@@ -4,6 +4,7 @@ import Test.Tasty (defaultMain, testGroup)
 
 import qualified Thena.Core.TermTests
 import qualified Thena.DriverTests
+import qualified Thena.SyntaxTests
 
 main :: IO ()
 main =
@@ -12,4 +13,5 @@ main =
       "thena"
       [ Thena.Core.TermTests.tests
       , Thena.DriverTests.tests
+      , Thena.SyntaxTests.tests
       ]

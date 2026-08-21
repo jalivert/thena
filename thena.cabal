@@ -21,8 +21,13 @@ library
         Thena.Core.Term
         Thena.Driver
         Thena.Repl
+        Thena.Syntax.Concrete
+        Thena.Syntax.Lexer
+        Thena.Syntax.Parser
+        Thena.Syntax.Resolve
     build-depends:
         base       ^>=4.21.2.0,
+        array      >=0.5 && <0.6,
         haskeline  >=0.8.4 && <0.9
     build-tool-depends:
         alex:alex   >=3.5,
@@ -46,6 +51,7 @@ test-suite thena-test
     other-modules:
         Thena.Core.TermTests
         Thena.DriverTests
+        Thena.SyntaxTests
     build-depends:
         base              ^>=4.21.2.0,
         thena,
