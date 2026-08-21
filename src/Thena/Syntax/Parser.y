@@ -2,6 +2,7 @@
 module Thena.Syntax.Parser
   ( ParseError (..)
   , parseTerm
+  , parseNameAndType
   ) where
 
 import Thena.Syntax.Concrete (Raw (..), RawBinder (..), RawConstraint (..))
@@ -9,6 +10,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
 %name parseTerm Term
+%name parseNameAndType NameAndType
 %tokentype { Located Token }
 %monad { Either ParseError }
 %error { parseError }
@@ -48,6 +50,12 @@ Term :: { Raw }
   | '[|' Term '|]'                                 { RawQuote $2 }
   | App '->' Term                                  { RawArrow $1 $3 }
   | App                                            { $1 }
+
+-- The argument of @assume@ and @claim@ (§2.4's "commands are the op vocabulary
+-- spelled out"). The nameless form is the one that makes the op ask (§7.5).
+NameAndType :: { (Maybe String, Raw) }
+  : ident ':' Term                         { (Just $1, $3) }
+  | ':' Term                               { (Nothing, $2) }
 
 Constraint :: { RawConstraint }
   : Binders '⊢' Term '≟' Term ':' Term   { RawConstraint (reverse $1) $3 $5 $7 }

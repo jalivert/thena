@@ -1,0 +1,13 @@
+thena> wibble
+no such command: wibble
+thena> :core y
+not in scope: y
+thena> :show it
+:show takes no argument
+thena> assume : Type₀
+name for the assumption? it will have type Type₀
+> let
+stuck: "let" is not a name
+thena> :show
+let ? goal : Type₀ in
+goal

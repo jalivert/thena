@@ -22,6 +22,9 @@ library
         Thena.Development.Component
         Thena.Development.Partial
         Thena.Driver
+        Thena.Engine
+        Thena.Errors
+        Thena.Ops
         Thena.Repl
         Thena.Syntax.Concrete
         Thena.Syntax.Lexer
@@ -53,12 +56,16 @@ test-suite thena-test
     other-modules:
         Thena.Core.TermTests
         Thena.DevelopmentTests
+        Thena.EngineTests
+        Thena.GoldenTests
         Thena.DriverTests
         Thena.Fixtures
         Thena.SyntaxTests
     build-depends:
         base              ^>=4.21.2.0,
         thena,
+        bytestring        >=0.12 && <0.13,
         tasty             >=1.5  && <1.6,
+        tasty-golden      >=2.3  && <2.4,
         tasty-hunit       >=0.10 && <0.11,
         tasty-quickcheck  >=0.11 && <0.12

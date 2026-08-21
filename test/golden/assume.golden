@@ -1,0 +1,22 @@
+thena> assume A : Type₀
+assumed A
+thena> :goal A -> A
+λ (A : Type₀) ->
+let ? goal : A -> A in
+goal
+thena> :show
+λ (A : Type₀) ->
+let ? goal : A -> A in
+goal
+thena> assume : A
+name for the assumption? it will have type A
+> x
+assumed x
+thena> :show
+λ (A : Type₀) ->
+λ (x : A) ->
+let ? goal : A -> A in
+goal
+thena> :core A
+A
+thena> :quit

@@ -1,13 +1,21 @@
 -- | The terminal frontend, and rendering.
 --
 -- The only module in the project that reads a key or writes to the screen
--- (§2.1, §12 invariant 4). Rendering lives here too, per §2.5 — 'Core' and
--- 'Partial' back to something the user can read. That is "for now": when phase
--- 7 adds eliminations this may be worth its own module.
+-- (§2.1, §12 invariant 4). Rendering lives here too, per §2.5 — 'Core',
+-- 'Partial' and now the machine, back to something the user can read.
+--
+-- 'turn' is the whole of the loop except the reading and the writing, and it is
+-- deliberately pure: the interactive 'repl' and the golden 'transcript' both go
+-- through it, so a transcript cannot drift away from the loop it is supposed to
+-- be testing.
 module Thena.Repl
   ( repl
+  , Turn (..)
+  , turn
+  , transcript
   , renderCore
   , renderPartial
+  , renderMachine
   , renderSyntaxError
   ) where
 
@@ -19,7 +27,7 @@ import System.Console.Haskeline
   , runInputT
   )
 
-import Thena.Core.Context (Entry (..))
+import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
@@ -34,37 +42,113 @@ import Thena.Core.Term
 import Thena.Development.Component (Component (..))
 import Thena.Development.Partial (Constraint (..), Partial (..))
 import Thena.Driver
-  ( Response (..)
+  ( CommandError (..)
+  , Response (..)
   , Session (..)
+  , Stop (..)
   , SyntaxError (..)
+  , answer
   , command
   , newSession
   )
+import Thena.Engine
+  ( Exec (..)
+  , Frame (..)
+  , Machine (..)
+  , Question (..)
+  , proofContext
+  )
+import Thena.Errors (FailReason (..))
+import Thena.Ops (AnswerKind (..), Instr (..), Op, Operand (..), Value (..))
+import qualified Thena.Ops as Ops
 import Thena.Syntax.Lexer (LexError (..), Pos (..), Token (..))
 import Thena.Syntax.Parser (ParseError (..))
 import Thena.Syntax.Resolve (DevForm (..), ResolveError (..))
 
 -- | Run the read-eval-print loop until @:quit@ or end of input.
 repl :: IO ()
-repl = runInputT defaultSettings (loop newSession)
+repl = runInputT defaultSettings (loop newSession Nothing)
 
-loop :: Session -> InputT IO ()
-loop s = do
-  input <- getInputLine "thena> "
+loop :: Session -> Maybe Question -> InputT IO ()
+loop s pending = do
+  input <- getInputLine (prompt pending)
   case input of
     Nothing   -> pure ()          -- end of input: Ctrl-D
-    Just line ->
-      case command s line of
-        (_, Quit)  -> pure ()
-        (s', resp) -> outputStrLn (renderResponse s' resp) >> loop s'
+    Just line -> do
+      let t = turn s pending line
+      mapM_ outputStrLn (turnOutput t)
+      if turnQuit t then pure () else loop (turnSession t) (turnPending t)
 
-renderResponse :: Session -> Response -> String
+-- | The machine asks with the rule body's own words, so the prompt is bare.
+prompt :: Maybe Question -> String
+prompt = maybe "thena> " (const "> ")
+
+-- | One line in, and everything that follows from it.
+data Turn = Turn
+  { turnOutput  :: [String]
+  , turnSession :: Session
+  , turnPending :: Maybe Question  -- ^ set when the next line is an answer
+  , turnQuit    :: Bool
+  }
+  deriving (Eq, Show)
+
+turn :: Session -> Maybe Question -> String -> Turn
+turn s pending line =
+  Turn (renderResponse s' resp) s' (waitingOn resp) (resp == Quit)
+  where
+    (s', resp) = case pending of
+      Just _  -> answer s line
+      Nothing -> command s line
+
+waitingOn :: Response -> Maybe Question
+waitingOn resp = case resp of
+  Ran _ (Waiting q) -> Just q
+  _                 -> Nothing
+
+-- | Replay a script through 'turn' and render what a terminal would have shown,
+-- prompts included. The golden tests' whole harness (§9, "golden REPL
+-- transcripts are the natural regression test for a tool whose interface is the
+-- REPL").
+transcript :: [String] -> String
+transcript = unlines . replay newSession Nothing
+  where
+    replay _ _ []           = []
+    replay s pending (l : ls) =
+      let t = turn s pending l
+          rest
+            | turnQuit t = []
+            | otherwise  = replay (turnSession t) (turnPending t) ls
+       in (prompt pending ++ l) : turnOutput t ++ rest
+
+renderResponse :: Session -> Response -> [String]
 renderResponse s resp = case resp of
-  Echoed l      -> l
-  Rendered t    -> renderCore (sessionNames s) t
-  RenderedDev p -> renderPartial (sessionNames s) p
-  Failed e      -> renderSyntaxError e
-  Quit          -> ""
+  Blank          -> []
+  Rendered t     -> [renderCore (counter s) (contextOf s) t]
+  RenderedDev p  -> [renderPartial (counter s) (contextOf s) p]
+  Shown p        -> [renderPartial (counter s) [] p]
+  Ran msgs stop  -> msgs ++ renderStop s stop
+  Failed e       -> [renderSyntaxError e]
+  Rejected e     -> [renderCommandError e]
+  Quit           -> []
+
+-- | Render with the counter the session holds, never with a smaller one: a
+-- printer given a counter below the term's highest 'Var' mints a colliding
+-- display name (phase 3's §7).
+counter :: Session -> Int
+counter = names . sessionMachine
+
+-- | The context a command's argument was resolved in, so that a 'Var' standing
+-- for one of the development's binders prints as its name rather than as a
+-- number. @:show@ renders from the root and needs no seed.
+contextOf :: Session -> Context
+contextOf = proofContext . proof . sessionMachine
+
+renderStop :: Session -> Stop -> [String]
+renderStop s stop = case stop of
+  Completed              -> []
+  Waiting (Question p _) -> [p]
+  Halted r               -> ["stuck: " ++ renderFailReason r]
+  Paused                 -> renderMachine (counter s) (contextOf s) (sessionMachine s)
 
 -- --------------------------------------------------------------------------
 -- Errors, made readable
@@ -130,8 +214,19 @@ type Env = [(Var, String)]
 -- descend, 'open' needs a 'Var', and only 'fresh' mints one. It cannot inspect
 -- the term's existing 'Var's to pick a safe number instead — 'Var'\'s
 -- constructor is hidden (§2.6, §3.4).
-renderCore :: Int -> Core -> String
-renderCore n = go n [] AtTop
+renderCore :: Int -> Context -> Core -> String
+renderCore n ctx = go n (envOf ctx) AtTop
+
+-- | Display names for a context's variables, freshened as the chain printer
+-- freshens a component's.
+envOf :: Context -> Env
+envOf = foldl add []
+  where
+    add e entry =
+      let (v, hint) = case entry of
+            Hypothesis x (Ident h) _   -> (x, h)
+            Definition x (Ident h) _ _ -> (x, h)
+       in (v, freshen hint e) : e
 
 go :: Int -> Env -> Prec -> Core -> String
 go n env prec term = case term of
@@ -237,8 +332,8 @@ parensIf False s = s
 
 -- | One chain link per line, at the current indent; a guess body indented one
 -- level inside its parentheses. Structural breaks only — no width, no reflow.
-renderPartial :: Int -> Partial -> String
-renderPartial n = goP n [] 0
+renderPartial :: Int -> Context -> Partial -> String
+renderPartial n ctx = goP n (envOf ctx) 0
 
 goP :: Int -> Env -> Int -> Partial -> String
 goP n env ind p = case p of
@@ -313,3 +408,75 @@ pad ind = replicate ind ' '
 -- 'loop' and 'renderSyntaxError', and @-Wall@ says so.
 row :: Int -> String -> String
 row ind s = pad ind ++ s ++ "\n"
+
+-- --------------------------------------------------------------------------
+-- The machine, made readable (§7.7's stepping mode)
+-- --------------------------------------------------------------------------
+
+-- | @pc@, @env@ and the frame stack, which is the whole of what stepping mode
+-- shows. It is not a debugger bolted on: 'Machine' is plain data with no
+-- functions inside it, so this is printing a value (§7.7).
+--
+-- This is a /display/ of the instruction data, not a concrete syntax for the
+-- instruction language — that is MS2's and is deliberately not in the build
+-- order. Nothing here parses back.
+renderMachine :: Int -> Context -> Machine -> [String]
+renderMachine n ctx m =
+  ["pc"]    ++ indented (zipWith instruction [0 :: Int ..] (pc (exec m)))
+    ++ ["env"]   ++ indented (map binding (env (exec m)))
+    ++ ["stack"] ++ indented (map frame (stack (exec m)))
+  where
+    indented []  = ["  (empty)"]
+    indented xs  = map ("  " ++) xs
+    instruction i instr = show i ++ "  " ++ renderInstr n ctx instr
+    binding (x, v) = x ++ " = " ++ renderValue n ctx v
+    frame fr = "call, " ++ show (length (resume fr)) ++ " instruction(s) to resume"
+
+renderInstr :: Int -> Context -> Instr -> String
+renderInstr n ctx instr = case instr of
+  Bind x op -> x ++ " = " ++ renderOp n ctx op
+  Do op     -> renderOp n ctx op
+
+renderOp :: Int -> Context -> Op -> String
+renderOp n ctx op = case op of
+  Ops.Assume x ty -> "assume " ++ operand x ++ " " ++ operand ty
+  Ops.Claim  x ty -> "claim "  ++ operand x ++ " " ++ operand ty
+  Ops.Ask    p k  -> "ask "    ++ operand p ++ " " ++ answerKind k
+  Ops.Say    msg  -> "say "    ++ operand msg
+  Ops.Concat l r  -> "concat " ++ operand l ++ " " ++ operand r
+  where
+    operand = renderOperand n ctx
+
+renderOperand :: Int -> Context -> Operand -> String
+renderOperand n ctx o = case o of
+  Ref x -> x
+  Lit v -> renderValue n ctx v
+
+renderValue :: Int -> Context -> Value -> String
+renderValue n ctx v = case v of
+  VText s            -> show s
+  VTerm (Trailing t) -> "⌜" ++ renderCore n ctx t ++ "⌝"
+  VTerm p            -> "⌜" ++ unwords (words (renderPartial n ctx p)) ++ "⌝"
+  VSurface _         -> "‹unresolved›"
+  VPair a b          -> "(" ++ renderValue n ctx a ++ ", " ++ renderValue n ctx b ++ ")"
+
+answerKind :: AnswerKind -> String
+answerKind k = case k of
+  AText -> ":text"
+  AName -> ":name"
+  ATerm -> ":term"
+  ARule -> ":rule"
+
+renderCommandError :: CommandError -> String
+renderCommandError e = case e of
+  NoSuchCommand w      -> "no such command: " ++ w
+  MissingArgument w    -> w ++ " needs an argument"
+  UnexpectedArgument w -> w ++ " takes no argument"
+  NotAsking            -> "nothing was asked"
+
+renderFailReason :: FailReason -> String
+renderFailReason r = case r of
+  UnboundInBody x   -> "nothing named " ++ x ++ " in this body"
+  NotAnIdentifier s -> show s ++ " is not a name"
+  ExpectedText      -> "expected text"
+  ExpectedTerm      -> "expected a term"

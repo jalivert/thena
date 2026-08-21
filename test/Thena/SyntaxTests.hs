@@ -26,7 +26,7 @@ import Thena.Syntax.Resolve (resolve)
 
 -- | Resolve, render, re-resolve. The property everything else supports.
 roundTrips :: Core -> Int -> Bool
-roundTrips t n = case parseCore n (renderCore n t) of
+roundTrips t n = case parseCore [] n (renderCore n [] t) of
   Right (t', _) -> t' == t
   Left _        -> False
 
@@ -143,17 +143,17 @@ inputTests =
   , testCase "Type0 prints as Type₀" $
       render "Type0" @?= "Type₀"
   , testCase "ASCII and unicode agree" $
-      parseCore 0 "\\ (x : Type0) -> x" @?= parseCore 0 "λ (x : Type₀) -> x"
+      parseCore [] 0 "\\ (x : Type0) -> x" @?= parseCore [] 0 "λ (x : Type₀) -> x"
   ]
 
 errorTests :: [TestTree]
 errorTests =
   [ testCase "an unbound name is a scope error" $
-      isLeft (parseCore 0 "y") @?= True
+      isLeft (parseCore [] 0 "y") @?= True
   , testCase "a λ with no body is a parse error" $
-      isLeft (parseCore 0 "λ (x : Type₀)") @?= True
+      isLeft (parseCore [] 0 "λ (x : Type₀)") @?= True
   , testCase "a stray character is a lex error" $
-      isLeft (parseCore 0 "x # y") @?= True
+      isLeft (parseCore [] 0 "x # y") @?= True
   ]
 
 -- | The case that cannot be written in concrete syntax and must still print
@@ -163,9 +163,9 @@ errorTests =
 shadowTests :: [TestTree]
 shadowTests =
   [ testCase "the inner binder is renamed, so the body still reparses" $
-      assertBool (renderCore 500 shadowed) (roundTrips shadowed 500)
+      assertBool (renderCore 500 [] shadowed) (roundTrips shadowed 500)
   , testCase "and the two binders really do print differently" $
-      renderCore 500 shadowed @?= "λ (x : Type₀) (x1 : Type₀) -> x"
+      renderCore 500 [] shadowed @?= "λ (x : Type₀) (x1 : Type₀) -> x"
   ]
 
 shadowed :: Core
@@ -180,7 +180,7 @@ shadowed =
 resolveTests :: [TestTree]
 resolveTests =
   [ testCase "an inner binder shadows an outer one of the same name" $
-      fmap fst (parseCore 0 "λ (x : Type₀) -> λ (x : Type₁) -> x")
+      fmap fst (parseCore [] 0 "λ (x : Type₀) -> λ (x : Type₁) -> x")
         @?= Right (nestedLam Inner)
   , testCase "and that is not the same term as referring to the outer" $
       assertBool "inner and outer must differ" (nestedLam Inner /= nestedLam Outer)
@@ -199,8 +199,8 @@ nestedLam which =
         (close v1 (Lam (Ident "x") (Universe (Level 1)) (close v2 body)))
 
 render :: String -> String
-render src = case parseCore 0 src of
-  Right (t, n) -> renderCore n t
+render src = case parseCore [] 0 src of
+  Right (t, n) -> renderCore n [] t
   Left e       -> "ERROR: " ++ show e
 
 isLeft :: Either a b -> Bool

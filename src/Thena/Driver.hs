@@ -1,110 +1,288 @@
--- | The session, and the commands that act on it.
+-- | The session, the commands that act on it, and the loop of §7.8.
 --
 -- Nothing in this module or below it may assume a terminal, block on 'getLine',
--- or write to stdout (@PLAN.md@ §2.1, §12 invariant 4). The terminal lives in
--- "Thena.Repl" and nowhere else, which is why 'command' is a pure function and
--- why 'Rendered'/'RenderedDev' hand back data rather than a rendered line.
+-- or write to stdout (§2.1, §12 invariant 4). 'command' and 'answer' are pure
+-- functions from a session and a line to a session and a 'Response'; the
+-- terminal lives in "Thena.Repl" and nowhere else.
 --
--- At phase 4 this module is rewritten around the loop of §7.8: a command
--- compiles to @[Instr]@ and the driver dispatches on the five 'Outcome' cases.
--- @:core@ and @:dev@ survive that, being view commands (§2.4).
+-- §12 invariant 3 is what shapes this module: a command that changes the
+-- development compiles to @[Instr]@ and runs on the machine (§2.4). Only three
+-- kinds of command are the driver's own — the ones that produce a view
+-- (@:core@, @:dev@, @:show@), the ones that set a session setting (@:step
+-- on@), and the ones that create or replace a proof (@:goal@, which is phase
+-- 13's @:theorem@ in miniature; §7.8 puts that on the session side).
 module Thena.Driver
   ( Session (..)
   , newSession
   , Response (..)
+  , Stop (..)
   , SyntaxError (..)
+  , CommandError (..)
   , command
+  , answer
   , parseCore
   , parseDevelopment
   ) where
 
 import Thena.Core.Context (Context)
 import Thena.Core.Term (Core)
-import Thena.Development.Partial (Partial)
+import Thena.Development.Partial (Partial (..))
+import Thena.Engine
+  ( Exec (..)
+  , Machine (..)
+  , Message
+  , ProofState (..)
+  , Question
+  , isAsking
+  , load
+  , newProof
+  , proofContext
+  , resumeAt
+  , setGoal
+  , step
+  )
+import qualified Thena.Engine as Engine
+import Thena.Errors (FailReason)
+import Thena.Ops
+  ( AnswerKind (..)
+  , Instr (..)
+  , Op (..)
+  , Operand (..)
+  , Value (..)
+  )
 import Thena.Syntax.Concrete (Raw)
-import Thena.Syntax.Lexer (LexError, lexTokens)
-import Thena.Syntax.Parser (ParseError, parseTerm)
+import Thena.Syntax.Lexer (LexError, Located, Token, lexTokens)
+import Thena.Syntax.Parser (ParseError, parseNameAndType, parseTerm)
 import Thena.Syntax.Resolve (ResolveError, resolve, resolvePartial)
 
--- | Everything the session holds. It grows into the proof list, the global
--- environment and the per-proof undo stacks (§2.4).
+-- | Everything the session holds.
 --
--- The name counter is session-global and an 'Int', per §2.4 and
--- @PREPLAN.md@ standing rule 7. Every mint threads it by hand.
-newtype Session = Session { sessionNames :: Int }
+-- The name counter is not here: it is the machine's 'names' field (§7.2), and
+-- while there is one machine that field /is/ §2.4's session-global counter.
+-- Phase 13 has several proofs and must decide how one counter is threaded
+-- through them; until then a second copy here would be two homes for one
+-- number.
+--
+-- Stepping is a session setting, so it does not backtrack and does not belong
+-- to the machine (§7.4).
+data Session = Session
+  { sessionMachine  :: Machine
+  , sessionStepping :: Bool
+  }
   deriving (Eq, Show)
 
 newSession :: Session
-newSession = Session { sessionNames = 0 }
+newSession = Session
+  { sessionMachine = Machine (Exec [] [] []) ps n
+  , sessionStepping = False
+  }
+  where
+    (ps, n) = newProof 0
 
--- | What the driver hands back for a frontend to render.
+-- | What the driver hands back for a frontend to render. Data, never a line of
+-- text: rendering is "Thena.Repl"'s (§2.5).
 data Response
-  = Echoed String        -- ^ the line, to be shown back
-  | Rendered Core        -- ^ a term, for the frontend to print (§2.6)
-  | RenderedDev Partial  -- ^ a development, likewise (§2.7)
+  = Blank                     -- ^ an empty line; nothing to do
+  | Rendered Core             -- ^ @:core@ (§2.6)
+  | RenderedDev Partial       -- ^ @:dev@ (§2.7)
+  | Shown Partial             -- ^ @:show@, and the new state after @:goal@
+  | Ran [Message] Stop        -- ^ what the machine said, and where it stopped
   | Failed SyntaxError
+  | Rejected CommandError
   | Quit
   deriving (Eq, Show)
 
--- | The three ways reading a term or development can fail. Each carries
--- structure; turning one into English is the frontend's job (§12 invariant 2).
---
--- This sum lives here because this module is what composes the pipeline. Phase 4
--- decides where shared error types live (@AGENDA.md@ item 18a) and may move it.
+-- | Where a run of the machine came to rest — §7.8's five outcomes, less
+-- 'Engine.Continue', which the loop below never hands out except as 'Paused'.
+data Stop
+  = Completed            -- ^ the program ran out of instructions
+  | Waiting Question     -- ^ answer it with 'answer'
+  | Halted FailReason    -- ^ the machine is kept, so a later @retry@ can use it
+  | Paused               -- ^ stepping mode: one instruction done
+  deriving (Eq, Show)
+
+-- | The three ways reading a term or development can fail.
 data SyntaxError
   = LexFailed LexError
   | ParseFailed ParseError
   | ResolveFailed ResolveError
   deriving (Eq, Show)
 
--- | Lex, parse, resolve as a core term. The context is empty at this phase, so
--- only closed terms resolve — §9's "a free @y@ is a scope error".
-parseCore :: Int -> String -> Either SyntaxError (Core, Int)
+-- | Everything else a command line can get wrong (§7.8's @CommandError@).
+data CommandError
+  = NoSuchCommand String
+  | MissingArgument String
+  | UnexpectedArgument String
+  | NotAsking
+  deriving (Eq, Show)
+
+-- --------------------------------------------------------------------------
+-- Reading terms and developments
+-- --------------------------------------------------------------------------
+
+-- | Lex, parse, resolve as a core term, in the given context.
+parseCore :: Context -> Int -> String -> Either SyntaxError (Core, Int)
 parseCore = parseWith resolve
 
 -- | Lex, parse, resolve as a development (§2.7's longest-prefix convention).
-parseDevelopment :: Int -> String -> Either SyntaxError (Partial, Int)
+parseDevelopment :: Context -> Int -> String -> Either SyntaxError (Partial, Int)
 parseDevelopment = parseWith resolvePartial
 
--- | Lex, parse, resolve. One pipeline; the resolver argument decides at which
--- type the raw tree is read.
 parseWith
   :: (Context -> Int -> Raw -> Either ResolveError (a, Int))
-  -> Int -> String -> Either SyntaxError (a, Int)
-parseWith res n src = do
-  ts  <- mapLeft LexFailed (lexTokens src)
+  -> Context -> Int -> String -> Either SyntaxError (a, Int)
+parseWith res ctx n src = do
+  ts  <- tokensOf src
   raw <- mapLeft ParseFailed (parseTerm ts)
-  mapLeft ResolveFailed (res [] n raw)
+  mapLeft ResolveFailed (res ctx n raw)
 
+tokensOf :: String -> Either SyntaxError [Located Token]
+tokensOf = mapLeft LexFailed . lexTokens
+
+-- --------------------------------------------------------------------------
+-- Commands
+-- --------------------------------------------------------------------------
+
+-- | Bare word acts, colon looks (decided by the user 2026-08-21). @assume@ and
+-- @claim@ are ops and read exactly as they will read inside a rule body;
+-- everything with a colon is the driver's own.
 command :: Session -> String -> (Session, Response)
-command s line
-  | Just src <- argumentOf ":core" line =
-      respond s (parseCore (sessionNames s) src) Rendered
-  | Just src <- argumentOf ":dev" line =
-      respond s (parseDevelopment (sessionNames s) src) RenderedDev
-  | line == ":quit" = (s, Quit)
-  | otherwise       = (s, Echoed line)
+command s line = case break (== ' ') (dropWhile (== ' ') line) of
+  ("", _)      -> (s, Blank)
+  (name, rest) -> dispatch s name (dropWhile (== ' ') rest)
 
--- | Shared by the two view commands. Top-level rather than a @where@ binding
--- because it is used at both 'Core' and 'Partial', and a @where@ binding under
--- a guard does not generalise.
-respond
-  :: Session -> Either SyntaxError (a, Int) -> (a -> Response)
+dispatch :: Session -> String -> String -> (Session, Response)
+dispatch s name arg = case name of
+  ":quit"  -> noArgument (s, Quit)
+  ":core"  -> withArgument (view s parseCore Rendered arg)
+  ":dev"   -> withArgument (view s parseDevelopment RenderedDev arg)
+  ":show"  -> noArgument (s, Shown (development (proof machine)))
+  ":goal"  -> goal
+  ":step"  -> stepping
+  ":run"   -> noArgument (progress False s [])
+  "assume" -> tactic "assumption" "assumed" Assume
+  "claim"  -> tactic "hole" "claimed" Claim
+  _        -> (s, Rejected (NoSuchCommand name))
+  where
+    machine = sessionMachine s
+    ctx     = proofContext (proof machine)
+
+    noArgument r
+      | null arg  = r
+      | otherwise = (s, Rejected (UnexpectedArgument name))
+
+    withArgument k
+      | null arg  = (s, Rejected (MissingArgument name))
+      | otherwise = k
+
+    goal = withArgument $ case parseCore ctx (names machine) arg of
+      Left e -> (s, Failed e)
+      Right (t, n1) ->
+        let m' = setGoal t machine { names = n1 }
+         in (s { sessionMachine = m' }, Shown (development (proof m')))
+
+    stepping = case arg of
+      ""    -> progress True s []
+      "on"  -> (s { sessionStepping = True }, Ran [] Completed)
+      "off" -> (s { sessionStepping = False }, Ran [] Completed)
+      _     -> (s, Rejected (UnexpectedArgument name))
+
+    tactic what verb op = withArgument $ case compile what verb op ctx (names machine) arg of
+      Left e -> (s, Failed e)
+      Right (is, n1) ->
+        progress (sessionStepping s) s { sessionMachine = load is machine { names = n1 } } []
+
+-- | Read something and hand it back for rendering.
+--
+-- Top-level rather than a @where@ binding in 'dispatch' because it is used at
+-- 'Core' and at 'Partial' both, and a @where@ binding under a guard does not
+-- generalise — the same trap phase 3 met with its @respond@.
+--
+-- It threads the counter: rendering a term mints display variables, and
+-- rendering with a counter below the term's highest 'Thena.Core.Term.Var'
+-- silently makes a colliding name (phase 3's §7).
+view
+  :: Session
+  -> (Context -> Int -> String -> Either SyntaxError (a, Int))
+  -> (a -> Response)
+  -> String
   -> (Session, Response)
-respond s r f = case r of
-  Right (x, n') -> (s { sessionNames = n' }, f x)
+view s rd f arg = case rd (proofContext (proof machine)) (names machine) arg of
   Left e        -> (s, Failed e)
+  Right (x, n1) -> (s { sessionMachine = machine { names = n1 } }, f x)
+  where
+    machine = sessionMachine s
 
--- | @argumentOf ":core" ":core t"@ is @Just "t"@; @":corex"@ is 'Nothing', so a
--- longer command starting with the same letters is not swallowed.
-argumentOf :: String -> String -> Maybe String
-argumentOf name line = case splitAt (length name) line of
-  (before, rest)
-    | before /= name -> Nothing
-    | null rest      -> Just ""
-    | otherwise      -> case rest of
-        c : _ | c == ' ' -> Just (dropWhile (== ' ') rest)
-        _                -> Nothing
+-- | A command becomes a program (§2.4, §12 invariant 3).
+--
+-- Two paths, and the nameless one is §2.2's motivating example: @assume :
+-- Type₀@ has no name to give the binder, so the program asks for one and the
+-- answer lands in @env@ where the op reads it.
+--
+-- The prompt quotes the type as the user wrote it rather than as the printer
+-- would render it: rendering lives in "Thena.Repl" (§2.5) and the driver
+-- cannot reach it. §7.5's illustrative body builds the same prompt with a
+-- @show@ op, which phase 4 does not have.
+compile
+  :: String -> String -> (Operand -> Operand -> Op)
+  -> Context -> Int -> String -> Either SyntaxError ([Instr], Int)
+compile what verb op ctx n arg = do
+  ts       <- tokensOf arg
+  (mx, ty) <- mapLeft ParseFailed (parseNameAndType ts)
+  (t, n1)  <- mapLeft ResolveFailed (resolve ctx n ty)
+  let term = Lit (VTerm (Trailing t))
+  pure $ case mx of
+    Just x ->
+      ( [ Do (op (Lit (VText x)) term)
+        , Do (Say (Lit (VText (verb ++ " " ++ x))))
+        ]
+      , n1
+      )
+    Nothing ->
+      ( [ Bind "name"    (Ask (Lit (VText prompt)) AName)
+        , Do             (op (Ref "name") term)
+        , Bind "message" (Concat (Lit (VText (verb ++ " "))) (Ref "name"))
+        , Do             (Say (Ref "message"))
+        ]
+      , n1
+      )
+  where
+    prompt =
+      "name for the " ++ what ++ "? it will have type "
+        ++ dropWhile (\c -> c == ':' || c == ' ') arg
+
+-- --------------------------------------------------------------------------
+-- The loop of §7.8
+-- --------------------------------------------------------------------------
+
+-- | Answer the question the machine is asking, then carry on.
+answer :: Session -> String -> (Session, Response)
+answer s a
+  | isAsking (sessionMachine s) =
+      progress (sessionStepping s) s { sessionMachine = resumeAt a (sessionMachine s) } []
+  | otherwise = (s, Rejected NotAsking)
+
+-- | Run until the machine needs the user, honouring stepping mode.
+--
+-- @Saying@ costs a round trip per message and buys the driver an ordered view
+-- of execution as a sequence of events (§7.5), which is why the messages come
+-- back as a list rather than being buffered in the machine.
+--
+-- Phase 13 snapshots for @:undo@ at 'Completed'; phase 16 keeps the machine at
+-- 'Halted' so @retry@ can use it, which this already does.
+progress :: Bool -> Session -> [Message] -> (Session, Response)
+progress oneStep s msgs = case step (sessionMachine s) of
+  Engine.Continue m
+    | oneStep   -> stop m msgs Paused
+    | otherwise -> progress oneStep s { sessionMachine = m } msgs
+  Engine.Saying msg m
+    | oneStep   -> stop m (msg : msgs) Paused
+    | otherwise -> progress oneStep s { sessionMachine = m } (msg : msgs)
+  Engine.Asking q m   -> stop m msgs (Waiting q)
+  Engine.Finished m   -> stop m msgs Completed
+  Engine.Stuck r m    -> stop m msgs (Halted r)
+  where
+    stop m out what = (s { sessionMachine = m }, Ran (reverse out) what)
 
 mapLeft :: (a -> b) -> Either a c -> Either b c
 mapLeft f = either (Left . f) Right

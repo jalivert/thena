@@ -1,0 +1,25 @@
+thena> :step on
+thena> assume A : Type₀
+pc
+  0  say "assumed A"
+env
+  (empty)
+stack
+  (empty)
+thena> :step
+assumed A
+pc
+  (empty)
+env
+  (empty)
+stack
+  (empty)
+thena> :step
+thena> :step off
+thena> claim h : Type₀
+claimed h
+thena> :show
+λ (A : Type₀) ->
+let ? h : Type₀ in
+let ? goal : Type₀ in
+goal

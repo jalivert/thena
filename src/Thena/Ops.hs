@@ -1,0 +1,83 @@
+-- | The instruction language (§7.2).
+--
+-- Imperative and assignment-style: a body is a list of instructions, each
+-- either binding its result to a name or discarding it. The stepper in
+-- "Thena.Engine" is what runs them; nothing here executes anything.
+--
+-- INCOMPLETE BY DESIGN. §12 invariant 5: the op vocabulary is discovered by
+-- writing tactics, not designed up front. Phase 4 has the five ops its two
+-- commands need, and every later phase adds the ops its own deliverable
+-- exercises.
+module Thena.Ops
+  ( Name
+  , Env
+  , Value (..)
+  , Operand (..)
+  , Instr (..)
+  , Op (..)
+  , AnswerKind (..)
+  ) where
+
+import Thena.Development.Partial (Partial)
+import Thena.Syntax.Concrete (Raw)
+
+-- | A name in a rule body's environment. Not a 'Thena.Core.Term.Var' and not an
+-- 'Thena.Core.Term.Ident': those name things in the development, this names an
+-- intermediate result inside one body.
+type Name = String
+
+-- | What 'Bind' introduces; scoped to the body, and rewound structurally when a
+-- frame is popped (§7.5).
+type Env = [(Name, Value)]
+
+-- | 'VTerm' is deliberately one case and holds a 'Partial', not a 'Core'
+-- (§7.2): a core term is @Trailing t@ and a variable is @Trailing (Free x)@, so
+-- there is no separate @VVar@, @VCore@ and @VPartial@ to keep in step. The
+-- price is stated once in §7.2 — an op that needs a plain term checks at
+-- runtime and fails with 'Thena.Errors.ExpectedTerm' if it does not have one.
+--
+-- @VRule@ is NOT here, and cannot be until 'Thena.Rules.Rule' exists (phase
+-- 15); see the plan for phase 4 §10. 'VSurface' and 'VPair' are on
+-- @AGENDA.md@'s standing list of things defined in MS1 and not yet exercised.
+data Value
+  = VText    String    -- ^ what @Ask@ returns and @Say@ consumes
+  | VTerm    Partial   -- ^ a term, a variable, or a whole development
+  | VSurface Raw       -- ^ an unelaborated tree — elaboration's input
+  | VPair    Value Value
+  deriving (Eq, Show)
+
+data Operand
+  = Ref Name  -- ^ read a name bound earlier in this body
+  | Lit Value -- ^ a value the compiler or rule author wrote down
+  deriving (Eq, Show)
+
+-- | @x = op …@ or @op …@. Binding an op that produces nothing is caught by the
+-- load-time validation pass that rules will need anyway (§2.4, §7.2, phase 15);
+-- that is what keeps 'Op' free of a @Maybe@.
+data Instr
+  = Bind Name Op
+  | Do   Op
+  deriving (Eq, Show)
+
+-- | Phase 4's five.
+--
+-- @Assume@ is not in §7.2's sketch of this type. It is added here per §12
+-- invariant 5, because phase 4's deliverable needs it and the thesis's @intro@
+-- (table 2.7) cannot stand in: @intro@ turns a hole whose type is a Π into a λ,
+-- and phase 4 has neither @attack@ nor a guess to work under.
+data Op
+  = Assume Operand Operand    -- ^ name, type — extend the development with @λ x : S@
+  | Claim  Operand Operand    -- ^ name, type — extend it with a hole @? x : S@
+  | Ask    Operand AnswerKind -- ^ prompt text, and what the frontend should offer
+  | Say    Operand            -- ^ message text
+  | Concat Operand Operand    -- ^ building prompt and message text
+  deriving (Eq, Show)
+
+-- | A hint to the frontend, not a type the machine enforces (§7.5).
+--
+-- The one predefined vocabulary in the whole instruction language: without
+-- knowing what is being asked for, a frontend can offer no help. It is watched
+-- so that it does not quietly grow. @ATerm@ and @ARule@ are on @AGENDA.md@'s
+-- standing list — MS1's terminal offers no completion, so nothing reads them.
+data AnswerKind = AText | AName | ATerm | ARule
+  deriving (Eq, Show)

@@ -5,6 +5,7 @@ module Thena.Syntax.Lexer
   , Pos (..)
   , LexError (..)
   , lexTokens
+  , isIdentifier
   ) where
 }
 
@@ -114,4 +115,16 @@ lexTokens str0 = go (alexStartPos, '\n', [], str0)
     firstOf cs = case cs of
       c : _ -> Just c
       []    -> Nothing
+
+-- | Is this string one identifier and nothing else?
+--
+-- Asked by "Thena.Engine" of an answer to an @AName@ question, so that an
+-- 'Thena.Core.Term.Ident' the printer could not print back never enters a
+-- component (§2.6). Answered by the lexer rather than by a second copy of
+-- @\@ident@: keywords fail because they lex as keywords, and a leading digit
+-- fails because no rule matches it.
+isIdentifier :: String -> Bool
+isIdentifier s = case lexTokens s of
+  Right [Located _ (TIdent _)] -> True
+  _                            -> False
 }

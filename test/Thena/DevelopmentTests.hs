@@ -56,7 +56,7 @@ forgetTests =
 renderTests :: [TestTree]
 renderTests =
   [ testCase "the running example" $
-      renderPartial 500 idMidway
+      renderPartial 500 [] idMidway
         @?= unlines'
           [ "λ (A : Type₀) ->"
           , "let ? id' : A -> A ≐ ("
@@ -67,7 +67,7 @@ renderTests =
           , "id'"
           ]
   , testCase "a constraint, with a non-empty Ξ" $
-      renderPartial 500 withConstraint
+      renderPartial 500 [] withConstraint
         @?= unlines'
           [ "λ (A : Type₀) ->"
           , "λ (a : A) ->"
@@ -76,7 +76,7 @@ renderTests =
           , "h"
           ]
   , testCase "one link of each kind" $
-      renderPartial 500 allFour
+      renderPartial 500 [] allFour
         @?= unlines'
           [ "λ (A : Type₀) ->"
           , "let d = A : Type₀ in"
@@ -87,10 +87,10 @@ renderTests =
           , "g"
           ]
   , testCase "a shadowed chain binder is freshened" $
-      renderPartial 500 shadowedBinders
+      renderPartial 500 [] shadowedBinders
         @?= unlines' [ "λ (x : Type₀) ->", "λ (x1 : Type₀) ->", "x" ]
   , testCase "a guess body does not see the hole's name, so nothing is freshened" $
-      renderPartial 500 guessShadowing
+      renderPartial 500 [] guessShadowing
         @?= unlines'
           [ "let ? x : Type₀ ≐ ("
           , "  λ (x : Type₀) ->"
@@ -99,7 +99,7 @@ renderTests =
           , "x"
           ]
   , testCase "a trailing binder is quoted, or it would re-read as a link" $
-      renderPartial 500 trailingLam @?= "⌜ λ (A : Type₀) -> A ⌝"
+      renderPartial 500 [] trailingLam @?= "⌜ λ (A : Type₀) -> A ⌝"
   ]
 
 -- | 'unlines' appends a trailing newline; 'renderPartial' does not emit one.
@@ -114,27 +114,27 @@ unlines' = foldr1 (\a b -> a ++ "\n" ++ b)
 prefixTests :: [TestTree]
 prefixTests =
   [ testCase "a leading λ becomes a chain link, not a trailing Lam" $
-      fmap fst (parseDevelopment 0 "λ (A : Type₀) -> A")
+      fmap fst (parseDevelopment [] 0 "λ (A : Type₀) -> A")
         @?= Right (Under (Assume vA (Ident "A") type0) (Trailing (Free vA)))
   , testCase "corners stop the spine" $
-      fmap fst (parseDevelopment 0 "[| λ (A : Type₀) -> A |]")
+      fmap fst (parseDevelopment [] 0 "[| λ (A : Type₀) -> A |]")
         @?= Right (Trailing (Lam (Ident "A") type0 (close vA (Free vA))))
   , testCase "and those two are genuinely different developments" $
       assertBool "chain link and trailing Lam must differ" $
-        fmap fst (parseDevelopment 0 "λ (A : Type₀) -> A")
-          /= fmap fst (parseDevelopment 0 "[| λ (A : Type₀) -> A |]")
+        fmap fst (parseDevelopment [] 0 "λ (A : Type₀) -> A")
+          /= fmap fst (parseDevelopment [] 0 "[| λ (A : Type₀) -> A |]")
   , testCase "a leading let becomes a Define link" $
-      fmap fst (parseDevelopment 0 "let d = Type₀ : Type₁ in d")
+      fmap fst (parseDevelopment [] 0 "let d = Type₀ : Type₁ in d")
         @?= Right (Under (Define vA (Ident "d") type0 (Universe (Level 1)))
                      (Trailing (Free vA)))
   , testCase "several binder groups become several links" $
-      fmap fst (parseDevelopment 0 "λ (A : Type₀) (B : Type₀) -> B")
+      fmap fst (parseDevelopment [] 0 "λ (A : Type₀) (B : Type₀) -> B")
         @?= Right
               (Under (Assume vA (Ident "A") type0)
                 (Under (Assume vB (Ident "B") type0)
                   (Trailing (Free vB))))
   , testCase "a ∀ is a type, not a link, so it stays in the trailing term" $
-      fmap fst (parseDevelopment 0 "∀ (A : Type₀) -> A")
+      fmap fst (parseDevelopment [] 0 "∀ (A : Type₀) -> A")
         @?= Right (Trailing (Pi (Ident "A") type0 (close vA (Free vA))))
   ]
   where
@@ -149,7 +149,7 @@ prefixTests =
 scopeTests :: [TestTree]
 scopeTests =
   [ testCase "a guess body does not see the hole it fills" $
-      fmap fst (parseDevelopment 0 "λ (h : Type₀) -> let ? h : Type₀ ≐ (h) in h")
+      fmap fst (parseDevelopment [] 0 "λ (h : Type₀) -> let ? h : Type₀ ≐ (h) in h")
         @?= Right
               (Under (Assume vOuter (Ident "h") type0)
                 (Under (Guess vHole (Ident "h")
@@ -157,16 +157,16 @@ scopeTests =
                           type0)
                   (Trailing (Free vHole))))
   , testCase "so a guess naming only its own hole is a scope error" $
-      isLeft (parseDevelopment 0 "let ? h : Type₀ ≐ (h) in h") @?= True
+      isLeft (parseDevelopment [] 0 "let ? h : Type₀ ≐ (h) in h") @?= True
   , testCase "a definition's value does not see its own name" $
-      isLeft (parseDevelopment 0 "let d = d : Type₀ in d") @?= True
+      isLeft (parseDevelopment [] 0 "let d = d : Type₀ in d") @?= True
   , testCase "a hole's type does not see its own name" $
-      isLeft (parseDevelopment 0 "let ? h : h in h") @?= True
+      isLeft (parseDevelopment [] 0 "let ? h : h in h") @?= True
   , testCase "Ξ's binders scope over the equation" $
-      isLeft (parseDevelopment 0
+      isLeft (parseDevelopment [] 0
                 "let ? h : Type₀ in (x : Type₀) |- h ?= x : Type₀ |> h") @?= False
   , testCase "but not over the rest of the chain" $
-      isLeft (parseDevelopment 0
+      isLeft (parseDevelopment [] 0
                 "let ? h : Type₀ in (x : Type₀) |- h ?= x : Type₀ |> x") @?= True
   ]
   where
@@ -179,7 +179,7 @@ scopeTests =
 roundTripTests :: [TestTree]
 roundTripTests =
   [ testCase (name ++ " survives print then read") $
-      reprint p @?= renderPartial 500 p
+      reprint p @?= renderPartial 500 [] p
   | (name, p) <-
       [ ("the running example", idMidway)
       , ("a constraint", withConstraint)
@@ -202,8 +202,8 @@ roundTripTests =
 -- hypothetical: it silently turned @A -> A@ into @∀ (_ : A) -> _@ while this
 -- suite was being written (§13e).
 reprint :: Partial -> String
-reprint p = case parseDevelopment 500 (renderPartial 500 p) of
-  Right (p', n) -> renderPartial n p'
+reprint p = case parseDevelopment [] 500 (renderPartial 500 [] p) of
+  Right (p', n) -> renderPartial n [] p'
   Left e        -> "PARSE FAILED: " ++ show e
 
 isLeft :: Either a b -> Bool
