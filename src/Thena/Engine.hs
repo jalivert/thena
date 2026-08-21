@@ -6,10 +6,8 @@
 -- continuation anywhere inside a 'Machine' — the whole point is that an
 -- in-flight execution is a value you can print, store, diff or send.
 --
--- What phase 4 does not have yet, and where it arrives:
+-- What is not here yet, and where it arrives:
 --
---   * @globals :: GlobalEnv@ in 'Machine' — phase 6, when there is a global
---     environment to hold.
 --   * 'Frame'\'s @Choice@ constructor, @unwind@ past a live alternative, and
 --     the peek that builds one — phase 16. They need alternatives to exist,
 --     and alternatives need the rule engine.
@@ -69,13 +67,14 @@ import Thena.Ops
   , Operand (..)
   , Value (..)
   )
+import Thena.Global.Env (GlobalEnv, InductiveDefinition)
 import Thena.Syntax.Lexer (isIdentifier)
 
 -- --------------------------------------------------------------------------
 -- The machine
 -- --------------------------------------------------------------------------
 
--- | §7.2's four fields, less @globals@ (phase 6).
+-- | §7.2's four fields.
 --
 -- The field boundary is the backtracking boundary: 'proof' rewinds in full and
 -- nothing else does (§7.4). That is why 'ProofState' is its own type rather
@@ -87,9 +86,10 @@ import Thena.Syntax.Lexer (isIdentifier)
 -- 'Thena.Core.Term.fresh' is the function that mints from it, and a field and a
 -- function of the same name are ambiguous to GHC and to the ear.
 data Machine = Machine
-  { exec  :: Exec
-  , proof :: ProofState
-  , names :: Int        -- ^ NOT backtrackable (§7.4)
+  { exec    :: Exec
+  , proof   :: ProofState
+  , globals :: GlobalEnv  -- ^ NOT backtrackable (§7.4, §3.3.1)
+  , names   :: Int        -- ^ NOT backtrackable (§7.4)
   }
   deriving (Eq, Show)
 
@@ -192,12 +192,25 @@ type Message = String
 -- the text into it with ordinary instructions (§7.5).
 type Answer = String
 
+-- | The single channel, in five shapes (§7.5).
+--
+-- 'Declaring' is the first that is neither a question nor a message: the
+-- machine hands out a declaration it cannot install itself, because the global
+-- environment is outside 'ProofState' and no instruction writes it (§3.7,
+-- §7.4). Like 'Saying' it carries a machine already advanced past the
+-- instruction — there is nothing to bind, so nothing has to be told where to
+-- put an answer, which is what kept the 'Ask' instruction at the head of @pc@.
+--
+-- The driver checks and installs it (decided by the user, planning phase 6);
+-- §7.5 gives @Certify@ the same shape at phase 12.
 data Outcome
-  = Continue Machine
-  | Asking   Question   Machine  -- ^ the driver must supply an 'Answer'
-  | Saying   Message    Machine  -- ^ the driver renders, then steps again
-  | Finished Machine
-  | Stuck    FailReason Machine  -- ^ carries the machine: failure does not end it
+  = Continue  Machine
+  | Asking    Question   Machine  -- ^ the driver must supply an 'Answer'
+  | Saying    Message    Machine  -- ^ the driver renders, then steps again
+  | Declaring InductiveDefinition Machine
+                                  -- ^ the driver checks, installs, then steps again
+  | Finished  Machine
+  | Stuck     FailReason Machine  -- ^ carries the machine: failure does not end it
   deriving (Eq, Show)
 
 -- | Put a program into the machine's @pc@ (§7.8). A command is a program loaded
@@ -266,6 +279,11 @@ perform instr rest m = case operation instr of
   Say message -> case text message of
     Left r  -> failure r m
     Right s -> Saying s (advance m)
+
+  -- Nothing to check here: the checks are "Thena.Global.Declare"'s and the
+  -- driver runs them (§7.5). The op's whole job is to make the declaration a
+  -- step you can watch rather than something that happens between commands.
+  DefineData d -> Declaring d (advance m)
 
   Concat l r -> case (,) <$> text l <*> text r of
     Left e         -> failure e m

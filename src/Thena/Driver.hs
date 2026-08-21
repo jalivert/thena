@@ -26,10 +26,11 @@ module Thena.Driver
   , answer
   , parseCore
   , parseDevelopment
+  , parseDeclaration
   ) where
 
 import Thena.Core.Context (Context)
-import Thena.Core.Term (Core)
+import Thena.Core.Term (Core, GlobalName (..))
 import Thena.Development.Cursor (Cursor, Part (..))
 import Thena.Development.Partial (Partial (..))
 import Thena.Engine
@@ -49,6 +50,17 @@ import Thena.Engine
   )
 import qualified Thena.Engine as Engine
 import Thena.Errors (FailReason, MoveError)
+import Thena.Global.Declare (DeclareError, declare)
+import Thena.Global.Env
+  ( Definition (..)
+  , GlobalEnv
+  , InductiveDefinition
+  , emptyGlobals
+  , inductiveName
+  , lookupConstant
+  , lookupDefinition
+  , lookupInductive
+  )
 import Thena.Ops
   ( AnswerKind (..)
   , Instr (..)
@@ -58,8 +70,8 @@ import Thena.Ops
   )
 import Thena.Syntax.Concrete (Raw)
 import Thena.Syntax.Lexer (LexError, Located, Token, lexTokens)
-import Thena.Syntax.Parser (ParseError, parseNameAndType, parseTerm)
-import Thena.Syntax.Resolve (ResolveError, resolve, resolvePartial)
+import Thena.Syntax.Parser (ParseError, parseData, parseNameAndType, parseTerm)
+import Thena.Syntax.Resolve (ResolveError, resolve, resolveData, resolvePartial)
 
 -- | Everything the session holds.
 --
@@ -79,7 +91,7 @@ data Session = Session
 
 newSession :: Session
 newSession = Session
-  { sessionMachine = Machine (Exec [] [] []) ps n
+  { sessionMachine = Machine (Exec [] [] []) ps emptyGlobals n
   , sessionStepping = False
   }
   where
@@ -92,6 +104,14 @@ data Response
   | Rendered Core             -- ^ @:core@ (§2.6)
   | RenderedDev Partial       -- ^ @:dev@ (§2.7)
   | Shown Cursor              -- ^ @:show@, and the new state after @:goal@
+  | ShownData InductiveDefinition
+    -- ^ @:show ‹name›@ on a datatype: the declaration, printed back
+  | ShownGlobal GlobalName Core (Maybe Core)
+    -- ^ @:show ‹name›@ on anything else: its name, its type, and its body if
+    -- it has one. A former has both — the constant is the type of its
+    -- saturated 'Thena.Core.Term.Canonical' and the definition is the generated
+    -- wrapper (§3.3.1) — and this shows the wrapper, which is what the name
+    -- means when it is written.
   | Where Cursor              -- ^ @:where@ — the focus, the path, Γ, the type
   | Ran [Message] Stop        -- ^ what the machine said, and where it stopped
   | Failed SyntaxError
@@ -105,6 +125,7 @@ data Stop
   = Completed            -- ^ the program ran out of instructions
   | Waiting Question     -- ^ answer it with 'answer'
   | Halted FailReason    -- ^ the machine is kept, so a later @retry@ can use it
+  | Refused DeclareError -- ^ a @data@ declaration the checker would not admit
   | Paused               -- ^ stepping mode: one instruction done
   deriving (Eq, Show)
 
@@ -121,6 +142,7 @@ data CommandError
   | MissingArgument String
   | UnexpectedArgument String
   | NotAsking
+  | NoSuchGlobal String
   | NotThere MoveError
     -- ^ a driver command that needs a particular focus, run at another. Only
     -- @:goal@ can produce it; the moves are ops and fail through 'Halted'.
@@ -130,21 +152,34 @@ data CommandError
 -- Reading terms and developments
 -- --------------------------------------------------------------------------
 
--- | Lex, parse, resolve as a core term, in the given context.
-parseCore :: Context -> Int -> String -> Either SyntaxError (Core, Int)
+-- | Lex, parse, resolve as a core term, in the given environment and context.
+parseCore :: GlobalEnv -> Context -> Int -> String -> Either SyntaxError (Core, Int)
 parseCore = parseWith resolve
 
 -- | Lex, parse, resolve as a development (§2.7's longest-prefix convention).
-parseDevelopment :: Context -> Int -> String -> Either SyntaxError (Partial, Int)
+parseDevelopment
+  :: GlobalEnv -> Context -> Int -> String -> Either SyntaxError (Partial, Int)
 parseDevelopment = parseWith resolvePartial
 
 parseWith
-  :: (Context -> Int -> Raw -> Either ResolveError (a, Int))
-  -> Context -> Int -> String -> Either SyntaxError (a, Int)
-parseWith res ctx n src = do
+  :: (GlobalEnv -> Context -> Int -> Raw -> Either ResolveError (a, Int))
+  -> GlobalEnv -> Context -> Int -> String -> Either SyntaxError (a, Int)
+parseWith res env ctx n src = do
   ts  <- tokensOf src
   raw <- mapLeft ParseFailed (parseTerm ts)
-  mapLeft ResolveFailed (res ctx n raw)
+  mapLeft ResolveFailed (res env ctx n raw)
+
+-- | Lex, parse, resolve a @data@ declaration (§3.7).
+--
+-- Its own entry point rather than a case of 'parseWith', because a declaration
+-- is not a term: it has its own start symbol in the grammar and it is read in
+-- the empty context, never in the development's.
+parseDeclaration
+  :: GlobalEnv -> Int -> String -> Either SyntaxError (InductiveDefinition, Int)
+parseDeclaration env n src = do
+  ts  <- tokensOf src
+  raw <- mapLeft ParseFailed (parseData ts)
+  mapLeft ResolveFailed (resolveData env n raw)
 
 tokensOf :: String -> Either SyntaxError [Located Token]
 tokensOf = mapLeft LexFailed . lexTokens
@@ -166,13 +201,18 @@ dispatch s name arg = case name of
   ":quit"  -> noArgument (s, Quit)
   ":core"  -> withArgument (view s parseCore Rendered arg)
   ":dev"   -> withArgument (view s parseDevelopment RenderedDev arg)
-  ":show"  -> noArgument (s, Shown (cursor (proof machine)))
+  -- The only command that means two things, and they do not overlap: with no
+  -- argument it is the development, with one it is a global (§9, phase 6).
+  ":show"  -> case arg of
+    "" -> (s, Shown (cursor (proof machine)))
+    _  -> showGlobal arg
   ":where" -> noArgument (s, Where (cursor (proof machine)))
   ":goal"  -> goal
   ":step"  -> stepping
   ":run"   -> noArgument (progress False s [])
   "assume" -> tactic "assumption" "assumed" Assume
   "claim"  -> tactic "hole" "claimed" Claim
+  "data"   -> declaration
 
   -- The moves (§4.3). Three take no argument, @cross@ takes which field, and
   -- every core-term descent is its own word so that none of them changes
@@ -202,7 +242,29 @@ dispatch s name arg = case name of
       | null arg  = (s, Rejected (MissingArgument name))
       | otherwise = k
 
-    goal = withArgument $ case parseCore ctx (names machine) arg of
+    showGlobal what = case lookupInductive g (globals machine) of
+      Just d  -> (s, ShownData d)
+      Nothing -> case lookupDefinition g (globals machine) of
+        Just d  -> (s, ShownGlobal g (definitionType d) (Just (definitionBody d)))
+        Nothing -> case lookupConstant g (globals machine) of
+          Just t  -> (s, ShownGlobal g t Nothing)
+          Nothing -> (s, Rejected (NoSuchGlobal what))
+      where
+        g = GlobalName what
+
+    declaration = withArgument $
+      case parseDeclaration (globals machine) (names machine) arg of
+        Left e -> (s, Failed e)
+        Right (d, n1) ->
+          let is = [ Do (DefineData d)
+                   , Do (Say (Lit (VText ("declared " ++ nameOf d))))
+                   ]
+           in progress
+                (sessionStepping s)
+                s { sessionMachine = load is machine { names = n1 } }
+                []
+
+    goal = withArgument $ case parseCore (globals machine) ctx (names machine) arg of
       Left e -> (s, Failed e)
       Right (t, n1) -> case setGoal t machine { names = n1 } of
         Left e   -> (s, Rejected (NotThere e))
@@ -216,7 +278,8 @@ dispatch s name arg = case name of
 
     run is = progress (sessionStepping s) s { sessionMachine = load is machine } []
 
-    tactic what verb op = withArgument $ case compile what verb op ctx (names machine) arg of
+    tactic what verb op = withArgument $
+      case compile what verb op (globals machine) ctx (names machine) arg of
       Left e -> (s, Failed e)
       Right (is, n1) ->
         progress (sessionStepping s) s { sessionMachine = load is machine { names = n1 } } []
@@ -273,11 +336,12 @@ position w k = case reads k of
 -- silently makes a colliding name (phase 3's §7).
 view
   :: Session
-  -> (Context -> Int -> String -> Either SyntaxError (a, Int))
+  -> (GlobalEnv -> Context -> Int -> String -> Either SyntaxError (a, Int))
   -> (a -> Response)
   -> String
   -> (Session, Response)
-view s rd f arg = case rd (proofContext (proof machine)) (names machine) arg of
+view s rd f arg =
+  case rd (globals machine) (proofContext (proof machine)) (names machine) arg of
   Left e        -> (s, Failed e)
   Right (x, n1) -> (s { sessionMachine = machine { names = n1 } }, f x)
   where
@@ -295,11 +359,11 @@ view s rd f arg = case rd (proofContext (proof machine)) (names machine) arg of
 -- @show@ op, which phase 4 does not have.
 compile
   :: String -> String -> (Operand -> Operand -> Op)
-  -> Context -> Int -> String -> Either SyntaxError ([Instr], Int)
-compile what verb op ctx n arg = do
+  -> GlobalEnv -> Context -> Int -> String -> Either SyntaxError ([Instr], Int)
+compile what verb op env ctx n arg = do
   ts       <- tokensOf arg
   (mx, ty) <- mapLeft ParseFailed (parseNameAndType ts)
-  (t, n1)  <- mapLeft ResolveFailed (resolve ctx n ty)
+  (t, n1)  <- mapLeft ResolveFailed (resolve env ctx n ty)
   let term = Lit (VTerm (Trailing t))
   pure $ case mx of
     Just x ->
@@ -348,11 +412,24 @@ progress oneStep s msgs = case step (sessionMachine s) of
   Engine.Saying msg m
     | oneStep   -> stop m (msg : msgs) Paused
     | otherwise -> progress oneStep s { sessionMachine = m } (msg : msgs)
+  -- The declaration is checked and installed here, outside the machine: the
+  -- global environment is not part of 'ProofState' and no instruction writes it
+  -- (§7.4, §7.5). On refusal the rest of the program is dropped — the command
+  -- is abandoned, and there is nothing to retry the way there is at 'Halted'.
+  Engine.Declaring d m -> case declare (globals m) (names m) d of
+    Left e -> stop (load [] m) msgs (Refused e)
+    Right (g, n1)
+      | oneStep   -> stop installed msgs Paused
+      | otherwise -> progress oneStep s { sessionMachine = installed } msgs
+      where installed = m { globals = g, names = n1 }
   Engine.Asking q m   -> stop m msgs (Waiting q)
   Engine.Finished m   -> stop m msgs Completed
   Engine.Stuck r m    -> stop m msgs (Halted r)
   where
     stop m out what = (s { sessionMachine = m }, Ran (reverse out) what)
+
+nameOf :: InductiveDefinition -> String
+nameOf d = case inductiveName d of GlobalName x -> x
 
 mapLeft :: (a -> b) -> Either a c -> Either b c
 mapLeft f = either (Left . f) Right

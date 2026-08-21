@@ -31,6 +31,7 @@ import Thena.Engine
   , setGoal
   , step
   )
+import Thena.Global.Env (emptyGlobals)
 import Thena.Errors (FailReason (..), MoveError (..))
 import Thena.Ops (AnswerKind (..), Instr (..), Operand (..), Value (..))
 import qualified Thena.Ops as Ops
@@ -46,7 +47,7 @@ text = Lit . VText
 
 -- | A machine holding the program, with the session's opening development.
 machine :: [Instr] -> Machine
-machine is = load is (Machine (Exec [] [] []) ps n)
+machine is = load is (Machine (Exec [] [] []) ps emptyGlobals n)
   where
     (ps, n) = newProof 0
 
@@ -198,7 +199,7 @@ tests =
             -- hole. It pins the rule, which is one sentence — everything from
             -- the focus down is discarded (§4.0 F6).
             let (v, n) = fresh 0
-                bare   = Machine (Exec [] [] []) (ProofState (enter (Under (Assume v (Ident "A") type0) (Trailing type0)))) n
+                bare   = Machine (Exec [] [] []) (ProofState (enter (Under (Assume v (Ident "A") type0) (Trailing type0)))) emptyGlobals n
              in case fmap (proofDevelopment . proof) (setGoal type0 bare) of
                   Right (Under (Claim x _ _) (Trailing (Free y))) -> x @?= y
                   other -> assertFailure ("wrong shape: " ++ show other)

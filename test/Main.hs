@@ -7,6 +7,7 @@ import qualified Thena.CursorTests
 import qualified Thena.DevelopmentTests
 import qualified Thena.DriverTests
 import qualified Thena.EngineTests
+import qualified Thena.GlobalTests
 import qualified Thena.GoldenTests
 import qualified Thena.SyntaxTests
 
@@ -20,6 +21,7 @@ main =
       , Thena.DevelopmentTests.tests
       , Thena.DriverTests.tests
       , Thena.EngineTests.tests
+      , Thena.GlobalTests.tests
       , Thena.GoldenTests.tests
       , Thena.SyntaxTests.tests
       ]

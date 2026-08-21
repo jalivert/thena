@@ -25,6 +25,8 @@ library
         Thena.Driver
         Thena.Engine
         Thena.Errors
+        Thena.Global.Declare
+        Thena.Global.Env
         Thena.Ops
         Thena.Repl
         Thena.Syntax.Concrete
@@ -59,6 +61,7 @@ test-suite thena-test
         Thena.CursorTests
         Thena.DevelopmentTests
         Thena.EngineTests
+        Thena.GlobalTests
         Thena.GoldenTests
         Thena.DriverTests
         Thena.Fixtures

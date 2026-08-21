@@ -3,7 +3,7 @@ no such command: wibble
 thena spine> :core y
 not in scope: y
 thena spine> :show it
-:show takes no argument
+nothing named it has been declared
 thena spine> assume : Type₀
 name for the assumption? it will have type Type₀
 > let

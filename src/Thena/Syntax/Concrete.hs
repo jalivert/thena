@@ -14,6 +14,8 @@ module Thena.Syntax.Concrete
   ( Raw (..)
   , RawBinder (..)
   , RawConstraint (..)
+  , RawData (..)
+  , RawConstructor (..)
   ) where
 
 data Raw
@@ -35,4 +37,17 @@ data RawBinder = RawBinder String Raw
 
 -- | @Ξ ⊢ s ≟ t : T@ — the binders, then the two sides, then the type.
 data RawConstraint = RawConstraint [RawBinder] Raw Raw Raw
+  deriving (Eq, Show)
+
+-- | @data D (p : P) : I -> Type_l { c : T ; c' : T' }@ — the name, the
+-- parameters, the type former's type, the constructors (§2.7, decided by the
+-- user planning phase 6).
+--
+-- A declaration is not a term, so it is not a case of 'Raw'. The type is kept
+-- whole rather than split into indices and a universe: the split is a shape
+-- check and belongs with the other ones in "Thena.Syntax.Resolve".
+data RawData = RawData String [RawBinder] Raw [RawConstructor]
+  deriving (Eq, Show)
+
+data RawConstructor = RawConstructor String Raw
   deriving (Eq, Show)

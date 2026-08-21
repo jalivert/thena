@@ -29,6 +29,7 @@ module Thena.Core.Term
   , open
   , instantiate
   , freeVars
+  , globalsIn
   ) where
 
 import Data.List (nub)
@@ -206,3 +207,28 @@ freeVars = nub . go
       Canonical _ as              -> concatMap go as
       Eliminate _ ps m ms is tgt  ->
         concatMap go ps ++ go m ++ concatMap go ms ++ concatMap go is ++ go tgt
+
+-- | The global names a term mentions, in order of first occurrence, without
+-- repeats.
+--
+-- Here for the same reason 'freeVars' is: it must see inside a 'Scope', and
+-- 'MkScope' is not exported. Phase 6's strict-positivity check is what wants
+-- it — "does the datatype being declared occur in this constructor argument's
+-- domain?" is exactly this question, and asking it by opening every binder
+-- would mint display variables for no reason (§3.7).
+globalsIn :: Core -> [GlobalName]
+globalsIn = nub . go
+  where
+    go :: Core -> [GlobalName]
+    go t = case t of
+      Bound _                     -> []
+      Free _                      -> []
+      Global g                    -> [g]
+      Universe _                  -> []
+      Pi _ s (MkScope b)          -> go s ++ go b
+      Lam _ s (MkScope b)         -> go s ++ go b
+      App f a                     -> go f ++ go a
+      Let _ v s (MkScope b)       -> go v ++ go s ++ go b
+      Canonical g as              -> g : concatMap go as
+      Eliminate d ps m ms is tgt  ->
+        d : (concatMap go ps ++ go m ++ concatMap go ms ++ concatMap go is ++ go tgt)

@@ -3,14 +3,22 @@ module Thena.Syntax.Parser
   ( ParseError (..)
   , parseTerm
   , parseNameAndType
+  , parseData
   ) where
 
-import Thena.Syntax.Concrete (Raw (..), RawBinder (..), RawConstraint (..))
+import Thena.Syntax.Concrete
+  ( Raw (..)
+  , RawBinder (..)
+  , RawConstraint (..)
+  , RawConstructor (..)
+  , RawData (..)
+  )
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
 %name parseTerm Term
 %name parseNameAndType NameAndType
+%name parseData Data
 %tokentype { Located Token }
 %monad { Either ParseError }
 %error { parseError }
@@ -21,6 +29,9 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   '->'    { Located _ TArrow }
   '('     { Located _ TLParen }
   ')'     { Located _ TRParen }
+  '{'     { Located _ TLBrace }
+  '}'     { Located _ TRBrace }
+  ';'     { Located _ TSemi }
   ':'     { Located _ TColon }
   '='     { Located _ TEquals }
   '?'     { Located _ TQuery }
@@ -56,6 +67,34 @@ Term :: { Raw }
 NameAndType :: { (Maybe String, Raw) }
   : ident ':' Term                         { (Just $1, $3) }
   | ':' Term                               { (Nothing, $2) }
+
+-- The argument of @data@ (§2.7's grammar, extended; decided by the user
+-- planning phase 6). @data@ itself is not a token: the driver splits the first
+-- word off the line before the lexer sees anything, which is what keeps @data@
+-- a perfectly good identifier (§2.4).
+--
+-- Parameters are the binder groups left of the @:@; indices are the arrow
+-- prefix of the type right of it, which must end in a universe. That is the
+-- split §3.7 requires disambiguated, made syntactic.
+Data :: { RawData }
+  : ident MaybeBinders ':' Term '{' Constructors '}'
+                                           { RawData $1 (reverse $2) $4 (reverse $6) }
+
+MaybeBinders :: { [RawBinder] }
+  :                                        { [] }
+  | Binders                                { $1 }
+
+-- A datatype with no constructors is legal and useful: @Empty@ (§3.7).
+Constructors :: { [RawConstructor] }
+  :                                        { [] }
+  | SomeConstructors                       { $1 }
+
+SomeConstructors :: { [RawConstructor] }
+  : Constructor                            { [$1] }
+  | SomeConstructors ';' Constructor       { $3 : $1 }
+
+Constructor :: { RawConstructor }
+  : ident ':' Term                         { RawConstructor $1 $3 }
 
 Constraint :: { RawConstraint }
   : Binders '⊢' Term '≟' Term ':' Term   { RawConstraint (reverse $1) $3 $5 $7 }

@@ -29,6 +29,9 @@ tokens :-
   "∀"           { keyword TForall }
   "("           { keyword TLParen }
   ")"           { keyword TRParen }
+  "{"           { keyword TLBrace }
+  "}"           { keyword TRBrace }
+  ";"           { keyword TSemi }
   ":"           { keyword TColon }
   "="           { keyword TEquals }
   "?="          { keyword TEquate }
@@ -66,6 +69,9 @@ data Token
   | TArrow
   | TLParen
   | TRParen
+  | TLBrace
+  | TRBrace
+  | TSemi
   | TColon
   | TEquals
   | TQuery

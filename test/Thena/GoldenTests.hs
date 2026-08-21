@@ -63,6 +63,26 @@ tests =
         , ":quit"
         ]
     , script
+        "declaring"
+        [ "data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }"
+        , ":show Nat"
+        , ":show succ"
+        , ":show zero"
+        , ":core succ (succ zero)"
+        , "data Vec (A : Type₀) : Nat -> Type₀ { nil : Vec A zero ; cons : ∀ (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ n) }"
+        , ":show Vec"
+        , ":show cons"
+        , "data Empty : Type₀ { }"
+        , ":show Empty"
+        , "data Nat : Type₀ { z : Nat }"
+        , "data Ordinal : Type₀ { sup : (Nat -> Ordinal) -> Ordinal }"
+        , "data Bad : Type₀ { bad : (Bad -> Bad) -> Bad }"
+        , ":show nowhere"
+        , "assume n : Nat"
+        , ":show"
+        , ":quit"
+        ]
+    , script
         "mistakes"
         [ "wibble"
         , ":core y"

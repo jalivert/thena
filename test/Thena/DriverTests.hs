@@ -5,7 +5,7 @@ module Thena.DriverTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (Core (..), Ident (..), Level (..))
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Level (..))
 import Thena.Development.Component (Component (..))
 import Thena.Development.Partial (Partial (..))
 import Thena.Driver
@@ -18,8 +18,10 @@ import Thena.Driver
   , newSession
   )
 import Thena.Development.Cursor (rebuild)
-import Thena.Engine (Machine (..), Question (..), proof, proofDevelopment)
+import Thena.Engine (Machine (..), Question (..), globals, proof, proofDevelopment)
 import Thena.Errors (FailReason (..))
+import Thena.Global.Declare (DeclareError (..))
+import Thena.Global.Env (isDeclared)
 import Thena.Ops (AnswerKind (..))
 
 -- | Run a script of command lines, answering nothing, and give back the last
@@ -31,6 +33,14 @@ say = foldl next (newSession, Blank)
 
 devOf :: Session -> Partial
 devOf = proofDevelopment . proof . sessionMachine
+
+-- | What is typed to declare the running example. The @data@ word is the
+-- command; everything after it is the grammar's (§2.4).
+natCommand :: String
+natCommand = "data Nat : Type\8320 { zero : Nat ; succ : Nat -> Nat }"
+
+declaredIn :: Session -> String -> Bool
+declaredIn s g = isDeclared (GlobalName g) (globals (sessionMachine s))
 
 tests :: TestTree
 tests =
@@ -62,8 +72,8 @@ tests =
             case snd (command newSession ":where") of
               Where _ -> pure ()
               other   -> assertFailure ("expected Where, got " ++ show other)
-        , testCase ":show takes no argument" $
-            snd (command newSession ":show x") @?= Rejected (UnexpectedArgument ":show")
+        , testCase ":show with an argument is a global, not a mistake" $
+            snd (command newSession ":show x") @?= Rejected (NoSuchGlobal "x")
         , testCase ":step takes on, off, or nothing" $
             snd (command newSession ":step sideways") @?= Rejected (UnexpectedArgument ":step")
         ]
@@ -148,6 +158,54 @@ tests =
             case devOf (fst (say [":goal Type₀", "assume A : Type₀"])) of
               Under Assume {} (Under Claim {} (Trailing _)) -> pure ()
               other -> assertFailure ("wrong shape: " ++ show other)
+        ]
+    , testGroup
+        "declarations"
+        [ testCase "data says what it declared" $
+            snd (say [natCommand]) @?= Ran ["declared Nat"] Completed
+        , testCase "and the globals hold it afterwards" $
+            declaredIn (fst (say [natCommand])) "Nat" @?= True
+        , testCase "so do the names it generated" $
+            map (declaredIn (fst (say [natCommand]))) ["zero", "succ"] @?= [True, True]
+        , testCase "the development is untouched: globals are not ProofState (§7.4)" $
+            devOf (fst (say [natCommand])) @?= devOf newSession
+        , testCase "data needs an argument" $
+            snd (command newSession "data") @?= Rejected (MissingArgument "data")
+        , testCase "a declaration that does not fit the form is a syntax error" $
+            case snd (command newSession "data T : Type\8320 { c }") of
+              Failed _ -> pure ()
+              other    -> assertFailure ("expected Failed, got " ++ show other)
+        , testCase "a declaration the checker refuses stops the run" $
+            snd (say [natCommand, "data T : Type\8320 { c : (T -> T) -> T }"])
+              @?= Ran [] (Refused (NotStrictlyPositive (GlobalName "c") (Ident "x")))
+        , testCase "and writes nothing" $
+            declaredIn (fst (say [natCommand, "data T : Type\8320 { c : (T -> T) -> T }"])) "T"
+              @?= False
+        , testCase "while what was already declared survives it" $
+            declaredIn (fst (say [natCommand, "data T : Type\8320 { c : (T -> T) -> T }"])) "Nat"
+              @?= True
+        , testCase "a refused declaration abandons the rest of the program" $
+            case fst (say [natCommand, "data T : Type\8320 { c : (T -> T) -> T }", ":run"]) of
+              s' -> snd (command s' ":run") @?= Ran [] Completed
+        , testCase ":show ‹datatype› is the declaration" $
+            case snd (say [natCommand, ":show Nat"]) of
+              ShownData _ -> pure ()
+              other       -> assertFailure ("expected ShownData, got " ++ show other)
+        , testCase ":show ‹former› is the generated wrapper, type and body" $
+            case snd (say [natCommand, ":show succ"]) of
+              ShownGlobal (GlobalName "succ") _ (Just _) -> pure ()
+              other -> assertFailure ("expected ShownGlobal, got " ++ show other)
+        , testCase "a global is in scope for an ordinary term" $
+            case snd (say [natCommand, ":core succ zero"]) of
+              Rendered _ -> pure ()
+              other      -> assertFailure ("expected Rendered, got " ++ show other)
+        , testCase "and can be assumed at" $
+            snd (say [natCommand, "assume n : Nat"]) @?= Ran ["assumed n"] Completed
+        , testCase "stepping installs the declaration before it pauses" $
+            let s' = fst (say [":step on", natCommand])
+             in declaredIn s' "Nat" @?= True
+        , testCase "and the message is still to come" $
+            snd (say [":step on", natCommand]) @?= Ran [] Paused
         ]
     , testGroup
         "stepping"

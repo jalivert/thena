@@ -20,13 +20,14 @@ import Thena.Core.Term
   , fresh
   )
 import Thena.Driver (parseCore)
+import Thena.Global.Env (emptyGlobals)
 import Thena.Repl (renderCore)
 import Thena.Syntax.Concrete (Raw (..), RawBinder (..))
 import Thena.Syntax.Resolve (resolve)
 
 -- | Resolve, render, re-resolve. The property everything else supports.
 roundTrips :: Core -> Int -> Bool
-roundTrips t n = case parseCore [] n (renderCore n [] t) of
+roundTrips t n = case parseCore emptyGlobals [] n (renderCore n [] t) of
   Right (t', _) -> t' == t
   Left _        -> False
 
@@ -79,7 +80,7 @@ genRaw = sized . go
 genClosed :: Gen Core
 genClosed = do
   raw <- genRaw []
-  case resolve [] 0 raw of
+  case resolve emptyGlobals [] 0 raw of
     Right (t, _) -> pure t
     Left e       -> error ("generator produced an unresolvable term: " ++ show e)
 
@@ -143,17 +144,17 @@ inputTests =
   , testCase "Type0 prints as Type₀" $
       render "Type0" @?= "Type₀"
   , testCase "ASCII and unicode agree" $
-      parseCore [] 0 "\\ (x : Type0) -> x" @?= parseCore [] 0 "λ (x : Type₀) -> x"
+      parseCore emptyGlobals [] 0 "\\ (x : Type0) -> x" @?= parseCore emptyGlobals [] 0 "λ (x : Type₀) -> x"
   ]
 
 errorTests :: [TestTree]
 errorTests =
   [ testCase "an unbound name is a scope error" $
-      isLeft (parseCore [] 0 "y") @?= True
+      isLeft (parseCore emptyGlobals [] 0 "y") @?= True
   , testCase "a λ with no body is a parse error" $
-      isLeft (parseCore [] 0 "λ (x : Type₀)") @?= True
+      isLeft (parseCore emptyGlobals [] 0 "λ (x : Type₀)") @?= True
   , testCase "a stray character is a lex error" $
-      isLeft (parseCore [] 0 "x # y") @?= True
+      isLeft (parseCore emptyGlobals [] 0 "x # y") @?= True
   ]
 
 -- | The case that cannot be written in concrete syntax and must still print
@@ -180,7 +181,7 @@ shadowed =
 resolveTests :: [TestTree]
 resolveTests =
   [ testCase "an inner binder shadows an outer one of the same name" $
-      fmap fst (parseCore [] 0 "λ (x : Type₀) -> λ (x : Type₁) -> x")
+      fmap fst (parseCore emptyGlobals [] 0 "λ (x : Type₀) -> λ (x : Type₁) -> x")
         @?= Right (nestedLam Inner)
   , testCase "and that is not the same term as referring to the outer" $
       assertBool "inner and outer must differ" (nestedLam Inner /= nestedLam Outer)
@@ -199,7 +200,7 @@ nestedLam which =
         (close v1 (Lam (Ident "x") (Universe (Level 1)) (close v2 body)))
 
 render :: String -> String
-render src = case parseCore [] 0 src of
+render src = case parseCore emptyGlobals [] 0 src of
   Right (t, n) -> renderCore n [] t
   Left e       -> "ERROR: " ++ show e
 

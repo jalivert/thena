@@ -21,6 +21,7 @@ module Thena.Ops
 
 import Thena.Development.Cursor (Part (..))
 import Thena.Development.Partial (Partial)
+import Thena.Global.Env (InductiveDefinition)
 import Thena.Syntax.Concrete (Raw)
 
 -- | A name in a rule body's environment. Not a 'Thena.Core.Term.Var' and not an
@@ -61,7 +62,7 @@ data Instr
   | Do   Op
   deriving (Eq, Show)
 
--- | Phase 4's five, and phase 5's six moves.
+-- | Phase 4's five, phase 5's six moves, and phase 6's @define-data@.
 --
 -- @Assume@ is not in §7.2's sketch of this type. It is added here per §12
 -- invariant 5, because phase 4's deliverable needs it and the thesis's @intro@
@@ -86,7 +87,19 @@ data Op
   | CrossValue                -- ^ into a definition's value
   | Down Part                 -- ^ into a named field of a core term (§4.7)
   | Back                      -- ^ undo the last move
+  | DefineData InductiveDefinition
+    -- ^ hand a declaration out through the channel (§7.5)
   deriving (Eq, Show)
+
+-- @DefineData@ carries the declaration as a field rather than an 'Operand',
+-- for the same reason 'Down' carries a 'Part' and 'Ask' an 'AnswerKind': a
+-- datatype is written down, never computed by a body. It is also why 'Value'
+-- gains no case here — nothing ever binds a declaration to a name.
+--
+-- **No instruction writes globals, here or ever** (§7.5, §3.7). This op yields;
+-- the driver checks the declaration with "Thena.Global.Declare" and installs
+-- it. That is what keeps §3.7's line — @define-data@ is a command, not a
+-- rule-body operation — structural rather than a rule someone has to remember.
 
 -- | A hint to the frontend, not a type the machine enforces (§7.5).
 --

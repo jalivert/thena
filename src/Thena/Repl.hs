@@ -19,6 +19,7 @@ module Thena.Repl
   , renderWhere
   , renderMachine
   , renderSyntaxError
+  , renderInductive
   ) where
 
 import System.Console.Haskeline
@@ -29,7 +30,7 @@ import System.Console.Haskeline
   , runInputT
   )
 
-import Thena.Core.Context (Context, Entry (..))
+import Thena.Core.Context (Context, Entry (..), entryType, entryVar, piOver)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
@@ -77,6 +78,12 @@ import Thena.Engine
   , proofContext
   )
 import Thena.Errors (FailReason (..), MoveError (..))
+import Thena.Global.Declare (DeclareError (..))
+import Thena.Global.Env
+  ( ConstructorDefinition (..)
+  , InductiveDefinition (..)
+  , constructorTarget
+  )
 import Thena.Ops (AnswerKind (..), Instr (..), Op, Operand (..), Value (..))
 import qualified Thena.Ops as Ops
 import Thena.Syntax.Lexer (LexError (..), Pos (..), Token (..))
@@ -160,6 +167,8 @@ renderResponse s resp = case resp of
   Rendered t     -> [renderCore (counter s) (contextOf s) t]
   RenderedDev p  -> [renderPartial (counter s) (contextOf s) p]
   Shown c        -> [renderCursor (counter s) c]
+  ShownData d    -> renderInductive (counter s) d
+  ShownGlobal g ty body -> renderGlobal (counter s) g ty body
   Where c        -> renderWhere (counter s) c
   Ran msgs stop  -> msgs ++ renderStop s stop
   Failed e       -> [renderSyntaxError e]
@@ -183,6 +192,7 @@ renderStop s stop = case stop of
   Completed              -> []
   Waiting (Question p _) -> [p]
   Halted r               -> ["stuck: " ++ renderFailReason r]
+  Refused e              -> ["refused: " ++ renderDeclareError e]
   Paused                 -> renderMachine (counter s) (contextOf s) (sessionMachine s)
 
 -- --------------------------------------------------------------------------
@@ -198,6 +208,18 @@ renderSyntaxError e = case e of
   ResolveFailed (NotInScope n)      -> "not in scope: " ++ n
   ResolveFailed (NotACoreTerm f)    ->
     devForm f ++ " is part of a development, not a term"
+  ResolveFailed (NotAUniverse d)    ->
+    d ++ " must be declared at a universe, as in \": Type\8320\""
+  ResolveFailed (TargetIsNotTheDatatype c) ->
+    c ++ " must produce the datatype being declared"
+  ResolveFailed (TargetArgumentCount c want got) ->
+    c
+      ++ " should produce the datatype applied to "
+      ++ show want
+      ++ " argument(s), not "
+      ++ show got
+  ResolveFailed (ParameterNotPassedThrough c i) ->
+    c ++ " must pass the parameter " ++ identString i ++ " through unchanged"
   where
     at (Pos line col) = show line ++ ":" ++ show col ++ ": "
 
@@ -215,6 +237,9 @@ describe t = case t of
   TLParen     -> "("
   TRParen     -> ")"
   TColon      -> ":"
+  TLBrace     -> "{"
+  TRBrace     -> "}"
+  TSemi       -> ";"
   TEquals     -> "="
   TQuery      -> "?"
   TGuessed    -> "≐"
@@ -649,6 +674,7 @@ renderOp n ctx op = case op of
   Ops.CrossType   -> "cross type"
   Ops.CrossValue  -> "cross val"
   Ops.Down part   -> partWord part
+  Ops.DefineData d -> "data " ++ nameString (inductiveName d)
   where
     operand = renderOperand n ctx
 
@@ -678,6 +704,7 @@ renderCommandError e = case e of
   MissingArgument w    -> w ++ " needs an argument"
   UnexpectedArgument w -> w ++ " takes no argument"
   NotAsking            -> "nothing was asked"
+  NoSuchGlobal x       -> "nothing named " ++ x ++ " has been declared"
   NotThere m           -> renderMoveError m
 
 renderFailReason :: FailReason -> String
@@ -697,3 +724,100 @@ renderMoveError m = case m of
   NotADefinition -> "only a definition has a value"
   NoCrossingIntoAConstraint -> "there is no position inside a constraint"
   NoSuchPart     -> "the focus has no such part"
+
+-- --------------------------------------------------------------------------
+-- Declarations, made readable (§3.7)
+-- --------------------------------------------------------------------------
+
+-- | Print a datatype back in the syntax it was declared in.
+--
+-- One constructor per line, opened by @{@ and separated by @;@, the way the
+-- user's own preview of the syntax reads. Structural, with no width
+-- calculation and no reflow — the same rule as the development printer (§2.7).
+--
+-- The two halves of a declaration's header are printed by different means and
+-- that is not an accident: the parameters are binder groups, because that is
+-- what puts them left of the @:@ and makes the parameter/index split syntactic
+-- (§3.7), while the indices are printed as the type they bind, so that
+-- 'renderCore' decides between @Nat -> Type\8320@ and @\8704 (n : Nat) -> \8230@ by
+-- its own rule (§2.6).
+renderInductive :: Int -> InductiveDefinition -> [String]
+renderInductive n d = case inductiveConstructors d of
+  [] -> [header ++ " { }"]
+  cs -> header : closed (zipWith (++) ("  { " : repeat "  ; ") (map line cs))
+  where
+    ps   = inductiveParameters d
+    penv = envOf ps
+
+    header =
+      "data "
+        ++ nameString (inductiveName d)
+        ++ concatMap group (zip [0 ..] ps)
+        ++ " : "
+        ++ renderCore n ps (piOver (inductiveIndices d) (Universe (inductiveLevel d)))
+
+    -- A parameter's type sees the parameters before it and no more.
+    group (i, e) =
+      " ("
+        ++ nameOf (entryVar e) penv
+        ++ " : "
+        ++ renderCore n (take i ps) (entryType e)
+        ++ ")"
+
+    -- The parameters are already in scope, so a constructor line binds only its
+    -- own arguments. Its stored type abstracts the parameters as well — that is
+    -- what makes it a function (§3.7) — and printing /that/ here would rebind
+    -- them and freshen the second copy to @A1@.
+    line c =
+      nameString (constructorName c)
+        ++ " : "
+        ++ renderCore n ps (piOver (constructorArguments c) (constructorTarget d c))
+
+    closed ls = init ls ++ [last ls ++ " }"]
+
+-- | @:show ‹name›@ on anything that is not a datatype.
+--
+-- The body is on its own line because it is what a generated wrapper /is/, and
+-- the point of generating into the environment rather than conjuring inside a
+-- tactic is that the student can go and look at it (§3.7).
+renderGlobal :: Int -> GlobalName -> Core -> Maybe Core -> [String]
+renderGlobal n g ty body =
+  (nameString g ++ " : " ++ renderCore n [] ty)
+    : case body of
+        Nothing -> []
+        Just b  -> [nameString g ++ " = " ++ renderCore n [] b]
+
+renderDeclareError :: DeclareError -> String
+renderDeclareError e = case e of
+  AlreadyDeclared g -> nameString g ++ " is already declared"
+  RepeatedName g    -> "this declaration uses the name " ++ nameString g ++ " twice"
+  WrongNumberOfIndices g want got ->
+    nameString g
+      ++ " should target the family at "
+      ++ show want
+      ++ " index/indices, not "
+      ++ show got
+  NotStrictlyPositive g i ->
+    "the argument "
+      ++ identString i
+      ++ " of "
+      ++ nameString g
+      ++ " puts the datatype to the left of an arrow"
+  HigherOrderRecursion g i ->
+    "the argument "
+      ++ identString i
+      ++ " of "
+      ++ nameString g
+      ++ " is a function into the datatype, which MS1 does not admit yet"
+  NestedRecursion g i ->
+    "the argument "
+      ++ identString i
+      ++ " of "
+      ++ nameString g
+      ++ " mentions the datatype under another type, which MS1 does not admit yet"
+
+nameString :: GlobalName -> String
+nameString (GlobalName g) = g
+
+identString :: Ident -> String
+identString (Ident i) = i
