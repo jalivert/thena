@@ -8,9 +8,13 @@
 -- §12 invariant 3 is what shapes this module: a command that changes the
 -- development compiles to @[Instr]@ and runs on the machine (§2.4). Only three
 -- kinds of command are the driver's own — the ones that produce a view
--- (@:core@, @:dev@, @:show@), the ones that set a session setting (@:step
--- on@), and the ones that create or replace a proof (@:goal@, which is phase
--- 13's @:theorem@ in miniature; §7.8 puts that on the session side).
+-- (@:core@, @:dev@, @:show@, @:where@), the ones that set a session setting
+-- (@:step on@), and the ones that create or replace a proof (@:goal@, which is
+-- phase 13's @:theorem@ in miniature; §7.8 puts that on the session side).
+--
+-- **The moves are not among them.** Moving the focus changes the cursor, and
+-- the cursor is 'Thena.Engine.ProofState' — exactly what backtracks — so a
+-- move is an op and is spelled as a bare word (§2.4, §4.3).
 module Thena.Driver
   ( Session (..)
   , newSession
@@ -26,6 +30,7 @@ module Thena.Driver
 
 import Thena.Core.Context (Context)
 import Thena.Core.Term (Core)
+import Thena.Development.Cursor (Cursor, Part (..))
 import Thena.Development.Partial (Partial (..))
 import Thena.Engine
   ( Exec (..)
@@ -33,6 +38,7 @@ import Thena.Engine
   , Message
   , ProofState (..)
   , Question
+  , cursor
   , isAsking
   , load
   , newProof
@@ -42,7 +48,7 @@ import Thena.Engine
   , step
   )
 import qualified Thena.Engine as Engine
-import Thena.Errors (FailReason)
+import Thena.Errors (FailReason, MoveError)
 import Thena.Ops
   ( AnswerKind (..)
   , Instr (..)
@@ -85,7 +91,8 @@ data Response
   = Blank                     -- ^ an empty line; nothing to do
   | Rendered Core             -- ^ @:core@ (§2.6)
   | RenderedDev Partial       -- ^ @:dev@ (§2.7)
-  | Shown Partial             -- ^ @:show@, and the new state after @:goal@
+  | Shown Cursor              -- ^ @:show@, and the new state after @:goal@
+  | Where Cursor              -- ^ @:where@ — the focus, the path, Γ, the type
   | Ran [Message] Stop        -- ^ what the machine said, and where it stopped
   | Failed SyntaxError
   | Rejected CommandError
@@ -114,6 +121,9 @@ data CommandError
   | MissingArgument String
   | UnexpectedArgument String
   | NotAsking
+  | NotThere MoveError
+    -- ^ a driver command that needs a particular focus, run at another. Only
+    -- @:goal@ can produce it; the moves are ops and fail through 'Halted'.
   deriving (Eq, Show)
 
 -- --------------------------------------------------------------------------
@@ -156,13 +166,30 @@ dispatch s name arg = case name of
   ":quit"  -> noArgument (s, Quit)
   ":core"  -> withArgument (view s parseCore Rendered arg)
   ":dev"   -> withArgument (view s parseDevelopment RenderedDev arg)
-  ":show"  -> noArgument (s, Shown (development (proof machine)))
+  ":show"  -> noArgument (s, Shown (cursor (proof machine)))
+  ":where" -> noArgument (s, Where (cursor (proof machine)))
   ":goal"  -> goal
   ":step"  -> stepping
   ":run"   -> noArgument (progress False s [])
   "assume" -> tactic "assumption" "assumed" Assume
   "claim"  -> tactic "hole" "claimed" Claim
-  _        -> (s, Rejected (NoSuchCommand name))
+
+  -- The moves (§4.3). Three take no argument, @cross@ takes which field, and
+  -- every core-term descent is its own word so that none of them changes
+  -- meaning with what is in focus (§4.0 C1).
+  "along"  -> noArgument (run [Do Along])
+  "into"   -> noArgument (run [Do Into])
+  "back"   -> noArgument (run [Do Back])
+  "cross"  -> case arg of
+    "type" -> run [Do CrossType]
+    "val"  -> run [Do CrossValue]
+    ""     -> (s, Rejected (MissingArgument name))
+    _      -> (s, Rejected (UnexpectedArgument name))
+
+  _ | name `elem` partWords -> case corePart name arg of
+        Left e  -> (s, Rejected e)
+        Right p -> run [Do (Down p)]
+    | otherwise -> (s, Rejected (NoSuchCommand name))
   where
     machine = sessionMachine s
     ctx     = proofContext (proof machine)
@@ -177,9 +204,9 @@ dispatch s name arg = case name of
 
     goal = withArgument $ case parseCore ctx (names machine) arg of
       Left e -> (s, Failed e)
-      Right (t, n1) ->
-        let m' = setGoal t machine { names = n1 }
-         in (s { sessionMachine = m' }, Shown (development (proof m')))
+      Right (t, n1) -> case setGoal t machine { names = n1 } of
+        Left e   -> (s, Rejected (NotThere e))
+        Right m' -> (s { sessionMachine = m' }, Shown (cursor (proof m')))
 
     stepping = case arg of
       ""    -> progress True s []
@@ -187,10 +214,53 @@ dispatch s name arg = case name of
       "off" -> (s { sessionStepping = False }, Ran [] Completed)
       _     -> (s, Rejected (UnexpectedArgument name))
 
+    run is = progress (sessionStepping s) s { sessionMachine = load is machine } []
+
     tactic what verb op = withArgument $ case compile what verb op ctx (names machine) arg of
       Left e -> (s, Failed e)
       Right (is, n1) ->
         progress (sessionStepping s) s { sessionMachine = load is machine { names = n1 } } []
+
+-- | The core-term descents, as the user types them (§4.7).
+--
+-- One word per 'Part', and the words are the field names of §2.6's syntax. The
+-- three that take a position are one-based, because the printer numbers from
+-- one and nothing else here counts.
+--
+-- @arg@ is both @f □@\'s and a former's, and takes a position in the second
+-- case only — a saturated 'Thena.Core.Term.Canonical' has many arguments and an
+-- application has exactly one, so no form has both readings and no word changes
+-- meaning.
+partWords :: [String]
+partWords =
+  [ "fun", "arg", "dom", "cod", "val", "type", "body"
+  , "motive", "target", "param", "method", "index"
+  ]
+
+corePart :: String -> String -> Either CommandError Part
+corePart w a = case (w, a) of
+  ("fun",    "") -> Right Fun
+  ("arg",    "") -> Right Arg
+  ("dom",    "") -> Right Dom
+  ("cod",    "") -> Right Cod
+  ("val",    "") -> Right Val
+  ("type",   "") -> Right Type
+  ("body",   "") -> Right Body
+  ("motive", "") -> Right Motive
+  ("target", "") -> Right Target
+  -- Before the positional cases: without it @param@ with no number reaches
+  -- 'position', which reports the wrong mistake.
+  (_,        "") -> Left (MissingArgument w)
+  ("arg",    k)  -> CanonArg <$> position w k
+  ("param",  k)  -> Param    <$> position w k
+  ("method", k)  -> Method   <$> position w k
+  ("index",  k)  -> Index    <$> position w k
+  _              -> Left (UnexpectedArgument w)
+
+position :: String -> String -> Either CommandError Int
+position w k = case reads k of
+  [(i, "")] -> Right i
+  _         -> Left (UnexpectedArgument w)
 
 -- | Read something and hand it back for rendering.
 --

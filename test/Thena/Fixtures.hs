@@ -11,6 +11,7 @@ module Thena.Fixtures
   , shadowedBinders
   , guessShadowing
   , trailingLam
+  , richTypes
   ) where
 
 import Thena.Core.Context (Entry (..))
@@ -99,6 +100,39 @@ guessShadowing =
                (Under (Assume vLam (Ident "x") type0) (Trailing (Free vLam)))
                type0)
         (Trailing (Free vHole))
+
+-- | A development whose component types have something in every core field.
+--
+-- Phase 5's core navigation needs one: a /dependent/ Π (so @cod@ opens a
+-- binder), a @let@ (all three of @val@, @type@, @body@), an application (@fun@
+-- and @arg@), and a λ in a definition's value, which is the only way to reach
+-- one through @cross val@.
+--
+--   > λ (A : Type₀) ->
+--   > λ (f : A -> A) ->
+--   > let d = λ (z : A) -> z : A -> A in
+--   > let ? h : ∀ (x : A) -> let y = x : A in f y in
+--   > h
+richTypes :: Partial
+richTypes =
+  let (vA, n1) = fresh 0
+      (vf, n2) = fresh n1
+      (vd, n3) = fresh n2
+      (vz, n4) = fresh n3
+      (vh, n5) = fresh n4
+      (vx, n6) = fresh n5
+      (vy, n7) = fresh n6
+      (spare, _) = fresh n7
+      a        = Free vA
+      endo     = arrow spare a
+      lamZ     = Lam (Ident "z") a (close vz (Free vz))
+      letY     = Let (Ident "y") (Free vx) a (close vy (App (Free vf) (Free vy)))
+      holeTy   = Pi (Ident "x") a (close vx letY)
+   in Under (Assume vA (Ident "A") type0)
+        (Under (Assume vf (Ident "f") endo)
+          (Under (Define vd (Ident "d") lamZ endo)
+            (Under (Claim vh (Ident "h") holeTy)
+              (Trailing (Free vh)))))
 
 -- | A 'Trailing' holding a binder. Without the corners this re-reads as a
 -- chain link and print-then-read is not stable (§2.7).

@@ -15,9 +15,11 @@ module Thena.Ops
   , Operand (..)
   , Instr (..)
   , Op (..)
+  , Part (..)
   , AnswerKind (..)
   ) where
 
+import Thena.Development.Cursor (Part (..))
 import Thena.Development.Partial (Partial)
 import Thena.Syntax.Concrete (Raw)
 
@@ -59,18 +61,31 @@ data Instr
   | Do   Op
   deriving (Eq, Show)
 
--- | Phase 4's five.
+-- | Phase 4's five, and phase 5's six moves.
 --
 -- @Assume@ is not in §7.2's sketch of this type. It is added here per §12
 -- invariant 5, because phase 4's deliverable needs it and the thesis's @intro@
 -- (table 2.7) cannot stand in: @intro@ turns a hole whose type is a Π into a λ,
 -- and phase 4 has neither @attack@ nor a guess to work under.
+--
+-- **The moves are ops, not driver commands.** The cursor /is/
+-- 'Thena.Engine.ProofState' (§7.2), so moving the focus changes exactly what
+-- backtracks — §12 invariant 3's hazard, and the reason §2.4 spells them as
+-- bare words. 'Down' takes its 'Part' as a field rather than an 'Operand' for
+-- the same reason 'Ask' takes an 'AnswerKind' that way: it is chosen when the
+-- instruction is written, not computed while it runs.
 data Op
   = Assume Operand Operand    -- ^ name, type — extend the development with @λ x : S@
   | Claim  Operand Operand    -- ^ name, type — extend it with a hole @? x : S@
   | Ask    Operand AnswerKind -- ^ prompt text, and what the frontend should offer
   | Say    Operand            -- ^ message text
   | Concat Operand Operand    -- ^ building prompt and message text
+  | Along                     -- ^ past the head of the focus (§4.3)
+  | Into                      -- ^ into a guess's body
+  | CrossType                 -- ^ into the focused component's type
+  | CrossValue                -- ^ into a definition's value
+  | Down Part                 -- ^ into a named field of a core term (§4.7)
+  | Back                      -- ^ undo the last move
   deriving (Eq, Show)
 
 -- | A hint to the frontend, not a type the machine enforces (§7.5).

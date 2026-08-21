@@ -10,8 +10,6 @@
 --
 --   * @globals :: GlobalEnv@ in 'Machine' — phase 6, when there is a global
 --     environment to hold.
---   * 'ProofState' wraps a 'Thena.Development.Cursor.Cursor' — phase 5. It
---     wraps a 'Partial' here, which is one newtype and its accessors (§9).
 --   * 'Frame'\'s @Choice@ constructor, @unwind@ past a live alternative, and
 --     the peek that builds one — phase 16. They need alternatives to exist,
 --     and alternatives need the rule engine.
@@ -23,6 +21,7 @@ module Thena.Engine
   , ProofState (..)
   , newProof
   , proofContext
+  , proofDevelopment
   , setGoal
 
     -- * Running it
@@ -46,9 +45,22 @@ import Thena.Core.Term
   , fresh
   )
 import qualified Thena.Development.Component as Component
-import Thena.Development.Component (forget)
+import Thena.Development.Cursor
+  ( Cursor
+  , along
+  , back
+  , crossType
+  , crossValue
+  , down
+  , enter
+  , insertAbove
+  , into
+  , rebuild
+  , replaceFocus
+  )
+import qualified Thena.Development.Cursor as Cursor
 import Thena.Development.Partial (Partial (..))
-import Thena.Errors (FailReason (..))
+import Thena.Errors (FailReason (..), MoveError)
 import Thena.Ops
   ( AnswerKind
   , Env
@@ -104,12 +116,14 @@ data Frame = Call
 -- | Exactly the backtrackable part of the machine, and nothing else (§7.2,
 -- §12 invariant 1).
 --
--- Wraps a 'Partial' until phase 5, which changes it to a
--- 'Thena.Development.Cursor.Cursor'. The development is the whole of it either
--- way: postponed constraints are @Pending@ links inside it (§3.3, §6.4), so
--- there is no second structure to keep in step and a checkpoint is one pointer
--- copy.
-newtype ProofState = ProofState { development :: Partial }
+-- The cursor is the whole of it: the development /is/ the cursor (§4.2), and
+-- postponed constraints are @Pending@ links inside it (§3.3, §6.4), so there is
+-- no second structure to keep in step and a checkpoint is one pointer copy.
+--
+-- **The focus backtracks with it**, and that is the point of it being in here
+-- rather than beside it: a retried alternative must start where the abandoned
+-- one started, not wherever the abandoned one wandered to.
+newtype ProofState = ProofState { cursor :: Cursor }
   deriving (Eq, Show)
 
 -- | The development a session starts with: one hole, at the least interesting
@@ -123,25 +137,23 @@ newtype ProofState = ProofState { development :: Partial }
 newProof :: Int -> (ProofState, Int)
 newProof n =
   let (v, n1) = fresh n
-   in (ProofState (goalAt v (Universe (Level 0))), n1)
+   in (ProofState (enter (goalAt v (Universe (Level 0)))), n1)
 
 goalAt :: Var -> Core -> Partial
 goalAt v ty = Under (Component.Claim v (Ident "goal") ty) (Trailing (Free v))
 
--- | Γ, derived from the chain by forgetting each component (§3.2, §4.5).
+-- | Γ at the focus (§4.5), which is what an identifier typed at the REPL must
+-- be in scope in (§4.0 E1).
 --
--- Outermost first, matching 'Context'. A @Pending@ link binds nothing, so it
--- contributes nothing — by construction rather than by a filter (§3.3).
---
--- This is phase 5's @context@ in embryo. When the cursor lands, Γ is derived
--- from the /prefix/ of the focus rather than from the whole chain, and this
--- function goes.
+-- One line, and it is the whole of what phase 4's own @proofContext@ was
+-- approximating: that one forgot the /entire/ chain, because there was no
+-- focus to take a prefix of.
 proofContext :: ProofState -> Context
-proofContext = go . development
-  where
-    go (Trailing _)  = []
-    go (Under c p)   = forget c : go p
-    go (Pending _ p) = go p
+proofContext = Cursor.context . cursor
+
+-- | The development, rebuilt. O(depth), with most structure shared (§4.2).
+proofDevelopment :: ProofState -> Partial
+proofDevelopment = rebuild . cursor
 
 -- | Replace the goal: retract the trailing hole, if the chain ends in one, and
 -- claim a new one at the given type.
@@ -149,36 +161,21 @@ proofContext = go . development
 -- A session command, not an op, and deliberately: it is @:theorem@ in miniature
 -- (§7.8 puts @:theorem@ on the session side, because starting a proof is what
 -- creates a machine rather than something a machine does). Phase 13 replaces it.
-setGoal :: Core -> Machine -> Machine
+-- | Throw the focus away and start it again as a hole at the given type.
+--
+-- The prefix is kept, so @assume A : Type₀@ then @:goal A -> A@ still means
+-- something — @A@ is in scope for the new goal precisely because it is above
+-- the focus. Everything from the focus down is discarded, which is what
+-- "start again" means and is @abandon@ followed by @claim@ (table 2.7).
+--
+-- Refused in the core fragment, because a core focus cannot be replaced by a
+-- chain. Phase 13 replaces the whole command.
+setGoal :: Core -> Machine -> Either MoveError Machine
 setGoal ty m =
   let (v, n1) = fresh (names m)
-   in m { proof = ProofState (atGoal (const (goalAt v ty)) (development (proof m)))
-        , names = n1
-        }
-
--- | The goal is the innermost link: a hole that the trailing term /is/.
---
--- Recognising it by shape rather than by remembering a 'Var' in the session is
--- the same discipline as everywhere else here — the development is the state,
--- and nothing beside it has to be kept in step (§12 invariant 1).
-isGoal :: Partial -> Bool
-isGoal p = case p of
-  Under (Component.Claim x _ _) (Trailing (Free y)) -> x == y
-  _                                                 -> False
-
--- | Rewrite the chain at the goal, or at the trailing term when there is no
--- goal to find.
---
--- Phase 5 deletes this. Once there is a cursor, an operation acts /at the
--- focus/, and "at the goal" stops being a rule the engine applies and becomes
--- wherever the user is standing.
-atGoal :: (Partial -> Partial) -> Partial -> Partial
-atGoal f p
-  | isGoal p = f p
-  | otherwise = case p of
-      Under c q   -> Under c (atGoal f q)
-      Pending k q -> Pending k (atGoal f q)
-      Trailing _  -> f p
+   in case replaceFocus (goalAt v ty) (cursor (proof m)) of
+        Left e    -> Left e
+        Right cur -> Right m { proof = ProofState cur, names = n1 }
 
 -- --------------------------------------------------------------------------
 -- Running it
@@ -276,6 +273,13 @@ perform instr rest m = case operation instr of
 
   Assume name ty -> component Component.Assume name ty
   Claim  name ty -> component Component.Claim  name ty
+
+  Along      -> navigate (keeping along)
+  Into       -> navigate (keeping into)
+  CrossType  -> navigate (keeping crossType)
+  CrossValue -> navigate (keeping crossValue)
+  Back       -> navigate (keeping back)
+  Down part  -> navigate (down part)
   where
     operation i = case i of
       Bind _ o -> o
@@ -295,13 +299,25 @@ perform instr rest m = case operation instr of
 
     -- 'Assume' and 'Claim' differ only in which component they build, and both
     -- produce the variable they bound: §7.3's sketch reads @?x <- claim S@.
+    -- A move rewrites the cursor and produces no value, so there is nothing to
+    -- bind: a @Bind@ on one is what phase 15's load-time pass rejects (§7.2).
+    -- The counter comes back because descending under a core binder mints a
+    -- variable, and only 'Thena.Core.Term.fresh' can (§4.0 D3).
+    navigate f = case f (names m) (cursor (proof m)) of
+      Left e          -> failure (CannotMove e) m
+      Right (cur, n1) ->
+        Continue (advance m { proof = ProofState cur, names = n1 })
+
+    -- Every move but 'down' leaves the counter alone.
+    keeping g n cur = fmap (\cur' -> (cur', n)) (g cur)
+
     component build name ty =
       case (,) <$> operandIdent (env (exec m)) name <*> term ty of
         Left r -> failure r m
         Right (i, t) ->
           let (v, n1) = fresh (names m)
-              p       = atGoal (Under (build v i t)) (development (proof m))
-           in produce (VTerm (Trailing (Free v))) m { proof = ProofState p, names = n1 }
+              cur     = insertAbove (build v i t) (cursor (proof m))
+           in produce (VTerm (Trailing (Free v))) m { proof = ProofState cur, names = n1 }
 
 operandValue :: Env -> Operand -> Either FailReason Value
 operandValue e o = case o of

@@ -3,6 +3,7 @@ module Main (main) where
 import Test.Tasty (defaultMain, testGroup)
 
 import qualified Thena.Core.TermTests
+import qualified Thena.CursorTests
 import qualified Thena.DevelopmentTests
 import qualified Thena.DriverTests
 import qualified Thena.EngineTests
@@ -15,6 +16,7 @@ main =
     testGroup
       "thena"
       [ Thena.Core.TermTests.tests
+      , Thena.CursorTests.tests
       , Thena.DevelopmentTests.tests
       , Thena.DriverTests.tests
       , Thena.EngineTests.tests

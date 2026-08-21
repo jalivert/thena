@@ -17,7 +17,8 @@ import Thena.Driver
   , command
   , newSession
   )
-import Thena.Engine (Machine (..), ProofState (..), Question (..), proof)
+import Thena.Development.Cursor (rebuild)
+import Thena.Engine (Machine (..), Question (..), proof, proofDevelopment)
 import Thena.Errors (FailReason (..))
 import Thena.Ops (AnswerKind (..))
 
@@ -29,7 +30,7 @@ say = foldl next (newSession, Blank)
     next (s, _) l = command s l
 
 devOf :: Session -> Partial
-devOf = development . proof . sessionMachine
+devOf = proofDevelopment . proof . sessionMachine
 
 tests :: TestTree
 tests =
@@ -47,6 +48,20 @@ tests =
             snd (command newSession ":corex") @?= Rejected (NoSuchCommand ":corex")
         , testCase "a view command with no argument says so" $
             snd (command newSession ":core") @?= Rejected (MissingArgument ":core")
+        , testCase "cross must say which field" $
+            snd (command newSession "cross") @?= Rejected (MissingArgument "cross")
+        , testCase "and it must be one of the two there are" $
+            snd (command newSession "cross body") @?= Rejected (UnexpectedArgument "cross")
+        , testCase "a positional descent needs a number" $
+            snd (command newSession "param") @?= Rejected (MissingArgument "param")
+        , testCase "and it has to be one" $
+            snd (command newSession "param x") @?= Rejected (UnexpectedArgument "param")
+        , testCase "a plain descent takes no argument" $
+            snd (command newSession "cod 2") @?= Rejected (UnexpectedArgument "cod")
+        , testCase ":where answers with the cursor, not with text" $
+            case snd (command newSession ":where") of
+              Where _ -> pure ()
+              other   -> assertFailure ("expected Where, got " ++ show other)
         , testCase ":show takes no argument" $
             snd (command newSession ":show x") @?= Rejected (UnexpectedArgument ":show")
         , testCase ":step takes on, off, or nothing" $
@@ -77,7 +92,7 @@ tests =
               other    -> assertFailure ("expected Failed, got " ++ show other)
         , testCase ":show renders the development the machine holds" $
             case snd (say ["assume A : Type₀", ":show"]) of
-              Shown (Under (Assume _ (Ident "A") _) _) -> pure ()
+              Shown c | Under (Assume _ (Ident "A") _) _ <- rebuild c -> pure ()
               other -> assertFailure ("expected the assumption, got " ++ show other)
         ]
     , testGroup
@@ -121,7 +136,9 @@ tests =
         "the goal"
         [ testCase ":goal claims a new one, in context" $
             case snd (say ["assume A : Type₀", ":goal A -> A"]) of
-              Shown (Under Assume {} (Under (Claim _ (Ident "goal") _) (Trailing _))) -> pure ()
+              Shown c
+                | Under Assume {} (Under (Claim _ (Ident "goal") _) (Trailing _)) <-
+                    rebuild c -> pure ()
               other -> assertFailure ("wrong shape: " ++ show other)
         , testCase ":goal replaces the old one rather than stacking" $
             case devOf (fst (say [":goal Type₀", ":goal Type₁"])) of

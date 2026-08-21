@@ -41,6 +41,28 @@ tests =
         , ":show"
         ]
     , script
+        "navigation"
+        [ "assume A : Type₀"
+        , "assume B : A -> Type₀"
+        , ":goal forall (x : A) -> B x"
+        , ":where"
+        , "cross type"
+        , ":where"
+        , "cod"
+        , "arg"
+        , ":where"
+        , "back"
+        , "back"
+        , "back"
+        , ":show"
+        , "along"
+        , ":show"
+        , "back"
+        , "into"
+        , "fun"
+        , ":quit"
+        ]
+    , script
         "mistakes"
         [ "wibble"
         , ":core y"

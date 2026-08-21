@@ -1,0 +1,59 @@
+thena spine> assume A : Type₀
+assumed A
+thena spine> assume B : A -> Type₀
+assumed B
+thena spine> :goal forall (x : A) -> B x
+  λ (A : Type₀) ->
+  λ (B : A -> Type₀) ->
+▶ let ? goal : ∀ (x : A) -> B x in
+  goal
+thena spine> :where
+focus
+  let ? goal : ∀ (x : A) -> B x in
+path
+  root ▸ A ▸ B
+context
+  A : Type₀
+  B : A -> Type₀
+type
+  ∀ (x : A) -> B x
+thena spine> cross type
+thena core> :where
+focus
+  ∀ (x : A) -> B x
+path
+  root ▸ A ▸ B ▸ type of goal
+context
+  A : Type₀
+  B : A -> Type₀
+thena core> cod
+thena core> arg
+thena core> :where
+focus
+  x
+path
+  root ▸ A ▸ B ▸ type of goal ▸ cod ▸ arg
+context
+  A : Type₀
+  B : A -> Type₀
+  x : A
+thena core> back
+thena core> back
+thena core> back
+thena spine> :show
+  λ (A : Type₀) ->
+  λ (B : A -> Type₀) ->
+▶ let ? goal : ∀ (x : A) -> B x in
+  goal
+thena spine> along
+thena core> :show
+  λ (A : Type₀) ->
+  λ (B : A -> Type₀) ->
+  let ? goal : ∀ (x : A) -> B x in
+▶ goal
+thena core> back
+thena spine> into
+stuck: only a guess has a body to enter
+thena spine> fun
+stuck: that move is for a core term, and the focus is on the chain
+thena spine> :quit

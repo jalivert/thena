@@ -20,6 +20,7 @@ library
         Thena.Core.Context
         Thena.Core.Term
         Thena.Development.Component
+        Thena.Development.Cursor
         Thena.Development.Partial
         Thena.Driver
         Thena.Engine
@@ -55,6 +56,7 @@ test-suite thena-test
     main-is:            Main.hs
     other-modules:
         Thena.Core.TermTests
+        Thena.CursorTests
         Thena.DevelopmentTests
         Thena.EngineTests
         Thena.GoldenTests

@@ -15,6 +15,8 @@ module Thena.Repl
   , transcript
   , renderCore
   , renderPartial
+  , renderCursor
+  , renderWhere
   , renderMachine
   , renderSyntaxError
   ) where
@@ -40,6 +42,20 @@ import Thena.Core.Term
   , open
   )
 import Thena.Development.Component (Component (..))
+import Thena.Development.Cursor
+  ( Crossing (..)
+  , Cursor
+  , Focus (..)
+  , Part (..)
+  , Slot (..)
+  , Step (..)
+  , TermStep (..)
+  , context
+  , expectedType
+  , focus
+  , prefix
+  , rebuild
+  )
 import Thena.Development.Partial (Constraint (..), Partial (..))
 import Thena.Driver
   ( CommandError (..)
@@ -56,14 +72,19 @@ import Thena.Engine
   , Frame (..)
   , Machine (..)
   , Question (..)
+  , cursor
+  , proof
   , proofContext
   )
-import Thena.Errors (FailReason (..))
+import Thena.Errors (FailReason (..), MoveError (..))
 import Thena.Ops (AnswerKind (..), Instr (..), Op, Operand (..), Value (..))
 import qualified Thena.Ops as Ops
 import Thena.Syntax.Lexer (LexError (..), Pos (..), Token (..))
 import Thena.Syntax.Parser (ParseError (..))
 import Thena.Syntax.Resolve (DevForm (..), ResolveError (..))
+
+import Data.Foldable (toList)
+import Data.List (intercalate)
 
 -- | Run the read-eval-print loop until @:quit@ or end of input.
 repl :: IO ()
@@ -71,7 +92,7 @@ repl = runInputT defaultSettings (loop newSession Nothing)
 
 loop :: Session -> Maybe Question -> InputT IO ()
 loop s pending = do
-  input <- getInputLine (prompt pending)
+  input <- getInputLine (prompt s pending)
   case input of
     Nothing   -> pure ()          -- end of input: Ctrl-D
     Just line -> do
@@ -79,9 +100,22 @@ loop s pending = do
       mapM_ outputStrLn (turnOutput t)
       if turnQuit t then pure () else loop (turnSession t) (turnPending t)
 
--- | The machine asks with the rule body's own words, so the prompt is bare.
-prompt :: Maybe Question -> String
-prompt = maybe "thena> " (const "> ")
+-- | The machine asks with the rule body's own words, so an answer prompt is
+-- bare. Otherwise the prompt says which fragment the focus is in.
+--
+-- **Two words, and a guess body is @spine@** — asked for by the user
+-- 2026-08-21 (@AGENDA.md@ item 24) and settled two-way while planning phase 5.
+-- His parenthesis is the load-bearing part: being inside a guess's proposed
+-- term is still the spine, so this is not a depth question and cannot be read
+-- off the nesting level. It is 'Focus'\'s own distinction and nothing else. A
+-- constraint focus reads as @spine@ too: it is a link in the chain.
+prompt :: Session -> Maybe Question -> String
+prompt _ (Just _) = "> "
+prompt s Nothing  = "thena " ++ fragment ++ "> "
+  where
+    fragment = case focus (cursor (proof (sessionMachine s))) of
+      OnTerm {} -> "core"
+      _         -> "spine"
 
 -- | One line in, and everything that follows from it.
 data Turn = Turn
@@ -118,14 +152,15 @@ transcript = unlines . replay newSession Nothing
           rest
             | turnQuit t = []
             | otherwise  = replay (turnSession t) (turnPending t) ls
-       in (prompt pending ++ l) : turnOutput t ++ rest
+       in (prompt s pending ++ l) : turnOutput t ++ rest
 
 renderResponse :: Session -> Response -> [String]
 renderResponse s resp = case resp of
   Blank          -> []
   Rendered t     -> [renderCore (counter s) (contextOf s) t]
   RenderedDev p  -> [renderPartial (counter s) (contextOf s) p]
-  Shown p        -> [renderPartial (counter s) [] p]
+  Shown c        -> [renderCursor (counter s) c]
+  Where c        -> renderWhere (counter s) c
   Ran msgs stop  -> msgs ++ renderStop s stop
   Failed e       -> [renderSyntaxError e]
   Rejected e     -> [renderCommandError e]
@@ -330,47 +365,205 @@ parensIf False s = s
 -- Developments, made readable (§2.7)
 -- --------------------------------------------------------------------------
 
+-- | One rendered line: whether the focus is on it, how far it is indented, and
+-- its text. The two development printers differ only in what they do with the
+-- first field.
+data Line = Line Bool Int String
+
+-- | The way from here to the focus: the prefix steps still to walk, and what is
+-- at the end of them. 'Nothing' means the focus is not in this subtree at all.
+--
+-- This is what lets ':show' mark the focus without consulting 'context' —
+-- display names are accumulated structurally, from the root down, and a guess
+-- body is entered without its own hole's name (§4.5, phase 3 §7.2).
+type Route = Maybe ([Step], Focus)
+
 -- | One chain link per line, at the current indent; a guess body indented one
 -- level inside its parentheses. Structural breaks only — no width, no reflow.
 renderPartial :: Int -> Context -> Partial -> String
-renderPartial n ctx = goP n (envOf ctx) 0
+renderPartial n ctx = layout . goP n (envOf ctx) 0 Nothing
+  where
+    layout = intercalate "\n" . map (\(Line _ ind t) -> pad ind ++ t)
 
-goP :: Int -> Env -> Int -> Partial -> String
-goP n env ind p = case p of
-  Trailing t -> pad ind ++ trailing n env t
+-- | The development with the focus marked (§4.0 J1) — @:show@.
+--
+-- The marker is chain-link precision: it names the link the focus is in, and
+-- @:where@ says where inside it. Rendered from the root with no seed context,
+-- because rendering from the root introduces every binder on the way down.
+renderCursor :: Int -> Cursor -> String
+renderCursor n cur = intercalate "\n" (map gutter lines')
+  where
+    lines' = goP n [] 0 (Just (toList (prefix cur), focus cur)) (rebuild cur)
+    -- A different glyph from the ▸ that ends a constraint line and separates
+    -- the breadcrumb: those are §2.7's "then", and this is not that.
+    gutter (Line marked ind t) = (if marked then "▶ " else "  ") ++ pad ind ++ t
 
-  Under c rest -> case c of
-    Assume v (Ident hint) ty ->
-      let name = freshen hint env
-       in row ind ("λ (" ++ name ++ " : " ++ go n env AtTop ty ++ ") ->")
-            ++ goP n ((v, name) : env) ind rest
-
-    Define v (Ident hint) val ty ->
-      let name = freshen hint env
-       in row ind
-            ( "let " ++ name ++ " = " ++ go n env AtTop val
-                ++ " : " ++ go n env AtTop ty ++ " in"
-            )
-            ++ goP n ((v, name) : env) ind rest
-
-    Claim v (Ident hint) ty ->
-      let name = freshen hint env
-       in row ind ("let ? " ++ name ++ " : " ++ go n env AtTop ty ++ " in")
-            ++ goP n ((v, name) : env) ind rest
-
-    -- The body is rendered in 'env' WITHOUT the hole's own name, matching
-    -- Γ_(?x ≐ P : S . p) = Γ_P (§4.5). Getting this wrong is invisible unless
-    -- the body binds the hole's identifier — see the plan's §7.2.
-    Guess v (Ident hint) g ty ->
-      let name = freshen hint env
-       in row ind ("let ? " ++ name ++ " : " ++ go n env AtTop ty ++ " ≐ (")
-            ++ goP n env (ind + 2) g
-            ++ "\n"
-            ++ row ind ") in"
-            ++ goP n ((v, name) : env) ind rest
+goP :: Int -> Env -> Int -> Route -> Partial -> [Line]
+goP n env ind route p = case p of
+  Trailing t -> [Line (isHere route) ind (trailing n env t)]
 
   Pending k rest ->
-    row ind (renderConstraint n env k ++ " ▸") ++ goP n env ind rest
+    Line (isHere route) ind (renderConstraint n env k ++ " ▸")
+      : goP n env ind (past route) rest
+
+  Under c rest ->
+    let (text, env') = link n env c
+        after = goP n env' ind (onward route) rest
+     in Line (isHere route) ind text
+          : case c of
+              -- The body is rendered in 'env' WITHOUT the hole's own name,
+              -- matching Γ_(?x ≐ P : S . p) = Γ_P (§4.5). Getting this wrong is
+              -- invisible unless the body binds the hole's identifier — see
+              -- phase 3's §7.2.
+              Guess _ _ g _ ->
+                goP n env (ind + 2) (inward route) g ++ Line False ind ") in" : after
+              _ -> after
+
+-- | The line a chain link prints as, and the environment for what follows it.
+--
+-- A guess prints as its opening line only; its body is separate lines and the
+-- caller places them. Shared with @:where@, which prints exactly this line for
+-- a component focus.
+link :: Int -> Env -> Component -> (String, Env)
+link n env c = (text, (v, name) : env)
+  where
+    (v, hint) = bound c
+    name      = freshen hint env
+    text      = case c of
+      Assume _ _ ty     -> "λ (" ++ name ++ " : " ++ go n env AtTop ty ++ ") ->"
+      Define _ _ val ty ->
+        "let " ++ name ++ " = " ++ go n env AtTop val
+          ++ " : " ++ go n env AtTop ty ++ " in"
+      Claim _ _ ty      -> "let ? " ++ name ++ " : " ++ go n env AtTop ty ++ " in"
+      Guess _ _ _ ty    -> "let ? " ++ name ++ " : " ++ go n env AtTop ty ++ " ≐ ("
+
+-- | The variable a component binds, and the name it would like.
+bound :: Component -> (Var, String)
+bound c = case c of
+  Assume v (Ident h) _   -> (v, h)
+  Define v (Ident h) _ _ -> (v, h)
+  Claim  v (Ident h) _   -> (v, h)
+  Guess  v (Ident h) _ _ -> (v, h)
+
+isHere :: Route -> Bool
+isHere (Just ([], _)) = True
+isHere _              = False
+
+-- | Each of the three follows one kind of step and refuses the others, so a
+-- route can never be handed to the wrong part of a link.
+onward, past, inward :: Route -> Route
+onward (Just (Along _ : ss, f))      = Just (ss, f)
+onward _                             = Nothing
+past   (Just (Past _ : ss, f))       = Just (ss, f)
+past   _                             = Nothing
+inward (Just (IntoGuess {} : ss, f)) = Just (ss, f)
+inward _                             = Nothing
+
+-- --------------------------------------------------------------------------
+-- Where the focus is (§4.0 J2) — @:where@
+-- --------------------------------------------------------------------------
+
+-- | The focused form, the path that reaches it, Γ, and the type — §4.5's hover
+-- panel, in text.
+--
+-- The type section is absent when the structure does not carry one. That is not
+-- a failure to look: deriving a type for an arbitrary core subterm is @infer@'s
+-- job and arrives at phase 8. See 'Thena.Development.Cursor.expectedType'.
+renderWhere :: Int -> Cursor -> [String]
+renderWhere n cur =
+  section "focus"   [focusText]
+    ++ section "path"    [intercalate " ▸ " ("root" : crumbs ++ coreCrumbs)]
+    ++ section "context" (if null ctx then ["(nothing in scope)"] else map entry ctx)
+    ++ maybe [] (\t -> section "type" [go n env' AtTop t]) (expectedType cur)
+  where
+    section heading ls = heading : map ("  " ++) ls
+
+    ctx           = context cur
+    (env, crumbs) = walkSteps (toList (prefix cur))
+
+    (env', coreCrumbs, focusText) = case focus cur of
+      OnComponent c  -> (env, [], fst (link n env c))
+      OnConstraint k -> (env, [], renderConstraint n env k)
+      OnTerm x ts t  ->
+        let (e, ws) = walkTerm env (toList ts)
+         in (e, crossingWord x : ws, go n e AtTop t)
+
+    entry e = case e of
+      Hypothesis v _ ty ->
+        nameOf v env' ++ " : " ++ go n env' AtTop ty
+      Definition v _ val ty ->
+        nameOf v env' ++ " = " ++ go n env' AtTop val ++ " : " ++ go n env' AtTop ty
+
+-- | Walk the prefix root first, collecting display names and breadcrumb words.
+--
+-- It builds the same names 'goP' builds, in the same order and by the same
+-- rule, so the two agree wherever they overlap. A guess adds a crumb and no
+-- name, which is §4.5's Γ rule showing up in the display for the same reason it
+-- shows up in 'context'.
+walkSteps :: [Step] -> (Env, [String])
+walkSteps = foldl add ([], [])
+  where
+    add (env, crumbs) s = case s of
+      Along c ->
+        let (v, hint) = bound c
+            name      = freshen hint env
+         in ((v, name) : env, crumbs ++ [name])
+      Past _ -> (env, crumbs ++ ["≟"])
+      IntoGuess _ (Ident hint) _ _ -> (env, crumbs ++ ["≐ " ++ freshen hint env])
+
+-- | The same for the core path. Only the three binder steps add a name.
+walkTerm :: Env -> [TermStep] -> (Env, [String])
+walkTerm env0 = foldl add (env0, [])
+  where
+    add (env, crumbs) s = case binderOf s of
+      Nothing        -> (env, crumbs ++ [partWord (partOf s)])
+      Just (v, hint) ->
+        let name = freshen hint env
+         in ((v, name) : env, crumbs ++ [partWord (partOf s)])
+
+binderOf :: TermStep -> Maybe (Var, String)
+binderOf s = case s of
+  IntoPiCod   v (Ident h) _   -> Just (v, h)
+  IntoLamBody v (Ident h) _   -> Just (v, h)
+  IntoLetBody v (Ident h) _ _ -> Just (v, h)
+  _                           -> Nothing
+
+-- | Which field a step descended into. The positions are one-based, matching
+-- what the user types.
+partOf :: TermStep -> Part
+partOf s = case s of
+  IntoFun {}                    -> Fun
+  IntoArg {}                    -> Arg
+  IntoPiDom {}                  -> Dom
+  IntoPiCod {}                  -> Cod
+  IntoLamDom {}                 -> Dom
+  IntoLamBody {}                -> Body
+  IntoLetValue {}               -> Val
+  IntoLetType {}                -> Type
+  IntoLetBody {}                -> Body
+  IntoCanonArg _ before _       -> CanonArg (length before + 1)
+  IntoElimParam _ before _ _ _ _ _ -> Param (length before + 1)
+  IntoElimMotive {}             -> Motive
+  IntoElimMethod _ _ _ before _ _ _ -> Method (length before + 1)
+  IntoElimIndex _ _ _ _ before _ _  -> Index (length before + 1)
+  IntoElimTarget {}             -> Target
+
+-- | A 'Part' as the user types it (§4.7, and "Thena.Driver"'s @partWords@).
+partWord :: Part -> String
+partWord p = case p of
+  Fun        -> "fun"
+  Arg        -> "arg"
+  Dom        -> "dom"
+  Cod        -> "cod"
+  Val        -> "val"
+  Type       -> "type"
+  Body       -> "body"
+  Motive     -> "motive"
+  Target     -> "target"
+  Param k    -> "param " ++ show k
+  Method k   -> "method " ++ show k
+  Index k    -> "index " ++ show k
+  CanonArg k -> "arg " ++ show k
 
 -- | A 'Trailing' term that is itself a binder would re-read as another chain
 -- link, so it is quoted. This is longest prefix's escape hatch, and it is what
@@ -380,6 +573,17 @@ trailing n env t = case t of
   Lam {} -> "⌜ " ++ go n env AtTop t ++ " ⌝"
   Let {} -> "⌜ " ++ go n env AtTop t ++ " ⌝"
   _      -> go n env AtTop t
+
+-- | The one fragment change, named for what was crossed into.
+crossingWord :: Crossing -> String
+crossingWord x = case x of
+  TrailingTerm  -> "the term"
+  InSlot slot _ -> case slot of
+    TypeOfAssume  _ (Ident h)   -> "type of " ++ h
+    TypeOfDefine  _ (Ident h) _ -> "type of " ++ h
+    ValueOfDefine _ (Ident h) _ -> "val of "  ++ h
+    TypeOfClaim   _ (Ident h)   -> "type of " ++ h
+    TypeOfGuess   _ (Ident h) _ -> "type of " ++ h
 
 renderConstraint :: Int -> Env -> Constraint -> String
 renderConstraint n env (Equate xi s t ty) =
@@ -403,11 +607,6 @@ telescopeOf n env (e : rest) =
 
 pad :: Int -> String
 pad ind = replicate ind ' '
-
--- | A line at an indent. Not called @line@: that name is already bound in
--- 'loop' and 'renderSyntaxError', and @-Wall@ says so.
-row :: Int -> String -> String
-row ind s = pad ind ++ s ++ "\n"
 
 -- --------------------------------------------------------------------------
 -- The machine, made readable (§7.7's stepping mode)
@@ -444,6 +643,12 @@ renderOp n ctx op = case op of
   Ops.Ask    p k  -> "ask "    ++ operand p ++ " " ++ answerKind k
   Ops.Say    msg  -> "say "    ++ operand msg
   Ops.Concat l r  -> "concat " ++ operand l ++ " " ++ operand r
+  Ops.Along       -> "along"
+  Ops.Into        -> "into"
+  Ops.Back        -> "back"
+  Ops.CrossType   -> "cross type"
+  Ops.CrossValue  -> "cross val"
+  Ops.Down part   -> partWord part
   where
     operand = renderOperand n ctx
 
@@ -473,6 +678,7 @@ renderCommandError e = case e of
   MissingArgument w    -> w ++ " needs an argument"
   UnexpectedArgument w -> w ++ " takes no argument"
   NotAsking            -> "nothing was asked"
+  NotThere m           -> renderMoveError m
 
 renderFailReason :: FailReason -> String
 renderFailReason r = case r of
@@ -480,3 +686,14 @@ renderFailReason r = case r of
   NotAnIdentifier s -> show s ++ " is not a name"
   ExpectedText      -> "expected text"
   ExpectedTerm      -> "expected a term"
+  CannotMove m      -> renderMoveError m
+
+renderMoveError :: MoveError -> String
+renderMoveError m = case m of
+  AtRoot         -> "already at the root"
+  NotOnTheSpine  -> "that move is for the chain, and the focus is a core term"
+  NotInCore      -> "that move is for a core term, and the focus is on the chain"
+  NotAGuess      -> "only a guess has a body to enter"
+  NotADefinition -> "only a definition has a value"
+  NoCrossingIntoAConstraint -> "there is no position inside a constraint"
+  NoSuchPart     -> "the focus has no such part"

@@ -13,6 +13,7 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Thena.Core.Context (Entry (..))
 import Thena.Core.Term (Core (..), Ident (..), Level (..), fresh)
 import Thena.Development.Component (Component (..))
+import Thena.Development.Cursor (enter)
 import Thena.Development.Partial (Partial (..))
 import Thena.Engine
   ( Exec (..)
@@ -25,11 +26,12 @@ import Thena.Engine
   , load
   , newProof
   , proofContext
+  , proofDevelopment
   , resumeAt
   , setGoal
   , step
   )
-import Thena.Errors (FailReason (..))
+import Thena.Errors (FailReason (..), MoveError (..))
 import Thena.Ops (AnswerKind (..), Instr (..), Operand (..), Value (..))
 import qualified Thena.Ops as Ops
 
@@ -56,7 +58,7 @@ runTo m = case step m of
   outcome     -> outcome
 
 devOf :: Machine -> Partial
-devOf = development . proof
+devOf = proofDevelopment . proof
 
 envOf :: Machine -> [(String, Value)]
 envOf = env . exec
@@ -183,21 +185,46 @@ tests =
             case runTo (machine [Do (Ops.Assume (text "A") (term type0)), Do (Ops.Assume (text "B") (term type0))]) of
               Finished m -> names m @?= 3   -- the opening goal, then two binders
               other      -> assertFailure ("expected Finished, got " ++ show other)
-        , testCase "setGoal replaces the goal and keeps the prefix" $
+        , testCase "setGoal replaces the focus and keeps the prefix" $
             case runTo (machine [Do (Ops.Assume (text "A") (term type0))]) of
-              Finished m -> case development (proof (setGoal (Universe (Level 1)) m)) of
-                Under Assume {} (Under (Claim _ _ ty) (Trailing (Free _))) -> ty @?= Universe (Level 1)
+              Finished m -> case fmap (proofDevelopment . proof) (setGoal (Universe (Level 1)) m) of
+                Right (Under Assume {} (Under (Claim _ _ ty) (Trailing (Free _)))) ->
+                  ty @?= Universe (Level 1)
                 other -> assertFailure ("wrong shape: " ++ show other)
               other -> assertFailure ("expected Finished, got " ++ show other)
-        , testCase "setGoal claims one where a chain has no goal" $
+        , testCase "setGoal standing at the root throws the whole chain away" $
+            -- Not a corner case that arises in a session: 'newProof' focuses the
+            -- goal and 'assume' leaves the focus alone, so ':goal' lands on a
+            -- hole. It pins the rule, which is one sentence — everything from
+            -- the focus down is discarded (§4.0 F6).
             let (v, n) = fresh 0
-                bare   = Machine (Exec [] [] []) (ProofState (Under (Assume v (Ident "A") type0) (Trailing type0))) n
-             in case development (proof (setGoal type0 bare)) of
-                  Under Assume {} (Under (Claim x _ _) (Trailing (Free y))) -> x @?= y
+                bare   = Machine (Exec [] [] []) (ProofState (enter (Under (Assume v (Ident "A") type0) (Trailing type0)))) n
+             in case fmap (proofDevelopment . proof) (setGoal type0 bare) of
+                  Right (Under (Claim x _ _) (Trailing (Free y))) -> x @?= y
                   other -> assertFailure ("wrong shape: " ++ show other)
-        , testCase "the context forgets the chain, outermost first" $
+        , testCase "a move is an op, and it moves the focus" $
+            -- The moves go through the machine because the cursor IS
+            -- 'ProofState' (§7.2): moving the focus changes exactly what
+            -- backtracks, which is §12 invariant 3's hazard.
+            case runTo (machine [Do (Ops.Assume (text "A") (term type0)), Do Ops.Along]) of
+              Finished m -> map nameOf (proofContext (proof m)) @?= ["A", "goal"]
+              other      -> assertFailure ("expected Finished, got " ++ show other)
+        , testCase "and back undoes it, through the machine as well" $
+            case runTo (machine [Do (Ops.Assume (text "A") (term type0)), Do Ops.Along, Do Ops.Back]) of
+              Finished m -> map nameOf (proofContext (proof m)) @?= ["A"]
+              other      -> assertFailure ("expected Finished, got " ++ show other)
+        , testCase "a refused move is Stuck, and keeps the machine (§4.0 C4)" $
+            stuckWith (CannotMove NotAGuess) (runTo (machine [Do Ops.Into]))
+        , testCase "a core descent mints the binder it opens, so the counter moves" $
+            case runTo (machine [Do Ops.CrossType]) of
+              Finished m -> names m @?= 1
+              other      -> assertFailure ("expected Finished, got " ++ show other)
+        , testCase "Γ is the prefix of the focus, so the goal it stands on is NOT in it" $
+            -- Phase 4's own version forgot the entire chain, because there was
+            -- no focus to take a prefix of. §4.5: you are ON the focused
+            -- component, not past it.
             case runTo (machine [Do (Ops.Assume (text "A") (term type0)), Do (Ops.Claim (text "h") (term type0))]) of
-              Finished m -> map nameOf (proofContext (proof m)) @?= ["A", "h", "goal"]
+              Finished m -> map nameOf (proofContext (proof m)) @?= ["A", "h"]
               other      -> assertFailure ("expected Finished, got " ++ show other)
         ]
     ]

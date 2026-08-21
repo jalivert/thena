@@ -15,6 +15,7 @@
 -- operand it read.
 module Thena.Errors
   ( FailReason (..)
+  , MoveError (..)
   ) where
 
 -- | Why an operation failed. Structured, never a string (§12 invariant 2).
@@ -32,4 +33,30 @@ data FailReason
     -- ^ an operand was not a @VText@
   | ExpectedTerm
     -- ^ an operand was not a @VTerm@ holding a core term
+  | CannotMove MoveError
+    -- ^ a navigation op asked for a move the focus does not have (§4.0 C4)
+  deriving (Eq, Show)
+
+-- | Why a move was impossible (§4.0 C4, §12 invariant 2).
+--
+-- Payload-free, and here rather than in "Thena.Development.Cursor", for this
+-- module's own reason: it imports nothing, and 'FailReason' has to carry it.
+-- Nothing is lost by the missing payload — 'Thena.Engine.Stuck' carries the
+-- whole machine, whose @pc@ still begins with the navigation instruction that
+-- failed, and that instruction names the part it asked for.
+data MoveError
+  = AtRoot
+    -- ^ @back@ at the root: there is no step left to pop
+  | NotOnTheSpine
+    -- ^ a partial-fragment move, attempted in the core fragment
+  | NotInCore
+    -- ^ a core-term descent, attempted on the spine
+  | NotAGuess
+    -- ^ @into@, on something that is not a guess
+  | NotADefinition
+    -- ^ @cross val@, on a component that has no value
+  | NoCrossingIntoAConstraint
+    -- ^ crossing into a constraint. Not a gap: decided against (§4.2)
+  | NoSuchPart
+    -- ^ a descent naming a field the focused form does not have
   deriving (Eq, Show)
