@@ -4,7 +4,7 @@ module Thena.Syntax.Parser
   , parseTerm
   ) where
 
-import Thena.Syntax.Concrete (Raw (..), RawBinder (..))
+import Thena.Syntax.Concrete (Raw (..), RawBinder (..), RawConstraint (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
@@ -21,6 +21,13 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   ')'     { Located _ TRParen }
   ':'     { Located _ TColon }
   '='     { Located _ TEquals }
+  '?'     { Located _ TQuery }
+  '≐'     { Located _ TGuessed }
+  '▸'     { Located _ TThen }
+  '⊢'     { Located _ TTurnstile }
+  '≟'     { Located _ TEquate }
+  '[|'    { Located _ TOpenQuote }
+  '|]'    { Located _ TCloseQuote }
   let     { Located _ TLet }
   in      { Located _ TIn }
   univ    { Located _ (TUniverse $$) }
@@ -31,11 +38,20 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 %%
 
 Term :: { Raw }
-  : 'λ' Binders '->' Term                  { RawLam (reverse $2) $4 }
-  | '∀' Binders '->' Term                  { RawPi (reverse $2) $4 }
-  | let ident '=' Term ':' Term in Term    { RawLet $2 $4 $6 $8 }
-  | App '->' Term                          { RawArrow $1 $3 }
-  | App                                    { $1 }
+  : 'λ' Binders '->' Term                          { RawLam (reverse $2) $4 }
+  | '∀' Binders '->' Term                          { RawPi (reverse $2) $4 }
+  | let ident '=' Term ':' Term in Term            { RawLet $2 $4 $6 $8 }
+  | let '?' ident ':' Term in Term                 { RawClaim $3 $5 $7 }
+  | let '?' ident ':' Term '≐' '(' Term ')' in Term
+                                                   { RawGuess $3 $5 $8 $11 }
+  | Constraint '▸' Term                            { RawPending $1 $3 }
+  | '[|' Term '|]'                                 { RawQuote $2 }
+  | App '->' Term                                  { RawArrow $1 $3 }
+  | App                                            { $1 }
+
+Constraint :: { RawConstraint }
+  : Binders '⊢' Term '≟' Term ':' Term   { RawConstraint (reverse $1) $3 $5 $7 }
+  | '⊢' Term '≟' Term ':' Term           { RawConstraint [] $2 $4 $6 }
 
 App :: { Raw }
   : App Atom                               { RawApp $1 $2 }

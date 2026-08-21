@@ -19,6 +19,8 @@ library
     exposed-modules:
         Thena.Core.Context
         Thena.Core.Term
+        Thena.Development.Component
+        Thena.Development.Partial
         Thena.Driver
         Thena.Repl
         Thena.Syntax.Concrete
@@ -50,7 +52,9 @@ test-suite thena-test
     main-is:            Main.hs
     other-modules:
         Thena.Core.TermTests
+        Thena.DevelopmentTests
         Thena.DriverTests
+        Thena.Fixtures
         Thena.SyntaxTests
     build-depends:
         base              ^>=4.21.2.0,

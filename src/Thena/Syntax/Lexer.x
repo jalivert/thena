@@ -30,6 +30,19 @@ tokens :-
   ")"           { keyword TRParen }
   ":"           { keyword TColon }
   "="           { keyword TEquals }
+  "?="          { keyword TEquate }
+  "≟"           { keyword TEquate }
+  "?"           { keyword TQuery }
+  "≐"           { keyword TGuessed }
+  "≈"           { keyword TGuessed }
+  "|>"          { keyword TThen }
+  "▸"           { keyword TThen }
+  "|-"          { keyword TTurnstile }
+  "⊢"           { keyword TTurnstile }
+  "[|"          { keyword TOpenQuote }
+  "⌜"           { keyword TOpenQuote }
+  "|]"          { keyword TCloseQuote }
+  "⌝"           { keyword TCloseQuote }
   "forall"      { keyword TForall }
   "let"         { keyword TLet }
   "in"          { keyword TIn }
@@ -54,6 +67,13 @@ data Token
   | TRParen
   | TColon
   | TEquals
+  | TQuery
+  | TGuessed
+  | TThen
+  | TTurnstile
+  | TEquate
+  | TOpenQuote
+  | TCloseQuote
   | TLet
   | TIn
   | TUniverse Int

@@ -25,4 +25,16 @@ tests =
           other    -> assertFailure ("expected Failed, got " ++ show other)
     , testCase "a command that merely starts with :core is not :core" $
         snd (command newSession ":corex") @?= Echoed ":corex"
+    , testCase ":dev resolves a development" $
+        case snd (command newSession ":dev let ? h : Type₀ in h") of
+          RenderedDev _ -> pure ()
+          other         -> assertFailure ("expected RenderedDev, got " ++ show other)
+    , testCase ":dev accepts anything :core accepts" $
+        case snd (command newSession ":dev Type₀") of
+          RenderedDev _ -> pure ()
+          other         -> assertFailure ("expected RenderedDev, got " ++ show other)
+    , testCase ":core rejects a hole, which is development-only" $
+        case snd (command newSession ":core let ? h : Type₀ in h") of
+          Failed _ -> pure ()
+          other    -> assertFailure ("expected Failed, got " ++ show other)
     ]
