@@ -17,6 +17,8 @@ library
     hs-source-dirs:     src
     default-language:   GHC2024
     exposed-modules:
+        Thena.Core.Context
+        Thena.Core.Term
         Thena.Driver
         Thena.Repl
     build-depends:
@@ -42,6 +44,7 @@ test-suite thena-test
     type:               exitcode-stdio-1.0
     main-is:            Main.hs
     other-modules:
+        Thena.Core.TermTests
         Thena.DriverTests
     build-depends:
         base              ^>=4.21.2.0,
