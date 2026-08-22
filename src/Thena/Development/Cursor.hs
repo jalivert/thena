@@ -46,6 +46,8 @@ module Thena.Development.Cursor
     -- * Changing the development
   , insertAbove
   , replaceFocus
+  , replaceComponent
+  , dropFocus
   , replaceCore
 
     -- * The root-down pass (§4.0 G1)
@@ -523,6 +525,41 @@ replaceFocus q cur = case cur of
   InPartial    p _ _ -> Right (focusAt p q)
   AtConstraint p _ _ -> Right (focusAt p q)
   InCore {}          -> Left NotOnTheSpine
+
+-- | Swap the focused component for another, leaving the path and everything
+-- below it alone. What the hole ops do (thesis tables 2.7 and 2.8): each of
+-- them rewrites one link and touches nothing else.
+--
+-- Narrower than 'replaceFocus', which replaces the link /and/ the whole chain
+-- below it, and that narrowness is the point — an op that only meant to turn a
+-- @?x : S@ into a @?x ≐ g : S@ cannot lose the rest of the development by
+-- passing the wrong tail.
+replaceComponent :: Component -> Cursor -> Either MoveError Cursor
+replaceComponent c cur = case cur of
+  InPartial p _ rest -> Right (InPartial p c rest)
+  AtConstraint {}    -> Left NotOnTheSpine
+  InCore {}          -> Left NotOnTheSpine
+
+-- | Drop the focused component, leaving the focus on what was below it —
+-- table 2.7\'s @abandon@.
+--
+-- Its side condition is @x ∉ Θ\'@, and it is checked against the /rebuilt/
+-- development for 'replaceCore''s reason: an occurrence may be anywhere below,
+-- not only in the neighbouring link. Reported as 'StillReferenced' rather than
+-- as a move error, because nothing about the position is wrong.
+dropFocus :: Cursor -> Either MoveError Cursor
+dropFocus cur = case cur of
+  InPartial p c rest
+    | entryVarOf c `elem` freeVarsPartial rest -> Left StillReferenced
+    | otherwise                                -> Right (focusAt p rest)
+  AtConstraint p _ rest -> Right (focusAt p rest)
+  InCore {}             -> Left NotOnTheSpine
+  where
+    entryVarOf c = case c of
+      Assume x _ _   -> x
+      Define x _ _ _ -> x
+      Claim  x _ _   -> x
+      Guess  x _ _ _ -> x
 
 -- | Replace a focused core term with another, in place — what a committed
 -- reduction does (§4.7). The caller decides what the replacement is; this

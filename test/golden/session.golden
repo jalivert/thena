@@ -1,0 +1,42 @@
+thena spine> data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }
+declared Nat
+thena spine> :theorem two : Nat
+proving two : Nat
+thena spine> attack
+thena spine> :show
+▶ let ? two : Nat ≐ (
+    let ? two : Nat in
+    two
+  ) in
+  two
+thena spine> :undo
+▶ let ? two : Nat in
+  two
+thena spine> :undo
+nothing to undo
+thena spine> :suspend
+suspended two
+thena spine> :proofs
+  two : Nat
+thena spine> data Bool : Type₀ { true : Bool ; false : Bool }
+declared Bool
+thena spine> :theorem one : Nat
+proving one : Nat
+thena spine> try zero
+thena spine> solve
+thena spine> qed
+one : Nat   ∎
+thena spine> :resume two
+resumed two
+thena spine> :core true
+true
+thena spine> try (succ (succ zero))
+thena spine> solve
+thena spine> qed
+two : Nat   ∎
+thena spine> :show two
+two : Nat
+two = let two = succ (succ zero) : Nat in two
+thena spine> :undo
+no proof is being worked on
+thena spine> :quit

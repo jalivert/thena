@@ -21,6 +21,7 @@ module Thena.Engine
   , proofContext
   , proofDevelopment
   , setGoal
+  , setGoalNamed
 
     -- * Running it
   , Outcome (..)
@@ -40,10 +41,12 @@ import Data.List (intercalate, nub)
 import Thena.Core.Context (Context)
 import Thena.Core.Term
   ( Core (..)
+  , GlobalName (..)
   , Ident (..)
   , Level (..)
   , Var
   , fresh
+  , instantiate
   )
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Typing (infer)
@@ -62,6 +65,8 @@ import Thena.Development.Cursor
   , insertAbove
   , into
   , rebuild
+  , dropFocus
+  , replaceComponent
   , replaceCore
   , replaceFocus
   )
@@ -149,7 +154,10 @@ newProof n =
    in (ProofState (enter (goalAt v (Universe (Level 0)))), n1)
 
 goalAt :: Var -> Core -> Partial
-goalAt v ty = Under (Component.Claim v (Ident "goal") ty) (Trailing (Free v))
+goalAt = goalAtNamed (Ident "goal")
+
+goalAtNamed :: Ident -> Var -> Core -> Partial
+goalAtNamed i v ty = Under (Component.Claim v i ty) (Trailing (Free v))
 
 -- | Γ at the focus (§4.5), which is what an identifier typed at the REPL must
 -- be in scope in (§4.0 E1).
@@ -179,10 +187,22 @@ proofDevelopment = rebuild . cursor
 --
 -- Refused in the core fragment, because a core focus cannot be replaced by a
 -- chain. Phase 13 replaces the whole command.
+-- | @:theorem ‹name› : T@ — the same, but the hole carries the theorem's own
+-- name rather than @goal@.
+--
+-- That name is what @:show@ and every error message will call it, and it is
+-- also what the extracted term's outermost @let@ binds, so a proof of @id@
+-- reads @let id = … in id@ rather than @let goal = … in goal@.
+setGoalNamed :: GlobalName -> Core -> Machine -> Either MoveError Machine
+setGoalNamed (GlobalName x) = goalNamed (Ident x)
+
 setGoal :: Core -> Machine -> Either MoveError Machine
-setGoal ty m =
+setGoal = goalNamed (Ident "goal")
+
+goalNamed :: Ident -> Core -> Machine -> Either MoveError Machine
+goalNamed i ty m =
   let (v, n1) = fresh (names m)
-   in case replaceFocus (goalAt v ty) (cursor (proof m)) of
+   in case replaceFocus (goalAtNamed i v ty) (cursor (proof m)) of
         Left e    -> Left e
         Right cur -> Right m { proof = ProofState cur, names = n1 }
 
@@ -306,6 +326,55 @@ perform instr rest m = case operation instr of
       Left why -> failure (NotYetPure (whereImpure why)) m
       Right t  -> Certifying t ty (advance m)
 
+  -- The life of a hole (thesis tables 2.7, 2.8). All six act on the component
+  -- at the focus, and all six rewrite 'ProofState', which is why they are ops
+  -- and not driver commands (§12 invariant 3).
+  Attack -> onHole $ \c -> case c of
+    Component.Claim x i s ->
+      let (v, n1) = fresh (names m)
+       in Right ( Component.Guess x i (Under (Component.Claim v i s) (Trailing (Free v))) s
+                , n1 )
+    _ -> Left NotAHole
+
+  -- Table 2.8's intro-∀ and intro-let, which "only replace constructions of the
+  -- shape @?x : S . x@" — anything else is made ready by @attack@ first. So the
+  -- shape test is the specification, not a shortcut.
+  Intro -> onHole $ \c -> case c of
+    Component.Guess x i g ty ->
+      (\(g', n1) -> (Component.Guess x i g' ty, n1))
+        <$> introduce (globals m) contextAt (names m) g
+    _ -> Left NotReadyToIntroduce
+
+  Try t -> case term t of
+    Left r  -> failure r m
+    Right t' -> onHole $ \c -> case c of
+      Component.Claim x i s -> Right (Component.Guess x i (Trailing t') s, names m)
+      _                     -> Left NotAHole
+
+  Regret -> onHole $ \c -> case c of
+    Component.Guess x i _ s -> Right (Component.Claim x i s, names m)
+    _                       -> Left NotAGuessHere
+
+  -- Table 2.7's side condition is that the guess is pure, and 'extract' is what
+  -- decides that (§5.3) — the same traversal @Certify@ uses, so the two cannot
+  -- come to disagree about what pure means.
+  Solve -> onHole $ \c -> case c of
+    Component.Guess x i g s -> case extract g of
+      Right v  -> Right (Component.Define x i v s, names m)
+      Left why -> Left (NotYetPure (whereImpure why))
+    _ -> Left NotAGuessHere
+
+  -- @x ∉ Θ'@: the hole may not be referred to by anything below it. Checked
+  -- against the rebuilt development for 'replaceCore''s reason — an occurrence
+  -- may be anywhere, not only in the neighbouring link.
+  Abandon -> case focus (cursor (proof m)) of
+    OnComponent c
+      | isHole c -> case dropFocus (cursor (proof m)) of
+          Left e    -> failure (CannotMove e) m
+          Right cur -> Continue (advance m { proof = ProofState cur })
+      | otherwise -> failure NotAHole m
+    _ -> failure (CannotMove NotOnTheSpine) m
+
   Concat l r -> case (,) <$> text l <*> text r of
     Left e         -> failure e m
     Right (ls, rs) -> produce (VText (ls ++ rs)) m
@@ -381,6 +450,23 @@ perform instr rest m = case operation instr of
 
     -- Every move but 'down' leaves the counter alone.
     keeping g n cur = fmap (\cur' -> (cur', n)) (g cur)
+
+    contextAt = proofContext (proof m)
+
+    isHole c = case c of
+      Component.Claim {} -> True
+      Component.Guess {} -> True
+      _                  -> False
+
+    -- Rewrite the component at the focus, or say why not. Every hole op has
+    -- this shape, which is why it is written once.
+    onHole f = case focus (cursor (proof m)) of
+      OnComponent c -> case f c of
+        Left r         -> failure r m
+        Right (c', n1) -> case replaceComponent c' (cursor (proof m)) of
+          Left e    -> failure (CannotMove e) m
+          Right cur -> Continue (advance m { proof = ProofState cur, names = n1 })
+      _ -> failure (CannotMove NotOnTheSpine) m
 
     component build name ty =
       case (,) <$> operandIdent (env (exec m)) name <*> term ty of
@@ -463,3 +549,42 @@ whereImpure i = case i of
   StillAHole x n     -> TheHole x n
   StillAGuess x n    -> GuessOf x n
   StillConstrained _ -> ConstraintAt 1
+
+-- | Table 2.8's @intro-∀@ and @intro-let@, inside a guess.
+--
+-- The thesis's own note is the specification: the introduction tactics "only
+-- replace constructions of the shape @?x : S . x@". **Within a guess body there
+-- is at most one such position, and it is the bottom one** — everything above
+-- it is an assumption, a definition or a guess, none of which has that shape.
+-- So "find the shape" and "walk to the end of the chain" are the same
+-- traversal, and there is nothing to disambiguate.
+--
+-- Walking rather than matching the body directly is what lets introductions
+-- accumulate: after one @intro@ the body is @λ A : Type₀ . ? h : A -> A . h@,
+-- and the next @intro@ has to reach past the λ it just made. Γ grows as it
+-- goes, because the hole's type is whnf'd where the hole actually is.
+--
+-- It stays inside the guess, and that is why @attack@ exists: introducing at
+-- the top of the whole development would change what the development proves,
+-- whereas inside a guess the guess's own type absorbs the binders.
+introduce
+  :: GlobalEnv -> Context -> Int -> Partial
+  -> Either FailReason (Partial, Int)
+introduce env ctx n p = case p of
+  Under (Component.Claim v i s) (Trailing (Free v'))
+    | v == v' -> case whnf env ctx s of
+        Pi j dom cod   -> Right (opened (Component.Assume y j dom) (instantiate (Free y) cod))
+        Let j val sty cod ->
+          Right (opened (Component.Define y j val sty) (instantiate (Free y) cod))
+        _ -> Left NothingToIntroduce
+      where
+        (y, n1) = fresh n
+        (h, n2) = fresh n1
+        opened binder rest =
+          ( Under binder (Under (Component.Claim h i rest) (Trailing (Free h)))
+          , n2
+          )
+  Under c rest ->
+    (\(rest', n1) -> (Under c rest', n1))
+      <$> introduce env (ctx ++ [Component.forget c]) n rest
+  _ -> Left NotReadyToIntroduce

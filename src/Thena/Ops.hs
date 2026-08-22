@@ -91,6 +91,15 @@ data Op
   | Unify Operand Operand     -- ^ two terms — solve holes, or park the equation (§6, phase 9)
   | DefineData InductiveDefinition
     -- ^ hand a declaration out through the channel (§7.5)
+    -- The life of a hole — thesis tables 2.7 and 2.8, phase 13. Each acts on
+    -- the component at the focus, so none takes a name: §4.0 C1's rule that a
+    -- command means one thing wherever it is applies to these too.
+  | Attack                    -- ^ @?x : S@ ⟹ @?x ≐ (?x' : S . x') : S@
+  | Intro                     -- ^ move a hole through a Π or a @let@ in its type
+  | Try     Operand           -- ^ attach a guess to the hole at the focus
+  | Regret                    -- ^ discard it again
+  | Solve                     -- ^ commit a guess whose body is pure
+  | Abandon                   -- ^ drop a hole nothing refers to
   | Certify Operand
     -- ^ the development must be pure; yields the closed term it stands for and
     -- the type it is claimed to have, for the driver to run the kernel on
@@ -156,3 +165,18 @@ data AnswerKind = AText | AName | ATerm | ARule
 -- 'Thena.Development.Partial.extract', which is one traversal that either
 -- reads the term off or says what stopped it — a predicate plus a fold would
 -- be two codes that could disagree about what pure means.
+
+-- The six hole ops are thesis tables 2.7 and 2.8, less the five phase 13 does
+-- not need — decided by the user 2026-08-22, and §12 invariant 5's rule that
+-- the vocabulary is discovered rather than designed. @cut@, @postpone@,
+-- @justify@ and @retreat@ wait for phase 17\'s tactics; @raise@ waits longer,
+-- because phase 9 decided a scope violation is /reported/ and not repaired,
+-- and repairing it is what @raise@ is for (§6.2).
+--
+-- **None takes a hole as an operand.** They act at the focus, like the moves,
+-- so a rule body says @along@ then @attack@ rather than naming a variable it
+-- would have had to get from somewhere. That also keeps @Value@ free of a case
+-- for "a hole", which §7.2 already refused once.
+--
+-- @Try@ is the exception and takes the term to attach — there is nowhere else
+-- that could come from.

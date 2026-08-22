@@ -88,6 +88,7 @@ test-suite thena-test
         Thena.DriverTests
         Thena.Declared
         Thena.Fixtures
+        Thena.SessionTests
         Thena.SyntaxTests
     build-depends:
         base              ^>=4.21.2.0,

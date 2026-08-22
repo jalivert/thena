@@ -68,6 +68,18 @@ data FailReason
     -- not in MS1\'s vocabulary yet (§7.2)
   | UniverseMismatch Level Level
     -- ^ two universes, and no cumulativity to relate them (§5.2)
+    -- The life of a hole (tables 2.7, 2.8), phase 13.
+  | NotAHole
+    -- ^ @attack@ or @try@ where the focus is not a @?x : S@
+  | NotAGuessHere
+    -- ^ @solve@ or @regret@ where the focus is not a @?x ≐ g : S@
+  | NotReadyToIntroduce
+    -- ^ @intro@ on anything but table 2.8's shape @?x ≐ (?x' : S . x') : …@.
+    -- The shape test is the specification, not a shortcut: a hole not of that
+    -- form is made ready by @attack@
+  | NothingToIntroduce
+    -- ^ @intro@ on the right shape, but the hole's type is neither a Π nor a
+    -- @let@ once whnf'd
   | NotYetPure Position
     -- ^ @Certify@ on a development that still has a hole, a guess or an
     -- undischarged constraint in it (§5.3). The 'Position' names the first one
@@ -97,6 +109,9 @@ data MoveError
     -- ^ @into@, on something that is not a guess
   | NotADefinition
     -- ^ @cross val@, on a component that has no value
+  | StillReferenced
+    -- ^ @abandon@ on a hole something below it still mentions — table 2.7's
+    -- @x ∉ Θ'@ (phase 13)
   | NoCrossingIntoAConstraint
     -- ^ crossing into a constraint. Not a gap: decided against (§4.2)
   | NoSuchPart

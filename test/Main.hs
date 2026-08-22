@@ -16,6 +16,7 @@ import qualified Thena.GlobalTests
 import qualified Thena.KernelTests
 import qualified Thena.LoadTests
 import qualified Thena.GoldenTests
+import qualified Thena.SessionTests
 import qualified Thena.SyntaxTests
 
 main :: IO ()
@@ -37,5 +38,6 @@ main =
       , Thena.KernelTests.tests
       , Thena.LoadTests.tests
       , Thena.GoldenTests.tests
+      , Thena.SessionTests.tests
       , Thena.SyntaxTests.tests
       ]

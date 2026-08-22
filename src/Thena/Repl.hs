@@ -71,6 +71,7 @@ import Thena.Driver
   , Session (..)
   , Stop (..)
   , SyntaxError (..)
+  , Proof (..)
   , loadSource
   , newSession
   , oneLine
@@ -275,6 +276,14 @@ renderResponse s resp = case resp of
   Revalidated Nothing  -> ["valid"]
   Revalidated (Just e) -> renderKernelError (counter s) e
   Extracted t          -> [renderCore (counter s) [] t]
+  Proving g ty  -> ["proving " ++ nameString g ++ " : " ++ renderCore (counter s) [] ty]
+  Proved g ty   -> [nameString g ++ " : " ++ renderCore (counter s) [] ty ++ "   ∎"]
+  Suspended g   -> ["suspended " ++ nameString g]
+  Resumed g     -> ["resumed " ++ nameString g]
+  Abandoned g   -> ["abandoned " ++ nameString g]
+  -- Show where it landed: an undo with no output looks like nothing happened.
+  Undone        -> [renderCursor (counter s) (cursor (proof (sessionMachine s)))]
+  Proofs cur ps -> renderProofs (counter s) cur ps
   Ran msgs stop  -> msgs ++ renderStop s stop
   Failed e       -> [renderSyntaxError e]
   Rejected e     -> [renderCommandError e]
@@ -816,6 +825,12 @@ renderOp n ctx op = case op of
   Ops.Down part   -> partWord part
   Ops.DefineData d -> "data " ++ nameString (inductiveName d)
   Ops.Certify ty  -> "certify " ++ operand ty
+  Ops.Attack      -> "attack"
+  Ops.Intro       -> "intro"
+  Ops.Try t       -> "try " ++ operand t
+  Ops.Regret      -> "regret"
+  Ops.Solve       -> "solve"
+  Ops.Abandon     -> "abandon"
   where
     operand = renderOperand n ctx
 
@@ -846,6 +861,11 @@ renderCommandError e = case e of
   UnexpectedArgument w -> w ++ " takes no argument"
   NotAsking            -> "nothing was asked"
   NoSuchGlobal x       -> "nothing named " ++ x ++ " has been declared"
+  NotProving           -> "no proof is being worked on"
+  AlreadyProving g     -> nameString g ++ " is still being proved — :suspend or :abandon it first"
+  NoSuchProof x        -> "no suspended proof called " ++ x
+  AlreadyDeclaredHere x -> x ++ " is already declared"
+  NothingToUndo        -> "nothing to undo"
   LevelExpected u      -> u ++ " is not a universe, as in \"Type\8320\""
   NotThere m           -> renderMoveError m
 
@@ -867,6 +887,10 @@ renderFailReason r = case r of
   ExpectedText      -> "expected text"
   ExpectedTerm      -> "expected a term"
   CannotMove m      -> renderMoveError m
+  NotAHole            -> "that is not a hole"
+  NotAGuessHere       -> "that is not a guess"
+  NotReadyToIntroduce -> "intro wants a hole of the form ? x ≐ (? x' : S . x') — attack it first"
+  NothingToIntroduce  -> "that hole's type is neither a ∀ nor a let"
   NotYetPure pos    ->
     "not finished: " ++ renderPosition pos ++ " is still open, so there is no term yet"
 
@@ -893,6 +917,16 @@ renderPosition p = case p of
   ConstraintAt k   -> "constraint " ++ show k
   Inside _ i inner -> renderPosition inner ++ ", inside the guess for " ++ identString i
 
+-- | @:proofs@ — what the session is holding (§2.4).
+renderProofs :: Int -> Maybe Proof -> [Proof] -> [String]
+renderProofs n cur ps
+  | null everything = ["no proofs"]
+  | otherwise       = everything
+  where
+    everything = maybe [] (pure . line "▶ ") cur ++ map (line "  ") ps
+    line mark pr =
+      mark ++ nameString (proofName pr) ++ " : " ++ renderCore n [] (proofClaim pr)
+
 renderMoveError :: MoveError -> String
 renderMoveError m = case m of
   AtRoot         -> "already at the root"
@@ -900,6 +934,7 @@ renderMoveError m = case m of
   NotInCore      -> "that move is for a core term, and the focus is on the chain"
   NotAGuess      -> "only a guess has a body to enter"
   NotADefinition -> "only a definition has a value"
+  StillReferenced -> "something below it still refers to it"
   NoCrossingIntoAConstraint -> "there is no position inside a constraint"
   NoSuchPart     -> "the focus has no such part"
 

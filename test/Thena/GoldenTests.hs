@@ -95,6 +95,58 @@ tests =
         , "certify Nat"
         , ":quit"
         ]
+      -- §9's phase-13 deliverable: a theorem proved by hand, and admitted.
+      -- Every step is one of thesis §2's own operations — no unification and
+      -- no rule engine.
+    , script
+        "proof"
+        [ ":theorem id : \8704 (A : Type\8320) -> A -> A"
+        , ":show"
+        , "attack"
+        , "intro"
+        , "intro"
+        , ":show"
+        , "into"
+        , "along"
+        , "along"
+        , ":where"
+        , "try _"
+        , "solve"
+        , "back"
+        , "back"
+        , "back"
+        , "solve"
+        , ":show"
+        , "qed"
+        , ":show id"
+        , ":proofs"
+        , ":quit"
+        ]
+      -- Suspension, undo, and the promise that the environment only grows.
+    , script
+        "session"
+        [ "data Nat : Type\8320 { zero : Nat ; succ : Nat -> Nat }"
+        , ":theorem two : Nat"
+        , "attack"
+        , ":show"
+        , ":undo"
+        , ":undo"
+        , ":suspend"
+        , ":proofs"
+        , "data Bool : Type\8320 { true : Bool ; false : Bool }"
+        , ":theorem one : Nat"
+        , "try zero"
+        , "solve"
+        , "qed"
+        , ":resume two"
+        , ":core true"
+        , "try (succ (succ zero))"
+        , "solve"
+        , "qed"
+        , ":show two"
+        , ":undo"
+        , ":quit"
+        ]
     , script
         "unification"
         [ "data Nat : Type\8320 { zero : Nat ; succ : Nat -> Nat }"
