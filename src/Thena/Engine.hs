@@ -32,6 +32,7 @@ module Thena.Engine
   , step
   , resumeAt
   , failure
+  , whereImpure
   ) where
 
 import Data.List (intercalate, nub)
@@ -65,8 +66,8 @@ import Thena.Development.Cursor
   , replaceFocus
   )
 import qualified Thena.Development.Cursor as Cursor
-import Thena.Development.Partial (Partial (..))
-import Thena.Errors (FailReason (..), MoveError (..))
+import Thena.Development.Partial (Impure (..), Partial (..), extract)
+import Thena.Errors (FailReason (..), MoveError (..), Position (..))
 import Thena.Ops
   ( AnswerKind
   , Env
@@ -217,6 +218,10 @@ data Outcome
   | Saying    Message    Machine  -- ^ the driver renders, then steps again
   | Declaring InductiveDefinition Machine
                                   -- ^ the driver checks, installs, then steps again
+  | Certifying Core Core Machine
+                                  -- ^ the closed term the development stands for
+                                  -- and the type it claims: the driver runs the
+                                  -- kernel, then steps again (§5.3, §7.5)
   | Finished  Machine
   | Stuck     FailReason Machine  -- ^ carries the machine: failure does not end it
   deriving (Eq, Show)
@@ -292,6 +297,14 @@ perform instr rest m = case operation instr of
   -- driver runs them (§7.5). The op's whole job is to make the declaration a
   -- step you can watch rather than something that happens between commands.
   DefineData d -> Declaring d (advance m)
+
+  -- Purity and extraction are one traversal (§5.3); the kernel itself is the
+  -- driver's to run, exactly as a declaration's checks are.
+  Certify stated -> case term stated of
+    Left r   -> failure r m
+    Right ty -> case extract (proofDevelopment (proof m)) of
+      Left why -> failure (NotYetPure (whereImpure why)) m
+      Right t  -> Certifying t ty (advance m)
 
   Concat l r -> case (,) <$> text l <*> text r of
     Left e         -> failure e m
@@ -440,3 +453,13 @@ operandIdent :: Env -> Operand -> Either FailReason Ident
 operandIdent e o = do
   s <- operandText e o
   if isIdentifier s then Right (Ident s) else Left (NotAnIdentifier s)
+
+-- | Which component stopped 'extract'. Purely a translation from
+-- "Thena.Development.Partial"\'s local 'Impure' into the shared vocabulary —
+-- 'Thena.Errors' may not import @Partial@ (it sits below @Core@), so the
+-- mapping lives on this side.
+whereImpure :: Impure -> Position
+whereImpure i = case i of
+  StillAHole x n     -> TheHole x n
+  StillAGuess x n    -> GuessOf x n
+  StillConstrained _ -> ConstraintAt 1

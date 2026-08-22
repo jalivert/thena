@@ -91,7 +91,9 @@ import Thena.Errors
   ( Clash (..)
   , ConversionFailure (..)
   , FailReason (..)
+  , KernelError (..)
   , MoveError (..)
+  , Position (..)
   , Site (..)
   , TypeError (..)
   )
@@ -270,6 +272,9 @@ renderResponse s resp = case resp of
           Just f  -> (q ++ "   no") : renderConversionFailure (counter s) f
   -- Nothing to print: the caller reads the file and prints what that produced.
   LoadRequested _ -> []
+  Revalidated Nothing  -> ["valid"]
+  Revalidated (Just e) -> renderKernelError (counter s) e
+  Extracted t          -> [renderCore (counter s) [] t]
   Ran msgs stop  -> msgs ++ renderStop s stop
   Failed e       -> [renderSyntaxError e]
   Rejected e     -> [renderCommandError e]
@@ -293,6 +298,7 @@ renderStop s stop = case stop of
   Waiting (Question p _) -> [p]
   Halted r               -> ["stuck: " ++ renderFailReason r]
   Refused e              -> ["refused: " ++ renderDeclareError e]
+  Uncertified e          -> "the kernel refused it" : renderKernelError (counter s) e
   Paused                 -> renderMachine (counter s) (contextOf s) (sessionMachine s)
 
 -- --------------------------------------------------------------------------
@@ -809,6 +815,7 @@ renderOp n ctx op = case op of
   Ops.CrossValue  -> "cross val"
   Ops.Down part   -> partWord part
   Ops.DefineData d -> "data " ++ nameString (inductiveName d)
+  Ops.Certify ty  -> "certify " ++ operand ty
   where
     operand = renderOperand n ctx
 
@@ -860,6 +867,31 @@ renderFailReason r = case r of
   ExpectedText      -> "expected text"
   ExpectedTerm      -> "expected a term"
   CannotMove m      -> renderMoveError m
+  NotYetPure pos    ->
+    "not finished: " ++ renderPosition pos ++ " is still open, so there is no term yet"
+
+-- | Why the kernel refused, or where a development stopped being valid (§5.3).
+renderKernelError :: Int -> KernelError -> [String]
+renderKernelError n e = case e of
+  NotClosed x  ->
+    ["the term mentions " ++ show x ++ ", which nothing binds"]
+  Overabstracted _ i ty ->
+    [ "the assumption " ++ identString i ++ " has no matching binder in "
+        ++ renderCore n [] ty
+    ]
+  Ill pos te   ->
+    ("in " ++ renderPosition pos ++ ":") : map ("  " ++) (renderTypeError n te)
+
+-- | Where in a development, said the way the user would say it.
+renderPosition :: Position -> String
+renderPosition p = case p of
+  TheTerm          -> "the term"
+  TheHole _ i      -> "the hole " ++ identString i
+  TypeOf _ i       -> "the type of " ++ identString i
+  ValueOf _ i      -> "the value of " ++ identString i
+  GuessOf _ i      -> "the guess for " ++ identString i
+  ConstraintAt k   -> "constraint " ++ show k
+  Inside _ i inner -> renderPosition inner ++ ", inside the guess for " ++ identString i
 
 renderMoveError :: MoveError -> String
 renderMoveError m = case m of

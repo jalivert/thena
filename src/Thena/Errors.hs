@@ -27,6 +27,10 @@ module Thena.Errors
 
     -- * Typing (§5.2, §7.4)
   , TypeError (..)
+
+    -- * The kernel (§5.3)
+  , KernelError (..)
+  , Position (..)
   ) where
 
 import Thena.Core.Context (Context)
@@ -64,6 +68,11 @@ data FailReason
     -- not in MS1\'s vocabulary yet (§7.2)
   | UniverseMismatch Level Level
     -- ^ two universes, and no cumulativity to relate them (§5.2)
+  | NotYetPure Position
+    -- ^ @Certify@ on a development that still has a hole, a guess or an
+    -- undischarged constraint in it (§5.3). The 'Position' names the first one
+    -- — @certify@ before anything is proved is the normal way to meet this, so
+    -- it says which component rather than only that one exists
   | NotTypeable TypeError
     -- ^ an op was handed a term with no type. @unify@ needs one: a deferred
     -- equation records the type it was asked at (§3.3), so the op infers it
@@ -189,4 +198,52 @@ data TypeError
     -- hand — the resolver cannot produce it
   | OverApplied GlobalName
     -- ^ the same, given too many
+  deriving (Eq, Show)
+
+-- --------------------------------------------------------------------------
+-- The kernel (§5.3)
+-- --------------------------------------------------------------------------
+
+-- | Why the kernel refused a term, or why a development is not a valid state.
+--
+-- **One type for both checks**, though §5.3 keeps @certify@ and @revalidate@
+-- carefully apart: they disagree about their /input/ and their /layer/, not
+-- about what going wrong looks like. Both bottom out in "this term does not
+-- typecheck, here", and a second type would be the same three cases under
+-- other names.
+--
+-- 'NotClosed' is 'certify'\'s alone — @revalidate@ walks a development whose
+-- components bind the variables, so a free one there is in Γ by construction.
+data KernelError
+  = NotClosed Var
+    -- ^ @certify@: the term mentions a variable nothing binds. §5.3\'s
+    -- signature has no context, so this is the check that earns that
+  | Overabstracted Var Ident Core
+    -- ^ a construction assumes something the type it is claimed to build has
+    -- no binder for: @? g ≐ (λ a : A . …) : Nat@. Its own case rather than an
+    -- 'Ill', because no 'TypeError' says this — @infer@ never meets the
+    -- question, since only a /construction/ can abstract more than its type
+  | Ill Position TypeError
+    -- ^ it does not typecheck, and where. The 'TypeError' is the ordinary one
+    -- "Thena.Core.Typing" produces — the kernel shares the core\'s typechecker
+    -- (§5.3, decided 2026-08-22), so it shares the core\'s reasons too
+  deriving (Eq, Show)
+
+-- | Where in a development something failed to check.
+--
+-- Named after what the user wrote rather than after the constructor, because
+-- this is what a message says out loud: "the type of @h@", not "the @Claim@\'s
+-- third field". A 'Var' as well as an 'Ident', because two components may show
+-- the same identifier and only the variable says which (§3.5).
+data Position
+  = TheTerm
+    -- ^ @certify@\'s whole closed term, or a development\'s trailing term
+  | TheHole Var Ident       -- ^ this hole has nothing in it yet
+  | TypeOf Var Ident        -- ^ a component\'s stated type is not a type
+  | ValueOf Var Ident       -- ^ a definition\'s value does not have its type
+  | GuessOf Var Ident       -- ^ a guess\'s construction does not build its type
+  | ConstraintAt Int        -- ^ the nth constraint in the chain, counting from 1
+  | Inside Var Ident Position
+    -- ^ under a guess: a guess\'s body is a development in its own right, so
+    -- its failures nest rather than flatten
   deriving (Eq, Show)

@@ -3,12 +3,14 @@ module Thena.Development.Partial
   ( Partial (..)
   , Constraint (..)
   , freeVarsPartial
+  , Impure (..)
+  , extract
   ) where
 
 import Data.List (nub)
 
 import Thena.Core.Context (Context, Entry (..))
-import Thena.Core.Term (Core, Var, freeVars)
+import Thena.Core.Term (Core (..), Ident, Var, close, freeVars)
 import Thena.Development.Component (Component (..))
 
 -- | @p ::= t | c . p | κ . p@ — the grammar of §3.3 as a cons list with a
@@ -66,3 +68,49 @@ freeVarsPartial = nub . go
     goEntry e = case e of
       Hypothesis _ _ ty   -> freeVars ty
       Definition _ _ v ty -> freeVars v ++ freeVars ty
+
+-- --------------------------------------------------------------------------
+-- Reading the term off a finished construction (§5.3, §7.5)
+-- --------------------------------------------------------------------------
+
+-- | What stopped a development from being pure.
+--
+-- Local to this module rather than in "Thena.Errors", whose header says it is
+-- for types with producers on opposite sides of the layering. This one has a
+-- single producer.
+data Impure
+  = StillAHole Var Ident        -- ^ a @?x : S@ with nothing tried
+  | StillAGuess Var Ident       -- ^ a @?x ≐ g : S@ not yet solved
+  | StillConstrained Constraint -- ^ an undischarged unification problem
+  deriving (Eq, Show)
+
+-- | The closed core term a finished construction stands for (§7.5, @Certify@).
+--
+-- A pure development is a telescope of binders with a term at the end, and
+-- reading it off is the obvious fold — @assume@ becomes a λ and a local
+-- definition becomes a @let@, which is exactly what thesis §2.3 says they are:
+-- @solve@ turns @?x ≐ g : S@ into @x = g : S@, "the transition by which a hole
+-- is solved, becoming a local definition".
+--
+-- @
+-- extract (Trailing t)                = t
+-- extract (Under (Assume x i S) p)    = Lam i S (close x (extract p))
+-- extract (Under (Define x i v S) p)  = Let i v S (close x (extract p))
+-- @
+--
+-- A 'Claim', a 'Guess' or a 'Pending' has no core counterpart and stops it —
+-- that /is/ the purity check, and it is one traversal rather than a predicate
+-- and a fold that could disagree about what pure means.
+--
+-- **The result need not be closed.** An @assume@ made outside the proof, or a
+-- development still holding a free variable from somewhere else, comes back
+-- with it. Saying so is 'Thena.Kernel.certify'\'s job, not this one\'s: this
+-- function knows about developments and that one knows about scope.
+extract :: Partial -> Either Impure Core
+extract p = case p of
+  Trailing t                    -> Right t
+  Pending k _                   -> Left (StillConstrained k)
+  Under (Claim x i _)     _     -> Left (StillAHole x i)
+  Under (Guess x i _ _)   _     -> Left (StillAGuess x i)
+  Under (Assume x i s)    rest  -> Lam i s . close x <$> extract rest
+  Under (Define x i v s)  rest  -> Let i v s . close x <$> extract rest

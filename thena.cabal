@@ -31,11 +31,13 @@ library
         Thena.Development.Component
         Thena.Development.Cursor
         Thena.Development.Partial
+        Thena.Development.Validate
         Thena.Driver
         Thena.Engine
         Thena.Errors
         Thena.Global.Declare
         Thena.Global.Env
+        Thena.Kernel
         Thena.Ops
         Thena.Repl
         Thena.Syntax.Concrete
@@ -81,6 +83,7 @@ test-suite thena-test
         Thena.EngineTests
         Thena.GlobalTests
         Thena.GoldenTests
+        Thena.KernelTests
         Thena.LoadTests
         Thena.DriverTests
         Thena.Declared

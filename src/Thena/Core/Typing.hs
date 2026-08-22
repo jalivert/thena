@@ -22,6 +22,9 @@
 module Thena.Core.Typing
   ( infer
   , check
+    -- | Exported at phase 12 for "Thena.Development.Validate", which asks the
+    -- same question of every component's stated type.
+  , sortOf
   ) where
 
 import Data.List (find)

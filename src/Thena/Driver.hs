@@ -37,7 +37,7 @@ import Thena.Core.Context (Context)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Level)
 import Thena.Development.Cursor (Cursor, Focus (..), Part (..), focus)
-import Thena.Development.Partial (Partial (..))
+import Thena.Development.Partial (Partial (..), extract)
 import Thena.Engine
   ( Exec (..)
   , Machine (..)
@@ -46,6 +46,7 @@ import Thena.Engine
   , Question
   , cursor
   , isAsking
+  , proofDevelopment
   , load
   , newProof
   , proofContext
@@ -54,8 +55,17 @@ import Thena.Engine
   , step
   )
 import qualified Thena.Engine as Engine
-import Thena.Errors (ConversionFailure, FailReason, MoveError (..), TypeError)
+import Thena.Engine (whereImpure)
+import Thena.Errors
+  ( ConversionFailure
+  , FailReason (..)
+  , KernelError
+  , MoveError (..)
+  , TypeError
+  )
+import Thena.Development.Validate (revalidate)
 import Thena.Global.Declare (DeclareError, declare)
+import Thena.Kernel (certify)
 import Thena.Global.Env
   ( Definition (..)
   , GlobalEnv
@@ -139,6 +149,14 @@ data Response
     -- ^ @:convert@ — the two terms, and 'Nothing' if they are convertible.
     -- Both terms are kept so the answer can restate the question: with η in
     -- play a yes is printed about two terms that still look different (§5.2)
+  | Revalidated (Maybe KernelError)
+    -- ^ @:revalidate@ — 'Nothing' if the development is a valid state (§5.3,
+    -- thesis §2.3)
+  | Extracted Core
+    -- ^ @:extract@ — the closed term the development stands for (§7.5). Its
+    -- own look, because @certify@ is an op and an op's answer comes back as a
+    -- 'Message', which the driver may not build out of a term: rendering is
+    -- "Thena.Repl"'s (§2.5)
   | LoadRequested FilePath
     -- ^ @:load ‹path›@. The driver may not touch a file — §12 invariant 4 puts
     -- all IO in "Thena.Repl" — so it asks, and the caller reads the file and
@@ -156,6 +174,9 @@ data Stop
   | Waiting Question     -- ^ answer it with 'answer'
   | Halted FailReason    -- ^ the machine is kept, so a later @retry@ can use it
   | Refused DeclareError -- ^ a @data@ declaration the checker would not admit
+  | Uncertified KernelError
+    -- ^ the kernel would not accept what the development built (§5.3). Shaped
+    -- like 'Refused': the command is abandoned, and there is nothing to retry
   | Paused               -- ^ stepping mode: one instruction done
   deriving (Eq, Show)
 
@@ -285,6 +306,32 @@ dispatch s name arg = case name of
       Right (t, n1) -> inferred t n1
   -- Reading the file is the caller's; this only names it (§12 invariant 4).
   ":load"  -> withArgument (s, LoadRequested arg)
+  -- Thesis §2.3's state-validity judgment over the whole development, at any
+  -- time (§5.3). A colon: it looks and changes nothing.
+  ":revalidate" -> noArgument $
+    ( s
+    , Revalidated . either Just (const Nothing) . fst $
+        revalidate (globals machine) [] (names machine) (proofDevelopment (proof machine))
+    )
+  -- The term the development stands for, if it is finished. A colon: it looks.
+  -- 'extract' is otherwise reachable only through the op, and the whole
+  -- interest of @certify@ is /what/ it built.
+  ":extract" -> noArgument $
+    case extract (proofDevelopment (proof machine)) of
+      Right t  -> (s, Extracted t)
+      Left why -> (s, Ran [] (Halted (NotYetPure (whereImpure why))))
+  -- A bare word: it is an op, and it is written as the op is written (§2.4).
+  -- The argument is the type the development is claimed to prove — see
+  -- 'Thena.Ops.Certify' for why the op needs one.
+  "certify" -> withArgument $
+    case parseCore (globals machine) ctx (names machine) arg of
+      Left e -> (s, Failed e)
+      Right (ty, n1) ->
+        progress
+          (sessionStepping s)
+          s { sessionMachine =
+                load [Do (Certify (Lit (VTerm (Trailing ty))))] machine { names = n1 } }
+          []
   ":convert" -> conversion
   ":step"  -> stepping
   ":run"   -> noArgument (progress False s [])
@@ -650,6 +697,15 @@ progress oneStep s msgs = case step (sessionMachine s) of
       | oneStep   -> stop installed msgs Paused
       | otherwise -> progress oneStep s { sessionMachine = installed } msgs
       where installed = m { globals = g, names = n1 }
+  -- The kernel runs here, outside the machine, for 'Declaring'\'s reason: it is
+  -- policy, and §7.5 has the driver own policy. On refusal the rest of the
+  -- program is dropped.
+  Engine.Certifying t ty m -> case certify (globals m) t ty of
+    Left e -> stop (load [] m) msgs (Uncertified e)
+    Right ()
+      | oneStep   -> stop m (say : msgs) Paused
+      | otherwise -> progress oneStep s { sessionMachine = m } (say : msgs)
+      where say = "certified"
   Engine.Asking q m   -> stop m msgs (Waiting q)
   Engine.Finished m   -> stop m msgs Completed
   Engine.Stuck r m    -> stop m msgs (Halted r)

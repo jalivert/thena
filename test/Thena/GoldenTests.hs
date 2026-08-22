@@ -73,6 +73,28 @@ tests =
         , ":show FinElim"
         , ":quit"
         ]
+      -- The kernel (phase 12). @:revalidate@ at any time; @certify@ once the
+      -- development is pure, which phase 9's @unify@ is enough to reach.
+    , script
+        "kernel"
+        [ "data Nat : Type\8320 { zero : Nat ; succ : Nat -> Nat }"
+        , ":revalidate"
+        , ":goal Nat"
+        , ":revalidate"
+        , ":extract"
+        , "certify Nat"
+        , "along"
+        , "unify goal \8799 zero"
+        , ":extract"
+        , "certify Nat"
+        , "certify Nat -> Nat"
+        , ":revalidate"
+        , "back"
+        , "assume A : Type\8320"
+        , ":extract"
+        , "certify Nat"
+        , ":quit"
+        ]
     , script
         "unification"
         [ "data Nat : Type\8320 { zero : Nat ; succ : Nat -> Nat }"

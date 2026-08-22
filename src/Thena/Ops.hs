@@ -91,6 +91,10 @@ data Op
   | Unify Operand Operand     -- ^ two terms — solve holes, or park the equation (§6, phase 9)
   | DefineData InductiveDefinition
     -- ^ hand a declaration out through the channel (§7.5)
+  | Certify Operand
+    -- ^ the development must be pure; yields the closed term it stands for and
+    -- the type it is claimed to have, for the driver to run the kernel on
+    -- (§7.5, §5.3)
   deriving (Eq, Show)
 
 -- @Reduce@ is a move, not a value-producing op, for the same reason 'Along'
@@ -128,3 +132,27 @@ data Op
 -- standing list — MS1's terminal offers no completion, so nothing reads them.
 data AnswerKind = AText | AName | ATerm | ARule
   deriving (Eq, Show)
+
+-- @Certify@ produces no value: what it yields goes out through the channel
+-- rather than into @env@ (§7.5). It is the third op of that shape, after @Ask@
+-- and @DefineData@.
+--
+-- **It takes one operand where §7.2's sketch took none** — the type the
+-- development is claimed to prove. The sketch assumed the term alone was
+-- enough, and it is not: §5.3's @certify@ checks a term /against a stated
+-- type/, and a development does not in general carry one. Phase 5 settled the
+-- same point from the other side — at the top of a development \"nothing is
+-- written down, so nothing is claimed\". So somebody must say it: at phase 12
+-- the @certify@ command's argument, at phase 13 the theorem's declared type,
+-- and the op is the same either way.
+--
+-- It is an op and not a driver command for §12 invariant 3's reason, even
+-- though it does not itself rewrite 'Thena.Engine.ProofState': @qed@ at phase
+-- 13 certifies /and then/ admits and closes the proof, and admitting a theorem
+-- must be a step you can watch in stepping mode rather than something the
+-- driver does invisibly between commands (§7.5, §1).
+--
+-- **Purity is checked here, extraction is not implemented here.** The op calls
+-- 'Thena.Development.Partial.extract', which is one traversal that either
+-- reads the term off or says what stopped it — a predicate plus a fold would
+-- be two codes that could disagree about what pure means.

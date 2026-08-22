@@ -1,0 +1,40 @@
+thena spine> data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }
+declared Nat
+thena spine> :revalidate
+valid
+thena spine> :goal Nat
+▶ let ? goal : Nat in
+  goal
+thena spine> :revalidate
+valid
+thena spine> :extract
+stuck: not finished: the hole goal is still open, so there is no term yet
+thena spine> certify Nat
+stuck: not finished: the hole goal is still open, so there is no term yet
+thena spine> along
+thena core> unify goal ≟ zero
+solved: goal
+thena core> :extract
+let goal = zero : Nat in goal
+thena core> certify Nat
+certified
+thena core> certify Nat -> Nat
+the kernel refused it
+in the term:
+  let goal = zero : Nat in goal has type Nat
+    but Nat -> Nat was expected
+    Nat -> Nat and Nat do not match
+thena core> :revalidate
+valid
+thena core> back
+thena spine> assume A : Type₀
+assumed A
+thena spine> :extract
+λ (A : Type₀) -> let goal = zero : Nat in goal
+thena spine> certify Nat
+the kernel refused it
+in the term:
+  λ (A : Type₀) -> let goal = zero : Nat in goal has type Type₀ -> Nat
+    but Nat was expected
+    Nat and Type₀ -> Nat do not match
+thena spine> :quit

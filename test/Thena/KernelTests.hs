@@ -1,0 +1,242 @@
+-- | The kernel, extraction, and state validity (§5.3, thesis §2.3).
+--
+-- Three things that only look alike:
+--
+--   * 'certify' takes a closed pure term and its stated type. It shares the
+--     core's typechecker (decided 2026-08-22), so what is tested here is not
+--     typing — 'Thena.Core.TypingTests' does that — but the two checks the
+--     kernel adds on top: closedness, and that the /stated/ type is the one
+--     checked against rather than the one inferred.
+--   * 'extract' reads the closed term off a finished construction.
+--   * 'revalidate' walks a whole development, holes and all.
+--
+-- **The invalid developments here are hand-built and cannot be typed at the
+-- REPL**, which is the point: every command builds a valid state by
+-- construction, so 'revalidate' can only be tested by breaking one on purpose.
+-- That is the standing lesson's shape — the invariant is checked by different
+-- code from the code that maintains it.
+module Thena.KernelTests (tests) where
+
+import Test.Tasty (TestTree, testGroup)
+import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
+
+import Thena.Core.Context (Entry (..))
+import Thena.Core.Term
+  ( Core (..)
+  , GlobalName (..)
+  , Ident (..)
+  , Level (..)
+  , Var
+  , close
+  , fresh
+  )
+import Thena.Declared (natVec, natVecCounter)
+import Thena.Driver (parseCore)
+import Thena.Development.Component (Component (..))
+import Thena.Development.Partial (Constraint (..), Impure (..), Partial (..), extract)
+import Thena.Development.Validate (revalidate)
+import Thena.Errors (KernelError (..), Position (..), TypeError (..))
+import Thena.Fixtures (idMidway, withConstraint)
+import Thena.Kernel (certify)
+
+tests :: TestTree
+tests =
+  testGroup
+    "the kernel and state validity (§5.3)"
+    [ testGroup "certify" certifyTests
+    , testGroup "extract — the term a finished construction stands for" extractTests
+    , testGroup "revalidate — thesis §2.3" validTests
+    ]
+
+-- --------------------------------------------------------------------------
+-- certify
+-- --------------------------------------------------------------------------
+
+certifyTests :: [TestTree]
+certifyTests =
+  [ testCase "a closed term at its type is accepted" $
+      certify natVec (nat "succ zero") (nat "Nat") @?= Right ()
+
+  , testCase "and under binders too, where the context reappears" $
+      certify natVec
+        (nat "\\ (n : Nat) -> succ n")
+        (nat "Nat -> Nat")
+        @?= Right ()
+
+    -- The check §5.3's context-free signature earns. @infer@ would report this
+    -- as an unknown variable, which is true and says nothing about whose
+    -- mistake it is: the caller's, for not abstracting it.
+  , testCase "an open term is refused before typing is attempted" $
+      certify natVec (Free loose) (nat "Nat") @?= Left (NotClosed loose)
+
+  , testCase "an open stated type is refused too" $
+      certify natVec (nat "zero") (Free loose) @?= Left (NotClosed loose)
+
+    -- What makes the stated type load-bearing: the term has *a* type, and it
+    -- is not this one. A kernel that inferred instead of checking would pass.
+  , testCase "a well-typed term at the wrong stated type is refused" $
+      case certify natVec (nat "zero") (nat "Nat -> Nat") of
+        Left (Ill TheTerm (NotOfType {})) -> pure ()
+        other -> assertFailure ("expected a mismatch at the term: " ++ show other)
+
+  , testCase "and an ill-typed term is refused, with the core's own reason" $
+      case certify natVec (nat "zero zero") (nat "Nat") of
+        Left (Ill TheTerm _) -> pure ()
+        other -> assertFailure ("expected an ill-typed term: " ++ show other)
+  ]
+  where
+    (loose, _) = fresh natVecCounter
+
+-- --------------------------------------------------------------------------
+-- extract
+-- --------------------------------------------------------------------------
+
+extractTests :: [TestTree]
+extractTests =
+  [ testCase "a trailing term is itself" $
+      extract (Trailing (nat "zero")) @?= Right (nat "zero")
+
+    -- Thesis §2.3: assume is a λ, and a local definition — what solve leaves
+    -- behind — is a let.
+  , testCase "an assumption becomes a lambda" $
+      extract (Under (Assume x (Ident "x") (nat "Nat")) (Trailing (Free x)))
+        @?= Right (Lam (Ident "x") (nat "Nat") (close x (Free x)))
+
+  , testCase "a definition becomes a let" $
+      extract (Under (Define x (Ident "x") (nat "zero") (nat "Nat")) (Trailing (Free x)))
+        @?= Right (Let (Ident "x") (nat "zero") (nat "Nat") (close x (Free x)))
+
+  , testCase "and they nest, outermost first" $
+      extract
+        (Under (Assume x (Ident "x") (nat "Nat"))
+          (Under (Define y (Ident "y") (Free x) (nat "Nat"))
+            (Trailing (Free y))))
+        @?= Right
+              (Lam (Ident "x") (nat "Nat")
+                (close x (Let (Ident "y") (Free x) (nat "Nat") (close y (Free y)))))
+
+    -- The purity check *is* this traversal, so each impure form has to stop it
+    -- and say which one it was.
+  , testCase "a hole stops it, and names itself" $
+      extract (Under (Claim x (Ident "h") (nat "Nat")) (Trailing (Free x)))
+        @?= Left (StillAHole x (Ident "h"))
+
+  , testCase "a guess stops it: tried is not solved" $
+      extract (Under (Guess x (Ident "g") (Trailing (nat "zero")) (nat "Nat")) (Trailing (Free x)))
+        @?= Left (StillAGuess x (Ident "g"))
+
+    -- Not 'withConstraint' from "Thena.Fixtures": that one has a hole above its
+    -- constraint, so it stops on the hole first — which is right, and is why
+    -- this case needs a chain whose only impurity is the constraint.
+  , testCase "an undischarged constraint stops it" $
+      case extract (Pending (Equate [] (nat "zero") (nat "zero") (nat "Nat"))
+                     (Trailing (nat "zero"))) of
+        Left (StillConstrained _) -> pure ()
+        other -> assertFailure ("expected a parked constraint: " ++ show other)
+
+    -- The result of a successful extraction need not be closed: saying so is
+    -- 'certify''s job, and this is the seam between the two.
+  , testCase "extraction does not close: a stray free variable survives it" $
+      extract (Trailing (Free x)) @?= Right (Free x)
+  ]
+  where
+    (x, n1) = fresh natVecCounter
+    (y, _)  = fresh n1
+
+-- --------------------------------------------------------------------------
+-- revalidate
+-- --------------------------------------------------------------------------
+
+validTests :: [TestTree]
+validTests =
+  [ testCase "a development with holes is a valid state" $
+      valid (Under (Claim x (Ident "h") (nat "Nat")) (Trailing (Free x)))
+
+  , testCase "and one with a guess in it" $ valid idMidway
+
+  , testCase "and one carrying an undischarged constraint" $ valid withConstraint
+
+    -- Nothing written down says what the top-level trailing term should be, so
+    -- nothing is claimed about it (phase 5's expectedType, restated).
+  , testCase "the top-level trailing term is not checked against anything" $
+      valid (Trailing (nat "zero"))
+
+  , testCase "a component's type must be a type" $
+      invalid
+        (Under (Claim x (Ident "h") (nat "zero")) (Trailing (Free x)))
+        (TypeOf x (Ident "h"))
+
+  , testCase "a definition's value must have its stated type" $
+      invalid
+        (Under (Define x (Ident "d") (nat "zero") (nat "Nat -> Nat")) (Trailing (Free x)))
+        (ValueOf x (Ident "d"))
+
+    -- A guess's body is a development in its own right, and its trailing term
+    -- must build the guess's type. Its failures nest rather than flatten.
+  , testCase "a guess whose body does not build its type is caught, inside it" $
+      invalid
+        (Under (Guess x (Ident "g") (Trailing (nat "zero")) (nat "Nat -> Nat"))
+          (Trailing (Free x)))
+        (Inside x (Ident "g") TheTerm)
+
+    -- Only an assumption consumes the guess's type (thesis §2.3), so the
+    -- running example above is valid *because* its λ eats the A -> A. Abstract
+    -- once more than the type allows and there is no binder left.
+  , testCase "a guess body may not abstract more than its type allows" $
+      case fst (revalidate natVec [] n2
+                  (Under (Guess x (Ident "g")
+                            (Under (Assume y (Ident "a") (nat "Nat")) (Trailing (nat "zero")))
+                            (nat "Nat"))
+                    (Trailing (Free x)))) of
+        Left (Overabstracted v (Ident "a") _) -> v @?= y
+        other -> assertFailure ("expected an overabstraction: " ++ show other)
+
+  , testCase "and the running example's λ is exactly what makes it valid" $
+      valid (Under (Guess x (Ident "g")
+                      (Under (Assume y (Ident "a") (nat "Nat")) (Trailing (Free y)))
+                      (nat "Nat -> Nat"))
+              (Trailing (Free x)))
+
+  , testCase "a constraint's two sides must have the type it is asked at" $
+      invalid
+        (Pending (Equate [] (nat "zero") (nat "zero") (nat "Nat -> Nat"))
+          (Trailing (nat "zero")))
+        (ConstraintAt 1)
+
+    -- Γ is built as the walk goes, so a type mentioning something bound later
+    -- is not in scope where it is written. This is the case a check that
+    -- forgot the whole chain at once would miss.
+  , testCase "a component may not mention what is bound after it" $
+      case revalidate natVec [] n2 later of
+        (Left (Ill (TypeOf v _) (UnknownVariable _ _)), _) -> v @?= x
+        (other, _) -> assertFailure ("expected a scope error at x: " ++ show other)
+  ]
+  where
+    (x, n1) = fresh natVecCounter
+    (y, n2) = fresh n1
+
+    -- @? x : y . λ y : Nat . x@ — x's type names y, which is bound below it.
+    later =
+      Under (Claim x (Ident "x") (Free y))
+        (Under (Assume y (Ident "y") (nat "Nat"))
+          (Trailing (Free x)))
+
+    valid p = case fst (revalidate natVec [] n2 p) of
+      Right () -> pure () :: Assertion
+      Left e   -> assertFailure ("should be valid: " ++ show e)
+
+    invalid p pos = case fst (revalidate natVec [] n2 p) of
+      Left (Ill pos' _) -> pos' @?= pos
+      other             -> assertFailure ("should be invalid at " ++ show pos ++ ": " ++ show other)
+
+-- --------------------------------------------------------------------------
+-- Helpers
+-- --------------------------------------------------------------------------
+
+-- | A core term over the shared @Nat@/@Vec@ environment.
+nat :: String -> Core
+nat src = case parse src of
+  Left e       -> error ("fixture does not resolve: " ++ show e)
+  Right (t, _) -> t
+  where
+    parse = parseCore natVec [] natVecCounter
