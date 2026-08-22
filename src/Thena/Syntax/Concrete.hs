@@ -30,6 +30,10 @@ data Raw
   | RawGuess String Raw Raw Raw  -- ^ @let ? x : S ≐ (g) in p@
   | RawPending RawConstraint Raw -- ^ @κ ▸ p@
   | RawQuote Raw                 -- ^ @⌜ t ⌝@
+  | RawElim String [Raw] Raw [Raw] [Raw] Raw
+    -- ^ @elim d (params) motive (methods) (indices) target@ (§2.6, phase 7) —
+    -- positional, and in exactly 'Thena.Core.Term.Core'\'s own field order for
+    -- 'Thena.Core.Term.Eliminate', so where a field goes needs no name.
   deriving (Eq, Show)
 
 data RawBinder = RawBinder String Raw

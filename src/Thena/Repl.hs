@@ -220,6 +220,15 @@ renderSyntaxError e = case e of
       ++ show got
   ResolveFailed (ParameterNotPassedThrough c i) ->
     c ++ " must pass the parameter " ++ identString i ++ " through unchanged"
+  ResolveFailed (NotADatatype d) ->
+    d ++ " is not a declared datatype"
+  ResolveFailed (WrongNumberOfEliminationParameters d want got) ->
+    d ++ " has " ++ show want ++ " parameter(s), not " ++ show got
+  ResolveFailed (WrongNumberOfMethods d want got) ->
+    d ++ " has " ++ show want ++ " constructor(s), so this elim needs "
+      ++ show want ++ " method(s), not " ++ show got
+  ResolveFailed (WrongNumberOfEliminationIndices d want got) ->
+    d ++ " has " ++ show want ++ " index/indices, not " ++ show got
   where
     at (Pos line col) = show line ++ ":" ++ show col ++ ": "
 
@@ -250,6 +259,7 @@ describe t = case t of
   TCloseQuote -> "⌝"
   TLet        -> "let"
   TIn         -> "in"
+  TElim       -> "elim"
   TUniverse k -> "Type" ++ subscript k
   TIdent s    -> s
 
@@ -315,23 +325,45 @@ go n env prec term = case term of
             ++ " : " ++ go n1 env AtTop ty
             ++ " in " ++ go n1 ((v, name) : env) AtTop (open v sc)
 
-  -- No concrete syntax yet (§2.6): phase 7 gives 'Eliminate' one and the user
-  -- never writes a 'Canonical'. Rendered so the function is total, and
-  -- deliberately in a bracketed form that does not parse back.
-  Canonical (GlobalName f) as ->
-    "‹" ++ unwords (f : map (go n env AtAtom) as) ++ "›"
+  -- A 'Canonical' prints as its own wrapper applied — @succ zero@, not a
+  -- bracketed internal form. DECIDED by the user 2026-08-22.
+  --
+  -- The user never writes a 'Canonical' and the resolver never builds one
+  -- (§3.6), so before phase 7 nothing could put one in front of a reader and
+  -- this branch printed @‹succ zero›@, deliberately unreadable-back. Phase 7's
+  -- committed @reduce@ changed that: δ on a former wrapper followed by β puts
+  -- a 'Canonical' into the development itself — the thing @:show@ prints,
+  -- @:undo@ will snapshot (phase 13) and @certify@ will read (phase 12) — so
+  -- an internal form is no longer an internal form.
+  --
+  -- **The cost, stated rather than hidden: this is the one place
+  -- @parse . print@ is not the identity on the nose.** @Canonical "succ" [z]@
+  -- prints @succ z@, which re-reads as @App (Global "succ") z@ — δβ-convertible
+  -- to what was printed, not structurally equal to it. §2.6 carries the
+  -- qualification. Giving 'Canonical' a spelling of its own was the
+  -- alternative and §12 invariant 6 forbids it: two spellings of a saturated
+  -- former application is exactly what that invariant exists to prevent.
+  Canonical (GlobalName f) as
+    | null as   -> f
+    | otherwise -> parensIf (prec > AtApp) (unwords (f : map (go n env AtAtom) as))
 
+  -- @elim d (params) motive (methods) (indices) target@ (§2.6, phase 7) —
+  -- positional, in 'Eliminate'\'s own field order, each group parenthesized
+  -- so a motive or a target cannot be mistaken for the start of the next
+  -- group the way an unparenthesized term could.
   Eliminate (GlobalName d) ps m ms is t ->
-    "‹elim "
-      ++ unwords
-           ( d
-               : map (go n env AtAtom) ps
-               ++ [go n env AtAtom m]
-               ++ map (go n env AtAtom) ms
-               ++ map (go n env AtAtom) is
-               ++ [go n env AtAtom t]
-           )
-      ++ "›"
+    parensIf (prec > AtTop) $
+      unwords
+        [ "elim", d
+        , atoms ps
+        , go n env AtAtom m
+        , atoms ms
+        , atoms is
+        , go n env AtAtom t
+        ]
+    where
+      atoms = paren . unwords . map (go n env AtAtom)
+      paren s = "(" ++ s ++ ")"
 
 -- | Does the scope's variable actually occur? This is the whole of the
 -- @S -> B@ versus @∀ (x : S) -> B@ decision (§2.6).
@@ -671,6 +703,7 @@ renderOp n ctx op = case op of
   Ops.Along       -> "along"
   Ops.Into        -> "into"
   Ops.Back        -> "back"
+  Ops.Reduce      -> "reduce"
   Ops.CrossType   -> "cross type"
   Ops.CrossValue  -> "cross val"
   Ops.Down part   -> partWord part

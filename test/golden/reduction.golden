@@ -1,0 +1,48 @@
+thena spine> data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }
+declared Nat
+thena spine> :whnf succ zero
+succ zero
+thena spine> claim h : Nat
+claimed h
+thena spine> claim g : (\ (_ : Nat) -> Nat) h
+claimed g
+thena spine> back
+thena spine> cross type
+thena core> :where
+focus
+  (λ (_ : Nat) -> Nat) h
+path
+  root ▸ h ▸ type of g
+context
+  h : Nat
+thena core> :whnf
+Nat
+thena core> reduce
+reduced; now unreachable: h
+thena core> :where
+focus
+  Nat
+path
+  root ▸ h ▸ type of g
+context
+  h : Nat
+thena core> :show
+  let ? h : Nat in
+▶ let ? g : Nat in
+  let ? goal : Type₀ in
+  goal
+thena core> back
+thena spine> back
+thena spine> claim n : Nat
+claimed n
+thena spine> :whnf elim Nat () (\ (_ : Nat) -> Nat) (zero succ) () n
+elim Nat () (λ (_ : Nat) -> Nat) (zero succ) () n
+thena spine> :whnf elim Nat () (\ (_ : Nat) -> Nat) (zero) () n
+Nat has 2 constructor(s), so this elim needs 2 method(s), not 1
+thena spine> :whnf elim Nat (n) (\ (_ : Nat) -> Nat) (zero succ) () n
+Nat has 0 parameter(s), not 1
+thena spine> :whnf elim Nat () (\ (_ : Nat) -> Nat) (zero succ) (n) n
+Nat has 0 index/indices, not 1
+thena spine> :whnf elim NotADatatype () (\ (_ : Nat) -> Nat) () () n
+NotADatatype is not a declared datatype
+thena spine> :quit

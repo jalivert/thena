@@ -46,9 +46,11 @@ module Thena.Development.Cursor
     -- * Changing the development
   , insertAbove
   , replaceFocus
+  , replaceCore
   ) where
 
 import Data.Foldable (toList)
+import Data.List ((\\))
 import Data.Maybe (mapMaybe)
 
 import Thena.Core.Context (Context, Entry (..))
@@ -59,11 +61,12 @@ import Thena.Core.Term
   , Scope
   , Var
   , close
+  , freeVars
   , fresh
   , open
   )
 import Thena.Development.Component (Component (..), forget)
-import Thena.Development.Partial (Constraint (..), Partial (..))
+import Thena.Development.Partial (Constraint (..), Partial (..), freeVarsPartial)
 import Thena.Errors (MoveError (..))
 
 -- --------------------------------------------------------------------------
@@ -514,3 +517,37 @@ replaceFocus q cur = case cur of
   InPartial    p _ _ -> Right (focusAt p q)
   AtConstraint p _ _ -> Right (focusAt p q)
   InCore {}          -> Left NotOnTheSpine
+
+-- | Replace a focused core term with another, in place — what a committed
+-- reduction does (§4.7). The caller decides what the replacement is; this
+-- function is the zipper mechanics and the orphan check, nothing about
+-- reduction itself, which is why "Thena.Core.Reduce" is not imported here —
+-- @whnf@ is called by 'Thena.Engine', which already has the 'Context' this
+-- position's Γ is and the 'Thena.Global.Env.GlobalEnv' @whnf@ needs.
+--
+-- Reports which of the prefix's HOLES — a 'Claim' or a 'Guess', never a plain
+-- 'Assume' — no longer occur anywhere in the resulting development. A
+-- variable that vanished from the reduced subterm might still be referenced
+-- somewhere else below the focus, so the check rebuilds and asks
+-- 'freeVarsPartial' rather than trusting the one subterm's own free variables
+-- (§4.7's own example, @(λ_. Nat) ?h ⟶ Nat@, only orphans @?h@ because that
+-- was its one and only occurrence).
+replaceCore :: Core -> Cursor -> Either MoveError (Cursor, [Ident])
+replaceCore t' cur = case cur of
+  InCore p x ts t ->
+    let cur'      = InCore p x ts t'
+        vanished  = freeVars t \\ freeVars t'
+        remaining = freeVarsPartial (rebuild cur')
+        holes     = mapMaybe holeBinding [ c | Along c <- toList p ]
+        orphaned  = [ i | (v, i) <- holes, v `elem` vanished, v `notElem` remaining ]
+     in Right (cur', orphaned)
+  _ -> Left NotInCore
+
+-- | The variable and identifier a hole binds — a 'Claim' or a 'Guess' — or
+-- 'Nothing' for an 'Assume' or a 'Define', which are not holes and whose
+-- variables becoming unused is unremarkable.
+holeBinding :: Component -> Maybe (Var, Ident)
+holeBinding c = case c of
+  Claim v i _   -> Just (v, i)
+  Guess v i _ _ -> Just (v, i)
+  _             -> Nothing

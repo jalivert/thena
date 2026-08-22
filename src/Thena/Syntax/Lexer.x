@@ -50,6 +50,7 @@ tokens :-
   "forall"      { keyword TForall }
   "let"         { keyword TLet }
   "in"          { keyword TIn }
+  "elim"        { keyword TElim }
   @universe     { \p s -> Located (posOf p) (TUniverse (levelOf s)) }
   @ident        { \p s -> Located (posOf p) (TIdent s) }
 
@@ -83,6 +84,7 @@ data Token
   | TCloseQuote
   | TLet
   | TIn
+  | TElim
   | TUniverse Int
   | TIdent String
   deriving (Eq, Show)

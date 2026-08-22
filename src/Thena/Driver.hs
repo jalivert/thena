@@ -30,8 +30,9 @@ module Thena.Driver
   ) where
 
 import Thena.Core.Context (Context)
+import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core, GlobalName (..))
-import Thena.Development.Cursor (Cursor, Part (..))
+import Thena.Development.Cursor (Cursor, Focus (..), Part (..), focus)
 import Thena.Development.Partial (Partial (..))
 import Thena.Engine
   ( Exec (..)
@@ -49,7 +50,7 @@ import Thena.Engine
   , step
   )
 import qualified Thena.Engine as Engine
-import Thena.Errors (FailReason, MoveError)
+import Thena.Errors (FailReason, MoveError (..))
 import Thena.Global.Declare (DeclareError, declare)
 import Thena.Global.Env
   ( Definition (..)
@@ -144,8 +145,9 @@ data CommandError
   | NotAsking
   | NoSuchGlobal String
   | NotThere MoveError
-    -- ^ a driver command that needs a particular focus, run at another. Only
-    -- @:goal@ can produce it; the moves are ops and fail through 'Halted'.
+    -- ^ a driver command that needs a particular focus, run at another —
+    -- @:goal@, and @:whnf@ with no argument (phase 7); the moves are ops and
+    -- fail through 'Halted'.
   deriving (Eq, Show)
 
 -- --------------------------------------------------------------------------
@@ -208,6 +210,15 @@ dispatch s name arg = case name of
     _  -> showGlobal arg
   ":where" -> noArgument (s, Where (cursor (proof machine)))
   ":goal"  -> goal
+  -- With no argument, view-reduce the core focus (§4.7); with one, an
+  -- arbitrary typed term — the same no-argument/with-argument split as
+  -- @:show@, and for the same reason: two different questions share a word
+  -- because neither can be mistaken for the other.
+  ":whnf"  -> case arg of
+    "" -> case focus (cursor (proof machine)) of
+      OnTerm _ _ t -> (s, Rendered (whnf (globals machine) ctx t))
+      _            -> (s, Rejected (NotThere NotInCore))
+    _  -> view s parseCore (Rendered . whnf (globals machine) ctx) arg
   ":step"  -> stepping
   ":run"   -> noArgument (progress False s [])
   "assume" -> tactic "assumption" "assumed" Assume
@@ -220,6 +231,7 @@ dispatch s name arg = case name of
   "along"  -> noArgument (run [Do Along])
   "into"   -> noArgument (run [Do Into])
   "back"   -> noArgument (run [Do Back])
+  "reduce" -> noArgument (run [Do Reduce])
   "cross"  -> case arg of
     "type" -> run [Do CrossType]
     "val"  -> run [Do CrossValue]

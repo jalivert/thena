@@ -2,6 +2,7 @@ module Main (main) where
 
 import Test.Tasty (defaultMain, testGroup)
 
+import qualified Thena.Core.ReduceTests
 import qualified Thena.Core.TermTests
 import qualified Thena.CursorTests
 import qualified Thena.DevelopmentTests
@@ -16,7 +17,8 @@ main =
   defaultMain $
     testGroup
       "thena"
-      [ Thena.Core.TermTests.tests
+      [ Thena.Core.ReduceTests.tests
+      , Thena.Core.TermTests.tests
       , Thena.CursorTests.tests
       , Thena.DevelopmentTests.tests
       , Thena.DriverTests.tests

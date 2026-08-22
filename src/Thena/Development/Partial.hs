@@ -2,11 +2,14 @@
 module Thena.Development.Partial
   ( Partial (..)
   , Constraint (..)
+  , freeVarsPartial
   ) where
 
-import Thena.Core.Context (Context)
-import Thena.Core.Term (Core)
-import Thena.Development.Component (Component)
+import Data.List (nub)
+
+import Thena.Core.Context (Context, Entry (..))
+import Thena.Core.Term (Core, Var, freeVars)
+import Thena.Development.Component (Component (..))
 
 -- | @p ::= t | c . p | κ . p@ — the grammar of §3.3 as a cons list with a
 -- typed end.
@@ -32,3 +35,34 @@ data Partial
 data Constraint
   = Equate Context Core Core Core   -- ^ @Ξ ⊢ s ≟ t : T@ (type last, as ever)
   deriving (Eq, Show)
+
+-- | Every 'Var' the whole development mentions, structurally — every
+-- component's type, a 'Define'\'s value, a 'Guess'\'s body (recursively) and
+-- its own type, a 'Constraint'\'s Ξ and its three terms, and the trailing
+-- term.
+--
+-- What "Thena.Development.Cursor"\'s committing reduction needs to answer
+-- §4.7's orphaning question: after a reduction discards a variable from the
+-- one subterm it touched, does that variable still occur ANYWHERE in the
+-- rest of the development? A local check (just the reduced subterm) would
+-- miss a hole referenced twice, only one of which was under the focus.
+freeVarsPartial :: Partial -> [Var]
+freeVarsPartial = nub . go
+  where
+    go p = case p of
+      Trailing t     -> freeVars t
+      Pending k rest -> goConstraint k ++ go rest
+      Under c rest   -> goComponent c ++ go rest
+
+    goComponent c = case c of
+      Assume _ _ ty     -> freeVars ty
+      Define _ _ v ty   -> freeVars v ++ freeVars ty
+      Claim  _ _ ty     -> freeVars ty
+      Guess  _ _ g ty   -> go g ++ freeVars ty
+
+    goConstraint (Equate xi s t ty) =
+      concatMap goEntry xi ++ freeVars s ++ freeVars t ++ freeVars ty
+
+    goEntry e = case e of
+      Hypothesis _ _ ty   -> freeVars ty
+      Definition _ _ v ty -> freeVars v ++ freeVars ty

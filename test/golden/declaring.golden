@@ -6,10 +6,10 @@ data Nat : Type₀
   ; succ : Nat -> Nat }
 thena spine> :show succ
 succ : Nat -> Nat
-succ = λ (x : Nat) -> ‹succ x›
+succ = λ (x : Nat) -> succ x
 thena spine> :show zero
 zero : Nat
-zero = ‹zero›
+zero = zero
 thena spine> :core succ (succ zero)
 succ (succ zero)
 thena spine> data Vec (A : Type₀) : Nat -> Type₀ { nil : Vec A zero ; cons : ∀ (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ n) }
@@ -20,7 +20,7 @@ data Vec (A : Type₀) : Nat -> Type₀
   ; cons : ∀ (n : Nat) -> A -> Vec A n -> Vec A (succ n) }
 thena spine> :show cons
 cons : ∀ (A : Type₀) (n : Nat) -> A -> Vec A n -> Vec A (succ n)
-cons = λ (A : Type₀) (n : Nat) (a : A) (as : Vec A n) -> ‹cons A n a as›
+cons = λ (A : Type₀) (n : Nat) (a : A) (as : Vec A n) -> cons A n a as
 thena spine> data Empty : Type₀ { }
 declared Empty
 thena spine> :show Empty

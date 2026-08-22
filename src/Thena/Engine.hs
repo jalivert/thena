@@ -34,6 +34,8 @@ module Thena.Engine
   , failure
   ) where
 
+import Data.List (intercalate)
+
 import Thena.Core.Context (Context)
 import Thena.Core.Term
   ( Core (..)
@@ -42,23 +44,27 @@ import Thena.Core.Term
   , Var
   , fresh
   )
+import Thena.Core.Reduce (whnf)
 import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor
   ( Cursor
+  , Focus (..)
   , along
   , back
   , crossType
   , crossValue
   , down
   , enter
+  , focus
   , insertAbove
   , into
   , rebuild
+  , replaceCore
   , replaceFocus
   )
 import qualified Thena.Development.Cursor as Cursor
 import Thena.Development.Partial (Partial (..))
-import Thena.Errors (FailReason (..), MoveError)
+import Thena.Errors (FailReason (..), MoveError (..))
 import Thena.Ops
   ( AnswerKind
   , Env
@@ -298,6 +304,22 @@ perform instr rest m = case operation instr of
   CrossValue -> navigate (keeping crossValue)
   Back       -> navigate (keeping back)
   Down part  -> navigate (down part)
+
+  -- Commit a whnf at the core focus (§4.7). Not 'navigate': a move never has
+  -- anything to say, and this one sometimes does — an orphaned hole is
+  -- reported, not prevented, so a non-empty report goes out through 'Saying'
+  -- exactly as 'Say' already does, rather than being silently swallowed.
+  Reduce -> case focus (cursor (proof m)) of
+    OnTerm _ _ t ->
+      let t' = whnf (globals m) (Cursor.context (cursor (proof m))) t
+       in case replaceCore t' (cursor (proof m)) of
+            Left e -> failure (CannotMove e) m
+            Right (cur', orphaned) ->
+              let m' = advance m { proof = ProofState cur' }
+               in case orphaned of
+                    [] -> Continue m'
+                    is -> Saying (orphanMessage is) m'
+    _ -> failure (CannotMove NotInCore) m
   where
     operation i = case i of
       Bind _ o -> o
@@ -336,6 +358,14 @@ perform instr rest m = case operation instr of
           let (v, n1) = fresh (names m)
               cur     = insertAbove (build v i t) (cursor (proof m))
            in produce (VTerm (Trailing (Free v))) m { proof = ProofState cur, names = n1 }
+
+-- | What 'Reduce' says when it orphans one or more holes (§4.7). Plain text:
+-- these are the identifiers the user themselves wrote for a 'Claim' or a
+-- 'Guess', not a term needing "Thena.Repl"'s freshening.
+orphanMessage :: [Ident] -> String
+orphanMessage is = "reduced; now unreachable: " ++ intercalate ", " (map identString is)
+  where
+    identString (Ident s) = s
 
 operandValue :: Env -> Operand -> Either FailReason Value
 operandValue e o = case o of

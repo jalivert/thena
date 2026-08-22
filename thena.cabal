@@ -18,6 +18,7 @@ library
     default-language:   GHC2024
     exposed-modules:
         Thena.Core.Context
+        Thena.Core.Reduce
         Thena.Core.Term
         Thena.Development.Component
         Thena.Development.Cursor
@@ -57,6 +58,7 @@ test-suite thena-test
     type:               exitcode-stdio-1.0
     main-is:            Main.hs
     other-modules:
+        Thena.Core.ReduceTests
         Thena.Core.TermTests
         Thena.CursorTests
         Thena.DevelopmentTests

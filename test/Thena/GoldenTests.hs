@@ -83,6 +83,36 @@ tests =
         , ":quit"
         ]
     , script
+        "reduction"
+        [ "data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }"
+        , ":whnf succ zero"
+        -- committing reduction, and the orphaning case (§4.7): claim two
+        -- holes, put a redex mentioning the first in the second's type, then
+        -- navigate to it — 'back' pops the step 'claim' pushed, landing on
+        -- the component itself rather than the trailing goal it left alone.
+        , "claim h : Nat"
+        , "claim g : (\\ (_ : Nat) -> Nat) h"
+        , "back"
+        , "cross type"
+        , ":where"
+        , ":whnf"
+        , "reduce"
+        , ":where"
+        , ":show"
+        , "back"
+        , "back"
+        , "claim n : Nat"
+        -- a hand-written elim: stuck on a neutral target, so it round-trips
+        -- through the printer unreduced rather than firing ι.
+        , ":whnf elim Nat () (\\ (_ : Nat) -> Nat) (zero succ) () n"
+        -- arity mistakes, one per field (§2.6's resolve-time shape check).
+        , ":whnf elim Nat () (\\ (_ : Nat) -> Nat) (zero) () n"
+        , ":whnf elim Nat (n) (\\ (_ : Nat) -> Nat) (zero succ) () n"
+        , ":whnf elim Nat () (\\ (_ : Nat) -> Nat) (zero succ) (n) n"
+        , ":whnf elim NotADatatype () (\\ (_ : Nat) -> Nat) () () n"
+        , ":quit"
+        ]
+    , script
         "mistakes"
         [ "wibble"
         , ":core y"

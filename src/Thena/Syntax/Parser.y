@@ -43,6 +43,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   '|]'    { Located _ TCloseQuote }
   let     { Located _ TLet }
   in      { Located _ TIn }
+  elim    { Located _ TElim }
   univ    { Located _ (TUniverse $$) }
   ident   { Located _ (TIdent $$) }
 
@@ -59,6 +60,8 @@ Term :: { Raw }
                                                    { RawGuess $3 $5 $8 $11 }
   | Constraint '▸' Term                            { RawPending $1 $3 }
   | '[|' Term '|]'                                 { RawQuote $2 }
+  | elim ident '(' Atoms ')' Atom '(' Atoms ')' '(' Atoms ')' Atom
+      { RawElim $2 (reverse $4) $6 (reverse $8) (reverse $11) $13 }
   | App '->' Term                                  { RawArrow $1 $3 }
   | App                                            { $1 }
 
@@ -108,6 +111,15 @@ Atom :: { Raw }
   : ident                                  { RawName $1 }
   | univ                                   { RawUniverse $1 }
   | '(' Term ')'                           { $2 }
+
+-- A possibly-empty run of atoms, accumulated in reverse like 'Binders'. An
+-- 'elim''s three list-valued fields (§2.6, phase 7): each is parenthesized so
+-- that a fixed field count and a fixed field order are the whole grammar, with
+-- nothing left for a motive or a target to swallow by extending rightward the
+-- way a λ or ∀ body does.
+Atoms :: { [Raw] }
+  :                                        { [] }
+  | Atoms Atom                             { $2 : $1 }
 
 -- Accumulated in reverse; the productions above put them back in order.
 Binders :: { [RawBinder] }

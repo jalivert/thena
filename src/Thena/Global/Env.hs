@@ -33,6 +33,7 @@ module Thena.Global.Env
   , formerType
   , constructorType
   , constructorTarget
+  , formerArity
   ) where
 
 import Thena.Core.Context (Context, entryVar, piOver)
@@ -182,3 +183,40 @@ constructorTarget :: InductiveDefinition -> ConstructorDefinition -> Core
 constructorTarget d c =
   foldl App (Global (inductiveName d))
     (map (Free . entryVar) (inductiveParameters d) ++ constructorIndices c)
+
+-- | How many arguments a generated former wrapper takes before its body's
+-- 'Thena.Core.Term.Canonical' is saturated — or 'Nothing' if this name is not
+-- a former at all (an ordinary definition: a proved theorem, the prelude).
+--
+-- Derived from the record for the same reason 'formerType' and
+-- 'constructorType' are: "Thena.Global.Declare" builds each wrapper by
+-- abstracting exactly this telescope, so reading the count back off the same
+-- fields is what stops generation and reduction disagreeing about a former's
+-- arity (§3.7). Counting the @λ@s in the stored body would be a second
+-- encoding of the same fact.
+--
+-- **What wants it: δ (§5.1).** Unfolding a wrapper that has not been given
+-- enough arguments turns a compact neutral term into a lambda around a
+-- 'Thena.Core.Term.Canonical' and exposes nothing a consumer can use — no ι
+-- can fire on it, nothing can project from it. Decided by the user
+-- 2026-08-22; "Thena.Core.Reduce" has the argument and the one obligation it
+-- puts on phase 8's conversion.
+--
+-- A type former counts its parameters and its indices; a value constructor
+-- counts the parameters (shared, and abstracted by every constructor) and its
+-- own arguments. Nullary formers give @Just 0@, which is saturated
+-- immediately — @Nat@ still unfolds to @Canonical "Nat" []@ on its own.
+formerArity :: GlobalName -> GlobalEnv -> Maybe Int
+formerArity g e = case lookup g (inductives e) of
+  Just d  -> Just (length (inductiveParameters d) + length (inductiveIndices d))
+  Nothing -> lookupConstructor
+  where
+    lookupConstructor =
+      case [ (d, c)
+           | (_, d) <- inductives e
+           , c      <- inductiveConstructors d
+           , constructorName c == g
+           ] of
+        (d, c) : _ ->
+          Just (length (inductiveParameters d) + length (constructorArguments c))
+        [] -> Nothing

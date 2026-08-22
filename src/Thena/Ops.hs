@@ -87,9 +87,17 @@ data Op
   | CrossValue                -- ^ into a definition's value
   | Down Part                 -- ^ into a named field of a core term (§4.7)
   | Back                      -- ^ undo the last move
+  | Reduce                    -- ^ commit a whnf at the core focus (§4.7, phase 7)
   | DefineData InductiveDefinition
     -- ^ hand a declaration out through the channel (§7.5)
   deriving (Eq, Show)
+
+-- @Reduce@ is a move, not a value-producing op, for the same reason 'Along'
+-- and 'Down' are not (§7.2): it rewrites the cursor and that is the whole of
+-- what it does. It differs from the other moves in one way — it can have
+-- something worth saying (an orphaned hole, §4.7), which is why
+-- "Thena.Engine" answers it with 'Thena.Engine.Saying' rather than always
+-- 'Thena.Engine.Continue', the same distinction 'Say' already makes.
 
 -- @DefineData@ carries the declaration as a field rather than an 'Operand',
 -- for the same reason 'Down' carries a 'Part' and 'Ask' an 'AnswerKind': a
