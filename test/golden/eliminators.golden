@@ -1,0 +1,25 @@
+thena spine> data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }
+declared Nat
+thena spine> data Fin : Nat -> Type₀ { fz : ∀ (n : Nat) -> Fin (succ n) ; fs : ∀ (n : Nat) (i : Fin n) -> Fin (succ n) }
+declared Fin
+thena spine> data Empty : Type₀ { }
+declared Empty
+thena spine> :elim Nat
+elim Nat : ∀ (P : Nat -> Type₀) -> P zero -> (∀ (x : Nat) -> P x -> P (succ x)) -> ∀ (target : Nat) -> P target
+thena spine> :elim Nat Type₁
+elim Nat : ∀ (P : Nat -> Type₁) -> P zero -> (∀ (x : Nat) -> P x -> P (succ x)) -> ∀ (target : Nat) -> P target
+thena spine> :elim Fin
+elim Fin : ∀ (P : ∀ (x : Nat) -> Fin x -> Type₀) -> (∀ (n : Nat) -> P (succ n) (fz n)) -> (∀ (n : Nat) (i : Fin n) -> P n i -> P (succ n) (fs n i)) -> ∀ (x : Nat) (target : Fin x) -> P x target
+thena spine> :elim Empty
+elim Empty : ∀ (P : Empty -> Type₀) (target : Empty) -> P target
+thena spine> :whnf elim Fin () (\ (n : Nat) (i : Fin n) -> Nat) ((\ (n : Nat) -> zero) (\ (n : Nat) (i : Fin n) (ih : Nat) -> succ ih)) ((succ (succ zero))) (fs (succ zero) (fz zero))
+succ (elim Fin () (λ (n : Nat) (i : Fin n) -> Nat) ((λ (n : Nat) -> zero) (λ (n : Nat) (i : Fin n) (ih : Nat) -> succ ih)) ((succ zero)) (fz zero))
+thena spine> :elim Foo
+Foo is not a declared datatype
+thena spine> :elim Nat Nat
+Nat is not a universe, as in "Type₀"
+thena spine> :elim
+:elim needs an argument
+thena spine> :show FinElim
+nothing named FinElim has been declared
+thena spine> :quit

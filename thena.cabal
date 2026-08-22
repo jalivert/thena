@@ -68,6 +68,7 @@ test-suite thena-test
         Thena.Core.UnifyTests
         Thena.CursorTests
         Thena.DevelopmentTests
+        Thena.EliminatorTests
         Thena.EngineTests
         Thena.GlobalTests
         Thena.GoldenTests

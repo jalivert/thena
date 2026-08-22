@@ -14,9 +14,13 @@
 module Thena.Declared
   ( natDecl
   , vecDecl
+  , finDecl
+  , emptyDecl
   , nat
   , natVec
   , natVecCounter
+  , natFin
+  , natFinCounter
   , declared
   ) where
 
@@ -24,12 +28,30 @@ import Thena.Driver (parseDeclaration)
 import Thena.Global.Declare (declare)
 import Thena.Global.Env (GlobalEnv, emptyGlobals)
 
-natDecl, vecDecl :: String
+natDecl, vecDecl, finDecl, emptyDecl :: String
 natDecl = "Nat : Type\8320 { zero : Nat ; succ : Nat -> Nat }"
 vecDecl =
   "Vec (A : Type\8320) : Nat -> Type\8320 \
   \{ nil : Vec A zero \
   \; cons : forall (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ n) }"
+
+-- | Thesis §4.1.4's own example, and phase 10's reason for existing.
+--
+-- **Not a substitute for @Vec@ and not covered by it.** @Vec@ is a family of
+-- datatypes with a parameter; @Fin@ is an inductive family with /no/ parameter
+-- and an index that varies between a constructor's argument and its target —
+-- @fs : Fin n -> Fin (succ n)@. So @Fin@ is what distinguishes an eliminator
+-- that carries a recursive argument\'s /own/ indices into the inductive
+-- hypothesis and the recursive call from one that reuses the target\'s
+-- (`PREPLAN.md` phase 10: "@Nat@ alone will not catch it").
+finDecl =
+  "Fin : Nat -> Type\8320 \
+  \{ fz : forall (n : Nat) -> Fin (succ n) \
+  \; fs : forall (n : Nat) (i : Fin n) -> Fin (succ n) }"
+
+-- | No constructors at all — the eliminator with no methods, which every other
+-- fixture has at least one of.
+emptyDecl = "Empty : Type\8320 { }"
 
 -- | Declare a list of datatypes in order, threading the environment and the
 -- name counter. A refusal is a fixture bug, not a test result, so it errors
@@ -43,9 +65,15 @@ declared = foldl one (emptyGlobals, 0)
         Left e         -> error ("fixture refused: " ++ show e)
         Right (env', n2) -> (env', n2)
 
-nat, natVec :: GlobalEnv
+nat, natVec, natFin :: GlobalEnv
 nat    = fst (declared [natDecl])
 natVec = fst (declared [natDecl, vecDecl])
+
+-- | Its own environment rather than a third entry in 'natVec', because
+-- 'natVecCounter' is what every hand-built context in the core suites starts
+-- from: adding a declaration to that list shifts the counter and each of those
+-- contexts silently starts numbering somewhere else.
+natFin = fst (declared [natDecl, finDecl, emptyDecl])
 
 -- | The counter after both declarations. Every hand-built context in the core
 -- suites must start from this and never from 0: a declaration mints its own
@@ -54,3 +82,7 @@ natVec = fst (declared [natDecl, vecDecl])
 -- recorded in "Thena.Core.ReduceTests").
 natVecCounter :: Int
 natVecCounter = snd (declared [natDecl, vecDecl])
+
+-- | The same for 'natFin'.
+natFinCounter :: Int
+natFinCounter = snd (declared [natDecl, finDecl, emptyDecl])

@@ -20,6 +20,7 @@ module Thena.Repl
   , renderMachine
   , renderSyntaxError
   , renderInductive
+  , renderEliminator
   ) where
 
 import System.Console.Haskeline
@@ -175,6 +176,7 @@ renderResponse s resp = case resp of
   RenderedDev p  -> [renderPartial (counter s) (contextOf s) p]
   Shown c        -> [renderCursor (counter s) c]
   ShownData d    -> renderInductive (counter s) d
+  ShownEliminator g ty  -> renderEliminator (counter s) g ty
   ShownGlobal g ty body -> renderGlobal (counter s) g ty body
   Where c        -> renderWhere (counter s) c
   Inferred t ty  ->
@@ -757,6 +759,7 @@ renderCommandError e = case e of
   UnexpectedArgument w -> w ++ " takes no argument"
   NotAsking            -> "nothing was asked"
   NoSuchGlobal x       -> "nothing named " ++ x ++ " has been declared"
+  LevelExpected u      -> u ++ " is not a universe, as in \"Type\8320\""
   NotThere m           -> renderMoveError m
 
 renderFailReason :: FailReason -> String
@@ -837,6 +840,16 @@ renderInductive n d = case inductiveConstructors d of
         ++ renderCore n ps (piOver (constructorArguments c) (constructorTarget d c))
 
     closed ls = init ls ++ [last ls ++ " }"]
+
+-- | @:elim ‹datatype› [‹universe›]@ — the elimination rule (§3.7).
+--
+-- Headed @elim ‹datatype› :@ rather than @‹datatype›Elim :@, because there is
+-- no such constant and inventing a name for the display would suggest one
+-- (§3.7, reversed 2026-08-22). What is printed on the left is the concrete
+-- syntax the user actually writes.
+renderEliminator :: Int -> GlobalName -> Core -> [String]
+renderEliminator n g ty =
+  ["elim " ++ nameString g ++ " : " ++ renderCore n [] ty]
 
 -- | @:show ‹name›@ on anything that is not a datatype.
 --

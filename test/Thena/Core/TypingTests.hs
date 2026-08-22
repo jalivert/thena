@@ -25,7 +25,7 @@ import Thena.Core.Convert (convert)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Level (..), fresh)
 import Thena.Core.Typing (check, infer)
-import Thena.Declared (natVec, natVecCounter)
+import Thena.Declared (natFin, natFinCounter, natVec, natVecCounter)
 import Thena.Driver (parseCore)
 import Thena.Errors (TypeError (..))
 import Thena.Global.Env (eliminatorType, lookupInductive)
@@ -186,17 +186,23 @@ elimTests =
 -- check on the construction.
 eliminatorTypeTests :: [TestTree]
 eliminatorTypeTests =
-  [ testCase "Nat's eliminator type, at Type0" $ wellFormed "Nat" (Level 0)
-  , testCase "Nat's eliminator type, at Type1" $ wellFormed "Nat" (Level 1)
-  , testCase "Vec's eliminator type, at Type0" $ wellFormed "Vec" (Level 0)
-  , testCase "Vec's eliminator type, at Type2" $ wellFormed "Vec" (Level 2)
+  [ testCase "Nat's eliminator type, at Type0" $ wellFormed natVec natVecCounter "Nat" (Level 0)
+  , testCase "Nat's eliminator type, at Type1" $ wellFormed natVec natVecCounter "Nat" (Level 1)
+  , testCase "Vec's eliminator type, at Type0" $ wellFormed natVec natVecCounter "Vec" (Level 0)
+  , testCase "Vec's eliminator type, at Type2" $ wellFormed natVec natVecCounter "Vec" (Level 2)
+    -- Phase 10's two: an indexed family with no parameter, whose method
+    -- conclusions are at constructor-supplied indices, and a family with no
+    -- methods at all.
+  , testCase "Fin's eliminator type, at Type0" $ wellFormed natFin natFinCounter "Fin" (Level 0)
+  , testCase "Fin's eliminator type, at Type1" $ wellFormed natFin natFinCounter "Fin" (Level 1)
+  , testCase "Empty's eliminator type, at Type0" $ wellFormed natFin natFinCounter "Empty" (Level 0)
   ]
   where
-    wellFormed d l = case lookupInductive (named d) natVec of
+    wellFormed env n0 d l = case lookupInductive (named d) env of
       Nothing  -> assertFailure (d ++ " is not declared")
       Just def ->
-        let (ty, n) = eliminatorType def l natVecCounter
-         in case fst (infer natVec [] n ty) of
+        let (ty, n) = eliminatorType def l n0
+         in case fst (infer env [] n ty) of
               Right (Universe _) -> pure ()
               Right other        -> assertFailure ("not a type: " ++ show other)
               Left e             -> assertFailure (show e)

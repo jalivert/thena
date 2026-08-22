@@ -10,6 +10,7 @@ import qualified Thena.Core.UnifyTests
 import qualified Thena.CursorTests
 import qualified Thena.DevelopmentTests
 import qualified Thena.DriverTests
+import qualified Thena.EliminatorTests
 import qualified Thena.EngineTests
 import qualified Thena.GlobalTests
 import qualified Thena.GoldenTests
@@ -28,6 +29,7 @@ main =
       , Thena.CursorTests.tests
       , Thena.DevelopmentTests.tests
       , Thena.DriverTests.tests
+      , Thena.EliminatorTests.tests
       , Thena.EngineTests.tests
       , Thena.GlobalTests.tests
       , Thena.GoldenTests.tests

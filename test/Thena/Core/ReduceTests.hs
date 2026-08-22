@@ -12,9 +12,9 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Var, fresh)
-import Thena.Declared (nat, natVec, natVecCounter)
+import Thena.Declared (nat, natFin, natFinCounter, natVec, natVecCounter)
 import Thena.Driver (SyntaxError, parseCore)
-import Thena.Global.Env (Definition (..), addDefinition, emptyGlobals)
+import Thena.Global.Env (Definition (..), GlobalEnv, addDefinition, emptyGlobals)
 
 tests :: TestTree
 tests =
@@ -25,6 +25,7 @@ tests =
     , testGroup "nu (waste disposal)" nuTests
     , testGroup "iota — Nat" iotaNatTests
     , testGroup "iota — an indexed family carries its OWN index" iotaVecTests
+    , testGroup "iota — an indexed family with no parameters" iotaFinTests
     , testGroup "iota refuses an unsaturated target" iotaSaturationTests
     , testGroup "whnf leaves neutral terms alone" neutralTests
     , testGroup "elim's arity is checked at resolve time" elimShapeTests
@@ -63,7 +64,12 @@ hyp n name =
 -- Failing to parse is a fixture bug, not a test result: it errors loudly
 -- rather than quietly turning into an unrelated assertion failure.
 term :: Context -> String -> Core
-term ctx src = case parseCore natVec ctx natVecCounter src of
+term = term' natVec natVecCounter
+
+-- | 'term' against an environment other than 'natVec'. The counter must be
+-- that environment\'s own, for the reason 'hyp' gives.
+term' :: GlobalEnv -> Int -> Context -> String -> Core
+term' env n ctx src = case parseCore env ctx n src of
   Left e       -> error ("fixture term does not resolve: " ++ show e)
   Right (t, _) -> t
 
@@ -195,6 +201,45 @@ iotaVecTests =
     ctx = [evA, en0, ea0, eas0, epm, ecnil, eccons]
 
     elimCons = "elim Vec (A) Pm (cnil ccons) ((succ n0)) (cons A n0 a0 as0)"
+
+-- --------------------------------------------------------------------------
+-- iota — Fin, an indexed family with no parameters
+-- --------------------------------------------------------------------------
+
+-- | What 'iotaVecTests' above cannot catch: @np@ is zero.
+--
+-- 'Thena.Global.Env.recursiveArgument' answers with @drop np args@, and
+-- "Thena.Core.Reduce" substitutes the parameters into a constructor's argument
+-- types before asking. With @Vec@ both numbers are one, so an off-by-one in
+-- either direction still lines up on some case; with @Fin@ the parameter
+-- telescope is empty and the index is the first argument, so a @drop@ that is
+-- one too many silently loses the index it should recurse at.
+--
+-- @fz@ has no recursive argument and @fs@ has one, at its own @n@ while the
+-- elimination is at @succ n@ — thesis §4.1.4's two rules exactly.
+iotaFinTests :: [TestTree]
+iotaFinTests =
+  [ testCase "fz: the base method, applied to its index and nothing else" $
+      elimFin "((succ n0))" "(fz n0)" @?= App (Free mfz) (Free n0)
+  , testCase "fs: the step method recurses at the argument's own index" $
+      elimFin "((succ n0))" "(fs n0 i0)"
+        @?= App
+              (App (App (Free mfs) (Free n0)) (Free i0))
+              (Eliminate (named "Fin") [] (Free pf) [Free mfz, Free mfs]
+                [Free n0] (Free i0))
+  ]
+  where
+    (n0, en0, c1)   = hyp natFinCounter "n0"
+    (i0, ei0, c2)   = hyp c1 "i0"
+    (pf, epf, c3)   = hyp c2 "Pf"
+    (mfz, emfz, c4) = hyp c3 "mfz"
+    (mfs, emfs, _)  = hyp c4 "mfs"
+
+    ctx = [en0, ei0, epf, emfz, emfs]
+
+    elimFin indices target =
+      whnf natFin ctx
+        (term' natFin natFinCounter ctx ("elim Fin () Pf (mfz mfs) " ++ indices ++ " " ++ target))
 
 -- --------------------------------------------------------------------------
 -- iota refuses an unsaturated target

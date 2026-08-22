@@ -50,6 +50,29 @@ tests =
         , "data Big : Type\8320 { wrap : Type\8320 -> Big }"
         , ":quit"
         ]
+      -- The elimination rule, seen (phase 10). The same datatype at two levels
+      -- is §3.7's universe trick: one rule per universe the motive is valued
+      -- in, and no constant that could have held either.
+    , script
+        "eliminators"
+        [ "data Nat : Type\8320 { zero : Nat ; succ : Nat -> Nat }"
+        , "data Fin : Nat -> Type\8320 \
+          \{ fz : \8704 (n : Nat) -> Fin (succ n) \
+          \; fs : \8704 (n : Nat) (i : Fin n) -> Fin (succ n) }"
+        , "data Empty : Type\8320 { }"
+        , ":elim Nat"
+        , ":elim Nat Type\8321"
+        , ":elim Fin"
+        , ":elim Empty"
+        , ":whnf elim Fin () (\\ (n : Nat) (i : Fin n) -> Nat) \
+          \((\\ (n : Nat) -> zero) (\\ (n : Nat) (i : Fin n) (ih : Nat) -> succ ih)) \
+          \((succ (succ zero))) (fs (succ zero) (fz zero))"
+        , ":elim Foo"
+        , ":elim Nat Nat"
+        , ":elim"
+        , ":show FinElim"
+        , ":quit"
+        ]
     , script
         "unification"
         [ "data Nat : Type\8320 { zero : Nat ; succ : Nat -> Nat }"

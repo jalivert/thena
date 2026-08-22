@@ -31,7 +31,7 @@ module Thena.Driver
 
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core, GlobalName (..))
+import Thena.Core.Term (Core (..), GlobalName (..), Level)
 import Thena.Development.Cursor (Cursor, Focus (..), Part (..), focus)
 import Thena.Development.Partial (Partial (..))
 import Thena.Engine
@@ -61,6 +61,8 @@ import Thena.Global.Env
   , lookupConstant
   , lookupDefinition
   , lookupInductive
+  , eliminatorType
+  , inductiveLevel
   )
 import Thena.Core.Convert (convert)
 import Thena.Core.Typing (infer)
@@ -80,7 +82,7 @@ import Thena.Syntax.Parser
   , parseNameAndType
   , parseTerm
   )
-import Thena.Syntax.Resolve (ResolveError, resolve, resolveData, resolvePartial)
+import Thena.Syntax.Resolve (ResolveError (..), resolve, resolveData, resolvePartial)
 
 -- | Everything the session holds.
 --
@@ -115,6 +117,11 @@ data Response
   | Shown Cursor              -- ^ @:show@, and the new state after @:goal@
   | ShownData InductiveDefinition
     -- ^ @:show ‹name›@ on a datatype: the declaration, printed back
+  | ShownEliminator GlobalName Core
+    -- ^ @:elim ‹datatype› [‹universe›]@ — the datatype, and its elimination
+    -- rule at the universe asked for. Not a 'ShownGlobal': the eliminator is
+    -- no global (§3.7, reversed 2026-08-22), so there is no name to print on
+    -- the left and no body to print underneath
   | ShownGlobal GlobalName Core (Maybe Core)
     -- ^ @:show ‹name›@ on anything else: its name, its type, and its body if
     -- it has one. A former has both — the constant is the type of its
@@ -158,6 +165,11 @@ data CommandError
   | UnexpectedArgument String
   | NotAsking
   | NoSuchGlobal String
+  | LevelExpected String
+    -- ^ @:elim Nat Nat@ — @:elim@\'s optional second argument parsed as a term
+    -- but is not a @Typeₗ@ (phase 10). Not called @NotAUniverse@ because
+    -- 'Thena.Syntax.Resolve.ResolveError' has one of those already, about a
+    -- different mistake: a datatype /declared/ at a non-universe
   | NotThere MoveError
     -- ^ a driver command that needs a particular focus, run at another —
     -- @:goal@, and @:whnf@ with no argument (phase 7); the moves are ops and
@@ -238,6 +250,11 @@ dispatch s name arg = case name of
   ":show"  -> case arg of
     "" -> (s, Shown (cursor (proof machine)))
     _  -> showGlobal arg
+  -- The eliminator is not a global, so it is not reachable through @:show@
+  -- (§3.7, reversed by the user 2026-08-22). Its own word, and its own second
+  -- argument: the level comes from the motive at every use site, so there is
+  -- no one rule to print and the command has to be told which one is wanted.
+  ":elim"  -> withArgument (eliminator arg)
   ":where" -> noArgument (s, Where (cursor (proof machine)))
   ":goal"  -> goal
   -- With no argument, view-reduce the core focus (§4.7); with one, an
@@ -316,6 +333,35 @@ dispatch s name arg = case name of
           Nothing -> (s, Rejected (NoSuchGlobal what))
       where
         g = GlobalName what
+
+    -- | @:elim ‹datatype›@, or @:elim ‹datatype› ‹universe›@.
+    --
+    -- The datatype half reports through 'ResolveError'\'s own 'NotADatatype'
+    -- rather than a new case, so @:elim Foo@ and @elim Foo …@ inside a term
+    -- say the same thing about the same mistake.
+    --
+    -- The level defaults to the datatype\'s own, which is the common case and
+    -- nothing more — @Nat@\'s eliminator into @Type₀@. Writing @Type₁@ is how
+    -- §3.7\'s universe trick is seen: the same datatype, a second rule.
+    eliminator what = case lookupInductive g (globals machine) of
+      Nothing -> (s, Failed (ResolveFailed (NotADatatype name')))
+      Just d  -> case level d (dropWhile (== ' ') rest) of
+        Left e  -> e
+        Right l -> (s, ShownEliminator g (fst (eliminatorType d l (names machine))))
+      where
+        (name', rest) = break (== ' ') what
+        g             = GlobalName name'
+
+    -- The universe is read with the ordinary term parser, in the empty
+    -- context, so @:elim Nat Typ₀@ reports a lex error where it happened
+    -- rather than a flat refusal.
+    level :: InductiveDefinition -> String -> Either (Session, Response) Level
+    level d u
+      | null u    = Right (inductiveLevel d)
+      | otherwise = case parseCore (globals machine) [] (names machine) u of
+          Left e                -> Left (s, Failed e)
+          Right (Universe l, _) -> Right l
+          Right _               -> Left (s, Rejected (LevelExpected u))
 
     declaration = withArgument $
       case parseDeclaration (globals machine) (names machine) arg of
