@@ -112,7 +112,7 @@ infer env ctx n term = case term of
       | length as > k -> (Left (OverApplied g), n)
       | otherwise -> case lookupConstant g env of
           Nothing -> (Left (UnknownGlobal g), n)
-          Just ty -> spine env ctx n g ty as
+          Just ty -> spine env ctx n MustSaturate g ty as
 
   -- The elimination rule, in full: build the eliminator's type at the level the
   -- motive is valued in, then walk the node's six field groups down it with the
@@ -129,7 +129,7 @@ infer env ctx n term = case term of
     Just def ->
       motiveLevel env ctx n def m `andThen` \l n1 ->
         let (ety, n2) = eliminatorType def l n1
-         in spine env ctx n2 d ety (ps ++ [m] ++ ms ++ is ++ [tgt])
+         in spine env ctx n2 MayBind d ety (ps ++ [m] ++ ms ++ is ++ [tgt])
 
 -- | Does this term have this type? @infer@, then @convert@ (§5.2).
 check :: GlobalEnv -> Context -> Int -> Core -> Core -> (Either TypeError (), Int)
@@ -146,20 +146,30 @@ sortOf env ctx n t =
     Universe l -> (Right l, n1)
     ty'        -> (Left (NotAType ctx t ty'), n1)
 
+-- | What it means for the walk to end on a Π.
+--
+-- **Corrected phase 14.** Phase 8 rejected a leftover binder for both forms, on
+-- the grounds that both are saturated by construction (§12 invariant 6). That
+-- is right for 'Canonical', whose stored type ends at the datatype or a
+-- universe, so a residual Π can only mean too few arguments. It is wrong for
+-- 'Eliminate': every field group is supplied and the residue is @P indices
+-- target@, which is whatever the motive says — and a motive valued in a
+-- function type is the ordinary way to define a function by recursion.
+-- @elim Nat () (λ t -> Nat -> Nat) (…) () n@, addition, was refused.
+data Residue
+  = MustSaturate  -- ^ a residual Π means arguments are missing
+  | MayBind       -- ^ a residual Π is the motive's own value
+
 -- | Apply a function type to a list of arguments, checking each against the
 -- domain it lands in. The whole of the 'Canonical' and 'Eliminate' rules.
---
--- The residue must not still be a Π: both forms are saturated by construction
--- (§12 invariant 6), so a leftover binder means the caller built the node by
--- hand with too few arguments.
 spine
-  :: GlobalEnv -> Context -> Int -> GlobalName -> Core -> [Core]
+  :: GlobalEnv -> Context -> Int -> Residue -> GlobalName -> Core -> [Core]
   -> (Either TypeError Core, Int)
-spine env ctx n0 g = walk n0
+spine env ctx n0 residue g = walk n0
   where
-    walk n ty [] = case whnf env ctx ty of
-      Pi {} -> (Left (Unsaturated g ty), n)
-      _     -> (Right ty, n)
+    walk n ty [] = case (residue, whnf env ctx ty) of
+      (MustSaturate, Pi {}) -> (Left (Unsaturated g ty), n)
+      _                     -> (Right ty, n)
     walk n ty (a : as) = case whnf env ctx ty of
       Pi _ dom sc ->
         check env ctx n a dom `andThen` \() n1 -> walk n1 (instantiate a sc) as

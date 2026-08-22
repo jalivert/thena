@@ -20,13 +20,9 @@ module Thena.KernelTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
-import Thena.Core.Context (Entry (..))
 import Thena.Core.Term
   ( Core (..)
-  , GlobalName (..)
   , Ident (..)
-  , Level (..)
-  , Var
   , close
   , fresh
   )

@@ -1,0 +1,34 @@
+thena spine> data Eq (A : Type₀) : A -> A -> Type₀ { refl : ∀ (a : A) -> Eq A a a }
+declared Eq
+thena spine> data Term : Type₀ { true : Term ; false : Term ; ifthen : Term -> Term -> Term -> Term ; zero : Term ; succ : Term -> Term }
+declared Term
+thena spine> :show noConfusionTerm
+noConfusionTerm : ∀ (x : Term) (y : Term) -> Eq Term x y -> NoConfusionTerm x y
+noConfusionTerm = λ (x : Term) (y : Term) (e : Eq Term x y) -> elim Eq (Term) (λ (u : Term) (v : Term) (w : Eq Term u v) -> NoConfusionTerm u v) ((λ (a : Term) -> elim Term () (λ (z : Term) -> NoConfusionTerm z z) ((λ (C : Type₀) (k : C) -> k) (λ (C : Type₀) (k : C) -> k) (λ (x1 : Term) (x2 : Term) (x3 : Term) (ih : (λ (z : Term) -> NoConfusionTerm z z) x1) (ih1 : (λ (z : Term) -> NoConfusionTerm z z) x2) (ih2 : (λ (z : Term) -> NoConfusionTerm z z) x3) (C : Type₀) (k : Eq Term x1 x1 -> Eq Term x2 x2 -> Eq Term x3 x3 -> C) -> k (refl Term x1) (refl Term x2) (refl Term x3)) (λ (C : Type₀) (k : C) -> k) (λ (x1 : Term) (ih : (λ (z : Term) -> NoConfusionTerm z z) x1) (C : Type₀) (k : Eq Term x1 x1 -> C) -> k (refl Term x1))) () a)) (x y) e
+thena spine> :whnf NoConfusionTerm true true
+∀ (C : Type₀) -> C -> C
+thena spine> :whnf NoConfusionTerm true (succ zero)
+∀ (C : Type₀) -> C
+thena spine> :whnf NoConfusionTerm (succ true) (succ zero)
+∀ (C : Type₀) -> (Eq Term true zero -> C) -> C
+thena spine> :whnf NoConfusionTerm (ifthen true zero zero) (ifthen false zero zero)
+∀ (C : Type₀) -> (Eq Term true false -> Eq Term zero zero -> Eq Term zero zero -> C) -> C
+thena spine> :goal ∀ (a : Term) (b : Term) -> Eq Term (succ a) (succ b) -> Eq Term a b
+▶ let ? goal : ∀ (a : Term) (b : Term) -> Eq Term (succ a) (succ b) -> Eq Term a b in
+  goal
+thena spine> along
+thena core> unify goal ≟ \ (a : Term) (b : Term) (e : Eq Term (succ a) (succ b)) -> noConfusionTerm (succ a) (succ b) e (Eq Term a b) (\ (q : Eq Term a b) -> q)
+solved: goal
+thena core> :extract
+let goal = λ (a : Term) (b : Term) (e : Eq Term (succ a) (succ b)) -> noConfusionTerm (succ a) (succ b) e (Eq Term a b) (λ (q : Eq Term a b) -> q) : ∀ (a : Term) (b : Term) -> Eq Term (succ a) (succ b) -> Eq Term a b in goal
+thena core> certify ∀ (a : Term) (b : Term) -> Eq Term (succ a) (succ b) -> Eq Term a b
+certified
+thena core> back
+thena spine> data Nat : Type₀ { zero' : Nat ; succ' : Nat -> Nat }
+declared Nat
+thena spine> data Vec (A : Type₀) : Nat -> Type₀ { nil : Vec A zero' ; cons : ∀ (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ' n) }
+no noConfusionVec: cons's argument as has a type that depends on an earlier argument, so its equation cannot be stated
+declared Vec
+thena spine> :show noConfusionVec
+nothing named noConfusionVec has been declared
+thena spine> :quit

@@ -95,6 +95,42 @@ tests =
         , "certify Nat"
         , ":quit"
         ]
+      -- §9's phase-14 deliverable: @noConfusion@ for MS1's own target language,
+      -- printed, computed and certified. The script declares its own @Eq@
+      -- because these transcripts run prelude-free (phase 11) and no equation
+      -- can be stated without one — which is also why the @Nat@ line here gets
+      -- no note and the @Vec@ line does.
+    , script
+        "noconfusion"
+        [ "data Eq (A : Type\8320) : A -> A -> Type\8320 \
+          \{ refl : \8704 (a : A) -> Eq A a a }"
+        , "data Term : Type\8320 \
+          \{ true : Term ; false : Term \
+          \; ifthen : Term -> Term -> Term -> Term \
+          \; zero : Term ; succ : Term -> Term }"
+        , ":show noConfusionTerm"
+        , ":whnf NoConfusionTerm true true"
+        , ":whnf NoConfusionTerm true (succ zero)"
+        , ":whnf NoConfusionTerm (succ true) (succ zero)"
+        , ":whnf NoConfusionTerm (ifthen true zero zero) (ifthen false zero zero)"
+          -- And the deliverable's second half: a proof that goes /through/ the
+          -- generated lemma, extracted and put to the kernel. This is
+          -- injectivity of @succ@, which is what a matching branch of the
+          -- determinacy proof needs.
+        , ":goal \8704 (a : Term) (b : Term) -> Eq Term (succ a) (succ b) -> Eq Term a b"
+        , "along"
+        , "unify goal \8799 \\ (a : Term) (b : Term) (e : Eq Term (succ a) (succ b)) \
+          \-> noConfusionTerm (succ a) (succ b) e (Eq Term a b) (\\ (q : Eq Term a b) -> q)"
+        , ":extract"
+        , "certify \8704 (a : Term) (b : Term) -> Eq Term (succ a) (succ b) -> Eq Term a b"
+        , "back"
+        , "data Nat : Type\8320 { zero' : Nat ; succ' : Nat -> Nat }"
+        , "data Vec (A : Type\8320) : Nat -> Type\8320 \
+          \{ nil : Vec A zero' \
+          \; cons : \8704 (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ' n) }"
+        , ":show noConfusionVec"
+        , ":quit"
+        ]
       -- §9's phase-13 deliverable: a theorem proved by hand, and admitted.
       -- Every step is one of thesis §2's own operations — no unification and
       -- no rule engine.

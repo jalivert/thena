@@ -37,6 +37,7 @@ library
         Thena.Errors
         Thena.Global.Declare
         Thena.Global.Env
+        Thena.Global.NoConfusion
         Thena.Kernel
         Thena.Ops
         Thena.Repl
@@ -84,6 +85,7 @@ test-suite thena-test
         Thena.GlobalTests
         Thena.GoldenTests
         Thena.KernelTests
+        Thena.NoConfusionTests
         Thena.LoadTests
         Thena.DriverTests
         Thena.Declared

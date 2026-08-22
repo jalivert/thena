@@ -24,7 +24,6 @@ import Thena.Driver
   , Loaded (..)
   , Response (..)
   , Session (..)
-  , Stop (..)
   , loadSource
   , newSession
   )

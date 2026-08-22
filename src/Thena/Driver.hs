@@ -37,7 +37,7 @@ module Thena.Driver
 
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Level)
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Level)
 import Thena.Development.Cursor (Cursor, Focus (..), Part (..), focus)
 import Thena.Development.Partial (Partial (..), extract)
 import Thena.Engine
@@ -68,6 +68,7 @@ import Thena.Errors
   )
 import Thena.Development.Validate (revalidate)
 import Thena.Global.Declare (DeclareError, declare)
+import Thena.Global.NoConfusion (Skipped (..), noConfusionNames)
 import Thena.Kernel (certify)
 import Thena.Global.Env
   ( Definition (..)
@@ -934,10 +935,15 @@ progress oneStep s msgs = case step (sessionMachine s) of
   -- is abandoned, and there is nothing to retry the way there is at 'Halted'.
   Engine.Declaring d m -> case declare (globals m) (names m) d of
     Left e -> stop (load [] m) msgs (Refused e)
-    Right (g, n1)
-      | oneStep   -> stop installed msgs Paused
-      | otherwise -> progress oneStep s { sessionMachine = installed } msgs
-      where installed = m { globals = g, names = n1 }
+    Right (g, n1, skip)
+      | oneStep   -> stop installed msgs' Paused
+      | otherwise -> progress oneStep s { sessionMachine = installed } msgs'
+      where
+        installed = m { globals = g, names = n1 }
+        -- Said here rather than by a 'Say' in the program, because the program
+        -- is built before 'declare' runs and cannot know (§7.5: the driver owns
+        -- what the driver decides).
+        msgs' = maybe msgs (\why -> whyNoConfusion (inductiveName d) why : msgs) skip
   -- The kernel runs here, outside the machine, for 'Declaring'\'s reason: it is
   -- policy, and §7.5 has the driver own policy. On refusal the rest of the
   -- program is dropped.
@@ -955,6 +961,27 @@ progress oneStep s msgs = case step (sessionMachine s) of
 
 nameOf :: InductiveDefinition -> String
 nameOf d = case inductiveName d of GlobalName x -> x
+
+-- | Why a datatype got no no-confusion (phase 14).
+--
+-- A message, not an error, so it is a 'String' here beside @"declared X"@ and
+-- @"certified"@ rather than structured data rendered in "Thena.Repl". The
+-- declaration succeeded; this says what it does not come with.
+--
+-- 'NoEquality' never reaches here — "Thena.Global.Declare" keeps it quiet,
+-- because it is a fact about the environment rather than about the declaration
+-- and would fire on every @data@ line of a prelude-free script.
+whyNoConfusion :: GlobalName -> Skipped -> String
+whyNoConfusion d why = "no " ++ str (snd (noConfusionNames d)) ++ ": " ++ because
+  where
+    str (GlobalName x) = x
+    because = case why of
+      NoEquality -> "there is no Eq in scope"
+      NotAtTypeZero _ ->
+        str d ++ " is not declared at Type\8320, and Eq relates only Type\8320 types"
+      DependentArguments c (Ident i) ->
+        str c ++ "'s argument " ++ i ++ " has a type that depends on an earlier"
+          ++ " argument, so its equation cannot be stated"
 
 mapLeft :: (a -> b) -> Either a c -> Either b c
 mapLeft f = either (Left . f) Right

@@ -9,10 +9,13 @@
 -- §4.1.1 restricts the universe of a constructor's arguments and checking it
 -- needs level inference. 'universes' below is it.
 --
--- **Eliminator generation is not in this phase either.** Phase 10 extends this
--- module with §3.7's items 1, 3 and 4 — the eliminator's type, the
--- @NoConfusion@ family and the @noConfusion@ lemma. Phase 6 has item 2, the
--- former wrappers, which are purely syntactic and need no typing.
+-- **The eliminator is generated nowhere** — its type is a derived function of
+-- the record, 'Thena.Global.Env.eliminatorType' (§3.7, reversed by the user
+-- 2026-08-22). What phase 14 adds here is §3.7's items 3 and 4, the
+-- @NoConfusion@ family and the @noConfusion@ lemma, and they live in
+-- "Thena.Global.NoConfusion" because emitting a proof term is a different kind
+-- of code from deciding whether a declaration may be admitted. Phase 6 has item
+-- 2, the former wrappers, which are purely syntactic and need no typing.
 module Thena.Global.Declare
   ( DeclareError (..)
   , declare
@@ -32,6 +35,11 @@ import Thena.Core.Term
   , fresh
   , globalsIn
   , open
+  )
+import Thena.Global.NoConfusion
+  ( Generated (..)
+  , Skipped (..)
+  , generateNoConfusion
   )
 import Thena.Global.Env
   ( ConstructorDefinition (..)
@@ -73,6 +81,11 @@ data DeclareError
   | ArgumentTooLarge GlobalName Ident Level Level
     -- ^ constructor, argument, the universe the argument lives in, and the
     -- datatype's own — thesis §4.1.1 (phase 8)
+  | NoConfusionRejected GlobalName TypeError
+    -- ^ **a generator bug, not a user mistake** (phase 14): the checker refused
+    -- a definition "Thena.Global.NoConfusion" emitted. It is a refusal rather
+    -- than a crash because §3.7 has these checked like anything else, and a
+    -- checked thing that fails has to be able to say so.
   deriving (Eq, Show)
 
 -- | Check a declaration and admit it, or say why not.
@@ -86,9 +99,13 @@ data DeclareError
 -- phase 6). @define-data@ yields the resolved declaration through the single
 -- channel and the driver runs this, exactly as §7.5 has the driver run kernel
 -- policy for @Certify@ at phase 12. No instruction writes globals.
+-- **Also reports what no-confusion did not do.** The 'Skipped' is a fact about
+-- the declaration the user just wrote — @Vec@ gets no @noConfusionVec@ — and
+-- the driver says it. 'Thena.Global.NoConfusion.NoEquality' is the one case
+-- that is about the environment instead, and it is silent.
 declare
   :: GlobalEnv -> Int -> InductiveDefinition
-  -> Either DeclareError (GlobalEnv, Int)
+  -> Either DeclareError (GlobalEnv, Int, Maybe Skipped)
 declare env n d = do
   checkNames env d
   n1 <- foldM
@@ -96,7 +113,15 @@ declare env n d = do
           n
           (inductiveConstructors d)
   n2 <- universes env n1 d
-  Right (generate d env, n2)
+  -- The wrappers first: the generated terms name the datatype's own former and
+  -- constructors, so they must already resolve.
+  let env1 = generate d env
+  case generateNoConfusion env1 n2 d of
+    Generated env2 n3 -> Right (env2, n3, Nothing)
+    Declined NoEquality -> Right (env1, n2, Nothing)
+    Declined why        -> Right (env1, n2, Just why)
+    Clash g            -> Left (AlreadyDeclared g)
+    Rejected g e       -> Left (NoConfusionRejected g e)
 
 -- --------------------------------------------------------------------------
 -- Checking

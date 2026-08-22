@@ -1051,6 +1051,11 @@ renderDeclareError e = case e of
   ArgumentNotAType g i te ->
     "the argument " ++ identString i ++ " of " ++ nameString g ++ " is ill-typed"
       ++ concatMap ("\n  " ++) (renderTypeError 0 te)
+  -- Worded as a bug report because it is one: nothing the user wrote is wrong,
+  -- and the term the checker refused is one they never saw (phase 14).
+  NoConfusionRejected g te ->
+    "the generated " ++ nameString g ++ " does not typecheck, which is a bug in Thena"
+      ++ concatMap ("\n  " ++) (renderTypeError 0 te)
 
 -- --------------------------------------------------------------------------
 -- Typing and conversion (§5.2)

@@ -40,10 +40,43 @@ tests =
     , testGroup "elimination" elimTests
     , testGroup "the generated eliminator type is itself a type" eliminatorTypeTests
     , testGroup "typing and iota agree — subject reduction" subjectReductionTests
+    , testGroup "an elimination may return a function" recursiveFunctionTests
     , testGroup "check is infer then convert" checkTests
     , testGroup "what goes wrong" errorTests
     , testGroup "the counter comes back" counterTests
     ]
+
+-- | Addition, defined by recursion on the first argument — the motive is
+-- valued in @Nat -> Nat@, so the elimination's own type is a Π.
+--
+-- **A phase-8 bug, found while planning phase 14.** @spine@ refused any walk
+-- that ended on a Π, on the grounds that both 'Canonical' and 'Eliminate' are
+-- saturated by construction (§12 invariant 6). That is right for a 'Canonical',
+-- whose stored type ends at the datatype or a universe. For an 'Eliminate'
+-- every field group /is/ supplied and the residue is @P indices target@, which
+-- is whatever the motive says — so this, the ordinary way to define a function
+-- by recursion, was rejected as "Nat is not given enough arguments".
+--
+-- Typed and then reduced, because the two are different code: a residue check
+-- that let the term through while ι mishandled it would pass the first half.
+recursiveFunctionTests :: [TestTree]
+recursiveFunctionTests =
+  [ testCase "add has a function type" $
+      hasType add "Nat -> Nat"
+  , testCase "applied, it has the element type" $
+      hasType ("(" ++ add ++ ") (succ zero)") "Nat"
+  , testCase "and it computes: 1 + 1 = 2" $
+      case convert natVec [] natVecCounter
+             (term ("(" ++ add ++ ") (succ zero)"))
+             (term "succ (succ zero)") of
+        (Nothing,  _) -> pure ()
+        (Just why, _) -> assertFailure ("does not converge: " ++ show why)
+  ]
+  where
+    add =
+      "elim Nat () (\\ (t : Nat) -> Nat -> Nat) \
+      \((\\ (m : Nat) -> m) (\\ (k : Nat) (ih : Nat -> Nat) (m : Nat) -> succ (ih m))) \
+      \() (succ zero)"
 
 -- --------------------------------------------------------------------------
 -- Fixtures
