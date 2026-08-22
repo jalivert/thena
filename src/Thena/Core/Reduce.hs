@@ -21,6 +21,7 @@ import Thena.Global.Env
   , formerArity
   , lookupDefinition
   , lookupInductive
+  , recursiveArgument
   )
 
 -- | Reduce to weak head normal form (§5.1): β, δ (all three forms), ν, and ι.
@@ -152,15 +153,12 @@ iota env d ps m ms cg cargs = do
 -- Which arguments are recursive, and each one's own indices @a⃗ⱼ@, are read
 -- off 'constructorArguments'\' stored types — never a second table (§3.7).
 --
--- **This classifies by the argument type's spine head, which is only complete
--- because "Thena.Global.Declare" rejects higher-order recursion.** A
--- @sup : (Nat -> Ord) -> Ord@ argument (thesis §4.1.3) has spine head @Pi@,
--- not @Global Ord@, so it would be taken for non-recursive and produce **no**
--- recursive call — where §4.1.3's rule wants a λ-abstracted one,
--- @λ z⃗ . DataElim P m⃗ (g z⃗)@. Today that is unreachable: @Declare@ refuses
--- the declaration with 'Thena.Global.Declare.HigherOrderRecursion'. If MS1's
--- limit is ever lifted, this function must be extended in the same commit —
--- otherwise a declaration-time error silently becomes a wrong reduct.
+-- **Which arguments are recursive is decided by 'recursiveArgument', shared
+-- with the eliminator's type** (phase 8). It has to be shared: if ι and the
+-- eliminator's typing rule disagreed about which arguments are recursive, a
+-- datatype would reduce by a rule its own eliminator is not typed for. That
+-- function also carries the standing caveat — the classification is complete
+-- only while "Thena.Global.Declare" rejects higher-order recursion.
 -- Those stored types are written against the *declaration's own* formal
 -- variables — the parameter telescope's and the earlier arguments' — so the
 -- substitution seeds itself with the parameters (formal var ↦ @ps@, the
@@ -182,10 +180,9 @@ recursiveCalls def ps m ms con = go (constructorArguments con) seed
     go (e : es) subst (a : as) =
       let ty' = foldl (\ty (x, v) -> substFree x v ty) (entryType e) subst
           rest = go es ((entryVar e, a) : subst) as
-       in case spine ty' of
-            (Global g, sargs) | g == dn ->
-              Eliminate dn ps m ms (drop np sargs) a : rest
-            _ -> rest
+       in case recursiveArgument dn np ty' of
+            Just is -> Eliminate dn ps m ms is a : rest
+            Nothing -> rest
     go _ _ _ = []   -- mismatched arities: not a saturated value of this constructor
 
 -- | Substitute a free variable throughout a term. Not new machinery: 'close'
@@ -209,12 +206,3 @@ atIndex i xs
   | otherwise = case drop i xs of
       x : _ -> Just x
       []    -> Nothing
-
--- | An application spine, head first. The same shape "Thena.Syntax.Resolve"
--- and "Thena.Global.Declare" each compute locally rather than sharing — a
--- three-line function is not worth a fourth module importing it.
-spine :: Core -> (Core, [Core])
-spine = go []
-  where
-    go as (App f a) = go (a : as) f
-    go as t         = (t, as)

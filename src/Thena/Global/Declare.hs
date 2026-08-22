@@ -5,10 +5,9 @@
 -- "Thena.Core.Reduce" — that split is the whole reason @Global@ is two modules
 -- (§2.5). Nothing here may move down into 'Thena.Global.Env'.
 --
--- **The universe check is not in this phase.** Thesis §4.1.1 restricts the
--- universe of a constructor's non-recursive arguments, and checking it needs
--- level inference, so it is back-filled here at phase 8 when @infer@ exists
--- (§9). This is a marked omission, not an oversight.
+-- **The universe check landed at phase 8**, as §9 said it would: thesis
+-- §4.1.1 restricts the universe of a constructor's arguments and checking it
+-- needs level inference. 'universes' below is it.
 --
 -- **Eliminator generation is not in this phase either.** Phase 10 extends this
 -- module with §3.7's items 1, 3 and 4 — the eliminator's type, the
@@ -21,7 +20,11 @@ module Thena.Global.Declare
 
 import Control.Monad (foldM)
 
-import Thena.Core.Context (Entry (..), entryVar, lamOver)
+import Thena.Core.Context (Context, Entry (..), entryType, entryVar, lamOver)
+import Thena.Core.Reduce (whnf)
+import Thena.Core.Term (Level)
+import Thena.Core.Typing (infer)
+import Thena.Errors (TypeError (..))
 import Thena.Core.Term
   ( Core (..)
   , GlobalName
@@ -65,6 +68,11 @@ data DeclareError
     -- ^ @sup : (Nat -> Ord) -> Ord@ — thesis §4.1.3, out of MS1
   | NestedRecursion GlobalName Ident
     -- ^ the datatype occurs under another type former, as in @List D@
+  | ArgumentNotAType GlobalName Ident TypeError
+    -- ^ this argument's type does not itself have a type (phase 8)
+  | ArgumentTooLarge GlobalName Ident Level Level
+    -- ^ constructor, argument, the universe the argument lives in, and the
+    -- datatype's own — thesis §4.1.1 (phase 8)
   deriving (Eq, Show)
 
 -- | Check a declaration and admit it, or say why not.
@@ -87,11 +95,57 @@ declare env n d = do
           (constructor (inductiveName d) (length (inductiveIndices d)))
           n
           (inductiveConstructors d)
-  Right (generate d env, n1)
+  n2 <- universes env n1 d
+  Right (generate d env, n2)
 
 -- --------------------------------------------------------------------------
 -- Checking
 -- --------------------------------------------------------------------------
+
+-- | Thesis §4.1.1: the declared universe must dominate the universes its
+-- constructors\' arguments live in. Without it a larger universe can be
+-- embedded in a smaller one and the system is inconsistent.
+--
+-- **Checked in an environment where the type former exists and nothing else
+-- of the declaration does.** That is not a convenience: a recursive argument\'s
+-- type mentions @D@, so it cannot be typed at all until @D@ has one, and the
+-- eliminator and the wrappers must /not/ exist yet because they are generated
+-- from the completed declaration (@AGENDA.md@ item 28 confirms this is the
+-- intended reading, and Agda and Idris agree).
+--
+-- **Applied uniformly, to recursive and non-recursive arguments alike**, though
+-- §4.1.1 restricts only the non-recursive ones. It comes to the same thing: a
+-- recursive argument is an application of @D@, whose type is the declared
+-- universe exactly, so @≤@ holds for it by construction. One rule beats two
+-- with a classification between them.
+--
+-- The context is the parameters plus the arguments already walked, which is
+-- what the stored types are written against — no opening, no substitution.
+universes :: GlobalEnv -> Int -> InductiveDefinition -> Either DeclareError Int
+universes env n0 d = foldM eachConstructor n0 (inductiveConstructors d)
+  where
+    provisional = addConstant (inductiveName d) (formerType d) env
+
+    eachConstructor n c = go n (inductiveParameters d) (constructorArguments c)
+      where
+        go n' _   []       = Right n'
+        go n' ctx (e : es) = case infer provisional ctx n' (entryType e) of
+          (Left err, _) -> Left (ArgumentNotAType (constructorName c) (identOf e) err)
+          (Right ty, n'') -> case whnf provisional ctx ty of
+            Universe l
+              | l <= inductiveLevel d -> go n'' (ctx ++ [e]) es
+              | otherwise ->
+                  Left (ArgumentTooLarge (constructorName c) (identOf e) l (inductiveLevel d))
+            ty' -> Left (ArgumentNotAType (constructorName c) (identOf e)
+                          (notAType ctx (entryType e) ty'))
+
+    identOf :: Entry -> Ident
+    identOf e = case e of
+      Hypothesis _ i _   -> i
+      Definition _ i _ _ -> i
+
+    notAType :: Context -> Core -> Core -> TypeError
+    notAType = NotAType
 
 -- | Every name a declaration introduces must be free, and distinct from the
 -- others it introduces.

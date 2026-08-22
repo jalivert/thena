@@ -12,9 +12,9 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Var, fresh)
-import Thena.Driver (SyntaxError, parseCore, parseDeclaration)
-import Thena.Global.Declare (declare)
-import Thena.Global.Env (Definition (..), GlobalEnv, addDefinition, emptyGlobals)
+import Thena.Declared (nat, natVec, natVecCounter)
+import Thena.Driver (SyntaxError, parseCore)
+import Thena.Global.Env (Definition (..), addDefinition, emptyGlobals)
 
 tests :: TestTree
 tests =
@@ -33,35 +33,9 @@ tests =
 -- --------------------------------------------------------------------------
 -- Fixtures
 -- --------------------------------------------------------------------------
-
-natDecl, vecDecl :: String
-natDecl = "Nat : Type\8320 { zero : Nat ; succ : Nat -> Nat }"
-vecDecl =
-  "Vec (A : Type\8320) : Nat -> Type\8320 \
-  \{ nil : Vec A zero \
-  \; cons : forall (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ n) }"
-
-declareAll :: [String] -> Either String (GlobalEnv, Int)
-declareAll = foldl one (Right (emptyGlobals, 0))
-  where
-    one acc src = do
-      (env, n) <- acc
-      (d, n1)  <- shown (parseDeclaration env n src)
-      shown (declare env n1 d)
-    shown :: Show e => Either e a -> Either String a
-    shown = either (Left . show) Right
-
-declared :: [String] -> (GlobalEnv, Int)
-declared srcs = case declareAll srcs of
-  Left e  -> error ("fixture refused: " ++ e)
-  Right r -> r
-
-nat, natVec :: GlobalEnv
-nat    = fst (declared [natDecl])
-natVec = fst (declared [natDecl, vecDecl])
-
-natVecCounter :: Int
-natVecCounter = snd (declared [natDecl, vecDecl])
+--
+-- @Nat@ and @Vec@ come from "Thena.Declared", shared with the conversion and
+-- typing suites so that all three agree about what they are.
 
 named :: String -> GlobalName
 named = GlobalName

@@ -77,7 +77,14 @@ import Thena.Engine
   , proof
   , proofContext
   )
-import Thena.Errors (FailReason (..), MoveError (..))
+import Thena.Errors
+  ( Clash (..)
+  , ConversionFailure (..)
+  , FailReason (..)
+  , MoveError (..)
+  , Site (..)
+  , TypeError (..)
+  )
 import Thena.Global.Declare (DeclareError (..))
 import Thena.Global.Env
   ( ConstructorDefinition (..)
@@ -170,6 +177,17 @@ renderResponse s resp = case resp of
   ShownData d    -> renderInductive (counter s) d
   ShownGlobal g ty body -> renderGlobal (counter s) g ty body
   Where c        -> renderWhere (counter s) c
+  Inferred t ty  ->
+    [renderCore (counter s) (contextOf s) t ++ " : " ++ renderCore (counter s) (contextOf s) ty]
+  IllTyped e     -> renderTypeError (counter s) e
+  -- The two terms are restated, because with η a yes is printed about terms
+  -- that still look different (§5.2).
+  Converted a b why ->
+    let q = renderCore (counter s) (contextOf s) a
+              ++ " ≟ " ++ renderCore (counter s) (contextOf s) b
+     in case why of
+          Nothing -> [q ++ "   yes"]
+          Just f  -> (q ++ "   no") : renderConversionFailure (counter s) f
   Ran msgs stop  -> msgs ++ renderStop s stop
   Failed e       -> [renderSyntaxError e]
   Rejected e     -> [renderCommandError e]
@@ -848,6 +866,83 @@ renderDeclareError e = case e of
       ++ " of "
       ++ nameString g
       ++ " mentions the datatype under another type, which MS1 does not admit yet"
+  ArgumentTooLarge g i (Level l) (Level d) ->
+    "the argument "
+      ++ identString i
+      ++ " of "
+      ++ nameString g
+      ++ " lives in Type"
+      ++ subscript l
+      ++ ", which the datatype's own Type"
+      ++ subscript d
+      ++ " does not contain"
+  ArgumentNotAType g i te ->
+    "the argument " ++ identString i ++ " of " ++ nameString g ++ " is ill-typed"
+      ++ concatMap ("\n  " ++) (renderTypeError 0 te)
+
+-- --------------------------------------------------------------------------
+-- Typing and conversion (§5.2)
+-- --------------------------------------------------------------------------
+
+-- | Why a term has no type. Each case renders its terms in the context the
+-- error carries, not the session's: by the time inference has opened three
+-- binders the terms mention variables the session has never heard of.
+renderTypeError :: Int -> TypeError -> [String]
+renderTypeError n e = case e of
+  UnknownVariable ctx x       -> [nameIn ctx x ++ " is not in scope"]
+  UnknownGlobal g        -> [nameString g ++ " is not declared"]
+  LooseIndex i           -> ["a loose de Bruijn index " ++ show i ++ " reached the checker"]
+  NotAType ctx t ty      ->
+    [renderCore n ctx t ++ " is not a type — it has type " ++ renderCore n ctx ty]
+  NotAFunction ctx t ty  ->
+    [renderCore n ctx t ++ " cannot be applied — it has type " ++ renderCore n ctx ty]
+  NotOfType ctx t want got why ->
+    [ renderCore n ctx t ++ " has type " ++ renderCore n ctx got
+    , "  but " ++ renderCore n ctx want ++ " was expected"
+    ] ++ renderConversionFailure n why
+  UnknownDatatype g         -> [nameString g ++ " is not a declared datatype"]
+  NotAMotive ctx m ty    ->
+    [ renderCore n ctx m ++ " is not a motive for this family"
+    , "  it has type " ++ renderCore n ctx ty ++ ", which does not end in a universe"
+    ]
+  Unsaturated g ty       ->
+    [nameString g ++ " is not given enough arguments — " ++ renderCore n [] ty ++ " is left over"]
+  OverApplied g          -> [nameString g ++ " is given too many arguments"]
+
+-- | Why two terms are not convertible: where, then what.
+renderConversionFailure :: Int -> ConversionFailure -> [String]
+renderConversionFailure n (ConversionFailure sites clash) =
+  [ "  " ++ where_ ++ renderClash n clash ]
+  where
+    where_
+      | null sites = ""
+      | otherwise  = concatMap ((++ ", ") . siteWord) sites
+
+siteWord :: Site -> String
+siteWord site = case site of
+  TheDomain i        -> "in the domain of " ++ identString i
+  TheBody i          -> "under " ++ identString i
+  TheFunction        -> "in the function"
+  TheArgument        -> "in the argument"
+  TheArgumentOf g k  -> "in argument " ++ show (k + 1) ++ " of " ++ nameString g
+  TheParameter k     -> "in parameter " ++ show (k + 1)
+  TheMotive          -> "in the motive"
+  TheMethod k        -> "in method " ++ show (k + 1)
+  TheIndex k         -> "in index " ++ show (k + 1)
+  TheTarget          -> "in the target"
+
+renderClash :: Int -> Clash -> String
+renderClash n clash = case clash of
+  HeadsDiffer ctx a b  -> renderCore n ctx a ++ " and " ++ renderCore n ctx b ++ " do not match"
+  LevelsDiffer (Level a) (Level b) ->
+    "Type" ++ subscript a ++ " and Type" ++ subscript b ++ " are different universes"
+  NamesDiffer a b      -> nameString a ++ " and " ++ nameString b ++ " are different names"
+  VariablesDiffer a b  -> "the variables " ++ show a ++ " and " ++ show b ++ " are different"
+  CountsDiffer a b     -> show a ++ " arguments against " ++ show b
+
+-- | A variable's display name, taken from the context the error carries.
+nameIn :: Context -> Var -> String
+nameIn ctx x = nameOf x (envOf ctx)
 
 nameString :: GlobalName -> String
 nameString (GlobalName g) = g

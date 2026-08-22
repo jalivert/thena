@@ -50,7 +50,7 @@ import Thena.Engine
   , step
   )
 import qualified Thena.Engine as Engine
-import Thena.Errors (FailReason, MoveError (..))
+import Thena.Errors (ConversionFailure, FailReason, MoveError (..), TypeError)
 import Thena.Global.Declare (DeclareError, declare)
 import Thena.Global.Env
   ( Definition (..)
@@ -62,6 +62,8 @@ import Thena.Global.Env
   , lookupDefinition
   , lookupInductive
   )
+import Thena.Core.Convert (convert)
+import Thena.Core.Typing (infer)
 import Thena.Ops
   ( AnswerKind (..)
   , Instr (..)
@@ -71,7 +73,13 @@ import Thena.Ops
   )
 import Thena.Syntax.Concrete (Raw)
 import Thena.Syntax.Lexer (LexError, Located, Token, lexTokens)
-import Thena.Syntax.Parser (ParseError, parseData, parseNameAndType, parseTerm)
+import Thena.Syntax.Parser
+  ( ParseError
+  , parseData
+  , parseEquation
+  , parseNameAndType
+  , parseTerm
+  )
 import Thena.Syntax.Resolve (ResolveError, resolve, resolveData, resolvePartial)
 
 -- | Everything the session holds.
@@ -114,6 +122,12 @@ data Response
     -- wrapper (§3.3.1) — and this shows the wrapper, which is what the name
     -- means when it is written.
   | Where Cursor              -- ^ @:where@ — the focus, the path, Γ, the type
+  | Inferred Core Core        -- ^ @:infer@ — the term, and the type it has
+  | IllTyped TypeError        -- ^ @:infer@ — why it has none
+  | Converted Core Core (Maybe ConversionFailure)
+    -- ^ @:convert@ — the two terms, and 'Nothing' if they are convertible.
+    -- Both terms are kept so the answer can restate the question: with η in
+    -- play a yes is printed about two terms that still look different (§5.2)
   | Ran [Message] Stop        -- ^ what the machine said, and where it stopped
   | Failed SyntaxError
   | Rejected CommandError
@@ -183,6 +197,22 @@ parseDeclaration env n src = do
   raw <- mapLeft ParseFailed (parseData ts)
   mapLeft ResolveFailed (resolveData env n raw)
 
+-- | Lex, parse and resolve the two sides of @:convert t ≟ u@.
+--
+-- Its own entry point for 'parseDeclaration'\'s reason — a different start
+-- symbol — and it threads the counter from the first term into the second, so
+-- the two are resolved in one continuous supply of names rather than two that
+-- overlap.
+parseEquated
+  :: GlobalEnv -> Context -> Int -> String
+  -> Either SyntaxError ((Core, Core), Int)
+parseEquated env ctx n src = do
+  ts       <- tokensOf src
+  (r1, r2) <- mapLeft ParseFailed (parseEquation ts)
+  (a, n1)  <- mapLeft ResolveFailed (resolve env ctx n r1)
+  (b, n2)  <- mapLeft ResolveFailed (resolve env ctx n1 r2)
+  Right ((a, b), n2)
+
 tokensOf :: String -> Either SyntaxError [Located Token]
 tokensOf = mapLeft LexFailed . lexTokens
 
@@ -219,6 +249,16 @@ dispatch s name arg = case name of
       OnTerm _ _ t -> (s, Rendered (whnf (globals machine) ctx t))
       _            -> (s, Rejected (NotThere NotInCore))
     _  -> view s parseCore (Rendered . whnf (globals machine) ctx) arg
+  -- The same no-argument/with-argument split as @:whnf@ and @:show@: with no
+  -- argument it is the core focus, with one it is a term the user writes.
+  ":infer" -> case arg of
+    "" -> case focus (cursor (proof machine)) of
+      OnTerm _ _ t -> inferred t (names machine)
+      _            -> (s, Rejected (NotThere NotInCore))
+    _  -> case parseCore (globals machine) ctx (names machine) arg of
+      Left e        -> (s, Failed e)
+      Right (t, n1) -> inferred t n1
+  ":convert" -> conversion
   ":step"  -> stepping
   ":run"   -> noArgument (progress False s [])
   "assume" -> tactic "assumption" "assumed" Assume
@@ -281,6 +321,21 @@ dispatch s name arg = case name of
       Right (t, n1) -> case setGoal t machine { names = n1 } of
         Left e   -> (s, Rejected (NotThere e))
         Right m' -> (s { sessionMachine = m' }, Shown (cursor (proof m')))
+
+    -- Both of these advance the session counter even when they fail. Conversion
+    -- and inference mint variables to open binders with, and a name that has
+    -- reached the user inside an error must never be handed out again (§7.4).
+    bump n = s { sessionMachine = machine { names = n } }
+
+    inferred t n = case infer (globals machine) ctx n t of
+      (Left e,   n1) -> (bump n1, IllTyped e)
+      (Right ty, n1) -> (bump n1, Inferred t ty)
+
+    conversion = withArgument $
+      case parseEquated (globals machine) ctx (names machine) arg of
+        Left e -> (s, Failed e)
+        Right ((a, b), n1) -> case convert (globals machine) ctx n1 a b of
+          (why, n2) -> (bump n2, Converted a b why)
 
     stepping = case arg of
       ""    -> progress True s []

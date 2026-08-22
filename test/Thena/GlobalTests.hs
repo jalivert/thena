@@ -28,6 +28,7 @@ import Thena.Core.Term
   , open
   )
 import Thena.Driver (parseCore, parseDeclaration)
+import Thena.Errors (TypeError (..))
 import Thena.Global.Declare (DeclareError (..), declare)
 import Thena.Global.Env
   ( Definition (..)
@@ -58,6 +59,7 @@ tests =
     , testGroup "the generated wrappers" wrapperTests
     , testGroup "generation agrees with the ordinary resolver" agreesWithTheResolver
     , testGroup "strict positivity" positivityTests
+    , testGroup "universes (thesis §4.1.1, back-filled at phase 8)" universeTests
     , testGroup "names" nameTests
     , testGroup "printed and read back" roundTripTests
     ]
@@ -242,6 +244,39 @@ positivityTests =
   , refused "the argument is named in the message when it has a name"
       "T : Type\8320 { c : forall (f : T -> T) -> T }"
       (NotStrictlyPositive (named "c") (Ident "f"))
+  ]
+
+-- --------------------------------------------------------------------------
+-- Universes (thesis §4.1.1)
+-- --------------------------------------------------------------------------
+--
+-- The check needs 'Thena.Core.Typing.infer', so it could only land once phase 8
+-- existed. Two things it must get right beyond the inequality itself: the type
+-- former has to be in scope while its own constructors are checked, or no
+-- recursive argument types at all; and each argument is checked in a context of
+-- the parameters plus the arguments before it, or a telescope that refers back
+-- to itself does not type either.
+
+universeTests :: [TestTree]
+universeTests =
+  [ accepted "a small argument in a large datatype"
+      "T : Type\8321 { c : Type\8320 -> T }"
+  , refused "a large argument in a small datatype"
+      "T : Type\8320 { c : Type\8320 -> T }"
+      (ArgumentTooLarge (named "c") (Ident "x") (Level 1) (Level 0))
+  , accepted "a recursive argument, which needs the former in scope already"
+      "T : Type\8320 { c : T -> T }"
+  , accepted "a parameter used as an argument's type"
+      "Box (A : Type\8320) : Type\8320 { box : A -> Box A }"
+  , refused "a parameter from a larger universe than the datatype"
+      "Box (A : Type\8321) : Type\8320 { box : A -> Box A }"
+      (ArgumentTooLarge (named "box") (Ident "x") (Level 1) (Level 0))
+  , accepted "an argument whose type mentions an earlier argument"
+      "T : Type\8320 { c : forall (n : Nat) (v : Vec Nat n) -> T }"
+  , refused "an argument whose type is not a type at all"
+      "T : Type\8320 { c : zero -> T }"
+      (ArgumentNotAType (named "c") (Ident "x")
+         (NotAType [] (Global (named "zero")) (Canonical (named "Nat") [])))
   ]
 
 -- --------------------------------------------------------------------------

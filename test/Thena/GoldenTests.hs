@@ -31,6 +31,26 @@ tests =
         , ":quit"
         ]
     , script
+        "typing"
+        [ "data Nat : Type\8320 { zero : Nat ; succ : Nat -> Nat }"
+        , ":infer succ zero"
+        , ":infer \\ (x : Nat) -> x"
+        , ":infer \8704 (A : Type\8320) -> A"
+        , ":convert succ \8799 \\ (n : Nat) -> succ n"
+        , ":convert Type\8320 \8799 Type\8321"
+        , ":convert succ zero \8799 succ (succ zero)"
+        , ":infer zero zero"
+        , ":infer elim Nat () (\\ (_ : Nat) -> Nat) (zero succ) () (succ zero)"
+        , "claim h : Nat"
+        , "cross type"
+        , ":infer"
+        , "back"
+        , "back"
+        , ":infer"
+        , "data Big : Type\8320 { wrap : Type\8320 -> Big }"
+        , ":quit"
+        ]
+    , script
         "stepping"
         [ ":step on"
         , "assume A : Type₀"

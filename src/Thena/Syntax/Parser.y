@@ -4,6 +4,7 @@ module Thena.Syntax.Parser
   , parseTerm
   , parseNameAndType
   , parseData
+  , parseEquation
   ) where
 
 import Thena.Syntax.Concrete
@@ -19,6 +20,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 %name parseTerm Term
 %name parseNameAndType NameAndType
 %name parseData Data
+%name parseEquation Equation
 %tokentype { Located Token }
 %monad { Either ParseError }
 %error { parseError }
@@ -64,6 +66,13 @@ Term :: { Raw }
       { RawElim $2 (reverse $4) $6 (reverse $8) (reverse $11) $13 }
   | App '->' Term                                  { RawArrow $1 $3 }
   | App                                            { $1 }
+
+-- The argument of @:convert@ (§9, phase 8). Two terms and the @≟@ that §2.7
+-- already spells a constraint's two sides with, so the separator is not a new
+-- piece of notation — it is the one the user chose for exactly this question,
+-- asked without a context or a type.
+Equation :: { (Raw, Raw) }
+  : Term '≟' Term                          { ($1, $3) }
 
 -- The argument of @assume@ and @claim@ (§2.4's "commands are the op vocabulary
 -- spelled out"). The nameless form is the one that makes the op ask (§7.5).

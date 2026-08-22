@@ -1,0 +1,34 @@
+thena spine> data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }
+declared Nat
+thena spine> :infer succ zero
+succ zero : Nat
+thena spine> :infer \ (x : Nat) -> x
+λ (x : Nat) -> x : Nat -> Nat
+thena spine> :infer ∀ (A : Type₀) -> A
+∀ (A : Type₀) -> A : Type₁
+thena spine> :convert succ ≟ \ (n : Nat) -> succ n
+succ ≟ λ (n : Nat) -> succ n   yes
+thena spine> :convert Type₀ ≟ Type₁
+Type₀ ≟ Type₁   no
+  Type₀ and Type₁ are different universes
+thena spine> :convert succ zero ≟ succ (succ zero)
+succ zero ≟ succ (succ zero)   no
+  in argument 1 of succ, zero and succ are different names
+thena spine> :infer zero zero
+zero cannot be applied — it has type Nat
+thena spine> :infer elim Nat () (\ (_ : Nat) -> Nat) (zero succ) () (succ zero)
+succ has type Nat -> Nat
+  but ∀ (x : Nat) -> (λ (_ : Nat) -> Nat) x -> (λ (_ : Nat) -> Nat) (succ x) was expected
+  under x, (λ (_ : Nat) -> Nat) x -> (λ (_ : Nat) -> Nat) (succ x) and Nat do not match
+thena spine> claim h : Nat
+claimed h
+thena spine> cross type
+thena core> :infer
+Type₀ : Type₁
+thena core> back
+thena spine> back
+thena spine> :infer
+that move is for a core term, and the focus is on the chain
+thena spine> data Big : Type₀ { wrap : Type₀ -> Big }
+refused: the argument x of wrap lives in Type₁, which the datatype's own Type₀ does not contain
+thena spine> :quit

@@ -34,10 +34,19 @@ module Thena.Global.Env
   , constructorType
   , constructorTarget
   , formerArity
+  , recursiveArgument
+  , eliminatorType
   ) where
 
-import Thena.Core.Context (Context, entryVar, piOver)
-import Thena.Core.Term (Core (..), GlobalName, Level)
+import Thena.Core.Context (Context, entryType, entryVar, piOver)
+import Thena.Core.Term
+  ( Core (..)
+  , GlobalName
+  , Ident (..)
+  , Level (..)
+  , close
+  , fresh
+  )
 
 -- | A global with a body — the @definition@ kind of §3.3.1's table: proved
 -- theorems, the generated former wrappers, the prelude. δ-reducible.
@@ -220,3 +229,129 @@ formerArity g e = case lookup g (inductives e) of
         (d, c) : _ ->
           Just (length (inductiveParameters d) + length (constructorArguments c))
         [] -> Nothing
+
+-- | Is this constructor argument recursive, and if so at which indices?
+--
+-- @Just is@ when the argument\'s type is an application of the datatype itself,
+-- with @is@ the indices it is at; 'Nothing' otherwise. The type must already
+-- have the enclosing telescope\'s actual values substituted in where that
+-- matters — 'Thena.Core.Reduce' does that before asking, 'eliminatorType' does
+-- not need to because it works with the declaration\'s own formal variables.
+--
+-- **Here rather than in either caller, because there are two.** ι builds one
+-- recursive /call/ per recursive argument and the eliminator\'s type builds one
+-- inductive /hypothesis/ per recursive argument, and if the two ever disagreed
+-- about which arguments those are, a datatype would reduce by a rule its own
+-- eliminator is not typed for. Same argument as 'formerType' and 'formerArity':
+-- one reading of the record, consulted twice.
+--
+-- **Complete only because "Thena.Global.Declare" rejects higher-order
+-- recursion.** A @sup : (Nat -> Ord) -> Ord@ argument (thesis §4.1.3) has spine
+-- head 'Pi', so it answers 'Nothing' — no recursive call and no inductive
+-- hypothesis. Today that declaration never gets admitted; if MS1\'s limit is
+-- lifted, this function and both its callers change in the same commit.
+recursiveArgument :: GlobalName -> Int -> Core -> Maybe [Core]
+recursiveArgument dn np ty = case spine ty of
+  (Global g, args) | g == dn -> Just (drop np args)
+  _                          -> Nothing
+  where
+    spine = go []
+      where
+        go as (App f a) = go (a : as) f
+        go as t         = (t, as)
+
+-- | The type of the datatype\'s eliminator, at the universe the motive lives in
+-- (§3.7, thesis §4.1.4).
+--
+-- @
+-- ∀ params
+--   (P : ∀ indices (t : D params indices) -> Type l)
+--   (m₁ : ∀ Δ₁ -> IHs -> P ī₁ ‹c₁ params Δ₁›)
+--   …
+--   indices (t : D params indices)
+--   -> P indices t
+-- @
+--
+-- **Derived, never stored twice.** Phase 10\'s generator writes this function\'s
+-- output into 'constants'; phase 8\'s @infer@ calls the function. So the stored
+-- constant and the rule @infer@ applies cannot drift apart — the same argument
+-- 'formerType' and 'formerArity' are here for, and the same one §3.7 makes
+-- against emitting ι-rules.
+--
+-- **The level is an argument, not a field**, which is §3.7\'s "universe
+-- polymorphism of the eliminator, without universe polymorphism": there is no
+-- one type for @NatElim@, there is one per universe the motive is valued in,
+-- and the caller reads that off the motive at the use site.
+--
+-- **Parameters are abstracted at the front.** §3.7\'s "parameters not abstracted
+-- in the scheme" is about the motive and the methods, which range over the
+-- indices and not the parameters — and they do not here either. Putting the
+-- parameters outermost is what makes the binder order match
+-- 'Thena.Core.Term.Eliminate'\'s own field order exactly, so typing the node is
+-- the ordinary application rule walked down this telescope and nothing else.
+--
+-- Takes and returns the name counter: the motive, the methods and the target
+-- are binders the declaration has no variables for, and only
+-- 'Thena.Core.Term.fresh' mints one (§3.5). Unlike 'formerType' it therefore
+-- cannot be a plain function of the record; that is the cost of \'Var\''s hidden
+-- constructor, paid here rather than by a second way to make a variable.
+eliminatorType :: InductiveDefinition -> Level -> Int -> (Core, Int)
+eliminatorType d l n0 =
+  (piOver params (Pi (Ident "P") motiveType (close pv rest)), nEnd)
+  where
+    dn      = inductiveName d
+    params  = inductiveParameters d
+    indices = inductiveIndices d
+    np      = length params
+
+    (pv,  n1) = fresh n0                 -- the motive
+    (mtv, n2) = fresh n1                 -- the motive's own target binder
+    (ctv, n3) = fresh n2                 -- the conclusion's target binder
+
+    paramVars = map (Free . entryVar) params
+    indexVars = map (Free . entryVar) indices
+
+    -- @D params is@
+    familyAt is = foldl App (Global dn) (paramVars ++ is)
+
+    -- @P is v@
+    motiveAt is v = foldl App (Free pv) (is ++ [v])
+
+    -- @forall indices (t : D params indices) -> Type l@
+    motiveType =
+      piOver indices (Pi (Ident "target") (familyAt indexVars) (close mtv (Universe l)))
+
+    (rest, nEnd) = methods (inductiveConstructors d) n3
+
+    methods []       n = (conclusion, n)
+    methods (c : cs) n =
+      let (mty, na)    = methodType c n
+          (mv,  nb)    = fresh na
+          (below, nc)  = methods cs nb
+       in (Pi (Ident "method") mty (close mv below), nc)
+
+    conclusion =
+      piOver indices
+        (Pi (Ident "target") (familyAt indexVars)
+            (close ctv (motiveAt indexVars (Free ctv))))
+
+    -- @forall D -> IH1 -> ... -> IHn -> P is (c params D)@
+    methodType c n =
+      let args = constructorArguments c
+          goal = motiveAt (constructorIndices c)
+                          (Canonical (constructorName c)
+                                     (paramVars ++ map (Free . entryVar) args))
+          (body, na) = hypotheses args n goal
+       in (piOver args body, na)
+
+    -- One inductive hypothesis per recursive argument, in argument order. The
+    -- binder is non-dependent -- nothing may refer to an induction hypothesis --
+    -- but a 'Thena.Core.Term.Scope' still needs a variable to close over, so
+    -- each takes one from the counter rather than reusing a sentinel.
+    hypotheses []       n acc = (acc, n)
+    hypotheses (e : es) n acc = case recursiveArgument dn np (entryType e) of
+      Nothing -> hypotheses es n acc
+      Just is ->
+        let (hv, na)   = fresh n
+            (below, nb) = hypotheses es na acc
+         in (Pi (Ident "ih") (motiveAt is (Free (entryVar e))) (close hv below), nb)
