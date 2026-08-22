@@ -1,0 +1,49 @@
+thena spine> data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }
+declared Nat
+thena spine> claim h : Nat
+claimed h
+thena spine> unify succ h ≟ succ (succ zero)
+solved: h
+thena spine> :show
+  let h = succ zero : Nat in
+▶ let ? goal : Type₀ in
+  goal
+thena spine> claim f : Nat -> Nat
+claimed f
+thena spine> unify \ (x : Nat) -> f x ≟ \ (x : Nat) -> succ x
+solved: f
+thena spine> :show
+  let h = succ zero : Nat in
+  let f = λ (x : Nat) -> succ x : Nat -> Nat in
+▶ let ? goal : Type₀ in
+  goal
+thena spine> claim a : Nat
+claimed a
+thena spine> claim b : Nat
+claimed b
+thena spine> unify a ≟ b
+parked 1 constraint(s), blocked on a, b
+thena spine> :show
+  let h = succ zero : Nat in
+  let f = λ (x : Nat) -> succ x : Nat -> Nat in
+  let ? a : Nat in
+  let ? b : Nat in
+  ⊢ a ≟ b : Nat ▸
+▶ let ? goal : Type₀ in
+  goal
+thena spine> unify b ≟ zero
+solved: b, a
+thena spine> :show
+  let h = succ zero : Nat in
+  let f = λ (x : Nat) -> succ x : Nat -> Nat in
+  let a = zero : Nat in
+  let b = zero : Nat in
+▶ let ? goal : Type₀ in
+  goal
+thena spine> claim c : Nat
+claimed c
+thena spine> unify c ≟ succ c
+stuck: solving c with succ c would define it in terms of itself
+thena spine> unify zero ≟ succ zero
+stuck: zero and succ zero cannot be made equal
+thena spine> :quit

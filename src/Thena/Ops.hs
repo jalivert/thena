@@ -88,6 +88,7 @@ data Op
   | Down Part                 -- ^ into a named field of a core term (§4.7)
   | Back                      -- ^ undo the last move
   | Reduce                    -- ^ commit a whnf at the core focus (§4.7, phase 7)
+  | Unify Operand Operand     -- ^ two terms — solve holes, or park the equation (§6, phase 9)
   | DefineData InductiveDefinition
     -- ^ hand a declaration out through the channel (§7.5)
   deriving (Eq, Show)
@@ -98,6 +99,16 @@ data Op
 -- something worth saying (an orphaned hole, §4.7), which is why
 -- "Thena.Engine" answers it with 'Thena.Engine.Saying' rather than always
 -- 'Thena.Engine.Continue', the same distinction 'Say' already makes.
+
+-- @Unify@ is §7.2's own sketch, arriving at the phase that writes the unifier.
+-- It is an op rather than a driver command for §12 invariant 3's reason: it
+-- rewrites 'Thena.Engine.ProofState', so it must backtrack with everything else
+-- that does. That is also why §9's @:unify@ is spelled without the colon —
+-- §2.4's rule is that a bare word acts and a colon looks, and this acts.
+--
+-- It takes two terms and no type, and infers the type from the left one: a
+-- parked equation records the type it was asked at (§3.3), and phase 8 made
+-- inferring it possible where §7.2's sketch could not have.
 
 -- @DefineData@ carries the declaration as a field rather than an 'Operand',
 -- for the same reason 'Down' carries a 'Part' and 'Ask' an 'AnswerKind': a

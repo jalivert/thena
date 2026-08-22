@@ -49,6 +49,25 @@ data FailReason
     -- ^ an operand was not a @VTerm@ holding a core term
   | CannotMove MoveError
     -- ^ a navigation op asked for a move the focus does not have (§4.0 C4)
+
+    -- Unification's four (§6.2), added at phase 9.
+  | Mismatch Context Core Core
+    -- ^ two whnfs that cannot be made equal, in the context they live in
+  | OccursCheck Context Var Core
+    -- ^ solving this hole with this term would define it in terms of itself
+  | ScopeViolation Context Var Var
+    -- ^ the solution for this hole mentions this variable, which is not bound
+    -- before it. Reported rather than repaired: repairing it means moving a
+    -- declaration leftwards — Gundry\'s @DEPEND_S@, OLEG\'s @raise@ — which
+    -- changes the shape of the user\'s development and is a tactic\'s decision,
+    -- not a unifier\'s. @raise@ is one of table 2.8\'s ops and is deliberately
+    -- not in MS1\'s vocabulary yet (§7.2)
+  | UniverseMismatch Level Level
+    -- ^ two universes, and no cumulativity to relate them (§5.2)
+  | NotTypeable TypeError
+    -- ^ an op was handed a term with no type. @unify@ needs one: a deferred
+    -- equation records the type it was asked at (§3.3), so the op infers it
+    -- from the left-hand side and this is what happens when it cannot
   deriving (Eq, Show)
 
 -- | Why a move was impossible (§4.0 C4, §12 invariant 2).

@@ -6,6 +6,7 @@ import qualified Thena.Core.ConvertTests
 import qualified Thena.Core.ReduceTests
 import qualified Thena.Core.TermTests
 import qualified Thena.Core.TypingTests
+import qualified Thena.Core.UnifyTests
 import qualified Thena.CursorTests
 import qualified Thena.DevelopmentTests
 import qualified Thena.DriverTests
@@ -23,6 +24,7 @@ main =
       , Thena.Core.ReduceTests.tests
       , Thena.Core.TermTests.tests
       , Thena.Core.TypingTests.tests
+      , Thena.Core.UnifyTests.tests
       , Thena.CursorTests.tests
       , Thena.DevelopmentTests.tests
       , Thena.DriverTests.tests

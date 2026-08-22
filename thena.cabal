@@ -22,6 +22,7 @@ library
         Thena.Core.Reduce
         Thena.Core.Term
         Thena.Core.Typing
+        Thena.Core.Unify
         Thena.Development.Component
         Thena.Development.Cursor
         Thena.Development.Partial
@@ -64,6 +65,7 @@ test-suite thena-test
         Thena.Core.ReduceTests
         Thena.Core.TermTests
         Thena.Core.TypingTests
+        Thena.Core.UnifyTests
         Thena.CursorTests
         Thena.DevelopmentTests
         Thena.EngineTests

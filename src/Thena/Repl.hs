@@ -722,6 +722,7 @@ renderOp n ctx op = case op of
   Ops.Into        -> "into"
   Ops.Back        -> "back"
   Ops.Reduce      -> "reduce"
+  Ops.Unify l r   -> "unify " ++ operand l ++ " ≟ " ++ operand r
   Ops.CrossType   -> "cross type"
   Ops.CrossValue  -> "cross val"
   Ops.Down part   -> partWord part
@@ -760,6 +761,17 @@ renderCommandError e = case e of
 
 renderFailReason :: FailReason -> String
 renderFailReason r = case r of
+  Mismatch ctx a b ->
+    renderCore 0 ctx a ++ " and " ++ renderCore 0 ctx b ++ " cannot be made equal"
+  OccursCheck ctx x t ->
+    "solving " ++ nameIn ctx x ++ " with " ++ renderCore 0 ctx t
+      ++ " would define it in terms of itself"
+  ScopeViolation ctx x y ->
+    nameIn ctx y ++ " is not bound before " ++ nameIn ctx x
+      ++ ", so there is no solution for it there"
+  UniverseMismatch (Level a) (Level b) ->
+    "Type" ++ subscript a ++ " and Type" ++ subscript b ++ " are different universes"
+  NotTypeable e -> "that term has no type" ++ concatMap ("\n  " ++) (renderTypeError 0 e)
   UnboundInBody x   -> "nothing named " ++ x ++ " in this body"
   NotAnIdentifier s -> show s ++ " is not a name"
   ExpectedText      -> "expected text"

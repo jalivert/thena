@@ -34,7 +34,7 @@ module Thena.Engine
   , failure
   ) where
 
-import Data.List (intercalate)
+import Data.List (intercalate, nub)
 
 import Thena.Core.Context (Context)
 import Thena.Core.Term
@@ -45,6 +45,8 @@ import Thena.Core.Term
   , fresh
   )
 import Thena.Core.Reduce (whnf)
+import Thena.Core.Typing (infer)
+import Thena.Core.Unify (UnifyResult (..), blockers, unify)
 import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor
   ( Cursor
@@ -320,6 +322,22 @@ perform instr rest m = case operation instr of
                     [] -> Continue m'
                     is -> Saying (orphanMessage is) m'
     _ -> failure (CannotMove NotInCore) m
+
+  -- Unification writes to the development, so it is an op and not a driver
+  -- command (§12 invariant 3): what it changes has to backtrack with the rest
+  -- of the proof state. What it has to say — which holes it solved, what it
+  -- parked — goes out through 'Saying', exactly as 'Reduce' reports an orphan.
+  Unify l r -> case (,) <$> term l <*> term r of
+    Left e       -> failure e m
+    Right (a, b) ->
+      let cur = cursor (proof m)
+       in case infer (globals m) (Cursor.context cur) (names m) a of
+            (Left e, n1)  -> failure (NotTypeable e) m { names = n1 }
+            (Right ty, n1) -> case unify (globals m) cur n1 a b ty of
+              (Failed reason, _, n2) -> failure reason m { names = n2 }
+              (result, cur', n2) ->
+                Saying (unifyMessage cur' result)
+                       (advance m { proof = ProofState cur', names = n2 })
   where
     operation i = case i of
       Bind _ o -> o
@@ -362,6 +380,38 @@ perform instr rest m = case operation instr of
 -- | What 'Reduce' says when it orphans one or more holes (§4.7). Plain text:
 -- these are the identifiers the user themselves wrote for a 'Claim' or a
 -- 'Guess', not a term needing "Thena.Repl"'s freshening.
+-- | What @unify@ reports. §9's deliverable in one line: which holes it solved,
+-- or what is parked and what each is waiting on — the blockers being derived
+-- from the development rather than stored (§6.1).
+unifyMessage :: Cursor -> UnifyResult -> String
+unifyMessage cur result = case result of
+  Failed _          -> ""     -- never reached: a failure goes out through 'Stuck'
+  Solved []         -> "already equal"
+  Solved xs         -> "solved: " ++ intercalate ", " (map nameOfVar xs)
+  Deferred xs ks    ->
+    (if null xs then "" else "solved: " ++ intercalate ", " (map nameOfVar xs) ++ "; ")
+      ++ "parked " ++ show (length ks) ++ " constraint(s), blocked on "
+      ++ intercalate ", " (map nameOfVar (nub (concatMap (blockers cur) ks)))
+  where
+    -- The identifier the user gave the hole, read off the development. A 'Var'
+    -- has no name of its own (§3.5), and "Thena.Repl" is where display lives —
+    -- but a message is text by the time it leaves here, so the lookup happens
+    -- against the components rather than against a printer.
+    nameOfVar x = case [ i | c <- componentsOf (rebuild cur), (y, Ident i) <- [named c], y == x ] of
+      i : _ -> i
+      []    -> "?"
+
+    named c = case c of
+      Component.Assume y i _   -> (y, i)
+      Component.Define y i _ _ -> (y, i)
+      Component.Claim  y i _   -> (y, i)
+      Component.Guess  y i _ _ -> (y, i)
+
+    componentsOf p = case p of
+      Trailing _     -> []
+      Under c rest   -> c : componentsOf rest
+      Pending _ rest -> componentsOf rest
+
 orphanMessage :: [Ident] -> String
 orphanMessage is = "reduced; now unreachable: " ++ intercalate ", " (map identString is)
   where

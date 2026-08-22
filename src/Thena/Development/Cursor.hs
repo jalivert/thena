@@ -47,6 +47,12 @@ module Thena.Development.Cursor
   , insertAbove
   , replaceFocus
   , replaceCore
+
+    -- * The root-down pass (§4.0 G1)
+  , overComponents
+  , overConstraints
+  , postConstraint
+  , below
   ) where
 
 import Data.Foldable (toList)
@@ -551,3 +557,149 @@ holeBinding c = case c of
   Claim v i _   -> Just (v, i)
   Guess v i _ _ -> Just (v, i)
   _             -> Nothing
+
+-- --------------------------------------------------------------------------
+-- The root-down pass (§4.0 G1)
+-- --------------------------------------------------------------------------
+--
+-- §4.0 G1 asks for "a focus-independent pass that walks from the root,
+-- rewrites, and rebuilds — with the focus intact", and says unification's
+-- substitutions are applied this way: it would be insane to make unification
+-- zip around hunting for holes. These four are that pass, split by what they
+-- edit. They are the only operations here that touch the development without
+-- being a move, and they exist because the moves cannot do this job — a move
+-- takes the focus with it, and this pass must not.
+--
+-- **Policy lives in the caller.** None of these knows what a hole is or where a
+-- constraint belongs; 'postConstraint' takes the position as a number and
+-- "Thena.Core.Unify" computes it.
+
+-- | Rewrite every component of the development in place, above the focus, at
+-- it, and below it. What unification's hole-solving uses: promoting @? x : S@
+-- to @x = t : S@ is exactly a component rewritten in place (§4.0 G2).
+--
+-- **In place only, and at a core focus the focused component is skipped.** The
+-- focus's 'Slot' has the component's kind built into its constructor, so a
+-- rewrite that turned that component's 'Claim' into a 'Define' would leave a
+-- 'TypeOfClaim' slot describing a component that no longer exists. Standing
+-- inside a hole's own type while something solves that hole is an odd place to
+-- be, and the answer is that the equation defers rather than that the focus
+-- moves — G1 is explicit that the focus stays put.
+overComponents :: (Component -> Component) -> Cursor -> Cursor
+overComponents f cur = case cur of
+  InPartial p c rest    -> InPartial (fmap onStep p) (f c) (onPartial rest)
+  AtConstraint p k rest -> AtConstraint (fmap onStep p) k (onPartial rest)
+  InCore p x ts t       -> InCore (fmap onStep p) (onCrossing x) ts t
+  where
+    onStep s = case s of
+      Along c               -> Along (f c)
+      Past  k               -> Past k
+      IntoGuess x i ty rest -> IntoGuess x i ty (onPartial rest)
+
+    onCrossing x = case x of
+      TrailingTerm     -> TrailingTerm
+      InSlot slot rest -> InSlot slot (onPartial rest)   -- the slot's own component is skipped
+
+    onPartial q = case q of
+      Trailing t     -> Trailing t
+      Under c rest   -> Under (f c) (onPartial rest)
+      Pending k rest -> Pending k (onPartial rest)
+
+-- | Rewrite the chain's constraint links; 'Nothing' removes one. What
+-- unification's wake-up uses: a constraint that has become solvable stops being
+-- a link, and one that has not stays where it is.
+--
+-- **The focused constraint is left alone**, for 'overComponents'\' reason: a
+-- focus standing on a constraint cannot survive that constraint being deleted,
+-- and the pass may not move the focus.
+overConstraints :: (Constraint -> Maybe Constraint) -> Cursor -> Cursor
+overConstraints f cur = case cur of
+  InPartial p c rest    -> InPartial (onPath p) c (onPartial rest)
+  AtConstraint p k rest -> AtConstraint (onPath p) k (onPartial rest)
+  InCore p x ts t       -> InCore (onPath p) (onCrossing x) ts t
+  where
+    onPath Here     = Here
+    onPath (p :> s) = case s of
+      Past k -> case f k of
+        Nothing -> onPath p
+        Just k' -> onPath p :> Past k'
+      Along c               -> onPath p :> Along c
+      IntoGuess x i ty rest -> onPath p :> IntoGuess x i ty (onPartial rest)
+
+    onCrossing x = case x of
+      TrailingTerm     -> TrailingTerm
+      InSlot slot rest -> InSlot slot (onPartial rest)
+
+    onPartial q = case q of
+      Trailing t     -> Trailing t
+      Under c rest   -> Under c (onPartial rest)
+      Pending k rest -> case f k of
+        Nothing -> onPartial rest
+        Just k' -> Pending k' (onPartial rest)
+
+-- | Splice a constraint into the path, keeping the given number of steps above
+-- it and pushing the rest down. @0@ puts it at the root; the path's own length
+-- puts it immediately above the focus, which is what 'insertAbove' does for a
+-- component.
+--
+-- The position is a number rather than a policy because §6.4 makes position
+-- real information and `AGENDA.md` item 16 q1 makes choosing it a /tactic/
+-- question. "Thena.Core.Unify" answers it — the minimal legal position,
+-- decided by the user 2026-08-22 — and this function does as it is told.
+--
+-- **It reaches below the focus as well as above it**, which the first draft did
+-- not: it spliced into the path only, on the argument that a constraint's
+-- variables are all in scope where it was built and so never below. That is
+-- true of a term typed at the REPL and false in general — a tactic that has
+-- moved the focus upwards can defer an equation about components under it, and
+-- parking that above them would name a variable that is not bound yet. The
+-- numbering is continuous across the focus so the caller does not have to know
+-- which side it landed on.
+postConstraint :: Int -> Constraint -> Cursor -> Cursor
+postConstraint n k cur = case cur of
+  InPartial    p c rest -> place p (\p' -> InPartial    p' c) rest
+  AtConstraint p j rest -> place p (\p' -> AtConstraint p' j) rest
+  InCore       p x ts t -> case x of
+    TrailingTerm     -> InCore (splice p (depth p)) TrailingTerm ts t
+    InSlot slot rest ->
+      let d = depth p
+       in if n <= d
+            then InCore (splice p d) x ts t
+            else InCore p (InSlot slot (spliceUnder (n - d - 1) rest)) ts t
+  where
+    -- Above the focus the constraint becomes a step in the path; below it, a
+    -- link in the chain. One index numbers both — the path's steps are 0 to
+    -- d-1, the focus is d, and what is under it carries on from d+1 — which is
+    -- the same numbering "Thena.Core.Unify" computes positions in.
+    place p rebuildAt rest
+      | n <= depth p = rebuildAt (splice p (depth p)) rest
+      | otherwise    = rebuildAt p (spliceUnder (n - depth p - 1) rest)
+
+    depth = length . toList
+
+    splice p d = foldl (:>) Here (insertAt (clamp d) (toList p))
+
+    clamp d = max 0 (min n d)
+
+    insertAt _ []       = [Past k]
+    insertAt 0 ss       = Past k : ss
+    insertAt m (s : ss) = s : insertAt (m - 1) ss
+
+    spliceUnder m q
+      | m <= 0 = Pending k q
+      | otherwise = case q of
+          Trailing t     -> Pending k (Trailing t)
+          Under c rest   -> Under c (spliceUnder (m - 1) rest)
+          Pending j rest -> Pending j (spliceUnder (m - 1) rest)
+
+-- | The chain strictly below the focus, where there is one.
+--
+-- 'Nothing' at a trailing term and at a core term inside one: a chain ends
+-- there, so there is nothing under it. Read-only — 'overComponents' and
+-- 'overConstraints' are how the part below the focus is written.
+below :: Cursor -> Maybe Partial
+below cur = case cur of
+  InPartial    _ _ rest          -> Just rest
+  AtConstraint _ _ rest          -> Just rest
+  InCore _ (InSlot _ rest) _ _   -> Just rest
+  InCore _ TrailingTerm    _ _   -> Nothing

@@ -51,6 +51,26 @@ tests =
         , ":quit"
         ]
     , script
+        "unification"
+        [ "data Nat : Type\8320 { zero : Nat ; succ : Nat -> Nat }"
+        , "claim h : Nat"
+        , "unify succ h \8799 succ (succ zero)"
+        , ":show"
+        , "claim f : Nat -> Nat"
+        , "unify \\ (x : Nat) -> f x \8799 \\ (x : Nat) -> succ x"
+        , ":show"
+        , "claim a : Nat"
+        , "claim b : Nat"
+        , "unify a \8799 b"
+        , ":show"
+        , "unify b \8799 zero"
+        , ":show"
+        , "claim c : Nat"
+        , "unify c \8799 succ c"
+        , "unify zero \8799 succ zero"
+        , ":quit"
+        ]
+    , script
         "stepping"
         [ ":step on"
         , "assume A : Type₀"

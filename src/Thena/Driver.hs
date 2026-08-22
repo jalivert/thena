@@ -272,6 +272,19 @@ dispatch s name arg = case name of
   "into"   -> noArgument (run [Do Into])
   "back"   -> noArgument (run [Do Back])
   "reduce" -> noArgument (run [Do Reduce])
+  -- A bare word, not @:unify@ as §9 first wrote it: unification rewrites the
+  -- development, and §2.4's rule is that a bare word acts and a colon looks.
+  -- The argument is @t ≟ u@, the same two-sided form @:convert@ reads.
+  "unify"  -> withArgument $
+    case parseEquated (globals machine) ctx (names machine) arg of
+      Left e -> (s, Failed e)
+      Right ((a, b), n1) ->
+        progress
+          (sessionStepping s)
+          s { sessionMachine =
+                load [Do (Unify (Lit (VTerm (Trailing a))) (Lit (VTerm (Trailing b))))]
+                     machine { names = n1 } }
+          []
   "cross"  -> case arg of
     "type" -> run [Do CrossType]
     "val"  -> run [Do CrossValue]
