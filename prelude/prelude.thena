@@ -1,0 +1,3 @@
+data Eq (A : Type₀) : A -> A -> Type₀ { refl : ∀ (a : A) -> Eq A a a }
+data Unit : Type₀ { unit : Unit }
+data Empty : Type₀ { }

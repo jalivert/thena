@@ -22,8 +22,12 @@ module Thena.Driver
   , Stop (..)
   , SyntaxError (..)
   , CommandError (..)
+  , LoadError (..)
+  , Loaded (..)
   , command
   , answer
+  , oneLine
+  , loadSource
   , parseCore
   , parseDevelopment
   , parseDeclaration
@@ -135,6 +139,10 @@ data Response
     -- ^ @:convert@ — the two terms, and 'Nothing' if they are convertible.
     -- Both terms are kept so the answer can restate the question: with η in
     -- play a yes is printed about two terms that still look different (§5.2)
+  | LoadRequested FilePath
+    -- ^ @:load ‹path›@. The driver may not touch a file — §12 invariant 4 puts
+    -- all IO in "Thena.Repl" — so it asks, and the caller reads the file and
+    -- hands the contents back to 'loadSource'
   | Ran [Message] Stop        -- ^ what the machine said, and where it stopped
   | Failed SyntaxError
   | Rejected CommandError
@@ -275,6 +283,8 @@ dispatch s name arg = case name of
     _  -> case parseCore (globals machine) ctx (names machine) arg of
       Left e        -> (s, Failed e)
       Right (t, n1) -> inferred t n1
+  -- Reading the file is the caller's; this only names it (§12 invariant 4).
+  ":load"  -> withArgument (s, LoadRequested arg)
   ":convert" -> conversion
   ":step"  -> stepping
   ":run"   -> noArgument (progress False s [])
@@ -521,6 +531,98 @@ answer s a
   | isAsking (sessionMachine s) =
       progress (sessionStepping s) s { sessionMachine = resumeAt a (sessionMachine s) } []
   | otherwise = (s, Rejected NotAsking)
+
+-- | One line of input, whichever kind it is: an answer while something is
+-- asking, a command otherwise. Returns what is asking /after/ it.
+--
+-- Extracted at phase 11 because two callers need exactly this — "Thena.Repl"\'s
+-- terminal turn and 'loadSource' below — and the pending-question bookkeeping
+-- is the part a second copy would get subtly wrong.
+oneLine :: Session -> Maybe Question -> String -> (Session, Response, Maybe Question)
+oneLine s pending line = (s', resp, asking)
+  where
+    (s', resp) = case pending of
+      Just _  -> answer s line
+      Nothing -> command s line
+
+    asking = case resp of
+      Ran _ (Waiting q) -> Just q
+      _                 -> Nothing
+
+-- --------------------------------------------------------------------------
+-- Loading a file (§9, phase 11)
+-- --------------------------------------------------------------------------
+
+-- | Why a load stopped early. Every case carries the **1-based line number**,
+-- because the whole value of loading a file over typing the lines is that the
+-- failure has an address.
+data LoadError
+  = LoadStopped Int
+    -- ^ this line failed. **The reason is not carried here** — it is the last
+    -- of 'loadedResponses', the ordinary response the REPL would have printed
+    -- had the line been typed. Two encodings of one failure can disagree
+    -- (§3.7's argument against emitting ι-rules, in miniature)
+  | NestedLoad Int
+    -- ^ @:load@ inside a loaded file. Refused in MS1 rather than followed:
+    -- following it needs IO from a pure function, and a file that loads itself
+    -- would not terminate
+  | UnansweredQuestion Int
+    -- ^ the file ended while an op was still asking (§7.5). The line is the one
+    -- that asked
+  deriving (Eq, Show)
+
+-- | What running a file produced.
+data Loaded = Loaded
+  { loadedSession   :: Session
+  , loadedResponses :: [Response]
+    -- ^ one per line that ran, in order, blank lines included as 'Blank'
+  , loadedError     :: Maybe LoadError
+  }
+  deriving (Eq, Show)
+
+-- | Run a file\'s contents.
+--
+-- **A file is a script of command lines** — decided by the user 2026-08-22,
+-- planning phase 11. Each line goes through 'oneLine', so it means exactly what
+-- it would mean typed at the prompt, asking and answering included, and there
+-- is no second syntax to keep in step with the first. The prelude is therefore
+-- an ordinary sequence of @data@ lines and nothing else (§3.7).
+--
+-- **It stops at the first failure**, on phase 6\'s precedent that a refused
+-- declaration abandons the rest of a program: a later line in a file is
+-- normally written against what an earlier one declared, so carrying on past a
+-- failure reports the same mistake several times over.
+--
+-- Takes the contents and not a path: §12 invariant 4 keeps IO in "Thena.Repl".
+loadSource :: Session -> String -> Loaded
+loadSource s0 = go s0 Nothing 1 [] . lines
+  where
+    go s pending _ acc [] = case pending of
+      -- The file ran out while an op was still asking. The line to name is the
+      -- one that asked, which is the last one that ran.
+      Just _  -> Loaded s (reverse acc) (Just (UnansweredQuestion (length acc)))
+      Nothing -> Loaded s (reverse acc) Nothing
+    go s pending n acc (l : ls) =
+      let (s', resp, asking) = oneLine s pending l
+          acc'               = resp : acc
+       in case resp of
+            LoadRequested _ -> Loaded s (reverse acc) (Just (NestedLoad n))
+            Quit            -> Loaded s' (reverse acc') Nothing
+            _ | stopped resp -> Loaded s' (reverse acc') (Just (LoadStopped n))
+              | otherwise    -> go s' asking (n + 1) acc' ls
+
+-- | Which responses end a load.
+--
+-- Deliberately narrow: an @:infer@ that reports an ill-typed term is a question
+-- answered, not a script that failed, so 'IllTyped' is not here. What is here
+-- is the four ways a line does not do what it said.
+stopped :: Response -> Bool
+stopped resp = case resp of
+  Failed _            -> True
+  Rejected _          -> True
+  Ran _ (Halted _)    -> True
+  Ran _ (Refused _)   -> True
+  _                   -> False
 
 -- | Run until the machine needs the user, honouring stepping mode.
 --

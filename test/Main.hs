@@ -13,6 +13,7 @@ import qualified Thena.DriverTests
 import qualified Thena.EliminatorTests
 import qualified Thena.EngineTests
 import qualified Thena.GlobalTests
+import qualified Thena.LoadTests
 import qualified Thena.GoldenTests
 import qualified Thena.SyntaxTests
 
@@ -32,6 +33,7 @@ main =
       , Thena.EliminatorTests.tests
       , Thena.EngineTests.tests
       , Thena.GlobalTests.tests
+      , Thena.LoadTests.tests
       , Thena.GoldenTests.tests
       , Thena.SyntaxTests.tests
       ]

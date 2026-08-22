@@ -21,8 +21,12 @@ module Thena.Repl
   , renderSyntaxError
   , renderInductive
   , renderEliminator
+  , preludePath
+  , loadPrelude
+  , renderLoadError
   ) where
 
+import Control.Monad.IO.Class (liftIO)
 import System.Console.Haskeline
   ( InputT
   , defaultSettings
@@ -61,14 +65,19 @@ import Thena.Development.Cursor
 import Thena.Development.Partial (Constraint (..), Partial (..))
 import Thena.Driver
   ( CommandError (..)
+  , LoadError (..)
+  , Loaded (..)
   , Response (..)
   , Session (..)
   , Stop (..)
   , SyntaxError (..)
-  , answer
-  , command
+  , loadSource
   , newSession
+  , oneLine
   )
+
+import Control.Exception (IOException, try)
+import qualified Paths_thena
 import Thena.Engine
   ( Exec (..)
   , Frame (..)
@@ -102,8 +111,16 @@ import Data.Foldable (toList)
 import Data.List (intercalate)
 
 -- | Run the read-eval-print loop until @:quit@ or end of input.
+--
+-- The prelude is loaded first (§9, phase 11) and **silently on success** — it
+-- is three @data@ lines and announcing them at every start is noise. A failure
+-- is reported and the loop starts anyway, with whatever did load: @Eq@ missing
+-- makes elimination fail later with a message naming @Eq@, which is the bargain
+-- §3.7 already struck, and a REPL that refuses to start would say less.
 repl :: IO ()
-repl = runInputT defaultSettings (loop newSession Nothing)
+repl = do
+  (s, problems) <- loadPrelude newSession
+  runInputT defaultSettings (mapM_ outputStrLn problems >> loop s Nothing)
 
 loop :: Session -> Maybe Question -> InputT IO ()
 loop s pending = do
@@ -113,7 +130,66 @@ loop s pending = do
     Just line -> do
       let t = turn s pending line
       mapM_ outputStrLn (turnOutput t)
-      if turnQuit t then pure () else loop (turnSession t) (turnPending t)
+      case turnResponse t of
+        -- The one response the driver cannot act on itself: it named a file,
+        -- and reading files is this module's (§12 invariant 4).
+        LoadRequested path | not (turnQuit t) -> do
+          (s', out, problems) <- liftIO (loadFile (turnSession t) path)
+          mapM_ outputStrLn (out ++ problems)
+          loop s' Nothing
+        _ | turnQuit t -> pure ()
+          | otherwise  -> loop (turnSession t) (turnPending t)
+
+-- --------------------------------------------------------------------------
+-- Loading (§9, phase 11)
+-- --------------------------------------------------------------------------
+
+-- | Where the shipped prelude went.
+--
+-- @data-files@ and 'Paths_thena' rather than a path relative to the working
+-- directory, so an installed @thena@ finds it too. This is the only place the
+-- project asks cabal anything at runtime.
+preludePath :: IO FilePath
+preludePath = Paths_thena.getDataFileName "prelude/prelude.thena"
+
+-- | Load the shipped prelude into a session, keeping only what went wrong.
+--
+-- Discarding the lines\' own output is what makes startup silent: a @data@ line
+-- says @declared Eq@, and three of those at every start are noise. @:load@ on
+-- the same file keeps them, because there the user asked.
+loadPrelude :: Session -> IO (Session, [String])
+loadPrelude s = do
+  path <- preludePath
+  (s', _, problems) <- loadFile s path
+  pure (s', map ("prelude: " ++) problems)
+
+-- | Read a file and run it: the session after, **what its lines printed**, and
+-- **what went wrong**, kept apart because the two callers want different halves.
+--
+-- A loaded line\'s own output is real output — a file is a script of command
+-- lines (§9), so @:infer@ in a file prints what @:infer@ prints.
+loadFile :: Session -> FilePath -> IO (Session, [String], [String])
+loadFile s path = do
+  contents <- try (readFile path)
+  pure $ case contents of
+    Left e  -> (s, [], [show (e :: IOException)])
+    Right c ->
+      let l  = loadSource s c
+          s' = loadedSession l
+       in ( s'
+          , concatMap (renderResponse s') (loadedResponses l)
+          , maybe [] (renderLoadError path) (loadedError l)
+          )
+
+-- | Why a load stopped. It says only /where/ — the reason has already been
+-- printed, because a stopped line renders like any other line.
+renderLoadError :: FilePath -> LoadError -> [String]
+renderLoadError path e = case e of
+  LoadStopped n        -> [at n ++ "stopped here"]
+  NestedLoad n         -> [at n ++ ":load inside a loaded file is not followed"]
+  UnansweredQuestion n -> [at n ++ "the file ended while this was still asking"]
+  where
+    at n = path ++ ":" ++ show n ++ ": "
 
 -- | The machine asks with the rule body's own words, so an answer prompt is
 -- bare. Otherwise the prompt says which fragment the focus is in.
@@ -134,30 +210,32 @@ prompt s Nothing  = "thena " ++ fragment ++ "> "
 
 -- | One line in, and everything that follows from it.
 data Turn = Turn
-  { turnOutput  :: [String]
-  , turnSession :: Session
-  , turnPending :: Maybe Question  -- ^ set when the next line is an answer
-  , turnQuit    :: Bool
+  { turnOutput   :: [String]
+  , turnSession  :: Session
+  , turnPending  :: Maybe Question  -- ^ set when the next line is an answer
+  , turnQuit     :: Bool
+  , turnResponse :: Response
+    -- ^ kept from phase 11, because @:load@ is a response the /caller/ has to
+    -- act on: the driver may not read a file (§12 invariant 4)
   }
   deriving (Eq, Show)
 
 turn :: Session -> Maybe Question -> String -> Turn
-turn s pending line =
-  Turn (renderResponse s' resp) s' (waitingOn resp) (resp == Quit)
+turn s pending line = Turn (renderResponse s' resp) s' asking (resp == Quit) resp
   where
-    (s', resp) = case pending of
-      Just _  -> answer s line
-      Nothing -> command s line
-
-waitingOn :: Response -> Maybe Question
-waitingOn resp = case resp of
-  Ran _ (Waiting q) -> Just q
-  _                 -> Nothing
+    (s', resp, asking) = oneLine s pending line
 
 -- | Replay a script through 'turn' and render what a terminal would have shown,
 -- prompts included. The golden tests' whole harness (§9, "golden REPL
 -- transcripts are the natural regression test for a tool whose interface is the
 -- REPL").
+--
+-- **It starts from a bare 'newSession', where 'repl' starts from the prelude**
+-- — the one place a transcript is not what the terminal would have done
+-- (phase 11). Deliberate: the existing scripts declare their own @Nat@ and
+-- @Empty@, and the prelude's @Empty@ would collide with phase 10's. It also
+-- does not follow a @:load@, because it is pure and reading a file is not.
+-- "Thena.LoadTests" covers both, against the real 'loadPrelude'.
 transcript :: [String] -> String
 transcript = unlines . replay newSession Nothing
   where
@@ -190,6 +268,8 @@ renderResponse s resp = case resp of
      in case why of
           Nothing -> [q ++ "   yes"]
           Just f  -> (q ++ "   no") : renderConversionFailure (counter s) f
+  -- Nothing to print: the caller reads the file and prints what that produced.
+  LoadRequested _ -> []
   Ran msgs stop  -> msgs ++ renderStop s stop
   Failed e       -> [renderSyntaxError e]
   Rejected e     -> [renderCommandError e]

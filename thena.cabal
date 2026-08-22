@@ -9,6 +9,11 @@ category:           Language
 build-type:         Simple
 extra-doc-files:    CHANGELOG.md
 
+-- The prelude is a real file, not a built-in (§3.7). 'data-files' rather than a
+-- path relative to the working directory, so it is still found after
+-- 'cabal install'; 'Paths_thena' is how the library asks where it went.
+data-files:         prelude/prelude.thena
+
 common warnings
     ghc-options: -Wall
 
@@ -37,6 +42,10 @@ library
         Thena.Syntax.Lexer
         Thena.Syntax.Parser
         Thena.Syntax.Resolve
+    other-modules:
+        Paths_thena
+    autogen-modules:
+        Paths_thena
     build-depends:
         base       ^>=4.21.2.0,
         array      >=0.5 && <0.6,
@@ -72,6 +81,7 @@ test-suite thena-test
         Thena.EngineTests
         Thena.GlobalTests
         Thena.GoldenTests
+        Thena.LoadTests
         Thena.DriverTests
         Thena.Declared
         Thena.Fixtures
