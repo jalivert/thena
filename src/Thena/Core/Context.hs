@@ -36,16 +36,22 @@ data Entry
 -- | Outermost first.
 type Context = [Entry]
 
+-- | The variable an entry binds. Unique within a session, and what every
+-- lookup and scope check actually compares (§3.5).
 entryVar :: Entry -> Var
 entryVar e = case e of
   Hypothesis v _ _   -> v
   Definition v _ _ _ -> v
 
+-- | The display name an entry was written with. Never used to decide anything
+-- semantic — see 'Thena.Core.Term.Ident'.
 entryIdent :: Entry -> Ident
 entryIdent e = case e of
   Hypothesis _ i _   -> i
   Definition _ i _ _ -> i
 
+-- | The type of an entry, whichever kind it is. Both constructors have one, in
+-- the same last position, which is why this accessor is total.
 entryType :: Entry -> Core
 entryType e = case e of
   Hypothesis _ _ t   -> t

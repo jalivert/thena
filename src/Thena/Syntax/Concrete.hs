@@ -18,6 +18,14 @@ module Thena.Syntax.Concrete
   , RawConstructor (..)
   ) where
 
+-- | A written term, or a written development. One tree for both fragments
+-- (§2.7): 'RawClaim', 'RawGuess' and 'RawPending' can only resolve to
+-- development components, everything else can appear in either, and nothing
+-- here records which was meant.
+--
+-- Names are 'String' and undistinguished. @RawName \"x\"@ may become a
+-- 'Thena.Core.Term.Bound', a 'Thena.Core.Term.Free' or a
+-- 'Thena.Core.Term.Global'; the tree cannot say which and does not try.
 data Raw
   = RawName String
   | RawUniverse Int
@@ -36,6 +44,9 @@ data Raw
     -- 'Thena.Core.Term.Eliminate', so where a field goes needs no name.
   deriving (Eq, Show)
 
+-- | @(x : S)@ — one parenthesised binding. Always annotated: there is no
+-- inference at this level, and a binder with no type is a parse error rather
+-- than a hole (§2.6).
 data RawBinder = RawBinder String Raw
   deriving (Eq, Show)
 
@@ -53,5 +64,8 @@ data RawConstraint = RawConstraint [RawBinder] Raw Raw Raw
 data RawData = RawData String [RawBinder] Raw [RawConstructor]
   deriving (Eq, Show)
 
+-- | @c : T@ — one constructor of a 'RawData', with its type written out in
+-- full. Splitting that type into arguments and a return index is a shape check,
+-- and happens in "Thena.Syntax.Resolve" with the others.
 data RawConstructor = RawConstructor String Raw
   deriving (Eq, Show)
