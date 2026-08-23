@@ -184,7 +184,33 @@ kernelTests =
   , testCase "Term's family" (certified eqTapl "NoConfusionTerm")
   , testCase "Term's lemma" (certified eqTapl "noConfusionTerm")
   , testCase "Eq's own, which is an indexed family" (certified eqNat "noConfusionEq")
+
+    -- **Found by phase 17, and it was a real bug.** The generator freshens a
+    -- telescope in two places, and 'freshen' gave each entry a new variable
+    -- without repointing the /later/ entries' types at it. Invisible for every
+    -- telescope in the suite, because none of them is dependent where that is
+    -- used: @Vec@ and @Fin@ have one index each, and their dependent
+    -- /constructor/ telescopes are skipped before the copy happens. @Below@'s
+    -- second index is a @Fin@ of its first, so the second copy of the index
+    -- telescope named the first copy's variable, and @NoConfusionBelow@ came
+    -- out ill-typed — reported as @DeclareError@'s @NoConfusionRejected@,
+    -- which is precisely the "unreachable if the generator is right" case.
+  , testCase "an index telescope that is dependent (phase 17)" $
+      certified belowEnv "NoConfusionBelow"
+  , testCase "and its lemma" $
+      certified belowEnv "noConfusionBelow"
   ]
+
+-- | @Below@\'s second index has the first in its type — a dependent /index/
+-- telescope, which is a different thing from the dependent /constructor/
+-- telescope 'skipTests' pins, and which nothing else in the suite has.
+belowEnv :: GlobalEnv
+belowEnv = fst (declared [eqDecl, natDecl, finDecl, belowDecl])
+
+belowDecl :: String
+belowDecl =
+  "Below : \8704 (n : Nat) (i : Fin n) -> Type\8320 \
+  \{ bz : \8704 (m : Nat) -> Below (succ m) (fz m) }"
 
 certified :: GlobalEnv -> String -> Assertion
 certified env g = case lookupDefinition (GlobalName g) env of

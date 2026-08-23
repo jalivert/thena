@@ -35,6 +35,7 @@ import Thena.Core.Term (Core (..), GlobalName (..))
 import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor (Cursor, Focus (..), context, expectedType, focus)
 import Thena.Global.Env (GlobalEnv)
+import qualified Thena.Ops as Op
 import Thena.Ops
   ( Instr (..)
   , Name
@@ -81,8 +82,13 @@ allRules (RuleBase rs) = rs
 -- come from a written collection is unchanged, and this is that collection
 -- written in Haskell because there is no rule syntax yet.
 --
--- Three of them match at a hole — @attack@, @try@ and @abandon@ — which is what
--- makes the match list a list, and what phase 16 will have to dispatch between.
+-- **Four** match at a hole — @attack@, @try@, @abandon@ and, from phase 17,
+-- @eliminate@ — which is what makes the match list a list, and what phase 16
+-- dispatches between. @eliminate@ is the first rule here whose body is /not/ a
+-- word the driver already had: it is §3.7's tactic, and it is a rule rather
+-- than a driver command because §8's whole claim is that a tactic and a rule
+-- are the same kind of thing. Like @try@ it takes a parameter, so 'dispatch'
+-- skips it and @:matches@ still shows it.
 --
 -- @intro@ is **two rules and not one**, because table 2.8 has two: @intro-∀@
 -- and @intro-let@. §8's \"a rule that wants an alternative is two rules\" is the
@@ -96,6 +102,7 @@ standardRules = RuleBase
   , Rule (GlobalName "intro-let")  []    [FocusIsGuess, GoalTypeIsLet] [Do Intro]
   , Rule (GlobalName "solve")      []    [FocusIsGuess]                [Do Solve]
   , Rule (GlobalName "regret")     []    [FocusIsGuess]                [Do Regret]
+  , Rule (GlobalName "eliminate")  ["t"] [FocusIsHole]                 [Do (Op.Eliminate (Ref "t"))]
   ]
 
 -- --------------------------------------------------------------------------
@@ -273,6 +280,7 @@ operandsOf o = case o of
   Unify  a b   -> [a, b]
   Try    a     -> [a]
   Certify a    -> [a]
+  Op.Eliminate a -> [a]
   DefineData _ -> []
   Along        -> []
   Into         -> []

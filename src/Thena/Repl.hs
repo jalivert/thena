@@ -92,6 +92,7 @@ import Thena.Engine
 import Thena.Errors
   ( Clash (..)
   , ConversionFailure (..)
+  , ElimError (..)
   , FailReason (..)
   , KernelError (..)
   , MoveError (..)
@@ -835,6 +836,7 @@ renderOp n ctx op = case op of
   Ops.Solve       -> "solve"
   Ops.Abandon     -> "abandon"
   Ops.Prove       -> "prove"
+  Ops.Eliminate t -> "eliminate " ++ operand t
   where
     operand = renderOperand n ctx
 
@@ -892,6 +894,7 @@ renderFailReason r = case r of
     "Type" ++ subscript a ++ " and Type" ++ subscript b ++ " are different universes"
   NotTypeable e -> "that term has no type" ++ concatMap ("\n  " ++) (renderTypeError 0 e)
   NoRuleMatched     -> "no rule applies here"
+  CannotEliminate e -> renderElimError e
   UnboundInBody x   -> "nothing named " ++ x ++ " in this body"
   NotAnIdentifier s -> show s ++ " is not a name"
   ExpectedText      -> "expected text"
@@ -1074,6 +1077,32 @@ renderDeclareError e = case e of
 -- | Why a term has no type. Each case renders its terms in the context the
 -- error carries, not the session's: by the time inference has opened three
 -- binders the terms mention variables the session has never heard of.
+-- | Why @eliminate@ refused (§3.7, phase 17).
+--
+-- 'IndexTypeDepends' is the one worth reading twice: it is not a bug and not a
+-- typo, it is §3.7's stated limit — homogeneous @Eq@ cannot state a constraint
+-- on an index whose /type/ mentions an earlier index, and lifting it is what
+-- \"John Major\" equality is for (@AGENDA.md@ item 10, deferred past MS1). The
+-- message says so, because a user meeting it has done nothing wrong.
+renderElimError :: ElimError -> String
+renderElimError e = case e of
+  TargetNotTypeable te ->
+    "that target has no type" ++ concatMap ("\n  " ++) (renderTypeError 0 te)
+  TargetNotInductive ctx t ty ->
+    renderCore 0 ctx t ++ " is not a target: its type is " ++ renderCore 0 ctx ty
+      ++ ", not a fully applied datatype"
+  NoEquality g ->
+    "eliminating at indices needs " ++ nameString g ++ ", which is not declared"
+  IndexTypeDepends k (Ident i) ->
+    "index " ++ show k ++ " (" ++ i ++ ") has a type that depends on an earlier index,"
+      ++ "\n  so the equation constraining it cannot be stated"
+  MotiveIllTyped te ->
+    "the goal does not survive generalising the target"
+      ++ concatMap ("\n  " ++) (renderTypeError 0 te)
+  SchemeIllTyped te ->
+    "the elimination does not prove this goal"
+      ++ concatMap ("\n  " ++) (renderTypeError 0 te)
+
 renderTypeError :: Int -> TypeError -> [String]
 renderTypeError n e = case e of
   UnknownVariable ctx x       -> [nameIn ctx x ++ " is not in scope"]

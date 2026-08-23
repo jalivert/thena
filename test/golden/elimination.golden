@@ -1,0 +1,48 @@
+thena spine> data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }
+declared Nat
+thena spine> data Fin : Nat -> Type₀ { fz : ∀ (n : Nat) -> Fin (succ n) ; fs : ∀ (n : Nat) (i : Fin n) -> Fin (succ n) }
+declared Fin
+thena spine> :theorem noEq : ∀ (n : Nat) (i : Fin n) -> Nat
+proving noEq : ∀ (n : Nat) -> Fin n -> Nat
+thena spine> attack
+thena spine> intro
+thena spine> intro
+thena spine> into
+thena spine> along
+thena spine> along
+thena spine> eliminate i
+stuck: eliminating at indices needs Eq, which is not declared
+thena spine> eliminate n
+subgoals: zeroMethod, succMethod
+thena spine> :abandon
+abandoned noEq
+thena spine> data Eq (A : Type₀) : A -> A -> Type₀ { refl : ∀ (a : A) -> Eq A a a }
+declared Eq
+thena spine> data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ { bz : ∀ (m : Nat) -> Below (succ m) (fz m) }
+declared Below
+thena spine> :theorem probe : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Nat
+proving probe : ∀ (n : Nat) (i : Fin n) -> Below n i -> Nat
+thena spine> attack
+thena spine> intro
+thena spine> intro
+thena spine> intro
+thena spine> into
+thena spine> along
+thena spine> along
+thena spine> along
+thena spine> :matches
+attack
+try ‹t›
+abandon
+eliminate ‹t›
+thena spine> eliminate b
+stuck: index 2 (i) has a type that depends on an earlier index,
+  so the equation constraining it cannot be stated
+thena spine> eliminate Type₀
+stuck: Type₀ is not a target: its type is Type₁, not a fully applied datatype
+thena spine> eliminate succ
+stuck: succ is not a target: its type is Nat -> Nat, not a fully applied datatype
+thena spine> attack
+thena spine> eliminate n
+stuck: that is not a hole
+thena spine> :quit

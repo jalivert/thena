@@ -68,6 +68,7 @@ import Thena.Core.Term
   , close
   , fresh
   , freeVars
+  , instantiate
   )
 import Thena.Core.Typing (check)
 import Thena.Errors (TypeError)
@@ -438,18 +439,37 @@ varsOf = map (Free . entryVar)
 --
 -- Sound only because 'dependentArgument' has already refused telescopes whose
 -- later types mention earlier entries: the types are carried across unchanged.
+-- | A second copy of a telescope, with new variables.
+--
+-- **Every later entry is repointed at the new variable** — a telescope is
+-- dependent in general, and an entry whose type still named the /old/ variable
+-- would be a copy that silently refers back into the original. Phase 17 found
+-- this the hard way: it is invisible for every telescope in the suite, because
+-- none of them is dependent where this is used, and it made
+-- @data Below : ∀ (n : Nat) (i : Fin n) -> Type₀@ generate a
+-- @NoConfusionBelow@ that did not typecheck — reported as "the variables
+-- Var 125 and Var 121 are different", which is exactly what it was.
+--
+-- 'close' then 'instantiate' is the only way to rewrite a variable (§3.4), and
+-- it is safe here because both are free variables of the ambient context.
 freshen :: Int -> Context -> (Context, Int)
 freshen n0 = go n0
   where
     go n []       = ([], n)
     go n (e : es) =
-      let (v, n1)   = fresh n
-          (rest, n2) = go n1 es
+      let (v, n1)    = fresh n
+          (rest, n2) = go n1 (map (repoint (entryVar e) v) es)
        in (copy v e : rest, n2)
 
     copy v e = case e of
       Hypothesis _ (Ident i) t   -> Hypothesis v (Ident (i ++ "'")) t
       Definition _ (Ident i) s t -> Definition v (Ident (i ++ "'")) s t
+
+    repoint old new e = case e of
+      Hypothesis w i t   -> Hypothesis w i (swap t)
+      Definition w i s t -> Definition w i (swap s) (swap t)
+      where
+        swap t = instantiate (Free new) (close old t)
 
 -- | Map with the counter threaded, left to right.
 each :: (a -> Int -> (b, Int)) -> Int -> [a] -> ([b], Int)

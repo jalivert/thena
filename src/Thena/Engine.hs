@@ -89,6 +89,8 @@ import Thena.Ops
   , Value (..)
   )
 import Thena.Global.Env (GlobalEnv, InductiveDefinition)
+import qualified Thena.Ops as Op
+import Thena.Tactics.Eliminate (Elimination (..), eliminate)
 import Thena.Rules (RuleBase, RuleIter, dispatch, hasNext, next)
 import Thena.Syntax.Lexer (isIdentifier)
 
@@ -488,6 +490,36 @@ perform instr rest m = case operation instr of
       entering r fr k =
         k { exec = Exec (ruleBody r) [] (fr : stack (exec m)) }
 
+  -- §3.7's elimination tactic (phase 17). The goal is the focus, as with the
+  -- six hole ops; the target is an operand, for the reason 'Try' takes one —
+  -- there is nowhere else it could come from.
+  --
+  -- Qualified because "Thena.Core.Term" has an 'Eliminate' too. The two are
+  -- exactly one apart: this op /decides/ to eliminate, that node /is/ the
+  -- elimination it builds. The same shape as @Component.Claim@ beside 'Claim'.
+  Op.Eliminate tgt -> case term tgt of
+    Left r  -> failure r m
+    Right t -> case focus (cursor (proof m)) of
+      OnComponent (Component.Claim x i s) ->
+        case eliminate (globals m) contextAt (names m) s t of
+          (Left e,   n1) -> failure (CannotEliminate e) m { names = n1 }
+          (Right el, n1) ->
+            -- The methods go in above the goal, innermost first, so the goal
+            -- can see them; then the goal itself becomes the guess that uses
+            -- them. Both halves are one op because a half-applied elimination
+            -- — holes claimed, nothing attached — is not a state any rule
+            -- should be able to observe.
+            let holes = foldl claimAbove (cursor (proof m)) (elimMethods el)
+                claimAbove c (v, hi, hty) = insertAbove (Component.Claim v hi hty) c
+                guess = Component.Guess x i (Trailing (elimTerm el)) s
+             in case replaceComponent guess holes of
+                  Left e    -> failure (CannotMove e) m
+                  Right cur ->
+                    Saying (subgoalMessage (elimMethods el))
+                           (advance m { proof = ProofState cur, names = n1 })
+      OnComponent _ -> failure NotAHole m
+      _             -> failure (CannotMove NotOnTheSpine) m
+
   Concat l r -> case (,) <$> text l <*> text r of
     Left e         -> failure e m
     Right (ls, rs) -> produce (VText (ls ++ rs)) m
@@ -588,6 +620,17 @@ perform instr rest m = case operation instr of
           let (v, n1) = fresh (names m)
               cur     = insertAbove (build v i t) (cursor (proof m))
            in produce (VTerm (Trailing (Free v))) m { proof = ProofState cur, names = n1 }
+
+-- | What @eliminate@ says: the subgoals it opened, by the names it gave them.
+--
+-- It is 'Saying' rather than 'Continue' for 'Reduce'\'s reason — an op that
+-- changes the development in a way the user cannot see at the focus has to say
+-- so. After an elimination the focus is still the goal, now a guess, while the
+-- new holes are above it and off screen.
+subgoalMessage :: [(Var, Ident, Core)] -> String
+subgoalMessage [] = "no subgoals"
+subgoalMessage hs =
+  "subgoals: " ++ intercalate ", " [ n | (_, Ident n, _) <- hs ]
 
 -- | What 'Reduce' says when it orphans one or more holes (§4.7). Plain text:
 -- these are the identifiers the user themselves wrote for a 'Claim' or a

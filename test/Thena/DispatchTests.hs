@@ -33,7 +33,7 @@ import Thena.Engine
   )
 import Thena.Errors (FailReason (..))
 import Thena.Global.Env (emptyGlobals)
-import Thena.Ops (Instr (..), Rule (..), Test (..), Value (..))
+import Thena.Ops (Instr (..), Rule (..), Test (..))
 import qualified Thena.Ops as Ops
 import qualified Thena.Rules
 import Thena.Rules (RuleBase, dispatch, matches, ruleBase, standardRules)
@@ -282,7 +282,7 @@ dispatchableTests =
     "dispatch skips parameterised rules"
     [ testCase "matches shows try, dispatch does not" $ do
         names' (matches standardRules emptyGlobals hole)
-          @?= ["attack", "try", "abandon"]
+          @?= ["attack", "try", "abandon", "eliminate"]
         names' (dispatch standardRules emptyGlobals hole)
           @?= ["attack", "abandon"]
 

@@ -46,6 +46,7 @@ library
         Thena.Syntax.Lexer
         Thena.Syntax.Parser
         Thena.Syntax.Resolve
+        Thena.Tactics.Eliminate
     other-modules:
         Paths_thena
     autogen-modules:
@@ -81,6 +82,7 @@ test-suite thena-test
         Thena.Core.UnifyTests
         Thena.CursorTests
         Thena.DevelopmentTests
+        Thena.EliminateTests
         Thena.EliminatorTests
         Thena.EngineTests
         Thena.GlobalTests

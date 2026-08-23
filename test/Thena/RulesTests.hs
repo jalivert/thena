@@ -23,14 +23,12 @@ import Thena.Development.Cursor (Cursor, crossType, enter)
 import Thena.Development.Partial (Partial (..))
 import Thena.Declared (natDecl)
 import Thena.Driver (parseDeclaration)
-import qualified Thena.Engine
 import Thena.Engine
   ( Exec (..)
   , Machine (..)
   , Outcome (..)
   , ProofState (..)
   , load
-  , newProof
   , resumeAt
   , step
   )
@@ -139,9 +137,9 @@ matchTests =
     "matches"
     [ -- Three at a hole, and that is what makes the list a list: phase 16 has
       -- to choose between them, and the user sees the choice being made.
-      testCase "a hole offers the three hole rules, in definition order" $
+      testCase "a hole offers the four hole rules, in definition order" $
         matching emptyGlobals (holeAt type0)
-          @?= ["attack", "try", "abandon"]
+          @?= ["attack", "try", "abandon", "eliminate"]
 
     , testCase "a guess at a non-Π offers only solve and regret" $
         matching emptyGlobals (guessAt type0)
@@ -239,8 +237,8 @@ iteratorTests =
             deep = drop 2 (drain it)
          in do
               _ <- pure deep
-              map nameOf (drain it) @?= ["attack", "try", "abandon"]
-              map nameOf deep @?= ["abandon"]
+              map nameOf (drain it) @?= ["attack", "try", "abandon", "eliminate"]
+              map nameOf deep @?= ["abandon", "eliminate"]
     ]
 
 -- --------------------------------------------------------------------------

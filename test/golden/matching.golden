@@ -2,6 +2,7 @@ thena spine> :matches
 attack
 try ‹t›
 abandon
+eliminate ‹t›
 thena spine> attack
 thena spine> :matches
 solve
@@ -16,6 +17,7 @@ thena spine> :matches
 attack
 try ‹t›
 abandon
+eliminate ‹t›
 thena spine> attack
 thena spine> :matches
 intro-pi
@@ -37,6 +39,7 @@ thena spine> :matches
 attack
 try ‹t›
 abandon
+eliminate ‹t›
 thena spine> :abandon
 abandoned id
 thena spine> :theorem c : ∀ (A : Type₀) -> Type₀

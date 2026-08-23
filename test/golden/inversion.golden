@@ -1,0 +1,52 @@
+thena spine> data Eq (A : Type₀) : A -> A -> Type₀ { refl : ∀ (a : A) -> Eq A a a }
+declared Eq
+thena spine> data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }
+declared Nat
+thena spine> data Empty : Type₀ { }
+declared Empty
+thena spine> data Ev : Nat -> Type₀ { evZero : Ev zero ; evSS : ∀ (n : Nat) (p : Ev n) -> Ev (succ (succ n)) }
+no noConfusionEv: evSS's argument p has a type that depends on an earlier argument, so its equation cannot be stated
+declared Ev
+thena spine> :whnf NoConfusionNat zero (succ zero)
+∀ (C : Type₀) -> C
+thena spine> :whnf NoConfusionNat (succ (succ zero)) (succ zero)
+∀ (C : Type₀) -> (Eq Nat (succ zero) zero -> C) -> C
+thena spine> :theorem oneNotEven : ∀ (p : Ev (succ zero)) -> Empty
+proving oneNotEven : Ev (succ zero) -> Empty
+thena spine> attack
+thena spine> intro
+thena spine> into
+thena spine> along
+thena spine> eliminate p
+subgoals: evZeroMethod, evSSMethod
+thena spine> :where
+focus
+  let ? oneNotEven : Empty ≐ (
+path
+  root ▸ ≐ oneNotEven ▸ p ▸ evZeroMethod ▸ evSSMethod
+context
+  p : Ev (succ zero)
+  evZeroMethod : Eq Nat zero (succ zero) -> Empty
+  evSSMethod : ∀ (n : Nat) -> Ev n -> (Eq Nat n (succ zero) -> Empty) -> Eq Nat (succ (succ n)) (succ zero) -> Empty
+type
+  Empty
+thena spine> back
+thena spine> back
+thena spine> try \ (q : Eq Nat zero (succ zero)) -> noConfusionNat zero (succ zero) q Empty
+thena spine> solve
+thena spine> along
+thena spine> try \ (n : Nat) (e : Ev n) (ih : Eq Nat n (succ zero) -> Empty) (q : Eq Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ (succ n)) (succ zero) q Empty (\ (q2 : Eq Nat (succ n) zero) -> noConfusionNat (succ n) zero q2 Empty)
+thena spine> solve
+thena spine> along
+thena spine> solve
+thena spine> back
+thena spine> back
+thena spine> back
+thena spine> back
+thena spine> solve
+thena spine> qed
+oneNotEven : Ev (succ zero) -> Empty   ∎
+thena spine> :show oneNotEven
+oneNotEven : Ev (succ zero) -> Empty
+oneNotEven = let oneNotEven = λ (p : Ev (succ zero)) -> let evZeroMethod = λ (q : Eq Nat zero (succ zero)) -> noConfusionNat zero (succ zero) q Empty : Eq Nat zero (succ zero) -> Empty in let evSSMethod = λ (n : Nat) (e : Ev n) (ih : Eq Nat n (succ zero) -> Empty) (q : Eq Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ (succ n)) (succ zero) q Empty (λ (q2 : Eq Nat (succ n) zero) -> noConfusionNat (succ n) zero q2 Empty) : ∀ (n : Nat) -> Ev n -> (Eq Nat n (succ zero) -> Empty) -> Eq Nat (succ (succ n)) (succ zero) -> Empty in let oneNotEven = (elim Ev () (λ (x : Nat) (target : Ev x) -> Eq Nat x (succ zero) -> Empty) (evZeroMethod evSSMethod) ((succ zero)) p) (refl Nat (succ zero)) : Empty in oneNotEven : Ev (succ zero) -> Empty in oneNotEven
+thena spine> :quit

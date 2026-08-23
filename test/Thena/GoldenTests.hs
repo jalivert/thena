@@ -356,6 +356,156 @@ tests =
         , ":whnf elim NotADatatype () (\\ (_ : Nat) -> Nat) () () n"
         , ":quit"
         ]
+      -- §3.7's elimination tactic (phase 17). Plain induction over @Nat@: the
+      -- generalisation the motive performs is abstracting the /target/, and
+      -- @plus n zero@ is the case that needs it — @plus zero n@ would not,
+      -- because the recursion is on the first argument and it computes.
+      --
+      -- @congSucc@ is the same tactic at an /indexed/ family: eliminating an
+      -- equation constrains both of @Eq@'s indices, and the use site discharges
+      -- them reflexively.
+      --
+      -- Prelude-free like every transcript here (phase 11), so @Eq@ is declared
+      -- rather than loaded.
+    , script
+        "induction"
+        [ "data Eq (A : Type₀) : A -> A -> Type₀ { refl : ∀ (a : A) -> Eq A a a }"
+        , "data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }"
+        , ":theorem plus : Nat -> Nat -> Nat"
+        , "try \\ (n : Nat) (m : Nat) -> elim Nat () (\\ (t : Nat) -> Nat) (m (\\ (k : Nat) (ih : Nat) -> succ ih)) () n"
+        , "solve"
+        , "qed"
+        , ":whnf plus (succ zero) (succ zero)"
+        , ":theorem congSucc : ∀ (a : Nat) (b : Nat) (e : Eq Nat a b) -> Eq Nat (succ a) (succ b)"
+        , "attack"
+        , "intro"
+        , "intro"
+        , "intro"
+        , "into"
+        , "along"
+        , "along"
+        , "along"
+        , "eliminate e"
+        , "back"
+        , ":where"
+        , "try \\ (c : Nat) (q1 : Eq Nat c a) (q2 : Eq Nat c b) -> refl Nat (succ c)"
+        , "solve"
+        , "along"
+        , "solve"
+        , "back"
+        , "back"
+        , "back"
+        , "back"
+        , "back"
+        , "solve"
+        , "qed"
+        , ":theorem plusZero : ∀ (n : Nat) -> Eq Nat (plus n zero) n"
+        , "attack"
+        , "intro"
+        , "into"
+        , "along"
+        , "eliminate n"
+        , ":show"
+        , "back"
+        , "back"
+        , "try refl Nat zero"
+        , "solve"
+        , "along"
+        , "try \\ (x : Nat) (ih : Eq Nat (plus x zero) x) -> congSucc (plus x zero) x ih"
+        , "solve"
+        , "along"
+        , "solve"
+        , "back"
+        , "back"
+        , "back"
+        , "back"
+        , "solve"
+        , "qed"
+        , ":show plusZero"
+        , ":quit"
+        ]
+      -- The other half of §3.7: eliminating an indexed family at a **specific**
+      -- index. @Ev (succ zero)@ matches no constructor, and the scheme is what
+      -- says so — each method carries an equation between its own index
+      -- expression and @succ zero@, and @noConfusionNat@ (phase 14) turns both
+      -- into @Empty@. Ruling out @E-IfTrue@ against @E-If@ in the determinacy
+      -- proof is this, at a bigger relation (§9, phase 18).
+    , script
+        "inversion"
+        [ "data Eq (A : Type₀) : A -> A -> Type₀ { refl : ∀ (a : A) -> Eq A a a }"
+        , "data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }"
+        , "data Empty : Type₀ { }"
+        , "data Ev : Nat -> Type₀ { evZero : Ev zero ; evSS : ∀ (n : Nat) (p : Ev n) -> Ev (succ (succ n)) }"
+        , ":whnf NoConfusionNat zero (succ zero)"
+        , ":whnf NoConfusionNat (succ (succ zero)) (succ zero)"
+        , ":theorem oneNotEven : ∀ (p : Ev (succ zero)) -> Empty"
+        , "attack"
+        , "intro"
+        , "into"
+        , "along"
+        , "eliminate p"
+        , ":where"
+        , "back"
+        , "back"
+        , "try \\ (q : Eq Nat zero (succ zero)) -> noConfusionNat zero (succ zero) q Empty"
+        , "solve"
+        , "along"
+        , "try \\ (n : Nat) (e : Ev n) (ih : Eq Nat n (succ zero) -> Empty) (q : Eq Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ (succ n)) (succ zero) q Empty (\\ (q2 : Eq Nat (succ n) zero) -> noConfusionNat (succ n) zero q2 Empty)"
+        , "solve"
+        , "along"
+        , "solve"
+        , "back"
+        , "back"
+        , "back"
+        , "back"
+        , "solve"
+        , "qed"
+        , ":show oneNotEven"
+        , ":quit"
+        ]
+      -- What the tactic refuses. None of these is a bug: §3.7's non-dependent
+      -- index telescope limit (@AGENDA.md@ item 10), @Eq@ and @refl@ being
+      -- named rather than designated, and a target that is not an inhabitant of
+      -- a family at all.
+      --
+      -- One more refusal is /not/ here: thesis §3.5.2's \"what to fix, what to
+      -- abstract\". It is in "Thena.EliminateTests" instead, matched on shape,
+      -- because its message ends in a conversion clash that names two raw
+      -- variables by number — and the number depends on how much of the script
+      -- ran before it, which would make this file churn for unrelated reasons.
+    , script
+        "elimination"
+        [ "data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }"
+        , "data Fin : Nat -> Type₀ { fz : ∀ (n : Nat) -> Fin (succ n) ; fs : ∀ (n : Nat) (i : Fin n) -> Fin (succ n) }"
+        , ":theorem noEq : ∀ (n : Nat) (i : Fin n) -> Nat"
+        , "attack"
+        , "intro"
+        , "intro"
+        , "into"
+        , "along"
+        , "along"
+        , "eliminate i"
+        , "eliminate n"
+        , ":abandon"
+        , "data Eq (A : Type₀) : A -> A -> Type₀ { refl : ∀ (a : A) -> Eq A a a }"
+        , "data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ { bz : ∀ (m : Nat) -> Below (succ m) (fz m) }"
+        , ":theorem probe : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Nat"
+        , "attack"
+        , "intro"
+        , "intro"
+        , "intro"
+        , "into"
+        , "along"
+        , "along"
+        , "along"
+        , ":matches"
+        , "eliminate b"
+        , "eliminate Type₀"
+        , "eliminate succ"
+        , "attack"
+        , "eliminate n"
+        , ":quit"
+        ]
     , script
         "mistakes"
         [ "wibble"

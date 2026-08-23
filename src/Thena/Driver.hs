@@ -89,6 +89,7 @@ import Thena.Global.Env
   )
 import Thena.Core.Convert (convert)
 import Thena.Core.Typing (infer, sortOf)
+import qualified Thena.Ops as Ops
 import Thena.Ops
   ( AnswerKind (..)
   , Instr (..)
@@ -503,6 +504,19 @@ dispatch s name arg = case name of
           (sessionStepping s)
           s { sessionMachine =
                 load [Do (Try (Lit (VTerm (Trailing t))))] machine { names = n1 } }
+          []
+  -- §3.7's elimination tactic (phase 17). A bare word taking the target to
+  -- eliminate, spelled and read exactly as @try@ is: it acts, and its argument
+  -- is a core term in the context at the focus. Thesis §3.6 calls choosing it
+  -- \"fingering\", and it is the user's choice, not the tactic's.
+  "eliminate" -> withArgument $
+    case parseCore (globals machine) ctx (names machine) arg of
+      Left e -> (s, Failed e)
+      Right (t, n1) ->
+        progress
+          (sessionStepping s)
+          s { sessionMachine =
+                load [Do (Ops.Eliminate (Lit (VTerm (Trailing t))))] machine { names = n1 } }
           []
   "cross"  -> case arg of
     "type" -> run [Do CrossType]

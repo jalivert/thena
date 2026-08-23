@@ -18,6 +18,7 @@ module Thena.Declared
   , emptyDecl
   , eqDecl
   , taplDecl
+  , stepDecl
   , nat
   , natVec
   , natVecCounter
@@ -27,6 +28,8 @@ module Thena.Declared
   , eqNatCounter
   , eqTapl
   , eqTaplCounter
+  , eqStep
+  , eqStepCounter
   , declared
   ) where
 
@@ -83,6 +86,23 @@ taplDecl =
   \; pred : Term -> Term \
   \; iszero : Term -> Term }"
 
+-- | The @if@ fragment of TAPL\'s one-step evaluation relation (3.5.3), as an
+-- inductively defined relation over 'taplDecl'\'s @Term@.
+--
+-- **Three rules, not the whole relation.** These are the ones @PLAN.md@ §3.7
+-- works its elimination example on, and eliminating them at specific term
+-- shapes is what phase 17 exists to do. The @succ@/@pred@/@iszero@ rules need
+-- a numeric-value predicate and belong with phase 18, which declares the
+-- relation for real; a fixture that guessed at them now would be a second
+-- transcription to drift.
+stepDecl :: String
+stepDecl =
+  "Step : Term -> Term -> Type\8320 \
+  \{ eIfTrue : \8704 (t2 : Term) (t3 : Term) -> Step (ifthen true t2 t3) t2 \
+  \; eIfFalse : \8704 (t2 : Term) (t3 : Term) -> Step (ifthen false t2 t3) t3 \
+  \; eIf : \8704 (t1 : Term) (t1' : Term) (t2 : Term) (t3 : Term) (s : Step t1 t1') \
+  \-> Step (ifthen t1 t2 t3) (ifthen t1' t2 t3) }"
+
 -- | Declare a list of datatypes in order, threading the environment and the
 -- name counter. A refusal is a fixture bug, not a test result, so it errors
 -- loudly rather than quietly becoming an unrelated assertion failure.
@@ -131,3 +151,11 @@ eqTapl = fst (declared [eqDecl, taplDecl])
 
 eqTaplCounter :: Int
 eqTaplCounter = snd (declared [eqDecl, taplDecl])
+
+-- | @Eq@, MS1's target language, and its evaluation relation — what phase 17's
+-- elimination tactic is aimed at.
+eqStep :: GlobalEnv
+eqStep = fst (declared [eqDecl, taplDecl, stepDecl])
+
+eqStepCounter :: Int
+eqStepCounter = snd (declared [eqDecl, taplDecl, stepDecl])

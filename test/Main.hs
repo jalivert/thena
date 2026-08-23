@@ -11,6 +11,7 @@ import qualified Thena.CursorTests
 import qualified Thena.DispatchTests
 import qualified Thena.DevelopmentTests
 import qualified Thena.DriverTests
+import qualified Thena.EliminateTests
 import qualified Thena.EliminatorTests
 import qualified Thena.EngineTests
 import qualified Thena.GlobalTests
@@ -36,6 +37,7 @@ main =
       , Thena.DispatchTests.tests
       , Thena.DevelopmentTests.tests
       , Thena.DriverTests.tests
+      , Thena.EliminateTests.tests
       , Thena.EliminatorTests.tests
       , Thena.EngineTests.tests
       , Thena.GlobalTests.tests

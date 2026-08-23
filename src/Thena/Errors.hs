@@ -31,6 +31,9 @@ module Thena.Errors
     -- * The kernel (§5.3)
   , KernelError (..)
   , Position (..)
+
+    -- * The elimination tactic (§3.7)
+  , ElimError (..)
   ) where
 
 import Thena.Core.Context (Context)
@@ -97,6 +100,9 @@ data FailReason
     -- ^ an op was handed a term with no type. @unify@ needs one: a deferred
     -- equation records the type it was asked at (§3.3), so the op infers it
     -- from the left-hand side and this is what happens when it cannot
+  | CannotEliminate ElimError
+    -- ^ the elimination tactic could not build a scheme for the target it was
+    -- given (§3.7, phase 17)
   deriving (Eq, Show)
 
 -- | Why a move was impossible (§4.0 C4, §12 invariant 2).
@@ -269,4 +275,35 @@ data Position
   | Inside Var Ident Position
     -- ^ under a guess: a guess\'s body is a development in its own right, so
     -- its failures nest rather than flatten
+  deriving (Eq, Show)
+
+-- | Why @eliminate@ could not build its scheme (§3.7, phase 17).
+--
+-- Every case is a refusal the /user/ can meet by picking a different target,
+-- except 'SchemeIllTyped', which is the tactic being wrong about its own
+-- construction — kept as a refusal rather than a crash, exactly as
+-- 'Thena.Global.Declare.NoConfusionRejected' is.
+data ElimError
+  = TargetNotTypeable TypeError
+    -- ^ the term fingered as the target has no type at all
+  | TargetNotInductive Context Core Core
+    -- ^ its type does not whnf to a saturated application of a declared
+    -- inductive family. Carries the context, the target, and the type it
+    -- actually had — the context because the target is usually a variable and
+    -- a message that calls it @\8249Var 107\8250@ is no message
+  | NoEquality GlobalName
+    -- ^ eliminating at indices needs @Eq@ and @refl@ /by name/ (§3.7, decided
+    -- 2026-08-11), and the named one is not declared. Only ever raised for a
+    -- family that has indices: without them the scheme states no equations
+  | IndexTypeDepends Int Ident
+    -- ^ §3.7's stated limit. The type of index @n@ (counting from 1, named)
+    -- mentions an earlier index, so the homogeneous @Eq I i a@ that constrains
+    -- it cannot be written down. @Vec@-style families; @AGENDA.md@ item 10
+  | MotiveIllTyped TypeError
+    -- ^ the generalised goal does not typecheck under the abstracted indices.
+    -- Abstracting a term in a dependent theory is not always type-preserving,
+    -- and thesis §3.5.3 says so; MS1 reports it rather than falling back
+  | SchemeIllTyped TypeError
+    -- ^ the assembled elimination does not have the goal's type. Unreachable if
+    -- the motive typechecked and the generated eliminator type is right
   deriving (Eq, Show)

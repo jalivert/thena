@@ -119,6 +119,20 @@ data Op
     -- ^ the development must be pure; yields the closed term it stands for and
     -- the type it is claimed to have, for the driver to run the kernel on
     -- (§7.5, §5.3)
+  | Eliminate Operand
+    -- ^ the term to eliminate — §3.7's elimination tactic, phase 17. It
+    -- generalises the target and its indices in the motive, claims a hole per
+    -- constructor above the goal, and attaches the elimination as a guess.
+    --
+    -- **One coarse op, and deliberately so** (decided 2026-08-23,
+    -- @AGENDA.md@ item 35): see "Thena.Tactics.Eliminate"'s header. §7.2's
+    -- \"large and small instructions coexist\" is what permits it, and §12
+    -- invariant 5 is what makes it the right call — a granular version needs a
+    -- term-construction vocabulary nothing else has asked for.
+    --
+    -- It takes an operand where the six hole ops take none, for 'Try'\'s
+    -- reason: the goal is the focus, but the target has nowhere else to come
+    -- from.
   deriving (Eq, Show)
 
 -- @Reduce@ is a move, not a value-producing op, for the same reason 'Along'
@@ -183,10 +197,16 @@ data AnswerKind = AText | AName | ATerm | ARule
 
 -- The six hole ops are thesis tables 2.7 and 2.8, less the five phase 13 does
 -- not need — decided by the user 2026-08-22, and §12 invariant 5's rule that
--- the vocabulary is discovered rather than designed. @cut@, @postpone@,
--- @justify@ and @retreat@ wait for phase 17\'s tactics; @raise@ waits longer,
--- because phase 9 decided a scope violation is /reported/ and not repaired,
--- and repairing it is what @raise@ is for (§6.2).
+-- the vocabulary is discovered rather than designed.
+--
+-- **@cut@, @postpone@, @justify@ and @retreat@ are not in MS1, and that is now
+-- a decision rather than a wait.** They were held for \"phase 17\'s tactics\";
+-- phase 17 wrote the tactics and none of them needs one. Thesis §3.6.5 uses
+-- @cut@ and @retreat@ to tidy up after @eliminate@, and Thena does not have to:
+-- the methods are claimed as holes /above/ the goal and never sit inside the
+-- guess, so there is nothing to retreat and nothing to cut. @raise@ waits
+-- longer still, because phase 9 decided a scope violation is /reported/ and
+-- not repaired, and repairing it is what @raise@ is for (§6.2).
 --
 -- **None takes a hole as an operand.** They act at the focus, like the moves,
 -- so a rule body says @along@ then @attack@ rather than naming a variable it
@@ -243,6 +263,7 @@ produces o = case o of
   Solve        -> False
   Abandon      -> False
   Prove        -> False
+  Eliminate _  -> False
 
 -- --------------------------------------------------------------------------
 -- Rules (§8)
