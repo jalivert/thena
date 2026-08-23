@@ -158,6 +158,47 @@ tests =
         , ":proofs"
         , ":quit"
         ]
+      -- Phase 15's deliverable: what could be done next, at each shape of
+      -- focus. A look and nothing more — no body runs (§7.6).
+    , script
+        "matching"
+        [ ":matches"
+        , "attack"
+        , ":matches"
+          -- Nothing applies in the core fragment: every head this phase has
+          -- asks about a component, and a core subterm is not one.
+        , "cross type"
+        , ":matches"
+        , "back"
+        , ":theorem id : \8704 (A : Type\8320) -> A -> A"
+        , ":matches"
+        , "attack"
+        , ":matches"
+        , "intro"
+        , "into"
+        , "along"
+        , ":where"
+        , ":matches"
+        , ":abandon"
+          -- Section 8's stated cost, live: the head asks about the guess's own
+          -- type, which is still a Pi, while the hole @intro@ reaches is at
+          -- Type0. The rule is offered, runs, and fails in its body.
+        , ":theorem c : \8704 (A : Type\8320) -> Type\8320"
+        , "attack"
+        , "intro"
+        , ":matches"
+        , "intro"
+        , ":abandon"
+          -- Table 2.8's other introduction. Its head reads the type as
+          -- written, because whnf delta-reduces a term-level let away (5.1) --
+          -- the bug this phase found in 'Thena.Engine.introduce'.
+        , ":theorem l : let x = Type\8320 : Type\8321 in x"
+        , "attack"
+        , ":matches"
+        , "intro"
+        , ":show"
+        , ":quit"
+        ]
       -- Suspension, undo, and the promise that the environment only grows.
     , script
         "session"

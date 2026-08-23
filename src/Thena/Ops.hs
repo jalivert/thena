@@ -15,10 +15,16 @@ module Thena.Ops
   , Operand (..)
   , Instr (..)
   , Op (..)
+  , produces
   , Part (..)
   , AnswerKind (..)
+
+    -- * Rules (§8)
+  , Rule (..)
+  , Test (..)
   ) where
 
+import Thena.Core.Term (GlobalName)
 import Thena.Development.Cursor (Part (..))
 import Thena.Development.Partial (Partial)
 import Thena.Global.Env (InductiveDefinition)
@@ -39,13 +45,16 @@ type Env = [(Name, Value)]
 -- price is stated once in §7.2 — an op that needs a plain term checks at
 -- runtime and fails with 'Thena.Errors.ExpectedTerm' if it does not have one.
 --
--- @VRule@ is NOT here, and cannot be until 'Thena.Rules.Rule' exists (phase
--- 15); see the plan for phase 4 §10. 'VSurface' and 'VPair' are on
--- @AGENDA.md@'s standing list of things defined in MS1 and not yet exercised.
+-- 'VRule' arrives at phase 15, with 'Rule' itself: §7.2's \"rules are values, so
+-- 'Call' and higher-order rules fall out\" needs 'Rule' in /this/ module, which
+-- is what the user decided 2026-08-23 (@AGENDA.md@ item 25). 'VSurface',
+-- 'VPair' and 'VRule' are all on @AGENDA.md@'s standing list of things defined
+-- in MS1 and not yet exercised.
 data Value
   = VText    String    -- ^ what @Ask@ returns and @Say@ consumes
   | VTerm    Partial   -- ^ a term, a variable, or a whole development
   | VSurface Raw       -- ^ an unelaborated tree — elaboration's input
+  | VRule    Rule      -- ^ rules are values, so @Call@ costs no machinery (§8)
   | VPair    Value Value
   deriving (Eq, Show)
 
@@ -180,3 +189,93 @@ data AnswerKind = AText | AName | ATerm | ARule
 --
 -- @Try@ is the exception and takes the term to attach — there is nowhere else
 -- that could come from.
+
+-- --------------------------------------------------------------------------
+-- Which ops produce a value (§7.2)
+-- --------------------------------------------------------------------------
+
+-- | Does this op leave something for a @Bind@ to name?
+--
+-- §7.2 keeps 'Op' free of a @Maybe@ and answers the question here instead, so
+-- that @x = attack@ is rejected by 'Thena.Rules.validate' before a body runs
+-- rather than binding nothing quietly.
+--
+-- **The engine is what makes this true, and it is checked against the engine**,
+-- not against this list: 'Thena.RulesTests' runs each op through 'Thena.Engine'
+-- on a fixture and asserts that a name appears in @env@ exactly when this
+-- function says it should. That is the standing lesson about finding an
+-- invariant maintained by different code from the code that checks it — a table
+-- agreeing with itself would agree with itself while being wrong.
+--
+-- Written as a total case split rather than a list of the four, so @-Wall@
+-- makes every op added later answer the question.
+produces :: Op -> Bool
+produces o = case o of
+  -- 'Ask' produces through 'Thena.Engine.resumeAt', which is why the asking
+  -- instruction stays at the head of @pc@ (§7.5): the destination has to still
+  -- be there when the answer comes back.
+  Ask _ _      -> True
+  Concat _ _   -> True
+  Assume _ _   -> True   -- the variable it bound; §7.3's @?x <- claim S@
+  Claim  _ _   -> True
+
+  Say _        -> False
+  DefineData _ -> False
+  Certify _    -> False
+  Unify _ _    -> False
+  Reduce       -> False
+  Along        -> False
+  Into         -> False
+  CrossType    -> False
+  CrossValue   -> False
+  Down _       -> False
+  Back         -> False
+  Attack       -> False
+  Intro        -> False
+  Try _        -> False
+  Regret       -> False
+  Solve        -> False
+  Abandon      -> False
+
+-- --------------------------------------------------------------------------
+-- Rules (§8)
+-- --------------------------------------------------------------------------
+
+-- | A rule is a head and a body: a list of shape questions that must all pass,
+-- and a procedure (§8).
+--
+-- **It lives here rather than in "Thena.Rules"** — decided by the user
+-- 2026-08-23, @AGENDA.md@ item 25. 'Value'\'s 'VRule' case needs 'Rule' and a
+-- rule's body is @[Instr]@, so the two modules would each need the other;
+-- §7.2's own \"rules are values\" is the argument for which way to break it.
+-- "Thena.Rules" keeps the engine — 'Thena.Rules.RuleBase',
+-- 'Thena.Rules.RuleIter', 'Thena.Rules.matches', 'Thena.Rules.validate'.
+--
+-- **A tactic is a rule**, and that is the whole point (§8): the match list the
+-- user sees must contain @intro@ beside an elaborate search strategy without
+-- fragmenting by implementation category.
+data Rule = Rule
+  { ruleName   :: GlobalName
+  , ruleParams :: [Name]   -- ^ bound by @Call@; they land in the body's own 'Env'
+  , ruleHead   :: [Test]   -- ^ all must pass
+  , ruleBody   :: [Instr]
+  }
+  deriving (Eq, Show)
+
+-- | A shallow shape question — **a small closed set, and there is no pattern
+-- language** (§8, DECIDED 2026-08-20).
+--
+-- The body pulls things apart with ordinary instructions; a head only asks
+-- whether the rule is worth trying. §8 states the cost once: a rule needing a
+-- deeper condition matches, runs and fails in its body, so the match list can
+-- offer something that will not work. Prolog has exactly this.
+--
+-- Phase 15 defines the four its rule base asks, and no more (§12 invariant 5).
+-- §8's @HintIsApp@ and @HintIsName@ are deliberately absent: there is no hint
+-- until @Prove@ carries one, and elaboration's rules are phase 17's.
+data Test
+  = FocusIsHole     -- ^ the focus is a @? x : S@ component
+  | FocusIsGuess    -- ^ the focus is a @? x ≐ g : S@ component
+  | GoalTypeIsPi    -- ^ the focused component's type whnfs to a Π
+  | GoalTypeIsLet   -- ^ … or to a @let@, which is table 2.8's other intro
+  deriving (Eq, Show)

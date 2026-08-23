@@ -1,0 +1,69 @@
+thena spine> :matches
+attack
+try ‹t›
+abandon
+thena spine> attack
+thena spine> :matches
+solve
+regret
+thena spine> cross type
+thena core> :matches
+no rule applies here
+thena core> back
+thena spine> :theorem id : ∀ (A : Type₀) -> A -> A
+proving id : ∀ (A : Type₀) -> A -> A
+thena spine> :matches
+attack
+try ‹t›
+abandon
+thena spine> attack
+thena spine> :matches
+intro-pi
+solve
+regret
+thena spine> intro
+thena spine> into
+thena spine> along
+thena spine> :where
+focus
+  let ? id : A -> A in
+path
+  root ▸ ≐ id ▸ A
+context
+  A : Type₀
+type
+  A -> A
+thena spine> :matches
+attack
+try ‹t›
+abandon
+thena spine> :abandon
+abandoned id
+thena spine> :theorem c : ∀ (A : Type₀) -> Type₀
+proving c : Type₀ -> Type₀
+thena spine> attack
+thena spine> intro
+thena spine> :matches
+intro-pi
+solve
+regret
+thena spine> intro
+stuck: that hole's type is neither a ∀ nor a let
+thena spine> :abandon
+abandoned c
+thena spine> :theorem l : let x = Type₀ : Type₁ in x
+proving l : let x = Type₀ : Type₁ in x
+thena spine> attack
+thena spine> :matches
+intro-let
+solve
+regret
+thena spine> intro
+thena spine> :show
+▶ let ? l : let x = Type₀ : Type₁ in x ≐ (
+    let x = Type₀ : Type₁ in
+    let ? l : x in
+    l
+  ) in
+  l
+thena spine> :quit

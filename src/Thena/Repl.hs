@@ -104,7 +104,7 @@ import Thena.Global.Env
   , InductiveDefinition (..)
   , constructorTarget
   )
-import Thena.Ops (AnswerKind (..), Instr (..), Op, Operand (..), Value (..))
+import Thena.Ops (AnswerKind (..), Instr (..), Op, Operand (..), Rule (..), Value (..))
 import qualified Thena.Ops as Ops
 import Thena.Syntax.Lexer (LexError (..), Pos (..), Token (..))
 import Thena.Syntax.Parser (ParseError (..))
@@ -284,6 +284,7 @@ renderResponse s resp = case resp of
   -- Show where it landed: an undo with no output looks like nothing happened.
   Undone        -> [renderCursor (counter s) (cursor (proof (sessionMachine s)))]
   Proofs cur ps -> renderProofs (counter s) cur ps
+  Matched rs    -> renderMatches rs
   Ran msgs stop  -> msgs ++ renderStop s stop
   Failed e       -> [renderSyntaxError e]
   Rejected e     -> [renderCommandError e]
@@ -845,6 +846,9 @@ renderValue n ctx v = case v of
   VTerm (Trailing t) -> "⌜" ++ renderCore n ctx t ++ "⌝"
   VTerm p            -> "⌜" ++ unwords (words (renderPartial n ctx p)) ++ "⌝"
   VSurface _         -> "‹unresolved›"
+  -- A rule in an operand is a rule being passed to another rule, so its name
+  -- is what identifies it; its body belongs to @:show@ on the rule, not here.
+  VRule r            -> "‹rule " ++ nameString (ruleName r) ++ "›"
   VPair a b          -> "(" ++ renderValue n ctx a ++ ", " ++ renderValue n ctx b ++ ")"
 
 answerKind :: AnswerKind -> String
@@ -1126,3 +1130,20 @@ nameString (GlobalName g) = g
 
 identString :: Ident -> String
 identString (Ident i) = i
+
+-- | @:matches@ — the rules that apply at the focus, in dispatch order (§7.6).
+--
+-- One per line, spelled the way it would be invoked: the name, then a
+-- placeholder per parameter. Not the head: the user asked what could be done
+-- next, and the tests are why the answer is what it is rather than part of it.
+--
+-- **Order is meaning here.** §8 fixes dispatch order as definition order, so
+-- the first line is the one the engine would try first when phase 16 makes it
+-- able to. Ranking and grouping the list for display is a separate question and
+-- deliberately deferred past MS5 (§8).
+renderMatches :: [Rule] -> [String]
+renderMatches [] = ["no rule applies here"]
+renderMatches rs = map one rs
+  where
+    one r = unwords (nameString (ruleName r) : map placeholder (ruleParams r))
+    placeholder n = "‹" ++ n ++ "›"

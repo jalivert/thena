@@ -89,10 +89,12 @@ import Thena.Core.Typing (infer, sortOf)
 import Thena.Ops
   ( AnswerKind (..)
   , Instr (..)
+  , Rule (..)
   , Op (..)
   , Operand (..)
   , Value (..)
   )
+import Thena.Rules (RuleIter, matches, next, standardRules)
 import Thena.Syntax.Concrete (Raw)
 import Thena.Syntax.Lexer (LexError, Located, Token, lexTokens)
 import Thena.Syntax.Parser
@@ -157,7 +159,7 @@ data Proof = Proof
 
 newSession :: Session
 newSession = Session
-  { sessionMachine   = Machine (Exec [] [] []) ps emptyGlobals n
+  { sessionMachine   = Machine (Exec [] [] []) ps emptyGlobals standardRules n
   , sessionProof     = Nothing
   , sessionSuspended = []
   , sessionStepping  = False
@@ -212,6 +214,10 @@ data Response
     -- ^ @:load ‹path›@. The driver may not touch a file — §12 invariant 4 puts
     -- all IO in "Thena.Repl" — so it asks, and the caller reads the file and
     -- hands the contents back to 'loadSource'
+  | Matched [Rule]
+    -- ^ @:matches@ — the rules whose heads pass at the focus, in dispatch order
+    -- (§7.6). A look and not an act: no body runs, and nothing is speculatively
+    -- executed to find out whether one would succeed (§2.2)
   | Ran [Message] Stop        -- ^ what the machine said, and where it stopped
   | Failed SyntaxError
   | Rejected CommandError
@@ -360,6 +366,14 @@ dispatch s name arg = case name of
   -- no one rule to print and the command has to be told which one is wanted.
   ":elim"  -> withArgument (eliminator arg)
   ":where" -> noArgument (s, Where (cursor (proof machine)))
+  -- Autocomplete, and it is a read-only query on the iterator (§7.6): the
+  -- driver asks for the matches at the current state and shows them. Picking
+  -- one and running its body is phase 16's.
+  ":matches" -> noArgument
+    ( s
+    , Matched (unfoldIter
+                 (matches (rules machine) (globals machine) (cursor (proof machine))))
+    )
   ":goal"  -> goal
   -- With no argument, view-reduce the core focus (§4.7); with one, an
   -- arbitrary typed term — the same no-argument/with-argument split as
@@ -985,3 +999,14 @@ whyNoConfusion d why = "no " ++ str (snd (noConfusionNames d)) ++ ": " ++ becaus
 
 mapLeft :: (a -> b) -> Either a c -> Either b c
 mapLeft f = either (Left . f) Right
+
+-- | Drain the iterator (§7.6). The REPL shows the whole match list rather than
+-- a few with more on scroll, because MS1's terminal has no scroll and a list
+-- silently cut short would be a worse lie than a long one. The incremental
+-- reads — 'Thena.Rules.next' and 'Thena.Rules.hasNext' — are what phase 16's
+-- peek and a real frontend use, and this is written in terms of the first so
+-- that the display and the dispatcher walk the same iterator.
+unfoldIter :: RuleIter -> [Rule]
+unfoldIter it = case next it of
+  Nothing        -> []
+  Just (r, rest) -> r : unfoldIter rest

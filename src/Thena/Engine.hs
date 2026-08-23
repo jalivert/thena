@@ -82,6 +82,7 @@ import Thena.Ops
   , Value (..)
   )
 import Thena.Global.Env (GlobalEnv, InductiveDefinition)
+import Thena.Rules (RuleBase)
 import Thena.Syntax.Lexer (isIdentifier)
 
 -- --------------------------------------------------------------------------
@@ -96,6 +97,12 @@ import Thena.Syntax.Lexer (isIdentifier)
 -- whole of what backtracks, so there is no sub-record to snapshot correctly or
 -- incorrectly.
 --
+-- 'rules' is the fifth field, added phase 15 and chosen by the user: the rule
+-- base cannot live in 'GlobalEnv', because "Thena.Global.Env" sits below
+-- "Thena.Ops" and so cannot mention a 'Thena.Ops.Rule' (@AGENDA.md@ item 25).
+-- It does not backtrack for 'globals'\' reason — proving something is not what
+-- changes the set of rules that exist.
+--
 -- §7.2 calls the counter @fresh@. It is 'names' here because
 -- 'Thena.Core.Term.fresh' is the function that mints from it, and a field and a
 -- function of the same name are ambiguous to GHC and to the ear.
@@ -103,6 +110,7 @@ data Machine = Machine
   { exec    :: Exec
   , proof   :: ProofState
   , globals :: GlobalEnv  -- ^ NOT backtrackable (§7.4, §3.3.1)
+  , rules   :: RuleBase   -- ^ NOT backtrackable (§7.4) — phase 15
   , names   :: Int        -- ^ NOT backtrackable (§7.4)
   }
   deriving (Eq, Show)
@@ -572,11 +580,21 @@ introduce
   -> Either FailReason (Partial, Int)
 introduce env ctx n p = case p of
   Under (Component.Claim v i s) (Trailing (Free v'))
-    | v == v' -> case whnf env ctx s of
-        Pi j dom cod   -> Right (opened (Component.Assume y j dom) (instantiate (Free y) cod))
+    | v == v' -> case s of
+        -- @intro-let@ reads the type AS WRITTEN, and must come first.
+        -- 'Thena.Core.Reduce.whnf' δ-reduces a term-level @let@ away (§5.1), so
+        -- a whnf'd type is never a 'Let' and this branch was unreachable when
+        -- it sat inside the @case whnf@ below — table 2.8's second
+        -- introduction rule could not fire at all. Found and fixed planning
+        -- phase 15, while writing the @intro-let@ rule's head; §5.1 and §7.2
+        -- both carry it.
         Let j val sty cod ->
           Right (opened (Component.Define y j val sty) (instantiate (Free y) cod))
-        _ -> Left NothingToIntroduce
+        -- @intro-∀@ reduces first, because a goal typed @id Type₀ (Nat -> Nat)@
+        -- is a Π and must be introduced (§8's own example, from the other side).
+        _ -> case whnf env ctx s of
+          Pi j dom cod -> Right (opened (Component.Assume y j dom) (instantiate (Free y) cod))
+          _            -> Left NothingToIntroduce
       where
         (y, n1) = fresh n
         (h, n2) = fresh n1

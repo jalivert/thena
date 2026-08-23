@@ -41,6 +41,7 @@ library
         Thena.Kernel
         Thena.Ops
         Thena.Repl
+        Thena.Rules
         Thena.Syntax.Concrete
         Thena.Syntax.Lexer
         Thena.Syntax.Parser
@@ -86,6 +87,7 @@ test-suite thena-test
         Thena.GoldenTests
         Thena.KernelTests
         Thena.NoConfusionTests
+        Thena.RulesTests
         Thena.LoadTests
         Thena.DriverTests
         Thena.Declared

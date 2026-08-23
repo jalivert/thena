@@ -1,0 +1,424 @@
+-- | The rule engine, read-only: what matches where, and what a well-formed
+-- rule is.
+--
+-- Built in Haskell rather than driven through the REPL, for
+-- "Thena.EngineTests"' reason — @:matches@ can only reach the states the REPL
+-- can reach, and 'Thena.Rules.matches' has to be right for the rest.
+module Thena.RulesTests (tests) where
+
+import Test.Tasty (TestTree, testGroup)
+import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+
+import Thena.Core.Term
+  ( Core (..)
+  , GlobalName (..)
+  , Ident (..)
+  , Level (..)
+  , Var
+  , close
+  , fresh
+  )
+import Thena.Development.Component (Component (..))
+import Thena.Development.Cursor (Cursor, crossType, enter)
+import Thena.Development.Partial (Partial (..))
+import Thena.Declared (natDecl)
+import Thena.Driver (parseDeclaration)
+import qualified Thena.Engine
+import Thena.Engine
+  ( Exec (..)
+  , Machine (..)
+  , Outcome (..)
+  , ProofState (..)
+  , load
+  , newProof
+  , resumeAt
+  , step
+  )
+import Thena.Errors (FailReason)
+import Thena.Global.Env
+  ( Definition (..)
+  , GlobalEnv
+  , InductiveDefinition
+  , addDefinition
+  , emptyGlobals
+  )
+import Thena.Ops
+  ( AnswerKind (..)
+  , Instr (..)
+  , Op
+  , Operand (..)
+  , Rule (..)
+  , Value (..)
+  , produces
+  )
+-- §2.5: "Thena.Ops" is qualified everywhere except "Thena.Engine", because
+-- @Assume@ and @Claim@ name both a component and an op.
+import qualified Thena.Ops as Ops
+import Thena.Rules
+  ( RuleError (..)
+  , RuleIter
+  , allRules
+  , hasNext
+  , matches
+  , next
+  , ruleBase
+  , standardRules
+  , validate
+  , validateBase
+  )
+
+tests :: TestTree
+tests =
+  testGroup
+    "rules"
+    [ matchTests
+    , iteratorTests
+    , validateTests
+    , producesTests
+    ]
+
+-- --------------------------------------------------------------------------
+-- Fixtures
+-- --------------------------------------------------------------------------
+
+type0, type1 :: Core
+type0 = Universe (Level 0)
+type1 = Universe (Level 1)
+
+-- | @S -> T@, with a binder nothing refers to.
+arrow :: Core -> Core -> Core
+arrow s t = Pi (Ident "_") s (close (fst (fresh 0)) t)
+
+-- | @? x : ty . x@ — the shape every hole rule wants.
+holeAt :: Core -> Cursor
+holeAt ty = enter (Under (Claim v (Ident "goal") ty) (Trailing (Free v)))
+  where v = var
+
+-- | @? x ≐ (? y : ty . y) : ty . x@ — what @attack@ makes.
+guessAt :: Core -> Cursor
+guessAt ty =
+  enter (Under (Guess v (Ident "goal") body ty) (Trailing (Free v)))
+  where
+    body = Under (Claim w (Ident "goal") ty) (Trailing (Free w))
+    v = var
+    w = fst (fresh 1)
+
+var :: Var
+var = fst (fresh 0)
+
+-- | An environment where @Arrow@ is a definition unfolding to a Π. §8's own
+-- example of why head matching has to reduce, in the smallest form that has
+-- one.
+withArrow :: GlobalEnv
+withArrow =
+  addDefinition
+    (GlobalName "Arrow")
+    (MkDefinition type1 (arrow type0 type0))
+    emptyGlobals
+
+matching :: GlobalEnv -> Cursor -> [String]
+matching env cur = map nameOf (drain (matches standardRules env cur))
+
+nameOf :: Rule -> String
+nameOf r = let GlobalName n = ruleName r in n
+
+-- | Walk an iterator to the end with 'next' alone, which is how the driver's
+-- display walks it.
+drain :: RuleIter -> [Rule]
+drain it = case next it of
+  Nothing        -> []
+  Just (r, rest) -> r : drain rest
+
+-- --------------------------------------------------------------------------
+-- What matches where (§7.6)
+-- --------------------------------------------------------------------------
+
+matchTests :: TestTree
+matchTests =
+  testGroup
+    "matches"
+    [ -- Three at a hole, and that is what makes the list a list: phase 16 has
+      -- to choose between them, and the user sees the choice being made.
+      testCase "a hole offers the three hole rules, in definition order" $
+        matching emptyGlobals (holeAt type0)
+          @?= ["attack", "try", "abandon"]
+
+    , testCase "a guess at a non-Π offers only solve and regret" $
+        matching emptyGlobals (guessAt type0)
+          @?= ["solve", "regret"]
+
+    , testCase "a guess at a Π offers intro-pi as well" $
+        matching emptyGlobals (guessAt (arrow type0 type0))
+          @?= ["intro-pi", "solve", "regret"]
+
+      -- §8: "Head matching runs whnf. A goal typed @id Type (Nat → Nat)@ is a Π
+      -- and must match GoalTypeIsPi." Written down, @Arrow@ is a 'Global' and
+      -- not a 'Pi'; a head that did not reduce would miss it.
+    , testCase "a goal type that only reduces to a Π still matches" $
+        matching withArrow (guessAt (Global (GlobalName "Arrow")))
+          @?= ["intro-pi", "solve", "regret"]
+
+    , testCase "and does not, in an environment where it does not unfold" $
+        matching emptyGlobals (guessAt (Global (GlobalName "Arrow")))
+          @?= ["solve", "regret"]
+
+      -- The one test that must NOT reduce: whnf δ-reduces a term-level let
+      -- away (§5.1), so asking about the reduced type would make GoalTypeIsLet
+      -- unpassable — which is exactly the bug this phase found in
+      -- 'Thena.Engine.introduce'.
+    , testCase "a goal type written as a let offers intro-let" $
+        matching emptyGlobals (guessAt (Let (Ident "x") type0 type1 (close var type0)))
+          @?= ["intro-let", "solve", "regret"]
+
+      -- The invariant checked by different code from the code that maintains
+      -- it: the head says @intro@ applies, so @intro@ must actually apply. It
+      -- is the direction that /is/ guaranteed for these two rules, and the one
+      -- the let bug broke — the op could not do what no head could offer.
+    , testCase "where intro-let is offered, intro succeeds" $
+        let cur = guessAt (Let (Ident "x") type0 type1 (close var type0))
+         in do
+              nameOf `map` drain (matches standardRules emptyGlobals cur)
+                @?= ["intro-let", "solve", "regret"]
+              ranOk (machineAt cur [Do Ops.Intro])
+
+    , testCase "where intro-pi is offered, intro succeeds" $
+        ranOk (machineAt (guessAt (arrow type0 type0)) [Do Ops.Intro])
+
+      -- Every head this phase has asks about a component, so nothing applies
+      -- in the core fragment. Definite, not "blocked": the focus's shape is
+      -- known, which is what §7.6 distinguishes from §8.1's suspension case.
+    , testCase "nothing matches in the core fragment" $
+        case crossType (holeAt type0) of
+          Left e    -> assertFailure ("could not cross: " ++ show e)
+          Right cur -> matching emptyGlobals cur @?= []
+
+      -- Definition order is dispatch order (§8), so the match list is always a
+      -- subsequence of the base and never a reordering of it.
+    , testCase "the match list is a subsequence of the base" $
+        let base = map nameOf (allRules standardRules)
+         in mapM_
+              (\cur -> assertSubsequence (matching emptyGlobals cur) base)
+              [holeAt type0, guessAt type0, guessAt (arrow type0 type0)]
+    ]
+
+assertSubsequence :: [String] -> [String] -> IO ()
+assertSubsequence xs ys
+  | go xs ys  = pure ()
+  | otherwise = assertFailure (show xs ++ " is not a subsequence of " ++ show ys)
+  where
+    go [] _ = True
+    go _ [] = False
+    go (a : as) (b : bs) = if a == b then go as bs else go (a : as) bs
+
+-- --------------------------------------------------------------------------
+-- The iterator (§7.6)
+-- --------------------------------------------------------------------------
+
+iteratorTests :: TestTree
+iteratorTests =
+  testGroup
+    "the iterator"
+    [ testCase "hasNext agrees with next, at every position" $
+        let walk it = case next it of
+              Nothing        -> hasNext it @?= False
+              Just (_, rest) -> (hasNext it @?= True) >> walk rest
+         in walk (matches standardRules emptyGlobals (holeAt type0))
+
+    , testCase "an empty iterator has nothing" $
+        let it = matches standardRules emptyGlobals (guessAt type0)
+         in case next it >>= next . snd >>= next . snd of
+              Nothing -> pure ()
+              Just _  -> assertFailure "expected two matches and no more"
+
+      -- §7.6: persistent, "a frame holds one and the UI may hold the same one;
+      -- if advancing mutated shared state they would interfere." A lazy list
+      -- gives this outright; the test is here because the requirement is on the
+      -- type, and a later representation could quietly lose it.
+    , testCase "advancing one copy does not disturb another" $
+        let it = matches standardRules emptyGlobals (holeAt type0)
+            deep = drop 2 (drain it)
+         in do
+              _ <- pure deep
+              map nameOf (drain it) @?= ["attack", "try", "abandon"]
+              map nameOf deep @?= ["abandon"]
+    ]
+
+-- --------------------------------------------------------------------------
+-- Well-formedness (§2.4, §7.2)
+-- --------------------------------------------------------------------------
+
+named :: String -> [Name'] -> [Instr] -> Rule
+named n ps = Rule (GlobalName n) ps []
+
+type Name' = String
+
+validateTests :: TestTree
+validateTests =
+  testGroup
+    "validate"
+    [ testCase "the shipped base is clean" $
+        validateBase standardRules @?= []
+
+      -- §3.7's line, made structural: a declaration is a command, not a
+      -- rule-body operation.
+    , testCase "define-data in a body is rejected" $
+        validate (named "bad" [] [Do (Ops.DefineData someData)])
+          @?= [DeclarationInBody (GlobalName "bad") 0]
+
+    , testCase "binding an op that produces nothing is rejected" $
+        validate (named "bad" [] [Bind "x" Ops.Attack])
+          @?= [BoundNonProducing (GlobalName "bad") 0 "x"]
+
+    , testCase "binding an op that produces something is fine" $
+        validate (named "ok" [] [Bind "x" (Ops.Concat (Lit (VText "a")) (Lit (VText "b")))])
+          @?= []
+
+    , testCase "a Ref to nothing is rejected" $
+        validate (named "bad" [] [Do (Ops.Say (Ref "z"))])
+          @?= [UnboundInRule (GlobalName "bad") 0 "z"]
+
+    , testCase "a parameter binds it" $
+        validate (named "ok" ["z"] [Do (Ops.Say (Ref "z"))]) @?= []
+
+    , testCase "an earlier Bind binds it" $
+        validate
+          (named "ok" []
+            [ Bind "z" (Ops.Concat (Lit (VText "a")) (Lit (VText "b")))
+            , Do (Ops.Say (Ref "z"))
+            ])
+          @?= []
+
+      -- A later Bind does not: the environment is built as the body runs.
+    , testCase "a later Bind does not" $
+        validate
+          (named "bad" []
+            [ Do (Ops.Say (Ref "z"))
+            , Bind "z" (Ops.Concat (Lit (VText "a")) (Lit (VText "b")))
+            ])
+          @?= [UnboundInRule (GlobalName "bad") 0 "z"]
+
+      -- Every error, not the first: a rule author fixing one at a time would
+      -- reload once per mistake.
+    , testCase "all three are reported, with their positions" $
+        validate
+          (named "bad" []
+            [ Bind "x" Ops.Attack
+            , Do (Ops.DefineData someData)
+            , Do (Ops.Say (Ref "z"))
+            ])
+          @?= [ BoundNonProducing (GlobalName "bad") 0 "x"
+              , DeclarationInBody (GlobalName "bad") 1
+              , UnboundInRule (GlobalName "bad") 2 "z"
+              ]
+
+    , testCase "validateBase checks every rule" $
+        length (validateBase (ruleBase [ named "a" [] [Bind "x" Ops.Attack]
+                                       , named "b" [] [Do (Ops.Say (Ref "z"))]
+                                       ]))
+          @?= 2
+    ]
+
+-- --------------------------------------------------------------------------
+-- 'produces', checked against the engine (§7.2)
+-- --------------------------------------------------------------------------
+
+-- | The standing lesson: find the invariant maintained by different code from
+-- the code that checks it (phase 5's @context@).
+--
+-- 'Thena.Ops.produces' is a table, and a table agrees with itself. What decides
+-- the question is 'Thena.Engine.perform', so every op is run — in a state where
+-- it actually succeeds, which the 'ranOk' half enforces — and the answer is
+-- read off @env@. An op that grows a result later, or loses one, fails here
+-- rather than silently letting @x = op@ bind nothing.
+producesTests :: TestTree
+producesTests =
+  testGroup
+    "produces agrees with the engine"
+    [ testCase label (checkProduces env cur before o) | (label, env, cur, before, o) <- table ]
+  where
+    hole    = holeAt type0
+    piHole  = holeAt (arrow type0 type0)
+    guessed = [Do Ops.Attack]
+    tried   = [Do (Ops.Try (term type0))]
+    solved  = [Do (Ops.Try (term type0)), Do Ops.Solve]
+    e       = emptyGlobals
+    table =
+      [ ("ask",         e, hole,    [],            Ops.Ask (text "?") AText)
+      , ("concat",      e, hole,    [],            Ops.Concat (text "a") (text "b"))
+      , ("assume",      e, hole,    [],            Ops.Assume (text "x") (term type0))
+      , ("claim",       e, hole,    [],            Ops.Claim (text "h") (term type0))
+      , ("say",         e, hole,    [],            Ops.Say (text "hi"))
+      , ("define-data", e, hole,    [],            Ops.DefineData someData)
+      , ("certify",     e, hole,    solved,        Ops.Certify (term type0))
+      , ("unify",       e, hole,    [],            Ops.Unify (term type0) (term type0))
+      , ("reduce",      e, hole,    [Do Ops.CrossType], Ops.Reduce)
+      , ("along",       e, twoHoles, [],           Ops.Along)
+      , ("into",        e, hole,    guessed,       Ops.Into)
+      , ("cross type",  e, hole,    [],            Ops.CrossType)
+      , ("cross val",   e, hole,    solved,        Ops.CrossValue)
+      , ("down",        e, piHole,  [Do Ops.CrossType], Ops.Down Ops.Dom)
+      , ("back",        e, hole,    [Do Ops.CrossType], Ops.Back)
+      , ("attack",      e, hole,    [],            Ops.Attack)
+      , ("intro",       e, guessAt (arrow type0 type0), [], Ops.Intro)
+      , ("try",         e, hole,    [],            Ops.Try (term type0))
+      , ("regret",      e, hole,    tried,         Ops.Regret)
+      , ("solve",       e, hole,    tried,         Ops.Solve)
+      , ("abandon",     e, twoHoles, [],           Ops.Abandon)
+      ]
+
+checkProduces :: GlobalEnv -> Cursor -> [Instr] -> Op -> IO ()
+checkProduces globalEnv cur before o =
+  case runOut (machineIn globalEnv cur (before ++ [Bind "r" o])) of
+    Left r  -> assertFailure ("the op did not run: " ++ show r)
+    Right m -> (lookup "r" (Thena.Engine.env (exec m)) /= Nothing) @?= produces o
+
+-- | @? a : Type₀ . ? goal : Type₀ . goal@, focused on @a@ — the one shape
+-- @along@ and @abandon@ both need, and the only one in this module with a
+-- component the trailing term does not mention.
+twoHoles :: Cursor
+twoHoles =
+  enter
+    ( Under (Claim a (Ident "a") type0)
+        (Under (Claim g (Ident "goal") type0) (Trailing (Free g)))
+    )
+  where
+    a = fst (fresh 8)
+    g = fst (fresh 9)
+
+someData :: InductiveDefinition
+someData = case parseDeclaration emptyGlobals 200 natDecl of
+  Right (d, _) -> d
+  Left err     -> error ("fixture does not parse: " ++ show err)
+
+term :: Core -> Operand
+term = Lit . VTerm . Trailing
+
+text :: String -> Operand
+text = Lit . VText
+
+-- | A machine at a given state, holding a program. The counter starts well
+-- above every 'Var' the fixtures mint, so nothing it mints collides.
+machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
+machineIn env cur is =
+  load is (Machine (Exec [] [] []) (ProofState cur) env standardRules 1000)
+
+machineAt :: Cursor -> [Instr] -> Machine
+machineAt = machineIn emptyGlobals
+
+-- | Run to the end, following every channel the driver follows. 'Asking' is
+-- answered, because that is the only way an @Ops.Ask@'s destination is ever filled
+-- (§7.5) — the whole point of 'produces' saying @True@ for it.
+runOut :: Machine -> Either FailReason Machine
+runOut m = case step m of
+  Continue m'       -> runOut m'
+  Saying _ m'       -> runOut m'
+  Declaring _ m'    -> runOut m'
+  Certifying _ _ m' -> runOut m'
+  Asking _ m'       -> runOut (resumeAt "ok" m')
+  Finished m'       -> Right m'
+  Stuck r _         -> Left r
+
+ranOk :: Machine -> IO ()
+ranOk m = case runOut m of
+  Right _ -> pure ()
+  Left r  -> assertFailure ("expected the program to run, got " ++ show r)
