@@ -92,15 +92,18 @@ import Thena.Engine
 import Thena.Errors
   ( Clash (..)
   , ConversionFailure (..)
+  , DevForm (..)
   , ElimError (..)
   , FailReason (..)
   , KernelError (..)
   , MoveError (..)
   , Position (..)
+  , ResolveError (..)
   , Site (..)
   , TypeError (..)
   )
 import Thena.Global.Declare (DeclareError (..))
+import Thena.Syntax.Concrete (Raw (..), RawBinder (..))
 import Thena.Global.Env
   ( ConstructorDefinition (..)
   , InductiveDefinition (..)
@@ -110,7 +113,6 @@ import Thena.Ops (AnswerKind (..), Instr (..), Op, Operand (..), Rule (..), Valu
 import qualified Thena.Ops as Ops
 import Thena.Syntax.Lexer (LexError (..), Pos (..), Token (..))
 import Thena.Syntax.Parser (ParseError (..))
-import Thena.Syntax.Resolve (DevForm (..), ResolveError (..))
 
 import Data.Foldable (toList)
 import Data.List (intercalate)
@@ -835,7 +837,12 @@ renderOp n ctx op = case op of
   Ops.Regret      -> "regret"
   Ops.Solve       -> "solve"
   Ops.Abandon     -> "abandon"
-  Ops.Prove       -> "prove"
+  Ops.Prove Nothing  -> "prove"
+  Ops.Prove (Just h) -> "prove with " ++ operand h
+  Ops.Parse src   -> "parse " ++ operand src
+  Ops.Resolve raw -> "resolve " ++ operand raw
+  Ops.Call r as   -> "call " ++ operand r
+                       ++ " (" ++ intercalate ", " (map operand as) ++ ")"
   Ops.Eliminate t -> "eliminate " ++ operand t
   where
     operand = renderOperand n ctx
@@ -850,7 +857,10 @@ renderValue n ctx v = case v of
   VText s            -> show s
   VTerm (Trailing t) -> "⌜" ++ renderCore n ctx t ++ "⌝"
   VTerm p            -> "⌜" ++ unwords (words (renderPartial n ctx p)) ++ "⌝"
-  VSurface _         -> "‹unresolved›"
+  -- A hint, printed as it was written. It is not resolved and may never
+  -- resolve — that is @resolve@'s answer, given in a rule body — so this is a
+  -- printer for 'Raw' and not a detour through 'Core'.
+  VSurface raw       -> "‹" ++ renderRaw raw ++ "›"
   -- A rule in an operand is a rule being passed to another rule, so its name
   -- is what identifies it; its body belongs to @:show@ on the rule, not here.
   VRule r            -> "‹rule " ++ nameString (ruleName r) ++ "›"
@@ -906,6 +916,49 @@ renderFailReason r = case r of
   NothingToIntroduce  -> "that hole's type is neither a ∀ nor a let"
   NotYetPure pos    ->
     "not finished: " ++ renderPosition pos ++ " is still open, so there is no term yet"
+  -- Phase 17b's four. 'CannotRead' reuses the renderer the driver's own
+  -- @Failed@ already had — which is the whole reason 'SyntaxError' is one case
+  -- rather than two.
+  CannotRead e      -> renderSyntaxError e
+  ExpectedSurface   -> "expected a hint"
+  ExpectedRule      -> "expected a rule"
+  WrongNumberOfArguments g want got ->
+    nameString g ++ " takes " ++ show want ++ " argument(s), given " ++ show got
+
+-- | A hint, printed as written (phase 17b).
+--
+-- 'Raw' is the parser's own tree, so this is the inverse of the parser and not
+-- of the resolver: no context is consulted and no name is looked up. Parenthesised
+-- wherever a subterm could otherwise re-associate, which is enough for a hint —
+-- the elaborate layout decisions are 'renderCore'\'s and belong to terms.
+renderRaw :: Raw -> String
+renderRaw = raw False
+  where
+    raw _ (RawName x)       = x
+    raw _ (RawUniverse l)   = "Type" ++ subscript l
+    raw p (RawApp f a)      = wrap p (raw False f ++ " " ++ raw True a)
+    raw p (RawArrow a b)    = wrap p (raw True a ++ " -> " ++ raw False b)
+    raw p (RawLam bs b)     = wrap p ("λ" ++ concatMap binder bs ++ " -> " ++ raw False b)
+    raw p (RawPi bs b)      = wrap p ("∀" ++ concatMap binder bs ++ " -> " ++ raw False b)
+    raw p (RawLet x v ty b) =
+      wrap p ("let " ++ x ++ " = " ++ raw False v ++ " : " ++ raw False ty
+                ++ " in " ++ raw False b)
+    raw p (RawClaim x ty b) =
+      wrap p ("let ? " ++ x ++ " : " ++ raw False ty ++ " in " ++ raw False b)
+    raw p (RawGuess x ty g b) =
+      wrap p ("let ? " ++ x ++ " : " ++ raw False ty ++ " ≐ (" ++ raw False g ++ ")"
+                ++ " in " ++ raw False b)
+    raw p (RawPending _ b)  = wrap p ("κ ▸ " ++ raw False b)
+    raw _ (RawQuote t)      = "⌜" ++ raw False t ++ "⌝"
+    raw p (RawElim d ps mot ms is tgt) =
+      wrap p ("elim " ++ d ++ group ps ++ " " ++ raw True mot
+                ++ " " ++ group ms ++ " " ++ group is ++ " " ++ raw True tgt)
+
+    binder (RawBinder x ty) = " (" ++ x ++ " : " ++ raw False ty ++ ")"
+    group ts = "(" ++ intercalate ", " (map (raw False) ts) ++ ")"
+
+    wrap True t  = "(" ++ t ++ ")"
+    wrap False t = t
 
 -- | Why the kernel refused, or where a development stopped being valid (§5.3).
 renderKernelError :: Int -> KernelError -> [String]

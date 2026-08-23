@@ -52,6 +52,7 @@ import Thena.Ops
 -- §2.5: "Thena.Ops" is qualified everywhere except "Thena.Engine", because
 -- @Assume@ and @Claim@ name both a component and an op.
 import qualified Thena.Ops as Ops
+import Thena.Syntax.Concrete (Raw (..))
 import Thena.Rules
   ( RuleError (..)
   , RuleIter
@@ -115,7 +116,7 @@ withArrow =
     emptyGlobals
 
 matching :: GlobalEnv -> Cursor -> [String]
-matching env cur = map nameOf (drain (matches standardRules env cur))
+matching env cur = map nameOf (drain (matches standardRules env cur Nothing))
 
 nameOf :: Rule -> String
 nameOf r = let GlobalName n = ruleName r in n
@@ -175,7 +176,7 @@ matchTests =
     , testCase "where intro-let is offered, intro succeeds" $
         let cur = guessAt (Let (Ident "x") type0 type1 (close var type0))
          in do
-              nameOf `map` drain (matches standardRules emptyGlobals cur)
+              nameOf `map` drain (matches standardRules emptyGlobals cur Nothing)
                 @?= ["intro-let", "solve", "regret"]
               ranOk (machineAt cur [Do Ops.Intro])
 
@@ -220,10 +221,10 @@ iteratorTests =
         let walk it = case next it of
               Nothing        -> hasNext it @?= False
               Just (_, rest) -> (hasNext it @?= True) >> walk rest
-         in walk (matches standardRules emptyGlobals (holeAt type0))
+         in walk (matches standardRules emptyGlobals (holeAt type0) Nothing)
 
     , testCase "an empty iterator has nothing" $
-        let it = matches standardRules emptyGlobals (guessAt type0)
+        let it = matches standardRules emptyGlobals (guessAt type0) Nothing
          in case next it >>= next . snd >>= next . snd of
               Nothing -> pure ()
               Just _  -> assertFailure "expected two matches and no more"
@@ -233,7 +234,7 @@ iteratorTests =
       -- gives this outright; the test is here because the requirement is on the
       -- type, and a later representation could quietly lose it.
     , testCase "advancing one copy does not disturb another" $
-        let it = matches standardRules emptyGlobals (holeAt type0)
+        let it = matches standardRules emptyGlobals (holeAt type0) Nothing
             deep = drop 2 (drain it)
          in do
               _ <- pure deep
@@ -362,7 +363,18 @@ producesTests =
       , ("regret",      e, hole,    tried,         Ops.Regret)
       , ("solve",       e, hole,    tried,         Ops.Solve)
       , ("abandon",     e, twoHoles, [],           Ops.Abandon)
+        -- Phase 17b's four. @prove@ and @call@ both hand control to a body and
+        -- get it back, so what a @Bind@ on either would name is the caller's
+        -- own environment — restored on return, and without the destination.
+      , ("prove",       e, hole,    [],            Ops.Prove Nothing)
+      , ("call",        e, hole,    [],            Ops.Call (Lit (VRule tryRule)) [term type0])
+      , ("parse",       e, hole,    [],            Ops.Parse (text "Type\8320"))
+      , ("resolve",     e, hole,    [],            Ops.Resolve (Lit (VSurface (RawUniverse 0))))
       ]
+
+    -- @try ‹t›@, as 'standardRules' ships it — what @call@ needs something to
+    -- call.
+    tryRule = named "try" ["t"] [Do (Ops.Try (Ref "t"))]
 
 checkProduces :: GlobalEnv -> Cursor -> [Instr] -> Op -> IO ()
 checkProduces globalEnv cur before o =

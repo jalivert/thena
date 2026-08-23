@@ -229,6 +229,72 @@ tests =
         , "retry"
         , ":quit"
         ]
+      -- Elaboration (phase 17b). @prove ‹hint›@ is the same engine and the same
+      -- frames as @prove@; the only difference is that a hint is present (§8),
+      -- and the hint partitions the base, so @:matches@ and @:matches ‹hint›@
+      -- are two questions with two answers.
+      --
+      -- The identifier case is the whole of MS1's elaboration, and its rule
+      -- reaches @try@ through @Call@ — the first thing to supply a rule's
+      -- parameters (§8).
+    , script
+        "elaboration"
+        [ ":theorem const : \8704 (A : Type\8320) (a : A) -> A"
+        , "attack"
+        , "intro"
+        , "intro"
+        , "into"
+        , "along"
+        , "along"
+        , ":where"
+          -- Two questions, two answers: the second lists only what could
+          -- elaborate that hint.
+        , ":matches"
+        , ":matches a"
+        , "prove a"
+        , ":show"
+        , "back"
+        , "back"
+        , "back"
+        , "solve"
+        , "qed"
+        , ":show const"
+          -- A hint that is not in scope: @resolve@ fails in the body, which is
+          -- an ordinary op failure (§7.3), and the head could not have known —
+          -- it is shallow on purpose (§8).
+        , ":theorem again : \8704 (A : Type\8320) (a : A) -> A"
+        , "attack"
+        , "intro"
+        , "intro"
+        , "into"
+        , "along"
+        , "along"
+        , "prove b"
+          -- A hint that is not an identifier does not match at all: no rule
+          -- with a hint head passes, and there is nothing else in the hinted
+          -- half of the base.
+        , "prove a a"
+        , ":matches a a"
+        , ":abandon"
+          -- The instruction language, seen: stepping shows the driver's own
+          -- two-instruction program, the callee's body, and the return.
+        , ":theorem shown : \8704 (A : Type\8320) (a : A) -> A"
+        , "attack"
+        , "intro"
+        , "intro"
+        , "into"
+        , "along"
+        , "along"
+        , ":step on"
+        , "prove a"
+        , ":step"
+        , ":step"
+        , ":step"
+        , ":step"
+        , ":step"
+        , ":step off"
+        , ":quit"
+        ]
       -- Suspension, undo, and the promise that the environment only grows.
     , script
         "session"

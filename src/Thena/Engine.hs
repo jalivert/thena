@@ -78,7 +78,7 @@ import Thena.Development.Cursor
   )
 import qualified Thena.Development.Cursor as Cursor
 import Thena.Development.Partial (Impure (..), Partial (..), extract)
-import Thena.Errors (FailReason (..), MoveError (..), Position (..))
+import Thena.Errors (FailReason (..), MoveError (..), Position (..), SyntaxError (..))
 import Thena.Ops
   ( AnswerKind
   , Env
@@ -87,12 +87,16 @@ import Thena.Ops
   , Op (..)
   , Operand (..)
   , Value (..)
+  , hintName
   )
 import Thena.Global.Env (GlobalEnv, InductiveDefinition)
 import qualified Thena.Ops as Op
 import Thena.Tactics.Eliminate (Elimination (..), eliminate)
 import Thena.Rules (RuleBase, RuleIter, dispatch, hasNext, next)
-import Thena.Syntax.Lexer (isIdentifier)
+import Thena.Syntax.Concrete (Raw)
+import Thena.Syntax.Lexer (isIdentifier, lexTokens)
+import Thena.Syntax.Parser (parseTerm)
+import qualified Thena.Syntax.Resolve as Resolve
 
 -- --------------------------------------------------------------------------
 -- The machine
@@ -138,6 +142,11 @@ data Exec = Exec
 -- @Choice@ is missing on purpose: its @alts@ field is a @RuleIter@, which is
 -- "Thena.Rules"' and does not exist. Adding the constructor at phase 16 does
 -- not disturb 'Exec' or anything written here.
+-- **@Call@ is spelled twice in §7.2** — this frame, and phase 17b's op that
+-- applies a 'Rule'. They are one apart, exactly as @Eliminate@'s two are: the
+-- op /decides/ to call, the frame /is/ the call it is inside. This module sees
+-- both, so it qualifies both — @Op.Call@ for the instruction and
+-- @Thena.Engine.Call@ for the frame.
 data Frame
   = Call
       { resume    :: [Instr]
@@ -152,6 +161,19 @@ data Frame
       , chosen    :: GlobalName  -- ^ the rule this frame is currently running
       , returned  :: Bool
         -- ^ has control already passed back out of this call? See 'resumeFrom'.
+      , entryEnv  :: Env
+        -- ^ the environment /every/ alternative of this choice point starts in
+        -- (phase 17b). Empty for a plain @prove@; @[(hint, …)]@ when the
+        -- dispatch carried one, because a hint belongs to the dispatch and not
+        -- to the alternative that happened to be tried first.
+        --
+        -- Without it, backtracking into a second elaboration rule would enter
+        -- it with @hint@ unbound and it would fail as an unbound 'Ref'. MS1
+        -- never reaches that — the partition (\'Thena.Ops.usesHint\') leaves one
+        -- hint rule, so a hinted dispatch is always deterministic and builds a
+        -- @Call@ — so this field is on @AGENDA.md@'s standing list of things
+        -- defined and not exercised. It is here rather than deferred because a
+        -- second elaboration rule would otherwise be broken by construction.
       }
   deriving (Eq, Show)
 
@@ -316,12 +338,12 @@ step m = case pc (exec m) of
 resumeFrom :: [Frame] -> Maybe ([Instr], Env, [Frame])
 resumeFrom [] = Nothing
 resumeFrom (fr : stk) = case fr of
-  Call {} -> Just (resume fr, resumeEnv fr, stk)
+  Thena.Engine.Call {} -> Just (resume fr, resumeEnv fr, stk)
   Choice { returned = False } ->
     Just ( resume fr
          , resumeEnv fr
          , Choice (resume fr) (resumeEnv fr) (alts fr) (saved fr)
-                  (choiceId fr) (chosen fr) True
+                  (choiceId fr) (chosen fr) True (entryEnv fr)
              : stk
          )
   Choice { returned = True } ->
@@ -356,7 +378,7 @@ failure r0 m = unwind (stack (exec m))
   where
     unwind [] = Stuck r0 m
     unwind (fr : stk) = case fr of
-      Call {} -> unwind stk
+      Thena.Engine.Call {} -> unwind stk
       Choice {} -> case next (alts fr) of
         -- Cannot arise: the peek in 'perform' never builds a 'Choice' without
         -- a live alternative, and 'demote' unbuilds one the moment its last is
@@ -369,7 +391,7 @@ failure r0 m = unwind (stack (exec m))
         -- @regret@ ran, and only the development moved.
         Just (r, it') -> Saying (took "backtracking to" fr r) m
           { proof = saved fr
-          , exec  = Exec (ruleBody r) [] (demote fr r it' : stk)
+          , exec  = Exec (ruleBody r) (entryEnv fr) (demote fr r it' : stk)
           }
 
     took verb fr r = verb ++ " " ++ show (choiceId fr) ++ ": " ++ nameOfRule r
@@ -383,8 +405,9 @@ failure r0 m = unwind (stack (exec m))
 demote :: Frame -> Rule -> RuleIter -> Frame
 demote fr r it'
   | hasNext it' =
-      Choice (resume fr) (resumeEnv fr) it' (saved fr) (choiceId fr) (ruleName r) False
-  | otherwise = Call (resume fr) (resumeEnv fr)
+      Choice (resume fr) (resumeEnv fr) it' (saved fr) (choiceId fr) (ruleName r)
+             False (entryEnv fr)
+  | otherwise = Thena.Engine.Call (resume fr) (resumeEnv fr)
 
 -- --------------------------------------------------------------------------
 -- Performing one instruction
@@ -465,30 +488,84 @@ perform instr rest m = case operation instr of
   -- Dispatch (§7.3). The goal is the focus, so there is nothing to read: the
   -- iterator is built from the cursor, the first match's body becomes @pc@, and
   -- what would have been on Haskell's stack goes into the frame.
-  Prove -> case next it of
-    Nothing       -> failure NoRuleMatched m
-    Just (r, it')
-      -- Announced only when the dispatch was a real decision, which is exactly
-      -- when a 'Choice' was built. A message marks a choice; where there was
-      -- one candidate there was none, and a line per deterministic call would
-      -- be noise (§1, §7.5).
-      | hasNext it' ->
-          Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
-                 (entering r (Choice rest (env (exec m)) it' (proof m)
-                                     (names m) (ruleName r) False)
-                             m { names = names m + 1 })
-      | otherwise ->
-          Continue (entering r (Call rest (env (exec m))) m)
+  -- The hint, phase 17b: an optional operand holding a 'VSurface'. It changes
+  -- two things and no more — which rules are eligible ('Thena.Rules.matches'
+  -- partitions on it), and what the callee's environment starts with. §8's
+  -- \"same engine, same frames — the only difference is whether a hint is
+  -- present\", made literal.
+  Prove mh -> case traverse surface mh of
+    Left r     -> failure r m
+    Right hint -> case next (it hint) of
+      Nothing       -> failure NoRuleMatched m
+      Just (r, it')
+        -- Announced only when the dispatch was a real decision, which is
+        -- exactly when a 'Choice' was built. A message marks a choice; where
+        -- there was one candidate there was none, and a line per deterministic
+        -- call would be noise (§1, §7.5).
+        | hasNext it' ->
+            Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
+                   (entering hint r (Choice rest (env (exec m)) it' (proof m)
+                                       (names m) (ruleName r) False (seeded hint))
+                               m { names = names m + 1 })
+        | otherwise ->
+            Continue (entering hint r (Thena.Engine.Call rest (env (exec m))) m)
     where
-      it = dispatch (rules m) (globals m) (cursor (proof m))
+      it hint = dispatch (rules m) (globals m) (cursor (proof m)) hint
+
+      -- The one magic name in the instruction language, and §8 wrote it:
+      -- @h₁ = app-fun hint@ reads @hint@ as an ordinary operand. Seeding the
+      -- environment is what makes that true, and it is why there is no @Hint@
+      -- read op and nothing on the machine holding \"the current hint\".
+      seeded hint = maybe [] (\h -> [(hintName, VSurface h)]) hint
 
       -- THE PEEK, decided 2026-08-20. A 'Choice' is built only when there
       -- really is another alternative — Prolog's determinism detection.
       -- Otherwise this is an ordinary 'Call', carrying no iterator, no
       -- snapshot and no identifier. The cost is Prolog's own: one more head
       -- match is computed than is used.
-      entering r fr k =
-        k { exec = Exec (ruleBody r) [] (fr : stack (exec m)) }
+      entering hint r fr k =
+        k { exec = Exec (ruleBody r) (seeded hint) (fr : stack (exec m)) }
+
+  -- Text to a surface tree: lexing and parsing, and no resolution (§7.2). The
+  -- lexer was already this module's — @isIdentifier@ — and the parser joins it
+  -- here, which is what makes a syntax error an op failure rather than
+  -- something only the driver can have.
+  Parse src -> case text src of
+    Left r  -> failure r m
+    Right t -> case lexTokens t of
+      Left e   -> failure (CannotRead (LexFailed e)) m
+      Right ts -> case parseTerm ts of
+        Left e    -> failure (CannotRead (ParseFailed e)) m
+        Right raw -> produce (VSurface raw) m
+
+  -- A surface tree to a term, in Γ at the focus (§4.5) — which is exactly the
+  -- context an identifier typed at the REPL must be in scope in (§4.0 E1).
+  Resolve raw -> case surface raw of
+    Left r  -> failure r m
+    Right h -> case Resolve.resolve (globals m) contextAt (names m) h of
+      Left e         -> failure (CannotRead (ResolveFailed e)) m
+      Right (t, n1)  -> produce (VTerm (Trailing t)) m { names = n1 }
+
+  -- Apply a rule to arguments (§7.2, §8). Direct invocation, so no head is
+  -- tested and no iterator exists: this pushes a 'Call' frame, which carries
+  -- neither alternatives nor a snapshot, and a callee that does not apply fails
+  -- in its body like any other body (§7.3).
+  --
+  -- **The arity check is here and not in the callee**, because an arity slip
+  -- that surfaced as an unbound 'Ref' halfway through a body would already have
+  -- changed the development.
+  Op.Call ruleOf args -> case operandValue (env (exec m)) ruleOf of
+    Left r            -> failure r m
+    Right (VRule r)
+      | length args /= length (ruleParams r) ->
+          failure (WrongNumberOfArguments (ruleName r)
+                     (length (ruleParams r)) (length args)) m
+      | otherwise -> case traverse (operandValue (env (exec m))) args of
+          Left e   -> failure e m
+          Right vs -> Continue m
+            { exec = Exec (ruleBody r) (zip (ruleParams r) vs)
+                          (Thena.Engine.Call rest (env (exec m)) : stack (exec m)) }
+    Right _ -> failure ExpectedRule m
 
   -- §3.7's elimination tactic (phase 17). The goal is the focus, as with the
   -- six hole ops; the target is an operand, for the reason 'Try' takes one —
@@ -570,8 +647,9 @@ perform instr rest m = case operation instr of
       Bind _ o -> o
       Do     o -> o
 
-    text = operandText (env (exec m))
-    term = operandTerm (env (exec m))
+    text    = operandText (env (exec m))
+    term    = operandTerm (env (exec m))
+    surface = operandSurface (env (exec m))
 
     advance m' = m' { exec = (exec m') { pc = rest } }
 
@@ -687,6 +765,14 @@ operandTerm :: Env -> Operand -> Either FailReason Core
 operandTerm e o = operandValue e o >>= \v -> case v of
   VTerm (Trailing t) -> Right t
   _                  -> Left ExpectedTerm
+
+-- | An unelaborated tree, and nothing else (§7.2). Shaped like 'operandText'
+-- and 'operandTerm', and phase 17b's reason for existing at all: 'VSurface' had
+-- no reader before elaboration had a rule.
+operandSurface :: Env -> Operand -> Either FailReason Raw
+operandSurface e o = operandValue e o >>= \v -> case v of
+  VSurface raw -> Right raw
+  _            -> Left ExpectedSurface
 
 -- | The name a component will display. Checked against the lexer's own notion
 -- of an identifier, because an 'Ident' that does not lex is one the printer
@@ -819,7 +905,7 @@ retryFrom target m = go (0 :: Int) (stack (exec m))
         Nothing       -> Left missing      -- cannot arise; see 'demote'
         Just (r, it') -> Right
           ( m { proof = saved fr
-              , exec  = Exec (ruleBody r) [] (demote fr r it' : stk)
+              , exec  = Exec (ruleBody r) (entryEnv fr) (demote fr r it' : stk)
               }
           , note (choiceId fr) (ruleName r) popped
           )

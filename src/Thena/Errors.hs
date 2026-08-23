@@ -7,15 +7,26 @@
 -- @AGENDA.md@ item 18a; "Thena.Core.Typing"'s @TypeError@ (phase 8) and
 -- "Thena.Kernel"'s @KernelError@ (phase 12) join it here.
 --
--- It imports "Thena.Core.Term" and "Thena.Core.Context" and nothing else —
--- **first at phase 8**, one phase earlier than the note below predicted, because
--- 'TypeError' carries terms before unification's reasons do. What it still may
+-- It imports "Thena.Core.Term" and "Thena.Core.Context" — **first at phase 8**,
+-- one phase earlier than the note below predicted, because 'TypeError' carries
+-- terms before unification's reasons do — and, from phase 17b, the two leaves of
+-- the syntax branch. What it still may
 -- not import is anything above @Core@: a reason that carried a
 -- 'Thena.Ops.Value' would put the instruction language below @Core.Unify@,
 -- which is backwards, so the operand-shape reasons say what was expected and
 -- nothing more. Nothing is lost: 'Thena.Engine.Stuck' carries the whole machine
 -- (§7.5), whose @pc@ still begins with the instruction that failed and whose
 -- @env@ holds the operand it read.
+--
+-- **'SyntaxError' moved down here at phase 17b, and with it 'ResolveError'.**
+-- The @parse@ and @resolve@ ops (§7.2) fail the way every other op does, so
+-- their reasons have to be cases of 'FailReason', and 'FailReason' lives here.
+-- The rule above is untouched: "Thena.Syntax.Lexer" and "Thena.Syntax.Parser"
+-- are not /above/ @Core@ but /beside/ it — between them they import one module,
+-- "Thena.Syntax.Concrete", which imports nothing — so this module still sees
+-- nothing of @Ops@, @Development@ or @Global@. 'ResolveError' comes the whole
+-- way down rather than being imported, because "Thena.Syntax.Resolve" /is/
+-- above @Core@; it mentions nothing this module did not already have.
 module Thena.Errors
   ( FailReason (..)
   , MoveError (..)
@@ -34,10 +45,17 @@ module Thena.Errors
 
     -- * The elimination tactic (§3.7)
   , ElimError (..)
+
+    -- * Reading a term (§2.5, §2.6) — moved here at phase 17b
+  , SyntaxError (..)
+  , ResolveError (..)
+  , DevForm (..)
   ) where
 
 import Thena.Core.Context (Context)
 import Thena.Core.Term (Core, GlobalName, Ident, Level, Var)
+import Thena.Syntax.Lexer (LexError)
+import Thena.Syntax.Parser (ParseError)
 
 -- | Why an operation failed. Structured, never a string (§12 invariant 2).
 --
@@ -103,6 +121,25 @@ data FailReason
   | CannotEliminate ElimError
     -- ^ the elimination tactic could not build a scheme for the target it was
     -- given (§3.7, phase 17)
+
+    -- Elaboration and @Call@ (§7.2, §8), added at phase 17b.
+  | CannotRead SyntaxError
+    -- ^ @parse@ could not lex or parse its text, or @resolve@ could not resolve
+    -- the tree it was given in the context at the focus. One case for both,
+    -- because they are two halves of one pipeline and 'SyntaxError' already
+    -- bundles exactly these three failures for the driver's own @parseCore@ —
+    -- so "Thena.Repl" renders an op\'s failure with the renderer it already has
+  | ExpectedSurface
+    -- ^ an operand was not a 'Thena.Ops.VSurface'. Shaped like 'ExpectedText'
+    -- and 'ExpectedTerm', and here for their reason: the value itself may not
+    -- be named below @Core@
+  | ExpectedRule
+    -- ^ @call@\'s first operand was not a 'Thena.Ops.VRule'
+  | WrongNumberOfArguments GlobalName Int Int
+    -- ^ @call@ on a rule, the parameters it declares, the arguments it was
+    -- given. Checked before the body runs, because an arity slip that only
+    -- showed up as an unbound @Ref@ halfway through would already have changed
+    -- the development
   deriving (Eq, Show)
 
 -- | Why a move was impossible (§4.0 C4, §12 invariant 2).
@@ -306,4 +343,51 @@ data ElimError
   | SchemeIllTyped TypeError
     -- ^ the assembled elimination does not have the goal's type. Unreachable if
     -- the motive typechecked and the generated eliminator type is right
+  deriving (Eq, Show)
+
+-- --------------------------------------------------------------------------
+-- Reading a term (§2.5, §2.6)
+-- --------------------------------------------------------------------------
+
+-- | The three ways reading a term or development can fail.
+--
+-- It lived in "Thena.Driver" until phase 17b, where the @parse@ and @resolve@
+-- ops made it something 'FailReason' has to carry. The driver still uses it for
+-- a command line it could not read; nothing about that changed but the import.
+data SyntaxError
+  = LexFailed LexError
+  | ParseFailed ParseError
+  | ResolveFailed ResolveError
+  deriving (Eq, Show)
+
+-- | Why a named tree could not be turned into 'Core' (§2.5, §3.5).
+--
+-- Moved here from "Thena.Syntax.Resolve" at phase 17b, with 'DevForm'. It could
+-- not be imported from there — @Resolve@ is above @Core@ — and it needs nothing
+-- that module has: every case is a 'String', an 'Int' or an 'Ident'.
+data ResolveError
+  = NotInScope String
+  | NotACoreTerm DevForm
+    -- ^ a development-only form written where a term goes
+  | NotAUniverse String
+    -- ^ the datatype's declared type does not end in @Type_l@
+  | TargetIsNotTheDatatype String
+    -- ^ this constructor's result type is not the family being declared
+  | TargetArgumentCount String Int Int
+    -- ^ constructor, arguments its target should have, arguments it has
+  | ParameterNotPassedThrough String Ident
+    -- ^ a constructor's target changed a parameter; parameters are fixed (§3.7)
+  | NotADatatype String
+    -- ^ an @elim@ naming something that is not a declared inductive (phase 7)
+  | WrongNumberOfEliminationParameters String Int Int
+    -- ^ datatype, parameters it has, parameters the @elim@ wrote
+  | WrongNumberOfMethods String Int Int
+    -- ^ datatype, constructors it has, methods the @elim@ wrote
+  | WrongNumberOfEliminationIndices String Int Int
+    -- ^ datatype, indices it has, indices the @elim@ wrote
+  deriving (Eq, Show)
+
+-- | Which development-only form was met in a core position. An enum rather
+-- than a message, per §12 invariant 2 — "Thena.Repl" turns it into English.
+data DevForm = AHole | AGuess | AConstraint
   deriving (Eq, Show)

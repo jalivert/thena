@@ -1,0 +1,119 @@
+thena spine> :theorem const : ∀ (A : Type₀) (a : A) -> A
+proving const : ∀ (A : Type₀) -> A -> A
+thena spine> attack
+thena spine> intro
+thena spine> intro
+thena spine> into
+thena spine> along
+thena spine> along
+thena spine> :where
+focus
+  let ? const : A in
+path
+  root ▸ ≐ const ▸ A ▸ a
+context
+  A : Type₀
+  a : A
+type
+  A
+thena spine> :matches
+attack
+try ‹t›
+abandon
+eliminate ‹t›
+thena spine> :matches a
+elab-var
+thena spine> prove a
+thena spine> :show
+  let ? const : ∀ (A : Type₀) -> A -> A ≐ (
+    λ (A : Type₀) ->
+    λ (a : A) ->
+▶   let const = a : A in
+    const
+  ) in
+  const
+thena spine> back
+thena spine> back
+thena spine> back
+thena spine> solve
+thena spine> qed
+const : ∀ (A : Type₀) -> A -> A   ∎
+thena spine> :show const
+const : ∀ (A : Type₀) -> A -> A
+const = let const = λ (A : Type₀) (a : A) -> let const = a : A in const : ∀ (A : Type₀) -> A -> A in const
+thena spine> :theorem again : ∀ (A : Type₀) (a : A) -> A
+proving again : ∀ (A : Type₀) -> A -> A
+thena spine> attack
+thena spine> intro
+thena spine> intro
+thena spine> into
+thena spine> along
+thena spine> along
+thena spine> prove b
+stuck: not in scope: b
+thena spine> prove a a
+stuck: no rule applies here
+thena spine> :matches a a
+no rule applies here
+thena spine> :abandon
+abandoned again
+thena spine> :theorem shown : ∀ (A : Type₀) (a : A) -> A
+proving shown : ∀ (A : Type₀) -> A -> A
+thena spine> attack
+thena spine> intro
+thena spine> intro
+thena spine> into
+thena spine> along
+thena spine> along
+thena spine> :step on
+thena spine> prove a
+pc
+  0  prove with hint
+env
+  hint = ‹a›
+stack
+  (empty)
+thena spine> :step
+pc
+  0  t = resolve hint
+  1  call ‹rule try› (t)
+  2  solve
+env
+  hint = ‹a›
+stack
+  call, 0 instruction(s) to resume
+thena spine> :step
+pc
+  0  call ‹rule try› (t)
+  1  solve
+env
+  t = ⌜a⌝
+  hint = ‹a›
+stack
+  call, 0 instruction(s) to resume
+thena spine> :step
+pc
+  0  try t
+env
+  t = ⌜a⌝
+stack
+  call, 1 instruction(s) to resume
+  call, 0 instruction(s) to resume
+thena spine> :step
+pc
+  (empty)
+env
+  t = ⌜a⌝
+stack
+  call, 1 instruction(s) to resume
+  call, 0 instruction(s) to resume
+thena spine> :step
+pc
+  0  solve
+env
+  t = ⌜a⌝
+  hint = ‹a›
+stack
+  call, 0 instruction(s) to resume
+thena spine> :step off
+thena spine> :quit

@@ -22,6 +22,8 @@ module Thena.Ops
     -- * Rules (§8)
   , Rule (..)
   , Test (..)
+  , usesHint
+  , hintName
   ) where
 
 import Thena.Core.Term (GlobalName)
@@ -109,12 +111,50 @@ data Op
   | Regret                    -- ^ discard it again
   | Solve                     -- ^ commit a guess whose body is pure
   | Abandon                   -- ^ drop a hole nothing refers to
-  | Prove
-    -- ^ dispatch the rule engine at the focus (§7.3, phase 16). It takes no
-    -- operand for the same reason the six hole ops take none: it acts at the
-    -- focus, and 'Value' has no case for "a hole" — §7.2 refused one twice.
-    -- §7.2 and §7.3 sketch it as @Prove goal hint@; the goal is the focus, and
-    -- the hint waits for phase 17, where elaboration is.
+  | Prove (Maybe Operand)
+    -- ^ dispatch the rule engine at the focus, with an optional hint (§7.3,
+    -- §8; phase 16 without the hint, phase 17b with it).
+    --
+    -- **One op and not two.** §7.2 and §7.3 sketch it as @Prove goal hint@:
+    -- the goal went at phase 16, because it is the focus and 'Value' has no
+    -- case for \"a hole\" (§7.2 refused one twice); the hint arrives here as a
+    -- 'Maybe'. §8's own sentence is why it is not @Prove@ beside @ProveWith@ —
+    -- /same engine, same frames — the only difference is whether a hint is
+    -- present/.
+    --
+    -- The operand must be a 'VSurface'. It is bound into the callee\'s
+    -- environment under the name @hint@, which is how §8's rule bodies already
+    -- read it (@h₁ = app-fun hint@); see "Thena.Engine"\'s @Prove@ case.
+  | Parse Operand
+    -- ^ text → 'VSurface' (§7.2, phase 17b). Lexing and parsing only: turning
+    -- the tree into 'Thena.Core.Term.Core' is 'Resolve', because that needs a
+    -- context and this does not.
+  | Resolve Operand
+    -- ^ 'VSurface' → 'VTerm', in the context at the focus (phase 17b).
+    --
+    -- Not in §7.2's sketch, and discovered rather than designed (§12 invariant
+    -- 5): @elab-var@ has to get a term out of its hint, and §8's own sketch of
+    -- @elab-app@ already pulls hints apart with ordinary instructions. It is
+    -- one op and not a name-lookup, because "Thena.Syntax.Resolve" answers
+    -- 'Thena.Syntax.Concrete.RawName' against the local context, the
+    -- development's own names and the global environment in one pass, and
+    -- splitting that into three would be three ways to disagree about scope.
+  | Call Operand [Operand]
+    -- ^ apply a 'VRule' to arguments, which bind to its 'ruleParams' (§7.2,
+    -- §8; phase 17b). **The first supplier of @ruleParams@** — phase 15
+    -- validated the field, phase 16's 'Thena.Rules.dispatch' skips over rules
+    -- that have any, and until now nothing filled one in.
+    --
+    -- The rule comes as an operand rather than a name, per §7.2's \"rules are
+    -- values, so @Call@ and higher-order rules fall out instead of needing
+    -- machinery\": a body written in Haskell names a rule by writing
+    -- @Lit (VRule …)@, and a rule that takes a rule costs nothing extra.
+    -- Decided by the user 2026-08-23.
+    --
+    -- **It does not test the callee\'s head.** A head is dispatch's filter
+    -- (§8); a direct call has already chosen, and a callee that does not apply
+    -- fails in its body, which is handled (§7.3). So this pushes a @Call@
+    -- frame and never a @Choice@ — there is nothing to retry.
   | Certify Operand
     -- ^ the development must be pure; yields the closed term it stands for and
     -- the type it is claimed to have, for the driver to run the kernel on
@@ -262,7 +302,10 @@ produces o = case o of
   Regret       -> False
   Solve        -> False
   Abandon      -> False
-  Prove        -> False
+  Prove _      -> False
+  Call _ _     -> False   -- what the callee builds is in the development
+  Parse _      -> True
+  Resolve _    -> True
   Eliminate _  -> False
 
 -- --------------------------------------------------------------------------
@@ -298,12 +341,56 @@ data Rule = Rule
 -- deeper condition matches, runs and fails in its body, so the match list can
 -- offer something that will not work. Prolog has exactly this.
 --
--- Phase 15 defines the four its rule base asks, and no more (§12 invariant 5).
--- §8's @HintIsApp@ and @HintIsName@ are deliberately absent: there is no hint
--- until @Prove@ carries one, and elaboration's rules are phase 17's.
+-- Phase 15 defines the four its rule base asks, and no more (§12 invariant 5);
+-- phase 17b adds the fifth, when @Prove@ starts carrying a hint. §8's
+-- @HintIsApp@ is still absent — elaborating a compound surface term is beyond
+-- MS1's identifier case.
 data Test
   = FocusIsHole     -- ^ the focus is a @? x : S@ component
   | FocusIsGuess    -- ^ the focus is a @? x ≐ g : S@ component
   | GoalTypeIsPi    -- ^ the focused component's type whnfs to a Π
   | GoalTypeIsLet   -- ^ … or to a @let@, which is table 2.8's other intro
+  | HintIsName      -- ^ there is a hint, and it is a bare identifier (§8)
   deriving (Eq, Show)
+
+-- | Does this head ask about the hint?
+--
+-- **The partition, decided by the user 2026-08-23.** A hint changes the
+-- question being asked — /build a term for this goal out of this surface
+-- syntax/, rather than /make progress on this goal/ — so
+-- 'Thena.Rules.dispatch' offers hint rules when there is a hint and the rest
+-- when there is not. Without it @attack@ would win every elaboration, being
+-- first in definition order and matching on 'FocusIsHole' like everything else
+-- at a hole.
+--
+-- The other two answers were declined: ordering @elab-var@ first leaves rules
+-- that ignore the hint sitting in the retry list underneath it, and a @NoHint@
+-- test would be boilerplate on every rule ever written.
+--
+-- It is a function of the /head/ and not of the body, so it is decidable
+-- without running anything — which is what lets 'Thena.Rules.matches' apply it
+-- too, and keeps @:matches@ from listing rules the engine would not run.
+usesHint :: Rule -> Bool
+usesHint r = any hintTest (ruleHead r)
+  where
+    hintTest t = case t of
+      HintIsName    -> True
+      FocusIsHole   -> False
+      FocusIsGuess  -> False
+      GoalTypeIsPi  -> False
+      GoalTypeIsLet -> False
+
+-- | The name a hint is bound to in the environment of the body it dispatches
+-- into (§8).
+--
+-- A reserved name, and the one magic name in the instruction language. §8 wrote
+-- it this way — @h₁ = app-fun hint@ reads @hint@ as an ordinary operand — and
+-- the alternative was a @Hint@ read op, which would have made the machine carry
+-- the current hint somewhere for it to read. This way @Prove@ seeds the
+-- callee's environment and everything downstream is ordinary.
+--
+-- 'Thena.Rules.validate' knows it: a body whose head asks about the hint starts
+-- with this name in scope, so an @elab-@ rule reading it is not an unbound
+-- 'Ref'.
+hintName :: Name
+hintName = "hint"

@@ -9,6 +9,7 @@ import qualified Thena.Core.TypingTests
 import qualified Thena.Core.UnifyTests
 import qualified Thena.CursorTests
 import qualified Thena.DispatchTests
+import qualified Thena.ElaborateTests
 import qualified Thena.DevelopmentTests
 import qualified Thena.DriverTests
 import qualified Thena.EliminateTests
@@ -35,6 +36,7 @@ main =
       , Thena.Core.UnifyTests.tests
       , Thena.CursorTests.tests
       , Thena.DispatchTests.tests
+      , Thena.ElaborateTests.tests
       , Thena.DevelopmentTests.tests
       , Thena.DriverTests.tests
       , Thena.EliminateTests.tests

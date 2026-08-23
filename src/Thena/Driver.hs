@@ -67,6 +67,8 @@ import Thena.Errors
   , FailReason (..)
   , KernelError
   , MoveError (..)
+  , ResolveError (..)
+  , SyntaxError (..)
   , TypeError
   )
 import Thena.Development.Validate (revalidate)
@@ -100,15 +102,14 @@ import Thena.Ops
   )
 import Thena.Rules (RuleIter, matches, next, standardRules)
 import Thena.Syntax.Concrete (Raw)
-import Thena.Syntax.Lexer (LexError, Located, Token, lexTokens)
+import Thena.Syntax.Lexer (Located, Token, lexTokens)
 import Thena.Syntax.Parser
-  ( ParseError
-  , parseData
+  ( parseData
   , parseEquation
   , parseNameAndType
   , parseTerm
   )
-import Thena.Syntax.Resolve (ResolveError (..), resolve, resolveData, resolvePartial)
+import Thena.Syntax.Resolve (resolve, resolveData, resolvePartial)
 
 -- | Everything the session holds.
 --
@@ -243,13 +244,6 @@ data Stop
   | Paused               -- ^ stepping mode: one instruction done
   deriving (Eq, Show)
 
--- | The three ways reading a term or development can fail.
-data SyntaxError
-  = LexFailed LexError
-  | ParseFailed ParseError
-  | ResolveFailed ResolveError
-  deriving (Eq, Show)
-
 -- | Everything else a command line can get wrong (§7.8's @CommandError@).
 data CommandError
   = NoSuchCommand String
@@ -351,6 +345,12 @@ parseStatement env n src = do
 tokensOf :: String -> Either SyntaxError [Located Token]
 tokensOf = mapLeft LexFailed . lexTokens
 
+-- | Lex and parse, and stop there (phase 17b). What @:matches ‹hint›@ needs:
+-- a hint is a tree, not a term — resolving it is the rule body's job, and a
+-- hint that does not resolve is still a hint the engine can be asked about.
+parseSurface :: String -> Either SyntaxError Raw
+parseSurface src = tokensOf src >>= mapLeft ParseFailed . parseTerm
+
 -- --------------------------------------------------------------------------
 -- Commands
 -- --------------------------------------------------------------------------
@@ -382,11 +382,16 @@ dispatch s name arg = case name of
   -- Autocomplete, and it is a read-only query on the iterator (§7.6): the
   -- driver asks for the matches at the current state and shows them. Picking
   -- one and running its body is phase 16's.
-  ":matches" -> noArgument
-    ( s
-    , Matched (unfoldIter
-                 (matches (rules machine) (globals machine) (cursor (proof machine))))
-    )
+  --
+  -- **The optional argument is a hint** (phase 17b), read exactly as @prove@\'s
+  -- is. A hint partitions the base, so the two forms answer two questions:
+  -- @:matches@ is what could be done here, @:matches ‹hint›@ is what could
+  -- elaborate that.
+  ":matches" -> case arg of
+    "" -> (s, Matched (matching Nothing))
+    _  -> case parseSurface arg of
+      Left e    -> (s, Failed e)
+      Right raw -> (s, Matched (matching (Just raw)))
   -- The live choice points, nearest first (§7.7). A look, so a colon.
   ":choices" -> noArgument (s, Choices (choicePoints machine))
   ":goal"  -> goal
@@ -484,7 +489,17 @@ dispatch s name arg = case name of
   "regret" -> noArgument (run [Do Regret])
   "abandon" -> noArgument (run [Do Abandon])
   -- Dispatch the rule engine at the focus (§7.3). An op, so a bare word.
-  "prove"  -> noArgument (run [Do Prove])
+  --
+  -- **With an argument it is elaboration** (§8, phase 17b), and the argument
+  -- goes through the @parse@ op rather than being parsed here: the program is
+  -- @h = parse "‹text›"; prove with h@, so a syntax error in a hint fails the
+  -- way an op fails and is visible in stepping mode. The driver still parses
+  -- for @try@ and @eliminate@, which want a resolved 'Core' and not a tree.
+  "prove"  -> case arg of
+    "" -> run [Do (Prove Nothing)]
+    _  -> run [ Bind "hint" (Parse (Lit (VText arg)))
+              , Do (Prove (Just (Ref "hint")))
+              ]
   -- @retry@ / @retry ‹n›@ (§7.7). **The driver's, not an op** — a rule body
   -- may not contain one, because §7.2 decided there is no @catch@ and no
   -- alternation inside a body: a rule that wants an alternative is two rules,
@@ -531,6 +546,10 @@ dispatch s name arg = case name of
   where
     machine = sessionMachine s
     ctx     = proofContext (proof machine)
+
+    matching hint =
+      unfoldIter (matches (rules machine) (globals machine)
+                          (cursor (proof machine)) hint)
 
     noArgument r
       | null arg  = r

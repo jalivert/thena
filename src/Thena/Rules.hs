@@ -43,8 +43,12 @@ import Thena.Ops
   , Operand (..)
   , Rule (..)
   , Test (..)
+  , Value (..)
+  , hintName
   , produces
+  , usesHint
   )
+import Thena.Syntax.Concrete (Raw (..))
 
 -- --------------------------------------------------------------------------
 -- The rule base
@@ -96,13 +100,47 @@ allRules (RuleBase rs) = rs
 standardRules :: RuleBase
 standardRules = RuleBase
   [ Rule (GlobalName "attack")     []    [FocusIsHole]                 [Do Attack]
-  , Rule (GlobalName "try")        ["t"] [FocusIsHole]                 [Do (Try (Ref "t"))]
+  , tryRule
   , Rule (GlobalName "abandon")    []    [FocusIsHole]                 [Do Abandon]
   , Rule (GlobalName "intro-pi")   []    [FocusIsGuess, GoalTypeIsPi]  [Do Intro]
   , Rule (GlobalName "intro-let")  []    [FocusIsGuess, GoalTypeIsLet] [Do Intro]
   , Rule (GlobalName "solve")      []    [FocusIsGuess]                [Do Solve]
   , Rule (GlobalName "regret")     []    [FocusIsGuess]                [Do Regret]
   , Rule (GlobalName "eliminate")  ["t"] [FocusIsHole]                 [Do (Op.Eliminate (Ref "t"))]
+  , elabVar
+  ]
+
+-- | @try ‹t›@ — table 2.7's @try@, wrapped as a rule.
+--
+-- Named rather than written inline because 'elabVar' calls it: a body names a
+-- rule by writing @Lit (VRule …)@ (§7.2, and the user's answer 2026-08-23), so
+-- the Haskell binding /is/ the name until there is a rule syntax to write one
+-- in.
+tryRule :: Rule
+tryRule = Rule (GlobalName "try") ["t"] [FocusIsHole] [Do (Try (Ref "t"))]
+
+-- | MS1's one elaboration rule (§8, phase 17b).
+--
+-- The hint is a bare identifier; resolve it in the context at the focus, attach
+-- it to the goal, and commit. That is §8's own @elab-var@ — /hint is a name in
+-- scope, whose body is @try ?y x; solve ?y@/ — written in the instruction
+-- language, where the hole is the focus and so is not named.
+--
+-- **The @try@ step goes through 'Call'**, and that is the phase's point rather
+-- than a flourish: @try@ is already a rule with a parameter, so calling it is
+-- what finally /supplies/ a 'Thena.Ops.ruleParams' (phase 15 validated the
+-- field, phase 16 skipped over it). Writing @Do (Try (Ref "t"))@ inline here
+-- would have been one instruction shorter and would have left @Call@ with
+-- nothing in MS1 to do.
+--
+-- **Elaborating a compound hint is not MS1.** §8's @elab-app@ needs
+-- 'Thena.Ops.Test'\'s @HintIsApp@ and a way to take an application apart; the
+-- milestone implements the identifier case, which is the one it exercises.
+elabVar :: Rule
+elabVar = Rule (GlobalName "elab-var") [] [FocusIsHole, HintIsName]
+  [ Bind "t" (Op.Resolve (Ref hintName))
+  , Do (Call (Lit (VRule tryRule)) [Ref "t"])
+  , Do Solve
   ]
 
 -- --------------------------------------------------------------------------
@@ -138,9 +176,21 @@ newtype RuleIter = RuleIter [Rule]
 -- **This is a query and nothing more.** No body runs, and nothing is
 -- speculatively executed to see whether it would succeed — that is a real
 -- feature, a far more expensive one, and it is not MS1 (§2.2, §7.6).
-matches :: RuleBase -> GlobalEnv -> Cursor -> RuleIter
-matches (RuleBase rs) env cur =
-  RuleIter [ r | r <- rs, all (holds env cur) (ruleHead r) ]
+--
+-- **A hint partitions the base** — 'Thena.Ops.usesHint', decided by the user
+-- 2026-08-23, and the argument is there. It is applied /here/ and not only in
+-- 'dispatch' so that the two cannot disagree: @:matches@ would otherwise offer
+-- @attack@ under a hint that the engine, dispatching, would never run it for.
+-- The consequence at the REPL is that @:matches@ with no argument lists exactly
+-- what it listed before this phase, and @:matches ‹hint›@ is a separate
+-- question with a separate answer.
+matches :: RuleBase -> GlobalEnv -> Cursor -> Maybe Raw -> RuleIter
+matches (RuleBase rs) env cur hint =
+  RuleIter [ r | r <- rs, usesHint r == isHinted, all (holds env cur hint) (ruleHead r) ]
+  where
+    isHinted = case hint of
+      Just _  -> True
+      Nothing -> False
 
 -- | The rules @Prove@ may actually run: 'matches', less the ones it could not
 -- supply arguments for.
@@ -155,9 +205,9 @@ matches (RuleBase rs) env cur =
 -- questions: this one is /what the engine can run/, and 'matches' is /what
 -- could be done here/, which includes @try ‹t›@ because the user can type
 -- @try x@. @:matches@ keeps showing it.
-dispatch :: RuleBase -> GlobalEnv -> Cursor -> RuleIter
-dispatch base env cur =
-  let RuleIter rs = matches base env cur
+dispatch :: RuleBase -> GlobalEnv -> Cursor -> Maybe Raw -> RuleIter
+dispatch base env cur hint =
+  let RuleIter rs = matches base env cur hint
    in RuleIter [ r | r <- rs, null (ruleParams r) ]
 
 next :: RuleIter -> Maybe (Rule, RuleIter)
@@ -181,8 +231,8 @@ hasNext (RuleIter rs) = not (null rs)
 -- matches, runs and fails in its body, and failing in a body is already handled
 -- (§7.3). Asking about the hole at the bottom of the guess instead would make
 -- the head a traversal, which is what \"shallow\" rules out.
-holds :: GlobalEnv -> Cursor -> Test -> Bool
-holds env cur t = case t of
+holds :: GlobalEnv -> Cursor -> Maybe Raw -> Test -> Bool
+holds env cur hint t = case t of
   FocusIsHole   -> case focus cur of
     OnComponent (Component.Claim {}) -> True
     _                                -> False
@@ -200,6 +250,13 @@ holds env cur t = case t of
   GoalTypeIsLet -> case written of
     Just (Let {}) -> True
     _             -> False
+  -- The hint is the tree as parsed, not as resolved: whether the name is in
+  -- scope is @resolve@'s answer and it is given in the body, where failing is
+  -- ordinary (§7.3). A head that resolved would be doing the work twice and
+  -- would be a head that is not shallow (§8).
+  HintIsName    -> case hint of
+    Just (RawName _) -> True
+    _                -> False
   where
     -- Written down, then reduced: §8's "head matching runs whnf", because a
     -- goal typed @id Type₀ (Nat -> Nat)@ is a Π and must match.
@@ -240,7 +297,7 @@ data RuleError
 -- states the head admits. That is not decidable shallowly, and §8 already
 -- states the answer — a rule may match, run and fail.
 validate :: Rule -> [RuleError]
-validate r = go 0 (ruleParams r) (ruleBody r)
+validate r = go 0 (initiallyBound r) (ruleBody r)
   where
     nm = ruleName r
 
@@ -268,6 +325,17 @@ validate r = go 0 (ruleParams r) (ruleBody r)
     scope i bound o =
       [ UnboundInRule nm i n | Ref n <- operandsOf o, n `notElem` bound ]
 
+-- | The names a body may read before it binds anything of its own: its
+-- parameters, and — when its head asks about the hint — 'Thena.Ops.hintName',
+-- which @Prove@ seeds the environment with (§8, phase 17b).
+--
+-- Without this line 'elabVar' fails its own load-time check, because @hint@ is
+-- a 'Ref' that no @Bind@ introduces.
+initiallyBound :: Rule -> [Name]
+initiallyBound r
+  | usesHint r = hintName : ruleParams r
+  | otherwise  = ruleParams r
+
 -- | Every operand an op reads. A total case split, so @-Wall@ makes a new op
 -- say whether it reads anything.
 operandsOf :: Op -> [Operand]
@@ -281,6 +349,10 @@ operandsOf o = case o of
   Try    a     -> [a]
   Certify a    -> [a]
   Op.Eliminate a -> [a]
+  Parse   a    -> [a]
+  Op.Resolve a -> [a]
+  Call r as    -> r : as
+  Prove h      -> maybe [] (: []) h
   DefineData _ -> []
   Along        -> []
   Into         -> []
@@ -294,7 +366,6 @@ operandsOf o = case o of
   Regret       -> []
   Solve        -> []
   Abandon      -> []
-  Prove        -> []
 
 -- | Every rule in the base, checked. The shipped 'standardRules' is asserted
 -- clean by "Thena.RulesTests"; when rules become a file this is what a load

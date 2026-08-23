@@ -1,9 +1,7 @@
 -- | Turning the named tree the parser produces into 'Core', into a 'Partial',
 -- or into an 'InductiveDefinition' (§2.5, §2.7, §3.7).
 module Thena.Syntax.Resolve
-  ( ResolveError (..)
-  , DevForm (..)
-  , resolve
+  ( resolve
   , resolvePartial
   , resolveData
   ) where
@@ -21,6 +19,7 @@ import Thena.Core.Term
   )
 import Thena.Development.Component (Component (..))
 import Thena.Development.Partial (Constraint (..), Partial (..))
+import Thena.Errors (DevForm (..), ResolveError (..))
 import Thena.Global.Env
   ( ConstructorDefinition (..)
   , GlobalEnv
@@ -39,39 +38,6 @@ import Thena.Syntax.Concrete
   , RawData (..)
   )
 
--- | Structured, per §12 invariant 2.
---
--- The last seven are one shape of mistake — the declaration or elimination
--- does not fit the form — and they are here rather than in
--- "Thena.Global.Declare" because this is where "what you wrote does not fit"
--- already lives. @Declare@ keeps the judgements: positivity now, the
--- universes at phase 8.
-data ResolveError
-  = NotInScope String
-  | NotACoreTerm DevForm
-    -- ^ a development-only form written where a term goes
-  | NotAUniverse String
-    -- ^ the datatype's declared type does not end in @Type_l@
-  | TargetIsNotTheDatatype String
-    -- ^ this constructor's result type is not the family being declared
-  | TargetArgumentCount String Int Int
-    -- ^ constructor, arguments its target should have, arguments it has
-  | ParameterNotPassedThrough String Ident
-    -- ^ a constructor's target changed a parameter; parameters are fixed (§3.7)
-  | NotADatatype String
-    -- ^ an @elim@ naming something that is not a declared inductive (phase 7)
-  | WrongNumberOfEliminationParameters String Int Int
-    -- ^ datatype, parameters it has, parameters the @elim@ wrote
-  | WrongNumberOfMethods String Int Int
-    -- ^ datatype, constructors it has, methods the @elim@ wrote
-  | WrongNumberOfEliminationIndices String Int Int
-    -- ^ datatype, indices it has, indices the @elim@ wrote
-  deriving (Eq, Show)
-
--- | Which development-only form was met in a core position. An enum rather
--- than a message, per §12 invariant 2 — "Thena.Repl" turns it into English.
-data DevForm = AHole | AGuess | AConstraint
-  deriving (Eq, Show)
 
 -- | Names bound locally, innermost first.
 type Local = [(String, Var)]
