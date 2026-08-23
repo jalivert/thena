@@ -41,6 +41,7 @@ tests =
     "the elimination tactic (§3.7)"
     [ testGroup "the scheme, against §3.7's worked example" workedTests
     , testGroup "no indices: the target is what gets generalised" simpleTests
+    , testGroup "friendly indices are abstracted, not equated" friendlyTests
     , testGroup "what it refuses" refusalTests
     ]
 
@@ -55,35 +56,49 @@ tests =
 -- >               -> Eq Term u₂ t''
 -- >               -> Eq Term t₂ u₂
 --
--- The first case below is that, in §2.6's concrete syntax. Every difference is
--- the syntax's and none is the tactic's: @∀ (x : T) (y : T) ->@ for the
--- thesis's @(x y : T) ->@, @ifthen@ for @if@ because that is what the fixture
--- calls the constructor, and the binder names the /constructor's own
--- arguments/ carry — @t2@ and @t3@ freshened to @t21@, @t31@ against the
--- goal's @t2@, @t3@ — rather than the document's @u₂@, @u₃@.
+-- The first case below is that **minus its second equation**, in §2.6's
+-- concrete syntax. Two kinds of difference, and only the second is the
+-- tactic's.
+--
+-- The syntax's: @∀ (x : T) (y : T) ->@ for the thesis's @(x y : T) ->@,
+-- @ifthen@ for @if@ because that is what the fixture calls the constructor,
+-- and the binder names the /constructor's own arguments/ carry — @t2@ and @t3@
+-- freshened to @t21@, @t31@ against the goal's @t2@, @t3@ — rather than the
+-- document's @u₂@, @u₃@.
+--
+-- The tactic's, decided planning phase 18: @Eq Term u₂ t''@ is **gone**. The
+-- second index of the target is @t''@, a plain context variable, so it is
+-- thesis §3.5.2's /friendly/ case — abstracting it in the motive generalises
+-- every occurrence there is, and an equation tying it back adds nothing to a
+-- method and destroys the induction hypothesis of any method that has one.
+-- §3.7 is amended to say so. The first index, @if true t₂ t₃@, is not a
+-- variable and keeps its equation, which is what the impossible branches close
+-- on.
 --
 -- The other two cases are the schemes the same elimination hands to the
 -- branches that cannot occur; determinacy closes both by discrimination, and
--- what makes that possible is the constraint each carries.
+-- what makes that possible is the constraint the first index carries.
 workedTests :: [TestTree]
 workedTests =
   [ method "eIfTrue — §3.7's own displayed method" 0
       "∀ (t21 : Term) (t31 : Term) -> Eq Term (ifthen true t21 t31) (ifthen true t2 t3) \
-      \-> Eq Term t21 u -> Eq Term t2 t21"
+      \-> Eq Term t2 t21"
 
   , method "eIfFalse — the branch ruled out by conflict on true/false" 1
       "∀ (t21 : Term) (t31 : Term) -> Eq Term (ifthen false t21 t31) (ifthen true t2 t3) \
-      \-> Eq Term t31 u -> Eq Term t2 t31"
+      \-> Eq Term t2 t31"
 
     -- The inductive hypothesis is the motive at the recursive argument's own
-    -- indices, so it carries its own copy of both constraints. That is the
-    -- \"unfriendly\" constraint of thesis §3.5.4 — it narrows what the
-    -- hypothesis may be used at rather than telling you anything.
+    -- indices, so it carries its own copy of whatever the motive constrains.
+    -- Here that is the /first/ index only — thesis §3.5.4's \"unfriendly\"
+    -- constraint, which narrows what the hypothesis may be used at rather than
+    -- telling you anything. An inversion does not want the hypothesis, so this
+    -- one is harmless; 'friendlyTests' is where it would not have been.
   , method "eIf — and its induction hypothesis is constrained too" 2
       "∀ (t1 : Term) (t1' : Term) (t21 : Term) (t31 : Term) -> Step t1 t1' \
-      \-> (Eq Term t1 (ifthen true t2 t3) -> Eq Term t1' u -> Eq Term t2 t1') \
+      \-> (Eq Term t1 (ifthen true t2 t3) -> Eq Term t2 t1') \
       \-> Eq Term (ifthen t1 t21 t31) (ifthen true t2 t3) \
-      \-> Eq Term (ifthen t1' t21 t31) u -> Eq Term t2 (ifthen t1' t21 t31)"
+      \-> Eq Term t2 (ifthen t1' t21 t31)"
 
   , testCase "one subgoal per constructor, in declaration order" $
       names worked
@@ -91,12 +106,15 @@ workedTests =
 
     -- The equations are reflexive at the use site, which is the whole point of
     -- the scheme (§3.7): @P a⃗ target@ applied to @refl …@ is the goal again.
+    -- One @refl@ per /tied/ index, and none for a friendly one. The motive
+    -- still binds both — the eliminator's type demands it — so what changes is
+    -- the equations it states and the spine that discharges them.
   , testCase "the equations are discharged with refl at the use site" $
       rendered (withMethods stepContext worked) (elimTerm worked)
         @?= "(elim Step () (λ (x : Term) (x1 : Term) (target : Step x x1) \
-            \-> Eq Term x (ifthen true t2 t3) -> Eq Term x1 u -> Eq Term t2 x1) \
+            \-> Eq Term x (ifthen true t2 t3) -> Eq Term t2 x1) \
             \(eIfTrueMethod eIfFalseMethod eIfMethod) ((ifthen true t2 t3) u) d) \
-            \(refl Term (ifthen true t2 t3)) (refl Term u)"
+            \(refl Term (ifthen true t2 t3))"
   ]
   where
     method label k want = testCase label $
@@ -162,6 +180,102 @@ natContext :: Context
 natCounter' :: Int
 (natContext, natCounter') =
   contextOf eqNat eqNatCounter [("n", "Nat"), ("m", "Nat")]
+
+-- --------------------------------------------------------------------------
+-- Friendly indices
+-- --------------------------------------------------------------------------
+
+-- | Thesis §3.5.2, "what to fix, what to abstract", **decided planning phase
+-- 18**: an index the target supplies as a plain context variable is abstracted
+-- and carries no equation.
+--
+-- The first case is why. Before this, induction over any inductively defined
+-- relation was worthless, because the method's induction hypothesis is the
+-- motive at the recursive argument's own indices — so it arrived guarded by
+-- @Eq Nat m1 m -> Eq Nat n1 n -> …@, and the method holds only
+-- @Eq Nat (succ m1) m@. Discharging the guard would need @Eq Nat m1 (succ m1)@,
+-- which is refutable. @weaken@ below is the smallest statement that shows it,
+-- and MS1's determinacy proof is the same shape at ten constructors.
+--
+-- The other three are the conditions under which an index is /not/ friendly,
+-- each of which is a case that breaks if it is ignored.
+friendlyTests :: [TestTree]
+friendlyTests =
+  [ testCase "the induction hypothesis arrives unguarded" $
+      map (rendered leContext . thirdOf') (elimMethods leWeaken)
+        @?= [ "∀ (n1 : Nat) -> Le zero (succ n1)"
+            , "∀ (m1 : Nat) (n1 : Nat) -> Le m1 n1 -> Le m1 (succ n1) \
+              \-> Le (succ m1) (succ (succ n1))"
+            ]
+
+    -- Nothing is applied to the elimination: both indices were abstracted, so
+    -- there is no equation left to discharge reflexively.
+  , testCase "and no refl spine is needed at all" $
+      rendered (withMethods leContext leWeaken) (elimTerm leWeaken)
+        @?= "elim Le () (λ (x : Nat) (x1 : Nat) (target : Le x x1) \
+            \-> Le x (succ x1)) (leZeroMethod leSuccMethod) (m n) p"
+
+    -- Two abstractions would race for the same occurrences, and the second
+    -- would find none left. @Eq Nat a a@ is the case; it keeps both equations
+    -- and is exactly as provable as it was.
+  , testCase "an index variable repeated in the spine is tied" $
+      let (env, n0) = declared [eqDecl', natDecl]
+          (ctx, n1) = contextOf env n0 [("a", "Nat"), ("e", "Eq Nat a a")]
+       in map (rendered ctx . thirdOf') (elimMethods (run "repeated" env ctx n1 "Eq Nat a a" "e"))
+            @?= [ "∀ (a1 : Nat) -> Eq Nat a1 a -> Eq Nat a1 a -> Eq Nat a1 a1" ]
+
+    -- Every premise of the goal stays fixed (§3.7), so a premise that still
+    -- mentions the index is precisely the specificity the equation exists to
+    -- carry. The pair below is the same elimination with and without @k@.
+  , testCase "an index another hypothesis mentions is tied" $
+      let (env, n0) = declared [eqDecl', natDecl, finDecl]
+          (with, n1) = contextOf env n0
+            [("n", "Nat"), ("k", "Eq Nat n n"), ("i", "Fin n")]
+          (without, n2) = contextOf env n0 [("n", "Nat"), ("i", "Fin n")]
+       in do
+            map (rendered with . thirdOf') (elimMethods (run "tied" env with n1 "Eq Nat n n" "i"))
+              @?= [ "∀ (n1 : Nat) -> Eq Nat (succ n1) n -> Eq Nat (succ n1) (succ n1)"
+                  , "∀ (n1 : Nat) -> Fin n1 -> (Eq Nat n1 n -> Eq Nat n1 n1) \
+                    \-> Eq Nat (succ n1) n -> Eq Nat (succ n1) (succ n1)"
+                  ]
+            map (rendered without . thirdOf') (elimMethods (run "free" env without n2 "Eq Nat n n" "i"))
+              @?= [ "∀ (n1 : Nat) -> Eq Nat (succ n1) (succ n1)"
+                  , "∀ (n1 : Nat) -> Fin n1 -> Eq Nat n1 n1 -> Eq Nat (succ n1) (succ n1)"
+                  ]
+
+    -- A 'Definition' has a value as well as a type, and abstracting the
+    -- variable would leave the value behind. Conservative on purpose: tying it
+    -- is what the tactic did for every index before this change.
+  , testCase "an index bound by a definition is tied" $
+      let (env, n0)  = declared [eqDecl', natDecl, finDecl]
+          (zeroT, n1) = parsed env [] n0 "Nat"
+          (zeroV, n2) = parsed env [] n1 "zero"
+          (dv,    n3) = fresh n2
+          defCtx      = [Definition dv (Ident "n") zeroV zeroT]
+          (ctx,   n4) = contextOf' env defCtx n3 [("i", "Fin n")]
+       in map (rendered ctx . thirdOf') (elimMethods (run "defined" env ctx n4 "Eq Nat n n" "i"))
+            @?= [ "∀ (n1 : Nat) -> Eq Nat (succ n1) n -> Eq Nat (succ n1) (succ n1)"
+                , "∀ (n1 : Nat) -> Fin n1 -> (Eq Nat n1 n -> Eq Nat n1 n1) \
+                  \-> Eq Nat (succ n1) n -> Eq Nat (succ n1) (succ n1)"
+                ]
+  ]
+  where
+    thirdOf' (_, _, ty) = ty
+
+-- | @m n : Nat@, @p : Le m n@ — the state @weaken@ reaches after three
+-- @intro@s, and the smallest induction over an indexed family there is.
+leContext :: Context
+leWeaken :: Elimination
+(leContext, leWeaken) =
+  let (env, n0) = declared [eqDecl', natDecl, leDecl]
+      (ctx, n1) = contextOf env n0 [("m", "Nat"), ("n", "Nat"), ("p", "Le m n")]
+   in (ctx, run "weaken" env ctx n1 "Le m (succ n)" "p")
+
+leDecl :: String
+leDecl =
+  "Le : Nat -> Nat -> Type\8320 \
+  \{ leZero : \8704 (n : Nat) -> Le zero n \
+  \; leSucc : \8704 (m : Nat) (n : Nat) (p : Le m n) -> Le (succ m) (succ n) }"
 
 -- --------------------------------------------------------------------------
 -- Refusals
@@ -247,13 +361,23 @@ belowDecl =
 -- | Build a context by parsing each entry's type against what precedes it, so
 -- that a dependent context can be written down as the user would type it.
 contextOf :: GlobalEnv -> Int -> [(String, String)] -> (Context, Int)
-contextOf env = foldl one . (,) []
+contextOf env = contextOf' env []
+
+-- | 'contextOf' onto a context that already has entries — the one fixture that
+-- needs a 'Definition' cannot state it as a @(name, type)@ pair.
+contextOf' :: GlobalEnv -> Context -> Int -> [(String, String)] -> (Context, Int)
+contextOf' env ctx0 n0 = foldl one (ctx0, n0)
   where
     one (ctx, n) (name, src) = case parseCore env ctx n src of
       Left e -> error ("fixture does not parse: " ++ show e)
       Right (ty, n1) ->
         let (v, n2) = fresh n1
          in (ctx ++ [Hypothesis v (Ident name) ty], n2)
+
+parsed :: GlobalEnv -> Context -> Int -> String -> (Core, Int)
+parsed env ctx n src = case parseCore env ctx n src of
+  Left e        -> error ("fixture does not parse: " ++ show e)
+  Right (t, n1) -> (t, n1)
 
 -- | Run the tactic and insist it worked; a refusal in these fixtures is a bug
 -- in the fixture, not a test result.

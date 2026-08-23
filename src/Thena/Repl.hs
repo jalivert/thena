@@ -23,6 +23,7 @@ module Thena.Repl
   , renderEliminator
   , preludePath
   , loadPrelude
+  , loadFile
   , renderLoadError
   ) where
 

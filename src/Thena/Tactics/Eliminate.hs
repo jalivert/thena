@@ -157,11 +157,45 @@ eliminate env ctx n0 goal tgt =
           (goalIx, n5) = foldl abstractIndex (goalX, n4) (zip ivs as)
           abstractIndex (g, n) (iv, a) = replaceTerm a iv n g
 
-          -- @Eq Iₖ iₖ aₖ → …@, one non-dependent Π per index. A Π still needs
-          -- a variable to close over even when nothing refers to it, exactly
-          -- as 'Thena.Global.Env.eliminatorType' mints one per induction
-          -- hypothesis.
-          (equations, n6) = constrain (zip3 indexTys ivs as) n5 goalIx
+          -- Thesis §3.5.2's "what to fix, what to abstract", answered one index
+          -- at a time. An index the target supplies as a plain context
+          -- /variable/ needs no equation: replacing its occurrences already
+          -- generalises everything that mentions it, and applying the motive
+          -- back at that very variable recovers the goal. Emitting one anyway
+          -- is what killed the induction hypothesis — see the header.
+          --
+          -- Three conditions, each a case that breaks without it. The variable
+          -- must be a 'Hypothesis', since a 'Definition' has a value that would
+          -- be left behind. It must occur nowhere else in the family's own
+          -- spine, or two abstractions race for the same occurrences —
+          -- @e : Eq Nat a a@ is the case, and it must keep both equations. And
+          -- no /other/ entry of the context may mention it: every premise stays
+          -- fixed (§3.7), and a fixed premise still constraining the abstracted
+          -- variable is exactly the specificity the equation existed to carry.
+          friendlyAt k a = case a of
+            Free v ->
+              isHypothesisOf v
+                && not (any (\b -> v `elem` freeVars b) (ps ++ others k))
+                && all (unmentioned v) ctx
+            _ -> False
+          others k = [ b | (j, b) <- zip [(0 :: Int) ..] as, j /= k ]
+          isHypothesisOf v = or [ True | Hypothesis w _ _ <- ctx, w == v ]
+          unmentioned v e =
+            entryVar e == v
+              || Just (entryVar e) == targetVar
+              || v `notElem` entryUses e
+
+          -- Which indices keep an equation, and which are simply abstracted.
+          tied = [ (ity, iv, a)
+                 | (k, (ity, iv, a)) <- zip [(0 :: Int) ..] (zip3 indexTys ivs as)
+                 , not (friendlyAt k a)
+                 ]
+
+          -- @Eq Iₖ iₖ aₖ → …@, one non-dependent Π per *tied* index. A Π still
+          -- needs a variable to close over even when nothing refers to it,
+          -- exactly as 'Thena.Global.Env.eliminatorType' mints one per
+          -- induction hypothesis.
+          (equations, n6) = constrain tied n5 goalIx
           constrain []                  n b = (b, n)
           constrain ((ity, iv, a) : cs) n b =
             let (body, na) = constrain cs n b
@@ -186,9 +220,9 @@ eliminate env ctx n0 goal tgt =
           -- extra (thesis §3.5.3, and see this module's header).
           case sortOf env bodyCtx n6 equations of
             (Left e, n7)  -> (Left (MotiveIllTyped e), n7)
-            (Right l, n7) -> assemble d ps as indexTys motiveTerm l n7
+            (Right l, n7) -> assemble d ps as tied motiveTerm l n7
 
-    assemble d ps as indexTys motiveTerm l n7 =
+    assemble d ps as tied motiveTerm l n7 =
       let (ety, n8) = eliminatorType d l n7
           -- Walk the eliminator's type past the parameters and the motive, then
           -- read one method type off per constructor. This is phase 8's "the
@@ -219,9 +253,10 @@ eliminate env ctx n0 goal tgt =
             , target     = tgt
             }
           -- The equations are reflexive at the use site, which is the whole
-          -- point of the scheme (§3.7, thesis §3.5).
+          -- point of the scheme (§3.7, thesis §3.5). Only the tied indices have
+          -- one; a friendly index was abstracted outright and carries none.
           proof = foldl App node
-            [ Canonical reflexivity [ity, a] | (ity, a) <- zip indexTys as ]
+            [ Canonical reflexivity [ity, a] | (ity, _, a) <- tied ]
        in case check env (ctx ++ methodEntries) n10 proof goal of
             (Left e, n11)  -> (Left (SchemeIllTyped e), n11)
             (Right (), n11) -> (Right (Elimination holes proof), n11)
@@ -269,6 +304,17 @@ eliminate env ctx n0 goal tgt =
       other -> (other, n)
 
     equationOf ity l r = foldl App (Global equality) [ity, l, r]
+
+    -- The entry the target /is/, when it is a variable. It is the one entry
+    -- allowed to mention a friendly index — the whole point is that the target
+    -- follows the index into the motive.
+    targetVar = case tgt of
+      Free w -> Just w
+      _      -> Nothing
+
+    entryUses e = case e of
+      Hypothesis _ _ t   -> freeVars t
+      Definition _ _ s t -> freeVars s ++ freeVars t
 
 equality :: GlobalName
 equality = GlobalName "Eq"

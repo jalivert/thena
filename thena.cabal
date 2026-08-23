@@ -81,6 +81,7 @@ test-suite thena-test
         Thena.Core.TypingTests
         Thena.Core.UnifyTests
         Thena.CursorTests
+        Thena.DeterminacyTests
         Thena.DevelopmentTests
         Thena.EliminateTests
         Thena.EliminatorTests

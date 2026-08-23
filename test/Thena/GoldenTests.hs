@@ -454,7 +454,7 @@ tests =
         , "eliminate e"
         , "back"
         , ":where"
-        , "try \\ (c : Nat) (q1 : Eq Nat c a) (q2 : Eq Nat c b) -> refl Nat (succ c)"
+        , "try \\ (c : Nat) -> refl Nat (succ c)"
         , "solve"
         , "along"
         , "solve"
