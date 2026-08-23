@@ -199,6 +199,36 @@ tests =
         , ":show"
         , ":quit"
         ]
+      -- Phase 16's deliverable: a goal dispatched one way, then the other on
+      -- request, five commands later, because the frame stack persists (7.7).
+    , script
+        "backtracking"
+        [ ":theorem id : \8704 (A : Type\8320) -> A -> A"
+        , "attack"
+          -- Three rules match a guess; two are nullary, so dispatch is a real
+          -- choice and the machine says which it took.
+        , ":matches"
+        , "prove"
+        , ":show"
+        , ":choices"
+          -- Deterministic commands in between. They push no frame (the peek),
+          -- and they do not disturb the one that is there.
+        , "into"
+        , "along"
+        , ":where"
+        , "back"
+        , "back"
+        , ":choices"
+          -- retry takes one ALTERNATIVE, not one command: it pops back past
+          -- everything since, restores the development, and runs the next one.
+          -- @solve@ then fails on its own and the engine backtracks again
+          -- inside the same command, which is why both lines are printed.
+        , "retry"
+        , ":show"
+        , ":choices"
+        , "retry"
+        , ":quit"
+        ]
       -- Suspension, undo, and the promise that the environment only grows.
     , script
         "session"

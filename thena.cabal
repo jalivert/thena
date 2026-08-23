@@ -87,6 +87,7 @@ test-suite thena-test
         Thena.GoldenTests
         Thena.KernelTests
         Thena.NoConfusionTests
+        Thena.DispatchTests
         Thena.RulesTests
         Thena.LoadTests
         Thena.DriverTests

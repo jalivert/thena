@@ -109,6 +109,12 @@ data Op
   | Regret                    -- ^ discard it again
   | Solve                     -- ^ commit a guess whose body is pure
   | Abandon                   -- ^ drop a hole nothing refers to
+  | Prove
+    -- ^ dispatch the rule engine at the focus (§7.3, phase 16). It takes no
+    -- operand for the same reason the six hole ops take none: it acts at the
+    -- focus, and 'Value' has no case for "a hole" — §7.2 refused one twice.
+    -- §7.2 and §7.3 sketch it as @Prove goal hint@; the goal is the focus, and
+    -- the hint waits for phase 17, where elaboration is.
   | Certify Operand
     -- ^ the development must be pure; yields the closed term it stands for and
     -- the type it is claimed to have, for the driver to run the kernel on
@@ -236,6 +242,7 @@ produces o = case o of
   Regret       -> False
   Solve        -> False
   Abandon      -> False
+  Prove        -> False
 
 -- --------------------------------------------------------------------------
 -- Rules (§8)

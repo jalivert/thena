@@ -85,6 +85,14 @@ data FailReason
     -- undischarged constraint in it (§5.3). The 'Position' names the first one
     -- — @certify@ before anything is proved is the normal way to meet this, so
     -- it says which component rather than only that one exists
+  | NoRuleMatched
+    -- ^ @prove@ found no rule whose head passes at the focus (§7.3). It says
+    -- only that, and no more: the focus is what it is about, and 'Stuck'
+    -- carries the whole machine, so @:where@ still says where (§7.5).
+    --
+    -- **This is the definite case, not §8.1's suspension.** The focus's shape
+    -- is known, so "no rule will ever match" is the answer. Blocked-on-a-hole
+    -- is a different outcome and a later milestone (§12 invariant 2).
   | NotTypeable TypeError
     -- ^ an op was handed a term with no type. @unify@ needs one: a deferred
     -- equation records the type it was asked at (§3.3), so the op infers it

@@ -1,0 +1,44 @@
+thena spine> :theorem id : ∀ (A : Type₀) -> A -> A
+proving id : ∀ (A : Type₀) -> A -> A
+thena spine> attack
+thena spine> :matches
+intro-pi
+solve
+regret
+thena spine> prove
+chose 7: intro-pi
+thena spine> :show
+▶ let ? id : ∀ (A : Type₀) -> A -> A ≐ (
+    λ (A : Type₀) ->
+    let ? id : A -> A in
+    id
+  ) in
+  id
+thena spine> :choices
+7  intro-pi   untried: solve, regret
+thena spine> into
+thena spine> along
+thena spine> :where
+focus
+  let ? id : A -> A in
+path
+  root ▸ ≐ id ▸ A
+context
+  A : Type₀
+type
+  A -> A
+thena spine> back
+thena spine> back
+thena spine> :choices
+7  intro-pi   untried: solve, regret
+thena spine> retry
+retrying 7: solve
+backtracking to 7: regret
+thena spine> :show
+▶ let ? id : ∀ (A : Type₀) -> A -> A in
+  id
+thena spine> :choices
+no choice points
+thena spine> retry
+no choice point to retry
+thena spine> :quit

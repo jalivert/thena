@@ -24,6 +24,7 @@ module Thena.Driver
   , CommandError (..)
   , Proof (..)
   , Snapshot
+  , ChoicePoint (..)
   , LoadError (..)
   , Loaded (..)
   , command
@@ -41,11 +42,13 @@ import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Level)
 import Thena.Development.Cursor (Cursor, Focus (..), Part (..), focus)
 import Thena.Development.Partial (Partial (..), extract)
 import Thena.Engine
-  ( Exec (..)
+  ( ChoicePoint (..)
+  , Exec (..)
   , Machine (..)
   , Message
   , ProofState (..)
   , Question
+  , choicePoints
   , cursor
   , isAsking
   , proofDevelopment
@@ -214,6 +217,8 @@ data Response
     -- ^ @:load ‹path›@. The driver may not touch a file — §12 invariant 4 puts
     -- all IO in "Thena.Repl" — so it asks, and the caller reads the file and
     -- hands the contents back to 'loadSource'
+  | Choices [ChoicePoint]
+    -- ^ @:choices@ — the live choice points, nearest first (§7.7). A look
   | Matched [Rule]
     -- ^ @:matches@ — the rules whose heads pass at the focus, in dispatch order
     -- (§7.6). A look and not an act: no body runs, and nothing is speculatively
@@ -266,6 +271,13 @@ data CommandError
     -- but is not a @Typeₗ@ (phase 10). Not called @NotAUniverse@ because
     -- 'Thena.Syntax.Resolve.ResolveError' has one of those already, about a
     -- different mistake: a datatype /declared/ at a non-universe
+  | NothingToRetry
+    -- ^ @retry@ with no live choice point anywhere on the stack
+  | NoSuchChoice Int
+    -- ^ @retry ‹n›@ naming an identifier that is not on the stack. There is no
+    -- second case for "that one is exhausted": the peek (§7.3) demotes a frame
+    -- the moment its last alternative is taken, so an exhausted 'Choice' never
+    -- exists
   | NotThere MoveError
     -- ^ a driver command that needs a particular focus, run at another —
     -- @:goal@, and @:whnf@ with no argument (phase 7); the moves are ops and
@@ -374,6 +386,8 @@ dispatch s name arg = case name of
     , Matched (unfoldIter
                  (matches (rules machine) (globals machine) (cursor (proof machine))))
     )
+  -- The live choice points, nearest first (§7.7). A look, so a colon.
+  ":choices" -> noArgument (s, Choices (choicePoints machine))
   ":goal"  -> goal
   -- With no argument, view-reduce the core focus (§4.7); with one, an
   -- arbitrary typed term — the same no-argument/with-argument split as
@@ -468,6 +482,19 @@ dispatch s name arg = case name of
   "solve"  -> noArgument (run [Do Solve])
   "regret" -> noArgument (run [Do Regret])
   "abandon" -> noArgument (run [Do Abandon])
+  -- Dispatch the rule engine at the focus (§7.3). An op, so a bare word.
+  "prove"  -> noArgument (run [Do Prove])
+  -- @retry@ / @retry ‹n›@ (§7.7). **The driver's, not an op** — a rule body
+  -- may not contain one, because §7.2 decided there is no @catch@ and no
+  -- alternation inside a body: a rule that wants an alternative is two rules,
+  -- and an op that re-entered a choice point would be exactly the mechanism
+  -- that refused. It is still spelled bare, because §2.4's rule is that a word
+  -- that /acts/ takes no colon, and this acts.
+  "retry"  -> case arg of
+    "" -> retryAt Nothing
+    _  -> case reads arg of
+      [(n, "")] -> retryAt (Just n)
+      _         -> (s, Rejected (UnexpectedArgument name))
   "try"    -> withArgument $
     case parseCore (globals machine) ctx (names machine) arg of
       Left e -> (s, Failed e)
@@ -686,6 +713,25 @@ dispatch s name arg = case name of
       _     -> (s, Rejected (UnexpectedArgument name))
 
     run is = progress (sessionStepping s) s { sessionMachine = load is machine } []
+
+    -- Unwind to a choice point and take its next alternative, then let the
+    -- machine run as any other command does. 'Thena.Engine.retryFrom' is what
+    -- knows how; the driver only decides which one and reports what happened,
+    -- because §7.7 asks @retry@ to say what it did — it pops past any 'Call'
+    -- frames in between, which may be several commands back.
+    retryAt target = case Engine.retryFrom target machine of
+      Left Engine.NoChoicePoint   -> (s, Rejected NothingToRetry)
+      Left (Engine.UnknownChoice n) -> (s, Rejected (NoSuchChoice n))
+      Right (m, note) ->
+        let (s', resp) = progress (sessionStepping s) s { sessionMachine = m } []
+         in (s', withNote note resp)
+
+    -- The note goes in front of whatever the alternative itself said, as a
+    -- 'Message' — the same shape as @"declared X"@ and @"certified"@, which
+    -- the driver also builds because they are things the driver decided (§7.5).
+    withNote note resp = case resp of
+      Ran msgs stop -> Ran (note : msgs) stop
+      _             -> resp
 
     tactic what verb op = withArgument $
       case compile what verb op (globals machine) ctx (names machine) arg of

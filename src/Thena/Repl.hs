@@ -68,6 +68,7 @@ import Thena.Driver
   , LoadError (..)
   , Loaded (..)
   , Response (..)
+  , ChoicePoint (..)
   , Session (..)
   , Stop (..)
   , SyntaxError (..)
@@ -285,6 +286,7 @@ renderResponse s resp = case resp of
   Undone        -> [renderCursor (counter s) (cursor (proof (sessionMachine s)))]
   Proofs cur ps -> renderProofs (counter s) cur ps
   Matched rs    -> renderMatches rs
+  Choices cs    -> renderChoices cs
   Ran msgs stop  -> msgs ++ renderStop s stop
   Failed e       -> [renderSyntaxError e]
   Rejected e     -> [renderCommandError e]
@@ -832,6 +834,7 @@ renderOp n ctx op = case op of
   Ops.Regret      -> "regret"
   Ops.Solve       -> "solve"
   Ops.Abandon     -> "abandon"
+  Ops.Prove       -> "prove"
   where
     operand = renderOperand n ctx
 
@@ -870,6 +873,8 @@ renderCommandError e = case e of
   NoSuchProof x        -> "no suspended proof called " ++ x
   AlreadyDeclaredHere x -> x ++ " is already declared"
   NothingToUndo        -> "nothing to undo"
+  NothingToRetry       -> "no choice point to retry"
+  NoSuchChoice n       -> "no choice point " ++ show n
   LevelExpected u      -> u ++ " is not a universe, as in \"Type\8320\""
   NotThere m           -> renderMoveError m
 
@@ -886,6 +891,7 @@ renderFailReason r = case r of
   UniverseMismatch (Level a) (Level b) ->
     "Type" ++ subscript a ++ " and Type" ++ subscript b ++ " are different universes"
   NotTypeable e -> "that term has no type" ++ concatMap ("\n  " ++) (renderTypeError 0 e)
+  NoRuleMatched     -> "no rule applies here"
   UnboundInBody x   -> "nothing named " ++ x ++ " in this body"
   NotAnIdentifier s -> show s ++ " is not a name"
   ExpectedText      -> "expected text"
@@ -1147,3 +1153,21 @@ renderMatches rs = map one rs
   where
     one r = unwords (nameString (ruleName r) : map placeholder (ruleParams r))
     placeholder n = "‹" ++ n ++ "›"
+
+-- | @:choices@ — the live choice points, nearest first (§7.7).
+--
+-- One line each: the identifier @retry ‹n›@ names it by, the alternative it is
+-- running now, and the ones still untried in dispatch order. Every choice point
+-- listed has something left, which is the peek's invariant (§7.3) and the
+-- reason there is no \"exhausted\" column.
+--
+-- The identifier is minted from the session's name counter, chosen by the user
+-- 2026-08-23, so the numbers are unique and stable but not consecutive — every
+-- binder minted in between spends the counter too.
+renderChoices :: [ChoicePoint] -> [String]
+renderChoices [] = ["no choice points"]
+renderChoices cs = map one cs
+  where
+    one c =
+      show (pointId c) ++ "  " ++ nameString (pointRule c)
+        ++ "   untried: " ++ intercalate ", " (map nameString (pointAlts c))

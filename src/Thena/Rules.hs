@@ -20,6 +20,7 @@ module Thena.Rules
     -- * Finding rules (§7.6)
   , RuleIter
   , matches
+  , dispatch
   , next
   , hasNext
 
@@ -133,6 +134,24 @@ newtype RuleIter = RuleIter [Rule]
 matches :: RuleBase -> GlobalEnv -> Cursor -> RuleIter
 matches (RuleBase rs) env cur =
   RuleIter [ r | r <- rs, all (holds env cur) (ruleHead r) ]
+
+-- | The rules @Prove@ may actually run: 'matches', less the ones it could not
+-- supply arguments for.
+--
+-- **A parameterised rule is @Call@-only** — §8 says @ruleParams@ are "for
+-- @Call@" and @Prove@ passes nothing, so a rule with parameters would be
+-- dispatched into a body whose first @Ref@ is unbound. Decided by the user
+-- 2026-08-23 (@AGENDA.md@ item 34); asking the user for each parameter was the
+-- alternative and was declined.
+--
+-- **'matches' is deliberately not filtered.** The two answer different
+-- questions: this one is /what the engine can run/, and 'matches' is /what
+-- could be done here/, which includes @try ‹t›@ because the user can type
+-- @try x@. @:matches@ keeps showing it.
+dispatch :: RuleBase -> GlobalEnv -> Cursor -> RuleIter
+dispatch base env cur =
+  let RuleIter rs = matches base env cur
+   in RuleIter [ r | r <- rs, null (ruleParams r) ]
 
 next :: RuleIter -> Maybe (Rule, RuleIter)
 next (RuleIter rs) = case rs of
@@ -267,6 +286,7 @@ operandsOf o = case o of
   Regret       -> []
   Solve        -> []
   Abandon      -> []
+  Prove        -> []
 
 -- | Every rule in the base, checked. The shipped 'standardRules' is asserted
 -- clean by "Thena.RulesTests"; when rules become a file this is what a load

@@ -34,6 +34,12 @@ module Thena.Engine
   , resumeAt
   , failure
   , whereImpure
+
+    -- * Going back (§7.7)
+  , ChoicePoint (..)
+  , choicePoints
+  , RetryError (..)
+  , retryFrom
   ) where
 
 import Data.List (intercalate, nub)
@@ -76,13 +82,14 @@ import Thena.Errors (FailReason (..), MoveError (..), Position (..))
 import Thena.Ops
   ( AnswerKind
   , Env
+  , Rule (..)
   , Instr (..)
   , Op (..)
   , Operand (..)
   , Value (..)
   )
 import Thena.Global.Env (GlobalEnv, InductiveDefinition)
-import Thena.Rules (RuleBase)
+import Thena.Rules (RuleBase, RuleIter, dispatch, hasNext, next)
 import Thena.Syntax.Lexer (isIdentifier)
 
 -- --------------------------------------------------------------------------
@@ -129,10 +136,21 @@ data Exec = Exec
 -- @Choice@ is missing on purpose: its @alts@ field is a @RuleIter@, which is
 -- "Thena.Rules"' and does not exist. Adding the constructor at phase 16 does
 -- not disturb 'Exec' or anything written here.
-data Frame = Call
-  { resume    :: [Instr]
-  , resumeEnv :: Env
-  }
+data Frame
+  = Call
+      { resume    :: [Instr]
+      , resumeEnv :: Env
+      }
+  | Choice
+      { resume    :: [Instr]
+      , resumeEnv :: Env
+      , alts      :: RuleIter    -- ^ the matches not yet tried, lazily (§7.6)
+      , saved     :: ProofState  -- ^ the state before the first alternative ran
+      , choiceId  :: Int         -- ^ what @retry ‹n›@ names it by
+      , chosen    :: GlobalName  -- ^ the rule this frame is currently running
+      , returned  :: Bool
+        -- ^ has control already passed back out of this call? See 'resumeFrom'.
+      }
   deriving (Eq, Show)
 
 -- | Exactly the backtrackable part of the machine, and nothing else (§7.2,
@@ -275,10 +293,37 @@ isAsking m = case pc (exec m) of
 -- loop can fall off the end of one (§7.5).
 step :: Machine -> Outcome
 step m = case pc (exec m) of
-  [] -> case stack (exec m) of
-    []        -> Finished m
-    fr : stk  -> Continue m { exec = Exec (resume fr) (resumeEnv fr) stk }
+  [] -> case resumeFrom (stack (exec m)) of
+    Nothing            -> Finished m
+    Just (is, e, stk') -> Continue m { exec = Exec is e stk' }
   instr : rest -> perform instr rest m
+
+-- | Where control goes when a body runs out of instructions.
+--
+-- **A 'Choice' frame is kept on success, not popped** (§7.3, DECIDED
+-- 2026-08-20): the alternatives are still live, and the user may ask for
+-- another solution after one has been found. §7.3's own sketch of this case
+-- pops the frame, which contradicts the sentence immediately under it; the
+-- 'returned' flag is how the two are reconciled. A frame that has already
+-- served its return is stepped /over/ — it stays exactly where it is, because
+-- it is an /inner/ choice point and 'unwind' must reach it before anything
+-- below it — and the search continues for the next live return target.
+--
+-- 'returned' is not lateral validity (§4.0 I1): every other field stays
+-- meaningful, and 'unwind' clears it again when it re-enters the call.
+resumeFrom :: [Frame] -> Maybe ([Instr], Env, [Frame])
+resumeFrom [] = Nothing
+resumeFrom (fr : stk) = case fr of
+  Call {} -> Just (resume fr, resumeEnv fr, stk)
+  Choice { returned = False } ->
+    Just ( resume fr
+         , resumeEnv fr
+         , Choice (resume fr) (resumeEnv fr) (alts fr) (saved fr)
+                  (choiceId fr) (chosen fr) True
+             : stk
+         )
+  Choice { returned = True } ->
+    (\(is, e, stk') -> (is, e, fr : stk')) <$> resumeFrom stk
 
 -- | Deposit an answer into @env@ at the destination the asking instruction
 -- named, and step past it.
@@ -305,7 +350,39 @@ resumeAt a m = case pc (exec m) of
 -- alternative left, restore the state it saved, run the next alternative. Until
 -- @Choice@ exists there is nothing to unwind /to/, so every failure is 'Stuck'.
 failure :: FailReason -> Machine -> Outcome
-failure r m = Stuck r m
+failure r0 m = unwind (stack (exec m))
+  where
+    unwind [] = Stuck r0 m
+    unwind (fr : stk) = case fr of
+      Call {} -> unwind stk
+      Choice {} -> case next (alts fr) of
+        -- Cannot arise: the peek in 'perform' never builds a 'Choice' without
+        -- a live alternative, and 'demote' unbuilds one the moment its last is
+        -- taken. Written out rather than left to a pattern-match failure.
+        Nothing       -> unwind stk
+        -- **Announced, not silent.** §1 asks that search be a transparent,
+        -- inspectable part of the machine rather than something that happens
+        -- between commands, and an alternative taken inside a failing command
+        -- is otherwise invisible: the user typed @retry 77@, @solve@ failed,
+        -- @regret@ ran, and only the development moved.
+        Just (r, it') -> Saying (took "backtracking to" fr r) m
+          { proof = saved fr
+          , exec  = Exec (ruleBody r) [] (demote fr r it' : stk)
+          }
+
+    took verb fr r = verb ++ " " ++ show (choiceId fr) ++ ": " ++ nameOfRule r
+
+-- | Taking the /last/ alternative demotes the frame to a 'Call', by the same
+-- peek that created it, so an exhausted 'Choice' never exists (§7.3). Three
+-- things follow, and the third is the one that matters: @retry@ can only name a
+-- choice that really has something left; a whole development snapshot is held
+-- only where it can be used; and the choice-point view shows exactly the live
+-- decisions and nothing dead.
+demote :: Frame -> Rule -> RuleIter -> Frame
+demote fr r it'
+  | hasNext it' =
+      Choice (resume fr) (resumeEnv fr) it' (saved fr) (choiceId fr) (ruleName r) False
+  | otherwise = Call (resume fr) (resumeEnv fr)
 
 -- --------------------------------------------------------------------------
 -- Performing one instruction
@@ -382,6 +459,34 @@ perform instr rest m = case operation instr of
           Right cur -> Continue (advance m { proof = ProofState cur })
       | otherwise -> failure NotAHole m
     _ -> failure (CannotMove NotOnTheSpine) m
+
+  -- Dispatch (§7.3). The goal is the focus, so there is nothing to read: the
+  -- iterator is built from the cursor, the first match's body becomes @pc@, and
+  -- what would have been on Haskell's stack goes into the frame.
+  Prove -> case next it of
+    Nothing       -> failure NoRuleMatched m
+    Just (r, it')
+      -- Announced only when the dispatch was a real decision, which is exactly
+      -- when a 'Choice' was built. A message marks a choice; where there was
+      -- one candidate there was none, and a line per deterministic call would
+      -- be noise (§1, §7.5).
+      | hasNext it' ->
+          Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
+                 (entering r (Choice rest (env (exec m)) it' (proof m)
+                                     (names m) (ruleName r) False)
+                             m { names = names m + 1 })
+      | otherwise ->
+          Continue (entering r (Call rest (env (exec m))) m)
+    where
+      it = dispatch (rules m) (globals m) (cursor (proof m))
+
+      -- THE PEEK, decided 2026-08-20. A 'Choice' is built only when there
+      -- really is another alternative — Prolog's determinism detection.
+      -- Otherwise this is an ordinary 'Call', carrying no iterator, no
+      -- snapshot and no identifier. The cost is Prolog's own: one more head
+      -- match is computed than is used.
+      entering r fr k =
+        k { exec = Exec (ruleBody r) [] (fr : stack (exec m)) }
 
   Concat l r -> case (,) <$> text l <*> text r of
     Left e         -> failure e m
@@ -606,3 +711,77 @@ introduce env ctx n p = case p of
     (\(rest', n1) -> (Under c rest', n1))
       <$> introduce env (ctx ++ [Component.forget c]) n rest
   _ -> Left NotReadyToIntroduce
+
+-- --------------------------------------------------------------------------
+-- Going back into an untried alternative (§7.7)
+-- --------------------------------------------------------------------------
+
+-- | One live choice point, for the view @:choices@ prints.
+--
+-- Every 'Choice' frame on the stack is live, by the peek's own invariant
+-- (§7.3), so this is a projection and not a filter.
+data ChoicePoint = ChoicePoint
+  { pointId    :: Int          -- ^ what @retry ‹n›@ names it by
+  , pointRule  :: GlobalName   -- ^ the alternative it is running now
+  , pointAlts  :: [GlobalName] -- ^ the ones still untried, in dispatch order
+  }
+  deriving (Eq, Show)
+
+-- | The live choice points, **nearest first** — which is also the order
+-- @retry@ with no argument walks.
+choicePoints :: Machine -> [ChoicePoint]
+choicePoints m =
+  [ ChoicePoint (choiceId fr) (chosen fr) (map ruleName (drainIter (alts fr)))
+  | fr@Choice {} <- stack (exec m)
+  ]
+
+-- | A rule's name as text. 'Thena.Repl' owns display, but a 'Message' is text
+-- by the time it leaves here — the same bargain 'unifyMessage' already struck.
+nameOfRule :: Rule -> String
+nameOfRule r = case ruleName r of GlobalName g -> g
+
+drainIter :: RuleIter -> [Rule]
+drainIter it = case next it of
+  Nothing        -> []
+  Just (r, rest) -> r : drainIter rest
+
+-- | Why @retry@ could not.
+--
+-- Two cases and not three: there is no \"that choice is exhausted\", because
+-- 'demote' unbuilds a 'Choice' the moment its last alternative is taken, so an
+-- exhausted one never exists (§7.3).
+data RetryError = NoChoicePoint | UnknownChoice Int
+  deriving (Eq, Show)
+
+-- | Unwind to a choice point and take its next alternative (§7.7).
+--
+-- **The same three moves as 'failure''s unwind**, with a target instead of a
+-- reason: pop frames until the wanted one, restore the state it saved, and set
+-- @pc@ to the next alternative with the frame pushed back and its iterator
+-- advanced. That it /is/ the same operation is the point — §7.7's \"a user's
+-- pick and the engine's pick are the same event, so going back to either is one
+-- command, not two\".
+--
+-- Returns a note saying what it did, because @retry@ takes one /alternative/
+-- and not one command: it pops past any 'Call' frames in between, which may be
+-- several commands back.
+retryFrom :: Maybe Int -> Machine -> Either RetryError (Machine, String)
+retryFrom target m = go (0 :: Int) (stack (exec m))
+  where
+    missing = maybe NoChoicePoint UnknownChoice target
+
+    go _ [] = Left missing
+    go popped (fr : stk) = case fr of
+      Choice {} | maybe True (== choiceId fr) target -> case next (alts fr) of
+        Nothing       -> Left missing      -- cannot arise; see 'demote'
+        Just (r, it') -> Right
+          ( m { proof = saved fr
+              , exec  = Exec (ruleBody r) [] (demote fr r it' : stk)
+              }
+          , note (choiceId fr) (ruleName r) popped
+          )
+      _ -> go (popped + 1) stk
+
+    note i (GlobalName g) popped =
+      "retrying " ++ show i ++ ": " ++ g
+        ++ (if popped == 0 then "" else " (" ++ show popped ++ " frame(s) dropped)")
