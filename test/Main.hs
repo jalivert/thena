@@ -10,6 +10,7 @@ import qualified Thena.Core.UnifyTests
 import qualified Thena.CursorTests
 import qualified Thena.DependentIndexTests
 import qualified Thena.DeterminacyTests
+import qualified Thena.ProductTests
 import qualified Thena.DispatchTests
 import qualified Thena.ElaborateTests
 import qualified Thena.DevelopmentTests
@@ -39,6 +40,7 @@ main =
       , Thena.CursorTests.tests
       , Thena.DependentIndexTests.tests
       , Thena.DeterminacyTests.tests
+      , Thena.ProductTests.tests
       , Thena.DispatchTests.tests
       , Thena.ElaborateTests.tests
       , Thena.DevelopmentTests.tests

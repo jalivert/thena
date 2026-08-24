@@ -38,6 +38,7 @@ import Thena.Declared
   , eqTaplCounter
   , finDecl
   , natDecl
+  , preludeDecls
   , vecDecl
   )
 import Thena.Driver (parseCore, parseDeclaration)
@@ -84,31 +85,37 @@ taplReduces = reduces eqTapl eqTaplCounter
 -- case came out, and the four cases of @Nat@ are four different Π-types that
 -- no shape assertion would distinguish more clearly than the text does.
 --
--- Every case is CPS, including the two that §3.7 wrote as @Unit@ and @Empty@.
--- With no cumulativity (§5.2) a @Type₀@ case cannot sit in a family whose
--- multi-argument case is @(C : Type₀) -> … -> C@, which is at @Type₁@.
+-- **This is §3.7's own table, verbatim** — @Unit@, @Empty@, the bare equation,
+-- and a right-nested @And@ of them. Phase 14 could not have it: with no
+-- cumulativity (§5.2) a @Type₀@ case cannot sit in a family whose
+-- multi-argument case is @(C : Type₀) -> … -> C@, which is at @Type₁@, so every
+-- case was CPS and the family was at @Type₁@. Phase 20 put the products in the
+-- prelude and the level came down with them.
 caseTests :: [TestTree]
 caseTests =
   [ testCase "same nullary former — no equations to give" $
-      natReduces "NoConfusionNat zero zero" "∀ (C : Type₀) -> C -> C"
-  , testCase "different formers — the Church-encoded empty type" $
-      natReduces "NoConfusionNat zero (succ zero)" "∀ (C : Type₀) -> C"
+      natReduces "NoConfusionNat zero zero" "Unit"
+  , testCase "different formers — the empty type" $
+      natReduces "NoConfusionNat zero (succ zero)" "Empty"
   , testCase "and the other way round" $
-      natReduces "NoConfusionNat (succ zero) zero" "∀ (C : Type₀) -> C"
-  , testCase "same former, one argument — injectivity" $
+      natReduces "NoConfusionNat (succ zero) zero" "Empty"
+  , -- One argument conjoins nothing, so the case /is/ the equation and a use
+    -- site applies the lemma and stops. That is the common case by a wide
+    -- margin — six of MS1's seven target constructors.
+    testCase "same former, one argument — injectivity" $
       natReduces
         "NoConfusionNat (succ zero) (succ (succ zero))"
-        "∀ (C : Type₀) -> (Eq Nat zero (succ zero) -> C) -> C"
+        "Eq Nat zero (succ zero)"
   , -- The case §3.7 is written around, and the only one in any fixture with
     -- more than one equation to conjoin.
     testCase "three arguments — three equations, in argument order" $
       taplReduces
         "NoConfusionTerm (ifthen true zero (succ zero)) (ifthen false zero zero)"
-        "∀ (C : Type₀) -> (Eq Term true false -> Eq Term zero zero \
-        \-> Eq Term (succ zero) zero -> C) -> C"
+        "And (Eq Term true false) (And (Eq Term zero zero) \
+        \(Eq Term (succ zero) zero))"
   , testCase "the family's own type" $
       typeOfGlobal eqTapl eqTaplCounter "NoConfusionTerm"
-        @?= Just "Term -> Term -> Type₁"
+        @?= Just "Term -> Term -> Type₀"
   , testCase "the lemma's own type" $
       typeOfGlobal eqTapl eqTaplCounter "noConfusionTerm"
         @?= Just "∀ (x : Term) (y : Term) -> Eq Term x y -> NoConfusionTerm x y"
@@ -145,26 +152,37 @@ provesIn eq src ty =
 useTests :: [TestTree]
 useTests =
   [ -- Injectivity: from @succ x ≡ succ y@ get @x ≡ y@. This is what a matching
-    -- branch needs, and the continuation is how it is taken.
-    testCase "injectivity, taken through the continuation" $
+    -- branch needs, and with one argument there is nothing to take it out of.
+    testCase "injectivity is the lemma applied, and nothing else" $
       provesIn
         "Eq Term (succ x) (succ y)"
-        "noConfusionTerm (succ x) (succ y) e (Eq Term x y) (\\ (q : Eq Term x y) -> q)"
+        "noConfusionTerm (succ x) (succ y) e"
         "Eq Term x y"
   , -- Discrimination: from @true ≡ succ x@ get anything. This is what an
-    -- impossible branch needs, and it closes in one application because the
-    -- case is already the Church-encoded empty type.
+    -- impossible branch needs, and it is now @elim Empty@ at the goal — which
+    -- reaches a goal at /any/ level, where @(C : Type₀) -> C@ reached only
+    -- @Type₀@ ones.
     testCase "discrimination closes an impossible branch" $
       provesIn
         "Eq Term true (succ x)"
-        "noConfusionTerm true (succ x) e (Eq Term x y)"
+        "elim Empty () (\\ (t : Empty) -> Eq Term x y) () () \
+        \(noConfusionTerm true (succ x) e)"
         "Eq Term x y"
-  , -- Three equations arrive in argument order and each is usable on its own.
+  , -- Three equations, right-nested in argument order, each reachable. Spelled
+    -- with @elim And@ rather than the prelude's @andLeft@/@andRight@ because
+    -- this fixture has the datatypes and not the proved projections — which
+    -- also pins the nesting itself rather than a projection's say-so.
     testCase "the second of three equations" $
       provesIn
         "Eq Term (ifthen true x zero) (ifthen false y zero)"
-        "noConfusionTerm (ifthen true x zero) (ifthen false y zero) e (Eq Term x y) \
-        \(\\ (q1 : Eq Term true false) (q2 : Eq Term x y) (q3 : Eq Term zero zero) -> q2)"
+        "elim And ((Eq Term true false) (And (Eq Term x y) (Eq Term zero zero))) \
+        \(\\ (z : And (Eq Term true false) (And (Eq Term x y) (Eq Term zero zero))) \
+        \-> Eq Term x y) \
+        \((\\ (q1 : Eq Term true false) (r : And (Eq Term x y) (Eq Term zero zero)) \
+        \-> elim And ((Eq Term x y) (Eq Term zero zero)) \
+        \(\\ (z : And (Eq Term x y) (Eq Term zero zero)) -> Eq Term x y) \
+        \((\\ (q2 : Eq Term x y) (q3 : Eq Term zero zero) -> q2)) () r)) () \
+        \(noConfusionTerm (ifthen true x zero) (ifthen false y zero) e)"
         "Eq Term x y"
   ]
 
@@ -235,10 +253,10 @@ skipTests =
   [ -- The MS1 limit. @cons@ wants @Eq (Vec A n) as as'@ while @as' : Vec A n'@,
     -- and a transported chain of equations is the way out — not MS1's.
     testCase "Vec: cons's telescope is dependent" $
-      skipped [eqDecl, natDecl] vecDecl
+      skipped (preludeDecls ++ [natDecl]) vecDecl
         @?= Right (Just (DependentArguments (GlobalName "cons") (Ident "as")))
   , testCase "Fin: so is fs's" $
-      skipped [eqDecl, natDecl] finDecl
+      skipped (preludeDecls ++ [natDecl]) finDecl
         @?= Right (Just (DependentArguments (GlobalName "fs") (Ident "i")))
   , -- Eq relates only Type₀ types, so nothing above it can have an equation.
     testCase "a datatype above Type₀" $
@@ -255,6 +273,22 @@ skipTests =
         @?= True
   , testCase "but with Eq it was" $
       (lookupDefinition (GlobalName "NoConfusionNat") eqNat == Nothing) @?= False
+  , -- Phase 20's precondition is asked **per datatype**, and these two cases
+    -- are why it has to be. @Eq@'s own table mentions none of the products —
+    -- one constructor, so no off-diagonal @Empty@; one argument, so neither
+    -- @Unit@ nor @And@ — and the prelude must declare @Eq@ before @And@,
+    -- since @And@'s no-confusion states equations. A blanket precondition
+    -- silently loses @NoConfusionEq@ at that very line, which is what the
+    -- first draft of the phase did.
+    testCase "Eq alone: its own table needs no product, so it is generated" $
+      (lookupDefinition (GlobalName "NoConfusionEq") (fst (declared [eqDecl])) == Nothing)
+        @?= False
+  , -- Two constructors want an off-diagonal @Empty@, and there is none.
+    testCase "Nat with Eq but no Empty — skipped, and quietly" $
+      skipped [eqDecl] natDecl @?= Right Nothing
+  , testCase "and then nothing was generated" $
+      (lookupDefinition (GlobalName "NoConfusionNat") (fst (declared [eqDecl, natDecl]))
+        == Nothing) @?= True
   ]
 
 -- --------------------------------------------------------------------------
@@ -267,9 +301,9 @@ skipTests =
 clashTests :: [TestTree]
 clashTests =
   [ testCase "the family's name taken" $
-      skipped [eqDecl, "NoConfusionNat : Type\8320 { }"] natDecl
+      skipped (preludeDecls ++ ["NoConfusionNat : Type\8320 { }"]) natDecl
         @?= Left (AlreadyDeclared (GlobalName "NoConfusionNat"))
   , testCase "the lemma's name taken" $
-      skipped [eqDecl, "noConfusionNat : Type\8320 { }"] natDecl
+      skipped (preludeDecls ++ ["noConfusionNat : Type\8320 { }"]) natDecl
         @?= Left (AlreadyDeclared (GlobalName "noConfusionNat"))
   ]

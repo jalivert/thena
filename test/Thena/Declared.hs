@@ -17,6 +17,9 @@ module Thena.Declared
   , finDecl
   , emptyDecl
   , eqDecl
+  , unitDecl
+  , andDecl
+  , preludeDecls
   , taplDecl
   , stepDecl
   , nat
@@ -68,10 +71,26 @@ emptyDecl = "Empty : Type\8320 { }"
 -- stated, and these fixtures are prelude-free on purpose (phase 11). Declaring
 -- it in a fixture is what lets a suite have both worlds — the environments
 -- above have no @Eq@ and therefore no no-confusion, the ones below do.
-eqDecl, taplDecl :: String
+eqDecl, unitDecl, andDecl, taplDecl :: String
 eqDecl =
   "Eq (A : Type\8320) : A -> A -> Type\8320 \
   \{ refl : \8704 (a : A) -> Eq A a a }"
+
+-- | The other two prelude types no-confusion is written out of (phase 20).
+--
+-- @Empty@ is 'emptyDecl' above, which predates them and is shared.
+unitDecl = "Unit : Type\8320 { unit : Unit }"
+andDecl =
+  "And (A : Type\8320) (B : Type\8320) : Type\8320 \
+  \{ both : \8704 (a : A) (b : B) -> And A B }"
+
+-- | Everything 'Thena.Global.NoConfusion' can need, in the prelude's own order.
+--
+-- **@Eq@ first, and @And@ after it**, because @And@\'s own no-confusion states
+-- equations and so needs the equality already declared. The reverse order costs
+-- @NoConfusionAnd@ silently.
+preludeDecls :: [String]
+preludeDecls = [eqDecl, unitDecl, emptyDecl, andDecl]
 
 -- | MS1's target language: TAPL chapter 3, the seven constructors determinacy
 -- of evaluation is proved about (§9). @ifthen@ is the one with three arguments,
@@ -137,25 +156,25 @@ natVecCounter = snd (declared [natDecl, vecDecl])
 natFinCounter :: Int
 natFinCounter = snd (declared [natDecl, finDecl, emptyDecl])
 
--- | @Eq@ and then @Nat@ — so @Nat@ arrives with @NoConfusionNat@ and
+-- | The prelude and then @Nat@ — so @Nat@ arrives with @NoConfusionNat@ and
 -- @noConfusionNat@ beside it (phase 14).
 eqNat :: GlobalEnv
-eqNat = fst (declared [eqDecl, natDecl])
+eqNat = fst (declared (preludeDecls ++ [natDecl]))
 
 eqNatCounter :: Int
-eqNatCounter = snd (declared [eqDecl, natDecl])
+eqNatCounter = snd (declared (preludeDecls ++ [natDecl]))
 
--- | @Eq@ and then MS1's target language.
+-- | The prelude and then MS1's target language.
 eqTapl :: GlobalEnv
-eqTapl = fst (declared [eqDecl, taplDecl])
+eqTapl = fst (declared (preludeDecls ++ [taplDecl]))
 
 eqTaplCounter :: Int
-eqTaplCounter = snd (declared [eqDecl, taplDecl])
+eqTaplCounter = snd (declared (preludeDecls ++ [taplDecl]))
 
--- | @Eq@, MS1's target language, and its evaluation relation — what phase 17's
--- elimination tactic is aimed at.
+-- | The prelude, MS1's target language, and its evaluation relation — what
+-- phase 17's elimination tactic is aimed at.
 eqStep :: GlobalEnv
-eqStep = fst (declared [eqDecl, taplDecl, stepDecl])
+eqStep = fst (declared (preludeDecls ++ [taplDecl, stepDecl]))
 
 eqStepCounter :: Int
-eqStepCounter = snd (declared [eqDecl, taplDecl, stepDecl])
+eqStepCounter = snd (declared (preludeDecls ++ [taplDecl, stepDecl]))

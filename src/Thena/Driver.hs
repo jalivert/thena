@@ -1061,15 +1061,20 @@ nameOf d = case inductiveName d of GlobalName x -> x
 -- @"certified"@ rather than structured data rendered in "Thena.Repl". The
 -- declaration succeeded; this says what it does not come with.
 --
--- 'NoEquality' never reaches here — "Thena.Global.Declare" keeps it quiet,
--- because it is a fact about the environment rather than about the declaration
--- and would fire on every @data@ line of a prelude-free script.
+-- 'Thena.Global.NoConfusion.NoEquality' and
+-- 'Thena.Global.NoConfusion.NoProducts' never reach here —
+-- "Thena.Global.Declare" keeps both quiet, because each is a fact about the
+-- environment rather than about the declaration and would fire on every @data@
+-- line of a prelude-free script. They are given wordings anyway rather than an
+-- @error@ call: a message that cannot be printed is still cheaper to write than
+-- a partial function to explain.
 whyNoConfusion :: GlobalName -> Skipped -> String
 whyNoConfusion d why = "no " ++ str (snd (noConfusionNames d)) ++ ": " ++ because
   where
     str (GlobalName x) = x
     because = case why of
       NoEquality -> "there is no Eq in scope"
+      NoProducts -> "there is no And, Unit and Empty in scope"
       NotAtTypeZero _ ->
         str d ++ " is not declared at Type\8320, and Eq relates only Type\8320 types"
       DependentArguments c (Ident i) ->

@@ -119,6 +119,7 @@ declare env n d = do
   case generateNoConfusion env1 n2 d of
     Generated env2 n3 -> Right (env2, n3, Nothing)
     Declined NoEquality -> Right (env1, n2, Nothing)
+    Declined NoProducts -> Right (env1, n2, Nothing)
     Declined why        -> Right (env1, n2, Just why)
     Clash g            -> Left (AlreadyDeclared g)
     Rejected g e       -> Left (NoConfusionRejected g e)

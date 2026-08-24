@@ -37,16 +37,23 @@
 --
 -- @
 -- NoConfusionNat : Nat -> Nat -> Type₁
---   NoConfusionNat zero     zero     =  (C : Type₀) -> C -> C
---   NoConfusionNat zero     (succ b) =  (C : Type₀) -> C
---   NoConfusionNat (succ a) zero     =  (C : Type₀) -> C
---   NoConfusionNat (succ a) (succ b) =  (C : Type₀) -> (Eq Nat a b -> C) -> C
+--   NoConfusionNat zero     zero     =  Unit
+--   NoConfusionNat zero     (succ b) =  Empty
+--   NoConfusionNat (succ a) zero     =  Empty
+--   NoConfusionNat (succ a) (succ b) =  Eq Nat a b
 --
 -- noConfusionNat : ∀ (x y : Nat) -> Eq Nat x y -> NoConfusionNat x y
 -- @
 --
--- @Unit@ and @Empty@ are therefore not used here at all; @Eq@ and @refl@ are
--- the only prelude names this module needs.
+-- A constructor with several arguments conjoins one equation per argument,
+-- right-nested: @both@'s @And (Eq A a a') (Eq B b b')@. **Phase 20 replaced a
+-- continuation-passing encoding of that conjunction**, which phase 14 had been
+-- forced into because @(C : Type₀) -> …@ is at @Type₁@ and no cumulativity
+-- lets a @Type₀@ case sit beside it. With the products in the prelude the
+-- table above is the one §3.7 always displayed, at @Type₀@.
+--
+-- The prelude names this module needs are therefore @Eq@ and @refl@, and
+-- @And@, @both@, @Unit@, @unit@ and @Empty@.
 --
 -- The family is two nested eliminations of the datatype — one to fix @x@'s
 -- former, one to fix @y@'s. The lemma eliminates the equality first (its
@@ -94,6 +101,16 @@ data Skipped
     -- ^ no well-shaped @Eq@ is in scope, so no equation can be stated. Arises
     -- only before the prelude is loaded — @repl@ loads it at startup — which is
     -- why it is silent.
+  | NoProducts
+    -- ^ a prelude type this datatype's own table would be written out of —
+    -- @And@, @Unit@ or @Empty@ — is missing or misshapen. Silent for
+    -- 'NoEquality'\'s reason and arising in the same situation, a prelude-free
+    -- script, which is why the two are tested together.
+    --
+    -- **Asked per datatype, not once**, and that is load-bearing rather than
+    -- fastidious: the prelude declares @Eq@ before @And@, so a blanket
+    -- precondition would refuse @NoConfusionEq@ — which phase 14 generated —
+    -- for a name it was never going to write. See 'productsInScope'.
   | NotAtTypeZero Level
     -- ^ the datatype is not declared at @Type₀@, so @Eq (D params indices) x y@
     -- cannot be formed: the prelude's @Eq@ takes @A : Type₀@.
@@ -142,6 +159,7 @@ noConfusionNames (GlobalName d) =
 generateNoConfusion :: GlobalEnv -> Int -> InductiveDefinition -> Generated
 generateNoConfusion env n0 d
   | not (equalityInScope env)          = Declined NoEquality
+  | not (productsInScope env d)        = Declined NoProducts
   | inductiveLevel d /= Level 0        = Declined (NotAtTypeZero (inductiveLevel d))
   | Just why <- dependentArgument d    = Declined why
   | isDeclared famName env             = Clash famName
@@ -177,18 +195,26 @@ generateNoConfusion env n0 d
     eqAt a x y = foldl App (Global (GlobalName "Eq")) [a, x, y]
     reflAt a x = foldl App (Global (GlobalName "refl")) [a, x]
 
+    andAt p q        = foldl App (Global (GlobalName "And")) [p, q]
+    bothAt p q x y   = foldl App (Global (GlobalName "both")) [p, q, x, y]
+
     -- ----------------------------------------------------------------------
     -- The family
     -- ----------------------------------------------------------------------
 
-    -- @∀ params indices (x y : D params indices) -> Type₁@
+    -- @∀ params indices (x y : D params indices) -> Type₀@
+    --
+    -- **@Type₀@, not @Type₁@.** Phase 14 had every case CPS-encoded, and
+    -- @(C : Type₀) -> C@ is itself at @Type₁@; with @Empty@, @Unit@ and @And@
+    -- in the prelude every case is an ordinary @Type₀@ proposition and the
+    -- family follows it down. Nothing else about the shape changed.
     familyType n =
       let (vx, n1) = fresh n
           (vy, n2) = fresh n1
           fam      = familyAt (varsOf idx)
        in ( piOver ps (piOver idx
               (Pi (Ident "x") fam (close vx
-                (Pi (Ident "y") fam (close vy (Universe (Level 1)))))))
+                (Pi (Ident "y") fam (close vy (Universe (Level 0)))))))
           , n2
           )
 
@@ -214,14 +240,14 @@ generateNoConfusion env n0 d
           , n4
           )
 
-    -- @λ indices (t : D params indices) . Type₁@ — the motive of both
+    -- @λ indices (t : D params indices) . Type₀@ — the motive of both
     -- eliminations, since both compute a type and neither result depends on
-    -- what was eliminated. Valued in @Type₂@, which is the level
+    -- what was eliminated. Valued in @Type₁@, which is the level
     -- 'Thena.Core.Typing.infer' reads off it.
     typeMotive n =
       let (is, n1) = freshen n idx
           (vt, n2) = fresh n1
-       in ( lamOver is (Lam (Ident "t") (familyAt (varsOf is)) (close vt (Universe (Level 1))))
+       in ( lamOver is (Lam (Ident "t") (familyAt (varsOf is)) (close vt (Universe (Level 0))))
           , n2
           )
 
@@ -240,32 +266,25 @@ generateNoConfusion env n0 d
     -- capture the outer one and every equation read @Eq A a a@.
     innerMethod mt args c c' n =
       let (args', n1) = freshen n (constructorArguments c')
-          (payload, n2)
-            | constructorName c' == constructorName c = diagonal args args' n1
-            | otherwise                               = discriminate n1
-          (body, n3) = withHypotheses mt args' payload n2
-       in (lamOver args' body, n3)
+          payload
+            | constructorName c' == constructorName c = diagonal args args'
+            | otherwise                               = discriminate
+          (body, n2) = withHypotheses mt args' payload n1
+       in (lamOver args' body, n2)
 
-    -- @(C : Type₀) -> C@ — the Church-encoded empty type. Applying it to the
-    -- goal is how an impossible branch closes.
-    discriminate n =
-      let (vc, n1) = fresh n
-       in (Pi (Ident "C") (Universe (Level 0)) (close vc (Free vc)), n1)
+    -- @Empty@ — the prelude's empty type, named rather than Church-encoded.
+    -- Discharging an impossible branch is @elim Empty@ at whatever goal is
+    -- wanted, which is a goal at /any/ level; the CPS form it replaces could
+    -- only ever reach a @Type₀@ one.
+    discriminate = Global (GlobalName "Empty")
 
-    -- @(C : Type₀) -> (Eq A₁ a₁ a\'₁ -> … -> C) -> C@. Well typed only because
-    -- 'dependentArgument' has already refused telescopes where @Aᵢ@ mentions an
-    -- earlier argument.
-    diagonal args args' n =
-      let (vc, n1) = fresh n
-          (vk, n2) = fresh n1
-          eqs = zipWith
-                  (\e e' -> eqAt (entryType e) (Free (entryVar e)) (Free (entryVar e')))
-                  args args'
-          (kty, n3) = arrows eqs (Free vc) n2
-       in ( Pi (Ident "C") (Universe (Level 0)) (close vc
-              (Pi (Ident "k") kty (close vk (Free vc))))
-          , n3
-          )
+    -- @And (Eq A₁ a₁ a\'₁) (… (Eq Aₙ aₙ a\'ₙ))@, right-nested, and @Unit@ for a
+    -- constructor with no arguments. Well typed only because 'dependentArgument'
+    -- has already refused telescopes where @Aᵢ@ mentions an earlier argument.
+    diagonal args args' =
+      conjoin (zipWith
+                 (\e e' -> eqAt (entryType e) (Free (entryVar e)) (Free (entryVar e')))
+                 args args')
 
     -- ----------------------------------------------------------------------
     -- The lemma
@@ -306,8 +325,8 @@ generateNoConfusion env n0 d
           )
 
     -- @λ u v (w : Eq (D …) u v) . NoConfusionD params indices u v@ — valued in
-    -- @Type₁@, so J is used at level 1 here and the family's own eliminations
-    -- at level 2.
+    -- @Type₀@, so J is used at level 0 here and the family's own eliminations
+    -- at level 1.
     equalityMotive n =
       let (vu, n1) = fresh n
           (vv, n2) = fresh n1
@@ -340,20 +359,19 @@ generateNoConfusion env n0 d
           , n2
           )
 
-    -- @λ Δ . λ IHs . λ C k . k (refl A₁ a₁) … (refl Aₖ aₖ)@ — the only proof
-    -- this generator ever writes, and §3.7's own @λ C k . k refl … refl@.
+    -- @λ Δ . λ IHs . both … (refl A₁ a₁) (both … (refl A₂ a₂) …)@ — the only
+    -- proof this generator ever writes, nested exactly as 'conjoin' nests the
+    -- type it inhabits, and @unit@ where that type is @Unit@.
     diagonalMethod mdg c n =
-      let args     = constructorArguments c
-          (vc, n1) = fresh n
-          (vk, n2) = fresh n1
-          eqs = map (\e -> eqAt (entryType e) (Free (entryVar e)) (Free (entryVar e))) args
-          (kty, n3) = arrows eqs (Free vc) n2
-          proof = foldl App (Free vk)
-                    (map (\e -> reflAt (entryType e) (Free (entryVar e))) args)
-          payload = Lam (Ident "C") (Universe (Level 0)) (close vc
-                      (Lam (Ident "k") kty (close vk proof)))
-          (body, n4) = withHypotheses mdg args payload n3
-       in (lamOver args body, n4)
+      let args    = constructorArguments c
+          payload = conjoinProof
+                      [ ( eqAt (entryType e) (Free (entryVar e)) (Free (entryVar e))
+                        , reflAt (entryType e) (Free (entryVar e))
+                        )
+                      | e <- args
+                      ]
+          (body, n1) = withHypotheses mdg args payload n
+       in (lamOver args body, n1)
 
     -- ----------------------------------------------------------------------
     -- Shared shapes
@@ -373,14 +391,20 @@ generateNoConfusion env n0 d
                 (below, n2) = go es n1
              in (Lam (Ident "ih") (foldl App mot (is ++ [Free (entryVar e)])) (close hv below), n2)
 
-    -- @S₁ -> … -> Sₙ -> T@. Each arrow is a Π whose scope binds nothing, but a
-    -- 'Thena.Core.Term.Scope' still needs a variable to close over — the same
-    -- spend 'Thena.Global.Env.eliminatorType' makes on inductive hypotheses.
-    arrows []       t n = (t, n)
-    arrows (s : ss) t n =
-      let (v, n1)     = fresh n
-          (below, n2) = arrows ss t n1
-       in (Pi (Ident "_") s (close v below), n2)
+    -- @P₁ ∧ (P₂ ∧ … ∧ Pₙ)@, right-nested, and @Unit@ when there is nothing to
+    -- conjoin. Right-nested rather than left so that the one-argument case is
+    -- the bare equation with no wrapper at all, which is the overwhelmingly
+    -- common one.
+    conjoin []       = Global (GlobalName "Unit")
+    conjoin [t]      = t
+    conjoin (t : ts) = andAt t (conjoin ts)
+
+    -- The proof of 'conjoin' applied to the same list, given a proof of each
+    -- conjunct. Taken as pairs so the two nestings cannot drift apart.
+    conjoinProof []             = Global (GlobalName "unit")
+    conjoinProof [(_, p)]       = p
+    conjoinProof ((t, p) : tps) =
+      bothAt t (conjoin (map fst tps)) p (conjoinProof tps)
 
 -- --------------------------------------------------------------------------
 -- Preconditions
@@ -407,6 +431,77 @@ equalityInScope env = case lookupInductive (GlobalName "Eq") env of
                       && constructorIndices c == [Free (entryVar x), Free (entryVar x)]
              _   -> False
     _ -> False
+
+-- | Are the prelude types /this/ datatype's table is written out of in scope?
+--
+-- Matched structurally, for 'equalityInScope'\'s reason and by the same
+-- technique, and reported the same way — silently.
+--
+-- **Only what the generator will actually write is required.** The three names
+-- are each demanded by one shape of case and by nothing else:
+--
+-- * @Empty@ by an off-diagonal case, so only where there are two or more
+--   constructors to be off the diagonal of;
+-- * @Unit@ and @unit@ by a diagonal case for a constructor with no arguments;
+-- * @And@ and @both@ by a diagonal case for a constructor with two or more,
+--   since one argument needs no conjunction and 'conjoin' emits the bare
+--   equation.
+--
+-- Asking for all three unconditionally would be simpler and wrong. The prelude
+-- must declare @Eq@ before @And@ — @And@\'s own no-confusion needs the
+-- equality — and @Eq@\'s single constructor @refl@ takes a single argument, so
+-- its table mentions none of the three. Under a blanket check @NoConfusionEq@
+-- would be silently lost at the very line that makes everything else possible.
+productsInScope :: GlobalEnv -> InductiveDefinition -> Bool
+productsInScope env d =
+     (not needsEmpty || falsityInScope env)
+  && (not needsUnit  || truthInScope env)
+  && (not needsAnd   || conjunctionInScope env)
+  where
+    cs         = inductiveConstructors d
+    arity      = length . constructorArguments
+    needsEmpty = length cs >= 2
+    needsUnit  = any ((== 0) . arity) cs
+    needsAnd   = any ((>= 2) . arity) cs
+
+-- | @And (A : Type₀) (B : Type₀) : Type₀ { both : ∀ (a : A) (b : B) -> And A B }@
+conjunctionInScope :: GlobalEnv -> Bool
+conjunctionInScope env = case lookupInductive (GlobalName "And") env of
+  Nothing -> False
+  Just e -> case (inductiveParameters e, inductiveIndices e, inductiveConstructors e) of
+    ([a, b], [], [c]) ->
+      inductiveLevel e == Level 0
+        && entryType a == Universe (Level 0)
+        && entryType b == Universe (Level 0)
+        && constructorName c == GlobalName "both"
+        && case constructorArguments c of
+             [x, y] -> entryType x == Free (entryVar a)
+                         && entryType y == Free (entryVar b)
+                         && null (constructorIndices c)
+             _      -> False
+    _ -> False
+
+-- | @Unit : Type₀ { unit : Unit }@ — @unit@ is checked because 'conjoinProof'
+-- writes it, not only the type.
+truthInScope :: GlobalEnv -> Bool
+truthInScope env = case lookupInductive (GlobalName "Unit") env of
+  Nothing -> False
+  Just e -> case (inductiveParameters e, inductiveIndices e, inductiveConstructors e) of
+    ([], [], [c]) ->
+      inductiveLevel e == Level 0
+        && constructorName c == GlobalName "unit"
+        && null (constructorArguments c)
+        && null (constructorIndices c)
+    _ -> False
+
+-- | @Empty : Type₀ { }@ — no constructor to check, which is the point of it.
+falsityInScope :: GlobalEnv -> Bool
+falsityInScope env = case lookupInductive (GlobalName "Empty") env of
+  Nothing -> False
+  Just e -> null (inductiveParameters e)
+              && null (inductiveIndices e)
+              && null (inductiveConstructors e)
+              && inductiveLevel e == Level 0
 
 -- | The first constructor argument whose type mentions an argument before it.
 --

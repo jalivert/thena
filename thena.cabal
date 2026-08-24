@@ -83,6 +83,7 @@ test-suite thena-test
         Thena.CursorTests
         Thena.DependentIndexTests
         Thena.DeterminacyTests
+        Thena.ProductTests
         Thena.DevelopmentTests
         Thena.EliminateTests
         Thena.EliminatorTests

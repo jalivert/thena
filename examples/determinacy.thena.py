@@ -164,6 +164,25 @@ STEP = [
        lhs=C("iszero", V("c1")), rhs=C("iszero", V("c2")), rec=True),
 ]
 
+# The conjunction NoConfusionTerm builds for a constructor with several
+# arguments: right-nested And, and Unit when there is nothing to conjoin.
+# Must agree with Thena.Global.NoConfusion.conjoin exactly.
+def conj(ts):
+    if not ts: return "Unit"
+    if len(ts) == 1: return ts[0]
+    return "And (%s) (%s)" % (ts[0], conj(ts[1:]))
+
+# One projection out of that nest per conjunct. The last is the residue itself,
+# because conj stops wrapping at one element.
+def projections(nc, eqs):
+    out, rest = [], "(%s)" % nc
+    for i in range(len(eqs) - 1):
+        tail = conj(eqs[i+1:])
+        out.append("(andLeft (%s) (%s) %s)" % (eqs[i], tail, rest))
+        rest = "(andRight (%s) (%s) %s)" % (eqs[i], tail, rest)
+    out.append(rest)
+    return out
+
 def compose(ps, body):
     for p in reversed(ps): body = p % body
     return body
@@ -174,16 +193,25 @@ def decompose(a, b, q, goal, ctr):
         x, y, qq = work.pop(0)
         if x[0] == 'c' and y[0] == 'c':
             if x[1] != y[1]:
-                return (compose(ps, "noConfusionTerm %s %s %s (%s)"
-                                    % (pp(x,0), pp(y,0), qq, goal)), None)
+                # NoConfusionTerm at two different formers computes to Empty,
+                # so discrimination is absurd rather than a continuation.
+                return (compose(ps, "absurd (%s) (noConfusionTerm %s %s %s)"
+                                    % (goal, pp(x,0), pp(y,0), qq)), None)
             if not x[2]: continue
-            binders, sub = [], []
+            eqs, binders, sub = [], [], []
             for (l, r) in zip(x[2], y[2]):
                 e = "e%d" % next(ctr)
-                binders.append("(%s : Eq Term %s %s)" % (e, pp(l, False), pp(r, False)))
+                ty = "Eq Term %s %s" % (pp(l, False), pp(r, False))
+                eqs.append(ty)
+                binders.append("(%s : %s)" % (e, ty))
                 sub.append((l, r, e))
-            ps.append("noConfusionTerm %s %s %s (%s) (\\ %s -> %%s)"
-                      % (pp(x,0), pp(y,0), qq, goal, " ".join(binders)))
+            # The lemma now hands back the conjunction itself. Bind it once,
+            # then feed the argument equations in by projection.
+            nc = "nc%d" % next(ctr)
+            ps.append("(\\ (%s : %s) -> (\\ %s -> %%s) %s) (noConfusionTerm %s %s %s)"
+                      % (nc, conj(eqs), " ".join(binders),
+                         " ".join(projections(nc, eqs)),
+                         pp(x,0), pp(y,0), qq))
             work = sub + work
         else:
             leaves.append((pp(x), pp(y), qq))

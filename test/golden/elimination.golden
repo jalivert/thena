@@ -18,6 +18,12 @@ thena spine> :abandon
 abandoned noEq
 thena spine> data Eq (A : Type₀) : A -> A -> Type₀ { refl : ∀ (a : A) -> Eq A a a }
 declared Eq
+thena spine> data Unit : Type₀ { unit : Unit }
+declared Unit
+thena spine> data Empty : Type₀ { }
+declared Empty
+thena spine> data And (A : Type₀) (B : Type₀) : Type₀ { both : ∀ (a : A) (b : B) -> And A B }
+declared And
 thena spine> data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ { bz : ∀ (m : Nat) -> Below (succ m) (fz m) ; bs : ∀ (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }
 no noConfusionBelow: bs's argument j has a type that depends on an earlier argument, so its equation cannot be stated
 declared Below

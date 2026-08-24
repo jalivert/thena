@@ -96,15 +96,14 @@ tests =
         , ":quit"
         ]
       -- §9's phase-14 deliverable: @noConfusion@ for MS1's own target language,
-      -- printed, computed and certified. The script declares its own @Eq@
-      -- because these transcripts run prelude-free (phase 11) and no equation
-      -- can be stated without one — which is also why the @Nat@ line here gets
-      -- no note and the @Vec@ line does.
+      -- printed, computed and certified. The script declares the prelude types
+      -- the generator writes its table out of, because these transcripts run
+      -- prelude-free (phase 11) — which is also why the @Nat@ line here gets no
+      -- note and the @Vec@ line does.
     , script
         "noconfusion"
-        [ "data Eq (A : Type\8320) : A -> A -> Type\8320 \
-          \{ refl : \8704 (a : A) -> Eq A a a }"
-        , "data Term : Type\8320 \
+        ( preludeLines ++
+        [ "data Term : Type\8320 \
           \{ true : Term ; false : Term \
           \; ifthen : Term -> Term -> Term -> Term \
           \; zero : Term ; succ : Term -> Term }"
@@ -120,7 +119,7 @@ tests =
         , ":goal \8704 (a : Term) (b : Term) -> Eq Term (succ a) (succ b) -> Eq Term a b"
         , "along"
         , "unify goal \8799 \\ (a : Term) (b : Term) (e : Eq Term (succ a) (succ b)) \
-          \-> noConfusionTerm (succ a) (succ b) e (Eq Term a b) (\\ (q : Eq Term a b) -> q)"
+          \-> noConfusionTerm (succ a) (succ b) e"
         , ":extract"
         , "certify \8704 (a : Term) (b : Term) -> Eq Term (succ a) (succ b) -> Eq Term a b"
         , "back"
@@ -130,7 +129,7 @@ tests =
           \; cons : \8704 (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ' n) }"
         , ":show noConfusionVec"
         , ":quit"
-        ]
+        ])
       -- §9's phase-13 deliverable: a theorem proved by hand, and admitted.
       -- Every step is one of thesis §2's own operations — no unification and
       -- no rule engine.
@@ -498,9 +497,8 @@ tests =
       -- proof is this, at a bigger relation (§9, phase 18).
     , script
         "inversion"
-        [ "data Eq (A : Type₀) : A -> A -> Type₀ { refl : ∀ (a : A) -> Eq A a a }"
-        , "data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }"
-        , "data Empty : Type₀ { }"
+        ( preludeLines ++
+        [ "data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }"
         , "data Ev : Nat -> Type₀ { evZero : Ev zero ; evSS : ∀ (n : Nat) (p : Ev n) -> Ev (succ (succ n)) }"
         , ":whnf NoConfusionNat zero (succ zero)"
         , ":whnf NoConfusionNat (succ (succ zero)) (succ zero)"
@@ -513,10 +511,10 @@ tests =
         , ":where"
         , "back"
         , "back"
-        , "try \\ (q : Eq Nat zero (succ zero)) -> noConfusionNat zero (succ zero) q Empty"
+        , "try \\ (q : Eq Nat zero (succ zero)) -> noConfusionNat zero (succ zero) q"
         , "solve"
         , "along"
-        , "try \\ (n : Nat) (e : Ev n) (ih : Eq Nat n (succ zero) -> Empty) (q : Eq Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ (succ n)) (succ zero) q Empty (\\ (q2 : Eq Nat (succ n) zero) -> noConfusionNat (succ n) zero q2 Empty)"
+        , "try \\ (n : Nat) (e : Ev n) (ih : Eq Nat n (succ zero) -> Empty) (q : Eq Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ n) zero (noConfusionNat (succ (succ n)) (succ zero) q)"
         , "solve"
         , "along"
         , "solve"
@@ -528,7 +526,7 @@ tests =
         , "qed"
         , ":show oneNotEven"
         , ":quit"
-        ]
+        ])
       -- What the tactic refuses. None of these is a bug: §3.7's non-dependent
       -- index telescope limit (@AGENDA.md@ item 10), @Eq@ and @refl@ being
       -- named rather than designated, and a target that is not an inhabitant of
@@ -554,6 +552,9 @@ tests =
         , "eliminate n"
         , ":abandon"
         , "data Eq (A : Type₀) : A -> A -> Type₀ { refl : ∀ (a : A) -> Eq A a a }"
+        , "data Unit : Type₀ { unit : Unit }"
+        , "data Empty : Type₀ { }"
+        , "data And (A : Type₀) (B : Type₀) : Type₀ { both : ∀ (a : A) (b : B) -> And A B }"
         , "data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ { bz : ∀ (m : Nat) -> Below (succ m) (fz m) ; bs : ∀ (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }"
         , ":theorem probe : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Nat"
         , "attack"
@@ -603,3 +604,26 @@ tests =
         name
         ("test/golden/" ++ name ++ ".golden")
         (pure (toLazyByteString (stringUtf8 (transcript ls))))
+
+-- | The prelude declarations a transcript must make before no-confusion can be
+-- generated for anything it goes on to declare.
+--
+-- These transcripts run prelude-free (phase 11's accepted divergence: the
+-- scripts declare their own @Nat@ and @Empty@, which the real prelude would
+-- clash with). Phase 14 needed only @Eq@ for that; phase 20 writes the table
+-- out of @Empty@, @Unit@ and @And@ as well, so a script that wants
+-- @noConfusionD@ must declare all four up front — **and in this order**, since
+-- @And@\'s own no-confusion states equations and so needs @Eq@ already there.
+--
+-- Only the two scripts that use no-confusion take it. A script that declares
+-- @Eq@ and a datatype without these gets no lemma, silently, which is what
+-- 'Thena.Global.NoConfusion.NoProducts' means.
+preludeLines :: [String]
+preludeLines =
+  [ "data Eq (A : Type\8320) : A -> A -> Type\8320 \
+    \{ refl : \8704 (a : A) -> Eq A a a }"
+  , "data Unit : Type\8320 { unit : Unit }"
+  , "data Empty : Type\8320 { }"
+  , "data And (A : Type\8320) (B : Type\8320) : Type\8320 \
+    \{ both : \8704 (a : A) (b : B) -> And A B }"
+  ]
