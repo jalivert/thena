@@ -243,6 +243,25 @@ friendlyTests =
                   , "∀ (n1 : Nat) -> Fin n1 -> Eq Nat n1 n1 -> Eq Nat (succ n1) (succ n1)"
                   ]
 
+    -- Phase 19. Both of @Below@'s indices are plain variables, so the second
+    -- is friendly and states no equation — and its type may therefore mention
+    -- the first freely. Before phase 19 this whole family was refused.
+  , testCase "a dependent index telescope is fine when the dependent index is friendly" $
+      map (rendered belowContext . thirdOf') (elimMethods belowProbe)
+        @?= [ "∀ (m : Nat) -> Eq Nat (succ m) n -> Nat"
+            , "∀ (m : Nat) (j : Fin m) -> Below m j -> (Eq Nat m n -> Nat) \
+              \-> Eq Nat (succ m) n -> Nat"
+            ]
+
+    -- The load-bearing artifact of phase 19, and the thing @check@ alone would
+    -- not have caught: the motive's own telescope is dependent, and its second
+    -- binder names /this motive's/ first binder rather than the one in the
+    -- declaration, which is not in scope here at all.
+  , testCase "and the motive's telescope carries the dependency" $
+      rendered (withMethods belowContext belowProbe) (elimTerm belowProbe)
+        @?= "(elim Below () (λ (n1 : Nat) (i1 : Fin n1) (target : Below n1 i1) \
+            \-> Eq Nat n1 n -> Nat) (bzMethod bsMethod) (n i) b) (refl Nat n)"
+
     -- A 'Definition' has a value as well as a type, and abstracting the
     -- variable would leave the value behind. Conservative on purpose: tying it
     -- is what the tactic did for every index before this change.
@@ -261,6 +280,17 @@ friendlyTests =
   ]
   where
     thirdOf' (_, _, ty) = ty
+
+-- | @n : Nat@, @i : Fin n@, @b : Below n i@ — a family whose index telescope
+-- is dependent, eliminated at plain variables so the dependent index is
+-- friendly. Phase 19's case.
+belowContext :: Context
+belowProbe :: Elimination
+(belowContext, belowProbe) =
+  let (env, n0) = declared [eqDecl', natDecl, finDecl, belowDecl]
+      (ctx, n1) = contextOf env n0
+        [("n", "Nat"), ("i", "Fin n"), ("b", "Below n i")]
+   in (ctx, run "below" env ctx n1 "Nat" "b")
 
 -- | @m n : Nat@, @p : Le m n@ — the state @weaken@ reaches after three
 -- @intro@s, and the smallest induction over an indexed family there is.
@@ -288,13 +318,13 @@ refusalTests =
         Left (TargetNotInductive {}) -> pure ()
         other                        -> assertFailure (show (fmap (const ()) other))
 
-    -- §3.7's stated limit, and the one an @AGENDA.md@ item is open on (item
-    -- 10): @Eq I i a@ is homogeneous, so the /type/ of an index may not mention
-    -- an earlier index. @Below@'s second index is a @Fin@ of its first.
-  , testCase "a dependent index telescope is refused, by position and name" $
+    -- §3.7's limit, and it binds a /tied/ index only (phase 19). Here index 2
+    -- is @fz m@ — a constructor application, so it states an equation, and
+    -- @Eq (Fin i1) i2 (fz m)@ is the one that cannot be written down.
+  , testCase "a dependent index that is tied is refused, by position and name" $
       let (env, n0) = declared [eqDecl', natDecl, finDecl, belowDecl]
           (ctx, n1) = contextOf env n0
-            [("n", "Nat"), ("i", "Fin n"), ("b", "Below n i")]
+            [("m", "Nat"), ("b", "Below (succ m) (fz m)")]
        in case fst (attempt env ctx n1 "Nat" "b") of
             Left e  -> e @?= IndexTypeDepends 2 (Ident "i")
             Right _ -> assertFailure "expected a refusal"
@@ -352,11 +382,16 @@ vecDecl' =
   \; cons : \8704 (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ n) }"
 
 -- | An index whose /type/ mentions an earlier index — the shape §3.7's limit
--- is about, and the one nothing else in the suite has.
+-- is about, and the one nothing else in the suite has. Note it is /not/ @Vec@:
+-- a one-element index telescope has no earlier index to depend on.
+--
+-- @bs@ is recursive, so a method carries an induction hypothesis at @Below m j@
+-- and the motive's dependent telescope has to be right for it to typecheck.
 belowDecl :: String
 belowDecl =
   "Below : \8704 (n : Nat) (i : Fin n) -> Type\8320 \
-  \{ bz : \8704 (m : Nat) -> Below (succ m) (fz m) }"
+  \{ bz : \8704 (m : Nat) -> Below (succ m) (fz m) \
+  \; bs : \8704 (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }"
 
 -- | Build a context by parsing each entry's type against what precedes it, so
 -- that a dependent context can be written down as the user would type it.

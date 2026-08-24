@@ -1138,6 +1138,11 @@ renderDeclareError e = case e of
 -- on an index whose /type/ mentions an earlier index, and lifting it is what
 -- \"John Major\" equality is for (@AGENDA.md@ item 10, deferred past MS1). The
 -- message says so, because a user meeting it has done nothing wrong.
+--
+-- Since phase 19 it is raised only for an index that is /tied/ — one that
+-- actually states an equation. A friendly index is abstracted outright and its
+-- type may depend on an earlier index freely, which is why eliminating a
+-- @Below n i@ whose indices are plain variables now works.
 renderElimError :: ElimError -> String
 renderElimError e = case e of
   TargetNotTypeable te ->

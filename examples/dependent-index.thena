@@ -1,0 +1,30 @@
+data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }
+data Fin : Nat -> Type₀ { fz : ∀ (n : Nat) -> Fin (succ n) ; fs : ∀ (n : Nat) (i : Fin n) -> Fin (succ n) }
+data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ { bz : ∀ (m : Nat) -> Below (succ m) (fz m) ; bs : ∀ (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }
+:theorem belowRefl : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Eq (Fin n) i i
+attack
+intro
+intro
+intro
+into
+along
+along
+along
+eliminate b
+back
+back
+try \ (m : Nat) (q : Eq Nat (succ m) n) -> refl (Fin (succ m)) (fz m)
+solve
+along
+try \ (m : Nat) (j : Fin m) (c : Below m j) (ih : Eq Nat m n -> Eq (Fin m) j j) (q : Eq Nat (succ m) n) -> refl (Fin (succ m)) (fs m j)
+solve
+along
+solve
+back
+back
+back
+back
+back
+back
+solve
+qed

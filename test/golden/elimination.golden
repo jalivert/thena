@@ -18,7 +18,8 @@ thena spine> :abandon
 abandoned noEq
 thena spine> data Eq (A : Type₀) : A -> A -> Type₀ { refl : ∀ (a : A) -> Eq A a a }
 declared Eq
-thena spine> data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ { bz : ∀ (m : Nat) -> Below (succ m) (fz m) }
+thena spine> data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ { bz : ∀ (m : Nat) -> Below (succ m) (fz m) ; bs : ∀ (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }
+no noConfusionBelow: bs's argument j has a type that depends on an earlier argument, so its equation cannot be stated
 declared Below
 thena spine> :theorem probe : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Nat
 proving probe : ∀ (n : Nat) (i : Fin n) -> Below n i -> Nat
@@ -35,14 +36,40 @@ attack
 try ‹t›
 abandon
 eliminate ‹t›
-thena spine> eliminate b
-stuck: index 2 (i) has a type that depends on an earlier index,
-  so the equation constraining it cannot be stated
 thena spine> eliminate Type₀
 stuck: Type₀ is not a target: its type is Type₁, not a fully applied datatype
 thena spine> eliminate succ
 stuck: succ is not a target: its type is Nat -> Nat, not a fully applied datatype
+thena spine> eliminate b
+subgoals: bzMethod, bsMethod
+thena spine> :where
+focus
+  let ? probe : Nat ≐ (
+path
+  root ▸ ≐ probe ▸ n ▸ i ▸ b ▸ bzMethod ▸ bsMethod
+context
+  n : Nat
+  i : Fin n
+  b : Below n i
+  bzMethod : ∀ (m : Nat) -> Eq Nat (succ m) n -> Nat
+  bsMethod : ∀ (m : Nat) (j : Fin m) -> Below m j -> (Eq Nat m n -> Nat) -> Eq Nat (succ m) n -> Nat
+type
+  Nat
 thena spine> attack
+stuck: that is not a hole
 thena spine> eliminate n
 stuck: that is not a hole
+thena spine> :abandon
+abandoned probe
+thena spine> :theorem tied : ∀ (m : Nat) (b : Below (succ m) (fz m)) -> Nat
+proving tied : ∀ (m : Nat) -> Below (succ m) (fz m) -> Nat
+thena spine> attack
+thena spine> intro
+thena spine> intro
+thena spine> into
+thena spine> along
+thena spine> along
+thena spine> eliminate b
+stuck: index 2 (i) has a type that depends on an earlier index,
+  so the equation constraining it cannot be stated
 thena spine> :quit

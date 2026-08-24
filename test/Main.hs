@@ -8,6 +8,7 @@ import qualified Thena.Core.TermTests
 import qualified Thena.Core.TypingTests
 import qualified Thena.Core.UnifyTests
 import qualified Thena.CursorTests
+import qualified Thena.DependentIndexTests
 import qualified Thena.DeterminacyTests
 import qualified Thena.DispatchTests
 import qualified Thena.ElaborateTests
@@ -36,6 +37,7 @@ main =
       , Thena.Core.TypingTests.tests
       , Thena.Core.UnifyTests.tests
       , Thena.CursorTests.tests
+      , Thena.DependentIndexTests.tests
       , Thena.DeterminacyTests.tests
       , Thena.DispatchTests.tests
       , Thena.ElaborateTests.tests

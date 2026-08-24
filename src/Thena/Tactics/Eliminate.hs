@@ -16,6 +16,13 @@
 -- designed up front with nothing else asking for it, and §12 invariant 5
 -- forbids exactly that.
 --
+-- **The limit on a dependent index telescope binds only a /tied/ index —
+-- narrowed at phase 19.** An index whose type mentions an earlier one cannot be
+-- equated, because the two sides of @Eq@ would be at two different types. But a
+-- /friendly/ index states no equation at all, so it is abstracted and its type
+-- is free to depend; the motive's own telescope carries the dependency, which
+-- is what 'scheme' substitutes the earlier fresh index variables to build.
+--
 -- **It computes; it does not touch the development.** What comes back is a list
 -- of holes to claim and a term to attach, and "Thena.Engine" does both. That is
 -- §7.4's rule about which operations take a 'Context' and which take the
@@ -114,9 +121,8 @@ eliminate env ctx n0 goal tgt =
 
     build d ps as n1
       | not (null as), Just missing <- undeclared = (Left (NoEquality missing), n1)
-      | otherwise = case indexTypes of
-          Left e   -> (Left e, n1)
-          Right is -> scheme d ps as is n1
+      | Just e <- dependentTied = (Left e, n1)
+      | otherwise = scheme d ps as tiedIx n1
       where
         -- §3.7, decided 2026-08-11: @Eq@ and @refl@ are referred to **by
         -- name**. No designation table, no pragma, no shape check — they are
@@ -128,27 +134,83 @@ eliminate env ctx n0 goal tgt =
           | not (isDeclared reflexivity env) = Just reflexivity
           | otherwise = Nothing
 
-        -- The type each index is constrained at, with the family's parameters
-        -- replaced by the target's. §3.7's limit lands here: @Eq Iₖ iₖ aₖ@ is
-        -- homogeneous, so @Iₖ@ may not mention an earlier index.
-        indexTypes = walk (zip [1 ..] (inductiveIndices d))
-          where
-            earlier = map entryVar (inductiveIndices d)
-            subst   = zip (map entryVar (inductiveParameters d)) ps
-            walk [] = Right []
-            walk ((k, e) : rest) =
-              let ty = substVars subst (entryType e)
-                  taken = take (k - 1) earlier
-               in if any (`elem` freeVars ty) taken
-                    then Left (IndexTypeDepends k (entryIdent e))
-                    else (ty :) <$> walk rest
+        -- Thesis §3.5.2's "what to fix, what to abstract", answered one index
+        -- at a time. An index the target supplies as a plain context
+        -- /variable/ needs no equation: replacing its occurrences already
+        -- generalises everything that mentions it, and applying the motive
+        -- back at that very variable recovers the goal. Emitting one anyway
+        -- is what killed the induction hypothesis — see the header.
+        --
+        -- Three conditions, each a case that breaks without it. The variable
+        -- must be a 'Hypothesis', since a 'Definition' has a value that would
+        -- be left behind. It must occur nowhere else in the family's own
+        -- spine, or two abstractions race for the same occurrences —
+        -- @e : Eq Nat a a@ is the case, and it must keep both equations. And
+        -- no /other/ entry of the context may mention it: every premise stays
+        -- fixed (§3.7), and a fixed premise still constraining the abstracted
+        -- variable is exactly the specificity the equation existed to carry.
+        --
+        -- Decided here rather than in 'scheme' because it needs no fresh
+        -- names, and the dependent-index refusal below is about /these/
+        -- indices only.
+        friendlyAt k a = case a of
+          Free v ->
+            isHypothesisOf v
+              && not (any (\b -> v `elem` freeVars b) (ps ++ others k))
+              && all (unmentioned v) ctx
+          _ -> False
+        others k = [ b | (j, b) <- zip [(0 :: Int) ..] as, j /= k ]
+        isHypothesisOf v = or [ True | Hypothesis w _ _ <- ctx, w == v ]
+        unmentioned v e =
+          entryVar e == v
+            || Just (entryVar e) == targetVar
+            || v `notElem` entryUses e
 
-    scheme d ps as indexTys n1 =
+        -- Which indices keep an equation, and which are simply abstracted.
+        tiedIx = [ k | (k, a) <- zip [(0 :: Int) ..] as, not (friendlyAt k a) ]
+
+        -- §3.7's limit, and it binds a *tied* index only. @Eq Iₖ iₖ aₖ@ is
+        -- homogeneous, and @iₖ@ is the generalised index while @aₖ@ is the
+        -- actual one, so @Iₖ@ may not mention an earlier index: instantiated
+        -- for the two sides it would be two different types, which is what
+        -- \"John Major\" equality exists to relate. A /friendly/ index states no
+        -- equation at all, so its type is free to depend on an earlier one —
+        -- only the motive's own telescope has to carry the dependency, and
+        -- 'scheme' builds it so that it does.
+        dependentTied = firstJust [ dependent k | k <- tiedIx ]
+        dependent k =
+          let e     = inductiveIndices d !! k
+              subst = zip (map entryVar (inductiveParameters d)) ps
+              ty    = substVars subst (entryType e)
+              taken = take k (map entryVar (inductiveIndices d))
+           in if any (`elem` freeVars ty) taken
+                then Just (IndexTypeDepends (k + 1) (entryIdent e))
+                else Nothing
+        firstJust xs = case [ x | Just x <- xs ] of
+          x : _ -> Just x
+          []    -> Nothing
+
+    scheme d ps as tiedIx n1 =
       let ni = length as
 
           -- One fresh variable per index, plus the motive's own target binder.
           (ivs, n2) = freshen ni n1
           (xv,  n3) = fresh n2
+
+          -- The type each index is generalised at: the family's parameters
+          -- replaced by the target's, and each /earlier/ index binder by this
+          -- motive's own fresh variable. The second substitution is what makes
+          -- a dependent index telescope expressible — the motive's binder for
+          -- @Below@'s second index must read @Fin i₁@, naming the first binder
+          -- of this motive and not the one in the declaration, which is not in
+          -- scope here at all.
+          paramSubst = zip (map entryVar (inductiveParameters d)) ps
+          earlierIx  = map entryVar (inductiveIndices d)
+          indexTys =
+            [ substVars (paramSubst ++ zip (take k earlierIx) (map Free (take k ivs)))
+                        (entryType e)
+            | (k, e) <- zip [(0 :: Int) ..] (inductiveIndices d)
+            ]
 
           familyAt is = foldl App (Global (inductiveName d)) (ps ++ is)
 
@@ -157,38 +219,11 @@ eliminate env ctx n0 goal tgt =
           (goalIx, n5) = foldl abstractIndex (goalX, n4) (zip ivs as)
           abstractIndex (g, n) (iv, a) = replaceTerm a iv n g
 
-          -- Thesis §3.5.2's "what to fix, what to abstract", answered one index
-          -- at a time. An index the target supplies as a plain context
-          -- /variable/ needs no equation: replacing its occurrences already
-          -- generalises everything that mentions it, and applying the motive
-          -- back at that very variable recovers the goal. Emitting one anyway
-          -- is what killed the induction hypothesis — see the header.
-          --
-          -- Three conditions, each a case that breaks without it. The variable
-          -- must be a 'Hypothesis', since a 'Definition' has a value that would
-          -- be left behind. It must occur nowhere else in the family's own
-          -- spine, or two abstractions race for the same occurrences —
-          -- @e : Eq Nat a a@ is the case, and it must keep both equations. And
-          -- no /other/ entry of the context may mention it: every premise stays
-          -- fixed (§3.7), and a fixed premise still constraining the abstracted
-          -- variable is exactly the specificity the equation existed to carry.
-          friendlyAt k a = case a of
-            Free v ->
-              isHypothesisOf v
-                && not (any (\b -> v `elem` freeVars b) (ps ++ others k))
-                && all (unmentioned v) ctx
-            _ -> False
-          others k = [ b | (j, b) <- zip [(0 :: Int) ..] as, j /= k ]
-          isHypothesisOf v = or [ True | Hypothesis w _ _ <- ctx, w == v ]
-          unmentioned v e =
-            entryVar e == v
-              || Just (entryVar e) == targetVar
-              || v `notElem` entryUses e
-
-          -- Which indices keep an equation, and which are simply abstracted.
+          -- Which indices keep an equation. Decided by 'build'; see the note
+          -- on 'friendlyAt' there.
           tied = [ (ity, iv, a)
                  | (k, (ity, iv, a)) <- zip [(0 :: Int) ..] (zip3 indexTys ivs as)
-                 , not (friendlyAt k a)
+                 , k `elem` tiedIx
                  ]
 
           -- @Eq Iₖ iₖ aₖ → …@, one non-dependent Π per *tied* index. A Π still

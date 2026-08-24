@@ -333,9 +333,17 @@ data ElimError
     -- 2026-08-11), and the named one is not declared. Only ever raised for a
     -- family that has indices: without them the scheme states no equations
   | IndexTypeDepends Int Ident
-    -- ^ §3.7's stated limit. The type of index @n@ (counting from 1, named)
-    -- mentions an earlier index, so the homogeneous @Eq I i a@ that constrains
-    -- it cannot be written down. @Vec@-style families; @AGENDA.md@ item 10
+    -- ^ §3.7's stated limit, and it binds a /tied/ index only. The type of
+    -- index @n@ (counting from 1, named) mentions an earlier index, so the
+    -- homogeneous @Eq I i a@ that constrains it cannot be written down: @i@ is
+    -- at the generalised index and @a@ at the actual one, which are two
+    -- different types. A /friendly/ index states no equation, so it is
+    -- abstracted and this is not raised for it (phase 19).
+    --
+    -- Not @Vec@: a one-element index telescope has no earlier index to depend
+    -- on, so @Vec@ and @Fin@ eliminate fine. The shape is
+    -- @Below : ∀ (n : Nat) (i : Fin n) -> Type₀@, two indices with the second
+    -- typed by the first. @AGENDA.md@ item 10
   | MotiveIllTyped TypeError
     -- ^ the generalised goal does not typecheck under the abstracted indices.
     -- Abstracting a term in a dependent theory is not always type-preserving,

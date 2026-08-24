@@ -554,7 +554,7 @@ tests =
         , "eliminate n"
         , ":abandon"
         , "data Eq (A : Type₀) : A -> A -> Type₀ { refl : ∀ (a : A) -> Eq A a a }"
-        , "data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ { bz : ∀ (m : Nat) -> Below (succ m) (fz m) }"
+        , "data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ { bz : ∀ (m : Nat) -> Below (succ m) (fz m) ; bs : ∀ (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }"
         , ":theorem probe : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Nat"
         , "attack"
         , "intro"
@@ -565,11 +565,26 @@ tests =
         , "along"
         , "along"
         , ":matches"
-        , "eliminate b"
         , "eliminate Type₀"
         , "eliminate succ"
+        -- Phase 19: @Below@'s index telescope is dependent, but both indices
+        -- are plain variables here, so the dependent one is friendly and
+        -- states no equation. This line was a refusal until phase 19.
+        , "eliminate b"
+        , ":where"
         , "attack"
         , "eliminate n"
+        , ":abandon"
+        -- And the refusal that remains: index 2 is @fz m@, a constructor
+        -- application, so it is tied and does want an equation.
+        , ":theorem tied : ∀ (m : Nat) (b : Below (succ m) (fz m)) -> Nat"
+        , "attack"
+        , "intro"
+        , "intro"
+        , "into"
+        , "along"
+        , "along"
+        , "eliminate b"
         , ":quit"
         ]
     , script
