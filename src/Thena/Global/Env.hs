@@ -272,11 +272,14 @@ recursiveArgument dn np ty = case spine ty of
 --   -> P indices t
 -- @
 --
--- **Derived, never stored twice.** Phase 10\'s generator writes this function\'s
--- output into 'constants'; phase 8\'s @infer@ calls the function. So the stored
--- constant and the rule @infer@ applies cannot drift apart — the same argument
--- 'formerType' and 'formerArity' are here for, and the same one §3.7 makes
--- against emitting ι-rules.
+-- **Derived, and stored nowhere at all** — §3.7's "the eliminator's type is
+-- generated and stored as a constant" was reversed by the user 2026-08-22,
+-- planning phase 10. Every caller — @infer@, @:elim@, the elimination tactic —
+-- calls this function, so there is no stored copy to drift from it. A
+-- @NatElim@ in 'constants' would also be a trap: it would resolve in term
+-- position as a bodyless 'Thena.Core.Term.Global', a term that typechecks and
+-- never reduces. Same argument as 'formerType' and 'formerArity', and the same
+-- one §3.7 makes against emitting ι-rules.
 --
 -- **The level is an argument, not a field**, which is §3.7\'s "universe
 -- polymorphism of the eliminator, without universe polymorphism": there is no

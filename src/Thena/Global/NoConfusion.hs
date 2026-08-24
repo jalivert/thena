@@ -434,12 +434,8 @@ dependentArgument d = firstJust (map perConstructor (inductiveConstructors d))
 varsOf :: Context -> [Core]
 varsOf = map (Free . entryVar)
 
--- | A copy of a telescope under fresh variables, primed so a printed term does
--- not show two binders with one name.
---
--- Sound only because 'dependentArgument' has already refused telescopes whose
--- later types mention earlier entries: the types are carried across unchanged.
--- | A second copy of a telescope, with new variables.
+-- | A second copy of a telescope, with new variables — primed, so a printed
+-- term does not show two binders with one name.
 --
 -- **Every later entry is repointed at the new variable** — a telescope is
 -- dependent in general, and an entry whose type still named the /old/ variable
