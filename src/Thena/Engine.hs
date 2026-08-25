@@ -628,6 +628,36 @@ perform instr rest m = case operation instr of
   Assume name ty -> component Component.Assume name ty
   Claim  name ty -> component Component.Claim  name ty
 
+  -- The three reads (§7.2, phase 24). "Always named, never a general
+  -- getState": a body asks a particular question of the development and gets a
+  -- particular answer, so nothing hands it the machine.
+  --
+  -- The goal is the type the focused component is /claimed at/ — what the
+  -- development writes down, never what @infer@ derives (§4.5). A focus with
+  -- nothing written down has no goal, which is a failure and not an empty
+  -- answer.
+  Goal -> case Cursor.expectedType (cursor (proof m)) of
+    Just t  -> produce (VTerm (Trailing t)) m
+    Nothing -> failure NoGoalHere m
+
+  Typing t -> case term t of
+    Left r  -> failure r m
+    Right t' -> case infer (globals m) contextAt (names m) t' of
+      (Left e,   n1) -> failure (NotTypeable e) m { names = n1 }
+      (Right ty, n1) -> produce (VTerm (Trailing ty)) m { names = n1 }
+
+  -- Thesis §2.7's @=@-binding. The type is inferred, because that is what makes
+  -- it a definition: a definition's type is determined by its value.
+  Define name v -> case (,) <$> operandIdent (env (exec m)) name <*> term v of
+    Left r -> failure r m
+    Right (i, val) -> case infer (globals m) contextAt (names m) val of
+      (Left e,   n1) -> failure (NotTypeable e) m { names = n1 }
+      (Right ty, n1) ->
+        let (x, n2) = fresh n1
+            cur     = insertAbove (Component.Define x i val ty) (cursor (proof m))
+         in produce (VTerm (Trailing (Free x)))
+                    m { proof = ProofState cur, names = n2 }
+
   Along      -> navigate (keeping along)
   Into       -> navigate (keeping into)
   CrossType  -> navigate (keeping crossType)

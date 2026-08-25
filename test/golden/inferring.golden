@@ -1,0 +1,43 @@
+thena spine> data Bool : Type₀ where { true : Bool ; false : Bool }
+declared Bool
+thena spine> data Maybe (A : Type₀) : Type₀ where { Nothing : Maybe A ; Just : ∀ (a : A) -> Maybe A }
+declared Maybe
+thena spine> :theorem g : Maybe Bool
+proving g : Maybe Bool
+thena spine> claim T : Type₀
+claimed T
+thena spine> claim b : T
+claimed b
+thena spine> unify-refine (Just T b)
+solved: T
+thena spine> :show
+  let T = Bool : Type₀ in
+  let ? b : T in
+  let refined = Just T b : Maybe T in
+▶ let g = refined : Maybe Bool in
+  g
+thena spine> back
+thena spine> back
+thena spine> :where
+focus
+  let ? b : T in
+path
+  root ▸ T
+context
+  T = Bool : Type₀
+type
+  T
+thena spine> unify-refine true
+already equal
+thena spine> :show
+  let T = Bool : Type₀ in
+  let refined = true : Bool in
+▶ let b = refined : T in
+  let refined1 = Just T b : Maybe T in
+  let g = refined1 : Maybe Bool in
+  g
+thena spine> qed
+g : Maybe Bool   ∎
+thena spine> :show g
+g : Maybe Bool
+g = let T = Bool : Type₀ in let refined = true : Bool in let b = refined : T in let refined1 = Just T b : Maybe T in let g = refined1 : Maybe Bool in g

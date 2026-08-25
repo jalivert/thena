@@ -9,11 +9,13 @@ standard
   regret
   eliminate ‹t›
   elab-var
+  unify-refine ‹t›
 thena spine> :matches
 attack
 try ‹t›
 abandon
 eliminate ‹t›
+unify-refine ‹t›
 thena spine> attack
 thena spine> :matches
 solve
@@ -29,6 +31,7 @@ attack
 try ‹t›
 abandon
 eliminate ‹t›
+unify-refine ‹t›
 thena spine> attack
 thena spine> :matches
 intro
@@ -51,6 +54,7 @@ attack
 try ‹t›
 abandon
 eliminate ‹t›
+unify-refine ‹t›
 thena spine> :abandon
 abandoned id
 thena spine> :theorem c : ∀ (A : Type₀) -> Type₀

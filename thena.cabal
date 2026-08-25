@@ -99,6 +99,7 @@ test-suite thena-test
         Thena.RuleSyntaxTests
         Thena.RuleFileTests
         Thena.CallTests
+        Thena.ReadTests
         Thena.LoadTests
         Thena.DriverTests
         Thena.Declared

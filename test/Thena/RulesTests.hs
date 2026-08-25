@@ -138,9 +138,9 @@ matchTests =
     "matches"
     [ -- Three at a hole, and that is what makes the list a list: phase 16 has
       -- to choose between them, and the user sees the choice being made.
-      testCase "a hole offers the four hole rules, in definition order" $
+      testCase "a hole offers the hole rules, in definition order" $
         matching emptyGlobals (holeAt type0)
-          @?= ["attack", "try", "abandon", "eliminate"]
+          @?= ["attack", "try", "abandon", "eliminate", "unify-refine"]
 
     , testCase "a guess at a non-Π offers only solve and regret" $
         matching emptyGlobals (guessAt type0)
@@ -238,8 +238,8 @@ iteratorTests =
             deep = drop 2 (drain it)
          in do
               _ <- pure deep
-              map nameOf (drain it) @?= ["attack", "try", "abandon", "eliminate"]
-              map nameOf deep @?= ["abandon", "eliminate"]
+              map nameOf (drain it) @?= ["attack", "try", "abandon", "eliminate", "unify-refine"]
+              map nameOf deep @?= ["abandon", "eliminate", "unify-refine"]
     ]
 
 -- --------------------------------------------------------------------------

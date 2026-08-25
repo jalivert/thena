@@ -1,0 +1,39 @@
+thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
+declared Nat
+thena spine> data Eq (A : Type₀) : A -> A -> Type₀ where { refl : ∀ (a : A) -> Eq A a a }
+declared Eq
+thena spine> :theorem id0 : ∀ (A : Type₀) -> A -> A
+proving id0 : ∀ (A : Type₀) -> A -> A
+thena spine> unify-refine (\ (A : Type₀) (a : A) -> a)
+already equal
+thena spine> :show
+  let refined = λ (A : Type₀) (a : A) -> a : ∀ (A : Type₀) -> A -> A in
+▶ let id0 = refined : ∀ (A : Type₀) -> A -> A in
+  id0
+thena spine> qed
+id0 : ∀ (A : Type₀) -> A -> A   ∎
+thena spine> :theorem refl0 : Eq Nat zero zero
+proving refl0 : Eq Nat zero zero
+thena spine> claim A : Type₀
+claimed A
+thena spine> claim a : A
+claimed a
+thena spine> unify-refine (refl A a)
+solved: A, a
+thena spine> :show
+  let A = Nat : Type₀ in
+  let a = zero : A in
+  let refined = refl A a : Eq A a a in
+▶ let refl0 = refined : Eq Nat zero zero in
+  refl0
+thena spine> qed
+refl0 : Eq Nat zero zero   ∎
+thena spine> :show refl0
+refl0 : Eq Nat zero zero
+refl0 = let A = Nat : Type₀ in let a = zero : A in let refined = refl A a : Eq A a a in let refl0 = refined : Eq Nat zero zero in refl0
+thena spine> :theorem wrong : Eq Nat zero (succ zero)
+proving wrong : Eq Nat zero (succ zero)
+thena spine> unify-refine (refl Nat zero)
+stuck: zero and succ zero cannot be made equal
+thena spine> :abandon
+abandoned wrong

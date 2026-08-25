@@ -21,6 +21,7 @@ attack
 try ‹t›
 abandon
 eliminate ‹t›
+unify-refine ‹t›
 thena spine> :matches a
 elab-var
 thena spine> prove a

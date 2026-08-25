@@ -99,7 +99,7 @@ againstTheBase =
         map baseDescription bs @?= [Just "the rules the engine starts with"]
         map (null . basePath) bs @?= [False]
 
-    , testCase "its rules are exactly the nine, in order" $ do
+    , testCase "its rules are exactly the ten, in order" $ do
         rs <- allRules <$> standardBases
         map ruleName rs @?= map ruleName expectedStandard
         rs @?= expectedStandard
@@ -164,6 +164,9 @@ everyOp =
   , ("resolve x",    Op.Resolve (Ref "x"))
   , ("certify x",    Certify (Ref "x"))
   , ("prim-eliminate x", Op.Eliminate (Ref "x"))
+  , ("goal",          Goal)
+  , ("typeof x",      Typing (Ref "x"))
+  , ("define x y",    Define (Ref "x") (Ref "y"))
   ]
 
 vocabulary :: TestTree
