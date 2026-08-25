@@ -373,6 +373,7 @@ operandsOf o = case o of
   CrossType    -> []
   CrossValue   -> []
   Down _       -> []
+  Goto a       -> [a]
   Back         -> []
   Reduce       -> []
   Attack       -> []
@@ -501,6 +502,7 @@ operation g i (RawOp w as)
       ]
     unary =
       [ ("say", Say), ("prim-try", Try), ("parse", Parse), ("resolve", Op.Resolve)
+      , ("goto", Goto)
       , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
       , ("typeof", Typing)
       ]

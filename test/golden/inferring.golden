@@ -16,8 +16,7 @@ thena spine> :show
   let refined = Just T b : Maybe T in
 ▶ let g = refined : Maybe Bool in
   g
-thena spine> back
-thena spine> back
+thena spine> goto b
 thena spine> :where
 focus
   let ? b : T in
@@ -31,13 +30,13 @@ thena spine> unify-refine true
 already equal
 thena spine> :show
   let T = Bool : Type₀ in
-  let refined = true : Bool in
-▶ let b = refined : T in
-  let refined1 = Just T b : Maybe T in
-  let g = refined1 : Maybe Bool in
+  let refined1 = true : Bool in
+▶ let b = refined1 : T in
+  let refined = Just T b : Maybe T in
+  let g = refined : Maybe Bool in
   g
 thena spine> qed
 g : Maybe Bool   ∎
 thena spine> :show g
 g : Maybe Bool
-g = let T = Bool : Type₀ in let refined = true : Bool in let b = refined : T in let refined1 = Just T b : Maybe T in let g = refined1 : Maybe Bool in g
+g = let T = Bool : Type₀ in let refined1 = true : Bool in let b = refined1 : T in let refined = Just T b : Maybe T in let g = refined : Maybe Bool in g

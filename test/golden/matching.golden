@@ -42,7 +42,7 @@ thena spine> into
 thena spine> along
 thena spine> :where
 focus
-  let ? id : A -> A in
+  let ? id1 : A -> A in
 path
   root ▸ ≐ id ▸ A
 context
@@ -80,8 +80,8 @@ thena spine> intro
 thena spine> :show
 ▶ let ? l : let x = Type₀ : Type₁ in x ≐ (
     let x = Type₀ : Type₁ in
-    let ? l : x in
-    l
+    let ? l1 : x in
+    l1
   ) in
   l
 thena spine> :quit

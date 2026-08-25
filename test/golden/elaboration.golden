@@ -8,7 +8,7 @@ thena spine> along
 thena spine> along
 thena spine> :where
 focus
-  let ? const : A in
+  let ? const1 : A in
 path
   root ▸ ≐ const ▸ A ▸ a
 context
@@ -29,8 +29,8 @@ thena spine> :show
   let ? const : ∀ (A : Type₀) -> A -> A ≐ (
     λ (A : Type₀) ->
     λ (a : A) ->
-▶   let const = a : A in
-    const
+▶   let const1 = a : A in
+    const1
   ) in
   const
 thena spine> back
@@ -41,7 +41,7 @@ thena spine> qed
 const : ∀ (A : Type₀) -> A -> A   ∎
 thena spine> :show const
 const : ∀ (A : Type₀) -> A -> A
-const = let const = λ (A : Type₀) (a : A) -> let const = a : A in const : ∀ (A : Type₀) -> A -> A in const
+const = let const = λ (A : Type₀) (a : A) -> let const1 = a : A in const1 : ∀ (A : Type₀) -> A -> A in const
 thena spine> :theorem again : ∀ (A : Type₀) (a : A) -> A
 proving again : ∀ (A : Type₀) -> A -> A
 thena spine> attack

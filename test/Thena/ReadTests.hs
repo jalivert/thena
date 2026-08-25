@@ -14,7 +14,8 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Thena.Core.Context (Entry (..))
 import Thena.Core.Term (Core (..), Ident (..), Level (..), Var, fresh)
 import qualified Thena.Development.Component as Component
-import Thena.Development.Cursor (Cursor, Focus (..), context, enter, focus, along)
+import Thena.Development.Cursor
+  (Cursor, Focus (..), along, context, enter, focus, rebuild)
 import Thena.Development.Partial (Partial (..))
 import Thena.Engine
   ( Exec (..)
@@ -26,12 +27,15 @@ import Thena.Engine
   , proof
   , step
   )
-import Thena.Errors (FailReason (..))
+import Thena.Errors (FailReason (..), MoveError (..))
 import Thena.Global.Env (emptyGlobals)
 import Thena.Ops (Instr (..), Op (..), Operand (..), Value (..))
 
 tests :: TestTree
-tests = testGroup "reading the development (§7.2)" [goalTests, typeofTests, defineTests]
+tests =
+  testGroup
+    "reading the development (§7.2)"
+    [goalTests, typeofTests, defineTests, gotoTests]
 
 type0 :: Core
 type0 = Universe (Level 0)
@@ -139,4 +143,109 @@ defineTests =
         case run hole [Do (Define (Lit (VText "d")) (Lit (VTerm (Trailing (App type0 type0)))))] of
           Left (NotTypeable _) -> pure ()
           other -> assertFailure ("expected NotTypeable, got " ++ show (fmap (const ()) other))
+    ]
+
+-- --------------------------------------------------------------------------
+-- goto (phase 24b)
+-- --------------------------------------------------------------------------
+
+-- | Focusing a hole by the variable that binds it.
+--
+-- The sharp check here is 'rebuild': @goto@ rewrites the /path/ and must leave
+-- the development itself alone, and 'rebuild' is computed by code that knows
+-- nothing about the search. That is the standing lesson — look for the
+-- invariant maintained by different code from the code that checks it.
+gotoTests :: TestTree
+gotoTests =
+  testGroup
+    "goto"
+    [ testCase "finds a hole claimed above the focus" $
+        case run hole [ Bind "h" (Claim (Lit (VText "h")) (Lit (VTerm (Trailing type0))))
+                      , Do (Goto (Ref "h"))
+                      ] of
+          Left r  -> assertFailure ("did not run: " ++ show r)
+          Right m -> case focus (cursor (proof m)) of
+            OnComponent (Component.Claim _ (Ident "h") _) -> pure ()
+            other -> assertFailure ("focused " ++ show other)
+
+      -- The development is untouched; only the path moved.
+    , testCase "and changes nothing about the development" $
+        let is  = [ Bind "h" (Claim (Lit (VText "h")) (Lit (VTerm (Trailing type0))))
+                  , Do (Goto (Ref "h"))
+                  ]
+            before = [ Bind "h" (Claim (Lit (VText "h")) (Lit (VTerm (Trailing type0)))) ]
+         in case (run hole before, run hole is) of
+              (Right a, Right b) ->
+                rebuild (cursor (proof b)) @?= rebuild (cursor (proof a))
+              _ -> assertFailure "did not run"
+
+      -- Depth first, and into guess bodies: after prim-attack the hole that
+      -- matters is inside the guess, where 'along' alone never reaches.
+    , -- @prim-attack@ makes a guess whose body is a hole; @into@ focuses it;
+      -- the claim then lands **inside the guess body**. @back@ leaves, and
+      -- @goto@ has to descend to find it again — which 'along' alone never
+      -- does.
+      testCase "descends into a guess body" $
+        case run hole [ Do Attack
+                      , Do Into
+                      , Bind "h" (Claim (Lit (VText "h")) (Lit (VTerm (Trailing type0))))
+                      , Do Back
+                      , Do Back
+                      , Do (Goto (Ref "h"))
+                      ] of
+          Left r  -> assertFailure ("did not run: " ++ show r)
+          Right m -> case focus (cursor (proof m)) of
+            OnComponent (Component.Claim _ (Ident "h") _) -> pure ()
+            other -> assertFailure ("focused " ++ show other)
+
+    , testCase "refuses an assumption" $
+        case run hole [ Bind "a" (Assume (Lit (VText "a")) (Lit (VTerm (Trailing type0))))
+                      , Do (Goto (Ref "a"))
+                      ] of
+          Left (CannotMove NoSuchHole) -> pure ()
+          other -> assertFailure ("expected NoSuchHole, got " ++ show (fmap (const ()) other))
+
+      -- **By name, from the root** — the user's correction, 2026-08-25: the
+      -- move must work wherever the hole is, not only where Γ can see it. This
+      -- is the case that failed before: the hole is inside a guess body the
+      -- focus has left, so it is in no context at all.
+    , testCase "by name, into a guess body the focus has left" $
+        case run hole [ Do Attack
+                      , Do Into
+                      , Bind "h" (Claim (Lit (VText "h")) (Lit (VTerm (Trailing type0))))
+                      , Do Back
+                      , Do Back
+                      , Do (Goto (Lit (VText "h")))
+                      ] of
+          Left r  -> assertFailure ("did not run: " ++ show r)
+          Right m -> case focus (cursor (proof m)) of
+            OnComponent (Component.Claim _ (Ident "h") _) -> pure ()
+            other -> assertFailure ("focused " ++ show other)
+
+    , testCase "a name nothing carries" $
+        case run hole [Do (Goto (Lit (VText "nosuch")))] of
+          Left (CannotMove NoSuchHole) -> pure ()
+          other -> assertFailure ("expected NoSuchHole, got " ++ show (fmap (const ()) other))
+
+      -- Freshening at creation is what makes a name search unambiguous, and
+      -- what makes the printed name the stored one.
+    , testCase "two holes asked for one name get two names" $
+        case run hole [ Do (Claim (Lit (VText "h")) (Lit (VTerm (Trailing type0))))
+                      , Do (Claim (Lit (VText "h")) (Lit (VTerm (Trailing type0))))
+                      ] of
+          Left r  -> assertFailure ("did not run: " ++ show r)
+          Right m -> [ i | Hypothesis _ i _ <- context (cursor (proof m)) ]
+                       @?= [Ident "h", Ident "h1"]
+
+    , testCase "and attack's inner hole is not its outer one" $
+        case run hole [Do Attack, Do Into] of
+          Left r  -> assertFailure ("did not run: " ++ show r)
+          Right m -> case focus (cursor (proof m)) of
+            OnComponent (Component.Claim _ (Ident "goal1") _) -> pure ()
+            other -> assertFailure ("focused " ++ show other)
+
+    , testCase "refuses a term that is not a variable" $
+        case run hole [Do (Goto (Lit (VTerm (Trailing type0))))] of
+          Left (CannotMove NoSuchHole) -> pure ()
+          other -> assertFailure ("expected NoSuchHole, got " ++ show (fmap (const ()) other))
     ]

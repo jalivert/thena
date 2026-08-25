@@ -576,6 +576,16 @@ dispatch s name arg = case name of
     _  -> case reads arg of
       [(n, "")] -> retryAt (Just n)
       _         -> (s, Rejected (UnexpectedArgument name))
+  -- A move, so a bare word, and it needs a driver case because it is an /op/
+  -- and not a rule (phase 24b). Its argument is a term — a variable naming the
+  -- hole to go to — which is why it cannot reach the rule-call fallback below:
+  -- that would read it as a rule name. @AGENDA.md@'s closeout item 4e is this
+  -- divergence in general.
+  -- **The argument is a name and is not parsed as a term** (phase 24b): the
+  -- hole you want may be nowhere near the focus, and a term would have to
+  -- resolve in Γ, which holds only what is above you. The move searches the
+  -- development from the root instead.
+  "goto"   -> withArgument (run [Do (Ops.Goto (Lit (VText arg)))])
   "cross"  -> case arg of
     "type" -> run [Do CrossType]
     "val"  -> run [Do CrossValue]

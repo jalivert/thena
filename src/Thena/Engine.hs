@@ -446,10 +446,14 @@ perform instr rest m = case operation instr of
   -- The life of a hole (thesis tables 2.7, 2.8). All six act on the component
   -- at the focus, and all six rewrite 'ProofState', which is why they are ops
   -- and not driver commands (§12 invariant 3).
+  -- The inner hole gets its **own** identifier, which the thesis writes @x'@ —
+  -- @?x : S@ ⟹ @?x ≐ (?x' : S . x')@. It shared the outer one until phase 24b,
+  -- and two components with one name is what stopped @goto ‹name›@ working.
   Attack -> onHole $ \c -> case c of
     Component.Claim x i s ->
       let (v, n1) = fresh (names m)
-       in Right ( Component.Guess x i (Under (Component.Claim v i s) (Trailing (Free v))) s
+          i'      = Cursor.freshIdent (Cursor.identsIn (cursor (proof m))) i
+       in Right ( Component.Guess x i (Under (Component.Claim v i' s) (Trailing (Free v))) s
                 , n1 )
     _ -> Left NotAHole
 
@@ -611,7 +615,11 @@ perform instr rest m = case operation instr of
             -- — holes claimed, nothing attached — is not a state any rule
             -- should be able to observe.
             let holes = foldl claimAbove (cursor (proof m)) (elimMethods el)
-                claimAbove c (v, hi, hty) = insertAbove (Component.Claim v hi hty) c
+                -- Freshened one at a time, against the development as it grows,
+                -- so two methods never share a name either (phase 24b).
+                claimAbove c (v, hi, hty) =
+                  insertAbove
+                    (Component.Claim v (Cursor.freshIdent (Cursor.identsIn c) hi) hty) c
                 guess = Component.Guess x i (Trailing (elimTerm el)) s
              in case replaceComponent guess holes of
                   Left e    -> failure (CannotMove e) m
@@ -654,7 +662,9 @@ perform instr rest m = case operation instr of
       (Left e,   n1) -> failure (NotTypeable e) m { names = n1 }
       (Right ty, n1) ->
         let (x, n2) = fresh n1
-            cur     = insertAbove (Component.Define x i val ty) (cursor (proof m))
+            cur0    = cursor (proof m)
+            i'      = Cursor.freshIdent (Cursor.identsIn cur0) i
+            cur     = insertAbove (Component.Define x i' val ty) cur0
          in produce (VTerm (Trailing (Free x)))
                     m { proof = ProofState cur, names = n2 }
 
@@ -663,6 +673,27 @@ perform instr rest m = case operation instr of
   CrossType  -> navigate (keeping crossType)
   CrossValue -> navigate (keeping crossValue)
   Back       -> navigate (keeping back)
+
+  -- Not 'navigate' with the others: it reads its operand first, and it takes
+  -- **either** shape (phase 24b).
+  --
+  --   * a name — what a person types, searched from the root, so a hole is
+  --     reachable from anywhere. The user's correction: *"This instruction is
+  --     supposed to be useful always, not only when you already can see the
+  --     hole right above you."*
+  --   * a variable — what a rule body holds, since @claim@ and @define@ produce
+  --     it. A body may **not** go by name: 'Cursor.freshIdent' means the name it
+  --     asked for is not always the name it got.
+  Goto v -> case operandValue (env (exec m)) v of
+    Left r -> failure r m
+    Right val -> case val of
+      VText n              -> move (Cursor.gotoNamed (Ident n))
+      VTerm (Trailing (Free x)) -> move (Cursor.goto x)
+      _                    -> failure (CannotMove NoSuchHole) m
+    where
+      move f = case f (cursor (proof m)) of
+        Left e    -> failure (CannotMove e) m
+        Right cur -> Continue (advance m { proof = ProofState cur })
   Down part  -> navigate (down part)
 
   -- Commit a whnf at the core focus (§4.7). Not 'navigate': a move never has
@@ -750,7 +781,11 @@ perform instr rest m = case operation instr of
         Left r -> failure r m
         Right (i, t) ->
           let (v, n1) = fresh (names m)
-              cur     = insertAbove (build v i t) (cursor (proof m))
+              cur0    = cursor (proof m)
+              -- Unique when built, not when printed (phase 24b): what @:show@
+              -- prints is what @goto ‹name›@ can find.
+              i'      = Cursor.freshIdent (Cursor.identsIn cur0) i
+              cur     = insertAbove (build v i' t) cur0
            in produce (VTerm (Trailing (Free v))) m { proof = ProofState cur, names = n1 }
 
 -- | What @eliminate@ says: the subgoals it opened, by the names it gave them.

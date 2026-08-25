@@ -51,7 +51,7 @@ thena spine> eliminate b
 subgoals: bzMethod, bsMethod
 thena spine> :where
 focus
-  let ? probe : Nat ≐ (
+  let ? probe1 : Nat ≐ (
 path
   root ▸ ≐ probe ▸ n ▸ i ▸ b ▸ bzMethod ▸ bsMethod
 context

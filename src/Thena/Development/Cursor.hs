@@ -33,6 +33,10 @@ module Thena.Development.Cursor
 
     -- * Moving (§4.3)
   , along
+  , goto
+  , gotoNamed
+  , identsIn
+  , freshIdent
   , into
   , crossType
   , crossValue
@@ -65,7 +69,7 @@ import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Term
   ( Core (..)
   , GlobalName
-  , Ident
+  , Ident (..)
   , Scope
   , Var
   , close
@@ -297,6 +301,99 @@ along cur = case cur of
   InPartial    p c rest -> Right (focusAt (p :> Along c) rest)
   AtConstraint p k rest -> Right (focusAt (p :> Past  k) rest)
   InCore {}             -> Left NotOnTheSpine
+
+-- | Focus the hole or guess a variable binds, wherever it is (phase 24b).
+--
+-- **The one move that is not a step**, and the reason it exists: after a
+-- refinement the holes you still owe are /above/ the focus, and @back@ can only
+-- pop the path you came down. Filling three claimed holes meant counting
+-- @back@s, which is exactly the kind of thing that stops scaling the moment
+-- @apply@ claims several at once.
+--
+-- **By 'Var', for a rule body**, which holds one: @claim@ and @define@ both
+-- produce the variable they bound. A body may not go by name, because
+-- 'freshIdent' means the name it /asked for/ is not always the name it got.
+goto :: Var -> Cursor -> Either MoveError Cursor
+goto x = searchFrom (\y _ -> y == x)
+
+-- | The same, by the name the component carries (phase 24b).
+--
+-- **What the REPL uses**, because a person types what they see. It searches
+-- from the root like its sibling, so a hole is reachable from anywhere and not
+-- only from below it — the user\'s correction, 2026-08-25: *"This instruction
+-- is supposed to be useful always, not only when you already can see the hole
+-- right above you."*
+--
+-- Unambiguous because 'freshIdent' makes a component\'s identifier unique in
+-- the development when it is /built/, so what is printed is what is stored.
+gotoNamed :: Ident -> Cursor -> Either MoveError Cursor
+gotoNamed i = searchFrom (\_ j -> j == i)
+
+-- | Depth first from the root, over holes and guesses only.
+--
+-- It **descends into guess bodies**, so a hole under an @attack@ is reachable;
+-- @along@ alone never leaves the outer chain. Three lines, because the zipper
+-- is persistent: @inside@ searches a guess\'s subtree and, if it finds nothing,
+-- @next@ carries on from the /unchanged/ cursor.
+--
+-- It rebuilds from the root first, so the resulting path is the path from the
+-- root and @back@ walks it normally.
+searchFrom :: (Var -> Ident -> Bool) -> Cursor -> Either MoveError Cursor
+searchFrom p cur = maybe (Left NoSuchHole) Right (search (enter (rebuild cur)))
+  where
+    search c = here c `orElse` inside c `orElse` next c
+
+    here c = case focus c of
+      OnComponent (Claim y i _)   | p y i -> Just c
+      OnComponent (Guess y i _ _) | p y i -> Just c
+      _                                   -> Nothing
+
+    inside c = case into c of
+      Right c' -> search c'
+      Left _   -> Nothing
+
+    next c = case along c of
+      Right c' -> search c'
+      Left _   -> Nothing
+
+    orElse (Just a) _ = Just a
+    orElse Nothing  b = b
+
+-- | Every identifier the development binds, holes and guesses and the rest.
+identsIn :: Cursor -> [Ident]
+identsIn = idents . rebuild
+  where
+    idents q = case q of
+      Under   c rest -> identOf c : idents rest
+      Pending _ rest -> idents rest
+      Trailing _     -> []
+
+    identOf c = case c of
+      Assume _ i _   -> i
+      Define _ i _ _ -> i
+      Claim  _ i _   -> i
+      Guess  _ i _ _ -> i
+
+-- | An identifier not already taken: the hint, or the hint with the first
+-- number that frees it.
+--
+-- **Freshening happens when a component is built, not when it is printed —
+-- DECIDED by the user 2026-08-25.** Before this, two components could carry the
+-- same 'Ident' and the printer told them apart for the screen only, so the name
+-- you saw was not the name that was stored and @goto ‹name›@ could not find it.
+-- Now what is printed is what is there.
+--
+-- "Thena.Repl"\'s own @freshen@ stays: core terms bind with de Bruijn indices,
+-- so opening a binder for display still has to avoid shadowing. That is a
+-- different problem in a different fragment.
+freshIdent :: [Ident] -> Ident -> Ident
+freshIdent taken i@(Ident hint)
+  | free i    = i
+  | otherwise = numbered (1 :: Int)
+  where
+    free j = j `notElem` taken
+    numbered k =
+      let j = Ident (hint ++ show k) in if free j then j else numbered (k + 1)
 
 -- | Enter a guess's body, which stays inside the partial fragment (§4.2).
 --
