@@ -29,3 +29,7 @@ rule unify-refine t :- when focus-is-hole
      ; unify s g
      ; prim-try x
      ; prim-solve
+
+rule apply f :- when focus-is-hole
+  then s = prim-apply f
+     ; call unify-refine s

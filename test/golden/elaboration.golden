@@ -22,6 +22,7 @@ try ‹t›
 abandon
 eliminate ‹t›
 unify-refine ‹t›
+apply ‹f›
 thena spine> :matches a
 elab-var
 thena spine> prove a

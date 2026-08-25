@@ -364,6 +364,7 @@ operandsOf o = case o of
   Typing a     -> [a]
   Define a b   -> [a, b]
   Op.Eliminate a -> [a]
+  Op.Apply a   -> [a]
   Parse   a    -> [a]
   Op.Resolve a -> [a]
   Call _ as    -> as
@@ -505,7 +506,7 @@ operation g i (RawOp w as)
       [ ("say", Say), ("prim-try", Try), ("parse", Parse), ("resolve", Op.Resolve)
       , ("goto", Goto)
       , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
-      , ("typeof", Typing), ("fresh-name", FreshName)
+      , ("typeof", Typing), ("fresh-name", FreshName), ("prim-apply", Op.Apply)
       ]
     binary =
       [ ("assume", Assume), ("claim", Claim), ("define", Define)
