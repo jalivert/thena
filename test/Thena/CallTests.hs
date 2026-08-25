@@ -46,11 +46,16 @@ tests = testGroup "call by name (§8)" [finding, backtracking, arity, recursion]
 -- Fixtures
 -- --------------------------------------------------------------------------
 
-type0 :: Core
+type0, type1 :: Core
 type0 = Universe (Level 0)
+type1 = Universe (Level 1)
 
+-- **The goal is at @Type₁@** (phase 25b): the clauses below @try@ their
+-- argument, that argument is @Type₀@, and @try@ now checks it — so the hole
+-- must be at the universe @Type₀@ actually inhabits. It was @type0@ while the
+-- side condition went unenforced.
 hole :: Cursor
-hole = enter (Under (Component.Claim v (Ident "goal") type0) (Trailing (Free v)))
+hole = enter (Under (Component.Claim v (Ident "goal") type1) (Trailing (Free v)))
   where v = fst (fresh 0)
 
 bases :: [Rule] -> [RuleBase]

@@ -336,7 +336,11 @@ producesTests =
     "produces agrees with the engine"
     [ testCase label (checkProduces env cur before o) | (label, env, cur, before, o) <- table ]
   where
-    hole    = holeAt type0
+    -- **At @Type₁@, not @Type₀@** (phase 25b): the rows below @try@ a term and
+    -- @try@ now checks it, and the term to hand in an empty environment is
+    -- @Type₀@ — which inhabits @Type₁@. It was @holeAt type0@ until the side
+    -- condition was enforced and the fixture turned out to be ill-typed.
+    hole    = holeAt type1
     piHole  = holeAt (arrow type0 type0)
     guessed = [Do Ops.Attack]
     tried   = [Do (Ops.Try (term type0))]

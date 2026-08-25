@@ -1006,6 +1006,9 @@ renderFailReason r = case r of
   UniverseMismatch (Level a) (Level b) ->
     "Type" ++ subscript a ++ " and Type" ++ subscript b ++ " are different universes"
   NotTypeable e -> "that term has no type" ++ concatMap ("\n  " ++) (renderTypeError 0 e)
+  GuessIllTyped e ->
+    "that term does not have the hole's type"
+      ++ concatMap ("\n  " ++) (renderTypeError 0 e)
   NameTaken n       -> n ++ " is already taken; ask fresh-name for one"
   NoGoalHere        -> "nothing is written down here, so there is no goal"
   NoRuleMatched     -> "no rule applies here"

@@ -55,7 +55,7 @@ import Thena.Core.Term
   , instantiate
   )
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Typing (infer)
+import Thena.Core.Typing (check, infer)
 import Thena.Core.Unify (UnifyResult (..), blockers, unify)
 import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor
@@ -466,11 +466,38 @@ perform instr rest m = case operation instr of
         <$> introduce (globals m) contextAt (names m) g
     _ -> Left NotReadyToIntroduce
 
+  -- **Table 2.7's side condition @Θ ⊩ t : S@, enforced** (phase 25b). It was
+  -- documented and not checked until this phase, so an ill-typed guess sat in
+  -- the development until @qed@ or @:revalidate@ found it.
+  --
+  -- @⊩@ is the /partial/ judgement, but @try@ only ever attaches @Trailing t@ —
+  -- never a nested development — so for this one op it degenerates to @check@.
+  -- That is 'Thena.Development.Validate.chain' read at its @Guess@ case: what
+  -- it asks of a guess is @chain … (Just s) g@, and for a trailing @g@ that is
+  -- exactly this. The two agree because it is the same judgement, not because
+  -- the check was written twice.
+  --
+  -- Γ comes from 'forget', so a hole in @t'@ is a hypothesis with no value and
+  -- checks fine — @try (Just A a)@ with @A@ and @a@ still open is legal, which
+  -- is what @unify-refine@ depends on.
+  --
+  -- Written out rather than through 'onHole' so the counter threads on the
+  -- failing path too: @check@ mints variables opening scopes, and rewinding
+  -- past them could hand a later @fresh@ a token an error message already used.
   Try t -> case term t of
     Left r  -> failure r m
-    Right t' -> onHole $ \c -> case c of
-      Component.Claim x i s -> Right (Component.Guess x i (Trailing t') s, names m)
-      _                     -> Left NotAHole
+    Right t' -> case focus (cursor (proof m)) of
+      OnComponent (Component.Claim x i s) ->
+        case check (globals m) contextAt (names m) t' s of
+          (Left e,   n1) -> failure (GuessIllTyped e) m { names = n1 }
+          (Right (), n1) ->
+            case replaceComponent (Component.Guess x i (Trailing t') s)
+                                  (cursor (proof m)) of
+              Left e    -> failure (CannotMove e) m { names = n1 }
+              Right cur ->
+                Continue (advance m { proof = ProofState cur, names = n1 })
+      OnComponent _ -> failure NotAHole m
+      _             -> failure (CannotMove NotOnTheSpine) m
 
   Regret -> onHole $ \c -> case c of
     Component.Guess x i _ s -> Right (Component.Claim x i s, names m)

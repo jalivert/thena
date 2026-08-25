@@ -720,6 +720,34 @@ tests =
         , ":abandon"
         ]
 
+    , -- **Phase 25b's deliverable**: thesis table 2.7 gives @try@ the side
+      -- condition @Θ ⊩ t : S@ and it is now enforced, so a guess that does not
+      -- fit is refused on the line that wrote it rather than at @qed@.
+      script
+        "guessing"
+        [ "data Nat : Type\8320 where { zero : Nat ; succ : \8704 (n : Nat) -> Nat }"
+        , "data Bool : Type\8320 where { true : Bool ; false : Bool }"
+        , ":theorem n : Nat"
+          -- Refused, and it says which type against which. Before this phase
+          -- the guess went in and @qed@ found it, arbitrarily far away.
+        , "try true"
+          -- **And it left nothing behind** — the check runs before the
+          -- component is replaced, so a refused @try@ is not the debris case.
+        , ":show"
+        , "try zero"
+        , "solve"
+        , "qed"
+          -- **A term mentioning an open hole still checks.** Γ comes from
+          -- @forget@, so a claim is a hypothesis with no value; this is what
+          -- @unify-refine@ depends on, since it tries a binding whose own value
+          -- may still contain holes.
+        , ":theorem m : Nat"
+        , "claim h : Nat"
+        , "try (succ h)"
+        , ":show"
+        , ":abandon"
+        ]
+
     , script
         "mistakes"
         [ "wibble"
