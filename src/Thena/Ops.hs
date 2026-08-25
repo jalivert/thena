@@ -225,6 +225,26 @@ data Op
     -- ^ the development must be pure; yields the closed term it stands for and
     -- the type it is claimed to have, for the driver to run the kernel on
     -- (§7.5, §5.3)
+  | Apply Operand
+    -- ^ the head to apply — thesis §2.7's @naive-refine@ with the search
+    -- taken out (phase 25). Walks the head's Π telescope, claims a hole for
+    -- every domain, and yields the saturated spine.
+    --
+    -- **It saturates; it does not search.** §2.7 says the argument count
+    -- /"need not be given in advance: try successively longer sequences
+    -- afforded by the @∀@s"/ — that is @fit@, and it is a later phase's,
+    -- because making it two rule clauses and backtracking rather than a loop
+    -- in here is the demonstration the rule engine is for.
+    --
+    -- **Holes, not assumptions.** @claim@ and not @assume@: an assumption
+    -- adds @λ x : S@ and abstracts, so applying @Just@ would start building
+    -- a term of @Type₀ -> Maybe Bool@. §5.3's distinction arriving in a new
+    -- place.
+    --
+    -- It names each hole from the Π binder it came from, freshened with
+    -- 'Thena.Development.Cursor.freshIdent' — the same licence 'Attack' and
+    -- 'Eliminate' have. Phase 24c's @fresh-name@ is for names a /rule body/
+    -- chooses; these the engine chooses for itself.
   | Eliminate Operand
     -- ^ the term to eliminate — §3.7's elimination tactic, phase 17. It
     -- generalises the target and its indices in the motive, claims a hole per
@@ -378,6 +398,7 @@ produces o = case o of
   Parse _      -> True
   Resolve _    -> True
   Eliminate _  -> False
+  Apply _      -> True   -- the spine it built
 
 -- --------------------------------------------------------------------------
 -- Rules (§8)
@@ -531,6 +552,7 @@ opKeyword o = case o of
   Define _ _   -> "define"
   Certify _    -> "certify"
   Eliminate _  -> "prim-eliminate"
+  Apply _      -> "prim-apply"
 
 -- | The words that name a field of a core term (§4.3, phase 5). One word per
 -- field, so that none of them changes meaning with what is in focus.

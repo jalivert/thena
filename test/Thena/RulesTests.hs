@@ -140,7 +140,7 @@ matchTests =
       -- to choose between them, and the user sees the choice being made.
       testCase "a hole offers the hole rules, in definition order" $
         matching emptyGlobals (holeAt type0)
-          @?= ["attack", "try", "abandon", "eliminate", "unify-refine"]
+          @?= ["attack", "try", "abandon", "eliminate", "unify-refine", "apply"]
 
     , testCase "a guess at a non-Π offers only solve and regret" $
         matching emptyGlobals (guessAt type0)
@@ -238,8 +238,8 @@ iteratorTests =
             deep = drop 2 (drain it)
          in do
               _ <- pure deep
-              map nameOf (drain it) @?= ["attack", "try", "abandon", "eliminate", "unify-refine"]
-              map nameOf deep @?= ["abandon", "eliminate", "unify-refine"]
+              map nameOf (drain it) @?= ["attack", "try", "abandon", "eliminate", "unify-refine", "apply"]
+              map nameOf deep @?= ["abandon", "eliminate", "unify-refine", "apply"]
     ]
 
 -- --------------------------------------------------------------------------

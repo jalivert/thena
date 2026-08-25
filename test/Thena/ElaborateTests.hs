@@ -133,7 +133,7 @@ partitionTests =
       -- Unchanged from phase 16, and that is the point: the partition costs the
       -- hintless question nothing.
     , testCase "with no hint, the hintless half" $
-        named expectedBase Nothing @?= ["attack", "try", "abandon", "eliminate", "unify-refine"]
+        named expectedBase Nothing @?= ["attack", "try", "abandon", "eliminate", "unify-refine", "apply"]
 
     , testCase "with a name, only the elaboration rule" $
         named expectedBase nameHint @?= ["elab-var"]

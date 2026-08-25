@@ -653,6 +653,73 @@ tests =
         , ":show g"
         ]
 
+    , -- **Phase 25's deliverable**: the transcript above, with the two @claim@s
+      -- replaced by @apply@ — and then the cases the worked example does not
+      -- reach.
+      --
+      -- The holes are named from the Π binders they came from, so @Just@'s are
+      -- @A@ and @a@ where the hand-written version chose @T@ and @b@. An
+      -- anonymous domain — every @->@ — has no name to take, and gets @_@.
+      script
+        "applying"
+        [ "data Bool : Type\8320 where { true : Bool ; false : Bool }"
+        , "data Maybe (A : Type\8320) : Type\8320 \
+          \where { Nothing : Maybe A ; Just : \8704 (a : A) -> Maybe A }"
+        , ":theorem g : Maybe Bool"
+          -- One line for the whole of `inferring`'s three.
+        , ":matches"
+        , "apply Just"
+        , ":show"
+          -- A head with no Π at all: zero holes claimed, so @apply@ degenerates
+          -- to @unify-refine@ exactly. That is the phase's claim that it adds
+          -- no capability, in its smallest form.
+        , "goto a"
+        , "apply true"
+        , ":show"
+        , "qed"
+        , ":show g"
+          -- **A hypothesis, not a global.** A REPL argument is resolved in the
+          -- context at the focus, so @apply@ works on anything in scope — which
+          -- is what @examples/determinacy.thena@ needs when it applies an
+          -- induction hypothesis by hand.
+          --
+          -- Two anonymous domains, so two holes called @_@ and @_1@, and
+          -- @goto _@ still reaches the first: identifiers stay unique (phase
+          -- 24b) whatever they are named after.
+        , ":theorem ap2 : \8704 (A : Type\8320) (f : A -> A -> A) (x : A) -> A"
+        , "attack"
+        , "intro"
+        , "intro"
+        , "intro"
+        , "into"
+        , "along"
+        , "along"
+        , "along"
+        , "apply f"
+        , ":show"
+        , "goto _"
+        , ":where"
+        , ":abandon"
+          -- **The failure, and what it leaves behind.** @prim-apply@ claims
+          -- before @unify-refine@ can find out the types will not meet, so a
+          -- refused @apply@ leaves its holes and its @=@-binding in the
+          -- development. Pre-existing — a failing @unify-refine@ leaves its
+          -- binding the same way — and @:undo@ is the answer: one command in,
+          -- one command out.
+        , ":theorem bad : Bool"
+        , "apply Just"
+        , ":show"
+        , ":undo"
+        , ":show"
+        , "apply true"
+        , "qed"
+          -- The head is the guard, so @apply@ at a guess never runs its body.
+        , ":theorem guessed : Bool"
+        , "attack"
+        , "apply true"
+        , ":abandon"
+        ]
+
     , script
         "mistakes"
         [ "wibble"

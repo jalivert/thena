@@ -1,8 +1,8 @@
 -- | The shipped rule base, read off disk, and what it is supposed to say.
 --
--- **Two independent encodings of the same nine rules**, which is the whole
+-- **Two independent encodings of the same ten rules**, which is the whole
 -- point. 'standardBases' reads @rules/standard.thena.rules@ through the same
--- path the REPL uses at startup; 'expectedStandard' is the same nine rules as
+-- path the REPL uses at startup; 'expectedStandard' is the same ten rules as
 -- Haskell literals, moved here from @Thena.Rules@ when phase 22 deleted
 -- @standardRules@. "Thena.RuleSyntaxTests" asserts they agree.
 --
@@ -75,6 +75,7 @@ expectedStandard =
   , Rule (GlobalName "eliminate")  ["t"] [FocusIsHole]                 [Do (Op.Eliminate (Ref "t"))]
   , elabVar
   , unifyRefine
+  , applyRule
   ]
 
 -- | Thesis §2.7's two-phase tactic, less the claiming half (which is phase
@@ -92,6 +93,17 @@ unifyRefine = Rule (GlobalName "unify-refine") ["t"] [FocusIsHole]
   , Do (Unify (Ref "s") (Ref "g"))
   , Do (Try (Ref "x"))
   , Do Solve
+  ]
+
+-- | Phase 25's claiming half — §2.7's @naive-refine@ with the search left out.
+--
+-- Two instructions, and that is the phase's argument: @prim-apply@ builds the
+-- saturated spine and 'unifyRefine' is what makes it fit, unchanged. @apply@
+-- adds no capability the two of them did not already have.
+applyRule :: Rule
+applyRule = Rule (GlobalName "apply") ["f"] [FocusIsHole]
+  [ Bind "s" (Op.Apply (Ref "f"))
+  , Do (Call (GlobalName "unify-refine") [Ref "s"])
   ]
 
 -- | A fresh session with 'expectedBase' installed, for the suites that drive

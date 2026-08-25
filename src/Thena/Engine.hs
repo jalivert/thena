@@ -629,6 +629,14 @@ perform instr rest m = case operation instr of
       OnComponent _ -> failure NotAHole m
       _             -> failure (CannotMove NotOnTheSpine) m
 
+  -- Thesis §2.7's @naive-refine@ with the search taken out (phase 25): the
+  -- head's type is inferred here, and 'saturate' does the walking.
+  Apply f -> case term f of
+    Left r   -> failure r m
+    Right hd -> case infer (globals m) contextAt (names m) hd of
+      (Left e,   n1) -> failure (NotTypeable e) m { names = n1 }
+      (Right ty, n1) -> saturate hd ty m { names = n1 }
+
   Concat l r -> case (,) <$> text l <*> text r of
     Left e         -> failure e m
     Right (ls, rs) -> produce (VText (ls ++ rs)) m
@@ -771,6 +779,24 @@ perform instr rest m = case operation instr of
     keeping g n cur = fmap (\cur' -> (cur', n)) (g cur)
 
     contextAt = proofContext (proof m)
+
+    -- Claim a hole for every Π domain, extending the spine as it goes, and
+    -- stop at the first type that is not a Π — that is what makes @apply@
+    -- saturating rather than searching (§2.7, 'Thena.Ops.Apply').
+    --
+    -- **Each hole goes above the focus, and the context is re-read each time**,
+    -- so a later domain may mention an earlier hole and still be in scope:
+    -- @Just : ∀ (A : Type₀) (a : A) -> Maybe A@ claims @?A@ and then @?a : A@.
+    -- That is also why 'whnf' cannot be given @contextAt@ — that one is fixed
+    -- at the focus this instruction started from.
+    saturate hd ty m' = case whnf (globals m') (proofContext (proof m')) ty of
+      Pi i dom sc ->
+        let (v, n1) = fresh (names m')
+            i'      = Cursor.freshIdent (Cursor.identsIn (cursor (proof m'))) i
+            cur     = insertAbove (Component.Claim v i' dom) (cursor (proof m'))
+         in saturate (App hd (Free v)) (instantiate (Free v) sc)
+                     m' { proof = ProofState cur, names = n1 }
+      _ -> produce (VTerm (Trailing hd)) m'
 
     taken (Ident n) = NameTaken n
 

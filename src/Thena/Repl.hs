@@ -936,6 +936,12 @@ renderOp n ctx op = case op of
   -- arguments as any other op's, spaced and unwrapped.
   Ops.Call nm as  -> unwords ("call" : nameString nm : map operand as)
   Ops.Eliminate t -> "eliminate " ++ operand t
+  -- **Spelled as 'Thena.Ops.opKeyword' spells it**, unlike its neighbours.
+  -- They still print @try@, @attack@ and @eliminate@, which since phase 23b
+  -- name the /rules/ rather than the ops this display is showing. Divergence
+  -- noted on MS2's closeout list rather than fixed in passing, since fixing
+  -- it moves seven lines that are not this phase's.
+  Ops.Apply f     -> "prim-apply " ++ operand f
   where
     operand = renderOperand n ctx
 

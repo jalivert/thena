@@ -10,12 +10,14 @@ standard
   eliminate ‹t›
   elab-var
   unify-refine ‹t›
+  apply ‹f›
 thena spine> :matches
 attack
 try ‹t›
 abandon
 eliminate ‹t›
 unify-refine ‹t›
+apply ‹f›
 thena spine> attack
 thena spine> :matches
 solve
@@ -32,6 +34,7 @@ try ‹t›
 abandon
 eliminate ‹t›
 unify-refine ‹t›
+apply ‹f›
 thena spine> attack
 thena spine> :matches
 intro
@@ -55,6 +58,7 @@ try ‹t›
 abandon
 eliminate ‹t›
 unify-refine ‹t›
+apply ‹f›
 thena spine> :abandon
 abandoned id
 thena spine> :theorem c : ∀ (A : Type₀) -> Type₀

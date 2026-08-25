@@ -1,0 +1,101 @@
+thena spine> data Bool : Type₀ where { true : Bool ; false : Bool }
+declared Bool
+thena spine> data Maybe (A : Type₀) : Type₀ where { Nothing : Maybe A ; Just : ∀ (a : A) -> Maybe A }
+declared Maybe
+thena spine> :theorem g : Maybe Bool
+proving g : Maybe Bool
+thena spine> :matches
+attack
+try ‹t›
+abandon
+eliminate ‹t›
+unify-refine ‹t›
+apply ‹f›
+thena spine> apply Just
+solved: A
+thena spine> :show
+  let A = Bool : Type₀ in
+  let ? a : A in
+  let refined = Just A a : Maybe A in
+▶ let g = refined : Maybe Bool in
+  g
+thena spine> goto a
+thena spine> apply true
+already equal
+thena spine> :show
+  let A = Bool : Type₀ in
+  let refined1 = true : Bool in
+▶ let a = refined1 : A in
+  let refined = Just A a : Maybe A in
+  let g = refined : Maybe Bool in
+  g
+thena spine> qed
+g : Maybe Bool   ∎
+thena spine> :show g
+g : Maybe Bool
+g = let A = Bool : Type₀ in let refined1 = true : Bool in let a = refined1 : A in let refined = Just A a : Maybe A in let g = refined : Maybe Bool in g
+thena spine> :theorem ap2 : ∀ (A : Type₀) (f : A -> A -> A) (x : A) -> A
+proving ap2 : ∀ (A : Type₀) -> (A -> A -> A) -> A -> A
+thena spine> attack
+thena spine> intro
+thena spine> intro
+thena spine> intro
+thena spine> into
+thena spine> along
+thena spine> along
+thena spine> along
+thena spine> apply f
+already equal
+thena spine> :show
+  let ? ap2 : ∀ (A : Type₀) -> (A -> A -> A) -> A -> A ≐ (
+    λ (A : Type₀) ->
+    λ (f : A -> A -> A) ->
+    λ (x : A) ->
+    let ? _ : A in
+    let ? _1 : A in
+    let refined = f _ _1 : A in
+▶   let ap21 = refined : A in
+    ap21
+  ) in
+  ap2
+thena spine> goto _
+thena spine> :where
+focus
+  let ? _ : A in
+path
+  root ▸ ≐ ap2 ▸ A ▸ f ▸ x
+context
+  A : Type₀
+  f : A -> A -> A
+  x : A
+type
+  A
+thena spine> :abandon
+abandoned ap2
+thena spine> :theorem bad : Bool
+proving bad : Bool
+thena spine> apply Just
+stuck: Maybe A and Bool cannot be made equal
+thena spine> :show
+  let ? A : Type₀ in
+  let ? a : A in
+  let refined = Just A a : Maybe A in
+▶ let ? bad : Bool in
+  bad
+thena spine> :undo
+▶ let ? bad : Bool in
+  bad
+thena spine> :show
+▶ let ? bad : Bool in
+  bad
+thena spine> apply true
+already equal
+thena spine> qed
+bad : Bool   ∎
+thena spine> :theorem guessed : Bool
+proving guessed : Bool
+thena spine> attack
+thena spine> apply true
+stuck: no clause of apply applies here
+thena spine> :abandon
+abandoned guessed
