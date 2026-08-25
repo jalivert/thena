@@ -31,6 +31,9 @@ module Thena.Driver
   , answer
   , oneLine
   , loadSource
+  , RuleFileError (..)
+  , loadRuleBases
+  , ruleHeader
   , parseCore
   , parseDevelopment
   , parseDeclaration
@@ -39,6 +42,7 @@ module Thena.Driver
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Level)
+import Data.List (isSuffixOf)
 import Thena.Development.Cursor (Cursor, Focus (..), Part (..), focus)
 import Thena.Development.Partial (Partial (..), extract)
 import Thena.Engine
@@ -99,16 +103,28 @@ import Thena.Ops
   , Instr (..)
   , Rule (..)
   , Op (..)
+  , Rule
   , Operand (..)
   , Value (..)
   )
-import Thena.Rules (RuleIter, matches, next, standardRules)
-import Thena.Syntax.Concrete (Raw)
+import Thena.Rules
+  ( RuleBase (..)
+  , RuleError
+  , RuleIter
+  , allRules
+  , matches
+  , next
+  , resolveRule
+  , ruleBase
+  , validate
+  )
+import Thena.Syntax.Concrete (Raw, RawRule)
 import Thena.Syntax.Lexer (Located, Token, lexTokens)
 import Thena.Syntax.Parser
   ( parseData
   , parseEquation
   , parseNameAndType
+  , parseRules
   , parseTerm
   )
 import Thena.Syntax.Resolve (resolve, resolveData, resolvePartial)
@@ -166,7 +182,7 @@ data Proof = Proof
 
 newSession :: Session
 newSession = Session
-  { sessionMachine   = Machine (Exec [] [] []) ps emptyGlobals standardRules n
+  { sessionMachine   = Machine (Exec [] [] []) ps emptyGlobals [] n
   , sessionProof     = Nothing
   , sessionSuspended = []
   , sessionStepping  = False
@@ -218,6 +234,15 @@ data Response
     -- 'Message', which the driver may not build out of a term: rendering is
     -- "Thena.Repl"'s (§2.5)
   | LoadRequested FilePath
+  | RulesRequested [FilePath]
+    -- ^ @:load@ on one or more @.thena.rules@ paths (phase 22). Like
+    -- 'LoadRequested' it only names them — reading is "Thena.Repl"'s (§12
+    -- invariant 4) — but it names /several/, because a load replaces the whole
+    -- ordered list of bases and the order is the order written
+  | BasesLoaded [RuleBase]      -- ^ what @:load@ on rule files installed
+  | BasesListed [RuleBase]      -- ^ @:bases@ — name, description, path
+  | RulesListed [RuleBase]      -- ^ @:rules@ — the rules themselves, by base
+  | RuleFileRefused FilePath RuleFileError
     -- ^ @:load ‹path›@. The driver may not touch a file — §12 invariant 4 puts
     -- all IO in "Thena.Repl" — so it asks, and the caller reads the file and
     -- hands the contents back to 'loadSource'
@@ -263,6 +288,17 @@ data CommandError
   | AlreadyDeclaredHere String
     -- ^ @:theorem@ under a name the global environment already has (§3.6)
   | NothingToUndo
+  | MixedLoad String
+    -- ^ @:load a.thena b.thena.rules@ — a script and a rule base in one
+    -- command. Two different operations, and neither is what was asked for
+  | ProofUnderway GlobalName
+    -- ^ a rule base loaded while a proof is current. **The base may not change
+    -- under a half-built proof** — the user's reproducibility argument,
+    -- 2026-08-25 — and *"loading a new rule-base in between theorems is fine
+    -- for now"* is why this names the proof rather than refusing outright
+  | ProofsSuspended [GlobalName]
+    -- ^ … or while one is suspended, which is the same hazard postponed: a
+    -- suspended proof is resumed and continued, so its replay would change
   | LevelExpected String
     -- ^ @:elim Nat Nat@ — @:elim@\'s optional second argument parsed as a term
     -- but is not a @Typeₗ@ (phase 10). Not called @NotAUniverse@ because
@@ -416,7 +452,22 @@ dispatch s name arg = case name of
       Left e        -> (s, Failed e)
       Right (t, n1) -> inferred t n1
   -- Reading the file is the caller's; this only names it (§12 invariant 4).
-  ":load"  -> withArgument (s, LoadRequested arg)
+  -- **Two different loads behind one word, told apart by extension** — the
+  -- user, 2026-08-25. A @.thena.rules@ path is a rule base and there may be
+  -- several, leftmost searched first; anything else is one script of command
+  -- lines, exactly as phase 11 left it. Reading is the caller's; this only
+  -- names them (§12 invariant 4).
+  ":load"  -> withArgument $ case pathsOf arg of
+    ps@(_ : _)
+      | all isRulePath ps -> case proofUnderway of
+          Just why -> (s, Rejected why)
+          Nothing  -> (s, RulesRequested ps)
+      | any isRulePath ps -> (s, Rejected (MixedLoad name))
+    [one] -> (s, LoadRequested one)
+    _     -> (s, Rejected (UnexpectedArgument name))
+  -- The loaded bases, in search order. A look, so a colon.
+  ":bases" -> noArgument (s, BasesListed (rules machine))
+  ":rules" -> noArgument (s, RulesListed (rules machine))
   -- Thesis §2.3's state-validity judgment over the whole development, at any
   -- time (§5.3). A colon: it looks and changes nothing.
   ":revalidate" -> noArgument $
@@ -552,6 +603,14 @@ dispatch s name arg = case name of
     matching hint =
       unfoldIter (matches (rules machine) (globals machine)
                           (cursor (proof machine)) hint)
+
+    -- The base may not change under a half-built proof, current or suspended
+    -- (the user, 2026-08-25). Answered before the file is read, so a refusal
+    -- costs no IO and is decided in the pure half.
+    proofUnderway = case (sessionProof s, sessionSuspended s) of
+      (Just pr, _)     -> Just (ProofUnderway (proofName pr))
+      (Nothing, [])    -> Nothing
+      (Nothing, ps)    -> Just (ProofsSuspended (map proofName ps))
 
     noArgument r
       | null arg  = r
@@ -798,6 +857,112 @@ corePart w a = case a of
   _  -> case reads a of
     [(k, "")] -> maybe (Left (UnexpectedArgument w)) Right (partOf w (Just k))
     _         -> Left (UnexpectedArgument w)
+
+-- --------------------------------------------------------------------------
+-- Rule bases (§8, phase 22)
+-- --------------------------------------------------------------------------
+
+-- | @:load@\'s argument, split on spaces and commas. **Both separators** —
+-- the user asked for "comma or space separated (or both)", 2026-08-25.
+pathsOf :: String -> [FilePath]
+pathsOf = words . map (\c -> if c == ',' then ' ' else c)
+
+-- | Is this a rule base rather than a script? The extension is the whole test,
+-- and it is the user\'s: *"Maybe `.thena.rules`, that sounds fine."*
+isRulePath :: FilePath -> Bool
+isRulePath p = ruleExtension `isSuffixOf` p
+
+ruleExtension :: String
+ruleExtension = ".thena.rules"
+
+-- | Why a rule-base file was not accepted.
+data RuleFileError
+  = NoRuleHeader
+    -- ^ the file does not begin @rule base ‹name› … where@. Required, because
+    -- a base is a named thing that @:bases@ has to be able to list
+  | RuleSyntaxError SyntaxError
+    -- ^ it did not lex or parse. The position is inside, and it is the true
+    -- line: the header is blanked rather than dropped so that nothing shifts
+  | RuleIllFormed [RuleError]
+    -- ^ it parsed, and one or more rules did not resolve or did not validate
+  deriving (Eq, Show)
+
+-- | The header line — @rule base ‹name› ‹description› where@.
+--
+-- **Read textually, before the lexer sees anything**, which is what makes the
+-- user\'s *"just any text in front of the `where` keyword"* literally true:
+-- commas, parentheses and quotes are reserved characters and would not lex,
+-- but they never reach the lexer. The same trick keeps @data@ from being a
+-- lexer keyword (§2.4).
+--
+-- It is **one line**, and that is what makes the trailing @where@ unambiguous
+-- even when the description itself contains the word.
+ruleHeader :: String -> Maybe (String, Maybe String)
+ruleHeader line = case words line of
+  "rule" : "base" : nm : rest
+    | not (null rest)
+    , last rest == "where" ->
+        Just (nm, describe (init rest))
+  _ -> Nothing
+  where
+    describe ws
+      | null ws   = Nothing
+      | otherwise = Just (unwords ws)
+
+-- | Read one rule-base file: its header, then its rules.
+--
+-- @visible@ is every rule already in scope — the bases loaded before this one,
+-- in order — so a later base may @call@ an earlier one\'s rules, which is the
+-- Prolog-file analogy the user drew. Within the file, a rule sees the rules
+-- above it, which is why @elab-var@ can call @try@ from the same file.
+--
+-- Takes contents and not a path (§12 invariant 4).
+readRuleBase :: [Rule] -> FilePath -> String -> Either RuleFileError RuleBase
+readRuleBase visible path src = case lines src of
+  [] -> Left NoRuleHeader
+  header : rest -> case ruleHeader header of
+    Nothing -> Left NoRuleHeader
+    Just (nm, desc) -> do
+      -- The header line is blanked, not dropped: every position the lexer
+      -- reports then names the line the user is looking at.
+      ts   <- mapLeft RuleSyntaxError (tokensOf (unlines ("" : rest)))
+      raws <- mapLeft (RuleSyntaxError . ParseFailed) (parseRules ts)
+      rs   <- resolveAll visible raws
+      Right (ruleBase nm desc path rs)
+
+-- | Resolve each rule against everything visible above it, then validate.
+--
+-- Threaded rather than mapped, because a rule may @call@ one written earlier
+-- in the same file. Every error, not the first — 'validate'\'s reason.
+resolveAll :: [Rule] -> [RawRule] -> Either RuleFileError [Rule]
+resolveAll visible0 = go visible0 [] []
+  where
+    go _ errs done [] = case errs of
+      [] -> Right (reverse done)
+      _  -> Left (RuleIllFormed (reverse errs))
+    go visible errs done (raw : more) = case resolveRule visible raw of
+      Left es -> go visible (reverse es ++ errs) done more
+      Right r -> go (visible ++ [r]) (reverse (validate r) ++ errs) (r : done) more
+
+-- | Install a whole ordered list of bases, or none of them.
+--
+-- **A load replaces the list** — the user, 2026-08-25: *"If I want to shuffle
+-- them, I just run load again and that replaces the entire thing."* So this is
+-- also the shuffling command, until there is a real one.
+--
+-- **All or nothing.** A file that will not load leaves the previous list in
+-- place, so a session never ends up searching half of what was asked for.
+loadRuleBases :: Session -> [(FilePath, String)] -> (Session, Response)
+loadRuleBases s = go [] 
+  where
+    go acc [] =
+      ( s { sessionMachine = (sessionMachine s) { rules = acc } }
+      , BasesLoaded acc
+      )
+    go acc ((path, src) : more) =
+      case readRuleBase (allRules acc) path src of
+        Left e  -> (s, RuleFileRefused path e)
+        Right b -> go (acc ++ [b]) more
 
 -- | Read something and hand it back for rendering.
 --

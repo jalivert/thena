@@ -27,6 +27,7 @@ module Thena.Syntax.Parser
   , parseData
   , parseEquation
   , parseRule
+  , parseRules
   ) where
 
 import Thena.Syntax.Concrete
@@ -48,6 +49,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 %name parseData Data
 %name parseEquation Equation
 %name parseRule Rule
+%name parseRules RuleFile
 %tokentype { Located Token }
 %monad { Either ParseError }
 %error { parseError }
@@ -149,6 +151,17 @@ Constructor :: { RawConstructor }
 -- @when@ is optional, because a rule may apply everywhere; @then@ is not,
 -- because a rule with no body does nothing. Test words and op words are
 -- @ident@s and not tokens — see 'Thena.Syntax.Concrete.RawRule'.
+-- A whole rule-base file, less its header line. Rules may span lines — DECIDED
+-- by the user 2026-08-25 — so the file is parsed whole rather than split, and
+-- what ends a rule is the next 'rule' keyword or the end of input. Nothing in
+-- 'Instr' can begin with 'rule', so no terminator is needed.
+RuleFile :: { [RawRule] }
+  : Rules                                  { reverse $1 }
+
+Rules :: { [RawRule] }
+  :                                        { [] }
+  | Rules Rule                             { $2 : $1 }
+
 Rule :: { RawRule }
   : rule ident Params ':-' Tests then Body   { RawRule $2 $3 $5 (reverse $7) }
 

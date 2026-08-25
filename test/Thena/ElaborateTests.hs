@@ -54,9 +54,9 @@ import Thena.Rules
   , matches
   , next
   , ruleBase
-  , standardRules
   , validate
   )
+import Thena.Standard (expectedBase)
 import Thena.Syntax.Concrete (Raw (..))
 
 tests :: TestTree
@@ -97,7 +97,7 @@ nameHint, appHint :: Maybe Raw
 nameHint = Just (RawName "a")
 appHint  = Just (RawApp (RawName "a") (RawName "a"))
 
-machine :: RuleBase -> [Instr] -> Machine
+machine :: [RuleBase] -> [Instr] -> Machine
 machine base is =
   load is (Machine (Exec [] [] []) (ProofState hole) emptyGlobals base 1000)
 
@@ -111,7 +111,7 @@ runOut m = case step m of
   Finished m'       -> ([], Right m')
   Stuck r _         -> ([], Left r)
 
-named :: RuleBase -> Maybe Raw -> [String]
+named :: [RuleBase] -> Maybe Raw -> [String]
 named base hint =
   [ n | Rule (GlobalName n) _ _ _ <- drain (matches base emptyGlobals hole hint) ]
 
@@ -129,34 +129,34 @@ partitionTests =
   testGroup
     "a hint partitions the base"
     [ testCase "exactly one shipped rule asks about the hint" $
-        [ n | r@(Rule (GlobalName n) _ _ _) <- allRules standardRules, usesHint r ]
+        [ n | r@(Rule (GlobalName n) _ _ _) <- allRules expectedBase, usesHint r ]
           @?= ["elab-var"]
 
       -- Unchanged from phase 16, and that is the point: the partition costs the
       -- hintless question nothing.
     , testCase "with no hint, the hintless half" $
-        named standardRules Nothing @?= ["attack", "try", "abandon", "eliminate"]
+        named expectedBase Nothing @?= ["attack", "try", "abandon", "eliminate"]
 
     , testCase "with a name, only the elaboration rule" $
-        named standardRules nameHint @?= ["elab-var"]
+        named expectedBase nameHint @?= ["elab-var"]
 
       -- The head is shallow (§8): it asks what the tree /is/, not whether it
       -- resolves. An application is not a name, so nothing in the hinted half
       -- matches and there is no hintless half to fall through to.
     , testCase "with a compound hint, nothing" $
-        named standardRules appHint @?= []
+        named expectedBase appHint @?= []
 
       -- @elab-var@ takes no parameters, so unlike @try@ and @eliminate@ it is
       -- something the engine can actually run.
     , testCase "and dispatch can run it" $
         [ n | Rule (GlobalName n) _ _ _ <-
-                drain (dispatch standardRules emptyGlobals hole nameHint) ]
+                drain (dispatch expectedBase emptyGlobals hole nameHint) ]
           @?= ["elab-var"]
 
       -- Without this line 'elabVar' fails its own load-time check: @hint@ is a
       -- Ref that no Bind introduces (§7.2's validation pass).
     , testCase "a hint rule may read `hint` without binding it" $
-        concatMap validate (allRules standardRules) @?= []
+        concatMap validate (allRules expectedBase) @?= []
 
     , testCase "and a rule with no hint head may not" $
         validate (Rule (GlobalName "sneaky") [] [FocusIsHole]
@@ -203,7 +203,7 @@ opTests =
       -- (§8's one magic name), @elab-var@ resolves it, calls @try@ with it and
       -- commits — so the hole ends up defined as the variable that was named.
     , testCase "prove with a name elaborates it" $
-        case snd (runOut (machine standardRules
+        case snd (runOut (machine expectedBase
                     [Do (Ops.Prove (Just (Lit (VSurface (RawName "a")))))])) of
           Left r  -> assertFailure ("did not elaborate: " ++ show r)
           Right m -> case focus (cursor (proof m)) of
@@ -211,11 +211,11 @@ opTests =
             other -> assertFailure ("expected a definition, got " ++ show other)
     ]
   where
-    bound n is = case snd (runOut (machine (ruleBase []) is)) of
+    bound n is = case snd (runOut (machine [] is)) of
       Right m -> lookup n (Thena.Engine.env (exec m))
       Left r  -> error ("the program did not run: " ++ show r)
 
-    failed is = case snd (runOut (machine (ruleBase []) is)) of
+    failed is = case snd (runOut (machine [] is)) of
       Left r  -> r
       Right _ -> error "expected the program to fail"
 
@@ -223,7 +223,7 @@ opTests =
 -- Call (§7.2, §8)
 -- --------------------------------------------------------------------------
 
--- | @try ‹t›@, as 'Thena.Rules.standardRules' ships it.
+-- | @try ‹t›@, as the shipped base has it.
 callee :: Rule
 callee = Rule (GlobalName "try") ["t"] [FocusIsHole] [Do (Ops.Try (Ref "t"))]
 
@@ -236,7 +236,7 @@ callTests =
         let is = [ Bind "x" (Ops.Concat (Lit (VText "a")) (Lit (VText "")))
                  , Do (Ops.Call (Lit (VRule callee)) [Lit (VTerm (Trailing type0))])
                  ]
-        case snd (runOut (machine (ruleBase []) is)) of
+        case snd (runOut (machine [] is)) of
           Left r  -> assertFailure ("did not run: " ++ show r)
           Right m -> do
             isGuess m @?= True
@@ -246,7 +246,7 @@ callTests =
       -- Direct invocation, so there is nothing to retry and no snapshot to
       -- hold: a Call frame, never a Choice.
     , testCase "it pushes no choice point" $
-        case snd (runOut (machine (ruleBase [])
+        case snd (runOut (machine []
                     [Do (Ops.Call (Lit (VRule callee)) [Lit (VTerm (Trailing type0))])])) of
           Right m -> choicePoints m @?= []
           Left r  -> assertFailure ("did not run: " ++ show r)
@@ -254,26 +254,26 @@ callTests =
       -- Checked before the body runs, because an arity slip surfacing as an
       -- unbound Ref halfway through would already have moved the development.
     , testCase "too few arguments is caught before anything happens" $
-        case snd (runOut (machine (ruleBase []) [Do (Ops.Call (Lit (VRule callee)) [])])) of
+        case snd (runOut (machine [] [Do (Ops.Call (Lit (VRule callee)) [])])) of
           Left (WrongNumberOfArguments (GlobalName "try") 1 0) -> pure ()
           other -> assertFailure ("expected an arity failure, got " ++ show other)
 
     , testCase "and so is too many" $
-        case snd (runOut (machine (ruleBase [])
+        case snd (runOut (machine []
                     [Do (Ops.Call (Lit (VRule callee))
                            [Lit (VTerm (Trailing type0)), Lit (VTerm (Trailing type0))])])) of
           Left (WrongNumberOfArguments (GlobalName "try") 1 2) -> pure ()
           other -> assertFailure ("expected an arity failure, got " ++ show other)
 
     , testCase "calling something that is not a rule" $
-        case snd (runOut (machine (ruleBase []) [Do (Ops.Call (Lit (VText "try")) [])])) of
+        case snd (runOut (machine [] [Do (Ops.Call (Lit (VText "try")) [])])) of
           Left ExpectedRule -> pure ()
           other             -> assertFailure ("expected ExpectedRule, got " ++ show other)
 
       -- §8: a head is dispatch's filter, and a direct call has already chosen.
       -- The callee runs and fails in its body, which is handled (§7.3).
     , testCase "the callee's head is not tested" $
-        case snd (runOut (machine (ruleBase [])
+        case snd (runOut (machine []
                     [ Do Ops.Attack
                     , Do (Ops.Call (Lit (VRule callee)) [Lit (VTerm (Trailing type0))])
                     ])) of
@@ -298,7 +298,7 @@ entryEnvTests =
       -- after the hint has been read, and the second must still be able to
       -- read it. Without 'entryEnv' this is UnboundInBody "hint".
       testCase "the second alternative still sees it" $ do
-        let (msgs, out) = runOut (machine (ruleBase [elabFails, elabWorks])
+        let (msgs, out) = runOut (machine [ruleBase "test" Nothing "" [elabFails, elabWorks]]
                                     [Do (Ops.Prove (Just (Lit (VSurface (RawName "a")))))])
         msgs @?= ["chose 1000: elab-fails", "backtracking to 1000: elab-works"]
         case out of

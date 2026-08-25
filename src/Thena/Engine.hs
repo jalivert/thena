@@ -123,7 +123,8 @@ data Machine = Machine
   { exec    :: Exec
   , proof   :: ProofState
   , globals :: GlobalEnv  -- ^ NOT backtrackable (§7.4, §3.3.1)
-  , rules   :: RuleBase   -- ^ NOT backtrackable (§7.4) — phase 15
+  , rules   :: [RuleBase] -- ^ NOT backtrackable (§7.4) — phase 15; a list
+                          -- of loaded bases, leftmost searched first (phase 22)
   , names   :: Int        -- ^ NOT backtrackable (§7.4)
   }
   deriving (Eq, Show)
