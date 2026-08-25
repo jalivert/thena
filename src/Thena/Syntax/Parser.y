@@ -81,6 +81,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   then    { Located _ TThen }
   ':-'    { Located _ TNeck }
   num     { Located _ (TNumber $$) }
+  str     { Located _ (TString $$) }
   univ    { Located _ (TUniverse $$) }
   ident   { Located _ (TIdent $$) }
 
@@ -200,6 +201,7 @@ Operands :: { [RawOperand] }
 Operand :: { RawOperand }
   : ident                                  { RawRef $1 }
   | num                                    { RawPos $1 }
+  | str                                    { RawText $1 }
 
 
 Constraint :: { RawConstraint }

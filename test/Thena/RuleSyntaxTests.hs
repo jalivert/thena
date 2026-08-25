@@ -49,6 +49,7 @@ tests =
     [ againstTheBase
     , vocabulary
     , shapes
+    , text
     , mistakes
     ]
 
@@ -231,6 +232,61 @@ shapes =
       testCase "a hyphenated name is one identifier" $ do
         r <- expectRule expectedStandard "rule elab-app :- when focus-is-hole then solve"
         ruleName r @?= GlobalName "elab-app"
+    ]
+
+-- --------------------------------------------------------------------------
+-- Text literals (phase 22b)
+-- --------------------------------------------------------------------------
+
+-- | @"…"@, at the user's instruction: *"Rules absolutely need a string
+-- literal."* Without one @say@, @ask@ and @concat@ had keywords that resolved
+-- and nothing they could be given.
+text :: TestTree
+text =
+  testGroup
+    "text literals"
+    [ testCase "say" $ do
+        b <- bodyOf "say \"attacking\""
+        b @?= [Do (Say (Lit (VText "attacking")))]
+
+    , testCase "concat, both sides" $ do
+        b <- bodyOf "m = concat \"no rule for \" g"
+        b @?= [Bind "m" (Concat (Lit (VText "no rule for ")) (Ref "g"))]
+
+    , -- The op this was really missing: a rule can now interrogate the user.
+      testCase "ask" $ do
+        b <- bodyOf "x = ask \"which one?\" name"
+        b @?= [Bind "x" (Ask (Lit (VText "which one?")) AName)]
+
+    , testCase "the empty string" $ do
+        b <- bodyOf "say \"\""
+        b @?= [Do (Say (Lit (VText "")))]
+
+    , testCase "the three escapes" $ do
+        b <- bodyOf "say \"a \\\"q\\\" b\\\\c\\nd\""
+        b @?= [Do (Say (Lit (VText "a \"q\" b\\c\nd")))]
+
+    , -- Reserved characters are ordinary inside a string: it is one token, and
+      -- the lexer never looks inside it.
+      testCase "reserved characters are ordinary inside a string" $ do
+        b <- bodyOf "say \"( ) { } ; , :- -> λ\""
+        b @?= [Do (Say (Lit (VText "( ) { } ; , :- -> λ")))]
+
+    , -- §7.2's bargain: an op given the wrong kind of value fails at run time,
+      -- not in the grammar. So this resolves and would fail when run.
+      testCase "text is accepted wherever an operand is" $ do
+        b <- bodyOf "try \"not a term\""
+        b @?= [Do (Try (Lit (VText "not a term")))]
+
+    , testCase "an unterminated string does not lex" $
+        case readRule expectedStandard "rule r :- when focus-is-hole then say \"oops" of
+          Left _  -> pure ()
+          Right r -> assertFailure ("read: " ++ show r)
+
+    , testCase "a rule name is still a name, not text" $
+        case readRule expectedStandard "rule r :- when focus-is-hole then call \"try\" x" of
+          Left _  -> pure ()
+          Right r -> assertFailure ("read: " ++ show r)
     ]
 
 -- --------------------------------------------------------------------------

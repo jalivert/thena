@@ -25,6 +25,19 @@ $reserved = [\( \) \{ \} \[ \] \; \, \" λ ∀ ⊢ ≟ ≐ ≈ ▸ ⌜ ⌝]
 $idstart = [$lower $upper \_ \x80-\x10ffff] # $reserved
 $idchar  = [\x21-\x10ffff] # $reserved
 
+-- A string literal (phase 22b). The quote is already reserved, so this is
+-- purely additive — no name has ever been able to contain one. Three escapes
+-- and no more, and a string does not span a line.
+--
+-- An unterminated string is a lex error, but it is reported where scanning gave
+-- up — the end of the line, not the opening quote — because that is where
+-- Alex's longest match runs out. Good enough at the REPL and imprecise in a
+-- file; on MS2's closeout list rather than fixed here, since a better message
+-- needs a second 'LexError' constructor and a rule that matches the bad case.
+$strchar = [$printable \t] # [\" \\]
+@escape  = \\ [\" \\ n]
+@string  = \" ($strchar | @escape)* \"
+
 @ident    = $idstart $idchar*
 @universe = "Type" ($digit+ | $sub+)
 
@@ -65,6 +78,7 @@ tokens :-
   "then"        { keyword TThen }
   ":-"          { keyword TNeck }
   $digit+       { \p s -> Located (posOf p) (TNumber (read s)) }
+  @string       { \p s -> Located (posOf p) (TString (unescape s)) }
   @universe     { \p s -> Located (posOf p) (TUniverse (levelOf s)) }
   @ident        { \p s -> Located (posOf p) (TIdent s) }
 
@@ -105,6 +119,7 @@ data Token
   | TThen
   | TNeck
   | TNumber Int
+  | TString String
   | TUniverse Int
   | TIdent String
   deriving (Eq, Show)
@@ -119,6 +134,24 @@ keyword t p _ = Located (posOf p) t
 
 posOf :: AlexPosn -> Pos
 posOf (AlexPn _ line col) = Pos line col
+
+-- | The three escapes, undone. Takes the token including its quotes.
+--
+-- Total by construction: the lexer only hands it strings @\@string@ matched, so
+-- a backslash is always followed by one of the three and the quotes are always
+-- there. Written to fall through rather than to fail, because a partial
+-- function here would be a crash in the lexer.
+unescape :: String -> String
+unescape = go . drop 1 . dropLast
+  where
+    dropLast str = if null str then str else init str
+
+    go cs = case cs of
+      '\\' : 'n'  : rest -> '\n' : go rest
+      '\\' : '\\' : rest -> '\\' : go rest
+      '\\' : '\"' : rest -> '\"' : go rest
+      c          : rest -> c    : go rest
+      []                -> []
 
 -- | @Type₀@ and @Type0@ both mean level 0 (§2.6).
 levelOf :: String -> Int
