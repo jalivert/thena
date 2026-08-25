@@ -105,13 +105,17 @@ data RawInstr
 data RawOp = RawOp String [RawOperand]
   deriving (Eq, Show)
 
--- | What may be written as an argument: a name, or a position.
+-- | What may be written as an argument: a name, a position, or text.
 --
 -- **No term literal, and that is a boundary rather than an omission.** A term
 -- would have to be resolved in a context, and a rule is written where there is
--- no context — no proof is in progress and no focus exists. Text literals are
--- absent for §12 invariant 5's reason: no rule has yet needed to speak.
+-- no context — no proof is in progress and no focus exists.
+--
+-- 'RawText' arrives at phase 22b, at the user's instruction: *"Rules absolutely
+-- need a string literal."* Without it @say@, @ask@ and @concat@ had keywords
+-- that resolved and no way to be given anything to say.
 data RawOperand
   = RawRef String
   | RawPos Int
+  | RawText String
   deriving (Eq, Show)

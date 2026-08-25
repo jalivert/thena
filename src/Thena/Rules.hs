@@ -455,9 +455,15 @@ operation visible g i (RawOp w as)
     -- Spelled out rather than sharing 'bad': a @where@ binding under a guard
     -- does not generalise, and 'bad' is already fixed at 'Op' by its other
     -- uses. The same trap phase 3 met with its @respond@.
+    -- **A text literal is accepted wherever an operand is**, not only where an
+    -- op wants text. §7.2 already settled that shape: an op given the wrong
+    -- kind of value fails at run time with 'Thena.Errors.ExpectedTerm', and
+    -- "when the instruction language gets a type system that check moves
+    -- there". A grammar that policed it here would be that type system, badly.
     ref o   = case o of
-      RawRef n -> Right (Ref n)
-      RawPos _ -> Left (BadOperands g i w)
+      RawRef n  -> Right (Ref n)
+      RawText t -> Right (Lit (VText t))
+      RawPos _  -> Left (BadOperands g i w)
 
     nullary =
       [ ("along", Along), ("into", Into), ("back", Back), ("reduce", Reduce)

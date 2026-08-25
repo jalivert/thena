@@ -452,6 +452,7 @@ describe t = case t of
   TThen       -> "then"
   TNeck       -> ":-"
   TNumber k   -> show k
+  TString txt -> show txt
   TUniverse k -> "Type" ++ subscript k
   TIdent s    -> s
 
