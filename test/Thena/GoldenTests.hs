@@ -631,8 +631,15 @@ tests =
         , "qed"
         , ":show refl0"
           -- And the failure: nothing unifies these.
+          --
+          -- **The @=@-binding it had already parked is gone** (phase 25d).
+          -- @define@ runs before @unify@, so this body really does change the
+          -- development and then fail — it is the case that predates @apply@,
+          -- and the reason the rewind lives in the driver rather than in
+          -- anything @apply@ owns.
         , ":theorem wrong : Eq Nat zero (succ zero)"
         , "unify-refine (refl Nat zero)"
+        , ":show"
         , ":abandon"
         ]
 
@@ -715,17 +722,19 @@ tests =
         , "goto _"
         , ":where"
         , ":abandon"
-          -- **The failure, and what it leaves behind.** @prim-apply@ claims
-          -- before @unify-refine@ can find out the types will not meet, so a
-          -- refused @apply@ leaves its holes and its @=@-binding in the
-          -- development. Pre-existing — a failing @unify-refine@ leaves its
-          -- binding the same way — and @:undo@ is the answer: one command in,
-          -- one command out.
+          -- **The failure, and that it leaves nothing** (phase 25d).
+          -- @prim-apply@ claims two holes and @define@ parks a binding before
+          -- @unify-refine@ can find out the types will not meet — so the body
+          -- really does change the development and then fail. The driver
+          -- rewinds it: @:show@ is the bare hole, exactly as before the line.
+          --
+          -- And @:undo@ says there is nothing to undo, which is the same fact
+          -- from the other side: a line that did not do what it said is not a
+          -- step, so there is no step to take back.
         , ":theorem bad : Bool"
         , "apply Just"
         , ":show"
         , ":undo"
-        , ":show"
         , "apply true"
         , "qed"
           -- The head is the guard, so @apply@ at a guess never runs its body.

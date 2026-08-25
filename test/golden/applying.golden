@@ -77,17 +77,10 @@ proving bad : Bool
 thena spine> apply Just
 stuck: Maybe A and Bool cannot be made equal
 thena spine> :show
-  let ? A : Type₀ in
-  let ? a : A in
-  let refined = Just A a : Maybe A in
 ▶ let ? bad : Bool in
   bad
 thena spine> :undo
-▶ let ? bad : Bool in
-  bad
-thena spine> :show
-▶ let ? bad : Bool in
-  bad
+nothing to undo
 thena spine> apply true
 already equal
 thena spine> qed

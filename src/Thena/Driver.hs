@@ -264,7 +264,15 @@ data Response
 data Stop
   = Completed            -- ^ the program ran out of instructions
   | Waiting Question     -- ^ answer it with 'answer'
-  | Halted FailReason    -- ^ the machine is kept, so a later @retry@ can use it
+  | Halted FailReason
+    -- ^ the machine ran and failed.
+    --
+    -- **It said "the machine is kept, so a later @retry@ can use it" until
+    -- phase 25d, and that was never true.** 'Thena.Engine.Stuck' is returned
+    -- only from an @unwind@ that walked the whole stack without finding a live
+    -- alternative, so a halted machine has no choice point left to retry —
+    -- @:choices@ after one says so. What the machine is kept /for/ is the
+    -- messages and the reason; the proof itself is rewound by 'oneLine'.
   | Refused DeclareError -- ^ a @data@ declaration the checker would not admit
   | Uncertified KernelError
     -- ^ the kernel would not accept what the development built (§5.3). Shaped
@@ -1087,6 +1095,34 @@ oneLine s pending line = (record s', resp, asking)
     record sess = case sessionProof sess of
       Nothing -> sess
       Just pr
+        -- **A line that did not do what it said leaves the proof exactly as it
+        -- was** (phase 25d). Before this, a rule body that had already changed
+        -- the development and then failed left what it built behind, and the
+        -- user had to notice and type @:undo@. The user, 2026-08-25: /"it
+        -- rewinds the state to what it was previously before the command ran…
+        -- so that the user can try again with no change to their previously
+        -- correct state."/
+        --
+        -- **This is not backtracking and does not want a choice point.** His
+        -- own analysis: a tactic failing at the REPL has nowhere to backtrack
+        -- to, and inside a search 'Thena.Engine.failure' already restores the
+        -- snapshot of the choice point it unwinds to. This is the top of the
+        -- stack, where there is no such frame — 'Thena.Engine.Stuck' is
+        -- returned only from an @unwind@ that found none.
+        --
+        -- 'stopped' is reused rather than matched on 'Halted' alone, because it
+        -- already means /the four ways a line does not do what it said/ and
+        -- that is exactly the condition. 'Failed' and 'Rejected' never ran the
+        -- machine and 'Refused' changes no development, so for those three the
+        -- restore is a no-op — which is the point: one rule, no case analysis
+        -- about which failures dirty the state.
+        --
+        -- **Per line, like @:undo@ itself.** If an @ask@ suspended the command
+        -- and the answering line fails, this rewinds to the asking state and
+        -- not to before the whole command, because that is where the previous
+        -- snapshot was taken. §2.4's granularity, applied consistently.
+        | stopped resp ->
+            sess { sessionMachine = restore (proofSaved pr) (sessionMachine sess) }
         | resp == Undone || now == proofSaved pr -> sess { sessionProof = Just pr { proofSaved = now } }
         | otherwise ->
             sess { sessionProof = Just pr
@@ -1184,8 +1220,10 @@ stopped resp = case resp of
 -- of execution as a sequence of events (§7.5), which is why the messages come
 -- back as a list rather than being buffered in the machine.
 --
--- Phase 13 snapshots for @:undo@ at 'Completed'; phase 16 keeps the machine at
--- 'Halted' so @retry@ can use it, which this already does.
+-- Phase 13 snapshots for @:undo@ at 'Completed'; phase 16 kept the machine at
+-- 'Halted' for @retry@\'s sake, which phase 25d found was never reachable —
+-- see 'Halted'. The machine still comes back here; what changed is that
+-- 'oneLine' does not let a failed line's development survive into the session.
 progress :: Bool -> Session -> [Message] -> (Session, Response)
 progress oneStep s msgs = case step (sessionMachine s) of
   Engine.Continue m
