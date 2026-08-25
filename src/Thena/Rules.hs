@@ -28,6 +28,10 @@ module Thena.Rules
   , RuleError (..)
   , validate
   , validateBase
+
+    -- * Written rules (§8, phase 21)
+  , resolveRule
+  , testWord
   ) where
 
 import Thena.Core.Reduce (whnf)
@@ -37,7 +41,8 @@ import Thena.Development.Cursor (Cursor, Focus (..), context, expectedType, focu
 import Thena.Global.Env (GlobalEnv)
 import qualified Thena.Ops as Op
 import Thena.Ops
-  ( Instr (..)
+  ( AnswerKind (..)
+  , Instr (..)
   , Name
   , Op (..)
   , Operand (..)
@@ -45,10 +50,19 @@ import Thena.Ops
   , Test (..)
   , Value (..)
   , hintName
+  , partOf
+  , partWords
   , produces
   , usesHint
   )
-import Thena.Syntax.Concrete (Raw (..))
+import Thena.Syntax.Concrete
+  ( Raw (..)
+  , RawInstr (..)
+  , RawOp (..)
+  , RawOperand (..)
+  , RawRule (..)
+  )
+import Data.Either (partitionEithers)
 
 -- --------------------------------------------------------------------------
 -- The rule base
@@ -281,6 +295,25 @@ data RuleError
     -- ^ @x = attack@: a destination on an op that leaves nothing ('produces')
   | UnboundInRule     GlobalName Int Name
     -- ^ a @Ref@ to a name no parameter and no earlier @Bind@ introduced
+    -- The three below are 'resolveRule'\'s, phase 21. They join this type
+    -- rather than starting another because they are the same question asked
+    -- one step earlier — /is this rule well formed?/ — and a rule file's
+    -- loader wants one list, not two.
+  | NoSuchTest        GlobalName String
+    -- ^ a word after @when@ that names no 'Test'. No instruction index: a head
+    -- is not a sequence
+  | NoSuchOp          GlobalName Int String
+    -- ^ a word in a body that names no 'Op'
+  | BadOperands       GlobalName Int String
+    -- ^ the right op word, written with the wrong arguments — too many, too
+    -- few, or a position where a name was wanted. One error for all three: a
+    -- rule body is one line, and the word is enough to find it
+  | NoSuchRuleCalled  GlobalName Int String
+    -- ^ @call ‹name›@ naming no rule in the base. **Resolution answers this,
+    -- not the engine** — phase 21 bakes the callee in as a @Lit (VRule …)@,
+    -- exactly as a Haskell-written body does, so a call is resolved once when
+    -- the rule is read. Phase 23 moves the lookup to run time, and that is what
+    -- will make a rule able to call itself
   deriving (Eq, Show)
 
 -- | The load-time pass (§2.4, §7.2). Three checks, one traversal, **every**
@@ -372,3 +405,159 @@ operandsOf o = case o of
 -- runs (§8, and the user's note about a rule-loading phase).
 validateBase :: RuleBase -> [RuleError]
 validateBase (RuleBase rs) = concatMap validate rs
+
+-- --------------------------------------------------------------------------
+-- Written rules (§8, phase 21)
+-- --------------------------------------------------------------------------
+
+-- | A parsed rule, resolved against the base into the very value a Haskell
+-- literal would give.
+--
+-- **This is the second spelling of an existing type, not a new type**, and that
+-- is the phase\'s load-bearing check: "Thena.RuleSyntaxTests" writes each of
+-- 'standardRules'\' rules out by hand and asserts that reading it back gives
+-- the same 'Rule'. A fixture, not a round trip against itself.
+--
+-- It needs the base for one reason — @call ‹name›@. Everything else is a
+-- closed vocabulary.
+--
+-- **Every error, not the first**, for 'validate'\'s reason: instructions
+-- resolve independently, so a body with three mistakes reports three.
+resolveRule :: RuleBase -> RawRule -> Either [RuleError] Rule
+resolveRule base (RawRule nm ps ts body) =
+  case (headErrs, bodyErrs) of
+    ([], []) -> Right (Rule g ps tests instrs)
+    _        -> Left (headErrs ++ bodyErrs)
+  where
+    g = GlobalName nm
+
+    (headErrs, tests) = partitionEithers (map test ts)
+    test w = maybe (Left (NoSuchTest g w)) Right (testOf w)
+
+    (bodyErrs, instrs) =
+      partitionEithers (zipWith (instruction base g) [0 ..] body)
+
+-- | One written instruction. @‹name› = ‹op›@ is a 'Bind', a bare op is a 'Do' —
+-- §7.2\'s two cases, and the grammar has no third.
+instruction :: RuleBase -> GlobalName -> Int -> RawInstr -> Either RuleError Instr
+instruction base g i ri = case ri of
+  RawBind n o -> Bind n <$> operation base g i o
+  RawDo     o -> Do     <$> operation base g i o
+
+-- | An op word and its written arguments, resolved.
+--
+-- The whole word vocabulary is 'Thena.Ops.opKeyword'\'s, read backwards, and
+-- the arities are here because that is where they are known. A word this does
+-- not accept is 'NoSuchOp'; an accepted word given the wrong arguments is
+-- 'BadOperands'. The two are separate because they are separate mistakes —
+-- \"there is no such op\" and \"you wrote it wrong\".
+operation :: RuleBase -> GlobalName -> Int -> RawOp -> Either RuleError Op
+operation base g i (RawOp w as)
+  -- The field words come first: @arg@ is one of them and also the only word
+  -- that reads a position, so a general arity table could not describe it.
+  | w `elem` partWords = case as of
+      []          -> part Nothing
+      [RawPos k]  -> part (Just k)
+      _           -> bad
+  | otherwise = case (w, as) of
+      ("cross",  [RawRef "type"]) -> Right CrossType
+      ("cross",  [RawRef "val"])  -> Right CrossValue
+      ("cross",  _)               -> bad
+
+      -- @call ‹name› ‹args›@. The callee is a name and never a @Ref@: §7.2\'s
+      -- higher-order call — a rule held in a body\'s environment — has no
+      -- written form, because nothing produces a 'VRule' for one to hold.
+      ("call", RawRef r : rest)   -> case lookupRule base r of
+        Nothing -> Left (NoSuchRuleCalled g i r)
+        Just cl -> Call (Lit (VRule cl)) <$> traverse ref rest
+      ("call", _)                 -> bad
+
+      ("prove", [])               -> Right (Prove Nothing)
+      ("prove", [a])              -> Prove . Just <$> ref a
+      ("prove", _)                -> bad
+
+      ("ask", [a, RawRef k])      -> case answerKind k of
+        Just ak -> flip Ask ak <$> ref a
+        Nothing -> bad
+      ("ask", _)                  -> bad
+
+      -- §3.7: a declaration is a command, not a rule-body operation. The word
+      -- exists ('Thena.Ops.opKeyword' is total) and resolving it is refused
+      -- here, one step before 'validate' would have.
+      ("data", _)                 -> Left (DeclarationInBody g i)
+
+      _ -> case (lookup w nullary, lookup w unary, lookup w binary, as) of
+        (Just o,  _, _, [])       -> Right o
+        (Just _,  _, _, _)        -> bad
+        (_, Just f,  _, [a])      -> f <$> ref a
+        (_, Just _,  _, _)        -> bad
+        (_, _, Just f,  [a, b])   -> f <$> ref a <*> ref b
+        (_, _, Just _,  _)        -> bad
+        _                         -> Left (NoSuchOp g i w)
+  where
+    bad     = Left (BadOperands g i w)
+    part k  = maybe bad (Right . Down) (partOf w k)
+    -- Spelled out rather than sharing 'bad': a @where@ binding under a guard
+    -- does not generalise, and 'bad' is already fixed at 'Op' by its other
+    -- uses. The same trap phase 3 met with its @respond@.
+    ref o   = case o of
+      RawRef n -> Right (Ref n)
+      RawPos _ -> Left (BadOperands g i w)
+
+    nullary =
+      [ ("along", Along), ("into", Into), ("back", Back), ("reduce", Reduce)
+      , ("attack", Attack), ("intro", Intro), ("regret", Regret)
+      , ("solve", Solve), ("abandon", Abandon)
+      ]
+    unary =
+      [ ("say", Say), ("try", Try), ("parse", Parse), ("resolve", Op.Resolve)
+      , ("certify", Certify), ("eliminate", Op.Eliminate)
+      ]
+    binary =
+      [ ("assume", Assume), ("claim", Claim)
+      , ("concat", Concat), ("unify", Unify)
+      ]
+
+-- | The first rule of this name, for @call@. Definition order, so the first is
+-- the one a Haskell body naming the binding would have got.
+lookupRule :: RuleBase -> String -> Maybe Rule
+lookupRule (RuleBase rs) r =
+  case [ x | x <- rs, ruleName x == GlobalName r ] of
+    x : _ -> Just x
+    []    -> Nothing
+
+-- | What @ask@'s second word may be — 'AnswerKind', spelled.
+--
+-- @rule-name@ and not @rule@, because @rule@ is a keyword as of this phase and
+-- could not be written here. It is the better word anyway: it pairs with
+-- @name@, and the two really are "a name in scope" and "the name of a rule".
+answerKind :: String -> Maybe AnswerKind
+answerKind k = case k of
+  "text"      -> Just AText
+  "name"      -> Just AName
+  "term"      -> Just ATerm
+  "rule-name" -> Just ARule
+  _           -> Nothing
+
+testOf :: String -> Maybe Test
+testOf w = lookup w [ (testWord t, t) | t <- everyTest ]
+
+-- | The word a 'Test' is written with. Total, so @-Wall@ makes a new test say
+-- how it is spelled — 'Thena.Ops.opKeyword'\'s trick, one type over.
+--
+-- Hyphenated, which is what §8 and @OBJECTIVE.md@ have always written
+-- (@focus-is-hole@, @hint-is-app@) and what the lexer could not read until this
+-- phase widened an identifier.
+testWord :: Test -> String
+testWord t = case t of
+  FocusIsHole   -> "focus-is-hole"
+  FocusIsGuess  -> "focus-is-guess"
+  GoalTypeIsPi  -> "goal-type-is-pi"
+  GoalTypeIsLet -> "goal-type-is-let"
+  HintIsName    -> "hint-is-name"
+
+-- | Every test there is. A list and not a case split, so it cannot be total —
+-- 'testWord' is what @-Wall@ guards, and "Thena.RuleSyntaxTests" checks this
+-- list against it.
+everyTest :: [Test]
+everyTest = [FocusIsHole, FocusIsGuess, GoalTypeIsPi, GoalTypeIsLet, HintIsName]

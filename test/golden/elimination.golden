@@ -1,6 +1,6 @@
-thena spine> data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }
+thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
-thena spine> data Fin : Nat -> Type₀ { fz : ∀ (n : Nat) -> Fin (succ n) ; fs : ∀ (n : Nat) (i : Fin n) -> Fin (succ n) }
+thena spine> data Fin : Nat -> Type₀ where { fz : ∀ (n : Nat) -> Fin (succ n) ; fs : ∀ (n : Nat) (i : Fin n) -> Fin (succ n) }
 declared Fin
 thena spine> :theorem noEq : ∀ (n : Nat) (i : Fin n) -> Nat
 proving noEq : ∀ (n : Nat) -> Fin n -> Nat
@@ -16,15 +16,15 @@ thena spine> eliminate n
 subgoals: zeroMethod, succMethod
 thena spine> :abandon
 abandoned noEq
-thena spine> data Eq (A : Type₀) : A -> A -> Type₀ { refl : ∀ (a : A) -> Eq A a a }
+thena spine> data Eq (A : Type₀) : A -> A -> Type₀ where { refl : ∀ (a : A) -> Eq A a a }
 declared Eq
-thena spine> data Unit : Type₀ { unit : Unit }
+thena spine> data Unit : Type₀ where { unit : Unit }
 declared Unit
-thena spine> data Empty : Type₀ { }
+thena spine> data Empty : Type₀ where { }
 declared Empty
-thena spine> data And (A : Type₀) (B : Type₀) : Type₀ { both : ∀ (a : A) (b : B) -> And A B }
+thena spine> data And (A : Type₀) (B : Type₀) : Type₀ where { both : ∀ (a : A) (b : B) -> And A B }
 declared And
-thena spine> data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ { bz : ∀ (m : Nat) -> Below (succ m) (fz m) ; bs : ∀ (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }
+thena spine> data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ where { bz : ∀ (m : Nat) -> Below (succ m) (fz m) ; bs : ∀ (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }
 no noConfusionBelow: bs's argument j has a type that depends on an earlier argument, so its equation cannot be stated
 declared Below
 thena spine> :theorem probe : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Nat

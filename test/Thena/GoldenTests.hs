@@ -32,7 +32,7 @@ tests =
         ]
     , script
         "typing"
-        [ "data Nat : Type\8320 { zero : Nat ; succ : Nat -> Nat }"
+        [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
         , ":infer succ zero"
         , ":infer \\ (x : Nat) -> x"
         , ":infer \8704 (A : Type\8320) -> A"
@@ -47,7 +47,7 @@ tests =
         , "back"
         , "back"
         , ":infer"
-        , "data Big : Type\8320 { wrap : Type\8320 -> Big }"
+        , "data Big : Type\8320 where { wrap : Type\8320 -> Big }"
         , ":quit"
         ]
       -- The elimination rule, seen (phase 10). The same datatype at two levels
@@ -55,11 +55,11 @@ tests =
       -- in, and no constant that could have held either.
     , script
         "eliminators"
-        [ "data Nat : Type\8320 { zero : Nat ; succ : Nat -> Nat }"
+        [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
         , "data Fin : Nat -> Type\8320 \
-          \{ fz : \8704 (n : Nat) -> Fin (succ n) \
+          \where { fz : \8704 (n : Nat) -> Fin (succ n) \
           \; fs : \8704 (n : Nat) (i : Fin n) -> Fin (succ n) }"
-        , "data Empty : Type\8320 { }"
+        , "data Empty : Type\8320 where { }"
         , ":elim Nat"
         , ":elim Nat Type\8321"
         , ":elim Fin"
@@ -77,7 +77,7 @@ tests =
       -- development is pure, which phase 9's @unify@ is enough to reach.
     , script
         "kernel"
-        [ "data Nat : Type\8320 { zero : Nat ; succ : Nat -> Nat }"
+        [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
         , ":revalidate"
         , ":goal Nat"
         , ":revalidate"
@@ -104,7 +104,7 @@ tests =
         "noconfusion"
         ( preludeLines ++
         [ "data Term : Type\8320 \
-          \{ true : Term ; false : Term \
+          \where { true : Term ; false : Term \
           \; ifthen : Term -> Term -> Term -> Term \
           \; zero : Term ; succ : Term -> Term }"
         , ":show noConfusionTerm"
@@ -123,9 +123,9 @@ tests =
         , ":extract"
         , "certify \8704 (a : Term) (b : Term) -> Eq Term (succ a) (succ b) -> Eq Term a b"
         , "back"
-        , "data Nat : Type\8320 { zero' : Nat ; succ' : Nat -> Nat }"
+        , "data Nat : Type\8320 where { zero' : Nat ; succ' : Nat -> Nat }"
         , "data Vec (A : Type\8320) : Nat -> Type\8320 \
-          \{ nil : Vec A zero' \
+          \where { nil : Vec A zero' \
           \; cons : \8704 (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ' n) }"
         , ":show noConfusionVec"
         , ":quit"
@@ -297,7 +297,7 @@ tests =
       -- Suspension, undo, and the promise that the environment only grows.
     , script
         "session"
-        [ "data Nat : Type\8320 { zero : Nat ; succ : Nat -> Nat }"
+        [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
         , ":theorem two : Nat"
         , "attack"
         , ":show"
@@ -305,7 +305,7 @@ tests =
         , ":undo"
         , ":suspend"
         , ":proofs"
-        , "data Bool : Type\8320 { true : Bool ; false : Bool }"
+        , "data Bool : Type\8320 where { true : Bool ; false : Bool }"
         , ":theorem one : Nat"
         , "try zero"
         , "solve"
@@ -321,7 +321,7 @@ tests =
         ]
     , script
         "unification"
-        [ "data Nat : Type\8320 { zero : Nat ; succ : Nat -> Nat }"
+        [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
         , "claim h : Nat"
         , "unify succ h \8799 succ (succ zero)"
         , ":show"
@@ -373,19 +373,19 @@ tests =
         ]
     , script
         "declaring"
-        [ "data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }"
+        [ "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
         , ":show Nat"
         , ":show succ"
         , ":show zero"
         , ":core succ (succ zero)"
-        , "data Vec (A : Type₀) : Nat -> Type₀ { nil : Vec A zero ; cons : ∀ (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ n) }"
+        , "data Vec (A : Type₀) : Nat -> Type₀ where { nil : Vec A zero ; cons : ∀ (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ n) }"
         , ":show Vec"
         , ":show cons"
-        , "data Empty : Type₀ { }"
+        , "data Empty : Type₀ where { }"
         , ":show Empty"
-        , "data Nat : Type₀ { z : Nat }"
-        , "data Ordinal : Type₀ { sup : (Nat -> Ordinal) -> Ordinal }"
-        , "data Bad : Type₀ { bad : (Bad -> Bad) -> Bad }"
+        , "data Nat : Type₀ where { z : Nat }"
+        , "data Ordinal : Type₀ where { sup : (Nat -> Ordinal) -> Ordinal }"
+        , "data Bad : Type₀ where { bad : (Bad -> Bad) -> Bad }"
         , ":show nowhere"
         , "assume n : Nat"
         , ":show"
@@ -393,7 +393,7 @@ tests =
         ]
     , script
         "reduction"
-        [ "data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }"
+        [ "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
         , ":whnf succ zero"
         -- committing reduction, and the orphaning case (§4.7): claim two
         -- holes, put a redex mentioning the first in the second's type, then
@@ -434,8 +434,8 @@ tests =
       -- rather than loaded.
     , script
         "induction"
-        [ "data Eq (A : Type₀) : A -> A -> Type₀ { refl : ∀ (a : A) -> Eq A a a }"
-        , "data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }"
+        [ "data Eq (A : Type₀) : A -> A -> Type₀ where { refl : ∀ (a : A) -> Eq A a a }"
+        , "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
         , ":theorem plus : Nat -> Nat -> Nat"
         , "try \\ (n : Nat) (m : Nat) -> elim Nat () (\\ (t : Nat) -> Nat) (m (\\ (k : Nat) (ih : Nat) -> succ ih)) () n"
         , "solve"
@@ -498,8 +498,8 @@ tests =
     , script
         "inversion"
         ( preludeLines ++
-        [ "data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }"
-        , "data Ev : Nat -> Type₀ { evZero : Ev zero ; evSS : ∀ (n : Nat) (p : Ev n) -> Ev (succ (succ n)) }"
+        [ "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
+        , "data Ev : Nat -> Type₀ where { evZero : Ev zero ; evSS : ∀ (n : Nat) (p : Ev n) -> Ev (succ (succ n)) }"
         , ":whnf NoConfusionNat zero (succ zero)"
         , ":whnf NoConfusionNat (succ (succ zero)) (succ zero)"
         , ":theorem oneNotEven : ∀ (p : Ev (succ zero)) -> Empty"
@@ -539,8 +539,8 @@ tests =
       -- ran before it, which would make this file churn for unrelated reasons.
     , script
         "elimination"
-        [ "data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }"
-        , "data Fin : Nat -> Type₀ { fz : ∀ (n : Nat) -> Fin (succ n) ; fs : ∀ (n : Nat) (i : Fin n) -> Fin (succ n) }"
+        [ "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
+        , "data Fin : Nat -> Type₀ where { fz : ∀ (n : Nat) -> Fin (succ n) ; fs : ∀ (n : Nat) (i : Fin n) -> Fin (succ n) }"
         , ":theorem noEq : ∀ (n : Nat) (i : Fin n) -> Nat"
         , "attack"
         , "intro"
@@ -551,11 +551,11 @@ tests =
         , "eliminate i"
         , "eliminate n"
         , ":abandon"
-        , "data Eq (A : Type₀) : A -> A -> Type₀ { refl : ∀ (a : A) -> Eq A a a }"
-        , "data Unit : Type₀ { unit : Unit }"
-        , "data Empty : Type₀ { }"
-        , "data And (A : Type₀) (B : Type₀) : Type₀ { both : ∀ (a : A) (b : B) -> And A B }"
-        , "data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ { bz : ∀ (m : Nat) -> Below (succ m) (fz m) ; bs : ∀ (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }"
+        , "data Eq (A : Type₀) : A -> A -> Type₀ where { refl : ∀ (a : A) -> Eq A a a }"
+        , "data Unit : Type₀ where { unit : Unit }"
+        , "data Empty : Type₀ where { }"
+        , "data And (A : Type₀) (B : Type₀) : Type₀ where { both : ∀ (a : A) (b : B) -> And A B }"
+        , "data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ where { bz : ∀ (m : Nat) -> Below (succ m) (fz m) ; bs : ∀ (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }"
         , ":theorem probe : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Nat"
         , "attack"
         , "intro"
@@ -621,9 +621,9 @@ tests =
 preludeLines :: [String]
 preludeLines =
   [ "data Eq (A : Type\8320) : A -> A -> Type\8320 \
-    \{ refl : \8704 (a : A) -> Eq A a a }"
-  , "data Unit : Type\8320 { unit : Unit }"
-  , "data Empty : Type\8320 { }"
+    \where { refl : \8704 (a : A) -> Eq A a a }"
+  , "data Unit : Type\8320 where { unit : Unit }"
+  , "data Empty : Type\8320 where { }"
   , "data And (A : Type\8320) (B : Type\8320) : Type\8320 \
-    \{ both : \8704 (a : A) (b : B) -> And A B }"
+    \where { both : \8704 (a : A) (b : B) -> And A B }"
   ]

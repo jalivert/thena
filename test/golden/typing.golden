@@ -1,4 +1,4 @@
-thena spine> data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }
+thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
 thena spine> :infer succ zero
 succ zero : Nat
@@ -29,6 +29,6 @@ thena core> back
 thena spine> back
 thena spine> :infer
 that move is for a core term, and the focus is on the chain
-thena spine> data Big : Type₀ { wrap : Type₀ -> Big }
+thena spine> data Big : Type₀ where { wrap : Type₀ -> Big }
 refused: the argument x of wrap lives in Type₁, which the datatype's own Type₀ does not contain
 thena spine> :quit

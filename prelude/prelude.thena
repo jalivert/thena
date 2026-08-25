@@ -1,8 +1,8 @@
-data Eq (A : Type₀) : A -> A -> Type₀ { refl : ∀ (a : A) -> Eq A a a }
-data Unit : Type₀ { unit : Unit }
-data Empty : Type₀ { }
-data And (A : Type₀) (B : Type₀) : Type₀ { both : ∀ (a : A) (b : B) -> And A B }
-data Sigma (A : Type₀) (B : A -> Type₀) : Type₀ { pair : ∀ (a : A) (b : B a) -> Sigma A B }
+data Eq (A : Type₀) : A -> A -> Type₀ where { refl : ∀ (a : A) -> Eq A a a }
+data Unit : Type₀ where { unit : Unit }
+data Empty : Type₀ where { }
+data And (A : Type₀) (B : Type₀) : Type₀ where { both : ∀ (a : A) (b : B) -> And A B }
+data Sigma (A : Type₀) (B : A -> Type₀) : Type₀ where { pair : ∀ (a : A) (b : B a) -> Sigma A B }
 :theorem fst : ∀ (A : Type₀) (B : A -> Type₀) (s : Sigma A B) -> A
 try \ (A : Type₀) (B : A -> Type₀) (s : Sigma A B) -> elim Sigma (A B) (\ (z : Sigma A B) -> A) ((\ (a : A) (b : B a) -> a)) () s
 solve

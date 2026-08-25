@@ -1,7 +1,7 @@
-thena spine> data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }
+thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
 thena spine> :show Nat
-data Nat : Type₀
+data Nat : Type₀ where
   { zero : Nat
   ; succ : Nat -> Nat }
 thena spine> :show succ
@@ -12,24 +12,24 @@ zero : Nat
 zero = zero
 thena spine> :core succ (succ zero)
 succ (succ zero)
-thena spine> data Vec (A : Type₀) : Nat -> Type₀ { nil : Vec A zero ; cons : ∀ (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ n) }
+thena spine> data Vec (A : Type₀) : Nat -> Type₀ where { nil : Vec A zero ; cons : ∀ (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ n) }
 declared Vec
 thena spine> :show Vec
-data Vec (A : Type₀) : Nat -> Type₀
+data Vec (A : Type₀) : Nat -> Type₀ where
   { nil : Vec A zero
   ; cons : ∀ (n : Nat) -> A -> Vec A n -> Vec A (succ n) }
 thena spine> :show cons
 cons : ∀ (A : Type₀) (n : Nat) -> A -> Vec A n -> Vec A (succ n)
 cons = λ (A : Type₀) (n : Nat) (a : A) (as : Vec A n) -> cons A n a as
-thena spine> data Empty : Type₀ { }
+thena spine> data Empty : Type₀ where { }
 declared Empty
 thena spine> :show Empty
-data Empty : Type₀ { }
-thena spine> data Nat : Type₀ { z : Nat }
+data Empty : Type₀ where where { }
+thena spine> data Nat : Type₀ where { z : Nat }
 refused: Nat is already declared
-thena spine> data Ordinal : Type₀ { sup : (Nat -> Ordinal) -> Ordinal }
+thena spine> data Ordinal : Type₀ where { sup : (Nat -> Ordinal) -> Ordinal }
 refused: the argument x of sup is a function into the datatype, which MS1 does not admit yet
-thena spine> data Bad : Type₀ { bad : (Bad -> Bad) -> Bad }
+thena spine> data Bad : Type₀ where { bad : (Bad -> Bad) -> Bad }
 refused: the argument x of bad puts the datatype to the left of an arrow
 thena spine> :show nowhere
 nothing named nowhere has been declared

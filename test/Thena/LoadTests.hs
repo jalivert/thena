@@ -89,7 +89,7 @@ preludeTests =
     -- is the difference, made visible.
   , testCase "preludeIsInTheWay: Empty cannot be redeclared over the prelude" $ do
       (s, _) <- loadPrelude newSession
-      afterLines s ["data Empty : Type₀ { }"] $ \l ->
+      afterLines s ["data Empty : Type₀ where { }"] $ \l ->
         loadedError l @?= Just (LoadStopped 1)
   ]
 
@@ -100,14 +100,14 @@ preludeTests =
 scriptTests :: [TestTree]
 scriptTests =
   [ testCase "every line runs, in order" $
-      let l = source ["data A0 : Type₀ { a0 : A0 }", "data B0 : Type₀ { b0 : B0 }"]
+      let l = source ["data A0 : Type₀ where { a0 : A0 }", "data B0 : Type₀ where { b0 : B0 }"]
        in do
             loadedError l @?= Nothing
             length (loadedResponses l) @?= 2
             mapM_ (\n -> assertBool (n ++ " missing") (declared n l)) ["A0", "B0"]
 
   , testCase "a blank line is a line, and is counted" $
-      let l = source ["data A0 : Type₀ { a0 : A0 }", "", "data B0 : Type₀ { b0 : B0 }"]
+      let l = source ["data A0 : Type₀ where { a0 : A0 }", "", "data B0 : Type₀ where { b0 : B0 }"]
        in do
             loadedError l @?= Nothing
             loadedResponses l !! 1 @?= Blank
@@ -122,7 +122,7 @@ scriptTests =
             length (loadedResponses l) @?= 2
 
   , testCase ":quit ends the load and is not a failure" $
-      let l = source ["data A0 : Type₀ { a0 : A0 }", ":quit", "data B0 : Type₀ { b0 : B0 }"]
+      let l = source ["data A0 : Type₀ where { a0 : A0 }", ":quit", "data B0 : Type₀ where { b0 : B0 }"]
        in do
             loadedError l @?= Nothing
             declared "A0" l @?= True
@@ -137,9 +137,9 @@ failureTests :: [TestTree]
 failureTests =
   [ testCase "it stops at the first failure, and names the line" $
       let l = source
-                [ "data A0 : Type₀ { a0 : A0 }"
-                , "data B0 : Type₀ { b0 : (B0 -> A0) -> B0 }"
-                , "data C0 : Type₀ { c0 : C0 }"
+                [ "data A0 : Type₀ where { a0 : A0 }"
+                , "data B0 : Type₀ where { b0 : (B0 -> A0) -> B0 }"
+                , "data C0 : Type₀ where { c0 : C0 }"
                 ]
        in do
             loadedError l @?= Just (LoadStopped 2)
@@ -148,7 +148,7 @@ failureTests =
 
     -- The reason is the last response, not a second copy inside 'LoadError'.
   , testCase "and the reason is the last response, not carried twice" $
-      let l = source ["data A0 : Type₀ { a0 : A0 }", "no such command here"]
+      let l = source ["data A0 : Type₀ where { a0 : A0 }", "no such command here"]
        in case reverse (loadedResponses l) of
             Rejected _ : _ -> pure ()
             other          -> assertFailure ("not a rejection: " ++ show (take 1 other))
@@ -157,7 +157,7 @@ failureTests =
       (loadedError (source ["data ohno"]) @?= Just (LoadStopped 1))
 
   , testCase "nested :load is refused, not followed" $
-      let l = source ["data A0 : Type₀ { a0 : A0 }", ":load somewhere.thena"]
+      let l = source ["data A0 : Type₀ where { a0 : A0 }", ":load somewhere.thena"]
        in do
             loadedError l @?= Just (NestedLoad 2)
             -- what ran before it still ran

@@ -26,6 +26,7 @@ module Thena.Syntax.Parser
   , parseNameAndType
   , parseData
   , parseEquation
+  , parseRule
   ) where
 
 import Thena.Syntax.Concrete
@@ -34,6 +35,10 @@ import Thena.Syntax.Concrete
   , RawConstraint (..)
   , RawConstructor (..)
   , RawData (..)
+  , RawInstr (..)
+  , RawOp (..)
+  , RawOperand (..)
+  , RawRule (..)
   )
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
@@ -42,6 +47,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 %name parseNameAndType NameAndType
 %name parseData Data
 %name parseEquation Equation
+%name parseRule Rule
 %tokentype { Located Token }
 %monad { Either ParseError }
 %error { parseError }
@@ -59,7 +65,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   '='     { Located _ TEquals }
   '?'     { Located _ TQuery }
   '≐'     { Located _ TGuessed }
-  '▸'     { Located _ TThen }
+  '▸'     { Located _ TPending }
   '⊢'     { Located _ TTurnstile }
   '≟'     { Located _ TEquate }
   '[|'    { Located _ TOpenQuote }
@@ -67,6 +73,12 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   let     { Located _ TLet }
   in      { Located _ TIn }
   elim    { Located _ TElim }
+  where   { Located _ TWhere }
+  rule    { Located _ TRule }
+  when    { Located _ TWhen }
+  then    { Located _ TThen }
+  ':-'    { Located _ TNeck }
+  num     { Located _ (TNumber $$) }
   univ    { Located _ (TUniverse $$) }
   ident   { Located _ (TIdent $$) }
 
@@ -110,8 +122,8 @@ NameAndType :: { (Maybe String, Raw) }
 -- prefix of the type right of it, which must end in a universe. That is the
 -- split §3.7 requires disambiguated, made syntactic.
 Data :: { RawData }
-  : ident MaybeBinders ':' Term '{' Constructors '}'
-                                           { RawData $1 (reverse $2) $4 (reverse $6) }
+  : ident MaybeBinders ':' Term where '{' Constructors '}'
+                                           { RawData $1 (reverse $2) $4 (reverse $7) }
 
 MaybeBinders :: { [RawBinder] }
   :                                        { [] }
@@ -128,6 +140,54 @@ SomeConstructors :: { [RawConstructor] }
 
 Constructor :: { RawConstructor }
   : ident ':' Term                         { RawConstructor $1 $3 }
+
+-- The rule language (§8, phase 21). @:-@ separates the head — the name and its
+-- parameters — from the conditions and the body, and the space on either side
+-- of it is deliberately unused: pattern matching on the focus and on the goal
+-- is coming and will attach to the head (DECIDED by the user 2026-08-25).
+--
+-- @when@ is optional, because a rule may apply everywhere; @then@ is not,
+-- because a rule with no body does nothing. Test words and op words are
+-- @ident@s and not tokens — see 'Thena.Syntax.Concrete.RawRule'.
+Rule :: { RawRule }
+  : rule ident Params ':-' Tests then Body   { RawRule $2 $3 $5 (reverse $7) }
+
+Params :: { [String] }
+  :                                        { [] }
+  | '(' Names ')'                          { reverse $2 }
+
+Names :: { [String] }
+  : ident                                  { [$1] }
+  | Names ident                            { $2 : $1 }
+
+Tests :: { [String] }
+  :                                        { [] }
+  | when Names                             { reverse $2 }
+
+-- Accumulated in reverse, like 'Binders'. At least one: 'Rule' requires 'then'
+-- and 'then' with nothing after it is a parse error rather than an empty body.
+Body :: { [RawInstr] }
+  : Instr                                  { [$1] }
+  | Body ';' Instr                         { $3 : $1 }
+
+Instr :: { RawInstr }
+  : ident '=' Op                           { RawBind $1 $3 }
+  | Op                                     { RawDo $1 }
+
+-- One shape for every op: a word and whatever was written after it. Which op
+-- the word names, and whether it was given the right arguments, is resolution's
+-- (§2.5 — the parser is shallow).
+Op :: { RawOp }
+  : ident Operands                         { RawOp $1 (reverse $2) }
+
+Operands :: { [RawOperand] }
+  :                                        { [] }
+  | Operands Operand                       { $2 : $1 }
+
+Operand :: { RawOperand }
+  : ident                                  { RawRef $1 }
+  | num                                    { RawPos $1 }
+
 
 Constraint :: { RawConstraint }
   : Binders '⊢' Term '≟' Term ':' Term   { RawConstraint (reverse $1) $3 $5 $7 }

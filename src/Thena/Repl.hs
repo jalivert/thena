@@ -374,7 +374,7 @@ describe t = case t of
   TEquals     -> "="
   TQuery      -> "?"
   TGuessed    -> "≐"
-  TThen       -> "▸"
+  TPending    -> "▸"
   TTurnstile  -> "⊢"
   TEquate     -> "≟"
   TOpenQuote  -> "⌜"
@@ -382,6 +382,12 @@ describe t = case t of
   TLet        -> "let"
   TIn         -> "in"
   TElim       -> "elim"
+  TWhere      -> "where"
+  TRule       -> "rule"
+  TWhen       -> "when"
+  TThen       -> "then"
+  TNeck       -> ":-"
+  TNumber k   -> show k
   TUniverse k -> "Type" ++ subscript k
   TIdent s    -> s
 
@@ -1023,7 +1029,7 @@ renderMoveError m = case m of
 -- its own rule (§2.6).
 renderInductive :: Int -> InductiveDefinition -> [String]
 renderInductive n d = case inductiveConstructors d of
-  [] -> [header ++ " { }"]
+  [] -> [header ++ " where { }"]
   cs -> header : closed (zipWith (++) ("  { " : repeat "  ; ") (map line cs))
   where
     ps   = inductiveParameters d
@@ -1035,6 +1041,7 @@ renderInductive n d = case inductiveConstructors d of
         ++ concatMap group (zip [0 ..] ps)
         ++ " : "
         ++ renderCore n ps (piOver (inductiveIndices d) (Universe (inductiveLevel d)))
+        ++ " where"
 
     -- A parameter's type sees the parameters before it and no more.
     group (i, e) =
