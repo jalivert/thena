@@ -99,6 +99,19 @@ data Op
   | CrossType                 -- ^ into the focused component's type
   | CrossValue                -- ^ into a definition's value
   | Down Part                 -- ^ into a named field of a core term (§4.7)
+  | Goto Operand
+    -- ^ focus the hole or guess this variable binds, wherever it is on the
+    -- spine (phase 24b, the user's request).
+    --
+    -- **The one move that is not a step.** The others go one link from where
+    -- you are; this one goes to a component you are holding the variable of.
+    -- After a refinement the holes still owed are /above/ the focus and @back@
+    -- only pops the path you came down — countable when @unify-refine@ claims
+    -- two, not when @apply@ claims several.
+    --
+    -- It takes the variable and not a name: an 'Thena.Core.Term.Ident' is a
+    -- display hint, two components may carry the same one, and a rule body
+    -- already holds the variable because @claim@ and @define@ produce it.
   | Back                      -- ^ undo the last move
   | Reduce                    -- ^ commit a whnf at the core focus (§4.7, phase 7)
   | Unify Operand Operand     -- ^ two terms — solve holes, or park the equation (§6, phase 9)
@@ -337,6 +350,7 @@ produces o = case o of
   CrossType    -> False
   CrossValue   -> False
   Down _       -> False
+  Goto _       -> False   -- a move; it rewrites the cursor and yields nothing
   Back         -> False
   Attack       -> False
   Intro        -> False
@@ -481,6 +495,7 @@ opKeyword o = case o of
   CrossType    -> "cross"
   CrossValue   -> "cross"
   Down p       -> partWord p
+  Goto _       -> "goto"
   Back         -> "back"
   Reduce       -> "reduce"
   Unify _ _    -> "unify"

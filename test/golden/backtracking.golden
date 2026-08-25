@@ -10,8 +10,8 @@ chose 7: intro
 thena spine> :show
 ▶ let ? id : ∀ (A : Type₀) -> A -> A ≐ (
     λ (A : Type₀) ->
-    let ? id : A -> A in
-    id
+    let ? id1 : A -> A in
+    id1
   ) in
   id
 thena spine> :choices
@@ -20,7 +20,7 @@ thena spine> into
 thena spine> along
 thena spine> :where
 focus
-  let ? id : A -> A in
+  let ? id1 : A -> A in
 path
   root ▸ ≐ id ▸ A
 context

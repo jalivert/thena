@@ -643,8 +643,9 @@ tests =
         , "unify-refine (Just T b)"
         , ":show"
           -- The only hole left is the boolean, and its type is now T = Bool.
-        , "back"
-        , "back"
+          -- @goto@ (phase 24b) goes straight to it; counting @back@s would
+          -- stop scaling the moment @apply@ claims several holes at once.
+        , "goto b"
         , ":where"
         , "unify-refine true"
         , ":show"

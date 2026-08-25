@@ -5,8 +5,8 @@ proving two : Nat
 thena spine> attack
 thena spine> :show
 ▶ let ? two : Nat ≐ (
-    let ? two : Nat in
-    two
+    let ? two1 : Nat in
+    two1
   ) in
   two
 thena spine> :undo

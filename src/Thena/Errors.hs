@@ -171,6 +171,11 @@ data MoveError
     -- @x ∉ Θ'@ (phase 13)
   | NoCrossingIntoAConstraint
     -- ^ crossing into a constraint. Not a gap: decided against (§4.2)
+  | NoSuchHole
+    -- ^ @goto@ naming something that is no hole or guess — either nothing
+    -- binds the variable, or what binds it is an assumption or a definition
+    -- (phase 24b). One case for both: the operand is a term, so "not in
+    -- scope" has already been answered by resolution before this is reached
   | NoSuchPart
     -- ^ a descent naming a field the focused form does not have
   deriving (Eq, Show)

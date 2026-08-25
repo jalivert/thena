@@ -916,6 +916,7 @@ renderOp n ctx op = case op of
   Ops.CrossValue  -> "cross val"
   Ops.Down part   -> partWord part
   Ops.DefineData d -> "data " ++ nameString (inductiveName d)
+  Ops.Goto v      -> "goto " ++ operand v
   Ops.Goal        -> "goal"
   Ops.Typing t    -> "typeof " ++ operand t
   Ops.Define x v  -> "define " ++ operand x ++ " " ++ operand v
@@ -1112,6 +1113,7 @@ renderMoveError m = case m of
   NotADefinition -> "only a definition has a value"
   StillReferenced -> "something below it still refers to it"
   NoCrossingIntoAConstraint -> "there is no position inside a constraint"
+  NoSuchHole    -> "that names no hole or guess"
   NoSuchPart     -> "the focus has no such part"
 
 -- --------------------------------------------------------------------------

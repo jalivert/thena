@@ -10,8 +10,8 @@ thena spine> :show
 ▶ let ? id : ∀ (A : Type₀) -> A -> A ≐ (
     λ (A : Type₀) ->
     λ (_ : A) ->
-    let ? id : A in
-    id
+    let ? id1 : A in
+    id1
   ) in
   id
 thena spine> into
@@ -19,7 +19,7 @@ thena spine> along
 thena spine> along
 thena spine> :where
 focus
-  let ? id : A in
+  let ? id1 : A in
 path
   root ▸ ≐ id ▸ A ▸ _
 context
@@ -34,13 +34,13 @@ thena spine> back
 thena spine> back
 thena spine> solve
 thena spine> :show
-▶ let id = λ (A : Type₀) (_ : A) -> let id = _ : A in id : ∀ (A : Type₀) -> A -> A in
+▶ let id = λ (A : Type₀) (_ : A) -> let id1 = _ : A in id1 : ∀ (A : Type₀) -> A -> A in
   id
 thena spine> qed
 id : ∀ (A : Type₀) -> A -> A   ∎
 thena spine> :show id
 id : ∀ (A : Type₀) -> A -> A
-id = let id = λ (A : Type₀) (_ : A) -> let id = _ : A in id : ∀ (A : Type₀) -> A -> A in id
+id = let id = λ (A : Type₀) (_ : A) -> let id1 = _ : A in id1 : ∀ (A : Type₀) -> A -> A in id
 thena spine> :proofs
 no proofs
 thena spine> :quit
