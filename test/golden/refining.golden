@@ -35,5 +35,8 @@ thena spine> :theorem wrong : Eq Nat zero (succ zero)
 proving wrong : Eq Nat zero (succ zero)
 thena spine> unify-refine (refl Nat zero)
 stuck: zero and succ zero cannot be made equal
+thena spine> :show
+▶ let ? wrong : Eq Nat zero (succ zero) in
+  wrong
 thena spine> :abandon
 abandoned wrong
