@@ -79,7 +79,7 @@ thena spine> :step
 pc
   0  t = resolve hint
   1  call try t
-  2  solve
+  2  prim-solve
 env
   hint = ‹a›
 stack
@@ -87,7 +87,7 @@ stack
 thena spine> :step
 pc
   0  call try t
-  1  solve
+  1  prim-solve
 env
   t = ⌜a⌝
   hint = ‹a›
@@ -95,7 +95,7 @@ stack
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  0  try t
+  0  prim-try t
 env
   t = ⌜a⌝
 stack
@@ -111,7 +111,7 @@ stack
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  0  solve
+  0  prim-solve
 env
   t = ⌜a⌝
   hint = ‹a›

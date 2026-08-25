@@ -51,6 +51,7 @@ import Thena.Ops
   , Test (..)
   , Value (..)
   , hintName
+  , operandsOf
   , partOf
   , partWords
   , produces
@@ -346,43 +347,6 @@ initiallyBound :: Rule -> [Name]
 initiallyBound r
   | usesHint r = hintName : ruleParams r
   | otherwise  = ruleParams r
-
--- | Every operand an op reads. A total case split, so @-Wall@ makes a new op
--- say whether it reads anything.
-operandsOf :: Op -> [Operand]
-operandsOf o = case o of
-  Assume a b   -> [a, b]
-  Claim  a b   -> [a, b]
-  Ask    a _   -> [a]
-  Say    a     -> [a]
-  Concat a b   -> [a, b]
-  Unify  a b   -> [a, b]
-  Try    a     -> [a]
-  Certify a    -> [a]
-  FreshName a  -> [a]
-  Goal         -> []
-  Typing a     -> [a]
-  Define a b   -> [a, b]
-  Op.Eliminate a -> [a]
-  Op.Apply a   -> [a]
-  Parse   a    -> [a]
-  Op.Resolve a -> [a]
-  Call _ as    -> as
-  Prove h      -> maybe [] (: []) h
-  DefineData _ -> []
-  Along        -> []
-  Into         -> []
-  CrossType    -> []
-  CrossValue   -> []
-  Down _       -> []
-  Goto a       -> [a]
-  Back         -> []
-  Reduce       -> []
-  Attack       -> []
-  Intro        -> []
-  Regret       -> []
-  Solve        -> []
-  Abandon      -> []
 
 -- | Every rule in one base, checked.
 --

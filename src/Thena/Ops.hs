@@ -16,6 +16,7 @@ module Thena.Ops
   , Instr (..)
   , Op (..)
   , produces
+  , operandsOf
   , opKeyword
   , partWords
   , partOf
@@ -399,6 +400,52 @@ produces o = case o of
   Resolve _    -> True
   Eliminate _  -> False
   Apply _      -> True   -- the spine it built
+
+-- | Every operand an op reads, in the order it is written.
+--
+-- **Here rather than in "Thena.Rules", where it lived until phase 25c**, so
+-- that the three total functions over 'Op' — this, 'produces' and 'opKeyword' —
+-- are one place and a new constructor answers all three at once. It moved
+-- because 'Thena.Repl.renderOp' needs it: that function kept a second spelling
+-- table beside 'opKeyword', the two drifted at phase 23b, and deleting the
+-- duplicate is what stops it happening again.
+--
+-- A total case split, so @-Wall@ makes a new op say whether it reads
+-- anything.
+operandsOf :: Op -> [Operand]
+operandsOf o = case o of
+  Assume a b   -> [a, b]
+  Claim  a b   -> [a, b]
+  Ask    a _   -> [a]
+  Say    a     -> [a]
+  Concat a b   -> [a, b]
+  Unify  a b   -> [a, b]
+  Try    a     -> [a]
+  Certify a    -> [a]
+  FreshName a  -> [a]
+  Goal         -> []
+  Typing a     -> [a]
+  Define a b   -> [a, b]
+  Eliminate a  -> [a]
+  Apply a      -> [a]
+  Parse   a    -> [a]
+  Resolve a    -> [a]
+  Call _ as    -> as
+  Prove h      -> maybe [] (: []) h
+  DefineData _ -> []
+  Along        -> []
+  Into         -> []
+  CrossType    -> []
+  CrossValue   -> []
+  Down _       -> []
+  Goto a       -> [a]
+  Back         -> []
+  Reduce       -> []
+  Attack       -> []
+  Intro        -> []
+  Regret       -> []
+  Solve        -> []
+  Abandon      -> []
 
 -- --------------------------------------------------------------------------
 -- Rules (§8)

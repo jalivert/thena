@@ -23,3 +23,94 @@ thena spine> :show
   let ? h : Type₀ in
 ▶ let ? goal : Type₀ in
   goal
+thena spine> :goal Type₀
+  λ (A : Type₀) ->
+  let ? h : Type₀ in
+▶ let ? goal : Type₀ in
+  goal
+thena spine> :step on
+thena spine> unify-refine A
+pc
+  0  n = fresh-name "refined"
+  1  x = define n t
+  2  s = typeof x
+  3  g = goal
+  4  unify s ≟ g
+  5  prim-try x
+  6  prim-solve
+env
+  t = ⌜A⌝
+stack
+  call, 0 instruction(s) to resume
+thena spine> :step
+pc
+  0  x = define n t
+  1  s = typeof x
+  2  g = goal
+  3  unify s ≟ g
+  4  prim-try x
+  5  prim-solve
+env
+  n = "refined"
+  t = ⌜A⌝
+stack
+  call, 0 instruction(s) to resume
+thena spine> :step
+pc
+  0  s = typeof x
+  1  g = goal
+  2  unify s ≟ g
+  3  prim-try x
+  4  prim-solve
+env
+  x = ⌜refined⌝
+  n = "refined"
+  t = ⌜A⌝
+stack
+  call, 0 instruction(s) to resume
+thena spine> :step
+pc
+  0  g = goal
+  1  unify s ≟ g
+  2  prim-try x
+  3  prim-solve
+env
+  s = ⌜Type₀⌝
+  x = ⌜refined⌝
+  n = "refined"
+  t = ⌜A⌝
+stack
+  call, 0 instruction(s) to resume
+thena spine> :step
+pc
+  0  unify s ≟ g
+  1  prim-try x
+  2  prim-solve
+env
+  g = ⌜Type₀⌝
+  s = ⌜Type₀⌝
+  x = ⌜refined⌝
+  n = "refined"
+  t = ⌜A⌝
+stack
+  call, 0 instruction(s) to resume
+thena spine> :step
+already equal
+pc
+  0  prim-try x
+  1  prim-solve
+env
+  g = ⌜Type₀⌝
+  s = ⌜Type₀⌝
+  x = ⌜refined⌝
+  n = "refined"
+  t = ⌜A⌝
+stack
+  call, 0 instruction(s) to resume
+thena spine> :step off
+thena spine> :show
+  λ (A : Type₀) ->
+  let ? h : Type₀ in
+  let refined = A : Type₀ in
+▶ let ? goal : Type₀ in
+  goal

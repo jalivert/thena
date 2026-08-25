@@ -117,7 +117,15 @@ import Thena.Global.Env
   , InductiveDefinition (..)
   , constructorTarget
   )
-import Thena.Ops (AnswerKind (..), Instr (..), Op, Operand (..), Rule (..), Value (..))
+import Thena.Ops
+  ( AnswerKind (..)
+  , Instr (..)
+  , Op
+  , Operand (..)
+  , Rule (..)
+  , Value (..)
+  , operandsOf
+  )
 import Thena.Rules (RuleBase (..), RuleError (..))
 import qualified Thena.Ops as Ops
 import Thena.Syntax.Lexer (LexError (..), Pos (..), Token (..))
@@ -900,49 +908,41 @@ renderInstr n ctx instr = case instr of
   Bind x op -> x ++ " = " ++ renderOp n ctx op
   Do op     -> renderOp n ctx op
 
+-- | One instruction's op, as stepping mode shows it.
+--
+-- **The word comes from 'Thena.Ops.opKeyword' and the operands from
+-- 'Thena.Ops.operandsOf'** — phase 25c. Until then this was a second spelling
+-- table, and at phase 23b the two drifted: the @prim-@ renames moved
+-- 'Thena.Ops.opKeyword' and left this printing @try@, @attack@, @solve@ and
+-- @eliminate@, which since that phase name the /rules/ and not the ops this is
+-- displaying. The user, 2026-08-25: *"Fix the other seven right away - we are
+-- not leaving something like this behind."*
+--
+-- So only the shapes that are **not** "the word, then its operands in order"
+-- are written out below. The wildcard is deliberate and is not a loss of
+-- @-Wall@\'s totality: a new op still has to answer 'Thena.Ops.opKeyword' and
+-- 'Thena.Ops.operandsOf', both total, and now renders correctly by default
+-- instead of needing a third case that can be written wrong. Totality here
+-- bought nothing — the case that drifted at 23b existed; it was just wrong.
 renderOp :: Int -> Context -> Op -> String
 renderOp n ctx op = case op of
-  Ops.Assume x ty -> "assume " ++ operand x ++ " " ++ operand ty
-  Ops.Claim  x ty -> "claim "  ++ operand x ++ " " ++ operand ty
-  Ops.Ask    p k  -> "ask "    ++ operand p ++ " " ++ answerKind k
-  Ops.Say    msg  -> "say "    ++ operand msg
-  Ops.Concat l r  -> "concat " ++ operand l ++ " " ++ operand r
-  Ops.Along       -> "along"
-  Ops.Into        -> "into"
-  Ops.Back        -> "back"
-  Ops.Reduce      -> "reduce"
-  Ops.Unify l r   -> "unify " ++ operand l ++ " ≟ " ++ operand r
-  Ops.CrossType   -> "cross type"
-  Ops.CrossValue  -> "cross val"
-  Ops.Down part   -> partWord part
-  Ops.DefineData d -> "data " ++ nameString (inductiveName d)
-  Ops.Goto v      -> "goto " ++ operand v
-  Ops.FreshName h -> "fresh-name " ++ operand h
-  Ops.Goal        -> "goal"
-  Ops.Typing t    -> "typeof " ++ operand t
-  Ops.Define x v  -> "define " ++ operand x ++ " " ++ operand v
-  Ops.Certify ty  -> "certify " ++ operand ty
-  Ops.Attack      -> "attack"
-  Ops.Intro       -> "intro"
-  Ops.Try t       -> "try " ++ operand t
-  Ops.Regret      -> "regret"
-  Ops.Solve       -> "solve"
-  Ops.Abandon     -> "abandon"
-  Ops.Prove Nothing  -> "prove"
-  Ops.Prove (Just h) -> "prove with " ++ operand h
-  Ops.Parse src   -> "parse " ++ operand src
-  Ops.Resolve raw -> "resolve " ++ operand raw
+  Ops.Ask    p k  -> word ++ " " ++ operand p ++ " " ++ answerKind k
+  -- The one infix operand shape.
+  Ops.Unify  l r  -> word ++ " " ++ operand l ++ " \8799 " ++ operand r
+  -- Neither takes an operand: the declaration is a field, and the two crossings
+  -- share a keyword and are told apart by the word after it.
+  Ops.DefineData d -> word ++ " " ++ nameString (inductiveName d)
+  Ops.CrossType   -> word ++ " type"
+  Ops.CrossValue  -> word ++ " val"
+  -- A hint is optional, and reads as a phrase rather than an argument.
+  Ops.Prove Nothing  -> word
+  Ops.Prove (Just h) -> word ++ " with " ++ operand h
   -- Written the way a rule file writes it (phase 23): the name, then the
-  -- arguments as any other op's, spaced and unwrapped.
-  Ops.Call nm as  -> unwords ("call" : nameString nm : map operand as)
-  Ops.Eliminate t -> "eliminate " ++ operand t
-  -- **Spelled as 'Thena.Ops.opKeyword' spells it**, unlike its neighbours.
-  -- They still print @try@, @attack@ and @eliminate@, which since phase 23b
-  -- name the /rules/ rather than the ops this display is showing. Divergence
-  -- noted on MS2's closeout list rather than fixed in passing, since fixing
-  -- it moves seven lines that are not this phase's.
-  Ops.Apply f     -> "prim-apply " ++ operand f
+  -- arguments as any other op\'s, spaced and unwrapped.
+  Ops.Call nm as  -> unwords (word : nameString nm : map operand as)
+  _               -> unwords (word : map operand (operandsOf op))
   where
+    word    = Ops.opKeyword op
     operand = renderOperand n ctx
 
 renderOperand :: Int -> Context -> Operand -> String
