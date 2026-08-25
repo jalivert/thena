@@ -107,11 +107,11 @@ import Thena.Ops
   , Operand (..)
   , Value (..)
   )
+import Data.Either (partitionEithers)
 import Thena.Rules
   ( RuleBase (..)
   , RuleError
   , RuleIter
-  , allRules
   , matches
   , next
   , resolveRule
@@ -911,14 +911,14 @@ ruleHeader line = case words line of
 
 -- | Read one rule-base file: its header, then its rules.
 --
--- @visible@ is every rule already in scope — the bases loaded before this one,
--- in order — so a later base may @call@ an earlier one\'s rules, which is the
--- Prolog-file analogy the user drew. Within the file, a rule sees the rules
--- above it, which is why @elab-var@ can call @try@ from the same file.
+-- **It needs nothing but the file** — phase 23 moved @call@'s lookup to run
+-- time, so a rule no longer has to be resolved against the rules already in
+-- scope, and this stopped threading them. That is what lets a rule call itself,
+-- call a rule written below it, and call a rule in a base loaded after it.
 --
 -- Takes contents and not a path (§12 invariant 4).
-readRuleBase :: [Rule] -> FilePath -> String -> Either RuleFileError RuleBase
-readRuleBase visible path src = case lines src of
+readRuleBase :: FilePath -> String -> Either RuleFileError RuleBase
+readRuleBase path src = case lines src of
   [] -> Left NoRuleHeader
   header : rest -> case ruleHeader header of
     Nothing -> Left NoRuleHeader
@@ -927,22 +927,17 @@ readRuleBase visible path src = case lines src of
       -- reports then names the line the user is looking at.
       ts   <- mapLeft RuleSyntaxError (tokensOf (unlines ("" : rest)))
       raws <- mapLeft (RuleSyntaxError . ParseFailed) (parseRules ts)
-      rs   <- resolveAll visible raws
+      rs   <- resolveAll raws
       Right (ruleBase nm desc path rs)
 
--- | Resolve each rule against everything visible above it, then validate.
---
--- Threaded rather than mapped, because a rule may @call@ one written earlier
--- in the same file. Every error, not the first — 'validate'\'s reason.
-resolveAll :: [Rule] -> [RawRule] -> Either RuleFileError [Rule]
-resolveAll visible0 = go visible0 [] []
+-- | Resolve every rule, then validate every rule. Every error, not the first —
+-- 'validate'\'s reason.
+resolveAll :: [RawRule] -> Either RuleFileError [Rule]
+resolveAll raws = case (concat resolveErrs, concatMap validate ok) of
+  ([], [])     -> Right ok
+  (res, valid) -> Left (RuleIllFormed (res ++ valid))
   where
-    go _ errs done [] = case errs of
-      [] -> Right (reverse done)
-      _  -> Left (RuleIllFormed (reverse errs))
-    go visible errs done (raw : more) = case resolveRule visible raw of
-      Left es -> go visible (reverse es ++ errs) done more
-      Right r -> go (visible ++ [r]) (reverse (validate r) ++ errs) (r : done) more
+    (resolveErrs, ok) = partitionEithers (map resolveRule raws)
 
 -- | Install a whole ordered list of bases, or none of them.
 --
@@ -960,7 +955,7 @@ loadRuleBases s = go []
       , BasesLoaded acc
       )
     go acc ((path, src) : more) =
-      case readRuleBase (allRules acc) path src of
+      case readRuleBase path src of
         Left e  -> (s, RuleFileRefused path e)
         Right b -> go (acc ++ [b]) more
 

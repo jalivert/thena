@@ -27,7 +27,6 @@ import Thena.Ops
   , Operand (..)
   , Rule (..)
   , Test (..)
-  , Value (..)
   , hintName
   )
 import qualified Thena.Ops as Op
@@ -60,7 +59,7 @@ standardVisible = allRules <$> standardBases
 expectedStandard :: [Rule]
 expectedStandard =
   [ Rule (GlobalName "attack")     []    [FocusIsHole]                 [Do Attack]
-  , tryRule
+  , Rule (GlobalName "try") ["t"] [FocusIsHole] [Do (Try (Ref "t"))]
   , Rule (GlobalName "abandon")    []    [FocusIsHole]                 [Do Abandon]
   , Rule (GlobalName "intro-pi")   []    [FocusIsGuess, GoalTypeIsPi]  [Do Intro]
   , Rule (GlobalName "intro-let")  []    [FocusIsGuess, GoalTypeIsLet] [Do Intro]
@@ -77,17 +76,11 @@ expectedStandard =
 expectedBase :: [RuleBase]
 expectedBase = [ruleBase "standard" Nothing "" expectedStandard]
 
--- | @try ‹t›@. Named because 'elabVar' embeds it: a @call@ is resolved when the
--- rule is read, into the very @Lit (VRule …)@ this writes (phase 21). Phase 23
--- moves that lookup to run time.
-tryRule :: Rule
-tryRule = Rule (GlobalName "try") ["t"] [FocusIsHole] [Do (Try (Ref "t"))]
-
 -- | The one elaboration rule (§8, phase 17b): resolve the hint in the context
 -- at the focus, attach it, commit.
 elabVar :: Rule
 elabVar = Rule (GlobalName "elab-var") [] [FocusIsHole, HintIsName]
   [ Bind "t" (Op.Resolve (Ref hintName))
-  , Do (Call (Lit (VRule tryRule)) [Ref "t"])
+  , Do (Call (GlobalName "try") [Ref "t"])
   , Do Solve
   ]

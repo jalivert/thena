@@ -25,6 +25,7 @@ import qualified Thena.NoConfusionTests
 import qualified Thena.RulesTests
 import qualified Thena.RuleSyntaxTests
 import qualified Thena.RuleFileTests
+import qualified Thena.CallTests
 import qualified Thena.GoldenTests
 import qualified Thena.SessionTests
 import qualified Thena.SyntaxTests
@@ -57,6 +58,7 @@ main =
       , Thena.RulesTests.tests
       , Thena.RuleSyntaxTests.tests
       , Thena.RuleFileTests.tests
+      , Thena.CallTests.tests
       , Thena.GoldenTests.tests
       , Thena.SessionTests.tests
       , Thena.SyntaxTests.tests

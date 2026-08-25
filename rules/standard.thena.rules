@@ -2,7 +2,7 @@ rule base standard the rules the engine starts with where
 
 rule attack :- when focus-is-hole then attack
 
-rule try(t) :- when focus-is-hole then try t
+rule try t :- when focus-is-hole then try t
 
 rule abandon :- when focus-is-hole then abandon
 
@@ -14,7 +14,7 @@ rule solve :- when focus-is-guess then solve
 
 rule regret :- when focus-is-guess then regret
 
-rule eliminate(t) :- when focus-is-hole then eliminate t
+rule eliminate t :- when focus-is-hole then eliminate t
 
 rule elab-var :- when focus-is-hole hint-is-name
   then t = resolve hint

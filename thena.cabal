@@ -98,6 +98,7 @@ test-suite thena-test
         Thena.RulesTests
         Thena.RuleSyntaxTests
         Thena.RuleFileTests
+        Thena.CallTests
         Thena.LoadTests
         Thena.DriverTests
         Thena.Declared

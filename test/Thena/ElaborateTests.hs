@@ -29,7 +29,6 @@ import Thena.Engine
   , Machine (..)
   , Outcome (..)
   , ProofState (..)
-  , choicePoints
   , load
   , step
   )
@@ -65,7 +64,6 @@ tests =
     "elaboration"
     [ partitionTests
     , opTests
-    , callTests
     , entryEnvTests
     ]
 
@@ -218,68 +216,6 @@ opTests =
     failed is = case snd (runOut (machine [] is)) of
       Left r  -> r
       Right _ -> error "expected the program to fail"
-
--- --------------------------------------------------------------------------
--- Call (§7.2, §8)
--- --------------------------------------------------------------------------
-
--- | @try ‹t›@, as the shipped base has it.
-callee :: Rule
-callee = Rule (GlobalName "try") ["t"] [FocusIsHole] [Do (Ops.Try (Ref "t"))]
-
-callTests :: TestTree
-callTests =
-  testGroup
-    "call"
-    [ -- The whole of what the phase adds: a rule's parameters, supplied.
-      testCase "arguments bind to the callee's parameters" $ do
-        let is = [ Bind "x" (Ops.Concat (Lit (VText "a")) (Lit (VText "")))
-                 , Do (Ops.Call (Lit (VRule callee)) [Lit (VTerm (Trailing type0))])
-                 ]
-        case snd (runOut (machine [] is)) of
-          Left r  -> assertFailure ("did not run: " ++ show r)
-          Right m -> do
-            isGuess m @?= True
-            -- §7.3's return: the caller's own environment comes back.
-            lookup "x" (Thena.Engine.env (exec m)) @?= Just (VText "a")
-
-      -- Direct invocation, so there is nothing to retry and no snapshot to
-      -- hold: a Call frame, never a Choice.
-    , testCase "it pushes no choice point" $
-        case snd (runOut (machine []
-                    [Do (Ops.Call (Lit (VRule callee)) [Lit (VTerm (Trailing type0))])])) of
-          Right m -> choicePoints m @?= []
-          Left r  -> assertFailure ("did not run: " ++ show r)
-
-      -- Checked before the body runs, because an arity slip surfacing as an
-      -- unbound Ref halfway through would already have moved the development.
-    , testCase "too few arguments is caught before anything happens" $
-        case snd (runOut (machine [] [Do (Ops.Call (Lit (VRule callee)) [])])) of
-          Left (WrongNumberOfArguments (GlobalName "try") 1 0) -> pure ()
-          other -> assertFailure ("expected an arity failure, got " ++ show other)
-
-    , testCase "and so is too many" $
-        case snd (runOut (machine []
-                    [Do (Ops.Call (Lit (VRule callee))
-                           [Lit (VTerm (Trailing type0)), Lit (VTerm (Trailing type0))])])) of
-          Left (WrongNumberOfArguments (GlobalName "try") 1 2) -> pure ()
-          other -> assertFailure ("expected an arity failure, got " ++ show other)
-
-    , testCase "calling something that is not a rule" $
-        case snd (runOut (machine [] [Do (Ops.Call (Lit (VText "try")) [])])) of
-          Left ExpectedRule -> pure ()
-          other             -> assertFailure ("expected ExpectedRule, got " ++ show other)
-
-      -- §8: a head is dispatch's filter, and a direct call has already chosen.
-      -- The callee runs and fails in its body, which is handled (§7.3).
-    , testCase "the callee's head is not tested" $
-        case snd (runOut (machine []
-                    [ Do Ops.Attack
-                    , Do (Ops.Call (Lit (VRule callee)) [Lit (VTerm (Trailing type0))])
-                    ])) of
-          Left NotAHole -> pure ()
-          other         -> assertFailure ("expected the body to fail, got " ++ show other)
-    ]
 
 isGuess :: Machine -> Bool
 isGuess m = case focus (cursor (proof m)) of

@@ -133,13 +133,16 @@ data FailReason
     -- ^ an operand was not a 'Thena.Ops.VSurface'. Shaped like 'ExpectedText'
     -- and 'ExpectedTerm', and here for their reason: the value itself may not
     -- be named below @Core@
-  | ExpectedRule
-    -- ^ @call@\'s first operand was not a 'Thena.Ops.VRule'
-  | WrongNumberOfArguments GlobalName Int Int
-    -- ^ @call@ on a rule, the parameters it declares, the arguments it was
-    -- given. Checked before the body runs, because an arity slip that only
-    -- showed up as an unbound @Ref@ halfway through would already have changed
-    -- the development
+  | NoClauseMatched GlobalName Int [Int]
+    -- ^ @call ‹name› ‹args›@ found nothing to run: the name, the number of
+    -- arguments it was given, and the arities of the rules that do bear that
+    -- name. **One reason for three mistakes**, told apart by the renderer —
+    -- no rule of that name at all (the list is empty), no clause of that
+    -- arity (the count is not in the list), or clauses of the right arity
+    -- whose heads all failed. Phase 23; @ExpectedRule@ and
+    -- @WrongNumberOfArguments@ were its two predecessors and are gone, because
+    -- a call no longer takes a rule /value/ and arity is a filter rather than
+    -- an error.
   deriving (Eq, Show)
 
 -- | Why a move was impossible (§4.0 C4, §12 invariant 2).

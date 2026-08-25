@@ -153,15 +153,16 @@ ordering =
     , testCase "and the other way round" $
         map baseName (basesOf (fst (load1 [b, a]))) @?= ["b", "a"]
 
-    , -- The Prolog-file analogy the user drew: a later base sees an earlier
-      -- one. Resolution walks the list, so this is decided at load time —
-      -- phase 23 moves it to run time.
-      testCase "a later base may call an earlier one's rule" $
+    , -- **Phase 23 made a call a run-time search**, so loading no longer has an
+      -- opinion about who calls whom. Both orders load; which clause a call
+      -- finds is decided when it runs, and a call that finds nothing fails
+      -- with 'Thena.Errors.NoClauseMatched'.
+      testCase "a call is not resolved at load time, either way round" $ do
         map baseName (basesOf (fst (load1 [a, caller]))) @?= ["a", "calls"]
+        map baseName (basesOf (fst (load1 [caller, a]))) @?= ["calls", "a"]
 
-    , testCase "but not an earlier base a later one" $
-        refusalOf [caller, a]
-          @?= Just ("calls.thena.rules", RuleIllFormed [NoSuchRuleCalled (GlobalName "c") 0 "helper"])
+    , testCase "and calling a name nothing defines still loads" $
+        map baseName (basesOf (fst (load1 [caller]))) @?= ["calls"]
 
     , -- All or nothing: a bad second file leaves the first uninstalled, so a
       -- session never searches half of what was asked for.
@@ -174,16 +175,13 @@ ordering =
          in map baseName (basesOf s2) @?= ["b"]
     ]
   where
-    a = ("a.thena.rules", "rule base a where\nrule helper(t) :- when focus-is-hole then try t")
+    a = ("a.thena.rules", "rule base a where\nrule helper t :- when focus-is-hole then try t")
     b = ("b.thena.rules", "rule base b where\nrule solve :- when focus-is-guess then solve")
     caller =
       ( "calls.thena.rules"
       , "rule base calls where\n\
-        \rule c(t) :- when focus-is-hole then call helper t"
+        \rule c t :- when focus-is-hole then call helper t"
       )
-    refusalOf fs = case snd (load1 fs) of
-      RuleFileRefused p e -> Just (p, e)
-      _                   -> Nothing
 
 -- --------------------------------------------------------------------------
 -- What a load refuses
