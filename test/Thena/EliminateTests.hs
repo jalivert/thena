@@ -304,7 +304,7 @@ leWeaken :: Elimination
 leDecl :: String
 leDecl =
   "Le : Nat -> Nat -> Type\8320 \
-  \{ leZero : \8704 (n : Nat) -> Le zero n \
+  \where { leZero : \8704 (n : Nat) -> Le zero n \
   \; leSucc : \8704 (m : Nat) (n : Nat) (p : Le m n) -> Le (succ m) (succ n) }"
 
 -- --------------------------------------------------------------------------
@@ -373,12 +373,12 @@ refusalTests =
 -- --------------------------------------------------------------------------
 
 eqDecl' :: String
-eqDecl' = "Eq (A : Type\8320) : A -> A -> Type\8320 { refl : \8704 (a : A) -> Eq A a a }"
+eqDecl' = "Eq (A : Type\8320) : A -> A -> Type\8320 where { refl : \8704 (a : A) -> Eq A a a }"
 
 vecDecl' :: String
 vecDecl' =
   "Vec (A : Type\8320) : Nat -> Type\8320 \
-  \{ nil : Vec A zero \
+  \where { nil : Vec A zero \
   \; cons : \8704 (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ n) }"
 
 -- | An index whose /type/ mentions an earlier index — the shape §3.7's limit
@@ -390,7 +390,7 @@ vecDecl' =
 belowDecl :: String
 belowDecl =
   "Below : \8704 (n : Nat) (i : Fin n) -> Type\8320 \
-  \{ bz : \8704 (m : Nat) -> Below (succ m) (fz m) \
+  \where { bz : \8704 (m : Nat) -> Below (succ m) (fz m) \
   \; bs : \8704 (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }"
 
 -- | Build a context by parsing each entry's type against what precedes it, so

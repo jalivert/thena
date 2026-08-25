@@ -1,8 +1,8 @@
-thena spine> data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }
+thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
-thena spine> data Fin : Nat -> Type₀ { fz : ∀ (n : Nat) -> Fin (succ n) ; fs : ∀ (n : Nat) (i : Fin n) -> Fin (succ n) }
+thena spine> data Fin : Nat -> Type₀ where { fz : ∀ (n : Nat) -> Fin (succ n) ; fs : ∀ (n : Nat) (i : Fin n) -> Fin (succ n) }
 declared Fin
-thena spine> data Empty : Type₀ { }
+thena spine> data Empty : Type₀ where { }
 declared Empty
 thena spine> :elim Nat
 elim Nat : ∀ (P : Nat -> Type₀) -> P zero -> (∀ (x : Nat) -> P x -> P (succ x)) -> ∀ (target : Nat) -> P target

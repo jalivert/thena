@@ -95,6 +95,7 @@ test-suite thena-test
         Thena.DispatchTests
         Thena.ElaborateTests
         Thena.RulesTests
+        Thena.RuleSyntaxTests
         Thena.LoadTests
         Thena.DriverTests
         Thena.Declared

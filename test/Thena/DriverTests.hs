@@ -37,7 +37,7 @@ devOf = proofDevelopment . proof . sessionMachine
 -- | What is typed to declare the running example. The @data@ word is the
 -- command; everything after it is the grammar's (§2.4).
 natCommand :: String
-natCommand = "data Nat : Type\8320 { zero : Nat ; succ : Nat -> Nat }"
+natCommand = "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
 
 declaredIn :: Session -> String -> Bool
 declaredIn s g = isDeclared (GlobalName g) (globals (sessionMachine s))
@@ -172,20 +172,20 @@ tests =
         , testCase "data needs an argument" $
             snd (command newSession "data") @?= Rejected (MissingArgument "data")
         , testCase "a declaration that does not fit the form is a syntax error" $
-            case snd (command newSession "data T : Type\8320 { c }") of
+            case snd (command newSession "data T : Type\8320 where { c }") of
               Failed _ -> pure ()
               other    -> assertFailure ("expected Failed, got " ++ show other)
         , testCase "a declaration the checker refuses stops the run" $
-            snd (say [natCommand, "data T : Type\8320 { c : (T -> T) -> T }"])
+            snd (say [natCommand, "data T : Type\8320 where { c : (T -> T) -> T }"])
               @?= Ran [] (Refused (NotStrictlyPositive (GlobalName "c") (Ident "x")))
         , testCase "and writes nothing" $
-            declaredIn (fst (say [natCommand, "data T : Type\8320 { c : (T -> T) -> T }"])) "T"
+            declaredIn (fst (say [natCommand, "data T : Type\8320 where { c : (T -> T) -> T }"])) "T"
               @?= False
         , testCase "while what was already declared survives it" $
-            declaredIn (fst (say [natCommand, "data T : Type\8320 { c : (T -> T) -> T }"])) "Nat"
+            declaredIn (fst (say [natCommand, "data T : Type\8320 where { c : (T -> T) -> T }"])) "Nat"
               @?= True
         , testCase "a refused declaration abandons the rest of the program" $
-            case fst (say [natCommand, "data T : Type\8320 { c : (T -> T) -> T }", ":run"]) of
+            case fst (say [natCommand, "data T : Type\8320 where { c : (T -> T) -> T }", ":run"]) of
               s' -> snd (command s' ":run") @?= Ran [] Completed
         , testCase ":show ‹datatype› is the declaration" $
             case snd (say [natCommand, ":show Nat"]) of

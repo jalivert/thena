@@ -40,7 +40,7 @@ natEnv = case parseDeclaration emptyGlobals 0 decl of
     Left e            -> error ("generator fixture refused: " ++ show e)
     Right (env, _, _) -> env
   where
-    decl = "Nat : Type\8320 { zero : Nat ; succ : Nat -> Nat }"
+    decl = "Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
 
 -- | Resolve, render, re-resolve. The property everything else supports.
 roundTrips :: Core -> Int -> Bool

@@ -228,7 +228,7 @@ belowEnv = fst (declared [eqDecl, natDecl, finDecl, belowDecl])
 belowDecl :: String
 belowDecl =
   "Below : \8704 (n : Nat) (i : Fin n) -> Type\8320 \
-  \{ bz : \8704 (m : Nat) -> Below (succ m) (fz m) }"
+  \where { bz : \8704 (m : Nat) -> Below (succ m) (fz m) }"
 
 certified :: GlobalEnv -> String -> Assertion
 certified env g = case lookupDefinition (GlobalName g) env of
@@ -260,7 +260,7 @@ skipTests =
         @?= Right (Just (DependentArguments (GlobalName "fs") (Ident "i")))
   , -- Eq relates only Type₀ types, so nothing above it can have an equation.
     testCase "a datatype above Type₀" $
-      skipped [eqDecl] "Big : Type\8321 { wrap : Type\8320 -> Big }"
+      skipped [eqDecl] "Big : Type\8321 where { wrap : Type\8320 -> Big }"
         @?= Right (Just (NotAtTypeZero (Level 1)))
   , -- Silent, and it has to be: this is the state every prelude-free golden
     -- transcript declares its datatypes in, and a note on every @data@ line
@@ -301,9 +301,9 @@ skipTests =
 clashTests :: [TestTree]
 clashTests =
   [ testCase "the family's name taken" $
-      skipped (preludeDecls ++ ["NoConfusionNat : Type\8320 { }"]) natDecl
+      skipped (preludeDecls ++ ["NoConfusionNat : Type\8320 where { }"]) natDecl
         @?= Left (AlreadyDeclared (GlobalName "NoConfusionNat"))
   , testCase "the lemma's name taken" $
-      skipped (preludeDecls ++ ["noConfusionNat : Type\8320 { }"]) natDecl
+      skipped (preludeDecls ++ ["noConfusionNat : Type\8320 where { }"]) natDecl
         @?= Left (AlreadyDeclared (GlobalName "noConfusionNat"))
   ]

@@ -15,9 +15,17 @@ $digit  = 0-9
 $sub    = [₀₁₂₃₄₅₆₇₈₉]
 $lower  = [a-z]
 $upper  = [A-Z]
-$idchar = [$lower $upper $digit \_ \']
+-- Reserved characters: the brackets, the separators, and every character that
+-- spells an operator on its own. Nothing else is off limits inside a name.
+$reserved = [\( \) \{ \} \[ \] \; \, \" λ ∀ ⊢ ≟ ≐ ≈ ▸ ⌜ ⌝]
 
-@ident    = [$lower $upper \_] $idchar*
+-- A name starts with a letter — ASCII, or any non-reserved character above the
+-- ASCII range — and continues with anything that is neither reserved nor
+-- whitespace.
+$idstart = [$lower $upper \_ \x80-\x10ffff] # $reserved
+$idchar  = [\x21-\x10ffff] # $reserved
+
+@ident    = $idstart $idchar*
 @universe = "Type" ($digit+ | $sub+)
 
 tokens :-
@@ -39,8 +47,8 @@ tokens :-
   "?"           { keyword TQuery }
   "≐"           { keyword TGuessed }
   "≈"           { keyword TGuessed }
-  "|>"          { keyword TThen }
-  "▸"           { keyword TThen }
+  "|>"          { keyword TPending }
+  "▸"           { keyword TPending }
   "|-"          { keyword TTurnstile }
   "⊢"           { keyword TTurnstile }
   "[|"          { keyword TOpenQuote }
@@ -51,6 +59,12 @@ tokens :-
   "let"         { keyword TLet }
   "in"          { keyword TIn }
   "elim"        { keyword TElim }
+  "where"       { keyword TWhere }
+  "rule"        { keyword TRule }
+  "when"        { keyword TWhen }
+  "then"        { keyword TThen }
+  ":-"          { keyword TNeck }
+  $digit+       { \p s -> Located (posOf p) (TNumber (read s)) }
   @universe     { \p s -> Located (posOf p) (TUniverse (levelOf s)) }
   @ident        { \p s -> Located (posOf p) (TIdent s) }
 
@@ -77,7 +91,7 @@ data Token
   | TEquals
   | TQuery
   | TGuessed
-  | TThen
+  | TPending
   | TTurnstile
   | TEquate
   | TOpenQuote
@@ -85,6 +99,12 @@ data Token
   | TLet
   | TIn
   | TElim
+  | TWhere
+  | TRule
+  | TWhen
+  | TThen
+  | TNeck
+  | TNumber Int
   | TUniverse Int
   | TIdent String
   deriving (Eq, Show)

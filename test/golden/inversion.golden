@@ -1,14 +1,14 @@
-thena spine> data Eq (A : Type₀) : A -> A -> Type₀ { refl : ∀ (a : A) -> Eq A a a }
+thena spine> data Eq (A : Type₀) : A -> A -> Type₀ where { refl : ∀ (a : A) -> Eq A a a }
 declared Eq
-thena spine> data Unit : Type₀ { unit : Unit }
+thena spine> data Unit : Type₀ where { unit : Unit }
 declared Unit
-thena spine> data Empty : Type₀ { }
+thena spine> data Empty : Type₀ where { }
 declared Empty
-thena spine> data And (A : Type₀) (B : Type₀) : Type₀ { both : ∀ (a : A) (b : B) -> And A B }
+thena spine> data And (A : Type₀) (B : Type₀) : Type₀ where { both : ∀ (a : A) (b : B) -> And A B }
 declared And
-thena spine> data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }
+thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
-thena spine> data Ev : Nat -> Type₀ { evZero : Ev zero ; evSS : ∀ (n : Nat) (p : Ev n) -> Ev (succ (succ n)) }
+thena spine> data Ev : Nat -> Type₀ where { evZero : Ev zero ; evSS : ∀ (n : Nat) (p : Ev n) -> Ev (succ (succ n)) }
 no noConfusionEv: evSS's argument p has a type that depends on an earlier argument, so its equation cannot be stated
 declared Ev
 thena spine> :whnf NoConfusionNat zero (succ zero)

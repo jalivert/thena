@@ -71,12 +71,12 @@ tests =
 -- What is typed after the command word: the driver splits @data@ off the line
 -- before the lexer sees anything (§2.4).
 natDecl, vecDecl, emptyDecl :: String
-natDecl   = "Nat : Type\8320 { zero : Nat ; succ : Nat -> Nat }"
+natDecl   = "Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
 vecDecl   =
   "Vec (A : Type\8320) : Nat -> Type\8320 \
-  \{ nil : Vec A zero \
+  \where { nil : Vec A zero \
   \; cons : forall (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ n) }"
-emptyDecl = "Empty : Type\8320 { }"
+emptyDecl = "Empty : Type\8320 where { }"
 
 -- | Declare in order, against the empty environment, threading the counter.
 -- Either the reason it was refused, or the environment and the counter.
@@ -228,22 +228,22 @@ agreesWithTheResolver =
 
 positivityTests :: [TestTree]
 positivityTests =
-  [ accepted "a non-recursive argument" "T : Type\8320 { c : Nat -> T }"
-  , accepted "a recursive argument" "T : Type\8320 { c : T -> T }"
+  [ accepted "a non-recursive argument" "T : Type\8320 where { c : Nat -> T }"
+  , accepted "a recursive argument" "T : Type\8320 where { c : T -> T }"
   , accepted "a function argument that does not mention the datatype"
-      "T : Type\8320 { c : (Nat -> Nat) -> T }"
-  , accepted "several recursive arguments" "T : Type\8320 { c : T -> T -> T }"
+      "T : Type\8320 where { c : (Nat -> Nat) -> T }"
+  , accepted "several recursive arguments" "T : Type\8320 where { c : T -> T -> T }"
   , refused "the datatype left of an arrow"
-      "T : Type\8320 { c : (T -> T) -> T }"
+      "T : Type\8320 where { c : (T -> T) -> T }"
       (NotStrictlyPositive (named "c") (Ident "x"))
   , refused "a higher-order recursive argument (thesis §4.1.3)"
-      "T : Type\8320 { c : (Nat -> T) -> T }"
+      "T : Type\8320 where { c : (Nat -> T) -> T }"
       (HigherOrderRecursion (named "c") (Ident "x"))
   , refused "the datatype under another former"
-      "T : Type\8320 { c : Vec T zero -> T }"
+      "T : Type\8320 where { c : Vec T zero -> T }"
       (NestedRecursion (named "c") (Ident "x"))
   , refused "the argument is named in the message when it has a name"
-      "T : Type\8320 { c : forall (f : T -> T) -> T }"
+      "T : Type\8320 where { c : forall (f : T -> T) -> T }"
       (NotStrictlyPositive (named "c") (Ident "f"))
   ]
 
@@ -261,21 +261,21 @@ positivityTests =
 universeTests :: [TestTree]
 universeTests =
   [ accepted "a small argument in a large datatype"
-      "T : Type\8321 { c : Type\8320 -> T }"
+      "T : Type\8321 where { c : Type\8320 -> T }"
   , refused "a large argument in a small datatype"
-      "T : Type\8320 { c : Type\8320 -> T }"
+      "T : Type\8320 where { c : Type\8320 -> T }"
       (ArgumentTooLarge (named "c") (Ident "x") (Level 1) (Level 0))
   , accepted "a recursive argument, which needs the former in scope already"
-      "T : Type\8320 { c : T -> T }"
+      "T : Type\8320 where { c : T -> T }"
   , accepted "a parameter used as an argument's type"
-      "Box (A : Type\8320) : Type\8320 { box : A -> Box A }"
+      "Box (A : Type\8320) : Type\8320 where { box : A -> Box A }"
   , refused "a parameter from a larger universe than the datatype"
-      "Box (A : Type\8321) : Type\8320 { box : A -> Box A }"
+      "Box (A : Type\8321) : Type\8320 where { box : A -> Box A }"
       (ArgumentTooLarge (named "box") (Ident "x") (Level 1) (Level 0))
   , accepted "an argument whose type mentions an earlier argument"
-      "T : Type\8320 { c : forall (n : Nat) (v : Vec Nat n) -> T }"
+      "T : Type\8320 where { c : forall (n : Nat) (v : Vec Nat n) -> T }"
   , refused "an argument whose type is not a type at all"
-      "T : Type\8320 { c : zero -> T }"
+      "T : Type\8320 where { c : zero -> T }"
       (ArgumentNotAType (named "c") (Ident "x")
          (NotAType [] (Global (named "zero")) (Canonical (named "Nat") [])))
   ]
@@ -287,13 +287,13 @@ universeTests =
 nameTests :: [TestTree]
 nameTests =
   [ refused "a datatype that is already declared"
-      "Nat : Type\8320 { z : Nat }"
+      "Nat : Type\8320 where { z : Nat }"
       (AlreadyDeclared (named "Nat"))
   , refused "a constructor whose name is taken"
-      "T : Type\8320 { zero : T }"
+      "T : Type\8320 where { zero : T }"
       (AlreadyDeclared (named "zero"))
   , refused "a declaration that uses one name twice"
-      "T : Type\8320 { c : T ; c : T }"
+      "T : Type\8320 where { c : T ; c : T }"
       (RepeatedName (named "c"))
   , testCase "everything a declaration introduces is declared afterwards" $
       sequence_

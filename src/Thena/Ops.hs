@@ -16,6 +16,9 @@ module Thena.Ops
   , Instr (..)
   , Op (..)
   , produces
+  , opKeyword
+  , partWords
+  , partOf
   , Part (..)
   , AnswerKind (..)
 
@@ -394,3 +397,106 @@ usesHint r = any hintTest (ruleHead r)
 -- 'Ref'.
 hintName :: Name
 hintName = "hint"
+
+-- --------------------------------------------------------------------------
+-- How an op is written (§2.4, phase 21)
+-- --------------------------------------------------------------------------
+
+-- | The word this op is written with, at the REPL and inside a rule body.
+--
+-- **They are the same word, and that is the whole point** — the user,
+-- 2026-08-24: /"they absolutely are the same as in the REPL. That was the whole
+-- point of non-colon commands — they are just statements in the instruction
+-- language."/ So this is one table where phase 21 found two, and a new op gets
+-- its REPL word and its rule-syntax word at once because it gets them here.
+--
+-- Written as a total case split for 'produces'\' reason: @-Wall@ then makes
+-- every op added later say how it is spelled, rather than silently having no
+-- written form. "Thena.RuleSyntaxTests" crosses it against the parser, which is
+-- code of a different shape — a table checked against itself would agree with
+-- itself while being wrong.
+--
+-- 'Down' answers with its field's word and drops the position, which is all a
+-- coverage table needs; 'partOf' below is what actually reads one back.
+--
+-- 'DefineData' has a word and no written form: §3.7 keeps a declaration out of
+-- a rule body, and 'Thena.Rules.validate' is what enforces that. The word is
+-- here because the case split is total, not because a body may say it.
+opKeyword :: Op -> String
+opKeyword o = case o of
+  Assume _ _   -> "assume"
+  Claim  _ _   -> "claim"
+  Ask    _ _   -> "ask"
+  Say    _     -> "say"
+  Concat _ _   -> "concat"
+  Along        -> "along"
+  Into         -> "into"
+  CrossType    -> "cross"
+  CrossValue   -> "cross"
+  Down p       -> partWord p
+  Back         -> "back"
+  Reduce       -> "reduce"
+  Unify _ _    -> "unify"
+  DefineData _ -> "data"
+  Attack       -> "attack"
+  Intro        -> "intro"
+  Try _        -> "try"
+  Regret       -> "regret"
+  Solve        -> "solve"
+  Abandon      -> "abandon"
+  Prove _      -> "prove"
+  Parse _      -> "parse"
+  Resolve _    -> "resolve"
+  Call _ _     -> "call"
+  Certify _    -> "certify"
+  Eliminate _  -> "eliminate"
+
+-- | The words that name a field of a core term (§4.3, phase 5). One word per
+-- field, so that none of them changes meaning with what is in focus.
+partWords :: [String]
+partWords =
+  [ "fun", "arg", "dom", "cod", "val", "type", "body"
+  , "motive", "target", "param", "method", "index"
+  ]
+
+-- | A field word, and the position written after it if there was one.
+--
+-- 'Nothing' covers both mistakes — a word that names no field, and a word given
+-- the wrong kind of argument. "Thena.Driver" tells those apart for its own
+-- error messages; a rule body has one error for both.
+--
+-- @arg@ is the one word that means two things: bare it is an application's
+-- argument, numbered it is a canonical form's (§4.7).
+partOf :: String -> Maybe Int -> Maybe Part
+partOf w k = case (w, k) of
+  ("fun",    Nothing) -> Just Fun
+  ("arg",    Nothing) -> Just Arg
+  ("dom",    Nothing) -> Just Dom
+  ("cod",    Nothing) -> Just Cod
+  ("val",    Nothing) -> Just Val
+  ("type",   Nothing) -> Just Type
+  ("body",   Nothing) -> Just Body
+  ("motive", Nothing) -> Just Motive
+  ("target", Nothing) -> Just Target
+  ("arg",    Just i)  -> Just (CanonArg i)
+  ("param",  Just i)  -> Just (Param i)
+  ("method", Just i)  -> Just (Method i)
+  ("index",  Just i)  -> Just (Index i)
+  _                   -> Nothing
+
+-- | The inverse, for 'opKeyword'. Total, so a new field must be spelled.
+partWord :: Part -> String
+partWord p = case p of
+  Fun        -> "fun"
+  Arg        -> "arg"
+  Dom        -> "dom"
+  Cod        -> "cod"
+  Val        -> "val"
+  Type       -> "type"
+  Body       -> "body"
+  Motive     -> "motive"
+  Target     -> "target"
+  CanonArg _ -> "arg"
+  Param _    -> "param"
+  Method _   -> "method"
+  Index _    -> "index"

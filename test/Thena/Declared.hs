@@ -41,10 +41,10 @@ import Thena.Global.Declare (declare)
 import Thena.Global.Env (GlobalEnv, emptyGlobals)
 
 natDecl, vecDecl, finDecl, emptyDecl :: String
-natDecl = "Nat : Type\8320 { zero : Nat ; succ : Nat -> Nat }"
+natDecl = "Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
 vecDecl =
   "Vec (A : Type\8320) : Nat -> Type\8320 \
-  \{ nil : Vec A zero \
+  \where { nil : Vec A zero \
   \; cons : forall (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ n) }"
 
 -- | Thesis §4.1.4's own example, and phase 10's reason for existing.
@@ -58,12 +58,12 @@ vecDecl =
 -- (`PREPLAN.md` phase 10: "@Nat@ alone will not catch it").
 finDecl =
   "Fin : Nat -> Type\8320 \
-  \{ fz : forall (n : Nat) -> Fin (succ n) \
+  \where { fz : forall (n : Nat) -> Fin (succ n) \
   \; fs : forall (n : Nat) (i : Fin n) -> Fin (succ n) }"
 
 -- | No constructors at all — the eliminator with no methods, which every other
 -- fixture has at least one of.
-emptyDecl = "Empty : Type\8320 { }"
+emptyDecl = "Empty : Type\8320 where { }"
 
 -- | The prelude's propositional equality, spelled out here rather than loaded.
 --
@@ -74,15 +74,15 @@ emptyDecl = "Empty : Type\8320 { }"
 eqDecl, unitDecl, andDecl, taplDecl :: String
 eqDecl =
   "Eq (A : Type\8320) : A -> A -> Type\8320 \
-  \{ refl : \8704 (a : A) -> Eq A a a }"
+  \where { refl : \8704 (a : A) -> Eq A a a }"
 
 -- | The other two prelude types no-confusion is written out of (phase 20).
 --
 -- @Empty@ is 'emptyDecl' above, which predates them and is shared.
-unitDecl = "Unit : Type\8320 { unit : Unit }"
+unitDecl = "Unit : Type\8320 where { unit : Unit }"
 andDecl =
   "And (A : Type\8320) (B : Type\8320) : Type\8320 \
-  \{ both : \8704 (a : A) (b : B) -> And A B }"
+  \where { both : \8704 (a : A) (b : B) -> And A B }"
 
 -- | Everything 'Thena.Global.NoConfusion' can need, in the prelude's own order.
 --
@@ -97,7 +97,7 @@ preludeDecls = [eqDecl, unitDecl, emptyDecl, andDecl]
 -- which is the case no other fixture has.
 taplDecl =
   "Term : Type\8320 \
-  \{ true : Term \
+  \where { true : Term \
   \; false : Term \
   \; ifthen : Term -> Term -> Term -> Term \
   \; zero : Term \
@@ -117,7 +117,7 @@ taplDecl =
 stepDecl :: String
 stepDecl =
   "Step : Term -> Term -> Type\8320 \
-  \{ eIfTrue : \8704 (t2 : Term) (t3 : Term) -> Step (ifthen true t2 t3) t2 \
+  \where { eIfTrue : \8704 (t2 : Term) (t3 : Term) -> Step (ifthen true t2 t3) t2 \
   \; eIfFalse : \8704 (t2 : Term) (t3 : Term) -> Step (ifthen false t2 t3) t3 \
   \; eIf : \8704 (t1 : Term) (t1' : Term) (t2 : Term) (t3 : Term) (s : Step t1 t1') \
   \-> Step (ifthen t1 t2 t3) (ifthen t1' t2 t3) }"

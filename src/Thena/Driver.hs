@@ -94,6 +94,8 @@ import Thena.Core.Typing (infer, sortOf)
 import qualified Thena.Ops as Ops
 import Thena.Ops
   ( AnswerKind (..)
+  , partOf
+  , partWords
   , Instr (..)
   , Rule (..)
   , Op (..)
@@ -782,36 +784,20 @@ dispatch s name arg = case name of
 -- case only — a saturated 'Thena.Core.Term.Canonical' has many arguments and an
 -- application has exactly one, so no form has both readings and no word changes
 -- meaning.
-partWords :: [String]
-partWords =
-  [ "fun", "arg", "dom", "cod", "val", "type", "body"
-  , "motive", "target", "param", "method", "index"
-  ]
-
+-- | @fun@, @arg 2@ … — "Thena.Ops"\'s table, with this module\'s two error
+-- messages laid over it.
+--
+-- **The table moved down in phase 21** so that a field word means the same
+-- thing at the REPL and inside a rule body, from one place rather than two.
+-- What stays here is the refinement a command line wants and a rule body does
+-- not: @param@ with no number is a /missing/ argument, @fun 2@ an /unexpected/
+-- one, and 'Thena.Ops.partOf' answers 'Nothing' to both.
 corePart :: String -> String -> Either CommandError Part
-corePart w a = case (w, a) of
-  ("fun",    "") -> Right Fun
-  ("arg",    "") -> Right Arg
-  ("dom",    "") -> Right Dom
-  ("cod",    "") -> Right Cod
-  ("val",    "") -> Right Val
-  ("type",   "") -> Right Type
-  ("body",   "") -> Right Body
-  ("motive", "") -> Right Motive
-  ("target", "") -> Right Target
-  -- Before the positional cases: without it @param@ with no number reaches
-  -- 'position', which reports the wrong mistake.
-  (_,        "") -> Left (MissingArgument w)
-  ("arg",    k)  -> CanonArg <$> position w k
-  ("param",  k)  -> Param    <$> position w k
-  ("method", k)  -> Method   <$> position w k
-  ("index",  k)  -> Index    <$> position w k
-  _              -> Left (UnexpectedArgument w)
-
-position :: String -> String -> Either CommandError Int
-position w k = case reads k of
-  [(i, "")] -> Right i
-  _         -> Left (UnexpectedArgument w)
+corePart w a = case a of
+  "" -> maybe (Left (MissingArgument w)) Right (partOf w Nothing)
+  _  -> case reads a of
+    [(k, "")] -> maybe (Left (UnexpectedArgument w)) Right (partOf w (Just k))
+    _         -> Left (UnexpectedArgument w)
 
 -- | Read something and hand it back for rendering.
 --
