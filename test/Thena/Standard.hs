@@ -30,6 +30,7 @@ import Thena.Ops
   , Test (..)
   , hintName
   )
+import Thena.Ops (Value (VText))
 import qualified Thena.Ops as Op
 import Thena.Repl (loadStandardRules)
 import Thena.Rules (RuleBase (..), allRules, ruleBase)
@@ -73,6 +74,23 @@ expectedStandard =
   , Rule (GlobalName "regret")     []    [FocusIsGuess]                [Do Regret]
   , Rule (GlobalName "eliminate")  ["t"] [FocusIsHole]                 [Do (Op.Eliminate (Ref "t"))]
   , elabVar
+  , unifyRefine
+  ]
+
+-- | Thesis §2.7's two-phase tactic, less the claiming half (which is phase
+-- 25's @apply@) and the arity search (phase 27's @fit@).
+--
+-- The @=@-binding is the load-bearing part: the term being refined with does
+-- not yet have the goal's type, so it is parked in a definition until
+-- unification makes the two converge, and only then filled in.
+unifyRefine :: Rule
+unifyRefine = Rule (GlobalName "unify-refine") ["t"] [FocusIsHole]
+  [ Bind "x" (Define (Lit (VText "refined")) (Ref "t"))
+  , Bind "s" (Typing (Ref "x"))
+  , Bind "g" Goal
+  , Do (Unify (Ref "s") (Ref "g"))
+  , Do (Try (Ref "x"))
+  , Do Solve
   ]
 
 -- | A fresh session with 'expectedBase' installed, for the suites that drive

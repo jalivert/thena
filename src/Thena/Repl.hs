@@ -916,6 +916,9 @@ renderOp n ctx op = case op of
   Ops.CrossValue  -> "cross val"
   Ops.Down part   -> partWord part
   Ops.DefineData d -> "data " ++ nameString (inductiveName d)
+  Ops.Goal        -> "goal"
+  Ops.Typing t    -> "typeof " ++ operand t
+  Ops.Define x v  -> "define " ++ operand x ++ " " ++ operand v
   Ops.Certify ty  -> "certify " ++ operand ty
   Ops.Attack      -> "attack"
   Ops.Intro       -> "intro"
@@ -995,6 +998,7 @@ renderFailReason r = case r of
   UniverseMismatch (Level a) (Level b) ->
     "Type" ++ subscript a ++ " and Type" ++ subscript b ++ " are different universes"
   NotTypeable e -> "that term has no type" ++ concatMap ("\n  " ++) (renderTypeError 0 e)
+  NoGoalHere        -> "nothing is written down here, so there is no goal"
   NoRuleMatched     -> "no rule applies here"
   CannotEliminate e -> renderElimError e
   UnboundInBody x   -> "nothing named " ++ x ++ " in this body"

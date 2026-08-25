@@ -169,6 +169,31 @@ data Op
     -- **A call carries no hint**, so a rule whose head asks about one is never
     -- a call candidate; it is reached by @prove ‹hint›@. Hints are on MS2's
     -- closeout list.
+  | Goal
+    -- ^ the type the focused hole is claimed at (§7.2, phase 24). **The first
+    -- op that reads the development** — §7.2's sketch called it @GoalType@ and
+    -- listed it under "reads — always named, never a general getState", which
+    -- is the rule it arrives under: a body asks a named question, it does not
+    -- get handed the state.
+  | Typing Operand
+    -- ^ the type of a term, inferred in the context at the focus (§7.2,
+    -- phase 24). §7.2 sketched it and @t = typeof x@ has been this language's
+    -- standing example of its own surface since 2026-08-20.
+  | Define Operand Operand
+    -- ^ name, value — extend the development with @x = v : S@, above the focus,
+    -- at the type @v@ is inferred to have (phase 24).
+    --
+    -- **Thesis §2.7's @=@-binding**, and it is the load-bearing part of
+    -- @unify-refine@ rather than a convenience: the application being refined
+    -- with does /not/ yet have the goal's type — that is the whole thing
+    -- unification is there to fix — so it cannot be attached to the hole. It is
+    -- *"temporarily stored in a `=`-binding"* until unification makes the two
+    -- types converge, and only then filled in as the hole's value.
+    --
+    -- The type is inferred rather than given, which is what makes it a
+    -- definition and not a claim: a definition's type is determined by its
+    -- value. That is also why it takes two operands where 'Assume' and 'Claim'
+    -- take a name and a /type/.
   | Certify Operand
     -- ^ the development must be pure; yields the closed term it stands for and
     -- the type it is claimed to have, for the driver to run the kernel on
@@ -302,6 +327,9 @@ produces o = case o of
   Say _        -> False
   DefineData _ -> False
   Certify _    -> False
+  Goal         -> True
+  Typing _     -> True
+  Define _ _   -> True   -- the variable it bound, as 'Assume' and 'Claim' do
   Unify _ _    -> False
   Reduce       -> False
   Along        -> False
@@ -467,6 +495,9 @@ opKeyword o = case o of
   Parse _      -> "parse"
   Resolve _    -> "resolve"
   Call _ _     -> "call"
+  Goal         -> "goal"
+  Typing _     -> "typeof"
+  Define _ _   -> "define"
   Certify _    -> "certify"
   Eliminate _  -> "prim-eliminate"
 

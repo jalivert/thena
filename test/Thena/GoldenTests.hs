@@ -590,6 +590,68 @@ tests =
         , "eliminate b"
         , ":quit"
         ]
+    , -- Thesis §2.7, and the phase's deliverable. The interesting half is the
+      -- second theorem: the term is parked in a @=@-binding, unification solves
+      -- the holes **in the goal**, and only then is the hole filled with the
+      -- binding. That is what @unify-refine@ has over @naive-refine@ — you
+      -- infer values for holes in the goal, not just for the arguments.
+      script
+        "refining"
+        [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "data Eq (A : Type\8320) : A -> A -> Type\8320 \
+          \where { refl : \8704 (a : A) -> Eq A a a }"
+          -- Already the goal's type: unification has nothing to do, and the
+          -- binding is filled straight in.
+        , ":theorem id0 : \8704 (A : Type\8320) -> A -> A"
+        , "unify-refine (\\ (A : Type\8320) (a : A) -> a)"
+        , ":show"
+        , "qed"
+          -- Holes on both sides. @refl A a@ has type @Eq A a a@; unifying that
+          -- with @Eq Nat zero zero@ solves @A@ and @a@.
+        , ":theorem refl0 : Eq Nat zero zero"
+        , "claim A : Type\8320"
+        , "claim a : A"
+        , "unify-refine (refl A a)"
+        , ":show"
+        , "qed"
+        , ":show refl0"
+          -- And the failure: nothing unifies these.
+        , ":theorem wrong : Eq Nat zero (succ zero)"
+        , "unify-refine (refl Nat zero)"
+        , ":abandon"
+        ]
+
+    , -- **The user's own motivating example for `unify-refine`**, 2026-08-25:
+      -- a goal at @Maybe Bool@, refined with @Just@, where unification works
+      -- out the type argument so only the boolean is left to supply.
+      --
+      -- The two @claim@s are what `apply` will do for you in phase 25 — look
+      -- the name up, walk its Π telescope, claim a hole per argument, hand the
+      -- spine to this tactic. `apply Just` abbreviates exactly these three
+      -- lines and adds no capability, which is why `MS2.md` makes it one item
+      -- rather than a phase.
+      script
+        "inferring"
+        [ "data Bool : Type\8320 where { true : Bool ; false : Bool }"
+        , "data Maybe (A : Type\8320) : Type\8320 \
+          \where { Nothing : Maybe A ; Just : \8704 (a : A) -> Maybe A }"
+        , ":theorem g : Maybe Bool"
+          -- One hole per argument of Just, including the type parameter.
+        , "claim T : Type\8320"
+        , "claim b : T"
+          -- Maybe T against Maybe Bool solves T, and says so.
+        , "unify-refine (Just T b)"
+        , ":show"
+          -- The only hole left is the boolean, and its type is now T = Bool.
+        , "back"
+        , "back"
+        , ":where"
+        , "unify-refine true"
+        , ":show"
+        , "qed"
+        , ":show g"
+        ]
+
     , script
         "mistakes"
         [ "wibble"

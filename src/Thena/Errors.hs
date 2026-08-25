@@ -106,6 +106,9 @@ data FailReason
     -- undischarged constraint in it (§5.3). The 'Position' names the first one
     -- — @certify@ before anything is proved is the normal way to meet this, so
     -- it says which component rather than only that one exists
+  | NoGoalHere
+    -- ^ @goal@ where nothing is written down (§4.5, phase 24). The top of a
+    -- development claims nothing, so it has no goal to read
   | NoRuleMatched
     -- ^ @prove@ found no rule whose head passes at the focus (§7.3). It says
     -- only that, and no more: the focus is what it is about, and 'Stuck'

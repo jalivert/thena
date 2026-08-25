@@ -359,6 +359,9 @@ operandsOf o = case o of
   Unify  a b   -> [a, b]
   Try    a     -> [a]
   Certify a    -> [a]
+  Goal         -> []
+  Typing a     -> [a]
+  Define a b   -> [a, b]
   Op.Eliminate a -> [a]
   Parse   a    -> [a]
   Op.Resolve a -> [a]
@@ -494,14 +497,15 @@ operation g i (RawOp w as)
     nullary =
       [ ("along", Along), ("into", Into), ("back", Back), ("reduce", Reduce)
       , ("prim-attack", Attack), ("prim-intro", Intro), ("prim-regret", Regret)
-      , ("prim-solve", Solve), ("prim-abandon", Abandon)
+      , ("prim-solve", Solve), ("prim-abandon", Abandon), ("goal", Goal)
       ]
     unary =
       [ ("say", Say), ("prim-try", Try), ("parse", Parse), ("resolve", Op.Resolve)
       , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
+      , ("typeof", Typing)
       ]
     binary =
-      [ ("assume", Assume), ("claim", Claim)
+      [ ("assume", Assume), ("claim", Claim), ("define", Define)
       , ("concat", Concat), ("unify", Unify)
       ]
 

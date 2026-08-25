@@ -20,3 +20,11 @@ rule elab-var :- when focus-is-hole hint-is-name
   then t = resolve hint
      ; call try t
      ; prim-solve
+
+rule unify-refine t :- when focus-is-hole
+  then x = define "refined" t
+     ; s = typeof x
+     ; g = goal
+     ; unify s g
+     ; prim-try x
+     ; prim-solve

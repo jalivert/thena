@@ -42,6 +42,7 @@ attack
 try ‹t›
 abandon
 eliminate ‹t›
+unify-refine ‹t›
 thena spine> eliminate Type₀
 stuck: Type₀ is not a target: its type is Type₁, not a fully applied datatype
 thena spine> eliminate succ
