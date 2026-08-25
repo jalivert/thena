@@ -23,10 +23,10 @@ import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (GlobalName (..))
-import Thena.Driver (Session (..), newSession)
+import Thena.Driver (Session (..))
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
-import Thena.Repl (loadPrelude, loadFile, renderCore)
+import Thena.Repl (startingSession, loadFile, renderCore)
 
 -- | Relative to the package root, which is where the suite runs — the same
 -- assumption @test\/golden@ already makes.
@@ -38,17 +38,17 @@ tests =
   testGroup
     "MS1's target — determinacy of evaluation (§9, phase 18)"
     [ goldenVsString "determinacy" "test/golden/determinacy.golden" $ do
-        (s, problems) <- loadPrelude newSession
+        (s, problems) <- startingSession
         (_, out, _) <- loadFile s target
         pure (toLazyByteString (stringUtf8 (unlines (problems ++ out))))
 
     , testCase "the file runs to the end" $ do
-        (s, _) <- loadPrelude newSession
+        (s, _) <- startingSession
         (_, _, stopped) <- loadFile s target
         stopped @?= []
 
     , testCase "and TAPL 3.5.4 is a global with the statement it should have" $ do
-        (s, _) <- loadPrelude newSession
+        (s, _) <- startingSession
         (s', _, _) <- loadFile s target
         case lookupDefinition (GlobalName "determinacy") (globals (sessionMachine s')) of
           Nothing -> assertFailure "determinacy was not admitted"

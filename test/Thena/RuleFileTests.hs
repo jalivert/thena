@@ -60,7 +60,7 @@ headers =
     , testCase "no trailing where is no header" $
         ruleHeader "rule base standard" @?= Nothing
     , testCase "something else entirely" $
-        ruleHeader "rule attack :- then attack" @?= Nothing
+        ruleHeader "rule attack :- then prim-attack" @?= Nothing
     ]
 
 -- --------------------------------------------------------------------------
@@ -68,7 +68,7 @@ headers =
 -- --------------------------------------------------------------------------
 
 oneRule :: String
-oneRule = "rule base tiny where\nrule solve :- when focus-is-guess then solve\n"
+oneRule = "rule base tiny where\nrule solve :- when focus-is-guess then prim-solve\n"
 
 load1 :: [(FilePath, String)] -> (Session, Response)
 load1 = loadRuleBases newSession
@@ -97,11 +97,11 @@ loading =
       testCase "a rule may span lines" $ do
         let src = "rule base multi where\n\
                   \rule long :- when focus-is-hole\n\
-                  \  then attack\n\
+                  \  then prim-attack\n\
                   \     ; along\n\
-                  \     ; solve\n\
+                  \     ; prim-solve\n\
                   \\n\
-                  \rule short :- when focus-is-guess then solve\n"
+                  \rule short :- when focus-is-guess then prim-solve\n"
         case basesOf (fst (load1 [("m.thena.rules", src)])) of
           [b] -> do
             ruleNames b @?= ["long", "short"]
@@ -113,23 +113,23 @@ loading =
           @?= [[]]
 
     , testCase "no header is refused" $
-        refusal [("x.thena.rules", "rule solve :- when focus-is-guess then solve")]
+        refusal [("x.thena.rules", "rule solve :- when focus-is-guess then prim-solve")]
           @?= Just ("x.thena.rules", NoRuleHeader)
 
     , testCase "a rule that does not resolve is refused, naming every mistake" $
-        refusal [("x.thena.rules", "rule base b where\nrule r :- when focus-is-hole then frobnicate; solve x")]
+        refusal [("x.thena.rules", "rule base b where\nrule r :- when focus-is-hole then frobnicate; prim-solve x")]
           @?= Just
                 ( "x.thena.rules"
                 , RuleIllFormed
                     [ NoSuchOp (GlobalName "r") 0 "frobnicate"
-                    , BadOperands (GlobalName "r") 1 "solve"
+                    , BadOperands (GlobalName "r") 1 "prim-solve"
                     ]
                 )
 
     , -- The load-time pass §2.4 asked for, now running at load rather than in
       -- a test.
       testCase "a rule that does not validate is refused" $
-        refusal [("x.thena.rules", "rule base b where\nrule r :- when focus-is-hole then try nothing")]
+        refusal [("x.thena.rules", "rule base b where\nrule r :- when focus-is-hole then prim-try nothing")]
           @?= Just
                 ( "x.thena.rules"
                 , RuleIllFormed [UnboundInRule (GlobalName "r") 0 "nothing"] )
@@ -175,8 +175,8 @@ ordering =
          in map baseName (basesOf s2) @?= ["b"]
     ]
   where
-    a = ("a.thena.rules", "rule base a where\nrule helper t :- when focus-is-hole then try t")
-    b = ("b.thena.rules", "rule base b where\nrule solve :- when focus-is-guess then solve")
+    a = ("a.thena.rules", "rule base a where\nrule helper t :- when focus-is-hole then prim-try t")
+    b = ("b.thena.rules", "rule base b where\nrule solve :- when focus-is-guess then prim-solve")
     caller =
       ( "calls.thena.rules"
       , "rule base calls where\n\
@@ -252,7 +252,7 @@ commands =
 
     , testCase ":rules lists the rules of every base, in order" $ do
         let s = fst (load1 [ ("tiny.thena.rules", oneRule)
-                           , ("b.thena.rules", "rule base b where\nrule attack :- when focus-is-hole then attack")
+                           , ("b.thena.rules", "rule base b where\nrule attack :- when focus-is-hole then prim-attack")
                            ])
         fmap (concatMap ruleNames) (ruled s) @?= Just ["solve", "attack"]
     ]

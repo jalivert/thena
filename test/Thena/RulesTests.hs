@@ -146,16 +146,16 @@ matchTests =
         matching emptyGlobals (guessAt type0)
           @?= ["solve", "regret"]
 
-    , testCase "a guess at a Π offers intro-pi as well" $
+    , testCase "a guess at a Π offers intro as well" $
         matching emptyGlobals (guessAt (arrow type0 type0))
-          @?= ["intro-pi", "solve", "regret"]
+          @?= ["intro", "solve", "regret"]
 
       -- §8: "Head matching runs whnf. A goal typed @id Type (Nat → Nat)@ is a Π
       -- and must match GoalTypeIsPi." Written down, @Arrow@ is a 'Global' and
       -- not a 'Pi'; a head that did not reduce would miss it.
     , testCase "a goal type that only reduces to a Π still matches" $
         matching withArrow (guessAt (Global (GlobalName "Arrow")))
-          @?= ["intro-pi", "solve", "regret"]
+          @?= ["intro", "solve", "regret"]
 
     , testCase "and does not, in an environment where it does not unfold" $
         matching emptyGlobals (guessAt (Global (GlobalName "Arrow")))
@@ -165,22 +165,22 @@ matchTests =
       -- away (§5.1), so asking about the reduced type would make GoalTypeIsLet
       -- unpassable — which is exactly the bug this phase found in
       -- 'Thena.Engine.introduce'.
-    , testCase "a goal type written as a let offers intro-let" $
+    , testCase "a goal type written as a let offers intro" $
         matching emptyGlobals (guessAt (Let (Ident "x") type0 type1 (close var type0)))
-          @?= ["intro-let", "solve", "regret"]
+          @?= ["intro", "solve", "regret"]
 
       -- The invariant checked by different code from the code that maintains
       -- it: the head says @intro@ applies, so @intro@ must actually apply. It
       -- is the direction that /is/ guaranteed for these two rules, and the one
       -- the let bug broke — the op could not do what no head could offer.
-    , testCase "where intro-let is offered, intro succeeds" $
+    , testCase "where the let clause is offered, intro succeeds" $
         let cur = guessAt (Let (Ident "x") type0 type1 (close var type0))
          in do
               nameOf `map` drain (matches expectedBase emptyGlobals cur Nothing)
-                @?= ["intro-let", "solve", "regret"]
+                @?= ["intro", "solve", "regret"]
               ranOk (machineAt cur [Do Ops.Intro])
 
-    , testCase "where intro-pi is offered, intro succeeds" $
+    , testCase "where the Π clause is offered, intro succeeds" $
         ranOk (machineAt (guessAt (arrow type0 type0)) [Do Ops.Intro])
 
       -- Every head this phase has asks about a component, so nothing applies

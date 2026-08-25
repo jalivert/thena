@@ -26,6 +26,7 @@ module Thena.Repl
   , loadPrelude
   , rulesPath
   , loadStandardRules
+  , startingSession
   , loadRuleFiles
   , loadFile
   , renderLoadError
@@ -134,9 +135,7 @@ import Data.List (intercalate)
 -- §3.7 already struck, and a REPL that refuses to start would say less.
 repl :: IO ()
 repl = do
-  (s0, preludeProblems) <- loadPrelude newSession
-  (s, ruleProblems)     <- loadStandardRules s0
-  let problems = preludeProblems ++ ruleProblems
+  (s, problems) <- startingSession
   runInputT defaultSettings (mapM_ outputStrLn problems >> loop s Nothing)
 
 loop :: Session -> Maybe Question -> InputT IO ()
@@ -185,6 +184,21 @@ loadPrelude s = do
   path <- preludePath
   (s', _, problems) <- loadFile s path
   pure (s', map ("prelude: " ++) problems)
+
+-- | A session with everything shipped loaded: **the rule base first, then the
+-- prelude**.
+--
+-- **The order is load-bearing as of phase 23b.** The prelude proves @fst@,
+-- @snd@, @andLeft@ and @andRight@ with @try@ and @solve@, and those stopped
+-- being driver commands when the tactic words went to the rules — so a prelude
+-- loaded before the base fails at its first @try@ with /no rule is called try/.
+-- Everything that starts a session goes through here rather than calling the
+-- two loaders in whichever order it happened to write them.
+startingSession :: IO (Session, [String])
+startingSession = do
+  (s0, ruleProblems)   <- loadStandardRules newSession
+  (s, preludeProblems) <- loadPrelude s0
+  pure (s, ruleProblems ++ preludeProblems)
 
 -- | Where the shipped rule base went. 'preludePath'\'s reason, verbatim.
 rulesPath :: IO FilePath

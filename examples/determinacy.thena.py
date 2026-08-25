@@ -2,7 +2,7 @@ BASE = r'''data Term : Type₀ where { true : Term ; false : Term ; ifthen : Ter
 data NV : Term -> Type₀ where { nvZero : NV zero ; nvSucc : ∀ (t : Term) (n : NV t) -> NV (succ t) }
 data Step : Term -> Term -> Type₀ where { eIfTrue : ∀ (t2 : Term) (t3 : Term) -> Step (ifthen true t2 t3) t2 ; eIfFalse : ∀ (t2 : Term) (t3 : Term) -> Step (ifthen false t2 t3) t3 ; eIf : ∀ (t1 : Term) (t1' : Term) (t2 : Term) (t3 : Term) (s : Step t1 t1') -> Step (ifthen t1 t2 t3) (ifthen t1' t2 t3) ; eSucc : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (succ t1) (succ t1') ; ePredZero : Step (pred zero) zero ; ePredSucc : ∀ (v : Term) (nv : NV v) -> Step (pred (succ v)) v ; ePred : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (pred t1) (pred t1') ; eIsZeroZero : Step (iszero zero) true ; eIsZeroSucc : ∀ (v : Term) (nv : NV v) -> Step (iszero (succ v)) false ; eIsZero : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (iszero t1) (iszero t1') }
 :theorem absurd : ∀ (C : Type₀) (e : Empty) -> C
-try \ (C : Type₀) (e : Empty) -> elim Empty () (\ (t : Empty) -> C) () () e
+try (\ (C : Type₀) (e : Empty) -> elim Empty () (\ (t : Empty) -> C) () () e)
 solve
 qed
 :theorem sym : ∀ (A : Type₀) (a : A) (b : A) (e : Eq A a b) -> Eq A b a
@@ -18,7 +18,7 @@ along
 along
 eliminate e
 back
-try \ (c : A) -> refl A c
+try (\ (c : A) -> refl A c)
 solve
 along
 solve
@@ -45,7 +45,7 @@ along
 along
 eliminate e
 back
-try \ (c : A) (h : P c) -> h
+try (\ (c : A) (h : P c) -> h)
 solve
 along
 solve
@@ -75,7 +75,7 @@ along
 along
 eliminate e
 back
-try \ (c : A) -> refl B (f c)
+try (\ (c : A) -> refl B (f c))
 solve
 along
 solve
@@ -104,7 +104,7 @@ along
 along
 eliminate e
 back
-try \ (z : A) (h : Eq A z c) -> h
+try (\ (z : A) (h : Eq A z c) -> h)
 solve
 along
 solve
@@ -388,7 +388,7 @@ def proof(name, ty, intros, tgt, bodies):
     out += ["intro"] * k + ["into"] + ["along"] * k + ["eliminate " + tgt]
     out += ["back"] * m
     for b in bodies:
-        out += ["try " + b, "solve", "along"]
+        out += ["try (" + b + ")", "solve", "along"]
     out += ["solve"] + ["back"] * (1 + k + m) + ["solve", "qed"]
     return out
 

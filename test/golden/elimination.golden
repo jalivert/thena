@@ -62,9 +62,9 @@ context
 type
   Nat
 thena spine> attack
-stuck: that is not a hole
+stuck: no clause of attack applies here
 thena spine> eliminate n
-stuck: that is not a hole
+stuck: no clause of eliminate applies here
 thena spine> :abandon
 abandoned probe
 thena spine> :theorem tied : ∀ (m : Nat) (b : Below (succ m) (fz m)) -> Nat

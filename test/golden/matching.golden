@@ -3,8 +3,8 @@ standard
   attack
   try ‹t›
   abandon
-  intro-pi
-  intro-let
+  intro
+  intro
   solve
   regret
   eliminate ‹t›
@@ -31,7 +31,7 @@ abandon
 eliminate ‹t›
 thena spine> attack
 thena spine> :matches
-intro-pi
+intro
 solve
 regret
 thena spine> intro
@@ -58,7 +58,7 @@ proving c : Type₀ -> Type₀
 thena spine> attack
 thena spine> intro
 thena spine> :matches
-intro-pi
+intro
 solve
 regret
 thena spine> intro
@@ -69,7 +69,7 @@ thena spine> :theorem l : let x = Type₀ : Type₁ in x
 proving l : let x = Type₀ : Type₁ in x
 thena spine> attack
 thena spine> :matches
-intro-let
+intro
 solve
 regret
 thena spine> intro

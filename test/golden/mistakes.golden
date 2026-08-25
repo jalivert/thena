@@ -1,5 +1,5 @@
 thena spine> wibble
-no such command: wibble
+stuck: no rule is called wibble
 thena spine> :core y
 not in scope: y
 thena spine> :show it

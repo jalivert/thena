@@ -18,10 +18,10 @@ import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (GlobalName (..))
-import Thena.Driver (Session (..), newSession)
+import Thena.Driver (Session (..))
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
-import Thena.Repl (loadPrelude, loadFile, renderCore)
+import Thena.Repl (startingSession, loadFile, renderCore)
 
 target :: FilePath
 target = "examples/products.thena"
@@ -31,12 +31,12 @@ tests =
   testGroup
     "the prelude's products (phase 20)"
     [ goldenVsString "products" "test/golden/products.golden" $ do
-        (s, problems) <- loadPrelude newSession
+        (s, problems) <- startingSession
         (_, out, _) <- loadFile s target
         pure (toLazyByteString (stringUtf8 (unlines (problems ++ out))))
 
     , testCase "the file runs to the end" $ do
-        (s, _) <- loadPrelude newSession
+        (s, _) <- startingSession
         (_, _, stopped) <- loadFile s target
         stopped @?= []
 
@@ -57,13 +57,13 @@ tests =
     ]
   where
     statementOf g ty = testCase ("the prelude's " ++ g ++ " has its dependent type") $ do
-      (s, _) <- loadPrelude newSession
+      (s, _) <- startingSession
       case lookupDefinition (GlobalName g) (globals (sessionMachine s)) of
         Nothing -> assertFailure (g ++ " is not in the prelude")
         Just d  -> renderCore (names (sessionMachine s)) [] (definitionType d) @?= ty
 
     declares g want =
       testCase (g ++ (if want then " is generated" else " is not")) $ do
-        (s, _) <- loadPrelude newSession
+        (s, _) <- startingSession
         let there = lookupDefinition (GlobalName g) (globals (sessionMachine s))
         (there /= Nothing) @?= want

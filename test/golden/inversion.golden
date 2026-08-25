@@ -36,10 +36,10 @@ type
   Empty
 thena spine> back
 thena spine> back
-thena spine> try \ (q : Eq Nat zero (succ zero)) -> noConfusionNat zero (succ zero) q
+thena spine> try (\ (q : Eq Nat zero (succ zero)) -> noConfusionNat zero (succ zero) q)
 thena spine> solve
 thena spine> along
-thena spine> try \ (n : Nat) (e : Ev n) (ih : Eq Nat n (succ zero) -> Empty) (q : Eq Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ n) zero (noConfusionNat (succ (succ n)) (succ zero) q)
+thena spine> try (\ (n : Nat) (e : Ev n) (ih : Eq Nat n (succ zero) -> Empty) (q : Eq Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ n) zero (noConfusionNat (succ (succ n)) (succ zero) q))
 thena spine> solve
 thena spine> along
 thena spine> solve
