@@ -89,7 +89,7 @@ import Thena.Ops
   , Value (..)
   , hintName
   )
-import Thena.Global.Env (GlobalEnv, InductiveDefinition)
+import Thena.Global.Env (GlobalEnv, InductiveDefinition, declaredNames)
 import qualified Thena.Ops as Op
 import Thena.Tactics.Eliminate (Elimination (..), eliminate)
 import Thena.Rules (RuleBase, RuleIter, arities, clauses, dispatch, hasNext, next)
@@ -644,6 +644,17 @@ perform instr rest m = case operation instr of
   -- development writes down, never what @infer@ derives (§4.5). A focus with
   -- nothing written down has no goal, which is a failure and not an empty
   -- answer.
+  -- A name nothing has taken (phase 24c). Avoids the development's own
+  -- identifiers **and** the globals, so a generated hole never shadows a
+  -- datatype or a theorem.
+  FreshName hint -> case operandIdent (env (exec m)) hint of
+    Left r  -> failure r m
+    Right i ->
+      let inUse = Cursor.identsIn (cursor (proof m))
+                    ++ [ Ident g | GlobalName g <- declaredNames (globals m) ]
+          Ident n = Cursor.freshIdent inUse i
+       in produce (VText n) m
+
   Goal -> case Cursor.expectedType (cursor (proof m)) of
     Just t  -> produce (VTerm (Trailing t)) m
     Nothing -> failure NoGoalHere m
@@ -660,13 +671,13 @@ perform instr rest m = case operation instr of
     Left r -> failure r m
     Right (i, val) -> case infer (globals m) contextAt (names m) val of
       (Left e,   n1) -> failure (NotTypeable e) m { names = n1 }
-      (Right ty, n1) ->
-        let (x, n2) = fresh n1
-            cur0    = cursor (proof m)
-            i'      = Cursor.freshIdent (Cursor.identsIn cur0) i
-            cur     = insertAbove (Component.Define x i' val ty) cur0
-         in produce (VTerm (Trailing (Free x)))
-                    m { proof = ProofState cur, names = n2 }
+      (Right ty, n1)
+        | i `elem` Cursor.identsIn (cursor (proof m)) -> failure (taken i) m { names = n1 }
+        | otherwise ->
+            let (x, n2) = fresh n1
+                cur     = insertAbove (Component.Define x i val ty) (cursor (proof m))
+             in produce (VTerm (Trailing (Free x)))
+                        m { proof = ProofState cur, names = n2 }
 
   Along      -> navigate (keeping along)
   Into       -> navigate (keeping into)
@@ -761,6 +772,8 @@ perform instr rest m = case operation instr of
 
     contextAt = proofContext (proof m)
 
+    taken (Ident n) = NameTaken n
+
     isHole c = case c of
       Component.Claim {} -> True
       Component.Guess {} -> True
@@ -779,14 +792,16 @@ perform instr rest m = case operation instr of
     component build name ty =
       case (,) <$> operandIdent (env (exec m)) name <*> term ty of
         Left r -> failure r m
-        Right (i, t) ->
-          let (v, n1) = fresh (names m)
-              cur0    = cursor (proof m)
-              -- Unique when built, not when printed (phase 24b): what @:show@
-              -- prints is what @goto ‹name›@ can find.
-              i'      = Cursor.freshIdent (Cursor.identsIn cur0) i
-              cur     = insertAbove (build v i' t) cur0
-           in produce (VTerm (Trailing (Free v))) m { proof = ProofState cur, names = n1 }
+        Right (i, t)
+          -- **Refused, not renamed** (phase 24c). Identifiers stay unique — so
+          -- @goto ‹name›@ keeps working — but deciding /what/ the name is
+          -- belongs to the rule, through @fresh-name@.
+          | i `elem` Cursor.identsIn (cursor (proof m)) -> failure (taken i) m
+          | otherwise ->
+              let (v, n1) = fresh (names m)
+                  cur     = insertAbove (build v i t) (cursor (proof m))
+               in produce (VTerm (Trailing (Free v)))
+                          m { proof = ProofState cur, names = n1 }
 
 -- | What @eliminate@ says: the subgoals it opened, by the names it gave them.
 --

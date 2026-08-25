@@ -359,6 +359,7 @@ operandsOf o = case o of
   Unify  a b   -> [a, b]
   Try    a     -> [a]
   Certify a    -> [a]
+  FreshName a  -> [a]
   Goal         -> []
   Typing a     -> [a]
   Define a b   -> [a, b]
@@ -504,7 +505,7 @@ operation g i (RawOp w as)
       [ ("say", Say), ("prim-try", Try), ("parse", Parse), ("resolve", Op.Resolve)
       , ("goto", Goto)
       , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
-      , ("typeof", Typing)
+      , ("typeof", Typing), ("fresh-name", FreshName)
       ]
     binary =
       [ ("assume", Assume), ("claim", Claim), ("define", Define)

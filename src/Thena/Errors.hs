@@ -106,6 +106,11 @@ data FailReason
     -- undischarged constraint in it (§5.3). The 'Position' names the first one
     -- — @certify@ before anything is proved is the normal way to meet this, so
     -- it says which component rather than only that one exists
+  | NameTaken String
+    -- ^ @claim@, @assume@ or @define@ handed an identifier the development
+    -- already binds (phase 24c). **A refusal and not a rename**: inventing a
+    -- name is @fresh-name@'s job, and silently repairing this would hide from
+    -- the body what it had actually got
   | NoGoalHere
     -- ^ @goal@ where nothing is written down (§4.5, phase 24). The top of a
     -- development claims nothing, so it has no goal to read
