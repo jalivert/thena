@@ -125,6 +125,7 @@ import Thena.Syntax.Parser
   , parseEquation
   , parseNameAndType
   , parseRules
+  , parseAtoms
   , parseTerm
   )
 import Thena.Syntax.Resolve (resolve, resolveData, resolvePartial)
@@ -330,6 +331,25 @@ parseDevelopment
   :: GlobalEnv -> Context -> Int -> String -> Either SyntaxError (Partial, Int)
 parseDevelopment = parseWith resolvePartial
 
+-- | The arguments of a rule called by name at the REPL (phase 23b): a run of
+-- atoms, each resolved as a core term in the context at the focus.
+--
+-- **A run and not one term**, so that a REPL line means what the same line
+-- means inside a rule body — @f a b@ is two arguments in both. The counter is
+-- threaded through, because resolving mints display variables.
+parseArguments
+  :: GlobalEnv -> Context -> Int -> String -> Either SyntaxError ([Core], Int)
+parseArguments env ctx n src = do
+  ts   <- tokensOf src
+  raws <- mapLeft ParseFailed (parseAtoms ts)
+  go n raws
+  where
+    go k []       = Right ([], k)
+    go k (r : rs) = do
+      (t, k1)  <- mapLeft ResolveFailed (resolve env ctx k r)
+      (ts', k2) <- go k1 rs
+      Right (t : ts', k2)
+
 parseWith
   :: (GlobalEnv -> Context -> Int -> Raw -> Either ResolveError (a, Int))
   -> GlobalEnv -> Context -> Int -> String -> Either SyntaxError (a, Int)
@@ -533,14 +553,6 @@ dispatch s name arg = case name of
                 load [Do (Unify (Lit (VTerm (Trailing a))) (Lit (VTerm (Trailing b))))]
                      machine { names = n1 } }
           []
-  -- The life of a hole (thesis tables 2.7, 2.8). Bare words: they are ops, and
-  -- they rewrite the development. Each acts at the focus, so only @try@ takes
-  -- an argument.
-  "attack" -> noArgument (run [Do Attack])
-  "intro"  -> noArgument (run [Do Intro])
-  "solve"  -> noArgument (run [Do Solve])
-  "regret" -> noArgument (run [Do Regret])
-  "abandon" -> noArgument (run [Do Abandon])
   -- Dispatch the rule engine at the focus (§7.3). An op, so a bare word.
   --
   -- **With an argument it is elaboration** (§8, phase 17b), and the argument
@@ -564,28 +576,6 @@ dispatch s name arg = case name of
     _  -> case reads arg of
       [(n, "")] -> retryAt (Just n)
       _         -> (s, Rejected (UnexpectedArgument name))
-  "try"    -> withArgument $
-    case parseCore (globals machine) ctx (names machine) arg of
-      Left e -> (s, Failed e)
-      Right (t, n1) ->
-        progress
-          (sessionStepping s)
-          s { sessionMachine =
-                load [Do (Try (Lit (VTerm (Trailing t))))] machine { names = n1 } }
-          []
-  -- §3.7's elimination tactic (phase 17). A bare word taking the target to
-  -- eliminate, spelled and read exactly as @try@ is: it acts, and its argument
-  -- is a core term in the context at the focus. Thesis §3.6 calls choosing it
-  -- \"fingering\", and it is the user's choice, not the tactic's.
-  "eliminate" -> withArgument $
-    case parseCore (globals machine) ctx (names machine) arg of
-      Left e -> (s, Failed e)
-      Right (t, n1) ->
-        progress
-          (sessionStepping s)
-          s { sessionMachine =
-                load [Do (Ops.Eliminate (Lit (VTerm (Trailing t))))] machine { names = n1 } }
-          []
   "cross"  -> case arg of
     "type" -> run [Do CrossType]
     "val"  -> run [Do CrossValue]
@@ -595,7 +585,33 @@ dispatch s name arg = case name of
   _ | name `elem` partWords -> case corePart name arg of
         Left e  -> (s, Rejected e)
         Right p -> run [Do (Down p)]
-    | otherwise -> (s, Rejected (NoSuchCommand name))
+    -- **Anything else is a rule, called by name** — the user, 2026-08-25:
+    -- *"They should just be called by name, like what happens in rule's body.
+    -- No additional `call` keyword. The point was — REPL is literally as if you
+    -- are inside a rule's body."*
+    --
+    -- So @attack@, @try ‹t›@, @intro@, @solve@, @regret@, @abandon@ and
+    -- @eliminate ‹t›@ stopped being cases of this function: they are rules now,
+    -- and this is how they are reached. The seven primitives they run were
+    -- renamed @prim-…@ so the words could go to the tactics (§8).
+    --
+    -- Arguments are a **run of atoms**, as a rule body writes its operands, so
+    -- @f a b@ is two arguments here exactly as it is there. A compound argument
+    -- is parenthesised — @try (λ (x : A) -> x)@ — which is also what @elim@'s
+    -- field groups have always required (§2.6).
+    -- A colon word is the driver's own and is never a rule: §2.4's split says
+    -- a colon looks, and nothing that looks lives in the rule base.
+    | take 1 name == ":" -> (s, Rejected (NoSuchCommand name))
+    | otherwise -> case parseArguments (globals machine) ctx (names machine) arg of
+        Left e          -> (s, Failed e)
+        Right (ts, n1)  ->
+          progress
+            (sessionStepping s)
+            s { sessionMachine =
+                  load [Do (Ops.Call (GlobalName name)
+                                     (map (Lit . VTerm . Trailing) ts))]
+                       machine { names = n1 } }
+            []
   where
     machine = sessionMachine s
     ctx     = proofContext (proof machine)

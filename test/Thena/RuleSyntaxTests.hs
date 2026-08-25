@@ -152,18 +152,18 @@ everyOp =
   , ("back",         Back)
   , ("reduce",       Reduce)
   , ("unify x y",    Unify (Ref "x") (Ref "y"))
-  , ("attack",       Attack)
-  , ("intro",        Intro)
-  , ("try x",        Try (Ref "x"))
-  , ("regret",       Regret)
-  , ("solve",        Solve)
-  , ("abandon",      Abandon)
+  , ("prim-attack",  Attack)
+  , ("prim-intro",   Intro)
+  , ("prim-try x",   Try (Ref "x"))
+  , ("prim-regret",  Regret)
+  , ("prim-solve",   Solve)
+  , ("prim-abandon", Abandon)
   , ("prove",        Prove Nothing)
   , ("prove x",      Prove (Just (Ref "x")))
   , ("parse x",      Parse (Ref "x"))
   , ("resolve x",    Op.Resolve (Ref "x"))
   , ("certify x",    Certify (Ref "x"))
-  , ("eliminate x",  Op.Eliminate (Ref "x"))
+  , ("prim-eliminate x", Op.Eliminate (Ref "x"))
   ]
 
 vocabulary :: TestTree
@@ -197,7 +197,7 @@ vocabulary =
 
     testCase' t =
       testCase (testWord t) $ do
-        r <- expectRule ("rule r :- when " ++ testWord t ++ " then solve")
+        r <- expectRule ("rule r :- when " ++ testWord t ++ " then prim-solve")
         ruleHead r @?= [t]
 
 -- --------------------------------------------------------------------------
@@ -209,20 +209,20 @@ shapes =
   testGroup
     "shape"
     [ testCase "no parameters, no parentheses" $ do
-        r <- expectRule "rule r :- when focus-is-hole then solve"
+        r <- expectRule "rule r :- when focus-is-hole then prim-solve"
         ruleParams r @?= []
     , -- **No parentheses and no commas** — corrected by the user 2026-08-25,
       -- so that a definition and a call site write their arguments alike.
       testCase "parameters are a bare run of names" $ do
-        r <- expectRule "rule r a b c :- when focus-is-hole then solve"
+        r <- expectRule "rule r a b c :- when focus-is-hole then prim-solve"
         ruleParams r @?= ["a", "b", "c"]
     , -- A rule may apply everywhere, so 'when' is optional; a rule with no body
       -- does nothing, so 'then' is not.
       testCase "when is optional" $ do
-        r <- expectRule "rule r :- then solve"
+        r <- expectRule "rule r :- then prim-solve"
         ruleHead r @?= []
     , testCase "several instructions, separated by semicolons" $ do
-        b <- bodyOf "attack; along; solve"
+        b <- bodyOf "prim-attack; along; prim-solve"
         b @?= [Do Attack, Do Along, Do Solve]
     , testCase "a binding instruction" $ do
         b <- bodyOf "x = resolve hint"
@@ -230,7 +230,7 @@ shapes =
     , -- The hyphens are the reason the lexer was widened this phase: §8 and
       -- OBJECTIVE.md have always written rule and test names this way.
       testCase "a hyphenated name is one identifier" $ do
-        r <- expectRule "rule elab-app :- when focus-is-hole then solve"
+        r <- expectRule "rule elab-app :- when focus-is-hole then prim-solve"
         ruleName r @?= GlobalName "elab-app"
     ]
 
@@ -275,7 +275,7 @@ text =
     , -- §7.2's bargain: an op given the wrong kind of value fails at run time,
       -- not in the grammar. So this resolves and would fail when run.
       testCase "text is accepted wherever an operand is" $ do
-        b <- bodyOf "try \"not a term\""
+        b <- bodyOf "prim-try \"not a term\""
         b @?= [Do (Try (Lit (VText "not a term")))]
 
     , testCase "an unterminated string does not lex" $
@@ -298,20 +298,20 @@ mistakes =
   testGroup
     "mistakes"
     [ refused "an unknown test word"
-        "rule r :- when focus-is-purple then solve"
+        "rule r :- when focus-is-purple then prim-solve"
         [NoSuchTest (GlobalName "r") "focus-is-purple"]
     , refused "an unknown op word"
         "rule r :- when focus-is-hole then frobnicate"
         [NoSuchOp (GlobalName "r") 0 "frobnicate"]
     , refused "too many arguments"
-        "rule r :- when focus-is-hole then solve x"
-        [BadOperands (GlobalName "r") 0 "solve"]
+        "rule r :- when focus-is-hole then prim-solve x"
+        [BadOperands (GlobalName "r") 0 "prim-solve"]
     , refused "too few arguments"
         "rule r :- when focus-is-hole then unify x"
         [BadOperands (GlobalName "r") 0 "unify"]
     , refused "a position where a name was wanted"
-        "rule r :- when focus-is-hole then try 3"
-        [BadOperands (GlobalName "r") 0 "try"]
+        "rule r :- when focus-is-hole then prim-try 3"
+        [BadOperands (GlobalName "r") 0 "prim-try"]
     , -- §3.7: a declaration is a command, never a rule-body operation. It is
       -- refused in resolution now, one step before 'validate' would have —
       -- which is why 'validate''s own check stays reachable only for a rule
@@ -320,10 +320,10 @@ mistakes =
         "rule r :- when focus-is-hole then data"
         [DeclarationInBody (GlobalName "r") 0]
     , refused "every mistake, not the first"
-        "rule r :- when focus-is-purple then frobnicate; solve x"
+        "rule r :- when focus-is-purple then frobnicate; prim-solve x"
         [ NoSuchTest (GlobalName "r") "focus-is-purple"
         , NoSuchOp (GlobalName "r") 0 "frobnicate"
-        , BadOperands (GlobalName "r") 1 "solve"
+        , BadOperands (GlobalName "r") 1 "prim-solve"
         ]
     , testCase "a body is required" $
         case readRule "rule r :- when focus-is-hole" of

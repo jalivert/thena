@@ -18,10 +18,10 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (GlobalName (..))
-import Thena.Driver (Session (..), newSession)
+import Thena.Driver (Session (..))
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
-import Thena.Repl (loadPrelude, loadFile, renderCore)
+import Thena.Repl (startingSession, loadFile, renderCore)
 
 -- | Relative to the package root, which is where the suite runs.
 target :: FilePath
@@ -32,12 +32,12 @@ tests =
   testGroup
     "a dependent index telescope, proved end to end (phase 19)"
     [ testCase "the file runs to the end" $ do
-        (s, _) <- loadPrelude newSession
+        (s, _) <- startingSession
         (_, _, stopped) <- loadFile s target
         stopped @?= []
 
     , testCase "and the theorem is a global with the statement it should have" $ do
-        (s, _) <- loadPrelude newSession
+        (s, _) <- startingSession
         (s', _, _) <- loadFile s target
         case lookupDefinition (GlobalName "belowRefl") (globals (sessionMachine s')) of
           Nothing -> assertFailure "belowRefl was not admitted"

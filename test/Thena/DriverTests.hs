@@ -8,6 +8,7 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Level (..))
 import Thena.Development.Component (Component (..))
 import Thena.Development.Partial (Partial (..))
+import Thena.Standard (withRules)
 import Thena.Driver
   ( CommandError (..)
   , Response (..)
@@ -49,42 +50,42 @@ tests =
     [ testGroup
         "the command line"
         [ testCase "an empty line does nothing" $
-            snd (command newSession "") @?= Blank
+            snd (command withRules "") @?= Blank
         , testCase ":quit leaves the loop" $
-            snd (command newSession ":quit") @?= Quit
+            snd (command withRules ":quit") @?= Quit
         , testCase "an unknown word is not a term, it is a mistake" $
-            snd (command newSession "hello") @?= Rejected (NoSuchCommand "hello")
+            snd (command withRules "hello") @?= Ran [] (Halted (NoClauseMatched (GlobalName "hello") 0 []))
         , testCase "a command that merely starts with :core is not :core" $
-            snd (command newSession ":corex") @?= Rejected (NoSuchCommand ":corex")
+            snd (command withRules ":corex") @?= Rejected (NoSuchCommand ":corex")
         , testCase "a view command with no argument says so" $
-            snd (command newSession ":core") @?= Rejected (MissingArgument ":core")
+            snd (command withRules ":core") @?= Rejected (MissingArgument ":core")
         , testCase "cross must say which field" $
-            snd (command newSession "cross") @?= Rejected (MissingArgument "cross")
+            snd (command withRules "cross") @?= Rejected (MissingArgument "cross")
         , testCase "and it must be one of the two there are" $
-            snd (command newSession "cross body") @?= Rejected (UnexpectedArgument "cross")
+            snd (command withRules "cross body") @?= Rejected (UnexpectedArgument "cross")
         , testCase "a positional descent needs a number" $
-            snd (command newSession "param") @?= Rejected (MissingArgument "param")
+            snd (command withRules "param") @?= Rejected (MissingArgument "param")
         , testCase "and it has to be one" $
-            snd (command newSession "param x") @?= Rejected (UnexpectedArgument "param")
+            snd (command withRules "param x") @?= Rejected (UnexpectedArgument "param")
         , testCase "a plain descent takes no argument" $
-            snd (command newSession "cod 2") @?= Rejected (UnexpectedArgument "cod")
+            snd (command withRules "cod 2") @?= Rejected (UnexpectedArgument "cod")
         , testCase ":where answers with the cursor, not with text" $
-            case snd (command newSession ":where") of
+            case snd (command withRules ":where") of
               Where _ -> pure ()
               other   -> assertFailure ("expected Where, got " ++ show other)
         , testCase ":show with an argument is a global, not a mistake" $
-            snd (command newSession ":show x") @?= Rejected (NoSuchGlobal "x")
+            snd (command withRules ":show x") @?= Rejected (NoSuchGlobal "x")
         , testCase ":step takes on, off, or nothing" $
-            snd (command newSession ":step sideways") @?= Rejected (UnexpectedArgument ":step")
+            snd (command withRules ":step sideways") @?= Rejected (UnexpectedArgument ":step")
         ]
     , testGroup
         "views"
         [ testCase ":core resolves a term" $
-            case snd (command newSession ":core λ (x : Type₀) -> x") of
+            case snd (command withRules ":core λ (x : Type₀) -> x") of
               Rendered _ -> pure ()
               other      -> assertFailure ("expected Rendered, got " ++ show other)
         , testCase ":core reports a scope error" $
-            case snd (command newSession ":core y") of
+            case snd (command withRules ":core y") of
               Failed _ -> pure ()
               other    -> assertFailure ("expected Failed, got " ++ show other)
         , testCase ":core sees what the development binds" $
@@ -93,11 +94,11 @@ tests =
               Rendered _ -> pure ()
               other      -> assertFailure ("expected Rendered, got " ++ show other)
         , testCase ":dev resolves a development" $
-            case snd (command newSession ":dev let ? h : Type₀ in h") of
+            case snd (command withRules ":dev let ? h : Type₀ in h") of
               RenderedDev _ -> pure ()
               other         -> assertFailure ("expected RenderedDev, got " ++ show other)
         , testCase ":core rejects a hole, which is development-only" $
-            case snd (command newSession ":core let ? h : Type₀ in h") of
+            case snd (command withRules ":core let ? h : Type₀ in h") of
               Failed _ -> pure ()
               other    -> assertFailure ("expected Failed, got " ++ show other)
         , testCase ":show renders the development the machine holds" $
@@ -134,7 +135,7 @@ tests =
         , testCase "answering when nothing was asked is refused" $
             snd (answer newSession "B") @?= Rejected NotAsking
         , testCase "assume needs a type" $
-            case snd (command newSession "assume A") of
+            case snd (command withRules "assume A") of
               Failed _ -> pure ()
               other    -> assertFailure ("expected Failed, got " ++ show other)
         , testCase "assume resolves its type in the development's context" $
@@ -170,9 +171,9 @@ tests =
         , testCase "the development is untouched: globals are not ProofState (§7.4)" $
             devOf (fst (say [natCommand])) @?= devOf newSession
         , testCase "data needs an argument" $
-            snd (command newSession "data") @?= Rejected (MissingArgument "data")
+            snd (command withRules "data") @?= Rejected (MissingArgument "data")
         , testCase "a declaration that does not fit the form is a syntax error" $
-            case snd (command newSession "data T : Type\8320 where { c }") of
+            case snd (command withRules "data T : Type\8320 where { c }") of
               Failed _ -> pure ()
               other    -> assertFailure ("expected Failed, got " ++ show other)
         , testCase "a declaration the checker refuses stops the run" $

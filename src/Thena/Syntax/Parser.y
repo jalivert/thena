@@ -28,6 +28,7 @@ module Thena.Syntax.Parser
   , parseEquation
   , parseRule
   , parseRules
+  , parseAtoms
   ) where
 
 import Thena.Syntax.Concrete
@@ -50,6 +51,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 %name parseEquation Equation
 %name parseRule Rule
 %name parseRules RuleFile
+%name parseAtoms AtomRun
 %tokentype { Located Token }
 %monad { Either ParseError }
 %error { parseError }
@@ -220,6 +222,13 @@ Atom :: { Raw }
   : ident                                  { RawName $1 }
   | univ                                   { RawUniverse $1 }
   | '(' Term ')'                           { $2 }
+
+-- The argument list of a rule invoked at the REPL (phase 23b): a run of atoms,
+-- exactly as a rule body writes its operands. @try (\ x -> x)@ is one argument
+-- and @f a b@ is two, which is what makes a REPL line mean what the same line
+-- means inside a rule body.
+AtomRun :: { [Raw] }
+  : Atoms                                  { reverse $1 }
 
 -- A possibly-empty run of atoms, accumulated in reverse like 'Binders'. An
 -- 'elim''s three list-valued fields (§2.6, phase 7): each is parenthesized so

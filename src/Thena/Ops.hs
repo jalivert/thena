@@ -430,6 +430,14 @@ hintName = "hint"
 -- 'Down' answers with its field's word and drops the position, which is all a
 -- coverage table needs; 'partOf' below is what actually reads one back.
 --
+-- **The seven @prim-@ words — DECIDED by the user 2026-08-25, phase 23b.** Ops
+-- and rules share one namespace, and the good words belong to the /tactics/:
+-- @attack@ is a rule, and an instruction called @attack@ *"would be absurd"*.
+-- These seven were named after their rule counterparts by mistake, and the
+-- prefix marks them for what they are — temporary machine-level primitives that
+-- rules will replace. It invents no vocabulary, which matters because phase 26
+-- is where the op set is actually redesigned.
+--
 -- 'DefineData' has a word and no written form: §3.7 keeps a declaration out of
 -- a rule body, and 'Thena.Rules.validate' is what enforces that. The word is
 -- here because the case split is total, not because a body may say it.
@@ -449,18 +457,18 @@ opKeyword o = case o of
   Reduce       -> "reduce"
   Unify _ _    -> "unify"
   DefineData _ -> "data"
-  Attack       -> "attack"
-  Intro        -> "intro"
-  Try _        -> "try"
-  Regret       -> "regret"
-  Solve        -> "solve"
-  Abandon      -> "abandon"
+  Attack       -> "prim-attack"
+  Intro        -> "prim-intro"
+  Try _        -> "prim-try"
+  Regret       -> "prim-regret"
+  Solve        -> "prim-solve"
+  Abandon      -> "prim-abandon"
   Prove _      -> "prove"
   Parse _      -> "parse"
   Resolve _    -> "resolve"
   Call _ _     -> "call"
   Certify _    -> "certify"
-  Eliminate _  -> "eliminate"
+  Eliminate _  -> "prim-eliminate"
 
 -- | The words that name a field of a core term (§4.3, phase 5). One word per
 -- field, so that none of them changes meaning with what is in focus.

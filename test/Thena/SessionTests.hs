@@ -15,6 +15,7 @@ import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (GlobalName (..))
 import Thena.Declared (natDecl)
+import Thena.Standard (withRules)
 import Thena.Driver
   ( CommandError (..)
   , Loaded (..)
@@ -23,7 +24,6 @@ import Thena.Driver
   , Session (..)
   , Stop (..)
   , loadSource
-  , newSession
   )
 import Thena.Engine (Machine (..), ProofState)
 import Thena.Errors (FailReason (..), MoveError (..))
@@ -96,23 +96,28 @@ theoremIsAGlobal = testCase "and it is a global definition afterwards (§3.3.1)"
 holeTests :: [TestTree]
 holeTests =
   [ ok "attack turns a hole into a guess holding a hole" (goal ++ ["attack"])
-    -- The trailing term of the top-level chain is a core term, not a hole.
-  , halts "and refuses a focus that is not a hole at all"
-      (goal ++ ["along", "attack"]) (CannotMove NotOnTheSpine)
 
-    -- Table 2.8's shape test is the specification: a hole not of the form
-    -- @?x : S . x@ is made ready by @attack@ first.
+    -- **These say @NoClauseMatched@ where they used to say the op's own
+    -- reason, and that is phase 23b arriving.** A tactic word reaches a /rule/
+    -- now, so whether it applies is decided by the rule's head before the body
+    -- runs — Prolog's answer, and the same one @prove@ has always given. The
+    -- cost is diagnostic: @intro@ at a guess whose type is neither a ∀ nor a
+    -- @let@ said @NothingToIntroduce@ and now says only that no clause applies.
+    -- On MS2's closeout list.
+  , halts "and refuses a focus that is not a hole at all"
+      (goal ++ ["along", "attack"]) (NoClauseMatched (GlobalName "attack") 0 [0])
   , halts "intro refuses a hole that has not been attacked"
-      (goal ++ ["intro"]) NotReadyToIntroduce
+      (goal ++ ["intro"]) (NoClauseMatched (GlobalName "intro") 0 [0, 0])
   , halts "and a guess whose type is neither a ∀ nor a let"
-      (natGoal ++ ["attack", "intro"]) NothingToIntroduce
+      (natGoal ++ ["attack", "intro"]) (NoClauseMatched (GlobalName "intro") 0 [0, 0])
   , ok "intro walks a Π"        (arrowGoal ++ ["attack", "intro"])
   , ok "and then the next one"  (arrowGoal ++ ["attack", "intro", "intro"])
 
   , ok "try attaches a guess"   (natGoal ++ ["attack", "into", "try zero"])
   , ok "and regret takes it off again"
       (natGoal ++ ["attack", "into", "try zero", "regret"])
-  , halts "regret needs a guess" (natGoal ++ ["regret"]) NotAGuessHere
+  , halts "regret needs a guess" (natGoal ++ ["regret"])
+      (NoClauseMatched (GlobalName "regret") 0 [0])
 
   , ok "solve commits a pure guess"
       (natGoal ++ ["attack", "into", "try zero", "solve"])
@@ -209,7 +214,7 @@ undoTests =
 -- --------------------------------------------------------------------------
 
 run :: [String] -> Loaded
-run = loadSource newSession . unlines
+run = loadSource withRules . unlines
 
 globalsAfter :: Loaded -> GlobalEnv
 globalsAfter = globals . sessionMachine . loadedSession

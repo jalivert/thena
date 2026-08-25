@@ -13,10 +13,10 @@ along
 eliminate b
 back
 back
-try \ (m : Nat) (q : Eq Nat (succ m) n) -> refl (Fin (succ m)) (fz m)
+try (\ (m : Nat) (q : Eq Nat (succ m) n) -> refl (Fin (succ m)) (fz m))
 solve
 along
-try \ (m : Nat) (j : Fin m) (c : Below m j) (ih : Eq Nat m n -> Eq (Fin m) j j) (q : Eq Nat (succ m) n) -> refl (Fin (succ m)) (fs m j)
+try (\ (m : Nat) (j : Fin m) (c : Below m j) (ih : Eq Nat m n -> Eq (Fin m) j j) (q : Eq Nat (succ m) n) -> refl (Fin (succ m)) (fs m j))
 solve
 along
 solve

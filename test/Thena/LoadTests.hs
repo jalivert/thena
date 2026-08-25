@@ -29,7 +29,7 @@ import Thena.Driver
   )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (eliminatorType, isDeclared, lookupInductive)
-import Thena.Repl (loadPrelude, renderCore, renderEliminator)
+import Thena.Repl (startingSession, renderCore, renderEliminator)
 
 tests :: TestTree
 tests =
@@ -47,11 +47,11 @@ tests =
 preludeTests :: [TestTree]
 preludeTests =
   [ testCase "it is found where cabal put it, and loads clean" $ do
-      (_, problems) <- loadPrelude newSession
+      (_, problems) <- startingSession
       problems @?= []
 
   , testCase "and declares exactly Eq, refl, Unit, unit and Empty" $ do
-      (s, _) <- loadPrelude newSession
+      (s, _) <- startingSession
       let env = globals (sessionMachine s)
       sequence_
         [ assertBool (n ++ " is not declared") (isDeclared (GlobalName n) env)
@@ -61,7 +61,7 @@ preludeTests =
     -- §9's phase-11 deliverable, in full: "Eq's generated eliminator is J and
     -- can be used". Pinned as a string, for 'Thena.EliminatorTests'' reason.
   , testCase "Eq's generated eliminator is J" $ do
-      (s, _) <- loadPrelude newSession
+      (s, _) <- startingSession
       let env = globals (sessionMachine s)
           n0  = names (sessionMachine s)
       case lookupInductive (GlobalName "Eq") env of
@@ -76,7 +76,7 @@ preludeTests =
     -- "and can be used": eliminating a 'refl' must actually fire. The motive is
     -- constant so the reduct is the method applied to the one index.
   , testCase "and J computes on refl" $ do
-      (s, _) <- loadPrelude newSession
+      (s, _) <- startingSession
       afterLines s
         [ ":whnf elim Eq (Unit) (\\ (x : Unit) (y : Unit) (p : Eq Unit x y) -> Unit) \
           \((\\ (a : Unit) -> a)) (unit unit) (refl Unit unit)"
@@ -88,7 +88,7 @@ preludeTests =
     -- The real @repl@ has the prelude in scope and 'transcript' does not; this
     -- is the difference, made visible.
   , testCase "preludeIsInTheWay: Empty cannot be redeclared over the prelude" $ do
-      (s, _) <- loadPrelude newSession
+      (s, _) <- startingSession
       afterLines s ["data Empty : Type₀ where { }"] $ \l ->
         loadedError l @?= Just (LoadStopped 1)
   ]
@@ -148,7 +148,7 @@ failureTests =
 
     -- The reason is the last response, not a second copy inside 'LoadError'.
   , testCase "and the reason is the last response, not carried twice" $
-      let l = source ["data A0 : Type₀ where { a0 : A0 }", "no such command here"]
+      let l = source ["data A0 : Type₀ where { a0 : A0 }", ":no-such-command-here"]
        in case reverse (loadedResponses l) of
             Rejected _ : _ -> pure ()
             other          -> assertFailure ("not a rejection: " ++ show (take 1 other))

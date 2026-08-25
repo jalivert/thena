@@ -16,6 +16,7 @@ module Thena.Standard
   , standardVisible
   , expectedStandard
   , expectedBase
+  , withRules
   ) where
 
 import Thena.Core.Term (GlobalName (..))
@@ -61,13 +62,27 @@ expectedStandard =
   [ Rule (GlobalName "attack")     []    [FocusIsHole]                 [Do Attack]
   , Rule (GlobalName "try") ["t"] [FocusIsHole] [Do (Try (Ref "t"))]
   , Rule (GlobalName "abandon")    []    [FocusIsHole]                 [Do Abandon]
-  , Rule (GlobalName "intro-pi")   []    [FocusIsGuess, GoalTypeIsPi]  [Do Intro]
-  , Rule (GlobalName "intro-let")  []    [FocusIsGuess, GoalTypeIsLet] [Do Intro]
+    -- **Two clauses of one name** (phase 23b): table 2.8 has two intro rules and
+    -- they differ only in their head, which is exactly what a second clause is
+    -- for. Before phase 23 a call could not backtrack, so they had to be
+    -- @intro-pi@ and @intro-let@; now they are @intro@, and typing @intro@ at
+    -- the REPL reaches whichever one applies.
+  , Rule (GlobalName "intro")      []    [FocusIsGuess, GoalTypeIsPi]  [Do Intro]
+  , Rule (GlobalName "intro")      []    [FocusIsGuess, GoalTypeIsLet] [Do Intro]
   , Rule (GlobalName "solve")      []    [FocusIsGuess]                [Do Solve]
   , Rule (GlobalName "regret")     []    [FocusIsGuess]                [Do Regret]
   , Rule (GlobalName "eliminate")  ["t"] [FocusIsHole]                 [Do (Op.Eliminate (Ref "t"))]
   , elabVar
   ]
+
+-- | A fresh session with 'expectedBase' installed, for the suites that drive
+-- the driver without IO.
+--
+-- **Needed as of phase 23b**: @attack@, @try@ and @solve@ are rules now, so a
+-- session with no base cannot run the commands every REPL test types.
+withRules :: Session
+withRules =
+  newSession { sessionMachine = (sessionMachine newSession) { rules = expectedBase } }
 
 -- | 'expectedStandard' as a base, for the suites that want one and do not want
 -- IO. They were testing against a Haskell literal before phase 22 and still

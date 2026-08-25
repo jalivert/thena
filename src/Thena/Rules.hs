@@ -493,12 +493,12 @@ operation g i (RawOp w as)
 
     nullary =
       [ ("along", Along), ("into", Into), ("back", Back), ("reduce", Reduce)
-      , ("attack", Attack), ("intro", Intro), ("regret", Regret)
-      , ("solve", Solve), ("abandon", Abandon)
+      , ("prim-attack", Attack), ("prim-intro", Intro), ("prim-regret", Regret)
+      , ("prim-solve", Solve), ("prim-abandon", Abandon)
       ]
     unary =
-      [ ("say", Say), ("try", Try), ("parse", Parse), ("resolve", Op.Resolve)
-      , ("certify", Certify), ("eliminate", Op.Eliminate)
+      [ ("say", Say), ("prim-try", Try), ("parse", Parse), ("resolve", Op.Resolve)
+      , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
       ]
     binary =
       [ ("assume", Assume), ("claim", Claim)
