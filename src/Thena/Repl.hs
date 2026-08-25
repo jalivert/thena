@@ -913,8 +913,9 @@ renderOp n ctx op = case op of
   Ops.Prove (Just h) -> "prove with " ++ operand h
   Ops.Parse src   -> "parse " ++ operand src
   Ops.Resolve raw -> "resolve " ++ operand raw
-  Ops.Call r as   -> "call " ++ operand r
-                       ++ " (" ++ intercalate ", " (map operand as) ++ ")"
+  -- Written the way a rule file writes it (phase 23): the name, then the
+  -- arguments as any other op's, spaced and unwrapped.
+  Ops.Call nm as  -> unwords ("call" : nameString nm : map operand as)
   Ops.Eliminate t -> "eliminate " ++ operand t
   where
     operand = renderOperand n ctx
@@ -935,7 +936,6 @@ renderValue n ctx v = case v of
   VSurface raw       -> "‹" ++ renderRaw raw ++ "›"
   -- A rule in an operand is a rule being passed to another rule, so its name
   -- is what identifies it; its body belongs to @:show@ on the rule, not here.
-  VRule r            -> "‹rule " ++ nameString (ruleName r) ++ "›"
   VPair a b          -> "(" ++ renderValue n ctx a ++ ", " ++ renderValue n ctx b ++ ")"
 
 answerKind :: AnswerKind -> String
@@ -999,9 +999,23 @@ renderFailReason r = case r of
   -- rather than two.
   CannotRead e      -> renderSyntaxError e
   ExpectedSurface   -> "expected a hint"
-  ExpectedRule      -> "expected a rule"
-  WrongNumberOfArguments g want got ->
-    nameString g ++ " takes " ++ show want ++ " argument(s), given " ++ show got
+  -- One reason, three messages (§8, phase 23): the name is unknown, the name
+  -- is known at other arities, or clauses of the right arity all failed their
+  -- heads. Which one it is falls out of the arities the reason carries.
+  NoClauseMatched g got want
+    | null want        -> "no rule is called " ++ nameString g
+    | got `notElem` want ->
+        nameString g ++ " takes " ++ orList (map show want)
+          ++ " argument(s), given " ++ show got
+    | otherwise        ->
+        "no clause of " ++ nameString g ++ " applies here"
+
+-- | @a@, @a or b@, @a, b or c@ — for a message that lists alternatives.
+orList :: [String] -> String
+orList xs = case reverse xs of
+  []      -> ""
+  [x]     -> x
+  x : ys  -> intercalate ", " (reverse ys) ++ " or " ++ x
 
 -- | A hint, printed as written (phase 17b).
 --
@@ -1357,7 +1371,6 @@ renderRuleError e = case e of
   NoSuchTest g w           -> "in " ++ nameString g ++ ": no such test: " ++ w
   NoSuchOp g i w           -> inRule g i ++ "no such operation: " ++ w
   BadOperands g i w        -> inRule g i ++ w ++ " was written with the wrong arguments"
-  NoSuchRuleCalled g i r   -> inRule g i ++ "no rule called " ++ r ++ " is in scope here"
   where
     inRule g i = "in " ++ nameString g ++ ", instruction " ++ show i ++ ": "
 

@@ -164,19 +164,23 @@ Rules :: { [RawRule] }
   | Rules Rule                             { $2 : $1 }
 
 Rule :: { RawRule }
-  : rule ident Params ':-' Tests then Body   { RawRule $2 $3 $5 (reverse $7) }
+  : rule ident Params ':-' Tests then Body   { RawRule $2 (reverse $3) $5 (reverse $7) }
 
+-- Parameters are a bare run of names, ended by @:-@ — no parentheses and no
+-- commas. CORRECTED by the user 2026-08-25, planning phase 23: a call site
+-- writes its arguments as every other op writes them, @call f x y@, so a
+-- definition that wrapped its parameters would have been the odd one out.
 Params :: { [String] }
   :                                        { [] }
-  | '(' Names ')'                          { reverse $2 }
-
-Names :: { [String] }
-  : ident                                  { [$1] }
-  | Names ident                            { $2 : $1 }
+  | Params ident                           { $2 : $1 }
 
 Tests :: { [String] }
   :                                        { [] }
   | when Names                             { reverse $2 }
+
+Names :: { [String] }
+  : ident                                  { [$1] }
+  | Names ident                            { $2 : $1 }
 
 -- Accumulated in reverse, like 'Binders'. At least one: 'Rule' requires 'then'
 -- and 'then' with nothing after it is a parse error rather than an empty body.

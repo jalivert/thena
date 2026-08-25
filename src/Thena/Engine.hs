@@ -92,7 +92,7 @@ import Thena.Ops
 import Thena.Global.Env (GlobalEnv, InductiveDefinition)
 import qualified Thena.Ops as Op
 import Thena.Tactics.Eliminate (Elimination (..), eliminate)
-import Thena.Rules (RuleBase, RuleIter, dispatch, hasNext, next)
+import Thena.Rules (RuleBase, RuleIter, arities, clauses, dispatch, hasNext, next)
 import Thena.Syntax.Concrete (Raw)
 import Thena.Syntax.Lexer (isIdentifier, lexTokens)
 import Thena.Syntax.Parser (parseTerm)
@@ -162,6 +162,12 @@ data Frame
       , chosen    :: GlobalName  -- ^ the rule this frame is currently running
       , returned  :: Bool
         -- ^ has control already passed back out of this call? See 'resumeFrom'.
+      , callArgs  :: [Value]
+        -- ^ the arguments a @call@ was given, or @[]@ for a dispatch (phase
+        -- 23). Kept beside 'entryEnv' rather than folded into it because each
+        -- clause binds them to **its own** parameter names — clauses of one
+        -- name need not agree on those, or even on how many there are. See
+        -- 'seedFor', which is the one place the two are put together.
       , entryEnv  :: Env
         -- ^ the environment /every/ alternative of this choice point starts in
         -- (phase 17b). Empty for a plain @prove@; @[(hint, …)]@ when the
@@ -344,7 +350,7 @@ resumeFrom (fr : stk) = case fr of
     Just ( resume fr
          , resumeEnv fr
          , Choice (resume fr) (resumeEnv fr) (alts fr) (saved fr)
-                  (choiceId fr) (chosen fr) True (entryEnv fr)
+                  (choiceId fr) (chosen fr) True (callArgs fr) (entryEnv fr)
              : stk
          )
   Choice { returned = True } ->
@@ -392,7 +398,7 @@ failure r0 m = unwind (stack (exec m))
         -- @regret@ ran, and only the development moved.
         Just (r, it') -> Saying (took "backtracking to" fr r) m
           { proof = saved fr
-          , exec  = Exec (ruleBody r) (entryEnv fr) (demote fr r it' : stk)
+          , exec  = Exec (ruleBody r) (seedFor fr r) (demote fr r it' : stk)
           }
 
     took verb fr r = verb ++ " " ++ show (choiceId fr) ++ ": " ++ nameOfRule r
@@ -407,7 +413,7 @@ demote :: Frame -> Rule -> RuleIter -> Frame
 demote fr r it'
   | hasNext it' =
       Choice (resume fr) (resumeEnv fr) it' (saved fr) (choiceId fr) (ruleName r)
-             False (entryEnv fr)
+             False (callArgs fr) (entryEnv fr)
   | otherwise = Thena.Engine.Call (resume fr) (resumeEnv fr)
 
 -- --------------------------------------------------------------------------
@@ -506,7 +512,7 @@ perform instr rest m = case operation instr of
         | hasNext it' ->
             Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
                    (entering hint r (Choice rest (env (exec m)) it' (proof m)
-                                       (names m) (ruleName r) False (seeded hint))
+                                       (names m) (ruleName r) False [] (seeded hint))
                                m { names = names m + 1 })
         | otherwise ->
             Continue (entering hint r (Thena.Engine.Call rest (env (exec m))) m)
@@ -547,26 +553,43 @@ perform instr rest m = case operation instr of
       Left e         -> failure (CannotRead (ResolveFailed e)) m
       Right (t, n1)  -> produce (VTerm (Trailing t)) m { names = n1 }
 
-  -- Apply a rule to arguments (§7.2, §8). Direct invocation, so no head is
-  -- tested and no iterator exists: this pushes a 'Call' frame, which carries
-  -- neither alternatives nor a snapshot, and a callee that does not apply fails
-  -- in its body like any other body (§7.3).
+  -- **Call by name: the same search as @Prove@, over a narrower candidate
+  -- list** (§8, phase 23). The user's own framing, and it is why this case now
+  -- reads almost exactly like @Prove@'s above:
   --
-  -- **The arity check is here and not in the callee**, because an arity slip
-  -- that surfaced as an unbound 'Ref' halfway through a body would already have
-  -- changed the development.
-  Op.Call ruleOf args -> case operandValue (env (exec m)) ruleOf of
-    Left r            -> failure r m
-    Right (VRule r)
-      | length args /= length (ruleParams r) ->
-          failure (WrongNumberOfArguments (ruleName r)
-                     (length (ruleParams r)) (length args)) m
-      | otherwise -> case traverse (operandValue (env (exec m))) args of
-          Left e   -> failure e m
-          Right vs -> Continue m
-            { exec = Exec (ruleBody r) (zip (ruleParams r) vs)
-                          (Thena.Engine.Call rest (env (exec m)) : stack (exec m)) }
-    Right _ -> failure ExpectedRule m
+  -- > @Prove@ means \"search any rule that fits and wants to try solving the
+  -- > goal\" and @Call@ means \"see if any rules named like this can succeed\".
+  -- > Calling is not that different from searching. Calling is essentially what
+  -- > Prolog does.
+  --
+  -- So a call gets the peek, a @Choice@ frame, @:choices@, @retry@ and
+  -- backtracking, none of which it had. The @Call@ frame is **not** gone — it
+  -- is still what the peek builds when exactly one clause applies, for both
+  -- kinds of dispatch (@MS2.md@ guessed it might disappear; it does not).
+  --
+  -- Arguments are evaluated **before** the candidates are found, because their
+  -- number is one of the filters.
+  Op.Call nm args -> case traverse (operandValue (env (exec m))) args of
+    Left e   -> failure e m
+    Right vs -> case next (it vs) of
+      Nothing -> failure (NoClauseMatched nm (length vs) (arities (rules m) nm)) m
+      Just (r, it')
+        | hasNext it' ->
+            Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
+                   (entering vs r (Choice rest (env (exec m)) (it' ) (proof m)
+                                     (names m) (ruleName r) False vs [])
+                            m { names = names m + 1 })
+        | otherwise ->
+            Continue (entering vs r (Thena.Engine.Call rest (env (exec m))) m)
+    where
+      it vs = clauses (rules m) (globals m) (cursor (proof m)) nm (length vs)
+
+      -- The callee's parameters, bound to the arguments. 'clauses' has already
+      -- filtered on arity, so the two lists agree by construction — and the
+      -- frame keeps @vs@ rather than this, because the next clause may name its
+      -- parameters differently ('seedFor').
+      entering vs r fr k =
+        k { exec = Exec (ruleBody r) (zip (ruleParams r) vs) (fr : stack (exec m)) }
 
   -- §3.7's elimination tactic (phase 17). The goal is the focus, as with the
   -- six hole ops; the target is an operand, for the reason 'Try' takes one —
@@ -895,6 +918,17 @@ data RetryError = NoChoicePoint | UnknownChoice Int
 -- Returns a note saying what it did, because @retry@ takes one /alternative/
 -- and not one command: it pops past any 'Call' frames in between, which may be
 -- several commands back.
+-- | The environment an alternative of this choice point starts in.
+--
+-- **One expression covers a dispatch and a call**, which is the whole reason
+-- @Call@ could stop being a separate mechanism. A dispatch has no arguments and
+-- 'Thena.Rules.dispatch' skips parameterised rules, so this is just its
+-- 'entryEnv' — the hint, or nothing. A call carries no hint and binds its
+-- arguments to the clause's own parameters, and 'Thena.Rules.clauses' has
+-- already guaranteed the two lists are the same length.
+seedFor :: Frame -> Rule -> Env
+seedFor fr r = entryEnv fr ++ zip (ruleParams r) (callArgs fr)
+
 retryFrom :: Maybe Int -> Machine -> Either RetryError (Machine, String)
 retryFrom target m = go (0 :: Int) (stack (exec m))
   where
@@ -906,7 +940,7 @@ retryFrom target m = go (0 :: Int) (stack (exec m))
         Nothing       -> Left missing      -- cannot arise; see 'demote'
         Just (r, it') -> Right
           ( m { proof = saved fr
-              , exec  = Exec (ruleBody r) (entryEnv fr) (demote fr r it' : stk)
+              , exec  = Exec (ruleBody r) (seedFor fr r) (demote fr r it' : stk)
               }
           , note (choiceId fr) (ruleName r) popped
           )

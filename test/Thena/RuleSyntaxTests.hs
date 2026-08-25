@@ -62,22 +62,21 @@ tests =
 -- else, DECIDED by the user 2026-08-25) and no file to load one from until
 -- phase 22, so the composition lives here and moves to the loader when there
 -- is one.
-readRule :: [Rule] -> String -> Either String Rule
-readRule visible src = case lexTokens src of
+readRule :: String -> Either String Rule
+readRule src = case lexTokens src of
   Left e -> Left ("lex: " ++ show e)
   Right ts -> case parseRule ts of
     Left e -> Left ("parse: " ++ show e)
-    Right raw -> case resolveRule visible raw of
+    Right raw -> case resolveRule raw of
       Left es -> Left ("resolve: " ++ show es)
       Right r -> Right r
 
-expectRule :: [Rule] -> String -> IO Rule
-expectRule visible src =
-  either (assertFailure . ((src ++ " — ") ++)) pure (readRule visible src)
+expectRule :: String -> IO Rule
+expectRule src = either (assertFailure . ((src ++ " — ") ++)) pure (readRule src)
 
 -- | A rule whose body is the one instruction under test.
 bodyOf :: String -> IO [Instr]
-bodyOf src = ruleBody <$> expectRule expectedStandard ("rule r :- when focus-is-hole then " ++ src)
+bodyOf src = ruleBody <$> expectRule ("rule r :- when focus-is-hole then " ++ src)
 
 -- --------------------------------------------------------------------------
 -- The base, written out
@@ -175,12 +174,15 @@ vocabulary =
     , testGroup "every op's keyword is the word it is written with"
         (map keywordCase everyOp)
     , testGroup "every test reads back" (map testCase' allTests)
-    , testCase "call names a rule in the base" $ do
+    , -- **The name is recorded and nothing is looked up** (phase 23), which is
+      -- what lets a rule call itself and call rules written after it.
+      testCase "call records a name, and resolves nothing" $ do
         b <- bodyOf "call try x"
-        callee <- case expectedStandard of
-          _ : t : _ -> pure t
-          _         -> assertFailure "the base has no second rule"
-        b @?= [Do (Call (Lit (VRule callee)) [Ref "x"])]
+        b @?= [Do (Call (GlobalName "try") [Ref "x"])]
+
+    , testCase "including a name no rule bears" $ do
+        b <- bodyOf "call nonesuch x"
+        b @?= [Do (Call (GlobalName "nonesuch") [Ref "x"])]
     ]
   where
     opCase (src, expected) =
@@ -195,8 +197,7 @@ vocabulary =
 
     testCase' t =
       testCase (testWord t) $ do
-        r <- expectRule expectedStandard
-               ("rule r :- when " ++ testWord t ++ " then solve")
+        r <- expectRule ("rule r :- when " ++ testWord t ++ " then solve")
         ruleHead r @?= [t]
 
 -- --------------------------------------------------------------------------
@@ -208,18 +209,17 @@ shapes =
   testGroup
     "shape"
     [ testCase "no parameters, no parentheses" $ do
-        r <- expectRule expectedStandard "rule r :- when focus-is-hole then solve"
+        r <- expectRule "rule r :- when focus-is-hole then solve"
         ruleParams r @?= []
-    , testCase "parameters need no space before the parenthesis" $ do
-        r <- expectRule expectedStandard "rule r(a b c) :- when focus-is-hole then solve"
+    , -- **No parentheses and no commas** — corrected by the user 2026-08-25,
+      -- so that a definition and a call site write their arguments alike.
+      testCase "parameters are a bare run of names" $ do
+        r <- expectRule "rule r a b c :- when focus-is-hole then solve"
         ruleParams r @?= ["a", "b", "c"]
-    , testCase "and a space is allowed" $ do
-        r <- expectRule expectedStandard "rule r (a) :- when focus-is-hole then solve"
-        ruleParams r @?= ["a"]
     , -- A rule may apply everywhere, so 'when' is optional; a rule with no body
       -- does nothing, so 'then' is not.
       testCase "when is optional" $ do
-        r <- expectRule expectedStandard "rule r :- then solve"
+        r <- expectRule "rule r :- then solve"
         ruleHead r @?= []
     , testCase "several instructions, separated by semicolons" $ do
         b <- bodyOf "attack; along; solve"
@@ -230,7 +230,7 @@ shapes =
     , -- The hyphens are the reason the lexer was widened this phase: §8 and
       -- OBJECTIVE.md have always written rule and test names this way.
       testCase "a hyphenated name is one identifier" $ do
-        r <- expectRule expectedStandard "rule elab-app :- when focus-is-hole then solve"
+        r <- expectRule "rule elab-app :- when focus-is-hole then solve"
         ruleName r @?= GlobalName "elab-app"
     ]
 
@@ -279,12 +279,12 @@ text =
         b @?= [Do (Try (Lit (VText "not a term")))]
 
     , testCase "an unterminated string does not lex" $
-        case readRule expectedStandard "rule r :- when focus-is-hole then say \"oops" of
+        case readRule "rule r :- when focus-is-hole then say \"oops" of
           Left _  -> pure ()
           Right r -> assertFailure ("read: " ++ show r)
 
     , testCase "a rule name is still a name, not text" $
-        case readRule expectedStandard "rule r :- when focus-is-hole then call \"try\" x" of
+        case readRule "rule r :- when focus-is-hole then call \"try\" x" of
           Left _  -> pure ()
           Right r -> assertFailure ("read: " ++ show r)
     ]
@@ -312,9 +312,6 @@ mistakes =
     , refused "a position where a name was wanted"
         "rule r :- when focus-is-hole then try 3"
         [BadOperands (GlobalName "r") 0 "try"]
-    , refused "calling a rule that is not in the base"
-        "rule r :- when focus-is-hole then call nonesuch x"
-        [NoSuchRuleCalled (GlobalName "r") 0 "nonesuch"]
     , -- §3.7: a declaration is a command, never a rule-body operation. It is
       -- refused in resolution now, one step before 'validate' would have —
       -- which is why 'validate''s own check stays reachable only for a rule
@@ -329,7 +326,7 @@ mistakes =
         , BadOperands (GlobalName "r") 1 "solve"
         ]
     , testCase "a body is required" $
-        case readRule expectedStandard "rule r :- when focus-is-hole" of
+        case readRule "rule r :- when focus-is-hole" of
           Left _  -> pure ()
           Right r -> assertFailure ("parsed: " ++ show r)
     ]
@@ -343,6 +340,6 @@ mistakes =
       Left _ -> Nothing
       Right ts -> case parseRule ts of
         Left _ -> Nothing
-        Right raw -> case resolveRule expectedStandard raw of
+        Right raw -> case resolveRule raw of
           Left es -> Just es
           Right _ -> Nothing

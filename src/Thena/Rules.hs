@@ -20,6 +20,8 @@ module Thena.Rules
   , RuleIter
   , matches
   , dispatch
+  , clauses
+  , arities
   , next
   , hasNext
 
@@ -30,7 +32,6 @@ module Thena.Rules
 
     -- * Written rules (§8, phase 21)
   , resolveRule
-  , lookupRule
   , testWord
   ) where
 
@@ -175,6 +176,38 @@ dispatch base env cur hint =
   let RuleIter rs = matches base env cur hint
    in RuleIter [ r | r <- rs, null (ruleParams r) ]
 
+-- | The clauses @Call@ may run: **this name, this arity, and a head that
+-- passes** (§8, phase 23).
+--
+-- The third filter is what the user reversed a phase-15 decision for — a call
+-- tests the callee's head, because with several clauses of one name a call is a
+-- search and not a jump. The second is why clauses need not share arity: it is
+-- a filter, so a name may carry a one-argument clause and a two-argument one
+-- and each call picks its own.
+--
+-- **No hint**, so a rule whose head asks about one is never a call candidate.
+-- 'matches' partitions on exactly this, and passing 'Nothing' here means a call
+-- and a hintless dispatch agree about which half of the base they see.
+clauses :: [RuleBase] -> GlobalEnv -> Cursor -> GlobalName -> Int -> RuleIter
+clauses bases env cur nm n =
+  RuleIter
+    [ r
+    | r <- allRules bases
+    , ruleName r == nm
+    , length (ruleParams r) == n
+    , not (usesHint r)
+    , all (holds env cur Nothing) (ruleHead r)
+    ]
+
+-- | The arities of every rule bearing this name, in search order.
+--
+-- Only a diagnostic: 'Thena.Errors.NoClauseMatched' carries it so that a failed
+-- call can say /no clause of @f@ takes two arguments/ rather than only /nothing
+-- matched/.
+arities :: [RuleBase] -> GlobalName -> [Int]
+arities bases nm =
+  [ length (ruleParams r) | r <- allRules bases, ruleName r == nm ]
+
 next :: RuleIter -> Maybe (Rule, RuleIter)
 next (RuleIter rs) = case rs of
   []      -> Nothing
@@ -259,12 +292,6 @@ data RuleError
     -- ^ the right op word, written with the wrong arguments — too many, too
     -- few, or a position where a name was wanted. One error for all three: a
     -- rule body is one line, and the word is enough to find it
-  | NoSuchRuleCalled  GlobalName Int String
-    -- ^ @call ‹name›@ naming no rule in the base. **Resolution answers this,
-    -- not the engine** — phase 21 bakes the callee in as a @Lit (VRule …)@,
-    -- exactly as a Haskell-written body does, so a call is resolved once when
-    -- the rule is read. Phase 23 moves the lookup to run time, and that is what
-    -- will make a rule able to call itself
   deriving (Eq, Show)
 
 -- | The load-time pass (§2.4, §7.2). Three checks, one traversal, **every**
@@ -335,7 +362,7 @@ operandsOf o = case o of
   Op.Eliminate a -> [a]
   Parse   a    -> [a]
   Op.Resolve a -> [a]
-  Call r as    -> r : as
+  Call _ as    -> as
   Prove h      -> maybe [] (: []) h
   DefineData _ -> []
   Along        -> []
@@ -378,8 +405,8 @@ validateBase = concatMap validate . baseRules
 --
 -- **Every error, not the first**, for 'validate'\'s reason: instructions
 -- resolve independently, so a body with three mistakes reports three.
-resolveRule :: [Rule] -> RawRule -> Either [RuleError] Rule
-resolveRule visible (RawRule nm ps ts body) =
+resolveRule :: RawRule -> Either [RuleError] Rule
+resolveRule (RawRule nm ps ts body) =
   case (headErrs, bodyErrs) of
     ([], []) -> Right (Rule g ps tests instrs)
     _        -> Left (headErrs ++ bodyErrs)
@@ -390,14 +417,14 @@ resolveRule visible (RawRule nm ps ts body) =
     test w = maybe (Left (NoSuchTest g w)) Right (testOf w)
 
     (bodyErrs, instrs) =
-      partitionEithers (zipWith (instruction visible g) [0 ..] body)
+      partitionEithers (zipWith (instruction g) [0 ..] body)
 
 -- | One written instruction. @‹name› = ‹op›@ is a 'Bind', a bare op is a 'Do' —
 -- §7.2\'s two cases, and the grammar has no third.
-instruction :: [Rule] -> GlobalName -> Int -> RawInstr -> Either RuleError Instr
-instruction visible g i ri = case ri of
-  RawBind n o -> Bind n <$> operation visible g i o
-  RawDo     o -> Do     <$> operation visible g i o
+instruction :: GlobalName -> Int -> RawInstr -> Either RuleError Instr
+instruction g i ri = case ri of
+  RawBind n o -> Bind n <$> operation g i o
+  RawDo     o -> Do     <$> operation g i o
 
 -- | An op word and its written arguments, resolved.
 --
@@ -406,8 +433,8 @@ instruction visible g i ri = case ri of
 -- not accept is 'NoSuchOp'; an accepted word given the wrong arguments is
 -- 'BadOperands'. The two are separate because they are separate mistakes —
 -- \"there is no such op\" and \"you wrote it wrong\".
-operation :: [Rule] -> GlobalName -> Int -> RawOp -> Either RuleError Op
-operation visible g i (RawOp w as)
+operation :: GlobalName -> Int -> RawOp -> Either RuleError Op
+operation g i (RawOp w as)
   -- The field words come first: @arg@ is one of them and also the only word
   -- that reads a position, so a general arity table could not describe it.
   | w `elem` partWords = case as of
@@ -419,12 +446,11 @@ operation visible g i (RawOp w as)
       ("cross",  [RawRef "val"])  -> Right CrossValue
       ("cross",  _)               -> bad
 
-      -- @call ‹name› ‹args›@. The callee is a name and never a @Ref@: §7.2\'s
-      -- higher-order call — a rule held in a body\'s environment — has no
-      -- written form, because nothing produces a 'VRule' for one to hold.
-      ("call", RawRef r : rest)   -> case lookupRule visible r of
-        Nothing -> Left (NoSuchRuleCalled g i r)
-        Just cl -> Call (Lit (VRule cl)) <$> traverse ref rest
+      -- @call ‹name› ‹args›@. **The name is recorded and nothing is looked
+      -- up** (phase 23): the base is searched when the call runs, which is what
+      -- lets a rule call itself and call a rule defined after it, or in a base
+      -- loaded after it. 'Thena.Rules.clauses' is the search.
+      ("call", RawRef r : rest)   -> Call (GlobalName r) <$> traverse ref rest
       ("call", _)                 -> bad
 
       ("prove", [])               -> Right (Prove Nothing)
@@ -478,20 +504,6 @@ operation visible g i (RawOp w as)
       [ ("assume", Assume), ("claim", Claim)
       , ("concat", Concat), ("unify", Unify)
       ]
-
--- | The first rule of this name, for @call@, among the rules **visible where
--- the calling rule is written**: every earlier base in load order, then the
--- rules above it in its own file.
---
--- Search order, so a later base may call an earlier one\'s rules — the Prolog-
--- file analogy the user drew, 2026-08-25. It is still the /first/ clause of the
--- name, which is what a Haskell body naming the binding got; phase 23 moves the
--- lookup to run time and a call starts backtracking over the clauses.
-lookupRule :: [Rule] -> String -> Maybe Rule
-lookupRule visible r =
-  case [ x | x <- visible, ruleName x == GlobalName r ] of
-    x : _ -> Just x
-    []    -> Nothing
 
 -- | What @ask@'s second word may be — 'AnswerKind', spelled.
 --

@@ -76,7 +76,7 @@ stack
 thena spine> :step
 pc
   0  t = resolve hint
-  1  call ‹rule try› (t)
+  1  call try t
   2  solve
 env
   hint = ‹a›
@@ -84,7 +84,7 @@ stack
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  0  call ‹rule try› (t)
+  0  call try t
   1  solve
 env
   t = ⌜a⌝

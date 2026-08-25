@@ -50,16 +50,15 @@ type Env = [(Name, Value)]
 -- price is stated once in §7.2 — an op that needs a plain term checks at
 -- runtime and fails with 'Thena.Errors.ExpectedTerm' if it does not have one.
 --
--- 'VRule' arrives at phase 15, with 'Rule' itself: §7.2's \"rules are values, so
--- 'Call' and higher-order rules fall out\" needs 'Rule' in /this/ module, which
--- is what the user decided 2026-08-23 (@AGENDA.md@ item 25). 'VSurface',
--- 'VPair' and 'VRule' are all on @AGENDA.md@'s standing list of things defined
--- in MS1 and not yet exercised.
+-- **'VRule' was deleted at phase 23**, and with it §7.2's \"rules are values, so
+-- @Call@ and higher-order rules fall out\". A call names a rule and the base is
+-- searched at run time (§8), so nothing constructs a rule value and nothing
+-- consumes one. 'Rule' stays in this module for the other half of that argument
+-- — a body is @[Instr]@, so \"Thena.Rules\" would need this module anyway.
 data Value
   = VText    String    -- ^ what @Ask@ returns and @Say@ consumes
   | VTerm    Partial   -- ^ a term, a variable, or a whole development
   | VSurface Raw       -- ^ an unelaborated tree — elaboration's input
-  | VRule    Rule      -- ^ rules are values, so @Call@ costs no machinery (§8)
   | VPair    Value Value
   deriving (Eq, Show)
 
@@ -142,22 +141,34 @@ data Op
     -- 'Thena.Syntax.Concrete.RawName' against the local context, the
     -- development's own names and the global environment in one pass, and
     -- splitting that into three would be three ways to disagree about scope.
-  | Call Operand [Operand]
-    -- ^ apply a 'VRule' to arguments, which bind to its 'ruleParams' (§7.2,
-    -- §8; phase 17b). **The first supplier of @ruleParams@** — phase 15
-    -- validated the field, phase 16's 'Thena.Rules.dispatch' skips over rules
-    -- that have any, and until now nothing filled one in.
+  | Call GlobalName [Operand]
+    -- ^ **call a rule by name — the same search as 'Prove', with a narrower
+    -- candidate list** (§8, phase 23, and the user's own framing):
     --
-    -- The rule comes as an operand rather than a name, per §7.2's \"rules are
-    -- values, so @Call@ and higher-order rules fall out instead of needing
-    -- machinery\": a body written in Haskell names a rule by writing
-    -- @Lit (VRule …)@, and a rule that takes a rule costs nothing extra.
-    -- Decided by the user 2026-08-23.
+    -- > @Prove@ means \"search any rule that fits and wants to try solving the
+    -- > goal\" and @Call@ means \"see if any rules named like this can succeed\".
+    -- > Calling is not that different from searching. Calling is essentially
+    -- > what Prolog does.
     --
-    -- **It does not test the callee\'s head.** A head is dispatch's filter
-    -- (§8); a direct call has already chosen, and a callee that does not apply
-    -- fails in its body, which is handled (§7.3). So this pushes a @Call@
-    -- frame and never a @Choice@ — there is nothing to retry.
+    -- So it takes a 'GlobalName' and not an 'Operand'. Candidates are the rules
+    -- of that name **whose arity matches the number of arguments given** and
+    -- **whose head passes** — 'Thena.Rules.clauses' — tried in search order,
+    -- with a @Choice@ frame and backtracking, exactly as a dispatch is.
+    --
+    -- Three things this reverses, all decided by the user 2026-08-25:
+    --
+    --   * it **does** test the callee's head. Phase 15's note that a direct
+    --     call has already chosen was written when there was one callee.
+    --   * clauses of one name **need not share arity**. Arity is a filter, not
+    --     an error, so the load-time check @MS2.md@ proposed was dropped rather
+    --     than added.
+    --   * the callee is resolved **when the call runs**, not when the rule is
+    --     read, so a rule may call itself and may call a rule defined later or
+    --     in a base loaded after it.
+    --
+    -- **A call carries no hint**, so a rule whose head asks about one is never
+    -- a call candidate; it is reached by @prove ‹hint›@. Hints are on MS2's
+    -- closeout list.
   | Certify Operand
     -- ^ the development must be pure; yields the closed term it stands for and
     -- the type it is claimed to have, for the driver to run the kernel on

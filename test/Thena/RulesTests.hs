@@ -368,14 +368,13 @@ producesTests =
         -- get it back, so what a @Bind@ on either would name is the caller's
         -- own environment — restored on return, and without the destination.
       , ("prove",       e, hole,    [],            Ops.Prove Nothing)
-      , ("call",        e, hole,    [],            Ops.Call (Lit (VRule tryRule)) [term type0])
+      , ("call",        e, hole,    [],            Ops.Call (GlobalName "try") [term type0])
       , ("parse",       e, hole,    [],            Ops.Parse (text "Type\8320"))
       , ("resolve",     e, hole,    [],            Ops.Resolve (Lit (VSurface (RawUniverse 0))))
       ]
 
     -- @try ‹t›@, as 'expectedBase' ships it — what @call@ needs something to
     -- call.
-    tryRule = named "try" ["t"] [Do (Ops.Try (Ref "t"))]
 
 checkProduces :: GlobalEnv -> Cursor -> [Instr] -> Op -> IO ()
 checkProduces globalEnv cur before o =
