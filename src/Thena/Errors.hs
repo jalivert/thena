@@ -122,6 +122,14 @@ data FailReason
     -- **This is the definite case, not §8.1's suspension.** The focus's shape
     -- is known, so "no rule will ever match" is the answer. Blocked-on-a-hole
     -- is a different outcome and a later milestone (§12 invariant 2).
+  | GuessIllTyped TypeError
+    -- ^ @try@ handed a term that does not have the hole's type (phase 25b).
+    -- Thesis table 2.7 gives @try@ the side condition @Θ ⊩ t : S@, and until
+    -- this phase it was documented and not enforced: the guess went in and the
+    -- kernel caught it at @qed@, one command or a hundred later.
+    --
+    -- **Distinct from 'NotTypeable'**, which is "this term has no type at
+    -- all". Here it has one; it is not the one written down.
   | NotTypeable TypeError
     -- ^ an op was handed a term with no type. @unify@ needs one: a deferred
     -- equation records the type it was asked at (§3.3), so the op infers it
