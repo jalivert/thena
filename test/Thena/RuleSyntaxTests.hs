@@ -31,14 +31,14 @@ import Thena.Ops
   )
 import qualified Thena.Ops as Op
 import Thena.Rules
-  ( RuleBase
+  ( RuleBase (..)
   , RuleError (..)
   , allRules
   , resolveRule
-  , standardRules
   , testWord
   , validate
   )
+import Thena.Standard (expectedStandard, standardBases)
 import Thena.Syntax.Lexer (lexTokens)
 import Thena.Syntax.Parser (parseRule)
 
@@ -61,63 +61,53 @@ tests =
 -- else, DECIDED by the user 2026-08-25) and no file to load one from until
 -- phase 22, so the composition lives here and moves to the loader when there
 -- is one.
-readRule :: RuleBase -> String -> Either String Rule
-readRule base src = case lexTokens src of
+readRule :: [Rule] -> String -> Either String Rule
+readRule visible src = case lexTokens src of
   Left e -> Left ("lex: " ++ show e)
   Right ts -> case parseRule ts of
     Left e -> Left ("parse: " ++ show e)
-    Right raw -> case resolveRule base raw of
+    Right raw -> case resolveRule visible raw of
       Left es -> Left ("resolve: " ++ show es)
       Right r -> Right r
 
-expectRule :: RuleBase -> String -> IO Rule
-expectRule base src = either (assertFailure . ((src ++ " — ") ++)) pure (readRule base src)
+expectRule :: [Rule] -> String -> IO Rule
+expectRule visible src =
+  either (assertFailure . ((src ++ " — ") ++)) pure (readRule visible src)
 
 -- | A rule whose body is the one instruction under test.
 bodyOf :: String -> IO [Instr]
-bodyOf src = ruleBody <$> expectRule standardRules ("rule r :- when focus-is-hole then " ++ src)
+bodyOf src = ruleBody <$> expectRule expectedStandard ("rule r :- when focus-is-hole then " ++ src)
 
 -- --------------------------------------------------------------------------
 -- The base, written out
 -- --------------------------------------------------------------------------
 
--- | 'Thena.Rules.standardRules', in definition order, as a rule file would
--- write it. Phase 22 promotes exactly these lines into the shipped rule base,
--- which is why they are written the way a person would write them rather than
--- minimally.
-written :: [String]
-written =
-  [ "rule attack :- when focus-is-hole then attack"
-  , "rule try(t) :- when focus-is-hole then try t"
-  , "rule abandon :- when focus-is-hole then abandon"
-  , "rule intro-pi :- when focus-is-guess goal-type-is-pi then intro"
-  , "rule intro-let :- when focus-is-guess goal-type-is-let then intro"
-  , "rule solve :- when focus-is-guess then solve"
-  , "rule regret :- when focus-is-guess then regret"
-  , "rule eliminate(t) :- when focus-is-hole then eliminate t"
-  , "rule elab-var :- when focus-is-hole hint-is-name \
-    \then t = resolve hint; call try t; solve"
-  ]
-
+-- | The **shipped file** against the Haskell literals.
+--
+-- Phase 21 compared nine hand-written lines with 'Thena.Rules.standardRules';
+-- phase 22 deleted that value, so the comparison would have become the file
+-- against itself. The literals moved to "Thena.Standard" instead and this now
+-- pins @rules/standard.thena.rules@ — a stronger target, because it is the file
+-- the REPL actually reads at startup.
 againstTheBase :: TestTree
 againstTheBase =
   testGroup
-    "the shipped base, written and read back"
-    ( sameLength
-        : zipWith one written (allRules standardRules)
-    )
-  where
-    sameLength =
-      testCase "every rule in the base is written here" $
-        length written @?= length (allRules standardRules)
+    "the shipped base, read off disk"
+    [ testCase "it is one base, named, with a description and a path" $ do
+        bs <- standardBases
+        map baseName bs @?= ["standard"]
+        map baseDescription bs @?= [Just "the rules the engine starts with"]
+        map (null . basePath) bs @?= [False]
 
-    one src expected =
-      testCase (nameString (ruleName expected)) $ do
-        got <- expectRule standardRules src
-        got @?= expected
-        validate got @?= []
+    , testCase "its rules are exactly the nine, in order" $ do
+        rs <- allRules <$> standardBases
+        map ruleName rs @?= map ruleName expectedStandard
+        rs @?= expectedStandard
 
-    nameString (GlobalName n) = n
+    , testCase "and every one of them validates" $ do
+        rs <- allRules <$> standardBases
+        concatMap validate rs @?= []
+    ]
 
 -- --------------------------------------------------------------------------
 -- The vocabularies
@@ -186,7 +176,7 @@ vocabulary =
     , testGroup "every test reads back" (map testCase' allTests)
     , testCase "call names a rule in the base" $ do
         b <- bodyOf "call try x"
-        callee <- case allRules standardRules of
+        callee <- case expectedStandard of
           _ : t : _ -> pure t
           _         -> assertFailure "the base has no second rule"
         b @?= [Do (Call (Lit (VRule callee)) [Ref "x"])]
@@ -204,7 +194,7 @@ vocabulary =
 
     testCase' t =
       testCase (testWord t) $ do
-        r <- expectRule standardRules
+        r <- expectRule expectedStandard
                ("rule r :- when " ++ testWord t ++ " then solve")
         ruleHead r @?= [t]
 
@@ -217,18 +207,18 @@ shapes =
   testGroup
     "shape"
     [ testCase "no parameters, no parentheses" $ do
-        r <- expectRule standardRules "rule r :- when focus-is-hole then solve"
+        r <- expectRule expectedStandard "rule r :- when focus-is-hole then solve"
         ruleParams r @?= []
     , testCase "parameters need no space before the parenthesis" $ do
-        r <- expectRule standardRules "rule r(a b c) :- when focus-is-hole then solve"
+        r <- expectRule expectedStandard "rule r(a b c) :- when focus-is-hole then solve"
         ruleParams r @?= ["a", "b", "c"]
     , testCase "and a space is allowed" $ do
-        r <- expectRule standardRules "rule r (a) :- when focus-is-hole then solve"
+        r <- expectRule expectedStandard "rule r (a) :- when focus-is-hole then solve"
         ruleParams r @?= ["a"]
     , -- A rule may apply everywhere, so 'when' is optional; a rule with no body
       -- does nothing, so 'then' is not.
       testCase "when is optional" $ do
-        r <- expectRule standardRules "rule r :- then solve"
+        r <- expectRule expectedStandard "rule r :- then solve"
         ruleHead r @?= []
     , testCase "several instructions, separated by semicolons" $ do
         b <- bodyOf "attack; along; solve"
@@ -239,7 +229,7 @@ shapes =
     , -- The hyphens are the reason the lexer was widened this phase: §8 and
       -- OBJECTIVE.md have always written rule and test names this way.
       testCase "a hyphenated name is one identifier" $ do
-        r <- expectRule standardRules "rule elab-app :- when focus-is-hole then solve"
+        r <- expectRule expectedStandard "rule elab-app :- when focus-is-hole then solve"
         ruleName r @?= GlobalName "elab-app"
     ]
 
@@ -283,7 +273,7 @@ mistakes =
         , BadOperands (GlobalName "r") 1 "solve"
         ]
     , testCase "a body is required" $
-        case readRule standardRules "rule r :- when focus-is-hole" of
+        case readRule expectedStandard "rule r :- when focus-is-hole" of
           Left _  -> pure ()
           Right r -> assertFailure ("parsed: " ++ show r)
     ]
@@ -297,6 +287,6 @@ mistakes =
       Left _ -> Nothing
       Right ts -> case parseRule ts of
         Left _ -> Nothing
-        Right raw -> case resolveRule standardRules raw of
+        Right raw -> case resolveRule expectedStandard raw of
           Left es -> Just es
           Right _ -> Nothing

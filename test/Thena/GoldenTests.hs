@@ -13,7 +13,8 @@ import Data.ByteString.Builder (stringUtf8, toLazyByteString)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
 
-import Thena.Repl (transcript)
+import Thena.Driver (newSession)
+import Thena.Repl (loadStandardRules, transcriptFrom)
 
 tests :: TestTree
 tests =
@@ -161,7 +162,8 @@ tests =
       -- focus. A look and nothing more — no body runs (§7.6).
     , script
         "matching"
-        [ ":matches"
+        [ ":rules"
+        , ":matches"
         , "attack"
         , ":matches"
           -- Nothing applies in the core fragment: every head this phase has
@@ -599,11 +601,18 @@ tests =
         ]
     ]
   where
+    -- **From a session with the shipped rule base loaded** (phase 22), because
+    -- @newSession@ no longer has one. Loading problems are prepended rather
+    -- than thrown, so a broken rule file shows up as a golden diff naming it
+    -- instead of as an unrelated failure somewhere downstream.
     script name ls =
       goldenVsString
         name
         ("test/golden/" ++ name ++ ".golden")
-        (pure (toLazyByteString (stringUtf8 (transcript ls))))
+        ( do
+            (s, problems) <- loadStandardRules newSession
+            pure (toLazyByteString (stringUtf8 (unlines problems ++ transcriptFrom s ls)))
+        )
 
 -- | The prelude declarations a transcript must make before no-confusion can be
 -- generated for anything it goes on to declare.

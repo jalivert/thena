@@ -13,6 +13,7 @@ extra-doc-files:    CHANGELOG.md
 -- path relative to the working directory, so it is still found after
 -- 'cabal install'; 'Paths_thena' is how the library asks where it went.
 data-files:         prelude/prelude.thena
+                    rules/standard.thena.rules
 
 common warnings
     ghc-options: -Wall
@@ -96,9 +97,11 @@ test-suite thena-test
         Thena.ElaborateTests
         Thena.RulesTests
         Thena.RuleSyntaxTests
+        Thena.RuleFileTests
         Thena.LoadTests
         Thena.DriverTests
         Thena.Declared
+        Thena.Standard
         Thena.Fixtures
         Thena.SessionTests
         Thena.SyntaxTests

@@ -11,11 +11,10 @@
 -- the user corrected it 2026-08-23 (@AGENDA.md@ item 25). The rest of §2.5's
 -- listing for this module stands.
 module Thena.Rules
-  ( -- * The rule base
-    RuleBase
+  ( -- * Rule bases
+    RuleBase (..)
   , ruleBase
   , allRules
-  , standardRules
 
     -- * Finding rules (§7.6)
   , RuleIter
@@ -31,6 +30,7 @@ module Thena.Rules
 
     -- * Written rules (§8, phase 21)
   , resolveRule
+  , lookupRule
   , testWord
   ) where
 
@@ -68,94 +68,45 @@ import Data.Either (partitionEithers)
 -- The rule base
 -- --------------------------------------------------------------------------
 
--- | The rules that exist, **in definition order** — which is dispatch order
--- (§8, DECIDED 2026-08-10). Order is the whole of the structure here, so this
--- is a list and not a map: a lookup by name would lose it.
+-- | One loaded rule-base file: its name, what it says it is for, where it came
+-- from, and its rules **in definition order**, which is search order (§8,
+-- DECIDED 2026-08-10).
 --
--- It is a field of 'Thena.Engine.Machine' and not of 'Thena.Global.Env', and
--- that is forced: @Thena.Global.Env@ sits below "Thena.Ops", so it cannot
--- mention a 'Rule'. Decided by the user 2026-08-23, who also said where this
--- goes next — *\"Rule-base will eventually be a user-written modules… Eventually
--- we will have a 'rule loading phase' the same way we will be loading
--- user-written modules for theorems and such.\"* MS1 ships 'standardRules' and
--- has no loading phase.
-newtype RuleBase = RuleBase [Rule]
+-- **A record and not a bare list, and the machine holds a /list of these/ —
+-- DECIDED by the user 2026-08-25.** He was explicit that one base was never the
+-- goal: *"the intended goal for when it is nearing maturity is that we can load
+-- multiple rule-bases the same way we would load multiple prolog files"*. So a
+-- base is a named thing with a provenance, and 'Thena.Engine.Machine' carries
+-- @[RuleBase]@ — leftmost searched first.
+--
+-- **A plain list and no newtype over it.** The order is the list\'s order and
+-- there is no invariant to hide, so a wrapper would earn nothing; it would also
+-- put @RuleBase@ and @RuleBases@ one @s@ apart, which is exactly the kind of
+-- name that fails said out loud.
+--
+-- The name and description come from the file\'s header line, @rule base ‹name›
+-- ‹description› where@ — see "Thena.Driver"\'s @ruleHeader@.
+data RuleBase = RuleBase
+  { baseName        :: String
+  , baseDescription :: Maybe String
+  , basePath        :: FilePath
+  , baseRules       :: [Rule]
+  }
   deriving (Eq, Show)
 
--- | Build a base. Nothing is checked here — 'validateBase' is separate, so that
--- a caller who wants the errors gets them all rather than the first.
-ruleBase :: [Rule] -> RuleBase
+-- | Build one. Nothing is checked here — 'validateBase' is separate, so that a
+-- caller who wants the errors gets them all rather than the first.
+ruleBase :: String -> Maybe String -> FilePath -> [Rule] -> RuleBase
 ruleBase = RuleBase
 
-allRules :: RuleBase -> [Rule]
-allRules (RuleBase rs) = rs
-
--- | MS1's built-in collection: **one rule per bare word the REPL already has
--- for the life of a hole** (thesis tables 2.7 and 2.8).
+-- | Every rule the engine may search, across every loaded base, **in search
+-- order**: the bases in the order they were loaded, and within each the order
+-- its file wrote them.
 --
--- Chosen by the user 2026-08-23. The bodies are single ops the driver already
--- compiles and runs for those same words, so no rule body here is speculative —
--- what is new at this phase is the /heads/, and heads are what @:matches@
--- reads. Phase 17 adds the compound tactics; §8's plan that rules eventually
--- come from a written collection is unchanged, and this is that collection
--- written in Haskell because there is no rule syntax yet.
---
--- **Four** match at a hole — @attack@, @try@, @abandon@ and, from phase 17,
--- @eliminate@ — which is what makes the match list a list, and what phase 16
--- dispatches between. @eliminate@ is the first rule here whose body is /not/ a
--- word the driver already had: it is §3.7's tactic, and it is a rule rather
--- than a driver command because §8's whole claim is that a tactic and a rule
--- are the same kind of thing. Like @try@ it takes a parameter, so 'dispatch'
--- skips it and @:matches@ still shows it.
---
--- @intro@ is **two rules and not one**, because table 2.8 has two: @intro-∀@
--- and @intro-let@. §8's \"a rule that wants an alternative is two rules\" is the
--- same principle from the other side.
-standardRules :: RuleBase
-standardRules = RuleBase
-  [ Rule (GlobalName "attack")     []    [FocusIsHole]                 [Do Attack]
-  , tryRule
-  , Rule (GlobalName "abandon")    []    [FocusIsHole]                 [Do Abandon]
-  , Rule (GlobalName "intro-pi")   []    [FocusIsGuess, GoalTypeIsPi]  [Do Intro]
-  , Rule (GlobalName "intro-let")  []    [FocusIsGuess, GoalTypeIsLet] [Do Intro]
-  , Rule (GlobalName "solve")      []    [FocusIsGuess]                [Do Solve]
-  , Rule (GlobalName "regret")     []    [FocusIsGuess]                [Do Regret]
-  , Rule (GlobalName "eliminate")  ["t"] [FocusIsHole]                 [Do (Op.Eliminate (Ref "t"))]
-  , elabVar
-  ]
-
--- | @try ‹t›@ — table 2.7's @try@, wrapped as a rule.
---
--- Named rather than written inline because 'elabVar' calls it: a body names a
--- rule by writing @Lit (VRule …)@ (§7.2, and the user's answer 2026-08-23), so
--- the Haskell binding /is/ the name until there is a rule syntax to write one
--- in.
-tryRule :: Rule
-tryRule = Rule (GlobalName "try") ["t"] [FocusIsHole] [Do (Try (Ref "t"))]
-
--- | MS1's one elaboration rule (§8, phase 17b).
---
--- The hint is a bare identifier; resolve it in the context at the focus, attach
--- it to the goal, and commit. That is §8's own @elab-var@ — /hint is a name in
--- scope, whose body is @try ?y x; solve ?y@/ — written in the instruction
--- language, where the hole is the focus and so is not named.
---
--- **The @try@ step goes through 'Call'**, and that is the phase's point rather
--- than a flourish: @try@ is already a rule with a parameter, so calling it is
--- what finally /supplies/ a 'Thena.Ops.ruleParams' (phase 15 validated the
--- field, phase 16 skipped over it). Writing @Do (Try (Ref "t"))@ inline here
--- would have been one instruction shorter and would have left @Call@ with
--- nothing in MS1 to do.
---
--- **Elaborating a compound hint is not MS1.** §8's @elab-app@ needs
--- 'Thena.Ops.Test'\'s @HintIsApp@ and a way to take an application apart; the
--- milestone implements the identifier case, which is the one it exercises.
-elabVar :: Rule
-elabVar = Rule (GlobalName "elab-var") [] [FocusIsHole, HintIsName]
-  [ Bind "t" (Op.Resolve (Ref hintName))
-  , Do (Call (Lit (VRule tryRule)) [Ref "t"])
-  , Do Solve
-  ]
+-- This is the one place that says what \"leftmost first\" means, which is why
+-- 'matches' takes the bases rather than the rules.
+allRules :: [RuleBase] -> [Rule]
+allRules = concatMap baseRules
 
 -- --------------------------------------------------------------------------
 -- Finding rules (§7.6)
@@ -198,9 +149,9 @@ newtype RuleIter = RuleIter [Rule]
 -- The consequence at the REPL is that @:matches@ with no argument lists exactly
 -- what it listed before this phase, and @:matches ‹hint›@ is a separate
 -- question with a separate answer.
-matches :: RuleBase -> GlobalEnv -> Cursor -> Maybe Raw -> RuleIter
-matches (RuleBase rs) env cur hint =
-  RuleIter [ r | r <- rs, usesHint r == isHinted, all (holds env cur hint) (ruleHead r) ]
+matches :: [RuleBase] -> GlobalEnv -> Cursor -> Maybe Raw -> RuleIter
+matches bases env cur hint =
+  RuleIter [ r | r <- allRules bases, usesHint r == isHinted, all (holds env cur hint) (ruleHead r) ]
   where
     isHinted = case hint of
       Just _  -> True
@@ -219,7 +170,7 @@ matches (RuleBase rs) env cur hint =
 -- questions: this one is /what the engine can run/, and 'matches' is /what
 -- could be done here/, which includes @try ‹t›@ because the user can type
 -- @try x@. @:matches@ keeps showing it.
-dispatch :: RuleBase -> GlobalEnv -> Cursor -> Maybe Raw -> RuleIter
+dispatch :: [RuleBase] -> GlobalEnv -> Cursor -> Maybe Raw -> RuleIter
 dispatch base env cur hint =
   let RuleIter rs = matches base env cur hint
    in RuleIter [ r | r <- rs, null (ruleParams r) ]
@@ -362,7 +313,7 @@ validate r = go 0 (initiallyBound r) (ruleBody r)
 -- parameters, and — when its head asks about the hint — 'Thena.Ops.hintName',
 -- which @Prove@ seeds the environment with (§8, phase 17b).
 --
--- Without this line 'elabVar' fails its own load-time check, because @hint@ is
+-- Without this line @elab-var@ fails its own load-time check, because @hint@ is
 -- a 'Ref' that no @Bind@ introduces.
 initiallyBound :: Rule -> [Name]
 initiallyBound r
@@ -400,11 +351,14 @@ operandsOf o = case o of
   Solve        -> []
   Abandon      -> []
 
--- | Every rule in the base, checked. The shipped 'standardRules' is asserted
--- clean by "Thena.RulesTests"; when rules become a file this is what a load
--- runs (§8, and the user's note about a rule-loading phase).
+-- | Every rule in one base, checked.
+--
+-- **This is what a load runs**, since phase 22 — @Thena.Driver.readRuleBase@
+-- calls it on every rule as it resolves one, so a base that would not validate
+-- is refused rather than installed. §2.4 asked for a load-time pass and until
+-- there was a load there was only a test.
 validateBase :: RuleBase -> [RuleError]
-validateBase (RuleBase rs) = concatMap validate rs
+validateBase = concatMap validate . baseRules
 
 -- --------------------------------------------------------------------------
 -- Written rules (§8, phase 21)
@@ -415,16 +369,17 @@ validateBase (RuleBase rs) = concatMap validate rs
 --
 -- **This is the second spelling of an existing type, not a new type**, and that
 -- is the phase\'s load-bearing check: "Thena.RuleSyntaxTests" writes each of
--- 'standardRules'\' rules out by hand and asserts that reading it back gives
--- the same 'Rule'. A fixture, not a round trip against itself.
+-- the shipped base's rules out by hand and asserts that reading
+-- @rules/standard.thena.rules@ back gives the same 'Rule's. A fixture, not a
+-- round trip against itself.
 --
 -- It needs the base for one reason — @call ‹name›@. Everything else is a
 -- closed vocabulary.
 --
 -- **Every error, not the first**, for 'validate'\'s reason: instructions
 -- resolve independently, so a body with three mistakes reports three.
-resolveRule :: RuleBase -> RawRule -> Either [RuleError] Rule
-resolveRule base (RawRule nm ps ts body) =
+resolveRule :: [Rule] -> RawRule -> Either [RuleError] Rule
+resolveRule visible (RawRule nm ps ts body) =
   case (headErrs, bodyErrs) of
     ([], []) -> Right (Rule g ps tests instrs)
     _        -> Left (headErrs ++ bodyErrs)
@@ -435,14 +390,14 @@ resolveRule base (RawRule nm ps ts body) =
     test w = maybe (Left (NoSuchTest g w)) Right (testOf w)
 
     (bodyErrs, instrs) =
-      partitionEithers (zipWith (instruction base g) [0 ..] body)
+      partitionEithers (zipWith (instruction visible g) [0 ..] body)
 
 -- | One written instruction. @‹name› = ‹op›@ is a 'Bind', a bare op is a 'Do' —
 -- §7.2\'s two cases, and the grammar has no third.
-instruction :: RuleBase -> GlobalName -> Int -> RawInstr -> Either RuleError Instr
-instruction base g i ri = case ri of
-  RawBind n o -> Bind n <$> operation base g i o
-  RawDo     o -> Do     <$> operation base g i o
+instruction :: [Rule] -> GlobalName -> Int -> RawInstr -> Either RuleError Instr
+instruction visible g i ri = case ri of
+  RawBind n o -> Bind n <$> operation visible g i o
+  RawDo     o -> Do     <$> operation visible g i o
 
 -- | An op word and its written arguments, resolved.
 --
@@ -451,8 +406,8 @@ instruction base g i ri = case ri of
 -- not accept is 'NoSuchOp'; an accepted word given the wrong arguments is
 -- 'BadOperands'. The two are separate because they are separate mistakes —
 -- \"there is no such op\" and \"you wrote it wrong\".
-operation :: RuleBase -> GlobalName -> Int -> RawOp -> Either RuleError Op
-operation base g i (RawOp w as)
+operation :: [Rule] -> GlobalName -> Int -> RawOp -> Either RuleError Op
+operation visible g i (RawOp w as)
   -- The field words come first: @arg@ is one of them and also the only word
   -- that reads a position, so a general arity table could not describe it.
   | w `elem` partWords = case as of
@@ -467,7 +422,7 @@ operation base g i (RawOp w as)
       -- @call ‹name› ‹args›@. The callee is a name and never a @Ref@: §7.2\'s
       -- higher-order call — a rule held in a body\'s environment — has no
       -- written form, because nothing produces a 'VRule' for one to hold.
-      ("call", RawRef r : rest)   -> case lookupRule base r of
+      ("call", RawRef r : rest)   -> case lookupRule visible r of
         Nothing -> Left (NoSuchRuleCalled g i r)
         Just cl -> Call (Lit (VRule cl)) <$> traverse ref rest
       ("call", _)                 -> bad
@@ -518,11 +473,17 @@ operation base g i (RawOp w as)
       , ("concat", Concat), ("unify", Unify)
       ]
 
--- | The first rule of this name, for @call@. Definition order, so the first is
--- the one a Haskell body naming the binding would have got.
-lookupRule :: RuleBase -> String -> Maybe Rule
-lookupRule (RuleBase rs) r =
-  case [ x | x <- rs, ruleName x == GlobalName r ] of
+-- | The first rule of this name, for @call@, among the rules **visible where
+-- the calling rule is written**: every earlier base in load order, then the
+-- rules above it in its own file.
+--
+-- Search order, so a later base may call an earlier one\'s rules — the Prolog-
+-- file analogy the user drew, 2026-08-25. It is still the /first/ clause of the
+-- name, which is what a Haskell body naming the binding got; phase 23 moves the
+-- lookup to run time and a call starts backtracking over the clauses.
+lookupRule :: [Rule] -> String -> Maybe Rule
+lookupRule visible r =
+  case [ x | x <- visible, ruleName x == GlobalName r ] of
     x : _ -> Just x
     []    -> Nothing
 

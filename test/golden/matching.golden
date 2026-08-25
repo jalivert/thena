@@ -1,3 +1,14 @@
+thena spine> :rules
+standard
+  attack
+  try ‹t›
+  abandon
+  intro-pi
+  intro-let
+  solve
+  regret
+  eliminate ‹t›
+  elab-var
 thena spine> :matches
 attack
 try ‹t›

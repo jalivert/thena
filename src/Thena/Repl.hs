@@ -13,6 +13,7 @@ module Thena.Repl
   , Turn (..)
   , turn
   , transcript
+  , transcriptFrom
   , renderCore
   , renderPartial
   , renderCursor
@@ -23,6 +24,9 @@ module Thena.Repl
   , renderEliminator
   , preludePath
   , loadPrelude
+  , rulesPath
+  , loadStandardRules
+  , loadRuleFiles
   , loadFile
   , renderLoadError
   ) where
@@ -66,6 +70,8 @@ import Thena.Development.Cursor
 import Thena.Development.Partial (Constraint (..), Partial (..))
 import Thena.Driver
   ( CommandError (..)
+  , RuleFileError (..)
+  , loadRuleBases
   , LoadError (..)
   , Loaded (..)
   , Response (..)
@@ -111,6 +117,7 @@ import Thena.Global.Env
   , constructorTarget
   )
 import Thena.Ops (AnswerKind (..), Instr (..), Op, Operand (..), Rule (..), Value (..))
+import Thena.Rules (RuleBase (..), RuleError (..))
 import qualified Thena.Ops as Ops
 import Thena.Syntax.Lexer (LexError (..), Pos (..), Token (..))
 import Thena.Syntax.Parser (ParseError (..))
@@ -127,7 +134,9 @@ import Data.List (intercalate)
 -- §3.7 already struck, and a REPL that refuses to start would say less.
 repl :: IO ()
 repl = do
-  (s, problems) <- loadPrelude newSession
+  (s0, preludeProblems) <- loadPrelude newSession
+  (s, ruleProblems)     <- loadStandardRules s0
+  let problems = preludeProblems ++ ruleProblems
   runInputT defaultSettings (mapM_ outputStrLn problems >> loop s Nothing)
 
 loop :: Session -> Maybe Question -> InputT IO ()
@@ -143,6 +152,12 @@ loop s pending = do
         -- and reading files is this module's (§12 invariant 4).
         LoadRequested path | not (turnQuit t) -> do
           (s', out, problems) <- liftIO (loadFile (turnSession t) path)
+          mapM_ outputStrLn (out ++ problems)
+          loop s' Nothing
+        -- The same shape for rule bases, and several paths rather than one:
+        -- a load replaces the whole ordered list (phase 22).
+        RulesRequested paths | not (turnQuit t) -> do
+          (s', out, problems) <- liftIO (loadRuleFiles (turnSession t) paths)
           mapM_ outputStrLn (out ++ problems)
           loop s' Nothing
         _ | turnQuit t -> pure ()
@@ -170,6 +185,40 @@ loadPrelude s = do
   path <- preludePath
   (s', _, problems) <- loadFile s path
   pure (s', map ("prelude: " ++) problems)
+
+-- | Where the shipped rule base went. 'preludePath'\'s reason, verbatim.
+rulesPath :: IO FilePath
+rulesPath = Paths_thena.getDataFileName "rules/standard.thena.rules"
+
+-- | Load the shipped rule base at startup, keeping only what went wrong.
+--
+-- 'loadPrelude'\'s bargain, in the same words: a broken or missing rule base is
+-- reported and the REPL starts anyway, with an empty base. @prove@ then matches
+-- nothing, which says more than refusing to start would.
+loadStandardRules :: Session -> IO (Session, [String])
+loadStandardRules s = do
+  path <- rulesPath
+  (s', _, problems) <- loadRuleFiles s [path]
+  pure (s', map ("rules: " ++) problems)
+
+-- | Read every named rule base and install the whole ordered list, or none.
+--
+-- **All the files are read before any of them is installed**, which is what
+-- makes 'Thena.Driver.loadRuleBases'\' all-or-nothing promise reach as far as
+-- the disk: a second path that does not exist leaves the first uninstalled too.
+loadRuleFiles :: Session -> [FilePath] -> IO (Session, [String], [String])
+loadRuleFiles s paths = do
+  reads' <- mapM (\p -> fmap ((,) p) (try (readFile p))) paths
+  pure $ case [ (p, e) | (p, Left e) <- reads' ] of
+    (p, e) : _ -> (s, [], [p ++ ": " ++ show (e :: IOException)])
+    [] ->
+      let contents = [ (p, c) | (p, Right c) <- reads' ]
+          (s', resp) = loadRuleBases s contents
+       in case resp of
+            -- A refusal is a problem and not output: the whole load was
+            -- abandoned, so there is nothing to report as having happened.
+            RuleFileRefused p e -> (s, [], renderRuleFileError p e)
+            _                   -> (s', renderResponse s' resp, [])
 
 -- | Read a file and run it: the session after, **what its lines printed**, and
 -- **what went wrong**, kept apart because the two callers want different halves.
@@ -245,7 +294,16 @@ turn s pending line = Turn (renderResponse s' resp) s' asking (resp == Quit) res
 -- does not follow a @:load@, because it is pure and reading a file is not.
 -- "Thena.LoadTests" covers both, against the real 'loadPrelude'.
 transcript :: [String] -> String
-transcript = unlines . replay newSession Nothing
+transcript = transcriptFrom newSession
+
+-- | The same, from a session that has already had something loaded into it.
+--
+-- Phase 22: the rule base comes off disk now, so a transcript that uses
+-- @:matches@, @prove@ or @retry@ has to start from a session that has one.
+-- That makes the golden suite test the **shipped file** rather than a Haskell
+-- literal, which is strictly stronger than what it tested before.
+transcriptFrom :: Session -> [String] -> String
+transcriptFrom s0 = unlines . replay s0 Nothing
   where
     replay _ _ []           = []
     replay s pending (l : ls) =
@@ -289,6 +347,12 @@ renderResponse s resp = case resp of
   -- Show where it landed: an undo with no output looks like nothing happened.
   Undone        -> [renderCursor (counter s) (cursor (proof (sessionMachine s)))]
   Proofs cur ps -> renderProofs (counter s) cur ps
+  -- Nothing to print: the caller reads the files and prints what that produced.
+  RulesRequested _ -> []
+  BasesLoaded bs   -> map loadedLine bs
+  BasesListed bs   -> renderBases bs
+  RulesListed bs   -> renderRuleBases bs
+  RuleFileRefused p e -> renderRuleFileError p e
   Matched rs    -> renderMatches rs
   Choices cs    -> renderChoices cs
   Ran msgs stop  -> msgs ++ renderStop s stop
@@ -896,6 +960,12 @@ renderCommandError e = case e of
   NoSuchChoice n       -> "no choice point " ++ show n
   LevelExpected u      -> u ++ " is not a universe, as in \"Type\8320\""
   NotThere m           -> renderMoveError m
+  MixedLoad w          -> w ++ " takes either one script or any number of " ++ ruleSuffix ++ " files"
+  ProofUnderway g      ->
+    "a rule base may not be loaded while " ++ nameString g ++ " is being proved"
+  ProofsSuspended gs   ->
+    "a rule base may not be loaded while proofs are suspended: "
+      ++ intercalate ", " (map nameString gs)
 
 renderFailReason :: FailReason -> String
 renderFailReason r = case r of
@@ -1242,6 +1312,54 @@ identString (Ident i) = i
 -- the first line is the one the engine would try first when phase 16 makes it
 -- able to. Ranking and grouping the list for display is a separate question and
 -- deliberately deferred past MS5 (§8).
+ruleSuffix :: String
+ruleSuffix = ".thena.rules"
+
+-- | One line per base, as @:load@ reports what it installed.
+loadedLine :: RuleBase -> String
+loadedLine b = "loaded " ++ baseName b ++ " (" ++ plural n "rule" ++ ")"
+  where n = length (baseRules b)
+
+plural :: Int -> String -> String
+plural 1 w = "1 " ++ w
+plural n w = show n ++ " " ++ w ++ "s"
+
+-- | @:bases@ — **name, description if there is one, and path**, which is what
+-- the user asked for, 2026-08-25. In search order, which is the point of
+-- listing them at all.
+renderBases :: [RuleBase] -> [String]
+renderBases [] = ["no rule base is loaded"]
+renderBases bs = concatMap one bs
+  where
+    one b = (baseName b ++ maybe "" ("   " ++) (baseDescription b)) : ["    " ++ basePath b]
+
+-- | @:rules@ — the rules themselves, under the base each came from, in search
+-- order. The per-rule line is @:matches@\', so a rule reads the same in both.
+renderRuleBases :: [RuleBase] -> [String]
+renderRuleBases [] = ["no rule base is loaded"]
+renderRuleBases bs = concatMap one bs
+  where
+    one b = baseName b : map ("  " ++) (renderMatches (baseRules b))
+
+renderRuleFileError :: FilePath -> RuleFileError -> [String]
+renderRuleFileError path e = case e of
+  NoRuleHeader ->
+    [ path ++ ": needs a header line — rule base \8249name\8250 \8249description\8250 where" ]
+  RuleSyntaxError se -> [path ++ ": " ++ renderSyntaxError se]
+  RuleIllFormed es   -> map ((path ++ ": ") ++) (map renderRuleError es)
+
+renderRuleError :: RuleError -> String
+renderRuleError e = case e of
+  DeclarationInBody g i    -> inRule g i ++ "a declaration is a command, not a rule-body operation"
+  BoundNonProducing g i n  -> inRule g i ++ n ++ " is bound to an operation that leaves nothing"
+  UnboundInRule g i n      -> inRule g i ++ "no parameter or earlier binding is called " ++ n
+  NoSuchTest g w           -> "in " ++ nameString g ++ ": no such test: " ++ w
+  NoSuchOp g i w           -> inRule g i ++ "no such operation: " ++ w
+  BadOperands g i w        -> inRule g i ++ w ++ " was written with the wrong arguments"
+  NoSuchRuleCalled g i r   -> inRule g i ++ "no rule called " ++ r ++ " is in scope here"
+  where
+    inRule g i = "in " ++ nameString g ++ ", instruction " ++ show i ++ ": "
+
 renderMatches :: [Rule] -> [String]
 renderMatches [] = ["no rule applies here"]
 renderMatches rs = map one rs

@@ -22,6 +22,7 @@ import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, crossType, enter)
 import Thena.Development.Partial (Partial (..))
 import Thena.Declared (natDecl)
+import Thena.Standard (expectedBase)
 import Thena.Driver (parseDeclaration)
 import Thena.Engine
   ( Exec (..)
@@ -61,7 +62,6 @@ import Thena.Rules
   , matches
   , next
   , ruleBase
-  , standardRules
   , validate
   , validateBase
   )
@@ -116,7 +116,7 @@ withArrow =
     emptyGlobals
 
 matching :: GlobalEnv -> Cursor -> [String]
-matching env cur = map nameOf (drain (matches standardRules env cur Nothing))
+matching env cur = map nameOf (drain (matches expectedBase env cur Nothing))
 
 nameOf :: Rule -> String
 nameOf r = let GlobalName n = ruleName r in n
@@ -176,7 +176,7 @@ matchTests =
     , testCase "where intro-let is offered, intro succeeds" $
         let cur = guessAt (Let (Ident "x") type0 type1 (close var type0))
          in do
-              nameOf `map` drain (matches standardRules emptyGlobals cur Nothing)
+              nameOf `map` drain (matches expectedBase emptyGlobals cur Nothing)
                 @?= ["intro-let", "solve", "regret"]
               ranOk (machineAt cur [Do Ops.Intro])
 
@@ -194,7 +194,7 @@ matchTests =
       -- Definition order is dispatch order (§8), so the match list is always a
       -- subsequence of the base and never a reordering of it.
     , testCase "the match list is a subsequence of the base" $
-        let base = map nameOf (allRules standardRules)
+        let base = map nameOf (allRules expectedBase)
          in mapM_
               (\cur -> assertSubsequence (matching emptyGlobals cur) base)
               [holeAt type0, guessAt type0, guessAt (arrow type0 type0)]
@@ -221,10 +221,10 @@ iteratorTests =
         let walk it = case next it of
               Nothing        -> hasNext it @?= False
               Just (_, rest) -> (hasNext it @?= True) >> walk rest
-         in walk (matches standardRules emptyGlobals (holeAt type0) Nothing)
+         in walk (matches expectedBase emptyGlobals (holeAt type0) Nothing)
 
     , testCase "an empty iterator has nothing" $
-        let it = matches standardRules emptyGlobals (guessAt type0) Nothing
+        let it = matches expectedBase emptyGlobals (guessAt type0) Nothing
          in case next it >>= next . snd >>= next . snd of
               Nothing -> pure ()
               Just _  -> assertFailure "expected two matches and no more"
@@ -234,7 +234,7 @@ iteratorTests =
       -- gives this outright; the test is here because the requirement is on the
       -- type, and a later representation could quietly lose it.
     , testCase "advancing one copy does not disturb another" $
-        let it = matches standardRules emptyGlobals (holeAt type0) Nothing
+        let it = matches expectedBase emptyGlobals (holeAt type0) Nothing
             deep = drop 2 (drain it)
          in do
               _ <- pure deep
@@ -256,7 +256,7 @@ validateTests =
   testGroup
     "validate"
     [ testCase "the shipped base is clean" $
-        validateBase standardRules @?= []
+        concatMap validateBase expectedBase @?= []
 
       -- §3.7's line, made structural: a declaration is a command, not a
       -- rule-body operation.
@@ -311,9 +311,10 @@ validateTests =
               ]
 
     , testCase "validateBase checks every rule" $
-        length (validateBase (ruleBase [ named "a" [] [Bind "x" Ops.Attack]
-                                       , named "b" [] [Do (Ops.Say (Ref "z"))]
-                                       ]))
+        length (validateBase (ruleBase "test" Nothing ""
+                                [ named "a" [] [Bind "x" Ops.Attack]
+                                , named "b" [] [Do (Ops.Say (Ref "z"))]
+                                ]))
           @?= 2
     ]
 
@@ -372,7 +373,7 @@ producesTests =
       , ("resolve",     e, hole,    [],            Ops.Resolve (Lit (VSurface (RawUniverse 0))))
       ]
 
-    -- @try ‹t›@, as 'standardRules' ships it — what @call@ needs something to
+    -- @try ‹t›@, as 'expectedBase' ships it — what @call@ needs something to
     -- call.
     tryRule = named "try" ["t"] [Do (Ops.Try (Ref "t"))]
 
@@ -410,7 +411,7 @@ text = Lit . VText
 -- above every 'Var' the fixtures mint, so nothing it mints collides.
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env cur is =
-  load is (Machine (Exec [] [] []) (ProofState cur) env standardRules 1000)
+  load is (Machine (Exec [] [] []) (ProofState cur) env expectedBase 1000)
 
 machineAt :: Cursor -> [Instr] -> Machine
 machineAt = machineIn emptyGlobals
