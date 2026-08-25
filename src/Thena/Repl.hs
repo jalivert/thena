@@ -917,6 +917,7 @@ renderOp n ctx op = case op of
   Ops.Down part   -> partWord part
   Ops.DefineData d -> "data " ++ nameString (inductiveName d)
   Ops.Goto v      -> "goto " ++ operand v
+  Ops.FreshName h -> "fresh-name " ++ operand h
   Ops.Goal        -> "goal"
   Ops.Typing t    -> "typeof " ++ operand t
   Ops.Define x v  -> "define " ++ operand x ++ " " ++ operand v
@@ -999,6 +1000,7 @@ renderFailReason r = case r of
   UniverseMismatch (Level a) (Level b) ->
     "Type" ++ subscript a ++ " and Type" ++ subscript b ++ " are different universes"
   NotTypeable e -> "that term has no type" ++ concatMap ("\n  " ++) (renderTypeError 0 e)
+  NameTaken n       -> n ++ " is already taken; ask fresh-name for one"
   NoGoalHere        -> "nothing is written down here, so there is no goal"
   NoRuleMatched     -> "no rule applies here"
   CannotEliminate e -> renderElimError e

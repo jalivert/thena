@@ -85,7 +85,8 @@ expectedStandard =
 -- unification makes the two converge, and only then filled in.
 unifyRefine :: Rule
 unifyRefine = Rule (GlobalName "unify-refine") ["t"] [FocusIsHole]
-  [ Bind "x" (Define (Lit (VText "refined")) (Ref "t"))
+  [ Bind "n" (FreshName (Lit (VText "refined")))
+  , Bind "x" (Define (Ref "n") (Ref "t"))
   , Bind "s" (Typing (Ref "x"))
   , Bind "g" Goal
   , Do (Unify (Ref "s") (Ref "g"))

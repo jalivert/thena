@@ -182,6 +182,20 @@ data Op
     -- **A call carries no hint**, so a rule whose head asks about one is never
     -- a call candidate; it is reached by @prove ‹hint›@. Hints are on MS2's
     -- closeout list.
+  | FreshName Operand
+    -- ^ a name nothing has taken, from a hint (phase 24c, the user's
+    -- correction).
+    --
+    -- **Inventing a name is the rule's job, not @claim@'s.** Until this op,
+    -- @claim@, @assume@ and @define@ silently renamed a taken identifier — a
+    -- repair rather than a check, and it hid from the body what it had actually
+    -- got. His words: *"They shouldn't be deciding whether the name given to
+    -- them is unique or not, that's breaking the separation of responsibility
+    -- and abstraction."* Now a body asks for a name, holds it, and passes it
+    -- on.
+    --
+    -- It avoids the development's identifiers **and the global environment's
+    -- names**, so a generated hole never shadows a datatype or a theorem.
   | Goal
     -- ^ the type the focused hole is claimed at (§7.2, phase 24). **The first
     -- op that reads the development** — §7.2's sketch called it @GoalType@ and
@@ -340,6 +354,7 @@ produces o = case o of
   Say _        -> False
   DefineData _ -> False
   Certify _    -> False
+  FreshName _  -> True
   Goal         -> True
   Typing _     -> True
   Define _ _   -> True   -- the variable it bound, as 'Assume' and 'Claim' do
@@ -510,6 +525,7 @@ opKeyword o = case o of
   Parse _      -> "parse"
   Resolve _    -> "resolve"
   Call _ _     -> "call"
+  FreshName _  -> "fresh-name"
   Goal         -> "goal"
   Typing _     -> "typeof"
   Define _ _   -> "define"

@@ -25,6 +25,7 @@ module Thena.Global.Env
   , lookupDefinition
   , lookupInductive
   , isDeclared
+  , declaredNames
   , addConstant
   , addDefinition
   , addInductive
@@ -149,6 +150,15 @@ isDeclared g e =
   g `elem` map fst (constants e)
     || g `elem` map fst (definitions e)
     || g `elem` map fst (inductives e)
+
+-- | Every name the global environment binds (phase 24c).
+--
+-- @fresh-name@ avoids these as well as the development's own, so a generated
+-- hole never shadows a datatype, a constructor or a proved theorem — something
+-- a rule author cannot anticipate and a reader would find baffling.
+declaredNames :: GlobalEnv -> [GlobalName]
+declaredNames e =
+  map fst (constants e) ++ map fst (definitions e) ++ map fst (inductives e)
 
 addConstant :: GlobalName -> Core -> GlobalEnv -> GlobalEnv
 addConstant g t e = e { constants = (g, t) : constants e }

@@ -22,7 +22,8 @@ rule elab-var :- when focus-is-hole hint-is-name
      ; prim-solve
 
 rule unify-refine t :- when focus-is-hole
-  then x = define "refined" t
+  then n = fresh-name "refined"
+     ; x = define n t
      ; s = typeof x
      ; g = goal
      ; unify s g

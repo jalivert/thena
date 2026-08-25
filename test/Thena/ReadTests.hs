@@ -28,7 +28,8 @@ import Thena.Engine
   , step
   )
 import Thena.Errors (FailReason (..), MoveError (..))
-import Thena.Global.Env (emptyGlobals)
+import Thena.Global.Env (GlobalEnv, emptyGlobals)
+import Thena.Declared (nat)
 import Thena.Ops (Instr (..), Op (..), Operand (..), Value (..))
 
 tests :: TestTree
@@ -48,21 +49,27 @@ hole :: Cursor
 hole = enter (Under (Component.Claim goalVar (Ident "goal") type0) (Trailing (Free goalVar)))
 
 machine :: Cursor -> [Instr] -> Machine
-machine cur is =
-  load is (Machine (Exec [] [] []) (ProofState cur) emptyGlobals [] 1000)
+machine = machineIn emptyGlobals
+
+machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
+machineIn env' cur is =
+  load is (Machine (Exec [] [] []) (ProofState cur) env' [] 1000)
 
 -- | Run to a stop, and hand back the environment or the reason.
 run :: Cursor -> [Instr] -> Either FailReason Machine
 run cur is = go (machine cur is)
-  where
-    go m = case step m of
-      Continue m'       -> go m'
-      Saying _ m'       -> go m'
-      Declaring _ m'    -> go m'
-      Certifying _ _ m' -> go m'
-      Asking _ m'       -> Right m'
-      Finished m'       -> Right m'
-      Stuck r _         -> Left r
+
+-- | Run a machine to a stop. Top level, so a test that needs a non-empty
+-- global environment can build its own machine and still use it.
+go :: Machine -> Either FailReason Machine
+go m = case step m of
+  Continue m'       -> go m'
+  Saying _ m'       -> go m'
+  Declaring _ m'    -> go m'
+  Certifying _ _ m' -> go m'
+  Asking _ m'       -> Right m'
+  Finished m'       -> Right m'
+  Stuck r _         -> Left r
 
 bound :: String -> Machine -> Maybe Value
 bound n m = lookup n (env (exec m))
@@ -227,15 +234,31 @@ gotoTests =
           Left (CannotMove NoSuchHole) -> pure ()
           other -> assertFailure ("expected NoSuchHole, got " ++ show (fmap (const ()) other))
 
-      -- Freshening at creation is what makes a name search unambiguous, and
-      -- what makes the printed name the stored one.
-    , testCase "two holes asked for one name get two names" $
+      -- **Refused, not renamed** (phase 24c): inventing a name is the rule's
+      -- job. Uniqueness is still guaranteed — it is just enforced rather than
+      -- silently repaired.
+    , testCase "a second hole asking for a taken name is refused" $
         case run hole [ Do (Claim (Lit (VText "h")) (Lit (VTerm (Trailing type0))))
                       , Do (Claim (Lit (VText "h")) (Lit (VTerm (Trailing type0))))
+                      ] of
+          Left (NameTaken "h") -> pure ()
+          other -> assertFailure ("expected NameTaken, got " ++ show (fmap (const ()) other))
+
+    , testCase "and fresh-name is how a rule gets one that is not" $
+        case run hole [ Do (Claim (Lit (VText "h")) (Lit (VTerm (Trailing type0))))
+                      , Bind "n" (FreshName (Lit (VText "h")))
+                      , Do (Claim (Ref "n") (Lit (VTerm (Trailing type0))))
                       ] of
           Left r  -> assertFailure ("did not run: " ++ show r)
           Right m -> [ i | Hypothesis _ i _ <- context (cursor (proof m)) ]
                        @?= [Ident "h", Ident "h1"]
+
+      -- A generated name must not shadow a datatype, a constructor or a
+      -- theorem: a rule author cannot anticipate what is declared.
+    , testCase "fresh-name avoids the globals too" $
+        case go (machineIn nat hole [Bind "n" (FreshName (Lit (VText "Nat")))]) of
+          Left r  -> assertFailure ("did not run: " ++ show r)
+          Right m -> bound "n" m @?= Just (VText "Nat1")
 
     , testCase "and attack's inner hole is not its outer one" $
         case run hole [Do Attack, Do Into] of
