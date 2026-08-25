@@ -344,11 +344,26 @@ tests =
     , script
         "stepping"
         [ ":step on"
-        , "assume A : Type₀"
+        , "assume A : Type\8320"
         , ":step"
         , ":step"
         , ":step off"
-        , "claim h : Type₀"
+        , "claim h : Type\8320"
+        , ":show"
+          -- **Phase 25c**: the whole of @unify-refine@\'s body, one instruction
+          -- at a time. Seven ops, two of them binary and one infix, so this
+          -- pins both halves of what @renderOp@ now derives — the word from
+          -- @opKeyword@, and the operands in the order @operandsOf@ lists them.
+          -- A swapped pair in that list would show up here and nowhere else.
+        , ":goal Type\8320"
+        , ":step on"
+        , "unify-refine A"
+        , ":step"
+        , ":step"
+        , ":step"
+        , ":step"
+        , ":step"
+        , ":step off"
         , ":show"
         ]
     , script

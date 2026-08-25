@@ -164,6 +164,7 @@ everyOp =
   , ("resolve x",    Op.Resolve (Ref "x"))
   , ("certify x",    Certify (Ref "x"))
   , ("prim-eliminate x", Op.Eliminate (Ref "x"))
+  , ("prim-apply x",  Op.Apply (Ref "x"))
   , ("goal",          Goal)
   , ("fresh-name x",  FreshName (Ref "x"))
   , ("typeof x",      Typing (Ref "x"))
