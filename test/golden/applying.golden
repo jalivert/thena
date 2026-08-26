@@ -85,6 +85,43 @@ thena spine> apply true
 already equal
 thena spine> qed
 bad : Bool   ∎
+thena spine> :theorem h : ∀ (b : Bool) -> Maybe Bool
+proving h : Bool -> Maybe Bool
+thena spine> apply Just
+stuck: Maybe A and Bool -> Maybe Bool cannot be made equal
+thena spine> assume q : Bool
+assumed q
+thena spine> apply Just
+stuck: Maybe A and Bool -> Maybe Bool cannot be made equal
+thena spine> :abandon
+abandoned h
+thena spine> :theorem h : ∀ (b : Bool) -> Maybe Bool
+proving h : Bool -> Maybe Bool
+thena spine> attack
+thena spine> intro
+thena spine> into
+thena spine> along
+thena spine> :where
+focus
+  let ? h1 : Maybe Bool in
+path
+  root ▸ ≐ h ▸ b
+context
+  b : Bool
+type
+  Maybe Bool
+thena spine> apply Just
+solved: A
+thena spine> goto a
+thena spine> apply b
+already equal
+thena spine> goto h
+thena spine> solve
+thena spine> qed
+h : Bool -> Maybe Bool   ∎
+thena spine> :show h
+h : Bool -> Maybe Bool
+h = let h = λ (b : Bool) -> let A = Bool : Type₀ in let refined = b : Bool in let a = refined : A in let refined1 = Just A a : Maybe A in let h1 = refined1 : Maybe Bool in h1 : Bool -> Maybe Bool in h
 thena spine> :theorem guessed : Bool
 proving guessed : Bool
 thena spine> attack
