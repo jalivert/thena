@@ -737,6 +737,39 @@ tests =
         , ":undo"
         , "apply true"
         , "qed"
+          -- **A goal `apply` cannot saturate into, and the way back** (the
+          -- user, 2026-08-26). @Just@'s result is a @Maybe@, so no number of
+          -- arguments makes it a function type: saturating and unifying fails.
+          --
+          -- Phase 27's @fit@ will get this by stopping an argument early —
+          -- @Just ?A : ?A -> Maybe ?A@ does unify with it. **But it is already
+          -- provable without any search**, by moving the hole through the Π
+          -- first: table 2.8's @intro@ puts the λ in and leaves the goal at
+          -- @Maybe Bool@, where @apply@ works as it does above.
+          --
+          -- **@assume@ does not do this**, and it was the first thing tried:
+          -- it adds the λ /above/ the hole and leaves the hole claimed at
+          -- @Bool -> Maybe Bool@, so @apply@ fails identically and the term
+          -- would have type @Bool -> Bool -> Maybe Bool@ anyway. §5.3's
+          -- distinction between assuming and introducing, from the other side.
+        , ":theorem h : \8704 (b : Bool) -> Maybe Bool"
+        , "apply Just"
+        , "assume q : Bool"
+        , "apply Just"
+        , ":abandon"
+        , ":theorem h : \8704 (b : Bool) -> Maybe Bool"
+        , "attack"
+        , "intro"
+        , "into"
+        , "along"
+        , ":where"
+        , "apply Just"
+        , "goto a"
+        , "apply b"
+        , "goto h"
+        , "solve"
+        , "qed"
+        , ":show h"
           -- The head is the guard, so @apply@ at a guess never runs its body.
         , ":theorem guessed : Bool"
         , "attack"

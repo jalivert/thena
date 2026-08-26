@@ -897,10 +897,19 @@ unifyMessage cur result = case result of
       Component.Claim  y i _   -> (y, i)
       Component.Guess  y i _ _ -> (y, i)
 
+    -- **Into a guess's body too**, and that is not optional: a hole claimed
+    -- inside a guess is where most of them are once @attack@ and @intro@ have
+    -- run, and without this line 'nameOfVar' fell through to @"?"@ for every
+    -- one of them — @unify@ said @solved: ?@ where it meant @solved: A@.
+    -- Found 2026-08-26 by the user, driving @apply@ under an @intro@.
     componentsOf p = case p of
       Trailing _     -> []
-      Under c rest   -> c : componentsOf rest
+      Under c rest   -> c : inside c ++ componentsOf rest
       Pending _ rest -> componentsOf rest
+      where
+        inside c = case c of
+          Component.Guess _ _ g _ -> componentsOf g
+          _                       -> []
 
 orphanMessage :: [Ident] -> String
 orphanMessage is = "reduced; now unreachable: " ++ intercalate ", " (map identString is)
