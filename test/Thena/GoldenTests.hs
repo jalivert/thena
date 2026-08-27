@@ -813,6 +813,18 @@ tests =
         , "assume : Type₀"
         , "let"
         , ":show"
+        -- Table 2.7's @Θ ⊢ S : Type@ on both binders (phase 25f). The λ is a
+        -- term, not a type, so both ops refuse it and — per phase 25d — leave
+        -- the proof exactly as it was.
+        , "claim h : (\\ (x : Type₀) -> x)"
+        , "assume k : (\\ (x : Type₀) -> x)"
+        -- **Accepted, and this line is the point of the pair.** A type family
+        -- is a perfectly good type; the condition is "S is a type", not "S is
+        -- a type at level 0". Closeout 4l offered
+        -- @claim h : Nat -> Nat -> Nat -> Type₀@ as an example of the defect
+        -- and it never was one.
+        , "claim fam : Type₀ -> Type₀ -> Type₀"
+        , ":show"
         ]
     ]
   where
