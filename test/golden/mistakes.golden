@@ -11,3 +11,15 @@ stuck: "let" is not a name
 thena spine> :show
 ▶ let ? goal : Type₀ in
   goal
+thena spine> claim h : (\ (x : Type₀) -> x)
+stuck: that is not a type
+  λ (x : Type₀) -> x is not a type — it has type Type₀ -> Type₀
+thena spine> assume k : (\ (x : Type₀) -> x)
+stuck: that is not a type
+  λ (x : Type₀) -> x is not a type — it has type Type₀ -> Type₀
+thena spine> claim fam : Type₀ -> Type₀ -> Type₀
+claimed fam
+thena spine> :show
+  let ? fam : Type₀ -> Type₀ -> Type₀ in
+▶ let ? goal : Type₀ in
+  goal

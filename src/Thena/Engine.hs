@@ -55,7 +55,7 @@ import Thena.Core.Term
   , instantiate
   )
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Typing (check, infer)
+import Thena.Core.Typing (check, infer, sortOf)
 import Thena.Core.Unify (UnifyResult (..), blockers, unify)
 import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor
@@ -850,11 +850,23 @@ perform instr rest m = case operation instr of
           -- @goto ‹name›@ keeps working — but deciding /what/ the name is
           -- belongs to the rule, through @fresh-name@.
           | i `elem` Cursor.identsIn (cursor (proof m)) -> failure (taken i) m
-          | otherwise ->
-              let (v, n1) = fresh (names m)
-                  cur     = insertAbove (build v i t) (cursor (proof m))
-               in produce (VTerm (Trailing (Free v)))
-                          m { proof = ProofState cur, names = n1 }
+          -- Table 2.7's side condition on both @assume@ and @claim@:
+          -- @Θ ⊢ S : Type@ (phase 25f). 'sortOf' is the same check
+          -- @revalidate@ runs on these components through @Validate@'s
+          -- @isAType@, so the op and the kernel cannot disagree about what a
+          -- type is — the same argument that made phase 25b use 'check' for
+          -- @try@ rather than a second opinion.
+          --
+          -- **The level is discarded.** The condition is "S is a type", not
+          -- "S is a type at level ℓ"; nothing here compares levels, so there
+          -- is nothing for a level to be constrained against.
+          | otherwise -> case sortOf (globals m) contextAt (names m) t of
+              (Left e,  n1) -> failure (BinderNotAType e) m { names = n1 }
+              (Right _, n1) ->
+                let (v, n2) = fresh n1
+                    cur     = insertAbove (build v i t) (cursor (proof m))
+                 in produce (VTerm (Trailing (Free v)))
+                            m { proof = ProofState cur, names = n2 }
 
 -- | What @eliminate@ says: the subgoals it opened, by the names it gave them.
 --

@@ -130,6 +130,21 @@ data FailReason
     --
     -- **Distinct from 'NotTypeable'**, which is "this term has no type at
     -- all". Here it has one; it is not the one written down.
+  | BinderNotAType TypeError
+    -- ^ @assume@ or @claim@ was handed something that is not a type (phase
+    -- 25f). Thesis table 2.7 gives both the side condition @Θ ⊢ S : Type@, and
+    -- until this phase it was documented and not enforced — @claim h : zero@
+    -- went in and the kernel caught it at @qed@.
+    --
+    -- **The exact analogue of 'GuessIllTyped'**, which phase 25b added for
+    -- @try@'s side condition in the same table. The check is
+    -- 'Thena.Core.Typing.sortOf', which is what @revalidate@ has always run on
+    -- these two components via @Validate@'s @isAType@ — so the op and the
+    -- kernel cannot come to disagree about what a type is.
+    --
+    -- **The level is discarded**, because the condition is "S is a type", not
+    -- "S is a type at level ℓ". That is what makes this survive the universe
+    -- work unchanged: @Universe ?ℓ@ answers it as well as @Universe 0@ does.
   | NotTypeable TypeError
     -- ^ an op was handed a term with no type. @unify@ needs one: a deferred
     -- equation records the type it was asked at (§3.3), so the op infers it
