@@ -20,10 +20,11 @@ module Thena.Core.TypingTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
+import Thena.Core.Level (Level (..), levelOfNat)
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Convert (convert)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Level (..), fresh)
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), fresh)
 import Thena.Core.Typing (check, infer)
 import Thena.Declared (natFin, natFinCounter, natVec, natVecCounter)
 import Thena.Driver (parseCore)
@@ -116,7 +117,7 @@ named = GlobalName
 formTests :: [TestTree]
 formTests =
   [ testCase "a universe is one universe up" $
-      typeOf "Type\8320" @?= Right (Universe (Level 1))
+      typeOf "Type\8320" @?= Right (Universe (levelOfNat 1))
   , testCase "a variable takes its type from the context" $
       let (v, n) = fresh natVecCounter
           ctx    = [Hypothesis v (Ident "x") (Global (named "Nat"))]
@@ -138,9 +139,9 @@ formTests =
 universeTests :: [TestTree]
 universeTests =
   [ testCase "a Pi lands at the larger of its two levels" $
-      typeOf "\8704 (A : Type\8320) -> A" @?= Right (Universe (Level 1))
+      typeOf "\8704 (A : Type\8320) -> A" @?= Right (Universe (levelOfNat 1))
   , testCase "the domain can be the larger one" $
-      typeOf "Type\8321 -> Type\8320" @?= Right (Universe (Level 2))
+      typeOf "Type\8321 -> Type\8320" @?= Right (Universe (levelOfNat 2))
   , testCase "no cumulativity: a Type0 term does not check at Type1" $
       illTyped' "Nat" "Type\8321"
   , testCase "and it does check at Type0" $
@@ -219,16 +220,16 @@ elimTests =
 -- check on the construction.
 eliminatorTypeTests :: [TestTree]
 eliminatorTypeTests =
-  [ testCase "Nat's eliminator type, at Type0" $ wellFormed natVec natVecCounter "Nat" (Level 0)
-  , testCase "Nat's eliminator type, at Type1" $ wellFormed natVec natVecCounter "Nat" (Level 1)
-  , testCase "Vec's eliminator type, at Type0" $ wellFormed natVec natVecCounter "Vec" (Level 0)
-  , testCase "Vec's eliminator type, at Type2" $ wellFormed natVec natVecCounter "Vec" (Level 2)
+  [ testCase "Nat's eliminator type, at Type0" $ wellFormed natVec natVecCounter "Nat" (LZero)
+  , testCase "Nat's eliminator type, at Type1" $ wellFormed natVec natVecCounter "Nat" (levelOfNat 1)
+  , testCase "Vec's eliminator type, at Type0" $ wellFormed natVec natVecCounter "Vec" (LZero)
+  , testCase "Vec's eliminator type, at Type2" $ wellFormed natVec natVecCounter "Vec" (levelOfNat 2)
     -- Phase 10's two: an indexed family with no parameter, whose method
     -- conclusions are at constructor-supplied indices, and a family with no
     -- methods at all.
-  , testCase "Fin's eliminator type, at Type0" $ wellFormed natFin natFinCounter "Fin" (Level 0)
-  , testCase "Fin's eliminator type, at Type1" $ wellFormed natFin natFinCounter "Fin" (Level 1)
-  , testCase "Empty's eliminator type, at Type0" $ wellFormed natFin natFinCounter "Empty" (Level 0)
+  , testCase "Fin's eliminator type, at Type0" $ wellFormed natFin natFinCounter "Fin" (LZero)
+  , testCase "Fin's eliminator type, at Type1" $ wellFormed natFin natFinCounter "Fin" (levelOfNat 1)
+  , testCase "Empty's eliminator type, at Type0" $ wellFormed natFin natFinCounter "Empty" (LZero)
   ]
   where
     wellFormed env n0 d l = case lookupInductive (named d) env of

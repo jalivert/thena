@@ -52,8 +52,9 @@ module Thena.Errors
   , DevForm (..)
   ) where
 
+import Thena.Core.Level (Level)
 import Thena.Core.Context (Context)
-import Thena.Core.Term (Core, GlobalName, Ident, Level, Var)
+import Thena.Core.Term (Core, GlobalName, Ident, Var)
 import Thena.Syntax.Lexer (LexError)
 import Thena.Syntax.Parser (ParseError)
 

@@ -18,11 +18,11 @@ module Thena.GlobalTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
+import Thena.Core.Level (Level (..), levelOfNat)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
   , Ident (..)
-  , Level (..)
   , close
   , fresh
   , open
@@ -122,7 +122,7 @@ tablesTests =
   [ testCase "the datatype has a record" $
       fmap inductiveName (lookupInductive (named "Nat") nat) @?= Just (named "Nat")
   , testCase "the type former is a constant at its declared universe" $
-      lookupConstant (named "Nat") nat @?= Just (Universe (Level 0))
+      lookupConstant (named "Nat") nat @?= Just (Universe (LZero))
   , testCase "a former is in two tables under one name (§3.3.1)" $
       sequence_
         [ lookupConstant (named g) natVec
@@ -264,14 +264,14 @@ universeTests =
       "T : Type\8321 where { c : Type\8320 -> T }"
   , refused "a large argument in a small datatype"
       "T : Type\8320 where { c : Type\8320 -> T }"
-      (ArgumentTooLarge (named "c") (Ident "x") (Level 1) (Level 0))
+      (ArgumentTooLarge (named "c") (Ident "x") (levelOfNat 1) (LZero))
   , accepted "a recursive argument, which needs the former in scope already"
       "T : Type\8320 where { c : T -> T }"
   , accepted "a parameter used as an argument's type"
       "Box (A : Type\8320) : Type\8320 where { box : A -> Box A }"
   , refused "a parameter from a larger universe than the datatype"
       "Box (A : Type\8321) : Type\8320 where { box : A -> Box A }"
-      (ArgumentTooLarge (named "box") (Ident "x") (Level 1) (Level 0))
+      (ArgumentTooLarge (named "box") (Ident "x") (levelOfNat 1) (LZero))
   , accepted "an argument whose type mentions an earlier argument"
       "T : Type\8320 where { c : forall (n : Nat) (v : Vec Nat n) -> T }"
   , refused "an argument whose type is not a type at all"

@@ -39,9 +39,10 @@ module Thena.Driver
   , parseDeclaration
   ) where
 
+import Thena.Core.Level (Level)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Level)
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..))
 import Data.Char (isSpace)
 import Data.List (dropWhileEnd, isSuffixOf, stripPrefix)
 import Thena.Development.Cursor (Cursor, Focus (..), Part (..), focus)

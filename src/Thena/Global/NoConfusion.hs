@@ -66,12 +66,12 @@ module Thena.Global.NoConfusion
   , generateNoConfusion
   ) where
 
+import Thena.Core.Level (Level (..))
 import Thena.Core.Context (Context, Entry (..), entryIdent, entryType, entryVar, lamOver, piOver)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
   , Ident (..)
-  , Level (..)
   , close
   , fresh
   , freeVars
@@ -160,7 +160,7 @@ generateNoConfusion :: GlobalEnv -> Int -> InductiveDefinition -> Generated
 generateNoConfusion env n0 d
   | not (equalityInScope env)          = Declined NoEquality
   | not (productsInScope env d)        = Declined NoProducts
-  | inductiveLevel d /= Level 0        = Declined (NotAtTypeZero (inductiveLevel d))
+  | inductiveLevel d /= LZero        = Declined (NotAtTypeZero (inductiveLevel d))
   | Just why <- dependentArgument d    = Declined why
   | isDeclared famName env             = Clash famName
   | isDeclared lemName env             = Clash lemName
@@ -214,7 +214,7 @@ generateNoConfusion env n0 d
           fam      = familyAt (varsOf idx)
        in ( piOver ps (piOver idx
               (Pi (Ident "x") fam (close vx
-                (Pi (Ident "y") fam (close vy (Universe (Level 0)))))))
+                (Pi (Ident "y") fam (close vy (Universe (LZero)))))))
           , n2
           )
 
@@ -247,7 +247,7 @@ generateNoConfusion env n0 d
     typeMotive n =
       let (is, n1) = freshen n idx
           (vt, n2) = fresh n1
-       in ( lamOver is (Lam (Ident "t") (familyAt (varsOf is)) (close vt (Universe (Level 0))))
+       in ( lamOver is (Lam (Ident "t") (familyAt (varsOf is)) (close vt (Universe (LZero))))
           , n2
           )
 
@@ -421,8 +421,8 @@ equalityInScope env = case lookupInductive (GlobalName "Eq") env of
   Nothing -> False
   Just e -> case (inductiveParameters e, inductiveIndices e, inductiveConstructors e) of
     ([a], [i, j], [c]) ->
-      inductiveLevel e == Level 0
-        && entryType a == Universe (Level 0)
+      inductiveLevel e == LZero
+        && entryType a == Universe (LZero)
         && entryType i == Free (entryVar a)
         && entryType j == Free (entryVar a)
         && constructorName c == GlobalName "refl"
@@ -470,9 +470,9 @@ conjunctionInScope env = case lookupInductive (GlobalName "And") env of
   Nothing -> False
   Just e -> case (inductiveParameters e, inductiveIndices e, inductiveConstructors e) of
     ([a, b], [], [c]) ->
-      inductiveLevel e == Level 0
-        && entryType a == Universe (Level 0)
-        && entryType b == Universe (Level 0)
+      inductiveLevel e == LZero
+        && entryType a == Universe (LZero)
+        && entryType b == Universe (LZero)
         && constructorName c == GlobalName "both"
         && case constructorArguments c of
              [x, y] -> entryType x == Free (entryVar a)
@@ -488,7 +488,7 @@ truthInScope env = case lookupInductive (GlobalName "Unit") env of
   Nothing -> False
   Just e -> case (inductiveParameters e, inductiveIndices e, inductiveConstructors e) of
     ([], [], [c]) ->
-      inductiveLevel e == Level 0
+      inductiveLevel e == LZero
         && constructorName c == GlobalName "unit"
         && null (constructorArguments c)
         && null (constructorIndices c)
@@ -501,7 +501,7 @@ falsityInScope env = case lookupInductive (GlobalName "Empty") env of
   Just e -> null (inductiveParameters e)
               && null (inductiveIndices e)
               && null (inductiveConstructors e)
-              && inductiveLevel e == Level 0
+              && inductiveLevel e == LZero
 
 -- | The first constructor argument whose type mentions an argument before it.
 --

@@ -12,10 +12,10 @@ import Test.Tasty.QuickCheck
   , testProperty
   )
 
+import Thena.Core.Level (Level (..), levelOfNat)
 import Thena.Core.Term
   ( Core (..)
   , Ident (..)
-  , Level (..)
   , close
   , fresh
   )
@@ -204,7 +204,7 @@ shadowed :: Core
 shadowed =
   let (v1, n1) = fresh 0
       (v2, _)  = fresh n1
-      ty       = Universe (Level 0)
+      ty       = Universe (LZero)
    in Lam (Ident "x") ty (close v1 (Lam (Ident "x") ty (close v2 (Free v1))))
 
 -- | Pinned against hand-built terms, because the round trip cannot see these:
@@ -241,8 +241,8 @@ nestedLam which =
   let (v1, n1) = fresh 0
       (v2, _)  = fresh n1
       body     = Free (case which of Inner -> v2; Outer -> v1)
-   in Lam (Ident "x") (Universe (Level 0))
-        (close v1 (Lam (Ident "x") (Universe (Level 1)) (close v2 body)))
+   in Lam (Ident "x") (Universe (LZero))
+        (close v1 (Lam (Ident "x") (Universe (levelOfNat 1)) (close v2 body)))
 
 render :: String -> String
 render src = case parseCore emptyGlobals [] 0 src of

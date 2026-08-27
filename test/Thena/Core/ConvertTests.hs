@@ -5,9 +5,10 @@ module Thena.Core.ConvertTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 
+import Thena.Core.Level (Level (..), levelOfNat)
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Convert (convert)
-import Thena.Core.Term (Core, GlobalName (..), Ident (..), Level (..), fresh)
+import Thena.Core.Term (Core, GlobalName (..), Ident (..), fresh)
 import Thena.Declared (natVec, natVecCounter)
 import Thena.Driver (parseCore)
 import Thena.Errors (Clash (..), ConversionFailure (..), Site (..))
@@ -155,7 +156,7 @@ siteTests :: [TestTree]
 siteTests =
   [ testCase "two universes, at the top" $
       same [] "Type\8320" "Type\8321"
-        @?= Just (ConversionFailure [] (LevelsDiffer (Level 0) (Level 1)))
+        @?= Just (ConversionFailure [] (LevelsDiffer (LZero) (levelOfNat 1)))
   , testCase "two formers, at the top" $
       same [] "zero" "nil Nat"
         @?= Just (ConversionFailure [] (NamesDiffer (named "zero") (named "nil")))

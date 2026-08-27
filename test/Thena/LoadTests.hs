@@ -18,7 +18,8 @@ module Thena.LoadTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (GlobalName (..), Level (..))
+import Thena.Core.Level (Level (..))
+import Thena.Core.Term (GlobalName (..))
 import Thena.Driver
   ( LoadError (..)
   , Loaded (..)
@@ -67,7 +68,7 @@ preludeTests =
       case lookupInductive (GlobalName "Eq") env of
         Nothing -> assertFailure "Eq is not declared"
         Just d  ->
-          renderEliminator n0 (GlobalName "Eq") (fst (eliminatorType d (Level 0) n0))
+          renderEliminator n0 (GlobalName "Eq") (fst (eliminatorType d (LZero) n0))
             @?= [ "elim Eq : ∀ (A : Type₀) (P : ∀ (x : A) (x1 : A) -> Eq A x x1 -> Type₀) \
                   \-> (∀ (a : A) -> P a a (refl A a)) \
                   \-> ∀ (x : A) (x1 : A) (target : Eq A x x1) -> P x x1 target"

@@ -10,8 +10,9 @@ module Thena.EngineTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
+import Thena.Core.Level (Level (..), levelOfNat)
 import Thena.Core.Context (Entry (..))
-import Thena.Core.Term (Core (..), Ident (..), Level (..), fresh)
+import Thena.Core.Term (Core (..), Ident (..), fresh)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (enter)
 import Thena.Development.Partial (Partial (..))
@@ -38,7 +39,7 @@ import Thena.Ops (AnswerKind (..), Instr (..), Operand (..), Value (..))
 import qualified Thena.Ops as Ops
 
 type0 :: Core
-type0 = Universe (Level 0)
+type0 = Universe (LZero)
 
 term :: Core -> Operand
 term = Lit . VTerm . Trailing
@@ -189,9 +190,9 @@ tests =
               other      -> assertFailure ("expected Finished, got " ++ show other)
         , testCase "setGoal replaces the focus and keeps the prefix" $
             case runTo (machine [Do (Ops.Assume (text "A") (term type0))]) of
-              Finished m -> case fmap (proofDevelopment . proof) (setGoal (Universe (Level 1)) m) of
+              Finished m -> case fmap (proofDevelopment . proof) (setGoal (Universe (levelOfNat 1)) m) of
                 Right (Under Assume {} (Under (Claim _ _ ty) (Trailing (Free _)))) ->
-                  ty @?= Universe (Level 1)
+                  ty @?= Universe (levelOfNat 1)
                 other -> assertFailure ("wrong shape: " ++ show other)
               other -> assertFailure ("expected Finished, got " ++ show other)
         , testCase "setGoal standing at the root throws the whole chain away" $

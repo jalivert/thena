@@ -1,7 +1,7 @@
 -- | The core language: its terms, the names that appear in them, and the
 -- opaque 'Scope' that carries a binder's body.
 --
--- This module spends two of the three places the project uses Level 1
+-- This module spends two of the three places the project uses levelOfNat 1
 -- enforcement (@PLAN.md@ §3.4, §2.5):
 --
 --   * 'Scope' — only 'close' builds one; only 'open' and 'instantiate' take one
@@ -18,7 +18,6 @@ module Thena.Core.Term
   , fresh
   , Ident (..)
   , GlobalName (..)
-  , Level (..)
 
     -- * Terms
   , Core (..)
@@ -33,6 +32,8 @@ module Thena.Core.Term
   ) where
 
 import Data.List (nub)
+
+import Thena.Core.Level (Level)
 
 -- | A reference to a binding, globally unique within a session.
 --
@@ -63,11 +64,6 @@ newtype Ident = Ident String
 -- being named, so a tag would be data derivable from its own context and able to
 -- disagree with it. One namespace, shared with generated names.
 newtype GlobalName = GlobalName String
-  deriving (Eq, Ord, Show)
-
--- | A universe level. Concrete and user-written; MS1 has no universe
--- polymorphism and no cumulativity (§3.7, §5.2).
-newtype Level = Level Int
   deriving (Eq, Ord, Show)
 
 -- | The body of a binder, with the bound variable replaced by a de Bruijn index.

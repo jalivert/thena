@@ -16,11 +16,11 @@ import Test.Tasty.QuickCheck
   , (===)
   )
 
+import Thena.Core.Level (levelOfNat)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
   , Ident (..)
-  , Level (..)
   , Var
   , close
   , freeVars
@@ -91,7 +91,7 @@ genCore depth = sized go
       oneof
         [ Free <$> elements inScope
         , Global <$> genGlobalName
-        , Universe . Level <$> elements [0, 1]
+        , Universe . levelOfNat <$> elements [0, 1]
         ]
 
     genNode :: Int -> Gen Core

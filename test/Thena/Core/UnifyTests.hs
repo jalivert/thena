@@ -24,9 +24,10 @@ import Data.List (isInfixOf)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
+import Thena.Core.Level (Level (..))
 import Thena.Core.Context (Context)
 import Thena.Core.Convert (convert)
-import Thena.Core.Term (Core (..), Ident (..), Level (..), Var, fresh)
+import Thena.Core.Term (Core (..), Ident (..), Var, fresh)
 import Thena.Core.Typing (check)
 import Thena.Core.Unify (UnifyResult (..), blockers, constraintsOf, unify)
 import Thena.Declared (natVec, natVecCounter)
@@ -71,7 +72,7 @@ data Dev = Dev
 
 devOf :: [Decl] -> Dev
 devOf ds = Dev
-  { devCursor  = enter (foldr Under (Trailing (Universe (Level 0))) comps)
+  { devCursor  = enter (foldr Under (Trailing (Universe (LZero))) comps)
   , devContext = map forget comps
   , devNames   = n
   , devVars    = vars

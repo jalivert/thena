@@ -11,8 +11,9 @@ module Thena.ReadTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
+import Thena.Core.Level (Level (..), levelOfNat)
 import Thena.Core.Context (Entry (..))
-import Thena.Core.Term (Core (..), Ident (..), Level (..), Var, fresh)
+import Thena.Core.Term (Core (..), Ident (..), Var, fresh)
 import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor
   (Cursor, Focus (..), along, context, enter, focus, rebuild)
@@ -39,7 +40,7 @@ tests =
     [goalTests, typeofTests, defineTests, gotoTests]
 
 type0 :: Core
-type0 = Universe (Level 0)
+type0 = Universe (LZero)
 
 goalVar :: Var
 goalVar = fst (fresh 0)
@@ -101,7 +102,7 @@ typeofTests =
     "typeof"
     [ testCase "infers in the context at the focus" $ do
         v <- expectBound hole [Bind "t" (Typing (Lit (VTerm (Trailing type0))))] "t"
-        v @?= VTerm (Trailing (Universe (Level 1)))
+        v @?= VTerm (Trailing (Universe (levelOfNat 1)))
 
     , testCase "a variable gets its type from the context" $ do
         v <- expectBound hole
@@ -127,7 +128,7 @@ defineTests =
           Right m -> case context (cursor (proof m)) of
             [Definition _ (Ident "d") v t] -> do
               v @?= type0
-              t @?= Universe (Level 1)
+              t @?= Universe (levelOfNat 1)
             other -> assertFailure ("unexpected context: " ++ show other)
 
     , testCase "and produces the variable it bound" $ do

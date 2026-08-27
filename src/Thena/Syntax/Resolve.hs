@@ -7,16 +7,16 @@ module Thena.Syntax.Resolve
   ) where
 
 import Thena.Core.Context (Context, Entry (..), entryIdent, entryVar)
+import Thena.Core.Level (levelOfNat)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
   , Ident (..)
-  , Level (..)
   , Scope
   , Var
   , close
   , fresh
-  )
+   )
 import Thena.Development.Component (Component (..))
 import Thena.Development.Partial (Constraint (..), Partial (..))
 import Thena.Errors (DevForm (..), ResolveError (..))
@@ -96,7 +96,7 @@ core env gs ctx local n raw = case raw of
         | GlobalName s `elem` gs -> Right (Global (GlobalName s), n)
         | otherwise              -> Left (NotInScope s)
 
-  RawUniverse k -> Right (Universe (Level k), n)
+  RawUniverse k -> Right (Universe (levelOfNat k), n)
 
   RawApp f a -> do
     (f', n1) <- core env gs ctx local n f
@@ -301,7 +301,7 @@ resolveData env n (RawData name ps ty cs) = do
   (params, afterParams, n1)  <- telescope env gs [] [] n ps
   (indices, _, rest, n2)     <- prefix env gs afterParams n1 ty
   level <- case rest of
-    RawUniverse k -> Right (Level k)
+    RawUniverse k -> Right (levelOfNat k)
     _             -> Left (NotAUniverse name)
   -- The datatype being declared joins 'Globals' here, and only here: a
   -- constructor may recursively mention it (@succ : Nat -> Nat@), and

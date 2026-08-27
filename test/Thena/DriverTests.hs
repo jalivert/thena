@@ -5,7 +5,8 @@ module Thena.DriverTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Level (..))
+import Thena.Core.Level (levelOfNat)
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..))
 import Thena.Development.Component (Component (..))
 import Thena.Development.Partial (Partial (..))
 import Thena.Standard (withRules)
@@ -153,7 +154,7 @@ tests =
               other -> assertFailure ("wrong shape: " ++ show other)
         , testCase ":goal replaces the old one rather than stacking" $
             case devOf (fst (say [":goal Type₀", ":goal Type₁"])) of
-              Under (Claim _ _ ty) (Trailing _) -> ty @?= Universe (Level 1)
+              Under (Claim _ _ ty) (Trailing _) -> ty @?= Universe (levelOfNat 1)
               other -> assertFailure ("wrong shape: " ++ show other)
         , testCase "an assumption made later still lands outside the goal" $
             case devOf (fst (say [":goal Type₀", "assume A : Type₀"])) of

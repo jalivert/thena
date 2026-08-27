@@ -25,7 +25,8 @@ import Control.Monad (foldM)
 
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar, lamOver)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Level)
+import Thena.Core.Level (Level, levelLeq)
+import Thena.Core.Term ()
 import Thena.Core.Typing (infer)
 import Thena.Errors (TypeError (..))
 import Thena.Core.Term
@@ -158,8 +159,24 @@ universes env n0 d = foldM eachConstructor n0 (inductiveConstructors d)
         go n' ctx (e : es) = case infer provisional ctx n' (entryType e) of
           (Left err, _) -> Left (ArgumentNotAType (constructorName c) (identOf e) err)
           (Right ty, n'') -> case whnf provisional ctx ty of
+            -- OLEG's size restriction, now a question about level
+            -- *expressions* rather than an @Int@ comparison (phase 28).
+            --
+            -- **@levelLeq@ has three answers and this reads two of them.**
+            -- @Nothing@ — undecided, the disjunctive residue of
+            -- @level-binders-and-constraints.md@ §6.3 — shares the refusal
+            -- path with @Just False@. That is not a stub: refusing what cannot
+            -- be shown is the conservative answer, and it is the one the user
+            -- chose for the residue generally on 2026-08-27. **In this phase
+            -- it cannot arise at all**, because nothing yet builds a level
+            -- variable, so the branch is reached only from @Just False@.
+            --
+            -- **Phase 31 is where this gets revisited** — §4.3's open question
+            -- is whether a datatype's level should be *computed* as the max of
+            -- its arguments' rather than *constrained* like this, and that
+            -- phase is the test §4.3 asked for.
             Universe l
-              | l <= inductiveLevel d -> go n'' (ctx ++ [e]) es
+              | levelLeq l (inductiveLevel d) == Just True -> go n'' (ctx ++ [e]) es
               | otherwise ->
                   Left (ArgumentTooLarge (constructorName c) (identOf e) l (inductiveLevel d))
             ty' -> Left (ArgumentNotAType (constructorName c) (identOf e)

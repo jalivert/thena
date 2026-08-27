@@ -39,12 +39,12 @@ module Thena.Global.Env
   , eliminatorType
   ) where
 
+import Thena.Core.Level (Level)
 import Thena.Core.Context (Context, entryType, entryVar, piOver)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName
   , Ident (..)
-  , Level (..)
   , close
   , fresh
   )

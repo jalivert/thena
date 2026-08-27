@@ -25,9 +25,10 @@ module Thena.NoConfusionTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
+import Thena.Core.Level (levelOfNat)
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core, GlobalName (..), Ident (..), Level (..), fresh)
+import Thena.Core.Term (Core, GlobalName (..), Ident (..), fresh)
 import Thena.Core.Typing (check)
 import Thena.Declared
   ( declared
@@ -261,7 +262,7 @@ skipTests =
   , -- Eq relates only Type₀ types, so nothing above it can have an equation.
     testCase "a datatype above Type₀" $
       skipped [eqDecl] "Big : Type\8321 where { wrap : Type\8320 -> Big }"
-        @?= Right (Just (NotAtTypeZero (Level 1)))
+        @?= Right (Just (NotAtTypeZero (levelOfNat 1)))
   , -- Silent, and it has to be: this is the state every prelude-free golden
     -- transcript declares its datatypes in, and a note on every @data@ line
     -- would be noise about the environment rather than about the declaration.

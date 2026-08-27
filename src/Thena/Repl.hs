@@ -15,6 +15,7 @@ module Thena.Repl
   , transcript
   , transcriptFrom
   , renderCore
+  , renderLevel
   , renderPartial
   , renderCursor
   , renderWhere
@@ -42,11 +43,11 @@ import System.Console.Haskeline
   )
 
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar, piOver)
+import Thena.Core.Level (Level, LevelVar (..), Normal (..), normalise)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
   , Ident (..)
-  , Level (..)
   , Scope
   , Var
   , freeVars
@@ -518,7 +519,7 @@ go n env prec term = case term of
   Bound i               -> "‹bound " ++ show i ++ "›"
   Free v                -> nameOf v env
   Global (GlobalName g) -> g
-  Universe (Level k)    -> "Type" ++ subscript k
+  Universe l            -> renderLevel l
 
   App f a -> parensIf (prec > AtApp) (go n env AtApp f ++ " " ++ go n env AtAtom a)
 
@@ -628,6 +629,36 @@ subscript :: Int -> String
 subscript = map sub . show
   where
     sub c = toEnum (fromEnum '₀' + (fromEnum c - fromEnum '0'))
+
+-- | Render a universe, **normalising first** (phase 28).
+--
+-- Normalising is not cosmetic. 'Thena.Core.Typing' builds a Π's level with
+-- @levelMax@ and does not evaluate it, so @:infer Type₀ -> Type₀@ now arrives
+-- here as @LMax (LSuc LZero) (LSuc LZero)@ where it used to arrive as
+-- @Level 1@. It must still print @Type₁@ — which is most of what this phase's
+-- "the test suite does not move" check is checking.
+--
+-- A level with variables in it prints as an expression over @⊔@, Agda's
+-- spelling of the join. **Nothing constructs one before phase 29**, so that
+-- branch is exercised by unit tests rather than by the REPL; it is written now
+-- because rendering is total and a partial renderer would be worse than an
+-- unexercised one.
+renderLevel :: Level -> String
+renderLevel l = case normalise l of
+  Normal c []  -> "Type" ++ subscript c
+  Normal c vs  -> "Type (" ++ intercalate " ⊔ " (constant ++ map var vs) ++ ")"
+    where
+      constant  = [subscriptFree c | c > 0 || null vs]
+      var (v, k)
+        | k == 0    = levelVarName v
+        | otherwise = "suc" ++ concat (replicate (k - 1) " (suc") ++ " "
+                        ++ levelVarName v ++ concat (replicate (k - 1) ")")
+      subscriptFree = show
+
+-- | A level variable's display name. Numbered from the shared counter, so it
+-- is shown the way a hole is: a sigil and its number.
+levelVarName :: LevelVar -> String
+levelVarName (LevelVar i) = "?ℓ" ++ show i
 
 parensIf :: Bool -> String -> String
 parensIf True s  = "(" ++ s ++ ")"
@@ -1003,8 +1034,8 @@ renderFailReason r = case r of
   ScopeViolation ctx x y ->
     nameIn ctx y ++ " is not bound before " ++ nameIn ctx x
       ++ ", so there is no solution for it there"
-  UniverseMismatch (Level a) (Level b) ->
-    "Type" ++ subscript a ++ " and Type" ++ subscript b ++ " are different universes"
+  UniverseMismatch a b ->
+    renderLevel a ++ " and " ++ renderLevel b ++ " are different universes"
   NotTypeable e -> "that term has no type" ++ concatMap ("\n  " ++) (renderTypeError 0 e)
   BinderNotAType e ->
     "that is not a type"
@@ -1231,15 +1262,15 @@ renderDeclareError e = case e of
       ++ " of "
       ++ nameString g
       ++ " mentions the datatype under another type, which MS1 does not admit yet"
-  ArgumentTooLarge g i (Level l) (Level d) ->
+  ArgumentTooLarge g i l d ->
     "the argument "
       ++ identString i
       ++ " of "
       ++ nameString g
-      ++ " lives in Type"
-      ++ subscript l
-      ++ ", which the datatype's own Type"
-      ++ subscript d
+      ++ " lives in "
+      ++ renderLevel l
+      ++ ", which the datatype's own "
+      ++ renderLevel d
       ++ " does not contain"
   ArgumentNotAType g i te ->
     "the argument " ++ identString i ++ " of " ++ nameString g ++ " is ill-typed"
@@ -1335,8 +1366,8 @@ siteWord site = case site of
 renderClash :: Int -> Clash -> String
 renderClash n clash = case clash of
   HeadsDiffer ctx a b  -> renderCore n ctx a ++ " and " ++ renderCore n ctx b ++ " do not match"
-  LevelsDiffer (Level a) (Level b) ->
-    "Type" ++ subscript a ++ " and Type" ++ subscript b ++ " are different universes"
+  LevelsDiffer a b ->
+    renderLevel a ++ " and " ++ renderLevel b ++ " are different universes"
   NamesDiffer a b      -> nameString a ++ " and " ++ nameString b ++ " are different names"
   VariablesDiffer a b  -> "the variables " ++ show a ++ " and " ++ show b ++ " are different"
   CountsDiffer a b     -> show a ++ " arguments against " ++ show b

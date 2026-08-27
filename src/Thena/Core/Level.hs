@@ -1,0 +1,181 @@
+-- | Universe levels, as an algebra rather than a number (MS3 phase 28).
+--
+-- @Level@ was @newtype Level Int@ through MS1 and MS2, which is why §2 of
+-- @discussion\/universe-polymorphism.md@ lists four places where finished code
+-- is bent out of shape: @Eq@ stuck at @Type₀@, no-confusion skipping anything
+-- above it, one eliminator per motive level, and a size restriction that is an
+-- @Int@ comparison. All four have the same cause and this module is the start
+-- of removing it.
+--
+-- **This module exists separately from "Thena.Core.Term", and the reason is the
+-- central finding of MS3: levels are context-free.** 'Level' contains no
+-- 'Thena.Core.Term.Core', so nothing here needs to traverse a term and there is
+-- no import cycle — the situation that forced @Core.Scope@ to be merged into
+-- @Core.Term@ (§2.5) simply does not arise. §2.5's own guiding principle then
+-- applies in the other direction: everything cooperating to maintain the
+-- normal-form invariant lives here, and nothing else needs to.
+--
+-- **The constructors are exported and the normal form is NOT enforced by the
+-- type.** A non-normalised 'Level' is not an invalid state, only a
+-- non-canonical one, so §3.4's line — representable is not the same as well
+-- formed — says not to reach for a hidden constructor here. 'Eq' does the
+-- normalising instead, exactly as @Eq Core@ is hand-written rather than derived.
+module Thena.Core.Level
+  ( Level (..)
+  , LevelVar (..)
+  , levelOfNat
+  , levelSuc
+  , levelMax
+  , Normal (..)
+  , normalise
+  , levelLeq
+  ) where
+
+import Data.List (sortOn)
+
+-- | A universe level.
+--
+-- @LMax@ is kept **lazy** — it is a constructor, not a computation. Under a
+-- fixed hierarchy one could evaluate @max@ on the spot, and 'Thena.Core.Typing'
+-- did; under polymorphism @max ℓ 0@ has no value until @ℓ@ does, so the
+-- expression has to survive in the term. That is the *computed* form, and
+-- choosing it over Brady's *constrained* one is what
+-- @discussion\/level-binders-and-constraints.md@ §5 settles, on volume: a fresh
+-- level variable and two constraints per Π is not viable on the chain.
+--
+-- The stated price, accepted knowingly, is that @max@ comes back — see
+-- 'levelLeq'.
+data Level
+  = LZero
+  | LSuc Level
+  | LMax Level Level
+  | LVar LevelVar
+  deriving (Show)
+
+-- | A level variable — a definition's level parameter (phase 29) or a level
+-- metavariable (phase 33).
+--
+-- **Its @Int@ comes from the same counter as 'Thena.Core.Term.Var'**, which is
+-- MS2 closeout 4f, decided by the user: one counter across every sort, so a
+-- name that has reached the user inside a message can never be reissued as a
+-- different kind of thing. The sorts stay apart in the *type* — a 'LevelVar'
+-- binds nothing, has no 'Thena.Core.Context.Entry' and never enters Γ.
+newtype LevelVar = LevelVar Int
+  deriving (Eq, Ord, Show)
+
+-- | @Level@ equality is equality of normal forms, never structural:
+-- @max 0 (suc 0)@ and @suc 0@ are the same level.
+instance Eq Level where
+  a == b = normalise a == normalise b
+
+-- | The literal level @n@ — what a written @Typeₙ@ resolves to.
+levelOfNat :: Int -> Level
+levelOfNat n
+  | n <= 0    = LZero
+  | otherwise = LSuc (levelOfNat (n - 1))
+
+-- | @suc@, as a function, so callers need not import the constructor.
+levelSuc :: Level -> Level
+levelSuc = LSuc
+
+-- | The join. Agda spells it @⊔@ — binary, @infixl 6@ — and its builtin pragma
+-- is @LEVELMAX@; read from Agda 2.8.0's own @Agda\/Primitive.agda@.
+levelMax :: Level -> Level -> Level
+levelMax = LMax
+
+-- --------------------------------------------------------------------------
+-- The normal form
+-- --------------------------------------------------------------------------
+
+-- | A level in normal form: a constant, and a set of variables each with an
+-- offset, all combined by @max@.
+--
+-- @Normal c vs@ denotes @max c (max { v + k | (v, k) <- vs })@. This is the
+-- representation §4 of the companion write-up calls for — /"a constant offset
+-- plus a set of (variable, offset) pairs, combined by max"/ — and it is what
+-- Agda uses internally, minus the library façade.
+--
+-- **Invariants**, all established by 'normalise' and relied on by 'Eq':
+--
+--   * @vs@ is sorted by variable and each variable appears once, carrying its
+--     largest offset — @max (v+2) (v+5)@ is @v+5@;
+--   * the constant is @0@ whenever some @k >= c@, because @v + k >= k >= c@
+--     makes it redundant. Without this @max 3 (v+5)@ and @v+5@ would compare
+--     unequal despite denoting the same level.
+data Normal = Normal Int [(LevelVar, Int)]
+  deriving (Eq, Ord, Show)
+
+-- | Evaluate a level to its normal form. Total, and cheap.
+normalise :: Level -> Normal
+normalise = canon . go
+  where
+    go l = case l of
+      LZero    -> Normal 0 []
+      LVar v   -> Normal 0 [(v, 0)]
+      LSuc a   -> bump (go a)
+      LMax a b -> join (go a) (go b)
+
+    bump (Normal c vs) = Normal (c + 1) [(v, k + 1) | (v, k) <- vs]
+
+    join (Normal c vs) (Normal d ws) = Normal (max c d) (foldl' insert vs ws)
+
+    insert acc (v, k) = case lookup v acc of
+      Just k' | k' >= k -> acc
+      Just _            -> (v, k) : filter ((/= v) . fst) acc
+      Nothing           -> (v, k) : acc
+
+-- | Impose the two canonicity invariants 'Normal' documents.
+canon :: Normal -> Normal
+canon (Normal c vs)
+  | any ((>= c) . snd) vs = Normal 0 sorted
+  | otherwise             = Normal c sorted
+  where
+    sorted = sortOn fst vs
+
+-- --------------------------------------------------------------------------
+-- Comparison
+-- --------------------------------------------------------------------------
+
+-- | Is the first level less than or equal to the second?
+--
+-- **Closed levels decide. Anything with a variable in it returns @Nothing@ —
+-- undecided, which is not the same as false.**
+--
+-- That is deliberately less than this function could compute, and phase 28 is
+-- deliberately not the place to compute more. Deciding a level inequality with
+-- variables in it needs a question answered first that this phase has no
+-- business answering: whether @a <= b@ is being asked as **validity** (does it
+-- hold for every instantiation, which is what the size restriction wants) or as
+-- a **constraint to record and revisit** (which is what the solver wants). The
+-- two give different answers to the same input, and choosing between them here
+-- would be designing phase 33's solver from inside phase 28.
+--
+-- A first draft of this function tried to answer the variable cases anyway and
+-- got them wrong — it reported @Just True@ for @?ℓ <= Type₃@, which is unsound
+-- for @?ℓ := 4@. The unit tests in "Thena.Core.LevelTests" caught it, and they
+-- are the only thing that could have: nothing else in the system builds a level
+-- variable yet.
+--
+-- **The shape of the eventual difficulty is already known**, and it is §6.1 of
+-- @discussion\/level-binders-and-constraints.md@. @max@ is a join, so its
+-- universal property runs one way only:
+--
+-- > max a b <= c    <=>   a <= c  &&  b <= c        decomposes, nothing guessed
+-- > c <= max a b    <=>   c <= a  ||  c <= b        a DISJUNCTION
+--
+-- The second holds because levels are totally ordered, so @max a b@ /is/ one of
+-- @a@ or @b@. Cumulativity's real contribution — narrower than
+-- @universe-polymorphism.md@ §9 claimed — is that it puts @max@ on the left,
+-- where it decomposes.
+--
+-- **The user's decision on the residue (2026-08-27): postpone it.** A caller
+-- that cannot decide puts the constraint at the back of its queue and retries
+-- once something else is solved, because propagation either kills a disjunct or
+-- discharges the constraint outright; only what survives to the end is an
+-- error, and writing the level explicitly is the recovery. **That queue belongs
+-- to phase 33.** This function's whole job is to be honest about which answer
+-- it has.
+levelLeq :: Level -> Level -> Maybe Bool
+levelLeq a b = case (normalise a, normalise b) of
+  (Normal c [], Normal d []) -> Just (c <= d)
+  _                          -> Nothing

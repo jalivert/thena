@@ -9,7 +9,7 @@
 -- variable a binder step carries is the variable its 'Scope' was opened with —
 -- and §2.5's principle is that such a set lives together.
 --
--- This is the third and last place the project spends Level 1 (§3.4):
+-- This is the third and last place the project spends levelOfNat 1 (§3.4):
 -- 'Cursor'\'s constructors are not exported, so 'enter' and the moves are the
 -- only ways to build one. Everything else here is transparent, because the
 -- terminal has to render a path and cannot do it through a keyhole.

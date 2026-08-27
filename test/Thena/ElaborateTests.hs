@@ -19,7 +19,8 @@ module Thena.ElaborateTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Level (..), Var, fresh)
+import Thena.Core.Level (Level (..))
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Var, fresh)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, enter, focus)
 import qualified Thena.Development.Cursor as Cursor
@@ -72,7 +73,7 @@ tests =
 -- --------------------------------------------------------------------------
 
 type0 :: Core
-type0 = Universe (Level 0)
+type0 = Universe (LZero)
 
 goalVar, hypVar :: Var
 goalVar = fst (fresh 0)

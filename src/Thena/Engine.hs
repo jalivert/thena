@@ -44,12 +44,12 @@ module Thena.Engine
 
 import Data.List (intercalate, nub)
 
+import Thena.Core.Level (Level (..))
 import Thena.Core.Context (Context)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
   , Ident (..)
-  , Level (..)
   , Var
   , fresh
   , instantiate
@@ -208,7 +208,7 @@ newtype ProofState = ProofState { cursor :: Cursor }
 newProof :: Int -> (ProofState, Int)
 newProof n =
   let (v, n1) = fresh n
-   in (ProofState (enter (goalAt v (Universe (Level 0)))), n1)
+   in (ProofState (enter (goalAt v (Universe (LZero)))), n1)
 
 goalAt :: Var -> Core -> Partial
 goalAt = goalAtNamed (Ident "goal")

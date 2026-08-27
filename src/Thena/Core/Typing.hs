@@ -31,11 +31,11 @@ import Data.List (find)
 
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar)
 import Thena.Core.Convert (convert)
+import Thena.Core.Level (Level (..), levelMax, levelSuc)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName
-  , Level (..)
   , close
   , fresh
   , instantiate
@@ -72,15 +72,21 @@ infer env ctx n term = case term of
       Just t  -> (Right t, n)
       Nothing -> (Left (UnknownGlobal g), n)
 
-  Universe (Level k) -> (Right (Universe (Level (k + 1))), n)
+  Universe l -> (Right (Universe (levelSuc l)), n)
 
   -- @max@, not a subsumption: without cumulativity a Π lives at the larger of
   -- its two levels and nothing may be silently lifted into it (§5.2).
+  --
+  -- **Phase 28: this is now the algebra's @max@, and it is not evaluated.**
+  -- @levelMax@ builds an @LMax@ and leaves it standing, because under
+  -- polymorphism @max ℓ 0@ has no value until @ℓ@ does. Conversion compares up
+  -- to the normal form, so nothing downstream notices — which is exactly what
+  -- this phase's "the test suite does not move" check is testing.
   Pi i dom sc ->
     sortOf env ctx n dom `andThen` \k1 n1 ->
       let (x, n2) = fresh n1
        in sortOf env (ctx ++ [Hypothesis x i dom]) n2 (open x sc) `andThen` \k2 n3 ->
-            (Right (Universe (max k1 k2)), n3)
+            (Right (Universe (levelMax k1 k2)), n3)
 
   Lam i dom sc ->
     sortOf env ctx n dom `andThen` \_ n1 ->

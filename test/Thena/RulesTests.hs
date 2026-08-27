@@ -9,11 +9,11 @@ module Thena.RulesTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
+import Thena.Core.Level (Level (..), levelOfNat)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
   , Ident (..)
-  , Level (..)
   , Var
   , close
   , fresh
@@ -81,8 +81,8 @@ tests =
 -- --------------------------------------------------------------------------
 
 type0, type1 :: Core
-type0 = Universe (Level 0)
-type1 = Universe (Level 1)
+type0 = Universe (LZero)
+type1 = Universe (levelOfNat 1)
 
 -- | @S -> T@, with a binder nothing refers to.
 arrow :: Core -> Core -> Core

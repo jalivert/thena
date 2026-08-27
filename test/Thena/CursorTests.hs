@@ -16,8 +16,9 @@ module Thena.CursorTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
+import Thena.Core.Level (Level (..))
 import Thena.Core.Context (Context, Entry (..))
-import Thena.Core.Term (Core (..), Ident (..), Level (..), close, fresh)
+import Thena.Core.Term (Core (..), Ident (..), close, fresh)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor
   ( Cursor
@@ -256,7 +257,7 @@ contextTests =
 -- --------------------------------------------------------------------------
 
 type0 :: Core
-type0 = Universe (Level 0)
+type0 = Universe (LZero)
 
 typeTests :: [TestTree]
 typeTests =
