@@ -1,4 +1,6 @@
-rule base standard the rules the engine starts with where
+"""the rules the engine starts with"""
+
+rule base standard where
 
 rule attack :- when focus-is-hole then prim-attack
 
@@ -18,7 +20,7 @@ rule eliminate t :- when focus-is-hole then prim-eliminate t
 
 rule elab-var :- when focus-is-hole hint-is-name
   then t = resolve hint
-     ; call try t
+     ; try t
      ; prim-solve
 
 rule unify-refine t :- when focus-is-hole
@@ -32,4 +34,4 @@ rule unify-refine t :- when focus-is-hole
 
 rule apply f :- when focus-is-hole
   then s = prim-apply f
-     ; call unify-refine s
+     ; unify-refine s
