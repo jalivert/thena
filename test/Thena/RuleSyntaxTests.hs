@@ -305,9 +305,17 @@ mistakes =
     [ refused "an unknown test word"
         "rule r :- when focus-is-purple then prim-solve"
         [NoSuchTest (GlobalName "r") "focus-is-purple"]
-    , refused "an unknown op word"
-        "rule r :- when focus-is-hole then frobnicate"
-        [NoSuchOp (GlobalName "r") 0 "frobnicate"]
+    , -- **A word that names no op is a call** (phase 25e), so this is no
+      -- longer a load-time refusal: it resolves, and finds no clause when it
+      -- runs. The same trade phase 23 took for explicit @call@.
+      testCase "an unknown op word is a rule call" $
+        bodyOf "frobnicate x"
+          >>= (@?= [Do (Call (GlobalName "frobnicate") [Ref "x"])])
+    , -- An op word with the wrong arity is still a mistake about that op, not
+      -- a call to a rule of its name: the arity tables are consulted first.
+      refused "an op word with the wrong arity is not a call"
+        "rule r :- when focus-is-hole then prim-solve x y"
+        [BadOperands (GlobalName "r") 0 "prim-solve"]
     , refused "too many arguments"
         "rule r :- when focus-is-hole then prim-solve x"
         [BadOperands (GlobalName "r") 0 "prim-solve"]
@@ -327,7 +335,6 @@ mistakes =
     , refused "every mistake, not the first"
         "rule r :- when focus-is-purple then frobnicate; prim-solve x"
         [ NoSuchTest (GlobalName "r") "focus-is-purple"
-        , NoSuchOp (GlobalName "r") 0 "frobnicate"
         , BadOperands (GlobalName "r") 1 "prim-solve"
         ]
     , testCase "a body is required" $

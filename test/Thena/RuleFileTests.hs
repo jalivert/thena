@@ -22,7 +22,7 @@ import Thena.Driver
   , command
   , loadRuleBases
   , newSession
-  , ruleHeader
+  , baseHead
   )
 import Thena.Engine (Machine (rules))
 import Thena.Ops (Rule (..))
@@ -35,32 +35,54 @@ tests = testGroup "rule files (§8)" [headers, loading, ordering, refusals, comm
 -- The header
 -- --------------------------------------------------------------------------
 
--- | @rule base ‹name› ‹description› where@, read textually before the lexer
--- sees anything — which is what makes the user's "just any text" literal.
+-- | An optional @\"\"\"…\"\"\"@ description, then @rule base ‹name› where@ — read
+-- textually before the lexer sees anything, which is what lets a description
+-- hold characters the lexer reserves.
+--
+-- **The description moved above the header at phase 25e** (his change). The
+-- third component of the result is how many lines the head took, which is what
+-- the caller blanks so later positions still name the right line.
 headers :: TestTree
 headers =
   testGroup
     "header"
     [ testCase "name only" $
-        ruleHeader "rule base standard where" @?= Just ("standard", Nothing)
-    , testCase "name and description" $
-        ruleHeader "rule base standard the ones we start with where"
-          @?= Just ("standard", Just "the ones we start with")
+        baseHead ["rule base standard where"] @?= Just ("standard", Nothing, 1)
+    , testCase "a description above it" $
+        baseHead ["\"\"\"the ones we start with\"\"\"", "", "rule base standard where"]
+          @?= Just ("standard", Just "the ones we start with", 3)
     , -- The characters the lexer reserves. They never reach it, which is the
-      -- whole reason the header is read this way.
+      -- whole reason the head is read this way.
       testCase "a description may contain reserved characters" $
-        ruleHeader "rule base tidy (things; \"quoted\", bracketed) where"
-          @?= Just ("tidy", Just "(things; \"quoted\", bracketed)")
-    , -- One line, so the trailing 'where' is unambiguous even here.
+        baseHead ["\"\"\"(things; quoted, bracketed)\"\"\"", "rule base tidy where"]
+          @?= Just ("tidy", Just "(things; quoted, bracketed)", 2)
+    , -- What the one-line form could never do: the delimiter is a delimiter,
+      -- so @where@ is just a word.
       testCase "a description may contain the word where" $
-        ruleHeader "rule base start where it all begins where"
-          @?= Just ("start", Just "where it all begins")
+        baseHead ["\"\"\"where it all begins\"\"\"", "rule base start where"]
+          @?= Just ("start", Just "where it all begins", 2)
+    , testCase "several lines" $
+        baseHead ["\"\"\"", "one", "two", "\"\"\"", "rule base long where"]
+          @?= Just ("long", Just "one\ntwo", 5)
+    , testCase "blank lines before and between are skipped" $
+        baseHead ["", "\"\"\"d\"\"\"", "", "", "rule base b where"]
+          @?= Just ("b", Just "d", 5)
+    , -- Consume nothing rather than swallow the file: it then fails on the
+      -- header, which is the true complaint.
+      testCase "an unterminated description is no header" $
+        baseHead ["\"\"\"never closed", "rule base b where"] @?= Nothing
     , testCase "no name is no header" $
-        ruleHeader "rule base where" @?= Nothing
+        baseHead ["rule base where"] @?= Nothing
     , testCase "no trailing where is no header" $
-        ruleHeader "rule base standard" @?= Nothing
+        baseHead ["rule base standard"] @?= Nothing
+    , -- The description is no longer part of the line, so extra words are not
+      -- a description any more — they are a malformed header.
+      testCase "words between the name and where are no header" $
+        baseHead ["rule base standard and more where"] @?= Nothing
     , testCase "something else entirely" $
-        ruleHeader "rule attack :- then prim-attack" @?= Nothing
+        baseHead ["rule attack :- then prim-attack"] @?= Nothing
+    , testCase "an empty file is no header" $
+        baseHead [] @?= Nothing
     ]
 
 -- --------------------------------------------------------------------------
@@ -116,14 +138,13 @@ loading =
         refusal [("x.thena.rules", "rule solve :- when focus-is-guess then prim-solve")]
           @?= Just ("x.thena.rules", NoRuleHeader)
 
-    , testCase "a rule that does not resolve is refused, naming every mistake" $
+    , -- @frobnicate@ is a rule call as of phase 25e, so the only mistake left
+      -- here is the arity one.
+      testCase "a rule that does not resolve is refused, naming every mistake" $
         refusal [("x.thena.rules", "rule base b where\nrule r :- when focus-is-hole then frobnicate; prim-solve x")]
           @?= Just
                 ( "x.thena.rules"
-                , RuleIllFormed
-                    [ NoSuchOp (GlobalName "r") 0 "frobnicate"
-                    , BadOperands (GlobalName "r") 1 "prim-solve"
-                    ]
+                , RuleIllFormed [BadOperands (GlobalName "r") 1 "prim-solve"]
                 )
 
     , -- The load-time pass §2.4 asked for, now running at load rather than in

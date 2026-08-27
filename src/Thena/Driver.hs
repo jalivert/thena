@@ -33,7 +33,7 @@ module Thena.Driver
   , loadSource
   , RuleFileError (..)
   , loadRuleBases
-  , ruleHeader
+  , baseHead
   , parseCore
   , parseDevelopment
   , parseDeclaration
@@ -42,7 +42,8 @@ module Thena.Driver
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Level)
-import Data.List (isSuffixOf)
+import Data.Char (isSpace)
+import Data.List (dropWhileEnd, isSuffixOf, stripPrefix)
 import Thena.Development.Cursor (Cursor, Focus (..), Part (..), focus)
 import Thena.Development.Partial (Partial (..), extract)
 import Thena.Engine
@@ -912,8 +913,9 @@ ruleExtension = ".thena.rules"
 -- | Why a rule-base file was not accepted.
 data RuleFileError
   = NoRuleHeader
-    -- ^ the file does not begin @rule base ‹name› … where@. Required, because
-    -- a base is a named thing that @:bases@ has to be able to list
+    -- ^ the file does not begin @rule base ‹name› where@, optionally preceded
+    -- by a @\"\"\"…\"\"\"@ description (phase 25e). Required, because a base is a
+    -- named thing that @:bases@ has to be able to list
   | RuleSyntaxError SyntaxError
     -- ^ it did not lex or parse. The position is inside, and it is the true
     -- line: the header is blanked rather than dropped so that nothing shifts
@@ -921,27 +923,73 @@ data RuleFileError
     -- ^ it parsed, and one or more rules did not resolve or did not validate
   deriving (Eq, Show)
 
--- | The header line — @rule base ‹name› ‹description› where@.
+-- | The head of a rule-base file: an optional @\"\"\"…\"\"\"@ description, then
+-- @rule base ‹name› where@.
 --
--- **Read textually, before the lexer sees anything**, which is what makes the
--- user\'s *"just any text in front of the `where` keyword"* literally true:
--- commas, parentheses and quotes are reserved characters and would not lex,
--- but they never reach the lexer. The same trick keeps @data@ from being a
--- lexer keyword (§2.4).
+-- **The description moved out of the header line and above it — his change,
+-- 2026-08-26**, closing the item he had parked at phase 22 (*\"later, I will
+-- want to revisit this and make it nicer and more robust\"*). It reads better
+-- and it parses better, and the second is the substantive half: a triple-quoted
+-- block is **delimited**, where the old description was terminated by @where@
+-- and so could never contain that word. It may now run to several lines.
 --
--- It is **one line**, and that is what makes the trailing @where@ unambiguous
--- even when the description itself contains the word.
-ruleHeader :: String -> Maybe (String, Maybe String)
-ruleHeader line = case words line of
-  "rule" : "base" : nm : rest
-    | not (null rest)
-    , last rest == "where" ->
-        Just (nm, describe (init rest))
-  _ -> Nothing
+-- **Still read textually, before the lexer sees anything** — the trick phase 22
+-- introduced, and the reason a description may hold commas, parentheses and
+-- quotes, all of which are reserved characters that would not lex.
+--
+-- Returns the name, the description, and **how many lines were consumed**, so
+-- the caller can blank exactly those and leave every later position naming the
+-- line the user is looking at.
+baseHead :: [String] -> Maybe (String, Maybe String, Int)
+baseHead ls0 = do
+  let (blanks, ls1) = span (all isSpace) ls0
+  (desc, ls2, used) <- Just (docstring ls1)
+  let (blanks2, ls3) = span (all isSpace) ls2
+  (nm, hdr) <- case ls3 of
+    l : _ -> (\n -> (n, 1 :: Int)) <$> baseLine l
+    []    -> Nothing
+  Just (nm, desc, length blanks + used + length blanks2 + hdr)
+
+-- | @rule base ‹name› where@ — the name and nothing else between.
+baseLine :: String -> Maybe String
+baseLine l = case words l of
+  ["rule", "base", nm, "where"] -> Just nm
+  _                             -> Nothing
+
+-- | A leading @\"\"\"…\"\"\"@ block, if there is one: its text, what is left, and
+-- how many lines it took. Opening and closing delimiters may share a line.
+--
+-- An **unterminated** block yields no description and consumes nothing, so the
+-- file then fails on its header line rather than silently swallowing the rules.
+docstring :: [String] -> (Maybe String, [String], Int)
+docstring ls = case ls of
+  l : rest
+    | Just after <- stripPrefix quote (dropWhile isSpace l) ->
+        case breakOn quote after of
+          Just (before, _) -> (tidy [before], rest, 1)
+          Nothing          -> gather [after] rest 1
+  _ -> (Nothing, ls, 0)
   where
-    describe ws
-      | null ws   = Nothing
-      | otherwise = Just (unwords ws)
+    quote = "\"\"\""
+
+    gather _ [] _ = (Nothing, ls, 0)   -- unterminated: consume nothing
+    gather acc (l : rest) n = case breakOn quote l of
+      Just (before, _) -> (tidy (reverse (before : acc)), rest, n + 1)
+      Nothing          -> gather (l : acc) rest (n + 1)
+
+    tidy parts =
+      let text = unlines (map (dropWhileEnd isSpace) parts)
+          trimmed = dropWhile isSpace (dropWhileEnd isSpace text)
+       in if null trimmed then Nothing else Just trimmed
+
+-- | The text before the first occurrence of a needle, and the text after it.
+breakOn :: String -> String -> Maybe (String, String)
+breakOn needle = go ""
+  where
+    go acc h
+      | Just t <- stripPrefix needle h = Just (reverse acc, t)
+      | c : cs <- h                    = go (c : acc) cs
+      | otherwise                      = Nothing
 
 -- | Read one rule-base file: its header, then its rules.
 --
@@ -952,17 +1000,18 @@ ruleHeader line = case words line of
 --
 -- Takes contents and not a path (§12 invariant 4).
 readRuleBase :: FilePath -> String -> Either RuleFileError RuleBase
-readRuleBase path src = case lines src of
-  [] -> Left NoRuleHeader
-  header : rest -> case ruleHeader header of
-    Nothing -> Left NoRuleHeader
-    Just (nm, desc) -> do
-      -- The header line is blanked, not dropped: every position the lexer
-      -- reports then names the line the user is looking at.
-      ts   <- mapLeft RuleSyntaxError (tokensOf (unlines ("" : rest)))
+readRuleBase path src = case baseHead ls of
+  Nothing -> Left NoRuleHeader
+  Just (nm, desc, used) -> do
+      -- The head is blanked, not dropped: every position the lexer reports
+      -- then names the line the user is looking at.
+      let rest = replicate used "" ++ drop used ls
+      ts   <- mapLeft RuleSyntaxError (tokensOf (unlines rest))
       raws <- mapLeft (RuleSyntaxError . ParseFailed) (parseRules ts)
       rs   <- resolveAll raws
       Right (ruleBase nm desc path rs)
+  where
+    ls = lines src
 
 -- | Resolve every rule, then validate every rule. Every error, not the first —
 -- 'validate'\'s reason.

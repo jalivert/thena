@@ -1400,7 +1400,6 @@ renderRuleError e = case e of
   BoundNonProducing g i n  -> inRule g i ++ n ++ " is bound to an operation that leaves nothing"
   UnboundInRule g i n      -> inRule g i ++ "no parameter or earlier binding is called " ++ n
   NoSuchTest g w           -> "in " ++ nameString g ++ ": no such test: " ++ w
-  NoSuchOp g i w           -> inRule g i ++ "no such operation: " ++ w
   BadOperands g i w        -> inRule g i ++ w ++ " was written with the wrong arguments"
   where
     inRule g i = "in " ++ nameString g ++ ", instruction " ++ show i ++ ": "

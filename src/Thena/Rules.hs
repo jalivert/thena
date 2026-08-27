@@ -287,8 +287,6 @@ data RuleError
   | NoSuchTest        GlobalName String
     -- ^ a word after @when@ that names no 'Test'. No instruction index: a head
     -- is not a sequence
-  | NoSuchOp          GlobalName Int String
-    -- ^ a word in a body that names no 'Op'
   | BadOperands       GlobalName Int String
     -- ^ the right op word, written with the wrong arguments — too many, too
     -- few, or a position where a name was wanted. One error for all three: a
@@ -400,9 +398,9 @@ instruction g i ri = case ri of
 --
 -- The whole word vocabulary is 'Thena.Ops.opKeyword'\'s, read backwards, and
 -- the arities are here because that is where they are known. A word this does
--- not accept is 'NoSuchOp'; an accepted word given the wrong arguments is
--- 'BadOperands'. The two are separate because they are separate mistakes —
--- \"there is no such op\" and \"you wrote it wrong\".
+-- A word this does not accept is a **rule call** (phase 25e); an accepted word
+-- given the wrong arguments is 'BadOperands'. Those are separate mistakes, and
+-- only the second is a load-time error now.
 operation :: GlobalName -> Int -> RawOp -> Either RuleError Op
 operation g i (RawOp w as)
   -- The field words come first: @arg@ is one of them and also the only word
@@ -444,7 +442,23 @@ operation g i (RawOp w as)
         (_, Just _,  _, _)        -> bad
         (_, _, Just f,  [a, b])   -> f <$> ref a <*> ref b
         (_, _, Just _,  _)        -> bad
-        _                         -> Left (NoSuchOp g i w)
+        -- **A word that names no op is a call to a rule of that name**
+        -- (phase 25e), which is what a bare word has meant at the REPL since
+        -- phase 23b. The user, 2026-08-26: *"Bare word was always, always, the
+        -- intended design."*
+        --
+        -- An op word given the wrong arity is still 'BadOperands' and not a
+        -- call, because the arity tables above are consulted first: @claim x@
+        -- is a mistake about @claim@, not a call to a rule named @claim@.
+        --
+        -- The cost: a mistyped word is no longer refused at load time; it is
+        -- a call that finds no clause when it runs. @NoSuchOp@ went with this
+        -- change, being an error that can no longer happen. **That is the
+        -- trade phase 23 already took for explicit @call@** (§8: a rule may
+        -- call itself, a rule below it, or one in a base loaded later, so no
+        -- name can be resolved at load time), and it is what the rule
+        -- language's type system is for (closeout 4b).
+        _                         -> Call (GlobalName w) <$> traverse ref as
   where
     bad     = Left (BadOperands g i w)
     part k  = maybe bad (Right . Down) (partOf w k)
