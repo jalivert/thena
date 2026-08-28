@@ -421,10 +421,6 @@ renderSyntaxError e = case e of
     s ++ " is not a level parameter in scope"
   ResolveFailed (LevelArgumentsOnALocal s) ->
     s ++ " is bound here, and only a definition has level parameters"
-  ResolveFailed LevelParametersOnABinder ->
-    "only a definition has level parameters; this binds a component"
-  ResolveFailed (UniverseTakesOneLevel k) ->
-    "a universe takes one level, not " ++ show k
   ResolveFailed (NotAUniverse d)    ->
     d ++ " must be declared at a universe, as in \": Type\8320\""
   ResolveFailed (TargetIsNotTheDatatype c) ->

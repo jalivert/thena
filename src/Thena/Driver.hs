@@ -35,12 +35,11 @@ module Thena.Driver
   , loadRuleBases
   , baseHead
   , parseCore
-  , parseCoreAt
   , parseDevelopment
   , parseDeclaration
   ) where
 
-import Thena.Core.Level (Level, LevelVar (..))
+import Thena.Core.Level (Level)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Ident (..))
@@ -132,7 +131,7 @@ import Thena.Syntax.Parser
   , parseAtoms
   , parseTerm
   )
-import Thena.Syntax.Resolve (resolve, resolveAt, resolveData, resolvePartial)
+import Thena.Syntax.Resolve (resolve, resolveData, resolvePartial)
 
 -- | Everything the session holds.
 --
@@ -173,18 +172,6 @@ type Snapshot = (Exec, ProofState)
 -- | A proof the session holds (§2.4, §3.3.1).
 data Proof = Proof
   { proofName      :: GlobalName
-  , proofLevels    :: [(String, LevelVar)]
-    -- ^ the level parameters the statement declared, **by the names it wrote
-    -- them under** (MS3 phase 30). In scope as *rigid* while the proof runs,
-    -- and stored on the definition at @qed@.
-    --
-    -- **The names are kept, and they have to be**, which is the one place
-    -- levels being context-free costs something rather than saving something:
-    -- a term binder is resolved by looking it up in Γ, which the cursor
-    -- derives from the development — but a level parameter has **no chain
-    -- presence at all** (§3), so there is nowhere in the development to look
-    -- one up. It has to be carried beside the proof, and every term resolved
-    -- while the proof is open needs it.
   , proofClaim     :: Core       -- ^ what @qed@ will certify against
   , proofSaved     :: Snapshot
     -- ^ kept in step with the machine after every line, so suspending is a
@@ -348,25 +335,8 @@ data CommandError
 
 -- | Lex, parse, resolve as a core term, in the given environment and context.
 parseCore :: GlobalEnv -> Context -> Int -> String -> Either SyntaxError (Core, Int)
-parseCore = parseCoreAt []
+parseCore = parseWith resolve
 
--- | 'parseCore', with level parameters in scope (MS3 phase 30).
---
--- **The split exists so the ordinary path does not change.** Almost everything
--- that resolves a term does so with no level parameters in scope — datatype
--- declarations, rule files, @:load@ — and a proof under @:theorem f {ℓ} : …@
--- is the exception. Same shape as 'Thena.Syntax.Resolve.resolve' beside
--- 'Thena.Syntax.Resolve.resolveAt', one layer up.
---
--- **Why the scope has to be passed at all**, rather than derived like Γ: a term
--- binder is a component, so the cursor recovers it from the development; a
--- level parameter has no chain presence, so the development records its
--- *identity* inside types but never the *name* the user wrote. There is
--- nothing to derive it from.
-parseCoreAt
-  :: [(String, LevelVar)] -> GlobalEnv -> Context -> Int -> String
-  -> Either SyntaxError (Core, Int)
-parseCoreAt lvs = parseWith (resolveAt lvs)
 
 -- | Lex, parse, resolve as a development (§2.7's longest-prefix convention).
 parseDevelopment
@@ -380,20 +350,16 @@ parseDevelopment = parseWith resolvePartial
 -- means inside a rule body — @f a b@ is two arguments in both. The counter is
 -- threaded through, because resolving mints display variables.
 --
--- **Always with the level scope** (phase 30), unlike 'parseCore' — every
--- caller of this one is a tactic line inside a proof, so there is no
--- level-free variant to keep.
-parseArgumentsAt
-  :: [(String, LevelVar)] -> GlobalEnv -> Context -> Int -> String
-  -> Either SyntaxError ([Core], Int)
-parseArgumentsAt lvs env ctx n src = do
+parseArguments
+  :: GlobalEnv -> Context -> Int -> String -> Either SyntaxError ([Core], Int)
+parseArguments env ctx n src = do
   ts   <- tokensOf src
   raws <- mapLeft ParseFailed (parseAtoms ts)
   go n raws
   where
     go k []       = Right ([], k)
     go k (r : rs) = do
-      (t, k1)  <- mapLeft ResolveFailed (resolveAt lvs env ctx k r)
+      (t, k1)  <- mapLeft ResolveFailed (resolve env ctx k r)
       (ts', k2) <- go k1 rs
       Right (t : ts', k2)
 
@@ -440,23 +406,12 @@ parseEquated env ctx n src = do
 -- would let one in.
 parseStatement
   :: GlobalEnv -> Int -> String
-  -> Either SyntaxError (Maybe String, [(String, LevelVar)], (Core, Int))
+  -> Either SyntaxError (Maybe String, (Core, Int))
 parseStatement env n src = do
-  ts             <- tokensOf src
-  (mx, lps, raw) <- mapLeft ParseFailed (parseNameAndType ts)
-  -- **The parameters are minted here**, from the same counter as everything
-  -- else (MS2 closeout 4f), and are in scope only while this statement is
-  -- resolved. They are 'LRigid': a declared parameter is universally
-  -- quantified and unification may not instantiate it.
-  let (vs, n1) = mintLevels n lps
-      scope     = zip lps vs
-  r              <- mapLeft ResolveFailed (resolveAt scope env [] n1 raw)
-  Right (mx, scope, r)
-
--- | One 'LRigid' per declared level parameter, threading the counter.
-mintLevels :: Int -> [String] -> ([LevelVar], Int)
-mintLevels n []       = ([], n)
-mintLevels n (_ : xs) = let (vs, n') = mintLevels (n + 1) xs in (LRigid n : vs, n')
+  ts        <- tokensOf src
+  (mx, raw) <- mapLeft ParseFailed (parseNameAndType ts)
+  r         <- mapLeft ResolveFailed (resolve env [] n raw)
+  Right (mx, r)
 
 tokensOf :: String -> Either SyntaxError [Located Token]
 tokensOf = mapLeft LexFailed . lexTokens
@@ -482,7 +437,7 @@ command s line = case break (== ' ') (dropWhile (== ' ') line) of
 dispatch :: Session -> String -> String -> (Session, Response)
 dispatch s name arg = case name of
   ":quit"  -> noArgument (s, Quit)
-  ":core"  -> withArgument (view s (parseCoreAt lvs) Rendered arg)
+  ":core"  -> withArgument (view s parseCore Rendered arg)
   ":dev"   -> withArgument (view s parseDevelopment RenderedDev arg)
   -- The only command that means two things, and they do not overlap: with no
   -- argument it is the development, with one it is a global (§9, phase 6).
@@ -519,14 +474,14 @@ dispatch s name arg = case name of
     "" -> case focus (cursor (proof machine)) of
       OnTerm _ _ t -> (s, Rendered (whnf (globals machine) ctx t))
       _            -> (s, Rejected (NotThere NotInCore))
-    _  -> view s (parseCoreAt lvs) (Rendered . whnf (globals machine) ctx) arg
+    _  -> view s parseCore (Rendered . whnf (globals machine) ctx) arg
   -- The same no-argument/with-argument split as @:whnf@ and @:show@: with no
   -- argument it is the core focus, with one it is a term the user writes.
   ":infer" -> case arg of
     "" -> case focus (cursor (proof machine)) of
       OnTerm _ _ t -> inferred t (names machine)
       _            -> (s, Rejected (NotThere NotInCore))
-    _  -> case parseCoreAt lvs (globals machine) ctx (names machine) arg of
+    _  -> case parseCore (globals machine) ctx (names machine) arg of
       Left e        -> (s, Failed e)
       Right (t, n1) -> inferred t n1
   -- Reading the file is the caller's; this only names it (§12 invariant 4).
@@ -564,7 +519,7 @@ dispatch s name arg = case name of
   -- The argument is the type the development is claimed to prove — see
   -- 'Thena.Ops.Certify' for why the op needs one.
   "certify" -> withArgument $
-    case parseCoreAt lvs (globals machine) ctx (names machine) arg of
+    case parseCore (globals machine) ctx (names machine) arg of
       Left e -> (s, Failed e)
       Right (ty, n1) ->
         progress
@@ -670,7 +625,7 @@ dispatch s name arg = case name of
     -- A colon word is the driver's own and is never a rule: §2.4's split says
     -- a colon looks, and nothing that looks lives in the rule base.
     | take 1 name == ":" -> (s, Rejected (NoSuchCommand name))
-    | otherwise -> case parseArgumentsAt lvs (globals machine) ctx (names machine) arg of
+    | otherwise -> case parseArguments (globals machine) ctx (names machine) arg of
         Left e          -> (s, Failed e)
         Right (ts, n1)  ->
           progress
@@ -684,11 +639,6 @@ dispatch s name arg = case name of
     machine = sessionMachine s
     ctx     = proofContext (proof machine)
 
-    -- The level parameters the current proof declared, by the names it wrote
-    -- them under (phase 30). Empty outside a proof and empty for every
-    -- theorem that declares none, which is all of them until someone writes
-    -- @:theorem f {ℓ} : …@.
-    lvs     = maybe [] proofLevels (sessionProof s)
 
     matching hint =
       unfoldIter (matches (rules machine) (globals machine)
@@ -744,7 +694,7 @@ dispatch s name arg = case name of
     level :: InductiveDefinition -> String -> Either (Session, Response) Level
     level d u
       | null u    = Right (inductiveLevel d)
-      | otherwise = case parseCoreAt lvs (globals machine) [] (names machine) u of
+      | otherwise = case parseCore (globals machine) [] (names machine) u of
           Left e                -> Left (s, Failed e)
           Right (Universe l, _) -> Right l
           Right _               -> Left (s, Rejected (LevelExpected u))
@@ -757,21 +707,21 @@ dispatch s name arg = case name of
       Just pr -> (s, Rejected (AlreadyProving (proofName pr)))
       Nothing -> case parseStatement (globals machine) (names machine) arg of
         Left e             -> (s, Failed e)
-        Right (Nothing, _, _) -> (s, Rejected (MissingArgument ":theorem"))
-        Right (Just x, params, (ty, n1))
+        Right (Nothing, _) -> (s, Rejected (MissingArgument ":theorem"))
+        Right (Just x, (ty, n1))
           -- One namespace, shared with generated names (§3.6): a theorem may
           -- not take a name a datatype or a wrapper already has.
           | isDeclared g (globals machine) -> (s, Rejected (AlreadyDeclaredHere x))
           | otherwise -> case sortOf (globals machine) [] n1 ty of
               (Left e,  _)  -> (s, IllTyped e)
-              (Right _, n2) -> started g params ty n2
+              (Right _, n2) -> started g ty n2
           where g = GlobalName x
 
-    started g params ty n = case setGoalNamed g ty machine { names = n } of
+    started g ty n = case setGoalNamed g ty machine { names = n } of
       Left e  -> (s, Rejected (NotThere e))
       Right m ->
         ( s { sessionMachine = m
-            , sessionProof = Just (Proof g params ty (snapshotOf m) [])
+            , sessionProof = Just (Proof g ty (snapshotOf m) [])
             }
         , Proving g ty
         )
@@ -803,8 +753,7 @@ dispatch s name arg = case name of
     admitted s' pr t =
       let m  = sessionMachine s'
           g  = addDefinition (proofName pr)
-                 (MkDefinition (map snd (proofLevels pr)) (proofClaim pr) t)
-                 (globals m)
+                 (MkDefinition [] (proofClaim pr) t) (globals m)
           (ps, n) = newProof (names m)
        in s' { sessionMachine = m { globals = g, proof = ps, names = n }
              , sessionProof = Nothing
@@ -871,7 +820,7 @@ dispatch s name arg = case name of
                 s { sessionMachine = load is machine { names = n1 } }
                 []
 
-    goal = withArgument $ case parseCoreAt lvs (globals machine) ctx (names machine) arg of
+    goal = withArgument $ case parseCore (globals machine) ctx (names machine) arg of
       Left e -> (s, Failed e)
       Right (t, n1) -> case setGoal t machine { names = n1 } of
         Left e   -> (s, Rejected (NotThere e))
@@ -1136,12 +1085,7 @@ compile
   -> GlobalEnv -> Context -> Int -> String -> Either SyntaxError ([Instr], Int)
 compile what verb op env ctx n arg = do
   ts       <- tokensOf arg
-  (mx, lps, ty) <- mapLeft ParseFailed (parseNameAndType ts)
-  -- @assume@ and @claim@ bind a component, not a definition, and a component
-  -- has no level parameters — only a definition's head binds one (phase 30).
-  _        <- if null lps
-                then Right ()
-                else Left (ResolveFailed LevelParametersOnABinder)
+  (mx, ty) <- mapLeft ParseFailed (parseNameAndType ts)
   (t, n1)  <- mapLeft ResolveFailed (resolve env ctx n ty)
   let term = Lit (VTerm (Trailing t))
   pure $ case mx of

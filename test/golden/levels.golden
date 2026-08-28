@@ -1,36 +1,20 @@
-thena spine> :theorem idp {l} : ∀ (A : Type {l}) -> A -> A
-proving idp : ∀ (A : Type (ℓ1)) -> A -> A
-thena spine> try (\ (A : Type {l}) (a : A) -> a)
-thena spine> solve
-thena spine> qed
-idp : ∀ (A : Type (ℓ1)) -> A -> A   ∎
-thena spine> :infer idp {0}
-idp {0} : ∀ (A : Type₀) -> A -> A
-thena spine> :infer idp {1}
-idp {1} : ∀ (A : Type₁) -> A -> A
-thena spine> :infer idp {2}
-idp {2} : ∀ (A : Type₂) -> A -> A
-thena spine> :infer idp
-idp has 1 level parameter, and was given 0 level arguments
-its level parameters are prenex, so a use supplies all of them or none
-thena spine> :infer idp {0 1}
-idp has 1 level parameter, and was given 2 level arguments
-its level parameters are prenex, so a use supplies all of them or none
-thena spine> :core Type {l}
-l is not a level parameter in scope
 thena spine> data Id {l} (A : Type {l}) : A -> A -> Type {l} where { rfl : ∀ (a : A) -> Id A a a }
 declared Id
 thena spine> :show Id
-data Id {ℓ12} (A : Type (ℓ12)) : A -> A -> Type (ℓ12) where
-  { rfl : ∀ (a : A) -> Id {ℓ12} A a a }
+data Id {ℓ1} (A : Type (ℓ1)) : A -> A -> Type (ℓ1) where
+  { rfl : ∀ (a : A) -> Id {ℓ1} A a a }
 thena spine> :infer Id {0}
 Id {0} : ∀ (A : Type₀) -> A -> A -> Type₀
 thena spine> :infer rfl {0}
 rfl {0} : ∀ (A : Type₀) (a : A) -> Id {0} A a a
 thena spine> :infer \ (A : Type₀) (a : A) (b : A) (q : Id {0} A a b) -> elim Id {0} (A) (\ (x : A) (y : A) (z : Id {0} A x y) -> Id {0} A x x) ((\ (c : A) -> rfl {0} A c)) (a b) q
 λ (A : Type₀) (a : A) (b : A) (q : Id {0} A a b) -> elim Id {0} (A) (λ (x : A) (y : A) (z : Id {0} A x y) -> Id {0} A x x) ((λ (c : A) -> rfl {0} A c)) (a b) q : ∀ (A : Type₀) (a : A) (b : A) (q : Id {0} A a b) -> (λ (x : A) (y : A) (z : Id {0} A x y) -> Id {0} A x x) a b q
-thena spine> :theorem t2 : Type₀
-proving t2 : Type₀
-thena spine> assume x {l} : Type₀
-only a definition has level parameters; this binds a component
+thena spine> :infer Id
+Id has 1 level parameter, and was given 0 level arguments
+its level parameters are prenex, so a use supplies all of them or none
+thena spine> :infer Id {0 1}
+Id has 1 level parameter, and was given 2 level arguments
+its level parameters are prenex, so a use supplies all of them or none
+thena spine> :core Type {l}
+l is not a level parameter in scope
 thena spine> :quit

@@ -453,12 +453,6 @@ data ResolveError
     -- ^ level arguments written on a name bound by a λ or by the development.
     -- Only a definition has level parameters, so only a global can be given
     -- level arguments
-  | LevelParametersOnABinder
-    -- ^ @assume x {ℓ} : S@ or @claim@. Both bind a **component**, and only a
-    -- definition's head binds level parameters — so this is not a scope error
-    -- about @ℓ@, it is the wrong kind of binding to declare one on
-  | UniverseTakesOneLevel Int
-    -- ^ @Type { }@ or @Type {a b}@ — how many were written
   deriving (Eq, Show)
 
 -- | Which development-only form was met in a core position. An enum rather

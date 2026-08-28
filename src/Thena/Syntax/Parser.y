@@ -121,14 +121,13 @@ Equation :: { (Raw, Raw) }
 
 -- The argument of @assume@ and @claim@ (§2.4's "commands are the op vocabulary
 -- spelled out"). The nameless form is the one that makes the op ask (§7.5).
--- The level parameters are a run of names in braces, exactly as a level
--- argument list is a run of level atoms (MS3 phase 30). They are returned
--- separately because they are binders, not part of the type.
-NameAndType :: { (Maybe String, [String], Raw) }
-  : ident ':' Term                         { (Just $1, [], $3) }
-  | ident LevelParams ':' Term             { (Just $1, $2, $4) }
-  | ':' Term                               { (Nothing, [], $2) }
+NameAndType :: { (Maybe String, Raw) }
+  : ident ':' Term                         { (Just $1, $3) }
+  | ':' Term                               { (Nothing, $2) }
 
+-- | A run of level-parameter names in braces. **Only @data@ takes these**
+-- (MS3 phase 31e): a theorem's level parameters are inferred and generalised,
+-- never written, which is his decision of 2026-08-28.
 LevelParams :: { [String] }
   : '{' LevelNames '}'                     { reverse $2 }
 

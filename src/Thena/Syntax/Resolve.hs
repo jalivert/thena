@@ -2,7 +2,6 @@
 -- or into an 'InductiveDefinition' (§2.5, §2.7, §3.7).
 module Thena.Syntax.Resolve
   ( resolve
-  , resolveAt
   , resolvePartial
   , resolveData
   ) where
@@ -72,16 +71,6 @@ globalsOf = map fst . definitions
 resolve :: GlobalEnv -> Context -> Int -> Raw -> Either ResolveError (Core, Int)
 resolve env ctx = core env (globalsOf env) ctx [] []
 
--- | 'resolve', with level parameters in scope (MS3 phase 30).
---
--- Only the theorem path supplies any: a statement declared @:theorem f {ℓ} : …@
--- resolves @ℓ@ inside its own type. Every other caller has none, which is why
--- 'resolve' stays the entry point it always was rather than every site growing
--- an empty list.
-resolveAt
-  :: [(String, LevelVar)] -> GlobalEnv -> Context -> Int -> Raw
-  -> Either ResolveError (Core, Int)
-resolveAt ls env ctx = core env (globalsOf env) ctx [] ls
 
 -- | Resolve a raw tree as a development, taking the LONGEST PREFIX (§2.7):
 -- every leading binder becomes a chain link, so 'Trailing' ends up holding
