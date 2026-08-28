@@ -280,6 +280,14 @@ data Clash
 data TypeError
   = UnknownVariable Context Var
     -- ^ a 'Thena.Core.Term.Free' naming no entry of the context
+  | WrongNumberOfLevelArguments GlobalName Int Int
+    -- ^ definition, level parameters it has, level arguments the use wrote
+    -- (MS3 phase 30). A definition's level parameters are prenex, so a use
+    -- supplies all of them or none of them is well formed — there is no
+    -- partial instantiation
+  | LevelArgumentsOnAConstant GlobalName Int
+    -- ^ level arguments written on a name that has a type but no level
+    -- parameters — a former, or any constant. Monomorphic until phase 31
   | UnknownGlobal GlobalName
     -- ^ a 'Thena.Core.Term.Global' in neither the definitions nor the constants
   | LooseIndex Int
@@ -433,6 +441,20 @@ data ResolveError
     -- ^ datatype, constructors it has, methods the @elim@ wrote
   | WrongNumberOfEliminationIndices String Int Int
     -- ^ datatype, indices it has, indices the @elim@ wrote
+  | LevelNotInScope String
+    -- ^ a level name written where no level parameter of that name is bound
+    -- (MS3 phase 30). Distinct from 'NotInScope' because the two namespaces
+    -- are distinct: a level parameter is not a term binding and never enters Γ
+  | LevelArgumentsOnALocal String
+    -- ^ level arguments written on a name bound by a λ or by the development.
+    -- Only a definition has level parameters, so only a global can be given
+    -- level arguments
+  | LevelParametersOnABinder
+    -- ^ @assume x {ℓ} : S@ or @claim@. Both bind a **component**, and only a
+    -- definition's head binds level parameters — so this is not a scope error
+    -- about @ℓ@, it is the wrong kind of binding to declare one on
+  | UniverseTakesOneLevel Int
+    -- ^ @Type { }@ or @Type {a b}@ — how many were written
   deriving (Eq, Show)
 
 -- | Which development-only form was met in a core position. An enum rather

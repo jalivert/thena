@@ -29,9 +29,12 @@ module Thena.Core.Level
   , Normal (..)
   , normalise
   , levelLeq
+  , levelVarsIn
+  , substLevel
+  , instantiateLevels
   ) where
 
-import Data.List (sortOn)
+import Data.List (nub, sortOn)
 
 -- | A universe level.
 --
@@ -214,3 +217,49 @@ levelLeq :: Level -> Level -> Maybe Bool
 levelLeq a b = case (normalise a, normalise b) of
   (Normal c [], Normal d []) -> Just (c <= d)
   _                          -> Nothing
+
+-- --------------------------------------------------------------------------
+-- Substitution — what instantiating a scheme does
+-- --------------------------------------------------------------------------
+
+-- | Every level variable a level mentions, without duplicates, in first-seen
+-- order.
+levelVarsIn :: Level -> [LevelVar]
+levelVarsIn l = nub (go l)
+  where
+    go x = case x of
+      LZero    -> []
+      LSuc a   -> go a
+      LMax a b -> go a ++ go b
+      LVar v   -> [v]
+
+-- | Replace level variables by levels, everywhere at once.
+--
+-- **No capture is possible and no freshening is needed**, which is worth
+-- stating rather than leaving to be rediscovered: 'Level' has no binder of its
+-- own (prenex means the only binder is the definition's head, `MS3.md`), and
+-- every 'LevelVar' carries an @Int@ from the one global counter, so two
+-- variables are equal exactly when they are the same variable. That is the
+-- second dividend from MS2 closeout 4f.
+substLevel :: [(LevelVar, Level)] -> Level -> Level
+substLevel sub = go
+  where
+    go l = case l of
+      LZero    -> LZero
+      LSuc a   -> LSuc (go a)
+      LMax a b -> LMax (go a) (go b)
+      LVar v   -> case lookup v sub of
+        Just l' -> l'
+        Nothing -> l
+
+-- | Instantiate a prenex scheme: pair its parameters with the arguments given
+-- and substitute.
+--
+-- @Nothing@ when the counts do not match, which is the caller's error to
+-- report — it is the level-argument analogue of applying a function to the
+-- wrong number of arguments, and 'Thena.Core.Typing' names the definition when
+-- it says so.
+instantiateLevels :: [LevelVar] -> [Level] -> Maybe ([(LevelVar, Level)])
+instantiateLevels ps as
+  | length ps == length as = Just (zip ps as)
+  | otherwise              = Nothing

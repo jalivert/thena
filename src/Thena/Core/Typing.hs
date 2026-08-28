@@ -31,7 +31,7 @@ import Data.List (find)
 
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar)
 import Thena.Core.Convert (convert)
-import Thena.Core.Level (Level (..), levelMax, levelSuc)
+import Thena.Core.Level (Level (..), instantiateLevels, levelMax, levelSuc)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term
   ( Core (..)
@@ -40,11 +40,13 @@ import Thena.Core.Term
   , fresh
   , instantiate
   , open
+  , substLevelsIn
   )
 import Thena.Errors (TypeError (..))
 import Thena.Global.Env
   ( GlobalEnv
   , InductiveDefinition (..)
+  , definitionLevels
   , definitionType
   , eliminatorType
   , formerArity
@@ -66,10 +68,25 @@ infer env ctx n term = case term of
   -- has an entry in both tables under one name, and what @g@ /means/ written
   -- as a term is the generated wrapper, not the type of the saturated
   -- 'Canonical' the wrapper's body builds.
-  Global g _ -> case lookupDefinition g env of
-    Just d  -> (Right (definitionType d), n)
+  -- **Instantiating a level scheme** (MS3 phase 30). A definition's type is
+  -- stored over its prenex level parameters; a use site supplies one level per
+  -- parameter, and the type it gets is the stored one with them substituted.
+  --
+  -- Prenex means all-or-nothing: there is no partial instantiation to allow, so
+  -- an arity mismatch is an error here rather than something to defer.
+  Global g ls -> case lookupDefinition g env of
+    Just d -> case instantiateLevels (definitionLevels d) ls of
+      Just sub -> (Right (substLevelsIn sub (definitionType d)), n)
+      Nothing  ->
+        ( Left (WrongNumberOfLevelArguments g (length (definitionLevels d)) (length ls))
+        , n )
     Nothing -> case lookupConstant g env of
-      Just t  -> (Right t, n)
+      -- A constant has a type and no parameters. Datatypes stay monomorphic
+      -- until phase 31, so writing level arguments on one is an error and not
+      -- an empty substitution.
+      Just t
+        | null ls   -> (Right t, n)
+        | otherwise -> (Left (LevelArgumentsOnAConstant g (length ls)), n)
       Nothing -> (Left (UnknownGlobal g), n)
 
   Universe l -> (Right (Universe (levelSuc l)), n)

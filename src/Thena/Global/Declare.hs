@@ -292,7 +292,7 @@ generate d env = addInductive dn d (foldl former env (typeFormer : map value cs)
     value c    = (constructorName c, ps ++ constructorArguments c, constructorType d c)
 
     former e (g, tel, ty) =
-      addDefinition g (MkDefinition ty body) (addConstant g ty e)
+      addDefinition g (MkDefinition [] ty body) (addConstant g ty e)
       where
         body = lamOver tel (Canonical g [] (map (Free . entryVar) tel))
 

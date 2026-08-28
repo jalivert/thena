@@ -806,6 +806,29 @@ tests =
         ]
 
     , script
+        "levels"
+        [ -- A level-polymorphic theorem: the parameter is declared, is in
+          -- scope in the statement AND in the tactic line that proves it, and
+          -- is stored on the definition at qed.
+          ":theorem idp {l} : ∀ (A : Type {l}) -> A -> A"
+        , "try (\\ (A : Type {l}) (a : A) -> a)"
+        , "solve"
+        , "qed"
+          -- One definition, instantiated at three levels.
+        , ":infer idp {0}"
+        , ":infer idp {1}"
+        , ":infer idp {2}"
+          -- Prenex is all-or-nothing.
+        , ":infer idp"
+        , ":infer idp {0 1}"
+          -- A level name means nothing outside the proof that declared it.
+        , ":core Type {l}"
+          -- Levels are not term binders and do not share their namespace.
+        , ":theorem t2 : Type\8320"
+        , "assume x {l} : Type\8320"
+        , ":quit"
+        ]
+    , script
         "mistakes"
         [ "wibble"
         , ":core y"

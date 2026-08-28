@@ -112,7 +112,7 @@ import Thena.Errors
   , TypeError (..)
   )
 import Thena.Global.Declare (DeclareError (..))
-import Thena.Syntax.Concrete (Raw (..), RawBinder (..))
+import Thena.Syntax.Concrete (Raw (..), RawLevel (..), RawBinder (..))
 import Thena.Global.Env
   ( ConstructorDefinition (..)
   , InductiveDefinition (..)
@@ -417,6 +417,14 @@ renderSyntaxError e = case e of
   ResolveFailed (NotInScope n)      -> "not in scope: " ++ n
   ResolveFailed (NotACoreTerm f)    ->
     devForm f ++ " is part of a development, not a term"
+  ResolveFailed (LevelNotInScope s) ->
+    s ++ " is not a level parameter in scope"
+  ResolveFailed (LevelArgumentsOnALocal s) ->
+    s ++ " is bound here, and only a definition has level parameters"
+  ResolveFailed LevelParametersOnABinder ->
+    "only a definition has level parameters; this binds a component"
+  ResolveFailed (UniverseTakesOneLevel k) ->
+    "a universe takes one level, not " ++ show k
   ResolveFailed (NotAUniverse d)    ->
     d ++ " must be declared at a universe, as in \": Type\8320\""
   ResolveFailed (TargetIsNotTheDatatype c) ->
@@ -476,7 +484,8 @@ describe t = case t of
   TNeck       -> ":-"
   TNumber k   -> show k
   TString txt -> show txt
-  TUniverse k -> "Type" ++ subscript k
+  TUniverse k   -> "Type" ++ subscript k
+  TUniverseOpen -> "Type"
   TIdent s    -> s
 
 -- --------------------------------------------------------------------------
@@ -1098,6 +1107,8 @@ renderRaw = raw False
   where
     raw _ (RawName x)       = x
     raw _ (RawUniverse l)   = "Type" ++ subscript l
+    raw _ (RawUniverseAt l) = "Type {" ++ rawLevel l ++ "}"
+    raw _ (RawAt x ls)      = x ++ " {" ++ unwords (map rawLevel ls) ++ "}"
     raw p (RawApp f a)      = wrap p (raw False f ++ " " ++ raw True a)
     raw p (RawArrow a b)    = wrap p (raw True a ++ " -> " ++ raw False b)
     raw p (RawLam bs b)     = wrap p ("λ" ++ concatMap binder bs ++ " -> " ++ raw False b)
@@ -1329,6 +1340,14 @@ renderTypeError :: Int -> TypeError -> [String]
 renderTypeError n e = case e of
   UnknownVariable ctx x       -> [nameIn ctx x ++ " is not in scope"]
   UnknownGlobal g        -> [nameString g ++ " is not declared"]
+  WrongNumberOfLevelArguments g want got ->
+    [ nameString g ++ " has " ++ count want "level parameter"
+        ++ ", and was given " ++ count got "level argument"
+    , "its level parameters are prenex, so a use supplies all of them or none"
+    ]
+  LevelArgumentsOnAConstant g got ->
+    [ nameString g ++ " has no level parameters, but was given "
+        ++ count got "level argument" ]
   LooseIndex i           -> ["a loose de Bruijn index " ++ show i ++ " reached the checker"]
   NotAType ctx t ty      ->
     [renderCore n ctx t ++ " is not a type — it has type " ++ renderCore n ctx ty]
@@ -1468,3 +1487,13 @@ renderChoices cs = map one cs
     one c =
       show (pointId c) ++ "  " ++ nameString (pointRule c)
         ++ "   untried: " ++ intercalate ", " (map nameString (pointAlts c))
+
+-- | A level as it was written — a numeral or a parameter's name.
+rawLevel :: RawLevel -> String
+rawLevel l = case l of
+  RawLevelNum k -> show k
+  RawLevelVar x -> x
+
+-- | @1 thing@, @2 things@ — so a message never reads "1 level arguments".
+count :: Int -> String -> String
+count k what = show k ++ " " ++ what ++ (if k == 1 then "" else "s")

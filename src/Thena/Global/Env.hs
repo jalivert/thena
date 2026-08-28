@@ -39,7 +39,7 @@ module Thena.Global.Env
   , eliminatorType
   ) where
 
-import Thena.Core.Level (Level)
+import Thena.Core.Level (Level, LevelVar)
 import Thena.Core.Context (Context, entryType, entryVar, piOver)
 import Thena.Core.Term
   ( Core (..)
@@ -56,7 +56,17 @@ import Thena.Core.Term
 -- has a data constructor called @Definition@ and the two would be ambiguous
 -- wherever both modules are in scope. Same technique as @MkScope@.
 data Definition = MkDefinition
-  { definitionType :: Core
+  { definitionLevels :: [LevelVar]
+    -- ^ the prenex level parameters, in the order a use site supplies them
+    -- (MS3 phase 30). **Empty for everything a monomorphic declaration
+    -- generates**, and non-empty only for a theorem stated with @{ℓ}@.
+    --
+    -- The binder lives here and nowhere else: prenex means all the
+    -- quantifiers are at the definition's head, so a flat list is the whole of
+    -- the binding structure and 'Thena.Core.Level.Level' needs no binder of
+    -- its own. Instantiating is 'Thena.Core.Level.instantiateLevels' followed
+    -- by a substitution.
+  , definitionType :: Core
   , definitionBody :: Core
   }
   deriving (Eq, Show)

@@ -13,6 +13,7 @@
 module Thena.Syntax.Concrete
   ( Raw (..)
   , RawBinder (..)
+  , RawLevel (..)
   , RawConstraint (..)
   , RawData (..)
   , RawConstructor (..)
@@ -33,6 +34,9 @@ module Thena.Syntax.Concrete
 data Raw
   = RawName String
   | RawUniverse Int
+  | RawUniverseAt RawLevel       -- ^ @Type {ℓ}@ — a universe at a written level
+  | RawAt String [RawLevel]      -- ^ @foo {ℓ 0}@ — a global at level arguments
+
   | RawLam [RawBinder] Raw       -- ^ @λ (x : S) (y : T) -> b@
   | RawPi [RawBinder] Raw        -- ^ @∀ (x : S) (y : T) -> B@
   | RawArrow Raw Raw             -- ^ @S -> B@, the non-dependent case
@@ -51,6 +55,15 @@ data Raw
 -- | @(x : S)@ — one parenthesised binding. Always annotated: there is no
 -- inference at this level, and a binder with no type is a parse error rather
 -- than a hole (§2.6).
+-- | A level as written. **Atoms only** (MS3 phase 30): a numeral, or the name
+-- of a level parameter in scope. @suc@ and @⊔@ have no surface spelling yet —
+-- adding @⊔@ would mean reserving it in the lexer, which narrows what an
+-- identifier may contain, and nothing yet needs to write one.
+data RawLevel
+  = RawLevelNum Int
+  | RawLevelVar String
+  deriving (Eq, Show)
+
 data RawBinder = RawBinder String Raw
   deriving (Eq, Show)
 

@@ -126,7 +126,7 @@ delayedDeltaTests =
       -- these yet — proved theorems arrive at phase 13, the prelude at 11 —
       -- so it is added by hand rather than left uncovered.
       let env = addDefinition (named "twice")
-                  (MkDefinition (term [] "Nat -> Nat") (term [] "\\ (k : Nat) -> k"))
+                  (MkDefinition [] (term [] "Nat -> Nat") (term [] "\\ (k : Nat) -> k"))
                   natVec
        in whnf env [] (Global (named "twice") []) @?= term [] "\\ (k : Nat) -> k"
   ]

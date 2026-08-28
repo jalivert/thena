@@ -1,0 +1,25 @@
+thena spine> :theorem idp {l} : ∀ (A : Type {l}) -> A -> A
+proving idp : ∀ (A : Type (ℓ1)) -> A -> A
+thena spine> try (\ (A : Type {l}) (a : A) -> a)
+thena spine> solve
+thena spine> qed
+idp : ∀ (A : Type (ℓ1)) -> A -> A   ∎
+thena spine> :infer idp {0}
+idp : ∀ (A : Type₀) -> A -> A
+thena spine> :infer idp {1}
+idp : ∀ (A : Type₁) -> A -> A
+thena spine> :infer idp {2}
+idp : ∀ (A : Type₂) -> A -> A
+thena spine> :infer idp
+idp has 1 level parameter, and was given 0 level arguments
+its level parameters are prenex, so a use supplies all of them or none
+thena spine> :infer idp {0 1}
+idp has 1 level parameter, and was given 2 level arguments
+its level parameters are prenex, so a use supplies all of them or none
+thena spine> :core Type {l}
+l is not a level parameter in scope
+thena spine> :theorem t2 : Type₀
+proving t2 : Type₀
+thena spine> assume x {l} : Type₀
+only a definition has level parameters; this binds a component
+thena spine> :quit

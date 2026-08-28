@@ -79,6 +79,7 @@ tokens :-
   ":-"          { keyword TNeck }
   $digit+       { \p s -> Located (posOf p) (TNumber (read s)) }
   @string       { \p s -> Located (posOf p) (TString (unescape s)) }
+  "Type"        { \p _ -> Located (posOf p) TUniverseOpen }
   @universe     { \p s -> Located (posOf p) (TUniverse (levelOf s)) }
   @ident        { \p s -> Located (posOf p) (TIdent s) }
 
@@ -121,6 +122,7 @@ data Token
   | TNumber Int
   | TString String
   | TUniverse Int
+  | TUniverseOpen
   | TIdent String
   deriving (Eq, Show)
 

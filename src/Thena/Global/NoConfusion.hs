@@ -170,13 +170,13 @@ generateNoConfusion env n0 d
        in case fst (check env [] n2 famBody famTy) of
             Left e   -> Rejected famName e
             Right () ->
-              let env1          = addDefinition famName (MkDefinition famTy famBody) env
+              let env1          = addDefinition famName (MkDefinition [] famTy famBody) env
                   (lemTy,   n3) = lemmaType n2
                   (lemBody, n4) = lemma n3
                in case fst (check env1 [] n4 lemBody lemTy) of
                     Left e   -> Rejected lemName e
                     Right () ->
-                      Generated (addDefinition lemName (MkDefinition lemTy lemBody) env1) n4
+                      Generated (addDefinition lemName (MkDefinition [] lemTy lemBody) env1) n4
   where
     (famName, lemName) = noConfusionNames (inductiveName d)
 

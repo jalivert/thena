@@ -29,11 +29,12 @@ module Thena.Core.Term
   , instantiate
   , freeVars
   , globalsIn
+  , substLevelsIn
   ) where
 
 import Data.List (nub)
 
-import Thena.Core.Level (Level)
+import Thena.Core.Level (Level, LevelVar, substLevel)
 
 -- | A reference to a binding, globally unique within a session.
 --
@@ -229,3 +230,34 @@ globalsIn = nub . go
       Canonical g _ as              -> g : concatMap go as
       Eliminate d _ ps m ms is tgt  ->
         d : (concatMap go ps ++ go m ++ concatMap go ms ++ concatMap go is ++ go tgt)
+
+-- | Apply a level substitution everywhere in a term (MS3 phase 30).
+--
+-- What instantiating a definition's level scheme does to its stored type.
+--
+-- **Levels occur in exactly four places** and this is the list: a @Universe@,
+-- and the level arguments of the three reference forms. Everything else is
+-- structural recursion — which is the practical shape of levels being
+-- context-free, the same fact that lets 'close' and 'open' ignore them
+-- entirely.
+--
+-- **This lives here and not in "Thena.Core.Level"** because it traverses
+-- 'Core', and that module deliberately knows nothing about terms.
+substLevelsIn :: [(LevelVar, Level)] -> Core -> Core
+substLevelsIn sub = go
+  where
+    at = substLevel sub
+
+    go t = case t of
+      Bound i        -> Bound i
+      Free x         -> Free x
+      Global g ls    -> Global g (map at ls)
+      Universe l     -> Universe (at l)
+      Pi i s (MkScope b)  -> Pi i (go s) (MkScope (go b))
+      Lam i s (MkScope b) -> Lam i (go s) (MkScope (go b))
+      App f a        -> App (go f) (go a)
+      Let i v s (MkScope b) -> Let i (go v) (go s) (MkScope (go b))
+      Canonical f ls as -> Canonical f (map at ls) (map go as)
+      Eliminate dn ls ps m ms is tgt ->
+        Eliminate dn (map at ls) (map go ps) (go m) (map go ms)
+                  (map go is) (go tgt)

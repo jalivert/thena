@@ -2,12 +2,13 @@
 -- or into an 'InductiveDefinition' (§2.5, §2.7, §3.7).
 module Thena.Syntax.Resolve
   ( resolve
+  , resolveAt
   , resolvePartial
   , resolveData
   ) where
 
 import Thena.Core.Context (Context, Entry (..), entryIdent, entryVar)
-import Thena.Core.Level (levelOfNat)
+import Thena.Core.Level (Level (..), LevelVar, levelOfNat)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
@@ -36,6 +37,7 @@ import Thena.Syntax.Concrete
   , RawConstraint (..)
   , RawConstructor (..)
   , RawData (..)
+  , RawLevel (..)
   )
 
 
@@ -68,13 +70,24 @@ globalsOf = map fst . definitions
 -- | Resolve a raw tree as a core term. Holes, guesses and constraints are
 -- rejected here: they live only in a development (§3.1).
 resolve :: GlobalEnv -> Context -> Int -> Raw -> Either ResolveError (Core, Int)
-resolve env ctx = core env (globalsOf env) ctx []
+resolve env ctx = core env (globalsOf env) ctx [] []
+
+-- | 'resolve', with level parameters in scope (MS3 phase 30).
+--
+-- Only the theorem path supplies any: a statement declared @:theorem f {ℓ} : …@
+-- resolves @ℓ@ inside its own type. Every other caller has none, which is why
+-- 'resolve' stays the entry point it always was rather than every site growing
+-- an empty list.
+resolveAt
+  :: [(String, LevelVar)] -> GlobalEnv -> Context -> Int -> Raw
+  -> Either ResolveError (Core, Int)
+resolveAt ls env ctx = core env (globalsOf env) ctx [] ls
 
 -- | Resolve a raw tree as a development, taking the LONGEST PREFIX (§2.7):
 -- every leading binder becomes a chain link, so 'Trailing' ends up holding
 -- something that is not a binder unless @⌜ ⌝@ says otherwise.
 resolvePartial :: GlobalEnv -> Context -> Int -> Raw -> Either ResolveError (Partial, Int)
-resolvePartial env ctx = partial env (globalsOf env) ctx []
+resolvePartial env ctx = partial env (globalsOf env) ctx [] []
 
 -- --------------------------------------------------------------------------
 -- Core terms
@@ -83,8 +96,10 @@ resolvePartial env ctx = partial env (globalsOf env) ctx []
 -- | @env@ answers "is @d@ a declared datatype, and what is its shape" for an
 -- @elim@ (phase 7); @gs@ answers "is @s@ in scope as an ordinary name" for
 -- everything else, and is not always @globalsOf env@ — see 'Globals'.
-core :: GlobalEnv -> Globals -> Context -> Local -> Int -> Raw -> Either ResolveError (Core, Int)
-core env gs ctx local n raw = case raw of
+core
+  :: GlobalEnv -> Globals -> Context -> Local -> [(String, LevelVar)] -> Int
+  -> Raw -> Either ResolveError (Core, Int)
+core env gs ctx local lvs n raw = case raw of
   -- Local, then the ambient context, then the globals. A binder shadows a
   -- global of the same name, which is what one namespace (§3.6) requires: the
   -- names collide and the innermost wins.
@@ -98,33 +113,50 @@ core env gs ctx local n raw = case raw of
 
   RawUniverse k -> Right (Universe (levelOfNat k), n)
 
+  -- @Type {ℓ}@ — a universe at a written level (phase 30).
+  RawUniverseAt rl -> do
+    l <- levelArg lvs rl
+    Right (Universe l, n)
+
+  -- @foo {ℓ 0}@ — a global at level arguments. **Refused on a local**: only a
+  -- definition has level parameters, and a λ-bound name has none to give.
+  RawAt s rls -> case lookup s local of
+    Just _  -> Left (LevelArgumentsOnALocal s)
+    Nothing -> case lookupEntry s ctx of
+      Just _ -> Left (LevelArgumentsOnALocal s)
+      Nothing
+        | GlobalName s `elem` gs -> do
+            args <- mapM (levelArg lvs) rls
+            Right (Global (GlobalName s) args, n)
+        | otherwise -> Left (NotInScope s)
+
   RawApp f a -> do
-    (f', n1) <- core env gs ctx local n f
-    (a', n2) <- core env gs ctx local n1 a
+    (f', n1) <- core env gs ctx local lvs n f
+    (a', n2) <- core env gs ctx local lvs n1 a
     Right (App f' a', n2)
 
   -- A non-dependent arrow is a 'Pi' whose variable does not occur.
   RawArrow s b -> do
-    (s', n1) <- core env gs ctx local n s
-    (b', n2) <- core env gs ctx local n1 b
+    (s', n1) <- core env gs ctx local lvs n s
+    (b', n2) <- core env gs ctx local lvs n1 b
     let (v, n3) = fresh n2
     Right (Pi (Ident "_") s' (close v b'), n3)
 
-  RawLam bs b -> binders env gs Lam ctx local n bs b
-  RawPi bs b  -> binders env gs Pi ctx local n bs b
+  RawLam bs b -> binders env gs Lam ctx local lvs n bs b
+  RawPi bs b  -> binders env gs Pi ctx local lvs n bs b
 
   RawLet x val ty b -> do
-    (val', n1) <- core env gs ctx local n val
-    (ty', n2)  <- core env gs ctx local n1 ty
+    (val', n1) <- core env gs ctx local lvs n val
+    (ty', n2)  <- core env gs ctx local lvs n1 ty
     let (v, n3) = fresh n2
-    (b', n4)   <- core env gs ctx ((x, v) : local) n3 b
+    (b', n4)   <- core env gs ctx ((x, v) : local) lvs n3 b
     Right (Let (Ident x) val' ty' (close v b'), n4)
 
   -- Transparent here: the corners only say something in a development
   -- position, where they stop the spine. A no-op rather than an error, because
   -- rejecting them would make the printer's own output fail to re-read in a
   -- nested position.
-  RawQuote t -> core env gs ctx local n t
+  RawQuote t -> core env gs ctx local lvs n t
 
   -- Phase 7: no concrete syntax existed for 'Eliminate' before this. Checked
   -- against the datatype's own record, exactly as a constructor's target is
@@ -143,11 +175,11 @@ core env gs ctx local n raw = case raw of
   RawElim d ps m ms is t -> do
     dn        <- datatypeNamed env gs ctx local d
     def       <- maybe (Left (NotADatatype d)) Right (lookupInductive dn env)
-    (ps', n1) <- coreList env gs ctx local n ps
-    (m', n2)  <- core env gs ctx local n1 m
-    (ms', n3) <- coreList env gs ctx local n2 ms
-    (is', n4) <- coreList env gs ctx local n3 is
-    (t', n5)  <- core env gs ctx local n4 t
+    (ps', n1) <- coreList env gs ctx local lvs n ps
+    (m', n2)  <- core env gs ctx local lvs n1 m
+    (ms', n3) <- coreList env gs ctx local lvs n2 ms
+    (is', n4) <- coreList env gs ctx local lvs n3 is
+    (t', n5)  <- core env gs ctx local lvs n4 t
     let wantP = length (inductiveParameters def)
         wantM = length (inductiveConstructors def)
         wantI = length (inductiveIndices def)
@@ -181,103 +213,105 @@ core env gs ctx local n raw = case raw of
 datatypeNamed
   :: GlobalEnv -> Globals -> Context -> Local -> String
   -> Either ResolveError GlobalName
-datatypeNamed env gs ctx local d = case core env gs ctx local 0 (RawName d) of
+datatypeNamed env gs ctx local d = case core env gs ctx local [] 0 (RawName d) of
   Right (Global g _, _) -> Right g
   _                   -> Left (NotADatatype d)
 
 -- | A run of terms in the same local scope, left to right, threading the
 -- counter — what @elim@\'s three list-valued fields need (§2.6).
 coreList
-  :: GlobalEnv -> Globals -> Context -> Local -> Int -> [Raw]
-  -> Either ResolveError ([Core], Int)
-coreList _ _ _ _ n [] = Right ([], n)
-coreList env gs ctx local n (r : rs) = do
-  (t, n1)  <- core env gs ctx local n r
-  (ts, n2) <- coreList env gs ctx local n1 rs
+  :: GlobalEnv -> Globals -> Context -> Local -> [(String, LevelVar)] -> Int
+  -> [Raw] -> Either ResolveError ([Core], Int)
+coreList _ _ _ _ _ n [] = Right ([], n)
+coreList env gs ctx local lvs n (r : rs) = do
+  (t, n1)  <- core env gs ctx local lvs n r
+  (ts, n2) <- coreList env gs ctx local lvs n1 rs
   Right (t : ts, n2)
 
 -- | One binder group at a time, each nested inside the last.
 binders
   :: GlobalEnv -> Globals
   -> (Ident -> Core -> Scope Core -> Core)
-  -> Context -> Local -> Int -> [RawBinder] -> Raw
+  -> Context -> Local -> [(String, LevelVar)] -> Int -> [RawBinder] -> Raw
   -> Either ResolveError (Core, Int)
-binders env gs con ctx local n bs b = case bs of
-  [] -> core env gs ctx local n b
+binders env gs con ctx local lvs n bs b = case bs of
+  [] -> core env gs ctx local lvs n b
   RawBinder x ty : rest -> do
-    (ty', n1) <- core env gs ctx local n ty
+    (ty', n1) <- core env gs ctx local lvs n ty
     let (v, n2) = fresh n1
-    (b', n3) <- binders env gs con ctx ((x, v) : local) n2 rest b
+    (b', n3) <- binders env gs con ctx ((x, v) : local) lvs n2 rest b
     Right (con (Ident x) ty' (close v b'), n3)
 
 -- --------------------------------------------------------------------------
 -- Developments
 -- --------------------------------------------------------------------------
 
-partial :: GlobalEnv -> Globals -> Context -> Local -> Int -> Raw -> Either ResolveError (Partial, Int)
-partial env gs ctx local n raw = case raw of
-  RawLam bs b -> assumes env gs ctx local n bs b
+partial
+  :: GlobalEnv -> Globals -> Context -> Local -> [(String, LevelVar)] -> Int
+  -> Raw -> Either ResolveError (Partial, Int)
+partial env gs ctx local lvs n raw = case raw of
+  RawLam bs b -> assumes env gs ctx local lvs n bs b
 
   RawLet x val ty b -> do
-    (val', n1) <- core env gs ctx local n val
-    (ty', n2)  <- core env gs ctx local n1 ty
+    (val', n1) <- core env gs ctx local lvs n val
+    (ty', n2)  <- core env gs ctx local lvs n1 ty
     let (v, n3) = fresh n2
-    (b', n4)   <- partial env gs ctx ((x, v) : local) n3 b
+    (b', n4)   <- partial env gs ctx ((x, v) : local) lvs n3 b
     Right (Under (Define v (Ident x) val' ty') b', n4)
 
   RawClaim x ty b -> do
-    (ty', n1) <- core env gs ctx local n ty
+    (ty', n1) <- core env gs ctx local lvs n ty
     let (v, n2) = fresh n1
-    (b', n3)  <- partial env gs ctx ((x, v) : local) n2 b
+    (b', n3)  <- partial env gs ctx ((x, v) : local) lvs n2 b
     Right (Under (Claim v (Ident x) ty') b', n3)
 
   -- The guess body does NOT see the hole it fills: Γ_(?x ≐ P : S . p) = Γ_P
   -- (§4.5). Resolved with 'local' as it was; only the continuation gains @x@.
   RawGuess x ty g b -> do
-    (ty', n1) <- core env gs ctx local n ty
-    (g', n2)  <- partial env gs ctx local n1 g
+    (ty', n1) <- core env gs ctx local lvs n ty
+    (g', n2)  <- partial env gs ctx local lvs n1 g
     let (v, n3) = fresh n2
-    (b', n4)  <- partial env gs ctx ((x, v) : local) n3 b
+    (b', n4)  <- partial env gs ctx ((x, v) : local) lvs n3 b
     Right (Under (Guess v (Ident x) g' ty') b', n4)
 
   RawPending k b -> do
-    (k', n1) <- constraint env gs ctx local n k
-    (b', n2) <- partial env gs ctx local n1 b
+    (k', n1) <- constraint env gs ctx local lvs n k
+    (b', n2) <- partial env gs ctx local lvs n1 b
     Right (Pending k' b', n2)
 
   -- The corners stop the spine: what is inside is a term, not a chain.
   RawQuote t -> do
-    (t', n1) <- core env gs ctx local n t
+    (t', n1) <- core env gs ctx local lvs n t
     Right (Trailing t', n1)
 
   -- Everything else is the trailing term. This is the whole of longest prefix:
   -- the binder cases above consume as much as they can, and this catches the
   -- first thing that is not a binder.
   _ -> do
-    (t', n1) <- core env gs ctx local n raw
+    (t', n1) <- core env gs ctx local lvs n raw
     Right (Trailing t', n1)
 
 -- | Each binder group in a @λ@ becomes its own 'Assume' link.
 assumes
-  :: GlobalEnv -> Globals -> Context -> Local -> Int -> [RawBinder] -> Raw
-  -> Either ResolveError (Partial, Int)
-assumes env gs ctx local n bs b = case bs of
-  [] -> partial env gs ctx local n b
+  :: GlobalEnv -> Globals -> Context -> Local -> [(String, LevelVar)] -> Int
+  -> [RawBinder] -> Raw -> Either ResolveError (Partial, Int)
+assumes env gs ctx local lvs n bs b = case bs of
+  [] -> partial env gs ctx local lvs n b
   RawBinder x ty : rest -> do
-    (ty', n1) <- core env gs ctx local n ty
+    (ty', n1) <- core env gs ctx local lvs n ty
     let (v, n2) = fresh n1
-    (b', n3) <- assumes env gs ctx ((x, v) : local) n2 rest b
+    (b', n3) <- assumes env gs ctx ((x, v) : local) lvs n2 rest b
     Right (Under (Assume v (Ident x) ty') b', n3)
 
 -- | Ξ's binders scope over @s@, @t@ and @T@ and nothing else.
 constraint
-  :: GlobalEnv -> Globals -> Context -> Local -> Int -> RawConstraint
-  -> Either ResolveError (Constraint, Int)
-constraint env gs ctx local n (RawConstraint bs s t ty) = do
-  (xi, local', n1) <- telescope env gs ctx local n bs
-  (s', n2)  <- core env gs ctx local' n1 s
-  (t', n3)  <- core env gs ctx local' n2 t
-  (ty', n4) <- core env gs ctx local' n3 ty
+  :: GlobalEnv -> Globals -> Context -> Local -> [(String, LevelVar)] -> Int
+  -> RawConstraint -> Either ResolveError (Constraint, Int)
+constraint env gs ctx local lvs n (RawConstraint bs s t ty) = do
+  (xi, local', n1) <- telescope env gs ctx local lvs n bs
+  (s', n2)  <- core env gs ctx local' lvs n1 s
+  (t', n3)  <- core env gs ctx local' lvs n2 t
+  (ty', n4) <- core env gs ctx local' lvs n3 ty
   Right (Equate xi s' t' ty', n4)
 
 -- --------------------------------------------------------------------------
@@ -298,7 +332,7 @@ resolveData
   :: GlobalEnv -> Int -> RawData
   -> Either ResolveError (InductiveDefinition, Int)
 resolveData env n (RawData name ps ty cs) = do
-  (params, afterParams, n1)  <- telescope env gs [] [] n ps
+  (params, afterParams, n1)  <- telescope env gs [] [] [] n ps
   (indices, _, rest, n2)     <- prefix env gs afterParams n1 ty
   level <- case rest of
     RawUniverse k -> Right (levelOfNat k)
@@ -318,7 +352,7 @@ constructors
 constructors _ _ _ _ _ _ n [] = Right ([], n)
 constructors env gs dn params want local n (RawConstructor cn ty : rest) = do
   (args, inside, tgt, n1) <- prefix env gs local n ty
-  (tgt', n2)              <- core env gs [] inside n1 tgt
+  (tgt', n2)              <- core env gs [] inside [] n1 tgt
   ixs                     <- targetIndices dn params want cn tgt'
   (rest', n3)             <- constructors env gs dn params want local n2 rest
   Right (ConstructorDefinition (GlobalName cn) args ixs : rest', n3)
@@ -354,13 +388,13 @@ targetIndices dn params want cn t = case spine t of
 -- | A binder group list, outermost first. Only 'Hypothesis' entries ever
 -- appear (§3.3).
 telescope
-  :: GlobalEnv -> Globals -> Context -> Local -> Int -> [RawBinder]
-  -> Either ResolveError (Context, Local, Int)
-telescope _ _ _ local n [] = Right ([], local, n)
-telescope env gs ctx local n (RawBinder x ty : rest) = do
-  (ty', n1) <- core env gs ctx local n ty
+  :: GlobalEnv -> Globals -> Context -> Local -> [(String, LevelVar)] -> Int
+  -> [RawBinder] -> Either ResolveError (Context, Local, Int)
+telescope _ _ _ local _ n [] = Right ([], local, n)
+telescope env gs ctx local lvs n (RawBinder x ty : rest) = do
+  (ty', n1) <- core env gs ctx local lvs n ty
   let (v, n2) = fresh n1
-  (xi, local', n3) <- telescope env gs ctx ((x, v) : local) n2 rest
+  (xi, local', n3) <- telescope env gs ctx ((x, v) : local) lvs n2 rest
   Right (Hypothesis v (Ident x) ty' : xi, local', n3)
 
 -- | Peel the binder prefix of a declared type, and hand back what is left.
@@ -375,7 +409,7 @@ prefix
   -> Either ResolveError (Context, Local, Raw, Int)
 prefix env gs local n raw = case raw of
   RawPi bs b -> do
-    (tel, local1, n1)        <- telescope env gs [] local n bs
+    (tel, local1, n1)        <- telescope env gs [] local [] n bs
     (tel', local2, rest, n2) <- prefix env gs local1 n1 b
     Right (tel ++ tel', local2, rest, n2)
 
@@ -385,7 +419,7 @@ prefix env gs local n raw = case raw of
   -- hand a student (§3.7 — the point of generating into the environment is that
   -- it can be read). The printer freshens a repeat to @x1@.
   RawArrow s b -> do
-    (s', n1) <- core env gs [] local n s
+    (s', n1) <- core env gs [] local [] n s
     let (v, n2) = fresh n1
     (tel, local', rest, n3) <- prefix env gs local n2 b
     Right (Hypothesis v (Ident "x") s' : tel, local', rest, n3)
@@ -411,3 +445,16 @@ lookupEntry s = foldl pick Nothing
     pick acc e
       | entryIdent e == Ident s = Just (entryVar e)
       | otherwise               = acc
+
+-- | A level as written, against the level parameters in scope (phase 30).
+--
+-- **A numeral and a name are the whole of it.** There is no surface spelling
+-- for @suc@ or @⊔@ yet: @⊔@ would have to become reserved, which narrows what
+-- an identifier may contain (§2.6, his decision), and nothing needs to write
+-- one until inference can get stuck.
+levelArg :: [(String, LevelVar)] -> RawLevel -> Either ResolveError Level
+levelArg lvs rl = case rl of
+  RawLevelNum k -> Right (levelOfNat k)
+  RawLevelVar s -> case lookup s lvs of
+    Just v  -> Right (LVar v)
+    Nothing -> Left (LevelNotInScope s)

@@ -35,6 +35,7 @@ import Thena.Syntax.Concrete
   ( Raw (..)
   , RawBinder (..)
   , RawConstraint (..)
+  , RawLevel (..)
   , RawConstructor (..)
   , RawData (..)
   , RawInstr (..)
@@ -85,6 +86,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   num     { Located _ (TNumber $$) }
   str     { Located _ (TString $$) }
   univ    { Located _ (TUniverse $$) }
+  Type    { Located _ TUniverseOpen }
   ident   { Located _ (TIdent $$) }
 
 %right '->'
@@ -114,9 +116,20 @@ Equation :: { (Raw, Raw) }
 
 -- The argument of @assume@ and @claim@ (§2.4's "commands are the op vocabulary
 -- spelled out"). The nameless form is the one that makes the op ask (§7.5).
-NameAndType :: { (Maybe String, Raw) }
-  : ident ':' Term                         { (Just $1, $3) }
-  | ':' Term                               { (Nothing, $2) }
+-- The level parameters are a run of names in braces, exactly as a level
+-- argument list is a run of level atoms (MS3 phase 30). They are returned
+-- separately because they are binders, not part of the type.
+NameAndType :: { (Maybe String, [String], Raw) }
+  : ident ':' Term                         { (Just $1, [], $3) }
+  | ident LevelParams ':' Term             { (Just $1, $2, $4) }
+  | ':' Term                               { (Nothing, [], $2) }
+
+LevelParams :: { [String] }
+  : '{' LevelNames '}'                     { reverse $2 }
+
+LevelNames :: { [String] }
+  :                                        { [] }
+  | LevelNames ident                       { $2 : $1 }
 
 -- The argument of @data@ (§2.7's grammar, extended; decided by the user
 -- planning phase 6). @data@ itself is not a token: the driver splits the first
@@ -220,8 +233,23 @@ App :: { Raw }
 
 Atom :: { Raw }
   : ident                                  { RawName $1 }
+  | ident LevelArgs                        { RawAt $1 $2 }
   | univ                                   { RawUniverse $1 }
+  | Type LevelArgs                         { RawUniverseAt (theOne $2) }
   | '(' Term ')'                           { $2 }
+
+-- | @{ ℓ 0 }@ — a brace-enclosed run of level atoms, no commas, exactly as
+-- rule parameters and call arguments are a bare run of names (phase 23).
+LevelArgs :: { [RawLevel] }
+  : '{' LevelAtoms '}'                     { reverse $2 }
+
+LevelAtoms :: { [RawLevel] }
+  :                                        { [] }
+  | LevelAtoms LevelAtom                   { $2 : $1 }
+
+LevelAtom :: { RawLevel }
+  : num                                    { RawLevelNum $1 }
+  | ident                                  { RawLevelVar $1 }
 
 -- The argument list of a rule invoked at the REPL (phase 23b): a run of atoms,
 -- exactly as a rule body writes its operands. @try (\ x -> x)@ is one argument
@@ -259,4 +287,14 @@ parseError :: [Located Token] -> Either ParseError a
 parseError ts = Left $ case ts of
   Located p t : _ -> UnexpectedToken p t
   []              -> UnexpectedEndOfInput
+
+-- | A universe takes exactly one level.
+--
+-- **@Type { }@ and @Type {a b}@ are accepted by the grammar and rejected
+-- here**, so the complaint is about levels rather than about a parse — and the
+-- grammar keeps one rule for a brace group instead of two that differ only in
+-- how many things they hold.
+theOne :: [RawLevel] -> RawLevel
+theOne [l] = l
+theOne _   = RawLevelNum 0
 }
