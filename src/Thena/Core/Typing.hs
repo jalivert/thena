@@ -30,7 +30,7 @@ module Thena.Core.Typing
 import Data.List (find)
 
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar)
-import Thena.Core.Convert (convert)
+import Thena.Core.Convert (subsumes)
 import Thena.Core.Level (Level (..), instantiateLevels, levelMax, levelSuc)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term
@@ -189,7 +189,11 @@ infer env ctx n term = case term of
 check :: GlobalEnv -> Context -> Int -> Core -> Core -> (Either TypeError (), Int)
 check env ctx n t expected =
   infer env ctx n t `andThen` \actual n1 ->
-    case convert env ctx n1 expected actual of
+    -- **'subsumes', not 'convert' — this is where cumulativity lives** (MS3
+    -- phase 32). A term whose type is @Type₀@ is usable where @Type₁@ is
+    -- wanted; conversion is still an equality and is still what @:convert@ and
+    -- a Π's domain ask for.
+    case subsumes env ctx n1 expected actual of
       (Nothing,  n2) -> (Right (), n2)
       (Just why, n2) -> (Left (NotOfType ctx t expected actual why), n2)
 

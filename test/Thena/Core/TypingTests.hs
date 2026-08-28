@@ -36,7 +36,7 @@ tests =
   testGroup
     "Thena.Core.Typing"
     [ testGroup "the ordinary forms" formTests
-    , testGroup "universes: max, and no cumulativity" universeTests
+    , testGroup "universes: max, and cumulativity" universeTests
     , testGroup "formers and their wrappers" formerTests
     , testGroup "elimination" elimTests
     , testGroup "the generated eliminator type is itself a type" eliminatorTypeTests
@@ -142,10 +142,17 @@ universeTests =
       typeOf "\8704 (A : Type\8320) -> A" @?= Right (Universe (levelOfNat 1))
   , testCase "the domain can be the larger one" $
       typeOf "Type\8321 -> Type\8320" @?= Right (Universe (levelOfNat 2))
-  , testCase "no cumulativity: a Type0 term does not check at Type1" $
-      illTyped' "Nat" "Type\8321"
-  , testCase "and it does check at Type0" $
+    -- **Cumulativity, from MS3 phase 32.** This case asserted the opposite
+    -- until then — @Nat@ at @Type₁@ was the recorded proof that there was no
+    -- subsumption. It is the one behaviour the phase changes.
+  , testCase "cumulativity: a Type0 term checks at Type1" $
+      hasType "Nat" "Type\8321"
+  , testCase "and at Type2, and at its own level" $ do
+      hasType "Nat" "Type\8322"
       hasType "Nat" "Type\8320"
+    -- It lifts and never lowers.
+  , testCase "but Type1 does not check at Type0" $
+      illTyped' "Type\8320" "Type\8320"
   ]
   where
     illTyped' src ty = case fst (check natVec [] natVecCounter (term src) (term ty)) of

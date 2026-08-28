@@ -11,9 +11,10 @@
 -- 'Context' and two terms is the whole of its input (§7.4).
 module Thena.Core.Convert
   ( convert
+  , subsumes
   ) where
 
-import Thena.Core.Level (Level)
+import Thena.Core.Level (Level, levelLeq)
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), fresh, open)
@@ -39,7 +40,38 @@ import Thena.Global.Env (GlobalEnv)
 convert
   :: GlobalEnv -> Context -> Int -> Core -> Core
   -> (Maybe ConversionFailure, Int)
-convert env = go
+convert env = related Same env
+
+-- | Is @actual@ usable where @expected@ is wanted? Cumulativity's relation
+-- (MS3 phase 32).
+--
+-- **This is where the direction lives, and 'convert' keeps none.** Conversion
+-- is an equality — its own header says there is no left and no right — and
+-- cumulativity is not: @Type₀@ is usable where @Type₁@ is wanted and not the
+-- other way about. Making @convert@ directional would have made every caller
+-- that wants an equality state a direction it does not have.
+--
+-- @subsumes expected actual@, in that order, matching
+-- 'Thena.Core.Typing.check''s own argument order.
+--
+-- **A Π's domain stays invariant and only its codomain varies**, which is
+-- Coq's rule and the sound one: a function expecting @Type₁@ arguments cannot
+-- stand in for one expecting @Type₀@ arguments, because it would be handed
+-- something too small. Everything that is not a universe or a Π is compared
+-- exactly as 'convert' compares it.
+subsumes
+  :: GlobalEnv -> Context -> Int -> Core -> Core
+  -> (Maybe ConversionFailure, Int)
+subsumes = related AtMost
+
+-- | Which relation the universe case and the Π codomain are read at.
+data Direction = Same | AtMost
+  deriving (Eq)
+
+related
+  :: Direction -> GlobalEnv -> Context -> Int -> Core -> Core
+  -> (Maybe ConversionFailure, Int)
+related dir env = go
   where
     go ctx n s t
       | s == t    = (Nothing, n)
@@ -49,9 +81,18 @@ convert env = go
     -- every one it meets away, which is recorded as a property of that function
     -- and is why there is no @Let@ case below.
     heads ctx n s t = case (s, t) of
+      -- @k@ is what was expected and @l@ is what was found, so cumulativity
+      -- asks @l <= k@. **@Nothing@ from 'levelLeq' fails here**, and that is
+      -- the conservative reading: an undecided inequality is not a licence to
+      -- accept. Only metas produce it, and they arrive in phase 33 with the
+      -- postponement queue that is the right place to hold one.
       (Universe k, Universe l)
-        | k == l    -> ok n
+        | ok' -> ok n
         | otherwise -> bad n [] (LevelsDiffer k l)
+        where
+          ok' = case dir of
+            Same   -> k == l
+            AtMost -> levelLeq l k == Just True
 
       (Free x, Free y)
         | x == y    -> ok n
@@ -111,11 +152,16 @@ convert env = go
 
       _ -> bad n [] (HeadsDiffer ctx s t)
 
+    -- **The domain is compared at 'Same' whatever @dir@ is** — see 'subsumes'.
+    -- 'related Same' rather than 'go' is what makes that true for the whole
+    -- subtree, not just the head.
     binder ctx n i dom sc dom' sc' =
-      at ctx n (TheDomain i) dom dom' `andThen` \n1 ->
+      atSame ctx n (TheDomain i) dom dom' `andThen` \n1 ->
         let (x, n2) = fresh n1
             ctx'    = ctx ++ [Hypothesis x i dom]
          in beneath (TheBody i) (go ctx' n2 (open x sc) (open x sc'))
+
+    atSame ctx n site a b = beneath site (related Same env ctx n a b)
 
     -- One η step: open the λ with a fresh variable and apply the other side to
     -- it. @flipped@ only keeps the two sides in the order the caller passed
