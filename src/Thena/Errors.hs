@@ -392,6 +392,10 @@ data ElimError
     -- on, so @Vec@ and @Fin@ eliminate fine. The shape is
     -- @Below : ∀ (n : Nat) (i : Fin n) -> Type₀@, two indices with the second
     -- typed by the first. @AGENDA.md@ item 10
+  | IndexTypeIllTyped TypeError
+    -- ^ a tied index's type has no universe (MS3 phase 31d). Needed because
+    -- the equation @Eq Iₖ iₖ aₖ@ is stated at @Iₖ@'s **level** now, which has
+    -- to be read
   | MotiveIllTyped TypeError
     -- ^ the generalised goal does not typecheck under the abstracted indices.
     -- Abstracting a term in a dependent theory is not always type-preserving,

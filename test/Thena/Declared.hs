@@ -73,7 +73,7 @@ emptyDecl = "Empty : Type\8320 where { }"
 -- above have no @Eq@ and therefore no no-confusion, the ones below do.
 eqDecl, unitDecl, andDecl, taplDecl :: String
 eqDecl =
-  "Eq (A : Type\8320) : A -> A -> Type\8320 \
+  "Eq {l} (A : Type {l}) : A -> A -> Type {l} \
   \where { refl : \8704 (a : A) -> Eq A a a }"
 
 -- | The other two prelude types no-confusion is written out of (phase 20).

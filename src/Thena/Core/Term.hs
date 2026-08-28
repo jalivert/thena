@@ -29,6 +29,7 @@ module Thena.Core.Term
   , instantiate
   , freeVars
   , globalsIn
+  , beyond
   , substLevelsIn
   ) where
 
@@ -261,3 +262,17 @@ substLevelsIn sub = go
       Eliminate dn ls ps m ms is tgt ->
         Eliminate dn (map at ls) (map go ps) (go m) (map go ms)
                   (map go is) (go tgt)
+
+-- | A counter value greater than every variable given.
+--
+-- **What a checker needs when it did not mint the variables it is walking
+-- among.** 'fresh' guarantees uniqueness only within one monotonic run of the
+-- counter; a checker handed terms that were built during an *earlier* run has
+-- to start above them or it will mint a variable that is already in use, and
+-- 'close' will capture it.
+--
+-- Returns the representation's @Int@ rather than a 'Var', so the constructor
+-- stays hidden and the caller can only do with it the one thing it is for:
+-- start counting.
+beyond :: [Var] -> Int
+beyond vs = 1 + maximum (-1 : [i | Var i <- vs])

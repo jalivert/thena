@@ -18,7 +18,7 @@ module Thena.LoadTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
-import Thena.Core.Level (Level (..))
+import Thena.Core.Level (Level (..), instantiateLevels)
 import Thena.Core.Term (GlobalName (..))
 import Thena.Driver
   ( LoadError (..)
@@ -29,7 +29,14 @@ import Thena.Driver
   , newSession
   )
 import Thena.Engine (Machine (..))
-import Thena.Global.Env (eliminatorType, isDeclared, lookupInductive)
+import Thena.Core.Term (Core, substLevelsIn)
+import Thena.Global.Env
+  ( InductiveDefinition
+  , eliminatorType
+  , inductiveLevels
+  , isDeclared
+  , lookupInductive
+  )
 import Thena.Repl (startingSession, renderCore, renderEliminator)
 
 tests :: TestTree
@@ -68,10 +75,14 @@ preludeTests =
       case lookupInductive (GlobalName "Eq") env of
         Nothing -> assertFailure "Eq is not declared"
         Just d  ->
-          renderEliminator n0 (GlobalName "Eq") (fst (eliminatorType d (LZero) n0))
-            @?= [ "elim Eq : ∀ (A : Type₀) (P : ∀ (x : A) (x1 : A) -> Eq A x x1 -> Type₀) \
-                  \-> (∀ (a : A) -> P a a (refl A a)) \
-                  \-> ∀ (x : A) (x1 : A) (target : Eq A x x1) -> P x x1 target"
+          -- **At @Eq {0}@**, not at its bare parameter (MS3 phase 31d): the
+          -- eliminator is a scheme now, and what a use site sees is the
+          -- instantiation. Rendering it uninstantiated would pin @ℓ@'s number,
+          -- which is a counter value and no business of this assertion.
+          renderEliminator n0 (GlobalName "Eq") (atZero d (fst (eliminatorType d LZero n0)))
+            @?= [ "elim Eq : ∀ (A : Type₀) (P : ∀ (x : A) (x1 : A) -> Eq {0} A x x1 -> Type₀) \
+                  \-> (∀ (a : A) -> P a a (refl {0} A a)) \
+                  \-> ∀ (x : A) (x1 : A) (target : Eq {0} A x x1) -> P x x1 target"
                 ]
 
     -- "and can be used": eliminating a 'refl' must actually fire. The motive is
@@ -193,3 +204,9 @@ renderedLast :: Loaded -> Maybe String
 renderedLast l = case reverse (loadedResponses l) of
   Rendered t : _ -> Just (renderCore (names (sessionMachine (loadedSession l))) [] t)
   _              -> Nothing
+
+-- | A datatype's own level parameters, all instantiated at zero.
+atZero :: InductiveDefinition -> Core -> Core
+atZero d t = case instantiateLevels (inductiveLevels d) (map (const LZero) (inductiveLevels d)) of
+  Just sub -> substLevelsIn sub t
+  Nothing  -> t

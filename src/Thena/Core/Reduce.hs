@@ -11,9 +11,9 @@ module Thena.Core.Reduce
 
 import Data.List (find)
 
-import Thena.Core.Level (Level)
+import Thena.Core.Level (Level, LevelVar, instantiateLevels)
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar)
-import Thena.Core.Term (Core (..), GlobalName, Var, close, instantiate)
+import Thena.Core.Term (Core (..), GlobalName, Var, close, instantiate, substLevelsIn)
 import Thena.Global.Env
   ( ConstructorDefinition (..)
   , Definition (..)
@@ -74,10 +74,15 @@ whnf env ctx = go 0
       -- Ordinary definitions — proved theorems, the prelude — are not formers,
       -- get 'Nothing' from 'formerArity', and unfold unconditionally as
       -- before.
-      Global g _
+      -- **δ substitutes the level arguments into the body** (MS3 phase 31d).
+      -- A polymorphic definition's body is written over its own level
+      -- parameters, so unfolding @Eq {0}@ without substituting hands back a
+      -- body that still mentions @ℓ@ — and every later comparison then sees a
+      -- rigid parameter where a concrete level belongs.
+      Global g ls
         | Just k <- formerArity g env, nargs < k -> t
         | otherwise -> case lookupDefinition g env of
-            Just d  -> go nargs (definitionBody d)
+            Just d  -> go nargs (atLevels (definitionLevels d) ls (definitionBody d))
             Nothing -> t                    -- a constant with no body: neutral
 
       Universe _ -> t
@@ -207,3 +212,13 @@ atIndex i xs
   | otherwise = case drop i xs of
       x : _ -> Just x
       []    -> Nothing
+
+-- | Instantiate a definition's level parameters in its body.
+--
+-- A mismatched count cannot arise from a checked term, and this leaves the body
+-- alone rather than inventing a substitution — the checker is what reports the
+-- arity, and δ is not the place to duplicate that judgement.
+atLevels :: [LevelVar] -> [Level] -> Core -> Core
+atLevels ps as body = case instantiateLevels ps as of
+  Just sub -> substLevelsIn sub body
+  Nothing  -> body

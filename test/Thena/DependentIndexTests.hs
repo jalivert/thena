@@ -43,5 +43,5 @@ tests =
           Nothing -> assertFailure "belowRefl was not admitted"
           Just d  ->
             renderCore (names (sessionMachine s')) [] (definitionType d)
-              @?= "∀ (n : Nat) (i : Fin n) -> Below n i -> Eq (Fin n) i i"
+              @?= "∀ (n : Nat) (i : Fin n) -> Below n i -> Eq {0} (Fin n) i i"
     ]

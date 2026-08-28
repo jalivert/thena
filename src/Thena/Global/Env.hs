@@ -38,12 +38,14 @@ module Thena.Global.Env
   , formerArity
   , recursiveArgument
   , eliminatorType
+  , varsInEnv
   ) where
 
 import Thena.Core.Level (Level (..), LevelVar)
 import Thena.Core.Context (Context, entryType, entryVar, piOver)
 import Thena.Core.Term
   ( Core (..)
+  , Var
   , GlobalName
   , Ident (..)
   , close
@@ -402,3 +404,23 @@ eliminatorType d l n0 =
         let (hv, na)   = fresh n
             (below, nb) = hypotheses es na acc
          in (Pi (Ident "ih") (motiveAt is (Free (entryVar e))) (close hv below), nb)
+
+-- | Every 'Var' the environment holds.
+--
+-- **The inductive records are where they are.** A global definition's type and
+-- body are closed, but 'inductiveParameters', 'inductiveIndices' and each
+-- constructor's arguments are 'Context'es — telescopes of *named, numbered*
+-- bindings, minted when the datatype was declared and living in the environment
+-- ever after.
+--
+-- 'Thena.Kernel.certify' needs them: it walks terms it did not build, and
+-- 'eliminatorType' reuses a datatype's own parameter variables while minting
+-- fresh ones beside them. Starting the counter below either is how a fresh
+-- variable collides with a declared one.
+varsInEnv :: GlobalEnv -> [Var]
+varsInEnv e = concatMap (ofInductive . snd) (inductives e)
+  where
+    ofInductive d =
+      map entryVar (inductiveParameters d)
+        ++ map entryVar (inductiveIndices d)
+        ++ concatMap (map entryVar . constructorArguments) (inductiveConstructors d)

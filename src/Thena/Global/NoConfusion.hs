@@ -192,8 +192,13 @@ generateNoConfusion env n0 d
     -- reduce to see the two agree.
     familyAt is = foldl App (Global dn []) (paramVars ++ is)
 
-    eqAt a x y = foldl App (Global (GlobalName "Eq") []) [a, x, y]
-    reflAt a x = foldl App (Global (GlobalName "refl") []) [a, x]
+    -- **At level 0** (MS3 phase 31d). @Eq@ is level-polymorphic now, and
+    -- no-confusion is generated only for a @Type₀@ datatype (the
+    -- 'NotAtTypeZero' guard), whose constructor arguments therefore live at
+    -- @Type₀@ too by the size restriction. So every equation this module
+    -- writes is stated at @Eq {0}@.
+    eqAt a x y = foldl App (Global (GlobalName "Eq") [LZero]) [a, x, y]
+    reflAt a x = foldl App (Global (GlobalName "refl") [LZero]) [a, x]
 
     andAt p q        = foldl App (Global (GlobalName "And") []) [p, q]
     bothAt p q x y   = foldl App (Global (GlobalName "both") []) [p, q, x, y]
@@ -315,7 +320,7 @@ generateNoConfusion env n0 d
           fam      = familyAt (varsOf idx)
           (meq, n4)  = equalityMotive n3
           (mrfl, n5) = reflMethod n4
-          body = Eliminate (GlobalName "Eq") [] [fam] meq [mrfl]
+          body = Eliminate (GlobalName "Eq") [LZero] [fam] meq [mrfl]
                    [Free vx, Free vy] (Free ve)
        in ( lamOver ps (lamOver idx
               (Lam (Ident "x") fam (close vx
@@ -420,9 +425,15 @@ equalityInScope :: GlobalEnv -> Bool
 equalityInScope env = case lookupInductive (GlobalName "Eq") env of
   Nothing -> False
   Just e -> case (inductiveParameters e, inductiveIndices e, inductiveConstructors e) of
-    ([a], [i, j], [c]) ->
-      inductiveLevel e == LZero
-        && entryType a == Universe (LZero)
+    -- **@Eq@ is level-polymorphic in exactly one parameter** (MS3 phase 31d),
+    -- and the shape check follows it: the carrier lives at that parameter, and
+    -- so does the family. Everything this module generates is still stated at
+    -- @Eq {0}@ — no-confusion is only produced for a @Type₀@ datatype (the
+    -- guard below), whose constructor arguments live at @Type₀@ too by the size
+    -- restriction.
+    ([a], [i, j], [c]) | [lv] <- inductiveLevels e ->
+      inductiveLevel e == LVar lv
+        && entryType a == Universe (LVar lv)
         && entryType i == Free (entryVar a)
         && entryType j == Free (entryVar a)
         && constructorName c == GlobalName "refl"

@@ -117,12 +117,12 @@ tests =
           -- generated lemma, extracted and put to the kernel. This is
           -- injectivity of @succ@, which is what a matching branch of the
           -- determinacy proof needs.
-        , ":goal \8704 (a : Term) (b : Term) -> Eq Term (succ a) (succ b) -> Eq Term a b"
+        , ":goal \8704 (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b"
         , "along"
-        , "unify goal \8799 \\ (a : Term) (b : Term) (e : Eq Term (succ a) (succ b)) \
+        , "unify goal \8799 \\ (a : Term) (b : Term) (e : Eq {0} Term (succ a) (succ b)) \
           \-> noConfusionTerm (succ a) (succ b) e"
         , ":extract"
-        , "certify \8704 (a : Term) (b : Term) -> Eq Term (succ a) (succ b) -> Eq Term a b"
+        , "certify \8704 (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b"
         , "back"
         , "data Nat : Type\8320 where { zero' : Nat ; succ' : Nat -> Nat }"
         , "data Vec (A : Type\8320) : Nat -> Type\8320 \
@@ -451,14 +451,14 @@ tests =
       -- rather than loaded.
     , script
         "induction"
-        [ "data Eq (A : Type₀) : A -> A -> Type₀ where { refl : ∀ (a : A) -> Eq A a a }"
+        [ "data Eq {l} (A : Type {l}) : A -> A -> Type {l} where { refl : ∀ (a : A) -> Eq A a a }"
         , "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
         , ":theorem plus : Nat -> Nat -> Nat"
         , "try (\\ (n : Nat) (m : Nat) -> elim Nat () (\\ (t : Nat) -> Nat) (m (\\ (k : Nat) (ih : Nat) -> succ ih)) () n)"
         , "solve"
         , "qed"
         , ":whnf plus (succ zero) (succ zero)"
-        , ":theorem congSucc : ∀ (a : Nat) (b : Nat) (e : Eq Nat a b) -> Eq Nat (succ a) (succ b)"
+        , ":theorem congSucc : ∀ (a : Nat) (b : Nat) (e : Eq {0} Nat a b) -> Eq {0} Nat (succ a) (succ b)"
         , "attack"
         , "intro"
         , "intro"
@@ -470,7 +470,7 @@ tests =
         , "eliminate e"
         , "back"
         , ":where"
-        , "try (\\ (c : Nat) -> refl Nat (succ c))"
+        , "try (\\ (c : Nat) -> refl {0} Nat (succ c))"
         , "solve"
         , "along"
         , "solve"
@@ -481,7 +481,7 @@ tests =
         , "back"
         , "solve"
         , "qed"
-        , ":theorem plusZero : ∀ (n : Nat) -> Eq Nat (plus n zero) n"
+        , ":theorem plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n"
         , "attack"
         , "intro"
         , "into"
@@ -490,10 +490,10 @@ tests =
         , ":show"
         , "back"
         , "back"
-        , "try (refl Nat zero)"
+        , "try (refl {0} Nat zero)"
         , "solve"
         , "along"
-        , "try (\\ (x : Nat) (ih : Eq Nat (plus x zero) x) -> congSucc (plus x zero) x ih)"
+        , "try (\\ (x : Nat) (ih : Eq {0} Nat (plus x zero) x) -> congSucc (plus x zero) x ih)"
         , "solve"
         , "along"
         , "solve"
@@ -528,10 +528,10 @@ tests =
         , ":where"
         , "back"
         , "back"
-        , "try (\\ (q : Eq Nat zero (succ zero)) -> noConfusionNat zero (succ zero) q)"
+        , "try (\\ (q : Eq {0} Nat zero (succ zero)) -> noConfusionNat zero (succ zero) q)"
         , "solve"
         , "along"
-        , "try (\\ (n : Nat) (e : Ev n) (ih : Eq Nat n (succ zero) -> Empty) (q : Eq Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ n) zero (noConfusionNat (succ (succ n)) (succ zero) q))"
+        , "try (\\ (n : Nat) (e : Ev n) (ih : Eq {0} Nat n (succ zero) -> Empty) (q : Eq {0} Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ n) zero (noConfusionNat (succ (succ n)) (succ zero) q))"
         , "solve"
         , "along"
         , "solve"
@@ -568,7 +568,7 @@ tests =
         , "eliminate i"
         , "eliminate n"
         , ":abandon"
-        , "data Eq (A : Type₀) : A -> A -> Type₀ where { refl : ∀ (a : A) -> Eq A a a }"
+        , "data Eq {l} (A : Type {l}) : A -> A -> Type {l} where { refl : ∀ (a : A) -> Eq A a a }"
         , "data Unit : Type₀ where { unit : Unit }"
         , "data Empty : Type₀ where { }"
         , "data And (A : Type₀) (B : Type₀) : Type₀ where { both : ∀ (a : A) (b : B) -> And A B }"
@@ -613,20 +613,20 @@ tests =
       script
         "refining"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
-        , "data Eq (A : Type\8320) : A -> A -> Type\8320 \
-          \where { refl : \8704 (a : A) -> Eq A a a }"
+        , "data Eq {l} (A : Type {l}) : A -> A -> Type {l} \
+          \where { refl {0} : \8704 (a : A) -> Eq {0} A a a }"
           -- Already the goal's type: unification has nothing to do, and the
           -- binding is filled straight in.
         , ":theorem id0 : \8704 (A : Type\8320) -> A -> A"
         , "unify-refine (\\ (A : Type\8320) (a : A) -> a)"
         , ":show"
         , "qed"
-          -- Holes on both sides. @refl A a@ has type @Eq A a a@; unifying that
-          -- with @Eq Nat zero zero@ solves @A@ and @a@.
-        , ":theorem refl0 : Eq Nat zero zero"
+          -- Holes on both sides. @refl {0} A a@ has type @Eq {0} A a a@; unifying that
+          -- with @Eq {0} Nat zero zero@ solves @A@ and @a@.
+        , ":theorem refl0 : Eq {0} Nat zero zero"
         , "claim A : Type\8320"
         , "claim a : A"
-        , "unify-refine (refl A a)"
+        , "unify-refine (refl {0} A a)"
         , ":show"
         , "qed"
         , ":show refl0"
@@ -637,8 +637,8 @@ tests =
           -- development and then fail — it is the case that predates @apply@,
           -- and the reason the rewind lives in the driver rather than in
           -- anything @apply@ owns.
-        , ":theorem wrong : Eq Nat zero (succ zero)"
-        , "unify-refine (refl Nat zero)"
+        , ":theorem wrong : Eq {0} Nat zero (succ zero)"
+        , "unify-refine (refl {0} Nat zero)"
         , ":show"
         , ":abandon"
         ]
@@ -886,8 +886,8 @@ tests =
 -- 'Thena.Global.NoConfusion.NoProducts' means.
 preludeLines :: [String]
 preludeLines =
-  [ "data Eq (A : Type\8320) : A -> A -> Type\8320 \
-    \where { refl : \8704 (a : A) -> Eq A a a }"
+  [ "data Eq {l} (A : Type {l}) : A -> A -> Type {l} \
+    \where { refl {0} : \8704 (a : A) -> Eq {0} A a a }"
   , "data Unit : Type\8320 where { unit : Unit }"
   , "data Empty : Type\8320 where { }"
   , "data And (A : Type\8320) (B : Type\8320) : Type\8320 \

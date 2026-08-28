@@ -55,5 +55,5 @@ tests =
           Just d  ->
             renderCore (names (sessionMachine s')) [] (definitionType d)
               @?= "∀ (t : Term) (t1 : Term) -> Step t t1 \
-                  \-> ∀ (t2 : Term) -> Step t t2 -> Eq Term t1 t2"
+                  \-> ∀ (t2 : Term) -> Step t t2 -> Eq {0} Term t1 t2"
     ]

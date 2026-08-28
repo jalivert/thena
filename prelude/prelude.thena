@@ -1,4 +1,4 @@
-data Eq (A : Type₀) : A -> A -> Type₀ where { refl : ∀ (a : A) -> Eq A a a }
+data Eq {l} (A : Type {l}) : A -> A -> Type {l} where { refl : ∀ (a : A) -> Eq A a a }
 data Unit : Type₀ where { unit : Unit }
 data Empty : Type₀ where { }
 data And (A : Type₀) (B : Type₀) : Type₀ where { both : ∀ (a : A) (b : B) -> And A B }

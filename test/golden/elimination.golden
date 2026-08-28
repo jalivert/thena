@@ -16,7 +16,8 @@ thena spine> eliminate n
 subgoals: zeroMethod, succMethod
 thena spine> :abandon
 abandoned noEq
-thena spine> data Eq (A : Type₀) : A -> A -> Type₀ where { refl : ∀ (a : A) -> Eq A a a }
+thena spine> data Eq {l} (A : Type {l}) : A -> A -> Type {l} where { refl : ∀ (a : A) -> Eq A a a }
+no noConfusionEq: Eq is not declared at Type₀, and Eq relates only Type₀ types
 declared Eq
 thena spine> data Unit : Type₀ where { unit : Unit }
 declared Unit
@@ -59,8 +60,8 @@ context
   n : Nat
   i : Fin n
   b : Below n i
-  bzMethod : ∀ (m : Nat) -> Eq Nat (succ m) n -> Nat
-  bsMethod : ∀ (m : Nat) (j : Fin m) -> Below m j -> (Eq Nat m n -> Nat) -> Eq Nat (succ m) n -> Nat
+  bzMethod : ∀ (m : Nat) -> Eq {0} Nat (succ m) n -> Nat
+  bsMethod : ∀ (m : Nat) (j : Fin m) -> Below m j -> (Eq {0} Nat m n -> Nat) -> Eq {0} Nat (succ m) n -> Nat
 type
   Nat
 thena spine> attack

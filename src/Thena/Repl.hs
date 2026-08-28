@@ -1339,6 +1339,9 @@ renderElimError e = case e of
   IndexTypeDepends k (Ident i) ->
     "index " ++ show k ++ " (" ++ i ++ ") has a type that depends on an earlier index,"
       ++ "\n  so the equation constraining it cannot be stated"
+  IndexTypeIllTyped te ->
+    "the type of a tied index has no universe, so its equation cannot be stated"
+      ++ concatMap ("\n  " ++) (renderTypeError 0 te)
   MotiveIllTyped te ->
     "the goal does not survive generalising the target"
       ++ concatMap ("\n  " ++) (renderTypeError 0 te)

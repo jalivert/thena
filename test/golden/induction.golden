@@ -1,4 +1,5 @@
-thena spine> data Eq (A : Type₀) : A -> A -> Type₀ where { refl : ∀ (a : A) -> Eq A a a }
+thena spine> data Eq {l} (A : Type {l}) : A -> A -> Type {l} where { refl : ∀ (a : A) -> Eq A a a }
+no noConfusionEq: Eq is not declared at Type₀, and Eq relates only Type₀ types
 declared Eq
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
@@ -10,8 +11,8 @@ thena spine> qed
 plus : Nat -> Nat -> Nat   ∎
 thena spine> :whnf plus (succ zero) (succ zero)
 succ (elim Nat () (λ (t : Nat) -> Nat) ((succ zero) (λ (k : Nat) (ih : Nat) -> succ ih)) () zero)
-thena spine> :theorem congSucc : ∀ (a : Nat) (b : Nat) (e : Eq Nat a b) -> Eq Nat (succ a) (succ b)
-proving congSucc : ∀ (a : Nat) (b : Nat) -> Eq Nat a b -> Eq Nat (succ a) (succ b)
+thena spine> :theorem congSucc : ∀ (a : Nat) (b : Nat) (e : Eq {0} Nat a b) -> Eq {0} Nat (succ a) (succ b)
+proving congSucc : ∀ (a : Nat) (b : Nat) -> Eq {0} Nat a b -> Eq {0} Nat (succ a) (succ b)
 thena spine> attack
 thena spine> intro
 thena spine> intro
@@ -25,16 +26,16 @@ subgoals: reflMethod
 thena spine> back
 thena spine> :where
 focus
-  let ? reflMethod : ∀ (a1 : Nat) -> Eq Nat (succ a1) (succ a1) in
+  let ? reflMethod : ∀ (a1 : Nat) -> Eq {0} Nat (succ a1) (succ a1) in
 path
   root ▸ ≐ congSucc ▸ a ▸ b ▸ e
 context
   a : Nat
   b : Nat
-  e : Eq Nat a b
+  e : Eq {0} Nat a b
 type
-  ∀ (a1 : Nat) -> Eq Nat (succ a1) (succ a1)
-thena spine> try (\ (c : Nat) -> refl Nat (succ c))
+  ∀ (a1 : Nat) -> Eq {0} Nat (succ a1) (succ a1)
+thena spine> try (\ (c : Nat) -> refl {0} Nat (succ c))
 thena spine> solve
 thena spine> along
 thena spine> solve
@@ -45,9 +46,9 @@ thena spine> back
 thena spine> back
 thena spine> solve
 thena spine> qed
-congSucc : ∀ (a : Nat) (b : Nat) -> Eq Nat a b -> Eq Nat (succ a) (succ b)   ∎
-thena spine> :theorem plusZero : ∀ (n : Nat) -> Eq Nat (plus n zero) n
-proving plusZero : ∀ (n : Nat) -> Eq Nat (plus n zero) n
+congSucc : ∀ (a : Nat) (b : Nat) -> Eq {0} Nat a b -> Eq {0} Nat (succ a) (succ b)   ∎
+thena spine> :theorem plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n
+proving plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n
 thena spine> attack
 thena spine> intro
 thena spine> into
@@ -55,22 +56,22 @@ thena spine> along
 thena spine> eliminate n
 subgoals: zeroMethod, succMethod
 thena spine> :show
-  let ? plusZero : ∀ (n : Nat) -> Eq Nat (plus n zero) n ≐ (
+  let ? plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n ≐ (
     λ (n : Nat) ->
-    let ? zeroMethod : Eq Nat (plus zero zero) zero in
-    let ? succMethod : ∀ (x : Nat) -> Eq Nat (plus x zero) x -> Eq Nat (plus (succ x) zero) (succ x) in
-▶   let ? plusZero1 : Eq Nat (plus n zero) n ≐ (
-      elim Nat () (λ (target : Nat) -> Eq Nat (plus target zero) target) (zeroMethod succMethod) () n
+    let ? zeroMethod : Eq {0} Nat (plus zero zero) zero in
+    let ? succMethod : ∀ (x : Nat) -> Eq {0} Nat (plus x zero) x -> Eq {0} Nat (plus (succ x) zero) (succ x) in
+▶   let ? plusZero1 : Eq {0} Nat (plus n zero) n ≐ (
+      elim Nat () (λ (target : Nat) -> Eq {0} Nat (plus target zero) target) (zeroMethod succMethod) () n
     ) in
     plusZero1
   ) in
   plusZero
 thena spine> back
 thena spine> back
-thena spine> try (refl Nat zero)
+thena spine> try (refl {0} Nat zero)
 thena spine> solve
 thena spine> along
-thena spine> try (\ (x : Nat) (ih : Eq Nat (plus x zero) x) -> congSucc (plus x zero) x ih)
+thena spine> try (\ (x : Nat) (ih : Eq {0} Nat (plus x zero) x) -> congSucc (plus x zero) x ih)
 thena spine> solve
 thena spine> along
 thena spine> solve
@@ -80,8 +81,8 @@ thena spine> back
 thena spine> back
 thena spine> solve
 thena spine> qed
-plusZero : ∀ (n : Nat) -> Eq Nat (plus n zero) n   ∎
+plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n   ∎
 thena spine> :show plusZero
-plusZero : ∀ (n : Nat) -> Eq Nat (plus n zero) n
-plusZero = let plusZero = λ (n : Nat) -> let zeroMethod = refl Nat zero : Eq Nat (plus zero zero) zero in let succMethod = λ (x : Nat) (ih : Eq Nat (plus x zero) x) -> congSucc (plus x zero) x ih : ∀ (x : Nat) -> Eq Nat (plus x zero) x -> Eq Nat (plus (succ x) zero) (succ x) in let plusZero1 = elim Nat () (λ (target : Nat) -> Eq Nat (plus target zero) target) (zeroMethod succMethod) () n : Eq Nat (plus n zero) n in plusZero1 : ∀ (n : Nat) -> Eq Nat (plus n zero) n in plusZero
+plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n
+plusZero = let plusZero = λ (n : Nat) -> let zeroMethod = refl {0} Nat zero : Eq {0} Nat (plus zero zero) zero in let succMethod = λ (x : Nat) (ih : Eq {0} Nat (plus x zero) x) -> congSucc (plus x zero) x ih : ∀ (x : Nat) -> Eq {0} Nat (plus x zero) x -> Eq {0} Nat (plus (succ x) zero) (succ x) in let plusZero1 = elim Nat () (λ (target : Nat) -> Eq {0} Nat (plus target zero) target) (zeroMethod succMethod) () n : Eq {0} Nat (plus n zero) n in plusZero1 : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n in plusZero
 thena spine> :quit

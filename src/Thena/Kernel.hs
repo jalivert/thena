@@ -27,10 +27,10 @@ module Thena.Kernel
   ( certify
   ) where
 
-import Thena.Core.Term (Core, Var, freeVars)
+import Thena.Core.Term (Core, Var, beyond, freeVars)
 import Thena.Core.Typing (check)
 import Thena.Errors (KernelError (..), Position (..))
-import Thena.Global.Env (GlobalEnv)
+import Thena.Global.Env (GlobalEnv, varsInEnv)
 
 -- | @certify env t ty@ — does @t@ really have type @ty@, trusting nothing the
 -- elaborator produced?
@@ -52,7 +52,23 @@ certify :: GlobalEnv -> Core -> Core -> Either KernelError ()
 certify env t ty = do
   closed t
   closed ty
-  case fst (check env [] 0 t ty) of
+  -- **Start the counter above every variable the environment holds**, not at
+  -- zero (MS3 phase 31d).
+  --
+  -- Zero looks safe because 'closed' has just rejected a term with any free
+  -- variable — but the **global environment is inside the trust boundary**
+  -- (see this module's header), and a datatype's telescopes carry variables
+  -- minted when it was declared. 'Thena.Global.Env.eliminatorType' reuses
+  -- those *and* mints fresh ones beside them, so a checker counting from zero
+  -- mints a variable a prelude datatype already owns, and 'close' captures it.
+  --
+  -- **This was a live bug**, found 2026-08-28: @fst@'s proof over @Sigma@ was
+  -- accepted by @:infer@ (which counts from the machine's live counter) and
+  -- refused by @qed@, with the motive substituted where a parameter belonged.
+  -- It had nothing to do with levels — making the prelude's @Eq@ polymorphic
+  -- shifted the numbering one place and moved @Sigma@'s parameters into range,
+  -- which is all that changed.
+  case fst (check env [] (beyond (varsInEnv env)) t ty) of
     Left e   -> Left (Ill TheTerm e)
     Right () -> Right ()
 
