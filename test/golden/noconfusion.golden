@@ -1,11 +1,11 @@
 thena spine> data Eq {l} (A : Type {l}) : A -> A -> Type {l} where { refl {0} : ∀ (a : A) -> Eq {0} A a a }
 1:57: unexpected {
-thena spine> data Unit : Type₀ where { unit : Unit }
+thena spine> data Unit {l} : Type {l} where { unit : Unit }
 declared Unit
-thena spine> data Empty : Type₀ where { }
+thena spine> data Empty {l} : Type {l} where { }
 declared Empty
-thena spine> data And (A : Type₀) (B : Type₀) : Type₀ where { both : ∀ (a : A) (b : B) -> And A B }
-declared And
+thena spine> data And (A : Type₀) (B : Type₀) : Type₀ where { both {0} : ∀ (a : A) (b : B) -> And {0} A B }
+1:50: unexpected {
 thena spine> data Term : Type₀ where { true : Term ; false : Term ; ifthen : Term -> Term -> Term -> Term ; zero : Term ; succ : Term -> Term }
 declared Term
 thena spine> :show noConfusionTerm

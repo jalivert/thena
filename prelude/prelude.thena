@@ -1,7 +1,7 @@
 data Eq {l} (A : Type {l}) : A -> A -> Type {l} where { refl : ∀ (a : A) -> Eq A a a }
-data Unit : Type₀ where { unit : Unit }
-data Empty : Type₀ where { }
-data And (A : Type₀) (B : Type₀) : Type₀ where { both : ∀ (a : A) (b : B) -> And A B }
+data Unit {l} : Type {l} where { unit : Unit }
+data Empty {l} : Type {l} where { }
+data And {l} (A : Type {l}) (B : Type {l}) : Type {l} where { both : ∀ (a : A) (b : B) -> And A B }
 data Sigma (A : Type₀) (B : A -> Type₀) : Type₀ where { pair : ∀ (a : A) (b : B a) -> Sigma A B }
 :theorem fst : ∀ (A : Type₀) (B : A -> Type₀) (s : Sigma A B) -> A
 try (\ (A : Type₀) (B : A -> Type₀) (s : Sigma A B) -> elim Sigma (A B) (\ (z : Sigma A B) -> A) ((\ (a : A) (b : B a) -> a)) () s)
@@ -11,11 +11,11 @@ qed
 try (\ (A : Type₀) (B : A -> Type₀) (s : Sigma A B) -> elim Sigma (A B) (\ (z : Sigma A B) -> B (fst A B z)) ((\ (a : A) (b : B a) -> b)) () s)
 solve
 qed
-:theorem andLeft : ∀ (A : Type₀) (B : Type₀) (c : And A B) -> A
-try (\ (A : Type₀) (B : Type₀) (c : And A B) -> elim And (A B) (\ (z : And A B) -> A) ((\ (a : A) (b : B) -> a)) () c)
+:theorem andLeft : ∀ (A : Type₀) (B : Type₀) (c : And {0} A B) -> A
+try (\ (A : Type₀) (B : Type₀) (c : And {0} A B) -> elim And {0} (A B) (\ (z : And {0} A B) -> A) ((\ (a : A) (b : B) -> a)) () c)
 solve
 qed
-:theorem andRight : ∀ (A : Type₀) (B : Type₀) (c : And A B) -> B
-try (\ (A : Type₀) (B : Type₀) (c : And A B) -> elim And (A B) (\ (z : And A B) -> B) ((\ (a : A) (b : B) -> b)) () c)
+:theorem andRight : ∀ (A : Type₀) (B : Type₀) (c : And {0} A B) -> B
+try (\ (A : Type₀) (B : Type₀) (c : And {0} A B) -> elim And {0} (A B) (\ (z : And {0} A B) -> B) ((\ (a : A) (b : B) -> b)) () c)
 solve
 qed

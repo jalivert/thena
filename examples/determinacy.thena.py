@@ -1,8 +1,8 @@
 BASE = r'''data Term : Type₀ where { true : Term ; false : Term ; ifthen : Term -> Term -> Term -> Term ; zero : Term ; succ : Term -> Term ; pred : Term -> Term ; iszero : Term -> Term }
 data NV : Term -> Type₀ where { nvZero : NV zero ; nvSucc : ∀ (t : Term) (n : NV t) -> NV (succ t) }
 data Step : Term -> Term -> Type₀ where { eIfTrue : ∀ (t2 : Term) (t3 : Term) -> Step (ifthen true t2 t3) t2 ; eIfFalse : ∀ (t2 : Term) (t3 : Term) -> Step (ifthen false t2 t3) t3 ; eIf : ∀ (t1 : Term) (t1' : Term) (t2 : Term) (t3 : Term) (s : Step t1 t1') -> Step (ifthen t1 t2 t3) (ifthen t1' t2 t3) ; eSucc : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (succ t1) (succ t1') ; ePredZero : Step (pred zero) zero ; ePredSucc : ∀ (v : Term) (nv : NV v) -> Step (pred (succ v)) v ; ePred : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (pred t1) (pred t1') ; eIsZeroZero : Step (iszero zero) true ; eIsZeroSucc : ∀ (v : Term) (nv : NV v) -> Step (iszero (succ v)) false ; eIsZero : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (iszero t1) (iszero t1') }
-:theorem absurd : ∀ (C : Type₀) (e : Empty) -> C
-try (\ (C : Type₀) (e : Empty) -> elim Empty () (\ (t : Empty) -> C) () () e)
+:theorem absurd : ∀ (C : Type₀) (e : Empty {0}) -> C
+try (\ (C : Type₀) (e : Empty {0}) -> elim Empty {0} () (\ (t : Empty {0}) -> C) () () e)
 solve
 qed
 :theorem sym : ∀ (A : Type₀) (a : A) (b : A) (e : Eq {0} A a b) -> Eq {0} A b a
@@ -165,12 +165,12 @@ STEP = [
 ]
 
 # The conjunction NoConfusionTerm builds for a constructor with several
-# arguments: right-nested And, and Unit when there is nothing to conjoin.
+# arguments: right-nested And {0}, and Unit {0} when there is nothing to conjoin.
 # Must agree with Thena.Global.NoConfusion.conjoin exactly.
 def conj(ts):
-    if not ts: return "Unit"
+    if not ts: return "Unit {0}"
     if len(ts) == 1: return ts[0]
-    return "And (%s) (%s)" % (ts[0], conj(ts[1:]))
+    return "And {0} (%s) (%s)" % (ts[0], conj(ts[1:]))
 
 # One projection out of that nest per conjunct. The last is the residue itself,
 # because conj stops wrapping at one element.
@@ -193,7 +193,7 @@ def decompose(a, b, q, goal, ctr):
         x, y, qq = work.pop(0)
         if x[0] == 'c' and y[0] == 'c':
             if x[1] != y[1]:
-                # NoConfusionTerm at two different formers computes to Empty,
+                # NoConfusionTerm at two different formers computes to Empty {0},
                 # so discrimination is absurd rather than a continuation.
                 return (compose(ps, "absurd (%s) (noConfusionTerm %s %s %s)"
                                     % (goal, pp(x,0), pp(y,0), qq)), None)
@@ -256,16 +256,16 @@ def lemma(name, ty, intros, target, left, goal, fin):
 A = "Term"
 
 # ---- values do not step ---------------------------------------------------
-lemma("trueNoStep",  "∀ (u : Term) (s : Step true u) -> Empty", ["u","s"], "s",
-      C("true"), lambda y: "Empty", {})
-lemma("falseNoStep", "∀ (u : Term) (s : Step false u) -> Empty", ["u","s"], "s",
-      C("false"), lambda y: "Empty", {})
-lemma("zeroNoStep",  "∀ (u : Term) (s : Step zero u) -> Empty", ["u","s"], "s",
-      C("zero"), lambda y: "Empty", {})
+lemma("trueNoStep",  "∀ (u : Term) (s : Step true u) -> Empty {0}", ["u","s"], "s",
+      C("true"), lambda y: "Empty {0}", {})
+lemma("falseNoStep", "∀ (u : Term) (s : Step false u) -> Empty {0}", ["u","s"], "s",
+      C("false"), lambda y: "Empty {0}", {})
+lemma("zeroNoStep",  "∀ (u : Term) (s : Step zero u) -> Empty {0}", ["u","s"], "s",
+      C("zero"), lambda y: "Empty {0}", {})
 lemma("succNoStep",
-      "∀ (w : Term) (ih0 : ∀ (u : Term) (s : Step w u) -> Empty) (u : Term) "
-      "(s : Step (succ w) u) -> Empty",
-      ["w","ih0","u","s"], "s", C("succ", V("w")), lambda y: "Empty",
+      "∀ (w : Term) (ih0 : ∀ (u : Term) (s : Step w u) -> Empty {0}) (u : Term) "
+      "(s : Step (succ w) u) -> Empty {0}",
+      ["w","ih0","u","s"], "s", C("succ", V("w")), lambda y: "Empty {0}",
       {"eSucc": lambda lv, g: "ih0 c2 (%s)" % transport("c2","c1","w",eq(lv,"c1","w"),"sr")})
 
 # ---- the ten inversions ---------------------------------------------------
@@ -421,9 +421,9 @@ def det_branch(ct):
     return "\\ %s -> %s u s" % (" ".join("(%s : %s)" % b for b in bs), DET[ct['n']])
 
 NV_SCRIPT = proof("nvNoStep",
-  "∀ (v : Term) (nv : NV v) (u : Term) (s : Step v u) -> Empty", ["v","nv"], "nv",
+  "∀ (v : Term) (nv : NV v) (u : Term) (s : Step v u) -> Empty {0}", ["v","nv"], "nv",
   ["\\ (u : Term) (s : Step zero u) -> zeroNoStep u s",
-   "\\ (c1 : Term) (n : NV c1) (ih : ∀ (u : Term) -> Step c1 u -> Empty) "
+   "\\ (c1 : Term) (n : NV c1) (ih : ∀ (u : Term) -> Step c1 u -> Empty {0}) "
    "(u : Term) (s : Step (succ c1) u) -> succNoStep c1 ih u s"])
 
 if __name__ == "__main__":

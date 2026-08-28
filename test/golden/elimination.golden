@@ -17,13 +17,12 @@ subgoals: zeroMethod, succMethod
 thena spine> :abandon
 abandoned noEq
 thena spine> data Eq {l} (A : Type {l}) : A -> A -> Type {l} where { refl : ∀ (a : A) -> Eq A a a }
-no noConfusionEq: Eq is not declared at Type₀, and Eq relates only Type₀ types
 declared Eq
-thena spine> data Unit : Type₀ where { unit : Unit }
+thena spine> data Unit {l} : Type {l} where { unit : Unit }
 declared Unit
-thena spine> data Empty : Type₀ where { }
+thena spine> data Empty {l} : Type {l} where { }
 declared Empty
-thena spine> data And (A : Type₀) (B : Type₀) : Type₀ where { both : ∀ (a : A) (b : B) -> And A B }
+thena spine> data And {l} (A : Type {l}) (B : Type {l}) : Type {l} where { both : ∀ (a : A) (b : B) -> And A B }
 declared And
 thena spine> data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ where { bz : ∀ (m : Nat) -> Below (succ m) (fz m) ; bs : ∀ (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }
 no noConfusionBelow: bs's argument j has a type that depends on an earlier argument, so its equation cannot be stated

@@ -60,7 +60,7 @@ tests =
         , "data Fin : Nat -> Type\8320 \
           \where { fz : \8704 (n : Nat) -> Fin (succ n) \
           \; fs : \8704 (n : Nat) (i : Fin n) -> Fin (succ n) }"
-        , "data Empty : Type\8320 where { }"
+        , "data Empty {l} : Type {l} where { }"
         , ":elim Nat"
         , ":elim Nat Type\8321"
         , ":elim Fin"
@@ -398,7 +398,7 @@ tests =
         , "data Vec (A : Type₀) : Nat -> Type₀ where { nil : Vec A zero ; cons : ∀ (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ n) }"
         , ":show Vec"
         , ":show cons"
-        , "data Empty : Type₀ where { }"
+        , "data Empty {l} : Type {l} where { }"
         , ":show Empty"
         , "data Nat : Type₀ where { z : Nat }"
         , "data Ordinal : Type₀ where { sup : (Nat -> Ordinal) -> Ordinal }"
@@ -519,7 +519,7 @@ tests =
         , "data Ev : Nat -> Type₀ where { evZero : Ev zero ; evSS : ∀ (n : Nat) (p : Ev n) -> Ev (succ (succ n)) }"
         , ":whnf NoConfusionNat zero (succ zero)"
         , ":whnf NoConfusionNat (succ (succ zero)) (succ zero)"
-        , ":theorem oneNotEven : ∀ (p : Ev (succ zero)) -> Empty"
+        , ":theorem oneNotEven : ∀ (p : Ev (succ zero)) -> Empty {0}"
         , "attack"
         , "intro"
         , "into"
@@ -531,7 +531,7 @@ tests =
         , "try (\\ (q : Eq {0} Nat zero (succ zero)) -> noConfusionNat zero (succ zero) q)"
         , "solve"
         , "along"
-        , "try (\\ (n : Nat) (e : Ev n) (ih : Eq {0} Nat n (succ zero) -> Empty) (q : Eq {0} Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ n) zero (noConfusionNat (succ (succ n)) (succ zero) q))"
+        , "try (\\ (n : Nat) (e : Ev n) (ih : Eq {0} Nat n (succ zero) -> Empty {0}) (q : Eq {0} Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ n) zero (noConfusionNat (succ (succ n)) (succ zero) q))"
         , "solve"
         , "along"
         , "solve"
@@ -569,9 +569,9 @@ tests =
         , "eliminate n"
         , ":abandon"
         , "data Eq {l} (A : Type {l}) : A -> A -> Type {l} where { refl : ∀ (a : A) -> Eq A a a }"
-        , "data Unit : Type₀ where { unit : Unit }"
-        , "data Empty : Type₀ where { }"
-        , "data And (A : Type₀) (B : Type₀) : Type₀ where { both : ∀ (a : A) (b : B) -> And A B }"
+        , "data Unit {l} : Type {l} where { unit : Unit }"
+        , "data Empty {l} : Type {l} where { }"
+        , "data And {l} (A : Type {l}) (B : Type {l}) : Type {l} where { both : ∀ (a : A) (b : B) -> And A B }"
         , "data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ where { bz : ∀ (m : Nat) -> Below (succ m) (fz m) ; bs : ∀ (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }"
         , ":theorem probe : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Nat"
         , "attack"
@@ -877,8 +877,8 @@ preludeLines :: [String]
 preludeLines =
   [ "data Eq {l} (A : Type {l}) : A -> A -> Type {l} \
     \where { refl {0} : \8704 (a : A) -> Eq {0} A a a }"
-  , "data Unit : Type\8320 where { unit : Unit }"
-  , "data Empty : Type\8320 where { }"
+  , "data Unit {l} : Type {l} where { unit : Unit }"
+  , "data Empty {l} : Type {l} where { }"
   , "data And (A : Type\8320) (B : Type\8320) : Type\8320 \
-    \where { both : \8704 (a : A) (b : B) -> And A B }"
+    \where { both {0} : \8704 (a : A) (b : B) -> And {0} A B }"
   ]

@@ -90,12 +90,13 @@ preludeTests =
   , testCase "and J computes on refl" $ do
       (s, _) <- startingSession
       afterLines s
-        [ ":whnf elim Eq (Unit) (\\ (x : Unit) (y : Unit) (p : Eq Unit x y) -> Unit) \
-          \((\\ (a : Unit) -> a)) (unit unit) (refl Unit unit)"
+        [ ":whnf elim Eq {0} (Unit {0}) \
+          \(\\ (x : Unit {0}) (y : Unit {0}) (p : Eq {0} (Unit {0}) x y) -> Unit {0}) \
+          \((\\ (a : Unit {0}) -> a)) (unit {0} unit {0}) (refl {0} (Unit {0}) (unit {0}))"
         ]
         (\l -> do
             loadedError l @?= Nothing
-            renderedLast l @?= Just "unit")
+            renderedLast l @?= Just "unit {0}")
 
     -- The real @repl@ has the prelude in scope and 'transcript' does not; this
     -- is the difference, made visible.

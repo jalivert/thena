@@ -22,10 +22,10 @@ module Thena.EliminatorTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Level (Level (..), levelOfNat)
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Level (Level (..), instantiateLevels, levelOfNat)
+import Thena.Core.Term (Core, GlobalName (..), substLevelsIn)
 import Thena.Declared (natFin, natFinCounter, natVec, natVecCounter)
-import Thena.Global.Env (GlobalEnv, eliminatorType, lookupInductive)
+import Thena.Global.Env (GlobalEnv, InductiveDefinition, eliminatorType, inductiveLevels, lookupInductive)
 import Thena.Repl (renderEliminator)
 
 tests :: TestTree
@@ -79,7 +79,7 @@ ruleTests =
     -- between them. Every other fixture has at least one method, so this is
     -- the only case that shows the methods are a list and not a non-empty one.
   , rule "Empty, with no constructors" natFin natFinCounter "Empty" (LZero)
-      "elim Empty : ∀ (P : Empty -> Type₀) (target : Empty) -> P target"
+      "elim Empty : ∀ (P : Empty {0} -> Type₀) (target : Empty {0}) -> P target"
   ]
 
 -- | §3.7's "universe polymorphism of the eliminator, without universe
@@ -103,6 +103,15 @@ rule :: String -> GlobalEnv -> Int -> String -> Level -> String -> TestTree
 rule name env n0 d l expect = testCase name $
   case lookupInductive g env of
     Nothing  -> assertFailure (d ++ " is not declared")
-    Just def -> renderEliminator n0 g (fst (eliminatorType def l n0)) @?= [expect]
+    -- **Instantiated at the datatype's own levels** (MS3 phase 31g), which is
+    -- what a use site sees. Rendering it uninstantiated would pin @ℓ@'s number
+    -- — a counter value, and no business of an assertion about the shape.
+    Just def -> renderEliminator n0 g (atZero def (fst (eliminatorType def l n0))) @?= [expect]
   where
     g = GlobalName d
+
+-- | A datatype's own level parameters, all instantiated at zero.
+atZero :: InductiveDefinition -> Core -> Core
+atZero d t = case instantiateLevels (inductiveLevels d) (map (const LZero) (inductiveLevels d)) of
+  Just sub -> substLevelsIn sub t
+  Nothing  -> t

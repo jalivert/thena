@@ -1,5 +1,4 @@
 thena spine> data Eq {l} (A : Type {l}) : A -> A -> Type {l} where { refl : ∀ (a : A) -> Eq A a a }
-no noConfusionEq: Eq is not declared at Type₀, and Eq relates only Type₀ types
 declared Eq
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat

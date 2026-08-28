@@ -3,8 +3,8 @@ no noConfusionNV: nvSucc's argument n has a type that depends on an earlier argu
 declared NV
 no noConfusionStep: eIf's argument s has a type that depends on an earlier argument, so its equation cannot be stated
 declared Step
-proving absurd : ∀ (C : Type₀) -> Empty -> C
-absurd : ∀ (C : Type₀) -> Empty -> C   ∎
+proving absurd : ∀ (C : Type₀) -> Empty {0} -> C
+absurd : ∀ (C : Type₀) -> Empty {0} -> C   ∎
 proving sym : ∀ (A : Type₀) (a : A) (b : A) -> Eq {0} A a b -> Eq {0} A b a
 subgoals: reflMethod
 sym : ∀ (A : Type₀) (a : A) (b : A) -> Eq {0} A a b -> Eq {0} A b a   ∎
@@ -17,21 +17,21 @@ cong : ∀ (A : Type₀) (B : Type₀) (f : A -> B) (a : A) (b : A) -> Eq {0} A 
 proving trans : ∀ (A : Type₀) (a : A) (b : A) (c : A) -> Eq {0} A a b -> Eq {0} A b c -> Eq {0} A a c
 subgoals: reflMethod
 trans : ∀ (A : Type₀) (a : A) (b : A) (c : A) -> Eq {0} A a b -> Eq {0} A b c -> Eq {0} A a c   ∎
-proving trueNoStep : ∀ (u : Term) -> Step true u -> Empty
+proving trueNoStep : ∀ (u : Term) -> Step true u -> Empty {0}
 subgoals: eIfTrueMethod, eIfFalseMethod, eIfMethod, eSuccMethod, ePredZeroMethod, ePredSuccMethod, ePredMethod, eIsZeroZeroMethod, eIsZeroSuccMethod, eIsZeroMethod
-trueNoStep : ∀ (u : Term) -> Step true u -> Empty   ∎
-proving falseNoStep : ∀ (u : Term) -> Step false u -> Empty
+trueNoStep : ∀ (u : Term) -> Step true u -> Empty {0}   ∎
+proving falseNoStep : ∀ (u : Term) -> Step false u -> Empty {0}
 subgoals: eIfTrueMethod, eIfFalseMethod, eIfMethod, eSuccMethod, ePredZeroMethod, ePredSuccMethod, ePredMethod, eIsZeroZeroMethod, eIsZeroSuccMethod, eIsZeroMethod
-falseNoStep : ∀ (u : Term) -> Step false u -> Empty   ∎
-proving zeroNoStep : ∀ (u : Term) -> Step zero u -> Empty
+falseNoStep : ∀ (u : Term) -> Step false u -> Empty {0}   ∎
+proving zeroNoStep : ∀ (u : Term) -> Step zero u -> Empty {0}
 subgoals: eIfTrueMethod, eIfFalseMethod, eIfMethod, eSuccMethod, ePredZeroMethod, ePredSuccMethod, ePredMethod, eIsZeroZeroMethod, eIsZeroSuccMethod, eIsZeroMethod
-zeroNoStep : ∀ (u : Term) -> Step zero u -> Empty   ∎
-proving succNoStep : ∀ (w : Term) -> (∀ (u : Term) -> Step w u -> Empty) -> ∀ (u : Term) -> Step (succ w) u -> Empty
+zeroNoStep : ∀ (u : Term) -> Step zero u -> Empty {0}   ∎
+proving succNoStep : ∀ (w : Term) -> (∀ (u : Term) -> Step w u -> Empty {0}) -> ∀ (u : Term) -> Step (succ w) u -> Empty {0}
 subgoals: eIfTrueMethod, eIfFalseMethod, eIfMethod, eSuccMethod, ePredZeroMethod, ePredSuccMethod, ePredMethod, eIsZeroZeroMethod, eIsZeroSuccMethod, eIsZeroMethod
-succNoStep : ∀ (w : Term) -> (∀ (u : Term) -> Step w u -> Empty) -> ∀ (u : Term) -> Step (succ w) u -> Empty   ∎
-proving nvNoStep : ∀ (v : Term) -> NV v -> ∀ (u : Term) -> Step v u -> Empty
+succNoStep : ∀ (w : Term) -> (∀ (u : Term) -> Step w u -> Empty {0}) -> ∀ (u : Term) -> Step (succ w) u -> Empty {0}   ∎
+proving nvNoStep : ∀ (v : Term) -> NV v -> ∀ (u : Term) -> Step v u -> Empty {0}
 subgoals: nvZeroMethod, nvSuccMethod
-nvNoStep : ∀ (v : Term) -> NV v -> ∀ (u : Term) -> Step v u -> Empty   ∎
+nvNoStep : ∀ (v : Term) -> NV v -> ∀ (u : Term) -> Step v u -> Empty {0}   ∎
 proving invIfTrue : ∀ (a : Term) (b : Term) (u : Term) -> Step (ifthen true a b) u -> Eq {0} Term a u
 subgoals: eIfTrueMethod, eIfFalseMethod, eIfMethod, eSuccMethod, ePredZeroMethod, ePredSuccMethod, ePredMethod, eIsZeroZeroMethod, eIsZeroSuccMethod, eIsZeroMethod
 invIfTrue : ∀ (a : Term) (b : Term) (u : Term) -> Step (ifthen true a b) u -> Eq {0} Term a u   ∎

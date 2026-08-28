@@ -25,7 +25,6 @@ module Thena.NoConfusionTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
-import Thena.Core.Level (levelOfNat)
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core, GlobalName (..), Ident (..), fresh)
@@ -95,11 +94,11 @@ taplReduces = reduces eqTapl eqTaplCounter
 caseTests :: [TestTree]
 caseTests =
   [ testCase "same nullary former — no equations to give" $
-      natReduces "NoConfusionNat zero zero" "Unit"
+      natReduces "NoConfusionNat zero zero" "Unit {0}"
   , testCase "different formers — the empty type" $
-      natReduces "NoConfusionNat zero (succ zero)" "Empty"
+      natReduces "NoConfusionNat zero (succ zero)" "Empty {0}"
   , testCase "and the other way round" $
-      natReduces "NoConfusionNat (succ zero) zero" "Empty"
+      natReduces "NoConfusionNat (succ zero) zero" "Empty {0}"
   , -- One argument conjoins nothing, so the case /is/ the equation and a use
     -- site applies the lemma and stops. That is the common case by a wide
     -- margin — six of MS1's seven target constructors.
@@ -112,7 +111,7 @@ caseTests =
     testCase "three arguments — three equations, in argument order" $
       taplReduces
         "NoConfusionTerm (ifthen true zero (succ zero)) (ifthen false zero zero)"
-        "And (Eq {0} Term true false) (And (Eq {0} Term zero zero) \
+        "And {0} (Eq {0} Term true false) (And {0} (Eq {0} Term zero zero) \
         \(Eq {0} Term (succ zero) zero))"
   , testCase "the family's own type" $
       typeOfGlobal eqTapl eqTaplCounter "NoConfusionTerm"
@@ -166,7 +165,7 @@ useTests =
     testCase "discrimination closes an impossible branch" $
       provesIn
         "Eq {0} Term true (succ x)"
-        "elim Empty () (\\ (t : Empty) -> Eq {0} Term x y) () () \
+        "elim Empty {0} () (\\ (t : Empty {0}) -> Eq {0} Term x y) () () \
         \(noConfusionTerm true (succ x) e)"
         "Eq {0} Term x y"
   , -- Three equations, right-nested in argument order, each reachable. Spelled
@@ -176,12 +175,12 @@ useTests =
     testCase "the second of three equations" $
       provesIn
         "Eq {0} Term (ifthen true x zero) (ifthen false y zero)"
-        "elim And ((Eq {0} Term true false) (And (Eq {0} Term x y) (Eq {0} Term zero zero))) \
-        \(\\ (z : And (Eq {0} Term true false) (And (Eq {0} Term x y) (Eq {0} Term zero zero))) \
+        "elim And {0} ((Eq {0} Term true false) (And {0} (Eq {0} Term x y) (Eq {0} Term zero zero))) \
+        \(\\ (z : And {0} (Eq {0} Term true false) (And {0} (Eq {0} Term x y) (Eq {0} Term zero zero))) \
         \-> Eq {0} Term x y) \
-        \((\\ (q1 : Eq {0} Term true false) (r : And (Eq {0} Term x y) (Eq {0} Term zero zero)) \
-        \-> elim And ((Eq {0} Term x y) (Eq {0} Term zero zero)) \
-        \(\\ (z : And (Eq {0} Term x y) (Eq {0} Term zero zero)) -> Eq {0} Term x y) \
+        \((\\ (q1 : Eq {0} Term true false) (r : And {0} (Eq {0} Term x y) (Eq {0} Term zero zero)) \
+        \-> elim And {0} ((Eq {0} Term x y) (Eq {0} Term zero zero)) \
+        \(\\ (z : And {0} (Eq {0} Term x y) (Eq {0} Term zero zero)) -> Eq {0} Term x y) \
         \((\\ (q2 : Eq {0} Term x y) (q3 : Eq {0} Term zero zero) -> q2)) () r)) () \
         \(noConfusionTerm (ifthen true x zero) (ifthen false y zero) e)"
         "Eq {0} Term x y"
@@ -202,17 +201,11 @@ kernelTests =
   , testCase "Nat's lemma" (certified eqNat "noConfusionNat")
   , testCase "Term's family" (certified eqTapl "NoConfusionTerm")
   , testCase "Term's lemma" (certified eqTapl "noConfusionTerm")
-    -- **@Eq@ no longer gets one, and that is a consequence of it becoming
-    -- level-polymorphic** (MS3 phase 31d): the generator is written for a
-    -- @Type₀@ datatype and @Eq@'s level is now its own parameter, so the
-    -- @NotAtTypeZero@ guard declines. **Phase 31f is where no-confusion learns
-    -- to work at any level**, and this case comes back with it.
-    --
-    -- Nothing depended on it: @examples/determinacy.thena@ runs to the end
-    -- without it, and @Eq@ has one constructor, so its table is injectivity
-    -- only.
-  , testCase "Eq's own is declined now that Eq is polymorphic" $
-      lookupDefinition (GlobalName "noConfusionEq") eqNat @?= Nothing
+    -- **Back, as of MS3 phase 31g.** Phase 31d had to give it up: @Eq@ became
+    -- level-polymorphic and the generator was written for a @Type₀@ datatype.
+    -- 31g generalises the generator to the datatype's own level, and @Eq@'s
+    -- own table is the case that proves it — a polymorphic, indexed family.
+  , testCase "Eq's own, which is an indexed family" (certified eqNat "noConfusionEq")
 
     -- **Found by phase 17, and it was a real bug.** The generator freshens a
     -- telescope in two places, and 'freshen' gave each entry a new variable
@@ -269,10 +262,14 @@ skipTests =
   , testCase "Fin: so is fs's" $
       skipped (preludeDecls ++ [natDecl]) finDecl
         @?= Right (Just (DependentArguments (GlobalName "fs") (Ident "i")))
-  , -- Eq {0} relates only Type₀ types, so nothing above it can have an equation.
-    testCase "a datatype above Type₀" $
-      skipped [eqDecl] "Big : Type\8321 where { wrap : Type\8320 -> Big }"
-        @?= Right (Just (NotAtTypeZero (levelOfNat 1)))
+  , -- **This asserted the opposite until MS3 phase 31g**, and the change is
+    -- §2 item 2: the generator states its equations at the *datatype's own*
+    -- level rather than at @Type₀@, so a family above @Type₀@ gets its table
+    -- like any other. Cumulativity is what makes the equations conjoinable —
+    -- @wrap@'s argument type is @Type₀@, which lifts into @Type₁@.
+    testCase "a datatype above Type₀ gets one now" $
+      skipped preludeDecls "Big : Type\8321 where { wrap : Type\8320 -> Big }"
+        @?= Right Nothing
   , -- Silent, and it has to be: this is the state every prelude-free golden
     -- transcript declares its datatypes in, and a note on every @data@ line
     -- would be noise about the environment rather than about the declaration.
@@ -291,15 +288,10 @@ skipTests =
     -- since @And@'s no-confusion states equations. A blanket precondition
     -- silently loses @NoConfusionEq@ at that very line, which is what the
     -- first draft of the phase did.
-    -- **Declined now, because @Eq@ is level-polymorphic** (phase 31d) and the
-    -- generator is written for a @Type₀@ datatype. The point the case was
-    -- making — that the *products* precondition must be per datatype, not
-    -- blanket, or @Eq@ loses its own table at the very line that declares it —
-    -- is now made by @Unit@ below instead. **Phase 31f restores this.**
-    testCase "Eq alone: declined, since Eq is no longer at Type0" $
+    testCase "Eq alone: its own table needs no product, so it is generated" $
       (lookupDefinition (GlobalName "NoConfusionEq") (fst (declared [eqDecl])) == Nothing)
-        @?= True
-  , -- Two constructors want an off-diagonal @Empty@, and there is none.
+        @?= False
+  , -- Two constructors want an off-diagonal @Empty {0}@, and there is none.
     testCase "Nat with Eq but no Empty — skipped, and quietly" $
       skipped [eqDecl] natDecl @?= Right Nothing
   , testCase "and then nothing was generated" $
