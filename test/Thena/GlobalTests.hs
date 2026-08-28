@@ -151,18 +151,18 @@ wrapperTests :: [TestTree]
 wrapperTests =
   [ testCase "a nullary former's wrapper is the bare Canonical" $
       fmap definitionBody (lookupDefinition (named "zero") nat)
-        @?= Just (Canonical (named "zero") [])
+        @?= Just (Canonical (named "zero") [] [])
   , testCase "a unary former's wrapper abstracts and applies" $
       fmap definitionBody (lookupDefinition (named "succ") nat)
-        @?= Just (Lam (Ident "n") natTy (close v (Canonical (named "succ") [Free v])))
+        @?= Just (Lam (Ident "n") natTy (close v (Canonical (named "succ") [] [Free v])))
   , testCase "the type former gets a wrapper too" $
       fmap definitionBody (lookupDefinition (named "Nat") nat)
-        @?= Just (Canonical (named "Nat") [])
+        @?= Just (Canonical (named "Nat") [] [])
   , testCase "every wrapper body is a saturated Canonical (§12 invariant 6)" $
       sequence_ (map saturated (formerNames natVec))
   ]
   where
-    natTy   = Global (named "Nat")
+    natTy   = Global (named "Nat") []
     (v, _)  = fresh 0
 
     -- Peel the wrapper's λs, counting them, and check the body applies the
@@ -176,7 +176,7 @@ wrapperTests =
       where
         peel k t = case t of
           Lam _ _ sc -> peel (k + 1) (open v sc)
-          Canonical f as
+          Canonical f _ as
             | f == g && length as == k && k == arity -> pure ()
           _ -> assertFailure (show g ++ ": wrapper body is " ++ show t)
 
@@ -277,7 +277,7 @@ universeTests =
   , refused "an argument whose type is not a type at all"
       "T : Type\8320 where { c : zero -> T }"
       (ArgumentNotAType (named "c") (Ident "x")
-         (NotAType [] (Global (named "zero")) (Canonical (named "Nat") [])))
+         (NotAType [] (Global (named "zero") []) (Canonical (named "Nat") [] [])))
   ]
 
 -- --------------------------------------------------------------------------

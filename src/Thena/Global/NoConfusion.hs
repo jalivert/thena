@@ -190,13 +190,13 @@ generateNoConfusion env n0 d
     -- @D params indices@, as an application of the generated wrapper — the same
     -- spelling 'Thena.Global.Env.constructorTarget' builds, so nothing has to
     -- reduce to see the two agree.
-    familyAt is = foldl App (Global dn) (paramVars ++ is)
+    familyAt is = foldl App (Global dn []) (paramVars ++ is)
 
-    eqAt a x y = foldl App (Global (GlobalName "Eq")) [a, x, y]
-    reflAt a x = foldl App (Global (GlobalName "refl")) [a, x]
+    eqAt a x y = foldl App (Global (GlobalName "Eq") []) [a, x, y]
+    reflAt a x = foldl App (Global (GlobalName "refl") []) [a, x]
 
-    andAt p q        = foldl App (Global (GlobalName "And")) [p, q]
-    bothAt p q x y   = foldl App (Global (GlobalName "both")) [p, q, x, y]
+    andAt p q        = foldl App (Global (GlobalName "And") []) [p, q]
+    bothAt p q x y   = foldl App (Global (GlobalName "both") []) [p, q, x, y]
 
     -- ----------------------------------------------------------------------
     -- The family
@@ -233,7 +233,7 @@ generateNoConfusion env n0 d
           (mt, n3) = typeMotive n2
           (ms, n4) = each (outerMethod mt (Free vy)) n3 cs
           fam      = familyAt (varsOf idx)
-          body     = Eliminate dn paramVars mt ms (varsOf idx) (Free vx)
+          body     = Eliminate dn [] paramVars mt ms (varsOf idx) (Free vx)
        in ( lamOver ps (lamOver idx
               (Lam (Ident "x") fam (close vx
                 (Lam (Ident "y") fam (close vy body)))))
@@ -256,7 +256,7 @@ generateNoConfusion env n0 d
     outerMethod mt y c n =
       let args       = constructorArguments c
           (ms, n1)   = each (innerMethod mt args c) n cs
-          inner      = Eliminate dn paramVars mt ms (varsOf idx) y
+          inner      = Eliminate dn [] paramVars mt ms (varsOf idx) y
           (body, n2) = withHypotheses mt args inner n1
        in (lamOver args body, n2)
 
@@ -276,7 +276,7 @@ generateNoConfusion env n0 d
     -- Discharging an impossible branch is @elim Empty@ at whatever goal is
     -- wanted, which is a goal at /any/ level; the CPS form it replaces could
     -- only ever reach a @Type₀@ one.
-    discriminate = Global (GlobalName "Empty")
+    discriminate = Global (GlobalName "Empty") []
 
     -- @And (Eq A₁ a₁ a\'₁) (… (Eq Aₙ aₙ a\'ₙ))@, right-nested, and @Unit@ for a
     -- constructor with no arguments. Well typed only because 'dependentArgument'
@@ -297,7 +297,7 @@ generateNoConfusion env n0 d
           (vy, n2) = fresh n1
           (ve, n3) = fresh n2
           fam      = familyAt (varsOf idx)
-          result   = foldl App (Global famName)
+          result   = foldl App (Global famName [])
                        (paramVars ++ varsOf idx ++ [Free vx, Free vy])
        in ( piOver ps (piOver idx
               (Pi (Ident "x") fam (close vx
@@ -315,7 +315,7 @@ generateNoConfusion env n0 d
           fam      = familyAt (varsOf idx)
           (meq, n4)  = equalityMotive n3
           (mrfl, n5) = reflMethod n4
-          body = Eliminate (GlobalName "Eq") [fam] meq [mrfl]
+          body = Eliminate (GlobalName "Eq") [] [fam] meq [mrfl]
                    [Free vx, Free vy] (Free ve)
        in ( lamOver ps (lamOver idx
               (Lam (Ident "x") fam (close vx
@@ -332,7 +332,7 @@ generateNoConfusion env n0 d
           (vv, n2) = fresh n1
           (vw, n3) = fresh n2
           fam      = familyAt (varsOf idx)
-          result   = foldl App (Global famName)
+          result   = foldl App (Global famName [])
                        (paramVars ++ varsOf idx ++ [Free vu, Free vv])
        in ( Lam (Ident "u") fam (close vu
               (Lam (Ident "v") fam (close vv
@@ -346,14 +346,14 @@ generateNoConfusion env n0 d
       let (va, n1)   = fresh n
           (mdg, n2)  = diagonalMotive n1
           (ms,  n3)  = each (diagonalMethod mdg) n2 cs
-          body       = Eliminate dn paramVars mdg ms (varsOf idx) (Free va)
+          body       = Eliminate dn [] paramVars mdg ms (varsOf idx) (Free va)
        in (Lam (Ident "a") (familyAt (varsOf idx)) (close va body), n3)
 
     -- @λ indices (z : D params indices) . NoConfusionD params indices z z@.
     diagonalMotive n =
       let (is, n1) = freshen n idx
           (vz, n2) = fresh n1
-          result   = foldl App (Global famName)
+          result   = foldl App (Global famName [])
                        (paramVars ++ varsOf is ++ [Free vz, Free vz])
        in ( lamOver is (Lam (Ident "z") (familyAt (varsOf is)) (close vz result))
           , n2
@@ -395,13 +395,13 @@ generateNoConfusion env n0 d
     -- conjoin. Right-nested rather than left so that the one-argument case is
     -- the bare equation with no wrapper at all, which is the overwhelmingly
     -- common one.
-    conjoin []       = Global (GlobalName "Unit")
+    conjoin []       = Global (GlobalName "Unit") []
     conjoin [t]      = t
     conjoin (t : ts) = andAt t (conjoin ts)
 
     -- The proof of 'conjoin' applied to the same list, given a proof of each
     -- conjunct. Taken as pairs so the two nestings cannot drift apart.
-    conjoinProof []             = Global (GlobalName "unit")
+    conjoinProof []             = Global (GlobalName "unit") []
     conjoinProof [(_, p)]       = p
     conjoinProof ((t, p) : tps) =
       bothAt t (conjoin (map fst tps)) p (conjoinProof tps)

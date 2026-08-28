@@ -256,7 +256,7 @@ headOf st ctx t = case spineHead t of
   -- target is neutral. If that target's own head can still change — a hole, a
   -- guess — the elimination can still compute and nothing may be concluded
   -- from its shape.
-  Eliminate _ _ _ _ _ tgt -> case headOf st ctx tgt of
+  Eliminate _ _ _ _ _ _ tgt -> case headOf st ctx tgt of
     HRigid -> HRigid
     _      -> HBlocked
   _ -> HRigid
@@ -427,11 +427,15 @@ rigidRigid env st ctx (Equate xi s t ty) = case (s, t) of
 
   (App f a, App g b) -> sequential [(f, g), (a, b)]
 
-  (Canonical f as, Canonical g bs)
-    | f == g && length as == length bs -> sequential (zip as bs)
+  -- **Level arguments are compared, not skipped.** Two uses of the same former
+  -- at different levels are different terms, and a level is not a 'Core' so it
+  -- cannot become a sub-problem — it either matches here or the terms clash.
+  (Canonical f ks as, Canonical g ls bs)
+    | f == g && ks == ls && length as == length bs -> sequential (zip as bs)
 
-  (Eliminate d ps m ms is tgt, Eliminate d' ps' m' ms' is' tgt')
+  (Eliminate d ks ps m ms is tgt, Eliminate d' ls ps' m' ms' is' tgt')
     | d == d'
+    , ks == ls
     , length ps == length ps'
     , length ms == length ms'
     , length is == length is' ->

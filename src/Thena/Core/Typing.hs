@@ -66,7 +66,7 @@ infer env ctx n term = case term of
   -- has an entry in both tables under one name, and what @g@ /means/ written
   -- as a term is the generated wrapper, not the type of the saturated
   -- 'Canonical' the wrapper's body builds.
-  Global g -> case lookupDefinition g env of
+  Global g _ -> case lookupDefinition g env of
     Just d  -> (Right (definitionType d), n)
     Nothing -> case lookupConstant g env of
       Just t  -> (Right t, n)
@@ -112,7 +112,7 @@ infer env ctx n term = case term of
 
   -- A saturated former. Its arity is read from the same place δ reads it, so
   -- the checker and the reducer cannot disagree about when one is complete.
-  Canonical g as -> case formerArity g env of
+  Canonical g _ as -> case formerArity g env of
     Nothing -> (Left (UnknownGlobal g), n)
     Just k
       | length as > k -> (Left (OverApplied g), n)
@@ -130,7 +130,7 @@ infer env ctx n term = case term of
   -- eliminator's type says their types are, exactly as every other argument is.
   -- 'eliminatorType''s binder order is 'Eliminate''s own field order, which is
   -- also the order §2.6 writes them in, so the walk needs no reshuffling.
-  Eliminate d ps m ms is tgt -> case lookupInductive d env of
+  Eliminate d _ ps m ms is tgt -> case lookupInductive d env of
     Nothing  -> (Left (UnknownDatatype d), n)
     Just def ->
       motiveLevel env ctx n def m `andThen` \l n1 ->

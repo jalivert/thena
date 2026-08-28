@@ -518,7 +518,7 @@ go :: Int -> Env -> Prec -> Core -> String
 go n env prec term = case term of
   Bound i               -> "‹bound " ++ show i ++ "›"
   Free v                -> nameOf v env
-  Global (GlobalName g) -> g
+  Global (GlobalName g) _ -> g
   Universe l            -> renderLevel l
 
   App f a -> parensIf (prec > AtApp) (go n env AtApp f ++ " " ++ go n env AtAtom a)
@@ -559,7 +559,7 @@ go n env prec term = case term of
   -- qualification. Giving 'Canonical' a spelling of its own was the
   -- alternative and §12 invariant 6 forbids it: two spellings of a saturated
   -- former application is exactly what that invariant exists to prevent.
-  Canonical (GlobalName f) as
+  Canonical (GlobalName f) _ as
     | null as   -> f
     | otherwise -> parensIf (prec > AtApp) (unwords (f : map (go n env AtAtom) as))
 
@@ -567,7 +567,7 @@ go n env prec term = case term of
   -- positional, in 'Eliminate'\'s own field order, each group parenthesized
   -- so a motive or a target cannot be mistaken for the start of the next
   -- group the way an unparenthesized term could.
-  Eliminate (GlobalName d) ps m ms is t ->
+  Eliminate (GlobalName d) _ ps m ms is t ->
     parensIf (prec > AtTop) $
       unwords
         [ "elim", d
@@ -850,11 +850,11 @@ partOf s = case s of
   IntoLetValue {}               -> Val
   IntoLetType {}                -> Type
   IntoLetBody {}                -> Body
-  IntoCanonArg _ before _       -> CanonArg (length before + 1)
-  IntoElimParam _ before _ _ _ _ _ -> Param (length before + 1)
+  IntoCanonArg _ _ before _       -> CanonArg (length before + 1)
+  IntoElimParam _ _ before _ _ _ _ _ -> Param (length before + 1)
   IntoElimMotive {}             -> Motive
-  IntoElimMethod _ _ _ before _ _ _ -> Method (length before + 1)
-  IntoElimIndex _ _ _ _ before _ _  -> Index (length before + 1)
+  IntoElimMethod _ _ _ _ before _ _ _ -> Method (length before + 1)
+  IntoElimIndex _ _ _ _ _ before _ _  -> Index (length before + 1)
   IntoElimTarget {}             -> Target
 
 -- | A 'Part' as the user types it (§4.7, and "Thena.Driver"'s @partWords@).

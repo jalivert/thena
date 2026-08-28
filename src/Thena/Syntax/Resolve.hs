@@ -93,7 +93,7 @@ core env gs ctx local n raw = case raw of
     Nothing -> case lookupEntry s ctx of
       Just v  -> Right (Free v, n)
       Nothing
-        | GlobalName s `elem` gs -> Right (Global (GlobalName s), n)
+        | GlobalName s `elem` gs -> Right (Global (GlobalName s) [], n)
         | otherwise              -> Left (NotInScope s)
 
   RawUniverse k -> Right (Universe (levelOfNat k), n)
@@ -157,7 +157,7 @@ core env gs ctx local n raw = case raw of
         then Left (WrongNumberOfMethods d wantM (length ms'))
         else if length is' /= wantI
           then Left (WrongNumberOfEliminationIndices d wantI (length is'))
-          else Right (Eliminate dn ps' m' ms' is' t', n5)
+          else Right (Eliminate dn [] ps' m' ms' is' t', n5)
 
   RawClaim {}   -> Left (NotACoreTerm AHole)
   RawGuess {}   -> Left (NotACoreTerm AGuess)
@@ -182,7 +182,7 @@ datatypeNamed
   :: GlobalEnv -> Globals -> Context -> Local -> String
   -> Either ResolveError GlobalName
 datatypeNamed env gs ctx local d = case core env gs ctx local 0 (RawName d) of
-  Right (Global g, _) -> Right g
+  Right (Global g _, _) -> Right g
   _                   -> Left (NotADatatype d)
 
 -- | A run of terms in the same local scope, left to right, threading the
@@ -333,7 +333,7 @@ targetIndices
   :: GlobalName -> Context -> Int -> String -> Core
   -> Either ResolveError [Core]
 targetIndices dn params want cn t = case spine t of
-  (Global g, as)
+  (Global g _, as)
     | g == dn ->
         if length as /= length params + want
           then Left (TargetArgumentCount cn (length params + want) (length as))

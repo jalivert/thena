@@ -120,8 +120,8 @@ formTests =
       typeOf "Type\8320" @?= Right (Universe (levelOfNat 1))
   , testCase "a variable takes its type from the context" $
       let (v, n) = fresh natVecCounter
-          ctx    = [Hypothesis v (Ident "x") (Global (named "Nat"))]
-       in fst (infer natVec ctx n (Free v)) @?= Right (Global (named "Nat"))
+          ctx    = [Hypothesis v (Ident "x") (Global (named "Nat") [])]
+       in fst (infer natVec ctx n (Free v)) @?= Right (Global (named "Nat") [])
   , testCase "a lambda gets a Pi over its own domain" $
       hasType "\\ (x : Nat) -> x" "Nat -> Nat"
   , testCase "a dependent lambda too" $
@@ -296,7 +296,7 @@ errorTests =
             Left (UnknownVariable _ _) -> pure ()
             other                      -> assertFailure (show other)
   , testCase "a global that is not declared" $
-      fst (infer natVec [] natVecCounter (Global (named "nowhere")))
+      fst (infer natVec [] natVecCounter (Global (named "nowhere") []))
         @?= Left (UnknownGlobal (named "nowhere"))
   , testCase "applying something that is not a function" $
       case typeOf "zero zero" of
@@ -307,12 +307,12 @@ errorTests =
         Left (NotAType _ _ _) -> pure ()
         other                 -> assertFailure (show other)
   , testCase "an unsaturated Canonical, which only a hand-built term can be" $
-      case fst (infer natVec [] natVecCounter (Canonical (named "succ") [])) of
+      case fst (infer natVec [] natVecCounter (Canonical (named "succ") [] [])) of
         Left (Unsaturated _ _) -> pure ()
         other                  -> assertFailure (show other)
   , testCase "an over-applied Canonical" $
       case fst (infer natVec [] natVecCounter
-                  (Canonical (named "zero") [Canonical (named "zero") []])) of
+                  (Canonical (named "zero") [] [Canonical (named "zero") [] []])) of
         Left (OverApplied _) -> pure ()
         other                -> assertFailure (show other)
   , testCase "a loose de Bruijn index reaching the checker" $

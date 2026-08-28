@@ -253,7 +253,7 @@ positive dn cn i = peel False
       _ -> settle peeled n t
 
     settle peeled n t = case fst (spine t) of
-      Global g
+      Global g _
         | g == dn ->
             if peeled
               then Left (HigherOrderRecursion cn i)
@@ -294,7 +294,7 @@ generate d env = addInductive dn d (foldl former env (typeFormer : map value cs)
     former e (g, tel, ty) =
       addDefinition g (MkDefinition ty body) (addConstant g ty e)
       where
-        body = lamOver tel (Canonical g (map (Free . entryVar) tel))
+        body = lamOver tel (Canonical g [] (map (Free . entryVar) tel))
 
 -- | An application spine, head first.
 spine :: Core -> (Core, [Core])

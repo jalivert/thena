@@ -65,6 +65,7 @@ import Data.Foldable (toList)
 import Data.List ((\\))
 import Data.Maybe (mapMaybe)
 
+import Thena.Core.Level (Level)
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Term
   ( Core (..)
@@ -162,12 +163,16 @@ data TermStep
   | IntoLetValue Ident      Core (Scope Core)  -- ^ @x = □ : S . t@
   | IntoLetType  Ident Core      (Scope Core)  -- ^ @x = s : □ . t@
   | IntoLetBody  Var Ident Core Core           -- ^ @x = s : S . □@ — the opened binder
-  | IntoCanonArg GlobalName [Core] [Core]      -- ^ @c a₁ … □ … aₙ@
-  | IntoElimParam  GlobalName [Core] [Core] Core [Core] [Core] Core
-  | IntoElimMotive GlobalName [Core]            [Core] [Core] Core
-  | IntoElimMethod GlobalName [Core] Core [Core] [Core] [Core] Core
-  | IntoElimIndex  GlobalName [Core] Core [Core] [Core] [Core] Core
-  | IntoElimTarget GlobalName [Core] Core [Core] [Core]
+  -- **Each of these carries the node's level arguments** (MS3 phase 29).
+  -- Descending into a former's argument or an elimination's component and
+  -- rebuilding on the way out must put back the levels it went in with; the
+  -- slot is the only thing that remembers them while the focus is inside.
+  | IntoCanonArg GlobalName [Level] [Core] [Core]   -- ^ @c a₁ … □ … aₙ@
+  | IntoElimParam  GlobalName [Level] [Core] [Core] Core [Core] [Core] Core
+  | IntoElimMotive GlobalName [Level] [Core]            [Core] [Core] Core
+  | IntoElimMethod GlobalName [Level] [Core] Core [Core] [Core] [Core] Core
+  | IntoElimIndex  GlobalName [Level] [Core] Core [Core] [Core] [Core] Core
+  | IntoElimTarget GlobalName [Level] [Core] Core [Core] [Core]
   deriving (Eq, Show)
 
 -- | Which core field a descent names — one per 'TermStep', so that no word
@@ -263,12 +268,12 @@ termStep s t = case s of
   IntoLetValue i ty b     -> Let i t ty b
   IntoLetType  i v b      -> Let i v t b
   IntoLetBody  x i v ty   -> Let i v ty (close x t)
-  IntoCanonArg f bs as    -> Canonical f (bs ++ t : as)
-  IntoElimParam  d bs as m ms is tgt -> Eliminate d (bs ++ t : as) m ms is tgt
-  IntoElimMotive d ps      ms is tgt -> Eliminate d ps t ms is tgt
-  IntoElimMethod d ps m bs as is tgt -> Eliminate d ps m (bs ++ t : as) is tgt
-  IntoElimIndex  d ps m ms bs as tgt -> Eliminate d ps m ms (bs ++ t : as) tgt
-  IntoElimTarget d ps m ms is        -> Eliminate d ps m ms is t
+  IntoCanonArg f ls bs as -> Canonical f ls (bs ++ t : as)
+  IntoElimParam  d ls bs as m ms is tgt -> Eliminate d ls (bs ++ t : as) m ms is tgt
+  IntoElimMotive d ls ps      ms is tgt -> Eliminate d ls ps t ms is tgt
+  IntoElimMethod d ls ps m bs as is tgt -> Eliminate d ls ps m (bs ++ t : as) is tgt
+  IntoElimIndex  d ls ps m ms bs as tgt -> Eliminate d ls ps m ms (bs ++ t : as) tgt
+  IntoElimTarget d ls ps m ms is        -> Eliminate d ls ps m ms is t
 
 -- | The prefix: everything above the focus, root first. Always meaningful,
 -- whichever fragment the focus is in — §4.0 A4's \"the prefix spans both
@@ -448,22 +453,22 @@ down part n cur = case cur of
       let (w, n1) = fresh n
        in Right (InCore p x (ts :> IntoLetBody w i v s) (open w b), n1)
 
-    (CanonArg k, Canonical f as) -> do
+    (CanonArg k, Canonical f ls as) -> do
       (bs, a, as') <- pick k as
-      here n (IntoCanonArg f bs as') a
-    (Param k, Eliminate d ps m ms is tgt) -> do
+      here n (IntoCanonArg f ls bs as') a
+    (Param k, Eliminate d ls ps m ms is tgt) -> do
       (bs, a, as) <- pick k ps
-      here n (IntoElimParam d bs as m ms is tgt) a
-    (Motive, Eliminate d ps m ms is tgt) ->
-      here n (IntoElimMotive d ps ms is tgt) m
-    (Method k, Eliminate d ps m ms is tgt) -> do
+      here n (IntoElimParam d ls bs as m ms is tgt) a
+    (Motive, Eliminate d ls ps m ms is tgt) ->
+      here n (IntoElimMotive d ls ps ms is tgt) m
+    (Method k, Eliminate d ls ps m ms is tgt) -> do
       (bs, a, as) <- pick k ms
-      here n (IntoElimMethod d ps m bs as is tgt) a
-    (Index k, Eliminate d ps m ms is tgt) -> do
+      here n (IntoElimMethod d ls ps m bs as is tgt) a
+    (Index k, Eliminate d ls ps m ms is tgt) -> do
       (bs, a, as) <- pick k is
-      here n (IntoElimIndex d ps m ms bs as tgt) a
-    (Target, Eliminate d ps m ms is tgt) ->
-      here n (IntoElimTarget d ps m ms is) tgt
+      here n (IntoElimIndex d ls ps m ms bs as tgt) a
+    (Target, Eliminate d ls ps m ms is tgt) ->
+      here n (IntoElimTarget d ls ps m ms is) tgt
 
     _ -> Left NoSuchPart
     where

@@ -212,7 +212,7 @@ eliminate env ctx n0 goal tgt =
             | (k, e) <- zip [(0 :: Int) ..] (inductiveIndices d)
             ]
 
-          familyAt is = foldl App (Global (inductiveName d)) (ps ++ is)
+          familyAt is = foldl App (Global (inductiveName d) []) (ps ++ is)
 
           -- The generalised goal. Target first; see the note above.
           (goalX,  n4) = replaceTerm tgt xv n3 goal
@@ -291,7 +291,7 @@ eliminate env ctx n0 goal tgt =
           -- point of the scheme (§3.7, thesis §3.5). Only the tied indices have
           -- one; a friendly index was abstracted outright and carries none.
           proof = foldl App node
-            [ Canonical reflexivity [ity, a] | (ity, _, a) <- tied ]
+            [ Canonical reflexivity [] [ity, a] | (ity, _, a) <- tied ]
        in case check env (ctx ++ methodEntries) n10 proof goal of
             (Left e, n11)  -> (Left (SchemeIllTyped e), n11)
             (Right (), n11) -> (Right (Elimination holes proof), n11)
@@ -338,7 +338,7 @@ eliminate env ctx n0 goal tgt =
          in (Pi i dom' (close v body), n3)
       other -> (other, n)
 
-    equationOf ity l r = foldl App (Global equality) [ity, l, r]
+    equationOf ity l r = foldl App (Global equality []) [ity, l, r]
 
     -- The entry the target /is/, when it is a variable. It is the one entry
     -- allowed to mention a friendly index — the whole point is that the target
@@ -371,8 +371,8 @@ spineOf = go []
   where
     go acc t = case t of
       App f a         -> go (a : acc) f
-      Global g        -> Just (g, acc)
-      Canonical g as  -> Just (g, as ++ acc)
+      Global g _        -> Just (g, acc)
+      Canonical g _ as  -> Just (g, as ++ acc)
       _               -> Nothing
 
 -- | Replace parameter variables by the terms the target supplied for them.
@@ -411,15 +411,15 @@ replaceTerm needle v = go
             let (f', n1) = go n f
                 (a', n2) = go n1 a
              in (App f' a', n2)
-          Canonical g as ->
-            let (as', n1) = list n as in (Canonical g as', n1)
-          Eliminate d ps m ms is tg ->
+          Canonical g _ as ->
+            let (as', n1) = list n as in (Canonical g [] as', n1)
+          Eliminate d _ ps m ms is tg ->
             let (ps', n1) = list n ps
                 (m',  n2) = go n1 m
                 (ms', n3) = list n2 ms
                 (is', n4) = list n3 is
                 (tg', n5) = go n4 tg
-             in (Eliminate d ps' m' ms' is' tg', n5)
+             in (Eliminate d [] ps' m' ms' is' tg', n5)
           _ -> (t, n)
 
     binder con i s sc n =

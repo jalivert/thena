@@ -200,7 +200,7 @@ constructorType d c =
 -- store them a second time (§3.7).
 constructorTarget :: InductiveDefinition -> ConstructorDefinition -> Core
 constructorTarget d c =
-  foldl App (Global (inductiveName d))
+  foldl App (Global (inductiveName d) [])
     (map (Free . entryVar) (inductiveParameters d) ++ constructorIndices c)
 
 -- | How many arguments a generated former wrapper takes before its body's
@@ -262,7 +262,7 @@ formerArity g e = case lookup g (inductives e) of
 -- lifted, this function and both its callers change in the same commit.
 recursiveArgument :: GlobalName -> Int -> Core -> Maybe [Core]
 recursiveArgument dn np ty = case spine ty of
-  (Global g, args) | g == dn -> Just (drop np args)
+  (Global g _, args) | g == dn -> Just (drop np args)
   _                          -> Nothing
   where
     spine = go []
@@ -325,7 +325,7 @@ eliminatorType d l n0 =
     indexVars = map (Free . entryVar) indices
 
     -- @D params is@
-    familyAt is = foldl App (Global dn) (paramVars ++ is)
+    familyAt is = foldl App (Global dn []) (paramVars ++ is)
 
     -- @P is v@
     motiveAt is v = foldl App (Free pv) (is ++ [v])
@@ -352,7 +352,7 @@ eliminatorType d l n0 =
     methodType c n =
       let args = constructorArguments c
           goal = motiveAt (constructorIndices c)
-                          (Canonical (constructorName c)
+                          (Canonical (constructorName c) []
                                      (paramVars ++ map (Free . entryVar) args))
           (body, na) = hypotheses args n goal
        in (piOver args body, na)

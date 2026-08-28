@@ -79,15 +79,16 @@ newtype Scope a = MkScope a
 data Core
   = Bound Int                          -- ^ a binder inside this term
   | Free Var                           -- ^ a component in the context
-  | Global GlobalName                  -- ^ a definition in the global environment
+  | Global GlobalName [Level]          -- ^ a definition, at level arguments
   | Universe Level
   | Pi Ident Core (Scope Core)         -- ^ @Π x : S . B@
   | Lam Ident Core (Scope Core)        -- ^ @λ x : S . b@
   | App Core Core
   | Let Ident Core Core (Scope Core)   -- ^ @x = s : S . t@
-  | Canonical GlobalName [Core]        -- ^ saturated application of a former
+  | Canonical GlobalName [Level] [Core] -- ^ saturated former, at level arguments
   | Eliminate                          -- ^ saturated use of an eliminator
       { eliminated :: GlobalName
+      , levels     :: [Level]
       , parameters :: [Core]
       , motive     :: Core
       , methods    :: [Core]
@@ -111,14 +112,14 @@ data Core
 instance Eq Core where
   Bound i        == Bound j          = i == j
   Free x         == Free y           = x == y
-  Global f       == Global g         = f == g
+  Global f ks    == Global g ls      = f == g && ks == ls
   Universe k     == Universe l       = k == l
   Pi _ s b       == Pi _ s' b'       = s == s' && b == b'
   Lam _ s b      == Lam _ s' b'      = s == s' && b == b'
   App f a        == App g c          = f == g && a == c
   Let _ v s b    == Let _ v' s' b'   = v == v' && s == s' && b == b'
-  Canonical f as == Canonical g bs   = f == g && as == bs
-  Eliminate d ps m ms is t == Eliminate d' ps' m' ms' is' t' =
+  Canonical f _ as == Canonical g _ bs   = f == g && as == bs
+  Eliminate d _ ps m ms is t == Eliminate d' _ ps' m' ms' is' t' =
     d == d' && ps == ps' && m == m' && ms == ms' && is == is' && t == t'
   _ == _ = False
 
@@ -131,15 +132,15 @@ close x = MkScope . go 0
     go d t = case t of
       Bound i        -> Bound i
       Free y         -> if y == x then Bound d else Free y
-      Global g       -> Global g
+      Global g ls    -> Global g ls
       Universe k     -> Universe k
       Pi i s b       -> Pi i (go d s) (under d b)
       Lam i s b      -> Lam i (go d s) (under d b)
       App f a        -> App (go d f) (go d a)
       Let i v s b    -> Let i (go d v) (go d s) (under d b)
-      Canonical f as -> Canonical f (map (go d) as)
-      Eliminate dn ps m ms is tgt ->
-        Eliminate dn (map (go d) ps) (go d m) (map (go d) ms)
+      Canonical f ls as -> Canonical f ls (map (go d) as)
+      Eliminate dn ls ps m ms is tgt ->
+        Eliminate dn ls (map (go d) ps) (go d m) (map (go d) ms)
                   (map (go d) is) (go d tgt)
 
     under :: Int -> Scope Core -> Scope Core
@@ -161,15 +162,15 @@ instantiate v (MkScope body) = go 0 body
     go d t = case t of
       Bound i        -> if i == d then v else Bound i
       Free y         -> Free y
-      Global g       -> Global g
+      Global g ls    -> Global g ls
       Universe k     -> Universe k
       Pi i s b       -> Pi i (go d s) (under d b)
       Lam i s b      -> Lam i (go d s) (under d b)
       App f a        -> App (go d f) (go d a)
       Let i w s b    -> Let i (go d w) (go d s) (under d b)
-      Canonical f as -> Canonical f (map (go d) as)
-      Eliminate dn ps m ms is tgt ->
-        Eliminate dn (map (go d) ps) (go d m) (map (go d) ms)
+      Canonical f ls as -> Canonical f ls (map (go d) as)
+      Eliminate dn ls ps m ms is tgt ->
+        Eliminate dn ls (map (go d) ps) (go d m) (map (go d) ms)
                   (map (go d) is) (go d tgt)
 
     under :: Int -> Scope Core -> Scope Core
@@ -194,14 +195,14 @@ freeVars = nub . go
     go t = case t of
       Bound _                     -> []
       Free y                      -> [y]
-      Global _                    -> []
+      Global _ _                  -> []
       Universe _                  -> []
       Pi _ s (MkScope b)          -> go s ++ go b
       Lam _ s (MkScope b)         -> go s ++ go b
       App f a                     -> go f ++ go a
       Let _ v s (MkScope b)       -> go v ++ go s ++ go b
-      Canonical _ as              -> concatMap go as
-      Eliminate _ ps m ms is tgt  ->
+      Canonical _ _ as              -> concatMap go as
+      Eliminate _ _ ps m ms is tgt  ->
         concatMap go ps ++ go m ++ concatMap go ms ++ concatMap go is ++ go tgt
 
 -- | The global names a term mentions, in order of first occurrence, without
@@ -219,12 +220,12 @@ globalsIn = nub . go
     go t = case t of
       Bound _                     -> []
       Free _                      -> []
-      Global g                    -> [g]
+      Global g _                  -> [g]
       Universe _                  -> []
       Pi _ s (MkScope b)          -> go s ++ go b
       Lam _ s (MkScope b)         -> go s ++ go b
       App f a                     -> go f ++ go a
       Let _ v s (MkScope b)       -> go v ++ go s ++ go b
-      Canonical g as              -> g : concatMap go as
-      Eliminate d ps m ms is tgt  ->
+      Canonical g _ as              -> g : concatMap go as
+      Eliminate d _ ps m ms is tgt  ->
         d : (concatMap go ps ++ go m ++ concatMap go ms ++ concatMap go is ++ go tgt)

@@ -13,6 +13,7 @@ module Thena.Core.Convert
   ( convert
   ) where
 
+import Thena.Core.Level (Level)
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), fresh, open)
@@ -56,7 +57,7 @@ convert env = go
         | x == y    -> ok n
         | otherwise -> bad n [] (VariablesDiffer x y)
 
-      (Global f, Global g)
+      (Global f _, Global g _)
         | f == g    -> ok n
         | otherwise -> bad n [] (NamesDiffer f g)
 
@@ -72,13 +73,17 @@ convert env = go
       (App f a, App g b) ->
         both ctx n (TheFunction, f, g) (TheArgument, a, b)
 
-      (Canonical f as, Canonical g bs)
+      (Canonical f ks as, Canonical g ls bs)
         | f /= g              -> bad n [] (NamesDiffer f g)
+        | length ks /= length ls -> bad n [] (CountsDiffer (length ks) (length ls))
+        | Just (a, b) <- levelsDiffer ks ls -> bad n [] (LevelsDiffer a b)
         | length as /= length bs -> bad n [] (CountsDiffer (length as) (length bs))
         | otherwise -> list ctx n (TheArgumentOf f) as bs
 
-      (Eliminate d ps m ms is tgt, Eliminate d' ps' m' ms' is' tgt')
+      (Eliminate d ks ps m ms is tgt, Eliminate d' ls ps' m' ms' is' tgt')
         | d /= d'                   -> bad n [] (NamesDiffer d d')
+        | length ks /= length ls    -> bad n [] (CountsDiffer (length ks) (length ls))
+        | Just (a, b) <- levelsDiffer ks ls -> bad n [] (LevelsDiffer a b)
         | length ps /= length ps'   -> bad n [] (CountsDiffer (length ps) (length ps'))
         | length ms /= length ms'   -> bad n [] (CountsDiffer (length ms) (length ms'))
         | length is /= length is'   -> bad n [] (CountsDiffer (length is) (length is'))
@@ -152,3 +157,14 @@ andThen :: (Maybe ConversionFailure, Int) -> (Int -> (Maybe ConversionFailure, I
 andThen (Just f, n)  _ = (Just f, n)
 andThen (Nothing, n) k = k n
 infixl 1 `andThen`
+
+-- | The first pair of level arguments that are not the same level, if any.
+--
+-- Compared **up to the level algebra**, since that is what @Eq Level@ is —
+-- @Type (max 0 1)@ and @Type 1@ are one level. Two uses of the same former or
+-- eliminator at different levels are different terms, so this is a clash and
+-- not a sub-problem: a level is not a 'Core' and cannot be converted further.
+levelsDiffer :: [Level] -> [Level] -> Maybe (Level, Level)
+levelsDiffer ks ls = case [(a, b) | (a, b) <- zip ks ls, a /= b] of
+  (p : _) -> Just p
+  []      -> Nothing

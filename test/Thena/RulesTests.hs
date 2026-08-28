@@ -154,11 +154,11 @@ matchTests =
       -- and must match GoalTypeIsPi." Written down, @Arrow@ is a 'Global' and
       -- not a 'Pi'; a head that did not reduce would miss it.
     , testCase "a goal type that only reduces to a Π still matches" $
-        matching withArrow (guessAt (Global (GlobalName "Arrow")))
+        matching withArrow (guessAt (Global (GlobalName "Arrow") []))
           @?= ["intro", "solve", "regret"]
 
     , testCase "and does not, in an environment where it does not unfold" $
-        matching emptyGlobals (guessAt (Global (GlobalName "Arrow")))
+        matching emptyGlobals (guessAt (Global (GlobalName "Arrow") []))
           @?= ["solve", "regret"]
 
       -- The one test that must NOT reduce: whnf δ-reduces a term-level let
