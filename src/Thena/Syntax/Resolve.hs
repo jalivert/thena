@@ -172,9 +172,10 @@ core env gs ctx local lvs n raw = case raw of
   -- §3.6's "one namespace, the innermost wins" that round-tripped perfectly
   -- and so was invisible to every test. Now a shadowed name resolves to the
   -- local and is refused, because a local is not a datatype.
-  RawElim d ps m ms is t -> do
+  RawElim d rls ps m ms is t -> do
     dn        <- datatypeNamed env gs ctx local d
     def       <- maybe (Left (NotADatatype d)) Right (lookupInductive dn env)
+    dls       <- mapM (levelArg lvs) rls
     (ps', n1) <- coreList env gs ctx local lvs n ps
     (m', n2)  <- core env gs ctx local lvs n1 m
     (ms', n3) <- coreList env gs ctx local lvs n2 ms
@@ -189,7 +190,7 @@ core env gs ctx local lvs n raw = case raw of
         then Left (WrongNumberOfMethods d wantM (length ms'))
         else if length is' /= wantI
           then Left (WrongNumberOfEliminationIndices d wantI (length is'))
-          else Right (Eliminate dn [] ps' m' ms' is' t', n5)
+          else Right (Eliminate dn dls ps' m' ms' is' t', n5)
 
   RawClaim {}   -> Left (NotACoreTerm AHole)
   RawGuess {}   -> Left (NotACoreTerm AGuess)

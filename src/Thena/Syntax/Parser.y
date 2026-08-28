@@ -102,8 +102,13 @@ Term :: { Raw }
                                                    { RawGuess $3 $5 $8 $11 }
   | Constraint '▸' Term                            { RawPending $1 $3 }
   | '[|' Term '|]'                                 { RawQuote $2 }
+  -- **Level arguments are written or omitted** (MS3 phase 31c). Omitting them
+  -- is the only spelling for a monomorphic family, which is every family
+  -- written before this phase, so nothing existing moves.
   | elim ident '(' Atoms ')' Atom '(' Atoms ')' '(' Atoms ')' Atom
-      { RawElim $2 (reverse $4) $6 (reverse $8) (reverse $11) $13 }
+      { RawElim $2 [] (reverse $4) $6 (reverse $8) (reverse $11) $13 }
+  | elim ident LevelArgs '(' Atoms ')' Atom '(' Atoms ')' '(' Atoms ')' Atom
+      { RawElim $2 $3 (reverse $5) $7 (reverse $9) (reverse $12) $14 }
   | App '->' Term                                  { RawArrow $1 $3 }
   | App                                            { $1 }
 

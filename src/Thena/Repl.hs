@@ -527,7 +527,7 @@ go :: Int -> Env -> Prec -> Core -> String
 go n env prec term = case term of
   Bound i               -> "‹bound " ++ show i ++ "›"
   Free v                -> nameOf v env
-  Global (GlobalName g) _ -> g
+  Global (GlobalName g) ls -> g ++ levelArgs ls
   Universe l            -> renderLevel l
 
   App f a -> parensIf (prec > AtApp) (go n env AtApp f ++ " " ++ go n env AtAtom a)
@@ -568,18 +568,20 @@ go n env prec term = case term of
   -- qualification. Giving 'Canonical' a spelling of its own was the
   -- alternative and §12 invariant 6 forbids it: two spellings of a saturated
   -- former application is exactly what that invariant exists to prevent.
-  Canonical (GlobalName f) _ as
-    | null as   -> f
-    | otherwise -> parensIf (prec > AtApp) (unwords (f : map (go n env AtAtom) as))
+  Canonical (GlobalName f) ls as
+    | null as   -> f ++ levelArgs ls
+    | otherwise ->
+        parensIf (prec > AtApp)
+          (unwords ((f ++ levelArgs ls) : map (go n env AtAtom) as))
 
   -- @elim d (params) motive (methods) (indices) target@ (§2.6, phase 7) —
   -- positional, in 'Eliminate'\'s own field order, each group parenthesized
   -- so a motive or a target cannot be mistaken for the start of the next
   -- group the way an unparenthesized term could.
-  Eliminate (GlobalName d) _ ps m ms is t ->
+  Eliminate (GlobalName d) ls ps m ms is t ->
     parensIf (prec > AtTop) $
       unwords
-        [ "elim", d
+        [ "elim", d ++ levelArgs ls
         , atoms ps
         , go n env AtAtom m
         , atoms ms
@@ -654,15 +656,20 @@ subscript = map sub . show
 -- unexercised one.
 renderLevel :: Level -> String
 renderLevel l = case normalise l of
-  Normal c []  -> "Type" ++ subscript c
-  Normal c vs  -> "Type (" ++ intercalate " ⊔ " (constant ++ map var vs) ++ ")"
-    where
-      constant  = [subscriptFree c | c > 0 || null vs]
-      var (v, k)
-        | k == 0    = levelVarName v
-        | otherwise = "suc" ++ concat (replicate (k - 1) " (suc") ++ " "
-                        ++ levelVarName v ++ concat (replicate (k - 1) ")")
-      subscriptFree = show
+  Normal c [] -> "Type" ++ subscript c
+  nf          -> "Type (" ++ renderLevelBody nf ++ ")"
+
+-- | A level's own notation, without the @Type@ a universe wears — what goes
+-- inside @{…}@ at a use site, and inside the parentheses of a @Typeₙ@ that has
+-- variables in it.
+renderLevelBody :: Normal -> String
+renderLevelBody (Normal c vs) =
+  intercalate " ⊔ " ([show c | c > 0 || null vs] ++ map var vs)
+  where
+    var (v, k)
+      | k == 0    = levelVarName v
+      | otherwise = "suc" ++ concat (replicate (k - 1) " (suc") ++ " "
+                      ++ levelVarName v ++ concat (replicate (k - 1) ")")
 
 -- | A level variable's display name, numbered from the shared counter.
 --
@@ -1123,12 +1130,14 @@ renderRaw = raw False
                 ++ " in " ++ raw False b)
     raw p (RawPending _ b)  = wrap p ("κ ▸ " ++ raw False b)
     raw _ (RawQuote t)      = "⌜" ++ raw False t ++ "⌝"
-    raw p (RawElim d ps mot ms is tgt) =
-      wrap p ("elim " ++ d ++ group ps ++ " " ++ raw True mot
+    raw p (RawElim d rls ps mot ms is tgt) =
+      wrap p ("elim " ++ d ++ levelGroup rls ++ group ps ++ " " ++ raw True mot
                 ++ " " ++ group ms ++ " " ++ group is ++ " " ++ raw True tgt)
 
     binder (RawBinder x ty) = " (" ++ x ++ " : " ++ raw False ty ++ ")"
     group ts = "(" ++ intercalate ", " (map (raw False) ts) ++ ")"
+    levelGroup [] = ""
+    levelGroup ls = " {" ++ unwords (map rawLevel ls) ++ "}"
 
     wrap True t  = "(" ++ t ++ ")"
     wrap False t = t
@@ -1488,6 +1497,29 @@ renderChoices cs = map one cs
     one c =
       show (pointId c) ++ "  " ++ nameString (pointRule c)
         ++ "   untried: " ++ intercalate ", " (map nameString (pointAlts c))
+
+-- | A reference's level **arguments**, as a use site writes them: @{0 ℓ}@, and
+-- nothing at all when there are none (MS3 phase 31c).
+--
+-- **Printing them is what keeps output re-readable.** A polymorphic @Id@
+-- printed as @Id A a b@ re-parses to a reference with no level arguments, which
+-- is an arity error — so the printer would have been producing text the reader
+-- could not feed back in. Everything monomorphic prints exactly as before,
+-- since its list is empty.
+levelArgs :: [Level] -> String
+levelArgs [] = ""
+levelArgs ls = " {" ++ unwords (map renderLevelAtom ls) ++ "}"
+
+-- | A level argument inside @{…}@ — bare, without the @Type@ a universe wears.
+renderLevelAtom :: Level -> String
+renderLevelAtom l = case normalise l of
+  nf@(Normal _ []) -> renderLevelBody nf
+  nf@(Normal 0 [(_, 0)]) -> renderLevelBody nf
+  -- **Not writable, and it says so by parenthesising.** The surface only admits
+  -- atoms (phase 30 §3), so a compound level can only have been built by
+  -- inference — which arrives in phase 33. Printing it as an expression is
+  -- honest; printing it as an atom would produce text that does not re-read.
+  nf -> "(" ++ renderLevelBody nf ++ ")"
 
 -- | A definition's prenex level parameters, as a declaration writes them:
 -- @{ℓ₀ ℓ₁}@, and nothing at all when there are none (phase 31b).

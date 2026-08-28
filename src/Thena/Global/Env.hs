@@ -40,7 +40,7 @@ module Thena.Global.Env
   , eliminatorType
   ) where
 
-import Thena.Core.Level (Level, LevelVar)
+import Thena.Core.Level (Level (..), LevelVar)
 import Thena.Core.Context (Context, entryType, entryVar, piOver)
 import Thena.Core.Term
   ( Core (..)
@@ -230,7 +230,11 @@ constructorType d c =
 -- store them a second time (§3.7).
 constructorTarget :: InductiveDefinition -> ConstructorDefinition -> Core
 constructorTarget d c =
-  foldl App (Global (inductiveName d) [])
+  -- **At the datatype's own level parameters** (MS3 phase 31c). A constructor's
+  -- target is the family it builds, and inside the declaration that family is
+  -- the one being declared — so the reference carries exactly the parameters,
+  -- and instantiating the constructor instantiates its target with it.
+  foldl App (Global (inductiveName d) (map LVar (inductiveLevels d)))
     (map (Free . entryVar) (inductiveParameters d) ++ constructorIndices c)
 
 -- | How many arguments a generated former wrapper takes before its body's
@@ -355,7 +359,7 @@ eliminatorType d l n0 =
     indexVars = map (Free . entryVar) indices
 
     -- @D params is@
-    familyAt is = foldl App (Global dn []) (paramVars ++ is)
+    familyAt is = foldl App (Global dn (map LVar (inductiveLevels d))) (paramVars ++ is)
 
     -- @P is v@
     motiveAt is v = foldl App (Free pv) (is ++ [v])
@@ -382,7 +386,7 @@ eliminatorType d l n0 =
     methodType c n =
       let args = constructorArguments c
           goal = motiveAt (constructorIndices c)
-                          (Canonical (constructorName c) []
+                          (Canonical (constructorName c) (map LVar (inductiveLevels d))
                                      (paramVars ++ map (Free . entryVar) args))
           (body, na) = hypotheses args n goal
        in (piOver args body, na)

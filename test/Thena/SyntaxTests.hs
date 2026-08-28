@@ -95,8 +95,8 @@ genRaw = sized . go
             pure (RawLet x v ty b)
         , -- Nat has no parameters, no indices, and two constructors, so the
           -- shape is fixed: () motive (mz ms) ().
-          RawElim "Nat" [] <$> half <*> ((\a b -> [a, b]) <$> half <*> half)
-                           <*> pure [] <*> half
+          RawElim "Nat" [] [] <$> half <*> ((\a b -> [a, b]) <$> half <*> half)
+                              <*> pure [] <*> half
         ]
       where
         half = resize (n `div` 2) (genRaw scope)

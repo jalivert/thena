@@ -160,12 +160,30 @@ infer env ctx n term = case term of
   -- eliminator's type says their types are, exactly as every other argument is.
   -- 'eliminatorType''s binder order is 'Eliminate''s own field order, which is
   -- also the order §2.6 writes them in, so the walk needs no reshuffling.
-  Eliminate d _ ps m ms is tgt -> case lookupInductive d env of
+  -- **The datatype's level arguments are instantiated first** (MS3 phase 31c).
+  -- Without this the eliminator's type is built from the *declaration*, whose
+  -- types mention the datatype's rigid level parameters — so eliminating a
+  -- polymorphic family produced a type with free level variables in it, which
+  -- is nonsense the checker then compared against.
+  --
+  -- Phase 31b did not catch it because nothing polymorphic had been eliminated
+  -- yet: @Canonical@ instantiates and @Eliminate@ did not.
+  --
+  -- **The motive's level stays derived**, and deliberately: reading it *is* the
+  -- check that the abstraction was type-preserving (see 'motiveLevel' and this
+  -- case's original note), so it is not an argument that could be supplied
+  -- wrongly.
+  Eliminate d ls ps m ms is tgt -> case lookupInductive d env of
     Nothing  -> (Left (UnknownDatatype d), n)
-    Just def ->
-      motiveLevel env ctx n def m `andThen` \l n1 ->
-        let (ety, n2) = eliminatorType def l n1
-         in spine env ctx n2 MayBind d ety (ps ++ [m] ++ ms ++ is ++ [tgt])
+    Just def -> case instantiateLevels (inductiveLevels def) ls of
+      Nothing ->
+        ( Left (WrongNumberOfLevelArguments d (length (inductiveLevels def)) (length ls))
+        , n )
+      Just sub ->
+        motiveLevel env ctx n def m `andThen` \l n1 ->
+          let (ety, n2) = eliminatorType def l n1
+           in spine env ctx n2 MayBind d (substLevelsIn sub ety)
+                (ps ++ [m] ++ ms ++ is ++ [tgt])
 
 -- | Does this term have this type? @infer@, then @convert@ (§5.2).
 check :: GlobalEnv -> Context -> Int -> Core -> Core -> (Either TypeError (), Int)

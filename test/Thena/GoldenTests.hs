@@ -824,6 +824,13 @@ tests =
           -- A level name means nothing outside the proof that declared it.
         , ":core Type {l}"
           -- Levels are not term binders and do not share their namespace.
+          -- A level-polymorphic DATATYPE: declared, instantiated at two levels,
+          -- and eliminated (MS3 phase 31c). The elimination is J.
+        , "data Id {l} (A : Type {l}) : A -> A -> Type {l} where { rfl : \8704 (a : A) -> Id A a a }"
+        , ":show Id"
+        , ":infer Id {0}"
+        , ":infer rfl {0}"
+        , ":infer \\ (A : Type\8320) (a : A) (b : A) (q : Id {0} A a b) -> elim Id {0} (A) (\\ (x : A) (y : A) (z : Id {0} A x y) -> Id {0} A x x) ((\\ (c : A) -> rfl {0} A c)) (a b) q"
         , ":theorem t2 : Type\8320"
         , "assume x {l} : Type\8320"
         , ":quit"
