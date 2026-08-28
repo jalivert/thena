@@ -25,7 +25,7 @@ import Control.Monad (foldM)
 
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar, lamOver)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Level (Level, levelLeq)
+import Thena.Core.Level (Level (..), levelLeq)
 import Thena.Core.Term ()
 import Thena.Core.Typing (infer)
 import Thena.Errors (TypeError (..))
@@ -151,7 +151,7 @@ declare env n d = do
 universes :: GlobalEnv -> Int -> InductiveDefinition -> Either DeclareError Int
 universes env n0 d = foldM eachConstructor n0 (inductiveConstructors d)
   where
-    provisional = addConstant (inductiveName d) (formerType d) env
+    provisional = addConstant (inductiveName d) (inductiveLevels d) (formerType d) env
 
     eachConstructor n c = go n (inductiveParameters d) (constructorArguments c)
       where
@@ -291,10 +291,15 @@ generate d env = addInductive dn d (foldl former env (typeFormer : map value cs)
     typeFormer = (dn, ps ++ inductiveIndices d, formerType d)
     value c    = (constructorName c, ps ++ constructorArguments c, constructorType d c)
 
+    -- **The wrapper inherits the datatype's level parameters** (phase 31b),
+    -- and its body instantiates the 'Canonical' at exactly those parameters —
+    -- so @succ {ℓ}@ unfolds to @Canonical succ [ℓ] …@ and the two agree by
+    -- construction rather than by a rule someone has to remember.
     former e (g, tel, ty) =
-      addDefinition g (MkDefinition [] ty body) (addConstant g ty e)
+      addDefinition g (MkDefinition lvs ty body) (addConstant g lvs ty e)
       where
-        body = lamOver tel (Canonical g [] (map (Free . entryVar) tel))
+        lvs  = inductiveLevels d
+        body = lamOver tel (Canonical g (map LVar lvs) (map (Free . entryVar) tel))
 
 -- | An application spine, head first.
 spine :: Core -> (Core, [Core])

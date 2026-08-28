@@ -21,6 +21,7 @@ module Thena.Global.Env
     -- * The environment
   , GlobalEnv (..)
   , emptyGlobals
+  , Constant (..)
   , lookupConstant
   , lookupDefinition
   , lookupInductive
@@ -55,6 +56,20 @@ import Thena.Core.Term
 -- The constructor is @MkDefinition@ because 'Thena.Core.Context.Entry' already
 -- has a data constructor called @Definition@ and the two would be ambiguous
 -- wherever both modules are in scope. Same technique as @MkScope@.
+-- | A type and no body — a datatype's former, and each of its constructors.
+--
+-- **It carries level parameters for the same reason 'Definition' does** (MS3
+-- phase 31b): a polymorphic datatype's former is polymorphic, and so is every
+-- constructor of it. They are always exactly the datatype's own parameters,
+-- and they are stored rather than looked up through 'inductives' because
+-- 'addConstant' has them in hand and the tables are denormalised already — a
+-- former appears in @constants@ and @definitions@ both.
+data Constant = MkConstant
+  { constantLevels :: [LevelVar]
+  , constantType   :: Core
+  }
+  deriving (Eq, Show)
+
 data Definition = MkDefinition
   { definitionLevels :: [LevelVar]
     -- ^ the prenex level parameters, in the order a use site supplies them
@@ -88,9 +103,14 @@ data Definition = MkDefinition
 -- @parameters@ and @indices@ as selectors of 'Thena.Core.Term.Eliminate'.
 data InductiveDefinition = InductiveDefinition
   { inductiveName         :: GlobalName
+  , inductiveLevels       :: [LevelVar]
+    -- ^ prenex level parameters (MS3 phase 31b). Every constructor and the
+    -- former share them; a use site supplies one level per parameter
   , inductiveParameters   :: Context   -- ^ in scope in the indices and in every constructor
   , inductiveIndices      :: Context   -- ^ in scope in neither; each constructor supplies its own
-  , inductiveLevel        :: Level     -- ^ the declared result universe, concrete (§3.7)
+  , inductiveLevel        :: Level
+    -- ^ the declared result universe. **No longer concrete** (§3.7 said it
+    -- was): it may mention 'inductiveLevels'
   , inductiveConstructors :: [ConstructorDefinition]
   }
   deriving (Eq, Show)
@@ -129,7 +149,7 @@ data ConstructorDefinition = ConstructorDefinition
 -- 'Thena.Ops.Env' and 'Context' are lists: speed is a stated non-goal (§1), and
 -- a dependency is not worth adding for a table that holds a prelude.
 data GlobalEnv = GlobalEnv
-  { constants   :: [(GlobalName, Core)]                 -- ^ a type and no body
+  { constants   :: [(GlobalName, Constant)]             -- ^ a type and no body
   , definitions :: [(GlobalName, Definition)]           -- ^ a type and a body
   , inductives  :: [(GlobalName, InductiveDefinition)]  -- ^ what the checker and ι consult
   }
@@ -139,7 +159,7 @@ emptyGlobals :: GlobalEnv
 emptyGlobals = GlobalEnv [] [] []
 
 -- | The type of a saturated former or, from phase 10, of an eliminator.
-lookupConstant :: GlobalName -> GlobalEnv -> Maybe Core
+lookupConstant :: GlobalName -> GlobalEnv -> Maybe Constant
 lookupConstant g = lookup g . constants
 
 -- | What a 'Thena.Core.Term.Global' names: the third form of δ (§3.6).
@@ -170,8 +190,8 @@ declaredNames :: GlobalEnv -> [GlobalName]
 declaredNames e =
   map fst (constants e) ++ map fst (definitions e) ++ map fst (inductives e)
 
-addConstant :: GlobalName -> Core -> GlobalEnv -> GlobalEnv
-addConstant g t e = e { constants = (g, t) : constants e }
+addConstant :: GlobalName -> [LevelVar] -> Core -> GlobalEnv -> GlobalEnv
+addConstant g ls t e = e { constants = (g, MkConstant ls t) : constants e }
 
 addDefinition :: GlobalName -> Definition -> GlobalEnv -> GlobalEnv
 addDefinition g d e = e { definitions = (g, d) : definitions e }

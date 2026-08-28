@@ -78,7 +78,7 @@ data RawConstraint = RawConstraint [RawBinder] Raw Raw Raw
 -- A declaration is not a term, so it is not a case of 'Raw'. The type is kept
 -- whole rather than split into indices and a universe: the split is a shape
 -- check and belongs with the other ones in "Thena.Syntax.Resolve".
-data RawData = RawData String [RawBinder] Raw [RawConstructor]
+data RawData = RawData String [String] [RawBinder] Raw [RawConstructor]
   deriving (Eq, Show)
 
 -- | @c : T@ — one constructor of a 'RawData', with its type written out in

@@ -45,6 +45,7 @@ import Thena.Global.Env
   , inductiveParameters
   , inductives
   , isDeclared
+  , constantType
   , lookupConstant
   , lookupDefinition
   , lookupInductive
@@ -122,10 +123,10 @@ tablesTests =
   [ testCase "the datatype has a record" $
       fmap inductiveName (lookupInductive (named "Nat") nat) @?= Just (named "Nat")
   , testCase "the type former is a constant at its declared universe" $
-      lookupConstant (named "Nat") nat @?= Just (Universe (LZero))
+      fmap constantType (lookupConstant (named "Nat") nat) @?= Just (Universe LZero)
   , testCase "a former is in two tables under one name (§3.3.1)" $
       sequence_
-        [ lookupConstant (named g) natVec
+        [ fmap constantType (lookupConstant (named g) natVec)
             @?= fmap definitionType (lookupDefinition (named g) natVec)
         | g <- ["Nat", "zero", "succ", "Vec", "nil", "cons"]
         ]
@@ -210,7 +211,7 @@ agreesWithTheResolver :: [TestTree]
 agreesWithTheResolver =
   [ testCase name $ case parseCore natVec [] 0 written of
       Left e  -> assertFailure (show e)
-      Right (t, _) -> lookupConstant (named name) natVec @?= Just t
+      Right (t, _) -> fmap constantType (lookupConstant (named name) natVec) @?= Just t
   | (name, written) <-
       [ ("Nat",  "Type\8320")
       , ("zero", "Nat")

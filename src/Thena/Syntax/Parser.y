@@ -141,7 +141,9 @@ LevelNames :: { [String] }
 -- split §3.7 requires disambiguated, made syntactic.
 Data :: { RawData }
   : ident MaybeBinders ':' Term where '{' Constructors '}'
-                                           { RawData $1 (reverse $2) $4 (reverse $7) }
+                                           { RawData $1 [] (reverse $2) $4 (reverse $7) }
+  | ident LevelParams MaybeBinders ':' Term where '{' Constructors '}'
+                                           { RawData $1 $2 (reverse $3) $5 (reverse $8) }
 
 MaybeBinders :: { [RawBinder] }
   :                                        { [] }

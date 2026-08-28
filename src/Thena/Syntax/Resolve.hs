@@ -8,7 +8,7 @@ module Thena.Syntax.Resolve
   ) where
 
 import Thena.Core.Context (Context, Entry (..), entryIdent, entryVar)
-import Thena.Core.Level (Level (..), LevelVar, levelOfNat)
+import Thena.Core.Level (Level (..), LevelVar (..), levelOfNat)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
@@ -331,30 +331,38 @@ constraint env gs ctx local lvs n (RawConstraint bs s t ty) = do
 resolveData
   :: GlobalEnv -> Int -> RawData
   -> Either ResolveError (InductiveDefinition, Int)
-resolveData env n (RawData name ps ty cs) = do
-  (params, afterParams, n1)  <- telescope env gs [] [] [] n ps
-  (indices, _, rest, n2)     <- prefix env gs afterParams n1 ty
+resolveData env n (RawData name lps ps ty cs) = do
+  -- **The level parameters are minted first and are in scope in everything
+  -- that follows** (phase 31b) — the parameter telescope, the indices, the
+  -- declared universe, and every constructor. They are 'LRigid': a declared
+  -- parameter is universally quantified and unification may not solve it.
+  let (lvars, n0) = mintLevelVars n lps
+      lscope      = zip lps lvars
+  (params, afterParams, n1)  <- telescope env gs [] [] lscope n0 ps
+  (indices, _, rest, n2)     <- prefix env gs afterParams lscope n1 ty
   level <- case rest of
-    RawUniverse k -> Right (levelOfNat k)
-    _             -> Left (NotAUniverse name)
+    RawUniverse k    -> Right (levelOfNat k)
+    RawUniverseAt rl -> levelArg lscope rl
+    _                -> Left (NotAUniverse name)
   -- The datatype being declared joins 'Globals' here, and only here: a
   -- constructor may recursively mention it (@succ : Nat -> Nat@), and
   -- 'lookupInductive' would find nothing for it in @env@ mid-declaration.
-  (cs', n3) <- constructors env (dn : gs) dn params (length indices) afterParams n2 cs
-  Right (InductiveDefinition dn params indices level cs', n3)
+  (cs', n3) <- constructors env (dn : gs) dn params (length indices) afterParams lscope n2 cs
+  Right (InductiveDefinition dn lvars params indices level cs', n3)
   where
     gs = globalsOf env
     dn = GlobalName name
 
 constructors
-  :: GlobalEnv -> Globals -> GlobalName -> Context -> Int -> Local -> Int -> [RawConstructor]
+  :: GlobalEnv -> Globals -> GlobalName -> Context -> Int -> Local
+  -> [(String, LevelVar)] -> Int -> [RawConstructor]
   -> Either ResolveError ([ConstructorDefinition], Int)
-constructors _ _ _ _ _ _ n [] = Right ([], n)
-constructors env gs dn params want local n (RawConstructor cn ty : rest) = do
-  (args, inside, tgt, n1) <- prefix env gs local n ty
-  (tgt', n2)              <- core env gs [] inside [] n1 tgt
+constructors _ _ _ _ _ _ _ n [] = Right ([], n)
+constructors env gs dn params want local lvs n (RawConstructor cn ty : rest) = do
+  (args, inside, tgt, n1) <- prefix env gs local lvs n ty
+  (tgt', n2)              <- core env gs [] inside lvs n1 tgt
   ixs                     <- targetIndices dn params want cn tgt'
-  (rest', n3)             <- constructors env gs dn params want local n2 rest
+  (rest', n3)             <- constructors env gs dn params want local lvs n2 rest
   Right (ConstructorDefinition (GlobalName cn) args ixs : rest', n3)
 
 -- | Split a constructor's target into the index expressions the record keeps.
@@ -405,12 +413,12 @@ telescope env gs ctx local lvs n (RawBinder x ty : rest) = do
 -- target. @∀@ groups and bare arrows both contribute — @succ : Nat -> Nat@ has
 -- one argument and it happens to be nameless.
 prefix
-  :: GlobalEnv -> Globals -> Local -> Int -> Raw
+  :: GlobalEnv -> Globals -> Local -> [(String, LevelVar)] -> Int -> Raw
   -> Either ResolveError (Context, Local, Raw, Int)
-prefix env gs local n raw = case raw of
+prefix env gs local lvs n raw = case raw of
   RawPi bs b -> do
-    (tel, local1, n1)        <- telescope env gs [] local [] n bs
-    (tel', local2, rest, n2) <- prefix env gs local1 n1 b
+    (tel, local1, n1)        <- telescope env gs [] local lvs n bs
+    (tel', local2, rest, n2) <- prefix env gs local1 lvs n1 b
     Right (tel ++ tel', local2, rest, n2)
 
   -- An arrow's argument has no written name, and unlike the @Ident "_"@ that
@@ -419,9 +427,9 @@ prefix env gs local n raw = case raw of
   -- hand a student (§3.7 — the point of generating into the environment is that
   -- it can be read). The printer freshens a repeat to @x1@.
   RawArrow s b -> do
-    (s', n1) <- core env gs [] local [] n s
+    (s', n1) <- core env gs [] local lvs n s
     let (v, n2) = fresh n1
-    (tel, local', rest, n3) <- prefix env gs local n2 b
+    (tel, local', rest, n3) <- prefix env gs local lvs n2 b
     Right (Hypothesis v (Ident "x") s' : tel, local', rest, n3)
 
   _ -> Right ([], local, raw, n)
@@ -458,3 +466,11 @@ levelArg lvs rl = case rl of
   RawLevelVar s -> case lookup s lvs of
     Just v  -> Right (LVar v)
     Nothing -> Left (LevelNotInScope s)
+
+-- | One 'LRigid' per declared level parameter, threading the counter.
+--
+-- Same counter as everything else (MS2 closeout 4f), so a datatype's level
+-- parameters can never collide with a theorem's or with a metavariable.
+mintLevelVars :: Int -> [String] -> ([LevelVar], Int)
+mintLevelVars n []       = ([], n)
+mintLevelVars n (_ : xs) = let (vs, n') = mintLevelVars (n + 1) xs in (LRigid n : vs, n')

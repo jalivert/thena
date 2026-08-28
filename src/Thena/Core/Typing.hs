@@ -46,6 +46,7 @@ import Thena.Errors (TypeError (..))
 import Thena.Global.Env
   ( GlobalEnv
   , InductiveDefinition (..)
+  , Constant (..)
   , definitionLevels
   , definitionType
   , eliminatorType
@@ -84,9 +85,13 @@ infer env ctx n term = case term of
       -- A constant has a type and no parameters. Datatypes stay monomorphic
       -- until phase 31, so writing level arguments on one is an error and not
       -- an empty substitution.
-      Just t
-        | null ls   -> (Right t, n)
-        | otherwise -> (Left (LevelArgumentsOnAConstant g (length ls)), n)
+      -- A constant is a datatype's former or one of its constructors, so it
+      -- is polymorphic exactly when the datatype is (phase 31b).
+      Just c -> case instantiateLevels (constantLevels c) ls of
+        Just sub -> (Right (substLevelsIn sub (constantType c)), n)
+        Nothing  ->
+          ( Left (WrongNumberOfLevelArguments g (length (constantLevels c)) (length ls))
+          , n )
       Nothing -> (Left (UnknownGlobal g), n)
 
   Universe l -> (Right (Universe (levelSuc l)), n)
@@ -129,13 +134,21 @@ infer env ctx n term = case term of
 
   -- A saturated former. Its arity is read from the same place δ reads it, so
   -- the checker and the reducer cannot disagree about when one is complete.
-  Canonical g _ as -> case formerArity g env of
+  -- **Level arguments are instantiated before the spine is walked** (phase
+  -- 31b), so the walk sees the former's type at this use's levels and nothing
+  -- downstream needs to know levels exist.
+  Canonical g ls as -> case formerArity g env of
     Nothing -> (Left (UnknownGlobal g), n)
     Just k
       | length as > k -> (Left (OverApplied g), n)
       | otherwise -> case lookupConstant g env of
           Nothing -> (Left (UnknownGlobal g), n)
-          Just ty -> spine env ctx n MustSaturate g ty as
+          Just c  -> case instantiateLevels (constantLevels c) ls of
+            Nothing ->
+              ( Left (WrongNumberOfLevelArguments g (length (constantLevels c)) (length ls))
+              , n )
+            Just sub ->
+              spine env ctx n MustSaturate g (substLevelsIn sub (constantType c)) as
 
   -- The elimination rule, in full: build the eliminator's type at the level the
   -- motive is valued in, then walk the node's six field groups down it with the

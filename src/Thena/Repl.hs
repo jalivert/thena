@@ -1205,6 +1205,7 @@ renderInductive n d = case inductiveConstructors d of
     header =
       "data "
         ++ nameString (inductiveName d)
+        ++ levelParams (inductiveLevels d)
         ++ concatMap group (zip [0 ..] ps)
         ++ " : "
         ++ renderCore n ps (piOver (inductiveIndices d) (Universe (inductiveLevel d)))
@@ -1487,6 +1488,12 @@ renderChoices cs = map one cs
     one c =
       show (pointId c) ++ "  " ++ nameString (pointRule c)
         ++ "   untried: " ++ intercalate ", " (map nameString (pointAlts c))
+
+-- | A definition's prenex level parameters, as a declaration writes them:
+-- @{ℓ₀ ℓ₁}@, and nothing at all when there are none (phase 31b).
+levelParams :: [LevelVar] -> String
+levelParams [] = ""
+levelParams vs = " {" ++ unwords (map levelVarName vs) ++ "}"
 
 -- | A level as it was written — a numeral or a parameter's name.
 rawLevel :: RawLevel -> String

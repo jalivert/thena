@@ -83,7 +83,8 @@ import Thena.Global.Declare (DeclareError, declare)
 import Thena.Global.NoConfusion (Skipped (..), noConfusionNames)
 import Thena.Kernel (certify)
 import Thena.Global.Env
-  ( Definition (..)
+  ( Constant (..)
+  , Definition (..)
   , GlobalEnv
   , InductiveDefinition
   , addDefinition
@@ -714,7 +715,7 @@ dispatch s name arg = case name of
       Nothing -> case lookupDefinition g (globals machine) of
         Just d  -> (s, ShownGlobal g (definitionType d) (Just (definitionBody d)))
         Nothing -> case lookupConstant g (globals machine) of
-          Just t  -> (s, ShownGlobal g t Nothing)
+          Just c  -> (s, ShownGlobal g (constantType c) Nothing)
           Nothing -> (s, Rejected (NoSuchGlobal what))
       where
         g = GlobalName what
