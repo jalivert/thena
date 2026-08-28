@@ -52,15 +52,50 @@ data Level
   | LVar LevelVar
   deriving (Show)
 
--- | A level variable — a definition's level parameter (phase 29) or a level
--- metavariable (phase 33).
+-- | A level variable, and **whether it may be solved**.
 --
--- **Its @Int@ comes from the same counter as 'Thena.Core.Term.Var'**, which is
--- MS2 closeout 4f, decided by the user: one counter across every sort, so a
--- name that has reached the user inside a message can never be reissued as a
--- different kind of thing. The sorts stay apart in the *type* — a 'LevelVar'
--- binds nothing, has no 'Thena.Core.Context.Entry' and never enters Γ.
-newtype LevelVar = LevelVar Int
+-- 'LRigid' is a definition's prenex level parameter (phase 29): universally
+-- quantified, so unification may **not** instantiate it. 'LMeta' is an unknown
+-- (phase 33): unification **must** be free to. Conflating the two is how a
+-- checker silently instantiates a @∀@-bound variable, so they are separate
+-- constructors and every site that cares is made to say which it means.
+--
+-- **The distinction has to be syntactic here, where for terms it does not**,
+-- and the reason is MS3's central finding. A term variable is one constructor,
+-- 'Thena.Core.Term.Free', because its standing is looked up in the chain —
+-- 'Thena.Core.Unify' does exactly that, asking whether a @Var@ is @KHole@,
+-- @KGuess@ or @KRigid@. **Levels have no chain** (they are context-free, so
+-- they need no binder on it), so there is nowhere to look anything up and the
+-- standing must travel with the variable.
+--
+-- The split is one level down from 'Level' deliberately — the user's call,
+-- 2026-08-28. 'normalise' and 'Normal' are indifferent to it, and they are the
+-- delicate code; splitting 'Level' itself would fork the normaliser's variable
+-- handling and force @Normal@ to carry two lists, for a distinction neither
+-- cares about. The sites that do care destructure here instead.
+--
+-- **Generalisation at @qed@ is therefore a rewrite**: each still-unsolved
+-- 'LMeta' becomes an 'LRigid' in the definition's parameter list. That is R2 of
+-- @discussion\/level-binders-and-constraints.md@ §2 said out loud.
+--
+-- **Both @Int@s come from the same counter as 'Thena.Core.Term.Var'** — MS2
+-- closeout 4f, the user's decision: one counter across every sort, so a name
+-- that has reached the user inside a message can never be reissued as a
+-- different kind of thing. It is also what makes naming safe without de Bruijn
+-- indices here: every level variable is globally unique, so substituting one
+-- away cannot capture another.
+--
+-- `[for phase 33]` The counter guarantee stops two variables colliding; it does
+-- not stop an @LRigid@'s @Int@ being handed to the solver as though it were an
+-- @LMeta@'s. If that turns out to be a live hazard, the fix is a newtype around
+-- a meta's identity so the solver's substitution cannot take a rigid one — but
+-- that is the solver's phase to judge, not this one's.
+--
+-- Neither sort binds anything, neither has a 'Thena.Core.Context.Entry', and
+-- neither ever enters Γ.
+data LevelVar
+  = LRigid Int
+  | LMeta Int
   deriving (Eq, Ord, Show)
 
 -- | @Level@ equality is equality of normal forms, never structural:

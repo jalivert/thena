@@ -36,9 +36,13 @@ tests =
     , testGroup "rendering" renderTests
     ]
 
-a, b :: LevelVar
-a = LevelVar 0
-b = LevelVar 1
+-- | Two rigid parameters and one meta. The rigid\/flexible split matters to
+-- nothing in this module except the printer — normalisation is indifferent to
+-- it, which is the reason the split lives on 'LevelVar' rather than on 'Level'.
+a, b, m :: LevelVar
+a = LRigid 0
+b = LRigid 1
+m = LMeta 2
 
 -- --------------------------------------------------------------------------
 
@@ -148,11 +152,15 @@ renderTests =
       renderLevel (LMax (levelOfNat 1) (levelOfNat 1)) @?= "Type₁"
   , testCase "and so does a lopsided one" $
       renderLevel (LMax (levelOfNat 2) (levelOfNat 7)) @?= "Type₇"
-  , testCase "a bare variable" $ renderLevel (LVar a) @?= "Type (?ℓ0)"
+  , testCase "a bare rigid parameter" $ renderLevel (LVar a) @?= "Type (ℓ0)"
+  , testCase "a meta wears the ? a hole wears" $
+      renderLevel (LVar m) @?= "Type (?ℓ2)"
+  , testCase "and the two are different levels" $
+      (LVar (LRigid 0) == LVar (LMeta 0)) @?= False
   , testCase "a variable joined with a constant that can still win" $
-      renderLevel (LMax (levelOfNat 3) (LVar a)) @?= "Type (3 ⊔ ?ℓ0)"
+      renderLevel (LMax (levelOfNat 3) (LVar a)) @?= "Type (3 ⊔ ℓ0)"
   , testCase "two variables" $
-      renderLevel (LMax (LVar a) (LVar b)) @?= "Type (?ℓ0 ⊔ ?ℓ1)"
+      renderLevel (LMax (LVar a) (LVar b)) @?= "Type (ℓ0 ⊔ ℓ1)"
   , testCase "a variable with an offset" $
-      renderLevel (LSuc (LVar a)) @?= "Type (suc ?ℓ0)"
+      renderLevel (LSuc (LVar a)) @?= "Type (suc ℓ0)"
   ]

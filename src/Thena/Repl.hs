@@ -655,10 +655,16 @@ renderLevel l = case normalise l of
                         ++ levelVarName v ++ concat (replicate (k - 1) ")")
       subscriptFree = show
 
--- | A level variable's display name. Numbered from the shared counter, so it
--- is shown the way a hole is: a sigil and its number.
+-- | A level variable's display name, numbered from the shared counter.
+--
+-- **A meta wears the @?@ and a rigid parameter does not** — the same convention
+-- the development already uses, where @? x@ is a hole and a bare name is a
+-- hypothesis. A reader who knows what @?@ means in @:show@ knows what it means
+-- here.
 levelVarName :: LevelVar -> String
-levelVarName (LevelVar i) = "?ℓ" ++ show i
+levelVarName v = case v of
+  LRigid i -> "ℓ" ++ show i
+  LMeta  i -> "?ℓ" ++ show i
 
 parensIf :: Bool -> String -> String
 parensIf True s  = "(" ++ s ++ ")"
