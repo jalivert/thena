@@ -281,6 +281,7 @@ eliminate env ctx n0 goal tgt =
 
           node = Eliminate
             { eliminated = inductiveName d
+            , levels     = []
             , parameters = ps
             , motive     = motiveTerm
             , methods    = map Free mvs

@@ -272,6 +272,7 @@ freeVarsTests =
           node =
             Eliminate
               { eliminated = GlobalName "Nat"
+            , levels     = []
               , parameters = [Free (vs !! 0)]
               , motive     = Free (vs !! 1)
               , methods    = [Free (vs !! 2)]
