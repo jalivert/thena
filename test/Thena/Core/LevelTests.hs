@@ -110,40 +110,91 @@ equalityTests =
       (LVar a == LVar b) @?= False
   ]
 
--- | Two answers here and one deferral, which is exactly what phase 28 knows.
+-- | Three answers, and **the sort of variable decides which reading applies**
+-- (MS3 phase 31, his ruling of 2026-08-28).
 --
--- **The deferral is the point.** @levelLeq@ could compute more than this, and a
--- first draft did — and got it wrong, reporting @Just True@ for @?ℓ <= Type₃@,
--- which is unsound at @?ℓ := 4@. These tests are what caught it. Anything with
--- a variable in it postpones until phase 33 settles what the question even
--- means: validity over every instantiation, or a constraint to record.
+-- A **rigid** is a definition's prenex parameter, universally quantified, so
+-- the question is **validity** and it is decidable. A **meta** is an unknown, so
+-- the question is a **constraint** and the answer is postponement.
+--
+-- **Phase 28 answered @Nothing@ for every variable**, which was right while
+-- nothing could build one. The four cases below that changed answer are the
+-- ones that had to: the size restriction is @levelLeq@'s only caller and treats
+-- @Nothing@ as refusal, so under the old reading no polymorphic datatype could
+-- be declared at all.
 leqTests :: [TestTree]
 leqTests =
+  [ testGroup "closed levels decide, as they always did" closedLeq
+  , testGroup "a rigid parameter is universally quantified, so: validity" rigidLeq
+  , testGroup "a meta is an unknown, so: postpone" metaLeq
+  ]
+
+closedLeq :: [TestTree]
+closedLeq =
   [ testCase "constants decide outright" $
       levelLeq (levelOfNat 2) (levelOfNat 5) @?= Just True
   , testCase "and refuse outright" $
       levelLeq (levelOfNat 5) (levelOfNat 2) @?= Just False
   , testCase "equal constants are within the order" $
       levelLeq (levelOfNat 4) (levelOfNat 4) @?= Just True
-  , testCase "a max of constants is still closed, so it still decides" $
+  , testCase "a max on the left decomposes" $
       levelLeq (LMax (levelOfNat 2) (levelOfNat 3)) (levelOfNat 5) @?= Just True
-  , testCase "and decides against" $
+  , testCase "and one component that cannot fit refutes the whole" $
       levelLeq (LMax (levelOfNat 2) (levelOfNat 9)) (levelOfNat 5) @?= Just False
-  , testCase "a variable on the left postpones" $
-      levelLeq (LVar a) (levelOfNat 3) @?= Nothing
-  , testCase "a variable on the right postpones" $
-      levelLeq (levelOfNat 3) (LVar a) @?= Nothing
-  , testCase "even when it is the same variable both sides" $
-      levelLeq (LVar a) (LSuc (LVar a)) @?= Nothing
-  , testCase "and even when the answer looks obvious" $
-      levelLeq (LSuc (LVar a)) (LVar a) @?= Nothing
   ]
 
--- | The printer, whose variable branch is likewise reached from here alone.
+rigidLeq :: [TestTree]
+rigidLeq =
+  [ testCase "a parameter is below its own successor, for every instantiation" $
+      levelLeq (LVar a) (LSuc (LVar a)) @?= Just True
+  , testCase "and never above it" $
+      levelLeq (LSuc (LVar a)) (LVar a) @?= Just False
+  , testCase "a parameter is not bounded by any constant — it could be larger" $
+      levelLeq (LVar a) (levelOfNat 3) @?= Just False
+  , testCase "nor does a constant sit below one — it could be zero" $
+      levelLeq (levelOfNat 3) (LVar a) @?= Just False
+  , -- Only the SAME variable can dominate a variable. @b@ could be 0 while
+    -- @a@ is huge, so no other parameter bounds it.
+    testCase "and one parameter never bounds another" $
+      levelLeq (LVar a) (LVar b) @?= Just False
+  , testCase "but a max containing it does" $
+      levelLeq (LVar a) (LMax (LVar b) (LVar a)) @?= Just True
+  , testCase "offsets cancel the variable and decide on the numbers" $
+      levelLeq (LSuc (LVar a)) (LSuc (LSuc (LVar a))) @?= Just True
+  , -- The floor: every variable at zero. @3 <= max 0 (a+5)@ holds there and
+    -- variables only grow, so it holds everywhere.
+    testCase "a constant under a variable with a big enough offset is valid" $
+      levelLeq (levelOfNat 3) (LMax LZero (offset 5 (LVar a))) @?= Just True
+  , testCase "and invalid when the offset cannot carry it" $
+      levelLeq (levelOfNat 3) (LMax LZero (LVar a)) @?= Just False
+  ]
+  where
+    offset k l = iterate LSuc l !! k
+
+metaLeq :: [TestTree]
+metaLeq =
+  [ testCase "a meta on the left postpones — it could yet be small" $
+      levelLeq (LVar m) (levelOfNat 3) @?= Nothing
+  , testCase "a meta on the right postpones — it could yet be large" $
+      levelLeq (levelOfNat 3) (LVar m) @?= Nothing
+  , testCase "the same meta both sides still decides, by cancellation" $
+      levelLeq (LVar m) (LSuc (LVar m)) @?= Just True
+  , testCase "a rigid against a meta postpones" $
+      levelLeq (LVar a) (LVar m) @?= Nothing
+  , -- Refutation beats postponement: one component that can never fit settles
+    -- it however the metas are solved.
+    testCase "but a refutation elsewhere beats an undecided component" $
+      levelLeq (LMax (levelOfNat 9) (LVar m)) (levelOfNat 2) @?= Just False
+  , testCase "and a validity elsewhere does not" $
+      levelLeq (LMax (levelOfNat 1) (LVar m)) (levelOfNat 2) @?= Nothing
+  ]
+
+-- | The printer, whose variable branch is reached from here alone until the
+-- REPL can build a level variable.
 --
--- **A closed level must print exactly as it always did** — that is most of what
--- phase 28's "the existing suite does not move" check is checking, since
--- 'Thena.Core.Typing' now hands the printer an unevaluated @LMax@ for every Π.
+-- **A closed level must print exactly as it always did** — most of what phase
+-- 28's "the existing suite does not move" check was checking, since
+-- 'Thena.Core.Typing' hands the printer an unevaluated @LMax@ for every Π.
 renderTests :: [TestTree]
 renderTests =
   [ testCase "zero" $ renderLevel LZero @?= "Type₀"
