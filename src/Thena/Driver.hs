@@ -271,9 +271,16 @@ data Response
     -- thesis §2.3)
   | Extracted Core
   | Proving GlobalName Core   -- ^ @:theorem@ — a proof is now current
-  | Proved GlobalName [LevelVar] Core
+  | Proved GlobalName [LevelVar] [Obligation] Core
     -- ^ @qed@ — admitted, and the proof is closed. The levels are the scheme
-    -- generalisation produced (MS3 phase 33b), not anything that was written
+    -- generalisation produced (MS3 phase 33b), not anything that was written,
+    -- and the obligations are the scheme's own constraints.
+    --
+    -- **The constraints travel with the parameters**, because half a scheme is
+    -- worse than none: a scheme without its @(suc ℓ ≤ 2)@ reads as usable at
+    -- every level and is not. @:show@ printed them from the moment 33b stored
+    -- them; this line — the one the user reads at the moment the scheme comes
+    -- into existence — did not.
   | Suspended GlobalName      -- ^ @:suspend@
   | Resumed GlobalName        -- ^ @:resume@
   | Abandoned GlobalName      -- ^ @:abandon@
@@ -806,8 +813,8 @@ dispatch s name arg = case name of
           -- type still carrying a meta nothing could ever solve, which is a bug
           -- phase 33 shipped and 33b fixes.
           admit pr' s' t =
-            let (s'', lvs, scheme) = admitted s' pr' t
-             in (s'', Proved (proofName pr') lvs scheme)
+            let (s'', lvs, owed, scheme) = admitted s' pr' t
+             in (s'', Proved (proofName pr') lvs owed scheme)
 
     -- Admitting is the only thing that writes a theorem to globals (§3.3.1):
     -- a proved theorem is a global **definition**, type and body both.
@@ -830,6 +837,7 @@ dispatch s name arg = case name of
                , sessionProof = Nothing
                }
           , definitionLevels d
+          , definitionConstraints d
           , definitionType d
           )
 
@@ -1469,8 +1477,6 @@ whyNoConfusion d why = "no " ++ str (snd (noConfusionNames d)) ++ ": " ++ becaus
     because = case why of
       NoEquality -> "there is no Eq in scope"
       NoProducts -> "there is no And, Unit and Empty in scope"
-      NotAtTypeZero _ ->
-        str d ++ " is not declared at Type\8320, and Eq relates only Type\8320 types"
       DependentArguments c (Ident i) ->
         str c ++ "'s argument " ++ i ++ " has a type that depends on an earlier"
           ++ " argument, so its equation cannot be stated"

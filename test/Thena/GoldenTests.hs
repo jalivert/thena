@@ -613,8 +613,13 @@ tests =
       script
         "refining"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+          -- **The level arguments go on the /uses/, never on the constructor's
+          -- name.** Written @refl {0} :@ this line was a syntax error, so @Eq@
+          -- was never declared and every step below recorded @not in scope@ as
+          -- its expected output — the third golden caught doing that
+          -- (@ms3/CLOSEOUT.md@ item 14). Repaired reviewing MS3.
         , "data Eq (A : Type) : A -> A -> Type \
-          \where { refl {0} : \8704 (a : A) -> Eq {0} A a a }"
+          \where { refl : \8704 (a : A) -> Eq A a a }"
           -- Already the goal's type: unification has nothing to do, and the
           -- binding is filled straight in.
         , ":theorem id0 : \8704 (A : Type\8320) -> A -> A"
@@ -845,6 +850,39 @@ tests =
         , ":infer Id {suc 0}"
         , ":quit"
         ]
+      -- What level polymorphism was FOR, as a pair of probes neither of which
+      -- had a test (added reviewing MS3).
+      --
+      -- @Box1@ is §2 item 1 of @discussion\/universe-polymorphism.md@ and MS3's
+      -- own done-when: before the milestone @eliminate b@ answered /the goal
+      -- does not survive generalising the target/, because the elimination
+      -- tactic wrote @Eq@ at no level and @Eq@ was stuck at @Type₀@. It was
+      -- checked by hand when the done-when was signed off and never pinned.
+      --
+      -- @N@ is the shape phase 33c's inference could not declare at all: the
+      -- recursive occurrence in @s@'s argument is stored before @N@ has a level
+      -- parameter, so it came out with none and the declaration was refused
+      -- outright. Nothing in the prelude is both polymorphic and recursive,
+      -- which is why nothing caught it.
+    , script
+        "universes"
+        ( preludeLines ++
+        [ "data Box1 : Type\8320 -> Type\8321 \
+          \where { box1 : \8704 (A : Type\8320) -> A -> Box1 A }"
+        , "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , ":theorem probe : \8704 (b : Box1 Nat) -> Nat"
+        , "attack"
+        , "intro"
+        , "into"
+        , "along"
+        , "eliminate b"
+        , ":abandon"
+        , "data N : Type where { z : N ; s : N -> N }"
+        , ":show N"
+        , ":infer s {0}"
+        , ":infer s {1} (z {1})"
+        , ":quit"
+        ])
       -- Typical ambiguity (MS3 phase 33): a bare @Type@ is a universe whose
       -- level is worked out rather than written. The script walks the three
       -- endings — the level is forced, it is refuted, or nothing determines it

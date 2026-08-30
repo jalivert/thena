@@ -22,11 +22,10 @@ thena spine> solve
 thena spine> :revalidate
 valid
 thena spine> qed
-undetermined {ℓ12} : Type (ℓ12)   ∎
+undetermined {ℓ₁₂} : (1 ≤ ℓ₁₂) ⊢ Type (ℓ₁₂)   ∎
 thena spine> :show undetermined
-undetermined {ℓ12} : Type (ℓ12)
-  provided 1 ≤ ℓ12
-undetermined = let undetermined = Type₀ : Type (ℓ12) in undetermined
+undetermined {ℓ₁₂} : (1 ≤ ℓ₁₂) ⊢ Type (ℓ₁₂)
+undetermined = let undetermined = Type₀ : Type (ℓ₁₂) in undetermined
 thena spine> :theorem crossed : Type₀
 proving crossed : Type₀
 thena spine> try ((\ (x : Type) -> x) Type₀)
@@ -49,5 +48,5 @@ thena spine> :show
 thena spine> data Box : Type where { }
 declared Box
 thena spine> :show Box
-data Box {ℓ30} : Type (ℓ30) where { }
+data Box {ℓ₃₀} : Type (ℓ₃₀) where { }
 thena spine> :quit

@@ -111,9 +111,6 @@ data Skipped
     -- fastidious: the prelude declares @Eq@ before @And@, so a blanket
     -- precondition would refuse @NoConfusionEq@ — which phase 14 generated —
     -- for a name it was never going to write. See 'productsInScope'.
-  | NotAtTypeZero Level
-    -- ^ the datatype is not declared at @Type₀@, so @Eq (D params indices) x y@
-    -- cannot be formed: the prelude's @Eq@ takes @A : Type₀@.
   | DependentArguments GlobalName Ident
     -- ^ this constructor's argument telescope is dependent, so the equation for
     -- the named argument is ill-typed. @cons : (n : Nat) (a : A) (as : Vec A n)
@@ -198,11 +195,6 @@ generateNoConfusion env n0 d
     -- reference (phase 31g; the same fix `Thena.Global.Env` took in 31c).
     familyAt is = foldl App (Global dn (map LVar (inductiveLevels d))) (paramVars ++ is)
 
-    -- **At level 0** (MS3 phase 31d). @Eq@ is level-polymorphic now, and
-    -- no-confusion is generated only for a @Type₀@ datatype (the
-    -- 'NotAtTypeZero' guard), whose constructor arguments therefore live at
-    -- @Type₀@ too by the size restriction. So every equation this module
-    -- writes is stated at @Eq {0}@.
     -- **Everything this module writes is stated at the datatype's own level**
     -- (MS3 phase 31g), and that is exactly what cumulativity buys.
     --
@@ -234,12 +226,14 @@ generateNoConfusion env n0 d
     -- The family
     -- ----------------------------------------------------------------------
 
-    -- @∀ params indices (x y : D params indices) -> Type₀@
+    -- @∀ params indices (x y : D params indices) -> Type dl@
     --
-    -- **@Type₀@, not @Type₁@.** Phase 14 had every case CPS-encoded, and
-    -- @(C : Type₀) -> C@ is itself at @Type₁@; with @Empty@, @Unit@ and @And@
-    -- in the prelude every case is an ordinary @Type₀@ proposition and the
-    -- family follows it down. Nothing else about the shape changed.
+    -- **At the datatype's own level, not one above it.** Phase 14 had every
+    -- case CPS-encoded, and @(C : Type l) -> C@ is itself at @Type (suc l)@;
+    -- with @Empty@, @Unit@ and @And@ in the prelude every case is an ordinary
+    -- proposition at @dl@ and the family follows it down. Phase 31g is what
+    -- made @dl@ the datatype's own rather than @Type₀@; nothing else about the
+    -- shape changed.
     familyType n =
       let (vx, n1) = fresh n
           (vy, n2) = fresh n1
@@ -272,9 +266,9 @@ generateNoConfusion env n0 d
           , n4
           )
 
-    -- @λ indices (t : D params indices) . Type₀@ — the motive of both
+    -- @λ indices (t : D params indices) . Type dl@ — the motive of both
     -- eliminations, since both compute a type and neither result depends on
-    -- what was eliminated. Valued in @Type₁@, which is the level
+    -- what was eliminated. Valued in @Type (suc dl)@, which is the level
     -- 'Thena.Core.Typing.infer' reads off it.
     typeMotive n =
       let (is, n1) = freshen n idx

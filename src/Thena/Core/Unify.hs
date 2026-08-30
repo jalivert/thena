@@ -469,6 +469,14 @@ rigidRigid env st ctx k@(Equate xi s t ty) = case levelPairs of
     -- if they cannot. @Nothing@ for a node that carries no levels.
     levelPairs = case (s, t) of
       (Universe a, Universe b) -> Just ([(a, b)], UniverseMismatch a b)
+      -- **A neutral 'Global' carries level arguments too**, and they are
+      -- unified like a former's rather than compared. It reaches here whenever
+      -- @whnf@ leaves one standing — an under-applied former wrapper, or a
+      -- constant with no body — and until this was added @Eq {?l} ≟ Eq {0}@
+      -- fell through to a 'Mismatch' that no level could ever have been at
+      -- fault for. Found reviewing MS3.
+      (Global f ks, Global g ls)
+        | f == g, length ks == length ls -> Just (zip ks ls, Mismatch ctx s t)
       (Canonical f ks _, Canonical g ls _)
         | f == g, length ks == length ls -> Just (zip ks ls, Mismatch ctx s t)
       (Eliminate d ks _ _ _ _ _, Eliminate d' ls _ _ _ _ _)
@@ -485,6 +493,11 @@ rigidRigid env st ctx k@(Equate xi s t ty) = case levelPairs of
       -- left for this case to compare, and comparing again would refuse the
       -- stuck case that the decision above says to let through.
       (Universe _, Universe _) -> Right st
+
+      -- A neutral reference has no sub-terms, so like a universe it is
+      -- finished once 'levelPairs' has settled its levels.
+      (Global f ks, Global g ls)
+        | f == g, length ks == length ls -> Right st
 
       (Pi i dom sc, Pi _ dom' sc') -> binder i dom sc dom' sc'
       (Lam i dom sc, Lam _ dom' sc') -> binder i dom sc dom' sc'

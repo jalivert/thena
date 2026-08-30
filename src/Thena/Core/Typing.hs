@@ -120,9 +120,6 @@ infer env ctx n term = case term of
         ( Left (WrongNumberOfLevelArguments g (length (definitionLevels d)) (length ls))
         , [], n )
     Nothing -> case lookupConstant g env of
-      -- A constant has a type and no parameters. Datatypes stay monomorphic
-      -- until phase 31, so writing level arguments on one is an error and not
-      -- an empty substitution.
       -- A constant is a datatype's former or one of its constructors, so it
       -- is polymorphic exactly when the datatype is (phase 31b).
       Just c -> case instantiateLevels (constantLevels c) ls of

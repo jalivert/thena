@@ -282,12 +282,10 @@ data TypeError
     -- ^ a 'Thena.Core.Term.Free' naming no entry of the context
   | WrongNumberOfLevelArguments GlobalName Int Int
     -- ^ definition, level parameters it has, level arguments the use wrote
-    -- (MS3 phase 30). A definition's level parameters are prenex, so a use
-    -- supplies all of them or none of them is well formed — there is no
-    -- partial instantiation
-  | LevelArgumentsOnAConstant GlobalName Int
-    -- ^ level arguments written on a name that has a type but no level
-    -- parameters — a former, or any constant. Monomorphic until phase 31
+    -- (MS3 phase 30). A definition's level parameters are prenex: a use writes
+    -- every one of them or the term is not well formed. There is no partial
+    -- instantiation, and — until something infers them — no way to leave them
+    -- out either
   | UnknownGlobal GlobalName
     -- ^ a 'Thena.Core.Term.Global' in neither the definitions nor the constants
   | LooseIndex Int

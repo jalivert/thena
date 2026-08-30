@@ -1,7 +1,7 @@
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
-thena spine> data Eq (A : Type) : A -> A -> Type where { refl {0} : ∀ (a : A) -> Eq {0} A a a }
-1:45: unexpected {
+thena spine> data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }
+declared Eq
 thena spine> :theorem id0 : ∀ (A : Type₀) -> A -> A
 proving id0 : ∀ (A : Type₀) -> A -> A
 thena spine> unify-refine (\ (A : Type₀) (a : A) -> a)
@@ -13,30 +13,30 @@ thena spine> :show
 thena spine> qed
 id0 : ∀ (A : Type₀) -> A -> A   ∎
 thena spine> :theorem refl0 : Eq {0} Nat zero zero
-not in scope: Eq
+proving refl0 : Eq {0} Nat zero zero
 thena spine> claim A : Type₀
 claimed A
 thena spine> claim a : A
 claimed a
 thena spine> unify-refine (refl {0} A a)
-not in scope: refl
+solved: A, a
 thena spine> :show
-  let ? A : Type₀ in
-  let ? a : A in
-▶ let ? goal : Type₀ in
-  goal
+  let A = Nat : Type₀ in
+  let a = zero : A in
+  let refined = refl {0} A a : Eq {0} A a a in
+▶ let refl0 = refined : Eq {0} Nat zero zero in
+  refl0
 thena spine> qed
-no proof is being worked on
+refl0 : Eq {0} Nat zero zero   ∎
 thena spine> :show refl0
-nothing named refl0 has been declared
+refl0 : Eq {0} Nat zero zero
+refl0 = let A = Nat : Type₀ in let a = zero : A in let refined = refl {0} A a : Eq {0} A a a in let refl0 = refined : Eq {0} Nat zero zero in refl0
 thena spine> :theorem wrong : Eq {0} Nat zero (succ zero)
-not in scope: Eq
+proving wrong : Eq {0} Nat zero (succ zero)
 thena spine> unify-refine (refl {0} Nat zero)
-not in scope: refl
+stuck: zero and succ zero cannot be made equal
 thena spine> :show
-  let ? A : Type₀ in
-  let ? a : A in
-▶ let ? goal : Type₀ in
-  goal
+▶ let ? wrong : Eq {0} Nat zero (succ zero) in
+  wrong
 thena spine> :abandon
-no proof is being worked on
+abandoned wrong

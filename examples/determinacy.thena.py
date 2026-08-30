@@ -165,12 +165,16 @@ STEP = [
 ]
 
 # The conjunction NoConfusionTerm builds for a constructor with several
-# arguments: right-nested And {0}, and Unit {0} when there is nothing to conjoin.
+# arguments: right-nested And, and Unit when there is nothing to conjoin.
 # Must agree with Thena.Global.NoConfusion.conjoin exactly.
+#
+# And takes ONE LEVEL PER CONJUNCT since MS3 phase 33c — And {l0 l1}, whose own
+# level is the join — where it used to take one for both. Everything here is at
+# Type0, so the two are the same level; the arity is not.
 def conj(ts):
     if not ts: return "Unit {0}"
     if len(ts) == 1: return ts[0]
-    return "And {0} (%s) (%s)" % (ts[0], conj(ts[1:]))
+    return "And {0 0} (%s) (%s)" % (ts[0], conj(ts[1:]))
 
 # One projection out of that nest per conjunct. The last is the residue itself,
 # because conj stops wrapping at one element.

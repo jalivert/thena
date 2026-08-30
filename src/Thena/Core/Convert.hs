@@ -121,9 +121,17 @@ related dir env = go
         | x == y    -> ok n
         | otherwise -> bad n [] (VariablesDiffer x y)
 
-      (Global f _, Global g _)
-        | f == g    -> ok n
-        | otherwise -> bad n [] (NamesDiffer f g)
+      -- **A reference's level arguments are part of what it is.** @Eq {0}@ and
+      -- @Eq {1}@ are two different types, and this case used to compare the
+      -- names alone and call them convertible — which made conversion agree
+      -- terms whose /own/ types it then refused to convert. Found reviewing
+      -- MS3; it is the same omission phase 29 left in @Eq Core@ and the
+      -- @Canonical@ and @Eliminate@ cases below, and unlike those it was
+      -- reachable in one line at the REPL.
+      (Global f ks, Global g ls)
+        | f /= g                 -> bad n [] (NamesDiffer f g)
+        | length ks /= length ls -> bad n [] (CountsDiffer (length ks) (length ls))
+        | otherwise              -> levels n ks ls
 
       (Bound i, Bound j)
         | i == j    -> ok n
@@ -140,19 +148,17 @@ related dir env = go
       (Canonical f ks as, Canonical g ls bs)
         | f /= g              -> bad n [] (NamesDiffer f g)
         | length ks /= length ls -> bad n [] (CountsDiffer (length ks) (length ls))
-        | Just (a, b) <- levelsDiffer ks ls -> bad n [] (LevelsDiffer a b)
         | length as /= length bs -> bad n [] (CountsDiffer (length as) (length bs))
-        | otherwise -> list ctx n (TheArgumentOf f) as bs
+        | otherwise -> levels n ks ls `andThen` \n1 -> list ctx n1 (TheArgumentOf f) as bs
 
       (Eliminate d ks ps m ms is tgt, Eliminate d' ls ps' m' ms' is' tgt')
         | d /= d'                   -> bad n [] (NamesDiffer d d')
         | length ks /= length ls    -> bad n [] (CountsDiffer (length ks) (length ls))
-        | Just (a, b) <- levelsDiffer ks ls -> bad n [] (LevelsDiffer a b)
         | length ps /= length ps'   -> bad n [] (CountsDiffer (length ps) (length ps'))
         | length ms /= length ms'   -> bad n [] (CountsDiffer (length ms) (length ms'))
         | length is /= length is'   -> bad n [] (CountsDiffer (length is) (length is'))
         | otherwise ->
-            chain ctx n
+            levels n ks ls `andThen` \n0' -> chain ctx n0'
               [ (TheParameter k, p, p') | (k, p, p') <- zip3 [0 ..] ps ps' ]
               `andThen` \n1 -> at ctx n1 TheMotive m m'
               `andThen` \n2 -> chain ctx n2
@@ -209,6 +215,13 @@ related dir env = go
     chain ctx n ((site, a, b) : r) =
       at ctx n site a b `andThen` \n1 -> chain ctx n1 r
 
+    -- One reading of a level relation, used by all four sites that have one:
+    -- the universe case above and the three reference forms. **Undecided is an
+    -- obligation, not a refusal** — the same three answers, said once.
+    levels n ks ls = case levelsAgree ks ls of
+      Left (a, b) -> bad n [] (LevelsDiffer a b)
+      Right owed  -> (Nothing, owed, n)
+
     ok n = (Nothing, [], n)
     bad n site clash = (Just (ConversionFailure site clash), [], n)
 
@@ -222,11 +235,11 @@ beneath
 beneath site (Just f, o, n) = (Just f { conversionSite = site : conversionSite f }, o, n)
 beneath _    (Nothing, o, n) = (Nothing, o, n)
 
--- | Continue only if convertible so far, carrying the counter across either
--- branch. Written out rather than reached for as a monad: the counter is an
--- 'Int' in the outer state and there is deliberately no supply type (§3.5).
 -- | Continue only if convertible so far, carrying the counter and the
 -- obligations owed so far across either branch.
+--
+-- Written out rather than reached for as a monad: the counter is an 'Int' in
+-- the outer state and there is deliberately no supply type (§3.5).
 andThen
   :: (Maybe ConversionFailure, [Obligation], Int)
   -> (Int -> (Maybe ConversionFailure, [Obligation], Int))
@@ -235,13 +248,21 @@ andThen (Just f,  o, n) _ = (Just f, o, n)
 andThen (Nothing, o, n) k = let (r, o', n') = k n in (r, o ++ o', n')
 infixl 1 `andThen`
 
--- | The first pair of level arguments that are not the same level, if any.
+-- | Do two uses of the same reference agree on their level arguments?
 --
 -- Compared **up to the level algebra**, since that is what @Eq Level@ is —
--- @Type (max 0 1)@ and @Type 1@ are one level. Two uses of the same former or
--- eliminator at different levels are different terms, so this is a clash and
--- not a sub-problem: a level is not a 'Core' and cannot be converted further.
-levelsDiffer :: [Level] -> [Level] -> Maybe (Level, Level)
-levelsDiffer ks ls = case [(a, b) | (a, b) <- zip ks ls, a /= b] of
-  (p : _) -> Just p
-  []      -> Nothing
+-- @Type (max 0 1)@ and @Type 1@ are one level. Two uses of the same name at
+-- different levels are different terms, so a disagreement is a clash and not a
+-- sub-problem: a level is not a 'Core' and cannot be converted further.
+--
+-- **An undecided pair is owed, exactly as the universe case owes one.** A level
+-- argument is an /equality/, so a meta on either side is owed both ways round —
+-- the same two obligations, for the same reason, and this is the whole of why
+-- the four sites that read a level relation now read it the same way.
+levelsAgree :: [Level] -> [Level] -> Either (Level, Level) [Obligation]
+levelsAgree ks ls = concat <$> traverse one (zip ks ls)
+  where
+    one (a, b)
+      | a == b                                = Right []
+      | null (metasIn a) && null (metasIn b)  = Left (a, b)
+      | otherwise                             = Right [AtMost a b, AtMost b a]

@@ -3,27 +3,26 @@ proving id : ∀ (A : Type (?ℓ1)) -> A -> A
 thena spine> try (\ (A : Type) (a : A) -> a)
 thena spine> solve
 thena spine> qed
-id {ℓ13} : ∀ (A : Type (ℓ13)) -> A -> A   ∎
+id {ℓ₁₃} : ∀ (A : Type (ℓ₁₃)) -> A -> A   ∎
 thena spine> :show id
-id {ℓ13} : ∀ (A : Type (ℓ13)) -> A -> A
-id = let id = λ (A : Type (ℓ13)) (a : A) -> a : ∀ (A : Type (ℓ13)) -> A -> A in id
+id {ℓ₁₃} : ∀ (A : Type (ℓ₁₃)) -> A -> A
+id = let id = λ (A : Type (ℓ₁₃)) (a : A) -> a : ∀ (A : Type (ℓ₁₃)) -> A -> A in id
 thena spine> :infer id {0}
 id {0} : ∀ (A : Type₀) -> A -> A
 thena spine> :infer id {3}
 id {3} : ∀ (A : Type₃) -> A -> A
 thena spine> :infer id
 id has 1 level parameter, and was given 0 level arguments
-its level parameters are prenex, so a use supplies all of them or none
+its level parameters are prenex, so a use writes every one of them
 thena spine> :theorem lift : ∀ (A : Type) -> Type
 proving lift : Type (?ℓ15) -> Type (?ℓ17)
 thena spine> try (\ (A : Type) -> A)
 thena spine> solve
 thena spine> qed
-lift {ℓ24 ℓ25} : Type (ℓ24) -> Type (ℓ25)   ∎
+lift {ℓ₂₄ ℓ₂₅} : (ℓ₂₄ ≤ ℓ₂₅) ⊢ Type (ℓ₂₄) -> Type (ℓ₂₅)   ∎
 thena spine> :show lift
-lift {ℓ24 ℓ25} : Type (ℓ24) -> Type (ℓ25)
-  provided ℓ24 ≤ ℓ25
-lift = let lift = λ (A : Type (ℓ24)) -> A : Type (ℓ24) -> Type (ℓ25) in lift
+lift {ℓ₂₄ ℓ₂₅} : (ℓ₂₄ ≤ ℓ₂₅) ⊢ Type (ℓ₂₄) -> Type (ℓ₂₅)
+lift = let lift = λ (A : Type (ℓ₂₄)) -> A : Type (ℓ₂₄) -> Type (ℓ₂₅) in lift
 thena spine> :infer lift {0 1}
 lift {0 1} : Type₀ -> Type₁
 thena spine> :infer lift {1 0}

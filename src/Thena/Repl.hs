@@ -373,9 +373,8 @@ renderResponse s resp = case resp of
   Revalidated (Just e) -> renderKernelError (counter s) e
   Extracted t          -> [renderCore (counter s) [] t]
   Proving g ty  -> ["proving " ++ nameString g ++ " : " ++ renderCore (counter s) [] ty]
-  Proved g lvs ty ->
-    [nameString g ++ levelParams lvs ++ " : "
-       ++ renderCore (counter s) [] ty ++ "   ∎"]
+  Proved g lvs owed ty ->
+    [nameString g ++ scheme (counter s) lvs owed ty ++ "   ∎"]
   Suspended g   -> ["suspended " ++ nameString g]
   Resumed g     -> ["resumed " ++ nameString g]
   Abandoned g   -> ["abandoned " ++ nameString g]
@@ -1273,11 +1272,42 @@ renderGlobal
   :: Int -> GlobalName -> [LevelVar] -> [Obligation] -> Core -> Maybe Core
   -> [String]
 renderGlobal n g lvs cs ty body =
-  (nameString g ++ levelParams lvs ++ " : " ++ renderCore n [] ty)
-    : map (("  provided " ++) . obligation) cs
-    ++ case body of
-         Nothing -> []
-         Just b  -> [nameString g ++ " = " ++ renderCore n [] b]
+  (nameString g ++ scheme n lvs cs ty)
+    : case body of
+        Nothing -> []
+        Just b  -> [nameString g ++ " = " ++ renderCore n [] b]
+
+-- | A level scheme, from the colon rightwards:
+-- @ {ℓ₁ ℓ₂} : (ℓ₁ ≤ ℓ₂) ⊢ Type ℓ₁ -> Type ℓ₂@
+--
+-- **The constraints sit inside the type, not under it** — the user's call,
+-- 2026-08-30, on the @provided@ lines this replaces: *"I don't like the
+-- 'provided' part, it reads as if it is not even part of the type."* It is
+-- part of it. A use supplies the parameters and **owes** the constraints, so a
+-- scheme read without them is a scheme read wrong.
+--
+-- **@⊢@ and not @⊨@.** The constraints are hypotheses the use site discharges,
+-- which is the turnstile's own reading — /given these, this type/. @⊨@ would
+-- say every instantiation satisfies them, and that is exactly what these are
+-- not: a constraint that held for every instantiation would have been
+-- discharged by 'Thena.Core.Level.solveLevels' and never stored. @⊢@ is also
+-- already a reserved character (§2.6), so it costs no lexer change if a
+-- scheme ever becomes writable.
+--
+-- **Each constraint gets its own parens, even when there is only one**, so a
+-- run of them cannot be misread — @(ℓ₁ ≤ ℓ₂) (suc ℓ₂ ≤ 3)@ rather than one
+-- pair around a list whose separator is a space and whose members contain
+-- spaces.
+--
+-- **No constraints, no turnstile.** Every monomorphic theorem would otherwise
+-- grow an empty one.
+scheme :: Int -> [LevelVar] -> [Obligation] -> Core -> String
+scheme n lvs cs ty =
+  levelParams lvs ++ " : " ++ owed ++ renderCore n [] ty
+  where
+    owed
+      | null cs   = ""
+      | otherwise = unwords [ "(" ++ obligation c ++ ")" | c <- cs ] ++ " ⊢ "
 
 renderDeclareError :: DeclareError -> String
 renderDeclareError e = case e of
@@ -1374,11 +1404,8 @@ renderTypeError n e = case e of
   WrongNumberOfLevelArguments g want got ->
     [ nameString g ++ " has " ++ count want "level parameter"
         ++ ", and was given " ++ count got "level argument"
-    , "its level parameters are prenex, so a use supplies all of them or none"
+    , "its level parameters are prenex, so a use writes every one of them"
     ]
-  LevelArgumentsOnAConstant g got ->
-    [ nameString g ++ " has no level parameters, but was given "
-        ++ count got "level argument" ]
   LooseIndex i           -> ["a loose de Bruijn index " ++ show i ++ " reached the checker"]
   NotAType ctx t ty      ->
     [renderCore n ctx t ++ " is not a type — it has type " ++ renderCore n ctx ty]

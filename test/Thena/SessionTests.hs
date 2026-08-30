@@ -80,7 +80,7 @@ theTheorem = testCase "a theorem proved by hand, start to ∎" $ do
   let l = run identityProof
   loadedError l @?= Nothing
   case reverse (loadedResponses l) of
-    Proved g _ _ : _ -> g @?= GlobalName "id"
+    Proved g _ _ _ : _ -> g @?= GlobalName "id"
     other -> assertFailure ("did not end in qed: " ++ show (take 1 other))
 
 theoremIsAGlobal :: TestTree

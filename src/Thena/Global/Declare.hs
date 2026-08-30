@@ -34,7 +34,6 @@ import Thena.Core.Level
   , metasIn
   , solveLevels
   )
-import Thena.Core.Term ()
 import Thena.Core.Typing (infer)
 import Thena.Errors (TypeError (..))
 import Thena.Core.Term
@@ -44,6 +43,7 @@ import Thena.Core.Term
   , fresh
   , globalsIn
   , open
+  , referencesAt
   )
 import Thena.Global.NoConfusion
   ( Generated (..)
@@ -131,39 +131,45 @@ declare env n d0 = do
   -- finished declaration, which is why the wrappers and no-confusion need to
   -- know nothing about any of it.
   (d1, n2) <- computed env n1 d0
-  n2' <- universes env n2 d1
-  let (d, n4) = generaliseInductive n2' d1
+  n3 <- universes env n2 d1
+  let (d, n4) = generaliseInductive n3 d1
   -- The wrappers first: the generated terms name the datatype's own former and
   -- constructors, so they must already resolve.
   let env1 = generate d env
+  -- **Every branch gives back @n4@ or later, never an earlier counter.** A
+  -- declined no-confusion still leaves the datatype declared, and
+  -- 'generaliseInductive' has already minted its level parameters from the
+  -- shared counter — so handing back the count from before them would reissue
+  -- a level parameter's number as something else, which is exactly what MS2
+  -- closeout 4f says may never happen. Phase 33c introduced the slip by
+  -- renaming the post-'universes' counter and leaving these three branches
+  -- naming the old one.
   case generateNoConfusion env1 n4 d of
-    Generated env2 n3 -> Right (env2, n3, Nothing)
-    Declined NoEquality -> Right (env1, n2, Nothing)
-    Declined NoProducts -> Right (env1, n2, Nothing)
-    Declined why        -> Right (env1, n2, Just why)
-    Clash g            -> Left (AlreadyDeclared g)
-    Rejected g e       -> Left (NoConfusionRejected g e)
+    Generated env2 n5   -> Right (env2, n5, Nothing)
+    Declined NoEquality -> Right (env1, n4, Nothing)
+    Declined NoProducts -> Right (env1, n4, Nothing)
+    Declined why        -> Right (env1, n4, Just why)
+    Clash g             -> Left (AlreadyDeclared g)
+    Rejected g e        -> Left (NoConfusionRejected g e)
 
 -- --------------------------------------------------------------------------
 -- Checking
 -- --------------------------------------------------------------------------
 
--- | Thesis §4.1.1: the declared universe must dominate the universes its
--- constructors\' arguments live in. Without it a larger universe can be
--- embedded in a smaller one and the system is inconsistent.
+-- | The universe every constructor argument lives in, named by the constructor
+-- and the argument it belongs to.
 --
--- **Checked in an environment where the type former exists and nothing else
--- of the declaration does.** That is not a convenience: a recursive argument\'s
--- type mentions @D@, so it cannot be typed at all until @D@ has one, and the
+-- **Read twice and for two different questions** (MS3 phase 33c): 'computed'
+-- takes the join of these as the declared universe when the declaration left it
+-- open, and 'universes' checks the size restriction against them. The reasoning
+-- about what is being asked lives on 'universes'; this is only the walk.
+--
+-- **In an environment where the type former exists and nothing else of the
+-- declaration does.** That is not a convenience: a recursive argument\'s type
+-- mentions @D@, so it cannot be typed at all until @D@ has one, and the
 -- eliminator and the wrappers must /not/ exist yet because they are generated
 -- from the completed declaration (@AGENDA.md@ item 28 confirms this is the
 -- intended reading, and Agda and Idris agree).
---
--- **Applied uniformly, to recursive and non-recursive arguments alike**, though
--- §4.1.1 restricts only the non-recursive ones. It comes to the same thing: a
--- recursive argument is an application of @D@, whose type is the declared
--- universe exactly, so @≤@ holds for it by construction. One rule beats two
--- with a classification between them.
 --
 -- The context is the parameters plus the arguments already walked, which is
 -- what the stored types are written against — no opening, no substitution.
@@ -281,16 +287,51 @@ computed env n0 d = case loneMeta (inductiveLevel d) of
 -- the list coming in is always empty; the append is right either way.
 generaliseInductive
   :: Int -> InductiveDefinition -> (InductiveDefinition, Int)
-generaliseInductive n0 d =
-  (rewritten { inductiveLevels = inductiveLevels d ++ map snd binding }, n1)
+generaliseInductive n0 d = (ownReferences generalised, n1)
   where
     (binding, n1) = mint n0 (levelMetasInInductive d)
     rewritten     = substLevelsInInductive [ (v, LVar w) | (v, w) <- binding ] d
+    generalised   = rewritten { inductiveLevels = inductiveLevels d ++ map snd binding }
 
     mint k []       = ([], k)
     mint k (v : vs) = let (w, k1)  = freshLevelRigid k
                           (ws, k2) = mint k1 vs
                        in ((v, w) : ws, k2)
+
+-- | Give the datatype's own recursive occurrences its level parameters
+-- (MS3, review of the milestone).
+--
+-- **A declaration is resolved before it has any**, so @s : N -> N@ stores its
+-- argument as @Global N []@ and the parameter list only exists once
+-- 'generaliseInductive' has minted it. Without this step the very first thing a
+-- reader tries — @data N : Type where { z : N ; s : N -> N }@ — is refused
+-- with /N has 1 level parameter, and was given 0/, and no level-polymorphic
+-- recursive datatype can be declared at all. @data P (A : Type) : Type where
+-- { mk : A -> P A }@ hid it, because a recursive occurrence in the /target/ is
+-- dropped by 'Thena.Syntax.Resolve.targetIndices' and rebuilt at the right
+-- levels by 'Thena.Global.Env.constructorTarget'.
+--
+-- **The levels are the datatype's own parameters, in order, and there is no
+-- choice about that**: recursion here is uniform — @D@ occurring in its own
+-- constructor is @D@ at the same instantiation — and non-uniform recursion is
+-- what 'NestedRecursion' and 'HigherOrderRecursion' already refuse.
+--
+-- Only the parameters and the constructors can mention @D@: the parameter
+-- telescope is resolved before the datatype's name enters scope.
+ownReferences :: InductiveDefinition -> InductiveDefinition
+ownReferences d =
+  d { inductiveConstructors = map rewrite (inductiveConstructors d) }
+  where
+    at = referencesAt (inductiveName d) (map LVar (inductiveLevels d))
+
+    rewrite c = c
+      { constructorArguments = map entry (constructorArguments c)
+      , constructorIndices   = map at (constructorIndices c)
+      }
+
+    entry e = case e of
+      Hypothesis x i t   -> Hypothesis x i (at t)
+      Definition x i v t -> Definition x i (at v) (at t)
 
 -- | Every name a declaration introduces must be free, and distinct from the
 -- others it introduces.

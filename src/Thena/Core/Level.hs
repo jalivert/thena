@@ -130,10 +130,22 @@ instance Eq Level where
 -- name up in: unlike a 'Thena.Core.Term.Var', which the development names, a
 -- 'LevelVar' /is/ its number. "Thena.Engine" names the metas @unify@ solved in
 -- the message it builds, and a second copy of this would be a second spelling.
+-- **A rigid's number is a subscript** — the user's call, 2026-08-30. @ℓ231@
+-- reads as a level *expression* because a level is a number; @ℓ₂₃₁@ reads as a
+-- name with an index on it, which is what it is. A meta keeps its digits: the
+-- @?@ already says it is not a name, and its number is the one thing a reader
+-- has to carry between two messages.
 levelVarName :: LevelVar -> String
 levelVarName v = case v of
-  LRigid i -> "ℓ" ++ show i
+  LRigid i -> "ℓ" ++ subscript i
   LMeta  i -> "?ℓ" ++ show i
+
+-- | Digits as their subscript forms. Negative numbers cannot arise — every
+-- variable is minted from a counter that starts at zero.
+subscript :: Int -> String
+subscript = map sub . show
+  where
+    sub c = toEnum (fromEnum '₀' + (fromEnum c - fromEnum '0'))
 
 -- | Mint a level meta from the shared counter — what a written bare @Type@
 -- resolves to (MS3 phase 33).

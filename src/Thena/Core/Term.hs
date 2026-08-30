@@ -32,6 +32,7 @@ module Thena.Core.Term
   , beyond
   , substLevelsIn
   , substLevelsInScope
+  , referencesAt
   , levelMetasIn
   ) where
 
@@ -279,6 +280,39 @@ substLevelsIn sub = go
       Eliminate dn ls ps m ms is tgt ->
         Eliminate dn (map at ls) (map go ps) (go m) (map go ms)
                   (map go is) (go tgt)
+
+-- | Give every reference to @g@ that carries no level arguments these ones
+-- (MS3, review of the milestone).
+--
+-- **What a datatype's own recursive occurrences need.** A declaration is
+-- resolved before anything knows how many level parameters it will have, so
+-- @succ : N -> N@ stores its argument as @Global N []@; generalisation then
+-- gives @N@ a parameter and that stored @[]@ becomes an arity error, which is
+-- how @data N : Type where { z : N ; s : N -> N }@ came to be refused outright.
+-- 'Thena.Global.Declare' repairs it the moment the parameter list exists.
+--
+-- **Only the empty list is filled in.** A reference that already says which
+-- levels it is at was written that way on purpose and is left alone.
+--
+-- Reaching inside a 'Scope' is safe for 'substLevelsIn''s reason: this touches
+-- no 'Bound' and no 'Free', so it commutes with every binder.
+referencesAt :: GlobalName -> [Level] -> Core -> Core
+referencesAt g ls = go
+  where
+    go t = case t of
+      Bound i             -> Bound i
+      Free x              -> Free x
+      Global h []
+        | h == g          -> Global h ls
+      Global h ks         -> Global h ks
+      Universe l          -> Universe l
+      Pi i s (MkScope b)  -> Pi i (go s) (MkScope (go b))
+      Lam i s (MkScope b) -> Lam i (go s) (MkScope (go b))
+      App f a             -> App (go f) (go a)
+      Let i v s (MkScope b) -> Let i (go v) (go s) (MkScope (go b))
+      Canonical f ks as   -> Canonical f ks (map go as)
+      Eliminate d ks ps m ms is tgt ->
+        Eliminate d ks (map go ps) (go m) (map go ms) (map go is) (go tgt)
 
 -- | The same, under a binder.
 --

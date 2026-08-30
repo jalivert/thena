@@ -1,8 +1,8 @@
 thena spine> data Id (A : Type) : A -> A -> Type where { rfl : ∀ (a : A) -> Id A a a }
 declared Id
 thena spine> :show Id
-data Id {ℓ7} (A : Type (ℓ7)) : A -> A -> Type (ℓ7) where
-  { rfl : ∀ (a : A) -> Id {ℓ7} A a a }
+data Id {ℓ₇} (A : Type (ℓ₇)) : A -> A -> Type (ℓ₇) where
+  { rfl : ∀ (a : A) -> Id {ℓ₇} A a a }
 thena spine> :infer Id {0}
 Id {0} : ∀ (A : Type₀) -> A -> A -> Type₀
 thena spine> :infer rfl {0}
@@ -11,10 +11,10 @@ thena spine> :infer \ (A : Type₀) (a : A) (b : A) (q : Id {0} A a b) -> elim I
 λ (A : Type₀) (a : A) (b : A) (q : Id {0} A a b) -> elim Id {0} (A) (λ (x : A) (y : A) (z : Id {0} A x y) -> Id {0} A x x) ((λ (c : A) -> rfl {0} A c)) (a b) q : ∀ (A : Type₀) (a : A) (b : A) (q : Id {0} A a b) -> (λ (x : A) (y : A) (z : Id {0} A x y) -> Id {0} A x x) a b q
 thena spine> :infer Id
 Id has 1 level parameter, and was given 0 level arguments
-its level parameters are prenex, so a use supplies all of them or none
+its level parameters are prenex, so a use writes every one of them
 thena spine> :infer Id {0 1}
 Id has 1 level parameter, and was given 2 level arguments
-its level parameters are prenex, so a use supplies all of them or none
+its level parameters are prenex, so a use writes every one of them
 thena spine> :core Type {l}
 1:6: unexpected {
 thena spine> :infer Id {suc 0}
