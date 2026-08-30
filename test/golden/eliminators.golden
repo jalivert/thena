@@ -2,7 +2,7 @@ thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
 thena spine> data Fin : Nat -> Type₀ where { fz : ∀ (n : Nat) -> Fin (succ n) ; fs : ∀ (n : Nat) (i : Fin n) -> Fin (succ n) }
 declared Fin
-thena spine> data Empty {l} : Type {l} where { }
+thena spine> data Empty : Type where { }
 declared Empty
 thena spine> :elim Nat
 elim Nat : ∀ (P : Nat -> Type₀) -> P zero -> (∀ (x : Nat) -> P x -> P (succ x)) -> ∀ (target : Nat) -> P target
@@ -11,7 +11,7 @@ elim Nat : ∀ (P : Nat -> Type₁) -> P zero -> (∀ (x : Nat) -> P x -> P (suc
 thena spine> :elim Fin
 elim Fin : ∀ (P : ∀ (x : Nat) -> Fin x -> Type₀) -> (∀ (n : Nat) -> P (succ n) (fz n)) -> (∀ (n : Nat) (i : Fin n) -> P n i -> P (succ n) (fs n i)) -> ∀ (x : Nat) (target : Fin x) -> P x target
 thena spine> :elim Empty
-elim Empty : ∀ (P : Empty {ℓ6} -> Type (ℓ6)) (target : Empty {ℓ6}) -> P target
+elim Empty : ∀ (P : Empty {ℓ7} -> Type (ℓ7)) (target : Empty {ℓ7}) -> P target
 thena spine> :whnf elim Fin () (\ (n : Nat) (i : Fin n) -> Nat) ((\ (n : Nat) -> zero) (\ (n : Nat) (i : Fin n) (ih : Nat) -> succ ih)) ((succ (succ zero))) (fs (succ zero) (fz zero))
 succ (elim Fin () (λ (n : Nat) (i : Fin n) -> Nat) ((λ (n : Nat) -> zero) (λ (n : Nat) (i : Fin n) (ih : Nat) -> succ ih)) ((succ zero)) (fz zero))
 thena spine> :elim Foo

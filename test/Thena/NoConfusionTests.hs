@@ -111,7 +111,7 @@ caseTests =
     testCase "three arguments — three equations, in argument order" $
       taplReduces
         "NoConfusionTerm (ifthen true zero (succ zero)) (ifthen false zero zero)"
-        "And {0} (Eq {0} Term true false) (And {0} (Eq {0} Term zero zero) \
+        "And {0 0} (Eq {0} Term true false) (And {0 0} (Eq {0} Term zero zero) \
         \(Eq {0} Term (succ zero) zero))"
   , testCase "the family's own type" $
       typeOfGlobal eqTapl eqTaplCounter "NoConfusionTerm"
@@ -180,12 +180,12 @@ useTests =
     testCase "the second of three equations" $
       provesIn
         "Eq {0} Term (ifthen true x zero) (ifthen false y zero)"
-        "elim And {0} ((Eq {0} Term true false) (And {0} (Eq {0} Term x y) (Eq {0} Term zero zero))) \
-        \(\\ (z : And {0} (Eq {0} Term true false) (And {0} (Eq {0} Term x y) (Eq {0} Term zero zero))) \
+        "elim And {0 0} ((Eq {0} Term true false) (And {0 0} (Eq {0} Term x y) (Eq {0} Term zero zero))) \
+        \(\\ (z : And {0 0} (Eq {0} Term true false) (And {0 0} (Eq {0} Term x y) (Eq {0} Term zero zero))) \
         \-> Eq {0} Term x y) \
-        \((\\ (q1 : Eq {0} Term true false) (r : And {0} (Eq {0} Term x y) (Eq {0} Term zero zero)) \
-        \-> elim And {0} ((Eq {0} Term x y) (Eq {0} Term zero zero)) \
-        \(\\ (z : And {0} (Eq {0} Term x y) (Eq {0} Term zero zero)) -> Eq {0} Term x y) \
+        \((\\ (q1 : Eq {0} Term true false) (r : And {0 0} (Eq {0} Term x y) (Eq {0} Term zero zero)) \
+        \-> elim And {0 0} ((Eq {0} Term x y) (Eq {0} Term zero zero)) \
+        \(\\ (z : And {0 0} (Eq {0} Term x y) (Eq {0} Term zero zero)) -> Eq {0} Term x y) \
         \((\\ (q2 : Eq {0} Term x y) (q3 : Eq {0} Term zero zero) -> q2)) () r)) () \
         \(noConfusionTerm (ifthen true x zero) (ifthen false y zero) e)"
         "Eq {0} Term x y"

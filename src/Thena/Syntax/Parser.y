@@ -35,7 +35,6 @@ import Thena.Syntax.Concrete
   ( Raw (..)
   , RawBinder (..)
   , RawConstraint (..)
-  , RawLevel (..)
   , RawConstructor (..)
   , RawData (..)
   , RawInstr (..)
@@ -125,15 +124,6 @@ NameAndType :: { (Maybe String, Raw) }
   : ident ':' Term                         { (Just $1, $3) }
   | ':' Term                               { (Nothing, $2) }
 
--- | A run of level-parameter names in braces. **Only @data@ takes these**
--- (MS3 phase 31e): a theorem's level parameters are inferred and generalised,
--- never written, which is his decision of 2026-08-28.
-LevelParams :: { [String] }
-  : '{' LevelNames '}'                     { reverse $2 }
-
-LevelNames :: { [String] }
-  :                                        { [] }
-  | LevelNames ident                       { $2 : $1 }
 
 -- The argument of @data@ (§2.7's grammar, extended; decided by the user
 -- planning phase 6). @data@ itself is not a token: the driver splits the first
@@ -145,9 +135,7 @@ LevelNames :: { [String] }
 -- split §3.7 requires disambiguated, made syntactic.
 Data :: { RawData }
   : ident MaybeBinders ':' Term where '{' Constructors '}'
-                                           { RawData $1 [] (reverse $2) $4 (reverse $7) }
-  | ident LevelParams MaybeBinders ':' Term where '{' Constructors '}'
-                                           { RawData $1 $2 (reverse $3) $5 (reverse $8) }
+                                           { RawData $1 (reverse $2) $4 (reverse $7) }
 
 MaybeBinders :: { [RawBinder] }
   :                                        { [] }
@@ -241,22 +229,20 @@ Atom :: { Raw }
   : ident                                  { RawName $1 }
   | ident LevelArgs                        { RawAt $1 $2 }
   | univ                                   { RawUniverse $1 }
-  | Type LevelArgs                         { RawUniverseAt (theOne $2) }
   | Type                                   { RawUniverseOpen }
   | '(' Term ')'                           { $2 }
 
 -- | @{ ℓ 0 }@ — a brace-enclosed run of level atoms, no commas, exactly as
 -- rule parameters and call arguments are a bare run of names (phase 23).
-LevelArgs :: { [RawLevel] }
+LevelArgs :: { [Int] }
   : '{' LevelAtoms '}'                     { reverse $2 }
 
-LevelAtoms :: { [RawLevel] }
+LevelAtoms :: { [Int] }
   :                                        { [] }
   | LevelAtoms LevelAtom                   { $2 : $1 }
 
-LevelAtom :: { RawLevel }
-  : num                                    { RawLevelNum $1 }
-  | ident                                  { RawLevelVar $1 }
+LevelAtom :: { Int }
+  : num                                    { $1 }
 
 -- The argument list of a rule invoked at the REPL (phase 23b): a run of atoms,
 -- exactly as a rule body writes its operands. @try (\ x -> x)@ is one argument
@@ -295,13 +281,5 @@ parseError ts = Left $ case ts of
   Located p t : _ -> UnexpectedToken p t
   []              -> UnexpectedEndOfInput
 
--- | A universe takes exactly one level.
---
--- **@Type { }@ and @Type {a b}@ are accepted by the grammar and rejected
--- here**, so the complaint is about levels rather than about a parse — and the
--- grammar keeps one rule for a brace group instead of two that differ only in
--- how many things they hold.
-theOne :: [RawLevel] -> RawLevel
-theOne [l] = l
-theOne _   = RawLevelNum 0
+
 }

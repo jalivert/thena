@@ -60,7 +60,7 @@ tests =
         , "data Fin : Nat -> Type\8320 \
           \where { fz : \8704 (n : Nat) -> Fin (succ n) \
           \; fs : \8704 (n : Nat) (i : Fin n) -> Fin (succ n) }"
-        , "data Empty {l} : Type {l} where { }"
+        , "data Empty : Type where { }"
         , ":elim Nat"
         , ":elim Nat Type\8321"
         , ":elim Fin"
@@ -398,7 +398,7 @@ tests =
         , "data Vec (A : Type₀) : Nat -> Type₀ where { nil : Vec A zero ; cons : ∀ (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ n) }"
         , ":show Vec"
         , ":show cons"
-        , "data Empty {l} : Type {l} where { }"
+        , "data Empty : Type where { }"
         , ":show Empty"
         , "data Nat : Type₀ where { z : Nat }"
         , "data Ordinal : Type₀ where { sup : (Nat -> Ordinal) -> Ordinal }"
@@ -451,7 +451,7 @@ tests =
       -- rather than loaded.
     , script
         "induction"
-        [ "data Eq {l} (A : Type {l}) : A -> A -> Type {l} where { refl : ∀ (a : A) -> Eq A a a }"
+        [ "data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }"
         , "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
         , ":theorem plus : Nat -> Nat -> Nat"
         , "try (\\ (n : Nat) (m : Nat) -> elim Nat () (\\ (t : Nat) -> Nat) (m (\\ (k : Nat) (ih : Nat) -> succ ih)) () n)"
@@ -568,10 +568,10 @@ tests =
         , "eliminate i"
         , "eliminate n"
         , ":abandon"
-        , "data Eq {l} (A : Type {l}) : A -> A -> Type {l} where { refl : ∀ (a : A) -> Eq A a a }"
-        , "data Unit {l} : Type {l} where { unit : Unit }"
-        , "data Empty {l} : Type {l} where { }"
-        , "data And {l} (A : Type {l}) (B : Type {l}) : Type {l} where { both : ∀ (a : A) (b : B) -> And A B }"
+        , "data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }"
+        , "data Unit : Type where { unit : Unit }"
+        , "data Empty : Type where { }"
+        , "data And (A : Type) (B : Type) : Type where { both : ∀ (a : A) (b : B) -> And A B }"
         , "data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ where { bz : ∀ (m : Nat) -> Below (succ m) (fz m) ; bs : ∀ (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }"
         , ":theorem probe : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Nat"
         , "attack"
@@ -613,7 +613,7 @@ tests =
       script
         "refining"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
-        , "data Eq {l} (A : Type {l}) : A -> A -> Type {l} \
+        , "data Eq (A : Type) : A -> A -> Type \
           \where { refl {0} : \8704 (a : A) -> Eq {0} A a a }"
           -- Already the goal's type: unification has nothing to do, and the
           -- binding is filled straight in.
@@ -810,9 +810,10 @@ tests =
         [ -- A level-polymorphic DATATYPE: declared, instantiated at two levels,
           -- and eliminated (MS3 phase 31c). The elimination is J.
           --
-          -- **Theorems declare no level parameters** (phase 31e, his decision):
-          -- a definition's levels are inferred and generalised, never written.
-          "data Id {l} (A : Type {l}) : A -> A -> Type {l} where { rfl : \8704 (a : A) -> Id A a a }"
+          -- **Nothing declares level parameters any more** (phase 33c): a
+          -- theorem's were dropped at 31e and a datatype's here, so the schema
+          -- below is entirely inferred from the two written @Type@s.
+          "data Id (A : Type) : A -> A -> Type where { rfl : \8704 (a : A) -> Id A a a }"
         , ":show Id"
         , ":infer Id {0}"
         , ":infer rfl {0}"
@@ -820,8 +821,11 @@ tests =
           -- Prenex is all-or-nothing.
         , ":infer Id"
         , ":infer Id {0 1}"
-          -- A level name means nothing where none is bound.
+          -- **There is no level-variable syntax left to get wrong.** @Type {l}@
+          -- was the last thing that could name one, and phase 33c deleted it;
+          -- what a use may write is a numeral, and nothing else.
         , ":core Type {l}"
+        , ":infer Id {suc 0}"
         , ":quit"
         ]
       -- Typical ambiguity (MS3 phase 33): a bare @Type@ is a universe whose
@@ -864,9 +868,12 @@ tests =
         , "claim h : Type -> Type"
         , "unify \\ (x : Type) -> x \8799 \\ (x : Type\8320) -> x"
         , ":show"
-          -- A declaration still says which level it lives at: its levels are
-          -- stored and instantiated at every use, and nothing generalises one.
+          -- **A declaration infers its level too** (phase 33c). It could not
+          -- when this script was written — phase 33 refused a bare @Type@ here,
+          -- because a declaration's levels are stored and instantiated at every
+          -- use and nothing generalised one.
         , "data Box : Type where { }"
+        , ":show Box"
         , ":quit"
         ]
       -- Generalisation at @qed@ (MS3 phase 33b): a proof's leftover level metas
@@ -965,10 +972,10 @@ tests =
 -- 'Thena.Global.NoConfusion.NoProducts' means.
 preludeLines :: [String]
 preludeLines =
-  [ "data Eq {l} (A : Type {l}) : A -> A -> Type {l} \
-    \where { refl {0} : \8704 (a : A) -> Eq {0} A a a }"
-  , "data Unit {l} : Type {l} where { unit : Unit }"
-  , "data Empty {l} : Type {l} where { }"
-  , "data And (A : Type\8320) (B : Type\8320) : Type\8320 \
-    \where { both {0} : \8704 (a : A) (b : B) -> And {0} A B }"
+  [ "data Eq (A : Type) : A -> A -> Type \
+    \where { refl : \8704 (a : A) -> Eq A a a }"
+  , "data Unit : Type where { unit : Unit }"
+  , "data Empty : Type where { }"
+  , "data And (A : Type) (B : Type) : Type \
+    \where { both : \8704 (a : A) (b : B) -> And A B }"
   ]

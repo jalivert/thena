@@ -1,19 +1,20 @@
-thena spine> data Eq {l} (A : Type {l}) : A -> A -> Type {l} where { refl {0} : ∀ (a : A) -> Eq {0} A a a }
-1:57: unexpected {
-thena spine> data Unit {l} : Type {l} where { unit : Unit }
+thena spine> data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }
+declared Eq
+thena spine> data Unit : Type where { unit : Unit }
 declared Unit
-thena spine> data Empty {l} : Type {l} where { }
+thena spine> data Empty : Type where { }
 declared Empty
-thena spine> data And (A : Type₀) (B : Type₀) : Type₀ where { both {0} : ∀ (a : A) (b : B) -> And {0} A B }
-1:50: unexpected {
+thena spine> data And (A : Type) (B : Type) : Type where { both : ∀ (a : A) (b : B) -> And A B }
+declared And
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
 thena spine> data Ev : Nat -> Type₀ where { evZero : Ev zero ; evSS : ∀ (n : Nat) (p : Ev n) -> Ev (succ (succ n)) }
+no noConfusionEv: evSS's argument p has a type that depends on an earlier argument, so its equation cannot be stated
 declared Ev
 thena spine> :whnf NoConfusionNat zero (succ zero)
-not in scope: NoConfusionNat
+Empty {0}
 thena spine> :whnf NoConfusionNat (succ (succ zero)) (succ zero)
-not in scope: NoConfusionNat
+Eq {0} Nat (succ zero) zero
 thena spine> :theorem oneNotEven : ∀ (p : Ev (succ zero)) -> Empty {0}
 proving oneNotEven : Ev (succ zero) -> Empty {0}
 thena spine> attack
@@ -21,42 +22,35 @@ thena spine> intro
 thena spine> into
 thena spine> along
 thena spine> eliminate p
-stuck: eliminating at indices needs Eq, which is not declared
+subgoals: evZeroMethod, evSSMethod
 thena spine> :where
 focus
-  let ? oneNotEven1 : Empty {0} in
+  let ? oneNotEven1 : Empty {0} ≐ (
 path
-  root ▸ ≐ oneNotEven ▸ p
+  root ▸ ≐ oneNotEven ▸ p ▸ evZeroMethod ▸ evSSMethod
 context
   p : Ev (succ zero)
+  evZeroMethod : Eq {0} Nat zero (succ zero) -> Empty {0}
+  evSSMethod : ∀ (n : Nat) -> Ev n -> (Eq {0} Nat n (succ zero) -> Empty {0}) -> Eq {0} Nat (succ (succ n)) (succ zero) -> Empty {0}
 type
   Empty {0}
 thena spine> back
 thena spine> back
 thena spine> try (\ (q : Eq {0} Nat zero (succ zero)) -> noConfusionNat zero (succ zero) q)
-not in scope: Eq
 thena spine> solve
-stuck: not finished: the hole oneNotEven1 is still open, so there is no term yet
 thena spine> along
-thena core> try (\ (n : Nat) (e : Ev n) (ih : Eq {0} Nat n (succ zero) -> Empty {0}) (q : Eq {0} Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ n) zero (noConfusionNat (succ (succ n)) (succ zero) q))
-not in scope: Eq
-thena core> solve
-stuck: no clause of solve applies here
-thena core> along
-stuck: that move is for the chain, and the focus is a core term
-thena core> solve
-stuck: no clause of solve applies here
-thena core> back
-thena spine> back
-stuck: already at the root
-thena spine> back
-stuck: already at the root
-thena spine> back
-stuck: already at the root
+thena spine> try (\ (n : Nat) (e : Ev n) (ih : Eq {0} Nat n (succ zero) -> Empty {0}) (q : Eq {0} Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ n) zero (noConfusionNat (succ (succ n)) (succ zero) q))
 thena spine> solve
-stuck: not finished: the hole oneNotEven1 is still open, so there is no term yet
+thena spine> along
+thena spine> solve
+thena spine> back
+thena spine> back
+thena spine> back
+thena spine> back
+thena spine> solve
 thena spine> qed
-stuck: not finished: the guess for oneNotEven is still open, so there is no term yet
+oneNotEven : Ev (succ zero) -> Empty {0}   ∎
 thena spine> :show oneNotEven
-nothing named oneNotEven has been declared
+oneNotEven : Ev (succ zero) -> Empty {0}
+oneNotEven = let oneNotEven = λ (p : Ev (succ zero)) -> let evZeroMethod = λ (q : Eq {0} Nat zero (succ zero)) -> noConfusionNat zero (succ zero) q : Eq {0} Nat zero (succ zero) -> Empty {0} in let evSSMethod = λ (n : Nat) (e : Ev n) (ih : Eq {0} Nat n (succ zero) -> Empty {0}) (q : Eq {0} Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ n) zero (noConfusionNat (succ (succ n)) (succ zero) q) : ∀ (n : Nat) -> Ev n -> (Eq {0} Nat n (succ zero) -> Empty {0}) -> Eq {0} Nat (succ (succ n)) (succ zero) -> Empty {0} in let oneNotEven1 = (elim Ev () (λ (x : Nat) (target : Ev x) -> Eq {0} Nat x (succ zero) -> Empty {0}) (evZeroMethod evSSMethod) ((succ zero)) p) (refl {0} Nat (succ zero)) : Empty {0} in oneNotEven1 : Ev (succ zero) -> Empty {0} in oneNotEven
 thena spine> :quit

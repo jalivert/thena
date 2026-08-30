@@ -13,7 +13,6 @@
 module Thena.Syntax.Concrete
   ( Raw (..)
   , RawBinder (..)
-  , RawLevel (..)
   , RawConstraint (..)
   , RawData (..)
   , RawConstructor (..)
@@ -34,9 +33,8 @@ module Thena.Syntax.Concrete
 data Raw
   = RawName String
   | RawUniverse Int
-  | RawUniverseAt RawLevel       -- ^ @Type {ℓ}@ — a universe at a written level
   | RawUniverseOpen              -- ^ @Type@ — a universe whose level is inferred
-  | RawAt String [RawLevel]      -- ^ @foo {ℓ 0}@ — a global at level arguments
+  | RawAt String [Int]           -- ^ @foo {0 1}@ — a global at level arguments
 
   | RawLam [RawBinder] Raw       -- ^ @λ (x : S) (y : T) -> b@
   | RawPi [RawBinder] Raw        -- ^ @∀ (x : S) (y : T) -> B@
@@ -47,7 +45,7 @@ data Raw
   | RawGuess String Raw Raw Raw  -- ^ @let ? x : S ≐ (g) in p@
   | RawPending RawConstraint Raw -- ^ @κ ▸ p@
   | RawQuote Raw                 -- ^ @⌜ t ⌝@
-  | RawElim String [RawLevel] [Raw] Raw [Raw] [Raw] Raw
+  | RawElim String [Int] [Raw] Raw [Raw] [Raw] Raw
     -- ^ @elim d (params) motive (methods) (indices) target@ (§2.6, phase 7) —
     -- positional, and in exactly 'Thena.Core.Term.Core''s own field order for
     -- 'Thena.Core.Term.Eliminate', so where a field goes needs no name.
@@ -56,15 +54,6 @@ data Raw
 -- | @(x : S)@ — one parenthesised binding. Always annotated: there is no
 -- inference at this level, and a binder with no type is a parse error rather
 -- than a hole (§2.6).
--- | A level as written. **Atoms only** (MS3 phase 30): a numeral, or the name
--- of a level parameter in scope. @suc@ and @⊔@ have no surface spelling yet —
--- adding @⊔@ would mean reserving it in the lexer, which narrows what an
--- identifier may contain, and nothing yet needs to write one.
-data RawLevel
-  = RawLevelNum Int
-  | RawLevelVar String
-  deriving (Eq, Show)
-
 data RawBinder = RawBinder String Raw
   deriving (Eq, Show)
 
@@ -79,7 +68,7 @@ data RawConstraint = RawConstraint [RawBinder] Raw Raw Raw
 -- A declaration is not a term, so it is not a case of 'Raw'. The type is kept
 -- whole rather than split into indices and a universe: the split is a shape
 -- check and belongs with the other ones in "Thena.Syntax.Resolve".
-data RawData = RawData String [String] [RawBinder] Raw [RawConstructor]
+data RawData = RawData String [RawBinder] Raw [RawConstructor]
   deriving (Eq, Show)
 
 -- | @c : T@ — one constructor of a 'RawData', with its type written out in

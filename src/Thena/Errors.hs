@@ -454,19 +454,15 @@ data ResolveError
     -- ^ datatype, constructors it has, methods the @elim@ wrote
   | WrongNumberOfEliminationIndices String Int Int
     -- ^ datatype, indices it has, indices the @elim@ wrote
-  | LevelNotInScope String
-    -- ^ a level name written where no level parameter of that name is bound
-    -- (MS3 phase 30). Distinct from 'NotInScope' because the two namespaces
-    -- are distinct: a level parameter is not a term binding and never enters Γ
-  | LevelNotWritten String
-    -- ^ a datatype declaration writes a bare @Type@ (MS3 phase 33). A
-    -- declaration's levels are stored and instantiated at every use, so a meta
-    -- in one would be shared rather than solved, and nothing generalises a
-    -- declaration. Removed by phase 33c, which makes a datatype infer its own
   | LevelArgumentsOnALocal String
     -- ^ level arguments written on a name bound by a λ or by the development.
     -- Only a definition has level parameters, so only a global can be given
-    -- level arguments
+    -- level arguments.
+    --
+    -- **This one survived phase 33c** and its two neighbours did not.
+    -- @LevelNotInScope@ named a level /variable/ nobody can write any more, and
+    -- @LevelNotWritten@ refused a declaration that now infers its own level;
+    -- @foo {0}@ on a λ-bound name is still perfectly writable and still wrong
   deriving (Eq, Show)
 
 -- | Which development-only form was met in a core position. An enum rather

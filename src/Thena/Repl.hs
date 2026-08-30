@@ -120,7 +120,7 @@ import Thena.Errors
   , TypeError (..)
   )
 import Thena.Global.Declare (DeclareError (..))
-import Thena.Syntax.Concrete (Raw (..), RawLevel (..), RawBinder (..))
+import Thena.Syntax.Concrete (Raw (..), RawBinder (..))
 import Thena.Global.Env
   ( ConstructorDefinition (..)
   , InductiveDefinition (..)
@@ -429,10 +429,6 @@ renderSyntaxError e = case e of
   ResolveFailed (NotInScope n)      -> "not in scope: " ++ n
   ResolveFailed (NotACoreTerm f)    ->
     devForm f ++ " is part of a development, not a term"
-  ResolveFailed (LevelNotInScope s) ->
-    s ++ " is not a level parameter in scope"
-  ResolveFailed (LevelNotWritten s) ->
-    s ++ " must say which level it lives at, as in \"Type\8320\""
   ResolveFailed (LevelArgumentsOnALocal s) ->
     s ++ " is bound here, and only a definition has level parameters"
   ResolveFailed (NotAUniverse d)    ->
@@ -1114,8 +1110,7 @@ renderRaw = raw False
     raw _ (RawName x)       = x
     raw _ (RawUniverse l)   = "Type" ++ subscript l
     raw _ RawUniverseOpen   = "Type"
-    raw _ (RawUniverseAt l) = "Type {" ++ rawLevel l ++ "}"
-    raw _ (RawAt x ls)      = x ++ " {" ++ unwords (map rawLevel ls) ++ "}"
+    raw _ (RawAt x ls)      = x ++ " {" ++ unwords (map show ls) ++ "}"
     raw p (RawApp f a)      = wrap p (raw False f ++ " " ++ raw True a)
     raw p (RawArrow a b)    = wrap p (raw True a ++ " -> " ++ raw False b)
     raw p (RawLam bs b)     = wrap p ("λ" ++ concatMap binder bs ++ " -> " ++ raw False b)
@@ -1137,7 +1132,7 @@ renderRaw = raw False
     binder (RawBinder x ty) = " (" ++ x ++ " : " ++ raw False ty ++ ")"
     group ts = "(" ++ intercalate ", " (map (raw False) ts) ++ ")"
     levelGroup [] = ""
-    levelGroup ls = " {" ++ unwords (map rawLevel ls) ++ "}"
+    levelGroup ls = " {" ++ unwords (map show ls) ++ "}"
 
     wrap True t  = "(" ++ t ++ ")"
     wrap False t = t
@@ -1211,7 +1206,11 @@ renderMoveError m = case m of
 -- its own rule (§2.6).
 renderInductive :: Int -> InductiveDefinition -> [String]
 renderInductive n d = case inductiveConstructors d of
-  [] -> [header ++ " where { }"]
+  -- @header@ already ends in @where@ — a datatype with no constructors gets
+  -- the empty brace group and nothing else. It said @where where { }@ until
+  -- phase 33c, which is when a bare @Type@ made @data Box : Type where { }@
+  -- something a reader meets rather than a prelude line nobody rereads.
+  [] -> [header ++ " { }"]
   cs -> header : closed (zipWith (++) ("  { " : repeat "  ; ") (map line cs))
   where
     ps   = inductiveParameters d
@@ -1548,12 +1547,6 @@ renderLevelAtom l = case normalise l of
 levelParams :: [LevelVar] -> String
 levelParams [] = ""
 levelParams vs = " {" ++ unwords (map levelVarName vs) ++ "}"
-
--- | A level as it was written — a numeral or a parameter's name.
-rawLevel :: RawLevel -> String
-rawLevel l = case l of
-  RawLevelNum k -> show k
-  RawLevelVar x -> x
 
 -- | @1 thing@, @2 things@ — so a message never reads "1 level arguments".
 count :: Int -> String -> String

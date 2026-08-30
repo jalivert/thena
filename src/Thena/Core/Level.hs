@@ -42,6 +42,7 @@ module Thena.Core.Level
   , LevelUnification (..)
   , unifyLevels
   , metasIn
+  , loneMeta
   , levelVarName
   ) where
 
@@ -549,6 +550,10 @@ one a b
     rigidOnly l = not (any isMeta (levelVarsIn l))
 
 -- | The level that is exactly one meta, with no offset and no join.
+--
+-- Exported for "Thena.Global.Declare" as well as used here: a declared universe
+-- written as a bare @Type@ is exactly this, and that is what makes it the one
+-- that gets computed rather than checked (phase 33c).
 loneMeta :: Level -> Maybe LevelVar
 loneMeta l = case normalise l of
   Normal 0 [(v, 0)] | isMeta v -> Just v

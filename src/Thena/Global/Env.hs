@@ -29,6 +29,8 @@ module Thena.Global.Env
   , declaredNames
   , addConstant
   , generalised
+  , substLevelsInInductive
+  , levelMetasInInductive
   , addDefinition
   , addInductive
 
@@ -42,14 +44,18 @@ module Thena.Global.Env
   , varsInEnv
   ) where
 
+import Data.List (nub)
+
 import Thena.Core.Level
   ( Level (..)
   , LevelVar
   , Obligation
   , freshLevelRigid
+  , metasIn
+  , substLevel
   , substObligation
   )
-import Thena.Core.Context (Context, entryType, entryVar, piOver)
+import Thena.Core.Context (Context, entryType, entryVar, piOver, substLevelsInEntry)
 import Thena.Core.Term
   ( Core (..)
   , Var
@@ -205,6 +211,44 @@ data ConstructorDefinition = ConstructorDefinition
   , constructorIndices   :: [Core]
   }
   deriving (Eq, Show)
+
+-- | Apply a level substitution to a whole declaration (MS3 phase 33c).
+--
+-- Levels live in five places here — the declared universe, the parameters' and
+-- indices' types, each constructor's argument types, and each constructor's
+-- index expressions — and this is the list. Everything else in the record is a
+-- name or a count.
+--
+-- What computing a bare @Type@'s level and generalising a declaration both need.
+substLevelsInInductive
+  :: [(LevelVar, Level)] -> InductiveDefinition -> InductiveDefinition
+substLevelsInInductive sub d = d
+  { inductiveParameters   = map at (inductiveParameters d)
+  , inductiveIndices      = map at (inductiveIndices d)
+  , inductiveLevel        = substLevel sub (inductiveLevel d)
+  , inductiveConstructors = map constructor (inductiveConstructors d)
+  }
+  where
+    at = substLevelsInEntry sub
+
+    constructor c = c
+      { constructorArguments = map at (constructorArguments c)
+      , constructorIndices   = map (substLevelsIn sub) (constructorIndices c)
+      }
+
+-- | Every level meta a declaration mentions, without duplicates, in the order a
+-- reader meets them: the parameters, the indices, the declared universe, then
+-- the constructors.
+levelMetasInInductive :: InductiveDefinition -> [LevelVar]
+levelMetasInInductive d =
+  nub (concatMap (levelMetasIn . entryType) (inductiveParameters d)
+        ++ concatMap (levelMetasIn . entryType) (inductiveIndices d)
+        ++ metasIn (inductiveLevel d)
+        ++ concatMap constructor (inductiveConstructors d))
+  where
+    constructor c =
+      concatMap (levelMetasIn . entryType) (constructorArguments c)
+        ++ concatMap levelMetasIn (constructorIndices c)
 
 -- | Three tables, because §3.3.1 gives two kinds of term-level binding and the
 -- inductive records are not term-level bindings at all.

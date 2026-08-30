@@ -216,8 +216,19 @@ generateNoConfusion env n0 d
     eqAt a x y = foldl App (Global (GlobalName "Eq") [dl]) [a, x, y]
     reflAt a x = foldl App (Global (GlobalName "refl") [dl]) [a, x]
 
-    andAt p q        = foldl App (Global (GlobalName "And") [dl]) [p, q]
-    bothAt p q x y   = foldl App (Global (GlobalName "both") [dl]) [p, q, x, y]
+    -- **@And@ takes two levels, one per conjunct** (MS3 phase 33c). Both are
+    -- @dl@ here because every equation is stated at @dl@ — see the note above —
+    -- so the join @Type (dl ⊔ dl)@ is @Type dl@ and the family's own level is
+    -- unchanged.
+    --
+    -- `[an opportunity this opens, and it is not taken here]` Now that @And@
+    -- carries a level per conjunct, the equations need not all be stated at
+    -- @dl@: each could be stated at its own argument's level and conjoined at
+    -- the join, which is what phase 32 §1 wanted and could not spell. That
+    -- would make the lifting above unnecessary. It is a change to what is
+    -- generated, not to what this phase is about.
+    andAt p q        = foldl App (Global (GlobalName "And") [dl, dl]) [p, q]
+    bothAt p q x y   = foldl App (Global (GlobalName "both") [dl, dl]) [p, q, x, y]
 
     -- ----------------------------------------------------------------------
     -- The family
@@ -491,15 +502,27 @@ productsInScope env d =
     needsUnit  = any ((== 0) . arity) cs
     needsAnd   = any ((>= 2) . arity) cs
 
--- | @And (A : Type₀) (B : Type₀) : Type₀ { both : ∀ (a : A) (b : B) -> And A B }@
+-- | @And {ℓ₀ ℓ₁} (A : Type ℓ₀) (B : Type ℓ₁) : Type (ℓ₀ ⊔ ℓ₁)
+--   { both : ∀ (a : A) (b : B) -> And A B }@
+--
+-- **One level per conjunct** (MS3 phase 33c). Written by hand it was
+-- @And {ℓ} (A B : Type ℓ) : Type ℓ@ — one name in three places forcing them
+-- equal — and inference cannot say that, because each written @Type@ is its own
+-- unknown. What it gives instead is the more general form, and it is the one
+-- phase 32 §1 wanted and rejected for having no surface spelling: the join is
+-- computed, so nobody has to write @⊔@.
+--
+-- The result level is compared **up to the algebra**, since that is what
+-- @Eq Level@ is: @Type (ℓ₀ ⊔ ℓ₁)@ is what generalisation produces and
+-- @normalise@ is what makes the comparison mean it.
 conjunctionInScope :: GlobalEnv -> Bool
 conjunctionInScope env = case lookupInductive (GlobalName "And") env of
   Nothing -> False
   Just e -> case (inductiveParameters e, inductiveIndices e, inductiveConstructors e) of
-    ([a, b], [], [c]) | [lv] <- inductiveLevels e ->
-      inductiveLevel e == LVar lv
-        && entryType a == Universe (LVar lv)
-        && entryType b == Universe (LVar lv)
+    ([a, b], [], [c]) | [l0, l1] <- inductiveLevels e ->
+      inductiveLevel e == LMax (LVar l0) (LVar l1)
+        && entryType a == Universe (LVar l0)
+        && entryType b == Universe (LVar l1)
         && constructorName c == GlobalName "both"
         && case constructorArguments c of
              [x, y] -> entryType x == Free (entryVar a)

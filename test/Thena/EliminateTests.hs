@@ -373,7 +373,7 @@ refusalTests =
 -- --------------------------------------------------------------------------
 
 eqDecl' :: String
-eqDecl' = "Eq {l} (A : Type {l}) : A -> A -> Type {l} where { refl : \8704 (a : A) -> Eq A a a }"
+eqDecl' = "Eq (A : Type) : A -> A -> Type where { refl : \8704 (a : A) -> Eq A a a }"
 
 vecDecl' :: String
 vecDecl' =
