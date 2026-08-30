@@ -737,6 +737,23 @@ tests =
         , ":undo"
         , "apply true"
         , "qed"
+          -- **The same failure with no proof open** (phase 34). The top level
+          -- has a development too, so a line that did not do what it said is
+          -- rewound there as well, and @:undo@ takes back a line there as well
+          -- — neither of which happened until the undo stack moved off 'Proof'.
+        , ":goal Maybe Bool"
+        , "apply Just"
+        , ":show"
+        , "apply Nothing"
+        , ":show"
+        , ":undo"
+        , ":show"
+        , ":undo"
+          -- And the rewind proper: a body that ran, changed the development and
+          -- then failed, with no proof open. @:show@ is the bare hole.
+        , ":goal \8704 (b : Bool) -> Maybe Bool"
+        , "apply Just"
+        , ":show"
           -- **A goal `apply` cannot saturate into, and the way back** (the
           -- user, 2026-08-26). @Just@'s result is a @Maybe@, so no number of
           -- arguments makes it a function type: saturating and unifying fails.

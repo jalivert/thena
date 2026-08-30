@@ -186,8 +186,24 @@ sessionTests =
 
 undoTests :: [TestTree]
 undoTests =
-  [ rejects "outside a proof there is nothing to undo (§2.4)" [":undo"] NotProving
+  [ -- **@:undo@ does not need a proof** (phase 34, his ruling). It used to
+    -- answer @NotProving@ here, which was the wrong end of the stick: a
+    -- 'Snapshot' is @(Exec, ProofState)@ and 'Machine' always has both, so the
+    -- top level has a development to take a line back in.
+    rejects "with nothing typed yet there is nothing to undo" [":undo"] NothingToUndo
+  , testCase "a line at the top level is taken back like any other" $
+      sameDevelopment ["assume A : Type₀", ":undo"] []
+  , rejects "and then there is nothing left" ["assume A : Type₀", ":undo", ":undo"]
+      NothingToUndo
+
+    -- Every proof boundary starts a fresh history, which is what keeps @:undo@
+    -- away from a @qed@ it could not honestly reverse: admitting writes to
+    -- @globals@, which no 'Snapshot' carries.
   , rejects "nor at the start of one" [":theorem t : Type₀", ":undo"] NothingToUndo
+  , rejects "a theorem does not let you undo back past it"
+      ["assume A : Type₀", ":theorem t : Type₀", ":undo"] NothingToUndo
+  , rejects "and abandoning one does not either"
+      [":theorem t : Type₀", "attack", ":abandon", ":undo"] NothingToUndo
 
   , testCase "one line back is the state before that line" $
       sameDevelopment

@@ -38,5 +38,5 @@ thena spine> :show two
 two : Nat
 two = let two = succ (succ zero) : Nat in two
 thena spine> :undo
-no proof is being worked on
+nothing to undo
 thena spine> :quit

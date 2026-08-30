@@ -152,6 +152,31 @@ data Session = Session
     -- development @:goal@ and the phase 4–12 commands still use
   , sessionSuspended :: [Proof]
     -- ^ left and re-enterable, most recently suspended first (§2.4)
+  , sessionSaved     :: Snapshot
+    -- ^ the machine as it was when the current line began, kept in step after
+    -- every line. What a line that fails is rewound to (phase 25d).
+  , sessionUndo      :: [Snapshot]
+    -- ^ what @:undo@ walks back through, most recent first. Pushed only when a
+    -- line actually changed the snapshot, so @:undo@ never has to step over a
+    -- @:show@.
+    --
+    -- **On the session, not on the proof** (phase 34, his ruling of
+    -- 2026-08-29). It was 'Proof''s until then, so @:undo@ and phase 25d's
+    -- rewind both did nothing at the top level — where there is a development
+    -- but no theorem. That is the wrong way round: a 'Snapshot' is
+    -- @(Exec, ProofState)@ and 'Machine' always has both, so the history of a
+    -- thing that always exists was being kept in a record that sometimes does.
+    -- Nothing about taking a line back needs a theorem.
+    --
+    -- **Cleared at every proof boundary** — @:theorem@, @qed@, @:abandon@,
+    -- @:suspend@, @:resume@ — which is his choice of three. @qed@ writes to
+    -- @globals@, and @globals@ is deliberately not in a 'Snapshot' (§7.7: the
+    -- environment only ever grows), so an @:undo@ that crossed it would rewind
+    -- the development and leave the theorem admitted.
+    --
+    -- **The larger question this came out of is `ms3/CLOSEOUT.md` item 16**,
+    -- and it is not answered here: this phase moves a field and changes nothing
+    -- about what 'Session', 'Proof', 'ProofState' and 'Machine' /are/.
   , sessionStepping  :: Bool
   }
   deriving (Eq, Show)
@@ -186,13 +211,15 @@ data Proof = Proof
     -- somewhere in between. It is per-proof state and this is the per-proof
     -- record.
   , proofSaved     :: Snapshot
-    -- ^ kept in step with the machine after every line, so suspending is a
-    -- move and not a copy, and 'sessionSuspended' and the current proof are
-    -- the same kind of thing
-  , proofUndo      :: [Snapshot]
-    -- ^ born with the proof and dies with it (§2.4). Pushed only when a line
-    -- actually changed the snapshot, so @:undo@ never has to step over a
-    -- @:show@
+    -- ^ where this proof is parked: written when it is created and when it is
+    -- suspended, read when it is resumed. That is the whole of its life.
+    --
+    -- **It used to be rewritten after every line too**, because it doubled as
+    -- \"the state before this line\" for @:undo@ and for phase 25d's rewind.
+    -- Phase 34 gave the session its own 'sessionSaved' for that, so the two
+    -- jobs are no longer one field: suspending is still a move and not a copy,
+    -- and 'sessionSuspended' and the current proof are still the same kind of
+    -- thing.
   }
   deriving (Eq, Show)
 
@@ -201,6 +228,8 @@ newSession = Session
   { sessionMachine   = Machine (Exec [] [] []) ps emptyGlobals [] n
   , sessionProof     = Nothing
   , sessionSuspended = []
+  , sessionSaved     = (Exec [] [] [], ps)
+  , sessionUndo      = []
   , sessionStepping  = False
   }
   where
@@ -743,7 +772,7 @@ dispatch s name arg = case name of
       Left e  -> (s, Rejected (NotThere e))
       Right m ->
         ( s { sessionMachine = m
-            , sessionProof = Just (Proof g ty [] (snapshotOf m) [])
+            , sessionProof = Just (Proof g ty [] (snapshotOf m))
             }
         , Proving g ty
         )
@@ -842,16 +871,14 @@ dispatch s name arg = case name of
             , Resumed (proofName pr)
             )
 
-    undo = case sessionProof s of
-      Nothing -> (s, Rejected NotProving)
-      Just pr -> case proofUndo pr of
-        []       -> (s, Rejected NothingToUndo)
-        (u : us) ->
-          ( s { sessionMachine = restore u machine
-              , sessionProof = Just pr { proofSaved = u, proofUndo = us }
-              }
-          , Undone
-          )
+    -- **No proof required** (phase 34). @:undo@ takes back the line you typed,
+    -- and nothing about that needs a theorem to be open.
+    undo = case sessionUndo s of
+      []       -> (s, Rejected NothingToUndo)
+      (u : us) ->
+        ( s { sessionMachine = restore u machine, sessionUndo = us }
+        , Undone
+        )
 
     declaration = withArgument $
       case parseDeclaration (globals machine) (names machine) arg of
@@ -1192,9 +1219,9 @@ oneLine s pending line = (record s', resp, asking)
     --
     -- @:undo@ itself must not record, or undoing would immediately re-record
     -- the state it just left.
-    record sess = case sessionProof sess of
-      Nothing -> sess
-      Just pr
+    record sess = sess'
+      where
+       sess'
         -- **A line that did not do what it said leaves the proof exactly as it
         -- was** (phase 25d). Before this, a rule body that had already changed
         -- the development and then failed left what it built behind, and the
@@ -1221,15 +1248,19 @@ oneLine s pending line = (record s', resp, asking)
         -- and the answering line fails, this rewinds to the asking state and
         -- not to before the whole command, because that is where the previous
         -- snapshot was taken. §2.4's granularity, applied consistently.
-        | stopped resp ->
-            sess { sessionMachine = restore (proofSaved pr) (sessionMachine sess) }
-        | resp == Undone || now == proofSaved pr -> sess { sessionProof = Just pr { proofSaved = now } }
-        | otherwise ->
-            sess { sessionProof = Just pr
-                     { proofSaved = now
-                     , proofUndo  = proofSaved pr : proofUndo pr
-                     } }
-        where now = snapshotOf (sessionMachine sess)
+        | stopped resp =
+            sess { sessionMachine = restore (sessionSaved sess) (sessionMachine sess) }
+        -- **A proof boundary starts a fresh history** (phase 34, his choice of
+        -- three). Done here and not in the five commands themselves, because
+        -- @record@ runs /after/ the command and would push the crossing itself
+        -- back on top of a stack the command had just emptied.
+        | boundary resp = sess { sessionSaved = now, sessionUndo = [] }
+        | resp == Undone || now == sessionSaved sess = sess { sessionSaved = now }
+        | otherwise =
+            sess { sessionSaved = now
+                 , sessionUndo  = sessionSaved sess : sessionUndo sess
+                 }
+       now = snapshotOf (sessionMachine sess)
 
 -- | The per-proof half of a machine.
 snapshotOf :: Machine -> Snapshot
@@ -1284,22 +1315,47 @@ data Loaded = Loaded
 -- failure reports the same mistake several times over.
 --
 -- Takes the contents and not a path: §12 invariant 4 keeps IO in "Thena.Repl".
+--
+-- **A finished load leaves no undo history** (phase 34). Each line goes through
+-- 'oneLine' and so pushes its own snapshot, and stepping back into the middle of
+-- the prelude is not what @:undo@ is for — a file declares datatypes and admits
+-- theorems, which are @globals@ changes a 'Snapshot' deliberately does not carry
+-- (§7.7). Same argument as @qed@ clearing it, for the same reason.
 loadSource :: Session -> String -> Loaded
 loadSource s0 = go s0 Nothing 1 [] . lines
   where
+    finished s acc err = Loaded s { sessionUndo = [] } (reverse acc) err
+
     go s pending _ acc [] = case pending of
       -- The file ran out while an op was still asking. The line to name is the
       -- one that asked, which is the last one that ran.
-      Just _  -> Loaded s (reverse acc) (Just (UnansweredQuestion (length acc)))
-      Nothing -> Loaded s (reverse acc) Nothing
+      Just _  -> finished s acc (Just (UnansweredQuestion (length acc)))
+      Nothing -> finished s acc Nothing
     go s pending n acc (l : ls) =
       let (s', resp, asking) = oneLine s pending l
           acc'               = resp : acc
        in case resp of
-            LoadRequested _ -> Loaded s (reverse acc) (Just (NestedLoad n))
-            Quit            -> Loaded s' (reverse acc') Nothing
-            _ | stopped resp -> Loaded s' (reverse acc') (Just (LoadStopped n))
+            LoadRequested _ -> finished s acc (Just (NestedLoad n))
+            Quit            -> finished s' acc' Nothing
+            _ | stopped resp -> finished s' acc' (Just (LoadStopped n))
               | otherwise    -> go s' asking (n + 1) acc' ls
+
+-- | Which responses cross a proof boundary — the five ways the development you
+-- are standing in is exchanged for another (§2.4).
+--
+-- @:undo@ does not cross one. @qed@ is the case that forces it: admitting writes
+-- to @globals@, and @globals@ is deliberately not part of a 'Snapshot' (§7.7,
+-- \"the environment only ever grows\"), so an @:undo@ that stepped back over a
+-- @qed@ would rewind the development and leave the theorem admitted. The other
+-- four are the same idea without the sharp edge.
+boundary :: Response -> Bool
+boundary resp = case resp of
+  Proving {}   -> True
+  Proved {}    -> True
+  Abandoned {} -> True
+  Suspended {} -> True
+  Resumed {}   -> True
+  _            -> False
 
 -- | Which responses end a load.
 --
