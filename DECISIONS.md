@@ -108,4 +108,32 @@ here.*
 
 ## The REPL and the session
 
-*Nothing recorded yet.*
+### `:undo` takes back a line, whether or not you are proving
+
+*Decided 2026-08-29.*
+
+A session always has a development — at a fresh prompt you are standing in a
+scratch one with a single hole called `goal`. You can build in it: `assume`,
+`claim`, `:goal`, tactics, `certify`, all with no `:theorem` open.
+
+**`:undo` works there, and so does the rewind that undoes a failed line.** Both
+used to require a proof, which was an accident of where the undo stack was
+stored rather than a decision.
+
+**`:undo` does not cross a proof boundary.** `:theorem`, `qed`, `:abandon`,
+`:suspend` and `:resume` each start a fresh history:
+
+```
+assume A : Type₀
+:theorem t : Type₀
+:undo                  nothing to undo — it will not step back past :theorem
+```
+
+**Why `qed` in particular:** admitting a theorem writes it into the global
+environment, and the environment is not part of what `:undo` restores — it only
+ever grows. An `:undo` across a `qed` would rewind your development and leave the
+theorem admitted, which is worse than refusing.
+
+**Loading a file leaves no undo history**, for the same reason: a file declares
+datatypes and admits theorems, and neither is something `:undo` could honestly
+reverse.
