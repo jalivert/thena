@@ -3,10 +3,14 @@ name: Haskell CI
 on:
   push:
     paths:
-        - 'app/**'
-        - 'src/**'
-        - 'test/**'
-        - '**.cabal'
+      - 'app/**'
+      - 'src/**'
+      - 'test/**'
+      - 'prelude/**'
+      - 'rules/**'
+      - 'examples/**'
+      - '**.cabal'
+      - '.github/workflows/haskell.yml'
 
   pull_request:
     branches: [ "main" ]
@@ -16,35 +20,45 @@ permissions:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-haskell@v1
-      with:
-        ghc-version: '8.10.3'
-        cabal-version: '3.2'
+      - uses: actions/checkout@v4
 
-    - name: Cache
-      uses: actions/cache@v3
-      env:
-        cache-name: cache-cabal
-      with:
-        path: ~/.cabal
-        key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/*.cabal') }}-${{ hashFiles('**/cabal.project') }}
-        restore-keys: |
-          ${{ runner.os }}-build-${{ env.cache-name }}-
-          ${{ runner.os }}-build-
-          ${{ runner.os }}-
+      # GHC 9.12 or newer is required: the cabal file asks for the GHC2024
+      # language edition, which arrived in 9.10, and for base ^>=4.21.2.0,
+      # which ships with 9.12. Pinned to the version the project is developed
+      # against so that a -Wall-clean build here means the same thing it means
+      # locally.
+      - name: Set up GHC and cabal
+        uses: haskell-actions/setup@v2
+        id: setup
+        with:
+          ghc-version: '9.12.4'
+          cabal-version: 'latest'
 
-    - name: Install dependencies
-      run: |
-        cabal update
-        cabal build --only-dependencies --enable-tests --enable-benchmarks
+      # Dependencies only, and deliberately NOT dist-newstyle: cabal decides
+      # what to recompile by hashing file contents, so a cached build tree would
+      # leave unchanged modules uncompiled and their warnings unprinted. That is
+      # the exact way -Wall went unchecked for two phases locally. alex, happy
+      # and tasty are most of the cold-build time and they live in the store.
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.setup.outputs.cabal-store }}
+          key: ${{ runner.os }}-ghc${{ steps.setup.outputs.ghc-version }}-${{ hashFiles('**/*.cabal', 'cabal.project*') }}
+          restore-keys: |
+            ${{ runner.os }}-ghc${{ steps.setup.outputs.ghc-version }}-
 
-    - name: Build
-      run: cabal build --enable-tests --enable-benchmarks all
+      - name: Install dependencies
+        run: |
+          cabal update
+          cabal build --only-dependencies --enable-tests all
 
-    - name: Run tests
-      run: cabal test all
+      - name: Build
+        run: cabal build --enable-tests all
+
+      # --test-show-details=direct so a failing golden's diff reaches the log;
+      # cabal hides test output otherwise and the run is useless when it is red.
+      - name: Run tests
+        run: cabal test all --test-show-details=direct
