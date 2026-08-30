@@ -82,9 +82,135 @@ op words reserved.
 
 ## Universes and levels
 
-*Nothing recorded yet. The universe work is MS3; its decisions are in
-`.claude/plans/milestones/ms3/` and `.claude/discussion/` and should be summarised
-here.*
+*Decided across MS3 (2026-08-27 to 2026-08-29); written up 2026-08-30.*
+
+### `Type` infers its level; `Typeₙ` pins it
+
+Write `Type` and Thena works out which universe you meant. Write `Type₀`,
+`Type₁`, … and it holds you to it.
+
+```
+:theorem id : ∀ (A : Type) -> A -> A      the level is inferred, and generalised
+:theorem id0 : ∀ (A : Type₀) -> A -> A    this one is Type₀'s copy and nothing else
+```
+
+This is Coq's typical ambiguity, with one difference worth knowing: **nothing is
+ever defaulted.** An inferred level that the proof does not pin down is *not*
+quietly set to zero — it becomes a parameter of the theorem. Defaulting would
+turn every polymorphic statement into its `Type₀` instance.
+
+### Level polymorphism is prenex, inferred, and never written
+
+There is no syntax for declaring a level schema, on a theorem or on a datatype.
+`qed` generalises whatever levels the proof left open, and `data` does the same
+for a declaration.
+
+```
+:theorem id : ∀ (A : Type) -> A -> A
+try (\ (A : Type) (a : A) -> a) ; solve ; qed
+id {ℓ₁₃} : ∀ (A : Type (ℓ₁₃)) -> A -> A   ∎
+```
+
+Agda's `∀ {ℓ}` and Coq's `Polymorphic` have no counterpart here. If you want a
+particular level, write `Typeₙ` and you will get exactly it; that, and not a
+written schema, is the escape hatch when inference does not do what you wanted.
+
+**Prenex means the parameters are all at the front and none is first-class.**
+There is no `Setω`, no `Level` in the term language, and levels are not values.
+
+### A use writes its level arguments in braces, and writes all of them
+
+Positionally, in the order they appear in the type, and **numerals only**:
+
+```
+id {0}                fine
+id {0 1}              fine, for two parameters
+id                    refused — 1 level parameter, 0 level arguments given
+id {suc 0}            a parse error: a level argument is an atom
+```
+
+There is no inference of level *arguments* at a use site the way there is for a
+bare `Type`. If a name has level parameters, you write them.
+
+`⊔` — the join — is a real part of the level algebra and prints in inferred
+types (`And {ℓ₇₂ ℓ₇₃} : Type (ℓ₇₂ ⊔ ℓ₇₃)`), but **you cannot write one.** Only
+inference builds a join.
+
+### A reference's level arguments are part of what it is
+
+`Eq {0}` and `Eq {1}` are two different things and Thena will not convert one
+into the other:
+
+```
+:convert Eq {0} ≟ Eq {1}      no — Type₀ and Type₁ are different universes
+```
+
+Datatypes and definitions are *invariant* in their level arguments. Cumulativity
+(below) applies to universes and to a function's result, not to a family's
+levels — the same rule Coq's non-cumulative inductives have.
+
+### Cumulativity: smaller universes sit inside larger ones
+
+A term whose type is `Type₀` is usable wherever `Type₁` is wanted. A function's
+**codomain** is covariant and its **domain is invariant**, which is the sound
+direction: a function that wants `Type₁` arguments cannot stand in for one that
+wants `Type₀` arguments.
+
+**But `≟` is still equality**, so subsumption does not make two universes equal:
+
+```
+:convert Type₀ ≟ Type₁        no — they are compatible, not equal
+```
+
+### A datatype's level is computed from its constructors, and a written one is checked
+
+Write `data D … : Type` and the declared universe becomes the least one
+containing every constructor argument; whatever is still open is generalised.
+
+```
+data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }
+:show Eq
+data Eq {ℓ₇} (A : Type (ℓ₇)) : A -> A -> Type (ℓ₇) where …
+```
+
+Write `Typeₙ` and the size restriction is checked against exactly that:
+
+```
+data Big : Type₀ where { wrap : Type₀ -> Big }
+refused: the argument x of wrap lives in Type₁, which the datatype's own Type₀
+does not contain
+```
+
+**A datatype with nothing to contribute stays polymorphic.** `data Empty : Type
+where { }` has no constructor argument, so there is nothing to take the maximum
+of and the level is generalised rather than computed to zero.
+
+### A theorem can carry conditions on its levels, and they are part of its type
+
+Generalisation may leave a relation between two of the new parameters that is
+neither always true nor always false. It is stored on the theorem and owed again
+at every use, and it prints **inside** the type, behind a turnstile:
+
+```
+:show lift
+lift {ℓ₂₅₂ ℓ₂₅₃} : (ℓ₂₅₂ ≤ ℓ₂₅₃) ⊢ Type (ℓ₂₅₂) -> Type (ℓ₂₅₃)
+```
+
+Read it as *given these, this type*: the conditions are hypotheses **you**
+discharge by choosing level arguments, not facts that hold anyway. A condition
+that held for every instantiation would have been discharged when the theorem
+was admitted and never stored — which is why the turnstile is `⊢` and not `⊨`.
+
+Each condition gets its own parentheses, and a theorem with none has no
+turnstile at all.
+
+`:infer lift {1 0}` will still print a type — a look does not collect the
+conditions — but `:revalidate` and `qed` refuse it: *1 is not at most 0*.
+
+**A level parameter's number is a subscript** — `ℓ₂₅₂`, not `ℓ252` — because a
+level *is* a number and the undecorated form reads as one. A level
+metavariable, which you will see while a proof is open, keeps its digits behind
+a `?`: `Type (?ℓ229)`.
 
 ---
 
