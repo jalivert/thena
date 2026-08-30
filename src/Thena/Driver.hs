@@ -39,6 +39,7 @@ module Thena.Driver
   , parseDeclaration
   ) where
 
+import Data.Maybe (fromMaybe)
 import Thena.Core.Level (Level, LevelVar, Obligation)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (whnf)
@@ -87,6 +88,7 @@ import Thena.Global.Env
   , GlobalEnv
   , InductiveDefinition
   , addDefinition
+  , generalised
   , emptyGlobals
   , inductiveName
   , isDeclared
@@ -173,6 +175,16 @@ type Snapshot = (Exec, ProofState)
 data Proof = Proof
   { proofName      :: GlobalName
   , proofClaim     :: Core       -- ^ what @qed@ will certify against
+  , proofResidue   :: [Obligation]
+    -- ^ what the kernel could neither discharge nor refute, from the last
+    -- @certify@ (MS3 phase 33b).
+    --
+    -- **Written by 'progress''s @Certifying@ case and read by @qed@'s
+    -- 'admitted'**, which are the two halves of one @qed@ line with the
+    -- machine's own loop between them — the kernel runs inside the loop and
+    -- admitting happens after it returns, so the residue has to be put down
+    -- somewhere in between. It is per-proof state and this is the per-proof
+    -- record.
   , proofSaved     :: Snapshot
     -- ^ kept in step with the machine after every line, so suspending is a
     -- move and not a copy, and 'sessionSuspended' and the current proof are
@@ -208,7 +220,7 @@ data Response
     -- rule at the universe asked for. Not a 'ShownGlobal': the eliminator is
     -- no global (§3.7, reversed 2026-08-22), so there is no name to print on
     -- the left and no body to print underneath
-  | ShownGlobal GlobalName Core (Maybe Core)
+  | ShownGlobal GlobalName [LevelVar] [Obligation] Core (Maybe Core)
     -- ^ @:show ‹name›@ on anything else: its name, its type, and its body if
     -- it has one. A former has both — the constant is the type of its
     -- saturated 'Thena.Core.Term.Canonical' and the definition is the generated
@@ -230,7 +242,9 @@ data Response
     -- thesis §2.3)
   | Extracted Core
   | Proving GlobalName Core   -- ^ @:theorem@ — a proof is now current
-  | Proved GlobalName Core    -- ^ @qed@ — admitted, and the proof is closed
+  | Proved GlobalName [LevelVar] Core
+    -- ^ @qed@ — admitted, and the proof is closed. The levels are the scheme
+    -- generalisation produced (MS3 phase 33b), not anything that was written
   | Suspended GlobalName      -- ^ @:suspend@
   | Resumed GlobalName        -- ^ @:resume@
   | Abandoned GlobalName      -- ^ @:abandon@
@@ -667,9 +681,10 @@ dispatch s name arg = case name of
     showGlobal what = case lookupInductive g (globals machine) of
       Just d  -> (s, ShownData d)
       Nothing -> case lookupDefinition g (globals machine) of
-        Just d  -> (s, ShownGlobal g (definitionType d) (Just (definitionBody d)))
+        Just d  -> (s, ShownGlobal g (definitionLevels d) (definitionConstraints d)
+                                    (definitionType d) (Just (definitionBody d)))
         Nothing -> case lookupConstant g (globals machine) of
-          Just c  -> (s, ShownGlobal g (constantType c) Nothing)
+          Just c  -> (s, ShownGlobal g (constantLevels c) [] (constantType c) Nothing)
           Nothing -> (s, Rejected (NoSuchGlobal what))
       where
         g = GlobalName what
@@ -728,7 +743,7 @@ dispatch s name arg = case name of
       Left e  -> (s, Rejected (NotThere e))
       Right m ->
         ( s { sessionMachine = m
-            , sessionProof = Just (Proof g ty (snapshotOf m) [])
+            , sessionProof = Just (Proof g ty [] (snapshotOf m) [])
             }
         , Proving g ty
         )
@@ -750,21 +765,44 @@ dispatch s name arg = case name of
         (s', Ran msgs Completed) ->
           case extract (proofDevelopment (proof (sessionMachine s'))) of
             Left why -> (s', Ran msgs (Halted (NotYetPure (whereImpure why))))
-            Right t  -> (admitted s' pr t, Proved (proofName pr) (proofClaim pr))
+            Right t  -> admit (fromMaybe pr (sessionProof s')) s' t
         other -> other
         where
           ran = load [Do (Certify (Lit (VTerm (Trailing (proofClaim pr)))))] machine
 
+          -- **The proof record is re-read from @s'@, never the @pr@ above.**
+          -- Certifying settles the levels the claim was written with and files
+          -- the residue (phase 33), and the claim is what is stored as the
+          -- definition's type — reading the record from before the run stored a
+          -- type still carrying a meta nothing could ever solve, which is a bug
+          -- phase 33 shipped and 33b fixes.
+          admit pr' s' t =
+            let (s'', lvs, scheme) = admitted s' pr' t
+             in (s'', Proved (proofName pr') lvs scheme)
+
     -- Admitting is the only thing that writes a theorem to globals (§3.3.1):
     -- a proved theorem is a global **definition**, type and body both.
+    --
+    -- **And it is where a proof becomes a level scheme** (MS3 phase 33b). Every
+    -- level meta the claim and the term are still carrying becomes a prenex
+    -- parameter, and the kernel's residue becomes the constraints a use site
+    -- will owe. Generalisation is /admitting/, so it is policy and lives here,
+    -- with the rest of what §7.5 gives the driver; 'generalised' is the rewrite
+    -- itself and lives with the record it builds.
+    --
+    -- Returns the generalised type as well, because that — not the claim as
+    -- written — is what @qed@ reports and what @:show@ will print.
     admitted s' pr t =
       let m  = sessionMachine s'
-          g  = addDefinition (proofName pr)
-                 (MkDefinition [] (proofClaim pr) t) (globals m)
-          (ps, n) = newProof (names m)
-       in s' { sessionMachine = m { globals = g, proof = ps, names = n }
-             , sessionProof = Nothing
-             }
+          (d, n1) = generalised (names m) (proofResidue pr) (proofClaim pr) t
+          g  = addDefinition (proofName pr) d (globals m)
+          (ps, n) = newProof n1
+       in ( s' { sessionMachine = m { globals = g, proof = ps, names = n }
+               , sessionProof = Nothing
+               }
+          , definitionLevels d
+          , definitionType d
+          )
 
     suspend = case sessionProof s of
       Nothing -> (s, Rejected NotProving)
@@ -1324,14 +1362,14 @@ progress oneStep s msgs = case step (sessionMachine s) of
   -- before this phase.
   Engine.Certifying t ty m -> case certify (globals m) t ty of
     Left e -> stop (load [] m) msgs (Uncertified e)
-    Right sub
-      | oneStep   -> stop determined' (say : msgs) Paused
+    Right (sub, residue)
+      | oneStep   -> stop settled' (say : msgs) Paused
       | otherwise -> progress oneStep s' (say : msgs)
       where
         say = "certified"
-        determined' = m { proof = Engine.ProofState
-                                    (overLevels sub (cursor (proof m))) }
-        s' = (settled sub s) { sessionMachine = determined' }
+        settled' = m { proof = Engine.ProofState
+                                 (overLevels sub (cursor (proof m))) }
+        s' = (settled sub residue s) { sessionMachine = settled' }
   Engine.Asking q m   -> stop m msgs (Waiting q)
   Engine.Finished m   -> stop m msgs Completed
   Engine.Stuck r m    -> stop m msgs (Halted r)
@@ -1343,12 +1381,14 @@ progress oneStep s msgs = case step (sessionMachine s) of
 -- The development is rewritten beside it (see 'progress''s @Certifying@ case);
 -- this is the other half, because @qed@ stores the claim as the definition's
 -- type and @:show@ prints it.
-settled :: [(LevelVar, Level)] -> Session -> Session
-settled [] s  = s
-settled sub s =
-  s { sessionProof = fmap at (sessionProof s) }
+-- **And it files the residue** for @qed@ to generalise (phase 33b); see
+-- 'Proof''s own field.
+settled :: [(LevelVar, Level)] -> [Obligation] -> Session -> Session
+settled sub residue s = s { sessionProof = fmap at (sessionProof s) }
   where
-    at pr = pr { proofClaim = substLevelsIn sub (proofClaim pr) }
+    at pr = pr { proofClaim   = substLevelsIn sub (proofClaim pr)
+               , proofResidue = residue
+               }
 
 nameOf :: InductiveDefinition -> String
 nameOf d = case inductiveName d of GlobalName x -> x

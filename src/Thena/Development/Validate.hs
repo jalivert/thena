@@ -154,12 +154,11 @@ under :: Var -> Ident -> KernelError -> KernelError
 under x i e = case e of
   Ill pos te -> Ill (Inside x i pos) te
   -- The others carry no 'Position' to nest. 'Overabstracted' already names the
-  -- component it is about; the remaining three are 'certify''s or are about a
-  -- level, and a level has no position in the chain to be inside of.
+  -- component it is about; 'NotClosed' is 'certify''s, and 'Levels' is about a
+  -- level, which has no position in the chain to be inside of.
   Overabstracted {} -> e
   NotClosed {}      -> e   -- 'chain' never builds one
-  NotDetermined {}  -> e   -- nor one of these
-  Levels {}         -> e   -- and this one is 'revalidate''s own, after the walk
+  Levels {}         -> e   -- 'revalidate''s own, and after the walk
 
 -- | Which constraint this is, counting from the front of the chain.
 --

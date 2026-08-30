@@ -25,6 +25,7 @@ module Thena.Core.Level
   , LevelVar (..)
   , levelOfNat
   , freshLevelMeta
+  , freshLevelRigid
   , levelSuc
   , levelMax
   , Normal (..)
@@ -37,6 +38,7 @@ module Thena.Core.Level
   , Obligation (..)
   , Unmet (..)
   , solveLevels
+  , substObligation
   , LevelUnification (..)
   , unifyLevels
   , metasIn
@@ -142,6 +144,16 @@ levelVarName v = case v of
 -- makes 'substLevel' capture-free — see its note.
 freshLevelMeta :: Int -> (LevelVar, Int)
 freshLevelMeta n = (LMeta n, n + 1)
+
+-- | Mint a prenex level parameter from the shared counter — what generalisation
+-- turns a surviving meta into (MS3 phase 33b).
+--
+-- Beside 'freshLevelMeta' and drawing from the same counter, for the same
+-- reason: MS2 closeout 4f. **A meta is not rewritten to a rigid of its own
+-- number** — @?ℓ7@ may already have reached the user in a message, and @ℓ7@
+-- would be that number said about a different kind of thing.
+freshLevelRigid :: Int -> (LevelVar, Int)
+freshLevelRigid n = (LRigid n, n + 1)
 
 -- | The literal level @n@ — what a written @Typeₙ@ resolves to.
 levelOfNat :: Int -> Level
@@ -348,55 +360,62 @@ instantiateLevels ps as
 data Obligation = AtMost Level Level
   deriving (Eq, Show)
 
--- | An obligation the pass could not discharge, and which of the two ways.
+-- | An obligation no instantiation could ever satisfy.
 --
--- The distinction matters to the message and nothing else: 'Refuted' is a
--- mistake in the term, 'Undetermined' is a level the elaborator could not pin
--- down and which the user can supply by hand — §6.3's escape hatch, and the
--- reason explicit @Typeₙ@ stays writable.
-data Unmet
-  = Refuted      Level Level
-  | Undetermined Level Level
+-- **The only way the pass fails** (MS3 phase 33b). It had a second constructor,
+-- @Undetermined@, for an obligation the pass could neither discharge nor refute
+-- — and that is no longer a failure: it is the **residue**, and generalisation
+-- stores it on the definition rather than refusing it. What is left here is a
+-- mistake in the term, which is what the message says.
+data Unmet = Refuted Level Level
   deriving (Eq, Show)
 
--- | Discharge a set of level obligations, or say which one stops it.
+-- | Discharge what can be discharged, refuse what can never hold, and hand back
+-- the rest.
 --
--- **A worklist run to a fixpoint, refusing what survives** — the user's
--- decision of 2026-08-27: /"sometimes some of those @c@ or @a@ or @b@s could
--- solve and make the constraint trivially solvable"/. One round asks 'levelLeq'
--- of every pending obligation; what it decides is discharged or refuted, and
--- what it cannot is looked at for a **forced** solution — a meta whose bounds
--- have met. A forced solution is substituted into the rest and the round runs
--- again. When a round forces nothing, whatever is still pending is
--- 'Undetermined'.
+-- **A worklist run to a fixpoint** — the user's decision of 2026-08-27:
+-- /"sometimes some of those @c@ or @a@ or @b@s could solve and make the
+-- constraint trivially solvable"/. One round asks 'levelLeq' of everything
+-- pending; what it decides is discharged or refuted, and what it cannot is
+-- looked at for a solution. Two kinds are found, and either restarts the round:
+--
+--   * **forced** — a meta whose bounds have met ('forced');
+--   * **equated** — two metas each bounded by the other, which is an equality
+--     however it was written ('equated').
 --
 -- **It never guesses.** A bound is only read off an obligation one of whose
--- sides is a constant, so the solution it finds is the only one there was.
--- That is what makes refusing the residue order-independent, and it is §6.1's
--- point said operationally: @max@ on the left decomposes and nothing is chosen.
+-- sides is a constant, and an equality only off a relation that was stated both
+-- ways. So every solution it finds is the only one there was, which is what
+-- makes the residue order-independent.
 --
--- **Phase 33 refuses the residue; phase 33b generalises it instead**, an
--- obligation over the definition's new level parameters becoming part of its
--- scheme. Until then an undetermined level is a refusal whose recovery is to
--- write the level.
+-- **The residue is not a failure — phase 33b.** What a round can neither decide
+-- nor solve is handed back for generalisation to store on the definition, which
+-- is §4's call-site machinery: the constraint list in the environment plus the
+-- level arguments in the term are what let @qed@ re-derive it at every use.
+-- Phase 33 refused it instead, because there was nothing yet to store it on.
 --
--- **It terminates without a guard.** A round that forces anything replaces a
--- meta by a constant everywhere, so the number of distinct metas among the
--- pending obligations strictly decreases; a round that forces nothing stops.
+-- **It terminates without a guard.** Every solution replaces a meta everywhere,
+-- so the number of distinct metas among the pending obligations strictly
+-- decreases; a round that solves nothing stops.
 --
--- **It returns what it forced**, so a caller that owns the terms the metas came
--- from can write the solutions into them. Every solution is a constant — a
--- bound is only read off an obligation one of whose sides is one — so the list
--- needs no composing as it grows.
-solveLevels :: [Obligation] -> Either Unmet [(LevelVar, Level)]
+-- **It returns what it solved as well as what is left**, because the caller owns
+-- the terms the metas came from and has to write the solutions into them.
+solveLevels :: [Obligation] -> Either Unmet ([(LevelVar, Level)], [Obligation])
 solveLevels obs = case sift obs of
-  Left u                    -> Left u
-  Right []                  -> Right []
-  Right pending@(first : _) -> case forced pending of
-    []  -> Left (undetermined first)
-    sub -> (sub ++) <$> solveLevels (map (over sub) pending)
+  Left u        -> Left u
+  Right pending -> case solutions pending of
+    []  -> Right ([], pending)
+    sub -> do
+      (rest, residue) <- solveLevels (map (over sub) pending)
+      Right (sub ++ rest, residue)
   where
-    undetermined (AtMost l k) = Undetermined l k
+    -- **A constant solution first, an equality only when there is none.** The
+    -- two can name the same meta — @2 ≤ ?m@ and @?m ≤ 2@ are both bounds that
+    -- meet and a relation stated both ways — and taking either alone is right
+    -- where taking both would substitute twice.
+    solutions p = case forced p of
+      [] -> equated p
+      sub -> sub
 
     over sub (AtMost l k) = AtMost (substLevel sub l) (substLevel sub k)
 
@@ -407,6 +426,33 @@ solveLevels obs = case sift obs of
       Just False -> Left (Refuted l k)
       Just True  -> sift os
       Nothing    -> (o :) <$> sift os
+
+-- | Apply a level substitution to an obligation — what instantiating a
+-- definition's scheme does to its stored constraints at a use site.
+substObligation :: [(LevelVar, Level)] -> Obligation -> Obligation
+substObligation sub (AtMost l k) = AtMost (substLevel sub l) (substLevel sub k)
+
+-- | Metas that two obligations state to be equal — @l ≤ k@ and @k ≤ l@ — where
+-- one side is a lone meta.
+--
+-- **Written as two inequalities because that is how conversion says an
+-- equality** (phase 33): a Π's domain is invariant, so an undecided equality is
+-- owed both ways round. Reading them back as one substitution is what keeps
+-- generalisation from producing @foo {ℓ0 ℓ1}@ with @ℓ0 ≤ ℓ1@ and @ℓ1 ≤ ℓ0@
+-- where @foo {ℓ0}@ was meant — which is the ordinary shape of
+-- @∀ (A : Type) -> A -> A@.
+--
+-- At most one is returned per round; the fixpoint finds the next.
+equated :: [Obligation] -> [(LevelVar, Level)]
+equated obs =
+  take 1
+    [ (v, k)
+    | AtMost l k <- obs
+    , AtMost k' l' <- obs
+    , normalise k == normalise k', normalise l == normalise l'
+    , Just v <- [loneMeta l]
+    , v `notElem` metasIn k
+    ]
 
 -- | The metas whose lower and upper bounds have met, read off the pending
 -- obligations. Empty when nothing is forced, which is what ends the fixpoint.

@@ -112,7 +112,7 @@ withArrow :: GlobalEnv
 withArrow =
   addDefinition
     (GlobalName "Arrow")
-    (MkDefinition [] type1 (arrow type0 type0))
+    (MkDefinition [] [] type1 (arrow type0 type0))
     emptyGlobals
 
 matching :: GlobalEnv -> Cursor -> [String]

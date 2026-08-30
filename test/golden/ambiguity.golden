@@ -15,19 +15,18 @@ lift : Type₁   ∎
 thena spine> :show lift
 lift : Type₁
 lift = let lift = Type₀ : Type₁ in lift
-thena spine> :theorem undecided : Type
-proving undecided : Type (?ℓ10)
+thena spine> :theorem undetermined : Type
+proving undetermined : Type (?ℓ10)
 thena spine> try Type₀
 thena spine> solve
 thena spine> :revalidate
-cannot tell whether 1 is at most ?ℓ10
-  write the levels, as in "Type₀"
+valid
 thena spine> qed
-the kernel refused it
-cannot tell whether 1 is at most ?ℓ10
-  write the levels, as in "Type₀"
-thena spine> :abandon
-abandoned undecided
+undetermined {ℓ12} : Type (ℓ12)   ∎
+thena spine> :show undetermined
+undetermined {ℓ12} : Type (ℓ12)
+  provided 1 ≤ ℓ12
+undetermined = let undetermined = Type₀ : Type (ℓ12) in undetermined
 thena spine> :theorem crossed : Type₀
 proving crossed : Type₀
 thena spine> try ((\ (x : Type) -> x) Type₀)
@@ -42,9 +41,9 @@ abandoned crossed
 thena spine> claim h : Type -> Type
 claimed h
 thena spine> unify \ (x : Type) -> x ≟ \ (x : Type₀) -> x
-solved: ?ℓ23
+solved: ?ℓ24
 thena spine> :show
-  let ? h : Type (?ℓ18) -> Type (?ℓ19) in
+  let ? h : Type (?ℓ19) -> Type (?ℓ20) in
 ▶ let ? goal : Type₀ in
   goal
 thena spine> data Box : Type where { }

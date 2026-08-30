@@ -300,7 +300,7 @@ generate d env = addInductive dn d (foldl former env (typeFormer : map value cs)
     -- so @succ {ℓ}@ unfolds to @Canonical succ [ℓ] …@ and the two agree by
     -- construction rather than by a rule someone has to remember.
     former e (g, tel, ty) =
-      addDefinition g (MkDefinition lvs ty body) (addConstant g lvs ty e)
+      addDefinition g (MkDefinition lvs [] ty body) (addConstant g lvs ty e)
       where
         lvs  = inductiveLevels d
         body = lamOver tel (Canonical g (map LVar lvs) (map (Free . entryVar) tel))

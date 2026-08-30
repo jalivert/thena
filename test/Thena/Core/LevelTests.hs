@@ -232,19 +232,22 @@ renderTests =
 -- --------------------------------------------------------------------------
 
 -- | 'solveLevels' is the whole of what @qed@ does with the obligations
--- conversion handed back, so these are the cases the REPL's three endings are
--- built out of: discharged, refuted, and undetermined.
+-- conversion handed back: discharge, refute, or hand back for generalisation.
 --
--- **The fixpoint is what these test hardest.** A round that forces a meta
+-- **The fixpoint is what these test hardest.** A round that solves a meta
 -- substitutes it into the rest and runs again, and it is that second round —
 -- not the first — that turns a bound into a decision.
+--
+-- The second component is the **residue**: what is neither valid nor false, and
+-- what phase 33b stores on the definition rather than refusing (phase 33 did
+-- refuse it, which is the one behaviour these tests record as changed).
 solveTests :: [TestTree]
 solveTests =
   [ testCase "nothing owed is nothing to do" $
-      solveLevels [] @?= Right []
+      solveLevels [] @?= Right ([], [])
 
   , testCase "a closed obligation that holds is discharged" $
-      solveLevels [AtMost (levelOfNat 1) (levelOfNat 3)] @?= Right []
+      solveLevels [AtMost (levelOfNat 1) (levelOfNat 3)] @?= Right ([], [])
 
   , testCase "and one that does not is refuted, not postponed" $
       solveLevels [AtMost (levelOfNat 3) (levelOfNat 1)]
@@ -253,27 +256,28 @@ solveTests =
   , -- @0 <= anything@ holds at the floor, where every variable is zero, and
     -- variables only grow. So this needs no solving at all.
     testCase "zero fits under an unknown without pinning it down" $
-      solveLevels [AtMost LZero (LVar m)] @?= Right []
+      solveLevels [AtMost LZero (LVar m)] @?= Right ([], [])
 
   , -- The commonest shape there is: @try Type@ against a goal of @Type1@. The
     -- bound leaves one value, so it is the answer rather than a choice.
     testCase "an upper bound of zero pins the level at zero" $
-      solveLevels [AtMost (LSuc (LVar m)) (levelOfNat 1)] @?= Right [(m, LZero)]
+      solveLevels [AtMost (LSuc (LVar m)) (levelOfNat 1)] @?= Right ([(m, LZero)], [])
 
-  , -- **Nothing is defaulted**, and that is the line between this phase and
-    -- 33b: a level with room left in it is not chosen, it is generalised. Until
-    -- 33b does that, it is refused.
-    testCase "an upper bound with room left in it is not forced" $
+  , -- **Nothing is defaulted.** A level with room left in it is not chosen, it
+    -- is handed back — and generalisation makes it a parameter with this very
+    -- relation as its constraint. Choosing the lower bound here would quietly
+    -- turn every polymorphic theorem into its @Type₀@ copy.
+    testCase "an upper bound with room left in it is residue, not a solution" $
       solveLevels [AtMost (LSuc (LVar m)) (levelOfNat 3)]
-        @?= Left (Undetermined (LSuc (LVar m)) (levelOfNat 3))
+        @?= Right ([], [AtMost (LSuc (LVar m)) (levelOfNat 3)])
 
-  , testCase "a lower bound alone leaves the level undetermined" $
+  , testCase "a lower bound alone is residue too" $
       solveLevels [AtMost (levelOfNat 1) (LVar m)]
-        @?= Left (Undetermined (levelOfNat 1) (LVar m))
+        @?= Right ([], [AtMost (levelOfNat 1) (LVar m)])
 
   , testCase "bounds that meet force the one level there was" $
       solveLevels [AtMost (levelOfNat 2) (LVar m), AtMost (LVar m) (levelOfNat 2)]
-        @?= Right [(m, levelOfNat 2)]
+        @?= Right ([(m, levelOfNat 2)], [])
 
   , -- Crossed bounds are reported as the false obligation they make, rather
     -- than as an undetermined one — which is why 'forced' solves to the lower
@@ -291,16 +295,32 @@ solveTests =
         , AtMost (levelOfNat 2) (LVar m)
         , AtMost (LVar m) (levelOfNat 2)
         ]
-        @?= Right [(m, levelOfNat 2)]
+        @?= Right ([(m, levelOfNat 2)], [])
 
-  , testCase "a relation between two unknowns bounds neither" $
+  , testCase "a relation between two unknowns bounds neither, and is residue" $
       solveLevels [AtMost (LVar m) (LVar m2)]
-        @?= Left (Undetermined (LVar m) (LVar m2))
+        @?= Right ([], [AtMost (LVar m) (LVar m2)])
+
+  , -- **The shape @∀ (A : Type) -> A -> A@ makes**, and the reason 'equated'
+    -- exists: conversion says an equality as two inequalities, and read back as
+    -- one substitution it gives @foo {ℓ0}@ rather than @foo {ℓ0 ℓ1}@ with a
+    -- mutual constraint.
+    testCase "two unknowns each bounded by the other are one unknown" $
+      solveLevels [AtMost (LVar m) (LVar m2), AtMost (LVar m2) (LVar m)]
+        @?= Right ([(m, LVar m2)], [])
+
+  , testCase "and the equality is read even with other obligations around" $
+      solveLevels
+        [ AtMost (LVar m) (LVar m2)
+        , AtMost (levelOfNat 1) (LVar m2)
+        , AtMost (LVar m2) (LVar m)
+        ]
+        @?= Right ([(m, LVar m2)], [AtMost (levelOfNat 1) (LVar m2)])
 
   , -- A rigid is universally quantified, so 'levelLeq' decides it outright and
     -- the solver never sees it.
     testCase "a rigid parameter is decided rather than solved" $
-      solveLevels [AtMost (LVar a) (LSuc (LVar a))] @?= Right []
+      solveLevels [AtMost (LVar a) (LSuc (LVar a))] @?= Right ([], [])
   ]
 
 -- --------------------------------------------------------------------------

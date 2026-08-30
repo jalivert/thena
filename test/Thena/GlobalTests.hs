@@ -18,7 +18,12 @@ module Thena.GlobalTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
-import Thena.Core.Level (Level (..), levelOfNat)
+import Thena.Core.Level
+  ( Level (..)
+  , LevelVar (..)
+  , Obligation (..)
+  , levelOfNat
+  )
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
@@ -49,6 +54,7 @@ import Thena.Global.Env
   , lookupConstant
   , lookupDefinition
   , lookupInductive
+  , generalised
   )
 import Thena.Repl (renderInductive)
 
@@ -63,6 +69,7 @@ tests =
     , testGroup "universes (thesis §4.1.1, back-filled at phase 8)" universeTests
     , testGroup "names" nameTests
     , testGroup "printed and read back" roundTripTests
+    , testGroup "generalisation turns a proof into a scheme" generaliseTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -353,3 +360,73 @@ afterFixtures :: String -> Either DeclareError ()
 afterFixtures src = case parseDeclaration natVec 0 src of
   Left e       -> error ("fixture does not parse: " ++ show e)
   Right (d, n) -> () <$ declare natVec n d
+
+-- --------------------------------------------------------------------------
+-- generalised (MS3 phase 33b)
+-- --------------------------------------------------------------------------
+
+-- | @qed@'s half of level polymorphism: the metas a finished proof is still
+-- carrying become the definition's prenex parameters, and the kernel's residue
+-- becomes the constraints every use will owe.
+generaliseTests :: [TestTree]
+generaliseTests =
+  [ testCase "a proof with no unknown level generalises to nothing" $
+      let (d, n) = generalised 50 [] (universe 1) (universe 0)
+       in (definitionLevels d, definitionConstraints d, n) @?= ([], [], 50)
+
+  , testCase "a meta in the type becomes a parameter" $
+      definitionLevels (fst (generalised 50 [] (Universe (LVar p)) (universe 0)))
+        @?= [LRigid 50]
+
+  , -- **Fresh, not the meta's own number under another constructor.** MS2
+    -- closeout 4f is one counter across every sort precisely so that a number
+    -- the user has seen as @?ℓ7@ is never reissued as something else.
+    testCase "and it is a fresh number, not the meta's" $
+      definitionLevels (fst (generalised 50 [] (Universe (LVar (LMeta 7))) (universe 0)))
+        @?= [LRigid 50]
+
+  , testCase "the type's metas come first, in the order it reads" $
+      definitionLevels (fst (generalised 50 [] (arrow (LVar q) (LVar p)) (universe 0)))
+        @?= [LRigid 50, LRigid 51]
+
+  , -- A use site supplies level arguments positionally and reads the type to
+    -- know what they mean, so a meta only the body mentions comes last.
+    testCase "a meta only the body mentions comes after them" $
+      definitionLevels
+        (fst (generalised 50 [] (Universe (LVar p)) (Universe (LVar q))))
+        @?= [LRigid 50, LRigid 51]
+
+  , testCase "the same meta twice is one parameter" $
+      definitionLevels (fst (generalised 50 [] (arrow (LVar p) (LVar p)) (universe 0)))
+        @?= [LRigid 50]
+
+  , testCase "the type is rewritten to mention the parameters" $
+      definitionType (fst (generalised 50 [] (Universe (LVar p)) (universe 0)))
+        @?= Universe (LVar (LRigid 50))
+
+  , testCase "and so is the body" $
+      definitionBody (fst (generalised 50 [] (universe 0) (Universe (LVar p))))
+        @?= Universe (LVar (LRigid 50))
+
+  , -- **The residue is not filtered.** A relation between two of the new
+    -- parameters is exactly what a scheme constraint is for; asking 'levelLeq'
+    -- to decide it here would refuse it, because a rigid is not bounded by
+    -- another rigid — which is the whole reason it has to travel to the use.
+    testCase "the residue becomes the constraints, over the new parameters" $
+      definitionConstraints
+        (fst (generalised 50 [AtMost (LVar p) (LVar q)]
+                (arrow (LVar p) (LVar q)) (universe 0)))
+        @?= [AtMost (LVar (LRigid 50)) (LVar (LRigid 51))]
+
+  , testCase "the counter comes back advanced by one per parameter" $
+      snd (generalised 50 [] (arrow (LVar p) (LVar q)) (universe 0)) @?= 52
+  ]
+  where
+    p = LMeta 900
+    q = LMeta 901
+
+    universe = Universe . levelOfNat
+
+    -- A non-dependent function type between two universes, built by hand: the
+    -- concrete syntax cannot write a meta down.
+    arrow a b = Pi (Ident "_") (Universe a) (close (fst (fresh 990)) (Universe b))

@@ -52,16 +52,16 @@ tests =
 certifyTests :: [TestTree]
 certifyTests =
   [ testCase "a closed term at its type is accepted" $
-      -- **@Right@ carries the level solutions the check forced** (phase 33),
-      -- and nothing here writes a bare @Type@, so it is empty everywhere in
-      -- this module.
-      certify natVec (nat "succ zero") (nat "Nat") @?= Right []
+      -- **@Right@ carries the level solutions the check forced and the residue
+      -- it could not decide** (phases 33 and 33b), and nothing here writes a
+      -- bare @Type@, so both are empty almost everywhere in this module.
+      certify natVec (nat "succ zero") (nat "Nat") @?= Right ([], [])
 
   , testCase "and under binders too, where the context reappears" $
       certify natVec
         (nat "\\ (n : Nat) -> succ n")
         (nat "Nat -> Nat")
-        @?= Right []
+        @?= Right ([], [])
 
     -- The check §5.3's context-free signature earns. @infer@ would report this
     -- as an unknown variable, which is true and says nothing about whose
@@ -93,18 +93,19 @@ certifyTests =
     -- Phase 33b generalises rather than refusing; until then the recovery is to
     -- write the level.
     -- Stated at exactly the type it has, so every relation the check meets is
-    -- between the meta and itself and nothing is owed. What is left is a term
-    -- with an unknown in it, and that alone is the refusal.
-  , testCase "a level nothing pinned down is refused, like a free variable" $
+    -- between the meta and itself and nothing is owed. **A term with an unknown
+    -- level in it is accepted** — phase 33 refused it here, and 33b generalises
+    -- it instead, which is the caller's job and not the kernel's.
+  , testCase "a level nothing pinned down is accepted, for generalising" $
       certify natVec (Universe (LVar undetermined))
                      (Universe (LSuc (LVar undetermined)))
-        @?= Left (NotDetermined undetermined)
+        @?= Right ([], [])
 
     -- The obligation @suc ?m <= 1@ leaves one value, so the kernel takes it and
     -- hands it back for the caller to write into the development.
   , testCase "and one the obligations leave no choice about is solved" $
       certify natVec (Universe (LVar undetermined)) (nat "Type\8321")
-        @?= Right [(undetermined, levelOfNat 0)]
+        @?= Right ([(undetermined, levelOfNat 0)], [])
 
     -- Reported as the false relation it is, rather than as an unknown level:
     -- the meta is the symptom and the inequality is the cause.

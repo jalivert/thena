@@ -352,7 +352,7 @@ renderResponse s resp = case resp of
   Shown c        -> [renderCursor (counter s) c]
   ShownData d    -> renderInductive (counter s) d
   ShownEliminator g ty  -> renderEliminator (counter s) g ty
-  ShownGlobal g ty body -> renderGlobal (counter s) g ty body
+  ShownGlobal g lvs cs ty body -> renderGlobal (counter s) g lvs cs ty body
   Where c        -> renderWhere (counter s) c
   Inferred t ty  ->
     [renderCore (counter s) (contextOf s) t ++ " : " ++ renderCore (counter s) (contextOf s) ty]
@@ -373,7 +373,9 @@ renderResponse s resp = case resp of
   Revalidated (Just e) -> renderKernelError (counter s) e
   Extracted t          -> [renderCore (counter s) [] t]
   Proving g ty  -> ["proving " ++ nameString g ++ " : " ++ renderCore (counter s) [] ty]
-  Proved g ty   -> [nameString g ++ " : " ++ renderCore (counter s) [] ty ++ "   ∎"]
+  Proved g lvs ty ->
+    [nameString g ++ levelParams lvs ++ " : "
+       ++ renderCore (counter s) [] ty ++ "   ∎"]
   Suspended g   -> ["suspended " ++ nameString g]
   Resumed g     -> ["resumed " ++ nameString g]
   Abandoned g   -> ["abandoned " ++ nameString g]
@@ -1153,20 +1155,8 @@ renderKernelError n e = case e of
     [ "the assumption " ++ identString i ++ " has no matching binder in "
         ++ renderCore n [] ty
     ]
-  -- A level the elaborator never pinned down. The recovery is to write it —
-  -- @discussion\/level-binders-and-constraints.md@ §6.3's escape hatch, and the
-  -- reason concrete @Typeₙ@ stays writable — so the message says so.
-  NotDetermined v ->
-    [ "the level " ++ levelVarName v ++ " was never determined"
-    , "  write the level, as in \"Type\8320\""
-    ]
   Levels (Refuted l k) ->
     [ renderLevelAtom l ++ " is not at most " ++ renderLevelAtom k ]
-  Levels (Undetermined l k) ->
-    [ "cannot tell whether " ++ renderLevelAtom l ++ " is at most "
-        ++ renderLevelAtom k
-    , "  write the levels, as in \"Type\8320\""
-    ]
   Ill pos te   ->
     ("in " ++ renderPosition pos ++ ":") : map ("  " ++) (renderTypeError n te)
 
@@ -1270,12 +1260,25 @@ renderEliminator n g ty =
 -- The body is on its own line because it is what a generated wrapper /is/, and
 -- the point of generating into the environment rather than conjuring inside a
 -- tactic is that the student can go and look at it (§3.7).
-renderGlobal :: Int -> GlobalName -> Core -> Maybe Core -> [String]
-renderGlobal n g ty body =
-  (nameString g ++ " : " ++ renderCore n [] ty)
-    : case body of
-        Nothing -> []
-        Just b  -> [nameString g ++ " = " ++ renderCore n [] b]
+-- | A global, with its level scheme (MS3 phase 33b).
+--
+-- **The parameters and the constraints are printed, and until this phase
+-- neither was.** Nothing had level parameters that reached here while theorems
+-- could not be polymorphic, so the omission never showed; generalisation makes
+-- every polymorphic theorem one, and a type mentioning @ℓ0@ with nothing
+-- binding it is unreadable.
+--
+-- The constraints have **no surface spelling** — nothing writes a scheme by
+-- hand any more — so they are shown the way @:convert@ shows what it owes.
+renderGlobal
+  :: Int -> GlobalName -> [LevelVar] -> [Obligation] -> Core -> Maybe Core
+  -> [String]
+renderGlobal n g lvs cs ty body =
+  (nameString g ++ levelParams lvs ++ " : " ++ renderCore n [] ty)
+    : map (("  provided " ++) . obligation) cs
+    ++ case body of
+         Nothing -> []
+         Just b  -> [nameString g ++ " = " ++ renderCore n [] b]
 
 renderDeclareError :: DeclareError -> String
 renderDeclareError e = case e of

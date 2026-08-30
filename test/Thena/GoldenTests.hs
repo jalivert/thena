@@ -842,14 +842,15 @@ tests =
         , "solve"
         , "qed"
         , ":show lift"
-          -- Nothing determines it. The recovery is to write the level, which is
-          -- what the message says; phase 33b generalises instead of refusing.
-        , ":theorem undecided : Type"
+          -- Nothing determines it, so it is **generalised** rather than
+          -- refused (phase 33b) — and the relation that was left over becomes
+          -- the scheme's constraint.
+        , ":theorem undetermined : Type"
         , "try Type\8320"
         , "solve"
         , ":revalidate"
         , "qed"
-        , ":abandon"
+        , ":show undetermined"
           -- Refuted: the same meta is pushed up by one use and down by another.
         , ":theorem crossed : Type\8320"
         , "try ((\\ (x : Type) -> x) Type\8320)"
@@ -866,6 +867,51 @@ tests =
           -- A declaration still says which level it lives at: its levels are
           -- stored and instantiated at every use, and nothing generalises one.
         , "data Box : Type where { }"
+        , ":quit"
+        ]
+      -- Generalisation at @qed@ (MS3 phase 33b): a proof's leftover level metas
+      -- become the definition's prenex parameters, and the obligations that are
+      -- neither valid nor false become the constraints every use owes back.
+    , script
+        "polymorphism"
+        [ -- One parameter, not two — conversion states an equality as two
+          -- inequalities and generalisation reads them back as one.
+          ":theorem id : \8704 (A : Type) -> A -> A"
+        , "try (\\ (A : Type) (a : A) -> a)"
+        , "solve"
+        , "qed"
+        , ":show id"
+        , ":infer id {0}"
+        , ":infer id {3}"
+          -- Prenex is still all-or-nothing.
+        , ":infer id"
+          -- A scheme with a real constraint between two independent parameters.
+        , ":theorem lift : \8704 (A : Type) -> Type"
+        , "try (\\ (A : Type) -> A)"
+        , "solve"
+        , "qed"
+        , ":show lift"
+        , ":infer lift {0 1}"
+          -- **@:infer@ accepts a bad instantiation**, and that is the accepted
+          -- trade: obligations are re-collected, not pooled, so the error
+          -- arrives at @qed@ rather than at the line.
+        , ":infer lift {1 0}"
+        , ":theorem bad : Type\8321 -> Type\8320"
+        , "try (lift {1 0})"
+        , "solve"
+          -- Here it is: the stored constraint, instantiated. Without it
+          -- @Type\8321 -> Type\8320@ is a perfectly good type and this is
+          -- admitted.
+        , ":revalidate"
+        , "qed"
+          -- **And unfolding the call does not launder it.** The wart §4 warned
+          -- about needs a schema less general than inference gives, and
+          -- inference never over-claims — so with written schemata gone there
+          -- is nothing left to build it out of.
+        , "along"
+        , "reduce"
+        , ":revalidate"
+        , ":abandon"
         , ":quit"
         ]
     , script

@@ -49,6 +49,7 @@ import Thena.Core.Level
   ( Level (..)
   , Obligation
   , instantiateLevels
+  , substObligation
   , levelMax
   , levelSuc
   )
@@ -67,6 +68,7 @@ import Thena.Global.Env
   ( GlobalEnv
   , InductiveDefinition (..)
   , Constant (..)
+  , definitionConstraints
   , definitionLevels
   , definitionType
   , eliminatorType
@@ -97,9 +99,23 @@ infer env ctx n term = case term of
   --
   -- Prenex means all-or-nothing: there is no partial instantiation to allow, so
   -- an arity mismatch is an error here rather than something to defer.
+  -- **And the definition's own level constraints are owed here** (MS3 phase
+  -- 33b), instantiated at this use's levels. That is
+  -- @discussion\/level-binders-and-constraints.md@ §4's call site: the level
+  -- arguments are in the *term* and the constraint list is in the
+  -- *environment*, so the obligation is re-derivable from the finished
+  -- development and nothing has to be pooled while it is being built.
+  --
+  -- It cannot be got any other way. A constraint arising from a subsumption
+  -- *inside* a body is invisible in that body's type — @Type {a} -> Type {b}@
+  -- is well formed for any @a@, @b@ — so without this a badly instantiated call
+  -- would check.
   Global g ls -> case lookupDefinition g env of
     Just d -> case instantiateLevels (definitionLevels d) ls of
-      Just sub -> (Right (substLevelsIn sub (definitionType d)), [], n)
+      Just sub ->
+        ( Right (substLevelsIn sub (definitionType d))
+        , map (substObligation sub) (definitionConstraints d)
+        , n )
       Nothing  ->
         ( Left (WrongNumberOfLevelArguments g (length (definitionLevels d)) (length ls))
         , [], n )

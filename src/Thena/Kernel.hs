@@ -27,8 +27,8 @@ module Thena.Kernel
   ( certify
   ) where
 
-import Thena.Core.Level (Level, LevelVar, solveLevels)
-import Thena.Core.Term (Core, Var, beyond, freeVars, levelMetasIn, substLevelsIn)
+import Thena.Core.Level (Level, LevelVar, Obligation, solveLevels)
+import Thena.Core.Term (Core, Var, beyond, freeVars, substLevelsIn)
 import Thena.Core.Typing (check)
 import Thena.Errors (KernelError (..), Position (..))
 import Thena.Global.Env (GlobalEnv, varsInEnv)
@@ -52,9 +52,18 @@ import Thena.Global.Env (GlobalEnv, varsInEnv)
 -- **What it returns is the level solutions the check forced** (MS3 phase 33),
 -- and they are the caller's to write back: the development the term was
 -- extracted from still mentions the metas, and @qed@'s definition is stored
--- from that development. Empty whenever no bare @Type@ was involved, which is
--- every use before this phase.
-certify :: GlobalEnv -> Core -> Core -> Either KernelError [(LevelVar, Level)]
+-- from that development, and the **residue** — the obligations that are neither
+-- valid nor false, which are true of some levels and not others.
+--
+-- **The residue is not a refusal** (MS3 phase 33b). It is what the caller
+-- generalises: @qed@ turns the term's remaining metas into the definition's
+-- prenex level parameters and stores the residue as the scheme's constraints,
+-- which every use site then instantiates and owes again. Both lists are empty
+-- whenever no bare @Type@ was involved, which is every use of the kernel before
+-- phase 33.
+certify
+  :: GlobalEnv -> Core -> Core
+  -> Either KernelError ([(LevelVar, Level)], [Obligation])
 certify env t ty = do
   closed t
   closed ty
@@ -76,46 +85,25 @@ certify env t ty = do
   -- shifted the numbering one place and moved @Sigma@'s parameters into range,
   -- which is all that changed.
   --
-  -- **And the level obligations the check owed are discharged here** (phase
+  -- **And the level obligations the check owed are collected here** (phase
   -- 33), for @revalidate@'s reason: re-checking regenerates precisely the ones
   -- the finished term owes, so there is nothing to have carried along.
   case check env [] (beyond (varsInEnv env)) t ty of
     (Left e,   _,    _) -> Left (Ill TheTerm e)
     (Right (), owed, _) -> case solveLevels owed of
-      Left u -> Left (Levels u)
-      -- **Nothing forced, so this is the term as it will be stored.**
-      --
-      -- No level left undetermined, which is 'closed' one sort down: a bare
-      -- @Type@ mints a meta, and a definition whose type or body still holds one
-      -- says nothing about which universe it is in. Phase 33b generalises these
-      -- into the definition's level parameters instead; until it does, the
-      -- recovery is to write the level.
-      --
-      -- **Checked last**, so that a term which is ill typed or
-      -- level-inconsistent is reported as that rather than as an undetermined
-      -- level — the meta is usually a symptom of it and never the more
-      -- informative answer.
-      Right [] -> do
-        determined t
-        determined ty
-        Right []
+      Left u                -> Left (Levels u)
+      Right ([], residue)   -> Right ([], residue)
 
-      -- **Something was forced, so the term is re-checked with it in place**
+      -- **Something was solved, so the term is re-checked with it in place**
       -- rather than the check being argued to survive substitution. It is one
       -- extra pass, only when a bare @Type@ was written, and it terminates
-      -- because every forced solution is a constant and so removes a meta.
-      Right sub -> do
-        rest <- certify env (substLevelsIn sub t) (substLevelsIn sub ty)
-        Right (sub ++ rest)
+      -- because every solution removes a meta.
+      Right (sub, _) -> do
+        (rest, residue) <- certify env (substLevelsIn sub t) (substLevelsIn sub ty)
+        Right (sub ++ rest, residue)
 
 -- | Nothing free, in either the term or its stated type.
 closed :: Core -> Either KernelError ()
 closed t = case freeVars t of
   x : _ -> Left (NotClosed (x :: Var))
-  []    -> Right ()
-
--- | No level meta, in either.
-determined :: Core -> Either KernelError ()
-determined t = case levelMetasIn t of
-  v : _ -> Left (NotDetermined (v :: LevelVar))
   []    -> Right ()

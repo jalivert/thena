@@ -28,6 +28,7 @@ module Thena.Global.Env
   , isDeclared
   , declaredNames
   , addConstant
+  , generalised
   , addDefinition
   , addInductive
 
@@ -41,7 +42,13 @@ module Thena.Global.Env
   , varsInEnv
   ) where
 
-import Thena.Core.Level (Level (..), LevelVar)
+import Thena.Core.Level
+  ( Level (..)
+  , LevelVar
+  , Obligation
+  , freshLevelRigid
+  , substObligation
+  )
 import Thena.Core.Context (Context, entryType, entryVar, piOver)
 import Thena.Core.Term
   ( Core (..)
@@ -50,6 +57,8 @@ import Thena.Core.Term
   , Ident (..)
   , close
   , fresh
+  , levelMetasIn
+  , substLevelsIn
   )
 
 -- | A global with a body — the @definition@ kind of §3.3.1's table: proved
@@ -83,10 +92,69 @@ data Definition = MkDefinition
     -- the binding structure and 'Thena.Core.Level.Level' needs no binder of
     -- its own. Instantiating is 'Thena.Core.Level.instantiateLevels' followed
     -- by a substitution.
+    --
+    -- **Filled by generalisation from phase 33b**, not written: a theorem's
+    -- levels are inferred, and 'generalised' is what turns the metas its proof
+    -- was left holding into these.
+  , definitionConstraints :: [Obligation]
+    -- ^ the @≤@ relations between its own level parameters that must hold at
+    -- every use (MS3 phase 33b).
+    --
+    -- **Storing these is required for soundness, not merely for earliness** —
+    -- @discussion\/level-binders-and-constraints.md@ §4. Re-collection walks the
+    -- /finished term/, and a caller's term holds @Global foo [5, 0]@ opaquely,
+    -- so the body's obligations are never regenerated unless every definition
+    -- is δ-unfolded. Without this list a call site has nothing to read, and a
+    -- constraint arising inside a body is invisible in that body's /type/.
+    --
+    -- **It does not reopen §4's "re-collect, do not store".** Nothing is pooled
+    -- during a proof: this field never changes after generalisation, and what
+    -- a use site owes is reconstituted from it plus the level arguments in the
+    -- term. And it does not recurse — this list is already the full residue of
+    -- this definition's own generalisation.
+    --
+    -- **It is usually empty**, because a rigid gets the /validity/ reading:
+    -- @ℓ ≤ suc ℓ@ discharges and @suc ℓ ≤ ℓ@ is refused outright, so only a
+    -- genuine relation between independent parameters survives.
   , definitionType :: Core
   , definitionBody :: Core
   }
   deriving (Eq, Show)
+
+-- | Build a definition by generalising the level metas its type and body are
+-- still carrying (MS3 phase 33b).
+--
+-- **This is R2 of @discussion\/level-binders-and-constraints.md@ §2 done: a
+-- rewrite.** Each surviving 'Thena.Core.Level.LMeta' becomes a fresh
+-- 'Thena.Core.Level.LRigid' — /fresh/, and not the same @Int@ under a new
+-- constructor, because MS2 closeout 4f is that one counter serves every sort
+-- precisely so a number the user has seen as @?ℓ7@ is never reissued as
+-- something else.
+--
+-- **The order is first appearance in the type, then in the body**, because a
+-- use site supplies level arguments positionally and the type is what a use
+-- site reads.
+--
+-- The residue is generalised along with them, and becomes the scheme's
+-- constraints. It is not filtered: a relation between two of the new parameters
+-- is exactly what a scheme constraint is /for/, and asking 'levelLeq' to decide
+-- it here would refuse the useful case — a rigid is not bounded by another
+-- rigid, which is the whole reason the constraint has to travel to the use.
+generalised :: Int -> [Obligation] -> Core -> Core -> (Definition, Int)
+generalised n residue ty body =
+  ( MkDefinition (map snd binding) (map (substObligation sub) residue)
+      (substLevelsIn sub ty) (substLevelsIn sub body)
+  , n'
+  )
+  where
+    metas       = levelMetasIn ty ++ [ v | v <- levelMetasIn body, v `notElem` levelMetasIn ty ]
+    (binding, n') = mint n metas
+    sub         = [ (v, LVar w) | (v, w) <- binding ]
+
+    mint k []       = ([], k)
+    mint k (v : vs) = let (w, k1)  = freshLevelRigid k
+                          (ws, k2) = mint k1 vs
+                       in ((v, w) : ws, k2)
 
 -- | One inductive definition — a single record, as §3.7 requires.
 --

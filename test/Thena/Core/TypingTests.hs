@@ -20,16 +20,26 @@ module Thena.Core.TypingTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
-import Thena.Core.Level (Level (..), levelOfNat)
+import Thena.Core.Level
+  ( Level (..)
+  , LevelVar (..)
+  , Obligation (..)
+  , levelOfNat
+  )
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Convert (convert)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), fresh)
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), close, fresh)
 import Thena.Core.Typing (check, infer)
 import Thena.Declared (natFin, natFinCounter, natVec, natVecCounter)
 import Thena.Driver (parseCore)
 import Thena.Errors (TypeError (..))
-import Thena.Global.Env (eliminatorType, lookupInductive)
+import Thena.Global.Env
+  ( Definition (..)
+  , addDefinition
+  , eliminatorType
+  , lookupInductive
+  )
 
 tests :: TestTree
 tests =
@@ -45,6 +55,7 @@ tests =
     , testGroup "check is infer then convert" checkTests
     , testGroup "what goes wrong" errorTests
     , testGroup "the counter comes back" counterTests
+    , testGroup "a use owes its definition's level constraints" schemeTests
     ]
 
 -- | Addition, defined by recursion on the first argument — the motive is
@@ -342,3 +353,55 @@ counterTests =
   , testCase "it advances on the failing branch too" $
       (counter (infer natVec [] 100 (termAt 100 [] "\\ (x : Nat) -> zero zero")) > 100) @?= True
   ]
+
+-- --------------------------------------------------------------------------
+-- Scheme constraints at a use site (MS3 phase 33b)
+-- --------------------------------------------------------------------------
+
+-- | @discussion\/level-binders-and-constraints.md@ §4's call site, in one
+-- module: the level arguments are in the **term** and the constraint list is in
+-- the **environment**, and @infer@ puts them together.
+--
+-- **This is the soundness argument, not a convenience.** A constraint arising
+-- from a subsumption inside a body is invisible in that body's type —
+-- @Type ℓ0 -> Type ℓ1@ is well formed for any pair — so a badly instantiated
+-- call would check on its type alone. Nothing else can regenerate it, because
+-- checking a @Global@ never looks at the body.
+schemeTests :: [TestTree]
+schemeTests =
+  [ testCase "a use instantiates the constraint at the levels it wrote" $
+      owed (infer withScheme [] 800 (lift [levelOfNat 1, levelOfNat 0]))
+        @?= [AtMost (levelOfNat 1) (levelOfNat 0)]
+
+  , -- The obligation is **owed**, not decided: @infer@ never refuses one, and
+    -- the pass at @qed@ is what turns this into an error.
+    testCase "and it is owed rather than refused" $
+      verdict (infer withScheme [] 800 (lift [levelOfNat 1, levelOfNat 0]))
+        @?= Right (arrow (levelOfNat 1) (levelOfNat 0))
+
+  , testCase "a good instantiation owes one that discharges" $
+      owed (infer withScheme [] 800 (lift [levelOfNat 0, levelOfNat 1]))
+        @?= [AtMost (levelOfNat 0) (levelOfNat 1)]
+
+  , testCase "a definition with no constraints owes nothing" $
+      owed (infer natVec [] natVecCounter (Global (named "succ") [])) @?= []
+  ]
+  where
+    owed (_, o, _) = o
+
+    l0 = LVar (LRigid 700)
+    l1 = LVar (LRigid 701)
+
+    lift ls = Global (named "lift") ls
+
+    -- @lift {ℓ0 ℓ1} : Type ℓ0 -> Type ℓ1@, with @ℓ0 ≤ ℓ1@ — the shape
+    -- @∀ (A : Type) -> Type@ generalises to, built here rather than proved
+    -- because this module has no REPL.
+    withScheme =
+      addDefinition (named "lift")
+        (MkDefinition [LRigid 700, LRigid 701] [AtMost l0 l1]
+           (arrow l0 l1)
+           (Lam (Ident "A") (Universe l0) (close (fst (fresh 990)) (Universe l0))))
+        natVec
+
+    arrow a b = Pi (Ident "_") (Universe a) (close (fst (fresh 991)) (Universe b))
