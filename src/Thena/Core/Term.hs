@@ -113,6 +113,21 @@ data Core
 -- The final catch-all makes a missing case compare 'False' rather than warn.
 -- That is tolerable only because 'Core' is closed (§3.6) — if a constructor is
 -- ever added, this instance is the first place to look.
+--
+-- **All four places a 'Thena.Core.Level.Level' can sit are compared** — a
+-- 'Universe' and the three reference forms' arguments (MS3, his ruling of
+-- 2026-08-29). @Canonical@ and @Eliminate@ discarded theirs from phase 29 until
+-- then, which made this instance disagree with the two places that state the
+-- rule: 'Thena.Core.Convert' calls two uses of one former at different levels a
+-- clash, and 'Thena.Core.Unify' unifies their level arguments before their term
+-- arguments.
+--
+-- **Nothing could exhibit the disagreement**, because a @Canonical@ reaches a
+-- term only by δ-unfolding a saturated wrapper, so two written terms still
+-- compare at their @Global@ heads — where the levels /were/ compared — and the
+-- fast path correctly declined. That is not a reason to leave it: **equal
+-- implies convertible** is the licence conversion's fast path runs on (see
+-- 'Thena.Core.Convert'), and it was false as written.
 instance Eq Core where
   Bound i        == Bound j          = i == j
   Free x         == Free y           = x == y
@@ -122,9 +137,9 @@ instance Eq Core where
   Lam _ s b      == Lam _ s' b'      = s == s' && b == b'
   App f a        == App g c          = f == g && a == c
   Let _ v s b    == Let _ v' s' b'   = v == v' && s == s' && b == b'
-  Canonical f _ as == Canonical g _ bs   = f == g && as == bs
-  Eliminate d _ ps m ms is t == Eliminate d' _ ps' m' ms' is' t' =
-    d == d' && ps == ps' && m == m' && ms == ms' && is == is' && t == t'
+  Canonical f ks as == Canonical g ls bs = f == g && ks == ls && as == bs
+  Eliminate d ks ps m ms is t == Eliminate d' ls ps' m' ms' is' t' =
+    d == d' && ks == ls && ps == ps' && m == m' && ms == ms' && is == is' && t == t'
   _ == _ = False
 
 -- | Abstract a free variable: every @'Free' x@ becomes the index of the binder
