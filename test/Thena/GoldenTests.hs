@@ -864,6 +864,35 @@ tests =
       -- parameter, so it came out with none and the declaration was refused
       -- outright. Nothing in the prelude is both polymorphic and recursive,
       -- which is why nothing caught it.
+      -- **A set of level constraints that is pairwise possible and jointly
+      -- impossible** (phase 35), in two ordinary lines.
+      --
+      -- The two constant bounds sit on *different* metas with a meta-to-meta
+      -- edge between them, and that is what hides them from
+      -- 'Thena.Core.Level.forced': it reads a bound only off a relation one of
+      -- whose sides is a constant, so it sees @2 ≤ ?a@ and @?b ≤ 1@ and never
+      -- puts them together.
+      --
+      -- **Before this phase @:revalidate@ said /valid/ and @qed@ said /∎/**, and
+      -- the theorem entered the global environment carrying
+      -- @(2 ≤ ℓ₂) (ℓ₂ ≤ ℓ₁) (ℓ₁ ≤ 1)@ — a precondition no instantiation meets,
+      -- so every use of it was refused and it was noise in the scope.
+      -- @:infer@ printed a type for it at any levels, because a look drops the
+      -- obligations, which is what made it look usable.
+      --
+      -- **Its own script**, because @:theorem@ takes over the development it
+      -- finds rather than a fresh one, so appending this to a transcript that
+      -- has claimed anything makes @qed@ fail for an unrelated reason.
+    , script
+        "unsatisfiable"
+        [ ":theorem vacuous : Type\8321"
+        , "try ((\\ (y : Type) -> y) ((\\ (x : Type) -> x) Type\8321))"
+        , "solve"
+        , ":revalidate"
+        , "qed"
+        , ":show vacuous"
+        , ":quit"
+        ]
     , script
         "universes"
         ( preludeLines ++
@@ -929,6 +958,7 @@ tests =
           -- use and nothing generalised one.
         , "data Box : Type where { }"
         , ":show Box"
+
         , ":quit"
         ]
       -- Generalisation at @qed@ (MS3 phase 33b): a proof's leftover level metas

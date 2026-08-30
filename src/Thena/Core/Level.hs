@@ -38,6 +38,7 @@ module Thena.Core.Level
   , Obligation (..)
   , Unmet (..)
   , solveLevels
+  , unsatisfiable
   , substObligation
   , LevelUnification (..)
   , unifyLevels
@@ -373,14 +374,28 @@ instantiateLevels ps as
 data Obligation = AtMost Level Level
   deriving (Eq, Show)
 
--- | An obligation no instantiation could ever satisfy.
+-- | Why the pass failed.
 --
--- **The only way the pass fails** (MS3 phase 33b). It had a second constructor,
--- @Undetermined@, for an obligation the pass could neither discharge nor refute
--- — and that is no longer a failure: it is the **residue**, and generalisation
--- stores it on the definition rather than refusing it. What is left here is a
--- mistake in the term, which is what the message says.
-data Unmet = Refuted Level Level
+-- 'Refuted' is **one** relation that no instantiation satisfies. It had a
+-- companion, @Undetermined@, for an obligation the pass could neither discharge
+-- nor refute — and that is no longer a failure: it is the **residue**, and
+-- generalisation stores it on the definition rather than refusing it.
+--
+-- 'Unsatisfiable' is the other question, and it is about the residue as a
+-- **set** (phase 35). Every member can be individually undecidable while no
+-- assignment satisfies them together — @ℓ ≤ k@ with @suc k ≤ ℓ@ — and storing
+-- that as a scheme's constraints admits a theorem no call site could ever use.
+-- The payload is the constraints that cannot hold together, so the message can
+-- show them rather than name the whole residue.
+--
+-- **The two are different questions and neither implies the other.** 'Refuted'
+-- is validity, asked of one relation; 'Unsatisfiable' is satisfiability, asked
+-- of all of them. Re-running 'levelLeq' cannot answer the second: a rigid gets
+-- the validity reading, so @ℓ₁ ≤ ℓ₂@ between two parameters is @Just False@ —
+-- and that is a perfectly good scheme constraint.
+data Unmet
+  = Refuted Level Level
+  | Unsatisfiable [Obligation]
   deriving (Eq, Show)
 
 -- | Discharge what can be discharged, refuse what can never hold, and hand back
@@ -417,7 +432,13 @@ solveLevels :: [Obligation] -> Either Unmet ([(LevelVar, Level)], [Obligation])
 solveLevels obs = case sift obs of
   Left u        -> Left u
   Right pending -> case solutions pending of
-    []  -> Right ([], pending)
+    -- **The fixpoint has stopped, so this is the residue** — and the last
+    -- question is whether it can hold at all (phase 35). Asked here rather than
+    -- by the caller because every caller wants the same answer and there is one
+    -- of this function.
+    []  -> case unsatisfiable pending of
+             Just why -> Left (Unsatisfiable why)
+             Nothing  -> Right ([], pending)
     sub -> do
       (rest, residue) <- solveLevels (map (over sub) pending)
       Right (sub ++ rest, residue)
@@ -439,6 +460,124 @@ solveLevels obs = case sift obs of
       Just False -> Left (Refuted l k)
       Just True  -> sift os
       Nothing    -> (o :) <$> sift os
+
+-- --------------------------------------------------------------------------
+-- Satisfiability (phase 35)
+-- --------------------------------------------------------------------------
+
+-- | Can these obligations hold together? @Just@ the ones that cannot, if they
+-- demonstrably cannot.
+--
+-- **This is the question 'levelLeq' does not ask.** 'levelLeq' decides one
+-- relation; a set can be pairwise undecidable and jointly impossible, and
+-- without this a definition is admitted carrying constraints that refuse every
+-- use of it — vacuously polymorphic, and reported as proved.
+--
+-- **It is Brady's check.** @IDRIS.md@ §3.1–3.2: /"the type checker generates a
+-- graph of constraints between universe levels … and checks that there are no
+-- cycles."/ Over this algebra that is a **difference-constraint system**:
+-- @v + k ≤ w + j@ is @v - w ≤ j - k@, an edge, and the system is satisfiable
+-- exactly when the graph has no negative cycle (Bellman–Ford).
+--
+-- **A refutation, not a decision procedure, and the approximation is stated
+-- rather than hidden.** @X ≤ max d (w + j)@ is a *disjunction* and is not a
+-- difference constraint; those atoms are **dropped**. Dropping constraints can
+-- only make a system easier to satisfy, so a negative cycle among what is kept
+-- refutes the whole set — and a set with no cycle among what is kept is
+-- reported as /not shown impossible/, never as /satisfiable/. That is why the
+-- answer is a 'Maybe' and not a 'Bool'.
+--
+-- **Levels are naturals, and that is an edge too.** @v ≥ 0@ for every variable,
+-- without which @suc ?ℓ ≤ 0@ reads as satisfiable over the integers.
+unsatisfiable :: [Obligation] -> Maybe [Obligation]
+unsatisfiable obs
+  | null edges = Nothing
+  | otherwise  = fmap sources (negativeCycle nodes edges)
+  where
+    edges = concatMap edgesOf obs ++ [ Edge (At v) Ground 0 Nothing | v <- vars ]
+    vars  = nub [ v | AtMost l k <- obs, v <- levelVarsIn l ++ levelVarsIn k ]
+    nodes = Ground : map At vars
+
+    sources es = nub [ o | Edge _ _ _ (Just o) <- es ]
+
+-- | A vertex of the constraint graph: a level variable, or the constant zero
+-- that every bound is measured against.
+data Node = Ground | At LevelVar
+  deriving (Eq, Show)
+
+-- | @Edge y x c o@ — the constraint @x - y ≤ c@, which relaxes @x@ from @y@,
+-- and the obligation it came from (@Nothing@ for the @v ≥ 0@ edges, which no
+-- obligation wrote).
+data Edge = Edge Node Node Int (Maybe Obligation)
+
+-- | One obligation's difference constraints.
+--
+-- The left @max@ **decomposes**: @max c v⃗ ≤ R@ is @c ≤ R@ and @v + k ≤ R@ for
+-- each, with nothing guessed — §6.1's asymmetry, and the reason this direction
+-- is the easy one. The right @max@ does not, so a right-hand side that is not a
+-- single term contributes nothing.
+edgesOf :: Obligation -> [Edge]
+edgesOf o@(AtMost l k) = case (normalise l, normalise k) of
+  -- @X ≤ d@ — a constant ceiling, measured from 'Ground'.
+  (Normal c vs, Normal d []) ->
+    Edge Ground Ground (d - c) (Just o)
+      : [ Edge Ground (At v) (d - j) (Just o) | (v, j) <- vs ]
+
+  -- @X ≤ w + j@. Canonicity puts the right's constant at zero exactly when a
+  -- variable term dominates it, so this pattern /is/ the single-term case;
+  -- @Normal d [(w, j)]@ with @d > 0@ is @max d (w + j)@ and is disjunctive.
+  (Normal c vs, Normal 0 [(w, j)]) ->
+    Edge (At w) Ground (j - c) (Just o)
+      : [ Edge (At w) (At v) (j - i) (Just o) | (v, i) <- vs ]
+
+  _ -> []
+
+-- | Bellman–Ford, run for feasibility.
+--
+-- **Every distance starts at zero, so there is no source and no need for one**
+-- — the standard reading of a difference-constraint system, where a solution is
+-- any set of distances no edge can still improve. After @|V|@ rounds an edge
+-- that still relaxes lies on a negative cycle, and there is no other way one
+-- can.
+--
+-- The cycle itself is recovered by walking the predecessor edges back @|V|@
+-- steps — which lands inside it, whatever tail led there — and then round it
+-- until a node repeats. That is what lets the message name the constraints that
+-- clash instead of the whole residue.
+negativeCycle :: [Node] -> [Edge] -> Maybe [Edge]
+negativeCycle nodes edges = case still of
+    []    -> Nothing
+    e : _ -> Just (cycleFrom e)
+  where
+    (dist, preds) = rounds (length nodes) ([ (nd, 0) | nd <- nodes ], [])
+
+    rounds :: Int -> ([(Node, Int)], [(Node, Edge)]) -> ([(Node, Int)], [(Node, Edge)])
+    rounds 0 st = st
+    rounds r st = rounds (r - 1) (foldl relax st edges)
+
+    relax (d, p) e@(Edge y x c _)
+      | valueIn d y + c < valueIn d x =
+          (write x (valueIn d y + c) d, (x, e) : filter ((/= x) . fst) p)
+      | otherwise = (d, p)
+
+    still = [ e | e@(Edge y x c _) <- edges, valueIn dist y + c < valueIn dist x ]
+
+    valueIn d nd = maybe 0 id (lookup nd d)
+    write nd v d = (nd, v) : filter ((/= nd) . fst) d
+
+    cycleFrom (Edge _ x _ _) = collect [] [] (back (length nodes) x)
+
+    back 0 nd = nd
+    back k nd = case lookup nd preds of
+      Just (Edge y _ _ _) -> back (k - 1 :: Int) y
+      Nothing             -> nd
+
+    collect seen acc nd
+      | nd `elem` seen = reverse acc
+      | otherwise = case lookup nd preds of
+          Nothing               -> reverse acc
+          Just e@(Edge y _ _ _) -> collect (nd : seen) (e : acc) y
+
 
 -- | Apply a level substitution to an obligation — what instantiating a
 -- definition's scheme does to its stored constraints at a use site.

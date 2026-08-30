@@ -27,6 +27,7 @@ import Thena.Core.Level
   , normalise
   , solveLevels
   , unifyLevels
+  , unsatisfiable
   )
 
 tests :: TestTree
@@ -41,7 +42,12 @@ tests =
     , testGroup "rendering" renderTests
     , testGroup "solveLevels discharges, refutes, or gives up" solveTests
     , testGroup "unifyLevels solves, sticks, or clashes" unifyTests
+    , testGroup "satisfiability — the residue as a set (phase 35)" satTests
     ]
+
+-- | A third meta, for the three-variable cycle.
+m3 :: LevelVar
+m3 = LMeta 4
 
 -- | A second meta, for the constraints between two unknowns.
 m2 :: LevelVar
@@ -376,4 +382,101 @@ unifyTests =
   , testCase "one stuck pair does not lose the others' solutions — it reports stuck" $
       unifyLevels [(LVar m, levelOfNat 1), (LMax (LVar m2) (LVar a), levelOfNat 3)]
         @?= LevelsStuck
+  ]
+
+-- --------------------------------------------------------------------------
+-- Satisfiability (phase 35)
+-- --------------------------------------------------------------------------
+
+-- | 'unsatisfiable' asks of the whole residue what 'levelLeq' asks of one
+-- relation, and the two answers are independent: every constraint below is
+-- individually undecidable, and some sets of them are impossible.
+--
+-- **Everything here uses metas**, and that is forced rather than chosen: a
+-- relation between two /rigids/ is decided by 'levelLeq' under the validity
+-- reading and never reaches the residue at all.
+--
+-- **The negative tests are the ones that matter.** A refutation procedure that
+-- refuses too much is worse than none, so the satisfiable systems are pinned as
+-- hard as the impossible ones — in particular the disjunctive constraint this
+-- pass /drops/, where dropping must never turn a possible system into an
+-- impossible one.
+satTests :: [TestTree]
+satTests =
+  [ testCase "one constraint between two unknowns is possible" $
+      unsatisfiable [AtMost (LVar m) (LVar m2)] @?= Nothing
+
+  , testCase "and so is the pair that says they are equal" $
+      unsatisfiable [AtMost (LVar m) (LVar m2), AtMost (LVar m2) (LVar m)]
+        @?= Nothing
+
+  , testCase "cumulativity's own shape — a lower bound of zero — is possible" $
+      unsatisfiable [AtMost (levelOfNat 0) (LVar m)] @?= Nothing
+
+  , -- The two-cycle: @?m ≤ ?m2@ with @suc ?m2 ≤ ?m@ needs @?m ≤ ?m2 < ?m@.
+    --
+    -- **The order is the cycle's own**, walked back from the edge that was
+    -- still relaxing, not the order the obligations were written in. Pinned
+    -- exactly all the same: a message that lists the clash should list it the
+    -- same way every time.
+    testCase "a strict cycle of two is impossible" $
+      unsatisfiable [AtMost (LVar m) (LVar m2), AtMost (LSuc (LVar m2)) (LVar m)]
+        @?= Just [AtMost (LSuc (LVar m2)) (LVar m), AtMost (LVar m) (LVar m2)]
+
+  , testCase "and one of three, which no pair of them shows" $
+      unsatisfiable
+        [ AtMost (LVar m) (LVar m2)
+        , AtMost (LVar m2) (LVar m3)
+        , AtMost (LSuc (LVar m3)) (LVar m)
+        ]
+        @?= Just
+          [ AtMost (LVar m2) (LVar m3)
+          , AtMost (LSuc (LVar m3)) (LVar m)
+          , AtMost (LVar m) (LVar m2)
+          ]
+
+  , -- Any two of those three are perfectly possible, which is the whole reason
+    -- @levelLeq@ cannot answer this question.
+    testCase "any two of the three are possible on their own" $
+      map unsatisfiable
+        [ [AtMost (LVar m) (LVar m2), AtMost (LVar m2) (LVar m3)]
+        , [AtMost (LVar m2) (LVar m3), AtMost (LSuc (LVar m3)) (LVar m)]
+        , [AtMost (LVar m) (LVar m2), AtMost (LSuc (LVar m3)) (LVar m)]
+        ]
+        @?= [Nothing, Nothing, Nothing]
+
+  , -- **Levels are naturals.** Over the integers @?m + 2 ≤ ?m2@ and
+    -- @?m2 ≤ 1@ and @1 ≤ ?m@ would still need @?m ≥ 1@ and @?m ≤ -1@; the
+    -- @v ≥ 0@ edges are what make that a cycle here.
+    testCase "a bound that would only be met by a negative level is impossible" $
+      unsatisfiable
+        [ AtMost (LSuc (LSuc (LVar m))) (LVar m2)
+        , AtMost (LVar m2) (levelOfNat 1)
+        , AtMost (levelOfNat 1) (LVar m)
+        ]
+        /= Nothing @?= True
+
+  , -- **The approximation, pinned.** @?m ≤ max 5 ?m2@ is a disjunction and is
+    -- dropped; the pass must then report /not shown impossible/ rather than
+    -- inventing a cycle out of what is left. @?m2 := 0, ?m := 1@ satisfies both.
+    testCase "a join on the right is dropped, not misread as a constraint" $
+      unsatisfiable
+        [ AtMost (LVar m) (LMax (levelOfNat 5) (LVar m2))
+        , AtMost (LSuc (LVar m2)) (LVar m)
+        ]
+        @?= Nothing
+
+  , testCase "nothing owed is possible" $ unsatisfiable [] @?= Nothing
+
+  , -- And the whole pass, end to end: an impossible residue is a failure of
+    -- @solveLevels@ and not something handed back for generalisation to store.
+    testCase "solveLevels reports an impossible residue rather than returning it" $
+      solveLevels [AtMost (LVar m) (LVar m2), AtMost (LSuc (LVar m2)) (LVar m)]
+        @?= Left
+              (Unsatisfiable
+                 [AtMost (LSuc (LVar m2)) (LVar m), AtMost (LVar m) (LVar m2)])
+
+  , testCase "and still hands back a possible one" $
+      solveLevels [AtMost (LVar m) (LVar m2)]
+        @?= Right ([], [AtMost (LVar m) (LVar m2)])
   ]

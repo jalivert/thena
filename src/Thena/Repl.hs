@@ -1151,6 +1151,12 @@ renderKernelError n e = case e of
     ]
   Levels (Refuted l k) ->
     [ renderLevelAtom l ++ " is not at most " ++ renderLevelAtom k ]
+  -- **Plural, and it names the clash rather than the residue** (phase 35).
+  -- Each of these can be perfectly possible on its own; what is impossible is
+  -- holding them at once, so the message says so and lists them.
+  Levels (Unsatisfiable cs) ->
+    "no levels satisfy all of these at once:"
+      : map (("  " ++) . obligation) cs
   Ill pos te   ->
     ("in " ++ renderPosition pos ++ ":") : map ("  " ++) (renderTypeError n te)
 
