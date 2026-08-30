@@ -16,7 +16,7 @@ module Thena.CursorTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Level (Level (..))
+import Thena.Core.Level (Level (..), LevelVar (..), levelOfNat)
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Term (Core (..), Ident (..), close, fresh)
 import Thena.Development.Component (Component (..))
@@ -35,6 +35,7 @@ import Thena.Development.Cursor
   , focus
   , insertAbove
   , into
+  , overLevels
   , rebuild
   , replaceFocus
   )
@@ -61,6 +62,7 @@ tests =
     , testGroup "impossible moves" refusalTests
     , testGroup "changing the development" changeTests
     , testGroup "display" displayTests
+    , testGroup "a level solution reaches every core term" levelTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -457,3 +459,59 @@ unlines' = foldr1 (\a b -> a ++ "\n" ++ b)
 -- and by 'type0' above.
 _unused :: Core
 _unused = Pi (Ident "_") type0 (close (fst (fresh 0)) type0)
+
+-- --------------------------------------------------------------------------
+-- overLevels (MS3 phase 33)
+-- --------------------------------------------------------------------------
+
+-- | A development with the same level written into every place a 'Level' can
+-- occur, so one substitution has to find all of them.
+--
+-- Not a valid development and not meant to be: what is under test is that the
+-- traversal is total over the /shape/, and a shape is what this is.
+metaEverywhere :: Level -> Partial
+metaEverywhere l =
+  let (vA, n1) = fresh 700
+      (vd, n2) = fresh n1
+      (vh, n3) = fresh n2
+      (vg, n4) = fresh n3
+      (vx, _)  = fresh n4
+      u        = Universe l
+   in Under (Assume vA (Ident "A") u)
+        (Under (Define vd (Ident "d") u (Universe (LSuc l)))
+          (Pending (Equate [Hypothesis vx (Ident "x") u] (Free vx) (Free vx) u)
+            (Under (Claim vh (Ident "h") (Pi (Ident "x") u (close vx u)))
+              (Under (Guess vg (Ident "g") (Trailing u) u)
+                (Trailing u)))))
+
+-- | **The check that matters is that the focus is not an exception.**
+-- 'overComponents' has to skip a focused component, because promoting a 'Claim'
+-- to a 'Define' would strand the 'Slot' naming its kind; a level substitution
+-- changes no constructor, so leaving the focus out would just be a place a
+-- solution failed to reach — and a hole standing on its own type while its
+-- level is solved is exactly where that would bite.
+levelTests :: [TestTree]
+levelTests =
+  [ reaches "from the root" []
+  , reaches "with a component above the focus" [mAlong]
+  , reaches "standing on a constraint" [mAlong, mAlong]
+  , reaches "standing on the hole whose type is being rewritten"
+      [mAlong, mAlong, mAlong]
+  , reaches "inside a guess" [mAlong, mAlong, mAlong, mAlong, mInto]
+  , -- @Dom@ leaves a 'Scope' in the term step, which is the one field the
+    -- traversal cannot reach with plain 'substLevelsIn'.
+    reaches "under a binder's domain, where the sibling is a Scope"
+      [mAlong, mAlong, mAlong, mCrossType, mDown Dom]
+  , reaches "under a binder's codomain, where the sibling is not"
+      [mAlong, mAlong, mAlong, mCrossType, mDown Cod]
+  ]
+  where
+    meta  = LMeta 900
+    zero  = levelOfNat 0
+    solve = [(meta, zero)]
+
+    reaches what moves = testCase what $
+      let cur  = at (metaEverywhere (LVar meta)) moves
+          cur' = overLevels solve cur
+          want = at (metaEverywhere zero) moves
+       in (rebuild cur', focus cur' == focus want) @?= (metaEverywhere zero, True)

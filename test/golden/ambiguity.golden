@@ -1,0 +1,52 @@
+thena spine> :infer Type
+Type (?ℓ1) : Type (suc ?ℓ1)
+thena spine> :infer Type -> Type
+Type (?ℓ2) -> Type (?ℓ3) : Type (suc ?ℓ2 ⊔ suc ?ℓ3)
+thena spine> :convert Type ≟ Type₀
+Type (?ℓ6) ≟ Type₀   yes
+  provided ?ℓ6 ≤ 0
+  provided 0 ≤ ?ℓ6
+thena spine> :theorem lift : Type₁
+proving lift : Type₁
+thena spine> try Type
+thena spine> solve
+thena spine> qed
+lift : Type₁   ∎
+thena spine> :show lift
+lift : Type₁
+lift = let lift = Type₀ : Type₁ in lift
+thena spine> :theorem undecided : Type
+proving undecided : Type (?ℓ10)
+thena spine> try Type₀
+thena spine> solve
+thena spine> :revalidate
+cannot tell whether 1 is at most ?ℓ10
+  write the levels, as in "Type₀"
+thena spine> qed
+the kernel refused it
+cannot tell whether 1 is at most ?ℓ10
+  write the levels, as in "Type₀"
+thena spine> :abandon
+abandoned undecided
+thena spine> :theorem crossed : Type₀
+proving crossed : Type₀
+thena spine> try ((\ (x : Type) -> x) Type₀)
+thena spine> solve
+thena spine> :revalidate
+1 is not at most 0
+thena spine> qed
+the kernel refused it
+1 is not at most 0
+thena spine> :abandon
+abandoned crossed
+thena spine> claim h : Type -> Type
+claimed h
+thena spine> unify \ (x : Type) -> x ≟ \ (x : Type₀) -> x
+solved: ?ℓ23
+thena spine> :show
+  let ? h : Type (?ℓ18) -> Type (?ℓ19) in
+▶ let ? goal : Type₀ in
+  goal
+thena spine> data Box : Type where { }
+Box must say which level it lives at, as in "Type₀"
+thena spine> :quit

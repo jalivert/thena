@@ -57,6 +57,7 @@ module Thena.Development.Cursor
     -- * The root-down pass (§4.0 G1)
   , overComponents
   , overConstraints
+  , overLevels
   , postConstraint
   , below
   ) where
@@ -65,8 +66,8 @@ import Data.Foldable (toList)
 import Data.List ((\\))
 import Data.Maybe (mapMaybe)
 
-import Thena.Core.Level (Level)
-import Thena.Core.Context (Context, Entry (..))
+import Thena.Core.Level (Level, LevelVar, substLevel)
+import Thena.Core.Context (Context, Entry (..), substLevelsInEntry)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName
@@ -77,6 +78,8 @@ import Thena.Core.Term
   , freeVars
   , fresh
   , open
+  , substLevelsIn
+  , substLevelsInScope
   )
 import Thena.Development.Component (Component (..), forget)
 import Thena.Development.Partial (Constraint (..), Partial (..), freeVarsPartial)
@@ -775,6 +778,90 @@ overConstraints f cur = case cur of
       Pending k rest -> case f k of
         Nothing -> onPartial rest
         Just k' -> Pending k' (onPartial rest)
+
+-- | Apply a level substitution to every core term in the development (MS3
+-- phase 33). What unification's **level**-solving uses.
+--
+-- **It is the one root-down pass that touches the focus as well**, and that is
+-- safe for the reason the other three are not: a level substitution never
+-- changes a constructor. 'overComponents' must skip a focused component because
+-- promoting a 'Claim' to a 'Define' would strand the 'Slot' that names its kind;
+-- nothing here can strand anything, so leaving the focus out would just be a
+-- place a solution failed to reach.
+--
+-- **Why a solution has to be pushed at all**, where a term solution does not
+-- (see 'overComponents'): a term hole is a /component/, so solving it is
+-- promoting that component and δ does the rest on demand. A level meta has no
+-- component and no chain position — levels are context-free — so there is
+-- nowhere to record @?ℓ := 0@ except in the terms that mention it. That is
+-- @discussion\/level-binders-and-constraints.md@ §4's /"levels live inside
+-- terms, so a substitution is recorded like any other"/, and this is the
+-- traversal it needs.
+overLevels :: [(LevelVar, Level)] -> Cursor -> Cursor
+overLevels sub cur = case cur of
+  InPartial p c rest    -> InPartial (fmap onStep p) (onComponent c) (onPartial rest)
+  AtConstraint p k rest -> AtConstraint (fmap onStep p) (onConstraint k) (onPartial rest)
+  InCore p x ts t       -> InCore (fmap onStep p) (onCrossing x) (fmap onTermStep ts) (at t)
+  where
+    at = substLevelsIn sub
+
+    onComponent c = case c of
+      Assume x i s   -> Assume x i (at s)
+      Claim  x i s   -> Claim  x i (at s)
+      Define x i v s -> Define x i (at v) (at s)
+      Guess  x i g s -> Guess  x i (onPartial g) (at s)
+
+    onConstraint (Equate xi a b ty) =
+      Equate (map (substLevelsInEntry sub) xi) (at a) (at b) (at ty)
+
+    onStep st = case st of
+      Along c               -> Along (onComponent c)
+      Past  k               -> Past (onConstraint k)
+      IntoGuess x i ty rest -> IntoGuess x i (at ty) (onPartial rest)
+
+    onCrossing x = case x of
+      TrailingTerm     -> TrailingTerm
+      InSlot slot rest -> InSlot (onSlot slot) (onPartial rest)
+
+    onSlot slot = case slot of
+      TypeOfAssume  x i   -> TypeOfAssume  x i
+      TypeOfDefine  x i v -> TypeOfDefine  x i (at v)
+      ValueOfDefine x i s -> ValueOfDefine x i (at s)
+      TypeOfClaim   x i   -> TypeOfClaim   x i
+      TypeOfGuess   x i g -> TypeOfGuess   x i (onPartial g)
+
+    -- A term step carries the siblings of the field the focus went into, and
+    -- 'Scope' is opaque here — so the scoped fields go through
+    -- 'substLevelsInScope', which is 'substLevelsIn' under a binder it need not
+    -- open, levels being context-free.
+    onTermStep st = case st of
+      IntoFun      a        -> IntoFun      (at a)
+      IntoArg      f        -> IntoArg      (at f)
+      IntoPiDom    i b      -> IntoPiDom    i (substLevelsInScope sub b)
+      IntoPiCod    x i dom  -> IntoPiCod    x i (at dom)
+      IntoLamDom   i b      -> IntoLamDom   i (substLevelsInScope sub b)
+      IntoLamBody  x i dom  -> IntoLamBody  x i (at dom)
+      IntoLetValue i ty b   -> IntoLetValue i (at ty) (substLevelsInScope sub b)
+      IntoLetType  i v b    -> IntoLetType  i (at v) (substLevelsInScope sub b)
+      IntoLetBody  x i v ty -> IntoLetBody  x i (at v) (at ty)
+      IntoCanonArg f ls bs as -> IntoCanonArg f (map (substLevel sub) ls) (map at bs) (map at as)
+      IntoElimParam  d ls bs as m ms is tgt ->
+        IntoElimParam d (levels ls) (map at bs) (map at as) (at m) (map at ms) (map at is) (at tgt)
+      IntoElimMotive d ls ps ms is tgt ->
+        IntoElimMotive d (levels ls) (map at ps) (map at ms) (map at is) (at tgt)
+      IntoElimMethod d ls ps m bs as is tgt ->
+        IntoElimMethod d (levels ls) (map at ps) (at m) (map at bs) (map at as) (map at is) (at tgt)
+      IntoElimIndex  d ls ps m ms bs as tgt ->
+        IntoElimIndex d (levels ls) (map at ps) (at m) (map at ms) (map at bs) (map at as) (at tgt)
+      IntoElimTarget d ls ps m ms is ->
+        IntoElimTarget d (levels ls) (map at ps) (at m) (map at ms) (map at is)
+
+    levels = map (substLevel sub)
+
+    onPartial q = case q of
+      Trailing t     -> Trailing (at t)
+      Under c rest   -> Under (onComponent c) (onPartial rest)
+      Pending k rest -> Pending (onConstraint k) (onPartial rest)
 
 -- | Splice a constraint into the path, keeping the given number of steps above
 -- it and pushing the rest down. @0@ puts it at the root; the path's own length

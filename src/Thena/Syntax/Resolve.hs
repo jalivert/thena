@@ -7,7 +7,7 @@ module Thena.Syntax.Resolve
   ) where
 
 import Thena.Core.Context (Context, Entry (..), entryIdent, entryVar)
-import Thena.Core.Level (Level (..), LevelVar (..), levelOfNat)
+import Thena.Core.Level (Level (..), LevelVar (..), freshLevelMeta, levelOfNat)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
@@ -106,6 +106,15 @@ core env gs ctx local lvs n raw = case raw of
   RawUniverseAt rl -> do
     l <- levelArg lvs rl
     Right (Universe l, n)
+
+  -- @Type@ — a universe whose level is left to be worked out (phase 33).
+  -- **Typical ambiguity is this line**: the level is a meta from the shared
+  -- counter, and conversion, unification and the collector at @qed@ are what
+  -- decide it. Writing @Typeₙ@ instead is always available and is the recovery
+  -- when they cannot (§6.3).
+  RawUniverseOpen ->
+    let (v, n1) = freshLevelMeta n
+     in Right (Universe (LVar v), n1)
 
   -- @foo {ℓ 0}@ — a global at level arguments. **Refused on a local**: only a
   -- definition has level parameters, and a λ-bound name has none to give.
@@ -321,6 +330,14 @@ constraint env gs ctx local lvs n (RawConstraint bs s t ty) = do
 resolveData
   :: GlobalEnv -> Int -> RawData
   -> Either ResolveError (InductiveDefinition, Int)
+resolveData _ _ decl@(RawData name _ _ _ _)
+  -- **A declaration may not write a bare @Type@** (phase 33). A datatype's
+  -- levels are stored in the global environment and instantiated at every use,
+  -- so a meta in one would be shared by every use rather than solved per use —
+  -- and nothing generalises a declaration, since generalisation happens at
+  -- @qed@ and a declaration has none. Writing the level is the answer until
+  -- phase 33c, which makes a datatype infer its own.
+  | any openUniverse (writtenIn decl) = Left (LevelNotWritten name)
 resolveData env n (RawData name lps ps ty cs) = do
   -- **The level parameters are minted first and are in scope in everything
   -- that follows** (phase 31b) — the parameter telescope, the indices, the
@@ -450,6 +467,35 @@ lookupEntry s = foldl pick Nothing
 -- for @suc@ or @⊔@ yet: @⊔@ would have to become reserved, which narrows what
 -- an identifier may contain (§2.6, his decision), and nothing needs to write
 -- one until inference can get stuck.
+-- | Every written tree inside a declaration: the parameter and index binders'
+-- types, the declared universe, and every constructor's type.
+writtenIn :: RawData -> [Raw]
+writtenIn (RawData _ _ ps ty cs) =
+  [ t | RawBinder _ t <- ps ] ++ [ty] ++ [ t | RawConstructor _ t <- cs ]
+
+-- | Is a bare @Type@ written anywhere in this tree?
+openUniverse :: Raw -> Bool
+openUniverse raw = case raw of
+  RawUniverseOpen     -> True
+  RawName _           -> False
+  RawUniverse _       -> False
+  RawUniverseAt _     -> False
+  RawAt _ _           -> False
+  RawLam bs b         -> any openUniverse (map binderType bs ++ [b])
+  RawPi bs b          -> any openUniverse (map binderType bs ++ [b])
+  RawArrow s b        -> openUniverse s || openUniverse b
+  RawApp f a          -> openUniverse f || openUniverse a
+  RawLet _ v t b      -> any openUniverse [v, t, b]
+  RawClaim _ t b      -> any openUniverse [t, b]
+  RawGuess _ t g b    -> any openUniverse [t, g, b]
+  RawPending (RawConstraint bs a b t) p ->
+    any openUniverse (map binderType bs ++ [a, b, t, p])
+  RawQuote t          -> openUniverse t
+  RawElim _ _ ps m ms is tgt ->
+    any openUniverse (ps ++ [m] ++ ms ++ is ++ [tgt])
+  where
+    binderType (RawBinder _ t) = t
+
 levelArg :: [(String, LevelVar)] -> RawLevel -> Either ResolveError Level
 levelArg lvs rl = case rl of
   RawLevelNum k -> Right (levelOfNat k)

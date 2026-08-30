@@ -22,8 +22,13 @@ module Thena.Core.Unify
 
 import Data.List (nub)
 
-import Thena.Core.Context (Context, Entry (..), entryVar, lamOver)
+import Thena.Core.Context (Context, Entry (..), entryVar, lamOver, substLevelsInEntry)
 import Thena.Core.Reduce (whnf)
+import Thena.Core.Level
+  ( LevelUnification (..)
+  , LevelVar
+  , unifyLevels
+  )
 import Thena.Core.Term
   ( Core (..)
   , Ident
@@ -33,6 +38,7 @@ import Thena.Core.Term
   , fresh
   , instantiate
   , open
+  , substLevelsIn
   )
 import Thena.Core.Typing (infer)
 import Thena.Development.Component (Component (..), forget)
@@ -46,6 +52,7 @@ import Thena.Development.Cursor
   , focus
   , overComponents
   , overConstraints
+  , overLevels
   , postConstraint
   , prefix
   , rebuild
@@ -59,12 +66,20 @@ import Thena.Global.Env (GlobalEnv)
 -- stack (§7.3), and an exception would bypass the frames entirely.
 --
 -- The payloads are what the deliverable needs and nothing more: which holes
--- became definitions, and what is still parked. Neither is stored anywhere —
--- the holes are read off what changed and the constraints are read off the
--- development, which is where they live.
+-- became definitions, **which level metas were solved** (MS3 phase 33), and
+-- what is still parked. None is stored anywhere — the holes and the levels are
+-- read off what changed and the constraints are read off the development, which
+-- is where they live.
+--
+-- The levels are a separate list rather than folded in with the holes because
+-- they are a different sort: a hole becomes a component and a level meta becomes
+-- part of every term that mentioned it. They are reported together all the same
+-- — what the caller wants to say is /what got solved/.
 data UnifyResult
-  = Solved   [Var]                -- ^ holes instantiated, nothing left parked
-  | Deferred [Var] [Constraint]   -- ^ holes instantiated, and what still waits
+  = Solved   [Var] [LevelVar]
+    -- ^ holes and level metas instantiated, nothing left parked
+  | Deferred [Var] [LevelVar] [Constraint]
+    -- ^ the same, and what still waits
   | Failed   FailReason           -- ^ structurally impossible; triggers unwind
   deriving (Eq, Show)
 
@@ -88,12 +103,15 @@ unify
   :: GlobalEnv -> Cursor -> Int -> Core -> Core -> Core
   -> (UnifyResult, Cursor, Int)
 unify env cur n s t ty =
-  case work env (St cur n []) (Equate [] s t ty) >>= wake env of
+  case work env (St cur n [] []) (Equate [] s t ty) >>= wake env of
     Left (reason, n') -> (Failed reason, cur, n')
     Right st ->
       let solved = reverse (stSolved st)
+          levels = reverse (stLevels st)
           parked = constraintsOf (rebuild (stCur st))
-       in ( if null parked then Solved solved else Deferred solved parked
+       in ( if null parked
+              then Solved solved levels
+              else Deferred solved levels parked
           , stCur st
           , stNames st
           )
@@ -125,7 +143,8 @@ constraintsOf p = case p of
 data St = St
   { stCur    :: Cursor
   , stNames  :: Int
-  , stSolved :: [Var]   -- ^ newest first; reversed on the way out
+  , stSolved :: [Var]        -- ^ newest first; reversed on the way out
+  , stLevels :: [LevelVar]   -- ^ the level metas solved, same convention
   }
 
 -- | A failure carries the counter, because a variable minted on the way to it
@@ -416,33 +435,75 @@ solve x t st = st
 -- | Replace a problem by the problems it decomposes into, solved in sequence —
 -- §6.4's splices, and the Optimist's lemma is what licenses doing it greedily
 -- and in order.
+--
+-- **Level arguments are solved before the term arguments** (MS3 phase 33). A
+-- level is not a 'Core', so it cannot become a sub-problem; it is an equation in
+-- the level algebra, and 'unifyLevels' either solves it, clashes, or is stuck.
+--
+--   * **solved** — the solution is pushed through the whole development with
+--     'overLevels' and the problem is /restarted/. A level meta has no component
+--     to be promoted, so there is nowhere to record @?ℓ := 0@ but the terms that
+--     mention it (§4); restarting is what keeps the equation in hand from
+--     carrying a variable the development no longer has. It terminates because
+--     each restart removes at least one meta.
+--   * **stuck** — @max ?a ?b ≟ 3@ and its like. **It proceeds**, which is the
+--     user's decision of 2026-08-27: /a level obligation does not block/, and
+--     the pass at @qed@ re-derives everything. The cost is that the error
+--     arrives there rather than at the line.
+--   * **clash** — no instantiation makes @Type₀@ and @Type₁@ the same, so this
+--     is an ordinary mismatch and fails here.
 rigidRigid :: GlobalEnv -> St -> Context -> Constraint -> Attempt St
-rigidRigid env st ctx (Equate xi s t ty) = case (s, t) of
-  (Universe a, Universe b)
-    | a == b    -> Right st
-    | otherwise -> Left (UniverseMismatch a b, stNames st)
-
-  (Pi i dom sc, Pi _ dom' sc') -> binder i dom sc dom' sc'
-  (Lam i dom sc, Lam _ dom' sc') -> binder i dom sc dom' sc'
-
-  (App f a, App g b) -> sequential [(f, g), (a, b)]
-
-  -- **Level arguments are compared, not skipped.** Two uses of the same former
-  -- at different levels are different terms, and a level is not a 'Core' so it
-  -- cannot become a sub-problem — it either matches here or the terms clash.
-  (Canonical f ks as, Canonical g ls bs)
-    | f == g && ks == ls && length as == length bs -> sequential (zip as bs)
-
-  (Eliminate d ks ps m ms is tgt, Eliminate d' ls ps' m' ms' is' tgt')
-    | d == d'
-    , ks == ls
-    , length ps == length ps'
-    , length ms == length ms'
-    , length is == length is' ->
-        sequential (zip ps ps' ++ [(m, m')] ++ zip ms ms' ++ zip is is' ++ [(tgt, tgt')])
-
-  _ -> Left (Mismatch ctx s t, stNames st)
+rigidRigid env st ctx k@(Equate xi s t ty) = case levelPairs of
+  Just (eqs, clash) -> case unifyLevels eqs of
+    LevelsClash _ _  -> Left (clash, stNames st)
+    LevelsStuck      -> structural
+    LevelsSolved []  -> structural
+    LevelsSolved sub ->
+      work env st { stCur    = overLevels sub (stCur st)
+                  , stLevels = reverse (map fst sub) ++ stLevels st
+                  }
+                  (pushed sub k)
+  Nothing -> structural
   where
+    -- The level arguments two matching heads must agree on, and what to report
+    -- if they cannot. @Nothing@ for a node that carries no levels.
+    levelPairs = case (s, t) of
+      (Universe a, Universe b) -> Just ([(a, b)], UniverseMismatch a b)
+      (Canonical f ks _, Canonical g ls _)
+        | f == g, length ks == length ls -> Just (zip ks ls, Mismatch ctx s t)
+      (Eliminate d ks _ _ _ _ _, Eliminate d' ls _ _ _ _ _)
+        | d == d', length ks == length ls -> Just (zip ks ls, Mismatch ctx s t)
+      _ -> Nothing
+
+    pushed sub (Equate xi' a b ty') =
+      Equate (map (substLevelsInEntry sub) xi')
+             (substLevelsIn sub a) (substLevelsIn sub b) (substLevelsIn sub ty')
+
+    structural = case (s, t) of
+      -- **Reached only when 'levelPairs' has already settled the levels** —
+      -- solved to equal, or stuck and therefore proceeding. There is nothing
+      -- left for this case to compare, and comparing again would refuse the
+      -- stuck case that the decision above says to let through.
+      (Universe _, Universe _) -> Right st
+
+      (Pi i dom sc, Pi _ dom' sc') -> binder i dom sc dom' sc'
+      (Lam i dom sc, Lam _ dom' sc') -> binder i dom sc dom' sc'
+
+      (App f a, App g b) -> sequential [(f, g), (a, b)]
+
+      (Canonical f ks as, Canonical g ls bs)
+        | f == g, length ks == length ls, length as == length bs -> sequential (zip as bs)
+
+      (Eliminate d ks ps m ms is tgt, Eliminate d' ls ps' m' ms' is' tgt')
+        | d == d'
+        , length ks == length ls
+        , length ps == length ps'
+        , length ms == length ms'
+        , length is == length is' ->
+            sequential (zip ps ps' ++ [(m, m')] ++ zip ms ms' ++ zip is is' ++ [(tgt, tgt')])
+
+      _ -> Left (Mismatch ctx s t, stNames st)
+
     -- Sub-problems inherit the enclosing type. It is display-and-recheck
     -- information (§6.4) and only matters if the sub-problem is parked, where
     -- 'park' infers a better one; carrying the parent's is the fallback, and it
@@ -480,9 +541,11 @@ park env st k@(Equate xi s _ ty)
   | k' `elem` constraintsOf (rebuild (stCur st)) = Right st
   | otherwise = Right st { stCur = postConstraint position k' (stCur st), stNames = n1 }
   where
+    -- Level obligations are dropped, as everywhere outside the checking pass;
+    -- "Thena.Core.Typing"'s header says why once.
     (ty', n1) = case infer env (whole (stCur st) ++ xi) (stNames st) s of
-      (Right inferred, n) -> (inferred, n)
-      (Left _,         n) -> (ty, n)
+      (Right inferred, _, n) -> (inferred, n)
+      (Left _,         _, n) -> (ty, n)
 
     k' = Equate xi s (equateRight k) ty'
 

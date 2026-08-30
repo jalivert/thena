@@ -13,6 +13,20 @@
 -- **No cumulativity** (§5.2): a type is used at the universe it has, and
 -- 'convert' is symmetric.
 --
+-- **Every entry point also returns the level obligations it owes** (MS3 phase
+-- 33). They come from 'subsumes' — a subsumption between levels one of which is
+-- still a meta — and they are a success, not a failure.
+--
+-- **Who collects them, said once here:** nothing during a proof does.
+-- @discussion\/level-binders-and-constraints.md@ §4 decides it — obligations are
+-- /re-collected/ by re-checking rather than pooled, because re-checking the
+-- finished development regenerates precisely the ones that should apply and
+-- nothing regretted regenerates any. So "Thena.Development.Validate" and
+-- "Thena.Kernel" accumulate them and run 'Thena.Core.Level.solveLevels'; every
+-- other caller drops them, deliberately, and the cost of that is phase 25b in
+-- reverse — a level-inconsistent development can be built and is only refused
+-- at @qed@.
+--
 -- Takes and returns the name counter throughout, for the reason "Thena.Core.Convert"
 -- does. §7.4's signatures are corrected to match — decided by the user
 -- 2026-08-22, who also observed where this is heading: @infer@ is a large
@@ -31,7 +45,13 @@ import Data.List (find)
 
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar)
 import Thena.Core.Convert (subsumes)
-import Thena.Core.Level (Level (..), instantiateLevels, levelMax, levelSuc)
+import Thena.Core.Level
+  ( Level (..)
+  , Obligation
+  , instantiateLevels
+  , levelMax
+  , levelSuc
+  )
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term
   ( Core (..)
@@ -57,13 +77,15 @@ import Thena.Global.Env
   )
 
 -- | The type of a term, or why it has none.
-infer :: GlobalEnv -> Context -> Int -> Core -> (Either TypeError Core, Int)
+infer
+  :: GlobalEnv -> Context -> Int -> Core
+  -> (Either TypeError Core, [Obligation], Int)
 infer env ctx n term = case term of
-  Bound i -> (Left (LooseIndex i), n)
+  Bound i -> (Left (LooseIndex i), [], n)
 
   Free x -> case find ((== x) . entryVar) ctx of
-    Just e  -> (Right (entryType e), n)
-    Nothing -> (Left (UnknownVariable ctx x), n)
+    Just e  -> (Right (entryType e), [], n)
+    Nothing -> (Left (UnknownVariable ctx x), [], n)
 
   -- A definition first, then a constant. That order is δ's (§5.1): a former
   -- has an entry in both tables under one name, and what @g@ /means/ written
@@ -77,10 +99,10 @@ infer env ctx n term = case term of
   -- an arity mismatch is an error here rather than something to defer.
   Global g ls -> case lookupDefinition g env of
     Just d -> case instantiateLevels (definitionLevels d) ls of
-      Just sub -> (Right (substLevelsIn sub (definitionType d)), n)
+      Just sub -> (Right (substLevelsIn sub (definitionType d)), [], n)
       Nothing  ->
         ( Left (WrongNumberOfLevelArguments g (length (definitionLevels d)) (length ls))
-        , n )
+        , [], n )
     Nothing -> case lookupConstant g env of
       -- A constant has a type and no parameters. Datatypes stay monomorphic
       -- until phase 31, so writing level arguments on one is an error and not
@@ -88,13 +110,13 @@ infer env ctx n term = case term of
       -- A constant is a datatype's former or one of its constructors, so it
       -- is polymorphic exactly when the datatype is (phase 31b).
       Just c -> case instantiateLevels (constantLevels c) ls of
-        Just sub -> (Right (substLevelsIn sub (constantType c)), n)
+        Just sub -> (Right (substLevelsIn sub (constantType c)), [], n)
         Nothing  ->
           ( Left (WrongNumberOfLevelArguments g (length (constantLevels c)) (length ls))
-          , n )
-      Nothing -> (Left (UnknownGlobal g), n)
+          , [], n )
+      Nothing -> (Left (UnknownGlobal g), [], n)
 
-  Universe l -> (Right (Universe (levelSuc l)), n)
+  Universe l -> (Right (Universe (levelSuc l)), [], n)
 
   -- @max@, not a subsumption: without cumulativity a Π lives at the larger of
   -- its two levels and nothing may be silently lifted into it (§5.2).
@@ -108,19 +130,19 @@ infer env ctx n term = case term of
     sortOf env ctx n dom `andThen` \k1 n1 ->
       let (x, n2) = fresh n1
        in sortOf env (ctx ++ [Hypothesis x i dom]) n2 (open x sc) `andThen` \k2 n3 ->
-            (Right (Universe (levelMax k1 k2)), n3)
+            (Right (Universe (levelMax k1 k2)), [], n3)
 
   Lam i dom sc ->
     sortOf env ctx n dom `andThen` \_ n1 ->
       let (x, n2) = fresh n1
        in infer env (ctx ++ [Hypothesis x i dom]) n2 (open x sc) `andThen` \b n3 ->
-            (Right (Pi i dom (close x b)), n3)
+            (Right (Pi i dom (close x b)), [], n3)
 
   App f a ->
     infer env ctx n f `andThen` \fty n1 -> case whnf env ctx fty of
       Pi _ dom sc ->
-        check env ctx n1 a dom `andThen` \() n2 -> (Right (instantiate a sc), n2)
-      fty' -> (Left (NotAFunction ctx f fty'), n1)
+        check env ctx n1 a dom `andThen` \() n2 -> (Right (instantiate a sc), [], n2)
+      fty' -> (Left (NotAFunction ctx f fty'), [], n1)
 
   -- The body's type may mention the bound name, so the value is substituted
   -- back in — the same move @whnf@ makes on a term-level 'Let', and for the
@@ -130,7 +152,7 @@ infer env ctx n term = case term of
       check env ctx n1 v ty `andThen` \() n2 ->
         let (x, n3) = fresh n2
          in infer env (ctx ++ [Definition x i v ty]) n3 (open x sc) `andThen` \b n4 ->
-              (Right (instantiate v (close x b)), n4)
+              (Right (instantiate v (close x b)), [], n4)
 
   -- A saturated former. Its arity is read from the same place δ reads it, so
   -- the checker and the reducer cannot disagree about when one is complete.
@@ -138,15 +160,15 @@ infer env ctx n term = case term of
   -- 31b), so the walk sees the former's type at this use's levels and nothing
   -- downstream needs to know levels exist.
   Canonical g ls as -> case formerArity g env of
-    Nothing -> (Left (UnknownGlobal g), n)
+    Nothing -> (Left (UnknownGlobal g), [], n)
     Just k
-      | length as > k -> (Left (OverApplied g), n)
+      | length as > k -> (Left (OverApplied g), [], n)
       | otherwise -> case lookupConstant g env of
-          Nothing -> (Left (UnknownGlobal g), n)
+          Nothing -> (Left (UnknownGlobal g), [], n)
           Just c  -> case instantiateLevels (constantLevels c) ls of
             Nothing ->
               ( Left (WrongNumberOfLevelArguments g (length (constantLevels c)) (length ls))
-              , n )
+              , [], n )
             Just sub ->
               spine env ctx n MustSaturate g (substLevelsIn sub (constantType c)) as
 
@@ -174,11 +196,11 @@ infer env ctx n term = case term of
   -- case's original note), so it is not an argument that could be supplied
   -- wrongly.
   Eliminate d ls ps m ms is tgt -> case lookupInductive d env of
-    Nothing  -> (Left (UnknownDatatype d), n)
+    Nothing  -> (Left (UnknownDatatype d), [], n)
     Just def -> case instantiateLevels (inductiveLevels def) ls of
       Nothing ->
         ( Left (WrongNumberOfLevelArguments d (length (inductiveLevels def)) (length ls))
-        , n )
+        , [], n )
       Just sub ->
         motiveLevel env ctx n def m `andThen` \l n1 ->
           let (ety, n2) = eliminatorType def l n1
@@ -186,7 +208,9 @@ infer env ctx n term = case term of
                 (ps ++ [m] ++ ms ++ is ++ [tgt])
 
 -- | Does this term have this type? @infer@, then @convert@ (§5.2).
-check :: GlobalEnv -> Context -> Int -> Core -> Core -> (Either TypeError (), Int)
+check
+  :: GlobalEnv -> Context -> Int -> Core -> Core
+  -> (Either TypeError (), [Obligation], Int)
 check env ctx n t expected =
   infer env ctx n t `andThen` \actual n1 ->
     -- **'subsumes', not 'convert' — this is where cumulativity lives** (MS3
@@ -194,15 +218,17 @@ check env ctx n t expected =
     -- wanted; conversion is still an equality and is still what @:convert@ and
     -- a Π's domain ask for.
     case subsumes env ctx n1 expected actual of
-      (Nothing,  n2) -> (Right (), n2)
-      (Just why, n2) -> (Left (NotOfType ctx t expected actual why), n2)
+      (Nothing,  owed, n2) -> (Right (), owed, n2)
+      (Just why, owed, n2) -> (Left (NotOfType ctx t expected actual why), owed, n2)
 
 -- | The universe a type lives in: infer, reduce, and insist on a 'Universe'.
-sortOf :: GlobalEnv -> Context -> Int -> Core -> (Either TypeError Level, Int)
+sortOf
+  :: GlobalEnv -> Context -> Int -> Core
+  -> (Either TypeError Level, [Obligation], Int)
 sortOf env ctx n t =
   infer env ctx n t `andThen` \ty n1 -> case whnf env ctx ty of
-    Universe l -> (Right l, n1)
-    ty'        -> (Left (NotAType ctx t ty'), n1)
+    Universe l -> (Right l, [], n1)
+    ty'        -> (Left (NotAType ctx t ty'), [], n1)
 
 -- | What it means for the walk to end on a Π.
 --
@@ -222,16 +248,16 @@ data Residue
 -- domain it lands in. The whole of the 'Canonical' and 'Eliminate' rules.
 spine
   :: GlobalEnv -> Context -> Int -> Residue -> GlobalName -> Core -> [Core]
-  -> (Either TypeError Core, Int)
+  -> (Either TypeError Core, [Obligation], Int)
 spine env ctx n0 residue g = walk n0
   where
     walk n ty [] = case (residue, whnf env ctx ty) of
-      (MustSaturate, Pi {}) -> (Left (Unsaturated g ty), n)
-      _                     -> (Right ty, n)
+      (MustSaturate, Pi {}) -> (Left (Unsaturated g ty), [], n)
+      _                     -> (Right ty, [], n)
     walk n ty (a : as) = case whnf env ctx ty of
       Pi _ dom sc ->
         check env ctx n a dom `andThen` \() n1 -> walk n1 (instantiate a sc) as
-      _ -> (Left (OverApplied g), n)
+      _ -> (Left (OverApplied g), [], n)
 
 -- | The universe the motive is valued in — §3.7's "the level is read from the
 -- motive", which is how an eliminator serves every universe without the system
@@ -244,25 +270,30 @@ spine env ctx n0 residue g = walk n0
 -- for @P@, which is that check, stated once.
 motiveLevel
   :: GlobalEnv -> Context -> Int -> InductiveDefinition -> Core
-  -> (Either TypeError Level, Int)
+  -> (Either TypeError Level, [Obligation], Int)
 motiveLevel env ctx n def m =
   infer env ctx n m `andThen` \ty n1 ->
     peel ctx n1 (length (inductiveIndices def) + 1) ty
   where
     peel c n' k ty = case (k :: Int, whnf env c ty) of
-      (0, Universe l)   -> (Right l, n')
-      (0, ty')          -> (Left (NotAMotive c m ty'), n')
+      (0, Universe l)   -> (Right l, [], n')
+      (0, ty')          -> (Left (NotAMotive c m ty'), [], n')
       (_, Pi i dom sc)  ->
         let (x, n'') = fresh n'
          in peel (c ++ [Hypothesis x i dom]) n'' (k - 1) (open x sc)
-      (_, ty')          -> (Left (NotAMotive c m ty'), n')
+      (_, ty')          -> (Left (NotAMotive c m ty'), [], n')
 
--- | Continue only on success, carrying the counter across either branch.
+-- | Continue only on success, carrying the counter and the level obligations
+-- owed so far across either branch.
+--
 -- Written out rather than reached for as a monad, for the reason §3.5 gives:
 -- the counter is an 'Int' in the outer state and there is no supply type.
+-- **The obligations accumulate on the failing branch too**, for the same reason
+-- the counter does: they were owed by the work that got that far.
 andThen
-  :: (Either TypeError a, Int) -> (a -> Int -> (Either TypeError b, Int))
-  -> (Either TypeError b, Int)
-andThen (Left e,  n) _ = (Left e, n)
-andThen (Right a, n) k = k a n
+  :: (Either TypeError a, [Obligation], Int)
+  -> (a -> Int -> (Either TypeError b, [Obligation], Int))
+  -> (Either TypeError b, [Obligation], Int)
+andThen (Left e,  o, n) _ = (Left e, o, n)
+andThen (Right a, o, n) k = let (r, o', n') = k a n in (r, o ++ o', n')
 infixl 1 `andThen`

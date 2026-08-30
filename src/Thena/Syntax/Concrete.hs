@@ -35,6 +35,7 @@ data Raw
   = RawName String
   | RawUniverse Int
   | RawUniverseAt RawLevel       -- ^ @Type {ℓ}@ — a universe at a written level
+  | RawUniverseOpen              -- ^ @Type@ — a universe whose level is inferred
   | RawAt String [RawLevel]      -- ^ @foo {ℓ 0}@ — a global at level arguments
 
   | RawLam [RawBinder] Raw       -- ^ @λ (x : S) (y : T) -> b@

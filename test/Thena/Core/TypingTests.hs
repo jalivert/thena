@@ -70,8 +70,8 @@ recursiveFunctionTests =
       case convert natVec [] natVecCounter
              (term ("(" ++ add ++ ") (succ zero)"))
              (term "succ (succ zero)") of
-        (Nothing,  _) -> pure ()
-        (Just why, _) -> assertFailure ("does not converge: " ++ show why)
+        (Nothing,  _, _) -> pure ()
+        (Just why, _, _) -> assertFailure ("does not converge: " ++ show why)
   ]
   where
     add =
@@ -91,16 +91,25 @@ termAt n ctx src = case parseCore natVec ctx n src of
 term :: String -> Core
 term = termAt natVecCounter []
 
+-- | The typing entry points return their level obligations as well (MS3 phase
+-- 33). Nothing here builds a level meta, so the list is always empty and these
+-- two say so once instead of at every call.
+verdict :: (a, b, c) -> a
+verdict (r, _, _) = r
+
+counter :: (a, b, Int) -> Int
+counter (_, _, n) = n
+
 -- | The inferred type of a closed term.
 typeOf :: String -> Either TypeError Core
-typeOf src = fst (infer natVec [] natVecCounter (term src))
+typeOf src = verdict (infer natVec [] natVecCounter (term src))
 
 -- | @t@ has a type convertible with @ty@. A shape match, not a rendered-string
 -- one: two different types can legally print the same way, and an inferred type
 -- is not reduced, so @(λ _ -> Nat) zero@ is the right answer where @Nat@ is the
 -- one a string test would have demanded.
 hasType :: String -> String -> Assertion
-hasType src ty = case fst (check natVec [] natVecCounter (term src) (term ty)) of
+hasType src ty = case verdict (check natVec [] natVecCounter (term src) (term ty)) of
   Right () -> pure ()
   Left e   -> assertFailure (show e)
 
@@ -121,7 +130,7 @@ formTests =
   , testCase "a variable takes its type from the context" $
       let (v, n) = fresh natVecCounter
           ctx    = [Hypothesis v (Ident "x") (Global (named "Nat") [])]
-       in fst (infer natVec ctx n (Free v)) @?= Right (Global (named "Nat") [])
+       in verdict (infer natVec ctx n (Free v)) @?= Right (Global (named "Nat") [])
   , testCase "a lambda gets a Pi over its own domain" $
       hasType "\\ (x : Nat) -> x" "Nat -> Nat"
   , testCase "a dependent lambda too" $
@@ -155,7 +164,7 @@ universeTests =
       illTyped' "Type\8320" "Type\8320"
   ]
   where
-    illTyped' src ty = case fst (check natVec [] natVecCounter (term src) (term ty)) of
+    illTyped' src ty = case verdict (check natVec [] natVecCounter (term src) (term ty)) of
       Left _   -> pure ()
       Right () -> assertFailure "expected the universes not to match"
 
@@ -243,7 +252,7 @@ eliminatorTypeTests =
       Nothing  -> assertFailure (d ++ " is not declared")
       Just def ->
         let (ty, n) = eliminatorType def l n0
-         in case fst (infer env [] n ty) of
+         in case verdict (infer env [] n ty) of
               Right (Universe _) -> pure ()
               Right other        -> assertFailure ("not a type: " ++ show other)
               Left e             -> assertFailure (show e)
@@ -273,13 +282,13 @@ subjectReductionTests =
   where
     preserved src =
       let t = term src
-       in case fst (infer natVec [] natVecCounter t) of
+       in case verdict (infer natVec [] natVecCounter t) of
             Left e   -> assertFailure ("the term does not type: " ++ show e)
             Right ty ->
               let u = whnf natVec [] t
-               in case fst (infer natVec [] natVecCounter u) of
+               in case verdict (infer natVec [] natVecCounter u) of
                     Left e    -> assertFailure ("the reduct does not type: " ++ show e)
-                    Right ty' -> case fst (convert natVec [] natVecCounter ty ty') of
+                    Right ty' -> case verdict (convert natVec [] natVecCounter ty ty') of
                       Nothing  -> pure ()
                       Just why -> assertFailure ("the types differ: " ++ show why)
 
@@ -290,7 +299,7 @@ checkTests =
       -- to it. If @check@ were comparing with 'Eq' this would fail.
       hasType "zero" "(\\ (_ : Type\8320) -> Nat) Nat"
   , testCase "check reports the conversion's own reason" $
-      case fst (check natVec [] natVecCounter (term "zero") (term "Type\8320")) of
+      case verdict (check natVec [] natVecCounter (term "zero") (term "Type\8320")) of
         Left (NotOfType _ _ _ _ _) -> pure ()
         other                      -> assertFailure (show other)
   ]
@@ -299,11 +308,11 @@ errorTests :: [TestTree]
 errorTests =
   [ testCase "a variable that is not in the context" $
       let (v, n) = fresh natVecCounter
-       in case fst (infer natVec [] n (Free v)) of
+       in case verdict (infer natVec [] n (Free v)) of
             Left (UnknownVariable _ _) -> pure ()
             other                      -> assertFailure (show other)
   , testCase "a global that is not declared" $
-      fst (infer natVec [] natVecCounter (Global (named "nowhere") []))
+      verdict (infer natVec [] natVecCounter (Global (named "nowhere") []))
         @?= Left (UnknownGlobal (named "nowhere"))
   , testCase "applying something that is not a function" $
       case typeOf "zero zero" of
@@ -314,22 +323,22 @@ errorTests =
         Left (NotAType _ _ _) -> pure ()
         other                 -> assertFailure (show other)
   , testCase "an unsaturated Canonical, which only a hand-built term can be" $
-      case fst (infer natVec [] natVecCounter (Canonical (named "succ") [] [])) of
+      case verdict (infer natVec [] natVecCounter (Canonical (named "succ") [] [])) of
         Left (Unsaturated _ _) -> pure ()
         other                  -> assertFailure (show other)
   , testCase "an over-applied Canonical" $
-      case fst (infer natVec [] natVecCounter
+      case verdict (infer natVec [] natVecCounter
                   (Canonical (named "zero") [] [Canonical (named "zero") [] []])) of
         Left (OverApplied _) -> pure ()
         other                -> assertFailure (show other)
   , testCase "a loose de Bruijn index reaching the checker" $
-      fst (infer natVec [] natVecCounter (Bound 0)) @?= Left (LooseIndex 0)
+      verdict (infer natVec [] natVecCounter (Bound 0)) @?= Left (LooseIndex 0)
   ]
 
 counterTests :: [TestTree]
 counterTests =
   [ testCase "inferring under a binder advances it" $
-      (snd (infer natVec [] 100 (termAt 100 [] "\\ (x : Nat) -> x")) > 100) @?= True
+      (counter (infer natVec [] 100 (termAt 100 [] "\\ (x : Nat) -> x")) > 100) @?= True
   , testCase "it advances on the failing branch too" $
-      (snd (infer natVec [] 100 (termAt 100 [] "\\ (x : Nat) -> zero zero")) > 100) @?= True
+      (counter (infer natVec [] 100 (termAt 100 [] "\\ (x : Nat) -> zero zero")) > 100) @?= True
   ]

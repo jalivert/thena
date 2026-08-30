@@ -20,6 +20,7 @@ module Thena.KernelTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
+import Thena.Core.Level (LevelVar (..), Level (..), Unmet (..), levelOfNat)
 import Thena.Core.Term
   ( Core (..)
   , Ident (..)
@@ -51,13 +52,16 @@ tests =
 certifyTests :: [TestTree]
 certifyTests =
   [ testCase "a closed term at its type is accepted" $
-      certify natVec (nat "succ zero") (nat "Nat") @?= Right ()
+      -- **@Right@ carries the level solutions the check forced** (phase 33),
+      -- and nothing here writes a bare @Type@, so it is empty everywhere in
+      -- this module.
+      certify natVec (nat "succ zero") (nat "Nat") @?= Right []
 
   , testCase "and under binders too, where the context reappears" $
       certify natVec
         (nat "\\ (n : Nat) -> succ n")
         (nat "Nat -> Nat")
-        @?= Right ()
+        @?= Right []
 
     -- The check §5.3's context-free signature earns. @infer@ would report this
     -- as an unknown variable, which is true and says nothing about whose
@@ -79,9 +83,44 @@ certifyTests =
       case certify natVec (nat "zero zero") (nat "Nat") of
         Left (Ill TheTerm _) -> pure ()
         other -> assertFailure ("expected an ill-typed term: " ++ show other)
+
+    -- ------------------------------------------------------------------
+    -- Levels (MS3 phase 33)
+    -- ------------------------------------------------------------------
+
+    -- 'closed' one sort down. A definition is about to be stored under this
+    -- term, and a meta in it says nothing about which universe it is in.
+    -- Phase 33b generalises rather than refusing; until then the recovery is to
+    -- write the level.
+    -- Stated at exactly the type it has, so every relation the check meets is
+    -- between the meta and itself and nothing is owed. What is left is a term
+    -- with an unknown in it, and that alone is the refusal.
+  , testCase "a level nothing pinned down is refused, like a free variable" $
+      certify natVec (Universe (LVar undetermined))
+                     (Universe (LSuc (LVar undetermined)))
+        @?= Left (NotDetermined undetermined)
+
+    -- The obligation @suc ?m <= 1@ leaves one value, so the kernel takes it and
+    -- hands it back for the caller to write into the development.
+  , testCase "and one the obligations leave no choice about is solved" $
+      certify natVec (Universe (LVar undetermined)) (nat "Type\8321")
+        @?= Right [(undetermined, levelOfNat 0)]
+
+    -- Reported as the false relation it is, rather than as an unknown level:
+    -- the meta is the symptom and the inequality is the cause.
+  , testCase "a relation no level satisfies is reported as that" $
+      case certify natVec
+             (App (Lam (Ident "x") (Universe (LVar undetermined))
+                       (close bound (Free bound)))
+                  (Universe (levelOfNat 0)))
+             (nat "Type\8320") of
+        Left (Levels (Refuted _ _)) -> pure ()
+        other -> assertFailure ("expected a refuted level: " ++ show other)
   ]
   where
-    (loose, _) = fresh natVecCounter
+    (loose, n1)         = fresh natVecCounter
+    (bound, _)          = fresh n1
+    undetermined        = LMeta 900
 
 -- --------------------------------------------------------------------------
 -- extract

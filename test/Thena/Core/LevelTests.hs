@@ -17,11 +17,16 @@ import Thena.Repl (renderLevel)
 
 import Thena.Core.Level
   ( Level (..)
+  , LevelUnification (..)
   , LevelVar (..)
   , Normal (..)
+  , Obligation (..)
+  , Unmet (..)
   , levelLeq
   , levelOfNat
   , normalise
+  , solveLevels
+  , unifyLevels
   )
 
 tests :: TestTree
@@ -34,7 +39,13 @@ tests =
     , testGroup "equality is up to the normal form" equalityTests
     , testGroup "levelLeq decides, refuses, or postpones" leqTests
     , testGroup "rendering" renderTests
+    , testGroup "solveLevels discharges, refutes, or gives up" solveTests
+    , testGroup "unifyLevels solves, sticks, or clashes" unifyTests
     ]
+
+-- | A second meta, for the constraints between two unknowns.
+m2 :: LevelVar
+m2 = LMeta 3
 
 -- | Two rigid parameters and one meta. The rigid\/flexible split matters to
 -- nothing in this module except the printer — normalisation is indifferent to
@@ -214,4 +225,132 @@ renderTests =
       renderLevel (LMax (LVar a) (LVar b)) @?= "Type (ℓ0 ⊔ ℓ1)"
   , testCase "a variable with an offset" $
       renderLevel (LSuc (LVar a)) @?= "Type (suc ℓ0)"
+  ]
+
+-- --------------------------------------------------------------------------
+-- The collector's pass (phase 33)
+-- --------------------------------------------------------------------------
+
+-- | 'solveLevels' is the whole of what @qed@ does with the obligations
+-- conversion handed back, so these are the cases the REPL's three endings are
+-- built out of: discharged, refuted, and undetermined.
+--
+-- **The fixpoint is what these test hardest.** A round that forces a meta
+-- substitutes it into the rest and runs again, and it is that second round —
+-- not the first — that turns a bound into a decision.
+solveTests :: [TestTree]
+solveTests =
+  [ testCase "nothing owed is nothing to do" $
+      solveLevels [] @?= Right []
+
+  , testCase "a closed obligation that holds is discharged" $
+      solveLevels [AtMost (levelOfNat 1) (levelOfNat 3)] @?= Right []
+
+  , testCase "and one that does not is refuted, not postponed" $
+      solveLevels [AtMost (levelOfNat 3) (levelOfNat 1)]
+        @?= Left (Refuted (levelOfNat 3) (levelOfNat 1))
+
+  , -- @0 <= anything@ holds at the floor, where every variable is zero, and
+    -- variables only grow. So this needs no solving at all.
+    testCase "zero fits under an unknown without pinning it down" $
+      solveLevels [AtMost LZero (LVar m)] @?= Right []
+
+  , -- The commonest shape there is: @try Type@ against a goal of @Type1@. The
+    -- bound leaves one value, so it is the answer rather than a choice.
+    testCase "an upper bound of zero pins the level at zero" $
+      solveLevels [AtMost (LSuc (LVar m)) (levelOfNat 1)] @?= Right [(m, LZero)]
+
+  , -- **Nothing is defaulted**, and that is the line between this phase and
+    -- 33b: a level with room left in it is not chosen, it is generalised. Until
+    -- 33b does that, it is refused.
+    testCase "an upper bound with room left in it is not forced" $
+      solveLevels [AtMost (LSuc (LVar m)) (levelOfNat 3)]
+        @?= Left (Undetermined (LSuc (LVar m)) (levelOfNat 3))
+
+  , testCase "a lower bound alone leaves the level undetermined" $
+      solveLevels [AtMost (levelOfNat 1) (LVar m)]
+        @?= Left (Undetermined (levelOfNat 1) (LVar m))
+
+  , testCase "bounds that meet force the one level there was" $
+      solveLevels [AtMost (levelOfNat 2) (LVar m), AtMost (LVar m) (levelOfNat 2)]
+        @?= Right [(m, levelOfNat 2)]
+
+  , -- Crossed bounds are reported as the false obligation they make, rather
+    -- than as an undetermined one — which is why 'forced' solves to the lower
+    -- bound even when it is above the upper.
+    testCase "bounds that cross are refuted, and say which way" $
+      solveLevels [AtMost (levelOfNat 3) (LVar m), AtMost (LVar m) (levelOfNat 1)]
+        @?= Left (Refuted (levelOfNat 3) (levelOfNat 1))
+
+  , -- The fixpoint. @?m <= max 2 a@ is undecidable on the first round — a meta
+    -- against a rigid bounds nothing — and decides on the second, once the
+    -- other two obligations have pinned @?m@ to a constant.
+    testCase "a solution found in one round decides another obligation" $
+      solveLevels
+        [ AtMost (LVar m) (LMax (levelOfNat 2) (LVar a))
+        , AtMost (levelOfNat 2) (LVar m)
+        , AtMost (LVar m) (levelOfNat 2)
+        ]
+        @?= Right [(m, levelOfNat 2)]
+
+  , testCase "a relation between two unknowns bounds neither" $
+      solveLevels [AtMost (LVar m) (LVar m2)]
+        @?= Left (Undetermined (LVar m) (LVar m2))
+
+  , -- A rigid is universally quantified, so 'levelLeq' decides it outright and
+    -- the solver never sees it.
+    testCase "a rigid parameter is decided rather than solved" $
+      solveLevels [AtMost (LVar a) (LSuc (LVar a))] @?= Right []
+  ]
+
+-- --------------------------------------------------------------------------
+-- Level unification (phase 33)
+-- --------------------------------------------------------------------------
+
+-- | What "Thena.Core.Unify" does with two universes. **@LevelsStuck@ is not a
+-- failure** — the user's decision of 2026-08-27, that a level obligation does
+-- not block — and telling it apart from @LevelsClash@ is the whole point of the
+-- three answers.
+unifyTests :: [TestTree]
+unifyTests =
+  [ testCase "equal levels need no solution" $
+      unifyLevels [(levelOfNat 2, LMax (levelOfNat 2) LZero)] @?= LevelsSolved []
+
+  , testCase "a lone meta takes the other side" $
+      unifyLevels [(LVar m, levelOfNat 3)] @?= LevelsSolved [(m, levelOfNat 3)]
+
+  , testCase "from either side" $
+      unifyLevels [(levelOfNat 3, LVar m)] @?= LevelsSolved [(m, levelOfNat 3)]
+
+  , testCase "one meta may take another" $
+      unifyLevels [(LVar m, LVar m2)] @?= LevelsSolved [(m, LVar m2)]
+
+  , -- The Optimist's lemma in the small: the first pair solves and the second
+    -- is then a check rather than a second solution.
+    testCase "a solution is substituted into what is left" $
+      unifyLevels [(LVar m, levelOfNat 3), (LVar m, levelOfNat 3)]
+        @?= LevelsSolved [(m, levelOfNat 3)]
+
+  , testCase "and a later pair may contradict it" $
+      unifyLevels [(LVar m, levelOfNat 3), (LVar m, levelOfNat 1)]
+        @?= LevelsClash (levelOfNat 3) (levelOfNat 1)
+
+  , testCase "no variable at all, and different: a clash" $
+      unifyLevels [(levelOfNat 0, levelOfNat 1)]
+        @?= LevelsClash (levelOfNat 0) (levelOfNat 1)
+
+  , testCase "two rigids that differ clash — neither may be instantiated" $
+      unifyLevels [(LVar a, LVar b)] @?= LevelsClash (LVar a) (LVar b)
+
+  , -- @max ?m ?m2 = 3@ has no most general solution, so nothing is chosen. The
+    -- caller proceeds; @qed@ re-derives.
+    testCase "a join against a constant is stuck, not a clash" $
+      unifyLevels [(LMax (LVar m) (LVar m2), levelOfNat 3)] @?= LevelsStuck
+
+  , testCase "the occurs check keeps a meta out of its own solution" $
+      unifyLevels [(LVar m, LSuc (LVar m))] @?= LevelsStuck
+
+  , testCase "one stuck pair does not lose the others' solutions — it reports stuck" $
+      unifyLevels [(LVar m, levelOfNat 1), (LMax (LVar m2) (LVar a), levelOfNat 3)]
+        @?= LevelsStuck
   ]

@@ -166,17 +166,22 @@ generateNoConfusion env n0 d
   | otherwise =
       let (famTy,   n1) = familyType n0
           (famBody, n2) = family n1
-       in case fst (check env [] n2 famBody famTy) of
+       in case verdict (check env [] n2 famBody famTy) of
             Left e   -> Rejected famName e
             Right () ->
               let env1          = addDefinition famName (MkDefinition (inductiveLevels d) famTy famBody) env
                   (lemTy,   n3) = lemmaType n2
                   (lemBody, n4) = lemma n3
-               in case fst (check env1 [] n4 lemBody lemTy) of
+               in case verdict (check env1 [] n4 lemBody lemTy) of
                     Left e   -> Rejected lemName e
                     Right () ->
                       Generated (addDefinition lemName (MkDefinition (inductiveLevels d) lemTy lemBody) env1) n4
   where
+    -- Everything checked here is /generated/, so it holds no level meta and
+    -- can owe no obligation. The counter is not wanted either — these checks
+    -- run in an empty context on closed terms.
+    verdict (r, _, _) = r
+
     (famName, lemName) = noConfusionNames (inductiveName d)
 
     dn        = inductiveName d

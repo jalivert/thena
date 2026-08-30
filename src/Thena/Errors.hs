@@ -52,7 +52,7 @@ module Thena.Errors
   , DevForm (..)
   ) where
 
-import Thena.Core.Level (Level)
+import Thena.Core.Level (Level, LevelVar, Unmet)
 import Thena.Core.Context (Context)
 import Thena.Core.Term (Core, GlobalName, Ident, Var)
 import Thena.Syntax.Lexer (LexError)
@@ -326,12 +326,27 @@ data TypeError
 -- typecheck, here", and a second type would be the same three cases under
 -- other names.
 --
--- 'NotClosed' is 'certify'\'s alone — @revalidate@ walks a development whose
--- components bind the variables, so a free one there is in Γ by construction.
+-- 'NotClosed' and 'NotDetermined' are 'certify'\'s alone — @revalidate@ walks a
+-- development whose components bind the variables, so a free one there is in Γ
+-- by construction, and a level meta in a development under construction is
+-- ordinary rather than an error.
 data KernelError
   = NotClosed Var
     -- ^ @certify@: the term mentions a variable nothing binds. §5.3\'s
     -- signature has no context, so this is the check that earns that
+  | NotDetermined LevelVar
+    -- ^ @certify@ (MS3 phase 33): a level in the term is still a meta, so what
+    -- universe it lives at was never pinned down. The level analogue of
+    -- 'NotClosed', and it sits beside it for the same reason — a term that is
+    -- about to become a global definition may not carry an unknown.
+    --
+    -- **Phase 33b generalises these instead of refusing them**, each surviving
+    -- meta becoming a prenex level parameter of the definition. Until then the
+    -- recovery is to write the level, which is §6.3\'s escape hatch
+  | Levels Unmet
+    -- ^ a level obligation that the collector could neither discharge nor
+    -- refute (phase 33). Produced by @revalidate@ and by @certify@, both of
+    -- which run 'Thena.Core.Level.solveLevels' over what their walk owed
   | Overabstracted Var Ident Core
     -- ^ a construction assumes something the type it is claimed to build has
     -- no binder for: @? g ≐ (λ a : A . …) : Nat@. Its own case rather than an
@@ -449,6 +464,11 @@ data ResolveError
     -- ^ a level name written where no level parameter of that name is bound
     -- (MS3 phase 30). Distinct from 'NotInScope' because the two namespaces
     -- are distinct: a level parameter is not a term binding and never enters Γ
+  | LevelNotWritten String
+    -- ^ a datatype declaration writes a bare @Type@ (MS3 phase 33). A
+    -- declaration's levels are stored and instantiated at every use, so a meta
+    -- in one would be shared rather than solved, and nothing generalises a
+    -- declaration. Removed by phase 33c, which makes a datatype infer its own
   | LevelArgumentsOnALocal String
     -- ^ level arguments written on a name bound by a λ or by the development.
     -- Only a definition has level parameters, so only a global can be given

@@ -156,9 +156,13 @@ universes env n0 d = foldM eachConstructor n0 (inductiveConstructors d)
     eachConstructor n c = go n (inductiveParameters d) (constructorArguments c)
       where
         go n' _   []       = Right n'
+        -- Level obligations are dropped, as everywhere outside the checking
+        -- pass ("Thena.Core.Typing"'s header says why once). A declaration's
+        -- telescopes are written with concrete levels or the datatype's own
+        -- parameters, so there is no meta here to owe one.
         go n' ctx (e : es) = case infer provisional ctx n' (entryType e) of
-          (Left err, _) -> Left (ArgumentNotAType (constructorName c) (identOf e) err)
-          (Right ty, n'') -> case whnf provisional ctx ty of
+          (Left err, _, _) -> Left (ArgumentNotAType (constructorName c) (identOf e) err)
+          (Right ty, _, n'') -> case whnf provisional ctx ty of
             -- OLEG's size restriction, now a question about level
             -- *expressions* rather than an @Int@ comparison (phase 28).
             --

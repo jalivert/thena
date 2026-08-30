@@ -102,9 +102,11 @@ eliminate
   :: GlobalEnv -> Context -> Int -> Core -> Core
   -> (Either ElimError Elimination, Int)
 eliminate env ctx n0 goal tgt =
+  -- **Level obligations are dropped here**, as everywhere outside the checking
+  -- pass: "Thena.Core.Typing"'s header says why once, and @qed@ re-collects.
   case infer env ctx n0 tgt of
-    (Left e, n1)    -> (Left (TargetNotTypeable e), n1)
-    (Right tty, n1) -> case saturated (whnf env ctx tty) of
+    (Left e, _, n1)    -> (Left (TargetNotTypeable e), n1)
+    (Right tty, _, n1) -> case saturated (whnf env ctx tty) of
       Just (d, ls, ps, as) -> build d ls ps as n1
       Nothing          -> (Left (TargetNotInductive ctx tgt (whnf env ctx tty)), n1)
   where
@@ -144,8 +146,8 @@ eliminate env ctx n0 goal tgt =
             go []       k = (Right [], k)
             go (i : is) k =
               case sortOf env ctx k (substVars psub (entryType (inductiveIndices d !! i))) of
-                (Left e,  k1) -> (Left e, k1)
-                (Right v, k1) -> case go is k1 of
+                (Left e,  _, k1) -> (Left e, k1)
+                (Right v, _, k1) -> case go is k1 of
                   (Left e,   k2) -> (Left e, k2)
                   (Right vs, k2) -> (Right (v : vs), k2)
 
@@ -284,8 +286,8 @@ eliminate env ctx n0 goal tgt =
           -- type-preserving; the level is needed anyway, so it costs nothing
           -- extra (thesis §3.5.3, and see this module's header).
           case sortOf env bodyCtx n6 equations of
-            (Left e, n7)  -> (Left (MotiveIllTyped e), n7)
-            (Right l, n7) -> assemble d ls ps as tied motiveTerm l n7
+            (Left e, _, n7)  -> (Left (MotiveIllTyped e), n7)
+            (Right l, _, n7) -> assemble d ls ps as tied motiveTerm l n7
 
     assemble d ls ps as tied motiveTerm l n7 =
       let (ety0, n8) = eliminatorType d l n7
@@ -331,8 +333,8 @@ eliminate env ctx n0 goal tgt =
           proof = foldl App node
             [ Canonical reflexivity [lv] [ity, a] | (lv, (ity, _, a)) <- tied ]
        in case check env (ctx ++ methodEntries) n10 proof goal of
-            (Left e, n11)  -> (Left (SchemeIllTyped e), n11)
-            (Right (), n11) -> (Right (Elimination holes proof), n11)
+            (Left e, _, n11)   -> (Left (SchemeIllTyped e), n11)
+            (Right (), _, n11) -> (Right (Elimination holes proof), n11)
 
     -- Peel @k@ Π domains off a type, instantiating each binder with itself is
     -- not possible — nothing refers to a method — so a method type is read

@@ -7,11 +7,13 @@ module Thena.Core.Context
   , entryVar
   , entryIdent
   , entryType
+  , substLevelsInEntry
   , piOver
   , lamOver
   ) where
 
-import Thena.Core.Term (Core (..), Ident, Scope, Var, close)
+import Thena.Core.Level (Level, LevelVar)
+import Thena.Core.Term (Core (..), Ident, Scope, Var, close, substLevelsIn)
 
 -- | An entry in a working context: a name with a type, or a name with a type
 -- and a value.
@@ -56,6 +58,16 @@ entryType :: Entry -> Core
 entryType e = case e of
   Hypothesis _ _ t   -> t
   Definition _ _ _ t -> t
+
+-- | Apply a level substitution to an entry's types (MS3 phase 33).
+--
+-- Here rather than repeated in its two callers — "Thena.Core.Unify", pushing a
+-- level solution through Ξ, and "Thena.Development.Cursor", pushing one through
+-- a constraint's binders — so that the entry's shape is walked in one place.
+substLevelsInEntry :: [(LevelVar, Level)] -> Entry -> Entry
+substLevelsInEntry sub e = case e of
+  Hypothesis x i t   -> Hypothesis x i (substLevelsIn sub t)
+  Definition x i v t -> Definition x i (substLevelsIn sub v) (substLevelsIn sub t)
 
 -- | @∀ Γ -> T@: bind a whole context over a term.
 --

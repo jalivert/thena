@@ -39,13 +39,13 @@ module Thena.Driver
   , parseDeclaration
   ) where
 
-import Thena.Core.Level (Level)
+import Thena.Core.Level (Level, LevelVar, Obligation)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..))
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), substLevelsIn)
 import Data.Char (isSpace)
 import Data.List (dropWhileEnd, isSuffixOf, stripPrefix)
-import Thena.Development.Cursor (Cursor, Focus (..), Part (..), focus)
+import Thena.Development.Cursor (Cursor, Focus (..), Part (..), focus, overLevels)
 import Thena.Development.Partial (Partial (..), extract)
 import Thena.Engine
   ( ChoicePoint (..)
@@ -217,10 +217,14 @@ data Response
   | Where Cursor              -- ^ @:where@ — the focus, the path, Γ, the type
   | Inferred Core Core        -- ^ @:infer@ — the term, and the type it has
   | IllTyped TypeError        -- ^ @:infer@ — why it has none
-  | Converted Core Core (Maybe ConversionFailure)
+  | Converted Core Core (Maybe ConversionFailure) [Obligation]
     -- ^ @:convert@ — the two terms, and 'Nothing' if they are convertible.
     -- Both terms are kept so the answer can restate the question: with η in
-    -- play a yes is printed about two terms that still look different (§5.2)
+    -- play a yes is printed about two terms that still look different (§5.2).
+    --
+    -- **The obligations are shown rather than dropped** (MS3 phase 33), because
+    -- this is the one command whose whole output /is/ conversion's answer: a
+    -- yes that holds only for some levels is not the same answer as a yes
   | Revalidated (Maybe KernelError)
     -- ^ @:revalidate@ — 'Nothing' if the development is a valid state (§5.3,
     -- thesis §2.3)
@@ -712,9 +716,12 @@ dispatch s name arg = case name of
           -- One namespace, shared with generated names (§3.6): a theorem may
           -- not take a name a datatype or a wrapper already has.
           | isDeclared g (globals machine) -> (s, Rejected (AlreadyDeclaredHere x))
+          -- Level obligations are dropped: the statement is checked to be a
+          -- type, not to be consistent, and a bare @Type@ in it is a meta the
+          -- proof is free to pin down. @qed@ is where they are collected.
           | otherwise -> case sortOf (globals machine) [] n1 ty of
-              (Left e,  _)  -> (s, IllTyped e)
-              (Right _, n2) -> started g ty n2
+              (Left e,  _, _)  -> (s, IllTyped e)
+              (Right _, _, n2) -> started g ty n2
           where g = GlobalName x
 
     started g ty n = case setGoalNamed g ty machine { names = n } of
@@ -832,14 +839,14 @@ dispatch s name arg = case name of
     bump n = s { sessionMachine = machine { names = n } }
 
     inferred t n = case infer (globals machine) ctx n t of
-      (Left e,   n1) -> (bump n1, IllTyped e)
-      (Right ty, n1) -> (bump n1, Inferred t ty)
+      (Left e,   _, n1) -> (bump n1, IllTyped e)
+      (Right ty, _, n1) -> (bump n1, Inferred t ty)
 
     conversion = withArgument $
       case parseEquated (globals machine) ctx (names machine) arg of
         Left e -> (s, Failed e)
         Right ((a, b), n1) -> case convert (globals machine) ctx n1 a b of
-          (why, n2) -> (bump n2, Converted a b why)
+          (why, owed, n2) -> (bump n2, Converted a b why owed)
 
     stepping = case arg of
       ""    -> progress True s []
@@ -1305,17 +1312,43 @@ progress oneStep s msgs = case step (sessionMachine s) of
   -- The kernel runs here, outside the machine, for 'Declaring'\'s reason: it is
   -- policy, and §7.5 has the driver own policy. On refusal the rest of the
   -- program is dropped.
+  --
+  -- **What the kernel forced is written back here** (MS3 phase 33). It returns
+  -- the level solutions its check needed, and the development the term was
+  -- extracted from still mentions those metas — @qed@ stores its definition
+  -- from that development, and @:show@ reads it. A level meta has no component
+  -- to be promoted, so the only place a solution can be recorded is the terms
+  -- that mention it (§4), and that is what 'Cursor.overLevels' does.
+  --
+  -- Empty whenever no bare @Type@ was written, which is every use of the kernel
+  -- before this phase.
   Engine.Certifying t ty m -> case certify (globals m) t ty of
     Left e -> stop (load [] m) msgs (Uncertified e)
-    Right ()
-      | oneStep   -> stop m (say : msgs) Paused
-      | otherwise -> progress oneStep s { sessionMachine = m } (say : msgs)
-      where say = "certified"
+    Right sub
+      | oneStep   -> stop determined' (say : msgs) Paused
+      | otherwise -> progress oneStep s' (say : msgs)
+      where
+        say = "certified"
+        determined' = m { proof = Engine.ProofState
+                                    (overLevels sub (cursor (proof m))) }
+        s' = (settled sub s) { sessionMachine = determined' }
   Engine.Asking q m   -> stop m msgs (Waiting q)
   Engine.Finished m   -> stop m msgs Completed
   Engine.Stuck r m    -> stop m msgs (Halted r)
   where
     stop m out what = (s { sessionMachine = m }, Ran (reverse out) what)
+
+-- | Write a level solution into the proof's own statement.
+--
+-- The development is rewritten beside it (see 'progress''s @Certifying@ case);
+-- this is the other half, because @qed@ stores the claim as the definition's
+-- type and @:show@ prints it.
+settled :: [(LevelVar, Level)] -> Session -> Session
+settled [] s  = s
+settled sub s =
+  s { sessionProof = fmap at (sessionProof s) }
+  where
+    at pr = pr { proofClaim = substLevelsIn sub (proofClaim pr) }
 
 nameOf :: InductiveDefinition -> String
 nameOf d = case inductiveName d of GlobalName x -> x

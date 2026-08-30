@@ -24,6 +24,7 @@ module Thena.Core.Level
   ( Level (..)
   , LevelVar (..)
   , levelOfNat
+  , freshLevelMeta
   , levelSuc
   , levelMax
   , Normal (..)
@@ -32,6 +33,14 @@ module Thena.Core.Level
   , levelVarsIn
   , substLevel
   , instantiateLevels
+    -- * Obligations and their solver (phase 33)
+  , Obligation (..)
+  , Unmet (..)
+  , solveLevels
+  , LevelUnification (..)
+  , unifyLevels
+  , metasIn
+  , levelVarName
   ) where
 
 import Data.List (nub, sortOn)
@@ -105,6 +114,34 @@ data LevelVar
 -- @max 0 (suc 0)@ and @suc 0@ are the same level.
 instance Eq Level where
   a == b = normalise a == normalise b
+
+-- | A level variable's display name, numbered from the shared counter.
+--
+-- **A meta wears the @?@ and a rigid parameter does not** — the same convention
+-- the development already uses, where @? x@ is a hole and a bare name is a
+-- hypothesis. A reader who knows what @?@ means in @:show@ knows what it means
+-- here.
+--
+-- **Here rather than in "Thena.Repl", where display otherwise lives**, because
+-- two modules need the spelling and there is nothing to look a level variable's
+-- name up in: unlike a 'Thena.Core.Term.Var', which the development names, a
+-- 'LevelVar' /is/ its number. "Thena.Engine" names the metas @unify@ solved in
+-- the message it builds, and a second copy of this would be a second spelling.
+levelVarName :: LevelVar -> String
+levelVarName v = case v of
+  LRigid i -> "ℓ" ++ show i
+  LMeta  i -> "?ℓ" ++ show i
+
+-- | Mint a level meta from the shared counter — what a written bare @Type@
+-- resolves to (MS3 phase 33).
+--
+-- The level-sort twin of 'Thena.Core.Term.fresh', and it takes and returns the
+-- same 'Int': MS2 closeout 4f is the user's decision that there is **one
+-- counter across every sort**, so a name that has reached the user inside a
+-- message can never be reissued as a different kind of thing. That is also what
+-- makes 'substLevel' capture-free — see its note.
+freshLevelMeta :: Int -> (LevelVar, Int)
+freshLevelMeta n = (LMeta n, n + 1)
 
 -- | The literal level @n@ — what a written @Typeₙ@ resolves to.
 levelOfNat :: Int -> Level
@@ -290,3 +327,187 @@ instantiateLevels :: [LevelVar] -> [Level] -> Maybe [(LevelVar, Level)]
 instantiateLevels ps as
   | length ps == length as = Just (zip ps as)
   | otherwise              = Nothing
+
+-- --------------------------------------------------------------------------
+-- Obligations, and the pass that discharges them (phase 33)
+-- --------------------------------------------------------------------------
+
+-- | @AtMost l k@ — the deferred reading of @l ≤ k@.
+--
+-- **This is what conversion hands back instead of failing** (phase 33). Under
+-- typical ambiguity a subsumption may involve a level that is not yet known, so
+-- 'levelLeq' answers @Nothing@; refusing there would make a meta a term nothing
+-- can be checked against. The relation is recorded instead and decided by the
+-- pass below.
+--
+-- **Nothing stores one during a proof.** @discussion\/level-binders-and-constraints.md@
+-- §4 is the decision — obligations are re-collected by re-checking, because
+-- re-checking the finished development regenerates precisely the ones that
+-- should apply. So an @Obligation@ lives only as long as the check that
+-- produced it.
+data Obligation = AtMost Level Level
+  deriving (Eq, Show)
+
+-- | An obligation the pass could not discharge, and which of the two ways.
+--
+-- The distinction matters to the message and nothing else: 'Refuted' is a
+-- mistake in the term, 'Undetermined' is a level the elaborator could not pin
+-- down and which the user can supply by hand — §6.3's escape hatch, and the
+-- reason explicit @Typeₙ@ stays writable.
+data Unmet
+  = Refuted      Level Level
+  | Undetermined Level Level
+  deriving (Eq, Show)
+
+-- | Discharge a set of level obligations, or say which one stops it.
+--
+-- **A worklist run to a fixpoint, refusing what survives** — the user's
+-- decision of 2026-08-27: /"sometimes some of those @c@ or @a@ or @b@s could
+-- solve and make the constraint trivially solvable"/. One round asks 'levelLeq'
+-- of every pending obligation; what it decides is discharged or refuted, and
+-- what it cannot is looked at for a **forced** solution — a meta whose bounds
+-- have met. A forced solution is substituted into the rest and the round runs
+-- again. When a round forces nothing, whatever is still pending is
+-- 'Undetermined'.
+--
+-- **It never guesses.** A bound is only read off an obligation one of whose
+-- sides is a constant, so the solution it finds is the only one there was.
+-- That is what makes refusing the residue order-independent, and it is §6.1's
+-- point said operationally: @max@ on the left decomposes and nothing is chosen.
+--
+-- **Phase 33 refuses the residue; phase 33b generalises it instead**, an
+-- obligation over the definition's new level parameters becoming part of its
+-- scheme. Until then an undetermined level is a refusal whose recovery is to
+-- write the level.
+--
+-- **It terminates without a guard.** A round that forces anything replaces a
+-- meta by a constant everywhere, so the number of distinct metas among the
+-- pending obligations strictly decreases; a round that forces nothing stops.
+--
+-- **It returns what it forced**, so a caller that owns the terms the metas came
+-- from can write the solutions into them. Every solution is a constant — a
+-- bound is only read off an obligation one of whose sides is one — so the list
+-- needs no composing as it grows.
+solveLevels :: [Obligation] -> Either Unmet [(LevelVar, Level)]
+solveLevels obs = case sift obs of
+  Left u                    -> Left u
+  Right []                  -> Right []
+  Right pending@(first : _) -> case forced pending of
+    []  -> Left (undetermined first)
+    sub -> (sub ++) <$> solveLevels (map (over sub) pending)
+  where
+    undetermined (AtMost l k) = Undetermined l k
+
+    over sub (AtMost l k) = AtMost (substLevel sub l) (substLevel sub k)
+
+    -- One round's decisions: refuted stops everything, decided is dropped,
+    -- undecided comes back for the solver to look at.
+    sift []                    = Right []
+    sift (o@(AtMost l k) : os) = case levelLeq l k of
+      Just False -> Left (Refuted l k)
+      Just True  -> sift os
+      Nothing    -> (o :) <$> sift os
+
+-- | The metas whose lower and upper bounds have met, read off the pending
+-- obligations. Empty when nothing is forced, which is what ends the fixpoint.
+--
+-- A bound is derived only where one side of the relation is a constant:
+--
+-- > ?m + j ≤ d          gives  ?m ≤ d - j        (and refutes if d < j)
+-- > c ≤ ?m + j          gives  ?m ≥ c - j
+--
+-- Everything else — a relation between two metas, a @max@ on the right with
+-- more than one term — bounds nothing and is left for a later round, when a
+-- substitution may have collapsed it.
+--
+-- **A meta whose bounds have crossed is solved to its lower bound anyway**, so
+-- that the next round's 'levelLeq' reports a 'Refuted' obligation the user can
+-- read rather than an 'Undetermined' one that says nothing.
+forced :: [Obligation] -> [(LevelVar, Level)]
+forced obs =
+  [ (v, levelOfNat lo)
+  | v <- nub (map fst bounds)
+  , let lo = maximum (0 : [b | (w, Lower b) <- bounds, w == v])
+  , let his = [b | (w, Upper b) <- bounds, w == v]
+  , not (null his)
+  , lo >= minimum his
+  ]
+  where
+    bounds = concatMap boundsOf obs
+
+data Bound = Lower Int | Upper Int
+  deriving (Eq, Show)
+
+-- | The constant bounds one obligation puts on a meta.
+boundsOf :: Obligation -> [(LevelVar, Bound)]
+boundsOf (AtMost l k) = case (normalise l, normalise k) of
+  -- The right is a constant, so every variable on the left is bounded above.
+  (Normal _ vs, Normal d []) ->
+    [ (v, Upper (d - j)) | (v, j) <- vs, isMeta v ]
+
+  -- The right is a single variable term. The left's constant must fit under it
+  -- whenever it does not already fit under the right's own constant.
+  (Normal c [], Normal d [(w, j)])
+    | c > d, isMeta w -> [(w, Lower (c - j))]
+
+  _ -> []
+
+-- --------------------------------------------------------------------------
+-- Level unification — what "Thena.Core.Unify" does with two universes
+-- --------------------------------------------------------------------------
+
+-- | The three answers a level equation has.
+--
+-- **@LevelsStuck@ is not a failure**, and that is the user's decision of
+-- 2026-08-27: /a level obligation does not block/ — solve if possible,
+-- otherwise proceed, because the final pass re-derives everything. A 'Clash' is
+-- different in kind: no instantiation of any variable makes @Type₀@ and
+-- @Type₁@ the same, so nothing is being deferred and the unifier must fail.
+data LevelUnification
+  = LevelsSolved [(LevelVar, Level)]
+  | LevelsStuck
+  | LevelsClash Level Level
+  deriving (Eq, Show)
+
+-- | Unify level equations, solving metas left to right.
+--
+-- Solutions found early are substituted into what is left, which is the
+-- Optimist's lemma in the small: @[?a, ?a] ≟ [0, 0]@ solves once and then
+-- checks. Takes the pairs already zipped, because every caller has checked that
+-- the two lists are the same length and has its own clash to report if not.
+unifyLevels :: [(Level, Level)] -> LevelUnification
+unifyLevels = go [] False
+  where
+    go sub stuck [] = if stuck then LevelsStuck else LevelsSolved sub
+    go sub stuck ((a, b) : rest) =
+      case one (substLevel sub a) (substLevel sub b) of
+        LevelsClash x y  -> LevelsClash x y
+        LevelsStuck      -> go sub True rest
+        LevelsSolved s   -> go (compose s sub) stuck rest
+
+    compose s sub = s ++ [ (v, substLevel s l) | (v, l) <- sub ]
+
+-- | One level equation.
+--
+-- A lone meta is solved by the other side; anything else either has no variable
+-- in it at all — in which case the normal forms decide it — or is stuck.
+one :: Level -> Level -> LevelUnification
+one a b
+  | a == b = LevelsSolved []
+  | otherwise = case (loneMeta a, loneMeta b) of
+      (Just v, _) | v `notElem` levelVarsIn b -> LevelsSolved [(v, b)]
+      (_, Just w) | w `notElem` levelVarsIn a -> LevelsSolved [(w, a)]
+      _ | rigidOnly a && rigidOnly b -> LevelsClash a b
+        | otherwise                  -> LevelsStuck
+  where
+    rigidOnly l = not (any isMeta (levelVarsIn l))
+
+-- | The level that is exactly one meta, with no offset and no join.
+loneMeta :: Level -> Maybe LevelVar
+loneMeta l = case normalise l of
+  Normal 0 [(v, 0)] | isMeta v -> Just v
+  _                            -> Nothing
+
+-- | Every level meta a level mentions.
+metasIn :: Level -> [LevelVar]
+metasIn = filter isMeta . levelVarsIn

@@ -43,7 +43,15 @@ import System.Console.Haskeline
   )
 
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar, piOver)
-import Thena.Core.Level (Level, LevelVar (..), Normal (..), normalise)
+import Thena.Core.Level
+  ( Level
+  , LevelVar
+  , Normal (..)
+  , Obligation (..)
+  , Unmet (..)
+  , levelVarName
+  , normalise
+  )
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
@@ -351,11 +359,13 @@ renderResponse s resp = case resp of
   IllTyped e     -> renderTypeError (counter s) e
   -- The two terms are restated, because with η a yes is printed about terms
   -- that still look different (§5.2).
-  Converted a b why ->
+  Converted a b why owed ->
     let q = renderCore (counter s) (contextOf s) a
               ++ " ≟ " ++ renderCore (counter s) (contextOf s) b
      in case why of
-          Nothing -> [q ++ "   yes"]
+          -- A yes that holds only for some levels says so. Empty unless a bare
+          -- @Type@ is involved, which is why no golden moved when this arrived.
+          Nothing -> (q ++ "   yes") : map (("  provided " ++) . obligation) owed
           Just f  -> (q ++ "   no") : renderConversionFailure (counter s) f
   -- Nothing to print: the caller reads the file and prints what that produced.
   LoadRequested _ -> []
@@ -419,6 +429,8 @@ renderSyntaxError e = case e of
     devForm f ++ " is part of a development, not a term"
   ResolveFailed (LevelNotInScope s) ->
     s ++ " is not a level parameter in scope"
+  ResolveFailed (LevelNotWritten s) ->
+    s ++ " must say which level it lives at, as in \"Type\8320\""
   ResolveFailed (LevelArgumentsOnALocal s) ->
     s ++ " is bound here, and only a definition has level parameters"
   ResolveFailed (NotAUniverse d)    ->
@@ -666,17 +678,6 @@ renderLevelBody (Normal c vs) =
       | k == 0    = levelVarName v
       | otherwise = "suc" ++ concat (replicate (k - 1) " (suc") ++ " "
                       ++ levelVarName v ++ concat (replicate (k - 1) ")")
-
--- | A level variable's display name, numbered from the shared counter.
---
--- **A meta wears the @?@ and a rigid parameter does not** — the same convention
--- the development already uses, where @? x@ is a hole and a bare name is a
--- hypothesis. A reader who knows what @?@ means in @:show@ knows what it means
--- here.
-levelVarName :: LevelVar -> String
-levelVarName v = case v of
-  LRigid i -> "ℓ" ++ show i
-  LMeta  i -> "?ℓ" ++ show i
 
 parensIf :: Bool -> String -> String
 parensIf True s  = "(" ++ s ++ ")"
@@ -1110,6 +1111,7 @@ renderRaw = raw False
   where
     raw _ (RawName x)       = x
     raw _ (RawUniverse l)   = "Type" ++ subscript l
+    raw _ RawUniverseOpen   = "Type"
     raw _ (RawUniverseAt l) = "Type {" ++ rawLevel l ++ "}"
     raw _ (RawAt x ls)      = x ++ " {" ++ unwords (map rawLevel ls) ++ "}"
     raw p (RawApp f a)      = wrap p (raw False f ++ " " ++ raw True a)
@@ -1138,6 +1140,10 @@ renderRaw = raw False
     wrap True t  = "(" ++ t ++ ")"
     wrap False t = t
 
+-- | A level obligation, in the notation @Unmet@'s messages use.
+obligation :: Obligation -> String
+obligation (AtMost l k) = renderLevelAtom l ++ " ≤ " ++ renderLevelAtom k
+
 -- | Why the kernel refused, or where a development stopped being valid (§5.3).
 renderKernelError :: Int -> KernelError -> [String]
 renderKernelError n e = case e of
@@ -1146,6 +1152,20 @@ renderKernelError n e = case e of
   Overabstracted _ i ty ->
     [ "the assumption " ++ identString i ++ " has no matching binder in "
         ++ renderCore n [] ty
+    ]
+  -- A level the elaborator never pinned down. The recovery is to write it —
+  -- @discussion\/level-binders-and-constraints.md@ §6.3's escape hatch, and the
+  -- reason concrete @Typeₙ@ stays writable — so the message says so.
+  NotDetermined v ->
+    [ "the level " ++ levelVarName v ++ " was never determined"
+    , "  write the level, as in \"Type\8320\""
+    ]
+  Levels (Refuted l k) ->
+    [ renderLevelAtom l ++ " is not at most " ++ renderLevelAtom k ]
+  Levels (Undetermined l k) ->
+    [ "cannot tell whether " ++ renderLevelAtom l ++ " is at most "
+        ++ renderLevelAtom k
+    , "  write the levels, as in \"Type\8320\""
     ]
   Ill pos te   ->
     ("in " ++ renderPosition pos ++ ":") : map ("  " ++) (renderTypeError n te)

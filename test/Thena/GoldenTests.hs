@@ -824,6 +824,50 @@ tests =
         , ":core Type {l}"
         , ":quit"
         ]
+      -- Typical ambiguity (MS3 phase 33): a bare @Type@ is a universe whose
+      -- level is worked out rather than written. The script walks the three
+      -- endings — the level is forced, it is refuted, or nothing determines it
+      -- — because which one you get is the whole of what this phase decides.
+    , script
+        "ambiguity"
+        [ ":infer Type"
+        , ":infer Type -> Type"
+          -- Conversion does not refuse an undecided level; it says what it
+          -- would need.
+        , ":convert Type \8799 Type\8320"
+          -- Forced, and written back: the theorem is stored with the level the
+          -- obligations left it no choice about.
+        , ":theorem lift : Type\8321"
+        , "try Type"
+        , "solve"
+        , "qed"
+        , ":show lift"
+          -- Nothing determines it. The recovery is to write the level, which is
+          -- what the message says; phase 33b generalises instead of refusing.
+        , ":theorem undecided : Type"
+        , "try Type\8320"
+        , "solve"
+        , ":revalidate"
+        , "qed"
+        , ":abandon"
+          -- Refuted: the same meta is pushed up by one use and down by another.
+        , ":theorem crossed : Type\8320"
+        , "try ((\\ (x : Type) -> x) Type\8320)"
+        , "solve"
+        , ":revalidate"
+        , "qed"
+        , ":abandon"
+          -- Unification solves a level and writes it through the whole
+          -- development — a level meta has no component to be promoted, so this
+          -- is the only place a solution can be recorded.
+        , "claim h : Type -> Type"
+        , "unify \\ (x : Type) -> x \8799 \\ (x : Type\8320) -> x"
+        , ":show"
+          -- A declaration still says which level it lives at: its levels are
+          -- stored and instantiated at every use, and nothing generalises one.
+        , "data Box : Type where { }"
+        , ":quit"
+        ]
     , script
         "mistakes"
         [ "wibble"

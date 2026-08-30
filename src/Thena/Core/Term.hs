@@ -31,11 +31,13 @@ module Thena.Core.Term
   , globalsIn
   , beyond
   , substLevelsIn
+  , substLevelsInScope
+  , levelMetasIn
   ) where
 
 import Data.List (nub)
 
-import Thena.Core.Level (Level, LevelVar, substLevel)
+import Thena.Core.Level (Level, LevelVar, metasIn, substLevel)
 
 -- | A reference to a binding, globally unique within a session.
 --
@@ -262,6 +264,39 @@ substLevelsIn sub = go
       Eliminate dn ls ps m ms is tgt ->
         Eliminate dn (map at ls) (map go ps) (go m) (map go ms)
                   (map go is) (go tgt)
+
+-- | The same, under a binder.
+--
+-- **No opening and no freshening**, which is the whole point: levels are
+-- context-free, so a level substitution commutes with a binder and 'Scope' can
+-- be reached inside without breaking what hiding @MkScope@ protects. Exported
+-- for "Thena.Development.Cursor", whose 'Thena.Development.Cursor.TermStep'
+-- carries scoped siblings of the field the focus went into.
+substLevelsInScope :: [(LevelVar, Level)] -> Scope Core -> Scope Core
+substLevelsInScope sub (MkScope b) = MkScope (substLevelsIn sub b)
+
+-- | Every level meta the term mentions, without duplicates, in first-seen
+-- order (MS3 phase 33).
+--
+-- The level analogue of 'freeVars', and it walks the same four places
+-- 'substLevelsIn' writes to. 'Thena.Kernel' is the caller: a closed term whose
+-- levels are all determined is what a global definition may be built from.
+levelMetasIn :: Core -> [LevelVar]
+levelMetasIn = nub . concatMap metasIn . go
+  where
+    go t = case t of
+      Bound _                       -> []
+      Free _                        -> []
+      Global _ ls                   -> ls
+      Universe l                    -> [l]
+      Pi _ s (MkScope b)            -> go s ++ go b
+      Lam _ s (MkScope b)           -> go s ++ go b
+      App f a                       -> go f ++ go a
+      Let _ v s (MkScope b)         -> go v ++ go s ++ go b
+      Canonical _ ls as             -> ls ++ concatMap go as
+      Eliminate _ ls ps m ms is tgt ->
+        ls ++ concatMap go ps ++ go m ++ concatMap go ms
+           ++ concatMap go is ++ go tgt
 
 -- | A counter value greater than every variable given.
 --

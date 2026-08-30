@@ -12,7 +12,7 @@ import Test.Tasty.QuickCheck
   , testProperty
   )
 
-import Thena.Core.Level (Level (..), levelOfNat)
+import Thena.Core.Level (Level (..), LevelVar (..), levelOfNat)
 import Thena.Core.Term
   ( Core (..)
   , Ident (..)
@@ -127,6 +127,7 @@ tests =
     , testGroup "errors" errorTests
     , testGroup "shadowing" shadowTests
     , testGroup "resolution" resolveTests
+    , testGroup "a bare Type mints a level meta" openUniverseTests
     ]
 
 roundTripTests :: [TestTree]
@@ -231,6 +232,44 @@ resolveTests =
       isLeft (parseCore natEnv [] 0 "elim Nat () zero (zero zero) () zero")
         @?= False
   ]
+
+-- --------------------------------------------------------------------------
+-- Bare @Type@ (MS3 phase 33)
+-- --------------------------------------------------------------------------
+
+-- | @Type@ with no braces is a universe whose level is worked out rather than
+-- written. It was a **parse error** before this phase, which is why nothing
+-- that already existed can have changed meaning.
+openUniverseTests :: [TestTree]
+openUniverseTests =
+  [ testCase "it resolves to a meta drawn from the counter it was given" $
+      parseCore emptyGlobals [] 40 "Type"
+        @?= Right (Universe (LVar (LMeta 40)), 41)
+
+  , -- Two universes written in one term are two unknowns, not one. Writing them
+    -- equal is what the *checker* may conclude, never what the reader wrote.
+    testCase "each one written is its own meta" $
+      fmap fst (parseCore emptyGlobals [] 40 "Type -> Type")
+        @?= Right (arrowOf (Universe (LVar (LMeta 40))) (Universe (LVar (LMeta 41))))
+
+  , testCase "and Typeₙ is still exactly the level written" $
+      fmap fst (parseCore emptyGlobals [] 40 "Type\8321")
+        @?= Right (Universe (levelOfNat 1))
+
+  , -- A datatype's levels are stored and instantiated at every use, so a meta in
+    -- one would be shared rather than solved. Phase 33c makes them inferred;
+    -- until then a declaration says its level.
+    testCase "a declaration may not write one" $
+      isLeft (parseDeclaration emptyGlobals 0 "data Box : Type where { }") @?= True
+
+  , testCase "not even in a parameter it never mentions again" $
+      isLeft (parseDeclaration emptyGlobals 0
+                "data Box (A : Type) : Type\8320 where { }") @?= True
+  ]
+  where
+    -- The counter that 'parseCore' spends on the arrow's own binder is why this
+    -- reads @fmap fst@: what is under test is which metas were minted.
+    arrowOf dom cod = Pi (Ident "_") dom (close (fst (fresh 42)) cod)
 
 data Which = Inner | Outer
 

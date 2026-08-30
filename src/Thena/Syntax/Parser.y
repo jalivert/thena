@@ -242,6 +242,7 @@ Atom :: { Raw }
   | ident LevelArgs                        { RawAt $1 $2 }
   | univ                                   { RawUniverse $1 }
   | Type LevelArgs                         { RawUniverseAt (theOne $2) }
+  | Type                                   { RawUniverseOpen }
   | '(' Term ')'                           { $2 }
 
 -- | @{ ℓ 0 }@ — a brace-enclosed run of level atoms, no commas, exactly as

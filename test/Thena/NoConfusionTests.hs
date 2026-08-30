@@ -144,10 +144,15 @@ withEquation eq = ([Hypothesis vx (Ident "x") tm, Hypothesis vy (Ident "y") tm, 
 -- | Does this term have this type, in that context?
 provesIn :: String -> String -> String -> Assertion
 provesIn eq src ty =
-  case fst (check eqTapl ctx n (termIn eqTapl n ctx src) (termIn eqTapl n ctx ty)) of
+  case verdict (check eqTapl ctx n (termIn eqTapl n ctx src) (termIn eqTapl n ctx ty)) of
     Right () -> pure ()
     Left e   -> assertFailure ("rejected: " ++ show e)
-  where (ctx, n) = withEquation eq
+  where
+    (ctx, n) = withEquation eq
+
+    -- @check@ returns its level obligations too (phase 33); nothing here
+    -- builds a level meta, so the list is always empty.
+    verdict (r, _, _) = r
 
 useTests :: [TestTree]
 useTests =
@@ -238,7 +243,7 @@ certified :: GlobalEnv -> String -> Assertion
 certified env g = case lookupDefinition (GlobalName g) env of
   Nothing -> assertFailure (g ++ " was not generated")
   Just d  -> case certify env (definitionBody d) (definitionType d) of
-    Right ()             -> pure ()
+    Right _  -> pure ()
     Left e   -> assertFailure ("the kernel refused " ++ g ++ ": " ++ show e)
 
 -- --------------------------------------------------------------------------

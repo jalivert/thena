@@ -14,7 +14,7 @@ module Thena.Core.Convert
   , subsumes
   ) where
 
-import Thena.Core.Level (Level, levelLeq)
+import Thena.Core.Level (Level, Obligation (..), levelLeq, metasIn)
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), fresh, open)
@@ -39,7 +39,7 @@ import Thena.Global.Env (GlobalEnv)
 -- what keeps conversion of two large identical terms from reducing both.
 convert
   :: GlobalEnv -> Context -> Int -> Core -> Core
-  -> (Maybe ConversionFailure, Int)
+  -> (Maybe ConversionFailure, [Obligation], Int)
 convert env = related Same env
 
 -- | Is @actual@ usable where @expected@ is wanted? Cumulativity's relation
@@ -59,40 +59,63 @@ convert env = related Same env
 -- stand in for one expecting @Type₀@ arguments, because it would be handed
 -- something too small. Everything that is not a universe or a Π is compared
 -- exactly as 'convert' compares it.
+--
+-- **The third component is what it could not decide** (phase 33): a subsumption
+-- between levels one of which is still a meta is neither true nor false yet, so
+-- it comes back as an 'Obligation' and the answer is still a success. Who
+-- collects them is stated once, in "Thena.Core.Typing" — during a proof they
+-- are dropped, and the pass that re-checks the finished development is where
+-- they are discharged.
 subsumes
   :: GlobalEnv -> Context -> Int -> Core -> Core
-  -> (Maybe ConversionFailure, Int)
-subsumes = related AtMost
+  -> (Maybe ConversionFailure, [Obligation], Int)
+subsumes = related Cumulative
 
 -- | Which relation the universe case and the Π codomain are read at.
-data Direction = Same | AtMost
+data Direction = Same | Cumulative
   deriving (Eq)
 
 related
   :: Direction -> GlobalEnv -> Context -> Int -> Core -> Core
-  -> (Maybe ConversionFailure, Int)
+  -> (Maybe ConversionFailure, [Obligation], Int)
 related dir env = go
   where
     go ctx n s t
-      | s == t    = (Nothing, n)
+      | s == t    = ok n
       | otherwise = heads ctx n (whnf env ctx s) (whnf env ctx t)
 
     -- Both sides are in whnf here. A 'Let' cannot appear: 'whnf' substitutes
     -- every one it meets away, which is recorded as a property of that function
     -- and is why there is no @Let@ case below.
     heads ctx n s t = case (s, t) of
-      -- @k@ is what was expected and @l@ is what was found, so cumulativity
-      -- asks @l <= k@. **@Nothing@ from 'levelLeq' fails here**, and that is
-      -- the conservative reading: an undecided inequality is not a licence to
-      -- accept. Only metas produce it, and they arrive in phase 33 with the
-      -- postponement queue that is the right place to hold one.
-      (Universe k, Universe l)
-        | ok' -> ok n
-        | otherwise -> bad n [] (LevelsDiffer k l)
-        where
-          ok' = case dir of
-            Same   -> k == l
-            AtMost -> levelLeq l k == Just True
+      (Universe k, Universe l) -> case dir of
+        -- An **equality** between levels, which a meta makes undecided in both
+        -- directions at once. It is owed as two obligations rather than
+        -- refused: a Π's domain is invariant (see 'subsumes'), and a bare
+        -- @Type@ written in a domain is ordinary, so failing here would make
+        -- the commonest thing a user writes unusable.
+        --
+        -- **With no meta on either side this is exactly what it always was** —
+        -- 'Eq' 'Level' up to the normal form — which is why the suite did not
+        -- move when this arrived.
+        Same
+          | k == l     -> ok n
+          | undecided  -> (Nothing, [AtMost k l, AtMost l k], n)
+          | otherwise  -> bad n [] (LevelsDiffer k l)
+          where undecided = not (null (metasIn k) && null (metasIn l))
+        -- @k@ is what was expected and @l@ is what was found, so cumulativity
+        -- asks @l <= k@.
+        --
+        -- **@Nothing@ is no longer a failure** (phase 33). Only a meta produces
+        -- it, and refusing there would make @Type@ a term nothing can be
+        -- checked against; the relation is handed back for the collector
+        -- instead. @Just False@ still fails on the spot — an inequality that is
+        -- false for every instantiation is a mistake in the term, and reporting
+        -- it here is what puts the error on the line that caused it.
+        Cumulative -> case levelLeq l k of
+          Just True  -> ok n
+          Just False -> bad n [] (LevelsDiffer k l)
+          Nothing    -> (Nothing, [AtMost l k], n)
 
       (Free x, Free y)
         | x == y    -> ok n
@@ -186,22 +209,30 @@ related dir env = go
     chain ctx n ((site, a, b) : r) =
       at ctx n site a b `andThen` \n1 -> chain ctx n1 r
 
-    ok n = (Nothing, n)
-    bad n site clash = (Just (ConversionFailure site clash), n)
+    ok n = (Nothing, [], n)
+    bad n site clash = (Just (ConversionFailure site clash), [], n)
 
 -- | Push one step onto a failure's route. A success passes through untouched,
 -- which is why the site list is built on the way /out/ and comes out
 -- outermost-first without a reverse.
-beneath :: Site -> (Maybe ConversionFailure, Int) -> (Maybe ConversionFailure, Int)
-beneath site (Just f, n) = (Just f { conversionSite = site : conversionSite f }, n)
-beneath _    (Nothing, n) = (Nothing, n)
+beneath
+  :: Site
+  -> (Maybe ConversionFailure, [Obligation], Int)
+  -> (Maybe ConversionFailure, [Obligation], Int)
+beneath site (Just f, o, n) = (Just f { conversionSite = site : conversionSite f }, o, n)
+beneath _    (Nothing, o, n) = (Nothing, o, n)
 
 -- | Continue only if convertible so far, carrying the counter across either
 -- branch. Written out rather than reached for as a monad: the counter is an
 -- 'Int' in the outer state and there is deliberately no supply type (§3.5).
-andThen :: (Maybe ConversionFailure, Int) -> (Int -> (Maybe ConversionFailure, Int)) -> (Maybe ConversionFailure, Int)
-andThen (Just f, n)  _ = (Just f, n)
-andThen (Nothing, n) k = k n
+-- | Continue only if convertible so far, carrying the counter and the
+-- obligations owed so far across either branch.
+andThen
+  :: (Maybe ConversionFailure, [Obligation], Int)
+  -> (Int -> (Maybe ConversionFailure, [Obligation], Int))
+  -> (Maybe ConversionFailure, [Obligation], Int)
+andThen (Just f,  o, n) _ = (Just f, o, n)
+andThen (Nothing, o, n) k = let (r, o', n') = k n in (r, o ++ o', n')
 infixl 1 `andThen`
 
 -- | The first pair of level arguments that are not the same level, if any.
