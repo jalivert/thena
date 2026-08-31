@@ -141,7 +141,7 @@ import Thena.Syntax.Lexer (LexError (..), Pos (..), Token (..))
 import Thena.Syntax.Parser (ParseError (..))
 
 import Data.Foldable (toList)
-import Data.List (intercalate)
+import Data.List (intercalate, partition)
 
 -- | Run the read-eval-print loop until @:quit@ or end of input.
 --
@@ -387,6 +387,7 @@ renderResponse s resp = case resp of
   BasesListed bs   -> renderBases bs
   RulesListed bs   -> renderRuleBases bs
   RuleFileRefused p e -> renderRuleFileError p e
+  Helped rows   -> renderHelp rows
   Matched rs    -> renderMatches rs
   Choices cs    -> renderChoices cs
   Ran msgs stop  -> msgs ++ renderStop s stop
@@ -1019,7 +1020,9 @@ answerKind k = case k of
 
 renderCommandError :: CommandError -> String
 renderCommandError e = case e of
-  NoSuchCommand w      -> "no such command: " ++ w
+  -- The one error whose reader is looking for the command set (MS1 review
+  -- §2.4), so it is the one error that names @:help@.
+  NoSuchCommand w      -> "no such command: " ++ w ++ " — :help lists them"
   MissingArgument w    -> w ++ " needs an argument"
   UnexpectedArgument w -> w ++ " takes no argument"
   NotAsking            -> "nothing was asked"
@@ -1496,6 +1499,35 @@ plural n w = show n ++ " " ++ w ++ "s"
 -- | @:bases@ — **name, description if there is one, and path**, which is what
 -- the user asked for, 2026-08-25. In search order, which is the point of
 -- listing them at all.
+-- | @:help@ — the driver's commands, in two blocks.
+--
+-- **The split is on the leading colon and on nothing else**, because that is
+-- exactly what §2.4's rule says: a bare word acts, a word with a colon looks.
+-- The driver therefore hands over one list and is not asked which block each
+-- line belongs in.
+--
+-- Glosses line up in a column, and a spelling too wide for it takes the next
+-- line instead — the field descents are the only two that do, and widening the
+-- column for them would push every other gloss off a narrow terminal.
+renderHelp :: [(String, String)] -> [String]
+renderHelp rows =
+     ["a bare word acts, a word with a colon looks."]
+  ++ block acts ++ block looks
+  ++ [ ""
+     , "any other bare word calls a rule of that name; :rules lists them."
+     , "docs/MANUAL.md is the full reference."
+     ]
+  where
+    (looks, acts) = partition ((== ":") . take 1 . fst) rows
+
+    block rs = "" : concatMap line rs
+
+    width = 28
+    line (spelling, gloss)
+      | length spelling <= width =
+          ["  " ++ spelling ++ pad (width - length spelling) ++ "  " ++ gloss]
+      | otherwise = ["  " ++ spelling, "  " ++ pad width ++ "  " ++ gloss]
+
 renderBases :: [RuleBase] -> [String]
 renderBases [] = ["no rule base is loaded"]
 renderBases bs = concatMap one bs

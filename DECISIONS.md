@@ -234,6 +234,26 @@ a `?`: `Type (?ℓ229)`.
 
 ## The REPL and the session
 
+### `:help` lists the commands, not the tactics
+
+*Decided 2026-08-31.*
+
+`:help` prints every command the REPL itself has, split by the naming rule —
+a bare word acts, a word with a colon looks — and nothing else. `attack`,
+`intro`, `try`, `solve`, `eliminate` and the rest are **not** commands: they
+are rules in a rule base, reached by writing their name the way a rule body
+would. Listing them under `:help` would state a loaded file's contents from
+inside the binary, and would be wrong the moment you load a different base.
+
+So the last line of `:help` says where they are instead:
+
+```
+any other bare word calls a rule of that name; :rules lists them.
+```
+
+`:rules` prints the rules of every loaded base, in search order. If a word is
+in neither list, `no such command` says so and points back at `:help`.
+
 ### `:undo` takes back a line, whether or not you are proving
 
 *Decided 2026-08-29.*

@@ -32,7 +32,8 @@ thena spine> :show
 thena spine> :quit
 ```
 
-`:quit` exits. **There is no `:help`** — this manual is the command reference.
+`:quit` exits. `:help` lists every command in one screen; this manual is the
+longer reference.
 
 ### The two prompts
 
@@ -635,9 +636,9 @@ finished proofs with an independent kernel; and load files of commands.
   is no Agda-like language to elaborate from — the elaboration *mechanism*
   exists, but only the "this hole is that variable in scope" case is wired up.
 - **No comments in files**, and no layout-sensitive syntax.
-- **No `:help`**, and no completion of command or identifier names. Line
-  editing and history come from `haskeline`, so the arrow keys work, but tab
-  completes filenames only — which is `haskeline`'s default, not a choice.
+- **No completion of command or identifier names.** Line editing and history
+  come from `haskeline`, so the arrow keys work, but tab completes filenames
+  only — which is `haskeline`'s default, not a choice.
 - **No automation beyond the small rule base.** There is no `auto`, no
   simplifier, no decision procedure. Every proof step above is one you type.
 - **No cumulativity and no universe polymorphism.** `Type₀` is not a `Type₁`;
@@ -688,4 +689,6 @@ finished proofs with an independent kernel; and load files of commands.
 | `:goal ‹T›` | discard everything and start a fresh scratch goal |
 | `:extract` `:revalidate` | read off the term / recheck the development |
 | `:load ‹path›` | run a file of commands |
+| `:bases` / `:rules` | the loaded rule bases / the rules in them |
+| `:help` | this table, in one screen |
 | `:quit` | exit |

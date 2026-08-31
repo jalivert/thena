@@ -1027,6 +1027,16 @@ tests =
         , "claim fam : Type₀ -> Type₀ -> Type₀"
         , ":show"
         ]
+      -- The command list, and the one error that points at it. Pinning the
+      -- whole thing is the point: a command added without a line here is a
+      -- diff, which is the only pressure keeping 'commandSummary' honest that
+      -- does not depend on someone remembering.
+    , script
+        "help"
+        [ ":help"
+        , ":nonesuch"
+        , ":quit"
+        ]
     ]
   where
     -- **From a session with the shipped rule base loaded** (phase 22), because

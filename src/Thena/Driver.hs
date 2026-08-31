@@ -28,6 +28,7 @@ module Thena.Driver
   , LoadError (..)
   , Loaded (..)
   , command
+  , commandSummary
   , answer
   , oneLine
   , loadSource
@@ -39,7 +40,7 @@ module Thena.Driver
   , parseDeclaration
   ) where
 
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Thena.Core.Level (Level, LevelVar, Obligation)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (whnf)
@@ -306,6 +307,11 @@ data Response
     -- hands the contents back to 'loadSource'
   | Choices [ChoicePoint]
     -- ^ @:choices@ — the live choice points, nearest first (§7.7). A look
+  | Helped [(String, String)]
+    -- ^ @:help@ — every command the driver itself has, each with one line
+    -- saying what it does. The spelling carries the grouping: §2.4's rule is
+    -- that a bare word acts and a colon looks, so "Thena.Repl" splits the list
+    -- on the leading colon rather than being told twice
   | Matched [Rule]
     -- ^ @:matches@ — the rules whose heads pass at the focus, in dispatch order
     -- (§7.6). A look and not an act: no body runs, and nothing is speculatively
@@ -490,6 +496,10 @@ command s line = case break (== ' ') (dropWhile (== ' ') line) of
 
 dispatch :: Session -> String -> String -> (Session, Response)
 dispatch s name arg = case name of
+  -- The driver's own commands, and only those: a bare word this function does
+  -- not name is a rule call, and 'commandSummary' says so rather than listing
+  -- the rule base a second time.
+  ":help"  -> noArgument (s, Helped commandSummary)
   ":quit"  -> noArgument (s, Quit)
   ":core"  -> withArgument (view s parseCore Rendered arg)
   ":dev"   -> withArgument (view s parseDevelopment RenderedDev arg)
@@ -953,6 +963,68 @@ dispatch s name arg = case name of
       Left e -> (s, Failed e)
       Right (is, n1) ->
         progress (sessionStepping s) s { sessionMachine = load is machine { names = n1 } } []
+
+-- | What @:help@ shows: one line per command the driver has, the spelling on
+-- the left and what it does on the right.
+--
+-- **It is a second place a command word is written, and it cannot be derived
+-- from 'dispatch'**, which is a @case@ over strings and so is not enumerable.
+-- Three things keep the two together: this list sits next to 'dispatch', the
+-- field descents are taken from 'partWords' rather than restated, and
+-- "Thena.DriverTests" crosses every colon word here against 'dispatch' and a
+-- hand-written list of colon words against this — the same arrangement, and
+-- the same admitted incompleteness, as @RuleSyntaxTests@' @everyOp@.
+--
+-- **The tactics are deliberately absent.** @attack@, @intro@, @try@ and the
+-- rest are rules in the rule base, not commands (§8, phase 23b); listing them
+-- here would state the base's contents in a second place, and it would go
+-- stale the moment a base is loaded. The last line points at @:rules@ instead.
+commandSummary :: [(String, String)]
+commandSummary =
+  [ ("assume ‹x› : ‹S›",        "add a hypothesis above the focus")
+  , ("claim ‹x› : ‹S›",         "add a hole above the focus")
+  , ("unify ‹t› ≟ ‹u›",         "solve the focus by unification")
+  , ("prove / prove ‹hint›",     "run a rule here / elaborate a term")
+  , ("retry / retry ‹n›",        "backtrack to a choice point")
+  , ("along  into  back",        "move on the chain")
+  , ("cross type / cross val",   "move into a term")
+  , (unwords bareParts,          "descend into a field of the focused term")
+  , (unwords numberedParts,      "descend into a numbered field")
+  , ("goto ‹hole›",              "move to a hole by name")
+  , ("reduce",                   "reduce the focused term in place")
+  , ("data ‹D› … where { … }",   "declare an inductive family")
+  , ("certify ‹type›",           "ask the kernel about the development")
+  , ("qed",                      "certify and admit the finished proof")
+  , (":show / :show ‹name›",     "the development / a global")
+  , (":where",                   "focus, path, context, expected type")
+  , (":core ‹t› / :dev ‹p›",     "parse a term / a development and print it")
+  , (":infer / :infer ‹t›",      "the type of the focus / of a term")
+  , (":whnf / :whnf ‹t›",        "reduce the focus / a term, without committing")
+  , (":convert ‹t› ≟ ‹u›",      "are two terms convertible")
+  , (":elim ‹D› [‹universe›]",  "a datatype’s elimination rule")
+  , (":matches / :matches ‹hint›", "which rules apply here")
+  , (":choices",                 "the live choice points, nearest first")
+  , (":bases / :rules",          "the loaded rule bases / the rules in them")
+  , (":step on / :step / :step off", "single-step the machine")
+  , (":run",                     "let a stepping machine run on")
+  , (":theorem ‹x› : ‹T›",      "start a proof")
+  , (":goal ‹T›",                "discard everything and start a scratch goal")
+  , (":suspend / :resume ‹name›", "put a proof aside / take it up again")
+  , (":proofs",                  "the current proof and the suspended ones")
+  , (":abandon",                 "give up the current proof")
+  , (":undo",                    "take back the last line")
+  , (":extract",                 "the term the development stands for")
+  , (":revalidate",              "recheck the whole development")
+  , (":load ‹path›",             "run a script, or install rule bases")
+  , (":help",                    "this list")
+  , (":quit",                    "leave")
+  ]
+  where
+    -- Taken from 'partOf' rather than written out, so a new field word joins
+    -- these lines by existing (phase 5's lesson: the check that catches a
+    -- mistake is the one made by different code from the code it checks).
+    bareParts     = [ w | w <- partWords, isJust (partOf w Nothing) ]
+    numberedParts = [ w ++ " ‹n›" | w <- partWords, isJust (partOf w (Just 1)) ]
 
 -- | The core-term descents, as the user types them (§4.7).
 --
