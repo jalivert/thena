@@ -22,8 +22,9 @@ cabal run thena
 Use `cabal run` rather than the built binary directly — it is what tells the
 program where the prelude file is installed.
 
-You land at a prompt with a small prelude already loaded (`Eq` and `refl`,
-`Unit` and `unit`, `Empty`) and one empty goal:
+You land at a prompt with a small prelude already loaded — `Eq` and `refl`,
+`Unit` and `unit`, `Empty`, `And` and `both`, `Sigma` and `pair`, with `fst`,
+`snd`, `andLeft` and `andRight` proved — and one empty goal:
 
 ```
 thena spine> :show
@@ -66,7 +67,8 @@ is inferred.
 | function | `λ (x : A) -> b` |
 | function type | `∀ (x : A) -> B`, or `A -> B` when `B` does not mention `x` |
 | application | `f a b` |
-| universes | `Type₀`, `Type₁`, … |
+| universes | `Type₀`, `Type₁`, …, or a bare `Type` whose level is inferred |
+| level arguments | `refl {0}`, `And {0 1}` — see below |
 | local definition | `let x = s : S in t` |
 | a hole | `let ? x : S in t` |
 | a hole with a proposed body | `let ? x : S ≐ (g) in t` |
@@ -96,11 +98,79 @@ thena spine> :core forall (A : Type0) -> A -> A
 Input is echoed back in the unicode spelling. **There are no comments** — `--`
 is not a comment, it is an unrecognised command.
 
+### Universes, and the level arguments you write
+
+`Typeₙ` is the universe at level `n`, and a bare `Type` is the same thing with
+the level left to be worked out:
+
+```
+thena spine> :infer Type₀
+Type₀ : Type₁
+thena spine> :infer Type
+Type (?ℓ229) : Type (suc ?ℓ229)
+```
+
+`?ℓ229` is an unknown level. It is not a default and it is not zero — it is
+carried along until something pins it down, which is what lets one declaration
+serve every level.
+
+**Smaller universes sit inside larger ones.** A `Type₀` is accepted where a
+`Type₁` is wanted:
+
+```
+thena spine> :infer (\ (A : Type₁) -> A) Type₀
+(λ (A : Type₁) -> A) Type₀ : Type₁
+```
+
+They are still different universes, so nothing collapses:
+
+```
+thena spine> :convert Type₀ ≟ Type₁
+Type₀ ≟ Type₁   no
+  Type₀ and Type₁ are different universes
+```
+
+**A datatype declared over a bare `Type` gets a level parameter**, and every use
+of it writes that level in braces:
+
+```
+thena spine> :show Eq
+data Eq {ℓ₇} (A : Type (ℓ₇)) : A -> A -> Type (ℓ₇) where
+  { refl : ∀ (a : A) -> Eq {ℓ₇} A a a }
+```
+
+So `Eq` on its own is not a term — `Eq {0} Nat x y` is. The parameters are
+prenex, which means a use writes all of them or none:
+
+```
+thena spine> :infer refl
+refl has 1 level parameter, and was given 0 level arguments
+its level parameters are prenex, so a use writes every one of them
+thena spine> :infer refl {1}
+refl {1} : ∀ (A : Type₁) (a : A) -> Eq {1} A a a
+```
+
+A datatype over two of them gets two parameters, and its own level is their
+join:
+
+```
+thena spine> :show And
+data And {ℓ₇₂ ℓ₇₃} (A : Type (ℓ₇₂)) (B : Type (ℓ₇₃)) : Type (ℓ₇₂ ⊔ ℓ₇₃) where
+  { both : A -> B -> And {ℓ₇₂ ℓ₇₃} A B }
+```
+
+`⊔` is the one symbol that is printed and never written: the join is computed
+from the constructors, so there is nothing to type and no ASCII spelling for it.
+
+A subscripted `ℓ₇` is a level *parameter*; a `?ℓ229` is a level still unknown.
+That is the whole of the notation.
+
 ---
 
 ## 3. Looking at things
 
-Seven commands, none of which change anything.
+These commands only look; none of them changes anything. `:help` lists them
+all, along with everything else.
 
 | command | what it does |
 |---|---|
@@ -128,12 +198,30 @@ succ zero ≟ succ zero   yes
 ## 4. Declaring a datatype
 
 ```
-thena spine> data Nat : Type₀ { zero : Nat ; succ : Nat -> Nat }
+thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
 thena spine> :show Nat
-data Nat : Type₀
+data Nat : Type₀ where
   { zero : Nat
   ; succ : Nat -> Nat }
+```
+
+**Write the universe as a bare `Type` and it is worked out for you**, from the
+constructors' own levels, and becomes a level parameter if nothing pins it:
+
+```
+thena spine> data Box (A : Type) : Type where { box : A -> Box A }
+declared Box
+thena spine> :show Box
+data Box {ℓ₂₅₆} (A : Type (ℓ₂₅₆)) : Type (ℓ₂₅₆) where
+  { box : A -> Box {ℓ₂₅₆} A }
+```
+
+A written `Typeₙ` is still checked rather than believed:
+
+```
+thena spine> data Big : Type₀ where { wrap : Type₀ -> Big }
+refused: the argument x of wrap lives in Type₁, which the datatype's own Type₀ does not contain
 ```
 
 Declaring a datatype checks strict positivity and **generates three things**:
@@ -162,16 +250,18 @@ equal" and "constructors are injective" usable in a proof:
 
 ```
 thena spine> :show noConfusionNat
-noConfusionNat : ∀ (x : Nat) (y : Nat) -> Eq Nat x y -> NoConfusionNat x y
+noConfusionNat : ∀ (x : Nat) (y : Nat) -> Eq {0} Nat x y -> NoConfusionNat x y
+noConfusionNat = λ (x : Nat) (y : Nat) (e : Eq {0} Nat x y) -> elim Eq {0} …
 ```
+
+(`:show` prints the body too; it is one long line and is elided here.)
 
 Indexed families work too. Where a constructor's argument types depend on
 earlier arguments, the no-confusion lemma cannot be stated, and the system says
 so plainly rather than failing:
 
 ```
-no noConfusionNV: nvSucc's argument n has a type that depends on an earlier argument,
-so its equation cannot be stated
+no noConfusionNV: nvSucc's argument p has a type that depends on an earlier argument, so its equation cannot be stated
 ```
 
 ---
@@ -201,11 +291,14 @@ thena spine> :show
 ▶ let ? id : ∀ (A : Type₀) -> A -> A ≐ (
     λ (A : Type₀) ->
     λ (_ : A) ->
-    let ? id : A in
-    id
+    let ? id1 : A in
+    id1
   ) in
   id
 ```
+
+The inner hole is `id1`, not `id`: every component in a development has a name
+of its own, so that `goto ‹name›` always means one place.
 
 Two λs have appeared, and the remaining hole now has type `A`. Move the cursor
 down to it — `into` enters the guess body, `along` steps past a binder — and ask
@@ -217,7 +310,7 @@ thena spine> along
 thena spine> along
 thena spine> :where
 focus
-  let ? id : A in
+  let ? id1 : A in
 path
   root ▸ ≐ id ▸ A ▸ _
 context
@@ -241,11 +334,58 @@ thena spine> qed
 id : ∀ (A : Type₀) -> A -> A   ∎
 thena spine> :show id
 id : ∀ (A : Type₀) -> A -> A
-id = let id = λ (A : Type₀) (_ : A) -> let id = _ : A in id : ∀ (A : Type₀) -> A -> A in id
+id = let id = λ (A : Type₀) (_ : A) -> let id1 = _ : A in id1 : ∀ (A : Type₀) -> A -> A in id
 ```
 
 `qed` re-checks the finished term with the kernel before admitting it. If it
 does not check, nothing is admitted.
+
+### What `qed` does about levels
+
+Write the statement with a bare `Type` instead of `Type₀`, prove it exactly the
+same way, and the theorem comes out polymorphic — the level that was left
+unknown becomes a parameter:
+
+```
+thena spine> :theorem id : ∀ (A : Type) -> A -> A
+proving id : ∀ (A : Type (?ℓ229)) -> A -> A
+…
+thena spine> qed
+id {ℓ₂₄₀} : ∀ (A : Type (ℓ₂₄₀)) -> A -> A   ∎
+```
+
+Sometimes one level is not enough, and the proof leaves a *relation* between two
+of them. That relation is part of the theorem, and is printed inside the type,
+before a `⊢`:
+
+```
+thena spine> :theorem lift : Type -> Type
+proving lift : Type (?ℓ229) -> Type (?ℓ230)
+thena spine> try (\ (x : Type) -> x)
+thena spine> solve
+thena spine> qed
+lift {ℓ₂₃₈ ℓ₂₃₉} : (ℓ₂₃₈ ≤ ℓ₂₃₉) ⊢ Type (ℓ₂₃₈) -> Type (ℓ₂₃₉)   ∎
+```
+
+Read it as *given `ℓ₂₃₈ ≤ ℓ₂₃₉`, this type*. A constraint that held at every
+level would have been discharged and never stored, so if there is no `⊢`, there
+is nothing to meet.
+
+A use of `lift` writes two levels and owes the condition. **The debt is
+collected by the kernel, not at the moment you type the term** — `:infer` and
+`try` will hand you `lift {1 0}` quite happily, and `qed` is where it stops:
+
+```
+thena spine> :theorem bad : Type₁ -> Type₀
+proving bad : Type₁ -> Type₀
+thena spine> try (lift {1 0})
+thena spine> solve
+thena spine> qed
+the kernel refused it
+1 is not at most 0
+```
+
+`:revalidate` says the same thing at any point, without closing the proof.
 
 ### The proof commands
 
@@ -283,7 +423,7 @@ thena core> :show
 asked on its own line, and your answer is read at the `>` prompt:
 
 ```
-thena spine> claim : Nat
+thena core> claim : Nat
 name for the hole? it will have type Nat
 > k
 claimed k
@@ -315,13 +455,13 @@ param ‹n›   method ‹n›   index ‹n›   arg ‹n›
 The numbered ones count from one.
 
 ```
-thena spine> :goal ∀ (n : Nat) -> Eq Nat n n
-▶ let ? goal : ∀ (n : Nat) -> Eq Nat n n in
+thena spine> :goal ∀ (n : Nat) -> Eq {0} Nat n n
+▶ let ? goal : ∀ (n : Nat) -> Eq {0} Nat n n in
   goal
 thena spine> cross type
 thena core> :where
 focus
-  ∀ (n : Nat) -> Eq Nat n n
+  ∀ (n : Nat) -> Eq {0} Nat n n
 path
   root ▸ type of goal
 context
@@ -329,7 +469,7 @@ context
 thena core> cod
 thena core> :where
 focus
-  Eq Nat n n
+  Eq {0} Nat n n
 path
   root ▸ type of goal ▸ cod
 context
@@ -339,8 +479,9 @@ context
 Note the prompt changed to `thena core>`, and that descending into the codomain
 brought `n` into scope. `back` reverses any move, including that one.
 
-`:goal ‹type›` throws the current development away and starts a fresh one — handy
-for scratch work.
+`:goal ‹type›` replaces whatever component is in focus with a fresh hole of that
+type — at a fresh prompt, where the only component is the starting goal, that
+amounts to starting over. Handy for scratch work.
 
 ---
 
@@ -352,8 +493,8 @@ what each case has to prove, and posts one hole per case.
 Assume `Nat`, addition as `plus`, and congruence of `succ` are already proved.
 
 ```
-thena spine> :theorem plusZero : ∀ (n : Nat) -> Eq Nat (plus n zero) n
-proving plusZero : ∀ (n : Nat) -> Eq Nat (plus n zero) n
+thena spine> :theorem plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n
+proving plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n
 thena spine> attack
 thena spine> intro
 thena spine> into
@@ -366,29 +507,29 @@ Two subgoals, named after the constructors. Look at what it built:
 
 ```
 thena spine> :show
-  let ? plusZero : ∀ (n : Nat) -> Eq Nat (plus n zero) n ≐ (
+  let ? plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n ≐ (
     λ (n : Nat) ->
-    let ? zeroMethod : Eq Nat (plus zero zero) zero in
-    let ? succMethod : ∀ (x : Nat) -> Eq Nat (plus x zero) x -> Eq Nat (plus (succ x) zero) (succ x) in
-▶   let ? plusZero : Eq Nat (plus n zero) n ≐ (
-      elim Nat () (λ (target : Nat) -> Eq Nat (plus target zero) target) (zeroMethod succMethod) () n
+    let ? zeroMethod : Eq {0} Nat (plus zero zero) zero in
+    let ? succMethod : ∀ (x : Nat) -> Eq {0} Nat (plus x zero) x -> Eq {0} Nat (plus (succ x) zero) (succ x) in
+▶   let ? plusZero1 : Eq {0} Nat (plus n zero) n ≐ (
+      elim Nat () (λ (target : Nat) -> Eq {0} Nat (plus target zero) target) (zeroMethod succMethod) () n
     ) in
-    plusZero
+    plusZero1
   ) in
   plusZero
 ```
 
-The base case wants `Eq Nat (plus zero zero) zero`; the step case gets an
+The base case wants `Eq {0} Nat (plus zero zero) zero`; the step case gets an
 induction hypothesis and must produce the successor case. Fill them in and
 finish:
 
 ```
 thena spine> back
 thena spine> back
-thena spine> try refl Nat zero
+thena spine> try (refl {0} Nat zero)
 thena spine> solve
 thena spine> along
-thena spine> try \ (x : Nat) (ih : Eq Nat (plus x zero) x) -> congSucc (plus x zero) x ih
+thena spine> try (\ (x : Nat) (ih : Eq {0} Nat (plus x zero) x) -> congSucc (plus x zero) x ih)
 thena spine> solve
 thena spine> along
 thena spine> solve
@@ -398,8 +539,13 @@ thena spine> back
 thena spine> back
 thena spine> solve
 thena spine> qed
-plusZero : ∀ (n : Nat) -> Eq Nat (plus n zero) n   ∎
+plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n   ∎
 ```
+
+**A tactic argument that is more than one word must be parenthesised.** A
+command line is a run of atoms, exactly as it would be inside a rule body, so
+`try refl {0} Nat zero` is four arguments and is refused; `try (refl {0} Nat zero)`
+is one.
 
 `eliminate` works on inductively defined **relations** too, which is what proofs
 about a reduction relation need — see §11.
@@ -422,11 +568,11 @@ thena spine> :theorem id : ∀ (A : Type₀) -> A -> A
 proving id : ∀ (A : Type₀) -> A -> A
 thena spine> attack
 thena spine> :matches
-intro-pi
+intro
 solve
 regret
 thena spine> prove
-chose 74: intro-pi
+chose 235: intro
 ```
 
 Three rules matched, so the engine reports which one it took and leaves a
@@ -434,7 +580,7 @@ Three rules matched, so the engine reports which one it took and leaves a
 
 ```
 thena spine> :choices
-74  intro-pi   untried: solve, regret
+235  intro   untried: solve, regret
 ```
 
 `retry` backtracks to the nearest choice point and takes the next alternative.
@@ -443,8 +589,8 @@ undoes the whole thing:
 
 ```
 thena spine> retry
-retrying 74: solve
-backtracking to 74: regret
+retrying 235: solve
+backtracking to 235: regret
 thena spine> :show
 ▶ let ? id : ∀ (A : Type₀) -> A -> A in
   id
@@ -469,6 +615,8 @@ attack
 try ‹t›
 abandon
 eliminate ‹t›
+unify-refine ‹t›
+apply ‹f›
 thena spine> :matches a
 elab-var
 ```
@@ -490,16 +638,16 @@ stack
 thena spine> :step
 pc
   0  t = resolve hint
-  1  call ‹rule try› (t)
-  2  solve
+  1  call try t
+  2  prim-solve
 env
   hint = ‹a›
 stack
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  0  call ‹rule try› (t)
-  1  solve
+  0  call try t
+  1  prim-solve
 env
   t = ⌜a⌝
   hint = ‹a›
@@ -522,11 +670,11 @@ The kernel is an independent check. It does not trust the machine.
 | `:revalidate` | re-derive the whole development's well-formedness from scratch |
 
 ```
-thena core> :extract
+thena spine> :extract
 let goal = zero : Nat in goal
-thena core> certify Nat
+thena spine> certify Nat
 certified
-thena core> certify Nat -> Nat
+thena spine> certify Nat -> Nat
 the kernel refused it
 in the term:
   let goal = zero : Nat in goal has type Nat
@@ -538,7 +686,7 @@ An unfinished proof cannot be extracted, and the message says exactly what is
 still open:
 
 ```
-thena core> :extract
+thena spine> :extract
 stuck: not finished: the hole k is still open, so there is no term yet
 ```
 
@@ -594,7 +742,7 @@ predicate, and a ten-rule small-step reduction relation —
 
 ```
 thena spine> :show Term
-data Term : Type₀
+data Term : Type₀ where
   { true : Term
   ; false : Term
   ; ifthen : Term -> Term -> Term -> Term
@@ -608,7 +756,7 @@ data Term : Type₀
 TAPL Theorem 3.5.4:
 
 ```
-determinacy : ∀ (t : Term) (t1 : Term) -> Step t t1 -> ∀ (t2 : Term) -> Step t t2 -> Eq Term t1 t2   ∎
+determinacy : ∀ (t : Term) (t1 : Term) -> Step t t1 -> ∀ (t2 : Term) -> Step t t2 -> Eq {0} Term t1 t2   ∎
 ```
 
 Every one of the twenty-one is checked by the kernel as it is admitted. The
@@ -623,12 +771,15 @@ its 130 case branches are mechanical constructor clashes.
 
 ## 12. What it can and cannot currently do
 
-**It can:** declare inductive families with parameters and indices; generate
-their eliminators and no-confusion lemmas; reduce, infer types and test
-convertibility; unify, including parking equations it cannot yet decide; prove
-theorems by hand at the REPL with full undo; do induction on data and on
-inductively defined relations; dispatch named rules with backtracking; check
-finished proofs with an independent kernel; and load files of commands.
+**It can:** declare inductive families with parameters and indices, at an
+inferred universe level or a written one; generate their eliminators and
+no-confusion lemmas; infer the levels of a theorem and generalise it at `qed`,
+constraints and all; reduce, infer types and test convertibility, with smaller
+universes sitting inside larger ones; unify, including parking equations it
+cannot yet decide; prove theorems by hand at the REPL with full undo; do
+induction on data and on inductively defined relations; dispatch named rules
+with backtracking; check finished proofs with an independent kernel; and load
+files of commands.
 
 **It cannot yet:**
 
@@ -641,8 +792,10 @@ finished proofs with an independent kernel; and load files of commands.
   only — which is `haskeline`'s default, not a choice.
 - **No automation beyond the small rule base.** There is no `auto`, no
   simplifier, no decision procedure. Every proof step above is one you type.
-- **No cumulativity and no universe polymorphism.** `Type₀` is not a `Type₁`;
-  where you need a rule at a higher universe you ask for it (`:elim Nat Type₁`).
+- **A use of a level-polymorphic global must write its level arguments.**
+  `Eq {0} Nat x y`, never `Eq Nat x y`. The declaration side infers, the use
+  side does not — which is what most of the braces in `examples/determinacy.thena`
+  are.
 - **No no-confusion lemma for a constructor with dependent argument types** —
   the system tells you when it skipped one and why.
 - **No proof scripts.** A `.thena` file is a flat sequence of commands, not a
@@ -658,6 +811,8 @@ finished proofs with an independent kernel; and load files of commands.
 |---|---|
 | `attack` `intro` `solve` `regret` `abandon` | the hole operations |
 | `try ‹term›` | propose a term for the focused hole |
+| `apply ‹f›` / `unify-refine ‹t›` | apply a function / refine by unification |
+| `goto ‹name›` | move to a hole by name |
 | `assume ‹x› : ‹S›` / `claim ‹x› : ‹S›` | add a hypothesis / a hole above the focus |
 | `unify ‹t› ≟ ‹u›` | solve by unification |
 | `eliminate ‹target›` | induction |
@@ -668,7 +823,7 @@ finished proofs with an independent kernel; and load files of commands.
 | `param ‹n›` `method ‹n›` `index ‹n›` `arg ‹n›` | descend into a numbered field |
 | `prove` / `prove ‹hint›` | let the rule engine choose and run a rule |
 | `retry` / `retry ‹n›` | backtrack to a choice point |
-| `data ‹D› … { … }` | declare an inductive family |
+| `data ‹D› … where { … }` | declare an inductive family |
 | `certify ‹type›` | ask the kernel |
 | `qed` | certify and admit the finished proof |
 
