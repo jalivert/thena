@@ -28,6 +28,7 @@ module Thena.Driver
   , LoadError (..)
   , Loaded (..)
   , command
+  , commandSummary
   , answer
   , oneLine
   , loadSource
@@ -39,12 +40,14 @@ module Thena.Driver
   , parseDeclaration
   ) where
 
+import Data.Maybe (fromMaybe, isJust)
+import Thena.Core.Level (Level, LevelVar, Obligation)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Level)
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), substLevelsIn)
 import Data.Char (isSpace)
 import Data.List (dropWhileEnd, isSuffixOf, stripPrefix)
-import Thena.Development.Cursor (Cursor, Focus (..), Part (..), focus)
+import Thena.Development.Cursor (Cursor, Focus (..), Part (..), focus, overLevels)
 import Thena.Development.Partial (Partial (..), extract)
 import Thena.Engine
   ( ChoicePoint (..)
@@ -81,10 +84,12 @@ import Thena.Global.Declare (DeclareError, declare)
 import Thena.Global.NoConfusion (Skipped (..), noConfusionNames)
 import Thena.Kernel (certify)
 import Thena.Global.Env
-  ( Definition (..)
+  ( Constant (..)
+  , Definition (..)
   , GlobalEnv
   , InductiveDefinition
   , addDefinition
+  , generalised
   , emptyGlobals
   , inductiveName
   , isDeclared
@@ -148,6 +153,31 @@ data Session = Session
     -- development @:goal@ and the phase 4–12 commands still use
   , sessionSuspended :: [Proof]
     -- ^ left and re-enterable, most recently suspended first (§2.4)
+  , sessionSaved     :: Snapshot
+    -- ^ the machine as it was when the current line began, kept in step after
+    -- every line. What a line that fails is rewound to (phase 25d).
+  , sessionUndo      :: [Snapshot]
+    -- ^ what @:undo@ walks back through, most recent first. Pushed only when a
+    -- line actually changed the snapshot, so @:undo@ never has to step over a
+    -- @:show@.
+    --
+    -- **On the session, not on the proof** (phase 34, his ruling of
+    -- 2026-08-29). It was 'Proof''s until then, so @:undo@ and phase 25d's
+    -- rewind both did nothing at the top level — where there is a development
+    -- but no theorem. That is the wrong way round: a 'Snapshot' is
+    -- @(Exec, ProofState)@ and 'Machine' always has both, so the history of a
+    -- thing that always exists was being kept in a record that sometimes does.
+    -- Nothing about taking a line back needs a theorem.
+    --
+    -- **Cleared at every proof boundary** — @:theorem@, @qed@, @:abandon@,
+    -- @:suspend@, @:resume@ — which is his choice of three. @qed@ writes to
+    -- @globals@, and @globals@ is deliberately not in a 'Snapshot' (§7.7: the
+    -- environment only ever grows), so an @:undo@ that crossed it would rewind
+    -- the development and leave the theorem admitted.
+    --
+    -- **The larger question this came out of is `ms3/CLOSEOUT.md` item 16**,
+    -- and it is not answered here: this phase moves a field and changes nothing
+    -- about what 'Session', 'Proof', 'ProofState' and 'Machine' /are/.
   , sessionStepping  :: Bool
   }
   deriving (Eq, Show)
@@ -171,14 +201,26 @@ type Snapshot = (Exec, ProofState)
 data Proof = Proof
   { proofName      :: GlobalName
   , proofClaim     :: Core       -- ^ what @qed@ will certify against
+  , proofResidue   :: [Obligation]
+    -- ^ what the kernel could neither discharge nor refute, from the last
+    -- @certify@ (MS3 phase 33b).
+    --
+    -- **Written by 'progress''s @Certifying@ case and read by @qed@'s
+    -- 'admitted'**, which are the two halves of one @qed@ line with the
+    -- machine's own loop between them — the kernel runs inside the loop and
+    -- admitting happens after it returns, so the residue has to be put down
+    -- somewhere in between. It is per-proof state and this is the per-proof
+    -- record.
   , proofSaved     :: Snapshot
-    -- ^ kept in step with the machine after every line, so suspending is a
-    -- move and not a copy, and 'sessionSuspended' and the current proof are
-    -- the same kind of thing
-  , proofUndo      :: [Snapshot]
-    -- ^ born with the proof and dies with it (§2.4). Pushed only when a line
-    -- actually changed the snapshot, so @:undo@ never has to step over a
-    -- @:show@
+    -- ^ where this proof is parked: written when it is created and when it is
+    -- suspended, read when it is resumed. That is the whole of its life.
+    --
+    -- **It used to be rewritten after every line too**, because it doubled as
+    -- \"the state before this line\" for @:undo@ and for phase 25d's rewind.
+    -- Phase 34 gave the session its own 'sessionSaved' for that, so the two
+    -- jobs are no longer one field: suspending is still a move and not a copy,
+    -- and 'sessionSuspended' and the current proof are still the same kind of
+    -- thing.
   }
   deriving (Eq, Show)
 
@@ -187,6 +229,8 @@ newSession = Session
   { sessionMachine   = Machine (Exec [] [] []) ps emptyGlobals [] n
   , sessionProof     = Nothing
   , sessionSuspended = []
+  , sessionSaved     = (Exec [] [] [], ps)
+  , sessionUndo      = []
   , sessionStepping  = False
   }
   where
@@ -206,7 +250,7 @@ data Response
     -- rule at the universe asked for. Not a 'ShownGlobal': the eliminator is
     -- no global (§3.7, reversed 2026-08-22), so there is no name to print on
     -- the left and no body to print underneath
-  | ShownGlobal GlobalName Core (Maybe Core)
+  | ShownGlobal GlobalName [LevelVar] [Obligation] Core (Maybe Core)
     -- ^ @:show ‹name›@ on anything else: its name, its type, and its body if
     -- it has one. A former has both — the constant is the type of its
     -- saturated 'Thena.Core.Term.Canonical' and the definition is the generated
@@ -215,16 +259,29 @@ data Response
   | Where Cursor              -- ^ @:where@ — the focus, the path, Γ, the type
   | Inferred Core Core        -- ^ @:infer@ — the term, and the type it has
   | IllTyped TypeError        -- ^ @:infer@ — why it has none
-  | Converted Core Core (Maybe ConversionFailure)
+  | Converted Core Core (Maybe ConversionFailure) [Obligation]
     -- ^ @:convert@ — the two terms, and 'Nothing' if they are convertible.
     -- Both terms are kept so the answer can restate the question: with η in
-    -- play a yes is printed about two terms that still look different (§5.2)
+    -- play a yes is printed about two terms that still look different (§5.2).
+    --
+    -- **The obligations are shown rather than dropped** (MS3 phase 33), because
+    -- this is the one command whose whole output /is/ conversion's answer: a
+    -- yes that holds only for some levels is not the same answer as a yes
   | Revalidated (Maybe KernelError)
     -- ^ @:revalidate@ — 'Nothing' if the development is a valid state (§5.3,
     -- thesis §2.3)
   | Extracted Core
   | Proving GlobalName Core   -- ^ @:theorem@ — a proof is now current
-  | Proved GlobalName Core    -- ^ @qed@ — admitted, and the proof is closed
+  | Proved GlobalName [LevelVar] [Obligation] Core
+    -- ^ @qed@ — admitted, and the proof is closed. The levels are the scheme
+    -- generalisation produced (MS3 phase 33b), not anything that was written,
+    -- and the obligations are the scheme's own constraints.
+    --
+    -- **The constraints travel with the parameters**, because half a scheme is
+    -- worse than none: a scheme without its @(suc ℓ ≤ 2)@ reads as usable at
+    -- every level and is not. @:show@ printed them from the moment 33b stored
+    -- them; this line — the one the user reads at the moment the scheme comes
+    -- into existence — did not.
   | Suspended GlobalName      -- ^ @:suspend@
   | Resumed GlobalName        -- ^ @:resume@
   | Abandoned GlobalName      -- ^ @:abandon@
@@ -250,6 +307,11 @@ data Response
     -- hands the contents back to 'loadSource'
   | Choices [ChoicePoint]
     -- ^ @:choices@ — the live choice points, nearest first (§7.7). A look
+  | Helped [(String, String)]
+    -- ^ @:help@ — every command the driver itself has, each with one line
+    -- saying what it does. The spelling carries the grouping: §2.4's rule is
+    -- that a bare word acts and a colon looks, so "Thena.Repl" splits the list
+    -- on the leading colon rather than being told twice
   | Matched [Rule]
     -- ^ @:matches@ — the rules whose heads pass at the focus, in dispatch order
     -- (§7.6). A look and not an act: no body runs, and nothing is speculatively
@@ -335,6 +397,7 @@ data CommandError
 parseCore :: GlobalEnv -> Context -> Int -> String -> Either SyntaxError (Core, Int)
 parseCore = parseWith resolve
 
+
 -- | Lex, parse, resolve as a development (§2.7's longest-prefix convention).
 parseDevelopment
   :: GlobalEnv -> Context -> Int -> String -> Either SyntaxError (Partial, Int)
@@ -346,6 +409,7 @@ parseDevelopment = parseWith resolvePartial
 -- **A run and not one term**, so that a REPL line means what the same line
 -- means inside a rule body — @f a b@ is two arguments in both. The counter is
 -- threaded through, because resolving mints display variables.
+--
 parseArguments
   :: GlobalEnv -> Context -> Int -> String -> Either SyntaxError ([Core], Int)
 parseArguments env ctx n src = do
@@ -432,6 +496,10 @@ command s line = case break (== ' ') (dropWhile (== ' ') line) of
 
 dispatch :: Session -> String -> String -> (Session, Response)
 dispatch s name arg = case name of
+  -- The driver's own commands, and only those: a bare word this function does
+  -- not name is a rule call, and 'commandSummary' says so rather than listing
+  -- the rule base a second time.
+  ":help"  -> noArgument (s, Helped commandSummary)
   ":quit"  -> noArgument (s, Quit)
   ":core"  -> withArgument (view s parseCore Rendered arg)
   ":dev"   -> withArgument (view s parseDevelopment RenderedDev arg)
@@ -635,6 +703,7 @@ dispatch s name arg = case name of
     machine = sessionMachine s
     ctx     = proofContext (proof machine)
 
+
     matching hint =
       unfoldIter (matches (rules machine) (globals machine)
                           (cursor (proof machine)) hint)
@@ -658,9 +727,10 @@ dispatch s name arg = case name of
     showGlobal what = case lookupInductive g (globals machine) of
       Just d  -> (s, ShownData d)
       Nothing -> case lookupDefinition g (globals machine) of
-        Just d  -> (s, ShownGlobal g (definitionType d) (Just (definitionBody d)))
+        Just d  -> (s, ShownGlobal g (definitionLevels d) (definitionConstraints d)
+                                    (definitionType d) (Just (definitionBody d)))
         Nothing -> case lookupConstant g (globals machine) of
-          Just t  -> (s, ShownGlobal g t Nothing)
+          Just c  -> (s, ShownGlobal g (constantLevels c) [] (constantType c) Nothing)
           Nothing -> (s, Rejected (NoSuchGlobal what))
       where
         g = GlobalName what
@@ -707,16 +777,19 @@ dispatch s name arg = case name of
           -- One namespace, shared with generated names (§3.6): a theorem may
           -- not take a name a datatype or a wrapper already has.
           | isDeclared g (globals machine) -> (s, Rejected (AlreadyDeclaredHere x))
+          -- Level obligations are dropped: the statement is checked to be a
+          -- type, not to be consistent, and a bare @Type@ in it is a meta the
+          -- proof is free to pin down. @qed@ is where they are collected.
           | otherwise -> case sortOf (globals machine) [] n1 ty of
-              (Left e,  _)  -> (s, IllTyped e)
-              (Right _, n2) -> started g ty n2
+              (Left e,  _, _)  -> (s, IllTyped e)
+              (Right _, _, n2) -> started g ty n2
           where g = GlobalName x
 
     started g ty n = case setGoalNamed g ty machine { names = n } of
       Left e  -> (s, Rejected (NotThere e))
       Right m ->
         ( s { sessionMachine = m
-            , sessionProof = Just (Proof g ty (snapshotOf m) [])
+            , sessionProof = Just (Proof g ty [] (snapshotOf m))
             }
         , Proving g ty
         )
@@ -738,20 +811,45 @@ dispatch s name arg = case name of
         (s', Ran msgs Completed) ->
           case extract (proofDevelopment (proof (sessionMachine s'))) of
             Left why -> (s', Ran msgs (Halted (NotYetPure (whereImpure why))))
-            Right t  -> (admitted s' pr t, Proved (proofName pr) (proofClaim pr))
+            Right t  -> admit (fromMaybe pr (sessionProof s')) s' t
         other -> other
         where
           ran = load [Do (Certify (Lit (VTerm (Trailing (proofClaim pr)))))] machine
 
+          -- **The proof record is re-read from @s'@, never the @pr@ above.**
+          -- Certifying settles the levels the claim was written with and files
+          -- the residue (phase 33), and the claim is what is stored as the
+          -- definition's type — reading the record from before the run stored a
+          -- type still carrying a meta nothing could ever solve, which is a bug
+          -- phase 33 shipped and 33b fixes.
+          admit pr' s' t =
+            let (s'', lvs, owed, scheme) = admitted s' pr' t
+             in (s'', Proved (proofName pr') lvs owed scheme)
+
     -- Admitting is the only thing that writes a theorem to globals (§3.3.1):
     -- a proved theorem is a global **definition**, type and body both.
+    --
+    -- **And it is where a proof becomes a level scheme** (MS3 phase 33b). Every
+    -- level meta the claim and the term are still carrying becomes a prenex
+    -- parameter, and the kernel's residue becomes the constraints a use site
+    -- will owe. Generalisation is /admitting/, so it is policy and lives here,
+    -- with the rest of what §7.5 gives the driver; 'generalised' is the rewrite
+    -- itself and lives with the record it builds.
+    --
+    -- Returns the generalised type as well, because that — not the claim as
+    -- written — is what @qed@ reports and what @:show@ will print.
     admitted s' pr t =
       let m  = sessionMachine s'
-          g  = addDefinition (proofName pr) (MkDefinition (proofClaim pr) t) (globals m)
-          (ps, n) = newProof (names m)
-       in s' { sessionMachine = m { globals = g, proof = ps, names = n }
-             , sessionProof = Nothing
-             }
+          (d, n1) = generalised (names m) (proofResidue pr) (proofClaim pr) t
+          g  = addDefinition (proofName pr) d (globals m)
+          (ps, n) = newProof n1
+       in ( s' { sessionMachine = m { globals = g, proof = ps, names = n }
+               , sessionProof = Nothing
+               }
+          , definitionLevels d
+          , definitionConstraints d
+          , definitionType d
+          )
 
     suspend = case sessionProof s of
       Nothing -> (s, Rejected NotProving)
@@ -791,16 +889,14 @@ dispatch s name arg = case name of
             , Resumed (proofName pr)
             )
 
-    undo = case sessionProof s of
-      Nothing -> (s, Rejected NotProving)
-      Just pr -> case proofUndo pr of
-        []       -> (s, Rejected NothingToUndo)
-        (u : us) ->
-          ( s { sessionMachine = restore u machine
-              , sessionProof = Just pr { proofSaved = u, proofUndo = us }
-              }
-          , Undone
-          )
+    -- **No proof required** (phase 34). @:undo@ takes back the line you typed,
+    -- and nothing about that needs a theorem to be open.
+    undo = case sessionUndo s of
+      []       -> (s, Rejected NothingToUndo)
+      (u : us) ->
+        ( s { sessionMachine = restore u machine, sessionUndo = us }
+        , Undone
+        )
 
     declaration = withArgument $
       case parseDeclaration (globals machine) (names machine) arg of
@@ -826,14 +922,14 @@ dispatch s name arg = case name of
     bump n = s { sessionMachine = machine { names = n } }
 
     inferred t n = case infer (globals machine) ctx n t of
-      (Left e,   n1) -> (bump n1, IllTyped e)
-      (Right ty, n1) -> (bump n1, Inferred t ty)
+      (Left e,   _, n1) -> (bump n1, IllTyped e)
+      (Right ty, _, n1) -> (bump n1, Inferred t ty)
 
     conversion = withArgument $
       case parseEquated (globals machine) ctx (names machine) arg of
         Left e -> (s, Failed e)
         Right ((a, b), n1) -> case convert (globals machine) ctx n1 a b of
-          (why, n2) -> (bump n2, Converted a b why)
+          (why, owed, n2) -> (bump n2, Converted a b why owed)
 
     stepping = case arg of
       ""    -> progress True s []
@@ -867,6 +963,68 @@ dispatch s name arg = case name of
       Left e -> (s, Failed e)
       Right (is, n1) ->
         progress (sessionStepping s) s { sessionMachine = load is machine { names = n1 } } []
+
+-- | What @:help@ shows: one line per command the driver has, the spelling on
+-- the left and what it does on the right.
+--
+-- **It is a second place a command word is written, and it cannot be derived
+-- from 'dispatch'**, which is a @case@ over strings and so is not enumerable.
+-- Three things keep the two together: this list sits next to 'dispatch', the
+-- field descents are taken from 'partWords' rather than restated, and
+-- "Thena.DriverTests" crosses every colon word here against 'dispatch' and a
+-- hand-written list of colon words against this — the same arrangement, and
+-- the same admitted incompleteness, as @RuleSyntaxTests@' @everyOp@.
+--
+-- **The tactics are deliberately absent.** @attack@, @intro@, @try@ and the
+-- rest are rules in the rule base, not commands (§8, phase 23b); listing them
+-- here would state the base's contents in a second place, and it would go
+-- stale the moment a base is loaded. The last line points at @:rules@ instead.
+commandSummary :: [(String, String)]
+commandSummary =
+  [ ("assume ‹x› : ‹S›",        "add a hypothesis above the focus")
+  , ("claim ‹x› : ‹S›",         "add a hole above the focus")
+  , ("unify ‹t› ≟ ‹u›",         "solve the focus by unification")
+  , ("prove / prove ‹hint›",     "run a rule here / elaborate a term")
+  , ("retry / retry ‹n›",        "backtrack to a choice point")
+  , ("along  into  back",        "move on the chain")
+  , ("cross type / cross val",   "move into a term")
+  , (unwords bareParts,          "descend into a field of the focused term")
+  , (unwords numberedParts,      "descend into a numbered field")
+  , ("goto ‹hole›",              "move to a hole by name")
+  , ("reduce",                   "reduce the focused term in place")
+  , ("data ‹D› … where { … }",   "declare an inductive family")
+  , ("certify ‹type›",           "ask the kernel about the development")
+  , ("qed",                      "certify and admit the finished proof")
+  , (":show / :show ‹name›",     "the development / a global")
+  , (":where",                   "focus, path, context, expected type")
+  , (":core ‹t› / :dev ‹p›",     "parse a term / a development and print it")
+  , (":infer / :infer ‹t›",      "the type of the focus / of a term")
+  , (":whnf / :whnf ‹t›",        "reduce the focus / a term, without committing")
+  , (":convert ‹t› ≟ ‹u›",      "are two terms convertible")
+  , (":elim ‹D› [‹universe›]",  "a datatype’s elimination rule")
+  , (":matches / :matches ‹hint›", "which rules apply here")
+  , (":choices",                 "the live choice points, nearest first")
+  , (":bases / :rules",          "the loaded rule bases / the rules in them")
+  , (":step on / :step / :step off", "single-step the machine")
+  , (":run",                     "let a stepping machine run on")
+  , (":theorem ‹x› : ‹T›",      "start a proof")
+  , (":goal ‹T›",                "discard everything and start a scratch goal")
+  , (":suspend / :resume ‹name›", "put a proof aside / take it up again")
+  , (":proofs",                  "the current proof and the suspended ones")
+  , (":abandon",                 "give up the current proof")
+  , (":undo",                    "take back the last line")
+  , (":extract",                 "the term the development stands for")
+  , (":revalidate",              "recheck the whole development")
+  , (":load ‹path›",             "run a script, or install rule bases")
+  , (":help",                    "this list")
+  , (":quit",                    "leave")
+  ]
+  where
+    -- Taken from 'partOf' rather than written out, so a new field word joins
+    -- these lines by existing (phase 5's lesson: the check that catches a
+    -- mistake is the one made by different code from the code it checks).
+    bareParts     = [ w | w <- partWords, isJust (partOf w Nothing) ]
+    numberedParts = [ w ++ " ‹n›" | w <- partWords, isJust (partOf w (Just 1)) ]
 
 -- | The core-term descents, as the user types them (§4.7).
 --
@@ -1141,9 +1299,9 @@ oneLine s pending line = (record s', resp, asking)
     --
     -- @:undo@ itself must not record, or undoing would immediately re-record
     -- the state it just left.
-    record sess = case sessionProof sess of
-      Nothing -> sess
-      Just pr
+    record sess = sess'
+      where
+       sess'
         -- **A line that did not do what it said leaves the proof exactly as it
         -- was** (phase 25d). Before this, a rule body that had already changed
         -- the development and then failed left what it built behind, and the
@@ -1170,15 +1328,19 @@ oneLine s pending line = (record s', resp, asking)
         -- and the answering line fails, this rewinds to the asking state and
         -- not to before the whole command, because that is where the previous
         -- snapshot was taken. §2.4's granularity, applied consistently.
-        | stopped resp ->
-            sess { sessionMachine = restore (proofSaved pr) (sessionMachine sess) }
-        | resp == Undone || now == proofSaved pr -> sess { sessionProof = Just pr { proofSaved = now } }
-        | otherwise ->
-            sess { sessionProof = Just pr
-                     { proofSaved = now
-                     , proofUndo  = proofSaved pr : proofUndo pr
-                     } }
-        where now = snapshotOf (sessionMachine sess)
+        | stopped resp =
+            sess { sessionMachine = restore (sessionSaved sess) (sessionMachine sess) }
+        -- **A proof boundary starts a fresh history** (phase 34, his choice of
+        -- three). Done here and not in the five commands themselves, because
+        -- @record@ runs /after/ the command and would push the crossing itself
+        -- back on top of a stack the command had just emptied.
+        | boundary resp = sess { sessionSaved = now, sessionUndo = [] }
+        | resp == Undone || now == sessionSaved sess = sess { sessionSaved = now }
+        | otherwise =
+            sess { sessionSaved = now
+                 , sessionUndo  = sessionSaved sess : sessionUndo sess
+                 }
+       now = snapshotOf (sessionMachine sess)
 
 -- | The per-proof half of a machine.
 snapshotOf :: Machine -> Snapshot
@@ -1233,22 +1395,47 @@ data Loaded = Loaded
 -- failure reports the same mistake several times over.
 --
 -- Takes the contents and not a path: §12 invariant 4 keeps IO in "Thena.Repl".
+--
+-- **A finished load leaves no undo history** (phase 34). Each line goes through
+-- 'oneLine' and so pushes its own snapshot, and stepping back into the middle of
+-- the prelude is not what @:undo@ is for — a file declares datatypes and admits
+-- theorems, which are @globals@ changes a 'Snapshot' deliberately does not carry
+-- (§7.7). Same argument as @qed@ clearing it, for the same reason.
 loadSource :: Session -> String -> Loaded
 loadSource s0 = go s0 Nothing 1 [] . lines
   where
+    finished s acc err = Loaded s { sessionUndo = [] } (reverse acc) err
+
     go s pending _ acc [] = case pending of
       -- The file ran out while an op was still asking. The line to name is the
       -- one that asked, which is the last one that ran.
-      Just _  -> Loaded s (reverse acc) (Just (UnansweredQuestion (length acc)))
-      Nothing -> Loaded s (reverse acc) Nothing
+      Just _  -> finished s acc (Just (UnansweredQuestion (length acc)))
+      Nothing -> finished s acc Nothing
     go s pending n acc (l : ls) =
       let (s', resp, asking) = oneLine s pending l
           acc'               = resp : acc
        in case resp of
-            LoadRequested _ -> Loaded s (reverse acc) (Just (NestedLoad n))
-            Quit            -> Loaded s' (reverse acc') Nothing
-            _ | stopped resp -> Loaded s' (reverse acc') (Just (LoadStopped n))
+            LoadRequested _ -> finished s acc (Just (NestedLoad n))
+            Quit            -> finished s' acc' Nothing
+            _ | stopped resp -> finished s' acc' (Just (LoadStopped n))
               | otherwise    -> go s' asking (n + 1) acc' ls
+
+-- | Which responses cross a proof boundary — the five ways the development you
+-- are standing in is exchanged for another (§2.4).
+--
+-- @:undo@ does not cross one. @qed@ is the case that forces it: admitting writes
+-- to @globals@, and @globals@ is deliberately not part of a 'Snapshot' (§7.7,
+-- \"the environment only ever grows\"), so an @:undo@ that stepped back over a
+-- @qed@ would rewind the development and leave the theorem admitted. The other
+-- four are the same idea without the sharp edge.
+boundary :: Response -> Bool
+boundary resp = case resp of
+  Proving {}   -> True
+  Proved {}    -> True
+  Abandoned {} -> True
+  Suspended {} -> True
+  Resumed {}   -> True
+  _            -> False
 
 -- | Which responses end a load.
 --
@@ -1299,17 +1486,45 @@ progress oneStep s msgs = case step (sessionMachine s) of
   -- The kernel runs here, outside the machine, for 'Declaring'\'s reason: it is
   -- policy, and §7.5 has the driver own policy. On refusal the rest of the
   -- program is dropped.
+  --
+  -- **What the kernel forced is written back here** (MS3 phase 33). It returns
+  -- the level solutions its check needed, and the development the term was
+  -- extracted from still mentions those metas — @qed@ stores its definition
+  -- from that development, and @:show@ reads it. A level meta has no component
+  -- to be promoted, so the only place a solution can be recorded is the terms
+  -- that mention it (§4), and that is what 'Cursor.overLevels' does.
+  --
+  -- Empty whenever no bare @Type@ was written, which is every use of the kernel
+  -- before this phase.
   Engine.Certifying t ty m -> case certify (globals m) t ty of
     Left e -> stop (load [] m) msgs (Uncertified e)
-    Right ()
-      | oneStep   -> stop m (say : msgs) Paused
-      | otherwise -> progress oneStep s { sessionMachine = m } (say : msgs)
-      where say = "certified"
+    Right (sub, residue)
+      | oneStep   -> stop settled' (say : msgs) Paused
+      | otherwise -> progress oneStep s' (say : msgs)
+      where
+        say = "certified"
+        settled' = m { proof = Engine.ProofState
+                                 (overLevels sub (cursor (proof m))) }
+        s' = (settled sub residue s) { sessionMachine = settled' }
   Engine.Asking q m   -> stop m msgs (Waiting q)
   Engine.Finished m   -> stop m msgs Completed
   Engine.Stuck r m    -> stop m msgs (Halted r)
   where
     stop m out what = (s { sessionMachine = m }, Ran (reverse out) what)
+
+-- | Write a level solution into the proof's own statement.
+--
+-- The development is rewritten beside it (see 'progress''s @Certifying@ case);
+-- this is the other half, because @qed@ stores the claim as the definition's
+-- type and @:show@ prints it.
+-- **And it files the residue** for @qed@ to generalise (phase 33b); see
+-- 'Proof''s own field.
+settled :: [(LevelVar, Level)] -> [Obligation] -> Session -> Session
+settled sub residue s = s { sessionProof = fmap at (sessionProof s) }
+  where
+    at pr = pr { proofClaim   = substLevelsIn sub (proofClaim pr)
+               , proofResidue = residue
+               }
 
 nameOf :: InductiveDefinition -> String
 nameOf d = case inductiveName d of GlobalName x -> x
@@ -1334,8 +1549,6 @@ whyNoConfusion d why = "no " ++ str (snd (noConfusionNames d)) ++ ": " ++ becaus
     because = case why of
       NoEquality -> "there is no Eq in scope"
       NoProducts -> "there is no And, Unit and Empty in scope"
-      NotAtTypeZero _ ->
-        str d ++ " is not declared at Type\8320, and Eq relates only Type\8320 types"
       DependentArguments c (Ident i) ->
         str c ++ "'s argument " ++ i ++ " has a type that depends on an earlier"
           ++ " argument, so its equation cannot be stated"

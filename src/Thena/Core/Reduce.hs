@@ -11,8 +11,9 @@ module Thena.Core.Reduce
 
 import Data.List (find)
 
+import Thena.Core.Level (Level, LevelVar, instantiateLevels)
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar)
-import Thena.Core.Term (Core (..), GlobalName, Var, close, instantiate)
+import Thena.Core.Term (Core (..), GlobalName, Var, close, instantiate, substLevelsIn)
 import Thena.Global.Env
   ( ConstructorDefinition (..)
   , Definition (..)
@@ -73,10 +74,15 @@ whnf env ctx = go 0
       -- Ordinary definitions — proved theorems, the prelude — are not formers,
       -- get 'Nothing' from 'formerArity', and unfold unconditionally as
       -- before.
-      Global g
+      -- **δ substitutes the level arguments into the body** (MS3 phase 31d).
+      -- A polymorphic definition's body is written over its own level
+      -- parameters, so unfolding @Eq {0}@ without substituting hands back a
+      -- body that still mentions @ℓ@ — and every later comparison then sees a
+      -- rigid parameter where a concrete level belongs.
+      Global g ls
         | Just k <- formerArity g env, nargs < k -> t
         | otherwise -> case lookupDefinition g env of
-            Just d  -> go nargs (definitionBody d)
+            Just d  -> go nargs (atLevels (definitionLevels d) ls (definitionBody d))
             Nothing -> t                    -- a constant with no body: neutral
 
       Universe _ -> t
@@ -96,12 +102,12 @@ whnf env ctx = go 0
       Let _ val _ sc -> go nargs (instantiate val sc)
 
       -- The target stands in argument position, so it starts its own count.
-      Eliminate d ps m ms is tgt ->
+      Eliminate d ls ps m ms is tgt ->
         let tgt' = go 0 tgt
          in case tgt' of
-              Canonical cg cargs
-                | Just result <- iota env d ps m ms cg cargs -> go nargs result
-              _ -> Eliminate d ps m ms is tgt'
+              Canonical cg _ cargs
+                | Just result <- iota env d ls ps m ms cg cargs -> go nargs result
+              _ -> Eliminate d ls ps m ms is tgt'
 
 -- --------------------------------------------------------------------------
 -- ι — computed from the inductive-definition record, not generated (§3.7)
@@ -133,10 +139,10 @@ whnf env ctx = go 0
 -- programmatically, so "unreachable today" is not a reason to leave a wrong
 -- answer reachable at all.
 iota
-  :: GlobalEnv -> GlobalName -> [Core] -> Core -> [Core]
+  :: GlobalEnv -> GlobalName -> [Level] -> [Core] -> Core -> [Core]
   -> GlobalName -> [Core]
   -> Maybe Core
-iota env d ps m ms cg cargs = do
+iota env d ls ps m ms cg cargs = do
   def          <- lookupInductive d env
   (idx, con)   <- findConstructor cg (inductiveConstructors def)
   method       <- atIndex idx ms
@@ -144,7 +150,7 @@ iota env d ps m ms cg cargs = do
       ownArgs = drop np cargs
   if length cargs /= np + length (constructorArguments con)
     then Nothing
-    else Just (foldl App method (ownArgs ++ recursiveCalls def ps m ms con ownArgs))
+    else Just (foldl App method (ownArgs ++ recursiveCalls def ls ps m ms con ownArgs))
 
 -- | One recursive call per recursive argument, in argument order — the
 -- general dependent-family ι-rule:
@@ -167,10 +173,10 @@ iota env d ps m ms cg cargs = do
 -- 'Free' variable throughout a type — the same two primitives 'whnf' itself
 -- uses, composed instead of a new one written for this.
 recursiveCalls
-  :: InductiveDefinition -> [Core] -> Core -> [Core]
+  :: InductiveDefinition -> [Level] -> [Core] -> Core -> [Core]
   -> ConstructorDefinition -> [Core]
   -> [Core]
-recursiveCalls def ps m ms con = go (constructorArguments con) seed
+recursiveCalls def ls ps m ms con = go (constructorArguments con) seed
   where
     dn   = inductiveName def
     np   = length (inductiveParameters def)
@@ -181,7 +187,7 @@ recursiveCalls def ps m ms con = go (constructorArguments con) seed
       let ty' = foldl (\ty (x, v) -> substFree x v ty) (entryType e) subst
           rest = go es ((entryVar e, a) : subst) as
        in case recursiveArgument dn np ty' of
-            Just is -> Eliminate dn ps m ms is a : rest
+            Just is -> Eliminate dn ls ps m ms is a : rest
             Nothing -> rest
     go _ _ _ = []   -- mismatched arities: not a saturated value of this constructor
 
@@ -206,3 +212,13 @@ atIndex i xs
   | otherwise = case drop i xs of
       x : _ -> Just x
       []    -> Nothing
+
+-- | Instantiate a definition's level parameters in its body.
+--
+-- A mismatched count cannot arise from a checked term, and this leaves the body
+-- alone rather than inventing a substitution — the checker is what reports the
+-- arity, and δ is not the place to duplicate that judgement.
+atLevels :: [LevelVar] -> [Level] -> Core -> Core
+atLevels ps as body = case instantiateLevels ps as of
+  Just sub -> substLevelsIn sub body
+  Nothing  -> body

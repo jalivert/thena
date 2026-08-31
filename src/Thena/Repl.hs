@@ -15,6 +15,7 @@ module Thena.Repl
   , transcript
   , transcriptFrom
   , renderCore
+  , renderLevel
   , renderPartial
   , renderCursor
   , renderWhere
@@ -42,11 +43,19 @@ import System.Console.Haskeline
   )
 
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar, piOver)
+import Thena.Core.Level
+  ( Level
+  , LevelVar
+  , Normal (..)
+  , Obligation (..)
+  , Unmet (..)
+  , levelVarName
+  , normalise
+  )
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
   , Ident (..)
-  , Level (..)
   , Scope
   , Var
   , freeVars
@@ -132,7 +141,7 @@ import Thena.Syntax.Lexer (LexError (..), Pos (..), Token (..))
 import Thena.Syntax.Parser (ParseError (..))
 
 import Data.Foldable (toList)
-import Data.List (intercalate)
+import Data.List (intercalate, partition)
 
 -- | Run the read-eval-print loop until @:quit@ or end of input.
 --
@@ -343,18 +352,20 @@ renderResponse s resp = case resp of
   Shown c        -> [renderCursor (counter s) c]
   ShownData d    -> renderInductive (counter s) d
   ShownEliminator g ty  -> renderEliminator (counter s) g ty
-  ShownGlobal g ty body -> renderGlobal (counter s) g ty body
+  ShownGlobal g lvs cs ty body -> renderGlobal (counter s) g lvs cs ty body
   Where c        -> renderWhere (counter s) c
   Inferred t ty  ->
     [renderCore (counter s) (contextOf s) t ++ " : " ++ renderCore (counter s) (contextOf s) ty]
   IllTyped e     -> renderTypeError (counter s) e
   -- The two terms are restated, because with η a yes is printed about terms
   -- that still look different (§5.2).
-  Converted a b why ->
+  Converted a b why owed ->
     let q = renderCore (counter s) (contextOf s) a
               ++ " ≟ " ++ renderCore (counter s) (contextOf s) b
      in case why of
-          Nothing -> [q ++ "   yes"]
+          -- A yes that holds only for some levels says so. Empty unless a bare
+          -- @Type@ is involved, which is why no golden moved when this arrived.
+          Nothing -> (q ++ "   yes") : map (("  provided " ++) . obligation) owed
           Just f  -> (q ++ "   no") : renderConversionFailure (counter s) f
   -- Nothing to print: the caller reads the file and prints what that produced.
   LoadRequested _ -> []
@@ -362,7 +373,8 @@ renderResponse s resp = case resp of
   Revalidated (Just e) -> renderKernelError (counter s) e
   Extracted t          -> [renderCore (counter s) [] t]
   Proving g ty  -> ["proving " ++ nameString g ++ " : " ++ renderCore (counter s) [] ty]
-  Proved g ty   -> [nameString g ++ " : " ++ renderCore (counter s) [] ty ++ "   ∎"]
+  Proved g lvs owed ty ->
+    [nameString g ++ scheme (counter s) lvs owed ty ++ "   ∎"]
   Suspended g   -> ["suspended " ++ nameString g]
   Resumed g     -> ["resumed " ++ nameString g]
   Abandoned g   -> ["abandoned " ++ nameString g]
@@ -375,6 +387,7 @@ renderResponse s resp = case resp of
   BasesListed bs   -> renderBases bs
   RulesListed bs   -> renderRuleBases bs
   RuleFileRefused p e -> renderRuleFileError p e
+  Helped rows   -> renderHelp rows
   Matched rs    -> renderMatches rs
   Choices cs    -> renderChoices cs
   Ran msgs stop  -> msgs ++ renderStop s stop
@@ -416,6 +429,8 @@ renderSyntaxError e = case e of
   ResolveFailed (NotInScope n)      -> "not in scope: " ++ n
   ResolveFailed (NotACoreTerm f)    ->
     devForm f ++ " is part of a development, not a term"
+  ResolveFailed (LevelArgumentsOnALocal s) ->
+    s ++ " is bound here, and only a definition has level parameters"
   ResolveFailed (NotAUniverse d)    ->
     d ++ " must be declared at a universe, as in \": Type\8320\""
   ResolveFailed (TargetIsNotTheDatatype c) ->
@@ -475,7 +490,8 @@ describe t = case t of
   TNeck       -> ":-"
   TNumber k   -> show k
   TString txt -> show txt
-  TUniverse k -> "Type" ++ subscript k
+  TUniverse k   -> "Type" ++ subscript k
+  TUniverseOpen -> "Type"
   TIdent s    -> s
 
 -- --------------------------------------------------------------------------
@@ -517,8 +533,8 @@ go :: Int -> Env -> Prec -> Core -> String
 go n env prec term = case term of
   Bound i               -> "‹bound " ++ show i ++ "›"
   Free v                -> nameOf v env
-  Global (GlobalName g) -> g
-  Universe (Level k)    -> "Type" ++ subscript k
+  Global (GlobalName g) ls -> g ++ levelArgs ls
+  Universe l            -> renderLevel l
 
   App f a -> parensIf (prec > AtApp) (go n env AtApp f ++ " " ++ go n env AtAtom a)
 
@@ -558,18 +574,20 @@ go n env prec term = case term of
   -- qualification. Giving 'Canonical' a spelling of its own was the
   -- alternative and §12 invariant 6 forbids it: two spellings of a saturated
   -- former application is exactly what that invariant exists to prevent.
-  Canonical (GlobalName f) as
-    | null as   -> f
-    | otherwise -> parensIf (prec > AtApp) (unwords (f : map (go n env AtAtom) as))
+  Canonical (GlobalName f) ls as
+    | null as   -> f ++ levelArgs ls
+    | otherwise ->
+        parensIf (prec > AtApp)
+          (unwords ((f ++ levelArgs ls) : map (go n env AtAtom) as))
 
   -- @elim d (params) motive (methods) (indices) target@ (§2.6, phase 7) —
   -- positional, in 'Eliminate'\'s own field order, each group parenthesized
   -- so a motive or a target cannot be mistaken for the start of the next
   -- group the way an unparenthesized term could.
-  Eliminate (GlobalName d) ps m ms is t ->
+  Eliminate (GlobalName d) ls ps m ms is t ->
     parensIf (prec > AtTop) $
       unwords
-        [ "elim", d
+        [ "elim", d ++ levelArgs ls
         , atoms ps
         , go n env AtAtom m
         , atoms ms
@@ -628,6 +646,36 @@ subscript :: Int -> String
 subscript = map sub . show
   where
     sub c = toEnum (fromEnum '₀' + (fromEnum c - fromEnum '0'))
+
+-- | Render a universe, **normalising first** (phase 28).
+--
+-- Normalising is not cosmetic. 'Thena.Core.Typing' builds a Π's level with
+-- @levelMax@ and does not evaluate it, so @:infer Type₀ -> Type₀@ now arrives
+-- here as @LMax (LSuc LZero) (LSuc LZero)@ where it used to arrive as
+-- @Level 1@. It must still print @Type₁@ — which is most of what this phase's
+-- "the test suite does not move" check is checking.
+--
+-- A level with variables in it prints as an expression over @⊔@, Agda's
+-- spelling of the join. **Nothing constructs one before phase 29**, so that
+-- branch is exercised by unit tests rather than by the REPL; it is written now
+-- because rendering is total and a partial renderer would be worse than an
+-- unexercised one.
+renderLevel :: Level -> String
+renderLevel l = case normalise l of
+  Normal c [] -> "Type" ++ subscript c
+  nf          -> "Type (" ++ renderLevelBody nf ++ ")"
+
+-- | A level's own notation, without the @Type@ a universe wears — what goes
+-- inside @{…}@ at a use site, and inside the parentheses of a @Typeₙ@ that has
+-- variables in it.
+renderLevelBody :: Normal -> String
+renderLevelBody (Normal c vs) =
+  intercalate " ⊔ " ([show c | c > 0 || null vs] ++ map var vs)
+  where
+    var (v, k)
+      | k == 0    = levelVarName v
+      | otherwise = "suc" ++ concat (replicate (k - 1) " (suc") ++ " "
+                      ++ levelVarName v ++ concat (replicate (k - 1) ")")
 
 parensIf :: Bool -> String -> String
 parensIf True s  = "(" ++ s ++ ")"
@@ -813,11 +861,11 @@ partOf s = case s of
   IntoLetValue {}               -> Val
   IntoLetType {}                -> Type
   IntoLetBody {}                -> Body
-  IntoCanonArg _ before _       -> CanonArg (length before + 1)
-  IntoElimParam _ before _ _ _ _ _ -> Param (length before + 1)
+  IntoCanonArg _ _ before _       -> CanonArg (length before + 1)
+  IntoElimParam _ _ before _ _ _ _ _ -> Param (length before + 1)
   IntoElimMotive {}             -> Motive
-  IntoElimMethod _ _ _ before _ _ _ -> Method (length before + 1)
-  IntoElimIndex _ _ _ _ before _ _  -> Index (length before + 1)
+  IntoElimMethod _ _ _ _ before _ _ _ -> Method (length before + 1)
+  IntoElimIndex _ _ _ _ _ before _ _  -> Index (length before + 1)
   IntoElimTarget {}             -> Target
 
 -- | A 'Part' as the user types it (§4.7, and "Thena.Driver"'s @partWords@).
@@ -972,7 +1020,9 @@ answerKind k = case k of
 
 renderCommandError :: CommandError -> String
 renderCommandError e = case e of
-  NoSuchCommand w      -> "no such command: " ++ w
+  -- The one error whose reader is looking for the command set (MS1 review
+  -- §2.4), so it is the one error that names @:help@.
+  NoSuchCommand w      -> "no such command: " ++ w ++ " — :help lists them"
   MissingArgument w    -> w ++ " needs an argument"
   UnexpectedArgument w -> w ++ " takes no argument"
   NotAsking            -> "nothing was asked"
@@ -1003,8 +1053,8 @@ renderFailReason r = case r of
   ScopeViolation ctx x y ->
     nameIn ctx y ++ " is not bound before " ++ nameIn ctx x
       ++ ", so there is no solution for it there"
-  UniverseMismatch (Level a) (Level b) ->
-    "Type" ++ subscript a ++ " and Type" ++ subscript b ++ " are different universes"
+  UniverseMismatch a b ->
+    renderLevel a ++ " and " ++ renderLevel b ++ " are different universes"
   NotTypeable e -> "that term has no type" ++ concatMap ("\n  " ++) (renderTypeError 0 e)
   BinderNotAType e ->
     "that is not a type"
@@ -1061,6 +1111,8 @@ renderRaw = raw False
   where
     raw _ (RawName x)       = x
     raw _ (RawUniverse l)   = "Type" ++ subscript l
+    raw _ RawUniverseOpen   = "Type"
+    raw _ (RawAt x ls)      = x ++ " {" ++ unwords (map show ls) ++ "}"
     raw p (RawApp f a)      = wrap p (raw False f ++ " " ++ raw True a)
     raw p (RawArrow a b)    = wrap p (raw True a ++ " -> " ++ raw False b)
     raw p (RawLam bs b)     = wrap p ("λ" ++ concatMap binder bs ++ " -> " ++ raw False b)
@@ -1075,15 +1127,21 @@ renderRaw = raw False
                 ++ " in " ++ raw False b)
     raw p (RawPending _ b)  = wrap p ("κ ▸ " ++ raw False b)
     raw _ (RawQuote t)      = "⌜" ++ raw False t ++ "⌝"
-    raw p (RawElim d ps mot ms is tgt) =
-      wrap p ("elim " ++ d ++ group ps ++ " " ++ raw True mot
+    raw p (RawElim d rls ps mot ms is tgt) =
+      wrap p ("elim " ++ d ++ levelGroup rls ++ group ps ++ " " ++ raw True mot
                 ++ " " ++ group ms ++ " " ++ group is ++ " " ++ raw True tgt)
 
     binder (RawBinder x ty) = " (" ++ x ++ " : " ++ raw False ty ++ ")"
     group ts = "(" ++ intercalate ", " (map (raw False) ts) ++ ")"
+    levelGroup [] = ""
+    levelGroup ls = " {" ++ unwords (map show ls) ++ "}"
 
     wrap True t  = "(" ++ t ++ ")"
     wrap False t = t
+
+-- | A level obligation, in the notation @Unmet@'s messages use.
+obligation :: Obligation -> String
+obligation (AtMost l k) = renderLevelAtom l ++ " ≤ " ++ renderLevelAtom k
 
 -- | Why the kernel refused, or where a development stopped being valid (§5.3).
 renderKernelError :: Int -> KernelError -> [String]
@@ -1094,6 +1152,14 @@ renderKernelError n e = case e of
     [ "the assumption " ++ identString i ++ " has no matching binder in "
         ++ renderCore n [] ty
     ]
+  Levels (Refuted l k) ->
+    [ renderLevelAtom l ++ " is not at most " ++ renderLevelAtom k ]
+  -- **Plural, and it names the clash rather than the residue** (phase 35).
+  -- Each of these can be perfectly possible on its own; what is impossible is
+  -- holding them at once, so the message says so and lists them.
+  Levels (Unsatisfiable cs) ->
+    "no levels satisfy all of these at once:"
+      : map (("  " ++) . obligation) cs
   Ill pos te   ->
     ("in " ++ renderPosition pos ++ ":") : map ("  " ++) (renderTypeError n te)
 
@@ -1148,7 +1214,11 @@ renderMoveError m = case m of
 -- its own rule (§2.6).
 renderInductive :: Int -> InductiveDefinition -> [String]
 renderInductive n d = case inductiveConstructors d of
-  [] -> [header ++ " where { }"]
+  -- @header@ already ends in @where@ — a datatype with no constructors gets
+  -- the empty brace group and nothing else. It said @where where { }@ until
+  -- phase 33c, which is when a bare @Type@ made @data Box : Type where { }@
+  -- something a reader meets rather than a prelude line nobody rereads.
+  [] -> [header ++ " { }"]
   cs -> header : closed (zipWith (++) ("  { " : repeat "  ; ") (map line cs))
   where
     ps   = inductiveParameters d
@@ -1157,6 +1227,7 @@ renderInductive n d = case inductiveConstructors d of
     header =
       "data "
         ++ nameString (inductiveName d)
+        ++ levelParams (inductiveLevels d)
         ++ concatMap group (zip [0 ..] ps)
         ++ " : "
         ++ renderCore n ps (piOver (inductiveIndices d) (Universe (inductiveLevel d)))
@@ -1196,12 +1267,56 @@ renderEliminator n g ty =
 -- The body is on its own line because it is what a generated wrapper /is/, and
 -- the point of generating into the environment rather than conjuring inside a
 -- tactic is that the student can go and look at it (§3.7).
-renderGlobal :: Int -> GlobalName -> Core -> Maybe Core -> [String]
-renderGlobal n g ty body =
-  (nameString g ++ " : " ++ renderCore n [] ty)
+-- | A global, with its level scheme (MS3 phase 33b).
+--
+-- **The parameters and the constraints are printed, and until this phase
+-- neither was.** Nothing had level parameters that reached here while theorems
+-- could not be polymorphic, so the omission never showed; generalisation makes
+-- every polymorphic theorem one, and a type mentioning @ℓ0@ with nothing
+-- binding it is unreadable.
+--
+-- The constraints have **no surface spelling** — nothing writes a scheme by
+-- hand any more — so they are shown the way @:convert@ shows what it owes.
+renderGlobal
+  :: Int -> GlobalName -> [LevelVar] -> [Obligation] -> Core -> Maybe Core
+  -> [String]
+renderGlobal n g lvs cs ty body =
+  (nameString g ++ scheme n lvs cs ty)
     : case body of
         Nothing -> []
         Just b  -> [nameString g ++ " = " ++ renderCore n [] b]
+
+-- | A level scheme, from the colon rightwards:
+-- @ {ℓ₁ ℓ₂} : (ℓ₁ ≤ ℓ₂) ⊢ Type ℓ₁ -> Type ℓ₂@
+--
+-- **The constraints sit inside the type, not under it** — the user's call,
+-- 2026-08-30, on the @provided@ lines this replaces: *"I don't like the
+-- 'provided' part, it reads as if it is not even part of the type."* It is
+-- part of it. A use supplies the parameters and **owes** the constraints, so a
+-- scheme read without them is a scheme read wrong.
+--
+-- **@⊢@ and not @⊨@.** The constraints are hypotheses the use site discharges,
+-- which is the turnstile's own reading — /given these, this type/. @⊨@ would
+-- say every instantiation satisfies them, and that is exactly what these are
+-- not: a constraint that held for every instantiation would have been
+-- discharged by 'Thena.Core.Level.solveLevels' and never stored. @⊢@ is also
+-- already a reserved character (§2.6), so it costs no lexer change if a
+-- scheme ever becomes writable.
+--
+-- **Each constraint gets its own parens, even when there is only one**, so a
+-- run of them cannot be misread — @(ℓ₁ ≤ ℓ₂) (suc ℓ₂ ≤ 3)@ rather than one
+-- pair around a list whose separator is a space and whose members contain
+-- spaces.
+--
+-- **No constraints, no turnstile.** Every monomorphic theorem would otherwise
+-- grow an empty one.
+scheme :: Int -> [LevelVar] -> [Obligation] -> Core -> String
+scheme n lvs cs ty =
+  levelParams lvs ++ " : " ++ owed ++ renderCore n [] ty
+  where
+    owed
+      | null cs   = ""
+      | otherwise = unwords [ "(" ++ obligation c ++ ")" | c <- cs ] ++ " ⊢ "
 
 renderDeclareError :: DeclareError -> String
 renderDeclareError e = case e of
@@ -1231,15 +1346,15 @@ renderDeclareError e = case e of
       ++ " of "
       ++ nameString g
       ++ " mentions the datatype under another type, which MS1 does not admit yet"
-  ArgumentTooLarge g i (Level l) (Level d) ->
+  ArgumentTooLarge g i l d ->
     "the argument "
       ++ identString i
       ++ " of "
       ++ nameString g
-      ++ " lives in Type"
-      ++ subscript l
-      ++ ", which the datatype's own Type"
-      ++ subscript d
+      ++ " lives in "
+      ++ renderLevel l
+      ++ ", which the datatype's own "
+      ++ renderLevel d
       ++ " does not contain"
   ArgumentNotAType g i te ->
     "the argument " ++ identString i ++ " of " ++ nameString g ++ " is ill-typed"
@@ -1281,6 +1396,9 @@ renderElimError e = case e of
   IndexTypeDepends k (Ident i) ->
     "index " ++ show k ++ " (" ++ i ++ ") has a type that depends on an earlier index,"
       ++ "\n  so the equation constraining it cannot be stated"
+  IndexTypeIllTyped te ->
+    "the type of a tied index has no universe, so its equation cannot be stated"
+      ++ concatMap ("\n  " ++) (renderTypeError 0 te)
   MotiveIllTyped te ->
     "the goal does not survive generalising the target"
       ++ concatMap ("\n  " ++) (renderTypeError 0 te)
@@ -1292,6 +1410,11 @@ renderTypeError :: Int -> TypeError -> [String]
 renderTypeError n e = case e of
   UnknownVariable ctx x       -> [nameIn ctx x ++ " is not in scope"]
   UnknownGlobal g        -> [nameString g ++ " is not declared"]
+  WrongNumberOfLevelArguments g want got ->
+    [ nameString g ++ " has " ++ count want "level parameter"
+        ++ ", and was given " ++ count got "level argument"
+    , "its level parameters are prenex, so a use writes every one of them"
+    ]
   LooseIndex i           -> ["a loose de Bruijn index " ++ show i ++ " reached the checker"]
   NotAType ctx t ty      ->
     [renderCore n ctx t ++ " is not a type — it has type " ++ renderCore n ctx ty]
@@ -1335,8 +1458,8 @@ siteWord site = case site of
 renderClash :: Int -> Clash -> String
 renderClash n clash = case clash of
   HeadsDiffer ctx a b  -> renderCore n ctx a ++ " and " ++ renderCore n ctx b ++ " do not match"
-  LevelsDiffer (Level a) (Level b) ->
-    "Type" ++ subscript a ++ " and Type" ++ subscript b ++ " are different universes"
+  LevelsDiffer a b ->
+    renderLevel a ++ " and " ++ renderLevel b ++ " are different universes"
   NamesDiffer a b      -> nameString a ++ " and " ++ nameString b ++ " are different names"
   VariablesDiffer a b  -> "the variables " ++ show a ++ " and " ++ show b ++ " are different"
   CountsDiffer a b     -> show a ++ " arguments against " ++ show b
@@ -1376,6 +1499,35 @@ plural n w = show n ++ " " ++ w ++ "s"
 -- | @:bases@ — **name, description if there is one, and path**, which is what
 -- the user asked for, 2026-08-25. In search order, which is the point of
 -- listing them at all.
+-- | @:help@ — the driver's commands, in two blocks.
+--
+-- **The split is on the leading colon and on nothing else**, because that is
+-- exactly what §2.4's rule says: a bare word acts, a word with a colon looks.
+-- The driver therefore hands over one list and is not asked which block each
+-- line belongs in.
+--
+-- Glosses line up in a column, and a spelling too wide for it takes the next
+-- line instead — the field descents are the only two that do, and widening the
+-- column for them would push every other gloss off a narrow terminal.
+renderHelp :: [(String, String)] -> [String]
+renderHelp rows =
+     ["a bare word acts, a word with a colon looks."]
+  ++ block acts ++ block looks
+  ++ [ ""
+     , "any other bare word calls a rule of that name; :rules lists them."
+     , "docs/MANUAL.md is the full reference."
+     ]
+  where
+    (looks, acts) = partition ((== ":") . take 1 . fst) rows
+
+    block rs = "" : concatMap line rs
+
+    width = 28
+    line (spelling, gloss)
+      | length spelling <= width =
+          ["  " ++ spelling ++ pad (width - length spelling) ++ "  " ++ gloss]
+      | otherwise = ["  " ++ spelling, "  " ++ pad width ++ "  " ++ gloss]
+
 renderBases :: [RuleBase] -> [String]
 renderBases [] = ["no rule base is loaded"]
 renderBases bs = concatMap one bs
@@ -1431,3 +1583,36 @@ renderChoices cs = map one cs
     one c =
       show (pointId c) ++ "  " ++ nameString (pointRule c)
         ++ "   untried: " ++ intercalate ", " (map nameString (pointAlts c))
+
+-- | A reference's level **arguments**, as a use site writes them: @{0 ℓ}@, and
+-- nothing at all when there are none (MS3 phase 31c).
+--
+-- **Printing them is what keeps output re-readable.** A polymorphic @Id@
+-- printed as @Id A a b@ re-parses to a reference with no level arguments, which
+-- is an arity error — so the printer would have been producing text the reader
+-- could not feed back in. Everything monomorphic prints exactly as before,
+-- since its list is empty.
+levelArgs :: [Level] -> String
+levelArgs [] = ""
+levelArgs ls = " {" ++ unwords (map renderLevelAtom ls) ++ "}"
+
+-- | A level argument inside @{…}@ — bare, without the @Type@ a universe wears.
+renderLevelAtom :: Level -> String
+renderLevelAtom l = case normalise l of
+  nf@(Normal _ []) -> renderLevelBody nf
+  nf@(Normal 0 [(_, 0)]) -> renderLevelBody nf
+  -- **Not writable, and it says so by parenthesising.** The surface only admits
+  -- atoms (phase 30 §3), so a compound level can only have been built by
+  -- inference — which arrives in phase 33. Printing it as an expression is
+  -- honest; printing it as an atom would produce text that does not re-read.
+  nf -> "(" ++ renderLevelBody nf ++ ")"
+
+-- | A definition's prenex level parameters, as a declaration writes them:
+-- @{ℓ₀ ℓ₁}@, and nothing at all when there are none (phase 31b).
+levelParams :: [LevelVar] -> String
+levelParams [] = ""
+levelParams vs = " {" ++ unwords (map levelVarName vs) ++ "}"
+
+-- | @1 thing@, @2 things@ — so a message never reads "1 level arguments".
+count :: Int -> String -> String
+count k what = show k ++ " " ++ what ++ (if k == 1 then "" else "s")

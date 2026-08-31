@@ -85,6 +85,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   num     { Located _ (TNumber $$) }
   str     { Located _ (TString $$) }
   univ    { Located _ (TUniverse $$) }
+  Type    { Located _ TUniverseOpen }
   ident   { Located _ (TIdent $$) }
 
 %right '->'
@@ -100,8 +101,13 @@ Term :: { Raw }
                                                    { RawGuess $3 $5 $8 $11 }
   | Constraint '▸' Term                            { RawPending $1 $3 }
   | '[|' Term '|]'                                 { RawQuote $2 }
+  -- **Level arguments are written or omitted** (MS3 phase 31c). Omitting them
+  -- is the only spelling for a monomorphic family, which is every family
+  -- written before this phase, so nothing existing moves.
   | elim ident '(' Atoms ')' Atom '(' Atoms ')' '(' Atoms ')' Atom
-      { RawElim $2 (reverse $4) $6 (reverse $8) (reverse $11) $13 }
+      { RawElim $2 [] (reverse $4) $6 (reverse $8) (reverse $11) $13 }
+  | elim ident LevelArgs '(' Atoms ')' Atom '(' Atoms ')' '(' Atoms ')' Atom
+      { RawElim $2 $3 (reverse $5) $7 (reverse $9) (reverse $12) $14 }
   | App '->' Term                                  { RawArrow $1 $3 }
   | App                                            { $1 }
 
@@ -117,6 +123,7 @@ Equation :: { (Raw, Raw) }
 NameAndType :: { (Maybe String, Raw) }
   : ident ':' Term                         { (Just $1, $3) }
   | ':' Term                               { (Nothing, $2) }
+
 
 -- The argument of @data@ (§2.7's grammar, extended; decided by the user
 -- planning phase 6). @data@ itself is not a token: the driver splits the first
@@ -220,8 +227,22 @@ App :: { Raw }
 
 Atom :: { Raw }
   : ident                                  { RawName $1 }
+  | ident LevelArgs                        { RawAt $1 $2 }
   | univ                                   { RawUniverse $1 }
+  | Type                                   { RawUniverseOpen }
   | '(' Term ')'                           { $2 }
+
+-- | @{ ℓ 0 }@ — a brace-enclosed run of level atoms, no commas, exactly as
+-- rule parameters and call arguments are a bare run of names (phase 23).
+LevelArgs :: { [Int] }
+  : '{' LevelAtoms '}'                     { reverse $2 }
+
+LevelAtoms :: { [Int] }
+  :                                        { [] }
+  | LevelAtoms LevelAtom                   { $2 : $1 }
+
+LevelAtom :: { Int }
+  : num                                    { $1 }
 
 -- The argument list of a rule invoked at the REPL (phase 23b): a run of atoms,
 -- exactly as a rule body writes its operands. @try (\ x -> x)@ is one argument
@@ -259,4 +280,6 @@ parseError :: [Located Token] -> Either ParseError a
 parseError ts = Left $ case ts of
   Located p t : _ -> UnexpectedToken p t
   []              -> UnexpectedEndOfInput
+
+
 }

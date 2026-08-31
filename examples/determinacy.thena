@@ -1,11 +1,11 @@
 data Term : Type₀ where { true : Term ; false : Term ; ifthen : Term -> Term -> Term -> Term ; zero : Term ; succ : Term -> Term ; pred : Term -> Term ; iszero : Term -> Term }
 data NV : Term -> Type₀ where { nvZero : NV zero ; nvSucc : ∀ (t : Term) (n : NV t) -> NV (succ t) }
 data Step : Term -> Term -> Type₀ where { eIfTrue : ∀ (t2 : Term) (t3 : Term) -> Step (ifthen true t2 t3) t2 ; eIfFalse : ∀ (t2 : Term) (t3 : Term) -> Step (ifthen false t2 t3) t3 ; eIf : ∀ (t1 : Term) (t1' : Term) (t2 : Term) (t3 : Term) (s : Step t1 t1') -> Step (ifthen t1 t2 t3) (ifthen t1' t2 t3) ; eSucc : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (succ t1) (succ t1') ; ePredZero : Step (pred zero) zero ; ePredSucc : ∀ (v : Term) (nv : NV v) -> Step (pred (succ v)) v ; ePred : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (pred t1) (pred t1') ; eIsZeroZero : Step (iszero zero) true ; eIsZeroSucc : ∀ (v : Term) (nv : NV v) -> Step (iszero (succ v)) false ; eIsZero : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (iszero t1) (iszero t1') }
-:theorem absurd : ∀ (C : Type₀) (e : Empty) -> C
-try (\ (C : Type₀) (e : Empty) -> elim Empty () (\ (t : Empty) -> C) () () e)
+:theorem absurd : ∀ (C : Type₀) (e : Empty {0}) -> C
+try (\ (C : Type₀) (e : Empty {0}) -> elim Empty {0} () (\ (t : Empty {0}) -> C) () () e)
 solve
 qed
-:theorem sym : ∀ (A : Type₀) (a : A) (b : A) (e : Eq A a b) -> Eq A b a
+:theorem sym : ∀ (A : Type₀) (a : A) (b : A) (e : Eq {0} A a b) -> Eq {0} A b a
 attack
 intro
 intro
@@ -18,7 +18,7 @@ along
 along
 eliminate e
 back
-try (\ (c : A) -> refl A c)
+try (\ (c : A) -> refl {0} A c)
 solve
 along
 solve
@@ -30,7 +30,7 @@ back
 back
 solve
 qed
-:theorem subst : ∀ (A : Type₀) (P : A -> Type₀) (a : A) (b : A) (e : Eq A a b) -> P a -> P b
+:theorem subst : ∀ (A : Type₀) (P : A -> Type₀) (a : A) (b : A) (e : Eq {0} A a b) -> P a -> P b
 attack
 intro
 intro
@@ -58,7 +58,7 @@ back
 back
 solve
 qed
-:theorem cong : ∀ (A : Type₀) (B : Type₀) (f : A -> B) (a : A) (b : A) (e : Eq A a b) -> Eq B (f a) (f b)
+:theorem cong : ∀ (A : Type₀) (B : Type₀) (f : A -> B) (a : A) (b : A) (e : Eq {0} A a b) -> Eq {0} B (f a) (f b)
 attack
 intro
 intro
@@ -75,7 +75,7 @@ along
 along
 eliminate e
 back
-try (\ (c : A) -> refl B (f c))
+try (\ (c : A) -> refl {0} B (f c))
 solve
 along
 solve
@@ -89,7 +89,7 @@ back
 back
 solve
 qed
-:theorem trans : ∀ (A : Type₀) (a : A) (b : A) (c : A) (e : Eq A a b) -> Eq A b c -> Eq A a c
+:theorem trans : ∀ (A : Type₀) (a : A) (b : A) (c : A) (e : Eq {0} A a b) -> Eq {0} A b c -> Eq {0} A a c
 attack
 intro
 intro
@@ -104,7 +104,7 @@ along
 along
 eliminate e
 back
-try (\ (z : A) (h : Eq A z c) -> h)
+try (\ (z : A) (h : Eq {0} A z c) -> h)
 solve
 along
 solve
@@ -117,7 +117,7 @@ back
 back
 solve
 qed
-:theorem trueNoStep : ∀ (u : Term) (s : Step true u) -> Empty
+:theorem trueNoStep : ∀ (u : Term) (s : Step true u) -> Empty {0}
 attack
 intro
 intro
@@ -135,34 +135,34 @@ back
 back
 back
 back
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen true c1 c2) true) -> absurd (Empty) (noConfusionTerm (ifthen true c1 c2) true q))
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) true) -> absurd (Empty {0}) (noConfusionTerm (ifthen true c1 c2) true q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen false c1 c2) true) -> absurd (Empty) (noConfusionTerm (ifthen false c1 c2) true q))
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) true) -> absurd (Empty {0}) (noConfusionTerm (ifthen false c1 c2) true q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq Term c1 true -> Empty) (q : Eq Term (ifthen c1 c3 c4) true) -> absurd (Empty) (noConfusionTerm (ifthen c1 c3 c4) true q))
+try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 true -> Empty {0}) (q : Eq {0} Term (ifthen c1 c3 c4) true) -> absurd (Empty {0}) (noConfusionTerm (ifthen c1 c3 c4) true q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 true -> Empty) (q : Eq Term (succ c1) true) -> absurd (Empty) (noConfusionTerm (succ c1) true q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 true -> Empty {0}) (q : Eq {0} Term (succ c1) true) -> absurd (Empty {0}) (noConfusionTerm (succ c1) true q))
 solve
 along
-try (\ (q : Eq Term (pred zero) true) -> absurd (Empty) (noConfusionTerm (pred zero) true q))
+try (\ (q : Eq {0} Term (pred zero) true) -> absurd (Empty {0}) (noConfusionTerm (pred zero) true q))
 solve
 along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (pred (succ c1)) true) -> absurd (Empty) (noConfusionTerm (pred (succ c1)) true q))
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) true) -> absurd (Empty {0}) (noConfusionTerm (pred (succ c1)) true q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 true -> Empty) (q : Eq Term (pred c1) true) -> absurd (Empty) (noConfusionTerm (pred c1) true q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 true -> Empty {0}) (q : Eq {0} Term (pred c1) true) -> absurd (Empty {0}) (noConfusionTerm (pred c1) true q))
 solve
 along
-try (\ (q : Eq Term (iszero zero) true) -> absurd (Empty) (noConfusionTerm (iszero zero) true q))
+try (\ (q : Eq {0} Term (iszero zero) true) -> absurd (Empty {0}) (noConfusionTerm (iszero zero) true q))
 solve
 along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (iszero (succ c1)) true) -> absurd (Empty) (noConfusionTerm (iszero (succ c1)) true q))
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) true) -> absurd (Empty {0}) (noConfusionTerm (iszero (succ c1)) true q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 true -> Empty) (q : Eq Term (iszero c1) true) -> absurd (Empty) (noConfusionTerm (iszero c1) true q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 true -> Empty {0}) (q : Eq {0} Term (iszero c1) true) -> absurd (Empty {0}) (noConfusionTerm (iszero c1) true q))
 solve
 along
 solve
@@ -181,7 +181,7 @@ back
 back
 solve
 qed
-:theorem falseNoStep : ∀ (u : Term) (s : Step false u) -> Empty
+:theorem falseNoStep : ∀ (u : Term) (s : Step false u) -> Empty {0}
 attack
 intro
 intro
@@ -199,34 +199,34 @@ back
 back
 back
 back
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen true c1 c2) false) -> absurd (Empty) (noConfusionTerm (ifthen true c1 c2) false q))
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) false) -> absurd (Empty {0}) (noConfusionTerm (ifthen true c1 c2) false q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen false c1 c2) false) -> absurd (Empty) (noConfusionTerm (ifthen false c1 c2) false q))
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) false) -> absurd (Empty {0}) (noConfusionTerm (ifthen false c1 c2) false q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq Term c1 false -> Empty) (q : Eq Term (ifthen c1 c3 c4) false) -> absurd (Empty) (noConfusionTerm (ifthen c1 c3 c4) false q))
+try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 false -> Empty {0}) (q : Eq {0} Term (ifthen c1 c3 c4) false) -> absurd (Empty {0}) (noConfusionTerm (ifthen c1 c3 c4) false q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 false -> Empty) (q : Eq Term (succ c1) false) -> absurd (Empty) (noConfusionTerm (succ c1) false q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 false -> Empty {0}) (q : Eq {0} Term (succ c1) false) -> absurd (Empty {0}) (noConfusionTerm (succ c1) false q))
 solve
 along
-try (\ (q : Eq Term (pred zero) false) -> absurd (Empty) (noConfusionTerm (pred zero) false q))
+try (\ (q : Eq {0} Term (pred zero) false) -> absurd (Empty {0}) (noConfusionTerm (pred zero) false q))
 solve
 along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (pred (succ c1)) false) -> absurd (Empty) (noConfusionTerm (pred (succ c1)) false q))
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) false) -> absurd (Empty {0}) (noConfusionTerm (pred (succ c1)) false q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 false -> Empty) (q : Eq Term (pred c1) false) -> absurd (Empty) (noConfusionTerm (pred c1) false q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 false -> Empty {0}) (q : Eq {0} Term (pred c1) false) -> absurd (Empty {0}) (noConfusionTerm (pred c1) false q))
 solve
 along
-try (\ (q : Eq Term (iszero zero) false) -> absurd (Empty) (noConfusionTerm (iszero zero) false q))
+try (\ (q : Eq {0} Term (iszero zero) false) -> absurd (Empty {0}) (noConfusionTerm (iszero zero) false q))
 solve
 along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (iszero (succ c1)) false) -> absurd (Empty) (noConfusionTerm (iszero (succ c1)) false q))
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) false) -> absurd (Empty {0}) (noConfusionTerm (iszero (succ c1)) false q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 false -> Empty) (q : Eq Term (iszero c1) false) -> absurd (Empty) (noConfusionTerm (iszero c1) false q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 false -> Empty {0}) (q : Eq {0} Term (iszero c1) false) -> absurd (Empty {0}) (noConfusionTerm (iszero c1) false q))
 solve
 along
 solve
@@ -245,7 +245,7 @@ back
 back
 solve
 qed
-:theorem zeroNoStep : ∀ (u : Term) (s : Step zero u) -> Empty
+:theorem zeroNoStep : ∀ (u : Term) (s : Step zero u) -> Empty {0}
 attack
 intro
 intro
@@ -263,34 +263,34 @@ back
 back
 back
 back
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen true c1 c2) zero) -> absurd (Empty) (noConfusionTerm (ifthen true c1 c2) zero q))
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) zero) -> absurd (Empty {0}) (noConfusionTerm (ifthen true c1 c2) zero q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen false c1 c2) zero) -> absurd (Empty) (noConfusionTerm (ifthen false c1 c2) zero q))
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) zero) -> absurd (Empty {0}) (noConfusionTerm (ifthen false c1 c2) zero q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq Term c1 zero -> Empty) (q : Eq Term (ifthen c1 c3 c4) zero) -> absurd (Empty) (noConfusionTerm (ifthen c1 c3 c4) zero q))
+try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 zero -> Empty {0}) (q : Eq {0} Term (ifthen c1 c3 c4) zero) -> absurd (Empty {0}) (noConfusionTerm (ifthen c1 c3 c4) zero q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 zero -> Empty) (q : Eq Term (succ c1) zero) -> absurd (Empty) (noConfusionTerm (succ c1) zero q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 zero -> Empty {0}) (q : Eq {0} Term (succ c1) zero) -> absurd (Empty {0}) (noConfusionTerm (succ c1) zero q))
 solve
 along
-try (\ (q : Eq Term (pred zero) zero) -> absurd (Empty) (noConfusionTerm (pred zero) zero q))
+try (\ (q : Eq {0} Term (pred zero) zero) -> absurd (Empty {0}) (noConfusionTerm (pred zero) zero q))
 solve
 along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (pred (succ c1)) zero) -> absurd (Empty) (noConfusionTerm (pred (succ c1)) zero q))
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) zero) -> absurd (Empty {0}) (noConfusionTerm (pred (succ c1)) zero q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 zero -> Empty) (q : Eq Term (pred c1) zero) -> absurd (Empty) (noConfusionTerm (pred c1) zero q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 zero -> Empty {0}) (q : Eq {0} Term (pred c1) zero) -> absurd (Empty {0}) (noConfusionTerm (pred c1) zero q))
 solve
 along
-try (\ (q : Eq Term (iszero zero) zero) -> absurd (Empty) (noConfusionTerm (iszero zero) zero q))
+try (\ (q : Eq {0} Term (iszero zero) zero) -> absurd (Empty {0}) (noConfusionTerm (iszero zero) zero q))
 solve
 along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (iszero (succ c1)) zero) -> absurd (Empty) (noConfusionTerm (iszero (succ c1)) zero q))
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) zero) -> absurd (Empty {0}) (noConfusionTerm (iszero (succ c1)) zero q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 zero -> Empty) (q : Eq Term (iszero c1) zero) -> absurd (Empty) (noConfusionTerm (iszero c1) zero q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 zero -> Empty {0}) (q : Eq {0} Term (iszero c1) zero) -> absurd (Empty {0}) (noConfusionTerm (iszero c1) zero q))
 solve
 along
 solve
@@ -309,7 +309,7 @@ back
 back
 solve
 qed
-:theorem succNoStep : ∀ (w : Term) (ih0 : ∀ (u : Term) (s : Step w u) -> Empty) (u : Term) (s : Step (succ w) u) -> Empty
+:theorem succNoStep : ∀ (w : Term) (ih0 : ∀ (u : Term) (s : Step w u) -> Empty {0}) (u : Term) (s : Step (succ w) u) -> Empty {0}
 attack
 intro
 intro
@@ -331,34 +331,34 @@ back
 back
 back
 back
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen true c1 c2) (succ w)) -> absurd (Empty) (noConfusionTerm (ifthen true c1 c2) (succ w) q))
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (succ w)) -> absurd (Empty {0}) (noConfusionTerm (ifthen true c1 c2) (succ w) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen false c1 c2) (succ w)) -> absurd (Empty) (noConfusionTerm (ifthen false c1 c2) (succ w) q))
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (succ w)) -> absurd (Empty {0}) (noConfusionTerm (ifthen false c1 c2) (succ w) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (succ w) -> Empty) (q : Eq Term (ifthen c1 c3 c4) (succ w)) -> absurd (Empty) (noConfusionTerm (ifthen c1 c3 c4) (succ w) q))
+try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ w) -> Empty {0}) (q : Eq {0} Term (ifthen c1 c3 c4) (succ w)) -> absurd (Empty {0}) (noConfusionTerm (ifthen c1 c3 c4) (succ w) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (succ w) -> Empty) (q : Eq Term (succ c1) (succ w)) -> (\ (nc2 : Eq Term c1 w) -> (\ (e1 : Eq Term c1 w) -> ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 w (e1) (sr))) (nc2)) (noConfusionTerm (succ c1) (succ w) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ w) -> Empty {0}) (q : Eq {0} Term (succ c1) (succ w)) -> (\ (nc2 : Eq {0} Term c1 w) -> (\ (e1 : Eq {0} Term c1 w) -> ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 w (e1) (sr))) (nc2)) (noConfusionTerm (succ c1) (succ w) q))
 solve
 along
-try (\ (q : Eq Term (pred zero) (succ w)) -> absurd (Empty) (noConfusionTerm (pred zero) (succ w) q))
+try (\ (q : Eq {0} Term (pred zero) (succ w)) -> absurd (Empty {0}) (noConfusionTerm (pred zero) (succ w) q))
 solve
 along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (pred (succ c1)) (succ w)) -> absurd (Empty) (noConfusionTerm (pred (succ c1)) (succ w) q))
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (succ w)) -> absurd (Empty {0}) (noConfusionTerm (pred (succ c1)) (succ w) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (succ w) -> Empty) (q : Eq Term (pred c1) (succ w)) -> absurd (Empty) (noConfusionTerm (pred c1) (succ w) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ w) -> Empty {0}) (q : Eq {0} Term (pred c1) (succ w)) -> absurd (Empty {0}) (noConfusionTerm (pred c1) (succ w) q))
 solve
 along
-try (\ (q : Eq Term (iszero zero) (succ w)) -> absurd (Empty) (noConfusionTerm (iszero zero) (succ w) q))
+try (\ (q : Eq {0} Term (iszero zero) (succ w)) -> absurd (Empty {0}) (noConfusionTerm (iszero zero) (succ w) q))
 solve
 along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (iszero (succ c1)) (succ w)) -> absurd (Empty) (noConfusionTerm (iszero (succ c1)) (succ w) q))
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (succ w)) -> absurd (Empty {0}) (noConfusionTerm (iszero (succ c1)) (succ w) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (succ w) -> Empty) (q : Eq Term (iszero c1) (succ w)) -> absurd (Empty) (noConfusionTerm (iszero c1) (succ w) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ w) -> Empty {0}) (q : Eq {0} Term (iszero c1) (succ w)) -> absurd (Empty {0}) (noConfusionTerm (iszero c1) (succ w) q))
 solve
 along
 solve
@@ -379,7 +379,7 @@ back
 back
 solve
 qed
-:theorem nvNoStep : ∀ (v : Term) (nv : NV v) (u : Term) (s : Step v u) -> Empty
+:theorem nvNoStep : ∀ (v : Term) (nv : NV v) (u : Term) (s : Step v u) -> Empty {0}
 attack
 intro
 intro
@@ -392,7 +392,7 @@ back
 try (\ (u : Term) (s : Step zero u) -> zeroNoStep u s)
 solve
 along
-try (\ (c1 : Term) (n : NV c1) (ih : ∀ (u : Term) -> Step c1 u -> Empty) (u : Term) (s : Step (succ c1) u) -> succNoStep c1 ih u s)
+try (\ (c1 : Term) (n : NV c1) (ih : ∀ (u : Term) -> Step c1 u -> Empty {0}) (u : Term) (s : Step (succ c1) u) -> succNoStep c1 ih u s)
 solve
 along
 solve
@@ -403,7 +403,7 @@ back
 back
 solve
 qed
-:theorem invIfTrue : ∀ (a : Term) (b : Term) (u : Term) (s : Step (ifthen true a b) u) -> Eq Term a u
+:theorem invIfTrue : ∀ (a : Term) (b : Term) (u : Term) (s : Step (ifthen true a b) u) -> Eq {0} Term a u
 attack
 intro
 intro
@@ -425,34 +425,34 @@ back
 back
 back
 back
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen true c1 c2) (ifthen true a b)) -> (\ (nc4 : And (Eq Term true true) (And (Eq Term c1 a) (Eq Term c2 b))) -> (\ (e1 : Eq Term true true) (e2 : Eq Term c1 a) (e3 : Eq Term c2 b) -> sym Term c1 a e2) (andLeft (Eq Term true true) (And (Eq Term c1 a) (Eq Term c2 b)) (nc4)) (andLeft (Eq Term c1 a) (Eq Term c2 b) (andRight (Eq Term true true) (And (Eq Term c1 a) (Eq Term c2 b)) (nc4))) (andRight (Eq Term c1 a) (Eq Term c2 b) (andRight (Eq Term true true) (And (Eq Term c1 a) (Eq Term c2 b)) (nc4)))) (noConfusionTerm (ifthen true c1 c2) (ifthen true a b) q))
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (ifthen true a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term true true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b))) -> (\ (e1 : Eq {0} Term true true) (e2 : Eq {0} Term c1 a) (e3 : Eq {0} Term c2 b) -> sym Term c1 a e2) (andLeft (Eq {0} Term true true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)) (andLeft (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight (Eq {0} Term true true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4))) (andRight (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight (Eq {0} Term true true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)))) (noConfusionTerm (ifthen true c1 c2) (ifthen true a b) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen false c1 c2) (ifthen true a b)) -> (\ (nc4 : And (Eq Term false true) (And (Eq Term c1 a) (Eq Term c2 b))) -> (\ (e1 : Eq Term false true) (e2 : Eq Term c1 a) (e3 : Eq Term c2 b) -> absurd (Eq Term a c2) (noConfusionTerm false true e1)) (andLeft (Eq Term false true) (And (Eq Term c1 a) (Eq Term c2 b)) (nc4)) (andLeft (Eq Term c1 a) (Eq Term c2 b) (andRight (Eq Term false true) (And (Eq Term c1 a) (Eq Term c2 b)) (nc4))) (andRight (Eq Term c1 a) (Eq Term c2 b) (andRight (Eq Term false true) (And (Eq Term c1 a) (Eq Term c2 b)) (nc4)))) (noConfusionTerm (ifthen false c1 c2) (ifthen true a b) q))
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (ifthen true a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term false true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b))) -> (\ (e1 : Eq {0} Term false true) (e2 : Eq {0} Term c1 a) (e3 : Eq {0} Term c2 b) -> absurd (Eq {0} Term a c2) (noConfusionTerm false true e1)) (andLeft (Eq {0} Term false true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)) (andLeft (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight (Eq {0} Term false true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4))) (andRight (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight (Eq {0} Term false true) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)))) (noConfusionTerm (ifthen false c1 c2) (ifthen true a b) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (ifthen true a b) -> Eq Term a c2) (q : Eq Term (ifthen c1 c3 c4) (ifthen true a b)) -> (\ (nc4 : And (Eq Term c1 true) (And (Eq Term c3 a) (Eq Term c4 b))) -> (\ (e1 : Eq Term c1 true) (e2 : Eq Term c3 a) (e3 : Eq Term c4 b) -> absurd (Eq Term a (ifthen c2 c3 c4)) (trueNoStep c2 (subst Term (\ (x : Term) -> Step x c2) c1 true (e1) (sr)))) (andLeft (Eq Term c1 true) (And (Eq Term c3 a) (Eq Term c4 b)) (nc4)) (andLeft (Eq Term c3 a) (Eq Term c4 b) (andRight (Eq Term c1 true) (And (Eq Term c3 a) (Eq Term c4 b)) (nc4))) (andRight (Eq Term c3 a) (Eq Term c4 b) (andRight (Eq Term c1 true) (And (Eq Term c3 a) (Eq Term c4 b)) (nc4)))) (noConfusionTerm (ifthen c1 c3 c4) (ifthen true a b) q))
+try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen true a b) -> Eq {0} Term a c2) (q : Eq {0} Term (ifthen c1 c3 c4) (ifthen true a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term c1 true) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b))) -> (\ (e1 : Eq {0} Term c1 true) (e2 : Eq {0} Term c3 a) (e3 : Eq {0} Term c4 b) -> absurd (Eq {0} Term a (ifthen c2 c3 c4)) (trueNoStep c2 (subst Term (\ (x : Term) -> Step x c2) c1 true (e1) (sr)))) (andLeft (Eq {0} Term c1 true) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4)) (andLeft (Eq {0} Term c3 a) (Eq {0} Term c4 b) (andRight (Eq {0} Term c1 true) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4))) (andRight (Eq {0} Term c3 a) (Eq {0} Term c4 b) (andRight (Eq {0} Term c1 true) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4)))) (noConfusionTerm (ifthen c1 c3 c4) (ifthen true a b) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (ifthen true a b) -> Eq Term a c2) (q : Eq Term (succ c1) (ifthen true a b)) -> absurd (Eq Term a (succ c2)) (noConfusionTerm (succ c1) (ifthen true a b) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen true a b) -> Eq {0} Term a c2) (q : Eq {0} Term (succ c1) (ifthen true a b)) -> absurd (Eq {0} Term a (succ c2)) (noConfusionTerm (succ c1) (ifthen true a b) q))
 solve
 along
-try (\ (q : Eq Term (pred zero) (ifthen true a b)) -> absurd (Eq Term a zero) (noConfusionTerm (pred zero) (ifthen true a b) q))
+try (\ (q : Eq {0} Term (pred zero) (ifthen true a b)) -> absurd (Eq {0} Term a zero) (noConfusionTerm (pred zero) (ifthen true a b) q))
 solve
 along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (pred (succ c1)) (ifthen true a b)) -> absurd (Eq Term a c1) (noConfusionTerm (pred (succ c1)) (ifthen true a b) q))
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (ifthen true a b)) -> absurd (Eq {0} Term a c1) (noConfusionTerm (pred (succ c1)) (ifthen true a b) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (ifthen true a b) -> Eq Term a c2) (q : Eq Term (pred c1) (ifthen true a b)) -> absurd (Eq Term a (pred c2)) (noConfusionTerm (pred c1) (ifthen true a b) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen true a b) -> Eq {0} Term a c2) (q : Eq {0} Term (pred c1) (ifthen true a b)) -> absurd (Eq {0} Term a (pred c2)) (noConfusionTerm (pred c1) (ifthen true a b) q))
 solve
 along
-try (\ (q : Eq Term (iszero zero) (ifthen true a b)) -> absurd (Eq Term a true) (noConfusionTerm (iszero zero) (ifthen true a b) q))
+try (\ (q : Eq {0} Term (iszero zero) (ifthen true a b)) -> absurd (Eq {0} Term a true) (noConfusionTerm (iszero zero) (ifthen true a b) q))
 solve
 along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (iszero (succ c1)) (ifthen true a b)) -> absurd (Eq Term a false) (noConfusionTerm (iszero (succ c1)) (ifthen true a b) q))
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (ifthen true a b)) -> absurd (Eq {0} Term a false) (noConfusionTerm (iszero (succ c1)) (ifthen true a b) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (ifthen true a b) -> Eq Term a c2) (q : Eq Term (iszero c1) (ifthen true a b)) -> absurd (Eq Term a (iszero c2)) (noConfusionTerm (iszero c1) (ifthen true a b) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen true a b) -> Eq {0} Term a c2) (q : Eq {0} Term (iszero c1) (ifthen true a b)) -> absurd (Eq {0} Term a (iszero c2)) (noConfusionTerm (iszero c1) (ifthen true a b) q))
 solve
 along
 solve
@@ -473,7 +473,7 @@ back
 back
 solve
 qed
-:theorem invIfFalse : ∀ (a : Term) (b : Term) (u : Term) (s : Step (ifthen false a b) u) -> Eq Term b u
+:theorem invIfFalse : ∀ (a : Term) (b : Term) (u : Term) (s : Step (ifthen false a b) u) -> Eq {0} Term b u
 attack
 intro
 intro
@@ -495,34 +495,34 @@ back
 back
 back
 back
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen true c1 c2) (ifthen false a b)) -> (\ (nc4 : And (Eq Term true false) (And (Eq Term c1 a) (Eq Term c2 b))) -> (\ (e1 : Eq Term true false) (e2 : Eq Term c1 a) (e3 : Eq Term c2 b) -> absurd (Eq Term b c1) (noConfusionTerm true false e1)) (andLeft (Eq Term true false) (And (Eq Term c1 a) (Eq Term c2 b)) (nc4)) (andLeft (Eq Term c1 a) (Eq Term c2 b) (andRight (Eq Term true false) (And (Eq Term c1 a) (Eq Term c2 b)) (nc4))) (andRight (Eq Term c1 a) (Eq Term c2 b) (andRight (Eq Term true false) (And (Eq Term c1 a) (Eq Term c2 b)) (nc4)))) (noConfusionTerm (ifthen true c1 c2) (ifthen false a b) q))
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (ifthen false a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term true false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b))) -> (\ (e1 : Eq {0} Term true false) (e2 : Eq {0} Term c1 a) (e3 : Eq {0} Term c2 b) -> absurd (Eq {0} Term b c1) (noConfusionTerm true false e1)) (andLeft (Eq {0} Term true false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)) (andLeft (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight (Eq {0} Term true false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4))) (andRight (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight (Eq {0} Term true false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)))) (noConfusionTerm (ifthen true c1 c2) (ifthen false a b) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen false c1 c2) (ifthen false a b)) -> (\ (nc4 : And (Eq Term false false) (And (Eq Term c1 a) (Eq Term c2 b))) -> (\ (e1 : Eq Term false false) (e2 : Eq Term c1 a) (e3 : Eq Term c2 b) -> sym Term c2 b e3) (andLeft (Eq Term false false) (And (Eq Term c1 a) (Eq Term c2 b)) (nc4)) (andLeft (Eq Term c1 a) (Eq Term c2 b) (andRight (Eq Term false false) (And (Eq Term c1 a) (Eq Term c2 b)) (nc4))) (andRight (Eq Term c1 a) (Eq Term c2 b) (andRight (Eq Term false false) (And (Eq Term c1 a) (Eq Term c2 b)) (nc4)))) (noConfusionTerm (ifthen false c1 c2) (ifthen false a b) q))
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (ifthen false a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term false false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b))) -> (\ (e1 : Eq {0} Term false false) (e2 : Eq {0} Term c1 a) (e3 : Eq {0} Term c2 b) -> sym Term c2 b e3) (andLeft (Eq {0} Term false false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)) (andLeft (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight (Eq {0} Term false false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4))) (andRight (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight (Eq {0} Term false false) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)))) (noConfusionTerm (ifthen false c1 c2) (ifthen false a b) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (ifthen false a b) -> Eq Term b c2) (q : Eq Term (ifthen c1 c3 c4) (ifthen false a b)) -> (\ (nc4 : And (Eq Term c1 false) (And (Eq Term c3 a) (Eq Term c4 b))) -> (\ (e1 : Eq Term c1 false) (e2 : Eq Term c3 a) (e3 : Eq Term c4 b) -> absurd (Eq Term b (ifthen c2 c3 c4)) (falseNoStep c2 (subst Term (\ (x : Term) -> Step x c2) c1 false (e1) (sr)))) (andLeft (Eq Term c1 false) (And (Eq Term c3 a) (Eq Term c4 b)) (nc4)) (andLeft (Eq Term c3 a) (Eq Term c4 b) (andRight (Eq Term c1 false) (And (Eq Term c3 a) (Eq Term c4 b)) (nc4))) (andRight (Eq Term c3 a) (Eq Term c4 b) (andRight (Eq Term c1 false) (And (Eq Term c3 a) (Eq Term c4 b)) (nc4)))) (noConfusionTerm (ifthen c1 c3 c4) (ifthen false a b) q))
+try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen false a b) -> Eq {0} Term b c2) (q : Eq {0} Term (ifthen c1 c3 c4) (ifthen false a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term c1 false) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b))) -> (\ (e1 : Eq {0} Term c1 false) (e2 : Eq {0} Term c3 a) (e3 : Eq {0} Term c4 b) -> absurd (Eq {0} Term b (ifthen c2 c3 c4)) (falseNoStep c2 (subst Term (\ (x : Term) -> Step x c2) c1 false (e1) (sr)))) (andLeft (Eq {0} Term c1 false) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4)) (andLeft (Eq {0} Term c3 a) (Eq {0} Term c4 b) (andRight (Eq {0} Term c1 false) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4))) (andRight (Eq {0} Term c3 a) (Eq {0} Term c4 b) (andRight (Eq {0} Term c1 false) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4)))) (noConfusionTerm (ifthen c1 c3 c4) (ifthen false a b) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (ifthen false a b) -> Eq Term b c2) (q : Eq Term (succ c1) (ifthen false a b)) -> absurd (Eq Term b (succ c2)) (noConfusionTerm (succ c1) (ifthen false a b) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen false a b) -> Eq {0} Term b c2) (q : Eq {0} Term (succ c1) (ifthen false a b)) -> absurd (Eq {0} Term b (succ c2)) (noConfusionTerm (succ c1) (ifthen false a b) q))
 solve
 along
-try (\ (q : Eq Term (pred zero) (ifthen false a b)) -> absurd (Eq Term b zero) (noConfusionTerm (pred zero) (ifthen false a b) q))
+try (\ (q : Eq {0} Term (pred zero) (ifthen false a b)) -> absurd (Eq {0} Term b zero) (noConfusionTerm (pred zero) (ifthen false a b) q))
 solve
 along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (pred (succ c1)) (ifthen false a b)) -> absurd (Eq Term b c1) (noConfusionTerm (pred (succ c1)) (ifthen false a b) q))
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (ifthen false a b)) -> absurd (Eq {0} Term b c1) (noConfusionTerm (pred (succ c1)) (ifthen false a b) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (ifthen false a b) -> Eq Term b c2) (q : Eq Term (pred c1) (ifthen false a b)) -> absurd (Eq Term b (pred c2)) (noConfusionTerm (pred c1) (ifthen false a b) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen false a b) -> Eq {0} Term b c2) (q : Eq {0} Term (pred c1) (ifthen false a b)) -> absurd (Eq {0} Term b (pred c2)) (noConfusionTerm (pred c1) (ifthen false a b) q))
 solve
 along
-try (\ (q : Eq Term (iszero zero) (ifthen false a b)) -> absurd (Eq Term b true) (noConfusionTerm (iszero zero) (ifthen false a b) q))
+try (\ (q : Eq {0} Term (iszero zero) (ifthen false a b)) -> absurd (Eq {0} Term b true) (noConfusionTerm (iszero zero) (ifthen false a b) q))
 solve
 along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (iszero (succ c1)) (ifthen false a b)) -> absurd (Eq Term b false) (noConfusionTerm (iszero (succ c1)) (ifthen false a b) q))
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (ifthen false a b)) -> absurd (Eq {0} Term b false) (noConfusionTerm (iszero (succ c1)) (ifthen false a b) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (ifthen false a b) -> Eq Term b c2) (q : Eq Term (iszero c1) (ifthen false a b)) -> absurd (Eq Term b (iszero c2)) (noConfusionTerm (iszero c1) (ifthen false a b) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen false a b) -> Eq {0} Term b c2) (q : Eq {0} Term (iszero c1) (ifthen false a b)) -> absurd (Eq {0} Term b (iszero c2)) (noConfusionTerm (iszero c1) (ifthen false a b) q))
 solve
 along
 solve
@@ -543,7 +543,7 @@ back
 back
 solve
 qed
-:theorem invIf : ∀ (p : Term) (p' : Term) (a : Term) (b : Term) (s0 : Step p p') (ih0 : ∀ (w : Term) (sw : Step p w) -> Eq Term p' w) (u : Term) (s : Step (ifthen p a b) u) -> Eq Term (ifthen p' a b) u
+:theorem invIf : ∀ (p : Term) (p' : Term) (a : Term) (b : Term) (s0 : Step p p') (ih0 : ∀ (w : Term) (sw : Step p w) -> Eq {0} Term p' w) (u : Term) (s : Step (ifthen p a b) u) -> Eq {0} Term (ifthen p' a b) u
 attack
 intro
 intro
@@ -573,115 +573,39 @@ back
 back
 back
 back
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen true c1 c2) (ifthen p a b)) -> (\ (nc4 : And (Eq Term true p) (And (Eq Term c1 a) (Eq Term c2 b))) -> (\ (e1 : Eq Term true p) (e2 : Eq Term c1 a) (e3 : Eq Term c2 b) -> absurd (Eq Term (ifthen p' a b) c1) (trueNoStep p' (subst Term (\ (x : Term) -> Step x p') p true (sym Term true p e1) (s0)))) (andLeft (Eq Term true p) (And (Eq Term c1 a) (Eq Term c2 b)) (nc4)) (andLeft (Eq Term c1 a) (Eq Term c2 b) (andRight (Eq Term true p) (And (Eq Term c1 a) (Eq Term c2 b)) (nc4))) (andRight (Eq Term c1 a) (Eq Term c2 b) (andRight (Eq Term true p) (And (Eq Term c1 a) (Eq Term c2 b)) (nc4)))) (noConfusionTerm (ifthen true c1 c2) (ifthen p a b) q))
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (ifthen p a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term true p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b))) -> (\ (e1 : Eq {0} Term true p) (e2 : Eq {0} Term c1 a) (e3 : Eq {0} Term c2 b) -> absurd (Eq {0} Term (ifthen p' a b) c1) (trueNoStep p' (subst Term (\ (x : Term) -> Step x p') p true (sym Term true p e1) (s0)))) (andLeft (Eq {0} Term true p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)) (andLeft (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight (Eq {0} Term true p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4))) (andRight (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight (Eq {0} Term true p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)))) (noConfusionTerm (ifthen true c1 c2) (ifthen p a b) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen false c1 c2) (ifthen p a b)) -> (\ (nc4 : And (Eq Term false p) (And (Eq Term c1 a) (Eq Term c2 b))) -> (\ (e1 : Eq Term false p) (e2 : Eq Term c1 a) (e3 : Eq Term c2 b) -> absurd (Eq Term (ifthen p' a b) c2) (falseNoStep p' (subst Term (\ (x : Term) -> Step x p') p false (sym Term false p e1) (s0)))) (andLeft (Eq Term false p) (And (Eq Term c1 a) (Eq Term c2 b)) (nc4)) (andLeft (Eq Term c1 a) (Eq Term c2 b) (andRight (Eq Term false p) (And (Eq Term c1 a) (Eq Term c2 b)) (nc4))) (andRight (Eq Term c1 a) (Eq Term c2 b) (andRight (Eq Term false p) (And (Eq Term c1 a) (Eq Term c2 b)) (nc4)))) (noConfusionTerm (ifthen false c1 c2) (ifthen p a b) q))
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (ifthen p a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term false p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b))) -> (\ (e1 : Eq {0} Term false p) (e2 : Eq {0} Term c1 a) (e3 : Eq {0} Term c2 b) -> absurd (Eq {0} Term (ifthen p' a b) c2) (falseNoStep p' (subst Term (\ (x : Term) -> Step x p') p false (sym Term false p e1) (s0)))) (andLeft (Eq {0} Term false p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)) (andLeft (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight (Eq {0} Term false p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4))) (andRight (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight (Eq {0} Term false p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)))) (noConfusionTerm (ifthen false c1 c2) (ifthen p a b) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (ifthen p a b) -> Eq Term (ifthen p' a b) c2) (q : Eq Term (ifthen c1 c3 c4) (ifthen p a b)) -> (\ (nc4 : And (Eq Term c1 p) (And (Eq Term c3 a) (Eq Term c4 b))) -> (\ (e1 : Eq Term c1 p) (e2 : Eq Term c3 a) (e3 : Eq Term c4 b) -> trans Term (ifthen p' a b) (ifthen c2 a b) (ifthen c2 c3 c4) (cong Term Term (\ (x : Term) -> ifthen x a b) p' c2 (ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 p (e1) (sr)))) (trans Term (ifthen c2 a b) (ifthen c2 c3 b) (ifthen c2 c3 c4) (cong Term Term (\ (x : Term) -> ifthen c2 x b) a c3 (sym Term c3 a e2)) (cong Term Term (\ (x : Term) -> ifthen c2 c3 x) b c4 (sym Term c4 b e3)))) (andLeft (Eq Term c1 p) (And (Eq Term c3 a) (Eq Term c4 b)) (nc4)) (andLeft (Eq Term c3 a) (Eq Term c4 b) (andRight (Eq Term c1 p) (And (Eq Term c3 a) (Eq Term c4 b)) (nc4))) (andRight (Eq Term c3 a) (Eq Term c4 b) (andRight (Eq Term c1 p) (And (Eq Term c3 a) (Eq Term c4 b)) (nc4)))) (noConfusionTerm (ifthen c1 c3 c4) (ifthen p a b) q))
+try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen p a b) -> Eq {0} Term (ifthen p' a b) c2) (q : Eq {0} Term (ifthen c1 c3 c4) (ifthen p a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term c1 p) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b))) -> (\ (e1 : Eq {0} Term c1 p) (e2 : Eq {0} Term c3 a) (e3 : Eq {0} Term c4 b) -> trans Term (ifthen p' a b) (ifthen c2 a b) (ifthen c2 c3 c4) (cong Term Term (\ (x : Term) -> ifthen x a b) p' c2 (ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 p (e1) (sr)))) (trans Term (ifthen c2 a b) (ifthen c2 c3 b) (ifthen c2 c3 c4) (cong Term Term (\ (x : Term) -> ifthen c2 x b) a c3 (sym Term c3 a e2)) (cong Term Term (\ (x : Term) -> ifthen c2 c3 x) b c4 (sym Term c4 b e3)))) (andLeft (Eq {0} Term c1 p) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4)) (andLeft (Eq {0} Term c3 a) (Eq {0} Term c4 b) (andRight (Eq {0} Term c1 p) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4))) (andRight (Eq {0} Term c3 a) (Eq {0} Term c4 b) (andRight (Eq {0} Term c1 p) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4)))) (noConfusionTerm (ifthen c1 c3 c4) (ifthen p a b) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (ifthen p a b) -> Eq Term (ifthen p' a b) c2) (q : Eq Term (succ c1) (ifthen p a b)) -> absurd (Eq Term (ifthen p' a b) (succ c2)) (noConfusionTerm (succ c1) (ifthen p a b) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen p a b) -> Eq {0} Term (ifthen p' a b) c2) (q : Eq {0} Term (succ c1) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) (succ c2)) (noConfusionTerm (succ c1) (ifthen p a b) q))
 solve
 along
-try (\ (q : Eq Term (pred zero) (ifthen p a b)) -> absurd (Eq Term (ifthen p' a b) zero) (noConfusionTerm (pred zero) (ifthen p a b) q))
+try (\ (q : Eq {0} Term (pred zero) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) zero) (noConfusionTerm (pred zero) (ifthen p a b) q))
 solve
 along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (pred (succ c1)) (ifthen p a b)) -> absurd (Eq Term (ifthen p' a b) c1) (noConfusionTerm (pred (succ c1)) (ifthen p a b) q))
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) c1) (noConfusionTerm (pred (succ c1)) (ifthen p a b) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (ifthen p a b) -> Eq Term (ifthen p' a b) c2) (q : Eq Term (pred c1) (ifthen p a b)) -> absurd (Eq Term (ifthen p' a b) (pred c2)) (noConfusionTerm (pred c1) (ifthen p a b) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen p a b) -> Eq {0} Term (ifthen p' a b) c2) (q : Eq {0} Term (pred c1) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) (pred c2)) (noConfusionTerm (pred c1) (ifthen p a b) q))
 solve
 along
-try (\ (q : Eq Term (iszero zero) (ifthen p a b)) -> absurd (Eq Term (ifthen p' a b) true) (noConfusionTerm (iszero zero) (ifthen p a b) q))
+try (\ (q : Eq {0} Term (iszero zero) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) true) (noConfusionTerm (iszero zero) (ifthen p a b) q))
 solve
 along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (iszero (succ c1)) (ifthen p a b)) -> absurd (Eq Term (ifthen p' a b) false) (noConfusionTerm (iszero (succ c1)) (ifthen p a b) q))
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) false) (noConfusionTerm (iszero (succ c1)) (ifthen p a b) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (ifthen p a b) -> Eq Term (ifthen p' a b) c2) (q : Eq Term (iszero c1) (ifthen p a b)) -> absurd (Eq Term (ifthen p' a b) (iszero c2)) (noConfusionTerm (iszero c1) (ifthen p a b) q))
-solve
-along
-solve
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-solve
-qed
-:theorem invSucc : ∀ (p : Term) (p' : Term) (s0 : Step p p') (ih0 : ∀ (w : Term) (sw : Step p w) -> Eq Term p' w) (u : Term) (s : Step (succ p) u) -> Eq Term (succ p') u
-attack
-intro
-intro
-intro
-intro
-intro
-intro
-into
-along
-along
-along
-along
-along
-along
-eliminate s
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen true c1 c2) (succ p)) -> absurd (Eq Term (succ p') c1) (noConfusionTerm (ifthen true c1 c2) (succ p) q))
-solve
-along
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen false c1 c2) (succ p)) -> absurd (Eq Term (succ p') c2) (noConfusionTerm (ifthen false c1 c2) (succ p) q))
-solve
-along
-try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (succ p) -> Eq Term (succ p') c2) (q : Eq Term (ifthen c1 c3 c4) (succ p)) -> absurd (Eq Term (succ p') (ifthen c2 c3 c4)) (noConfusionTerm (ifthen c1 c3 c4) (succ p) q))
-solve
-along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (succ p) -> Eq Term (succ p') c2) (q : Eq Term (succ c1) (succ p)) -> (\ (nc2 : Eq Term c1 p) -> (\ (e1 : Eq Term c1 p) -> cong Term Term (\ (x : Term) -> succ x) p' c2 (ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 p (e1) (sr)))) (nc2)) (noConfusionTerm (succ c1) (succ p) q))
-solve
-along
-try (\ (q : Eq Term (pred zero) (succ p)) -> absurd (Eq Term (succ p') zero) (noConfusionTerm (pred zero) (succ p) q))
-solve
-along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (pred (succ c1)) (succ p)) -> absurd (Eq Term (succ p') c1) (noConfusionTerm (pred (succ c1)) (succ p) q))
-solve
-along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (succ p) -> Eq Term (succ p') c2) (q : Eq Term (pred c1) (succ p)) -> absurd (Eq Term (succ p') (pred c2)) (noConfusionTerm (pred c1) (succ p) q))
-solve
-along
-try (\ (q : Eq Term (iszero zero) (succ p)) -> absurd (Eq Term (succ p') true) (noConfusionTerm (iszero zero) (succ p) q))
-solve
-along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (iszero (succ c1)) (succ p)) -> absurd (Eq Term (succ p') false) (noConfusionTerm (iszero (succ c1)) (succ p) q))
-solve
-along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (succ p) -> Eq Term (succ p') c2) (q : Eq Term (iszero c1) (succ p)) -> absurd (Eq Term (succ p') (iszero c2)) (noConfusionTerm (iszero c1) (succ p) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen p a b) -> Eq {0} Term (ifthen p' a b) c2) (q : Eq {0} Term (iszero c1) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) (iszero c2)) (noConfusionTerm (iszero c1) (ifthen p a b) q))
 solve
 along
 solve
+back
+back
 back
 back
 back
@@ -701,141 +625,7 @@ back
 back
 solve
 qed
-:theorem invPredZero : ∀ (u : Term) (s : Step (pred zero) u) -> Eq Term zero u
-attack
-intro
-intro
-into
-along
-along
-eliminate s
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen true c1 c2) (pred zero)) -> absurd (Eq Term zero c1) (noConfusionTerm (ifthen true c1 c2) (pred zero) q))
-solve
-along
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen false c1 c2) (pred zero)) -> absurd (Eq Term zero c2) (noConfusionTerm (ifthen false c1 c2) (pred zero) q))
-solve
-along
-try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (pred zero) -> Eq Term zero c2) (q : Eq Term (ifthen c1 c3 c4) (pred zero)) -> absurd (Eq Term zero (ifthen c2 c3 c4)) (noConfusionTerm (ifthen c1 c3 c4) (pred zero) q))
-solve
-along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (pred zero) -> Eq Term zero c2) (q : Eq Term (succ c1) (pred zero)) -> absurd (Eq Term zero (succ c2)) (noConfusionTerm (succ c1) (pred zero) q))
-solve
-along
-try (\ (q : Eq Term (pred zero) (pred zero)) -> (\ (nc2 : Eq Term zero zero) -> (\ (e1 : Eq Term zero zero) -> refl Term zero) (nc2)) (noConfusionTerm (pred zero) (pred zero) q))
-solve
-along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (pred (succ c1)) (pred zero)) -> (\ (nc2 : Eq Term (succ c1) zero) -> (\ (e1 : Eq Term (succ c1) zero) -> absurd (Eq Term zero c1) (noConfusionTerm (succ c1) zero e1)) (nc2)) (noConfusionTerm (pred (succ c1)) (pred zero) q))
-solve
-along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (pred zero) -> Eq Term zero c2) (q : Eq Term (pred c1) (pred zero)) -> (\ (nc2 : Eq Term c1 zero) -> (\ (e1 : Eq Term c1 zero) -> absurd (Eq Term zero (pred c2)) (zeroNoStep c2 (subst Term (\ (x : Term) -> Step x c2) c1 zero (e1) (sr)))) (nc2)) (noConfusionTerm (pred c1) (pred zero) q))
-solve
-along
-try (\ (q : Eq Term (iszero zero) (pred zero)) -> absurd (Eq Term zero true) (noConfusionTerm (iszero zero) (pred zero) q))
-solve
-along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (iszero (succ c1)) (pred zero)) -> absurd (Eq Term zero false) (noConfusionTerm (iszero (succ c1)) (pred zero) q))
-solve
-along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (pred zero) -> Eq Term zero c2) (q : Eq Term (iszero c1) (pred zero)) -> absurd (Eq Term zero (iszero c2)) (noConfusionTerm (iszero c1) (pred zero) q))
-solve
-along
-solve
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-solve
-qed
-:theorem invPredSucc : ∀ (v : Term) (nv : NV v) (u : Term) (s : Step (pred (succ v)) u) -> Eq Term v u
-attack
-intro
-intro
-intro
-intro
-into
-along
-along
-along
-along
-eliminate s
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen true c1 c2) (pred (succ v))) -> absurd (Eq Term v c1) (noConfusionTerm (ifthen true c1 c2) (pred (succ v)) q))
-solve
-along
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen false c1 c2) (pred (succ v))) -> absurd (Eq Term v c2) (noConfusionTerm (ifthen false c1 c2) (pred (succ v)) q))
-solve
-along
-try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (pred (succ v)) -> Eq Term v c2) (q : Eq Term (ifthen c1 c3 c4) (pred (succ v))) -> absurd (Eq Term v (ifthen c2 c3 c4)) (noConfusionTerm (ifthen c1 c3 c4) (pred (succ v)) q))
-solve
-along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (pred (succ v)) -> Eq Term v c2) (q : Eq Term (succ c1) (pred (succ v))) -> absurd (Eq Term v (succ c2)) (noConfusionTerm (succ c1) (pred (succ v)) q))
-solve
-along
-try (\ (q : Eq Term (pred zero) (pred (succ v))) -> (\ (nc2 : Eq Term zero (succ v)) -> (\ (e1 : Eq Term zero (succ v)) -> absurd (Eq Term v zero) (noConfusionTerm zero (succ v) e1)) (nc2)) (noConfusionTerm (pred zero) (pred (succ v)) q))
-solve
-along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (pred (succ c1)) (pred (succ v))) -> (\ (nc2 : Eq Term (succ c1) (succ v)) -> (\ (e1 : Eq Term (succ c1) (succ v)) -> (\ (nc4 : Eq Term c1 v) -> (\ (e3 : Eq Term c1 v) -> sym Term c1 v e3) (nc4)) (noConfusionTerm (succ c1) (succ v) e1)) (nc2)) (noConfusionTerm (pred (succ c1)) (pred (succ v)) q))
-solve
-along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (pred (succ v)) -> Eq Term v c2) (q : Eq Term (pred c1) (pred (succ v))) -> (\ (nc2 : Eq Term c1 (succ v)) -> (\ (e1 : Eq Term c1 (succ v)) -> absurd (Eq Term v (pred c2)) (nvNoStep (succ v) (nvSucc v nv) c2 (subst Term (\ (x : Term) -> Step x c2) c1 (succ v) (e1) (sr)))) (nc2)) (noConfusionTerm (pred c1) (pred (succ v)) q))
-solve
-along
-try (\ (q : Eq Term (iszero zero) (pred (succ v))) -> absurd (Eq Term v true) (noConfusionTerm (iszero zero) (pred (succ v)) q))
-solve
-along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (iszero (succ c1)) (pred (succ v))) -> absurd (Eq Term v false) (noConfusionTerm (iszero (succ c1)) (pred (succ v)) q))
-solve
-along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (pred (succ v)) -> Eq Term v c2) (q : Eq Term (iszero c1) (pred (succ v))) -> absurd (Eq Term v (iszero c2)) (noConfusionTerm (iszero c1) (pred (succ v)) q))
-solve
-along
-solve
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-back
-solve
-qed
-:theorem invPred : ∀ (p : Term) (p' : Term) (s0 : Step p p') (ih0 : ∀ (w : Term) (sw : Step p w) -> Eq Term p' w) (u : Term) (s : Step (pred p) u) -> Eq Term (pred p') u
+:theorem invSucc : ∀ (p : Term) (p' : Term) (s0 : Step p p') (ih0 : ∀ (w : Term) (sw : Step p w) -> Eq {0} Term p' w) (u : Term) (s : Step (succ p) u) -> Eq {0} Term (succ p') u
 attack
 intro
 intro
@@ -861,34 +651,34 @@ back
 back
 back
 back
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen true c1 c2) (pred p)) -> absurd (Eq Term (pred p') c1) (noConfusionTerm (ifthen true c1 c2) (pred p) q))
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (succ p)) -> absurd (Eq {0} Term (succ p') c1) (noConfusionTerm (ifthen true c1 c2) (succ p) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen false c1 c2) (pred p)) -> absurd (Eq Term (pred p') c2) (noConfusionTerm (ifthen false c1 c2) (pred p) q))
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (succ p)) -> absurd (Eq {0} Term (succ p') c2) (noConfusionTerm (ifthen false c1 c2) (succ p) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (pred p) -> Eq Term (pred p') c2) (q : Eq Term (ifthen c1 c3 c4) (pred p)) -> absurd (Eq Term (pred p') (ifthen c2 c3 c4)) (noConfusionTerm (ifthen c1 c3 c4) (pred p) q))
+try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ p) -> Eq {0} Term (succ p') c2) (q : Eq {0} Term (ifthen c1 c3 c4) (succ p)) -> absurd (Eq {0} Term (succ p') (ifthen c2 c3 c4)) (noConfusionTerm (ifthen c1 c3 c4) (succ p) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (pred p) -> Eq Term (pred p') c2) (q : Eq Term (succ c1) (pred p)) -> absurd (Eq Term (pred p') (succ c2)) (noConfusionTerm (succ c1) (pred p) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ p) -> Eq {0} Term (succ p') c2) (q : Eq {0} Term (succ c1) (succ p)) -> (\ (nc2 : Eq {0} Term c1 p) -> (\ (e1 : Eq {0} Term c1 p) -> cong Term Term (\ (x : Term) -> succ x) p' c2 (ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 p (e1) (sr)))) (nc2)) (noConfusionTerm (succ c1) (succ p) q))
 solve
 along
-try (\ (q : Eq Term (pred zero) (pred p)) -> (\ (nc2 : Eq Term zero p) -> (\ (e1 : Eq Term zero p) -> absurd (Eq Term (pred p') zero) (zeroNoStep p' (subst Term (\ (x : Term) -> Step x p') p zero (sym Term zero p e1) (s0)))) (nc2)) (noConfusionTerm (pred zero) (pred p) q))
+try (\ (q : Eq {0} Term (pred zero) (succ p)) -> absurd (Eq {0} Term (succ p') zero) (noConfusionTerm (pred zero) (succ p) q))
 solve
 along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (pred (succ c1)) (pred p)) -> (\ (nc2 : Eq Term (succ c1) p) -> (\ (e1 : Eq Term (succ c1) p) -> absurd (Eq Term (pred p') c1) (nvNoStep (succ c1) (nvSucc c1 nv1) p' (subst Term (\ (x : Term) -> Step x p') p (succ c1) (sym Term (succ c1) p e1) (s0)))) (nc2)) (noConfusionTerm (pred (succ c1)) (pred p) q))
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (succ p)) -> absurd (Eq {0} Term (succ p') c1) (noConfusionTerm (pred (succ c1)) (succ p) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (pred p) -> Eq Term (pred p') c2) (q : Eq Term (pred c1) (pred p)) -> (\ (nc2 : Eq Term c1 p) -> (\ (e1 : Eq Term c1 p) -> cong Term Term (\ (x : Term) -> pred x) p' c2 (ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 p (e1) (sr)))) (nc2)) (noConfusionTerm (pred c1) (pred p) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ p) -> Eq {0} Term (succ p') c2) (q : Eq {0} Term (pred c1) (succ p)) -> absurd (Eq {0} Term (succ p') (pred c2)) (noConfusionTerm (pred c1) (succ p) q))
 solve
 along
-try (\ (q : Eq Term (iszero zero) (pred p)) -> absurd (Eq Term (pred p') true) (noConfusionTerm (iszero zero) (pred p) q))
+try (\ (q : Eq {0} Term (iszero zero) (succ p)) -> absurd (Eq {0} Term (succ p') true) (noConfusionTerm (iszero zero) (succ p) q))
 solve
 along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (iszero (succ c1)) (pred p)) -> absurd (Eq Term (pred p') false) (noConfusionTerm (iszero (succ c1)) (pred p) q))
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (succ p)) -> absurd (Eq {0} Term (succ p') false) (noConfusionTerm (iszero (succ c1)) (succ p) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (pred p) -> Eq Term (pred p') c2) (q : Eq Term (iszero c1) (pred p)) -> absurd (Eq Term (pred p') (iszero c2)) (noConfusionTerm (iszero c1) (pred p) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (succ p) -> Eq {0} Term (succ p') c2) (q : Eq {0} Term (iszero c1) (succ p)) -> absurd (Eq {0} Term (succ p') (iszero c2)) (noConfusionTerm (iszero c1) (succ p) q))
 solve
 along
 solve
@@ -911,7 +701,7 @@ back
 back
 solve
 qed
-:theorem invIsZeroZero : ∀ (u : Term) (s : Step (iszero zero) u) -> Eq Term true u
+:theorem invPredZero : ∀ (u : Term) (s : Step (pred zero) u) -> Eq {0} Term zero u
 attack
 intro
 intro
@@ -929,34 +719,34 @@ back
 back
 back
 back
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen true c1 c2) (iszero zero)) -> absurd (Eq Term true c1) (noConfusionTerm (ifthen true c1 c2) (iszero zero) q))
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (pred zero)) -> absurd (Eq {0} Term zero c1) (noConfusionTerm (ifthen true c1 c2) (pred zero) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen false c1 c2) (iszero zero)) -> absurd (Eq Term true c2) (noConfusionTerm (ifthen false c1 c2) (iszero zero) q))
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (pred zero)) -> absurd (Eq {0} Term zero c2) (noConfusionTerm (ifthen false c1 c2) (pred zero) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (iszero zero) -> Eq Term true c2) (q : Eq Term (ifthen c1 c3 c4) (iszero zero)) -> absurd (Eq Term true (ifthen c2 c3 c4)) (noConfusionTerm (ifthen c1 c3 c4) (iszero zero) q))
+try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred zero) -> Eq {0} Term zero c2) (q : Eq {0} Term (ifthen c1 c3 c4) (pred zero)) -> absurd (Eq {0} Term zero (ifthen c2 c3 c4)) (noConfusionTerm (ifthen c1 c3 c4) (pred zero) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (iszero zero) -> Eq Term true c2) (q : Eq Term (succ c1) (iszero zero)) -> absurd (Eq Term true (succ c2)) (noConfusionTerm (succ c1) (iszero zero) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred zero) -> Eq {0} Term zero c2) (q : Eq {0} Term (succ c1) (pred zero)) -> absurd (Eq {0} Term zero (succ c2)) (noConfusionTerm (succ c1) (pred zero) q))
 solve
 along
-try (\ (q : Eq Term (pred zero) (iszero zero)) -> absurd (Eq Term true zero) (noConfusionTerm (pred zero) (iszero zero) q))
+try (\ (q : Eq {0} Term (pred zero) (pred zero)) -> (\ (nc2 : Eq {0} Term zero zero) -> (\ (e1 : Eq {0} Term zero zero) -> refl {0} Term zero) (nc2)) (noConfusionTerm (pred zero) (pred zero) q))
 solve
 along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (pred (succ c1)) (iszero zero)) -> absurd (Eq Term true c1) (noConfusionTerm (pred (succ c1)) (iszero zero) q))
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (pred zero)) -> (\ (nc2 : Eq {0} Term (succ c1) zero) -> (\ (e1 : Eq {0} Term (succ c1) zero) -> absurd (Eq {0} Term zero c1) (noConfusionTerm (succ c1) zero e1)) (nc2)) (noConfusionTerm (pred (succ c1)) (pred zero) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (iszero zero) -> Eq Term true c2) (q : Eq Term (pred c1) (iszero zero)) -> absurd (Eq Term true (pred c2)) (noConfusionTerm (pred c1) (iszero zero) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred zero) -> Eq {0} Term zero c2) (q : Eq {0} Term (pred c1) (pred zero)) -> (\ (nc2 : Eq {0} Term c1 zero) -> (\ (e1 : Eq {0} Term c1 zero) -> absurd (Eq {0} Term zero (pred c2)) (zeroNoStep c2 (subst Term (\ (x : Term) -> Step x c2) c1 zero (e1) (sr)))) (nc2)) (noConfusionTerm (pred c1) (pred zero) q))
 solve
 along
-try (\ (q : Eq Term (iszero zero) (iszero zero)) -> (\ (nc2 : Eq Term zero zero) -> (\ (e1 : Eq Term zero zero) -> refl Term true) (nc2)) (noConfusionTerm (iszero zero) (iszero zero) q))
+try (\ (q : Eq {0} Term (iszero zero) (pred zero)) -> absurd (Eq {0} Term zero true) (noConfusionTerm (iszero zero) (pred zero) q))
 solve
 along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (iszero (succ c1)) (iszero zero)) -> (\ (nc2 : Eq Term (succ c1) zero) -> (\ (e1 : Eq Term (succ c1) zero) -> absurd (Eq Term true false) (noConfusionTerm (succ c1) zero e1)) (nc2)) (noConfusionTerm (iszero (succ c1)) (iszero zero) q))
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (pred zero)) -> absurd (Eq {0} Term zero false) (noConfusionTerm (iszero (succ c1)) (pred zero) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (iszero zero) -> Eq Term true c2) (q : Eq Term (iszero c1) (iszero zero)) -> (\ (nc2 : Eq Term c1 zero) -> (\ (e1 : Eq Term c1 zero) -> absurd (Eq Term true (iszero c2)) (zeroNoStep c2 (subst Term (\ (x : Term) -> Step x c2) c1 zero (e1) (sr)))) (nc2)) (noConfusionTerm (iszero c1) (iszero zero) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred zero) -> Eq {0} Term zero c2) (q : Eq {0} Term (iszero c1) (pred zero)) -> absurd (Eq {0} Term zero (iszero c2)) (noConfusionTerm (iszero c1) (pred zero) q))
 solve
 along
 solve
@@ -975,7 +765,7 @@ back
 back
 solve
 qed
-:theorem invIsZeroSucc : ∀ (v : Term) (nv : NV v) (u : Term) (s : Step (iszero (succ v)) u) -> Eq Term false u
+:theorem invPredSucc : ∀ (v : Term) (nv : NV v) (u : Term) (s : Step (pred (succ v)) u) -> Eq {0} Term v u
 attack
 intro
 intro
@@ -997,34 +787,34 @@ back
 back
 back
 back
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen true c1 c2) (iszero (succ v))) -> absurd (Eq Term false c1) (noConfusionTerm (ifthen true c1 c2) (iszero (succ v)) q))
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (pred (succ v))) -> absurd (Eq {0} Term v c1) (noConfusionTerm (ifthen true c1 c2) (pred (succ v)) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen false c1 c2) (iszero (succ v))) -> absurd (Eq Term false c2) (noConfusionTerm (ifthen false c1 c2) (iszero (succ v)) q))
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (pred (succ v))) -> absurd (Eq {0} Term v c2) (noConfusionTerm (ifthen false c1 c2) (pred (succ v)) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (iszero (succ v)) -> Eq Term false c2) (q : Eq Term (ifthen c1 c3 c4) (iszero (succ v))) -> absurd (Eq Term false (ifthen c2 c3 c4)) (noConfusionTerm (ifthen c1 c3 c4) (iszero (succ v)) q))
+try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred (succ v)) -> Eq {0} Term v c2) (q : Eq {0} Term (ifthen c1 c3 c4) (pred (succ v))) -> absurd (Eq {0} Term v (ifthen c2 c3 c4)) (noConfusionTerm (ifthen c1 c3 c4) (pred (succ v)) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (iszero (succ v)) -> Eq Term false c2) (q : Eq Term (succ c1) (iszero (succ v))) -> absurd (Eq Term false (succ c2)) (noConfusionTerm (succ c1) (iszero (succ v)) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred (succ v)) -> Eq {0} Term v c2) (q : Eq {0} Term (succ c1) (pred (succ v))) -> absurd (Eq {0} Term v (succ c2)) (noConfusionTerm (succ c1) (pred (succ v)) q))
 solve
 along
-try (\ (q : Eq Term (pred zero) (iszero (succ v))) -> absurd (Eq Term false zero) (noConfusionTerm (pred zero) (iszero (succ v)) q))
+try (\ (q : Eq {0} Term (pred zero) (pred (succ v))) -> (\ (nc2 : Eq {0} Term zero (succ v)) -> (\ (e1 : Eq {0} Term zero (succ v)) -> absurd (Eq {0} Term v zero) (noConfusionTerm zero (succ v) e1)) (nc2)) (noConfusionTerm (pred zero) (pred (succ v)) q))
 solve
 along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (pred (succ c1)) (iszero (succ v))) -> absurd (Eq Term false c1) (noConfusionTerm (pred (succ c1)) (iszero (succ v)) q))
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (pred (succ v))) -> (\ (nc2 : Eq {0} Term (succ c1) (succ v)) -> (\ (e1 : Eq {0} Term (succ c1) (succ v)) -> (\ (nc4 : Eq {0} Term c1 v) -> (\ (e3 : Eq {0} Term c1 v) -> sym Term c1 v e3) (nc4)) (noConfusionTerm (succ c1) (succ v) e1)) (nc2)) (noConfusionTerm (pred (succ c1)) (pred (succ v)) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (iszero (succ v)) -> Eq Term false c2) (q : Eq Term (pred c1) (iszero (succ v))) -> absurd (Eq Term false (pred c2)) (noConfusionTerm (pred c1) (iszero (succ v)) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred (succ v)) -> Eq {0} Term v c2) (q : Eq {0} Term (pred c1) (pred (succ v))) -> (\ (nc2 : Eq {0} Term c1 (succ v)) -> (\ (e1 : Eq {0} Term c1 (succ v)) -> absurd (Eq {0} Term v (pred c2)) (nvNoStep (succ v) (nvSucc v nv) c2 (subst Term (\ (x : Term) -> Step x c2) c1 (succ v) (e1) (sr)))) (nc2)) (noConfusionTerm (pred c1) (pred (succ v)) q))
 solve
 along
-try (\ (q : Eq Term (iszero zero) (iszero (succ v))) -> (\ (nc2 : Eq Term zero (succ v)) -> (\ (e1 : Eq Term zero (succ v)) -> absurd (Eq Term false true) (noConfusionTerm zero (succ v) e1)) (nc2)) (noConfusionTerm (iszero zero) (iszero (succ v)) q))
+try (\ (q : Eq {0} Term (iszero zero) (pred (succ v))) -> absurd (Eq {0} Term v true) (noConfusionTerm (iszero zero) (pred (succ v)) q))
 solve
 along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (iszero (succ c1)) (iszero (succ v))) -> (\ (nc2 : Eq Term (succ c1) (succ v)) -> (\ (e1 : Eq Term (succ c1) (succ v)) -> (\ (nc4 : Eq Term c1 v) -> (\ (e3 : Eq Term c1 v) -> refl Term false) (nc4)) (noConfusionTerm (succ c1) (succ v) e1)) (nc2)) (noConfusionTerm (iszero (succ c1)) (iszero (succ v)) q))
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (pred (succ v))) -> absurd (Eq {0} Term v false) (noConfusionTerm (iszero (succ c1)) (pred (succ v)) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (iszero (succ v)) -> Eq Term false c2) (q : Eq Term (iszero c1) (iszero (succ v))) -> (\ (nc2 : Eq Term c1 (succ v)) -> (\ (e1 : Eq Term c1 (succ v)) -> absurd (Eq Term false (iszero c2)) (nvNoStep (succ v) (nvSucc v nv) c2 (subst Term (\ (x : Term) -> Step x c2) c1 (succ v) (e1) (sr)))) (nc2)) (noConfusionTerm (iszero c1) (iszero (succ v)) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred (succ v)) -> Eq {0} Term v c2) (q : Eq {0} Term (iszero c1) (pred (succ v))) -> absurd (Eq {0} Term v (iszero c2)) (noConfusionTerm (iszero c1) (pred (succ v)) q))
 solve
 along
 solve
@@ -1045,7 +835,7 @@ back
 back
 solve
 qed
-:theorem invIsZero : ∀ (p : Term) (p' : Term) (s0 : Step p p') (ih0 : ∀ (w : Term) (sw : Step p w) -> Eq Term p' w) (u : Term) (s : Step (iszero p) u) -> Eq Term (iszero p') u
+:theorem invPred : ∀ (p : Term) (p' : Term) (s0 : Step p p') (ih0 : ∀ (w : Term) (sw : Step p w) -> Eq {0} Term p' w) (u : Term) (s : Step (pred p) u) -> Eq {0} Term (pred p') u
 attack
 intro
 intro
@@ -1071,34 +861,34 @@ back
 back
 back
 back
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen true c1 c2) (iszero p)) -> absurd (Eq Term (iszero p') c1) (noConfusionTerm (ifthen true c1 c2) (iszero p) q))
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (pred p)) -> absurd (Eq {0} Term (pred p') c1) (noConfusionTerm (ifthen true c1 c2) (pred p) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (q : Eq Term (ifthen false c1 c2) (iszero p)) -> absurd (Eq Term (iszero p') c2) (noConfusionTerm (ifthen false c1 c2) (iszero p) q))
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (pred p)) -> absurd (Eq {0} Term (pred p') c2) (noConfusionTerm (ifthen false c1 c2) (pred p) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (iszero p) -> Eq Term (iszero p') c2) (q : Eq Term (ifthen c1 c3 c4) (iszero p)) -> absurd (Eq Term (iszero p') (ifthen c2 c3 c4)) (noConfusionTerm (ifthen c1 c3 c4) (iszero p) q))
+try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred p) -> Eq {0} Term (pred p') c2) (q : Eq {0} Term (ifthen c1 c3 c4) (pred p)) -> absurd (Eq {0} Term (pred p') (ifthen c2 c3 c4)) (noConfusionTerm (ifthen c1 c3 c4) (pred p) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (iszero p) -> Eq Term (iszero p') c2) (q : Eq Term (succ c1) (iszero p)) -> absurd (Eq Term (iszero p') (succ c2)) (noConfusionTerm (succ c1) (iszero p) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred p) -> Eq {0} Term (pred p') c2) (q : Eq {0} Term (succ c1) (pred p)) -> absurd (Eq {0} Term (pred p') (succ c2)) (noConfusionTerm (succ c1) (pred p) q))
 solve
 along
-try (\ (q : Eq Term (pred zero) (iszero p)) -> absurd (Eq Term (iszero p') zero) (noConfusionTerm (pred zero) (iszero p) q))
+try (\ (q : Eq {0} Term (pred zero) (pred p)) -> (\ (nc2 : Eq {0} Term zero p) -> (\ (e1 : Eq {0} Term zero p) -> absurd (Eq {0} Term (pred p') zero) (zeroNoStep p' (subst Term (\ (x : Term) -> Step x p') p zero (sym Term zero p e1) (s0)))) (nc2)) (noConfusionTerm (pred zero) (pred p) q))
 solve
 along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (pred (succ c1)) (iszero p)) -> absurd (Eq Term (iszero p') c1) (noConfusionTerm (pred (succ c1)) (iszero p) q))
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (pred p)) -> (\ (nc2 : Eq {0} Term (succ c1) p) -> (\ (e1 : Eq {0} Term (succ c1) p) -> absurd (Eq {0} Term (pred p') c1) (nvNoStep (succ c1) (nvSucc c1 nv1) p' (subst Term (\ (x : Term) -> Step x p') p (succ c1) (sym Term (succ c1) p e1) (s0)))) (nc2)) (noConfusionTerm (pred (succ c1)) (pred p) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (iszero p) -> Eq Term (iszero p') c2) (q : Eq Term (pred c1) (iszero p)) -> absurd (Eq Term (iszero p') (pred c2)) (noConfusionTerm (pred c1) (iszero p) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred p) -> Eq {0} Term (pred p') c2) (q : Eq {0} Term (pred c1) (pred p)) -> (\ (nc2 : Eq {0} Term c1 p) -> (\ (e1 : Eq {0} Term c1 p) -> cong Term Term (\ (x : Term) -> pred x) p' c2 (ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 p (e1) (sr)))) (nc2)) (noConfusionTerm (pred c1) (pred p) q))
 solve
 along
-try (\ (q : Eq Term (iszero zero) (iszero p)) -> (\ (nc2 : Eq Term zero p) -> (\ (e1 : Eq Term zero p) -> absurd (Eq Term (iszero p') true) (zeroNoStep p' (subst Term (\ (x : Term) -> Step x p') p zero (sym Term zero p e1) (s0)))) (nc2)) (noConfusionTerm (iszero zero) (iszero p) q))
+try (\ (q : Eq {0} Term (iszero zero) (pred p)) -> absurd (Eq {0} Term (pred p') true) (noConfusionTerm (iszero zero) (pred p) q))
 solve
 along
-try (\ (c1 : Term) (nv1 : NV c1) (q : Eq Term (iszero (succ c1)) (iszero p)) -> (\ (nc2 : Eq Term (succ c1) p) -> (\ (e1 : Eq Term (succ c1) p) -> absurd (Eq Term (iszero p') false) (nvNoStep (succ c1) (nvSucc c1 nv1) p' (subst Term (\ (x : Term) -> Step x p') p (succ c1) (sym Term (succ c1) p e1) (s0)))) (nc2)) (noConfusionTerm (iszero (succ c1)) (iszero p) q))
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (pred p)) -> absurd (Eq {0} Term (pred p') false) (noConfusionTerm (iszero (succ c1)) (pred p) q))
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq Term c1 (iszero p) -> Eq Term (iszero p') c2) (q : Eq Term (iszero c1) (iszero p)) -> (\ (nc2 : Eq Term c1 p) -> (\ (e1 : Eq Term c1 p) -> cong Term Term (\ (x : Term) -> iszero x) p' c2 (ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 p (e1) (sr)))) (nc2)) (noConfusionTerm (iszero c1) (iszero p) q))
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred p) -> Eq {0} Term (pred p') c2) (q : Eq {0} Term (iszero c1) (pred p)) -> absurd (Eq {0} Term (pred p') (iszero c2)) (noConfusionTerm (iszero c1) (pred p) q))
 solve
 along
 solve
@@ -1121,7 +911,217 @@ back
 back
 solve
 qed
-:theorem determinacy : ∀ (t : Term) (t1 : Term) (s1 : Step t t1) (t2 : Term) (s2 : Step t t2) -> Eq Term t1 t2
+:theorem invIsZeroZero : ∀ (u : Term) (s : Step (iszero zero) u) -> Eq {0} Term true u
+attack
+intro
+intro
+into
+along
+along
+eliminate s
+back
+back
+back
+back
+back
+back
+back
+back
+back
+back
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (iszero zero)) -> absurd (Eq {0} Term true c1) (noConfusionTerm (ifthen true c1 c2) (iszero zero) q))
+solve
+along
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (iszero zero)) -> absurd (Eq {0} Term true c2) (noConfusionTerm (ifthen false c1 c2) (iszero zero) q))
+solve
+along
+try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero zero) -> Eq {0} Term true c2) (q : Eq {0} Term (ifthen c1 c3 c4) (iszero zero)) -> absurd (Eq {0} Term true (ifthen c2 c3 c4)) (noConfusionTerm (ifthen c1 c3 c4) (iszero zero) q))
+solve
+along
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero zero) -> Eq {0} Term true c2) (q : Eq {0} Term (succ c1) (iszero zero)) -> absurd (Eq {0} Term true (succ c2)) (noConfusionTerm (succ c1) (iszero zero) q))
+solve
+along
+try (\ (q : Eq {0} Term (pred zero) (iszero zero)) -> absurd (Eq {0} Term true zero) (noConfusionTerm (pred zero) (iszero zero) q))
+solve
+along
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (iszero zero)) -> absurd (Eq {0} Term true c1) (noConfusionTerm (pred (succ c1)) (iszero zero) q))
+solve
+along
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero zero) -> Eq {0} Term true c2) (q : Eq {0} Term (pred c1) (iszero zero)) -> absurd (Eq {0} Term true (pred c2)) (noConfusionTerm (pred c1) (iszero zero) q))
+solve
+along
+try (\ (q : Eq {0} Term (iszero zero) (iszero zero)) -> (\ (nc2 : Eq {0} Term zero zero) -> (\ (e1 : Eq {0} Term zero zero) -> refl {0} Term true) (nc2)) (noConfusionTerm (iszero zero) (iszero zero) q))
+solve
+along
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (iszero zero)) -> (\ (nc2 : Eq {0} Term (succ c1) zero) -> (\ (e1 : Eq {0} Term (succ c1) zero) -> absurd (Eq {0} Term true false) (noConfusionTerm (succ c1) zero e1)) (nc2)) (noConfusionTerm (iszero (succ c1)) (iszero zero) q))
+solve
+along
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero zero) -> Eq {0} Term true c2) (q : Eq {0} Term (iszero c1) (iszero zero)) -> (\ (nc2 : Eq {0} Term c1 zero) -> (\ (e1 : Eq {0} Term c1 zero) -> absurd (Eq {0} Term true (iszero c2)) (zeroNoStep c2 (subst Term (\ (x : Term) -> Step x c2) c1 zero (e1) (sr)))) (nc2)) (noConfusionTerm (iszero c1) (iszero zero) q))
+solve
+along
+solve
+back
+back
+back
+back
+back
+back
+back
+back
+back
+back
+back
+back
+back
+solve
+qed
+:theorem invIsZeroSucc : ∀ (v : Term) (nv : NV v) (u : Term) (s : Step (iszero (succ v)) u) -> Eq {0} Term false u
+attack
+intro
+intro
+intro
+intro
+into
+along
+along
+along
+along
+eliminate s
+back
+back
+back
+back
+back
+back
+back
+back
+back
+back
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (iszero (succ v))) -> absurd (Eq {0} Term false c1) (noConfusionTerm (ifthen true c1 c2) (iszero (succ v)) q))
+solve
+along
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (iszero (succ v))) -> absurd (Eq {0} Term false c2) (noConfusionTerm (ifthen false c1 c2) (iszero (succ v)) q))
+solve
+along
+try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero (succ v)) -> Eq {0} Term false c2) (q : Eq {0} Term (ifthen c1 c3 c4) (iszero (succ v))) -> absurd (Eq {0} Term false (ifthen c2 c3 c4)) (noConfusionTerm (ifthen c1 c3 c4) (iszero (succ v)) q))
+solve
+along
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero (succ v)) -> Eq {0} Term false c2) (q : Eq {0} Term (succ c1) (iszero (succ v))) -> absurd (Eq {0} Term false (succ c2)) (noConfusionTerm (succ c1) (iszero (succ v)) q))
+solve
+along
+try (\ (q : Eq {0} Term (pred zero) (iszero (succ v))) -> absurd (Eq {0} Term false zero) (noConfusionTerm (pred zero) (iszero (succ v)) q))
+solve
+along
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (iszero (succ v))) -> absurd (Eq {0} Term false c1) (noConfusionTerm (pred (succ c1)) (iszero (succ v)) q))
+solve
+along
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero (succ v)) -> Eq {0} Term false c2) (q : Eq {0} Term (pred c1) (iszero (succ v))) -> absurd (Eq {0} Term false (pred c2)) (noConfusionTerm (pred c1) (iszero (succ v)) q))
+solve
+along
+try (\ (q : Eq {0} Term (iszero zero) (iszero (succ v))) -> (\ (nc2 : Eq {0} Term zero (succ v)) -> (\ (e1 : Eq {0} Term zero (succ v)) -> absurd (Eq {0} Term false true) (noConfusionTerm zero (succ v) e1)) (nc2)) (noConfusionTerm (iszero zero) (iszero (succ v)) q))
+solve
+along
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (iszero (succ v))) -> (\ (nc2 : Eq {0} Term (succ c1) (succ v)) -> (\ (e1 : Eq {0} Term (succ c1) (succ v)) -> (\ (nc4 : Eq {0} Term c1 v) -> (\ (e3 : Eq {0} Term c1 v) -> refl {0} Term false) (nc4)) (noConfusionTerm (succ c1) (succ v) e1)) (nc2)) (noConfusionTerm (iszero (succ c1)) (iszero (succ v)) q))
+solve
+along
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero (succ v)) -> Eq {0} Term false c2) (q : Eq {0} Term (iszero c1) (iszero (succ v))) -> (\ (nc2 : Eq {0} Term c1 (succ v)) -> (\ (e1 : Eq {0} Term c1 (succ v)) -> absurd (Eq {0} Term false (iszero c2)) (nvNoStep (succ v) (nvSucc v nv) c2 (subst Term (\ (x : Term) -> Step x c2) c1 (succ v) (e1) (sr)))) (nc2)) (noConfusionTerm (iszero c1) (iszero (succ v)) q))
+solve
+along
+solve
+back
+back
+back
+back
+back
+back
+back
+back
+back
+back
+back
+back
+back
+back
+back
+solve
+qed
+:theorem invIsZero : ∀ (p : Term) (p' : Term) (s0 : Step p p') (ih0 : ∀ (w : Term) (sw : Step p w) -> Eq {0} Term p' w) (u : Term) (s : Step (iszero p) u) -> Eq {0} Term (iszero p') u
+attack
+intro
+intro
+intro
+intro
+intro
+intro
+into
+along
+along
+along
+along
+along
+along
+eliminate s
+back
+back
+back
+back
+back
+back
+back
+back
+back
+back
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (iszero p)) -> absurd (Eq {0} Term (iszero p') c1) (noConfusionTerm (ifthen true c1 c2) (iszero p) q))
+solve
+along
+try (\ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (iszero p)) -> absurd (Eq {0} Term (iszero p') c2) (noConfusionTerm (ifthen false c1 c2) (iszero p) q))
+solve
+along
+try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero p) -> Eq {0} Term (iszero p') c2) (q : Eq {0} Term (ifthen c1 c3 c4) (iszero p)) -> absurd (Eq {0} Term (iszero p') (ifthen c2 c3 c4)) (noConfusionTerm (ifthen c1 c3 c4) (iszero p) q))
+solve
+along
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero p) -> Eq {0} Term (iszero p') c2) (q : Eq {0} Term (succ c1) (iszero p)) -> absurd (Eq {0} Term (iszero p') (succ c2)) (noConfusionTerm (succ c1) (iszero p) q))
+solve
+along
+try (\ (q : Eq {0} Term (pred zero) (iszero p)) -> absurd (Eq {0} Term (iszero p') zero) (noConfusionTerm (pred zero) (iszero p) q))
+solve
+along
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (iszero p)) -> absurd (Eq {0} Term (iszero p') c1) (noConfusionTerm (pred (succ c1)) (iszero p) q))
+solve
+along
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero p) -> Eq {0} Term (iszero p') c2) (q : Eq {0} Term (pred c1) (iszero p)) -> absurd (Eq {0} Term (iszero p') (pred c2)) (noConfusionTerm (pred c1) (iszero p) q))
+solve
+along
+try (\ (q : Eq {0} Term (iszero zero) (iszero p)) -> (\ (nc2 : Eq {0} Term zero p) -> (\ (e1 : Eq {0} Term zero p) -> absurd (Eq {0} Term (iszero p') true) (zeroNoStep p' (subst Term (\ (x : Term) -> Step x p') p zero (sym Term zero p e1) (s0)))) (nc2)) (noConfusionTerm (iszero zero) (iszero p) q))
+solve
+along
+try (\ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (iszero p)) -> (\ (nc2 : Eq {0} Term (succ c1) p) -> (\ (e1 : Eq {0} Term (succ c1) p) -> absurd (Eq {0} Term (iszero p') false) (nvNoStep (succ c1) (nvSucc c1 nv1) p' (subst Term (\ (x : Term) -> Step x p') p (succ c1) (sym Term (succ c1) p e1) (s0)))) (nc2)) (noConfusionTerm (iszero (succ c1)) (iszero p) q))
+solve
+along
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero p) -> Eq {0} Term (iszero p') c2) (q : Eq {0} Term (iszero c1) (iszero p)) -> (\ (nc2 : Eq {0} Term c1 p) -> (\ (e1 : Eq {0} Term c1 p) -> cong Term Term (\ (x : Term) -> iszero x) p' c2 (ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 p (e1) (sr)))) (nc2)) (noConfusionTerm (iszero c1) (iszero p) q))
+solve
+along
+solve
+back
+back
+back
+back
+back
+back
+back
+back
+back
+back
+back
+back
+back
+back
+back
+back
+back
+solve
+qed
+:theorem determinacy : ∀ (t : Term) (t1 : Term) (s1 : Step t t1) (t2 : Term) (s2 : Step t t2) -> Eq {0} Term t1 t2
 attack
 intro
 intro
@@ -1147,10 +1147,10 @@ along
 try (\ (c1 : Term) (c2 : Term) (u : Term) (s : Step (ifthen false c1 c2) u) -> invIfFalse c1 c2 u s)
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : ∀ (u : Term) -> Step c1 u -> Eq Term c2 u) (u : Term) (s : Step (ifthen c1 c3 c4) u) -> invIf c1 c2 c3 c4 sr ih u s)
+try (\ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : ∀ (u : Term) -> Step c1 u -> Eq {0} Term c2 u) (u : Term) (s : Step (ifthen c1 c3 c4) u) -> invIf c1 c2 c3 c4 sr ih u s)
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : ∀ (u : Term) -> Step c1 u -> Eq Term c2 u) (u : Term) (s : Step (succ c1) u) -> invSucc c1 c2 sr ih u s)
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : ∀ (u : Term) -> Step c1 u -> Eq {0} Term c2 u) (u : Term) (s : Step (succ c1) u) -> invSucc c1 c2 sr ih u s)
 solve
 along
 try (\ (u : Term) (s : Step (pred zero) u) -> invPredZero u s)
@@ -1159,7 +1159,7 @@ along
 try (\ (c1 : Term) (nv1 : NV c1) (u : Term) (s : Step (pred (succ c1)) u) -> invPredSucc c1 nv1 u s)
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : ∀ (u : Term) -> Step c1 u -> Eq Term c2 u) (u : Term) (s : Step (pred c1) u) -> invPred c1 c2 sr ih u s)
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : ∀ (u : Term) -> Step c1 u -> Eq {0} Term c2 u) (u : Term) (s : Step (pred c1) u) -> invPred c1 c2 sr ih u s)
 solve
 along
 try (\ (u : Term) (s : Step (iszero zero) u) -> invIsZeroZero u s)
@@ -1168,7 +1168,7 @@ along
 try (\ (c1 : Term) (nv1 : NV c1) (u : Term) (s : Step (iszero (succ c1)) u) -> invIsZeroSucc c1 nv1 u s)
 solve
 along
-try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : ∀ (u : Term) -> Step c1 u -> Eq Term c2 u) (u : Term) (s : Step (iszero c1) u) -> invIsZero c1 c2 sr ih u s)
+try (\ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : ∀ (u : Term) -> Step c1 u -> Eq {0} Term c2 u) (u : Term) (s : Step (iszero c1) u) -> invIsZero c1 c2 sr ih u s)
 solve
 along
 solve

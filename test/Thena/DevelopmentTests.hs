@@ -3,8 +3,9 @@ module Thena.DevelopmentTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, testCase, (@?=))
 
+import Thena.Core.Level (Level (..), levelOfNat)
 import Thena.Core.Context (Entry (..))
-import Thena.Core.Term (Core (..), Ident (..), Level (..), close, fresh)
+import Thena.Core.Term (Core (..), Ident (..), close, fresh)
 import Thena.Development.Component (Component (..), forget)
 import Thena.Development.Partial (Partial (..))
 import Thena.Driver (parseDevelopment)
@@ -47,8 +48,8 @@ forgetTests =
   ]
   where
     (v, _) = fresh 0
-    ty     = Universe (Level 0)
-    val    = Universe (Level 0)
+    ty     = Universe (LZero)
+    val    = Universe (LZero)
 
 -- --------------------------------------------------------------------------
 -- Rendering, as exact strings. These are what pin the printer down (§7).
@@ -126,7 +127,7 @@ prefixTests =
           /= fmap fst (parseDevelopment emptyGlobals [] 0 "[| λ (A : Type₀) -> A |]")
   , testCase "a leading let becomes a Define link" $
       fmap fst (parseDevelopment emptyGlobals [] 0 "let d = Type₀ : Type₁ in d")
-        @?= Right (Under (Define vA (Ident "d") type0 (Universe (Level 1)))
+        @?= Right (Under (Define vA (Ident "d") type0 (Universe (levelOfNat 1)))
                      (Trailing (Free vA)))
   , testCase "several binder groups become several links" $
       fmap fst (parseDevelopment emptyGlobals [] 0 "λ (A : Type₀) (B : Type₀) -> B")
@@ -139,7 +140,7 @@ prefixTests =
         @?= Right (Trailing (Pi (Ident "A") type0 (close vA (Free vA))))
   ]
   where
-    type0    = Universe (Level 0)
+    type0    = Universe (LZero)
     (vA, n1) = fresh 0
     (vB, _)  = fresh n1
 
@@ -171,7 +172,7 @@ scopeTests =
                 "let ? h : Type₀ in (x : Type₀) |- h ?= x : Type₀ |> x") @?= True
   ]
   where
-    type0        = Universe (Level 0)
+    type0        = Universe (LZero)
     (vOuter, n1) = fresh 0
     (vHole, _)   = fresh n1
 

@@ -52,8 +52,9 @@ module Thena.Errors
   , DevForm (..)
   ) where
 
+import Thena.Core.Level (Level, Unmet)
 import Thena.Core.Context (Context)
-import Thena.Core.Term (Core, GlobalName, Ident, Level, Var)
+import Thena.Core.Term (Core, GlobalName, Ident, Var)
 import Thena.Syntax.Lexer (LexError)
 import Thena.Syntax.Parser (ParseError)
 
@@ -279,6 +280,12 @@ data Clash
 data TypeError
   = UnknownVariable Context Var
     -- ^ a 'Thena.Core.Term.Free' naming no entry of the context
+  | WrongNumberOfLevelArguments GlobalName Int Int
+    -- ^ definition, level parameters it has, level arguments the use wrote
+    -- (MS3 phase 30). A definition's level parameters are prenex: a use writes
+    -- every one of them or the term is not well formed. There is no partial
+    -- instantiation, and — until something infers them — no way to leave them
+    -- out either
   | UnknownGlobal GlobalName
     -- ^ a 'Thena.Core.Term.Global' in neither the definitions nor the constants
   | LooseIndex Int
@@ -323,6 +330,15 @@ data KernelError
   = NotClosed Var
     -- ^ @certify@: the term mentions a variable nothing binds. §5.3\'s
     -- signature has no context, so this is the check that earns that
+  | Levels Unmet
+    -- ^ a level relation that no instantiation could satisfy (phase 33).
+    -- Produced by @revalidate@ and by @certify@, both of which run
+    -- 'Thena.Core.Level.solveLevels' over what their walk owed.
+    --
+    -- **There is no constructor for an /undecided/ level, and phase 33b
+    -- deleted the one there was.** A relation that is neither valid nor false
+    -- is the residue, which generalisation stores on the definition — see
+    -- 'Thena.Global.Env.definitionConstraints'. Only a refutation is an error
   | Overabstracted Var Ident Core
     -- ^ a construction assumes something the type it is claimed to build has
     -- no binder for: @? g ≐ (λ a : A . …) : Nat@. Its own case rather than an
@@ -383,6 +399,10 @@ data ElimError
     -- on, so @Vec@ and @Fin@ eliminate fine. The shape is
     -- @Below : ∀ (n : Nat) (i : Fin n) -> Type₀@, two indices with the second
     -- typed by the first. @AGENDA.md@ item 10
+  | IndexTypeIllTyped TypeError
+    -- ^ a tied index's type has no universe (MS3 phase 31d). Needed because
+    -- the equation @Eq Iₖ iₖ aₖ@ is stated at @Iₖ@'s **level** now, which has
+    -- to be read
   | MotiveIllTyped TypeError
     -- ^ the generalised goal does not typecheck under the abstracted indices.
     -- Abstracting a term in a dependent theory is not always type-preserving,
@@ -432,6 +452,15 @@ data ResolveError
     -- ^ datatype, constructors it has, methods the @elim@ wrote
   | WrongNumberOfEliminationIndices String Int Int
     -- ^ datatype, indices it has, indices the @elim@ wrote
+  | LevelArgumentsOnALocal String
+    -- ^ level arguments written on a name bound by a λ or by the development.
+    -- Only a definition has level parameters, so only a global can be given
+    -- level arguments.
+    --
+    -- **This one survived phase 33c** and its two neighbours did not.
+    -- @LevelNotInScope@ named a level /variable/ nobody can write any more, and
+    -- @LevelNotWritten@ refused a declaration that now infers its own level;
+    -- @foo {0}@ on a λ-bound name is still perfectly writable and still wrong
   deriving (Eq, Show)
 
 -- | Which development-only form was met in a core position. An enum rather

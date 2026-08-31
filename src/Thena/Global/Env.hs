@@ -21,12 +21,16 @@ module Thena.Global.Env
     -- * The environment
   , GlobalEnv (..)
   , emptyGlobals
+  , Constant (..)
   , lookupConstant
   , lookupDefinition
   , lookupInductive
   , isDeclared
   , declaredNames
   , addConstant
+  , generalised
+  , substLevelsInInductive
+  , levelMetasInInductive
   , addDefinition
   , addInductive
 
@@ -37,16 +41,30 @@ module Thena.Global.Env
   , formerArity
   , recursiveArgument
   , eliminatorType
+  , varsInEnv
   ) where
 
-import Thena.Core.Context (Context, entryType, entryVar, piOver)
+import Data.List (nub)
+
+import Thena.Core.Level
+  ( Level (..)
+  , LevelVar
+  , Obligation
+  , freshLevelRigid
+  , metasIn
+  , substLevel
+  , substObligation
+  )
+import Thena.Core.Context (Context, entryType, entryVar, piOver, substLevelsInEntry)
 import Thena.Core.Term
   ( Core (..)
+  , Var
   , GlobalName
   , Ident (..)
-  , Level (..)
   , close
   , fresh
+  , levelMetasIn
+  , substLevelsIn
   )
 
 -- | A global with a body — the @definition@ kind of §3.3.1's table: proved
@@ -55,11 +73,94 @@ import Thena.Core.Term
 -- The constructor is @MkDefinition@ because 'Thena.Core.Context.Entry' already
 -- has a data constructor called @Definition@ and the two would be ambiguous
 -- wherever both modules are in scope. Same technique as @MkScope@.
+-- | A type and no body — a datatype's former, and each of its constructors.
+--
+-- **It carries level parameters for the same reason 'Definition' does** (MS3
+-- phase 31b): a polymorphic datatype's former is polymorphic, and so is every
+-- constructor of it. They are always exactly the datatype's own parameters,
+-- and they are stored rather than looked up through 'inductives' because
+-- 'addConstant' has them in hand and the tables are denormalised already — a
+-- former appears in @constants@ and @definitions@ both.
+data Constant = MkConstant
+  { constantLevels :: [LevelVar]
+  , constantType   :: Core
+  }
+  deriving (Eq, Show)
+
 data Definition = MkDefinition
-  { definitionType :: Core
+  { definitionLevels :: [LevelVar]
+    -- ^ the prenex level parameters, in the order a use site supplies them
+    -- (MS3 phase 30). **Empty for everything a monomorphic declaration
+    -- generates**, and non-empty only for a theorem stated with @{ℓ}@.
+    --
+    -- The binder lives here and nowhere else: prenex means all the
+    -- quantifiers are at the definition's head, so a flat list is the whole of
+    -- the binding structure and 'Thena.Core.Level.Level' needs no binder of
+    -- its own. Instantiating is 'Thena.Core.Level.instantiateLevels' followed
+    -- by a substitution.
+    --
+    -- **Filled by generalisation from phase 33b**, not written: a theorem's
+    -- levels are inferred, and 'generalised' is what turns the metas its proof
+    -- was left holding into these.
+  , definitionConstraints :: [Obligation]
+    -- ^ the @≤@ relations between its own level parameters that must hold at
+    -- every use (MS3 phase 33b).
+    --
+    -- **Storing these is required for soundness, not merely for earliness** —
+    -- @discussion\/level-binders-and-constraints.md@ §4. Re-collection walks the
+    -- /finished term/, and a caller's term holds @Global foo [5, 0]@ opaquely,
+    -- so the body's obligations are never regenerated unless every definition
+    -- is δ-unfolded. Without this list a call site has nothing to read, and a
+    -- constraint arising inside a body is invisible in that body's /type/.
+    --
+    -- **It does not reopen §4's "re-collect, do not store".** Nothing is pooled
+    -- during a proof: this field never changes after generalisation, and what
+    -- a use site owes is reconstituted from it plus the level arguments in the
+    -- term. And it does not recurse — this list is already the full residue of
+    -- this definition's own generalisation.
+    --
+    -- **It is usually empty**, because a rigid gets the /validity/ reading:
+    -- @ℓ ≤ suc ℓ@ discharges and @suc ℓ ≤ ℓ@ is refused outright, so only a
+    -- genuine relation between independent parameters survives.
+  , definitionType :: Core
   , definitionBody :: Core
   }
   deriving (Eq, Show)
+
+-- | Build a definition by generalising the level metas its type and body are
+-- still carrying (MS3 phase 33b).
+--
+-- **This is R2 of @discussion\/level-binders-and-constraints.md@ §2 done: a
+-- rewrite.** Each surviving 'Thena.Core.Level.LMeta' becomes a fresh
+-- 'Thena.Core.Level.LRigid' — /fresh/, and not the same @Int@ under a new
+-- constructor, because MS2 closeout 4f is that one counter serves every sort
+-- precisely so a number the user has seen as @?ℓ7@ is never reissued as
+-- something else.
+--
+-- **The order is first appearance in the type, then in the body**, because a
+-- use site supplies level arguments positionally and the type is what a use
+-- site reads.
+--
+-- The residue is generalised along with them, and becomes the scheme's
+-- constraints. It is not filtered: a relation between two of the new parameters
+-- is exactly what a scheme constraint is /for/, and asking 'levelLeq' to decide
+-- it here would refuse the useful case — a rigid is not bounded by another
+-- rigid, which is the whole reason the constraint has to travel to the use.
+generalised :: Int -> [Obligation] -> Core -> Core -> (Definition, Int)
+generalised n residue ty body =
+  ( MkDefinition (map snd binding) (map (substObligation sub) residue)
+      (substLevelsIn sub ty) (substLevelsIn sub body)
+  , n'
+  )
+  where
+    metas       = levelMetasIn ty ++ [ v | v <- levelMetasIn body, v `notElem` levelMetasIn ty ]
+    (binding, n') = mint n metas
+    sub         = [ (v, LVar w) | (v, w) <- binding ]
+
+    mint k []       = ([], k)
+    mint k (v : vs) = let (w, k1)  = freshLevelRigid k
+                          (ws, k2) = mint k1 vs
+                       in ((v, w) : ws, k2)
 
 -- | One inductive definition — a single record, as §3.7 requires.
 --
@@ -78,9 +179,14 @@ data Definition = MkDefinition
 -- @parameters@ and @indices@ as selectors of 'Thena.Core.Term.Eliminate'.
 data InductiveDefinition = InductiveDefinition
   { inductiveName         :: GlobalName
+  , inductiveLevels       :: [LevelVar]
+    -- ^ prenex level parameters (MS3 phase 31b). Every constructor and the
+    -- former share them; a use site supplies one level per parameter
   , inductiveParameters   :: Context   -- ^ in scope in the indices and in every constructor
   , inductiveIndices      :: Context   -- ^ in scope in neither; each constructor supplies its own
-  , inductiveLevel        :: Level     -- ^ the declared result universe, concrete (§3.7)
+  , inductiveLevel        :: Level
+    -- ^ the declared result universe. **No longer concrete** (§3.7 said it
+    -- was): it may mention 'inductiveLevels'
   , inductiveConstructors :: [ConstructorDefinition]
   }
   deriving (Eq, Show)
@@ -106,6 +212,44 @@ data ConstructorDefinition = ConstructorDefinition
   }
   deriving (Eq, Show)
 
+-- | Apply a level substitution to a whole declaration (MS3 phase 33c).
+--
+-- Levels live in five places here — the declared universe, the parameters' and
+-- indices' types, each constructor's argument types, and each constructor's
+-- index expressions — and this is the list. Everything else in the record is a
+-- name or a count.
+--
+-- What computing a bare @Type@'s level and generalising a declaration both need.
+substLevelsInInductive
+  :: [(LevelVar, Level)] -> InductiveDefinition -> InductiveDefinition
+substLevelsInInductive sub d = d
+  { inductiveParameters   = map at (inductiveParameters d)
+  , inductiveIndices      = map at (inductiveIndices d)
+  , inductiveLevel        = substLevel sub (inductiveLevel d)
+  , inductiveConstructors = map constructor (inductiveConstructors d)
+  }
+  where
+    at = substLevelsInEntry sub
+
+    constructor c = c
+      { constructorArguments = map at (constructorArguments c)
+      , constructorIndices   = map (substLevelsIn sub) (constructorIndices c)
+      }
+
+-- | Every level meta a declaration mentions, without duplicates, in the order a
+-- reader meets them: the parameters, the indices, the declared universe, then
+-- the constructors.
+levelMetasInInductive :: InductiveDefinition -> [LevelVar]
+levelMetasInInductive d =
+  nub (concatMap (levelMetasIn . entryType) (inductiveParameters d)
+        ++ concatMap (levelMetasIn . entryType) (inductiveIndices d)
+        ++ metasIn (inductiveLevel d)
+        ++ concatMap constructor (inductiveConstructors d))
+  where
+    constructor c =
+      concatMap (levelMetasIn . entryType) (constructorArguments c)
+        ++ concatMap levelMetasIn (constructorIndices c)
+
 -- | Three tables, because §3.3.1 gives two kinds of term-level binding and the
 -- inductive records are not term-level bindings at all.
 --
@@ -119,7 +263,7 @@ data ConstructorDefinition = ConstructorDefinition
 -- 'Thena.Ops.Env' and 'Context' are lists: speed is a stated non-goal (§1), and
 -- a dependency is not worth adding for a table that holds a prelude.
 data GlobalEnv = GlobalEnv
-  { constants   :: [(GlobalName, Core)]                 -- ^ a type and no body
+  { constants   :: [(GlobalName, Constant)]             -- ^ a type and no body
   , definitions :: [(GlobalName, Definition)]           -- ^ a type and a body
   , inductives  :: [(GlobalName, InductiveDefinition)]  -- ^ what the checker and ι consult
   }
@@ -129,7 +273,7 @@ emptyGlobals :: GlobalEnv
 emptyGlobals = GlobalEnv [] [] []
 
 -- | The type of a saturated former or, from phase 10, of an eliminator.
-lookupConstant :: GlobalName -> GlobalEnv -> Maybe Core
+lookupConstant :: GlobalName -> GlobalEnv -> Maybe Constant
 lookupConstant g = lookup g . constants
 
 -- | What a 'Thena.Core.Term.Global' names: the third form of δ (§3.6).
@@ -160,8 +304,8 @@ declaredNames :: GlobalEnv -> [GlobalName]
 declaredNames e =
   map fst (constants e) ++ map fst (definitions e) ++ map fst (inductives e)
 
-addConstant :: GlobalName -> Core -> GlobalEnv -> GlobalEnv
-addConstant g t e = e { constants = (g, t) : constants e }
+addConstant :: GlobalName -> [LevelVar] -> Core -> GlobalEnv -> GlobalEnv
+addConstant g ls t e = e { constants = (g, MkConstant ls t) : constants e }
 
 addDefinition :: GlobalName -> Definition -> GlobalEnv -> GlobalEnv
 addDefinition g d e = e { definitions = (g, d) : definitions e }
@@ -200,7 +344,11 @@ constructorType d c =
 -- store them a second time (§3.7).
 constructorTarget :: InductiveDefinition -> ConstructorDefinition -> Core
 constructorTarget d c =
-  foldl App (Global (inductiveName d))
+  -- **At the datatype's own level parameters** (MS3 phase 31c). A constructor's
+  -- target is the family it builds, and inside the declaration that family is
+  -- the one being declared — so the reference carries exactly the parameters,
+  -- and instantiating the constructor instantiates its target with it.
+  foldl App (Global (inductiveName d) (map LVar (inductiveLevels d)))
     (map (Free . entryVar) (inductiveParameters d) ++ constructorIndices c)
 
 -- | How many arguments a generated former wrapper takes before its body's
@@ -262,7 +410,7 @@ formerArity g e = case lookup g (inductives e) of
 -- lifted, this function and both its callers change in the same commit.
 recursiveArgument :: GlobalName -> Int -> Core -> Maybe [Core]
 recursiveArgument dn np ty = case spine ty of
-  (Global g, args) | g == dn -> Just (drop np args)
+  (Global g _, args) | g == dn -> Just (drop np args)
   _                          -> Nothing
   where
     spine = go []
@@ -325,7 +473,7 @@ eliminatorType d l n0 =
     indexVars = map (Free . entryVar) indices
 
     -- @D params is@
-    familyAt is = foldl App (Global dn) (paramVars ++ is)
+    familyAt is = foldl App (Global dn (map LVar (inductiveLevels d))) (paramVars ++ is)
 
     -- @P is v@
     motiveAt is v = foldl App (Free pv) (is ++ [v])
@@ -352,7 +500,7 @@ eliminatorType d l n0 =
     methodType c n =
       let args = constructorArguments c
           goal = motiveAt (constructorIndices c)
-                          (Canonical (constructorName c)
+                          (Canonical (constructorName c) (map LVar (inductiveLevels d))
                                      (paramVars ++ map (Free . entryVar) args))
           (body, na) = hypotheses args n goal
        in (piOver args body, na)
@@ -368,3 +516,23 @@ eliminatorType d l n0 =
         let (hv, na)   = fresh n
             (below, nb) = hypotheses es na acc
          in (Pi (Ident "ih") (motiveAt is (Free (entryVar e))) (close hv below), nb)
+
+-- | Every 'Var' the environment holds.
+--
+-- **The inductive records are where they are.** A global definition's type and
+-- body are closed, but 'inductiveParameters', 'inductiveIndices' and each
+-- constructor's arguments are 'Context'es — telescopes of *named, numbered*
+-- bindings, minted when the datatype was declared and living in the environment
+-- ever after.
+--
+-- 'Thena.Kernel.certify' needs them: it walks terms it did not build, and
+-- 'eliminatorType' reuses a datatype's own parameter variables while minting
+-- fresh ones beside them. Starting the counter below either is how a fresh
+-- variable collides with a declared one.
+varsInEnv :: GlobalEnv -> [Var]
+varsInEnv e = concatMap (ofInductive . snd) (inductives e)
+  where
+    ofInductive d =
+      map entryVar (inductiveParameters d)
+        ++ map entryVar (inductiveIndices d)
+        ++ concatMap (map entryVar . constructorArguments) (inductiveConstructors d)

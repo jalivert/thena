@@ -36,10 +36,12 @@ module Thena.Tactics.Eliminate
   , eliminate
   ) where
 
+import Thena.Core.Level (Level, instantiateLevels)
 import Thena.Core.Context (Context, Entry (..), entryIdent, entryType, entryVar, lamOver)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term
   ( Core (..)
+  , substLevelsIn
   , GlobalName (..)
   , Ident (..)
   , Var
@@ -100,30 +102,55 @@ eliminate
   :: GlobalEnv -> Context -> Int -> Core -> Core
   -> (Either ElimError Elimination, Int)
 eliminate env ctx n0 goal tgt =
+  -- **Level obligations are dropped here**, as everywhere outside the checking
+  -- pass: "Thena.Core.Typing"'s header says why once, and @qed@ re-collects.
   case infer env ctx n0 tgt of
-    (Left e, n1)    -> (Left (TargetNotTypeable e), n1)
-    (Right tty, n1) -> case saturated (whnf env ctx tty) of
-      Just (d, ps, as) -> build d ps as n1
+    (Left e, _, n1)    -> (Left (TargetNotTypeable e), n1)
+    (Right tty, _, n1) -> case saturated (whnf env ctx tty) of
+      Just (d, ls, ps, as) -> build d ls ps as n1
       Nothing          -> (Left (TargetNotInductive ctx tgt (whnf env ctx tty)), n1)
   where
     -- @D p⃗ a⃗@ for a declared @D@, with every parameter and index supplied.
     -- Under-application is not an elimination target: the eliminator is
     -- saturated (§3.6) and so is the family it eliminates.
     saturated ty = case spineOf ty of
-      Just (dn, args) -> do
+      Just (dn, ls, args) -> do
         d <- lookupInductive dn env
         let np = length (inductiveParameters d)
             ni = length (inductiveIndices d)
         if length args == np + ni
-          then let (ps, as) = splitAt np args in Just (d, ps, as)
+          then let (ps, as) = splitAt np args in Just (d, ls, ps, as)
           else Nothing
       Nothing -> Nothing
 
-    build d ps as n1
+    build d ls ps as n1
       | not (null as), Just missing <- undeclared = (Left (NoEquality missing), n1)
       | Just e <- dependentTied = (Left e, n1)
-      | otherwise = scheme d ps as tiedIx n1
+      -- **The level of each tied index's type** (phase 31d). @Eq@ is
+      -- level-polymorphic, so @Eq Iₖ iₖ aₖ@ has to say which level @Iₖ@ lives
+      -- at.
+      --
+      -- Read **here** and not inside 'scheme': here the type is
+      -- @substVars paramSubst (entryType e)@ and nothing more, and
+      -- 'dependentTied' has already refused a tied index whose type mentions an
+      -- earlier index — so it mentions only what @ctx@ already has. Inside
+      -- 'scheme' the same type also carries the motive's fresh binders, which
+      -- are in no context at all.
+      | otherwise = case tiedLevels n1 of
+          (Left e,    n) -> (Left (IndexTypeIllTyped e), n)
+          (Right lvls, n) -> scheme d ls ps as tiedIx lvls n
       where
+        tiedLevels k0 = go tiedIx k0
+          where
+            psub = zip (map entryVar (inductiveParameters d)) ps
+            go []       k = (Right [], k)
+            go (i : is) k =
+              case sortOf env ctx k (substVars psub (entryType (inductiveIndices d !! i))) of
+                (Left e,  _, k1) -> (Left e, k1)
+                (Right v, _, k1) -> case go is k1 of
+                  (Left e,   k2) -> (Left e, k2)
+                  (Right vs, k2) -> (Right (v : vs), k2)
+
         -- §3.7, decided 2026-08-11: @Eq@ and @refl@ are referred to **by
         -- name**. No designation table, no pragma, no shape check — they are
         -- expected to be there, and elimination fails if they are not. A name
@@ -190,7 +217,7 @@ eliminate env ctx n0 goal tgt =
           x : _ -> Just x
           []    -> Nothing
 
-    scheme d ps as tiedIx n1 =
+    scheme d ls ps as tiedIx tiedLvs n1 =
       let ni = length as
 
           -- One fresh variable per index, plus the motive's own target binder.
@@ -212,7 +239,9 @@ eliminate env ctx n0 goal tgt =
             | (k, e) <- zip [(0 :: Int) ..] (inductiveIndices d)
             ]
 
-          familyAt is = foldl App (Global (inductiveName d)) (ps ++ is)
+          -- **At the target's own level arguments** (phase 31c): the family
+          -- the motive abstracts is the same family the target inhabits.
+          familyAt is = foldl App (Global (inductiveName d) ls) (ps ++ is)
 
           -- The generalised goal. Target first; see the note above.
           (goalX,  n4) = replaceTerm tgt xv n3 goal
@@ -221,10 +250,13 @@ eliminate env ctx n0 goal tgt =
 
           -- Which indices keep an equation. Decided by 'build'; see the note
           -- on 'friendlyAt' there.
-          tied = [ (ity, iv, a)
-                 | (k, (ity, iv, a)) <- zip [(0 :: Int) ..] (zip3 indexTys ivs as)
-                 , k `elem` tiedIx
-                 ]
+          -- Each tied index with **the level its type lives at**, in @tiedIx@
+          -- order — which is the order 'tiedLevels' produced them in.
+          tied = zip tiedLvs
+                     [ (ity, iv, a)
+                     | (k, (ity, iv, a)) <- zip [(0 :: Int) ..] (zip3 indexTys ivs as)
+                     , k `elem` tiedIx
+                     ]
 
           -- @Eq Iₖ iₖ aₖ → …@, one non-dependent Π per *tied* index. A Π still
           -- needs a variable to close over even when nothing refers to it,
@@ -232,10 +264,10 @@ eliminate env ctx n0 goal tgt =
           -- induction hypothesis.
           (equations, n6) = constrain tied n5 goalIx
           constrain []                  n b = (b, n)
-          constrain ((ity, iv, a) : cs) n b =
+          constrain ((lv, (ity, iv, a)) : cs) n b =
             let (body, na) = constrain cs n b
                 (qv,   nb) = fresh na
-             in (Pi (Ident "q") (equationOf ity (Free iv) a) (close qv body), nb)
+             in (Pi (Ident "q") (equationOf lv ity (Free iv) a) (close qv body), nb)
 
           -- The context the motive's body lives in, which is also where its
           -- universe is read.
@@ -254,11 +286,18 @@ eliminate env ctx n0 goal tgt =
           -- type-preserving; the level is needed anyway, so it costs nothing
           -- extra (thesis §3.5.3, and see this module's header).
           case sortOf env bodyCtx n6 equations of
-            (Left e, n7)  -> (Left (MotiveIllTyped e), n7)
-            (Right l, n7) -> assemble d ps as tied motiveTerm l n7
+            (Left e, _, n7)  -> (Left (MotiveIllTyped e), n7)
+            (Right l, _, n7) -> assemble d ls ps as tied motiveTerm l n7
 
-    assemble d ps as tied motiveTerm l n7 =
-      let (ety, n8) = eliminatorType d l n7
+    assemble d ls ps as tied motiveTerm l n7 =
+      let (ety0, n8) = eliminatorType d l n7
+          -- **Instantiated at the target's level arguments** (phase 31d).
+          -- 'Thena.Core.Typing' does the same for a written @elim@; the tactic
+          -- builds its own scheme and has to do it too, or the eliminator's
+          -- type keeps the datatype's rigid parameters and nothing matches.
+          ety = case instantiateLevels (inductiveLevels d) ls of
+            Just sub -> substLevelsIn sub ety0
+            Nothing  -> ety0
           -- Walk the eliminator's type past the parameters and the motive, then
           -- read one method type off per constructor. This is phase 8's "the
           -- ordinary application rule walked down the eliminator's type", used
@@ -281,6 +320,7 @@ eliminate env ctx n0 goal tgt =
 
           node = Eliminate
             { eliminated = inductiveName d
+            , levels     = ls
             , parameters = ps
             , motive     = motiveTerm
             , methods    = map Free mvs
@@ -291,10 +331,10 @@ eliminate env ctx n0 goal tgt =
           -- point of the scheme (§3.7, thesis §3.5). Only the tied indices have
           -- one; a friendly index was abstracted outright and carries none.
           proof = foldl App node
-            [ Canonical reflexivity [ity, a] | (ity, _, a) <- tied ]
+            [ Canonical reflexivity [lv] [ity, a] | (lv, (ity, _, a)) <- tied ]
        in case check env (ctx ++ methodEntries) n10 proof goal of
-            (Left e, n11)  -> (Left (SchemeIllTyped e), n11)
-            (Right (), n11) -> (Right (Elimination holes proof), n11)
+            (Left e, _, n11)   -> (Left (SchemeIllTyped e), n11)
+            (Right (), _, n11) -> (Right (Elimination holes proof), n11)
 
     -- Peel @k@ Π domains off a type, instantiating each binder with itself is
     -- not possible — nothing refers to a method — so a method type is read
@@ -338,7 +378,10 @@ eliminate env ctx n0 goal tgt =
          in (Pi i dom' (close v body), n3)
       other -> (other, n)
 
-    equationOf ity l r = foldl App (Global equality) [ity, l, r]
+    -- @Eq {ℓ} I l r@ — instantiated at the level its carrier type lives at
+    -- (phase 31d). Before this it was @Global equality []@, and @Eq@ was stuck
+    -- at @Type₀@: §2 item 1, and why @Box1@ could not be eliminated.
+    equationOf lv ity l r = foldl App (Global equality [lv]) [ity, l, r]
 
     -- The entry the target /is/, when it is a variable. It is the one entry
     -- allowed to mention a friendly index — the whole point is that the target
@@ -366,14 +409,20 @@ reflexivity = GlobalName "refl"
 -- spelling the representation admits. Both forms are read here because this is
 -- asked of a reduced type, and reading only the second is a bug that shows up
 -- as \"Nat is not a datatype\".
-spineOf :: Core -> Maybe (GlobalName, [Core])
+-- | The head of an application spine, **its level arguments**, and its
+-- ordinary arguments.
+--
+-- The levels come back because an elimination has to record the ones its target
+-- was at (phase 31c) — the node carries them and 'Thena.Core.Typing'
+-- instantiates the eliminator with them.
+spineOf :: Core -> Maybe (GlobalName, [Level], [Core])
 spineOf = go []
   where
     go acc t = case t of
-      App f a         -> go (a : acc) f
-      Global g        -> Just (g, acc)
-      Canonical g as  -> Just (g, as ++ acc)
-      _               -> Nothing
+      App f a          -> go (a : acc) f
+      Global g ls      -> Just (g, ls, acc)
+      Canonical g ls as -> Just (g, ls, as ++ acc)
+      _                -> Nothing
 
 -- | Replace parameter variables by the terms the target supplied for them.
 --
@@ -411,15 +460,15 @@ replaceTerm needle v = go
             let (f', n1) = go n f
                 (a', n2) = go n1 a
              in (App f' a', n2)
-          Canonical g as ->
-            let (as', n1) = list n as in (Canonical g as', n1)
-          Eliminate d ps m ms is tg ->
+          Canonical g _ as ->
+            let (as', n1) = list n as in (Canonical g [] as', n1)
+          Eliminate d _ ps m ms is tg ->
             let (ps', n1) = list n ps
                 (m',  n2) = go n1 m
                 (ms', n3) = list n2 ms
                 (is', n4) = list n3 is
                 (tg', n5) = go n4 tg
-             in (Eliminate d ps' m' ms' is' tg', n5)
+             in (Eliminate d [] ps' m' ms' is' tg', n5)
           _ -> (t, n)
 
     binder con i s sc n =

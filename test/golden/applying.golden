@@ -85,6 +85,42 @@ thena spine> apply true
 already equal
 thena spine> qed
 bad : Bool   ∎
+thena spine> :goal Maybe Bool
+▶ let ? goal : Maybe Bool in
+  goal
+thena spine> apply Just
+solved: A
+thena spine> :show
+  let A = Bool : Type₀ in
+  let ? a : A in
+  let refined = Just A a : Maybe A in
+▶ let goal = refined : Maybe Bool in
+  goal
+thena spine> apply Nothing
+stuck: no clause of apply applies here
+thena spine> :show
+  let A = Bool : Type₀ in
+  let ? a : A in
+  let refined = Just A a : Maybe A in
+▶ let goal = refined : Maybe Bool in
+  goal
+thena spine> :undo
+▶ let ? goal : Maybe Bool in
+  goal
+thena spine> :show
+▶ let ? goal : Maybe Bool in
+  goal
+thena spine> :undo
+▶ let ? goal : Type₀ in
+  goal
+thena spine> :goal ∀ (b : Bool) -> Maybe Bool
+▶ let ? goal : Bool -> Maybe Bool in
+  goal
+thena spine> apply Just
+stuck: Maybe A and Bool -> Maybe Bool cannot be made equal
+thena spine> :show
+▶ let ? goal : Bool -> Maybe Bool in
+  goal
 thena spine> :theorem h : ∀ (b : Bool) -> Maybe Bool
 proving h : Bool -> Maybe Bool
 thena spine> apply Just

@@ -16,13 +16,13 @@ thena spine> eliminate n
 subgoals: zeroMethod, succMethod
 thena spine> :abandon
 abandoned noEq
-thena spine> data Eq (A : Type₀) : A -> A -> Type₀ where { refl : ∀ (a : A) -> Eq A a a }
+thena spine> data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }
 declared Eq
-thena spine> data Unit : Type₀ where { unit : Unit }
+thena spine> data Unit : Type where { unit : Unit }
 declared Unit
-thena spine> data Empty : Type₀ where { }
+thena spine> data Empty : Type where { }
 declared Empty
-thena spine> data And (A : Type₀) (B : Type₀) : Type₀ where { both : ∀ (a : A) (b : B) -> And A B }
+thena spine> data And (A : Type) (B : Type) : Type where { both : ∀ (a : A) (b : B) -> And A B }
 declared And
 thena spine> data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ where { bz : ∀ (m : Nat) -> Below (succ m) (fz m) ; bs : ∀ (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }
 no noConfusionBelow: bs's argument j has a type that depends on an earlier argument, so its equation cannot be stated
@@ -59,8 +59,8 @@ context
   n : Nat
   i : Fin n
   b : Below n i
-  bzMethod : ∀ (m : Nat) -> Eq Nat (succ m) n -> Nat
-  bsMethod : ∀ (m : Nat) (j : Fin m) -> Below m j -> (Eq Nat m n -> Nat) -> Eq Nat (succ m) n -> Nat
+  bzMethod : ∀ (m : Nat) -> Eq {0} Nat (succ m) n -> Nat
+  bsMethod : ∀ (m : Nat) (j : Fin m) -> Below m j -> (Eq {0} Nat m n -> Nat) -> Eq {0} Nat (succ m) n -> Nat
 type
   Nat
 thena spine> attack

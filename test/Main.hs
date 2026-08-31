@@ -3,6 +3,7 @@ module Main (main) where
 import Test.Tasty (defaultMain, testGroup)
 
 import qualified Thena.Core.ConvertTests
+import qualified Thena.Core.LevelTests
 import qualified Thena.Core.ReduceTests
 import qualified Thena.Core.TermTests
 import qualified Thena.Core.TypingTests
@@ -37,6 +38,7 @@ main =
     testGroup
       "thena"
       [ Thena.Core.ConvertTests.tests
+      , Thena.Core.LevelTests.tests
       , Thena.Core.ReduceTests.tests
       , Thena.Core.TermTests.tests
       , Thena.Core.TypingTests.tests

@@ -5,9 +5,10 @@ module Thena.Core.ConvertTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 
+import Thena.Core.Level (Level (..), LevelVar (..), Obligation (..), levelOfNat)
 import Thena.Core.Context (Context, Entry (..))
-import Thena.Core.Convert (convert)
-import Thena.Core.Term (Core, GlobalName (..), Ident (..), Level (..), fresh)
+import Thena.Core.Convert (convert, subsumes)
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), close, fresh)
 import Thena.Declared (natVec, natVecCounter)
 import Thena.Driver (parseCore)
 import Thena.Errors (Clash (..), ConversionFailure (..), Site (..))
@@ -22,6 +23,7 @@ tests =
     , testGroup "no eta for datatypes, no cumulativity" refusalTests
     , testGroup "the reason says where" siteTests
     , testGroup "the counter comes back, and only ever goes up" counterTests
+    , testGroup "an undecided level is owed, not refused" obligationTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -42,9 +44,18 @@ termAt n ctx src = case parseCore natVec ctx n src of
   Left e       -> error ("fixture term does not resolve: " ++ show e)
   Right (t, _) -> t
 
+-- | 'convert' returns its level obligations as well (MS3 phase 33). Nothing in
+-- this module builds a level meta, so the list is always empty; these two say
+-- so once rather than at every call.
+verdict :: (a, b, c) -> a
+verdict (r, _, _) = r
+
+counter :: (a, b, Int) -> Int
+counter (_, _, n) = n
+
 -- | Convertible? Reported as the reason itself, so a failing test prints why.
 same :: Context -> String -> String -> Maybe ConversionFailure
-same ctx a b = fst (convert natVec ctx natVecCounter (term ctx a) (term ctx b))
+same ctx a b = verdict (convert natVec ctx natVecCounter (term ctx a) (term ctx b))
 
 yes :: Context -> String -> String -> IO ()
 yes ctx a b = same ctx a b @?= Nothing
@@ -59,7 +70,7 @@ named = GlobalName
 -- counter threaded through the context, then both terms, in that order.
 convertIn :: [(String, String)] -> String -> String -> Maybe ConversionFailure
 convertIn binders a b =
-  fst (convert natVec ctx n (termAt n ctx a) (termAt n ctx b))
+  verdict (convert natVec ctx n (termAt n ctx a) (termAt n ctx b))
   where
     (ctx, n) = foldl add ([], natVecCounter) binders
     add (c, k) (name, ty) =
@@ -155,7 +166,7 @@ siteTests :: [TestTree]
 siteTests =
   [ testCase "two universes, at the top" $
       same [] "Type\8320" "Type\8321"
-        @?= Just (ConversionFailure [] (LevelsDiffer (Level 0) (Level 1)))
+        @?= Just (ConversionFailure [] (LevelsDiffer (LZero) (levelOfNat 1)))
   , testCase "two formers, at the top" $
       same [] "zero" "nil Nat"
         @?= Just (ConversionFailure [] (NamesDiffer (named "zero") (named "nil")))
@@ -188,18 +199,76 @@ siteTests =
 counterTests :: [TestTree]
 counterTests =
   [ testCase "opening a binder advances it" $
-      (snd (convert natVec [] 100
+      (counter (convert natVec [] 100
               (term [] "\\ (x : Nat) -> x") (term [] "\\ (x : Nat) -> x")) > 100)
         @?= False
       -- Syntactically equal: the fast path returns before any binder is opened,
       -- so nothing is minted. That is the point of the fast path.
   , testCase "a binder that IS opened advances it" $
-      (snd (convert natVec [] 100
+      (counter (convert natVec [] 100
               (term [] "\\ (x : Nat) -> (\\ (y : Nat) -> y) x")
               (term [] "\\ (x : Nat) -> x")) > 100)
         @?= True
   , testCase "it advances on the failing branch too" $
-      (snd (convert natVec [] 100
+      (counter (convert natVec [] 100
               (term [] "\\ (x : Nat) -> zero") (term [] "\\ (x : Nat) -> succ zero")) > 100)
         @?= True
   ]
+
+-- --------------------------------------------------------------------------
+-- Level obligations (MS3 phase 33)
+-- --------------------------------------------------------------------------
+
+-- | **The invariant this group is really about**: with no meta on either side,
+-- nothing is owed and the answer is exactly what it was before phase 33. That
+-- is why the rest of the suite did not move, and it is checked here rather than
+-- left to be inferred from the suite passing.
+obligationTests :: [TestTree]
+obligationTests =
+  [ testCase "closed universes owe nothing, whichever way they subsume" $
+      owed (subsumes natVec [] natVecCounter (universe 1) (universe 0)) @?= []
+
+  , testCase "nor does an equality between closed universes" $
+      owed (convert natVec [] natVecCounter (universe 1) (universe 1)) @?= []
+
+  , -- @subsumes expected actual@, so this asks whether a term at @Type ?m@ is
+    -- usable where @Type1@ is wanted: @?m <= 1@.
+    testCase "a meta on the right of the relation is owed" $
+      subsumes natVec [] natVecCounter (universe 1) (Universe (LVar meta))
+        @?= (Nothing, [AtMost (LVar meta) (levelOfNat 1)], natVecCounter)
+
+  , testCase "and it is a success, not a failure" $
+      verdict (subsumes natVec [] natVecCounter (universe 1) (Universe (LVar meta)))
+        @?= Nothing
+
+  , -- An **equality** is undecided in both directions at once, and both are
+    -- owed: a Π's domain is invariant, so a bare @Type@ written in a domain
+    -- reaches this case and must not be refused.
+    testCase "an equality with a meta owes the relation both ways" $
+      owed (convert natVec [] natVecCounter (Universe (LVar meta)) (universe 0))
+        @?= [AtMost (LVar meta) (levelOfNat 0), AtMost (levelOfNat 0) (LVar meta)]
+
+  , -- False for every instantiation, so it is reported here rather than
+    -- postponed — the error lands on the line that caused it.
+    testCase "a relation that no level could satisfy still fails on the spot" $
+      (verdict (subsumes natVec [] natVecCounter (universe 0) (universe 1)) == Nothing)
+        @?= False
+
+  , -- Reached through a Π rather than at the head, so the obligation has to
+    -- survive the recursion that 'andThen' threads it through.
+    testCase "obligations come back from under a binder" $
+      owed (convert natVec [] natVecCounter
+              (arrow (Universe (LVar meta)) (universe 0))
+              (arrow (universe 0) (universe 0)))
+        @?= [AtMost (LVar meta) (levelOfNat 0), AtMost (levelOfNat 0) (LVar meta)]
+  ]
+  where
+    universe = Universe . levelOfNat
+    meta     = LMeta 900
+
+    owed (_, o, _) = o
+
+    -- A non-dependent function type, built by hand: the concrete syntax cannot
+    -- write a meta down, which is the point — only a bare @Type@ mints one, and
+    -- this module reads no source.
+    arrow dom cod = Pi (Ident "_") dom (close (fst (fresh 990)) cod)

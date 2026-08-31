@@ -1,19 +1,19 @@
 declared Nat
 no noConfusionEven: evenSS's argument p has a type that depends on an earlier argument, so its equation cannot be stated
 declared Even
-Unit
-Empty
-Eq Nat zero (succ zero)
+Unit {0}
+Empty {0}
+Eq {0} Nat zero (succ zero)
 proving twoIsEven : Even (succ (succ zero))
 twoIsEven : Even (succ (succ zero))   ∎
 proving anEvenNumber : Sigma Nat Even
 anEvenNumber : Sigma Nat Even   ∎
 succ (succ zero)
-proving eta : ∀ (A : Type₀) (B : A -> Type₀) (s : Sigma A B) -> Eq (Sigma A B) s (pair A B (fst A B s) (snd A B s))
-eta : ∀ (A : Type₀) (B : A -> Type₀) (s : Sigma A B) -> Eq (Sigma A B) s (pair A B (fst A B s) (snd A B s))   ∎
-proving swap : ∀ (A : Type₀) (B : Type₀) -> And A B -> And B A
-swap : ∀ (A : Type₀) (B : Type₀) -> And A B -> And B A   ∎
-proving succInjective : ∀ (a : Nat) (b : Nat) -> Eq Nat (succ a) (succ b) -> Eq Nat a b
-succInjective : ∀ (a : Nat) (b : Nat) -> Eq Nat (succ a) (succ b) -> Eq Nat a b   ∎
-proving zeroIsNotSuccessor : ∀ (a : Nat) -> Eq Nat zero (succ a) -> Empty
-zeroIsNotSuccessor : ∀ (a : Nat) -> Eq Nat zero (succ a) -> Empty   ∎
+proving eta : ∀ (A : Type₀) (B : A -> Type₀) (s : Sigma A B) -> Eq {0} (Sigma A B) s (pair A B (fst A B s) (snd A B s))
+eta : ∀ (A : Type₀) (B : A -> Type₀) (s : Sigma A B) -> Eq {0} (Sigma A B) s (pair A B (fst A B s) (snd A B s))   ∎
+proving swap : ∀ (A : Type₀) (B : Type₀) -> And {0 0} A B -> And {0 0} B A
+swap : ∀ (A : Type₀) (B : Type₀) -> And {0 0} A B -> And {0 0} B A   ∎
+proving succInjective : ∀ (a : Nat) (b : Nat) -> Eq {0} Nat (succ a) (succ b) -> Eq {0} Nat a b
+succInjective : ∀ (a : Nat) (b : Nat) -> Eq {0} Nat (succ a) (succ b) -> Eq {0} Nat a b   ∎
+proving zeroIsNotSuccessor : ∀ (a : Nat) -> Eq {0} Nat zero (succ a) -> Empty {0}
+zeroIsNotSuccessor : ∀ (a : Nat) -> Eq {0} Nat zero (succ a) -> Empty {0}   ∎

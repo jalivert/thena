@@ -1,0 +1,34 @@
+thena spine> data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }
+declared Eq
+thena spine> data Unit : Type where { unit : Unit }
+declared Unit
+thena spine> data Empty : Type where { }
+declared Empty
+thena spine> data And (A : Type) (B : Type) : Type where { both : ∀ (a : A) (b : B) -> And A B }
+declared And
+thena spine> data Box1 : Type₀ -> Type₁ where { box1 : ∀ (A : Type₀) -> A -> Box1 A }
+no noConfusionBox1: box1's argument x has a type that depends on an earlier argument, so its equation cannot be stated
+declared Box1
+thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
+declared Nat
+thena spine> :theorem probe : ∀ (b : Box1 Nat) -> Nat
+proving probe : Box1 Nat -> Nat
+thena spine> attack
+thena spine> intro
+thena spine> into
+thena spine> along
+thena spine> eliminate b
+subgoals: box1Method
+thena spine> :abandon
+abandoned probe
+thena spine> data N : Type where { z : N ; s : N -> N }
+declared N
+thena spine> :show N
+data N {ℓ₁₅₅} : Type (ℓ₁₅₅) where
+  { z : N {ℓ₁₅₅}
+  ; s : N {ℓ₁₅₅} -> N {ℓ₁₅₅} }
+thena spine> :infer s {0}
+s {0} : N {0} -> N {0}
+thena spine> :infer s {1} (z {1})
+s {1} z {1} : N {1}
+thena spine> :quit

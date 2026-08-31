@@ -66,12 +66,12 @@ module Thena.Global.NoConfusion
   , generateNoConfusion
   ) where
 
+import Thena.Core.Level (Level (..))
 import Thena.Core.Context (Context, Entry (..), entryIdent, entryType, entryVar, lamOver, piOver)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
   , Ident (..)
-  , Level (..)
   , close
   , fresh
   , freeVars
@@ -111,9 +111,6 @@ data Skipped
     -- fastidious: the prelude declares @Eq@ before @And@, so a blanket
     -- precondition would refuse @NoConfusionEq@ — which phase 14 generated —
     -- for a name it was never going to write. See 'productsInScope'.
-  | NotAtTypeZero Level
-    -- ^ the datatype is not declared at @Type₀@, so @Eq (D params indices) x y@
-    -- cannot be formed: the prelude's @Eq@ takes @A : Type₀@.
   | DependentArguments GlobalName Ident
     -- ^ this constructor's argument telescope is dependent, so the equation for
     -- the named argument is ill-typed. @cons : (n : Nat) (a : A) (as : Vec A n)
@@ -160,24 +157,28 @@ generateNoConfusion :: GlobalEnv -> Int -> InductiveDefinition -> Generated
 generateNoConfusion env n0 d
   | not (equalityInScope env)          = Declined NoEquality
   | not (productsInScope env d)        = Declined NoProducts
-  | inductiveLevel d /= Level 0        = Declined (NotAtTypeZero (inductiveLevel d))
   | Just why <- dependentArgument d    = Declined why
   | isDeclared famName env             = Clash famName
   | isDeclared lemName env             = Clash lemName
   | otherwise =
       let (famTy,   n1) = familyType n0
           (famBody, n2) = family n1
-       in case fst (check env [] n2 famBody famTy) of
+       in case verdict (check env [] n2 famBody famTy) of
             Left e   -> Rejected famName e
             Right () ->
-              let env1          = addDefinition famName (MkDefinition famTy famBody) env
+              let env1          = addDefinition famName (MkDefinition (inductiveLevels d) [] famTy famBody) env
                   (lemTy,   n3) = lemmaType n2
                   (lemBody, n4) = lemma n3
-               in case fst (check env1 [] n4 lemBody lemTy) of
+               in case verdict (check env1 [] n4 lemBody lemTy) of
                     Left e   -> Rejected lemName e
                     Right () ->
-                      Generated (addDefinition lemName (MkDefinition lemTy lemBody) env1) n4
+                      Generated (addDefinition lemName (MkDefinition (inductiveLevels d) [] lemTy lemBody) env1) n4
   where
+    -- Everything checked here is /generated/, so it holds no level meta and
+    -- can owe no obligation. The counter is not wanted either — these checks
+    -- run in an empty context on closed terms.
+    verdict (r, _, _) = r
+
     (famName, lemName) = noConfusionNames (inductiveName d)
 
     dn        = inductiveName d
@@ -190,31 +191,56 @@ generateNoConfusion env n0 d
     -- @D params indices@, as an application of the generated wrapper — the same
     -- spelling 'Thena.Global.Env.constructorTarget' builds, so nothing has to
     -- reduce to see the two agree.
-    familyAt is = foldl App (Global dn) (paramVars ++ is)
+    -- **At the datatype's own level parameters**, like every other generated
+    -- reference (phase 31g; the same fix `Thena.Global.Env` took in 31c).
+    familyAt is = foldl App (Global dn (map LVar (inductiveLevels d))) (paramVars ++ is)
 
-    eqAt a x y = foldl App (Global (GlobalName "Eq")) [a, x, y]
-    reflAt a x = foldl App (Global (GlobalName "refl")) [a, x]
+    -- **Everything this module writes is stated at the datatype's own level**
+    -- (MS3 phase 31g), and that is exactly what cumulativity buys.
+    --
+    -- A constructor argument's type lives at some @ℓ_arg ≤ dl@ (the size
+    -- restriction), so @Eq {dl}@ applied to it is well typed: subsumption
+    -- lifts a @Type ℓ_arg@ into @Type dl@. Before phase 32 the equations would
+    -- have had to be stated each at its own argument's level, and then could
+    -- not have been conjoined — @And@ takes two types at **one** level.
+    dl = inductiveLevel d
 
-    andAt p q        = foldl App (Global (GlobalName "And")) [p, q]
-    bothAt p q x y   = foldl App (Global (GlobalName "both")) [p, q, x, y]
+    eqAt a x y = foldl App (Global (GlobalName "Eq") [dl]) [a, x, y]
+    reflAt a x = foldl App (Global (GlobalName "refl") [dl]) [a, x]
+
+    -- **@And@ takes two levels, one per conjunct** (MS3 phase 33c). Both are
+    -- @dl@ here because every equation is stated at @dl@ — see the note above —
+    -- so the join @Type (dl ⊔ dl)@ is @Type dl@ and the family's own level is
+    -- unchanged.
+    --
+    -- `[an opportunity this opens, and it is not taken here]` Now that @And@
+    -- carries a level per conjunct, the equations need not all be stated at
+    -- @dl@: each could be stated at its own argument's level and conjoined at
+    -- the join, which is what phase 32 §1 wanted and could not spell. That
+    -- would make the lifting above unnecessary. It is a change to what is
+    -- generated, not to what this phase is about.
+    andAt p q        = foldl App (Global (GlobalName "And") [dl, dl]) [p, q]
+    bothAt p q x y   = foldl App (Global (GlobalName "both") [dl, dl]) [p, q, x, y]
 
     -- ----------------------------------------------------------------------
     -- The family
     -- ----------------------------------------------------------------------
 
-    -- @∀ params indices (x y : D params indices) -> Type₀@
+    -- @∀ params indices (x y : D params indices) -> Type dl@
     --
-    -- **@Type₀@, not @Type₁@.** Phase 14 had every case CPS-encoded, and
-    -- @(C : Type₀) -> C@ is itself at @Type₁@; with @Empty@, @Unit@ and @And@
-    -- in the prelude every case is an ordinary @Type₀@ proposition and the
-    -- family follows it down. Nothing else about the shape changed.
+    -- **At the datatype's own level, not one above it.** Phase 14 had every
+    -- case CPS-encoded, and @(C : Type l) -> C@ is itself at @Type (suc l)@;
+    -- with @Empty@, @Unit@ and @And@ in the prelude every case is an ordinary
+    -- proposition at @dl@ and the family follows it down. Phase 31g is what
+    -- made @dl@ the datatype's own rather than @Type₀@; nothing else about the
+    -- shape changed.
     familyType n =
       let (vx, n1) = fresh n
           (vy, n2) = fresh n1
           fam      = familyAt (varsOf idx)
        in ( piOver ps (piOver idx
               (Pi (Ident "x") fam (close vx
-                (Pi (Ident "y") fam (close vy (Universe (Level 0)))))))
+                (Pi (Ident "y") fam (close vy (Universe dl))))))
           , n2
           )
 
@@ -233,21 +259,21 @@ generateNoConfusion env n0 d
           (mt, n3) = typeMotive n2
           (ms, n4) = each (outerMethod mt (Free vy)) n3 cs
           fam      = familyAt (varsOf idx)
-          body     = Eliminate dn paramVars mt ms (varsOf idx) (Free vx)
+          body     = Eliminate dn (map LVar (inductiveLevels d)) paramVars mt ms (varsOf idx) (Free vx)
        in ( lamOver ps (lamOver idx
               (Lam (Ident "x") fam (close vx
                 (Lam (Ident "y") fam (close vy body)))))
           , n4
           )
 
-    -- @λ indices (t : D params indices) . Type₀@ — the motive of both
+    -- @λ indices (t : D params indices) . Type dl@ — the motive of both
     -- eliminations, since both compute a type and neither result depends on
-    -- what was eliminated. Valued in @Type₁@, which is the level
+    -- what was eliminated. Valued in @Type (suc dl)@, which is the level
     -- 'Thena.Core.Typing.infer' reads off it.
     typeMotive n =
       let (is, n1) = freshen n idx
           (vt, n2) = fresh n1
-       in ( lamOver is (Lam (Ident "t") (familyAt (varsOf is)) (close vt (Universe (Level 0))))
+       in ( lamOver is (Lam (Ident "t") (familyAt (varsOf is)) (close vt (Universe dl)))
           , n2
           )
 
@@ -256,7 +282,7 @@ generateNoConfusion env n0 d
     outerMethod mt y c n =
       let args       = constructorArguments c
           (ms, n1)   = each (innerMethod mt args c) n cs
-          inner      = Eliminate dn paramVars mt ms (varsOf idx) y
+          inner      = Eliminate dn (map LVar (inductiveLevels d)) paramVars mt ms (varsOf idx) y
           (body, n2) = withHypotheses mt args inner n1
        in (lamOver args body, n2)
 
@@ -276,7 +302,7 @@ generateNoConfusion env n0 d
     -- Discharging an impossible branch is @elim Empty@ at whatever goal is
     -- wanted, which is a goal at /any/ level; the CPS form it replaces could
     -- only ever reach a @Type₀@ one.
-    discriminate = Global (GlobalName "Empty")
+    discriminate = Global (GlobalName "Empty") [dl]
 
     -- @And (Eq A₁ a₁ a\'₁) (… (Eq Aₙ aₙ a\'ₙ))@, right-nested, and @Unit@ for a
     -- constructor with no arguments. Well typed only because 'dependentArgument'
@@ -297,7 +323,7 @@ generateNoConfusion env n0 d
           (vy, n2) = fresh n1
           (ve, n3) = fresh n2
           fam      = familyAt (varsOf idx)
-          result   = foldl App (Global famName)
+          result   = foldl App (Global famName (map LVar (inductiveLevels d)))
                        (paramVars ++ varsOf idx ++ [Free vx, Free vy])
        in ( piOver ps (piOver idx
               (Pi (Ident "x") fam (close vx
@@ -315,7 +341,7 @@ generateNoConfusion env n0 d
           fam      = familyAt (varsOf idx)
           (meq, n4)  = equalityMotive n3
           (mrfl, n5) = reflMethod n4
-          body = Eliminate (GlobalName "Eq") [fam] meq [mrfl]
+          body = Eliminate (GlobalName "Eq") [dl] [fam] meq [mrfl]
                    [Free vx, Free vy] (Free ve)
        in ( lamOver ps (lamOver idx
               (Lam (Ident "x") fam (close vx
@@ -332,7 +358,7 @@ generateNoConfusion env n0 d
           (vv, n2) = fresh n1
           (vw, n3) = fresh n2
           fam      = familyAt (varsOf idx)
-          result   = foldl App (Global famName)
+          result   = foldl App (Global famName (map LVar (inductiveLevels d)))
                        (paramVars ++ varsOf idx ++ [Free vu, Free vv])
        in ( Lam (Ident "u") fam (close vu
               (Lam (Ident "v") fam (close vv
@@ -346,14 +372,14 @@ generateNoConfusion env n0 d
       let (va, n1)   = fresh n
           (mdg, n2)  = diagonalMotive n1
           (ms,  n3)  = each (diagonalMethod mdg) n2 cs
-          body       = Eliminate dn paramVars mdg ms (varsOf idx) (Free va)
+          body       = Eliminate dn (map LVar (inductiveLevels d)) paramVars mdg ms (varsOf idx) (Free va)
        in (Lam (Ident "a") (familyAt (varsOf idx)) (close va body), n3)
 
     -- @λ indices (z : D params indices) . NoConfusionD params indices z z@.
     diagonalMotive n =
       let (is, n1) = freshen n idx
           (vz, n2) = fresh n1
-          result   = foldl App (Global famName)
+          result   = foldl App (Global famName (map LVar (inductiveLevels d)))
                        (paramVars ++ varsOf is ++ [Free vz, Free vz])
        in ( lamOver is (Lam (Ident "z") (familyAt (varsOf is)) (close vz result))
           , n2
@@ -395,13 +421,13 @@ generateNoConfusion env n0 d
     -- conjoin. Right-nested rather than left so that the one-argument case is
     -- the bare equation with no wrapper at all, which is the overwhelmingly
     -- common one.
-    conjoin []       = Global (GlobalName "Unit")
+    conjoin []       = Global (GlobalName "Unit") [dl]
     conjoin [t]      = t
     conjoin (t : ts) = andAt t (conjoin ts)
 
     -- The proof of 'conjoin' applied to the same list, given a proof of each
     -- conjunct. Taken as pairs so the two nestings cannot drift apart.
-    conjoinProof []             = Global (GlobalName "unit")
+    conjoinProof []             = Global (GlobalName "unit") [dl]
     conjoinProof [(_, p)]       = p
     conjoinProof ((t, p) : tps) =
       bothAt t (conjoin (map fst tps)) p (conjoinProof tps)
@@ -420,9 +446,15 @@ equalityInScope :: GlobalEnv -> Bool
 equalityInScope env = case lookupInductive (GlobalName "Eq") env of
   Nothing -> False
   Just e -> case (inductiveParameters e, inductiveIndices e, inductiveConstructors e) of
-    ([a], [i, j], [c]) ->
-      inductiveLevel e == Level 0
-        && entryType a == Universe (Level 0)
+    -- **@Eq@ is level-polymorphic in exactly one parameter** (MS3 phase 31d),
+    -- and the shape check follows it: the carrier lives at that parameter, and
+    -- so does the family. Everything this module generates is still stated at
+    -- @Eq {0}@ — no-confusion is only produced for a @Type₀@ datatype (the
+    -- guard below), whose constructor arguments live at @Type₀@ too by the size
+    -- restriction.
+    ([a], [i, j], [c]) | [lv] <- inductiveLevels e ->
+      inductiveLevel e == LVar lv
+        && entryType a == Universe (LVar lv)
         && entryType i == Free (entryVar a)
         && entryType j == Free (entryVar a)
         && constructorName c == GlobalName "refl"
@@ -464,15 +496,27 @@ productsInScope env d =
     needsUnit  = any ((== 0) . arity) cs
     needsAnd   = any ((>= 2) . arity) cs
 
--- | @And (A : Type₀) (B : Type₀) : Type₀ { both : ∀ (a : A) (b : B) -> And A B }@
+-- | @And {ℓ₀ ℓ₁} (A : Type ℓ₀) (B : Type ℓ₁) : Type (ℓ₀ ⊔ ℓ₁)
+--   { both : ∀ (a : A) (b : B) -> And A B }@
+--
+-- **One level per conjunct** (MS3 phase 33c). Written by hand it was
+-- @And {ℓ} (A B : Type ℓ) : Type ℓ@ — one name in three places forcing them
+-- equal — and inference cannot say that, because each written @Type@ is its own
+-- unknown. What it gives instead is the more general form, and it is the one
+-- phase 32 §1 wanted and rejected for having no surface spelling: the join is
+-- computed, so nobody has to write @⊔@.
+--
+-- The result level is compared **up to the algebra**, since that is what
+-- @Eq Level@ is: @Type (ℓ₀ ⊔ ℓ₁)@ is what generalisation produces and
+-- @normalise@ is what makes the comparison mean it.
 conjunctionInScope :: GlobalEnv -> Bool
 conjunctionInScope env = case lookupInductive (GlobalName "And") env of
   Nothing -> False
   Just e -> case (inductiveParameters e, inductiveIndices e, inductiveConstructors e) of
-    ([a, b], [], [c]) ->
-      inductiveLevel e == Level 0
-        && entryType a == Universe (Level 0)
-        && entryType b == Universe (Level 0)
+    ([a, b], [], [c]) | [l0, l1] <- inductiveLevels e ->
+      inductiveLevel e == LMax (LVar l0) (LVar l1)
+        && entryType a == Universe (LVar l0)
+        && entryType b == Universe (LVar l1)
         && constructorName c == GlobalName "both"
         && case constructorArguments c of
              [x, y] -> entryType x == Free (entryVar a)
@@ -487,8 +531,8 @@ truthInScope :: GlobalEnv -> Bool
 truthInScope env = case lookupInductive (GlobalName "Unit") env of
   Nothing -> False
   Just e -> case (inductiveParameters e, inductiveIndices e, inductiveConstructors e) of
-    ([], [], [c]) ->
-      inductiveLevel e == Level 0
+    ([], [], [c]) | [lv] <- inductiveLevels e ->
+      inductiveLevel e == LVar lv
         && constructorName c == GlobalName "unit"
         && null (constructorArguments c)
         && null (constructorIndices c)
@@ -498,10 +542,12 @@ truthInScope env = case lookupInductive (GlobalName "Unit") env of
 falsityInScope :: GlobalEnv -> Bool
 falsityInScope env = case lookupInductive (GlobalName "Empty") env of
   Nothing -> False
-  Just e -> null (inductiveParameters e)
+  Just e -> case inductiveLevels e of
+    [lv] -> null (inductiveParameters e)
               && null (inductiveIndices e)
               && null (inductiveConstructors e)
-              && inductiveLevel e == Level 0
+              && inductiveLevel e == LVar lv
+    _ -> False
 
 -- | The first constructor argument whose type mentions an argument before it.
 --

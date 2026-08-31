@@ -18,6 +18,7 @@ module Thena.Development.Validate
   ) where
 
 import Thena.Core.Context (Context)
+import Thena.Core.Level (Obligation, solveLevels)
 import Thena.Core.Convert (convert)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), Ident, Var, instantiate)
@@ -53,8 +54,25 @@ import Thena.Global.Env (GlobalEnv)
 --
 -- The first failure stops it, carrying a 'Position' that names the component
 -- the way the user wrote it.
+-- **The level obligations are collected here and discharged here** (MS3 phase
+-- 33), which is @discussion\/level-binders-and-constraints.md@ §4's /"one
+-- collector in the checking pass"/. Nothing pools them during a proof: this
+-- walk regenerates precisely the obligations the development's /current/ shape
+-- owes, so anything regretted owes nothing and anything kept owes again.
+--
+-- 'Thena.Core.Level.solveLevels' runs once, over the whole walk's obligations
+-- rather than per component, because a meta bounded in one component and
+-- forced in another is the ordinary case.
 revalidate :: GlobalEnv -> Context -> Int -> Partial -> (Either KernelError (), Int)
-revalidate env ctx n = chain env ctx n Nothing
+revalidate env ctx n p = case chain env ctx n Nothing p of
+  (Left e,   _,    n1) -> (Left e, n1)
+  (Right (), owed, n1) -> case solveLevels owed of
+    Left u  -> (Left (Levels u), n1)
+    -- **What it forced is discarded**, and that is the difference between this
+    -- and 'Thena.Kernel.certify': @:revalidate@ is a look, not an act (§2.4's
+    -- "bare word acts, colon looks"), so it says whether the development is a
+    -- valid state without changing it. @qed@ is where a solution is written in.
+    Right _ -> (Right (), n1)
 
 -- | The whole of 'revalidate', plus what the trailing term must have.
 --
@@ -62,10 +80,10 @@ revalidate env ctx n = chain env ctx n Nothing
 -- argument, rather than two that could come to disagree about a link.
 chain
   :: GlobalEnv -> Context -> Int -> Maybe Core -> Partial
-  -> (Either KernelError (), Int)
+  -> (Either KernelError (), [Obligation], Int)
 chain env ctx n0 expected p0 = case p0 of
   Trailing t -> case expected of
-    Nothing -> (Right (), n0)
+    Nothing -> (Right (), [], n0)
     Just ty -> at TheTerm (check env ctx n0 t ty)
 
   Pending k rest -> constraint k `andThen` \n1 ->
@@ -83,8 +101,10 @@ chain env ctx n0 expected p0 = case p0 of
 
   Under c rest -> component c `andThen` \n1 ->
     case peeled c n1 of
-      (Left e,      n2) -> (Left e, n2)
-      (Right below, n2) -> chain env (ctx ++ [forget c]) n2 below rest
+      (Left e,      o, n2) -> (Left e, o, n2)
+      (Right below, o, n2) ->
+        let (r, o', n3) = chain env (ctx ++ [forget c]) n2 below rest
+         in (r, o ++ o', n3)
     where
       component (Assume x i s)   = isAType (TypeOf x i) ctx n0 s
       component (Claim  x i s)   = isAType (TypeOf x i) ctx n0 s
@@ -94,8 +114,8 @@ chain env ctx n0 expected p0 = case p0 of
       component (Guess x i g s) =
         isAType (TypeOf x i) ctx n0 s `andThen` \n1 ->
           case chain env ctx n1 (Just s) g of
-            (Left e,   n2) -> (Left (under x i e), n2)
-            (Right (), n2) -> (Right (), n2)
+            (Left e,   o, n2) -> (Left (under x i e), o, n2)
+            (Right (), o, n2) -> (Right (), o, n2)
 
       -- **Only an assumption consumes the expected type**, and that is thesis
       -- §2.3 read exactly: @assume@ adds @(λx:S)@, an abstraction, so the
@@ -109,22 +129,23 @@ chain env ctx n0 expected p0 = case p0 of
       --
       -- Without this the running example fails: @? id' ≐ (λ a : A . ? h : A .
       -- h) : A -> A@ has a trailing @h : A@, not @h : A -> A@.
-      peeled :: Component -> Int -> (Either KernelError (Maybe Core), Int)
+      peeled :: Component -> Int -> (Either KernelError (Maybe Core), [Obligation], Int)
       peeled c' n = case (c', expected) of
         (Assume x i s, Just ty) -> case whnf env ctx ty of
           Pi _ dom cod -> case convert env ctx n dom s of
-            (Nothing,  n') -> (Right (Just (instantiate (Free x) cod)), n')
-            (Just why, n') -> (Left (Ill (TypeOf x i) (NotOfType ctx (Free x) dom s why)), n')
-          other -> (Left (Overabstracted x i other), n)
-        _ -> (Right expected, n)
+            (Nothing,  o, n') -> (Right (Just (instantiate (Free x) cod)), o, n')
+            (Just why, o, n') ->
+              (Left (Ill (TypeOf x i) (NotOfType ctx (Free x) dom s why)), o, n')
+          other -> (Left (Overabstracted x i other), [], n)
+        _ -> (Right expected, [], n)
   where
     isAType here ctx' n t = case sortOf env ctx' n t of
-      (Left e,  n1) -> (Left (Ill here e), n1)
-      (Right _, n1) -> (Right (), n1)
+      (Left e,  o, n1) -> (Left (Ill here e), o, n1)
+      (Right _, o, n1) -> (Right (), o, n1)
 
-    at here (r, n) = case r of
-      Left e   -> (Left (Ill here e), n)
-      Right () -> (Right (), n)
+    at here (r, o, n) = case r of
+      Left e   -> (Left (Ill here e), o, n)
+      Right () -> (Right (), o, n)
 
 -- | A failure inside a guess is reported inside it, not flattened: a guess's
 -- body is a development in its own right and its positions mean nothing
@@ -132,10 +153,12 @@ chain env ctx n0 expected p0 = case p0 of
 under :: Var -> Ident -> KernelError -> KernelError
 under x i e = case e of
   Ill pos te -> Ill (Inside x i pos) te
-  -- The other two carry no 'Position' to nest, and both already name the
-  -- component they are about.
+  -- The others carry no 'Position' to nest. 'Overabstracted' already names the
+  -- component it is about; 'NotClosed' is 'certify''s, and 'Levels' is about a
+  -- level, which has no position in the chain to be inside of.
   Overabstracted {} -> e
   NotClosed {}      -> e   -- 'chain' never builds one
+  Levels {}         -> e   -- 'revalidate''s own, and after the walk
 
 -- | Which constraint this is, counting from the front of the chain.
 --
@@ -149,6 +172,9 @@ constraintsBefore whole rest = count whole - count rest - 1
       Pending _ q     -> 1 + count q
       Under _ q       -> count q
 
-andThen :: (Either e (), Int) -> (Int -> (Either e (), Int)) -> (Either e (), Int)
-andThen (Left e,   n) _ = (Left e, n)
-andThen (Right (), n) k = k n
+andThen
+  :: (Either e (), [Obligation], Int)
+  -> (Int -> (Either e (), [Obligation], Int))
+  -> (Either e (), [Obligation], Int)
+andThen (Left e,   o, n) _ = (Left e, o, n)
+andThen (Right (), o, n) k = let (r, o', n') = k n in (r, o ++ o', n')

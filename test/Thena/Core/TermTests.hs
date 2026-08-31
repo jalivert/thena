@@ -16,11 +16,11 @@ import Test.Tasty.QuickCheck
   , (===)
   )
 
+import Thena.Core.Level (levelOfNat)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
   , Ident (..)
-  , Level (..)
   , Var
   , close
   , freeVars
@@ -90,8 +90,8 @@ genCore depth = sized go
     genLeaf =
       oneof
         [ Free <$> elements inScope
-        , Global <$> genGlobalName
-        , Universe . Level <$> elements [0, 1]
+        , (\g -> Global g []) <$> genGlobalName
+        , Universe . levelOfNat <$> elements [0, 1]
         ]
 
     genNode :: Int -> Gen Core
@@ -101,8 +101,8 @@ genCore depth = sized go
         , Lam <$> genIdent <*> half <*> (close (binderVar depth) <$> deeper)
         , Let <$> genIdent <*> half <*> half <*> (close (binderVar depth) <$> deeper)
         , App <$> half <*> half
-        , Canonical <$> genGlobalName <*> resize (n `div` 3) (listOf half)
-        , Eliminate
+        , (\g as -> Canonical g [] as) <$> genGlobalName <*> resize (n `div` 3) (listOf half)
+        , (\d -> Eliminate d [])
             <$> genGlobalName
             <*> resize (n `div` 4) (listOf half)
             <*> half
@@ -141,14 +141,14 @@ wellScoped = go 1000
     go c t = case t of
       Bound _        -> False
       Free _         -> True
-      Global _       -> True
+      Global _ _     -> True
       Universe _     -> True
       Pi _ s b       -> go c s && under c b
       Lam _ s b      -> go c s && under c b
       App f a        -> go c f && go c a
       Let _ v s b    -> go c v && go c s && under c b
-      Canonical _ as -> all (go c) as
-      Eliminate _ ps m ms is tgt ->
+      Canonical _ _ as -> all (go c) as
+      Eliminate _ _ ps m ms is tgt ->
         all (go c) ps && go c m && all (go c) ms && all (go c) is && go c tgt
       where
         under n sc = let (v, n') = fresh n in go n' (open v sc)
@@ -158,7 +158,7 @@ wellScoped = go 1000
 -- --------------------------------------------------------------------------
 
 tyA :: Core
-tyA = Global (GlobalName "A")
+tyA = Global (GlobalName "A") []
 
 -- | @λ ‹name› : A . ‹name›@, built with a variable of its own.
 identityLam :: String -> Int -> Core
@@ -272,6 +272,7 @@ freeVarsTests =
           node =
             Eliminate
               { eliminated = GlobalName "Nat"
+            , levels     = []
               , parameters = [Free (vs !! 0)]
               , motive     = Free (vs !! 1)
               , methods    = [Free (vs !! 2)]
@@ -282,7 +283,7 @@ freeVarsTests =
 
   , testCase "a Canonical node's arguments are traversed" $
       let vs = take 2 (mintFrom 300)
-       in asSet (freeVars (Canonical (GlobalName "S") (map Free vs)))
+       in asSet (freeVars (Canonical (GlobalName "S") [] (map Free vs)))
             @?= asSet vs
   ]
 

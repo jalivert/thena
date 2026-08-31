@@ -18,11 +18,16 @@ module Thena.GlobalTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
+import Thena.Core.Level
+  ( Level (..)
+  , LevelVar (..)
+  , Obligation (..)
+  , levelOfNat
+  )
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
   , Ident (..)
-  , Level (..)
   , close
   , fresh
   , open
@@ -45,9 +50,11 @@ import Thena.Global.Env
   , inductiveParameters
   , inductives
   , isDeclared
+  , constantType
   , lookupConstant
   , lookupDefinition
   , lookupInductive
+  , generalised
   )
 import Thena.Repl (renderInductive)
 
@@ -62,6 +69,7 @@ tests =
     , testGroup "universes (thesis §4.1.1, back-filled at phase 8)" universeTests
     , testGroup "names" nameTests
     , testGroup "printed and read back" roundTripTests
+    , testGroup "generalisation turns a proof into a scheme" generaliseTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -122,10 +130,10 @@ tablesTests =
   [ testCase "the datatype has a record" $
       fmap inductiveName (lookupInductive (named "Nat") nat) @?= Just (named "Nat")
   , testCase "the type former is a constant at its declared universe" $
-      lookupConstant (named "Nat") nat @?= Just (Universe (Level 0))
+      fmap constantType (lookupConstant (named "Nat") nat) @?= Just (Universe LZero)
   , testCase "a former is in two tables under one name (§3.3.1)" $
       sequence_
-        [ lookupConstant (named g) natVec
+        [ fmap constantType (lookupConstant (named g) natVec)
             @?= fmap definitionType (lookupDefinition (named g) natVec)
         | g <- ["Nat", "zero", "succ", "Vec", "nil", "cons"]
         ]
@@ -151,18 +159,18 @@ wrapperTests :: [TestTree]
 wrapperTests =
   [ testCase "a nullary former's wrapper is the bare Canonical" $
       fmap definitionBody (lookupDefinition (named "zero") nat)
-        @?= Just (Canonical (named "zero") [])
+        @?= Just (Canonical (named "zero") [] [])
   , testCase "a unary former's wrapper abstracts and applies" $
       fmap definitionBody (lookupDefinition (named "succ") nat)
-        @?= Just (Lam (Ident "n") natTy (close v (Canonical (named "succ") [Free v])))
+        @?= Just (Lam (Ident "n") natTy (close v (Canonical (named "succ") [] [Free v])))
   , testCase "the type former gets a wrapper too" $
       fmap definitionBody (lookupDefinition (named "Nat") nat)
-        @?= Just (Canonical (named "Nat") [])
+        @?= Just (Canonical (named "Nat") [] [])
   , testCase "every wrapper body is a saturated Canonical (§12 invariant 6)" $
       sequence_ (map saturated (formerNames natVec))
   ]
   where
-    natTy   = Global (named "Nat")
+    natTy   = Global (named "Nat") []
     (v, _)  = fresh 0
 
     -- Peel the wrapper's λs, counting them, and check the body applies the
@@ -176,7 +184,7 @@ wrapperTests =
       where
         peel k t = case t of
           Lam _ _ sc -> peel (k + 1) (open v sc)
-          Canonical f as
+          Canonical f _ as
             | f == g && length as == k && k == arity -> pure ()
           _ -> assertFailure (show g ++ ": wrapper body is " ++ show t)
 
@@ -210,7 +218,7 @@ agreesWithTheResolver :: [TestTree]
 agreesWithTheResolver =
   [ testCase name $ case parseCore natVec [] 0 written of
       Left e  -> assertFailure (show e)
-      Right (t, _) -> lookupConstant (named name) natVec @?= Just t
+      Right (t, _) -> fmap constantType (lookupConstant (named name) natVec) @?= Just t
   | (name, written) <-
       [ ("Nat",  "Type\8320")
       , ("zero", "Nat")
@@ -264,20 +272,20 @@ universeTests =
       "T : Type\8321 where { c : Type\8320 -> T }"
   , refused "a large argument in a small datatype"
       "T : Type\8320 where { c : Type\8320 -> T }"
-      (ArgumentTooLarge (named "c") (Ident "x") (Level 1) (Level 0))
+      (ArgumentTooLarge (named "c") (Ident "x") (levelOfNat 1) (LZero))
   , accepted "a recursive argument, which needs the former in scope already"
       "T : Type\8320 where { c : T -> T }"
   , accepted "a parameter used as an argument's type"
       "Box (A : Type\8320) : Type\8320 where { box : A -> Box A }"
   , refused "a parameter from a larger universe than the datatype"
       "Box (A : Type\8321) : Type\8320 where { box : A -> Box A }"
-      (ArgumentTooLarge (named "box") (Ident "x") (Level 1) (Level 0))
+      (ArgumentTooLarge (named "box") (Ident "x") (levelOfNat 1) (LZero))
   , accepted "an argument whose type mentions an earlier argument"
       "T : Type\8320 where { c : forall (n : Nat) (v : Vec Nat n) -> T }"
   , refused "an argument whose type is not a type at all"
       "T : Type\8320 where { c : zero -> T }"
       (ArgumentNotAType (named "c") (Ident "x")
-         (NotAType [] (Global (named "zero")) (Canonical (named "Nat") [])))
+         (NotAType [] (Global (named "zero") []) (Canonical (named "Nat") [] [])))
   ]
 
 -- --------------------------------------------------------------------------
@@ -352,3 +360,73 @@ afterFixtures :: String -> Either DeclareError ()
 afterFixtures src = case parseDeclaration natVec 0 src of
   Left e       -> error ("fixture does not parse: " ++ show e)
   Right (d, n) -> () <$ declare natVec n d
+
+-- --------------------------------------------------------------------------
+-- generalised (MS3 phase 33b)
+-- --------------------------------------------------------------------------
+
+-- | @qed@'s half of level polymorphism: the metas a finished proof is still
+-- carrying become the definition's prenex parameters, and the kernel's residue
+-- becomes the constraints every use will owe.
+generaliseTests :: [TestTree]
+generaliseTests =
+  [ testCase "a proof with no unknown level generalises to nothing" $
+      let (d, n) = generalised 50 [] (universe 1) (universe 0)
+       in (definitionLevels d, definitionConstraints d, n) @?= ([], [], 50)
+
+  , testCase "a meta in the type becomes a parameter" $
+      definitionLevels (fst (generalised 50 [] (Universe (LVar p)) (universe 0)))
+        @?= [LRigid 50]
+
+  , -- **Fresh, not the meta's own number under another constructor.** MS2
+    -- closeout 4f is one counter across every sort precisely so that a number
+    -- the user has seen as @?ℓ7@ is never reissued as something else.
+    testCase "and it is a fresh number, not the meta's" $
+      definitionLevels (fst (generalised 50 [] (Universe (LVar (LMeta 7))) (universe 0)))
+        @?= [LRigid 50]
+
+  , testCase "the type's metas come first, in the order it reads" $
+      definitionLevels (fst (generalised 50 [] (arrow (LVar q) (LVar p)) (universe 0)))
+        @?= [LRigid 50, LRigid 51]
+
+  , -- A use site supplies level arguments positionally and reads the type to
+    -- know what they mean, so a meta only the body mentions comes last.
+    testCase "a meta only the body mentions comes after them" $
+      definitionLevels
+        (fst (generalised 50 [] (Universe (LVar p)) (Universe (LVar q))))
+        @?= [LRigid 50, LRigid 51]
+
+  , testCase "the same meta twice is one parameter" $
+      definitionLevels (fst (generalised 50 [] (arrow (LVar p) (LVar p)) (universe 0)))
+        @?= [LRigid 50]
+
+  , testCase "the type is rewritten to mention the parameters" $
+      definitionType (fst (generalised 50 [] (Universe (LVar p)) (universe 0)))
+        @?= Universe (LVar (LRigid 50))
+
+  , testCase "and so is the body" $
+      definitionBody (fst (generalised 50 [] (universe 0) (Universe (LVar p))))
+        @?= Universe (LVar (LRigid 50))
+
+  , -- **The residue is not filtered.** A relation between two of the new
+    -- parameters is exactly what a scheme constraint is for; asking 'levelLeq'
+    -- to decide it here would refuse it, because a rigid is not bounded by
+    -- another rigid — which is the whole reason it has to travel to the use.
+    testCase "the residue becomes the constraints, over the new parameters" $
+      definitionConstraints
+        (fst (generalised 50 [AtMost (LVar p) (LVar q)]
+                (arrow (LVar p) (LVar q)) (universe 0)))
+        @?= [AtMost (LVar (LRigid 50)) (LVar (LRigid 51))]
+
+  , testCase "the counter comes back advanced by one per parameter" $
+      snd (generalised 50 [] (arrow (LVar p) (LVar q)) (universe 0)) @?= 52
+  ]
+  where
+    p = LMeta 900
+    q = LMeta 901
+
+    universe = Universe . levelOfNat
+
+    -- A non-dependent function type between two universes, built by hand: the
+    -- concrete syntax cannot write a meta down.
+    arrow a b = Pi (Ident "_") (Universe a) (close (fst (fresh 990)) (Universe b))

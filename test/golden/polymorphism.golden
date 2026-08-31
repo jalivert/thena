@@ -1,0 +1,45 @@
+thena spine> :theorem id : ∀ (A : Type) -> A -> A
+proving id : ∀ (A : Type (?ℓ1)) -> A -> A
+thena spine> try (\ (A : Type) (a : A) -> a)
+thena spine> solve
+thena spine> qed
+id {ℓ₁₃} : ∀ (A : Type (ℓ₁₃)) -> A -> A   ∎
+thena spine> :show id
+id {ℓ₁₃} : ∀ (A : Type (ℓ₁₃)) -> A -> A
+id = let id = λ (A : Type (ℓ₁₃)) (a : A) -> a : ∀ (A : Type (ℓ₁₃)) -> A -> A in id
+thena spine> :infer id {0}
+id {0} : ∀ (A : Type₀) -> A -> A
+thena spine> :infer id {3}
+id {3} : ∀ (A : Type₃) -> A -> A
+thena spine> :infer id
+id has 1 level parameter, and was given 0 level arguments
+its level parameters are prenex, so a use writes every one of them
+thena spine> :theorem lift : ∀ (A : Type) -> Type
+proving lift : Type (?ℓ15) -> Type (?ℓ17)
+thena spine> try (\ (A : Type) -> A)
+thena spine> solve
+thena spine> qed
+lift {ℓ₂₄ ℓ₂₅} : (ℓ₂₄ ≤ ℓ₂₅) ⊢ Type (ℓ₂₄) -> Type (ℓ₂₅)   ∎
+thena spine> :show lift
+lift {ℓ₂₄ ℓ₂₅} : (ℓ₂₄ ≤ ℓ₂₅) ⊢ Type (ℓ₂₄) -> Type (ℓ₂₅)
+lift = let lift = λ (A : Type (ℓ₂₄)) -> A : Type (ℓ₂₄) -> Type (ℓ₂₅) in lift
+thena spine> :infer lift {0 1}
+lift {0 1} : Type₀ -> Type₁
+thena spine> :infer lift {1 0}
+lift {1 0} : Type₁ -> Type₀
+thena spine> :theorem bad : Type₁ -> Type₀
+proving bad : Type₁ -> Type₀
+thena spine> try (lift {1 0})
+thena spine> solve
+thena spine> :revalidate
+1 is not at most 0
+thena spine> qed
+the kernel refused it
+1 is not at most 0
+thena spine> along
+thena core> reduce
+thena core> :revalidate
+1 is not at most 0
+thena core> :abandon
+abandoned bad
+thena spine> :quit

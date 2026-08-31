@@ -1,7 +1,7 @@
 -- | The core language: its terms, the names that appear in them, and the
 -- opaque 'Scope' that carries a binder's body.
 --
--- This module spends two of the three places the project uses Level 1
+-- This module spends two of the three places the project uses levelOfNat 1
 -- enforcement (@PLAN.md@ §3.4, §2.5):
 --
 --   * 'Scope' — only 'close' builds one; only 'open' and 'instantiate' take one
@@ -18,7 +18,6 @@ module Thena.Core.Term
   , fresh
   , Ident (..)
   , GlobalName (..)
-  , Level (..)
 
     -- * Terms
   , Core (..)
@@ -30,9 +29,16 @@ module Thena.Core.Term
   , instantiate
   , freeVars
   , globalsIn
+  , beyond
+  , substLevelsIn
+  , substLevelsInScope
+  , referencesAt
+  , levelMetasIn
   ) where
 
 import Data.List (nub)
+
+import Thena.Core.Level (Level, LevelVar, metasIn, substLevel)
 
 -- | A reference to a binding, globally unique within a session.
 --
@@ -65,11 +71,6 @@ newtype Ident = Ident String
 newtype GlobalName = GlobalName String
   deriving (Eq, Ord, Show)
 
--- | A universe level. Concrete and user-written; MS1 has no universe
--- polymorphism and no cumulativity (§3.7, §5.2).
-newtype Level = Level Int
-  deriving (Eq, Ord, Show)
-
 -- | The body of a binder, with the bound variable replaced by a de Bruijn index.
 --
 -- The constructor is not exported. 'close' is the only way in and 'open' and
@@ -83,15 +84,16 @@ newtype Scope a = MkScope a
 data Core
   = Bound Int                          -- ^ a binder inside this term
   | Free Var                           -- ^ a component in the context
-  | Global GlobalName                  -- ^ a definition in the global environment
+  | Global GlobalName [Level]          -- ^ a definition, at level arguments
   | Universe Level
   | Pi Ident Core (Scope Core)         -- ^ @Π x : S . B@
   | Lam Ident Core (Scope Core)        -- ^ @λ x : S . b@
   | App Core Core
   | Let Ident Core Core (Scope Core)   -- ^ @x = s : S . t@
-  | Canonical GlobalName [Core]        -- ^ saturated application of a former
+  | Canonical GlobalName [Level] [Core] -- ^ saturated former, at level arguments
   | Eliminate                          -- ^ saturated use of an eliminator
       { eliminated :: GlobalName
+      , levels     :: [Level]
       , parameters :: [Core]
       , motive     :: Core
       , methods    :: [Core]
@@ -112,18 +114,33 @@ data Core
 -- The final catch-all makes a missing case compare 'False' rather than warn.
 -- That is tolerable only because 'Core' is closed (§3.6) — if a constructor is
 -- ever added, this instance is the first place to look.
+--
+-- **All four places a 'Thena.Core.Level.Level' can sit are compared** — a
+-- 'Universe' and the three reference forms' arguments (MS3, his ruling of
+-- 2026-08-29). @Canonical@ and @Eliminate@ discarded theirs from phase 29 until
+-- then, which made this instance disagree with the two places that state the
+-- rule: 'Thena.Core.Convert' calls two uses of one former at different levels a
+-- clash, and 'Thena.Core.Unify' unifies their level arguments before their term
+-- arguments.
+--
+-- **Nothing could exhibit the disagreement**, because a @Canonical@ reaches a
+-- term only by δ-unfolding a saturated wrapper, so two written terms still
+-- compare at their @Global@ heads — where the levels /were/ compared — and the
+-- fast path correctly declined. That is not a reason to leave it: **equal
+-- implies convertible** is the licence conversion's fast path runs on (see
+-- 'Thena.Core.Convert'), and it was false as written.
 instance Eq Core where
   Bound i        == Bound j          = i == j
   Free x         == Free y           = x == y
-  Global f       == Global g         = f == g
+  Global f ks    == Global g ls      = f == g && ks == ls
   Universe k     == Universe l       = k == l
   Pi _ s b       == Pi _ s' b'       = s == s' && b == b'
   Lam _ s b      == Lam _ s' b'      = s == s' && b == b'
   App f a        == App g c          = f == g && a == c
   Let _ v s b    == Let _ v' s' b'   = v == v' && s == s' && b == b'
-  Canonical f as == Canonical g bs   = f == g && as == bs
-  Eliminate d ps m ms is t == Eliminate d' ps' m' ms' is' t' =
-    d == d' && ps == ps' && m == m' && ms == ms' && is == is' && t == t'
+  Canonical f ks as == Canonical g ls bs = f == g && ks == ls && as == bs
+  Eliminate d ks ps m ms is t == Eliminate d' ls ps' m' ms' is' t' =
+    d == d' && ks == ls && ps == ps' && m == m' && ms == ms' && is == is' && t == t'
   _ == _ = False
 
 -- | Abstract a free variable: every @'Free' x@ becomes the index of the binder
@@ -135,15 +152,15 @@ close x = MkScope . go 0
     go d t = case t of
       Bound i        -> Bound i
       Free y         -> if y == x then Bound d else Free y
-      Global g       -> Global g
+      Global g ls    -> Global g ls
       Universe k     -> Universe k
       Pi i s b       -> Pi i (go d s) (under d b)
       Lam i s b      -> Lam i (go d s) (under d b)
       App f a        -> App (go d f) (go d a)
       Let i v s b    -> Let i (go d v) (go d s) (under d b)
-      Canonical f as -> Canonical f (map (go d) as)
-      Eliminate dn ps m ms is tgt ->
-        Eliminate dn (map (go d) ps) (go d m) (map (go d) ms)
+      Canonical f ls as -> Canonical f ls (map (go d) as)
+      Eliminate dn ls ps m ms is tgt ->
+        Eliminate dn ls (map (go d) ps) (go d m) (map (go d) ms)
                   (map (go d) is) (go d tgt)
 
     under :: Int -> Scope Core -> Scope Core
@@ -165,15 +182,15 @@ instantiate v (MkScope body) = go 0 body
     go d t = case t of
       Bound i        -> if i == d then v else Bound i
       Free y         -> Free y
-      Global g       -> Global g
+      Global g ls    -> Global g ls
       Universe k     -> Universe k
       Pi i s b       -> Pi i (go d s) (under d b)
       Lam i s b      -> Lam i (go d s) (under d b)
       App f a        -> App (go d f) (go d a)
       Let i w s b    -> Let i (go d w) (go d s) (under d b)
-      Canonical f as -> Canonical f (map (go d) as)
-      Eliminate dn ps m ms is tgt ->
-        Eliminate dn (map (go d) ps) (go d m) (map (go d) ms)
+      Canonical f ls as -> Canonical f ls (map (go d) as)
+      Eliminate dn ls ps m ms is tgt ->
+        Eliminate dn ls (map (go d) ps) (go d m) (map (go d) ms)
                   (map (go d) is) (go d tgt)
 
     under :: Int -> Scope Core -> Scope Core
@@ -198,14 +215,14 @@ freeVars = nub . go
     go t = case t of
       Bound _                     -> []
       Free y                      -> [y]
-      Global _                    -> []
+      Global _ _                  -> []
       Universe _                  -> []
       Pi _ s (MkScope b)          -> go s ++ go b
       Lam _ s (MkScope b)         -> go s ++ go b
       App f a                     -> go f ++ go a
       Let _ v s (MkScope b)       -> go v ++ go s ++ go b
-      Canonical _ as              -> concatMap go as
-      Eliminate _ ps m ms is tgt  ->
+      Canonical _ _ as              -> concatMap go as
+      Eliminate _ _ ps m ms is tgt  ->
         concatMap go ps ++ go m ++ concatMap go ms ++ concatMap go is ++ go tgt
 
 -- | The global names a term mentions, in order of first occurrence, without
@@ -223,12 +240,123 @@ globalsIn = nub . go
     go t = case t of
       Bound _                     -> []
       Free _                      -> []
-      Global g                    -> [g]
+      Global g _                  -> [g]
       Universe _                  -> []
       Pi _ s (MkScope b)          -> go s ++ go b
       Lam _ s (MkScope b)         -> go s ++ go b
       App f a                     -> go f ++ go a
       Let _ v s (MkScope b)       -> go v ++ go s ++ go b
-      Canonical g as              -> g : concatMap go as
-      Eliminate d ps m ms is tgt  ->
+      Canonical g _ as              -> g : concatMap go as
+      Eliminate d _ ps m ms is tgt  ->
         d : (concatMap go ps ++ go m ++ concatMap go ms ++ concatMap go is ++ go tgt)
+
+-- | Apply a level substitution everywhere in a term (MS3 phase 30).
+--
+-- What instantiating a definition's level scheme does to its stored type.
+--
+-- **Levels occur in exactly four places** and this is the list: a @Universe@,
+-- and the level arguments of the three reference forms. Everything else is
+-- structural recursion — which is the practical shape of levels being
+-- context-free, the same fact that lets 'close' and 'open' ignore them
+-- entirely.
+--
+-- **This lives here and not in "Thena.Core.Level"** because it traverses
+-- 'Core', and that module deliberately knows nothing about terms.
+substLevelsIn :: [(LevelVar, Level)] -> Core -> Core
+substLevelsIn sub = go
+  where
+    at = substLevel sub
+
+    go t = case t of
+      Bound i        -> Bound i
+      Free x         -> Free x
+      Global g ls    -> Global g (map at ls)
+      Universe l     -> Universe (at l)
+      Pi i s (MkScope b)  -> Pi i (go s) (MkScope (go b))
+      Lam i s (MkScope b) -> Lam i (go s) (MkScope (go b))
+      App f a        -> App (go f) (go a)
+      Let i v s (MkScope b) -> Let i (go v) (go s) (MkScope (go b))
+      Canonical f ls as -> Canonical f (map at ls) (map go as)
+      Eliminate dn ls ps m ms is tgt ->
+        Eliminate dn (map at ls) (map go ps) (go m) (map go ms)
+                  (map go is) (go tgt)
+
+-- | Give every reference to @g@ that carries no level arguments these ones
+-- (MS3, review of the milestone).
+--
+-- **What a datatype's own recursive occurrences need.** A declaration is
+-- resolved before anything knows how many level parameters it will have, so
+-- @succ : N -> N@ stores its argument as @Global N []@; generalisation then
+-- gives @N@ a parameter and that stored @[]@ becomes an arity error, which is
+-- how @data N : Type where { z : N ; s : N -> N }@ came to be refused outright.
+-- 'Thena.Global.Declare' repairs it the moment the parameter list exists.
+--
+-- **Only the empty list is filled in.** A reference that already says which
+-- levels it is at was written that way on purpose and is left alone.
+--
+-- Reaching inside a 'Scope' is safe for 'substLevelsIn''s reason: this touches
+-- no 'Bound' and no 'Free', so it commutes with every binder.
+referencesAt :: GlobalName -> [Level] -> Core -> Core
+referencesAt g ls = go
+  where
+    go t = case t of
+      Bound i             -> Bound i
+      Free x              -> Free x
+      Global h []
+        | h == g          -> Global h ls
+      Global h ks         -> Global h ks
+      Universe l          -> Universe l
+      Pi i s (MkScope b)  -> Pi i (go s) (MkScope (go b))
+      Lam i s (MkScope b) -> Lam i (go s) (MkScope (go b))
+      App f a             -> App (go f) (go a)
+      Let i v s (MkScope b) -> Let i (go v) (go s) (MkScope (go b))
+      Canonical f ks as   -> Canonical f ks (map go as)
+      Eliminate d ks ps m ms is tgt ->
+        Eliminate d ks (map go ps) (go m) (map go ms) (map go is) (go tgt)
+
+-- | The same, under a binder.
+--
+-- **No opening and no freshening**, which is the whole point: levels are
+-- context-free, so a level substitution commutes with a binder and 'Scope' can
+-- be reached inside without breaking what hiding @MkScope@ protects. Exported
+-- for "Thena.Development.Cursor", whose 'Thena.Development.Cursor.TermStep'
+-- carries scoped siblings of the field the focus went into.
+substLevelsInScope :: [(LevelVar, Level)] -> Scope Core -> Scope Core
+substLevelsInScope sub (MkScope b) = MkScope (substLevelsIn sub b)
+
+-- | Every level meta the term mentions, without duplicates, in first-seen
+-- order (MS3 phase 33).
+--
+-- The level analogue of 'freeVars', and it walks the same four places
+-- 'substLevelsIn' writes to. 'Thena.Kernel' is the caller: a closed term whose
+-- levels are all determined is what a global definition may be built from.
+levelMetasIn :: Core -> [LevelVar]
+levelMetasIn = nub . concatMap metasIn . go
+  where
+    go t = case t of
+      Bound _                       -> []
+      Free _                        -> []
+      Global _ ls                   -> ls
+      Universe l                    -> [l]
+      Pi _ s (MkScope b)            -> go s ++ go b
+      Lam _ s (MkScope b)           -> go s ++ go b
+      App f a                       -> go f ++ go a
+      Let _ v s (MkScope b)         -> go v ++ go s ++ go b
+      Canonical _ ls as             -> ls ++ concatMap go as
+      Eliminate _ ls ps m ms is tgt ->
+        ls ++ concatMap go ps ++ go m ++ concatMap go ms
+           ++ concatMap go is ++ go tgt
+
+-- | A counter value greater than every variable given.
+--
+-- **What a checker needs when it did not mint the variables it is walking
+-- among.** 'fresh' guarantees uniqueness only within one monotonic run of the
+-- counter; a checker handed terms that were built during an *earlier* run has
+-- to start above them or it will mint a variable that is already in use, and
+-- 'close' will capture it.
+--
+-- Returns the representation's @Int@ rather than a 'Var', so the constructor
+-- stays hidden and the caller can only do with it the one thing it is for:
+-- start counting.
+beyond :: [Var] -> Int
+beyond vs = 1 + maximum (-1 : [i | Var i <- vs])

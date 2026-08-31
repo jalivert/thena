@@ -24,9 +24,10 @@ import Data.List (isInfixOf)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
+import Thena.Core.Level (Level (..))
 import Thena.Core.Context (Context)
 import Thena.Core.Convert (convert)
-import Thena.Core.Term (Core (..), Ident (..), Level (..), Var, fresh)
+import Thena.Core.Term (Core (..), Ident (..), Var, fresh)
 import Thena.Core.Typing (check)
 import Thena.Core.Unify (UnifyResult (..), blockers, constraintsOf, unify)
 import Thena.Declared (natVec, natVecCounter)
@@ -71,7 +72,7 @@ data Dev = Dev
 
 devOf :: [Decl] -> Dev
 devOf ds = Dev
-  { devCursor  = enter (foldr Under (Trailing (Universe (Level 0))) comps)
+  { devCursor  = enter (foldr Under (Trailing (Universe (LZero))) comps)
   , devContext = map forget comps
   , devNames   = n
   , devVars    = vars
@@ -139,9 +140,9 @@ nameOf dev v = case [ nm | (nm, w) <- devVars dev, w == v ] of
 decompositionTests :: [TestTree]
 decompositionTests =
   [ testCase "two identical terms need no work" $
-      resultOf [] "succ zero" "succ zero" "Nat" @?= Solved []
+      resultOf [] "succ zero" "succ zero" "Nat" @?= Solved [] []
   , testCase "reduction first: a redex meets its value" $
-      resultOf [] "(\\ (x : Nat) -> x) zero" "zero" "Nat" @?= Solved []
+      resultOf [] "(\\ (x : Nat) -> x) zero" "zero" "Nat" @?= Solved [] []
   , testCase "a former's arguments are decomposed, and a hole inside is solved" $
       solvedNames ([Hole "h" "Nat"]) "succ h" "succ (succ zero)" "Nat" @?= ["h"]
   , testCase "two holes, one on each side, both solved in one run" $
@@ -159,8 +160,8 @@ decompositionTests =
     solvedNames ds a b ty =
       let (r, _, dev) = run ds a b ty
        in case r of
-            Solved xs     -> map (nameOf dev) xs
-            Deferred xs _ -> map (nameOf dev) xs ++ ["<deferred>"]
+            Solved xs _     -> map (nameOf dev) xs
+            Deferred xs _ _ -> map (nameOf dev) xs ++ ["<deferred>"]
             Failed e      -> ["<failed: " ++ show e ++ ">"]
 
 patternTests :: [TestTree]
@@ -204,7 +205,7 @@ patternTests =
        in case [ v | Define _ _ v _ <- componentsOf (rebuild cur) ] of
             []    -> assertFailure "nothing was solved"
             t : _ -> case t of
-              Lam {} -> case fst (convert natVec (solvedContext cur) n1 t want) of
+              Lam {} -> case verdict (convert natVec (solvedContext cur) n1 t want) of
                 Nothing  -> pure ()
                 Just why -> assertFailure ("wrong solution: " ++ show why)
               _ -> assertFailure ("the pattern arguments were not abstracted: " ++ show t)
@@ -256,7 +257,7 @@ positionTests =
   , testCase "blockers are derived from the constraint, never stored" $
       let (r, cur, dev) = run [Hole "f" "Nat -> Nat", Hole "h" "Nat"] "f h" "zero" "Nat"
        in case r of
-            Deferred _ [k] -> map (nameOf dev) (blockers cur k) @?= ["f", "h"]
+            Deferred _ _ [k] -> map (nameOf dev) (blockers cur k) @?= ["f", "h"]
             other          -> assertFailure (show other)
   ]
   where
@@ -338,7 +339,7 @@ agreementTests =
               let ctx = solvedContext cur
                   (ta, n1) = readIn (devContext dev) (devNames dev) a
                   (tb, n2) = readIn (devContext dev) n1 b
-               in case fst (convert natVec ctx n2 ta tb) of
+               in case verdict (convert natVec ctx n2 ta tb) of
                     Nothing  -> pure ()
                     Just why -> assertFailure ("still not convertible: " ++ show why)
 
@@ -364,10 +365,15 @@ typeTests =
 
     one cur dev c = case c of
       Define _ _ v declared ->
-        case fst (check natVec (solvedContext cur) (devNames dev + 500) v declared) of
+        case verdict (check natVec (solvedContext cur) (devNames dev + 500) v declared) of
           Right () -> pure ()
           Left e   -> assertFailure ("a solution does not have its hole's type: " ++ show e)
       _ -> pure ()
+
+-- | @check@ and @convert@ return their level obligations too (phase 33);
+-- nothing here builds a level meta, so the list is always empty.
+verdict :: (a, b, c) -> a
+verdict (r, _, _) = r
 
 disciplineTests :: [TestTree]
 disciplineTests =
@@ -408,10 +414,10 @@ solvedContext = map forget . componentsOf . rebuild
 
 isSolved :: UnifyResult -> Int -> Assertion
 isSolved r k = case r of
-  Solved xs | length xs == k -> pure ()
+  Solved xs _ | length xs == k -> pure ()
   _ -> assertFailure ("expected " ++ show k ++ " solved, got " ++ show r)
 
 isDeferred :: UnifyResult -> Int -> Assertion
 isDeferred r k = case r of
-  Deferred _ ks | length ks == k -> pure ()
+  Deferred _ _ ks | length ks == k -> pure ()
   _ -> assertFailure ("expected " ++ show k ++ " parked, got " ++ show r)

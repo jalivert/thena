@@ -33,6 +33,9 @@ module Thena.Syntax.Concrete
 data Raw
   = RawName String
   | RawUniverse Int
+  | RawUniverseOpen              -- ^ @Type@ — a universe whose level is inferred
+  | RawAt String [Int]           -- ^ @foo {0 1}@ — a global at level arguments
+
   | RawLam [RawBinder] Raw       -- ^ @λ (x : S) (y : T) -> b@
   | RawPi [RawBinder] Raw        -- ^ @∀ (x : S) (y : T) -> B@
   | RawArrow Raw Raw             -- ^ @S -> B@, the non-dependent case
@@ -42,7 +45,7 @@ data Raw
   | RawGuess String Raw Raw Raw  -- ^ @let ? x : S ≐ (g) in p@
   | RawPending RawConstraint Raw -- ^ @κ ▸ p@
   | RawQuote Raw                 -- ^ @⌜ t ⌝@
-  | RawElim String [Raw] Raw [Raw] [Raw] Raw
+  | RawElim String [Int] [Raw] Raw [Raw] [Raw] Raw
     -- ^ @elim d (params) motive (methods) (indices) target@ (§2.6, phase 7) —
     -- positional, and in exactly 'Thena.Core.Term.Core''s own field order for
     -- 'Thena.Core.Term.Eliminate', so where a field goes needs no name.

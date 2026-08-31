@@ -7,16 +7,16 @@ module Thena.Syntax.Resolve
   ) where
 
 import Thena.Core.Context (Context, Entry (..), entryIdent, entryVar)
+import Thena.Core.Level (Level (..), freshLevelMeta, levelOfNat)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
   , Ident (..)
-  , Level (..)
   , Scope
   , Var
   , close
   , fresh
-  )
+   )
 import Thena.Development.Component (Component (..))
 import Thena.Development.Partial (Constraint (..), Partial (..))
 import Thena.Errors (DevForm (..), ResolveError (..))
@@ -70,6 +70,7 @@ globalsOf = map fst . definitions
 resolve :: GlobalEnv -> Context -> Int -> Raw -> Either ResolveError (Core, Int)
 resolve env ctx = core env (globalsOf env) ctx []
 
+
 -- | Resolve a raw tree as a development, taking the LONGEST PREFIX (§2.7):
 -- every leading binder becomes a chain link, so 'Trailing' ends up holding
 -- something that is not a binder unless @⌜ ⌝@ says otherwise.
@@ -83,7 +84,9 @@ resolvePartial env ctx = partial env (globalsOf env) ctx []
 -- | @env@ answers "is @d@ a declared datatype, and what is its shape" for an
 -- @elim@ (phase 7); @gs@ answers "is @s@ in scope as an ordinary name" for
 -- everything else, and is not always @globalsOf env@ — see 'Globals'.
-core :: GlobalEnv -> Globals -> Context -> Local -> Int -> Raw -> Either ResolveError (Core, Int)
+core
+  :: GlobalEnv -> Globals -> Context -> Local -> Int
+  -> Raw -> Either ResolveError (Core, Int)
 core env gs ctx local n raw = case raw of
   -- Local, then the ambient context, then the globals. A binder shadows a
   -- global of the same name, which is what one namespace (§3.6) requires: the
@@ -93,10 +96,31 @@ core env gs ctx local n raw = case raw of
     Nothing -> case lookupEntry s ctx of
       Just v  -> Right (Free v, n)
       Nothing
-        | GlobalName s `elem` gs -> Right (Global (GlobalName s), n)
+        | GlobalName s `elem` gs -> Right (Global (GlobalName s) [], n)
         | otherwise              -> Left (NotInScope s)
 
-  RawUniverse k -> Right (Universe (Level k), n)
+  RawUniverse k -> Right (Universe (levelOfNat k), n)
+
+  -- @Type@ — a universe whose level is left to be worked out (phase 33).
+  -- **Typical ambiguity is this line**: the level is a meta from the shared
+  -- counter, and conversion, unification and the collector at @qed@ are what
+  -- decide it. Writing @Typeₙ@ instead is always available and is the recovery
+  -- when they cannot (§6.3).
+  RawUniverseOpen ->
+    let (v, n1) = freshLevelMeta n
+     in Right (Universe (LVar v), n1)
+
+  -- @foo {ℓ 0}@ — a global at level arguments. **Refused on a local**: only a
+  -- definition has level parameters, and a λ-bound name has none to give.
+  RawAt s rls -> case lookup s local of
+    Just _  -> Left (LevelArgumentsOnALocal s)
+    Nothing -> case lookupEntry s ctx of
+      Just _ -> Left (LevelArgumentsOnALocal s)
+      Nothing
+        | GlobalName s `elem` gs -> do
+            let args = map levelOfNat rls
+            Right (Global (GlobalName s) args, n)
+        | otherwise -> Left (NotInScope s)
 
   RawApp f a -> do
     (f', n1) <- core env gs ctx local n f
@@ -140,9 +164,10 @@ core env gs ctx local n raw = case raw of
   -- §3.6's "one namespace, the innermost wins" that round-tripped perfectly
   -- and so was invisible to every test. Now a shadowed name resolves to the
   -- local and is refused, because a local is not a datatype.
-  RawElim d ps m ms is t -> do
+  RawElim d rls ps m ms is t -> do
     dn        <- datatypeNamed env gs ctx local d
     def       <- maybe (Left (NotADatatype d)) Right (lookupInductive dn env)
+    let dls = map levelOfNat rls
     (ps', n1) <- coreList env gs ctx local n ps
     (m', n2)  <- core env gs ctx local n1 m
     (ms', n3) <- coreList env gs ctx local n2 ms
@@ -157,7 +182,7 @@ core env gs ctx local n raw = case raw of
         then Left (WrongNumberOfMethods d wantM (length ms'))
         else if length is' /= wantI
           then Left (WrongNumberOfEliminationIndices d wantI (length is'))
-          else Right (Eliminate dn ps' m' ms' is' t', n5)
+          else Right (Eliminate dn dls ps' m' ms' is' t', n5)
 
   RawClaim {}   -> Left (NotACoreTerm AHole)
   RawGuess {}   -> Left (NotACoreTerm AGuess)
@@ -182,14 +207,14 @@ datatypeNamed
   :: GlobalEnv -> Globals -> Context -> Local -> String
   -> Either ResolveError GlobalName
 datatypeNamed env gs ctx local d = case core env gs ctx local 0 (RawName d) of
-  Right (Global g, _) -> Right g
+  Right (Global g _, _) -> Right g
   _                   -> Left (NotADatatype d)
 
 -- | A run of terms in the same local scope, left to right, threading the
 -- counter — what @elim@\'s three list-valued fields need (§2.6).
 coreList
-  :: GlobalEnv -> Globals -> Context -> Local -> Int -> [Raw]
-  -> Either ResolveError ([Core], Int)
+  :: GlobalEnv -> Globals -> Context -> Local -> Int
+  -> [Raw] -> Either ResolveError ([Core], Int)
 coreList _ _ _ _ n [] = Right ([], n)
 coreList env gs ctx local n (r : rs) = do
   (t, n1)  <- core env gs ctx local n r
@@ -214,7 +239,9 @@ binders env gs con ctx local n bs b = case bs of
 -- Developments
 -- --------------------------------------------------------------------------
 
-partial :: GlobalEnv -> Globals -> Context -> Local -> Int -> Raw -> Either ResolveError (Partial, Int)
+partial
+  :: GlobalEnv -> Globals -> Context -> Local -> Int
+  -> Raw -> Either ResolveError (Partial, Int)
 partial env gs ctx local n raw = case raw of
   RawLam bs b -> assumes env gs ctx local n bs b
 
@@ -259,8 +286,8 @@ partial env gs ctx local n raw = case raw of
 
 -- | Each binder group in a @λ@ becomes its own 'Assume' link.
 assumes
-  :: GlobalEnv -> Globals -> Context -> Local -> Int -> [RawBinder] -> Raw
-  -> Either ResolveError (Partial, Int)
+  :: GlobalEnv -> Globals -> Context -> Local -> Int
+  -> [RawBinder] -> Raw -> Either ResolveError (Partial, Int)
 assumes env gs ctx local n bs b = case bs of
   [] -> partial env gs ctx local n b
   RawBinder x ty : rest -> do
@@ -271,8 +298,8 @@ assumes env gs ctx local n bs b = case bs of
 
 -- | Ξ's binders scope over @s@, @t@ and @T@ and nothing else.
 constraint
-  :: GlobalEnv -> Globals -> Context -> Local -> Int -> RawConstraint
-  -> Either ResolveError (Constraint, Int)
+  :: GlobalEnv -> Globals -> Context -> Local -> Int
+  -> RawConstraint -> Either ResolveError (Constraint, Int)
 constraint env gs ctx local n (RawConstraint bs s t ty) = do
   (xi, local', n1) <- telescope env gs ctx local n bs
   (s', n2)  <- core env gs ctx local' n1 s
@@ -298,22 +325,32 @@ resolveData
   :: GlobalEnv -> Int -> RawData
   -> Either ResolveError (InductiveDefinition, Int)
 resolveData env n (RawData name ps ty cs) = do
+  -- **A declaration writes no level parameters** (MS3 phase 33c). It used to —
+  -- @data D {ℓ}@, minted here as 'LRigid's and in scope throughout — and that
+  -- was scaffolding, the only way to make a datatype polymorphic before metas
+  -- existed. Now every written @Type@ mints a meta like any other, and
+  -- "Thena.Global.Declare" computes the declared universe from the
+  -- constructors' arguments and generalises whatever is left.
   (params, afterParams, n1)  <- telescope env gs [] [] n ps
   (indices, _, rest, n2)     <- prefix env gs afterParams n1 ty
-  level <- case rest of
-    RawUniverse k -> Right (Level k)
-    _             -> Left (NotAUniverse name)
+  (level, n3) <- case rest of
+    RawUniverse k   -> Right (levelOfNat k, n2)
+    -- A bare @Type@: the level is worked out by the declaration path, which is
+    -- where the constructors' arguments are known.
+    RawUniverseOpen -> let (v, n') = freshLevelMeta n2 in Right (LVar v, n')
+    _               -> Left (NotAUniverse name)
   -- The datatype being declared joins 'Globals' here, and only here: a
   -- constructor may recursively mention it (@succ : Nat -> Nat@), and
   -- 'lookupInductive' would find nothing for it in @env@ mid-declaration.
-  (cs', n3) <- constructors env (dn : gs) dn params (length indices) afterParams n2 cs
-  Right (InductiveDefinition dn params indices level cs', n3)
+  (cs', n4) <- constructors env (dn : gs) dn params (length indices) afterParams n3 cs
+  Right (InductiveDefinition dn [] params indices level cs', n4)
   where
     gs = globalsOf env
     dn = GlobalName name
 
 constructors
-  :: GlobalEnv -> Globals -> GlobalName -> Context -> Int -> Local -> Int -> [RawConstructor]
+  :: GlobalEnv -> Globals -> GlobalName -> Context -> Int -> Local
+  -> Int -> [RawConstructor]
   -> Either ResolveError ([ConstructorDefinition], Int)
 constructors _ _ _ _ _ _ n [] = Right ([], n)
 constructors env gs dn params want local n (RawConstructor cn ty : rest) = do
@@ -333,7 +370,7 @@ targetIndices
   :: GlobalName -> Context -> Int -> String -> Core
   -> Either ResolveError [Core]
 targetIndices dn params want cn t = case spine t of
-  (Global g, as)
+  (Global g _, as)
     | g == dn ->
         if length as /= length params + want
           then Left (TargetArgumentCount cn (length params + want) (length as))
@@ -354,8 +391,8 @@ targetIndices dn params want cn t = case spine t of
 -- | A binder group list, outermost first. Only 'Hypothesis' entries ever
 -- appear (§3.3).
 telescope
-  :: GlobalEnv -> Globals -> Context -> Local -> Int -> [RawBinder]
-  -> Either ResolveError (Context, Local, Int)
+  :: GlobalEnv -> Globals -> Context -> Local -> Int
+  -> [RawBinder] -> Either ResolveError (Context, Local, Int)
 telescope _ _ _ local n [] = Right ([], local, n)
 telescope env gs ctx local n (RawBinder x ty : rest) = do
   (ty', n1) <- core env gs ctx local n ty
@@ -411,3 +448,4 @@ lookupEntry s = foldl pick Nothing
     pick acc e
       | entryIdent e == Ident s = Just (entryVar e)
       | otherwise               = acc
+

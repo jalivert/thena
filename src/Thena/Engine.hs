@@ -44,12 +44,12 @@ module Thena.Engine
 
 import Data.List (intercalate, nub)
 
+import Thena.Core.Level (Level (..), levelVarName)
 import Thena.Core.Context (Context)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
   , Ident (..)
-  , Level (..)
   , Var
   , fresh
   , instantiate
@@ -208,7 +208,7 @@ newtype ProofState = ProofState { cursor :: Cursor }
 newProof :: Int -> (ProofState, Int)
 newProof n =
   let (v, n1) = fresh n
-   in (ProofState (enter (goalAt v (Universe (Level 0)))), n1)
+   in (ProofState (enter (goalAt v (Universe (LZero)))), n1)
 
 goalAt :: Var -> Core -> Partial
 goalAt = goalAtNamed (Ident "goal")
@@ -488,9 +488,12 @@ perform instr rest m = case operation instr of
     Left r  -> failure r m
     Right t' -> case focus (cursor (proof m)) of
       OnComponent (Component.Claim x i s) ->
+        -- **The level obligations are dropped**, here and at every other
+        -- typing call in this module: "Thena.Core.Typing"'s header says why
+        -- once, and @qed@ re-collects what the finished development owes.
         case check (globals m) contextAt (names m) t' s of
-          (Left e,   n1) -> failure (GuessIllTyped e) m { names = n1 }
-          (Right (), n1) ->
+          (Left e,   _, n1) -> failure (GuessIllTyped e) m { names = n1 }
+          (Right (), _, n1) ->
             case replaceComponent (Component.Guess x i (Trailing t') s)
                                   (cursor (proof m)) of
               Left e    -> failure (CannotMove e) m { names = n1 }
@@ -661,8 +664,8 @@ perform instr rest m = case operation instr of
   Apply f -> case term f of
     Left r   -> failure r m
     Right hd -> case infer (globals m) contextAt (names m) hd of
-      (Left e,   n1) -> failure (NotTypeable e) m { names = n1 }
-      (Right ty, n1) -> saturate hd ty m { names = n1 }
+      (Left e,   _, n1) -> failure (NotTypeable e) m { names = n1 }
+      (Right ty, _, n1) -> saturate hd ty m { names = n1 }
 
   Concat l r -> case (,) <$> text l <*> text r of
     Left e         -> failure e m
@@ -697,16 +700,16 @@ perform instr rest m = case operation instr of
   Typing t -> case term t of
     Left r  -> failure r m
     Right t' -> case infer (globals m) contextAt (names m) t' of
-      (Left e,   n1) -> failure (NotTypeable e) m { names = n1 }
-      (Right ty, n1) -> produce (VTerm (Trailing ty)) m { names = n1 }
+      (Left e,   _, n1) -> failure (NotTypeable e) m { names = n1 }
+      (Right ty, _, n1) -> produce (VTerm (Trailing ty)) m { names = n1 }
 
   -- Thesis §2.7's @=@-binding. The type is inferred, because that is what makes
   -- it a definition: a definition's type is determined by its value.
   Define name v -> case (,) <$> operandIdent (env (exec m)) name <*> term v of
     Left r -> failure r m
     Right (i, val) -> case infer (globals m) contextAt (names m) val of
-      (Left e,   n1) -> failure (NotTypeable e) m { names = n1 }
-      (Right ty, n1)
+      (Left e,   _, n1) -> failure (NotTypeable e) m { names = n1 }
+      (Right ty, _, n1)
         | i `elem` Cursor.identsIn (cursor (proof m)) -> failure (taken i) m { names = n1 }
         | otherwise ->
             let (x, n2) = fresh n1
@@ -767,8 +770,8 @@ perform instr rest m = case operation instr of
     Right (a, b) ->
       let cur = cursor (proof m)
        in case infer (globals m) (Cursor.context cur) (names m) a of
-            (Left e, n1)  -> failure (NotTypeable e) m { names = n1 }
-            (Right ty, n1) -> case unify (globals m) cur n1 a b ty of
+            (Left e, _, n1)  -> failure (NotTypeable e) m { names = n1 }
+            (Right ty, _, n1) -> case unify (globals m) cur n1 a b ty of
               (Failed reason, _, n2) -> failure reason m { names = n2 }
               (result, cur', n2) ->
                 Saying (unifyMessage cur' result)
@@ -861,8 +864,8 @@ perform instr rest m = case operation instr of
           -- "S is a type at level ℓ"; nothing here compares levels, so there
           -- is nothing for a level to be constrained against.
           | otherwise -> case sortOf (globals m) contextAt (names m) t of
-              (Left e,  n1) -> failure (BinderNotAType e) m { names = n1 }
-              (Right _, n1) ->
+              (Left e,  _, n1) -> failure (BinderNotAType e) m { names = n1 }
+              (Right _, _, n1) ->
                 let (v, n2) = fresh n1
                     cur     = insertAbove (build v i t) (cursor (proof m))
                  in produce (VTerm (Trailing (Free v)))
@@ -885,16 +888,23 @@ subgoalMessage hs =
 -- | What @unify@ reports. §9's deliverable in one line: which holes it solved,
 -- or what is parked and what each is waiting on — the blockers being derived
 -- from the development rather than stored (§6.1).
+--
+-- **Level metas are named beside the holes** (MS3 phase 33), because solving one
+-- changes the development just as much and @already equal@ would otherwise be
+-- said about two terms that were not equal until a level was pinned down. The
+-- @?ℓ@ spelling is the printer's own, so the two sorts tell themselves apart.
 unifyMessage :: Cursor -> UnifyResult -> String
 unifyMessage cur result = case result of
   Failed _          -> ""     -- never reached: a failure goes out through 'Stuck'
-  Solved []         -> "already equal"
-  Solved xs         -> "solved: " ++ intercalate ", " (map nameOfVar xs)
-  Deferred xs ks    ->
-    (if null xs then "" else "solved: " ++ intercalate ", " (map nameOfVar xs) ++ "; ")
+  Solved [] []      -> "already equal"
+  Solved xs ls      -> "solved: " ++ what xs ls
+  Deferred xs ls ks ->
+    (if null xs && null ls then "" else "solved: " ++ what xs ls ++ "; ")
       ++ "parked " ++ show (length ks) ++ " constraint(s), blocked on "
       ++ intercalate ", " (map nameOfVar (nub (concatMap (blockers cur) ks)))
   where
+    what xs ls = intercalate ", " (map nameOfVar xs ++ map levelVarName ls)
+
     -- The identifier the user gave the hole, read off the development. A 'Var'
     -- has no name of its own (§3.5), and "Thena.Repl" is where display lives —
     -- but a message is text by the time it leaves here, so the lookup happens

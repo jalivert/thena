@@ -22,9 +22,10 @@ module Thena.EliminatorTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (GlobalName (..), Level (..))
+import Thena.Core.Level (Level (..), instantiateLevels, levelOfNat)
+import Thena.Core.Term (Core, GlobalName (..), substLevelsIn)
 import Thena.Declared (natFin, natFinCounter, natVec, natVecCounter)
-import Thena.Global.Env (GlobalEnv, eliminatorType, lookupInductive)
+import Thena.Global.Env (GlobalEnv, InductiveDefinition, eliminatorType, inductiveLevels, lookupInductive)
 import Thena.Repl (renderEliminator)
 
 tests :: TestTree
@@ -43,7 +44,7 @@ tests =
 ruleTests :: [TestTree]
 ruleTests =
   [ -- §4.1.1's @NatElim@, its worked simple datatype.
-    rule "Nat, a simple datatype (§4.1.1)" natVec natVecCounter "Nat" (Level 0)
+    rule "Nat, a simple datatype (§4.1.1)" natVec natVecCounter "Nat" (LZero)
       "elim Nat : ∀ (P : Nat -> Type₀) -> P zero \
       \-> (∀ (x : Nat) -> P x -> P (succ x)) \
       \-> ∀ (target : Nat) -> P target"
@@ -51,7 +52,7 @@ ruleTests =
     -- §4.1.2's @ListElim@ shape: the parameter is bound first and the motive
     -- mentions it without binding it. That is the whole content of "parameters
     -- are not abstracted in the scheme".
-  , rule "Vec, a parameterised family (§4.1.2)" natVec natVecCounter "Vec" (Level 0)
+  , rule "Vec, a parameterised family (§4.1.2)" natVec natVecCounter "Vec" (LZero)
       "elim Vec : ∀ (A : Type₀) (P : ∀ (x : Nat) -> Vec A x -> Type₀) \
       \-> P zero (nil A) \
       \-> (∀ (n : Nat) (a : A) (as : Vec A n) -> P n as -> P (succ n) (cons A n a as)) \
@@ -68,7 +69,7 @@ ruleTests =
     -- the recursive argument's /own/ index, while its conclusion is at
     -- @succ n@. An eliminator that reused the target's indices would print
     -- @P (succ n) i@ here and pass every @Nat@ test in the suite.
-  , rule "Fin, an indexed family (§4.1.4)" natFin natFinCounter "Fin" (Level 0)
+  , rule "Fin, an indexed family (§4.1.4)" natFin natFinCounter "Fin" (LZero)
       "elim Fin : ∀ (P : ∀ (x : Nat) -> Fin x -> Type₀) \
       \-> (∀ (n : Nat) -> P (succ n) (fz n)) \
       \-> (∀ (n : Nat) (i : Fin n) -> P n i -> P (succ n) (fs n i)) \
@@ -77,8 +78,8 @@ ruleTests =
     -- No constructors, so no methods: the motive and the target and nothing
     -- between them. Every other fixture has at least one method, so this is
     -- the only case that shows the methods are a list and not a non-empty one.
-  , rule "Empty, with no constructors" natFin natFinCounter "Empty" (Level 0)
-      "elim Empty : ∀ (P : Empty -> Type₀) (target : Empty) -> P target"
+  , rule "Empty, with no constructors" natFin natFinCounter "Empty" (LZero)
+      "elim Empty : ∀ (P : Empty {0} -> Type₀) (target : Empty {0}) -> P target"
   ]
 
 -- | §3.7's "universe polymorphism of the eliminator, without universe
@@ -86,11 +87,11 @@ ruleTests =
 -- level appears in exactly one place — the motive's codomain.
 levelTests :: [TestTree]
 levelTests =
-  [ rule "Nat at Type₁" natVec natVecCounter "Nat" (Level 1)
+  [ rule "Nat at Type₁" natVec natVecCounter "Nat" (levelOfNat 1)
       "elim Nat : ∀ (P : Nat -> Type₁) -> P zero \
       \-> (∀ (x : Nat) -> P x -> P (succ x)) \
       \-> ∀ (target : Nat) -> P target"
-  , rule "Vec at Type₂, and its parameter stays at Type₀" natVec natVecCounter "Vec" (Level 2)
+  , rule "Vec at Type₂, and its parameter stays at Type₀" natVec natVecCounter "Vec" (levelOfNat 2)
       "elim Vec : ∀ (A : Type₀) (P : ∀ (x : Nat) -> Vec A x -> Type₂) \
       \-> P zero (nil A) \
       \-> (∀ (n : Nat) (a : A) (as : Vec A n) -> P n as -> P (succ n) (cons A n a as)) \
@@ -102,6 +103,15 @@ rule :: String -> GlobalEnv -> Int -> String -> Level -> String -> TestTree
 rule name env n0 d l expect = testCase name $
   case lookupInductive g env of
     Nothing  -> assertFailure (d ++ " is not declared")
-    Just def -> renderEliminator n0 g (fst (eliminatorType def l n0)) @?= [expect]
+    -- **Instantiated at the datatype's own levels** (MS3 phase 31g), which is
+    -- what a use site sees. Rendering it uninstantiated would pin @ℓ@'s number
+    -- — a counter value, and no business of an assertion about the shape.
+    Just def -> renderEliminator n0 g (atZero def (fst (eliminatorType def l n0))) @?= [expect]
   where
     g = GlobalName d
+
+-- | A datatype's own level parameters, all instantiated at zero.
+atZero :: InductiveDefinition -> Core -> Core
+atZero d t = case instantiateLevels (inductiveLevels d) (map (const LZero) (inductiveLevels d)) of
+  Just sub -> substLevelsIn sub t
+  Nothing  -> t

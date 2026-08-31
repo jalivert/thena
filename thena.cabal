@@ -26,6 +26,7 @@ library
         Thena.Core.Context
         Thena.Core.Convert
         Thena.Core.Reduce
+        Thena.Core.Level
         Thena.Core.Term
         Thena.Core.Typing
         Thena.Core.Unify
@@ -78,6 +79,7 @@ test-suite thena-test
     other-modules:
         Thena.Core.ConvertTests
         Thena.Core.ReduceTests
+        Thena.Core.LevelTests
         Thena.Core.TermTests
         Thena.Core.TypingTests
         Thena.Core.UnifyTests

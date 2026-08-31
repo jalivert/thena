@@ -5,7 +5,8 @@ module Thena.DriverTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Level (..))
+import Thena.Core.Level (levelOfNat)
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..))
 import Thena.Development.Component (Component (..))
 import Thena.Development.Partial (Partial (..))
 import Thena.Standard (withRules)
@@ -16,6 +17,7 @@ import Thena.Driver
   , Stop (..)
   , answer
   , command
+  , commandSummary
   , newSession
   )
 import Thena.Development.Cursor (rebuild)
@@ -23,7 +25,7 @@ import Thena.Engine (Machine (..), Question (..), globals, proof, proofDevelopme
 import Thena.Errors (FailReason (..))
 import Thena.Global.Declare (DeclareError (..))
 import Thena.Global.Env (isDeclared)
-import Thena.Ops (AnswerKind (..))
+import Thena.Ops (AnswerKind (..), partWords)
 
 -- | Run a script of command lines, answering nothing, and give back the last
 -- response and the session it left.
@@ -42,6 +44,39 @@ natCommand = "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
 
 declaredIn :: Session -> String -> Bool
 declaredIn s g = isDeclared (GlobalName g) (globals (sessionMachine s))
+
+-- | The words of every spelling @:help@ shows, and those of them that are
+-- colon words.
+wordsIn :: [(String, String)] -> [String]
+wordsIn = concatMap (words . fst)
+
+-- A colon and something: the bare @:@ of @assume \8249x\8250 : \8249S\8250@ is
+-- ascription\'s, not a command\'s.
+colonWordsIn :: [(String, String)] -> [String]
+colonWordsIn = filter (\w -> take 1 w == ":" && length w > 1) . wordsIn
+
+unknown :: String -> Bool
+unknown w = case snd (command withRules w) of
+  Rejected (NoSuchCommand _) -> True
+  _                          -> False
+
+-- | The driver\'s own words, written out. **Hand-written and not total** — no
+-- function can enumerate a @case@ — so this is a mirror that has to be kept up
+-- by the same hand that adds a command. It is here rather than in the driver
+-- because a mirror in the same module as the thing it mirrors checks nothing.
+everyColonCommand :: [String]
+everyColonCommand =
+  [ ":help", ":quit", ":core", ":dev", ":show", ":elim", ":where", ":matches"
+  , ":choices", ":goal", ":whnf", ":infer", ":load", ":bases", ":rules"
+  , ":revalidate", ":extract", ":theorem", ":suspend", ":resume", ":abandon"
+  , ":proofs", ":undo", ":convert", ":step", ":run"
+  ]
+
+everyBareCommand :: [String]
+everyBareCommand =
+  [ "assume", "claim", "data", "along", "into", "back", "reduce", "unify"
+  , "prove", "retry", "goto", "cross", "certify", "qed"
+  ] ++ partWords
 
 tests :: TestTree
 tests =
@@ -77,6 +112,21 @@ tests =
             snd (command withRules ":show x") @?= Rejected (NoSuchGlobal "x")
         , testCase ":step takes on, off, or nothing" $
             snd (command withRules ":step sideways") @?= Rejected (UnexpectedArgument ":step")
+        ]
+    , testGroup
+        "the help list"
+        -- 'commandSummary' is a second place a command word is written and
+        -- 'dispatch' is a @case@, so nothing can derive one from the other.
+        -- These three cross them as far as anything can: the first direction
+        -- is total, the other two lean on a hand-written list below, exactly
+        -- as @RuleSyntaxTests@\' @everyOp@ does and with the same admitted
+        -- incompleteness.
+        [ testCase "every colon word it lists is a command" $
+            filter unknown (colonWordsIn commandSummary) @?= []
+        , testCase "every colon command is listed" $
+            filter (`notElem` colonWordsIn commandSummary) everyColonCommand @?= []
+        , testCase "every bare command the driver has is listed" $
+            filter (`notElem` wordsIn commandSummary) everyBareCommand @?= []
         ]
     , testGroup
         "views"
@@ -153,7 +203,7 @@ tests =
               other -> assertFailure ("wrong shape: " ++ show other)
         , testCase ":goal replaces the old one rather than stacking" $
             case devOf (fst (say [":goal Type₀", ":goal Type₁"])) of
-              Under (Claim _ _ ty) (Trailing _) -> ty @?= Universe (Level 1)
+              Under (Claim _ _ ty) (Trailing _) -> ty @?= Universe (levelOfNat 1)
               other -> assertFailure ("wrong shape: " ++ show other)
         , testCase "an assumption made later still lands outside the goal" $
             case devOf (fst (say [":goal Type₀", "assume A : Type₀"])) of
@@ -194,7 +244,7 @@ tests =
               other       -> assertFailure ("expected ShownData, got " ++ show other)
         , testCase ":show ‹former› is the generated wrapper, type and body" $
             case snd (say [natCommand, ":show succ"]) of
-              ShownGlobal (GlobalName "succ") _ (Just _) -> pure ()
+              ShownGlobal (GlobalName "succ") _ _ _ (Just _) -> pure ()
               other -> assertFailure ("expected ShownGlobal, got " ++ show other)
         , testCase "a global is in scope for an ordinary term" $
             case snd (say [natCommand, ":core succ zero"]) of

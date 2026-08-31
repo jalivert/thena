@@ -12,10 +12,10 @@ import Test.Tasty.QuickCheck
   , testProperty
   )
 
+import Thena.Core.Level (Level (..), LevelVar (..), levelOfNat)
 import Thena.Core.Term
   ( Core (..)
   , Ident (..)
-  , Level (..)
   , close
   , fresh
   )
@@ -95,8 +95,8 @@ genRaw = sized . go
             pure (RawLet x v ty b)
         , -- Nat has no parameters, no indices, and two constructors, so the
           -- shape is fixed: () motive (mz ms) ().
-          RawElim "Nat" [] <$> half <*> ((\a b -> [a, b]) <$> half <*> half)
-                           <*> pure [] <*> half
+          RawElim "Nat" [] [] <$> half <*> ((\a b -> [a, b]) <$> half <*> half)
+                              <*> pure [] <*> half
         ]
       where
         half = resize (n `div` 2) (genRaw scope)
@@ -127,6 +127,7 @@ tests =
     , testGroup "errors" errorTests
     , testGroup "shadowing" shadowTests
     , testGroup "resolution" resolveTests
+    , testGroup "a bare Type mints a level meta" openUniverseTests
     ]
 
 roundTripTests :: [TestTree]
@@ -204,7 +205,7 @@ shadowed :: Core
 shadowed =
   let (v1, n1) = fresh 0
       (v2, _)  = fresh n1
-      ty       = Universe (Level 0)
+      ty       = Universe (LZero)
    in Lam (Ident "x") ty (close v1 (Lam (Ident "x") ty (close v2 (Free v1))))
 
 -- | Pinned against hand-built terms, because the round trip cannot see these:
@@ -232,6 +233,44 @@ resolveTests =
         @?= False
   ]
 
+-- --------------------------------------------------------------------------
+-- Bare @Type@ (MS3 phase 33)
+-- --------------------------------------------------------------------------
+
+-- | @Type@ with no braces is a universe whose level is worked out rather than
+-- written. It was a **parse error** before this phase, which is why nothing
+-- that already existed can have changed meaning.
+openUniverseTests :: [TestTree]
+openUniverseTests =
+  [ testCase "it resolves to a meta drawn from the counter it was given" $
+      parseCore emptyGlobals [] 40 "Type"
+        @?= Right (Universe (LVar (LMeta 40)), 41)
+
+  , -- Two universes written in one term are two unknowns, not one. Writing them
+    -- equal is what the *checker* may conclude, never what the reader wrote.
+    testCase "each one written is its own meta" $
+      fmap fst (parseCore emptyGlobals [] 40 "Type -> Type")
+        @?= Right (arrowOf (Universe (LVar (LMeta 40))) (Universe (LVar (LMeta 41))))
+
+  , testCase "and Typeₙ is still exactly the level written" $
+      fmap fst (parseCore emptyGlobals [] 40 "Type\8321")
+        @?= Right (Universe (levelOfNat 1))
+
+  , -- A datatype's levels are stored and instantiated at every use, so a meta in
+    -- one would be shared rather than solved. Phase 33c makes them inferred;
+    -- until then a declaration says its level.
+    testCase "a declaration may not write one" $
+      isLeft (parseDeclaration emptyGlobals 0 "data Box : Type where { }") @?= True
+
+  , testCase "not even in a parameter it never mentions again" $
+      isLeft (parseDeclaration emptyGlobals 0
+                "data Box (A : Type) : Type\8320 where { }") @?= True
+  ]
+  where
+    -- The counter that 'parseCore' spends on the arrow's own binder is why this
+    -- reads @fmap fst@: what is under test is which metas were minted.
+    arrowOf dom cod = Pi (Ident "_") dom (close (fst (fresh 42)) cod)
+
 data Which = Inner | Outer
 
 -- | @λ (x : Type₀) -> λ (x : Type₁) -> x@, with the body referring to whichever
@@ -241,8 +280,8 @@ nestedLam which =
   let (v1, n1) = fresh 0
       (v2, _)  = fresh n1
       body     = Free (case which of Inner -> v2; Outer -> v1)
-   in Lam (Ident "x") (Universe (Level 0))
-        (close v1 (Lam (Ident "x") (Universe (Level 1)) (close v2 body)))
+   in Lam (Ident "x") (Universe (LZero))
+        (close v1 (Lam (Ident "x") (Universe (levelOfNat 1)) (close v2 body)))
 
 render :: String -> String
 render src = case parseCore emptyGlobals [] 0 src of

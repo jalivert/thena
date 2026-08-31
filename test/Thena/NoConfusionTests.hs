@@ -27,7 +27,7 @@ import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core, GlobalName (..), Ident (..), Level (..), fresh)
+import Thena.Core.Term (Core, GlobalName (..), Ident (..), fresh)
 import Thena.Core.Typing (check)
 import Thena.Declared
   ( declared
@@ -94,31 +94,31 @@ taplReduces = reduces eqTapl eqTaplCounter
 caseTests :: [TestTree]
 caseTests =
   [ testCase "same nullary former — no equations to give" $
-      natReduces "NoConfusionNat zero zero" "Unit"
+      natReduces "NoConfusionNat zero zero" "Unit {0}"
   , testCase "different formers — the empty type" $
-      natReduces "NoConfusionNat zero (succ zero)" "Empty"
+      natReduces "NoConfusionNat zero (succ zero)" "Empty {0}"
   , testCase "and the other way round" $
-      natReduces "NoConfusionNat (succ zero) zero" "Empty"
+      natReduces "NoConfusionNat (succ zero) zero" "Empty {0}"
   , -- One argument conjoins nothing, so the case /is/ the equation and a use
     -- site applies the lemma and stops. That is the common case by a wide
     -- margin — six of MS1's seven target constructors.
     testCase "same former, one argument — injectivity" $
       natReduces
         "NoConfusionNat (succ zero) (succ (succ zero))"
-        "Eq Nat zero (succ zero)"
+        "Eq {0} Nat zero (succ zero)"
   , -- The case §3.7 is written around, and the only one in any fixture with
     -- more than one equation to conjoin.
     testCase "three arguments — three equations, in argument order" $
       taplReduces
         "NoConfusionTerm (ifthen true zero (succ zero)) (ifthen false zero zero)"
-        "And (Eq Term true false) (And (Eq Term zero zero) \
-        \(Eq Term (succ zero) zero))"
+        "And {0 0} (Eq {0} Term true false) (And {0 0} (Eq {0} Term zero zero) \
+        \(Eq {0} Term (succ zero) zero))"
   , testCase "the family's own type" $
       typeOfGlobal eqTapl eqTaplCounter "NoConfusionTerm"
         @?= Just "Term -> Term -> Type₀"
   , testCase "the lemma's own type" $
       typeOfGlobal eqTapl eqTaplCounter "noConfusionTerm"
-        @?= Just "∀ (x : Term) (y : Term) -> Eq Term x y -> NoConfusionTerm x y"
+        @?= Just "∀ (x : Term) (y : Term) -> Eq {0} Term x y -> NoConfusionTerm x y"
   ]
 
 typeOfGlobal :: GlobalEnv -> Int -> String -> Maybe String
@@ -129,7 +129,7 @@ typeOfGlobal env n g =
 -- Using it
 -- --------------------------------------------------------------------------
 
--- | @x : Term, y : Term, e : Eq Term (succ x) (succ y)@ — a context shaped like
+-- | @x : Term, y : Term, e : Eq {0} Term (succ x) (succ y)@ — a context shaped like
 -- the one a method of an elimination at specific indices is handed.
 withEquation :: String -> (Context, Int)
 withEquation eq = ([Hypothesis vx (Ident "x") tm, Hypothesis vy (Ident "y") tm, hyp], n3)
@@ -144,10 +144,15 @@ withEquation eq = ([Hypothesis vx (Ident "x") tm, Hypothesis vy (Ident "y") tm, 
 -- | Does this term have this type, in that context?
 provesIn :: String -> String -> String -> Assertion
 provesIn eq src ty =
-  case fst (check eqTapl ctx n (termIn eqTapl n ctx src) (termIn eqTapl n ctx ty)) of
+  case verdict (check eqTapl ctx n (termIn eqTapl n ctx src) (termIn eqTapl n ctx ty)) of
     Right () -> pure ()
     Left e   -> assertFailure ("rejected: " ++ show e)
-  where (ctx, n) = withEquation eq
+  where
+    (ctx, n) = withEquation eq
+
+    -- @check@ returns its level obligations too (phase 33); nothing here
+    -- builds a level meta, so the list is always empty.
+    verdict (r, _, _) = r
 
 useTests :: [TestTree]
 useTests =
@@ -155,35 +160,35 @@ useTests =
     -- branch needs, and with one argument there is nothing to take it out of.
     testCase "injectivity is the lemma applied, and nothing else" $
       provesIn
-        "Eq Term (succ x) (succ y)"
+        "Eq {0} Term (succ x) (succ y)"
         "noConfusionTerm (succ x) (succ y) e"
-        "Eq Term x y"
+        "Eq {0} Term x y"
   , -- Discrimination: from @true ≡ succ x@ get anything. This is what an
     -- impossible branch needs, and it is now @elim Empty@ at the goal — which
     -- reaches a goal at /any/ level, where @(C : Type₀) -> C@ reached only
     -- @Type₀@ ones.
     testCase "discrimination closes an impossible branch" $
       provesIn
-        "Eq Term true (succ x)"
-        "elim Empty () (\\ (t : Empty) -> Eq Term x y) () () \
+        "Eq {0} Term true (succ x)"
+        "elim Empty {0} () (\\ (t : Empty {0}) -> Eq {0} Term x y) () () \
         \(noConfusionTerm true (succ x) e)"
-        "Eq Term x y"
+        "Eq {0} Term x y"
   , -- Three equations, right-nested in argument order, each reachable. Spelled
     -- with @elim And@ rather than the prelude's @andLeft@/@andRight@ because
     -- this fixture has the datatypes and not the proved projections — which
     -- also pins the nesting itself rather than a projection's say-so.
     testCase "the second of three equations" $
       provesIn
-        "Eq Term (ifthen true x zero) (ifthen false y zero)"
-        "elim And ((Eq Term true false) (And (Eq Term x y) (Eq Term zero zero))) \
-        \(\\ (z : And (Eq Term true false) (And (Eq Term x y) (Eq Term zero zero))) \
-        \-> Eq Term x y) \
-        \((\\ (q1 : Eq Term true false) (r : And (Eq Term x y) (Eq Term zero zero)) \
-        \-> elim And ((Eq Term x y) (Eq Term zero zero)) \
-        \(\\ (z : And (Eq Term x y) (Eq Term zero zero)) -> Eq Term x y) \
-        \((\\ (q2 : Eq Term x y) (q3 : Eq Term zero zero) -> q2)) () r)) () \
+        "Eq {0} Term (ifthen true x zero) (ifthen false y zero)"
+        "elim And {0 0} ((Eq {0} Term true false) (And {0 0} (Eq {0} Term x y) (Eq {0} Term zero zero))) \
+        \(\\ (z : And {0 0} (Eq {0} Term true false) (And {0 0} (Eq {0} Term x y) (Eq {0} Term zero zero))) \
+        \-> Eq {0} Term x y) \
+        \((\\ (q1 : Eq {0} Term true false) (r : And {0 0} (Eq {0} Term x y) (Eq {0} Term zero zero)) \
+        \-> elim And {0 0} ((Eq {0} Term x y) (Eq {0} Term zero zero)) \
+        \(\\ (z : And {0 0} (Eq {0} Term x y) (Eq {0} Term zero zero)) -> Eq {0} Term x y) \
+        \((\\ (q2 : Eq {0} Term x y) (q3 : Eq {0} Term zero zero) -> q2)) () r)) () \
         \(noConfusionTerm (ifthen true x zero) (ifthen false y zero) e)"
-        "Eq Term x y"
+        "Eq {0} Term x y"
   ]
 
 -- --------------------------------------------------------------------------
@@ -201,6 +206,10 @@ kernelTests =
   , testCase "Nat's lemma" (certified eqNat "noConfusionNat")
   , testCase "Term's family" (certified eqTapl "NoConfusionTerm")
   , testCase "Term's lemma" (certified eqTapl "noConfusionTerm")
+    -- **Back, as of MS3 phase 31g.** Phase 31d had to give it up: @Eq@ became
+    -- level-polymorphic and the generator was written for a @Type₀@ datatype.
+    -- 31g generalises the generator to the datatype's own level, and @Eq@'s
+    -- own table is the case that proves it — a polymorphic, indexed family.
   , testCase "Eq's own, which is an indexed family" (certified eqNat "noConfusionEq")
 
     -- **Found by phase 17, and it was a real bug.** The generator freshens a
@@ -234,7 +243,7 @@ certified :: GlobalEnv -> String -> Assertion
 certified env g = case lookupDefinition (GlobalName g) env of
   Nothing -> assertFailure (g ++ " was not generated")
   Just d  -> case certify env (definitionBody d) (definitionType d) of
-    Right ()             -> pure ()
+    Right _  -> pure ()
     Left e   -> assertFailure ("the kernel refused " ++ g ++ ": " ++ show e)
 
 -- --------------------------------------------------------------------------
@@ -250,7 +259,7 @@ skipped before src = case parseDeclaration env n src of
 
 skipTests :: [TestTree]
 skipTests =
-  [ -- The MS1 limit. @cons@ wants @Eq (Vec A n) as as'@ while @as' : Vec A n'@,
+  [ -- The MS1 limit. @cons@ wants @Eq {0} (Vec A n) as as'@ while @as' : Vec A n'@,
     -- and a transported chain of equations is the way out — not MS1's.
     testCase "Vec: cons's telescope is dependent" $
       skipped (preludeDecls ++ [natDecl]) vecDecl
@@ -258,10 +267,14 @@ skipTests =
   , testCase "Fin: so is fs's" $
       skipped (preludeDecls ++ [natDecl]) finDecl
         @?= Right (Just (DependentArguments (GlobalName "fs") (Ident "i")))
-  , -- Eq relates only Type₀ types, so nothing above it can have an equation.
-    testCase "a datatype above Type₀" $
-      skipped [eqDecl] "Big : Type\8321 where { wrap : Type\8320 -> Big }"
-        @?= Right (Just (NotAtTypeZero (Level 1)))
+  , -- **This asserted the opposite until MS3 phase 31g**, and the change is
+    -- §2 item 2: the generator states its equations at the *datatype's own*
+    -- level rather than at @Type₀@, so a family above @Type₀@ gets its table
+    -- like any other. Cumulativity is what makes the equations conjoinable —
+    -- @wrap@'s argument type is @Type₀@, which lifts into @Type₁@.
+    testCase "a datatype above Type₀ gets one now" $
+      skipped preludeDecls "Big : Type\8321 where { wrap : Type\8320 -> Big }"
+        @?= Right Nothing
   , -- Silent, and it has to be: this is the state every prelude-free golden
     -- transcript declares its datatypes in, and a note on every @data@ line
     -- would be noise about the environment rather than about the declaration.
@@ -283,7 +296,7 @@ skipTests =
     testCase "Eq alone: its own table needs no product, so it is generated" $
       (lookupDefinition (GlobalName "NoConfusionEq") (fst (declared [eqDecl])) == Nothing)
         @?= False
-  , -- Two constructors want an off-diagonal @Empty@, and there is none.
+  , -- Two constructors want an off-diagonal @Empty {0}@, and there is none.
     testCase "Nat with Eq but no Empty — skipped, and quietly" $
       skipped [eqDecl] natDecl @?= Right Nothing
   , testCase "and then nothing was generated" $

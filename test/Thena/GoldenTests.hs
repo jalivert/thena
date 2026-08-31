@@ -60,7 +60,7 @@ tests =
         , "data Fin : Nat -> Type\8320 \
           \where { fz : \8704 (n : Nat) -> Fin (succ n) \
           \; fs : \8704 (n : Nat) (i : Fin n) -> Fin (succ n) }"
-        , "data Empty : Type\8320 where { }"
+        , "data Empty : Type where { }"
         , ":elim Nat"
         , ":elim Nat Type\8321"
         , ":elim Fin"
@@ -117,12 +117,12 @@ tests =
           -- generated lemma, extracted and put to the kernel. This is
           -- injectivity of @succ@, which is what a matching branch of the
           -- determinacy proof needs.
-        , ":goal \8704 (a : Term) (b : Term) -> Eq Term (succ a) (succ b) -> Eq Term a b"
+        , ":goal \8704 (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b"
         , "along"
-        , "unify goal \8799 \\ (a : Term) (b : Term) (e : Eq Term (succ a) (succ b)) \
+        , "unify goal \8799 \\ (a : Term) (b : Term) (e : Eq {0} Term (succ a) (succ b)) \
           \-> noConfusionTerm (succ a) (succ b) e"
         , ":extract"
-        , "certify \8704 (a : Term) (b : Term) -> Eq Term (succ a) (succ b) -> Eq Term a b"
+        , "certify \8704 (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b"
         , "back"
         , "data Nat : Type\8320 where { zero' : Nat ; succ' : Nat -> Nat }"
         , "data Vec (A : Type\8320) : Nat -> Type\8320 \
@@ -398,7 +398,7 @@ tests =
         , "data Vec (A : Type₀) : Nat -> Type₀ where { nil : Vec A zero ; cons : ∀ (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ n) }"
         , ":show Vec"
         , ":show cons"
-        , "data Empty : Type₀ where { }"
+        , "data Empty : Type where { }"
         , ":show Empty"
         , "data Nat : Type₀ where { z : Nat }"
         , "data Ordinal : Type₀ where { sup : (Nat -> Ordinal) -> Ordinal }"
@@ -451,14 +451,14 @@ tests =
       -- rather than loaded.
     , script
         "induction"
-        [ "data Eq (A : Type₀) : A -> A -> Type₀ where { refl : ∀ (a : A) -> Eq A a a }"
+        [ "data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }"
         , "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
         , ":theorem plus : Nat -> Nat -> Nat"
         , "try (\\ (n : Nat) (m : Nat) -> elim Nat () (\\ (t : Nat) -> Nat) (m (\\ (k : Nat) (ih : Nat) -> succ ih)) () n)"
         , "solve"
         , "qed"
         , ":whnf plus (succ zero) (succ zero)"
-        , ":theorem congSucc : ∀ (a : Nat) (b : Nat) (e : Eq Nat a b) -> Eq Nat (succ a) (succ b)"
+        , ":theorem congSucc : ∀ (a : Nat) (b : Nat) (e : Eq {0} Nat a b) -> Eq {0} Nat (succ a) (succ b)"
         , "attack"
         , "intro"
         , "intro"
@@ -470,7 +470,7 @@ tests =
         , "eliminate e"
         , "back"
         , ":where"
-        , "try (\\ (c : Nat) -> refl Nat (succ c))"
+        , "try (\\ (c : Nat) -> refl {0} Nat (succ c))"
         , "solve"
         , "along"
         , "solve"
@@ -481,7 +481,7 @@ tests =
         , "back"
         , "solve"
         , "qed"
-        , ":theorem plusZero : ∀ (n : Nat) -> Eq Nat (plus n zero) n"
+        , ":theorem plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n"
         , "attack"
         , "intro"
         , "into"
@@ -490,10 +490,10 @@ tests =
         , ":show"
         , "back"
         , "back"
-        , "try (refl Nat zero)"
+        , "try (refl {0} Nat zero)"
         , "solve"
         , "along"
-        , "try (\\ (x : Nat) (ih : Eq Nat (plus x zero) x) -> congSucc (plus x zero) x ih)"
+        , "try (\\ (x : Nat) (ih : Eq {0} Nat (plus x zero) x) -> congSucc (plus x zero) x ih)"
         , "solve"
         , "along"
         , "solve"
@@ -519,7 +519,7 @@ tests =
         , "data Ev : Nat -> Type₀ where { evZero : Ev zero ; evSS : ∀ (n : Nat) (p : Ev n) -> Ev (succ (succ n)) }"
         , ":whnf NoConfusionNat zero (succ zero)"
         , ":whnf NoConfusionNat (succ (succ zero)) (succ zero)"
-        , ":theorem oneNotEven : ∀ (p : Ev (succ zero)) -> Empty"
+        , ":theorem oneNotEven : ∀ (p : Ev (succ zero)) -> Empty {0}"
         , "attack"
         , "intro"
         , "into"
@@ -528,10 +528,10 @@ tests =
         , ":where"
         , "back"
         , "back"
-        , "try (\\ (q : Eq Nat zero (succ zero)) -> noConfusionNat zero (succ zero) q)"
+        , "try (\\ (q : Eq {0} Nat zero (succ zero)) -> noConfusionNat zero (succ zero) q)"
         , "solve"
         , "along"
-        , "try (\\ (n : Nat) (e : Ev n) (ih : Eq Nat n (succ zero) -> Empty) (q : Eq Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ n) zero (noConfusionNat (succ (succ n)) (succ zero) q))"
+        , "try (\\ (n : Nat) (e : Ev n) (ih : Eq {0} Nat n (succ zero) -> Empty {0}) (q : Eq {0} Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ n) zero (noConfusionNat (succ (succ n)) (succ zero) q))"
         , "solve"
         , "along"
         , "solve"
@@ -568,10 +568,10 @@ tests =
         , "eliminate i"
         , "eliminate n"
         , ":abandon"
-        , "data Eq (A : Type₀) : A -> A -> Type₀ where { refl : ∀ (a : A) -> Eq A a a }"
-        , "data Unit : Type₀ where { unit : Unit }"
-        , "data Empty : Type₀ where { }"
-        , "data And (A : Type₀) (B : Type₀) : Type₀ where { both : ∀ (a : A) (b : B) -> And A B }"
+        , "data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }"
+        , "data Unit : Type where { unit : Unit }"
+        , "data Empty : Type where { }"
+        , "data And (A : Type) (B : Type) : Type where { both : ∀ (a : A) (b : B) -> And A B }"
         , "data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ where { bz : ∀ (m : Nat) -> Below (succ m) (fz m) ; bs : ∀ (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }"
         , ":theorem probe : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Nat"
         , "attack"
@@ -613,7 +613,12 @@ tests =
       script
         "refining"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
-        , "data Eq (A : Type\8320) : A -> A -> Type\8320 \
+          -- **The level arguments go on the /uses/, never on the constructor's
+          -- name.** Written @refl {0} :@ this line was a syntax error, so @Eq@
+          -- was never declared and every step below recorded @not in scope@ as
+          -- its expected output — the third golden caught doing that
+          -- (@ms3/CLOSEOUT.md@ item 14). Repaired reviewing MS3.
+        , "data Eq (A : Type) : A -> A -> Type \
           \where { refl : \8704 (a : A) -> Eq A a a }"
           -- Already the goal's type: unification has nothing to do, and the
           -- binding is filled straight in.
@@ -621,12 +626,12 @@ tests =
         , "unify-refine (\\ (A : Type\8320) (a : A) -> a)"
         , ":show"
         , "qed"
-          -- Holes on both sides. @refl A a@ has type @Eq A a a@; unifying that
-          -- with @Eq Nat zero zero@ solves @A@ and @a@.
-        , ":theorem refl0 : Eq Nat zero zero"
+          -- Holes on both sides. @refl {0} A a@ has type @Eq {0} A a a@; unifying that
+          -- with @Eq {0} Nat zero zero@ solves @A@ and @a@.
+        , ":theorem refl0 : Eq {0} Nat zero zero"
         , "claim A : Type\8320"
         , "claim a : A"
-        , "unify-refine (refl A a)"
+        , "unify-refine (refl {0} A a)"
         , ":show"
         , "qed"
         , ":show refl0"
@@ -637,8 +642,8 @@ tests =
           -- development and then fail — it is the case that predates @apply@,
           -- and the reason the rewind lives in the driver rather than in
           -- anything @apply@ owns.
-        , ":theorem wrong : Eq Nat zero (succ zero)"
-        , "unify-refine (refl Nat zero)"
+        , ":theorem wrong : Eq {0} Nat zero (succ zero)"
+        , "unify-refine (refl {0} Nat zero)"
         , ":show"
         , ":abandon"
         ]
@@ -737,6 +742,23 @@ tests =
         , ":undo"
         , "apply true"
         , "qed"
+          -- **The same failure with no proof open** (phase 34). The top level
+          -- has a development too, so a line that did not do what it said is
+          -- rewound there as well, and @:undo@ takes back a line there as well
+          -- — neither of which happened until the undo stack moved off 'Proof'.
+        , ":goal Maybe Bool"
+        , "apply Just"
+        , ":show"
+        , "apply Nothing"
+        , ":show"
+        , ":undo"
+        , ":show"
+        , ":undo"
+          -- And the rewind proper: a body that ran, changed the development and
+          -- then failed, with no proof open. @:show@ is the bare hole.
+        , ":goal \8704 (b : Bool) -> Maybe Bool"
+        , "apply Just"
+        , ":show"
           -- **A goal `apply` cannot saturate into, and the way back** (the
           -- user, 2026-08-26). @Just@'s result is a @Maybe@, so no number of
           -- arguments makes it a function type: saturating and unifying fails.
@@ -806,6 +828,185 @@ tests =
         ]
 
     , script
+        "levels"
+        [ -- A level-polymorphic DATATYPE: declared, instantiated at two levels,
+          -- and eliminated (MS3 phase 31c). The elimination is J.
+          --
+          -- **Nothing declares level parameters any more** (phase 33c): a
+          -- theorem's were dropped at 31e and a datatype's here, so the schema
+          -- below is entirely inferred from the two written @Type@s.
+          "data Id (A : Type) : A -> A -> Type where { rfl : \8704 (a : A) -> Id A a a }"
+        , ":show Id"
+        , ":infer Id {0}"
+        , ":infer rfl {0}"
+        , ":infer \\ (A : Type\8320) (a : A) (b : A) (q : Id {0} A a b) -> elim Id {0} (A) (\\ (x : A) (y : A) (z : Id {0} A x y) -> Id {0} A x x) ((\\ (c : A) -> rfl {0} A c)) (a b) q"
+          -- Prenex is all-or-nothing.
+        , ":infer Id"
+        , ":infer Id {0 1}"
+          -- **There is no level-variable syntax left to get wrong.** @Type {l}@
+          -- was the last thing that could name one, and phase 33c deleted it;
+          -- what a use may write is a numeral, and nothing else.
+        , ":core Type {l}"
+        , ":infer Id {suc 0}"
+        , ":quit"
+        ]
+      -- What level polymorphism was FOR, as a pair of probes neither of which
+      -- had a test (added reviewing MS3).
+      --
+      -- @Box1@ is §2 item 1 of @discussion\/universe-polymorphism.md@ and MS3's
+      -- own done-when: before the milestone @eliminate b@ answered /the goal
+      -- does not survive generalising the target/, because the elimination
+      -- tactic wrote @Eq@ at no level and @Eq@ was stuck at @Type₀@. It was
+      -- checked by hand when the done-when was signed off and never pinned.
+      --
+      -- @N@ is the shape phase 33c's inference could not declare at all: the
+      -- recursive occurrence in @s@'s argument is stored before @N@ has a level
+      -- parameter, so it came out with none and the declaration was refused
+      -- outright. Nothing in the prelude is both polymorphic and recursive,
+      -- which is why nothing caught it.
+      -- **A set of level constraints that is pairwise possible and jointly
+      -- impossible** (phase 35), in two ordinary lines.
+      --
+      -- The two constant bounds sit on *different* metas with a meta-to-meta
+      -- edge between them, and that is what hides them from
+      -- 'Thena.Core.Level.forced': it reads a bound only off a relation one of
+      -- whose sides is a constant, so it sees @2 ≤ ?a@ and @?b ≤ 1@ and never
+      -- puts them together.
+      --
+      -- **Before this phase @:revalidate@ said /valid/ and @qed@ said /∎/**, and
+      -- the theorem entered the global environment carrying
+      -- @(2 ≤ ℓ₂) (ℓ₂ ≤ ℓ₁) (ℓ₁ ≤ 1)@ — a precondition no instantiation meets,
+      -- so every use of it was refused and it was noise in the scope.
+      -- @:infer@ printed a type for it at any levels, because a look drops the
+      -- obligations, which is what made it look usable.
+      --
+      -- **Its own script**, because @:theorem@ takes over the development it
+      -- finds rather than a fresh one, so appending this to a transcript that
+      -- has claimed anything makes @qed@ fail for an unrelated reason.
+    , script
+        "unsatisfiable"
+        [ ":theorem vacuous : Type\8321"
+        , "try ((\\ (y : Type) -> y) ((\\ (x : Type) -> x) Type\8321))"
+        , "solve"
+        , ":revalidate"
+        , "qed"
+        , ":show vacuous"
+        , ":quit"
+        ]
+    , script
+        "universes"
+        ( preludeLines ++
+        [ "data Box1 : Type\8320 -> Type\8321 \
+          \where { box1 : \8704 (A : Type\8320) -> A -> Box1 A }"
+        , "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , ":theorem probe : \8704 (b : Box1 Nat) -> Nat"
+        , "attack"
+        , "intro"
+        , "into"
+        , "along"
+        , "eliminate b"
+        , ":abandon"
+        , "data N : Type where { z : N ; s : N -> N }"
+        , ":show N"
+        , ":infer s {0}"
+        , ":infer s {1} (z {1})"
+        , ":quit"
+        ])
+      -- Typical ambiguity (MS3 phase 33): a bare @Type@ is a universe whose
+      -- level is worked out rather than written. The script walks the three
+      -- endings — the level is forced, it is refuted, or nothing determines it
+      -- — because which one you get is the whole of what this phase decides.
+    , script
+        "ambiguity"
+        [ ":infer Type"
+        , ":infer Type -> Type"
+          -- Conversion does not refuse an undecided level; it says what it
+          -- would need.
+        , ":convert Type \8799 Type\8320"
+          -- Forced, and written back: the theorem is stored with the level the
+          -- obligations left it no choice about.
+        , ":theorem lift : Type\8321"
+        , "try Type"
+        , "solve"
+        , "qed"
+        , ":show lift"
+          -- Nothing determines it, so it is **generalised** rather than
+          -- refused (phase 33b) — and the relation that was left over becomes
+          -- the scheme's constraint.
+        , ":theorem undetermined : Type"
+        , "try Type\8320"
+        , "solve"
+        , ":revalidate"
+        , "qed"
+        , ":show undetermined"
+          -- Refuted: the same meta is pushed up by one use and down by another.
+        , ":theorem crossed : Type\8320"
+        , "try ((\\ (x : Type) -> x) Type\8320)"
+        , "solve"
+        , ":revalidate"
+        , "qed"
+        , ":abandon"
+          -- Unification solves a level and writes it through the whole
+          -- development — a level meta has no component to be promoted, so this
+          -- is the only place a solution can be recorded.
+        , "claim h : Type -> Type"
+        , "unify \\ (x : Type) -> x \8799 \\ (x : Type\8320) -> x"
+        , ":show"
+          -- **A declaration infers its level too** (phase 33c). It could not
+          -- when this script was written — phase 33 refused a bare @Type@ here,
+          -- because a declaration's levels are stored and instantiated at every
+          -- use and nothing generalised one.
+        , "data Box : Type where { }"
+        , ":show Box"
+
+        , ":quit"
+        ]
+      -- Generalisation at @qed@ (MS3 phase 33b): a proof's leftover level metas
+      -- become the definition's prenex parameters, and the obligations that are
+      -- neither valid nor false become the constraints every use owes back.
+    , script
+        "polymorphism"
+        [ -- One parameter, not two — conversion states an equality as two
+          -- inequalities and generalisation reads them back as one.
+          ":theorem id : \8704 (A : Type) -> A -> A"
+        , "try (\\ (A : Type) (a : A) -> a)"
+        , "solve"
+        , "qed"
+        , ":show id"
+        , ":infer id {0}"
+        , ":infer id {3}"
+          -- Prenex is still all-or-nothing.
+        , ":infer id"
+          -- A scheme with a real constraint between two independent parameters.
+        , ":theorem lift : \8704 (A : Type) -> Type"
+        , "try (\\ (A : Type) -> A)"
+        , "solve"
+        , "qed"
+        , ":show lift"
+        , ":infer lift {0 1}"
+          -- **@:infer@ accepts a bad instantiation**, and that is the accepted
+          -- trade: obligations are re-collected, not pooled, so the error
+          -- arrives at @qed@ rather than at the line.
+        , ":infer lift {1 0}"
+        , ":theorem bad : Type\8321 -> Type\8320"
+        , "try (lift {1 0})"
+        , "solve"
+          -- Here it is: the stored constraint, instantiated. Without it
+          -- @Type\8321 -> Type\8320@ is a perfectly good type and this is
+          -- admitted.
+        , ":revalidate"
+        , "qed"
+          -- **And unfolding the call does not launder it.** The wart §4 warned
+          -- about needs a schema less general than inference gives, and
+          -- inference never over-claims — so with written schemata gone there
+          -- is nothing left to build it out of.
+        , "along"
+        , "reduce"
+        , ":revalidate"
+        , ":abandon"
+        , ":quit"
+        ]
+    , script
         "mistakes"
         [ "wibble"
         , ":core y"
@@ -825,6 +1026,16 @@ tests =
         -- and it never was one.
         , "claim fam : Type₀ -> Type₀ -> Type₀"
         , ":show"
+        ]
+      -- The command list, and the one error that points at it. Pinning the
+      -- whole thing is the point: a command added without a line here is a
+      -- diff, which is the only pressure keeping 'commandSummary' honest that
+      -- does not depend on someone remembering.
+    , script
+        "help"
+        [ ":help"
+        , ":nonesuch"
+        , ":quit"
         ]
     ]
   where
@@ -856,10 +1067,10 @@ tests =
 -- 'Thena.Global.NoConfusion.NoProducts' means.
 preludeLines :: [String]
 preludeLines =
-  [ "data Eq (A : Type\8320) : A -> A -> Type\8320 \
+  [ "data Eq (A : Type) : A -> A -> Type \
     \where { refl : \8704 (a : A) -> Eq A a a }"
-  , "data Unit : Type\8320 where { unit : Unit }"
-  , "data Empty : Type\8320 where { }"
-  , "data And (A : Type\8320) (B : Type\8320) : Type\8320 \
+  , "data Unit : Type where { unit : Unit }"
+  , "data Empty : Type where { }"
+  , "data And (A : Type) (B : Type) : Type \
     \where { both : \8704 (a : A) (b : B) -> And A B }"
   ]

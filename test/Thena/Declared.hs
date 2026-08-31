@@ -63,7 +63,7 @@ finDecl =
 
 -- | No constructors at all — the eliminator with no methods, which every other
 -- fixture has at least one of.
-emptyDecl = "Empty : Type\8320 where { }"
+emptyDecl = "Empty : Type where { }"
 
 -- | The prelude's propositional equality, spelled out here rather than loaded.
 --
@@ -73,15 +73,15 @@ emptyDecl = "Empty : Type\8320 where { }"
 -- above have no @Eq@ and therefore no no-confusion, the ones below do.
 eqDecl, unitDecl, andDecl, taplDecl :: String
 eqDecl =
-  "Eq (A : Type\8320) : A -> A -> Type\8320 \
+  "Eq (A : Type) : A -> A -> Type \
   \where { refl : \8704 (a : A) -> Eq A a a }"
 
 -- | The other two prelude types no-confusion is written out of (phase 20).
 --
 -- @Empty@ is 'emptyDecl' above, which predates them and is shared.
-unitDecl = "Unit : Type\8320 where { unit : Unit }"
+unitDecl = "Unit : Type where { unit : Unit }"
 andDecl =
-  "And (A : Type\8320) (B : Type\8320) : Type\8320 \
+  "And (A : Type) (B : Type) : Type \
   \where { both : \8704 (a : A) (b : B) -> And A B }"
 
 -- | Everything 'Thena.Global.NoConfusion' can need, in the prelude's own order.

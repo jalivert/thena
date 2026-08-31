@@ -20,22 +20,33 @@ module Thena.Core.TypingTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
+import Thena.Core.Level
+  ( Level (..)
+  , LevelVar (..)
+  , Obligation (..)
+  , levelOfNat
+  )
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Convert (convert)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Level (..), fresh)
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), close, fresh)
 import Thena.Core.Typing (check, infer)
 import Thena.Declared (natFin, natFinCounter, natVec, natVecCounter)
 import Thena.Driver (parseCore)
 import Thena.Errors (TypeError (..))
-import Thena.Global.Env (eliminatorType, lookupInductive)
+import Thena.Global.Env
+  ( Definition (..)
+  , addDefinition
+  , eliminatorType
+  , lookupInductive
+  )
 
 tests :: TestTree
 tests =
   testGroup
     "Thena.Core.Typing"
     [ testGroup "the ordinary forms" formTests
-    , testGroup "universes: max, and no cumulativity" universeTests
+    , testGroup "universes: max, and cumulativity" universeTests
     , testGroup "formers and their wrappers" formerTests
     , testGroup "elimination" elimTests
     , testGroup "the generated eliminator type is itself a type" eliminatorTypeTests
@@ -44,6 +55,7 @@ tests =
     , testGroup "check is infer then convert" checkTests
     , testGroup "what goes wrong" errorTests
     , testGroup "the counter comes back" counterTests
+    , testGroup "a use owes its definition's level constraints" schemeTests
     ]
 
 -- | Addition, defined by recursion on the first argument — the motive is
@@ -69,8 +81,8 @@ recursiveFunctionTests =
       case convert natVec [] natVecCounter
              (term ("(" ++ add ++ ") (succ zero)"))
              (term "succ (succ zero)") of
-        (Nothing,  _) -> pure ()
-        (Just why, _) -> assertFailure ("does not converge: " ++ show why)
+        (Nothing,  _, _) -> pure ()
+        (Just why, _, _) -> assertFailure ("does not converge: " ++ show why)
   ]
   where
     add =
@@ -90,16 +102,25 @@ termAt n ctx src = case parseCore natVec ctx n src of
 term :: String -> Core
 term = termAt natVecCounter []
 
+-- | The typing entry points return their level obligations as well (MS3 phase
+-- 33). Nothing here builds a level meta, so the list is always empty and these
+-- two say so once instead of at every call.
+verdict :: (a, b, c) -> a
+verdict (r, _, _) = r
+
+counter :: (a, b, Int) -> Int
+counter (_, _, n) = n
+
 -- | The inferred type of a closed term.
 typeOf :: String -> Either TypeError Core
-typeOf src = fst (infer natVec [] natVecCounter (term src))
+typeOf src = verdict (infer natVec [] natVecCounter (term src))
 
 -- | @t@ has a type convertible with @ty@. A shape match, not a rendered-string
 -- one: two different types can legally print the same way, and an inferred type
 -- is not reduced, so @(λ _ -> Nat) zero@ is the right answer where @Nat@ is the
 -- one a string test would have demanded.
 hasType :: String -> String -> Assertion
-hasType src ty = case fst (check natVec [] natVecCounter (term src) (term ty)) of
+hasType src ty = case verdict (check natVec [] natVecCounter (term src) (term ty)) of
   Right () -> pure ()
   Left e   -> assertFailure (show e)
 
@@ -116,11 +137,11 @@ named = GlobalName
 formTests :: [TestTree]
 formTests =
   [ testCase "a universe is one universe up" $
-      typeOf "Type\8320" @?= Right (Universe (Level 1))
+      typeOf "Type\8320" @?= Right (Universe (levelOfNat 1))
   , testCase "a variable takes its type from the context" $
       let (v, n) = fresh natVecCounter
-          ctx    = [Hypothesis v (Ident "x") (Global (named "Nat"))]
-       in fst (infer natVec ctx n (Free v)) @?= Right (Global (named "Nat"))
+          ctx    = [Hypothesis v (Ident "x") (Global (named "Nat") [])]
+       in verdict (infer natVec ctx n (Free v)) @?= Right (Global (named "Nat") [])
   , testCase "a lambda gets a Pi over its own domain" $
       hasType "\\ (x : Nat) -> x" "Nat -> Nat"
   , testCase "a dependent lambda too" $
@@ -138,16 +159,23 @@ formTests =
 universeTests :: [TestTree]
 universeTests =
   [ testCase "a Pi lands at the larger of its two levels" $
-      typeOf "\8704 (A : Type\8320) -> A" @?= Right (Universe (Level 1))
+      typeOf "\8704 (A : Type\8320) -> A" @?= Right (Universe (levelOfNat 1))
   , testCase "the domain can be the larger one" $
-      typeOf "Type\8321 -> Type\8320" @?= Right (Universe (Level 2))
-  , testCase "no cumulativity: a Type0 term does not check at Type1" $
-      illTyped' "Nat" "Type\8321"
-  , testCase "and it does check at Type0" $
+      typeOf "Type\8321 -> Type\8320" @?= Right (Universe (levelOfNat 2))
+    -- **Cumulativity, from MS3 phase 32.** This case asserted the opposite
+    -- until then — @Nat@ at @Type₁@ was the recorded proof that there was no
+    -- subsumption. It is the one behaviour the phase changes.
+  , testCase "cumulativity: a Type0 term checks at Type1" $
+      hasType "Nat" "Type\8321"
+  , testCase "and at Type2, and at its own level" $ do
+      hasType "Nat" "Type\8322"
       hasType "Nat" "Type\8320"
+    -- It lifts and never lowers.
+  , testCase "but Type1 does not check at Type0" $
+      illTyped' "Type\8320" "Type\8320"
   ]
   where
-    illTyped' src ty = case fst (check natVec [] natVecCounter (term src) (term ty)) of
+    illTyped' src ty = case verdict (check natVec [] natVecCounter (term src) (term ty)) of
       Left _   -> pure ()
       Right () -> assertFailure "expected the universes not to match"
 
@@ -219,23 +247,23 @@ elimTests =
 -- check on the construction.
 eliminatorTypeTests :: [TestTree]
 eliminatorTypeTests =
-  [ testCase "Nat's eliminator type, at Type0" $ wellFormed natVec natVecCounter "Nat" (Level 0)
-  , testCase "Nat's eliminator type, at Type1" $ wellFormed natVec natVecCounter "Nat" (Level 1)
-  , testCase "Vec's eliminator type, at Type0" $ wellFormed natVec natVecCounter "Vec" (Level 0)
-  , testCase "Vec's eliminator type, at Type2" $ wellFormed natVec natVecCounter "Vec" (Level 2)
+  [ testCase "Nat's eliminator type, at Type0" $ wellFormed natVec natVecCounter "Nat" (LZero)
+  , testCase "Nat's eliminator type, at Type1" $ wellFormed natVec natVecCounter "Nat" (levelOfNat 1)
+  , testCase "Vec's eliminator type, at Type0" $ wellFormed natVec natVecCounter "Vec" (LZero)
+  , testCase "Vec's eliminator type, at Type2" $ wellFormed natVec natVecCounter "Vec" (levelOfNat 2)
     -- Phase 10's two: an indexed family with no parameter, whose method
     -- conclusions are at constructor-supplied indices, and a family with no
     -- methods at all.
-  , testCase "Fin's eliminator type, at Type0" $ wellFormed natFin natFinCounter "Fin" (Level 0)
-  , testCase "Fin's eliminator type, at Type1" $ wellFormed natFin natFinCounter "Fin" (Level 1)
-  , testCase "Empty's eliminator type, at Type0" $ wellFormed natFin natFinCounter "Empty" (Level 0)
+  , testCase "Fin's eliminator type, at Type0" $ wellFormed natFin natFinCounter "Fin" (LZero)
+  , testCase "Fin's eliminator type, at Type1" $ wellFormed natFin natFinCounter "Fin" (levelOfNat 1)
+  , testCase "Empty's eliminator type, at Type0" $ wellFormed natFin natFinCounter "Empty" (LZero)
   ]
   where
     wellFormed env n0 d l = case lookupInductive (named d) env of
       Nothing  -> assertFailure (d ++ " is not declared")
       Just def ->
         let (ty, n) = eliminatorType def l n0
-         in case fst (infer env [] n ty) of
+         in case verdict (infer env [] n ty) of
               Right (Universe _) -> pure ()
               Right other        -> assertFailure ("not a type: " ++ show other)
               Left e             -> assertFailure (show e)
@@ -265,13 +293,13 @@ subjectReductionTests =
   where
     preserved src =
       let t = term src
-       in case fst (infer natVec [] natVecCounter t) of
+       in case verdict (infer natVec [] natVecCounter t) of
             Left e   -> assertFailure ("the term does not type: " ++ show e)
             Right ty ->
               let u = whnf natVec [] t
-               in case fst (infer natVec [] natVecCounter u) of
+               in case verdict (infer natVec [] natVecCounter u) of
                     Left e    -> assertFailure ("the reduct does not type: " ++ show e)
-                    Right ty' -> case fst (convert natVec [] natVecCounter ty ty') of
+                    Right ty' -> case verdict (convert natVec [] natVecCounter ty ty') of
                       Nothing  -> pure ()
                       Just why -> assertFailure ("the types differ: " ++ show why)
 
@@ -282,7 +310,7 @@ checkTests =
       -- to it. If @check@ were comparing with 'Eq' this would fail.
       hasType "zero" "(\\ (_ : Type\8320) -> Nat) Nat"
   , testCase "check reports the conversion's own reason" $
-      case fst (check natVec [] natVecCounter (term "zero") (term "Type\8320")) of
+      case verdict (check natVec [] natVecCounter (term "zero") (term "Type\8320")) of
         Left (NotOfType _ _ _ _ _) -> pure ()
         other                      -> assertFailure (show other)
   ]
@@ -291,11 +319,11 @@ errorTests :: [TestTree]
 errorTests =
   [ testCase "a variable that is not in the context" $
       let (v, n) = fresh natVecCounter
-       in case fst (infer natVec [] n (Free v)) of
+       in case verdict (infer natVec [] n (Free v)) of
             Left (UnknownVariable _ _) -> pure ()
             other                      -> assertFailure (show other)
   , testCase "a global that is not declared" $
-      fst (infer natVec [] natVecCounter (Global (named "nowhere")))
+      verdict (infer natVec [] natVecCounter (Global (named "nowhere") []))
         @?= Left (UnknownGlobal (named "nowhere"))
   , testCase "applying something that is not a function" $
       case typeOf "zero zero" of
@@ -306,22 +334,74 @@ errorTests =
         Left (NotAType _ _ _) -> pure ()
         other                 -> assertFailure (show other)
   , testCase "an unsaturated Canonical, which only a hand-built term can be" $
-      case fst (infer natVec [] natVecCounter (Canonical (named "succ") [])) of
+      case verdict (infer natVec [] natVecCounter (Canonical (named "succ") [] [])) of
         Left (Unsaturated _ _) -> pure ()
         other                  -> assertFailure (show other)
   , testCase "an over-applied Canonical" $
-      case fst (infer natVec [] natVecCounter
-                  (Canonical (named "zero") [Canonical (named "zero") []])) of
+      case verdict (infer natVec [] natVecCounter
+                  (Canonical (named "zero") [] [Canonical (named "zero") [] []])) of
         Left (OverApplied _) -> pure ()
         other                -> assertFailure (show other)
   , testCase "a loose de Bruijn index reaching the checker" $
-      fst (infer natVec [] natVecCounter (Bound 0)) @?= Left (LooseIndex 0)
+      verdict (infer natVec [] natVecCounter (Bound 0)) @?= Left (LooseIndex 0)
   ]
 
 counterTests :: [TestTree]
 counterTests =
   [ testCase "inferring under a binder advances it" $
-      (snd (infer natVec [] 100 (termAt 100 [] "\\ (x : Nat) -> x")) > 100) @?= True
+      (counter (infer natVec [] 100 (termAt 100 [] "\\ (x : Nat) -> x")) > 100) @?= True
   , testCase "it advances on the failing branch too" $
-      (snd (infer natVec [] 100 (termAt 100 [] "\\ (x : Nat) -> zero zero")) > 100) @?= True
+      (counter (infer natVec [] 100 (termAt 100 [] "\\ (x : Nat) -> zero zero")) > 100) @?= True
   ]
+
+-- --------------------------------------------------------------------------
+-- Scheme constraints at a use site (MS3 phase 33b)
+-- --------------------------------------------------------------------------
+
+-- | @discussion\/level-binders-and-constraints.md@ §4's call site, in one
+-- module: the level arguments are in the **term** and the constraint list is in
+-- the **environment**, and @infer@ puts them together.
+--
+-- **This is the soundness argument, not a convenience.** A constraint arising
+-- from a subsumption inside a body is invisible in that body's type —
+-- @Type ℓ0 -> Type ℓ1@ is well formed for any pair — so a badly instantiated
+-- call would check on its type alone. Nothing else can regenerate it, because
+-- checking a @Global@ never looks at the body.
+schemeTests :: [TestTree]
+schemeTests =
+  [ testCase "a use instantiates the constraint at the levels it wrote" $
+      owed (infer withScheme [] 800 (lift [levelOfNat 1, levelOfNat 0]))
+        @?= [AtMost (levelOfNat 1) (levelOfNat 0)]
+
+  , -- The obligation is **owed**, not decided: @infer@ never refuses one, and
+    -- the pass at @qed@ is what turns this into an error.
+    testCase "and it is owed rather than refused" $
+      verdict (infer withScheme [] 800 (lift [levelOfNat 1, levelOfNat 0]))
+        @?= Right (arrow (levelOfNat 1) (levelOfNat 0))
+
+  , testCase "a good instantiation owes one that discharges" $
+      owed (infer withScheme [] 800 (lift [levelOfNat 0, levelOfNat 1]))
+        @?= [AtMost (levelOfNat 0) (levelOfNat 1)]
+
+  , testCase "a definition with no constraints owes nothing" $
+      owed (infer natVec [] natVecCounter (Global (named "succ") [])) @?= []
+  ]
+  where
+    owed (_, o, _) = o
+
+    l0 = LVar (LRigid 700)
+    l1 = LVar (LRigid 701)
+
+    lift ls = Global (named "lift") ls
+
+    -- @lift {ℓ0 ℓ1} : Type ℓ0 -> Type ℓ1@, with @ℓ0 ≤ ℓ1@ — the shape
+    -- @∀ (A : Type) -> Type@ generalises to, built here rather than proved
+    -- because this module has no REPL.
+    withScheme =
+      addDefinition (named "lift")
+        (MkDefinition [LRigid 700, LRigid 701] [AtMost l0 l1]
+           (arrow l0 l1)
+           (Lam (Ident "A") (Universe l0) (close (fst (fresh 990)) (Universe l0))))
+        natVec
+
+    arrow a b = Pi (Ident "_") (Universe a) (close (fst (fresh 991)) (Universe b))

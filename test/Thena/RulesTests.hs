@@ -9,11 +9,11 @@ module Thena.RulesTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
+import Thena.Core.Level (Level (..), levelOfNat)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
   , Ident (..)
-  , Level (..)
   , Var
   , close
   , fresh
@@ -81,8 +81,8 @@ tests =
 -- --------------------------------------------------------------------------
 
 type0, type1 :: Core
-type0 = Universe (Level 0)
-type1 = Universe (Level 1)
+type0 = Universe (LZero)
+type1 = Universe (levelOfNat 1)
 
 -- | @S -> T@, with a binder nothing refers to.
 arrow :: Core -> Core -> Core
@@ -112,7 +112,7 @@ withArrow :: GlobalEnv
 withArrow =
   addDefinition
     (GlobalName "Arrow")
-    (MkDefinition type1 (arrow type0 type0))
+    (MkDefinition [] [] type1 (arrow type0 type0))
     emptyGlobals
 
 matching :: GlobalEnv -> Cursor -> [String]
@@ -154,11 +154,11 @@ matchTests =
       -- and must match GoalTypeIsPi." Written down, @Arrow@ is a 'Global' and
       -- not a 'Pi'; a head that did not reduce would miss it.
     , testCase "a goal type that only reduces to a Π still matches" $
-        matching withArrow (guessAt (Global (GlobalName "Arrow")))
+        matching withArrow (guessAt (Global (GlobalName "Arrow") []))
           @?= ["intro", "solve", "regret"]
 
     , testCase "and does not, in an environment where it does not unfold" $
-        matching emptyGlobals (guessAt (Global (GlobalName "Arrow")))
+        matching emptyGlobals (guessAt (Global (GlobalName "Arrow") []))
           @?= ["solve", "regret"]
 
       -- The one test that must NOT reduce: whnf δ-reduces a term-level let

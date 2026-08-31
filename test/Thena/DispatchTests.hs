@@ -13,7 +13,8 @@ module Thena.DispatchTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Level (..), fresh)
+import Thena.Core.Level (Level (..))
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), fresh)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, enter, focus)
 import qualified Thena.Development.Cursor as Cursor
@@ -54,7 +55,7 @@ tests =
 -- --------------------------------------------------------------------------
 
 type0 :: Core
-type0 = Universe (Level 0)
+type0 = Universe (LZero)
 
 -- | @? x : Type₀ . x@.
 hole :: Cursor

@@ -14,11 +14,11 @@ module Thena.Fixtures
   , richTypes
   ) where
 
+import Thena.Core.Level (Level (..))
 import Thena.Core.Context (Entry (..))
 import Thena.Core.Term
   ( Core (..)
   , Ident (..)
-  , Level (..)
   , Var
   , close
   , fresh
@@ -27,7 +27,7 @@ import Thena.Development.Component (Component (..))
 import Thena.Development.Partial (Constraint (..), Partial (..))
 
 type0 :: Core
-type0 = Universe (Level 0)
+type0 = Universe (LZero)
 
 -- | @A -> A@, a non-dependent 'Pi' over the given domain.
 arrow :: Var -> Core -> Core

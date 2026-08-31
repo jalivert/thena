@@ -15,7 +15,8 @@ module Thena.CallTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Level (..), fresh)
+import Thena.Core.Level (Level (..), levelOfNat)
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), fresh)
 import qualified Thena.Development.Component as Component
 import qualified Thena.Development.Cursor as Cursor
 import Thena.Development.Cursor (Cursor, enter, focus)
@@ -47,8 +48,8 @@ tests = testGroup "call by name (§8)" [finding, backtracking, arity, recursion]
 -- --------------------------------------------------------------------------
 
 type0, type1 :: Core
-type0 = Universe (Level 0)
-type1 = Universe (Level 1)
+type0 = Universe (LZero)
+type1 = Universe (levelOfNat 1)
 
 -- **The goal is at @Type₁@** (phase 25b): the clauses below @try@ their
 -- argument, that argument is @Type₀@, and @try@ now checks it — so the hole

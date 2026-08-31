@@ -3,65 +3,65 @@ no noConfusionNV: nvSucc's argument n has a type that depends on an earlier argu
 declared NV
 no noConfusionStep: eIf's argument s has a type that depends on an earlier argument, so its equation cannot be stated
 declared Step
-proving absurd : ∀ (C : Type₀) -> Empty -> C
-absurd : ∀ (C : Type₀) -> Empty -> C   ∎
-proving sym : ∀ (A : Type₀) (a : A) (b : A) -> Eq A a b -> Eq A b a
+proving absurd : ∀ (C : Type₀) -> Empty {0} -> C
+absurd : ∀ (C : Type₀) -> Empty {0} -> C   ∎
+proving sym : ∀ (A : Type₀) (a : A) (b : A) -> Eq {0} A a b -> Eq {0} A b a
 subgoals: reflMethod
-sym : ∀ (A : Type₀) (a : A) (b : A) -> Eq A a b -> Eq A b a   ∎
-proving subst : ∀ (A : Type₀) (P : A -> Type₀) (a : A) (b : A) -> Eq A a b -> P a -> P b
+sym : ∀ (A : Type₀) (a : A) (b : A) -> Eq {0} A a b -> Eq {0} A b a   ∎
+proving subst : ∀ (A : Type₀) (P : A -> Type₀) (a : A) (b : A) -> Eq {0} A a b -> P a -> P b
 subgoals: reflMethod
-subst : ∀ (A : Type₀) (P : A -> Type₀) (a : A) (b : A) -> Eq A a b -> P a -> P b   ∎
-proving cong : ∀ (A : Type₀) (B : Type₀) (f : A -> B) (a : A) (b : A) -> Eq A a b -> Eq B (f a) (f b)
+subst : ∀ (A : Type₀) (P : A -> Type₀) (a : A) (b : A) -> Eq {0} A a b -> P a -> P b   ∎
+proving cong : ∀ (A : Type₀) (B : Type₀) (f : A -> B) (a : A) (b : A) -> Eq {0} A a b -> Eq {0} B (f a) (f b)
 subgoals: reflMethod
-cong : ∀ (A : Type₀) (B : Type₀) (f : A -> B) (a : A) (b : A) -> Eq A a b -> Eq B (f a) (f b)   ∎
-proving trans : ∀ (A : Type₀) (a : A) (b : A) (c : A) -> Eq A a b -> Eq A b c -> Eq A a c
+cong : ∀ (A : Type₀) (B : Type₀) (f : A -> B) (a : A) (b : A) -> Eq {0} A a b -> Eq {0} B (f a) (f b)   ∎
+proving trans : ∀ (A : Type₀) (a : A) (b : A) (c : A) -> Eq {0} A a b -> Eq {0} A b c -> Eq {0} A a c
 subgoals: reflMethod
-trans : ∀ (A : Type₀) (a : A) (b : A) (c : A) -> Eq A a b -> Eq A b c -> Eq A a c   ∎
-proving trueNoStep : ∀ (u : Term) -> Step true u -> Empty
+trans : ∀ (A : Type₀) (a : A) (b : A) (c : A) -> Eq {0} A a b -> Eq {0} A b c -> Eq {0} A a c   ∎
+proving trueNoStep : ∀ (u : Term) -> Step true u -> Empty {0}
 subgoals: eIfTrueMethod, eIfFalseMethod, eIfMethod, eSuccMethod, ePredZeroMethod, ePredSuccMethod, ePredMethod, eIsZeroZeroMethod, eIsZeroSuccMethod, eIsZeroMethod
-trueNoStep : ∀ (u : Term) -> Step true u -> Empty   ∎
-proving falseNoStep : ∀ (u : Term) -> Step false u -> Empty
+trueNoStep : ∀ (u : Term) -> Step true u -> Empty {0}   ∎
+proving falseNoStep : ∀ (u : Term) -> Step false u -> Empty {0}
 subgoals: eIfTrueMethod, eIfFalseMethod, eIfMethod, eSuccMethod, ePredZeroMethod, ePredSuccMethod, ePredMethod, eIsZeroZeroMethod, eIsZeroSuccMethod, eIsZeroMethod
-falseNoStep : ∀ (u : Term) -> Step false u -> Empty   ∎
-proving zeroNoStep : ∀ (u : Term) -> Step zero u -> Empty
+falseNoStep : ∀ (u : Term) -> Step false u -> Empty {0}   ∎
+proving zeroNoStep : ∀ (u : Term) -> Step zero u -> Empty {0}
 subgoals: eIfTrueMethod, eIfFalseMethod, eIfMethod, eSuccMethod, ePredZeroMethod, ePredSuccMethod, ePredMethod, eIsZeroZeroMethod, eIsZeroSuccMethod, eIsZeroMethod
-zeroNoStep : ∀ (u : Term) -> Step zero u -> Empty   ∎
-proving succNoStep : ∀ (w : Term) -> (∀ (u : Term) -> Step w u -> Empty) -> ∀ (u : Term) -> Step (succ w) u -> Empty
+zeroNoStep : ∀ (u : Term) -> Step zero u -> Empty {0}   ∎
+proving succNoStep : ∀ (w : Term) -> (∀ (u : Term) -> Step w u -> Empty {0}) -> ∀ (u : Term) -> Step (succ w) u -> Empty {0}
 subgoals: eIfTrueMethod, eIfFalseMethod, eIfMethod, eSuccMethod, ePredZeroMethod, ePredSuccMethod, ePredMethod, eIsZeroZeroMethod, eIsZeroSuccMethod, eIsZeroMethod
-succNoStep : ∀ (w : Term) -> (∀ (u : Term) -> Step w u -> Empty) -> ∀ (u : Term) -> Step (succ w) u -> Empty   ∎
-proving nvNoStep : ∀ (v : Term) -> NV v -> ∀ (u : Term) -> Step v u -> Empty
+succNoStep : ∀ (w : Term) -> (∀ (u : Term) -> Step w u -> Empty {0}) -> ∀ (u : Term) -> Step (succ w) u -> Empty {0}   ∎
+proving nvNoStep : ∀ (v : Term) -> NV v -> ∀ (u : Term) -> Step v u -> Empty {0}
 subgoals: nvZeroMethod, nvSuccMethod
-nvNoStep : ∀ (v : Term) -> NV v -> ∀ (u : Term) -> Step v u -> Empty   ∎
-proving invIfTrue : ∀ (a : Term) (b : Term) (u : Term) -> Step (ifthen true a b) u -> Eq Term a u
+nvNoStep : ∀ (v : Term) -> NV v -> ∀ (u : Term) -> Step v u -> Empty {0}   ∎
+proving invIfTrue : ∀ (a : Term) (b : Term) (u : Term) -> Step (ifthen true a b) u -> Eq {0} Term a u
 subgoals: eIfTrueMethod, eIfFalseMethod, eIfMethod, eSuccMethod, ePredZeroMethod, ePredSuccMethod, ePredMethod, eIsZeroZeroMethod, eIsZeroSuccMethod, eIsZeroMethod
-invIfTrue : ∀ (a : Term) (b : Term) (u : Term) -> Step (ifthen true a b) u -> Eq Term a u   ∎
-proving invIfFalse : ∀ (a : Term) (b : Term) (u : Term) -> Step (ifthen false a b) u -> Eq Term b u
+invIfTrue : ∀ (a : Term) (b : Term) (u : Term) -> Step (ifthen true a b) u -> Eq {0} Term a u   ∎
+proving invIfFalse : ∀ (a : Term) (b : Term) (u : Term) -> Step (ifthen false a b) u -> Eq {0} Term b u
 subgoals: eIfTrueMethod, eIfFalseMethod, eIfMethod, eSuccMethod, ePredZeroMethod, ePredSuccMethod, ePredMethod, eIsZeroZeroMethod, eIsZeroSuccMethod, eIsZeroMethod
-invIfFalse : ∀ (a : Term) (b : Term) (u : Term) -> Step (ifthen false a b) u -> Eq Term b u   ∎
-proving invIf : ∀ (p : Term) (p' : Term) (a : Term) (b : Term) -> Step p p' -> (∀ (w : Term) -> Step p w -> Eq Term p' w) -> ∀ (u : Term) -> Step (ifthen p a b) u -> Eq Term (ifthen p' a b) u
+invIfFalse : ∀ (a : Term) (b : Term) (u : Term) -> Step (ifthen false a b) u -> Eq {0} Term b u   ∎
+proving invIf : ∀ (p : Term) (p' : Term) (a : Term) (b : Term) -> Step p p' -> (∀ (w : Term) -> Step p w -> Eq {0} Term p' w) -> ∀ (u : Term) -> Step (ifthen p a b) u -> Eq {0} Term (ifthen p' a b) u
 subgoals: eIfTrueMethod, eIfFalseMethod, eIfMethod, eSuccMethod, ePredZeroMethod, ePredSuccMethod, ePredMethod, eIsZeroZeroMethod, eIsZeroSuccMethod, eIsZeroMethod
-invIf : ∀ (p : Term) (p' : Term) (a : Term) (b : Term) -> Step p p' -> (∀ (w : Term) -> Step p w -> Eq Term p' w) -> ∀ (u : Term) -> Step (ifthen p a b) u -> Eq Term (ifthen p' a b) u   ∎
-proving invSucc : ∀ (p : Term) (p' : Term) -> Step p p' -> (∀ (w : Term) -> Step p w -> Eq Term p' w) -> ∀ (u : Term) -> Step (succ p) u -> Eq Term (succ p') u
+invIf : ∀ (p : Term) (p' : Term) (a : Term) (b : Term) -> Step p p' -> (∀ (w : Term) -> Step p w -> Eq {0} Term p' w) -> ∀ (u : Term) -> Step (ifthen p a b) u -> Eq {0} Term (ifthen p' a b) u   ∎
+proving invSucc : ∀ (p : Term) (p' : Term) -> Step p p' -> (∀ (w : Term) -> Step p w -> Eq {0} Term p' w) -> ∀ (u : Term) -> Step (succ p) u -> Eq {0} Term (succ p') u
 subgoals: eIfTrueMethod, eIfFalseMethod, eIfMethod, eSuccMethod, ePredZeroMethod, ePredSuccMethod, ePredMethod, eIsZeroZeroMethod, eIsZeroSuccMethod, eIsZeroMethod
-invSucc : ∀ (p : Term) (p' : Term) -> Step p p' -> (∀ (w : Term) -> Step p w -> Eq Term p' w) -> ∀ (u : Term) -> Step (succ p) u -> Eq Term (succ p') u   ∎
-proving invPredZero : ∀ (u : Term) -> Step (pred zero) u -> Eq Term zero u
+invSucc : ∀ (p : Term) (p' : Term) -> Step p p' -> (∀ (w : Term) -> Step p w -> Eq {0} Term p' w) -> ∀ (u : Term) -> Step (succ p) u -> Eq {0} Term (succ p') u   ∎
+proving invPredZero : ∀ (u : Term) -> Step (pred zero) u -> Eq {0} Term zero u
 subgoals: eIfTrueMethod, eIfFalseMethod, eIfMethod, eSuccMethod, ePredZeroMethod, ePredSuccMethod, ePredMethod, eIsZeroZeroMethod, eIsZeroSuccMethod, eIsZeroMethod
-invPredZero : ∀ (u : Term) -> Step (pred zero) u -> Eq Term zero u   ∎
-proving invPredSucc : ∀ (v : Term) -> NV v -> ∀ (u : Term) -> Step (pred (succ v)) u -> Eq Term v u
+invPredZero : ∀ (u : Term) -> Step (pred zero) u -> Eq {0} Term zero u   ∎
+proving invPredSucc : ∀ (v : Term) -> NV v -> ∀ (u : Term) -> Step (pred (succ v)) u -> Eq {0} Term v u
 subgoals: eIfTrueMethod, eIfFalseMethod, eIfMethod, eSuccMethod, ePredZeroMethod, ePredSuccMethod, ePredMethod, eIsZeroZeroMethod, eIsZeroSuccMethod, eIsZeroMethod
-invPredSucc : ∀ (v : Term) -> NV v -> ∀ (u : Term) -> Step (pred (succ v)) u -> Eq Term v u   ∎
-proving invPred : ∀ (p : Term) (p' : Term) -> Step p p' -> (∀ (w : Term) -> Step p w -> Eq Term p' w) -> ∀ (u : Term) -> Step (pred p) u -> Eq Term (pred p') u
+invPredSucc : ∀ (v : Term) -> NV v -> ∀ (u : Term) -> Step (pred (succ v)) u -> Eq {0} Term v u   ∎
+proving invPred : ∀ (p : Term) (p' : Term) -> Step p p' -> (∀ (w : Term) -> Step p w -> Eq {0} Term p' w) -> ∀ (u : Term) -> Step (pred p) u -> Eq {0} Term (pred p') u
 subgoals: eIfTrueMethod, eIfFalseMethod, eIfMethod, eSuccMethod, ePredZeroMethod, ePredSuccMethod, ePredMethod, eIsZeroZeroMethod, eIsZeroSuccMethod, eIsZeroMethod
-invPred : ∀ (p : Term) (p' : Term) -> Step p p' -> (∀ (w : Term) -> Step p w -> Eq Term p' w) -> ∀ (u : Term) -> Step (pred p) u -> Eq Term (pred p') u   ∎
-proving invIsZeroZero : ∀ (u : Term) -> Step (iszero zero) u -> Eq Term true u
+invPred : ∀ (p : Term) (p' : Term) -> Step p p' -> (∀ (w : Term) -> Step p w -> Eq {0} Term p' w) -> ∀ (u : Term) -> Step (pred p) u -> Eq {0} Term (pred p') u   ∎
+proving invIsZeroZero : ∀ (u : Term) -> Step (iszero zero) u -> Eq {0} Term true u
 subgoals: eIfTrueMethod, eIfFalseMethod, eIfMethod, eSuccMethod, ePredZeroMethod, ePredSuccMethod, ePredMethod, eIsZeroZeroMethod, eIsZeroSuccMethod, eIsZeroMethod
-invIsZeroZero : ∀ (u : Term) -> Step (iszero zero) u -> Eq Term true u   ∎
-proving invIsZeroSucc : ∀ (v : Term) -> NV v -> ∀ (u : Term) -> Step (iszero (succ v)) u -> Eq Term false u
+invIsZeroZero : ∀ (u : Term) -> Step (iszero zero) u -> Eq {0} Term true u   ∎
+proving invIsZeroSucc : ∀ (v : Term) -> NV v -> ∀ (u : Term) -> Step (iszero (succ v)) u -> Eq {0} Term false u
 subgoals: eIfTrueMethod, eIfFalseMethod, eIfMethod, eSuccMethod, ePredZeroMethod, ePredSuccMethod, ePredMethod, eIsZeroZeroMethod, eIsZeroSuccMethod, eIsZeroMethod
-invIsZeroSucc : ∀ (v : Term) -> NV v -> ∀ (u : Term) -> Step (iszero (succ v)) u -> Eq Term false u   ∎
-proving invIsZero : ∀ (p : Term) (p' : Term) -> Step p p' -> (∀ (w : Term) -> Step p w -> Eq Term p' w) -> ∀ (u : Term) -> Step (iszero p) u -> Eq Term (iszero p') u
+invIsZeroSucc : ∀ (v : Term) -> NV v -> ∀ (u : Term) -> Step (iszero (succ v)) u -> Eq {0} Term false u   ∎
+proving invIsZero : ∀ (p : Term) (p' : Term) -> Step p p' -> (∀ (w : Term) -> Step p w -> Eq {0} Term p' w) -> ∀ (u : Term) -> Step (iszero p) u -> Eq {0} Term (iszero p') u
 subgoals: eIfTrueMethod, eIfFalseMethod, eIfMethod, eSuccMethod, ePredZeroMethod, ePredSuccMethod, ePredMethod, eIsZeroZeroMethod, eIsZeroSuccMethod, eIsZeroMethod
-invIsZero : ∀ (p : Term) (p' : Term) -> Step p p' -> (∀ (w : Term) -> Step p w -> Eq Term p' w) -> ∀ (u : Term) -> Step (iszero p) u -> Eq Term (iszero p') u   ∎
-proving determinacy : ∀ (t : Term) (t1 : Term) -> Step t t1 -> ∀ (t2 : Term) -> Step t t2 -> Eq Term t1 t2
+invIsZero : ∀ (p : Term) (p' : Term) -> Step p p' -> (∀ (w : Term) -> Step p w -> Eq {0} Term p' w) -> ∀ (u : Term) -> Step (iszero p) u -> Eq {0} Term (iszero p') u   ∎
+proving determinacy : ∀ (t : Term) (t1 : Term) -> Step t t1 -> ∀ (t2 : Term) -> Step t t2 -> Eq {0} Term t1 t2
 subgoals: eIfTrueMethod, eIfFalseMethod, eIfMethod, eSuccMethod, ePredZeroMethod, ePredSuccMethod, ePredMethod, eIsZeroZeroMethod, eIsZeroSuccMethod, eIsZeroMethod
-determinacy : ∀ (t : Term) (t1 : Term) -> Step t t1 -> ∀ (t2 : Term) -> Step t t2 -> Eq Term t1 t2   ∎
+determinacy : ∀ (t : Term) (t1 : Term) -> Step t t1 -> ∀ (t2 : Term) -> Step t t2 -> Eq {0} Term t1 t2   ∎

@@ -1,11 +1,11 @@
 BASE = r'''data Term : Type₀ where { true : Term ; false : Term ; ifthen : Term -> Term -> Term -> Term ; zero : Term ; succ : Term -> Term ; pred : Term -> Term ; iszero : Term -> Term }
 data NV : Term -> Type₀ where { nvZero : NV zero ; nvSucc : ∀ (t : Term) (n : NV t) -> NV (succ t) }
 data Step : Term -> Term -> Type₀ where { eIfTrue : ∀ (t2 : Term) (t3 : Term) -> Step (ifthen true t2 t3) t2 ; eIfFalse : ∀ (t2 : Term) (t3 : Term) -> Step (ifthen false t2 t3) t3 ; eIf : ∀ (t1 : Term) (t1' : Term) (t2 : Term) (t3 : Term) (s : Step t1 t1') -> Step (ifthen t1 t2 t3) (ifthen t1' t2 t3) ; eSucc : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (succ t1) (succ t1') ; ePredZero : Step (pred zero) zero ; ePredSucc : ∀ (v : Term) (nv : NV v) -> Step (pred (succ v)) v ; ePred : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (pred t1) (pred t1') ; eIsZeroZero : Step (iszero zero) true ; eIsZeroSucc : ∀ (v : Term) (nv : NV v) -> Step (iszero (succ v)) false ; eIsZero : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (iszero t1) (iszero t1') }
-:theorem absurd : ∀ (C : Type₀) (e : Empty) -> C
-try (\ (C : Type₀) (e : Empty) -> elim Empty () (\ (t : Empty) -> C) () () e)
+:theorem absurd : ∀ (C : Type₀) (e : Empty {0}) -> C
+try (\ (C : Type₀) (e : Empty {0}) -> elim Empty {0} () (\ (t : Empty {0}) -> C) () () e)
 solve
 qed
-:theorem sym : ∀ (A : Type₀) (a : A) (b : A) (e : Eq A a b) -> Eq A b a
+:theorem sym : ∀ (A : Type₀) (a : A) (b : A) (e : Eq {0} A a b) -> Eq {0} A b a
 attack
 intro
 intro
@@ -18,7 +18,7 @@ along
 along
 eliminate e
 back
-try (\ (c : A) -> refl A c)
+try (\ (c : A) -> refl {0} A c)
 solve
 along
 solve
@@ -30,7 +30,7 @@ back
 back
 solve
 qed
-:theorem subst : ∀ (A : Type₀) (P : A -> Type₀) (a : A) (b : A) (e : Eq A a b) -> P a -> P b
+:theorem subst : ∀ (A : Type₀) (P : A -> Type₀) (a : A) (b : A) (e : Eq {0} A a b) -> P a -> P b
 attack
 intro
 intro
@@ -58,7 +58,7 @@ back
 back
 solve
 qed
-:theorem cong : ∀ (A : Type₀) (B : Type₀) (f : A -> B) (a : A) (b : A) (e : Eq A a b) -> Eq B (f a) (f b)
+:theorem cong : ∀ (A : Type₀) (B : Type₀) (f : A -> B) (a : A) (b : A) (e : Eq {0} A a b) -> Eq {0} B (f a) (f b)
 attack
 intro
 intro
@@ -75,7 +75,7 @@ along
 along
 eliminate e
 back
-try (\ (c : A) -> refl B (f c))
+try (\ (c : A) -> refl {0} B (f c))
 solve
 along
 solve
@@ -89,7 +89,7 @@ back
 back
 solve
 qed
-:theorem trans : ∀ (A : Type₀) (a : A) (b : A) (c : A) (e : Eq A a b) -> Eq A b c -> Eq A a c
+:theorem trans : ∀ (A : Type₀) (a : A) (b : A) (c : A) (e : Eq {0} A a b) -> Eq {0} A b c -> Eq {0} A a c
 attack
 intro
 intro
@@ -104,7 +104,7 @@ along
 along
 eliminate e
 back
-try (\ (z : A) (h : Eq A z c) -> h)
+try (\ (z : A) (h : Eq {0} A z c) -> h)
 solve
 along
 solve
@@ -167,10 +167,14 @@ STEP = [
 # The conjunction NoConfusionTerm builds for a constructor with several
 # arguments: right-nested And, and Unit when there is nothing to conjoin.
 # Must agree with Thena.Global.NoConfusion.conjoin exactly.
+#
+# And takes ONE LEVEL PER CONJUNCT since MS3 phase 33c — And {l0 l1}, whose own
+# level is the join — where it used to take one for both. Everything here is at
+# Type0, so the two are the same level; the arity is not.
 def conj(ts):
-    if not ts: return "Unit"
+    if not ts: return "Unit {0}"
     if len(ts) == 1: return ts[0]
-    return "And (%s) (%s)" % (ts[0], conj(ts[1:]))
+    return "And {0 0} (%s) (%s)" % (ts[0], conj(ts[1:]))
 
 # One projection out of that nest per conjunct. The last is the residue itself,
 # because conj stops wrapping at one element.
@@ -193,7 +197,7 @@ def decompose(a, b, q, goal, ctr):
         x, y, qq = work.pop(0)
         if x[0] == 'c' and y[0] == 'c':
             if x[1] != y[1]:
-                # NoConfusionTerm at two different formers computes to Empty,
+                # NoConfusionTerm at two different formers computes to Empty {0},
                 # so discrimination is absurd rather than a continuation.
                 return (compose(ps, "absurd (%s) (noConfusionTerm %s %s %s)"
                                     % (goal, pp(x,0), pp(y,0), qq)), None)
@@ -201,7 +205,7 @@ def decompose(a, b, q, goal, ctr):
             eqs, binders, sub = [], [], []
             for (l, r) in zip(x[2], y[2]):
                 e = "e%d" % next(ctr)
-                ty = "Eq Term %s %s" % (pp(l, False), pp(r, False))
+                ty = "Eq {0} Term %s %s" % (pp(l, False), pp(r, False))
                 eqs.append(ty)
                 binders.append("(%s : %s)" % (e, ty))
                 sub.append((l, r, e))
@@ -234,7 +238,7 @@ def chain(steps):
     return proof
 
 def congs(head, left, right, proofs):
-    """Eq Term (head left) (head right), one argument at a time."""
+    """Eq {0} Term (head left) (head right), one argument at a time."""
     render = lambda xs: head % tuple(xs)
     steps, cur = [], list(left)
     for i, (l, r, pr) in enumerate(zip(left, right, proofs)):
@@ -256,42 +260,42 @@ def lemma(name, ty, intros, target, left, goal, fin):
 A = "Term"
 
 # ---- values do not step ---------------------------------------------------
-lemma("trueNoStep",  "∀ (u : Term) (s : Step true u) -> Empty", ["u","s"], "s",
-      C("true"), lambda y: "Empty", {})
-lemma("falseNoStep", "∀ (u : Term) (s : Step false u) -> Empty", ["u","s"], "s",
-      C("false"), lambda y: "Empty", {})
-lemma("zeroNoStep",  "∀ (u : Term) (s : Step zero u) -> Empty", ["u","s"], "s",
-      C("zero"), lambda y: "Empty", {})
+lemma("trueNoStep",  "∀ (u : Term) (s : Step true u) -> Empty {0}", ["u","s"], "s",
+      C("true"), lambda y: "Empty {0}", {})
+lemma("falseNoStep", "∀ (u : Term) (s : Step false u) -> Empty {0}", ["u","s"], "s",
+      C("false"), lambda y: "Empty {0}", {})
+lemma("zeroNoStep",  "∀ (u : Term) (s : Step zero u) -> Empty {0}", ["u","s"], "s",
+      C("zero"), lambda y: "Empty {0}", {})
 lemma("succNoStep",
-      "∀ (w : Term) (ih0 : ∀ (u : Term) (s : Step w u) -> Empty) (u : Term) "
-      "(s : Step (succ w) u) -> Empty",
-      ["w","ih0","u","s"], "s", C("succ", V("w")), lambda y: "Empty",
+      "∀ (w : Term) (ih0 : ∀ (u : Term) (s : Step w u) -> Empty {0}) (u : Term) "
+      "(s : Step (succ w) u) -> Empty {0}",
+      ["w","ih0","u","s"], "s", C("succ", V("w")), lambda y: "Empty {0}",
       {"eSucc": lambda lv, g: "ih0 c2 (%s)" % transport("c2","c1","w",eq(lv,"c1","w"),"sr")})
 
 # ---- the ten inversions ---------------------------------------------------
 lemma("invIfTrue",
-      "∀ (a : Term) (b : Term) (u : Term) (s : Step (ifthen true a b) u) -> Eq Term a u",
+      "∀ (a : Term) (b : Term) (u : Term) (s : Step (ifthen true a b) u) -> Eq {0} Term a u",
       ["a","b","u","s"], "s", C("ifthen", C("true"), V("a"), V("b")),
-      lambda y: "Eq Term a %s" % y,
+      lambda y: "Eq {0} Term a %s" % y,
       {"eIfTrue": lambda lv, g: "sym Term c1 a %s" % eq(lv,"c1","a"),
        "eIf":     lambda lv, g: "absurd (%s) (trueNoStep c2 (%s))"
                     % (g, transport("c2","c1","true",eq(lv,"c1","true"),"sr"))})
 
 lemma("invIfFalse",
-      "∀ (a : Term) (b : Term) (u : Term) (s : Step (ifthen false a b) u) -> Eq Term b u",
+      "∀ (a : Term) (b : Term) (u : Term) (s : Step (ifthen false a b) u) -> Eq {0} Term b u",
       ["a","b","u","s"], "s", C("ifthen", C("false"), V("a"), V("b")),
-      lambda y: "Eq Term b %s" % y,
+      lambda y: "Eq {0} Term b %s" % y,
       {"eIfFalse": lambda lv, g: "sym Term c2 b %s" % eq(lv,"c2","b"),
        "eIf":      lambda lv, g: "absurd (%s) (falseNoStep c2 (%s))"
                      % (g, transport("c2","c1","false",eq(lv,"c1","false"),"sr"))})
 
 lemma("invIf",
       "∀ (p : Term) (p' : Term) (a : Term) (b : Term) (s0 : Step p p') "
-      "(ih0 : ∀ (w : Term) (sw : Step p w) -> Eq Term p' w) (u : Term) "
-      "(s : Step (ifthen p a b) u) -> Eq Term (ifthen p' a b) u",
+      "(ih0 : ∀ (w : Term) (sw : Step p w) -> Eq {0} Term p' w) (u : Term) "
+      "(s : Step (ifthen p a b) u) -> Eq {0} Term (ifthen p' a b) u",
       ["p","p'","a","b","s0","ih0","u","s"], "s",
       C("ifthen", V("p"), V("a"), V("b")),
-      lambda y: "Eq Term (ifthen p' a b) %s" % y,
+      lambda y: "Eq {0} Term (ifthen p' a b) %s" % y,
       {"eIfTrue":  lambda lv, g: "absurd (%s) (trueNoStep p' (%s))"
                      % (g, transport("p'","p","true","sym Term true p %s" % eq(lv,"true","p"),"s0")),
        "eIfFalse": lambda lv, g: "absurd (%s) (falseNoStep p' (%s))"
@@ -303,34 +307,34 @@ lemma("invIf",
 
 lemma("invSucc",
       "∀ (p : Term) (p' : Term) (s0 : Step p p') "
-      "(ih0 : ∀ (w : Term) (sw : Step p w) -> Eq Term p' w) (u : Term) "
-      "(s : Step (succ p) u) -> Eq Term (succ p') u",
+      "(ih0 : ∀ (w : Term) (sw : Step p w) -> Eq {0} Term p' w) (u : Term) "
+      "(s : Step (succ p) u) -> Eq {0} Term (succ p') u",
       ["p","p'","s0","ih0","u","s"], "s", C("succ", V("p")),
-      lambda y: "Eq Term (succ p') %s" % y,
+      lambda y: "Eq {0} Term (succ p') %s" % y,
       {"eSucc": lambda lv, g: "cong Term Term (\\ (x : Term) -> succ x) p' c2 "
                               "(ih0 c2 (%s))" % transport("c2","c1","p",eq(lv,"c1","p"),"sr")})
 
 lemma("invPredZero",
-      "∀ (u : Term) (s : Step (pred zero) u) -> Eq Term zero u",
-      ["u","s"], "s", C("pred", C("zero")), lambda y: "Eq Term zero %s" % y,
-      {"ePredZero": lambda lv, g: "refl Term zero",
+      "∀ (u : Term) (s : Step (pred zero) u) -> Eq {0} Term zero u",
+      ["u","s"], "s", C("pred", C("zero")), lambda y: "Eq {0} Term zero %s" % y,
+      {"ePredZero": lambda lv, g: "refl {0} Term zero",
        "ePred":     lambda lv, g: "absurd (%s) (zeroNoStep c2 (%s))"
                       % (g, transport("c2","c1","zero",eq(lv,"c1","zero"),"sr"))})
 
 lemma("invPredSucc",
-      "∀ (v : Term) (nv : NV v) (u : Term) (s : Step (pred (succ v)) u) -> Eq Term v u",
+      "∀ (v : Term) (nv : NV v) (u : Term) (s : Step (pred (succ v)) u) -> Eq {0} Term v u",
       ["v","nv","u","s"], "s", C("pred", C("succ", V("v"))),
-      lambda y: "Eq Term v %s" % y,
+      lambda y: "Eq {0} Term v %s" % y,
       {"ePredSucc": lambda lv, g: "sym Term c1 v %s" % eq(lv,"c1","v"),
        "ePred":     lambda lv, g: "absurd (%s) (nvNoStep (succ v) (nvSucc v nv) c2 (%s))"
                       % (g, transport("c2","c1","(succ v)",eq(lv,"c1","succ v"),"sr"))})
 
 lemma("invPred",
       "∀ (p : Term) (p' : Term) (s0 : Step p p') "
-      "(ih0 : ∀ (w : Term) (sw : Step p w) -> Eq Term p' w) (u : Term) "
-      "(s : Step (pred p) u) -> Eq Term (pred p') u",
+      "(ih0 : ∀ (w : Term) (sw : Step p w) -> Eq {0} Term p' w) (u : Term) "
+      "(s : Step (pred p) u) -> Eq {0} Term (pred p') u",
       ["p","p'","s0","ih0","u","s"], "s", C("pred", V("p")),
-      lambda y: "Eq Term (pred p') %s" % y,
+      lambda y: "Eq {0} Term (pred p') %s" % y,
       {"ePredZero": lambda lv, g: "absurd (%s) (zeroNoStep p' (%s))"
                       % (g, transport("p'","p","zero","sym Term zero p %s" % eq(lv,"zero","p"),"s0")),
        "ePredSucc": lambda lv, g: "absurd (%s) (nvNoStep (succ c1) (nvSucc c1 nv1) p' (%s))"
@@ -340,26 +344,26 @@ lemma("invPred",
                                   "(ih0 c2 (%s))" % transport("c2","c1","p",eq(lv,"c1","p"),"sr")})
 
 lemma("invIsZeroZero",
-      "∀ (u : Term) (s : Step (iszero zero) u) -> Eq Term true u",
-      ["u","s"], "s", C("iszero", C("zero")), lambda y: "Eq Term true %s" % y,
-      {"eIsZeroZero": lambda lv, g: "refl Term true",
+      "∀ (u : Term) (s : Step (iszero zero) u) -> Eq {0} Term true u",
+      ["u","s"], "s", C("iszero", C("zero")), lambda y: "Eq {0} Term true %s" % y,
+      {"eIsZeroZero": lambda lv, g: "refl {0} Term true",
        "eIsZero":     lambda lv, g: "absurd (%s) (zeroNoStep c2 (%s))"
                         % (g, transport("c2","c1","zero",eq(lv,"c1","zero"),"sr"))})
 
 lemma("invIsZeroSucc",
-      "∀ (v : Term) (nv : NV v) (u : Term) (s : Step (iszero (succ v)) u) -> Eq Term false u",
+      "∀ (v : Term) (nv : NV v) (u : Term) (s : Step (iszero (succ v)) u) -> Eq {0} Term false u",
       ["v","nv","u","s"], "s", C("iszero", C("succ", V("v"))),
-      lambda y: "Eq Term false %s" % y,
-      {"eIsZeroSucc": lambda lv, g: "refl Term false",
+      lambda y: "Eq {0} Term false %s" % y,
+      {"eIsZeroSucc": lambda lv, g: "refl {0} Term false",
        "eIsZero":     lambda lv, g: "absurd (%s) (nvNoStep (succ v) (nvSucc v nv) c2 (%s))"
                         % (g, transport("c2","c1","(succ v)",eq(lv,"c1","succ v"),"sr"))})
 
 lemma("invIsZero",
       "∀ (p : Term) (p' : Term) (s0 : Step p p') "
-      "(ih0 : ∀ (w : Term) (sw : Step p w) -> Eq Term p' w) (u : Term) "
-      "(s : Step (iszero p) u) -> Eq Term (iszero p') u",
+      "(ih0 : ∀ (w : Term) (sw : Step p w) -> Eq {0} Term p' w) (u : Term) "
+      "(s : Step (iszero p) u) -> Eq {0} Term (iszero p') u",
       ["p","p'","s0","ih0","u","s"], "s", C("iszero", V("p")),
-      lambda y: "Eq Term (iszero p') %s" % y,
+      lambda y: "Eq {0} Term (iszero p') %s" % y,
       {"eIsZeroZero": lambda lv, g: "absurd (%s) (zeroNoStep p' (%s))"
                         % (g, transport("p'","p","zero","sym Term zero p %s" % eq(lv,"zero","p"),"s0")),
        "eIsZeroSucc": lambda lv, g: "absurd (%s) (nvNoStep (succ c1) (nvSucc c1 nv1) p' (%s))"
@@ -376,8 +380,8 @@ def branch(lem, ct):
     bs = list(ct['tel'])
     if ct['rec']:
         bs.append(("sr", "Step c1 c2"))
-        bs.append(("ih", "Eq Term c1 %s -> %s" % (arg(lem['L']), lem['goal']("c2"))))
-    bs.append(("q", "Eq Term %s %s" % (arg(ct['lhs']), arg(lem['L']))))
+        bs.append(("ih", "Eq {0} Term c1 %s -> %s" % (arg(lem['L']), lem['goal']("c2"))))
+    bs.append(("q", "Eq {0} Term %s %s" % (arg(ct['lhs']), arg(lem['L']))))
     res, leaves = decompose(ct['lhs'], lem['L'], 'q', goal, itertools.count(1))
     body = res if leaves is None else compose(res, lem['fin'][ct['n']](leaves, goal))
     return "\\ %s -> %s" % (" ".join("(%s : %s)" % b for b in bs), body)
@@ -397,7 +401,7 @@ def lemma_script(lem):
                  [branch(lem, ct) for ct in STEP])
 
 DET_TY = ("∀ (t : Term) (t1 : Term) (s1 : Step t t1) (t2 : Term) (s2 : Step t t2) "
-          "-> Eq Term t1 t2")
+          "-> Eq {0} Term t1 t2")
 DET = {
  "eIfTrue":     "invIfTrue c1 c2",
  "eIfFalse":    "invIfFalse c1 c2",
@@ -415,15 +419,15 @@ def det_branch(ct):
     bs = list(ct['tel'])
     if ct['rec']:
         bs.append(("sr", "Step c1 c2"))
-        bs.append(("ih", "∀ (u : Term) -> Step c1 u -> Eq Term c2 u"))
+        bs.append(("ih", "∀ (u : Term) -> Step c1 u -> Eq {0} Term c2 u"))
     bs.append(("u", "Term"))
     bs.append(("s", "Step %s u" % arg(ct['lhs'])))
     return "\\ %s -> %s u s" % (" ".join("(%s : %s)" % b for b in bs), DET[ct['n']])
 
 NV_SCRIPT = proof("nvNoStep",
-  "∀ (v : Term) (nv : NV v) (u : Term) (s : Step v u) -> Empty", ["v","nv"], "nv",
+  "∀ (v : Term) (nv : NV v) (u : Term) (s : Step v u) -> Empty {0}", ["v","nv"], "nv",
   ["\\ (u : Term) (s : Step zero u) -> zeroNoStep u s",
-   "\\ (c1 : Term) (n : NV c1) (ih : ∀ (u : Term) -> Step c1 u -> Empty) "
+   "\\ (c1 : Term) (n : NV c1) (ih : ∀ (u : Term) -> Step c1 u -> Empty {0}) "
    "(u : Term) (s : Step (succ c1) u) -> succNoStep c1 ih u s"])
 
 if __name__ == "__main__":

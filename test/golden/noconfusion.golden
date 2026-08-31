@@ -1,33 +1,33 @@
-thena spine> data Eq (A : Type₀) : A -> A -> Type₀ where { refl : ∀ (a : A) -> Eq A a a }
+thena spine> data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }
 declared Eq
-thena spine> data Unit : Type₀ where { unit : Unit }
+thena spine> data Unit : Type where { unit : Unit }
 declared Unit
-thena spine> data Empty : Type₀ where { }
+thena spine> data Empty : Type where { }
 declared Empty
-thena spine> data And (A : Type₀) (B : Type₀) : Type₀ where { both : ∀ (a : A) (b : B) -> And A B }
+thena spine> data And (A : Type) (B : Type) : Type where { both : ∀ (a : A) (b : B) -> And A B }
 declared And
 thena spine> data Term : Type₀ where { true : Term ; false : Term ; ifthen : Term -> Term -> Term -> Term ; zero : Term ; succ : Term -> Term }
 declared Term
 thena spine> :show noConfusionTerm
-noConfusionTerm : ∀ (x : Term) (y : Term) -> Eq Term x y -> NoConfusionTerm x y
-noConfusionTerm = λ (x : Term) (y : Term) (e : Eq Term x y) -> elim Eq (Term) (λ (u : Term) (v : Term) (w : Eq Term u v) -> NoConfusionTerm u v) ((λ (a : Term) -> elim Term () (λ (z : Term) -> NoConfusionTerm z z) (unit unit (λ (x1 : Term) (x2 : Term) (x3 : Term) (ih : (λ (z : Term) -> NoConfusionTerm z z) x1) (ih1 : (λ (z : Term) -> NoConfusionTerm z z) x2) (ih2 : (λ (z : Term) -> NoConfusionTerm z z) x3) -> both (Eq Term x1 x1) (And (Eq Term x2 x2) (Eq Term x3 x3)) (refl Term x1) (both (Eq Term x2 x2) (Eq Term x3 x3) (refl Term x2) (refl Term x3))) unit (λ (x1 : Term) (ih : (λ (z : Term) -> NoConfusionTerm z z) x1) -> refl Term x1)) () a)) (x y) e
+noConfusionTerm : ∀ (x : Term) (y : Term) -> Eq {0} Term x y -> NoConfusionTerm x y
+noConfusionTerm = λ (x : Term) (y : Term) (e : Eq {0} Term x y) -> elim Eq {0} (Term) (λ (u : Term) (v : Term) (w : Eq {0} Term u v) -> NoConfusionTerm u v) ((λ (a : Term) -> elim Term () (λ (z : Term) -> NoConfusionTerm z z) (unit {0} unit {0} (λ (x1 : Term) (x2 : Term) (x3 : Term) (ih : (λ (z : Term) -> NoConfusionTerm z z) x1) (ih1 : (λ (z : Term) -> NoConfusionTerm z z) x2) (ih2 : (λ (z : Term) -> NoConfusionTerm z z) x3) -> both {0 0} (Eq {0} Term x1 x1) (And {0 0} (Eq {0} Term x2 x2) (Eq {0} Term x3 x3)) (refl {0} Term x1) (both {0 0} (Eq {0} Term x2 x2) (Eq {0} Term x3 x3) (refl {0} Term x2) (refl {0} Term x3))) unit {0} (λ (x1 : Term) (ih : (λ (z : Term) -> NoConfusionTerm z z) x1) -> refl {0} Term x1)) () a)) (x y) e
 thena spine> :whnf NoConfusionTerm true true
-Unit
+Unit {0}
 thena spine> :whnf NoConfusionTerm true (succ zero)
-Empty
+Empty {0}
 thena spine> :whnf NoConfusionTerm (succ true) (succ zero)
-Eq Term true zero
+Eq {0} Term true zero
 thena spine> :whnf NoConfusionTerm (ifthen true zero zero) (ifthen false zero zero)
-And (Eq Term true false) (And (Eq Term zero zero) (Eq Term zero zero))
-thena spine> :goal ∀ (a : Term) (b : Term) -> Eq Term (succ a) (succ b) -> Eq Term a b
-▶ let ? goal : ∀ (a : Term) (b : Term) -> Eq Term (succ a) (succ b) -> Eq Term a b in
+And {0 0} (Eq {0} Term true false) (And {0 0} (Eq {0} Term zero zero) (Eq {0} Term zero zero))
+thena spine> :goal ∀ (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b
+▶ let ? goal : ∀ (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b in
   goal
 thena spine> along
-thena core> unify goal ≟ \ (a : Term) (b : Term) (e : Eq Term (succ a) (succ b)) -> noConfusionTerm (succ a) (succ b) e
+thena core> unify goal ≟ \ (a : Term) (b : Term) (e : Eq {0} Term (succ a) (succ b)) -> noConfusionTerm (succ a) (succ b) e
 solved: goal
 thena core> :extract
-let goal = λ (a : Term) (b : Term) (e : Eq Term (succ a) (succ b)) -> noConfusionTerm (succ a) (succ b) e : ∀ (a : Term) (b : Term) -> Eq Term (succ a) (succ b) -> Eq Term a b in goal
-thena core> certify ∀ (a : Term) (b : Term) -> Eq Term (succ a) (succ b) -> Eq Term a b
+let goal = λ (a : Term) (b : Term) (e : Eq {0} Term (succ a) (succ b)) -> noConfusionTerm (succ a) (succ b) e : ∀ (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b in goal
+thena core> certify ∀ (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b
 certified
 thena core> back
 thena spine> data Nat : Type₀ where { zero' : Nat ; succ' : Nat -> Nat }
