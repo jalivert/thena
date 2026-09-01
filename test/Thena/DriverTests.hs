@@ -66,7 +66,7 @@ unknown w = case snd (command withRules w) of
 -- because a mirror in the same module as the thing it mirrors checks nothing.
 everyColonCommand :: [String]
 everyColonCommand =
-  [ ":help", ":quit", ":core", ":dev", ":show", ":elim", ":where", ":matches"
+  [ ":help", ":quit", ":core", ":surface", ":dev", ":show", ":elim", ":where", ":matches"
   , ":choices", ":goal", ":whnf", ":infer", ":load", ":bases", ":rules"
   , ":revalidate", ":extract", ":theorem", ":suspend", ":resume", ":abandon"
   , ":proofs", ":undo", ":convert", ":step", ":run"

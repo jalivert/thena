@@ -56,6 +56,7 @@ import Thena.Core.Level (Level, Unmet)
 import Thena.Core.Context (Context)
 import Thena.Core.Term (Core, GlobalName, Ident, Var)
 import Thena.Syntax.Lexer (LexError)
+import Thena.Surface.Parser (SurfaceParseError (..))
 import Thena.Syntax.Parser (ParseError)
 
 -- | Why an operation failed. Structured, never a string (§12 invariant 2).
@@ -424,6 +425,14 @@ data ElimError
 data SyntaxError
   = LexFailed LexError
   | ParseFailed ParseError
+  | SurfaceParseFailed SurfaceParseError
+    -- ^ the **surface** grammar refused it (MS4 phase 39). Its own case beside
+    -- 'ParseFailed', because the two grammars are separate and an error from
+    -- one must not be reported as the other's.
+    --
+    -- There is deliberately no @SurfaceResolveFailed@: a surface term is never
+    -- resolved. Turning one into a 'Thena.Core.Term.Core' is elaboration, and
+    -- elaboration fails through the machine.
   | ResolveFailed ResolveError
   deriving (Eq, Show)
 

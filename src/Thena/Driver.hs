@@ -129,6 +129,8 @@ import Thena.Rules
   , ruleBase
   , validate
   )
+import Thena.Surface.Concrete (Surface)
+import qualified Thena.Surface.Parser as Surface
 import Thena.Syntax.Concrete (Raw (..), RawRule)
 import Thena.Syntax.Lexer (Located, Token, lexTokens)
 import Thena.Syntax.Parser
@@ -285,6 +287,8 @@ newSession = Session
 -- text: rendering is "Thena.Repl"'s (§2.5).
 data Response
   = Blank                     -- ^ an empty line; nothing to do
+  | RenderedSurface Surface
+    -- ^ @:surface ‹term›@ — the surface term as the parser read it (phase 39)
   | Rendered Core             -- ^ @:core@ (§2.6)
   | RenderedDev Partial       -- ^ @:dev@ (§2.7)
   | Shown Cursor              -- ^ @:show@, and the new state after @:goal@
@@ -557,11 +561,28 @@ parseStatement env n src = do
 tokensOf :: String -> Either SyntaxError [Located Token]
 tokensOf = mapLeft LexFailed . lexTokens
 
--- | Lex and parse, and stop there (phase 17b). What @:matches ‹hint›@ needs:
--- a hint is a tree, not a term — resolving it is the rule body's job, and a
--- hint that does not resolve is still a hint the engine can be asked about.
-parseSurface :: String -> Either SyntaxError Raw
-parseSurface src = tokensOf src >>= mapLeft ParseFailed . parseTerm
+-- | Lex and parse a **development-calculus** term, and stop there (phase 17b).
+-- What @:matches ‹t›@ needs: the argument is a tree, not a term — resolving it
+-- is the rule body's job, and one that does not resolve is still something the
+-- engine can be asked about.
+--
+-- **It was called @parseSurface@ until phase 39**, which is the nomenclature
+-- mistake @CLAUDE.md@ has had to correct three times: @Raw@ is a concrete
+-- syntax for the /development/ language and has nothing to do with the surface
+-- one. 'Thena.Surface.Parser.parseSurface' is the surface parser, and the two
+-- must not be confusable by name.
+parseRawTerm :: String -> Either SyntaxError Raw
+parseRawTerm src = tokensOf src >>= mapLeft ParseFailed . parseTerm
+
+-- | Lex and parse a **surface** term (phase 39). No context, because nothing is
+-- resolved: what a name denotes is elaboration's answer, and elaboration is
+-- phase 41.
+parseSurfaceTerm :: String -> Either SyntaxError Surface
+parseSurfaceTerm src = do
+  ts <- tokensOf src
+  case Surface.parseSurface ts of
+    Left e  -> Left (SurfaceParseFailed e)
+    Right t -> Right t
 
 -- --------------------------------------------------------------------------
 -- Commands
@@ -583,6 +604,16 @@ dispatch s name arg = case name of
   ":help"  -> noArgument (s, Helped commandSummary)
   ":quit"  -> noArgument (s, Quit)
   ":core"  -> withArgument (view s parseCore Rendered arg)
+  -- | @:surface ‹term›@ — parse a **surface** term and print it back (phase
+  -- 39). The analogue of @:core@, and for the same reason: it is the only way
+  -- to see what the parser made of what you wrote, and until phase 41 it is the
+  -- only thing that can be done with a surface term at all.
+  --
+  -- It takes no context and changes no state — nothing is resolved, because
+  -- resolving a surface term is elaborating it.
+  ":surface" -> withArgument $ case parseSurfaceTerm arg of
+    Left e  -> (s, Failed e)
+    Right t -> (s, RenderedSurface t)
   ":dev"   -> withArgument (view s parseDevelopment RenderedDev arg)
   -- The only command that means two things, and they do not overlap: with no
   -- argument it is the development, with one it is a global (§9, phase 6).
@@ -605,7 +636,7 @@ dispatch s name arg = case name of
   -- elaborate that.
   ":matches" -> case arg of
     "" -> (s, Matched (matching Nothing))
-    _  -> case parseSurface arg of
+    _  -> case parseRawTerm arg of
       Left e    -> (s, Failed e)
       Right raw -> (s, Matched (matching (Just raw)))
   -- The live choice points, nearest first (§7.7). A look, so a colon.
@@ -1081,6 +1112,7 @@ commandSummary =
   , (":show / :show ‹name›",     "the development / a global")
   , (":where",                   "focus, path, context, expected type")
   , (":core ‹t› / :dev ‹p›",     "parse a term / a development and print it")
+  , (":surface ‹t›",             "parse a surface term and print it")
   , (":infer / :infer ‹t›",      "the type of the focus / of a term")
   , (":whnf / :whnf ‹t›",        "reduce the focus / a term, without committing")
   , (":convert ‹t› ≟ ‹u›",      "are two terms convertible")

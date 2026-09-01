@@ -177,12 +177,31 @@ all, along with everything else.
 | `:show` | print the whole development, with `▶` marking the cursor |
 | `:show ‹name›` | print a global — a datatype, or a proved theorem |
 | `:core ‹term›` | parse, resolve and print a term |
+| `:surface ‹term›` | parse and print a **surface** term |
 | `:dev ‹development›` | the same, for a development |
 | `:infer ‹term›` | print the term's type |
 | `:whnf ‹term›` | reduce to weak head normal form |
 | `:convert ‹t› ≟ ‹u›` | are these two terms convertible? |
 | `:elim ‹datatype›` | print the datatype's elimination rule |
 | `:where` | print the focus, the path, the context and the expected type |
+
+### The surface language
+
+`:surface` is the same idea one language over. Thena is growing a **surface
+language** — the one you will write programs in — beside the development
+calculus, and `:surface` shows what its parser made of what you typed. Nothing
+is resolved and no names are looked up: turning a surface term into a core term
+is *elaboration*, which is not built yet.
+
+```
+thena spine> :surface \ x (y : A) -> f x {B} y
+λ x (y : A) -> f x {B} y
+```
+
+It has three things the development calculus does not: a lambda binder may have
+no type, an argument in braces is **implicit**, and `_` and `?goal` are
+placeholders — `_` for something inference should find, `?goal` for something
+you mean to prove yourself. None of them *do* anything yet.
 
 ```
 thena spine> :core succ (succ zero)
@@ -839,6 +858,7 @@ files of commands.
 | `:show` / `:show ‹name›` | the development / a global |
 | `:where` | focus, path, context, expected type |
 | `:core ‹t›` `:dev ‹p›` | parse and print |
+| `:surface ‹t›` | parse and print a surface term |
 | `:infer ‹t›` `:whnf ‹t›` `:convert ‹t› ≟ ‹u›` | type, reduct, convertibility |
 | `:elim ‹D›` / `:elim ‹D› ‹universe›` | the elimination rule |
 | `:matches` / `:matches ‹hint›` | which rules apply here |

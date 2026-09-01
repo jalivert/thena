@@ -44,6 +44,8 @@ library
         Thena.Ops
         Thena.Repl
         Thena.Rules
+        Thena.Surface.Concrete
+        Thena.Surface.Parser
         Thena.Syntax.Concrete
         Thena.Syntax.Lexer
         Thena.Syntax.Parser
@@ -93,6 +95,7 @@ test-suite thena-test
         Thena.EngineTests
         Thena.GlobalTests
         Thena.GoldenTests
+        Thena.SurfaceTests
         Thena.KernelTests
         Thena.NoConfusionTests
         Thena.DispatchTests

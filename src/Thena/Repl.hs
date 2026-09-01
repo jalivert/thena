@@ -15,6 +15,7 @@ module Thena.Repl
   , transcript
   , transcriptFrom
   , renderCore
+  , renderSurface
   , renderLevel
   , renderPartial
   , renderCursor
@@ -121,6 +122,13 @@ import Thena.Errors
   , TypeError (..)
   )
 import Thena.Global.Declare (DeclareError (..))
+import qualified Data.List.NonEmpty as NE
+import Thena.Surface.Concrete
+  ( Plicity (..)
+  , Surface (..)
+  , SurfaceArg (..)
+  , SurfaceBinder (..)
+  )
 import Thena.Syntax.Concrete (Raw (..), RawBinder (..))
 import Thena.Global.Env
   ( ConstructorDefinition (..)
@@ -139,6 +147,7 @@ import Thena.Ops
 import Thena.Rules (RuleBase (..), RuleError (..))
 import qualified Thena.Ops as Ops
 import Thena.Syntax.Lexer (LexError (..), Pos (..), Token (..))
+import Thena.Surface.Parser (SurfaceParseError (..))
 import Thena.Syntax.Parser (ParseError (..))
 
 import Data.Foldable (toList)
@@ -348,6 +357,7 @@ transcriptFrom s0 = unlines . replay s0 Nothing
 renderResponse :: Session -> Response -> [String]
 renderResponse s resp = case resp of
   Blank          -> []
+  RenderedSurface t -> [renderSurface t]
   Rendered t     -> [renderCore (counter s) (contextOf s) t]
   RenderedDev p  -> [renderPartial (counter s) (contextOf s) p]
   Shown c        -> [renderCursor (counter s) c]
@@ -427,6 +437,8 @@ renderSyntaxError e = case e of
     at p ++ "unexpected character" ++ maybe "" (\ch -> " " ++ show ch) c
   ParseFailed (UnexpectedToken p t) -> at p ++ "unexpected " ++ describe t
   ParseFailed UnexpectedEndOfInput  -> "unexpected end of input"
+  SurfaceParseFailed (SurfaceUnexpectedToken p t) -> at p ++ "unexpected " ++ describe t
+  SurfaceParseFailed SurfaceUnexpectedEndOfInput  -> "unexpected end of input"
   ResolveFailed (NotInScope n)      -> "not in scope: " ++ n
   ResolveFailed (NotACoreTerm f)    ->
     devForm f ++ " is part of a development, not a term"
@@ -1109,6 +1121,62 @@ orList xs = case reverse xs of
 -- of the resolver: no context is consulted and no name is looked up. Parenthesised
 -- wherever a subterm could otherwise re-associate, which is enough for a hint —
 -- the elaborate layout decisions are 'renderCore'\'s and belong to terms.
+-- | A surface term, as written (MS4 phase 39).
+--
+-- **Its own function, not a case of 'renderRaw'.** The two languages print
+-- differently — a surface lambda's binder may have no type, its arguments carry
+-- braces, and it has @_@ and @?foo@ where the development calculus has neither.
+-- Sharing one printer would mean a printer that has to ask which language it is
+-- in, which is the special case the first design principle refuses.
+--
+-- Parenthesised by precedence, and it round-trips: 'Thena.Surface.Parser.parseSurface'
+-- on this output gives the same tree back.
+renderSurface :: Surface -> String
+renderSurface = surf Loose
+  where
+    surf _ (SurfaceName x)      = x
+    surf _ (SurfaceUniverse l)  = "Type" ++ subscript l
+    surf _ SurfaceUniverseOpen  = "Type"
+    surf _ SurfacePlaceholder   = "_"
+    surf _ (SurfaceHole h)      = "?" ++ h
+    surf p (SurfaceApp f as)    =
+      paren (p >= Tight) (surf Spine f ++ concatMap arg (NE.toList as))
+    surf p (SurfaceLam bs b)    =
+      paren (p >= Spine) ("λ" ++ concatMap binder (NE.toList bs) ++ " -> " ++ surf Loose b)
+    surf p (SurfacePi bs b)     =
+      paren (p >= Spine) ("∀" ++ concatMap binder (NE.toList bs) ++ " -> " ++ surf Loose b)
+    surf p (SurfaceArrow a b)   =
+      paren (p >= Spine) (surf Tight a ++ " -> " ++ surf Loose b)
+    surf p (SurfaceLet x ty v b) =
+      paren (p >= Spine)
+        ("let " ++ x ++ maybe "" (\t -> " : " ++ surf Loose t) ty
+           ++ " = " ++ surf Loose v ++ " in " ++ surf Loose b)
+    surf p (SurfaceAnnot e ty)  =
+      paren (p >= Spine) (surf Spine e ++ " : " ++ surf Loose ty)
+    surf p (SurfaceElim d ps mot ms is tgt) =
+      paren (p >= Tight)
+        ("elim " ++ d ++ " " ++ list ps ++ " " ++ surf Tight mot ++ " " ++ list ms
+           ++ " " ++ list is ++ " " ++ surf Tight tgt)
+
+    arg (SurfaceArg Explicit t) = " " ++ surf Tight t
+    arg (SurfaceArg Implicit t) = " {" ++ surf Loose t ++ "}"
+
+    binder (SurfaceBinder Explicit x Nothing)   = " " ++ x
+    binder (SurfaceBinder Explicit x (Just ty)) = " (" ++ x ++ " : " ++ surf Loose ty ++ ")"
+    binder (SurfaceBinder Implicit x Nothing)   = " {" ++ x ++ "}"
+    binder (SurfaceBinder Implicit x (Just ty)) = " {" ++ x ++ " : " ++ surf Loose ty ++ "}"
+
+    list ts = "(" ++ unwords (map (surf Tight) ts) ++ ")"
+
+    paren True t  = "(" ++ t ++ ")"
+    paren False t = t
+
+-- | Where a surface term is being printed, and therefore what has to be
+-- parenthesised. @Loose@ is the top, @Spine@ is the head or an argument of an
+-- application, @Tight@ is an argument.
+data SurfacePrec = Loose | Spine | Tight
+  deriving (Eq, Ord)
+
 renderRaw :: Raw -> String
 renderRaw = raw False
   where
