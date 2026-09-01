@@ -16,12 +16,12 @@ module Thena.Engine
     Machine (..)
   , Exec (..)
   , Frame (..)
-  , ProofState (..)
-  , newProof
-  , proofContext
-  , proofDevelopment
+  , Development (..)
+  , newDevelopment
+  , focusContext
+  , flatten
   , setGoal
-  , setGoalNamed
+  , newDevelopmentNamed
 
     -- * Running it
   , Outcome (..)
@@ -105,7 +105,7 @@ import qualified Thena.Syntax.Resolve as Resolve
 -- | §7.2's four fields.
 --
 -- The field boundary is the backtracking boundary: 'proof' rewinds in full and
--- nothing else does (§7.4). That is why 'ProofState' is its own type rather
+-- nothing else does (§7.4). That is why 'Development' is its own type rather
 -- than a few fields here — a @Choice@ frame's snapshot has the same type as the
 -- whole of what backtracks, so there is no sub-record to snapshot correctly or
 -- incorrectly.
@@ -120,12 +120,15 @@ import qualified Thena.Syntax.Resolve as Resolve
 -- 'Thena.Core.Term.fresh' is the function that mints from it, and a field and a
 -- function of the same name are ambiguous to GHC and to the ear.
 data Machine = Machine
-  { exec    :: Exec
-  , proof   :: ProofState
-  , globals :: GlobalEnv  -- ^ NOT backtrackable (§7.4, §3.3.1)
-  , rules   :: [RuleBase] -- ^ NOT backtrackable (§7.4) — phase 15; a list
-                          -- of loaded bases, leftmost searched first (phase 22)
-  , names   :: Int        -- ^ NOT backtrackable (§7.4)
+  { exec        :: Exec
+  , development :: Development
+    -- ^ the development, focused. **Named for what it is** (phase 37): it was
+    -- @proof@, beside a @Session.sessionProof@ that meant a theorem, and one
+    -- word for two things is where @docs/SESSION-STATE.md@ §5.5 came from.
+  , globals     :: GlobalEnv  -- ^ NOT backtrackable (§7.4, §3.3.1)
+  , rules       :: [RuleBase] -- ^ NOT backtrackable (§7.4) — phase 15; a list
+                              -- of loaded bases, leftmost searched first (phase 22)
+  , names       :: Int        -- ^ NOT backtrackable (§7.4)
   }
   deriving (Eq, Show)
 
@@ -157,7 +160,7 @@ data Frame
       { resume    :: [Instr]
       , resumeEnv :: Env
       , alts      :: RuleIter    -- ^ the matches not yet tried, lazily (§7.6)
-      , saved     :: ProofState  -- ^ the state before the first alternative ran
+      , saved     :: Development  -- ^ the state before the first alternative ran
       , choiceId  :: Int         -- ^ what @retry ‹n›@ names it by
       , chosen    :: GlobalName  -- ^ the rule this frame is currently running
       , returned  :: Bool
@@ -194,7 +197,7 @@ data Frame
 -- **The focus backtracks with it**, and that is the point of it being in here
 -- rather than beside it: a retried alternative must start where the abandoned
 -- one started, not wherever the abandoned one wandered to.
-newtype ProofState = ProofState { cursor :: Cursor }
+newtype Development = Development { cursor :: Cursor }
   deriving (Eq, Show)
 
 -- | The development a session starts with: one hole, at the least interesting
@@ -205,10 +208,10 @@ newtype ProofState = ProofState { cursor :: Cursor }
 -- phase wants a goal to point at, and because @let ? goal : Type₀ in goal@ is
 -- an honest development where @Trailing Type₀@ would be scaffolding pretending
 -- to be a proof.
-newProof :: Int -> (ProofState, Int)
-newProof n =
+newDevelopment :: Int -> (Development, Int)
+newDevelopment n =
   let (v, n1) = fresh n
-   in (ProofState (enter (goalAt v (Universe (LZero)))), n1)
+   in (Development (enter (goalAt v (Universe (LZero)))), n1)
 
 goalAt :: Var -> Core -> Partial
 goalAt = goalAtNamed (Ident "goal")
@@ -219,15 +222,15 @@ goalAtNamed i v ty = Under (Component.Claim v i ty) (Trailing (Free v))
 -- | Γ at the focus (§4.5), which is what an identifier typed at the REPL must
 -- be in scope in (§4.0 E1).
 --
--- One line, and it is the whole of what phase 4's own @proofContext@ was
+-- One line, and it is the whole of what phase 4's own @focusContext@ was
 -- approximating: that one forgot the /entire/ chain, because there was no
 -- focus to take a prefix of.
-proofContext :: ProofState -> Context
-proofContext = Cursor.context . cursor
+focusContext :: Development -> Context
+focusContext = Cursor.context . cursor
 
 -- | The development, rebuilt. O(depth), with most structure shared (§4.2).
-proofDevelopment :: ProofState -> Partial
-proofDevelopment = rebuild . cursor
+flatten :: Development -> Partial
+flatten = rebuild . cursor
 
 -- | Replace the goal: retract the trailing hole, if the chain ends in one, and
 -- claim a new one at the given type.
@@ -250,8 +253,30 @@ proofDevelopment = rebuild . cursor
 -- That name is what @:show@ and every error message will call it, and it is
 -- also what the extracted term's outermost @let@ binds, so a proof of @id@
 -- reads @let id = … in id@ rather than @let goal = … in goal@.
-setGoalNamed :: GlobalName -> Core -> Machine -> Either MoveError Machine
-setGoalNamed (GlobalName x) = goalNamed (Ident x)
+-- | @:theorem ‹name› : T@ — a **fresh** development, whose one hole is the
+-- theorem's goal and carries the theorem's own name.
+--
+-- **Fresh, and not @:goal@ with a name** (phase 37, his ruling). Until then
+-- @:theorem@ went through the same @replaceFocus@ that @:goal@ does, which
+-- keeps everything above the focus — deliberate for @:goal@, where
+-- @assume A : Type₀@ then @:goal A -> A@ still means something, and inherited
+-- by @:theorem@, where nobody decided it. The effect was that a @claim@ left
+-- open in the scratch development became part of the theorem's, and @qed@ then
+-- failed with /"the hole h is still open"/ for a reason that had nothing to do
+-- with the theorem.
+--
+-- **It could never have been a loss.** An inherited prefix can only be
+-- @assume@s and @claim@s; an @assume@ puts a λ in the extracted term, and @qed@
+-- certifies that term against the attempt's claim — so an inherited prefix
+-- could not have produced something that certifies. It could only fail.
+--
+-- It cannot fail, which is why it returns no 'Either' where @setGoalNamed@ did:
+-- 'enter' takes any 'Partial', where 'replaceFocus' has a focus to be wrong
+-- about.
+newDevelopmentNamed :: GlobalName -> Core -> Int -> (Development, Int)
+newDevelopmentNamed (GlobalName x) ty n =
+  let (v, n1) = fresh n
+   in (Development (enter (goalAtNamed (Ident x) v ty)), n1)
 
 setGoal :: Core -> Machine -> Either MoveError Machine
 setGoal = goalNamed (Ident "goal")
@@ -259,9 +284,9 @@ setGoal = goalNamed (Ident "goal")
 goalNamed :: Ident -> Core -> Machine -> Either MoveError Machine
 goalNamed i ty m =
   let (v, n1) = fresh (names m)
-   in case replaceFocus (goalAtNamed i v ty) (cursor (proof m)) of
+   in case replaceFocus (goalAtNamed i v ty) (cursor (development m)) of
         Left e    -> Left e
-        Right cur -> Right m { proof = ProofState cur, names = n1 }
+        Right cur -> Right m { development = Development cur, names = n1 }
 
 -- --------------------------------------------------------------------------
 -- Running it
@@ -282,7 +307,7 @@ type Answer = String
 --
 -- 'Declaring' is the first that is neither a question nor a message: the
 -- machine hands out a declaration it cannot install itself, because the global
--- environment is outside 'ProofState' and no instruction writes it (§3.7,
+-- environment is outside 'Development' and no instruction writes it (§3.7,
 -- §7.4). Like 'Saying' it carries a machine already advanced past the
 -- instruction — there is nothing to bind, so nothing has to be told where to
 -- put an answer, which is what kept the 'Ask' instruction at the head of @pc@.
@@ -397,7 +422,7 @@ failure r0 m = unwind (stack (exec m))
         -- is otherwise invisible: the user typed @retry 77@, @solve@ failed,
         -- @regret@ ran, and only the development moved.
         Just (r, it') -> Saying (took "backtracking to" fr r) m
-          { proof = saved fr
+          { development = saved fr
           , exec  = Exec (ruleBody r) (seedFor fr r) (demote fr r it' : stk)
           }
 
@@ -439,12 +464,12 @@ perform instr rest m = case operation instr of
   -- driver's to run, exactly as a declaration's checks are.
   Certify stated -> case term stated of
     Left r   -> failure r m
-    Right ty -> case extract (proofDevelopment (proof m)) of
+    Right ty -> case extract (flatten (development m)) of
       Left why -> failure (NotYetPure (whereImpure why)) m
       Right t  -> Certifying t ty (advance m)
 
   -- The life of a hole (thesis tables 2.7, 2.8). All six act on the component
-  -- at the focus, and all six rewrite 'ProofState', which is why they are ops
+  -- at the focus, and all six rewrite 'Development', which is why they are ops
   -- and not driver commands (§12 invariant 3).
   -- The inner hole gets its **own** identifier, which the thesis writes @x'@ —
   -- @?x : S@ ⟹ @?x ≐ (?x' : S . x')@. It shared the outer one until phase 24b,
@@ -452,7 +477,7 @@ perform instr rest m = case operation instr of
   Attack -> onHole $ \c -> case c of
     Component.Claim x i s ->
       let (v, n1) = fresh (names m)
-          i'      = Cursor.freshIdent (Cursor.identsIn (cursor (proof m))) i
+          i'      = Cursor.freshIdent (Cursor.identsIn (cursor (development m))) i
        in Right ( Component.Guess x i (Under (Component.Claim v i' s) (Trailing (Free v))) s
                 , n1 )
     _ -> Left NotAHole
@@ -486,7 +511,7 @@ perform instr rest m = case operation instr of
   -- past them could hand a later @fresh@ a token an error message already used.
   Try t -> case term t of
     Left r  -> failure r m
-    Right t' -> case focus (cursor (proof m)) of
+    Right t' -> case focus (cursor (development m)) of
       OnComponent (Component.Claim x i s) ->
         -- **The level obligations are dropped**, here and at every other
         -- typing call in this module: "Thena.Core.Typing"'s header says why
@@ -495,10 +520,10 @@ perform instr rest m = case operation instr of
           (Left e,   _, n1) -> failure (GuessIllTyped e) m { names = n1 }
           (Right (), _, n1) ->
             case replaceComponent (Component.Guess x i (Trailing t') s)
-                                  (cursor (proof m)) of
+                                  (cursor (development m)) of
               Left e    -> failure (CannotMove e) m { names = n1 }
               Right cur ->
-                Continue (advance m { proof = ProofState cur, names = n1 })
+                Continue (advance m { development = Development cur, names = n1 })
       OnComponent _ -> failure NotAHole m
       _             -> failure (CannotMove NotOnTheSpine) m
 
@@ -518,11 +543,11 @@ perform instr rest m = case operation instr of
   -- @x ∉ Θ'@: the hole may not be referred to by anything below it. Checked
   -- against the rebuilt development for 'replaceCore''s reason — an occurrence
   -- may be anywhere, not only in the neighbouring link.
-  Abandon -> case focus (cursor (proof m)) of
+  Abandon -> case focus (cursor (development m)) of
     OnComponent c
-      | isHole c -> case dropFocus (cursor (proof m)) of
+      | isHole c -> case dropFocus (cursor (development m)) of
           Left e    -> failure (CannotMove e) m
-          Right cur -> Continue (advance m { proof = ProofState cur })
+          Right cur -> Continue (advance m { development = Development cur })
       | otherwise -> failure NotAHole m
     _ -> failure (CannotMove NotOnTheSpine) m
 
@@ -545,13 +570,13 @@ perform instr rest m = case operation instr of
         -- call would be noise (§1, §7.5).
         | hasNext it' ->
             Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
-                   (entering hint r (Choice rest (env (exec m)) it' (proof m)
+                   (entering hint r (Choice rest (env (exec m)) it' (development m)
                                        (names m) (ruleName r) False [] (seeded hint))
                                m { names = names m + 1 })
         | otherwise ->
             Continue (entering hint r (Thena.Engine.Call rest (env (exec m))) m)
     where
-      it hint = dispatch (rules m) (globals m) (cursor (proof m)) hint
+      it hint = dispatch (rules m) (globals m) (cursor (development m)) hint
 
       -- The one magic name in the instruction language, and §8 wrote it:
       -- @h₁ = app-fun hint@ reads @hint@ as an ordinary operand. Seeding the
@@ -610,13 +635,13 @@ perform instr rest m = case operation instr of
       Just (r, it')
         | hasNext it' ->
             Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
-                   (entering vs r (Choice rest (env (exec m)) (it' ) (proof m)
+                   (entering vs r (Choice rest (env (exec m)) (it' ) (development m)
                                      (names m) (ruleName r) False vs [])
                             m { names = names m + 1 })
         | otherwise ->
             Continue (entering vs r (Thena.Engine.Call rest (env (exec m))) m)
     where
-      it vs = clauses (rules m) (globals m) (cursor (proof m)) nm (length vs)
+      it vs = clauses (rules m) (globals m) (cursor (development m)) nm (length vs)
 
       -- The callee's parameters, bound to the arguments. 'clauses' has already
       -- filtered on arity, so the two lists agree by construction — and the
@@ -634,7 +659,7 @@ perform instr rest m = case operation instr of
   -- elimination it builds. The same shape as @Component.Claim@ beside 'Claim'.
   Op.Eliminate tgt -> case term tgt of
     Left r  -> failure r m
-    Right t -> case focus (cursor (proof m)) of
+    Right t -> case focus (cursor (development m)) of
       OnComponent (Component.Claim x i s) ->
         case eliminate (globals m) contextAt (names m) s t of
           (Left e,   n1) -> failure (CannotEliminate e) m { names = n1 }
@@ -644,7 +669,7 @@ perform instr rest m = case operation instr of
             -- them. Both halves are one op because a half-applied elimination
             -- — holes claimed, nothing attached — is not a state any rule
             -- should be able to observe.
-            let holes = foldl claimAbove (cursor (proof m)) (elimMethods el)
+            let holes = foldl claimAbove (cursor (development m)) (elimMethods el)
                 -- Freshened one at a time, against the development as it grows,
                 -- so two methods never share a name either (phase 24b).
                 claimAbove c (v, hi, hty) =
@@ -655,7 +680,7 @@ perform instr rest m = case operation instr of
                   Left e    -> failure (CannotMove e) m
                   Right cur ->
                     Saying (subgoalMessage (elimMethods el))
-                           (advance m { proof = ProofState cur, names = n1 })
+                           (advance m { development = Development cur, names = n1 })
       OnComponent _ -> failure NotAHole m
       _             -> failure (CannotMove NotOnTheSpine) m
 
@@ -688,12 +713,12 @@ perform instr rest m = case operation instr of
   FreshName hint -> case operandIdent (env (exec m)) hint of
     Left r  -> failure r m
     Right i ->
-      let inUse = Cursor.identsIn (cursor (proof m))
+      let inUse = Cursor.identsIn (cursor (development m))
                     ++ [ Ident g | GlobalName g <- declaredNames (globals m) ]
           Ident n = Cursor.freshIdent inUse i
        in produce (VText n) m
 
-  Goal -> case Cursor.expectedType (cursor (proof m)) of
+  Goal -> case Cursor.expectedType (cursor (development m)) of
     Just t  -> produce (VTerm (Trailing t)) m
     Nothing -> failure NoGoalHere m
 
@@ -710,12 +735,12 @@ perform instr rest m = case operation instr of
     Right (i, val) -> case infer (globals m) contextAt (names m) val of
       (Left e,   _, n1) -> failure (NotTypeable e) m { names = n1 }
       (Right ty, _, n1)
-        | i `elem` Cursor.identsIn (cursor (proof m)) -> failure (taken i) m { names = n1 }
+        | i `elem` Cursor.identsIn (cursor (development m)) -> failure (taken i) m { names = n1 }
         | otherwise ->
             let (x, n2) = fresh n1
-                cur     = insertAbove (Component.Define x i val ty) (cursor (proof m))
+                cur     = insertAbove (Component.Define x i val ty) (cursor (development m))
              in produce (VTerm (Trailing (Free x)))
-                        m { proof = ProofState cur, names = n2 }
+                        m { development = Development cur, names = n2 }
 
   Along      -> navigate (keeping along)
   Into       -> navigate (keeping into)
@@ -740,22 +765,22 @@ perform instr rest m = case operation instr of
       VTerm (Trailing (Free x)) -> move (Cursor.goto x)
       _                    -> failure (CannotMove NoSuchHole) m
     where
-      move f = case f (cursor (proof m)) of
+      move f = case f (cursor (development m)) of
         Left e    -> failure (CannotMove e) m
-        Right cur -> Continue (advance m { proof = ProofState cur })
+        Right cur -> Continue (advance m { development = Development cur })
   Down part  -> navigate (down part)
 
   -- Commit a whnf at the core focus (§4.7). Not 'navigate': a move never has
   -- anything to say, and this one sometimes does — an orphaned hole is
   -- reported, not prevented, so a non-empty report goes out through 'Saying'
   -- exactly as 'Say' already does, rather than being silently swallowed.
-  Reduce -> case focus (cursor (proof m)) of
+  Reduce -> case focus (cursor (development m)) of
     OnTerm _ _ t ->
-      let t' = whnf (globals m) (Cursor.context (cursor (proof m))) t
-       in case replaceCore t' (cursor (proof m)) of
+      let t' = whnf (globals m) (Cursor.context (cursor (development m))) t
+       in case replaceCore t' (cursor (development m)) of
             Left e -> failure (CannotMove e) m
             Right (cur', orphaned) ->
-              let m' = advance m { proof = ProofState cur' }
+              let m' = advance m { development = Development cur' }
                in case orphaned of
                     [] -> Continue m'
                     is -> Saying (orphanMessage is) m'
@@ -768,14 +793,14 @@ perform instr rest m = case operation instr of
   Unify l r -> case (,) <$> term l <*> term r of
     Left e       -> failure e m
     Right (a, b) ->
-      let cur = cursor (proof m)
+      let cur = cursor (development m)
        in case infer (globals m) (Cursor.context cur) (names m) a of
             (Left e, _, n1)  -> failure (NotTypeable e) m { names = n1 }
             (Right ty, _, n1) -> case unify (globals m) cur n1 a b ty of
               (Failed reason, _, n2) -> failure reason m { names = n2 }
               (result, cur', n2) ->
                 Saying (unifyMessage cur' result)
-                       (advance m { proof = ProofState cur', names = n2 })
+                       (advance m { development = Development cur', names = n2 })
   where
     operation i = case i of
       Bind _ o -> o
@@ -800,15 +825,15 @@ perform instr rest m = case operation instr of
     -- bind: a @Bind@ on one is what phase 15's load-time pass rejects (§7.2).
     -- The counter comes back because descending under a core binder mints a
     -- variable, and only 'Thena.Core.Term.fresh' can (§4.0 D3).
-    navigate f = case f (names m) (cursor (proof m)) of
+    navigate f = case f (names m) (cursor (development m)) of
       Left e          -> failure (CannotMove e) m
       Right (cur, n1) ->
-        Continue (advance m { proof = ProofState cur, names = n1 })
+        Continue (advance m { development = Development cur, names = n1 })
 
     -- Every move but 'down' leaves the counter alone.
     keeping g n cur = fmap (\cur' -> (cur', n)) (g cur)
 
-    contextAt = proofContext (proof m)
+    contextAt = focusContext (development m)
 
     -- Claim a hole for every Π domain, extending the spine as it goes, and
     -- stop at the first type that is not a Π — that is what makes @apply@
@@ -819,13 +844,13 @@ perform instr rest m = case operation instr of
     -- @Just : ∀ (A : Type₀) (a : A) -> Maybe A@ claims @?A@ and then @?a : A@.
     -- That is also why 'whnf' cannot be given @contextAt@ — that one is fixed
     -- at the focus this instruction started from.
-    saturate hd ty m' = case whnf (globals m') (proofContext (proof m')) ty of
+    saturate hd ty m' = case whnf (globals m') (focusContext (development m')) ty of
       Pi i dom sc ->
         let (v, n1) = fresh (names m')
-            i'      = Cursor.freshIdent (Cursor.identsIn (cursor (proof m'))) i
-            cur     = insertAbove (Component.Claim v i' dom) (cursor (proof m'))
+            i'      = Cursor.freshIdent (Cursor.identsIn (cursor (development m'))) i
+            cur     = insertAbove (Component.Claim v i' dom) (cursor (development m'))
          in saturate (App hd (Free v)) (instantiate (Free v) sc)
-                     m' { proof = ProofState cur, names = n1 }
+                     m' { development = Development cur, names = n1 }
       _ -> produce (VTerm (Trailing hd)) m'
 
     taken (Ident n) = NameTaken n
@@ -837,12 +862,12 @@ perform instr rest m = case operation instr of
 
     -- Rewrite the component at the focus, or say why not. Every hole op has
     -- this shape, which is why it is written once.
-    onHole f = case focus (cursor (proof m)) of
+    onHole f = case focus (cursor (development m)) of
       OnComponent c -> case f c of
         Left r         -> failure r m
-        Right (c', n1) -> case replaceComponent c' (cursor (proof m)) of
+        Right (c', n1) -> case replaceComponent c' (cursor (development m)) of
           Left e    -> failure (CannotMove e) m
-          Right cur -> Continue (advance m { proof = ProofState cur, names = n1 })
+          Right cur -> Continue (advance m { development = Development cur, names = n1 })
       _ -> failure (CannotMove NotOnTheSpine) m
 
     component build name ty =
@@ -852,7 +877,7 @@ perform instr rest m = case operation instr of
           -- **Refused, not renamed** (phase 24c). Identifiers stay unique — so
           -- @goto ‹name›@ keeps working — but deciding /what/ the name is
           -- belongs to the rule, through @fresh-name@.
-          | i `elem` Cursor.identsIn (cursor (proof m)) -> failure (taken i) m
+          | i `elem` Cursor.identsIn (cursor (development m)) -> failure (taken i) m
           -- Table 2.7's side condition on both @assume@ and @claim@:
           -- @Θ ⊢ S : Type@ (phase 25f). 'sortOf' is the same check
           -- @revalidate@ runs on these components through @Validate@'s
@@ -867,9 +892,9 @@ perform instr rest m = case operation instr of
               (Left e,  _, n1) -> failure (BinderNotAType e) m { names = n1 }
               (Right _, _, n1) ->
                 let (v, n2) = fresh n1
-                    cur     = insertAbove (build v i t) (cursor (proof m))
+                    cur     = insertAbove (build v i t) (cursor (development m))
                  in produce (VTerm (Trailing (Free v)))
-                            m { proof = ProofState cur, names = n2 }
+                            m { development = Development cur, names = n2 }
 
 -- | What @eliminate@ says: the subgoals it opened, by the names it gave them.
 --
@@ -1103,7 +1128,7 @@ retryFrom target m = go (0 :: Int) (stack (exec m))
       Choice {} | maybe True (== choiceId fr) target -> case next (alts fr) of
         Nothing       -> Left missing      -- cannot arise; see 'demote'
         Just (r, it') -> Right
-          ( m { proof = saved fr
+          ( m { development = saved fr
               , exec  = Exec (ruleBody r) (seedFor fr r) (demote fr r it' : stk)
               }
           , note (choiceId fr) (ruleName r) popped

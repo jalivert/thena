@@ -28,7 +28,7 @@ import Thena.Engine
   ( Exec (..)
   , Machine (..)
   , Outcome (..)
-  , ProofState (..)
+  , Development (..)
   , load
   , resumeAt
   , step
@@ -414,7 +414,7 @@ text = Lit . VText
 -- above every 'Var' the fixtures mint, so nothing it mints collides.
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env cur is =
-  load is (Machine (Exec [] [] []) (ProofState cur) env expectedBase 1000)
+  load is (Machine (Exec [] [] []) (Development cur) env expectedBase 1000)
 
 machineAt :: Cursor -> [Instr] -> Machine
 machineAt = machineIn emptyGlobals

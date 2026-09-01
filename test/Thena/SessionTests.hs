@@ -13,19 +13,22 @@ module Thena.SessionTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (GlobalName (..), Ident (..))
+import Thena.Development.Component (Component (..))
+import Thena.Development.Partial (Partial (..))
 import Thena.Declared (natDecl)
 import Thena.Standard (withRules)
 import Thena.Driver
   ( CommandError (..)
   , Loaded (..)
-  , Proof (..)
+  , Attempt (..)
+  , currentAttempt
   , Response (..)
   , Session (..)
   , Stop (..)
   , loadSource
   )
-import Thena.Engine (Machine (..), ProofState)
+import Thena.Engine (Machine (..), Development, flatten)
 import Thena.Errors (FailReason (..), MoveError (..))
 import Thena.Global.Env (Definition (..), GlobalEnv, lookupDefinition)
 
@@ -178,6 +181,19 @@ sessionTests =
   , testCase "abandoning drops it, suspending keeps it" $ do
       countsAre [":theorem t : Type₀", ":abandon"] Nothing 0
       countsAre [":theorem t : Type₀", ":suspend"] Nothing 1
+
+    -- **A theorem starts a FRESH development** (phase 37, his ruling). Until
+    -- then @:theorem@ went through the same @replaceFocus@ as @:goal@, which
+    -- keeps everything above the focus, so a hole left open in the scratch
+    -- development became part of the theorem's and @qed@ failed with a message
+    -- about a hole the theorem never mentioned. Two tests, because the first
+    -- one alone would pass for the wrong reason if @qed@ ever stopped checking
+    -- purity.
+  , testCase "a theorem starts a fresh development, not the one it found" $
+      namesIn (developmentAfter (run ["claim spare : Type₀", ":theorem t : Type₀"]))
+        @?= ["t"]
+  , ok "so a hole left in the scratch cannot block qed"
+      ["claim spare : Type₀", ":theorem t : Type₁", "try Type₀", "solve", "qed"]
   ]
 
 -- --------------------------------------------------------------------------
@@ -188,7 +204,7 @@ undoTests :: [TestTree]
 undoTests =
   [ -- **@:undo@ does not need a proof** (phase 34, his ruling). It used to
     -- answer @NotProving@ here, which was the wrong end of the stick: a
-    -- 'Snapshot' is @(Exec, ProofState)@ and 'Machine' always has both, so the
+    -- 'Snapshot' is @(Exec, Development)@ and 'Machine' always has both, so the
     -- top level has a development to take a line back in.
     rejects "with nothing typed yet there is nothing to undo" [":undo"] NothingToUndo
   , testCase "a line at the top level is taken back like any other" $
@@ -235,8 +251,8 @@ run = loadSource withRules . unlines
 globalsAfter :: Loaded -> GlobalEnv
 globalsAfter = globals . sessionMachine . loadedSession
 
-developmentAfter :: Loaded -> ProofState
-developmentAfter = proof . sessionMachine . loadedSession
+developmentAfter :: Loaded -> Development
+developmentAfter = development . sessionMachine . loadedSession
 
 ok :: String -> [String] -> TestTree
 ok name ls = testCase name $ loadedError (run ls) @?= Nothing
@@ -257,9 +273,23 @@ rejects name ls e = testCase name $
 sameDevelopment :: [String] -> [String] -> Assertion
 sameDevelopment a b = developmentAfter (run a) @?= developmentAfter (run b)
 
+-- | Every component the development binds, in order, by the name it shows.
+namesIn :: Development -> [String]
+namesIn = go . flatten
+  where
+    go p = case p of
+      Trailing _     -> []
+      Pending _ rest -> go rest
+      Under c rest   -> nameOfComponent c : go rest
+    nameOfComponent c = case c of
+      Assume _ (Ident i) _   -> i
+      Define _ (Ident i) _ _ -> i
+      Claim  _ (Ident i) _   -> i
+      Guess  _ (Ident i) _ _ -> i
+
 countsAre :: [String] -> Maybe String -> Int -> Assertion
 countsAre ls current suspended = do
-  fmap (nameOf . proofName) (sessionProof s) @?= current
+  fmap (nameOf . attemptName) (currentAttempt s) @?= current
   length (sessionSuspended s) @?= suspended
   where
     s = loadedSession (run ls)

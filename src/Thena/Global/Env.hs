@@ -8,7 +8,7 @@
 -- the generation live in "Thena.Global.Declare", above @Typing@.
 --
 -- The global environment does not backtrack (§7.4): it is a field of
--- 'Thena.Engine.Machine' beside 'Thena.Engine.ProofState' rather than inside
+-- 'Thena.Engine.Machine' beside 'Thena.Engine.Development' rather than inside
 -- it, so a datatype declared in a branch that later fails survives.
 module Thena.Global.Env
   ( -- * Kinds of global binding (§3.3.1)

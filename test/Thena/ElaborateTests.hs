@@ -29,7 +29,7 @@ import Thena.Engine
   ( Exec (..)
   , Machine (..)
   , Outcome (..)
-  , ProofState (..)
+  , Development (..)
   , load
   , step
   )
@@ -98,7 +98,7 @@ appHint  = Just (RawApp (RawName "a") (RawName "a"))
 
 machine :: [RuleBase] -> [Instr] -> Machine
 machine base is =
-  load is (Machine (Exec [] [] []) (ProofState hole) emptyGlobals base 1000)
+  load is (Machine (Exec [] [] []) (Development hole) emptyGlobals base 1000)
 
 runOut :: Machine -> ([String], Either FailReason Machine)
 runOut m = case step m of
@@ -205,7 +205,7 @@ opTests =
         case snd (runOut (machine expectedBase
                     [Do (Ops.Prove (Just (Lit (VSurface (RawName "a")))))])) of
           Left r  -> assertFailure ("did not elaborate: " ++ show r)
-          Right m -> case focus (cursor (proof m)) of
+          Right m -> case focus (cursor (development m)) of
             Cursor.OnComponent (Define _ _ v _) -> v @?= Free hypVar
             other -> assertFailure ("expected a definition, got " ++ show other)
     ]
@@ -219,7 +219,7 @@ opTests =
       Right _ -> error "expected the program to fail"
 
 isGuess :: Machine -> Bool
-isGuess m = case focus (cursor (proof m)) of
+isGuess m = case focus (cursor (development m)) of
   Cursor.OnComponent (Guess {}) -> True
   _                             -> False
 

@@ -84,7 +84,7 @@ data Instr
 -- and phase 4 has neither @attack@ nor a guess to work under.
 --
 -- **The moves are ops, not driver commands.** The cursor /is/
--- 'Thena.Engine.ProofState' (§7.2), so moving the focus changes exactly what
+-- 'Thena.Engine.Development' (§7.2), so moving the focus changes exactly what
 -- backtracks — §12 invariant 3's hazard, and the reason §2.4 spells them as
 -- bare words. 'Down' takes its 'Part' as a field rather than an 'Operand' for
 -- the same reason 'Ask' takes an 'AnswerKind' that way: it is chosen when the
@@ -271,7 +271,7 @@ data Op
 
 -- @Unify@ is §7.2's own sketch, arriving at the phase that writes the unifier.
 -- It is an op rather than a driver command for §12 invariant 3's reason: it
--- rewrites 'Thena.Engine.ProofState', so it must backtrack with everything else
+-- rewrites 'Thena.Engine.Development', so it must backtrack with everything else
 -- that does. That is also why §9's @:unify@ is spelled without the colon —
 -- §2.4's rule is that a bare word acts and a colon looks, and this acts.
 --
@@ -312,7 +312,7 @@ data AnswerKind = AText | AName | ATerm | ARule
 -- and the op is the same either way.
 --
 -- It is an op and not a driver command for §12 invariant 3's reason, even
--- though it does not itself rewrite 'Thena.Engine.ProofState': @qed@ at phase
+-- though it does not itself rewrite 'Thena.Engine.Development': @qed@ at phase
 -- 13 certifies /and then/ admits and closes the proof, and admitting a theorem
 -- must be a step you can watch in stepping mode rather than something the
 -- driver does invisibly between commands (§7.5, §1).

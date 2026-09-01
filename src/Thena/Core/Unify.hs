@@ -149,7 +149,7 @@ data St = St
 
 -- | A failure carries the counter, because a variable minted on the way to it
 -- may already have reached the user inside a reason (§7.4).
-type Attempt a = Either (FailReason, Int) a
+type Unifying a = Either (FailReason, Int) a
 
 -- --------------------------------------------------------------------------
 -- What the chain says about a variable
@@ -239,7 +239,7 @@ components p = case p of
 -- Solving one equation
 -- --------------------------------------------------------------------------
 
-work :: GlobalEnv -> St -> Constraint -> Attempt St
+work :: GlobalEnv -> St -> Constraint -> Unifying St
 work env st (Equate xi s t ty)
   | s == t    = Right st
   | otherwise =
@@ -253,7 +253,7 @@ work env st (Equate xi s t ty)
 -- | Both sides are in whnf. Which rule applies is decided by the two heads
 -- (§6.1): a blocked head defers, a flex head against a rigid one is the pattern
 -- case, flex against flex defers, and rigid against rigid decomposes.
-match :: GlobalEnv -> St -> Context -> Constraint -> Attempt St
+match :: GlobalEnv -> St -> Context -> Constraint -> Unifying St
 match env st ctx k@(Equate _ s t _) =
   case (headOf st ctx s, headOf st ctx t) of
     (HBlocked, _) -> park env st k
@@ -308,7 +308,7 @@ spineArgs = go []
 -- may reduce to one once some other hole is solved.
 flexRigid
   :: GlobalEnv -> St -> Context -> Constraint -> Var -> Int -> [Core] -> Core
-  -> Attempt St
+  -> Unifying St
 flexRigid env st ctx k x i args rhs = case patternArgs (kinds (stCur st)) ctx args of
   Nothing -> park env st k
   Just es
@@ -452,7 +452,7 @@ solve x t st = st
 --     arrives there rather than at the line.
 --   * **clash** — no instantiation makes @Type₀@ and @Type₁@ the same, so this
 --     is an ordinary mismatch and fails here.
-rigidRigid :: GlobalEnv -> St -> Context -> Constraint -> Attempt St
+rigidRigid :: GlobalEnv -> St -> Context -> Constraint -> Unifying St
 rigidRigid env st ctx k@(Equate xi s t ty) = case levelPairs of
   Just (eqs, clash) -> case unifyLevels eqs of
     LevelsClash _ _  -> Left (clash, stNames st)
@@ -549,7 +549,7 @@ rigidRigid env st ctx k@(Equate xi s t ty) = case levelPairs of
 --
 -- The stored type is inferred from the left-hand side where that works, because
 -- decomposition is untyped and a sub-problem's type is not the parent's.
-park :: GlobalEnv -> St -> Constraint -> Attempt St
+park :: GlobalEnv -> St -> Constraint -> Unifying St
 park env st k@(Equate xi s _ ty)
   | k' `elem` constraintsOf (rebuild (stCur st)) = Right st
   | otherwise = Right st { stCur = postConstraint position k' (stCur st), stNames = n1 }
@@ -599,7 +599,7 @@ mentions (Equate xi s t ty) =
 -- The focused constraint is not retried. 'overConstraints' cannot delete it —
 -- the focus would have nowhere to stand — and G1 is explicit that the pass
 -- leaves the focus alone.
-wake :: GlobalEnv -> St -> Attempt St
+wake :: GlobalEnv -> St -> Unifying St
 wake env = loop
   where
     loop st

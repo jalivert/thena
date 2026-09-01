@@ -131,9 +131,9 @@ newtype RuleIter = RuleIter [Rule]
 
 -- | Every rule whose head passes at the focus, in definition order (§7.6).
 --
--- It takes a 'Cursor' rather than a 'Thena.Engine.ProofState' because
--- @ProofState@ is "Thena.Engine"'s and this module sits below it — and it can,
--- since @ProofState@ is a newtype over exactly this cursor. It takes a
+-- It takes a 'Cursor' rather than a 'Thena.Engine.Development' because
+-- @Development@ is "Thena.Engine"'s and this module sits below it — and it can,
+-- since @Development@ is a newtype over exactly this cursor. It takes a
 -- 'GlobalEnv' because §8's head matching runs 'whnf' and 'whnf' unfolds
 -- globals. It needs no name counter: the type a head reads is the one the
 -- development /writes down/ ('expectedType'), never one @infer@ derives.

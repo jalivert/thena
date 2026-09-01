@@ -21,7 +21,7 @@ import Thena.Driver
   , newSession
   )
 import Thena.Development.Cursor (rebuild)
-import Thena.Engine (Machine (..), Question (..), globals, proof, proofDevelopment)
+import Thena.Engine (Machine (..), Question (..), globals, development, flatten)
 import Thena.Errors (FailReason (..))
 import Thena.Global.Declare (DeclareError (..))
 import Thena.Global.Env (isDeclared)
@@ -35,7 +35,7 @@ say = foldl next (newSession, Blank)
     next (s, _) l = command s l
 
 devOf :: Session -> Partial
-devOf = proofDevelopment . proof . sessionMachine
+devOf = flatten . development . sessionMachine
 
 -- | What is typed to declare the running example. The @data@ word is the
 -- command; everything after it is the grammar's (§2.4).
@@ -218,7 +218,7 @@ tests =
             declaredIn (fst (say [natCommand])) "Nat" @?= True
         , testCase "so do the names it generated" $
             map (declaredIn (fst (say [natCommand]))) ["zero", "succ"] @?= [True, True]
-        , testCase "the development is untouched: globals are not ProofState (§7.4)" $
+        , testCase "the development is untouched: globals are not Development (§7.4)" $
             devOf (fst (say [natCommand])) @?= devOf newSession
         , testCase "data needs an argument" $
             snd (command withRules "data") @?= Rejected (MissingArgument "data")

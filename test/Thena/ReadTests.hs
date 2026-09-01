@@ -22,10 +22,10 @@ import Thena.Engine
   ( Exec (..)
   , Machine (..)
   , Outcome (..)
-  , ProofState (..)
+  , Development (..)
   , cursor
   , load
-  , proof
+  , development
   , step
   )
 import Thena.Errors (FailReason (..), MoveError (..))
@@ -54,7 +54,7 @@ machine = machineIn emptyGlobals
 
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env' cur is =
-  load is (Machine (Exec [] [] []) (ProofState cur) env' [] 1000)
+  load is (Machine (Exec [] [] []) (Development cur) env' [] 1000)
 
 -- | Run to a stop, and hand back the environment or the reason.
 run :: Cursor -> [Instr] -> Either FailReason Machine
@@ -125,7 +125,7 @@ defineTests =
     [ testCase "adds a definition above the focus, at the inferred type" $
         case run hole [Do (Define (Lit (VText "d")) (Lit (VTerm (Trailing type0))))] of
           Left r  -> assertFailure ("did not run: " ++ show r)
-          Right m -> case context (cursor (proof m)) of
+          Right m -> case context (cursor (development m)) of
             [Definition _ (Ident "d") v t] -> do
               v @?= type0
               t @?= Universe (levelOfNat 1)
@@ -143,7 +143,7 @@ defineTests =
     , testCase "the focus stays on the hole" $
         case run hole [Do (Define (Lit (VText "d")) (Lit (VTerm (Trailing type0))))] of
           Left r  -> assertFailure ("did not run: " ++ show r)
-          Right m -> case focus (cursor (proof m)) of
+          Right m -> case focus (cursor (development m)) of
             OnComponent (Component.Claim _ (Ident "goal") _) -> pure ()
             other -> assertFailure ("focus moved: " ++ show other)
 
@@ -172,7 +172,7 @@ gotoTests =
                       , Do (Goto (Ref "h"))
                       ] of
           Left r  -> assertFailure ("did not run: " ++ show r)
-          Right m -> case focus (cursor (proof m)) of
+          Right m -> case focus (cursor (development m)) of
             OnComponent (Component.Claim _ (Ident "h") _) -> pure ()
             other -> assertFailure ("focused " ++ show other)
 
@@ -184,7 +184,7 @@ gotoTests =
             before = [ Bind "h" (Claim (Lit (VText "h")) (Lit (VTerm (Trailing type0)))) ]
          in case (run hole before, run hole is) of
               (Right a, Right b) ->
-                rebuild (cursor (proof b)) @?= rebuild (cursor (proof a))
+                rebuild (cursor (development b)) @?= rebuild (cursor (development a))
               _ -> assertFailure "did not run"
 
       -- Depth first, and into guess bodies: after prim-attack the hole that
@@ -202,7 +202,7 @@ gotoTests =
                       , Do (Goto (Ref "h"))
                       ] of
           Left r  -> assertFailure ("did not run: " ++ show r)
-          Right m -> case focus (cursor (proof m)) of
+          Right m -> case focus (cursor (development m)) of
             OnComponent (Component.Claim _ (Ident "h") _) -> pure ()
             other -> assertFailure ("focused " ++ show other)
 
@@ -226,7 +226,7 @@ gotoTests =
                       , Do (Goto (Lit (VText "h")))
                       ] of
           Left r  -> assertFailure ("did not run: " ++ show r)
-          Right m -> case focus (cursor (proof m)) of
+          Right m -> case focus (cursor (development m)) of
             OnComponent (Component.Claim _ (Ident "h") _) -> pure ()
             other -> assertFailure ("focused " ++ show other)
 
@@ -251,7 +251,7 @@ gotoTests =
                       , Do (Claim (Ref "n") (Lit (VTerm (Trailing type0))))
                       ] of
           Left r  -> assertFailure ("did not run: " ++ show r)
-          Right m -> [ i | Hypothesis _ i _ <- context (cursor (proof m)) ]
+          Right m -> [ i | Hypothesis _ i _ <- context (cursor (development m)) ]
                        @?= [Ident "h", Ident "h1"]
 
       -- A generated name must not shadow a datatype, a constructor or a
@@ -264,7 +264,7 @@ gotoTests =
     , testCase "and attack's inner hole is not its outer one" $
         case run hole [Do Attack, Do Into] of
           Left r  -> assertFailure ("did not run: " ++ show r)
-          Right m -> case focus (cursor (proof m)) of
+          Right m -> case focus (cursor (development m)) of
             OnComponent (Component.Claim _ (Ident "goal1") _) -> pure ()
             other -> assertFailure ("focused " ++ show other)
 

@@ -315,7 +315,7 @@ constraint env gs ctx local n (RawConstraint bs s t ty) = do
 --
 -- A declaration is closed: it is read in the empty context, not in the
 -- development's, because what enters the global environment must mean the same
--- thing in every later proof (§3.3.1). Only the parameters, and the datatype's
+-- thing in every later development (§3.3.1). Only the parameters, and the datatype's
 -- own name, are added to the scope it is read in.
 --
 -- **The indices are not in scope in the constructors.** Each constructor

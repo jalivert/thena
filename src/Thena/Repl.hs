@@ -89,7 +89,8 @@ import Thena.Driver
   , Session (..)
   , Stop (..)
   , SyntaxError (..)
-  , Proof (..)
+  , Attempt (..)
+  , Parked (..)
   , loadSource
   , newSession
   , oneLine
@@ -103,8 +104,8 @@ import Thena.Engine
   , Machine (..)
   , Question (..)
   , cursor
-  , proof
-  , proofContext
+  , development
+  , focusContext
   )
 import Thena.Errors
   ( Clash (..)
@@ -292,7 +293,7 @@ prompt :: Session -> Maybe Question -> String
 prompt _ (Just _) = "> "
 prompt s Nothing  = "thena " ++ fragment ++ "> "
   where
-    fragment = case focus (cursor (proof (sessionMachine s))) of
+    fragment = case focus (cursor (development (sessionMachine s))) of
       OnTerm {} -> "core"
       _         -> "spine"
 
@@ -379,7 +380,7 @@ renderResponse s resp = case resp of
   Resumed g     -> ["resumed " ++ nameString g]
   Abandoned g   -> ["abandoned " ++ nameString g]
   -- Show where it landed: an undo with no output looks like nothing happened.
-  Undone        -> [renderCursor (counter s) (cursor (proof (sessionMachine s)))]
+  Undone        -> [renderCursor (counter s) (cursor (development (sessionMachine s)))]
   Proofs cur ps -> renderProofs (counter s) cur ps
   -- Nothing to print: the caller reads the files and prints what that produced.
   RulesRequested _ -> []
@@ -405,7 +406,7 @@ counter = names . sessionMachine
 -- for one of the development's binders prints as its name rather than as a
 -- number. @:show@ renders from the root and needs no seed.
 contextOf :: Session -> Context
-contextOf = proofContext . proof . sessionMachine
+contextOf = focusContext . development . sessionMachine
 
 renderStop :: Session -> Stop -> [String]
 renderStop s stop = case stop of
@@ -1175,14 +1176,15 @@ renderPosition p = case p of
   Inside _ i inner -> renderPosition inner ++ ", inside the guess for " ++ identString i
 
 -- | @:proofs@ — what the session is holding (§2.4).
-renderProofs :: Int -> Maybe Proof -> [Proof] -> [String]
+renderProofs :: Int -> Maybe Attempt -> [Parked] -> [String]
 renderProofs n cur ps
   | null everything = ["no proofs"]
   | otherwise       = everything
   where
-    everything = maybe [] (pure . line "▶ ") cur ++ map (line "  ") ps
-    line mark pr =
-      mark ++ nameString (proofName pr) ++ " : " ++ renderCore n [] (proofClaim pr)
+    everything = maybe [] (pure . line "▶ ") cur
+                 ++ map (line "  " . parkedAttempt) ps
+    line mark att =
+      mark ++ nameString (attemptName att) ++ " : " ++ renderCore n [] (attemptClaim att)
 
 renderMoveError :: MoveError -> String
 renderMoveError m = case m of

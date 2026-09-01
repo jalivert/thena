@@ -25,7 +25,7 @@ import Thena.Engine
   , Frame (..)
   , Machine (..)
   , Outcome (..)
-  , ProofState (..)
+  , Development (..)
   , RetryError (..)
   , choicePoints
   , load
@@ -96,7 +96,7 @@ only r = bases [r]
 
 machine :: [RuleBase] -> Cursor -> [Instr] -> Machine
 machine base cur is =
-  load is (Machine (Exec [] [] []) (ProofState cur) emptyGlobals base 1000)
+  load is (Machine (Exec [] [] []) (Development cur) emptyGlobals base 1000)
 
 -- | Run as the driver does, following every channel, and keep the messages.
 runOut :: Machine -> ([String], Either FailReason Machine)
@@ -115,12 +115,12 @@ ranTo m = case snd (runOut m) of
   Left r   -> error ("the program did not run: " ++ show r)
 
 isGuess :: Machine -> Bool
-isGuess m = case focus (cursor (proof m)) of
+isGuess m = case focus (cursor (development m)) of
   Cursor.OnComponent (Guess {}) -> True
   _                             -> False
 
 isHole :: Machine -> Bool
-isHole m = case focus (cursor (proof m)) of
+isHole m = case focus (cursor (development m)) of
   Cursor.OnComponent (Claim {}) -> True
   _                             -> False
 
@@ -188,7 +188,7 @@ backtrackTests =
         -- @messes@ attacked and then failed; @fails@ failed; @works@ attacked.
         -- One attack deep, not two, which is what says @saved@ was restored.
         isGuess m @?= True
-        case cursor (proof m) of
+        case cursor (development m) of
           cur -> case Cursor.focus cur of
             Cursor.OnComponent (Guess _ _ (Under (Claim {}) (Trailing _)) _) -> pure ()
             other -> assertFailure ("the failing branch was not undone: " ++ show other)

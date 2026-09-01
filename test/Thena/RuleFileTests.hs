@@ -208,7 +208,7 @@ ordering =
 -- What a load refuses
 -- --------------------------------------------------------------------------
 
--- | The base may not change under a half-built proof (the user, 2026-08-25).
+-- | The base may not change under a half-built development (the user, 2026-08-25).
 refusals :: TestTree
 refusals =
   testGroup

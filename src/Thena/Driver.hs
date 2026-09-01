@@ -9,11 +9,11 @@
 -- development compiles to @[Instr]@ and runs on the machine (§2.4). Only three
 -- kinds of command are the driver's own — the ones that produce a view
 -- (@:core@, @:dev@, @:show@, @:where@), the ones that set a session setting
--- (@:step on@), and the ones that create or replace a proof (@:goal@, which is
+-- (@:step on@), and the ones that create or replace a development (@:goal@, which is
 -- phase 13's @:theorem@ in miniature; §7.8 puts that on the session side).
 --
 -- **The moves are not among them.** Moving the focus changes the cursor, and
--- the cursor is 'Thena.Engine.ProofState' — exactly what backtracks — so a
+-- the cursor is 'Thena.Engine.Development' — exactly what backtracks — so a
 -- move is an op and is spelled as a bare word (§2.4, §4.3).
 module Thena.Driver
   ( Session (..)
@@ -22,7 +22,10 @@ module Thena.Driver
   , Stop (..)
   , SyntaxError (..)
   , CommandError (..)
-  , Proof (..)
+  , Attempt (..)
+  , Parked (..)
+  , Working (..)
+  , currentAttempt
   , Snapshot
   , ChoicePoint (..)
   , LoadError (..)
@@ -47,6 +50,8 @@ import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), substLevelsIn)
 import Data.Char (isSpace)
 import Data.List (dropWhileEnd, isSuffixOf, stripPrefix)
+import Data.List.NonEmpty (NonEmpty (..))
+import qualified Data.List.NonEmpty as NE
 import Thena.Development.Cursor (Cursor, Focus (..), Part (..), focus, overLevels)
 import Thena.Development.Partial (Partial (..), extract)
 import Thena.Engine
@@ -54,18 +59,18 @@ import Thena.Engine
   , Exec (..)
   , Machine (..)
   , Message
-  , ProofState (..)
+  , Development (..)
   , Question
   , choicePoints
   , cursor
   , isAsking
-  , proofDevelopment
+  , flatten
   , load
-  , newProof
-  , proofContext
+  , newDevelopment
+  , focusContext
   , resumeAt
   , setGoal
-  , setGoalNamed
+  , newDevelopmentNamed
   , step
   )
 import qualified Thena.Engine as Engine
@@ -148,42 +153,56 @@ import Thena.Syntax.Resolve (resolve, resolveData, resolvePartial)
 -- to the machine (§7.4).
 data Session = Session
   { sessionMachine   :: Machine
-  , sessionProof     :: Maybe Proof
-    -- ^ the proof being worked on, if any. @Nothing@ is the scratch
-    -- development @:goal@ and the phase 4–12 commands still use
-  , sessionSuspended :: [Proof]
+  , sessionWork      :: Working
+    -- ^ what the session is working on: an 'Attempt', or an unnamed scratch
+    -- development. **A named case rather than an absence** (phase 37): this
+    -- was @Maybe Proof@, and @Nothing@ read as \"there is no development\"
+    -- when it means \"the development belongs to nothing\". There is always a
+    -- development — it is 'Thena.Engine.development', and 'Machine' always has
+    -- one.
+  , sessionSuspended :: [Parked]
     -- ^ left and re-enterable, most recently suspended first (§2.4)
-  , sessionSaved     :: Snapshot
-    -- ^ the machine as it was when the current line began, kept in step after
-    -- every line. What a line that fails is rewound to (phase 25d).
-  , sessionUndo      :: [Snapshot]
-    -- ^ what @:undo@ walks back through, most recent first. Pushed only when a
-    -- line actually changed the snapshot, so @:undo@ never has to step over a
-    -- @:show@.
+  , sessionHistory   :: NonEmpty Snapshot
+    -- ^ where each line began, most recent first — and the head is **this**
+    -- line's, so it always exists.
     --
-    -- **On the session, not on the proof** (phase 34, his ruling of
+    -- **One field, not two** (phase 37). It was @sessionSaved :: Snapshot@ and
+    -- @sessionUndo :: [Snapshot]@, which are the head and the tail of exactly
+    -- this list: the head is what a failed line is rewound to (phase 25d), and
+    -- the tail is what @:undo@ walks. A line that changed nothing replaces the
+    -- head rather than pushing, which is why @:undo@ never has to step over a
+    -- @:show@. 'NonEmpty' is what makes \"there is always a state this line
+    -- began in\" a fact of the type rather than a discipline 'record' keeps.
+    --
+    -- **On the session, not on the attempt** (phase 34, his ruling of
     -- 2026-08-29). It was 'Proof''s until then, so @:undo@ and phase 25d's
     -- rewind both did nothing at the top level — where there is a development
     -- but no theorem. That is the wrong way round: a 'Snapshot' is
-    -- @(Exec, ProofState)@ and 'Machine' always has both, so the history of a
+    -- @(Exec, Development)@ and 'Machine' always has both, so the history of a
     -- thing that always exists was being kept in a record that sometimes does.
     -- Nothing about taking a line back needs a theorem.
     --
-    -- **Cleared at every proof boundary** — @:theorem@, @qed@, @:abandon@,
+    -- **Reset at every proof boundary** — @:theorem@, @qed@, @:abandon@,
     -- @:suspend@, @:resume@ — which is his choice of three. @qed@ writes to
     -- @globals@, and @globals@ is deliberately not in a 'Snapshot' (§7.7: the
     -- environment only ever grows), so an @:undo@ that crossed it would rewind
     -- the development and leave the theorem admitted.
-    --
-    -- **The larger question this came out of is `ms3/CLOSEOUT.md` item 16**,
-    -- and it is not answered here: this phase moves a field and changes nothing
-    -- about what 'Session', 'Proof', 'ProofState' and 'Machine' /are/.
   , sessionStepping  :: Bool
   }
   deriving (Eq, Show)
 
--- | The per-proof half of the machine: @exec@ and @proof@ together (§7.7's
--- own correction to §2.4).
+-- | What the session is working on.
+--
+-- **The scratch case is named, and that is the whole of why this type exists**
+-- (phase 37, his call). Nothing is stored here that was not stored before; a
+-- development that belongs to no theorem now says so.
+data Working
+  = Scratch              -- ^ a development nobody has named; @qed@ is refused
+  | Attempting Attempt   -- ^ a theorem is being proved
+  deriving (Eq, Show)
+
+-- | The per-attempt half of the machine: @exec@ and @development@ together
+-- (§7.7's own correction to §2.4).
 --
 -- **Not the whole 'Machine' — an amendment to §7.7, phase 13.** That section
 -- says suspending stores the machine untouched, and it cannot: @globals@ and
@@ -193,15 +212,27 @@ data Session = Session
 -- \"the global environment only ever grows\". Storing this pair instead is what
 -- makes that promise true rather than aspirational.
 --
--- It is the same pair @:undo@ snapshots, and that is not a coincidence: a
--- suspended proof /is/ an undo snapshot with a name and a statement attached.
-type Snapshot = (Exec, ProofState)
+-- It is the same pair 'sessionHistory' keeps, and that is not a coincidence: a
+-- 'Parked' attempt /is/ an undo snapshot with a name and a statement attached.
+type Snapshot = (Exec, Development)
 
--- | A proof the session holds (§2.4, §3.3.1).
-data Proof = Proof
-  { proofName      :: GlobalName
-  , proofClaim     :: Core       -- ^ what @qed@ will certify against
-  , proofResidue   :: [Obligation]
+-- | An unfinished proof of a theorem (§2.4, §3.3.1).
+--
+-- **\"Attempt\" is the word for it** — his, 2026-09-01, renaming @Proof@:
+-- @Claim@ is taken twice already ('Thena.Development.Component.Claim' and this
+-- record's own statement), and @Conjecture@ names the statement rather than the
+-- work.
+--
+-- **It carries no snapshot.** It used to: the field was written when the proof
+-- was created, overwritten when it was suspended, and read when it was
+-- resumed — so the value written at creation was dead on every path, and it was
+-- written only because the field was total and something had to go there. The
+-- snapshot now lives on 'Parked', where it is the whole point, and nothing can
+-- write it anywhere else.
+data Attempt = Attempt
+  { attemptName    :: GlobalName
+  , attemptClaim   :: Core       -- ^ what @qed@ will certify against
+  , attemptResidue :: [Obligation]
     -- ^ what the kernel could neither discharge nor refute, from the last
     -- @certify@ (MS3 phase 33b).
     --
@@ -209,32 +240,46 @@ data Proof = Proof
     -- 'admitted'**, which are the two halves of one @qed@ line with the
     -- machine's own loop between them — the kernel runs inside the loop and
     -- admitting happens after it returns, so the residue has to be put down
-    -- somewhere in between. It is per-proof state and this is the per-proof
-    -- record.
-  , proofSaved     :: Snapshot
-    -- ^ where this proof is parked: written when it is created and when it is
-    -- suspended, read when it is resumed. That is the whole of its life.
-    --
-    -- **It used to be rewritten after every line too**, because it doubled as
-    -- \"the state before this line\" for @:undo@ and for phase 25d's rewind.
-    -- Phase 34 gave the session its own 'sessionSaved' for that, so the two
-    -- jobs are no longer one field: suspending is still a move and not a copy,
-    -- and 'sessionSuspended' and the current proof are still the same kind of
-    -- thing.
+    -- somewhere in between. It is a mailbox rather than a property, and every
+    -- alternative to it is worse; @docs/SESSION-STATE.md@ §5.3 says so out
+    -- loud, because reading it outside that instant is how phase 33 shipped a
+    -- bug.
   }
   deriving (Eq, Show)
+
+-- | An attempt that has been put down, and where it was put down.
+--
+-- **The snapshot is here and nowhere else** (phase 37). @:suspend@ is the only
+-- thing that builds one of these, @:resume@ the only thing that takes one
+-- apart, so an attempt cannot carry a stale parking position while it is the
+-- one being worked on.
+--
+-- **The asymmetry with 'Working' is deliberate, not an oversight**: what is
+-- live is an attempt beside a 'Machine'; what is parked is an attempt beside a
+-- 'Snapshot'. A parked one may not carry a machine, for the reason 'Snapshot'
+-- gives above.
+data Parked = Parked
+  { parkedAttempt :: Attempt
+  , parkedAt      :: Snapshot
+  }
+  deriving (Eq, Show)
+
+-- | The attempt being worked on, if there is one.
+currentAttempt :: Session -> Maybe Attempt
+currentAttempt s = case sessionWork s of
+  Scratch        -> Nothing
+  Attempting att -> Just att
 
 newSession :: Session
 newSession = Session
   { sessionMachine   = Machine (Exec [] [] []) ps emptyGlobals [] n
-  , sessionProof     = Nothing
+  , sessionWork      = Scratch
   , sessionSuspended = []
-  , sessionSaved     = (Exec [] [] [], ps)
-  , sessionUndo      = []
+  , sessionHistory   = (Exec [] [] [], ps) :| []
   , sessionStepping  = False
   }
   where
-    (ps, n) = newProof 0
+    (ps, n) = newDevelopment 0
 
 -- | What the driver hands back for a frontend to render. Data, never a line of
 -- text: rendering is "Thena.Repl"'s (§2.5).
@@ -286,7 +331,7 @@ data Response
   | Resumed GlobalName        -- ^ @:resume@
   | Abandoned GlobalName      -- ^ @:abandon@
   | Undone                    -- ^ @:undo@ — one line taken back
-  | Proofs (Maybe Proof) [Proof]
+  | Proofs (Maybe Attempt) [Parked]
     -- ^ @:proofs@ — the current one, if any, and the suspended ones
     -- ^ @:extract@ — the closed term the development stands for (§7.5). Its
     -- own look, because @certify@ is an op and an op's answer comes back as a
@@ -506,14 +551,14 @@ dispatch s name arg = case name of
   -- The only command that means two things, and they do not overlap: with no
   -- argument it is the development, with one it is a global (§9, phase 6).
   ":show"  -> case arg of
-    "" -> (s, Shown (cursor (proof machine)))
+    "" -> (s, Shown (cursor (development machine)))
     _  -> showGlobal arg
   -- The eliminator is not a global, so it is not reachable through @:show@
   -- (§3.7, reversed by the user 2026-08-22). Its own word, and its own second
   -- argument: the level comes from the motive at every use site, so there is
   -- no one rule to print and the command has to be told which one is wanted.
   ":elim"  -> withArgument (eliminator arg)
-  ":where" -> noArgument (s, Where (cursor (proof machine)))
+  ":where" -> noArgument (s, Where (cursor (development machine)))
   -- Autocomplete, and it is a read-only query on the iterator (§7.6): the
   -- driver asks for the matches at the current state and shows them. Picking
   -- one and running its body is phase 16's.
@@ -535,14 +580,14 @@ dispatch s name arg = case name of
   -- @:show@, and for the same reason: two different questions share a word
   -- because neither can be mistaken for the other.
   ":whnf"  -> case arg of
-    "" -> case focus (cursor (proof machine)) of
+    "" -> case focus (cursor (development machine)) of
       OnTerm _ _ t -> (s, Rendered (whnf (globals machine) ctx t))
       _            -> (s, Rejected (NotThere NotInCore))
     _  -> view s parseCore (Rendered . whnf (globals machine) ctx) arg
   -- The same no-argument/with-argument split as @:whnf@ and @:show@: with no
   -- argument it is the core focus, with one it is a term the user writes.
   ":infer" -> case arg of
-    "" -> case focus (cursor (proof machine)) of
+    "" -> case focus (cursor (development machine)) of
       OnTerm _ _ t -> inferred t (names machine)
       _            -> (s, Rejected (NotThere NotInCore))
     _  -> case parseCore (globals machine) ctx (names machine) arg of
@@ -570,13 +615,13 @@ dispatch s name arg = case name of
   ":revalidate" -> noArgument $
     ( s
     , Revalidated . either Just (const Nothing) . fst $
-        revalidate (globals machine) [] (names machine) (proofDevelopment (proof machine))
+        revalidate (globals machine) [] (names machine) (flatten (development machine))
     )
   -- The term the development stands for, if it is finished. A colon: it looks.
   -- 'extract' is otherwise reachable only through the op, and the whole
   -- interest of @certify@ is /what/ it built.
   ":extract" -> noArgument $
-    case extract (proofDevelopment (proof machine)) of
+    case extract (flatten (development machine)) of
       Right t  -> (s, Extracted t)
       Left why -> (s, Ran [] (Halted (NotYetPure (whereImpure why))))
   -- A bare word: it is an op, and it is written as the op is written (§2.4).
@@ -601,7 +646,7 @@ dispatch s name arg = case name of
   ":suspend" -> noArgument suspend
   ":resume"  -> withArgument (resume arg)
   ":abandon" -> noArgument abandonProof
-  ":proofs"  -> noArgument (s, Proofs (sessionProof s) (sessionSuspended s))
+  ":proofs"  -> noArgument (s, Proofs (currentAttempt s) (sessionSuspended s))
   ":undo"    -> noArgument undo
   ":convert" -> conversion
   ":step"  -> stepping
@@ -701,20 +746,20 @@ dispatch s name arg = case name of
             []
   where
     machine = sessionMachine s
-    ctx     = proofContext (proof machine)
+    ctx     = focusContext (development machine)
 
 
     matching hint =
       unfoldIter (matches (rules machine) (globals machine)
-                          (cursor (proof machine)) hint)
+                          (cursor (development machine)) hint)
 
     -- The base may not change under a half-built proof, current or suspended
     -- (the user, 2026-08-25). Answered before the file is read, so a refusal
     -- costs no IO and is decided in the pure half.
-    proofUnderway = case (sessionProof s, sessionSuspended s) of
-      (Just pr, _)     -> Just (ProofUnderway (proofName pr))
+    proofUnderway = case (currentAttempt s, sessionSuspended s) of
+      (Just att, _)    -> Just (ProofUnderway (attemptName att))
       (Nothing, [])    -> Nothing
-      (Nothing, ps)    -> Just (ProofsSuspended (map proofName ps))
+      (Nothing, ps)    -> Just (ProofsSuspended (map (attemptName . parkedAttempt) ps))
 
     noArgument r
       | null arg  = r
@@ -768,9 +813,9 @@ dispatch s name arg = case name of
     --
     -- The statement is checked to be a type here rather than left to the first
     -- @:revalidate@: a proof of a non-type is not worth entering.
-    theorem = case sessionProof s of
-      Just pr -> (s, Rejected (AlreadyProving (proofName pr)))
-      Nothing -> case parseStatement (globals machine) (names machine) arg of
+    theorem = case sessionWork s of
+      Attempting att -> (s, Rejected (AlreadyProving (attemptName att)))
+      Scratch -> case parseStatement (globals machine) (names machine) arg of
         Left e             -> (s, Failed e)
         Right (Nothing, _) -> (s, Rejected (MissingArgument ":theorem"))
         Right (Just x, (ty, n1))
@@ -785,14 +830,13 @@ dispatch s name arg = case name of
               (Right _, _, n2) -> started g ty n2
           where g = GlobalName x
 
-    started g ty n = case setGoalNamed g ty machine { names = n } of
-      Left e  -> (s, Rejected (NotThere e))
-      Right m ->
-        ( s { sessionMachine = m
-            , sessionProof = Just (Proof g ty [] (snapshotOf m))
-            }
-        , Proving g ty
-        )
+    started g ty n =
+      let (dev, n1) = newDevelopmentNamed g ty n
+       in ( s { sessionMachine = machine { development = dev, names = n1 }
+              , sessionWork    = Attempting (Attempt g ty [])
+              }
+          , Proving g ty
+          )
 
     -- | @qed@ — certify what the development built, admit it, and close.
     --
@@ -805,16 +849,16 @@ dispatch s name arg = case name of
     -- the same @extract@ on the same value, so it cannot differ; doing it this
     -- way keeps the certified term out of 'Session', where it would be a
     -- second home for something the development already says.
-    closeProof = case sessionProof s of
-      Nothing -> (s, Rejected NotProving)
-      Just pr -> case progress False s { sessionMachine = ran } [] of
+    closeProof = case sessionWork s of
+      Scratch -> (s, Rejected NotProving)
+      Attempting att -> case progress False s { sessionMachine = ran } [] of
         (s', Ran msgs Completed) ->
-          case extract (proofDevelopment (proof (sessionMachine s'))) of
+          case extract (flatten (development (sessionMachine s'))) of
             Left why -> (s', Ran msgs (Halted (NotYetPure (whereImpure why))))
-            Right t  -> admit (fromMaybe pr (sessionProof s')) s' t
+            Right t  -> admit (fromMaybe att (currentAttempt s')) s' t
         other -> other
         where
-          ran = load [Do (Certify (Lit (VTerm (Trailing (proofClaim pr)))))] machine
+          ran = load [Do (Certify (Lit (VTerm (Trailing (attemptClaim att)))))] machine
 
           -- **The proof record is re-read from @s'@, never the @pr@ above.**
           -- Certifying settles the levels the claim was written with and files
@@ -822,9 +866,9 @@ dispatch s name arg = case name of
           -- definition's type — reading the record from before the run stored a
           -- type still carrying a meta nothing could ever solve, which is a bug
           -- phase 33 shipped and 33b fixes.
-          admit pr' s' t =
-            let (s'', lvs, owed, scheme) = admitted s' pr' t
-             in (s'', Proved (proofName pr') lvs owed scheme)
+          admit att' s' t =
+            let (s'', lvs, owed, scheme) = admitted s' att' t
+             in (s'', Proved (attemptName att') lvs owed scheme)
 
     -- Admitting is the only thing that writes a theorem to globals (§3.3.1):
     -- a proved theorem is a global **definition**, type and body both.
@@ -838,32 +882,32 @@ dispatch s name arg = case name of
     --
     -- Returns the generalised type as well, because that — not the claim as
     -- written — is what @qed@ reports and what @:show@ will print.
-    admitted s' pr t =
+    admitted s' att t =
       let m  = sessionMachine s'
-          (d, n1) = generalised (names m) (proofResidue pr) (proofClaim pr) t
-          g  = addDefinition (proofName pr) d (globals m)
-          (ps, n) = newProof n1
-       in ( s' { sessionMachine = m { globals = g, proof = ps, names = n }
-               , sessionProof = Nothing
+          (d, n1) = generalised (names m) (attemptResidue att) (attemptClaim att) t
+          g  = addDefinition (attemptName att) d (globals m)
+          (ps, n) = newDevelopment n1
+       in ( s' { sessionMachine = m { globals = g, development = ps, names = n }
+               , sessionWork = Scratch
                }
           , definitionLevels d
           , definitionConstraints d
           , definitionType d
           )
 
-    suspend = case sessionProof s of
-      Nothing -> (s, Rejected NotProving)
-      Just pr ->
-        ( cleared { sessionSuspended = pr { proofSaved = snapshotOf machine }
-                                         : sessionSuspended s }
-        , Suspended (proofName pr)
+    suspend = case sessionWork s of
+      Scratch -> (s, Rejected NotProving)
+      Attempting att ->
+        ( cleared { sessionSuspended =
+                      Parked att (snapshotOf machine) : sessionSuspended s }
+        , Suspended (attemptName att)
         )
 
     -- Abandoning drops the proof; suspending keeps it. Same exit, different
     -- list — which is the whole difference between the two commands.
-    abandonProof = case sessionProof s of
-      Nothing -> (s, Rejected NotProving)
-      Just pr -> (cleared, Abandoned (proofName pr))
+    abandonProof = case sessionWork s of
+      Scratch -> (s, Rejected NotProving)
+      Attempting att -> (cleared, Abandoned (attemptName att))
 
     -- Leave proof mode, putting the machine back on a fresh scratch
     -- development. **The environment and the counter are not touched**, which
@@ -871,30 +915,31 @@ dispatch s name arg = case name of
     -- the machine, so a datatype declared while it was away is simply there on
     -- return.
     cleared =
-      let (ps, n) = newProof (names machine)
-       in s { sessionMachine = machine { proof = ps, names = n, exec = Exec [] [] [] }
-            , sessionProof = Nothing
+      let (ps, n) = newDevelopment (names machine)
+       in s { sessionMachine = machine { development = ps, names = n, exec = Exec [] [] [] }
+            , sessionWork = Scratch
             }
 
-    resume what = case break ((== GlobalName what) . proofName) (sessionSuspended s) of
-      (_, [])          -> (s, Rejected (NoSuchProof what))
-      (before, pr : after)
-        | Just cur <- sessionProof s ->
-            (s, Rejected (AlreadyProving (proofName cur)))
-        | otherwise ->
-            ( s { sessionMachine = restore (proofSaved pr) machine
-                , sessionProof = Just pr
-                , sessionSuspended = before ++ after
-                }
-            , Resumed (proofName pr)
-            )
+    resume what =
+      case break ((== GlobalName what) . attemptName . parkedAttempt) (sessionSuspended s) of
+        (_, [])          -> (s, Rejected (NoSuchProof what))
+        (before, Parked att at : after)
+          | Attempting cur <- sessionWork s ->
+              (s, Rejected (AlreadyProving (attemptName cur)))
+          | otherwise ->
+              ( s { sessionMachine = restore at machine
+                  , sessionWork = Attempting att
+                  , sessionSuspended = before ++ after
+                  }
+              , Resumed (attemptName att)
+              )
 
     -- **No proof required** (phase 34). @:undo@ takes back the line you typed,
     -- and nothing about that needs a theorem to be open.
-    undo = case sessionUndo s of
-      []       -> (s, Rejected NothingToUndo)
-      (u : us) ->
-        ( s { sessionMachine = restore u machine, sessionUndo = us }
+    undo = case sessionHistory s of
+      _ :| []       -> (s, Rejected NothingToUndo)
+      _ :| (u : us) ->
+        ( s { sessionMachine = restore u machine, sessionHistory = u :| us }
         , Undone
         )
 
@@ -914,7 +959,7 @@ dispatch s name arg = case name of
       Left e -> (s, Failed e)
       Right (t, n1) -> case setGoal t machine { names = n1 } of
         Left e   -> (s, Rejected (NotThere e))
-        Right m' -> (s { sessionMachine = m' }, Shown (cursor (proof m')))
+        Right m' -> (s { sessionMachine = m' }, Shown (cursor (development m')))
 
     -- Both of these advance the session counter even when they fail. Conversion
     -- and inference mint variables to open binders with, and a name that has
@@ -1216,7 +1261,7 @@ view
   -> String
   -> (Session, Response)
 view s rd f arg =
-  case rd (globals machine) (proofContext (proof machine)) (names machine) arg of
+  case rd (globals machine) (focusContext (development machine)) (names machine) arg of
   Left e        -> (s, Failed e)
   Right (x, n1) -> (s { sessionMachine = machine { names = n1 } }, f x)
   where
@@ -1329,26 +1374,25 @@ oneLine s pending line = (record s', resp, asking)
         -- not to before the whole command, because that is where the previous
         -- snapshot was taken. §2.4's granularity, applied consistently.
         | stopped resp =
-            sess { sessionMachine = restore (sessionSaved sess) (sessionMachine sess) }
+            sess { sessionMachine =
+                     restore (NE.head (sessionHistory sess)) (sessionMachine sess) }
         -- **A proof boundary starts a fresh history** (phase 34, his choice of
         -- three). Done here and not in the five commands themselves, because
         -- @record@ runs /after/ the command and would push the crossing itself
         -- back on top of a stack the command had just emptied.
-        | boundary resp = sess { sessionSaved = now, sessionUndo = [] }
-        | resp == Undone || now == sessionSaved sess = sess { sessionSaved = now }
-        | otherwise =
-            sess { sessionSaved = now
-                 , sessionUndo  = sessionSaved sess : sessionUndo sess
-                 }
+        | boundary resp = sess { sessionHistory = now :| [] }
+        | resp == Undone || now == NE.head (sessionHistory sess) =
+            sess { sessionHistory = now :| NE.tail (sessionHistory sess) }
+        | otherwise = sess { sessionHistory = now NE.<| sessionHistory sess }
        now = snapshotOf (sessionMachine sess)
 
 -- | The per-proof half of a machine.
 snapshotOf :: Machine -> Snapshot
-snapshotOf m = (exec m, proof m)
+snapshotOf m = (exec m, development m)
 
 -- | Put one back.
 restore :: Snapshot -> Machine -> Machine
-restore (e, p) m = m { exec = e, proof = p }
+restore (e, p) m = m { exec = e, development = p }
 
 -- --------------------------------------------------------------------------
 -- Loading a file (§9, phase 11)
@@ -1404,7 +1448,8 @@ data Loaded = Loaded
 loadSource :: Session -> String -> Loaded
 loadSource s0 = go s0 Nothing 1 [] . lines
   where
-    finished s acc err = Loaded s { sessionUndo = [] } (reverse acc) err
+    finished s acc err =
+      Loaded s { sessionHistory = NE.head (sessionHistory s) :| [] } (reverse acc) err
 
     go s pending _ acc [] = case pending of
       -- The file ran out while an op was still asking. The line to name is the
@@ -1469,7 +1514,7 @@ progress oneStep s msgs = case step (sessionMachine s) of
     | oneStep   -> stop m (msg : msgs) Paused
     | otherwise -> progress oneStep s { sessionMachine = m } (msg : msgs)
   -- The declaration is checked and installed here, outside the machine: the
-  -- global environment is not part of 'ProofState' and no instruction writes it
+  -- global environment is not part of 'Development' and no instruction writes it
   -- (§7.4, §7.5). On refusal the rest of the program is dropped — the command
   -- is abandoned, and there is nothing to retry the way there is at 'Halted'.
   Engine.Declaring d m -> case declare (globals m) (names m) d of
@@ -1503,8 +1548,8 @@ progress oneStep s msgs = case step (sessionMachine s) of
       | otherwise -> progress oneStep s' (say : msgs)
       where
         say = "certified"
-        settled' = m { proof = Engine.ProofState
-                                 (overLevels sub (cursor (proof m))) }
+        settled' = m { development = Engine.Development
+                                 (overLevels sub (cursor (development m))) }
         s' = (settled sub residue s) { sessionMachine = settled' }
   Engine.Asking q m   -> stop m msgs (Waiting q)
   Engine.Finished m   -> stop m msgs Completed
@@ -1520,10 +1565,12 @@ progress oneStep s msgs = case step (sessionMachine s) of
 -- **And it files the residue** for @qed@ to generalise (phase 33b); see
 -- 'Proof''s own field.
 settled :: [(LevelVar, Level)] -> [Obligation] -> Session -> Session
-settled sub residue s = s { sessionProof = fmap at (sessionProof s) }
+settled sub residue s = s { sessionWork = fmap' (sessionWork s) }
   where
-    at pr = pr { proofClaim   = substLevelsIn sub (proofClaim pr)
-               , proofResidue = residue
+    fmap' Scratch          = Scratch
+    fmap' (Attempting att) = Attempting (at att)
+    at att = att { attemptClaim   = substLevelsIn sub (attemptClaim att)
+               , attemptResidue = residue
                }
 
 nameOf :: InductiveDefinition -> String

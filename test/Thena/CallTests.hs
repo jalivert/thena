@@ -26,11 +26,11 @@ import Thena.Engine
   , Exec (..)
   , Machine (..)
   , Outcome (..)
-  , ProofState (..)
+  , Development (..)
   , choicePoints
   , cursor
   , load
-  , proof
+  , development
   , retryFrom
   , step
   )
@@ -64,7 +64,7 @@ bases rs = [ruleBase "test" Nothing "" rs]
 
 machine :: [RuleBase] -> [Instr] -> Machine
 machine base is =
-  load is (Machine (Exec [] [] []) (ProofState hole) emptyGlobals base 1000)
+  load is (Machine (Exec [] [] []) (Development hole) emptyGlobals base 1000)
 
 runOut :: Machine -> ([String], Either FailReason Machine)
 runOut m = case step m of
@@ -82,7 +82,7 @@ ranTo m = case snd (runOut m) of
   Left r   -> error ("the program did not run: " ++ show r)
 
 isGuess :: Machine -> Bool
-isGuess m = case focus (cursor (proof m)) of
+isGuess m = case focus (cursor (development m)) of
   Cursor.OnComponent (Component.Guess {}) -> True
   _                             -> False
 
