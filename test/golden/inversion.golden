@@ -21,7 +21,7 @@ thena spine> attack
 thena spine> intro
 thena spine> into
 thena spine> along
-thena spine> eliminate p
+thena spine> eliminate-core ⌜ p ⌝
 subgoals: evZeroMethod, evSSMethod
 thena spine> :where
 focus
@@ -36,10 +36,10 @@ type
   Empty {0}
 thena spine> back
 thena spine> back
-thena spine> try (\ (q : Eq {0} Nat zero (succ zero)) -> noConfusionNat zero (succ zero) q)
+thena spine> try-core ⌜ \ (q : Eq {0} Nat zero (succ zero)) -> noConfusionNat zero (succ zero) q ⌝
 thena spine> solve
 thena spine> along
-thena spine> try (\ (n : Nat) (e : Ev n) (ih : Eq {0} Nat n (succ zero) -> Empty {0}) (q : Eq {0} Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ n) zero (noConfusionNat (succ (succ n)) (succ zero) q))
+thena spine> try-core ⌜ \ (n : Nat) (e : Ev n) (ih : Eq {0} Nat n (succ zero) -> Empty {0}) (q : Eq {0} Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ n) zero (noConfusionNat (succ (succ n)) (succ zero) q) ⌝
 thena spine> solve
 thena spine> along
 thena spine> solve

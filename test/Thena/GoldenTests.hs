@@ -146,7 +146,7 @@ tests =
         , "along"
         , "along"
         , ":where"
-        , "try _"
+        , "try-core ⌜ _ ⌝"
         , "solve"
         , "back"
         , "back"
@@ -309,12 +309,12 @@ tests =
         , ":proofs"
         , "data Bool : Type\8320 where { true : Bool ; false : Bool }"
         , ":theorem one : Nat"
-        , "try zero"
+        , "try-core ⌜ zero ⌝"
         , "solve"
         , "qed"
         , ":resume two"
         , ":core true"
-        , "try (succ (succ zero))"
+        , "try-core ⌜ succ (succ zero) ⌝"
         , "solve"
         , "qed"
         , ":show two"
@@ -357,7 +357,7 @@ tests =
           -- A swapped pair in that list would show up here and nowhere else.
         , ":goal Type\8320"
         , ":step on"
-        , "unify-refine A"
+        , "unify-refine-core ⌜ A ⌝"
         , ":step"
         , ":step"
         , ":step"
@@ -454,7 +454,7 @@ tests =
         [ "data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }"
         , "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
         , ":theorem plus : Nat -> Nat -> Nat"
-        , "try (\\ (n : Nat) (m : Nat) -> elim Nat () (\\ (t : Nat) -> Nat) (m (\\ (k : Nat) (ih : Nat) -> succ ih)) () n)"
+        , "try-core ⌜ \\ (n : Nat) (m : Nat) -> elim Nat () (\\ (t : Nat) -> Nat) (m (\\ (k : Nat) (ih : Nat) -> succ ih)) () n ⌝"
         , "solve"
         , "qed"
         , ":whnf plus (succ zero) (succ zero)"
@@ -467,10 +467,10 @@ tests =
         , "along"
         , "along"
         , "along"
-        , "eliminate e"
+        , "eliminate-core ⌜ e ⌝"
         , "back"
         , ":where"
-        , "try (\\ (c : Nat) -> refl {0} Nat (succ c))"
+        , "try-core ⌜ \\ (c : Nat) -> refl {0} Nat (succ c) ⌝"
         , "solve"
         , "along"
         , "solve"
@@ -486,14 +486,14 @@ tests =
         , "intro"
         , "into"
         , "along"
-        , "eliminate n"
+        , "eliminate-core ⌜ n ⌝"
         , ":show"
         , "back"
         , "back"
-        , "try (refl {0} Nat zero)"
+        , "try-core ⌜ refl {0} Nat zero ⌝"
         , "solve"
         , "along"
-        , "try (\\ (x : Nat) (ih : Eq {0} Nat (plus x zero) x) -> congSucc (plus x zero) x ih)"
+        , "try-core ⌜ \\ (x : Nat) (ih : Eq {0} Nat (plus x zero) x) -> congSucc (plus x zero) x ih ⌝"
         , "solve"
         , "along"
         , "solve"
@@ -524,14 +524,14 @@ tests =
         , "intro"
         , "into"
         , "along"
-        , "eliminate p"
+        , "eliminate-core ⌜ p ⌝"
         , ":where"
         , "back"
         , "back"
-        , "try (\\ (q : Eq {0} Nat zero (succ zero)) -> noConfusionNat zero (succ zero) q)"
+        , "try-core ⌜ \\ (q : Eq {0} Nat zero (succ zero)) -> noConfusionNat zero (succ zero) q ⌝"
         , "solve"
         , "along"
-        , "try (\\ (n : Nat) (e : Ev n) (ih : Eq {0} Nat n (succ zero) -> Empty {0}) (q : Eq {0} Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ n) zero (noConfusionNat (succ (succ n)) (succ zero) q))"
+        , "try-core ⌜ \\ (n : Nat) (e : Ev n) (ih : Eq {0} Nat n (succ zero) -> Empty {0}) (q : Eq {0} Nat (succ (succ n)) (succ zero)) -> noConfusionNat (succ n) zero (noConfusionNat (succ (succ n)) (succ zero) q) ⌝"
         , "solve"
         , "along"
         , "solve"
@@ -565,8 +565,8 @@ tests =
         , "into"
         , "along"
         , "along"
-        , "eliminate i"
-        , "eliminate n"
+        , "eliminate-core ⌜ i ⌝"
+        , "eliminate-core ⌜ n ⌝"
         , ":abandon"
         , "data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }"
         , "data Unit : Type where { unit : Unit }"
@@ -583,15 +583,15 @@ tests =
         , "along"
         , "along"
         , ":matches"
-        , "eliminate Type₀"
-        , "eliminate succ"
+        , "eliminate-core ⌜ Type₀ ⌝"
+        , "eliminate-core ⌜ succ ⌝"
         -- Phase 19: @Below@'s index telescope is dependent, but both indices
         -- are plain variables here, so the dependent one is friendly and
         -- states no equation. This line was a refusal until phase 19.
-        , "eliminate b"
+        , "eliminate-core ⌜ b ⌝"
         , ":where"
         , "attack"
-        , "eliminate n"
+        , "eliminate-core ⌜ n ⌝"
         , ":abandon"
         -- And the refusal that remains: index 2 is @fz m@, a constructor
         -- application, so it is tied and does want an equation.
@@ -602,7 +602,7 @@ tests =
         , "into"
         , "along"
         , "along"
-        , "eliminate b"
+        , "eliminate-core ⌜ b ⌝"
         , ":quit"
         ]
     , -- Thesis §2.7, and the phase's deliverable. The interesting half is the
@@ -623,7 +623,7 @@ tests =
           -- Already the goal's type: unification has nothing to do, and the
           -- binding is filled straight in.
         , ":theorem id0 : \8704 (A : Type\8320) -> A -> A"
-        , "unify-refine (\\ (A : Type\8320) (a : A) -> a)"
+        , "unify-refine-core ⌜ \\ (A : Type\8320) (a : A) -> a ⌝"
         , ":show"
         , "qed"
           -- Holes on both sides. @refl {0} A a@ has type @Eq {0} A a a@; unifying that
@@ -631,7 +631,7 @@ tests =
         , ":theorem refl0 : Eq {0} Nat zero zero"
         , "claim A : Type\8320"
         , "claim a : A"
-        , "unify-refine (refl {0} A a)"
+        , "unify-refine-core ⌜ refl {0} A a ⌝"
         , ":show"
         , "qed"
         , ":show refl0"
@@ -643,7 +643,7 @@ tests =
           -- and the reason the rewind lives in the driver rather than in
           -- anything @apply@ owns.
         , ":theorem wrong : Eq {0} Nat zero (succ zero)"
-        , "unify-refine (refl {0} Nat zero)"
+        , "unify-refine-core ⌜ refl {0} Nat zero ⌝"
         , ":show"
         , ":abandon"
         ]
@@ -667,14 +667,14 @@ tests =
         , "claim T : Type\8320"
         , "claim b : T"
           -- Maybe T against Maybe Bool solves T, and says so.
-        , "unify-refine (Just T b)"
+        , "unify-refine-core ⌜ Just T b ⌝"
         , ":show"
           -- The only hole left is the boolean, and its type is now T = Bool.
           -- @goto@ (phase 24b) goes straight to it; counting @back@s would
           -- stop scaling the moment @apply@ claims several holes at once.
         , "goto b"
         , ":where"
-        , "unify-refine true"
+        , "unify-refine-core ⌜ true ⌝"
         , ":show"
         , "qed"
         , ":show g"
@@ -695,13 +695,13 @@ tests =
         , ":theorem g : Maybe Bool"
           -- One line for the whole of `inferring`'s three.
         , ":matches"
-        , "apply Just"
+        , "apply-core ⌜ Just ⌝"
         , ":show"
           -- A head with no Π at all: zero holes claimed, so @apply@ degenerates
           -- to @unify-refine@ exactly. That is the phase's claim that it adds
           -- no capability, in its smallest form.
         , "goto a"
-        , "apply true"
+        , "apply-core ⌜ true ⌝"
         , ":show"
         , "qed"
         , ":show g"
@@ -722,7 +722,7 @@ tests =
         , "along"
         , "along"
         , "along"
-        , "apply f"
+        , "apply-core ⌜ f ⌝"
         , ":show"
         , "goto _"
         , ":where"
@@ -737,19 +737,19 @@ tests =
           -- from the other side: a line that did not do what it said is not a
           -- step, so there is no step to take back.
         , ":theorem bad : Bool"
-        , "apply Just"
+        , "apply-core ⌜ Just ⌝"
         , ":show"
         , ":undo"
-        , "apply true"
+        , "apply-core ⌜ true ⌝"
         , "qed"
           -- **The same failure with no proof open** (phase 34). The top level
           -- has a development too, so a line that did not do what it said is
           -- rewound there as well, and @:undo@ takes back a line there as well
           -- — neither of which happened until the undo stack moved off 'Proof'.
         , ":goal Maybe Bool"
-        , "apply Just"
+        , "apply-core ⌜ Just ⌝"
         , ":show"
-        , "apply Nothing"
+        , "apply-core ⌜ Nothing ⌝"
         , ":show"
         , ":undo"
         , ":show"
@@ -757,7 +757,7 @@ tests =
           -- And the rewind proper: a body that ran, changed the development and
           -- then failed, with no proof open. @:show@ is the bare hole.
         , ":goal \8704 (b : Bool) -> Maybe Bool"
-        , "apply Just"
+        , "apply-core ⌜ Just ⌝"
         , ":show"
           -- **A goal `apply` cannot saturate into, and the way back** (the
           -- user, 2026-08-26). @Just@'s result is a @Maybe@, so no number of
@@ -775,9 +775,9 @@ tests =
           -- would have type @Bool -> Bool -> Maybe Bool@ anyway. §5.3's
           -- distinction between assuming and introducing, from the other side.
         , ":theorem h : \8704 (b : Bool) -> Maybe Bool"
-        , "apply Just"
+        , "apply-core ⌜ Just ⌝"
         , "assume q : Bool"
-        , "apply Just"
+        , "apply-core ⌜ Just ⌝"
         , ":abandon"
         , ":theorem h : \8704 (b : Bool) -> Maybe Bool"
         , "attack"
@@ -785,9 +785,9 @@ tests =
         , "into"
         , "along"
         , ":where"
-        , "apply Just"
+        , "apply-core ⌜ Just ⌝"
         , "goto a"
-        , "apply b"
+        , "apply-core ⌜ b ⌝"
         , "goto h"
         , "solve"
         , "qed"
@@ -795,7 +795,7 @@ tests =
           -- The head is the guard, so @apply@ at a guess never runs its body.
         , ":theorem guessed : Bool"
         , "attack"
-        , "apply true"
+        , "apply-core ⌜ true ⌝"
         , ":abandon"
         ]
 
@@ -809,11 +809,11 @@ tests =
         , ":theorem n : Nat"
           -- Refused, and it says which type against which. Before this phase
           -- the guess went in and @qed@ found it, arbitrarily far away.
-        , "try true"
+        , "try-core ⌜ true ⌝"
           -- **And it left nothing behind** — the check runs before the
           -- component is replaced, so a refused @try@ is not the debris case.
         , ":show"
-        , "try zero"
+        , "try-core ⌜ zero ⌝"
         , "solve"
         , "qed"
           -- **A term mentioning an open hole still checks.** Γ comes from
@@ -822,7 +822,7 @@ tests =
           -- may still contain holes.
         , ":theorem m : Nat"
         , "claim h : Nat"
-        , "try (succ h)"
+        , "try-core ⌜ succ h ⌝"
         , ":show"
         , ":abandon"
         ]
@@ -886,7 +886,7 @@ tests =
     , script
         "unsatisfiable"
         [ ":theorem vacuous : Type\8321"
-        , "try ((\\ (y : Type) -> y) ((\\ (x : Type) -> x) Type\8321))"
+        , "try-core ⌜ (\\ (y : Type) -> y) ((\\ (x : Type) -> x) Type\8321) ⌝"
         , "solve"
         , ":revalidate"
         , "qed"
@@ -904,7 +904,7 @@ tests =
         , "intro"
         , "into"
         , "along"
-        , "eliminate b"
+        , "eliminate-core ⌜ b ⌝"
         , ":abandon"
         , "data N : Type where { z : N ; s : N -> N }"
         , ":show N"
@@ -926,7 +926,7 @@ tests =
           -- Forced, and written back: the theorem is stored with the level the
           -- obligations left it no choice about.
         , ":theorem lift : Type\8321"
-        , "try Type"
+        , "try-core ⌜ Type ⌝"
         , "solve"
         , "qed"
         , ":show lift"
@@ -934,14 +934,14 @@ tests =
           -- refused (phase 33b) — and the relation that was left over becomes
           -- the scheme's constraint.
         , ":theorem undetermined : Type"
-        , "try Type\8320"
+        , "try-core ⌜ Type\8320 ⌝"
         , "solve"
         , ":revalidate"
         , "qed"
         , ":show undetermined"
           -- Refuted: the same meta is pushed up by one use and down by another.
         , ":theorem crossed : Type\8320"
-        , "try ((\\ (x : Type) -> x) Type\8320)"
+        , "try-core ⌜ (\\ (x : Type) -> x) Type\8320 ⌝"
         , "solve"
         , ":revalidate"
         , "qed"
@@ -969,7 +969,7 @@ tests =
         [ -- One parameter, not two — conversion states an equality as two
           -- inequalities and generalisation reads them back as one.
           ":theorem id : \8704 (A : Type) -> A -> A"
-        , "try (\\ (A : Type) (a : A) -> a)"
+        , "try-core ⌜ \\ (A : Type) (a : A) -> a ⌝"
         , "solve"
         , "qed"
         , ":show id"
@@ -979,7 +979,7 @@ tests =
         , ":infer id"
           -- A scheme with a real constraint between two independent parameters.
         , ":theorem lift : \8704 (A : Type) -> Type"
-        , "try (\\ (A : Type) -> A)"
+        , "try-core ⌜ \\ (A : Type) -> A ⌝"
         , "solve"
         , "qed"
         , ":show lift"
@@ -989,7 +989,7 @@ tests =
           -- arrives at @qed@ rather than at the line.
         , ":infer lift {1 0}"
         , ":theorem bad : Type\8321 -> Type\8320"
-        , "try (lift {1 0})"
+        , "try-core ⌜ lift {1 0} ⌝"
         , "solve"
           -- Here it is: the stored constraint, instantiated. Without it
           -- @Type\8321 -> Type\8320@ is a perfectly good type and this is

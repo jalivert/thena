@@ -129,7 +129,7 @@ import Thena.Rules
   , ruleBase
   , validate
   )
-import Thena.Syntax.Concrete (Raw, RawRule)
+import Thena.Syntax.Concrete (Raw (..), RawRule)
 import Thena.Syntax.Lexer (Located, Token, lexTokens)
 import Thena.Syntax.Parser
   ( parseData
@@ -416,6 +416,16 @@ data CommandError
   | ProofsSuspended [GlobalName]
     -- ^ … or while one is suspended, which is the same hazard postponed: a
     -- suspended proof is resumed and continued, so its replay would change
+  | CoreExpected String
+    -- ^ @try-core x@ — a rule was called from the REPL with an argument that is
+    -- not in corners (phase 38).
+    --
+    -- **The two vocabularies have to be visible at the call site.** From this
+    -- phase the rule base holds core-taking tactics under @-core@ names and
+    -- will hold surface-taking ones under the good names; a bare argument is
+    -- reserved for the surface term it will be from phase 39 on, so accepting
+    -- it as a core term now would mean its meaning changing silently later.
+    -- Carries the argument as written.
   | LevelExpected String
     -- ^ @:elim Nat Nat@ — @:elim@\'s optional second argument parsed as a term
     -- but is not a @Typeₗ@ (phase 10). Not called @NotAUniverse@ because
@@ -455,18 +465,44 @@ parseDevelopment = parseWith resolvePartial
 -- means inside a rule body — @f a b@ is two arguments in both. The counter is
 -- threaded through, because resolving mints display variables.
 --
+-- | Why an argument run did not become terms.
+--
+-- Two outcomes rather than one 'SyntaxError', because they are answered
+-- differently: a malformed argument is the user's typo and reports as
+-- 'Failed', while an argument that is merely not in corners is a 'Rejected'
+-- with its own sentence (phase 38).
+data ArgumentError
+  = Syntax SyntaxError
+  | NotInCorners
+
+-- | The arguments of a bare-word rule call: **each one written in corners**.
+--
+-- **Phase 38, and it is what makes the two vocabularies visible.** Every atom
+-- must be @⌜ t ⌝@ — the corners already meant /this is a term, not a chain/ in
+-- the development syntax (§2.7), and here they mean /this is a core term, not
+-- a surface one/. The bare form is refused rather than accepted, because from
+-- phase 39 a bare argument is a **surface** term: accepting it as core now
+-- would mean the same line silently changing meaning later.
+--
+-- The corners come off here and nothing below sees them:
+-- 'Thena.Syntax.Resolve' treats @RawQuote@ transparently in a term position
+-- anyway, so unwrapping is about /requiring/ them, not about reading them.
 parseArguments
-  :: GlobalEnv -> Context -> Int -> String -> Either SyntaxError ([Core], Int)
+  :: GlobalEnv -> Context -> Int -> String -> Either ArgumentError ([Core], Int)
 parseArguments env ctx n src = do
-  ts   <- tokensOf src
-  raws <- mapLeft ParseFailed (parseAtoms ts)
+  ts   <- mapLeft Syntax (tokensOf src)
+  raws <- mapLeft (Syntax . ParseFailed) (parseAtoms ts)
   go n raws
   where
     go k []       = Right ([], k)
     go k (r : rs) = do
-      (t, k1)  <- mapLeft ResolveFailed (resolve env ctx k r)
+      inner    <- unquote r
+      (t, k1)  <- mapLeft (Syntax . ResolveFailed) (resolve env ctx k inner)
       (ts', k2) <- go k1 rs
       Right (t : ts', k2)
+
+    unquote (RawQuote t) = Right t
+    unquote _            = Left NotInCorners
 
 parseWith
   :: (GlobalEnv -> Context -> Int -> Raw -> Either ResolveError (a, Int))
@@ -735,7 +771,9 @@ dispatch s name arg = case name of
     -- a colon looks, and nothing that looks lives in the rule base.
     | take 1 name == ":" -> (s, Rejected (NoSuchCommand name))
     | otherwise -> case parseArguments (globals machine) ctx (names machine) arg of
-        Left e          -> (s, Failed e)
+        Left err        -> case err of
+          NotInCorners -> (s, Rejected (CoreExpected arg))
+          Syntax e     -> (s, Failed e)
         Right (ts, n1)  ->
           progress
             (sessionStepping s)

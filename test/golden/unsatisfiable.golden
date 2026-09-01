@@ -1,6 +1,6 @@
 thena spine> :theorem vacuous : Type₁
 proving vacuous : Type₁
-thena spine> try ((\ (y : Type) -> y) ((\ (x : Type) -> x) Type₁))
+thena spine> try-core ⌜ (\ (y : Type) -> y) ((\ (x : Type) -> x) Type₁) ⌝
 thena spine> solve
 thena spine> :revalidate
 no levels satisfy all of these at once:

@@ -4,7 +4,7 @@ rule base standard where
 
 rule attack :- when focus-is-hole then prim-attack
 
-rule try t :- when focus-is-hole then prim-try t
+rule try-core t :- when focus-is-hole then prim-try t
 
 rule abandon :- when focus-is-hole then prim-abandon
 
@@ -16,14 +16,14 @@ rule solve :- when focus-is-guess then prim-solve
 
 rule regret :- when focus-is-guess then prim-regret
 
-rule eliminate t :- when focus-is-hole then prim-eliminate t
+rule eliminate-core t :- when focus-is-hole then prim-eliminate t
 
 rule elab-var :- when focus-is-hole hint-is-name
   then t = resolve hint
-     ; try t
+     ; try-core t
      ; prim-solve
 
-rule unify-refine t :- when focus-is-hole
+rule unify-refine-core t :- when focus-is-hole
   then n = fresh-name "refined"
      ; x = define n t
      ; s = typeof x
@@ -32,6 +32,6 @@ rule unify-refine t :- when focus-is-hole
      ; prim-try x
      ; prim-solve
 
-rule apply f :- when focus-is-hole
+rule apply-core f :- when focus-is-hole
   then s = prim-apply f
-     ; unify-refine s
+     ; unify-refine-core s

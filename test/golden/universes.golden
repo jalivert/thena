@@ -17,7 +17,7 @@ thena spine> attack
 thena spine> intro
 thena spine> into
 thena spine> along
-thena spine> eliminate b
+thena spine> eliminate-core ⌜ b ⌝
 subgoals: box1Method
 thena spine> :abandon
 abandoned probe

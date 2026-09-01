@@ -2,7 +2,7 @@ BASE = r'''data Term : Type₀ where { true : Term ; false : Term ; ifthen : Ter
 data NV : Term -> Type₀ where { nvZero : NV zero ; nvSucc : ∀ (t : Term) (n : NV t) -> NV (succ t) }
 data Step : Term -> Term -> Type₀ where { eIfTrue : ∀ (t2 : Term) (t3 : Term) -> Step (ifthen true t2 t3) t2 ; eIfFalse : ∀ (t2 : Term) (t3 : Term) -> Step (ifthen false t2 t3) t3 ; eIf : ∀ (t1 : Term) (t1' : Term) (t2 : Term) (t3 : Term) (s : Step t1 t1') -> Step (ifthen t1 t2 t3) (ifthen t1' t2 t3) ; eSucc : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (succ t1) (succ t1') ; ePredZero : Step (pred zero) zero ; ePredSucc : ∀ (v : Term) (nv : NV v) -> Step (pred (succ v)) v ; ePred : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (pred t1) (pred t1') ; eIsZeroZero : Step (iszero zero) true ; eIsZeroSucc : ∀ (v : Term) (nv : NV v) -> Step (iszero (succ v)) false ; eIsZero : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (iszero t1) (iszero t1') }
 :theorem absurd : ∀ (C : Type₀) (e : Empty {0}) -> C
-try (\ (C : Type₀) (e : Empty {0}) -> elim Empty {0} () (\ (t : Empty {0}) -> C) () () e)
+try-core ⌜ \ (C : Type₀) (e : Empty {0}) -> elim Empty {0} () (\ (t : Empty {0}) -> C) () () e ⌝
 solve
 qed
 :theorem sym : ∀ (A : Type₀) (a : A) (b : A) (e : Eq {0} A a b) -> Eq {0} A b a
@@ -16,9 +16,9 @@ along
 along
 along
 along
-eliminate e
+eliminate-core ⌜ e ⌝
 back
-try (\ (c : A) -> refl {0} A c)
+try-core ⌜ \ (c : A) -> refl {0} A c ⌝
 solve
 along
 solve
@@ -43,9 +43,9 @@ along
 along
 along
 along
-eliminate e
+eliminate-core ⌜ e ⌝
 back
-try (\ (c : A) (h : P c) -> h)
+try-core ⌜ \ (c : A) (h : P c) -> h ⌝
 solve
 along
 solve
@@ -73,9 +73,9 @@ along
 along
 along
 along
-eliminate e
+eliminate-core ⌜ e ⌝
 back
-try (\ (c : A) -> refl {0} B (f c))
+try-core ⌜ \ (c : A) -> refl {0} B (f c) ⌝
 solve
 along
 solve
@@ -102,9 +102,9 @@ along
 along
 along
 along
-eliminate e
+eliminate-core ⌜ e ⌝
 back
-try (\ (z : A) (h : Eq {0} A z c) -> h)
+try-core ⌜ \ (z : A) (h : Eq {0} A z c) -> h ⌝
 solve
 along
 solve
@@ -389,10 +389,10 @@ def branch(lem, ct):
 def proof(name, ty, intros, tgt, bodies):
     m, k = len(bodies), len(intros)
     out = [":theorem %s : %s" % (name, ty), "attack"]
-    out += ["intro"] * k + ["into"] + ["along"] * k + ["eliminate " + tgt]
+    out += ["intro"] * k + ["into"] + ["along"] * k + ["eliminate-core ⌜ " + tgt + " ⌝"]
     out += ["back"] * m
     for b in bodies:
-        out += ["try (" + b + ")", "solve", "along"]
+        out += ["try-core ⌜ " + b + " ⌝", "solve", "along"]
     out += ["solve"] + ["back"] * (1 + k + m) + ["solve", "qed"]
     return out
 

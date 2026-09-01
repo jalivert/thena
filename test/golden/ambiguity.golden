@@ -8,7 +8,7 @@ Type (?ℓ6) ≟ Type₀   yes
   provided 0 ≤ ?ℓ6
 thena spine> :theorem lift : Type₁
 proving lift : Type₁
-thena spine> try Type
+thena spine> try-core ⌜ Type ⌝
 thena spine> solve
 thena spine> qed
 lift : Type₁   ∎
@@ -17,7 +17,7 @@ lift : Type₁
 lift = let lift = Type₀ : Type₁ in lift
 thena spine> :theorem undetermined : Type
 proving undetermined : Type (?ℓ10)
-thena spine> try Type₀
+thena spine> try-core ⌜ Type₀ ⌝
 thena spine> solve
 thena spine> :revalidate
 valid
@@ -28,7 +28,7 @@ undetermined {ℓ₁₂} : (1 ≤ ℓ₁₂) ⊢ Type (ℓ₁₂)
 undetermined = let undetermined = Type₀ : Type (ℓ₁₂) in undetermined
 thena spine> :theorem crossed : Type₀
 proving crossed : Type₀
-thena spine> try ((\ (x : Type) -> x) Type₀)
+thena spine> try-core ⌜ (\ (x : Type) -> x) Type₀ ⌝
 thena spine> solve
 thena spine> :revalidate
 1 is not at most 0

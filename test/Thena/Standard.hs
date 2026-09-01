@@ -61,7 +61,7 @@ standardVisible = allRules <$> standardBases
 expectedStandard :: [Rule]
 expectedStandard =
   [ Rule (GlobalName "attack")     []    [FocusIsHole]                 [Do Attack]
-  , Rule (GlobalName "try") ["t"] [FocusIsHole] [Do (Try (Ref "t"))]
+  , Rule (GlobalName "try-core") ["t"] [FocusIsHole] [Do (Try (Ref "t"))]
   , Rule (GlobalName "abandon")    []    [FocusIsHole]                 [Do Abandon]
     -- **Two clauses of one name** (phase 23b): table 2.8 has two intro rules and
     -- they differ only in their head, which is exactly what a second clause is
@@ -72,7 +72,7 @@ expectedStandard =
   , Rule (GlobalName "intro")      []    [FocusIsGuess, GoalTypeIsLet] [Do Intro]
   , Rule (GlobalName "solve")      []    [FocusIsGuess]                [Do Solve]
   , Rule (GlobalName "regret")     []    [FocusIsGuess]                [Do Regret]
-  , Rule (GlobalName "eliminate")  ["t"] [FocusIsHole]                 [Do (Op.Eliminate (Ref "t"))]
+  , Rule (GlobalName "eliminate-core")  ["t"] [FocusIsHole]                 [Do (Op.Eliminate (Ref "t"))]
   , elabVar
   , unifyRefine
   , applyRule
@@ -85,7 +85,7 @@ expectedStandard =
 -- not yet have the goal's type, so it is parked in a definition until
 -- unification makes the two converge, and only then filled in.
 unifyRefine :: Rule
-unifyRefine = Rule (GlobalName "unify-refine") ["t"] [FocusIsHole]
+unifyRefine = Rule (GlobalName "unify-refine-core") ["t"] [FocusIsHole]
   [ Bind "n" (FreshName (Lit (VText "refined")))
   , Bind "x" (Define (Ref "n") (Ref "t"))
   , Bind "s" (Typing (Ref "x"))
@@ -101,9 +101,9 @@ unifyRefine = Rule (GlobalName "unify-refine") ["t"] [FocusIsHole]
 -- saturated spine and 'unifyRefine' is what makes it fit, unchanged. @apply@
 -- adds no capability the two of them did not already have.
 applyRule :: Rule
-applyRule = Rule (GlobalName "apply") ["f"] [FocusIsHole]
+applyRule = Rule (GlobalName "apply-core") ["f"] [FocusIsHole]
   [ Bind "s" (Op.Apply (Ref "f"))
-  , Do (Call (GlobalName "unify-refine") [Ref "s"])
+  , Do (Call (GlobalName "unify-refine-core") [Ref "s"])
   ]
 
 -- | A fresh session with 'expectedBase' installed, for the suites that drive
@@ -127,6 +127,6 @@ expectedBase = [ruleBase "standard" Nothing "" expectedStandard]
 elabVar :: Rule
 elabVar = Rule (GlobalName "elab-var") [] [FocusIsHole, HintIsName]
   [ Bind "t" (Op.Resolve (Ref hintName))
-  , Do (Call (GlobalName "try") [Ref "t"])
+  , Do (Call (GlobalName "try-core") [Ref "t"])
   , Do Solve
   ]

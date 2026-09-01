@@ -100,7 +100,6 @@ Term :: { Raw }
   | let '?' ident ':' Term '≐' '(' Term ')' in Term
                                                    { RawGuess $3 $5 $8 $11 }
   | Constraint '▸' Term                            { RawPending $1 $3 }
-  | '[|' Term '|]'                                 { RawQuote $2 }
   -- **Level arguments are written or omitted** (MS3 phase 31c). Omitting them
   -- is the only spelling for a monomorphic family, which is every family
   -- written before this phase, so nothing existing moves.
@@ -227,6 +226,12 @@ App :: { Raw }
 
 Atom :: { Raw }
   : ident                                  { RawName $1 }
+  -- **The corners are an atom, not a term** (phase 38). They were a @Term@
+  -- production, so @⌜ t ⌝@ could not appear in an atom run — and phase 38's
+  -- REPL writes every core argument of a rule exactly there. Moving it is
+  -- strictly more permissive: every place it parsed before still reaches it
+  -- through @Term -> App -> Atom@.
+  | '[|' Term '|]'                         { RawQuote $2 }
   | ident LevelArgs                        { RawAt $1 $2 }
   | univ                                   { RawUniverse $1 }
   | Type                                   { RawUniverseOpen }

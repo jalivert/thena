@@ -27,7 +27,7 @@ context
   _ : A
 type
   A
-thena spine> try _
+thena spine> try-core ⌜ _ ⌝
 thena spine> solve
 thena spine> back
 thena spine> back

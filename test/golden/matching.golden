@@ -1,23 +1,23 @@
 thena spine> :rules
 standard
   attack
-  try ‹t›
+  try-core ‹t›
   abandon
   intro
   intro
   solve
   regret
-  eliminate ‹t›
+  eliminate-core ‹t›
   elab-var
-  unify-refine ‹t›
-  apply ‹f›
+  unify-refine-core ‹t›
+  apply-core ‹f›
 thena spine> :matches
 attack
-try ‹t›
+try-core ‹t›
 abandon
-eliminate ‹t›
-unify-refine ‹t›
-apply ‹f›
+eliminate-core ‹t›
+unify-refine-core ‹t›
+apply-core ‹f›
 thena spine> attack
 thena spine> :matches
 solve
@@ -30,11 +30,11 @@ thena spine> :theorem id : ∀ (A : Type₀) -> A -> A
 proving id : ∀ (A : Type₀) -> A -> A
 thena spine> :matches
 attack
-try ‹t›
+try-core ‹t›
 abandon
-eliminate ‹t›
-unify-refine ‹t›
-apply ‹f›
+eliminate-core ‹t›
+unify-refine-core ‹t›
+apply-core ‹f›
 thena spine> attack
 thena spine> :matches
 intro
@@ -54,11 +54,11 @@ type
   A -> A
 thena spine> :matches
 attack
-try ‹t›
+try-core ‹t›
 abandon
-eliminate ‹t›
-unify-refine ‹t›
-apply ‹f›
+eliminate-core ‹t›
+unify-refine-core ‹t›
+apply-core ‹f›
 thena spine> :abandon
 abandoned id
 thena spine> :theorem c : ∀ (A : Type₀) -> Type₀

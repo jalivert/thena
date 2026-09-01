@@ -1036,6 +1036,8 @@ renderCommandError e = case e of
   NothingToRetry       -> "no choice point to retry"
   NoSuchChoice n       -> "no choice point " ++ show n
   LevelExpected u      -> u ++ " is not a universe, as in \"Type\8320\""
+  CoreExpected a       ->
+    "a core term must be written in corners: \8988 " ++ a ++ " \8989"
   NotThere m           -> renderMoveError m
   MixedLoad w          -> w ++ " takes either one script or any number of " ++ ruleSuffix ++ " files"
   ProofUnderway g      ->

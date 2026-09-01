@@ -69,7 +69,7 @@ identityProof =
   , "along"
   -- The second binder of @A -> A@ is written @_@, because a non-dependent Π
   -- carries that identifier (§2.6). It is an ordinary name and is typed as one.
-  , "try _"
+  , "try-core ⌜ _ ⌝"
   , "solve"
   , "back"
   , "back"
@@ -116,14 +116,25 @@ holeTests =
   , ok "intro walks a Π"        (arrowGoal ++ ["attack", "intro"])
   , ok "and then the next one"  (arrowGoal ++ ["attack", "intro", "intro"])
 
-  , ok "try attaches a guess"   (natGoal ++ ["attack", "into", "try zero"])
+  , ok "try attaches a guess"             (natGoal ++ ["attack", "into", "try-core ⌜ zero ⌝"])
+
+    -- **A core tactic's argument must be in corners** (phase 38). The bare
+    -- form is refused rather than accepted, because from phase 39 on a bare
+    -- argument is a *surface* term — accepting it as core now would mean the
+    -- same line silently changing meaning later.
+  , rejects "a core tactic's argument must be in corners"
+      (natGoal ++ ["attack", "into", "try-core zero"]) (CoreExpected "zero")
+    -- The corners subsume phase 23b's parenthesisation rule: an argument that
+    -- is not a single atom needed parentheses, and inside corners it does not.
+  , ok "and inside them an argument needs no parentheses"
+      (natGoal ++ ["attack", "into", "try-core ⌜ succ zero ⌝"])
   , ok "and regret takes it off again"
-      (natGoal ++ ["attack", "into", "try zero", "regret"])
+      (natGoal ++ ["attack", "into", "try-core ⌜ zero ⌝", "regret"])
   , halts "regret needs a guess" (natGoal ++ ["regret"])
       (NoClauseMatched (GlobalName "regret") 0 [0])
 
   , ok "solve commits a pure guess"
-      (natGoal ++ ["attack", "into", "try zero", "solve"])
+      (natGoal ++ ["attack", "into", "try-core ⌜ zero ⌝", "solve"])
   , notYetPure "and refuses one that is not pure" (natGoal ++ ["attack", "solve"])
 
     -- @claim@ inserts above the focus and leaves it where it was, so reaching
@@ -172,7 +183,7 @@ sessionTests =
       let l = run
                 [ ":theorem t : Type₀", ":suspend"
                 , "data " ++ natDecl
-                , ":resume t", "try Nat", "solve", "qed"
+                , ":resume t", "try-core ⌜ Nat ⌝", "solve", "qed"
                 ]
       loadedError l @?= Nothing
       assertBool "t was not admitted"
@@ -193,7 +204,7 @@ sessionTests =
       namesIn (developmentAfter (run ["claim spare : Type₀", ":theorem t : Type₀"]))
         @?= ["t"]
   , ok "so a hole left in the scratch cannot block qed"
-      ["claim spare : Type₀", ":theorem t : Type₁", "try Type₀", "solve", "qed"]
+      ["claim spare : Type₀", ":theorem t : Type₁", "try-core ⌜ Type₀ ⌝", "solve", "qed"]
   ]
 
 -- --------------------------------------------------------------------------

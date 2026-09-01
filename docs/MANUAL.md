@@ -320,11 +320,11 @@ type
   A
 ```
 
-`try` proposes a term for the hole; `solve` accepts it. Then walk back out,
+`try-core` proposes a term for the hole; `solve` accepts it. Then walk back out,
 `solve`-ing each guess as you go, and finish:
 
 ```
-thena spine> try _
+thena spine> try-core ⌜ _ ⌝
 thena spine> solve
 thena spine> back
 thena spine> back
@@ -361,7 +361,7 @@ before a `⊢`:
 ```
 thena spine> :theorem lift : Type -> Type
 proving lift : Type (?ℓ229) -> Type (?ℓ230)
-thena spine> try (\ (x : Type) -> x)
+thena spine> try-core ⌜ \ (x : Type) -> x ⌝
 thena spine> solve
 thena spine> qed
 lift {ℓ₂₃₈ ℓ₂₃₉} : (ℓ₂₃₈ ≤ ℓ₂₃₉) ⊢ Type (ℓ₂₃₈) -> Type (ℓ₂₃₉)   ∎
@@ -373,12 +373,12 @@ is nothing to meet.
 
 A use of `lift` writes two levels and owes the condition. **The debt is
 collected by the kernel, not at the moment you type the term** — `:infer` and
-`try` will hand you `lift {1 0}` quite happily, and `qed` is where it stops:
+`try-core` will hand you `lift {1 0}` quite happily, and `qed` is where it stops:
 
 ```
 thena spine> :theorem bad : Type₁ -> Type₀
 proving bad : Type₁ -> Type₀
-thena spine> try (lift {1 0})
+thena spine> try-core ⌜ lift {1 0} ⌝
 thena spine> solve
 thena spine> qed
 the kernel refused it
@@ -393,7 +393,7 @@ the kernel refused it
 |---|---|
 | `attack` | turn the focused hole into a guess, ready to be built |
 | `intro` | move one `∀` binder from the goal into the guess body |
-| `try ‹term›` | propose a term for the focused hole |
+| `try-core ⌜ term ⌝` | propose a term for the focused hole |
 | `solve` | accept the focused guess — it becomes a definition |
 | `regret` | throw away a guess's body, back to a plain hole |
 | `abandon` | remove the focused hole entirely |
@@ -487,7 +487,7 @@ amounts to starting over. Handy for scratch work.
 
 ## 7. Proof by induction
 
-`eliminate ‹target›` is the induction tactic. It builds the motive, works out
+`eliminate-core ⌜ target ⌝` is the induction tactic. It builds the motive, works out
 what each case has to prove, and posts one hole per case.
 
 Assume `Nat`, addition as `plus`, and congruence of `succ` are already proved.
@@ -499,7 +499,7 @@ thena spine> attack
 thena spine> intro
 thena spine> into
 thena spine> along
-thena spine> eliminate n
+thena spine> eliminate-core ⌜ n ⌝
 subgoals: zeroMethod, succMethod
 ```
 
@@ -526,10 +526,10 @@ finish:
 ```
 thena spine> back
 thena spine> back
-thena spine> try (refl {0} Nat zero)
+thena spine> try-core ⌜ refl {0} Nat zero ⌝
 thena spine> solve
 thena spine> along
-thena spine> try (\ (x : Nat) (ih : Eq {0} Nat (plus x zero) x) -> congSucc (plus x zero) x ih)
+thena spine> try-core ⌜ \ (x : Nat) (ih : Eq {0} Nat (plus x zero) x) -> congSucc (plus x zero) x ih ⌝
 thena spine> solve
 thena spine> along
 thena spine> solve
@@ -542,15 +542,20 @@ thena spine> qed
 plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n   ∎
 ```
 
-**A tactic argument that is more than one word must be parenthesised.** A
-command line is a run of atoms, exactly as it would be inside a rule body, so
-`try refl {0} Nat zero` is four arguments and is refused; `try (refl {0} Nat zero)`
-is one.
+**A core tactic's argument is written in corners**, `⌜ … ⌝`. A command line is
+a run of atoms, exactly as it would be inside a rule body, so
+`try-core refl {0} Nat zero` would be four arguments and is refused — the
+corners say where the term begins and ends, and inside them nothing needs
+parenthesising.
 
-`eliminate` works on inductively defined **relations** too, which is what proofs
-about a reduction relation need — see §11.
+The `-core` suffix marks the tactics that take a **development-calculus** term.
+They are the ones that exist today; the surface language and the tactics that
+take *its* terms are being built beside them.
 
-One thing to know: `eliminate` refuses when a premise of the goal would have to
+`eliminate-core` works on inductively defined **relations** too, which is what
+proofs about a reduction relation need — see §11.
+
+One thing to know: `eliminate-core` refuses when a premise of the goal would have to
 follow the target into the abstraction, because the induction it could give you
 there would be too weak to use. The workaround is the ordinary one — do not
 `intro` something you need generalised.
@@ -612,11 +617,11 @@ the hint:
 ```
 thena spine> :matches
 attack
-try ‹t›
+try-core ‹t›
 abandon
-eliminate ‹t›
-unify-refine ‹t›
-apply ‹f›
+eliminate-core ‹t›
+unify-refine-core ‹t›
+apply-core ‹f›
 thena spine> :matches a
 elab-var
 ```
@@ -638,7 +643,7 @@ stack
 thena spine> :step
 pc
   0  t = resolve hint
-  1  call try t
+  1  call try-core t
   2  prim-solve
 env
   hint = ‹a›
@@ -646,7 +651,7 @@ stack
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  0  call try t
+  0  call try-core t
   1  prim-solve
 env
   t = ⌜a⌝
@@ -810,12 +815,12 @@ files of commands.
 | | |
 |---|---|
 | `attack` `intro` `solve` `regret` `abandon` | the hole operations |
-| `try ‹term›` | propose a term for the focused hole |
-| `apply ‹f›` / `unify-refine ‹t›` | apply a function / refine by unification |
+| `try-core ⌜ term ⌝` | propose a term for the focused hole |
+| `apply-core ⌜ f ⌝` / `unify-refine-core ⌜ t ⌝` | apply a function / refine by unification |
 | `goto ‹name›` | move to a hole by name |
 | `assume ‹x› : ‹S›` / `claim ‹x› : ‹S›` | add a hypothesis / a hole above the focus |
 | `unify ‹t› ≟ ‹u›` | solve by unification |
-| `eliminate ‹target›` | induction |
+| `eliminate-core ⌜ target ⌝` | induction |
 | `reduce` | reduce the focused term in place |
 | `along` `into` `back` | move on the chain |
 | `cross type` / `cross val` | move into a term |

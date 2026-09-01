@@ -140,7 +140,7 @@ matchTests =
       -- to choose between them, and the user sees the choice being made.
       testCase "a hole offers the hole rules, in definition order" $
         matching emptyGlobals (holeAt type0)
-          @?= ["attack", "try", "abandon", "eliminate", "unify-refine", "apply"]
+          @?= ["attack", "try-core", "abandon", "eliminate-core", "unify-refine-core", "apply-core"]
 
     , testCase "a guess at a non-Π offers only solve and regret" $
         matching emptyGlobals (guessAt type0)
@@ -238,8 +238,8 @@ iteratorTests =
             deep = drop 2 (drain it)
          in do
               _ <- pure deep
-              map nameOf (drain it) @?= ["attack", "try", "abandon", "eliminate", "unify-refine", "apply"]
-              map nameOf deep @?= ["abandon", "eliminate", "unify-refine", "apply"]
+              map nameOf (drain it) @?= ["attack", "try-core", "abandon", "eliminate-core", "unify-refine-core", "apply-core"]
+              map nameOf deep @?= ["abandon", "eliminate-core", "unify-refine-core", "apply-core"]
     ]
 
 -- --------------------------------------------------------------------------
@@ -372,7 +372,7 @@ producesTests =
         -- get it back, so what a @Bind@ on either would name is the caller's
         -- own environment — restored on return, and without the destination.
       , ("prove",       e, hole,    [],            Ops.Prove Nothing)
-      , ("call",        e, hole,    [],            Ops.Call (GlobalName "try") [term type0])
+      , ("call",        e, hole,    [],            Ops.Call (GlobalName "try-core") [term type0])
       , ("parse",       e, hole,    [],            Ops.Parse (text "Type\8320"))
       , ("resolve",     e, hole,    [],            Ops.Resolve (Lit (VSurface (RawUniverse 0))))
       ]

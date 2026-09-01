@@ -4,27 +4,27 @@ data Even : Nat -> Type₀ where { evenZero : Even zero ; evenSS : ∀ (n : Nat)
 :whnf NoConfusionNat zero (succ zero)
 :whnf NoConfusionNat (succ zero) (succ (succ zero))
 :theorem twoIsEven : Even (succ (succ zero))
-try (evenSS zero evenZero)
+try-core ⌜ evenSS zero evenZero ⌝
 solve
 qed
 :theorem anEvenNumber : Sigma Nat Even
-try (pair Nat Even (succ (succ zero)) twoIsEven)
+try-core ⌜ pair Nat Even (succ (succ zero)) twoIsEven ⌝
 solve
 qed
 :whnf fst Nat Even anEvenNumber
 :theorem eta : ∀ (A : Type₀) (B : A -> Type₀) (s : Sigma A B) -> Eq {0} (Sigma A B) s (pair A B (fst A B s) (snd A B s))
-try (\ (A : Type₀) (B : A -> Type₀) (s : Sigma A B) -> elim Sigma (A B) (\ (z : Sigma A B) -> Eq {0} (Sigma A B) z (pair A B (fst A B z) (snd A B z))) ((\ (a : A) (b : B a) -> refl {0} (Sigma A B) (pair A B a b))) () s)
+try-core ⌜ \ (A : Type₀) (B : A -> Type₀) (s : Sigma A B) -> elim Sigma (A B) (\ (z : Sigma A B) -> Eq {0} (Sigma A B) z (pair A B (fst A B z) (snd A B z))) ((\ (a : A) (b : B a) -> refl {0} (Sigma A B) (pair A B a b))) () s ⌝
 solve
 qed
 :theorem swap : ∀ (A : Type₀) (B : Type₀) (c : And {0 0} A B) -> And {0 0} B A
-try (\ (A : Type₀) (B : Type₀) (c : And {0 0} A B) -> both {0 0} B A (andRight A B c) (andLeft A B c))
+try-core ⌜ \ (A : Type₀) (B : Type₀) (c : And {0 0} A B) -> both {0 0} B A (andRight A B c) (andLeft A B c) ⌝
 solve
 qed
 :theorem succInjective : ∀ (a : Nat) (b : Nat) (q : Eq {0} Nat (succ a) (succ b)) -> Eq {0} Nat a b
-try (\ (a : Nat) (b : Nat) (q : Eq {0} Nat (succ a) (succ b)) -> noConfusionNat (succ a) (succ b) q)
+try-core ⌜ \ (a : Nat) (b : Nat) (q : Eq {0} Nat (succ a) (succ b)) -> noConfusionNat (succ a) (succ b) q ⌝
 solve
 qed
 :theorem zeroIsNotSuccessor : ∀ (a : Nat) (q : Eq {0} Nat zero (succ a)) -> Empty {0}
-try (\ (a : Nat) (q : Eq {0} Nat zero (succ a)) -> noConfusionNat zero (succ a) q)
+try-core ⌜ \ (a : Nat) (q : Eq {0} Nat zero (succ a)) -> noConfusionNat zero (succ a) q ⌝
 solve
 qed

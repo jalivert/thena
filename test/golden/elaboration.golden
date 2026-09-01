@@ -18,11 +18,11 @@ type
   A
 thena spine> :matches
 attack
-try ‹t›
+try-core ‹t›
 abandon
-eliminate ‹t›
-unify-refine ‹t›
-apply ‹f›
+eliminate-core ‹t›
+unify-refine-core ‹t›
+apply-core ‹f›
 thena spine> :matches a
 elab-var
 thena spine> prove a
@@ -78,7 +78,7 @@ stack
 thena spine> :step
 pc
   0  t = resolve hint
-  1  call try t
+  1  call try-core t
   2  prim-solve
 env
   hint = ‹a›
@@ -86,7 +86,7 @@ stack
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  0  call try t
+  0  call try-core t
   1  prim-solve
 env
   t = ⌜a⌝

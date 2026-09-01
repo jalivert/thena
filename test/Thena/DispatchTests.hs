@@ -291,7 +291,7 @@ dispatchableTests =
     [ testCase "matches shows try, dispatch does not" $ do
         let std = expectedBase
         names' (matches std emptyGlobals hole Nothing)
-          @?= ["attack", "try", "abandon", "eliminate", "unify-refine", "apply"]
+          @?= ["attack", "try-core", "abandon", "eliminate-core", "unify-refine-core", "apply-core"]
         names' (dispatch std emptyGlobals hole Nothing)
           @?= ["attack", "abandon"]
 
