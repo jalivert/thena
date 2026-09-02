@@ -38,11 +38,13 @@ import Thena.Core.Context (Context, entryIdent, entryVar)
 
 import Thena.Core.Level (Level (..), freshLevelMeta, levelOfNat)
 import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Var)
+import qualified Data.List.NonEmpty as NE
+
 import Thena.Development.Partial (Partial (..))
 import Thena.Errors (FailReason (..), ResolveError (..), SyntaxError (..))
 import Thena.Global.Env (GlobalEnv, isDeclared)
 import Thena.Ops (Instr (..), Op (..), Operand (..), Value (..))
-import Thena.Surface.Concrete (Surface (..))
+import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceBinder (..))
 
 -- | The program that elaborates one surface node into the focused hole.
 --
@@ -88,7 +90,44 @@ compile env ctx n s = case s of
   SurfaceHole _ -> Right ([], n)
 
   SurfaceApp {}   -> unsupported "an application"
-  SurfaceLam {}   -> unsupported "a lambda"
+
+  -- @E⟦\ x => e⟧ = ATTACK; LAMBDA x; E⟦e⟧; SOLVE@ — Brady's λ case, and the
+  -- first structural one this elaborator can do (MS4 phase 41b).
+  --
+  -- **One @prim-intro@ per binder, and each is given the SURFACE name.** That
+  -- is what @prim-intro@'s optional operand is for: without it the binder keeps
+  -- the identifier written in the /type/, so @\ y -> y@ at a goal
+  -- @∀ (x : A) -> A@ would bind @x@ and the body's @y@ would resolve to
+  -- nothing.
+  --
+  -- **Then @into@, then one @along@ per binder** — the navigation the phase-26
+  -- mockup established and tested. It is counting structure rather than holding
+  -- a handle, which is @elaboration-in-rules.md@'s gap 1; it is exact here
+  -- because this clause knows how many binders it introduced.
+  --
+  -- **And the moves are undone before @prim-solve@**, which is the invariant
+  -- every later case will lean on: **an @Elaborate@ leaves the focus where it
+  -- found it.** The leaves do it by not moving at all — @prim-try@ and
+  -- @prim-solve@ rewrite the focused component in place — and this clause does
+  -- it by balancing its own moves.
+  SurfaceLam bs body ->
+    let names' = [ x | SurfaceBinder _ x _ <- NE.toList bs ]
+        moves  = length names' + 1
+     in case [ b | b@(SurfaceBinder p _ ty) <- NE.toList bs
+             , p == Implicit || ty /= Nothing ] of
+          _ : _ -> Left (NoElaborationRule "a lambda binder with a type or braces")
+          []    -> Right
+            ( concat
+                [ [Do Attack]
+                , [ Do (Intro (Just (lit' x))) | x <- names' ]
+                , [Do Into]
+                , replicate (length names') (Do Along)
+                , [Do (Elaborate (Lit (VSurface body)))]
+                , replicate moves (Do Back)
+                , [Do Solve]
+                ]
+            , n
+            )
   SurfacePi {}    -> unsupported "a ∀"
   SurfaceArrow {} -> unsupported "an arrow"
   SurfaceLet {}   -> unsupported "a let"
@@ -96,6 +135,7 @@ compile env ctx n s = case s of
   SurfaceElim {}  -> unsupported "an elim"
   where
     attach t = Right ([Do (Try (lit t)), Do Solve], n)
+    lit' x   = Lit (VText x)
 
     -- The innermost binding of that name, if the context has one. The same
     -- reading "Thena.Syntax.Resolve" gives it, kept here rather than shared:

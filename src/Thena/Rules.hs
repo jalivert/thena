@@ -395,6 +395,13 @@ operation g i (RawOp w as)
       -- up** (phase 23): the base is searched when the call runs, which is what
       -- lets a rule call itself and call a rule defined after it, or in a base
       -- loaded after it. 'Thena.Rules.clauses' is the search.
+      -- **@prim-intro@ takes an optional name** (MS4 phase 41b): bare, the
+      -- binder keeps the one written in the type; with an argument, the
+      -- caller's. Spelled here rather than in the arity tables because it is
+      -- the one op that appears in two of them.
+      ("prim-intro", [])          -> Right (Intro Nothing)
+      ("prim-intro", [a])         -> Intro . Just <$> ref a
+      ("prim-intro", _)           -> bad
       ("call", RawRef r : rest)   -> Call (GlobalName r) <$> traverse ref rest
       ("call", _)                 -> bad
 
@@ -451,7 +458,7 @@ operation g i (RawOp w as)
 
     nullary =
       [ ("along", Along), ("into", Into), ("back", Back), ("reduce", Reduce)
-      , ("prim-attack", Attack), ("prim-intro", Intro), ("prim-regret", Regret)
+      , ("prim-attack", Attack), ("prim-regret", Regret)
       , ("prim-solve", Solve), ("prim-abandon", Abandon), ("goal", Goal)
       , ("prim-prove", Prove)
       ]

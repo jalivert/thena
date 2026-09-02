@@ -21,6 +21,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Level (Level (..))
+import qualified Thena.Core.Term
 import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Var, fresh)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, enter, focus)
@@ -44,8 +45,7 @@ import Thena.Ops
   )
 import qualified Thena.Ops as Ops
 import Thena.Rules
-  ( RuleBase
-  , RuleIter
+  ( RuleIter
   , matches
   , next
   )
@@ -57,6 +57,7 @@ tests =
   testGroup
     "elaboration"
     [ leafTests
+    , lambdaTests
     , unsupportedTests
     , baseTests
     ]
@@ -85,10 +86,6 @@ hole = case Cursor.along top of
             (Under (Claim goalVar (Ident "goal") type0) (Trailing (Free goalVar)))
         )
 
-machine :: [RuleBase] -> [Instr] -> Machine
-machine base is =
-  load is (Machine (Exec [] [] []) (Development hole) emptyGlobals base 1000)
-
 runOut :: Machine -> ([String], Either FailReason Machine)
 runOut m = case step m of
   Continue m'       -> runOut m'
@@ -101,7 +98,45 @@ runOut m = case step m of
 
 -- | Elaborate one surface term into the fixture's hole.
 elaborating :: Surface -> Either FailReason Machine
-elaborating s = snd (runOut (machine [] [Do (Ops.Elaborate (Lit (VSurface s)))]))
+elaborating = elaboratingAt hole
+
+-- | The same, at a cursor of your own.
+elaboratingAt :: Cursor -> Surface -> Either FailReason Machine
+elaboratingAt cur s =
+  snd (runOut (load [Do (Ops.Elaborate (Lit (VSurface s)))]
+                 (Machine (Exec [] [] []) (Development cur) emptyGlobals [] 1000)))
+
+-- | @? goal : ∀ (a : Type₀) -> Type₀@ — a hole a lambda can be elaborated into.
+--
+-- **The Π's binder is @a@ and the surface will say @y@**, which is the whole
+-- point of the test that uses it.
+piGoal :: Cursor
+piGoal = enter (Under (Claim goalVar (Ident "goal") ty) (Trailing (Free goalVar)))
+  where
+    ty = Pi (Ident "a") type0 (Thena.Core.Term.close hypVar type0)
+
+-- | The λ binders of the term the development has built, outermost first.
+--
+-- **In the term and not in the chain**: @attack@ opens a guess, @intro@ binds
+-- inside it, and @solve@ commits the lot into one component whose /value/ is a
+-- @Lam@. So the surface name that has to survive ends up as a
+-- 'Thena.Core.Term.Lam' binder, which is where this looks for it.
+identsBound :: Machine -> [String]
+identsBound m = chain (Cursor.rebuild (cursor (development m)))
+  where
+    chain (Under (Define _ _ v _) _) = lams v
+    chain (Under _ rest)             = chain rest
+    chain (Trailing t)               = lams t
+    chain _                          = []
+
+    lams (Lam (Ident i) _ b) = i : lams (Thena.Core.Term.instantiate (Universe LZero) b)
+    lams _                   = []
+
+-- | Is the focus back at the top of the chain?
+isTop :: Machine -> Bool
+isTop m = case Cursor.back (cursor (development m)) of
+  Left _  -> True
+  Right _ -> False
 
 isGuess :: Machine -> Bool
 isGuess m = case focus (cursor (development m)) of
@@ -177,7 +212,6 @@ unsupportedTests =
     "a node with no case is refused, not ignored"
     [ refused "an application"
         (SurfaceApp (SurfaceName "a") [SurfaceArg Explicit (SurfaceName "a")])
-    , refused "a lambda"      (SurfaceLam [binder] (SurfaceName "a"))
     , refused "a ∀"           (SurfacePi [binder] (SurfaceName "a"))
     , refused "an arrow"      (SurfaceArrow (SurfaceName "a") (SurfaceName "a"))
     , refused "a let"         (SurfaceLet "x" Nothing (SurfaceName "a") (SurfaceName "x"))
@@ -187,6 +221,48 @@ unsupportedTests =
     binder = SurfaceBinder Explicit "x" Nothing
     refused what s = testCase what $
       case elaborating s of
+        Left (NoElaborationRule w) -> w @?= what
+        other -> assertFailure ("expected a refusal: " ++ show other)
+
+-- --------------------------------------------------------------------------
+-- The λ case (MS4 phase 41b)
+-- --------------------------------------------------------------------------
+
+lambdaTests :: TestTree
+lambdaTests =
+  testGroup
+    "a lambda elaborates"
+    [ -- **The binder takes the SURFACE name, not the type\'s**, which is the
+      -- whole reason @prim-intro@ gained an operand. The fixture\'s goal binds
+      -- @a@; the surface says @y@; the development must say @y@, or the body\'s
+      -- @y@ resolves to nothing.
+      testCase "the binder takes the surface name" $
+        case elaboratingAt piGoal (SurfaceLam [SurfaceBinder Explicit "y" Nothing]
+                                     (SurfaceName "y")) of
+          Left r  -> assertFailure ("did not elaborate: " ++ show r)
+          Right m -> identsBound m @?= ["y"]
+
+      -- **The invariant every later case leans on**: an @Elaborate@ leaves the
+      -- focus where it found it. The λ case makes moves and must undo them, or
+      -- its own @prim-solve@ lands somewhere else.
+    , testCase "and the focus comes back to where it started" $
+        case elaboratingAt piGoal (SurfaceLam [SurfaceBinder Explicit "y" Nothing]
+                                     (SurfaceName "y")) of
+          Left r  -> assertFailure ("did not elaborate: " ++ show r)
+          Right m -> isTop m @?= True
+
+      -- An annotation is **refused rather than ignored**: checking it against
+      -- the goal\'s domain needs the ascription machinery, which is a later
+      -- phase, and accepting it silently would be a check that is not happening.
+    , refused "a lambda binder with a type or braces"
+        (SurfaceLam [SurfaceBinder Explicit "x" (Just (SurfaceUniverse 0))]
+           (SurfaceName "x"))
+    , refused "a lambda binder with a type or braces"
+        (SurfaceLam [SurfaceBinder Implicit "x" Nothing] (SurfaceName "x"))
+    ]
+  where
+    refused what s = testCase what $
+      case elaboratingAt piGoal s of
         Left (NoElaborationRule w) -> w @?= what
         other -> assertFailure ("expected a refusal: " ++ show other)
 

@@ -131,7 +131,19 @@ data Op
     -- the component at the focus, so none takes a name: §4.0 C1's rule that a
     -- command means one thing wherever it is applies to these too.
   | Attack                    -- ^ @?x : S@ ⟹ @?x ≐ (?x' : S . x') : S@
-  | Intro                     -- ^ move a hole through a Π or a @let@ in its type
+  | Intro (Maybe Operand)
+    -- ^ move a hole through a Π or a @let@ in its type, **optionally naming
+    -- the binder it opens** (MS4 phase 41b).
+    --
+    -- Without a name the binder keeps the one written in the /type/, which is
+    -- what it has always done and what a user typing @intro@ wants. With one,
+    -- the name is the caller's — Brady's @LAMBDA Γ n@, and elaboration needs it:
+    -- @\ y -> y@ against a goal @∀ (x : A) -> A@ must bind **y**, or the body's
+    -- @y@ resolves to nothing.
+    --
+    -- **An optional argument, not an optional mode.** @Prove (Maybe Operand)@
+    -- was deleted one phase ago for being the latter — two mechanisms behind
+    -- one constructor. This is one operation with a default.
   | Try     Operand           -- ^ attach a guess to the hole at the focus
   | Regret                    -- ^ discard it again
   | Solve                     -- ^ commit a guess whose body is pure
@@ -407,7 +419,7 @@ produces o = case o of
   Goto _       -> False   -- a move; it rewrites the cursor and yields nothing
   Back         -> False
   Attack       -> False
-  Intro        -> False
+  Intro _      -> False
   Try _        -> False
   Regret       -> False
   Solve        -> False
@@ -458,7 +470,7 @@ operandsOf o = case o of
   Back         -> []
   Reduce       -> []
   Attack       -> []
-  Intro        -> []
+  Intro m      -> maybe [] (: []) m
   Regret       -> []
   Solve        -> []
   Abandon      -> []
@@ -559,7 +571,7 @@ opKeyword o = case o of
   Unify _ _    -> "unify"
   DefineData _ -> "data"
   Attack       -> "prim-attack"
-  Intro        -> "prim-intro"
+  Intro _      -> "prim-intro"
   Try _        -> "prim-try"
   Regret       -> "prim-regret"
   Solve        -> "prim-solve"

@@ -178,10 +178,10 @@ matchTests =
          in do
               nameOf `map` drain (matches expectedBase emptyGlobals cur)
                 @?= ["intro", "solve", "regret", "prove"]
-              ranOk (machineAt cur [Do Ops.Intro])
+              ranOk (machineAt cur [Do (Ops.Intro Nothing)])
 
     , testCase "where the Π clause is offered, intro succeeds" $
-        ranOk (machineAt (guessAt (arrow type0 type0)) [Do Ops.Intro])
+        ranOk (machineAt (guessAt (arrow type0 type0)) [Do (Ops.Intro Nothing)])
 
       -- Every head this phase has asks about a component, so nothing applies
       -- in the core fragment. Definite, not "blocked": the focus's shape is
@@ -363,7 +363,7 @@ producesTests =
       , ("down",        e, piHole,  [Do Ops.CrossType], Ops.Down Ops.Dom)
       , ("back",        e, hole,    [Do Ops.CrossType], Ops.Back)
       , ("attack",      e, hole,    [],            Ops.Attack)
-      , ("intro",       e, guessAt (arrow type0 type0), [], Ops.Intro)
+      , ("intro",       e, guessAt (arrow type0 type0), [], Ops.Intro Nothing)
       , ("try",         e, hole,    [],            Ops.Try (term type0))
       , ("regret",      e, hole,    tried,         Ops.Regret)
       , ("solve",       e, hole,    tried,         Ops.Solve)

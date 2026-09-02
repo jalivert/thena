@@ -483,11 +483,16 @@ perform instr rest m = case operation instr of
   -- Table 2.8's intro-∀ and intro-let, which "only replace constructions of the
   -- shape @?x : S . x@" — anything else is made ready by @attack@ first. So the
   -- shape test is the specification, not a shortcut.
-  Intro -> onHole $ \c -> case c of
-    Component.Guess x i g ty ->
-      (\(g', n1) -> (Component.Guess x i g' ty, n1))
-        <$> introduce (globals m) contextAt (names m) g
-    _ -> Left NotReadyToIntroduce
+  -- **The name is optional** (MS4 phase 41b). Given, it is the binder's; absent,
+  -- the binder keeps the one written in the type. Read through 'operandIdent',
+  -- so it is checked to be something the printer can print back (§2.6).
+  Intro mn -> case traverse (operandIdent (env (exec m))) mn of
+    Left r    -> failure r m
+    Right nm  -> onHole $ \c -> case c of
+      Component.Guess x i g ty ->
+        (\(g', n1) -> (Component.Guess x i g' ty, n1))
+          <$> introduce (globals m) contextAt (names m) nm g
+      _ -> Left NotReadyToIntroduce
 
   -- **Table 2.7's side condition @Θ ⊩ t : S@, enforced** (phase 25b). It was
   -- documented and not checked until this phase, so an ill-typed guess sat in
@@ -1009,9 +1014,9 @@ whereImpure i = case i of
 -- the top of the whole development would change what the development proves,
 -- whereas inside a guess the guess's own type absorbs the binders.
 introduce
-  :: GlobalEnv -> Context -> Int -> Partial
+  :: GlobalEnv -> Context -> Int -> Maybe Ident -> Partial
   -> Either FailReason (Partial, Int)
-introduce env ctx n p = case p of
+introduce env ctx n nm p = case p of
   Under (Component.Claim v i s) (Trailing (Free v'))
     | v == v' -> case s of
         -- @intro-let@ reads the type AS WRITTEN, and must come first.
@@ -1022,13 +1027,15 @@ introduce env ctx n p = case p of
         -- phase 15, while writing the @intro-let@ rule's head; §5.1 and §7.2
         -- both carry it.
         Let j val sty cod ->
-          Right (opened (Component.Define y j val sty) (instantiate (Free y) cod))
+          Right (opened (Component.Define y (named j) val sty) (instantiate (Free y) cod))
         -- @intro-∀@ reduces first, because a goal typed @id Type₀ (Nat -> Nat)@
         -- is a Π and must be introduced (§8's own example, from the other side).
         _ -> case whnf env ctx s of
-          Pi j dom cod -> Right (opened (Component.Assume y j dom) (instantiate (Free y) cod))
+          Pi j dom cod -> Right (opened (Component.Assume y (named j) dom) (instantiate (Free y) cod))
           _            -> Left NothingToIntroduce
       where
+        -- The caller's name if there is one, the type's otherwise.
+        named j = maybe j id nm
         (y, n1) = fresh n
         (h, n2) = fresh n1
         opened binder rest =
@@ -1037,7 +1044,7 @@ introduce env ctx n p = case p of
           )
   Under c rest ->
     (\(rest', n1) -> (Under c rest', n1))
-      <$> introduce env (ctx ++ [Component.forget c]) n rest
+      <$> introduce env (ctx ++ [Component.forget c]) n nm rest
   _ -> Left NotReadyToIntroduce
 
 -- --------------------------------------------------------------------------
