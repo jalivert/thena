@@ -323,6 +323,26 @@ sessionTests =
       , "elaborate (let y = zero in let y = succ y in y)"
       , "qed"
       ]
+    -- **Cumulativity does not reach into an argument** (MS4 phase 41h). Both
+    -- of these were ACCEPTED until then, and @:revalidate@ called the
+    -- development valid — @ms4/CLOSEOUT.md@ 12. @F@ is opaque, so nothing
+    -- relates @F Type₀@ to @F Type₁@.
+  , notOk "a neutral spine's argument is not cumulative"
+      [ "assume F : Type\8322 -> Type\8320"
+      , "assume x : F Type\8320"
+      , ":goal F Type\8321"
+      , "try-core \8988 x \8989"
+      ]
+    -- The one that matters more, because datatype parameters are everywhere:
+    -- the value inside is a @Type₀ -> Empty2@ and the type would have claimed
+    -- its contents were a @Type₁ -> Empty2@.
+  , notOk "nor is a datatype's parameter"
+      [ "data Empty2 : Type\8320 where { }"
+      , "data Fn (A : Type\8322) : Type\8322 where { fn : (A -> Empty2) -> Fn A }"
+      , "assume g : Type\8320 -> Empty2"
+      , ":goal Fn Type\8321"
+      , "try-core \8988 fn Type\8320 g \8989"
+      ]
   , ok "so a hole left in the scratch cannot block qed"
       ["claim spare : Type₀", ":theorem t : Type₁", "try-core ⌜ Type₀ ⌝", "solve", "qed"]
   ]
