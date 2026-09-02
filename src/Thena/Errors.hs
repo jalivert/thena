@@ -131,6 +131,9 @@ data FailReason
     -- ^ the elaborated types do not make a datatype record (MS4 phase 42b).
     -- Everything a /user/ can get wrong is checked by @declare@ on the
     -- finished record; this is about it not being buildable at all.
+  | TooManyArgumentsForHead
+    -- ^ @make-apply@ was given more argument names than the head's type has Π
+    -- domains (MS4 phase 44)
   | NoEnclosingDevelopment
     -- ^ @pop-development@ at the outermost one (MS4 phase 42). There is
     -- nothing to pop back to, and a machine with no development at all is not

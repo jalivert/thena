@@ -436,6 +436,40 @@ sessionTests =
     -- a written datatype does, so its checks all still apply.
   , notOk "and the declaration checker still refuses a bad one"
       [ "declare data Bad : Type\8320 where { wrap : Type\8320 -> Bad }" ]
+    -- **Level arguments inserted at a use site** (MS4 phase 44, his ruling).
+    -- Until then elaboration could reach no level-polymorphic global at all,
+    -- so the whole prelude was out of its range.
+  , ok "a polymorphic global is usable now"
+      [ "data " ++ natDecl
+      , "data Box (A : Type) : Type where { box : A -> Box A }"
+      , ":theorem e : Type\8320"
+      , "elaborate (Box Nat)"
+      , "qed"
+      ]
+    -- **The dependent application rule.** @box@'s second domain is the first
+    -- argument, which the binary rule's @f : A -> B@ cannot express — it failed
+    -- with a scope violation, /"A3 is not bound before A1"/.
+  , ok "and its constructor, whose domain is an earlier argument"
+      [ "data " ++ natDecl
+      , "data Box (A : Type) : Type where { box : A -> Box A }"
+      , ":theorem e : Box {0} Nat"
+      , "elaborate (box Nat zero)"
+      , "qed"
+      ]
+    -- **A declaration may use an earlier one**, which is what a proof module
+    -- is for and what this phase was ordered before 43 to make possible.
+  , ok "a declaration may use an earlier one"
+      [ "declare data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , "declare one : Nat ; one = succ zero"
+      , "declare two : Nat ; two = succ one"
+      ]
+    -- The head's own type says how many arguments it takes, so too many is
+    -- caught by the walk rather than by a later type error.
+  , notOk "and too many arguments for the head is refused"
+      [ "data " ++ natDecl
+      , ":theorem e : Nat"
+      , "elaborate (zero zero)"
+      ]
   , ok "so a hole left in the scratch cannot block qed"
       ["claim spare : Type₀", ":theorem t : Type₁", "try-core ⌜ Type₀ ⌝", "solve", "qed"]
   ]

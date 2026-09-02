@@ -2,53 +2,48 @@ thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
 thena spine> declare one : Nat ; one = succ zero
 solved: ?ℓ2
-solved: B
-solved: A
+already equal
 already equal
 thena spine> :show one
-one {ℓ₂₄ ℓ₂₅} : Nat
-one = let A = Nat : Type (ℓ₂₄) in let B = Nat : Type (ℓ₂₅) in let refined1 = succ : Nat -> Nat in let f = refined1 : A -> B in let refined2 = zero : Nat in let s = refined2 : A in let refined = f s : B in let goal = refined : Nat in goal
+one : Nat
+one = let refined = zero : Nat in let a0 = refined : Nat in let refined1 = succ a0 : Nat in let goal = refined1 : Nat in goal
 thena spine> declare idn : Nat -> Nat ; idn = \ n -> n
-solved: ?ℓ26
-solved: ?ℓ29
-solved: ?ℓ30
+solved: ?ℓ12
+solved: ?ℓ15
+solved: ?ℓ16
 already equal
 thena spine> :show idn
 idn : Nat -> Nat
 idn = let goal = λ (n : Nat) -> let refined = n : Nat in let goal1 = refined : Nat in goal1 : Nat -> Nat in goal
 thena spine> declare two : Nat ; two = succ one
-solved: ?ℓ48
-solved: B
-solved: A
-stuck: that term has no type
-  one has 2 level parameters, and was given 0 level arguments
-  its level parameters are prenex, so a use writes every one of them
+solved: ?ℓ34
+already equal
+already equal
 thena spine> declare lonely : Nat
 lonely has a type but no definition — write lonely = ‹term› after it
 thena spine> declare stray = zero
 stray has a definition but no type — write stray : ‹type› before it
 thena spine> declare bad : Nat -> Nat ; bad = zero
-solved: ?ℓ69
-solved: ?ℓ72
-solved: ?ℓ73
+solved: ?ℓ44
+solved: ?ℓ47
+solved: ?ℓ48
 stuck: Nat and Nat -> Nat cannot be made equal
 thena spine> declare data Bool : Type₀ where { true : Bool ; false : Bool }
-solved: ?ℓ87
-solved: ?ℓ87
-solved: ?ℓ87
+solved: ?ℓ62
+solved: ?ℓ62
+solved: ?ℓ62
 thena spine> :show Bool
 data Bool : Type₀ where
   { true : Bool
   ; false : Bool }
 thena spine> declare data Box (A : Type₀) : Type₀ where { box : A -> Box A }
+solved: ?ℓ77
+solved: ?ℓ82
+solved: ?ℓ93
+solved: ?ℓ98
 solved: ?ℓ102
-solved: ?ℓ107
-solved: ?ℓ118
-solved: ?ℓ123
-solved: ?ℓ127
-solved: B
-solved: A1, ?ℓ128
 already equal
+solved: ?ℓ103
 thena spine> :show Box
 data Box (A : Type₀) : Type₀ where
   { box : A -> Box A }

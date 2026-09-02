@@ -1115,6 +1115,7 @@ renderFailReason r = case r of
       nameString c ++ "'s target is not the datatype applied to its parameters"
     TooFewBinders ->
       "the datatype's type has fewer binders than it has parameters"
+  TooManyArgumentsForHead -> "that head does not take that many arguments"
   NoEnclosingDevelopment ->
     "pop-development needs a development to go back to; this is the outermost one"
   WrongNumberOfEliminationFields d want got ->

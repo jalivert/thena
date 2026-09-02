@@ -421,6 +421,22 @@ data Op
     -- 'Thena.Development.Cursor.freshIdent' — the same licence 'Attack' and
     -- 'Eliminate' have. Phase 24c's @fresh-name@ is for names a /rule body/
     -- chooses; these the engine chooses for itself.
+  | MakeApply Operand [Operand]
+    -- ^ **a head, and the names its argument holes are to carry** — claim one
+    -- per Π domain of the head's type and yield the saturated spine (MS4 phase
+    -- 44).
+    --
+    -- **This is Brady's @E⟦x ⃗a⟧@, and it exists because his @E⟦e a⟧@ cannot do
+    -- a dependent function.** That rule claims @f : A -> B@ — an /arrow/, with
+    -- no way for @B@ to mention the argument — so applying @Eq@, whose later
+    -- domains mention the earlier ones, made unification try to solve a hole
+    -- with a term mentioning a binder out of its scope: /"A3 is not bound
+    -- before A1"/. Walking the real telescope claims each domain in the scope
+    -- of the holes already claimed, which is what @prim-apply@ has always done
+    -- and never handed back.
+    --
+    -- **The caller supplies the names**, as 'MakeElim' does and for the same
+    -- reason (his decision, 2026-09-02): a body reaches the holes by name.
   | MakeElim GlobalName [Operand]
     -- ^ **build a saturated elimination, claiming a hole for every field**
     -- (MS4 phase 41i) — the datatype is written, the operands are the names
@@ -621,6 +637,7 @@ produces o = case o of
   Call _ _     -> False   -- what the callee builds is in the development
   Elaborate _  -> False
   Eliminate _  -> False
+  MakeApply _ _ -> True  -- the saturated spine
   MakeElim _ _ -> True   -- the assembled node
   Apply _      -> True   -- the spine it built
 
@@ -660,6 +677,7 @@ operandsOf o = case o of
   Typing a     -> [a]
   Define a b   -> [a, b]
   Eliminate a  -> [a]
+  MakeApply h as -> h : as
   MakeElim _ as -> as
   Apply a      -> [a]
   Elaborate a  -> [a]
@@ -800,6 +818,7 @@ opKeyword o = case o of
   PushDevelopment _ -> "push-development"
   PopDevelopment -> "pop-development"
   Eliminate _  -> "prim-eliminate"
+  MakeApply _ _ -> "make-apply"
   MakeElim _ _ -> "make-elim"
   Apply _      -> "prim-apply"
 

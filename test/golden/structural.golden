@@ -53,8 +53,7 @@ proving lt : Nat
 thena spine> elaborate (let y : Nat = zero in succ y)
 solved: ?ℓ39
 already equal
-solved: B
-solved: A
+already equal
 already equal
 thena spine> :show
   let refined = Nat : Type₀ in
@@ -62,21 +61,17 @@ thena spine> :show
   let refined1 = zero : Nat in
   let V = refined1 : X in
   let y = V : X in
-  let A = Nat : Type (?ℓ48) in
-  let B = Nat : Type (?ℓ49) in
-  let refined3 = succ : Nat -> Nat in
-  let f = refined3 : A -> B in
-  let refined4 = y : X in
-  let s = refined4 : A in
-  let refined2 = f s : B in
-▶ let lt = refined2 : Nat in
+  let refined2 = y : X in
+  let a0 = refined2 : Nat in
+  let refined3 = succ a0 : Nat in
+▶ let lt = refined3 : Nat in
   lt
 thena spine> qed
-lt {ℓ₆₄ ℓ₆₅} : Nat   ∎
+lt : Nat   ∎
 thena spine> :theorem asc : Nat
 proving asc : Nat
 thena spine> elaborate (zero : Nat)
-solved: ?ℓ69
+solved: ?ℓ55
 already equal
 already equal
 thena spine> qed

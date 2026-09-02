@@ -256,12 +256,13 @@ tests =
         , ":show one"
         , "declare idn : Nat -> Nat ; idn = \\ n -> n"
         , ":show idn"
-          -- **A second declaration using the first FAILS, and this is the
-          -- reason 44 runs before 43** (@MS4.md@, his call): @one@ generalised
-          -- over the body-only level metas the application case makes
-          -- (@CLOSEOUT.md@ 9), so using it needs level arguments that
-          -- elaboration cannot write until implicits land. Recorded rather
-          -- than worked around — it is what tier 0 is waiting on.
+          -- **A second declaration using the first**, which is what a proof
+          -- module is for and what 44-before-43 was ordered for. It failed
+          -- until MS4 phase 44 — @one@ had generalised over body-only level
+          -- metas and a use could not write them — and now it does not: the
+          -- level arguments are inserted, and @one@ has no such metas to begin
+          -- with, because a name-headed application no longer claims
+          -- @A : Type ?ℓ@ and @B : Type ?ℓ@ of its own.
         , "declare two : Nat ; two = succ one"
           -- Agda's and Haskell's pairing rule.
         , "declare lonely : Nat"

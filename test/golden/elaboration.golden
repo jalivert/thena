@@ -57,8 +57,7 @@ thena spine> along
 thena spine> elaborate b
 stuck: not in scope: b
 thena spine> elaborate (a a)
-solved: B
-stuck: A and A1 -> B cannot be made equal
+stuck: that head does not take that many arguments
 thena spine> :abandon
 abandoned again
 thena spine> :theorem shown : ∀ (A : Type₀) (a : A) -> A
@@ -79,12 +78,12 @@ stack
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  0  ref47n = fresh-name "refined"
-  1  ref47 = define ref47n ⌜a⌝
-  2  ty47 = typeof ref47
-  3  goal47 = goal
-  4  unify-into ty47 goal47
-  5  prim-try ref47
+  0  ref36n = fresh-name "refined"
+  1  ref36 = define ref36n ⌜a⌝
+  2  ty36 = typeof ref36
+  3  goal36 = goal
+  4  unify-into ty36 goal36
+  5  prim-try ref36
   6  prim-solve
 env
   t = ‹a›
@@ -92,53 +91,53 @@ stack
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  0  ref47 = define ref47n ⌜a⌝
-  1  ty47 = typeof ref47
-  2  goal47 = goal
-  3  unify-into ty47 goal47
-  4  prim-try ref47
+  0  ref36 = define ref36n ⌜a⌝
+  1  ty36 = typeof ref36
+  2  goal36 = goal
+  3  unify-into ty36 goal36
+  4  prim-try ref36
   5  prim-solve
 env
-  ref47n = "refined"
+  ref36n = "refined"
   t = ‹a›
 stack
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  0  ty47 = typeof ref47
-  1  goal47 = goal
-  2  unify-into ty47 goal47
-  3  prim-try ref47
+  0  ty36 = typeof ref36
+  1  goal36 = goal
+  2  unify-into ty36 goal36
+  3  prim-try ref36
   4  prim-solve
 env
-  ref47 = ⌜refined⌝
-  ref47n = "refined"
+  ref36 = ⌜refined⌝
+  ref36n = "refined"
   t = ‹a›
 stack
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  0  goal47 = goal
-  1  unify-into ty47 goal47
-  2  prim-try ref47
+  0  goal36 = goal
+  1  unify-into ty36 goal36
+  2  prim-try ref36
   3  prim-solve
 env
-  ty47 = ⌜A⌝
-  ref47 = ⌜refined⌝
-  ref47n = "refined"
+  ty36 = ⌜A⌝
+  ref36 = ⌜refined⌝
+  ref36n = "refined"
   t = ‹a›
 stack
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  0  unify-into ty47 goal47
-  1  prim-try ref47
+  0  unify-into ty36 goal36
+  1  prim-try ref36
   2  prim-solve
 env
-  goal47 = ⌜A⌝
-  ty47 = ⌜A⌝
-  ref47 = ⌜refined⌝
-  ref47n = "refined"
+  goal36 = ⌜A⌝
+  ty36 = ⌜A⌝
+  ref36 = ⌜refined⌝
+  ref36n = "refined"
   t = ‹a›
 stack
   call, 0 instruction(s) to resume

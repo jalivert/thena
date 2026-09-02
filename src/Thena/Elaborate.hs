@@ -44,6 +44,8 @@ import Thena.Development.Partial (Partial (..))
 import Thena.Errors (FailReason (..), ResolveError (..), SyntaxError (..))
 import Thena.Global.Env
   ( GlobalEnv
+  , definitionLevels
+  , lookupDefinition
   , inductiveConstructors
   , inductiveIndices
   , inductiveParameters
@@ -92,11 +94,21 @@ compile env ctx n0 s = case s of
   -- Local names first, then the globals: a binder shadows a global of the same
   -- name, which is what one namespace (§3.6) requires. The same order
   -- "Thena.Syntax.Resolve" uses, for the same reason.
-  SurfaceName x -> case inContext x of
-    Just v -> attach (Free v)
-    Nothing
-      | isDeclared (GlobalName x) env -> attach (Global (GlobalName x) [])
-      | otherwise -> Left (CannotRead (ResolveFailed (NotInScope x)))
+  -- **A global's level arguments are inserted here** (MS4 phase 44). His
+  -- ruling: /"obviously we have them implicitly inserted. That's the whole
+  -- idea."/
+  --
+  -- One meta per prenex parameter, and unification decides them — which is
+  -- typical ambiguity applied to a use site rather than to a written @Type@.
+  -- Before this every global was written @g []@ and the whole prelude was out
+  -- of elaboration's reach: @elaborate (Eq Nat zero zero)@ said /"Eq has 1
+  -- level parameter, and was given 0 level arguments"/.
+  --
+  -- **A former and a constructor are definitions too** (§3.7 generates a
+  -- wrapper for each), so one lookup answers for all three.
+  SurfaceName x -> case resolveName x of
+    Nothing        -> Left (CannotRead (ResolveFailed (NotInScope x)))
+    Just (t, n')   -> fmap (bump n') (attach t)
 
   SurfaceUniverse k  -> attach (Universe (levelOfNat k))
 
@@ -141,6 +153,53 @@ compile env ctx n0 s = case s of
   SurfaceApp h as
     | SurfaceArg Implicit _ <- NE.last as ->
         Left (NoElaborationRule "an implicit argument")
+
+    -- **Brady's OTHER application rule, @E⟦x ⃗a⟧@** (MS4 phase 44), taken
+    -- whenever the head is a name — which is the case his has and the binary
+    -- one cannot do.
+    --
+    -- The binary rule claims @f : A -> B@, an **arrow**, so @B@ cannot mention
+    -- the argument; a dependent head like @Eq {ℓ} (A : Type ℓ) : A -> A -> …@
+    -- then makes unification try to solve a hole with a term mentioning a
+    -- binder out of its scope. @make-apply@ walks the head's real telescope
+    -- instead, claiming each domain in the scope of the holes already claimed.
+    --
+    -- **The whole spine at once**, which is why phase 39's AST is a spine: the
+    -- arguments are not folded here, they are handed over together.
+    | SurfaceName x <- h, Just (hd, nh) <- resolveName x ->
+        let args   = [ a | SurfaceArg _ a <- NE.toList as ]
+            slot k = argName names ++ show (k :: Int)
+         in fmap (bump nh) $ Right
+              ( concat
+                  [ [Bind (hereName names) Here]
+                  , [ Bind (slot k) (FreshName (lit' ("a" ++ show k)))
+                    | k <- [0 .. length args - 1]
+                    ]
+                  , [ Bind (appName names)
+                        (MakeApply (lit hd)
+                           [ Ref (slot k) | k <- [0 .. length args - 1] ])
+                    ]
+                    -- **The arguments are elaborated BEFORE the @FILL@**,
+                    -- where the binary rule fills first. Brady's printed order
+                    -- is @FILL x ⃗n@ then @⃗ELAB ARG@, and it cannot be kept:
+                    -- unifying the spine's type with the goal /solves/ the
+                    -- argument holes — @refl Nat zero@ at a concrete @Eq@ goal
+                    -- determines both — and a solved hole is a definition, so
+                    -- the @goto@ that followed found no hole. Same reason
+                    -- @elim@ fills last (phase 41i).
+                  , concat
+                      [ [ Do (Goto (Ref (slot k)))
+                        , Do (Elaborate (Lit (VSurface a)))
+                        ]
+                      | (k, a) <- zip [0 ..] args
+                      ]
+                  , [Do (Goto (Ref (hereName names)))]
+                  , fill (Ref (appName names))
+                  , [Do Solve]
+                  ]
+              , n
+              )
+
     | otherwise ->
         let front = NE.init as
             fun   = case front of
@@ -504,6 +563,34 @@ compile env ctx n0 s = case s of
       , Do (Try (Ref (refName names)))
       ]
     lit' x   = Lit (VText x)
+
+    -- **What a name denotes, with its level arguments inserted** (MS4 phase
+    -- 44). Shared by the leaf case and the global-head application case, so
+    -- the two cannot come to disagree about what a name means.
+    --
+    -- Locals first, then the globals: a binder shadows a global of the same
+    -- name, which is what one namespace (§3.6) requires — the same order
+    -- "Thena.Syntax.Resolve" uses.
+    resolveName x = case inContext x of
+      Just v  -> Just (Free v, n)
+      Nothing -> case lookupDefinition (GlobalName x) env of
+        Just d ->
+          let (ls, n') = levelArgs (length (definitionLevels d)) n
+           in Just (Global (GlobalName x) ls, n')
+        Nothing
+          | isDeclared (GlobalName x) env -> Just (Global (GlobalName x) [], n)
+          | otherwise                     -> Nothing
+
+    -- One fresh level meta per prenex parameter of the global being used.
+    levelArgs k n' = case k of
+      0 -> ([], n')
+      _ -> let (l, n1)  = freshLevelMeta n'
+               (ls, n2) = levelArgs (k - 1) n1
+            in (LVar l : ls, n2)
+
+    -- 'attach' hands back the counter this clause started from; a name that
+    -- minted level metas has moved it on.
+    bump n' (is, _) = (is, n')
 
 
     -- The innermost binding of that name, if the context has one. The same

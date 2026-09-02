@@ -408,6 +408,8 @@ operation g i (RawOp w as)
       -- 41i), so it is spelled here for @call@'s reason rather than sitting in
       -- an arity table: the name is written down, never computed. The rest are
       -- the names its holes are to carry.
+      ("make-apply", h : rest)    -> Op.MakeApply <$> ref h <*> traverse ref rest
+      ("make-apply", _)           -> bad
       ("make-elim", RawRef d : rest) -> Op.MakeElim (GlobalName d) <$> traverse ref rest
       ("make-elim", _)            -> bad
 

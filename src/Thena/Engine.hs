@@ -837,6 +837,16 @@ perform instr rest m = case operation instr of
   -- global name to apply — §3.7 generates nothing for it — but its type is a Π
   -- telescope all the same, so the walk is the same walk, and it is claiming
   -- where 'Thena.Core.Typing.spine' checks.
+  -- **Brady's @E⟦x ⃗a⟧@** (MS4 phase 44) — @prim-apply@'s walk, with the holes
+  -- named by the caller so a body can elaborate into them. See
+  -- 'Thena.Ops.MakeApply' for why the binary application rule is not enough.
+  MakeApply hd fields ->
+    case (,) <$> term hd <*> traverse (operandIdent (env (exec m))) fields of
+      Left r -> failure r m
+      Right (h, is) -> case infer (globals m) contextAt (names m) h of
+        (Left e,   _, n1) -> failure (NotTypeable e) m { names = n1 }
+        (Right ty, _, n1) -> spineOver h is ty m { names = n1 }
+
   MakeElim d fields -> case traverse (operandIdent (env (exec m))) fields of
     Left r -> failure r m
     Right is -> case lookupInductive d (globals m) of
@@ -1057,6 +1067,20 @@ perform instr rest m = case operation instr of
          in saturate (App hd (Free v)) (instantiate (Free v) sc)
                      m' { development = Development cur, names = n1 }
       _ -> produce (VTerm (Trailing hd)) m'
+
+    -- Claim a hole for each of the head's Π domains, in the scope of the ones
+    -- already claimed — which is what makes it dependent where @arrow@ is not.
+    -- 'saturate' below is this walk without the names and without keeping the
+    -- holes.
+    spineOver hd is ty m' = case is of
+      [] -> produce (VTerm (Trailing hd)) m'
+      i : rest' -> case whnf (globals m') (focusContext (development m')) ty of
+        Pi _ dom sc ->
+          let (v, n1) = fresh (names m')
+              cur     = insertAbove (Component.Claim v i dom) (cursor (development m'))
+           in spineOver (App hd (Free v)) rest' (instantiate (Free v) sc)
+                m' { development = Development cur, names = n1 }
+        _ -> failure TooManyArgumentsForHead m'
 
     -- How many fields an elimination of this datatype has, in
     -- 'Thena.Core.Term.Eliminate'\'s own order.
