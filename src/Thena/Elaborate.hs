@@ -54,6 +54,16 @@ import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceBinder (..))
 --
 -- **A node it cannot yet elaborate is a failure and not a silence.** That list
 -- is phase 41b's specification.
+-- | Where a clause parks the component it was called at.
+--
+-- **Body-local and therefore safe to fix**: a rule body's environment is its
+-- own, restored structurally when its frame is popped (§7.5), and a nested
+-- @Elaborate@ runs in the /same/ body — so the name must not be one a clause
+-- could also bind. Nothing else in a compiled program binds, so one name is
+-- enough and a fresh one per node would only be noise.
+hereName :: String
+hereName = "here"
+
 compile :: GlobalEnv -> Context -> Int -> Surface -> Either FailReason ([Instr], Int)
 compile env ctx n s = case s of
   -- @E⟦x⟧ = FILL x; SOLVE@ — Brady's variable case, and the one clause of his
@@ -112,19 +122,17 @@ compile env ctx n s = case s of
   -- it by balancing its own moves.
   SurfaceLam bs body ->
     let names' = [ x | SurfaceBinder _ x _ <- NE.toList bs ]
-        moves  = length names' + 1
-     in case [ b | b@(SurfaceBinder p _ ty) <- NE.toList bs
+     in case [ () | SurfaceBinder p _ ty <- NE.toList bs
              , p == Implicit || ty /= Nothing ] of
           _ : _ -> Left (NoElaborationRule "a lambda binder with a type or braces")
           []    -> Right
             ( concat
-                [ [Do Attack]
+                [ [Bind hereName Here, Do Attack]
                 , [ Do (Intro (Just (lit' x))) | x <- names' ]
                 , [Do Into]
                 , replicate (length names') (Do Along)
                 , [Do (Elaborate (Lit (VSurface body)))]
-                , replicate moves (Do Back)
-                , [Do Solve]
+                , [Do (Goto (Ref hereName)), Do Solve]
                 ]
             , n
             )

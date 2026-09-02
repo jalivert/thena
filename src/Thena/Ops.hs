@@ -227,6 +227,24 @@ data Op
     --
     -- It avoids the development's identifiers **and the global environment's
     -- names**, so a generated hole never shadows a datatype or a theorem.
+  | Here
+    -- ^ **the variable of the focused component** (MS4 phase 41c) — the
+    -- companion to 'Goal', which gives the type it is claimed at.
+    --
+    -- **There was no way to ask "which component am I standing on?"**
+    -- @claim@ and @define@ yield the variables of the holes /they/ make, and
+    -- @goto@ takes a variable — but a rule that wanted to come back to the hole
+    -- it was called at had to count its own moves and undo them. The λ case did
+    -- exactly that (phase 41b), and every later case would have.
+    --
+    -- With this, @h = here@ then @goto h@ is exact where balancing @back@s was
+    -- only careful. That retires @elaboration-in-rules.md@'s **gap 1** rather
+    -- than working around it — and it does so with **one read op** instead of
+    -- making every hole-creating op produce its hole, which was that document's
+    -- own suggestion and touches every caller.
+    --
+    -- It yields the variable as a term, @Trailing (Free x)@, which is the shape
+    -- @goto@ already reads.
   | Goal
     -- ^ the type the focused hole is claimed at (§7.2, phase 24). **The first
     -- op that reads the development** — §7.2's sketch called it @GoalType@ and
@@ -406,6 +424,7 @@ produces o = case o of
   DefineData _ -> False
   Certify _    -> False
   FreshName _  -> True
+  Here         -> True
   Goal         -> True
   Typing _     -> True
   Define _ _   -> True   -- the variable it bound, as 'Assume' and 'Claim' do
@@ -452,6 +471,7 @@ operandsOf o = case o of
   Try    a     -> [a]
   Certify a    -> [a]
   FreshName a  -> [a]
+  Here         -> []
   Goal         -> []
   Typing a     -> [a]
   Define a b   -> [a, b]
@@ -580,6 +600,7 @@ opKeyword o = case o of
   Elaborate _  -> "prim-elaborate"
   Call _ _     -> "call"
   FreshName _  -> "fresh-name"
+  Here         -> "here"
   Goal         -> "goal"
   Typing _     -> "typeof"
   Define _ _   -> "define"

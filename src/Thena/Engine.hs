@@ -709,6 +709,16 @@ perform instr rest m = case operation instr of
           Ident n = Cursor.freshIdent inUse i
        in produce (VText n) m
 
+  -- **Which component am I standing on?** (MS4 phase 41c) — the companion to
+  -- @goal@, which answers what it is claimed /at/. Yielded as a term so that
+  -- @goto@ reads it without a second shape.
+  --
+  -- Refused off the spine for the reason every component op is: a core subterm
+  -- is not a component and has no variable of its own.
+  Here -> case focus (cursor (development m)) of
+    OnComponent c -> produce (VTerm (Trailing (Free (variableOf c)))) m
+    _             -> failure (CannotMove NotOnTheSpine) m
+
   Goal -> case Cursor.expectedType (cursor (development m)) of
     Just t  -> produce (VTerm (Trailing t)) m
     Nothing -> failure NoGoalHere m
@@ -1131,3 +1141,14 @@ retryFrom target m = go (0 :: Int) (stack (exec m))
     note i (GlobalName g) popped =
       "retrying " ++ show i ++ ": " ++ g
         ++ (if popped == 0 then "" else " (" ++ show popped ++ " frame(s) dropped)")
+
+-- | The variable a component binds. What @here@ answers.
+--
+-- Every component has one; the four constructors differ in what else they
+-- carry, which is why this is a fold and not a field.
+variableOf :: Component.Component -> Var
+variableOf c = case c of
+  Component.Assume v _ _   -> v
+  Component.Define v _ _ _ -> v
+  Component.Claim  v _ _   -> v
+  Component.Guess  v _ _ _ -> v

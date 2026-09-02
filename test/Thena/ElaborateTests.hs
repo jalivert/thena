@@ -35,7 +35,7 @@ import Thena.Engine
   , load
   , step
   )
-import Thena.Errors (FailReason (..), ResolveError (..), SyntaxError (..))
+import Thena.Errors (FailReason (..), MoveError (..), ResolveError (..), SyntaxError (..))
 import Thena.Global.Env (emptyGlobals)
 import Thena.Ops
   ( Instr (..)
@@ -57,6 +57,7 @@ tests =
   testGroup
     "elaboration"
     [ leafTests
+    , hereTests
     , lambdaTests
     , unsupportedTests
     , baseTests
@@ -102,9 +103,20 @@ elaborating = elaboratingAt hole
 
 -- | The same, at a cursor of your own.
 elaboratingAt :: Cursor -> Surface -> Either FailReason Machine
-elaboratingAt cur s =
-  snd (runOut (load [Do (Ops.Elaborate (Lit (VSurface s)))]
-                 (Machine (Exec [] [] []) (Development cur) emptyGlobals [] 1000)))
+elaboratingAt cur s = snd (runOut (machineAt cur [Do (Ops.Elaborate (Lit (VSurface s)))]))
+
+-- | A machine at a cursor, loaded with a program.
+machineAt :: Cursor -> [Instr] -> Machine
+machineAt cur is =
+  load is (Machine (Exec [] [] []) (Development cur) emptyGlobals [] 1000)
+
+-- | @? goal : ∀ (a : Type₀) (b : Type₀) -> Type₀@ — two binders, so a miscount
+-- would show.
+piGoal2 :: Cursor
+piGoal2 = enter (Under (Claim goalVar (Ident "goal") ty) (Trailing (Free goalVar)))
+  where
+    inner = Pi (Ident "b") type0 (Thena.Core.Term.close hypVar type0)
+    ty    = Pi (Ident "a") type0 (Thena.Core.Term.close hypVar inner)
 
 -- | @? goal : ∀ (a : Type₀) -> Type₀@ — a hole a lambda can be elaborated into.
 --
@@ -132,11 +144,19 @@ identsBound m = chain (Cursor.rebuild (cursor (development m)))
     lams (Lam (Ident i) _ b) = i : lams (Thena.Core.Term.instantiate (Universe LZero) b)
     lams _                   = []
 
--- | Is the focus back at the top of the chain?
-isTop :: Machine -> Bool
-isTop m = case Cursor.back (cursor (development m)) of
-  Left _  -> True
-  Right _ -> False
+-- | The variable of the component the focus is on.
+--
+-- **What "the focus came back" actually means**, and it is what @here@ itself
+-- answers — so the assertions below say /this component/ rather than /some
+-- property of the path/. An earlier version asked whether @back@ failed, which
+-- is a different question and passed for the wrong reason.
+focusedVar :: Machine -> Maybe Var
+focusedVar m = case focus (cursor (development m)) of
+  Cursor.OnComponent (Assume v _ _)   -> Just v
+  Cursor.OnComponent (Define v _ _ _) -> Just v
+  Cursor.OnComponent (Claim  v _ _)   -> Just v
+  Cursor.OnComponent (Guess  v _ _ _) -> Just v
+  _                                   -> Nothing
 
 isGuess :: Machine -> Bool
 isGuess m = case focus (cursor (development m)) of
@@ -242,6 +262,18 @@ lambdaTests =
           Left r  -> assertFailure ("did not elaborate: " ++ show r)
           Right m -> identsBound m @?= ["y"]
 
+      -- **@here@ is what makes this exact rather than careful** (phase 41c).
+      -- Before it, the clause counted its own @into@/@along@ and undid them
+      -- with matching @back@s; now it parks the component it was called at and
+      -- @goto@es it. Two binders rather than one, because a miscount only shows
+      -- when the counts differ.
+    , testCase "two binders, and the focus still comes back" $
+        case elaboratingAt piGoal2 (SurfaceLam [ SurfaceBinder Explicit "y" Nothing
+                                               , SurfaceBinder Explicit "z" Nothing ]
+                                      (SurfaceName "z")) of
+          Left r  -> assertFailure ("did not elaborate: " ++ show r)
+          Right m -> (identsBound m, focusedVar m) @?= (["y", "z"], Just goalVar)
+
       -- **The invariant every later case leans on**: an @Elaborate@ leaves the
       -- focus where it found it. The λ case makes moves and must undo them, or
       -- its own @prim-solve@ lands somewhere else.
@@ -249,7 +281,7 @@ lambdaTests =
         case elaboratingAt piGoal (SurfaceLam [SurfaceBinder Explicit "y" Nothing]
                                      (SurfaceName "y")) of
           Left r  -> assertFailure ("did not elaborate: " ++ show r)
-          Right m -> isTop m @?= True
+          Right m -> focusedVar m @?= Just goalVar
 
       -- An annotation is **refused rather than ignored**: checking it against
       -- the goal\'s domain needs the ascription machinery, which is a later
@@ -265,6 +297,43 @@ lambdaTests =
       case elaboratingAt piGoal s of
         Left (NoElaborationRule w) -> w @?= what
         other -> assertFailure ("expected a refusal: " ++ show other)
+
+-- --------------------------------------------------------------------------
+-- here (MS4 phase 41c)
+-- --------------------------------------------------------------------------
+
+hereTests :: TestTree
+hereTests =
+  testGroup
+    "here answers which component the focus is on"
+    [ -- The companion to @goal@, which answers what it is claimed /at/. Nothing
+      -- could answer this before: @claim@ and @define@ yield the variables of
+      -- holes they make, and @goal@ gives a type.
+      testCase "it yields the focused component's variable" $
+        case snd (runOut (machineAt hole [Bind "h" Ops.Here])) of
+          Left r  -> assertFailure ("did not run: " ++ show r)
+          Right m -> lookup "h" (env (exec m))
+                       @?= Just (VTerm (Trailing (Free goalVar)))
+
+      -- **It survives @attack@**, which is the whole reason the λ case can use
+      -- it: @attack@ turns @? x : S@ into a guess binding the /same/ variable,
+      -- so a @goto@ afterwards finds what @here@ named.
+    , testCase "and goto finds it again after attack" $
+        case snd (runOut (machineAt hole [ Bind "h" Ops.Here
+                                         , Do Ops.Attack
+                                         , Do Ops.Into
+                                         , Do (Ops.Goto (Ref "h"))
+                                         ])) of
+          Left r  -> assertFailure ("did not run: " ++ show r)
+          Right m -> focusedVar m @?= Just goalVar
+
+      -- Off the spine there is no component and no variable, which is the same
+      -- refusal every component op gives.
+    , testCase "and it is refused in the core fragment" $
+        case snd (runOut (machineAt hole [Do Ops.CrossType, Bind "h" Ops.Here])) of
+          Left (CannotMove NotOnTheSpine) -> pure ()
+          other -> assertFailure ("expected a refusal: " ++ show other)
+    ]
 
 -- --------------------------------------------------------------------------
 -- The shipped base

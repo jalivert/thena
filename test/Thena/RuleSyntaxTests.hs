@@ -165,6 +165,7 @@ everyOp =
   , ("prim-eliminate x", Op.Eliminate (Ref "x"))
   , ("prim-apply x",  Op.Apply (Ref "x"))
   , ("goal",          Goal)
+  , ("here",          Here)
   , ("fresh-name x",  FreshName (Ref "x"))
   , ("typeof x",      Typing (Ref "x"))
   , ("define x y",    Define (Ref "x") (Ref "y"))

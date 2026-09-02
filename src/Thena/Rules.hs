@@ -460,6 +460,7 @@ operation g i (RawOp w as)
       [ ("along", Along), ("into", Into), ("back", Back), ("reduce", Reduce)
       , ("prim-attack", Attack), ("prim-regret", Regret)
       , ("prim-solve", Solve), ("prim-abandon", Abandon), ("goal", Goal)
+      , ("here", Here)
       , ("prim-prove", Prove)
       ]
     unary =
