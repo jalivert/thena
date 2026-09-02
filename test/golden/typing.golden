@@ -1,10 +1,10 @@
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
-thena spine> :infer succ zero
+thena spine> :infer ⌜ succ zero ⌝
 succ zero : Nat
-thena spine> :infer \ (x : Nat) -> x
+thena spine> :infer ⌜ \ (x : Nat) -> x ⌝
 λ (x : Nat) -> x : Nat -> Nat
-thena spine> :infer ∀ (A : Type₀) -> A
+thena spine> :infer ⌜ ∀ (A : Type₀) -> A ⌝
 ∀ (A : Type₀) -> A : Type₁
 thena spine> :convert succ ≟ \ (n : Nat) -> succ n
 succ ≟ λ (n : Nat) -> succ n   yes
@@ -14,9 +14,9 @@ Type₀ ≟ Type₁   no
 thena spine> :convert succ zero ≟ succ (succ zero)
 succ zero ≟ succ (succ zero)   no
   in argument 1 of succ, zero and succ are different names
-thena spine> :infer zero zero
+thena spine> :infer ⌜ zero zero ⌝
 zero cannot be applied — it has type Nat
-thena spine> :infer elim Nat () (\ (_ : Nat) -> Nat) (zero succ) () (succ zero)
+thena spine> :infer ⌜ elim Nat () (\ (_ : Nat) -> Nat) (zero succ) () (succ zero) ⌝
 succ has type Nat -> Nat
   but ∀ (x : Nat) -> (λ (_ : Nat) -> Nat) x -> (λ (_ : Nat) -> Nat) (succ x) was expected
   under x, (λ (_ : Nat) -> Nat) x -> (λ (_ : Nat) -> Nat) (succ x) and Nat do not match

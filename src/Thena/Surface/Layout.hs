@@ -39,8 +39,13 @@ data LayoutError
 -- a line here — the machinery below does not change.
 layoutKeyword :: Token -> Bool
 layoutKeyword t = case t of
-  TLet -> True
-  _    -> False
+  TLet   -> True
+  -- **Added at phase 43**, and it serves both users at once: a module's
+  -- declaration block and a datatype's constructor block are both introduced by
+  -- @where@, so neither needs a rule of its own. An explicit @{@ after it still
+  -- passes through — 'mark' declines to open a block the user opened.
+  TWhere -> True
+  _      -> False
 
 -- | Tokens that close an implicit block by appearing.
 --
@@ -58,14 +63,13 @@ layoutKeyword t = case t of
 -- what has to grow** — and the failure is a parse error, not silence.
 closesBlock :: Token -> Bool
 closesBlock t = case t of
-  TIn     -> True
-  TRParen -> True
-  TRBrace -> True
-  _       -> False
+  TIn -> True
+  _   -> False
 
 -- | What the algorithm is standing inside.
 data Context
   = Explicit      -- ^ the user wrote @{@; the Report's @0@
+  | Paren         -- ^ the user wrote @(@ (MS4 phase 43)
   | Implicit Int  -- ^ opened by the offside rule, at this column
   deriving (Eq, Show)
 
@@ -129,10 +133,34 @@ run cs is = case (is, cs) of
     | n <  m    -> (at p TRBrace :) <$> run ms (Line p n : ts)
   (Line _ _ : ts, ms) -> run ms ts
 
-  -- An explicit brace opens and closes an explicit context, and an explicit
-  -- close may not reach past an implicit block — that is 'UnmatchedClose'.
+  -- **Brackets are tracked, not merely recognised** (MS4 phase 43). Before it,
+  -- 'closesBlock' named @)@ and @}@, so /every/ close ended the block it was in
+  -- — and the first real file found that at once:
+  --
+  -- > module Arith where
+  -- > plus = \\ m n -> elim Nat () (\\ k -> Nat) …
+  --
+  -- the @)@ of @()@ closed the module. That was invisible while layout only ran
+  -- on a @let@ and on one REPL argument at a time, which is
+  -- @ms4\/CLOSEOUT.md@ 5 arriving exactly where it said it would.
+  --
+  -- A bracket opened inside a block is therefore its own context, and its close
+  -- is ordinary. Only a close with no opener of its own reaches an implicit
+  -- block.
+  (Tok t@(Located _ TLParen) : ts, ms) -> (t :) <$> run (Paren : ms) ts
+  (Tok t@(Located _ TRParen) : ts, Paren : ms) -> (t :) <$> run ms ts
+
   (Tok t@(Located _ TLBrace) : ts, ms) -> (t :) <$> run (Explicit : ms) ts
   (Tok t@(Located _ TRBrace) : ts, Explicit : ms) -> (t :) <$> run ms ts
+
+  -- **An unmatched close ends the implicit block and is looked at again**, so
+  -- one @)@ can close several — which is what a bracket opened outside them
+  -- means, and it terminates because each step pops a context. This is the one
+  -- place re-processing is right; see 'closesBlock' for the case where it is
+  -- not.
+  (Tok (Located p k) : _, Implicit _ : ms)
+    | k == TRParen, Paren    `elem` ms -> reclose p
+    | k == TRBrace, Explicit `elem` ms -> reclose p
   (Tok (Located p TRBrace) : _, Implicit _ : _) -> Left (UnmatchedClose p)
 
   -- 'closesBlock' stands in for the Report's @parse-error(t)@.
@@ -152,10 +180,18 @@ run cs is = case (is, cs) of
 
   (Tok t : ts, ms) -> (t :) <$> run ms ts
 
-  -- The end: implicit blocks close, an explicit one is an error.
+  -- The end: implicit blocks close, an explicit one is an error. An unclosed
+  -- @(@ is left to the parser, which has a better message for it than layout
+  -- could invent.
   ([], Implicit _ : ms) -> (at endOfInput TRBrace :) <$> run ms []
+  ([], Paren : ms)      -> run ms []
   ([], Explicit : _)    -> Left (MissingClose endOfInput)
   ([], [])              -> Right []
+  where
+    -- Close the implicit block and put the token back.
+    reclose p = case (is, cs) of
+      (_, _ : ms) -> (at p TRBrace :) <$> run ms is
+      _           -> Left (UnmatchedClose p)
 
 -- | Does the next token end a block by appearing? See 'closesBlock'.
 closingNext :: [Item] -> Bool

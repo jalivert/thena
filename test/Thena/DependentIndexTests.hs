@@ -1,6 +1,6 @@
 -- | A family with a dependent index telescope, proved and admitted (phase 19).
 --
--- @examples\/dependent-index.thena@ declares
+-- @examples\/dependent-index.thena.script@ declares
 -- @Below : ∀ (n : Nat) (i : Fin n) -> Type₀@ — two indices, the second typed by
 -- the first — and proves a theorem about it by induction. Before phase 19 the
 -- elimination was refused outright, on a condition that only a /tied/ index can
@@ -25,7 +25,7 @@ import Thena.Repl (startingSession, loadFile, renderCore)
 
 -- | Relative to the package root, which is where the suite runs.
 target :: FilePath
-target = "examples/dependent-index.thena"
+target = "examples/dependent-index.thena.script"
 
 tests :: TestTree
 tests =

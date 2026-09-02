@@ -1,7 +1,7 @@
 -- | The prelude's products, and what the no-confusion generator does with them
 -- (phase 20).
 --
--- @examples\/products.thena@ is the deliverable: @Sigma@ with its projections,
+-- @examples\/products.thena.script@ is the deliverable: @Sigma@ with its projections,
 -- @And@ with its own, and §3.7's no-confusion table at @Type₀@ where phase 14
 -- had to write it in continuation-passing style at @Type₁@. Loaded the way
 -- phase 11 loads any file, and for 'Thena.DeterminacyTests'\'s reason — the
@@ -24,7 +24,7 @@ import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Repl (startingSession, loadFile, renderCore)
 
 target :: FilePath
-target = "examples/products.thena"
+target = "examples/products.thena.script"
 
 tests :: TestTree
 tests =

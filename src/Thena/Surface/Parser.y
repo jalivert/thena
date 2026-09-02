@@ -19,6 +19,7 @@ module Thena.Surface.Parser
   ( SurfaceParseError (..)
   , parseSurface
   , parseSurfaceDecls
+  , parseSurfaceModule
   ) where
 
 import Data.List.NonEmpty (NonEmpty (..))
@@ -28,6 +29,7 @@ import Thena.Surface.Concrete
   ( Plicity (..)
   , Surface (..)
   , SurfaceDecl (..)
+  , SurfaceModule (..)
   , SurfaceData (..)
   , SurfaceConstructor (..)
   , SurfaceArg (..)
@@ -38,6 +40,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 
 %name parseSurface Term
 %name parseSurfaceDecls Decls
+%name parseSurfaceModule Module
 %tokentype { Located Token }
 %monad { Either SurfaceParseError }
 %error { parseError }
@@ -59,6 +62,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   elim    { Located _ TElim }
   where   { Located _ TWhere }
   data    { Located _ TData }
+  module  { Located _ TModule }
   univ    { Located _ (TUniverse $$) }
   Type    { Located _ TUniverseOpen }
   ident   { Located _ (TIdent $$) }
@@ -75,6 +79,15 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 --
 -- Accumulated reversed and turned round by the caller, which is what every
 -- other list in this grammar does.
+-- | A proof module (MS4 phase 43): a header, then the declarations.
+--
+-- **The braces and semicolons are the layout pass's**, exactly as they are for
+-- @data … where@ — @where@ became a layout keyword in the same phase, so a file
+-- written with indentation and one written with explicit braces reach this
+-- production as the same token stream.
+Module :: { SurfaceModule }
+  : module ident where '{' Decls '}'       { SurfaceModule $2 (reverse $5) }
+
 Decls :: { [SurfaceDecl] }
   : Decl                                   { [$1] }
   | Decls ';' Decl                         { $3 : $1 }

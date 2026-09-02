@@ -34,14 +34,14 @@ tests =
     , script
         "typing"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
-        , ":infer succ zero"
-        , ":infer \\ (x : Nat) -> x"
-        , ":infer \8704 (A : Type\8320) -> A"
+        , ":infer \8988 succ zero \8989"
+        , ":infer \8988 \\ (x : Nat) -> x \8989"
+        , ":infer \8988 \8704 (A : Type\8320) -> A \8989"
         , ":convert succ \8799 \\ (n : Nat) -> succ n"
         , ":convert Type\8320 \8799 Type\8321"
         , ":convert succ zero \8799 succ (succ zero)"
-        , ":infer zero zero"
-        , ":infer elim Nat () (\\ (_ : Nat) -> Nat) (zero succ) () (succ zero)"
+        , ":infer \8988 zero zero \8989"
+        , ":infer \8988 elim Nat () (\\ (_ : Nat) -> Nat) (zero succ) () (succ zero) \8989"
         , "claim h : Nat"
         , "cross type"
         , ":infer"
@@ -769,7 +769,25 @@ tests =
       -- spine to this tactic. `apply Just` abbreviates exactly these three
       -- lines and adds no capability, which is why `MS2.md` makes it one item
       -- rather than a phase.
+      -- **@:infer@ takes a surface term** (MS4 phase 43), and a core one in
+      -- corners. It elaborates where you are asking, reads the type off, and
+      -- undoes the line — his framing: /"if this term were put here, what would
+      -- its type be?"/ The two @:show@es around it are the whole point.
       script
+        "surface-inference"
+        [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , ":theorem t : Nat"
+        , ":show"
+        , ":infer succ zero"
+        , ":infer \8988 succ zero \8989"
+        , ":show"
+        , ":where"
+        , ":infer nosuchthing"
+        , ":show"
+        , ":quit"
+        ]
+
+    , script
         "inferring"
         [ "data Bool : Type\8320 where { true : Bool ; false : Bool }"
         , "data Maybe (A : Type\8320) : Type\8320 \
@@ -819,7 +837,7 @@ tests =
         , ":show g"
           -- **A hypothesis, not a global.** A REPL argument is resolved in the
           -- context at the focus, so @apply@ works on anything in scope — which
-          -- is what @examples/determinacy.thena@ needs when it applies an
+          -- is what @examples/determinacy.thena.script@ needs when it applies an
           -- induction hypothesis by hand.
           --
           -- Two anonymous domains, so two holes called @_@ and @_1@, and
@@ -949,17 +967,17 @@ tests =
           -- below is entirely inferred from the two written @Type@s.
           "data Id (A : Type) : A -> A -> Type where { rfl : \8704 (a : A) -> Id A a a }"
         , ":show Id"
-        , ":infer Id {0}"
-        , ":infer rfl {0}"
-        , ":infer \\ (A : Type\8320) (a : A) (b : A) (q : Id {0} A a b) -> elim Id {0} (A) (\\ (x : A) (y : A) (z : Id {0} A x y) -> Id {0} A x x) ((\\ (c : A) -> rfl {0} A c)) (a b) q"
+        , ":infer \8988 Id {0} \8989"
+        , ":infer \8988 rfl {0} \8989"
+        , ":infer \8988 \\ (A : Type\8320) (a : A) (b : A) (q : Id {0} A a b) -> elim Id {0} (A) (\\ (x : A) (y : A) (z : Id {0} A x y) -> Id {0} A x x) ((\\ (c : A) -> rfl {0} A c)) (a b) q \8989"
           -- Prenex is all-or-nothing.
-        , ":infer Id"
-        , ":infer Id {0 1}"
+        , ":infer \8988 Id \8989"
+        , ":infer \8988 Id {0 1} \8989"
           -- **There is no level-variable syntax left to get wrong.** @Type {l}@
           -- was the last thing that could name one, and phase 33c deleted it;
           -- what a use may write is a numeral, and nothing else.
         , ":core Type {l}"
-        , ":infer Id {suc 0}"
+        , ":infer \8988 Id {suc 0} \8989"
         , ":quit"
         ]
       -- What level polymorphism was FOR, as a pair of probes neither of which
@@ -1020,8 +1038,8 @@ tests =
         , ":abandon"
         , "data N : Type where { z : N ; s : N -> N }"
         , ":show N"
-        , ":infer s {0}"
-        , ":infer s {1} (z {1})"
+        , ":infer \8988 s {0} \8989"
+        , ":infer \8988 s {1} (z {1}) \8989"
           -- **A level a constructor argument's typing determines** (phase 50).
           -- @suc ?\8467 \8804 1@ pins the inner bare @Type@ at @Type\8320@, and @E@ takes no
           -- level argument. Before phase 50 the bound was dropped, @?\8467@ became a
@@ -1046,8 +1064,8 @@ tests =
       -- — because which one you get is the whole of what this phase decides.
     , script
         "ambiguity"
-        [ ":infer Type"
-        , ":infer Type -> Type"
+        [ ":infer \8988 Type \8989"
+        , ":infer \8988 Type -> Type \8989"
           -- Conversion does not refuse an undecided level; it says what it
           -- would need.
         , ":convert Type \8799 Type\8320"
@@ -1101,21 +1119,21 @@ tests =
         , "solve"
         , "qed"
         , ":show id"
-        , ":infer id {0}"
-        , ":infer id {3}"
+        , ":infer \8988 id {0} \8989"
+        , ":infer \8988 id {3} \8989"
           -- Prenex is still all-or-nothing.
-        , ":infer id"
+        , ":infer \8988 id \8989"
           -- A scheme with a real constraint between two independent parameters.
         , ":theorem lift : \8704 (A : Type) -> Type"
         , "try-core ⌜ \\ (A : Type) -> A ⌝"
         , "solve"
         , "qed"
         , ":show lift"
-        , ":infer lift {0 1}"
+        , ":infer \8988 lift {0 1} \8989"
           -- **@:infer@ accepts a bad instantiation**, and that is the accepted
           -- trade: obligations are re-collected, not pooled, so the error
           -- arrives at @qed@ rather than at the line.
-        , ":infer lift {1 0}"
+        , ":infer \8988 lift {1 0} \8989"
         , ":theorem bad : Type\8321 -> Type\8320"
         , "try-core ⌜ lift {1 0} ⌝"
         , "solve"

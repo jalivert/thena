@@ -291,7 +291,7 @@ universes env n0 d = do
 -- computing** — and it is what makes @data Eq (A : Type) : A -> A -> Type@ come
 -- out as @Eq {ℓ}@ rather than @Eq {ℓ0 ℓ1}@ with @ℓ0 ≤ ℓ1@. Constraining would
 -- have given the datatype a second parameter that every use has to supply, and
--- MS3\'s own done-when — @examples\/determinacy.thena@ byte-identical — forbids
+-- MS3\'s own done-when — @examples\/determinacy.thena.script@ byte-identical — forbids
 -- that.
 --
 -- **Only a bare @Type@ is computed. A written @Typeₙ@ is still checked**, so

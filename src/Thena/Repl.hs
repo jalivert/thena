@@ -31,6 +31,7 @@ module Thena.Repl
   , startingSession
   , loadRuleFiles
   , loadFile
+  , loadProofFile
   , renderLoadError
   ) where
 
@@ -93,6 +94,7 @@ import Thena.Driver
   , Attempt (..)
   , Parked (..)
   , loadSource
+  , loadProofSource
   , newSession
   , oneLine
   )
@@ -182,6 +184,12 @@ loop s pending = do
           (s', out, problems) <- liftIO (loadFile (turnSession t) path)
           mapM_ outputStrLn (out ++ problems)
           loop s' Nothing
+        -- And the same shape again for a proof module (MS4 phase 43). The
+        -- driver elaborates it; this only reads the file.
+        ProofRequested path | not (turnQuit t) -> do
+          (s', out) <- liftIO (loadProofFile (turnSession t) path)
+          mapM_ outputStrLn out
+          loop s' Nothing
         -- The same shape for rule bases, and several paths rather than one:
         -- a load replaces the whole ordered list (phase 22).
         RulesRequested paths | not (turnQuit t) -> do
@@ -201,7 +209,7 @@ loop s pending = do
 -- directory, so an installed @thena@ finds it too. This is the only place the
 -- project asks cabal anything at runtime.
 preludePath :: IO FilePath
-preludePath = Paths_thena.getDataFileName "prelude/prelude.thena"
+preludePath = Paths_thena.getDataFileName "prelude/prelude.thena.script"
 
 -- | Load the shipped prelude into a session, keeping only what went wrong.
 --
@@ -280,6 +288,19 @@ loadFile s path = do
           , concatMap (renderResponse s') (loadedResponses l)
           , maybe [] (renderLoadError path) (loadedError l)
           )
+
+-- | Read a proof module and elaborate it (MS4 phase 43).
+--
+-- Simpler than 'loadFile' because a module is not a sequence of lines: the
+-- whole file is one program, so there is one response and no line to name when
+-- it stops. What went wrong is in that response, which renders like any other.
+loadProofFile :: Session -> FilePath -> IO (Session, [String])
+loadProofFile s path = do
+  contents <- try (readFile path)
+  pure $ case contents of
+    Left e  -> (s, [path ++ ": " ++ show (e :: IOException)])
+    Right c -> let (s', resp) = loadProofSource s c
+                in (s', renderResponse s' resp)
 
 -- | Why a load stopped. It says only /where/ — the reason has already been
 -- printed, because a stopped line renders like any other line.
@@ -369,6 +390,12 @@ renderResponse s resp = case resp of
   Where c        -> renderWhere (counter s) c
   Inferred t ty  ->
     [renderCore (counter s) (contextOf s) t ++ " : " ++ renderCore (counter s) (contextOf s) ty]
+  -- **The surface term as written, and the type elaborating it found** (MS4
+  -- phase 43). The core term it built is deliberately not shown: it was rewound
+  -- with the rest of the line, and naming a hole the session no longer has
+  -- would invite a @goto@ into nothing.
+  InferredSurface t ty ->
+    [renderSurface t ++ " : " ++ renderCore (counter s) (contextOf s) ty]
   IllTyped e     -> renderTypeError (counter s) e
   -- The two terms are restated, because with η a yes is printed about terms
   -- that still look different (§5.2).
@@ -394,6 +421,12 @@ renderResponse s resp = case resp of
   -- Show where it landed: an undo with no output looks like nothing happened.
   Undone        -> [renderCursor (counter s) (cursor (development (sessionMachine s)))]
   Proofs cur ps -> renderProofs (counter s) cur ps
+  -- Nothing to print: the caller reads the file and prints what that produced.
+  ProofRequested _ -> []
+  -- **One line per declaration and nothing else** (MS4 phase 43). The op-level
+  -- messages the run produced are already gone — 'Thena.Driver.loadProofSource'
+  -- drops them on success — so what is left is the shape of the file.
+  ProofLoaded nm ds -> ("module " ++ nm) : map ("  declared " ++) ds
   -- Nothing to print: the caller reads the files and prints what that produced.
   RulesRequested _ -> []
   BasesLoaded bs   -> map loadedLine bs
@@ -509,6 +542,8 @@ describe t = case t of
   TElim       -> "elim"
   TWhere      -> "where"
   TData       -> "data"
+  TModule     -> "module"
+  TDashes     -> "--"
   TRule       -> "rule"
   TWhen       -> "when"
   TThen       -> "then"

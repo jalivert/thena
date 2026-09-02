@@ -770,13 +770,44 @@ globals are session-wide, proofs are not.
 
 ## 11. Loading a file, and what the system has proved
 
-A `.thena` file is a script of REPL command lines, run in order.
+`:load` reads three kinds of file and the extension says which: a `.thena`
+**proof module**, a `.thena.script` script of REPL command lines, or one or more
+`.thena.rules` rule bases. `:load proof`, `:load script` and `:load rules` say
+it out loud instead.
+
+A script is command lines, run in order.
 
 ```
-thena spine> :load examples/determinacy.thena
+thena spine> :load examples/determinacy.thena.script
 ```
 
-`examples/determinacy.thena` is the acceptance test for the whole first
+A **proof module** is the surface language: a header, then declarations, laid
+out by indentation. It reports what it declared and nothing else — elaborating
+one declaration prints a dozen lines of unification chatter, and a file of them
+would bury its own output.
+
+```
+thena spine> :load examples/tier0.thena
+module Tier0
+  declared Nat
+  declared plus
+  declared identity
+  declared one
+  declared two
+  declared plusZeroLeft
+thena spine> :infer plus one one
+plus one one : Nat
+```
+
+`:infer` takes a **surface** term and elaborates it where you are asking, then
+puts the development back exactly as it was. A development-calculus term goes in
+corners instead: `:infer ⌜ succ zero ⌝`.
+
+A comment is `--` followed by a space, running to the end of the line, and it
+works the same way in all three kinds of file. Without the space it is not a
+comment, so `-->` is still yours to use.
+
+`examples/determinacy.thena.script` is the acceptance test for the whole first
 milestone. It declares the language of chapter 3 of Pierce's *Types and
 Programming Languages* — a seven-constructor term language, a numeric-value
 predicate, and a ten-rule small-step reduction relation —
@@ -835,12 +866,12 @@ files of commands.
   simplifier, no decision procedure. Every proof step above is one you type.
 - **A use of a level-polymorphic global must write its level arguments.**
   `Eq {0} Nat x y`, never `Eq Nat x y`. The declaration side infers, the use
-  side does not — which is what most of the braces in `examples/determinacy.thena`
+  side does not — which is what most of the braces in `examples/determinacy.thena.script`
   are.
 - **No no-confusion lemma for a constructor with dependent argument types** —
   the system tells you when it skipped one and why.
-- **No proof scripts.** A `.thena` file is a flat sequence of commands, not a
-  structured document.
+- **No proof scripts.** A `.thena.script` file is a flat sequence of commands,
+  not a structured document; a `.thena` proof module is the structured one.
 
 ---
 

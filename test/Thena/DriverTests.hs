@@ -5,6 +5,7 @@ module Thena.DriverTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
+import Thena.Core.Convert (convert)
 import Thena.Core.Level (levelOfNat)
 import Thena.Core.Term (Core (..), GlobalName (..), Ident (..))
 import Thena.Development.Component (Component (..))
@@ -72,10 +73,16 @@ everyColonCommand =
   , ":proofs", ":undo", ":convert", ":step", ":run"
   ]
 
+-- | **Hand-written, and it had the same gaps as the list it checks** (MS4
+-- phase 43): @declare@ and @quantify@ were missing from both, and @prove@ was
+-- in both after phase 41 made it a rule rather than a command. A mirror that
+-- shares the blind spot of what it mirrors cannot catch anything — which is the
+-- argument for @ms3\/CLOSEOUT.md@ 26, not against having it.
 everyBareCommand :: [String]
 everyBareCommand =
-  [ "assume", "claim", "data", "along", "into", "back", "reduce", "unify"
-  , "prove", "retry", "goto", "cross", "certify", "qed"
+  [ "assume", "claim", "quantify", "data", "declare"
+  , "along", "into", "back", "reduce", "unify"
+  , "retry", "goto", "cross", "certify", "qed"
   ] ++ partWords
 
 tests :: TestTree
@@ -209,6 +216,33 @@ tests =
             case devOf (fst (say [":goal Type₀", "assume A : Type₀"])) of
               Under Assume {} (Under Claim {} (Trailing _)) -> pure ()
               other -> assertFailure ("wrong shape: " ++ show other)
+        ]
+      -- **@:infer ‹surface›@ elaborates and then puts the development back**
+      -- (MS4 phase 43). @test\/golden\/surface-inference.golden@ shows the same
+      -- thing through @:show@; this asks the development itself, which is
+      -- different code from the code that maintains it (phase 5's lesson).
+    , testGroup
+        "inferring a surface term leaves nothing behind"
+        [ testCase "the development is exactly as it was" $
+            devOf (fst (say [natCommand, ":theorem t : Nat", ":infer succ zero"]))
+              @?= devOf (fst (say [natCommand, ":theorem t : Nat"]))
+        , testCase "and so it is when the term does not elaborate" $
+            devOf (fst (say [natCommand, ":theorem t : Nat", ":infer nosuchthing"]))
+              @?= devOf (fst (say [natCommand, ":theorem t : Nat"]))
+          -- **A bare argument is surface, corners are core**, and the two
+          -- answers agree **up to conversion, not syntactically**: the surface
+          -- one is read off the hole the elaboration solved, so it is whnf\'d to
+          -- see past the hole\'s own variable and comes back as the saturated
+          -- former where the core path stops at the wrapper. Both print @Nat@.
+        , testCase "a bare argument is surface, corners are core" $
+            case ( snd (say [natCommand, ":infer succ zero"])
+                 , snd (say [natCommand, ":infer ⌜ succ zero ⌝"])
+                 ) of
+              (InferredSurface _ a, Inferred _ b) ->
+                case convert (globals (sessionMachine (fst (say [natCommand])))) [] 0 a b of
+                  (Nothing, _, _)  -> pure ()
+                  (Just why, _, _) -> assertFailure (show why)
+              (x, y) -> assertFailure (show x ++ " / " ++ show y)
         ]
     , testGroup
         "declarations"

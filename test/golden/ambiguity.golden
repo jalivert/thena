@@ -1,6 +1,6 @@
-thena spine> :infer Type
+thena spine> :infer ⌜ Type ⌝
 Type (?ℓ1) : Type (suc ?ℓ1)
-thena spine> :infer Type -> Type
+thena spine> :infer ⌜ Type -> Type ⌝
 Type (?ℓ2) -> Type (?ℓ3) : Type (suc ?ℓ2 ⊔ suc ?ℓ3)
 thena spine> :convert Type ≟ Type₀
 Type (?ℓ6) ≟ Type₀   yes

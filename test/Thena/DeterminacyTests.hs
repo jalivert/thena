@@ -1,6 +1,6 @@
 -- | MS1's target — determinacy of one-step evaluation (§9, phase 18).
 --
--- @examples\/determinacy.thena@ is the deliverable: TAPL chapter 3's language,
+-- @examples\/determinacy.thena.script@ is the deliverable: TAPL chapter 3's language,
 -- its numeric-value predicate, its ten-rule evaluation relation, and twenty-one
 -- theorems ending in Theorem 3.5.4. It is a script of command lines, so it is
 -- run the way phase 11 runs any file — through 'loadFile', which is the same
@@ -31,7 +31,7 @@ import Thena.Repl (startingSession, loadFile, renderCore)
 -- | Relative to the package root, which is where the suite runs — the same
 -- assumption @test\/golden@ already makes.
 target :: FilePath
-target = "examples/determinacy.thena"
+target = "examples/determinacy.thena.script"
 
 tests :: TestTree
 tests =

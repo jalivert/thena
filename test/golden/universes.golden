@@ -27,9 +27,9 @@ thena spine> :show N
 data N {ℓ₁₅₅} : Type (ℓ₁₅₅) where
   { z : N {ℓ₁₅₅}
   ; s : N {ℓ₁₅₅} -> N {ℓ₁₅₅} }
-thena spine> :infer s {0}
+thena spine> :infer ⌜ s {0} ⌝
 s {0} : N {0} -> N {0}
-thena spine> :infer s {1} (z {1})
+thena spine> :infer ⌜ s {1} (z {1}) ⌝
 s {1} z {1} : N {1}
 thena spine> data E : Type where { k : Eq {1} Type Nat Nat -> E }
 declared E

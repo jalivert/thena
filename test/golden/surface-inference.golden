@@ -1,0 +1,29 @@
+thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
+declared Nat
+thena spine> :theorem t : Nat
+proving t : Nat
+thena spine> :show
+▶ let ? t : Nat in
+  t
+thena spine> :infer succ zero
+succ zero : Nat
+thena spine> :infer ⌜ succ zero ⌝
+succ zero : Nat
+thena spine> :show
+▶ let ? t : Nat in
+  t
+thena spine> :where
+focus
+  let ? t : Nat in
+path
+  root
+context
+  (nothing in scope)
+type
+  Nat
+thena spine> :infer nosuchthing
+stuck: not in scope: nosuchthing
+thena spine> :show
+▶ let ? t : Nat in
+  t
+thena spine> :quit

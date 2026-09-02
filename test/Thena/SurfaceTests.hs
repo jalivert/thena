@@ -13,7 +13,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
-import Thena.Driver (parseCore, parseSurfaceTerm)
+import Thena.Driver (parseCore, parseSurfaceModule, parseSurfaceTerm)
 import Thena.Global.Env (emptyGlobals)
 import Thena.Repl (renderSurface)
 import Thena.Surface.Concrete
@@ -33,6 +33,8 @@ tests =
     , testGroup "precedence" precedenceTests
     , testGroup "it prints as it was written" renderTests
     , testGroup "layout (phase 40)" layoutTests
+    , testGroup "proof modules (phase 43)" moduleTests
+    , testGroup "comments (phase 43)" commentTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -197,6 +199,31 @@ layoutTests =
       same "let { x = let { y = a } in y } in x"
            "let x = let y = a\n            in y\n in x"
 
+    -- **A bracket opened inside a block does not close it** (MS4 phase 43).
+    -- 'Thena.Surface.Layout.closesBlock' used to name @)@ and @}@, so any close
+    -- ended the block it was in — and the first real proof module found it at
+    -- once: the @)@ of @elim Nat ()@ closed the module. Invisible until then,
+    -- because layout had only ever run on a @let@ and on one REPL argument.
+  , testCase "a balanced bracket inside a block does not close it" $
+      same "let { x = f (g a) ; y = b } in c"
+           "let x = f (g a)\n    y = b\n in c"
+
+    -- **The exact shape that found it.** An eliminator's field groups are
+    -- bracketed and may be empty, so a @let@ over an @elim@ has closing
+    -- brackets in the middle of a block and nothing else does.
+  , testCase "an eliminator's empty field groups do not close it" $
+      same "let { x = elim Nat () (\\ k -> Nat) (a b) () m ; y = b } in c"
+           "let x = elim Nat () (\\ k -> Nat) (a b) () m\n    y = b\n in c"
+
+    -- The other half: a bracket opened *outside* the block still closes it, and
+    -- closes as many as it has to.
+  , testCase "a bracket opened outside closes the block" $
+      same "(let { x = a } in x)" "(let x = a\n in x)"
+
+  , testCase "and closes every block it has to" $
+      same "(let { x = let { y = a } in y } in x)"
+           "(let x = let y = a\n             in y\n  in x)"
+
     -- An explicit brace may not be closed by the offside rule, nor may an
     -- implicit block be closed by a brace the user wrote.
   , refuses "let { x = a in x"
@@ -288,3 +315,84 @@ roundTrips src = do
   t  <- tree src
   t' <- tree (renderSurface t)
   t' @?= t
+
+-- --------------------------------------------------------------------------
+-- Proof modules (MS4 phase 43)
+-- --------------------------------------------------------------------------
+
+-- | A module is a header and a block of declarations, and the block obeys the
+-- same layout rule everything else does.
+--
+-- **The condition is still his**: implicit and explicit must agree. That is
+-- what these check, one construct at a time, because a module is the first
+-- thing whose block is more than one line in practice.
+moduleTests :: [TestTree]
+moduleTests =
+  [ testCase "a module's block lays out" $
+      sameModule "module M where { f : A ; f = a }"
+                 "module M where\nf : A\nf = a"
+
+  , testCase "the name is kept" $
+      fmap fst (parseSurfaceModule "module Arith where { f : A ; f = a }")
+        @?= Right "Arith"
+
+  , -- A datatype's own @where@ opens a block inside the module's, so the two
+    -- offside levels have to nest rather than collide.
+    testCase "a datatype's block nests inside the module's" $
+      sameModule
+        "module M where { data D : Type\8320 where { c : D } ; f : D ; f = c }"
+        "module M where\ndata D : Type\8320 where\n  c : D\nf : D\nf = c"
+
+  , -- The regression the first real file found, at module scale.
+    testCase "a bracket in a declaration does not close the module" $
+      sameModule
+        "module M where { f : A ; f = g (h a) ; k : A ; k = b }"
+        "module M where\nf : A\nf = g (h a)\nk : A\nk = b"
+
+  , testCase "a module with no declarations is refused" $
+      case parseSurfaceModule "module M where { }" of
+        Left _  -> pure ()
+        Right r -> assertFailure ("admitted: " ++ show r)
+  ]
+  where
+    -- Compare the **items**, not the module name, so a test says only what it
+    -- is about.
+    sameModule a b = case (parseSurfaceModule a, parseSurfaceModule b) of
+      (Right (_, x), Right (_, y)) -> show y @?= show x
+      (x, y) -> assertFailure (show x ++ "\n" ++ show y)
+
+-- --------------------------------------------------------------------------
+-- Comments (MS4 phase 43)
+-- --------------------------------------------------------------------------
+
+-- | @--@ **followed by a space**, to the end of the line, in every language
+-- the lexer serves — his ruling, 2026-09-02: /"Better they are uniform than
+-- three different ones."/
+--
+-- **The space is the whole of the rule.** @-@ is an @$idchar@ but not an
+-- @$idstart@, so nothing is written @--@-first today; requiring the space means
+-- nothing ever has to be given up, and it is what these cases pin.
+commentTests :: [TestTree]
+commentTests =
+  [ testCase "a trailing comment is not part of the term" $
+      same "\\ x -> x" "\\ x -> x -- the identity"
+
+  , testCase "a comment on its own line is skipped" $
+      same "let { x = a ; y = b } in c"
+           "let x = a\n-- about y\n    y = b\n in c"
+
+  , -- The one that says the rule is about the space, not about @--@.
+    testCase "-- without a space is not a comment" $
+      case parseSurfaceTerm "\\ x -> x --oops" of
+        Left _  -> pure ()
+        Right t -> assertFailure ("read as a term: " ++ show t)
+
+  , testCase "and neither is an arrow" $
+      same "A -> B" "A -> B  -- a function"
+
+  , -- A comment line carries no tokens, so it contributes no column and cannot
+    -- move the offside rule.
+    testCase "a comment does not open or close a block" $
+      same "let { x = a } in x"
+           "let x = a\n-- not a second binding\n in x"
+  ]

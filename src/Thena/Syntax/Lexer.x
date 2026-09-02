@@ -44,6 +44,24 @@ $strchar = [$printable \t] # [\" \\]
 tokens :-
 
   $white+       ;
+  -- **A comment is @--@ followed by a space** — his ruling, 2026-09-02:
+  -- /"Let's have universal comments in all languages written `--` always
+  -- followed by a space. If it is not followed by a space, it is not a comment
+  -- and it can be some other identifier."/
+  --
+  -- **One syntax for all three kinds of file**, and that is the whole argument:
+  -- /"They might not fit super naturally in the .thena.script files or
+  -- .thena.rules files, but that's fine. Better they are uniform than three
+  -- different ones."/
+  --
+  -- The space is what keeps @-@ available. It is an @$idchar@ but not an
+  -- @$idstart@, so no identifier /begins/ @--@ today; requiring the space means
+  -- none ever has to be given up either, and an operator spelled @-->@ or @--@
+  -- stays writable. Alex takes the longest match, so @-- x@ is a comment and
+  -- @-->@ is not.
+  "--" [\ ] [^\n]*  ;
+  "--" \n            ;
+  "--"                { keyword TDashes }
   "->"          { keyword TArrow }
   "λ"           { keyword TLambda }
   \\            { keyword TLambda }
@@ -78,6 +96,11 @@ tokens :-
   -- command is unaffected: the driver splits the word off the line before this
   -- lexer sees the rest.
   "data"        { keyword TData }
+  -- **Reserved at MS4 phase 43**, for a proof module's header. Narrows
+  -- identifiers project-wide the way @data@ did, which is the price of the
+  -- header being real syntax rather than a textual pre-pass like the rule
+  -- base's — his call, 2026-09-02.
+  "module"      { keyword TModule }
   "rule"        { keyword TRule }
   "when"        { keyword TWhen }
   "then"        { keyword TThen }
@@ -120,7 +143,12 @@ data Token
   | TIn
   | TElim
   | TWhere
+  | TDashes
+    -- ^ @--@ not followed by a space, which is therefore /not/ a comment
+    -- (MS4 phase 43). No grammar uses it; it exists so that the lexer can say
+    -- what it saw rather than failing, and so a later operator may claim it.
   | TData
+  | TModule
   | TRule
   | TWhen
   | TThen

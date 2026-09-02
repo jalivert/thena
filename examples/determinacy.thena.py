@@ -120,9 +120,9 @@ qed
 '''
 
 #!/usr/bin/env python3
-"""Regenerates examples/determinacy.thena — MS1's target (§9, phase 18).
+"""Regenerates examples/determinacy.thena.script — MS1's target (§9, phase 18).
 
-    python3 examples/determinacy.thena.py > examples/determinacy.thena
+    python3 examples/determinacy.thena.py > examples/determinacy.thena.script
 
 The file it writes is the artifact; this is here so that a change to the
 elimination tactic does not leave 1190 lines of REPL script to re-derive by

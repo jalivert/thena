@@ -35,6 +35,7 @@ module Thena.Driver
   , answer
   , oneLine
   , loadSource
+  , loadProofSource
   , RuleFileError (..)
   , loadRuleBases
   , baseHead
@@ -42,6 +43,9 @@ module Thena.Driver
   , parseDevelopment
   , parseDeclaration
   , parseSurfaceTerm
+  , parseSurfaceModule
+  , LoadKind (..)
+  , kindOf
   ) where
 
 import Data.Maybe (fromMaybe, isJust)
@@ -53,7 +57,7 @@ import Data.Char (isSpace)
 import Data.List (dropWhileEnd, isSuffixOf, stripPrefix)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
-import Thena.Development.Cursor (Cursor, Focus (..), Part (..), focus, overLevels)
+import Thena.Development.Cursor (expectedType, Cursor, Focus (..), Part (..), focus, overLevels)
 import Thena.Development.Partial (Partial (..), extract)
 import Thena.Engine
   ( ChoicePoint (..)
@@ -137,6 +141,7 @@ import Thena.Surface.Concrete
   , SurfaceConstructor (..)
   , SurfaceData (..)
   , SurfaceDecl (..)
+  , SurfaceModule (..)
   , PairingError (..)
   )
 import Thena.Surface.Layout (layout)
@@ -350,7 +355,23 @@ data Response
     -- own look, because @certify@ is an op and an op's answer comes back as a
     -- 'Message', which the driver may not build out of a term: rendering is
     -- "Thena.Repl"'s (§2.5)
+  | InferredSurface Surface Core
+    -- ^ @:infer ‹surface›@ (MS4 phase 43): the term as written and the type
+    -- elaborating it produced. The **surface** term, not the core one it built,
+    -- because the development it built was rewound and printing a term the
+    -- session no longer holds would invite a @goto@ into nothing
   | LoadRequested FilePath
+  | ProofRequested FilePath
+    -- ^ @:load@ on a @.thena@ path (MS4 phase 43): a **proof module**, which is
+    -- surface declarations and not command lines. Like 'LoadRequested' it only
+    -- names the file; "Thena.Repl" reads it and hands the contents back to
+    -- 'loadProofSource'
+  | ProofLoaded String [String]
+    -- ^ a proof module went in: its name, and what it declared, in order. **The
+    -- op-level messages are discarded** — his call, 2026-09-02, the same bargain
+    -- @loadPrelude@ already makes: elaborating one declaration prints a dozen
+    -- @solved: ?ℓ229@ lines, and a file of them buries its own output. Typing
+    -- the declaration at the prompt still prints everything
   | RulesRequested [FilePath]
     -- ^ @:load@ on one or more @.thena.rules@ paths (phase 22). Like
     -- 'LoadRequested' it only names them — reading is "Thena.Repl"'s (§12
@@ -615,15 +636,177 @@ parseSurfaceItems src = do
   ts' <- mapLeft LayoutFailed (layout ts)
   ds  <- mapLeft SurfaceParseFailed (Surface.parseSurfaceDecls ts')
   regroup (reverse ds)
+
+-- | A whole **proof module** (MS4 phase 43): its name, and its items.
+--
+-- The same three passes 'parseSurfaceItems' makes, through the module start
+-- symbol instead — so a module's declaration block and a @declare@ line are the
+-- same grammar, and layout does the same work in both.
+parseSurfaceModule
+  :: String
+  -> Either SyntaxError (String, [Either SurfaceData (String, Surface, Surface)])
+parseSurfaceModule src = do
+  ts  <- tokensOf src
+  ts' <- mapLeft LayoutFailed (layout ts)
+  m   <- mapLeft SurfaceParseFailed (Surface.parseSurfaceModule ts')
+  is  <- regroup (surfaceModuleDecls m)
+  Right (surfaceModuleName m, is)
+
+-- | Pair each signature with the equation after it, and pass datatypes through.
+--
+-- Shared by the two above since phase 43. 'Thena.Surface.Concrete.paired' is
+-- the same idea for theorems alone; this one also admits a @data@ item, which
+-- is why it is here and not there.
+regroup
+  :: [SurfaceDecl]
+  -> Either SyntaxError [Either SurfaceData (String, Surface, Surface)]
+regroup = go
   where
-    regroup [] = Right []
-    regroup (SurfaceDatatype d : rest) = (Left d :) <$> regroup rest
-    regroup (SurfaceSignature x ty : SurfaceEquation y body : rest)
-      | x == y = (Right (x, ty, body) :) <$> regroup rest
-    regroup (SurfaceSignature x _ : _) =
+    go [] = Right []
+    go (SurfaceDatatype d : rest) = (Left d :) <$> go rest
+    go (SurfaceSignature x ty : SurfaceEquation y body : rest)
+      | x == y = (Right (x, ty, body) :) <$> go rest
+    go (SurfaceSignature x _ : _) =
       Left (DeclarationsUnpaired (SignatureWithNoEquation x))
-    regroup (SurfaceEquation x _ : _) =
+    go (SurfaceEquation x _ : _) =
       Left (DeclarationsUnpaired (EquationWithNoSignature x))
+
+-- --------------------------------------------------------------------------
+-- Surface declarations, as a program (MS4 phase 42; lifted here at 43)
+-- --------------------------------------------------------------------------
+
+-- | Compile a run of surface items into the instructions that admit them.
+--
+-- **Lifted out of @dispatch@ at phase 43** so that a proof module and a typed
+-- @declare@ line share it. It closed over nothing but the name counter, which
+-- is why lifting it is a move rather than a rewrite: what an item compiles to
+-- does not depend on how the driver was asked.
+--
+-- **A whole module is therefore one program**, which is what phase 42 decided
+-- for a single declaration and for the same reason — @:step@ can watch it, and
+-- phase 49 can move it into a rule body without the driver having sequenced
+-- anything in Haskell.
+surfaceProgram
+  :: Int -> [Either SurfaceData (String, Surface, Surface)] -> ([Instr], Int)
+surfaceProgram n0 items = foldl item ([], n0) items
+  where
+  item acc (Left d)          = datatype acc d
+  item acc (Right thm)       = declaring acc thm
+
+  -- **Brady's data rule** (@IDRIS.md@ §4.6): the datatype's own type is
+  -- elaborated first /"so that the type is in scope when elaborating the
+  -- constructor types"/, then each constructor the same way.
+  --
+  -- **Being in scope is an assumption, and then a β-step.** A constructor's
+  -- type mentions the datatype, which is not declared yet, so it is
+  -- elaborated under @assume D : ‹its type›@ — and popping a development
+  -- extracts, so what comes back is @λ D : ty . ‹the type›@. Applying that to
+  -- @D@ as a global and reducing puts the real reference in. Both ops
+  -- already existed; neither needed a mode.
+  datatype (acc, n) d =
+    let nm      = surfaceDataName d
+        dn      = GlobalName nm
+        ps      = surfaceDataParameters d
+        cs      = surfaceDataConstructors d
+        (l, n1) = freshLevelMeta n
+        full    = withParams ps (surfaceDataType d)
+        tyName  = "dty" ++ show n
+        conName k = "con" ++ show n ++ "_" ++ show (k :: Int)
+        selfName  = Lit (VTerm (Trailing (Global dn [])))
+     in ( acc ++
+            [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LVar l))))))
+            , Do (Elaborate (Lit (VSurface full)))
+            , Bind (tyName ++ "raw") PopDevelopment
+            , Bind tyName (Expose (Ref (tyName ++ "raw")))
+            ]
+            ++ concat
+                 [ [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LVar l))))))
+                   , Do (Assume (Lit (VText nm)) (Ref tyName))
+                   , Do (Elaborate (Lit (VSurface (withParams ps cty))))
+                   , Bind (conName k ++ "raw") PopDevelopment
+                   , Bind (conName k ++ "app")
+                       (ApplyTo (Ref (conName k ++ "raw")) selfName)
+                   , Bind (conName k) (Expose (Ref (conName k ++ "app")))
+                   ]
+                 | (k, SurfaceConstructor _ cty) <- zip [0 ..] cs
+                 ]
+            ++ [ Do (MakeData dn (length ps)
+                       [ GlobalName cn | SurfaceConstructor cn _ <- cs ]
+                       (Ref tyName : [ Ref (conName k) | k <- [0 .. length cs - 1] ]))
+               ]
+        , n1 )
+
+  -- | The plicity of each argument position a signature writes.
+  --
+  -- Only a leading run of @∀@ groups is read: once the type stops being a
+  -- quantifier there are no more named positions to speak of, and an arrow
+  -- contributes an 'Explicit' one.
+  plicitiesIn t = case t of
+    SurfacePi bs body ->
+      [ p | SurfaceBinder p _ _ <- NE.toList bs ] ++ plicitiesIn body
+    SurfaceArrow _ body -> Explicit : plicitiesIn body
+    _ -> []
+
+  -- A constructor's type is written in the scope of the parameters, so they
+  -- are put back in front of it and peeled off again by
+  -- 'Thena.Global.Declare.buildInductive'.
+  withParams ps t =
+    foldr (\(x, ty) rest -> SurfacePi (SurfaceBinder Explicit x (Just ty) NE.:| []) rest) t ps
+
+  declaring (acc, n) (x, ty, body) =
+    let (l, n1) = freshLevelMeta n
+     in ( acc ++
+            [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LVar l))))))
+            , Do (Elaborate (Lit (VSurface ty)))
+              -- **Reduced before it is used or stored.** What @extract@ hands
+              -- back carries @fill@'s @=@-bindings, and a @let@-headed type
+              -- is not merely ugly: @intro@ reads a @Let@ as written, so the
+              -- body's λ would open a definition instead. See
+              -- 'Thena.Ops.Whnf'.
+            , Bind ("raw" ++ show n) PopDevelopment
+            , Bind ("ty" ++ show n) (Expose (Ref ("raw" ++ show n)))
+            , Do (PushDevelopment (Ref ("ty" ++ show n)))
+            , Do (Elaborate (Lit (VSurface body)))
+            , Bind ("tm" ++ show n) PopDevelopment
+              -- **The plicities come from the signature as written** (MS4
+              -- phase 44b): a leading run of @∀@ binder groups, each in
+              -- braces or not. That is the whole of the surface signature
+              -- environment — where a binder was written, not what the type
+              -- turned out to be.
+            , Do (DefineGlobal (plicitiesIn ty) (Lit (VText x))
+                    (Ref ("ty" ++ show n)) (Ref ("tm" ++ show n)))
+            ]
+        , n1 )
+
+-- | Elaborate a whole proof module (MS4 phase 43).
+--
+-- **One program for the whole file**, built by 'surfaceProgram' — the same
+-- instructions a @declare@ line compiles to, concatenated. So a module is not a
+-- new mechanism, and @:step@ can walk it declaration by declaration.
+--
+-- **Quiet when it works, loud when it does not** — his call, 2026-09-02. On
+-- success the op-level messages are dropped and the driver reports the module
+-- and what it declared, in order; on failure everything the run printed is kept,
+-- because that is where the reason is. Elaborating one declaration emits a dozen
+-- @solved: ?ℓ229@ lines and a file of them buries its own output, which is the
+-- same bargain @loadPrelude@ has always made with a script.
+--
+-- **Holes left over are not an error.** A module that does not finish leaves a
+-- half-built development in the session, which is what the REPL is for.
+loadProofSource :: Session -> String -> (Session, Response)
+loadProofSource s src = case parseSurfaceModule src of
+  Left e -> (s, Failed e)
+  Right (nm, items) ->
+    let machine  = sessionMachine s
+        (is, n1) = surfaceProgram (names machine) items
+     in case progress False s { sessionMachine = load is machine { names = n1 } } [] of
+          (s', Ran _ Completed) -> (s', ProofLoaded nm (map declaredName items))
+          (s', other)           -> (s', other)
+
+-- | What an item adds to the environment, for the summary line.
+declaredName :: Either SurfaceData (String, Surface, Surface) -> String
+declaredName (Left d)          = surfaceDataName d
+declaredName (Right (x, _, _)) = x
 
 -- | Lex and parse a **surface** term (phase 39). No context, because nothing is
 -- resolved: what a name denotes is elaboration's answer, and elaboration is
@@ -646,6 +829,11 @@ parseSurfaceTerm src = do
 command :: Session -> String -> (Session, Response)
 command s line = case break (== ' ') (dropWhile (== ' ') line) of
   ("", _)      -> (s, Blank)
+  -- **A line that is only a comment is a blank line** (MS4 phase 43). The lexer
+  -- drops @-- @ wherever it appears, but a command word is split off before
+  -- anything is lexed, so a comment standing alone would otherwise be
+  -- dispatched as a rule named @--@.
+  _ | commentLine line -> (s, Blank)
   (name, rest) -> dispatch s name (dropWhile (== ' ') rest)
 
 dispatch :: Session -> String -> String -> (Session, Response)
@@ -704,27 +892,40 @@ dispatch s name arg = case name of
     _  -> view s parseCore (Rendered . whnf (globals machine) ctx) arg
   -- The same no-argument/with-argument split as @:whnf@ and @:show@: with no
   -- argument it is the core focus, with one it is a term the user writes.
+  -- **A bare argument is a surface term; corners are a core one** (MS4 phase
+  -- 43), which is the rule everywhere else an argument is written. With no
+  -- argument it is still the core focus.
   ":infer" -> case arg of
     "" -> case focus (cursor (development machine)) of
       OnTerm _ _ t -> inferred t (names machine)
       _            -> (s, Rejected (NotThere NotInCore))
-    _  -> case parseCore (globals machine) ctx (names machine) arg of
-      Left e        -> (s, Failed e)
-      Right (t, n1) -> inferred t n1
+    _ | Just inner <- cornered arg ->
+          case parseCore (globals machine) ctx (names machine) inner of
+            Left e        -> (s, Failed e)
+            Right (t, n1) -> inferred t n1
+      | otherwise -> case parseSurfaceTerm arg of
+          Left e  -> (s, Failed e)
+          Right t -> inferSurface t
   -- Reading the file is the caller's; this only names it (§12 invariant 4).
   -- **Two different loads behind one word, told apart by extension** — the
   -- user, 2026-08-25. A @.thena.rules@ path is a rule base and there may be
   -- several, leftmost searched first; anything else is one script of command
   -- lines, exactly as phase 11 left it. Reading is the caller's; this only
   -- names them (§12 invariant 4).
-  ":load"  -> withArgument $ case pathsOf arg of
-    ps@(_ : _)
-      | all isRulePath ps -> case proofUnderway of
-          Just why -> (s, Rejected why)
-          Nothing  -> (s, RulesRequested ps)
-      | any isRulePath ps -> (s, Rejected (MixedLoad name))
-    [one] -> (s, LoadRequested one)
-    _     -> (s, Rejected (UnexpectedArgument name))
+  -- **Three kinds, one word** (MS4 phase 43). @:load rules …@, @:load proof …@
+  -- and @:load script …@ say which; a bare @:load ‹path›@ reads the extension
+  -- and answers the same question. His ruling, 2026-09-02 — see 'kindOf'.
+  --
+  -- A keyword is not a path, so the two forms cannot be confused: the first
+  -- word is looked up, and only if it names no kind is it taken as a path.
+  ":load"  -> withArgument $ case words arg of
+    ("rules"  : rest) -> loadKind LoadRules  (pathsOf (unwords rest))
+    ("proof"  : rest) -> loadKind LoadProof  (pathsOf (unwords rest))
+    ("script" : rest) -> loadKind LoadScript (pathsOf (unwords rest))
+    _ -> case pathsOf arg of
+      ps@(p : _) | all ((== kindOf p) . kindOf) ps -> loadKind (kindOf p) ps
+      (_ : _)  -> (s, Rejected (MixedLoad name))
+      []       -> (s, Rejected (MissingArgument name))
   -- The loaded bases, in search order. A look, so a colon.
   ":bases" -> noArgument (s, BasesListed (rules machine))
   ":rules" -> noArgument (s, RulesListed (rules machine))
@@ -879,6 +1080,19 @@ dispatch s name arg = case name of
       (Just att, _)    -> Just (ProofUnderway (attemptName att))
       (Nothing, [])    -> Nothing
       (Nothing, ps)    -> Just (ProofsSuspended (map (attemptName . parkedAttempt) ps))
+
+    -- | One kind, the paths it was given. **Rule bases take several and the
+    -- other two take one**, which is not an accident of spelling: a load of
+    -- rule bases /replaces/ the ordered list, so the order written is the search
+    -- order (§8), while a script and a proof module are each just run.
+    loadKind k ps = case (k, ps) of
+      (_, [])             -> (s, Rejected (MissingArgument name))
+      (LoadRules, _)      -> case proofUnderway of
+        Just why -> (s, Rejected why)
+        Nothing  -> (s, RulesRequested ps)
+      (LoadScript, [one]) -> (s, LoadRequested one)
+      (LoadProof,  [one]) -> (s, ProofRequested one)
+      _                   -> (s, Rejected (UnexpectedArgument name))
 
     noArgument r
       | null arg  = r
@@ -1097,6 +1311,61 @@ dispatch s name arg = case name of
       (Left e,   _, n1) -> (bump n1, IllTyped e)
       (Right ty, _, n1) -> (bump n1, Inferred t ty)
 
+    -- | @:infer ‹surface›@ — his framing, 2026-09-01: /"if this term were put
+    -- here, what would its type be?"/
+    --
+    -- **Elaborate into a hole of unknown type, read the type off, put the
+    -- development back.** The hole is claimed at a second hole @Tinfer@, which
+    -- is what "unknown type" means here: unification solves it while the term
+    -- is elaborated, and 'Thena.Development.Cursor.expectedType' at the focus is
+    -- then the answer. @Elaborate@ leaves the focus where it found it (phase
+    -- 41b), which is what makes reading it off exact rather than careful.
+    --
+    -- **The rewind is unconditional**, where phase 25d's is taken only when a
+    -- line fails: this command is a look, so a success must undo itself too.
+    -- Only the development is rewound — @names@ and @globals@ are not part of a
+    -- 'Snapshot' (§7.7), and the counter must not go back or a number the user
+    -- has seen would be reissued (MS2 closeout 4f).
+    --
+    -- **It revalidates before answering.** A level obligation is collected only
+    -- by 'Thena.Development.Validate' and the kernel, so an elaboration can
+    -- succeed while owing one; reporting a type for a development that does not
+    -- check would be the gap @ms3\/CLOSEOUT.md@ item 25 describes, one command
+    -- further on.
+    inferSurface t =
+      let (l, n1) = freshLevelMeta (names machine)
+          before  = snapshotOf machine
+          prog =
+            [ Bind "T" (Claim (Lit (VText "Tinfer"))
+                          (Lit (VTerm (Trailing (Universe (LVar l))))))
+            , Bind "x" (Claim (Lit (VText "xinfer")) (Ref "T"))
+            , Do (Ops.Goto (Lit (VText "xinfer")))
+            , Do (Elaborate (Lit (VSurface t)))
+            ]
+          asking  = s { sessionMachine = load prog machine { names = n1 } }
+       in case progress False asking [] of
+            (s', Ran _ Completed) ->
+              let m'   = sessionMachine s'
+                  back = s' { sessionMachine = restore before m' }
+                  dev  = development m'
+               in case revalidate (globals m') [] (names m') (flatten dev) of
+                    (Left e, _) -> (back, Revalidated (Just e))
+                    -- **whnf'd, and that is not cosmetic.** The type is read
+                    -- off the hole the elaboration solved, so without reducing
+                    -- it prints as @Tinfer@ — the hole's own variable — and says
+                    -- nothing. It therefore reduces further than @:infer ⌜t⌝@
+                    -- does: a saturated former where that stops at the wrapper.
+                    -- **The two agree up to conversion, not syntactically**, and
+                    -- they print the same.
+                    (Right _, _) -> case expectedType (cursor dev) of
+                      Just ty -> (back, InferredSurface t
+                                          (whnf (globals m') (focusContext dev) ty))
+                      -- Unreachable as the program is written — the focus is the
+                      -- component @Elaborate@ was pointed at — but the cursor
+                      -- type admits it and inventing an answer would be worse.
+                      Nothing -> (back, Rejected (NotThere NotInCore))
+            (s', other) -> (s' { sessionMachine = restore before (sessionMachine s') }, other)
+
     conversion = withArgument $
       case parseEquated (globals machine) ctx (names machine) arg of
         Left e -> (s, Failed e)
@@ -1143,97 +1412,9 @@ dispatch s name arg = case name of
     declareSurface src = case parseSurfaceItems src of
       Left e -> (s, Failed e)
       Right items ->
-        let (is, n1) = foldl item ([], names machine) items
+        let (is, n1) = surfaceProgram (names machine) items
          in progress (sessionStepping s)
                      s { sessionMachine = load is machine { names = n1 } } []
-
-    item acc (Left d)          = datatype acc d
-    item acc (Right thm)       = declaring acc thm
-
-    -- **Brady's data rule** (@IDRIS.md@ §4.6): the datatype's own type is
-    -- elaborated first /"so that the type is in scope when elaborating the
-    -- constructor types"/, then each constructor the same way.
-    --
-    -- **Being in scope is an assumption, and then a β-step.** A constructor's
-    -- type mentions the datatype, which is not declared yet, so it is
-    -- elaborated under @assume D : ‹its type›@ — and popping a development
-    -- extracts, so what comes back is @λ D : ty . ‹the type›@. Applying that to
-    -- @D@ as a global and reducing puts the real reference in. Both ops
-    -- already existed; neither needed a mode.
-    datatype (acc, n) d =
-      let nm      = surfaceDataName d
-          dn      = GlobalName nm
-          ps      = surfaceDataParameters d
-          cs      = surfaceDataConstructors d
-          (l, n1) = freshLevelMeta n
-          full    = withParams ps (surfaceDataType d)
-          tyName  = "dty" ++ show n
-          conName k = "con" ++ show n ++ "_" ++ show (k :: Int)
-          selfName  = Lit (VTerm (Trailing (Global dn [])))
-       in ( acc ++
-              [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LVar l))))))
-              , Do (Elaborate (Lit (VSurface full)))
-              , Bind (tyName ++ "raw") PopDevelopment
-              , Bind tyName (Expose (Ref (tyName ++ "raw")))
-              ]
-              ++ concat
-                   [ [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LVar l))))))
-                     , Do (Assume (Lit (VText nm)) (Ref tyName))
-                     , Do (Elaborate (Lit (VSurface (withParams ps cty))))
-                     , Bind (conName k ++ "raw") PopDevelopment
-                     , Bind (conName k ++ "app")
-                         (ApplyTo (Ref (conName k ++ "raw")) selfName)
-                     , Bind (conName k) (Expose (Ref (conName k ++ "app")))
-                     ]
-                   | (k, SurfaceConstructor _ cty) <- zip [0 ..] cs
-                   ]
-              ++ [ Do (MakeData dn (length ps)
-                         [ GlobalName cn | SurfaceConstructor cn _ <- cs ]
-                         (Ref tyName : [ Ref (conName k) | k <- [0 .. length cs - 1] ]))
-                 ]
-          , n1 )
-
-    -- | The plicity of each argument position a signature writes.
-    --
-    -- Only a leading run of @∀@ groups is read: once the type stops being a
-    -- quantifier there are no more named positions to speak of, and an arrow
-    -- contributes an 'Explicit' one.
-    plicitiesIn t = case t of
-      SurfacePi bs body ->
-        [ p | SurfaceBinder p _ _ <- NE.toList bs ] ++ plicitiesIn body
-      SurfaceArrow _ body -> Explicit : plicitiesIn body
-      _ -> []
-
-    -- A constructor's type is written in the scope of the parameters, so they
-    -- are put back in front of it and peeled off again by
-    -- 'Thena.Global.Declare.buildInductive'.
-    withParams ps t =
-      foldr (\(x, ty) rest -> SurfacePi (SurfaceBinder Explicit x (Just ty) NE.:| []) rest) t ps
-
-    declaring (acc, n) (x, ty, body) =
-      let (l, n1) = freshLevelMeta n
-       in ( acc ++
-              [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LVar l))))))
-              , Do (Elaborate (Lit (VSurface ty)))
-                -- **Reduced before it is used or stored.** What @extract@ hands
-                -- back carries @fill@'s @=@-bindings, and a @let@-headed type
-                -- is not merely ugly: @intro@ reads a @Let@ as written, so the
-                -- body's λ would open a definition instead. See
-                -- 'Thena.Ops.Whnf'.
-              , Bind ("raw" ++ show n) PopDevelopment
-              , Bind ("ty" ++ show n) (Expose (Ref ("raw" ++ show n)))
-              , Do (PushDevelopment (Ref ("ty" ++ show n)))
-              , Do (Elaborate (Lit (VSurface body)))
-              , Bind ("tm" ++ show n) PopDevelopment
-                -- **The plicities come from the signature as written** (MS4
-                -- phase 44b): a leading run of @∀@ binder groups, each in
-                -- braces or not. That is the whole of the surface signature
-                -- environment — where a binder was written, not what the type
-                -- turned out to be.
-              , Do (DefineGlobal (plicitiesIn ty) (Lit (VText x))
-                      (Ref ("ty" ++ show n)) (Ref ("tm" ++ show n)))
-              ]
-          , n1 )
 
     tactic what verb op = withArgument $
       case compile what verb op (globals machine) ctx (names machine) arg of
@@ -1256,12 +1437,20 @@ dispatch s name arg = case name of
 -- rest are rules in the rule base, not commands (§8, phase 23b); listing them
 -- here would state the base's contents in a second place, and it would go
 -- stale the moment a base is loaded. The last line points at @:rules@ instead.
+--
+-- **@prove@ was listed and is not any more** (MS4 phase 43). Phase 41 made it a
+-- rule over @prim-prove@, at which point the paragraph above started applying
+-- to it and nothing noticed — the same phase left @prove ‹hint›@ and
+-- @:matches ‹hint›@ here after retiring hints. @declare@ and @quantify@ were
+-- missing for the opposite reason: they are the driver's own and had never been
+-- added. **All four were found by crossing this list against @dispatch@ by
+-- hand**, which is what @ms3\/CLOSEOUT.md@ 26 exists to make unnecessary — the
+-- @DriverTests@ mirrors had the same gaps, so they could not have caught it.
 commandSummary :: [(String, String)]
 commandSummary =
   [ ("assume ‹x› : ‹S›",        "add a hypothesis above the focus")
   , ("claim ‹x› : ‹S›",         "add a hole above the focus")
   , ("unify ‹t› ≟ ‹u›",         "solve the focus by unification")
-  , ("prove / prove ‹hint›",     "run a rule here / elaborate a term")
   , ("retry / retry ‹n›",        "backtrack to a choice point")
   , ("along  into  back",        "move on the chain")
   , ("cross type / cross val",   "move into a term")
@@ -1269,18 +1458,20 @@ commandSummary =
   , (unwords numberedParts,      "descend into a numbered field")
   , ("goto ‹hole›",              "move to a hole by name")
   , ("reduce",                   "reduce the focused term in place")
+  , ("quantify ‹x› : ‹S›",       "add a ∀-binder above the focus")
   , ("data ‹D› … where { … }",   "declare an inductive family")
+  , ("declare ‹sig› ; ‹equation›", "elaborate a surface declaration")
   , ("certify ‹type›",           "ask the kernel about the development")
   , ("qed",                      "certify and admit the finished proof")
   , (":show / :show ‹name›",     "the development / a global")
   , (":where",                   "focus, path, context, expected type")
   , (":core ‹t› / :dev ‹p›",     "parse a term / a development and print it")
   , (":surface ‹t›",             "parse a surface term and print it")
-  , (":infer / :infer ‹t›",      "the type of the focus / of a term")
+  , (":infer / :infer ‹t›",      "the type of the focus / of a surface term")
   , (":whnf / :whnf ‹t›",        "reduce the focus / a term, without committing")
   , (":convert ‹t› ≟ ‹u›",      "are two terms convertible")
   , (":elim ‹D› [‹universe›]",  "a datatype’s elimination rule")
-  , (":matches / :matches ‹hint›", "which rules apply here")
+  , (":matches",                 "which rules apply here")
   , (":choices",                 "the live choice points, nearest first")
   , (":bases / :rules",          "the loaded rule bases / the rules in them")
   , (":step on / :step / :step off", "single-step the machine")
@@ -1293,7 +1484,8 @@ commandSummary =
   , (":undo",                    "take back the last line")
   , (":extract",                 "the term the development stands for")
   , (":revalidate",              "recheck the whole development")
-  , (":load ‹path›",             "run a script, or install rule bases")
+  , (":load ‹path›",             "a proof module, a script, or rule bases")
+  , (":load proof / rules / script", "say which, rather than by extension")
   , (":help",                    "this list")
   , (":quit",                    "leave")
   ]
@@ -1335,16 +1527,56 @@ corePart w a = case a of
 
 -- | @:load@\'s argument, split on spaces and commas. **Both separators** —
 -- the user asked for "comma or space separated (or both)", 2026-08-25.
+-- | An argument written in corners, with them stripped (MS4 phase 43).
+--
+-- **The same split 'groups' makes, for a command that takes one argument
+-- rather than a run of them.** A command word decides which vocabulary it is
+-- reading, and this is how it asks: corners are the development calculus, a
+-- bare argument is the surface language.
+--
+-- Textual rather than a lex-and-inspect, because it is answering a question
+-- about how the argument was /written/ — and being wrong is a parse error in
+-- the grammar the user did not mean, not a silent misreading.
+cornered :: String -> Maybe String
+cornered src = case dropWhile (== ' ') src of
+  '\8988' : rest -> case break (== '\8989') rest of
+    (inner, '\8989' : after) | all (== ' ') after -> Just inner
+    _                                              -> Nothing
+  _ -> Nothing
+
 pathsOf :: String -> [FilePath]
 pathsOf = words . map (\c -> if c == ',' then ' ' else c)
 
 -- | Is this a rule base rather than a script? The extension is the whole test,
 -- and it is the user\'s: *"Maybe `.thena.rules`, that sounds fine."*
-isRulePath :: FilePath -> Bool
-isRulePath p = ruleExtension `isSuffixOf` p
+-- | Which of the three kinds a path names. **The extension is the whole test**,
+-- and it is the user's, 2026-09-02: /"The extension for thena proofs is
+-- @.thena@ — that's the whole extension. I think ideally we would have
+-- @:load rules@ and @:load proof@ and the universal @:load@ can load anything
+-- depending on the extensions."/
+--
+-- The three suffixes are disjoint, so no path has two readings: a script ends
+-- @.thena.script@, a rule base @.thena.rules@, and a proof module @.thena@ and
+-- neither of the others.
+--
+-- **@.thena@ meant a script until phase 43**, which is why the four shipped
+-- files were renamed rather than the proof module taking a new extension: he
+-- named @.thena@ for the proof module, and a proof module is what a reader will
+-- write most.
+data LoadKind = LoadRules | LoadProof | LoadScript
+  deriving (Eq, Show)
+
+kindOf :: FilePath -> LoadKind
+kindOf p
+  | ruleExtension   `isSuffixOf` p = LoadRules
+  | scriptExtension `isSuffixOf` p = LoadScript
+  | otherwise                      = LoadProof
 
 ruleExtension :: String
 ruleExtension = ".thena.rules"
+
+scriptExtension :: String
+scriptExtension = ".thena.script"
 
 -- | Why a rule-base file was not accepted.
 data RuleFileError
@@ -1378,13 +1610,31 @@ data RuleFileError
 -- line the user is looking at.
 baseHead :: [String] -> Maybe (String, Maybe String, Int)
 baseHead ls0 = do
-  let (blanks, ls1) = span (all isSpace) ls0
+  -- **Comment lines are skipped like blank ones** (MS4 phase 43). The header is
+  -- read textually, before the lexer, so it is the one place a comment has to
+  -- be recognised twice — and a rule base that could not be commented above its
+  -- own header would make the uniformity his ruling asked for a fiction.
+  let (blanks, ls1) = span skippable ls0
   (desc, ls2, used) <- Just (docstring ls1)
-  let (blanks2, ls3) = span (all isSpace) ls2
+  let (blanks2, ls3) = span skippable ls2
   (nm, hdr) <- case ls3 of
     l : _ -> (\n -> (n, 1 :: Int)) <$> baseLine l
     []    -> Nothing
   Just (nm, desc, length blanks + used + length blanks2 + hdr)
+
+skippable :: String -> Bool
+skippable l = all isSpace l || commentLine l
+
+-- | Is this whole line a comment (MS4 phase 43)?
+--
+-- **One place says what a comment line is**, and it says the same thing the
+-- lexer's rule does: @--@ is a comment when a space follows it, and an
+-- identifier-ish token when one does not. @words@ answers exactly that, because
+-- it is the space that separates them.
+commentLine :: String -> Bool
+commentLine l = case words l of
+  "--" : _ -> True
+  _        -> False
 
 -- | @rule base ‹name› where@ — the name and nothing else between.
 baseLine :: String -> Maybe String

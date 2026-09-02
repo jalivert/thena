@@ -67,6 +67,16 @@ headers =
     , testCase "blank lines before and between are skipped" $
         baseHead ["", "\"\"\"d\"\"\"", "", "", "rule base b where"]
           @?= Just ("b", Just "d", 5)
+      -- **And so are comment lines** (MS4 phase 43). The header is read
+      -- textually, before the lexer, so it is the one place a comment has to be
+      -- recognised a second time — and a rule base you could not comment above
+      -- its own header would make the uniformity his ruling asked for a
+      -- fiction.
+    , testCase "comment lines before and between are skipped too" $
+        baseHead ["-- what this is", "\"\"\"d\"\"\"", "-- and why", "rule base b where"]
+          @?= Just ("b", Just "d", 4)
+    , testCase "and -- without a space is not one, so the header is not found" $
+        baseHead ["--nope", "rule base b where"] @?= Nothing
     , -- Consume nothing rather than swallow the file: it then fails on the
       -- header, which is the true complaint.
       testCase "an unterminated description is no header" $
@@ -228,12 +238,12 @@ refusals =
 
     , -- A script and a rule base are two different operations.
       testCase "a script and a base in one load is refused" $
-        rejected (command newSession ":load prelude.thena extra.thena.rules")
+        rejected (command newSession ":load prelude.thena.script extra.thena.rules")
           @?= Just (MixedLoad ":load")
 
     , testCase "an ordinary script still loads" $
-        case snd (command newSession ":load prelude.thena") of
-          LoadRequested p -> p @?= "prelude.thena"
+        case snd (command newSession ":load prelude.thena.script") of
+          LoadRequested p -> p @?= "prelude.thena.script"
           other           -> assertFailure (show other)
 
     , -- "comma or space separated (or both)" — the user, 2026-08-25.

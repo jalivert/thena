@@ -18,6 +18,7 @@
 module Thena.Surface.Concrete
   ( Surface (..)
   , SurfaceDecl (..)
+  , SurfaceModule (..)
   , SurfaceData (..)
   , SurfaceConstructor (..)
   , PairingError (..)
@@ -116,6 +117,24 @@ data SurfaceArg = SurfaceArg Plicity Surface
 -- downstream needs to know two names were written inside one pair of
 -- parentheses, and a group would be a second way to say the same thing.
 data SurfaceBinder = SurfaceBinder Plicity String (Maybe Surface)
+  deriving (Eq, Show)
+
+-- | A proof module: a name and the declarations under it (MS4 phase 43).
+--
+-- **The header is real syntax**, not a textual pre-pass like the rule base's
+-- @rule base ‹name› where@ — his call, 2026-09-02. So @module@ is a reserved
+-- word in the shared lexer and identifiers narrow project-wide, exactly as they
+-- did for @data@ at 42b.
+--
+-- **The name is recorded and not yet used for anything.** Nothing imports a
+-- proof module until after MS4, and a module whose name disagreed with its path
+-- would be a rule this phase has no reason to invent. What the header buys now
+-- is that the file says what it is, which is how @:load@ tells a proof module
+-- from a script without opening it further than the first line.
+data SurfaceModule = SurfaceModule
+  { surfaceModuleName  :: String
+  , surfaceModuleDecls :: [SurfaceDecl]
+  }
   deriving (Eq, Show)
 
 -- | One line of a surface module (MS4 phase 42).

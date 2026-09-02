@@ -331,6 +331,86 @@ A tactic that needs a name *nobody* has still asks for one, with `fresh-name`.
 
 ## The REPL and the session
 
+### There are three kinds of file, and the extension says which
+
+*Decided 2026-09-02.*
+
+| extension | what it is |
+|---|---|
+| `.thena` | a **proof module** — the surface language: a header, then declarations |
+| `.thena.script` | a script of REPL command lines, run in order |
+| `.thena.rules` | a rule base |
+
+`:load ‹path›` reads the extension. `:load proof ‹path›`, `:load script ‹path›`
+and `:load rules ‹path›…` say it out loud instead, and the keyword wins over the
+extension.
+
+```
+module Tier0 where
+
+data Nat : Type₀ where
+  zero : Nat
+  succ : Nat -> Nat
+
+one : Nat
+one = succ zero
+```
+
+The header is real syntax, so `module` is a reserved word everywhere — you
+cannot name anything `module`, in any of the three kinds of file. `where` opens
+a block, so a module's declarations and a datatype's constructors are laid out
+by indentation; explicit `{ ; }` works exactly as well, and gives the same tree.
+
+**Loading a proof module is quiet.** It reports the module and what it declared,
+one line each. Elaborating a single declaration emits a dozen lines about
+solving level metas; a file of them buries its own output. Type the declaration
+at the prompt and you still see everything. A module that fails keeps all of it,
+because that is where the reason is.
+
+### A comment is `--` followed by a space, in every kind of file
+
+*Decided 2026-09-02.*
+
+```
+-- a whole line
+one : Nat
+one = succ zero        -- or the end of one
+```
+
+**The space is the rule.** `--` with no space after it is not a comment, so
+`-->` and `--x` stay available for whatever wants them later. Nothing is written
+`--`-first today — `-` may appear inside a name but not start one — and
+requiring the space means nothing has to be given up to get comments.
+
+**One syntax for all three kinds of file**, proof modules, scripts and rule
+bases alike, including above a rule base's own header. His reason: *"They might
+not fit super naturally in the .thena.script files or .thena.rules files, but
+that's fine. Better they are uniform than three different ones."*
+
+A comment carries no tokens, so it never affects layout: a comment line is not
+an item, and it neither opens nor closes a block.
+
+### `:infer` takes a surface term; a core one goes in corners
+
+*Decided 2026-09-02.*
+
+```
+:infer succ zero          -- a surface term: elaborated
+:infer ⌜ succ zero ⌝      -- a development-calculus term: resolved
+```
+
+This is the rule everywhere an argument is written — `try-core ⌜ x ⌝` against
+`try x` — now applied to the one command that had been core-only.
+
+`:infer ‹surface›` answers *if this term were put here, what would its type be?*
+It elaborates into a fresh hole at the focus, reads the type off, rechecks the
+development, and then **puts the development back exactly as it was**. Nothing
+it built survives the line, so it is a look despite doing real work.
+
+The type it prints is reduced further than `:infer ⌜t⌝`'s — it has to be, to see
+past the hole the elaboration solved. The two agree up to conversion, and print
+the same.
+
 ### `:help` lists the commands, not the tactics
 
 *Decided 2026-08-31.*
