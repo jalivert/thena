@@ -13,7 +13,7 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Level (Level (..), levelOfNat)
 import Thena.Core.Context (Entry (..))
-import Thena.Core.Term (Core (..), Ident (..), Var, fresh)
+import Thena.Core.Term (Core (..), Ident (..), Var, close, fresh)
 import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor
   (Cursor, Focus (..), along, context, enter, focus, identsIn, rebuild)
@@ -54,7 +54,7 @@ machine = machineIn emptyGlobals
 
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env' cur is =
-  load is (Machine (Exec [] [] []) (Development cur) env' [] 1000)
+  load is (Machine (Exec [] [] []) (Development cur) [] env' [] 1000)
 
 -- | Run to a stop, and hand back the environment or the reason.
 run :: Cursor -> [Instr] -> Either FailReason Machine
@@ -67,6 +67,7 @@ go m = case step m of
   Continue m'       -> go m'
   Saying _ m'       -> go m'
   Declaring _ m'    -> go m'
+  Defining _ _ _ m' -> go m'
   Certifying _ _ m' -> go m'
   Asking _ m'       -> Right m'
   Finished m'       -> Right m'
@@ -229,6 +230,51 @@ gotoTests =
           Right m -> case focus (cursor (development m)) of
             OnComponent (Component.Claim _ (Ident "h") _) -> pure ()
             other -> assertFailure ("focused " ++ show other)
+
+      -- **The development stack** (MS4 phase 42) — Brady's @NEW PROOF@ and
+      -- @TERM@. A pushed development is a claim of its own, and popping it
+      -- extracts the term it built.
+    , testCase "pop hands back what the nested development proved" $
+        case run hole [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LSuc LZero))))))
+                      , Do (Try (Lit (VTerm (Trailing (Universe LZero)))))
+                      , Do Solve
+                      , Bind "t" PopDevelopment
+                      ] of
+          Left r  -> assertFailure ("did not run: " ++ show r)
+          -- **And it hands back exactly what @extract@ built** — @solve@ turns
+          -- the goal into a definition, so the term is @let goal = … in goal@
+          -- and not the bare @Type₀@. That is why a declaration's type goes
+          -- through @whnf@ before it is stored or used: a @let@-headed type
+          -- makes @intro@ open a definition instead of a binder.
+          Right m -> lookup "t" (env (exec m))
+                       @?= Just (VTerm (Trailing
+                             (Let (Ident "goal") (Universe LZero)
+                                  (Universe (LSuc LZero)) (close goalVar (Free goalVar)))))
+
+      -- And it comes back to where it was: the outer development is the one
+      -- the machine had before the push.
+    , testCase "and the machine is back on the development it left" $
+        case run hole [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LSuc LZero))))))
+                      , Do (Try (Lit (VTerm (Trailing (Universe LZero)))))
+                      , Do Solve
+                      , Do PopDevelopment
+                      ] of
+          Left r  -> assertFailure ("did not run: " ++ show r)
+          Right m -> (development m == Development hole, enclosing m) @?= (True, [])
+
+      -- **A hole left open is reported, not silently turned into a term** —
+      -- the same 'extract' @certify@ uses.
+    , testCase "an unfinished nested development cannot be popped" $
+        case run hole [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LSuc LZero))))))
+                      , Do PopDevelopment
+                      ] of
+          Left (NotYetPure _) -> pure ()
+          other -> assertFailure ("expected NotYetPure: " ++ show (fmap (const ()) other))
+
+    , testCase "and the outermost one cannot be popped at all" $
+        case run hole [Do PopDevelopment] of
+          Left NoEnclosingDevelopment -> pure ()
+          other -> assertFailure ("expected NoEnclosingDevelopment: " ++ show (fmap (const ()) other))
 
     , testCase "a name nothing carries" $
         case run hole [Do (Goto (Lit (VText "nosuch")))] of

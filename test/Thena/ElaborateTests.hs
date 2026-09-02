@@ -94,6 +94,7 @@ runOut m = case step m of
   Continue m'       -> runOut m'
   Saying msg m'     -> let (ms, r) = runOut m' in (msg : ms, r)
   Declaring _ m'    -> runOut m'
+  Defining _ _ _ m' -> runOut m'
   Certifying _ _ m' -> runOut m'
   Asking _ m'       -> ([], Right m')
   Finished m'       -> ([], Right m')
@@ -110,7 +111,7 @@ elaboratingAt cur s = snd (runOut (machineAt cur [Do (Ops.Elaborate (Lit (VSurfa
 -- | A machine at a cursor, loaded with a program.
 machineAt :: Cursor -> [Instr] -> Machine
 machineAt cur is =
-  load is (Machine (Exec [] [] []) (Development cur) emptyGlobals [] 1000)
+  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals [] 1000)
 
 -- | @? goal : ∀ (a : Type₀) (b : Type₀) -> Type₀@ — two binders, so a miscount
 -- would show.

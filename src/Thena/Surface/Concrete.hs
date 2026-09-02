@@ -17,6 +17,9 @@
 -- different things that have to be distinguishable said out loud.
 module Thena.Surface.Concrete
   ( Surface (..)
+  , SurfaceDecl (..)
+  , PairingError (..)
+  , paired
   , SurfaceArg (..)
   , SurfaceBinder (..)
   , Plicity (..)
@@ -112,3 +115,33 @@ data SurfaceArg = SurfaceArg Plicity Surface
 -- parentheses, and a group would be a second way to say the same thing.
 data SurfaceBinder = SurfaceBinder Plicity String (Maybe Surface)
   deriving (Eq, Show)
+
+-- | One line of a surface module (MS4 phase 42).
+--
+-- **Agda\/Haskell-style, so a declaration is two of these** — his choice at
+-- phase 39. The signature and the equation are separate items and 'paired'
+-- puts them together, which is what those languages do and why a signature
+-- with no equation is a diagnosable mistake rather than an unparseable one.
+data SurfaceDecl
+  = SurfaceSignature String Surface   -- ^ @foo : T@
+  | SurfaceEquation  String Surface   -- ^ @foo = e@
+  deriving (Eq, Show)
+
+-- | What went wrong pairing them.
+data PairingError
+  = SignatureWithNoEquation String
+  | EquationWithNoSignature String
+  deriving (Eq, Show)
+
+-- | Pair each signature with the equation that follows it.
+--
+-- **Adjacent and in that order**, which is the rule Haskell and Agda both use;
+-- nothing here searches, so a declaration cannot pick up an equation from the
+-- far end of a module.
+paired :: [SurfaceDecl] -> Either PairingError [(String, Surface, Surface)]
+paired ds = case ds of
+  [] -> Right []
+  SurfaceSignature x ty : SurfaceEquation y body : rest
+    | x == y -> ((x, ty, body) :) <$> paired rest
+  SurfaceSignature x _ : _ -> Left (SignatureWithNoEquation x)
+  SurfaceEquation  x _ : _ -> Left (EquationWithNoSignature x)

@@ -124,7 +124,8 @@ import Thena.Errors
 import Thena.Global.Declare (DeclareError (..))
 import qualified Data.List.NonEmpty as NE
 import Thena.Surface.Concrete
-  ( Plicity (..)
+  ( PairingError (..)
+  , Plicity (..)
   , Surface (..)
   , SurfaceArg (..)
   , SurfaceBinder (..)
@@ -433,6 +434,10 @@ renderStop s stop = case stop of
 
 renderSyntaxError :: SyntaxError -> String
 renderSyntaxError e = case e of
+  DeclarationsUnpaired (SignatureWithNoEquation x) ->
+    x ++ " has a type but no definition — write " ++ x ++ " = ‹term› after it"
+  DeclarationsUnpaired (EquationWithNoSignature x) ->
+    x ++ " has a definition but no type — write " ++ x ++ " : ‹type› before it"
   LexFailed (LexError p c) ->
     at p ++ "unexpected character" ++ maybe "" (\ch -> " " ++ show ch) c
   ParseFailed (UnexpectedToken p t) -> at p ++ "unexpected " ++ describe t
@@ -1099,6 +1104,8 @@ renderFailReason r = case r of
   NotReadyToIntroduce -> "intro wants a hole of the form ? x ≐ (? x' : S . x') — attack it first"
   NothingToIntroduce  -> "that hole's type is neither a ∀ nor a let"
   GoalIsNotAUniverse  -> "quantify builds a type, so that hole must be claimed at a universe"
+  NoEnclosingDevelopment ->
+    "pop-development needs a development to go back to; this is the outermost one"
   WrongNumberOfEliminationFields d want got ->
     "eliminating " ++ nameString d ++ " needs " ++ show want
       ++ " field name(s), not " ++ show got

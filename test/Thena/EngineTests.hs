@@ -49,7 +49,7 @@ text = Lit . VText
 
 -- | A machine holding the program, with the session's opening development.
 machine :: [Instr] -> Machine
-machine is = load is (Machine (Exec [] [] []) ps emptyGlobals expectedBase n)
+machine is = load is (Machine (Exec [] [] []) ps [] emptyGlobals expectedBase n)
   where
     (ps, n) = newDevelopment 0
 
@@ -201,7 +201,7 @@ tests =
             -- hole. It pins the rule, which is one sentence — everything from
             -- the focus down is discarded (§4.0 F6).
             let (v, n) = fresh 0
-                bare   = Machine (Exec [] [] []) (Development (enter (Under (Assume v (Ident "A") type0) (Trailing type0)))) emptyGlobals expectedBase n
+                bare   = Machine (Exec [] [] []) (Development (enter (Under (Assume v (Ident "A") type0) (Trailing type0)))) [] emptyGlobals expectedBase n
              in case fmap (flatten . development) (setGoal type0 bare) of
                   Right (Under (Claim x _ _) (Trailing (Free y))) -> x @?= y
                   other -> assertFailure ("wrong shape: " ++ show other)

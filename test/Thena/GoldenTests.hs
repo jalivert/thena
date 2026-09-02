@@ -243,6 +243,37 @@ tests =
       -- visible without an elaborator around it; @:dev@, so the concrete
       -- syntax a ∀-binder reads and prints is on the record; and the four
       -- surface forms end to end.
+      -- Surface declarations (MS4 phase 42) — Brady's @NEW PROOF@ run as
+      -- instructions over the development stack. The separators are written
+      -- out because the driver reads one line at a time; a file supplies them
+      -- by layout at phase 43.
+    , script
+        "declarations"
+        [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "declare one : Nat ; one = succ zero"
+          -- The declared TYPE is clean; the body is not, and that is
+          -- @ms4/CLOSEOUT.md@ 8 rather than this phase's.
+        , ":show one"
+        , "declare idn : Nat -> Nat ; idn = \\ n -> n"
+        , ":show idn"
+          -- **A second declaration using the first FAILS, and this is the
+          -- reason 44 runs before 43** (@MS4.md@, his call): @one@ generalised
+          -- over the body-only level metas the application case makes
+          -- (@CLOSEOUT.md@ 9), so using it needs level arguments that
+          -- elaboration cannot write until implicits land. Recorded rather
+          -- than worked around — it is what tier 0 is waiting on.
+        , "declare two : Nat ; two = succ one"
+          -- Agda's and Haskell's pairing rule.
+        , "declare lonely : Nat"
+        , "declare stray = zero"
+          -- The body must have the type the signature declares.
+        , "declare bad : Nat -> Nat ; bad = zero"
+          -- @push-development@ and @pop-development@ are **ops, not commands**,
+          -- so they are exercised from "Thena.ReadTests" rather than here — a
+          -- bare word at the REPL is a command or a rule call, and they are
+          -- neither.
+        , ":quit"
+        ]
     , script
         "structural"
         [ ":theorem byhand : Type\8321"

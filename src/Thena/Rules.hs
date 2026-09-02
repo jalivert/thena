@@ -468,12 +468,13 @@ operation g i (RawOp w as)
       , ("prim-solve", Solve), ("prim-abandon", Abandon), ("goal", Goal)
       , ("here", Here)
       , ("prim-prove", Prove)
+      , ("pop-development", Op.PopDevelopment)
       ]
     unary =
       [ ("say", Say), ("prim-try", Try), ("prim-elaborate", Op.Elaborate)
-      , ("goto", Goto)
+      , ("goto", Goto), ("push-development", Op.PushDevelopment)
       , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
-      , ("typeof", Typing), ("fresh-name", FreshName), ("prim-apply", Op.Apply)
+      , ("typeof", Typing), ("whnf", Op.Whnf), ("fresh-name", FreshName), ("prim-apply", Op.Apply)
       ]
     binary =
       [ ("assume", Assume), ("claim", Claim), ("define", Define)

@@ -18,6 +18,7 @@
 module Thena.Surface.Parser
   ( SurfaceParseError (..)
   , parseSurface
+  , parseSurfaceDecls
   ) where
 
 import Data.List.NonEmpty (NonEmpty (..))
@@ -26,6 +27,7 @@ import qualified Data.List.NonEmpty as NE
 import Thena.Surface.Concrete
   ( Plicity (..)
   , Surface (..)
+  , SurfaceDecl (..)
   , SurfaceArg (..)
   , SurfaceBinder (..)
   )
@@ -33,6 +35,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
 %name parseSurface Term
+%name parseSurfaceDecls Decls
 %tokentype { Located Token }
 %monad { Either SurfaceParseError }
 %error { parseError }
@@ -59,6 +62,25 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 %right '->'
 
 %%
+
+-- | A run of signatures and equations — a surface module (MS4 phase 42).
+--
+-- **Separated the way layout separates anything else**, so the same text works
+-- with the braces and semicolons written out, which is how a declaration is
+-- typed at the REPL until files arrive (phase 43).
+--
+-- Accumulated reversed and turned round by the caller, which is what every
+-- other list in this grammar does.
+Decls :: { [SurfaceDecl] }
+  : Decl                                   { [$1] }
+  | Decls ';' Decl                         { $3 : $1 }
+
+-- | **Agda\/Haskell-style: a declaration is two of these.**
+-- 'Thena.Surface.Concrete.paired' puts a signature together with the equation
+-- that follows it.
+Decl :: { SurfaceDecl }
+  : ident ':' Term                         { SurfaceSignature $1 $3 }
+  | ident '=' Term                         { SurfaceEquation $1 $3 }
 
 -- | A whole surface term.
 --

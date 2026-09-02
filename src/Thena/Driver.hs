@@ -45,7 +45,7 @@ module Thena.Driver
   ) where
 
 import Data.Maybe (fromMaybe, isJust)
-import Thena.Core.Level (Level, LevelVar, Obligation)
+import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), substLevelsIn)
@@ -130,7 +130,7 @@ import Thena.Rules
   , ruleBase
   , validate
   )
-import Thena.Surface.Concrete (Surface)
+import Thena.Surface.Concrete (Surface, paired)
 import Thena.Surface.Layout (layout)
 import qualified Thena.Surface.Parser as Surface
 import Thena.Syntax.Concrete (Raw (..), RawRule)
@@ -217,7 +217,7 @@ data Working
 --
 -- It is the same pair 'sessionHistory' keeps, and that is not a coincidence: a
 -- 'Parked' attempt /is/ an undo snapshot with a name and a statement attached.
-type Snapshot = (Exec, Development)
+type Snapshot = (Exec, Development, [Development])
 
 -- | An unfinished proof of a theorem (§2.4, §3.3.1).
 --
@@ -275,10 +275,10 @@ currentAttempt s = case sessionWork s of
 
 newSession :: Session
 newSession = Session
-  { sessionMachine   = Machine (Exec [] [] []) ps emptyGlobals [] n
+  { sessionMachine   = Machine (Exec [] [] []) ps [] emptyGlobals [] n
   , sessionWork      = Scratch
   , sessionSuspended = []
-  , sessionHistory   = (Exec [] [] [], ps) :| []
+  , sessionHistory   = (Exec [] [] [], ps, []) :| []
   , sessionStepping  = False
   }
   where
@@ -595,6 +595,18 @@ parseStatement env n src = do
 tokensOf :: String -> Either SyntaxError [Located Token]
 tokensOf = mapLeft LexFailed . lexTokens
 
+-- | Lex and parse a run of **surface declarations** (MS4 phase 42).
+--
+-- Layout runs over it exactly as it does over a term, so at the REPL the
+-- separators are written out — @foo : T ; foo = e@ — and in a file (phase 43)
+-- the offside rule supplies them.
+parseSurfaceDeclarations :: String -> Either SyntaxError [(String, Surface, Surface)]
+parseSurfaceDeclarations src = do
+  ts  <- tokensOf src
+  ts' <- mapLeft LayoutFailed (layout ts)
+  ds  <- mapLeft SurfaceParseFailed (Surface.parseSurfaceDecls ts')
+  mapLeft DeclarationsUnpaired (paired (reverse ds))
+
 -- | Lex and parse a **surface** term (phase 39). No context, because nothing is
 -- resolved: what a name denotes is elaboration's answer, and elaboration is
 -- phase 41.
@@ -745,6 +757,10 @@ dispatch s name arg = case name of
   -- below it extracts as a Π rather than a λ.
   "quantify" -> tactic "∀-binder" "quantified" Quantify
   "data"   -> declaration
+  -- **A surface declaration** (MS4 phase 42) — a bare word, because it acts
+  -- (§2.4). It compiles to instructions rather than being run here, so
+  -- @:step@ can watch it and phase 49 can move the program into a rule body.
+  "declare" -> withArgument (declareSurface arg)
 
   -- The moves (§4.3). Three take no argument, @cross@ takes which field, and
   -- every core-term descent is its own word so that none of them changes
@@ -1087,6 +1103,43 @@ dispatch s name arg = case name of
     withNote note resp = case resp of
       Ran msgs stop -> Ran (note : msgs) stop
       _             -> resp
+
+    -- **Brady's @ELAB (x : t)@, as a program** (@IDRIS.md@ §4.6):
+    --
+    -- > NEW PROOF Type; E⟦t⟧; t' ← TERM; TTDECL (x : t')
+    --
+    -- The signature is elaborated in a development of its own — @certify@
+    -- extracts the whole chain, so it could not share one with the body — and
+    -- the term read off it becomes the type the body is elaborated against.
+    --
+    -- **The driver builds the program and the machine runs it**, which is what
+    -- @assume@ and @claim@ already do. Nothing here elaborates.
+    declareSurface src = case parseSurfaceDeclarations src of
+      Left e -> (s, Failed e)
+      Right ds ->
+        let (is, n1) = foldl declaring ([], names machine) ds
+         in progress (sessionStepping s)
+                     s { sessionMachine = load is machine { names = n1 } } []
+
+    declaring (acc, n) (x, ty, body) =
+      let (l, n1) = freshLevelMeta n
+       in ( acc ++
+              [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LVar l))))))
+              , Do (Elaborate (Lit (VSurface ty)))
+                -- **Reduced before it is used or stored.** What @extract@ hands
+                -- back carries @fill@'s @=@-bindings, and a @let@-headed type
+                -- is not merely ugly: @intro@ reads a @Let@ as written, so the
+                -- body's λ would open a definition instead. See
+                -- 'Thena.Ops.Whnf'.
+              , Bind ("raw" ++ show n) PopDevelopment
+              , Bind ("ty" ++ show n) (Whnf (Ref ("raw" ++ show n)))
+              , Do (PushDevelopment (Ref ("ty" ++ show n)))
+              , Do (Elaborate (Lit (VSurface body)))
+              , Bind ("tm" ++ show n) PopDevelopment
+              , Do (DefineGlobal (Lit (VText x))
+                      (Ref ("ty" ++ show n)) (Ref ("tm" ++ show n)))
+              ]
+          , n1 )
 
     tactic what verb op = withArgument $
       case compile what verb op (globals machine) ctx (names machine) arg of
@@ -1474,11 +1527,11 @@ oneLine s pending line = (record s', resp, asking)
 
 -- | The per-proof half of a machine.
 snapshotOf :: Machine -> Snapshot
-snapshotOf m = (exec m, development m)
+snapshotOf m = (exec m, development m, enclosing m)
 
 -- | Put one back.
 restore :: Snapshot -> Machine -> Machine
-restore (e, p) m = m { exec = e, development = p }
+restore (e, p, encl) m = m { exec = e, development = p, enclosing = encl }
 
 -- --------------------------------------------------------------------------
 -- Loading a file (§9, phase 11)
@@ -1627,6 +1680,22 @@ progress oneStep s msgs = case step (sessionMachine s) of
   --
   -- Empty whenever no bare @Type@ was written, which is every use of the kernel
   -- before this phase.
+  -- **A declaration arrives in the environment exactly as @qed@'s proof does**
+  -- (MS4 phase 42): the kernel runs, the level metas generalise, and
+  -- 'addDefinition' installs. The difference is only where the name and the
+  -- type came from — an 'Attempt' there, the declaration itself here.
+  --
+  -- **It says nothing**, per his instruction: the command that ran it reports
+  -- when it is over. See 'Thena.Ops.DefineGlobal'.
+  Engine.Defining nm ty t m -> case certify (globals m) t ty of
+    Left e -> stop (load [] m) msgs (Uncertified e)
+    Right (sub, residue) ->
+      let (d, n1) = generalised (names m) residue (substLevelsIn sub ty) t
+          m'      = m { globals = addDefinition nm d (globals m), names = n1 }
+       in if oneStep
+            then stop m' msgs Paused
+            else progress oneStep s { sessionMachine = m' } msgs
+
   Engine.Certifying t ty m -> case certify (globals m) t ty of
     Left e -> stop (load [] m) msgs (Uncertified e)
     Right (sub, residue)

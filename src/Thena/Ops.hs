@@ -327,6 +327,60 @@ data Op
     -- **@App (Canonical …) x@ is constructible here and is not well formed.**
     -- That is @PLAN-representation.md@ §3.4's line, deliberately: the checker
     -- refuses it, and no abstraction boundary is put in the way of building it.
+  | Whnf Operand
+    -- ^ a term, reduced to weak head normal form (MS4 phase 42) — §5.1's
+    -- 'Thena.Core.Reduce.whnf', which @:whnf@ has exposed at the REPL since
+    -- phase 7 and which no rule could reach.
+    --
+    -- **A declaration's type is what wanted it.** What @pop-development@ hands
+    -- back is what @extract@ built, and elaboration's own bookkeeping is in
+    -- there: @fill@ parks every term in a @=@-binding, so the type of
+    -- @foo : Nat@ comes out as @let refined = Nat in let goal = refined in
+    -- goal@. That is δ-equal to @Nat@ and still wrong to store, and it does not
+    -- merely look wrong — 'Thena.Engine.introduce' reads a @Let@ /as written/
+    -- and before any reduction (phase 15, deliberately), so @intro@ on a
+    -- @let@-typed goal opens a definition where the λ should have been.
+    --
+    -- **It is a move on a term, not on the development**, which is what
+    -- separates it from the @reduce@ move: that one commits a whnf at the core
+    -- focus, this one answers a question about a term a body is holding.
+  | PushDevelopment Operand
+    -- ^ **start a development of its own, nested inside this one** (MS4 phase
+    -- 42, his decision) — the operand is the type its goal is claimed at.
+    -- Brady's @NEW PROOF@ (@IDRIS.md@ §4.6).
+    --
+    -- **It exists because a declaration cannot be elaborated in the
+    -- development that is already there.** @certify@ extracts the /whole/
+    -- chain, so a signature elaborated beside the body would land inside the
+    -- proof term — which is why phase 37 made @:theorem@ start fresh, and why
+    -- Brady gives the signature a proof of its own.
+    --
+    -- The stack is 'Thena.Engine.enclosing', and it backtracks: a body that
+    -- pushes and then fails unwinds to the stack it had.
+  | PopDevelopment
+    -- ^ **finish the innermost development and yield the term it built** (MS4
+    -- phase 42) — Brady's @TERM@, and 'PushDevelopment'\'s other half.
+    --
+    -- **It insists the development is pure**, through the same
+    -- 'Thena.Development.Partial.extract' @certify@ uses, so a hole left open
+    -- is reported here rather than becoming a term with a gap in it.
+    --
+    -- Refused at the outermost development: there is nothing to pop back to,
+    -- and a machine with no development is not a state this language has.
+  | DefineGlobal Operand Operand Operand
+    -- ^ name, type, term — **hand a finished definition out through the
+    -- channel** (MS4 phase 42), the way 'DefineData' hands out a datatype.
+    --
+    -- **No instruction writes globals** (§7.5, §3.3.1), here or ever: this
+    -- yields and the driver installs, running the kernel and generalising the
+    -- level metas exactly as @qed@ does. That is what keeps a surface
+    -- declaration and a hand-built proof arriving in the environment the same
+    -- way.
+    --
+    -- **It says nothing.** His instruction, 2026-09-02: the instruction
+    -- /"doesn't really need to yield anything… Having it print something to the
+    -- REPL in the middle of the elaboration might be distracting."/ The command
+    -- that ran it reports when it is over; this does not report as it goes.
   | Certify Operand
     -- ^ the development must be pure; yields the closed term it stands for and
     -- the type it is claimed to have, for the driver to run the kernel on
@@ -519,6 +573,10 @@ produces o = case o of
   Say _        -> False
   DefineData _ -> False
   Certify _    -> False
+  DefineGlobal {} -> False
+  Whnf _ -> True
+  PushDevelopment _ -> False
+  PopDevelopment -> True   -- the term the nested development built
   FreshName _  -> True
   Here         -> True
   Arrow _ _    -> True
@@ -572,6 +630,10 @@ operandsOf o = case o of
   UnifyInto a b -> [a, b]
   Try    a     -> [a]
   Certify a    -> [a]
+  DefineGlobal a b c -> [a, b, c]
+  Whnf a -> [a]
+  PushDevelopment a -> [a]
+  PopDevelopment -> []
   FreshName a  -> [a]
   Here         -> []
   Arrow a b    -> [a, b]
@@ -714,6 +776,10 @@ opKeyword o = case o of
   Typing _     -> "typeof"
   Define _ _   -> "define"
   Certify _    -> "certify"
+  DefineGlobal {} -> "define-global"
+  Whnf _ -> "whnf"
+  PushDevelopment _ -> "push-development"
+  PopDevelopment -> "pop-development"
   Eliminate _  -> "prim-eliminate"
   MakeElim _ _ -> "make-elim"
   Apply _      -> "prim-apply"

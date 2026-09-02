@@ -137,6 +137,23 @@ data Machine = Machine
     -- ^ the development, focused. **Named for what it is** (phase 37): it was
     -- @proof@, beside a @Session.sessionProof@ that meant a theorem, and one
     -- word for two things is where @docs/SESSION-STATE.md@ §5.5 came from.
+  , enclosing   :: [Development]
+    -- ^ **the developments this one is nested inside** (MS4 phase 42, his
+    -- decision) — Brady's @NEW PROOF@ made a stack.
+    --
+    -- Elaborating a declaration needs the signature worked out in a
+    -- development of its own: @certify@ extracts the /whole/ chain, so a
+    -- signature elaborated beside the body would land inside the proof term,
+    -- and phase 37 made @:theorem@ start fresh for that reason. @IDRIS.md@
+    -- §4.6 is the same shape — @NEW PROOF Type; E⟦t⟧; t' ← TERM@.
+    --
+    -- **It is state, not control, so it lives here and not on the frame
+    -- stack.** A 'Frame' is what the machine is /inside/; this is what it is
+    -- /working on/. The consequence is that both things that snapshot a
+    -- machine have to carry it — 'Choice'\'s @savedEnclosing@ and
+    -- "Thena.Driver"\'s @Snapshot@ — and neither would compile without it.
+    --
+    -- **Backtrackable, like 'development' and unlike everything below it.**
   , globals     :: GlobalEnv  -- ^ NOT backtrackable (§7.4, §3.3.1)
   , rules       :: [RuleBase] -- ^ NOT backtrackable (§7.4) — phase 15; a list
                               -- of loaded bases, leftmost searched first (phase 22)
@@ -173,6 +190,10 @@ data Frame
       , resumeEnv :: Env
       , alts      :: RuleIter    -- ^ the matches not yet tried, lazily (§7.6)
       , saved     :: Development  -- ^ the state before the first alternative ran
+      , savedEnclosing :: [Development]
+        -- ^ and the developments it was nested inside (MS4 phase 42). A body
+        -- that pushes a development and then fails must unwind to the stack it
+        -- had, not to the one it left.
       , choiceId  :: Int         -- ^ what @retry ‹n›@ names it by
       , chosen    :: GlobalName  -- ^ the rule this frame is currently running
       , returned  :: Bool
@@ -285,6 +306,15 @@ flatten = rebuild . cursor
 -- It cannot fail, which is why it returns no 'Either' where @setGoalNamed@ did:
 -- 'enter' takes any 'Partial', where 'replaceFocus' has a focus to be wrong
 -- about.
+-- | A development whose goal is claimed at a given type (MS4 phase 42).
+--
+-- 'newDevelopment' is this at @Type₀@, and 'newDevelopmentNamed' is this with
+-- the goal named after the theorem; all three were the same three lines.
+newDevelopment' :: Core -> Int -> (Development, Int)
+newDevelopment' ty n =
+  let (v, n1) = fresh n
+   in (Development (enter (goalAt v ty)), n1)
+
 newDevelopmentNamed :: GlobalName -> Core -> Int -> (Development, Int)
 newDevelopmentNamed (GlobalName x) ty n =
   let (v, n1) = fresh n
@@ -332,6 +362,12 @@ data Outcome
   | Saying    Message    Machine  -- ^ the driver renders, then steps again
   | Declaring InductiveDefinition Machine
                                   -- ^ the driver checks, installs, then steps again
+  | Defining GlobalName Core Core Machine
+                                  -- ^ a finished definition — name, type, term
+                                  -- (MS4 phase 42). The driver runs the kernel,
+                                  -- generalises and installs, then steps again.
+                                  -- Same shape as 'Declaring', for §7.5's
+                                  -- reason: no instruction writes globals
   | Certifying Core Core Machine
                                   -- ^ the closed term the development stands for
                                   -- and the type it claims: the driver runs the
@@ -386,9 +422,11 @@ resumeFrom (fr : stk) = case fr of
   Choice { returned = False } ->
     Just ( resume fr
          , resumeEnv fr
-         , Choice (resume fr) (resumeEnv fr) (alts fr) (saved fr)
-                  (choiceId fr) (chosen fr) True (callArgs fr) (entryEnv fr)
-             : stk
+           -- A record update rather than a positional rebuild: this frame
+           -- differs from @fr@ in exactly one field, and saying so is what
+           -- keeps it right when 'Choice' gains another (it gained
+           -- @savedEnclosing@ at MS4 phase 42).
+         , fr { returned = True } : stk
          )
   Choice { returned = True } ->
     (\(is, e, stk') -> (is, e, fr : stk')) <$> resumeFrom stk
@@ -446,11 +484,44 @@ failure r0 m = unwind (stack (exec m))
 -- choice that really has something left; a whole development snapshot is held
 -- only where it can be used; and the choice-point view shows exactly the live
 -- decisions and nothing dead.
+-- | The one place a 'Choice' is built, so a field added to it is answered once.
+--
+-- Both dispatch sites — @Prove@'s and @Call@'s — differ only in the arguments
+-- and the entry environment they seed; everything else they said was the same
+-- thing written twice, and 'savedEnclosing' (MS4 phase 42) is the field that
+-- made writing it twice cost something.
+choicePoint :: Machine -> [Instr] -> RuleIter -> Rule -> [Value] -> Env -> Frame
+choicePoint m rest it' r vs seed =
+  Choice
+    { resume         = rest
+    , resumeEnv      = env (exec m)
+    , alts           = it'
+    , saved          = development m
+    , savedEnclosing = enclosing m
+    , choiceId       = names m
+    , chosen         = ruleName r
+    , returned       = False
+    , callArgs       = vs
+    , entryEnv       = seed
+    }
+
 demote :: Frame -> Rule -> RuleIter -> Frame
 demote fr r it'
   | hasNext it' =
-      Choice (resume fr) (resumeEnv fr) it' (saved fr) (choiceId fr) (ruleName r)
-             False (callArgs fr) (entryEnv fr)
+      -- Named fields rather than a record update: @fr@ is a 'Frame', which may
+      -- be a 'Thena.Engine.Call', and an update would be partial in it.
+      Choice
+        { resume         = resume fr
+        , resumeEnv      = resumeEnv fr
+        , alts           = it'
+        , saved          = saved fr
+        , savedEnclosing = savedEnclosing fr
+        , choiceId       = choiceId fr
+        , chosen         = ruleName r
+        , returned       = False
+        , callArgs       = callArgs fr
+        , entryEnv       = entryEnv fr
+        }
   | otherwise = Thena.Engine.Call (resume fr) (resumeEnv fr)
 
 -- --------------------------------------------------------------------------
@@ -474,6 +545,39 @@ perform instr rest m = case operation instr of
 
   -- Purity and extraction are one traversal (§5.3); the kernel itself is the
   -- driver's to run, exactly as a declaration's checks are.
+  -- **Brady's @NEW PROOF@ and @TERM@** (MS4 phase 42) — see 'Op.PushDevelopment'
+  -- for why a declaration needs them.
+  Whnf t -> case term t of
+    Left r  -> failure r m
+    Right t' -> produce (VTerm (Trailing (whnf (globals m) contextAt t'))) m
+
+  PushDevelopment ty -> case term ty of
+    Left r -> failure r m
+    Right t -> case sortOf (globals m) contextAt (names m) t of
+      -- The same side condition @claim@ owes (phase 25f): the goal of the new
+      -- development is a claim, so what it is claimed at must be a type.
+      (Left e,  _, n1) -> failure (NotTypeable e) m { names = n1 }
+      (Right _, _, n1) ->
+        let (dev, n2) = newDevelopment' t n1
+         in Continue (advance m { development   = dev
+                                , enclosing     = development m : enclosing m
+                                , names         = n2
+                                })
+
+  PopDevelopment -> case enclosing m of
+    [] -> failure NoEnclosingDevelopment m
+    outer : beneath -> case extract (flatten (development m)) of
+      -- Purity is 'Thena.Development.Partial.extract'\'s answer, not a second
+      -- opinion — the same traversal @certify@ uses.
+      Left impure -> failure (NotYetPure (whereImpure impure)) m
+      Right t ->
+        produce (VTerm (Trailing t))
+                m { development = outer, enclosing = beneath }
+
+  DefineGlobal nm ty tm -> case (,,) <$> text nm <*> term ty <*> term tm of
+    Left r -> failure r m
+    Right (x, t, v) -> Defining (GlobalName x) t v (advance m)
+
   Certify stated -> case term stated of
     Left r   -> failure r m
     Right ty -> case extract (flatten (development m)) of
@@ -613,9 +717,7 @@ perform instr rest m = case operation instr of
       -- call would be noise (§1, §7.5).
       | hasNext it' ->
           Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
-                 (entering r (Choice rest (env (exec m)) it' (development m)
-                                     (names m) (ruleName r) False [] [])
-                             m { names = names m + 1 })
+                 (entering r (choicePoint m rest it' r [] []) m { names = names m + 1 })
       | otherwise ->
           Continue (entering r (Thena.Engine.Call rest (env (exec m))) m)
     where
@@ -667,9 +769,7 @@ perform instr rest m = case operation instr of
       Just (r, it')
         | hasNext it' ->
             Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
-                   (entering vs r (Choice rest (env (exec m)) (it' ) (development m)
-                                     (names m) (ruleName r) False vs [])
-                            m { names = names m + 1 })
+                   (entering vs r (choicePoint m rest it' r vs []) m { names = names m + 1 })
         | otherwise ->
             Continue (entering vs r (Thena.Engine.Call rest (env (exec m))) m)
     where

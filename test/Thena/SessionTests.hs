@@ -370,6 +370,40 @@ sessionTests =
       , ":theorem e : Nat"
       , "elaborate (elim Nat () (\\ x -> Nat) (zero) () (succ zero))"
       ]
+    -- **Surface declarations** (MS4 phase 42) — Brady's
+    -- @NEW PROOF Type; E⟦t⟧; t' ← TERM; TTDECL (x : t')@, run as instructions
+    -- over the development stack. The separators are written out because the
+    -- driver reads one line; a file supplies them by layout at phase 43.
+  , ok "a surface declaration elaborates and installs"
+      [ "data " ++ natDecl
+      , "declare one : Nat ; one = succ zero"
+      , ":show one"
+      ]
+    -- **The declared type must be free of elaboration's scaffolding**, and
+    -- this is the case that proves it rather than a nicety: @extract@ hands
+    -- back @fill@'s @=@-bindings, 'Thena.Engine.introduce' reads a @Let@ as
+    -- written and before reducing (phase 15, deliberately), so without the
+    -- @whnf@ the body's λ opens a **definition** instead of a binder and the
+    -- declaration fails with @Type₀ and n -> Nat cannot be made equal@.
+  , ok "and a function declaration, whose body has a binder to open"
+      [ "data " ++ natDecl
+      , "declare idn : Nat -> Nat ; idn = \\ n -> n"
+      , ":show idn"
+      ]
+  , ok "several declarations in one run"
+      [ "data " ++ natDecl
+      , "declare a : Nat ; a = zero ; b : Nat ; b = succ zero"
+      , ":show b"
+      ]
+    -- Agda's and Haskell's rule: the equation follows its signature.
+  , notOk "a signature with no equation is refused"
+      [ "data " ++ natDecl
+      , "declare lonely : Nat"
+      ]
+  , notOk "and so is a body that does not have the declared type"
+      [ "data " ++ natDecl
+      , "declare bad : Nat -> Nat ; bad = zero"
+      ]
   , ok "so a hole left in the scratch cannot block qed"
       ["claim spare : Type₀", ":theorem t : Type₁", "try-core ⌜ Type₀ ⌝", "solve", "qed"]
   ]

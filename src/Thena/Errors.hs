@@ -56,6 +56,7 @@ import Thena.Core.Level (Level, Unmet)
 import Thena.Core.Context (Context)
 import Thena.Core.Term (Core, GlobalName, Ident, Var)
 import Thena.Syntax.Lexer (LexError)
+import Thena.Surface.Concrete (PairingError (..))
 import Thena.Surface.Layout (LayoutError (..))
 import Thena.Surface.Parser (SurfaceParseError (..))
 import Thena.Syntax.Parser (ParseError)
@@ -110,6 +111,10 @@ data FailReason
     -- @WrongNumberOfElimination…@ resolve errors, because those are about what
     -- a /user wrote/ in one field group and this is about the total a rule
     -- body handed an op.
+  | NoEnclosingDevelopment
+    -- ^ @pop-development@ at the outermost one (MS4 phase 42). There is
+    -- nothing to pop back to, and a machine with no development at all is not
+    -- a state this language has.
   | GoalIsNotAUniverse
     -- ^ @quantify@ at a hole whose type is not a universe (MS4 phase 41f).
     -- A ∀-binder builds a Π and a Π is a type, so there is nothing for one to
@@ -452,6 +457,10 @@ data SyntaxError
   | LayoutFailed LayoutError
     -- ^ the offside rule could not lay the surface program out (MS4 phase 40)
   | SurfaceParseFailed SurfaceParseError
+  | DeclarationsUnpaired PairingError
+    -- ^ a surface signature with no equation after it, or the other way round
+    -- (MS4 phase 42). A syntax error rather than a scope one: the declarations
+    -- parsed, they just do not make a module.
     -- ^ the **surface** grammar refused it (MS4 phase 39). Its own case beside
     -- 'ParseFailed', because the two grammars are separate and an error from
     -- one must not be reported as the other's.
