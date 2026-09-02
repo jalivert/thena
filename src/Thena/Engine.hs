@@ -55,6 +55,9 @@ import Thena.Core.Term
   , fresh
   , instantiate
   )
+-- Only for 'Core'\'s @Eliminate@, which "Thena.Ops" also has a constructor
+-- named: the op that builds one and the node it builds must be told apart.
+import qualified Thena.Core.Term as Term
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Typing (check, infer, sortOf)
 import Thena.Core.Unify (UnifyResult (..), blockers, unify, unifyInto)
@@ -79,7 +82,7 @@ import Thena.Development.Cursor
   )
 import qualified Thena.Development.Cursor as Cursor
 import Thena.Development.Partial (Impure (..), Partial (..), extract)
-import Thena.Errors (FailReason (..), MoveError (..), Position (..))
+import Thena.Errors (FailReason (..), MoveError (..), Position (..), TypeError (..))
 import Thena.Ops
   ( AnswerKind
   , Env
@@ -89,7 +92,17 @@ import Thena.Ops
   , Operand (..)
   , Value (..)
   )
-import Thena.Global.Env (GlobalEnv, InductiveDefinition, declaredNames)
+import Thena.Global.Env
+  ( GlobalEnv
+  , InductiveDefinition
+  , declaredNames
+  , eliminatorType
+  , inductiveConstructors
+  , inductiveIndices
+  , inductiveName
+  , inductiveParameters
+  , lookupInductive
+  )
 import qualified Thena.Ops as Op
 import Thena.Tactics.Eliminate (Elimination (..), eliminate)
 import Thena.Rules (RuleBase, RuleIter, arities, clauses, dispatch, hasNext, next)
@@ -705,6 +718,25 @@ perform instr rest m = case operation instr of
 
   -- Thesis §2.7's @naive-refine@ with the search taken out (phase 25): the
   -- head's type is inferred here, and 'saturate' does the walking.
+  -- **@prim-apply@ for the eliminator** (MS4 phase 41i). The eliminator has no
+  -- global name to apply — §3.7 generates nothing for it — but its type is a Π
+  -- telescope all the same, so the walk is the same walk, and it is claiming
+  -- where 'Thena.Core.Typing.spine' checks.
+  MakeElim d fields -> case traverse (operandIdent (env (exec m))) fields of
+    Left r -> failure r m
+    Right is -> case lookupInductive d (globals m) of
+      Nothing -> failure (NotTypeable (UnknownDatatype d)) m
+      Just def
+        | length is /= wanted def ->
+            failure (WrongNumberOfEliminationFields d (wanted def) (length is)) m
+        | otherwise ->
+            -- **The motive's level is a fresh meta.** It is read from the
+            -- motive (§3.7) and the motive is a hole here, so there is nothing
+            -- to read yet; typical ambiguity is the machinery for exactly that.
+            let (l, n1)   = freshLevelMeta (names m)
+                (ety, n2) = eliminatorType def (LVar l) n1
+             in telescope def is [] ety m { names = n2 }
+
   Apply f -> case term f of
     Left r   -> failure r m
     Right hd -> case infer (globals m) contextAt (names m) hd of
@@ -910,6 +942,49 @@ perform instr rest m = case operation instr of
          in saturate (App hd (Free v)) (instantiate (Free v) sc)
                      m' { development = Development cur, names = n1 }
       _ -> produce (VTerm (Trailing hd)) m'
+
+    -- How many fields an elimination of this datatype has, in
+    -- 'Thena.Core.Term.Eliminate'\'s own order.
+    wanted def =
+      length (inductiveParameters def)
+        + 1                                       -- the motive
+        + length (inductiveConstructors def)
+        + length (inductiveIndices def)
+        + 1                                       -- the target
+
+    -- Claim a hole for every domain of the eliminator's telescope, **with the
+    -- name the caller asked for**, then cut the collected variables back into
+    -- the field groups the node needs. 'saturate' below is the same walk for an
+    -- ordinary head; this one keeps the holes rather than only the spine,
+    -- because the caller has to elaborate into each of them.
+    telescope def used acc ty m' = case whnf (globals m') (focusContext (development m')) ty of
+      Pi _ dom sc -> case used of
+        [] -> failure (NotTypeable (UnknownDatatype (inductiveName def))) m'
+        i : rest' ->
+          let (v, n1) = fresh (names m')
+              cur     = insertAbove (Component.Claim v i dom) (cursor (development m'))
+           in telescope def rest' (acc ++ [v]) (instantiate (Free v) sc)
+                m' { development = Development cur, names = n1 }
+      _ -> case assemble def acc of
+             Just node -> produce (VTerm (Trailing node)) m'
+             Nothing   ->
+               failure (WrongNumberOfEliminationFields
+                          (inductiveName def) (wanted def) (length acc)) m'
+
+    -- The telescope's binders are in 'Eliminate'\'s field order, so this is a
+    -- split rather than a search.
+    -- Total rather than @head@\/@tail@: the arity was checked before the walk
+    -- began, so the shape is known — but a partial function whose totality
+    -- rests on a check made elsewhere is exactly what the next reader has to
+    -- reason about, and 'Nothing' here simply means the op refuses.
+    assemble def vs = case splitAt (length (inductiveParameters def)) vs of
+      (ps, mv : r2) -> case splitAt (length (inductiveConstructors def)) r2 of
+        (ms, r3) -> case splitAt (length (inductiveIndices def)) r3 of
+          (ixs, [tgt]) ->
+            Just (Term.Eliminate (inductiveName def) [] (map Free ps) (Free mv)
+                    (map Free ms) (map Free ixs) (Free tgt))
+          _ -> Nothing
+      _ -> Nothing
 
     isHole c = case c of
       Component.Claim {} -> True

@@ -42,7 +42,14 @@ import qualified Data.List.NonEmpty as NE
 
 import Thena.Development.Partial (Partial (..))
 import Thena.Errors (FailReason (..), ResolveError (..), SyntaxError (..))
-import Thena.Global.Env (GlobalEnv, isDeclared)
+import Thena.Global.Env
+  ( GlobalEnv
+  , inductiveConstructors
+  , inductiveIndices
+  , inductiveParameters
+  , isDeclared
+  , lookupInductive
+  )
 import Thena.Ops (Instr (..), Op (..), Operand (..), Value (..))
 import Thena.Surface.Concrete
   (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..))
@@ -68,12 +75,12 @@ import Thena.Surface.Concrete
 -- same thing 'Thena.Core.Term.fresh' does with the same counter.
 data Names = Names
   { hereName, domName, codName, arrName, funName, argName
-  , appName, refName, tyName, goalName, valName :: String }
+  , appName, refName, tyName, goalName, valName, elimName :: String }
 
 namesFor :: Int -> Names
 namesFor n =
   Names (w "here") (w "dom") (w "cod") (w "arr") (w "fun") (w "arg")
-        (w "app") (w "ref") (w "ty") (w "goal") (w "val")
+        (w "app") (w "ref") (w "ty") (w "goal") (w "val") (w "elim")
   where w x = x ++ show n
 
 compile :: GlobalEnv -> Context -> Int -> Surface -> Either FailReason ([Instr], Int)
@@ -397,7 +404,71 @@ compile env ctx n0 s = case s of
           , n1
           )
 
-  SurfaceElim {}  -> unsupported "an elim"
+  -- @E⟦elim d ⃗p P ⃗m ⃗i t⟧@ — the last case, and Brady has no rule for it
+  -- because IDRIS− has pattern matching where the surface language has
+  -- eliminators (his: /"yes, for now we use eliminators in the surface too"/).
+  --
+  -- **It is the application case with @make-elim@ where that has @apply-to@.**
+  -- The eliminator has no global name to apply — §3.7 generates nothing for it
+  -- — but 'Thena.Global.Env.eliminatorType' builds its Π telescope on demand,
+  -- in @Eliminate@'s own field order, so claiming a hole per domain is the
+  -- same walk @prim-apply@ does and the op does it.
+  --
+  -- **The names are minted here and handed down.** That is what makes the
+  -- holes reachable afterwards — his decision, 2026-09-02, closing
+  -- @elaboration-in-rules.md@'s complaint that @prim-apply@ /"claims holes and
+  -- yields only the spine, so a body cannot reach them"/. Phase 41f is what
+  -- made it sound: @claim@ takes a name as given.
+  --
+  -- **The arity is checked here, against the declaration**, so the message
+  -- names the field group the user got wrong rather than a total. The op
+  -- checks the total as well, because a rule body can call it directly.
+  SurfaceElim d ps mot ms is tgt -> case lookupInductive (GlobalName d) env of
+    Nothing  -> Left (CannotRead (ResolveFailed (NotADatatype d)))
+    Just def
+      | length ps /= wantP -> arity (WrongNumberOfEliminationParameters d wantP (length ps))
+      | length ms /= wantM -> arity (WrongNumberOfMethods d wantM (length ms))
+      | length is /= wantI -> arity (WrongNumberOfEliminationIndices d wantI (length is))
+      | otherwise ->
+          let fields  = ps ++ [mot] ++ ms ++ is ++ [tgt]
+              slot k  = elimName names ++ show (k :: Int)
+              hint k  = lit' ("e" ++ show k)
+           in Right
+                ( concat
+                    [ [Bind (hereName names) Here]
+                    , [ Bind (slot k) (FreshName (hint k))
+                      | k <- [0 .. length fields - 1]
+                      ]
+                    , [ Bind (elimName names)
+                          (MakeElim (GlobalName d)
+                             [ Ref (slot k) | k <- [0 .. length fields - 1] ])
+                      ]
+                      -- **The fields are elaborated BEFORE the @FILL@**, where
+                      -- the application case fills first. The difference is
+                      -- what the node's type is: @f s@ has type @B@, a bare
+                      -- hole that unification solves, but an elimination has
+                      -- type @P ⃗i t@ — the motive applied — which is a spine
+                      -- with a flexible head and no pattern, so it parks and
+                      -- @prim-try@ then has nothing to check against. With the
+                      -- motive and the target elaborated first it is a type.
+                    , concat
+                        [ [ Do (Goto (Ref (slot k)))
+                          , Do (Elaborate (Lit (VSurface f)))
+                          ]
+                        | (k, f) <- zip [0 ..] fields
+                        ]
+                    , [Do (Goto (Ref (hereName names)))]
+                    , fill (Ref (elimName names))
+                    , [Do Solve]
+                    ]
+                , n
+                )
+      where
+        wantP = length (inductiveParameters def)
+        wantM = length (inductiveConstructors def)
+        wantI = length (inductiveIndices def)
+        arity = Left . CannotRead . ResolveFailed
+
   where
     -- Each node takes one tick of the counter for the names it binds.
     n     = n0 + 1
@@ -446,4 +517,3 @@ compile env ctx n0 s = case s of
           | entryIdent e == Ident x = Just (entryVar e)
           | otherwise               = acc
     lit t    = Lit (VTerm (Trailing t))
-    unsupported what = Left (NoElaborationRule what)

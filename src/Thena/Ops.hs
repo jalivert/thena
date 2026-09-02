@@ -351,6 +351,44 @@ data Op
     -- 'Thena.Development.Cursor.freshIdent' — the same licence 'Attack' and
     -- 'Eliminate' have. Phase 24c's @fresh-name@ is for names a /rule body/
     -- chooses; these the engine chooses for itself.
+  | MakeElim GlobalName [Operand]
+    -- ^ **build a saturated elimination, claiming a hole for every field**
+    -- (MS4 phase 41i) — the datatype is written, the operands are the names
+    -- those holes are to carry, in 'Thena.Core.Term.Eliminate'\'s own field
+    -- order: parameters, motive, methods, indices, target.
+    --
+    -- **It is @prim-apply@ for the eliminator**, and it exists because the
+    -- eliminator has no global name to apply: §3.7 generates nothing for it,
+    -- and its type is computed on demand by
+    -- 'Thena.Global.Env.eliminatorType'. That type is a Π telescope in exactly
+    -- this field order, so the walk is 'Thena.Core.Typing.spine'\'s in
+    -- reverse — claim where that checks.
+    --
+    -- **The caller supplies the names, and that is what makes the holes
+    -- reachable** (his decision, 2026-09-02). @prim-apply@ claims holes and
+    -- yields only the spine, so a body cannot reach them —
+    -- @discussion\/elaboration-in-rules.md@ named that gap and nothing had
+    -- closed it. A body asks @fresh-name@ for one name per field, hands them
+    -- here, and @goto ‹name›@ reaches each hole afterwards. **Phase 41f is
+    -- what made that sound**: @claim@ takes the name as given, where it used
+    -- to freshen or refuse.
+    --
+    -- The alternative — yielding the holes as a list — was rejected because a
+    -- list a rule cannot take apart is inert, so it would pull in indexing or
+    -- head\/tail ops that nothing has asked for.
+    --
+    -- The datatype is a field rather than an 'Operand' for 'DefineData'\'s
+    -- reason: it is written down, never computed.
+    --
+    -- **The motive's level is a fresh meta.** It is derived, not written —
+    -- §3.7's /"the level is read from the motive"/ — and typical ambiguity is
+    -- exactly the machinery for a level nobody spells.
+    --
+    -- **The datatype's own level arguments are empty**, as
+    -- 'Thena.Core.Term.Global' is given @[]@ by every other elaborator case.
+    -- A polymorphic datatype therefore fails in @infer@ with
+    -- 'Thena.Errors.WrongNumberOfLevelArguments', which is phase 44's to fix
+    -- for all of them at once.
   | Eliminate Operand
     -- ^ the term to eliminate — §3.7's elimination tactic, phase 17. It
     -- generalises the target and its indices in the motive, claims a hole per
@@ -508,6 +546,7 @@ produces o = case o of
   Call _ _     -> False   -- what the callee builds is in the development
   Elaborate _  -> False
   Eliminate _  -> False
+  MakeElim _ _ -> True   -- the assembled node
   Apply _      -> True   -- the spine it built
 
 -- | Every operand an op reads, in the order it is written.
@@ -541,6 +580,7 @@ operandsOf o = case o of
   Typing a     -> [a]
   Define a b   -> [a, b]
   Eliminate a  -> [a]
+  MakeElim _ as -> as
   Apply a      -> [a]
   Elaborate a  -> [a]
   Call _ as    -> as
@@ -675,6 +715,7 @@ opKeyword o = case o of
   Define _ _   -> "define"
   Certify _    -> "certify"
   Eliminate _  -> "prim-eliminate"
+  MakeElim _ _ -> "make-elim"
   Apply _      -> "prim-apply"
 
 -- | The words that name a field of a core term (§4.3, phase 5). One word per

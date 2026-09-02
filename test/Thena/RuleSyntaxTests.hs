@@ -125,6 +125,7 @@ againstTheBase =
 everyOp :: [(String, Op)]
 everyOp =
   [ ("assume x y",   Assume (Ref "x") (Ref "y"))
+  , ("make-elim Nat a b c", Op.MakeElim (GlobalName "Nat") [Ref "a", Ref "b", Ref "c"])
   , ("claim x y",    Claim (Ref "x") (Ref "y"))
   , ("ask x text",   Ask (Ref "x") AText)
   , ("ask x name",   Ask (Ref "x") AName)

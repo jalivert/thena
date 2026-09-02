@@ -60,6 +60,7 @@ tests =
     , hereTests
     , constructionTests
     , lambdaTests
+    , elimTests
     , unsupportedTests
     , baseTests
     ]
@@ -228,16 +229,15 @@ leafTests =
 -- elaborated — the one outcome worse than refusing — so each refusal is named
 -- and each name is the specification of the phase that removes it.
 --
--- What is left is @elim@ (phase 41g) and the two implicit forms (phase 44).
--- @∀@, arrows, @let@ and ascription left this list at phase 41f.
+-- **What is left is the two implicit forms, and they are phase 44's.** @∀@,
+-- arrows, @let@ and ascription left this list at phase 41f and @elim@ at 41i,
+-- so every structural case of @E⟦·⟧@ is now compiled.
 unsupportedTests :: TestTree
 unsupportedTests =
   testGroup
     "a node with no case is refused, not ignored"
-    [ refused "an elim"
-        (SurfaceElim "D" [] (SurfaceName "a") [] [] (SurfaceName "a"))
-      -- Implicit **arguments** are phase 44's, like implicit binders.
-    , refused "an implicit argument"
+    [ -- Implicit **arguments** are phase 44's, like implicit binders.
+      refused "an implicit argument"
         (SurfaceApp (SurfaceName "a") [SurfaceArg Implicit (SurfaceName "a")])
     , refused "a ∀ binder in braces"
         (SurfacePi [SurfaceBinder Implicit "x" (Just (SurfaceUniverse 0))]
@@ -258,6 +258,19 @@ unsupportedTests =
 -- --------------------------------------------------------------------------
 -- The λ case (MS4 phase 41b)
 -- --------------------------------------------------------------------------
+
+-- | @elim@ (MS4 phase 41i) — the unit fixture has no datatypes, so what can be
+-- checked here is the refusal; the working cases are driven through the REPL in
+-- "Thena.SessionTests", which is where a datatype can be declared.
+elimTests :: TestTree
+elimTests =
+  testGroup
+    "an elim names a datatype"
+    [ testCase "and an unknown one is a scope error, not a missing rule" $
+        case elaborating (SurfaceElim "D" [] (SurfaceName "a") [] [] (SurfaceName "a")) of
+          Left (CannotRead (ResolveFailed (NotADatatype "D"))) -> pure ()
+          other -> assertFailure ("expected NotADatatype: " ++ show other)
+    ]
 
 lambdaTests :: TestTree
 lambdaTests =

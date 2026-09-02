@@ -404,6 +404,12 @@ operation g i (RawOp w as)
       ("prim-intro", _)           -> bad
       ("call", RawRef r : rest)   -> Call (GlobalName r) <$> traverse ref rest
       ("call", _)                 -> bad
+      -- **@make-elim@'s first word is a datatype, not an operand** (MS4 phase
+      -- 41i), so it is spelled here for @call@'s reason rather than sitting in
+      -- an arity table: the name is written down, never computed. The rest are
+      -- the names its holes are to carry.
+      ("make-elim", RawRef d : rest) -> Op.MakeElim (GlobalName d) <$> traverse ref rest
+      ("make-elim", _)            -> bad
 
 
       ("ask", [a, RawRef k])      -> case answerKind k of

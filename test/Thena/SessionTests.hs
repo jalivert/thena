@@ -343,6 +343,33 @@ sessionTests =
       , ":goal Fn Type\8321"
       , "try-core \8988 fn Type\8320 g \8989"
       ]
+    -- **`elim`, the last structural case** (MS4 phase 41i). No golden for
+    -- these: an elaborated elimination's term runs to several hundred
+    -- characters on one line, so a transcript of it records length rather than
+    -- meaning.
+  , ok "an elim elaborates and proves"
+      [ "data " ++ natDecl
+      , ":theorem e : Nat"
+      , "elaborate (elim Nat () (\\ x -> Nat) (zero (\\ k ih -> succ ih)) () (succ zero))"
+      , "qed"
+      ]
+    -- An indexed family, so the index group is not always empty and the
+    -- telescope walk has to place them.
+  , ok "including one with indices"
+      [ "data " ++ natDecl
+      , "data Ev : Nat -> Type\8320 where { evZero : Ev zero "
+          ++ "; evSS : \8704 (n : Nat) (p : Ev n) -> Ev (succ (succ n)) }"
+      , ":theorem e : Nat"
+      , "elaborate (elim Ev () (\\ n p -> Nat) (zero (\\ n p ih -> succ ih)) (zero) evZero)"
+      , "qed"
+      ]
+    -- The arity is checked against the declaration, so the message names the
+    -- field group rather than a total.
+  , notOk "and a method count that does not match the datatype is refused"
+      [ "data " ++ natDecl
+      , ":theorem e : Nat"
+      , "elaborate (elim Nat () (\\ x -> Nat) (zero) () (succ zero))"
+      ]
   , ok "so a hole left in the scratch cannot block qed"
       ["claim spare : Type₀", ":theorem t : Type₁", "try-core ⌜ Type₀ ⌝", "solve", "qed"]
   ]
