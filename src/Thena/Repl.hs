@@ -365,7 +365,7 @@ renderResponse s resp = case resp of
   Shown c        -> [renderCursor (counter s) c]
   ShownData d    -> renderInductive (counter s) d
   ShownEliminator g ty  -> renderEliminator (counter s) g ty
-  ShownGlobal g lvs cs ty body -> renderGlobal (counter s) g lvs cs ty body
+  ShownGlobal g lvs cs ps ty body -> renderGlobal (counter s) g lvs cs ps ty body
   Where c        -> renderWhere (counter s) c
   Inferred t ty  ->
     [renderCore (counter s) (contextOf s) t ++ " : " ++ renderCore (counter s) (contextOf s) ty]
@@ -387,7 +387,7 @@ renderResponse s resp = case resp of
   Extracted t          -> [renderCore (counter s) [] t]
   Proving g ty  -> ["proving " ++ nameString g ++ " : " ++ renderCore (counter s) [] ty]
   Proved g lvs owed ty ->
-    [nameString g ++ scheme (counter s) lvs owed ty ++ "   ∎"]
+    [nameString g ++ scheme (counter s) lvs owed [] ty ++ "   ∎"]
   Suspended g   -> ["suspended " ++ nameString g]
   Resumed g     -> ["resumed " ++ nameString g]
   Abandoned g   -> ["abandoned " ++ nameString g]
@@ -1352,10 +1352,10 @@ renderEliminator n g ty =
 -- The constraints have **no surface spelling** — nothing writes a scheme by
 -- hand any more — so they are shown the way @:convert@ shows what it owes.
 renderGlobal
-  :: Int -> GlobalName -> [LevelVar] -> [Obligation] -> Core -> Maybe Core
-  -> [String]
-renderGlobal n g lvs cs ty body =
-  (nameString g ++ scheme n lvs cs ty)
+  :: Int -> GlobalName -> [LevelVar] -> [Obligation] -> [Plicity] -> Core
+  -> Maybe Core -> [String]
+renderGlobal n g lvs cs ps ty body =
+  (nameString g ++ scheme n lvs cs ps ty)
     : case body of
         Nothing -> []
         Just b  -> [nameString g ++ " = " ++ renderCore n [] b]
@@ -1384,13 +1384,41 @@ renderGlobal n g lvs cs ty body =
 --
 -- **No constraints, no turnstile.** Every monomorphic theorem would otherwise
 -- grow an empty one.
-scheme :: Int -> [LevelVar] -> [Obligation] -> Core -> String
-scheme n lvs cs ty =
-  levelParams lvs ++ " : " ++ owed ++ renderCore n [] ty
+scheme :: Int -> [LevelVar] -> [Obligation] -> [Plicity] -> Core -> String
+scheme n lvs cs ps ty =
+  levelParams lvs ++ " : " ++ owed ++ signature n ps ty
   where
     owed
       | null cs   = ""
       | otherwise = unwords [ "(" ++ obligation c ++ ")" | c <- cs ] ++ " ⊢ "
+
+-- | A declared type, with the binders the signature wrote in braces shown in
+-- braces (MS4 phase 44b).
+--
+-- **Only the leading run, and only as far as the plicities go.** The record is
+-- surface information about the /name/ (see 'Thena.Engine.signatures'), so it
+-- runs out exactly where the written signature did; the rest is an ordinary
+-- core type and 'renderCore' prints it.
+--
+-- **A term is NOT hidden the same way**, and deliberately: @:show@ prints the
+-- core term a definition holds, and the core has no implicits at all — an
+-- application with its inserted arguments dropped would not be the term that
+-- is there.
+signature :: Int -> [Plicity] -> Core -> String
+signature n0 ps0 ty0 = braced n0 [] ps0 ty0
+  where
+    -- Only the **leading** implicit binders are peeled. The moment a position
+    -- is explicit the rest is an ordinary core type and 'renderCore' prints it
+    -- — grouping the binders the way it always has, which peeling them one at a
+    -- time here would lose.
+    --
+    -- The opened binder goes into the context, so the codomain prints it by
+    -- name rather than as a bare variable.
+    braced n ctx (Implicit : more) (Pi i dom sc) =
+      let (v, n1) = fresh n
+       in "∀ {" ++ identString i ++ " : " ++ renderCore n ctx dom ++ "} -> "
+            ++ braced n1 (ctx ++ [Hypothesis v i dom]) more (open v sc)
+    braced n ctx _ ty = renderCore n ctx ty
 
 renderDeclareError :: DeclareError -> String
 renderDeclareError e = case e of

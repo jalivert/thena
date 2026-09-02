@@ -276,6 +276,17 @@ tests =
         , ":show Bool"
         , "declare data Box (A : Type\8320) : Type\8320 where { box : A -> Box A }"
         , ":show Box"
+          -- **Implicit arguments** (MS4 phase 44b). The signature's braces are
+          -- shown back; the body is a core term and is not hidden, because the
+          -- core has no implicits at all.
+        , "declare idty : forall {A : Type\8320} -> A -> A ; idty = \\ A x -> x"
+        , ":show idty"
+          -- Inserted at a use, and writable by hand — the two must mean the
+          -- same thing.
+        , "declare z : Nat ; z = idty zero"
+        , ":show z"
+        , "declare z2 : Nat ; z2 = idty {Nat} zero"
+        , ":show z2"
           -- @push-development@ and @pop-development@ are **ops, not commands**,
           -- so they are exercised from "Thena.ReadTests" rather than here — a
           -- bare word at the REPL is a command or a rule call, and they are

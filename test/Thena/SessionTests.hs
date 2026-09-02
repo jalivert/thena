@@ -470,6 +470,34 @@ sessionTests =
       , ":theorem e : Nat"
       , "elaborate (zero zero)"
       ]
+    -- **A dependent signature can be declared at all** (MS4 phase 44b). It
+    -- could not before: phase 42 cleared elaboration's @=@-bindings from the
+    -- /head/ of a declared type and left the codomain alone, so @intro@ read a
+    -- @Let@ one binder down and opened a definition where the λ belonged —
+    -- @Type₀ and x -> A cannot be made equal@. Nothing to do with implicits;
+    -- this is the explicit spelling.
+  , ok "a dependent signature declares"
+      [ "declare idty : forall (A : Type\8320) -> A -> A ; idty = \\ A x -> x" ]
+
+    -- **Implicit arguments, inserted at a use site** — Brady's @EXPAND@.
+  , ok "an implicit argument is inserted"
+      [ "declare data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , "declare idty : forall {A : Type\8320} -> A -> A ; idty = \\ A x -> x"
+      , "declare z : Nat ; z = idty zero"
+      ]
+    -- **And may be written by hand** — his requirement: /"They are allowed to
+    -- be written explicitly too."/
+  , ok "and may be written in braces instead"
+      [ "declare data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , "declare idty : forall {A : Type\8320} -> A -> A ; idty = \\ A x -> x"
+      , "declare z : Nat ; z = idty {Nat} zero"
+      ]
+    -- A brace the head has no position for is refused rather than falling
+    -- through to a type error about a term the user did not mean to write.
+  , notOk "but a brace the head has no position for is refused"
+      [ "declare data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , "declare z : Nat ; z = succ {Nat} zero"
+      ]
   , ok "so a hole left in the scratch cannot block qed"
       ["claim spare : Type₀", ":theorem t : Type₁", "try-core ⌜ Type₀ ⌝", "solve", "qed"]
   ]

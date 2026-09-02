@@ -94,7 +94,7 @@ runOut m = case step m of
   Continue m'       -> runOut m'
   Saying msg m'     -> let (ms, r) = runOut m' in (msg : ms, r)
   Declaring _ m'    -> runOut m'
-  Defining _ _ _ m' -> runOut m'
+  Defining _ _ _ _ m' -> runOut m'
   Certifying _ _ m' -> runOut m'
   Asking _ m'       -> ([], Right m')
   Finished m'       -> ([], Right m')
@@ -111,7 +111,7 @@ elaboratingAt cur s = snd (runOut (machineAt cur [Do (Ops.Elaborate (Lit (VSurfa
 -- | A machine at a cursor, loaded with a program.
 machineAt :: Cursor -> [Instr] -> Machine
 machineAt cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals [] 1000)
+  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals [] [] 1000)
 
 -- | @? goal : ∀ (a : Type₀) (b : Type₀) -> Type₀@ — two binders, so a miscount
 -- would show.
@@ -238,11 +238,12 @@ unsupportedTests =
   testGroup
     "a node with no case is refused, not ignored"
     [ -- Implicit **arguments** are phase 44's, like implicit binders.
-      refused "an implicit argument"
+      -- **A brace the head has no position for** (MS4 phase 44b). An implicit
+      -- argument is ordinary now; what is still refused is one that cannot be
+      -- placed, which the fixture's @a@ — a local, with no recorded plicities
+      -- — never can.
+      refused "an implicit argument this head has no position for"
         (SurfaceApp (SurfaceName "a") [SurfaceArg Implicit (SurfaceName "a")])
-    , refused "a ∀ binder in braces"
-        (SurfacePi [SurfaceBinder Implicit "x" (Just (SurfaceUniverse 0))]
-                   (SurfaceName "a"))
       -- A @∀@ binder must say what it binds. The surface grammar allows
       -- @∀ x -> B@ because 'SurfaceBinder' is shared with λ, where the goal
       -- supplies the type; there is no goal to read a Π's domain off.

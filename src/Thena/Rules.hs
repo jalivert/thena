@@ -476,7 +476,7 @@ operation g i (RawOp w as)
       [ ("say", Say), ("prim-try", Try), ("prim-elaborate", Op.Elaborate)
       , ("goto", Goto), ("push-development", Op.PushDevelopment)
       , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
-      , ("typeof", Typing), ("whnf", Op.Whnf), ("fresh-name", FreshName), ("prim-apply", Op.Apply)
+      , ("typeof", Typing), ("expose", Op.Expose), ("fresh-name", FreshName), ("prim-apply", Op.Apply)
       ]
     binary =
       [ ("assume", Assume), ("claim", Claim), ("define", Define)

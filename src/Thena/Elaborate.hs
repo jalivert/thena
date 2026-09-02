@@ -85,8 +85,10 @@ namesFor n =
         (w "app") (w "ref") (w "ty") (w "goal") (w "val") (w "elim")
   where w x = x ++ show n
 
-compile :: GlobalEnv -> Context -> Int -> Surface -> Either FailReason ([Instr], Int)
-compile env ctx n0 s = case s of
+compile
+  :: GlobalEnv -> [(GlobalName, [Plicity])] -> Context -> Int -> Surface
+  -> Either FailReason ([Instr], Int)
+compile env sigs ctx n0 s = case s of
   -- @E⟦x⟧ = FILL x; SOLVE@ — Brady's variable case, and the one clause of his
   -- elaborator that has run in this system since phase 17b. What was
   -- @elab-var@'s body is now these two instructions.
@@ -151,9 +153,6 @@ compile env ctx n0 s = case s of
   -- rule turns out not to be needed to get it: the pieces are all ops, so the
   -- filling half is emitted here and the @prim-solve@ after the arguments.
   SurfaceApp h as
-    | SurfaceArg Implicit _ <- NE.last as ->
-        Left (NoElaborationRule "an implicit argument")
-
     -- **Brady's OTHER application rule, @E⟦x ⃗a⟧@** (MS4 phase 44), taken
     -- whenever the head is a name — which is the case his has and the binary
     -- one cannot do.
@@ -166,18 +165,29 @@ compile env ctx n0 s = case s of
     --
     -- **The whole spine at once**, which is why phase 39's AST is a spine: the
     -- arguments are not folded here, they are handed over together.
-    | SurfaceName x <- h, Just (hd, nh) <- resolveName x ->
-        let args   = [ a | SurfaceArg _ a <- NE.toList as ]
-            slot k = argName names ++ show (k :: Int)
+    -- **@EXPAND@ is here** (MS4 phase 44b): the written arguments are matched
+    -- against the head's plicities and a slot is opened for every implicit
+    -- position the user did not write. An inserted slot is claimed like any
+    -- other and simply not elaborated into — unification is what finds its
+    -- value, which is Brady's /"it is unification which finds values of
+    -- implicit arguments"/.
+    --
+    -- **A written @{a}@ fills an implicit slot** rather than being refused, so
+    -- an argument the elaborator would have supplied can always be given by
+    -- hand — his requirement: /"They are allowed to be written explicitly
+    -- too."/
+    | SurfaceName x <- h, Just (hd, nh) <- resolveName x
+    , Just slots <- expand (plicitiesOf x) (NE.toList as) ->
+        let slot k = argName names ++ show (k :: Int)
          in fmap (bump nh) $ Right
               ( concat
                   [ [Bind (hereName names) Here]
                   , [ Bind (slot k) (FreshName (lit' ("a" ++ show k)))
-                    | k <- [0 .. length args - 1]
+                    | k <- [0 .. length slots - 1]
                     ]
                   , [ Bind (appName names)
                         (MakeApply (lit hd)
-                           [ Ref (slot k) | k <- [0 .. length args - 1] ])
+                           [ Ref (slot k) | k <- [0 .. length slots - 1] ])
                     ]
                     -- **The arguments are elaborated BEFORE the @FILL@**,
                     -- where the binary rule fills first. Brady's printed order
@@ -191,7 +201,7 @@ compile env ctx n0 s = case s of
                       [ [ Do (Goto (Ref (slot k)))
                         , Do (Elaborate (Lit (VSurface a)))
                         ]
-                      | (k, a) <- zip [0 ..] args
+                      | (k, Just a) <- zip [0 ..] slots
                       ]
                   , [Do (Goto (Ref (hereName names)))]
                   , fill (Ref (appName names))
@@ -199,6 +209,13 @@ compile env ctx n0 s = case s of
                   ]
               , n
               )
+
+    -- **A brace that could not be placed is refused, not ignored.** The binary
+    -- rule below has no notion of plicity at all, so falling through to it
+    -- would report a type mismatch about a term the user never meant to write
+    -- explicitly.
+    | any implicitArg (NE.toList as) ->
+        Left (NoElaborationRule "an implicit argument this head has no position for")
 
     | otherwise ->
         let front = NE.init as
@@ -322,9 +339,12 @@ compile env ctx n0 s = case s of
   -- domain hole/, so @∀ (A : Type₀) -> A@ at @Type₁@ silently made @A@'s type
   -- @Type₁@ and then could not find the hole its annotation was owed.
   SurfacePi bs body -> case NE.uncons bs of
-    (b, Just rest) -> compile env ctx n0 (SurfacePi (b NE.:| []) (SurfacePi rest body))
-    (SurfaceBinder Implicit _ _, Nothing) ->
-      Left (NoElaborationRule "a ∀ binder in braces")
+    (b, Just rest) -> compile env sigs ctx n0 (SurfacePi (b NE.:| []) (SurfacePi rest body))
+    -- **A binder in braces elaborates exactly as one in parentheses** (MS4
+    -- phase 44b), because 'Thena.Core.Term.Pi' has no plicity to put it in —
+    -- his decision, and the reason the record of which positions are implicit
+    -- lives on the machine instead ('Thena.Engine.signatures'). What braces
+    -- change is what happens at a *use*, not what the type is.
     (SurfaceBinder _ _ Nothing, Nothing) ->
       Left (NoElaborationRule "a ∀ binder with no type")
     (SurfaceBinder _ x (Just ty), Nothing) ->
@@ -563,6 +583,45 @@ compile env ctx n0 s = case s of
       , Do (Try (Ref (refName names)))
       ]
     lit' x   = Lit (VText x)
+
+    -- What the machine recorded about this name's argument positions, if it
+    -- recorded anything. A name with no entry — every DC-declared global, and
+    -- every local — takes what was written and nothing more.
+    plicitiesOf x = case lookup (GlobalName x) sigs of
+      Just ps -> ps
+      Nothing -> []
+
+    -- | Brady's @EXPAND@: line the written arguments up against the plicities.
+    --
+    -- @Just a@ is a slot to elaborate into, @Nothing@ one the elaborator
+    -- opened and left for unification. It fails — @Nothing@ overall — when the
+    -- written arguments cannot be lined up at all, and the binary rule below
+    -- then has its turn.
+    expand ps as' = case (ps, as') of
+      ([], [])                            -> Just []
+      -- Nothing recorded, or more arguments than positions: take them as
+      -- written. A partially applied head is ordinary, and so is a head whose
+      -- result is itself a function.
+      ([], rest)
+        | all written rest                -> Just (map (Just . argOf) rest)
+        | otherwise                       -> Nothing
+      -- An implicit position the user did write, in braces.
+      (Implicit : more, SurfaceArg Implicit a : rest) ->
+        (Just a :) <$> expand more rest
+      -- An implicit position the user did not: insert it.
+      (Implicit : more, rest)             -> (Nothing :) <$> expand more rest
+      (Explicit : more, SurfaceArg Explicit a : rest) ->
+        (Just (a :: Surface) :) <$> expand more rest
+      -- An explicit position written in braces, or one not written at all.
+      (Explicit : _, _)                   -> Nothing
+
+    written (SurfaceArg Explicit _) = True
+    written _                       = False
+
+    implicitArg (SurfaceArg Implicit _) = True
+    implicitArg _                       = False
+
+    argOf (SurfaceArg _ a) = a
 
     -- **What a name denotes, with its level arguments inserted** (MS4 phase
     -- 44). Shared by the leaf case and the global-head application case, so

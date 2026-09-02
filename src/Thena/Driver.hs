@@ -283,7 +283,7 @@ currentAttempt s = case sessionWork s of
 
 newSession :: Session
 newSession = Session
-  { sessionMachine   = Machine (Exec [] [] []) ps [] emptyGlobals [] n
+  { sessionMachine   = Machine (Exec [] [] []) ps [] emptyGlobals [] [] n
   , sessionWork      = Scratch
   , sessionSuspended = []
   , sessionHistory   = (Exec [] [] [], ps, []) :| []
@@ -308,7 +308,7 @@ data Response
     -- rule at the universe asked for. Not a 'ShownGlobal': the eliminator is
     -- no global (§3.7, reversed 2026-08-22), so there is no name to print on
     -- the left and no body to print underneath
-  | ShownGlobal GlobalName [LevelVar] [Obligation] Core (Maybe Core)
+  | ShownGlobal GlobalName [LevelVar] [Obligation] [Plicity] Core (Maybe Core)
     -- ^ @:show ‹name›@ on anything else: its name, its type, and its body if
     -- it has one. A former has both — the constant is the type of its
     -- saturated 'Thena.Core.Term.Canonical' and the definition is the generated
@@ -892,9 +892,10 @@ dispatch s name arg = case name of
       Just d  -> (s, ShownData d)
       Nothing -> case lookupDefinition g (globals machine) of
         Just d  -> (s, ShownGlobal g (definitionLevels d) (definitionConstraints d)
+                         (fromMaybe [] (lookup g (signatures machine)))
                                     (definitionType d) (Just (definitionBody d)))
         Nothing -> case lookupConstant g (globals machine) of
-          Just c  -> (s, ShownGlobal g (constantLevels c) [] (constantType c) Nothing)
+          Just c  -> (s, ShownGlobal g (constantLevels c) [] [] (constantType c) Nothing)
           Nothing -> (s, Rejected (NoSuchGlobal what))
       where
         g = GlobalName what
@@ -1166,7 +1167,7 @@ dispatch s name arg = case name of
               [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LVar l))))))
               , Do (Elaborate (Lit (VSurface full)))
               , Bind (tyName ++ "raw") PopDevelopment
-              , Bind tyName (Whnf (Ref (tyName ++ "raw")))
+              , Bind tyName (Expose (Ref (tyName ++ "raw")))
               ]
               ++ concat
                    [ [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LVar l))))))
@@ -1175,7 +1176,7 @@ dispatch s name arg = case name of
                      , Bind (conName k ++ "raw") PopDevelopment
                      , Bind (conName k ++ "app")
                          (ApplyTo (Ref (conName k ++ "raw")) selfName)
-                     , Bind (conName k) (Whnf (Ref (conName k ++ "app")))
+                     , Bind (conName k) (Expose (Ref (conName k ++ "app")))
                      ]
                    | (k, SurfaceConstructor _ cty) <- zip [0 ..] cs
                    ]
@@ -1184,6 +1185,17 @@ dispatch s name arg = case name of
                          (Ref tyName : [ Ref (conName k) | k <- [0 .. length cs - 1] ]))
                  ]
           , n1 )
+
+    -- | The plicity of each argument position a signature writes.
+    --
+    -- Only a leading run of @∀@ groups is read: once the type stops being a
+    -- quantifier there are no more named positions to speak of, and an arrow
+    -- contributes an 'Explicit' one.
+    plicitiesIn t = case t of
+      SurfacePi bs body ->
+        [ p | SurfaceBinder p _ _ <- NE.toList bs ] ++ plicitiesIn body
+      SurfaceArrow _ body -> Explicit : plicitiesIn body
+      _ -> []
 
     -- A constructor's type is written in the scope of the parameters, so they
     -- are put back in front of it and peeled off again by
@@ -1202,11 +1214,16 @@ dispatch s name arg = case name of
                 -- body's λ would open a definition instead. See
                 -- 'Thena.Ops.Whnf'.
               , Bind ("raw" ++ show n) PopDevelopment
-              , Bind ("ty" ++ show n) (Whnf (Ref ("raw" ++ show n)))
+              , Bind ("ty" ++ show n) (Expose (Ref ("raw" ++ show n)))
               , Do (PushDevelopment (Ref ("ty" ++ show n)))
               , Do (Elaborate (Lit (VSurface body)))
               , Bind ("tm" ++ show n) PopDevelopment
-              , Do (DefineGlobal (Lit (VText x))
+                -- **The plicities come from the signature as written** (MS4
+                -- phase 44b): a leading run of @∀@ binder groups, each in
+                -- braces or not. That is the whole of the surface signature
+                -- environment — where a binder was written, not what the type
+                -- turned out to be.
+              , Do (DefineGlobal (plicitiesIn ty) (Lit (VText x))
                       (Ref ("ty" ++ show n)) (Ref ("tm" ++ show n)))
               ]
           , n1 )
@@ -1757,11 +1774,19 @@ progress oneStep s msgs = case step (sessionMachine s) of
   --
   -- **It says nothing**, per his instruction: the command that ran it reports
   -- when it is over. See 'Thena.Ops.DefineGlobal'.
-  Engine.Defining nm ty t m -> case certify (globals m) t ty of
+  Engine.Defining nm ps ty t m -> case certify (globals m) t ty of
     Left e -> stop (load [] m) msgs (Uncertified e)
     Right (sub, residue) ->
       let (d, n1) = generalised (names m) residue (substLevelsIn sub ty) t
-          m'      = m { globals = addDefinition nm d (globals m), names = n1 }
+          -- **The plicities are installed beside the definition** (MS4 phase
+          -- 44b) and only when there are any, so a global whose signature said
+          -- nothing implicit adds no entry at all.
+          m'      = m { globals    = addDefinition nm d (globals m)
+                      , names      = n1
+                      , signatures = if Explicit `elem` ps && Implicit `notElem` ps
+                                       then signatures m
+                                       else (nm, ps) : signatures m
+                      }
        in if oneStep
             then stop m' msgs Paused
             else progress oneStep s { sessionMachine = m' } msgs

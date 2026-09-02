@@ -45,7 +45,7 @@ module Thena.Engine
 import Data.List (intercalate, nub)
 
 import Thena.Core.Level (Level (..), freshLevelMeta, levelVarName)
-import Thena.Core.Context (Context)
+import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Term
   ( Core (..)
   , close
@@ -83,6 +83,7 @@ import Thena.Development.Cursor
 import qualified Thena.Development.Cursor as Cursor
 import Thena.Development.Partial (Impure (..), Partial (..), extract)
 import Thena.Errors (FailReason (..), MoveError (..), Position (..), TypeError (..))
+import Thena.Surface.Concrete (Plicity (..))
 import Thena.Ops
   ( AnswerKind
   , Env
@@ -158,6 +159,21 @@ data Machine = Machine
   , globals     :: GlobalEnv  -- ^ NOT backtrackable (§7.4, §3.3.1)
   , rules       :: [RuleBase] -- ^ NOT backtrackable (§7.4) — phase 15; a list
                               -- of loaded bases, leftmost searched first (phase 22)
+  , signatures  :: [(GlobalName, [Plicity])]
+    -- ^ **which of a global's argument positions were written implicit** (MS4
+    -- phase 44b) — Brady's system state @(C, A, I)@, the @I@ of it. NOT
+    -- backtrackable, like 'globals' beside it.
+    --
+    -- **It is here and not in 'Thena.Global.Env.GlobalEnv' because the core has
+    -- no plicity at all** — his decision: /"the DC does not need implicits. I
+    -- think implicit arguments and placeholders and implicit level arguments
+    -- are all only part of the surface syntax."/ A @Pi@ carries no flag, so the
+    -- record of which binders were written in braces cannot live on the type;
+    -- it is surface information about a name and it sits beside the rule bases,
+    -- which are not core either.
+    --
+    -- Written when a declaration is installed, read when a use of that name is
+    -- elaborated.
   , names       :: Int        -- ^ NOT backtrackable (§7.4)
   }
   deriving (Eq, Show)
@@ -307,6 +323,21 @@ flatten = rebuild . cursor
 -- It cannot fail, which is why it returns no 'Either' where @setGoalNamed@ did:
 -- 'enter' takes any 'Partial', where 'replaceFocus' has a focus to be wrong
 -- about.
+-- | Reduce a type's whole telescope, not only its head (MS4 phase 44b).
+--
+-- @whnf@ at every position a Π chain has, so elaboration's @=@-bindings are
+-- gone from the domains and the codomain as well as from the front. See
+-- 'Thena.Ops.Expose' for why a declared type needs it and why this is not a
+-- normaliser.
+exposed :: GlobalEnv -> Context -> Int -> Core -> (Core, Int)
+exposed env ctx n t = case whnf env ctx t of
+  Pi i dom sc ->
+    let (d, n1)   = exposed env ctx n dom
+        (v, n2)   = fresh n1
+        (cod, n3) = exposed env (ctx ++ [Hypothesis v i d]) n2 (instantiate (Free v) sc)
+     in (Pi i d (close v cod), n3)
+  other -> (other, n)
+
 -- | A development whose goal is claimed at a given type (MS4 phase 42).
 --
 -- 'newDevelopment' is this at @Type₀@, and 'newDevelopmentNamed' is this with
@@ -363,7 +394,7 @@ data Outcome
   | Saying    Message    Machine  -- ^ the driver renders, then steps again
   | Declaring InductiveDefinition Machine
                                   -- ^ the driver checks, installs, then steps again
-  | Defining GlobalName Core Core Machine
+  | Defining GlobalName [Plicity] Core Core Machine
                                   -- ^ a finished definition — name, type, term
                                   -- (MS4 phase 42). The driver runs the kernel,
                                   -- generalises and installs, then steps again.
@@ -548,9 +579,11 @@ perform instr rest m = case operation instr of
   -- driver's to run, exactly as a declaration's checks are.
   -- **Brady's @NEW PROOF@ and @TERM@** (MS4 phase 42) — see 'Op.PushDevelopment'
   -- for why a declaration needs them.
-  Whnf t -> case term t of
+  Expose t -> case term t of
     Left r  -> failure r m
-    Right t' -> produce (VTerm (Trailing (whnf (globals m) contextAt t'))) m
+    Right t' ->
+      let (t'', n1) = exposed (globals m) contextAt (names m) t'
+       in produce (VTerm (Trailing t'')) m { names = n1 }
 
   PushDevelopment ty -> case term ty of
     Left r -> failure r m
@@ -589,9 +622,9 @@ perform instr rest m = case operation instr of
               Left e            -> failure (CannotBuildDatatype e) m
               Right (def, n1)   -> Declaring def (advance m { names = n1 })
 
-  DefineGlobal nm ty tm -> case (,,) <$> text nm <*> term ty <*> term tm of
+  DefineGlobal ps nm ty tm -> case (,,) <$> text nm <*> term ty <*> term tm of
     Left r -> failure r m
-    Right (x, t, v) -> Defining (GlobalName x) t v (advance m)
+    Right (x, t, v) -> Defining (GlobalName x) ps t v (advance m)
 
   Certify stated -> case term stated of
     Left r   -> failure r m
@@ -756,7 +789,7 @@ perform instr rest m = case operation instr of
   -- shows an elaboration running as ordinary instructions.
   Elaborate t -> case surface t of
     Left r  -> failure r m
-    Right s -> case Elaborate.compile (globals m) contextAt (names m) s of
+    Right s -> case Elaborate.compile (globals m) (signatures m) contextAt (names m) s of
       Left r          -> failure r m
       Right (is, n1)  ->
         Continue m { exec = (exec m) { pc = is ++ rest }, names = n1 }

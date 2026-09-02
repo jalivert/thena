@@ -32,7 +32,7 @@ import Thena.Core.Term (GlobalName)
 import Thena.Development.Cursor (Part (..))
 import Thena.Development.Partial (Partial)
 import Thena.Global.Env (InductiveDefinition)
-import Thena.Surface.Concrete (Surface)
+import Thena.Surface.Concrete (Plicity, Surface)
 
 -- | A name in a rule body's environment. Not a 'Thena.Core.Term.Var' and not an
 -- 'Thena.Core.Term.Ident': those name things in the development, this names an
@@ -327,10 +327,11 @@ data Op
     -- **@App (Canonical …) x@ is constructible here and is not well formed.**
     -- That is @PLAN-representation.md@ §3.4's line, deliberately: the checker
     -- refuses it, and no abstraction boundary is put in the way of building it.
-  | Whnf Operand
-    -- ^ a term, reduced to weak head normal form (MS4 phase 42) — §5.1's
-    -- 'Thena.Core.Reduce.whnf', which @:whnf@ has exposed at the REPL since
-    -- phase 7 and which no rule could reach.
+  | Expose Operand
+    -- ^ **a type with elaboration's own bookkeeping reduced out of it**
+    -- (MS4 phase 42, widened at 44b) — §5.1's 'Thena.Core.Reduce.whnf', and
+    -- then again under every Π binder, so the whole telescope is exposed and
+    -- not merely the head.
     --
     -- **A declaration's type is what wanted it.** What @pop-development@ hands
     -- back is what @extract@ built, and elaboration's own bookkeeping is in
@@ -340,6 +341,19 @@ data Op
     -- merely look wrong — 'Thena.Engine.introduce' reads a @Let@ /as written/
     -- and before any reduction (phase 15, deliberately), so @intro@ on a
     -- @let@-typed goal opens a definition where the λ should have been.
+    --
+    -- **Going under the binders is the half phase 42 missed.** A plain @whnf@
+    -- clears the head, so @declare idn : Nat -> Nat@ worked; it leaves the
+    -- codomain alone, so **no dependent signature could be declared at all** —
+    -- @declare idty : ∀ (A : Type₀) -> A -> A ; idty = \\ A x -> x@ failed with
+    -- /"Type₀ and x -> A cannot be made equal"/, which is @intro-let@ firing
+    -- one binder down. Found at 44b, fixed here.
+    --
+    -- **It is not a normaliser and §5.1 is untouched.** Reduction is still to
+    -- whnf; this iterates it at the positions a telescope has, which is what
+    -- storing a signature needs and nothing more. Clearing a @let@ from a
+    -- /type/ is free — types are compared up to conversion — where clearing one
+    -- from a proof term would not be, and this is only ever applied to a type.
     --
     -- **It is a move on a term, not on the development**, which is what
     -- separates it from the @reduce@ move: that one commits a whnf at the core
@@ -383,8 +397,8 @@ data Op
     -- does — the whole of "Thena.Global.Declare"'s @declare@ runs on the
     -- result, so a surface datatype is checked by the same code a written one
     -- is.
-  | DefineGlobal Operand Operand Operand
-    -- ^ name, type, term — **hand a finished definition out through the
+  | DefineGlobal [Plicity] Operand Operand Operand
+    -- ^ the plicities its signature wrote, then name, type and term — **hand a finished definition out through the
     -- channel** (MS4 phase 42), the way 'DefineData' hands out a datatype.
     --
     -- **No instruction writes globals** (§7.5, §3.3.1), here or ever: this
@@ -607,7 +621,7 @@ produces o = case o of
   Certify _    -> False
   DefineGlobal {} -> False
   MakeData {} -> False
-  Whnf _ -> True
+  Expose _ -> True
   PushDevelopment _ -> False
   PopDevelopment -> True   -- the term the nested development built
   FreshName _  -> True
@@ -664,9 +678,9 @@ operandsOf o = case o of
   UnifyInto a b -> [a, b]
   Try    a     -> [a]
   Certify a    -> [a]
-  DefineGlobal a b c -> [a, b, c]
+  DefineGlobal _ a b c -> [a, b, c]
   MakeData _ _ _ as -> as
-  Whnf a -> [a]
+  Expose a -> [a]
   PushDevelopment a -> [a]
   PopDevelopment -> []
   FreshName a  -> [a]
@@ -814,7 +828,7 @@ opKeyword o = case o of
   Certify _    -> "certify"
   DefineGlobal {} -> "define-global"
   MakeData {} -> "make-data"
-  Whnf _ -> "whnf"
+  Expose _ -> "expose"
   PushDevelopment _ -> "push-development"
   PopDevelopment -> "pop-development"
   Eliminate _  -> "prim-eliminate"

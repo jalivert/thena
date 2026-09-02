@@ -244,7 +244,7 @@ tests =
               other       -> assertFailure ("expected ShownData, got " ++ show other)
         , testCase ":show ‹former› is the generated wrapper, type and body" $
             case snd (say [natCommand, ":show succ"]) of
-              ShownGlobal (GlobalName "succ") _ _ _ (Just _) -> pure ()
+              ShownGlobal (GlobalName "succ") _ _ _ _ (Just _) -> pure ()
               other -> assertFailure ("expected ShownGlobal, got " ++ show other)
         , testCase "a global is in scope for an ordinary term" $
             case snd (say [natCommand, ":core succ zero"]) of
