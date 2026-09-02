@@ -45,6 +45,7 @@ library
         Thena.Repl
         Thena.Rules
         Thena.Surface.Concrete
+        Thena.Surface.Layout
         Thena.Surface.Parser
         Thena.Syntax.Concrete
         Thena.Syntax.Lexer

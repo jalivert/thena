@@ -147,6 +147,7 @@ import Thena.Ops
 import Thena.Rules (RuleBase (..), RuleError (..))
 import qualified Thena.Ops as Ops
 import Thena.Syntax.Lexer (LexError (..), Pos (..), Token (..))
+import Thena.Surface.Layout (LayoutError (..))
 import Thena.Surface.Parser (SurfaceParseError (..))
 import Thena.Syntax.Parser (ParseError (..))
 
@@ -437,6 +438,9 @@ renderSyntaxError e = case e of
     at p ++ "unexpected character" ++ maybe "" (\ch -> " " ++ show ch) c
   ParseFailed (UnexpectedToken p t) -> at p ++ "unexpected " ++ describe t
   ParseFailed UnexpectedEndOfInput  -> "unexpected end of input"
+  LayoutFailed (UnmatchedClose p) ->
+    at p ++ "this } closes a block that was not opened with {"
+  LayoutFailed (MissingClose _)   -> "unexpected end of input inside { }"
   SurfaceParseFailed (SurfaceUnexpectedToken p t) -> at p ++ "unexpected " ++ describe t
   SurfaceParseFailed SurfaceUnexpectedEndOfInput  -> "unexpected end of input"
   ResolveFailed (NotInScope n)      -> "not in scope: " ++ n

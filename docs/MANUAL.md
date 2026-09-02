@@ -203,6 +203,23 @@ no type, an argument in braces is **implicit**, and `_` and `?goal` are
 placeholders — `_` for something inference should find, `?goal` for something
 you mean to prove yourself. None of them *do* anything yet.
 
+It also has **layout**. `let` opens a block, and you may write the block either
+way — the offside rule and explicit braces mean the same thing:
+
+```
+thena spine> :surface let { x = a ; y = b } in f x y
+let x = a in let y = b in f x y
+```
+
+The bindings are **sequential**, not mutually recursive, which is why that
+prints as nested `let`s: a development is a chain, so `y` is in scope after `x`
+and nothing in the calculus underneath can express two bindings that refer to
+each other.
+
+The indentation-sensitive spelling needs more than one line, and the REPL reads
+one line at a time — so until surface **files** arrive you can only write a
+block with explicit braces here.
+
 ```
 thena spine> :core succ (succ zero)
 succ (succ zero)

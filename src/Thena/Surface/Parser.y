@@ -46,6 +46,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   '{'     { Located _ TLBrace }
   '}'     { Located _ TRBrace }
   ':'     { Located _ TColon }
+  ';'     { Located _ TSemi }
   '?'     { Located _ TQuery }
   '='     { Located _ TEquals }
   let     { Located _ TLet }
@@ -70,9 +71,7 @@ Term :: { Surface }
 Arrowed :: { Surface }
   : 'λ' LamBinders '->' Arrowed            { SurfaceLam (NE.fromList (reverse $2)) $4 }
   | '∀' PiBinders '->' Arrowed             { SurfacePi (NE.fromList (reverse $2)) $4 }
-  | let ident '=' Arrowed in Arrowed       { SurfaceLet $2 Nothing $4 $6 }
-  | let ident ':' Arrowed '=' Arrowed in Arrowed
-                                           { SurfaceLet $2 (Just $4) $6 $8 }
+  | let '{' Bindings '}' in Arrowed        { lets (reverse $3) $6 }
   | App '->' Arrowed                       { SurfaceArrow $1 $3 }
   | App                                    { $1 }
 
@@ -134,6 +133,18 @@ PiBinder :: { [SurfaceBinder] }
   : '(' Names ':' Term ')'                 { group Explicit (reverse $2) (Just $4) }
   | '{' Names ':' Term '}'                 { group Implicit (reverse $2) (Just $4) }
 
+-- **The grammar only ever sees explicit braces and semicolons.**
+-- "Thena.Surface.Layout" inserts them where the offside rule says they belong,
+-- and a program that writes them itself reaches here unchanged — which is what
+-- makes the two spellings one language.
+Bindings :: { [(String, Maybe Surface, Surface)] }
+  : Binding                                { [$1] }
+  | Bindings ';' Binding                   { $3 : $1 }
+
+Binding :: { (String, Maybe Surface, Surface) }
+  : ident '=' Term                         { ($1, Nothing, $3) }
+  | ident ':' Term '=' Term                { ($1, Just $3, $5) }
+
 Names :: { [String] }
   : ident                                  { [$1] }
   | Names ident                            { $2 : $1 }
@@ -183,6 +194,19 @@ name x = case x of
 spine :: Surface -> NonEmpty SurfaceArg -> Surface
 spine (SurfaceApp f as) bs = SurfaceApp f (as <> bs)
 spine f                 bs = SurfaceApp f bs
+
+-- | @let { x = a ; y = b } in c@ nests, one 'SurfaceLet' per binding.
+--
+-- **The bindings are sequential and cannot be mutually recursive**, and that is
+-- not a preference: a development is a /chain/ of components, so @y@ is in
+-- scope after @x@ and nothing in the development calculus can express two
+-- bindings that refer to each other. Recursion comes from eliminators.
+--
+-- So @let { x = a ; y = b } in c@ and @let x = a in let y = b in c@ are the
+-- same tree. Two spellings of one term is what sugar is; what would be wrong is
+-- one term with two representations.
+lets :: [(String, Maybe Surface, Surface)] -> Surface -> Surface
+lets bs body = foldr (\(x, ty, v) b -> SurfaceLet x ty v b) body bs
 
 -- | @(x y : A)@ binds two names at one type. Grouping is a spelling and not a
 -- structure: it is expanded here so that nothing downstream can ask how many

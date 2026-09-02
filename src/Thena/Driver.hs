@@ -41,6 +41,7 @@ module Thena.Driver
   , parseCore
   , parseDevelopment
   , parseDeclaration
+  , parseSurfaceTerm
   ) where
 
 import Data.Maybe (fromMaybe, isJust)
@@ -130,6 +131,7 @@ import Thena.Rules
   , validate
   )
 import Thena.Surface.Concrete (Surface)
+import Thena.Surface.Layout (layout)
 import qualified Thena.Surface.Parser as Surface
 import Thena.Syntax.Concrete (Raw (..), RawRule)
 import Thena.Syntax.Lexer (Located, Token, lexTokens)
@@ -579,8 +581,9 @@ parseRawTerm src = tokensOf src >>= mapLeft ParseFailed . parseTerm
 -- phase 41.
 parseSurfaceTerm :: String -> Either SyntaxError Surface
 parseSurfaceTerm src = do
-  ts <- tokensOf src
-  case Surface.parseSurface ts of
+  ts  <- tokensOf src
+  ts' <- mapLeft LayoutFailed (layout ts)
+  case Surface.parseSurface ts' of
     Left e  -> Left (SurfaceParseFailed e)
     Right t -> Right t
 

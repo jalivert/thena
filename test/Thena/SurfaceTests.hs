@@ -13,6 +13,8 @@ import Data.List.NonEmpty (NonEmpty (..))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
+import Thena.Driver (parseCore, parseSurfaceTerm)
+import Thena.Global.Env (emptyGlobals)
 import Thena.Repl (renderSurface)
 import Thena.Surface.Concrete
   ( Plicity (..)
@@ -20,8 +22,6 @@ import Thena.Surface.Concrete
   , SurfaceArg (..)
   , SurfaceBinder (..)
   )
-import Thena.Surface.Parser (parseSurface)
-import Thena.Syntax.Lexer (lexTokens)
 
 tests :: TestTree
 tests =
@@ -32,6 +32,7 @@ tests =
     , testGroup "binders" binderTests
     , testGroup "precedence" precedenceTests
     , testGroup "it prints as it was written" renderTests
+    , testGroup "layout (phase 40)" layoutTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -157,6 +158,64 @@ precedenceTests =
   ]
 
 -- --------------------------------------------------------------------------
+-- Layout
+-- --------------------------------------------------------------------------
+
+-- | The offside rule, and the condition it has to meet.
+--
+-- **A multi-line surface term cannot be typed at the REPL**, which reads one
+-- line — so until files arrive at phase 43 these are the only thing exercising
+-- layout at all. They go through 'parseSurfaceTerm', which is what a file will
+-- go through too.
+layoutTests :: [TestTree]
+layoutTests =
+  [ -- **HIS CONDITION**: /"if implicit works, explicit has to work too."/ The
+    -- grammar sees only braces and semicolons, so the two spellings must give
+    -- one tree, and this is the test that says so.
+    testCase "explicit braces and the offside rule agree" $
+      same "let { x = a ; y = b } in c"
+           "let x = a\n    y = b\n in c"
+
+    -- The Report's @parse-error(t)@ case, replaced by 'closesBlock': nothing
+    -- about @in@'s column ends the block, only that @in@ arrived.
+  , testCase "in closes a block opened on the same line" $
+      same "let { x = a } in x" "let x = a in x"
+
+  , testCase "a second binding at the same column is a second binding" $
+      same "let { x = a ; y = b } in c" "let x = a\n    y = b\n in c"
+
+    -- A more-indented line continues the item it is under. Without this rule a
+    -- wrapped binding would become two.
+  , testCase "a more indented line continues the binding" $
+      same "let { x = f a b } in x"
+           "let x = f a\n          b\n in x"
+
+  , testCase "a less indented token closes the block" $
+      same "let { x = a } in x" "let x = a\n in x"
+
+  , testCase "blocks nest" $
+      same "let { x = let { y = a } in y } in x"
+           "let x = let y = a\n            in y\n in x"
+
+    -- An explicit brace may not be closed by the offside rule, nor may an
+    -- implicit block be closed by a brace the user wrote.
+  , refuses "let { x = a in x"
+  , refuses "let x = a } in x"
+
+    -- **Layout is the surface language's alone**, which is his ruling of
+    -- 2026-08-21: /"doing all that for a parser for the development calculus is
+    -- a massive overkill."/ The two share a lexer, so the check worth having is
+    -- that the development calculus never meets this pass — a line break means
+    -- nothing there, and no brace is inserted.
+  , testCase "the development calculus is not laid out" $
+      case ( parseCore emptyGlobals [] 0 "let x = Type\8320 : Type\8321 in x"
+           , parseCore emptyGlobals [] 0 "let x = Type\8320 : Type\8321\n  in x"
+           ) of
+        (Right (a, _), Right (b, _)) -> b @?= a
+        (other, _)                   -> assertFailure (show other)
+  ]
+
+-- --------------------------------------------------------------------------
 -- Rendering
 -- --------------------------------------------------------------------------
 
@@ -194,23 +253,32 @@ corpus =
 -- Helpers
 -- --------------------------------------------------------------------------
 
+-- | Read a surface term **exactly as the REPL does** — lex, lay out, parse.
+--
+-- Through 'parseSurfaceTerm' and not through the three steps composed here, so
+-- that a test cannot pass on a composition the program does not use. Phase 40
+-- is why: before it, these tests called the parser directly and would have gone
+-- on passing after layout made the grammar require braces.
 tree :: String -> IO Surface
-tree src = case lexTokens src of
-  Left e   -> assertFailure (src ++ ": " ++ show e)
-  Right ts -> case parseSurface ts of
-    Left e  -> assertFailure (src ++ ": " ++ show e)
-    Right t -> pure t
+tree src = case parseSurfaceTerm src of
+  Left e  -> assertFailure (src ++ ": " ++ show e)
+  Right t -> pure t
 
 parses :: String -> Surface -> TestTree
 parses src expected = testCase src (tree src >>= (@?= expected))
 
 refuses :: String -> TestTree
 refuses src = testCase ("refused: " ++ src) $
-  case lexTokens src of
-    Left _   -> pure ()
-    Right ts -> case parseSurface ts of
-      Left _  -> pure ()
-      Right t -> assertFailure ("accepted it: " ++ show t)
+  case parseSurfaceTerm src of
+    Left _  -> pure ()
+    Right t -> assertFailure ("accepted it: " ++ show t)
+
+-- | Two spellings, one tree.
+same :: String -> String -> Assertion
+same a b = do
+  ta <- tree a
+  tb <- tree b
+  tb @?= ta
 
 rendered :: String -> String -> Assertion
 rendered src expected = tree src >>= \t -> renderSurface t @?= expected

@@ -56,6 +56,7 @@ import Thena.Core.Level (Level, Unmet)
 import Thena.Core.Context (Context)
 import Thena.Core.Term (Core, GlobalName, Ident, Var)
 import Thena.Syntax.Lexer (LexError)
+import Thena.Surface.Layout (LayoutError (..))
 import Thena.Surface.Parser (SurfaceParseError (..))
 import Thena.Syntax.Parser (ParseError)
 
@@ -425,6 +426,8 @@ data ElimError
 data SyntaxError
   = LexFailed LexError
   | ParseFailed ParseError
+  | LayoutFailed LayoutError
+    -- ^ the offside rule could not lay the surface program out (MS4 phase 40)
   | SurfaceParseFailed SurfaceParseError
     -- ^ the **surface** grammar refused it (MS4 phase 39). Its own case beside
     -- 'ParseFailed', because the two grammars are separate and an error from
