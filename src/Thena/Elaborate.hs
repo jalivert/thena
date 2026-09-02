@@ -44,7 +44,8 @@ import Thena.Development.Partial (Partial (..))
 import Thena.Errors (FailReason (..), ResolveError (..), SyntaxError (..))
 import Thena.Global.Env (GlobalEnv, isDeclared)
 import Thena.Ops (Instr (..), Op (..), Operand (..), Value (..))
-import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceBinder (..))
+import Thena.Surface.Concrete
+  (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..))
 
 -- | The program that elaborates one surface node into the focused hole.
 --
@@ -54,18 +55,29 @@ import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceBinder (..))
 --
 -- **A node it cannot yet elaborate is a failure and not a silence.** That list
 -- is phase 41b's specification.
--- | Where a clause parks the component it was called at.
+-- | The names one compiled node binds, all carrying its own number.
 --
--- **Body-local and therefore safe to fix**: a rule body's environment is its
--- own, restored structurally when its frame is popped (§7.5), and a nested
--- @Elaborate@ runs in the /same/ body — so the name must not be one a clause
--- could also bind. Nothing else in a compiled program binds, so one name is
--- enough and a fresh one per node would only be noise.
-hereName :: String
-hereName = "here"
+-- **A fixed name is a bug and this is the fix** (MS4 phase 41e). A nested
+-- @Elaborate@ runs in the /same/ body environment, so an inner node that binds
+-- @here@ shadows the outer node's — and the outer @goto here@ then lands on the
+-- inner component. @elaborate (\ A -> \ y -> y)@ failed exactly that way with
+-- /"that names no hole or guess"/, from the moment @here@ was introduced.
+--
+-- The number comes from the machine's own counter, which only ever grows, so
+-- two nodes can never share one. Each 'compile' consumes a tick for it — the
+-- same thing 'Thena.Core.Term.fresh' does with the same counter.
+data Names = Names
+  { hereName, domName, codName, arrName, funName, argName
+  , appName, refName, tyName, goalName :: String }
+
+namesFor :: Int -> Names
+namesFor n =
+  Names (w "here") (w "dom") (w "cod") (w "arr") (w "fun") (w "arg")
+        (w "app") (w "ref") (w "ty") (w "goal")
+  where w x = x ++ show n
 
 compile :: GlobalEnv -> Context -> Int -> Surface -> Either FailReason ([Instr], Int)
-compile env ctx n s = case s of
+compile env ctx n0 s = case s of
   -- @E⟦x⟧ = FILL x; SOLVE@ — Brady's variable case, and the one clause of his
   -- elaborator that has run in this system since phase 17b. What was
   -- @elab-var@'s body is now these two instructions.
@@ -99,7 +111,73 @@ compile env ctx n s = case s of
   -- or hand control over, are phase 44's.
   SurfaceHole _ -> Right ([], n)
 
-  SurfaceApp {}   -> unsupported "an application"
+  -- @E⟦e a⟧@ — Brady's application case with his own correction to the printed
+  -- rule (the missing @FILL@ and @SOLVE@, @IDRIS.md@):
+  --
+  -- > CLAIM (A : Type); CLAIM (B : Type); CLAIM (f : A → B); CLAIM (s : A)
+  -- > FILL (f s); FOCUS f; E⟦e⟧; FOCUS s; E⟦a⟧; SOLVE
+  --
+  -- **A spine is folded right to left**: @h a₁ … aₙ@ is @(h a₁ … aₙ₋₁) aₙ@, so
+  -- one clause covers every arity and the head of the recursion is an ordinary
+  -- 'Surface'. Brady's other rule, @E⟦x ⃗a⟧@, is the one that expands implicits
+  -- and needs the whole list at once — phase 44's.
+  --
+  -- **@prim-apply@ is not involved.** It claims holes and yields only the
+  -- spine, so a body cannot reach them; here each claim is emitted and named,
+  -- and @goto@ reaches it. Brady's arrangement rather than ours.
+  --
+  -- **@FILL@ is written out rather than reached through @unify-refine-core@**,
+  -- which is @elaboration-in-rules.md@'s **gap 4** — /"Brady needs @FILL@ and
+  -- @SOLVE@ separated, with the two @FOCUS@es between them"/. Splitting the
+  -- rule turns out not to be needed to get it: the pieces are all ops, so the
+  -- filling half is emitted here and the @prim-solve@ after the arguments.
+  SurfaceApp h as
+    | SurfaceArg Implicit _ <- NE.last as ->
+        Left (NoElaborationRule "an implicit argument")
+    | otherwise ->
+        let front = NE.init as
+            fun   = case front of
+                      [] -> h
+                      _  -> SurfaceApp h (NE.fromList front)
+            SurfaceArg _ arg = NE.last as
+            (l1, n1) = freshLevelMeta n
+            (l2, n2) = freshLevelMeta n1
+            nm k w   = Bind k (FreshName (lit' w))
+         in Right
+              ( concat
+                  [ [ Bind (hereName names) Here
+                    , nm (domName names ++ "n") "A"
+                    , Bind (domName names)
+                        (Claim (Ref (domName names ++ "n")) (lit (Universe (LVar l1))))
+                    , nm (codName names ++ "n") "B"
+                    , Bind (codName names)
+                        (Claim (Ref (codName names ++ "n")) (lit (Universe (LVar l2))))
+                    , Bind (arrName names) (Arrow (Ref (domName names)) (Ref (codName names)))
+                    , nm (funName names ++ "n") "f"
+                    , Bind (funName names)
+                        (Claim (Ref (funName names ++ "n")) (Ref (arrName names)))
+                    , nm (argName names ++ "n") "s"
+                    , Bind (argName names)
+                        (Claim (Ref (argName names ++ "n")) (Ref (domName names)))
+                    , Bind (appName names)
+                        (ApplyTo (Ref (funName names)) (Ref (argName names)))
+                    ]
+                    -- @FILL@: park it in a definition, unify its type with the
+                    -- goal's, attach it. Thesis §2.7's @=@-binding, and the
+                    -- reason it is a definition rather than a direct @try@ is
+                    -- that @f s@'s type is @B@, a hole, and not yet the goal's.
+                  , fill (Ref (appName names))
+                    -- The two @FOCUS@es, and only then the @SOLVE@.
+                  , [ Do (Goto (Ref (funName names)))
+                    , Do (Elaborate (Lit (VSurface fun)))
+                    , Do (Goto (Ref (argName names)))
+                    , Do (Elaborate (Lit (VSurface arg)))
+                    , Do (Goto (Ref (hereName names)))
+                    , Do Solve
+                    ]
+                  ]
+              , n2
+              )
 
   -- @E⟦\ x => e⟧ = ATTACK; LAMBDA x; E⟦e⟧; SOLVE@ — Brady's λ case, and the
   -- first structural one this elaborator can do (MS4 phase 41b).
@@ -127,12 +205,12 @@ compile env ctx n s = case s of
           _ : _ -> Left (NoElaborationRule "a lambda binder with a type or braces")
           []    -> Right
             ( concat
-                [ [Bind hereName Here, Do Attack]
+                [ [Bind (hereName names) Here, Do Attack]
                 , [ Do (Intro (Just (lit' x))) | x <- names' ]
                 , [Do Into]
                 , replicate (length names') (Do Along)
                 , [Do (Elaborate (Lit (VSurface body)))]
-                , [Do (Goto (Ref hereName)), Do Solve]
+                , [Do (Goto (Ref (hereName names))), Do Solve]
                 ]
             , n
             )
@@ -142,7 +220,34 @@ compile env ctx n s = case s of
   SurfaceAnnot {} -> unsupported "an ascription"
   SurfaceElim {}  -> unsupported "an elim"
   where
-    attach t = Right ([Do (Try (lit t)), Do Solve], n)
+    -- Each node takes one tick of the counter for the names it binds.
+    n     = n0 + 1
+    names = namesFor n0
+
+    -- @E⟦x⟧ = FILL x; SOLVE@ — and **@FILL@ is not @try@**.
+    --
+    -- @try@ /checks/ the term against the goal, so it needs the two types to
+    -- match already; Brady's @FILL@ *"UNIFYs its type with the goal's"*. That
+    -- is the difference between a leaf at a concrete goal — which is all
+    -- @elab-var@ ever met — and one at a goal that is still a hole, which is
+    -- exactly what the application case claims for its function and argument.
+    -- So every leaf goes through the same filling sequence the application
+    -- case does.
+    attach t = Right (fill (lit t) ++ [Do Solve], n)
+
+    -- Thesis §2.7's @=@-binding: park the term in a definition, unify the type
+    -- it has with the type the hole wants, and only then attach it. What
+    -- @unify-refine-core@'s body does, emitted rather than called, so that the
+    -- application case can put its two @FOCUS@es before the @prim-solve@
+    -- (@elaboration-in-rules.md@'s gap 4).
+    fill t =
+      [ Bind (refName names ++ "n") (FreshName (lit' "refined"))
+      , Bind (refName names) (Define (Ref (refName names ++ "n")) t)
+      , Bind (tyName names) (Typing (Ref (refName names)))
+      , Bind (goalName names) Goal
+      , Do (Unify (Ref (tyName names)) (Ref (goalName names)))
+      , Do (Try (Ref (refName names)))
+      ]
     lit' x   = Lit (VText x)
 
     -- The innermost binding of that name, if the context has one. The same

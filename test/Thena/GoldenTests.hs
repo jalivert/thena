@@ -253,6 +253,10 @@ tests =
         , ":matches"
         , "elaborate a"
         , ":show"
+          -- **One more @back@ than before phase 41e.** A leaf now goes through
+          -- @FILL@ — park the term in a definition, unify, attach — so the
+          -- development gains a component and the walk out is one step longer.
+        , "back"
         , "back"
         , "back"
         , "back"

@@ -194,14 +194,15 @@ leafTests =
           Left (CannotRead (ResolveFailed (NotInScope x))) -> x @?= "nope"
           other -> assertFailure ("expected a scope error: " ++ show other)
 
-      -- **The emitted program really is @try; solve@**, and this is how that is
-      -- visible: the fixture's goal is @Type₀@, so attaching @Type₀@ to it is
-      -- ill-typed, and the failure that comes back is @try@'s own side
-      -- condition (phase 25b) rather than anything the elaborator checked.
-    , testCase "a universe goes through try, and try still checks it" $
+      -- **A leaf goes through @FILL@, not through @try@** (MS4 phase 41e), and
+      -- this is how that is visible: the fixture's goal is @Type₀@ and
+      -- @Type₀ : Type₁@, so the mismatch is reported by the **unification**
+      -- @FILL@ does rather than by @try@'s check. Before 41e it was
+      -- @GuessIllTyped@; the change is the point.
+    , testCase "a leaf goes through FILL, so unification reports the mismatch" $
         case elaborating (SurfaceUniverse 0) of
-          Left (GuessIllTyped _) -> pure ()
-          other -> assertFailure ("expected try's check to fire: " ++ show other)
+          Left (UniverseMismatch _ _) -> pure ()
+          other -> assertFailure ("expected unification to object: " ++ show other)
 
       -- **The placeholder elaborates by not elaborating** — his words. The
       -- hole is still a hole afterwards, which is the whole of the behaviour
@@ -231,12 +232,13 @@ unsupportedTests :: TestTree
 unsupportedTests =
   testGroup
     "a node with no case is refused, not ignored"
-    [ refused "an application"
-        (SurfaceApp (SurfaceName "a") [SurfaceArg Explicit (SurfaceName "a")])
-    , refused "a ∀"           (SurfacePi [binder] (SurfaceName "a"))
+    [ refused "a ∀"           (SurfacePi [binder] (SurfaceName "a"))
     , refused "an arrow"      (SurfaceArrow (SurfaceName "a") (SurfaceName "a"))
     , refused "a let"         (SurfaceLet "x" Nothing (SurfaceName "a") (SurfaceName "x"))
     , refused "an ascription" (SurfaceAnnot (SurfaceName "a") (SurfaceUniverse 0))
+      -- Implicit **arguments** are phase 44's, like implicit binders.
+    , refused "an implicit argument"
+        (SurfaceApp (SurfaceName "a") [SurfaceArg Implicit (SurfaceName "a")])
     ]
   where
     binder = SurfaceBinder Explicit "x" Nothing

@@ -204,6 +204,31 @@ sessionTests =
   , testCase "a theorem starts a fresh development, not the one it found" $
       namesIn (developmentAfter (run ["claim spare : Type₀", ":theorem t : Type₀"]))
         @?= ["t"]
+    -- **Elaboration, end to end** (MS4 phase 41e). The unit tests in
+    -- "Thena.ElaborateTests" run against a synthetic cursor with no globals;
+    -- these are the same clauses driven through the REPL with a datatype
+    -- declared, which is the only way to reach the application case at all.
+  , ok "an application elaborates and proves"
+      [ "data " ++ natDecl
+      , ":theorem t : Nat"
+      , "elaborate (succ zero)"
+      , "qed"
+      ]
+  , ok "a two-argument spine folds"
+      [ "data " ++ natDecl
+      , "data Pair : Type\8320 where { mk : Nat -> Nat -> Pair }"
+      , ":theorem p : Pair"
+      , "elaborate (mk zero (succ zero))"
+      , "qed"
+      ]
+    -- **Nested lambdas were broken from the moment @here@ existed** and this is
+    -- the test that would have caught it: the inner λ rebound the body-local
+    -- name, so the outer @goto@ landed on the inner component.
+  , ok "nested lambdas elaborate"
+      [ ":theorem u : \8704 (A : Type\8320) (a : A) -> A"
+      , "elaborate (\\ A -> \\ y -> y)"
+      , "qed"
+      ]
   , ok "so a hole left in the scratch cannot block qed"
       ["claim spare : Type₀", ":theorem t : Type₁", "try-core ⌜ Type₀ ⌝", "solve", "qed"]
   ]

@@ -26,14 +26,17 @@ elaborate ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
 thena spine> elaborate a
+already equal
 thena spine> :show
   let ? const : ∀ (A : Type₀) -> A -> A ≐ (
     λ (A : Type₀) ->
     λ (a : A) ->
-▶   let const1 = a : A in
+    let refined = a : A in
+▶   let const1 = refined : A in
     const1
   ) in
   const
+thena spine> back
 thena spine> back
 thena spine> back
 thena spine> back
@@ -42,7 +45,7 @@ thena spine> qed
 const : ∀ (A : Type₀) -> A -> A   ∎
 thena spine> :show const
 const : ∀ (A : Type₀) -> A -> A
-const = let const = λ (A : Type₀) (a : A) -> let const1 = a : A in const1 : ∀ (A : Type₀) -> A -> A in const
+const = let const = λ (A : Type₀) (a : A) -> let refined = a : A in let const1 = refined : A in const1 : ∀ (A : Type₀) -> A -> A in const
 thena spine> :theorem again : ∀ (A : Type₀) (a : A) -> A
 proving again : ∀ (A : Type₀) -> A -> A
 thena spine> attack
@@ -54,7 +57,8 @@ thena spine> along
 thena spine> elaborate b
 stuck: not in scope: b
 thena spine> elaborate (a a)
-stuck: elaboration has no rule for an application yet
+solved: B
+stuck: A and A1 -> B cannot be made equal
 thena spine> :abandon
 abandoned again
 thena spine> :theorem shown : ∀ (A : Type₀) (a : A) -> A
@@ -75,33 +79,68 @@ stack
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  0  prim-try ⌜a⌝
-  1  prim-solve
+  0  ref47n = fresh-name "refined"
+  1  ref47 = define ref47n ⌜a⌝
+  2  ty47 = typeof ref47
+  3  goal47 = goal
+  4  unify ty47 ≟ goal47
+  5  prim-try ref47
+  6  prim-solve
 env
   t = ‹a›
 stack
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  0  prim-solve
+  0  ref47 = define ref47n ⌜a⌝
+  1  ty47 = typeof ref47
+  2  goal47 = goal
+  3  unify ty47 ≟ goal47
+  4  prim-try ref47
+  5  prim-solve
 env
+  ref47n = "refined"
   t = ‹a›
 stack
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  (empty)
+  0  ty47 = typeof ref47
+  1  goal47 = goal
+  2  unify ty47 ≟ goal47
+  3  prim-try ref47
+  4  prim-solve
 env
+  ref47 = ⌜refined⌝
+  ref47n = "refined"
   t = ‹a›
 stack
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  (empty)
+  0  goal47 = goal
+  1  unify ty47 ≟ goal47
+  2  prim-try ref47
+  3  prim-solve
 env
-  (empty)
+  ty47 = ⌜A⌝
+  ref47 = ⌜refined⌝
+  ref47n = "refined"
+  t = ‹a›
 stack
-  (empty)
+  call, 0 instruction(s) to resume
 thena spine> :step
+pc
+  0  unify ty47 ≟ goal47
+  1  prim-try ref47
+  2  prim-solve
+env
+  goal47 = ⌜A⌝
+  ty47 = ⌜A⌝
+  ref47 = ⌜refined⌝
+  ref47n = "refined"
+  t = ‹a›
+stack
+  call, 0 instruction(s) to resume
 thena spine> :step off
 thena spine> :quit
