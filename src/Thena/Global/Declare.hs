@@ -34,6 +34,7 @@ import Thena.Core.Level
   , freshLevelRigid
   , levelMax
   , loneMeta
+  , minimise
   , metasIn
   , solveLevels
   )
@@ -44,6 +45,7 @@ import Thena.Core.Term
   , GlobalName
   , Ident
   , close
+  , levelMetasIn
   , fresh
   , instantiate
   , globalsIn
@@ -97,6 +99,9 @@ data DeclareError
   | ArgumentTooLarge GlobalName Ident Level Level
     -- ^ constructor, argument, the universe the argument lives in, and the
     -- datatype's own — thesis §4.1.1 (phase 8)
+  | AmbiguousLevels GlobalName
+    -- ^ the levels only this datatype's constructors mention have no least
+    -- solution, so they can be neither defaulted nor carried (phase 51)
   | ArgumentLevelsUnmet GlobalName
     -- ^ the level relations a constructor's arguments owe cannot all hold, and
     -- no single argument's size restriction is the one at fault (phase 50).
@@ -142,7 +147,7 @@ declare env n d0 = do
   -- finished declaration, which is why the wrappers and no-confusion need to
   -- know nothing about any of it.
   (d1, n2) <- computed env n1 d0
-  (sub, n3) <- universes env n2 d1
+  (sub, residue, n3) <- universes env n2 d1
   -- **Solve before generalising** (phase 50). A meta its own constraints
   -- determine must be substituted away here; left in, 'generaliseInductive'
   -- turns it into a prenex parameter, and a rigid gets the /validity/ reading,
@@ -150,7 +155,8 @@ declare env n d0 = do
   -- theoretical ordering point: it is what made
   -- @data E : Type where { k : Eq {1} Type Nat Nat -> E }@ declare a datatype
   -- whose generated no-confusion family could not typecheck.
-  let (d, n4) = generaliseInductive n3 (substLevelsInInductive sub d1)
+  d2 <- minimised residue (substLevelsInInductive sub d1)
+  let (d, n4) = generaliseInductive n3 d2
   -- The wrappers first: the generated terms name the datatype's own former and
   -- constructors, so they must already resolve.
   let env1 = generate d env
@@ -252,7 +258,7 @@ argumentLevels env n0 d = foldM eachConstructor ([], [], n0) (inductiveConstruct
 -- definition\'s and a use of a former supplies levels without proving anything.
 universes
   :: GlobalEnv -> Int -> InductiveDefinition
-  -> Either DeclareError ([(LevelVar, Level)], Int)
+  -> Either DeclareError ([(LevelVar, Level)], [Obligation], Int)
 universes env n0 d = do
   (ls, obs, n1) <- argumentLevels env n0 d
   let sized = [ AtMost l (inductiveLevel d) | (_, _, l) <- ls ]
@@ -262,7 +268,13 @@ universes env n0 d = do
     -- even a bound this function itself formed pinned nothing: the comment on
     -- 'Thena.Core.Level.solveLevels' that @suc ?ℓ ≤ 1@ pins @?ℓ@ at zero was
     -- true of the solver and false of this caller.
-    Right (sub, []) -> Right (sub, n1)
+    --
+    -- **And the residue is handed on rather than refused** (phase 51). It used
+    -- to have to be empty here; minimisation runs after this and is what
+    -- settles the metas the bounds only /constrain/, so the question this
+    -- function can answer is the one it asks — whether the constraints are
+    -- outright impossible.
+    Right (sub, residue) -> Right (sub, residue, n1)
     -- Which argument to name: the first whose own relation does not hold on
     -- its own. There is always one when the size restriction is what failed —
     -- and when it is not, the failure came from typing an argument rather than
@@ -306,6 +318,36 @@ computed env n0 d = case loneMeta (inductiveLevel d) of
       -- zero, which would be an answer invented rather than derived.
       []      -> Right (d, n1)
       l : ls' -> Right (substLevelsInInductive [(m, foldr levelMax l ls')] d, n1)
+
+-- | Default the level metas that only the /constructors/ mention (phase 51).
+--
+-- **The partition is occurrence in the former's type**, and it is the same one
+-- 'Thena.Global.Env.generalised' uses. A meta the former's type mentions —
+-- in a parameter, an index, or the declared universe — is real polymorphism: a
+-- use of @D@ writes it and it changes what the type means. A meta only a
+-- constructor argument mentions can be determined by nobody, because a use
+-- supplies levels without proving anything, and every use would have to write
+-- it to say nothing at all.
+--
+-- Concretely, before this phase:
+--
+-- > data D9 {ℓ₃₃₄ ℓ₃₃₅ ℓ₃₃₆ ℓ₃₃₇ ℓ₃₃₈} : Type (ℓ₃₃₄) where
+-- >   { c9 : Eq {ℓ₃₃₄} Nat a1 {ℓ₃₃₅ ℓ₃₃₆} a1 {ℓ₃₃₇ ℓ₃₃₈} -> D9 {…} }
+--
+-- Four of the five said nothing and had to be written at every use.
+--
+-- **A datatype still carries no constraints**, so anything 'minimise' hands
+-- back unsolved refuses the declaration — the rule 'generaliseInductive'
+-- already stated, now applied to what is genuinely left rather than to what had
+-- merely not been minimised yet.
+minimised
+  :: [Obligation] -> InductiveDefinition -> Either DeclareError InductiveDefinition
+minimised residue d = case minimise ambiguous residue of
+  Right (sub, []) -> Right (substLevelsInInductive sub d)
+  _               -> Left (AmbiguousLevels (inductiveName d))
+  where
+    ambiguous =
+      [ v | v <- levelMetasInInductive d, v `notElem` levelMetasIn (formerType d) ]
 
 -- | Turn the level metas a declaration is left holding into its prenex
 -- parameters (MS3 phase 33c) — 'Thena.Global.Env.generalised' for declarations.

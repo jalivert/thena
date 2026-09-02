@@ -1029,9 +1029,15 @@ tests =
         , "data E : Type where { k : Eq {1} Type Nat Nat -> E }"
         , ":show E"
           -- And one the bounds merely /constrain/: @suc ?\8467 \8804 2@ leaves @?\8467@ free
-          -- below 1, a datatype has nowhere to carry that, so it is refused —
-          -- honestly, and this is the case universe minimisation will accept.
+          -- below 1. Phase 50 refused it, because a datatype has nowhere to
+          -- carry a conditional constraint; **phase 51 defaults it** to its
+          -- least value instead, so @F@ takes no level argument either.
         , "data F : Type where { k2 : Eq {2} Type Nat Nat -> F }"
+        , ":show F"
+          -- **Real polymorphism is untouched**, which is the whole point of the
+          -- partition: @\8467@ occurs in @Eq@'s own type, so a use determines it
+          -- and it is never a candidate for defaulting.
+        , ":show Eq"
         , ":quit"
         ])
       -- Typical ambiguity (MS3 phase 33): a bare @Type@ is a universe whose

@@ -79,7 +79,7 @@ import Thena.Engine (whereImpure)
 import Thena.Errors
   ( ConversionFailure
   , FailReason (..)
-  , KernelError
+  , KernelError (..)
   , MoveError (..)
   , ResolveError (..)
   , SyntaxError (..)
@@ -975,7 +975,7 @@ dispatch s name arg = case name of
         (s', Ran msgs Completed) ->
           case extract (flatten (development (sessionMachine s'))) of
             Left why -> (s', Ran msgs (Halted (NotYetPure (whereImpure why))))
-            Right t  -> admit (fromMaybe att (currentAttempt s')) s' t
+            Right t  -> admit msgs (fromMaybe att (currentAttempt s')) s' t
         other -> other
         where
           ran = load [Do (Certify (Lit (VTerm (Trailing (attemptClaim att)))))] machine
@@ -986,9 +986,15 @@ dispatch s name arg = case name of
           -- definition's type — reading the record from before the run stored a
           -- type still carrying a meta nothing could ever solve, which is a bug
           -- phase 33 shipped and 33b fixes.
-          admit att' s' t =
-            let (s'', lvs, owed, scheme) = admitted s' att' t
-             in (s'', Proved (attemptName att') lvs owed scheme)
+          -- **Generalisation can now refuse** (MS4 phase 51): a level the
+          -- term mentions and the type does not is defaulted, and if it has no
+          -- least value there is nothing to default it to. The proof is left
+          -- standing rather than admitted, so the development is still there to
+          -- look at.
+          admit msgs att' s' t = case admitted s' att' t of
+            Left u -> (s', Ran msgs (Uncertified (Levels u)))
+            Right (s'', lvs, owed, scheme) ->
+              (s'', Proved (attemptName att') lvs owed scheme)
 
     -- Admitting is the only thing that writes a theorem to globals (§3.3.1):
     -- a proved theorem is a global **definition**, type and body both.
@@ -1002,18 +1008,19 @@ dispatch s name arg = case name of
     --
     -- Returns the generalised type as well, because that — not the claim as
     -- written — is what @qed@ reports and what @:show@ will print.
-    admitted s' att t =
-      let m  = sessionMachine s'
-          (d, n1) = generalised (names m) (attemptResidue att) (attemptClaim att) t
-          g  = addDefinition (attemptName att) d (globals m)
+    admitted s' att t = do
+      let m = sessionMachine s'
+      (d, n1) <- generalised (names m) (attemptResidue att) (attemptClaim att) t
+      let g  = addDefinition (attemptName att) d (globals m)
           (ps, n) = newDevelopment n1
-       in ( s' { sessionMachine = m { globals = g, development = ps, names = n }
-               , sessionWork = Scratch
-               }
-          , definitionLevels d
-          , definitionConstraints d
-          , definitionType d
-          )
+      Right
+        ( s' { sessionMachine = m { globals = g, development = ps, names = n }
+             , sessionWork = Scratch
+             }
+        , definitionLevels d
+        , definitionConstraints d
+        , definitionType d
+        )
 
     suspend = case sessionWork s of
       Scratch -> (s, Rejected NotProving)
@@ -1776,8 +1783,10 @@ progress oneStep s msgs = case step (sessionMachine s) of
   -- when it is over. See 'Thena.Ops.DefineGlobal'.
   Engine.Defining nm ps ty t m -> case certify (globals m) t ty of
     Left e -> stop (load [] m) msgs (Uncertified e)
-    Right (sub, residue) ->
-      let (d, n1) = generalised (names m) residue (substLevelsIn sub ty) t
+    Right (sub, residue) -> case generalised (names m) residue (substLevelsIn sub ty) t of
+      Left u -> stop (load [] m) msgs (Uncertified (Levels u))
+      Right (d, n1) ->
+        let
           -- **The plicities are installed beside the definition** (MS4 phase
           -- 44b) and only when there are any, so a global whose signature said
           -- nothing implicit adds no entry at all.

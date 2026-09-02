@@ -1233,6 +1233,12 @@ renderKernelError n e = case e of
   Levels (Unsatisfiable cs) ->
     "no levels satisfy all of these at once:"
       : map (("  " ++) . obligation) cs
+  -- **Named, not counted** (phase 51): these are the levels the proof term
+  -- mentions and its type does not, so the reader has no way to see them in
+  -- what was printed and the message has to say which.
+  Levels (Ambiguous vs) ->
+    [ "these universe levels appear only in the term, and nothing determines "
+        ++ "them: " ++ unwords (map levelVarName vs) ]
   Ill pos te   ->
     ("in " ++ renderPosition pos ++ ":") : map ("  " ++) (renderTypeError n te)
 
@@ -1458,6 +1464,10 @@ renderDeclareError e = case e of
       ++ ", which the datatype's own "
       ++ renderLevel d
       ++ " does not contain"
+  AmbiguousLevels g ->
+    "the universe levels only "
+      ++ nameString g
+      ++ "'s constructors mention cannot be determined"
   ArgumentLevelsUnmet g ->
     "the universe levels "
       ++ nameString g

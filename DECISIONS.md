@@ -214,6 +214,45 @@ a `?`: `Type (?ℓ229)`.
 
 ---
 
+### A level your type never mentions is defaulted, not turned into a parameter
+
+A proof can end up mentioning universe levels that its **type** does not. They
+come from the elaborator, not from you: every application claims a domain and a
+codomain, and nothing pins their levels.
+
+Such a level cannot be determined by anyone. A use site supplies level arguments
+and reads the type to know what they mean, so a parameter the type never names
+is one every caller must write in order to say nothing at all. Before this,
+`a1 = (\ x -> x) zero` came out as:
+
+```
+a1 {ℓ₃₂₈ ℓ₃₂₉} : Nat
+```
+
+Now those levels are given their **least** value and substituted away:
+
+```
+a1 : Nat
+```
+
+The partition is exactly occurrence in the type, and it applies to datatypes the
+same way — a level only a constructor mentions is defaulted, one the former's
+type mentions is kept.
+
+**Real polymorphism is never touched.** `Eq {ℓ} (A : Type ℓ)` mentions `ℓ` in
+its own type, so `ℓ` stays a parameter and `e : Eq {ℓ} Nat zero zero` remains
+usable at every level. The rule is about levels nobody can choose, not about
+levels you might not want to choose.
+
+Least means least, not zero: a level bounded below by 2 is defaulted to 2, and
+conditions that the defaulting discharges disappear from the type along with it.
+
+**If there is no least value, the definition is refused.** `2 ≤ max ?a ?b` is a
+disjunction — `(2, 0)` and `(0, 2)` both work and neither is smaller — so there
+is nothing to default to, and nothing is guessed.
+
+---
+
 ## The core language and its type theory
 
 *Nothing recorded yet.*

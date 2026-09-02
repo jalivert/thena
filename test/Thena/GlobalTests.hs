@@ -308,10 +308,15 @@ universeTests =
         Left e         -> assertFailure e
         Right (env, _) ->
           fmap inductiveLevels (lookupInductive (named "E") env) @?= Just []
-  , testCase "and one it merely bounds is refused, because a datatype carries no constraints" $
+  , -- **And one the bounds only constrain is defaulted** (phase 51). @suc ?ℓ ≤ 2@
+    -- leaves @?ℓ@ free below 1; phase 50 refused it, because a datatype has
+    -- nowhere to carry a conditional constraint, and minimisation is what gives
+    -- it a value instead — the least, so @Type\8320@.
+    testCase "and one they merely bound is defaulted to its least value" $
       case declareAll [natDecl, eqDecl, "E : Type where { k : Eq {2} Type Nat Nat -> E }"] of
-        Left e  -> e @?= show (ArgumentLevelsUnmet (named "E"))
-        Right _ -> assertFailure "admitted, and it should not have been"
+        Left e         -> assertFailure e
+        Right (env, _) ->
+          fmap inductiveLevels (lookupInductive (named "E") env) @?= Just []
   ]
 
 -- --------------------------------------------------------------------------
@@ -397,41 +402,57 @@ afterFixtures src = case parseDeclaration natVec 0 src of
 generaliseTests :: [TestTree]
 generaliseTests =
   [ testCase "a proof with no unknown level generalises to nothing" $
-      let (d, n) = generalised 50 [] (universe 1) (universe 0)
+      let (d, n) = gen 50 [] (universe 1) (universe 0)
        in (definitionLevels d, definitionConstraints d, n) @?= ([], [], 50)
 
   , testCase "a meta in the type becomes a parameter" $
-      definitionLevels (fst (generalised 50 [] (Universe (LVar p)) (universe 0)))
-        @?= [LRigid 50]
+      levelsOf (gen 50 [] (Universe (LVar p)) (universe 0)) @?= [LRigid 50]
 
   , -- **Fresh, not the meta's own number under another constructor.** MS2
     -- closeout 4f is one counter across every sort precisely so that a number
     -- the user has seen as @?ℓ7@ is never reissued as something else.
     testCase "and it is a fresh number, not the meta's" $
-      definitionLevels (fst (generalised 50 [] (Universe (LVar (LMeta 7))) (universe 0)))
-        @?= [LRigid 50]
+      levelsOf (gen 50 [] (Universe (LVar (LMeta 7))) (universe 0)) @?= [LRigid 50]
 
   , testCase "the type's metas come first, in the order it reads" $
-      definitionLevels (fst (generalised 50 [] (arrow (LVar q) (LVar p)) (universe 0)))
+      levelsOf (gen 50 [] (arrow (LVar q) (LVar p)) (universe 0))
         @?= [LRigid 50, LRigid 51]
 
-  , -- A use site supplies level arguments positionally and reads the type to
-    -- know what they mean, so a meta only the body mentions comes last.
-    testCase "a meta only the body mentions comes after them" $
-      definitionLevels
-        (fst (generalised 50 [] (Universe (LVar p)) (Universe (LVar q))))
-        @?= [LRigid 50, LRigid 51]
+  , -- **A meta only the body mentions is defaulted, not generalised** (phase
+    -- 51). It used to come last, on the reasoning that a use supplies level
+    -- arguments positionally and reads the type to know what they mean — which
+    -- is exactly why this one could never be read: nothing in the type names
+    -- it, so every use had to write a level that said nothing at all.
+    testCase "a meta only the body mentions is defaulted away" $
+      levelsOf (gen 50 [] (Universe (LVar p)) (Universe (LVar q))) @?= [LRigid 50]
+
+  , testCase "and it is defaulted to zero, its least value" $
+      bodyOf (gen 50 [] (Universe (LVar p)) (Universe (LVar q))) @?= Universe LZero
+
+  , -- Least, not zero unconditionally: a lower bound is met exactly.
+    testCase "a bounded body-only meta is defaulted to the bound" $
+      bodyOf (gen 50 [AtMost (levelOfNat 2) (LVar q)]
+                (Universe (LVar p)) (Universe (LVar q)))
+        @?= Universe (levelOfNat 2)
+
+  , -- **And when there is no least value it refuses** — his ruling, 2026-09-02.
+    -- @2 ≤ max ?q ?q2@ has minimal solutions @(2,0)@ and @(0,2)@, incomparable.
+    testCase "and refuses when no least value exists" $
+      refuses (generalised 50 [AtMost (levelOfNat 2) (LMax (LVar q) (LVar q2))]
+                 (Universe (LVar p)) (arrow (LVar q) (LVar q2)))
+        @?= True
 
   , testCase "the same meta twice is one parameter" $
-      definitionLevels (fst (generalised 50 [] (arrow (LVar p) (LVar p)) (universe 0)))
-        @?= [LRigid 50]
+      levelsOf (gen 50 [] (arrow (LVar p) (LVar p)) (universe 0)) @?= [LRigid 50]
 
   , testCase "the type is rewritten to mention the parameters" $
-      definitionType (fst (generalised 50 [] (Universe (LVar p)) (universe 0)))
+      typeOf' (gen 50 [] (Universe (LVar p)) (universe 0))
         @?= Universe (LVar (LRigid 50))
 
-  , testCase "and so is the body" $
-      definitionBody (fst (generalised 50 [] (universe 0) (Universe (LVar p))))
+  , -- The body is rewritten too. It has to share the type's meta to show it:
+    -- a meta of the body's own is now defaulted rather than generalised.
+    testCase "and so is the body" $
+      bodyOf (gen 50 [] (Universe (LVar p)) (Universe (LVar p)))
         @?= Universe (LVar (LRigid 50))
 
   , -- **The residue is not filtered.** A relation between two of the new
@@ -439,17 +460,30 @@ generaliseTests =
     -- to decide it here would refuse it, because a rigid is not bounded by
     -- another rigid — which is the whole reason it has to travel to the use.
     testCase "the residue becomes the constraints, over the new parameters" $
-      definitionConstraints
-        (fst (generalised 50 [AtMost (LVar p) (LVar q)]
-                (arrow (LVar p) (LVar q)) (universe 0)))
+      constraintsOf (gen 50 [AtMost (LVar p) (LVar q)]
+                       (arrow (LVar p) (LVar q)) (Universe (LVar q)))
         @?= [AtMost (LVar (LRigid 50)) (LVar (LRigid 51))]
 
   , testCase "the counter comes back advanced by one per parameter" $
-      snd (generalised 50 [] (arrow (LVar p) (LVar q)) (universe 0)) @?= 52
+      snd (gen 50 [] (arrow (LVar p) (LVar q)) (universe 0)) @?= 52
   ]
   where
-    p = LMeta 900
-    q = LMeta 901
+    -- Generalisation may refuse since phase 51. Every case here but one is an
+    -- acceptance, so a refusal is a broken fixture rather than a failed
+    -- assertion; the one that expects a refusal asks through 'isRefusal'.
+    gen n obs ty body = case generalised n obs ty body of
+      Left u  -> error ("generalised refused: " ++ show u)
+      Right r -> r
+
+    refuses = either (const True) (const False)
+
+    levelsOf      = definitionLevels . fst
+    bodyOf        = definitionBody . fst
+    typeOf'       = definitionType . fst
+    constraintsOf = definitionConstraints . fst
+    p  = LMeta 900
+    q  = LMeta 901
+    q2 = LMeta 902
 
     universe = Universe . levelOfNat
 

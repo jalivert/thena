@@ -49,6 +49,8 @@ import Data.List (nub)
 import Thena.Core.Level
   ( Level (..)
   , LevelVar
+  , Unmet
+  , minimise
   , Obligation
   , freshLevelRigid
   , metasIn
@@ -146,16 +148,32 @@ data Definition = MkDefinition
 -- is exactly what a scheme constraint is /for/, and asking 'levelLeq' to decide
 -- it here would refuse the useful case — a rigid is not bounded by another
 -- rigid, which is the whole reason the constraint has to travel to the use.
-generalised :: Int -> [Obligation] -> Core -> Core -> (Definition, Int)
-generalised n residue ty body =
-  ( MkDefinition (map snd binding) (map (substObligation sub) residue)
-      (substLevelsIn sub ty) (substLevelsIn sub body)
-  , n'
-  )
+generalised
+  :: Int -> [Obligation] -> Core -> Core -> Either Unmet (Definition, Int)
+generalised n residue ty body = do
+    -- **Default the ambiguous ones first, then generalise what is left**
+    -- (phase 51). The order is the whole of it: a meta the type does not
+    -- mention cannot be determined by a use — unification only ever sees the
+    -- type — so making it a parameter asks every caller to write something that
+    -- says nothing. 'Thena.Core.Level.minimise' gives it its least value
+    -- instead, and refuses when there is no least one.
+    (defaults, kept) <- minimise ambiguous residue
+    let ty1   = substLevelsIn defaults ty
+        body1 = substLevelsIn defaults body
+        -- Recomputed after the defaulting rather than reused: solving may have
+        -- discharged a meta the type mentioned too.
+        metas = levelMetasIn ty1
+                  ++ [ v | v <- levelMetasIn body1, v `notElem` levelMetasIn ty1 ]
+        (binding, n') = mint n metas
+        sub   = [ (v, LVar w) | (v, w) <- binding ]
+    Right
+      ( MkDefinition (map snd binding) (map (substObligation sub) kept)
+          (substLevelsIn sub ty1) (substLevelsIn sub body1)
+      , n'
+      )
   where
-    metas       = levelMetasIn ty ++ [ v | v <- levelMetasIn body, v `notElem` levelMetasIn ty ]
-    (binding, n') = mint n metas
-    sub         = [ (v, LVar w) | (v, w) <- binding ]
+    ambiguous =
+      [ v | v <- levelMetasIn body, v `notElem` levelMetasIn ty ]
 
     mint k []       = ([], k)
     mint k (v : vs) = let (w, k1)  = freshLevelRigid k
