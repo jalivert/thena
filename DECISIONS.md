@@ -222,7 +222,65 @@ a `?`: `Type (?ℓ229)`.
 
 ## The development calculus
 
-*Nothing recorded yet.*
+### There are five components, not McBride's four — the fifth is `∀`
+
+A development is a chain of bindings, and reading the finished term off it folds
+each binding into a term former. McBride's four give you three formers:
+
+```
+λ x : S      becomes  λ x : S . …          an assumption
+x = s : S    becomes  let x = s : S in …   a local definition
+? x : S                                    a hole — nothing yet
+? x ≐ g : S                                a guess — a hole with a candidate
+∀ x : S      becomes  ∀ (x : S) -> …       Thena's fifth
+```
+
+Without the fifth, **a development can be a term but never a type**. That
+matters as soon as types are written in a language that has to be elaborated:
+`∀ (x : A) -> B` needs `x` in scope while `B` is worked out, writing a component
+is the only way anything gets into scope, and every component there was folded
+into a λ or a `let`.
+
+You can write one, and the tactic that makes one is `quantify`:
+
+```
+:theorem t : Type₁
+attack
+quantify A : Type₀
+▶ let ? t : Type₁ ≐ (
+    ∀ (A : Type₀) ->
+    let ? t1 : Type (?ℓ5) in
+    t1
+  ) in
+  t
+```
+
+Note the codomain's universe: **`quantify` claims it at a level of its own**,
+not at the ∀'s. `∀ (A : Type₀) -> A` lives in `Type₁` while its codomain lives
+in `Type₀`, so inheriting would pin the whole thing a level too low.
+
+The concrete syntax is the one a Π already had, and a leading `∀` run in a
+development reads as components — exactly as a leading `λ` run does. So a
+development whose *trailing term* is a bare Π needs corners:
+
+```
+:dev ∀ (A : Type₀) -> A        two links and a trailing A
+:dev ⌜ ∀ (A : Type₀) -> A ⌝    one trailing Π
+```
+
+### A name you write is the name you get, even if something else has it
+
+`claim`, `assume`, `define` and `quantify` take the identifier you give them and
+do not rename it, refuse it, or number it. Two components may carry the same
+name; `goto ‹name›` then takes the first, and what is printed is freshened for
+the screen only.
+
+This is what lets the surface language shadow. `\ x -> \ x -> x` and
+`let x = a in let x = b in x` mean what they mean in any other functional
+language, and the inner binding wins — which could not be true if the
+development insisted its identifiers were distinct.
+
+A tactic that needs a name *nobody* has still asks for one, with `fresh-name`.
 
 ---
 
