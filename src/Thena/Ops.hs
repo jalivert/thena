@@ -367,6 +367,22 @@ data Op
     --
     -- Refused at the outermost development: there is nothing to pop back to,
     -- and a machine with no development is not a state this language has.
+  | MakeData GlobalName Int [GlobalName] [Operand]
+    -- ^ **assemble a datatype from elaborated types and hand it out through
+    -- the channel** (MS4 phase 42b) — the datatype's name, how many parameters
+    -- were written, the constructors' names, and the types: the datatype's own
+    -- first and then one per constructor, in order.
+    --
+    -- The names and the parameter count are fields rather than operands for
+    -- 'DefineData'\'s reason — they are written down, never computed — and the
+    -- count is what lets 'Thena.Global.Declare.buildInductive' make §3.7's
+    -- parameter/index split by /peeling/, where @resolveData@ makes it
+    -- syntactically on 'Thena.Syntax.Concrete.Raw'.
+    --
+    -- **It yields; the driver checks and installs**, exactly as 'DefineData'
+    -- does — the whole of "Thena.Global.Declare"'s @declare@ runs on the
+    -- result, so a surface datatype is checked by the same code a written one
+    -- is.
   | DefineGlobal Operand Operand Operand
     -- ^ name, type, term — **hand a finished definition out through the
     -- channel** (MS4 phase 42), the way 'DefineData' hands out a datatype.
@@ -574,6 +590,7 @@ produces o = case o of
   DefineData _ -> False
   Certify _    -> False
   DefineGlobal {} -> False
+  MakeData {} -> False
   Whnf _ -> True
   PushDevelopment _ -> False
   PopDevelopment -> True   -- the term the nested development built
@@ -631,6 +648,7 @@ operandsOf o = case o of
   Try    a     -> [a]
   Certify a    -> [a]
   DefineGlobal a b c -> [a, b, c]
+  MakeData _ _ _ as -> as
   Whnf a -> [a]
   PushDevelopment a -> [a]
   PopDevelopment -> []
@@ -777,6 +795,7 @@ opKeyword o = case o of
   Define _ _   -> "define"
   Certify _    -> "certify"
   DefineGlobal {} -> "define-global"
+  MakeData {} -> "make-data"
   Whnf _ -> "whnf"
   PushDevelopment _ -> "push-development"
   PopDevelopment -> "pop-development"

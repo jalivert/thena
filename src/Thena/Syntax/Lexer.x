@@ -73,6 +73,11 @@ tokens :-
   "in"          { keyword TIn }
   "elim"        { keyword TElim }
   "where"       { keyword TWhere }
+  -- **Reserved at MS4 phase 42b**, so a surface module can say @data@ inside a
+  -- declaration block. Agda and Haskell both reserve it. The DC's own @data@
+  -- command is unaffected: the driver splits the word off the line before this
+  -- lexer sees the rest.
+  "data"        { keyword TData }
   "rule"        { keyword TRule }
   "when"        { keyword TWhen }
   "then"        { keyword TThen }
@@ -115,6 +120,7 @@ data Token
   | TIn
   | TElim
   | TWhere
+  | TData
   | TRule
   | TWhen
   | TThen

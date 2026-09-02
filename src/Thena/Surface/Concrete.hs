@@ -18,6 +18,8 @@
 module Thena.Surface.Concrete
   ( Surface (..)
   , SurfaceDecl (..)
+  , SurfaceData (..)
+  , SurfaceConstructor (..)
   , PairingError (..)
   , paired
   , SurfaceArg (..)
@@ -125,12 +127,34 @@ data SurfaceBinder = SurfaceBinder Plicity String (Maybe Surface)
 data SurfaceDecl
   = SurfaceSignature String Surface   -- ^ @foo : T@
   | SurfaceEquation  String Surface   -- ^ @foo = e@
+  | SurfaceDatatype  SurfaceData      -- ^ @data D … where { … }@ (phase 42b)
+  deriving (Eq, Show)
+
+-- | A datatype declaration, in the shape §3.7 requires disambiguated.
+--
+-- **The same split 'Thena.Syntax.Concrete.RawData' makes**: the parameters are
+-- the binder groups left of the @:@ and the indices are the arrow prefix of the
+-- type right of it. Keeping it syntactic is what lets the elaborated form be
+-- taken apart again by /counting/ — 'Thena.Global.Declare.buildInductive'.
+data SurfaceData = SurfaceData
+  { surfaceDataName         :: String
+  , surfaceDataParameters   :: [(String, Surface)]
+  , surfaceDataType         :: Surface   -- ^ the part right of the @:@
+  , surfaceDataConstructors :: [SurfaceConstructor]
+  }
+  deriving (Eq, Show)
+
+data SurfaceConstructor = SurfaceConstructor String Surface
   deriving (Eq, Show)
 
 -- | What went wrong pairing them.
 data PairingError
   = SignatureWithNoEquation String
   | EquationWithNoSignature String
+  | DatatypeInATheoremList
+    -- ^ 'paired' is about theorems; a caller that can also take a datatype
+    -- splits the list first. Phase 43's loader does; phase 42b's @declare@
+    -- keeps them apart at the command.
   deriving (Eq, Show)
 
 -- | Pair each signature with the equation that follows it.
@@ -145,3 +169,4 @@ paired ds = case ds of
     | x == y -> ((x, ty, body) :) <$> paired rest
   SurfaceSignature x _ : _ -> Left (SignatureWithNoEquation x)
   SurfaceEquation  x _ : _ -> Left (EquationWithNoSignature x)
+  SurfaceDatatype _    : _ -> Left DatatypeInATheoremList

@@ -404,6 +404,38 @@ sessionTests =
       [ "data " ++ natDecl
       , "declare bad : Nat -> Nat ; bad = zero"
       ]
+    -- **Datatypes in the surface** (MS4 phase 42b) — Brady's data rule: the
+    -- datatype's own type first, /"so that the type is in scope when
+    -- elaborating the constructor types"/, and being in scope is an assumption
+    -- plus a β-step.
+  , ok "a surface datatype declares"
+      [ "declare data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , ":show Nat"
+      ]
+    -- And it is a real datatype: a theorem elaborates against it.
+  , ok "and a theorem over it elaborates"
+      [ "declare data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , "declare one : Nat ; one = succ zero"
+      ]
+    -- The parameters are shared between the datatype and its constructors,
+    -- which is what the rename in @buildInductive@ is for.
+  , ok "a parameterised one"
+      [ "declare data Box (A : Type\8320) : Type\8320 where { box : A -> Box A }"
+      , ":show Box"
+      ]
+    -- An indexed family, so the parameter/index split is exercised in both
+    -- halves rather than only the empty one.
+  , ok "and an indexed family"
+      [ "declare data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , "declare data Ev : Nat -> Type\8320 where "
+          ++ "{ evZero : Ev zero "
+          ++ "; evSS : forall (n : Nat) -> Ev n -> Ev (succ (succ n)) }"
+      , ":show Ev"
+      ]
+    -- The finished record goes through the same 'Thena.Global.Declare.declare'
+    -- a written datatype does, so its checks all still apply.
+  , notOk "and the declaration checker still refuses a bad one"
+      [ "declare data Bad : Type\8320 where { wrap : Type\8320 -> Bad }" ]
   , ok "so a hole left in the scratch cannot block qed"
       ["claim spare : Type₀", ":theorem t : Type₁", "try-core ⌜ Type₀ ⌝", "solve", "qed"]
   ]

@@ -32,4 +32,24 @@ solved: ?ℓ69
 solved: ?ℓ72
 solved: ?ℓ73
 stuck: Nat and Nat -> Nat cannot be made equal
+thena spine> declare data Bool : Type₀ where { true : Bool ; false : Bool }
+solved: ?ℓ87
+solved: ?ℓ87
+solved: ?ℓ87
+thena spine> :show Bool
+data Bool : Type₀ where
+  { true : Bool
+  ; false : Bool }
+thena spine> declare data Box (A : Type₀) : Type₀ where { box : A -> Box A }
+solved: ?ℓ102
+solved: ?ℓ107
+solved: ?ℓ118
+solved: ?ℓ123
+solved: ?ℓ127
+solved: B
+solved: A1, ?ℓ128
+already equal
+thena spine> :show Box
+data Box (A : Type₀) : Type₀ where
+  { box : A -> Box A }
 thena spine> :quit

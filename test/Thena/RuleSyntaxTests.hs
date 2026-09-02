@@ -328,13 +328,19 @@ mistakes =
     , refused "a position where a name was wanted"
         "rule r :- when focus-is-hole then prim-try 3"
         [BadOperands (GlobalName "r") 0 "prim-try"]
-    , -- §3.7: a declaration is a command, never a rule-body operation. It is
-      -- refused in resolution now, one step before 'validate' would have —
-      -- which is why 'validate''s own check stays reachable only for a rule
-      -- built in Haskell.
-      refused "a declaration in a body"
-        "rule r :- when focus-is-hole then data"
-        [DeclarationInBody (GlobalName "r") 0]
+    , -- §3.7: a declaration is a command, never a rule-body operation.
+      --
+      -- **Refused one step earlier again as of MS4 phase 42b**: @data@ is a
+      -- keyword now, so a rule body carrying it does not lex into a body word
+      -- at all and the parser stops it. It used to reach resolution and come
+      -- back as @DeclarationInBody@, which is why 'validate''s own check has
+      -- been reachable only for a rule built in Haskell since before that.
+      testCase "a declaration in a body" $
+        case lexTokens "rule r :- when focus-is-hole then data" of
+          Left _  -> pure ()
+          Right ts -> case parseRule ts of
+            Left _  -> pure ()
+            Right r -> assertFailure ("parsed: " ++ show r)
     , refused "every mistake, not the first"
         "rule r :- when focus-is-purple then frobnicate; prim-solve x"
         [ NoSuchTest (GlobalName "r") "focus-is-purple"

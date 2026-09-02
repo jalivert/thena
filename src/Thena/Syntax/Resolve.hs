@@ -20,6 +20,7 @@ import Thena.Core.Term
 import Thena.Development.Component (Component (..))
 import Thena.Development.Partial (Constraint (..), Partial (..))
 import Thena.Errors (DevForm (..), ResolveError (..))
+import Thena.Global.Declare (targetIndices)
 import Thena.Global.Env
   ( ConstructorDefinition (..)
   , GlobalEnv
@@ -375,30 +376,6 @@ constructors env gs dn params want local n (RawConstructor cn ty : rest) = do
   (rest', n3)             <- constructors env gs dn params want local n2 rest
   Right (ConstructorDefinition (GlobalName cn) args ixs : rest', n3)
 
--- | Split a constructor's target into the index expressions the record keeps.
---
--- The parameters are not kept, because they are fixed for the whole definition
--- and a constructor must pass them through unchanged (§3.7, thesis §4.1.2).
--- Checking that here is what lets "Thena.Global.Declare" rebuild the target
--- from the record and get the same term back.
-targetIndices
-  :: GlobalName -> Context -> Int -> String -> Core
-  -> Either ResolveError [Core]
-targetIndices dn params want cn t = case spine t of
-  (Global g _, as)
-    | g == dn ->
-        if length as /= length params + want
-          then Left (TargetArgumentCount cn (length params + want) (length as))
-          else passed params (take (length params) as)
-                 >> Right (drop (length params) as)
-  _ -> Left (TargetIsNotTheDatatype cn)
-  where
-    passed [] _ = Right ()
-    passed (p : more) (a : as)
-      | a == Free (entryVar p) = passed more as
-      | otherwise              = Left (ParameterNotPassedThrough cn (entryIdent p))
-    passed (p : _) []          = Left (ParameterNotPassedThrough cn (entryIdent p))
-
 -- --------------------------------------------------------------------------
 -- Telescopes
 -- --------------------------------------------------------------------------
@@ -448,12 +425,6 @@ prefix env gs local n raw = case raw of
 -- Odds and ends
 -- --------------------------------------------------------------------------
 
--- | An application spine, head first.
-spine :: Core -> (Core, [Core])
-spine = go []
-  where
-    go as (App f a) = go (a : as) f
-    go as t         = (t, as)
 
 -- | The innermost entry wins, so the fold keeps the last match: a 'Context' is
 -- outermost first (§3.2).

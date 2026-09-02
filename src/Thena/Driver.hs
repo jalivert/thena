@@ -130,7 +130,15 @@ import Thena.Rules
   , ruleBase
   , validate
   )
-import Thena.Surface.Concrete (Surface, paired)
+import Thena.Surface.Concrete
+  ( Plicity (..)
+  , Surface (..)
+  , SurfaceBinder (..)
+  , SurfaceConstructor (..)
+  , SurfaceData (..)
+  , SurfaceDecl (..)
+  , PairingError (..)
+  )
 import Thena.Surface.Layout (layout)
 import qualified Thena.Surface.Parser as Surface
 import Thena.Syntax.Concrete (Raw (..), RawRule)
@@ -595,17 +603,27 @@ parseStatement env n src = do
 tokensOf :: String -> Either SyntaxError [Located Token]
 tokensOf = mapLeft LexFailed . lexTokens
 
--- | Lex and parse a run of **surface declarations** (MS4 phase 42).
+-- | Datatypes and theorems, in the order they were written (MS4 phase 42b).
 --
--- Layout runs over it exactly as it does over a term, so at the REPL the
--- separators are written out — @foo : T ; foo = e@ — and in a file (phase 43)
--- the offside rule supplies them.
-parseSurfaceDeclarations :: String -> Either SyntaxError [(String, Surface, Surface)]
-parseSurfaceDeclarations src = do
+-- **The split happens here rather than in 'paired'**, which is about theorems:
+-- a signature and its equation are adjacent and a datatype is not part of that
+-- pairing at all.
+parseSurfaceItems
+  :: String -> Either SyntaxError [Either SurfaceData (String, Surface, Surface)]
+parseSurfaceItems src = do
   ts  <- tokensOf src
   ts' <- mapLeft LayoutFailed (layout ts)
   ds  <- mapLeft SurfaceParseFailed (Surface.parseSurfaceDecls ts')
-  mapLeft DeclarationsUnpaired (paired (reverse ds))
+  regroup (reverse ds)
+  where
+    regroup [] = Right []
+    regroup (SurfaceDatatype d : rest) = (Left d :) <$> regroup rest
+    regroup (SurfaceSignature x ty : SurfaceEquation y body : rest)
+      | x == y = (Right (x, ty, body) :) <$> regroup rest
+    regroup (SurfaceSignature x _ : _) =
+      Left (DeclarationsUnpaired (SignatureWithNoEquation x))
+    regroup (SurfaceEquation x _ : _) =
+      Left (DeclarationsUnpaired (EquationWithNoSignature x))
 
 -- | Lex and parse a **surface** term (phase 39). No context, because nothing is
 -- resolved: what a name denotes is elaboration's answer, and elaboration is
@@ -1114,12 +1132,64 @@ dispatch s name arg = case name of
     --
     -- **The driver builds the program and the machine runs it**, which is what
     -- @assume@ and @claim@ already do. Nothing here elaborates.
-    declareSurface src = case parseSurfaceDeclarations src of
+    declareSurface src = case parseSurfaceItems src of
       Left e -> (s, Failed e)
-      Right ds ->
-        let (is, n1) = foldl declaring ([], names machine) ds
+      Right items ->
+        let (is, n1) = foldl item ([], names machine) items
          in progress (sessionStepping s)
                      s { sessionMachine = load is machine { names = n1 } } []
+
+    item acc (Left d)          = datatype acc d
+    item acc (Right thm)       = declaring acc thm
+
+    -- **Brady's data rule** (@IDRIS.md@ §4.6): the datatype's own type is
+    -- elaborated first /"so that the type is in scope when elaborating the
+    -- constructor types"/, then each constructor the same way.
+    --
+    -- **Being in scope is an assumption, and then a β-step.** A constructor's
+    -- type mentions the datatype, which is not declared yet, so it is
+    -- elaborated under @assume D : ‹its type›@ — and popping a development
+    -- extracts, so what comes back is @λ D : ty . ‹the type›@. Applying that to
+    -- @D@ as a global and reducing puts the real reference in. Both ops
+    -- already existed; neither needed a mode.
+    datatype (acc, n) d =
+      let nm      = surfaceDataName d
+          dn      = GlobalName nm
+          ps      = surfaceDataParameters d
+          cs      = surfaceDataConstructors d
+          (l, n1) = freshLevelMeta n
+          full    = withParams ps (surfaceDataType d)
+          tyName  = "dty" ++ show n
+          conName k = "con" ++ show n ++ "_" ++ show (k :: Int)
+          selfName  = Lit (VTerm (Trailing (Global dn [])))
+       in ( acc ++
+              [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LVar l))))))
+              , Do (Elaborate (Lit (VSurface full)))
+              , Bind (tyName ++ "raw") PopDevelopment
+              , Bind tyName (Whnf (Ref (tyName ++ "raw")))
+              ]
+              ++ concat
+                   [ [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LVar l))))))
+                     , Do (Assume (Lit (VText nm)) (Ref tyName))
+                     , Do (Elaborate (Lit (VSurface (withParams ps cty))))
+                     , Bind (conName k ++ "raw") PopDevelopment
+                     , Bind (conName k ++ "app")
+                         (ApplyTo (Ref (conName k ++ "raw")) selfName)
+                     , Bind (conName k) (Whnf (Ref (conName k ++ "app")))
+                     ]
+                   | (k, SurfaceConstructor _ cty) <- zip [0 ..] cs
+                   ]
+              ++ [ Do (MakeData dn (length ps)
+                         [ GlobalName cn | SurfaceConstructor cn _ <- cs ]
+                         (Ref tyName : [ Ref (conName k) | k <- [0 .. length cs - 1] ]))
+                 ]
+          , n1 )
+
+    -- A constructor's type is written in the scope of the parameters, so they
+    -- are put back in front of it and peeled off again by
+    -- 'Thena.Global.Declare.buildInductive'.
+    withParams ps t =
+      foldr (\(x, ty) rest -> SurfacePi (SurfaceBinder Explicit x (Just ty) NE.:| []) rest) t ps
 
     declaring (acc, n) (x, ty, body) =
       let (l, n1) = freshLevelMeta n

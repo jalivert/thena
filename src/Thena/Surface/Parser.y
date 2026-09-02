@@ -28,6 +28,8 @@ import Thena.Surface.Concrete
   ( Plicity (..)
   , Surface (..)
   , SurfaceDecl (..)
+  , SurfaceData (..)
+  , SurfaceConstructor (..)
   , SurfaceArg (..)
   , SurfaceBinder (..)
   )
@@ -55,6 +57,8 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   let     { Located _ TLet }
   in      { Located _ TIn }
   elim    { Located _ TElim }
+  where   { Located _ TWhere }
+  data    { Located _ TData }
   univ    { Located _ (TUniverse $$) }
   Type    { Located _ TUniverseOpen }
   ident   { Located _ (TIdent $$) }
@@ -81,6 +85,31 @@ Decls :: { [SurfaceDecl] }
 Decl :: { SurfaceDecl }
   : ident ':' Term                         { SurfaceSignature $1 $3 }
   | ident '=' Term                         { SurfaceEquation $1 $3 }
+  | Datatype                               { SurfaceDatatype $1 }
+
+-- | **The same shape "Thena.Syntax.Parser"'s @Data@ has**, because §3.7's split
+-- between parameters and indices is syntactic in both: the parameters are the
+-- binder groups left of the @:@, the indices the arrow prefix of what is right
+-- of it.
+Datatype :: { SurfaceData }
+  : data ident DataParams ':' Term where '{' Constructors '}'
+      { SurfaceData $2 (reverse $3) $5 (reverse $8) }
+
+DataParams :: { [(String, Surface)] }
+  :                                        { [] }
+  | DataParams '(' ident ':' Term ')'      { ($3, $5) : $1 }
+
+-- A datatype with no constructors is legal and useful: @Empty@ (§3.7).
+Constructors :: { [SurfaceConstructor] }
+  :                                        { [] }
+  | SomeConstructors                       { $1 }
+
+SomeConstructors :: { [SurfaceConstructor] }
+  : Constructor                            { [$1] }
+  | SomeConstructors ';' Constructor       { $3 : $1 }
+
+Constructor :: { SurfaceConstructor }
+  : ident ':' Term                         { SurfaceConstructor $1 $3 }
 
 -- | A whole surface term.
 --

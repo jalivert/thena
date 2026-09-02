@@ -28,7 +28,8 @@
 -- way down rather than being imported, because "Thena.Syntax.Resolve" /is/
 -- above @Core@; it mentions nothing this module did not already have.
 module Thena.Errors
-  ( FailReason (..)
+  ( DataBuildError (..)
+  , FailReason (..)
   , MoveError (..)
 
     -- * Conversion (§5.2)
@@ -67,6 +68,21 @@ import Thena.Syntax.Parser (ParseError)
 -- adds unification's — @Mismatch Core Core@, @OccursCheck@, @ScopeViolation@,
 -- @UniverseMismatch@ (§6.2) — and that is when this module first imports
 -- "Thena.Core.Term".
+-- | Why an elaborated declaration is not one.
+--
+-- Small on purpose: everything a /user/ can get wrong about a datatype is
+-- 'DeclareError'\'s, checked by 'declare' on the finished record. These three
+-- are about the record not being buildable at all, which the surface form's
+-- own shape should already have ruled out.
+data DataBuildError
+  = DeclaredTypeIsNotAUniverse GlobalName
+    -- ^ the type ends in something that is not a sort
+  | ConstructorTargetWrong GlobalName
+    -- ^ its target is not this datatype applied to its parameters
+  | TooFewBinders
+    -- ^ fewer Π binders than the surface form said there were parameters
+  deriving (Eq, Show)
+
 data FailReason
   = UnboundInBody String
     -- ^ a @Ref@ named nothing in the body's environment
@@ -111,6 +127,10 @@ data FailReason
     -- @WrongNumberOfElimination…@ resolve errors, because those are about what
     -- a /user wrote/ in one field group and this is about the total a rule
     -- body handed an op.
+  | CannotBuildDatatype DataBuildError
+    -- ^ the elaborated types do not make a datatype record (MS4 phase 42b).
+    -- Everything a /user/ can get wrong is checked by @declare@ on the
+    -- finished record; this is about it not being buildable at all.
   | NoEnclosingDevelopment
     -- ^ @pop-development@ at the outermost one (MS4 phase 42). There is
     -- nothing to pop back to, and a machine with no development at all is not

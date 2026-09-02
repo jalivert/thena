@@ -268,6 +268,13 @@ tests =
         , "declare stray = zero"
           -- The body must have the type the signature declares.
         , "declare bad : Nat -> Nat ; bad = zero"
+          -- **A datatype in the surface** (MS4 phase 42b). It goes through the
+          -- same @declare@ a written one does, so @:show@ prints it the same
+          -- way — which is the check that the record was assembled right.
+        , "declare data Bool : Type\8320 where { true : Bool ; false : Bool }"
+        , ":show Bool"
+        , "declare data Box (A : Type\8320) : Type\8320 where { box : A -> Box A }"
+        , ":show Box"
           -- @push-development@ and @pop-development@ are **ops, not commands**,
           -- so they are exercised from "Thena.ReadTests" rather than here — a
           -- bare word at the REPL is a command or a rule call, and they are

@@ -109,7 +109,8 @@ import Thena.Engine
   , focusContext
   )
 import Thena.Errors
-  ( Clash (..)
+  ( DataBuildError (..)
+  , Clash (..)
   , ConversionFailure (..)
   , DevForm (..)
   , ElimError (..)
@@ -436,6 +437,8 @@ renderSyntaxError :: SyntaxError -> String
 renderSyntaxError e = case e of
   DeclarationsUnpaired (SignatureWithNoEquation x) ->
     x ++ " has a type but no definition — write " ++ x ++ " = ‹term› after it"
+  DeclarationsUnpaired DatatypeInATheoremList ->
+    "a datatype cannot be declared here"
   DeclarationsUnpaired (EquationWithNoSignature x) ->
     x ++ " has a definition but no type — write " ++ x ++ " : ‹type› before it"
   LexFailed (LexError p c) ->
@@ -505,6 +508,7 @@ describe t = case t of
   TIn         -> "in"
   TElim       -> "elim"
   TWhere      -> "where"
+  TData       -> "data"
   TRule       -> "rule"
   TWhen       -> "when"
   TThen       -> "then"
@@ -1104,6 +1108,13 @@ renderFailReason r = case r of
   NotReadyToIntroduce -> "intro wants a hole of the form ? x ≐ (? x' : S . x') — attack it first"
   NothingToIntroduce  -> "that hole's type is neither a ∀ nor a let"
   GoalIsNotAUniverse  -> "quantify builds a type, so that hole must be claimed at a universe"
+  CannotBuildDatatype why -> case why of
+    DeclaredTypeIsNotAUniverse d ->
+      nameString d ++ "'s type must end in a universe"
+    ConstructorTargetWrong c ->
+      nameString c ++ "'s target is not the datatype applied to its parameters"
+    TooFewBinders ->
+      "the datatype's type has fewer binders than it has parameters"
   NoEnclosingDevelopment ->
     "pop-development needs a development to go back to; this is the outermost one"
   WrongNumberOfEliminationFields d want got ->

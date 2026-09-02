@@ -19,11 +19,13 @@
 module Thena.Global.Declare
   ( DeclareError (..)
   , declare
+  , buildInductive
+  , targetIndices
   ) where
 
 import Control.Monad (foldM)
 
-import Thena.Core.Context (Context, Entry (..), entryType, entryVar, lamOver)
+import Thena.Core.Context (Context, Entry (..), entryIdent, entryType, entryVar, lamOver)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Level
   ( Level (..)
@@ -35,12 +37,14 @@ import Thena.Core.Level
   , solveLevels
   )
 import Thena.Core.Typing (infer)
-import Thena.Errors (TypeError (..))
+import Thena.Errors (DataBuildError (..), ResolveError (..), TypeError (..))
 import Thena.Core.Term
   ( Core (..)
   , GlobalName
   , Ident
+  , close
   , fresh
+  , instantiate
   , globalsIn
   , open
   , referencesAt
@@ -450,3 +454,117 @@ spine = go []
   where
     go as (App f a) = go (a : as) f
     go as t         = (t, as)
+
+-- --------------------------------------------------------------------------
+-- Building a declaration out of elaborated types (MS4 phase 42b)
+-- --------------------------------------------------------------------------
+
+-- | Assemble an 'InductiveDefinition' from types that have already been
+-- elaborated.
+--
+-- **"Thena.Syntax.Resolve"'s @resolveData@ does this from 'Raw', and it does it
+-- syntactically**: the parameters are what was written before the @:@, the
+-- indices what was written after, and a constructor's arguments are the Π
+-- binders written before its target. Elaboration cannot work that way — what it
+-- produces is a 'Core' — so the same split is made here by /peeling/, and the
+-- counts come from the surface form the driver read.
+--
+-- **The parameters must be the same variables everywhere.** A constructor's
+-- type is written in the scope of the parameters, so the driver prepends them
+-- and each constructor is elaborated as @∀ params -> ‹written›@ — which mints
+-- the parameters again, per constructor. Peeling gives one set per constructor
+-- and they are renamed onto the datatype's, which is what
+-- 'Thena.Global.Env.ConstructorDefinition'\\'s /"a telescope over the
+-- datatype's parameters"/ requires.
+buildInductive
+  :: GlobalEnv -> GlobalName -> Int -> [(GlobalName, Core)] -> Core -> Int
+  -> Either DataBuildError (InductiveDefinition, Int)
+buildInductive env dn nps cs ty n0 = do
+  (params, afterParams, n1) <- peelExactly env [] nps ty n0
+  (indices, rest, n2)       <- peelToUniverse env params afterParams n1
+  level                     <- universeOf rest
+  (cs', n3)                 <- constructorsOf params (length indices) n2 cs
+  Right (InductiveDefinition dn [] params indices level cs', n3)
+  where
+    universeOf t = case whnf env [] t of
+      Universe l -> Right l
+      _          -> Left (DeclaredTypeIsNotAUniverse dn)
+
+    constructorsOf _ _ n [] = Right ([], n)
+    constructorsOf params want n ((cn, cty) : more) = do
+      -- Peel the parameters this constructor's own type re-bound, and rename
+      -- them onto the datatype's.
+      (own, body, n1) <- peelExactly env [] nps cty n
+      let renamed = foldr rename body (zip own params)
+      (args, target, n2) <- peelAll env params renamed n1
+      ixs <- case targetIndices dn params want (show cn) target of
+               Left _   -> Left (ConstructorTargetWrong cn)
+               Right is -> Right is
+      (rest', n3) <- constructorsOf params want n2 more
+      Right (ConstructorDefinition cn args ixs : rest', n3)
+
+    -- @close@ then @instantiate@ — the two primitives a rename is, and the
+    -- same pair "Thena.Core.Unify" spells @substFree@ with.
+    rename (mine, theirs) t =
+      instantiate (Free (entryVar theirs)) (close (entryVar mine) t)
+
+-- | Peel exactly @k@ Π binders, reducing to expose each one.
+peelExactly
+  :: GlobalEnv -> Context -> Int -> Core -> Int
+  -> Either DataBuildError (Context, Core, Int)
+peelExactly env ctx k t n
+  | k <= 0    = Right ([], t, n)
+  | otherwise = case whnf env ctx t of
+      Pi i dom sc ->
+        let (v, n1) = fresh n
+            e       = Hypothesis v i dom
+         in (\(es, rest, n2) -> (e : es, rest, n2))
+              <$> peelExactly env (ctx ++ [e]) (k - 1) (instantiate (Free v) sc) n1
+      _ -> Left TooFewBinders
+
+-- | Peel Π binders until what is left is a universe.
+peelToUniverse
+  :: GlobalEnv -> Context -> Core -> Int
+  -> Either DataBuildError (Context, Core, Int)
+peelToUniverse env ctx t n = case whnf env ctx t of
+  Pi i dom sc ->
+    let (v, n1) = fresh n
+        e       = Hypothesis v i dom
+     in (\(es, rest, n2) -> (e : es, rest, n2))
+          <$> peelToUniverse env (ctx ++ [e]) (instantiate (Free v) sc) n1
+  other -> Right ([], other, n)
+
+-- | Peel every Π binder there is; what is left is the constructor's target.
+peelAll
+  :: GlobalEnv -> Context -> Core -> Int
+  -> Either DataBuildError (Context, Core, Int)
+peelAll = peelToUniverse
+
+-- **Moved here from "Thena.Syntax.Resolve" at MS4 phase 42b**, because a
+-- surface declaration needs the same check and this module is the one that is
+-- about what a declaration must be. It works on 'Core', so both callers reach
+-- it: that one has resolved the target, this one has elaborated it.
+-- | Split a constructor's target into the index expressions the record keeps.
+--
+-- The parameters are not kept, because they are fixed for the whole definition
+-- and a constructor must pass them through unchanged (§3.7, thesis §4.1.2).
+-- Checking that here is what lets "Thena.Global.Declare" rebuild the target
+-- from the record and get the same term back.
+targetIndices
+  :: GlobalName -> Context -> Int -> String -> Core
+  -> Either ResolveError [Core]
+targetIndices dn params want cn t = case spine t of
+  (Global g _, as)
+    | g == dn ->
+        if length as /= length params + want
+          then Left (TargetArgumentCount cn (length params + want) (length as))
+          else passed params (take (length params) as)
+                 >> Right (drop (length params) as)
+  _ -> Left (TargetIsNotTheDatatype cn)
+  where
+    passed [] _ = Right ()
+    passed (p : more) (a : as)
+      | a == Free (entryVar p) = passed more as
+      | otherwise              = Left (ParameterNotPassedThrough cn (entryIdent p))
+    passed (p : _) []          = Left (ParameterNotPassedThrough cn (entryIdent p))
+
