@@ -42,6 +42,8 @@ attack
 try-core ‹t›
 abandon
 eliminate-core ‹t›
+prove
+elaborate ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
 thena spine> eliminate-core ⌜ Type₀ ⌝

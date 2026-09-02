@@ -129,7 +129,6 @@ import Thena.Surface.Concrete
   , SurfaceArg (..)
   , SurfaceBinder (..)
   )
-import Thena.Syntax.Concrete (Raw (..), RawBinder (..))
 import Thena.Global.Env
   ( ConstructorDefinition (..)
   , InductiveDefinition (..)
@@ -999,9 +998,6 @@ renderOp n ctx op = case op of
   Ops.DefineData d -> word ++ " " ++ nameString (inductiveName d)
   Ops.CrossType   -> word ++ " type"
   Ops.CrossValue  -> word ++ " val"
-  -- A hint is optional, and reads as a phrase rather than an argument.
-  Ops.Prove Nothing  -> word
-  Ops.Prove (Just h) -> word ++ " with " ++ operand h
   -- Written the way a rule file writes it (phase 23): the name, then the
   -- arguments as any other op\'s, spaced and unwrapped.
   Ops.Call nm as  -> unwords (word : nameString nm : map operand as)
@@ -1023,7 +1019,7 @@ renderValue n ctx v = case v of
   -- A hint, printed as it was written. It is not resolved and may never
   -- resolve — that is @resolve@'s answer, given in a rule body — so this is a
   -- printer for 'Raw' and not a detour through 'Core'.
-  VSurface raw       -> "‹" ++ renderRaw raw ++ "›"
+  VSurface t         -> "‹" ++ renderSurface t ++ "›"
   -- A rule in an operand is a rule being passed to another rule, so its name
   -- is what identifies it; its body belongs to @:show@ on the rule, not here.
   VPair a b          -> "(" ++ renderValue n ctx a ++ ", " ++ renderValue n ctx b ++ ")"
@@ -1052,8 +1048,6 @@ renderCommandError e = case e of
   NothingToRetry       -> "no choice point to retry"
   NoSuchChoice n       -> "no choice point " ++ show n
   LevelExpected u      -> u ++ " is not a universe, as in \"Type\8320\""
-  CoreExpected a       ->
-    "a core term must be written in corners: \8988 " ++ a ++ " \8989"
   NotThere m           -> renderMoveError m
   MixedLoad w          -> w ++ " takes either one script or any number of " ++ ruleSuffix ++ " files"
   ProofUnderway g      ->
@@ -1064,6 +1058,10 @@ renderCommandError e = case e of
 
 renderFailReason :: FailReason -> String
 renderFailReason r = case r of
+  -- MS4 phase 41: the elaborator met a node it has no case for. Phase 41b's
+  -- list, said to the user rather than swallowed.
+  NoElaborationRule what ->
+    "elaboration has no rule for " ++ what ++ " yet"
   Mismatch ctx a b ->
     renderCore 0 ctx a ++ " and " ++ renderCore 0 ctx b ++ " cannot be made equal"
   OccursCheck ctx x t ->
@@ -1181,40 +1179,6 @@ renderSurface = surf Loose
 data SurfacePrec = Loose | Spine | Tight
   deriving (Eq, Ord)
 
-renderRaw :: Raw -> String
-renderRaw = raw False
-  where
-    raw _ (RawName x)       = x
-    raw _ (RawUniverse l)   = "Type" ++ subscript l
-    raw _ RawUniverseOpen   = "Type"
-    raw _ (RawAt x ls)      = x ++ " {" ++ unwords (map show ls) ++ "}"
-    raw p (RawApp f a)      = wrap p (raw False f ++ " " ++ raw True a)
-    raw p (RawArrow a b)    = wrap p (raw True a ++ " -> " ++ raw False b)
-    raw p (RawLam bs b)     = wrap p ("λ" ++ concatMap binder bs ++ " -> " ++ raw False b)
-    raw p (RawPi bs b)      = wrap p ("∀" ++ concatMap binder bs ++ " -> " ++ raw False b)
-    raw p (RawLet x v ty b) =
-      wrap p ("let " ++ x ++ " = " ++ raw False v ++ " : " ++ raw False ty
-                ++ " in " ++ raw False b)
-    raw p (RawClaim x ty b) =
-      wrap p ("let ? " ++ x ++ " : " ++ raw False ty ++ " in " ++ raw False b)
-    raw p (RawGuess x ty g b) =
-      wrap p ("let ? " ++ x ++ " : " ++ raw False ty ++ " ≐ (" ++ raw False g ++ ")"
-                ++ " in " ++ raw False b)
-    raw p (RawPending _ b)  = wrap p ("κ ▸ " ++ raw False b)
-    raw _ (RawQuote t)      = "⌜" ++ raw False t ++ "⌝"
-    raw p (RawElim d rls ps mot ms is tgt) =
-      wrap p ("elim " ++ d ++ levelGroup rls ++ group ps ++ " " ++ raw True mot
-                ++ " " ++ group ms ++ " " ++ group is ++ " " ++ raw True tgt)
-
-    binder (RawBinder x ty) = " (" ++ x ++ " : " ++ raw False ty ++ ")"
-    group ts = "(" ++ intercalate ", " (map (raw False) ts) ++ ")"
-    levelGroup [] = ""
-    levelGroup ls = " {" ++ unwords (map show ls) ++ "}"
-
-    wrap True t  = "(" ++ t ++ ")"
-    wrap False t = t
-
--- | A level obligation, in the notation @Unmet@'s messages use.
 obligation :: Obligation -> String
 obligation (AtMost l k) = renderLevelAtom l ++ " ≤ " ++ renderLevelAtom k
 

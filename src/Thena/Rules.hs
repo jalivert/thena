@@ -50,16 +50,13 @@ import Thena.Ops
   , Rule (..)
   , Test (..)
   , Value (..)
-  , hintName
   , operandsOf
   , partOf
   , partWords
   , produces
-  , usesHint
   )
 import Thena.Syntax.Concrete
-  ( Raw (..)
-  , RawInstr (..)
+  ( RawInstr (..)
   , RawOp (..)
   , RawOperand (..)
   , RawRule (..)
@@ -144,20 +141,14 @@ newtype RuleIter = RuleIter [Rule]
 -- speculatively executed to see whether it would succeed — that is a real
 -- feature, a far more expensive one, and it is not MS1 (§2.2, §7.6).
 --
--- **A hint partitions the base** — 'Thena.Ops.usesHint', decided by the user
--- 2026-08-23, and the argument is there. It is applied /here/ and not only in
--- 'dispatch' so that the two cannot disagree: @:matches@ would otherwise offer
--- @attack@ under a hint that the engine, dispatching, would never run it for.
--- The consequence at the REPL is that @:matches@ with no argument lists exactly
--- what it listed before this phase, and @:matches ‹hint›@ is a separate
--- question with a separate answer.
-matches :: [RuleBase] -> GlobalEnv -> Cursor -> Maybe Raw -> RuleIter
-matches bases env cur hint =
-  RuleIter [ r | r <- allRules bases, usesHint r == isHinted, all (holds env cur hint) (ruleHead r) ]
-  where
-    isHinted = case hint of
-      Just _  -> True
-      Nothing -> False
+-- **The base is no longer partitioned** (MS4 phase 41). A hint used to split it
+-- in two — rules whose head asked about one, and the rest — and both halves are
+-- gone with the hint: elaboration is a rule called by name, so nothing about it
+-- is a dispatch. Every rule whose head passes is a candidate, which is what §7.6
+-- said in the first place.
+matches :: [RuleBase] -> GlobalEnv -> Cursor -> RuleIter
+matches bases env cur =
+  RuleIter [ r | r <- allRules bases, all (holds env cur) (ruleHead r) ]
 
 -- | The rules @Prove@ may actually run: 'matches', less the ones it could not
 -- supply arguments for.
@@ -172,9 +163,9 @@ matches bases env cur hint =
 -- questions: this one is /what the engine can run/, and 'matches' is /what
 -- could be done here/, which includes @try ‹t›@ because the user can type
 -- @try x@. @:matches@ keeps showing it.
-dispatch :: [RuleBase] -> GlobalEnv -> Cursor -> Maybe Raw -> RuleIter
-dispatch base env cur hint =
-  let RuleIter rs = matches base env cur hint
+dispatch :: [RuleBase] -> GlobalEnv -> Cursor -> RuleIter
+dispatch base env cur =
+  let RuleIter rs = matches base env cur
    in RuleIter [ r | r <- rs, null (ruleParams r) ]
 
 -- | The clauses @Call@ may run: **this name, this arity, and a head that
@@ -186,9 +177,6 @@ dispatch base env cur hint =
 -- a filter, so a name may carry a one-argument clause and a two-argument one
 -- and each call picks its own.
 --
--- **No hint**, so a rule whose head asks about one is never a call candidate.
--- 'matches' partitions on exactly this, and passing 'Nothing' here means a call
--- and a hintless dispatch agree about which half of the base they see.
 clauses :: [RuleBase] -> GlobalEnv -> Cursor -> GlobalName -> Int -> RuleIter
 clauses bases env cur nm n =
   RuleIter
@@ -196,8 +184,7 @@ clauses bases env cur nm n =
     | r <- allRules bases
     , ruleName r == nm
     , length (ruleParams r) == n
-    , not (usesHint r)
-    , all (holds env cur Nothing) (ruleHead r)
+    , all (holds env cur) (ruleHead r)
     ]
 
 -- | The arities of every rule bearing this name, in search order.
@@ -230,8 +217,8 @@ hasNext (RuleIter rs) = not (null rs)
 -- matches, runs and fails in its body, and failing in a body is already handled
 -- (§7.3). Asking about the hole at the bottom of the guess instead would make
 -- the head a traversal, which is what \"shallow\" rules out.
-holds :: GlobalEnv -> Cursor -> Maybe Raw -> Test -> Bool
-holds env cur hint t = case t of
+holds :: GlobalEnv -> Cursor -> Test -> Bool
+holds env cur t = case t of
   FocusIsHole   -> case focus cur of
     OnComponent (Component.Claim {}) -> True
     _                                -> False
@@ -249,13 +236,6 @@ holds env cur hint t = case t of
   GoalTypeIsLet -> case written of
     Just (Let {}) -> True
     _             -> False
-  -- The hint is the tree as parsed, not as resolved: whether the name is in
-  -- scope is @resolve@'s answer and it is given in the body, where failing is
-  -- ordinary (§7.3). A head that resolved would be doing the work twice and
-  -- would be a head that is not shallow (§8).
-  HintIsName    -> case hint of
-    Just (RawName _) -> True
-    _                -> False
   where
     -- Written down, then reduced: §8's "head matching runs whnf", because a
     -- goal typed @id Type₀ (Nat -> Nat)@ is a Π and must match.
@@ -335,16 +315,13 @@ validate r = go 0 (initiallyBound r) (ruleBody r)
     scope i bound o =
       [ UnboundInRule nm i n | Ref n <- operandsOf o, n `notElem` bound ]
 
--- | The names a body may read before it binds anything of its own: its
--- parameters, and — when its head asks about the hint — 'Thena.Ops.hintName',
--- which @Prove@ seeds the environment with (§8, phase 17b).
+-- | The names a body may read before it binds anything of its own: **its
+-- parameters, and nothing else** (MS4 phase 41).
 --
--- Without this line @elab-var@ fails its own load-time check, because @hint@ is
--- a 'Ref' that no @Bind@ introduces.
+-- It used to add @hint@ when a rule's head asked about one, which was the only
+-- name a body could read that no @Bind@ introduced. Nothing is magic now.
 initiallyBound :: Rule -> [Name]
-initiallyBound r
-  | usesHint r = hintName : ruleParams r
-  | otherwise  = ruleParams r
+initiallyBound = ruleParams
 
 -- | Every rule in one base, checked.
 --
@@ -421,9 +398,6 @@ operation g i (RawOp w as)
       ("call", RawRef r : rest)   -> Call (GlobalName r) <$> traverse ref rest
       ("call", _)                 -> bad
 
-      ("prove", [])               -> Right (Prove Nothing)
-      ("prove", [a])              -> Prove . Just <$> ref a
-      ("prove", _)                -> bad
 
       ("ask", [a, RawRef k])      -> case answerKind k of
         Just ak -> flip Ask ak <$> ref a
@@ -479,9 +453,10 @@ operation g i (RawOp w as)
       [ ("along", Along), ("into", Into), ("back", Back), ("reduce", Reduce)
       , ("prim-attack", Attack), ("prim-intro", Intro), ("prim-regret", Regret)
       , ("prim-solve", Solve), ("prim-abandon", Abandon), ("goal", Goal)
+      , ("prim-prove", Prove)
       ]
     unary =
-      [ ("say", Say), ("prim-try", Try), ("parse", Parse), ("resolve", Op.Resolve)
+      [ ("say", Say), ("prim-try", Try), ("prim-elaborate", Op.Elaborate)
       , ("goto", Goto)
       , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
       , ("typeof", Typing), ("fresh-name", FreshName), ("prim-apply", Op.Apply)
@@ -519,10 +494,9 @@ testWord t = case t of
   FocusIsGuess  -> "focus-is-guess"
   GoalTypeIsPi  -> "goal-type-is-pi"
   GoalTypeIsLet -> "goal-type-is-let"
-  HintIsName    -> "hint-is-name"
 
 -- | Every test there is. A list and not a case split, so it cannot be total —
 -- 'testWord' is what @-Wall@ guards, and "Thena.RuleSyntaxTests" checks this
 -- list against it.
 everyTest :: [Test]
-everyTest = [FocusIsHole, FocusIsGuess, GoalTypeIsPi, GoalTypeIsLet, HintIsName]
+everyTest = [FocusIsHole, FocusIsGuess, GoalTypeIsPi, GoalTypeIsLet]

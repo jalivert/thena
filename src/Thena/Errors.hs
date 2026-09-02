@@ -157,6 +157,14 @@ data FailReason
     -- given (§3.7, phase 17)
 
     -- Elaboration and @Call@ (§7.2, §8), added at phase 17b.
+  | NoElaborationRule String
+    -- ^ @prim-elaborate@ met a surface node it has no case for (MS4 phase 41),
+    -- carrying what the node was.
+    --
+    -- **A failure and not a silence, deliberately.** Phase 41 compiles the
+    -- leaves; the nodes that raise this are phase 41b's list, and each of them
+    -- needs something the op vocabulary does not yet have. An elaborator that
+    -- quietly did nothing here would leave a hole that looked elaborated.
   | CannotRead SyntaxError
     -- ^ @parse@ could not lex or parse its text, or @resolve@ could not resolve
     -- the tree it was given in the context at the focus. One case for both,

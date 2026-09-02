@@ -134,13 +134,12 @@ import Thena.Surface.Concrete (Surface)
 import Thena.Surface.Layout (layout)
 import qualified Thena.Surface.Parser as Surface
 import Thena.Syntax.Concrete (Raw (..), RawRule)
-import Thena.Syntax.Lexer (Located, Token, lexTokens)
+import Thena.Syntax.Lexer (Located (..), Token (..), lexTokens)
 import Thena.Syntax.Parser
   ( parseData
   , parseEquation
   , parseNameAndType
   , parseRules
-  , parseAtoms
   , parseTerm
   )
 import Thena.Syntax.Resolve (resolve, resolveData, resolvePartial)
@@ -422,16 +421,6 @@ data CommandError
   | ProofsSuspended [GlobalName]
     -- ^ … or while one is suspended, which is the same hazard postponed: a
     -- suspended proof is resumed and continued, so its replay would change
-  | CoreExpected String
-    -- ^ @try-core x@ — a rule was called from the REPL with an argument that is
-    -- not in corners (phase 38).
-    --
-    -- **The two vocabularies have to be visible at the call site.** From this
-    -- phase the rule base holds core-taking tactics under @-core@ names and
-    -- will hold surface-taking ones under the good names; a bare argument is
-    -- reserved for the surface term it will be from phase 39 on, so accepting
-    -- it as a core term now would mean its meaning changing silently later.
-    -- Carries the argument as written.
   | LevelExpected String
     -- ^ @:elim Nat Nat@ — @:elim@\'s optional second argument parsed as a term
     -- but is not a @Typeₗ@ (phase 10). Not called @NotAUniverse@ because
@@ -477,38 +466,81 @@ parseDevelopment = parseWith resolvePartial
 -- differently: a malformed argument is the user's typo and reports as
 -- 'Failed', while an argument that is merely not in corners is a 'Rejected'
 -- with its own sentence (phase 38).
-data ArgumentError
-  = Syntax SyntaxError
-  | NotInCorners
+newtype ArgumentError = Syntax SyntaxError
 
--- | The arguments of a bare-word rule call: **each one written in corners**.
+-- | The arguments of a bare-word rule call — **each one a surface term, or a
+-- core term in corners** (MS4 phase 41).
 --
--- **Phase 38, and it is what makes the two vocabularies visible.** Every atom
--- must be @⌜ t ⌝@ — the corners already meant /this is a term, not a chain/ in
--- the development syntax (§2.7), and here they mean /this is a core term, not
--- a surface one/. The bare form is refused rather than accepted, because from
--- phase 39 a bare argument is a **surface** term: accepting it as core now
--- would mean the same line silently changing meaning later.
+-- **This is where phase 38's error message comes true.** That phase refused a
+-- bare argument and said the corners were for a core term, reserving the bare
+-- spelling for the surface one; here the bare spelling starts meaning it. So
+-- @try-core ⌜ x ⌝@ hands a rule a 'Thena.Ops.VTerm' and @elaborate x@ hands it
+-- a 'Thena.Ops.VSurface', and which one a rule wanted is settled where every
+-- other operand kind is — at run time, by the op (§7.2, and MS2 closeout 4b's
+-- type system when it arrives).
 --
--- The corners come off here and nothing below sees them:
--- 'Thena.Syntax.Resolve' treats @RawQuote@ transparently in a term position
--- anyway, so unwrapping is about /requiring/ them, not about reading them.
+-- The run is split by bracket depth first, because the two spellings need two
+-- different grammars and one token stream cannot be handed to both.
 parseArguments
-  :: GlobalEnv -> Context -> Int -> String -> Either ArgumentError ([Core], Int)
+  :: GlobalEnv -> Context -> Int -> String -> Either ArgumentError ([Value], Int)
 parseArguments env ctx n src = do
-  ts   <- mapLeft Syntax (tokensOf src)
-  raws <- mapLeft (Syntax . ParseFailed) (parseAtoms ts)
-  go n raws
+  ts <- mapLeft Syntax (tokensOf src)
+  go n (groups ts)
   where
     go k []       = Right ([], k)
-    go k (r : rs) = do
-      inner    <- unquote r
-      (t, k1)  <- mapLeft (Syntax . ResolveFailed) (resolve env ctx k inner)
-      (ts', k2) <- go k1 rs
-      Right (t : ts', k2)
+    go k (g : gs) = do
+      (v, k1)  <- one k g
+      (vs, k2) <- go k1 gs
+      Right (v : vs, k2)
 
-    unquote (RawQuote t) = Right t
-    unquote _            = Left NotInCorners
+    -- In corners: a development-calculus term, resolved here as it always was.
+    one k (Cornered inner) = do
+      raw     <- mapLeft (Syntax . ParseFailed) (parseTerm inner)
+      (t, k1) <- mapLeft (Syntax . ResolveFailed) (resolve env ctx k raw)
+      Right (VTerm (Trailing t), k1)
+    -- Bare: a surface term. Laid out, because a surface term always is.
+    one k (Bare g) = do
+      g' <- mapLeft (Syntax . LayoutFailed) (layout g)
+      t  <- mapLeft (Syntax . SurfaceParseFailed) (Surface.parseSurface g')
+      Right (VSurface t, k)
+
+-- | One written argument, before it is parsed.
+data Group
+  = Cornered [Located Token]  -- ^ @⌜ … ⌝@, corners stripped
+  | Bare     [Located Token]
+
+-- | Split an argument run into its arguments, by bracket depth.
+--
+-- **Why the driver splits and neither grammar does**: the two spellings need
+-- two different grammars, and one token stream cannot be handed to both. An
+-- argument is an atom (phase 23b), so its extent is a single token or a
+-- balanced group — which is decidable here without either parser.
+groups :: [Located Token] -> [Group]
+groups [] = []
+groups (t@(Located _ k) : ts) = case k of
+  TOpenQuote -> let (inner, rest) = corners 1 [] ts in Cornered inner : groups rest
+  TLParen    -> let (inner, rest) = bracketed 1 [t] ts in Bare inner : groups rest
+  TLBrace    -> let (inner, rest) = bracketed 1 [t] ts in Bare inner : groups rest
+  -- @?foo@ is two tokens and one argument (phase 39).
+  TQuery     -> case ts of
+    u : us -> Bare [t, u] : groups us
+    []     -> [Bare [t]]
+  _          -> Bare [t] : groups ts
+  where
+    corners _ acc [] = (reverse acc, [])
+    corners d acc (u@(Located _ w) : us) = case w of
+      TCloseQuote | d == (1 :: Int) -> (reverse acc, us)
+                  | otherwise       -> corners (d - 1) (u : acc) us
+      TOpenQuote                    -> corners (d + 1) (u : acc) us
+      _                             -> corners d (u : acc) us
+
+    bracketed _ acc [] = (reverse acc, [])
+    bracketed d acc (u@(Located _ w) : us)
+      | w == TLParen || w == TLBrace = bracketed (d + 1) (u : acc) us
+      | w == TRParen || w == TRBrace =
+          if d == (1 :: Int) then (reverse (u : acc), us)
+                             else bracketed (d - 1) (u : acc) us
+      | otherwise                    = bracketed d (u : acc) us
 
 parseWith
   :: (GlobalEnv -> Context -> Int -> Raw -> Either ResolveError (a, Int))
@@ -562,19 +594,6 @@ parseStatement env n src = do
 
 tokensOf :: String -> Either SyntaxError [Located Token]
 tokensOf = mapLeft LexFailed . lexTokens
-
--- | Lex and parse a **development-calculus** term, and stop there (phase 17b).
--- What @:matches ‹t›@ needs: the argument is a tree, not a term — resolving it
--- is the rule body's job, and one that does not resolve is still something the
--- engine can be asked about.
---
--- **It was called @parseSurface@ until phase 39**, which is the nomenclature
--- mistake @CLAUDE.md@ has had to correct three times: @Raw@ is a concrete
--- syntax for the /development/ language and has nothing to do with the surface
--- one. 'Thena.Surface.Parser.parseSurface' is the surface parser, and the two
--- must not be confusable by name.
-parseRawTerm :: String -> Either SyntaxError Raw
-parseRawTerm src = tokensOf src >>= mapLeft ParseFailed . parseTerm
 
 -- | Lex and parse a **surface** term (phase 39). No context, because nothing is
 -- resolved: what a name denotes is elaboration's answer, and elaboration is
@@ -637,11 +656,10 @@ dispatch s name arg = case name of
   -- is. A hint partitions the base, so the two forms answer two questions:
   -- @:matches@ is what could be done here, @:matches ‹hint›@ is what could
   -- elaborate that.
-  ":matches" -> case arg of
-    "" -> (s, Matched (matching Nothing))
-    _  -> case parseRawTerm arg of
-      Left e    -> (s, Failed e)
-      Right raw -> (s, Matched (matching (Just raw)))
+  -- **No argument** (MS4 phase 41). @:matches ‹hint›@ asked which rules could
+  -- elaborate a given term, and with the hint retired that is not a question:
+  -- @elaborate ‹t›@ appears in this listing the way @try-core ‹t›@ does.
+  ":matches" -> noArgument (s, Matched matching)
   -- The live choice points, nearest first (§7.7). A look, so a colon.
   ":choices" -> noArgument (s, Choices (choicePoints machine))
   ":goal"  -> goal
@@ -752,11 +770,6 @@ dispatch s name arg = case name of
   -- @h = parse "‹text›"; prove with h@, so a syntax error in a hint fails the
   -- way an op fails and is visible in stepping mode. The driver still parses
   -- for @try@ and @eliminate@, which want a resolved 'Core' and not a tree.
-  "prove"  -> case arg of
-    "" -> run [Do (Prove Nothing)]
-    _  -> run [ Bind "hint" (Parse (Lit (VText arg)))
-              , Do (Prove (Just (Ref "hint")))
-              ]
   -- @retry@ / @retry ‹n›@ (§7.7). **The driver's, not an op** — a rule body
   -- may not contain one, because §7.2 decided there is no @catch@ and no
   -- alternation inside a body: a rule that wants an alternative is two rules,
@@ -805,15 +818,12 @@ dispatch s name arg = case name of
     -- a colon looks, and nothing that looks lives in the rule base.
     | take 1 name == ":" -> (s, Rejected (NoSuchCommand name))
     | otherwise -> case parseArguments (globals machine) ctx (names machine) arg of
-        Left err        -> case err of
-          NotInCorners -> (s, Rejected (CoreExpected arg))
-          Syntax e     -> (s, Failed e)
-        Right (ts, n1)  ->
+        Left (Syntax e) -> (s, Failed e)
+        Right (vs, n1)  ->
           progress
             (sessionStepping s)
             s { sessionMachine =
-                  load [Do (Ops.Call (GlobalName name)
-                                     (map (Lit . VTerm . Trailing) ts))]
+                  load [Do (Ops.Call (GlobalName name) (map Lit vs))]
                        machine { names = n1 } }
             []
   where
@@ -821,9 +831,9 @@ dispatch s name arg = case name of
     ctx     = focusContext (development machine)
 
 
-    matching hint =
+    matching =
       unfoldIter (matches (rules machine) (globals machine)
-                          (cursor (development machine)) hint)
+                          (cursor (development machine)))
 
     -- The base may not change under a half-built proof, current or suspended
     -- (the user, 2026-08-25). Answered before the file is read, so a refusal

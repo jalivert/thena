@@ -28,7 +28,6 @@ import Thena.Ops
   , Operand (..)
   , Rule (..)
   , Test (..)
-  , hintName
   )
 import Thena.Ops (Value (VText))
 import qualified Thena.Ops as Op
@@ -73,7 +72,9 @@ expectedStandard =
   , Rule (GlobalName "solve")      []    [FocusIsGuess]                [Do Solve]
   , Rule (GlobalName "regret")     []    [FocusIsGuess]                [Do Regret]
   , Rule (GlobalName "eliminate-core")  ["t"] [FocusIsHole]                 [Do (Op.Eliminate (Ref "t"))]
-  , elabVar
+  , proveRule
+  , proveGuess
+  , elaborateRule
   , unifyRefine
   , applyRule
   ]
@@ -122,11 +123,30 @@ withRules =
 expectedBase :: [RuleBase]
 expectedBase = [ruleBase "standard" Nothing "" expectedStandard]
 
--- | The one elaboration rule (§8, phase 17b): resolve the hint in the context
--- at the focus, attach it, commit.
-elabVar :: Rule
-elabVar = Rule (GlobalName "elab-var") [] [FocusIsHole, HintIsName]
-  [ Bind "t" (Op.Resolve (Ref hintName))
-  , Do (Call (GlobalName "try-core") [Ref "t"])
-  , Do Solve
-  ]
+-- | Search: every rule whose head passes, in definition order (MS4 phase 41).
+--
+-- @prove@ is a rule and no longer a special case in the driver — his ruling,
+-- 2026-09-01. The op under it is @prim-prove@, the good word having gone to the
+-- rule (phase 23b's convention).
+--
+-- **Two clauses, and that is how the rule language spells a disjunction** —
+-- @intro@ has had two for the same reason since phase 15. Search makes sense
+-- wherever a component is focused, and there is no single test for /hole or
+-- guess/; one clause with @focus-is-hole@ would have made @prove@ silent at a
+-- guess, where the base has @intro@, @solve@ and @regret@ waiting, and an
+-- empty head would have offered it in the core fragment, where nothing can
+-- act at all.
+proveRule :: Rule
+proveRule = Rule (GlobalName "prove") [] [FocusIsHole] [Do Prove]
+
+proveGuess :: Rule
+proveGuess = Rule (GlobalName "prove") [] [FocusIsGuess] [Do Prove]
+
+-- | Elaboration (MS4 phase 41): one clause over the large instruction.
+--
+-- It replaces @elab-var@, whose head asked about the retired hint and whose
+-- body resolved it. Step 2 of the two-step (@MS4.md@) is what turns this into
+-- a clause per surface node.
+elaborateRule :: Rule
+elaborateRule = Rule (GlobalName "elaborate") ["t"] [FocusIsHole]
+  [Do (Op.Elaborate (Ref "t"))]

@@ -18,10 +18,11 @@ rule regret :- when focus-is-guess then prim-regret
 
 rule eliminate-core t :- when focus-is-hole then prim-eliminate t
 
-rule elab-var :- when focus-is-hole hint-is-name
-  then t = resolve hint
-     ; try-core t
-     ; prim-solve
+rule prove :- when focus-is-hole then prim-prove
+
+rule prove :- when focus-is-guess then prim-prove
+
+rule elaborate t :- when focus-is-hole then prim-elaborate t
 
 rule unify-refine-core t :- when focus-is-hole
   then n = fresh-name "refined"

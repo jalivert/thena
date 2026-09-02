@@ -53,7 +53,7 @@ import Thena.Ops
 -- §2.5: "Thena.Ops" is qualified everywhere except "Thena.Engine", because
 -- @Assume@ and @Claim@ name both a component and an op.
 import qualified Thena.Ops as Ops
-import Thena.Syntax.Concrete (Raw (..))
+import Thena.Surface.Concrete (Surface (..))
 import Thena.Rules
   ( RuleError (..)
   , RuleIter
@@ -116,7 +116,7 @@ withArrow =
     emptyGlobals
 
 matching :: GlobalEnv -> Cursor -> [String]
-matching env cur = map nameOf (drain (matches expectedBase env cur Nothing))
+matching env cur = map nameOf (drain (matches expectedBase env cur))
 
 nameOf :: Rule -> String
 nameOf r = let GlobalName n = ruleName r in n
@@ -140,26 +140,26 @@ matchTests =
       -- to choose between them, and the user sees the choice being made.
       testCase "a hole offers the hole rules, in definition order" $
         matching emptyGlobals (holeAt type0)
-          @?= ["attack", "try-core", "abandon", "eliminate-core", "unify-refine-core", "apply-core"]
+          @?= ["attack", "try-core", "abandon", "eliminate-core", "prove", "elaborate", "unify-refine-core", "apply-core"]
 
     , testCase "a guess at a non-Π offers only solve and regret" $
         matching emptyGlobals (guessAt type0)
-          @?= ["solve", "regret"]
+          @?= ["solve", "regret", "prove"]
 
     , testCase "a guess at a Π offers intro as well" $
         matching emptyGlobals (guessAt (arrow type0 type0))
-          @?= ["intro", "solve", "regret"]
+          @?= ["intro", "solve", "regret", "prove"]
 
       -- §8: "Head matching runs whnf. A goal typed @id Type (Nat → Nat)@ is a Π
       -- and must match GoalTypeIsPi." Written down, @Arrow@ is a 'Global' and
       -- not a 'Pi'; a head that did not reduce would miss it.
     , testCase "a goal type that only reduces to a Π still matches" $
         matching withArrow (guessAt (Global (GlobalName "Arrow") []))
-          @?= ["intro", "solve", "regret"]
+          @?= ["intro", "solve", "regret", "prove"]
 
     , testCase "and does not, in an environment where it does not unfold" $
         matching emptyGlobals (guessAt (Global (GlobalName "Arrow") []))
-          @?= ["solve", "regret"]
+          @?= ["solve", "regret", "prove"]
 
       -- The one test that must NOT reduce: whnf δ-reduces a term-level let
       -- away (§5.1), so asking about the reduced type would make GoalTypeIsLet
@@ -167,7 +167,7 @@ matchTests =
       -- 'Thena.Engine.introduce'.
     , testCase "a goal type written as a let offers intro" $
         matching emptyGlobals (guessAt (Let (Ident "x") type0 type1 (close var type0)))
-          @?= ["intro", "solve", "regret"]
+          @?= ["intro", "solve", "regret", "prove"]
 
       -- The invariant checked by different code from the code that maintains
       -- it: the head says @intro@ applies, so @intro@ must actually apply. It
@@ -176,8 +176,8 @@ matchTests =
     , testCase "where the let clause is offered, intro succeeds" $
         let cur = guessAt (Let (Ident "x") type0 type1 (close var type0))
          in do
-              nameOf `map` drain (matches expectedBase emptyGlobals cur Nothing)
-                @?= ["intro", "solve", "regret"]
+              nameOf `map` drain (matches expectedBase emptyGlobals cur)
+                @?= ["intro", "solve", "regret", "prove"]
               ranOk (machineAt cur [Do Ops.Intro])
 
     , testCase "where the Π clause is offered, intro succeeds" $
@@ -221,25 +221,25 @@ iteratorTests =
         let walk it = case next it of
               Nothing        -> hasNext it @?= False
               Just (_, rest) -> (hasNext it @?= True) >> walk rest
-         in walk (matches expectedBase emptyGlobals (holeAt type0) Nothing)
+         in walk (matches expectedBase emptyGlobals (holeAt type0))
 
     , testCase "an empty iterator has nothing" $
-        let it = matches expectedBase emptyGlobals (guessAt type0) Nothing
-         in case next it >>= next . snd >>= next . snd of
+        let it = matches expectedBase emptyGlobals (guessAt type0)
+         in case next it >>= next . snd >>= next . snd >>= next . snd of
               Nothing -> pure ()
-              Just _  -> assertFailure "expected two matches and no more"
+              Just _  -> assertFailure "expected three matches and no more"
 
       -- §7.6: persistent, "a frame holds one and the UI may hold the same one;
       -- if advancing mutated shared state they would interfere." A lazy list
       -- gives this outright; the test is here because the requirement is on the
       -- type, and a later representation could quietly lose it.
     , testCase "advancing one copy does not disturb another" $
-        let it = matches expectedBase emptyGlobals (holeAt type0) Nothing
+        let it = matches expectedBase emptyGlobals (holeAt type0)
             deep = drop 2 (drain it)
          in do
               _ <- pure deep
-              map nameOf (drain it) @?= ["attack", "try-core", "abandon", "eliminate-core", "unify-refine-core", "apply-core"]
-              map nameOf deep @?= ["abandon", "eliminate-core", "unify-refine-core", "apply-core"]
+              map nameOf (drain it) @?= ["attack", "try-core", "abandon", "eliminate-core", "prove", "elaborate", "unify-refine-core", "apply-core"]
+              map nameOf deep @?= ["abandon", "eliminate-core", "prove", "elaborate", "unify-refine-core", "apply-core"]
     ]
 
 -- --------------------------------------------------------------------------
@@ -371,10 +371,9 @@ producesTests =
         -- Phase 17b's four. @prove@ and @call@ both hand control to a body and
         -- get it back, so what a @Bind@ on either would name is the caller's
         -- own environment — restored on return, and without the destination.
-      , ("prove",       e, hole,    [],            Ops.Prove Nothing)
+      , ("prim-prove",  e, hole,    [],            Ops.Prove)
       , ("call",        e, hole,    [],            Ops.Call (GlobalName "try-core") [term type0])
-      , ("parse",       e, hole,    [],            Ops.Parse (text "Type\8320"))
-      , ("resolve",     e, hole,    [],            Ops.Resolve (Lit (VSurface (RawUniverse 0))))
+      , ("prim-elaborate", e, hole, [],           Ops.Elaborate (Lit (VSurface SurfaceUniverseOpen)))
       ]
 
     -- @try ‹t›@, as 'expectedBase' ships it — what @call@ needs something to

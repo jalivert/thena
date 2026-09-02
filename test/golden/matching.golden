@@ -8,7 +8,9 @@ standard
   solve
   regret
   eliminate-core ‹t›
-  elab-var
+  prove
+  prove
+  elaborate ‹t›
   unify-refine-core ‹t›
   apply-core ‹f›
 thena spine> :matches
@@ -16,12 +18,15 @@ attack
 try-core ‹t›
 abandon
 eliminate-core ‹t›
+prove
+elaborate ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
 thena spine> attack
 thena spine> :matches
 solve
 regret
+prove
 thena spine> cross type
 thena core> :matches
 no rule applies here
@@ -33,6 +38,8 @@ attack
 try-core ‹t›
 abandon
 eliminate-core ‹t›
+prove
+elaborate ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
 thena spine> attack
@@ -40,6 +47,7 @@ thena spine> :matches
 intro
 solve
 regret
+prove
 thena spine> intro
 thena spine> into
 thena spine> along
@@ -57,6 +65,8 @@ attack
 try-core ‹t›
 abandon
 eliminate-core ‹t›
+prove
+elaborate ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
 thena spine> :abandon
@@ -69,6 +79,7 @@ thena spine> :matches
 intro
 solve
 regret
+prove
 thena spine> intro
 stuck: that hole's type is neither a ∀ nor a let
 thena spine> :abandon
@@ -80,6 +91,7 @@ thena spine> :matches
 intro
 solve
 regret
+prove
 thena spine> intro
 thena spine> :show
 ▶ let ? l : let x = Type₀ : Type₁ in x ≐ (

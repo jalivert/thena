@@ -5,6 +5,7 @@ thena spine> :matches
 intro
 solve
 regret
+prove
 thena spine> prove
 chose 7: intro
 thena spine> :show
@@ -15,7 +16,7 @@ thena spine> :show
   ) in
   id
 thena spine> :choices
-7  intro   untried: solve, regret
+7  intro   untried: solve, regret, prove
 thena spine> into
 thena spine> along
 thena spine> :where
@@ -30,7 +31,7 @@ type
 thena spine> back
 thena spine> back
 thena spine> :choices
-7  intro   untried: solve, regret
+7  intro   untried: solve, regret, prove
 thena spine> retry
 retrying 7: solve
 backtracking to 7: regret
@@ -38,7 +39,8 @@ thena spine> :show
 ▶ let ? id : ∀ (A : Type₀) -> A -> A in
   id
 thena spine> :choices
-no choice points
+7  regret   untried: prove
 thena spine> retry
-no choice point to retry
+retrying 7: prove
+chose 10: intro
 thena spine> :quit

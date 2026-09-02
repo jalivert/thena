@@ -251,8 +251,7 @@ tests =
           -- Two questions, two answers: the second lists only what could
           -- elaborate that hint.
         , ":matches"
-        , ":matches a"
-        , "prove a"
+        , "elaborate a"
         , ":show"
         , "back"
         , "back"
@@ -270,12 +269,11 @@ tests =
         , "into"
         , "along"
         , "along"
-        , "prove b"
+        , "elaborate b"
           -- A hint that is not an identifier does not match at all: no rule
           -- with a hint head passes, and there is nothing else in the hinted
           -- half of the base.
-        , "prove a a"
-        , ":matches a a"
+        , "elaborate (a a)"
         , ":abandon"
           -- The instruction language, seen: stepping shows the driver's own
           -- two-instruction program, the callee's body, and the return.
@@ -287,7 +285,7 @@ tests =
         , "along"
         , "along"
         , ":step on"
-        , "prove a"
+        , "elaborate a"
         , ":step"
         , ":step"
         , ":step"

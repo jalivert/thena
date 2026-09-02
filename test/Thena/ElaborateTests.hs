@@ -1,19 +1,20 @@
--- | Elaboration's identifier case, and @Call@ (§8, phase 17b).
+{-# LANGUAGE OverloadedLists #-}
+
+-- | Elaboration (MS4 phase 41), and @Call@ (§8, phase 17b).
 --
--- Three separable things are checked here, and the third is the one that could
--- not be checked any other way.
+-- **The partition is gone and so are its tests.** Until this phase a hint split
+-- the rule base in two, and this module's first group checked that
+-- @:matches@ and @:matches ‹hint›@ were two questions with two answers. There
+-- is no hint now: elaboration is a rule called by name, so every rule whose
+-- head passes is a candidate and there is one question.
 --
---   * **The partition.** A hint changes which rules are eligible
---     ('Thena.Ops.usesHint'), so @:matches@ and @:matches ‹hint›@ are two
---     questions with two answers.
---   * **@Call@.** Arity, what binds in the callee, and what survives the
---     return — the first supplier of a rule's parameters (§8).
---   * **'Thena.Engine.entryEnv'.** Backtracking into a /second/ hint rule must
---     enter it with @hint@ still bound. MS1's own base cannot reach that state,
---     because the partition leaves exactly one hint rule and a hinted dispatch
---     is therefore always deterministic. So it is reached here with a synthetic
---     pair, in "Thena.DispatchTests"' own style — the alternative was a field
---     that is correct only by argument.
+-- What is checked here instead:
+--
+--   * **the elaborator's leaves** — a name, a universe, and the two
+--     placeholders — end to end, through the machine;
+--   * **that a node it has no case for FAILS**, which is phase 41b's list;
+--   * **@Call@** — arity, what binds in the callee, and what survives the
+--     return.
 module Thena.ElaborateTests (tests) where
 
 import Test.Tasty (TestTree, testGroup)
@@ -39,33 +40,25 @@ import Thena.Ops
   ( Instr (..)
   , Operand (..)
   , Rule (..)
-  , Test (..)
   , Value (..)
-  , hintName
-  , usesHint
   )
 import qualified Thena.Ops as Ops
 import Thena.Rules
   ( RuleBase
-  , RuleError (..)
   , RuleIter
-  , allRules
-  , dispatch
   , matches
   , next
-  , ruleBase
-  , validate
   )
 import Thena.Standard (expectedBase)
-import Thena.Syntax.Concrete (Raw (..))
+import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..))
 
 tests :: TestTree
 tests =
   testGroup
     "elaboration"
-    [ partitionTests
-    , opTests
-    , entryEnvTests
+    [ leafTests
+    , unsupportedTests
+    , baseTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -73,14 +66,14 @@ tests =
 -- --------------------------------------------------------------------------
 
 type0 :: Core
-type0 = Universe (LZero)
+type0 = Universe LZero
 
 goalVar, hypVar :: Var
 goalVar = fst (fresh 0)
 hypVar  = fst (fresh 1)
 
 -- | @λ a : Type₀ . ? goal : Type₀ . goal@, focused on the hole — so there is
--- something in scope at the focus for a hint to name (§4.5).
+-- something in scope at the focus for a surface name to denote (§4.5).
 hole :: Cursor
 hole = case Cursor.along top of
   Right cur -> cur
@@ -91,10 +84,6 @@ hole = case Cursor.along top of
         ( Under (Assume hypVar (Ident "a") type0)
             (Under (Claim goalVar (Ident "goal") type0) (Trailing (Free goalVar)))
         )
-
-nameHint, appHint :: Maybe Raw
-nameHint = Just (RawName "a")
-appHint  = Just (RawApp (RawName "a") (RawName "a"))
 
 machine :: [RuleBase] -> [Instr] -> Machine
 machine base is =
@@ -110,9 +99,19 @@ runOut m = case step m of
   Finished m'       -> ([], Right m')
   Stuck r _         -> ([], Left r)
 
-named :: [RuleBase] -> Maybe Raw -> [String]
-named base hint =
-  [ n | Rule (GlobalName n) _ _ _ <- drain (matches base emptyGlobals hole hint) ]
+-- | Elaborate one surface term into the fixture's hole.
+elaborating :: Surface -> Either FailReason Machine
+elaborating s = snd (runOut (machine [] [Do (Ops.Elaborate (Lit (VSurface s)))]))
+
+isGuess :: Machine -> Bool
+isGuess m = case focus (cursor (development m)) of
+  Cursor.OnComponent (Guess {}) -> True
+  _                             -> False
+
+isHole :: Machine -> Bool
+isHole m = case focus (cursor (development m)) of
+  Cursor.OnComponent (Claim {}) -> True
+  _                             -> False
 
 drain :: RuleIter -> [Rule]
 drain it = case next it of
@@ -120,140 +119,94 @@ drain it = case next it of
   Just (r, rest) -> r : drain rest
 
 -- --------------------------------------------------------------------------
--- The partition (§8, decided 2026-08-23)
+-- The leaves
 -- --------------------------------------------------------------------------
 
-partitionTests :: TestTree
-partitionTests =
+leafTests :: TestTree
+leafTests =
   testGroup
-    "a hint partitions the base"
-    [ testCase "exactly one shipped rule asks about the hint" $
-        [ n | r@(Rule (GlobalName n) _ _ _) <- allRules expectedBase, usesHint r ]
-          @?= ["elab-var"]
-
-      -- Unchanged from phase 16, and that is the point: the partition costs the
-      -- hintless question nothing.
-    , testCase "with no hint, the hintless half" $
-        named expectedBase Nothing @?= ["attack", "try-core", "abandon", "eliminate-core", "unify-refine-core", "apply-core"]
-
-    , testCase "with a name, only the elaboration rule" $
-        named expectedBase nameHint @?= ["elab-var"]
-
-      -- The head is shallow (§8): it asks what the tree /is/, not whether it
-      -- resolves. An application is not a name, so nothing in the hinted half
-      -- matches and there is no hintless half to fall through to.
-    , testCase "with a compound hint, nothing" $
-        named expectedBase appHint @?= []
-
-      -- @elab-var@ takes no parameters, so unlike @try@ and @eliminate@ it is
-      -- something the engine can actually run.
-    , testCase "and dispatch can run it" $
-        [ n | Rule (GlobalName n) _ _ _ <-
-                drain (dispatch expectedBase emptyGlobals hole nameHint) ]
-          @?= ["elab-var"]
-
-      -- Without this line 'elabVar' fails its own load-time check: @hint@ is a
-      -- Ref that no Bind introduces (§7.2's validation pass).
-    , testCase "a hint rule may read `hint` without binding it" $
-        concatMap validate (allRules expectedBase) @?= []
-
-    , testCase "and a rule with no hint head may not" $
-        validate (Rule (GlobalName "sneaky") [] [FocusIsHole]
-                    [Bind "t" (Ops.Resolve (Ref hintName))])
-          @?= [UnboundInRule (GlobalName "sneaky") 0 hintName]
-    ]
-
--- --------------------------------------------------------------------------
--- parse, resolve, and the hint's arrival
--- --------------------------------------------------------------------------
-
-opTests :: TestTree
-opTests =
-  testGroup
-    "parse and resolve"
-    [ testCase "parse produces a surface tree" $
-        bound "h" [Bind "h" (Ops.Parse (Lit (VText "a")))]
-          @?= Just (VSurface (RawName "a"))
-
-    , testCase "a stray character is a lex failure, not a crash" $
-        case failed [Bind "h" (Ops.Parse (Lit (VText "%")))] of
-          CannotRead (LexFailed _) -> pure ()
-          other -> assertFailure ("expected a lex failure, got " ++ show other)
-
-    , testCase "and an unfinished term is a parse failure" $
-        case failed [Bind "h" (Ops.Parse (Lit (VText "\\ (x : Type\8320) ->")))] of
-          CannotRead (ParseFailed _) -> pure ()
-          other -> assertFailure ("expected a parse failure, got " ++ show other)
-
-      -- Γ at the focus (§4.5) is what an identifier must be in scope in.
-    , testCase "resolve reads a name in the context at the focus" $
-        bound "t" [Bind "t" (Ops.Resolve (Lit (VSurface (RawName "a"))))]
-          @?= Just (VTerm (Trailing (Free hypVar)))
-
-    , testCase "a name that is not there says so" $
-        failed [Bind "t" (Ops.Resolve (Lit (VSurface (RawName "b"))))]
-          @?= CannotRead (ResolveFailed (NotInScope "b"))
-
-    , testCase "resolve wants a tree, not a term" $
-        failed [Bind "t" (Ops.Resolve (Lit (VTerm (Trailing type0))))]
-          @?= ExpectedSurface
-
-      -- The deliverable, in one assertion: the hint arrives bound to @hint@
-      -- (§8's one magic name), @elab-var@ resolves it, calls @try@ with it and
-      -- commits — so the hole ends up defined as the variable that was named.
-    , testCase "prove with a name elaborates it" $
-        case snd (runOut (machine expectedBase
-                    [Do (Ops.Prove (Just (Lit (VSurface (RawName "a")))))])) of
+    "the leaves elaborate"
+    [ -- @E⟦x⟧ = FILL x; SOLVE@ — Brady's variable case. What @elab-var@ did
+      -- with a hint, one op does with a surface term.
+      testCase "a name in scope is attached and committed" $
+        case elaborating (SurfaceName "a") of
           Left r  -> assertFailure ("did not elaborate: " ++ show r)
-          Right m -> case focus (cursor (development m)) of
-            Cursor.OnComponent (Define _ _ v _) -> v @?= Free hypVar
-            other -> assertFailure ("expected a definition, got " ++ show other)
+          Right m -> isGuess m @?= False   -- solved, so it is a definition now
+
+    , testCase "a name that is not in scope says so" $
+        case elaborating (SurfaceName "nope") of
+          Left (CannotRead (ResolveFailed (NotInScope x))) -> x @?= "nope"
+          other -> assertFailure ("expected a scope error: " ++ show other)
+
+      -- **The emitted program really is @try; solve@**, and this is how that is
+      -- visible: the fixture's goal is @Type₀@, so attaching @Type₀@ to it is
+      -- ill-typed, and the failure that comes back is @try@'s own side
+      -- condition (phase 25b) rather than anything the elaborator checked.
+    , testCase "a universe goes through try, and try still checks it" $
+        case elaborating (SurfaceUniverse 0) of
+          Left (GuessIllTyped _) -> pure ()
+          other -> assertFailure ("expected try's check to fire: " ++ show other)
+
+      -- **The placeholder elaborates by not elaborating** — his words. The
+      -- hole is still a hole afterwards, which is the whole of the behaviour
+      -- and the only way to see it.
+    , testCase "_ leaves the hole exactly as it was" $
+        case elaborating SurfacePlaceholder of
+          Left r  -> assertFailure ("did not elaborate: " ++ show r)
+          Right m -> isHole m @?= True
+
+    , testCase "and so does a named placeholder, for now" $
+        case elaborating (SurfaceHole "goal") of
+          Left r  -> assertFailure ("did not elaborate: " ++ show r)
+          Right m -> isHole m @?= True
     ]
-  where
-    bound n is = case snd (runOut (machine [] is)) of
-      Right m -> lookup n (Thena.Engine.env (exec m))
-      Left r  -> error ("the program did not run: " ++ show r)
-
-    failed is = case snd (runOut (machine [] is)) of
-      Left r  -> r
-      Right _ -> error "expected the program to fail"
-
-isGuess :: Machine -> Bool
-isGuess m = case focus (cursor (development m)) of
-  Cursor.OnComponent (Guess {}) -> True
-  _                             -> False
 
 -- --------------------------------------------------------------------------
--- entryEnv: the hint survives backtracking (§7.3, phase 17b)
+-- What phase 41 does not do
 -- --------------------------------------------------------------------------
 
-entryEnvTests :: TestTree
-entryEnvTests =
+-- | **A node with no case fails, and that is deliberate.**
+--
+-- Phase 41 compiles the leaves; these are phase 41b's list, and each needs
+-- something the op vocabulary does not have. An elaborator that quietly did
+-- nothing here would leave a hole that looked elaborated — which is the one
+-- outcome worse than refusing.
+unsupportedTests :: TestTree
+unsupportedTests =
   testGroup
-    "a hint outlives the alternative that was tried first"
-    [ -- Two hint rules, so the peek really builds a Choice; the first fails
-      -- after the hint has been read, and the second must still be able to
-      -- read it. Without 'entryEnv' this is UnboundInBody "hint".
-      testCase "the second alternative still sees it" $ do
-        let (msgs, out) = runOut (machine [ruleBase "test" Nothing "" [elabFails, elabWorks]]
-                                    [Do (Ops.Prove (Just (Lit (VSurface (RawName "a")))))])
-        msgs @?= ["chose 1000: elab-fails", "backtracking to 1000: elab-works"]
-        case out of
-          Left r  -> assertFailure ("expected the second to succeed, got " ++ show r)
-          Right m -> isGuess m @?= True
+    "a node with no case is refused, not ignored"
+    [ refused "an application"
+        (SurfaceApp (SurfaceName "a") [SurfaceArg Explicit (SurfaceName "a")])
+    , refused "a lambda"      (SurfaceLam [binder] (SurfaceName "a"))
+    , refused "a ∀"           (SurfacePi [binder] (SurfaceName "a"))
+    , refused "an arrow"      (SurfaceArrow (SurfaceName "a") (SurfaceName "a"))
+    , refused "a let"         (SurfaceLet "x" Nothing (SurfaceName "a") (SurfaceName "x"))
+    , refused "an ascription" (SurfaceAnnot (SurfaceName "a") (SurfaceUniverse 0))
     ]
   where
-    -- Reads the hint, attaches it, then fails: @solve@ wants a guess whose body
-    -- is pure and this one is a variable — so it is the /second/ instruction
-    -- that fails, after the environment has been used.
-    elabFails =
-      Rule (GlobalName "elab-fails") [] [FocusIsHole, HintIsName]
-        [ Bind "t" (Ops.Resolve (Ref hintName))
-        , Do Ops.Regret
-        ]
+    binder = SurfaceBinder Explicit "x" Nothing
+    refused what s = testCase what $
+      case elaborating s of
+        Left (NoElaborationRule w) -> w @?= what
+        other -> assertFailure ("expected a refusal: " ++ show other)
 
-    elabWorks =
-      Rule (GlobalName "elab-works") [] [FocusIsHole, HintIsName]
-        [ Bind "t" (Ops.Resolve (Ref hintName))
-        , Do (Ops.Try (Ref "t"))
-        ]
+-- --------------------------------------------------------------------------
+-- The shipped base
+-- --------------------------------------------------------------------------
+
+baseTests :: TestTree
+baseTests =
+  testGroup
+    "the shipped base"
+    [ -- Every rule whose head passes, and no partition to divide them.
+      testCase "every rule whose head passes is a candidate" $
+        [ n | Rule (GlobalName n) _ _ _ <- drain (matches expectedBase emptyGlobals hole) ]
+          @?= [ "attack", "try-core", "abandon", "eliminate-core"
+              , "prove", "elaborate", "unify-refine-core", "apply-core"
+              ]
+
+    , testCase "prove is a rule over prim-prove" $
+        case [ r | r@(Rule (GlobalName "prove") _ _ _) <- drain (matches expectedBase emptyGlobals hole) ] of
+          [Rule _ ps _ b] -> (ps, b) @?= ([], [Do Ops.Prove])
+          other           -> assertFailure ("expected one clause: " ++ show other)
+    ]

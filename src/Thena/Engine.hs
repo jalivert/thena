@@ -78,7 +78,7 @@ import Thena.Development.Cursor
   )
 import qualified Thena.Development.Cursor as Cursor
 import Thena.Development.Partial (Impure (..), Partial (..), extract)
-import Thena.Errors (FailReason (..), MoveError (..), Position (..), SyntaxError (..))
+import Thena.Errors (FailReason (..), MoveError (..), Position (..))
 import Thena.Ops
   ( AnswerKind
   , Env
@@ -87,16 +87,14 @@ import Thena.Ops
   , Op (..)
   , Operand (..)
   , Value (..)
-  , hintName
   )
 import Thena.Global.Env (GlobalEnv, InductiveDefinition, declaredNames)
 import qualified Thena.Ops as Op
 import Thena.Tactics.Eliminate (Elimination (..), eliminate)
 import Thena.Rules (RuleBase, RuleIter, arities, clauses, dispatch, hasNext, next)
-import Thena.Syntax.Concrete (Raw)
-import Thena.Syntax.Lexer (isIdentifier, lexTokens)
-import Thena.Syntax.Parser (parseTerm)
-import qualified Thena.Syntax.Resolve as Resolve
+import Thena.Syntax.Lexer (isIdentifier)
+import qualified Thena.Elaborate as Elaborate
+import Thena.Surface.Concrete (Surface)
 
 -- --------------------------------------------------------------------------
 -- The machine
@@ -554,63 +552,51 @@ perform instr rest m = case operation instr of
   -- Dispatch (§7.3). The goal is the focus, so there is nothing to read: the
   -- iterator is built from the cursor, the first match's body becomes @pc@, and
   -- what would have been on Haskell's stack goes into the frame.
-  -- The hint, phase 17b: an optional operand holding a 'VSurface'. It changes
-  -- two things and no more — which rules are eligible ('Thena.Rules.matches'
-  -- partitions on it), and what the callee's environment starts with. §8's
-  -- \"same engine, same frames — the only difference is whether a hint is
-  -- present\", made literal.
-  Prove mh -> case traverse surface mh of
-    Left r     -> failure r m
-    Right hint -> case next (it hint) of
-      Nothing       -> failure NoRuleMatched m
-      Just (r, it')
-        -- Announced only when the dispatch was a real decision, which is
-        -- exactly when a 'Choice' was built. A message marks a choice; where
-        -- there was one candidate there was none, and a line per deterministic
-        -- call would be noise (§1, §7.5).
-        | hasNext it' ->
-            Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
-                   (entering hint r (Choice rest (env (exec m)) it' (development m)
-                                       (names m) (ruleName r) False [] (seeded hint))
-                               m { names = names m + 1 })
-        | otherwise ->
-            Continue (entering hint r (Thena.Engine.Call rest (env (exec m))) m)
+  --
+  -- **It carries nothing** (MS4 phase 41). It took an optional surface term
+  -- from phase 17b to here, and that term partitioned the rule base and seeded
+  -- the callee's environment under the name @hint@. Both are gone: elaboration
+  -- is a rule called by name, so it was never a dispatch, and there is no magic
+  -- name in the instruction language any more.
+  Prove -> case next it of
+    Nothing       -> failure NoRuleMatched m
+    Just (r, it')
+      -- Announced only when the dispatch was a real decision, which is
+      -- exactly when a 'Choice' was built. A message marks a choice; where
+      -- there was one candidate there was none, and a line per deterministic
+      -- call would be noise (§1, §7.5).
+      | hasNext it' ->
+          Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
+                 (entering r (Choice rest (env (exec m)) it' (development m)
+                                     (names m) (ruleName r) False [] [])
+                             m { names = names m + 1 })
+      | otherwise ->
+          Continue (entering r (Thena.Engine.Call rest (env (exec m))) m)
     where
-      it hint = dispatch (rules m) (globals m) (cursor (development m)) hint
-
-      -- The one magic name in the instruction language, and §8 wrote it:
-      -- @h₁ = app-fun hint@ reads @hint@ as an ordinary operand. Seeding the
-      -- environment is what makes that true, and it is why there is no @Hint@
-      -- read op and nothing on the machine holding \"the current hint\".
-      seeded hint = maybe [] (\h -> [(hintName, VSurface h)]) hint
+      it = dispatch (rules m) (globals m) (cursor (development m))
 
       -- THE PEEK, decided 2026-08-20. A 'Choice' is built only when there
       -- really is another alternative — Prolog's determinism detection.
       -- Otherwise this is an ordinary 'Call', carrying no iterator, no
       -- snapshot and no identifier. The cost is Prolog's own: one more head
       -- match is computed than is used.
-      entering hint r fr k =
-        k { exec = Exec (ruleBody r) (seeded hint) (fr : stack (exec m)) }
+      entering r fr k =
+        k { exec = Exec (ruleBody r) [] (fr : stack (exec m)) }
 
-  -- Text to a surface tree: lexing and parsing, and no resolution (§7.2). The
-  -- lexer was already this module's — @isIdentifier@ — and the parser joins it
-  -- here, which is what makes a syntax error an op failure rather than
-  -- something only the driver can have.
-  Parse src -> case text src of
+  -- **Elaboration: the op emits the program, it does not run it** (MS4 phase
+  -- 41). "Thena.Elaborate" compiles one surface node into a short list of
+  -- instructions — ops that already exist, and an @Elaborate@ of each sub-term
+  -- — and they go in front of what was already queued.
+  --
+  -- That is what makes step 2 a decomposition: the rule clauses that replace
+  -- this will emit the same instructions from a body. Until they do, @:step@
+  -- shows an elaboration running as ordinary instructions.
+  Elaborate t -> case surface t of
     Left r  -> failure r m
-    Right t -> case lexTokens t of
-      Left e   -> failure (CannotRead (LexFailed e)) m
-      Right ts -> case parseTerm ts of
-        Left e    -> failure (CannotRead (ParseFailed e)) m
-        Right raw -> produce (VSurface raw) m
-
-  -- A surface tree to a term, in Γ at the focus (§4.5) — which is exactly the
-  -- context an identifier typed at the REPL must be in scope in (§4.0 E1).
-  Resolve raw -> case surface raw of
-    Left r  -> failure r m
-    Right h -> case Resolve.resolve (globals m) contextAt (names m) h of
-      Left e         -> failure (CannotRead (ResolveFailed e)) m
-      Right (t, n1)  -> produce (VTerm (Trailing t)) m { names = n1 }
+    Right s -> case Elaborate.compile (globals m) contextAt (names m) s of
+      Left r          -> failure r m
+      Right (is, n1)  ->
+        Continue m { exec = (exec m) { pc = is ++ rest }, names = n1 }
 
   -- **Call by name: the same search as @Prove@, over a narrower candidate
   -- list** (§8, phase 23). The user's own framing, and it is why this case now
@@ -982,10 +968,10 @@ operandTerm e o = operandValue e o >>= \v -> case v of
 -- | An unelaborated tree, and nothing else (§7.2). Shaped like 'operandText'
 -- and 'operandTerm', and phase 17b's reason for existing at all: 'VSurface' had
 -- no reader before elaboration had a rule.
-operandSurface :: Env -> Operand -> Either FailReason Raw
+operandSurface :: Env -> Operand -> Either FailReason Surface
 operandSurface e o = operandValue e o >>= \v -> case v of
-  VSurface raw -> Right raw
-  _            -> Left ExpectedSurface
+  VSurface t -> Right t
+  _          -> Left ExpectedSurface
 
 -- | The name a component will display. Checked against the lexer's own notion
 -- of an identifier, because an 'Ident' that does not lex is one the printer

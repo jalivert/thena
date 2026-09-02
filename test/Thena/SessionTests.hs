@@ -118,12 +118,13 @@ holeTests =
 
   , ok "try attaches a guess"             (natGoal ++ ["attack", "into", "try-core ⌜ zero ⌝"])
 
-    -- **A core tactic's argument must be in corners** (phase 38). The bare
-    -- form is refused rather than accepted, because from phase 39 on a bare
-    -- argument is a *surface* term — accepting it as core now would mean the
-    -- same line silently changing meaning later.
-  , rejects "a core tactic's argument must be in corners"
-      (natGoal ++ ["attack", "into", "try-core zero"]) (CoreExpected "zero")
+    -- **The two vocabularies, at the call site** (phase 38, come true at 41).
+    -- Corners make an argument a core term and a bare word makes it a surface
+    -- one — so a core tactic given a bare argument is handed the wrong kind of
+    -- value and says so. Phase 38 refused it earlier, with a message; now the
+    -- refusal is the op's, which is where every other operand kind is settled.
+  , halts "a core tactic will not take a surface argument"
+      (natGoal ++ ["attack", "into", "try-core zero"]) ExpectedTerm
     -- The corners subsume phase 23b's parenthesisation rule: an argument that
     -- is not a single atom needed parentheses, and inside corners it does not.
   , ok "and inside them an argument needs no parentheses"

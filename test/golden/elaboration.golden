@@ -21,11 +21,11 @@ attack
 try-core ‹t›
 abandon
 eliminate-core ‹t›
+prove
+elaborate ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
-thena spine> :matches a
-elab-var
-thena spine> prove a
+thena spine> elaborate a
 thena spine> :show
   let ? const : ∀ (A : Type₀) -> A -> A ≐ (
     λ (A : Type₀) ->
@@ -51,12 +51,10 @@ thena spine> intro
 thena spine> into
 thena spine> along
 thena spine> along
-thena spine> prove b
+thena spine> elaborate b
 stuck: not in scope: b
-thena spine> prove a a
-stuck: no rule applies here
-thena spine> :matches a a
-no rule applies here
+thena spine> elaborate (a a)
+stuck: elaboration has no rule for an application yet
 thena spine> :abandon
 abandoned again
 thena spine> :theorem shown : ∀ (A : Type₀) (a : A) -> A
@@ -68,54 +66,42 @@ thena spine> into
 thena spine> along
 thena spine> along
 thena spine> :step on
-thena spine> prove a
+thena spine> elaborate a
 pc
-  0  prove with hint
+  0  prim-elaborate t
 env
-  hint = ‹a›
-stack
-  (empty)
-thena spine> :step
-pc
-  0  t = resolve hint
-  1  call try-core t
-  2  prim-solve
-env
-  hint = ‹a›
+  t = ‹a›
 stack
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  0  call try-core t
+  0  prim-try ⌜a⌝
   1  prim-solve
 env
-  t = ⌜a⌝
-  hint = ‹a›
+  t = ‹a›
 stack
-  call, 0 instruction(s) to resume
-thena spine> :step
-pc
-  0  prim-try t
-env
-  t = ⌜a⌝
-stack
-  call, 1 instruction(s) to resume
-  call, 0 instruction(s) to resume
-thena spine> :step
-pc
-  (empty)
-env
-  t = ⌜a⌝
-stack
-  call, 1 instruction(s) to resume
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
   0  prim-solve
 env
-  t = ⌜a⌝
-  hint = ‹a›
+  t = ‹a›
 stack
   call, 0 instruction(s) to resume
+thena spine> :step
+pc
+  (empty)
+env
+  t = ‹a›
+stack
+  call, 0 instruction(s) to resume
+thena spine> :step
+pc
+  (empty)
+env
+  (empty)
+stack
+  (empty)
+thena spine> :step
 thena spine> :step off
 thena spine> :quit

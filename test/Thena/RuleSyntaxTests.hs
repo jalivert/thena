@@ -158,10 +158,8 @@ everyOp =
   , ("prim-regret",  Regret)
   , ("prim-solve",   Solve)
   , ("prim-abandon", Abandon)
-  , ("prove",        Prove Nothing)
-  , ("prove x",      Prove (Just (Ref "x")))
-  , ("parse x",      Parse (Ref "x"))
-  , ("resolve x",    Op.Resolve (Ref "x"))
+  , ("prim-prove",   Prove)
+  , ("prim-elaborate x", Op.Elaborate (Ref "x"))
   , ("certify x",    Certify (Ref "x"))
   , ("prim-eliminate x", Op.Eliminate (Ref "x"))
   , ("prim-apply x",  Op.Apply (Ref "x"))
@@ -198,7 +196,7 @@ vocabulary =
     keywordCase (src, expected) =
       testCase src $ Just (opKeyword expected) @?= listToMaybe (words src)
 
-    allTests = [FocusIsHole, FocusIsGuess, GoalTypeIsPi, GoalTypeIsLet, HintIsName]
+    allTests = [FocusIsHole, FocusIsGuess, GoalTypeIsPi, GoalTypeIsLet]
 
     testCase' t =
       testCase (testWord t) $ do
@@ -230,8 +228,8 @@ shapes =
         b <- bodyOf "prim-attack; along; prim-solve"
         b @?= [Do Attack, Do Along, Do Solve]
     , testCase "a binding instruction" $ do
-        b <- bodyOf "x = resolve hint"
-        b @?= [Bind "x" (Op.Resolve (Ref "hint"))]
+        b <- bodyOf "x = typeof y"
+        b @?= [Bind "x" (Typing (Ref "y"))]
     , -- The hyphens are the reason the lexer was widened this phase: §8 and
       -- OBJECTIVE.md have always written rule and test names this way.
       testCase "a hyphenated name is one identifier" $ do

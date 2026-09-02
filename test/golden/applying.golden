@@ -9,6 +9,8 @@ attack
 try-core ‹t›
 abandon
 eliminate-core ‹t›
+prove
+elaborate ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
 thena spine> apply-core ⌜ Just ⌝
