@@ -31,4 +31,11 @@ thena spine> :infer s {0}
 s {0} : N {0} -> N {0}
 thena spine> :infer s {1} (z {1})
 s {1} z {1} : N {1}
+thena spine> data E : Type where { k : Eq {1} Type Nat Nat -> E }
+declared E
+thena spine> :show E
+data E : Type₁ where
+  { k : Eq {1} Type₀ Nat Nat -> E }
+thena spine> data F : Type where { k2 : Eq {2} Type Nat Nat -> F }
+refused: the universe levels F's constructor arguments require cannot all hold
 thena spine> :quit

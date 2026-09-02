@@ -46,6 +46,7 @@ import Thena.Global.Env
   , formerType
   , inductiveConstructors
   , inductiveIndices
+  , inductiveLevels
   , inductiveName
   , inductiveParameters
   , inductives
@@ -85,6 +86,11 @@ vecDecl   =
   \where { nil : Vec A zero \
   \; cons : forall (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ n) }"
 emptyDecl = "Empty : Type\8320 where { }"
+
+-- | Phase 50 wants a level-polymorphic global in scope whose level arguments a
+-- constructor argument can be written at — 'Nat' and 'Vec' have none.
+eqDecl :: String
+eqDecl = "Eq (A : Type) : A -> A -> Type where { refl : \8704 (a : A) -> Eq A a a }"
 
 -- | Declare in order, against the empty environment, threading the counter.
 -- Either the reason it was refused, or the environment and the counter.
@@ -286,6 +292,26 @@ universeTests =
       "T : Type\8320 where { c : zero -> T }"
       (ArgumentNotAType (named "c") (Ident "x")
          (NotAType [] (Global (named "zero") []) (Canonical (named "Nat") [] [])))
+
+  -- **A level a constructor argument's own typing determines** (phase 50).
+  -- 'Thena.Global.Declare.argumentLevels' used to drop these obligations and
+  -- 'universes' used to discard the solver's answer, so @?\8467@ reached
+  -- 'generaliseInductive' undetermined and became a rigid that its own bound
+  -- then refuted — which surfaced as the generated no-confusion family failing
+  -- to typecheck, reported as a bug in Thena.
+  --
+  -- The assertion is on 'inductiveLevels' rather than on the stored argument
+  -- type because that is the invariant: a level the declaration determines is
+  -- not a parameter of it. Different code from the fix (phase 5's lesson).
+  , testCase "a level the argument's typing determines is solved, not generalised" $
+      case declareAll [natDecl, eqDecl, "E : Type where { k : Eq {1} Type Nat Nat -> E }"] of
+        Left e         -> assertFailure e
+        Right (env, _) ->
+          fmap inductiveLevels (lookupInductive (named "E") env) @?= Just []
+  , testCase "and one it merely bounds is refused, because a datatype carries no constraints" $
+      case declareAll [natDecl, eqDecl, "E : Type where { k : Eq {2} Type Nat Nat -> E }"] of
+        Left e  -> e @?= show (ArgumentLevelsUnmet (named "E"))
+        Right _ -> assertFailure "admitted, and it should not have been"
   ]
 
 -- --------------------------------------------------------------------------

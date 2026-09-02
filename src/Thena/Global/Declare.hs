@@ -29,6 +29,7 @@ import Thena.Core.Context (Context, Entry (..), entryIdent, entryType, entryVar,
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Level
   ( Level (..)
+  , LevelVar
   , Obligation (..)
   , freshLevelRigid
   , levelMax
@@ -96,6 +97,12 @@ data DeclareError
   | ArgumentTooLarge GlobalName Ident Level Level
     -- ^ constructor, argument, the universe the argument lives in, and the
     -- datatype's own — thesis §4.1.1 (phase 8)
+  | ArgumentLevelsUnmet GlobalName
+    -- ^ the level relations a constructor's arguments owe cannot all hold, and
+    -- no single argument's size restriction is the one at fault (phase 50).
+    -- Reachable since 'argumentLevels' stopped dropping typing obligations: a
+    -- datatype has nowhere to carry a conditional constraint, so an obligation
+    -- that survives 'solveLevels' has to refuse the declaration.
   | NoConfusionRejected GlobalName TypeError
     -- ^ **a generator bug, not a user mistake** (phase 14): the checker refused
     -- a definition "Thena.Global.NoConfusion" emitted. It is a refusal rather
@@ -135,8 +142,15 @@ declare env n d0 = do
   -- finished declaration, which is why the wrappers and no-confusion need to
   -- know nothing about any of it.
   (d1, n2) <- computed env n1 d0
-  n3 <- universes env n2 d1
-  let (d, n4) = generaliseInductive n3 d1
+  (sub, n3) <- universes env n2 d1
+  -- **Solve before generalising** (phase 50). A meta its own constraints
+  -- determine must be substituted away here; left in, 'generaliseInductive'
+  -- turns it into a prenex parameter, and a rigid gets the /validity/ reading,
+  -- so the very bound that determined it becomes unsatisfiable. That is not a
+  -- theoretical ordering point: it is what made
+  -- @data E : Type where { k : Eq {1} Type Nat Nat -> E }@ declare a datatype
+  -- whose generated no-confusion family could not typecheck.
+  let (d, n4) = generaliseInductive n3 (substLevelsInInductive sub d1)
   -- The wrappers first: the generated terms name the datatype's own former and
   -- constructors, so they must already resolve.
   let env1 = generate d env
@@ -179,21 +193,28 @@ declare env n d0 = do
 -- what the stored types are written against — no opening, no substitution.
 argumentLevels
   :: GlobalEnv -> Int -> InductiveDefinition
-  -> Either DeclareError ([(GlobalName, Ident, Level)], Int)
-argumentLevels env n0 d = foldM eachConstructor ([], n0) (inductiveConstructors d)
+  -> Either DeclareError ([(GlobalName, Ident, Level)], [Obligation], Int)
+argumentLevels env n0 d = foldM eachConstructor ([], [], n0) (inductiveConstructors d)
   where
     provisional = addConstant (inductiveName d) (inductiveLevels d) (formerType d) env
 
     eachConstructor acc c = go acc (inductiveParameters d) (constructorArguments c)
       where
         go seen _   []       = Right seen
-        -- Level obligations are dropped, as everywhere outside the checking
-        -- pass ("Thena.Core.Typing"'s header says why once). A declaration
-        -- names no global whose scheme could owe one.
-        go (seen, n') ctx (e : es) = case infer provisional ctx n' (entryType e) of
+        -- **The obligations are collected, not dropped** (phase 50). They used
+        -- to be, on the reading that /"a declaration names no global whose
+        -- scheme could owe one"/ — which is true of a /scheme/ constraint and
+        -- misses the ordinary kind. Typing @Eq {1} Type Nat Nat@ owes
+        -- @suc ?ℓ ≤ 1@, a bound on a meta this very declaration minted, and
+        -- dropping it let the meta reach 'generaliseInductive' undetermined and
+        -- become a rigid its own constraint then refuted. See 'universes'.
+        go (seen, owed, n') ctx (e : es) = case infer provisional ctx n' (entryType e) of
           (Left err, _, _) -> Left (ArgumentNotAType (constructorName c) (identOf e) err)
-          (Right ty, _, n'') -> case whnf provisional ctx ty of
-            Universe l -> go (seen ++ [(constructorName c, identOf e, l)], n'') (ctx ++ [e]) es
+          (Right ty, obs, n'') -> case whnf provisional ctx ty of
+            Universe l -> go ( seen ++ [(constructorName c, identOf e, l)]
+                             , owed ++ obs
+                             , n'' )
+                             (ctx ++ [e]) es
             ty' -> Left (ArgumentNotAType (constructorName c) (identOf e)
                           (notAType ctx (entryType e) ty'))
 
@@ -229,18 +250,27 @@ argumentLevels env n0 d = foldM eachConstructor ([], n0) (inductiveConstructors 
 -- cannot settle **is still refused**: a datatype has nowhere to carry a
 -- conditional constraint, because 'Thena.Global.Env.definitionConstraints' is a
 -- definition\'s and a use of a former supplies levels without proving anything.
-universes :: GlobalEnv -> Int -> InductiveDefinition -> Either DeclareError Int
+universes
+  :: GlobalEnv -> Int -> InductiveDefinition
+  -> Either DeclareError ([(LevelVar, Level)], Int)
 universes env n0 d = do
-  (ls, n1) <- argumentLevels env n0 d
-  let owed = [ AtMost l (inductiveLevel d) | (_, _, l) <- ls ]
+  (ls, obs, n1) <- argumentLevels env n0 d
+  let sized = [ AtMost l (inductiveLevel d) | (_, _, l) <- ls ]
+      owed  = obs ++ sized
   case solveLevels owed of
-    Right (_, []) -> Right n1
+    -- **The substitution is kept** (phase 50). It used to be discarded, so
+    -- even a bound this function itself formed pinned nothing: the comment on
+    -- 'Thena.Core.Level.solveLevels' that @suc ?ℓ ≤ 1@ pins @?ℓ@ at zero was
+    -- true of the solver and false of this caller.
+    Right (sub, []) -> Right (sub, n1)
     -- Which argument to name: the first whose own relation does not hold on
-    -- its own. There is always one, because the whole set failed.
+    -- its own. There is always one when the size restriction is what failed —
+    -- and when it is not, the failure came from typing an argument rather than
+    -- from its size, so there is nothing better to name than the declaration.
     _ -> case [ (g, i, l) | (g, i, l) <- ls
               , solveLevels [AtMost l (inductiveLevel d)] /= Right ([], []) ] of
            (g, i, l) : _ -> Left (ArgumentTooLarge g i l (inductiveLevel d))
-           []            -> Right n1
+           []            -> Left (ArgumentLevelsUnmet (inductiveName d))
 
 -- | The universe a bare @Type@ in the declared position stands for: the least
 -- one that contains every constructor argument (MS3 phase 33c).
@@ -267,7 +297,7 @@ computed
 computed env n0 d = case loneMeta (inductiveLevel d) of
   Nothing -> Right (d, n0)
   Just m  -> do
-    (ls, n1) <- argumentLevels env n0 d
+    (ls, _, n1) <- argumentLevels env n0 d
     case [ l | (_, _, l) <- ls, m `notElem` metasIn l ] of
       -- **Nothing contributes, so nothing is computed and the meta is left for
       -- generalisation.** @Empty@ and @Unit@ are this case, and it is the whole

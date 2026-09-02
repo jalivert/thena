@@ -1022,6 +1022,16 @@ tests =
         , ":show N"
         , ":infer s {0}"
         , ":infer s {1} (z {1})"
+          -- **A level a constructor argument's typing determines** (phase 50).
+          -- @suc ?\8467 \8804 1@ pins the inner bare @Type@ at @Type\8320@, and @E@ takes no
+          -- level argument. Before phase 50 the bound was dropped, @?\8467@ became a
+          -- rigid, and the generated no-confusion family was refused as a bug.
+        , "data E : Type where { k : Eq {1} Type Nat Nat -> E }"
+        , ":show E"
+          -- And one the bounds merely /constrain/: @suc ?\8467 \8804 2@ leaves @?\8467@ free
+          -- below 1, a datatype has nowhere to carry that, so it is refused —
+          -- honestly, and this is the case universe minimisation will accept.
+        , "data F : Type where { k2 : Eq {2} Type Nat Nat -> F }"
         , ":quit"
         ])
       -- Typical ambiguity (MS3 phase 33): a bare @Type@ is a universe whose

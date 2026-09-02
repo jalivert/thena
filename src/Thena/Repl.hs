@@ -1458,6 +1458,10 @@ renderDeclareError e = case e of
       ++ ", which the datatype's own "
       ++ renderLevel d
       ++ " does not contain"
+  ArgumentLevelsUnmet g ->
+    "the universe levels "
+      ++ nameString g
+      ++ "'s constructor arguments require cannot all hold"
   ArgumentNotAType g i te ->
     "the argument " ++ identString i ++ " of " ++ nameString g ++ " is ill-typed"
       ++ concatMap ("\n  " ++) (renderTypeError 0 te)
