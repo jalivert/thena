@@ -100,6 +100,19 @@ data Instr
 -- instruction is written, not computed while it runs.
 data Op
   = Assume Operand Operand    -- ^ name, type — extend the development with @λ x : S@
+  | Quantify Operand Operand
+    -- ^ name, type — extend the development with @∀ x : S@ (MS4 phase 41f).
+    --
+    -- **@assume@'s twin, and the only op that can start a Π.** The two build
+    -- the same binding and differ in what the chain below them turns out to
+    -- be: 'Thena.Development.Partial.extract' folds an assumption into a λ and
+    -- this into a Π. Elaborating @∀ (x : A) -> B@ needs @x@ in Γ while @B@ is
+    -- elaborated, and writing a component is the only way anything gets into
+    -- Γ — so without this the surface language's @∀@ has no image in the
+    -- development at all.
+    --
+    -- Its word is **@quantify@** and not @forall@, because @forall@ is a
+    -- keyword (§2.6) and an op word is an @ident@ (§8).
   | Claim  Operand Operand    -- ^ name, type — extend it with a hole @? x : S@
   | Ask    Operand AnswerKind -- ^ prompt text, and what the frontend should offer
   | Say    Operand            -- ^ message text
@@ -445,6 +458,7 @@ produces o = case o of
   Ask _ _      -> True
   Concat _ _   -> True
   Assume _ _   -> True   -- the variable it bound; §7.3's @?x <- claim S@
+  Quantify _ _ -> False  -- a hole-life op, like 'Attack' and 'Intro'
   Claim  _ _   -> True
 
   Say _        -> False
@@ -492,6 +506,7 @@ produces o = case o of
 operandsOf :: Op -> [Operand]
 operandsOf o = case o of
   Assume a b   -> [a, b]
+  Quantify a b -> [a, b]
   Claim  a b   -> [a, b]
   Ask    a _   -> [a]
   Say    a     -> [a]
@@ -607,6 +622,7 @@ data Test
 opKeyword :: Op -> String
 opKeyword o = case o of
   Assume _ _   -> "assume"
+  Quantify _ _ -> "quantify"
   Claim  _ _   -> "claim"
   Ask    _ _   -> "ask"
   Say    _     -> "say"

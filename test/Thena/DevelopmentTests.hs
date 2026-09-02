@@ -135,8 +135,16 @@ prefixTests =
               (Under (Assume vA (Ident "A") type0)
                 (Under (Assume vB (Ident "B") type0)
                   (Trailing (Free vB))))
-  , testCase "a ∀ is a type, not a link, so it stays in the trailing term" $
+    -- **A leading @∀@ run is links, exactly as a leading @λ@ run is** (MS4
+    -- phase 41f). This asserted the opposite until then, when the development
+    -- calculus had no ∀-binder to read one as.
+  , testCase "a leading ∀ becomes a Quantify link" $
       fmap fst (parseDevelopment emptyGlobals [] 0 "∀ (A : Type₀) -> A")
+        @?= Right (Under (Quantify vA (Ident "A") type0) (Trailing (Free vA)))
+    -- And the same escape the λ case has: corners stop the spine, so a
+    -- trailing Π is still writable.
+  , testCase "corners keep a ∀ in the trailing term" $
+      fmap fst (parseDevelopment emptyGlobals [] 0 "[| ∀ (A : Type₀) -> A |]")
         @?= Right (Trailing (Pi (Ident "A") type0 (close vA (Free vA))))
   ]
   where

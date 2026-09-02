@@ -772,6 +772,11 @@ link n env c = (text, (v, name) : env)
           ++ " : " ++ go n env AtTop ty ++ " in"
       Claim _ _ ty      -> "let ? " ++ name ++ " : " ++ go n env AtTop ty ++ " in"
       Guess _ _ _ ty    -> "let ? " ++ name ++ " : " ++ go n env AtTop ty ++ " ≐ ("
+      -- The same spelling a core Π's binder has, for the reason the λ line
+      -- above has a core λ's: the DC's concrete syntax reads a leading binder
+      -- run as components (§2.7, "Thena.Syntax.Resolve"'s @partial@), so what
+      -- is printed here is what is parsed back.
+      Quantify _ _ ty   -> "∀ (" ++ name ++ " : " ++ go n env AtTop ty ++ ") ->"
 
 -- | The variable a component binds, and the name it would like.
 bound :: Component -> (Var, String)
@@ -780,6 +785,7 @@ bound c = case c of
   Define v (Ident h) _ _ -> (v, h)
   Claim  v (Ident h) _   -> (v, h)
   Guess  v (Ident h) _ _ -> (v, h)
+  Quantify v (Ident h) _ -> (v, h)
 
 isHere :: Route -> Bool
 isHere (Just ([], _)) = True
@@ -920,6 +926,7 @@ crossingWord x = case x of
     ValueOfDefine _ (Ident h) _ -> "val of "  ++ h
     TypeOfClaim   _ (Ident h)   -> "type of " ++ h
     TypeOfGuess   _ (Ident h) _ -> "type of " ++ h
+    TypeOfQuantify _ (Ident h)  -> "type of " ++ h
 
 renderConstraint :: Int -> Env -> Constraint -> String
 renderConstraint n env (Equate xi s t ty) =
@@ -1079,7 +1086,6 @@ renderFailReason r = case r of
   GuessIllTyped e ->
     "that term does not have the hole's type"
       ++ concatMap ("\n  " ++) (renderTypeError 0 e)
-  NameTaken n       -> n ++ " is already taken; ask fresh-name for one"
   NoGoalHere        -> "nothing is written down here, so there is no goal"
   NoRuleMatched     -> "no rule applies here"
   CannotEliminate e -> renderElimError e
@@ -1092,6 +1098,7 @@ renderFailReason r = case r of
   NotAGuessHere       -> "that is not a guess"
   NotReadyToIntroduce -> "intro wants a hole of the form ? x ≐ (? x' : S . x') — attack it first"
   NothingToIntroduce  -> "that hole's type is neither a ∀ nor a let"
+  GoalIsNotAUniverse  -> "quantify builds a type, so that hole must be claimed at a universe"
   NotYetPure pos    ->
     "not finished: " ++ renderPosition pos ++ " is still open, so there is no term yet"
   -- Phase 17b's four. 'CannotRead' reuses the renderer the driver's own
@@ -1190,6 +1197,10 @@ renderKernelError n e = case e of
   Overabstracted _ i ty ->
     [ "the assumption " ++ identString i ++ " has no matching binder in "
         ++ renderCore n [] ty
+    ]
+  NotAUniverseAbove _ i ty ->
+    [ "the ∀-binder " ++ identString i ++ " builds a type, but "
+        ++ renderCore n [] ty ++ " is not a universe"
     ]
   Levels (Refuted l k) ->
     [ renderLevelAtom l ++ " is not at most " ++ renderLevelAtom k ]

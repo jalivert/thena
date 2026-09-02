@@ -44,7 +44,7 @@ module Thena.Engine
 
 import Data.List (intercalate, nub)
 
-import Thena.Core.Level (Level (..), levelVarName)
+import Thena.Core.Level (Level (..), freshLevelMeta, levelVarName)
 import Thena.Core.Context (Context)
 import Thena.Core.Term
   ( Core (..)
@@ -495,6 +495,33 @@ perform instr rest m = case operation instr of
           <$> introduce (globals m) contextAt (names m) nm g
       _ -> Left NotReadyToIntroduce
 
+  -- **@intro@'s twin, and the only op that can start a Π** (MS4 phase 41f).
+  --
+  -- It is a hole-life op and not a component op like @assume@, and the level
+  -- is why. As a component op it would insert @∀ x : S@ above whatever hole
+  -- @attack@ had already made — and @attack@ copies the outer type, so the
+  -- codomain would be claimed at the /whole Π's/ universe. That drops the
+  -- domain's contribution: @∀ (A : Type₀) -> A@ would be pinned at @Type₀@
+  -- when it inhabits @Type₁@. Claiming the codomain here, at a fresh meta, is
+  -- what lets @ℓ_dom ⊔ ℓ_cod ≤ ℓ@ be /owed/ rather than forced —
+  -- "Thena.Development.Validate"'s @peeled@ is where it is owed.
+  Quantify name ty -> case (,) <$> operandIdent (env (exec m)) name <*> term ty of
+    Left r -> failure r m
+    Right (i, dom) -> case sortOf (globals m) contextAt (names m) dom of
+      -- Table 2.7's side condition on @assume@ and @claim@, and a ∀-binder
+      -- owes it for the same reason (phase 25f): @Θ ⊢ S : Type@.
+      (Left e,  _, n1) -> failure (NotTypeable e) m { names = n1 }
+      (Right _, _, n1) -> case focus (cursor (development m)) of
+        OnComponent (Component.Guess x xi g s) ->
+          case quantifyIn (globals m) contextAt n1 i dom g of
+            Left r -> failure r m { names = n1 }
+            Right (g', n2) -> case replaceComponent (Component.Guess x xi g' s)
+                                                    (cursor (development m)) of
+              Left e    -> failure (CannotMove e) m { names = n2 }
+              Right cur -> Continue (advance m { development = Development cur, names = n2 })
+        OnComponent _ -> failure NotReadyToIntroduce m { names = n1 }
+        _             -> failure (CannotMove NotOnTheSpine) m { names = n1 }
+
   -- **Table 2.7's side condition @Θ ⊩ t : S@, enforced** (phase 25b). It was
   -- documented and not checked until this phase, so an ill-typed guess sat in
   -- the development until @qed@ or @:revalidate@ found it.
@@ -753,9 +780,10 @@ perform instr rest m = case operation instr of
     Left r -> failure r m
     Right (i, val) -> case infer (globals m) contextAt (names m) val of
       (Left e,   _, n1) -> failure (NotTypeable e) m { names = n1 }
-      (Right ty, _, n1)
-        | i `elem` Cursor.identsIn (cursor (development m)) -> failure (taken i) m { names = n1 }
-        | otherwise ->
+      -- No taken-name check, for the reason 'component' above states at
+      -- length: @let x = v in b@ elaborates to a definition carrying the
+      -- name the user wrote.
+      (Right ty, _, n1) ->
             let (x, n2) = fresh n1
                 cur     = insertAbove (Component.Define x i val ty) (cursor (development m))
              in produce (VTerm (Trailing (Free x)))
@@ -872,8 +900,6 @@ perform instr rest m = case operation instr of
                      m' { development = Development cur, names = n1 }
       _ -> produce (VTerm (Trailing hd)) m'
 
-    taken (Ident n) = NameTaken n
-
     isHole c = case c of
       Component.Claim {} -> True
       Component.Guess {} -> True
@@ -893,10 +919,26 @@ perform instr rest m = case operation instr of
       case (,) <$> operandIdent (env (exec m)) name <*> term ty of
         Left r -> failure r m
         Right (i, t)
-          -- **Refused, not renamed** (phase 24c). Identifiers stay unique — so
-          -- @goto ‹name›@ keeps working — but deciding /what/ the name is
-          -- belongs to the rule, through @fresh-name@.
-          | i `elem` Cursor.identsIn (cursor (development m)) -> failure (taken i) m
+          -- **The name is used as given, taken or not** (MS4 phase 41f, the
+          -- user's decision). It was refused if the development already had
+          -- it (phase 24c, /"refused, not renamed"/), on the ground that
+          -- identifiers stay unique so @goto ‹name›@ keeps working.
+          --
+          -- **They did not stay unique.** @prim-intro@ has never checked, and
+          -- elaboration gives it the surface binder's name, so
+          -- @elaborate (\ A A -> A)@ has built two components called @A@
+          -- since phase 41b. Two ops disagreeing about an invariant neither
+          -- can maintain is worse than not having it.
+          --
+          -- Elaboration is what forces the question: @∀ (x : A) -> B@ and
+          -- @let x = v in b@ must bind the name **the user wrote**, or the
+          -- body cannot resolve it, and a rule cannot ask @fresh-name@ for a
+          -- name it was given. Phase 24c's other half stands unchanged —
+          -- inventing a name is still the rule's job, and @fresh-name@ is
+          -- still how it does it.
+          --
+          -- @goto ‹name›@ now takes the first match. That is the same
+          -- resolution the printer's display freshening has always assumed.
           -- Table 2.7's side condition on both @assume@ and @claim@:
           -- @Θ ⊢ S : Type@ (phase 25f). 'sortOf' is the same check
           -- @revalidate@ runs on these components through @Validate@'s
@@ -962,6 +1004,7 @@ unifyMessage cur result = case result of
       Component.Define y i _ _ -> (y, i)
       Component.Claim  y i _   -> (y, i)
       Component.Guess  y i _ _ -> (y, i)
+      Component.Quantify y i _ -> (y, i)
 
     -- **Into a guess's body too**, and that is not optional: a hole claimed
     -- inside a guess is where most of them are once @attack@ and @intro@ have
@@ -1075,6 +1118,42 @@ introduce env ctx n nm p = case p of
       <$> introduce env (ctx ++ [Component.forget c]) n nm rest
   _ -> Left NotReadyToIntroduce
 
+-- | Open a ∀-binder where 'introduce' opens a λ-binder (MS4 phase 41f).
+--
+-- The same shape test — table 2.8's /"only replace constructions of the shape
+-- @?x : S . x@"/ — and the same walk down the chain. Two differences, and both
+-- are what a Π is:
+--
+--   * **the domain is given, not read off the goal.** @intro@ takes the type
+--     from the Π it is moving through; there is no Π here yet, so the caller
+--     says what it is.
+--   * **the codomain is claimed at a fresh universe meta**, not at the hole's
+--     own type. @Π x : S . T@ inhabits @Type (ℓ_S ⊔ ℓ_T)@, so pinning the
+--     codomain to the whole thing's universe throws the domain away: the
+--     codomain of @∀ (A : Type₀) -> A@ sits at @Type₀@ while the Π sits at
+--     @Type₁@. The relation between them is /owed/, by
+--     "Thena.Development.Validate"'s @peeled@, and not forced here.
+quantifyIn
+  :: GlobalEnv -> Context -> Int -> Ident -> Core -> Partial
+  -> Either FailReason (Partial, Int)
+quantifyIn env ctx n i dom p = case p of
+  Under (Component.Claim v ci s) (Trailing (Free v'))
+    | v == v' -> case whnf env ctx s of
+        Universe _ ->
+          let (y, n1) = fresh n
+              (h, n2) = fresh n1
+              (l, n3) = freshLevelMeta n2
+           in Right
+                ( Under (Component.Quantify y i dom)
+                    (Under (Component.Claim h ci (Universe (LVar l))) (Trailing (Free h)))
+                , n3
+                )
+        _ -> Left GoalIsNotAUniverse
+  Under c rest ->
+    (\(rest', n1) -> (Under c rest', n1))
+      <$> quantifyIn env (ctx ++ [Component.forget c]) n i dom rest
+  _ -> Left NotReadyToIntroduce
+
 -- --------------------------------------------------------------------------
 -- Going back into an untried alternative (§7.7)
 -- --------------------------------------------------------------------------
@@ -1162,7 +1241,7 @@ retryFrom target m = go (0 :: Int) (stack (exec m))
 
 -- | The variable a component binds. What @here@ answers.
 --
--- Every component has one; the four constructors differ in what else they
+-- Every component has one; the five constructors differ in what else they
 -- carry, which is why this is a fold and not a field.
 variableOf :: Component.Component -> Var
 variableOf c = case c of
@@ -1170,3 +1249,4 @@ variableOf c = case c of
   Component.Define v _ _ _ -> v
   Component.Claim  v _ _   -> v
   Component.Guess  v _ _ _ -> v
+  Component.Quantify v _ _ -> v

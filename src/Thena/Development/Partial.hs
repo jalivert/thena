@@ -61,6 +61,7 @@ freeVarsPartial = nub . go
       Define _ _ v ty   -> freeVars v ++ freeVars ty
       Claim  _ _ ty     -> freeVars ty
       Guess  _ _ g ty   -> go g ++ freeVars ty
+      Quantify _ _ ty   -> freeVars ty
 
     goConstraint (Equate xi s t ty) =
       concatMap goEntry xi ++ freeVars s ++ freeVars t ++ freeVars ty
@@ -96,7 +97,12 @@ data Impure
 -- extract (Trailing t)                = t
 -- extract (Under (Assume x i S) p)    = Lam i S (close x (extract p))
 -- extract (Under (Define x i v S) p)  = Let i v S (close x (extract p))
+-- extract (Under (Quantify x i S) p)  = Pi  i S (close x (extract p))
 -- @
+--
+-- The fourth line is the whole of what the fifth component adds (MS4 phase
+-- 41f): a chain link that folds into a Π rather than a λ, so that a
+-- development can /be/ a type as readily as it can be a term.
 --
 -- A 'Claim', a 'Guess' or a 'Pending' has no core counterpart and stops it —
 -- that /is/ the purity check, and it is one traversal rather than a predicate
@@ -114,3 +120,4 @@ extract p = case p of
   Under (Guess x i _ _)   _     -> Left (StillAGuess x i)
   Under (Assume x i s)    rest  -> Lam i s . close x <$> extract rest
   Under (Define x i v s)  rest  -> Let i v s . close x <$> extract rest
+  Under (Quantify x i s)  rest  -> Pi  i s   . close x <$> extract rest

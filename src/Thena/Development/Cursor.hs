@@ -119,6 +119,7 @@ data Slot
   | ValueOfDefine Var Ident Core       -- ^ @x  = □  : S@ — the type is kept
   | TypeOfClaim   Var Ident            -- ^ @? x     : □@
   | TypeOfGuess   Var Ident Partial    -- ^ @? x ≐ g : □@ — the body is kept
+  | TypeOfQuantify Var Ident           -- ^ @∀ x     : □@
   deriving (Eq, Show)
 
 -- | Put a core term back in the field a 'Slot' deleted.
@@ -129,6 +130,7 @@ fill slot t = case slot of
   ValueOfDefine x i s -> Define x i t s
   TypeOfClaim   x i   -> Claim  x i t
   TypeOfGuess   x i g -> Guess  x i g t
+  TypeOfQuantify x i  -> Quantify x i t
 
 -- | The one move out of the partial fragment. It happens once, or not at all
 -- (§4.2).
@@ -381,6 +383,7 @@ identsIn = idents . rebuild
       Define _ i _ _ -> i
       Claim  _ i _   -> i
       Guess  _ i _ _ -> i
+      Quantify _ i _ -> i
 
 -- | An identifier not already taken: the hint, or the hint with the first
 -- number that frees it.
@@ -423,6 +426,7 @@ crossType cur = case cur of
     Define x i v s -> InCore p (InSlot (TypeOfDefine x i v) rest) Here s
     Claim  x i   s -> InCore p (InSlot (TypeOfClaim  x i)   rest) Here s
     Guess  x i g s -> InCore p (InSlot (TypeOfGuess  x i g) rest) Here s
+    Quantify x i s -> InCore p (InSlot (TypeOfQuantify x i) rest) Here s
   AtConstraint {} -> Left NoCrossingIntoAConstraint
   InCore {}       -> Left NotOnTheSpine
 
@@ -585,6 +589,7 @@ componentType c = case c of
   Define _ _ _ s -> s
   Claim  _ _   s -> s
   Guess  _ _ _ s -> s
+  Quantify _ _ s -> s
 
 -- | The type carried by the innermost 'IntoGuess' step, walking up from the
 -- focus.
@@ -665,6 +670,7 @@ dropFocus cur = case cur of
       Define x _ _ _ -> x
       Claim  x _ _   -> x
       Guess  x _ _ _ -> x
+      Quantify x _ _ -> x
 
 -- | Replace a focused core term with another, in place — what a committed
 -- reduction does (§4.7). The caller decides what the replacement is; this
@@ -810,6 +816,7 @@ overLevels sub cur = case cur of
       Claim  x i s   -> Claim  x i (at s)
       Define x i v s -> Define x i (at v) (at s)
       Guess  x i g s -> Guess  x i (onPartial g) (at s)
+      Quantify x i s -> Quantify x i (at s)
 
     onConstraint (Equate xi a b ty) =
       Equate (map (substLevelsInEntry sub) xi) (at a) (at b) (at ty)
@@ -829,6 +836,7 @@ overLevels sub cur = case cur of
       ValueOfDefine x i s -> ValueOfDefine x i (at s)
       TypeOfClaim   x i   -> TypeOfClaim   x i
       TypeOfGuess   x i g -> TypeOfGuess   x i (onPartial g)
+      TypeOfQuantify x i  -> TypeOfQuantify x i
 
     -- A term step carries the siblings of the field the focus went into, and
     -- 'Scope' is opaque here — so the scoped fields go through

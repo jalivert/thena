@@ -213,6 +213,7 @@ kindOf c = case c of
   Define x _ _ _  -> (x, KRigid)
   Claim  x i ty   -> (x, KHole i ty)
   Guess  x _ _ _  -> (x, KGuess)
+  Quantify x _ _  -> (x, KRigid)
 
 -- | The context every core operation is called in here: Γ at the focus, the
 -- focused component, and everything below.

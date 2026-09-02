@@ -741,6 +741,9 @@ dispatch s name arg = case name of
   ":run"   -> noArgument (progress False s [])
   "assume" -> tactic "assumption" "assumed" Assume
   "claim"  -> tactic "hole" "claimed" Claim
+  -- @assume@'s twin (MS4 phase 41f): the same two arguments, and the chain
+  -- below it extracts as a Π rather than a λ.
+  "quantify" -> tactic "∀-binder" "quantified" Quantify
   "data"   -> declaration
 
   -- The moves (§4.3). Three take no argument, @cross@ takes which field, and

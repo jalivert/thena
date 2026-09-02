@@ -224,21 +224,29 @@ leafTests =
 
 -- | **A node with no case fails, and that is deliberate.**
 --
--- Phase 41 compiles the leaves; these are phase 41b's list, and each needs
--- something the op vocabulary does not have. An elaborator that quietly did
--- nothing here would leave a hole that looked elaborated — which is the one
--- outcome worse than refusing.
+-- An elaborator that quietly did nothing here would leave a hole that looked
+-- elaborated — the one outcome worse than refusing — so each refusal is named
+-- and each name is the specification of the phase that removes it.
+--
+-- What is left is @elim@ (phase 41g) and the two implicit forms (phase 44).
+-- @∀@, arrows, @let@ and ascription left this list at phase 41f.
 unsupportedTests :: TestTree
 unsupportedTests =
   testGroup
     "a node with no case is refused, not ignored"
-    [ refused "a ∀"           (SurfacePi [binder] (SurfaceName "a"))
-    , refused "an arrow"      (SurfaceArrow (SurfaceName "a") (SurfaceName "a"))
-    , refused "a let"         (SurfaceLet "x" Nothing (SurfaceName "a") (SurfaceName "x"))
-    , refused "an ascription" (SurfaceAnnot (SurfaceName "a") (SurfaceUniverse 0))
+    [ refused "an elim"
+        (SurfaceElim "D" [] (SurfaceName "a") [] [] (SurfaceName "a"))
       -- Implicit **arguments** are phase 44's, like implicit binders.
     , refused "an implicit argument"
         (SurfaceApp (SurfaceName "a") [SurfaceArg Implicit (SurfaceName "a")])
+    , refused "a ∀ binder in braces"
+        (SurfacePi [SurfaceBinder Implicit "x" (Just (SurfaceUniverse 0))]
+                   (SurfaceName "a"))
+      -- A @∀@ binder must say what it binds. The surface grammar allows
+      -- @∀ x -> B@ because 'SurfaceBinder' is shared with λ, where the goal
+      -- supplies the type; there is no goal to read a Π's domain off.
+    , refused "a ∀ binder with no type"
+        (SurfacePi [binder] (SurfaceName "a"))
     ]
   where
     binder = SurfaceBinder Explicit "x" Nothing

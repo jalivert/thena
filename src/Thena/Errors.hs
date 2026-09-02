@@ -101,6 +101,11 @@ data FailReason
     -- ^ @intro@ on anything but table 2.8's shape @?x ≐ (?x' : S . x') : …@.
     -- The shape test is the specification, not a shortcut: a hole not of that
     -- form is made ready by @attack@
+  | GoalIsNotAUniverse
+    -- ^ @quantify@ at a hole whose type is not a universe (MS4 phase 41f).
+    -- A ∀-binder builds a Π and a Π is a type, so there is nothing for one to
+    -- be part of unless the hole is claimed at a sort. The @∀@ counterpart of
+    -- 'NothingToIntroduce'
   | NothingToIntroduce
     -- ^ @intro@ on the right shape, but the hole's type is neither a Π nor a
     -- @let@ once whnf'd
@@ -109,11 +114,6 @@ data FailReason
     -- undischarged constraint in it (§5.3). The 'Position' names the first one
     -- — @certify@ before anything is proved is the normal way to meet this, so
     -- it says which component rather than only that one exists
-  | NameTaken String
-    -- ^ @claim@, @assume@ or @define@ handed an identifier the development
-    -- already binds (phase 24c). **A refusal and not a rename**: inventing a
-    -- name is @fresh-name@'s job, and silently repairing this would hide from
-    -- the body what it had actually got
   | NoGoalHere
     -- ^ @goal@ where nothing is written down (§4.5, phase 24). The top of a
     -- development claims nothing, so it has no goal to read
@@ -354,6 +354,12 @@ data KernelError
     -- no binder for: @? g ≐ (λ a : A . …) : Nat@. Its own case rather than an
     -- 'Ill', because no 'TypeError' says this — @infer@ never meets the
     -- question, since only a /construction/ can abstract more than its type
+  | NotAUniverseAbove Var Ident Core
+    -- ^ a construction quantifies where the type it is claimed to build is not
+    -- a universe: @? g ≐ (∀ a : A . …) : Nat@ (MS4 phase 41f). The @∀@
+    -- counterpart of 'Overabstracted', and its own case for the same reason —
+    -- @infer@ never meets the question, because only a /construction/ can put
+    -- a binder above a type that has no room for one
   | Ill Position TypeError
     -- ^ it does not typecheck, and where. The 'TypeError' is the ordinary one
     -- "Thena.Core.Typing" produces — the kernel shares the core\'s typechecker

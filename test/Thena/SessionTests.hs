@@ -229,6 +229,60 @@ sessionTests =
       , "elaborate (\\ A -> \\ y -> y)"
       , "qed"
       ]
+    -- **The structural cases** (MS4 phase 41f). A @∀@ is the one that needed
+    -- the fifth component; the other three needed no new op at all.
+  , ok "a ∀ elaborates and proves"
+      [ ":theorem a : Type\8321"
+      , "elaborate (forall (A : Type\8320) -> A)"
+      , "qed"
+      ]
+    -- **A binder group nests**, one @quantify@ per Π: the domain hole is
+    -- claimed outside the @attack@, where an earlier binder of the same group
+    -- is not in scope.
+  , ok "a ∀ with two binders nests"
+      [ ":theorem a : Type\8321"
+      , "elaborate (forall (A : Type\8320) (a : A) -> A)"
+      , "qed"
+      ]
+  , ok "an arrow elaborates and proves"
+      [ ":theorem a : Type\8321"
+      , "elaborate (Type\8320 -> Type\8320)"
+      , "qed"
+      ]
+  , ok "a let elaborates and proves"
+      [ "data " ++ natDecl
+      , ":theorem l : Nat"
+      , "elaborate (let y = zero in y)"
+      , "qed"
+      ]
+    -- **An annotated @let@ elaborates its annotation into the type hole
+    -- first**, which is also what makes an application-valued @let@ work —
+    -- see @ms4/CLOSEOUT.md@ 11.
+  , ok "an annotated let takes an application value"
+      [ "data " ++ natDecl
+      , ":theorem l : Nat"
+      , "elaborate (let y : Nat = succ zero in succ y)"
+      , "qed"
+      ]
+    -- **A @let@ binds the name the user wrote**, which is what made phase
+    -- 24c's taken-name check untenable: @y@ is a component name already.
+  , ok "a let may shadow"
+      [ "data " ++ natDecl
+      , ":theorem l : Nat"
+      , "elaborate (let y : Nat = zero in let y : Nat = succ y in y)"
+      , "qed"
+      ]
+  , ok "an ascription elaborates and proves"
+      [ "data " ++ natDecl
+      , ":theorem s : Nat"
+      , "elaborate (zero : Nat)"
+      , "qed"
+      ]
+  , notOk "and an ascription that disagrees with the goal is refused"
+      [ "data " ++ natDecl
+      , ":theorem s : Nat"
+      , "elaborate (zero : Type\8320)"
+      ]
   , ok "so a hole left in the scratch cannot block qed"
       ["claim spare : Type₀", ":theorem t : Type₁", "try-core ⌜ Type₀ ⌝", "solve", "qed"]
   ]
@@ -294,6 +348,13 @@ developmentAfter = development . sessionMachine . loadedSession
 ok :: String -> [String] -> TestTree
 ok name ls = testCase name $ loadedError (run ls) @?= Nothing
 
+-- | The other side of 'ok': the script must not get through cleanly.
+notOk :: String -> [String] -> TestTree
+notOk name ls = testCase name $
+  case loadedError (run ls) of
+    Nothing -> assertFailure "expected a failure"
+    Just _  -> pure ()
+
 halts :: String -> [String] -> FailReason -> TestTree
 halts name ls why = testCase name $
   case reverse (loadedResponses (run ls)) of
@@ -323,6 +384,7 @@ namesIn = go . flatten
       Define _ (Ident i) _ _ -> i
       Claim  _ (Ident i) _   -> i
       Guess  _ (Ident i) _ _ -> i
+      Quantify _ (Ident i) _ -> i
 
 countsAre :: [String] -> Maybe String -> Int -> Assertion
 countsAre ls current suspended = do

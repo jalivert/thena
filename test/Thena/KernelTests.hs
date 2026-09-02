@@ -227,6 +227,39 @@ validTests =
         Left (Overabstracted v (Ident "a") _) -> v @?= y
         other -> assertFailure ("expected an overabstraction: " ++ show other)
 
+    -- **A ∀-binder consumes the guess's type too, and it must be a universe**
+    -- (MS4 phase 41f). Its 'peeled' case is the ∀ counterpart of the one
+    -- above.
+  , testCase "a ∀-binder needs a universe above it" $
+      case fst (revalidate natVec [] n2
+                  (Under (Guess x (Ident "g")
+                            (Under (Quantify y (Ident "a") (nat "Nat")) (Trailing (nat "Nat")))
+                            (nat "Nat"))
+                    (Trailing (Free x)))) of
+        Left (NotAUniverseAbove v (Ident "a") _) -> v @?= y
+        other -> assertFailure ("expected a universe complaint: " ++ show other)
+
+    -- **The domain is checked AT the expected universe, not merely as a type**
+    -- — the line the phase's design turned on. @Π x : S . T@ inhabits
+    -- @Type (ℓ_S ⊔ ℓ_T)@, so without it @∀ x : Type₁ . Type₀@ would validate
+    -- at @Type₁@, which is a level too low.
+  , testCase "and a domain too big for it is refused" $
+      case fst (revalidate natVec [] n2
+                  (Under (Guess x (Ident "g")
+                            (Under (Quantify y (Ident "a") (Universe (levelOfNat 1)))
+                              (Trailing (Universe (levelOfNat 0))))
+                            (Universe (levelOfNat 1)))
+                    (Trailing (Free x)))) of
+        Left _  -> pure ()
+        other -> assertFailure ("expected a refusal: " ++ show other)
+
+  , testCase "while one that fits is valid" $
+      valid (Under (Guess x (Ident "g")
+                      (Under (Quantify y (Ident "a") (Universe (levelOfNat 0)))
+                        (Trailing (Universe (levelOfNat 0))))
+                      (Universe (levelOfNat 1)))
+              (Trailing (Free x)))
+
   , testCase "and the running example's λ is exactly what makes it valid" $
       valid (Under (Guess x (Ident "g")
                       (Under (Assume y (Ident "a") (nat "Nat")) (Trailing (Free y)))

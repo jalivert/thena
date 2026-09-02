@@ -129,6 +129,7 @@ shapeOf = go . rebuild
       Define _ (Ident i) _ _ -> "define " ++ i
       Claim  _ (Ident i) _   -> "hole "   ++ i
       Guess  _ (Ident i) _ _ -> "guess "  ++ i
+      Quantify _ (Ident i) _ -> "forall " ++ i
 
 nameOf :: Dev -> Var -> String
 nameOf dev v = case [ nm | (nm, w) <- devVars dev, w == v ] of

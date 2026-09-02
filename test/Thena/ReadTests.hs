@@ -16,7 +16,7 @@ import Thena.Core.Context (Entry (..))
 import Thena.Core.Term (Core (..), Ident (..), Var, fresh)
 import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor
-  (Cursor, Focus (..), along, context, enter, focus, rebuild)
+  (Cursor, Focus (..), along, context, enter, focus, identsIn, rebuild)
 import Thena.Development.Partial (Partial (..))
 import Thena.Engine
   ( Exec (..)
@@ -235,15 +235,20 @@ gotoTests =
           Left (CannotMove NoSuchHole) -> pure ()
           other -> assertFailure ("expected NoSuchHole, got " ++ show (fmap (const ()) other))
 
-      -- **Refused, not renamed** (phase 24c): inventing a name is the rule's
-      -- job. Uniqueness is still guaranteed — it is just enforced rather than
-      -- silently repaired.
-    , testCase "a second hole asking for a taken name is refused" $
+      -- **The name is used as given** (MS4 phase 41f). This asserted the
+      -- opposite until then — @claim@ refused a taken name (phase 24c,
+      -- /"refused, not renamed"/) so that identifiers stayed unique. They did
+      -- not: @prim-intro@ never checked, and elaboration hands it the surface
+      -- binder's name. Elaboration's @∀@ and @let@ are what force it, since
+      -- both must bind the name the user wrote.
+    , testCase "a second hole may ask for a taken name and gets it" $
         case run hole [ Do (Claim (Lit (VText "h")) (Lit (VTerm (Trailing type0))))
                       , Do (Claim (Lit (VText "h")) (Lit (VTerm (Trailing type0))))
                       ] of
-          Left (NameTaken "h") -> pure ()
-          other -> assertFailure ("expected NameTaken, got " ++ show (fmap (const ()) other))
+          Left r  -> assertFailure ("did not run: " ++ show r)
+          Right m ->
+            let named = [ i | Ident i <- identsIn (cursor (development m)), i == "h" ]
+             in length named @?= 2
 
     , testCase "and fresh-name is how a rule gets one that is not" $
         case run hole [ Do (Claim (Lit (VText "h")) (Lit (VTerm (Trailing type0))))

@@ -238,6 +238,54 @@ tests =
       -- The identifier case is the whole of MS1's elaboration, and its rule
       -- reaches @try@ through @Call@ — the first thing to supply a rule's
       -- parameters (§8).
+      -- The structural cases (MS4 phase 41f), and the fifth component under
+      -- them. Driven three ways on purpose: @quantify@ by hand, so the op is
+      -- visible without an elaborator around it; @:dev@, so the concrete
+      -- syntax a ∀-binder reads and prints is on the record; and the four
+      -- surface forms end to end.
+    , script
+        "structural"
+        [ ":theorem byhand : Type\8321"
+        , "attack"
+          -- @quantify@ is @intro@'s twin: it acts at the guess and claims the
+          -- codomain at its own universe, which is why the Π's level is not
+          -- pinned to the codomain's.
+        , "quantify A : Type\8320"
+        , ":show"
+        , "into"
+        , "along"
+        , "try-core \8988 Type\8320 \8989"
+        , "solve"
+        , "back"
+        , "back"
+        , "solve"
+        , ":extract"
+        , "qed"
+          -- A leading ∀ run is components, exactly as a leading λ run is; the
+          -- corners are the escape that keeps a trailing Π writable.
+        , ":dev \8704 (A : Type\8320) -> A"
+        , ":dev \8988 \8704 (A : Type\8320) -> A \8989"
+        , ":theorem pi : Type\8321"
+        , "elaborate (forall (A : Type\8320) -> A)"
+        , ":show"
+        , "qed"
+        , ":theorem arr : Type\8321"
+        , "elaborate (Type\8320 -> Type\8320)"
+        , "qed"
+        , "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , ":theorem lt : Nat"
+        , "elaborate (let y : Nat = zero in succ y)"
+        , ":show"
+        , "qed"
+        , ":theorem asc : Nat"
+        , "elaborate (zero : Nat)"
+        , "qed"
+          -- Refused, and the message names the ∀ rather than the term.
+        , ":theorem bad : Nat"
+        , "attack"
+        , "quantify A : Type\8320"
+        , ":quit"
+        ]
     , script
         "elaboration"
         [ ":theorem const : \8704 (A : Type\8320) (a : A) -> A"

@@ -243,7 +243,17 @@ partial
   :: GlobalEnv -> Globals -> Context -> Local -> Int
   -> Raw -> Either ResolveError (Partial, Int)
 partial env gs ctx local n raw = case raw of
-  RawLam bs b -> assumes env gs ctx local n bs b
+  RawLam bs b -> binderLinks env gs Assume ctx local n bs b
+
+  -- **A leading @∀@ run is components, exactly as a leading @λ@ run is** (MS4
+  -- phase 41f). The fifth component is a ∀-binder, so the concrete syntax it
+  -- needs is the one a core Π already has, and adding it here is the whole of
+  -- what the DC's syntax owes it — no token, no production.
+  --
+  -- It costs what the @λ@ case has always cost: a development whose trailing
+  -- term is a bare Π cannot be written without corners. @⌜ ∀ (x : A) -> B ⌝@
+  -- is the escape, and 'RawQuote' below is where it stops the spine.
+  RawPi bs b -> binderLinks env gs Quantify ctx local n bs b
 
   RawLet x val ty b -> do
     (val', n1) <- core env gs ctx local n val
@@ -284,17 +294,22 @@ partial env gs ctx local n raw = case raw of
     (t', n1) <- core env gs ctx local n raw
     Right (Trailing t', n1)
 
--- | Each binder group in a @λ@ becomes its own 'Assume' link.
-assumes
-  :: GlobalEnv -> Globals -> Context -> Local -> Int
+-- | Each binder group in a @λ@ or a @∀@ becomes its own link.
+--
+-- Parameterised by which component it builds, the way 'binders' above is
+-- parameterised by 'Thena.Core.Term.Lam' or 'Thena.Core.Term.Pi': the two runs
+-- differ in exactly that and in nothing else.
+binderLinks
+  :: GlobalEnv -> Globals -> (Var -> Ident -> Core -> Component)
+  -> Context -> Local -> Int
   -> [RawBinder] -> Raw -> Either ResolveError (Partial, Int)
-assumes env gs ctx local n bs b = case bs of
+binderLinks env gs build ctx local n bs b = case bs of
   [] -> partial env gs ctx local n b
   RawBinder x ty : rest -> do
     (ty', n1) <- core env gs ctx local n ty
     let (v, n2) = fresh n1
-    (b', n3) <- assumes env gs ctx ((x, v) : local) n2 rest b
-    Right (Under (Assume v (Ident x) ty') b', n3)
+    (b', n3) <- binderLinks env gs build ctx ((x, v) : local) n2 rest b
+    Right (Under (build v (Ident x) ty') b', n3)
 
 -- | Ξ's binders scope over @s@, @t@ and @T@ and nothing else.
 constraint

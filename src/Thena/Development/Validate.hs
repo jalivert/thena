@@ -32,7 +32,7 @@ import Thena.Global.Env (GlobalEnv)
 --
 -- Thesis §2.3's validity judgment, one line per component:
 --
--- * @λ x : S@ and @? x : S@ — @S@ must be a type in Γ.
+-- * @λ x : S@, @∀ x : S@ and @? x : S@ — @S@ must be a type in Γ.
 -- * @x = s : S@ — @S@ must be a type, and @s@ must have it.
 -- * @? x ≐ g : S@ — @S@ must be a type, and @g@ must itself be a valid
 --   development /whose trailing term has type @S@/.
@@ -107,6 +107,7 @@ chain env ctx n0 expected p0 = case p0 of
          in (r, o ++ o', n3)
     where
       component (Assume x i s)   = isAType (TypeOf x i) ctx n0 s
+      component (Quantify x i s) = isAType (TypeOf x i) ctx n0 s
       component (Claim  x i s)   = isAType (TypeOf x i) ctx n0 s
       component (Define x i v s) =
         isAType (TypeOf x i) ctx n0 s `andThen` \n1 ->
@@ -117,7 +118,8 @@ chain env ctx n0 expected p0 = case p0 of
             (Left e,   o, n2) -> (Left (under x i e), o, n2)
             (Right (), o, n2) -> (Right (), o, n2)
 
-      -- **Only an assumption consumes the expected type**, and that is thesis
+      -- **An assumption and a ∀-binder both consume the expected type**, and
+      -- that is thesis
       -- §2.3 read exactly: @assume@ adds @(λx:S)@, an abstraction, so the
       -- construction below it builds the codomain and not the whole thing. A
       -- hole and a guess are bindings that abstract nothing, and a local
@@ -131,6 +133,23 @@ chain env ctx n0 expected p0 = case p0 of
       -- h) : A -> A@ has a trailing @h : A@, not @h : A -> A@.
       peeled :: Component -> Int -> (Either KernelError (Maybe Core), [Obligation], Int)
       peeled c' n = case (c', expected) of
+        -- @∀ x : S@ under an expected type: the whole thing is a Π, so the
+        -- expected type must be a universe and the codomain below is claimed at
+        -- **that same universe**.
+        --
+        -- **The domain is checked at it too, and that is not redundant.**
+        -- 'component' above has already asked whether @S@ is /a/ type and
+        -- thrown the level away — deliberately, and stated at
+        -- "Thena.Engine"'s @claim@. Here the level is the point: @Π x : S . T@
+        -- inhabits @Type (ℓ_S ⊔ ℓ_T)@, so without this line
+        -- @∀ x : Type₅ . Type₀@ validates at @Type₀@. Checking each side at
+        -- @Type ℓ@ rather than computing the join is equivalent under
+        -- cumulativity and needs no second reading of the Π rule.
+        (Quantify x i s, Just ty) -> case whnf env ctx ty of
+          Universe _ -> case check env ctx n s ty of
+            (Left e,  o, n') -> (Left (Ill (TypeOf x i) e), o, n')
+            (Right (), o, n') -> (Right (Just ty), o, n')
+          other -> (Left (NotAUniverseAbove x i other), [], n)
         (Assume x i s, Just ty) -> case whnf env ctx ty of
           Pi _ dom cod -> case convert env ctx n dom s of
             (Nothing,  o, n') -> (Right (Just (instantiate (Free x) cod)), o, n')
@@ -156,7 +175,8 @@ under x i e = case e of
   -- The others carry no 'Position' to nest. 'Overabstracted' already names the
   -- component it is about; 'NotClosed' is 'certify''s, and 'Levels' is about a
   -- level, which has no position in the chain to be inside of.
-  Overabstracted {} -> e
+  Overabstracted {}    -> e
+  NotAUniverseAbove {} -> e   -- names its own component, as 'Overabstracted' does
   NotClosed {}      -> e   -- 'chain' never builds one
   Levels {}         -> e   -- 'revalidate''s own, and after the walk
 

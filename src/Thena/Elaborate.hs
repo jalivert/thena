@@ -68,12 +68,12 @@ import Thena.Surface.Concrete
 -- same thing 'Thena.Core.Term.fresh' does with the same counter.
 data Names = Names
   { hereName, domName, codName, arrName, funName, argName
-  , appName, refName, tyName, goalName :: String }
+  , appName, refName, tyName, goalName, valName :: String }
 
 namesFor :: Int -> Names
 namesFor n =
   Names (w "here") (w "dom") (w "cod") (w "arr") (w "fun") (w "arg")
-        (w "app") (w "ref") (w "ty") (w "goal")
+        (w "app") (w "ref") (w "ty") (w "goal") (w "val")
   where w x = x ++ show n
 
 compile :: GlobalEnv -> Context -> Int -> Surface -> Either FailReason ([Instr], Int)
@@ -214,10 +214,184 @@ compile env ctx n0 s = case s of
                 ]
             , n
             )
-  SurfacePi {}    -> unsupported "a ∀"
-  SurfaceArrow {} -> unsupported "an arrow"
-  SurfaceLet {}   -> unsupported "a let"
-  SurfaceAnnot {} -> unsupported "an ascription"
+  -- @E⟦(x : t) -> e⟧ = ATTACK; CLAIM (X : Type); PI (x : X); FOCUS X; E⟦t⟧;
+  -- E⟦e⟧; SOLVE@ — Brady's Π case, on the fifth component (MS4 phase 41f).
+  --
+  -- **@quantify@ is @PI@, and it is the reason the component exists.** The
+  -- codomain must be elaborated with @x@ in Γ, and writing a component is the
+  -- only way anything gets into Γ; every component there was extracted as a
+  -- /term/, so the chain could say @λ x : A . B@ and never @Π x : A . B@. The
+  -- user's ruling, 2026-09-02, and his reason is that a declaration hits the
+  -- same wall — Brady elaborates a signature as a development of its own
+  -- (@IDRIS.md@ §4.6) before elaborating the body against it.
+  --
+  -- **A binder group binds one name** ("Thena.Surface.Concrete"), so a run of
+  -- them is a run of @quantify@s under one @attack@, exactly as the λ case
+  -- emits a run of @prim-intro@s.
+  --
+  -- The domain hole is claimed **outside** the @attack@ and elaborated
+  -- **after** the binders are in place, which is Brady's order: the binder's
+  -- type is the hole's /variable/, so it is in scope before it is solved.
+  -- @E⟦(x : t) -> e⟧ = ATTACK; CLAIM (X : Type); PI (x : X);
+  -- FOCUS X; E⟦t⟧; E⟦e⟧; SOLVE@ — Brady's Π case, on the fifth component
+  -- (MS4 phase 41f).
+  --
+  -- **@quantify@ is @PI@, and it is the reason the component exists.** The
+  -- codomain must be elaborated with @x@ in Γ, and writing a component is the
+  -- only way anything gets into Γ; every component there was extracted as a
+  -- /term/, so the chain could say @λ x : A . B@ and never @Π x : A . B@. The
+  -- user's ruling, 2026-09-02, and his reason is that a declaration hits the
+  -- same wall — Brady elaborates a signature as a development of its own
+  -- (@IDRIS.md@ §4.6) before elaborating the body against it.
+  --
+  -- **One binder per clause; a group nests.** @∀ (A : Type₀) (a : A) -> B@ is
+  -- @∀ (A : Type₀) -> ∀ (a : A) -> B@, and it has to be: the domain hole is
+  -- claimed /outside/ the @attack@, where an earlier binder of the same group
+  -- is not in scope. The λ case can emit a run of @prim-intro@s because each
+  -- reads its type from the goal; this one is given the type and must place it.
+  --
+  -- **The domain is elaborated before the body**, which is Brady's order and
+  -- not a preference. With the body first, its @FILL@ unifies the binder's
+  -- type — the domain hole's variable — against the goal and /solves the
+  -- domain hole/, so @∀ (A : Type₀) -> A@ at @Type₁@ silently made @A@'s type
+  -- @Type₁@ and then could not find the hole its annotation was owed.
+  SurfacePi bs body -> case NE.uncons bs of
+    (b, Just rest) -> compile env ctx n0 (SurfacePi (b NE.:| []) (SurfacePi rest body))
+    (SurfaceBinder Implicit _ _, Nothing) ->
+      Left (NoElaborationRule "a ∀ binder in braces")
+    (SurfaceBinder _ _ Nothing, Nothing) ->
+      Left (NoElaborationRule "a ∀ binder with no type")
+    (SurfaceBinder _ x (Just ty), Nothing) ->
+      let (l, n1) = freshLevelMeta n
+       in Right
+            ( [ Bind (hereName names) Here
+              , Bind (domName names ++ "n") (FreshName (lit' "A"))
+              , Bind (domName names)
+                  (Claim (Ref (domName names ++ "n")) (lit (Universe (LVar l))))
+              , Do Attack
+                -- @quantify@ acts at the guess, as @prim-intro@ does, so the
+                -- descent comes after it — the λ case's @into@, @along@
+                -- exactly.
+              , Do (Quantify (lit' x) (Ref (domName names)))
+              , Do Into
+              , Do Along
+                -- The codomain hole, held rather than counted — phase 41c's
+                -- @here@ doing for a nested focus what it does for the outer.
+              , Bind (codName names) Here
+              , Do (Goto (Ref (domName names)))
+              , Do (Elaborate (Lit (VSurface ty)))
+              , Do (Goto (Ref (codName names)))
+              , Do (Elaborate (Lit (VSurface body)))
+              , Do (Goto (Ref (hereName names)))
+              , Do Solve
+              ]
+            , n1
+            )
+
+  -- @E⟦A -> B⟧@ — the application case's shape with @arrow@ where it has
+  -- @apply-to@, and **no new op at all**.
+  --
+  -- It is not the Π case with an anonymous binder: an arrow's codomain cannot
+  -- mention the domain, so there is nothing to put in Γ and nothing to attack.
+  -- Two claims, the term, and the same @FILL@ every other case ends with.
+  SurfaceArrow a b ->
+    let (l1, n1) = freshLevelMeta n
+        (l2, n2) = freshLevelMeta n1
+     in Right
+          ( concat
+              [ [ Bind (hereName names) Here
+                , Bind (domName names ++ "n") (FreshName (lit' "A"))
+                , Bind (domName names)
+                    (Claim (Ref (domName names ++ "n")) (lit (Universe (LVar l1))))
+                , Bind (codName names ++ "n") (FreshName (lit' "B"))
+                , Bind (codName names)
+                    (Claim (Ref (codName names ++ "n")) (lit (Universe (LVar l2))))
+                , Bind (arrName names) (Arrow (Ref (domName names)) (Ref (codName names)))
+                ]
+              , fill (Ref (arrName names))
+              , [ Do (Goto (Ref (domName names)))
+                , Do (Elaborate (Lit (VSurface a)))
+                , Do (Goto (Ref (codName names)))
+                , Do (Elaborate (Lit (VSurface b)))
+                , Do (Goto (Ref (hereName names)))
+                , Do Solve
+                ]
+              ]
+          , n2
+          )
+
+  -- @E⟦let x = v in e⟧ = ATTACK; CLAIM (X : Type); CLAIM (V : X);
+  -- LET (x : X ↦→ V); FOCUS V; E⟦v⟧; E⟦e⟧; SOLVE@ — Brady's @let@ case, and
+  -- **@define@ is his @LET@**.
+  --
+  -- @IDRIS.md@ records @define@ as /"close but infers the type"/, and that
+  -- turns out to be the reason it fits rather than the reason it does not: the
+  -- value handed to it is @V@'s /variable/, whose type is the claimed @X@, so
+  -- inferring gives back exactly the type Brady writes down.
+  --
+  -- **No @attack@ and no @solve@**, where Brady has both. His @LET@ acts on the
+  -- goal; ours writes a component /above/ the focus, so the body elaborates
+  -- into the hole this clause was called at and the clause is three
+  -- instructions shorter. The definition is in Γ by then, so the body's @x@
+  -- resolves to it.
+  --
+  -- **The definition carries the name the user wrote**, which is what made
+  -- phase 24c's taken-name check untenable — see "Thena.Engine"'s @claim@.
+  SurfaceLet x ann v body ->
+    let (l, n1) = freshLevelMeta n
+     in Right
+          ( concat
+              [ [ Bind (hereName names) Here
+                , Bind (tyName names ++ "n") (FreshName (lit' "X"))
+                , Bind (tyName names)
+                    (Claim (Ref (tyName names ++ "n")) (lit (Universe (LVar l))))
+                , Bind (valName names ++ "n") (FreshName (lit' "V"))
+                , Bind (valName names)
+                    (Claim (Ref (valName names ++ "n")) (Ref (tyName names)))
+                ]
+                -- An annotation elaborates into @X@; without one @X@ is left
+                -- for the value's own @FILL@ to unify against.
+              , [ i | Just ty <- [ann]
+                    , i <- [ Do (Goto (Ref (tyName names)))
+                           , Do (Elaborate (Lit (VSurface ty)))
+                           ]
+                ]
+              , [ Do (Goto (Ref (valName names)))
+                , Do (Elaborate (Lit (VSurface v)))
+                , Do (Goto (Ref (hereName names)))
+                , Do (Define (lit' x) (Ref (valName names)))
+                , Do (Elaborate (Lit (VSurface body)))
+                ]
+              ]
+          , n1
+          )
+
+  -- @E⟦e : T⟧@ — Brady gives no rule for ascription, and it needs no new op.
+  --
+  -- Claim @X : Type@, elaborate @T@ into it, and **unify @X@ with the goal**:
+  -- that is the whole of what an ascription says, since @X@ is a solved hole
+  -- by then and δ unfolds it ("Thena.Core.Reduce"). Then elaborate @e@ at the
+  -- same hole, whose type the unification has just constrained.
+  --
+  -- No second hole for @e@ and no @FILL@ of its own — the ascription does not
+  -- build a term, it narrows the one the goal was already asking for.
+  SurfaceAnnot e ty ->
+    let (l, n1) = freshLevelMeta n
+     in Right
+          ( [ Bind (hereName names) Here
+            , Bind (tyName names ++ "n") (FreshName (lit' "X"))
+            , Bind (tyName names)
+                (Claim (Ref (tyName names ++ "n")) (lit (Universe (LVar l))))
+            , Do (Goto (Ref (tyName names)))
+            , Do (Elaborate (Lit (VSurface ty)))
+            , Do (Goto (Ref (hereName names)))
+            , Bind (goalName names) Goal
+            , Do (Unify (Ref (tyName names)) (Ref (goalName names)))
+            , Do (Elaborate (Lit (VSurface e)))
+            ]
+          , n1
+          )
+
   SurfaceElim {}  -> unsupported "an elim"
   where
     -- Each node takes one tick of the counter for the names it binds.
@@ -249,6 +423,7 @@ compile env ctx n0 s = case s of
       , Do (Try (Ref (refName names)))
       ]
     lit' x   = Lit (VText x)
+
 
     -- The innermost binding of that name, if the context has one. The same
     -- reading "Thena.Syntax.Resolve" gives it, kept here rather than shared:
