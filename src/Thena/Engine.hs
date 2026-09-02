@@ -57,7 +57,7 @@ import Thena.Core.Term
   )
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Typing (check, infer, sortOf)
-import Thena.Core.Unify (UnifyResult (..), blockers, unify)
+import Thena.Core.Unify (UnifyResult (..), blockers, unify, unifyInto)
 import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor
   ( Cursor
@@ -837,18 +837,29 @@ perform instr rest m = case operation instr of
   -- command (§12 invariant 3): what it changes has to backtrack with the rest
   -- of the proof state. What it has to say — which holes it solved, what it
   -- parked — goes out through 'Saying', exactly as 'Reduce' reports an orphan.
-  Unify l r -> case (,) <$> term l <*> term r of
-    Left e       -> failure e m
-    Right (a, b) ->
-      let cur = cursor (development m)
-       in case infer (globals m) (Cursor.context cur) (names m) a of
-            (Left e, _, n1)  -> failure (NotTypeable e) m { names = n1 }
-            (Right ty, _, n1) -> case unify (globals m) cur n1 a b ty of
-              (Failed reason, _, n2) -> failure reason m { names = n2 }
-              (result, cur', n2) ->
-                Saying (unifyMessage cur' result)
-                       (advance m { development = Development cur', names = n2 })
+  Unify l r -> unifying unify l r
+
+  -- **@unify@'s directed sibling** (MS4 phase 41g), and the only difference is
+  -- which entry point of "Thena.Core.Unify" it calls — the whole of it is
+  -- there. Elaboration's @FILL@ is what wanted it; see 'Thena.Ops.UnifyInto'.
+  UnifyInto l r -> unifying unifyInto l r
   where
+    -- The two unification ops differ in one argument and share everything
+    -- else, including the type being inferred from the LEFT side. That is not
+    -- arbitrary now that there is a direction: @unify-into s t@ asks whether
+    -- @s@ fits where @t@ is wanted, and @s@ is the term whose type is known.
+    unifying how l r = case (,) <$> term l <*> term r of
+      Left e       -> failure e m
+      Right (a, b) ->
+        let cur = cursor (development m)
+         in case infer (globals m) (Cursor.context cur) (names m) a of
+              (Left e, _, n1)  -> failure (NotTypeable e) m { names = n1 }
+              (Right ty, _, n1) -> case how (globals m) cur n1 a b ty of
+                (Failed reason, _, n2) -> failure reason m { names = n2 }
+                (result, cur', n2) ->
+                  Saying (unifyMessage cur' result)
+                         (advance m { development = Development cur', names = n2 })
+
     operation i = case i of
       Bind _ o -> o
       Do     o -> o

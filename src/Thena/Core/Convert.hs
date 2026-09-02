@@ -12,6 +12,7 @@
 module Thena.Core.Convert
   ( convert
   , subsumes
+  , Direction (..)
   ) where
 
 import Thena.Core.Level (Level, Obligation (..), levelLeq, metasIn)
@@ -72,8 +73,14 @@ subsumes
 subsumes = related Cumulative
 
 -- | Which relation the universe case and the Π codomain are read at.
+--
+-- **Exported, and "Thena.Core.Unify" uses this one rather than declaring its
+-- own** (MS4 phase 41g). It is the same question there — a directed
+-- unification differs from a symmetric one at exactly these two places — and
+-- two types with one name and one meaning is the confusion the standing rule
+-- is about.
 data Direction = Same | Cumulative
-  deriving (Eq)
+  deriving (Eq, Show)
 
 related
   :: Direction -> GlobalEnv -> Context -> Int -> Core -> Core

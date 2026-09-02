@@ -380,10 +380,22 @@ tests =
         , "claim f : Nat -> Nat"
         , "unify \\ (x : Nat) -> f x \8799 \\ (x : Nat) -> succ x"
         , ":show"
+          -- **Two bare holes now SOLVE, where this recorded a parking until
+          -- MS4 phase 41g.** It is the degenerate flex-flex case: no spine on
+          -- either side, so Miller's pattern condition holds vacuously and the
+          -- equation has a most general unifier. The direction is forced by
+          -- the chain — @a@ is declared first, so @b := a@ — and the @:show@
+          -- below is where that is visible.
+          --
+          -- Flex-flex **with** a spine still defers; that is Huet's case and
+          -- §6.1 keeps it.
         , "claim a : Nat"
         , "claim b : Nat"
         , "unify a \8799 b"
         , ":show"
+          -- And the solution composes: @b@ δ-unfolds to @a@, so this equation
+          -- is @a ≟ zero@ and solves @a@ alone. Before 41g both were solved
+          -- here at once, by the parked constraint waking.
         , "unify b \8799 zero"
         , ":show"
         , "claim c : Nat"

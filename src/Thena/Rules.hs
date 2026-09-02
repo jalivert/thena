@@ -472,7 +472,7 @@ operation g i (RawOp w as)
     binary =
       [ ("assume", Assume), ("claim", Claim), ("define", Define)
       , ("quantify", Op.Quantify)
-      , ("concat", Concat), ("unify", Unify)
+      , ("concat", Concat), ("unify", Unify), ("unify-into", Op.UnifyInto)
       , ("arrow", Arrow), ("apply-to", ApplyTo)
       ]
 

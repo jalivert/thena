@@ -29,7 +29,7 @@ import Thena.Core.Context (Context)
 import Thena.Core.Convert (convert)
 import Thena.Core.Term (Core (..), Ident (..), Var, fresh)
 import Thena.Core.Typing (check)
-import Thena.Core.Unify (UnifyResult (..), blockers, constraintsOf, unify)
+import Thena.Core.Unify (UnifyResult (..), blockers, constraintsOf, unify, unifyInto)
 import Thena.Declared (natVec, natVecCounter)
 import Thena.Development.Component (Component (..), forget)
 import Thena.Development.Cursor (Cursor, enter, rebuild)
@@ -49,6 +49,8 @@ tests =
     , testGroup "unify agrees with convert" agreementTests
     , testGroup "every solution type-checks" typeTests
     , testGroup "all or nothing, and the counter" disciplineTests
+    , testGroup "the degenerate flex-flex case is solved" flexFlexTests
+    , testGroup "unify-into is directed at universes" directedTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -112,6 +114,23 @@ run ds a b ty = (result, cur', dev)
 
 resultOf :: [Decl] -> String -> String -> String -> UnifyResult
 resultOf ds a b ty = let (r, _, _) = run ds a b ty in r
+
+-- | 'run', through the directed entry point (MS4 phase 41g).
+--
+-- Written out rather than parameterising 'run', because every existing caller
+-- wants the symmetric one and threading an argument through all of them to say
+-- so would be noise.
+runInto :: [Decl] -> String -> String -> String -> (UnifyResult, Cursor, Dev)
+runInto ds a b ty = (result, cur', dev)
+  where
+    dev = devOf ds
+    (ta, n1) = readIn (devContext dev) (devNames dev) a
+    (tb, n2) = readIn (devContext dev) n1 b
+    (tt, n3) = readIn (devContext dev) n2 ty
+    (result, cur', _) = unifyInto natVec (devCursor dev) n3 ta tb tt
+
+intoResultOf :: [Decl] -> String -> String -> String -> UnifyResult
+intoResultOf ds a b ty = let (r, _, _) = runInto ds a b ty in r
 
 -- | The chain of a finished run, as a list of one-word tags plus names, which
 -- is what a position assertion can be written against without depending on how
@@ -376,6 +395,80 @@ typeTests =
 verdict :: (a, b, c) -> a
 verdict (r, _, _) = r
 
+-- | The degenerate flex-flex case — two bare holes, no spine (MS4 phase 41g).
+--
+-- **It has a most general unifier, so solving it is not eager guessing.**
+-- Miller's pattern condition is that the arguments are distinct locally-bound
+-- variables; with no arguments it holds vacuously. Huet's reason for deferring
+-- flex-flex — no mgu, always solvable, so branching would be guessing — is
+-- about the spined case, which still defers below.
+flexFlexTests :: [TestTree]
+flexFlexTests =
+  [ testCase "two bare holes solve" $
+      resultOf [Hole "a" "Nat", Hole "b" "Nat"] "a" "b" "Nat" `isSolved` 1
+
+    -- **The direction is forced by the chain**, which is the whole of the side
+    -- condition: a hole may only be solved by a term mentioning what is above
+    -- it, so the LATER hole is the one that gets solved. Asserted on the shape
+    -- rather than on a message, because it is a fact about the development.
+  , testCase "and it is the later hole that is solved" $
+      let (_, cur, _) = run [Hole "a" "Nat", Hole "b" "Nat"] "a" "b" "Nat"
+       in shapeOf cur @?= ["hole a", "define b"]
+
+  , testCase "whichever side of the equation it is written on" $
+      let (_, cur, _) = run [Hole "a" "Nat", Hole "b" "Nat"] "b" "a" "Nat"
+       in shapeOf cur @?= ["hole a", "define b"]
+
+    -- Huet's case, and §6.1 keeps it: a spine means there may be no most
+    -- general unifier, so nothing is chosen.
+  , testCase "but flex-flex with a spine still defers" $
+      resultOf [Hole "f" "Nat -> Nat", Hole "h" "Nat"] "f h" "h" "Nat"
+        `isDeferred` 1
+  ]
+
+-- | @unify-into@ relaxes a universe comparison, and only where there is
+-- nothing left to solve (MS4 phase 41g).
+directedTests :: [TestTree]
+directedTests =
+  [ -- The defect this phase exists for: @try-core ⌜ Nat ⌝@ at a claim of
+    -- @Type₁@ succeeded and @elaborate Nat@ did not.
+    testCase "a smaller universe fits a larger one" $
+      intoResultOf [] "Type\8320" "Type\8321" "Type\8322" `isSolved` 0
+  , testCase "and the symmetric one still refuses it" $
+      isFailure (resultOf [] "Type\8320" "Type\8321" "Type\8322")
+    -- Cumulativity has a direction; this is the wrong way round.
+  , testCase "a larger universe does not fit a smaller one" $
+      isFailure (intoResultOf [] "Type\8321" "Type\8320" "Type\8322")
+
+    -- **The boundary, and a golden caught it going wrong.** @0 ≤ ?ℓ@ is
+    -- decidably true, so answering it would discharge the problem without
+    -- solving @?ℓ@ — and the meta would survive to generalisation as a level
+    -- parameter nothing can determine. A level with a meta in it is a solving
+    -- problem, not a deciding one.
+  , testCase "but a level meta is still SOLVED, not merely satisfied" $
+      intoResultOf [Hole "h" "Type"] "Type\8320" "h" "Type\8321" `isSolved` 1
+
+    -- **The direction stops at an argument, and this is where it DIVERGES from
+    -- 'Thena.Core.Convert.related'** — which inherits here and should not.
+    -- @F@ is opaque, so nothing relates @F Type₀@ to @F Type₁@; Coq compares
+    -- application arguments at equality for the same reason. That
+    -- @Convert@ accepts it is @ms4/CLOSEOUT.md@ 12, a soundness bug this
+    -- phase found rather than caused.
+  , testCase "a neutral spine's argument is invariant" $
+      isFailure
+        (intoResultOf [Assumed "F" "Type\8322 -> Type\8320"]
+           "F Type\8320" "F Type\8321" "Type\8320")
+
+    -- A Π's codomain is the one covariant position, so the direction does
+    -- survive there.
+  , testCase "but a Pi's codomain still varies" $
+      intoResultOf [] "Nat -> Type\8320" "Nat -> Type\8321" "Type\8322"
+        `isSolved` 0
+    -- And its domain does not, which is Coq's rule and the sound one.
+  , testCase "while a Pi's domain does not" $
+      isFailure (intoResultOf [] "Type\8321 -> Nat" "Type\8320 -> Nat" "Type\8322")
+  ]
+
 disciplineTests :: [TestTree]
 disciplineTests =
   [ testCase "a failure leaves the development exactly as it was" $
@@ -417,6 +510,11 @@ isSolved :: UnifyResult -> Int -> Assertion
 isSolved r k = case r of
   Solved xs _ | length xs == k -> pure ()
   _ -> assertFailure ("expected " ++ show k ++ " solved, got " ++ show r)
+
+isFailure :: UnifyResult -> Assertion
+isFailure r = case r of
+  Failed _ -> pure ()
+  _        -> assertFailure ("expected a failure, got " ++ show r)
 
 isDeferred :: UnifyResult -> Int -> Assertion
 isDeferred r k = case r of

@@ -83,7 +83,7 @@ pc
   1  ref47 = define ref47n ⌜a⌝
   2  ty47 = typeof ref47
   3  goal47 = goal
-  4  unify ty47 ≟ goal47
+  4  unify-into ty47 goal47
   5  prim-try ref47
   6  prim-solve
 env
@@ -95,7 +95,7 @@ pc
   0  ref47 = define ref47n ⌜a⌝
   1  ty47 = typeof ref47
   2  goal47 = goal
-  3  unify ty47 ≟ goal47
+  3  unify-into ty47 goal47
   4  prim-try ref47
   5  prim-solve
 env
@@ -107,7 +107,7 @@ thena spine> :step
 pc
   0  ty47 = typeof ref47
   1  goal47 = goal
-  2  unify ty47 ≟ goal47
+  2  unify-into ty47 goal47
   3  prim-try ref47
   4  prim-solve
 env
@@ -119,7 +119,7 @@ stack
 thena spine> :step
 pc
   0  goal47 = goal
-  1  unify ty47 ≟ goal47
+  1  unify-into ty47 goal47
   2  prim-try ref47
   3  prim-solve
 env
@@ -131,7 +131,7 @@ stack
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  0  unify ty47 ≟ goal47
+  0  unify-into ty47 goal47
   1  prim-try ref47
   2  prim-solve
 env

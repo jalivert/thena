@@ -386,7 +386,12 @@ compile env ctx n0 s = case s of
             , Do (Elaborate (Lit (VSurface ty)))
             , Do (Goto (Ref (hereName names)))
             , Bind (goalName names) Goal
-            , Do (Unify (Ref (tyName names)) (Ref (goalName names)))
+              -- **@unify-into@ and not @unify@** (MS4 phase 41g). Brady's @FILL@
+        -- /"UNIFYs its type with the goal's"/, and in a cumulative system that
+        -- is too strong: the term's type need only be /usable/ where the goal
+        -- is wanted. @prim-try@ on the next line does the real check and
+        -- subsumes, so what is asked here is solving, not deciding.
+      , Do (UnifyInto (Ref (tyName names)) (Ref (goalName names)))
             , Do (Elaborate (Lit (VSurface e)))
             ]
           , n1
@@ -419,7 +424,12 @@ compile env ctx n0 s = case s of
       , Bind (refName names) (Define (Ref (refName names ++ "n")) t)
       , Bind (tyName names) (Typing (Ref (refName names)))
       , Bind (goalName names) Goal
-      , Do (Unify (Ref (tyName names)) (Ref (goalName names)))
+        -- **@unify-into@ and not @unify@** (MS4 phase 41g). Brady's @FILL@
+        -- /"UNIFYs its type with the goal's"/, and in a cumulative system that
+        -- is too strong: the term's type need only be /usable/ where the goal
+        -- is wanted. @prim-try@ on the next line does the real check and
+        -- subsumes, so what is asked here is solving, not deciding.
+      , Do (UnifyInto (Ref (tyName names)) (Ref (goalName names)))
       , Do (Try (Ref (refName names)))
       ]
     lit' x   = Lit (VText x)

@@ -138,6 +138,23 @@ data Op
   | Back                      -- ^ undo the last move
   | Reduce                    -- ^ commit a whnf at the core focus (§4.7, phase 7)
   | Unify Operand Operand     -- ^ two terms — solve holes, or park the equation (§6, phase 9)
+  | UnifyInto Operand Operand
+    -- ^ two terms — **solve so the first becomes usable where the second is
+    -- wanted** (MS4 phase 41g). @unify@'s directed sibling, standing to it as
+    -- 'Thena.Core.Convert.subsumes' stands to @convert@.
+    --
+    -- **Elaboration's @FILL@ is its caller**, and the reason it must exist is
+    -- that unification there is a /solver/: @fill@ runs @prim-try@ right after,
+    -- which is @check@, which subsumes — so the relation is enforced one
+    -- instruction later with the right variance, and @unify@ was refusing where
+    -- it merely had nothing to solve. Before it, @try-core ⌜ Nat ⌝@ at a claim
+    -- of @Type₁@ succeeded and @elaborate Nat@ did not: the elaborator was
+    -- strictly weaker than the core it elaborates into.
+    --
+    -- **@unify@ keeps no direction**, deliberately — the argument is stated
+    -- once in "Thena.Core.Convert" and holds here: making the symmetric one
+    -- directional would make every caller that wants an equality state a
+    -- direction it does not have.
   | DefineData InductiveDefinition
     -- ^ hand a declaration out through the channel (§7.5)
     -- The life of a hole — thesis tables 2.7 and 2.8, phase 13. Each acts on
@@ -472,6 +489,7 @@ produces o = case o of
   Typing _     -> True
   Define _ _   -> True   -- the variable it bound, as 'Assume' and 'Claim' do
   Unify _ _    -> False
+  UnifyInto _ _ -> False
   Reduce       -> False
   Along        -> False
   Into         -> False
@@ -512,6 +530,7 @@ operandsOf o = case o of
   Say    a     -> [a]
   Concat a b   -> [a, b]
   Unify  a b   -> [a, b]
+  UnifyInto a b -> [a, b]
   Try    a     -> [a]
   Certify a    -> [a]
   FreshName a  -> [a]
@@ -636,6 +655,7 @@ opKeyword o = case o of
   Back         -> "back"
   Reduce       -> "reduce"
   Unify _ _    -> "unify"
+  UnifyInto _ _ -> "unify-into"
   DefineData _ -> "data"
   Attack       -> "prim-attack"
   Intro _      -> "prim-intro"

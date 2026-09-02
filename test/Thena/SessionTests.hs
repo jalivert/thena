@@ -283,6 +283,46 @@ sessionTests =
       , ":theorem s : Nat"
       , "elaborate (zero : Type\8320)"
       ]
+    -- **Cumulativity reaching elaboration** (MS4 phase 41g). Every one of
+    -- these failed with /"Type₀ and Type₁ are different universes"/ until
+    -- @fill@ stopped asking @unify@ for an equality it did not need. The
+    -- second is the one with no surface workaround — a user cannot make @Nat@
+    -- live at @Type₁@, which is what cumulativity is for.
+  , ok "a term fits a universe above its own"
+      [ "data " ++ natDecl
+      , ":theorem u : Type\8321"
+      , "elaborate Nat"
+      , "qed"
+      ]
+  , ok "including as an argument to a parameter pinned above it"
+      [ "data " ++ natDecl
+      , "data Box (A : Type\8321) : Type\8321 where { box : A -> Box A }"
+      , ":theorem u : Type\8321"
+      , "elaborate (Box Nat)"
+      , "qed"
+      ]
+  , ok "and in a lambda's body"
+      [ "data " ++ natDecl
+      , ":theorem u : Nat -> Type\8321"
+      , "elaborate (\\ n -> Nat)"
+      , "qed"
+      ]
+    -- **The degenerate flex-flex case** (MS4 phase 41g). An un-annotated
+    -- @let@ whose value is an application is the only thing in the surface
+    -- language that produces one: the value's @FILL@ equates the @let@'s type
+    -- hole with the application's result hole, and both are bare.
+  , ok "an un-annotated let takes an application value"
+      [ "data " ++ natDecl
+      , ":theorem l : Nat"
+      , "elaborate (let y = succ zero in y)"
+      , "qed"
+      ]
+  , ok "and may still shadow"
+      [ "data " ++ natDecl
+      , ":theorem l : Nat"
+      , "elaborate (let y = zero in let y = succ y in y)"
+      , "qed"
+      ]
   , ok "so a hole left in the scratch cannot block qed"
       ["claim spare : Type₀", ":theorem t : Type₁", "try-core ⌜ Type₀ ⌝", "solve", "qed"]
   ]
