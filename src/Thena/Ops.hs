@@ -270,6 +270,33 @@ data Op
     -- definition and not a claim: a definition's type is determined by its
     -- value. That is also why it takes two operands where 'Assume' and 'Claim'
     -- take a name and a /type/.
+  | Arrow Operand Operand
+    -- ^ two terms → the non-dependent @Π@ between them (MS4 phase 41d).
+    --
+    -- **The first op that BUILDS a term**, and
+    -- @discussion/elaboration-in-rules.md@'s **gap 2** — /"we have no op that
+    -- constructs a term at all"/, which that document called the real wall.
+    -- It arrives with a caller and not before: elaborating @e a@ must claim
+    -- @f : A -> B@ where @A@ and @B@ are holes claimed **at run time**, so the
+    -- arrow cannot be built by whatever wrote the program.
+    --
+    -- **The binder is anonymous** — @_@, the convention @prim-apply@ already
+    -- uses for a domain with no name — and the codomain does not mention it,
+    -- which is what makes it an arrow rather than a Π.
+    --
+    -- **It builds; it does not check.** @Θ ⊢ S : Type@ is @claim@'s side
+    -- condition (phase 25f) and @try@'s (25b), and this is neither: a
+    -- constructed term is checked where it is used, which is the same line
+    -- §3.4 draws everywhere else.
+  | ApplyTo Operand Operand
+    -- ^ two terms → the application of the first to the second (MS4 phase 41d).
+    --
+    -- Brady's @FILL (f s)@, where @f@ and @s@ are holes claimed at run time.
+    -- Named @apply-to@ and not @apply@ because @apply@ is a tactic.
+    --
+    -- **@App (Canonical …) x@ is constructible here and is not well formed.**
+    -- That is @PLAN-representation.md@ §3.4's line, deliberately: the checker
+    -- refuses it, and no abstraction boundary is put in the way of building it.
   | Certify Operand
     -- ^ the development must be pure; yields the closed term it stands for and
     -- the type it is claimed to have, for the driver to run the kernel on
@@ -425,6 +452,8 @@ produces o = case o of
   Certify _    -> False
   FreshName _  -> True
   Here         -> True
+  Arrow _ _    -> True
+  ApplyTo _ _  -> True
   Goal         -> True
   Typing _     -> True
   Define _ _   -> True   -- the variable it bound, as 'Assume' and 'Claim' do
@@ -472,6 +501,8 @@ operandsOf o = case o of
   Certify a    -> [a]
   FreshName a  -> [a]
   Here         -> []
+  Arrow a b    -> [a, b]
+  ApplyTo a b  -> [a, b]
   Goal         -> []
   Typing a     -> [a]
   Define a b   -> [a, b]
@@ -601,6 +632,8 @@ opKeyword o = case o of
   Call _ _     -> "call"
   FreshName _  -> "fresh-name"
   Here         -> "here"
+  Arrow _ _    -> "arrow"
+  ApplyTo _ _  -> "apply-to"
   Goal         -> "goal"
   Typing _     -> "typeof"
   Define _ _   -> "define"

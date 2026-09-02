@@ -48,6 +48,7 @@ import Thena.Core.Level (Level (..), levelVarName)
 import Thena.Core.Context (Context)
 import Thena.Core.Term
   ( Core (..)
+  , close
   , GlobalName (..)
   , Ident (..)
   , Var
@@ -718,6 +719,23 @@ perform instr rest m = case operation instr of
   Here -> case focus (cursor (development m)) of
     OnComponent c -> produce (VTerm (Trailing (Free (variableOf c)))) m
     _             -> failure (CannotMove NotOnTheSpine) m
+
+  -- **The two term-construction ops** (MS4 phase 41d) — the first ops that
+  -- build a term rather than reading, moving or installing one.
+  --
+  -- Neither touches the development or the focus, and neither type-checks what
+  -- it builds: a constructed term is checked where it is /used/, by @claim@'s
+  -- side condition or @try@'s.
+  Arrow a b -> case (,) <$> term a <*> term b of
+    Left r          -> failure r m
+    Right (dom, cod) ->
+      let (v, n1) = fresh (names m)
+       in produce (VTerm (Trailing (Pi (Ident "_") dom (close v cod))))
+                  m { names = n1 }
+
+  ApplyTo f x -> case (,) <$> term f <*> term x of
+    Left r         -> failure r m
+    Right (f', x') -> produce (VTerm (Trailing (App f' x'))) m
 
   Goal -> case Cursor.expectedType (cursor (development m)) of
     Just t  -> produce (VTerm (Trailing t)) m

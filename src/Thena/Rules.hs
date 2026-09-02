@@ -472,6 +472,7 @@ operation g i (RawOp w as)
     binary =
       [ ("assume", Assume), ("claim", Claim), ("define", Define)
       , ("concat", Concat), ("unify", Unify)
+      , ("arrow", Arrow), ("apply-to", ApplyTo)
       ]
 
 -- | What @ask@'s second word may be — 'AnswerKind', spelled.

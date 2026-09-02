@@ -58,6 +58,7 @@ tests =
     "elaboration"
     [ leafTests
     , hereTests
+    , constructionTests
     , lambdaTests
     , unsupportedTests
     , baseTests
@@ -334,6 +335,56 @@ hereTests =
           Left (CannotMove NotOnTheSpine) -> pure ()
           other -> assertFailure ("expected a refusal: " ++ show other)
     ]
+
+-- --------------------------------------------------------------------------
+-- Term construction (MS4 phase 41d)
+-- --------------------------------------------------------------------------
+
+-- | The first two ops that build a term — gap 2, arriving with a caller.
+constructionTests :: TestTree
+constructionTests =
+  testGroup
+    "arrow and apply-to build terms"
+    [ -- **Stated as the property, not as the representation.** An arrow's
+      -- codomain does not mention its binder, and instantiating the scope with
+      -- anything at all must give the codomain back unchanged — which says
+      -- \"non-dependent\" without the test having to know which variable was
+      -- minted to close it.
+      testCase "an arrow's codomain does not mention its binder" $
+        case built (Ops.Arrow (litTerm type0) (litTerm hyp)) of
+          Just (Pi (Ident "_") dom sc) -> do
+            dom @?= type0
+            Thena.Core.Term.instantiate type0 sc @?= hyp
+            Thena.Core.Term.instantiate hyp   sc @?= hyp
+          other -> assertFailure ("not an arrow: " ++ show other)
+
+    , testCase "apply-to builds an application" $
+        built (Ops.ApplyTo (litTerm hyp) (litTerm type0))
+          @?= Just (App hyp type0)
+
+      -- **They build; they do not check.** @Type₀@ applied to anything is not
+      -- well formed and this still constructs it: a constructed term is checked
+      -- where it is used, by @claim@'s side condition or @try@'s.
+      -- @PLAN-representation.md@ §3.4's line.
+    , testCase "and neither checks what it builds" $
+        built (Ops.ApplyTo (litTerm type0) (litTerm type0))
+          @?= Just (App type0 type0)
+
+      -- Pure: the development is untouched, which is why they need no focus.
+    , testCase "and neither touches the development" $
+        case snd (runOut (machineAt hole [Bind "r" (Ops.Arrow (litTerm type0) (litTerm type0))])) of
+          Left r  -> assertFailure ("did not run: " ++ show r)
+          Right m -> focusedVar m @?= Just goalVar
+    ]
+  where
+    litTerm t = Lit (VTerm (Trailing t))
+    hyp       = Free hypVar
+
+    built o = case snd (runOut (machineAt hole [Bind "r" o])) of
+      Right m -> case lookup "r" (env (exec m)) of
+        Just (VTerm (Trailing t)) -> Just t
+        _                         -> Nothing
+      Left _  -> Nothing
 
 -- --------------------------------------------------------------------------
 -- The shipped base
