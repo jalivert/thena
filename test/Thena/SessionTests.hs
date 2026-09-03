@@ -363,6 +363,22 @@ sessionTests =
       , "elaborate (elim Ev () (\\ n p -> Nat) (zero (\\ n p ih -> succ ih)) (zero) evZero)"
       , "qed"
       ]
+    -- **A declaration that does not finish SAYS SO** (MS4 phase 56), and it
+    -- did not between phase 53 and here. @pop-development@ truncated the frame
+    -- stack to the development\'s own depth on success and **not on failure**,
+    -- so an unfinished development unwound into the elaboration\'s own
+    -- @Choice@ frames — which its success would have discarded. A @Choice@
+    -- frame resumes the /inner/ continuation it captured, so @define-global@
+    -- was dropped, the machine reported @Completed@, and the REPL printed
+    -- nothing at all: a @declare@ that installed no global and raised no error.
+    --
+    -- The target is @_@, so the elimination is left with an open hole; the
+    -- elimination is what makes the choice point that used to swallow it.
+  , notOk "a declaration left unfinished is refused, not silently dropped"
+      [ "data " ++ natDecl
+      , "declare bad : Nat ; bad = "
+          ++ "elim Nat () (\\ k -> Nat) ((zero) (\\ k ih -> succ ih)) () _"
+      ]
     -- **A dependent motive eliminates** (MS4 phase 54), and it could not
     -- between 49e and 54: giving the eliminator a wrapper made @elim@ an
     -- application, so its argument holes took the same names the nested

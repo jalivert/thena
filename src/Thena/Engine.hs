@@ -694,7 +694,18 @@ perform instr rest m = case operation instr of
     (outer, depth) : beneath -> case extract (flatten (development m)) of
       -- Purity is 'Thena.Development.Partial.extract'\'s answer, not a second
       -- opinion — the same traversal @certify@ uses.
-      Left impure -> failure (NotYetPure (whereImpure impure)) m
+      --
+      -- **The frames go with the development whether this succeeds or fails**
+      -- (MS4 phase 56). Only the success branch truncated until then, so a
+      -- @pop-development@ that found the development unfinished unwound into
+      -- the very @Choice@ frames its success would have discarded — the
+      -- elaboration\'s own, belonging to a development that is over. A
+      -- @Choice@ frame resumes the /inner/ continuation it captured, so the
+      -- caller\'s remaining program was dropped: @define-global@ never ran, the
+      -- machine reported @Completed@, and a @declare@ that installed nothing
+      -- said nothing at all. Phase 53\'s principle, on the branch it was not
+      -- applied to.
+      Left impure -> failure (NotYetPure (whereImpure impure)) (unstacked m)
       Right t ->
         -- **The frames the inner development made go with it** (phase 53), and
         -- only those: everything below @depth@ is the caller's and is still
@@ -703,10 +714,10 @@ perform instr rest m = case operation instr of
         -- would restore has just been extracted and put away, so keeping it
         -- would let a later failure resurrect a finished proof.
         produce (VTerm (Trailing t))
-                m { development = outer
-                  , enclosing   = beneath
-                  , exec        = (exec m) { stack = keepBelow depth (stack (exec m)) }
-                  }
+                (unstacked m) { development = outer, enclosing = beneath }
+      where
+        unstacked m' =
+          m' { exec = (exec m') { stack = keepBelow depth (stack (exec m')) } }
 
   -- **A surface datatype reaches the driver as a written one does** (MS4 phase
   -- 42b): this assembles the record and 'Declaring' carries it out, so
