@@ -81,8 +81,5 @@ thena spine> :theorem bad : Nat
 proving bad : Nat
 thena spine> attack
 thena spine> quantify A : Type₀
-backtracking to 38: elaborate
-solved: B
-solved: A
-already equal
+stuck: quantify builds a type, so that hole must be claimed at a universe
 thena spine> :quit
