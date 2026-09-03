@@ -155,7 +155,16 @@ data Machine = Machine
     -- ^ the development, focused. **Named for what it is** (phase 37): it was
     -- @proof@, beside a @Session.sessionProof@ that meant a theorem, and one
     -- word for two things is where @docs/SESSION-STATE.md@ §5.5 came from.
-  , enclosing   :: [Development]
+  , enclosing   :: [(Development, Int)]
+    -- ^ the developments a @push-development@ suspended, each with **the depth
+    -- the frame stack had when it was pushed** (phase 53).
+    --
+    -- **A choice point belongs to the development it was made in — HIS RULING,
+    -- 2026-09-03.** Phase 52 made `:theorem`, @qed@, `:abandon` and `:suspend`
+    -- discard them; this is the other pair of boundaries, and the one a
+    -- @declare@ crosses twice inside a single command. Without the depth
+    -- @pop-development@ has no way to tell the frames the inner development
+    -- made from the ones its caller was already standing in.
     -- ^ **the developments this one is nested inside** (MS4 phase 42, his
     -- decision) — Brady's @NEW PROOF@ made a stack.
     --
@@ -223,7 +232,7 @@ data Frame
       , resumeEnv :: Env
       , alts      :: RuleIter    -- ^ the matches not yet tried, lazily (§7.6)
       , saved     :: Development  -- ^ the state before the first alternative ran
-      , savedEnclosing :: [Development]
+      , savedEnclosing :: [(Development, Int)]
         -- ^ and the developments it was nested inside (MS4 phase 42). A body
         -- that pushes a development and then fails must unwind to the stack it
         -- had, not to the one it left.
@@ -678,19 +687,29 @@ perform instr rest m = case operation instr of
       (Right _, _, n1) ->
         let (dev, n2) = newDevelopment' t n1
          in Continue (advance m { development   = dev
-                                , enclosing     = development m : enclosing m
+                                , enclosing     = (development m, depthNow) : enclosing m
                                 , names         = n2
                                 })
+        where depthNow = length (stack (exec m))
 
   PopDevelopment -> case enclosing m of
     [] -> failure NoEnclosingDevelopment m
-    outer : beneath -> case extract (flatten (development m)) of
+    (outer, depth) : beneath -> case extract (flatten (development m)) of
       -- Purity is 'Thena.Development.Partial.extract'\'s answer, not a second
       -- opinion — the same traversal @certify@ uses.
       Left impure -> failure (NotYetPure (whereImpure impure)) m
       Right t ->
+        -- **The frames the inner development made go with it** (phase 53), and
+        -- only those: everything below @depth@ is the caller's and is still
+        -- being stood in. A @Choice@ frame survives success (§7.7) so that an
+        -- untried alternative can be @retry@ed into — but the development it
+        -- would restore has just been extracted and put away, so keeping it
+        -- would let a later failure resurrect a finished proof.
         produce (VTerm (Trailing t))
-                m { development = outer, enclosing = beneath }
+                m { development = outer
+                  , enclosing   = beneath
+                  , exec        = (exec m) { stack = keepBelow depth (stack (exec m)) }
+                  }
 
   -- **A surface datatype reaches the driver as a written one does** (MS4 phase
   -- 42b): this assembles the record and 'Declaring' carries it out, so
@@ -1537,6 +1556,15 @@ blockFailureOf :: [RuleError] -> FailReason
 blockFailureOf errs = case errs of
   BadOperands _ i w : _ -> BlockOperands i w
   _                     -> NoElaborationRule "a do block that does not resolve"
+
+-- | The frames that were already there at a given depth.
+--
+-- The stack grows at the head, so the oldest @n@ are its last @n@. A stack
+-- shorter than the mark keeps everything: a body may pop past its own
+-- @push-development@, and there is nothing of the inner development left to
+-- drop.
+keepBelow :: Int -> [Frame] -> [Frame]
+keepBelow n fs = drop (length fs - n) fs
 
 operandValue :: Env -> Operand -> Either FailReason Value
 operandValue e o = either (Left . UnboundInBody) Right (Op.operandIn e o)

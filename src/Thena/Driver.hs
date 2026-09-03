@@ -233,7 +233,7 @@ data Working
 --
 -- It is the same pair 'sessionHistory' keeps, and that is not a coincidence: a
 -- 'Parked' attempt /is/ an undo snapshot with a name and a statement attached.
-type Snapshot = (Exec, Development, [Development])
+type Snapshot = (Exec, Development, [(Development, Int)])
 
 -- | An unfinished proof of a theorem (§2.4, §3.3.1).
 --
