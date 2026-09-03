@@ -21,7 +21,7 @@ import Thena.Core.Term
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, crossType, enter)
 import Thena.Development.Partial (Partial (..))
-import Thena.Declared (natDecl)
+import Thena.Declared (nat, natDecl)
 import Thena.Standard (expectedBase)
 import Thena.Driver (parseDeclaration)
 import Thena.Engine
@@ -56,7 +56,7 @@ import Thena.Ops
 import qualified Thena.Ops as Ops
 import qualified Data.List.NonEmpty as NE
 import Thena.Surface.Concrete
-  (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..))
+  (Plicity (..), Surface (..), SurfaceArg (..))
 import Thena.Surface.Zipper (rootedAt)
 import Thena.Rules
   ( RuleError (..)
@@ -385,16 +385,14 @@ producesTests =
         -- be one of the three cases still behind it, and a λ is the one that
         -- needs no globals. The goal is an arrow so @prim-intro@ has a binder
         -- to take.
-        -- **An application** (MS4 phase 49c): the λ case is a clause now too,
-        -- so what is left behind this op is an application, an @elim@ and
-        -- nothing else — and an application is the one that needs no globals.
-        -- Its head is a λ, so the binary rule takes it.
-      , ("prim-elaborate", e, hole, [],
+        -- **A name-headed application** (MS4 phase 49d): all this op still does
+        -- is @E⟦x ⃗a⟧@ and @elim@, so the term has to have a name at its head
+        -- and that name has to be in scope — hence @nat@ rather than the empty
+        -- environment every other row uses.
+      , ("prim-elaborate", nat, holeAt natType, [],
            Ops.Elaborate (Lit (VSurface (rootedAt
-             (SurfaceApp
-                (SurfaceLam (SurfaceBinder Explicit "z" Nothing NE.:| [])
-                            (SurfaceName "z"))
-                (SurfaceArg Explicit SurfaceUniverseOpen NE.:| []))))))
+             (SurfaceApp (SurfaceName "succ")
+                (SurfaceArg Explicit (SurfaceName "zero") NE.:| []))))))
       ]
 
     -- @try ‹t›@, as 'expectedBase' ships it — what @call@ needs something to
@@ -471,7 +469,7 @@ everyHoleRule =
   [ "attack", "try-core", "abandon", "eliminate-core", "prove", "fill"
   , "unify-refine-core", "apply-core"
   ]
-    ++ replicate 14 "elaborate" ++ replicate 2 "enter-binders"
+    ++ replicate 15 "elaborate" ++ replicate 2 "enter-binders"
 
 -- | The λ case's two recursive helpers, which every listing at a guess shows.
 --
@@ -480,3 +478,7 @@ everyHoleRule =
 -- its state test passes — and @intro-binders@ really does apply at a guess.
 walkers :: [String]
 walkers = ["intro-binders", "intro-binders", "enter-binders", "enter-binders"]
+
+-- | @Nat@, as a core term, for the row above.
+natType :: Core
+natType = Global (GlobalName "Nat") []

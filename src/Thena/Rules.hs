@@ -58,7 +58,8 @@ import Thena.Ops
   , partWords
   , produces
   )
-import Thena.Surface.Concrete (Surface (..))
+import Thena.Surface.Concrete
+  (Plicity (..), Surface (..), SurfaceArg (..))
 import qualified Thena.Surface.Zipper as Zipper
 import Thena.Syntax.Concrete
   ( RawInstr (..)
@@ -281,6 +282,8 @@ holds env cur args t = case t of
   SurfaceIsAscription o   -> surfaceIs o isAscription
   SurfaceIsElim o         -> surfaceIs o isElim
   SurfaceIsDo o           -> surfaceIs o isDo
+  AppArgsAreExplicit o    -> surfaceIs o argsExplicit
+  AppHeadIsName o         -> surfaceIs o headIsName
   LambdaBindsMore o       -> surfaceIs o bindsMore
   LambdaBindsOne o        -> surfaceIs o bindsOne
   LetIsAnnotated o        -> surfaceIs o isAnnotatedLet
@@ -316,6 +319,10 @@ holds env cur args t = case t of
     isAscription   s = case s of SurfaceAnnot _ _ -> True; _ -> False
     isElim         s = case s of SurfaceElim {} -> True; _ -> False
     isDo           s = case s of SurfaceDo _ -> True; _ -> False
+    headIsName     s = case s of SurfaceApp (SurfaceName _) _ -> True; _ -> False
+    argsExplicit   s = case s of
+      SurfaceApp _ as -> all (\(SurfaceArg p _) -> p == Explicit) as
+      _               -> False
     bindsMore      s = case s of SurfaceLam bs _ -> length bs > 1; _ -> False
     bindsOne       s = case s of SurfaceLam bs _ -> length bs == 1; _ -> False
     isAnnotatedLet s = case s of SurfaceLet _ (Just _) _ _ -> True; _ -> False
@@ -614,6 +621,8 @@ operation g i (RawOp w as)
       , ("arrow-domain", Op.ArrowDomain), ("arrow-codomain", Op.ArrowCodomain)
       , ("ascription-type", Op.AscriptionType)
       , ("ascription-term", Op.AscriptionTerm)
+      , ("app-function", Op.AppFunction)
+      , ("app-last-argument", Op.AppLastArgument)
       , ("lambda-name", Op.LambdaName), ("lambda-tail", Op.LambdaTail)
       , ("lambda-body", Op.LambdaBody)
       , ("let-name", Op.LetName), ("let-type", Op.LetType)
@@ -691,6 +700,8 @@ withOperands t os = case (t, os) of
   (SurfaceIsAscription _, [o])   -> Just (SurfaceIsAscription o)
   (SurfaceIsElim _, [o])         -> Just (SurfaceIsElim o)
   (SurfaceIsDo _, [o])           -> Just (SurfaceIsDo o)
+  (AppArgsAreExplicit _, [o])    -> Just (AppArgsAreExplicit o)
+  (AppHeadIsName _, [o])         -> Just (AppHeadIsName o)
   (LambdaBindsMore _, [o])       -> Just (LambdaBindsMore o)
   (LambdaBindsOne _, [o])        -> Just (LambdaBindsOne o)
   (LetIsAnnotated _, [o])        -> Just (LetIsAnnotated o)
@@ -720,6 +731,8 @@ testOperands t = case t of
   SurfaceIsAscription o   -> [o]
   SurfaceIsElim o         -> [o]
   SurfaceIsDo o           -> [o]
+  AppArgsAreExplicit o    -> [o]
+  AppHeadIsName o         -> [o]
   LambdaBindsMore o       -> [o]
   LambdaBindsOne o        -> [o]
   LetIsAnnotated o        -> [o]
@@ -751,6 +764,8 @@ testWord t = case t of
   SurfaceIsAscription _   -> "surface-is-ascription"
   SurfaceIsElim _         -> "surface-is-elim"
   SurfaceIsDo _           -> "surface-is-do"
+  AppArgsAreExplicit _    -> "app-args-are-explicit"
+  AppHeadIsName _         -> "app-head-is-name"
   LambdaBindsMore _       -> "lambda-binds-more"
   LambdaBindsOne _        -> "lambda-binds-one"
   LetIsAnnotated _        -> "let-is-annotated"
@@ -778,6 +793,8 @@ everyTest =
   , SurfaceIsAscription (Lit (VText ""))
   , SurfaceIsElim (Lit (VText ""))
   , SurfaceIsDo (Lit (VText ""))
+  , AppArgsAreExplicit (Lit (VText ""))
+  , AppHeadIsName (Lit (VText ""))
   , LambdaBindsMore (Lit (VText ""))
   , LambdaBindsOne (Lit (VText ""))
   , LetIsAnnotated (Lit (VText ""))

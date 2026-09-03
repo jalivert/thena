@@ -218,7 +218,40 @@ elaborateClauses =
     -- a λ over its binder group, an application over its arguments against the
     -- head's plicities, an @elim@ over its fields. The rule language has no
     -- lists (MS4 phase 49b).
-  , clause SurfaceIsApp [Do (Op.Elaborate (Ref "t"))]
+    -- **Brady's split, as two clauses** (MS4 phase 49d). The first is
+    -- @E⟦x ⃗a⟧@, which begins with @EXPAND@ and is still in Haskell because
+    -- matching written arguments against a head's plicities is a computation
+    -- over two lists (@ms4\/CLOSEOUT.md@ 28). **It may fail and fall through**
+    -- to the second, which is what the Haskell @case@ did: a partial
+    -- application of a head with recorded plicities is an ordinary binary
+    -- application.
+  , Rule (GlobalName "elaborate") ["t"]
+      [FocusIsHole, SurfaceIsApp (Ref "t"), AppHeadIsName (Ref "t")]
+      [Do (Op.Elaborate (Ref "t"))]
+  , Rule (GlobalName "elaborate") ["t"]
+      [FocusIsHole, SurfaceIsApp (Ref "t"), AppArgsAreExplicit (Ref "t")]
+      [ Bind "h" Here
+      , Bind "dn" (FreshName (Lit (VText "A")))
+      , Bind "u1" Op.FreshUniverse
+      , Bind "d" (Claim (Ref "dn") (Ref "u1"))
+      , Bind "cn" (FreshName (Lit (VText "B")))
+      , Bind "u2" Op.FreshUniverse
+      , Bind "c" (Claim (Ref "cn") (Ref "u2"))
+      , Bind "ar" (Arrow (Ref "d") (Ref "c"))
+      , Bind "fn" (FreshName (Lit (VText "f")))
+      , Bind "f" (Claim (Ref "fn") (Ref "ar"))
+      , Bind "sn" (FreshName (Lit (VText "s")))
+      , Bind "sv" (Claim (Ref "sn") (Ref "d"))
+      , Bind "ap" (ApplyTo (Ref "f") (Ref "sv"))
+      , call "fill" [Ref "ap"]
+      , Do (Goto (Ref "f"))
+      , Bind "g" (Op.AppFunction (Ref "t"))
+      , call "elaborate" [Ref "g"]
+      , Do (Goto (Ref "sv"))
+      , Bind "a" (Op.AppLastArgument (Ref "t"))
+      , call "elaborate" [Ref "a"]
+      , Do (Goto (Ref "h")), call "solve" []
+      ]
     -- **The group is walked by recursion**, not by an iterating instruction:
     -- each helper peels one binder and calls itself on the tail, so the surface
     -- term is its own counter (MS4 phase 49c). Attacking once per binder

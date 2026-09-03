@@ -39,6 +39,7 @@ elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
+elaborate ‹t›
 enter-binders ‹t›
 enter-binders ‹t›
 thena spine> elaborate a
@@ -73,7 +74,10 @@ thena spine> along
 thena spine> elaborate b
 stuck: not in scope: b
 thena spine> elaborate (a a)
-stuck: that head does not take that many arguments
+chose 23: elaborate
+backtracking to 23: elaborate
+solved: B
+stuck: A and A1 -> B cannot be made equal
 thena spine> :abandon
 abandoned again
 thena spine> :theorem shown : ∀ (A : Type₀) (a : A) -> A

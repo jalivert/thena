@@ -60,6 +60,7 @@ elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
+elaborate ‹t›
 enter-binders ‹t›
 enter-binders ‹t›
 thena spine> eliminate-core ⌜ Type₀ ⌝

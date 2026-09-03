@@ -380,6 +380,10 @@ data Op
     -- **They do not reuse the cursor's words.** @dom@ and @cod@ already move the
     -- development's ambient cursor; these produce a value, and one word for two
     -- different things is what @CLAUDE.md@'s /no confusions/ rules out.
+  | AppFunction Operand
+    -- ^ a spine minus its last argument — @f a b@ gives @f a@, @f a@ gives @f@
+    -- (MS4 phase 49d)
+  | AppLastArgument Operand  -- ^ … that last argument
   | LambdaName Operand
     -- ^ the first binder's name in a surface λ, as text (MS4 phase 49c).
     -- **It refuses an annotated or implicit binder**, which is the whole of
@@ -775,6 +779,8 @@ produces o = case o of
   SurfaceNameOf _ -> True
   SurfaceUniverseOf _ -> True
   ArrowDomain _ -> True
+  AppFunction _ -> True
+  AppLastArgument _ -> True
   LambdaName _ -> True
   LambdaTail _ -> True
   LambdaBody _ -> True
@@ -857,6 +863,8 @@ operandsOf o = case o of
   SurfaceNameOf x -> [x]
   SurfaceUniverseOf x -> [x]
   ArrowDomain x -> [x]
+  AppFunction x -> [x]
+  AppLastArgument x -> [x]
   LambdaName x -> [x]
   LambdaTail x -> [x]
   LambdaBody x -> [x]
@@ -977,6 +985,15 @@ data Test
   | SurfaceIsAscription Operand    -- ^ @e : T@
   | SurfaceIsElim Operand          -- ^ @elim D … t@
   | SurfaceIsDo Operand            -- ^ @do { … }@
+  | AppArgsAreExplicit Operand
+    -- ^ a spine with no argument written in braces (MS4 phase 49d).
+    --
+    -- **The binary clause has no notion of plicity at all**, so it must decline
+    -- a written implicit rather than take it as an ordinary argument and report
+    -- a type mismatch about a term the user never meant to write explicitly.
+  | AppHeadIsName Operand
+    -- ^ a spine whose head is a name (MS4 phase 49d) — Brady's split, and the
+    -- clause that begins with @EXPAND@.
   | LambdaBindsMore Operand        -- ^ a λ whose group has a binder after the
                                    --   first (MS4 phase 49c)
   | LambdaBindsOne Operand         -- ^ … and one whose group has just the one
@@ -1066,6 +1083,8 @@ opKeyword o = case o of
   SurfaceNameOf _ -> "surface-name"
   SurfaceUniverseOf _ -> "surface-universe"
   ArrowDomain _ -> "arrow-domain"
+  AppFunction _ -> "app-function"
+  AppLastArgument _ -> "app-last-argument"
   LambdaName _ -> "lambda-name"
   LambdaTail _ -> "lambda-tail"
   LambdaBody _ -> "lambda-body"

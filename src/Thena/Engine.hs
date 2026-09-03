@@ -1133,6 +1133,20 @@ perform instr rest m = case operation instr of
   -- **A plain binder only** — no annotation and no braces. That is the whole of
   -- what the λ case cannot elaborate, and saying it here means the clause finds
   -- out before it has introduced anything.
+  Op.AppFunction x -> surfaceMove x "an application" $ \s -> case s of
+    Concrete.SurfaceApp h as ->
+      let front = NE.init as
+          fun   = case front of
+                    [] -> h
+                    _  -> Concrete.SurfaceApp h (NE.fromList front)
+       in Just (Zipper.intoFun (NE.last as) fun)
+    _ -> Nothing
+  Op.AppLastArgument x -> surfaceMove x "an application" $ \s -> case s of
+    Concrete.SurfaceApp h as ->
+      let Concrete.SurfaceArg _ a = NE.last as
+       in Just (Zipper.intoArg h as (length as - 1) a)
+    _ -> Nothing
+
   Op.LambdaName x -> case surfaceAt x of
     Left r  -> failure r m
     Right (Concrete.SurfaceLam bs _)

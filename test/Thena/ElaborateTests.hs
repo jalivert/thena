@@ -456,7 +456,7 @@ baseTests =
           @?= [ "attack", "try-core", "abandon", "eliminate-core"
               , "prove", "fill", "unify-refine-core", "apply-core"
               ]
-              ++ replicate 14 "elaborate" ++ replicate 2 "enter-binders"
+              ++ replicate 15 "elaborate" ++ replicate 2 "enter-binders"
 
     , testCase "prove is a rule over prim-prove" $
         case [ r | r@(Rule (GlobalName "prove") _ _ _) <- drain (matches expectedBase emptyGlobals hole) ] of

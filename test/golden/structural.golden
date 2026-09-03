@@ -53,6 +53,7 @@ proving lt : Nat
 thena spine> elaborate (let y : Nat = zero in succ y)
 solved: ?ℓ32
 already equal
+chose 38: elaborate
 already equal
 already equal
 thena spine> :show
@@ -71,7 +72,7 @@ lt : Nat   ∎
 thena spine> :theorem asc : Nat
 proving asc : Nat
 thena spine> elaborate (zero : Nat)
-solved: ?ℓ44
+solved: ?ℓ45
 already equal
 already equal
 thena spine> qed
@@ -80,5 +81,8 @@ thena spine> :theorem bad : Nat
 proving bad : Nat
 thena spine> attack
 thena spine> quantify A : Type₀
-stuck: quantify builds a type, so that hole must be claimed at a universe
+backtracking to 38: elaborate
+solved: B
+solved: A
+already equal
 thena spine> :quit

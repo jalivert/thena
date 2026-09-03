@@ -27,6 +27,7 @@ standard
   elaborate ‹t›
   elaborate ‹t›
   elaborate ‹t›
+  elaborate ‹t›
   intro-binders ‹t›
   intro-binders ‹t›
   enter-binders ‹t›
@@ -40,6 +41,7 @@ prove
 fill ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
+elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
@@ -94,6 +96,7 @@ elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
+elaborate ‹t›
 enter-binders ‹t›
 enter-binders ‹t›
 thena spine> attack
@@ -127,6 +130,7 @@ prove
 fill ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
+elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›

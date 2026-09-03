@@ -59,7 +59,7 @@ import Thena.Surface.Concrete
 import Thena.Surface.Zipper
   ( SurfaceZipper, focus
   , intoArg
-  , intoElimField, intoFun
+  , intoElimField
   )
 
 -- | The program that elaborates one surface node into the focused hole.
@@ -76,6 +76,12 @@ import Thena.Surface.Zipper
 -- for, so a node's own clause is the only head that matches it. Reaching this
 -- op means the rule base has lost that clause, or a body wrote
 -- @prim-elaborate@ by hand.
+-- | What the name-headed application case answers when the plicities do not
+-- fit: the binary clause is next in the rule base and takes it.
+binaryIsAClause :: FailReason
+binaryIsAClause =
+  NoElaborationRule "an application whose head's plicities do not fit"
+
 movedToTheRuleBase :: FailReason
 movedToTheRuleBase =
   NoElaborationRule "a surface node whose clause is in the rule base, not in \
@@ -93,13 +99,11 @@ movedToTheRuleBase =
 -- two nodes can never share one. Each 'compile' consumes a tick for it — the
 -- same thing 'Thena.Core.Term.fresh' does with the same counter.
 data Names = Names
-  { hereName, domName, codName, arrName, funName, argName
-  , appName, refName, tyName, goalName, elimName :: String }
+  { hereName, argName, appName, refName, tyName, goalName, elimName :: String }
 
 namesFor :: Int -> Names
 namesFor n =
-  Names (w "here") (w "dom") (w "cod") (w "arr") (w "fun") (w "arg")
-        (w "app") (w "ref") (w "ty") (w "goal") (w "elim")
+  Names (w "here") (w "arg") (w "app") (w "ref") (w "ty") (w "goal") (w "elim")
   where w x = x ++ show n
 
 compile
@@ -209,66 +213,21 @@ compile env sigs ctx n0 z = case focus z of
                   ]
               , n
               )
-
     -- **A brace that could not be placed is refused, not ignored.** The binary
-    -- rule below has no notion of plicity at all, so falling through to it
-    -- would report a type mismatch about a term the user never meant to write
+    -- clause has no notion of plicity at all, so falling through to it would
+    -- report a type mismatch about a term the user never meant to write
     -- explicitly.
     | any implicitArg (NE.toList as) ->
         Left (NoElaborationRule "an implicit argument this head has no position for")
 
-    | otherwise ->
-        let front = NE.init as
-            fun   = case front of
-                      [] -> h
-                      _  -> SurfaceApp h (NE.fromList front)
-            -- **Two moves, not two subterms** (MS4 phase 46). @intoFun@ stands
-            -- at the spine minus its last argument, which is exactly @fun@,
-            -- and @intoArg@ at the last argument's own position — so the
-            -- right-to-left fold walks the tree it was given instead of
-            -- building intermediate spines nobody wrote.
-            lastIx   = length front
-            funZ     = intoFun (NE.last as) fun z
-            argZ     = intoArg h as lastIx arg z
-            SurfaceArg _ arg = NE.last as
-            (l1, n1) = freshLevelMeta n
-            (l2, n2) = freshLevelMeta n1
-            nm k w   = Bind k (FreshName (lit' w))
-         in Right
-              ( concat
-                  [ [ Bind (hereName names) Here
-                    , nm (domName names ++ "n") "A"
-                    , Bind (domName names)
-                        (Claim (Ref (domName names ++ "n")) (lit (Universe (LVar l1))))
-                    , nm (codName names ++ "n") "B"
-                    , Bind (codName names)
-                        (Claim (Ref (codName names ++ "n")) (lit (Universe (LVar l2))))
-                    , Bind (arrName names) (Arrow (Ref (domName names)) (Ref (codName names)))
-                    , nm (funName names ++ "n") "f"
-                    , Bind (funName names)
-                        (Claim (Ref (funName names ++ "n")) (Ref (arrName names)))
-                    , nm (argName names ++ "n") "s"
-                    , Bind (argName names)
-                        (Claim (Ref (argName names ++ "n")) (Ref (domName names)))
-                    , Bind (appName names)
-                        (ApplyTo (Ref (funName names)) (Ref (argName names)))
-                    ]
-                    -- @FILL@: park it in a definition, unify its type with the
-                    -- goal's, attach it. Thesis §2.7's @=@-binding, and the
-                    -- reason it is a definition rather than a direct @try@ is
-                    -- that @f s@'s type is @B@, a hole, and not yet the goal's.
-                  , fill (Ref (appName names))
-                    -- The two @FOCUS@es, and only then the @SOLVE@.
-                  , [ Do (Goto (Ref (funName names)))
-                    , Do (elaborating (Lit (VSurface funZ)))
-                    , Do (Goto (Ref (argName names)))
-                    , Do (elaborating (Lit (VSurface argZ)))
-                    , Do (Goto (Ref (hereName names)))
-                    , Do Solve
-                    ]
-                  ]
-              , n2
-              )
+    -- **Anything else belongs to the binary clause**, which is a rule as of MS4
+    -- phase 49d. What is left in this op is only the half that needs @expand@ —
+    -- matching written arguments against the head\'s plicities, which is a
+    -- computation over two lists that a rule cannot do (@ms4/CLOSEOUT.md@ 28).
+    -- Failing here is what sends a head whose arguments do not line up on to
+    -- the clause below it, exactly as the @case@ fell through before.
+    | otherwise -> Left binaryIsAClause
+
   SurfaceElim d ps mot ms is tgt -> case lookupInductive (GlobalName d) env of
     Nothing  -> Left (CannotRead (ResolveFailed (NotADatatype d)))
     Just def

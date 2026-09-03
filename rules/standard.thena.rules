@@ -73,7 +73,44 @@ rule elaborate t :- when focus-is-hole (surface-is-hole t) then
 
 -- Still in Haskell, behind prim-elaborate. One clause each, so that moving one
 -- into the rule language changes this file and nothing else.
-rule elaborate t :- when focus-is-hole (surface-is-app t)        then prim-elaborate t
+-- E⟦x ⃗a⟧ — Brady's OTHER application rule, taken whenever the head is a name:
+-- the written arguments are matched against the head's plicities and a slot is
+-- opened for every implicit position the user did not write. Still in Haskell,
+-- because that match is a computation over two lists (ms4/CLOSEOUT.md 28).
+--
+-- **It may fail and fall through to the clause below**, which is what the
+-- Haskell did with a case: a head whose arguments do not line up — a partial
+-- application of a head with recorded plicities — is an ordinary binary
+-- application.
+rule elaborate t :- when focus-is-hole (surface-is-app t) (app-head-is-name t)
+  then prim-elaborate t
+
+-- E⟦e a⟧ — the binary rule, a spine folded right to left. CLAIM (A : Type);
+-- CLAIM (B : Type); CLAIM (f : A -> B); CLAIM (s : A); FILL (f s); FOCUS f;
+-- E⟦e⟧; FOCUS s; E⟦a⟧; SOLVE.
+rule elaborate t :- when focus-is-hole (surface-is-app t) (app-args-are-explicit t)
+  then h  = here
+     ; dn = fresh-name "A"
+     ; u1 = fresh-universe
+     ; d  = claim dn u1
+     ; cn = fresh-name "B"
+     ; u2 = fresh-universe
+     ; c  = claim cn u2
+     ; ar = arrow d c
+     ; fn = fresh-name "f"
+     ; f  = claim fn ar
+     ; sn = fresh-name "s"
+     ; sv = claim sn d
+     ; ap = apply-to f sv
+     ; fill ap
+     ; goto f
+     ; g  = app-function t
+     ; call elaborate g
+     ; goto sv
+     ; a  = app-last-argument t
+     ; call elaborate a
+     ; goto h
+     ; solve
 -- E⟦\ x => e⟧ = ATTACK; LAMBDA x; E⟦e⟧; SOLVE — Brady's λ case, with one
 -- prim-intro per binder of the group and one attack for the whole of it.
 --
