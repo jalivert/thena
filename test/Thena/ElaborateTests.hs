@@ -335,16 +335,19 @@ lambdaTests =
       -- An annotation is **refused rather than ignored**: checking it against
       -- the goal\'s domain needs the ascription machinery, which is a later
       -- phase, and accepting it silently would be a check that is not happening.
-    , refused "a lambda binder with a type or braces"
+    , refusedShape "a λ whose first binder is plain"
         (SurfaceLam [SurfaceBinder Explicit "x" (Just (SurfaceUniverse 0))]
            (SurfaceName "x"))
-    , refused "a lambda binder with a type or braces"
+    , refusedShape "a λ whose first binder is plain"
         (SurfaceLam [SurfaceBinder Implicit "x" Nothing] (SurfaceName "x"))
     ]
   where
-    refused what s = testCase what $
+    -- **The λ case is a clause now** (MS4 phase 49c), so its refusal comes from
+    -- @lambda-name@, which will not read an annotated or implicit binder — and
+    -- it is asked before anything is introduced.
+    refusedShape what s = testCase what $
       case elaboratingAt piGoal s of
-        Left (NoElaborationRule w) -> w @?= what
+        Left (ExpectedSurfaceShape w) -> w @?= what
         other -> assertFailure ("expected a refusal: " ++ show other)
 
 -- --------------------------------------------------------------------------
@@ -453,7 +456,7 @@ baseTests =
           @?= [ "attack", "try-core", "abandon", "eliminate-core"
               , "prove", "fill", "unify-refine-core", "apply-core"
               ]
-              ++ replicate 14 "elaborate"
+              ++ replicate 14 "elaborate" ++ replicate 2 "enter-binders"
 
     , testCase "prove is a rule over prim-prove" $
         case [ r | r@(Rule (GlobalName "prove") _ _ _) <- drain (matches expectedBase emptyGlobals hole) ] of

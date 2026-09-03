@@ -55,11 +55,11 @@ import Thena.Global.Env
 import Thena.Ops (Instr (..), Op (..), Operand (..), Value (..))
 
 import Thena.Surface.Concrete
-  (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..))
+  (Plicity (..), Surface (..), SurfaceArg (..))
 import Thena.Surface.Zipper
   ( SurfaceZipper, focus
   , intoArg
-  , intoElimField, intoFun, intoLamBody
+  , intoElimField, intoFun
   )
 
 -- | The program that elaborates one surface node into the focused hole.
@@ -130,6 +130,7 @@ compile env sigs ctx n0 z = case focus z of
   SurfaceLet {}       -> Left movedToTheRuleBase
   SurfacePi _ _       -> Left movedToTheRuleBase
   SurfaceDo _         -> Left movedToTheRuleBase
+  SurfaceLam _ _      -> Left movedToTheRuleBase
 
   -- @E⟦e a⟧@ — Brady's application case with his own correction to the printed
   -- rule (the missing @FILL@ and @SOLVE@, @IDRIS.md@):
@@ -268,91 +269,6 @@ compile env sigs ctx n0 z = case focus z of
                   ]
               , n2
               )
-
-  -- @E⟦\ x => e⟧ = ATTACK; LAMBDA x; E⟦e⟧; SOLVE@ — Brady's λ case, and the
-  -- first structural one this elaborator can do (MS4 phase 41b).
-  --
-  -- **One @prim-intro@ per binder, and each is given the SURFACE name.** That
-  -- is what @prim-intro@'s optional operand is for: without it the binder keeps
-  -- the identifier written in the /type/, so @\ y -> y@ at a goal
-  -- @∀ (x : A) -> A@ would bind @x@ and the body's @y@ would resolve to
-  -- nothing.
-  --
-  -- **Then @into@, then one @along@ per binder** — the navigation the phase-26
-  -- mockup established and tested. It is counting structure rather than holding
-  -- a handle, which is @elaboration-in-rules.md@'s gap 1; it is exact here
-  -- because this clause knows how many binders it introduced.
-  --
-  -- **And the moves are undone before @prim-solve@**, which is the invariant
-  -- every later case will lean on: **an @Elaborate@ leaves the focus where it
-  -- found it.** The leaves do it by not moving at all — @prim-try@ and
-  -- @prim-solve@ rewrite the focused component in place — and this clause does
-  -- it by balancing its own moves.
-  SurfaceLam bs body ->
-    let names' = [ x | SurfaceBinder _ x _ <- NE.toList bs ]
-     in case [ () | SurfaceBinder p _ ty <- NE.toList bs
-             , p == Implicit || ty /= Nothing ] of
-          _ : _ -> Left (NoElaborationRule "a lambda binder with a type or braces")
-          []    -> Right
-            ( concat
-                [ [Bind (hereName names) Here, Do Attack]
-                , [ Do (Intro (Just (lit' x))) | x <- names' ]
-                , [Do Into]
-                , replicate (length names') (Do Along)
-                , [Do (elaborating (Lit (VSurface (intoLamBody bs body z))))]
-                , [Do (Goto (Ref (hereName names))), Do Solve]
-                ]
-            , n
-            )
-  -- @E⟦(x : t) -> e⟧ = ATTACK; CLAIM (X : Type); PI (x : X); FOCUS X; E⟦t⟧;
-  -- E⟦e⟧; SOLVE@ — Brady's Π case, on the fifth component (MS4 phase 41f).
-  --
-  -- **@quantify@ is @PI@, and it is the reason the component exists.** The
-  -- codomain must be elaborated with @x@ in Γ, and writing a component is the
-  -- only way anything gets into Γ; every component there was extracted as a
-  -- /term/, so the chain could say @λ x : A . B@ and never @Π x : A . B@. The
-  -- user's ruling, 2026-09-02, and his reason is that a declaration hits the
-  -- same wall — Brady elaborates a signature as a development of its own
-  -- (@IDRIS.md@ §4.6) before elaborating the body against it.
-  --
-  -- **A binder group binds one name** ("Thena.Surface.Concrete"), so a run of
-  -- them is a run of @quantify@s under one @attack@, exactly as the λ case
-  -- emits a run of @prim-intro@s.
-  --
-  -- The domain hole is claimed **outside** the @attack@ and elaborated
-  -- **after** the binders are in place, which is Brady's order: the binder's
-  -- type is the hole's /variable/, so it is in scope before it is solved.
-  -- @E⟦(x : t) -> e⟧ = ATTACK; CLAIM (X : Type); PI (x : X);
-  -- FOCUS X; E⟦t⟧; E⟦e⟧; SOLVE@ — Brady's Π case, on the fifth component
-  -- (MS4 phase 41f).
-  --
-  -- **@quantify@ is @PI@, and it is the reason the component exists.** The
-  -- codomain must be elaborated with @x@ in Γ, and writing a component is the
-  -- only way anything gets into Γ; every component there was extracted as a
-  -- /term/, so the chain could say @λ x : A . B@ and never @Π x : A . B@. The
-  -- user's ruling, 2026-09-02, and his reason is that a declaration hits the
-  -- same wall — Brady elaborates a signature as a development of its own
-  -- (@IDRIS.md@ §4.6) before elaborating the body against it.
-  --
-  -- **One binder per clause; a group nests.** @∀ (A : Type₀) (a : A) -> B@ is
-  -- @∀ (A : Type₀) -> ∀ (a : A) -> B@, and it has to be: the domain hole is
-  -- claimed /outside/ the @attack@, where an earlier binder of the same group
-  -- is not in scope. The λ case can emit a run of @prim-intro@s because each
-  -- reads its type from the goal; this one is given the type and must place it.
-  --
-  -- **The domain is elaborated before the body**, which is Brady's order and
-  -- not a preference. With the body first, its @FILL@ unifies the binder's
-  -- type — the domain hole's variable — against the goal and /solves the
-  -- domain hole/, so @∀ (A : Type₀) -> A@ at @Type₁@ silently made @A@'s type
-  -- @Type₁@ and then could not find the hole its annotation was owed.
-  --
-  -- **The group is peeled by a zipper move** (MS4 phase 46). This case used to
-  -- rewrite @∀ (A : S) (a : A) -> B@ into @∀ (A : S) -> ∀ (a : A) -> B@ and
-  -- call 'compile' again on a node that was never in the user's program; now
-  -- @intoPiTail@ stands at the rest of the group and the frame puts the binder
-  -- back. **The emitted instructions are unchanged** — the rewritten node's
-  -- own case emitted exactly this, with the same counter — so what the move
-  -- buys is that the path the codomain travels with is real.
   SurfaceElim d ps mot ms is tgt -> case lookupInductive (GlobalName d) env of
     Nothing  -> Left (CannotRead (ResolveFailed (NotADatatype d)))
     Just def

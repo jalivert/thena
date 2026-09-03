@@ -250,6 +250,9 @@ holds env cur args t = case t of
   FocusIsGuess  -> case focus cur of
     OnComponent (Component.Guess {}) -> True
     _                                -> False
+  FocusIsComponent -> case focus cur of
+    OnComponent _ -> True
+    _             -> False
   GoalTypeIsPi  -> case reduced of
     Just (Pi {}) -> True
     _            -> False
@@ -278,6 +281,8 @@ holds env cur args t = case t of
   SurfaceIsAscription o   -> surfaceIs o isAscription
   SurfaceIsElim o         -> surfaceIs o isElim
   SurfaceIsDo o           -> surfaceIs o isDo
+  LambdaBindsMore o       -> surfaceIs o bindsMore
+  LambdaBindsOne o        -> surfaceIs o bindsOne
   LetIsAnnotated o        -> surfaceIs o isAnnotatedLet
   LetIsBare o             -> surfaceIs o isBareLet
   where
@@ -311,6 +316,8 @@ holds env cur args t = case t of
     isAscription   s = case s of SurfaceAnnot _ _ -> True; _ -> False
     isElim         s = case s of SurfaceElim {} -> True; _ -> False
     isDo           s = case s of SurfaceDo _ -> True; _ -> False
+    bindsMore      s = case s of SurfaceLam bs _ -> length bs > 1; _ -> False
+    bindsOne       s = case s of SurfaceLam bs _ -> length bs == 1; _ -> False
     isAnnotatedLet s = case s of SurfaceLet _ (Just _) _ _ -> True; _ -> False
     isBareLet      s = case s of SurfaceLet _ Nothing _ _  -> True; _ -> False
 
@@ -607,6 +614,8 @@ operation g i (RawOp w as)
       , ("arrow-domain", Op.ArrowDomain), ("arrow-codomain", Op.ArrowCodomain)
       , ("ascription-type", Op.AscriptionType)
       , ("ascription-term", Op.AscriptionTerm)
+      , ("lambda-name", Op.LambdaName), ("lambda-tail", Op.LambdaTail)
+      , ("lambda-body", Op.LambdaBody)
       , ("let-name", Op.LetName), ("let-type", Op.LetType)
       , ("let-value", Op.LetValue), ("let-body", Op.LetBody)
       , ("forall-name", Op.ForallName), ("forall-domain", Op.ForallDomain)
@@ -666,6 +675,7 @@ withOperands :: Test -> [Operand] -> Maybe Test
 withOperands t os = case (t, os) of
   (FocusIsHole,      []) -> Just FocusIsHole
   (FocusIsGuess,     []) -> Just FocusIsGuess
+  (FocusIsComponent, []) -> Just FocusIsComponent
   (GoalTypeIsPi,     []) -> Just GoalTypeIsPi
   (GoalTypeIsLet,    []) -> Just GoalTypeIsLet
   (SurfaceIsName _, [o])         -> Just (SurfaceIsName o)
@@ -681,6 +691,8 @@ withOperands t os = case (t, os) of
   (SurfaceIsAscription _, [o])   -> Just (SurfaceIsAscription o)
   (SurfaceIsElim _, [o])         -> Just (SurfaceIsElim o)
   (SurfaceIsDo _, [o])           -> Just (SurfaceIsDo o)
+  (LambdaBindsMore _, [o])       -> Just (LambdaBindsMore o)
+  (LambdaBindsOne _, [o])        -> Just (LambdaBindsOne o)
   (LetIsAnnotated _, [o])        -> Just (LetIsAnnotated o)
   (LetIsBare _, [o])             -> Just (LetIsBare o)
   _                      -> Nothing
@@ -692,6 +704,7 @@ testOperands :: Test -> [Operand]
 testOperands t = case t of
   FocusIsHole     -> []
   FocusIsGuess    -> []
+  FocusIsComponent -> []
   GoalTypeIsPi    -> []
   GoalTypeIsLet   -> []
   SurfaceIsName o         -> [o]
@@ -707,6 +720,8 @@ testOperands t = case t of
   SurfaceIsAscription o   -> [o]
   SurfaceIsElim o         -> [o]
   SurfaceIsDo o           -> [o]
+  LambdaBindsMore o       -> [o]
+  LambdaBindsOne o        -> [o]
   LetIsAnnotated o        -> [o]
   LetIsBare o             -> [o]
 
@@ -720,6 +735,7 @@ testWord :: Test -> String
 testWord t = case t of
   FocusIsHole     -> "focus-is-hole"
   FocusIsGuess    -> "focus-is-guess"
+  FocusIsComponent -> "focus-is-component"
   GoalTypeIsPi    -> "goal-type-is-pi"
   GoalTypeIsLet   -> "goal-type-is-let"
   SurfaceIsName _         -> "surface-is-name"
@@ -735,6 +751,8 @@ testWord t = case t of
   SurfaceIsAscription _   -> "surface-is-ascription"
   SurfaceIsElim _         -> "surface-is-elim"
   SurfaceIsDo _           -> "surface-is-do"
+  LambdaBindsMore _       -> "lambda-binds-more"
+  LambdaBindsOne _        -> "lambda-binds-one"
   LetIsAnnotated _        -> "let-is-annotated"
   LetIsBare _             -> "let-is-bare"
 
@@ -746,7 +764,7 @@ testWord t = case t of
 -- not what any written one says.
 everyTest :: [Test]
 everyTest =
-  [ FocusIsHole, FocusIsGuess, GoalTypeIsPi, GoalTypeIsLet
+  [ FocusIsHole, FocusIsGuess, FocusIsComponent, GoalTypeIsPi, GoalTypeIsLet
   , SurfaceIsName (Lit (VText ""))
   , SurfaceIsUniverse (Lit (VText ""))
   , SurfaceIsUniverseOpen (Lit (VText ""))
@@ -760,6 +778,8 @@ everyTest =
   , SurfaceIsAscription (Lit (VText ""))
   , SurfaceIsElim (Lit (VText ""))
   , SurfaceIsDo (Lit (VText ""))
+  , LambdaBindsMore (Lit (VText ""))
+  , LambdaBindsOne (Lit (VText ""))
   , LetIsAnnotated (Lit (VText ""))
   , LetIsBare (Lit (VText ""))
   ]

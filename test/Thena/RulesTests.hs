@@ -55,7 +55,8 @@ import Thena.Ops
 -- @Assume@ and @Claim@ name both a component and an op.
 import qualified Thena.Ops as Ops
 import qualified Data.List.NonEmpty as NE
-import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceBinder (..))
+import Thena.Surface.Concrete
+  (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..))
 import Thena.Surface.Zipper (rootedAt)
 import Thena.Rules
   ( RuleError (..)
@@ -146,22 +147,22 @@ matchTests =
 
     , testCase "a guess at a non-Π offers only solve and regret" $
         matching emptyGlobals (guessAt type0)
-          @?= ["solve", "regret", "prove"]
+          @?= ["solve", "regret", "prove"] ++ walkers
 
     , testCase "a guess at a Π offers intro as well" $
         matching emptyGlobals (guessAt (arrow type0 type0))
-          @?= ["intro", "solve", "regret", "prove"]
+          @?= ["intro", "solve", "regret", "prove"] ++ walkers
 
       -- §8: "Head matching runs whnf. A goal typed @id Type (Nat → Nat)@ is a Π
       -- and must match GoalTypeIsPi." Written down, @Arrow@ is a 'Global' and
       -- not a 'Pi'; a head that did not reduce would miss it.
     , testCase "a goal type that only reduces to a Π still matches" $
         matching withArrow (guessAt (Global (GlobalName "Arrow") []))
-          @?= ["intro", "solve", "regret", "prove"]
+          @?= ["intro", "solve", "regret", "prove"] ++ walkers
 
     , testCase "and does not, in an environment where it does not unfold" $
         matching emptyGlobals (guessAt (Global (GlobalName "Arrow") []))
-          @?= ["solve", "regret", "prove"]
+          @?= ["solve", "regret", "prove"] ++ walkers
 
       -- The one test that must NOT reduce: whnf δ-reduces a term-level let
       -- away (§5.1), so asking about the reduced type would make GoalTypeIsLet
@@ -169,7 +170,7 @@ matchTests =
       -- 'Thena.Engine.introduce'.
     , testCase "a goal type written as a let offers intro" $
         matching emptyGlobals (guessAt (Let (Ident "x") type0 type1 (close var type0)))
-          @?= ["intro", "solve", "regret", "prove"]
+          @?= ["intro", "solve", "regret", "prove"] ++ walkers
 
       -- The invariant checked by different code from the code that maintains
       -- it: the head says @intro@ applies, so @intro@ must actually apply. It
@@ -179,7 +180,7 @@ matchTests =
         let cur = guessAt (Let (Ident "x") type0 type1 (close var type0))
          in do
               nameOf `map` drain (matches expectedBase emptyGlobals cur)
-                @?= ["intro", "solve", "regret", "prove"]
+                @?= ["intro", "solve", "regret", "prove"] ++ walkers
               ranOk (machineAt cur [Do (Ops.Intro Nothing)])
 
     , testCase "where the Π clause is offered, intro succeeds" $
@@ -225,11 +226,15 @@ iteratorTests =
               Just (_, rest) -> (hasNext it @?= True) >> walk rest
          in walk (matches expectedBase emptyGlobals (holeAt type0))
 
+      -- **Drained by name rather than by a count**, since MS4 phase 49c: a guess
+      -- offers @solve@, @regret@, @prove@ and the λ case's two recursive
+      -- helpers, and a fixed number of @next@es would have to move every time a
+      -- rule is added.
     , testCase "an empty iterator has nothing" $
         let it = matches expectedBase emptyGlobals (guessAt type0)
-         in case next it >>= next . snd >>= next . snd >>= next . snd of
-              Nothing -> pure ()
-              Just _  -> assertFailure "expected three matches and no more"
+         in case drop (length (["solve", "regret", "prove"] ++ walkers)) (drain it) of
+              [] -> pure ()
+              rs -> assertFailure ("expected no more, got " ++ show (map nameOf rs))
 
       -- §7.6: persistent, "a frame holds one and the UI may hold the same one;
       -- if advancing mutated shared state they would interfere." A lazy list
@@ -380,10 +385,16 @@ producesTests =
         -- be one of the three cases still behind it, and a λ is the one that
         -- needs no globals. The goal is an arrow so @prim-intro@ has a binder
         -- to take.
-      , ("prim-elaborate", e, holeAt (arrow type0 type0), [],
+        -- **An application** (MS4 phase 49c): the λ case is a clause now too,
+        -- so what is left behind this op is an application, an @elim@ and
+        -- nothing else — and an application is the one that needs no globals.
+        -- Its head is a λ, so the binary rule takes it.
+      , ("prim-elaborate", e, hole, [],
            Ops.Elaborate (Lit (VSurface (rootedAt
-             (SurfaceLam (SurfaceBinder Explicit "z" Nothing NE.:| [])
-                         (SurfaceName "z"))))))
+             (SurfaceApp
+                (SurfaceLam (SurfaceBinder Explicit "z" Nothing NE.:| [])
+                            (SurfaceName "z"))
+                (SurfaceArg Explicit SurfaceUniverseOpen NE.:| []))))))
       ]
 
     -- @try ‹t›@, as 'expectedBase' ships it — what @call@ needs something to
@@ -460,4 +471,12 @@ everyHoleRule =
   [ "attack", "try-core", "abandon", "eliminate-core", "prove", "fill"
   , "unify-refine-core", "apply-core"
   ]
-    ++ replicate 14 "elaborate"
+    ++ replicate 14 "elaborate" ++ replicate 2 "enter-binders"
+
+-- | The λ case's two recursive helpers, which every listing at a guess shows.
+--
+-- **A test about an argument nobody supplied does not exclude a clause** (phase
+-- 47), so a rule whose head only asks about its argument is offered wherever
+-- its state test passes — and @intro-binders@ really does apply at a guess.
+walkers :: [String]
+walkers = ["intro-binders", "intro-binders", "enter-binders", "enter-binders"]

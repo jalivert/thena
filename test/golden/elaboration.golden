@@ -39,6 +39,8 @@ elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
+enter-binders ‹t›
+enter-binders ‹t›
 thena spine> elaborate a
 already equal
 thena spine> :show

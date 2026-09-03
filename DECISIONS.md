@@ -439,12 +439,30 @@ the hole is already there and unification is expected to find it. A clause that
 does nothing and a clause that does not match are different answers, so the
 empty body is saying something. `then` is still required.
 
-**Ten of the fourteen clauses are real** (MS4 phase 49b added `∀`, `->`, `let`
-— two clauses, since the annotation is optional and a head cannot say *not* —
-the ascription, and `do`). Three still run `prim-elaborate`, and they are
-exactly the three that **iterate**: a λ over its binder group, an application
-over its arguments against the head's plicities, an `elim` over its fields. The
-rule language has no lists.
+**A rule loops by recursing over the surface term.** The λ case needs one
+`prim-intro` per binder of a group, and a rule body is a straight run of
+instructions with no iteration — so a helper peels one binder and calls itself
+on the tail, and the term is its own counter:
+
+```
+rule intro-binders t :- when focus-is-guess (lambda-binds-more t)
+  then x = lambda-name t ; prim-intro x
+     ; tl = lambda-tail t ; call intro-binders tl
+
+rule intro-binders t :- when focus-is-guess (lambda-binds-one t)
+  then x = lambda-name t ; prim-intro x
+```
+
+**Peeling in the elaborate clause itself would not do**, because attacking once
+per binder nests the λs and wraps each in its own `let` — a different proof
+term. The run has to be emitted, and recursion is what emits it.
+
+**Eleven of the fourteen clauses are real** (49b added `∀`, `->`, `let` — two clauses, since the
+annotation is optional and a head cannot say *not* — the ascription and `do`;
+49c added the λ). Two still run `prim-elaborate`: an application, which matches
+its arguments against the head's plicities and then claims a hole per slot, and
+an `elim`, which claims one per field. Both hand a **list of names** to a single
+op, which recursion cannot build.
 
 A clause takes its surface term apart with **moves**, which answer with a
 surface term focused on the part rather than a detached one:

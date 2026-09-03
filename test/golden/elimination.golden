@@ -60,6 +60,8 @@ elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
+enter-binders ‹t›
+enter-binders ‹t›
 thena spine> eliminate-core ⌜ Type₀ ⌝
 stuck: Type₀ is not a target: its type is Type₁, not a fully applied datatype
 thena spine> eliminate-core ⌜ succ ⌝

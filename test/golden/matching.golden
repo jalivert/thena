@@ -27,6 +27,10 @@ standard
   elaborate ‹t›
   elaborate ‹t›
   elaborate ‹t›
+  intro-binders ‹t›
+  intro-binders ‹t›
+  enter-binders ‹t›
+  enter-binders ‹t›
 thena spine> :matches
 attack
 try-core ‹t›
@@ -50,11 +54,17 @@ elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
+enter-binders ‹t›
+enter-binders ‹t›
 thena spine> attack
 thena spine> :matches
 solve
 regret
 prove
+intro-binders ‹t›
+intro-binders ‹t›
+enter-binders ‹t›
+enter-binders ‹t›
 thena spine> cross type
 thena core> :matches
 no rule applies here
@@ -84,12 +94,18 @@ elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
+enter-binders ‹t›
+enter-binders ‹t›
 thena spine> attack
 thena spine> :matches
 intro
 solve
 regret
 prove
+intro-binders ‹t›
+intro-binders ‹t›
+enter-binders ‹t›
+enter-binders ‹t›
 thena spine> intro
 thena spine> into
 thena spine> along
@@ -125,6 +141,8 @@ elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
+enter-binders ‹t›
+enter-binders ‹t›
 thena spine> :abandon
 abandoned id
 thena spine> :theorem c : ∀ (A : Type₀) -> Type₀
@@ -136,6 +154,10 @@ intro
 solve
 regret
 prove
+intro-binders ‹t›
+intro-binders ‹t›
+enter-binders ‹t›
+enter-binders ‹t›
 thena spine> intro
 stuck: that hole's type is neither a ∀ nor a let
 thena spine> :abandon
@@ -148,6 +170,10 @@ intro
 solve
 regret
 prove
+intro-binders ‹t›
+intro-binders ‹t›
+enter-binders ‹t›
+enter-binders ‹t›
 thena spine> intro
 thena spine> :show
 ▶ let ? l : let x = Type₀ : Type₁ in x ≐ (

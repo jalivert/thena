@@ -74,7 +74,25 @@ rule elaborate t :- when focus-is-hole (surface-is-hole t) then
 -- Still in Haskell, behind prim-elaborate. One clause each, so that moving one
 -- into the rule language changes this file and nothing else.
 rule elaborate t :- when focus-is-hole (surface-is-app t)        then prim-elaborate t
-rule elaborate t :- when focus-is-hole (surface-is-lambda t)     then prim-elaborate t
+-- E⟦\ x => e⟧ = ATTACK; LAMBDA x; E⟦e⟧; SOLVE — Brady's λ case, with one
+-- prim-intro per binder of the group and one attack for the whole of it.
+--
+-- **The group is walked by recursion**, not by an iterating instruction: each
+-- helper peels one binder off the surface term and calls itself on the tail, so
+-- the term is its own counter. Attacking once per binder instead would nest the
+-- λs and put an extra let round each — a different proof term, which is why the
+-- run is emitted here rather than by peeling in this clause.
+rule elaborate t :- when focus-is-hole (surface-is-lambda t)
+  then h = here
+     ; prim-attack
+     ; call intro-binders t
+     ; into
+     ; call enter-binders t
+     ; b = lambda-body t
+     ; call elaborate b
+     ; goto h
+     ; solve
+
 -- E⟦(x : t) -> e⟧ = ATTACK; CLAIM (X : Type); PI (x : X); FOCUS X; E⟦t⟧; E⟦e⟧;
 -- SOLVE. One binder per clause and a group nests: the domain hole is claimed
 -- outside the attack, where an earlier binder of the same group is not in
@@ -181,3 +199,24 @@ rule elaborate t :- when focus-is-hole (surface-is-elim t)       then prim-elabo
 -- it, which is the one way it differs from every other clause: the block does
 -- what the user wrote, and repairing it is theirs.
 rule elaborate t :- when focus-is-hole (surface-is-do t) then play t
+
+-- One prim-intro per binder, each given the SURFACE name: without it the binder
+-- keeps the identifier written in the type.
+rule intro-binders t :- when focus-is-guess (lambda-binds-more t)
+  then x  = lambda-name t
+     ; prim-intro x
+     ; tl = lambda-tail t
+     ; call intro-binders tl
+
+rule intro-binders t :- when focus-is-guess (lambda-binds-one t)
+  then x = lambda-name t
+     ; prim-intro x
+
+-- One along per binder, to stand where the body was written. The λ's binders
+-- are the count and nothing else about them is read.
+rule enter-binders t :- when focus-is-component (lambda-binds-more t)
+  then along
+     ; tl = lambda-tail t
+     ; call enter-binders tl
+
+rule enter-binders t :- when focus-is-component (lambda-binds-one t) then along

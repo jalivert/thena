@@ -54,6 +54,7 @@ module Thena.Surface.Zipper
   , intoFun
   , intoArg
   , intoLamBody
+  , intoLamTail
   , intoPiDomain
   , intoPiTail
   , intoArrowDomain
@@ -97,6 +98,9 @@ data Frame
   | InArg Surface (NonEmpty SurfaceArg) Int
     -- ^ the focus is the @k@th argument of a spine
   | InLamBody (NonEmpty SurfaceBinder)
+  | InLamTail SurfaceBinder
+    -- ^ the focus is what the λ abstracts once its first binder is peeled off
+    -- — 'InPiTail' for a λ, and merged on the way out for the same reason
   | InPiDomain Plicity String [SurfaceBinder] Surface
     -- ^ the focus is the first binder's annotation: its plicity and name, the
     -- rest of the group, and the body
@@ -147,6 +151,9 @@ rebuild s f = case f of
   -- @∀ (A : S) -> ∀ (a : A) -> B@ comes back as the first — the same term,
   -- written the other way. The surface tree admits both, which is a wart of
   -- the AST and not of the zipper; @ms4\/CLOSEOUT.md@ 18 carries it.
+  InLamTail b -> case s of
+    SurfaceLam bs body -> SurfaceLam (b NE.<| bs) body
+    _                  -> SurfaceLam (b :| []) s
   InPiTail b -> case s of
     SurfacePi bs body -> SurfacePi (b NE.<| bs) body
     _                 -> SurfacePi (b :| []) s
@@ -213,6 +220,15 @@ intoPiDomain p x rest body ty = push ty (InPiDomain p x rest body)
 -- when it did not; the caller passes whichever it has.
 intoPiTail :: SurfaceBinder -> Surface -> SurfaceZipper -> SurfaceZipper
 intoPiTail b rest = push rest (InPiTail b)
+
+-- | Focus what a λ abstracts once its first binder is peeled off — the rest of
+-- the group if there was one, otherwise the body.
+--
+-- **This is how a rule loops over a binder group** (MS4 phase 49c): a clause
+-- peels one binder and calls itself on the tail, so the surface term is the
+-- counter and the rule language needs no iteration of its own.
+intoLamTail :: SurfaceBinder -> Surface -> SurfaceZipper -> SurfaceZipper
+intoLamTail b rest = push rest (InLamTail b)
 
 intoArrowDomain :: Surface -> Surface -> SurfaceZipper -> SurfaceZipper
 intoArrowDomain cod dom = push dom (InArrowDomain cod)

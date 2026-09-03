@@ -6,6 +6,10 @@ intro
 solve
 regret
 prove
+intro-binders ‹t›
+intro-binders ‹t›
+enter-binders ‹t›
+enter-binders ‹t›
 thena spine> prove
 chose 7: intro
 thena spine> :show

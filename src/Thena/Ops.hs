@@ -380,6 +380,15 @@ data Op
     -- **They do not reuse the cursor's words.** @dom@ and @cod@ already move the
     -- development's ambient cursor; these produce a value, and one word for two
     -- different things is what @CLAUDE.md@'s /no confusions/ rules out.
+  | LambdaName Operand
+    -- ^ the first binder's name in a surface λ, as text (MS4 phase 49c).
+    -- **It refuses an annotated or implicit binder**, which is the whole of
+    -- what the λ case still cannot elaborate.
+  | LambdaTail Operand
+    -- ^ … what the λ abstracts once that binder is peeled off: the rest of the
+    -- group if there was one, otherwise the body
+  | LambdaBody Operand
+    -- ^ … the body, past every binder of the group
   | LetName Operand          -- ^ the @x@ of a surface @let x = v in b@, as text
   | LetType Operand          -- ^ … its written annotation
   | LetValue Operand         -- ^ … its @v@
@@ -766,6 +775,9 @@ produces o = case o of
   SurfaceNameOf _ -> True
   SurfaceUniverseOf _ -> True
   ArrowDomain _ -> True
+  LambdaName _ -> True
+  LambdaTail _ -> True
+  LambdaBody _ -> True
   LetName _ -> True
   LetType _ -> True
   LetValue _ -> True
@@ -845,6 +857,9 @@ operandsOf o = case o of
   SurfaceNameOf x -> [x]
   SurfaceUniverseOf x -> [x]
   ArrowDomain x -> [x]
+  LambdaName x -> [x]
+  LambdaTail x -> [x]
+  LambdaBody x -> [x]
   LetName x -> [x]
   LetType x -> [x]
   LetValue x -> [x]
@@ -935,6 +950,10 @@ data Rule = Rule
 data Test
   = FocusIsHole     -- ^ the focus is a @? x : S@ component
   | FocusIsGuess    -- ^ the focus is a @? x ≐ g : S@ component
+  | FocusIsComponent
+    -- ^ the focus is a component of the chain rather than a core term (MS4
+    -- phase 49c). What @along@ and the other component moves need, and the one
+    -- thing that is true throughout a walk over a binder group.
   | GoalTypeIsPi    -- ^ the focused component's type whnfs to a Π
   | GoalTypeIsLet   -- ^ … or to a @let@, which is table 2.8's other intro
   | SurfaceIsName Operand
@@ -958,6 +977,12 @@ data Test
   | SurfaceIsAscription Operand    -- ^ @e : T@
   | SurfaceIsElim Operand          -- ^ @elim D … t@
   | SurfaceIsDo Operand            -- ^ @do { … }@
+  | LambdaBindsMore Operand        -- ^ a λ whose group has a binder after the
+                                   --   first (MS4 phase 49c)
+  | LambdaBindsOne Operand         -- ^ … and one whose group has just the one
+    -- ^ **Two positive tests, as @let@'s are**: they are how a clause that
+    -- peels one binder knows whether to recurse, and the head language has no
+    -- negation.
   | LetIsAnnotated Operand         -- ^ a @let@ whose type was written (49b)
   | LetIsBare Operand              -- ^ … and one whose type was not
     -- ^ **Two positive tests rather than one and its negation.** The head
@@ -1041,6 +1066,9 @@ opKeyword o = case o of
   SurfaceNameOf _ -> "surface-name"
   SurfaceUniverseOf _ -> "surface-universe"
   ArrowDomain _ -> "arrow-domain"
+  LambdaName _ -> "lambda-name"
+  LambdaTail _ -> "lambda-tail"
+  LambdaBody _ -> "lambda-body"
   LetName _ -> "let-name"
   LetType _ -> "let-type"
   LetValue _ -> "let-value"

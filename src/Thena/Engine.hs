@@ -1111,6 +1111,24 @@ perform instr rest m = case operation instr of
     Concrete.SurfaceAnnot e ty -> Just (Zipper.intoAnnotTerm ty e)
     _                          -> Nothing
 
+  -- **A plain binder only** — no annotation and no braces. That is the whole of
+  -- what the λ case cannot elaborate, and saying it here means the clause finds
+  -- out before it has introduced anything.
+  Op.LambdaName x -> case surfaceAt x of
+    Left r  -> failure r m
+    Right (Concrete.SurfaceLam bs _)
+      | Concrete.SurfaceBinder Concrete.Explicit w Nothing <- NE.head bs ->
+          produce (VText w) m
+    Right _ -> failure (ExpectedSurfaceShape "a λ whose first binder is plain") m
+  Op.LambdaTail x -> surfaceMove x "a λ" $ \s -> case s of
+    Concrete.SurfaceLam bs body -> case NE.uncons bs of
+      (b, more) ->
+        Just (Zipper.intoLamTail b (maybe body (`Concrete.SurfaceLam` body) more))
+    _ -> Nothing
+  Op.LambdaBody x -> surfaceMove x "a λ" $ \s -> case s of
+    Concrete.SurfaceLam bs body -> Just (Zipper.intoLamBody bs body)
+    _                           -> Nothing
+
   Op.LetName x -> case surfaceAt x of
     Left r  -> failure r m
     Right (Concrete.SurfaceLet w _ _ _) -> produce (VText w) m

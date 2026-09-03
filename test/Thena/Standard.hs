@@ -219,7 +219,21 @@ elaborateClauses =
     -- head's plicities, an @elim@ over its fields. The rule language has no
     -- lists (MS4 phase 49b).
   , clause SurfaceIsApp [Do (Op.Elaborate (Ref "t"))]
-  , clause SurfaceIsLambda [Do (Op.Elaborate (Ref "t"))]
+    -- **The group is walked by recursion**, not by an iterating instruction:
+    -- each helper peels one binder and calls itself on the tail, so the surface
+    -- term is its own counter (MS4 phase 49c). Attacking once per binder
+    -- instead would nest the λs and put an extra @let@ round each — a different
+    -- proof term.
+  , clause SurfaceIsLambda
+      [ Bind "h" Here
+      , Do Attack
+      , call "intro-binders" [Ref "t"]
+      , Do Into
+      , call "enter-binders" [Ref "t"]
+      , Bind "b" (Op.LambdaBody (Ref "t"))
+      , call "elaborate" [Ref "b"]
+      , Do (Goto (Ref "h")), call "solve" []
+      ]
     -- **The parts are read before the development is touched**, so a binder
     -- with no type fails without having claimed or quantified anything.
   , clause SurfaceIsForall
@@ -285,6 +299,7 @@ elaborateClauses =
   , clause SurfaceIsElim [Do (Op.Elaborate (Ref "t"))]
   , clause SurfaceIsDo [Do (Op.Play (Ref "t"))]
   ]
+    ++ binderWalkers
   where
     clause test = Rule (GlobalName "elaborate") ["t"] [FocusIsHole, test (Ref "t")]
     call nm as = Do (Call (GlobalName nm) as)
@@ -307,3 +322,38 @@ elaborateClauses =
       , Bind "b" (Op.LetBody (Ref "t"))
       , Do (Call (GlobalName "elaborate") [Ref "b"])
       ]
+
+-- | The two rules that walk a λ's binder group (MS4 phase 49c).
+--
+-- **Recursion is how the rule language loops.** A body is a straight run of
+-- instructions with no iteration and no accumulator; a clause that peels one
+-- binder and calls itself on the tail gets the run of @prim-intro@s the λ case
+-- needs, and the surface term is the counter.
+--
+-- Two clauses each, on two positive tests, for @let@'s reason: the head
+-- language has no negation.
+binderWalkers :: [Rule]
+binderWalkers =
+  [ Rule (GlobalName "intro-binders") ["t"]
+      [FocusIsGuess, LambdaBindsMore (Ref "t")]
+      [ Bind "x" (Op.LambdaName (Ref "t"))
+      , Do (Intro (Just (Ref "x")))
+      , Bind "tl" (Op.LambdaTail (Ref "t"))
+      , Do (Call (GlobalName "intro-binders") [Ref "tl"])
+      ]
+  , Rule (GlobalName "intro-binders") ["t"]
+      [FocusIsGuess, LambdaBindsOne (Ref "t")]
+      [ Bind "x" (Op.LambdaName (Ref "t"))
+      , Do (Intro (Just (Ref "x")))
+      ]
+    -- The binders are the count and nothing else about them is read.
+  , Rule (GlobalName "enter-binders") ["t"]
+      [FocusIsComponent, LambdaBindsMore (Ref "t")]
+      [ Do Along
+      , Bind "tl" (Op.LambdaTail (Ref "t"))
+      , Do (Call (GlobalName "enter-binders") [Ref "tl"])
+      ]
+  , Rule (GlobalName "enter-binders") ["t"]
+      [FocusIsComponent, LambdaBindsOne (Ref "t")]
+      [Do Along]
+  ]
