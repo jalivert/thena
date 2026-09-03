@@ -131,6 +131,8 @@ import Thena.Rules
   , matches
   , next
   , resolveRule
+  , resolveBlock
+  , RuleError (..)
   , ruleBase
   , validate
   )
@@ -366,12 +368,17 @@ data Response
     -- surface declarations and not command lines. Like 'LoadRequested' it only
     -- names the file; "Thena.Repl" reads it and hands the contents back to
     -- 'loadProofSource'
-  | ProofLoaded String [String]
+  | ProofLoaded String [String] Int
     -- ^ a proof module went in: its name, and what it declared, in order. **The
     -- op-level messages are discarded** — his call, 2026-09-02, the same bargain
     -- @loadPrelude@ already makes: elaborating one declaration prints a dozen
     -- @solved: ?ℓ229@ lines, and a file of them buries its own output. Typing
-    -- the declaration at the prompt still prints everything
+    -- the declaration at the prompt still prints everything.
+    --
+    -- **The trailing count is the top-level blocks** (MS4 phase 45). A block
+    -- declares nothing this side of running it, so it cannot be named in the
+    -- list — but it did run, and a summary that left it out entirely would be
+    -- saying less than happened
   | RulesRequested [FilePath]
     -- ^ @:load@ on one or more @.thena.rules@ paths (phase 22). Like
     -- 'LoadRequested' it only names them — reading is "Thena.Repl"'s (§12
@@ -630,7 +637,7 @@ tokensOf = mapLeft LexFailed . lexTokens
 -- a signature and its equation are adjacent and a datatype is not part of that
 -- pairing at all.
 parseSurfaceItems
-  :: String -> Either SyntaxError [Either SurfaceData (String, Surface, Surface)]
+  :: String -> Either SyntaxError [Item]
 parseSurfaceItems src = do
   ts  <- tokensOf src
   ts' <- mapLeft LayoutFailed (layout ts)
@@ -644,13 +651,37 @@ parseSurfaceItems src = do
 -- same grammar, and layout does the same work in both.
 parseSurfaceModule
   :: String
-  -> Either SyntaxError (String, [Either SurfaceData (String, Surface, Surface)])
+  -> Either SyntaxError (String, [Item])
 parseSurfaceModule src = do
   ts  <- tokensOf src
   ts' <- mapLeft LayoutFailed (layout ts)
   m   <- mapLeft SurfaceParseFailed (Surface.parseSurfaceModule ts')
   is  <- regroup (surfaceModuleDecls m)
   Right (surfaceModuleName m, is)
+
+-- | Why a top-level block did not resolve, in terms 'SyntaxError' can hold.
+--
+-- 'Thena.Elaborate.blockFailure'\'s twin, and the same reasoning: resolution can
+-- only produce 'Thena.Rules.BadOperands', because a word that names no op is a
+-- rule call and not an error.
+blockProblem :: [RuleError] -> SyntaxError
+blockProblem errs = case errs of
+  BadOperands _ i w : _ -> BlockIllFormed i w
+  _                     -> BlockIllFormed 0 "do"
+
+-- | One thing a module or a @declare@ line asks for.
+--
+-- **A sum rather than the @Either@ it was** (MS4 phase 45): a top-level @do@
+-- block is a third kind of item, and an @Either@ with a triple on one side had
+-- already stopped saying what it meant.
+data Item
+  = ItemData SurfaceData
+  | ItemTheorem String Surface Surface   -- ^ a signature and the equation after it
+  | ItemBlock [Instr]
+    -- ^ a top-level @do@ block (phase 45), **already resolved**: 'regroup'
+    -- resolves it while the file is being read, so a block with bad operands is
+    -- a syntax error at the right place rather than a failure at run time.
+  deriving (Eq, Show)
 
 -- | Pair each signature with the equation after it, and pass datatypes through.
 --
@@ -659,13 +690,16 @@ parseSurfaceModule src = do
 -- is why it is here and not there.
 regroup
   :: [SurfaceDecl]
-  -> Either SyntaxError [Either SurfaceData (String, Surface, Surface)]
+  -> Either SyntaxError [Item]
 regroup = go
   where
     go [] = Right []
-    go (SurfaceDatatype d : rest) = (Left d :) <$> go rest
+    go (SurfaceDatatype d : rest) = (ItemData d :) <$> go rest
+    go (SurfaceBlock b : rest) = case resolveBlock (GlobalName "do") b of
+      Right is  -> (ItemBlock is :) <$> go rest
+      Left errs -> Left (blockProblem errs)
     go (SurfaceSignature x ty : SurfaceEquation y body : rest)
-      | x == y = (Right (x, ty, body) :) <$> go rest
+      | x == y = (ItemTheorem x ty body :) <$> go rest
     go (SurfaceSignature x _ : _) =
       Left (DeclarationsUnpaired (SignatureWithNoEquation x))
     go (SurfaceEquation x _ : _) =
@@ -687,11 +721,20 @@ regroup = go
 -- phase 49 can move it into a rule body without the driver having sequenced
 -- anything in Haskell.
 surfaceProgram
-  :: Int -> [Either SurfaceData (String, Surface, Surface)] -> ([Instr], Int)
+  :: Int -> [Item] -> ([Instr], Int)
 surfaceProgram n0 items = foldl item ([], n0) items
   where
-  item acc (Left d)          = datatype acc d
-  item acc (Right thm)       = declaring acc thm
+  item acc (ItemData d)            = datatype acc d
+  item acc (ItemTheorem x ty body) = declaring acc (x, ty, body)
+  -- **A top-level block is spliced, and that is the whole of it** — his,
+  -- 2026-09-03. A module is already one instruction program, so a block of
+  -- instructions at the top of one is @++@: no frame, no op, and nothing that
+  -- could tell it from the instructions the elaborator emitted around it.
+  --
+  -- **Not 'Thena.Ops.Block'**, which is the /expression/ form: that one needs a
+  -- frame because it has to return to the term it stands in. A top-level block
+  -- has nothing to return to, so it needs no frame and gets none.
+  item (acc, n) (ItemBlock is) = (acc ++ is, n)
 
   -- **Brady's data rule** (@IDRIS.md@ §4.6): the datatype's own type is
   -- elaborated first /"so that the type is in scope when elaborating the
@@ -800,13 +843,22 @@ loadProofSource s src = case parseSurfaceModule src of
     let machine  = sessionMachine s
         (is, n1) = surfaceProgram (names machine) items
      in case progress False s { sessionMachine = load is machine { names = n1 } } [] of
-          (s', Ran _ Completed) -> (s', ProofLoaded nm (map declaredName items))
+          (s', Ran _ Completed) ->
+            ( s'
+            , ProofLoaded nm [ n | Just n <- map declaredName items ]
+                             (length [ () | ItemBlock _ <- items ])
+            )
           (s', other)           -> (s', other)
 
 -- | What an item adds to the environment, for the summary line.
-declaredName :: Either SurfaceData (String, Surface, Surface) -> String
-declaredName (Left d)          = surfaceDataName d
-declaredName (Right (x, _, _)) = x
+declaredName :: Item -> Maybe String
+declaredName i = case i of
+  ItemData d        -> Just (surfaceDataName d)
+  ItemTheorem x _ _ -> Just x
+  -- **A block declares nothing that can be read off the item.** What its
+  -- instructions install is known only by running them, so it is counted rather
+  -- than named — see 'ProofLoaded'.
+  ItemBlock _       -> Nothing
 
 -- | Lex and parse a **surface** term (phase 39). No context, because nothing is
 -- resolved: what a name denotes is elaboration's answer, and elaboration is

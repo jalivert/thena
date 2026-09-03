@@ -35,6 +35,7 @@ import Thena.Surface.Concrete
   , SurfaceArg (..)
   , SurfaceBinder (..)
   )
+import Thena.Syntax.Concrete (RawInstr (..), RawOp (..), RawOperand (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
@@ -63,6 +64,9 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   where   { Located _ TWhere }
   data    { Located _ TData }
   module  { Located _ TModule }
+  do      { Located _ TDo }
+  num     { Located _ (TNumber $$) }
+  str     { Located _ (TString $$) }
   univ    { Located _ (TUniverse $$) }
   Type    { Located _ TUniverseOpen }
   ident   { Located _ (TIdent $$) }
@@ -88,6 +92,44 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 Module :: { SurfaceModule }
   : module ident where '{' Decls '}'       { SurfaceModule $2 (reverse $5) }
 
+-- | A block of the **instruction** language (MS4 phase 45).
+--
+-- **These five productions mirror "Thena.Syntax.Parser"\'s, and that is the
+-- phase\'s one judgement call.** Happy has no way to share productions between
+-- two grammars, and the alternatives were worse: merging the two parsers would
+-- put the surface language and the development calculus in one file, which
+-- phase 39 deliberately separated, and lifting the block out as raw tokens
+-- before parsing would leave an unparsed hole in a parsed file.
+--
+-- **What makes the duplication safe is that it is crossed by a test**, not that
+-- it is small: @SurfaceTests@ parses the same block text through this grammar
+-- and through @parseRule@\'s and asserts the two @[RawInstr]@ are equal. Same
+-- arrangement as @commandSummary@ against @dispatch@, and the same admitted
+-- cost.
+--
+-- **The instruction language is term-free**, which is why it can be mirrored at
+-- all: an operand is an identifier, a number or a string, so neither copy
+-- mentions a term grammar and neither can drift towards one.
+Block :: { [RawInstr] }
+  : Instr                                  { [$1] }
+  | Block ';' Instr                        { $3 : $1 }
+
+Instr :: { RawInstr }
+  : ident '=' InstrOp                     { RawBind $1 $3 }
+  | InstrOp                                { RawDo $1 }
+
+InstrOp :: { RawOp }
+  : ident InstrOperands                    { RawOp $1 (reverse $2) }
+
+InstrOperands :: { [RawOperand] }
+  :                                        { [] }
+  | InstrOperands InstrOperand             { $2 : $1 }
+
+InstrOperand :: { RawOperand }
+  : ident                                  { RawRef $1 }
+  | num                                    { RawPos $1 }
+  | str                                    { RawText $1 }
+
 Decls :: { [SurfaceDecl] }
   : Decl                                   { [$1] }
   | Decls ';' Decl                         { $3 : $1 }
@@ -99,6 +141,10 @@ Decl :: { SurfaceDecl }
   : ident ':' Term                         { SurfaceSignature $1 $3 }
   | ident '=' Term                         { SurfaceEquation $1 $3 }
   | Datatype                               { SurfaceDatatype $1 }
+  -- **A top-level block is an item, not an expression** — his, 2026-09-03.
+  -- Same syntax, different role: at the top of a module it plays where the
+  -- other items declare.
+  | do '{' Block '}'                       { SurfaceBlock (reverse $3) }
 
 -- | **The same shape "Thena.Syntax.Parser"'s @Data@ has**, because §3.7's split
 -- between parameters and indices is syntactic in both: the parameters are the
@@ -165,6 +211,9 @@ Atom :: { Surface }
   | univ                                   { SurfaceUniverse $1 }
   | Type                                   { SurfaceUniverseOpen }
   | '(' Term ')'                           { $2 }
+  -- **An atom, so it needs no parentheses in an argument run** — @try (do { … })@
+  -- and @try do { … }@ both read, the same way a parenthesised term does.
+  | do '{' Block '}'                       { SurfaceDo (reverse $3) }
   | elim ident '(' Terms ')' Atom '(' Terms ')' '(' Terms ')' Atom
       { SurfaceElim $2 (reverse $4) $6 (reverse $8) (reverse $11) $13 }
 

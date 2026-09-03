@@ -1,0 +1,21 @@
+thena spine> :surface do { attack ; intro }
+do { attack ; intro }
+thena spine> :surface f (do { attack })
+f do { attack }
+thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
+declared Nat
+thena spine> :theorem t : Nat
+proving t : Nat
+thena spine> elaborate (do { attack ; prove })
+chose 4: solve
+backtracking to 4: regret
+thena spine> :show
+▶ let ? t : Nat in
+  t
+thena spine> :abandon
+abandoned t
+thena spine> :theorem u : Nat
+proving u : Nat
+thena spine> elaborate (do { say })
+stuck: instruction 1 of the do block gives say operands it does not take
+thena spine> :quit

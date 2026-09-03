@@ -215,6 +215,20 @@ data Op
     -- as ordinary instructions.
     --
     -- See "Thena.Elaborate".
+  | Block [Instr]
+    -- ^ play a written block of instructions (MS4 phase 45).
+    --
+    -- **It carries the block as a field, not as an 'Operand'**, because the
+    -- block is /written down and never computed/ — the same reason
+    -- 'DefineData' carries its declaration and 'Down' its 'Part'. There is a
+    -- precedent for the shape and it is the settled way to carry a written
+    -- thing into an op.
+    --
+    -- **It is 'Call' with the body supplied instead of looked up.** Same frame,
+    -- same return, same backtracking below it; what it does not do is choose,
+    -- because there is nothing to choose between — a block is one body, so
+    -- there is no candidate list and no choice point. That is the whole of the
+    -- difference.
   | Call GlobalName [Operand]
     -- ^ **call a rule by name — the same search as 'Prove', with a narrower
     -- candidate list** (§8, phase 23, and the user's own framing):
@@ -611,6 +625,10 @@ produces o = case o of
   -- instruction stays at the head of @pc@ (§7.5): the destination has to still
   -- be there when the answer comes back.
   Ask _ _      -> True
+  -- **A block produces nothing.** Its instructions produce whatever they
+  -- produce, into the block's own environment; the block itself is a body being
+  -- played, and a body has no value — the same answer 'Call' gives.
+  Block _      -> False
   Concat _ _   -> True
   Assume _ _   -> True   -- the variable it bound; §7.3's @?x <- claim S@
   Quantify _ _ -> False  -- a hole-life op, like 'Attack' and 'Intro'
@@ -668,6 +686,9 @@ produces o = case o of
 -- anything.
 operandsOf :: Op -> [Operand]
 operandsOf o = case o of
+  -- **A block reads no operand.** It is written down, not computed, so there is
+  -- nothing here for a rule to have bound — see 'Block'.
+  Block _      -> []
   Assume a b   -> [a, b]
   Quantify a b -> [a, b]
   Claim  a b   -> [a, b]
@@ -792,6 +813,10 @@ data Test
 -- here because the case split is total, not because a body may say it.
 opKeyword :: Op -> String
 opKeyword o = case o of
+  -- Like 'DefineData', a word with no written form of its own: a block is
+  -- written @do { … }@ in the surface language and is never spelled in a rule
+  -- body. The word is here because the case split is total.
+  Block _      -> "do"
   Assume _ _   -> "assume"
   Quantify _ _ -> "quantify"
   Claim  _ _   -> "claim"

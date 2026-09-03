@@ -390,6 +390,38 @@ that's fine. Better they are uniform than three different ones."*
 A comment carries no tokens, so it never affects layout: a comment line is not
 an item, and it neither opens nor closes a block.
 
+### `do { … }` drops into the instruction language, in a term or at the top
+
+*Decided 2026-09-03.*
+
+A `do` block holds the **instruction** language — the same one a rule body is
+written in. Two places take one, and they are the same syntax in two roles:
+
+```
+-- an expression: elaborating it means playing it
+foo = do { attack ; prove }
+
+-- an item: it plays where the declarations around it declare
+do
+  say "and now for something completely different"
+```
+
+It lays out like everything else, and it is an **atom**, so an argument run
+takes one without parentheses: `try do { attack }`.
+
+**This is why there is no surface term meaning *no proof given, search for one*.**
+You write `do { prove }`, and a search strategy is then a rule name rather than
+syntax — `do { auto }` names a rule you wrote, and the system knows nothing
+about it.
+
+**What a block cannot do yet: mention a term.** An operand is an identifier, a
+number or a string, so a block can search, navigate and bind but cannot
+construct. Term literals in a body are a later phase.
+
+**A block is not a script.** REPL commands — `:theorem`, `:show`, `qed` — are
+the driver's and are not instructions; a `.thena.script` file is where those
+live.
+
 ### `:infer` takes a surface term; a core one goes in corners
 
 *Decided 2026-09-02.*

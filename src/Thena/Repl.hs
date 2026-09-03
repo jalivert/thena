@@ -156,6 +156,7 @@ import Thena.Syntax.Parser (ParseError (..))
 
 import Data.Foldable (toList)
 import Data.List (intercalate, partition)
+import Thena.Syntax.Concrete (RawInstr (..), RawOp (..), RawOperand (..))
 
 -- | Run the read-eval-print loop until @:quit@ or end of input.
 --
@@ -426,7 +427,10 @@ renderResponse s resp = case resp of
   -- **One line per declaration and nothing else** (MS4 phase 43). The op-level
   -- messages the run produced are already gone — 'Thena.Driver.loadProofSource'
   -- drops them on success — so what is left is the shape of the file.
-  ProofLoaded nm ds -> ("module " ++ nm) : map ("  declared " ++) ds
+  ProofLoaded nm ds blocks ->
+    ("module " ++ nm)
+      : map ("  declared " ++) ds
+      ++ [ "  and " ++ plural blocks "do block" | blocks > 0 ]
   -- Nothing to print: the caller reads the files and prints what that produced.
   RulesRequested _ -> []
   BasesLoaded bs   -> map loadedLine bs
@@ -472,6 +476,14 @@ renderSyntaxError e = case e of
     x ++ " has a type but no definition — write " ++ x ++ " = ‹term› after it"
   DeclarationsUnpaired DatatypeInATheoremList ->
     "a datatype cannot be declared here"
+  DeclarationsUnpaired BlockInATheoremList ->
+    "a do block cannot appear here"
+  -- **Numbered from one**, because the user counts instructions the way the
+  -- printer numbers everything else, and the word is quoted back so the line is
+  -- findable in a block that repeats an op.
+  BlockIllFormed i w ->
+    "instruction " ++ show (i + 1) ++ " of the do block gives " ++ w
+      ++ " operands it does not take"
   DeclarationsUnpaired (EquationWithNoSignature x) ->
     x ++ " has a definition but no type — write " ++ x ++ " : ‹type› before it"
   LexFailed (LexError p c) ->
@@ -543,6 +555,7 @@ describe t = case t of
   TWhere      -> "where"
   TData       -> "data"
   TModule     -> "module"
+  TDo         -> "do"
   TDashes     -> "--"
   TRule       -> "rule"
   TWhen       -> "when"
@@ -1113,6 +1126,9 @@ renderFailReason r = case r of
   -- list, said to the user rather than swallowed.
   NoElaborationRule what ->
     "elaboration has no rule for " ++ what ++ " yet"
+  BlockOperands i w ->
+    "instruction " ++ show (i + 1) ++ " of the do block gives " ++ w
+      ++ " operands it does not take"
   Mismatch ctx a b ->
     renderCore 0 ctx a ++ " and " ++ renderCore 0 ctx b ++ " cannot be made equal"
   OccursCheck ctx x t ->
@@ -1201,11 +1217,27 @@ orList xs = case reverse xs of
 renderSurface :: Surface -> String
 renderSurface = surf Loose
   where
+    instruction i = case i of
+      RawBind x o -> x ++ " = " ++ operation o
+      RawDo     o -> operation o
+
+    operation (RawOp w as) = unwords (w : map operand as)
+
+    operand a = case a of
+      RawRef x  -> x
+      RawPos k  -> show k
+      RawText t -> show t
+
     surf _ (SurfaceName x)      = x
     surf _ (SurfaceUniverse l)  = "Type" ++ subscript l
     surf _ SurfaceUniverseOpen  = "Type"
     surf _ SurfacePlaceholder   = "_"
     surf _ (SurfaceHole h)      = "?" ++ h
+    -- **Printed with explicit braces and semicolons**, never re-laid-out: the
+    -- grammar accepts both spellings and this is the one that is unambiguous on
+    -- one line, which is what every other case here produces too.
+    surf _ (SurfaceDo b)        =
+      "do { " ++ intercalate " ; " (map instruction b) ++ " }" 
     surf p (SurfaceApp f as)    =
       paren (p >= Tight) (surf Spine f ++ concatMap arg (NE.toList as))
     surf p (SurfaceLam bs b)    =

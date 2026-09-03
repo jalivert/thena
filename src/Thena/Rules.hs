@@ -32,6 +32,7 @@ module Thena.Rules
 
     -- * Written rules (§8, phase 21)
   , resolveRule
+  , resolveBlock
   , testWord
   ) where
 
@@ -363,6 +364,20 @@ resolveRule (RawRule nm ps ts body) =
 
     (bodyErrs, instrs) =
       partitionEithers (zipWith (instruction g) [0 ..] body)
+
+-- | Resolve a written block of instructions (MS4 phase 45).
+--
+-- **The same resolution a rule body gets**, and deliberately the same function
+-- underneath: a @do@ block is the instruction language, so a word that names an
+-- op is an op and a word that does not is a rule call, exactly as it is in a
+-- rule (phase 25e). Nothing about a block is a second dialect.
+--
+-- The name is the one errors are reported against. A block has none of its own,
+-- so its caller supplies where it came from.
+resolveBlock :: GlobalName -> [RawInstr] -> Either [RuleError] [Instr]
+resolveBlock g body = case partitionEithers (zipWith (instruction g) [0 ..] body) of
+  ([], instrs) -> Right instrs
+  (errs, _)    -> Left errs
 
 -- | One written instruction. @‹name› = ‹op›@ is a 'Bind', a bare op is a 'Do' —
 -- §7.2\'s two cases, and the grammar has no third.

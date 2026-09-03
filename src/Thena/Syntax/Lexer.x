@@ -101,6 +101,11 @@ tokens :-
   -- header being real syntax rather than a textual pre-pass like the rule
   -- base's — his call, 2026-09-02.
   "module"      { keyword TModule }
+  -- **Reserved at MS4 phase 45**, for a block of the instruction language
+  -- inside a surface term or at the top of a module. The third word to narrow
+  -- identifiers project-wide, after @data@ and @module@, and the last the
+  -- surface language is expected to need.
+  "do"          { keyword TDo }
   "rule"        { keyword TRule }
   "when"        { keyword TWhen }
   "then"        { keyword TThen }
@@ -149,6 +154,7 @@ data Token
     -- what it saw rather than failing, and so a later operator may claim it.
   | TData
   | TModule
+  | TDo
   | TRule
   | TWhen
   | TThen

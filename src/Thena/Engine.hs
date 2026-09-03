@@ -566,6 +566,20 @@ perform instr rest m = case operation instr of
     Left r  -> failure r m
     Right s -> Asking (Question s kind) m       -- NB: pc unchanged; see 'resumeAt'
 
+  -- **Play a written block** (MS4 phase 45) — 'Op.Block'.
+  --
+  -- This is 'Op.Call' with the body supplied instead of looked up, and it is
+  -- deliberately the same two lines: a frame that says where to come back to,
+  -- and an 'Exec' over the body. **No choice point**, because a block is one
+  -- body and there is nothing to choose between; everything below it stays
+  -- live, so a @retry@ from inside a block still reaches whatever put it there.
+  --
+  -- **The environment starts empty**, as a rule's does when it takes no
+  -- arguments: a block's bindings are its own, and the surface term around it
+  -- has none to pass in.
+  Op.Block body ->
+    Continue m { exec = Exec body [] (Thena.Engine.Call rest (env (exec m)) : stack (exec m)) }
+
   Say message -> case text message of
     Left r  -> failure r m
     Right s -> Saying s (advance m)

@@ -53,6 +53,7 @@ import Thena.Global.Env
   , lookupInductive
   )
 import Thena.Ops (Instr (..), Op (..), Operand (..), Value (..))
+import Thena.Rules (RuleError (..), resolveBlock)
 import Thena.Surface.Concrete
   (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..))
 
@@ -64,6 +65,17 @@ import Thena.Surface.Concrete
 --
 -- **A node it cannot yet elaborate is a failure and not a silence.** That list
 -- is phase 41b's specification.
+-- | Say why a block did not resolve, in terms "Thena.Errors" can hold.
+--
+-- Resolution can only produce 'Thena.Rules.BadOperands' — every other
+-- 'Thena.Rules.RuleError' comes from @validate@, which a block does not go
+-- through. The fallback is therefore unreachable as things stand and says so
+-- rather than inventing a second story.
+blockFailure :: [RuleError] -> FailReason
+blockFailure errs = case errs of
+  BadOperands _ i w : _ -> BlockOperands i w
+  _                     -> NoElaborationRule "a do block that does not resolve"
+
 -- | The names one compiled node binds, all carrying its own number.
 --
 -- **A fixed name is a bug and this is the fix** (MS4 phase 41e). A nested
@@ -89,6 +101,24 @@ compile
   :: GlobalEnv -> [(GlobalName, [Plicity])] -> Context -> Int -> Surface
   -> Either FailReason ([Instr], Int)
 compile env sigs ctx n0 s = case s of
+  -- **@E⟦do { … }⟧ = play the block@** (MS4 phase 45). The whole of it: a block
+  -- is written down, so there is nothing to elaborate — it is already the
+  -- machine's own language, and the instruction that plays it is the
+  -- elaboration.
+  --
+  -- **Resolved here, not in the grammar.** Which word names an op and which
+  -- names a rule is "Thena.Rules"' question (phase 25e), and answering it in a
+  -- parser would write the op vocabulary in a second place.
+  --
+  -- **It leaves the focus wherever the block left it**, which is the one way it
+  -- differs from every other case: those restore the focus by construction
+  -- (phase 41b's invariant), and a block does what the user wrote. That is the
+  -- second principle — the block may do something strange, and repairing it is
+  -- the user's.
+  SurfaceDo body -> case resolveBlock (GlobalName "do") body of
+    Left errs -> Left (blockFailure errs)
+    Right is  -> Right ([Do (Block is)], n0)
+
   -- @E⟦x⟧ = FILL x; SOLVE@ — Brady's variable case, and the one clause of his
   -- elaborator that has run in this system since phase 17b. What was
   -- @elab-var@'s body is now these two instructions.

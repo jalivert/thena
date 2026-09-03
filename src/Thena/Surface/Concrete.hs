@@ -30,6 +30,13 @@ module Thena.Surface.Concrete
 
 import Data.List.NonEmpty (NonEmpty)
 
+-- | **The instruction language is shared, and it is term-free**, which is what
+-- makes sharing it possible: a 'Thena.Syntax.Concrete.RawOperand' is an
+-- identifier, a number or a string, and mentions neither 'Surface' nor
+-- 'Thena.Syntax.Concrete.Raw'. So this import crosses no language boundary —
+-- it is the machine's own syntax, which belongs to neither term language.
+import Thena.Syntax.Concrete (RawInstr)
+
 -- | Whether the elaborator supplies an argument or the user writes it.
 --
 -- **Icity lives here and never in "Thena.Core.Term"** — the user's decision,
@@ -95,6 +102,21 @@ data Surface
     -- calculus there is nothing to infer it with.
   | SurfaceAnnot Surface Surface                 -- ^ @e : T@
 
+  | SurfaceDo [RawInstr]
+    -- ^ @do { ‹instruction› ; … }@ (MS4 phase 45) — **a block of the
+    -- instruction language, written down and never computed.** Its elaboration
+    -- is to play it, which is why it holds the block as a field rather than
+    -- anything to be evaluated: the same shape 'Thena.Ops.DefineData' has, and
+    -- for the same reason.
+    --
+    -- **It holds @RawInstr@, not @Instr@**, because parsing precedes
+    -- resolution here as it does everywhere: which word names an op is
+    -- "Thena.Rules"' question, and a grammar that answered it would be a
+    -- second place the op vocabulary is written.
+    --
+    -- His proposal, and it is what removes the need for a surface term meaning
+    -- /no proof given, search for one/: the user writes @do { prove }@, and a
+    -- search strategy is then a rule name rather than syntax.
   | SurfaceElim String [Surface] Surface [Surface] [Surface] Surface
     -- ^ @elim d (params) motive (methods) (indices) target@ — the same
     -- positional shape 'Thena.Syntax.Concrete.RawElim' has, because there is no
@@ -147,6 +169,17 @@ data SurfaceDecl
   = SurfaceSignature String Surface   -- ^ @foo : T@
   | SurfaceEquation  String Surface   -- ^ @foo = e@
   | SurfaceDatatype  SurfaceData      -- ^ @data D … where { … }@ (phase 42b)
+  | SurfaceBlock     [RawInstr]
+    -- ^ a top-level @do@ block (MS4 phase 45) — **his, 2026-09-03**. At the top
+    -- of a module a block is not an expression but an /item/: it plays where
+    -- the others declare, so a module can define most of itself in the
+    -- functional language and drop into the instruction language for the parts
+    -- that want it.
+    --
+    -- **It needs no mechanism of its own.** A module is already one instruction
+    -- program ('Thena.Driver.surfaceProgram'), so a top-level block is spliced
+    -- into it — no frame, no op, and nothing that could tell it from
+    -- instructions the elaborator emitted.
   deriving (Eq, Show)
 
 -- | A datatype declaration, in the shape §3.7 requires disambiguated.
@@ -171,6 +204,9 @@ data PairingError
   = SignatureWithNoEquation String
   | EquationWithNoSignature String
   | DatatypeInATheoremList
+  | BlockInATheoremList
+    -- ^ and neither is a top-level @do@ block (MS4 phase 45), for the same
+    -- reason: 'paired' is about theorems.
     -- ^ 'paired' is about theorems; a caller that can also take a datatype
     -- splits the list first. Phase 43's loader does; phase 42b's @declare@
     -- keeps them apart at the command.
@@ -189,3 +225,4 @@ paired ds = case ds of
   SurfaceSignature x _ : _ -> Left (SignatureWithNoEquation x)
   SurfaceEquation  x _ : _ -> Left (EquationWithNoSignature x)
   SurfaceDatatype _    : _ -> Left DatatypeInATheoremList
+  SurfaceBlock _       : _ -> Left BlockInATheoremList

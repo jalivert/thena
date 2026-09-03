@@ -787,6 +787,36 @@ tests =
         , ":quit"
         ]
 
+      -- **A @do@ block is a surface term whose elaboration is to play it**
+      -- (MS4 phase 45). It removes the need for a surface term meaning /no
+      -- proof given, search for one/: the user writes the search as an
+      -- instruction, and a search strategy is then a rule name and never
+      -- syntax.
+    , script
+        "do-blocks"
+        [ ":surface do { attack ; intro }"
+          -- A block is an atom, so an argument run takes it unparenthesised.
+        , ":surface f (do { attack })"
+        , "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , ":theorem t : Nat"
+        , "elaborate (do { attack ; prove })"
+          -- The block did what was written rather than what was tidy, and the
+          -- development shows where it got to — the second principle.
+        , ":show"
+          -- An op given operands it does not take is caught when the block is
+          -- resolved, before any of it runs, and the message says which
+          -- instruction. **The block must be the whole of the failure**: with
+          -- an instruction before it that succeeds, the engine backtracks over
+          -- the failing clause and the reason is lost with it — which is how
+          -- every elaboration failure behaves, not something blocks add.
+          -- On a fresh proof, so that no choice point from the line above is
+          -- live to backtrack into.
+        , ":abandon"
+        , ":theorem u : Nat"
+        , "elaborate (do { say })"
+        , ":quit"
+        ]
+
     , script
         "inferring"
         [ "data Bool : Type\8320 where { true : Bool ; false : Bool }"

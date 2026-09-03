@@ -14,6 +14,9 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
 import Thena.Driver (parseCore, parseSurfaceModule, parseSurfaceTerm)
+import Thena.Syntax.Lexer (lexTokens)
+import Thena.Syntax.Concrete (RawInstr, RawRule (..))
+import Thena.Syntax.Parser (parseRule)
 import Thena.Global.Env (emptyGlobals)
 import Thena.Repl (renderSurface)
 import Thena.Surface.Concrete
@@ -35,6 +38,7 @@ tests =
     , testGroup "layout (phase 40)" layoutTests
     , testGroup "proof modules (phase 43)" moduleTests
     , testGroup "comments (phase 43)" commentTests
+    , testGroup "do blocks (phase 45)" blockTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -396,3 +400,68 @@ commentTests =
       same "let { x = a } in x"
            "let x = a\n-- not a second binding\n in x"
   ]
+
+-- --------------------------------------------------------------------------
+-- do blocks (MS4 phase 45)
+-- --------------------------------------------------------------------------
+
+-- | A block of the **instruction** language inside a surface term.
+--
+-- **The cross-grammar check is the important one here.** Happy cannot share
+-- productions between two files, so @Thena.Surface.Parser@ mirrors
+-- @Thena.Syntax.Parser@\'s five instruction nonterminals, and that duplication
+-- is this phase\'s judgement call. What makes it safe is not that it is
+-- fourteen lines: it is that the same text is parsed through both and the two
+-- @[RawInstr]@ compared. A mirror nothing crosses is the mistake the @:help@
+-- audit had just found one phase earlier.
+blockTests :: [TestTree]
+blockTests =
+  [ testCase "a block parses and prints back" $
+      roundTrip "do { attack ; intro }"
+
+  , testCase "a binding in a block round-trips too" $
+      roundTrip "do { h = here ; goto h }"
+
+  , testCase "operands may be numbers and strings" $
+      roundTrip "do { arg 2 ; say \"done\" }"
+
+  , -- Layout, like everything else the surface language has.
+    testCase "a block lays out" $
+      same "do { attack ; intro }" "do attack\n   intro"
+
+  , testCase "and it is an atom, so an argument run takes it unparenthesised" $
+      same "f (do { attack })" "f do { attack }"
+
+  , -- **The duplication, crossed.**
+    testCase "the surface grammar reads a block exactly as the rule grammar does" $
+      mapM_ crossed
+        ([ "attack"
+        , "attack ; intro"
+        , "h = here ; goto h"
+        , "arg 2 ; say \"done\" ; try-core x"
+        , "x = fresh-name \"a\" ; claim x y ; prove"
+        ] :: [String])
+  ]
+  where
+    roundTrip :: String -> Assertion
+    roundTrip src = case parseSurfaceTerm src of
+      Left e  -> assertFailure (src ++ ": " ++ show e)
+      Right t -> renderSurface t @?= src
+
+    -- The same body, through the surface grammar and through the rule grammar.
+    crossed :: String -> Assertion
+    crossed body = case (viaSurface body, viaRule body) of
+      (Just a, Just b) -> a @?= b
+      (a, b) -> assertFailure (body ++ ": " ++ show a ++ " / " ++ show b)
+
+    viaSurface :: String -> Maybe [RawInstr]
+    viaSurface body = case parseSurfaceTerm ("do { " ++ body ++ " }") of
+      Right (SurfaceDo is) -> Just is
+      _                    -> Nothing
+
+    viaRule :: String -> Maybe [RawInstr]
+    viaRule body = case lexTokens ("rule r :- when focus-is-hole then " ++ body) of
+      Left _   -> Nothing
+      Right ts -> case parseRule ts of
+        Right (RawRule _ _ _ is) -> Just is
+        Left _                   -> Nothing

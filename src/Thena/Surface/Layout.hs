@@ -45,6 +45,10 @@ layoutKeyword t = case t of
   -- @where@, so neither needs a rule of its own. An explicit @{@ after it still
   -- passes through — 'mark' declines to open a block the user opened.
   TWhere -> True
+  -- **Added at phase 45**, the third and last one phase 40 named. Its block is
+  -- the instruction language rather than the surface one, which changes nothing
+  -- here: layout is about columns, not about what the tokens mean.
+  TDo    -> True
   _      -> False
 
 -- | Tokens that close an implicit block by appearing.

@@ -87,6 +87,16 @@ data FailReason
   = UnboundInBody String
     -- ^ a @Ref@ named nothing in the body's environment
   | NotAnIdentifier String
+  | BlockOperands Int String
+    -- ^ the instruction at this position in a @do@ block gave this op word the
+    -- wrong operands (MS4 phase 45).
+    --
+    -- **Structured rather than a rendered rule error**, because
+    -- @Thena.Rules.RuleError@ is above this module in the layering (§2.5) and a
+    -- @String@ here would be the thing §12 forbids. It costs nothing to say it
+    -- this way: resolving a block can fail in exactly one way — an op word given
+    -- operands it does not take — since a word that names no op is a rule call
+    -- and not an error (phase 25e).
     -- ^ an answer to an @AName@ question that cannot be a name
   | ExpectedText
     -- ^ an operand was not a @VText@
@@ -481,6 +491,15 @@ data SyntaxError
     -- ^ the offside rule could not lay the surface program out (MS4 phase 40)
   | SurfaceParseFailed SurfaceParseError
   | DeclarationsUnpaired PairingError
+  | BlockIllFormed Int String
+    -- ^ the instruction at this position in a **top-level** @do@ block gave this
+    -- op word the wrong operands (MS4 phase 45).
+    --
+    -- Structured for 'BlockOperands'\' reason — @Thena.Rules.RuleError@ is above
+    -- this module — and a second constructor rather than a shared one because
+    -- the two failures are in two different error languages: a top-level block
+    -- is refused while the file is being read, and one inside a term fails
+    -- while the machine is running.
     -- ^ a surface signature with no equation after it, or the other way round
     -- (MS4 phase 42). A syntax error rather than a scope one: the declarations
     -- parsed, they just do not make a module.

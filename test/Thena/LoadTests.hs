@@ -281,7 +281,7 @@ moduleTests =
   [ testCase "a module declares what it says it declares" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 natModule of
-        (_, ProofLoaded nm ds) -> (nm, ds) @?= ("M", ["Nat", "one"])
+        (_, ProofLoaded nm ds _) -> (nm, ds) @?= ("M", ["Nat", "one"])
         (_, other)             -> assertFailure (show other)
 
   , testCase "and the globals are really there afterwards" $ do
@@ -297,7 +297,7 @@ moduleTests =
     testCase "a module that does not elaborate reports why" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 badModule of
-        (_, ProofLoaded _ _) -> assertFailure "admitted, and it should not have been"
+        (_, ProofLoaded {}) -> assertFailure "admitted, and it should not have been"
         (_, _)               -> pure ()
 
   , -- **Comments, in the other two kinds** (MS4 phase 43). The surface cases
@@ -307,7 +307,7 @@ moduleTests =
     testCase "a comment line in a proof module is skipped" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 commentedModule of
-        (_, ProofLoaded nm ds) -> (nm, ds) @?= ("M", ["Nat", "one"])
+        (_, ProofLoaded nm ds _) -> (nm, ds) @?= ("M", ["Nat", "one"])
         (_, other)             -> assertFailure (show other)
 
   , testCase "a comment line in a script is a blank line" $
@@ -317,6 +317,29 @@ moduleTests =
 
   , testCase "and -- without a space is still not one" $
       loadedError (loadSource newSession "--nope\n") @?= Just (LoadStopped 1)
+
+  , -- **A top-level @do@ block** (MS4 phase 45), his: at the top of a module a
+    -- block is an item, not an expression. It is spliced into the module's own
+    -- instruction program, so what this pins is that the items around it are
+    -- unaffected — the module goes on declaring after it.
+    testCase "a top-level do block runs and the module goes on" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 blockModule of
+        (_, ProofLoaded nm ds n) -> (nm, ds, n) @?= ("M", ["Nat", "one"], 1)
+        (_, other)               -> assertFailure (show other)
+
+  , testCase "and what it declared is really there" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 blockModule
+      isDeclared (GlobalName "one") (globals (sessionMachine s1)) @?= True
+
+  , -- Resolution happens while the file is read, so a block whose op is given
+    -- the wrong operands is a syntax error and not a run-time failure.
+    testCase "a block with bad operands is refused as a syntax error" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 badBlockModule of
+        (_, Failed _) -> pure ()
+        (_, other)    -> assertFailure (show other)
 
   , testCase "a file that is not a module at all is a syntax error" $ do
       (s0, _) <- startingSession
@@ -345,6 +368,26 @@ moduleTests =
       \\n\
       \one : Nat\n\
       \one = succ zero\n"
+
+    blockModule =
+      "module M where\n\
+      \data Nat : Type\8320 where\n\
+      \  zero : Nat\n\
+      \  succ : Nat -> Nat\n\
+      \\n\
+      \do\n\
+      \  say \"here\"\n\
+      \\n\
+      \one : Nat\n\
+      \one = succ zero\n"
+
+    badBlockModule =
+      "module M where\n\
+      \data Nat : Type\8320 where\n\
+      \  zero : Nat\n\
+      \\n\
+      \do\n\
+      \  say\n"
 
     badModule =
       "module M where\n\
@@ -385,7 +428,7 @@ tierTests =
     testCase "a written implicit argument and an inserted one agree" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 bothSpellings of
-        (_, ProofLoaded _ _) -> pure ()
+        (_, ProofLoaded {}) -> pure ()
         (_, other)           -> assertFailure (show other)
 
   , testCase "and they are convertible, not merely both admitted" $ do
