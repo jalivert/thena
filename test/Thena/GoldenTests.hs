@@ -817,6 +817,43 @@ tests =
         , ":quit"
         ]
 
+      -- **Yielding to the REPL** (MS4 phase 45b). The rule stops where it is
+      -- and hands control over; every command works, the development is the
+      -- half-built one, and @yield@ hands control back. The word is the same in
+      -- both directions — his, 2026-09-03: /"yielding is something that
+      -- switches from one control to the other so returning would be named the
+      -- same."/
+    , script
+        "yielding"
+        [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , ":theorem t : Nat"
+        , "elaborate (do { h = here ; yield \"look at this\" ; goto h ; prove })"
+          -- The development is what the rule has built so far, not what it
+          -- started with: @attack@ has not run, but @here@ has.
+        , ":show"
+          -- **Every ordinary command works, and really changes things.** That
+          -- is the whole difference between a yield and a question, which takes
+          -- an answer and refuses everything else.
+        , "assume w : Nat"
+        , ":show"
+        , ":infer succ zero"
+        , ":revalidate"
+          -- **A typed block reads the rule's own locals.** A command cannot —
+          -- @goto h@ looks for a hole named @h@ — which is why the REPL types
+          -- the instruction language through a block.
+        , "goto h"
+        , "do { goto h }"
+          -- And a block's bindings survive to the next line, because a yielded
+          -- machine's environment is not cleared.
+        , "do { k = here }"
+        , "do { goto k }"
+          -- The yield is not consumed, so the prompt keeps coming back until
+          -- this word advances past it.
+        , "yield"
+        , "yield"
+        , ":quit"
+        ]
+
     , script
         "inferring"
         [ "data Bool : Type\8320 where { true : Bool ; false : Bool }"

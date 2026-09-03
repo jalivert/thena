@@ -24,7 +24,9 @@ import Thena.Engine
   , Development (..)
   , Question (..)
   , isAsking
+  , isYielding
   , load
+  , resumeYield
   , newDevelopment
   , focusContext
   , flatten
@@ -76,6 +78,64 @@ tests =
   testGroup
     "Thena.Engine"
     [ testGroup
+        -- **Yielding, and what @load@ may keep** (MS4 phase 45b).
+        --
+        -- The second group is the one that matters. The design conversation had
+        -- @load@ prepending unconditionally; @pc@ is only empty when a program
+        -- /finished/, so a line that halted leaves instructions behind and
+        -- prepending revives them. @test\/golden\/mistakes.golden@ caught it —
+        -- a failed @assume@'s @Ask@ came back two commands later and swallowed a
+        -- @:show@ — and these say the rule that replaced it.
+        "yielding"
+        [ testCase "a yield stops the machine and does not consume itself" $
+            case step (machine [Do (Ops.Yield (text "look"))]) of
+              Yielding msg m -> (msg, isYielding m) @?= ("look", True)
+              other -> assertFailure ("expected Yielding, got " ++ show other)
+
+        , testCase "and stepping it again yields again" $
+            case step (machine [Do (Ops.Yield (text "look"))]) of
+              Yielding _ m -> case step m of
+                Yielding msg _ -> msg @?= "look"
+                other -> assertFailure ("expected Yielding, got " ++ show other)
+              other -> assertFailure ("expected Yielding, got " ++ show other)
+
+        , testCase "resumeYield advances past it, and the rest runs" $
+            let m = machine [Do (Ops.Yield (text "look")), Do (Ops.Say (text "after"))]
+             in case step m of
+                  Yielding _ y -> case step (resumeYield y) of
+                    Saying msg _ -> msg @?= "after"
+                    other -> assertFailure ("expected Saying, got " ++ show other)
+                  other -> assertFailure ("expected Yielding, got " ++ show other)
+
+        , testCase "nothing else is yielding" $
+            isYielding (machine [Do (Ops.Say (text "x"))]) @?= False
+        ]
+    , testGroup
+        "load keeps a suspended tape and drops a dead one"
+        [ testCase "a command in front of a yield keeps the rest of the program" $
+            let m = machine [Do (Ops.Yield (text "look")), Do (Ops.Say (text "after"))]
+             in case step m of
+                  Yielding _ y ->
+                    -- The typed line runs, falls back into the yield, and the
+                    -- suspended program is still behind it.
+                    case runTo (load [Do (Ops.Say (text "typed"))] y) of
+                      Saying msg m' -> (msg, isYielding m') @?= ("typed", True)
+                      other -> assertFailure (show other)
+                  other -> assertFailure (show other)
+
+        , -- **The regression.** A machine that is not yielding may still have
+          -- instructions on @pc@ — one that halted does — and those are dead.
+          testCase "but a tape that is not yielding is replaced, not prepended" $
+            let stale = machine [Do (Ops.Say (text "stale"))]
+             in case runTo (load [Do (Ops.Say (text "fresh"))] stale) of
+                  Saying msg _ -> msg @?= "fresh"
+                  other -> assertFailure (show other)
+
+        , testCase "and its environment goes with it" $
+            let stale = (machine []) { exec = (exec (machine [])) { env = [("x", VText "old")] } }
+             in env (exec (load [] stale)) @?= []
+        ]
+    , testGroup
         "stepping"
         [ testCase "an empty program with an empty stack is finished" $
             case step (machine []) of

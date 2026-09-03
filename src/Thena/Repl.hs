@@ -461,6 +461,10 @@ renderStop :: Session -> Stop -> [String]
 renderStop s stop = case stop of
   Completed              -> []
   Waiting (Question p _) -> [p]
+  -- **The message, then how to get out.** A yield takes every command the REPL
+  -- has, so unlike a question it cannot say what it wants — what it can say is
+  -- the one word that is not otherwise reachable from here.
+  Yielded msg            -> [msg, "(yield to hand control back)"]
   Halted r               -> ["stuck: " ++ renderFailReason r]
   Refused e              -> ["refused: " ++ renderDeclareError e]
   Uncertified e          -> "the kernel refused it" : renderKernelError (counter s) e
@@ -1103,6 +1107,7 @@ renderCommandError e = case e of
   MissingArgument w    -> w ++ " needs an argument"
   UnexpectedArgument w -> w ++ " takes no argument"
   NotAsking            -> "nothing was asked"
+  NotYielding          -> "nothing has yielded"
   NoSuchGlobal x       -> "nothing named " ++ x ++ " has been declared"
   NotProving           -> "no proof is being worked on"
   AlreadyProving g     -> nameString g ++ " is still being proved — :suspend or :abandon it first"

@@ -215,6 +215,22 @@ data Op
     -- as ordinary instructions.
     --
     -- See "Thena.Elaborate".
+  | Yield Operand
+    -- ^ hand control to the REPL and stay where you are (MS4 phase 45b).
+    --
+    -- **It is 'Ask''s mechanism without 'Ask''s question.** The instruction is
+    -- not consumed — @pc@ is unchanged, exactly as it is for 'Ask' — so the
+    -- machine keeps arriving back here and the user keeps getting the prompt.
+    -- His words: /"that instruction simply enters the REPL again and again and
+    -- again."/ Nothing duplicates itself onto the tape and no program modifies
+    -- itself; @yield@ the driver word is what finally advances past it, the way
+    -- 'Thena.Engine.resumeAt' advances past an 'Ask'.
+    --
+    -- **The operand is why it stopped**, and one op with a message covers both
+    -- callers: a rule body saying what it wants looked at, and elaboration's
+    -- named-placeholder clause saying which @?foo@ you are standing in. Two ops
+    -- differing only by carrying a string would be the special case §12's first
+    -- principle is about.
   | Block [Instr]
     -- ^ play a written block of instructions (MS4 phase 45).
     --
@@ -625,6 +641,9 @@ produces o = case o of
   -- instruction stays at the head of @pc@ (§7.5): the destination has to still
   -- be there when the answer comes back.
   Ask _ _      -> True
+  -- **A yield produces nothing.** It is not a question: control comes back
+  -- because the user handed it back, not because they supplied a value.
+  Yield _      -> False
   -- **A block produces nothing.** Its instructions produce whatever they
   -- produce, into the block's own environment; the block itself is a body being
   -- played, and a body has no value — the same answer 'Call' gives.
@@ -686,6 +705,7 @@ produces o = case o of
 -- anything.
 operandsOf :: Op -> [Operand]
 operandsOf o = case o of
+  Yield a      -> [a]
   -- **A block reads no operand.** It is written down, not computed, so there is
   -- nothing here for a rule to have bound — see 'Block'.
   Block _      -> []
@@ -813,6 +833,7 @@ data Test
 -- here because the case split is total, not because a body may say it.
 opKeyword :: Op -> String
 opKeyword o = case o of
+  Yield _      -> "yield"
   -- Like 'DefineData', a word with no written form of its own: a block is
   -- written @do { … }@ in the surface language and is never spelled in a rule
   -- body. The word is here because the case split is total.

@@ -413,6 +413,14 @@ data Response
 data Stop
   = Completed            -- ^ the program ran out of instructions
   | Waiting Question     -- ^ answer it with 'answer'
+  | Yielded Message
+    -- ^ a rule handed control to the REPL and is standing still (MS4 phase
+    -- 45b). The message is why it stopped. Type anything; @yield@ hands control
+    -- back.
+    --
+    -- **Not a 'Waiting'**, and the difference is the whole of the feature: a
+    -- question wants a value and refuses everything else, while a yield wants
+    -- nothing and takes every command the REPL has.
   | Halted FailReason
     -- ^ the machine ran and failed.
     --
@@ -435,6 +443,10 @@ data CommandError
   | MissingArgument String
   | UnexpectedArgument String
   | NotAsking
+  | NotYielding
+    -- ^ @yield@ typed when no rule has handed control over (MS4 phase 45b).
+    -- 'NotAsking''s twin, and it exists for the same reason: a word that did
+    -- nothing would be worse than one that says so.
   | NoSuchGlobal String
   | NotProving
     -- ^ @qed@, @:suspend@, @:abandon@ or @:undo@ outside a proof. §2.4: outside
@@ -1066,6 +1078,54 @@ dispatch s name arg = case name of
   -- and an op that re-entered a choice point would be exactly the mechanism
   -- that refused. It is still spelled bare, because §2.4's rule is that a word
   -- that /acts/ takes no colon, and this acts.
+  -- **A block typed at the REPL is played** (MS4 phase 45b), and it is how the
+  -- REPL types the instruction language at all.
+  --
+  -- **This is what makes standing inside a yield useful.** The driver's own
+  -- commands take /terms/ and /names/ — @goto h@ looks for a hole called @h@,
+  -- not for whatever @h@ is bound to — so nothing typed as a command can read a
+  -- suspended rule's locals. A block can: its operands are references, and with
+  -- 'Thena.Engine.load' prepending, the rule's environment is still there.
+  --
+  -- > elaborate (do { h = here ; yield "look" ; goto h })
+  -- > do { goto h }          -- reads the rule's own h
+  --
+  -- **And a block's own bindings survive**, for the same reason — while the
+  -- machine is yielding, @env@ is not cleared, so @do { x = here }@ on one line
+  -- and @do { goto x }@ on the next is one environment. Outside a yield there is
+  -- no suspended program to share with and @load@ clears @env@ as it always has.
+  --
+  -- Reusing the surface parser rather than adding a command form: @do { … }@ is
+  -- already a surface atom (phase 45), so this costs a case and no syntax.
+  "do" -> case parseSurfaceTerm ("do " ++ arg) of
+    Left e -> (s, Failed e)
+    Right (SurfaceDo body) -> case resolveBlock (GlobalName "do") body of
+      Left errs -> (s, Failed (blockProblem errs))
+      Right is  -> progress (sessionStepping s)
+                            s { sessionMachine = load is machine } []
+    Right _ -> (s, Rejected (UnexpectedArgument name))
+
+  -- **@yield@ hands control back to a rule that yielded** — his, 2026-09-03,
+  -- and the word is deliberately the same one the op has: /"yielding is
+  -- something that switches from one control to the other so returning would be
+  -- named the same."/
+  --
+  -- It is one word with one meaning, not an overload: yielding to yourself is a
+  -- no-op, so the op is meaningless typed here and the driver word is
+  -- meaningless inside a body. Who it transfers to is settled by who is
+  -- speaking.
+  --
+  -- **Bare, not @:yield@** (§2.4: a bare word acts). That is also what keeps the
+  -- symmetry visible — the two directions are spelled the same.
+  --
+  -- **The driver's, never an op.** With 'Thena.Engine.load' prepending, an op
+  -- would arrive in front of the yield and would have to delete the instruction
+  -- after it. @retry@ is the precedent for a bare driver word that is not an op.
+  "yield" -> noArgument $
+    if Engine.isYielding machine
+      then progress (sessionStepping s)
+                    s { sessionMachine = Engine.resumeYield machine } []
+      else (s, Rejected NotYielding)
   "retry"  -> case arg of
     "" -> retryAt Nothing
     _  -> case reads arg of
@@ -1503,6 +1563,8 @@ commandSummary =
   [ ("assume ‹x› : ‹S›",        "add a hypothesis above the focus")
   , ("claim ‹x› : ‹S›",         "add a hole above the focus")
   , ("unify ‹t› ≟ ‹u›",         "solve the focus by unification")
+  , ("do { ‹instruction› ; … }", "play a block of instructions here")
+  , ("yield",                    "hand control back to a rule that yielded")
   , ("retry / retry ‹n›",        "backtrack to a choice point")
   , ("along  into  back",        "move on the chain")
   , ("cross type / cross val",   "move into a term")
@@ -2048,6 +2110,10 @@ progress oneStep s msgs = case step (sessionMachine s) of
   Engine.Saying msg m
     | oneStep   -> stop m (msg : msgs) Paused
     | otherwise -> progress oneStep s { sessionMachine = m } (msg : msgs)
+  -- **A yield stops the run and keeps the machine** (MS4 phase 45b), exactly as
+  -- a question does. Stepping it again would yield again — the instruction is
+  -- not consumed — so the driver has to stop here or spin.
+  Engine.Yielding msg m -> stop m msgs (Yielded msg)
   -- The declaration is checked and installed here, outside the machine: the
   -- global environment is not part of 'Development' and no instruction writes it
   -- (§7.4, §7.5). On refusal the rest of the program is dropped — the command

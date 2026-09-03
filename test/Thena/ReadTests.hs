@@ -70,6 +70,7 @@ go m = case step m of
   Defining _ _ _ _ m' -> go m'
   Certifying _ _ m' -> go m'
   Asking _ m'       -> Right m'
+  Yielding _ m'     -> Right m'
   Finished m'       -> Right m'
   Stuck r _         -> Left r
 

@@ -31,6 +31,7 @@ import Thena.Engine
   , Development (..)
   , load
   , resumeAt
+  , resumeYield
   , step
   )
 import Thena.Errors (FailReason)
@@ -429,6 +430,9 @@ runOut m = case step m of
   Defining _ _ _ _ m' -> runOut m'
   Certifying _ _ m' -> runOut m'
   Asking _ m'       -> runOut (resumeAt "ok" m')
+  -- Handed straight back, so a rule that yields is still exercised end to
+  -- end rather than stopping the harness (MS4 phase 45b).
+  Yielding _ m'     -> runOut (resumeYield m')
   Finished m'       -> Right m'
   Stuck r _         -> Left r
 

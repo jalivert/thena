@@ -488,7 +488,7 @@ operation g i (RawOp w as)
       , ("pop-development", Op.PopDevelopment)
       ]
     unary =
-      [ ("say", Say), ("prim-try", Try), ("prim-elaborate", Op.Elaborate)
+      [ ("say", Say), ("yield", Op.Yield), ("prim-try", Try), ("prim-elaborate", Op.Elaborate)
       , ("goto", Goto), ("push-development", Op.PushDevelopment)
       , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
       , ("typeof", Typing), ("expose", Op.Expose), ("fresh-name", FreshName), ("prim-apply", Op.Apply)

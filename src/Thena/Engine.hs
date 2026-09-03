@@ -30,6 +30,8 @@ module Thena.Engine
   , Answer
   , load
   , isAsking
+  , isYielding
+  , resumeYield
   , step
   , resumeAt
   , failure
@@ -391,6 +393,11 @@ type Answer = String
 data Outcome
   = Continue  Machine
   | Asking    Question   Machine  -- ^ the driver must supply an 'Answer'
+  | Yielding  Message    Machine
+    -- ^ control has been handed to the REPL and the machine is standing still
+    -- (MS4 phase 45b). Like 'Asking' it leaves @pc@ where it is, so stepping a
+    -- yielding machine yields again; unlike 'Asking' the driver does not owe it
+    -- a value, only the word that lets it carry on.
   | Saying    Message    Machine  -- ^ the driver renders, then steps again
   | Declaring InductiveDefinition Machine
                                   -- ^ the driver checks, installs, then steps again
@@ -411,7 +418,22 @@ data Outcome
 -- | Put a program into the machine's @pc@ (§7.8). A command is a program loaded
 -- into the /current/ machine, not a new machine.
 load :: [Instr] -> Machine -> Machine
-load is m = m { exec = (exec m) { pc = is, env = [] } }
+load is m
+  -- **A suspended program survives; a dead one does not** (MS4 phase 45b).
+  --
+  -- The design conversation had this prepending unconditionally, and that is
+  -- wrong: @pc@ is only empty when a program /finished/. A line that halted, or
+  -- that was abandoned mid-question, leaves its instructions behind, and
+  -- prepending in front of those brings them back to life — which is exactly
+  -- what @test\/golden\/mistakes.golden@ caught: a failed @assume@\'s @Ask@
+  -- resurfaced two commands later and swallowed a @:show@ as its answer.
+  --
+  -- So the tape is kept **iff** it is standing in a yield, which is the one
+  -- state in which the rest of the program is still wanted. That is not a mode:
+  -- it is one statable rule about what is live, and 'isYielding' is the test
+  -- for it.
+  | isYielding m = m { exec = (exec m) { pc = is ++ pc (exec m) } }
+  | otherwise    = m { exec = (exec m) { pc = is, env = [] } }
 
 -- | Is the machine waiting for an answer? The driver asks this before it calls
 -- 'resumeAt', so that a line typed when nothing was asked is reported rather
@@ -421,6 +443,34 @@ isAsking m = case pc (exec m) of
   Bind _ (Ask _ _) : _ -> True
   Do     (Ask _ _) : _ -> True
   _                    -> False
+
+-- | Is the machine standing in a yield (MS4 phase 45b)?
+--
+-- 'isAsking''s twin, same shape and same head-of-@pc@ test, and the driver uses
+-- it for the same reason: so that @yield@ typed when nothing has yielded is
+-- reported rather than silently doing nothing.
+isYielding :: Machine -> Bool
+isYielding m = case pc (exec m) of
+  Bind _ (Yield _) : _ -> True
+  Do     (Yield _) : _ -> True
+  _                    -> False
+
+-- | Step past a yield, handing control back to the suspended program.
+--
+-- **'resumeAt''s twin, and it is the driver's** — an op could not do it. With
+-- 'load' prepending, a @resume@ /op/ would arrive as @[Do Resume, Yield, …]@
+-- and would have to reach forward and delete the instruction after it, which is
+-- a program modifying itself. There are two precedents for a driver word that
+-- advances the tape without an op: 'resumeAt' for 'Ask', and @retry@ (§7.7).
+--
+-- **A bound yield binds nothing.** It is not a question, so there is no answer
+-- to bind; the name simply goes unused, which the resolver already permits for
+-- any op that produces nothing.
+resumeYield :: Machine -> Machine
+resumeYield m = case pc (exec m) of
+  Bind _ (Yield _) : rest -> m { exec = (exec m) { pc = rest } }
+  Do     (Yield _) : rest -> m { exec = (exec m) { pc = rest } }
+  _                       -> m
 
 -- | One instruction.
 --
@@ -579,6 +629,12 @@ perform instr rest m = case operation instr of
   -- has none to pass in.
   Op.Block body ->
     Continue m { exec = Exec body [] (Thena.Engine.Call rest (env (exec m)) : stack (exec m)) }
+
+  -- **Hand control over, and stay put** (MS4 phase 45b). @pc@ is deliberately
+  -- unchanged — see 'Op.Yield' and 'resumeYield'.
+  Op.Yield message -> case text message of
+    Left r  -> failure r m
+    Right t -> Yielding t m
 
   Say message -> case text message of
     Left r  -> failure r m

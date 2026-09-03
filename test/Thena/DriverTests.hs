@@ -82,6 +82,7 @@ everyBareCommand :: [String]
 everyBareCommand =
   [ "assume", "claim", "quantify", "data", "declare"
   , "along", "into", "back", "reduce", "unify"
+  , "do", "yield"
   , "retry", "goto", "cross", "certify", "qed"
   ] ++ partWords
 

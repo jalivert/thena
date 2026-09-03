@@ -422,6 +422,38 @@ construct. Term literals in a body are a later phase.
 the driver's and are not instructions; a `.thena.script` file is where those
 live.
 
+### `yield` goes both ways, because it names one thing
+
+*Decided 2026-09-03.*
+
+A rule body can stop and hand control to you:
+
+```
+elaborate (do { h = here ; yield "look at this" ; goto h ; prove })
+   look at this
+   (yield to hand control back)
+```
+
+You are then standing **inside** the suspended rule. Every command works — this
+is not a question, which takes an answer and refuses everything else — and
+`:show` shows the half-built development. Typing `yield` hands control back.
+
+**The same word in both directions**, because it names one thing: a transfer of
+control. Who it goes to is settled by who is speaking, and yielding to yourself
+is a no-op, so there is nothing to confuse it with. It is bare rather than
+`:yield` for the usual reason — it acts.
+
+**The yield is not consumed**, so after each line you are handed the prompt
+again, until you `yield` out.
+
+**`do { … }` is a REPL command**, and inside a yield it is the useful one: the
+driver's own commands take terms and names, so `goto h` looks for a hole *called*
+`h`, while `do { goto h }` reads whatever the suspended rule bound `h` to. A
+block's own bindings survive to the next line while a rule is suspended.
+
+You can break the rule you are standing in — shadow one of its locals and its
+body will go wrong. That is allowed on purpose.
+
 ### `:infer` takes a surface term; a core one goes in corners
 
 *Decided 2026-09-02.*

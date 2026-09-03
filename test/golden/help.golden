@@ -4,6 +4,8 @@ a bare word acts, a word with a colon looks.
   assume ‹x› : ‹S›              add a hypothesis above the focus
   claim ‹x› : ‹S›               add a hole above the focus
   unify ‹t› ≟ ‹u›               solve the focus by unification
+  do { ‹instruction› ; … }      play a block of instructions here
+  yield                         hand control back to a rule that yielded
   retry / retry ‹n›             backtrack to a choice point
   along  into  back             move on the chain
   cross type / cross val        move into a term

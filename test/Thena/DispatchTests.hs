@@ -107,6 +107,7 @@ runOut m = case step m of
   Defining _ _ _ _ m' -> runOut m'
   Certifying _ _ m' -> runOut m'
   Asking _ m'       -> ([], Right m')
+  Yielding _ m'     -> ([], Right m')
   Finished m'       -> ([], Right m')
   Stuck r _         -> ([], Left r)
 
