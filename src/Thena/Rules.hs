@@ -541,14 +541,11 @@ operation g i (RawOp w as)
       ("prim-intro", _)           -> bad
       ("call", RawRef r : rest)   -> Call (GlobalName r) <$> traverse ref rest
       ("call", _)                 -> bad
-      -- **@make-elim@'s first word is a datatype, not an operand** (MS4 phase
-      -- 41i), so it is spelled here for @call@'s reason rather than sitting in
-      -- an arity table: the name is written down, never computed. The rest are
-      -- the names its holes are to carry.
+      -- **@make-apply@ takes a head and then the names its argument holes are
+      -- to carry**, a run of any length, so it is spelled here rather than
+      -- sitting in an arity table.
       ("make-apply", h : rest)    -> Op.MakeApply <$> ref h <*> traverse ref rest
       ("make-apply", _)           -> bad
-      ("make-elim", RawRef d : rest) -> Op.MakeElim (GlobalName d) <$> traverse ref rest
-      ("make-elim", _)            -> bad
 
 
       ("ask", [a, RawRef k])      -> case answerKind k of
@@ -629,6 +626,7 @@ operation g i (RawOp w as)
       , ("let-value", Op.LetValue), ("let-body", Op.LetBody)
       , ("forall-name", Op.ForallName), ("forall-domain", Op.ForallDomain)
       , ("forall-tail", Op.ForallTail), ("play", Op.Play)
+      , ("elim-spine", Op.ElimSpine)
       ]
     binary =
       [ ("assume", Assume), ("claim", Claim), ("define", Define)

@@ -128,15 +128,6 @@ data FailReason
     -- ^ @intro@ on anything but table 2.8's shape @?x ≐ (?x' : S . x') : …@.
     -- The shape test is the specification, not a shortcut: a hole not of that
     -- form is made ready by @attack@
-  | WrongNumberOfEliminationFields GlobalName Int Int
-    -- ^ @make-elim@ was handed a number of names that is not the number of
-    -- fields an elimination of that datatype has (MS4 phase 41i): parameters,
-    -- the motive, one method per constructor, the indices, the target.
-    --
-    -- Its own reason rather than one of "Thena.Errors"\'s
-    -- @WrongNumberOfElimination…@ resolve errors, because those are about what
-    -- a /user wrote/ in one field group and this is about the total a rule
-    -- body handed an op.
   | CannotBuildDatatype DataBuildError
     -- ^ the elaborated types do not make a datatype record (MS4 phase 42b).
     -- Everything a /user/ can get wrong is checked by @declare@ on the

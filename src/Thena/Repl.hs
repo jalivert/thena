@@ -1177,10 +1177,6 @@ renderFailReason r = case r of
   TooManyArgumentsForHead -> "that head does not take that many arguments"
   NoEnclosingDevelopment ->
     "pop-development needs a development to go back to; this is the outermost one"
-  WrongNumberOfEliminationFields d want got ->
-    "eliminating " ++ nameString d ++ " needs " ++ show want
-      ++ " field name(s), not " ++ show got
-      ++ " — parameters, the motive, one method per constructor, the indices, the target"
   NotYetPure pos    ->
     "not finished: " ++ renderPosition pos ++ " is still open, so there is no term yet"
   -- Phase 17b's four. 'CannotRead' reuses the renderer the driver's own

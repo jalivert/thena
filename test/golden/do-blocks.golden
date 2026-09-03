@@ -7,8 +7,8 @@ declared Nat
 thena spine> :theorem t : Nat
 proving t : Nat
 thena spine> elaborate (do { attack ; prove })
-chose 4: solve
-backtracking to 4: regret
+chose 11: solve
+backtracking to 11: regret
 thena spine> :show
 ▶ let ? t : Nat in
   t

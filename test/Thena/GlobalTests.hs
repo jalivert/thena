@@ -334,10 +334,16 @@ nameTests =
   , refused "a declaration that uses one name twice"
       "T : Type\8320 where { c : T ; c : T }"
       (RepeatedName (named "c"))
+    -- **The eliminator\'s wrapper is one of the names introduced** (MS4 phase
+    -- 49e): §3.7 item 2 generates a global for it the way it does for a former
+    -- and a constructor, which is what lets @elim D …@ elaborate as an
+    -- ordinary application.
   , testCase "everything a declaration introduces is declared afterwards" $
       sequence_
         [ isDeclared (named g) natVec @?= True
-        | g <- ["Nat", "zero", "succ", "Vec", "nil", "cons"]
+        | g <- [ "Nat", "zero", "succ", "elimNat"
+               , "Vec", "nil", "cons", "elimVec"
+               ]
         ]
   , testCase "and nothing else is" $
       isDeclared (named "pred") natVec @?= False

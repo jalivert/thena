@@ -41,16 +41,12 @@ import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Var)
 import qualified Data.List.NonEmpty as NE
 
 import Thena.Development.Partial (Partial (..))
-import Thena.Errors (FailReason (..), ResolveError (..), SyntaxError (..))
+import Thena.Errors (FailReason (..))
 import Thena.Global.Env
   ( GlobalEnv
   , definitionLevels
   , lookupDefinition
-  , inductiveConstructors
-  , inductiveIndices
-  , inductiveParameters
   , isDeclared
-  , lookupInductive
   )
 import Thena.Ops (Instr (..), Op (..), Operand (..), Value (..))
 
@@ -59,7 +55,6 @@ import Thena.Surface.Concrete
 import Thena.Surface.Zipper
   ( SurfaceZipper, focus
   , intoArg
-  , intoElimField
   )
 
 -- | The program that elaborates one surface node into the focused hole.
@@ -99,11 +94,11 @@ movedToTheRuleBase =
 -- two nodes can never share one. Each 'compile' consumes a tick for it — the
 -- same thing 'Thena.Core.Term.fresh' does with the same counter.
 data Names = Names
-  { hereName, argName, appName, refName, tyName, goalName, elimName :: String }
+  { hereName, argName, appName, refName, tyName, goalName :: String }
 
 namesFor :: Int -> Names
 namesFor n =
-  Names (w "here") (w "arg") (w "app") (w "ref") (w "ty") (w "goal") (w "elim")
+  Names (w "here") (w "arg") (w "app") (w "ref") (w "ty") (w "goal")
   where w x = x ++ show n
 
 compile
@@ -135,6 +130,7 @@ compile env sigs ctx n0 z = case focus z of
   SurfacePi _ _       -> Left movedToTheRuleBase
   SurfaceDo _         -> Left movedToTheRuleBase
   SurfaceLam _ _      -> Left movedToTheRuleBase
+  SurfaceElim {}      -> Left movedToTheRuleBase
 
   -- @E⟦e a⟧@ — Brady's application case with his own correction to the printed
   -- rule (the missing @FILL@ and @SOLVE@, @IDRIS.md@):
@@ -227,54 +223,6 @@ compile env sigs ctx n0 z = case focus z of
     -- Failing here is what sends a head whose arguments do not line up on to
     -- the clause below it, exactly as the @case@ fell through before.
     | otherwise -> Left binaryIsAClause
-
-  SurfaceElim d ps mot ms is tgt -> case lookupInductive (GlobalName d) env of
-    Nothing  -> Left (CannotRead (ResolveFailed (NotADatatype d)))
-    Just def
-      | length ps /= wantP -> arity (WrongNumberOfEliminationParameters d wantP (length ps))
-      | length ms /= wantM -> arity (WrongNumberOfMethods d wantM (length ms))
-      | length is /= wantI -> arity (WrongNumberOfEliminationIndices d wantI (length is))
-      | otherwise ->
-          let fields  = ps ++ [mot] ++ ms ++ is ++ [tgt]
-              slot k  = elimName names ++ show (k :: Int)
-              hint k  = lit' ("e" ++ show k)
-           in Right
-                ( concat
-                    [ [Bind (hereName names) Here]
-                    , [ Bind (slot k) (FreshName (hint k))
-                      | k <- [0 .. length fields - 1]
-                      ]
-                    , [ Bind (elimName names)
-                          (MakeElim (GlobalName d)
-                             [ Ref (slot k) | k <- [0 .. length fields - 1] ])
-                      ]
-                      -- **The fields are elaborated BEFORE the @FILL@**, where
-                      -- the application case fills first. The difference is
-                      -- what the node's type is: @f s@ has type @B@, a bare
-                      -- hole that unification solves, but an elimination has
-                      -- type @P ⃗i t@ — the motive applied — which is a spine
-                      -- with a flexible head and no pattern, so it parks and
-                      -- @prim-try@ then has nothing to check against. With the
-                      -- motive and the target elaborated first it is a type.
-                    , concat
-                        [ [ Do (Goto (Ref (slot k)))
-                          , Do (elaborating
-                                 (Lit (VSurface
-                                        (intoElimField d ps mot ms is tgt k f z))))
-                          ]
-                        | (k, f) <- zip [0 ..] fields
-                        ]
-                    , [Do (Goto (Ref (hereName names)))]
-                    , fill (Ref (elimName names))
-                    , [Do Solve]
-                    ]
-                , n
-                )
-      where
-        wantP = length (inductiveParameters def)
-        wantM = length (inductiveConstructors def)
-        wantI = length (inductiveIndices def)
-        arity = Left . CannotRead . ResolveFailed
 
   where
     -- Each node takes one tick of the counter for the names it binds.

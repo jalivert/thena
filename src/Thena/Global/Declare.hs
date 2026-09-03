@@ -66,6 +66,8 @@ import Thena.Global.Env
   , addDefinition
   , addInductive
   , constructorType
+  , eliminatorName
+  , eliminatorWrapper
   , formerType
   , levelMetasInInductive
   , substLevelsInInductive
@@ -159,8 +161,8 @@ declare env n d0 = do
   let (d, n4) = generaliseInductive n3 d2
   -- The wrappers first: the generated terms name the datatype's own former and
   -- constructors, so they must already resolve.
-  let env1 = generate d env
-  -- **Every branch gives back @n4@ or later, never an earlier counter.** A
+  let (env1, n5) = generate d n4 env
+  -- **Every branch gives back @n5@ or later, never an earlier counter.** A
   -- declined no-confusion still leaves the datatype declared, and
   -- 'generaliseInductive' has already minted its level parameters from the
   -- shared counter — so handing back the count from before them would reissue
@@ -168,11 +170,11 @@ declare env n d0 = do
   -- closeout 4f says may never happen. Phase 33c introduced the slip by
   -- renaming the post-'universes' counter and leaving these three branches
   -- naming the old one.
-  case generateNoConfusion env1 n4 d of
-    Generated env2 n5   -> Right (env2, n5, Nothing)
-    Declined NoEquality -> Right (env1, n4, Nothing)
-    Declined NoProducts -> Right (env1, n4, Nothing)
-    Declined why        -> Right (env1, n4, Just why)
+  case generateNoConfusion env1 n5 d of
+    Generated env2 n6   -> Right (env2, n6, Nothing)
+    Declined NoEquality -> Right (env1, n5, Nothing)
+    Declined NoProducts -> Right (env1, n5, Nothing)
+    Declined why        -> Right (env1, n5, Just why)
     Clash g             -> Left (AlreadyDeclared g)
     Rejected g e        -> Left (NoConfusionRejected g e)
 
@@ -411,8 +413,18 @@ ownReferences d =
 
 -- | Every name a declaration introduces must be free, and distinct from the
 -- others it introduces.
+--
+-- **The eliminator\'s wrapper is one of them** (MS4 phase 49e). It is generated
+-- like a former\'s, so it can clash like one, and this is where a clash is
+-- caught — 'Thena.Global.NoConfusion.generateNoConfusion' answers @Clash@ for
+-- its own two names for the same reason.
 checkNames :: GlobalEnv -> InductiveDefinition -> Either DeclareError ()
-checkNames env d = go [] (inductiveName d : map constructorName (inductiveConstructors d))
+checkNames env d =
+  go []
+    ( inductiveName d
+    : eliminatorName (inductiveName d)
+    : map constructorName (inductiveConstructors d)
+    )
   where
     go _ [] = Right ()
     go seen (g : gs)
@@ -500,8 +512,9 @@ positive dn cn i = peel False
 -- This is what makes a former usable as an ordinary function value: @succ@ on
 -- its own is that global, so @map succ xs@ works, and it is why 'Core' needs no
 -- under-applied 'Canonical' (§12 invariant 6).
-generate :: InductiveDefinition -> GlobalEnv -> GlobalEnv
-generate d env = addInductive dn d (foldl former env (typeFormer : map value cs))
+generate :: InductiveDefinition -> Int -> GlobalEnv -> (GlobalEnv, Int)
+generate d n0 env =
+  (addInductive dn d (eliminator (foldl former env (typeFormer : map value cs))), n2)
   where
     dn = inductiveName d
     ps = inductiveParameters d
@@ -509,6 +522,24 @@ generate d env = addInductive dn d (foldl former env (typeFormer : map value cs)
 
     typeFormer = (dn, ps ++ inductiveIndices d, formerType d)
     value c    = (constructorName c, ps ++ constructorArguments c, constructorType d c)
+
+    -- **§3.7 item 2 for the eliminator** (MS4 phase 49e, his proposal): the
+    -- eliminator gets a wrapper too, so that @elim D …@ is an ordinary
+    -- name-headed application and elaboration needs no case of its own. It
+    -- comes after the formers because its type names @D@ and its body names
+    -- every constructor.
+    --
+    -- **The motive\'s level is a prenex parameter of the wrapper**, minted here
+    -- and instantiated at each use by phase 44\'s level-argument insertion —
+    -- where @make-elim@ minted a meta per use inside the op. The wrapper\'s
+    -- parameters are therefore the datatype\'s plus that one, in that order.
+    (mlv, n1)      = freshLevelRigid n0
+    (ety, ebody, n2) = eliminatorWrapper d (LVar mlv) n1
+    elvs           = inductiveLevels d ++ [mlv]
+
+    eliminator e =
+      addDefinition (eliminatorName dn) (MkDefinition elvs [] ety ebody)
+        (addConstant (eliminatorName dn) elvs ety e)
 
     -- **The wrapper inherits the datatype's level parameters** (phase 31b),
     -- and its body instantiates the 'Canonical' at exactly those parameters —

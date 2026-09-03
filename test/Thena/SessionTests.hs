@@ -363,6 +363,26 @@ sessionTests =
       , "elaborate (elim Ev () (\\ n p -> Nat) (zero (\\ n p ih -> succ ih)) (zero) evZero)"
       , "qed"
       ]
+    -- **A level-polymorphic datatype eliminates** (MS4 phase 49e), and until
+    -- the eliminator got a wrapper it could not: @make-elim@ assembled the
+    -- node with @[]@ for the datatype\'s level arguments, so the target\'s type
+    -- was @Empty {0}@ and the node\'s was @Empty {ℓ}@ and the two were stuck.
+    -- The wrapper writes its own prenex parameters there, exactly as a former
+    -- wrapper does, so the question does not arise.
+  , ok "a level-polymorphic datatype eliminates"
+      [ "data " ++ natDecl
+      , "data Empty : Type where { }"
+      , ":theorem t : \8704 (e : Empty {0}) -> Nat"
+      , "elaborate (\\ e -> elim Empty () (\\ x -> Nat) () () e)"
+      , "qed"
+      ]
+    -- **The wrapper\'s name is checked for a clash like any other name a
+    -- declaration introduces** (MS4 phase 49e) — 'Thena.Global.Declare.checkNames'.
+  , notOk "a datatype whose eliminator's name is taken is refused"
+      [ "data " ++ natDecl
+      , "declare elimBool : Nat ; elimBool = zero"
+      , "data Bool : Type\8320 where { true : Bool ; false : Bool }"
+      ]
     -- The arity is checked against the declaration, so the message names the
     -- field group rather than a total.
   , notOk "and a method count that does not match the datatype is refused"

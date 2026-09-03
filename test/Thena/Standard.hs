@@ -329,7 +329,10 @@ elaborateClauses =
       , Bind "e" (Op.AscriptionTerm (Ref "t"))
       , call "elaborate" [Ref "e"]
       ]
-  , clause SurfaceIsElim [Do (Op.Elaborate (Ref "t"))]
+  , clause SurfaceIsElim
+      [ Bind "a" (Op.ElimSpine (Ref "t"))
+      , call "elaborate" [Ref "a"]
+      ]
   , clause SurfaceIsDo [Do (Op.Play (Ref "t"))]
   ]
     ++ binderWalkers

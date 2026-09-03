@@ -495,6 +495,33 @@ thena spine> do { z = resolve-name "zero" ; fill z ; solve }
 Both exist because they are what elaboration actually puts in an operand —
 every other term a rule handles comes from an op or from its caller.
 
+### The eliminator is an ordinary function you can name
+
+*Decided 2026-09-03.*
+
+Declaring a datatype has always generated a function for the type former and one
+for each constructor, so that `succ` on its own is a value you can pass around.
+It now generates one for the **eliminator** too, named `elim` followed by the
+datatype's name:
+
+```
+thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
+declared Nat
+thena spine> :show elimNat
+elimNat {ℓ₂₅₄} : ∀ (P : Nat -> Type (ℓ₂₅₄)) -> P zero -> (∀ (x : Nat) -> P x -> P (succ x)) -> ∀ (target : Nat) -> P target
+elimNat = λ (P : Nat -> Type (ℓ₂₅₄)) (method : P zero) (method1 : ∀ (x : Nat) -> P x -> P (succ x)) (target : Nat) -> elim Nat () P (method method1) () target
+```
+
+So `elim D …` in a surface term is not a special form any more — it is written
+in groups for legibility, but it means an application of that function, and the
+two elaborate to the same term. **The level the motive lives in is a level
+parameter of the wrapper**, like any other polymorphic global's, so a use
+supplies it the same way.
+
+`elim` is still a keyword, and `elimNat` is still one identifier — keywords are
+whole tokens. The generated name is checked for a clash the way a constructor's
+is: `data Bool …` is refused if you already have something called `elimBool`.
+
 ---
 
 ## The REPL and the session

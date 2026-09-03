@@ -231,7 +231,15 @@ rule elaborate t :- when focus-is-hole (surface-is-ascription t)
      ; unify-into x g
      ; e  = ascription-term t
      ; call elaborate e
-rule elaborate t :- when focus-is-hole (surface-is-elim t)       then prim-elaborate t
+-- E⟦elim D ⃗p P ⃗m ⃗i t⟧ — an ordinary application of the eliminator's wrapper.
+--
+-- §3.7 generates a global for the eliminator the way it does for every former
+-- and constructor, so `elim Nat (…) P (…) (…) n` and `elimNat (…) P … n` are
+-- the same term and this clause is the rewriting of one into the other. There
+-- is nothing here about eliminations that is not about applications.
+rule elaborate t :- when focus-is-hole (surface-is-elim t)
+  then a = elim-spine t
+     ; call elaborate a
 -- E⟦do { … }⟧ = play the block. It leaves the focus wherever the block left
 -- it, which is the one way it differs from every other clause: the block does
 -- what the user wrote, and repairing it is theirs.
