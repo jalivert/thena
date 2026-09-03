@@ -13,6 +13,7 @@ module Thena.Ops
   , Env
   , Value (..)
   , Operand (..)
+  , operandIn
   , Instr (..)
   , Op (..)
   , produces
@@ -85,6 +86,23 @@ data Operand
   = Ref Name  -- ^ read a name bound earlier in this body
   | Lit Value -- ^ a value the compiler or rule author wrote down
   deriving (Eq, Show)
+
+-- | What an operand denotes, or the name that had nothing bound to it.
+--
+-- **One definition, read by two callers** — "Thena.Engine" running a body, and
+-- "Thena.Rules" answering a head that asks about an argument (MS4 phase 47).
+-- It lives here because 'Env', 'Operand' and 'Value' all do, and because the
+-- alternative was three lines written twice, which is exactly the confusion his
+-- 2026-08-29 ruling is against.
+--
+-- It returns the unbound name rather than an error, so that each caller says
+-- what an unbound name means to it: to a body it is
+-- 'Thena.Errors.UnboundInBody' and fatal, and to a head it is a question about
+-- an argument nobody supplied.
+operandIn :: Env -> Operand -> Either Name Value
+operandIn e o = case o of
+  Lit v -> Right v
+  Ref n -> maybe (Left n) Right (lookup n e)
 
 -- | @x = op …@ or @op …@. Binding an op that produces nothing is caught by the
 -- load-time validation pass that rules will need anyway (§2.4, §7.2, phase 15);
@@ -796,14 +814,30 @@ data Rule = Rule
 -- offer something that will not work. Prolog has exactly this.
 --
 -- Phase 15 defines the four its rule base asks, and no more (§12 invariant 5);
--- phase 17b adds the fifth, when @Prove@ starts carrying a hint. §8's
--- @HintIsApp@ is still absent — elaborating a compound surface term is beyond
--- MS1's identifier case.
+-- phase 17b adds a fifth when @Prove@ carries a hint, and phase 41 removes it
+-- again with the hint itself.
+--
+-- == A test may ask about an argument — MS4 phase 47
+--
+-- 'SurfaceIsName' is the first test that takes one, and it is a **new shape in
+-- the head language** rather than only a new test: every other asks about the
+-- focus, which the machine is standing at, where this asks about a value the
+-- caller supplied. 'Thena.Rules.holds' therefore takes the environment binding
+-- a clause's parameters to a call's arguments, and 'Thena.Rules.validate'
+-- refuses a head naming anything that is not one of them.
+--
+-- **The operand is not restricted to a 'Ref'.** A head is written in the same
+-- operand language a body is, so a literal is accepted where a parameter name
+-- is — for the reason §8 gives about string literals, that a grammar policing
+-- operand kinds would be the rule language's type system in the wrong place
+-- (@ms2\/CLOSEOUT.md@ 4b, deferred at his direction 2026-09-03).
 data Test
   = FocusIsHole     -- ^ the focus is a @? x : S@ component
   | FocusIsGuess    -- ^ the focus is a @? x ≐ g : S@ component
   | GoalTypeIsPi    -- ^ the focused component's type whnfs to a Π
   | GoalTypeIsLet   -- ^ … or to a @let@, which is table 2.8's other intro
+  | SurfaceIsName Operand
+    -- ^ the operand is a surface term whose focus is a name (MS4 phase 47)
   deriving (Eq, Show)
 
 

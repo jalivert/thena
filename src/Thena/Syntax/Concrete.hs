@@ -20,6 +20,7 @@ module Thena.Syntax.Concrete
   , RawInstr (..)
   , RawOp (..)
   , RawOperand (..)
+  , RawTest (..)
   ) where
 
 -- | A written term, or a written development. One tree for both fragments
@@ -91,7 +92,7 @@ data RawConstructor = RawConstructor String Raw
 -- matching on the focused term and on the goal is coming, and it will attach to
 -- the head, left of @:-@ or right of it. @when@ stays underneath whatever
 -- arrives — it is the low-level, manual way to ask whether a rule applies.
-data RawRule = RawRule String [String] [String] [RawInstr]
+data RawRule = RawRule String [String] [RawTest] [RawInstr]
   deriving (Eq, Show)
 
 -- | @‹name› = ‹op› ‹args›@ or @‹op› ‹args›@ — 'Thena.Ops.Instr''s two cases, written.
@@ -106,6 +107,21 @@ data RawInstr
 -- type@, @arg 2@ and @call try t@ all parse to this and are told apart in
 -- resolution. That is what keeps the grammar to two productions.
 data RawOp = RawOp String [RawOperand]
+  deriving (Eq, Show)
+
+-- | One written test in a rule's head: a word, and whatever was written after
+-- it (MS4 phase 47).
+--
+-- **The same shape 'RawOp' has, for the same reason** — which word names a test
+-- and whether it was given the right number of operands is resolution's
+-- question, not the parser's (§2.5, the parser is shallow).
+--
+-- A head is a /run/ of tests with nothing between them, so a test that takes
+-- operands is written in parentheses — @when focus-is-hole (surface-is-name t)@
+-- — and a bare word is a test of no operands. Without the brackets
+-- @when focus-is-hole goal-type-is-pi@ would read as one test applied to
+-- another word.
+data RawTest = RawTest String [RawOperand]
   deriving (Eq, Show)
 
 -- | What may be written as an argument: a name, a position, or text.

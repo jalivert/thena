@@ -34,6 +34,8 @@ module Thena.Rules
   , resolveRule
   , resolveBlock
   , testWord
+  , testOperands
+  , everyTest
   ) where
 
 import Thena.Core.Reduce (whnf)
@@ -56,11 +58,14 @@ import Thena.Ops
   , partWords
   , produces
   )
+import Thena.Surface.Concrete (Surface (..))
+import qualified Thena.Surface.Zipper as Zipper
 import Thena.Syntax.Concrete
   ( RawInstr (..)
   , RawOp (..)
   , RawOperand (..)
   , RawRule (..)
+  , RawTest (..)
   )
 import Data.Either (partitionEithers)
 
@@ -149,7 +154,7 @@ newtype RuleIter = RuleIter [Rule]
 -- said in the first place.
 matches :: [RuleBase] -> GlobalEnv -> Cursor -> RuleIter
 matches bases env cur =
-  RuleIter [ r | r <- allRules bases, all (holds env cur) (ruleHead r) ]
+  RuleIter [ r | r <- allRules bases, all (holds env cur []) (ruleHead r) ]
 
 -- | The rules @Prove@ may actually run: 'matches', less the ones it could not
 -- supply arguments for.
@@ -178,14 +183,21 @@ dispatch base env cur =
 -- a filter, so a name may carry a one-argument clause and a two-argument one
 -- and each call picks its own.
 --
-clauses :: [RuleBase] -> GlobalEnv -> Cursor -> GlobalName -> Int -> RuleIter
-clauses bases env cur nm n =
+-- **The arguments reach the head** (MS4 phase 47). A clause's head may ask
+-- about what it was called with — @when surface-is-name t@ — and each clause
+-- binds them to /its own/ parameter names, exactly as "Thena.Engine" does when
+-- it enters the body. Passing the values rather than an environment is what
+-- keeps that true: clauses of one name need not agree about what they call
+-- their parameters.
+clauses
+  :: [RuleBase] -> GlobalEnv -> Cursor -> GlobalName -> [Value] -> RuleIter
+clauses bases env cur nm vs =
   RuleIter
     [ r
     | r <- allRules bases
     , ruleName r == nm
-    , length (ruleParams r) == n
-    , all (holds env cur) (ruleHead r)
+    , length (ruleParams r) == length vs
+    , all (holds env cur (zip (ruleParams r) vs)) (ruleHead r)
     ]
 
 -- | The arities of every rule bearing this name, in search order.
@@ -218,8 +230,20 @@ hasNext (RuleIter rs) = not (null rs)
 -- matches, runs and fails in its body, and failing in a body is already handled
 -- (§7.3). Asking about the hole at the bottom of the guess instead would make
 -- the head a traversal, which is what \"shallow\" rules out.
-holds :: GlobalEnv -> Cursor -> Test -> Bool
-holds env cur t = case t of
+-- **The third argument binds a call's arguments to this clause's parameters**
+-- (MS4 phase 47), and is empty for 'matches' and 'dispatch', which supply
+-- none.
+--
+-- **An argument nobody supplied does not exclude the rule.** 'matches' asks
+-- /what could be done here/, and whether @elaborate@ applies depends on a term
+-- the user has not typed yet — so the honest answer is that the question was
+-- not about the state and cannot rule the clause out. It is one reading, not a
+-- special case: under 'clauses' every parameter is bound, so the situation
+-- arises only where there is genuinely nothing to ask about, and
+-- 'validate' refuses a head that names anything but a parameter, so an unbound
+-- name here is never a mistake in the rule.
+holds :: GlobalEnv -> Cursor -> Op.Env -> Test -> Bool
+holds env cur args t = case t of
   FocusIsHole   -> case focus cur of
     OnComponent (Component.Claim {}) -> True
     _                                -> False
@@ -237,6 +261,13 @@ holds env cur t = case t of
   GoalTypeIsLet -> case written of
     Just (Let {}) -> True
     _             -> False
+  -- The first test that asks about an argument rather than about the focus.
+  SurfaceIsName o -> case Op.operandIn args o of
+    Left _            -> True
+    Right (VSurface z) -> case Zipper.focus z of
+      SurfaceName _ -> True
+      _             -> False
+    Right _            -> False
   where
     -- Written down, then reduced: §8's "head matching runs whnf", because a
     -- goal typed @id Type₀ (Nat -> Nat)@ is a Π and must match.
@@ -268,6 +299,15 @@ data RuleError
   | NoSuchTest        GlobalName String
     -- ^ a word after @when@ that names no 'Test'. No instruction index: a head
     -- is not a sequence
+  | UnboundInHead     GlobalName Name
+    -- ^ a head names something that is not one of the rule's parameters (MS4
+    -- phase 47). A head runs before the body, so its environment is the call's
+    -- arguments and nothing else — there is no earlier @Bind@ to have made a
+    -- name, which is why this is not 'UnboundInRule'
+  | BadTestOperands   GlobalName String
+    -- ^ the right test word, written with the wrong arguments (MS4 phase 47).
+    -- No instruction index, for 'NoSuchTest'\'s reason — a head is not a
+    -- sequence
   | BadOperands       GlobalName Int String
     -- ^ the right op word, written with the wrong arguments — too many, too
     -- few, or a position where a name was wanted. One error for all three: a
@@ -288,9 +328,22 @@ data RuleError
 -- states the head admits. That is not decidable shallowly, and §8 already
 -- states the answer — a rule may match, run and fail.
 validate :: Rule -> [RuleError]
-validate r = go 0 (initiallyBound r) (ruleBody r)
+validate r = headScope ++ go 0 (initiallyBound r) (ruleBody r)
   where
     nm = ruleName r
+
+    -- **A head may name only the rule's own parameters** (MS4 phase 47). It
+    -- runs before the body, so the environment it reads is the call's
+    -- arguments bound to those parameters and nothing else — there is no
+    -- earlier @Bind@ for a name to have come from. Catching it here is what
+    -- lets 'holds' read an unbound name as /a question about an argument
+    -- nobody supplied/ rather than as a mistake it has to guess about.
+    headScope =
+      [ UnboundInHead nm n
+      | t <- ruleHead r
+      , Ref n <- testOperands t
+      , n `notElem` ruleParams r
+      ]
 
     go _ _ [] = []
     go i bound (instr : rest) =
@@ -360,10 +413,25 @@ resolveRule (RawRule nm ps ts body) =
     g = GlobalName nm
 
     (headErrs, tests) = partitionEithers (map test ts)
-    test w = maybe (Left (NoSuchTest g w)) Right (testOf w)
+    test (RawTest w os) = case traverse headOperand os of
+      Nothing  -> Left (BadTestOperands g w)
+      Just os' -> case testOf w os' of
+        Right t                   -> Right t
+        Left NoSuchTestWord       -> Left (NoSuchTest g w)
+        Left (WrongTestArity _ _) -> Left (BadTestOperands g w)
 
     (bodyErrs, instrs) =
       partitionEithers (zipWith (instruction g) [0 ..] body)
+
+-- | What may be written as an operand of a test (MS4 phase 47).
+--
+-- The same two a body accepts, and 'RawPos' refused for the same reason —
+-- a position is 'Down'\'s and nothing else takes one.
+headOperand :: RawOperand -> Maybe Operand
+headOperand o = case o of
+  RawRef n  -> Just (Ref n)
+  RawText t -> Just (Lit (VText t))
+  RawPos _  -> Nothing
 
 -- | Resolve a written block of instructions (MS4 phase 45).
 --
@@ -513,8 +581,55 @@ answerKind k = case k of
   "rule-name" -> Just ARule
   _           -> Nothing
 
-testOf :: String -> Maybe Test
-testOf w = lookup w [ (testWord t, t) | t <- everyTest ]
+-- | Build the test a word names, from the operands written after it.
+--
+-- **Shaped like 'instruction', one layer up**: the word chooses the
+-- constructor and the operand count is checked here rather than in the grammar,
+-- for §2.5's reason that the parser is shallow. 'Nothing' is /no such test/ and
+-- 'Just' with the wrong count is a different error, so the two are told apart
+-- by the caller.
+testOf :: String -> [Operand] -> Either TestError Test
+testOf w os = case [ t | t <- everyTest, testWord t == w ] of
+  []    -> Left NoSuchTestWord
+  t : _ -> maybe (Left (WrongTestArity (length (testOperands t)) (length os)))
+                 Right
+                 (withOperands t os)
+
+-- | Why a written test is not one. Local to resolution; 'RuleError' is what
+-- escapes.
+data TestError = NoSuchTestWord | WrongTestArity Int Int
+
+-- | Put the written operands into a test drawn from 'everyTest'.
+--
+-- **The words live in 'testWord' and nowhere else**, which is why resolution
+-- goes through that list rather than keeping a second table — his standing
+-- objection to a word written in two places. What is left here is only /how/ a
+-- test is rebuilt from its operands, and the final case is the arity mismatch,
+-- which is reachable and is what 'testOf' reports.
+--
+-- A test added later must extend 'testWord' and 'testOperands', both of which
+-- @-Wall@ forces; "Thena.RuleSyntaxTests" round-trips every entry of
+-- 'everyTest' through the parser, which is what catches one this function
+-- forgot.
+withOperands :: Test -> [Operand] -> Maybe Test
+withOperands t os = case (t, os) of
+  (FocusIsHole,      []) -> Just FocusIsHole
+  (FocusIsGuess,     []) -> Just FocusIsGuess
+  (GoalTypeIsPi,     []) -> Just GoalTypeIsPi
+  (GoalTypeIsLet,    []) -> Just GoalTypeIsLet
+  (SurfaceIsName _, [o]) -> Just (SurfaceIsName o)
+  _                      -> Nothing
+
+-- | What a test was written with, in written order. 'Thena.Ops.operandsOf'\'s
+-- job one type over, and what lets 'testOf' read an arity off 'everyTest'
+-- rather than keeping a second table of counts.
+testOperands :: Test -> [Operand]
+testOperands t = case t of
+  FocusIsHole     -> []
+  FocusIsGuess    -> []
+  GoalTypeIsPi    -> []
+  GoalTypeIsLet   -> []
+  SurfaceIsName o -> [o]
 
 -- | The word a 'Test' is written with. Total, so @-Wall@ makes a new test say
 -- how it is spelled — 'Thena.Ops.opKeyword'\'s trick, one type over.
@@ -524,13 +639,20 @@ testOf w = lookup w [ (testWord t, t) | t <- everyTest ]
 -- phase widened an identifier.
 testWord :: Test -> String
 testWord t = case t of
-  FocusIsHole   -> "focus-is-hole"
-  FocusIsGuess  -> "focus-is-guess"
-  GoalTypeIsPi  -> "goal-type-is-pi"
-  GoalTypeIsLet -> "goal-type-is-let"
+  FocusIsHole     -> "focus-is-hole"
+  FocusIsGuess    -> "focus-is-guess"
+  GoalTypeIsPi    -> "goal-type-is-pi"
+  GoalTypeIsLet   -> "goal-type-is-let"
+  SurfaceIsName _ -> "surface-is-name"
 
 -- | Every test there is. A list and not a case split, so it cannot be total —
 -- 'testWord' is what @-Wall@ guards, and "Thena.RuleSyntaxTests" checks this
 -- list against it.
+-- An argument-taking test appears here with a placeholder operand, which is
+-- all 'testWord' and 'testOperands' read: this list says what tests /exist/,
+-- not what any written one says.
 everyTest :: [Test]
-everyTest = [FocusIsHole, FocusIsGuess, GoalTypeIsPi, GoalTypeIsLet]
+everyTest =
+  [ FocusIsHole, FocusIsGuess, GoalTypeIsPi, GoalTypeIsLet
+  , SurfaceIsName (Lit (VText ""))
+  ]

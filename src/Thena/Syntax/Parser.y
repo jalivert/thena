@@ -41,6 +41,7 @@ import Thena.Syntax.Concrete
   , RawOp (..)
   , RawOperand (..)
   , RawRule (..)
+  , RawTest (..)
   )
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
@@ -182,13 +183,23 @@ Params :: { [String] }
   :                                        { [] }
   | Params ident                           { $2 : $1 }
 
-Tests :: { [String] }
+-- A head is a run of tests with nothing between them, so a test that takes
+-- operands is parenthesised — @when focus-is-hole (surface-is-name t)@ — and a
+-- bare word is a test of no operands (MS4 phase 47). Without the brackets
+-- @when focus-is-hole goal-type-is-pi@ would parse as one test applied to
+-- another word, which is the same ambiguity a REPL argument run has and is
+-- answered the same way.
+Tests :: { [RawTest] }
   :                                        { [] }
-  | when Names                             { reverse $2 }
+  | when TestRun                           { reverse $2 }
 
-Names :: { [String] }
-  : ident                                  { [$1] }
-  | Names ident                            { $2 : $1 }
+TestRun :: { [RawTest] }
+  : Test                                   { [$1] }
+  | TestRun Test                           { $2 : $1 }
+
+Test :: { RawTest }
+  : ident                                  { RawTest $1 [] }
+  | '(' ident Operands ')'                 { RawTest $2 (reverse $3) }
 
 -- Accumulated in reverse, like 'Binders'. At least one: 'Rule' requires 'then'
 -- and 'then' with nothing after it is a parse error rather than an empty body.

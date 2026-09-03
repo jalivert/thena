@@ -891,7 +891,7 @@ perform instr rest m = case operation instr of
         | otherwise ->
             Continue (entering vs r (Thena.Engine.Call rest (env (exec m))) m)
     where
-      it vs = clauses (rules m) (globals m) (cursor (development m)) nm (length vs)
+      it vs = clauses (rules m) (globals m) (cursor (development m)) nm vs
 
       -- The callee's parameters, bound to the arguments. 'clauses' has already
       -- filtered on arity, so the two lists agree by construction — and the
@@ -1353,10 +1353,10 @@ orphanMessage is = "reduced; now unreachable: " ++ intercalate ", " (map identSt
   where
     identString (Ident s) = s
 
+-- | 'Thena.Ops.operandIn', with an unbound name read as a body's fatal error.
+-- A head reads the same failure differently — see 'Thena.Rules.holds'.
 operandValue :: Env -> Operand -> Either FailReason Value
-operandValue e o = case o of
-  Lit v -> Right v
-  Ref n -> maybe (Left (UnboundInBody n)) Right (lookup n e)
+operandValue e o = either (Left . UnboundInBody) Right (Op.operandIn e o)
 
 operandText :: Env -> Operand -> Either FailReason String
 operandText e o = operandValue e o >>= \v -> case v of

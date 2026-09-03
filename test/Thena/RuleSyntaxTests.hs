@@ -21,11 +21,11 @@ import Thena.Core.Term (GlobalName (..))
 import Thena.Development.Cursor (Part (..))
 import Thena.Ops
   ( AnswerKind (..)
+  , Test (..)
   , Instr (..)
   , Op (..)
   , Operand (..)
   , Rule (..)
-  , Test (..)
   , Value (..)
   , opKeyword
   )
@@ -35,6 +35,8 @@ import Thena.Rules
   , RuleError (..)
   , allRules
   , resolveRule
+  , everyTest
+  , testOperands
   , testWord
   , validate
   )
@@ -50,6 +52,7 @@ tests =
     , vocabulary
     , shapes
     , text
+    , headOperands
     , mistakes
     ]
 
@@ -201,12 +204,88 @@ vocabulary =
     keywordCase (src, expected) =
       testCase src $ Just (opKeyword expected) @?= listToMaybe (words src)
 
-    allTests = [FocusIsHole, FocusIsGuess, GoalTypeIsPi, GoalTypeIsLet]
+    -- **'everyTest', not a copy of it.** This was a hand-written list until MS4
+    -- phase 47, and it silently did not grow when that phase added a test —
+    -- the same hazard @CLAUDE.md@ names for 'everyOp' below, arriving one type
+    -- over. The list is exported precisely so this cannot happen again.
+    allTests = everyTest
 
+    -- A test taking operands is written in parentheses, so the parameters it
+    -- names have to exist. The assertion is on the word and on what was
+    -- written after it rather than on the 'Test' itself, because 'everyTest'
+    -- carries a placeholder operand and this rule writes real ones.
     testCase' t =
       testCase (testWord t) $ do
-        r <- expectRule ("rule r :- when " ++ testWord t ++ " then prim-solve")
-        ruleHead r @?= [t]
+        r <- expectRule
+               ("rule r " ++ unwords params ++ " :- when " ++ written
+                  ++ " then prim-solve")
+        map testWord (ruleHead r) @?= [testWord t]
+        map testOperands (ruleHead r) @?= [map Ref params]
+      where
+        params = [ "p" ++ show i | i <- [1 .. length (testOperands t)] ]
+        written = case params of
+          [] -> testWord t
+          _  -> "(" ++ unwords (testWord t : params) ++ ")"
+
+-- --------------------------------------------------------------------------
+-- A test written with operands (MS4 phase 47)
+-- --------------------------------------------------------------------------
+
+-- | **A head is a run of tests with nothing between them**, so a test taking
+-- operands is parenthesised and a bare word is a test of none. The ambiguity
+-- the brackets answer is the one the REPL's argument runs have, and it is
+-- answered the same way: without them @when focus-is-hole goal-type-is-pi@
+-- reads as one test applied to another word.
+--
+-- **The existing spellings do not move**, which is why this shape and not
+-- semicolons between tests — every rule already written, and every golden,
+-- stays as it is.
+headOperands :: TestTree
+headOperands =
+  testGroup
+    "a test may take operands"
+    [ testCase "parenthesised, it takes a parameter" $ do
+        r <- expectRule "rule r s :- when (surface-is-name s) then prim-solve"
+        ruleHead r @?= [SurfaceIsName (Ref "s")]
+
+    , testCase "beside bare ones, in either order" $ do
+        r <- expectRule
+               "rule r s :- when focus-is-hole (surface-is-name s) goal-type-is-pi \
+               \then prim-solve"
+        ruleHead r @?= [FocusIsHole, SurfaceIsName (Ref "s"), GoalTypeIsPi]
+
+    , testCase "a literal is accepted where a name is" $ do
+        r <- expectRule "rule r :- when (surface-is-name \"x\") then prim-solve"
+        ruleHead r @?= [SurfaceIsName (Lit (VText "x"))]
+
+    , -- Every operand of a head must be one of the rule's own parameters: a
+      -- head runs before the body, so there is no earlier binding it could
+      -- have come from.
+      testCase "a head naming something that is not a parameter is refused" $ do
+        r <- expectRule "rule r s :- when (surface-is-name q) then prim-solve"
+        validate r @?= [UnboundInHead (GlobalName "r") "q"]
+
+    , testCase "and a parameter it does name is fine" $ do
+        r <- expectRule "rule r s :- when (surface-is-name s) then prim-solve"
+        validate r @?= []
+
+    , testCase "the wrong number of operands is refused" $
+        case readRule "rule r s :- when (surface-is-name s s) then prim-solve" of
+          Left _  -> pure ()
+          Right _ -> assertFailure "two operands should not resolve"
+
+    , testCase "and so is a bare word that wanted one" $
+        case readRule "rule r s :- when surface-is-name then prim-solve" of
+          Left _  -> pure ()
+          Right _ -> assertFailure "no operands should not resolve"
+
+    , -- 'Down' is the only op that takes a position, so a head has no use for
+      -- one and says so rather than resolving it to something odd.
+      testCase "a position is not a head operand" $
+        case readRule "rule r s :- when (surface-is-name 2) then prim-solve" of
+          Left _  -> pure ()
+          Right _ -> assertFailure "a position should not resolve"
+    ]
 
 -- --------------------------------------------------------------------------
 -- The shape of a rule

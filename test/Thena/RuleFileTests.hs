@@ -29,7 +29,10 @@ import Thena.Ops (Rule (..))
 import Thena.Rules (RuleBase (..), RuleError (..))
 
 tests :: TestTree
-tests = testGroup "rule files (§8)" [headers, loading, ordering, refusals, commands]
+tests =
+  testGroup
+    "rule files (§8)"
+    [headers, loading, ordering, refusals, commands, argumentHeads]
 
 -- --------------------------------------------------------------------------
 -- The header
@@ -269,6 +272,46 @@ refusals =
 -- --------------------------------------------------------------------------
 -- Listing
 -- --------------------------------------------------------------------------
+
+-- --------------------------------------------------------------------------
+-- A head that asks about an argument, from the REPL (MS4 phase 47)
+-- --------------------------------------------------------------------------
+
+-- | **The phase working the way a user meets it.** Two clauses of one name,
+-- one of which asks what it was called with, loaded from a written file and
+-- called by typing the rule's name.
+--
+-- "Thena.CallTests" asks the same question of the engine; this asks it of the
+-- driver, which is where a bare REPL argument becomes a
+-- 'Thena.Ops.VSurface' in the first place.
+argumentHeads :: TestTree
+argumentHeads =
+  testGroup
+    "a loaded head may ask about its argument"
+    [ testCase "a name takes the clause that asks for one" $
+        said "pick foo" @?= Just "that is a name"
+    , testCase "and anything else falls through to the other" $
+        said "pick (Type\8320 -> Type\8320)" @?= Just "that is not a name"
+    ]
+  where
+    picking =
+      "rule base pick where\n\
+      \rule pick s :- when focus-is-hole (surface-is-name s) \
+      \then say \"that is a name\"\n\
+      \rule pick s :- when focus-is-hole then say \"that is not a name\"\n"
+
+    -- A claim to stand in, then the call. The last thing said is the answer.
+    said line =
+      let (s0, _) = load1 [("pick.thena.rules", picking)]
+          run s l = fst (command s l)
+          s1 = foldl run s0 [":theorem t : Type\8321"]
+       in case snd (command s1 line) of
+            Ran msgs _ -> lastOf msgs
+            other      -> error ("expected Ran, got " ++ show other)
+
+    lastOf ms = case reverse ms of
+      m : _ -> Just m
+      []    -> Nothing
 
 commands :: TestTree
 commands =
