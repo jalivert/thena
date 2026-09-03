@@ -211,26 +211,36 @@ loop s pending = do
 -- directory, so an installed @thena@ finds it too. This is the only place the
 -- project asks cabal anything at runtime.
 preludePath :: IO FilePath
-preludePath = Paths_thena.getDataFileName "prelude/prelude.thena.script"
+preludePath = Paths_thena.getDataFileName "prelude/prelude.thena"
 
 -- | Load the shipped prelude into a session, keeping only what went wrong.
 --
--- Discarding the lines\' own output is what makes startup silent: a @data@ line
--- says @declared Eq@, and three of those at every start are noise. @:load@ on
--- the same file keeps them, because there the user asked.
+-- **Silent on success**, which is what @:load@ on the same file is not: there
+-- the user asked, so the declarations are printed. A module gives one response
+-- rather than a line each, so this reads that response instead of discarding
+-- output (MS4 phase 54).
 loadPrelude :: Session -> IO (Session, [String])
 loadPrelude s = do
   path <- preludePath
-  (s', _, problems) <- loadFile s path
-  pure (s', map ("prelude: " ++) problems)
+  contents <- try (readFile path)
+  pure $ case contents of
+    Left e  -> (s, ["prelude: " ++ show (e :: IOException)])
+    Right c -> case loadProofSource s c of
+      -- **Silent on success, and the response says which it was.** A module
+      -- gives one response, so unlike 'loadFile' there is no output to discard
+      -- — there is a name for the thing that happened.
+      (s', ProofLoaded {}) -> (s', [])
+      (s', resp)           -> (s', map ("prelude: " ++) (renderResponse s' resp))
 
 -- | A session with everything shipped loaded: **the rule base first, then the
 -- prelude**.
 --
--- **The order is load-bearing as of phase 23b.** The prelude proves @fst@,
--- @snd@, @andLeft@ and @andRight@ with @try@ and @solve@, and those stopped
--- being driver commands when the tactic words went to the rules — so a prelude
--- loaded before the base fails at its first @try@ with /no rule is called try/.
+-- **The order is load-bearing, and more so since MS4 phase 54.** It was
+-- already: the prelude proved @fst@, @snd@, @andLeft@ and @andRight@ with @try@
+-- and @solve@, which stopped being driver commands at phase 23b. Now the
+-- prelude is a **surface module**, so every line of it goes through
+-- @elaborate@ — and elaboration is entirely rules (phase 49f). A prelude loaded
+-- before the base does not get part-way; it declares nothing at all.
 -- Everything that starts a session goes through here rather than calling the
 -- two loaders in whichever order it happened to write them.
 startingSession :: IO (Session, [String])

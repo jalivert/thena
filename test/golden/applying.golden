@@ -178,7 +178,7 @@ thena spine> qed
 h : Bool -> Maybe Bool   ∎
 thena spine> :show h
 h : Bool -> Maybe Bool
-h = let h = λ (b : Bool) -> let A = Bool : Type₀ in let refined = b : Bool in let a = refined : A in let refined1 = Just A a : Maybe A in let h1 = refined1 : Maybe Bool in h1 : Bool -> Maybe Bool in h
+h = let h = λ (b : Bool) -> let A = Bool : Type₀ in let refined1 = b : Bool in let a = refined1 : A in let refined = Just A a : Maybe A in let h1 = refined : Maybe Bool in h1 : Bool -> Maybe Bool in h
 thena spine> :theorem guessed : Bool
 proving guessed : Bool
 thena spine> attack

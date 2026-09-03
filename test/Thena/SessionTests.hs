@@ -363,6 +363,28 @@ sessionTests =
       , "elaborate (elim Ev () (\\ n p -> Nat) (zero (\\ n p ih -> succ ih)) (zero) evZero)"
       , "qed"
       ]
+    -- **A dependent motive eliminates** (MS4 phase 54), and it could not
+    -- between 49e and 54: giving the eliminator a wrapper made @elim@ an
+    -- application, so its argument holes took the same names the nested
+    -- application walk mints — and @goto@ by name then found the outer one.
+    -- Every elim test before this used a constant motive, which is why nothing
+    -- caught it.
+  , ok "an elim with a dependent motive"
+      [ "data " ++ natDecl
+      , "declare data Id (A : Type\8320) : A -> A -> Type\8320 where "
+          ++ "{ rfl : forall (a : A) -> Id A a a }"
+      , "declare eqr : forall (n : Nat) -> Id Nat n n ; eqr = "
+          ++ "\\ n -> elim Nat () (\\ k -> Id Nat k k) "
+          ++ "((rfl Nat zero) (\\ k ih -> rfl Nat (succ k))) () n"
+      ]
+    -- **A datatype with parameters AND indices declares** (MS4 phase 54).
+    -- @Box@ above has parameters and @Ev@ has indices; nothing had both, and
+    -- both together is what the prelude\'s @Eq@ needs.
+  , ok "a datatype with parameters and indices"
+      [ "declare data Id (A : Type\8320) : A -> A -> Type\8320 where "
+          ++ "{ rfl : forall (a : A) -> Id A a a }"
+      , ":show Id"
+      ]
     -- **A level-polymorphic datatype eliminates** (MS4 phase 49e), and until
     -- the eliminator got a wrapper it could not: @make-elim@ assembled the
     -- node with @[]@ for the datatype\'s level arguments, so the target\'s type

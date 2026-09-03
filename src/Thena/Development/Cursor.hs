@@ -374,9 +374,18 @@ identsIn :: Cursor -> [Ident]
 identsIn = idents . rebuild
   where
     idents q = case q of
-      Under   c rest -> identOf c : idents rest
+      Under   c rest -> identOf c : within c ++ idents rest
       Pending _ rest -> idents rest
       Trailing _     -> []
+
+    -- **A guess's body is part of the development too** (MS4 phase 54). This
+    -- walked the top-level chain only, while 'gotoNamed' searches the whole
+    -- development from the root — @here \`orElse\` inside \`orElse\` next@ — so a
+    -- name could be minted inside a guess, be invisible here, and then be found
+    -- by @goto@ somewhere else entirely.
+    within c = case c of
+      Guess _ _ g _ -> idents g
+      _                       -> []
 
     identOf c = case c of
       Assume _ i _   -> i

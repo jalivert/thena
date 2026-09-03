@@ -1,0 +1,27 @@
+module Prelude where
+
+data Eq (A : Type) : A -> A -> Type where
+  refl : forall (a : A) -> Eq A a a
+
+data Unit : Type where
+  unit : Unit
+
+data Empty : Type where
+
+data And (A : Type) (B : Type) : Type where
+  both : forall (a : A) (b : B) -> And A B
+
+data Sigma (A : Type₀) (B : A -> Type₀) : Type₀ where
+  pair : forall (a : A) (b : B a) -> Sigma A B
+
+fst : forall (A : Type₀) (B : A -> Type₀) (s : Sigma A B) -> A
+fst = \ A B s -> elim Sigma (A B) (\ z -> A) ((\ a b -> a)) () s
+
+snd : forall (A : Type₀) (B : A -> Type₀) (s : Sigma A B) -> B (fst A B s)
+snd = \ A B s -> elim Sigma (A B) (\ z -> B (fst A B z)) ((\ a b -> b)) () s
+
+andLeft : forall (A : Type) (B : Type) (c : And A B) -> A
+andLeft = \ A B c -> elim And (A B) (\ z -> A) ((\ a b -> a)) () c
+
+andRight : forall (A : Type) (B : Type) (c : And A B) -> B
+andRight = \ A B c -> elim And (A B) (\ z -> B) ((\ a b -> b)) () c

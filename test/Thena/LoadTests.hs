@@ -88,14 +88,20 @@ preludeTests =
       case lookupInductive (GlobalName "Eq") env of
         Nothing -> assertFailure "Eq is not declared"
         Just d  ->
+          -- **The indices are @_@ and not @x@** (MS4 phase 54): the prelude is
+          -- a surface module now, and elaborating @A -> A -> Type@ leaves the
+          -- arrow\'s binders anonymous where "Thena.Syntax.Resolve" named them.
+          -- 'Thena.Core.Term.Ident' is display metadata (§3.5), so the
+          -- eliminator is the same one; only its printing moved.
+          --
           -- **At @Eq {0}@**, not at its bare parameter (MS3 phase 31d): the
           -- eliminator is a scheme now, and what a use site sees is the
           -- instantiation. Rendering it uninstantiated would pin @ℓ@'s number,
           -- which is a counter value and no business of this assertion.
           renderEliminator n0 (GlobalName "Eq") (atZero d (fst (eliminatorType d LZero n0)))
-            @?= [ "elim Eq : ∀ (A : Type₀) (P : ∀ (x : A) (x1 : A) -> Eq {0} A x x1 -> Type₀) \
+            @?= [ "elim Eq : ∀ (A : Type₀) (P : ∀ (_ : A) (_1 : A) -> Eq {0} A _ _1 -> Type₀) \
                   \-> (∀ (a : A) -> P a a (refl {0} A a)) \
-                  \-> ∀ (x : A) (x1 : A) (target : Eq {0} A x x1) -> P x x1 target"
+                  \-> ∀ (_ : A) (_1 : A) (target : Eq {0} A _ _1) -> P _ _1 target"
                 ]
 
     -- "and can be used": eliminating a 'refl' must actually fire. The motive is

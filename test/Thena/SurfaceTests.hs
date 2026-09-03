@@ -353,6 +353,16 @@ moduleTests =
         "module M where { f : A ; f = g (h a) ; k : A ; k = b }"
         "module M where\nf : A\nf = g (h a)\nk : A\nk = b"
 
+  , -- **A layout keyword at the very end of the file** (MS4 phase 54). The
+    -- Report's @{n}@ takes the column of the next token and there is none, so
+    -- no block opened at all and the module's own @}@ arrived where the grammar
+    -- wanted a @{@ — @0:0: unexpected }@. Found writing the prelude as a
+    -- module, where @data Empty : Type where@ has no constructors.
+    testCase "a datatype with no constructors at the end of the file" $
+      sameModule
+        "module M where { f : A ; f = a ; data D : Type\8320 where { } }"
+        "module M where\nf : A\nf = a\ndata D : Type\8320 where"
+
   , testCase "a module with no declarations is refused" $
       case parseSurfaceModule "module M where { }" of
         Left _  -> pure ()

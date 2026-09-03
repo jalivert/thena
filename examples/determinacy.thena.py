@@ -182,8 +182,8 @@ def projections(nc, eqs):
     out, rest = [], "(%s)" % nc
     for i in range(len(eqs) - 1):
         tail = conj(eqs[i+1:])
-        out.append("(andLeft (%s) (%s) %s)" % (eqs[i], tail, rest))
-        rest = "(andRight (%s) (%s) %s)" % (eqs[i], tail, rest)
+        out.append("(andLeft {0 0} (%s) (%s) %s)" % (eqs[i], tail, rest))
+        rest = "(andRight {0 0} (%s) (%s) %s)" % (eqs[i], tail, rest)
     out.append(rest)
     return out
 

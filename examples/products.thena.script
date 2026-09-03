@@ -17,7 +17,7 @@ try-core ⌜ \ (A : Type₀) (B : A -> Type₀) (s : Sigma A B) -> elim Sigma (A
 solve
 qed
 :theorem swap : ∀ (A : Type₀) (B : Type₀) (c : And {0 0} A B) -> And {0 0} B A
-try-core ⌜ \ (A : Type₀) (B : Type₀) (c : And {0 0} A B) -> both {0 0} B A (andRight A B c) (andLeft A B c) ⌝
+try-core ⌜ \ (A : Type₀) (B : Type₀) (c : And {0 0} A B) -> both {0 0} B A (andRight {0 0} A B c) (andLeft {0 0} A B c) ⌝
 solve
 qed
 :theorem succInjective : ∀ (a : Nat) (b : Nat) (q : Eq {0} Nat (succ a) (succ b)) -> Eq {0} Nat a b

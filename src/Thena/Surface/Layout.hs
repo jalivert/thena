@@ -100,6 +100,15 @@ mark :: [Located Token] -> [Item]
 mark []           = []
 mark (t : ts)     = Tok t : go t ts
   where
+    -- **A layout keyword with nothing after it opens an empty block** (MS4
+    -- phase 54). The Report\'s @{n}@ takes the column of the next token, and
+    -- with no next token there is none — so without this, @data Empty : Type
+    -- where@ at the end of a file emitted no @{@ at all and the module\'s own
+    -- closing brace arrived where the grammar wanted an opening one:
+    -- @0:0: unexpected }@. Column 0 is what makes 'run' answer with @{ }@ and
+    -- then close every block that is still open.
+    go (Located _ pk) []
+      | layoutKeyword pk = [Open endOfInput 0]
     go _ [] = []
     go (Located (Pos pl _) pk) (u@(Located q@(Pos l c) _) : us)
       | layoutKeyword pk && not (isOpenBrace u) = Open q c : Tok u : go u us

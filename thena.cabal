@@ -12,7 +12,7 @@ extra-doc-files:    CHANGELOG.md
 -- The prelude is a real file, not a built-in (§3.7). 'data-files' rather than a
 -- path relative to the working directory, so it is still found after
 -- 'cabal install'; 'Paths_thena' is how the library asks where it went.
-data-files:         prelude/prelude.thena.script
+data-files:         prelude/prelude.thena
                     rules/standard.thena.rules
 
 common warnings
