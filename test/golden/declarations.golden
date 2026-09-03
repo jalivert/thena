@@ -7,18 +7,18 @@ already equal
 already equal
 thena spine> :show one
 one : Nat
-one = let refined = zero : Nat in let a0 = refined : Nat in let refined1 = succ a0 : Nat in let goal = refined1 : Nat in goal
+one = let refined = zero : Nat in let a = refined : Nat in let refined1 = succ a : Nat in let goal = refined1 : Nat in goal
 thena spine> declare idn : Nat -> Nat ; idn = \ n -> n
-solved: ?ℓ18
-solved: ?ℓ20
-solved: ?ℓ22
+solved: ?ℓ17
+solved: ?ℓ19
+solved: ?ℓ21
 already equal
 thena spine> :show idn
 idn : Nat -> Nat
 idn = let goal = λ (n : Nat) -> let refined = n : Nat in let goal1 = refined : Nat in goal1 : Nat -> Nat in goal
 thena spine> declare two : Nat ; two = succ one
-solved: ?ℓ36
-chose 40: elaborate
+solved: ?ℓ35
+chose 39: elaborate
 already equal
 already equal
 thena spine> declare lonely : Nat
@@ -26,53 +26,53 @@ lonely has a type but no definition — write lonely = ‹term› after it
 thena spine> declare stray = zero
 stray has a definition but no type — write stray : ‹type› before it
 thena spine> declare bad : Nat -> Nat ; bad = zero
+solved: ?ℓ43
 solved: ?ℓ45
 solved: ?ℓ47
-solved: ?ℓ49
 stuck: Nat and Nat -> Nat cannot be made equal
 thena spine> declare data Bool : Type₀ where { true : Bool ; false : Bool }
-solved: ?ℓ60
-solved: ?ℓ60
-solved: ?ℓ60
+solved: ?ℓ58
+solved: ?ℓ58
+solved: ?ℓ58
 thena spine> :show Bool
 data Bool : Type₀ where
   { true : Bool
   ; false : Bool }
 thena spine> declare data Box (A : Type₀) : Type₀ where { box : A -> Box A }
-solved: ?ℓ77
-solved: ?ℓ82
-solved: ?ℓ89
+solved: ?ℓ75
+solved: ?ℓ80
+solved: ?ℓ87
+solved: ?ℓ92
 solved: ?ℓ94
-solved: ?ℓ96
-chose 104: elaborate
+chose 102: elaborate
 already equal
-solved: ?ℓ98
+solved: ?ℓ96
 thena spine> :show Box
 data Box (A : Type₀) : Type₀ where
   { box : A -> Box A }
 thena spine> declare idty : forall {A : Type₀} -> A -> A ; idty = \ A x -> x
-solved: ?ℓ121
-solved: ?ℓ126
-solved: ?ℓ128
-solved: ?ℓ130
+solved: ?ℓ118
+solved: ?ℓ123
+solved: ?ℓ125
+solved: ?ℓ127
 already equal
 thena spine> :show idty
 idty : ∀ {A : Type₀} -> A -> A
 idty = let goal = λ (A : Type₀) (x : A) -> let refined = x : A in let goal1 = refined : A in goal1 : ∀ (A : Type₀) -> A -> A in goal
 thena spine> declare z : Nat ; z = idty zero
-solved: ?ℓ148
-chose 152: elaborate
-solved: a0
+solved: ?ℓ145
+chose 149: elaborate
+solved: a
 already equal
 thena spine> :show z
 z : Nat
-z = let a0 = Nat : Type₀ in let refined = zero : Nat in let a1 = refined : a0 in let refined1 = idty a0 a1 : a0 in let goal = refined1 : Nat in goal
+z = let a = Nat : Type₀ in let refined = zero : Nat in let a1 = refined : a in let refined1 = idty a a1 : a in let goal = refined1 : Nat in goal
 thena spine> declare z2 : Nat ; z2 = idty {Nat} zero
-solved: ?ℓ158
+solved: ?ℓ154
 already equal
 already equal
 already equal
 thena spine> :show z2
 z2 : Nat
-z2 = let refined = Nat : Type₀ in let a0 = refined : Type₀ in let refined1 = zero : Nat in let a1 = refined1 : a0 in let refined2 = idty a0 a1 : a0 in let goal = refined2 : Nat in goal
+z2 = let refined = Nat : Type₀ in let a = refined : Type₀ in let refined1 = zero : Nat in let a1 = refined1 : a in let refined2 = idty a a1 : a in let goal = refined2 : Nat in goal
 thena spine> :quit

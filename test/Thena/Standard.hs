@@ -105,7 +105,7 @@ expectedStandard =
 -- unification makes the two converge, and only then attached.
 --
 -- **@unify-into@ and not @unify@**, which is where this rule and
--- "Thena.Elaborate"\'s inline @fill@ had come apart. Phase 41g gave the
+-- the elaborator\'s inline @fill@ had come apart. Phase 41g gave the
 -- elaborator the directed sibling — the term's type need only be /usable/
 -- where the goal is wanted, and @prim-try@ on the next line does the real
 -- check — and left this rule symmetric, so the same operation answered
@@ -191,9 +191,9 @@ proveGuess = Rule (GlobalName "prove") [] [FocusIsGuess] [Do Prove]
 -- are not a design decision. If we never use them after MS4, we just drop them
 -- during a cleanup refactor."/
 --
--- The clauses whose body is still @prim-elaborate@ are the cases step 2 has not
--- reached; each later phase fills one in, and when the last is done
--- @prim-elaborate@ and "Thena.Elaborate" go together.
+-- **Every case is here as of MS4 phase 49f**, which deleted @prim-elaborate@
+-- and the Haskell elaborator behind it. There is nothing left for step 2 to
+-- move.
 elaborateClauses :: [Rule]
 elaborateClauses =
   [ clause SurfaceIsName
@@ -214,20 +214,22 @@ elaborateClauses =
     -- answer from a clause that does not match.
   , clause SurfaceIsPlaceholder []
   , clause SurfaceIsHole []
-    -- Still in Haskell, behind @prim-elaborate@: the three cases that iterate —
-    -- a λ over its binder group, an application over its arguments against the
-    -- head's plicities, an @elim@ over its fields. The rule language has no
-    -- lists (MS4 phase 49b).
     -- **Brady's split, as two clauses** (MS4 phase 49d). The first is
-    -- @E⟦x ⃗a⟧@, which begins with @EXPAND@ and is still in Haskell because
-    -- matching written arguments against a head's plicities is a computation
-    -- over two lists (@ms4\/CLOSEOUT.md@ 28). **It may fail and fall through**
+    -- @E⟦x ⃗a⟧@, which begins with @EXPAND@ — @expand-implicits@ (phase 49f),
+    -- writing a @_@ in at every implicit position the user left out — and then
+    -- hands the walk to @spine-arguments@. **It may fail and fall through**
     -- to the second, which is what the Haskell @case@ did: a partial
     -- application of a head with recorded plicities is an ordinary binary
     -- application.
   , Rule (GlobalName "elaborate") ["t"]
       [FocusIsHole, SurfaceIsApp (Ref "t"), AppHeadIsName (Ref "t")]
-      [Do (Op.Elaborate (Ref "t"))]
+      [ Bind "h" Here
+      , Bind "e" (Op.ExpandImplicits (Ref "t"))
+      , Bind "hd" (Op.AppHead (Ref "e"))
+      , Bind "w" (Op.SurfaceNameOf (Ref "hd"))
+      , Bind "f" (Op.ResolveName (Ref "w"))
+      , Do (Call (GlobalName "spine-arguments") [Ref "h", Ref "f", Ref "e"])
+      ]
   , Rule (GlobalName "elaborate") ["t"]
       [FocusIsHole, SurfaceIsApp (Ref "t"), AppArgsAreExplicit (Ref "t")]
       [ Bind "h" Here
@@ -336,6 +338,7 @@ elaborateClauses =
   , clause SurfaceIsDo [Do (Op.Play (Ref "t"))]
   ]
     ++ binderWalkers
+    ++ spineWalkers
   where
     clause test = Rule (GlobalName "elaborate") ["t"] [FocusIsHole, test (Ref "t")]
     call nm as = Do (Call (GlobalName nm) as)
@@ -368,6 +371,34 @@ elaborateClauses =
 --
 -- Two clauses each, on two positive tests, for @let@'s reason: the head
 -- language has no negation.
+-- | The two rules that walk a name-headed spine (MS4 phase 49f).
+--
+-- **The same shape as 'binderWalkers' and for the same reason**: a rule cannot
+-- hold a list, so it takes one argument off the spine per step and the surface
+-- term is the counter. The hole being filled and the spine built so far are
+-- carried as arguments, because a call restores the caller\'s environment and a
+-- rule therefore cannot hand a value back.
+spineWalkers :: [Rule]
+spineWalkers =
+  [ Rule (GlobalName "spine-arguments") ["h", "f", "t"]
+      [FocusIsComponent, SurfaceIsApp (Ref "t")]
+      [ Do (Goto (Ref "h"))
+      , Bind "n" (FreshName (Lit (VText "a")))
+      , Bind "f2" (Op.ApplyNext (Ref "f") (Ref "n"))
+      , Do (Goto (Ref "n"))
+      , Bind "a" (Op.AppFirstArgument (Ref "t"))
+      , Do (Call (GlobalName "elaborate") [Ref "a"])
+      , Bind "tl" (Op.AppTail (Ref "t"))
+      , Do (Call (GlobalName "spine-arguments") [Ref "h", Ref "f2", Ref "tl"])
+      ]
+  , Rule (GlobalName "spine-arguments") ["h", "f", "t"]
+      [FocusIsComponent, SurfaceIsName (Ref "t")]
+      [ Do (Goto (Ref "h"))
+      , Do (Call (GlobalName "fill") [Ref "f"])
+      , Do (Call (GlobalName "solve") [])
+      ]
+  ]
+
 binderWalkers :: [Rule]
 binderWalkers =
   [ Rule (GlobalName "intro-binders") ["t"]

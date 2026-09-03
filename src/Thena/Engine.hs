@@ -122,7 +122,6 @@ import Thena.Tactics.Eliminate (Elimination (..), eliminate)
 import Thena.Rules
   (RuleBase, RuleError (..), RuleIter, arities, clauses, dispatch, hasNext, next, resolveBlock)
 import Thena.Syntax.Lexer (isIdentifier)
-import qualified Thena.Elaborate as Elaborate
 import Thena.Surface.Zipper (SurfaceZipper)
 import qualified Thena.Surface.Zipper as Zipper
 
@@ -880,21 +879,6 @@ perform instr rest m = case operation instr of
       entering r fr k =
         k { exec = Exec (ruleBody r) [] (fr : stack (exec m)) }
 
-  -- **Elaboration: the op emits the program, it does not run it** (MS4 phase
-  -- 41). "Thena.Elaborate" compiles one surface node into a short list of
-  -- instructions — ops that already exist, and an @Elaborate@ of each sub-term
-  -- — and they go in front of what was already queued.
-  --
-  -- That is what makes step 2 a decomposition: the rule clauses that replace
-  -- this will emit the same instructions from a body. Until they do, @:step@
-  -- shows an elaboration running as ordinary instructions.
-  Elaborate t -> case surface t of
-    Left r  -> failure r m
-    Right s -> case Elaborate.compile (globals m) (signatures m) contextAt (names m) s of
-      Left r          -> failure r m
-      Right (is, n1)  ->
-        Continue m { exec = (exec m) { pc = is ++ rest }, names = n1 }
-
   -- **Call by name: the same search as @Prove@, over a narrower candidate
   -- list** (§8, phase 23). The user's own framing, and it is why this case now
   -- reads almost exactly like @Prove@'s above:
@@ -967,19 +951,26 @@ perform instr rest m = case operation instr of
 
   -- Thesis §2.7's @naive-refine@ with the search taken out (phase 25): the
   -- head's type is inferred here, and 'saturate' does the walking.
-  -- **@prim-apply@ for the eliminator** (MS4 phase 41i). The eliminator has no
-  -- global name to apply — §3.7 generates nothing for it — but its type is a Π
-  -- telescope all the same, so the walk is the same walk, and it is claiming
-  -- where 'Thena.Core.Typing.spine' checks.
-  -- **Brady's @E⟦x ⃗a⟧@** (MS4 phase 44) — @prim-apply@'s walk, with the holes
-  -- named by the caller so a body can elaborate into them. See
-  -- 'Thena.Ops.MakeApply' for why the binary application rule is not enough.
-  MakeApply hd fields ->
-    case (,) <$> term hd <*> traverse (operandIdent (env (exec m))) fields of
+  -- **One step of the walk @make-apply@ did over a list** (MS4 phase 49f):
+  -- claim a hole for the head\'s next argument, under the name the caller
+  -- minted, and hand back the spine extended by it.
+  --
+  -- **This is @ms4/CLOSEOUT.md@ 28\'s second answer.** A rule cannot build a
+  -- list of names, but it can mint one name per step of a recursion over the
+  -- surface spine, and the holes then accumulate in the development instead of
+  -- in the body. It is what let @make-apply@ be deleted rather than fed.
+  --
+  -- The binary application rule cannot do this: it claims @f : A -> B@, an
+  -- arrow, so @B@ cannot mention the argument and a dependent head like
+  -- @Eq {ℓ} (A : Type ℓ) : A -> A -> …@ makes unification try to solve a hole
+  -- with a term out of its scope. Walking the real telescope claims each domain
+  -- in the scope of the holes already claimed.
+  ApplyNext hd nm ->
+    case (,) <$> term hd <*> operandIdent (env (exec m)) nm of
       Left r -> failure r m
-      Right (h, is) -> case infer (globals m) contextAt (names m) h of
+      Right (h, i) -> case infer (globals m) contextAt (names m) h of
         (Left e,   _, n1) -> failure (NotTypeable e) m { names = n1 }
-        (Right ty, _, n1) -> spineOver h is ty m { names = n1 }
+        (Right ty, _, n1) -> claimNext h i ty m { names = n1 }
 
   -- **The application a surface @elim D …@ means** (MS4 phase 49e). §3.7
   -- generates a wrapper for the eliminator, so the node reads as an ordinary
@@ -1100,8 +1091,7 @@ perform instr rest m = case operation instr of
   -- **What a name denotes, Γ first and then the globals, with a definition's
   -- level arguments inserted** (MS4 phase 48).
   --
-  -- The same walk "Thena.Elaborate"\'s @resolveName@ does, and deliberately the
-  -- same order "Thena.Syntax.Resolve" uses — a binder shadows a global of the
+  -- Deliberately the same order "Thena.Syntax.Resolve" uses — a binder shadows a global of the
   -- same name, which is what one namespace (§3.6) requires.
   ResolveName x -> case operandText (env (exec m)) x of
     Left r  -> failure r m
@@ -1118,9 +1108,8 @@ perform instr rest m = case operation instr of
               failure (CannotRead (ResolveFailed (NotInScope w))) m
     where
       -- **The INNERMOST binding of that name**, which is what shadowing means
-      -- and what "Thena.Syntax.Resolve" and "Thena.Elaborate"\'s @inContext@
-      -- both give. Γ runs outermost-first, so this folds rather than taking
-      -- the head.
+      -- and what "Thena.Syntax.Resolve" gives. Γ runs outermost-first, so this
+      -- folds rather than taking the head.
       --
       -- **It took the head until MS4 phase 49**, so a shadowed name resolved to
       -- the binding it was shadowing. Nothing had asked: phase 48 shipped the
@@ -1177,6 +1166,62 @@ perform instr rest m = case operation instr of
     Concrete.SurfaceApp h as ->
       let Concrete.SurfaceArg _ a = NE.last as
        in Just (Zipper.intoArg h as (length as - 1) a)
+    _ -> Nothing
+
+  -- **Brady\'s @EXPAND@** (MS4 phase 49f, the last thing taken out of the
+  -- Haskell elaborator before it was deleted): line
+  -- the written arguments up against the head\'s recorded plicities and write
+  -- in a @_@ at every implicit position the user left out.
+  --
+  -- **The inserted argument is the placeholder the language already has**, so
+  -- the slot is claimed like any other and its clause of @elaborate@ — whose
+  -- body is empty — leaves the hole for unification. That is what the Haskell
+  -- elaborator did with a @Nothing@ slot, said in the surface language instead
+  -- of in a list only Haskell could read.
+  --
+  -- **Failing is how a spine reaches the binary clause**, exactly as the
+  -- @case@ fell through before.
+  Op.ExpandImplicits x -> case operandSurface (env (exec m)) x of
+    Left r  -> failure r m
+    Right z -> case Zipper.focus z of
+      Concrete.SurfaceApp h as
+        | Concrete.SurfaceName g <- h
+        , Just as' <- expand (plicitiesOf g) (NE.toList as) ->
+            case as' of
+              []     -> failure (ExpectedSurfaceShape "an application") m
+              a : bs -> produce
+                          (VSurface (Zipper.rootedAt
+                                       (Concrete.SurfaceApp h (a NE.:| bs)))) m
+        -- **A brace that could not be placed is refused by name**, not passed
+        -- down: the binary clause has no notion of plicity at all, so it would
+        -- report a type mismatch about a term the user never meant to write
+        -- explicitly.
+        | any implicitArg (NE.toList as) ->
+            failure (NoElaborationRule
+                       "an implicit argument this head has no position for") m
+        | otherwise ->
+            failure (NoElaborationRule
+                       "an application whose head's plicities do not fit") m
+      _ -> failure (ExpectedSurfaceShape "an application") m
+
+  Op.AppHead x -> surfaceMove x "an application" $ \s -> case s of
+    Concrete.SurfaceApp h as -> Just (Zipper.intoHead as h)
+    _ -> Nothing
+  Op.AppFirstArgument x -> surfaceMove x "an application" $ \s -> case s of
+    Concrete.SurfaceApp h as ->
+      let Concrete.SurfaceArg _ a = NE.head as
+       in Just (Zipper.intoArg h as 0 a)
+    _ -> Nothing
+  -- **The spine minus its FIRST argument**, which is the direction @E⟦x ⃗a⟧@
+  -- consumes it: the head's telescope is walked left to right. With one
+  -- argument left the answer is the bare head, and that is the recursion's base
+  -- case rather than a failure.
+  Op.AppTail x -> surfaceMove x "an application" $ \s -> case s of
+    Concrete.SurfaceApp h as -> Just (Zipper.intoAppTail (NE.head as) (dropFirst h as))
+      where
+        dropFirst g bs = case NE.tail bs of
+          []     -> g
+          c : cs -> Concrete.SurfaceApp g (c NE.:| cs)
     _ -> Nothing
 
   Op.LambdaName x -> case surfaceAt x of
@@ -1339,7 +1384,6 @@ perform instr rest m = case operation instr of
 
     text    = operandText (env (exec m))
     term    = operandTerm (env (exec m))
-    surface = operandSurface (env (exec m))
 
     advance m' = m' { exec = (exec m') { pc = rest } }
 
@@ -1401,15 +1445,62 @@ perform instr rest m = case operation instr of
     -- already claimed — which is what makes it dependent where @arrow@ is not.
     -- 'saturate' below is this walk without the names and without keeping the
     -- holes.
-    spineOver hd is ty m' = case is of
-      [] -> produce (VTerm (Trailing hd)) m'
-      i : rest' -> case whnf (globals m') (focusContext (development m')) ty of
-        Pi _ dom sc ->
+    -- **The hole goes directly above the focus**, so a caller that claims from
+    -- one fixed place gets the domains in telescope order and a later domain
+    -- may mention an earlier hole. 'saturate' below is the same step in a loop,
+    -- and keeps the focus still for the same reason.
+    -- The codomain is not read: the answer is the /term/, and the caller\'s
+    -- next step infers its type again. That costs one inference per argument
+    -- where @make-apply@ carried the type down its own loop, and it is what
+    -- lets the walk live in a rule body, which has nowhere to keep a type
+    -- between two instructions.
+    claimNext hd i ty m' =
+      case whnf (globals m') (focusContext (development m')) ty of
+        Pi _ dom _ ->
           let (v, n1) = fresh (names m')
               cur     = insertAbove (Component.Claim v i dom) (cursor (development m'))
-           in spineOver (App hd (Free v)) rest' (instantiate (Free v) sc)
-                m' { development = Development cur, names = n1 }
+           in produce (VTerm (Trailing (App hd (Free v))))
+                m' { development = Development cur, names = n1
+                   , exec = exec m' }
         _ -> failure TooManyArgumentsForHead m'
+
+    -- What the machine recorded about this name\'s argument positions, if it
+    -- recorded anything. A name with no entry — every DC-declared global, and
+    -- every local — takes what was written and nothing more.
+    plicitiesOf g = case lookup (GlobalName g) (signatures m) of
+      Just ps -> ps
+      Nothing -> []
+
+    -- | Brady\'s @EXPAND@: line the written arguments up against the plicities,
+    -- writing a placeholder in at each implicit position the user left out.
+    --
+    -- 'Nothing' overall means they cannot be lined up at all, and the binary
+    -- clause below then has its turn.
+    expand ps as' = case (ps, as') of
+      ([], [])                            -> Just []
+      -- Nothing recorded, or more arguments than positions: take them as
+      -- written. A partially applied head is ordinary, and so is a head whose
+      -- result is itself a function.
+      ([], rest')
+        | all written rest'               -> Just rest'
+        | otherwise                       -> Nothing
+      -- An implicit position the user did write, in braces.
+      (Implicit : more, a@(Concrete.SurfaceArg Implicit _) : rest') ->
+        (a :) <$> expand more rest'
+      -- An implicit position the user did not: write one in.
+      (Implicit : more, rest')            ->
+        (Concrete.SurfaceArg Implicit Concrete.SurfacePlaceholder :)
+          <$> expand more rest'
+      (Explicit : more, a@(Concrete.SurfaceArg Explicit _) : rest') ->
+        (a :) <$> expand more rest'
+      -- An explicit position written in braces, or one not written at all.
+      (Explicit : _, _)                   -> Nothing
+
+    written (Concrete.SurfaceArg Explicit _) = True
+    written _                               = False
+
+    implicitArg (Concrete.SurfaceArg Implicit _) = True
+    implicitArg _                                = False
 
     isHole c = case c of
       Component.Claim {} -> True
@@ -1538,9 +1629,8 @@ orphanMessage is = "reduced; now unreachable: " ++ intercalate ", " (map identSt
 
 -- | 'Thena.Ops.operandIn', with an unbound name read as a body's fatal error.
 -- A head reads the same failure differently — see 'Thena.Rules.holds'.
--- | One fresh level meta per prenex parameter (MS4 phase 48). The same
--- recursion "Thena.Elaborate" does at a use site, which is where his /"we have
--- them implicitly inserted"/ was first built.
+-- | One fresh level meta per prenex parameter (MS4 phase 48), inserted at a
+-- use site — his /"we have them implicitly inserted"/.
 levelArgsFor :: Int -> Int -> ([Level], Int)
 levelArgsFor k n = case k of
   0 -> ([], n)
@@ -1550,8 +1640,8 @@ levelArgsFor k n = case k of
 
 -- | Say why a written block did not resolve, in terms "Thena.Errors" can hold.
 --
--- **Moved here from "Thena.Elaborate" at MS4 phase 49b**, with the @do@ case it
--- belonged to. Resolution can only produce 'Thena.Rules.BadOperands' — every
+-- **Moved here at MS4 phase 49b** from the Haskell elaborator, with the @do@
+-- case it belonged to. Resolution can only produce 'Thena.Rules.BadOperands' — every
 -- other 'RuleError' comes from @validate@, which a block does not go through —
 -- so the fallback is unreachable as things stand and says so rather than
 -- inventing a second story.

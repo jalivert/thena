@@ -108,10 +108,9 @@ elaborating = elaboratingAt hole
 
 -- | The same, at a cursor of your own.
 --
--- **It calls the rule, not the op** (MS4 phase 49). Elaboration is a rule of
--- thirteen clauses now, and @prim-elaborate@ is only what the eight unmoved
--- ones run — so a test that drove the op directly would be testing less than
--- the system does, and could not reach a leaf at all.
+-- **It calls the rule** (MS4 phase 49). Elaboration is a rule of fifteen
+-- clauses and nothing else — there is no op behind it as of phase 49f — so this
+-- is the only way in.
 elaboratingAt :: Cursor -> Surface -> Either FailReason Machine
 elaboratingAt cur s =
   snd (runOut (machineAt cur
@@ -259,8 +258,8 @@ unsupportedTests =
       -- the annotation, so @∀ x -> B@ does not parse and this is reached only
       -- from a tree built by hand — but 'SurfaceBinder' is shared with λ, where
       -- an untyped binder is ordinary because the goal supplies the type, so
-      -- the case is constructible and 'Thena.Elaborate.compile' has to answer
-      -- for it. There is no goal to read a Π's domain off.
+      -- the case is constructible and the ∀ clause has to answer for it. There
+      -- is no goal to read a Π's domain off.
     , refusedShape "a ∀ whose first binder has a type"
         (SurfacePi [binder] (SurfaceName "a"))
     ]
@@ -271,9 +270,9 @@ unsupportedTests =
         Left (NoElaborationRule w) -> w @?= what
         other -> assertFailure ("expected a refusal: " ++ show other)
 
-    -- **The ∀ case is a clause now** (MS4 phase 49b), so its refusal comes from
-    -- the move that could not find an annotated binder rather than from
-    -- @prim-elaborate@ — and the clause reads its parts before it touches the
+    -- **The ∀ case is a clause** (MS4 phase 49b), so its refusal comes from the
+    -- move that could not find an annotated binder rather than from an op that
+    -- knew every shape — and the clause reads its parts before it touches the
     -- development, so nothing is claimed on the way to failing.
     refusedShape what s = testCase what $
       case elaborating s of
@@ -457,6 +456,7 @@ baseTests =
               , "prove", "fill", "unify-refine-core", "apply-core"
               ]
               ++ replicate 15 "elaborate" ++ replicate 2 "enter-binders"
+              ++ replicate 2 "spine-arguments"
 
     , testCase "prove is a rule over prim-prove" $
         case [ r | r@(Rule (GlobalName "prove") _ _ _) <- drain (matches expectedBase emptyGlobals hole) ] of

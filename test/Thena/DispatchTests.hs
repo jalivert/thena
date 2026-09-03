@@ -296,6 +296,7 @@ dispatchableTests =
           @?= ["attack", "try-core", "abandon", "eliminate-core", "prove", "fill"
              , "unify-refine-core", "apply-core"]
                ++ replicate 15 "elaborate" ++ replicate 2 "enter-binders"
+               ++ replicate 2 "spine-arguments"
         names' (dispatch std emptyGlobals hole)
           @?= ["attack", "abandon", "prove"]
 

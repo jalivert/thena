@@ -9,7 +9,7 @@
 -- /"look for the invariant that is checked by different code from the code that
 -- maintains it"/.
 --
--- Every descent "Thena.Elaborate" performs is covered, and the tests
+-- Every descent a clause of @elaborate@ performs is covered, and the tests
 -- destructure each node the way that module does, so the two agree about which
 -- child a move is meant to reach.
 module Thena.SurfaceZipperTests (tests) where
@@ -79,7 +79,7 @@ elimTerm = SurfaceElim "D" [nm "p"] (nm "mot") [nm "m1", nm "m2"] [nm "i"] (nm "
 -- --------------------------------------------------------------------------
 -- The descent table
 --
--- Each row is a move exactly as "Thena.Elaborate" makes it: the whole term,
+-- Each row is a move exactly as a clause makes it: the whole term,
 -- the child the move should reach, and the zipper the move produces from the
 -- term's root.
 
@@ -225,7 +225,7 @@ nestingCollapses = testCase "written nested, it comes back grouped" $
       SurfacePi (SurfaceBinder Explicit "A" (Just (nm "dom")) :| [])
         (SurfacePi (SurfaceBinder Explicit "b" (Just (nm "mid")) :| []) (nm "cod"))
 
--- | Descend into a Π's codomain the way "Thena.Elaborate" does.
+-- | Descend into a Π's codomain the way the ∀ clause does.
 peel :: Surface -> SurfaceZipper
 peel t@(SurfacePi bs body) = case NE.uncons bs of
   (b, rest) -> intoPiTail b (maybe body (`SurfacePi` body) rest) (rootedAt t)

@@ -5,6 +5,6 @@ module Tier0
   declared one
   declared two
   declared plusZeroLeft
-one = let refined = Nat : Type₀ in let a0 = refined : Type₀ in let refined1 = zero : Nat in let a01 = refined1 : Nat in let refined2 = succ a01 : Nat in let a1 = refined2 : a0 in let refined3 = identity a0 a1 : a0 in let goal = refined3 : Nat in goal
-two = let refined = one : Nat in let a0 = refined : Nat in let refined1 = one : Nat in let a1 = refined1 : Nat in let refined2 = plus a0 a1 : Nat in let goal = refined2 : Nat in goal
-plusZeroLeft = let goal = λ (n : Nat) -> let refined = Nat : Type₀ in let a0 = refined : Type₀ in let refined1 = n : Nat in let a1 = refined1 : a0 in let refined2 = refl {ℓ₄₄₉} a0 a1 : Eq {ℓ₄₄₉} a0 a1 a1 in let goal1 = refined2 : Eq {ℓ₄₄₉} Nat (plus zero n) n in goal1 : ∀ (n : Nat) -> Eq {ℓ₄₄₉} Nat (plus zero n) n in goal
+one = let refined = Nat : Type₀ in let a = refined : Type₀ in let refined1 = zero : Nat in let a2 = refined1 : Nat in let refined2 = succ a2 : Nat in let a1 = refined2 : a in let refined3 = identity a a1 : a in let goal = refined3 : Nat in goal
+two = let refined = one : Nat in let a = refined : Nat in let refined1 = one : Nat in let a1 = refined1 : Nat in let refined2 = plus a a1 : Nat in let goal = refined2 : Nat in goal
+plusZeroLeft = let goal = λ (n : Nat) -> let refined = Nat : Type₀ in let a = refined : Type₀ in let refined1 = n : Nat in let a1 = refined1 : a in let refined2 = refl {ℓ₄₅₆} a a1 : Eq {ℓ₄₅₆} a a1 a1 in let goal1 = refined2 : Eq {ℓ₄₅₆} Nat (plus zero n) n in goal1 : ∀ (n : Nat) -> Eq {ℓ₄₅₆} Nat (plus zero n) n in goal

@@ -697,7 +697,7 @@ parseSurfaceModule src = do
 
 -- | Why a top-level block did not resolve, in terms 'SyntaxError' can hold.
 --
--- 'Thena.Elaborate.blockFailure'\'s twin, and the same reasoning: resolution can
+-- 'Thena.Engine.blockFailureOf'\'s twin, and the same reasoning: resolution can
 -- only produce 'Thena.Rules.BadOperands', because a word that names no op is a
 -- rule call and not an error.
 blockProblem :: [RuleError] -> SyntaxError

@@ -541,11 +541,6 @@ operation g i (RawOp w as)
       ("prim-intro", _)           -> bad
       ("call", RawRef r : rest)   -> Call (GlobalName r) <$> traverse ref rest
       ("call", _)                 -> bad
-      -- **@make-apply@ takes a head and then the names its argument holes are
-      -- to carry**, a run of any length, so it is spelled here rather than
-      -- sitting in an arity table.
-      ("make-apply", h : rest)    -> Op.MakeApply <$> ref h <*> traverse ref rest
-      ("make-apply", _)           -> bad
 
 
       ("ask", [a, RawRef k])      -> case answerKind k of
@@ -608,7 +603,7 @@ operation g i (RawOp w as)
       , ("pop-development", Op.PopDevelopment)
       ]
     unary =
-      [ ("say", Say), ("yield", Op.Yield), ("prim-try", Try), ("prim-elaborate", Op.Elaborate)
+      [ ("say", Say), ("yield", Op.Yield), ("prim-try", Try)
       , ("goto", Goto), ("push-development", Op.PushDevelopment)
       , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
       , ("typeof", Typing), ("expose", Op.Expose), ("fresh-name", FreshName), ("prim-apply", Op.Apply)
@@ -620,6 +615,10 @@ operation g i (RawOp w as)
       , ("ascription-term", Op.AscriptionTerm)
       , ("app-function", Op.AppFunction)
       , ("app-last-argument", Op.AppLastArgument)
+      , ("app-head", Op.AppHead)
+      , ("app-first-argument", Op.AppFirstArgument)
+      , ("app-tail", Op.AppTail)
+      , ("expand-implicits", Op.ExpandImplicits)
       , ("lambda-name", Op.LambdaName), ("lambda-tail", Op.LambdaTail)
       , ("lambda-body", Op.LambdaBody)
       , ("let-name", Op.LetName), ("let-type", Op.LetType)
@@ -632,7 +631,7 @@ operation g i (RawOp w as)
       [ ("assume", Assume), ("claim", Claim), ("define", Define)
       , ("quantify", Op.Quantify)
       , ("concat", Concat), ("unify", Unify), ("unify-into", Op.UnifyInto)
-      , ("arrow", Arrow), ("apply-to", ApplyTo)
+      , ("arrow", Arrow), ("apply-to", ApplyTo), ("apply-next", Op.ApplyNext)
       ]
 
 -- | What @ask@'s second word may be — 'AnswerKind', spelled.

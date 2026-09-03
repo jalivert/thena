@@ -10,6 +10,8 @@ intro-binders ‹t›
 intro-binders ‹t›
 enter-binders ‹t›
 enter-binders ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+spine-arguments ‹h› ‹f› ‹t›
 thena spine> prove
 chose 7: intro
 thena spine> :show

@@ -63,8 +63,8 @@ thena spine> :show
   let V = refined1 : X in
   let y = V : X in
   let refined2 = y : X in
-  let a0 = refined2 : Nat in
-  let refined3 = succ a0 : Nat in
+  let a = refined2 : Nat in
+  let refined3 = succ a : Nat in
 ▶ let lt = refined3 : Nat in
   lt
 thena spine> qed
@@ -72,7 +72,7 @@ lt : Nat   ∎
 thena spine> :theorem asc : Nat
 proving asc : Nat
 thena spine> elaborate (zero : Nat)
-solved: ?ℓ52
+solved: ?ℓ51
 already equal
 already equal
 thena spine> qed

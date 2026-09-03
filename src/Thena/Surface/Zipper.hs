@@ -27,11 +27,11 @@
 --
 -- == What is here, and what is deliberately not
 --
--- **Only the moves "Thena.Elaborate" performs**, because §12 invariant 5 says
--- the vocabulary is discovered by writing the thing that needs it, and phase
--- 49's clauses are what will need the rest. So there is no @up@ — @compile@
--- never goes up, since each nested @Elaborate@ is a fresh op invocation
--- carrying its own zipper — and there is no way to /replace/ the focus, which
+-- **Only the moves the clauses of @elaborate@ perform**, because §12 invariant
+-- 5 says the vocabulary is discovered by writing the thing that needs it. So
+-- there is no @up@ — nothing goes up, since each nested @elaborate@ is a fresh
+-- call carrying its own zipper — and there is no way to /replace/ the focus,
+-- which
 -- is refinement's operation (§2.4.1) and not this phase's.
 --
 -- **There are no ops over this yet.** His ruling, 2026-09-03: phase 46 is the
@@ -50,9 +50,11 @@ module Thena.Surface.Zipper
   , rootedAt
   , focus
   , root
-    -- * Moves — one per descent "Thena.Elaborate" performs
+    -- * Moves — one per descent a clause of @elaborate@ performs
   , intoFun
   , intoArg
+  , intoHead
+  , intoAppTail
   , intoLamBody
   , intoLamTail
   , intoPiDomain
@@ -97,6 +99,12 @@ data Frame
     -- ^ the focus is a spine minus its last argument
   | InArg Surface (NonEmpty SurfaceArg) Int
     -- ^ the focus is the @k@th argument of a spine
+  | InHead (NonEmpty SurfaceArg)
+    -- ^ the focus is the head a whole spine is applied to
+  | InAppTail SurfaceArg
+    -- ^ the focus is the spine that is left once its first argument is taken
+    -- — 'InLamTail' one node over, and merged on the way out for 'InFun'\'s
+    -- reason
   | InLamBody (NonEmpty SurfaceBinder)
   | InLamTail SurfaceBinder
     -- ^ the focus is what the λ abstracts once its first binder is peeled off
@@ -143,6 +151,15 @@ rebuild s f = case f of
     _               -> SurfaceApp s (a :| [])
   InArg h as k ->
     SurfaceApp h (NE.zipWith (at k) (0 :| [1 ..]) as)
+  -- **Flattened, exactly as 'InFun' is**: a head that is itself a spine joins
+  -- the argument runs rather than nesting, which is what keeps @f a b@
+  -- representable one way only.
+  InHead as -> case s of
+    SurfaceApp g bs -> SurfaceApp g (bs <> as)
+    _               -> SurfaceApp s as
+  InAppTail a -> case s of
+    SurfaceApp h as -> SurfaceApp h (a NE.<| as)
+    _               -> SurfaceApp s (a :| [])
   InLamBody bs -> SurfaceLam bs s
   InPiDomain p x rest body ->
     SurfacePi (SurfaceBinder p x (Just s) :| rest) body
@@ -196,6 +213,24 @@ intoArg
   :: Surface -> NonEmpty SurfaceArg -> Int -> Surface -> SurfaceZipper
   -> SurfaceZipper
 intoArg h as k a = push a (InArg h as k)
+
+-- | Focus the head a whole spine is applied to — @f a b@ gives @f@.
+--
+-- 'intoFun' peels one argument off the right; this reaches all the way in,
+-- because @E⟦x ⃗a⟧@ needs the head before it has walked any argument.
+intoHead :: NonEmpty SurfaceArg -> Surface -> SurfaceZipper -> SurfaceZipper
+intoHead as h = push h (InHead as)
+
+-- | Focus what is left of a spine once its **first** argument is taken.
+--
+-- **This is how a rule loops over a spine** (MS4 phase 49f), and it is
+-- 'intoLamTail' one node over: a clause takes the first argument, claims a hole
+-- for it and calls itself on the tail, so the surface term is the counter.
+--
+-- The exhausted case is the bare head, not a failure, which is what gives the
+-- recursion its base case: @f a@ answers with @f@.
+intoAppTail :: SurfaceArg -> Surface -> SurfaceZipper -> SurfaceZipper
+intoAppTail a rest = push rest (InAppTail a)
 
 intoLamBody
   :: NonEmpty SurfaceBinder -> Surface -> SurfaceZipper -> SurfaceZipper

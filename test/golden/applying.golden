@@ -30,6 +30,8 @@ elaborate ‹t›
 elaborate ‹t›
 enter-binders ‹t›
 enter-binders ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+spine-arguments ‹h› ‹f› ‹t›
 thena spine> apply-core ⌜ Just ⌝
 solved: A
 thena spine> :show

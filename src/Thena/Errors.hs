@@ -133,8 +133,8 @@ data FailReason
     -- Everything a /user/ can get wrong is checked by @declare@ on the
     -- finished record; this is about it not being buildable at all.
   | TooManyArgumentsForHead
-    -- ^ @make-apply@ was given more argument names than the head's type has Π
-    -- domains (MS4 phase 44)
+    -- ^ @apply-next@ was asked for an argument the head's type has no Π domain
+    -- for (MS4 phase 44, and @make-apply@'s until 49f deleted it)
   | NoEnclosingDevelopment
     -- ^ @pop-development@ at the outermost one (MS4 phase 42). There is
     -- nothing to pop back to, and a machine with no development at all is not
@@ -196,13 +196,16 @@ data FailReason
 
     -- Elaboration and @Call@ (§7.2, §8), added at phase 17b.
   | NoElaborationRule String
-    -- ^ @prim-elaborate@ met a surface node it has no case for (MS4 phase 41),
-    -- carrying what the node was.
+    -- ^ elaboration met a surface node it cannot handle, carrying what the
+    -- node was (MS4 phase 41).
     --
-    -- **A failure and not a silence, deliberately.** Phase 41 compiles the
-    -- leaves; the nodes that raise this are phase 41b's list, and each of them
-    -- needs something the op vocabulary does not yet have. An elaborator that
-    -- quietly did nothing here would leave a hole that looked elaborated.
+    -- **A failure and not a silence, deliberately.** An elaborator that quietly
+    -- did nothing here would leave a hole that looked elaborated.
+    --
+    -- Two things raise it now that every case is a rule (phase 49f):
+    -- @expand-implicits@, when the written arguments cannot be lined up against
+    -- the head's plicities, and the λ accessors, on a binder shape the surface
+    -- language admits and elaboration does not yet.
   | CannotRead SyntaxError
     -- ^ @parse@ could not lex or parse its text, or @resolve@ could not resolve
     -- the tree it was given in the context at the focus. One case for both,

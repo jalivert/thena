@@ -41,10 +41,14 @@ rule apply-core f :- when focus-is-hole
 -- --------------------------------------------------------------------------
 -- Elaboration, one clause per surface node (MS4 step 2)
 --
--- Every clause names the node it is for, so exactly one head matches any term
--- and a call to elaborate never has a choice to make. The clauses whose body is
--- still prim-elaborate are the ones step 2 has not reached yet; each phase
--- fills one in, and when the last is done prim-elaborate goes.
+-- Every clause names the node it is for, so at most one head matches any term
+-- and a call to elaborate has nothing to choose between — the two application
+-- clauses are the exception, and they are ordered rather than exclusive because
+-- a head whose arguments do not line up must fall through to the binary rule.
+--
+-- **Elaboration is entirely here as of MS4 phase 49f.** There is no
+-- prim-elaborate any more and there is no Haskell elaborator behind it; what
+-- follows is the whole of E⟦·⟧.
 
 -- E⟦x⟧ = FILL x ; SOLVE — Brady's variable case.
 rule elaborate t :- when focus-is-hole (surface-is-name t)
@@ -71,19 +75,26 @@ rule elaborate t :- when focus-is-hole (surface-is-placeholder t) then
 -- E⟦?foo⟧ — a named placeholder is a real hole, which the focus already is.
 rule elaborate t :- when focus-is-hole (surface-is-hole t) then
 
--- Still in Haskell, behind prim-elaborate. One clause each, so that moving one
--- into the rule language changes this file and nothing else.
--- E⟦x ⃗a⟧ — Brady's OTHER application rule, taken whenever the head is a name:
--- the written arguments are matched against the head's plicities and a slot is
--- opened for every implicit position the user did not write. Still in Haskell,
--- because that match is a computation over two lists (ms4/CLOSEOUT.md 28).
+-- E⟦x ⃗a⟧ — Brady's OTHER application rule, taken whenever the head is a name.
+-- The binary rule below claims f : A -> B, an arrow, so B cannot mention the
+-- argument and a dependent head does not fit it; this one walks the head's real
+-- telescope, claiming each domain in the scope of the holes already claimed.
+--
+-- expand-implicits is Brady's EXPAND: it writes a _ in at every implicit
+-- position the user left out, so from here on every argument is written and the
+-- walk is the same for all of them.
 --
 -- **It may fail and fall through to the clause below**, which is what the
 -- Haskell did with a case: a head whose arguments do not line up — a partial
 -- application of a head with recorded plicities — is an ordinary binary
 -- application.
 rule elaborate t :- when focus-is-hole (surface-is-app t) (app-head-is-name t)
-  then prim-elaborate t
+  then h  = here
+     ; e  = expand-implicits t
+     ; hd = app-head e
+     ; w  = surface-name hd
+     ; f  = resolve-name w
+     ; call spine-arguments h f e
 
 -- E⟦e a⟧ — the binary rule, a spine folded right to left. CLAIM (A : Type);
 -- CLAIM (B : Type); CLAIM (f : A -> B); CLAIM (s : A); FILL (f s); FOCUS f;
@@ -265,3 +276,38 @@ rule enter-binders t :- when focus-is-component (lambda-binds-more t)
      ; call enter-binders tl
 
 rule enter-binders t :- when focus-is-component (lambda-binds-one t) then along
+
+-- The walk itself, and it is a recursion over the surface spine: take the first
+-- argument, claim a hole for it, elaborate into that hole, and call on what is
+-- left. The term is its own counter, exactly as the λ group is at
+-- intro-binders — which is what lets a rule apply a head to any number of
+-- arguments without ever holding a list (ms4/CLOSEOUT.md 28).
+--
+-- **goto h before each claim.** Every claim goes directly above the focus, so
+-- claiming from the one fixed place is what puts the domains in telescope order
+-- and lets a later domain mention an earlier hole.
+--
+-- focus-is-component is there for enter-binders' reason (phase 49c): a head of
+-- argument tests alone is true of every state, so the clause would be offered
+-- everywhere. It is a test that is TRUE here, not one chosen to tidy the match
+-- list — the focus is the hole on the way in and the argument just elaborated
+-- on the way round.
+rule spine-arguments h f t :- when focus-is-component (surface-is-app t)
+  then goto h
+     ; n  = fresh-name "a"
+     ; f2 = apply-next f n
+     ; goto n
+     ; a  = app-first-argument t
+     ; call elaborate a
+     ; tl = app-tail t
+     ; call spine-arguments h f2 tl
+
+-- The base case: the arguments are gone and what is left is the head. Only now
+-- is the spine filled in — the arguments are elaborated BEFORE the FILL,
+-- against Brady's printed order, because unifying the spine's type with the
+-- goal solves the argument holes and a solved hole is a definition, so a goto
+-- afterwards would find nothing.
+rule spine-arguments h f t :- when focus-is-component (surface-is-name t)
+  then goto h
+     ; fill f
+     ; solve

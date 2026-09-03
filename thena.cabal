@@ -35,7 +35,6 @@ library
         Thena.Development.Partial
         Thena.Development.Validate
         Thena.Driver
-        Thena.Elaborate
         Thena.Engine
         Thena.Errors
         Thena.Global.Declare

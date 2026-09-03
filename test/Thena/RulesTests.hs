@@ -385,15 +385,23 @@ producesTests =
         -- be one of the three cases still behind it, and a λ is the one that
         -- needs no globals. The goal is an arrow so @prim-intro@ has a binder
         -- to take.
-        -- **A name-headed application** (MS4 phase 49d): all this op still does
-        -- is @E⟦x ⃗a⟧@ and @elim@, so the term has to have a name at its head
-        -- and that name has to be in scope — hence @nat@ rather than the empty
-        -- environment every other row uses.
-      , ("prim-elaborate", nat, holeAt natType, [],
-           Ops.Elaborate (Lit (VSurface (rootedAt
-             (SurfaceApp (SurfaceName "succ")
-                (SurfaceArg Explicit (SurfaceName "zero") NE.:| []))))))
+        -- **The spine walk\'s vocabulary** (MS4 phase 49f). @apply-next@ needs a
+        -- head whose type is a Π and a name in scope, so it uses @nat@ like the
+        -- row that stood here before it; the three accessors only read the
+        -- surface term they are handed.
+      , ("expand-implicits", nat, holeAt natType, [], Ops.ExpandImplicits succZero)
+      , ("app-head",         e,   hole, [],           Ops.AppHead succZero)
+      , ("app-first-argument", e, hole, [],           Ops.AppFirstArgument succZero)
+      , ("app-tail",         e,   hole, [],           Ops.AppTail succZero)
+      , ("apply-next",       nat, holeAt natType, [],
+           Ops.ApplyNext (term (Global (GlobalName "succ") [])) (text "a"))
       ]
+
+    -- @succ zero@, as a focused surface term.
+    succZero =
+      Lit (VSurface (rootedAt
+        (SurfaceApp (SurfaceName "succ")
+           (SurfaceArg Explicit (SurfaceName "zero") NE.:| []))))
 
     -- @try ‹t›@, as 'expectedBase' ships it — what @call@ needs something to
     -- call.
@@ -461,15 +469,18 @@ ranOk m = case runOut m of
 
 -- | Every rule the shipped base offers at a hole, in definition order.
 --
--- **@elaborate@ thirteen times** (MS4 phase 49): one clause per surface node,
+-- **@elaborate@ fifteen times** (MS4 phase 49): one clause per surface node,
 -- and a test about an argument nobody supplied does not exclude a clause
--- (phase 47), so a listing with no argument shows them all.
+-- (phase 47), so a listing with no argument shows them all. @spine-arguments@
+-- is there for @enter-binders@\' reason — a helper whose head is honest about
+-- the focus is offered wherever that focus test passes (@ms4/CLOSEOUT.md@ 27).
 everyHoleRule :: [String]
 everyHoleRule =
   [ "attack", "try-core", "abandon", "eliminate-core", "prove", "fill"
   , "unify-refine-core", "apply-core"
   ]
     ++ replicate 15 "elaborate" ++ replicate 2 "enter-binders"
+    ++ replicate 2 "spine-arguments"
 
 -- | The λ case's two recursive helpers, which every listing at a guess shows.
 --
@@ -477,7 +488,10 @@ everyHoleRule =
 -- 47), so a rule whose head only asks about its argument is offered wherever
 -- its state test passes — and @intro-binders@ really does apply at a guess.
 walkers :: [String]
-walkers = ["intro-binders", "intro-binders", "enter-binders", "enter-binders"]
+walkers =
+  [ "intro-binders", "intro-binders", "enter-binders", "enter-binders"
+  , "spine-arguments", "spine-arguments"
+  ]
 
 -- | @Nat@, as a core term, for the row above.
 natType :: Core

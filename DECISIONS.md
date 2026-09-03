@@ -522,6 +522,31 @@ supplies it the same way.
 whole tokens. The generated name is checked for a clash the way a constructor's
 is: `data Bool …` is refused if you already have something called `elimBool`.
 
+### Elaboration is written in the rule base, all of it
+
+*Decided 2026-09-03.*
+
+Turning what you write into a proof term is not built into the program. It is
+fifteen clauses of a rule called `elaborate` in `rules/standard.thena.rules`, one
+per kind of thing you can write, and you can read them, change them, or load a
+base of your own:
+
+```
+-- E⟦x⟧ = FILL x ; SOLVE — Brady's variable case.
+rule elaborate t :- when focus-is-hole (surface-is-name t)
+  then w = surface-name t
+     ; x = resolve-name w
+     ; fill x
+     ; solve
+```
+
+`:rules` lists them and `:step` runs an elaboration one instruction at a time.
+
+**Elaboration and proof search are the same machine** — the same rule base, the
+same choice points, the same backtracking. A clause that applies a function to
+its arguments does it by recursion, one argument per step, because the rule
+language has no loops and needs none: the term you wrote is the counter.
+
 ---
 
 ## The REPL and the session

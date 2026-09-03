@@ -223,25 +223,6 @@ data Op
     --
     -- Its written word is **@prim-prove@**: the good word belongs to the rule
     -- (phase 23b's convention).
-  | Elaborate Operand
-    -- ^ **elaborate a surface term into the focused hole** (MS4 phase 41) —
-    -- the operand is a 'VSurface'.
-    --
-    -- **One large instruction, and step 1 of a two-step** (@MS4.md@). His
-    -- design, 2026-09-02: elaboration is written in Haskell behind one op
-    -- first, and then broken into the clauses of a rule. §7.2's /large and
-    -- small instructions coexist/ is the licence, and @eliminate@ is the
-    -- precedent.
-    --
-    -- **It does not do the work; it emits the instructions that do.** Each
-    -- surface node compiles to a short program of ops that already exist —
-    -- and to an @Elaborate@ of each sub-term, so the op recurses through
-    -- itself. That is what makes step 2 a /decomposition/: the rule clauses
-    -- that replace this will emit the same instructions from a body instead of
-    -- from Haskell, and until they do, @:step@ shows the elaboration running
-    -- as ordinary instructions.
-    --
-    -- See "Thena.Elaborate".
   | Yield Operand
     -- ^ hand control to the REPL and stay where you are (MS4 phase 45b).
     --
@@ -337,9 +318,9 @@ data Op
     -- the surface writes as a bare @Type@, and what typical ambiguity means at
     -- an operand.
     --
-    -- **It is the literal the elaborator does not write.** Seven of
-    -- "Thena.Elaborate"\'s nine @Lit (VTerm …)@ operands are a @Universe@ at a
-    -- level drawn from the counter — the type a claimed domain, codomain or
+    -- **It is the literal the elaborator does not write.** Seven of the nine
+    -- @Lit (VTerm …)@ operands the Haskell elaborator emitted, before MS4 phase
+    -- 49f deleted it, were a @Universe@ at a level drawn from the counter — the type a claimed domain, codomain or
     -- ascription is claimed at, before anything is known about it. A rule
     -- cannot write that down: the point of the meta is that it is fresh at
     -- every node.
@@ -384,6 +365,45 @@ data Op
     -- ^ a spine minus its last argument — @f a b@ gives @f a@, @f a@ gives @f@
     -- (MS4 phase 49d)
   | AppLastArgument Operand  -- ^ … that last argument
+  | AppHead Operand
+    -- ^ … the head the whole spine is applied to — @f a b@ gives @f@ (MS4
+    -- phase 49f). 'AppFunction' peels from the right and this reaches all the
+    -- way in; the name-headed clause needs the head **before** it has walked
+    -- any argument, because the head is what it claims domains from.
+  | AppFirstArgument Operand
+    -- ^ … its **first** argument (MS4 phase 49f). @E⟦x ⃗a⟧@ walks the head's
+    -- telescope left to right, so it consumes the spine from the left, where
+    -- the binary rule folds it from the right.
+  | AppTail Operand
+    -- ^ … the spine that is left once that first argument is taken: @f a b@
+    -- gives @f b@, and @f a@ gives the bare head @f@ (MS4 phase 49f).
+    --
+    -- **The exhausted case answers with the head and not with a failure**,
+    -- which is what makes the walk a recursion with a base case: the helper
+    -- rule\'s two clauses test @surface-is-app@ and @surface-is-name@, and a
+    -- name-headed spine is one or the other. 'LambdaTail' is the same shape one
+    -- binder group over.
+  | ExpandImplicits Operand
+    -- ^ **Brady\'s @EXPAND@, as a rewriting of the surface term** (MS4 phase
+    -- 49f): the written arguments are lined up against the head\'s recorded
+    -- plicities and an argument is **written in** at every implicit position
+    -- the user left out.
+    --
+    -- **The inserted argument is @_@** — 'Thena.Surface.Concrete.SurfacePlaceholder',
+    -- the placeholder the surface language already has, whose clause of
+    -- @elaborate@ has an empty body. So an inserted slot is claimed like any
+    -- other and simply not elaborated into, which is exactly what the Haskell
+    -- elaborator did with a @Nothing@ slot, and it is Brady\'s /"it is
+    -- unification which finds values of implicit arguments"/.
+    --
+    -- **It is an op and not a head test** because the match is a computation
+    -- over two lists and needs the machine\'s signature environment, which
+    -- "Thena.Rules"\'s @holds@ cannot see (@ms4/CLOSEOUT.md@ 28). Failing here
+    -- is what sends a spine whose arguments do not line up on to the binary
+    -- clause below, exactly as the Haskell @case@ fell through.
+    --
+    -- A head with nothing recorded — every DC-declared global, and every local
+    -- — takes its arguments as written, so the term comes back unchanged.
   | LambdaName Operand
     -- ^ the first binder's name in a surface λ, as text (MS4 phase 49c).
     -- **It refuses an annotated or implicit binder**, which is the whole of
@@ -576,6 +596,25 @@ data Op
     -- ^ the development must be pure; yields the closed term it stands for and
     -- the type it is claimed to have, for the driver to run the kernel on
     -- (§7.5, §5.3)
+  | ApplyNext Operand Operand
+    -- ^ **a spine and a name: claim a hole for the head\'s next argument and
+    -- yield the spine extended by it** (MS4 phase 49f).
+    --
+    -- One step of what 'Apply' does in a loop and what @make-apply@ did over a
+    -- list until MS4 phase 49f deleted it.
+    -- The type of the operand is reduced to a Π, its domain is claimed above
+    -- the focus under the name given, and the answer is @f ?x@.
+    --
+    -- **This is @ms4/CLOSEOUT.md@ 28\'s second answer** — /ops that take their
+    -- names one at a time, accumulating in the development rather than in the
+    -- body/. A rule cannot build a list of names, but it can mint one name per
+    -- step of a recursion over the spine, and the holes accumulate where they
+    -- belong: in the development.
+    --
+    -- **The caller must be at the hole it is filling when it calls this.** Each
+    -- claim goes directly above the focus, so claiming from one fixed place is
+    -- what puts the domains in telescope order and lets a later domain mention
+    -- an earlier hole. 'Apply' keeps the focus still for the same reason.
   | Apply Operand
     -- ^ the head to apply — thesis §2.7's @naive-refine@ with the search
     -- taken out (phase 25). Walks the head's Π telescope, claims a hole for
@@ -596,22 +635,6 @@ data Op
     -- 'Thena.Development.Cursor.freshIdent' — the same licence 'Attack' and
     -- 'Eliminate' have. Phase 24c's @fresh-name@ is for names a /rule body/
     -- chooses; these the engine chooses for itself.
-  | MakeApply Operand [Operand]
-    -- ^ **a head, and the names its argument holes are to carry** — claim one
-    -- per Π domain of the head's type and yield the saturated spine (MS4 phase
-    -- 44).
-    --
-    -- **This is Brady's @E⟦x ⃗a⟧@, and it exists because his @E⟦e a⟧@ cannot do
-    -- a dependent function.** That rule claims @f : A -> B@ — an /arrow/, with
-    -- no way for @B@ to mention the argument — so applying @Eq@, whose later
-    -- domains mention the earlier ones, made unification try to solve a hole
-    -- with a term mentioning a binder out of its scope: /"A3 is not bound
-    -- before A1"/. Walking the real telescope claims each domain in the scope
-    -- of the holes already claimed, which is what @prim-apply@ has always done
-    -- and never handed back.
-    --
-    -- **The caller supplies the names**, as 'MakeElim' does and for the same
-    -- reason (his decision, 2026-09-02): a body reaches the holes by name.
   | Eliminate Operand
     -- ^ the term to eliminate — §3.7's elimination tactic, phase 17. It
     -- generalises the target and its indices in the motive, claims a hole per
@@ -800,9 +823,12 @@ produces o = case o of
   Abandon      -> False
   Prove        -> False
   Call _ _     -> False   -- what the callee builds is in the development
-  Elaborate _  -> False
   Eliminate _  -> False
-  MakeApply _ _ -> True  -- the saturated spine
+  ApplyNext _ _ -> True  -- the spine, one argument longer
+  ExpandImplicits _ -> True
+  AppHead _ -> True
+  AppFirstArgument _ -> True
+  AppTail _ -> True
   ElimSpine _ -> True    -- the application an elim means
   Apply _      -> True   -- the spine it built
 
@@ -867,10 +893,13 @@ operandsOf o = case o of
   Typing a     -> [a]
   Define a b   -> [a, b]
   Eliminate a  -> [a]
-  MakeApply h as -> h : as
+  ApplyNext f x -> [f, x]
+  ExpandImplicits a -> [a]
+  AppHead a    -> [a]
+  AppFirstArgument a -> [a]
+  AppTail a    -> [a]
   ElimSpine a  -> [a]
   Apply a      -> [a]
-  Elaborate a  -> [a]
   Call _ as    -> as
   Prove        -> []
   DefineData _ -> []
@@ -1056,7 +1085,6 @@ opKeyword o = case o of
   Solve        -> "prim-solve"
   Abandon      -> "prim-abandon"
   Prove        -> "prim-prove"
-  Elaborate _  -> "prim-elaborate"
   Call _ _     -> "call"
   FreshName _  -> "fresh-name"
   Here         -> "here"
@@ -1093,7 +1121,11 @@ opKeyword o = case o of
   PushDevelopment _ -> "push-development"
   PopDevelopment -> "pop-development"
   Eliminate _  -> "prim-eliminate"
-  MakeApply _ _ -> "make-apply"
+  ApplyNext _ _ -> "apply-next"
+  ExpandImplicits _ -> "expand-implicits"
+  AppHead _ -> "app-head"
+  AppFirstArgument _ -> "app-first-argument"
+  AppTail _ -> "app-tail"
   ElimSpine _ -> "elim-spine"
   Apply _      -> "prim-apply"
 

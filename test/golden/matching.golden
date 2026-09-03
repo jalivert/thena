@@ -32,6 +32,8 @@ standard
   intro-binders ‹t›
   enter-binders ‹t›
   enter-binders ‹t›
+  spine-arguments ‹h› ‹f› ‹t›
+  spine-arguments ‹h› ‹f› ‹t›
 thena spine> :matches
 attack
 try-core ‹t›
@@ -58,6 +60,8 @@ elaborate ‹t›
 elaborate ‹t›
 enter-binders ‹t›
 enter-binders ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+spine-arguments ‹h› ‹f› ‹t›
 thena spine> attack
 thena spine> :matches
 solve
@@ -67,6 +71,8 @@ intro-binders ‹t›
 intro-binders ‹t›
 enter-binders ‹t›
 enter-binders ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+spine-arguments ‹h› ‹f› ‹t›
 thena spine> cross type
 thena core> :matches
 no rule applies here
@@ -99,6 +105,8 @@ elaborate ‹t›
 elaborate ‹t›
 enter-binders ‹t›
 enter-binders ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+spine-arguments ‹h› ‹f› ‹t›
 thena spine> attack
 thena spine> :matches
 intro
@@ -109,6 +117,8 @@ intro-binders ‹t›
 intro-binders ‹t›
 enter-binders ‹t›
 enter-binders ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+spine-arguments ‹h› ‹f› ‹t›
 thena spine> intro
 thena spine> into
 thena spine> along
@@ -147,6 +157,8 @@ elaborate ‹t›
 elaborate ‹t›
 enter-binders ‹t›
 enter-binders ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+spine-arguments ‹h› ‹f› ‹t›
 thena spine> :abandon
 abandoned id
 thena spine> :theorem c : ∀ (A : Type₀) -> Type₀
@@ -162,6 +174,8 @@ intro-binders ‹t›
 intro-binders ‹t›
 enter-binders ‹t›
 enter-binders ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+spine-arguments ‹h› ‹f› ‹t›
 thena spine> intro
 stuck: that hole's type is neither a ∀ nor a let
 thena spine> :abandon
@@ -178,6 +192,8 @@ intro-binders ‹t›
 intro-binders ‹t›
 enter-binders ‹t›
 enter-binders ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+spine-arguments ‹h› ‹f› ‹t›
 thena spine> intro
 thena spine> :show
 ▶ let ? l : let x = Type₀ : Type₁ in x ≐ (

@@ -332,7 +332,8 @@ gotoTests =
 
 -- | @fresh-universe@ — the surface's bare @Type@, at an operand.
 --
--- Seven of "Thena.Elaborate"\'s nine @Lit (VTerm …)@ operands are this, and
+-- Seven of the nine @Lit (VTerm …)@ operands the Haskell elaborator emitted
+-- were this, and
 -- **it is the one a rule cannot write down**: the point of the meta is that it
 -- is fresh at every node.
 universeTests :: TestTree
