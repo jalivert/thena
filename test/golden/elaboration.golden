@@ -38,6 +38,7 @@ elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
+elaborate ‹t›
 thena spine> elaborate a
 already equal
 thena spine> :show

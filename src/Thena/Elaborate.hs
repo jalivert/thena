@@ -53,14 +53,13 @@ import Thena.Global.Env
   , lookupInductive
   )
 import Thena.Ops (Instr (..), Op (..), Operand (..), Value (..))
-import Thena.Rules (RuleError (..), resolveBlock)
+
 import Thena.Surface.Concrete
   (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..))
 import Thena.Surface.Zipper
   ( SurfaceZipper, focus
-  , intoAnnotTerm, intoAnnotType, intoArg, intoArrowCodomain, intoArrowDomain
-  , intoElimField, intoFun, intoLamBody, intoLetBody, intoLetType, intoLetValue
-  , intoPiDomain, intoPiTail
+  , intoArg
+  , intoElimField, intoFun, intoLamBody
   )
 
 -- | The program that elaborates one surface node into the focused hole.
@@ -71,22 +70,16 @@ import Thena.Surface.Zipper
 --
 -- **A node it cannot yet elaborate is a failure and not a silence.** That list
 -- is phase 41b's specification.
--- | Say why a block did not resolve, in terms "Thena.Errors" can hold.
+-- | What a case that has moved gets if it reaches @prim-elaborate@ anyway.
 --
--- Resolution can only produce 'Thena.Rules.BadOperands' — every other
--- 'Thena.Rules.RuleError' comes from @validate@, which a block does not go
--- through. The fallback is therefore unreachable as things stand and says so
--- rather than inventing a second story.
--- | What a leaf gets if it reaches @prim-elaborate@ (MS4 phase 49).
+-- Nothing routes one here: every clause of @elaborate@ names the node it is
+-- for, so a node's own clause is the only head that matches it. Reaching this
+-- op means the rule base has lost that clause, or a body wrote
+-- @prim-elaborate@ by hand.
 movedToTheRuleBase :: FailReason
 movedToTheRuleBase =
-  NoElaborationRule "a name, a universe or a placeholder — those are clauses of \
-                    \elaborate in the rule base, not cases of this op"
-
-blockFailure :: [RuleError] -> FailReason
-blockFailure errs = case errs of
-  BadOperands _ i w : _ -> BlockOperands i w
-  _                     -> NoElaborationRule "a do block that does not resolve"
+  NoElaborationRule "a surface node whose clause is in the rule base, not in \
+                    \this op"
 
 -- | The names one compiled node binds, all carrying its own number.
 --
@@ -101,12 +94,12 @@ blockFailure errs = case errs of
 -- same thing 'Thena.Core.Term.fresh' does with the same counter.
 data Names = Names
   { hereName, domName, codName, arrName, funName, argName
-  , appName, refName, tyName, goalName, valName, elimName :: String }
+  , appName, refName, tyName, goalName, elimName :: String }
 
 namesFor :: Int -> Names
 namesFor n =
   Names (w "here") (w "dom") (w "cod") (w "arr") (w "fun") (w "arg")
-        (w "app") (w "ref") (w "ty") (w "goal") (w "val") (w "elim")
+        (w "app") (w "ref") (w "ty") (w "goal") (w "elim")
   where w x = x ++ show n
 
 compile
@@ -127,21 +120,16 @@ compile env sigs ctx n0 z = case focus z of
   -- (phase 41b's invariant), and a block does what the user wrote. That is the
   -- second principle — the block may do something strange, and repairing it is
   -- the user's.
-  SurfaceDo body -> case resolveBlock (GlobalName "do") body of
-    Left errs -> Left (blockFailure errs)
-    Right is  -> Right ([Do (Block is)], n0)
-
-  -- **The five leaves are clauses of @elaborate@ now** (MS4 phase 49) — a name,
-  -- @Typeₙ@, @Type@, @_@ and @?foo@. Nothing routes one here: every clause of
-  -- @elaborate@ names the node it is for, so a leaf's own clause is the only
-  -- head that matches it. Reaching this op with one means the rule base has
-  -- lost that clause, or a body wrote @prim-elaborate@ by hand — and saying so
-  -- beats keeping a second copy of five cases that could then drift.
   SurfaceName _       -> Left movedToTheRuleBase
   SurfaceUniverse _   -> Left movedToTheRuleBase
   SurfaceUniverseOpen -> Left movedToTheRuleBase
   SurfacePlaceholder  -> Left movedToTheRuleBase
   SurfaceHole _       -> Left movedToTheRuleBase
+  SurfaceArrow _ _    -> Left movedToTheRuleBase
+  SurfaceAnnot _ _    -> Left movedToTheRuleBase
+  SurfaceLet {}       -> Left movedToTheRuleBase
+  SurfacePi _ _       -> Left movedToTheRuleBase
+  SurfaceDo _         -> Left movedToTheRuleBase
 
   -- @E⟦e a⟧@ — Brady's application case with his own correction to the printed
   -- rule (the missing @FILL@ and @SOLVE@, @IDRIS.md@):
@@ -365,173 +353,6 @@ compile env sigs ctx n0 z = case focus z of
   -- back. **The emitted instructions are unchanged** — the rewritten node's
   -- own case emitted exactly this, with the same counter — so what the move
   -- buys is that the path the codomain travels with is real.
-  SurfacePi bs body -> case NE.uncons bs of
-    -- **A binder in braces elaborates exactly as one in parentheses** (MS4
-    -- phase 44b), because 'Thena.Core.Term.Pi' has no plicity to put it in —
-    -- his decision, and the reason the record of which positions are implicit
-    -- lives on the machine instead ('Thena.Engine.signatures'). What braces
-    -- change is what happens at a *use*, not what the type is.
-    (SurfaceBinder _ _ Nothing, _) ->
-      Left (NoElaborationRule "a ∀ binder with no type")
-    (b@(SurfaceBinder p x (Just ty)), rest) ->
-      let (l, n1) = freshLevelMeta n
-          restBs  = maybe [] NE.toList rest
-          cod     = maybe body (`SurfacePi` body) rest
-       in Right
-            ( [ Bind (hereName names) Here
-              , Bind (domName names ++ "n") (FreshName (lit' "A"))
-              , Bind (domName names)
-                  (Claim (Ref (domName names ++ "n")) (lit (Universe (LVar l))))
-              , Do Attack
-                -- @quantify@ acts at the guess, as @prim-intro@ does, so the
-                -- descent comes after it — the λ case's @into@, @along@
-                -- exactly.
-              , Do (Quantify (lit' x) (Ref (domName names)))
-              , Do Into
-              , Do Along
-                -- The codomain hole, held rather than counted — phase 41c's
-                -- @here@ doing for a nested focus what it does for the outer.
-              , Bind (codName names) Here
-              , Do (Goto (Ref (domName names)))
-              , Do (elaborating
-                     (Lit (VSurface (intoPiDomain p x restBs body ty z))))
-              , Do (Goto (Ref (codName names)))
-              , Do (elaborating (Lit (VSurface (intoPiTail b cod z))))
-              , Do (Goto (Ref (hereName names)))
-              , Do Solve
-              ]
-            , n1
-            )
-
-  -- @E⟦A -> B⟧@ — the application case's shape with @arrow@ where it has
-  -- @apply-to@, and **no new op at all**.
-  --
-  -- It is not the Π case with an anonymous binder: an arrow's codomain cannot
-  -- mention the domain, so there is nothing to put in Γ and nothing to attack.
-  -- Two claims, the term, and the same @FILL@ every other case ends with.
-  SurfaceArrow a b ->
-    let (l1, n1) = freshLevelMeta n
-        (l2, n2) = freshLevelMeta n1
-     in Right
-          ( concat
-              [ [ Bind (hereName names) Here
-                , Bind (domName names ++ "n") (FreshName (lit' "A"))
-                , Bind (domName names)
-                    (Claim (Ref (domName names ++ "n")) (lit (Universe (LVar l1))))
-                , Bind (codName names ++ "n") (FreshName (lit' "B"))
-                , Bind (codName names)
-                    (Claim (Ref (codName names ++ "n")) (lit (Universe (LVar l2))))
-                , Bind (arrName names) (Arrow (Ref (domName names)) (Ref (codName names)))
-                ]
-              , fill (Ref (arrName names))
-              , [ Do (Goto (Ref (domName names)))
-                , Do (elaborating (Lit (VSurface (intoArrowDomain b a z))))
-                , Do (Goto (Ref (codName names)))
-                , Do (elaborating (Lit (VSurface (intoArrowCodomain a b z))))
-                , Do (Goto (Ref (hereName names)))
-                , Do Solve
-                ]
-              ]
-          , n2
-          )
-
-  -- @E⟦let x = v in e⟧ = ATTACK; CLAIM (X : Type); CLAIM (V : X);
-  -- LET (x : X ↦→ V); FOCUS V; E⟦v⟧; E⟦e⟧; SOLVE@ — Brady's @let@ case, and
-  -- **@define@ is his @LET@**.
-  --
-  -- @IDRIS.md@ records @define@ as /"close but infers the type"/, and that
-  -- turns out to be the reason it fits rather than the reason it does not: the
-  -- value handed to it is @V@'s /variable/, whose type is the claimed @X@, so
-  -- inferring gives back exactly the type Brady writes down.
-  --
-  -- **No @attack@ and no @solve@**, where Brady has both. His @LET@ acts on the
-  -- goal; ours writes a component /above/ the focus, so the body elaborates
-  -- into the hole this clause was called at and the clause is three
-  -- instructions shorter. The definition is in Γ by then, so the body's @x@
-  -- resolves to it.
-  --
-  -- **The definition carries the name the user wrote**, which is what made
-  -- phase 24c's taken-name check untenable — see "Thena.Engine"'s @claim@.
-  SurfaceLet x ann v body ->
-    let (l, n1) = freshLevelMeta n
-     in Right
-          ( concat
-              [ [ Bind (hereName names) Here
-                , Bind (tyName names ++ "n") (FreshName (lit' "X"))
-                , Bind (tyName names)
-                    (Claim (Ref (tyName names ++ "n")) (lit (Universe (LVar l))))
-                , Bind (valName names ++ "n") (FreshName (lit' "V"))
-                , Bind (valName names)
-                    (Claim (Ref (valName names ++ "n")) (Ref (tyName names)))
-                ]
-                -- An annotation elaborates into @X@; without one @X@ is left
-                -- for the value's own @FILL@ to unify against.
-              , [ i | Just ty <- [ann]
-                    , i <- [ Do (Goto (Ref (tyName names)))
-                           , Do (elaborating
-                                  (Lit (VSurface (intoLetType x v body ty z))))
-                           ]
-                ]
-              , [ Do (Goto (Ref (valName names)))
-                , Do (elaborating (Lit (VSurface (intoLetValue x ann body v z))))
-                , Do (Goto (Ref (hereName names)))
-                , Do (Define (lit' x) (Ref (valName names)))
-                , Do (elaborating (Lit (VSurface (intoLetBody x ann v body z))))
-                ]
-              ]
-          , n1
-          )
-
-  -- @E⟦e : T⟧@ — Brady gives no rule for ascription, and it needs no new op.
-  --
-  -- Claim @X : Type@, elaborate @T@ into it, and **unify @X@ with the goal**:
-  -- that is the whole of what an ascription says, since @X@ is a solved hole
-  -- by then and δ unfolds it ("Thena.Core.Reduce"). Then elaborate @e@ at the
-  -- same hole, whose type the unification has just constrained.
-  --
-  -- No second hole for @e@ and no @FILL@ of its own — the ascription does not
-  -- build a term, it narrows the one the goal was already asking for.
-  SurfaceAnnot e ty ->
-    let (l, n1) = freshLevelMeta n
-     in Right
-          ( [ Bind (hereName names) Here
-            , Bind (tyName names ++ "n") (FreshName (lit' "X"))
-            , Bind (tyName names)
-                (Claim (Ref (tyName names ++ "n")) (lit (Universe (LVar l))))
-            , Do (Goto (Ref (tyName names)))
-            , Do (elaborating (Lit (VSurface (intoAnnotType e ty z))))
-            , Do (Goto (Ref (hereName names)))
-            , Bind (goalName names) Goal
-              -- **@unify-into@ and not @unify@** (MS4 phase 41g). Brady's @FILL@
-        -- /"UNIFYs its type with the goal's"/, and in a cumulative system that
-        -- is too strong: the term's type need only be /usable/ where the goal
-        -- is wanted. @prim-try@ on the next line does the real check and
-        -- subsumes, so what is asked here is solving, not deciding.
-      , Do (UnifyInto (Ref (tyName names)) (Ref (goalName names)))
-            , Do (elaborating (Lit (VSurface (intoAnnotTerm ty e z))))
-            ]
-          , n1
-          )
-
-  -- @E⟦elim d ⃗p P ⃗m ⃗i t⟧@ — the last case, and Brady has no rule for it
-  -- because IDRIS− has pattern matching where the surface language has
-  -- eliminators (his: /"yes, for now we use eliminators in the surface too"/).
-  --
-  -- **It is the application case with @make-elim@ where that has @apply-to@.**
-  -- The eliminator has no global name to apply — §3.7 generates nothing for it
-  -- — but 'Thena.Global.Env.eliminatorType' builds its Π telescope on demand,
-  -- in @Eliminate@'s own field order, so claiming a hole per domain is the
-  -- same walk @prim-apply@ does and the op does it.
-  --
-  -- **The names are minted here and handed down.** That is what makes the
-  -- holes reachable afterwards — his decision, 2026-09-02, closing
-  -- @elaboration-in-rules.md@'s complaint that @prim-apply@ /"claims holes and
-  -- yields only the spine, so a body cannot reach them"/. Phase 41f is what
-  -- made it sound: @claim@ takes a name as given.
-  --
-  -- **The arity is checked here, against the declaration**, so the message
-  -- names the field group the user got wrong rather than a total. The op
-  -- checks the total as well, because a rule body can call it directly.
   SurfaceElim d ps mot ms is tgt -> case lookupInductive (GlobalName d) env of
     Nothing  -> Left (CannotRead (ResolveFailed (NotADatatype d)))
     Just def

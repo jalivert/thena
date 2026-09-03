@@ -439,9 +439,25 @@ the hole is already there and unification is expected to find it. A clause that
 does nothing and a clause that does not match are different answers, so the
 empty body is saying something. `then` is still required.
 
-Eight of the thirteen still run `prim-elaborate`, the one large instruction the
-elaborator was written as. Each is a clause of its own, so moving one into the
-rule language changes the rule file and nothing else.
+**Ten of the fourteen clauses are real** (MS4 phase 49b added `∀`, `->`, `let`
+— two clauses, since the annotation is optional and a head cannot say *not* —
+the ascription, and `do`). Three still run `prim-elaborate`, and they are
+exactly the three that **iterate**: a λ over its binder group, an application
+over its arguments against the head's plicities, an `elim` over its fields. The
+rule language has no lists.
+
+A clause takes its surface term apart with **moves**, which answer with a
+surface term focused on the part rather than a detached one:
+
+```
+rule elaborate t :- when focus-is-hole (surface-is-arrow t)
+  then … ; a = arrow-domain t ; call elaborate a
+        ; … ; b = arrow-codomain t ; call elaborate b
+```
+
+They do not reuse the cursor's words — `dom` and `cod` already move the
+development's ambient cursor, and one word for two different things is what the
+project rules out.
 
 ### Two ops a rule needs that it cannot write down
 

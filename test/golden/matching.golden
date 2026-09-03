@@ -26,6 +26,7 @@ standard
   elaborate ‹t›
   elaborate ‹t›
   elaborate ‹t›
+  elaborate ‹t›
 thena spine> :matches
 attack
 try-core ‹t›
@@ -35,6 +36,7 @@ prove
 fill ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
+elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
@@ -81,6 +83,7 @@ elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
+elaborate ‹t›
 thena spine> attack
 thena spine> :matches
 intro
@@ -108,6 +111,7 @@ prove
 fill ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
+elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›

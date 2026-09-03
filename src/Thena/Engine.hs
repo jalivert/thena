@@ -45,6 +45,7 @@ module Thena.Engine
   ) where
 
 import Data.List (intercalate, nub)
+import qualified Data.List.NonEmpty as NE
 
 import Thena.Core.Level (Level (..), freshLevelMeta, levelOfNat, levelVarName)
 import Thena.Core.Context (Context, Entry (..), entryIdent, entryVar)
@@ -120,7 +121,8 @@ import Thena.Global.Env
   )
 import qualified Thena.Ops as Op
 import Thena.Tactics.Eliminate (Elimination (..), eliminate)
-import Thena.Rules (RuleBase, RuleIter, arities, clauses, dispatch, hasNext, next)
+import Thena.Rules
+  (RuleBase, RuleError (..), RuleIter, arities, clauses, dispatch, hasNext, next, resolveBlock)
 import Thena.Syntax.Lexer (isIdentifier)
 import qualified Thena.Elaborate as Elaborate
 import Thena.Surface.Zipper (SurfaceZipper)
@@ -1093,6 +1095,65 @@ perform instr rest m = case operation instr of
         produce (VTerm (Trailing (Universe (levelOfNat k)))) m
       _ -> failure (ExpectedSurfaceShape "a written universe") m
 
+  -- **The surface moves** (MS4 phase 49b). Each destructures the focus and
+  -- hands back a zipper standing at the part, so the path is extended and the
+  -- term the clause was called with is never lost.
+  Op.ArrowDomain x -> surfaceMove x "an arrow" $ \s -> case s of
+    Concrete.SurfaceArrow a b -> Just (Zipper.intoArrowDomain b a)
+    _                         -> Nothing
+  Op.ArrowCodomain x -> surfaceMove x "an arrow" $ \s -> case s of
+    Concrete.SurfaceArrow a b -> Just (Zipper.intoArrowCodomain a b)
+    _                         -> Nothing
+  Op.AscriptionType x -> surfaceMove x "an ascription" $ \s -> case s of
+    Concrete.SurfaceAnnot e ty -> Just (Zipper.intoAnnotType e ty)
+    _                          -> Nothing
+  Op.AscriptionTerm x -> surfaceMove x "an ascription" $ \s -> case s of
+    Concrete.SurfaceAnnot e ty -> Just (Zipper.intoAnnotTerm ty e)
+    _                          -> Nothing
+
+  Op.LetName x -> case surfaceAt x of
+    Left r  -> failure r m
+    Right (Concrete.SurfaceLet w _ _ _) -> produce (VText w) m
+    Right _ -> failure (ExpectedSurfaceShape "a let") m
+  Op.LetType x -> surfaceMove x "an annotated let" $ \s -> case s of
+    Concrete.SurfaceLet w (Just ty) v b -> Just (Zipper.intoLetType w v b ty)
+    _                                   -> Nothing
+  Op.LetValue x -> surfaceMove x "a let" $ \s -> case s of
+    Concrete.SurfaceLet w ann v b -> Just (Zipper.intoLetValue w ann b v)
+    _                             -> Nothing
+  Op.LetBody x -> surfaceMove x "a let" $ \s -> case s of
+    Concrete.SurfaceLet w ann v b -> Just (Zipper.intoLetBody w ann v b)
+    _                             -> Nothing
+
+  Op.ForallName x -> case surfaceAt x of
+    Left r  -> failure r m
+    Right (Concrete.SurfacePi bs _)
+      | Concrete.SurfaceBinder _ w _ <- NE.head bs -> produce (VText w) m
+    Right _ -> failure (ExpectedSurfaceShape "a ∀") m
+  Op.ForallDomain x -> surfaceMove x "a ∀ whose first binder has a type" $ \s ->
+    case s of
+      Concrete.SurfacePi bs body -> case NE.uncons bs of
+        (Concrete.SurfaceBinder p w (Just ty), more) ->
+          Just (Zipper.intoPiDomain p w (maybe [] NE.toList more) body ty)
+        _ -> Nothing
+      _ -> Nothing
+  Op.ForallTail x -> surfaceMove x "a ∀" $ \s -> case s of
+    Concrete.SurfacePi bs body -> case NE.uncons bs of
+      (b, more) ->
+        Just (Zipper.intoPiTail b (maybe body (`Concrete.SurfacePi` body) more))
+    _ -> Nothing
+
+  -- **@E⟦do { … }⟧ = play the block@** — the whole of that case. A block is
+  -- written down, so there is nothing to elaborate; the instruction that plays
+  -- it is the elaboration.
+  Op.Play x -> case surfaceAt x of
+    Left r  -> failure r m
+    Right (Concrete.SurfaceDo body) ->
+      case resolveBlock (GlobalName "do") body of
+        Left errs -> failure (blockFailureOf errs) m
+        Right is  -> Continue (advance m) { exec = (exec m) { pc = is ++ rest } }
+    Right _ -> failure (ExpectedSurfaceShape "a do block") m
+
   Goal -> case Cursor.expectedType (cursor (development m)) of
     Just t  -> produce (VTerm (Trailing t)) m
     Nothing -> failure NoGoalHere m
@@ -1224,6 +1285,16 @@ perform instr rest m = case operation instr of
 
     -- The surface term an operand names, focus and all (MS4 phase 49).
     surfaceAt x = Zipper.focus <$> operandSurface (env (exec m)) x
+
+    -- **One shape for every surface move** (MS4 phase 49b): read the zipper,
+    -- ask the node for the move it admits, and produce the zipper that move
+    -- gives. A focus of the wrong shape is what the paired head test rules out,
+    -- so reaching one here is a body that did not ask.
+    surfaceMove x shape f = case operandSurface (env (exec m)) x of
+      Left r  -> failure r m
+      Right z -> case f (Zipper.focus z) of
+        Just move -> produce (VSurface (move z)) m
+        Nothing   -> failure (ExpectedSurfaceShape shape) m
 
     -- Claim a hole for every Π domain, extending the spine as it goes, and
     -- stop at the first type that is not a Π — that is what makes @apply@
@@ -1436,6 +1507,18 @@ levelArgsFor k n = case k of
   _ -> let (l, n1)  = freshLevelMeta n
            (ls, n2) = levelArgsFor (k - 1) n1
         in (LVar l : ls, n2)
+
+-- | Say why a written block did not resolve, in terms "Thena.Errors" can hold.
+--
+-- **Moved here from "Thena.Elaborate" at MS4 phase 49b**, with the @do@ case it
+-- belonged to. Resolution can only produce 'Thena.Rules.BadOperands' — every
+-- other 'RuleError' comes from @validate@, which a block does not go through —
+-- so the fallback is unreachable as things stand and says so rather than
+-- inventing a second story.
+blockFailureOf :: [RuleError] -> FailReason
+blockFailureOf errs = case errs of
+  BadOperands _ i w : _ -> BlockOperands i w
+  _                     -> NoElaborationRule "a do block that does not resolve"
 
 operandValue :: Env -> Operand -> Either FailReason Value
 operandValue e o = either (Left . UnboundInBody) Right (Op.operandIn e o)

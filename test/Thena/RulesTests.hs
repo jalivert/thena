@@ -54,7 +54,8 @@ import Thena.Ops
 -- §2.5: "Thena.Ops" is qualified everywhere except "Thena.Engine", because
 -- @Assume@ and @Claim@ name both a component and an op.
 import qualified Thena.Ops as Ops
-import Thena.Surface.Concrete (Surface (..))
+import qualified Data.List.NonEmpty as NE
+import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceBinder (..))
 import Thena.Surface.Zipper (rootedAt)
 import Thena.Rules
   ( RuleError (..)
@@ -374,11 +375,15 @@ producesTests =
         -- own environment — restored on return, and without the destination.
       , ("prim-prove",  e, hole,    [],            Ops.Prove)
       , ("call",        e, hole,    [],            Ops.Call (GlobalName "try-core") [term type0])
-        -- **An arrow, not a bare @Type@** (MS4 phase 49): the leaves are clauses
-        -- of @elaborate@ now and this op refuses them, so the term here has to
-        -- be one of the cases it still handles.
-      , ("prim-elaborate", e, hole, [],
-           Ops.Elaborate (Lit (VSurface (rootedAt (SurfaceArrow SurfaceUniverseOpen SurfaceUniverseOpen)))))
+        -- **A λ** (MS4 phase 49b): every other shape this op once handled is a
+        -- clause of @elaborate@ now, and it refuses those — so the term has to
+        -- be one of the three cases still behind it, and a λ is the one that
+        -- needs no globals. The goal is an arrow so @prim-intro@ has a binder
+        -- to take.
+      , ("prim-elaborate", e, holeAt (arrow type0 type0), [],
+           Ops.Elaborate (Lit (VSurface (rootedAt
+             (SurfaceLam (SurfaceBinder Explicit "z" Nothing NE.:| [])
+                         (SurfaceName "z"))))))
       ]
 
     -- @try ‹t›@, as 'expectedBase' ships it — what @call@ needs something to
@@ -455,4 +460,4 @@ everyHoleRule =
   [ "attack", "try-core", "abandon", "eliminate-core", "prove", "fill"
   , "unify-refine-core", "apply-core"
   ]
-    ++ replicate 13 "elaborate"
+    ++ replicate 14 "elaborate"

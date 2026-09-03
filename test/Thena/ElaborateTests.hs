@@ -261,7 +261,7 @@ unsupportedTests =
       -- an untyped binder is ordinary because the goal supplies the type, so
       -- the case is constructible and 'Thena.Elaborate.compile' has to answer
       -- for it. There is no goal to read a Π's domain off.
-    , refused "a ∀ binder with no type"
+    , refusedShape "a ∀ whose first binder has a type"
         (SurfacePi [binder] (SurfaceName "a"))
     ]
   where
@@ -269,6 +269,15 @@ unsupportedTests =
     refused what s = testCase what $
       case elaborating s of
         Left (NoElaborationRule w) -> w @?= what
+        other -> assertFailure ("expected a refusal: " ++ show other)
+
+    -- **The ∀ case is a clause now** (MS4 phase 49b), so its refusal comes from
+    -- the move that could not find an annotated binder rather than from
+    -- @prim-elaborate@ — and the clause reads its parts before it touches the
+    -- development, so nothing is claimed on the way to failing.
+    refusedShape what s = testCase what $
+      case elaborating s of
+        Left (ExpectedSurfaceShape w) -> w @?= what
         other -> assertFailure ("expected a refusal: " ++ show other)
 
 -- --------------------------------------------------------------------------
@@ -444,7 +453,7 @@ baseTests =
           @?= [ "attack", "try-core", "abandon", "eliminate-core"
               , "prove", "fill", "unify-refine-core", "apply-core"
               ]
-              ++ replicate 13 "elaborate"
+              ++ replicate 14 "elaborate"
 
     , testCase "prove is a rule over prim-prove" $
         case [ r | r@(Rule (GlobalName "prove") _ _ _) <- drain (matches expectedBase emptyGlobals hole) ] of

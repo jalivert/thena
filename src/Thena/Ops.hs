@@ -368,6 +368,34 @@ data Op
     -- **@Of@, because 'Thena.Surface.Concrete.SurfaceName' is a different thing
     -- with the same word** — that constructor /is/ a surface term, this op
     -- /reads one/, and every module resolving a rule imports both.
+  | ArrowDomain Operand      -- ^ the @A@ of a surface @A -> B@ (MS4 phase 49b)
+  | ArrowCodomain Operand    -- ^ … its @B@
+  | AscriptionType Operand   -- ^ the @T@ of a surface @e : T@
+  | AscriptionTerm Operand   -- ^ … its @e@
+    -- ^ **Moves, not readers**: each answers with a 'VSurface' focused on that
+    -- part, so the path the zipper carries is extended rather than thrown away
+    -- (MS4 phase 46). A clause pairs each with the test that makes it total —
+    -- @when (surface-is-arrow t) then a = arrow-domain t@.
+    --
+    -- **They do not reuse the cursor's words.** @dom@ and @cod@ already move the
+    -- development's ambient cursor; these produce a value, and one word for two
+    -- different things is what @CLAUDE.md@'s /no confusions/ rules out.
+  | LetName Operand          -- ^ the @x@ of a surface @let x = v in b@, as text
+  | LetType Operand          -- ^ … its written annotation
+  | LetValue Operand         -- ^ … its @v@
+  | LetBody Operand          -- ^ … its @b@
+  | ForallName Operand       -- ^ the first binder's name in a surface @∀@
+  | ForallDomain Operand     -- ^ … that binder's annotation
+  | ForallTail Operand
+    -- ^ … what the @∀@ quantifies over once the first binder is peeled off:
+    -- the rest of the group if there was one, otherwise the body.
+  | Play Operand
+    -- ^ run the block a surface @do { … }@ holds (MS4 phase 49b).
+    --
+    -- **A block is written down and never computed**, so elaborating one is
+    -- playing it — the whole of @E⟦do { … }⟧@. It is an op and not a value a
+    -- body could hold, because 'Value' has no case for instructions and the
+    -- @do@ node keeps 'Thena.Syntax.Concrete.RawInstr' until something runs it.
   | SurfaceUniverseOf Operand
     -- ^ the universe a surface @Typeₙ@ denotes, as a term (MS4 phase 49).
     --
@@ -737,6 +765,17 @@ produces o = case o of
   ResolveName _  -> True
   SurfaceNameOf _ -> True
   SurfaceUniverseOf _ -> True
+  ArrowDomain _ -> True
+  LetName _ -> True
+  LetType _ -> True
+  LetValue _ -> True
+  LetBody _ -> True
+  ForallName _ -> True
+  ForallDomain _ -> True
+  ForallTail _ -> True
+  ArrowCodomain _ -> True
+  AscriptionType _ -> True
+  AscriptionTerm _ -> True
   Goal         -> True
   Typing _     -> True
   Define _ _   -> True   -- the variable it bound, as 'Assume' and 'Claim' do
@@ -750,6 +789,7 @@ produces o = case o of
   Down _       -> False
   Goto _       -> False   -- a move; it rewrites the cursor and yields nothing
   Back         -> False
+  Play _       -> False
   Attack       -> False
   Intro _      -> False
   Try _        -> False
@@ -804,6 +844,18 @@ operandsOf o = case o of
   ResolveName x  -> [x]
   SurfaceNameOf x -> [x]
   SurfaceUniverseOf x -> [x]
+  ArrowDomain x -> [x]
+  LetName x -> [x]
+  LetType x -> [x]
+  LetValue x -> [x]
+  LetBody x -> [x]
+  ForallName x -> [x]
+  ForallDomain x -> [x]
+  ForallTail x -> [x]
+  Play x -> [x]
+  ArrowCodomain x -> [x]
+  AscriptionType x -> [x]
+  AscriptionTerm x -> [x]
   Goal         -> []
   Typing a     -> [a]
   Define a b   -> [a, b]
@@ -906,6 +958,11 @@ data Test
   | SurfaceIsAscription Operand    -- ^ @e : T@
   | SurfaceIsElim Operand          -- ^ @elim D … t@
   | SurfaceIsDo Operand            -- ^ @do { … }@
+  | LetIsAnnotated Operand         -- ^ a @let@ whose type was written (49b)
+  | LetIsBare Operand              -- ^ … and one whose type was not
+    -- ^ **Two positive tests rather than one and its negation.** The head
+    -- language has no negation, and the two clauses of @E⟦let⟧@ differ by
+    -- whether there is an annotation to elaborate.
   deriving (Eq, Show)
 
 
@@ -983,6 +1040,18 @@ opKeyword o = case o of
   ResolveName _  -> "resolve-name"
   SurfaceNameOf _ -> "surface-name"
   SurfaceUniverseOf _ -> "surface-universe"
+  ArrowDomain _ -> "arrow-domain"
+  LetName _ -> "let-name"
+  LetType _ -> "let-type"
+  LetValue _ -> "let-value"
+  LetBody _ -> "let-body"
+  ForallName _ -> "forall-name"
+  ForallDomain _ -> "forall-domain"
+  ForallTail _ -> "forall-tail"
+  Play _ -> "play"
+  ArrowCodomain _ -> "arrow-codomain"
+  AscriptionType _ -> "ascription-type"
+  AscriptionTerm _ -> "ascription-term"
   Goal         -> "goal"
   Typing _     -> "typeof"
   Define _ _   -> "define"

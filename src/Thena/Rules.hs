@@ -278,6 +278,8 @@ holds env cur args t = case t of
   SurfaceIsAscription o   -> surfaceIs o isAscription
   SurfaceIsElim o         -> surfaceIs o isElim
   SurfaceIsDo o           -> surfaceIs o isDo
+  LetIsAnnotated o        -> surfaceIs o isAnnotatedLet
+  LetIsBare o             -> surfaceIs o isBareLet
   where
     -- Written down, then reduced: §8's "head matching runs whnf", because a
     -- goal typed @id Type₀ (Nat -> Nat)@ is a Π and must match.
@@ -309,6 +311,8 @@ holds env cur args t = case t of
     isAscription   s = case s of SurfaceAnnot _ _ -> True; _ -> False
     isElim         s = case s of SurfaceElim {} -> True; _ -> False
     isDo           s = case s of SurfaceDo _ -> True; _ -> False
+    isAnnotatedLet s = case s of SurfaceLet _ (Just _) _ _ -> True; _ -> False
+    isBareLet      s = case s of SurfaceLet _ Nothing _ _  -> True; _ -> False
 
 -- --------------------------------------------------------------------------
 -- Well-formedness (§2.4, §7.2)
@@ -600,6 +604,13 @@ operation g i (RawOp w as)
       , ("resolve-name", Op.ResolveName)
       , ("surface-name", Op.SurfaceNameOf)
       , ("surface-universe", Op.SurfaceUniverseOf)
+      , ("arrow-domain", Op.ArrowDomain), ("arrow-codomain", Op.ArrowCodomain)
+      , ("ascription-type", Op.AscriptionType)
+      , ("ascription-term", Op.AscriptionTerm)
+      , ("let-name", Op.LetName), ("let-type", Op.LetType)
+      , ("let-value", Op.LetValue), ("let-body", Op.LetBody)
+      , ("forall-name", Op.ForallName), ("forall-domain", Op.ForallDomain)
+      , ("forall-tail", Op.ForallTail), ("play", Op.Play)
       ]
     binary =
       [ ("assume", Assume), ("claim", Claim), ("define", Define)
@@ -670,6 +681,8 @@ withOperands t os = case (t, os) of
   (SurfaceIsAscription _, [o])   -> Just (SurfaceIsAscription o)
   (SurfaceIsElim _, [o])         -> Just (SurfaceIsElim o)
   (SurfaceIsDo _, [o])           -> Just (SurfaceIsDo o)
+  (LetIsAnnotated _, [o])        -> Just (LetIsAnnotated o)
+  (LetIsBare _, [o])             -> Just (LetIsBare o)
   _                      -> Nothing
 
 -- | What a test was written with, in written order. 'Thena.Ops.operandsOf'\'s
@@ -694,6 +707,8 @@ testOperands t = case t of
   SurfaceIsAscription o   -> [o]
   SurfaceIsElim o         -> [o]
   SurfaceIsDo o           -> [o]
+  LetIsAnnotated o        -> [o]
+  LetIsBare o             -> [o]
 
 -- | The word a 'Test' is written with. Total, so @-Wall@ makes a new test say
 -- how it is spelled — 'Thena.Ops.opKeyword'\'s trick, one type over.
@@ -720,6 +735,8 @@ testWord t = case t of
   SurfaceIsAscription _   -> "surface-is-ascription"
   SurfaceIsElim _         -> "surface-is-elim"
   SurfaceIsDo _           -> "surface-is-do"
+  LetIsAnnotated _        -> "let-is-annotated"
+  LetIsBare _             -> "let-is-bare"
 
 -- | Every test there is. A list and not a case split, so it cannot be total —
 -- 'testWord' is what @-Wall@ guards, and "Thena.RuleSyntaxTests" checks this
@@ -743,4 +760,6 @@ everyTest =
   , SurfaceIsAscription (Lit (VText ""))
   , SurfaceIsElim (Lit (VText ""))
   , SurfaceIsDo (Lit (VText ""))
+  , LetIsAnnotated (Lit (VText ""))
+  , LetIsBare (Lit (VText ""))
   ]

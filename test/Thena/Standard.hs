@@ -199,29 +199,111 @@ elaborateClauses =
   [ clause SurfaceIsName
       [ Bind "w" (Op.SurfaceNameOf (Ref "t"))
       , Bind "x" (Op.ResolveName (Ref "w"))
-      , Do (Call (GlobalName "fill") [Ref "x"])
-      , Do (Call (GlobalName "solve") [])
+      , call "fill" [Ref "x"], call "solve" []
       ]
   , clause SurfaceIsUniverse
       [ Bind "u" (Op.SurfaceUniverseOf (Ref "t"))
-      , Do (Call (GlobalName "fill") [Ref "u"])
-      , Do (Call (GlobalName "solve") [])
+      , call "fill" [Ref "u"], call "solve" []
       ]
   , clause SurfaceIsUniverseOpen
       [ Bind "u" Op.FreshUniverse
-      , Do (Call (GlobalName "fill") [Ref "u"])
-      , Do (Call (GlobalName "solve") [])
+      , call "fill" [Ref "u"], call "solve" []
       ]
-    -- **Two empty bodies**, which the rule grammar did not admit before this
-    -- phase: @E⟦_⟧@ /is/ do nothing, and a clause that does nothing is a
-    -- different answer from a clause that does not match.
+    -- **Two empty bodies**, which the rule grammar did not admit before phase
+    -- 49: @E⟦_⟧@ /is/ do nothing, and a clause that does nothing is a different
+    -- answer from a clause that does not match.
   , clause SurfaceIsPlaceholder []
   , clause SurfaceIsHole []
+    -- Still in Haskell, behind @prim-elaborate@: the three cases that iterate —
+    -- a λ over its binder group, an application over its arguments against the
+    -- head's plicities, an @elim@ over its fields. The rule language has no
+    -- lists (MS4 phase 49b).
+  , clause SurfaceIsApp [Do (Op.Elaborate (Ref "t"))]
+  , clause SurfaceIsLambda [Do (Op.Elaborate (Ref "t"))]
+    -- **The parts are read before the development is touched**, so a binder
+    -- with no type fails without having claimed or quantified anything.
+  , clause SurfaceIsForall
+      [ Bind "x" (Op.ForallName (Ref "t"))
+      , Bind "ty" (Op.ForallDomain (Ref "t"))
+      , Bind "tl" (Op.ForallTail (Ref "t"))
+      , Bind "h" Here
+      , Bind "dn" (FreshName (Lit (VText "A")))
+      , Bind "u" Op.FreshUniverse
+      , Bind "d" (Claim (Ref "dn") (Ref "u"))
+      , Do Attack
+      , Do (Op.Quantify (Ref "x") (Ref "d"))
+      , Do Into, Do Along
+      , Bind "c" Here
+      , Do (Goto (Ref "d"))
+      , call "elaborate" [Ref "ty"]
+      , Do (Goto (Ref "c"))
+      , call "elaborate" [Ref "tl"]
+      , Do (Goto (Ref "h")), call "solve" []
+      ]
+  , clause SurfaceIsArrow
+      [ Bind "h" Here
+      , Bind "dn" (FreshName (Lit (VText "A")))
+      , Bind "u1" Op.FreshUniverse
+      , Bind "d" (Claim (Ref "dn") (Ref "u1"))
+      , Bind "cn" (FreshName (Lit (VText "B")))
+      , Bind "u2" Op.FreshUniverse
+      , Bind "c" (Claim (Ref "cn") (Ref "u2"))
+      , Bind "ar" (Arrow (Ref "d") (Ref "c"))
+      , call "fill" [Ref "ar"]
+      , Do (Goto (Ref "d"))
+      , Bind "a" (Op.ArrowDomain (Ref "t"))
+      , call "elaborate" [Ref "a"]
+      , Do (Goto (Ref "c"))
+      , Bind "b" (Op.ArrowCodomain (Ref "t"))
+      , call "elaborate" [Ref "b"]
+      , Do (Goto (Ref "h")), call "solve" []
+      ]
+    -- **Two clauses for @let@**, because the annotation is optional and the
+    -- head language has no negation.
+  , Rule (GlobalName "elaborate") ["t"] [FocusIsHole, LetIsAnnotated (Ref "t")]
+      (letPrelude ++
+        [ Do (Goto (Ref "x"))
+        , Bind "ty" (Op.LetType (Ref "t"))
+        , call "elaborate" [Ref "ty"]
+        ] ++ letBody)
+  , Rule (GlobalName "elaborate") ["t"] [FocusIsHole, LetIsBare (Ref "t")]
+      (letPrelude ++ letBody)
+  , clause SurfaceIsAscription
+      [ Bind "h" Here
+      , Bind "xn" (FreshName (Lit (VText "X")))
+      , Bind "u" Op.FreshUniverse
+      , Bind "x" (Claim (Ref "xn") (Ref "u"))
+      , Do (Goto (Ref "x"))
+      , Bind "ty" (Op.AscriptionType (Ref "t"))
+      , call "elaborate" [Ref "ty"]
+      , Do (Goto (Ref "h"))
+      , Bind "g" Goal
+      , Do (Op.UnifyInto (Ref "x") (Ref "g"))
+      , Bind "e" (Op.AscriptionTerm (Ref "t"))
+      , call "elaborate" [Ref "e"]
+      ]
+  , clause SurfaceIsElim [Do (Op.Elaborate (Ref "t"))]
+  , clause SurfaceIsDo [Do (Op.Play (Ref "t"))]
   ]
-    ++ [ clause t [Do (Op.Elaborate (Ref "t"))]
-       | t <- [ SurfaceIsApp, SurfaceIsLambda, SurfaceIsForall, SurfaceIsArrow
-              , SurfaceIsLet, SurfaceIsAscription, SurfaceIsElim, SurfaceIsDo
-              ]
-       ]
   where
     clause test = Rule (GlobalName "elaborate") ["t"] [FocusIsHole, test (Ref "t")]
+    call nm as = Do (Call (GlobalName nm) as)
+
+    letPrelude =
+      [ Bind "h" Here
+      , Bind "xn" (FreshName (Lit (VText "X")))
+      , Bind "u" Op.FreshUniverse
+      , Bind "x" (Claim (Ref "xn") (Ref "u"))
+      , Bind "vn" (FreshName (Lit (VText "V")))
+      , Bind "v" (Claim (Ref "vn") (Ref "x"))
+      ]
+    letBody =
+      [ Do (Goto (Ref "v"))
+      , Bind "val" (Op.LetValue (Ref "t"))
+      , Do (Call (GlobalName "elaborate") [Ref "val"])
+      , Do (Goto (Ref "h"))
+      , Bind "w" (Op.LetName (Ref "t"))
+      , Do (Define (Ref "w") (Ref "v"))
+      , Bind "b" (Op.LetBody (Ref "t"))
+      , Do (Call (GlobalName "elaborate") [Ref "b"])
+      ]

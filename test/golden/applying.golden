@@ -26,6 +26,7 @@ elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
+elaborate ‹t›
 thena spine> apply-core ⌜ Just ⌝
 solved: A
 thena spine> :show

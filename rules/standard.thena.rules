@@ -75,9 +75,109 @@ rule elaborate t :- when focus-is-hole (surface-is-hole t) then
 -- into the rule language changes this file and nothing else.
 rule elaborate t :- when focus-is-hole (surface-is-app t)        then prim-elaborate t
 rule elaborate t :- when focus-is-hole (surface-is-lambda t)     then prim-elaborate t
-rule elaborate t :- when focus-is-hole (surface-is-forall t)     then prim-elaborate t
-rule elaborate t :- when focus-is-hole (surface-is-arrow t)      then prim-elaborate t
-rule elaborate t :- when focus-is-hole (surface-is-let t)        then prim-elaborate t
-rule elaborate t :- when focus-is-hole (surface-is-ascription t) then prim-elaborate t
+-- E⟦(x : t) -> e⟧ = ATTACK; CLAIM (X : Type); PI (x : X); FOCUS X; E⟦t⟧; E⟦e⟧;
+-- SOLVE. One binder per clause and a group nests: the domain hole is claimed
+-- outside the attack, where an earlier binder of the same group is not in
+-- scope. The domain is elaborated before the body — Brady's order, and not a
+-- preference: the other way round the body's FILL solves the domain hole.
+rule elaborate t :- when focus-is-hole (surface-is-forall t)
+  then x  = forall-name t
+     ; ty = forall-domain t
+     ; tl = forall-tail t
+     ; h  = here
+     ; dn = fresh-name "A"
+     ; u  = fresh-universe
+     ; d  = claim dn u
+     ; prim-attack
+     ; quantify x d
+     ; into
+     ; along
+     ; c  = here
+     ; goto d
+     ; call elaborate ty
+     ; goto c
+     ; call elaborate tl
+     ; goto h
+     ; solve
+-- E⟦A -> B⟧ — the application case's shape with `arrow` where that has
+-- `apply-to`. Not the ∀ case with an anonymous binder: an arrow's codomain
+-- cannot mention the domain, so there is nothing to put in Γ and no attack.
+rule elaborate t :- when focus-is-hole (surface-is-arrow t)
+  then h  = here
+     ; dn = fresh-name "A"
+     ; u1 = fresh-universe
+     ; d  = claim dn u1
+     ; cn = fresh-name "B"
+     ; u2 = fresh-universe
+     ; c  = claim cn u2
+     ; ar = arrow d c
+     ; fill ar
+     ; goto d
+     ; a  = arrow-domain t
+     ; call elaborate a
+     ; goto c
+     ; b  = arrow-codomain t
+     ; call elaborate b
+     ; goto h
+     ; solve
+-- E⟦let x = v in e⟧ — `define` is Brady's LET, and there is no attack and no
+-- solve: his LET acts on the goal, ours writes a component above the focus, so
+-- the body elaborates into the hole this clause was called at.
+--
+-- Two clauses, because the annotation is optional and the head language has no
+-- negation. With one, X is left for the value's own FILL to unify against.
+rule elaborate t :- when focus-is-hole (let-is-annotated t)
+  then h  = here
+     ; xn = fresh-name "X"
+     ; u  = fresh-universe
+     ; x  = claim xn u
+     ; vn = fresh-name "V"
+     ; v  = claim vn x
+     ; goto x
+     ; ty = let-type t
+     ; call elaborate ty
+     ; goto v
+     ; val = let-value t
+     ; call elaborate val
+     ; goto h
+     ; w  = let-name t
+     ; define w v
+     ; b  = let-body t
+     ; call elaborate b
+
+rule elaborate t :- when focus-is-hole (let-is-bare t)
+  then h  = here
+     ; xn = fresh-name "X"
+     ; u  = fresh-universe
+     ; x  = claim xn u
+     ; vn = fresh-name "V"
+     ; v  = claim vn x
+     ; goto v
+     ; val = let-value t
+     ; call elaborate val
+     ; goto h
+     ; w  = let-name t
+     ; define w v
+     ; b  = let-body t
+     ; call elaborate b
+-- E⟦e : T⟧ — claim X : Type, elaborate T into it, unify X with the goal, then
+-- elaborate e at the same hole. An ascription does not build a term; it narrows
+-- the one the goal was already asking for, so there is no fill and no solve.
+rule elaborate t :- when focus-is-hole (surface-is-ascription t)
+  then h  = here
+     ; xn = fresh-name "X"
+     ; u  = fresh-universe
+     ; x  = claim xn u
+     ; goto x
+     ; ty = ascription-type t
+     ; call elaborate ty
+     ; goto h
+     ; g  = goal
+     ; unify-into x g
+     ; e  = ascription-term t
+     ; call elaborate e
 rule elaborate t :- when focus-is-hole (surface-is-elim t)       then prim-elaborate t
-rule elaborate t :- when focus-is-hole (surface-is-do t)         then prim-elaborate t
+-- E⟦do { … }⟧ = play the block. It leaves the focus wherever the block left
+-- it, which is the one way it differs from every other clause: the block does
+-- what the user wrote, and repairing it is theirs.
+rule elaborate t :- when focus-is-hole (surface-is-do t) then play t
