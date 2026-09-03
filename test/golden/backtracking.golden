@@ -47,4 +47,26 @@ thena spine> :choices
 thena spine> retry
 retrying 7: prove
 chose 10: intro
+thena spine> :abandon
+abandoned id
+thena spine> :theorem gone : Type₁
+proving gone : Type₁
+thena spine> :choices
+no choice points
+thena spine> prove
+chose 15: attack
+thena spine> :choices
+15  attack   untried: abandon, prove
+thena spine> :suspend
+suspended gone
+thena spine> :theorem lemma : Type₁
+proving lemma : Type₁
+thena spine> :choices
+no choice points
+thena spine> :abandon
+abandoned lemma
+thena spine> :resume gone
+resumed gone
+thena spine> :choices
+15  attack   untried: abandon, prove
 thena spine> :quit

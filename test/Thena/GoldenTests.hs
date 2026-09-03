@@ -228,6 +228,26 @@ tests =
         , ":show"
         , ":choices"
         , "retry"
+          -- **A proof boundary discards choice points** — his ruling,
+          -- 2026-09-03, @ms4/CLOSEOUT.md@ 29. §7.7 keeps the frame after
+          -- success so an untried alternative is still there to @retry@ into;
+          -- what it did not intend was that the frame outlive the *proof*, so
+          -- that a later unrelated failure would unwind into it and restore a
+          -- finished proof's development.
+        , ":abandon"
+        , ":theorem gone : Type\8321"
+        , ":choices"
+          -- **And a suspended proof keeps its own**, which is what makes going
+          -- away to prove a side lemma safe: `:suspend` snapshots before it
+          -- clears, and a snapshot is @(Exec, Development, [Development])@.
+        , "prove"
+        , ":choices"
+        , ":suspend"
+        , ":theorem lemma : Type\8321"
+        , ":choices"
+        , ":abandon"
+        , ":resume gone"
+        , ":choices"
         , ":quit"
         ]
       -- Elaboration (phase 17b). @prove ‹hint›@ is the same engine and the same

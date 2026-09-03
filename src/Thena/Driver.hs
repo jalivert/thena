@@ -283,6 +283,29 @@ data Parked = Parked
   }
   deriving (Eq, Show)
 
+-- | Put the machine at rest: no tape, no environment and **no frames**.
+--
+-- **A proof boundary discards choice points — HIS RULING, 2026-09-03**
+-- (@ms4/CLOSEOUT.md@ 29). §7.7 keeps a @Choice@ frame after success on purpose,
+-- so that an alternative nobody needed is still there to @retry@ into; what it
+-- did not intend is that the frame outlive the *proof*. A later, unrelated
+-- command that failed would unwind into it and **restore the development of a
+-- proof that was already finished** — silently replacing the one being worked
+-- on, which is data loss rather than a strange thing a user did.
+--
+-- **The four boundaries are `:theorem`, @qed@, `:abandon` and `:suspend`**, and
+-- they go through this one function so they cannot come to disagree —
+-- `:abandon` and `:suspend` already emptied the exec and the other two did not,
+-- which is exactly how the defect got in.
+--
+-- **`:suspend` is why this does not break proving a side lemma.** It snapshots
+-- /before/ clearing, and a 'Snapshot' is @(Exec, Development, [Development])@ —
+-- so a parked attempt keeps its own frames and `:resume` hands them back. Going
+-- away to prove a lemma and coming back is unaffected; only what a *finished*
+-- proof left behind is dropped.
+atRest :: Machine -> Machine
+atRest m = m { exec = Exec [] [] [] }
+
 -- | The attempt being worked on, if there is one.
 currentAttempt :: Session -> Maybe Attempt
 currentAttempt s = case sessionWork s of
@@ -1279,7 +1302,7 @@ dispatch s name arg = case name of
 
     started g ty n =
       let (dev, n1) = newDevelopmentNamed g ty n
-       in ( s { sessionMachine = machine { development = dev, names = n1 }
+       in ( s { sessionMachine = atRest machine { development = dev, names = n1 }
               , sessionWork    = Attempting (Attempt g ty [])
               }
           , Proving g ty
@@ -1341,7 +1364,7 @@ dispatch s name arg = case name of
       let g  = addDefinition (attemptName att) d (globals m)
           (ps, n) = newDevelopment n1
       Right
-        ( s' { sessionMachine = m { globals = g, development = ps, names = n }
+        ( s' { sessionMachine = atRest m { globals = g, development = ps, names = n }
              , sessionWork = Scratch
              }
         , definitionLevels d
@@ -1370,7 +1393,7 @@ dispatch s name arg = case name of
     -- return.
     cleared =
       let (ps, n) = newDevelopment (names machine)
-       in s { sessionMachine = machine { development = ps, names = n, exec = Exec [] [] [] }
+       in s { sessionMachine = atRest machine { development = ps, names = n }
             , sessionWork = Scratch
             }
 
