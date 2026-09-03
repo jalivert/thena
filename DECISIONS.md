@@ -325,7 +325,95 @@ A tactic that needs a name *nobody* has still asks for one, with `fresh-name`.
 
 ## Tactics and the rule engine
 
-*Nothing recorded yet.*
+### A rule's head may ask about what the rule was called with
+
+*Decided 2026-09-03.*
+
+A head used to ask only about the focus — is it a hole, does its type reduce to
+a Π. So two clauses of one name and one arity could not be told apart, and the
+first always won. A test may now take operands, and it is written in
+parentheses:
+
+```
+rule pick s :- when focus-is-hole (surface-is-name s) then say "a name"
+rule pick s :- when focus-is-hole                     then say "not a name"
+```
+
+```
+thena spine> pick foo
+a name
+thena spine> pick (Type₀ -> Type₀)
+not a name
+```
+
+**A bare word is a test of no operands**, and that is why the brackets are
+there: a head is a run of tests with nothing between them, so
+`when focus-is-hole surface-is-name t` would read as one test applied to two
+words. It is the ambiguity a REPL argument run has, answered the same way.
+
+A head may name **only the rule's own parameters** — it runs before the body, so
+there is no earlier binding for a name to have come from, and
+`when (surface-is-name q)` on a rule that has no `q` is refused when the base is
+loaded. A test asked about an argument nobody supplied — which is what `:matches`
+does, since it calls nothing — does not rule the clause out.
+
+**There are no parameter kinds.** A test that asks a surface question of a core
+term is simply false: the clause does not match, and nothing tells you why. That
+is what a Prolog head does, and it is the same bargain the instruction language
+already strikes for operands.
+
+### `unify-refine` is `fill` then `solve`
+
+*Decided 2026-09-03.*
+
+McBride's tactic is now written as the two halves it always had:
+
+```
+rule fill-core t :- when focus-is-hole
+  then n = fresh-name "refined" ; x = define n t
+     ; s = typeof x ; g = goal ; unify-into s g ; prim-try x
+
+rule unify-refine-core t :- when focus-is-hole then fill-core t ; solve
+```
+
+`fill-core ⌜ t ⌝` parks `t` in a `=`-binding, unifies its type with the goal's
+and attaches it as a **guess**; `solve` discharges the guess. Both are callable
+on their own, which is the point — elaboration has to get in between the two to
+elaborate a term's parts once its shape is known.
+
+**And it fixed a real difference.** `fill` asks `unify-into` where the rule used
+to ask `unify`, so cumulativity now reaches the hand-driven tactic:
+
+```
+thena spine> :theorem lower : Type₂
+thena spine> unify-refine-core ⌜ Type₀ ⌝
+already equal
+```
+
+That said *"Type₁ and Type₂ are different universes"* before. The term's type
+need only be **usable** where the goal is wanted, and the check on the next line
+subsumes anyway — so what the unification there is for is solving, not deciding.
+Elaboration had been given the directed version already; the tactic had not, and
+the same operation answered differently depending on which one you reached it
+through.
+
+### Two ops a rule needs that it cannot write down
+
+*Decided 2026-09-03.*
+
+`fresh-universe` is a universe at a **fresh level meta** — what the surface
+writes as a bare `Type`. A rule cannot write it as a literal, because the whole
+point of the meta is that it is new at every use.
+
+`resolve-name ‹text›` is what a name denotes: the context at the focus first,
+then the globals, with a definition's level arguments inserted.
+
+```
+thena spine> do { z = resolve-name "zero" ; fill-core z ; solve }
+```
+
+Both exist because they are what elaboration actually puts in an operand —
+every other term a rule handles comes from an op or from its caller.
 
 ---
 

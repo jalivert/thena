@@ -11,6 +11,7 @@ abandon
 eliminate-core ‹t›
 prove
 elaborate ‹t›
+fill-core ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
 thena spine> apply-core ⌜ Just ⌝

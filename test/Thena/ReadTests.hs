@@ -11,9 +11,9 @@ module Thena.ReadTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Level (Level (..), levelOfNat)
+import Thena.Core.Level (Level (..), LevelVar (..), levelOfNat)
 import Thena.Core.Context (Entry (..))
-import Thena.Core.Term (Core (..), Ident (..), Var, close, fresh)
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Var, close, fresh)
 import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor
   (Cursor, Focus (..), along, context, enter, focus, identsIn, rebuild)
@@ -37,7 +37,7 @@ tests :: TestTree
 tests =
   testGroup
     "reading the development (§7.2)"
-    [goalTests, typeofTests, defineTests, gotoTests]
+    [goalTests, typeofTests, defineTests, gotoTests, universeTests, resolveTests]
 
 type0 :: Core
 type0 = Universe (LZero)
@@ -325,3 +325,64 @@ gotoTests =
           Left (CannotMove NoSuchHole) -> pure ()
           other -> assertFailure ("expected NoSuchHole, got " ++ show (fmap (const ()) other))
     ]
+
+-- --------------------------------------------------------------------------
+-- The two ops the elaborator's own operands asked for (MS4 phase 48)
+-- --------------------------------------------------------------------------
+
+-- | @fresh-universe@ — the surface's bare @Type@, at an operand.
+--
+-- Seven of "Thena.Elaborate"\'s nine @Lit (VTerm …)@ operands are this, and
+-- **it is the one a rule cannot write down**: the point of the meta is that it
+-- is fresh at every node.
+universeTests :: TestTree
+universeTests =
+  testGroup
+    "fresh-universe"
+    [ testCase "is a universe at a meta drawn from the counter" $ do
+        v <- expectBound hole [Bind "u" FreshUniverse] "u"
+        v @?= VTerm (Trailing (Universe (LVar (LMeta 1000))))
+
+    , testCase "and each one is its own" $ do
+        m <- expectRun hole [Bind "a" FreshUniverse, Bind "b" FreshUniverse]
+        (bound "a" m == bound "b" m) @?= False
+    ]
+
+-- | @resolve-name@ — Γ first, then the globals, with level arguments inserted.
+resolveTests :: TestTree
+resolveTests =
+  testGroup
+    "resolve-name"
+    [ testCase "a declared constructor is a global" $ do
+        v <- expectBoundIn nat hole [Bind "z" (ResolveName (Lit (VText "zero")))] "z"
+        v @?= VTerm (Trailing (Global (GlobalName "zero") []))
+
+      -- §3.6's one namespace: a binder shadows a global of the same name, and
+      -- this is the order "Thena.Syntax.Resolve" uses for the same reason. The
+      -- assumption is written with the constructor's own name, which phase 41f
+      -- made legal — a name is used as given.
+    , testCase "a local shadows a global of the same name" $ do
+        v <- expectBoundIn nat hole
+               [ Do (Assume (Lit (VText "zero")) (Lit (VTerm (Trailing type0))))
+               , Bind "z" (ResolveName (Lit (VText "zero")))
+               ] "z"
+        case v of
+          VTerm (Trailing (Free _)) -> pure ()
+          other -> assertFailure ("expected a local, got " ++ show other)
+
+    , testCase "a name nothing bears does not resolve" $
+        case runIn nat hole [Do (ResolveName (Lit (VText "nope")))] of
+          Left (CannotRead _) -> pure ()
+          other -> assertFailure ("expected CannotRead, got " ++ show (fmap (const ()) other))
+    ]
+
+runIn :: GlobalEnv -> Cursor -> [Instr] -> Either FailReason Machine
+runIn env' cur is = go (machineIn env' cur is)
+
+expectRun :: Cursor -> [Instr] -> IO Machine
+expectRun cur is = either (assertFailure . ("did not run: " ++) . show) pure (run cur is)
+
+expectBoundIn :: GlobalEnv -> Cursor -> [Instr] -> String -> IO Value
+expectBoundIn env' cur is n = case runIn env' cur is of
+  Left r  -> assertFailure ("did not run: " ++ show r)
+  Right m -> maybe (assertFailure (n ++ " is unbound")) pure (bound n m)

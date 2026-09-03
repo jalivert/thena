@@ -45,9 +45,10 @@ module Thena.Engine
   ) where
 
 import Data.List (intercalate, nub)
+import Data.Maybe (listToMaybe)
 
 import Thena.Core.Level (Level (..), freshLevelMeta, levelVarName)
-import Thena.Core.Context (Context, Entry (..))
+import Thena.Core.Context (Context, Entry (..), entryIdent, entryVar)
 import Thena.Core.Term
   ( Core (..)
   , close
@@ -84,7 +85,14 @@ import Thena.Development.Cursor
   )
 import qualified Thena.Development.Cursor as Cursor
 import Thena.Development.Partial (Impure (..), Partial (..), extract)
-import Thena.Errors (FailReason (..), MoveError (..), Position (..), TypeError (..))
+import Thena.Errors
+  ( FailReason (..)
+  , MoveError (..)
+  , Position (..)
+  , ResolveError (..)
+  , SyntaxError (..)
+  , TypeError (..)
+  )
 import Thena.Surface.Concrete (Plicity (..))
 import Thena.Ops
   ( AnswerKind
@@ -100,6 +108,9 @@ import Thena.Global.Env
   ( GlobalEnv
   , InductiveDefinition
   , declaredNames
+  , definitionLevels
+  , isDeclared
+  , lookupDefinition
   , eliminatorType
   , inductiveConstructors
   , inductiveIndices
@@ -1024,6 +1035,37 @@ perform instr rest m = case operation instr of
     Left r         -> failure r m
     Right (f', x') -> produce (VTerm (Trailing (App f' x'))) m
 
+  -- **A universe at a fresh level meta** (MS4 phase 48) — the surface's bare
+  -- @Type@, at an operand. Typical ambiguity (phase 33) is what makes this the
+  -- right shape: nothing is known about the level yet, and unification decides
+  -- it.
+  FreshUniverse ->
+    let (l, n1) = freshLevelMeta (names m)
+     in produce (VTerm (Trailing (Universe (LVar l)))) m { names = n1 }
+
+  -- **What a name denotes, Γ first and then the globals, with a definition's
+  -- level arguments inserted** (MS4 phase 48).
+  --
+  -- The same walk "Thena.Elaborate"\'s @resolveName@ does, and deliberately the
+  -- same order "Thena.Syntax.Resolve" uses — a binder shadows a global of the
+  -- same name, which is what one namespace (§3.6) requires.
+  ResolveName x -> case operandText (env (exec m)) x of
+    Left r  -> failure r m
+    Right w -> case inScopeAt w of
+      Just v  -> produce (VTerm (Trailing (Free v))) m
+      Nothing -> case lookupDefinition (GlobalName w) (globals m) of
+        Just d ->
+          let (ls, n1) = levelArgsFor (length (definitionLevels d)) (names m)
+           in produce (VTerm (Trailing (Global (GlobalName w) ls))) m { names = n1 }
+        Nothing
+          | isDeclared (GlobalName w) (globals m) ->
+              produce (VTerm (Trailing (Global (GlobalName w) []))) m
+          | otherwise ->
+              failure (CannotRead (ResolveFailed (NotInScope w))) m
+    where
+      inScopeAt w =
+        listToMaybe [ entryVar e | e <- contextAt, entryIdent e == Ident w ]
+
   Goal -> case Cursor.expectedType (cursor (development m)) of
     Just t  -> produce (VTerm (Trailing t)) m
     Nothing -> failure NoGoalHere m
@@ -1355,6 +1397,16 @@ orphanMessage is = "reduced; now unreachable: " ++ intercalate ", " (map identSt
 
 -- | 'Thena.Ops.operandIn', with an unbound name read as a body's fatal error.
 -- A head reads the same failure differently — see 'Thena.Rules.holds'.
+-- | One fresh level meta per prenex parameter (MS4 phase 48). The same
+-- recursion "Thena.Elaborate" does at a use site, which is where his /"we have
+-- them implicitly inserted"/ was first built.
+levelArgsFor :: Int -> Int -> ([Level], Int)
+levelArgsFor k n = case k of
+  0 -> ([], n)
+  _ -> let (l, n1)  = freshLevelMeta n
+           (ls, n2) = levelArgsFor (k - 1) n1
+        in (LVar l : ls, n2)
+
 operandValue :: Env -> Operand -> Either FailReason Value
 operandValue e o = either (Left . UnboundInBody) Right (Op.operandIn e o)
 

@@ -31,61 +31,68 @@ thena spine> :goal Type₀
 thena spine> :step on
 thena spine> unify-refine-core ⌜ A ⌝
 pc
+  0  call fill-core t
+  1  call solve
+env
+  t = ⌜A⌝
+stack
+  call, 0 instruction(s) to resume
+thena spine> :step
+pc
   0  n = fresh-name "refined"
   1  x = define n t
   2  s = typeof x
   3  g = goal
-  4  unify s ≟ g
+  4  unify-into s g
   5  prim-try x
-  6  prim-solve
 env
   t = ⌜A⌝
 stack
+  call, 1 instruction(s) to resume
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
   0  x = define n t
   1  s = typeof x
   2  g = goal
-  3  unify s ≟ g
+  3  unify-into s g
   4  prim-try x
-  5  prim-solve
 env
   n = "refined"
   t = ⌜A⌝
 stack
+  call, 1 instruction(s) to resume
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
   0  s = typeof x
   1  g = goal
-  2  unify s ≟ g
+  2  unify-into s g
   3  prim-try x
-  4  prim-solve
 env
   x = ⌜refined⌝
   n = "refined"
   t = ⌜A⌝
 stack
+  call, 1 instruction(s) to resume
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
   0  g = goal
-  1  unify s ≟ g
+  1  unify-into s g
   2  prim-try x
-  3  prim-solve
 env
   s = ⌜Type₀⌝
   x = ⌜refined⌝
   n = "refined"
   t = ⌜A⌝
 stack
+  call, 1 instruction(s) to resume
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  0  unify s ≟ g
+  0  unify-into s g
   1  prim-try x
-  2  prim-solve
 env
   g = ⌜Type₀⌝
   s = ⌜Type₀⌝
@@ -93,19 +100,7 @@ env
   n = "refined"
   t = ⌜A⌝
 stack
-  call, 0 instruction(s) to resume
-thena spine> :step
-already equal
-pc
-  0  prim-try x
-  1  prim-solve
-env
-  g = ⌜Type₀⌝
-  s = ⌜Type₀⌝
-  x = ⌜refined⌝
-  n = "refined"
-  t = ⌜A⌝
-stack
+  call, 1 instruction(s) to resume
   call, 0 instruction(s) to resume
 thena spine> :step off
 thena spine> :show

@@ -332,6 +332,34 @@ data Op
     --
     -- It yields the variable as a term, @Trailing (Free x)@, which is the shape
     -- @goto@ already reads.
+  | FreshUniverse
+    -- ^ a universe at a **freshly minted level meta** (MS4 phase 48) — what
+    -- the surface writes as a bare @Type@, and what typical ambiguity means at
+    -- an operand.
+    --
+    -- **It is the literal the elaborator does not write.** Seven of
+    -- "Thena.Elaborate"\'s nine @Lit (VTerm …)@ operands are a @Universe@ at a
+    -- level drawn from the counter — the type a claimed domain, codomain or
+    -- ascription is claimed at, before anything is known about it. A rule
+    -- cannot write that down: the point of the meta is that it is fresh at
+    -- every node.
+    --
+    -- Yielded as a term, not as a level: 'Value' has no level case, and
+    -- @Universe@ is the only place the elaborator puts one.
+  | ResolveName Operand
+    -- ^ what a name denotes, with its level arguments inserted (MS4 phase 48).
+    -- The other two of those nine operands.
+    --
+    -- **Γ first, then the globals**, which is what one namespace (§3.6)
+    -- requires and the order "Thena.Syntax.Resolve" uses: a binder shadows a
+    -- global of the same name. A definition's prenex level parameters each get
+    -- a fresh meta, which is his /"obviously we have them implicitly
+    -- inserted"/ (MS4 phase 44) arriving at an op.
+    --
+    -- **Not @Op.Resolve@ come back.** That took a 'Thena.Syntax.Concrete.Raw'
+    -- and resolved it in Γ, and phase 41 deleted it with the rest of the hint
+    -- machinery. This takes a /name/ and answers with level arguments already
+    -- in place, which is the question elaboration actually asks.
   | Goal
     -- ^ the type the focused hole is claimed at (§7.2, phase 24). **The first
     -- op that reads the development** — §7.2's sketch called it @GoalType@ and
@@ -692,6 +720,8 @@ produces o = case o of
   Here         -> True
   Arrow _ _    -> True
   ApplyTo _ _  -> True
+  FreshUniverse  -> True
+  ResolveName _  -> True
   Goal         -> True
   Typing _     -> True
   Define _ _   -> True   -- the variable it bound, as 'Assume' and 'Claim' do
@@ -755,6 +785,8 @@ operandsOf o = case o of
   Here         -> []
   Arrow a b    -> [a, b]
   ApplyTo a b  -> [a, b]
+  FreshUniverse  -> []
+  ResolveName x  -> [x]
   Goal         -> []
   Typing a     -> [a]
   Define a b   -> [a, b]
@@ -911,6 +943,8 @@ opKeyword o = case o of
   Here         -> "here"
   Arrow _ _    -> "arrow"
   ApplyTo _ _  -> "apply-to"
+  FreshUniverse  -> "fresh-universe"
+  ResolveName _  -> "resolve-name"
   Goal         -> "goal"
   Typing _     -> "typeof"
   Define _ _   -> "define"

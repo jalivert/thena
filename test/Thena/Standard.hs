@@ -75,25 +75,46 @@ expectedStandard =
   , proveRule
   , proveGuess
   , elaborateRule
+  , fillRule
   , unifyRefine
   , applyRule
+  ]
+
+-- | Brady's @FILL@ — **his request, 2026-09-01** (MS4 phase 48):
+-- /"Can you maybe add two new tactics @fill@ and @solve@ and define
+-- @unify-refine@ with them instead of just replacing @unify-refine@? It is
+-- Conor's tactic and I would like to keep it."/
+--
+-- The @=@-binding is the load-bearing part: the term being refined with does
+-- not yet have the goal's type, so it is parked in a definition until
+-- unification makes the two converge, and only then attached.
+--
+-- **@unify-into@ and not @unify@**, which is where this rule and
+-- "Thena.Elaborate"\'s inline @fill@ had come apart. Phase 41g gave the
+-- elaborator the directed sibling — the term's type need only be /usable/
+-- where the goal is wanted, and @prim-try@ on the next line does the real
+-- check — and left this rule symmetric, so the same operation answered
+-- differently depending on which one you reached it through.
+fillRule :: Rule
+fillRule = Rule (GlobalName "fill-core") ["t"] [FocusIsHole]
+  [ Bind "n" (FreshName (Lit (VText "refined")))
+  , Bind "x" (Define (Ref "n") (Ref "t"))
+  , Bind "s" (Typing (Ref "x"))
+  , Bind "g" Goal
+  , Do (Op.UnifyInto (Ref "s") (Ref "g"))
+  , Do (Try (Ref "x"))
   ]
 
 -- | Thesis §2.7's two-phase tactic, less the claiming half (which is phase
 -- 25's @apply@) and the arity search (phase 27's @fit@).
 --
--- The @=@-binding is the load-bearing part: the term being refined with does
--- not yet have the goal's type, so it is parked in a definition until
--- unification makes the two converge, and only then filled in.
+-- **Two calls, and that is the whole rule now** (MS4 phase 48): fill, then
+-- discharge. It calls the /rules/ and not the primitives, so the seam Brady
+-- needs — @FILL@, the two @FOCUS@es, @SOLVE@ — is one a caller can get at.
 unifyRefine :: Rule
 unifyRefine = Rule (GlobalName "unify-refine-core") ["t"] [FocusIsHole]
-  [ Bind "n" (FreshName (Lit (VText "refined")))
-  , Bind "x" (Define (Ref "n") (Ref "t"))
-  , Bind "s" (Typing (Ref "x"))
-  , Bind "g" Goal
-  , Do (Unify (Ref "s") (Ref "g"))
-  , Do (Try (Ref "x"))
-  , Do Solve
+  [ Do (Call (GlobalName "fill-core") [Ref "t"])
+  , Do (Call (GlobalName "solve") [])
   ]
 
 -- | Phase 25's claiming half — §2.7's @naive-refine@ with the search left out.

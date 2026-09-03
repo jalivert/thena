@@ -175,6 +175,8 @@ everyOp =
   , ("fresh-name x",  FreshName (Ref "x"))
   , ("typeof x",      Typing (Ref "x"))
   , ("define x y",    Define (Ref "x") (Ref "y"))
+  , ("fresh-universe", Op.FreshUniverse)
+  , ("resolve-name x", Op.ResolveName (Ref "x"))
   ]
 
 vocabulary :: TestTree
