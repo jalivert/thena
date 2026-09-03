@@ -81,6 +81,21 @@ expectedStandard =
   ]
 
 -- | Brady's @FILL@ — **his request, 2026-09-01** (MS4 phase 48):
+--
+-- **No @-core@ postfix, and his correction is why** (2026-09-03). Phase 38's
+-- postfix frees a word for a /surface twin/ — @try@, @apply@, @eliminate@ and
+-- @unify-refine@ are tactics the surface language will want the good names of.
+-- It is not what marks an argument as core: the corners already do that.
+--
+-- Nothing is holding @fill@\'s word, because *"fill this hole with a term I
+-- wrote"* **is @elaborate@**. And its argument is a core term for a reason that
+-- has nothing to do with notation: **its caller is a rule, not a user.** By the
+-- time an @elaborate@ clause calls it, the clause has just built the term with
+-- @apply-to@ or @resolve-name@, and it arrives as a @Ref@ with no corners typed
+-- anywhere. The surface parts are elaborated /after/ the fill — phases 41e and
+-- 44 both found that filling last leaves the argument holes already solved, so
+-- the @goto@s find nothing.
+--
 -- /"Can you maybe add two new tactics @fill@ and @solve@ and define
 -- @unify-refine@ with them instead of just replacing @unify-refine@? It is
 -- Conor's tactic and I would like to keep it."/
@@ -96,7 +111,7 @@ expectedStandard =
 -- check — and left this rule symmetric, so the same operation answered
 -- differently depending on which one you reached it through.
 fillRule :: Rule
-fillRule = Rule (GlobalName "fill-core") ["t"] [FocusIsHole]
+fillRule = Rule (GlobalName "fill") ["t"] [FocusIsHole]
   [ Bind "n" (FreshName (Lit (VText "refined")))
   , Bind "x" (Define (Ref "n") (Ref "t"))
   , Bind "s" (Typing (Ref "x"))
@@ -113,7 +128,7 @@ fillRule = Rule (GlobalName "fill-core") ["t"] [FocusIsHole]
 -- needs — @FILL@, the two @FOCUS@es, @SOLVE@ — is one a caller can get at.
 unifyRefine :: Rule
 unifyRefine = Rule (GlobalName "unify-refine-core") ["t"] [FocusIsHole]
-  [ Do (Call (GlobalName "fill-core") [Ref "t"])
+  [ Do (Call (GlobalName "fill") [Ref "t"])
   , Do (Call (GlobalName "solve") [])
   ]
 

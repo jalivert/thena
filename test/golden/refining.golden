@@ -42,7 +42,7 @@ thena spine> :abandon
 abandoned wrong
 thena spine> :theorem split : ∀ (A : Type₀) -> A -> A
 proving split : ∀ (A : Type₀) -> A -> A
-thena spine> fill-core ⌜ \ (A : Type₀) (a : A) -> a ⌝
+thena spine> fill ⌜ \ (A : Type₀) (a : A) -> a ⌝
 already equal
 thena spine> :show
   let refined = λ (A : Type₀) (a : A) -> a : ∀ (A : Type₀) -> A -> A in

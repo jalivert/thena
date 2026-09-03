@@ -760,16 +760,16 @@ tests =
         , ":abandon"
           -- **The tactic is two calls now** (MS4 phase 48) — his request:
           -- /"add two new tactics fill and solve and define unify-refine with
-          -- them"/. @fill-core@ leaves a guess and @solve@ discharges it, so
+          -- them"/. @fill@ leaves a guess and @solve@ discharges it, so
           -- the seam Brady needs between them is one a caller can get at.
         , ":theorem split : ∀ (A : Type₀) -> A -> A"
-        , "fill-core ⌜ \\ (A : Type₀) (a : A) -> a ⌝"
+        , "fill ⌜ \\ (A : Type₀) (a : A) -> a ⌝"
         , ":show"
         , "solve"
         , "qed"
           -- **And cumulativity reaches the tactic.** @Type₀@ has type @Type₁@
           -- and the goal is @Type₂@; this said /Type₁ and Type₂ are different
-          -- universes/ until @fill-core@ started asking @unify-into@. Phase
+          -- universes/ until @fill@ started asking @unify-into@. Phase
           -- 41g had fixed the elaborator's own inline fill and left this rule
           -- symmetric, so one operation answered differently depending on
           -- which of the two you reached it through.

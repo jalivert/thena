@@ -23,7 +23,7 @@ abandon
 eliminate-core ‹t›
 prove
 elaborate ‹t›
-fill-core ‹t›
+fill ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
 thena spine> elaborate a

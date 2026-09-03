@@ -31,7 +31,7 @@ thena spine> :goal Type₀
 thena spine> :step on
 thena spine> unify-refine-core ⌜ A ⌝
 pc
-  0  call fill-core t
+  0  call fill t
   1  call solve
 env
   t = ⌜A⌝

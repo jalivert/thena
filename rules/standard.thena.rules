@@ -24,7 +24,7 @@ rule prove :- when focus-is-guess then prim-prove
 
 rule elaborate t :- when focus-is-hole then prim-elaborate t
 
-rule fill-core t :- when focus-is-hole
+rule fill t :- when focus-is-hole
   then n = fresh-name "refined"
      ; x = define n t
      ; s = typeof x
@@ -33,7 +33,7 @@ rule fill-core t :- when focus-is-hole
      ; prim-try x
 
 rule unify-refine-core t :- when focus-is-hole
-  then fill-core t
+  then fill t
      ; solve
 
 rule apply-core f :- when focus-is-hole

@@ -369,17 +369,25 @@ already strikes for operands.
 McBride's tactic is now written as the two halves it always had:
 
 ```
-rule fill-core t :- when focus-is-hole
+rule fill t :- when focus-is-hole
   then n = fresh-name "refined" ; x = define n t
      ; s = typeof x ; g = goal ; unify-into s g ; prim-try x
 
-rule unify-refine-core t :- when focus-is-hole then fill-core t ; solve
+rule unify-refine-core t :- when focus-is-hole then fill t ; solve
 ```
 
-`fill-core ⌜ t ⌝` parks `t` in a `=`-binding, unifies its type with the goal's
+`fill ⌜ t ⌝` parks `t` in a `=`-binding, unifies its type with the goal's
 and attaches it as a **guess**; `solve` discharges the guess. Both are callable
 on their own, which is the point — elaboration has to get in between the two to
 elaborate a term's parts once its shape is known.
+
+**`fill` carries no `-core` postfix**, where `try-core`, `apply-core`,
+`eliminate-core` and `unify-refine-core` do. That postfix frees a word for the
+surface tactic that will want it; it is not what says an argument is core, since
+the corners say that already. Nothing is waiting for `fill`'s word — *fill this
+hole with a term I wrote* is `elaborate`. And its argument is a core term
+because its caller is a **rule** that has just built one with `apply-to` or
+`resolve-name`, not a user typing corners.
 
 **And it fixed a real difference.** `fill` asks `unify-into` where the rule used
 to ask `unify`, so cumulativity now reaches the hand-driven tactic:
@@ -409,7 +417,7 @@ point of the meta is that it is new at every use.
 then the globals, with a definition's level arguments inserted.
 
 ```
-thena spine> do { z = resolve-name "zero" ; fill-core z ; solve }
+thena spine> do { z = resolve-name "zero" ; fill z ; solve }
 ```
 
 Both exist because they are what elaboration actually puts in an operand —
