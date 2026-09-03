@@ -55,6 +55,7 @@ import Thena.Ops
 -- @Assume@ and @Claim@ name both a component and an op.
 import qualified Thena.Ops as Ops
 import Thena.Surface.Concrete (Surface (..))
+import Thena.Surface.Zipper (rootedAt)
 import Thena.Rules
   ( RuleError (..)
   , RuleIter
@@ -374,7 +375,7 @@ producesTests =
         -- own environment — restored on return, and without the destination.
       , ("prim-prove",  e, hole,    [],            Ops.Prove)
       , ("call",        e, hole,    [],            Ops.Call (GlobalName "try-core") [term type0])
-      , ("prim-elaborate", e, hole, [],           Ops.Elaborate (Lit (VSurface SurfaceUniverseOpen)))
+      , ("prim-elaborate", e, hole, [],           Ops.Elaborate (Lit (VSurface (rootedAt SurfaceUniverseOpen))))
       ]
 
     -- @try ‹t›@, as 'expectedBase' ships it — what @call@ needs something to

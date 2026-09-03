@@ -51,6 +51,7 @@ import Thena.Rules
   )
 import Thena.Standard (expectedBase)
 import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..))
+import Thena.Surface.Zipper (rootedAt)
 
 tests :: TestTree
 tests =
@@ -107,7 +108,7 @@ elaborating = elaboratingAt hole
 
 -- | The same, at a cursor of your own.
 elaboratingAt :: Cursor -> Surface -> Either FailReason Machine
-elaboratingAt cur s = snd (runOut (machineAt cur [Do (Ops.Elaborate (Lit (VSurface s)))]))
+elaboratingAt cur s = snd (runOut (machineAt cur [Do (Ops.Elaborate (Lit (VSurface (rootedAt s))))]))
 
 -- | A machine at a cursor, loaded with a program.
 machineAt :: Cursor -> [Instr] -> Machine
@@ -245,9 +246,12 @@ unsupportedTests =
       -- — never can.
       refused "an implicit argument this head has no position for"
         (SurfaceApp (SurfaceName "a") [SurfaceArg Implicit (SurfaceName "a")])
-      -- A @∀@ binder must say what it binds. The surface grammar allows
-      -- @∀ x -> B@ because 'SurfaceBinder' is shared with λ, where the goal
-      -- supplies the type; there is no goal to read a Π's domain off.
+      -- A @∀@ binder must say what it binds. The grammar's @PiBinder@ requires
+      -- the annotation, so @∀ x -> B@ does not parse and this is reached only
+      -- from a tree built by hand — but 'SurfaceBinder' is shared with λ, where
+      -- an untyped binder is ordinary because the goal supplies the type, so
+      -- the case is constructible and 'Thena.Elaborate.compile' has to answer
+      -- for it. There is no goal to read a Π's domain off.
     , refused "a ∀ binder with no type"
         (SurfacePi [binder] (SurfaceName "a"))
     ]

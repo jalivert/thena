@@ -112,7 +112,7 @@ import Thena.Tactics.Eliminate (Elimination (..), eliminate)
 import Thena.Rules (RuleBase, RuleIter, arities, clauses, dispatch, hasNext, next)
 import Thena.Syntax.Lexer (isIdentifier)
 import qualified Thena.Elaborate as Elaborate
-import Thena.Surface.Concrete (Surface)
+import Thena.Surface.Zipper (SurfaceZipper)
 
 -- --------------------------------------------------------------------------
 -- The machine
@@ -1369,12 +1369,12 @@ operandTerm e o = operandValue e o >>= \v -> case v of
   VTerm (Trailing t) -> Right t
   _                  -> Left ExpectedTerm
 
--- | An unelaborated tree, and nothing else (§7.2). Shaped like 'operandText'
--- and 'operandTerm', and phase 17b's reason for existing at all: 'VSurface' had
--- no reader before elaboration had a rule.
-operandSurface :: Env -> Operand -> Either FailReason Surface
+-- | An unelaborated tree and the place it sits at (§7.2). Shaped like
+-- 'operandText' and 'operandTerm', and phase 17b's reason for existing at all:
+-- 'VSurface' had no reader before elaboration had a rule.
+operandSurface :: Env -> Operand -> Either FailReason SurfaceZipper
 operandSurface e o = operandValue e o >>= \v -> case v of
-  VSurface t -> Right t
+  VSurface z -> Right z
   _          -> Left ExpectedSurface
 
 -- | The name a component will display. Checked against the lexer's own notion

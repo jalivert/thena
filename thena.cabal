@@ -48,6 +48,7 @@ library
         Thena.Surface.Concrete
         Thena.Surface.Layout
         Thena.Surface.Parser
+        Thena.Surface.Zipper
         Thena.Syntax.Concrete
         Thena.Syntax.Lexer
         Thena.Syntax.Parser
@@ -98,6 +99,7 @@ test-suite thena-test
         Thena.GlobalTests
         Thena.GoldenTests
         Thena.SurfaceTests
+        Thena.SurfaceZipperTests
         Thena.KernelTests
         Thena.NoConfusionTests
         Thena.DispatchTests

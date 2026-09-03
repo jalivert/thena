@@ -17,6 +17,7 @@ import qualified Thena.ElaborateTests
 import qualified Thena.DevelopmentTests
 import qualified Thena.DriverTests
 import qualified Thena.SurfaceTests
+import qualified Thena.SurfaceZipperTests
 import qualified Thena.EliminateTests
 import qualified Thena.EliminatorTests
 import qualified Thena.EngineTests
@@ -53,6 +54,7 @@ main =
       , Thena.DevelopmentTests.tests
       , Thena.DriverTests.tests
       , Thena.SurfaceTests.tests
+      , Thena.SurfaceZipperTests.tests
       , Thena.EliminateTests.tests
       , Thena.EliminatorTests.tests
       , Thena.EngineTests.tests

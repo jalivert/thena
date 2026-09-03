@@ -32,7 +32,8 @@ import Thena.Core.Term (GlobalName)
 import Thena.Development.Cursor (Part (..))
 import Thena.Development.Partial (Partial)
 import Thena.Global.Env (InductiveDefinition)
-import Thena.Surface.Concrete (Plicity, Surface)
+import Thena.Surface.Concrete (Plicity)
+import Thena.Surface.Zipper (SurfaceZipper)
 
 -- | A name in a rule body's environment. Not a 'Thena.Core.Term.Var' and not an
 -- 'Thena.Core.Term.Ident': those name things in the development, this names an
@@ -57,8 +58,16 @@ type Env = [(Name, Value)]
 data Value
   = VText    String    -- ^ what @Ask@ returns and @Say@ consumes
   | VTerm    Partial   -- ^ a term, a variable, or a whole development
-  | VSurface Surface
-    -- ^ **a surface term — elaboration's input** (MS4 phase 41).
+  | VSurface SurfaceZipper
+    -- ^ **a focused surface term — elaboration's input** (MS4 phase 41,
+    -- focused at phase 46).
+    --
+    -- **It carries a zipper and not a bare tree**, which is his shape D
+    -- (@discussion\/surface-and-elaboration.md@ §1): the subterm plus the path
+    -- it sits at. A value in @env@ is already rewound by a 'Thena.Engine.Choice'
+    -- frame, so a zipper that is a value backtracks for free and no op has to
+    -- ask which cursor it is moving — the Ξ precedent. See
+    -- "Thena.Surface.Zipper".
     --
     -- It held a 'Thena.Syntax.Concrete.Raw' from phase 17b until here, which
     -- was the badly named constructor @CLAUDE.md@ kept having to correct:

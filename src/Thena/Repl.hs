@@ -152,6 +152,7 @@ import qualified Thena.Ops as Ops
 import Thena.Syntax.Lexer (LexError (..), Pos (..), Token (..))
 import Thena.Surface.Layout (LayoutError (..))
 import Thena.Surface.Parser (SurfaceParseError (..))
+import qualified Thena.Surface.Zipper as Zipper
 import Thena.Syntax.Parser (ParseError (..))
 
 import Data.Foldable (toList)
@@ -1084,10 +1085,12 @@ renderValue n ctx v = case v of
   VText s            -> show s
   VTerm (Trailing t) -> "⌜" ++ renderCore n ctx t ++ "⌝"
   VTerm p            -> "⌜" ++ unwords (words (renderPartial n ctx p)) ++ "⌝"
-  -- A hint, printed as it was written. It is not resolved and may never
-  -- resolve — that is @resolve@'s answer, given in a rule body — so this is a
-  -- printer for 'Raw' and not a detour through 'Core'.
-  VSurface t         -> "‹" ++ renderSurface t ++ "›"
+  -- **The focus, printed as it was written.** A 'Thena.Ops.VSurface' carries a
+  -- zipper since phase 46, and what a reader wants to see is the subterm the
+  -- machine is elaborating, not the program it came from — so the path is
+  -- carried and not shown. Where it belongs on screen is a presentation
+  -- question and 46 does not answer it.
+  VSurface z         -> "‹" ++ renderSurface (Zipper.focus z) ++ "›"
   -- A rule in an operand is a rule being passed to another rule, so its name
   -- is what identifies it; its body belongs to @:show@ on the rule, not here.
   VPair a b          -> "(" ++ renderValue n ctx a ++ ", " ++ renderValue n ctx b ++ ")"

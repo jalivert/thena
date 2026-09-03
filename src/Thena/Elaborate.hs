@@ -56,6 +56,12 @@ import Thena.Ops (Instr (..), Op (..), Operand (..), Value (..))
 import Thena.Rules (RuleError (..), resolveBlock)
 import Thena.Surface.Concrete
   (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..))
+import Thena.Surface.Zipper
+  ( SurfaceZipper, focus
+  , intoAnnotTerm, intoAnnotType, intoArg, intoArrowCodomain, intoArrowDomain
+  , intoElimField, intoFun, intoLamBody, intoLetBody, intoLetType, intoLetValue
+  , intoPiDomain, intoPiTail
+  )
 
 -- | The program that elaborates one surface node into the focused hole.
 --
@@ -98,9 +104,9 @@ namesFor n =
   where w x = x ++ show n
 
 compile
-  :: GlobalEnv -> [(GlobalName, [Plicity])] -> Context -> Int -> Surface
+  :: GlobalEnv -> [(GlobalName, [Plicity])] -> Context -> Int -> SurfaceZipper
   -> Either FailReason ([Instr], Int)
-compile env sigs ctx n0 s = case s of
+compile env sigs ctx n0 z = case focus z of
   -- **@E⟦do { … }⟧ = play the block@** (MS4 phase 45). The whole of it: a block
   -- is written down, so there is nothing to elaborate — it is already the
   -- machine's own language, and the instruction that plays it is the
@@ -207,7 +213,7 @@ compile env sigs ctx n0 s = case s of
     -- hand — his requirement: /"They are allowed to be written explicitly
     -- too."/
     | SurfaceName x <- h, Just (hd, nh) <- resolveName x
-    , Just slots <- expand (plicitiesOf x) (NE.toList as) ->
+    , Just slots <- expand (plicitiesOf x) (zip [0 ..] (NE.toList as)) ->
         let slot k = argName names ++ show (k :: Int)
          in fmap (bump nh) $ Right
               ( concat
@@ -229,9 +235,9 @@ compile env sigs ctx n0 s = case s of
                     -- @elim@ fills last (phase 41i).
                   , concat
                       [ [ Do (Goto (Ref (slot k)))
-                        , Do (Elaborate (Lit (VSurface a)))
+                        , Do (Elaborate (Lit (VSurface (intoArg h as j a z))))
                         ]
-                      | (k, Just a) <- zip [0 ..] slots
+                      | (k, Just (j, a)) <- zip [0 ..] slots
                       ]
                   , [Do (Goto (Ref (hereName names)))]
                   , fill (Ref (appName names))
@@ -252,6 +258,14 @@ compile env sigs ctx n0 s = case s of
             fun   = case front of
                       [] -> h
                       _  -> SurfaceApp h (NE.fromList front)
+            -- **Two moves, not two subterms** (MS4 phase 46). @intoFun@ stands
+            -- at the spine minus its last argument, which is exactly @fun@,
+            -- and @intoArg@ at the last argument's own position — so the
+            -- right-to-left fold walks the tree it was given instead of
+            -- building intermediate spines nobody wrote.
+            lastIx   = length front
+            funZ     = intoFun (NE.last as) fun z
+            argZ     = intoArg h as lastIx arg z
             SurfaceArg _ arg = NE.last as
             (l1, n1) = freshLevelMeta n
             (l2, n2) = freshLevelMeta n1
@@ -282,9 +296,9 @@ compile env sigs ctx n0 s = case s of
                   , fill (Ref (appName names))
                     -- The two @FOCUS@es, and only then the @SOLVE@.
                   , [ Do (Goto (Ref (funName names)))
-                    , Do (Elaborate (Lit (VSurface fun)))
+                    , Do (Elaborate (Lit (VSurface funZ)))
                     , Do (Goto (Ref (argName names)))
-                    , Do (Elaborate (Lit (VSurface arg)))
+                    , Do (Elaborate (Lit (VSurface argZ)))
                     , Do (Goto (Ref (hereName names)))
                     , Do Solve
                     ]
@@ -322,7 +336,7 @@ compile env sigs ctx n0 s = case s of
                 , [ Do (Intro (Just (lit' x))) | x <- names' ]
                 , [Do Into]
                 , replicate (length names') (Do Along)
-                , [Do (Elaborate (Lit (VSurface body)))]
+                , [Do (Elaborate (Lit (VSurface (intoLamBody bs body z))))]
                 , [Do (Goto (Ref (hereName names))), Do Solve]
                 ]
             , n
@@ -368,17 +382,26 @@ compile env sigs ctx n0 s = case s of
   -- type — the domain hole's variable — against the goal and /solves the
   -- domain hole/, so @∀ (A : Type₀) -> A@ at @Type₁@ silently made @A@'s type
   -- @Type₁@ and then could not find the hole its annotation was owed.
+  --
+  -- **The group is peeled by a zipper move** (MS4 phase 46). This case used to
+  -- rewrite @∀ (A : S) (a : A) -> B@ into @∀ (A : S) -> ∀ (a : A) -> B@ and
+  -- call 'compile' again on a node that was never in the user's program; now
+  -- @intoPiTail@ stands at the rest of the group and the frame puts the binder
+  -- back. **The emitted instructions are unchanged** — the rewritten node's
+  -- own case emitted exactly this, with the same counter — so what the move
+  -- buys is that the path the codomain travels with is real.
   SurfacePi bs body -> case NE.uncons bs of
-    (b, Just rest) -> compile env sigs ctx n0 (SurfacePi (b NE.:| []) (SurfacePi rest body))
     -- **A binder in braces elaborates exactly as one in parentheses** (MS4
     -- phase 44b), because 'Thena.Core.Term.Pi' has no plicity to put it in —
     -- his decision, and the reason the record of which positions are implicit
     -- lives on the machine instead ('Thena.Engine.signatures'). What braces
     -- change is what happens at a *use*, not what the type is.
-    (SurfaceBinder _ _ Nothing, Nothing) ->
+    (SurfaceBinder _ _ Nothing, _) ->
       Left (NoElaborationRule "a ∀ binder with no type")
-    (SurfaceBinder _ x (Just ty), Nothing) ->
+    (b@(SurfaceBinder p x (Just ty)), rest) ->
       let (l, n1) = freshLevelMeta n
+          restBs  = maybe [] NE.toList rest
+          cod     = maybe body (`SurfacePi` body) rest
        in Right
             ( [ Bind (hereName names) Here
               , Bind (domName names ++ "n") (FreshName (lit' "A"))
@@ -395,9 +418,10 @@ compile env sigs ctx n0 s = case s of
                 -- @here@ doing for a nested focus what it does for the outer.
               , Bind (codName names) Here
               , Do (Goto (Ref (domName names)))
-              , Do (Elaborate (Lit (VSurface ty)))
+              , Do (Elaborate
+                     (Lit (VSurface (intoPiDomain p x restBs body ty z))))
               , Do (Goto (Ref (codName names)))
-              , Do (Elaborate (Lit (VSurface body)))
+              , Do (Elaborate (Lit (VSurface (intoPiTail b cod z))))
               , Do (Goto (Ref (hereName names)))
               , Do Solve
               ]
@@ -426,9 +450,9 @@ compile env sigs ctx n0 s = case s of
                 ]
               , fill (Ref (arrName names))
               , [ Do (Goto (Ref (domName names)))
-                , Do (Elaborate (Lit (VSurface a)))
+                , Do (Elaborate (Lit (VSurface (intoArrowDomain b a z))))
                 , Do (Goto (Ref (codName names)))
-                , Do (Elaborate (Lit (VSurface b)))
+                , Do (Elaborate (Lit (VSurface (intoArrowCodomain a b z))))
                 , Do (Goto (Ref (hereName names)))
                 , Do Solve
                 ]
@@ -469,14 +493,15 @@ compile env sigs ctx n0 s = case s of
                 -- for the value's own @FILL@ to unify against.
               , [ i | Just ty <- [ann]
                     , i <- [ Do (Goto (Ref (tyName names)))
-                           , Do (Elaborate (Lit (VSurface ty)))
+                           , Do (Elaborate
+                                  (Lit (VSurface (intoLetType x v body ty z))))
                            ]
                 ]
               , [ Do (Goto (Ref (valName names)))
-                , Do (Elaborate (Lit (VSurface v)))
+                , Do (Elaborate (Lit (VSurface (intoLetValue x ann body v z))))
                 , Do (Goto (Ref (hereName names)))
                 , Do (Define (lit' x) (Ref (valName names)))
-                , Do (Elaborate (Lit (VSurface body)))
+                , Do (Elaborate (Lit (VSurface (intoLetBody x ann v body z))))
                 ]
               ]
           , n1
@@ -499,7 +524,7 @@ compile env sigs ctx n0 s = case s of
             , Bind (tyName names)
                 (Claim (Ref (tyName names ++ "n")) (lit (Universe (LVar l))))
             , Do (Goto (Ref (tyName names)))
-            , Do (Elaborate (Lit (VSurface ty)))
+            , Do (Elaborate (Lit (VSurface (intoAnnotType e ty z))))
             , Do (Goto (Ref (hereName names)))
             , Bind (goalName names) Goal
               -- **@unify-into@ and not @unify@** (MS4 phase 41g). Brady's @FILL@
@@ -508,7 +533,7 @@ compile env sigs ctx n0 s = case s of
         -- is wanted. @prim-try@ on the next line does the real check and
         -- subsumes, so what is asked here is solving, not deciding.
       , Do (UnifyInto (Ref (tyName names)) (Ref (goalName names)))
-            , Do (Elaborate (Lit (VSurface e)))
+            , Do (Elaborate (Lit (VSurface (intoAnnotTerm ty e z))))
             ]
           , n1
           )
@@ -562,7 +587,9 @@ compile env sigs ctx n0 s = case s of
                       -- motive and the target elaborated first it is a type.
                     , concat
                         [ [ Do (Goto (Ref (slot k)))
-                          , Do (Elaborate (Lit (VSurface f)))
+                          , Do (Elaborate
+                                 (Lit (VSurface
+                                        (intoElimField d ps mot ms is tgt k f z))))
                           ]
                         | (k, f) <- zip [0 ..] fields
                         ]
@@ -627,21 +654,26 @@ compile env sigs ctx n0 s = case s of
     -- opened and left for unification. It fails — @Nothing@ overall — when the
     -- written arguments cannot be lined up at all, and the binary rule below
     -- then has its turn.
+    -- **A slot that the user wrote carries the argument and its position in
+    -- the spine** (MS4 phase 46), where it used to carry the argument alone.
+    -- The position is what the zipper needs — @intoArg@ descends to a place in
+    -- the spine rather than to a detached subterm — and carrying the argument
+    -- beside it keeps the descent total, with no indexing at the call site.
     expand ps as' = case (ps, as') of
       ([], [])                            -> Just []
       -- Nothing recorded, or more arguments than positions: take them as
       -- written. A partially applied head is ordinary, and so is a head whose
       -- result is itself a function.
       ([], rest)
-        | all written rest                -> Just (map (Just . argOf) rest)
+        | all (written . snd) rest        -> Just [ Just (i, a) | (i, SurfaceArg _ a) <- rest ]
         | otherwise                       -> Nothing
       -- An implicit position the user did write, in braces.
-      (Implicit : more, SurfaceArg Implicit a : rest) ->
-        (Just a :) <$> expand more rest
+      (Implicit : more, (i, SurfaceArg Implicit a) : rest) ->
+        (Just (i, a) :) <$> expand more rest
       -- An implicit position the user did not: insert it.
       (Implicit : more, rest)             -> (Nothing :) <$> expand more rest
-      (Explicit : more, SurfaceArg Explicit a : rest) ->
-        (Just (a :: Surface) :) <$> expand more rest
+      (Explicit : more, (i, SurfaceArg Explicit a) : rest) ->
+        (Just (i :: Int, a :: Surface) :) <$> expand more rest
       -- An explicit position written in braces, or one not written at all.
       (Explicit : _, _)                   -> Nothing
 
@@ -650,8 +682,6 @@ compile env sigs ctx n0 s = case s of
 
     implicitArg (SurfaceArg Implicit _) = True
     implicitArg _                       = False
-
-    argOf (SurfaceArg _ a) = a
 
     -- **What a name denotes, with its level arguments inserted** (MS4 phase
     -- 44). Shared by the leaf case and the global-head application case, so
