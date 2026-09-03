@@ -547,6 +547,36 @@ same choice points, the same backtracking. A clause that applies a function to
 its arguments does it by recursion, one argument per step, because the rule
 language has no loops and needs none: the term you wrote is the counter.
 
+### The prelude is a program you can read
+
+*Decided 2026-09-03.*
+
+`Eq`, `Unit`, `Empty`, `And`, `Sigma` and the four theorems over them are a
+**surface module** — `prelude/prelude.thena` — not a script of proof-assistant
+commands. It is written the way you would write your own file:
+
+```
+data And (A : Type) (B : Type) : Type where
+  both : forall (a : A) (b : B) -> And A B
+
+andLeft : forall (A : Type) (B : Type) (c : And A B) -> A
+andLeft = \ A B c -> elim And (A B) (\ z -> A) ((\ a b -> a)) () c
+```
+
+Every line of it goes through the same elaborator your own files do, so if the
+prelude loads, elaboration works.
+
+**Writing `Type` rather than `Type₀` is what makes these general.** `andLeft`
+comes out as
+
+```
+andLeft {ℓ₀ ℓ₁} : ∀ (A : Type ℓ₀) (B : Type ℓ₁) -> And {ℓ₀ ℓ₁} A B -> A
+```
+
+— one level parameter for each component, matching `And {ℓ₀ ℓ₁} : Type (ℓ₀ ⊔ ℓ₁)`.
+`Sigma` is deliberately written at `Type₀` and stays monomorphic, so `fst` and
+`snd` have no level parameters at all.
+
 ---
 
 ## The REPL and the session
