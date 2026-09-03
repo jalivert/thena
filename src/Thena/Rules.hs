@@ -261,18 +261,54 @@ holds env cur args t = case t of
   GoalTypeIsLet -> case written of
     Just (Let {}) -> True
     _             -> False
-  -- The first test that asks about an argument rather than about the focus.
-  SurfaceIsName o -> case Op.operandIn args o of
-    Left _            -> True
-    Right (VSurface z) -> case Zipper.focus z of
-      SurfaceName _ -> True
-      _             -> False
-    Right _            -> False
+  -- **The tests that ask about an argument rather than about the focus**
+  -- (MS4 phases 47 and 49). One per 'Thena.Surface.Concrete.Surface'
+  -- constructor, so a clause of @elaborate@ names the node it is for and no
+  -- two heads can match one term.
+  SurfaceIsName o         -> surfaceIs o isName
+  SurfaceIsUniverse o     -> surfaceIs o isUniverse
+  SurfaceIsUniverseOpen o -> surfaceIs o isUniverseOpen
+  SurfaceIsPlaceholder o  -> surfaceIs o isPlaceholder
+  SurfaceIsHole o         -> surfaceIs o isHole
+  SurfaceIsApp o          -> surfaceIs o isApp
+  SurfaceIsLambda o       -> surfaceIs o isLambda
+  SurfaceIsForall o       -> surfaceIs o isForall
+  SurfaceIsArrow o        -> surfaceIs o isArrow
+  SurfaceIsLet o          -> surfaceIs o isLet
+  SurfaceIsAscription o   -> surfaceIs o isAscription
+  SurfaceIsElim o         -> surfaceIs o isElim
+  SurfaceIsDo o           -> surfaceIs o isDo
   where
     -- Written down, then reduced: §8's "head matching runs whnf", because a
     -- goal typed @id Type₀ (Nat -> Nat)@ is a Π and must match.
     written = expectedType cur
     reduced = whnf env (context cur) <$> written
+
+    -- **One shape for every surface test**: read the operand, ask the predicate
+    -- of the focus. An operand that is not a surface term is a false question,
+    -- not an error — §8's shallow heads, and the reason there are no parameter
+    -- kinds (@ms4/CLOSEOUT.md@ 20).
+    --
+    -- An operand nobody bound does **not** exclude the rule — see this
+    -- function's own note above.
+    surfaceIs o p = case Op.operandIn args o of
+      Left _             -> True
+      Right (VSurface z) -> p (Zipper.focus z)
+      Right _            -> False
+
+    isName         s = case s of SurfaceName _ -> True; _ -> False
+    isUniverse     s = case s of SurfaceUniverse _ -> True; _ -> False
+    isUniverseOpen s = case s of SurfaceUniverseOpen -> True; _ -> False
+    isPlaceholder  s = case s of SurfacePlaceholder -> True; _ -> False
+    isHole         s = case s of SurfaceHole _ -> True; _ -> False
+    isApp          s = case s of SurfaceApp _ _ -> True; _ -> False
+    isLambda       s = case s of SurfaceLam _ _ -> True; _ -> False
+    isForall       s = case s of SurfacePi _ _ -> True; _ -> False
+    isArrow        s = case s of SurfaceArrow _ _ -> True; _ -> False
+    isLet          s = case s of SurfaceLet {} -> True; _ -> False
+    isAscription   s = case s of SurfaceAnnot _ _ -> True; _ -> False
+    isElim         s = case s of SurfaceElim {} -> True; _ -> False
+    isDo           s = case s of SurfaceDo _ -> True; _ -> False
 
 -- --------------------------------------------------------------------------
 -- Well-formedness (§2.4, §7.2)
@@ -562,6 +598,8 @@ operation g i (RawOp w as)
       , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
       , ("typeof", Typing), ("expose", Op.Expose), ("fresh-name", FreshName), ("prim-apply", Op.Apply)
       , ("resolve-name", Op.ResolveName)
+      , ("surface-name", Op.SurfaceNameOf)
+      , ("surface-universe", Op.SurfaceUniverseOf)
       ]
     binary =
       [ ("assume", Assume), ("claim", Claim), ("define", Define)
@@ -619,7 +657,19 @@ withOperands t os = case (t, os) of
   (FocusIsGuess,     []) -> Just FocusIsGuess
   (GoalTypeIsPi,     []) -> Just GoalTypeIsPi
   (GoalTypeIsLet,    []) -> Just GoalTypeIsLet
-  (SurfaceIsName _, [o]) -> Just (SurfaceIsName o)
+  (SurfaceIsName _, [o])         -> Just (SurfaceIsName o)
+  (SurfaceIsUniverse _, [o])     -> Just (SurfaceIsUniverse o)
+  (SurfaceIsUniverseOpen _, [o]) -> Just (SurfaceIsUniverseOpen o)
+  (SurfaceIsPlaceholder _, [o])  -> Just (SurfaceIsPlaceholder o)
+  (SurfaceIsHole _, [o])         -> Just (SurfaceIsHole o)
+  (SurfaceIsApp _, [o])          -> Just (SurfaceIsApp o)
+  (SurfaceIsLambda _, [o])       -> Just (SurfaceIsLambda o)
+  (SurfaceIsForall _, [o])       -> Just (SurfaceIsForall o)
+  (SurfaceIsArrow _, [o])        -> Just (SurfaceIsArrow o)
+  (SurfaceIsLet _, [o])          -> Just (SurfaceIsLet o)
+  (SurfaceIsAscription _, [o])   -> Just (SurfaceIsAscription o)
+  (SurfaceIsElim _, [o])         -> Just (SurfaceIsElim o)
+  (SurfaceIsDo _, [o])           -> Just (SurfaceIsDo o)
   _                      -> Nothing
 
 -- | What a test was written with, in written order. 'Thena.Ops.operandsOf'\'s
@@ -631,7 +681,19 @@ testOperands t = case t of
   FocusIsGuess    -> []
   GoalTypeIsPi    -> []
   GoalTypeIsLet   -> []
-  SurfaceIsName o -> [o]
+  SurfaceIsName o         -> [o]
+  SurfaceIsUniverse o     -> [o]
+  SurfaceIsUniverseOpen o -> [o]
+  SurfaceIsPlaceholder o  -> [o]
+  SurfaceIsHole o         -> [o]
+  SurfaceIsApp o          -> [o]
+  SurfaceIsLambda o       -> [o]
+  SurfaceIsForall o       -> [o]
+  SurfaceIsArrow o        -> [o]
+  SurfaceIsLet o          -> [o]
+  SurfaceIsAscription o   -> [o]
+  SurfaceIsElim o         -> [o]
+  SurfaceIsDo o           -> [o]
 
 -- | The word a 'Test' is written with. Total, so @-Wall@ makes a new test say
 -- how it is spelled — 'Thena.Ops.opKeyword'\'s trick, one type over.
@@ -645,7 +707,19 @@ testWord t = case t of
   FocusIsGuess    -> "focus-is-guess"
   GoalTypeIsPi    -> "goal-type-is-pi"
   GoalTypeIsLet   -> "goal-type-is-let"
-  SurfaceIsName _ -> "surface-is-name"
+  SurfaceIsName _         -> "surface-is-name"
+  SurfaceIsUniverse _     -> "surface-is-universe"
+  SurfaceIsUniverseOpen _ -> "surface-is-universe-open"
+  SurfaceIsPlaceholder _  -> "surface-is-placeholder"
+  SurfaceIsHole _         -> "surface-is-hole"
+  SurfaceIsApp _          -> "surface-is-app"
+  SurfaceIsLambda _       -> "surface-is-lambda"
+  SurfaceIsForall _       -> "surface-is-forall"
+  SurfaceIsArrow _        -> "surface-is-arrow"
+  SurfaceIsLet _          -> "surface-is-let"
+  SurfaceIsAscription _   -> "surface-is-ascription"
+  SurfaceIsElim _         -> "surface-is-elim"
+  SurfaceIsDo _           -> "surface-is-do"
 
 -- | Every test there is. A list and not a case split, so it cannot be total —
 -- 'testWord' is what @-Wall@ guards, and "Thena.RuleSyntaxTests" checks this
@@ -657,4 +731,16 @@ everyTest :: [Test]
 everyTest =
   [ FocusIsHole, FocusIsGuess, GoalTypeIsPi, GoalTypeIsLet
   , SurfaceIsName (Lit (VText ""))
+  , SurfaceIsUniverse (Lit (VText ""))
+  , SurfaceIsUniverseOpen (Lit (VText ""))
+  , SurfaceIsPlaceholder (Lit (VText ""))
+  , SurfaceIsHole (Lit (VText ""))
+  , SurfaceIsApp (Lit (VText ""))
+  , SurfaceIsLambda (Lit (VText ""))
+  , SurfaceIsForall (Lit (VText ""))
+  , SurfaceIsArrow (Lit (VText ""))
+  , SurfaceIsLet (Lit (VText ""))
+  , SurfaceIsAscription (Lit (VText ""))
+  , SurfaceIsElim (Lit (VText ""))
+  , SurfaceIsDo (Lit (VText ""))
   ]

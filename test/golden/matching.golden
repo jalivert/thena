@@ -10,20 +10,44 @@ standard
   eliminate-core ‹t›
   prove
   prove
-  elaborate ‹t›
   fill ‹t›
   unify-refine-core ‹t›
   apply-core ‹f›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
 thena spine> :matches
 attack
 try-core ‹t›
 abandon
 eliminate-core ‹t›
 prove
-elaborate ‹t›
 fill ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
 thena spine> attack
 thena spine> :matches
 solve
@@ -41,10 +65,22 @@ try-core ‹t›
 abandon
 eliminate-core ‹t›
 prove
-elaborate ‹t›
 fill ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
 thena spine> attack
 thena spine> :matches
 intro
@@ -69,10 +105,22 @@ try-core ‹t›
 abandon
 eliminate-core ‹t›
 prove
-elaborate ‹t›
 fill ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
 thena spine> :abandon
 abandoned id
 thena spine> :theorem c : ∀ (A : Type₀) -> Type₀

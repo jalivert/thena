@@ -36,7 +36,7 @@ module Thena.Elaborate
 
 import Thena.Core.Context (Context, entryIdent, entryVar)
 
-import Thena.Core.Level (Level (..), freshLevelMeta, levelOfNat)
+import Thena.Core.Level (Level (..), freshLevelMeta)
 import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Var)
 import qualified Data.List.NonEmpty as NE
 
@@ -77,6 +77,12 @@ import Thena.Surface.Zipper
 -- 'Thena.Rules.RuleError' comes from @validate@, which a block does not go
 -- through. The fallback is therefore unreachable as things stand and says so
 -- rather than inventing a second story.
+-- | What a leaf gets if it reaches @prim-elaborate@ (MS4 phase 49).
+movedToTheRuleBase :: FailReason
+movedToTheRuleBase =
+  NoElaborationRule "a name, a universe or a placeholder — those are clauses of \
+                    \elaborate in the rule base, not cases of this op"
+
 blockFailure :: [RuleError] -> FailReason
 blockFailure errs = case errs of
   BadOperands _ i w : _ -> BlockOperands i w
@@ -125,48 +131,17 @@ compile env sigs ctx n0 z = case focus z of
     Left errs -> Left (blockFailure errs)
     Right is  -> Right ([Do (Block is)], n0)
 
-  -- @E⟦x⟧ = FILL x; SOLVE@ — Brady's variable case, and the one clause of his
-  -- elaborator that has run in this system since phase 17b. What was
-  -- @elab-var@'s body is now these two instructions.
-  --
-  -- Local names first, then the globals: a binder shadows a global of the same
-  -- name, which is what one namespace (§3.6) requires. The same order
-  -- "Thena.Syntax.Resolve" uses, for the same reason.
-  -- **A global's level arguments are inserted here** (MS4 phase 44). His
-  -- ruling: /"obviously we have them implicitly inserted. That's the whole
-  -- idea."/
-  --
-  -- One meta per prenex parameter, and unification decides them — which is
-  -- typical ambiguity applied to a use site rather than to a written @Type@.
-  -- Before this every global was written @g []@ and the whole prelude was out
-  -- of elaboration's reach: @elaborate (Eq Nat zero zero)@ said /"Eq has 1
-  -- level parameter, and was given 0 level arguments"/.
-  --
-  -- **A former and a constructor are definitions too** (§3.7 generates a
-  -- wrapper for each), so one lookup answers for all three.
-  SurfaceName x -> case resolveName x of
-    Nothing        -> Left (CannotRead (ResolveFailed (NotInScope x)))
-    Just (t, n')   -> fmap (bump n') (attach t)
-
-  SurfaceUniverse k  -> attach (Universe (levelOfNat k))
-
-  -- Typical ambiguity: the level is a meta and conversion decides it (phase
-  -- 33). Writing @Typeₙ@ is always available and is the recovery.
-  SurfaceUniverseOpen ->
-    let (v, n1) = freshLevelMeta n
-     in Right ([Do (Try (lit (Universe (LVar v)))), Do Solve], n1)
-
-  -- @E⟦_⟧@ — **elaborate by not elaborating.** His words, 2026-09-01. Brady's
-  -- @UNFOCUS@ exists because his focus /is/ the head of a hole queue and he has
-  -- to move something off it; ours is a cursor, so leaving the hole alone is
-  -- the whole of it. Unification is expected to find it, and if it does not,
-  -- the hole is simply still there.
-  SurfacePlaceholder -> Right ([], n)
-
-  -- A **named** placeholder becomes a real hole, which is what the focused hole
-  -- already is. Giving it the written name, and the clauses that ask the user
-  -- or hand control over, are phase 44's.
-  SurfaceHole _ -> Right ([], n)
+  -- **The five leaves are clauses of @elaborate@ now** (MS4 phase 49) — a name,
+  -- @Typeₙ@, @Type@, @_@ and @?foo@. Nothing routes one here: every clause of
+  -- @elaborate@ names the node it is for, so a leaf's own clause is the only
+  -- head that matches it. Reaching this op with one means the rule base has
+  -- lost that clause, or a body wrote @prim-elaborate@ by hand — and saying so
+  -- beats keeping a second copy of five cases that could then drift.
+  SurfaceName _       -> Left movedToTheRuleBase
+  SurfaceUniverse _   -> Left movedToTheRuleBase
+  SurfaceUniverseOpen -> Left movedToTheRuleBase
+  SurfacePlaceholder  -> Left movedToTheRuleBase
+  SurfaceHole _       -> Left movedToTheRuleBase
 
   -- @E⟦e a⟧@ — Brady's application case with his own correction to the printed
   -- rule (the missing @FILL@ and @SOLVE@, @IDRIS.md@):
@@ -235,7 +210,7 @@ compile env sigs ctx n0 z = case focus z of
                     -- @elim@ fills last (phase 41i).
                   , concat
                       [ [ Do (Goto (Ref (slot k)))
-                        , Do (Elaborate (Lit (VSurface (intoArg h as j a z))))
+                        , Do (elaborating (Lit (VSurface (intoArg h as j a z))))
                         ]
                       | (k, Just (j, a)) <- zip [0 ..] slots
                       ]
@@ -296,9 +271,9 @@ compile env sigs ctx n0 z = case focus z of
                   , fill (Ref (appName names))
                     -- The two @FOCUS@es, and only then the @SOLVE@.
                   , [ Do (Goto (Ref (funName names)))
-                    , Do (Elaborate (Lit (VSurface funZ)))
+                    , Do (elaborating (Lit (VSurface funZ)))
                     , Do (Goto (Ref (argName names)))
-                    , Do (Elaborate (Lit (VSurface argZ)))
+                    , Do (elaborating (Lit (VSurface argZ)))
                     , Do (Goto (Ref (hereName names)))
                     , Do Solve
                     ]
@@ -336,7 +311,7 @@ compile env sigs ctx n0 z = case focus z of
                 , [ Do (Intro (Just (lit' x))) | x <- names' ]
                 , [Do Into]
                 , replicate (length names') (Do Along)
-                , [Do (Elaborate (Lit (VSurface (intoLamBody bs body z))))]
+                , [Do (elaborating (Lit (VSurface (intoLamBody bs body z))))]
                 , [Do (Goto (Ref (hereName names))), Do Solve]
                 ]
             , n
@@ -418,10 +393,10 @@ compile env sigs ctx n0 z = case focus z of
                 -- @here@ doing for a nested focus what it does for the outer.
               , Bind (codName names) Here
               , Do (Goto (Ref (domName names)))
-              , Do (Elaborate
+              , Do (elaborating
                      (Lit (VSurface (intoPiDomain p x restBs body ty z))))
               , Do (Goto (Ref (codName names)))
-              , Do (Elaborate (Lit (VSurface (intoPiTail b cod z))))
+              , Do (elaborating (Lit (VSurface (intoPiTail b cod z))))
               , Do (Goto (Ref (hereName names)))
               , Do Solve
               ]
@@ -450,9 +425,9 @@ compile env sigs ctx n0 z = case focus z of
                 ]
               , fill (Ref (arrName names))
               , [ Do (Goto (Ref (domName names)))
-                , Do (Elaborate (Lit (VSurface (intoArrowDomain b a z))))
+                , Do (elaborating (Lit (VSurface (intoArrowDomain b a z))))
                 , Do (Goto (Ref (codName names)))
-                , Do (Elaborate (Lit (VSurface (intoArrowCodomain a b z))))
+                , Do (elaborating (Lit (VSurface (intoArrowCodomain a b z))))
                 , Do (Goto (Ref (hereName names)))
                 , Do Solve
                 ]
@@ -493,15 +468,15 @@ compile env sigs ctx n0 z = case focus z of
                 -- for the value's own @FILL@ to unify against.
               , [ i | Just ty <- [ann]
                     , i <- [ Do (Goto (Ref (tyName names)))
-                           , Do (Elaborate
+                           , Do (elaborating
                                   (Lit (VSurface (intoLetType x v body ty z))))
                            ]
                 ]
               , [ Do (Goto (Ref (valName names)))
-                , Do (Elaborate (Lit (VSurface (intoLetValue x ann body v z))))
+                , Do (elaborating (Lit (VSurface (intoLetValue x ann body v z))))
                 , Do (Goto (Ref (hereName names)))
                 , Do (Define (lit' x) (Ref (valName names)))
-                , Do (Elaborate (Lit (VSurface (intoLetBody x ann v body z))))
+                , Do (elaborating (Lit (VSurface (intoLetBody x ann v body z))))
                 ]
               ]
           , n1
@@ -524,7 +499,7 @@ compile env sigs ctx n0 z = case focus z of
             , Bind (tyName names)
                 (Claim (Ref (tyName names ++ "n")) (lit (Universe (LVar l))))
             , Do (Goto (Ref (tyName names)))
-            , Do (Elaborate (Lit (VSurface (intoAnnotType e ty z))))
+            , Do (elaborating (Lit (VSurface (intoAnnotType e ty z))))
             , Do (Goto (Ref (hereName names)))
             , Bind (goalName names) Goal
               -- **@unify-into@ and not @unify@** (MS4 phase 41g). Brady's @FILL@
@@ -533,7 +508,7 @@ compile env sigs ctx n0 z = case focus z of
         -- is wanted. @prim-try@ on the next line does the real check and
         -- subsumes, so what is asked here is solving, not deciding.
       , Do (UnifyInto (Ref (tyName names)) (Ref (goalName names)))
-            , Do (Elaborate (Lit (VSurface (intoAnnotTerm ty e z))))
+            , Do (elaborating (Lit (VSurface (intoAnnotTerm ty e z))))
             ]
           , n1
           )
@@ -587,7 +562,7 @@ compile env sigs ctx n0 z = case focus z of
                       -- motive and the target elaborated first it is a type.
                     , concat
                         [ [ Do (Goto (Ref (slot k)))
-                          , Do (Elaborate
+                          , Do (elaborating
                                  (Lit (VSurface
                                         (intoElimField d ps mot ms is tgt k f z))))
                           ]
@@ -610,17 +585,6 @@ compile env sigs ctx n0 z = case focus z of
     n     = n0 + 1
     names = namesFor n0
 
-    -- @E⟦x⟧ = FILL x; SOLVE@ — and **@FILL@ is not @try@**.
-    --
-    -- @try@ /checks/ the term against the goal, so it needs the two types to
-    -- match already; Brady's @FILL@ *"UNIFYs its type with the goal's"*. That
-    -- is the difference between a leaf at a concrete goal — which is all
-    -- @elab-var@ ever met — and one at a goal that is still a hole, which is
-    -- exactly what the application case claims for its function and argument.
-    -- So every leaf goes through the same filling sequence the application
-    -- case does.
-    attach t = Right (fill (lit t) ++ [Do Solve], n)
-
     -- Thesis §2.7's @=@-binding: park the term in a definition, unify the type
     -- it has with the type the hole wants, and only then attach it. What
     -- @unify-refine-core@'s body does, emitted rather than called, so that the
@@ -640,6 +604,16 @@ compile env sigs ctx n0 z = case focus z of
       , Do (Try (Ref (refName names)))
       ]
     lit' x   = Lit (VText x)
+
+    -- **A sub-term goes through the RULE, not through this op** (MS4 phase 49).
+    -- While elaboration lived entirely in Haskell the recursion was
+    -- @prim-elaborate@ calling itself; now each surface node is a clause of
+    -- @elaborate@ and a sub-term has to be dispatched over them.
+    --
+    -- **That is what makes the decomposition incremental**: a case moved into
+    -- the rule base is reached from here without this module changing again,
+    -- and when the last one moves this module goes.
+    elaborating o = Call (GlobalName "elaborate") [o]
 
     -- What the machine recorded about this name's argument positions, if it
     -- recorded anything. A name with no entry — every DC-declared global, and

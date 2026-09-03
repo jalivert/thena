@@ -42,8 +42,8 @@ thena spine> :theorem arr : Type₁
 proving arr : Type₁
 thena spine> elaborate (Type₀ -> Type₀)
 already equal
-solved: ?ℓ24
-solved: ?ℓ25
+solved: ?ℓ22
+solved: ?ℓ23
 thena spine> qed
 arr : Type₁   ∎
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
@@ -51,7 +51,7 @@ declared Nat
 thena spine> :theorem lt : Nat
 proving lt : Nat
 thena spine> elaborate (let y : Nat = zero in succ y)
-solved: ?ℓ39
+solved: ?ℓ35
 already equal
 already equal
 already equal
@@ -71,7 +71,7 @@ lt : Nat   ∎
 thena spine> :theorem asc : Nat
 proving asc : Nat
 thena spine> elaborate (zero : Nat)
-solved: ?ℓ55
+solved: ?ℓ48
 already equal
 already equal
 thena spine> qed

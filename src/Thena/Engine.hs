@@ -45,9 +45,8 @@ module Thena.Engine
   ) where
 
 import Data.List (intercalate, nub)
-import Data.Maybe (listToMaybe)
 
-import Thena.Core.Level (Level (..), freshLevelMeta, levelVarName)
+import Thena.Core.Level (Level (..), freshLevelMeta, levelOfNat, levelVarName)
 import Thena.Core.Context (Context, Entry (..), entryIdent, entryVar)
 import Thena.Core.Term
   ( Core (..)
@@ -94,6 +93,7 @@ import Thena.Errors
   , TypeError (..)
   )
 import Thena.Surface.Concrete (Plicity (..))
+import qualified Thena.Surface.Concrete as Concrete
 import Thena.Ops
   ( AnswerKind
   , Env
@@ -124,6 +124,7 @@ import Thena.Rules (RuleBase, RuleIter, arities, clauses, dispatch, hasNext, nex
 import Thena.Syntax.Lexer (isIdentifier)
 import qualified Thena.Elaborate as Elaborate
 import Thena.Surface.Zipper (SurfaceZipper)
+import qualified Thena.Surface.Zipper as Zipper
 
 -- --------------------------------------------------------------------------
 -- The machine
@@ -1063,8 +1064,34 @@ perform instr rest m = case operation instr of
           | otherwise ->
               failure (CannotRead (ResolveFailed (NotInScope w))) m
     where
+      -- **The INNERMOST binding of that name**, which is what shadowing means
+      -- and what "Thena.Syntax.Resolve" and "Thena.Elaborate"\'s @inContext@
+      -- both give. Γ runs outermost-first, so this folds rather than taking
+      -- the head.
+      --
+      -- **It took the head until MS4 phase 49**, so a shadowed name resolved to
+      -- the binding it was shadowing. Nothing had asked: phase 48 shipped the
+      -- op with a test that had only one binding of the name in scope, and no
+      -- rule used it until the leaf clauses did.
       inScopeAt w =
-        listToMaybe [ entryVar e | e <- contextAt, entryIdent e == Ident w ]
+        foldl (\acc e -> if entryIdent e == Ident w then Just (entryVar e) else acc)
+              Nothing contextAt
+
+  -- **The two surface readers** (MS4 phase 49). Each is paired with the test
+  -- that makes it total in the clause that uses it, and fails rather than
+  -- guessing when it is reached any other way.
+  Op.SurfaceNameOf x -> case surfaceAt x of
+    Left r  -> failure r m
+    Right s -> case s of
+      Concrete.SurfaceName w -> produce (VText w) m
+      _                      -> failure (ExpectedSurfaceShape "a name") m
+
+  Op.SurfaceUniverseOf x -> case surfaceAt x of
+    Left r  -> failure r m
+    Right s -> case s of
+      Concrete.SurfaceUniverse k ->
+        produce (VTerm (Trailing (Universe (levelOfNat k)))) m
+      _ -> failure (ExpectedSurfaceShape "a written universe") m
 
   Goal -> case Cursor.expectedType (cursor (development m)) of
     Just t  -> produce (VTerm (Trailing t)) m
@@ -1194,6 +1221,9 @@ perform instr rest m = case operation instr of
     keeping g n cur = fmap (\cur' -> (cur', n)) (g cur)
 
     contextAt = focusContext (development m)
+
+    -- The surface term an operand names, focus and all (MS4 phase 49).
+    surfaceAt x = Zipper.focus <$> operandSurface (env (exec m)) x
 
     -- Claim a hole for every Π domain, extending the spine as it goes, and
     -- stop at the first type that is not a Π — that is what makes @apply@

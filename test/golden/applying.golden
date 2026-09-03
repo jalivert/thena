@@ -10,10 +10,22 @@ try-core ‹t›
 abandon
 eliminate-core ‹t›
 prove
-elaborate ‹t›
 fill ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
 thena spine> apply-core ⌜ Just ⌝
 solved: A
 thena spine> :show

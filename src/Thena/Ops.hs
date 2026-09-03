@@ -360,6 +360,19 @@ data Op
     -- and resolved it in Γ, and phase 41 deleted it with the rest of the hint
     -- machinery. This takes a /name/ and answers with level arguments already
     -- in place, which is the question elaboration actually asks.
+  | SurfaceNameOf Operand
+    -- ^ the name a surface term's focus is written with, as text (MS4 phase
+    -- 49). Paired with 'SurfaceIsName', which is what makes it total in the
+    -- clause that uses it.
+    --
+    -- **@Of@, because 'Thena.Surface.Concrete.SurfaceName' is a different thing
+    -- with the same word** — that constructor /is/ a surface term, this op
+    -- /reads one/, and every module resolving a rule imports both.
+  | SurfaceUniverseOf Operand
+    -- ^ the universe a surface @Typeₙ@ denotes, as a term (MS4 phase 49).
+    --
+    -- **A term and not a level**, for 'FreshUniverse'\'s reason: 'Value' has no
+    -- level case, and a universe is the only place a written level appears.
   | Goal
     -- ^ the type the focused hole is claimed at (§7.2, phase 24). **The first
     -- op that reads the development** — §7.2's sketch called it @GoalType@ and
@@ -722,6 +735,8 @@ produces o = case o of
   ApplyTo _ _  -> True
   FreshUniverse  -> True
   ResolveName _  -> True
+  SurfaceNameOf _ -> True
+  SurfaceUniverseOf _ -> True
   Goal         -> True
   Typing _     -> True
   Define _ _   -> True   -- the variable it bound, as 'Assume' and 'Claim' do
@@ -787,6 +802,8 @@ operandsOf o = case o of
   ApplyTo a b  -> [a, b]
   FreshUniverse  -> []
   ResolveName x  -> [x]
+  SurfaceNameOf x -> [x]
+  SurfaceUniverseOf x -> [x]
   Goal         -> []
   Typing a     -> [a]
   Define a b   -> [a, b]
@@ -870,6 +887,25 @@ data Test
   | GoalTypeIsLet   -- ^ … or to a @let@, which is table 2.8's other intro
   | SurfaceIsName Operand
     -- ^ the operand is a surface term whose focus is a name (MS4 phase 47)
+    --
+    -- **The twelve below complete the set** (MS4 phase 49) — one per 'Surface'
+    -- constructor, so every clause of @elaborate@ can say which node it is for
+    -- and **no two heads can match the same term**. His ruling, 2026-09-03:
+    -- /"those head-predicates can be useful in the future. And what's more —
+    -- adding them is not payed in design. They are not a design decision. If we
+    -- never use them after MS4, we just drop them during a cleanup refactor."/
+  | SurfaceIsUniverse Operand      -- ^ @Typeₙ@
+  | SurfaceIsUniverseOpen Operand  -- ^ a bare @Type@
+  | SurfaceIsPlaceholder Operand   -- ^ @_@
+  | SurfaceIsHole Operand          -- ^ @?foo@
+  | SurfaceIsApp Operand           -- ^ a spine
+  | SurfaceIsLambda Operand        -- ^ @\ x -> b@
+  | SurfaceIsForall Operand        -- ^ @∀ (x : A) -> B@
+  | SurfaceIsArrow Operand         -- ^ @A -> B@
+  | SurfaceIsLet Operand           -- ^ @let x = v in b@
+  | SurfaceIsAscription Operand    -- ^ @e : T@
+  | SurfaceIsElim Operand          -- ^ @elim D … t@
+  | SurfaceIsDo Operand            -- ^ @do { … }@
   deriving (Eq, Show)
 
 
@@ -945,6 +981,8 @@ opKeyword o = case o of
   ApplyTo _ _  -> "apply-to"
   FreshUniverse  -> "fresh-universe"
   ResolveName _  -> "resolve-name"
+  SurfaceNameOf _ -> "surface-name"
+  SurfaceUniverseOf _ -> "surface-universe"
   Goal         -> "goal"
   Typing _     -> "typeof"
   Define _ _   -> "define"

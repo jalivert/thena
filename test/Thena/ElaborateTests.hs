@@ -107,13 +107,22 @@ elaborating :: Surface -> Either FailReason Machine
 elaborating = elaboratingAt hole
 
 -- | The same, at a cursor of your own.
+--
+-- **It calls the rule, not the op** (MS4 phase 49). Elaboration is a rule of
+-- thirteen clauses now, and @prim-elaborate@ is only what the eight unmoved
+-- ones run — so a test that drove the op directly would be testing less than
+-- the system does, and could not reach a leaf at all.
 elaboratingAt :: Cursor -> Surface -> Either FailReason Machine
-elaboratingAt cur s = snd (runOut (machineAt cur [Do (Ops.Elaborate (Lit (VSurface (rootedAt s))))]))
+elaboratingAt cur s =
+  snd (runOut (machineAt cur
+        [Do (Ops.Call (GlobalName "elaborate") [Lit (VSurface (rootedAt s))])]))
 
 -- | A machine at a cursor, loaded with a program.
+--
+-- **With the standard base installed**, because elaboration lives in it.
 machineAt :: Cursor -> [Instr] -> Machine
 machineAt cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals [] [] 1000)
+  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals expectedBase [] 1000)
 
 -- | @? goal : ∀ (a : Type₀) (b : Type₀) -> Type₀@ — two binders, so a miscount
 -- would show.
@@ -425,11 +434,17 @@ baseTests =
   testGroup
     "the shipped base"
     [ -- Every rule whose head passes, and no partition to divide them.
+      --
+      -- **@elaborate@ appears thirteen times** (MS4 phase 49): one clause per
+      -- surface node, and a test about an argument nobody supplied does not
+      -- exclude a clause (phase 47), so a bare @:matches@ lists them all. What
+      -- to show a reader is presentation, deliberately unexamined (§8).
       testCase "every rule whose head passes is a candidate" $
         [ n | Rule (GlobalName n) _ _ _ <- drain (matches expectedBase emptyGlobals hole) ]
           @?= [ "attack", "try-core", "abandon", "eliminate-core"
-              , "prove", "elaborate", "fill", "unify-refine-core", "apply-core"
+              , "prove", "fill", "unify-refine-core", "apply-core"
               ]
+              ++ replicate 13 "elaborate"
 
     , testCase "prove is a rule over prim-prove" $
         case [ r | r@(Rule (GlobalName "prove") _ _ _) <- drain (matches expectedBase emptyGlobals hole) ] of

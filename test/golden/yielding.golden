@@ -35,7 +35,7 @@ thena spine> do { goto k }
 look at this
 (yield to hand control back)
 thena spine> yield
-chose 12: attack
+chose 11: attack
 thena spine> yield
 nothing has yielded
 thena spine> :quit

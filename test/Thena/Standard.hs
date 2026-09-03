@@ -74,11 +74,11 @@ expectedStandard =
   , Rule (GlobalName "eliminate-core")  ["t"] [FocusIsHole]                 [Do (Op.Eliminate (Ref "t"))]
   , proveRule
   , proveGuess
-  , elaborateRule
   , fillRule
   , unifyRefine
   , applyRule
   ]
+    ++ elaborateClauses
 
 -- | Brady's @FILL@ — **his request, 2026-09-01** (MS4 phase 48):
 --
@@ -183,6 +183,45 @@ proveGuess = Rule (GlobalName "prove") [] [FocusIsGuess] [Do Prove]
 -- It replaces @elab-var@, whose head asked about the retired hint and whose
 -- body resolved it. Step 2 of the two-step (@MS4.md@) is what turns this into
 -- a clause per surface node.
-elaborateRule :: Rule
-elaborateRule = Rule (GlobalName "elaborate") ["t"] [FocusIsHole]
-  [Do (Op.Elaborate (Ref "t"))]
+-- | Elaboration, **one clause per surface node** (MS4 phase 49, step 2).
+--
+-- **Every clause names the node it is for**, so exactly one head matches any
+-- term and a call to @elaborate@ never has a choice to make. His ruling,
+-- 2026-09-03, on head predicates: /"adding them is not payed in design. They
+-- are not a design decision. If we never use them after MS4, we just drop them
+-- during a cleanup refactor."/
+--
+-- The clauses whose body is still @prim-elaborate@ are the cases step 2 has not
+-- reached; each later phase fills one in, and when the last is done
+-- @prim-elaborate@ and "Thena.Elaborate" go together.
+elaborateClauses :: [Rule]
+elaborateClauses =
+  [ clause SurfaceIsName
+      [ Bind "w" (Op.SurfaceNameOf (Ref "t"))
+      , Bind "x" (Op.ResolveName (Ref "w"))
+      , Do (Call (GlobalName "fill") [Ref "x"])
+      , Do (Call (GlobalName "solve") [])
+      ]
+  , clause SurfaceIsUniverse
+      [ Bind "u" (Op.SurfaceUniverseOf (Ref "t"))
+      , Do (Call (GlobalName "fill") [Ref "u"])
+      , Do (Call (GlobalName "solve") [])
+      ]
+  , clause SurfaceIsUniverseOpen
+      [ Bind "u" Op.FreshUniverse
+      , Do (Call (GlobalName "fill") [Ref "u"])
+      , Do (Call (GlobalName "solve") [])
+      ]
+    -- **Two empty bodies**, which the rule grammar did not admit before this
+    -- phase: @E⟦_⟧@ /is/ do nothing, and a clause that does nothing is a
+    -- different answer from a clause that does not match.
+  , clause SurfaceIsPlaceholder []
+  , clause SurfaceIsHole []
+  ]
+    ++ [ clause t [Do (Op.Elaborate (Ref "t"))]
+       | t <- [ SurfaceIsApp, SurfaceIsLambda, SurfaceIsForall, SurfaceIsArrow
+              , SurfaceIsLet, SurfaceIsAscription, SurfaceIsElim, SurfaceIsDo
+              ]
+       ]
+  where
+    clause test = Rule (GlobalName "elaborate") ["t"] [FocusIsHole, test (Ref "t")]

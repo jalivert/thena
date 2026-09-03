@@ -222,6 +222,14 @@ data FailReason
     -- ^ an operand was not a 'Thena.Ops.VSurface'. Shaped like 'ExpectedText'
     -- and 'ExpectedTerm', and here for their reason: the value itself may not
     -- be named below @Core@
+  | ExpectedSurfaceShape String
+    -- ^ a surface reader was given a term of the wrong shape (MS4 phase 49):
+    -- @surface-name@ on something that is not a name, @surface-universe@ on
+    -- something that is not a written universe. Carries the shape it wanted.
+    --
+    -- **Each reader is paired with the test that makes it total in the clause
+    -- using it** — @when (surface-is-name s) then w = surface-name s@ — so this
+    -- is what a body reaching one any other way gets, rather than a guess.
   | NoClauseMatched GlobalName Int [Int]
     -- ^ @call ‹name› ‹args›@ found nothing to run: the name, the number of
     -- arguments it was given, and the arities of the rules that do bear that

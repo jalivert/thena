@@ -30,8 +30,11 @@ import Thena.Ops (AnswerKind (..), partWords)
 
 -- | Run a script of command lines, answering nothing, and give back the last
 -- response and the session it left.
+-- | **Starting from a session with the standard base**, because elaboration is
+-- a rule now (MS4 phase 49) and `:infer ‹surface›` calls it. It was
+-- 'newSession' while @prim-elaborate@ was reachable without one.
 say :: [String] -> (Session, Response)
-say = foldl next (newSession, Blank)
+say = foldl next (withRules, Blank)
   where
     next (s, _) l = command s l
 

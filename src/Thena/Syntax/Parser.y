@@ -201,10 +201,19 @@ Test :: { RawTest }
   : ident                                  { RawTest $1 [] }
   | '(' ident Operands ')'                 { RawTest $2 (reverse $3) }
 
--- Accumulated in reverse, like 'Binders'. At least one: 'Rule' requires 'then'
--- and 'then' with nothing after it is a parse error rather than an empty body.
+-- Accumulated in reverse, like 'Binders'.
+--
+-- **A body may be empty** (MS4 phase 49), where until then @then@ with nothing
+-- after it was a parse error. §8 refused one on the argument that /a rule with
+-- no body does nothing/, and the surface language's own @_@ is the
+-- counterexample: @E⟦_⟧@ /is/ do nothing — his /"those elaborate just by not
+-- elaborating"/. A clause that does nothing and a clause that does not match
+-- are different answers, so an empty body says something.
+--
+-- @then@ stays required, so a rule still says where its body begins.
 Body :: { [RawInstr] }
-  : Instr                                  { [$1] }
+  :                                        { [] }
+  | Instr                                  { [$1] }
   | Body ';' Instr                         { $3 : $1 }
 
 Instr :: { RawInstr }

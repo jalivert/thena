@@ -22,8 +22,6 @@ rule prove :- when focus-is-hole then prim-prove
 
 rule prove :- when focus-is-guess then prim-prove
 
-rule elaborate t :- when focus-is-hole then prim-elaborate t
-
 rule fill t :- when focus-is-hole
   then n = fresh-name "refined"
      ; x = define n t
@@ -39,3 +37,47 @@ rule unify-refine-core t :- when focus-is-hole
 rule apply-core f :- when focus-is-hole
   then s = prim-apply f
      ; unify-refine-core s
+
+-- --------------------------------------------------------------------------
+-- Elaboration, one clause per surface node (MS4 step 2)
+--
+-- Every clause names the node it is for, so exactly one head matches any term
+-- and a call to elaborate never has a choice to make. The clauses whose body is
+-- still prim-elaborate are the ones step 2 has not reached yet; each phase
+-- fills one in, and when the last is done prim-elaborate goes.
+
+-- E⟦x⟧ = FILL x ; SOLVE — Brady's variable case.
+rule elaborate t :- when focus-is-hole (surface-is-name t)
+  then w = surface-name t
+     ; x = resolve-name w
+     ; fill x
+     ; solve
+
+-- E⟦Typeₙ⟧ — the level is written, so the term is too.
+rule elaborate t :- when focus-is-hole (surface-is-universe t)
+  then u = surface-universe t
+     ; fill u
+     ; solve
+
+-- E⟦Type⟧ — typical ambiguity: the level is a fresh meta, unification decides.
+rule elaborate t :- when focus-is-hole (surface-is-universe-open t)
+  then u = fresh-universe
+     ; fill u
+     ; solve
+
+-- E⟦_⟧ — "those elaborate just by not elaborating". The hole is already there.
+rule elaborate t :- when focus-is-hole (surface-is-placeholder t) then
+
+-- E⟦?foo⟧ — a named placeholder is a real hole, which the focus already is.
+rule elaborate t :- when focus-is-hole (surface-is-hole t) then
+
+-- Still in Haskell, behind prim-elaborate. One clause each, so that moving one
+-- into the rule language changes this file and nothing else.
+rule elaborate t :- when focus-is-hole (surface-is-app t)        then prim-elaborate t
+rule elaborate t :- when focus-is-hole (surface-is-lambda t)     then prim-elaborate t
+rule elaborate t :- when focus-is-hole (surface-is-forall t)     then prim-elaborate t
+rule elaborate t :- when focus-is-hole (surface-is-arrow t)      then prim-elaborate t
+rule elaborate t :- when focus-is-hole (surface-is-let t)        then prim-elaborate t
+rule elaborate t :- when focus-is-hole (surface-is-ascription t) then prim-elaborate t
+rule elaborate t :- when focus-is-hole (surface-is-elim t)       then prim-elaborate t
+rule elaborate t :- when focus-is-hole (surface-is-do t)         then prim-elaborate t

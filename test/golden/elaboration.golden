@@ -22,10 +22,22 @@ try-core ‹t›
 abandon
 eliminate-core ‹t›
 prove
-elaborate ‹t›
 fill ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
 thena spine> elaborate a
 already equal
 thena spine> :show
@@ -72,75 +84,72 @@ thena spine> along
 thena spine> :step on
 thena spine> elaborate a
 pc
-  0  prim-elaborate t
+  0  w = surface-name t
+  1  x = resolve-name w
+  2  call fill x
+  3  call solve
 env
   t = ‹a›
 stack
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  0  ref36n = fresh-name "refined"
-  1  ref36 = define ref36n ⌜a⌝
-  2  ty36 = typeof ref36
-  3  goal36 = goal
-  4  unify-into ty36 goal36
-  5  prim-try ref36
-  6  prim-solve
+  0  x = resolve-name w
+  1  call fill x
+  2  call solve
 env
+  w = "a"
   t = ‹a›
 stack
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  0  ref36 = define ref36n ⌜a⌝
-  1  ty36 = typeof ref36
-  2  goal36 = goal
-  3  unify-into ty36 goal36
-  4  prim-try ref36
-  5  prim-solve
+  0  call fill x
+  1  call solve
 env
-  ref36n = "refined"
+  x = ⌜a⌝
+  w = "a"
   t = ‹a›
 stack
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  0  ty36 = typeof ref36
-  1  goal36 = goal
-  2  unify-into ty36 goal36
-  3  prim-try ref36
-  4  prim-solve
+  0  n = fresh-name "refined"
+  1  x = define n t
+  2  s = typeof x
+  3  g = goal
+  4  unify-into s g
+  5  prim-try x
 env
-  ref36 = ⌜refined⌝
-  ref36n = "refined"
-  t = ‹a›
+  t = ⌜a⌝
 stack
+  call, 1 instruction(s) to resume
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  0  goal36 = goal
-  1  unify-into ty36 goal36
-  2  prim-try ref36
-  3  prim-solve
+  0  x = define n t
+  1  s = typeof x
+  2  g = goal
+  3  unify-into s g
+  4  prim-try x
 env
-  ty36 = ⌜A⌝
-  ref36 = ⌜refined⌝
-  ref36n = "refined"
-  t = ‹a›
+  n = "refined"
+  t = ⌜a⌝
 stack
+  call, 1 instruction(s) to resume
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  0  unify-into ty36 goal36
-  1  prim-try ref36
-  2  prim-solve
+  0  s = typeof x
+  1  g = goal
+  2  unify-into s g
+  3  prim-try x
 env
-  goal36 = ⌜A⌝
-  ty36 = ⌜A⌝
-  ref36 = ⌜refined⌝
-  ref36n = "refined"
-  t = ‹a›
+  x = ⌜refined⌝
+  n = "refined"
+  t = ⌜a⌝
 stack
+  call, 1 instruction(s) to resume
   call, 0 instruction(s) to resume
 thena spine> :step off
 thena spine> :quit

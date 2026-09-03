@@ -43,10 +43,22 @@ try-core ‹t›
 abandon
 eliminate-core ‹t›
 prove
-elaborate ‹t›
 fill ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
 thena spine> eliminate-core ⌜ Type₀ ⌝
 stuck: Type₀ is not a target: its type is Type₁, not a fully applied datatype
 thena spine> eliminate-core ⌜ succ ⌝

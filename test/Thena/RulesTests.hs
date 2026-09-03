@@ -141,8 +141,7 @@ matchTests =
     [ -- Three at a hole, and that is what makes the list a list: phase 16 has
       -- to choose between them, and the user sees the choice being made.
       testCase "a hole offers the hole rules, in definition order" $
-        matching emptyGlobals (holeAt type0)
-          @?= ["attack", "try-core", "abandon", "eliminate-core", "prove", "elaborate", "fill", "unify-refine-core", "apply-core"]
+        matching emptyGlobals (holeAt type0) @?= everyHoleRule
 
     , testCase "a guess at a non-Π offers only solve and regret" $
         matching emptyGlobals (guessAt type0)
@@ -240,8 +239,8 @@ iteratorTests =
             deep = drop 2 (drain it)
          in do
               _ <- pure deep
-              map nameOf (drain it) @?= ["attack", "try-core", "abandon", "eliminate-core", "prove", "elaborate", "fill", "unify-refine-core", "apply-core"]
-              map nameOf deep @?= ["abandon", "eliminate-core", "prove", "elaborate", "fill", "unify-refine-core", "apply-core"]
+              map nameOf (drain it) @?= everyHoleRule
+              map nameOf deep @?= drop 2 everyHoleRule
     ]
 
 -- --------------------------------------------------------------------------
@@ -375,7 +374,11 @@ producesTests =
         -- own environment — restored on return, and without the destination.
       , ("prim-prove",  e, hole,    [],            Ops.Prove)
       , ("call",        e, hole,    [],            Ops.Call (GlobalName "try-core") [term type0])
-      , ("prim-elaborate", e, hole, [],           Ops.Elaborate (Lit (VSurface (rootedAt SurfaceUniverseOpen))))
+        -- **An arrow, not a bare @Type@** (MS4 phase 49): the leaves are clauses
+        -- of @elaborate@ now and this op refuses them, so the term here has to
+        -- be one of the cases it still handles.
+      , ("prim-elaborate", e, hole, [],
+           Ops.Elaborate (Lit (VSurface (rootedAt (SurfaceArrow SurfaceUniverseOpen SurfaceUniverseOpen)))))
       ]
 
     -- @try ‹t›@, as 'expectedBase' ships it — what @call@ needs something to
@@ -441,3 +444,15 @@ ranOk :: Machine -> IO ()
 ranOk m = case runOut m of
   Right _ -> pure ()
   Left r  -> assertFailure ("expected the program to run, got " ++ show r)
+
+-- | Every rule the shipped base offers at a hole, in definition order.
+--
+-- **@elaborate@ thirteen times** (MS4 phase 49): one clause per surface node,
+-- and a test about an argument nobody supplied does not exclude a clause
+-- (phase 47), so a listing with no argument shows them all.
+everyHoleRule :: [String]
+everyHoleRule =
+  [ "attack", "try-core", "abandon", "eliminate-core", "prove", "fill"
+  , "unify-refine-core", "apply-core"
+  ]
+    ++ replicate 13 "elaborate"

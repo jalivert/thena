@@ -1187,7 +1187,11 @@ renderFailReason r = case r of
   -- @Failed@ already had — which is the whole reason 'SyntaxError' is one case
   -- rather than two.
   CannotRead e      -> renderSyntaxError e
-  ExpectedSurface   -> "expected a hint"
+  -- **It read /expected a hint/ until MS4 phase 49**, and the word `hint` had
+  -- not meant anything since phase 41 retired the machinery — his instruction,
+  -- that it *"is misleading and ambiguous"*.
+  ExpectedSurface   -> "expected a surface term"
+  ExpectedSurfaceShape what -> "expected a surface term that is " ++ what
   -- One reason, three messages (§8, phase 23): the name is unknown, the name
   -- is known at other arities, or clauses of the right arity all failed their
   -- heads. Which one it is falls out of the arities the reason carries.

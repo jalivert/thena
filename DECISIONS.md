@@ -405,6 +405,44 @@ Elaboration had been given the directed version already; the tactic had not, and
 the same operation answered differently depending on which one you reached it
 through.
 
+### Elaboration is a rule with one clause per surface node
+
+*Decided 2026-09-03.*
+
+`elaborate` is thirteen clauses, and each says which surface node it is for:
+
+```
+rule elaborate t :- when focus-is-hole (surface-is-name t)
+  then w = surface-name t ; x = resolve-name w ; fill t ; solve
+
+rule elaborate t :- when focus-is-hole (surface-is-placeholder t) then
+```
+
+So `:step` through an elaboration shows the clause, not one opaque instruction:
+
+```
+thena spine> elaborate a
+pc
+  0  w = surface-name t
+  1  x = resolve-name w
+  2  call fill x
+  3  call solve
+```
+
+**Exactly one head matches any term**, so a call to `elaborate` never has a
+choice to make and never leaves a choice point. That is what the head predicates
+are for — there is one `surface-is-…` per node kind, and a clause that names its
+node cannot collide with another.
+
+**A rule body may be empty**, which it could not before. `E⟦_⟧` is *do nothing*:
+the hole is already there and unification is expected to find it. A clause that
+does nothing and a clause that does not match are different answers, so the
+empty body is saying something. `then` is still required.
+
+Eight of the thirteen still run `prim-elaborate`, the one large instruction the
+elaborator was written as. Each is a clause of its own, so moving one into the
+rule language changes the rule file and nothing else.
+
 ### Two ops a rule needs that it cannot write down
 
 *Decided 2026-09-03.*
