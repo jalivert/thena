@@ -101,6 +101,9 @@ env
   t = ‹a›
 stack
   call, 0 instruction(s) to resume
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
 thena spine> :step
 pc
   0  x = resolve-name w
@@ -111,6 +114,9 @@ env
   t = ‹a›
 stack
   call, 0 instruction(s) to resume
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
 thena spine> :step
 pc
   0  call fill x
@@ -121,6 +127,9 @@ env
   t = ‹a›
 stack
   call, 0 instruction(s) to resume
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
 thena spine> :step
 pc
   0  n = fresh-name "refined"
@@ -134,6 +143,9 @@ env
 stack
   call, 1 instruction(s) to resume
   call, 0 instruction(s) to resume
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
 thena spine> :step
 pc
   0  x = define n t
@@ -147,6 +159,9 @@ env
 stack
   call, 1 instruction(s) to resume
   call, 0 instruction(s) to resume
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
 thena spine> :step
 pc
   0  s = typeof x
@@ -160,5 +175,8 @@ env
 stack
   call, 1 instruction(s) to resume
   call, 0 instruction(s) to resume
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
 thena spine> :step off
 thena spine> :quit

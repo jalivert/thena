@@ -9,8 +9,12 @@ proving t : Nat
 thena spine> elaborate (do { attack ; prove })
 chose 11: solve
 backtracking to 11: regret
+chose 12: attack
 thena spine> :show
-▶ let ? t : Nat in
+▶ let ? t : Nat ≐ (
+    let ? t1 : Nat in
+    t1
+  ) in
   t
 thena spine> :abandon
 abandoned t

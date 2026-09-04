@@ -363,6 +363,23 @@ sessionTests =
       , "elaborate (elim Ev () (\\ n p -> Nat) (zero (\\ n p ih -> succ ih)) (zero) evZero)"
       , "qed"
       ]
+    -- **A failure after a nested call returned is still reported** (MS4 phase
+    -- 57), and it was not until then. A @Choice@ frame records its own
+    -- caller\'s leftovers and relies on the frames below it for the rest of the
+    -- continuation; a returned @Call@ used to be **popped**, which removed one
+    -- of those frames from under it. Backtracking then restored a continuation
+    -- with a hole in it, the alternative succeeded, and the machine reported
+    -- @Completed@ having dropped the caller\'s remaining program.
+    --
+    -- @elim@ is what makes the nested choice point here; the target is @_@, so
+    -- the elimination cannot finish and @pop-development@ fails **after** that
+    -- choice point has returned. The demonstration in its own right is
+    -- @examples/choice-points.thena.rules@, six lines of rule language.
+  , notOk "a failure after a nested call returned is not swallowed"
+      [ "data " ++ natDecl
+      , "declare bad : Nat -> Nat ; bad = \\ n -> "
+          ++ "elim Nat () (\\ k -> Nat) ((zero) (\\ k ih -> succ ih)) () _"
+      ]
     -- **A declaration that does not finish SAYS SO** (MS4 phase 56), and it
     -- did not between phase 53 and here. @pop-development@ truncated the frame
     -- stack to the development\'s own depth on success and **not on failure**,

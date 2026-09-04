@@ -245,7 +245,7 @@ retryTests =
         let base = bases [works, fails]
             -- A Call frame between the choice point and the top of the stack.
             m0 = (ranTo (machine base hole [Do Ops.Prove]))
-            m1 = m0 { exec = (exec m0) { stack = Call [] [] : stack (exec m0) } }
+            m1 = m0 { exec = (exec m0) { stack = Call [] [] False : stack (exec m0) } }
         case retryFrom Nothing m1 of
           Right (_, note) -> note @?= "retrying 1000: fails (1 frame(s) dropped)"
           Left e          -> assertFailure ("expected a retry, got " ++ show e)

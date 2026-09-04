@@ -144,10 +144,19 @@ tests =
         , testCase "an empty program returns into the frame below it" $
             -- Nothing in phase 4 pushes a frame; this is the return case of
             -- §7.3, which phase 16 exercises for real.
+            --
+            -- **The frame is KEPT and marked, not popped** (MS4 phase 57).
+            -- Popping it dismantled the stack under any 'Choice' standing on
+            -- it, and a choice point relies on the frames below it for the
+            -- rest of the continuation. Both frames have one lifetime now:
+            -- entered, returned, stepped over ever after.
             let resumed = [Do (Ops.Say (text "back"))]
-                m = (machine []) { exec = Exec [] [] [Call resumed [("x", VText "kept")]] }
+                entered = Call resumed [("x", VText "kept")] False
+                m = (machine []) { exec = Exec [] [] [entered] }
              in case step m of
-                  Continue m' -> (pc (exec m'), envOf m', stack (exec m')) @?= (resumed, [("x", VText "kept")], [])
+                  Continue m' ->
+                    (pc (exec m'), envOf m', stack (exec m'))
+                      @?= (resumed, [("x", VText "kept")], [entered { returned = True }])
                   other       -> assertFailure ("expected Continue, got " ++ show other)
         , testCase "Bind names the op's result" $
             case runTo (machine [Bind "s" (Ops.Concat (text "a") (text "b"))]) of

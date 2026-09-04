@@ -223,6 +223,18 @@ data Frame
   = Call
       { resume    :: [Instr]
       , resumeEnv :: Env
+      , returned  :: Bool
+        -- ^ has control already passed back out of this call? See 'resumeFrom',
+        -- and it means for a 'Call' exactly what it means for a 'Choice'.
+        --
+        -- **A returned frame is stepped over, never popped** (MS4 phase 57).
+        -- It used to be popped, and that quietly dismantled the stack
+        -- underneath any 'Choice' standing on it: a choice point records its
+        -- own caller\'s leftovers and /relies on the frames below it/ for the
+        -- rest of the continuation, so removing one of them left it standing
+        -- on a stack it was never made on. Backtracking then restored a
+        -- continuation with a hole in it — and the work that had migrated into
+        -- @pc@ was dropped without a word.
       }
   | Choice
       { resume    :: [Instr]
@@ -236,7 +248,9 @@ data Frame
       , choiceId  :: Int         -- ^ what @retry ‹n›@ names it by
       , chosen    :: GlobalName  -- ^ the rule this frame is currently running
       , returned  :: Bool
-        -- ^ has control already passed back out of this call? See 'resumeFrom'.
+        -- ^ **the same field a 'Call' carries, and it means the same thing.**
+        -- Both frames have exactly one lifetime as of MS4 phase 57: entered,
+        -- returned, and stepped over ever after. See 'resumeFrom'.
       , callArgs  :: [Value]
         -- ^ the arguments a @call@ was given, or @[]@ for a dispatch (phase
         -- 23). Kept beside 'entryEnv' rather than folded into it because each
@@ -519,19 +533,12 @@ step m = case pc (exec m) of
 -- meaningful, and 'unwind' clears it again when it re-enters the call.
 resumeFrom :: [Frame] -> Maybe ([Instr], Env, [Frame])
 resumeFrom [] = Nothing
-resumeFrom (fr : stk) = case fr of
-  Thena.Engine.Call {} -> Just (resume fr, resumeEnv fr, stk)
-  Choice { returned = False } ->
-    Just ( resume fr
-         , resumeEnv fr
-           -- A record update rather than a positional rebuild: this frame
-           -- differs from @fr@ in exactly one field, and saying so is what
-           -- keeps it right when 'Choice' gains another (it gained
-           -- @savedEnclosing@ at MS4 phase 42).
-         , fr { returned = True } : stk
-         )
-  Choice { returned = True } ->
-    (\(is, e, stk') -> (is, e, fr : stk')) <$> resumeFrom stk
+resumeFrom (fr : stk)
+  -- A record update rather than a positional rebuild: this frame differs from
+  -- @fr@ in exactly one field, and saying so is what keeps it right when a
+  -- frame gains another (a 'Choice' gained @savedEnclosing@ at MS4 phase 42).
+  | not (returned fr) = Just (resume fr, resumeEnv fr, fr { returned = True } : stk)
+  | otherwise         = (\(is, e, stk') -> (is, e, fr : stk')) <$> resumeFrom stk
 
 -- | Deposit an answer into @env@ at the destination the asking instruction
 -- named, and step past it.
@@ -573,12 +580,21 @@ failure r0 m = unwind (stack (exec m))
         -- between commands, and an alternative taken inside a failing command
         -- is otherwise invisible: the user typed @retry 77@, @solve@ failed,
         -- @regret@ ran, and only the development moved.
+        -- **Every frame below comes back to life** (MS4 phase 57). Their
+        -- continuations belong to the branch being abandoned; in the branch
+        -- about to be taken they have not run, so a frame that was stepped
+        -- over must be entered again. Without this the alternative would run
+        -- and the caller\'s remaining program would not — which is the same
+        -- hole from the other side.
         Just (r, it') -> Saying (took "backtracking to" fr r) m
           { development = saved fr
-          , exec  = Exec (ruleBody r) (seedFor fr r) (demote fr r it' : stk)
+          , exec  = Exec (ruleBody r) (seedFor fr r)
+                         (demote fr r it' : map unreturned stk)
           }
 
     took verb fr r = verb ++ " " ++ show (choiceId fr) ++ ": " ++ nameOfRule r
+
+    unreturned fr = fr { returned = False }
 
 -- | Taking the /last/ alternative demotes the frame to a 'Call', by the same
 -- peek that created it, so an exhausted 'Choice' never exists (§7.3). Three
@@ -624,7 +640,12 @@ demote fr r it'
         , callArgs       = callArgs fr
         , entryEnv       = entryEnv fr
         }
-  | otherwise = Thena.Engine.Call (resume fr) (resumeEnv fr)
+    -- **@returned = False@ in both branches**: the frame is being /entered/,
+    -- so control has not passed back out of it yet. Copying @fr@\'s flag here
+    -- would demote a frame that had already returned into one that is stepped
+    -- straight over, and its @resume@ — the caller\'s leftovers — would never
+    -- run (MS4 phase 57).
+  | otherwise = Thena.Engine.Call (resume fr) (resumeEnv fr) False
 
 -- --------------------------------------------------------------------------
 -- Performing one instruction
@@ -648,7 +669,7 @@ perform instr rest m = case operation instr of
   -- arguments: a block's bindings are its own, and the surface term around it
   -- has none to pass in.
   Op.Block body ->
-    Continue m { exec = Exec body [] (Thena.Engine.Call rest (env (exec m)) : stack (exec m)) }
+    Continue m { exec = Exec body [] (Thena.Engine.Call rest (env (exec m)) False : stack (exec m)) }
 
   -- **Hand control over, and stay put** (MS4 phase 45b). @pc@ is deliberately
   -- unchanged — see 'Op.Yield' and 'resumeYield'.
@@ -878,7 +899,7 @@ perform instr rest m = case operation instr of
           Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
                  (entering r (choicePoint m rest it' r [] []) m { names = names m + 1 })
       | otherwise ->
-          Continue (entering r (Thena.Engine.Call rest (env (exec m))) m)
+          Continue (entering r (Thena.Engine.Call rest (env (exec m)) False) m)
     where
       it = dispatch (rules m) (globals m) (cursor (development m))
 
@@ -915,7 +936,7 @@ perform instr rest m = case operation instr of
             Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
                    (entering vs r (choicePoint m rest it' r vs []) m { names = names m + 1 })
         | otherwise ->
-            Continue (entering vs r (Thena.Engine.Call rest (env (exec m))) m)
+            Continue (entering vs r (Thena.Engine.Call rest (env (exec m)) False) m)
     where
       it vs = clauses (rules m) (globals m) (cursor (development m)) nm vs
 

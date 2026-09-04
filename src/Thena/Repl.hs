@@ -1044,7 +1044,13 @@ renderMachine n ctx m =
     indented xs  = map ("  " ++) xs
     instruction i instr = show i ++ "  " ++ renderInstr n ctx instr
     binding (x, v) = x ++ " = " ++ renderValue n ctx v
-    frame fr = "call, " ++ show (length (resume fr)) ++ " instruction(s) to resume"
+    -- **A returned frame says so** (MS4 phase 57). Both frames are kept and
+    -- stepped over once control has passed back out of them, so the stack
+    -- shows callers that are still standing and callers that are only being
+    -- stood on — and a reader has to be able to tell which is which.
+    frame fr =
+      "call, " ++ show (length (resume fr)) ++ " instruction(s) to resume"
+        ++ if returned fr then " (returned)" else ""
 
 renderInstr :: Int -> Context -> Instr -> String
 renderInstr n ctx instr = case instr of
