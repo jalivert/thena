@@ -75,6 +75,17 @@ rule elaborate t :- when focus-is-hole (surface-is-placeholder t) then
 -- E⟦?foo⟧ — a named placeholder is a real hole, which the focus already is.
 rule elaborate t :- when focus-is-hole (surface-is-hole t) then
 
+-- E⟦(elim D … t) ⃗a⟧ — an elimination applied to something more, which is how a
+-- proof discharges the equation an unfriendly index carries:
+-- `elim Step () P (…) (true u) s (refl Term true)`. The head is the elim node
+-- rather than a name, so without this the binary clause below would take it —
+-- and it claims f : A -> B, an arrow, where an eliminator's type is a
+-- telescope. elim-spine folds the extra arguments into the eliminator's own
+-- spine, so what is elaborated is one name-headed application.
+rule elaborate t :- when focus-is-hole (surface-is-app t) (app-head-is-elim t)
+  then a = elim-spine t
+     ; call elaborate a
+
 -- E⟦x ⃗a⟧ — Brady's OTHER application rule, taken whenever the head is a name.
 -- The binary rule below claims f : A -> B, an arrow, so B cannot mention the
 -- argument and a dependent head does not fit it; this one walks the head's real

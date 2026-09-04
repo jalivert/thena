@@ -1015,8 +1015,8 @@ perform instr rest m = case operation instr of
   -- which.
   ElimSpine x -> case operandSurface (env (exec m)) x of
     Left r  -> failure r m
-    Right z -> case Zipper.focus z of
-      Concrete.SurfaceElim d ps mot ms is tgt ->
+    Right z -> case outerArgs (Zipper.focus z) of
+      (Concrete.SurfaceElim d ps mot ms is tgt, extra) ->
         case lookupInductive (GlobalName d) (globals m) of
           Nothing  -> failure (CannotRead (ResolveFailed (NotADatatype d))) m
           Just def
@@ -1047,11 +1047,17 @@ perform instr rest m = case operation instr of
                 Concrete.SurfaceApp
                   (Concrete.SurfaceName e)
                   (foldr NE.cons
-                         (explicit mot NE.:| map explicit (ms ++ is ++ [tgt]))
+                         (explicit mot
+                            NE.:| map explicit (ms ++ is ++ [tgt]) ++ extra)
                          (map explicit ps))
               GlobalName e = eliminatorName (GlobalName d)
               explicit = Concrete.SurfaceArg Concrete.Explicit
       _ -> failure (ExpectedSurfaceShape "an elimination") m
+    where
+      -- The @elim@ node, and whatever a spine applies it to.
+      outerArgs t = case t of
+        Concrete.SurfaceApp h as -> (h, NE.toList as)
+        _                        -> (t, [])
 
   Apply f -> case term f of
     Left r   -> failure r m

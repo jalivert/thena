@@ -943,7 +943,7 @@ tests =
         , ":show g"
           -- **A hypothesis, not a global.** A REPL argument is resolved in the
           -- context at the focus, so @apply@ works on anything in scope — which
-          -- is what @examples/determinacy.thena.script@ needs when it applies an
+          -- is what @examples/determinacy-tactics.thena.script@ needs when it applies an
           -- induction hypothesis by hand.
           --
           -- Two anonymous domains, so two holes called @_@ and @_1@, and

@@ -284,6 +284,7 @@ holds env cur args t = case t of
   SurfaceIsDo o           -> surfaceIs o isDo
   AppArgsAreExplicit o    -> surfaceIs o argsExplicit
   AppHeadIsName o         -> surfaceIs o headIsName
+  AppHeadIsElim o         -> surfaceIs o headIsElim
   LambdaBindsMore o       -> surfaceIs o bindsMore
   LambdaBindsOne o        -> surfaceIs o bindsOne
   LetIsAnnotated o        -> surfaceIs o isAnnotatedLet
@@ -320,6 +321,7 @@ holds env cur args t = case t of
     isElim         s = case s of SurfaceElim {} -> True; _ -> False
     isDo           s = case s of SurfaceDo _ -> True; _ -> False
     headIsName     s = case s of SurfaceApp (SurfaceName _) _ -> True; _ -> False
+    headIsElim     s = case s of SurfaceApp (SurfaceElim {}) _ -> True; _ -> False
     argsExplicit   s = case s of
       SurfaceApp _ as -> all (\(SurfaceArg p _) -> p == Explicit) as
       _               -> False
@@ -699,6 +701,7 @@ withOperands t os = case (t, os) of
   (SurfaceIsDo _, [o])           -> Just (SurfaceIsDo o)
   (AppArgsAreExplicit _, [o])    -> Just (AppArgsAreExplicit o)
   (AppHeadIsName _, [o])         -> Just (AppHeadIsName o)
+  (AppHeadIsElim _, [o])         -> Just (AppHeadIsElim o)
   (LambdaBindsMore _, [o])       -> Just (LambdaBindsMore o)
   (LambdaBindsOne _, [o])        -> Just (LambdaBindsOne o)
   (LetIsAnnotated _, [o])        -> Just (LetIsAnnotated o)
@@ -730,6 +733,7 @@ testOperands t = case t of
   SurfaceIsDo o           -> [o]
   AppArgsAreExplicit o    -> [o]
   AppHeadIsName o         -> [o]
+  AppHeadIsElim o         -> [o]
   LambdaBindsMore o       -> [o]
   LambdaBindsOne o        -> [o]
   LetIsAnnotated o        -> [o]
@@ -763,6 +767,7 @@ testWord t = case t of
   SurfaceIsDo _           -> "surface-is-do"
   AppArgsAreExplicit _    -> "app-args-are-explicit"
   AppHeadIsName _         -> "app-head-is-name"
+  AppHeadIsElim _         -> "app-head-is-elim"
   LambdaBindsMore _       -> "lambda-binds-more"
   LambdaBindsOne _        -> "lambda-binds-one"
   LetIsAnnotated _        -> "let-is-annotated"
@@ -792,6 +797,7 @@ everyTest =
   , SurfaceIsDo (Lit (VText ""))
   , AppArgsAreExplicit (Lit (VText ""))
   , AppHeadIsName (Lit (VText ""))
+  , AppHeadIsElim (Lit (VText ""))
   , LambdaBindsMore (Lit (VText ""))
   , LambdaBindsOne (Lit (VText ""))
   , LetIsAnnotated (Lit (VText ""))

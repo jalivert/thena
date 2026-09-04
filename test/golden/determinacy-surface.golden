@@ -1,0 +1,25 @@
+module Determinacy
+  declared Term
+  declared NV
+  declared Step
+  declared absurd
+  declared sym
+  declared subst
+  declared cong
+  declared trans
+  declared trueNoStep
+  declared falseNoStep
+  declared zeroNoStep
+  declared succNoStep
+  declared nvNoStep
+  declared invIfTrue
+  declared invIfFalse
+  declared invIf
+  declared invSucc
+  declared invPredZero
+  declared invPredSucc
+  declared invPred
+  declared invIsZeroZero
+  declared invIsZeroSucc
+  declared invIsZero
+  declared determinacy

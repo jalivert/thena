@@ -222,6 +222,11 @@ elaborateClauses =
     -- application of a head with recorded plicities is an ordinary binary
     -- application.
   , Rule (GlobalName "elaborate") ["t"]
+      [FocusIsHole, SurfaceIsApp (Ref "t"), AppHeadIsElim (Ref "t")]
+      [ Bind "a" (Op.ElimSpine (Ref "t"))
+      , call "elaborate" [Ref "a"]
+      ]
+  , Rule (GlobalName "elaborate") ["t"]
       [FocusIsHole, SurfaceIsApp (Ref "t"), AppHeadIsName (Ref "t")]
       [ Bind "h" Here
       , Bind "e" (Op.ExpandImplicits (Ref "t"))

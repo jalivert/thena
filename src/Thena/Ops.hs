@@ -1007,6 +1007,17 @@ data Test
   | AppHeadIsName Operand
     -- ^ a spine whose head is a name (MS4 phase 49d) — Brady's split, and the
     -- clause that begins with @EXPAND@.
+  | AppHeadIsElim Operand
+    -- ^ **a spine whose head is an @elim@** (MS4 phase 55).
+    --
+    -- @elim D … t@ on its own is a name-headed application already, because
+    -- §3.7 generates a wrapper for the eliminator (phase 49e) and
+    -- 'ElimSpine' rewrites the node into an application of it. **Applied to
+    -- something more** — @elim … t (refl Term x)@, which is how a proof
+    -- discharges the equation an unfriendly index carries — the head is the
+    -- @elim@ node, not a name, so the binary clause took it: it claims
+    -- @f : A -> B@, an /arrow/, and an eliminator\'s type is a telescope, so
+    -- @A@ was left unsolved and the declaration silently produced nothing.
   | LambdaBindsMore Operand        -- ^ a λ whose group has a binder after the
                                    --   first (MS4 phase 49c)
   | LambdaBindsOne Operand         -- ^ … and one whose group has just the one
