@@ -2,7 +2,8 @@ cabal-version:      3.0
 name:               thena
 version:            0.1.0.0
 synopsis:           An interactive proof assistant for language metatheory
-license:            NONE
+license:            MIT
+license-file:       LICENSE
 author:             jalivert
 maintainer:         jali@verter.cz
 category:           Language
