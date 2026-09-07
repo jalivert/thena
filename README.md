@@ -148,7 +148,7 @@ sessions and an honest account of what the system can and cannot currently do.
 | `rules/standard.thena.rules` | the rule base: elaboration and search, in full |
 | `prelude/prelude.thena` | the standard prelude, itself a surface module |
 | `examples/` | worked developments, including the determinacy proof |
-| `docs/` | the implementation guide — start at [`docs/README.md`](docs/README.md) |
+| `docs/MANUAL.md` | the reference manual — worked sessions, captured from the running program |
 | `DECISIONS.md` | the design decisions, written for readers who know Agda, Coq, Idris or Lean |
 
 ## Research context
@@ -174,4 +174,4 @@ extended in that way is itself one of the project's research interests.
 
 ## License
 
-Thena will be released under the MIT license.
+Thena is released under the MIT license. See [`LICENSE`](LICENSE).
