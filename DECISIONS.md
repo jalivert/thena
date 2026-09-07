@@ -579,6 +579,32 @@ andLeft {ℓ₀ ℓ₁} : ∀ (A : Type ℓ₀) (B : Type ℓ₁) -> And {ℓ₀
 
 ---
 
+### A `let` whose type is dependent must be annotated
+
+Thena does not infer the type of a `let`-bound name when that type mentions the
+value's own arguments. Write it:
+
+```
+let nc = noConfusionTerm x y q in nc            -- refused
+let nc : NoConfusionTerm x y = noConfusionTerm x y q in nc      -- fine
+```
+
+This is the same requirement Agda and Idris make, and for the same reason:
+inferring a dependent type for an unannotated binding is undecidable in general,
+and guessing at one is worse than asking. A `let` whose type is simple —
+`let n = succ zero in n` — needs no annotation and never will.
+
+**The refusal is currently reported badly**, in terms of machine-generated hole
+names, because the failure surfaces inside unification and only the elaboration
+rule that created those holes knows what they stand for. Giving the rule
+language a way to catch a failure and speak for it is open work; the semantics
+above are not.
+
+The same limit applies to an application whose head is not a name — a β-redex
+like `(\ p -> e) v` — where there is no annotation to write. Use a `let`.
+
+---
+
 ## The REPL and the session
 
 ### There are three kinds of file, and the extension says which
