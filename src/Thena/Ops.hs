@@ -71,7 +71,7 @@ data Value
     -- "Thena.Surface.Zipper".
     --
     -- It held a 'Thena.Syntax.Concrete.Raw' from phase 17b until here, which
-    -- was the badly named constructor @CLAUDE.md@ kept having to correct:
+    -- was a badly named constructor this project kept having to correct:
     -- @Raw@ is a concrete syntax for the /development/ language, and turning
     -- one into a term is resolution, not elaboration. Now it holds what its
     -- name says.
@@ -360,7 +360,7 @@ data Op
     --
     -- **They do not reuse the cursor's words.** @dom@ and @cod@ already move the
     -- development's ambient cursor; these produce a value, and one word for two
-    -- different things is what @CLAUDE.md@'s /no confusions/ rules out.
+    -- different things is the sort of confusion this project does not accept.
   | AppFunction Operand
     -- ^ a spine minus its last argument — @f a b@ gives @f a@, @f a@ gives @f@
     -- (MS4 phase 49d)
@@ -484,9 +484,9 @@ data Op
   | Arrow Operand Operand
     -- ^ two terms → the non-dependent @Π@ between them (MS4 phase 41d).
     --
-    -- **The first op that BUILDS a term**, and
-    -- @discussion/elaboration-in-rules.md@'s **gap 2** — /"we have no op that
-    -- constructs a term at all"/, which that document called the real wall.
+    -- **The first op that BUILDS a term**, and the answer to what the design
+    -- notes called the real wall — /"we have no op that constructs a term at
+    -- all"/.
     -- It arrives with a caller and not before: elaborating @e a@ must claim
     -- @f : A -> B@ where @A@ and @B@ are holes claimed **at run time**, so the
     -- arrow cannot be built by whatever wrote the program.

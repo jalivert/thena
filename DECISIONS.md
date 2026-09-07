@@ -18,7 +18,7 @@ made the same one.
 **Adding to it:** when a decision is made, add it to its section the same day,
 under a heading that says the decision rather than the topic. Say what you can
 and cannot write, and give the shortest example that shows it. Reasons are worth
-one paragraph, not three; the argument lives in `.claude/`.
+one paragraph, not three; the full argument lives in the design notes.
 
 ---
 

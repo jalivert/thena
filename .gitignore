@@ -1,2 +1,15 @@
 dist-newstyle/
 docs/api/
+
+.claude/
+discussion/
+reports/
+resources/
+CLAUDE.md
+docs/[0-9][0-9]-*.md
+docs/A-test-map.md
+docs/B-concordance.md
+docs/README.md
+docs/MS1-REVIEW.md
+docs/SESSION-STATE.md
+*.DS_Store

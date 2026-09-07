@@ -212,7 +212,7 @@ vocabulary =
 
     -- **'everyTest', not a copy of it.** This was a hand-written list until MS4
     -- phase 47, and it silently did not grow when that phase added a test —
-    -- the same hazard @CLAUDE.md@ names for 'everyOp' below, arriving one type
+    -- the same hazard that still stands for 'everyOp' below, arriving one type
     -- over. The list is exported precisely so this cannot happen again.
     allTests = everyTest
 

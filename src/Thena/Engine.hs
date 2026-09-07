@@ -151,7 +151,7 @@ data Machine = Machine
   , development :: Development
     -- ^ the development, focused. **Named for what it is** (phase 37): it was
     -- @proof@, beside a @Session.sessionProof@ that meant a theorem, and one
-    -- word for two things is where @docs/SESSION-STATE.md@ §5.5 came from.
+    -- word for two things is a confusion, and the rename is the fix.
   , enclosing   :: [(Development, Int)]
     -- ^ the developments a @push-development@ suspended, each with **the depth
     -- the frame stack had when it was pushed** (phase 53).

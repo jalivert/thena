@@ -260,9 +260,8 @@ data Attempt = Attempt
     -- machine's own loop between them — the kernel runs inside the loop and
     -- admitting happens after it returns, so the residue has to be put down
     -- somewhere in between. It is a mailbox rather than a property, and every
-    -- alternative to it is worse; @docs/SESSION-STATE.md@ §5.3 says so out
-    -- loud, because reading it outside that instant is how phase 33 shipped a
-    -- bug.
+    -- alternative to it is worse. Reading it outside that instant is how
+    -- phase 33 shipped a bug.
   }
   deriving (Eq, Show)
 
