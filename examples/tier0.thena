@@ -1,0 +1,26 @@
+-- MS4's tier-0 checkpoint: a datatype declared, a function defined by
+-- elimination, one declaration used by another, and a theorem proved about
+-- them — all elaborated from this file, with every term argument written out.
+
+module Tier0 where
+
+data Nat : Type₀ where
+  zero : Nat
+  succ : Nat -> Nat
+
+plus : Nat -> Nat -> Nat
+plus = \ m n -> elim Nat () (\ k -> Nat) (n (\ k ih -> succ ih)) () m
+
+-- Explicit, so that the implicit spelling has something to be checked against.
+identity : forall (A : Type₀) -> A -> A
+identity = \ A x -> x
+
+one : Nat
+one = identity Nat (succ zero)
+
+two : Nat
+two = plus one one          -- a later declaration may use an earlier one
+
+-- `plus zero n` reduces to `n`, so reflexivity proves it.
+plusZeroLeft : forall (n : Nat) -> Eq Nat (plus zero n) n
+plusZeroLeft = \ n -> refl Nat n

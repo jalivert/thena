@@ -11,7 +11,7 @@ elim Nat : ∀ (P : Nat -> Type₁) -> P zero -> (∀ (x : Nat) -> P x -> P (suc
 thena spine> :elim Fin
 elim Fin : ∀ (P : ∀ (x : Nat) -> Fin x -> Type₀) -> (∀ (n : Nat) -> P (succ n) (fz n)) -> (∀ (n : Nat) (i : Fin n) -> P n i -> P (succ n) (fs n i)) -> ∀ (x : Nat) (target : Fin x) -> P x target
 thena spine> :elim Empty
-elim Empty : ∀ (P : Empty {ℓ₇} -> Type (ℓ₇)) (target : Empty {ℓ₇}) -> P target
+elim Empty : ∀ (P : Empty {ℓ₂₁} -> Type (ℓ₂₁)) (target : Empty {ℓ₂₁}) -> P target
 thena spine> :whnf elim Fin () (\ (n : Nat) (i : Fin n) -> Nat) ((\ (n : Nat) -> zero) (\ (n : Nat) (i : Fin n) (ih : Nat) -> succ ih)) ((succ (succ zero))) (fs (succ zero) (fz zero))
 succ (elim Fin () (λ (n : Nat) (i : Fin n) -> Nat) ((λ (n : Nat) -> zero) (λ (n : Nat) (i : Fin n) (ih : Nat) -> succ ih)) ((succ zero)) (fz zero))
 thena spine> :elim Foo

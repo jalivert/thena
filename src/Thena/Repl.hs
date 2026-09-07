@@ -15,6 +15,7 @@ module Thena.Repl
   , transcript
   , transcriptFrom
   , renderCore
+  , renderSurface
   , renderLevel
   , renderPartial
   , renderCursor
@@ -30,6 +31,7 @@ module Thena.Repl
   , startingSession
   , loadRuleFiles
   , loadFile
+  , loadProofFile
   , renderLoadError
   ) where
 
@@ -89,8 +91,10 @@ import Thena.Driver
   , Session (..)
   , Stop (..)
   , SyntaxError (..)
-  , Proof (..)
+  , Attempt (..)
+  , Parked (..)
   , loadSource
+  , loadProofSource
   , newSession
   , oneLine
   )
@@ -103,11 +107,12 @@ import Thena.Engine
   , Machine (..)
   , Question (..)
   , cursor
-  , proof
-  , proofContext
+  , development
+  , focusContext
   )
 import Thena.Errors
-  ( Clash (..)
+  ( DataBuildError (..)
+  , Clash (..)
   , ConversionFailure (..)
   , DevForm (..)
   , ElimError (..)
@@ -120,7 +125,14 @@ import Thena.Errors
   , TypeError (..)
   )
 import Thena.Global.Declare (DeclareError (..))
-import Thena.Syntax.Concrete (Raw (..), RawBinder (..))
+import qualified Data.List.NonEmpty as NE
+import Thena.Surface.Concrete
+  ( PairingError (..)
+  , Plicity (..)
+  , Surface (..)
+  , SurfaceArg (..)
+  , SurfaceBinder (..)
+  )
 import Thena.Global.Env
   ( ConstructorDefinition (..)
   , InductiveDefinition (..)
@@ -138,10 +150,14 @@ import Thena.Ops
 import Thena.Rules (RuleBase (..), RuleError (..))
 import qualified Thena.Ops as Ops
 import Thena.Syntax.Lexer (LexError (..), Pos (..), Token (..))
+import Thena.Surface.Layout (LayoutError (..))
+import Thena.Surface.Parser (SurfaceParseError (..))
+import qualified Thena.Surface.Zipper as Zipper
 import Thena.Syntax.Parser (ParseError (..))
 
 import Data.Foldable (toList)
 import Data.List (intercalate, partition)
+import Thena.Syntax.Concrete (RawInstr (..), RawOp (..), RawOperand (..))
 
 -- | Run the read-eval-print loop until @:quit@ or end of input.
 --
@@ -170,6 +186,12 @@ loop s pending = do
           (s', out, problems) <- liftIO (loadFile (turnSession t) path)
           mapM_ outputStrLn (out ++ problems)
           loop s' Nothing
+        -- And the same shape again for a proof module (MS4 phase 43). The
+        -- driver elaborates it; this only reads the file.
+        ProofRequested path | not (turnQuit t) -> do
+          (s', out) <- liftIO (loadProofFile (turnSession t) path)
+          mapM_ outputStrLn out
+          loop s' Nothing
         -- The same shape for rule bases, and several paths rather than one:
         -- a load replaces the whole ordered list (phase 22).
         RulesRequested paths | not (turnQuit t) -> do
@@ -193,22 +215,32 @@ preludePath = Paths_thena.getDataFileName "prelude/prelude.thena"
 
 -- | Load the shipped prelude into a session, keeping only what went wrong.
 --
--- Discarding the lines\' own output is what makes startup silent: a @data@ line
--- says @declared Eq@, and three of those at every start are noise. @:load@ on
--- the same file keeps them, because there the user asked.
+-- **Silent on success**, which is what @:load@ on the same file is not: there
+-- the user asked, so the declarations are printed. A module gives one response
+-- rather than a line each, so this reads that response instead of discarding
+-- output (MS4 phase 54).
 loadPrelude :: Session -> IO (Session, [String])
 loadPrelude s = do
   path <- preludePath
-  (s', _, problems) <- loadFile s path
-  pure (s', map ("prelude: " ++) problems)
+  contents <- try (readFile path)
+  pure $ case contents of
+    Left e  -> (s, ["prelude: " ++ show (e :: IOException)])
+    Right c -> case loadProofSource s c of
+      -- **Silent on success, and the response says which it was.** A module
+      -- gives one response, so unlike 'loadFile' there is no output to discard
+      -- — there is a name for the thing that happened.
+      (s', ProofLoaded {}) -> (s', [])
+      (s', resp)           -> (s', map ("prelude: " ++) (renderResponse s' resp))
 
 -- | A session with everything shipped loaded: **the rule base first, then the
 -- prelude**.
 --
--- **The order is load-bearing as of phase 23b.** The prelude proves @fst@,
--- @snd@, @andLeft@ and @andRight@ with @try@ and @solve@, and those stopped
--- being driver commands when the tactic words went to the rules — so a prelude
--- loaded before the base fails at its first @try@ with /no rule is called try/.
+-- **The order is load-bearing, and more so since MS4 phase 54.** It was
+-- already: the prelude proved @fst@, @snd@, @andLeft@ and @andRight@ with @try@
+-- and @solve@, which stopped being driver commands at phase 23b. Now the
+-- prelude is a **surface module**, so every line of it goes through
+-- @elaborate@ — and elaboration is entirely rules (phase 49f). A prelude loaded
+-- before the base does not get part-way; it declares nothing at all.
 -- Everything that starts a session goes through here rather than calling the
 -- two loaders in whichever order it happened to write them.
 startingSession :: IO (Session, [String])
@@ -269,6 +301,19 @@ loadFile s path = do
           , maybe [] (renderLoadError path) (loadedError l)
           )
 
+-- | Read a proof module and elaborate it (MS4 phase 43).
+--
+-- Simpler than 'loadFile' because a module is not a sequence of lines: the
+-- whole file is one program, so there is one response and no line to name when
+-- it stops. What went wrong is in that response, which renders like any other.
+loadProofFile :: Session -> FilePath -> IO (Session, [String])
+loadProofFile s path = do
+  contents <- try (readFile path)
+  pure $ case contents of
+    Left e  -> (s, [path ++ ": " ++ show (e :: IOException)])
+    Right c -> let (s', resp) = loadProofSource s c
+                in (s', renderResponse s' resp)
+
 -- | Why a load stopped. It says only /where/ — the reason has already been
 -- printed, because a stopped line renders like any other line.
 renderLoadError :: FilePath -> LoadError -> [String]
@@ -292,7 +337,7 @@ prompt :: Session -> Maybe Question -> String
 prompt _ (Just _) = "> "
 prompt s Nothing  = "thena " ++ fragment ++ "> "
   where
-    fragment = case focus (cursor (proof (sessionMachine s))) of
+    fragment = case focus (cursor (development (sessionMachine s))) of
       OnTerm {} -> "core"
       _         -> "spine"
 
@@ -347,15 +392,22 @@ transcriptFrom s0 = unlines . replay s0 Nothing
 renderResponse :: Session -> Response -> [String]
 renderResponse s resp = case resp of
   Blank          -> []
+  RenderedSurface t -> [renderSurface t]
   Rendered t     -> [renderCore (counter s) (contextOf s) t]
   RenderedDev p  -> [renderPartial (counter s) (contextOf s) p]
   Shown c        -> [renderCursor (counter s) c]
   ShownData d    -> renderInductive (counter s) d
   ShownEliminator g ty  -> renderEliminator (counter s) g ty
-  ShownGlobal g lvs cs ty body -> renderGlobal (counter s) g lvs cs ty body
+  ShownGlobal g lvs cs ps ty body -> renderGlobal (counter s) g lvs cs ps ty body
   Where c        -> renderWhere (counter s) c
   Inferred t ty  ->
     [renderCore (counter s) (contextOf s) t ++ " : " ++ renderCore (counter s) (contextOf s) ty]
+  -- **The surface term as written, and the type elaborating it found** (MS4
+  -- phase 43). The core term it built is deliberately not shown: it was rewound
+  -- with the rest of the line, and naming a hole the session no longer has
+  -- would invite a @goto@ into nothing.
+  InferredSurface t ty ->
+    [renderSurface t ++ " : " ++ renderCore (counter s) (contextOf s) ty]
   IllTyped e     -> renderTypeError (counter s) e
   -- The two terms are restated, because with η a yes is printed about terms
   -- that still look different (§5.2).
@@ -374,13 +426,22 @@ renderResponse s resp = case resp of
   Extracted t          -> [renderCore (counter s) [] t]
   Proving g ty  -> ["proving " ++ nameString g ++ " : " ++ renderCore (counter s) [] ty]
   Proved g lvs owed ty ->
-    [nameString g ++ scheme (counter s) lvs owed ty ++ "   ∎"]
+    [nameString g ++ scheme (counter s) lvs owed [] ty ++ "   ∎"]
   Suspended g   -> ["suspended " ++ nameString g]
   Resumed g     -> ["resumed " ++ nameString g]
   Abandoned g   -> ["abandoned " ++ nameString g]
   -- Show where it landed: an undo with no output looks like nothing happened.
-  Undone        -> [renderCursor (counter s) (cursor (proof (sessionMachine s)))]
+  Undone        -> [renderCursor (counter s) (cursor (development (sessionMachine s)))]
   Proofs cur ps -> renderProofs (counter s) cur ps
+  -- Nothing to print: the caller reads the file and prints what that produced.
+  ProofRequested _ -> []
+  -- **One line per declaration and nothing else** (MS4 phase 43). The op-level
+  -- messages the run produced are already gone — 'Thena.Driver.loadProofSource'
+  -- drops them on success — so what is left is the shape of the file.
+  ProofLoaded nm ds blocks ->
+    ("module " ++ nm)
+      : map ("  declared " ++) ds
+      ++ [ "  and " ++ plural blocks "do block" | blocks > 0 ]
   -- Nothing to print: the caller reads the files and prints what that produced.
   RulesRequested _ -> []
   BasesLoaded bs   -> map loadedLine bs
@@ -405,12 +466,16 @@ counter = names . sessionMachine
 -- for one of the development's binders prints as its name rather than as a
 -- number. @:show@ renders from the root and needs no seed.
 contextOf :: Session -> Context
-contextOf = proofContext . proof . sessionMachine
+contextOf = focusContext . development . sessionMachine
 
 renderStop :: Session -> Stop -> [String]
 renderStop s stop = case stop of
   Completed              -> []
   Waiting (Question p _) -> [p]
+  -- **The message, then how to get out.** A yield takes every command the REPL
+  -- has, so unlike a question it cannot say what it wants — what it can say is
+  -- the one word that is not otherwise reachable from here.
+  Yielded msg            -> [msg, "(yield to hand control back)"]
   Halted r               -> ["stuck: " ++ renderFailReason r]
   Refused e              -> ["refused: " ++ renderDeclareError e]
   Uncertified e          -> "the kernel refused it" : renderKernelError (counter s) e
@@ -422,10 +487,29 @@ renderStop s stop = case stop of
 
 renderSyntaxError :: SyntaxError -> String
 renderSyntaxError e = case e of
+  DeclarationsUnpaired (SignatureWithNoEquation x) ->
+    x ++ " has a type but no definition — write " ++ x ++ " = ‹term› after it"
+  DeclarationsUnpaired DatatypeInATheoremList ->
+    "a datatype cannot be declared here"
+  DeclarationsUnpaired BlockInATheoremList ->
+    "a do block cannot appear here"
+  -- **Numbered from one**, because the user counts instructions the way the
+  -- printer numbers everything else, and the word is quoted back so the line is
+  -- findable in a block that repeats an op.
+  BlockIllFormed i w ->
+    "instruction " ++ show (i + 1) ++ " of the do block gives " ++ w
+      ++ " operands it does not take"
+  DeclarationsUnpaired (EquationWithNoSignature x) ->
+    x ++ " has a definition but no type — write " ++ x ++ " : ‹type› before it"
   LexFailed (LexError p c) ->
     at p ++ "unexpected character" ++ maybe "" (\ch -> " " ++ show ch) c
   ParseFailed (UnexpectedToken p t) -> at p ++ "unexpected " ++ describe t
   ParseFailed UnexpectedEndOfInput  -> "unexpected end of input"
+  LayoutFailed (UnmatchedClose p) ->
+    at p ++ "this } closes a block that was not opened with {"
+  LayoutFailed (MissingClose _)   -> "unexpected end of input inside { }"
+  SurfaceParseFailed (SurfaceUnexpectedToken p t) -> at p ++ "unexpected " ++ describe t
+  SurfaceParseFailed SurfaceUnexpectedEndOfInput  -> "unexpected end of input"
   ResolveFailed (NotInScope n)      -> "not in scope: " ++ n
   ResolveFailed (NotACoreTerm f)    ->
     devForm f ++ " is part of a development, not a term"
@@ -484,6 +568,10 @@ describe t = case t of
   TIn         -> "in"
   TElim       -> "elim"
   TWhere      -> "where"
+  TData       -> "data"
+  TModule     -> "module"
+  TDo         -> "do"
+  TDashes     -> "--"
   TRule       -> "rule"
   TWhen       -> "when"
   TThen       -> "then"
@@ -756,6 +844,11 @@ link n env c = (text, (v, name) : env)
           ++ " : " ++ go n env AtTop ty ++ " in"
       Claim _ _ ty      -> "let ? " ++ name ++ " : " ++ go n env AtTop ty ++ " in"
       Guess _ _ _ ty    -> "let ? " ++ name ++ " : " ++ go n env AtTop ty ++ " ≐ ("
+      -- The same spelling a core Π's binder has, for the reason the λ line
+      -- above has a core λ's: the DC's concrete syntax reads a leading binder
+      -- run as components (§2.7, "Thena.Syntax.Resolve"'s @partial@), so what
+      -- is printed here is what is parsed back.
+      Quantify _ _ ty   -> "∀ (" ++ name ++ " : " ++ go n env AtTop ty ++ ") ->"
 
 -- | The variable a component binds, and the name it would like.
 bound :: Component -> (Var, String)
@@ -764,6 +857,7 @@ bound c = case c of
   Define v (Ident h) _ _ -> (v, h)
   Claim  v (Ident h) _   -> (v, h)
   Guess  v (Ident h) _ _ -> (v, h)
+  Quantify v (Ident h) _ -> (v, h)
 
 isHere :: Route -> Bool
 isHere (Just ([], _)) = True
@@ -904,6 +998,7 @@ crossingWord x = case x of
     ValueOfDefine _ (Ident h) _ -> "val of "  ++ h
     TypeOfClaim   _ (Ident h)   -> "type of " ++ h
     TypeOfGuess   _ (Ident h) _ -> "type of " ++ h
+    TypeOfQuantify _ (Ident h)  -> "type of " ++ h
 
 renderConstraint :: Int -> Env -> Constraint -> String
 renderConstraint n env (Equate xi s t ty) =
@@ -949,7 +1044,13 @@ renderMachine n ctx m =
     indented xs  = map ("  " ++) xs
     instruction i instr = show i ++ "  " ++ renderInstr n ctx instr
     binding (x, v) = x ++ " = " ++ renderValue n ctx v
-    frame fr = "call, " ++ show (length (resume fr)) ++ " instruction(s) to resume"
+    -- **A returned frame says so** (MS4 phase 57). Both frames are kept and
+    -- stepped over once control has passed back out of them, so the stack
+    -- shows callers that are still standing and callers that are only being
+    -- stood on — and a reader has to be able to tell which is which.
+    frame fr =
+      "call, " ++ show (length (resume fr)) ++ " instruction(s) to resume"
+        ++ if returned fr then " (returned)" else ""
 
 renderInstr :: Int -> Context -> Instr -> String
 renderInstr n ctx instr = case instr of
@@ -982,9 +1083,6 @@ renderOp n ctx op = case op of
   Ops.DefineData d -> word ++ " " ++ nameString (inductiveName d)
   Ops.CrossType   -> word ++ " type"
   Ops.CrossValue  -> word ++ " val"
-  -- A hint is optional, and reads as a phrase rather than an argument.
-  Ops.Prove Nothing  -> word
-  Ops.Prove (Just h) -> word ++ " with " ++ operand h
   -- Written the way a rule file writes it (phase 23): the name, then the
   -- arguments as any other op\'s, spaced and unwrapped.
   Ops.Call nm as  -> unwords (word : nameString nm : map operand as)
@@ -1003,10 +1101,12 @@ renderValue n ctx v = case v of
   VText s            -> show s
   VTerm (Trailing t) -> "⌜" ++ renderCore n ctx t ++ "⌝"
   VTerm p            -> "⌜" ++ unwords (words (renderPartial n ctx p)) ++ "⌝"
-  -- A hint, printed as it was written. It is not resolved and may never
-  -- resolve — that is @resolve@'s answer, given in a rule body — so this is a
-  -- printer for 'Raw' and not a detour through 'Core'.
-  VSurface raw       -> "‹" ++ renderRaw raw ++ "›"
+  -- **The focus, printed as it was written.** A 'Thena.Ops.VSurface' carries a
+  -- zipper since phase 46, and what a reader wants to see is the subterm the
+  -- machine is elaborating, not the program it came from — so the path is
+  -- carried and not shown. Where it belongs on screen is a presentation
+  -- question and 46 does not answer it.
+  VSurface z         -> "‹" ++ renderSurface (Zipper.focus z) ++ "›"
   -- A rule in an operand is a rule being passed to another rule, so its name
   -- is what identifies it; its body belongs to @:show@ on the rule, not here.
   VPair a b          -> "(" ++ renderValue n ctx a ++ ", " ++ renderValue n ctx b ++ ")"
@@ -1026,6 +1126,7 @@ renderCommandError e = case e of
   MissingArgument w    -> w ++ " needs an argument"
   UnexpectedArgument w -> w ++ " takes no argument"
   NotAsking            -> "nothing was asked"
+  NotYielding          -> "nothing has yielded"
   NoSuchGlobal x       -> "nothing named " ++ x ++ " has been declared"
   NotProving           -> "no proof is being worked on"
   AlreadyProving g     -> nameString g ++ " is still being proved — :suspend or :abandon it first"
@@ -1045,6 +1146,13 @@ renderCommandError e = case e of
 
 renderFailReason :: FailReason -> String
 renderFailReason r = case r of
+  -- MS4 phase 41: the elaborator met a node it has no case for. Phase 41b's
+  -- list, said to the user rather than swallowed.
+  NoElaborationRule what ->
+    "elaboration has no rule for " ++ what ++ " yet"
+  BlockOperands i w ->
+    "instruction " ++ show (i + 1) ++ " of the do block gives " ++ w
+      ++ " operands it does not take"
   Mismatch ctx a b ->
     renderCore 0 ctx a ++ " and " ++ renderCore 0 ctx b ++ " cannot be made equal"
   OccursCheck ctx x t ->
@@ -1062,7 +1170,6 @@ renderFailReason r = case r of
   GuessIllTyped e ->
     "that term does not have the hole's type"
       ++ concatMap ("\n  " ++) (renderTypeError 0 e)
-  NameTaken n       -> n ++ " is already taken; ask fresh-name for one"
   NoGoalHere        -> "nothing is written down here, so there is no goal"
   NoRuleMatched     -> "no rule applies here"
   CannotEliminate e -> renderElimError e
@@ -1075,13 +1182,28 @@ renderFailReason r = case r of
   NotAGuessHere       -> "that is not a guess"
   NotReadyToIntroduce -> "intro wants a hole of the form ? x ≐ (? x' : S . x') — attack it first"
   NothingToIntroduce  -> "that hole's type is neither a ∀ nor a let"
+  GoalIsNotAUniverse  -> "quantify builds a type, so that hole must be claimed at a universe"
+  CannotBuildDatatype why -> case why of
+    DeclaredTypeIsNotAUniverse d ->
+      nameString d ++ "'s type must end in a universe"
+    ConstructorTargetWrong c ->
+      nameString c ++ "'s target is not the datatype applied to its parameters"
+    TooFewBinders ->
+      "the datatype's type has fewer binders than it has parameters"
+  TooManyArgumentsForHead -> "that head does not take that many arguments"
+  NoEnclosingDevelopment ->
+    "pop-development needs a development to go back to; this is the outermost one"
   NotYetPure pos    ->
     "not finished: " ++ renderPosition pos ++ " is still open, so there is no term yet"
   -- Phase 17b's four. 'CannotRead' reuses the renderer the driver's own
   -- @Failed@ already had — which is the whole reason 'SyntaxError' is one case
   -- rather than two.
   CannotRead e      -> renderSyntaxError e
-  ExpectedSurface   -> "expected a hint"
+  -- **It read /expected a hint/ until MS4 phase 49**, and the word `hint` had
+  -- not meant anything since phase 41 retired the machinery — his instruction,
+  -- that it *"is misleading and ambiguous"*.
+  ExpectedSurface   -> "expected a surface term"
+  ExpectedSurfaceShape what -> "expected a surface term that is " ++ what
   -- One reason, three messages (§8, phase 23): the name is unknown, the name
   -- is known at other arities, or clauses of the right arity all failed their
   -- heads. Which one it is falls out of the arities the reason carries.
@@ -1106,40 +1228,78 @@ orList xs = case reverse xs of
 -- of the resolver: no context is consulted and no name is looked up. Parenthesised
 -- wherever a subterm could otherwise re-associate, which is enough for a hint —
 -- the elaborate layout decisions are 'renderCore'\'s and belong to terms.
-renderRaw :: Raw -> String
-renderRaw = raw False
+-- | A surface term, as written (MS4 phase 39).
+--
+-- **Its own function, not a case of 'renderRaw'.** The two languages print
+-- differently — a surface lambda's binder may have no type, its arguments carry
+-- braces, and it has @_@ and @?foo@ where the development calculus has neither.
+-- Sharing one printer would mean a printer that has to ask which language it is
+-- in, which is the special case the first design principle refuses.
+--
+-- Parenthesised by precedence, and it round-trips: 'Thena.Surface.Parser.parseSurface'
+-- on this output gives the same tree back.
+renderSurface :: Surface -> String
+renderSurface = surf Loose
   where
-    raw _ (RawName x)       = x
-    raw _ (RawUniverse l)   = "Type" ++ subscript l
-    raw _ RawUniverseOpen   = "Type"
-    raw _ (RawAt x ls)      = x ++ " {" ++ unwords (map show ls) ++ "}"
-    raw p (RawApp f a)      = wrap p (raw False f ++ " " ++ raw True a)
-    raw p (RawArrow a b)    = wrap p (raw True a ++ " -> " ++ raw False b)
-    raw p (RawLam bs b)     = wrap p ("λ" ++ concatMap binder bs ++ " -> " ++ raw False b)
-    raw p (RawPi bs b)      = wrap p ("∀" ++ concatMap binder bs ++ " -> " ++ raw False b)
-    raw p (RawLet x v ty b) =
-      wrap p ("let " ++ x ++ " = " ++ raw False v ++ " : " ++ raw False ty
-                ++ " in " ++ raw False b)
-    raw p (RawClaim x ty b) =
-      wrap p ("let ? " ++ x ++ " : " ++ raw False ty ++ " in " ++ raw False b)
-    raw p (RawGuess x ty g b) =
-      wrap p ("let ? " ++ x ++ " : " ++ raw False ty ++ " ≐ (" ++ raw False g ++ ")"
-                ++ " in " ++ raw False b)
-    raw p (RawPending _ b)  = wrap p ("κ ▸ " ++ raw False b)
-    raw _ (RawQuote t)      = "⌜" ++ raw False t ++ "⌝"
-    raw p (RawElim d rls ps mot ms is tgt) =
-      wrap p ("elim " ++ d ++ levelGroup rls ++ group ps ++ " " ++ raw True mot
-                ++ " " ++ group ms ++ " " ++ group is ++ " " ++ raw True tgt)
+    instruction i = case i of
+      RawBind x o -> x ++ " = " ++ operation o
+      RawDo     o -> operation o
 
-    binder (RawBinder x ty) = " (" ++ x ++ " : " ++ raw False ty ++ ")"
-    group ts = "(" ++ intercalate ", " (map (raw False) ts) ++ ")"
-    levelGroup [] = ""
-    levelGroup ls = " {" ++ unwords (map show ls) ++ "}"
+    operation (RawOp w as) = unwords (w : map operand as)
 
-    wrap True t  = "(" ++ t ++ ")"
-    wrap False t = t
+    operand a = case a of
+      RawRef x  -> x
+      RawPos k  -> show k
+      RawText t -> show t
 
--- | A level obligation, in the notation @Unmet@'s messages use.
+    surf _ (SurfaceName x)      = x
+    surf _ (SurfaceUniverse l)  = "Type" ++ subscript l
+    surf _ SurfaceUniverseOpen  = "Type"
+    surf _ SurfacePlaceholder   = "_"
+    surf _ (SurfaceHole h)      = "?" ++ h
+    -- **Printed with explicit braces and semicolons**, never re-laid-out: the
+    -- grammar accepts both spellings and this is the one that is unambiguous on
+    -- one line, which is what every other case here produces too.
+    surf _ (SurfaceDo b)        =
+      "do { " ++ intercalate " ; " (map instruction b) ++ " }" 
+    surf p (SurfaceApp f as)    =
+      paren (p >= Tight) (surf Spine f ++ concatMap arg (NE.toList as))
+    surf p (SurfaceLam bs b)    =
+      paren (p >= Spine) ("λ" ++ concatMap binder (NE.toList bs) ++ " -> " ++ surf Loose b)
+    surf p (SurfacePi bs b)     =
+      paren (p >= Spine) ("∀" ++ concatMap binder (NE.toList bs) ++ " -> " ++ surf Loose b)
+    surf p (SurfaceArrow a b)   =
+      paren (p >= Spine) (surf Tight a ++ " -> " ++ surf Loose b)
+    surf p (SurfaceLet x ty v b) =
+      paren (p >= Spine)
+        ("let " ++ x ++ maybe "" (\t -> " : " ++ surf Loose t) ty
+           ++ " = " ++ surf Loose v ++ " in " ++ surf Loose b)
+    surf p (SurfaceAnnot e ty)  =
+      paren (p >= Spine) (surf Spine e ++ " : " ++ surf Loose ty)
+    surf p (SurfaceElim d ps mot ms is tgt) =
+      paren (p >= Tight)
+        ("elim " ++ d ++ " " ++ list ps ++ " " ++ surf Tight mot ++ " " ++ list ms
+           ++ " " ++ list is ++ " " ++ surf Tight tgt)
+
+    arg (SurfaceArg Explicit t) = " " ++ surf Tight t
+    arg (SurfaceArg Implicit t) = " {" ++ surf Loose t ++ "}"
+
+    binder (SurfaceBinder Explicit x Nothing)   = " " ++ x
+    binder (SurfaceBinder Explicit x (Just ty)) = " (" ++ x ++ " : " ++ surf Loose ty ++ ")"
+    binder (SurfaceBinder Implicit x Nothing)   = " {" ++ x ++ "}"
+    binder (SurfaceBinder Implicit x (Just ty)) = " {" ++ x ++ " : " ++ surf Loose ty ++ "}"
+
+    list ts = "(" ++ unwords (map (surf Tight) ts) ++ ")"
+
+    paren True t  = "(" ++ t ++ ")"
+    paren False t = t
+
+-- | Where a surface term is being printed, and therefore what has to be
+-- parenthesised. @Loose@ is the top, @Spine@ is the head or an argument of an
+-- application, @Tight@ is an argument.
+data SurfacePrec = Loose | Spine | Tight
+  deriving (Eq, Ord)
+
 obligation :: Obligation -> String
 obligation (AtMost l k) = renderLevelAtom l ++ " ≤ " ++ renderLevelAtom k
 
@@ -1152,6 +1312,10 @@ renderKernelError n e = case e of
     [ "the assumption " ++ identString i ++ " has no matching binder in "
         ++ renderCore n [] ty
     ]
+  NotAUniverseAbove _ i ty ->
+    [ "the ∀-binder " ++ identString i ++ " builds a type, but "
+        ++ renderCore n [] ty ++ " is not a universe"
+    ]
   Levels (Refuted l k) ->
     [ renderLevelAtom l ++ " is not at most " ++ renderLevelAtom k ]
   -- **Plural, and it names the clash rather than the residue** (phase 35).
@@ -1160,6 +1324,12 @@ renderKernelError n e = case e of
   Levels (Unsatisfiable cs) ->
     "no levels satisfy all of these at once:"
       : map (("  " ++) . obligation) cs
+  -- **Named, not counted** (phase 51): these are the levels the proof term
+  -- mentions and its type does not, so the reader has no way to see them in
+  -- what was printed and the message has to say which.
+  Levels (Ambiguous vs) ->
+    [ "these universe levels appear only in the term, and nothing determines "
+        ++ "them: " ++ unwords (map levelVarName vs) ]
   Ill pos te   ->
     ("in " ++ renderPosition pos ++ ":") : map ("  " ++) (renderTypeError n te)
 
@@ -1175,14 +1345,15 @@ renderPosition p = case p of
   Inside _ i inner -> renderPosition inner ++ ", inside the guess for " ++ identString i
 
 -- | @:proofs@ — what the session is holding (§2.4).
-renderProofs :: Int -> Maybe Proof -> [Proof] -> [String]
+renderProofs :: Int -> Maybe Attempt -> [Parked] -> [String]
 renderProofs n cur ps
   | null everything = ["no proofs"]
   | otherwise       = everything
   where
-    everything = maybe [] (pure . line "▶ ") cur ++ map (line "  ") ps
-    line mark pr =
-      mark ++ nameString (proofName pr) ++ " : " ++ renderCore n [] (proofClaim pr)
+    everything = maybe [] (pure . line "▶ ") cur
+                 ++ map (line "  " . parkedAttempt) ps
+    line mark att =
+      mark ++ nameString (attemptName att) ++ " : " ++ renderCore n [] (attemptClaim att)
 
 renderMoveError :: MoveError -> String
 renderMoveError m = case m of
@@ -1278,10 +1449,10 @@ renderEliminator n g ty =
 -- The constraints have **no surface spelling** — nothing writes a scheme by
 -- hand any more — so they are shown the way @:convert@ shows what it owes.
 renderGlobal
-  :: Int -> GlobalName -> [LevelVar] -> [Obligation] -> Core -> Maybe Core
-  -> [String]
-renderGlobal n g lvs cs ty body =
-  (nameString g ++ scheme n lvs cs ty)
+  :: Int -> GlobalName -> [LevelVar] -> [Obligation] -> [Plicity] -> Core
+  -> Maybe Core -> [String]
+renderGlobal n g lvs cs ps ty body =
+  (nameString g ++ scheme n lvs cs ps ty)
     : case body of
         Nothing -> []
         Just b  -> [nameString g ++ " = " ++ renderCore n [] b]
@@ -1310,13 +1481,41 @@ renderGlobal n g lvs cs ty body =
 --
 -- **No constraints, no turnstile.** Every monomorphic theorem would otherwise
 -- grow an empty one.
-scheme :: Int -> [LevelVar] -> [Obligation] -> Core -> String
-scheme n lvs cs ty =
-  levelParams lvs ++ " : " ++ owed ++ renderCore n [] ty
+scheme :: Int -> [LevelVar] -> [Obligation] -> [Plicity] -> Core -> String
+scheme n lvs cs ps ty =
+  levelParams lvs ++ " : " ++ owed ++ signature n ps ty
   where
     owed
       | null cs   = ""
       | otherwise = unwords [ "(" ++ obligation c ++ ")" | c <- cs ] ++ " ⊢ "
+
+-- | A declared type, with the binders the signature wrote in braces shown in
+-- braces (MS4 phase 44b).
+--
+-- **Only the leading run, and only as far as the plicities go.** The record is
+-- surface information about the /name/ (see 'Thena.Engine.signatures'), so it
+-- runs out exactly where the written signature did; the rest is an ordinary
+-- core type and 'renderCore' prints it.
+--
+-- **A term is NOT hidden the same way**, and deliberately: @:show@ prints the
+-- core term a definition holds, and the core has no implicits at all — an
+-- application with its inserted arguments dropped would not be the term that
+-- is there.
+signature :: Int -> [Plicity] -> Core -> String
+signature n0 ps0 ty0 = braced n0 [] ps0 ty0
+  where
+    -- Only the **leading** implicit binders are peeled. The moment a position
+    -- is explicit the rest is an ordinary core type and 'renderCore' prints it
+    -- — grouping the binders the way it always has, which peeling them one at a
+    -- time here would lose.
+    --
+    -- The opened binder goes into the context, so the codomain prints it by
+    -- name rather than as a bare variable.
+    braced n ctx (Implicit : more) (Pi i dom sc) =
+      let (v, n1) = fresh n
+       in "∀ {" ++ identString i ++ " : " ++ renderCore n ctx dom ++ "} -> "
+            ++ braced n1 (ctx ++ [Hypothesis v i dom]) more (open v sc)
+    braced n ctx _ ty = renderCore n ctx ty
 
 renderDeclareError :: DeclareError -> String
 renderDeclareError e = case e of
@@ -1356,6 +1555,14 @@ renderDeclareError e = case e of
       ++ ", which the datatype's own "
       ++ renderLevel d
       ++ " does not contain"
+  AmbiguousLevels g ->
+    "the universe levels only "
+      ++ nameString g
+      ++ "'s constructors mention cannot be determined"
+  ArgumentLevelsUnmet g ->
+    "the universe levels "
+      ++ nameString g
+      ++ "'s constructor arguments require cannot all hold"
   ArgumentNotAType g i te ->
     "the argument " ++ identString i ++ " of " ++ nameString g ++ " is ill-typed"
       ++ concatMap ("\n  " ++) (renderTypeError 0 te)
@@ -1555,6 +1762,8 @@ renderRuleError e = case e of
   BoundNonProducing g i n  -> inRule g i ++ n ++ " is bound to an operation that leaves nothing"
   UnboundInRule g i n      -> inRule g i ++ "no parameter or earlier binding is called " ++ n
   NoSuchTest g w           -> "in " ++ nameString g ++ ": no such test: " ++ w
+  UnboundInHead g n         -> "in " ++ nameString g ++ ": no parameter is called " ++ n
+  BadTestOperands g w      -> "in " ++ nameString g ++ ": " ++ w ++ " was written with the wrong arguments"
   BadOperands g i w        -> inRule g i ++ w ++ " was written with the wrong arguments"
   where
     inRule g i = "in " ++ nameString g ++ ", instruction " ++ show i ++ ": "

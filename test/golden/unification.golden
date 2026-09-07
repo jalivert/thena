@@ -22,22 +22,21 @@ claimed a
 thena spine> claim b : Nat
 claimed b
 thena spine> unify a ≟ b
-parked 1 constraint(s), blocked on a, b
+solved: b
 thena spine> :show
   let h = succ zero : Nat in
   let f = λ (x : Nat) -> succ x : Nat -> Nat in
   let ? a : Nat in
-  let ? b : Nat in
-  ⊢ a ≟ b : Nat ▸
+  let b = a : Nat in
 ▶ let ? goal : Type₀ in
   goal
 thena spine> unify b ≟ zero
-solved: b, a
+solved: a
 thena spine> :show
   let h = succ zero : Nat in
   let f = λ (x : Nat) -> succ x : Nat -> Nat in
   let a = zero : Nat in
-  let b = zero : Nat in
+  let b = a : Nat in
 ▶ let ? goal : Type₀ in
   goal
 thena spine> claim c : Nat

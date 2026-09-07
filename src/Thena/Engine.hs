@@ -16,12 +16,12 @@ module Thena.Engine
     Machine (..)
   , Exec (..)
   , Frame (..)
-  , ProofState (..)
-  , newProof
-  , proofContext
-  , proofDevelopment
+  , Development (..)
+  , newDevelopment
+  , focusContext
+  , flatten
   , setGoal
-  , setGoalNamed
+  , newDevelopmentNamed
 
     -- * Running it
   , Outcome (..)
@@ -30,6 +30,8 @@ module Thena.Engine
   , Answer
   , load
   , isAsking
+  , isYielding
+  , resumeYield
   , step
   , resumeAt
   , failure
@@ -43,20 +45,24 @@ module Thena.Engine
   ) where
 
 import Data.List (intercalate, nub)
+import qualified Data.List.NonEmpty as NE
 
-import Thena.Core.Level (Level (..), levelVarName)
-import Thena.Core.Context (Context)
+import Thena.Core.Level (Level (..), freshLevelMeta, levelOfNat, levelVarName)
+import Thena.Core.Context (Context, Entry (..), entryIdent, entryVar)
 import Thena.Core.Term
   ( Core (..)
+  , close
   , GlobalName (..)
   , Ident (..)
   , Var
   , fresh
   , instantiate
   )
+-- Only for 'Core'\'s @Eliminate@, which "Thena.Ops" also has a constructor
+-- named: the op that builds one and the node it builds must be told apart.
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Typing (check, infer, sortOf)
-import Thena.Core.Unify (UnifyResult (..), blockers, unify)
+import Thena.Core.Unify (UnifyResult (..), blockers, unify, unifyInto)
 import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor
   ( Cursor
@@ -78,7 +84,16 @@ import Thena.Development.Cursor
   )
 import qualified Thena.Development.Cursor as Cursor
 import Thena.Development.Partial (Impure (..), Partial (..), extract)
-import Thena.Errors (FailReason (..), MoveError (..), Position (..), SyntaxError (..))
+import Thena.Errors
+  ( FailReason (..)
+  , MoveError (..)
+  , Position (..)
+  , ResolveError (..)
+  , SyntaxError (..)
+  , TypeError (..)
+  )
+import Thena.Surface.Concrete (Plicity (..))
+import qualified Thena.Surface.Concrete as Concrete
 import Thena.Ops
   ( AnswerKind
   , Env
@@ -87,16 +102,28 @@ import Thena.Ops
   , Op (..)
   , Operand (..)
   , Value (..)
-  , hintName
   )
-import Thena.Global.Env (GlobalEnv, InductiveDefinition, declaredNames)
+import Thena.Global.Declare (buildInductive)
+import Thena.Global.Env
+  ( GlobalEnv
+  , InductiveDefinition
+  , declaredNames
+  , definitionLevels
+  , isDeclared
+  , lookupDefinition
+  , eliminatorName
+  , inductiveConstructors
+  , inductiveIndices
+  , inductiveParameters
+  , lookupInductive
+  )
 import qualified Thena.Ops as Op
 import Thena.Tactics.Eliminate (Elimination (..), eliminate)
-import Thena.Rules (RuleBase, RuleIter, arities, clauses, dispatch, hasNext, next)
-import Thena.Syntax.Concrete (Raw)
-import Thena.Syntax.Lexer (isIdentifier, lexTokens)
-import Thena.Syntax.Parser (parseTerm)
-import qualified Thena.Syntax.Resolve as Resolve
+import Thena.Rules
+  (RuleBase, RuleError (..), RuleIter, arities, clauses, dispatch, hasNext, next, resolveBlock)
+import Thena.Syntax.Lexer (isIdentifier)
+import Thena.Surface.Zipper (SurfaceZipper)
+import qualified Thena.Surface.Zipper as Zipper
 
 -- --------------------------------------------------------------------------
 -- The machine
@@ -105,7 +132,7 @@ import qualified Thena.Syntax.Resolve as Resolve
 -- | §7.2's four fields.
 --
 -- The field boundary is the backtracking boundary: 'proof' rewinds in full and
--- nothing else does (§7.4). That is why 'ProofState' is its own type rather
+-- nothing else does (§7.4). That is why 'Development' is its own type rather
 -- than a few fields here — a @Choice@ frame's snapshot has the same type as the
 -- whole of what backtracks, so there is no sub-record to snapshot correctly or
 -- incorrectly.
@@ -120,12 +147,56 @@ import qualified Thena.Syntax.Resolve as Resolve
 -- 'Thena.Core.Term.fresh' is the function that mints from it, and a field and a
 -- function of the same name are ambiguous to GHC and to the ear.
 data Machine = Machine
-  { exec    :: Exec
-  , proof   :: ProofState
-  , globals :: GlobalEnv  -- ^ NOT backtrackable (§7.4, §3.3.1)
-  , rules   :: [RuleBase] -- ^ NOT backtrackable (§7.4) — phase 15; a list
-                          -- of loaded bases, leftmost searched first (phase 22)
-  , names   :: Int        -- ^ NOT backtrackable (§7.4)
+  { exec        :: Exec
+  , development :: Development
+    -- ^ the development, focused. **Named for what it is** (phase 37): it was
+    -- @proof@, beside a @Session.sessionProof@ that meant a theorem, and one
+    -- word for two things is a confusion, and the rename is the fix.
+  , enclosing   :: [(Development, Int)]
+    -- ^ the developments a @push-development@ suspended, each with **the depth
+    -- the frame stack had when it was pushed** (phase 53).
+    --
+    -- **A choice point belongs to the development it was made in — HIS RULING,
+    -- 2026-09-03.** Phase 52 made `:theorem`, @qed@, `:abandon` and `:suspend`
+    -- discard them; this is the other pair of boundaries, and the one a
+    -- @declare@ crosses twice inside a single command. Without the depth
+    -- @pop-development@ has no way to tell the frames the inner development
+    -- made from the ones its caller was already standing in.
+    -- ^ **the developments this one is nested inside** (MS4 phase 42, his
+    -- decision) — Brady's @NEW PROOF@ made a stack.
+    --
+    -- Elaborating a declaration needs the signature worked out in a
+    -- development of its own: @certify@ extracts the /whole/ chain, so a
+    -- signature elaborated beside the body would land inside the proof term,
+    -- and phase 37 made @:theorem@ start fresh for that reason. @IDRIS.md@
+    -- §4.6 is the same shape — @NEW PROOF Type; E⟦t⟧; t' ← TERM@.
+    --
+    -- **It is state, not control, so it lives here and not on the frame
+    -- stack.** A 'Frame' is what the machine is /inside/; this is what it is
+    -- /working on/. The consequence is that both things that snapshot a
+    -- machine have to carry it — 'Choice'\'s @savedEnclosing@ and
+    -- "Thena.Driver"\'s @Snapshot@ — and neither would compile without it.
+    --
+    -- **Backtrackable, like 'development' and unlike everything below it.**
+  , globals     :: GlobalEnv  -- ^ NOT backtrackable (§7.4, §3.3.1)
+  , rules       :: [RuleBase] -- ^ NOT backtrackable (§7.4) — phase 15; a list
+                              -- of loaded bases, leftmost searched first (phase 22)
+  , signatures  :: [(GlobalName, [Plicity])]
+    -- ^ **which of a global's argument positions were written implicit** (MS4
+    -- phase 44b) — Brady's system state @(C, A, I)@, the @I@ of it. NOT
+    -- backtrackable, like 'globals' beside it.
+    --
+    -- **It is here and not in 'Thena.Global.Env.GlobalEnv' because the core has
+    -- no plicity at all** — his decision: /"the DC does not need implicits. I
+    -- think implicit arguments and placeholders and implicit level arguments
+    -- are all only part of the surface syntax."/ A @Pi@ carries no flag, so the
+    -- record of which binders were written in braces cannot live on the type;
+    -- it is surface information about a name and it sits beside the rule bases,
+    -- which are not core either.
+    --
+    -- Written when a declaration is installed, read when a use of that name is
+    -- elaborated.
+  , names       :: Int        -- ^ NOT backtrackable (§7.4)
   }
   deriving (Eq, Show)
 
@@ -152,16 +223,34 @@ data Frame
   = Call
       { resume    :: [Instr]
       , resumeEnv :: Env
+      , returned  :: Bool
+        -- ^ has control already passed back out of this call? See 'resumeFrom',
+        -- and it means for a 'Call' exactly what it means for a 'Choice'.
+        --
+        -- **A returned frame is stepped over, never popped** (MS4 phase 57).
+        -- It used to be popped, and that quietly dismantled the stack
+        -- underneath any 'Choice' standing on it: a choice point records its
+        -- own caller\'s leftovers and /relies on the frames below it/ for the
+        -- rest of the continuation, so removing one of them left it standing
+        -- on a stack it was never made on. Backtracking then restored a
+        -- continuation with a hole in it — and the work that had migrated into
+        -- @pc@ was dropped without a word.
       }
   | Choice
       { resume    :: [Instr]
       , resumeEnv :: Env
       , alts      :: RuleIter    -- ^ the matches not yet tried, lazily (§7.6)
-      , saved     :: ProofState  -- ^ the state before the first alternative ran
+      , saved     :: Development  -- ^ the state before the first alternative ran
+      , savedEnclosing :: [(Development, Int)]
+        -- ^ and the developments it was nested inside (MS4 phase 42). A body
+        -- that pushes a development and then fails must unwind to the stack it
+        -- had, not to the one it left.
       , choiceId  :: Int         -- ^ what @retry ‹n›@ names it by
       , chosen    :: GlobalName  -- ^ the rule this frame is currently running
       , returned  :: Bool
-        -- ^ has control already passed back out of this call? See 'resumeFrom'.
+        -- ^ **the same field a 'Call' carries, and it means the same thing.**
+        -- Both frames have exactly one lifetime as of MS4 phase 57: entered,
+        -- returned, and stepped over ever after. See 'resumeFrom'.
       , callArgs  :: [Value]
         -- ^ the arguments a @call@ was given, or @[]@ for a dispatch (phase
         -- 23). Kept beside 'entryEnv' rather than folded into it because each
@@ -194,7 +283,7 @@ data Frame
 -- **The focus backtracks with it**, and that is the point of it being in here
 -- rather than beside it: a retried alternative must start where the abandoned
 -- one started, not wherever the abandoned one wandered to.
-newtype ProofState = ProofState { cursor :: Cursor }
+newtype Development = Development { cursor :: Cursor }
   deriving (Eq, Show)
 
 -- | The development a session starts with: one hole, at the least interesting
@@ -205,10 +294,10 @@ newtype ProofState = ProofState { cursor :: Cursor }
 -- phase wants a goal to point at, and because @let ? goal : Type₀ in goal@ is
 -- an honest development where @Trailing Type₀@ would be scaffolding pretending
 -- to be a proof.
-newProof :: Int -> (ProofState, Int)
-newProof n =
+newDevelopment :: Int -> (Development, Int)
+newDevelopment n =
   let (v, n1) = fresh n
-   in (ProofState (enter (goalAt v (Universe (LZero)))), n1)
+   in (Development (enter (goalAt v (Universe (LZero)))), n1)
 
 goalAt :: Var -> Core -> Partial
 goalAt = goalAtNamed (Ident "goal")
@@ -219,15 +308,15 @@ goalAtNamed i v ty = Under (Component.Claim v i ty) (Trailing (Free v))
 -- | Γ at the focus (§4.5), which is what an identifier typed at the REPL must
 -- be in scope in (§4.0 E1).
 --
--- One line, and it is the whole of what phase 4's own @proofContext@ was
+-- One line, and it is the whole of what phase 4's own @focusContext@ was
 -- approximating: that one forgot the /entire/ chain, because there was no
 -- focus to take a prefix of.
-proofContext :: ProofState -> Context
-proofContext = Cursor.context . cursor
+focusContext :: Development -> Context
+focusContext = Cursor.context . cursor
 
 -- | The development, rebuilt. O(depth), with most structure shared (§4.2).
-proofDevelopment :: ProofState -> Partial
-proofDevelopment = rebuild . cursor
+flatten :: Development -> Partial
+flatten = rebuild . cursor
 
 -- | Replace the goal: retract the trailing hole, if the chain ends in one, and
 -- claim a new one at the given type.
@@ -250,8 +339,54 @@ proofDevelopment = rebuild . cursor
 -- That name is what @:show@ and every error message will call it, and it is
 -- also what the extracted term's outermost @let@ binds, so a proof of @id@
 -- reads @let id = … in id@ rather than @let goal = … in goal@.
-setGoalNamed :: GlobalName -> Core -> Machine -> Either MoveError Machine
-setGoalNamed (GlobalName x) = goalNamed (Ident x)
+-- | @:theorem ‹name› : T@ — a **fresh** development, whose one hole is the
+-- theorem's goal and carries the theorem's own name.
+--
+-- **Fresh, and not @:goal@ with a name** (phase 37, his ruling). Until then
+-- @:theorem@ went through the same @replaceFocus@ that @:goal@ does, which
+-- keeps everything above the focus — deliberate for @:goal@, where
+-- @assume A : Type₀@ then @:goal A -> A@ still means something, and inherited
+-- by @:theorem@, where nobody decided it. The effect was that a @claim@ left
+-- open in the scratch development became part of the theorem's, and @qed@ then
+-- failed with /"the hole h is still open"/ for a reason that had nothing to do
+-- with the theorem.
+--
+-- **It could never have been a loss.** An inherited prefix can only be
+-- @assume@s and @claim@s; an @assume@ puts a λ in the extracted term, and @qed@
+-- certifies that term against the attempt's claim — so an inherited prefix
+-- could not have produced something that certifies. It could only fail.
+--
+-- It cannot fail, which is why it returns no 'Either' where @setGoalNamed@ did:
+-- 'enter' takes any 'Partial', where 'replaceFocus' has a focus to be wrong
+-- about.
+-- | Reduce a type's whole telescope, not only its head (MS4 phase 44b).
+--
+-- @whnf@ at every position a Π chain has, so elaboration's @=@-bindings are
+-- gone from the domains and the codomain as well as from the front. See
+-- 'Thena.Ops.Expose' for why a declared type needs it and why this is not a
+-- normaliser.
+exposed :: GlobalEnv -> Context -> Int -> Core -> (Core, Int)
+exposed env ctx n t = case whnf env ctx t of
+  Pi i dom sc ->
+    let (d, n1)   = exposed env ctx n dom
+        (v, n2)   = fresh n1
+        (cod, n3) = exposed env (ctx ++ [Hypothesis v i d]) n2 (instantiate (Free v) sc)
+     in (Pi i d (close v cod), n3)
+  other -> (other, n)
+
+-- | A development whose goal is claimed at a given type (MS4 phase 42).
+--
+-- 'newDevelopment' is this at @Type₀@, and 'newDevelopmentNamed' is this with
+-- the goal named after the theorem; all three were the same three lines.
+newDevelopment' :: Core -> Int -> (Development, Int)
+newDevelopment' ty n =
+  let (v, n1) = fresh n
+   in (Development (enter (goalAt v ty)), n1)
+
+newDevelopmentNamed :: GlobalName -> Core -> Int -> (Development, Int)
+newDevelopmentNamed (GlobalName x) ty n =
+  let (v, n1) = fresh n
+   in (Development (enter (goalAtNamed (Ident x) v ty)), n1)
 
 setGoal :: Core -> Machine -> Either MoveError Machine
 setGoal = goalNamed (Ident "goal")
@@ -259,9 +394,9 @@ setGoal = goalNamed (Ident "goal")
 goalNamed :: Ident -> Core -> Machine -> Either MoveError Machine
 goalNamed i ty m =
   let (v, n1) = fresh (names m)
-   in case replaceFocus (goalAtNamed i v ty) (cursor (proof m)) of
+   in case replaceFocus (goalAtNamed i v ty) (cursor (development m)) of
         Left e    -> Left e
-        Right cur -> Right m { proof = ProofState cur, names = n1 }
+        Right cur -> Right m { development = Development cur, names = n1 }
 
 -- --------------------------------------------------------------------------
 -- Running it
@@ -282,7 +417,7 @@ type Answer = String
 --
 -- 'Declaring' is the first that is neither a question nor a message: the
 -- machine hands out a declaration it cannot install itself, because the global
--- environment is outside 'ProofState' and no instruction writes it (§3.7,
+-- environment is outside 'Development' and no instruction writes it (§3.7,
 -- §7.4). Like 'Saying' it carries a machine already advanced past the
 -- instruction — there is nothing to bind, so nothing has to be told where to
 -- put an answer, which is what kept the 'Ask' instruction at the head of @pc@.
@@ -292,9 +427,20 @@ type Answer = String
 data Outcome
   = Continue  Machine
   | Asking    Question   Machine  -- ^ the driver must supply an 'Answer'
+  | Yielding  Message    Machine
+    -- ^ control has been handed to the REPL and the machine is standing still
+    -- (MS4 phase 45b). Like 'Asking' it leaves @pc@ where it is, so stepping a
+    -- yielding machine yields again; unlike 'Asking' the driver does not owe it
+    -- a value, only the word that lets it carry on.
   | Saying    Message    Machine  -- ^ the driver renders, then steps again
   | Declaring InductiveDefinition Machine
                                   -- ^ the driver checks, installs, then steps again
+  | Defining GlobalName [Plicity] Core Core Machine
+                                  -- ^ a finished definition — name, type, term
+                                  -- (MS4 phase 42). The driver runs the kernel,
+                                  -- generalises and installs, then steps again.
+                                  -- Same shape as 'Declaring', for §7.5's
+                                  -- reason: no instruction writes globals
   | Certifying Core Core Machine
                                   -- ^ the closed term the development stands for
                                   -- and the type it claims: the driver runs the
@@ -306,7 +452,22 @@ data Outcome
 -- | Put a program into the machine's @pc@ (§7.8). A command is a program loaded
 -- into the /current/ machine, not a new machine.
 load :: [Instr] -> Machine -> Machine
-load is m = m { exec = (exec m) { pc = is, env = [] } }
+load is m
+  -- **A suspended program survives; a dead one does not** (MS4 phase 45b).
+  --
+  -- The design conversation had this prepending unconditionally, and that is
+  -- wrong: @pc@ is only empty when a program /finished/. A line that halted, or
+  -- that was abandoned mid-question, leaves its instructions behind, and
+  -- prepending in front of those brings them back to life — which is exactly
+  -- what @test\/golden\/mistakes.golden@ caught: a failed @assume@\'s @Ask@
+  -- resurfaced two commands later and swallowed a @:show@ as its answer.
+  --
+  -- So the tape is kept **iff** it is standing in a yield, which is the one
+  -- state in which the rest of the program is still wanted. That is not a mode:
+  -- it is one statable rule about what is live, and 'isYielding' is the test
+  -- for it.
+  | isYielding m = m { exec = (exec m) { pc = is ++ pc (exec m) } }
+  | otherwise    = m { exec = (exec m) { pc = is, env = [] } }
 
 -- | Is the machine waiting for an answer? The driver asks this before it calls
 -- 'resumeAt', so that a line typed when nothing was asked is reported rather
@@ -316,6 +477,34 @@ isAsking m = case pc (exec m) of
   Bind _ (Ask _ _) : _ -> True
   Do     (Ask _ _) : _ -> True
   _                    -> False
+
+-- | Is the machine standing in a yield (MS4 phase 45b)?
+--
+-- 'isAsking''s twin, same shape and same head-of-@pc@ test, and the driver uses
+-- it for the same reason: so that @yield@ typed when nothing has yielded is
+-- reported rather than silently doing nothing.
+isYielding :: Machine -> Bool
+isYielding m = case pc (exec m) of
+  Bind _ (Yield _) : _ -> True
+  Do     (Yield _) : _ -> True
+  _                    -> False
+
+-- | Step past a yield, handing control back to the suspended program.
+--
+-- **'resumeAt''s twin, and it is the driver's** — an op could not do it. With
+-- 'load' prepending, a @resume@ /op/ would arrive as @[Do Resume, Yield, …]@
+-- and would have to reach forward and delete the instruction after it, which is
+-- a program modifying itself. There are two precedents for a driver word that
+-- advances the tape without an op: 'resumeAt' for 'Ask', and @retry@ (§7.7).
+--
+-- **A bound yield binds nothing.** It is not a question, so there is no answer
+-- to bind; the name simply goes unused, which the resolver already permits for
+-- any op that produces nothing.
+resumeYield :: Machine -> Machine
+resumeYield m = case pc (exec m) of
+  Bind _ (Yield _) : rest -> m { exec = (exec m) { pc = rest } }
+  Do     (Yield _) : rest -> m { exec = (exec m) { pc = rest } }
+  _                       -> m
 
 -- | One instruction.
 --
@@ -344,17 +533,12 @@ step m = case pc (exec m) of
 -- meaningful, and 'unwind' clears it again when it re-enters the call.
 resumeFrom :: [Frame] -> Maybe ([Instr], Env, [Frame])
 resumeFrom [] = Nothing
-resumeFrom (fr : stk) = case fr of
-  Thena.Engine.Call {} -> Just (resume fr, resumeEnv fr, stk)
-  Choice { returned = False } ->
-    Just ( resume fr
-         , resumeEnv fr
-         , Choice (resume fr) (resumeEnv fr) (alts fr) (saved fr)
-                  (choiceId fr) (chosen fr) True (callArgs fr) (entryEnv fr)
-             : stk
-         )
-  Choice { returned = True } ->
-    (\(is, e, stk') -> (is, e, fr : stk')) <$> resumeFrom stk
+resumeFrom (fr : stk)
+  -- A record update rather than a positional rebuild: this frame differs from
+  -- @fr@ in exactly one field, and saying so is what keeps it right when a
+  -- frame gains another (a 'Choice' gained @savedEnclosing@ at MS4 phase 42).
+  | not (returned fr) = Just (resume fr, resumeEnv fr, fr { returned = True } : stk)
+  | otherwise         = (\(is, e, stk') -> (is, e, fr : stk')) <$> resumeFrom stk
 
 -- | Deposit an answer into @env@ at the destination the asking instruction
 -- named, and step past it.
@@ -396,12 +580,21 @@ failure r0 m = unwind (stack (exec m))
         -- between commands, and an alternative taken inside a failing command
         -- is otherwise invisible: the user typed @retry 77@, @solve@ failed,
         -- @regret@ ran, and only the development moved.
+        -- **Every frame below comes back to life** (MS4 phase 57). Their
+        -- continuations belong to the branch being abandoned; in the branch
+        -- about to be taken they have not run, so a frame that was stepped
+        -- over must be entered again. Without this the alternative would run
+        -- and the caller\'s remaining program would not — which is the same
+        -- hole from the other side.
         Just (r, it') -> Saying (took "backtracking to" fr r) m
-          { proof = saved fr
-          , exec  = Exec (ruleBody r) (seedFor fr r) (demote fr r it' : stk)
+          { development = saved fr
+          , exec  = Exec (ruleBody r) (seedFor fr r)
+                         (demote fr r it' : map unreturned stk)
           }
 
     took verb fr r = verb ++ " " ++ show (choiceId fr) ++ ": " ++ nameOfRule r
+
+    unreturned fr = fr { returned = False }
 
 -- | Taking the /last/ alternative demotes the frame to a 'Call', by the same
 -- peek that created it, so an exhausted 'Choice' never exists (§7.3). Three
@@ -409,12 +602,50 @@ failure r0 m = unwind (stack (exec m))
 -- choice that really has something left; a whole development snapshot is held
 -- only where it can be used; and the choice-point view shows exactly the live
 -- decisions and nothing dead.
+-- | The one place a 'Choice' is built, so a field added to it is answered once.
+--
+-- Both dispatch sites — @Prove@'s and @Call@'s — differ only in the arguments
+-- and the entry environment they seed; everything else they said was the same
+-- thing written twice, and 'savedEnclosing' (MS4 phase 42) is the field that
+-- made writing it twice cost something.
+choicePoint :: Machine -> [Instr] -> RuleIter -> Rule -> [Value] -> Env -> Frame
+choicePoint m rest it' r vs seed =
+  Choice
+    { resume         = rest
+    , resumeEnv      = env (exec m)
+    , alts           = it'
+    , saved          = development m
+    , savedEnclosing = enclosing m
+    , choiceId       = names m
+    , chosen         = ruleName r
+    , returned       = False
+    , callArgs       = vs
+    , entryEnv       = seed
+    }
+
 demote :: Frame -> Rule -> RuleIter -> Frame
 demote fr r it'
   | hasNext it' =
-      Choice (resume fr) (resumeEnv fr) it' (saved fr) (choiceId fr) (ruleName r)
-             False (callArgs fr) (entryEnv fr)
-  | otherwise = Thena.Engine.Call (resume fr) (resumeEnv fr)
+      -- Named fields rather than a record update: @fr@ is a 'Frame', which may
+      -- be a 'Thena.Engine.Call', and an update would be partial in it.
+      Choice
+        { resume         = resume fr
+        , resumeEnv      = resumeEnv fr
+        , alts           = it'
+        , saved          = saved fr
+        , savedEnclosing = savedEnclosing fr
+        , choiceId       = choiceId fr
+        , chosen         = ruleName r
+        , returned       = False
+        , callArgs       = callArgs fr
+        , entryEnv       = entryEnv fr
+        }
+    -- **@returned = False@ in both branches**: the frame is being /entered/,
+    -- so control has not passed back out of it yet. Copying @fr@\'s flag here
+    -- would demote a frame that had already returned into one that is stepped
+    -- straight over, and its @resume@ — the caller\'s leftovers — would never
+    -- run (MS4 phase 57).
+  | otherwise = Thena.Engine.Call (resume fr) (resumeEnv fr) False
 
 -- --------------------------------------------------------------------------
 -- Performing one instruction
@@ -425,6 +656,26 @@ perform instr rest m = case operation instr of
   Ask prompt kind -> case text prompt of
     Left r  -> failure r m
     Right s -> Asking (Question s kind) m       -- NB: pc unchanged; see 'resumeAt'
+
+  -- **Play a written block** (MS4 phase 45) — 'Op.Block'.
+  --
+  -- This is 'Op.Call' with the body supplied instead of looked up, and it is
+  -- deliberately the same two lines: a frame that says where to come back to,
+  -- and an 'Exec' over the body. **No choice point**, because a block is one
+  -- body and there is nothing to choose between; everything below it stays
+  -- live, so a @retry@ from inside a block still reaches whatever put it there.
+  --
+  -- **The environment starts empty**, as a rule's does when it takes no
+  -- arguments: a block's bindings are its own, and the surface term around it
+  -- has none to pass in.
+  Op.Block body ->
+    Continue m { exec = Exec body [] (Thena.Engine.Call rest (env (exec m)) False : stack (exec m)) }
+
+  -- **Hand control over, and stay put** (MS4 phase 45b). @pc@ is deliberately
+  -- unchanged — see 'Op.Yield' and 'resumeYield'.
+  Op.Yield message -> case text message of
+    Left r  -> failure r m
+    Right t -> Yielding t m
 
   Say message -> case text message of
     Left r  -> failure r m
@@ -437,14 +688,84 @@ perform instr rest m = case operation instr of
 
   -- Purity and extraction are one traversal (§5.3); the kernel itself is the
   -- driver's to run, exactly as a declaration's checks are.
+  -- **Brady's @NEW PROOF@ and @TERM@** (MS4 phase 42) — see 'Op.PushDevelopment'
+  -- for why a declaration needs them.
+  Expose t -> case term t of
+    Left r  -> failure r m
+    Right t' ->
+      let (t'', n1) = exposed (globals m) contextAt (names m) t'
+       in produce (VTerm (Trailing t'')) m { names = n1 }
+
+  PushDevelopment ty -> case term ty of
+    Left r -> failure r m
+    Right t -> case sortOf (globals m) contextAt (names m) t of
+      -- The same side condition @claim@ owes (phase 25f): the goal of the new
+      -- development is a claim, so what it is claimed at must be a type.
+      (Left e,  _, n1) -> failure (NotTypeable e) m { names = n1 }
+      (Right _, _, n1) ->
+        let (dev, n2) = newDevelopment' t n1
+         in Continue (advance m { development   = dev
+                                , enclosing     = (development m, depthNow) : enclosing m
+                                , names         = n2
+                                })
+        where depthNow = length (stack (exec m))
+
+  PopDevelopment -> case enclosing m of
+    [] -> failure NoEnclosingDevelopment m
+    (outer, depth) : beneath -> case extract (flatten (development m)) of
+      -- Purity is 'Thena.Development.Partial.extract'\'s answer, not a second
+      -- opinion — the same traversal @certify@ uses.
+      --
+      -- **The frames go with the development whether this succeeds or fails**
+      -- (MS4 phase 56). Only the success branch truncated until then, so a
+      -- @pop-development@ that found the development unfinished unwound into
+      -- the very @Choice@ frames its success would have discarded — the
+      -- elaboration\'s own, belonging to a development that is over. A
+      -- @Choice@ frame resumes the /inner/ continuation it captured, so the
+      -- caller\'s remaining program was dropped: @define-global@ never ran, the
+      -- machine reported @Completed@, and a @declare@ that installed nothing
+      -- said nothing at all. Phase 53\'s principle, on the branch it was not
+      -- applied to.
+      Left impure -> failure (NotYetPure (whereImpure impure)) (unstacked m)
+      Right t ->
+        -- **The frames the inner development made go with it** (phase 53), and
+        -- only those: everything below @depth@ is the caller's and is still
+        -- being stood in. A @Choice@ frame survives success (§7.7) so that an
+        -- untried alternative can be @retry@ed into — but the development it
+        -- would restore has just been extracted and put away, so keeping it
+        -- would let a later failure resurrect a finished proof.
+        produce (VTerm (Trailing t))
+                (unstacked m) { development = outer, enclosing = beneath }
+      where
+        unstacked m' =
+          m' { exec = (exec m') { stack = keepBelow depth (stack (exec m')) } }
+
+  -- **A surface datatype reaches the driver as a written one does** (MS4 phase
+  -- 42b): this assembles the record and 'Declaring' carries it out, so
+  -- @Thena.Global.Declare.declare@ checks both by the same code.
+  MakeData d nps cns tys -> case traverse term tys of
+    Left r -> failure r m
+    Right ts -> case ts of
+      [] -> failure (NotTypeable (UnknownDatatype d)) m
+      dty : ctys
+        | length ctys /= length cns -> failure (NotTypeable (UnknownDatatype d)) m
+        | otherwise ->
+            case buildInductive (globals m) d nps (zip cns ctys) dty (names m) of
+              Left e            -> failure (CannotBuildDatatype e) m
+              Right (def, n1)   -> Declaring def (advance m { names = n1 })
+
+  DefineGlobal ps nm ty tm -> case (,,) <$> text nm <*> term ty <*> term tm of
+    Left r -> failure r m
+    Right (x, t, v) -> Defining (GlobalName x) ps t v (advance m)
+
   Certify stated -> case term stated of
     Left r   -> failure r m
-    Right ty -> case extract (proofDevelopment (proof m)) of
+    Right ty -> case extract (flatten (development m)) of
       Left why -> failure (NotYetPure (whereImpure why)) m
       Right t  -> Certifying t ty (advance m)
 
   -- The life of a hole (thesis tables 2.7, 2.8). All six act on the component
-  -- at the focus, and all six rewrite 'ProofState', which is why they are ops
+  -- at the focus, and all six rewrite 'Development', which is why they are ops
   -- and not driver commands (§12 invariant 3).
   -- The inner hole gets its **own** identifier, which the thesis writes @x'@ —
   -- @?x : S@ ⟹ @?x ≐ (?x' : S . x')@. It shared the outer one until phase 24b,
@@ -452,7 +773,7 @@ perform instr rest m = case operation instr of
   Attack -> onHole $ \c -> case c of
     Component.Claim x i s ->
       let (v, n1) = fresh (names m)
-          i'      = Cursor.freshIdent (Cursor.identsIn (cursor (proof m))) i
+          i'      = Cursor.freshIdent (Cursor.identsIn (cursor (development m))) i
        in Right ( Component.Guess x i (Under (Component.Claim v i' s) (Trailing (Free v))) s
                 , n1 )
     _ -> Left NotAHole
@@ -460,11 +781,43 @@ perform instr rest m = case operation instr of
   -- Table 2.8's intro-∀ and intro-let, which "only replace constructions of the
   -- shape @?x : S . x@" — anything else is made ready by @attack@ first. So the
   -- shape test is the specification, not a shortcut.
-  Intro -> onHole $ \c -> case c of
-    Component.Guess x i g ty ->
-      (\(g', n1) -> (Component.Guess x i g' ty, n1))
-        <$> introduce (globals m) contextAt (names m) g
-    _ -> Left NotReadyToIntroduce
+  -- **The name is optional** (MS4 phase 41b). Given, it is the binder's; absent,
+  -- the binder keeps the one written in the type. Read through 'operandIdent',
+  -- so it is checked to be something the printer can print back (§2.6).
+  Intro mn -> case traverse (operandIdent (env (exec m))) mn of
+    Left r    -> failure r m
+    Right nm  -> onHole $ \c -> case c of
+      Component.Guess x i g ty ->
+        (\(g', n1) -> (Component.Guess x i g' ty, n1))
+          <$> introduce (globals m) contextAt (names m) nm g
+      _ -> Left NotReadyToIntroduce
+
+  -- **@intro@'s twin, and the only op that can start a Π** (MS4 phase 41f).
+  --
+  -- It is a hole-life op and not a component op like @assume@, and the level
+  -- is why. As a component op it would insert @∀ x : S@ above whatever hole
+  -- @attack@ had already made — and @attack@ copies the outer type, so the
+  -- codomain would be claimed at the /whole Π's/ universe. That drops the
+  -- domain's contribution: @∀ (A : Type₀) -> A@ would be pinned at @Type₀@
+  -- when it inhabits @Type₁@. Claiming the codomain here, at a fresh meta, is
+  -- what lets @ℓ_dom ⊔ ℓ_cod ≤ ℓ@ be /owed/ rather than forced —
+  -- "Thena.Development.Validate"'s @peeled@ is where it is owed.
+  Quantify name ty -> case (,) <$> operandIdent (env (exec m)) name <*> term ty of
+    Left r -> failure r m
+    Right (i, dom) -> case sortOf (globals m) contextAt (names m) dom of
+      -- Table 2.7's side condition on @assume@ and @claim@, and a ∀-binder
+      -- owes it for the same reason (phase 25f): @Θ ⊢ S : Type@.
+      (Left e,  _, n1) -> failure (NotTypeable e) m { names = n1 }
+      (Right _, _, n1) -> case focus (cursor (development m)) of
+        OnComponent (Component.Guess x xi g s) ->
+          case quantifyIn (globals m) contextAt n1 i dom g of
+            Left r -> failure r m { names = n1 }
+            Right (g', n2) -> case replaceComponent (Component.Guess x xi g' s)
+                                                    (cursor (development m)) of
+              Left e    -> failure (CannotMove e) m { names = n2 }
+              Right cur -> Continue (advance m { development = Development cur, names = n2 })
+        OnComponent _ -> failure NotReadyToIntroduce m { names = n1 }
+        _             -> failure (CannotMove NotOnTheSpine) m { names = n1 }
 
   -- **Table 2.7's side condition @Θ ⊩ t : S@, enforced** (phase 25b). It was
   -- documented and not checked until this phase, so an ill-typed guess sat in
@@ -486,7 +839,7 @@ perform instr rest m = case operation instr of
   -- past them could hand a later @fresh@ a token an error message already used.
   Try t -> case term t of
     Left r  -> failure r m
-    Right t' -> case focus (cursor (proof m)) of
+    Right t' -> case focus (cursor (development m)) of
       OnComponent (Component.Claim x i s) ->
         -- **The level obligations are dropped**, here and at every other
         -- typing call in this module: "Thena.Core.Typing"'s header says why
@@ -495,10 +848,10 @@ perform instr rest m = case operation instr of
           (Left e,   _, n1) -> failure (GuessIllTyped e) m { names = n1 }
           (Right (), _, n1) ->
             case replaceComponent (Component.Guess x i (Trailing t') s)
-                                  (cursor (proof m)) of
+                                  (cursor (development m)) of
               Left e    -> failure (CannotMove e) m { names = n1 }
               Right cur ->
-                Continue (advance m { proof = ProofState cur, names = n1 })
+                Continue (advance m { development = Development cur, names = n1 })
       OnComponent _ -> failure NotAHole m
       _             -> failure (CannotMove NotOnTheSpine) m
 
@@ -518,74 +871,45 @@ perform instr rest m = case operation instr of
   -- @x ∉ Θ'@: the hole may not be referred to by anything below it. Checked
   -- against the rebuilt development for 'replaceCore''s reason — an occurrence
   -- may be anywhere, not only in the neighbouring link.
-  Abandon -> case focus (cursor (proof m)) of
+  Abandon -> case focus (cursor (development m)) of
     OnComponent c
-      | isHole c -> case dropFocus (cursor (proof m)) of
+      | isHole c -> case dropFocus (cursor (development m)) of
           Left e    -> failure (CannotMove e) m
-          Right cur -> Continue (advance m { proof = ProofState cur })
+          Right cur -> Continue (advance m { development = Development cur })
       | otherwise -> failure NotAHole m
     _ -> failure (CannotMove NotOnTheSpine) m
 
   -- Dispatch (§7.3). The goal is the focus, so there is nothing to read: the
   -- iterator is built from the cursor, the first match's body becomes @pc@, and
   -- what would have been on Haskell's stack goes into the frame.
-  -- The hint, phase 17b: an optional operand holding a 'VSurface'. It changes
-  -- two things and no more — which rules are eligible ('Thena.Rules.matches'
-  -- partitions on it), and what the callee's environment starts with. §8's
-  -- \"same engine, same frames — the only difference is whether a hint is
-  -- present\", made literal.
-  Prove mh -> case traverse surface mh of
-    Left r     -> failure r m
-    Right hint -> case next (it hint) of
-      Nothing       -> failure NoRuleMatched m
-      Just (r, it')
-        -- Announced only when the dispatch was a real decision, which is
-        -- exactly when a 'Choice' was built. A message marks a choice; where
-        -- there was one candidate there was none, and a line per deterministic
-        -- call would be noise (§1, §7.5).
-        | hasNext it' ->
-            Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
-                   (entering hint r (Choice rest (env (exec m)) it' (proof m)
-                                       (names m) (ruleName r) False [] (seeded hint))
-                               m { names = names m + 1 })
-        | otherwise ->
-            Continue (entering hint r (Thena.Engine.Call rest (env (exec m))) m)
+  --
+  -- **It carries nothing** (MS4 phase 41). It took an optional surface term
+  -- from phase 17b to here, and that term partitioned the rule base and seeded
+  -- the callee's environment under the name @hint@. Both are gone: elaboration
+  -- is a rule called by name, so it was never a dispatch, and there is no magic
+  -- name in the instruction language any more.
+  Prove -> case next it of
+    Nothing       -> failure NoRuleMatched m
+    Just (r, it')
+      -- Announced only when the dispatch was a real decision, which is
+      -- exactly when a 'Choice' was built. A message marks a choice; where
+      -- there was one candidate there was none, and a line per deterministic
+      -- call would be noise (§1, §7.5).
+      | hasNext it' ->
+          Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
+                 (entering r (choicePoint m rest it' r [] []) m { names = names m + 1 })
+      | otherwise ->
+          Continue (entering r (Thena.Engine.Call rest (env (exec m)) False) m)
     where
-      it hint = dispatch (rules m) (globals m) (cursor (proof m)) hint
-
-      -- The one magic name in the instruction language, and §8 wrote it:
-      -- @h₁ = app-fun hint@ reads @hint@ as an ordinary operand. Seeding the
-      -- environment is what makes that true, and it is why there is no @Hint@
-      -- read op and nothing on the machine holding \"the current hint\".
-      seeded hint = maybe [] (\h -> [(hintName, VSurface h)]) hint
+      it = dispatch (rules m) (globals m) (cursor (development m))
 
       -- THE PEEK, decided 2026-08-20. A 'Choice' is built only when there
       -- really is another alternative — Prolog's determinism detection.
       -- Otherwise this is an ordinary 'Call', carrying no iterator, no
       -- snapshot and no identifier. The cost is Prolog's own: one more head
       -- match is computed than is used.
-      entering hint r fr k =
-        k { exec = Exec (ruleBody r) (seeded hint) (fr : stack (exec m)) }
-
-  -- Text to a surface tree: lexing and parsing, and no resolution (§7.2). The
-  -- lexer was already this module's — @isIdentifier@ — and the parser joins it
-  -- here, which is what makes a syntax error an op failure rather than
-  -- something only the driver can have.
-  Parse src -> case text src of
-    Left r  -> failure r m
-    Right t -> case lexTokens t of
-      Left e   -> failure (CannotRead (LexFailed e)) m
-      Right ts -> case parseTerm ts of
-        Left e    -> failure (CannotRead (ParseFailed e)) m
-        Right raw -> produce (VSurface raw) m
-
-  -- A surface tree to a term, in Γ at the focus (§4.5) — which is exactly the
-  -- context an identifier typed at the REPL must be in scope in (§4.0 E1).
-  Resolve raw -> case surface raw of
-    Left r  -> failure r m
-    Right h -> case Resolve.resolve (globals m) contextAt (names m) h of
-      Left e         -> failure (CannotRead (ResolveFailed e)) m
-      Right (t, n1)  -> produce (VTerm (Trailing t)) m { names = n1 }
+      entering r fr k =
+        k { exec = Exec (ruleBody r) [] (fr : stack (exec m)) }
 
   -- **Call by name: the same search as @Prove@, over a narrower candidate
   -- list** (§8, phase 23). The user's own framing, and it is why this case now
@@ -610,13 +934,11 @@ perform instr rest m = case operation instr of
       Just (r, it')
         | hasNext it' ->
             Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
-                   (entering vs r (Choice rest (env (exec m)) (it' ) (proof m)
-                                     (names m) (ruleName r) False vs [])
-                            m { names = names m + 1 })
+                   (entering vs r (choicePoint m rest it' r vs []) m { names = names m + 1 })
         | otherwise ->
-            Continue (entering vs r (Thena.Engine.Call rest (env (exec m))) m)
+            Continue (entering vs r (Thena.Engine.Call rest (env (exec m)) False) m)
     where
-      it vs = clauses (rules m) (globals m) (cursor (proof m)) nm (length vs)
+      it vs = clauses (rules m) (globals m) (cursor (development m)) nm vs
 
       -- The callee's parameters, bound to the arguments. 'clauses' has already
       -- filtered on arity, so the two lists agree by construction — and the
@@ -634,7 +956,7 @@ perform instr rest m = case operation instr of
   -- elimination it builds. The same shape as @Component.Claim@ beside 'Claim'.
   Op.Eliminate tgt -> case term tgt of
     Left r  -> failure r m
-    Right t -> case focus (cursor (proof m)) of
+    Right t -> case focus (cursor (development m)) of
       OnComponent (Component.Claim x i s) ->
         case eliminate (globals m) contextAt (names m) s t of
           (Left e,   n1) -> failure (CannotEliminate e) m { names = n1 }
@@ -644,7 +966,7 @@ perform instr rest m = case operation instr of
             -- them. Both halves are one op because a half-applied elimination
             -- — holes claimed, nothing attached — is not a state any rule
             -- should be able to observe.
-            let holes = foldl claimAbove (cursor (proof m)) (elimMethods el)
+            let holes = foldl claimAbove (cursor (development m)) (elimMethods el)
                 -- Freshened one at a time, against the development as it grows,
                 -- so two methods never share a name either (phase 24b).
                 claimAbove c (v, hi, hty) =
@@ -655,12 +977,88 @@ perform instr rest m = case operation instr of
                   Left e    -> failure (CannotMove e) m
                   Right cur ->
                     Saying (subgoalMessage (elimMethods el))
-                           (advance m { proof = ProofState cur, names = n1 })
+                           (advance m { development = Development cur, names = n1 })
       OnComponent _ -> failure NotAHole m
       _             -> failure (CannotMove NotOnTheSpine) m
 
   -- Thesis §2.7's @naive-refine@ with the search taken out (phase 25): the
   -- head's type is inferred here, and 'saturate' does the walking.
+  -- **One step of the walk @make-apply@ did over a list** (MS4 phase 49f):
+  -- claim a hole for the head\'s next argument, under the name the caller
+  -- minted, and hand back the spine extended by it.
+  --
+  -- **This is @ms4/CLOSEOUT.md@ 28\'s second answer.** A rule cannot build a
+  -- list of names, but it can mint one name per step of a recursion over the
+  -- surface spine, and the holes then accumulate in the development instead of
+  -- in the body. It is what let @make-apply@ be deleted rather than fed.
+  --
+  -- The binary application rule cannot do this: it claims @f : A -> B@, an
+  -- arrow, so @B@ cannot mention the argument and a dependent head like
+  -- @Eq {ℓ} (A : Type ℓ) : A -> A -> …@ makes unification try to solve a hole
+  -- with a term out of its scope. Walking the real telescope claims each domain
+  -- in the scope of the holes already claimed.
+  ApplyNext hd nm ->
+    case (,) <$> term hd <*> operandIdent (env (exec m)) nm of
+      Left r -> failure r m
+      Right (h, i) -> case infer (globals m) contextAt (names m) h of
+        (Left e,   _, n1) -> failure (NotTypeable e) m { names = n1 }
+        (Right ty, _, n1) -> claimNext h i ty m { names = n1 }
+
+  -- **The application a surface @elim D …@ means** (MS4 phase 49e). §3.7
+  -- generates a wrapper for the eliminator, so the node reads as an ordinary
+  -- name-headed spine and elaboration needs no eliminator case: the clause is
+  -- @a = elim-spine t ; call elaborate a@.
+  --
+  -- The arity of each group is checked here, where the group is still visible.
+  -- Left to the spine it would be one count against another, and @elim@ writes
+  -- its groups in parentheses precisely so that the user can see which is
+  -- which.
+  ElimSpine x -> case operandSurface (env (exec m)) x of
+    Left r  -> failure r m
+    Right z -> case outerArgs (Zipper.focus z) of
+      (Concrete.SurfaceElim d ps mot ms is tgt, extra) ->
+        case lookupInductive (GlobalName d) (globals m) of
+          Nothing  -> failure (CannotRead (ResolveFailed (NotADatatype d))) m
+          Just def
+            | length ps /= wantP ->
+                arity (WrongNumberOfEliminationParameters d wantP (length ps))
+            | length ms /= wantM ->
+                arity (WrongNumberOfMethods d wantM (length ms))
+            | length is /= wantI ->
+                arity (WrongNumberOfEliminationIndices d wantI (length is))
+            | otherwise -> produce (VSurface (Zipper.rootedAt spine)) m
+            where
+              wantP = length (inductiveParameters def)
+              wantM = length (inductiveConstructors def)
+              wantI = length (inductiveIndices def)
+              arity = flip failure m . CannotRead . ResolveFailed
+
+              -- @elimD ⃗params motive ⃗methods ⃗indices target@, in
+              -- 'Thena.Core.Term.Eliminate'\'s own field order — which is the
+              -- order 'Thena.Global.Env.eliminatorWrapper' abstracts them in,
+              -- so the two cannot come to disagree.
+              --
+              -- The 'Data.List.NonEmpty.NonEmpty' is built rather than
+              -- converted: the motive and the target are always written, so the
+              -- spine is never empty, and saying that with the constructor
+              -- keeps it out of a partial function whose totality rests on a
+              -- fact stated elsewhere.
+              spine =
+                Concrete.SurfaceApp
+                  (Concrete.SurfaceName e)
+                  (foldr NE.cons
+                         (explicit mot
+                            NE.:| map explicit (ms ++ is ++ [tgt]) ++ extra)
+                         (map explicit ps))
+              GlobalName e = eliminatorName (GlobalName d)
+              explicit = Concrete.SurfaceArg Concrete.Explicit
+      _ -> failure (ExpectedSurfaceShape "an elimination") m
+    where
+      -- The @elim@ node, and whatever a spine applies it to.
+      outerArgs t = case t of
+        Concrete.SurfaceApp h as -> (h, NE.toList as)
+        _                        -> (t, [])
+
   Apply f -> case term f of
     Left r   -> failure r m
     Right hd -> case infer (globals m) contextAt (names m) hd of
@@ -688,12 +1086,241 @@ perform instr rest m = case operation instr of
   FreshName hint -> case operandIdent (env (exec m)) hint of
     Left r  -> failure r m
     Right i ->
-      let inUse = Cursor.identsIn (cursor (proof m))
+      let inUse = Cursor.identsIn (cursor (development m))
                     ++ [ Ident g | GlobalName g <- declaredNames (globals m) ]
           Ident n = Cursor.freshIdent inUse i
        in produce (VText n) m
 
-  Goal -> case Cursor.expectedType (cursor (proof m)) of
+  -- **Which component am I standing on?** (MS4 phase 41c) — the companion to
+  -- @goal@, which answers what it is claimed /at/. Yielded as a term so that
+  -- @goto@ reads it without a second shape.
+  --
+  -- Refused off the spine for the reason every component op is: a core subterm
+  -- is not a component and has no variable of its own.
+  Here -> case focus (cursor (development m)) of
+    OnComponent c -> produce (VTerm (Trailing (Free (variableOf c)))) m
+    _             -> failure (CannotMove NotOnTheSpine) m
+
+  -- **The two term-construction ops** (MS4 phase 41d) — the first ops that
+  -- build a term rather than reading, moving or installing one.
+  --
+  -- Neither touches the development or the focus, and neither type-checks what
+  -- it builds: a constructed term is checked where it is /used/, by @claim@'s
+  -- side condition or @try@'s.
+  Arrow a b -> case (,) <$> term a <*> term b of
+    Left r          -> failure r m
+    Right (dom, cod) ->
+      let (v, n1) = fresh (names m)
+       in produce (VTerm (Trailing (Pi (Ident "_") dom (close v cod))))
+                  m { names = n1 }
+
+  ApplyTo f x -> case (,) <$> term f <*> term x of
+    Left r         -> failure r m
+    Right (f', x') -> produce (VTerm (Trailing (App f' x'))) m
+
+  -- **A universe at a fresh level meta** (MS4 phase 48) — the surface's bare
+  -- @Type@, at an operand. Typical ambiguity (phase 33) is what makes this the
+  -- right shape: nothing is known about the level yet, and unification decides
+  -- it.
+  FreshUniverse ->
+    let (l, n1) = freshLevelMeta (names m)
+     in produce (VTerm (Trailing (Universe (LVar l)))) m { names = n1 }
+
+  -- **What a name denotes, Γ first and then the globals, with a definition's
+  -- level arguments inserted** (MS4 phase 48).
+  --
+  -- Deliberately the same order "Thena.Syntax.Resolve" uses — a binder shadows a global of the
+  -- same name, which is what one namespace (§3.6) requires.
+  ResolveName x -> case operandText (env (exec m)) x of
+    Left r  -> failure r m
+    Right w -> case inScopeAt w of
+      Just v  -> produce (VTerm (Trailing (Free v))) m
+      Nothing -> case lookupDefinition (GlobalName w) (globals m) of
+        Just d ->
+          let (ls, n1) = levelArgsFor (length (definitionLevels d)) (names m)
+           in produce (VTerm (Trailing (Global (GlobalName w) ls))) m { names = n1 }
+        Nothing
+          | isDeclared (GlobalName w) (globals m) ->
+              produce (VTerm (Trailing (Global (GlobalName w) []))) m
+          | otherwise ->
+              failure (CannotRead (ResolveFailed (NotInScope w))) m
+    where
+      -- **The INNERMOST binding of that name**, which is what shadowing means
+      -- and what "Thena.Syntax.Resolve" gives. Γ runs outermost-first, so this
+      -- folds rather than taking the head.
+      --
+      -- **It took the head until MS4 phase 49**, so a shadowed name resolved to
+      -- the binding it was shadowing. Nothing had asked: phase 48 shipped the
+      -- op with a test that had only one binding of the name in scope, and no
+      -- rule used it until the leaf clauses did.
+      inScopeAt w =
+        foldl (\acc e -> if entryIdent e == Ident w then Just (entryVar e) else acc)
+              Nothing contextAt
+
+  -- **The two surface readers** (MS4 phase 49). Each is paired with the test
+  -- that makes it total in the clause that uses it, and fails rather than
+  -- guessing when it is reached any other way.
+  Op.SurfaceNameOf x -> case surfaceAt x of
+    Left r  -> failure r m
+    Right s -> case s of
+      Concrete.SurfaceName w -> produce (VText w) m
+      _                      -> failure (ExpectedSurfaceShape "a name") m
+
+  Op.SurfaceUniverseOf x -> case surfaceAt x of
+    Left r  -> failure r m
+    Right s -> case s of
+      Concrete.SurfaceUniverse k ->
+        produce (VTerm (Trailing (Universe (levelOfNat k)))) m
+      _ -> failure (ExpectedSurfaceShape "a written universe") m
+
+  -- **The surface moves** (MS4 phase 49b). Each destructures the focus and
+  -- hands back a zipper standing at the part, so the path is extended and the
+  -- term the clause was called with is never lost.
+  Op.ArrowDomain x -> surfaceMove x "an arrow" $ \s -> case s of
+    Concrete.SurfaceArrow a b -> Just (Zipper.intoArrowDomain b a)
+    _                         -> Nothing
+  Op.ArrowCodomain x -> surfaceMove x "an arrow" $ \s -> case s of
+    Concrete.SurfaceArrow a b -> Just (Zipper.intoArrowCodomain a b)
+    _                         -> Nothing
+  Op.AscriptionType x -> surfaceMove x "an ascription" $ \s -> case s of
+    Concrete.SurfaceAnnot e ty -> Just (Zipper.intoAnnotType e ty)
+    _                          -> Nothing
+  Op.AscriptionTerm x -> surfaceMove x "an ascription" $ \s -> case s of
+    Concrete.SurfaceAnnot e ty -> Just (Zipper.intoAnnotTerm ty e)
+    _                          -> Nothing
+
+  -- **A plain binder only** — no annotation and no braces. That is the whole of
+  -- what the λ case cannot elaborate, and saying it here means the clause finds
+  -- out before it has introduced anything.
+  Op.AppFunction x -> surfaceMove x "an application" $ \s -> case s of
+    Concrete.SurfaceApp h as ->
+      let front = NE.init as
+          fun   = case front of
+                    [] -> h
+                    _  -> Concrete.SurfaceApp h (NE.fromList front)
+       in Just (Zipper.intoFun (NE.last as) fun)
+    _ -> Nothing
+  Op.AppLastArgument x -> surfaceMove x "an application" $ \s -> case s of
+    Concrete.SurfaceApp h as ->
+      let Concrete.SurfaceArg _ a = NE.last as
+       in Just (Zipper.intoArg h as (length as - 1) a)
+    _ -> Nothing
+
+  -- **Brady\'s @EXPAND@** (MS4 phase 49f, the last thing taken out of the
+  -- Haskell elaborator before it was deleted): line
+  -- the written arguments up against the head\'s recorded plicities and write
+  -- in a @_@ at every implicit position the user left out.
+  --
+  -- **The inserted argument is the placeholder the language already has**, so
+  -- the slot is claimed like any other and its clause of @elaborate@ — whose
+  -- body is empty — leaves the hole for unification. That is what the Haskell
+  -- elaborator did with a @Nothing@ slot, said in the surface language instead
+  -- of in a list only Haskell could read.
+  --
+  -- **Failing is how a spine reaches the binary clause**, exactly as the
+  -- @case@ fell through before.
+  Op.ExpandImplicits x -> case operandSurface (env (exec m)) x of
+    Left r  -> failure r m
+    Right z -> case Zipper.focus z of
+      Concrete.SurfaceApp h as
+        | Concrete.SurfaceName g <- h
+        , Just as' <- expand (plicitiesOf g) (NE.toList as) ->
+            case as' of
+              []     -> failure (ExpectedSurfaceShape "an application") m
+              a : bs -> produce
+                          (VSurface (Zipper.rootedAt
+                                       (Concrete.SurfaceApp h (a NE.:| bs)))) m
+        -- **A brace that could not be placed is refused by name**, not passed
+        -- down: the binary clause has no notion of plicity at all, so it would
+        -- report a type mismatch about a term the user never meant to write
+        -- explicitly.
+        | any implicitArg (NE.toList as) ->
+            failure (NoElaborationRule
+                       "an implicit argument this head has no position for") m
+        | otherwise ->
+            failure (NoElaborationRule
+                       "an application whose head's plicities do not fit") m
+      _ -> failure (ExpectedSurfaceShape "an application") m
+
+  Op.AppHead x -> surfaceMove x "an application" $ \s -> case s of
+    Concrete.SurfaceApp h as -> Just (Zipper.intoHead as h)
+    _ -> Nothing
+  Op.AppFirstArgument x -> surfaceMove x "an application" $ \s -> case s of
+    Concrete.SurfaceApp h as ->
+      let Concrete.SurfaceArg _ a = NE.head as
+       in Just (Zipper.intoArg h as 0 a)
+    _ -> Nothing
+  -- **The spine minus its FIRST argument**, which is the direction @E⟦x ⃗a⟧@
+  -- consumes it: the head's telescope is walked left to right. With one
+  -- argument left the answer is the bare head, and that is the recursion's base
+  -- case rather than a failure.
+  Op.AppTail x -> surfaceMove x "an application" $ \s -> case s of
+    Concrete.SurfaceApp h as -> Just (Zipper.intoAppTail (NE.head as) (dropFirst h as))
+      where
+        dropFirst g bs = case NE.tail bs of
+          []     -> g
+          c : cs -> Concrete.SurfaceApp g (c NE.:| cs)
+    _ -> Nothing
+
+  Op.LambdaName x -> case surfaceAt x of
+    Left r  -> failure r m
+    Right (Concrete.SurfaceLam bs _)
+      | Concrete.SurfaceBinder Concrete.Explicit w Nothing <- NE.head bs ->
+          produce (VText w) m
+    Right _ -> failure (ExpectedSurfaceShape "a λ whose first binder is plain") m
+  Op.LambdaTail x -> surfaceMove x "a λ" $ \s -> case s of
+    Concrete.SurfaceLam bs body -> case NE.uncons bs of
+      (b, more) ->
+        Just (Zipper.intoLamTail b (maybe body (`Concrete.SurfaceLam` body) more))
+    _ -> Nothing
+  Op.LambdaBody x -> surfaceMove x "a λ" $ \s -> case s of
+    Concrete.SurfaceLam bs body -> Just (Zipper.intoLamBody bs body)
+    _                           -> Nothing
+
+  Op.LetName x -> case surfaceAt x of
+    Left r  -> failure r m
+    Right (Concrete.SurfaceLet w _ _ _) -> produce (VText w) m
+    Right _ -> failure (ExpectedSurfaceShape "a let") m
+  Op.LetType x -> surfaceMove x "an annotated let" $ \s -> case s of
+    Concrete.SurfaceLet w (Just ty) v b -> Just (Zipper.intoLetType w v b ty)
+    _                                   -> Nothing
+  Op.LetValue x -> surfaceMove x "a let" $ \s -> case s of
+    Concrete.SurfaceLet w ann v b -> Just (Zipper.intoLetValue w ann b v)
+    _                             -> Nothing
+  Op.LetBody x -> surfaceMove x "a let" $ \s -> case s of
+    Concrete.SurfaceLet w ann v b -> Just (Zipper.intoLetBody w ann v b)
+    _                             -> Nothing
+
+  Op.ForallName x -> case surfaceAt x of
+    Left r  -> failure r m
+    Right (Concrete.SurfacePi bs _)
+      | Concrete.SurfaceBinder _ w _ <- NE.head bs -> produce (VText w) m
+    Right _ -> failure (ExpectedSurfaceShape "a ∀") m
+  Op.ForallDomain x -> surfaceMove x "a ∀ whose first binder has a type" $ \s ->
+    case s of
+      Concrete.SurfacePi bs body -> case NE.uncons bs of
+        (Concrete.SurfaceBinder p w (Just ty), more) ->
+          Just (Zipper.intoPiDomain p w (maybe [] NE.toList more) body ty)
+        _ -> Nothing
+      _ -> Nothing
+  Op.ForallTail x -> surfaceMove x "a ∀" $ \s -> case s of
+    Concrete.SurfacePi bs body -> case NE.uncons bs of
+      (b, more) ->
+        Just (Zipper.intoPiTail b (maybe body (`Concrete.SurfacePi` body) more))
+    _ -> Nothing
+
+  -- **@E⟦do { … }⟧ = play the block@** — the whole of that case. A block is
+  -- written down, so there is nothing to elaborate; the instruction that plays
+  -- it is the elaboration.
+  Op.Play x -> case surfaceAt x of
+    Left r  -> failure r m
+    Right (Concrete.SurfaceDo body) ->
+      case resolveBlock (GlobalName "do") body of
+        Left errs -> failure (blockFailureOf errs) m
+        Right is  -> Continue (advance m) { exec = (exec m) { pc = is ++ rest } }
+    Right _ -> failure (ExpectedSurfaceShape "a do block") m
+
+  Goal -> case Cursor.expectedType (cursor (development m)) of
     Just t  -> produce (VTerm (Trailing t)) m
     Nothing -> failure NoGoalHere m
 
@@ -709,13 +1336,14 @@ perform instr rest m = case operation instr of
     Left r -> failure r m
     Right (i, val) -> case infer (globals m) contextAt (names m) val of
       (Left e,   _, n1) -> failure (NotTypeable e) m { names = n1 }
-      (Right ty, _, n1)
-        | i `elem` Cursor.identsIn (cursor (proof m)) -> failure (taken i) m { names = n1 }
-        | otherwise ->
+      -- No taken-name check, for the reason 'component' above states at
+      -- length: @let x = v in b@ elaborates to a definition carrying the
+      -- name the user wrote.
+      (Right ty, _, n1) ->
             let (x, n2) = fresh n1
-                cur     = insertAbove (Component.Define x i val ty) (cursor (proof m))
+                cur     = insertAbove (Component.Define x i val ty) (cursor (development m))
              in produce (VTerm (Trailing (Free x)))
-                        m { proof = ProofState cur, names = n2 }
+                        m { development = Development cur, names = n2 }
 
   Along      -> navigate (keeping along)
   Into       -> navigate (keeping into)
@@ -740,22 +1368,22 @@ perform instr rest m = case operation instr of
       VTerm (Trailing (Free x)) -> move (Cursor.goto x)
       _                    -> failure (CannotMove NoSuchHole) m
     where
-      move f = case f (cursor (proof m)) of
+      move f = case f (cursor (development m)) of
         Left e    -> failure (CannotMove e) m
-        Right cur -> Continue (advance m { proof = ProofState cur })
+        Right cur -> Continue (advance m { development = Development cur })
   Down part  -> navigate (down part)
 
   -- Commit a whnf at the core focus (§4.7). Not 'navigate': a move never has
   -- anything to say, and this one sometimes does — an orphaned hole is
   -- reported, not prevented, so a non-empty report goes out through 'Saying'
   -- exactly as 'Say' already does, rather than being silently swallowed.
-  Reduce -> case focus (cursor (proof m)) of
+  Reduce -> case focus (cursor (development m)) of
     OnTerm _ _ t ->
-      let t' = whnf (globals m) (Cursor.context (cursor (proof m))) t
-       in case replaceCore t' (cursor (proof m)) of
+      let t' = whnf (globals m) (Cursor.context (cursor (development m))) t
+       in case replaceCore t' (cursor (development m)) of
             Left e -> failure (CannotMove e) m
             Right (cur', orphaned) ->
-              let m' = advance m { proof = ProofState cur' }
+              let m' = advance m { development = Development cur' }
                in case orphaned of
                     [] -> Continue m'
                     is -> Saying (orphanMessage is) m'
@@ -765,25 +1393,35 @@ perform instr rest m = case operation instr of
   -- command (§12 invariant 3): what it changes has to backtrack with the rest
   -- of the proof state. What it has to say — which holes it solved, what it
   -- parked — goes out through 'Saying', exactly as 'Reduce' reports an orphan.
-  Unify l r -> case (,) <$> term l <*> term r of
-    Left e       -> failure e m
-    Right (a, b) ->
-      let cur = cursor (proof m)
-       in case infer (globals m) (Cursor.context cur) (names m) a of
-            (Left e, _, n1)  -> failure (NotTypeable e) m { names = n1 }
-            (Right ty, _, n1) -> case unify (globals m) cur n1 a b ty of
-              (Failed reason, _, n2) -> failure reason m { names = n2 }
-              (result, cur', n2) ->
-                Saying (unifyMessage cur' result)
-                       (advance m { proof = ProofState cur', names = n2 })
+  Unify l r -> unifying unify l r
+
+  -- **@unify@'s directed sibling** (MS4 phase 41g), and the only difference is
+  -- which entry point of "Thena.Core.Unify" it calls — the whole of it is
+  -- there. Elaboration's @FILL@ is what wanted it; see 'Thena.Ops.UnifyInto'.
+  UnifyInto l r -> unifying unifyInto l r
   where
+    -- The two unification ops differ in one argument and share everything
+    -- else, including the type being inferred from the LEFT side. That is not
+    -- arbitrary now that there is a direction: @unify-into s t@ asks whether
+    -- @s@ fits where @t@ is wanted, and @s@ is the term whose type is known.
+    unifying how l r = case (,) <$> term l <*> term r of
+      Left e       -> failure e m
+      Right (a, b) ->
+        let cur = cursor (development m)
+         in case infer (globals m) (Cursor.context cur) (names m) a of
+              (Left e, _, n1)  -> failure (NotTypeable e) m { names = n1 }
+              (Right ty, _, n1) -> case how (globals m) cur n1 a b ty of
+                (Failed reason, _, n2) -> failure reason m { names = n2 }
+                (result, cur', n2) ->
+                  Saying (unifyMessage cur' result)
+                         (advance m { development = Development cur', names = n2 })
+
     operation i = case i of
       Bind _ o -> o
       Do     o -> o
 
     text    = operandText (env (exec m))
     term    = operandTerm (env (exec m))
-    surface = operandSurface (env (exec m))
 
     advance m' = m' { exec = (exec m') { pc = rest } }
 
@@ -800,15 +1438,28 @@ perform instr rest m = case operation instr of
     -- bind: a @Bind@ on one is what phase 15's load-time pass rejects (§7.2).
     -- The counter comes back because descending under a core binder mints a
     -- variable, and only 'Thena.Core.Term.fresh' can (§4.0 D3).
-    navigate f = case f (names m) (cursor (proof m)) of
+    navigate f = case f (names m) (cursor (development m)) of
       Left e          -> failure (CannotMove e) m
       Right (cur, n1) ->
-        Continue (advance m { proof = ProofState cur, names = n1 })
+        Continue (advance m { development = Development cur, names = n1 })
 
     -- Every move but 'down' leaves the counter alone.
     keeping g n cur = fmap (\cur' -> (cur', n)) (g cur)
 
-    contextAt = proofContext (proof m)
+    contextAt = focusContext (development m)
+
+    -- The surface term an operand names, focus and all (MS4 phase 49).
+    surfaceAt x = Zipper.focus <$> operandSurface (env (exec m)) x
+
+    -- **One shape for every surface move** (MS4 phase 49b): read the zipper,
+    -- ask the node for the move it admits, and produce the zipper that move
+    -- gives. A focus of the wrong shape is what the paired head test rules out,
+    -- so reaching one here is a body that did not ask.
+    surfaceMove x shape f = case operandSurface (env (exec m)) x of
+      Left r  -> failure r m
+      Right z -> case f (Zipper.focus z) of
+        Just move -> produce (VSurface (move z)) m
+        Nothing   -> failure (ExpectedSurfaceShape shape) m
 
     -- Claim a hole for every Π domain, extending the spine as it goes, and
     -- stop at the first type that is not a Π — that is what makes @apply@
@@ -819,16 +1470,75 @@ perform instr rest m = case operation instr of
     -- @Just : ∀ (A : Type₀) (a : A) -> Maybe A@ claims @?A@ and then @?a : A@.
     -- That is also why 'whnf' cannot be given @contextAt@ — that one is fixed
     -- at the focus this instruction started from.
-    saturate hd ty m' = case whnf (globals m') (proofContext (proof m')) ty of
+    saturate hd ty m' = case whnf (globals m') (focusContext (development m')) ty of
       Pi i dom sc ->
         let (v, n1) = fresh (names m')
-            i'      = Cursor.freshIdent (Cursor.identsIn (cursor (proof m'))) i
-            cur     = insertAbove (Component.Claim v i' dom) (cursor (proof m'))
+            i'      = Cursor.freshIdent (Cursor.identsIn (cursor (development m'))) i
+            cur     = insertAbove (Component.Claim v i' dom) (cursor (development m'))
          in saturate (App hd (Free v)) (instantiate (Free v) sc)
-                     m' { proof = ProofState cur, names = n1 }
+                     m' { development = Development cur, names = n1 }
       _ -> produce (VTerm (Trailing hd)) m'
 
-    taken (Ident n) = NameTaken n
+    -- Claim a hole for each of the head's Π domains, in the scope of the ones
+    -- already claimed — which is what makes it dependent where @arrow@ is not.
+    -- 'saturate' below is this walk without the names and without keeping the
+    -- holes.
+    -- **The hole goes directly above the focus**, so a caller that claims from
+    -- one fixed place gets the domains in telescope order and a later domain
+    -- may mention an earlier hole. 'saturate' below is the same step in a loop,
+    -- and keeps the focus still for the same reason.
+    -- The codomain is not read: the answer is the /term/, and the caller\'s
+    -- next step infers its type again. That costs one inference per argument
+    -- where @make-apply@ carried the type down its own loop, and it is what
+    -- lets the walk live in a rule body, which has nowhere to keep a type
+    -- between two instructions.
+    claimNext hd i ty m' =
+      case whnf (globals m') (focusContext (development m')) ty of
+        Pi _ dom _ ->
+          let (v, n1) = fresh (names m')
+              cur     = insertAbove (Component.Claim v i dom) (cursor (development m'))
+           in produce (VTerm (Trailing (App hd (Free v))))
+                m' { development = Development cur, names = n1
+                   , exec = exec m' }
+        _ -> failure TooManyArgumentsForHead m'
+
+    -- What the machine recorded about this name\'s argument positions, if it
+    -- recorded anything. A name with no entry — every DC-declared global, and
+    -- every local — takes what was written and nothing more.
+    plicitiesOf g = case lookup (GlobalName g) (signatures m) of
+      Just ps -> ps
+      Nothing -> []
+
+    -- | Brady\'s @EXPAND@: line the written arguments up against the plicities,
+    -- writing a placeholder in at each implicit position the user left out.
+    --
+    -- 'Nothing' overall means they cannot be lined up at all, and the binary
+    -- clause below then has its turn.
+    expand ps as' = case (ps, as') of
+      ([], [])                            -> Just []
+      -- Nothing recorded, or more arguments than positions: take them as
+      -- written. A partially applied head is ordinary, and so is a head whose
+      -- result is itself a function.
+      ([], rest')
+        | all written rest'               -> Just rest'
+        | otherwise                       -> Nothing
+      -- An implicit position the user did write, in braces.
+      (Implicit : more, a@(Concrete.SurfaceArg Implicit _) : rest') ->
+        (a :) <$> expand more rest'
+      -- An implicit position the user did not: write one in.
+      (Implicit : more, rest')            ->
+        (Concrete.SurfaceArg Implicit Concrete.SurfacePlaceholder :)
+          <$> expand more rest'
+      (Explicit : more, a@(Concrete.SurfaceArg Explicit _) : rest') ->
+        (a :) <$> expand more rest'
+      -- An explicit position written in braces, or one not written at all.
+      (Explicit : _, _)                   -> Nothing
+
+    written (Concrete.SurfaceArg Explicit _) = True
+    written _                               = False
+
+    implicitArg (Concrete.SurfaceArg Implicit _) = True
+    implicitArg _                                = False
 
     isHole c = case c of
       Component.Claim {} -> True
@@ -837,22 +1547,38 @@ perform instr rest m = case operation instr of
 
     -- Rewrite the component at the focus, or say why not. Every hole op has
     -- this shape, which is why it is written once.
-    onHole f = case focus (cursor (proof m)) of
+    onHole f = case focus (cursor (development m)) of
       OnComponent c -> case f c of
         Left r         -> failure r m
-        Right (c', n1) -> case replaceComponent c' (cursor (proof m)) of
+        Right (c', n1) -> case replaceComponent c' (cursor (development m)) of
           Left e    -> failure (CannotMove e) m
-          Right cur -> Continue (advance m { proof = ProofState cur, names = n1 })
+          Right cur -> Continue (advance m { development = Development cur, names = n1 })
       _ -> failure (CannotMove NotOnTheSpine) m
 
     component build name ty =
       case (,) <$> operandIdent (env (exec m)) name <*> term ty of
         Left r -> failure r m
         Right (i, t)
-          -- **Refused, not renamed** (phase 24c). Identifiers stay unique — so
-          -- @goto ‹name›@ keeps working — but deciding /what/ the name is
-          -- belongs to the rule, through @fresh-name@.
-          | i `elem` Cursor.identsIn (cursor (proof m)) -> failure (taken i) m
+          -- **The name is used as given, taken or not** (MS4 phase 41f, the
+          -- user's decision). It was refused if the development already had
+          -- it (phase 24c, /"refused, not renamed"/), on the ground that
+          -- identifiers stay unique so @goto ‹name›@ keeps working.
+          --
+          -- **They did not stay unique.** @prim-intro@ has never checked, and
+          -- elaboration gives it the surface binder's name, so
+          -- @elaborate (\ A A -> A)@ has built two components called @A@
+          -- since phase 41b. Two ops disagreeing about an invariant neither
+          -- can maintain is worse than not having it.
+          --
+          -- Elaboration is what forces the question: @∀ (x : A) -> B@ and
+          -- @let x = v in b@ must bind the name **the user wrote**, or the
+          -- body cannot resolve it, and a rule cannot ask @fresh-name@ for a
+          -- name it was given. Phase 24c's other half stands unchanged —
+          -- inventing a name is still the rule's job, and @fresh-name@ is
+          -- still how it does it.
+          --
+          -- @goto ‹name›@ now takes the first match. That is the same
+          -- resolution the printer's display freshening has always assumed.
           -- Table 2.7's side condition on both @assume@ and @claim@:
           -- @Θ ⊢ S : Type@ (phase 25f). 'sortOf' is the same check
           -- @revalidate@ runs on these components through @Validate@'s
@@ -867,9 +1593,9 @@ perform instr rest m = case operation instr of
               (Left e,  _, n1) -> failure (BinderNotAType e) m { names = n1 }
               (Right _, _, n1) ->
                 let (v, n2) = fresh n1
-                    cur     = insertAbove (build v i t) (cursor (proof m))
+                    cur     = insertAbove (build v i t) (cursor (development m))
                  in produce (VTerm (Trailing (Free v)))
-                            m { proof = ProofState cur, names = n2 }
+                            m { development = Development cur, names = n2 }
 
 -- | What @eliminate@ says: the subgoals it opened, by the names it gave them.
 --
@@ -918,6 +1644,7 @@ unifyMessage cur result = case result of
       Component.Define y i _ _ -> (y, i)
       Component.Claim  y i _   -> (y, i)
       Component.Guess  y i _ _ -> (y, i)
+      Component.Quantify y i _ -> (y, i)
 
     -- **Into a guess's body too**, and that is not optional: a hole claimed
     -- inside a guess is where most of them are once @attack@ and @intro@ have
@@ -938,10 +1665,40 @@ orphanMessage is = "reduced; now unreachable: " ++ intercalate ", " (map identSt
   where
     identString (Ident s) = s
 
+-- | 'Thena.Ops.operandIn', with an unbound name read as a body's fatal error.
+-- A head reads the same failure differently — see 'Thena.Rules.holds'.
+-- | One fresh level meta per prenex parameter (MS4 phase 48), inserted at a
+-- use site — his /"we have them implicitly inserted"/.
+levelArgsFor :: Int -> Int -> ([Level], Int)
+levelArgsFor k n = case k of
+  0 -> ([], n)
+  _ -> let (l, n1)  = freshLevelMeta n
+           (ls, n2) = levelArgsFor (k - 1) n1
+        in (LVar l : ls, n2)
+
+-- | Say why a written block did not resolve, in terms "Thena.Errors" can hold.
+--
+-- **Moved here at MS4 phase 49b** from the Haskell elaborator, with the @do@
+-- case it belonged to. Resolution can only produce 'Thena.Rules.BadOperands' — every
+-- other 'RuleError' comes from @validate@, which a block does not go through —
+-- so the fallback is unreachable as things stand and says so rather than
+-- inventing a second story.
+blockFailureOf :: [RuleError] -> FailReason
+blockFailureOf errs = case errs of
+  BadOperands _ i w : _ -> BlockOperands i w
+  _                     -> NoElaborationRule "a do block that does not resolve"
+
+-- | The frames that were already there at a given depth.
+--
+-- The stack grows at the head, so the oldest @n@ are its last @n@. A stack
+-- shorter than the mark keeps everything: a body may pop past its own
+-- @push-development@, and there is nothing of the inner development left to
+-- drop.
+keepBelow :: Int -> [Frame] -> [Frame]
+keepBelow n fs = drop (length fs - n) fs
+
 operandValue :: Env -> Operand -> Either FailReason Value
-operandValue e o = case o of
-  Lit v -> Right v
-  Ref n -> maybe (Left (UnboundInBody n)) Right (lookup n e)
+operandValue e o = either (Left . UnboundInBody) Right (Op.operandIn e o)
 
 operandText :: Env -> Operand -> Either FailReason String
 operandText e o = operandValue e o >>= \v -> case v of
@@ -954,13 +1711,13 @@ operandTerm e o = operandValue e o >>= \v -> case v of
   VTerm (Trailing t) -> Right t
   _                  -> Left ExpectedTerm
 
--- | An unelaborated tree, and nothing else (§7.2). Shaped like 'operandText'
--- and 'operandTerm', and phase 17b's reason for existing at all: 'VSurface' had
--- no reader before elaboration had a rule.
-operandSurface :: Env -> Operand -> Either FailReason Raw
+-- | An unelaborated tree and the place it sits at (§7.2). Shaped like
+-- 'operandText' and 'operandTerm', and phase 17b's reason for existing at all:
+-- 'VSurface' had no reader before elaboration had a rule.
+operandSurface :: Env -> Operand -> Either FailReason SurfaceZipper
 operandSurface e o = operandValue e o >>= \v -> case v of
-  VSurface raw -> Right raw
-  _            -> Left ExpectedSurface
+  VSurface z -> Right z
+  _          -> Left ExpectedSurface
 
 -- | The name a component will display. Checked against the lexer's own notion
 -- of an identifier, because an 'Ident' that does not lex is one the printer
@@ -998,9 +1755,9 @@ whereImpure i = case i of
 -- the top of the whole development would change what the development proves,
 -- whereas inside a guess the guess's own type absorbs the binders.
 introduce
-  :: GlobalEnv -> Context -> Int -> Partial
+  :: GlobalEnv -> Context -> Int -> Maybe Ident -> Partial
   -> Either FailReason (Partial, Int)
-introduce env ctx n p = case p of
+introduce env ctx n nm p = case p of
   Under (Component.Claim v i s) (Trailing (Free v'))
     | v == v' -> case s of
         -- @intro-let@ reads the type AS WRITTEN, and must come first.
@@ -1011,13 +1768,15 @@ introduce env ctx n p = case p of
         -- phase 15, while writing the @intro-let@ rule's head; §5.1 and §7.2
         -- both carry it.
         Let j val sty cod ->
-          Right (opened (Component.Define y j val sty) (instantiate (Free y) cod))
+          Right (opened (Component.Define y (named j) val sty) (instantiate (Free y) cod))
         -- @intro-∀@ reduces first, because a goal typed @id Type₀ (Nat -> Nat)@
         -- is a Π and must be introduced (§8's own example, from the other side).
         _ -> case whnf env ctx s of
-          Pi j dom cod -> Right (opened (Component.Assume y j dom) (instantiate (Free y) cod))
+          Pi j dom cod -> Right (opened (Component.Assume y (named j) dom) (instantiate (Free y) cod))
           _            -> Left NothingToIntroduce
       where
+        -- The caller's name if there is one, the type's otherwise.
+        named j = maybe j id nm
         (y, n1) = fresh n
         (h, n2) = fresh n1
         opened binder rest =
@@ -1026,7 +1785,43 @@ introduce env ctx n p = case p of
           )
   Under c rest ->
     (\(rest', n1) -> (Under c rest', n1))
-      <$> introduce env (ctx ++ [Component.forget c]) n rest
+      <$> introduce env (ctx ++ [Component.forget c]) n nm rest
+  _ -> Left NotReadyToIntroduce
+
+-- | Open a ∀-binder where 'introduce' opens a λ-binder (MS4 phase 41f).
+--
+-- The same shape test — table 2.8's /"only replace constructions of the shape
+-- @?x : S . x@"/ — and the same walk down the chain. Two differences, and both
+-- are what a Π is:
+--
+--   * **the domain is given, not read off the goal.** @intro@ takes the type
+--     from the Π it is moving through; there is no Π here yet, so the caller
+--     says what it is.
+--   * **the codomain is claimed at a fresh universe meta**, not at the hole's
+--     own type. @Π x : S . T@ inhabits @Type (ℓ_S ⊔ ℓ_T)@, so pinning the
+--     codomain to the whole thing's universe throws the domain away: the
+--     codomain of @∀ (A : Type₀) -> A@ sits at @Type₀@ while the Π sits at
+--     @Type₁@. The relation between them is /owed/, by
+--     "Thena.Development.Validate"'s @peeled@, and not forced here.
+quantifyIn
+  :: GlobalEnv -> Context -> Int -> Ident -> Core -> Partial
+  -> Either FailReason (Partial, Int)
+quantifyIn env ctx n i dom p = case p of
+  Under (Component.Claim v ci s) (Trailing (Free v'))
+    | v == v' -> case whnf env ctx s of
+        Universe _ ->
+          let (y, n1) = fresh n
+              (h, n2) = fresh n1
+              (l, n3) = freshLevelMeta n2
+           in Right
+                ( Under (Component.Quantify y i dom)
+                    (Under (Component.Claim h ci (Universe (LVar l))) (Trailing (Free h)))
+                , n3
+                )
+        _ -> Left GoalIsNotAUniverse
+  Under c rest ->
+    (\(rest', n1) -> (Under c rest', n1))
+      <$> quantifyIn env (ctx ++ [Component.forget c]) n i dom rest
   _ -> Left NotReadyToIntroduce
 
 -- --------------------------------------------------------------------------
@@ -1103,7 +1898,7 @@ retryFrom target m = go (0 :: Int) (stack (exec m))
       Choice {} | maybe True (== choiceId fr) target -> case next (alts fr) of
         Nothing       -> Left missing      -- cannot arise; see 'demote'
         Just (r, it') -> Right
-          ( m { proof = saved fr
+          ( m { development = saved fr
               , exec  = Exec (ruleBody r) (seedFor fr r) (demote fr r it' : stk)
               }
           , note (choiceId fr) (ruleName r) popped
@@ -1113,3 +1908,15 @@ retryFrom target m = go (0 :: Int) (stack (exec m))
     note i (GlobalName g) popped =
       "retrying " ++ show i ++ ": " ++ g
         ++ (if popped == 0 then "" else " (" ++ show popped ++ " frame(s) dropped)")
+
+-- | The variable a component binds. What @here@ answers.
+--
+-- Every component has one; the five constructors differ in what else they
+-- carry, which is why this is a fold and not a field.
+variableOf :: Component.Component -> Var
+variableOf c = case c of
+  Component.Assume v _ _   -> v
+  Component.Define v _ _ _ -> v
+  Component.Claim  v _ _   -> v
+  Component.Guess  v _ _ _ -> v
+  Component.Quantify v _ _ -> v

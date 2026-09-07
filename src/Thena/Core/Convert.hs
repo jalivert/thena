@@ -12,6 +12,7 @@
 module Thena.Core.Convert
   ( convert
   , subsumes
+  , Direction (..)
   ) where
 
 import Thena.Core.Level (Level, Obligation (..), levelLeq, metasIn)
@@ -54,11 +55,29 @@ convert env = related Same env
 -- @subsumes expected actual@, in that order, matching
 -- 'Thena.Core.Typing.check''s own argument order.
 --
--- **A Π's domain stays invariant and only its codomain varies**, which is
--- Coq's rule and the sound one: a function expecting @Type₁@ arguments cannot
--- stand in for one expecting @Type₀@ arguments, because it would be handed
--- something too small. Everything that is not a universe or a Π is compared
--- exactly as 'convert' compares it.
+-- **A Π's codomain is the only position that varies. Everything else — its
+-- domain, a λ's body, and every argument of an application, a saturated former
+-- or an elimination — is compared at 'Same'** (MS4 phase 41h).
+--
+-- **The domain is invariant, and the reason is not the one this comment used
+-- to give.** It said /"a function expecting @Type₁@ arguments cannot stand in
+-- for one expecting @Type₀@ arguments, because it would be handed something
+-- too small"/ — which is backwards. Being handed something smaller is exactly
+-- what is fine: @Type₀ ⊑ Type₁@ means every @Type₀@ /is/ a @Type₁@, so
+-- @Type₁ -> Nat@ genuinely is usable where @Type₀ -> Nat@ is wanted. Ordinary
+-- subtyping is **contravariant** in the domain, and that would be sound here.
+--
+-- We decline it anyway, which is Coq's choice too: invariance is strictly more
+-- conservative — it can only reject — and a dependent Π's codomain binds a
+-- variable whose type is the thing being varied, so a contravariant domain
+-- means comparing two codomains in two different contexts.
+--
+-- **An argument of an application is a different question and has no variance
+-- at all.** The head is opaque, so nothing whatever relates @F Type₀@ to
+-- @F Type₁@; they are equal or they are unrelated. Inheriting the direction
+-- there was **unsound**, and it is what @ms4/CLOSEOUT.md@ 12 recorded:
+-- @x : F Type₀@ was accepted at a goal of @F Type₁@ and @:revalidate@ called
+-- it valid.
 --
 -- **The third component is what it could not decide** (phase 33): a subsumption
 -- between levels one of which is still a meta is neither true nor false yet, so
@@ -72,8 +91,14 @@ subsumes
 subsumes = related Cumulative
 
 -- | Which relation the universe case and the Π codomain are read at.
+--
+-- **Exported, and "Thena.Core.Unify" uses this one rather than declaring its
+-- own** (MS4 phase 41g). It is the same question there — a directed
+-- unification differs from a symmetric one at exactly these two places — and
+-- two types with one name and one meaning is the confusion the standing rule
+-- is about.
 data Direction = Same | Cumulative
-  deriving (Eq)
+  deriving (Eq, Show)
 
 related
   :: Direction -> GlobalEnv -> Context -> Int -> Core -> Core
@@ -137,8 +162,10 @@ related dir env = go
         | i == j    -> ok n
         | otherwise -> bad n [] (HeadsDiffer ctx s t)
 
-      (Pi i dom sc, Pi _ dom' sc') -> binder ctx n i dom sc dom' sc'
-      (Lam i dom sc, Lam _ dom' sc') -> binder ctx n i dom sc dom' sc'
+      -- **A Π's codomain is the one covariant position in the language.**
+      (Pi i dom sc, Pi _ dom' sc') -> binder dir ctx n i dom sc dom' sc'
+      -- A λ is not a type, so a direction has nothing to mean under one.
+      (Lam i dom sc, Lam _ dom' sc') -> binder Same ctx n i dom sc dom' sc'
 
       -- A neutral spine. Comparing the function and the argument separately is
       -- what makes two stuck applications of the same head agree.
@@ -183,14 +210,13 @@ related dir env = go
 
     -- **The domain is compared at 'Same' whatever @dir@ is** — see 'subsumes'.
     -- 'related Same' rather than 'go' is what makes that true for the whole
-    -- subtree, not just the head.
-    binder ctx n i dom sc dom' sc' =
-      atSame ctx n (TheDomain i) dom dom' `andThen` \n1 ->
+    -- subtree, not just the head. @below@ is what the /body/ is compared at,
+    -- and it is @dir@ only for a Π.
+    binder below ctx n i dom sc dom' sc' =
+      at ctx n (TheDomain i) dom dom' `andThen` \n1 ->
         let (x, n2) = fresh n1
             ctx'    = ctx ++ [Hypothesis x i dom]
-         in beneath (TheBody i) (go ctx' n2 (open x sc) (open x sc'))
-
-    atSame ctx n site a b = beneath site (related Same env ctx n a b)
+         in beneath (TheBody i) (related below env ctx' n2 (open x sc) (open x sc'))
 
     -- One η step: open the λ with a fresh variable and apply the other side to
     -- it. @flipped@ only keeps the two sides in the order the caller passed
@@ -200,10 +226,20 @@ related dir env = go
           ctx'    = ctx ++ [Hypothesis x i dom]
           body    = open x sc
           applied = App other (Free x)
-       in beneath (TheBody i)
-            (if flipped then go ctx' n1 applied body else go ctx' n1 body applied)
+          -- At 'Same': η relates a λ with a spine, and a λ is not a type, so
+          -- there is no direction for this to be read at.
+          same a b = related Same env ctx' n1 a b
+       in beneath (TheBody i) (if flipped then same applied body else same body applied)
 
-    at ctx n site s t = beneath site (go ctx n s t)
+    -- **Every site that reaches this is invariant**, so the direction stops
+    -- here rather than being carried down (MS4 phase 41h). It was @go@, which
+    -- inherits @dir@, and that made an application's arguments, a saturated
+    -- former's arguments and an elimination's fields all cumulative — the
+    -- unsoundness of @ms4/CLOSEOUT.md@ 12.
+    --
+    -- This is what @atSame@ was, under another name, for the Π domain's use.
+    -- The two are one function now, because every caller wants the same thing.
+    at ctx n site s t = beneath site (related Same env ctx n s t)
 
     both ctx n (s1, a, b) (s2, c, d) =
       at ctx n s1 a b `andThen` \n1 -> at ctx n1 s2 c d

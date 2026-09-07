@@ -21,13 +21,15 @@ import Thena.Engine
   , Frame (..)
   , Machine (..)
   , Outcome (..)
-  , ProofState (..)
+  , Development (..)
   , Question (..)
   , isAsking
+  , isYielding
   , load
-  , newProof
-  , proofContext
-  , proofDevelopment
+  , resumeYield
+  , newDevelopment
+  , focusContext
+  , flatten
   , resumeAt
   , setGoal
   , step
@@ -49,9 +51,9 @@ text = Lit . VText
 
 -- | A machine holding the program, with the session's opening development.
 machine :: [Instr] -> Machine
-machine is = load is (Machine (Exec [] [] []) ps emptyGlobals expectedBase n)
+machine is = load is (Machine (Exec [] [] []) ps [] emptyGlobals expectedBase [] n)
   where
-    (ps, n) = newProof 0
+    (ps, n) = newDevelopment 0
 
 -- | Run to the first stop, collecting nothing. Not the driver's loop — this is
 -- a test helper and it stops at anything that is not 'Continue'.
@@ -61,7 +63,7 @@ runTo m = case step m of
   outcome     -> outcome
 
 devOf :: Machine -> Partial
-devOf = proofDevelopment . proof
+devOf = flatten . development
 
 envOf :: Machine -> [(String, Value)]
 envOf = env . exec
@@ -76,6 +78,64 @@ tests =
   testGroup
     "Thena.Engine"
     [ testGroup
+        -- **Yielding, and what @load@ may keep** (MS4 phase 45b).
+        --
+        -- The second group is the one that matters. The design conversation had
+        -- @load@ prepending unconditionally; @pc@ is only empty when a program
+        -- /finished/, so a line that halted leaves instructions behind and
+        -- prepending revives them. @test\/golden\/mistakes.golden@ caught it —
+        -- a failed @assume@'s @Ask@ came back two commands later and swallowed a
+        -- @:show@ — and these say the rule that replaced it.
+        "yielding"
+        [ testCase "a yield stops the machine and does not consume itself" $
+            case step (machine [Do (Ops.Yield (text "look"))]) of
+              Yielding msg m -> (msg, isYielding m) @?= ("look", True)
+              other -> assertFailure ("expected Yielding, got " ++ show other)
+
+        , testCase "and stepping it again yields again" $
+            case step (machine [Do (Ops.Yield (text "look"))]) of
+              Yielding _ m -> case step m of
+                Yielding msg _ -> msg @?= "look"
+                other -> assertFailure ("expected Yielding, got " ++ show other)
+              other -> assertFailure ("expected Yielding, got " ++ show other)
+
+        , testCase "resumeYield advances past it, and the rest runs" $
+            let m = machine [Do (Ops.Yield (text "look")), Do (Ops.Say (text "after"))]
+             in case step m of
+                  Yielding _ y -> case step (resumeYield y) of
+                    Saying msg _ -> msg @?= "after"
+                    other -> assertFailure ("expected Saying, got " ++ show other)
+                  other -> assertFailure ("expected Yielding, got " ++ show other)
+
+        , testCase "nothing else is yielding" $
+            isYielding (machine [Do (Ops.Say (text "x"))]) @?= False
+        ]
+    , testGroup
+        "load keeps a suspended tape and drops a dead one"
+        [ testCase "a command in front of a yield keeps the rest of the program" $
+            let m = machine [Do (Ops.Yield (text "look")), Do (Ops.Say (text "after"))]
+             in case step m of
+                  Yielding _ y ->
+                    -- The typed line runs, falls back into the yield, and the
+                    -- suspended program is still behind it.
+                    case runTo (load [Do (Ops.Say (text "typed"))] y) of
+                      Saying msg m' -> (msg, isYielding m') @?= ("typed", True)
+                      other -> assertFailure (show other)
+                  other -> assertFailure (show other)
+
+        , -- **The regression.** A machine that is not yielding may still have
+          -- instructions on @pc@ — one that halted does — and those are dead.
+          testCase "but a tape that is not yielding is replaced, not prepended" $
+            let stale = machine [Do (Ops.Say (text "stale"))]
+             in case runTo (load [Do (Ops.Say (text "fresh"))] stale) of
+                  Saying msg _ -> msg @?= "fresh"
+                  other -> assertFailure (show other)
+
+        , testCase "and its environment goes with it" $
+            let stale = (machine []) { exec = (exec (machine [])) { env = [("x", VText "old")] } }
+             in env (exec (load [] stale)) @?= []
+        ]
+    , testGroup
         "stepping"
         [ testCase "an empty program with an empty stack is finished" $
             case step (machine []) of
@@ -84,10 +144,19 @@ tests =
         , testCase "an empty program returns into the frame below it" $
             -- Nothing in phase 4 pushes a frame; this is the return case of
             -- §7.3, which phase 16 exercises for real.
+            --
+            -- **The frame is KEPT and marked, not popped** (MS4 phase 57).
+            -- Popping it dismantled the stack under any 'Choice' standing on
+            -- it, and a choice point relies on the frames below it for the
+            -- rest of the continuation. Both frames have one lifetime now:
+            -- entered, returned, stepped over ever after.
             let resumed = [Do (Ops.Say (text "back"))]
-                m = (machine []) { exec = Exec [] [] [Call resumed [("x", VText "kept")]] }
+                entered = Call resumed [("x", VText "kept")] False
+                m = (machine []) { exec = Exec [] [] [entered] }
              in case step m of
-                  Continue m' -> (pc (exec m'), envOf m', stack (exec m')) @?= (resumed, [("x", VText "kept")], [])
+                  Continue m' ->
+                    (pc (exec m'), envOf m', stack (exec m'))
+                      @?= (resumed, [("x", VText "kept")], [entered { returned = True }])
                   other       -> assertFailure ("expected Continue, got " ++ show other)
         , testCase "Bind names the op's result" $
             case runTo (machine [Bind "s" (Ops.Concat (text "a") (text "b"))]) of
@@ -190,31 +259,31 @@ tests =
               other      -> assertFailure ("expected Finished, got " ++ show other)
         , testCase "setGoal replaces the focus and keeps the prefix" $
             case runTo (machine [Do (Ops.Assume (text "A") (term type0))]) of
-              Finished m -> case fmap (proofDevelopment . proof) (setGoal (Universe (levelOfNat 1)) m) of
+              Finished m -> case fmap (flatten . development) (setGoal (Universe (levelOfNat 1)) m) of
                 Right (Under Assume {} (Under (Claim _ _ ty) (Trailing (Free _)))) ->
                   ty @?= Universe (levelOfNat 1)
                 other -> assertFailure ("wrong shape: " ++ show other)
               other -> assertFailure ("expected Finished, got " ++ show other)
         , testCase "setGoal standing at the root throws the whole chain away" $
-            -- Not a corner case that arises in a session: 'newProof' focuses the
+            -- Not a corner case that arises in a session: 'newDevelopment' focuses the
             -- goal and 'assume' leaves the focus alone, so ':goal' lands on a
             -- hole. It pins the rule, which is one sentence — everything from
             -- the focus down is discarded (§4.0 F6).
             let (v, n) = fresh 0
-                bare   = Machine (Exec [] [] []) (ProofState (enter (Under (Assume v (Ident "A") type0) (Trailing type0)))) emptyGlobals expectedBase n
-             in case fmap (proofDevelopment . proof) (setGoal type0 bare) of
+                bare   = Machine (Exec [] [] []) (Development (enter (Under (Assume v (Ident "A") type0) (Trailing type0)))) [] emptyGlobals expectedBase [] n
+             in case fmap (flatten . development) (setGoal type0 bare) of
                   Right (Under (Claim x _ _) (Trailing (Free y))) -> x @?= y
                   other -> assertFailure ("wrong shape: " ++ show other)
         , testCase "a move is an op, and it moves the focus" $
             -- The moves go through the machine because the cursor IS
-            -- 'ProofState' (§7.2): moving the focus changes exactly what
+            -- 'Development' (§7.2): moving the focus changes exactly what
             -- backtracks, which is §12 invariant 3's hazard.
             case runTo (machine [Do (Ops.Assume (text "A") (term type0)), Do Ops.Along]) of
-              Finished m -> map nameOf (proofContext (proof m)) @?= ["A", "goal"]
+              Finished m -> map nameOf (focusContext (development m)) @?= ["A", "goal"]
               other      -> assertFailure ("expected Finished, got " ++ show other)
         , testCase "and back undoes it, through the machine as well" $
             case runTo (machine [Do (Ops.Assume (text "A") (term type0)), Do Ops.Along, Do Ops.Back]) of
-              Finished m -> map nameOf (proofContext (proof m)) @?= ["A"]
+              Finished m -> map nameOf (focusContext (development m)) @?= ["A"]
               other      -> assertFailure ("expected Finished, got " ++ show other)
         , testCase "a refused move is Stuck, and keeps the machine (§4.0 C4)" $
             stuckWith (CannotMove NotAGuess) (runTo (machine [Do Ops.Into]))
@@ -227,7 +296,7 @@ tests =
             -- no focus to take a prefix of. §4.5: you are ON the focused
             -- component, not past it.
             case runTo (machine [Do (Ops.Assume (text "A") (term type0)), Do (Ops.Claim (text "h") (term type0))]) of
-              Finished m -> map nameOf (proofContext (proof m)) @?= ["A", "h"]
+              Finished m -> map nameOf (focusContext (development m)) @?= ["A", "h"]
               other      -> assertFailure ("expected Finished, got " ++ show other)
         ]
     ]

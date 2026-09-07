@@ -24,6 +24,7 @@ import Thena.Core.Level
   , Unmet (..)
   , levelLeq
   , levelOfNat
+  , minimise
   , normalise
   , solveLevels
   , unifyLevels
@@ -43,6 +44,7 @@ tests =
     , testGroup "solveLevels discharges, refutes, or gives up" solveTests
     , testGroup "unifyLevels solves, sticks, or clashes" unifyTests
     , testGroup "satisfiability — the residue as a set (phase 35)" satTests
+    , testGroup "minimise defaults the ambiguous ones (phase 51)" minimiseTests
     ]
 
 -- | A third meta, for the three-variable cycle.
@@ -479,4 +481,60 @@ satTests =
   , testCase "and still hands back a possible one" $
       solveLevels [AtMost (LVar m) (LVar m2)]
         @?= Right ([], [AtMost (LVar m) (LVar m2)])
+  ]
+
+-- --------------------------------------------------------------------------
+-- Minimisation (phase 51)
+-- --------------------------------------------------------------------------
+--
+-- 'minimise' is defaulting, applied only to metas the caller has decided are
+-- ambiguous — not mentioned in the type, so determinable by nobody. What is
+-- pinned here is the three endings: a least value is found, the bound is
+-- already satisfied by zero, or no least value exists and it refuses.
+
+minimiseTests :: [TestTree]
+minimiseTests =
+  [ testCase "nothing to minimise is the identity" $
+      minimise [] [AtMost (LVar a) (LVar b)]
+        @?= Right ([], [AtMost (LVar a) (LVar b)])
+
+  , testCase "an unconstrained meta goes to zero" $
+      minimise [m] [] @?= Right ([(m, LZero)], [])
+
+  , testCase "an upper bound alone still goes to zero, and discharges" $
+      minimise [m] [AtMost (LSuc (LVar m)) (levelOfNat 2)] @?= Right ([(m, LZero)], [])
+
+  , testCase "a constant lower bound is met exactly" $
+      minimise [m] [AtMost (levelOfNat 2) (LVar m)] @?= Right ([(m, levelOfNat 2)], [])
+
+  , testCase "and not overshot when an offset absorbs it" $
+      minimise [m] [AtMost (levelOfNat 2) (LSuc (LVar m))]
+        @?= Right ([(m, levelOfNat 1)], [])
+
+  , testCase "a rigid lower bound is taken as the rigid itself" $
+      minimise [m] [AtMost (LVar a) (LVar m)] @?= Right ([(m, LVar a)], [])
+
+  , testCase "two metas in a chain both settle" $
+      minimise [m, m2] [AtMost (levelOfNat 1) (LVar m), AtMost (LVar m) (LVar m2)]
+        @?= Right ([(m, levelOfNat 1), (m2, levelOfNat 1)], [])
+
+  , -- **The disjunction, and the reason this returns 'Maybe'.**
+    -- @2 ≤ max ?m ?m2@ has minimal solutions @(2,0)@ and @(0,2)@, incomparable,
+    -- so no bound is extracted and zero fails the check.
+    testCase "a max on the right has no least solution, so it refuses" $
+      minimise [m, m2] [AtMost (levelOfNat 2) (LMax (LVar m) (LVar m2))]
+        @?= Left (Refuted (levelOfNat 2) (LMax LZero LZero))
+
+  , testCase "an impossible pair refuses rather than guessing" $
+      minimise [m] [AtMost (levelOfNat 3) (LVar m), AtMost (LVar m) (levelOfNat 1)]
+        @?= Left (Refuted (LMax (levelOfNat 3) LZero) (levelOfNat 1))
+
+  , -- A bound on a meta that is *not* being minimised survives, to be
+    -- generalised into a scheme constraint exactly as before. It has to be a
+    -- **meta**: two distinct rigids get 'levelLeq'\'s validity reading, under
+    -- which @ℓ₀ ≤ ℓ₁@ is simply false, which is why 'Thena.Global.Env.generalised'
+    -- generalises the residue rather than deciding it.
+    testCase "an obligation over a surviving meta is handed back" $
+      minimise [m] [AtMost (levelOfNat 1) (LVar m2), AtMost LZero (LVar m)]
+        @?= Right ([(m, LZero)], [AtMost (levelOfNat 1) (LVar m2)])
   ]

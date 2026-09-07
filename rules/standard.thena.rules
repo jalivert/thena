@@ -4,7 +4,7 @@ rule base standard where
 
 rule attack :- when focus-is-hole then prim-attack
 
-rule try t :- when focus-is-hole then prim-try t
+rule try-core t :- when focus-is-hole then prim-try t
 
 rule abandon :- when focus-is-hole then prim-abandon
 
@@ -16,22 +16,309 @@ rule solve :- when focus-is-guess then prim-solve
 
 rule regret :- when focus-is-guess then prim-regret
 
-rule eliminate t :- when focus-is-hole then prim-eliminate t
+rule eliminate-core t :- when focus-is-hole then prim-eliminate t
 
-rule elab-var :- when focus-is-hole hint-is-name
-  then t = resolve hint
-     ; try t
-     ; prim-solve
+rule prove :- when focus-is-hole then prim-prove
 
-rule unify-refine t :- when focus-is-hole
+rule prove :- when focus-is-guess then prim-prove
+
+rule fill t :- when focus-is-hole
   then n = fresh-name "refined"
      ; x = define n t
      ; s = typeof x
      ; g = goal
-     ; unify s g
+     ; unify-into s g
      ; prim-try x
-     ; prim-solve
 
-rule apply f :- when focus-is-hole
+rule unify-refine-core t :- when focus-is-hole
+  then fill t
+     ; solve
+
+rule apply-core f :- when focus-is-hole
   then s = prim-apply f
-     ; unify-refine s
+     ; unify-refine-core s
+
+-- --------------------------------------------------------------------------
+-- Elaboration, one clause per surface node (MS4 step 2)
+--
+-- Every clause names the node it is for, so at most one head matches any term
+-- and a call to elaborate has nothing to choose between — the two application
+-- clauses are the exception, and they are ordered rather than exclusive because
+-- a head whose arguments do not line up must fall through to the binary rule.
+--
+-- **Elaboration is entirely here as of MS4 phase 49f.** There is no
+-- prim-elaborate any more and there is no Haskell elaborator behind it; what
+-- follows is the whole of E⟦·⟧.
+
+-- E⟦x⟧ = FILL x ; SOLVE — Brady's variable case.
+rule elaborate t :- when focus-is-hole (surface-is-name t)
+  then w = surface-name t
+     ; x = resolve-name w
+     ; fill x
+     ; solve
+
+-- E⟦Typeₙ⟧ — the level is written, so the term is too.
+rule elaborate t :- when focus-is-hole (surface-is-universe t)
+  then u = surface-universe t
+     ; fill u
+     ; solve
+
+-- E⟦Type⟧ — typical ambiguity: the level is a fresh meta, unification decides.
+rule elaborate t :- when focus-is-hole (surface-is-universe-open t)
+  then u = fresh-universe
+     ; fill u
+     ; solve
+
+-- E⟦_⟧ — "those elaborate just by not elaborating". The hole is already there.
+rule elaborate t :- when focus-is-hole (surface-is-placeholder t) then
+
+-- E⟦?foo⟧ — a named placeholder is a real hole, which the focus already is.
+rule elaborate t :- when focus-is-hole (surface-is-hole t) then
+
+-- E⟦(elim D … t) ⃗a⟧ — an elimination applied to something more, which is how a
+-- proof discharges the equation an unfriendly index carries:
+-- `elim Step () P (…) (true u) s (refl Term true)`. The head is the elim node
+-- rather than a name, so without this the binary clause below would take it —
+-- and it claims f : A -> B, an arrow, where an eliminator's type is a
+-- telescope. elim-spine folds the extra arguments into the eliminator's own
+-- spine, so what is elaborated is one name-headed application.
+rule elaborate t :- when focus-is-hole (surface-is-app t) (app-head-is-elim t)
+  then a = elim-spine t
+     ; call elaborate a
+
+-- E⟦x ⃗a⟧ — Brady's OTHER application rule, taken whenever the head is a name.
+-- The binary rule below claims f : A -> B, an arrow, so B cannot mention the
+-- argument and a dependent head does not fit it; this one walks the head's real
+-- telescope, claiming each domain in the scope of the holes already claimed.
+--
+-- expand-implicits is Brady's EXPAND: it writes a _ in at every implicit
+-- position the user left out, so from here on every argument is written and the
+-- walk is the same for all of them.
+--
+-- **It may fail and fall through to the clause below**, which is what the
+-- Haskell did with a case: a head whose arguments do not line up — a partial
+-- application of a head with recorded plicities — is an ordinary binary
+-- application.
+rule elaborate t :- when focus-is-hole (surface-is-app t) (app-head-is-name t)
+  then h  = here
+     ; e  = expand-implicits t
+     ; hd = app-head e
+     ; w  = surface-name hd
+     ; f  = resolve-name w
+     ; call spine-arguments h f e
+
+-- E⟦e a⟧ — the binary rule, a spine folded right to left. CLAIM (A : Type);
+-- CLAIM (B : Type); CLAIM (f : A -> B); CLAIM (s : A); FILL (f s); FOCUS f;
+-- E⟦e⟧; FOCUS s; E⟦a⟧; SOLVE.
+rule elaborate t :- when focus-is-hole (surface-is-app t) (app-args-are-explicit t)
+  then h  = here
+     ; dn = fresh-name "A"
+     ; u1 = fresh-universe
+     ; d  = claim dn u1
+     ; cn = fresh-name "B"
+     ; u2 = fresh-universe
+     ; c  = claim cn u2
+     ; ar = arrow d c
+     ; fn = fresh-name "f"
+     ; f  = claim fn ar
+     ; sn = fresh-name "s"
+     ; sv = claim sn d
+     ; ap = apply-to f sv
+     ; fill ap
+     ; goto f
+     ; g  = app-function t
+     ; call elaborate g
+     ; goto sv
+     ; a  = app-last-argument t
+     ; call elaborate a
+     ; goto h
+     ; solve
+-- E⟦\ x => e⟧ = ATTACK; LAMBDA x; E⟦e⟧; SOLVE — Brady's λ case, with one
+-- prim-intro per binder of the group and one attack for the whole of it.
+--
+-- **The group is walked by recursion**, not by an iterating instruction: each
+-- helper peels one binder off the surface term and calls itself on the tail, so
+-- the term is its own counter. Attacking once per binder instead would nest the
+-- λs and put an extra let round each — a different proof term, which is why the
+-- run is emitted here rather than by peeling in this clause.
+rule elaborate t :- when focus-is-hole (surface-is-lambda t)
+  then h = here
+     ; prim-attack
+     ; call intro-binders t
+     ; into
+     ; call enter-binders t
+     ; b = lambda-body t
+     ; call elaborate b
+     ; goto h
+     ; solve
+
+-- E⟦(x : t) -> e⟧ = ATTACK; CLAIM (X : Type); PI (x : X); FOCUS X; E⟦t⟧; E⟦e⟧;
+-- SOLVE. One binder per clause and a group nests: the domain hole is claimed
+-- outside the attack, where an earlier binder of the same group is not in
+-- scope. The domain is elaborated before the body — Brady's order, and not a
+-- preference: the other way round the body's FILL solves the domain hole.
+rule elaborate t :- when focus-is-hole (surface-is-forall t)
+  then x  = forall-name t
+     ; ty = forall-domain t
+     ; tl = forall-tail t
+     ; h  = here
+     ; dn = fresh-name "A"
+     ; u  = fresh-universe
+     ; d  = claim dn u
+     ; prim-attack
+     ; quantify x d
+     ; into
+     ; along
+     ; c  = here
+     ; goto d
+     ; call elaborate ty
+     ; goto c
+     ; call elaborate tl
+     ; goto h
+     ; solve
+-- E⟦A -> B⟧ — the application case's shape with `arrow` where that has
+-- `apply-to`. Not the ∀ case with an anonymous binder: an arrow's codomain
+-- cannot mention the domain, so there is nothing to put in Γ and no attack.
+rule elaborate t :- when focus-is-hole (surface-is-arrow t)
+  then h  = here
+     ; dn = fresh-name "A"
+     ; u1 = fresh-universe
+     ; d  = claim dn u1
+     ; cn = fresh-name "B"
+     ; u2 = fresh-universe
+     ; c  = claim cn u2
+     ; ar = arrow d c
+     ; fill ar
+     ; goto d
+     ; a  = arrow-domain t
+     ; call elaborate a
+     ; goto c
+     ; b  = arrow-codomain t
+     ; call elaborate b
+     ; goto h
+     ; solve
+-- E⟦let x = v in e⟧ — `define` is Brady's LET, and there is no attack and no
+-- solve: his LET acts on the goal, ours writes a component above the focus, so
+-- the body elaborates into the hole this clause was called at.
+--
+-- Two clauses, because the annotation is optional and the head language has no
+-- negation. With one, X is left for the value's own FILL to unify against.
+rule elaborate t :- when focus-is-hole (let-is-annotated t)
+  then h  = here
+     ; xn = fresh-name "X"
+     ; u  = fresh-universe
+     ; x  = claim xn u
+     ; vn = fresh-name "V"
+     ; v  = claim vn x
+     ; goto x
+     ; ty = let-type t
+     ; call elaborate ty
+     ; goto v
+     ; val = let-value t
+     ; call elaborate val
+     ; goto h
+     ; w  = let-name t
+     ; define w v
+     ; b  = let-body t
+     ; call elaborate b
+
+rule elaborate t :- when focus-is-hole (let-is-bare t)
+  then h  = here
+     ; xn = fresh-name "X"
+     ; u  = fresh-universe
+     ; x  = claim xn u
+     ; vn = fresh-name "V"
+     ; v  = claim vn x
+     ; goto v
+     ; val = let-value t
+     ; call elaborate val
+     ; goto h
+     ; w  = let-name t
+     ; define w v
+     ; b  = let-body t
+     ; call elaborate b
+-- E⟦e : T⟧ — claim X : Type, elaborate T into it, unify X with the goal, then
+-- elaborate e at the same hole. An ascription does not build a term; it narrows
+-- the one the goal was already asking for, so there is no fill and no solve.
+rule elaborate t :- when focus-is-hole (surface-is-ascription t)
+  then h  = here
+     ; xn = fresh-name "X"
+     ; u  = fresh-universe
+     ; x  = claim xn u
+     ; goto x
+     ; ty = ascription-type t
+     ; call elaborate ty
+     ; goto h
+     ; g  = goal
+     ; unify-into x g
+     ; e  = ascription-term t
+     ; call elaborate e
+-- E⟦elim D ⃗p P ⃗m ⃗i t⟧ — an ordinary application of the eliminator's wrapper.
+--
+-- §3.7 generates a global for the eliminator the way it does for every former
+-- and constructor, so `elim Nat (…) P (…) (…) n` and `elimNat (…) P … n` are
+-- the same term and this clause is the rewriting of one into the other. There
+-- is nothing here about eliminations that is not about applications.
+rule elaborate t :- when focus-is-hole (surface-is-elim t)
+  then a = elim-spine t
+     ; call elaborate a
+-- E⟦do { … }⟧ = play the block. It leaves the focus wherever the block left
+-- it, which is the one way it differs from every other clause: the block does
+-- what the user wrote, and repairing it is theirs.
+rule elaborate t :- when focus-is-hole (surface-is-do t) then play t
+
+-- One prim-intro per binder, each given the SURFACE name: without it the binder
+-- keeps the identifier written in the type.
+rule intro-binders t :- when focus-is-guess (lambda-binds-more t)
+  then x  = lambda-name t
+     ; prim-intro x
+     ; tl = lambda-tail t
+     ; call intro-binders tl
+
+rule intro-binders t :- when focus-is-guess (lambda-binds-one t)
+  then x = lambda-name t
+     ; prim-intro x
+
+-- One along per binder, to stand where the body was written. The λ's binders
+-- are the count and nothing else about them is read.
+rule enter-binders t :- when focus-is-component (lambda-binds-more t)
+  then along
+     ; tl = lambda-tail t
+     ; call enter-binders tl
+
+rule enter-binders t :- when focus-is-component (lambda-binds-one t) then along
+
+-- The walk itself, and it is a recursion over the surface spine: take the first
+-- argument, claim a hole for it, elaborate into that hole, and call on what is
+-- left. The term is its own counter, exactly as the λ group is at
+-- intro-binders — which is what lets a rule apply a head to any number of
+-- arguments without ever holding a list (ms4/CLOSEOUT.md 28).
+--
+-- **goto h before each claim.** Every claim goes directly above the focus, so
+-- claiming from the one fixed place is what puts the domains in telescope order
+-- and lets a later domain mention an earlier hole.
+--
+-- focus-is-component is there for enter-binders' reason (phase 49c): a head of
+-- argument tests alone is true of every state, so the clause would be offered
+-- everywhere. It is a test that is TRUE here, not one chosen to tidy the match
+-- list — the focus is the hole on the way in and the argument just elaborated
+-- on the way round.
+rule spine-arguments h f t :- when focus-is-component (surface-is-app t)
+  then goto h
+     ; n  = fresh-name "a"
+     ; f2 = apply-next f n
+     ; goto n
+     ; a  = app-first-argument t
+     ; call elaborate a
+     ; tl = app-tail t
+     ; call spine-arguments h f2 tl
+
+-- The base case: the arguments are gone and what is left is the head. Only now
+-- is the spine filled in — the arguments are elaborated BEFORE the FILL,
+-- against Brady's printed order, because unifying the spine's type with the
+-- goal solves the argument holes and a solved hole is a definition, so a goto
+-- afterwards would find nothing.
+rule spine-arguments h f t :- when focus-is-component (surface-is-name t)
+  then goto h
+     ; fill f
+     ; solve

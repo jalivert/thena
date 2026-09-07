@@ -41,6 +41,7 @@ import Thena.Syntax.Concrete
   , RawOp (..)
   , RawOperand (..)
   , RawRule (..)
+  , RawTest (..)
   )
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
@@ -100,7 +101,6 @@ Term :: { Raw }
   | let '?' ident ':' Term '≐' '(' Term ')' in Term
                                                    { RawGuess $3 $5 $8 $11 }
   | Constraint '▸' Term                            { RawPending $1 $3 }
-  | '[|' Term '|]'                                 { RawQuote $2 }
   -- **Level arguments are written or omitted** (MS3 phase 31c). Omitting them
   -- is the only spelling for a monomorphic family, which is every family
   -- written before this phase, so nothing existing moves.
@@ -183,18 +183,37 @@ Params :: { [String] }
   :                                        { [] }
   | Params ident                           { $2 : $1 }
 
-Tests :: { [String] }
+-- A head is a run of tests with nothing between them, so a test that takes
+-- operands is parenthesised — @when focus-is-hole (surface-is-name t)@ — and a
+-- bare word is a test of no operands (MS4 phase 47). Without the brackets
+-- @when focus-is-hole goal-type-is-pi@ would parse as one test applied to
+-- another word, which is the same ambiguity a REPL argument run has and is
+-- answered the same way.
+Tests :: { [RawTest] }
   :                                        { [] }
-  | when Names                             { reverse $2 }
+  | when TestRun                           { reverse $2 }
 
-Names :: { [String] }
-  : ident                                  { [$1] }
-  | Names ident                            { $2 : $1 }
+TestRun :: { [RawTest] }
+  : Test                                   { [$1] }
+  | TestRun Test                           { $2 : $1 }
 
--- Accumulated in reverse, like 'Binders'. At least one: 'Rule' requires 'then'
--- and 'then' with nothing after it is a parse error rather than an empty body.
+Test :: { RawTest }
+  : ident                                  { RawTest $1 [] }
+  | '(' ident Operands ')'                 { RawTest $2 (reverse $3) }
+
+-- Accumulated in reverse, like 'Binders'.
+--
+-- **A body may be empty** (MS4 phase 49), where until then @then@ with nothing
+-- after it was a parse error. §8 refused one on the argument that /a rule with
+-- no body does nothing/, and the surface language's own @_@ is the
+-- counterexample: @E⟦_⟧@ /is/ do nothing — his /"those elaborate just by not
+-- elaborating"/. A clause that does nothing and a clause that does not match
+-- are different answers, so an empty body says something.
+--
+-- @then@ stays required, so a rule still says where its body begins.
 Body :: { [RawInstr] }
-  : Instr                                  { [$1] }
+  :                                        { [] }
+  | Instr                                  { [$1] }
   | Body ';' Instr                         { $3 : $1 }
 
 Instr :: { RawInstr }
@@ -227,6 +246,12 @@ App :: { Raw }
 
 Atom :: { Raw }
   : ident                                  { RawName $1 }
+  -- **The corners are an atom, not a term** (phase 38). They were a @Term@
+  -- production, so @⌜ t ⌝@ could not appear in an atom run — and phase 38's
+  -- REPL writes every core argument of a rule exactly there. Moving it is
+  -- strictly more permissive: every place it parsed before still reaches it
+  -- through @Term -> App -> Atom@.
+  | '[|' Term '|]'                         { RawQuote $2 }
   | ident LevelArgs                        { RawAt $1 $2 }
   | univ                                   { RawUniverse $1 }
   | Type                                   { RawUniverseOpen }

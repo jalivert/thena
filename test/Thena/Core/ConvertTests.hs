@@ -24,6 +24,7 @@ tests =
     , testGroup "the reason says where" siteTests
     , testGroup "the counter comes back, and only ever goes up" counterTests
     , testGroup "an undecided level is owed, not refused" obligationTests
+    , testGroup "only a Pi's codomain varies" varianceTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -214,6 +215,50 @@ counterTests =
               (term [] "\\ (x : Nat) -> zero") (term [] "\\ (x : Nat) -> succ zero")) > 100)
         @?= True
   ]
+
+-- | Where cumulativity is allowed to look, and where it must not (MS4 phase
+-- 41h).
+--
+-- **This group exists because the whole suite passed while 'subsumes' was
+-- unsound.** The direction was carried into every sub-problem, so an
+-- application's arguments, a saturated former's arguments and an elimination's
+-- fields were all compared cumulatively — and nothing here asked.
+--
+-- @subsumes expected actual@, matching 'Thena.Core.Typing.check'.
+varianceTests :: [TestTree]
+varianceTests =
+  [ -- The Π codomain is the one covariant position, and it still is.
+    testCase "a codomain may be smaller than the one wanted" $
+      subsumesIn [] "Nat -> Type\8321" "Nat -> Type\8320" @?= Nothing
+
+    -- Invariant, and deliberately more conservative than ordinary subtyping:
+    -- contravariance would be sound here and is declined (see 'subsumes').
+  , testCase "but a domain may not" $
+      (subsumesIn [] "Type\8321 -> Nat" "Type\8320 -> Nat" == Nothing) @?= False
+  , testCase "in either direction" $
+      (subsumesIn [] "Type\8320 -> Nat" "Type\8321 -> Nat" == Nothing) @?= False
+
+    -- **The unsoundness that was shipped.** @F@ is opaque, so nothing relates
+    -- @F Type₀@ to @F Type₁@. This was accepted, and @:revalidate@ called the
+    -- development valid — @ms4/CLOSEOUT.md@ 12.
+  , testCase "a neutral spine's argument is invariant" $
+      (subsumesIn [("F", "Type\8322 -> Type\8320")] "F Type\8321" "F Type\8320" == Nothing)
+        @?= False
+  , testCase "and so is its head" $
+      (subsumesIn [("F", "Type\8322 -> Type\8320"), ("G", "Type\8322 -> Type\8320")]
+         "F Type\8320" "G Type\8320" == Nothing)
+        @?= False
+  ]
+
+-- | 'subsumes' over 'convertIn'\'s context builder.
+subsumesIn :: [(String, String)] -> String -> String -> Maybe ConversionFailure
+subsumesIn binders a b =
+  verdict (subsumes natVec ctx n (termAt n ctx a) (termAt n ctx b))
+  where
+    (ctx, n) = foldl add ([], natVecCounter) binders
+    add (c, k) (name, ty) =
+      let (v, k1) = fresh k
+       in (c ++ [Hypothesis v (Ident name) (termAt k c ty)], k1)
 
 -- --------------------------------------------------------------------------
 -- Level obligations (MS3 phase 33)

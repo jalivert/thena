@@ -8,7 +8,7 @@
 -- the generation live in "Thena.Global.Declare", above @Typing@.
 --
 -- The global environment does not backtrack (§7.4): it is a field of
--- 'Thena.Engine.Machine' beside 'Thena.Engine.ProofState' rather than inside
+-- 'Thena.Engine.Machine' beside 'Thena.Engine.Development' rather than inside
 -- it, so a datatype declared in a branch that later fails survives.
 module Thena.Global.Env
   ( -- * Kinds of global binding (§3.3.1)
@@ -41,6 +41,8 @@ module Thena.Global.Env
   , formerArity
   , recursiveArgument
   , eliminatorType
+  , eliminatorWrapper
+  , eliminatorName
   , varsInEnv
   ) where
 
@@ -49,17 +51,20 @@ import Data.List (nub)
 import Thena.Core.Level
   ( Level (..)
   , LevelVar
+  , Unmet
+  , minimise
   , Obligation
   , freshLevelRigid
   , metasIn
   , substLevel
   , substObligation
   )
-import Thena.Core.Context (Context, entryType, entryVar, piOver, substLevelsInEntry)
+import Thena.Core.Context
+  (Context, Entry (..), entryType, entryVar, lamOver, piOver, substLevelsInEntry)
 import Thena.Core.Term
   ( Core (..)
   , Var
-  , GlobalName
+  , GlobalName (..)
   , Ident (..)
   , close
   , fresh
@@ -146,16 +151,32 @@ data Definition = MkDefinition
 -- is exactly what a scheme constraint is /for/, and asking 'levelLeq' to decide
 -- it here would refuse the useful case — a rigid is not bounded by another
 -- rigid, which is the whole reason the constraint has to travel to the use.
-generalised :: Int -> [Obligation] -> Core -> Core -> (Definition, Int)
-generalised n residue ty body =
-  ( MkDefinition (map snd binding) (map (substObligation sub) residue)
-      (substLevelsIn sub ty) (substLevelsIn sub body)
-  , n'
-  )
+generalised
+  :: Int -> [Obligation] -> Core -> Core -> Either Unmet (Definition, Int)
+generalised n residue ty body = do
+    -- **Default the ambiguous ones first, then generalise what is left**
+    -- (phase 51). The order is the whole of it: a meta the type does not
+    -- mention cannot be determined by a use — unification only ever sees the
+    -- type — so making it a parameter asks every caller to write something that
+    -- says nothing. 'Thena.Core.Level.minimise' gives it its least value
+    -- instead, and refuses when there is no least one.
+    (defaults, kept) <- minimise ambiguous residue
+    let ty1   = substLevelsIn defaults ty
+        body1 = substLevelsIn defaults body
+        -- Recomputed after the defaulting rather than reused: solving may have
+        -- discharged a meta the type mentioned too.
+        metas = levelMetasIn ty1
+                  ++ [ v | v <- levelMetasIn body1, v `notElem` levelMetasIn ty1 ]
+        (binding, n') = mint n metas
+        sub   = [ (v, LVar w) | (v, w) <- binding ]
+    Right
+      ( MkDefinition (map snd binding) (map (substObligation sub) kept)
+          (substLevelsIn sub ty1) (substLevelsIn sub body1)
+      , n'
+      )
   where
-    metas       = levelMetasIn ty ++ [ v | v <- levelMetasIn body, v `notElem` levelMetasIn ty ]
-    (binding, n') = mint n metas
-    sub         = [ (v, LVar w) | (v, w) <- binding ]
+    ambiguous =
+      [ v | v <- levelMetasIn body, v `notElem` levelMetasIn ty ]
 
     mint k []       = ([], k)
     mint k (v : vs) = let (w, k1)  = freshLevelRigid k
@@ -457,13 +478,70 @@ recursiveArgument dn np ty = case spine ty of
 -- cannot be a plain function of the record; that is the cost of \'Var\''s hidden
 -- constructor, paid here rather than by a second way to make a variable.
 eliminatorType :: InductiveDefinition -> Level -> Int -> (Core, Int)
-eliminatorType d l n0 =
-  (piOver params (Pi (Ident "P") motiveType (close pv rest)), nEnd)
+eliminatorType d l n0 = (piOver tel goal, n1)
+  where (tel, goal, _, n1) = eliminatorParts d l n0
+
+-- | The name the generated eliminator wrapper is bound to: @elimNat@,
+-- @elimVec@ (MS4 phase 49e).
+--
+-- The same shape as
+-- 'Thena.Global.NoConfusion.noConfusionNames' — a fixed word and the
+-- datatype\'s own name — and it is an ordinary identifier a user may write.
+-- @elim@ is a keyword, but keywords are whole tokens, so @elimNat@ lexes as one
+-- name and there is nothing to reserve.
+eliminatorName :: GlobalName -> GlobalName
+eliminatorName (GlobalName d) = GlobalName ("elim" ++ d)
+
+-- | The eliminator as an ordinary global definition — its type and its body
+-- (MS4 phase 49e).
+--
+-- **§3.7 item 2 for the eliminator.** A former and a value constructor each get
+-- a wrapper whose body is the 'Thena.Core.Term.Canonical' they name
+-- ('generate'); this is the same thing for the 'Thena.Core.Term.Eliminate'
+-- node, and it exists for the same reason: a node that is only ever saturated
+-- is unusable as a function until something abstracts it.
+--
+-- **What it buys is a name to apply.** Elaborating @elim D …@ used to need an
+-- op of its own — @make-elim@, which claimed a hole per field and handed back
+-- the node — precisely because §3.7 generated nothing for the eliminator and
+-- there was nothing to apply. With this definition in the environment @elim D
+-- …@ is an ordinary name-headed application and the elaborator needs no
+-- eliminator case at all (his proposal, 2026-09-03).
+--
+-- **The motive's level is a prenex parameter**, given here as an argument the
+-- way 'eliminatorType' takes it. Inside @make-elim@ it was a fresh /meta/,
+-- minted per use and invisible; as a parameter of the wrapper it is minted once
+-- at declaration and instantiated at each use by the same machinery every other
+-- polymorphic global goes through (phase 44). That is a special case becoming
+-- the general mechanism, not a change of behaviour.
+--
+-- **The body instantiates the datatype at the wrapper\'s own level
+-- parameters**, exactly as 'generate' does for a former — so @elimD {ℓ…}@
+-- unfolds to an 'Thena.Core.Term.Eliminate' at those levels and the two agree
+-- by construction. @make-elim@ wrote @[]@ there, which is why a polymorphic
+-- datatype could not be eliminated through it.
+eliminatorWrapper :: InductiveDefinition -> Level -> Int -> (Core, Core, Int)
+eliminatorWrapper d l n0 = (piOver tel goal, lamOver tel node, n1)
+  where (tel, goal, node, n1) = eliminatorParts d l n0
+
+-- | The telescope, the conclusion under it, and the saturated node its own
+-- binders form.
+--
+-- **One walk, read by two callers** — 'eliminatorType' wants the Π, and
+-- 'eliminatorWrapper' wants the Π /and/ the λ over the same variables. Building
+-- the telescope as a 'Context' rather than as nested 'Pi's is what lets the
+-- second exist: the binders are named here, so the node can be assembled where
+-- its pieces are in scope instead of being recovered by splitting a list of
+-- variables peeled back off the type.
+eliminatorParts
+  :: InductiveDefinition -> Level -> Int -> (Context, Core, Core, Int)
+eliminatorParts d l n0 = (telescope, motiveAt indexVars (Free ctv), node, nEnd)
   where
     dn      = inductiveName d
     params  = inductiveParameters d
     indices = inductiveIndices d
     np      = length params
+    levels  = map LVar (inductiveLevels d)
 
     (pv,  n1) = fresh n0                 -- the motive
     (mtv, n2) = fresh n1                 -- the motive's own target binder
@@ -472,8 +550,22 @@ eliminatorType d l n0 =
     paramVars = map (Free . entryVar) params
     indexVars = map (Free . entryVar) indices
 
+    -- The binder order is 'Thena.Core.Term.Eliminate'\'s own field order, which
+    -- is what makes typing the node the ordinary application rule walked down
+    -- this telescope and nothing else.
+    telescope =
+      params
+        ++ [Hypothesis pv (Ident "P") motiveType]
+        ++ methodEntries
+        ++ indices
+        ++ [Hypothesis ctv (Ident "target") (familyAt indexVars)]
+
+    node =
+      Eliminate dn levels paramVars (Free pv)
+        (map (Free . entryVar) methodEntries) indexVars (Free ctv)
+
     -- @D params is@
-    familyAt is = foldl App (Global dn (map LVar (inductiveLevels d))) (paramVars ++ is)
+    familyAt is = foldl App (Global dn levels) (paramVars ++ is)
 
     -- @P is v@
     motiveAt is v = foldl App (Free pv) (is ++ [v])
@@ -482,25 +574,20 @@ eliminatorType d l n0 =
     motiveType =
       piOver indices (Pi (Ident "target") (familyAt indexVars) (close mtv (Universe l)))
 
-    (rest, nEnd) = methods (inductiveConstructors d) n3
+    (methodEntries, nEnd) = methods (inductiveConstructors d) n3
 
-    methods []       n = (conclusion, n)
+    methods []       n = ([], n)
     methods (c : cs) n =
       let (mty, na)    = methodType c n
           (mv,  nb)    = fresh na
           (below, nc)  = methods cs nb
-       in (Pi (Ident "method") mty (close mv below), nc)
-
-    conclusion =
-      piOver indices
-        (Pi (Ident "target") (familyAt indexVars)
-            (close ctv (motiveAt indexVars (Free ctv))))
+       in (Hypothesis mv (Ident "method") mty : below, nc)
 
     -- @forall D -> IH1 -> ... -> IHn -> P is (c params D)@
     methodType c n =
       let args = constructorArguments c
           goal = motiveAt (constructorIndices c)
-                          (Canonical (constructorName c) (map LVar (inductiveLevels d))
+                          (Canonical (constructorName c) levels
                                      (paramVars ++ map (Free . entryVar) args))
           (body, na) = hypotheses args n goal
        in (piOver args body, na)

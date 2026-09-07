@@ -6,12 +6,34 @@ thena spine> :theorem g : Maybe Bool
 proving g : Maybe Bool
 thena spine> :matches
 attack
-try ‹t›
+try-core ‹t›
 abandon
-eliminate ‹t›
-unify-refine ‹t›
-apply ‹f›
-thena spine> apply Just
+eliminate-core ‹t›
+prove
+fill ‹t›
+unify-refine-core ‹t›
+apply-core ‹f›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+enter-binders ‹t›
+enter-binders ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+thena spine> apply-core ⌜ Just ⌝
 solved: A
 thena spine> :show
   let A = Bool : Type₀ in
@@ -20,7 +42,7 @@ thena spine> :show
 ▶ let g = refined : Maybe Bool in
   g
 thena spine> goto a
-thena spine> apply true
+thena spine> apply-core ⌜ true ⌝
 already equal
 thena spine> :show
   let A = Bool : Type₀ in
@@ -44,7 +66,7 @@ thena spine> into
 thena spine> along
 thena spine> along
 thena spine> along
-thena spine> apply f
+thena spine> apply-core ⌜ f ⌝
 already equal
 thena spine> :show
   let ? ap2 : ∀ (A : Type₀) -> (A -> A -> A) -> A -> A ≐ (
@@ -74,21 +96,21 @@ thena spine> :abandon
 abandoned ap2
 thena spine> :theorem bad : Bool
 proving bad : Bool
-thena spine> apply Just
+thena spine> apply-core ⌜ Just ⌝
 stuck: Maybe A and Bool cannot be made equal
 thena spine> :show
 ▶ let ? bad : Bool in
   bad
 thena spine> :undo
 nothing to undo
-thena spine> apply true
+thena spine> apply-core ⌜ true ⌝
 already equal
 thena spine> qed
 bad : Bool   ∎
 thena spine> :goal Maybe Bool
 ▶ let ? goal : Maybe Bool in
   goal
-thena spine> apply Just
+thena spine> apply-core ⌜ Just ⌝
 solved: A
 thena spine> :show
   let A = Bool : Type₀ in
@@ -96,8 +118,8 @@ thena spine> :show
   let refined = Just A a : Maybe A in
 ▶ let goal = refined : Maybe Bool in
   goal
-thena spine> apply Nothing
-stuck: no clause of apply applies here
+thena spine> apply-core ⌜ Nothing ⌝
+stuck: no clause of apply-core applies here
 thena spine> :show
   let A = Bool : Type₀ in
   let ? a : A in
@@ -116,18 +138,18 @@ thena spine> :undo
 thena spine> :goal ∀ (b : Bool) -> Maybe Bool
 ▶ let ? goal : Bool -> Maybe Bool in
   goal
-thena spine> apply Just
+thena spine> apply-core ⌜ Just ⌝
 stuck: Maybe A and Bool -> Maybe Bool cannot be made equal
 thena spine> :show
 ▶ let ? goal : Bool -> Maybe Bool in
   goal
 thena spine> :theorem h : ∀ (b : Bool) -> Maybe Bool
 proving h : Bool -> Maybe Bool
-thena spine> apply Just
+thena spine> apply-core ⌜ Just ⌝
 stuck: Maybe A and Bool -> Maybe Bool cannot be made equal
 thena spine> assume q : Bool
 assumed q
-thena spine> apply Just
+thena spine> apply-core ⌜ Just ⌝
 stuck: Maybe A and Bool -> Maybe Bool cannot be made equal
 thena spine> :abandon
 abandoned h
@@ -146,10 +168,10 @@ context
   b : Bool
 type
   Maybe Bool
-thena spine> apply Just
+thena spine> apply-core ⌜ Just ⌝
 solved: A
 thena spine> goto a
-thena spine> apply b
+thena spine> apply-core ⌜ b ⌝
 already equal
 thena spine> goto h
 thena spine> solve
@@ -157,11 +179,11 @@ thena spine> qed
 h : Bool -> Maybe Bool   ∎
 thena spine> :show h
 h : Bool -> Maybe Bool
-h = let h = λ (b : Bool) -> let A = Bool : Type₀ in let refined = b : Bool in let a = refined : A in let refined1 = Just A a : Maybe A in let h1 = refined1 : Maybe Bool in h1 : Bool -> Maybe Bool in h
+h = let h = λ (b : Bool) -> let A = Bool : Type₀ in let refined1 = b : Bool in let a = refined1 : A in let refined = Just A a : Maybe A in let h1 = refined : Maybe Bool in h1 : Bool -> Maybe Bool in h
 thena spine> :theorem guessed : Bool
 proving guessed : Bool
 thena spine> attack
-thena spine> apply true
-stuck: no clause of apply applies here
+thena spine> apply-core ⌜ true ⌝
+stuck: no clause of apply-core applies here
 thena spine> :abandon
 abandoned guessed

@@ -28,7 +28,8 @@
 -- way down rather than being imported, because "Thena.Syntax.Resolve" /is/
 -- above @Core@; it mentions nothing this module did not already have.
 module Thena.Errors
-  ( FailReason (..)
+  ( DataBuildError (..)
+  , FailReason (..)
   , MoveError (..)
 
     -- * Conversion (§5.2)
@@ -56,6 +57,9 @@ import Thena.Core.Level (Level, Unmet)
 import Thena.Core.Context (Context)
 import Thena.Core.Term (Core, GlobalName, Ident, Var)
 import Thena.Syntax.Lexer (LexError)
+import Thena.Surface.Concrete (PairingError (..))
+import Thena.Surface.Layout (LayoutError (..))
+import Thena.Surface.Parser (SurfaceParseError (..))
 import Thena.Syntax.Parser (ParseError)
 
 -- | Why an operation failed. Structured, never a string (§12 invariant 2).
@@ -64,10 +68,35 @@ import Thena.Syntax.Parser (ParseError)
 -- adds unification's — @Mismatch Core Core@, @OccursCheck@, @ScopeViolation@,
 -- @UniverseMismatch@ (§6.2) — and that is when this module first imports
 -- "Thena.Core.Term".
+-- | Why an elaborated declaration is not one.
+--
+-- Small on purpose: everything a /user/ can get wrong about a datatype is
+-- 'DeclareError'\'s, checked by 'declare' on the finished record. These three
+-- are about the record not being buildable at all, which the surface form's
+-- own shape should already have ruled out.
+data DataBuildError
+  = DeclaredTypeIsNotAUniverse GlobalName
+    -- ^ the type ends in something that is not a sort
+  | ConstructorTargetWrong GlobalName
+    -- ^ its target is not this datatype applied to its parameters
+  | TooFewBinders
+    -- ^ fewer Π binders than the surface form said there were parameters
+  deriving (Eq, Show)
+
 data FailReason
   = UnboundInBody String
     -- ^ a @Ref@ named nothing in the body's environment
   | NotAnIdentifier String
+  | BlockOperands Int String
+    -- ^ the instruction at this position in a @do@ block gave this op word the
+    -- wrong operands (MS4 phase 45).
+    --
+    -- **Structured rather than a rendered rule error**, because
+    -- @Thena.Rules.RuleError@ is above this module in the layering (§2.5) and a
+    -- @String@ here would be the thing §12 forbids. It costs nothing to say it
+    -- this way: resolving a block can fail in exactly one way — an op word given
+    -- operands it does not take — since a word that names no op is a rule call
+    -- and not an error (phase 25e).
     -- ^ an answer to an @AName@ question that cannot be a name
   | ExpectedText
     -- ^ an operand was not a @VText@
@@ -99,6 +128,22 @@ data FailReason
     -- ^ @intro@ on anything but table 2.8's shape @?x ≐ (?x' : S . x') : …@.
     -- The shape test is the specification, not a shortcut: a hole not of that
     -- form is made ready by @attack@
+  | CannotBuildDatatype DataBuildError
+    -- ^ the elaborated types do not make a datatype record (MS4 phase 42b).
+    -- Everything a /user/ can get wrong is checked by @declare@ on the
+    -- finished record; this is about it not being buildable at all.
+  | TooManyArgumentsForHead
+    -- ^ @apply-next@ was asked for an argument the head's type has no Π domain
+    -- for (MS4 phase 44, and @make-apply@'s until 49f deleted it)
+  | NoEnclosingDevelopment
+    -- ^ @pop-development@ at the outermost one (MS4 phase 42). There is
+    -- nothing to pop back to, and a machine with no development at all is not
+    -- a state this language has.
+  | GoalIsNotAUniverse
+    -- ^ @quantify@ at a hole whose type is not a universe (MS4 phase 41f).
+    -- A ∀-binder builds a Π and a Π is a type, so there is nothing for one to
+    -- be part of unless the hole is claimed at a sort. The @∀@ counterpart of
+    -- 'NothingToIntroduce'
   | NothingToIntroduce
     -- ^ @intro@ on the right shape, but the hole's type is neither a Π nor a
     -- @let@ once whnf'd
@@ -107,11 +152,6 @@ data FailReason
     -- undischarged constraint in it (§5.3). The 'Position' names the first one
     -- — @certify@ before anything is proved is the normal way to meet this, so
     -- it says which component rather than only that one exists
-  | NameTaken String
-    -- ^ @claim@, @assume@ or @define@ handed an identifier the development
-    -- already binds (phase 24c). **A refusal and not a rename**: inventing a
-    -- name is @fresh-name@'s job, and silently repairing this would hide from
-    -- the body what it had actually got
   | NoGoalHere
     -- ^ @goal@ where nothing is written down (§4.5, phase 24). The top of a
     -- development claims nothing, so it has no goal to read
@@ -155,6 +195,17 @@ data FailReason
     -- given (§3.7, phase 17)
 
     -- Elaboration and @Call@ (§7.2, §8), added at phase 17b.
+  | NoElaborationRule String
+    -- ^ elaboration met a surface node it cannot handle, carrying what the
+    -- node was (MS4 phase 41).
+    --
+    -- **A failure and not a silence, deliberately.** An elaborator that quietly
+    -- did nothing here would leave a hole that looked elaborated.
+    --
+    -- Two things raise it now that every case is a rule (phase 49f):
+    -- @expand-implicits@, when the written arguments cannot be lined up against
+    -- the head's plicities, and the λ accessors, on a binder shape the surface
+    -- language admits and elaboration does not yet.
   | CannotRead SyntaxError
     -- ^ @parse@ could not lex or parse its text, or @resolve@ could not resolve
     -- the tree it was given in the context at the focus. One case for both,
@@ -165,6 +216,14 @@ data FailReason
     -- ^ an operand was not a 'Thena.Ops.VSurface'. Shaped like 'ExpectedText'
     -- and 'ExpectedTerm', and here for their reason: the value itself may not
     -- be named below @Core@
+  | ExpectedSurfaceShape String
+    -- ^ a surface reader was given a term of the wrong shape (MS4 phase 49):
+    -- @surface-name@ on something that is not a name, @surface-universe@ on
+    -- something that is not a written universe. Carries the shape it wanted.
+    --
+    -- **Each reader is paired with the test that makes it total in the clause
+    -- using it** — @when (surface-is-name s) then w = surface-name s@ — so this
+    -- is what a body reaching one any other way gets, rather than a guess.
   | NoClauseMatched GlobalName Int [Int]
     -- ^ @call ‹name› ‹args›@ found nothing to run: the name, the number of
     -- arguments it was given, and the arities of the rules that do bear that
@@ -344,6 +403,12 @@ data KernelError
     -- no binder for: @? g ≐ (λ a : A . …) : Nat@. Its own case rather than an
     -- 'Ill', because no 'TypeError' says this — @infer@ never meets the
     -- question, since only a /construction/ can abstract more than its type
+  | NotAUniverseAbove Var Ident Core
+    -- ^ a construction quantifies where the type it is claimed to build is not
+    -- a universe: @? g ≐ (∀ a : A . …) : Nat@ (MS4 phase 41f). The @∀@
+    -- counterpart of 'Overabstracted', and its own case for the same reason —
+    -- @infer@ never meets the question, because only a /construction/ can put
+    -- a binder above a type that has no room for one
   | Ill Position TypeError
     -- ^ it does not typecheck, and where. The 'TypeError' is the ordinary one
     -- "Thena.Core.Typing" produces — the kernel shares the core\'s typechecker
@@ -424,6 +489,29 @@ data ElimError
 data SyntaxError
   = LexFailed LexError
   | ParseFailed ParseError
+  | LayoutFailed LayoutError
+    -- ^ the offside rule could not lay the surface program out (MS4 phase 40)
+  | SurfaceParseFailed SurfaceParseError
+  | DeclarationsUnpaired PairingError
+  | BlockIllFormed Int String
+    -- ^ the instruction at this position in a **top-level** @do@ block gave this
+    -- op word the wrong operands (MS4 phase 45).
+    --
+    -- Structured for 'BlockOperands'\' reason — @Thena.Rules.RuleError@ is above
+    -- this module — and a second constructor rather than a shared one because
+    -- the two failures are in two different error languages: a top-level block
+    -- is refused while the file is being read, and one inside a term fails
+    -- while the machine is running.
+    -- ^ a surface signature with no equation after it, or the other way round
+    -- (MS4 phase 42). A syntax error rather than a scope one: the declarations
+    -- parsed, they just do not make a module.
+    -- ^ the **surface** grammar refused it (MS4 phase 39). Its own case beside
+    -- 'ParseFailed', because the two grammars are separate and an error from
+    -- one must not be reported as the other's.
+    --
+    -- There is deliberately no @SurfaceResolveFailed@: a surface term is never
+    -- resolved. Turning one into a 'Thena.Core.Term.Core' is elaboration, and
+    -- elaboration fails through the machine.
   | ResolveFailed ResolveError
   deriving (Eq, Show)
 

@@ -1,0 +1,8 @@
+"""A demonstration of what a choice point resumes into."""
+
+rule base demo where
+
+rule pick :- when focus-is-hole then say "  pick: FIRST alternative"
+rule pick :- when focus-is-hole then say "  pick: SECOND alternative"
+
+rule outer :- when focus-is-hole then call pick

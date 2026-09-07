@@ -29,7 +29,10 @@ import Thena.Ops (Rule (..))
 import Thena.Rules (RuleBase (..), RuleError (..))
 
 tests :: TestTree
-tests = testGroup "rule files (§8)" [headers, loading, ordering, refusals, commands]
+tests =
+  testGroup
+    "rule files (§8)"
+    [headers, loading, ordering, refusals, commands, argumentHeads]
 
 -- --------------------------------------------------------------------------
 -- The header
@@ -67,6 +70,16 @@ headers =
     , testCase "blank lines before and between are skipped" $
         baseHead ["", "\"\"\"d\"\"\"", "", "", "rule base b where"]
           @?= Just ("b", Just "d", 5)
+      -- **And so are comment lines** (MS4 phase 43). The header is read
+      -- textually, before the lexer, so it is the one place a comment has to be
+      -- recognised a second time — and a rule base you could not comment above
+      -- its own header would make the uniformity his ruling asked for a
+      -- fiction.
+    , testCase "comment lines before and between are skipped too" $
+        baseHead ["-- what this is", "\"\"\"d\"\"\"", "-- and why", "rule base b where"]
+          @?= Just ("b", Just "d", 4)
+    , testCase "and -- without a space is not one, so the header is not found" $
+        baseHead ["--nope", "rule base b where"] @?= Nothing
     , -- Consume nothing rather than swallow the file: it then fails on the
       -- header, which is the true complaint.
       testCase "an unterminated description is no header" $
@@ -208,7 +221,7 @@ ordering =
 -- What a load refuses
 -- --------------------------------------------------------------------------
 
--- | The base may not change under a half-built proof (the user, 2026-08-25).
+-- | The base may not change under a half-built development (the user, 2026-08-25).
 refusals :: TestTree
 refusals =
   testGroup
@@ -228,12 +241,12 @@ refusals =
 
     , -- A script and a rule base are two different operations.
       testCase "a script and a base in one load is refused" $
-        rejected (command newSession ":load prelude.thena extra.thena.rules")
+        rejected (command newSession ":load prelude.thena.script extra.thena.rules")
           @?= Just (MixedLoad ":load")
 
     , testCase "an ordinary script still loads" $
-        case snd (command newSession ":load prelude.thena") of
-          LoadRequested p -> p @?= "prelude.thena"
+        case snd (command newSession ":load prelude.thena.script") of
+          LoadRequested p -> p @?= "prelude.thena.script"
           other           -> assertFailure (show other)
 
     , -- "comma or space separated (or both)" — the user, 2026-08-25.
@@ -259,6 +272,46 @@ refusals =
 -- --------------------------------------------------------------------------
 -- Listing
 -- --------------------------------------------------------------------------
+
+-- --------------------------------------------------------------------------
+-- A head that asks about an argument, from the REPL (MS4 phase 47)
+-- --------------------------------------------------------------------------
+
+-- | **The phase working the way a user meets it.** Two clauses of one name,
+-- one of which asks what it was called with, loaded from a written file and
+-- called by typing the rule's name.
+--
+-- "Thena.CallTests" asks the same question of the engine; this asks it of the
+-- driver, which is where a bare REPL argument becomes a
+-- 'Thena.Ops.VSurface' in the first place.
+argumentHeads :: TestTree
+argumentHeads =
+  testGroup
+    "a loaded head may ask about its argument"
+    [ testCase "a name takes the clause that asks for one" $
+        said "pick foo" @?= Just "that is a name"
+    , testCase "and anything else falls through to the other" $
+        said "pick (Type\8320 -> Type\8320)" @?= Just "that is not a name"
+    ]
+  where
+    picking =
+      "rule base pick where\n\
+      \rule pick s :- when focus-is-hole (surface-is-name s) \
+      \then say \"that is a name\"\n\
+      \rule pick s :- when focus-is-hole then say \"that is not a name\"\n"
+
+    -- A claim to stand in, then the call. The last thing said is the answer.
+    said line =
+      let (s0, _) = load1 [("pick.thena.rules", picking)]
+          run s l = fst (command s l)
+          s1 = foldl run s0 [":theorem t : Type\8321"]
+       in case snd (command s1 line) of
+            Ran msgs _ -> lastOf msgs
+            other      -> error ("expected Ran, got " ++ show other)
+
+    lastOf ms = case reverse ms of
+      m : _ -> Just m
+      []    -> Nothing
 
 commands :: TestTree
 commands =

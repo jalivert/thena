@@ -1,27 +1,80 @@
 thena spine> :rules
 standard
   attack
-  try ‹t›
+  try-core ‹t›
   abandon
   intro
   intro
   solve
   regret
-  eliminate ‹t›
-  elab-var
-  unify-refine ‹t›
-  apply ‹f›
+  eliminate-core ‹t›
+  prove
+  prove
+  fill ‹t›
+  unify-refine-core ‹t›
+  apply-core ‹f›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  intro-binders ‹t›
+  intro-binders ‹t›
+  enter-binders ‹t›
+  enter-binders ‹t›
+  spine-arguments ‹h› ‹f› ‹t›
+  spine-arguments ‹h› ‹f› ‹t›
 thena spine> :matches
 attack
-try ‹t›
+try-core ‹t›
 abandon
-eliminate ‹t›
-unify-refine ‹t›
-apply ‹f›
+eliminate-core ‹t›
+prove
+fill ‹t›
+unify-refine-core ‹t›
+apply-core ‹f›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+enter-binders ‹t›
+enter-binders ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+spine-arguments ‹h› ‹f› ‹t›
 thena spine> attack
 thena spine> :matches
 solve
 regret
+prove
+intro-binders ‹t›
+intro-binders ‹t›
+enter-binders ‹t›
+enter-binders ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+spine-arguments ‹h› ‹f› ‹t›
 thena spine> cross type
 thena core> :matches
 no rule applies here
@@ -30,16 +83,45 @@ thena spine> :theorem id : ∀ (A : Type₀) -> A -> A
 proving id : ∀ (A : Type₀) -> A -> A
 thena spine> :matches
 attack
-try ‹t›
+try-core ‹t›
 abandon
-eliminate ‹t›
-unify-refine ‹t›
-apply ‹f›
+eliminate-core ‹t›
+prove
+fill ‹t›
+unify-refine-core ‹t›
+apply-core ‹f›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+enter-binders ‹t›
+enter-binders ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+spine-arguments ‹h› ‹f› ‹t›
 thena spine> attack
 thena spine> :matches
 intro
 solve
 regret
+prove
+intro-binders ‹t›
+intro-binders ‹t›
+enter-binders ‹t›
+enter-binders ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+spine-arguments ‹h› ‹f› ‹t›
 thena spine> intro
 thena spine> into
 thena spine> along
@@ -54,11 +136,33 @@ type
   A -> A
 thena spine> :matches
 attack
-try ‹t›
+try-core ‹t›
 abandon
-eliminate ‹t›
-unify-refine ‹t›
-apply ‹f›
+eliminate-core ‹t›
+prove
+fill ‹t›
+unify-refine-core ‹t›
+apply-core ‹f›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+enter-binders ‹t›
+enter-binders ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+spine-arguments ‹h› ‹f› ‹t›
 thena spine> :abandon
 abandoned id
 thena spine> :theorem c : ∀ (A : Type₀) -> Type₀
@@ -69,6 +173,13 @@ thena spine> :matches
 intro
 solve
 regret
+prove
+intro-binders ‹t›
+intro-binders ‹t›
+enter-binders ‹t›
+enter-binders ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+spine-arguments ‹h› ‹f› ‹t›
 thena spine> intro
 stuck: that hole's type is neither a ∀ nor a let
 thena spine> :abandon
@@ -80,6 +191,13 @@ thena spine> :matches
 intro
 solve
 regret
+prove
+intro-binders ‹t›
+intro-binders ‹t›
+enter-binders ‹t›
+enter-binders ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+spine-arguments ‹h› ‹f› ‹t›
 thena spine> intro
 thena spine> :show
 ▶ let ? l : let x = Type₀ : Type₁ in x ≐ (

@@ -5,6 +5,7 @@ module Thena.DriverTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
+import Thena.Core.Convert (convert)
 import Thena.Core.Level (levelOfNat)
 import Thena.Core.Term (Core (..), GlobalName (..), Ident (..))
 import Thena.Development.Component (Component (..))
@@ -21,7 +22,7 @@ import Thena.Driver
   , newSession
   )
 import Thena.Development.Cursor (rebuild)
-import Thena.Engine (Machine (..), Question (..), globals, proof, proofDevelopment)
+import Thena.Engine (Machine (..), Question (..), globals, development, flatten)
 import Thena.Errors (FailReason (..))
 import Thena.Global.Declare (DeclareError (..))
 import Thena.Global.Env (isDeclared)
@@ -29,13 +30,16 @@ import Thena.Ops (AnswerKind (..), partWords)
 
 -- | Run a script of command lines, answering nothing, and give back the last
 -- response and the session it left.
+-- | **Starting from a session with the standard base**, because elaboration is
+-- a rule now (MS4 phase 49) and `:infer ‹surface›` calls it. It was
+-- 'newSession' while elaboration was reachable without one.
 say :: [String] -> (Session, Response)
-say = foldl next (newSession, Blank)
+say = foldl next (withRules, Blank)
   where
     next (s, _) l = command s l
 
 devOf :: Session -> Partial
-devOf = proofDevelopment . proof . sessionMachine
+devOf = flatten . development . sessionMachine
 
 -- | What is typed to declare the running example. The @data@ word is the
 -- command; everything after it is the grammar's (§2.4).
@@ -66,16 +70,23 @@ unknown w = case snd (command withRules w) of
 -- because a mirror in the same module as the thing it mirrors checks nothing.
 everyColonCommand :: [String]
 everyColonCommand =
-  [ ":help", ":quit", ":core", ":dev", ":show", ":elim", ":where", ":matches"
+  [ ":help", ":quit", ":core", ":surface", ":dev", ":show", ":elim", ":where", ":matches"
   , ":choices", ":goal", ":whnf", ":infer", ":load", ":bases", ":rules"
   , ":revalidate", ":extract", ":theorem", ":suspend", ":resume", ":abandon"
   , ":proofs", ":undo", ":convert", ":step", ":run"
   ]
 
+-- | **Hand-written, and it had the same gaps as the list it checks** (MS4
+-- phase 43): @declare@ and @quantify@ were missing from both, and @prove@ was
+-- in both after phase 41 made it a rule rather than a command. A mirror that
+-- shares the blind spot of what it mirrors cannot catch anything — which is the
+-- argument for @ms3\/CLOSEOUT.md@ 26, not against having it.
 everyBareCommand :: [String]
 everyBareCommand =
-  [ "assume", "claim", "data", "along", "into", "back", "reduce", "unify"
-  , "prove", "retry", "goto", "cross", "certify", "qed"
+  [ "assume", "claim", "quantify", "data", "declare"
+  , "along", "into", "back", "reduce", "unify"
+  , "do", "yield"
+  , "retry", "goto", "cross", "certify", "qed"
   ] ++ partWords
 
 tests :: TestTree
@@ -210,6 +221,33 @@ tests =
               Under Assume {} (Under Claim {} (Trailing _)) -> pure ()
               other -> assertFailure ("wrong shape: " ++ show other)
         ]
+      -- **@:infer ‹surface›@ elaborates and then puts the development back**
+      -- (MS4 phase 43). @test\/golden\/surface-inference.golden@ shows the same
+      -- thing through @:show@; this asks the development itself, which is
+      -- different code from the code that maintains it (phase 5's lesson).
+    , testGroup
+        "inferring a surface term leaves nothing behind"
+        [ testCase "the development is exactly as it was" $
+            devOf (fst (say [natCommand, ":theorem t : Nat", ":infer succ zero"]))
+              @?= devOf (fst (say [natCommand, ":theorem t : Nat"]))
+        , testCase "and so it is when the term does not elaborate" $
+            devOf (fst (say [natCommand, ":theorem t : Nat", ":infer nosuchthing"]))
+              @?= devOf (fst (say [natCommand, ":theorem t : Nat"]))
+          -- **A bare argument is surface, corners are core**, and the two
+          -- answers agree **up to conversion, not syntactically**: the surface
+          -- one is read off the hole the elaboration solved, so it is whnf\'d to
+          -- see past the hole\'s own variable and comes back as the saturated
+          -- former where the core path stops at the wrapper. Both print @Nat@.
+        , testCase "a bare argument is surface, corners are core" $
+            case ( snd (say [natCommand, ":infer succ zero"])
+                 , snd (say [natCommand, ":infer ⌜ succ zero ⌝"])
+                 ) of
+              (InferredSurface _ a, Inferred _ b) ->
+                case convert (globals (sessionMachine (fst (say [natCommand])))) [] 0 a b of
+                  (Nothing, _, _)  -> pure ()
+                  (Just why, _, _) -> assertFailure (show why)
+              (x, y) -> assertFailure (show x ++ " / " ++ show y)
+        ]
     , testGroup
         "declarations"
         [ testCase "data says what it declared" $
@@ -218,7 +256,7 @@ tests =
             declaredIn (fst (say [natCommand])) "Nat" @?= True
         , testCase "so do the names it generated" $
             map (declaredIn (fst (say [natCommand]))) ["zero", "succ"] @?= [True, True]
-        , testCase "the development is untouched: globals are not ProofState (§7.4)" $
+        , testCase "the development is untouched: globals are not Development (§7.4)" $
             devOf (fst (say [natCommand])) @?= devOf newSession
         , testCase "data needs an argument" $
             snd (command withRules "data") @?= Rejected (MissingArgument "data")
@@ -244,7 +282,7 @@ tests =
               other       -> assertFailure ("expected ShownData, got " ++ show other)
         , testCase ":show ‹former› is the generated wrapper, type and body" $
             case snd (say [natCommand, ":show succ"]) of
-              ShownGlobal (GlobalName "succ") _ _ _ (Just _) -> pure ()
+              ShownGlobal (GlobalName "succ") _ _ _ _ (Just _) -> pure ()
               other -> assertFailure ("expected ShownGlobal, got " ++ show other)
         , testCase "a global is in scope for an ordinary term" $
             case snd (say [natCommand, ":core succ zero"]) of

@@ -9,11 +9,11 @@
 -- development compiles to @[Instr]@ and runs on the machine (§2.4). Only three
 -- kinds of command are the driver's own — the ones that produce a view
 -- (@:core@, @:dev@, @:show@, @:where@), the ones that set a session setting
--- (@:step on@), and the ones that create or replace a proof (@:goal@, which is
+-- (@:step on@), and the ones that create or replace a development (@:goal@, which is
 -- phase 13's @:theorem@ in miniature; §7.8 puts that on the session side).
 --
 -- **The moves are not among them.** Moving the focus changes the cursor, and
--- the cursor is 'Thena.Engine.ProofState' — exactly what backtracks — so a
+-- the cursor is 'Thena.Engine.Development' — exactly what backtracks — so a
 -- move is an op and is spelled as a bare word (§2.4, §4.3).
 module Thena.Driver
   ( Session (..)
@@ -22,7 +22,10 @@ module Thena.Driver
   , Stop (..)
   , SyntaxError (..)
   , CommandError (..)
-  , Proof (..)
+  , Attempt (..)
+  , Parked (..)
+  , Working (..)
+  , currentAttempt
   , Snapshot
   , ChoicePoint (..)
   , LoadError (..)
@@ -32,40 +35,47 @@ module Thena.Driver
   , answer
   , oneLine
   , loadSource
+  , loadProofSource
   , RuleFileError (..)
   , loadRuleBases
   , baseHead
   , parseCore
   , parseDevelopment
   , parseDeclaration
+  , parseSurfaceTerm
+  , parseSurfaceModule
+  , LoadKind (..)
+  , kindOf
   ) where
 
 import Data.Maybe (fromMaybe, isJust)
-import Thena.Core.Level (Level, LevelVar, Obligation)
+import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), substLevelsIn)
 import Data.Char (isSpace)
 import Data.List (dropWhileEnd, isSuffixOf, stripPrefix)
-import Thena.Development.Cursor (Cursor, Focus (..), Part (..), focus, overLevels)
+import Data.List.NonEmpty (NonEmpty (..))
+import qualified Data.List.NonEmpty as NE
+import Thena.Development.Cursor (expectedType, Cursor, Focus (..), Part (..), focus, overLevels)
 import Thena.Development.Partial (Partial (..), extract)
 import Thena.Engine
   ( ChoicePoint (..)
   , Exec (..)
   , Machine (..)
   , Message
-  , ProofState (..)
+  , Development (..)
   , Question
   , choicePoints
   , cursor
   , isAsking
-  , proofDevelopment
+  , flatten
   , load
-  , newProof
-  , proofContext
+  , newDevelopment
+  , focusContext
   , resumeAt
   , setGoal
-  , setGoalNamed
+  , newDevelopmentNamed
   , step
   )
 import qualified Thena.Engine as Engine
@@ -73,7 +83,7 @@ import Thena.Engine (whereImpure)
 import Thena.Errors
   ( ConversionFailure
   , FailReason (..)
-  , KernelError
+  , KernelError (..)
   , MoveError (..)
   , ResolveError (..)
   , SyntaxError (..)
@@ -121,17 +131,31 @@ import Thena.Rules
   , matches
   , next
   , resolveRule
+  , resolveBlock
+  , RuleError (..)
   , ruleBase
   , validate
   )
-import Thena.Syntax.Concrete (Raw, RawRule)
-import Thena.Syntax.Lexer (Located, Token, lexTokens)
+import Thena.Surface.Concrete
+  ( Plicity (..)
+  , Surface (..)
+  , SurfaceBinder (..)
+  , SurfaceConstructor (..)
+  , SurfaceData (..)
+  , SurfaceDecl (..)
+  , SurfaceModule (..)
+  , PairingError (..)
+  )
+import Thena.Surface.Layout (layout)
+import Thena.Surface.Zipper (rootedAt)
+import qualified Thena.Surface.Parser as Surface
+import Thena.Syntax.Concrete (Raw (..), RawRule)
+import Thena.Syntax.Lexer (Located (..), Token (..), lexTokens)
 import Thena.Syntax.Parser
   ( parseData
   , parseEquation
   , parseNameAndType
   , parseRules
-  , parseAtoms
   , parseTerm
   )
 import Thena.Syntax.Resolve (resolve, resolveData, resolvePartial)
@@ -148,42 +172,56 @@ import Thena.Syntax.Resolve (resolve, resolveData, resolvePartial)
 -- to the machine (§7.4).
 data Session = Session
   { sessionMachine   :: Machine
-  , sessionProof     :: Maybe Proof
-    -- ^ the proof being worked on, if any. @Nothing@ is the scratch
-    -- development @:goal@ and the phase 4–12 commands still use
-  , sessionSuspended :: [Proof]
+  , sessionWork      :: Working
+    -- ^ what the session is working on: an 'Attempt', or an unnamed scratch
+    -- development. **A named case rather than an absence** (phase 37): this
+    -- was @Maybe Proof@, and @Nothing@ read as \"there is no development\"
+    -- when it means \"the development belongs to nothing\". There is always a
+    -- development — it is 'Thena.Engine.development', and 'Machine' always has
+    -- one.
+  , sessionSuspended :: [Parked]
     -- ^ left and re-enterable, most recently suspended first (§2.4)
-  , sessionSaved     :: Snapshot
-    -- ^ the machine as it was when the current line began, kept in step after
-    -- every line. What a line that fails is rewound to (phase 25d).
-  , sessionUndo      :: [Snapshot]
-    -- ^ what @:undo@ walks back through, most recent first. Pushed only when a
-    -- line actually changed the snapshot, so @:undo@ never has to step over a
-    -- @:show@.
+  , sessionHistory   :: NonEmpty Snapshot
+    -- ^ where each line began, most recent first — and the head is **this**
+    -- line's, so it always exists.
     --
-    -- **On the session, not on the proof** (phase 34, his ruling of
+    -- **One field, not two** (phase 37). It was @sessionSaved :: Snapshot@ and
+    -- @sessionUndo :: [Snapshot]@, which are the head and the tail of exactly
+    -- this list: the head is what a failed line is rewound to (phase 25d), and
+    -- the tail is what @:undo@ walks. A line that changed nothing replaces the
+    -- head rather than pushing, which is why @:undo@ never has to step over a
+    -- @:show@. 'NonEmpty' is what makes \"there is always a state this line
+    -- began in\" a fact of the type rather than a discipline 'record' keeps.
+    --
+    -- **On the session, not on the attempt** (phase 34, his ruling of
     -- 2026-08-29). It was 'Proof''s until then, so @:undo@ and phase 25d's
     -- rewind both did nothing at the top level — where there is a development
     -- but no theorem. That is the wrong way round: a 'Snapshot' is
-    -- @(Exec, ProofState)@ and 'Machine' always has both, so the history of a
+    -- @(Exec, Development)@ and 'Machine' always has both, so the history of a
     -- thing that always exists was being kept in a record that sometimes does.
     -- Nothing about taking a line back needs a theorem.
     --
-    -- **Cleared at every proof boundary** — @:theorem@, @qed@, @:abandon@,
+    -- **Reset at every proof boundary** — @:theorem@, @qed@, @:abandon@,
     -- @:suspend@, @:resume@ — which is his choice of three. @qed@ writes to
     -- @globals@, and @globals@ is deliberately not in a 'Snapshot' (§7.7: the
     -- environment only ever grows), so an @:undo@ that crossed it would rewind
     -- the development and leave the theorem admitted.
-    --
-    -- **The larger question this came out of is `ms3/CLOSEOUT.md` item 16**,
-    -- and it is not answered here: this phase moves a field and changes nothing
-    -- about what 'Session', 'Proof', 'ProofState' and 'Machine' /are/.
   , sessionStepping  :: Bool
   }
   deriving (Eq, Show)
 
--- | The per-proof half of the machine: @exec@ and @proof@ together (§7.7's
--- own correction to §2.4).
+-- | What the session is working on.
+--
+-- **The scratch case is named, and that is the whole of why this type exists**
+-- (phase 37, his call). Nothing is stored here that was not stored before; a
+-- development that belongs to no theorem now says so.
+data Working
+  = Scratch              -- ^ a development nobody has named; @qed@ is refused
+  | Attempting Attempt   -- ^ a theorem is being proved
+  deriving (Eq, Show)
+
+-- | The per-attempt half of the machine: @exec@ and @development@ together
+-- (§7.7's own correction to §2.4).
 --
 -- **Not the whole 'Machine' — an amendment to §7.7, phase 13.** That section
 -- says suspending stores the machine untouched, and it cannot: @globals@ and
@@ -193,15 +231,27 @@ data Session = Session
 -- \"the global environment only ever grows\". Storing this pair instead is what
 -- makes that promise true rather than aspirational.
 --
--- It is the same pair @:undo@ snapshots, and that is not a coincidence: a
--- suspended proof /is/ an undo snapshot with a name and a statement attached.
-type Snapshot = (Exec, ProofState)
+-- It is the same pair 'sessionHistory' keeps, and that is not a coincidence: a
+-- 'Parked' attempt /is/ an undo snapshot with a name and a statement attached.
+type Snapshot = (Exec, Development, [(Development, Int)])
 
--- | A proof the session holds (§2.4, §3.3.1).
-data Proof = Proof
-  { proofName      :: GlobalName
-  , proofClaim     :: Core       -- ^ what @qed@ will certify against
-  , proofResidue   :: [Obligation]
+-- | An unfinished proof of a theorem (§2.4, §3.3.1).
+--
+-- **\"Attempt\" is the word for it** — his, 2026-09-01, renaming @Proof@:
+-- @Claim@ is taken twice already ('Thena.Development.Component.Claim' and this
+-- record's own statement), and @Conjecture@ names the statement rather than the
+-- work.
+--
+-- **It carries no snapshot.** It used to: the field was written when the proof
+-- was created, overwritten when it was suspended, and read when it was
+-- resumed — so the value written at creation was dead on every path, and it was
+-- written only because the field was total and something had to go there. The
+-- snapshot now lives on 'Parked', where it is the whole point, and nothing can
+-- write it anywhere else.
+data Attempt = Attempt
+  { attemptName    :: GlobalName
+  , attemptClaim   :: Core       -- ^ what @qed@ will certify against
+  , attemptResidue :: [Obligation]
     -- ^ what the kernel could neither discharge nor refute, from the last
     -- @certify@ (MS3 phase 33b).
     --
@@ -209,37 +259,75 @@ data Proof = Proof
     -- 'admitted'**, which are the two halves of one @qed@ line with the
     -- machine's own loop between them — the kernel runs inside the loop and
     -- admitting happens after it returns, so the residue has to be put down
-    -- somewhere in between. It is per-proof state and this is the per-proof
-    -- record.
-  , proofSaved     :: Snapshot
-    -- ^ where this proof is parked: written when it is created and when it is
-    -- suspended, read when it is resumed. That is the whole of its life.
-    --
-    -- **It used to be rewritten after every line too**, because it doubled as
-    -- \"the state before this line\" for @:undo@ and for phase 25d's rewind.
-    -- Phase 34 gave the session its own 'sessionSaved' for that, so the two
-    -- jobs are no longer one field: suspending is still a move and not a copy,
-    -- and 'sessionSuspended' and the current proof are still the same kind of
-    -- thing.
+    -- somewhere in between. It is a mailbox rather than a property, and every
+    -- alternative to it is worse. Reading it outside that instant is how
+    -- phase 33 shipped a bug.
   }
   deriving (Eq, Show)
 
+-- | An attempt that has been put down, and where it was put down.
+--
+-- **The snapshot is here and nowhere else** (phase 37). @:suspend@ is the only
+-- thing that builds one of these, @:resume@ the only thing that takes one
+-- apart, so an attempt cannot carry a stale parking position while it is the
+-- one being worked on.
+--
+-- **The asymmetry with 'Working' is deliberate, not an oversight**: what is
+-- live is an attempt beside a 'Machine'; what is parked is an attempt beside a
+-- 'Snapshot'. A parked one may not carry a machine, for the reason 'Snapshot'
+-- gives above.
+data Parked = Parked
+  { parkedAttempt :: Attempt
+  , parkedAt      :: Snapshot
+  }
+  deriving (Eq, Show)
+
+-- | Put the machine at rest: no tape, no environment and **no frames**.
+--
+-- **A proof boundary discards choice points — HIS RULING, 2026-09-03**
+-- (@ms4/CLOSEOUT.md@ 29). §7.7 keeps a @Choice@ frame after success on purpose,
+-- so that an alternative nobody needed is still there to @retry@ into; what it
+-- did not intend is that the frame outlive the *proof*. A later, unrelated
+-- command that failed would unwind into it and **restore the development of a
+-- proof that was already finished** — silently replacing the one being worked
+-- on, which is data loss rather than a strange thing a user did.
+--
+-- **The four boundaries are `:theorem`, @qed@, `:abandon` and `:suspend`**, and
+-- they go through this one function so they cannot come to disagree —
+-- `:abandon` and `:suspend` already emptied the exec and the other two did not,
+-- which is exactly how the defect got in.
+--
+-- **`:suspend` is why this does not break proving a side lemma.** It snapshots
+-- /before/ clearing, and a 'Snapshot' is @(Exec, Development, [Development])@ —
+-- so a parked attempt keeps its own frames and `:resume` hands them back. Going
+-- away to prove a lemma and coming back is unaffected; only what a *finished*
+-- proof left behind is dropped.
+atRest :: Machine -> Machine
+atRest m = m { exec = Exec [] [] [] }
+
+-- | The attempt being worked on, if there is one.
+currentAttempt :: Session -> Maybe Attempt
+currentAttempt s = case sessionWork s of
+  Scratch        -> Nothing
+  Attempting att -> Just att
+
 newSession :: Session
 newSession = Session
-  { sessionMachine   = Machine (Exec [] [] []) ps emptyGlobals [] n
-  , sessionProof     = Nothing
+  { sessionMachine   = Machine (Exec [] [] []) ps [] emptyGlobals [] [] n
+  , sessionWork      = Scratch
   , sessionSuspended = []
-  , sessionSaved     = (Exec [] [] [], ps)
-  , sessionUndo      = []
+  , sessionHistory   = (Exec [] [] [], ps, []) :| []
   , sessionStepping  = False
   }
   where
-    (ps, n) = newProof 0
+    (ps, n) = newDevelopment 0
 
 -- | What the driver hands back for a frontend to render. Data, never a line of
 -- text: rendering is "Thena.Repl"'s (§2.5).
 data Response
   = Blank                     -- ^ an empty line; nothing to do
+  | RenderedSurface Surface
+    -- ^ @:surface ‹term›@ — the surface term as the parser read it (phase 39)
   | Rendered Core             -- ^ @:core@ (§2.6)
   | RenderedDev Partial       -- ^ @:dev@ (§2.7)
   | Shown Cursor              -- ^ @:show@, and the new state after @:goal@
@@ -250,7 +338,7 @@ data Response
     -- rule at the universe asked for. Not a 'ShownGlobal': the eliminator is
     -- no global (§3.7, reversed 2026-08-22), so there is no name to print on
     -- the left and no body to print underneath
-  | ShownGlobal GlobalName [LevelVar] [Obligation] Core (Maybe Core)
+  | ShownGlobal GlobalName [LevelVar] [Obligation] [Plicity] Core (Maybe Core)
     -- ^ @:show ‹name›@ on anything else: its name, its type, and its body if
     -- it has one. A former has both — the constant is the type of its
     -- saturated 'Thena.Core.Term.Canonical' and the definition is the generated
@@ -286,13 +374,34 @@ data Response
   | Resumed GlobalName        -- ^ @:resume@
   | Abandoned GlobalName      -- ^ @:abandon@
   | Undone                    -- ^ @:undo@ — one line taken back
-  | Proofs (Maybe Proof) [Proof]
+  | Proofs (Maybe Attempt) [Parked]
     -- ^ @:proofs@ — the current one, if any, and the suspended ones
     -- ^ @:extract@ — the closed term the development stands for (§7.5). Its
     -- own look, because @certify@ is an op and an op's answer comes back as a
     -- 'Message', which the driver may not build out of a term: rendering is
     -- "Thena.Repl"'s (§2.5)
+  | InferredSurface Surface Core
+    -- ^ @:infer ‹surface›@ (MS4 phase 43): the term as written and the type
+    -- elaborating it produced. The **surface** term, not the core one it built,
+    -- because the development it built was rewound and printing a term the
+    -- session no longer holds would invite a @goto@ into nothing
   | LoadRequested FilePath
+  | ProofRequested FilePath
+    -- ^ @:load@ on a @.thena@ path (MS4 phase 43): a **proof module**, which is
+    -- surface declarations and not command lines. Like 'LoadRequested' it only
+    -- names the file; "Thena.Repl" reads it and hands the contents back to
+    -- 'loadProofSource'
+  | ProofLoaded String [String] Int
+    -- ^ a proof module went in: its name, and what it declared, in order. **The
+    -- op-level messages are discarded** — his call, 2026-09-02, the same bargain
+    -- @loadPrelude@ already makes: elaborating one declaration prints a dozen
+    -- @solved: ?ℓ229@ lines, and a file of them buries its own output. Typing
+    -- the declaration at the prompt still prints everything.
+    --
+    -- **The trailing count is the top-level blocks** (MS4 phase 45). A block
+    -- declares nothing this side of running it, so it cannot be named in the
+    -- list — but it did run, and a summary that left it out entirely would be
+    -- saying less than happened
   | RulesRequested [FilePath]
     -- ^ @:load@ on one or more @.thena.rules@ paths (phase 22). Like
     -- 'LoadRequested' it only names them — reading is "Thena.Repl"'s (§12
@@ -327,6 +436,14 @@ data Response
 data Stop
   = Completed            -- ^ the program ran out of instructions
   | Waiting Question     -- ^ answer it with 'answer'
+  | Yielded Message
+    -- ^ a rule handed control to the REPL and is standing still (MS4 phase
+    -- 45b). The message is why it stopped. Type anything; @yield@ hands control
+    -- back.
+    --
+    -- **Not a 'Waiting'**, and the difference is the whole of the feature: a
+    -- question wants a value and refuses everything else, while a yield wants
+    -- nothing and takes every command the REPL has.
   | Halted FailReason
     -- ^ the machine ran and failed.
     --
@@ -349,6 +466,10 @@ data CommandError
   | MissingArgument String
   | UnexpectedArgument String
   | NotAsking
+  | NotYielding
+    -- ^ @yield@ typed when no rule has handed control over (MS4 phase 45b).
+    -- 'NotAsking''s twin, and it exists for the same reason: a word that did
+    -- nothing would be worse than one that says so.
   | NoSuchGlobal String
   | NotProving
     -- ^ @qed@, @:suspend@, @:abandon@ or @:undo@ outside a proof. §2.4: outside
@@ -410,18 +531,87 @@ parseDevelopment = parseWith resolvePartial
 -- means inside a rule body — @f a b@ is two arguments in both. The counter is
 -- threaded through, because resolving mints display variables.
 --
+-- | Why an argument run did not become terms.
+--
+-- Two outcomes rather than one 'SyntaxError', because they are answered
+-- differently: a malformed argument is the user's typo and reports as
+-- 'Failed', while an argument that is merely not in corners is a 'Rejected'
+-- with its own sentence (phase 38).
+newtype ArgumentError = Syntax SyntaxError
+
+-- | The arguments of a bare-word rule call — **each one a surface term, or a
+-- core term in corners** (MS4 phase 41).
+--
+-- **This is where phase 38's error message comes true.** That phase refused a
+-- bare argument and said the corners were for a core term, reserving the bare
+-- spelling for the surface one; here the bare spelling starts meaning it. So
+-- @try-core ⌜ x ⌝@ hands a rule a 'Thena.Ops.VTerm' and @elaborate x@ hands it
+-- a 'Thena.Ops.VSurface', and which one a rule wanted is settled where every
+-- other operand kind is — at run time, by the op (§7.2, and MS2 closeout 4b's
+-- type system when it arrives).
+--
+-- The run is split by bracket depth first, because the two spellings need two
+-- different grammars and one token stream cannot be handed to both.
 parseArguments
-  :: GlobalEnv -> Context -> Int -> String -> Either SyntaxError ([Core], Int)
+  :: GlobalEnv -> Context -> Int -> String -> Either ArgumentError ([Value], Int)
 parseArguments env ctx n src = do
-  ts   <- tokensOf src
-  raws <- mapLeft ParseFailed (parseAtoms ts)
-  go n raws
+  ts <- mapLeft Syntax (tokensOf src)
+  go n (groups ts)
   where
     go k []       = Right ([], k)
-    go k (r : rs) = do
-      (t, k1)  <- mapLeft ResolveFailed (resolve env ctx k r)
-      (ts', k2) <- go k1 rs
-      Right (t : ts', k2)
+    go k (g : gs) = do
+      (v, k1)  <- one k g
+      (vs, k2) <- go k1 gs
+      Right (v : vs, k2)
+
+    -- In corners: a development-calculus term, resolved here as it always was.
+    one k (Cornered inner) = do
+      raw     <- mapLeft (Syntax . ParseFailed) (parseTerm inner)
+      (t, k1) <- mapLeft (Syntax . ResolveFailed) (resolve env ctx k raw)
+      Right (VTerm (Trailing t), k1)
+    -- Bare: a surface term. Laid out, because a surface term always is.
+    one k (Bare g) = do
+      g' <- mapLeft (Syntax . LayoutFailed) (layout g)
+      t  <- mapLeft (Syntax . SurfaceParseFailed) (Surface.parseSurface g')
+      Right (VSurface (rootedAt t), k)
+
+-- | One written argument, before it is parsed.
+data Group
+  = Cornered [Located Token]  -- ^ @⌜ … ⌝@, corners stripped
+  | Bare     [Located Token]
+
+-- | Split an argument run into its arguments, by bracket depth.
+--
+-- **Why the driver splits and neither grammar does**: the two spellings need
+-- two different grammars, and one token stream cannot be handed to both. An
+-- argument is an atom (phase 23b), so its extent is a single token or a
+-- balanced group — which is decidable here without either parser.
+groups :: [Located Token] -> [Group]
+groups [] = []
+groups (t@(Located _ k) : ts) = case k of
+  TOpenQuote -> let (inner, rest) = corners 1 [] ts in Cornered inner : groups rest
+  TLParen    -> let (inner, rest) = bracketed 1 [t] ts in Bare inner : groups rest
+  TLBrace    -> let (inner, rest) = bracketed 1 [t] ts in Bare inner : groups rest
+  -- @?foo@ is two tokens and one argument (phase 39).
+  TQuery     -> case ts of
+    u : us -> Bare [t, u] : groups us
+    []     -> [Bare [t]]
+  _          -> Bare [t] : groups ts
+  where
+    corners _ acc [] = (reverse acc, [])
+    corners d acc (u@(Located _ w) : us) = case w of
+      TCloseQuote | d == (1 :: Int) -> (reverse acc, us)
+                  | otherwise       -> corners (d - 1) (u : acc) us
+      TOpenQuote                    -> corners (d + 1) (u : acc) us
+      _                             -> corners d (u : acc) us
+
+    bracketed _ acc [] = (reverse acc, [])
+    bracketed d acc (u@(Located _ w) : us)
+      | w == TLParen || w == TLBrace = bracketed (d + 1) (u : acc) us
+      | w == TRParen || w == TRBrace =
+          if d == (1 :: Int) then (reverse (u : acc), us)
+                             else bracketed (d - 1) (u : acc) us
+      | otherwise                    = bracketed d (u : acc) us
 
 parseWith
   :: (GlobalEnv -> Context -> Int -> Raw -> Either ResolveError (a, Int))
@@ -476,11 +666,245 @@ parseStatement env n src = do
 tokensOf :: String -> Either SyntaxError [Located Token]
 tokensOf = mapLeft LexFailed . lexTokens
 
--- | Lex and parse, and stop there (phase 17b). What @:matches ‹hint›@ needs:
--- a hint is a tree, not a term — resolving it is the rule body's job, and a
--- hint that does not resolve is still a hint the engine can be asked about.
-parseSurface :: String -> Either SyntaxError Raw
-parseSurface src = tokensOf src >>= mapLeft ParseFailed . parseTerm
+-- | Datatypes and theorems, in the order they were written (MS4 phase 42b).
+--
+-- **The split happens here rather than in 'paired'**, which is about theorems:
+-- a signature and its equation are adjacent and a datatype is not part of that
+-- pairing at all.
+parseSurfaceItems
+  :: String -> Either SyntaxError [Item]
+parseSurfaceItems src = do
+  ts  <- tokensOf src
+  ts' <- mapLeft LayoutFailed (layout ts)
+  ds  <- mapLeft SurfaceParseFailed (Surface.parseSurfaceDecls ts')
+  regroup (reverse ds)
+
+-- | A whole **proof module** (MS4 phase 43): its name, and its items.
+--
+-- The same three passes 'parseSurfaceItems' makes, through the module start
+-- symbol instead — so a module's declaration block and a @declare@ line are the
+-- same grammar, and layout does the same work in both.
+parseSurfaceModule
+  :: String
+  -> Either SyntaxError (String, [Item])
+parseSurfaceModule src = do
+  ts  <- tokensOf src
+  ts' <- mapLeft LayoutFailed (layout ts)
+  m   <- mapLeft SurfaceParseFailed (Surface.parseSurfaceModule ts')
+  is  <- regroup (surfaceModuleDecls m)
+  Right (surfaceModuleName m, is)
+
+-- | Why a top-level block did not resolve, in terms 'SyntaxError' can hold.
+--
+-- 'Thena.Engine.blockFailureOf'\'s twin, and the same reasoning: resolution can
+-- only produce 'Thena.Rules.BadOperands', because a word that names no op is a
+-- rule call and not an error.
+blockProblem :: [RuleError] -> SyntaxError
+blockProblem errs = case errs of
+  BadOperands _ i w : _ -> BlockIllFormed i w
+  _                     -> BlockIllFormed 0 "do"
+
+-- | One thing a module or a @declare@ line asks for.
+--
+-- **A sum rather than the @Either@ it was** (MS4 phase 45): a top-level @do@
+-- block is a third kind of item, and an @Either@ with a triple on one side had
+-- already stopped saying what it meant.
+data Item
+  = ItemData SurfaceData
+  | ItemTheorem String Surface Surface   -- ^ a signature and the equation after it
+  | ItemBlock [Instr]
+    -- ^ a top-level @do@ block (phase 45), **already resolved**: 'regroup'
+    -- resolves it while the file is being read, so a block with bad operands is
+    -- a syntax error at the right place rather than a failure at run time.
+  deriving (Eq, Show)
+
+-- | Pair each signature with the equation after it, and pass datatypes through.
+--
+-- Shared by the two above since phase 43. 'Thena.Surface.Concrete.paired' is
+-- the same idea for theorems alone; this one also admits a @data@ item, which
+-- is why it is here and not there.
+regroup
+  :: [SurfaceDecl]
+  -> Either SyntaxError [Item]
+regroup = go
+  where
+    go [] = Right []
+    go (SurfaceDatatype d : rest) = (ItemData d :) <$> go rest
+    go (SurfaceBlock b : rest) = case resolveBlock (GlobalName "do") b of
+      Right is  -> (ItemBlock is :) <$> go rest
+      Left errs -> Left (blockProblem errs)
+    go (SurfaceSignature x ty : SurfaceEquation y body : rest)
+      | x == y = (ItemTheorem x ty body :) <$> go rest
+    go (SurfaceSignature x _ : _) =
+      Left (DeclarationsUnpaired (SignatureWithNoEquation x))
+    go (SurfaceEquation x _ : _) =
+      Left (DeclarationsUnpaired (EquationWithNoSignature x))
+
+-- --------------------------------------------------------------------------
+-- Surface declarations, as a program (MS4 phase 42; lifted here at 43)
+-- --------------------------------------------------------------------------
+
+-- | Compile a run of surface items into the instructions that admit them.
+--
+-- **Lifted out of @dispatch@ at phase 43** so that a proof module and a typed
+-- @declare@ line share it. It closed over nothing but the name counter, which
+-- is why lifting it is a move rather than a rewrite: what an item compiles to
+-- does not depend on how the driver was asked.
+--
+-- **A whole module is therefore one program**, which is what phase 42 decided
+-- for a single declaration and for the same reason — @:step@ can watch it, and
+-- phase 49 can move it into a rule body without the driver having sequenced
+-- anything in Haskell.
+surfaceProgram
+  :: Int -> [Item] -> ([Instr], Int)
+surfaceProgram n0 items = foldl item ([], n0) items
+  where
+  item acc (ItemData d)            = datatype acc d
+  item acc (ItemTheorem x ty body) = declaring acc (x, ty, body)
+  -- **A top-level block is spliced, and that is the whole of it** — his,
+  -- 2026-09-03. A module is already one instruction program, so a block of
+  -- instructions at the top of one is @++@: no frame, no op, and nothing that
+  -- could tell it from the instructions the elaborator emitted around it.
+  --
+  -- **Not 'Thena.Ops.Block'**, which is the /expression/ form: that one needs a
+  -- frame because it has to return to the term it stands in. A top-level block
+  -- has nothing to return to, so it needs no frame and gets none.
+  item (acc, n) (ItemBlock is) = (acc ++ is, n)
+
+  -- **Brady's data rule** (@IDRIS.md@ §4.6): the datatype's own type is
+  -- elaborated first /"so that the type is in scope when elaborating the
+  -- constructor types"/, then each constructor the same way.
+  --
+  -- **Being in scope is an assumption, and then a β-step.** A constructor's
+  -- type mentions the datatype, which is not declared yet, so it is
+  -- elaborated under @assume D : ‹its type›@ — and popping a development
+  -- extracts, so what comes back is @λ D : ty . ‹the type›@. Applying that to
+  -- @D@ as a global and reducing puts the real reference in. Both ops
+  -- already existed; neither needed a mode.
+  datatype (acc, n) d =
+    let nm      = surfaceDataName d
+        dn      = GlobalName nm
+        ps      = surfaceDataParameters d
+        cs      = surfaceDataConstructors d
+        (l, n1) = freshLevelMeta n
+        full    = withParams ps (surfaceDataType d)
+        tyName  = "dty" ++ show n
+        conName k = "con" ++ show n ++ "_" ++ show (k :: Int)
+        selfName  = Lit (VTerm (Trailing (Global dn [])))
+     in ( acc ++
+            [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LVar l))))))
+            , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt full))])
+            , Bind (tyName ++ "raw") PopDevelopment
+            , Bind tyName (Expose (Ref (tyName ++ "raw")))
+            ]
+            ++ concat
+                 [ [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LVar l))))))
+                   , Do (Assume (Lit (VText nm)) (Ref tyName))
+                   , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt (withParams ps cty)))])
+                   , Bind (conName k ++ "raw") PopDevelopment
+                   , Bind (conName k ++ "app")
+                       (ApplyTo (Ref (conName k ++ "raw")) selfName)
+                   , Bind (conName k) (Expose (Ref (conName k ++ "app")))
+                   ]
+                 | (k, SurfaceConstructor _ cty) <- zip [0 ..] cs
+                 ]
+            ++ [ Do (MakeData dn (length ps)
+                       [ GlobalName cn | SurfaceConstructor cn _ <- cs ]
+                       (Ref tyName : [ Ref (conName k) | k <- [0 .. length cs - 1] ]))
+               ]
+        , n1 )
+
+  -- | The plicity of each argument position a signature writes.
+  --
+  -- Only a leading run of @∀@ groups is read: once the type stops being a
+  -- quantifier there are no more named positions to speak of, and an arrow
+  -- contributes an 'Explicit' one.
+  plicitiesIn t = case t of
+    SurfacePi bs body ->
+      [ p | SurfaceBinder p _ _ <- NE.toList bs ] ++ plicitiesIn body
+    SurfaceArrow _ body -> Explicit : plicitiesIn body
+    _ -> []
+
+  -- A constructor's type is written in the scope of the parameters, so they
+  -- are put back in front of it and peeled off again by
+  -- 'Thena.Global.Declare.buildInductive'.
+  withParams ps t =
+    foldr (\(x, ty) rest -> SurfacePi (SurfaceBinder Explicit x (Just ty) NE.:| []) rest) t ps
+
+  declaring (acc, n) (x, ty, body) =
+    let (l, n1) = freshLevelMeta n
+     in ( acc ++
+            [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LVar l))))))
+            , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt ty))])
+              -- **Reduced before it is used or stored.** What @extract@ hands
+              -- back carries @fill@'s @=@-bindings, and a @let@-headed type
+              -- is not merely ugly: @intro@ reads a @Let@ as written, so the
+              -- body's λ would open a definition instead. See
+              -- 'Thena.Ops.Whnf'.
+            , Bind ("raw" ++ show n) PopDevelopment
+            , Bind ("ty" ++ show n) (Expose (Ref ("raw" ++ show n)))
+            , Do (PushDevelopment (Ref ("ty" ++ show n)))
+            , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt body))])
+            , Bind ("tm" ++ show n) PopDevelopment
+              -- **The plicities come from the signature as written** (MS4
+              -- phase 44b): a leading run of @∀@ binder groups, each in
+              -- braces or not. That is the whole of the surface signature
+              -- environment — where a binder was written, not what the type
+              -- turned out to be.
+            , Do (DefineGlobal (plicitiesIn ty) (Lit (VText x))
+                    (Ref ("ty" ++ show n)) (Ref ("tm" ++ show n)))
+            ]
+        , n1 )
+
+-- | Elaborate a whole proof module (MS4 phase 43).
+--
+-- **One program for the whole file**, built by 'surfaceProgram' — the same
+-- instructions a @declare@ line compiles to, concatenated. So a module is not a
+-- new mechanism, and @:step@ can walk it declaration by declaration.
+--
+-- **Quiet when it works, loud when it does not** — his call, 2026-09-02. On
+-- success the op-level messages are dropped and the driver reports the module
+-- and what it declared, in order; on failure everything the run printed is kept,
+-- because that is where the reason is. Elaborating one declaration emits a dozen
+-- @solved: ?ℓ229@ lines and a file of them buries its own output, which is the
+-- same bargain @loadPrelude@ has always made with a script.
+--
+-- **Holes left over are not an error.** A module that does not finish leaves a
+-- half-built development in the session, which is what the REPL is for.
+loadProofSource :: Session -> String -> (Session, Response)
+loadProofSource s src = case parseSurfaceModule src of
+  Left e -> (s, Failed e)
+  Right (nm, items) ->
+    let machine  = sessionMachine s
+        (is, n1) = surfaceProgram (names machine) items
+     in case progress False s { sessionMachine = load is machine { names = n1 } } [] of
+          (s', Ran _ Completed) ->
+            ( s'
+            , ProofLoaded nm [ n | Just n <- map declaredName items ]
+                             (length [ () | ItemBlock _ <- items ])
+            )
+          (s', other)           -> (s', other)
+
+-- | What an item adds to the environment, for the summary line.
+declaredName :: Item -> Maybe String
+declaredName i = case i of
+  ItemData d        -> Just (surfaceDataName d)
+  ItemTheorem x _ _ -> Just x
+  -- **A block declares nothing that can be read off the item.** What its
+  -- instructions install is known only by running them, so it is counted rather
+  -- than named — see 'ProofLoaded'.
+  ItemBlock _       -> Nothing
+
+-- | Lex and parse a **surface** term (phase 39). No context, because nothing is
+-- resolved: what a name denotes is elaboration's answer, and elaboration is
+-- phase 41.
+parseSurfaceTerm :: String -> Either SyntaxError Surface
+parseSurfaceTerm src = do
+  ts  <- tokensOf src
+  ts' <- mapLeft LayoutFailed (layout ts)
+  case Surface.parseSurface ts' of
+    Left e  -> Left (SurfaceParseFailed e)
+    Right t -> Right t
 
 -- --------------------------------------------------------------------------
 -- Commands
@@ -492,6 +916,11 @@ parseSurface src = tokensOf src >>= mapLeft ParseFailed . parseTerm
 command :: Session -> String -> (Session, Response)
 command s line = case break (== ' ') (dropWhile (== ' ') line) of
   ("", _)      -> (s, Blank)
+  -- **A line that is only a comment is a blank line** (MS4 phase 43). The lexer
+  -- drops @-- @ wherever it appears, but a command word is split off before
+  -- anything is lexed, so a comment standing alone would otherwise be
+  -- dispatched as a rule named @--@.
+  _ | commentLine line -> (s, Blank)
   (name, rest) -> dispatch s name (dropWhile (== ' ') rest)
 
 dispatch :: Session -> String -> String -> (Session, Response)
@@ -502,18 +931,28 @@ dispatch s name arg = case name of
   ":help"  -> noArgument (s, Helped commandSummary)
   ":quit"  -> noArgument (s, Quit)
   ":core"  -> withArgument (view s parseCore Rendered arg)
+  -- | @:surface ‹term›@ — parse a **surface** term and print it back (phase
+  -- 39). The analogue of @:core@, and for the same reason: it is the only way
+  -- to see what the parser made of what you wrote, and until phase 41 it is the
+  -- only thing that can be done with a surface term at all.
+  --
+  -- It takes no context and changes no state — nothing is resolved, because
+  -- resolving a surface term is elaborating it.
+  ":surface" -> withArgument $ case parseSurfaceTerm arg of
+    Left e  -> (s, Failed e)
+    Right t -> (s, RenderedSurface t)
   ":dev"   -> withArgument (view s parseDevelopment RenderedDev arg)
   -- The only command that means two things, and they do not overlap: with no
   -- argument it is the development, with one it is a global (§9, phase 6).
   ":show"  -> case arg of
-    "" -> (s, Shown (cursor (proof machine)))
+    "" -> (s, Shown (cursor (development machine)))
     _  -> showGlobal arg
   -- The eliminator is not a global, so it is not reachable through @:show@
   -- (§3.7, reversed by the user 2026-08-22). Its own word, and its own second
   -- argument: the level comes from the motive at every use site, so there is
   -- no one rule to print and the command has to be told which one is wanted.
   ":elim"  -> withArgument (eliminator arg)
-  ":where" -> noArgument (s, Where (cursor (proof machine)))
+  ":where" -> noArgument (s, Where (cursor (development machine)))
   -- Autocomplete, and it is a read-only query on the iterator (§7.6): the
   -- driver asks for the matches at the current state and shows them. Picking
   -- one and running its body is phase 16's.
@@ -522,11 +961,10 @@ dispatch s name arg = case name of
   -- is. A hint partitions the base, so the two forms answer two questions:
   -- @:matches@ is what could be done here, @:matches ‹hint›@ is what could
   -- elaborate that.
-  ":matches" -> case arg of
-    "" -> (s, Matched (matching Nothing))
-    _  -> case parseSurface arg of
-      Left e    -> (s, Failed e)
-      Right raw -> (s, Matched (matching (Just raw)))
+  -- **No argument** (MS4 phase 41). @:matches ‹hint›@ asked which rules could
+  -- elaborate a given term, and with the hint retired that is not a question:
+  -- @elaborate ‹t›@ appears in this listing the way @try-core ‹t›@ does.
+  ":matches" -> noArgument (s, Matched matching)
   -- The live choice points, nearest first (§7.7). A look, so a colon.
   ":choices" -> noArgument (s, Choices (choicePoints machine))
   ":goal"  -> goal
@@ -535,33 +973,46 @@ dispatch s name arg = case name of
   -- @:show@, and for the same reason: two different questions share a word
   -- because neither can be mistaken for the other.
   ":whnf"  -> case arg of
-    "" -> case focus (cursor (proof machine)) of
+    "" -> case focus (cursor (development machine)) of
       OnTerm _ _ t -> (s, Rendered (whnf (globals machine) ctx t))
       _            -> (s, Rejected (NotThere NotInCore))
     _  -> view s parseCore (Rendered . whnf (globals machine) ctx) arg
   -- The same no-argument/with-argument split as @:whnf@ and @:show@: with no
   -- argument it is the core focus, with one it is a term the user writes.
+  -- **A bare argument is a surface term; corners are a core one** (MS4 phase
+  -- 43), which is the rule everywhere else an argument is written. With no
+  -- argument it is still the core focus.
   ":infer" -> case arg of
-    "" -> case focus (cursor (proof machine)) of
+    "" -> case focus (cursor (development machine)) of
       OnTerm _ _ t -> inferred t (names machine)
       _            -> (s, Rejected (NotThere NotInCore))
-    _  -> case parseCore (globals machine) ctx (names machine) arg of
-      Left e        -> (s, Failed e)
-      Right (t, n1) -> inferred t n1
+    _ | Just inner <- cornered arg ->
+          case parseCore (globals machine) ctx (names machine) inner of
+            Left e        -> (s, Failed e)
+            Right (t, n1) -> inferred t n1
+      | otherwise -> case parseSurfaceTerm arg of
+          Left e  -> (s, Failed e)
+          Right t -> inferSurface t
   -- Reading the file is the caller's; this only names it (§12 invariant 4).
   -- **Two different loads behind one word, told apart by extension** — the
   -- user, 2026-08-25. A @.thena.rules@ path is a rule base and there may be
   -- several, leftmost searched first; anything else is one script of command
   -- lines, exactly as phase 11 left it. Reading is the caller's; this only
   -- names them (§12 invariant 4).
-  ":load"  -> withArgument $ case pathsOf arg of
-    ps@(_ : _)
-      | all isRulePath ps -> case proofUnderway of
-          Just why -> (s, Rejected why)
-          Nothing  -> (s, RulesRequested ps)
-      | any isRulePath ps -> (s, Rejected (MixedLoad name))
-    [one] -> (s, LoadRequested one)
-    _     -> (s, Rejected (UnexpectedArgument name))
+  -- **Three kinds, one word** (MS4 phase 43). @:load rules …@, @:load proof …@
+  -- and @:load script …@ say which; a bare @:load ‹path›@ reads the extension
+  -- and answers the same question. His ruling, 2026-09-02 — see 'kindOf'.
+  --
+  -- A keyword is not a path, so the two forms cannot be confused: the first
+  -- word is looked up, and only if it names no kind is it taken as a path.
+  ":load"  -> withArgument $ case words arg of
+    ("rules"  : rest) -> loadKind LoadRules  (pathsOf (unwords rest))
+    ("proof"  : rest) -> loadKind LoadProof  (pathsOf (unwords rest))
+    ("script" : rest) -> loadKind LoadScript (pathsOf (unwords rest))
+    _ -> case pathsOf arg of
+      ps@(p : _) | all ((== kindOf p) . kindOf) ps -> loadKind (kindOf p) ps
+      (_ : _)  -> (s, Rejected (MixedLoad name))
+      []       -> (s, Rejected (MissingArgument name))
   -- The loaded bases, in search order. A look, so a colon.
   ":bases" -> noArgument (s, BasesListed (rules machine))
   ":rules" -> noArgument (s, RulesListed (rules machine))
@@ -570,13 +1021,13 @@ dispatch s name arg = case name of
   ":revalidate" -> noArgument $
     ( s
     , Revalidated . either Just (const Nothing) . fst $
-        revalidate (globals machine) [] (names machine) (proofDevelopment (proof machine))
+        revalidate (globals machine) [] (names machine) (flatten (development machine))
     )
   -- The term the development stands for, if it is finished. A colon: it looks.
   -- 'extract' is otherwise reachable only through the op, and the whole
   -- interest of @certify@ is /what/ it built.
   ":extract" -> noArgument $
-    case extract (proofDevelopment (proof machine)) of
+    case extract (flatten (development machine)) of
       Right t  -> (s, Extracted t)
       Left why -> (s, Ran [] (Halted (NotYetPure (whereImpure why))))
   -- A bare word: it is an op, and it is written as the op is written (§2.4).
@@ -601,14 +1052,21 @@ dispatch s name arg = case name of
   ":suspend" -> noArgument suspend
   ":resume"  -> withArgument (resume arg)
   ":abandon" -> noArgument abandonProof
-  ":proofs"  -> noArgument (s, Proofs (sessionProof s) (sessionSuspended s))
+  ":proofs"  -> noArgument (s, Proofs (currentAttempt s) (sessionSuspended s))
   ":undo"    -> noArgument undo
   ":convert" -> conversion
   ":step"  -> stepping
   ":run"   -> noArgument (progress False s [])
   "assume" -> tactic "assumption" "assumed" Assume
   "claim"  -> tactic "hole" "claimed" Claim
+  -- @assume@'s twin (MS4 phase 41f): the same two arguments, and the chain
+  -- below it extracts as a Π rather than a λ.
+  "quantify" -> tactic "∀-binder" "quantified" Quantify
   "data"   -> declaration
+  -- **A surface declaration** (MS4 phase 42) — a bare word, because it acts
+  -- (§2.4). It compiles to instructions rather than being run here, so
+  -- @:step@ can watch it and phase 49 can move the program into a rule body.
+  "declare" -> withArgument (declareSurface arg)
 
   -- The moves (§4.3). Three take no argument, @cross@ takes which field, and
   -- every core-term descent is its own word so that none of them changes
@@ -637,17 +1095,60 @@ dispatch s name arg = case name of
   -- @h = parse "‹text›"; prove with h@, so a syntax error in a hint fails the
   -- way an op fails and is visible in stepping mode. The driver still parses
   -- for @try@ and @eliminate@, which want a resolved 'Core' and not a tree.
-  "prove"  -> case arg of
-    "" -> run [Do (Prove Nothing)]
-    _  -> run [ Bind "hint" (Parse (Lit (VText arg)))
-              , Do (Prove (Just (Ref "hint")))
-              ]
   -- @retry@ / @retry ‹n›@ (§7.7). **The driver's, not an op** — a rule body
   -- may not contain one, because §7.2 decided there is no @catch@ and no
   -- alternation inside a body: a rule that wants an alternative is two rules,
   -- and an op that re-entered a choice point would be exactly the mechanism
   -- that refused. It is still spelled bare, because §2.4's rule is that a word
   -- that /acts/ takes no colon, and this acts.
+  -- **A block typed at the REPL is played** (MS4 phase 45b), and it is how the
+  -- REPL types the instruction language at all.
+  --
+  -- **This is what makes standing inside a yield useful.** The driver's own
+  -- commands take /terms/ and /names/ — @goto h@ looks for a hole called @h@,
+  -- not for whatever @h@ is bound to — so nothing typed as a command can read a
+  -- suspended rule's locals. A block can: its operands are references, and with
+  -- 'Thena.Engine.load' prepending, the rule's environment is still there.
+  --
+  -- > elaborate (do { h = here ; yield "look" ; goto h })
+  -- > do { goto h }          -- reads the rule's own h
+  --
+  -- **And a block's own bindings survive**, for the same reason — while the
+  -- machine is yielding, @env@ is not cleared, so @do { x = here }@ on one line
+  -- and @do { goto x }@ on the next is one environment. Outside a yield there is
+  -- no suspended program to share with and @load@ clears @env@ as it always has.
+  --
+  -- Reusing the surface parser rather than adding a command form: @do { … }@ is
+  -- already a surface atom (phase 45), so this costs a case and no syntax.
+  "do" -> case parseSurfaceTerm ("do " ++ arg) of
+    Left e -> (s, Failed e)
+    Right (SurfaceDo body) -> case resolveBlock (GlobalName "do") body of
+      Left errs -> (s, Failed (blockProblem errs))
+      Right is  -> progress (sessionStepping s)
+                            s { sessionMachine = load is machine } []
+    Right _ -> (s, Rejected (UnexpectedArgument name))
+
+  -- **@yield@ hands control back to a rule that yielded** — his, 2026-09-03,
+  -- and the word is deliberately the same one the op has: /"yielding is
+  -- something that switches from one control to the other so returning would be
+  -- named the same."/
+  --
+  -- It is one word with one meaning, not an overload: yielding to yourself is a
+  -- no-op, so the op is meaningless typed here and the driver word is
+  -- meaningless inside a body. Who it transfers to is settled by who is
+  -- speaking.
+  --
+  -- **Bare, not @:yield@** (§2.4: a bare word acts). That is also what keeps the
+  -- symmetry visible — the two directions are spelled the same.
+  --
+  -- **The driver's, never an op.** With 'Thena.Engine.load' prepending, an op
+  -- would arrive in front of the yield and would have to delete the instruction
+  -- after it. @retry@ is the precedent for a bare driver word that is not an op.
+  "yield" -> noArgument $
+    if Engine.isYielding machine
+      then progress (sessionStepping s)
+                    s { sessionMachine = Engine.resumeYield machine } []
+      else (s, Rejected NotYielding)
   "retry"  -> case arg of
     "" -> retryAt Nothing
     _  -> case reads arg of
@@ -690,31 +1191,43 @@ dispatch s name arg = case name of
     -- a colon looks, and nothing that looks lives in the rule base.
     | take 1 name == ":" -> (s, Rejected (NoSuchCommand name))
     | otherwise -> case parseArguments (globals machine) ctx (names machine) arg of
-        Left e          -> (s, Failed e)
-        Right (ts, n1)  ->
+        Left (Syntax e) -> (s, Failed e)
+        Right (vs, n1)  ->
           progress
             (sessionStepping s)
             s { sessionMachine =
-                  load [Do (Ops.Call (GlobalName name)
-                                     (map (Lit . VTerm . Trailing) ts))]
+                  load [Do (Ops.Call (GlobalName name) (map Lit vs))]
                        machine { names = n1 } }
             []
   where
     machine = sessionMachine s
-    ctx     = proofContext (proof machine)
+    ctx     = focusContext (development machine)
 
 
-    matching hint =
+    matching =
       unfoldIter (matches (rules machine) (globals machine)
-                          (cursor (proof machine)) hint)
+                          (cursor (development machine)))
 
     -- The base may not change under a half-built proof, current or suspended
     -- (the user, 2026-08-25). Answered before the file is read, so a refusal
     -- costs no IO and is decided in the pure half.
-    proofUnderway = case (sessionProof s, sessionSuspended s) of
-      (Just pr, _)     -> Just (ProofUnderway (proofName pr))
+    proofUnderway = case (currentAttempt s, sessionSuspended s) of
+      (Just att, _)    -> Just (ProofUnderway (attemptName att))
       (Nothing, [])    -> Nothing
-      (Nothing, ps)    -> Just (ProofsSuspended (map proofName ps))
+      (Nothing, ps)    -> Just (ProofsSuspended (map (attemptName . parkedAttempt) ps))
+
+    -- | One kind, the paths it was given. **Rule bases take several and the
+    -- other two take one**, which is not an accident of spelling: a load of
+    -- rule bases /replaces/ the ordered list, so the order written is the search
+    -- order (§8), while a script and a proof module are each just run.
+    loadKind k ps = case (k, ps) of
+      (_, [])             -> (s, Rejected (MissingArgument name))
+      (LoadRules, _)      -> case proofUnderway of
+        Just why -> (s, Rejected why)
+        Nothing  -> (s, RulesRequested ps)
+      (LoadScript, [one]) -> (s, LoadRequested one)
+      (LoadProof,  [one]) -> (s, ProofRequested one)
+      _                   -> (s, Rejected (UnexpectedArgument name))
 
     noArgument r
       | null arg  = r
@@ -728,9 +1241,10 @@ dispatch s name arg = case name of
       Just d  -> (s, ShownData d)
       Nothing -> case lookupDefinition g (globals machine) of
         Just d  -> (s, ShownGlobal g (definitionLevels d) (definitionConstraints d)
+                         (fromMaybe [] (lookup g (signatures machine)))
                                     (definitionType d) (Just (definitionBody d)))
         Nothing -> case lookupConstant g (globals machine) of
-          Just c  -> (s, ShownGlobal g (constantLevels c) [] (constantType c) Nothing)
+          Just c  -> (s, ShownGlobal g (constantLevels c) [] [] (constantType c) Nothing)
           Nothing -> (s, Rejected (NoSuchGlobal what))
       where
         g = GlobalName what
@@ -768,9 +1282,9 @@ dispatch s name arg = case name of
     --
     -- The statement is checked to be a type here rather than left to the first
     -- @:revalidate@: a proof of a non-type is not worth entering.
-    theorem = case sessionProof s of
-      Just pr -> (s, Rejected (AlreadyProving (proofName pr)))
-      Nothing -> case parseStatement (globals machine) (names machine) arg of
+    theorem = case sessionWork s of
+      Attempting att -> (s, Rejected (AlreadyProving (attemptName att)))
+      Scratch -> case parseStatement (globals machine) (names machine) arg of
         Left e             -> (s, Failed e)
         Right (Nothing, _) -> (s, Rejected (MissingArgument ":theorem"))
         Right (Just x, (ty, n1))
@@ -785,14 +1299,13 @@ dispatch s name arg = case name of
               (Right _, _, n2) -> started g ty n2
           where g = GlobalName x
 
-    started g ty n = case setGoalNamed g ty machine { names = n } of
-      Left e  -> (s, Rejected (NotThere e))
-      Right m ->
-        ( s { sessionMachine = m
-            , sessionProof = Just (Proof g ty [] (snapshotOf m))
-            }
-        , Proving g ty
-        )
+    started g ty n =
+      let (dev, n1) = newDevelopmentNamed g ty n
+       in ( s { sessionMachine = atRest machine { development = dev, names = n1 }
+              , sessionWork    = Attempting (Attempt g ty [])
+              }
+          , Proving g ty
+          )
 
     -- | @qed@ — certify what the development built, admit it, and close.
     --
@@ -805,16 +1318,16 @@ dispatch s name arg = case name of
     -- the same @extract@ on the same value, so it cannot differ; doing it this
     -- way keeps the certified term out of 'Session', where it would be a
     -- second home for something the development already says.
-    closeProof = case sessionProof s of
-      Nothing -> (s, Rejected NotProving)
-      Just pr -> case progress False s { sessionMachine = ran } [] of
+    closeProof = case sessionWork s of
+      Scratch -> (s, Rejected NotProving)
+      Attempting att -> case progress False s { sessionMachine = ran } [] of
         (s', Ran msgs Completed) ->
-          case extract (proofDevelopment (proof (sessionMachine s'))) of
+          case extract (flatten (development (sessionMachine s'))) of
             Left why -> (s', Ran msgs (Halted (NotYetPure (whereImpure why))))
-            Right t  -> admit (fromMaybe pr (sessionProof s')) s' t
+            Right t  -> admit msgs (fromMaybe att (currentAttempt s')) s' t
         other -> other
         where
-          ran = load [Do (Certify (Lit (VTerm (Trailing (proofClaim pr)))))] machine
+          ran = load [Do (Certify (Lit (VTerm (Trailing (attemptClaim att)))))] machine
 
           -- **The proof record is re-read from @s'@, never the @pr@ above.**
           -- Certifying settles the levels the claim was written with and files
@@ -822,9 +1335,15 @@ dispatch s name arg = case name of
           -- definition's type — reading the record from before the run stored a
           -- type still carrying a meta nothing could ever solve, which is a bug
           -- phase 33 shipped and 33b fixes.
-          admit pr' s' t =
-            let (s'', lvs, owed, scheme) = admitted s' pr' t
-             in (s'', Proved (proofName pr') lvs owed scheme)
+          -- **Generalisation can now refuse** (MS4 phase 51): a level the
+          -- term mentions and the type does not is defaulted, and if it has no
+          -- least value there is nothing to default it to. The proof is left
+          -- standing rather than admitted, so the development is still there to
+          -- look at.
+          admit msgs att' s' t = case admitted s' att' t of
+            Left u -> (s', Ran msgs (Uncertified (Levels u)))
+            Right (s'', lvs, owed, scheme) ->
+              (s'', Proved (attemptName att') lvs owed scheme)
 
     -- Admitting is the only thing that writes a theorem to globals (§3.3.1):
     -- a proved theorem is a global **definition**, type and body both.
@@ -838,32 +1357,33 @@ dispatch s name arg = case name of
     --
     -- Returns the generalised type as well, because that — not the claim as
     -- written — is what @qed@ reports and what @:show@ will print.
-    admitted s' pr t =
-      let m  = sessionMachine s'
-          (d, n1) = generalised (names m) (proofResidue pr) (proofClaim pr) t
-          g  = addDefinition (proofName pr) d (globals m)
-          (ps, n) = newProof n1
-       in ( s' { sessionMachine = m { globals = g, proof = ps, names = n }
-               , sessionProof = Nothing
-               }
-          , definitionLevels d
-          , definitionConstraints d
-          , definitionType d
-          )
+    admitted s' att t = do
+      let m = sessionMachine s'
+      (d, n1) <- generalised (names m) (attemptResidue att) (attemptClaim att) t
+      let g  = addDefinition (attemptName att) d (globals m)
+          (ps, n) = newDevelopment n1
+      Right
+        ( s' { sessionMachine = atRest m { globals = g, development = ps, names = n }
+             , sessionWork = Scratch
+             }
+        , definitionLevels d
+        , definitionConstraints d
+        , definitionType d
+        )
 
-    suspend = case sessionProof s of
-      Nothing -> (s, Rejected NotProving)
-      Just pr ->
-        ( cleared { sessionSuspended = pr { proofSaved = snapshotOf machine }
-                                         : sessionSuspended s }
-        , Suspended (proofName pr)
+    suspend = case sessionWork s of
+      Scratch -> (s, Rejected NotProving)
+      Attempting att ->
+        ( cleared { sessionSuspended =
+                      Parked att (snapshotOf machine) : sessionSuspended s }
+        , Suspended (attemptName att)
         )
 
     -- Abandoning drops the proof; suspending keeps it. Same exit, different
     -- list — which is the whole difference between the two commands.
-    abandonProof = case sessionProof s of
-      Nothing -> (s, Rejected NotProving)
-      Just pr -> (cleared, Abandoned (proofName pr))
+    abandonProof = case sessionWork s of
+      Scratch -> (s, Rejected NotProving)
+      Attempting att -> (cleared, Abandoned (attemptName att))
 
     -- Leave proof mode, putting the machine back on a fresh scratch
     -- development. **The environment and the counter are not touched**, which
@@ -871,30 +1391,31 @@ dispatch s name arg = case name of
     -- the machine, so a datatype declared while it was away is simply there on
     -- return.
     cleared =
-      let (ps, n) = newProof (names machine)
-       in s { sessionMachine = machine { proof = ps, names = n, exec = Exec [] [] [] }
-            , sessionProof = Nothing
+      let (ps, n) = newDevelopment (names machine)
+       in s { sessionMachine = atRest machine { development = ps, names = n }
+            , sessionWork = Scratch
             }
 
-    resume what = case break ((== GlobalName what) . proofName) (sessionSuspended s) of
-      (_, [])          -> (s, Rejected (NoSuchProof what))
-      (before, pr : after)
-        | Just cur <- sessionProof s ->
-            (s, Rejected (AlreadyProving (proofName cur)))
-        | otherwise ->
-            ( s { sessionMachine = restore (proofSaved pr) machine
-                , sessionProof = Just pr
-                , sessionSuspended = before ++ after
-                }
-            , Resumed (proofName pr)
-            )
+    resume what =
+      case break ((== GlobalName what) . attemptName . parkedAttempt) (sessionSuspended s) of
+        (_, [])          -> (s, Rejected (NoSuchProof what))
+        (before, Parked att at : after)
+          | Attempting cur <- sessionWork s ->
+              (s, Rejected (AlreadyProving (attemptName cur)))
+          | otherwise ->
+              ( s { sessionMachine = restore at machine
+                  , sessionWork = Attempting att
+                  , sessionSuspended = before ++ after
+                  }
+              , Resumed (attemptName att)
+              )
 
     -- **No proof required** (phase 34). @:undo@ takes back the line you typed,
     -- and nothing about that needs a theorem to be open.
-    undo = case sessionUndo s of
-      []       -> (s, Rejected NothingToUndo)
-      (u : us) ->
-        ( s { sessionMachine = restore u machine, sessionUndo = us }
+    undo = case sessionHistory s of
+      _ :| []       -> (s, Rejected NothingToUndo)
+      _ :| (u : us) ->
+        ( s { sessionMachine = restore u machine, sessionHistory = u :| us }
         , Undone
         )
 
@@ -914,7 +1435,7 @@ dispatch s name arg = case name of
       Left e -> (s, Failed e)
       Right (t, n1) -> case setGoal t machine { names = n1 } of
         Left e   -> (s, Rejected (NotThere e))
-        Right m' -> (s { sessionMachine = m' }, Shown (cursor (proof m')))
+        Right m' -> (s { sessionMachine = m' }, Shown (cursor (development m')))
 
     -- Both of these advance the session counter even when they fail. Conversion
     -- and inference mint variables to open binders with, and a name that has
@@ -924,6 +1445,61 @@ dispatch s name arg = case name of
     inferred t n = case infer (globals machine) ctx n t of
       (Left e,   _, n1) -> (bump n1, IllTyped e)
       (Right ty, _, n1) -> (bump n1, Inferred t ty)
+
+    -- | @:infer ‹surface›@ — his framing, 2026-09-01: /"if this term were put
+    -- here, what would its type be?"/
+    --
+    -- **Elaborate into a hole of unknown type, read the type off, put the
+    -- development back.** The hole is claimed at a second hole @Tinfer@, which
+    -- is what "unknown type" means here: unification solves it while the term
+    -- is elaborated, and 'Thena.Development.Cursor.expectedType' at the focus is
+    -- then the answer. @Elaborate@ leaves the focus where it found it (phase
+    -- 41b), which is what makes reading it off exact rather than careful.
+    --
+    -- **The rewind is unconditional**, where phase 25d's is taken only when a
+    -- line fails: this command is a look, so a success must undo itself too.
+    -- Only the development is rewound — @names@ and @globals@ are not part of a
+    -- 'Snapshot' (§7.7), and the counter must not go back or a number the user
+    -- has seen would be reissued (MS2 closeout 4f).
+    --
+    -- **It revalidates before answering.** A level obligation is collected only
+    -- by 'Thena.Development.Validate' and the kernel, so an elaboration can
+    -- succeed while owing one; reporting a type for a development that does not
+    -- check would be the gap @ms3\/CLOSEOUT.md@ item 25 describes, one command
+    -- further on.
+    inferSurface t =
+      let (l, n1) = freshLevelMeta (names machine)
+          before  = snapshotOf machine
+          prog =
+            [ Bind "T" (Claim (Lit (VText "Tinfer"))
+                          (Lit (VTerm (Trailing (Universe (LVar l))))))
+            , Bind "x" (Claim (Lit (VText "xinfer")) (Ref "T"))
+            , Do (Ops.Goto (Lit (VText "xinfer")))
+            , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt t))])
+            ]
+          asking  = s { sessionMachine = load prog machine { names = n1 } }
+       in case progress False asking [] of
+            (s', Ran _ Completed) ->
+              let m'   = sessionMachine s'
+                  back = s' { sessionMachine = restore before m' }
+                  dev  = development m'
+               in case revalidate (globals m') [] (names m') (flatten dev) of
+                    (Left e, _) -> (back, Revalidated (Just e))
+                    -- **whnf'd, and that is not cosmetic.** The type is read
+                    -- off the hole the elaboration solved, so without reducing
+                    -- it prints as @Tinfer@ — the hole's own variable — and says
+                    -- nothing. It therefore reduces further than @:infer ⌜t⌝@
+                    -- does: a saturated former where that stops at the wrapper.
+                    -- **The two agree up to conversion, not syntactically**, and
+                    -- they print the same.
+                    (Right _, _) -> case expectedType (cursor dev) of
+                      Just ty -> (back, InferredSurface t
+                                          (whnf (globals m') (focusContext dev) ty))
+                      -- Unreachable as the program is written — the focus is the
+                      -- component @Elaborate@ was pointed at — but the cursor
+                      -- type admits it and inventing an answer would be worse.
+                      Nothing -> (back, Rejected (NotThere NotInCore))
+            (s', other) -> (s' { sessionMachine = restore before (sessionMachine s') }, other)
 
     conversion = withArgument $
       case parseEquated (globals machine) ctx (names machine) arg of
@@ -958,6 +1534,23 @@ dispatch s name arg = case name of
       Ran msgs stop -> Ran (note : msgs) stop
       _             -> resp
 
+    -- **Brady's @ELAB (x : t)@, as a program** (@IDRIS.md@ §4.6):
+    --
+    -- > NEW PROOF Type; E⟦t⟧; t' ← TERM; TTDECL (x : t')
+    --
+    -- The signature is elaborated in a development of its own — @certify@
+    -- extracts the whole chain, so it could not share one with the body — and
+    -- the term read off it becomes the type the body is elaborated against.
+    --
+    -- **The driver builds the program and the machine runs it**, which is what
+    -- @assume@ and @claim@ already do. Nothing here elaborates.
+    declareSurface src = case parseSurfaceItems src of
+      Left e -> (s, Failed e)
+      Right items ->
+        let (is, n1) = surfaceProgram (names machine) items
+         in progress (sessionStepping s)
+                     s { sessionMachine = load is machine { names = n1 } } []
+
     tactic what verb op = withArgument $
       case compile what verb op (globals machine) ctx (names machine) arg of
       Left e -> (s, Failed e)
@@ -979,12 +1572,22 @@ dispatch s name arg = case name of
 -- rest are rules in the rule base, not commands (§8, phase 23b); listing them
 -- here would state the base's contents in a second place, and it would go
 -- stale the moment a base is loaded. The last line points at @:rules@ instead.
+--
+-- **@prove@ was listed and is not any more** (MS4 phase 43). Phase 41 made it a
+-- rule over @prim-prove@, at which point the paragraph above started applying
+-- to it and nothing noticed — the same phase left @prove ‹hint›@ and
+-- @:matches ‹hint›@ here after retiring hints. @declare@ and @quantify@ were
+-- missing for the opposite reason: they are the driver's own and had never been
+-- added. **All four were found by crossing this list against @dispatch@ by
+-- hand**, which is what @ms3\/CLOSEOUT.md@ 26 exists to make unnecessary — the
+-- @DriverTests@ mirrors had the same gaps, so they could not have caught it.
 commandSummary :: [(String, String)]
 commandSummary =
   [ ("assume ‹x› : ‹S›",        "add a hypothesis above the focus")
   , ("claim ‹x› : ‹S›",         "add a hole above the focus")
   , ("unify ‹t› ≟ ‹u›",         "solve the focus by unification")
-  , ("prove / prove ‹hint›",     "run a rule here / elaborate a term")
+  , ("do { ‹instruction› ; … }", "play a block of instructions here")
+  , ("yield",                    "hand control back to a rule that yielded")
   , ("retry / retry ‹n›",        "backtrack to a choice point")
   , ("along  into  back",        "move on the chain")
   , ("cross type / cross val",   "move into a term")
@@ -992,17 +1595,20 @@ commandSummary =
   , (unwords numberedParts,      "descend into a numbered field")
   , ("goto ‹hole›",              "move to a hole by name")
   , ("reduce",                   "reduce the focused term in place")
+  , ("quantify ‹x› : ‹S›",       "add a ∀-binder above the focus")
   , ("data ‹D› … where { … }",   "declare an inductive family")
+  , ("declare ‹sig› ; ‹equation›", "elaborate a surface declaration")
   , ("certify ‹type›",           "ask the kernel about the development")
   , ("qed",                      "certify and admit the finished proof")
   , (":show / :show ‹name›",     "the development / a global")
   , (":where",                   "focus, path, context, expected type")
   , (":core ‹t› / :dev ‹p›",     "parse a term / a development and print it")
-  , (":infer / :infer ‹t›",      "the type of the focus / of a term")
+  , (":surface ‹t›",             "parse a surface term and print it")
+  , (":infer / :infer ‹t›",      "the type of the focus / of a surface term")
   , (":whnf / :whnf ‹t›",        "reduce the focus / a term, without committing")
   , (":convert ‹t› ≟ ‹u›",      "are two terms convertible")
   , (":elim ‹D› [‹universe›]",  "a datatype’s elimination rule")
-  , (":matches / :matches ‹hint›", "which rules apply here")
+  , (":matches",                 "which rules apply here")
   , (":choices",                 "the live choice points, nearest first")
   , (":bases / :rules",          "the loaded rule bases / the rules in them")
   , (":step on / :step / :step off", "single-step the machine")
@@ -1015,7 +1621,8 @@ commandSummary =
   , (":undo",                    "take back the last line")
   , (":extract",                 "the term the development stands for")
   , (":revalidate",              "recheck the whole development")
-  , (":load ‹path›",             "run a script, or install rule bases")
+  , (":load ‹path›",             "a proof module, a script, or rule bases")
+  , (":load proof / rules / script", "say which, rather than by extension")
   , (":help",                    "this list")
   , (":quit",                    "leave")
   ]
@@ -1057,16 +1664,56 @@ corePart w a = case a of
 
 -- | @:load@\'s argument, split on spaces and commas. **Both separators** —
 -- the user asked for "comma or space separated (or both)", 2026-08-25.
+-- | An argument written in corners, with them stripped (MS4 phase 43).
+--
+-- **The same split 'groups' makes, for a command that takes one argument
+-- rather than a run of them.** A command word decides which vocabulary it is
+-- reading, and this is how it asks: corners are the development calculus, a
+-- bare argument is the surface language.
+--
+-- Textual rather than a lex-and-inspect, because it is answering a question
+-- about how the argument was /written/ — and being wrong is a parse error in
+-- the grammar the user did not mean, not a silent misreading.
+cornered :: String -> Maybe String
+cornered src = case dropWhile (== ' ') src of
+  '\8988' : rest -> case break (== '\8989') rest of
+    (inner, '\8989' : after) | all (== ' ') after -> Just inner
+    _                                              -> Nothing
+  _ -> Nothing
+
 pathsOf :: String -> [FilePath]
 pathsOf = words . map (\c -> if c == ',' then ' ' else c)
 
 -- | Is this a rule base rather than a script? The extension is the whole test,
 -- and it is the user\'s: *"Maybe `.thena.rules`, that sounds fine."*
-isRulePath :: FilePath -> Bool
-isRulePath p = ruleExtension `isSuffixOf` p
+-- | Which of the three kinds a path names. **The extension is the whole test**,
+-- and it is the user's, 2026-09-02: /"The extension for thena proofs is
+-- @.thena@ — that's the whole extension. I think ideally we would have
+-- @:load rules@ and @:load proof@ and the universal @:load@ can load anything
+-- depending on the extensions."/
+--
+-- The three suffixes are disjoint, so no path has two readings: a script ends
+-- @.thena.script@, a rule base @.thena.rules@, and a proof module @.thena@ and
+-- neither of the others.
+--
+-- **@.thena@ meant a script until phase 43**, which is why the four shipped
+-- files were renamed rather than the proof module taking a new extension: he
+-- named @.thena@ for the proof module, and a proof module is what a reader will
+-- write most.
+data LoadKind = LoadRules | LoadProof | LoadScript
+  deriving (Eq, Show)
+
+kindOf :: FilePath -> LoadKind
+kindOf p
+  | ruleExtension   `isSuffixOf` p = LoadRules
+  | scriptExtension `isSuffixOf` p = LoadScript
+  | otherwise                      = LoadProof
 
 ruleExtension :: String
 ruleExtension = ".thena.rules"
+
+scriptExtension :: String
+scriptExtension = ".thena.script"
 
 -- | Why a rule-base file was not accepted.
 data RuleFileError
@@ -1100,13 +1747,31 @@ data RuleFileError
 -- line the user is looking at.
 baseHead :: [String] -> Maybe (String, Maybe String, Int)
 baseHead ls0 = do
-  let (blanks, ls1) = span (all isSpace) ls0
+  -- **Comment lines are skipped like blank ones** (MS4 phase 43). The header is
+  -- read textually, before the lexer, so it is the one place a comment has to
+  -- be recognised twice — and a rule base that could not be commented above its
+  -- own header would make the uniformity his ruling asked for a fiction.
+  let (blanks, ls1) = span skippable ls0
   (desc, ls2, used) <- Just (docstring ls1)
-  let (blanks2, ls3) = span (all isSpace) ls2
+  let (blanks2, ls3) = span skippable ls2
   (nm, hdr) <- case ls3 of
     l : _ -> (\n -> (n, 1 :: Int)) <$> baseLine l
     []    -> Nothing
   Just (nm, desc, length blanks + used + length blanks2 + hdr)
+
+skippable :: String -> Bool
+skippable l = all isSpace l || commentLine l
+
+-- | Is this whole line a comment (MS4 phase 43)?
+--
+-- **One place says what a comment line is**, and it says the same thing the
+-- lexer's rule does: @--@ is a comment when a space follows it, and an
+-- identifier-ish token when one does not. @words@ answers exactly that, because
+-- it is the space that separates them.
+commentLine :: String -> Bool
+commentLine l = case words l of
+  "--" : _ -> True
+  _        -> False
 
 -- | @rule base ‹name› where@ — the name and nothing else between.
 baseLine :: String -> Maybe String
@@ -1216,7 +1881,7 @@ view
   -> String
   -> (Session, Response)
 view s rd f arg =
-  case rd (globals machine) (proofContext (proof machine)) (names machine) arg of
+  case rd (globals machine) (focusContext (development machine)) (names machine) arg of
   Left e        -> (s, Failed e)
   Right (x, n1) -> (s { sessionMachine = machine { names = n1 } }, f x)
   where
@@ -1329,26 +1994,25 @@ oneLine s pending line = (record s', resp, asking)
         -- not to before the whole command, because that is where the previous
         -- snapshot was taken. §2.4's granularity, applied consistently.
         | stopped resp =
-            sess { sessionMachine = restore (sessionSaved sess) (sessionMachine sess) }
+            sess { sessionMachine =
+                     restore (NE.head (sessionHistory sess)) (sessionMachine sess) }
         -- **A proof boundary starts a fresh history** (phase 34, his choice of
         -- three). Done here and not in the five commands themselves, because
         -- @record@ runs /after/ the command and would push the crossing itself
         -- back on top of a stack the command had just emptied.
-        | boundary resp = sess { sessionSaved = now, sessionUndo = [] }
-        | resp == Undone || now == sessionSaved sess = sess { sessionSaved = now }
-        | otherwise =
-            sess { sessionSaved = now
-                 , sessionUndo  = sessionSaved sess : sessionUndo sess
-                 }
+        | boundary resp = sess { sessionHistory = now :| [] }
+        | resp == Undone || now == NE.head (sessionHistory sess) =
+            sess { sessionHistory = now :| NE.tail (sessionHistory sess) }
+        | otherwise = sess { sessionHistory = now NE.<| sessionHistory sess }
        now = snapshotOf (sessionMachine sess)
 
 -- | The per-proof half of a machine.
 snapshotOf :: Machine -> Snapshot
-snapshotOf m = (exec m, proof m)
+snapshotOf m = (exec m, development m, enclosing m)
 
 -- | Put one back.
 restore :: Snapshot -> Machine -> Machine
-restore (e, p) m = m { exec = e, proof = p }
+restore (e, p, encl) m = m { exec = e, development = p, enclosing = encl }
 
 -- --------------------------------------------------------------------------
 -- Loading a file (§9, phase 11)
@@ -1404,7 +2068,8 @@ data Loaded = Loaded
 loadSource :: Session -> String -> Loaded
 loadSource s0 = go s0 Nothing 1 [] . lines
   where
-    finished s acc err = Loaded s { sessionUndo = [] } (reverse acc) err
+    finished s acc err =
+      Loaded s { sessionHistory = NE.head (sessionHistory s) :| [] } (reverse acc) err
 
     go s pending _ acc [] = case pending of
       -- The file ran out while an op was still asking. The line to name is the
@@ -1468,8 +2133,12 @@ progress oneStep s msgs = case step (sessionMachine s) of
   Engine.Saying msg m
     | oneStep   -> stop m (msg : msgs) Paused
     | otherwise -> progress oneStep s { sessionMachine = m } (msg : msgs)
+  -- **A yield stops the run and keeps the machine** (MS4 phase 45b), exactly as
+  -- a question does. Stepping it again would yield again — the instruction is
+  -- not consumed — so the driver has to stop here or spin.
+  Engine.Yielding msg m -> stop m msgs (Yielded msg)
   -- The declaration is checked and installed here, outside the machine: the
-  -- global environment is not part of 'ProofState' and no instruction writes it
+  -- global environment is not part of 'Development' and no instruction writes it
   -- (§7.4, §7.5). On refusal the rest of the program is dropped — the command
   -- is abandoned, and there is nothing to retry the way there is at 'Halted'.
   Engine.Declaring d m -> case declare (globals m) (names m) d of
@@ -1496,6 +2165,32 @@ progress oneStep s msgs = case step (sessionMachine s) of
   --
   -- Empty whenever no bare @Type@ was written, which is every use of the kernel
   -- before this phase.
+  -- **A declaration arrives in the environment exactly as @qed@'s proof does**
+  -- (MS4 phase 42): the kernel runs, the level metas generalise, and
+  -- 'addDefinition' installs. The difference is only where the name and the
+  -- type came from — an 'Attempt' there, the declaration itself here.
+  --
+  -- **It says nothing**, per his instruction: the command that ran it reports
+  -- when it is over. See 'Thena.Ops.DefineGlobal'.
+  Engine.Defining nm ps ty t m -> case certify (globals m) t ty of
+    Left e -> stop (load [] m) msgs (Uncertified e)
+    Right (sub, residue) -> case generalised (names m) residue (substLevelsIn sub ty) t of
+      Left u -> stop (load [] m) msgs (Uncertified (Levels u))
+      Right (d, n1) ->
+        let
+          -- **The plicities are installed beside the definition** (MS4 phase
+          -- 44b) and only when there are any, so a global whose signature said
+          -- nothing implicit adds no entry at all.
+          m'      = m { globals    = addDefinition nm d (globals m)
+                      , names      = n1
+                      , signatures = if Explicit `elem` ps && Implicit `notElem` ps
+                                       then signatures m
+                                       else (nm, ps) : signatures m
+                      }
+       in if oneStep
+            then stop m' msgs Paused
+            else progress oneStep s { sessionMachine = m' } msgs
+
   Engine.Certifying t ty m -> case certify (globals m) t ty of
     Left e -> stop (load [] m) msgs (Uncertified e)
     Right (sub, residue)
@@ -1503,8 +2198,8 @@ progress oneStep s msgs = case step (sessionMachine s) of
       | otherwise -> progress oneStep s' (say : msgs)
       where
         say = "certified"
-        settled' = m { proof = Engine.ProofState
-                                 (overLevels sub (cursor (proof m))) }
+        settled' = m { development = Engine.Development
+                                 (overLevels sub (cursor (development m))) }
         s' = (settled sub residue s) { sessionMachine = settled' }
   Engine.Asking q m   -> stop m msgs (Waiting q)
   Engine.Finished m   -> stop m msgs Completed
@@ -1520,10 +2215,12 @@ progress oneStep s msgs = case step (sessionMachine s) of
 -- **And it files the residue** for @qed@ to generalise (phase 33b); see
 -- 'Proof''s own field.
 settled :: [(LevelVar, Level)] -> [Obligation] -> Session -> Session
-settled sub residue s = s { sessionProof = fmap at (sessionProof s) }
+settled sub residue s = s { sessionWork = fmap' (sessionWork s) }
   where
-    at pr = pr { proofClaim   = substLevelsIn sub (proofClaim pr)
-               , proofResidue = residue
+    fmap' Scratch          = Scratch
+    fmap' (Attempting att) = Attempting (at att)
+    at att = att { attemptClaim   = substLevelsIn sub (attemptClaim att)
+               , attemptResidue = residue
                }
 
 nameOf :: InductiveDefinition -> String

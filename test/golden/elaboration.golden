@@ -18,22 +18,45 @@ type
   A
 thena spine> :matches
 attack
-try ‹t›
+try-core ‹t›
 abandon
-eliminate ‹t›
-unify-refine ‹t›
-apply ‹f›
-thena spine> :matches a
-elab-var
-thena spine> prove a
+eliminate-core ‹t›
+prove
+fill ‹t›
+unify-refine-core ‹t›
+apply-core ‹f›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+enter-binders ‹t›
+enter-binders ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+thena spine> elaborate a
+already equal
 thena spine> :show
   let ? const : ∀ (A : Type₀) -> A -> A ≐ (
     λ (A : Type₀) ->
     λ (a : A) ->
-▶   let const1 = a : A in
+    let refined = a : A in
+▶   let const1 = refined : A in
     const1
   ) in
   const
+thena spine> back
 thena spine> back
 thena spine> back
 thena spine> back
@@ -42,7 +65,7 @@ thena spine> qed
 const : ∀ (A : Type₀) -> A -> A   ∎
 thena spine> :show const
 const : ∀ (A : Type₀) -> A -> A
-const = let const = λ (A : Type₀) (a : A) -> let const1 = a : A in const1 : ∀ (A : Type₀) -> A -> A in const
+const = let const = λ (A : Type₀) (a : A) -> let refined = a : A in let const1 = refined : A in const1 : ∀ (A : Type₀) -> A -> A in const
 thena spine> :theorem again : ∀ (A : Type₀) (a : A) -> A
 proving again : ∀ (A : Type₀) -> A -> A
 thena spine> attack
@@ -51,12 +74,13 @@ thena spine> intro
 thena spine> into
 thena spine> along
 thena spine> along
-thena spine> prove b
+thena spine> elaborate b
 stuck: not in scope: b
-thena spine> prove a a
-stuck: no rule applies here
-thena spine> :matches a a
-no rule applies here
+thena spine> elaborate (a a)
+chose 23: elaborate
+backtracking to 23: elaborate
+solved: B
+stuck: A and A1 -> B cannot be made equal
 thena spine> :abandon
 abandoned again
 thena spine> :theorem shown : ∀ (A : Type₀) (a : A) -> A
@@ -68,54 +92,92 @@ thena spine> into
 thena spine> along
 thena spine> along
 thena spine> :step on
-thena spine> prove a
+thena spine> elaborate a
 pc
-  0  prove with hint
+  0  w = surface-name t
+  1  x = resolve-name w
+  2  call fill x
+  3  call solve
 env
-  hint = ‹a›
-stack
-  (empty)
-thena spine> :step
-pc
-  0  t = resolve hint
-  1  call try t
-  2  prim-solve
-env
-  hint = ‹a›
+  t = ‹a›
 stack
   call, 0 instruction(s) to resume
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
 thena spine> :step
 pc
-  0  call try t
-  1  prim-solve
+  0  x = resolve-name w
+  1  call fill x
+  2  call solve
 env
-  t = ⌜a⌝
-  hint = ‹a›
+  w = "a"
+  t = ‹a›
 stack
   call, 0 instruction(s) to resume
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
 thena spine> :step
 pc
-  0  prim-try t
+  0  call fill x
+  1  call solve
+env
+  x = ⌜a⌝
+  w = "a"
+  t = ‹a›
+stack
+  call, 0 instruction(s) to resume
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+thena spine> :step
+pc
+  0  n = fresh-name "refined"
+  1  x = define n t
+  2  s = typeof x
+  3  g = goal
+  4  unify-into s g
+  5  prim-try x
 env
   t = ⌜a⌝
 stack
   call, 1 instruction(s) to resume
   call, 0 instruction(s) to resume
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
 thena spine> :step
 pc
-  (empty)
+  0  x = define n t
+  1  s = typeof x
+  2  g = goal
+  3  unify-into s g
+  4  prim-try x
 env
+  n = "refined"
   t = ⌜a⌝
 stack
   call, 1 instruction(s) to resume
   call, 0 instruction(s) to resume
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
 thena spine> :step
 pc
-  0  prim-solve
+  0  s = typeof x
+  1  g = goal
+  2  unify-into s g
+  3  prim-try x
 env
+  x = ⌜refined⌝
+  n = "refined"
   t = ⌜a⌝
-  hint = ‹a›
 stack
+  call, 1 instruction(s) to resume
   call, 0 instruction(s) to resume
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
 thena spine> :step off
 thena spine> :quit

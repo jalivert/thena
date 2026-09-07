@@ -23,21 +23,31 @@ import Thena.Core.Term (GlobalName (..))
 import Thena.Driver
   ( LoadError (..)
   , Loaded (..)
+  , LoadKind (..)
   , Response (..)
   , Session (..)
+  , command
+  , kindOf
+  , loadProofSource
   , loadSource
   , newSession
   )
 import Thena.Engine (Machine (..))
 import Thena.Core.Term (Core, substLevelsIn)
 import Thena.Global.Env
-  ( InductiveDefinition
+  ( Definition (..)
+  , lookupDefinition
+  , InductiveDefinition
   , eliminatorType
   , inductiveLevels
   , isDeclared
   , lookupInductive
   )
-import Thena.Repl (startingSession, renderCore, renderEliminator)
+import Thena.Repl (startingSession, loadProofFile, renderCore, renderEliminator)
+import Thena.Core.Convert (convert)
+import Thena.Core.Context ()
+import Data.ByteString.Builder (stringUtf8, toLazyByteString)
+import Test.Tasty.Golden (goldenVsString)
 
 tests :: TestTree
 tests =
@@ -46,6 +56,9 @@ tests =
     [ testGroup "the shipped prelude" preludeTests
     , testGroup "a file is a script of command lines" scriptTests
     , testGroup "a load stops, and says where" failureTests
+    , testGroup "three kinds behind one word (phase 43)" kindTests
+    , testGroup "a proof module (phase 43)" moduleTests
+    , testGroup "MS4 tier 0 (phase 43)" tierTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -75,14 +88,20 @@ preludeTests =
       case lookupInductive (GlobalName "Eq") env of
         Nothing -> assertFailure "Eq is not declared"
         Just d  ->
+          -- **The indices are @_@ and not @x@** (MS4 phase 54): the prelude is
+          -- a surface module now, and elaborating @A -> A -> Type@ leaves the
+          -- arrow\'s binders anonymous where "Thena.Syntax.Resolve" named them.
+          -- 'Thena.Core.Term.Ident' is display metadata (§3.5), so the
+          -- eliminator is the same one; only its printing moved.
+          --
           -- **At @Eq {0}@**, not at its bare parameter (MS3 phase 31d): the
           -- eliminator is a scheme now, and what a use site sees is the
           -- instantiation. Rendering it uninstantiated would pin @ℓ@'s number,
           -- which is a counter value and no business of this assertion.
           renderEliminator n0 (GlobalName "Eq") (atZero d (fst (eliminatorType d LZero n0)))
-            @?= [ "elim Eq : ∀ (A : Type₀) (P : ∀ (x : A) (x1 : A) -> Eq {0} A x x1 -> Type₀) \
+            @?= [ "elim Eq : ∀ (A : Type₀) (P : ∀ (_ : A) (_1 : A) -> Eq {0} A _ _1 -> Type₀) \
                   \-> (∀ (a : A) -> P a a (refl {0} A a)) \
-                  \-> ∀ (x : A) (x1 : A) (target : Eq {0} A x x1) -> P x x1 target"
+                  \-> ∀ (_ : A) (_1 : A) (target : Eq {0} A _ _1) -> P _ _1 target"
                 ]
 
     -- "and can be used": eliminating a 'refl' must actually fire. The motive is
@@ -170,7 +189,7 @@ failureTests =
       (loadedError (source ["data ohno"]) @?= Just (LoadStopped 1))
 
   , testCase "nested :load is refused, not followed" $
-      let l = source ["data A0 : Type₀ where { a0 : A0 }", ":load somewhere.thena"]
+      let l = source ["data A0 : Type₀ where { a0 : A0 }", ":load somewhere.thena.script"]
        in do
             loadedError l @?= Just (NestedLoad 2)
             -- what ran before it still ran
@@ -211,3 +230,245 @@ atZero :: InductiveDefinition -> Core -> Core
 atZero d t = case instantiateLevels (inductiveLevels d) (map (const LZero) (inductiveLevels d)) of
   Just sub -> substLevelsIn sub t
   Nothing  -> t
+
+-- --------------------------------------------------------------------------
+-- The three kinds (MS4 phase 43)
+-- --------------------------------------------------------------------------
+
+-- | @:load@ answers one question — which kind is this — and the extension
+-- answers it, with the keywords saying the same thing out loud.
+--
+-- **The three suffixes are disjoint**, which is the property worth a test of
+-- its own: a path has exactly one reading, and @.thena.rules@ is not a
+-- @.thena@ that happens to end in something.
+kindTests :: [TestTree]
+kindTests =
+  [ testCase "a bare .thena is a proof module" $
+      kindOf "examples/arith.thena" @?= LoadProof
+  , testCase ".thena.rules is a rule base, not a proof module" $
+      kindOf "rules/standard.thena.rules" @?= LoadRules
+  , testCase ".thena.script is a script, not a proof module" $
+      kindOf "prelude/prelude.thena.script" @?= LoadScript
+
+  , testCase "the keyword says which, and overrides nothing else" $
+      case snd (command newSession ":load proof somewhere.thena") of
+        ProofRequested p -> p @?= "somewhere.thena"
+        other            -> assertFailure (show other)
+
+  , -- The keyword is read before the path, so a script *named* like a proof
+    -- module still loads as a script when it is asked for.
+    testCase "a keyword beats the extension" $
+      case snd (command newSession ":load script odd.thena") of
+        LoadRequested p -> p @?= "odd.thena"
+        other           -> assertFailure (show other)
+
+  , testCase "and without one the extension decides" $
+      case snd (command newSession ":load odd.thena") of
+        ProofRequested p -> p @?= "odd.thena"
+        other            -> assertFailure (show other)
+
+  , testCase "mixing kinds in one load is refused" $
+      case snd (command newSession ":load a.thena b.thena.rules") of
+        Rejected _ -> pure ()
+        other      -> assertFailure (show other)
+  ]
+
+-- --------------------------------------------------------------------------
+-- Proof modules (MS4 phase 43)
+-- --------------------------------------------------------------------------
+
+-- | A whole file of surface declarations, elaborated.
+--
+-- These go through 'loadProofSource', which is pure and takes the contents,
+-- for the same reason 'loadSource' does: §12 invariant 4 keeps IO in
+-- "Thena.Repl".
+moduleTests :: [TestTree]
+moduleTests =
+  [ testCase "a module declares what it says it declares" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 natModule of
+        (_, ProofLoaded nm ds _) -> (nm, ds) @?= ("M", ["Nat", "one"])
+        (_, other)             -> assertFailure (show other)
+
+  , testCase "and the globals are really there afterwards" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 natModule
+          g = globals (sessionMachine s1)
+      map (\n -> isDeclared (GlobalName n) g) ["Nat", "zero", "succ", "one"]
+        @?= [True, True, True, True]
+
+  , -- **Quiet on success, loud on failure** — his call, 2026-09-02. The success
+    -- case above carries no op messages at all; this one keeps them, because
+    -- that is where the reason is.
+    testCase "a module that does not elaborate reports why" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 badModule of
+        (_, ProofLoaded {}) -> assertFailure "admitted, and it should not have been"
+        (_, _)               -> pure ()
+
+  , -- **Comments, in the other two kinds** (MS4 phase 43). The surface cases
+    -- are in "Thena.SurfaceTests"; these are the two that do not go through the
+    -- lexer first — a script splits its command word off before lexing, and a
+    -- rule base reads its header textually.
+    testCase "a comment line in a proof module is skipped" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 commentedModule of
+        (_, ProofLoaded nm ds _) -> (nm, ds) @?= ("M", ["Nat", "one"])
+        (_, other)             -> assertFailure (show other)
+
+  , testCase "a comment line in a script is a blank line" $
+      loadedError (loadSource newSession
+        "-- a heading\ndata Nat : Type\8320 where { zero : Nat }  -- trailing\n")
+        @?= Nothing
+
+  , testCase "and -- without a space is still not one" $
+      loadedError (loadSource newSession "--nope\n") @?= Just (LoadStopped 1)
+
+  , -- **A top-level @do@ block** (MS4 phase 45), his: at the top of a module a
+    -- block is an item, not an expression. It is spliced into the module's own
+    -- instruction program, so what this pins is that the items around it are
+    -- unaffected — the module goes on declaring after it.
+    testCase "a top-level do block runs and the module goes on" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 blockModule of
+        (_, ProofLoaded nm ds n) -> (nm, ds, n) @?= ("M", ["Nat", "one"], 1)
+        (_, other)               -> assertFailure (show other)
+
+  , testCase "and what it declared is really there" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 blockModule
+      isDeclared (GlobalName "one") (globals (sessionMachine s1)) @?= True
+
+  , -- Resolution happens while the file is read, so a block whose op is given
+    -- the wrong operands is a syntax error and not a run-time failure.
+    testCase "a block with bad operands is refused as a syntax error" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 badBlockModule of
+        (_, Failed _) -> pure ()
+        (_, other)    -> assertFailure (show other)
+
+  , testCase "a file that is not a module at all is a syntax error" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 "data Nat : Type\8320 where { zero : Nat }" of
+        (_, Failed _) -> pure ()
+        (_, other)    -> assertFailure (show other)
+  ]
+  where
+    natModule =
+      "module M where\n\
+      \data Nat : Type\8320 where\n\
+      \  zero : Nat\n\
+      \  succ : Nat -> Nat\n\
+      \\n\
+      \one : Nat\n\
+      \one = succ zero\n"
+
+    commentedModule =
+      "-- a module about numbers\n\
+      \module M where\n\
+      \\n\
+      \-- the numbers themselves\n\
+      \data Nat : Type\8320 where\n\
+      \  zero : Nat\n\
+      \  succ : Nat -> Nat      -- successor\n\
+      \\n\
+      \one : Nat\n\
+      \one = succ zero\n"
+
+    blockModule =
+      "module M where\n\
+      \data Nat : Type\8320 where\n\
+      \  zero : Nat\n\
+      \  succ : Nat -> Nat\n\
+      \\n\
+      \do\n\
+      \  say \"here\"\n\
+      \\n\
+      \one : Nat\n\
+      \one = succ zero\n"
+
+    badBlockModule =
+      "module M where\n\
+      \data Nat : Type\8320 where\n\
+      \  zero : Nat\n\
+      \\n\
+      \do\n\
+      \  say\n"
+
+    badModule =
+      "module M where\n\
+      \data Nat : Type\8320 where\n\
+      \  zero : Nat\n\
+      \\n\
+      \one : Nat\n\
+      \one = nosuchthing\n"
+
+-- --------------------------------------------------------------------------
+-- MS4 tier 0 (phase 43)
+-- --------------------------------------------------------------------------
+
+-- | **The checkpoint MS4\'s done-when calls tier 0**: a surface file that
+-- declares a datatype, defines a function by elimination, uses one declaration
+-- from another, and proves a theorem about it — elaborated from a file, with
+-- every term argument written out.
+--
+-- @examples\/tier0.thena@ is the deliverable and the golden is what it
+-- produced. His reason for wanting the explicit form first, 2026-09-01:
+-- /"Couldn\'t we have a demo that uses all explicit arguments in case we want
+-- to test out that we are doing well and all is according the plan?"/
+tierTests :: [TestTree]
+tierTests =
+  [ goldenVsString "tier0" "test/golden/tier0.golden" $ do
+      (s, problems) <- startingSession
+      (s1, out) <- loadProofFile s "examples/tier0.thena"
+      let shown = concatMap (renderResponse' s1) ["one", "two", "plusZeroLeft"]
+      pure (toLazyByteString (stringUtf8 (unlines (problems ++ out ++ shown))))
+
+  , -- **Implicit insertion is semantically transparent**, which is the property
+    -- MS4\'s done-when asks for at phase 44 and not an approximation of it.
+    -- The two spellings do **not** give the same term — they differ by one
+    -- @=@-binding, because @fill@ parks a written argument and an inserted one
+    -- is simply never elaborated into (@ms4\/CLOSEOUT.md@ 8, recorded at 44b).
+    -- So the check is convertibility, which is the property; the syntactic gap
+    -- is the finding, and it is already written down.
+    testCase "a written implicit argument and an inserted one agree" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 bothSpellings of
+        (_, ProofLoaded {}) -> pure ()
+        (_, other)           -> assertFailure (show other)
+
+  , testCase "and they are convertible, not merely both admitted" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 bothSpellings
+          m = sessionMachine s1
+      case ( lookupDefinition (GlobalName "oneExplicit") (globals m)
+           , lookupDefinition (GlobalName "oneImplicit") (globals m)
+           ) of
+        (Just a, Just b) ->
+          case convert (globals m) [] 0 (definitionBody a) (definitionBody b) of
+            (Nothing, _, _) -> pure ()
+            (Just why, _, _) -> assertFailure (show why)
+        _ -> assertFailure "one of the two was not admitted"
+  ]
+  where
+    renderResponse' s g = case lookupDefinition (GlobalName g) (globals (sessionMachine s)) of
+      Just d  -> [g ++ " = " ++ renderCore 0 [] (definitionBody d)]
+      Nothing -> [g ++ " is missing"]
+
+    bothSpellings =
+      "module Both where\n\
+      \data Nat : Type\8320 where\n\
+      \  zero : Nat\n\
+      \  succ : Nat -> Nat\n\
+      \\n\
+      \idE : forall (A : Type\8320) -> A -> A\n\
+      \idE = \\ A x -> x\n\
+      \\n\
+      \idI : forall {A : Type\8320} -> A -> A\n\
+      \idI = \\ A x -> x\n\
+      \\n\
+      \oneExplicit : Nat\n\
+      \oneExplicit = idE Nat (succ zero)\n\
+      \\n\
+      \oneImplicit : Nat\n\
+      \oneImplicit = idI (succ zero)\n"

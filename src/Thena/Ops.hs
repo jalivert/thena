@@ -13,6 +13,7 @@ module Thena.Ops
   , Env
   , Value (..)
   , Operand (..)
+  , operandIn
   , Instr (..)
   , Op (..)
   , produces
@@ -26,15 +27,14 @@ module Thena.Ops
     -- * Rules (§8)
   , Rule (..)
   , Test (..)
-  , usesHint
-  , hintName
   ) where
 
 import Thena.Core.Term (GlobalName)
 import Thena.Development.Cursor (Part (..))
 import Thena.Development.Partial (Partial)
 import Thena.Global.Env (InductiveDefinition)
-import Thena.Syntax.Concrete (Raw)
+import Thena.Surface.Concrete (Plicity)
+import Thena.Surface.Zipper (SurfaceZipper)
 
 -- | A name in a rule body's environment. Not a 'Thena.Core.Term.Var' and not an
 -- 'Thena.Core.Term.Ident': those name things in the development, this names an
@@ -59,7 +59,26 @@ type Env = [(Name, Value)]
 data Value
   = VText    String    -- ^ what @Ask@ returns and @Say@ consumes
   | VTerm    Partial   -- ^ a term, a variable, or a whole development
-  | VSurface Raw       -- ^ an unelaborated tree — elaboration's input
+  | VSurface SurfaceZipper
+    -- ^ **a focused surface term — elaboration's input** (MS4 phase 41,
+    -- focused at phase 46).
+    --
+    -- **It carries a zipper and not a bare tree**, which is his shape D
+    -- (@discussion\/surface-and-elaboration.md@ §1): the subterm plus the path
+    -- it sits at. A value in @env@ is already rewound by a 'Thena.Engine.Choice'
+    -- frame, so a zipper that is a value backtracks for free and no op has to
+    -- ask which cursor it is moving — the Ξ precedent. See
+    -- "Thena.Surface.Zipper".
+    --
+    -- It held a 'Thena.Syntax.Concrete.Raw' from phase 17b until here, which
+    -- was a badly named constructor this project kept having to correct:
+    -- @Raw@ is a concrete syntax for the /development/ language, and turning
+    -- one into a term is resolution, not elaboration. Now it holds what its
+    -- name says.
+    --
+    -- There is deliberately no @VRaw@. Nothing wants development syntax as a
+    -- value any more: the REPL resolves a core argument before the call
+    -- (phase 38's corners), and elaboration takes this.
   | VPair    Value Value
   deriving (Eq, Show)
 
@@ -67,6 +86,23 @@ data Operand
   = Ref Name  -- ^ read a name bound earlier in this body
   | Lit Value -- ^ a value the compiler or rule author wrote down
   deriving (Eq, Show)
+
+-- | What an operand denotes, or the name that had nothing bound to it.
+--
+-- **One definition, read by two callers** — "Thena.Engine" running a body, and
+-- "Thena.Rules" answering a head that asks about an argument (MS4 phase 47).
+-- It lives here because 'Env', 'Operand' and 'Value' all do, and because the
+-- alternative was three lines written twice, which is exactly the confusion his
+-- 2026-08-29 ruling is against.
+--
+-- It returns the unbound name rather than an error, so that each caller says
+-- what an unbound name means to it: to a body it is
+-- 'Thena.Errors.UnboundInBody' and fatal, and to a head it is a question about
+-- an argument nobody supplied.
+operandIn :: Env -> Operand -> Either Name Value
+operandIn e o = case o of
+  Lit v -> Right v
+  Ref n -> maybe (Left n) Right (lookup n e)
 
 -- | @x = op …@ or @op …@. Binding an op that produces nothing is caught by the
 -- load-time validation pass that rules will need anyway (§2.4, §7.2, phase 15);
@@ -84,13 +120,26 @@ data Instr
 -- and phase 4 has neither @attack@ nor a guess to work under.
 --
 -- **The moves are ops, not driver commands.** The cursor /is/
--- 'Thena.Engine.ProofState' (§7.2), so moving the focus changes exactly what
+-- 'Thena.Engine.Development' (§7.2), so moving the focus changes exactly what
 -- backtracks — §12 invariant 3's hazard, and the reason §2.4 spells them as
 -- bare words. 'Down' takes its 'Part' as a field rather than an 'Operand' for
 -- the same reason 'Ask' takes an 'AnswerKind' that way: it is chosen when the
 -- instruction is written, not computed while it runs.
 data Op
   = Assume Operand Operand    -- ^ name, type — extend the development with @λ x : S@
+  | Quantify Operand Operand
+    -- ^ name, type — extend the development with @∀ x : S@ (MS4 phase 41f).
+    --
+    -- **@assume@'s twin, and the only op that can start a Π.** The two build
+    -- the same binding and differ in what the chain below them turns out to
+    -- be: 'Thena.Development.Partial.extract' folds an assumption into a λ and
+    -- this into a Π. Elaborating @∀ (x : A) -> B@ needs @x@ in Γ while @B@ is
+    -- elaborated, and writing a component is the only way anything gets into
+    -- Γ — so without this the surface language's @∀@ has no image in the
+    -- development at all.
+    --
+    -- Its word is **@quantify@** and not @forall@, because @forall@ is a
+    -- keyword (§2.6) and an op word is an @ident@ (§8).
   | Claim  Operand Operand    -- ^ name, type — extend it with a hole @? x : S@
   | Ask    Operand AnswerKind -- ^ prompt text, and what the frontend should offer
   | Say    Operand            -- ^ message text
@@ -116,45 +165,94 @@ data Op
   | Back                      -- ^ undo the last move
   | Reduce                    -- ^ commit a whnf at the core focus (§4.7, phase 7)
   | Unify Operand Operand     -- ^ two terms — solve holes, or park the equation (§6, phase 9)
+  | UnifyInto Operand Operand
+    -- ^ two terms — **solve so the first becomes usable where the second is
+    -- wanted** (MS4 phase 41g). @unify@'s directed sibling, standing to it as
+    -- 'Thena.Core.Convert.subsumes' stands to @convert@.
+    --
+    -- **Elaboration's @FILL@ is its caller**, and the reason it must exist is
+    -- that unification there is a /solver/: @fill@ runs @prim-try@ right after,
+    -- which is @check@, which subsumes — so the relation is enforced one
+    -- instruction later with the right variance, and @unify@ was refusing where
+    -- it merely had nothing to solve. Before it, @try-core ⌜ Nat ⌝@ at a claim
+    -- of @Type₁@ succeeded and @elaborate Nat@ did not: the elaborator was
+    -- strictly weaker than the core it elaborates into.
+    --
+    -- **@unify@ keeps no direction**, deliberately — the argument is stated
+    -- once in "Thena.Core.Convert" and holds here: making the symmetric one
+    -- directional would make every caller that wants an equality state a
+    -- direction it does not have.
   | DefineData InductiveDefinition
     -- ^ hand a declaration out through the channel (§7.5)
     -- The life of a hole — thesis tables 2.7 and 2.8, phase 13. Each acts on
     -- the component at the focus, so none takes a name: §4.0 C1's rule that a
     -- command means one thing wherever it is applies to these too.
   | Attack                    -- ^ @?x : S@ ⟹ @?x ≐ (?x' : S . x') : S@
-  | Intro                     -- ^ move a hole through a Π or a @let@ in its type
+  | Intro (Maybe Operand)
+    -- ^ move a hole through a Π or a @let@ in its type, **optionally naming
+    -- the binder it opens** (MS4 phase 41b).
+    --
+    -- Without a name the binder keeps the one written in the /type/, which is
+    -- what it has always done and what a user typing @intro@ wants. With one,
+    -- the name is the caller's — Brady's @LAMBDA Γ n@, and elaboration needs it:
+    -- @\ y -> y@ against a goal @∀ (x : A) -> A@ must bind **y**, or the body's
+    -- @y@ resolves to nothing.
+    --
+    -- **An optional argument, not an optional mode.** @Prove (Maybe Operand)@
+    -- was deleted one phase ago for being the latter — two mechanisms behind
+    -- one constructor. This is one operation with a default.
   | Try     Operand           -- ^ attach a guess to the hole at the focus
   | Regret                    -- ^ discard it again
   | Solve                     -- ^ commit a guess whose body is pure
   | Abandon                   -- ^ drop a hole nothing refers to
-  | Prove (Maybe Operand)
-    -- ^ dispatch the rule engine at the focus, with an optional hint (§7.3,
-    -- §8; phase 16 without the hint, phase 17b with it).
+  | Prove
+    -- ^ **dispatch the rule engine at the focus** (§7.3, §8) — every rule whose
+    -- head passes, in definition order, with a choice point if there is more
+    -- than one.
     --
-    -- **One op and not two.** §7.2 and §7.3 sketch it as @Prove goal hint@:
-    -- the goal went at phase 16, because it is the focus and 'Value' has no
-    -- case for \"a hole\" (§7.2 refused one twice); the hint arrives here as a
-    -- 'Maybe'. §8's own sentence is why it is not @Prove@ beside @ProveWith@ —
-    -- /same engine, same frames — the only difference is whether a hint is
-    -- present/.
+    -- **It carries nothing** (MS4 phase 41). It was @Prove (Maybe Operand)@,
+    -- the operand being the surface term to elaborate, and the base was
+    -- /partitioned/ on whether a rule's head asked about one. Both are gone,
+    -- and the reason is that **elaboration was never a dispatch**: it is a rule
+    -- of many clauses called by name, which is @Call@. The user, 2026-09-01:
+    -- /"There is no `elaborate` command — there will be an elaborate rule!"/
     --
-    -- The operand must be a 'VSurface'. It is bound into the callee\'s
-    -- environment under the name @hint@, which is how §8's rule bodies already
-    -- read it (@h₁ = app-fun hint@); see "Thena.Engine"\'s @Prove@ case.
-  | Parse Operand
-    -- ^ text → 'VSurface' (§7.2, phase 17b). Lexing and parsing only: turning
-    -- the tree into 'Thena.Core.Term.Core' is 'Resolve', because that needs a
-    -- context and this does not.
-  | Resolve Operand
-    -- ^ 'VSurface' → 'VTerm', in the context at the focus (phase 17b).
+    -- So this op's only customers are search — a bare @prove@ at the REPL,
+    -- which is now the rule @prove@ over this, and the body of a strategy rule
+    -- like @auto@ when one is written.
     --
-    -- Not in §7.2's sketch, and discovered rather than designed (§12 invariant
-    -- 5): @elab-var@ has to get a term out of its hint, and §8's own sketch of
-    -- @elab-app@ already pulls hints apart with ordinary instructions. It is
-    -- one op and not a name-lookup, because "Thena.Syntax.Resolve" answers
-    -- 'Thena.Syntax.Concrete.RawName' against the local context, the
-    -- development's own names and the global environment in one pass, and
-    -- splitting that into three would be three ways to disagree about scope.
+    -- Its written word is **@prim-prove@**: the good word belongs to the rule
+    -- (phase 23b's convention).
+  | Yield Operand
+    -- ^ hand control to the REPL and stay where you are (MS4 phase 45b).
+    --
+    -- **It is 'Ask''s mechanism without 'Ask''s question.** The instruction is
+    -- not consumed — @pc@ is unchanged, exactly as it is for 'Ask' — so the
+    -- machine keeps arriving back here and the user keeps getting the prompt.
+    -- His words: /"that instruction simply enters the REPL again and again and
+    -- again."/ Nothing duplicates itself onto the tape and no program modifies
+    -- itself; @yield@ the driver word is what finally advances past it, the way
+    -- 'Thena.Engine.resumeAt' advances past an 'Ask'.
+    --
+    -- **The operand is why it stopped**, and one op with a message covers both
+    -- callers: a rule body saying what it wants looked at, and elaboration's
+    -- named-placeholder clause saying which @?foo@ you are standing in. Two ops
+    -- differing only by carrying a string would be the special case §12's first
+    -- principle is about.
+  | Block [Instr]
+    -- ^ play a written block of instructions (MS4 phase 45).
+    --
+    -- **It carries the block as a field, not as an 'Operand'**, because the
+    -- block is /written down and never computed/ — the same reason
+    -- 'DefineData' carries its declaration and 'Down' its 'Part'. There is a
+    -- precedent for the shape and it is the settled way to carry a written
+    -- thing into an op.
+    --
+    -- **It is 'Call' with the body supplied instead of looked up.** Same frame,
+    -- same return, same backtracking below it; what it does not do is choose,
+    -- because there is nothing to choose between — a block is one body, so
+    -- there is no candidate list and no choice point. That is the whole of the
+    -- difference.
   | Call GlobalName [Operand]
     -- ^ **call a rule by name — the same search as 'Prove', with a narrower
     -- candidate list** (§8, phase 23, and the user's own framing):
@@ -197,6 +295,167 @@ data Op
     --
     -- It avoids the development's identifiers **and the global environment's
     -- names**, so a generated hole never shadows a datatype or a theorem.
+  | Here
+    -- ^ **the variable of the focused component** (MS4 phase 41c) — the
+    -- companion to 'Goal', which gives the type it is claimed at.
+    --
+    -- **There was no way to ask "which component am I standing on?"**
+    -- @claim@ and @define@ yield the variables of the holes /they/ make, and
+    -- @goto@ takes a variable — but a rule that wanted to come back to the hole
+    -- it was called at had to count its own moves and undo them. The λ case did
+    -- exactly that (phase 41b), and every later case would have.
+    --
+    -- With this, @h = here@ then @goto h@ is exact where balancing @back@s was
+    -- only careful. That retires @elaboration-in-rules.md@'s **gap 1** rather
+    -- than working around it — and it does so with **one read op** instead of
+    -- making every hole-creating op produce its hole, which was that document's
+    -- own suggestion and touches every caller.
+    --
+    -- It yields the variable as a term, @Trailing (Free x)@, which is the shape
+    -- @goto@ already reads.
+  | FreshUniverse
+    -- ^ a universe at a **freshly minted level meta** (MS4 phase 48) — what
+    -- the surface writes as a bare @Type@, and what typical ambiguity means at
+    -- an operand.
+    --
+    -- **It is the literal the elaborator does not write.** Seven of the nine
+    -- @Lit (VTerm …)@ operands the Haskell elaborator emitted, before MS4 phase
+    -- 49f deleted it, were a @Universe@ at a level drawn from the counter — the type a claimed domain, codomain or
+    -- ascription is claimed at, before anything is known about it. A rule
+    -- cannot write that down: the point of the meta is that it is fresh at
+    -- every node.
+    --
+    -- Yielded as a term, not as a level: 'Value' has no level case, and
+    -- @Universe@ is the only place the elaborator puts one.
+  | ResolveName Operand
+    -- ^ what a name denotes, with its level arguments inserted (MS4 phase 48).
+    -- The other two of those nine operands.
+    --
+    -- **Γ first, then the globals**, which is what one namespace (§3.6)
+    -- requires and the order "Thena.Syntax.Resolve" uses: a binder shadows a
+    -- global of the same name. A definition's prenex level parameters each get
+    -- a fresh meta, which is his /"obviously we have them implicitly
+    -- inserted"/ (MS4 phase 44) arriving at an op.
+    --
+    -- **Not @Op.Resolve@ come back.** That took a 'Thena.Syntax.Concrete.Raw'
+    -- and resolved it in Γ, and phase 41 deleted it with the rest of the hint
+    -- machinery. This takes a /name/ and answers with level arguments already
+    -- in place, which is the question elaboration actually asks.
+  | SurfaceNameOf Operand
+    -- ^ the name a surface term's focus is written with, as text (MS4 phase
+    -- 49). Paired with 'SurfaceIsName', which is what makes it total in the
+    -- clause that uses it.
+    --
+    -- **@Of@, because 'Thena.Surface.Concrete.SurfaceName' is a different thing
+    -- with the same word** — that constructor /is/ a surface term, this op
+    -- /reads one/, and every module resolving a rule imports both.
+  | ArrowDomain Operand      -- ^ the @A@ of a surface @A -> B@ (MS4 phase 49b)
+  | ArrowCodomain Operand    -- ^ … its @B@
+  | AscriptionType Operand   -- ^ the @T@ of a surface @e : T@
+  | AscriptionTerm Operand   -- ^ … its @e@
+    -- ^ **Moves, not readers**: each answers with a 'VSurface' focused on that
+    -- part, so the path the zipper carries is extended rather than thrown away
+    -- (MS4 phase 46). A clause pairs each with the test that makes it total —
+    -- @when (surface-is-arrow t) then a = arrow-domain t@.
+    --
+    -- **They do not reuse the cursor's words.** @dom@ and @cod@ already move the
+    -- development's ambient cursor; these produce a value, and one word for two
+    -- different things is the sort of confusion this project does not accept.
+  | AppFunction Operand
+    -- ^ a spine minus its last argument — @f a b@ gives @f a@, @f a@ gives @f@
+    -- (MS4 phase 49d)
+  | AppLastArgument Operand  -- ^ … that last argument
+  | AppHead Operand
+    -- ^ … the head the whole spine is applied to — @f a b@ gives @f@ (MS4
+    -- phase 49f). 'AppFunction' peels from the right and this reaches all the
+    -- way in; the name-headed clause needs the head **before** it has walked
+    -- any argument, because the head is what it claims domains from.
+  | AppFirstArgument Operand
+    -- ^ … its **first** argument (MS4 phase 49f). @E⟦x ⃗a⟧@ walks the head's
+    -- telescope left to right, so it consumes the spine from the left, where
+    -- the binary rule folds it from the right.
+  | AppTail Operand
+    -- ^ … the spine that is left once that first argument is taken: @f a b@
+    -- gives @f b@, and @f a@ gives the bare head @f@ (MS4 phase 49f).
+    --
+    -- **The exhausted case answers with the head and not with a failure**,
+    -- which is what makes the walk a recursion with a base case: the helper
+    -- rule\'s two clauses test @surface-is-app@ and @surface-is-name@, and a
+    -- name-headed spine is one or the other. 'LambdaTail' is the same shape one
+    -- binder group over.
+  | ExpandImplicits Operand
+    -- ^ **Brady\'s @EXPAND@, as a rewriting of the surface term** (MS4 phase
+    -- 49f): the written arguments are lined up against the head\'s recorded
+    -- plicities and an argument is **written in** at every implicit position
+    -- the user left out.
+    --
+    -- **The inserted argument is @_@** — 'Thena.Surface.Concrete.SurfacePlaceholder',
+    -- the placeholder the surface language already has, whose clause of
+    -- @elaborate@ has an empty body. So an inserted slot is claimed like any
+    -- other and simply not elaborated into, which is exactly what the Haskell
+    -- elaborator did with a @Nothing@ slot, and it is Brady\'s /"it is
+    -- unification which finds values of implicit arguments"/.
+    --
+    -- **It is an op and not a head test** because the match is a computation
+    -- over two lists and needs the machine\'s signature environment, which
+    -- "Thena.Rules"\'s @holds@ cannot see (@ms4/CLOSEOUT.md@ 28). Failing here
+    -- is what sends a spine whose arguments do not line up on to the binary
+    -- clause below, exactly as the Haskell @case@ fell through.
+    --
+    -- A head with nothing recorded — every DC-declared global, and every local
+    -- — takes its arguments as written, so the term comes back unchanged.
+  | LambdaName Operand
+    -- ^ the first binder's name in a surface λ, as text (MS4 phase 49c).
+    -- **It refuses an annotated or implicit binder**, which is the whole of
+    -- what the λ case still cannot elaborate.
+  | LambdaTail Operand
+    -- ^ … what the λ abstracts once that binder is peeled off: the rest of the
+    -- group if there was one, otherwise the body
+  | LambdaBody Operand
+    -- ^ … the body, past every binder of the group
+  | LetName Operand          -- ^ the @x@ of a surface @let x = v in b@, as text
+  | LetType Operand          -- ^ … its written annotation
+  | LetValue Operand         -- ^ … its @v@
+  | LetBody Operand          -- ^ … its @b@
+  | ForallName Operand       -- ^ the first binder's name in a surface @∀@
+  | ForallDomain Operand     -- ^ … that binder's annotation
+  | ForallTail Operand
+    -- ^ … what the @∀@ quantifies over once the first binder is peeled off:
+    -- the rest of the group if there was one, otherwise the body.
+  | ElimSpine Operand
+    -- ^ **the application a surface @elim D …@ means** (MS4 phase 49e) — the
+    -- same node, read as @elimD ⃗params motive ⃗methods ⃗indices target@.
+    --
+    -- **It exists so that elaboration has no eliminator case.** §3.7 generates
+    -- a wrapper for the eliminator now
+    -- ('Thena.Global.Env.eliminatorWrapper'), so the eliminator /has/ a global
+    -- name with an ordinary Π telescope, and everything @make-elim@ used to do
+    -- — claim a hole per field, assemble the node — is what applying a name
+    -- already does. His proposal, 2026-09-03.
+    --
+    -- **The three arity errors are answered here** rather than being left to
+    -- the application\'s telescope walk: @elim@\'s groups are written in
+    -- parentheses, so /which/ group is the wrong length is something the user
+    -- can act on and a spine\'s arity is not.
+    --
+    -- **The spine it hands back is rooted, not a move.** Every other accessor
+    -- descends into the tree it was given and 'Thena.Surface.Zipper' keeps the
+    -- path; this one is a node nobody wrote, so it has no place in the original
+    -- and the path is dropped (@ms4/CLOSEOUT.md@ 18 is the same tension one
+    -- node smaller — @lambda-tail@ and @forall-tail@ also answer with a group
+    -- the user did not write).
+  | Play Operand
+    -- ^ run the block a surface @do { … }@ holds (MS4 phase 49b).
+    --
+    -- **A block is written down and never computed**, so elaborating one is
+    -- playing it — the whole of @E⟦do { … }⟧@. It is an op and not a value a
+    -- body could hold, because 'Value' has no case for instructions and the
+    -- @do@ node keeps 'Thena.Syntax.Concrete.RawInstr' until something runs it.
+  | SurfaceUniverseOf Operand
+    -- ^ the universe a surface @Typeₙ@ denotes, as a term (MS4 phase 49).
+    --
+    -- **A term and not a level**, for 'FreshUniverse'\'s reason: 'Value' has no
+    -- level case, and a universe is the only place a written level appears.
   | Goal
     -- ^ the type the focused hole is claimed at (§7.2, phase 24). **The first
     -- op that reads the development** — §7.2's sketch called it @GoalType@ and
@@ -222,10 +481,140 @@ data Op
     -- definition and not a claim: a definition's type is determined by its
     -- value. That is also why it takes two operands where 'Assume' and 'Claim'
     -- take a name and a /type/.
+  | Arrow Operand Operand
+    -- ^ two terms → the non-dependent @Π@ between them (MS4 phase 41d).
+    --
+    -- **The first op that BUILDS a term**, and the answer to what the design
+    -- notes called the real wall — /"we have no op that constructs a term at
+    -- all"/.
+    -- It arrives with a caller and not before: elaborating @e a@ must claim
+    -- @f : A -> B@ where @A@ and @B@ are holes claimed **at run time**, so the
+    -- arrow cannot be built by whatever wrote the program.
+    --
+    -- **The binder is anonymous** — @_@, the convention @prim-apply@ already
+    -- uses for a domain with no name — and the codomain does not mention it,
+    -- which is what makes it an arrow rather than a Π.
+    --
+    -- **It builds; it does not check.** @Θ ⊢ S : Type@ is @claim@'s side
+    -- condition (phase 25f) and @try@'s (25b), and this is neither: a
+    -- constructed term is checked where it is used, which is the same line
+    -- §3.4 draws everywhere else.
+  | ApplyTo Operand Operand
+    -- ^ two terms → the application of the first to the second (MS4 phase 41d).
+    --
+    -- Brady's @FILL (f s)@, where @f@ and @s@ are holes claimed at run time.
+    -- Named @apply-to@ and not @apply@ because @apply@ is a tactic.
+    --
+    -- **@App (Canonical …) x@ is constructible here and is not well formed.**
+    -- That is @PLAN-representation.md@ §3.4's line, deliberately: the checker
+    -- refuses it, and no abstraction boundary is put in the way of building it.
+  | Expose Operand
+    -- ^ **a type with elaboration's own bookkeeping reduced out of it**
+    -- (MS4 phase 42, widened at 44b) — §5.1's 'Thena.Core.Reduce.whnf', and
+    -- then again under every Π binder, so the whole telescope is exposed and
+    -- not merely the head.
+    --
+    -- **A declaration's type is what wanted it.** What @pop-development@ hands
+    -- back is what @extract@ built, and elaboration's own bookkeeping is in
+    -- there: @fill@ parks every term in a @=@-binding, so the type of
+    -- @foo : Nat@ comes out as @let refined = Nat in let goal = refined in
+    -- goal@. That is δ-equal to @Nat@ and still wrong to store, and it does not
+    -- merely look wrong — 'Thena.Engine.introduce' reads a @Let@ /as written/
+    -- and before any reduction (phase 15, deliberately), so @intro@ on a
+    -- @let@-typed goal opens a definition where the λ should have been.
+    --
+    -- **Going under the binders is the half phase 42 missed.** A plain @whnf@
+    -- clears the head, so @declare idn : Nat -> Nat@ worked; it leaves the
+    -- codomain alone, so **no dependent signature could be declared at all** —
+    -- @declare idty : ∀ (A : Type₀) -> A -> A ; idty = \\ A x -> x@ failed with
+    -- /"Type₀ and x -> A cannot be made equal"/, which is @intro-let@ firing
+    -- one binder down. Found at 44b, fixed here.
+    --
+    -- **It is not a normaliser and §5.1 is untouched.** Reduction is still to
+    -- whnf; this iterates it at the positions a telescope has, which is what
+    -- storing a signature needs and nothing more. Clearing a @let@ from a
+    -- /type/ is free — types are compared up to conversion — where clearing one
+    -- from a proof term would not be, and this is only ever applied to a type.
+    --
+    -- **It is a move on a term, not on the development**, which is what
+    -- separates it from the @reduce@ move: that one commits a whnf at the core
+    -- focus, this one answers a question about a term a body is holding.
+  | PushDevelopment Operand
+    -- ^ **start a development of its own, nested inside this one** (MS4 phase
+    -- 42, his decision) — the operand is the type its goal is claimed at.
+    -- Brady's @NEW PROOF@ (@IDRIS.md@ §4.6).
+    --
+    -- **It exists because a declaration cannot be elaborated in the
+    -- development that is already there.** @certify@ extracts the /whole/
+    -- chain, so a signature elaborated beside the body would land inside the
+    -- proof term — which is why phase 37 made @:theorem@ start fresh, and why
+    -- Brady gives the signature a proof of its own.
+    --
+    -- The stack is 'Thena.Engine.enclosing', and it backtracks: a body that
+    -- pushes and then fails unwinds to the stack it had.
+  | PopDevelopment
+    -- ^ **finish the innermost development and yield the term it built** (MS4
+    -- phase 42) — Brady's @TERM@, and 'PushDevelopment'\'s other half.
+    --
+    -- **It insists the development is pure**, through the same
+    -- 'Thena.Development.Partial.extract' @certify@ uses, so a hole left open
+    -- is reported here rather than becoming a term with a gap in it.
+    --
+    -- Refused at the outermost development: there is nothing to pop back to,
+    -- and a machine with no development is not a state this language has.
+  | MakeData GlobalName Int [GlobalName] [Operand]
+    -- ^ **assemble a datatype from elaborated types and hand it out through
+    -- the channel** (MS4 phase 42b) — the datatype's name, how many parameters
+    -- were written, the constructors' names, and the types: the datatype's own
+    -- first and then one per constructor, in order.
+    --
+    -- The names and the parameter count are fields rather than operands for
+    -- 'DefineData'\'s reason — they are written down, never computed — and the
+    -- count is what lets 'Thena.Global.Declare.buildInductive' make §3.7's
+    -- parameter/index split by /peeling/, where @resolveData@ makes it
+    -- syntactically on 'Thena.Syntax.Concrete.Raw'.
+    --
+    -- **It yields; the driver checks and installs**, exactly as 'DefineData'
+    -- does — the whole of "Thena.Global.Declare"'s @declare@ runs on the
+    -- result, so a surface datatype is checked by the same code a written one
+    -- is.
+  | DefineGlobal [Plicity] Operand Operand Operand
+    -- ^ the plicities its signature wrote, then name, type and term — **hand a finished definition out through the
+    -- channel** (MS4 phase 42), the way 'DefineData' hands out a datatype.
+    --
+    -- **No instruction writes globals** (§7.5, §3.3.1), here or ever: this
+    -- yields and the driver installs, running the kernel and generalising the
+    -- level metas exactly as @qed@ does. That is what keeps a surface
+    -- declaration and a hand-built proof arriving in the environment the same
+    -- way.
+    --
+    -- **It says nothing.** His instruction, 2026-09-02: the instruction
+    -- /"doesn't really need to yield anything… Having it print something to the
+    -- REPL in the middle of the elaboration might be distracting."/ The command
+    -- that ran it reports when it is over; this does not report as it goes.
   | Certify Operand
     -- ^ the development must be pure; yields the closed term it stands for and
     -- the type it is claimed to have, for the driver to run the kernel on
     -- (§7.5, §5.3)
+  | ApplyNext Operand Operand
+    -- ^ **a spine and a name: claim a hole for the head\'s next argument and
+    -- yield the spine extended by it** (MS4 phase 49f).
+    --
+    -- One step of what 'Apply' does in a loop and what @make-apply@ did over a
+    -- list until MS4 phase 49f deleted it.
+    -- The type of the operand is reduced to a Π, its domain is claimed above
+    -- the focus under the name given, and the answer is @f ?x@.
+    --
+    -- **This is @ms4/CLOSEOUT.md@ 28\'s second answer** — /ops that take their
+    -- names one at a time, accumulating in the development rather than in the
+    -- body/. A rule cannot build a list of names, but it can mint one name per
+    -- step of a recursion over the spine, and the holes accumulate where they
+    -- belong: in the development.
+    --
+    -- **The caller must be at the hole it is filling when it calls this.** Each
+    -- claim goes directly above the focus, so claiming from one fixed place is
+    -- what puts the domains in telescope order and lets a later domain mention
+    -- an earlier hole. 'Apply' keeps the focus still for the same reason.
   | Apply Operand
     -- ^ the head to apply — thesis §2.7's @naive-refine@ with the search
     -- taken out (phase 25). Walks the head's Π telescope, claims a hole for
@@ -271,7 +660,7 @@ data Op
 
 -- @Unify@ is §7.2's own sketch, arriving at the phase that writes the unifier.
 -- It is an op rather than a driver command for §12 invariant 3's reason: it
--- rewrites 'Thena.Engine.ProofState', so it must backtrack with everything else
+-- rewrites 'Thena.Engine.Development', so it must backtrack with everything else
 -- that does. That is also why §9's @:unify@ is spelled without the colon —
 -- §2.4's rule is that a bare word acts and a colon looks, and this acts.
 --
@@ -312,7 +701,7 @@ data AnswerKind = AText | AName | ATerm | ARule
 -- and the op is the same either way.
 --
 -- It is an op and not a driver command for §12 invariant 3's reason, even
--- though it does not itself rewrite 'Thena.Engine.ProofState': @qed@ at phase
+-- though it does not itself rewrite 'Thena.Engine.Development': @qed@ at phase
 -- 13 certifies /and then/ admits and closes the proof, and admitting a theorem
 -- must be a step you can watch in stepping mode rather than something the
 -- driver does invisibly between commands (§7.5, §1).
@@ -368,18 +757,55 @@ produces o = case o of
   -- instruction stays at the head of @pc@ (§7.5): the destination has to still
   -- be there when the answer comes back.
   Ask _ _      -> True
+  -- **A yield produces nothing.** It is not a question: control comes back
+  -- because the user handed it back, not because they supplied a value.
+  Yield _      -> False
+  -- **A block produces nothing.** Its instructions produce whatever they
+  -- produce, into the block's own environment; the block itself is a body being
+  -- played, and a body has no value — the same answer 'Call' gives.
+  Block _      -> False
   Concat _ _   -> True
   Assume _ _   -> True   -- the variable it bound; §7.3's @?x <- claim S@
+  Quantify _ _ -> False  -- a hole-life op, like 'Attack' and 'Intro'
   Claim  _ _   -> True
 
   Say _        -> False
   DefineData _ -> False
   Certify _    -> False
+  DefineGlobal {} -> False
+  MakeData {} -> False
+  Expose _ -> True
+  PushDevelopment _ -> False
+  PopDevelopment -> True   -- the term the nested development built
   FreshName _  -> True
+  Here         -> True
+  Arrow _ _    -> True
+  ApplyTo _ _  -> True
+  FreshUniverse  -> True
+  ResolveName _  -> True
+  SurfaceNameOf _ -> True
+  SurfaceUniverseOf _ -> True
+  ArrowDomain _ -> True
+  AppFunction _ -> True
+  AppLastArgument _ -> True
+  LambdaName _ -> True
+  LambdaTail _ -> True
+  LambdaBody _ -> True
+  LetName _ -> True
+  LetType _ -> True
+  LetValue _ -> True
+  LetBody _ -> True
+  ForallName _ -> True
+  ForallDomain _ -> True
+  ForallTail _ -> True
+  ArrowCodomain _ -> True
+  AscriptionType _ -> True
+  AscriptionTerm _ -> True
   Goal         -> True
   Typing _     -> True
   Define _ _   -> True   -- the variable it bound, as 'Assume' and 'Claim' do
   Unify _ _    -> False
+  UnifyInto _ _ -> False
   Reduce       -> False
   Along        -> False
   Into         -> False
@@ -388,17 +814,22 @@ produces o = case o of
   Down _       -> False
   Goto _       -> False   -- a move; it rewrites the cursor and yields nothing
   Back         -> False
+  Play _       -> False
   Attack       -> False
-  Intro        -> False
+  Intro _      -> False
   Try _        -> False
   Regret       -> False
   Solve        -> False
   Abandon      -> False
-  Prove _      -> False
+  Prove        -> False
   Call _ _     -> False   -- what the callee builds is in the development
-  Parse _      -> True
-  Resolve _    -> True
   Eliminate _  -> False
+  ApplyNext _ _ -> True  -- the spine, one argument longer
+  ExpandImplicits _ -> True
+  AppHead _ -> True
+  AppFirstArgument _ -> True
+  AppTail _ -> True
+  ElimSpine _ -> True    -- the application an elim means
   Apply _      -> True   -- the spine it built
 
 -- | Every operand an op reads, in the order it is written.
@@ -414,24 +845,63 @@ produces o = case o of
 -- anything.
 operandsOf :: Op -> [Operand]
 operandsOf o = case o of
+  Yield a      -> [a]
+  -- **A block reads no operand.** It is written down, not computed, so there is
+  -- nothing here for a rule to have bound — see 'Block'.
+  Block _      -> []
   Assume a b   -> [a, b]
+  Quantify a b -> [a, b]
   Claim  a b   -> [a, b]
   Ask    a _   -> [a]
   Say    a     -> [a]
   Concat a b   -> [a, b]
   Unify  a b   -> [a, b]
+  UnifyInto a b -> [a, b]
   Try    a     -> [a]
   Certify a    -> [a]
+  DefineGlobal _ a b c -> [a, b, c]
+  MakeData _ _ _ as -> as
+  Expose a -> [a]
+  PushDevelopment a -> [a]
+  PopDevelopment -> []
   FreshName a  -> [a]
+  Here         -> []
+  Arrow a b    -> [a, b]
+  ApplyTo a b  -> [a, b]
+  FreshUniverse  -> []
+  ResolveName x  -> [x]
+  SurfaceNameOf x -> [x]
+  SurfaceUniverseOf x -> [x]
+  ArrowDomain x -> [x]
+  AppFunction x -> [x]
+  AppLastArgument x -> [x]
+  LambdaName x -> [x]
+  LambdaTail x -> [x]
+  LambdaBody x -> [x]
+  LetName x -> [x]
+  LetType x -> [x]
+  LetValue x -> [x]
+  LetBody x -> [x]
+  ForallName x -> [x]
+  ForallDomain x -> [x]
+  ForallTail x -> [x]
+  Play x -> [x]
+  ArrowCodomain x -> [x]
+  AscriptionType x -> [x]
+  AscriptionTerm x -> [x]
   Goal         -> []
   Typing a     -> [a]
   Define a b   -> [a, b]
   Eliminate a  -> [a]
+  ApplyNext f x -> [f, x]
+  ExpandImplicits a -> [a]
+  AppHead a    -> [a]
+  AppFirstArgument a -> [a]
+  AppTail a    -> [a]
+  ElimSpine a  -> [a]
   Apply a      -> [a]
-  Parse   a    -> [a]
-  Resolve a    -> [a]
   Call _ as    -> as
-  Prove h      -> maybe [] (: []) h
+  Prove        -> []
   DefineData _ -> []
   Along        -> []
   Into         -> []
@@ -442,7 +912,7 @@ operandsOf o = case o of
   Back         -> []
   Reduce       -> []
   Attack       -> []
-  Intro        -> []
+  Intro m      -> maybe [] (: []) m
   Regret       -> []
   Solve        -> []
   Abandon      -> []
@@ -481,58 +951,87 @@ data Rule = Rule
 -- offer something that will not work. Prolog has exactly this.
 --
 -- Phase 15 defines the four its rule base asks, and no more (§12 invariant 5);
--- phase 17b adds the fifth, when @Prove@ starts carrying a hint. §8's
--- @HintIsApp@ is still absent — elaborating a compound surface term is beyond
--- MS1's identifier case.
+-- phase 17b adds a fifth when @Prove@ carries a hint, and phase 41 removes it
+-- again with the hint itself.
+--
+-- == A test may ask about an argument — MS4 phase 47
+--
+-- 'SurfaceIsName' is the first test that takes one, and it is a **new shape in
+-- the head language** rather than only a new test: every other asks about the
+-- focus, which the machine is standing at, where this asks about a value the
+-- caller supplied. 'Thena.Rules.holds' therefore takes the environment binding
+-- a clause's parameters to a call's arguments, and 'Thena.Rules.validate'
+-- refuses a head naming anything that is not one of them.
+--
+-- **The operand is not restricted to a 'Ref'.** A head is written in the same
+-- operand language a body is, so a literal is accepted where a parameter name
+-- is — for the reason §8 gives about string literals, that a grammar policing
+-- operand kinds would be the rule language's type system in the wrong place
+-- (@ms2\/CLOSEOUT.md@ 4b, deferred at his direction 2026-09-03).
 data Test
   = FocusIsHole     -- ^ the focus is a @? x : S@ component
   | FocusIsGuess    -- ^ the focus is a @? x ≐ g : S@ component
+  | FocusIsComponent
+    -- ^ the focus is a component of the chain rather than a core term (MS4
+    -- phase 49c). What @along@ and the other component moves need, and the one
+    -- thing that is true throughout a walk over a binder group.
   | GoalTypeIsPi    -- ^ the focused component's type whnfs to a Π
   | GoalTypeIsLet   -- ^ … or to a @let@, which is table 2.8's other intro
-  | HintIsName      -- ^ there is a hint, and it is a bare identifier (§8)
+  | SurfaceIsName Operand
+    -- ^ the operand is a surface term whose focus is a name (MS4 phase 47)
+    --
+    -- **The twelve below complete the set** (MS4 phase 49) — one per 'Surface'
+    -- constructor, so every clause of @elaborate@ can say which node it is for
+    -- and **no two heads can match the same term**. His ruling, 2026-09-03:
+    -- /"those head-predicates can be useful in the future. And what's more —
+    -- adding them is not payed in design. They are not a design decision. If we
+    -- never use them after MS4, we just drop them during a cleanup refactor."/
+  | SurfaceIsUniverse Operand      -- ^ @Typeₙ@
+  | SurfaceIsUniverseOpen Operand  -- ^ a bare @Type@
+  | SurfaceIsPlaceholder Operand   -- ^ @_@
+  | SurfaceIsHole Operand          -- ^ @?foo@
+  | SurfaceIsApp Operand           -- ^ a spine
+  | SurfaceIsLambda Operand        -- ^ @\ x -> b@
+  | SurfaceIsForall Operand        -- ^ @∀ (x : A) -> B@
+  | SurfaceIsArrow Operand         -- ^ @A -> B@
+  | SurfaceIsLet Operand           -- ^ @let x = v in b@
+  | SurfaceIsAscription Operand    -- ^ @e : T@
+  | SurfaceIsElim Operand          -- ^ @elim D … t@
+  | SurfaceIsDo Operand            -- ^ @do { … }@
+  | AppArgsAreExplicit Operand
+    -- ^ a spine with no argument written in braces (MS4 phase 49d).
+    --
+    -- **The binary clause has no notion of plicity at all**, so it must decline
+    -- a written implicit rather than take it as an ordinary argument and report
+    -- a type mismatch about a term the user never meant to write explicitly.
+  | AppHeadIsName Operand
+    -- ^ a spine whose head is a name (MS4 phase 49d) — Brady's split, and the
+    -- clause that begins with @EXPAND@.
+  | AppHeadIsElim Operand
+    -- ^ **a spine whose head is an @elim@** (MS4 phase 55).
+    --
+    -- @elim D … t@ on its own is a name-headed application already, because
+    -- §3.7 generates a wrapper for the eliminator (phase 49e) and
+    -- 'ElimSpine' rewrites the node into an application of it. **Applied to
+    -- something more** — @elim … t (refl Term x)@, which is how a proof
+    -- discharges the equation an unfriendly index carries — the head is the
+    -- @elim@ node, not a name, so the binary clause took it: it claims
+    -- @f : A -> B@, an /arrow/, and an eliminator\'s type is a telescope, so
+    -- @A@ was left unsolved and the declaration silently produced nothing.
+  | LambdaBindsMore Operand        -- ^ a λ whose group has a binder after the
+                                   --   first (MS4 phase 49c)
+  | LambdaBindsOne Operand         -- ^ … and one whose group has just the one
+    -- ^ **Two positive tests, as @let@'s are**: they are how a clause that
+    -- peels one binder knows whether to recurse, and the head language has no
+    -- negation.
+  | LetIsAnnotated Operand         -- ^ a @let@ whose type was written (49b)
+  | LetIsBare Operand              -- ^ … and one whose type was not
+    -- ^ **Two positive tests rather than one and its negation.** The head
+    -- language has no negation, and the two clauses of @E⟦let⟧@ differ by
+    -- whether there is an annotation to elaborate.
   deriving (Eq, Show)
 
--- | Does this head ask about the hint?
---
--- **The partition, decided by the user 2026-08-23.** A hint changes the
--- question being asked — /build a term for this goal out of this surface
--- syntax/, rather than /make progress on this goal/ — so
--- 'Thena.Rules.dispatch' offers hint rules when there is a hint and the rest
--- when there is not. Without it @attack@ would win every elaboration, being
--- first in definition order and matching on 'FocusIsHole' like everything else
--- at a hole.
---
--- The other two answers were declined: ordering @elab-var@ first leaves rules
--- that ignore the hint sitting in the retry list underneath it, and a @NoHint@
--- test would be boilerplate on every rule ever written.
---
--- It is a function of the /head/ and not of the body, so it is decidable
--- without running anything — which is what lets 'Thena.Rules.matches' apply it
--- too, and keeps @:matches@ from listing rules the engine would not run.
-usesHint :: Rule -> Bool
-usesHint r = any hintTest (ruleHead r)
-  where
-    hintTest t = case t of
-      HintIsName    -> True
-      FocusIsHole   -> False
-      FocusIsGuess  -> False
-      GoalTypeIsPi  -> False
-      GoalTypeIsLet -> False
 
--- | The name a hint is bound to in the environment of the body it dispatches
--- into (§8).
---
--- A reserved name, and the one magic name in the instruction language. §8 wrote
--- it this way — @h₁ = app-fun hint@ reads @hint@ as an ordinary operand — and
--- the alternative was a @Hint@ read op, which would have made the machine carry
--- the current hint somewhere for it to read. This way @Prove@ seeds the
--- callee's environment and everything downstream is ordinary.
---
--- 'Thena.Rules.validate' knows it: a body whose head asks about the hint starts
--- with this name in scope, so an @elab-@ rule reading it is not an unbound
--- 'Ref'.
-hintName :: Name
-hintName = "hint"
 
 -- --------------------------------------------------------------------------
 -- How an op is written (§2.4, phase 21)
@@ -568,7 +1067,13 @@ hintName = "hint"
 -- here because the case split is total, not because a body may say it.
 opKeyword :: Op -> String
 opKeyword o = case o of
+  Yield _      -> "yield"
+  -- Like 'DefineData', a word with no written form of its own: a block is
+  -- written @do { … }@ in the surface language and is never spelled in a rule
+  -- body. The word is here because the case split is total.
+  Block _      -> "do"
   Assume _ _   -> "assume"
+  Quantify _ _ -> "quantify"
   Claim  _ _   -> "claim"
   Ask    _ _   -> "ask"
   Say    _     -> "say"
@@ -582,23 +1087,57 @@ opKeyword o = case o of
   Back         -> "back"
   Reduce       -> "reduce"
   Unify _ _    -> "unify"
+  UnifyInto _ _ -> "unify-into"
   DefineData _ -> "data"
   Attack       -> "prim-attack"
-  Intro        -> "prim-intro"
+  Intro _      -> "prim-intro"
   Try _        -> "prim-try"
   Regret       -> "prim-regret"
   Solve        -> "prim-solve"
   Abandon      -> "prim-abandon"
-  Prove _      -> "prove"
-  Parse _      -> "parse"
-  Resolve _    -> "resolve"
+  Prove        -> "prim-prove"
   Call _ _     -> "call"
   FreshName _  -> "fresh-name"
+  Here         -> "here"
+  Arrow _ _    -> "arrow"
+  ApplyTo _ _  -> "apply-to"
+  FreshUniverse  -> "fresh-universe"
+  ResolveName _  -> "resolve-name"
+  SurfaceNameOf _ -> "surface-name"
+  SurfaceUniverseOf _ -> "surface-universe"
+  ArrowDomain _ -> "arrow-domain"
+  AppFunction _ -> "app-function"
+  AppLastArgument _ -> "app-last-argument"
+  LambdaName _ -> "lambda-name"
+  LambdaTail _ -> "lambda-tail"
+  LambdaBody _ -> "lambda-body"
+  LetName _ -> "let-name"
+  LetType _ -> "let-type"
+  LetValue _ -> "let-value"
+  LetBody _ -> "let-body"
+  ForallName _ -> "forall-name"
+  ForallDomain _ -> "forall-domain"
+  ForallTail _ -> "forall-tail"
+  Play _ -> "play"
+  ArrowCodomain _ -> "arrow-codomain"
+  AscriptionType _ -> "ascription-type"
+  AscriptionTerm _ -> "ascription-term"
   Goal         -> "goal"
   Typing _     -> "typeof"
   Define _ _   -> "define"
   Certify _    -> "certify"
+  DefineGlobal {} -> "define-global"
+  MakeData {} -> "make-data"
+  Expose _ -> "expose"
+  PushDevelopment _ -> "push-development"
+  PopDevelopment -> "pop-development"
   Eliminate _  -> "prim-eliminate"
+  ApplyNext _ _ -> "apply-next"
+  ExpandImplicits _ -> "expand-implicits"
+  AppHead _ -> "app-head"
+  AppFirstArgument _ -> "app-first-argument"
+  AppTail _ -> "app-tail"
+  ElimSpine _ -> "elim-spine"
   Apply _      -> "prim-apply"
 
 -- | The words that name a field of a core term (§4.3, phase 5). One word per

@@ -16,6 +16,7 @@
 module Thena.Core.Unify
   ( UnifyResult (..)
   , unify
+  , unifyInto
   , blockers
   , constraintsOf
   ) where
@@ -23,10 +24,13 @@ module Thena.Core.Unify
 import Data.List (nub)
 
 import Thena.Core.Context (Context, Entry (..), entryVar, lamOver, substLevelsInEntry)
+import Thena.Core.Convert (Direction (..))
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Level
   ( LevelUnification (..)
   , LevelVar
+  , levelLeq
+  , metasIn
   , unifyLevels
   )
 import Thena.Core.Term
@@ -102,8 +106,42 @@ data UnifyResult
 unify
   :: GlobalEnv -> Cursor -> Int -> Core -> Core -> Core
   -> (UnifyResult, Cursor, Int)
-unify env cur n s t ty =
-  case work env (St cur n [] []) (Equate [] s t ty) >>= wake env of
+unify = related Same
+
+-- | @unifyInto s t@ — solve so that @s@ becomes usable where @t@ is wanted.
+--
+-- **Unification's directed sibling, and 'Thena.Core.Convert.subsumes' is the
+-- pattern it follows** (MS4 phase 41g). That module's header states the
+-- argument once and it holds here: making the symmetric one directional would
+-- have made every caller that wants an equality state a direction it does not
+-- have. So there are two entry points over one worker, exactly as @convert@ and
+-- @subsumes@ are.
+--
+-- **Its caller is elaboration's @FILL@, and the reason is that unification
+-- there is a SOLVER and not a checker.** @fill@ runs @prim-try@ immediately
+-- after, which is @check@, which subsumes — so the relation is enforced one
+-- instruction later, correctly and with the right variance. Before this,
+-- @unify@ refused where it merely had nothing to solve, and elaboration was
+-- strictly weaker than the core it elaborates into: @try-core ⌜ Nat ⌝@ at a
+-- claim of @Type₁@ succeeded and @elaborate Nat@ did not.
+--
+-- **What it does not do is carry the direction past a deferral.** A 'Constraint'
+-- is @Equate Ξ s t T@ with nowhere to record one, and 'wake' re-reads parked
+-- constraints out of the development, so a postponed subsumption comes back as
+-- an equality. That is sound — the approximation can only reject — and it is
+-- exactly the behaviour everything had before this function existed. It is
+-- @AGENDA.md@ item 41 and @discussion\/directed-unification.md@, which is
+-- written so that nobody has to re-derive any of it.
+unifyInto
+  :: GlobalEnv -> Cursor -> Int -> Core -> Core -> Core
+  -> (UnifyResult, Cursor, Int)
+unifyInto = related Cumulative
+
+related
+  :: Direction -> GlobalEnv -> Cursor -> Int -> Core -> Core -> Core
+  -> (UnifyResult, Cursor, Int)
+related dir env cur n s t ty =
+  case work dir env (St cur n [] []) (Equate [] s t ty) >>= wake env of
     Left (reason, n') -> (Failed reason, cur, n')
     Right st ->
       let solved = reverse (stSolved st)
@@ -149,7 +187,7 @@ data St = St
 
 -- | A failure carries the counter, because a variable minted on the way to it
 -- may already have reached the user inside a reason (§7.4).
-type Attempt a = Either (FailReason, Int) a
+type Unifying a = Either (FailReason, Int) a
 
 -- --------------------------------------------------------------------------
 -- What the chain says about a variable
@@ -213,6 +251,7 @@ kindOf c = case c of
   Define x _ _ _  -> (x, KRigid)
   Claim  x i ty   -> (x, KHole i ty)
   Guess  x _ _ _  -> (x, KGuess)
+  Quantify x _ _  -> (x, KRigid)
 
 -- | The context every core operation is called in here: Γ at the focus, the
 -- focused component, and everything below.
@@ -239,8 +278,8 @@ components p = case p of
 -- Solving one equation
 -- --------------------------------------------------------------------------
 
-work :: GlobalEnv -> St -> Constraint -> Attempt St
-work env st (Equate xi s t ty)
+work :: Direction -> GlobalEnv -> St -> Constraint -> Unifying St
+work dir env st (Equate xi s t ty)
   | s == t    = Right st
   | otherwise =
       let ctx = whole (stCur st) ++ xi
@@ -248,20 +287,50 @@ work env st (Equate xi s t ty)
           t'  = whnf env ctx t
        in if s' == t'
             then Right st
-            else match env st ctx (Equate xi s' t' ty)
+            else match dir env st ctx (Equate xi s' t' ty)
 
 -- | Both sides are in whnf. Which rule applies is decided by the two heads
 -- (§6.1): a blocked head defers, a flex head against a rigid one is the pattern
 -- case, flex against flex defers, and rigid against rigid decomposes.
-match :: GlobalEnv -> St -> Context -> Constraint -> Attempt St
-match env st ctx k@(Equate _ s t _) =
+match :: Direction -> GlobalEnv -> St -> Context -> Constraint -> Unifying St
+match dir env st ctx k@(Equate _ s t _) =
   case (headOf st ctx s, headOf st ctx t) of
     (HBlocked, _) -> park env st k
     (_, HBlocked) -> park env st k
-    (HFlex {}, HFlex {}) -> park env st k      -- flex-flex is deferred (§6.1)
+
+    -- **The degenerate flex-flex case is SOLVED, and the rest still defers**
+    -- (MS4 phase 41g). Two bare holes and no spine on either side is Miller's
+    -- pattern fragment trivially — the condition is that the arguments are
+    -- distinct locally-bound variables, and there are none — so the equation
+    -- has a most general unifier and assigning is not a guess.
+    --
+    -- **Huet's deferral is about the other case.** He postpones flex-flex
+    -- because in the general higher-order setting @?X a⃗ ≟ ?Y b⃗@ has no most
+    -- general unifier and is /always/ solvable, so branching on it would be
+    -- guessing. That is a good default and §6.1 inherited it wholesale; the
+    -- spined case below keeps it. @PLAN-semantics.md@ §6's own standard is
+    -- already *"correct Miller pattern unification"*, so this case is inside
+    -- what the project committed to rather than beyond it.
+    --
+    -- **The direction of the assignment is forced by the chain**, which is
+    -- Gundry–McBride–McKinna's point that position /is/ commitment: a hole may
+    -- only be solved by a term mentioning what is above it, so the later hole
+    -- is solved with the earlier one. 'flexRigid' checks that anyway and parks
+    -- on @MightCome@, so getting it backwards would be slow, not wrong.
+    --
+    -- The two cannot be the same hole: 'work' returns on @s == t@ before this
+    -- is reached, and two bare holes are equal exactly when their variables
+    -- are.
+    (HFlex x i, HFlex y j)
+      | null (spineArgs s), null (spineArgs t) ->
+          if i >= j
+            then flexRigid env st ctx k x i [] t
+            else flexRigid env st ctx k y j [] s
+      | otherwise -> park env st k
+
     (HFlex x i, _) -> flexRigid env st ctx k x i (spineArgs s) t
     (_, HFlex y i) -> flexRigid env st ctx k y i (spineArgs t) s
-    (HRigid, HRigid) -> rigidRigid env st ctx k
+    (HRigid, HRigid) -> rigidRigid dir env st ctx k
 
 data Head = HFlex Var Int | HBlocked | HRigid
 
@@ -308,7 +377,7 @@ spineArgs = go []
 -- may reduce to one once some other hole is solved.
 flexRigid
   :: GlobalEnv -> St -> Context -> Constraint -> Var -> Int -> [Core] -> Core
-  -> Attempt St
+  -> Unifying St
 flexRigid env st ctx k x i args rhs = case patternArgs (kinds (stCur st)) ctx args of
   Nothing -> park env st k
   Just es
@@ -452,17 +521,61 @@ solve x t st = st
 --     arrives there rather than at the line.
 --   * **clash** — no instantiation makes @Type₀@ and @Type₁@ the same, so this
 --     is an ordinary mismatch and fails here.
-rigidRigid :: GlobalEnv -> St -> Context -> Constraint -> Attempt St
-rigidRigid env st ctx k@(Equate xi s t ty) = case levelPairs of
+rigidRigid :: Direction -> GlobalEnv -> St -> Context -> Constraint -> Unifying St
+rigidRigid dir env st ctx k@(Equate _ s t _) = case cumulativeUniverses of
+  -- **The one place the direction is consulted at a universe** (MS4 phase
+  -- 41g). @Type₀@ is usable where @Type₁@ is wanted, so a directed problem is
+  -- finished the moment 'levelLeq' says so, where the symmetric one would
+  -- demand the levels be equal.
+  --
+  -- **It relaxes only when there is nothing left to SOLVE**, and that
+  -- condition is the whole of the case. A meta means this module has work to
+  -- do and must do it: @0 ≤ ?ℓ@ is /decidably true/ — zero is the bottom of the
+  -- hierarchy — so answering it would discharge the problem without ever
+  -- solving @?ℓ@, and the meta would survive to generalisation as a level
+  -- parameter nothing can determine (@ms4/CLOSEOUT.md@ 9). The golden caught
+  -- exactly that: @elaborate (forall (A : Type₀) -> A)@ went from @pi : Type₁@
+  -- to @pi {ℓ₂₁} : ((1 ⊔ ℓ₂₁) ≤ 1) ⊢ Type₁@.
+  --
+  -- So: **two closed levels are decided; anything with an unknown in it is a
+  -- solving problem** and goes to 'unifyLevels' exactly as it always has.
+  -- Solving it as an equality is sound for a subsumption — an equality implies
+  -- the inequality — it is merely less general, and it is what every caller
+  -- had before this function existed.
+  --
+  -- This is where the module parts company with
+  -- 'Thena.Core.Convert.related', which owes an 'Obligation' where this
+  -- solves. The reason is that they are different jobs: that one decides, this
+  -- one solves, and @fill@ runs both — 'unifyInto' first and @prim-try@, which
+  -- is @check@, immediately after.
+  Just True  -> Right st
+  Just False -> Left (universeClash, stNames st)
+  Nothing    -> byLevels
+  where
+    -- 'levelLeq' cannot answer 'Nothing' with no metas on either side, so the
+    -- three-way above is total.
+    cumulativeUniverses = case (dir, s, t) of
+      (Cumulative, Universe a, Universe b)
+        | null (metasIn a), null (metasIn b) -> levelLeq a b
+      _                                      -> Nothing
+
+    universeClash = case (s, t) of
+      (Universe a, Universe b) -> UniverseMismatch a b
+      _                        -> Mismatch ctx s t
+
+    byLevels = rigidRigidLevels dir env st ctx k
+
+rigidRigidLevels :: Direction -> GlobalEnv -> St -> Context -> Constraint -> Unifying St
+rigidRigidLevels dir env st ctx k@(Equate xi s t ty) = case levelPairs of
   Just (eqs, clash) -> case unifyLevels eqs of
     LevelsClash _ _  -> Left (clash, stNames st)
     LevelsStuck      -> structural
     LevelsSolved []  -> structural
     LevelsSolved sub ->
-      work env st { stCur    = overLevels sub (stCur st)
-                  , stLevels = reverse (map fst sub) ++ stLevels st
-                  }
-                  (pushed sub k)
+      work dir env st { stCur    = overLevels sub (stCur st)
+                      , stLevels = reverse (map fst sub) ++ stLevels st
+                      }
+                      (pushed sub k)
   Nothing -> structural
   where
     -- The level arguments two matching heads must agree on, and what to report
@@ -499,8 +612,12 @@ rigidRigid env st ctx k@(Equate xi s t ty) = case levelPairs of
       (Global f ks, Global g ls)
         | f == g, length ks == length ls -> Right st
 
-      (Pi i dom sc, Pi _ dom' sc') -> binder i dom sc dom' sc'
-      (Lam i dom sc, Lam _ dom' sc') -> binder i dom sc dom' sc'
+      -- **The codomain is the only covariant position in the language**, so it
+      -- is the only place @dir@ survives a decomposition.
+      (Pi i dom sc, Pi _ dom' sc') -> binder dir i dom sc dom' sc'
+      -- A λ is not a type. Two of them being compared under a directed problem
+      -- have nothing for a direction to mean, so it stops here too.
+      (Lam i dom sc, Lam _ dom' sc') -> binder Same i dom sc dom' sc'
 
       (App f a, App g b) -> sequential [(f, g), (a, b)]
 
@@ -523,15 +640,34 @@ rigidRigid env st ctx k@(Equate xi s t ty) = case levelPairs of
     -- is reached only for a term @check@ would already have rejected.
     sequential = foldl one (Right st)
       where
-        one acc (a, b) = acc >>= \st' -> work env st' (Equate xi a b ty)
+        -- **Every sub-problem here is INVARIANT, so the direction stops.**
+        -- These are the arguments of a neutral spine, of a saturated former
+        -- and of an elimination, and none of them is a place a smaller
+        -- universe may stand in for a larger one: the head is opaque, so
+        -- nothing relates @F Type₀@ to @F Type₁@. Coq compares application
+        -- arguments at equality for exactly this reason.
+        --
+        -- **This DIVERGES from 'Thena.Core.Convert.related', which inherits
+        -- here, and that is a bug in that module rather than a difference of
+        -- opinion** — found while building this phase and reported at
+        -- @ms4/CLOSEOUT.md@ 12. It was mirrored here first, on the argument
+        -- that the two comparisons agreeing matters more than either one's
+        -- view of variance; that argument does not survive knowing which of
+        -- them is wrong.
+        one acc (a, b) = acc >>= \st' -> work Same env st' (Equate xi a b ty)
 
     -- One fresh binder, opened on both sides and added to Ξ. This is where the
     -- name counter is spent, and Miller's mixed prefix is exactly this list.
-    binder i dom sc dom' sc' = do
-      st1 <- work env st (Equate xi dom dom' ty)
+    -- **The domain is unified at 'Same' whatever @dir@ is**, which is
+    -- 'Thena.Core.Convert.subsumes''s rule and the sound one: a function
+    -- expecting @Type₁@ arguments cannot stand in for one expecting @Type₀@
+    -- arguments, because it would be handed something too small. Only the
+    -- codomain varies.
+    binder inner i dom sc dom' sc' = do
+      st1 <- work Same env st (Equate xi dom dom' ty)
       let (x, n1) = fresh (stNames st1)
           xi'     = xi ++ [Hypothesis x i dom]
-      work env st1 { stNames = n1 } (Equate xi' (open x sc) (open x sc') ty)
+      work inner env st1 { stNames = n1 } (Equate xi' (open x sc) (open x sc') ty)
 
 -- --------------------------------------------------------------------------
 -- Parking
@@ -549,7 +685,7 @@ rigidRigid env st ctx k@(Equate xi s t ty) = case levelPairs of
 --
 -- The stored type is inferred from the left-hand side where that works, because
 -- decomposition is untyped and a sub-problem's type is not the parent's.
-park :: GlobalEnv -> St -> Constraint -> Attempt St
+park :: GlobalEnv -> St -> Constraint -> Unifying St
 park env st k@(Equate xi s _ ty)
   | k' `elem` constraintsOf (rebuild (stCur st)) = Right st
   | otherwise = Right st { stCur = postConstraint position k' (stCur st), stNames = n1 }
@@ -599,7 +735,7 @@ mentions (Equate xi s t ty) =
 -- The focused constraint is not retried. 'overConstraints' cannot delete it —
 -- the focus would have nowhere to stand — and G1 is explicit that the pass
 -- leaves the focus alone.
-wake :: GlobalEnv -> St -> Attempt St
+wake :: GlobalEnv -> St -> Unifying St
 wake env = loop
   where
     loop st
@@ -615,9 +751,19 @@ wake env = loop
       OnConstraint j -> j == k
       _              -> False
 
+    -- **A woken constraint is retried at 'Same', and that is where a directed
+    -- problem loses its direction** (MS4 phase 41g). A 'Constraint' is
+    -- @Equate Ξ s t T@ with nowhere to record one, and these are read back out
+    -- of the development, so nothing survives to say the equation was a
+    -- subsumption. Sound — the approximation can only reject — and exactly the
+    -- behaviour everything had before 'unifyInto' existed.
+    --
+    -- It is reachable and it is not fixed here: @AGENDA.md@ item 41, with the
+    -- measurements and the questions it raises in
+    -- @discussion\/directed-unification.md@.
     retry acc k = acc >>= \st ->
       let dropped = st { stCur = overConstraints (\j -> if j == k then Nothing else Just j) (stCur st) }
-       in work env dropped k
+       in work Same env dropped k
 
     progressed a b =
       length (stSolved b) > length (stSolved a)

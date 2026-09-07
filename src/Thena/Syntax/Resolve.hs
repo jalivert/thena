@@ -20,6 +20,7 @@ import Thena.Core.Term
 import Thena.Development.Component (Component (..))
 import Thena.Development.Partial (Constraint (..), Partial (..))
 import Thena.Errors (DevForm (..), ResolveError (..))
+import Thena.Global.Declare (targetIndices)
 import Thena.Global.Env
   ( ConstructorDefinition (..)
   , GlobalEnv
@@ -243,7 +244,17 @@ partial
   :: GlobalEnv -> Globals -> Context -> Local -> Int
   -> Raw -> Either ResolveError (Partial, Int)
 partial env gs ctx local n raw = case raw of
-  RawLam bs b -> assumes env gs ctx local n bs b
+  RawLam bs b -> binderLinks env gs Assume ctx local n bs b
+
+  -- **A leading @∀@ run is components, exactly as a leading @λ@ run is** (MS4
+  -- phase 41f). The fifth component is a ∀-binder, so the concrete syntax it
+  -- needs is the one a core Π already has, and adding it here is the whole of
+  -- what the DC's syntax owes it — no token, no production.
+  --
+  -- It costs what the @λ@ case has always cost: a development whose trailing
+  -- term is a bare Π cannot be written without corners. @⌜ ∀ (x : A) -> B ⌝@
+  -- is the escape, and 'RawQuote' below is where it stops the spine.
+  RawPi bs b -> binderLinks env gs Quantify ctx local n bs b
 
   RawLet x val ty b -> do
     (val', n1) <- core env gs ctx local n val
@@ -284,17 +295,22 @@ partial env gs ctx local n raw = case raw of
     (t', n1) <- core env gs ctx local n raw
     Right (Trailing t', n1)
 
--- | Each binder group in a @λ@ becomes its own 'Assume' link.
-assumes
-  :: GlobalEnv -> Globals -> Context -> Local -> Int
+-- | Each binder group in a @λ@ or a @∀@ becomes its own link.
+--
+-- Parameterised by which component it builds, the way 'binders' above is
+-- parameterised by 'Thena.Core.Term.Lam' or 'Thena.Core.Term.Pi': the two runs
+-- differ in exactly that and in nothing else.
+binderLinks
+  :: GlobalEnv -> Globals -> (Var -> Ident -> Core -> Component)
+  -> Context -> Local -> Int
   -> [RawBinder] -> Raw -> Either ResolveError (Partial, Int)
-assumes env gs ctx local n bs b = case bs of
+binderLinks env gs build ctx local n bs b = case bs of
   [] -> partial env gs ctx local n b
   RawBinder x ty : rest -> do
     (ty', n1) <- core env gs ctx local n ty
     let (v, n2) = fresh n1
-    (b', n3) <- assumes env gs ctx ((x, v) : local) n2 rest b
-    Right (Under (Assume v (Ident x) ty') b', n3)
+    (b', n3) <- binderLinks env gs build ctx ((x, v) : local) n2 rest b
+    Right (Under (build v (Ident x) ty') b', n3)
 
 -- | Ξ's binders scope over @s@, @t@ and @T@ and nothing else.
 constraint
@@ -315,7 +331,7 @@ constraint env gs ctx local n (RawConstraint bs s t ty) = do
 --
 -- A declaration is closed: it is read in the empty context, not in the
 -- development's, because what enters the global environment must mean the same
--- thing in every later proof (§3.3.1). Only the parameters, and the datatype's
+-- thing in every later development (§3.3.1). Only the parameters, and the datatype's
 -- own name, are added to the scope it is read in.
 --
 -- **The indices are not in scope in the constructors.** Each constructor
@@ -359,30 +375,6 @@ constructors env gs dn params want local n (RawConstructor cn ty : rest) = do
   ixs                     <- targetIndices dn params want cn tgt'
   (rest', n3)             <- constructors env gs dn params want local n2 rest
   Right (ConstructorDefinition (GlobalName cn) args ixs : rest', n3)
-
--- | Split a constructor's target into the index expressions the record keeps.
---
--- The parameters are not kept, because they are fixed for the whole definition
--- and a constructor must pass them through unchanged (§3.7, thesis §4.1.2).
--- Checking that here is what lets "Thena.Global.Declare" rebuild the target
--- from the record and get the same term back.
-targetIndices
-  :: GlobalName -> Context -> Int -> String -> Core
-  -> Either ResolveError [Core]
-targetIndices dn params want cn t = case spine t of
-  (Global g _, as)
-    | g == dn ->
-        if length as /= length params + want
-          then Left (TargetArgumentCount cn (length params + want) (length as))
-          else passed params (take (length params) as)
-                 >> Right (drop (length params) as)
-  _ -> Left (TargetIsNotTheDatatype cn)
-  where
-    passed [] _ = Right ()
-    passed (p : more) (a : as)
-      | a == Free (entryVar p) = passed more as
-      | otherwise              = Left (ParameterNotPassedThrough cn (entryIdent p))
-    passed (p : _) []          = Left (ParameterNotPassedThrough cn (entryIdent p))
 
 -- --------------------------------------------------------------------------
 -- Telescopes
@@ -433,12 +425,6 @@ prefix env gs local n raw = case raw of
 -- Odds and ends
 -- --------------------------------------------------------------------------
 
--- | An application spine, head first.
-spine :: Core -> (Core, [Core])
-spine = go []
-  where
-    go as (App f a) = go (a : as) f
-    go as t         = (t, as)
 
 -- | The innermost entry wins, so the fold keeps the last match: a 'Context' is
 -- outermost first (§3.2).

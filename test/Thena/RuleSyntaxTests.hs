@@ -21,11 +21,11 @@ import Thena.Core.Term (GlobalName (..))
 import Thena.Development.Cursor (Part (..))
 import Thena.Ops
   ( AnswerKind (..)
+  , Test (..)
   , Instr (..)
   , Op (..)
   , Operand (..)
   , Rule (..)
-  , Test (..)
   , Value (..)
   , opKeyword
   )
@@ -35,6 +35,8 @@ import Thena.Rules
   , RuleError (..)
   , allRules
   , resolveRule
+  , everyTest
+  , testOperands
   , testWord
   , validate
   )
@@ -50,6 +52,7 @@ tests =
     , vocabulary
     , shapes
     , text
+    , headOperands
     , mistakes
     ]
 
@@ -125,6 +128,7 @@ againstTheBase =
 everyOp :: [(String, Op)]
 everyOp =
   [ ("assume x y",   Assume (Ref "x") (Ref "y"))
+  , ("elim-spine t", Op.ElimSpine (Ref "t"))
   , ("claim x y",    Claim (Ref "x") (Ref "y"))
   , ("ask x text",   Ask (Ref "x") AText)
   , ("ask x name",   Ask (Ref "x") AName)
@@ -153,22 +157,30 @@ everyOp =
   , ("reduce",       Reduce)
   , ("unify x y",    Unify (Ref "x") (Ref "y"))
   , ("prim-attack",  Attack)
-  , ("prim-intro",   Intro)
+  , ("prim-intro",   Intro Nothing)
+  , ("prim-intro x", Intro (Just (Ref "x")))
   , ("prim-try x",   Try (Ref "x"))
   , ("prim-regret",  Regret)
   , ("prim-solve",   Solve)
   , ("prim-abandon", Abandon)
-  , ("prove",        Prove Nothing)
-  , ("prove x",      Prove (Just (Ref "x")))
-  , ("parse x",      Parse (Ref "x"))
-  , ("resolve x",    Op.Resolve (Ref "x"))
+  , ("prim-prove",   Prove)
+  , ("expand-implicits t", Op.ExpandImplicits (Ref "t"))
+  , ("app-head t", Op.AppHead (Ref "t"))
+  , ("app-first-argument t", Op.AppFirstArgument (Ref "t"))
+  , ("app-tail t", Op.AppTail (Ref "t"))
+  , ("apply-next f n", Op.ApplyNext (Ref "f") (Ref "n"))
   , ("certify x",    Certify (Ref "x"))
   , ("prim-eliminate x", Op.Eliminate (Ref "x"))
   , ("prim-apply x",  Op.Apply (Ref "x"))
   , ("goal",          Goal)
+  , ("here",          Here)
+  , ("arrow x y",     Arrow (Ref "x") (Ref "y"))
+  , ("apply-to x y",  ApplyTo (Ref "x") (Ref "y"))
   , ("fresh-name x",  FreshName (Ref "x"))
   , ("typeof x",      Typing (Ref "x"))
   , ("define x y",    Define (Ref "x") (Ref "y"))
+  , ("fresh-universe", Op.FreshUniverse)
+  , ("resolve-name x", Op.ResolveName (Ref "x"))
   ]
 
 vocabulary :: TestTree
@@ -198,12 +210,88 @@ vocabulary =
     keywordCase (src, expected) =
       testCase src $ Just (opKeyword expected) @?= listToMaybe (words src)
 
-    allTests = [FocusIsHole, FocusIsGuess, GoalTypeIsPi, GoalTypeIsLet, HintIsName]
+    -- **'everyTest', not a copy of it.** This was a hand-written list until MS4
+    -- phase 47, and it silently did not grow when that phase added a test —
+    -- the same hazard that still stands for 'everyOp' below, arriving one type
+    -- over. The list is exported precisely so this cannot happen again.
+    allTests = everyTest
 
+    -- A test taking operands is written in parentheses, so the parameters it
+    -- names have to exist. The assertion is on the word and on what was
+    -- written after it rather than on the 'Test' itself, because 'everyTest'
+    -- carries a placeholder operand and this rule writes real ones.
     testCase' t =
       testCase (testWord t) $ do
-        r <- expectRule ("rule r :- when " ++ testWord t ++ " then prim-solve")
-        ruleHead r @?= [t]
+        r <- expectRule
+               ("rule r " ++ unwords params ++ " :- when " ++ written
+                  ++ " then prim-solve")
+        map testWord (ruleHead r) @?= [testWord t]
+        map testOperands (ruleHead r) @?= [map Ref params]
+      where
+        params = [ "p" ++ show i | i <- [1 .. length (testOperands t)] ]
+        written = case params of
+          [] -> testWord t
+          _  -> "(" ++ unwords (testWord t : params) ++ ")"
+
+-- --------------------------------------------------------------------------
+-- A test written with operands (MS4 phase 47)
+-- --------------------------------------------------------------------------
+
+-- | **A head is a run of tests with nothing between them**, so a test taking
+-- operands is parenthesised and a bare word is a test of none. The ambiguity
+-- the brackets answer is the one the REPL's argument runs have, and it is
+-- answered the same way: without them @when focus-is-hole goal-type-is-pi@
+-- reads as one test applied to another word.
+--
+-- **The existing spellings do not move**, which is why this shape and not
+-- semicolons between tests — every rule already written, and every golden,
+-- stays as it is.
+headOperands :: TestTree
+headOperands =
+  testGroup
+    "a test may take operands"
+    [ testCase "parenthesised, it takes a parameter" $ do
+        r <- expectRule "rule r s :- when (surface-is-name s) then prim-solve"
+        ruleHead r @?= [SurfaceIsName (Ref "s")]
+
+    , testCase "beside bare ones, in either order" $ do
+        r <- expectRule
+               "rule r s :- when focus-is-hole (surface-is-name s) goal-type-is-pi \
+               \then prim-solve"
+        ruleHead r @?= [FocusIsHole, SurfaceIsName (Ref "s"), GoalTypeIsPi]
+
+    , testCase "a literal is accepted where a name is" $ do
+        r <- expectRule "rule r :- when (surface-is-name \"x\") then prim-solve"
+        ruleHead r @?= [SurfaceIsName (Lit (VText "x"))]
+
+    , -- Every operand of a head must be one of the rule's own parameters: a
+      -- head runs before the body, so there is no earlier binding it could
+      -- have come from.
+      testCase "a head naming something that is not a parameter is refused" $ do
+        r <- expectRule "rule r s :- when (surface-is-name q) then prim-solve"
+        validate r @?= [UnboundInHead (GlobalName "r") "q"]
+
+    , testCase "and a parameter it does name is fine" $ do
+        r <- expectRule "rule r s :- when (surface-is-name s) then prim-solve"
+        validate r @?= []
+
+    , testCase "the wrong number of operands is refused" $
+        case readRule "rule r s :- when (surface-is-name s s) then prim-solve" of
+          Left _  -> pure ()
+          Right _ -> assertFailure "two operands should not resolve"
+
+    , testCase "and so is a bare word that wanted one" $
+        case readRule "rule r s :- when surface-is-name then prim-solve" of
+          Left _  -> pure ()
+          Right _ -> assertFailure "no operands should not resolve"
+
+    , -- 'Down' is the only op that takes a position, so a head has no use for
+      -- one and says so rather than resolving it to something odd.
+      testCase "a position is not a head operand" $
+        case readRule "rule r s :- when (surface-is-name 2) then prim-solve" of
+          Left _  -> pure ()
+          Right _ -> assertFailure "a position should not resolve"
+    ]
 
 -- --------------------------------------------------------------------------
 -- The shape of a rule
@@ -230,8 +318,8 @@ shapes =
         b <- bodyOf "prim-attack; along; prim-solve"
         b @?= [Do Attack, Do Along, Do Solve]
     , testCase "a binding instruction" $ do
-        b <- bodyOf "x = resolve hint"
-        b @?= [Bind "x" (Op.Resolve (Ref "hint"))]
+        b <- bodyOf "x = typeof y"
+        b @?= [Bind "x" (Typing (Ref "y"))]
     , -- The hyphens are the reason the lexer was widened this phase: §8 and
       -- OBJECTIVE.md have always written rule and test names this way.
       testCase "a hyphenated name is one identifier" $ do
@@ -325,13 +413,19 @@ mistakes =
     , refused "a position where a name was wanted"
         "rule r :- when focus-is-hole then prim-try 3"
         [BadOperands (GlobalName "r") 0 "prim-try"]
-    , -- §3.7: a declaration is a command, never a rule-body operation. It is
-      -- refused in resolution now, one step before 'validate' would have —
-      -- which is why 'validate''s own check stays reachable only for a rule
-      -- built in Haskell.
-      refused "a declaration in a body"
-        "rule r :- when focus-is-hole then data"
-        [DeclarationInBody (GlobalName "r") 0]
+    , -- §3.7: a declaration is a command, never a rule-body operation.
+      --
+      -- **Refused one step earlier again as of MS4 phase 42b**: @data@ is a
+      -- keyword now, so a rule body carrying it does not lex into a body word
+      -- at all and the parser stops it. It used to reach resolution and come
+      -- back as @DeclarationInBody@, which is why 'validate''s own check has
+      -- been reachable only for a rule built in Haskell since before that.
+      testCase "a declaration in a body" $
+        case lexTokens "rule r :- when focus-is-hole then data" of
+          Left _  -> pure ()
+          Right ts -> case parseRule ts of
+            Left _  -> pure ()
+            Right r -> assertFailure ("parsed: " ++ show r)
     , refused "every mistake, not the first"
         "rule r :- when focus-is-purple then frobnicate; prim-solve x"
         [ NoSuchTest (GlobalName "r") "focus-is-purple"

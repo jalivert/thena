@@ -177,12 +177,48 @@ all, along with everything else.
 | `:show` | print the whole development, with `▶` marking the cursor |
 | `:show ‹name›` | print a global — a datatype, or a proved theorem |
 | `:core ‹term›` | parse, resolve and print a term |
+| `:surface ‹term›` | parse and print a **surface** term |
 | `:dev ‹development›` | the same, for a development |
 | `:infer ‹term›` | print the term's type |
 | `:whnf ‹term›` | reduce to weak head normal form |
 | `:convert ‹t› ≟ ‹u›` | are these two terms convertible? |
 | `:elim ‹datatype›` | print the datatype's elimination rule |
 | `:where` | print the focus, the path, the context and the expected type |
+
+### The surface language
+
+`:surface` is the same idea one language over. Thena is growing a **surface
+language** — the one you will write programs in — beside the development
+calculus, and `:surface` shows what its parser made of what you typed. Nothing
+is resolved and no names are looked up: turning a surface term into a core term
+is *elaboration*, which is not built yet.
+
+```
+thena spine> :surface \ x (y : A) -> f x {B} y
+λ x (y : A) -> f x {B} y
+```
+
+It has three things the development calculus does not: a lambda binder may have
+no type, an argument in braces is **implicit**, and `_` and `?goal` are
+placeholders — `_` for something inference should find, `?goal` for something
+you mean to prove yourself. None of them *do* anything yet.
+
+It also has **layout**. `let` opens a block, and you may write the block either
+way — the offside rule and explicit braces mean the same thing:
+
+```
+thena spine> :surface let { x = a ; y = b } in f x y
+let x = a in let y = b in f x y
+```
+
+The bindings are **sequential**, not mutually recursive, which is why that
+prints as nested `let`s: a development is a chain, so `y` is in scope after `x`
+and nothing in the calculus underneath can express two bindings that refer to
+each other.
+
+The indentation-sensitive spelling needs more than one line, and the REPL reads
+one line at a time — so until surface **files** arrive you can only write a
+block with explicit braces here.
 
 ```
 thena spine> :core succ (succ zero)
@@ -320,11 +356,11 @@ type
   A
 ```
 
-`try` proposes a term for the hole; `solve` accepts it. Then walk back out,
+`try-core` proposes a term for the hole; `solve` accepts it. Then walk back out,
 `solve`-ing each guess as you go, and finish:
 
 ```
-thena spine> try _
+thena spine> try-core ⌜ _ ⌝
 thena spine> solve
 thena spine> back
 thena spine> back
@@ -361,7 +397,7 @@ before a `⊢`:
 ```
 thena spine> :theorem lift : Type -> Type
 proving lift : Type (?ℓ229) -> Type (?ℓ230)
-thena spine> try (\ (x : Type) -> x)
+thena spine> try-core ⌜ \ (x : Type) -> x ⌝
 thena spine> solve
 thena spine> qed
 lift {ℓ₂₃₈ ℓ₂₃₉} : (ℓ₂₃₈ ≤ ℓ₂₃₉) ⊢ Type (ℓ₂₃₈) -> Type (ℓ₂₃₉)   ∎
@@ -373,12 +409,12 @@ is nothing to meet.
 
 A use of `lift` writes two levels and owes the condition. **The debt is
 collected by the kernel, not at the moment you type the term** — `:infer` and
-`try` will hand you `lift {1 0}` quite happily, and `qed` is where it stops:
+`try-core` will hand you `lift {1 0}` quite happily, and `qed` is where it stops:
 
 ```
 thena spine> :theorem bad : Type₁ -> Type₀
 proving bad : Type₁ -> Type₀
-thena spine> try (lift {1 0})
+thena spine> try-core ⌜ lift {1 0} ⌝
 thena spine> solve
 thena spine> qed
 the kernel refused it
@@ -393,7 +429,7 @@ the kernel refused it
 |---|---|
 | `attack` | turn the focused hole into a guess, ready to be built |
 | `intro` | move one `∀` binder from the goal into the guess body |
-| `try ‹term›` | propose a term for the focused hole |
+| `try-core ⌜ term ⌝` | propose a term for the focused hole |
 | `solve` | accept the focused guess — it becomes a definition |
 | `regret` | throw away a guess's body, back to a plain hole |
 | `abandon` | remove the focused hole entirely |
@@ -487,7 +523,7 @@ amounts to starting over. Handy for scratch work.
 
 ## 7. Proof by induction
 
-`eliminate ‹target›` is the induction tactic. It builds the motive, works out
+`eliminate-core ⌜ target ⌝` is the induction tactic. It builds the motive, works out
 what each case has to prove, and posts one hole per case.
 
 Assume `Nat`, addition as `plus`, and congruence of `succ` are already proved.
@@ -499,7 +535,7 @@ thena spine> attack
 thena spine> intro
 thena spine> into
 thena spine> along
-thena spine> eliminate n
+thena spine> eliminate-core ⌜ n ⌝
 subgoals: zeroMethod, succMethod
 ```
 
@@ -526,10 +562,10 @@ finish:
 ```
 thena spine> back
 thena spine> back
-thena spine> try (refl {0} Nat zero)
+thena spine> try-core ⌜ refl {0} Nat zero ⌝
 thena spine> solve
 thena spine> along
-thena spine> try (\ (x : Nat) (ih : Eq {0} Nat (plus x zero) x) -> congSucc (plus x zero) x ih)
+thena spine> try-core ⌜ \ (x : Nat) (ih : Eq {0} Nat (plus x zero) x) -> congSucc (plus x zero) x ih ⌝
 thena spine> solve
 thena spine> along
 thena spine> solve
@@ -542,15 +578,20 @@ thena spine> qed
 plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n   ∎
 ```
 
-**A tactic argument that is more than one word must be parenthesised.** A
-command line is a run of atoms, exactly as it would be inside a rule body, so
-`try refl {0} Nat zero` is four arguments and is refused; `try (refl {0} Nat zero)`
-is one.
+**A core tactic's argument is written in corners**, `⌜ … ⌝`. A command line is
+a run of atoms, exactly as it would be inside a rule body, so
+`try-core refl {0} Nat zero` would be four arguments and is refused — the
+corners say where the term begins and ends, and inside them nothing needs
+parenthesising.
 
-`eliminate` works on inductively defined **relations** too, which is what proofs
-about a reduction relation need — see §11.
+The `-core` suffix marks the tactics that take a **development-calculus** term.
+They are the ones that exist today; the surface language and the tactics that
+take *its* terms are being built beside them.
 
-One thing to know: `eliminate` refuses when a premise of the goal would have to
+`eliminate-core` works on inductively defined **relations** too, which is what
+proofs about a reduction relation need — see §11.
+
+One thing to know: `eliminate-core` refuses when a premise of the goal would have to
 follow the target into the abstraction, because the induction it could give you
 there would be too weak to use. The workaround is the ordinary one — do not
 `intro` something you need generalised.
@@ -612,11 +653,11 @@ the hint:
 ```
 thena spine> :matches
 attack
-try ‹t›
+try-core ‹t›
 abandon
-eliminate ‹t›
-unify-refine ‹t›
-apply ‹f›
+eliminate-core ‹t›
+unify-refine-core ‹t›
+apply-core ‹f›
 thena spine> :matches a
 elab-var
 ```
@@ -638,7 +679,7 @@ stack
 thena spine> :step
 pc
   0  t = resolve hint
-  1  call try t
+  1  call try-core t
   2  prim-solve
 env
   hint = ‹a›
@@ -646,7 +687,7 @@ stack
   call, 0 instruction(s) to resume
 thena spine> :step
 pc
-  0  call try t
+  0  call try-core t
   1  prim-solve
 env
   t = ⌜a⌝
@@ -729,13 +770,44 @@ globals are session-wide, proofs are not.
 
 ## 11. Loading a file, and what the system has proved
 
-A `.thena` file is a script of REPL command lines, run in order.
+`:load` reads three kinds of file and the extension says which: a `.thena`
+**proof module**, a `.thena.script` script of REPL command lines, or one or more
+`.thena.rules` rule bases. `:load proof`, `:load script` and `:load rules` say
+it out loud instead.
+
+A script is command lines, run in order.
 
 ```
-thena spine> :load examples/determinacy.thena
+thena spine> :load examples/determinacy.thena.script
 ```
 
-`examples/determinacy.thena` is the acceptance test for the whole first
+A **proof module** is the surface language: a header, then declarations, laid
+out by indentation. It reports what it declared and nothing else — elaborating
+one declaration prints a dozen lines of unification chatter, and a file of them
+would bury its own output.
+
+```
+thena spine> :load examples/tier0.thena
+module Tier0
+  declared Nat
+  declared plus
+  declared identity
+  declared one
+  declared two
+  declared plusZeroLeft
+thena spine> :infer plus one one
+plus one one : Nat
+```
+
+`:infer` takes a **surface** term and elaborates it where you are asking, then
+puts the development back exactly as it was. A development-calculus term goes in
+corners instead: `:infer ⌜ succ zero ⌝`.
+
+A comment is `--` followed by a space, running to the end of the line, and it
+works the same way in all three kinds of file. Without the space it is not a
+comment, so `-->` is still yours to use.
+
+`examples/determinacy.thena.script` is the acceptance test for the whole first
 milestone. It declares the language of chapter 3 of Pierce's *Types and
 Programming Languages* — a seven-constructor term language, a numeric-value
 predicate, and a ten-rule small-step reduction relation —
@@ -794,12 +866,12 @@ files of commands.
   simplifier, no decision procedure. Every proof step above is one you type.
 - **A use of a level-polymorphic global must write its level arguments.**
   `Eq {0} Nat x y`, never `Eq Nat x y`. The declaration side infers, the use
-  side does not — which is what most of the braces in `examples/determinacy.thena`
+  side does not — which is what most of the braces in `examples/determinacy.thena.script`
   are.
 - **No no-confusion lemma for a constructor with dependent argument types** —
   the system tells you when it skipped one and why.
-- **No proof scripts.** A `.thena` file is a flat sequence of commands, not a
-  structured document.
+- **No proof scripts.** A `.thena.script` file is a flat sequence of commands,
+  not a structured document; a `.thena` proof module is the structured one.
 
 ---
 
@@ -810,12 +882,12 @@ files of commands.
 | | |
 |---|---|
 | `attack` `intro` `solve` `regret` `abandon` | the hole operations |
-| `try ‹term›` | propose a term for the focused hole |
-| `apply ‹f›` / `unify-refine ‹t›` | apply a function / refine by unification |
+| `try-core ⌜ term ⌝` | propose a term for the focused hole |
+| `apply-core ⌜ f ⌝` / `unify-refine-core ⌜ t ⌝` | apply a function / refine by unification |
 | `goto ‹name›` | move to a hole by name |
 | `assume ‹x› : ‹S›` / `claim ‹x› : ‹S›` | add a hypothesis / a hole above the focus |
 | `unify ‹t› ≟ ‹u›` | solve by unification |
-| `eliminate ‹target›` | induction |
+| `eliminate-core ⌜ target ⌝` | induction |
 | `reduce` | reduce the focused term in place |
 | `along` `into` `back` | move on the chain |
 | `cross type` / `cross val` | move into a term |
@@ -834,6 +906,7 @@ files of commands.
 | `:show` / `:show ‹name›` | the development / a global |
 | `:where` | focus, path, context, expected type |
 | `:core ‹t›` `:dev ‹p›` | parse and print |
+| `:surface ‹t›` | parse and print a surface term |
 | `:infer ‹t›` `:whnf ‹t›` `:convert ‹t› ≟ ‹u›` | type, reduct, convertibility |
 | `:elim ‹D›` / `:elim ‹D› ‹universe›` | the elimination rule |
 | `:matches` / `:matches ‹hint›` | which rules apply here |

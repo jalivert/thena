@@ -4,7 +4,8 @@ a bare word acts, a word with a colon looks.
   assume ‹x› : ‹S›              add a hypothesis above the focus
   claim ‹x› : ‹S›               add a hole above the focus
   unify ‹t› ≟ ‹u›               solve the focus by unification
-  prove / prove ‹hint›          run a rule here / elaborate a term
+  do { ‹instruction› ; … }      play a block of instructions here
+  yield                         hand control back to a rule that yielded
   retry / retry ‹n›             backtrack to a choice point
   along  into  back             move on the chain
   cross type / cross val        move into a term
@@ -14,18 +15,21 @@ a bare word acts, a word with a colon looks.
                                 descend into a numbered field
   goto ‹hole›                   move to a hole by name
   reduce                        reduce the focused term in place
+  quantify ‹x› : ‹S›            add a ∀-binder above the focus
   data ‹D› … where { … }        declare an inductive family
+  declare ‹sig› ; ‹equation›    elaborate a surface declaration
   certify ‹type›                ask the kernel about the development
   qed                           certify and admit the finished proof
 
   :show / :show ‹name›          the development / a global
   :where                        focus, path, context, expected type
   :core ‹t› / :dev ‹p›          parse a term / a development and print it
-  :infer / :infer ‹t›           the type of the focus / of a term
+  :surface ‹t›                  parse a surface term and print it
+  :infer / :infer ‹t›           the type of the focus / of a surface term
   :whnf / :whnf ‹t›             reduce the focus / a term, without committing
   :convert ‹t› ≟ ‹u›            are two terms convertible
   :elim ‹D› [‹universe›]        a datatype’s elimination rule
-  :matches / :matches ‹hint›    which rules apply here
+  :matches                      which rules apply here
   :choices                      the live choice points, nearest first
   :bases / :rules               the loaded rule bases / the rules in them
   :step on / :step / :step off  single-step the machine
@@ -38,7 +42,8 @@ a bare word acts, a word with a colon looks.
   :undo                         take back the last line
   :extract                      the term the development stands for
   :revalidate                   recheck the whole development
-  :load ‹path›                  run a script, or install rule bases
+  :load ‹path›                  a proof module, a script, or rule bases
+  :load proof / rules / script  say which, rather than by extension
   :help                         this list
   :quit                         leave
 

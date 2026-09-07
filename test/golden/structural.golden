@@ -1,0 +1,85 @@
+thena spine> :theorem byhand : Type₁
+proving byhand : Type₁
+thena spine> attack
+thena spine> quantify A : Type₀
+quantified A
+thena spine> :show
+▶ let ? byhand : Type₁ ≐ (
+    ∀ (A : Type₀) ->
+    let ? byhand1 : Type (?ℓ5) in
+    byhand1
+  ) in
+  byhand
+thena spine> into
+thena spine> along
+thena spine> try-core ⌜ Type₀ ⌝
+thena spine> solve
+thena spine> back
+thena spine> back
+thena spine> solve
+thena spine> :extract
+let byhand = Type₀ -> let byhand1 = Type₀ : Type (?ℓ5) in byhand1 : Type₁ in byhand
+thena spine> qed
+byhand : Type₁   ∎
+thena spine> :dev ∀ (A : Type₀) -> A
+∀ (A : Type₀) ->
+A
+thena spine> :dev ⌜ ∀ (A : Type₀) -> A ⌝
+∀ (A : Type₀) -> A
+thena spine> :theorem pi : Type₁
+proving pi : Type₁
+thena spine> elaborate (forall (A : Type₀) -> A)
+solved: ?ℓ10
+solved: ?ℓ15
+thena spine> :show
+  let refined = Type₀ : Type₁ in
+  let A = refined : Type₁ in
+▶ let pi = ∀ (A1 : A) -> let refined1 = A1 : A in let pi1 = refined1 : Type₀ in pi1 : Type₁ in
+  pi
+thena spine> qed
+pi : Type₁   ∎
+thena spine> :theorem arr : Type₁
+proving arr : Type₁
+thena spine> elaborate (Type₀ -> Type₀)
+already equal
+solved: ?ℓ20
+solved: ?ℓ22
+thena spine> qed
+arr : Type₁   ∎
+thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
+declared Nat
+thena spine> :theorem lt : Nat
+proving lt : Nat
+thena spine> elaborate (let y : Nat = zero in succ y)
+solved: ?ℓ39
+already equal
+chose 45: elaborate
+already equal
+already equal
+thena spine> :show
+  let refined = Nat : Type₀ in
+  let X = refined : Type₀ in
+  let refined1 = zero : Nat in
+  let V = refined1 : X in
+  let y = V : X in
+  let refined2 = y : X in
+  let a = refined2 : Nat in
+  let refined3 = succ a : Nat in
+▶ let lt = refined3 : Nat in
+  lt
+thena spine> qed
+lt : Nat   ∎
+thena spine> :theorem asc : Nat
+proving asc : Nat
+thena spine> elaborate (zero : Nat)
+solved: ?ℓ51
+already equal
+already equal
+thena spine> qed
+asc : Nat   ∎
+thena spine> :theorem bad : Nat
+proving bad : Nat
+thena spine> attack
+thena spine> quantify A : Type₀
+stuck: quantify builds a type, so that hole must be claimed at a universe
+thena spine> :quit

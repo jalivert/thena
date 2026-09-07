@@ -21,16 +21,17 @@ import Thena.Core.Term
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, crossType, enter)
 import Thena.Development.Partial (Partial (..))
-import Thena.Declared (natDecl)
+import Thena.Declared (nat, natDecl)
 import Thena.Standard (expectedBase)
 import Thena.Driver (parseDeclaration)
 import Thena.Engine
   ( Exec (..)
   , Machine (..)
   , Outcome (..)
-  , ProofState (..)
+  , Development (..)
   , load
   , resumeAt
+  , resumeYield
   , step
   )
 import Thena.Errors (FailReason)
@@ -53,7 +54,10 @@ import Thena.Ops
 -- §2.5: "Thena.Ops" is qualified everywhere except "Thena.Engine", because
 -- @Assume@ and @Claim@ name both a component and an op.
 import qualified Thena.Ops as Ops
-import Thena.Syntax.Concrete (Raw (..))
+import qualified Data.List.NonEmpty as NE
+import Thena.Surface.Concrete
+  (Plicity (..), Surface (..), SurfaceArg (..))
+import Thena.Surface.Zipper (rootedAt)
 import Thena.Rules
   ( RuleError (..)
   , RuleIter
@@ -116,7 +120,7 @@ withArrow =
     emptyGlobals
 
 matching :: GlobalEnv -> Cursor -> [String]
-matching env cur = map nameOf (drain (matches expectedBase env cur Nothing))
+matching env cur = map nameOf (drain (matches expectedBase env cur))
 
 nameOf :: Rule -> String
 nameOf r = let GlobalName n = ruleName r in n
@@ -139,27 +143,26 @@ matchTests =
     [ -- Three at a hole, and that is what makes the list a list: phase 16 has
       -- to choose between them, and the user sees the choice being made.
       testCase "a hole offers the hole rules, in definition order" $
-        matching emptyGlobals (holeAt type0)
-          @?= ["attack", "try", "abandon", "eliminate", "unify-refine", "apply"]
+        matching emptyGlobals (holeAt type0) @?= everyHoleRule
 
     , testCase "a guess at a non-Π offers only solve and regret" $
         matching emptyGlobals (guessAt type0)
-          @?= ["solve", "regret"]
+          @?= ["solve", "regret", "prove"] ++ walkers
 
     , testCase "a guess at a Π offers intro as well" $
         matching emptyGlobals (guessAt (arrow type0 type0))
-          @?= ["intro", "solve", "regret"]
+          @?= ["intro", "solve", "regret", "prove"] ++ walkers
 
       -- §8: "Head matching runs whnf. A goal typed @id Type (Nat → Nat)@ is a Π
       -- and must match GoalTypeIsPi." Written down, @Arrow@ is a 'Global' and
       -- not a 'Pi'; a head that did not reduce would miss it.
     , testCase "a goal type that only reduces to a Π still matches" $
         matching withArrow (guessAt (Global (GlobalName "Arrow") []))
-          @?= ["intro", "solve", "regret"]
+          @?= ["intro", "solve", "regret", "prove"] ++ walkers
 
     , testCase "and does not, in an environment where it does not unfold" $
         matching emptyGlobals (guessAt (Global (GlobalName "Arrow") []))
-          @?= ["solve", "regret"]
+          @?= ["solve", "regret", "prove"] ++ walkers
 
       -- The one test that must NOT reduce: whnf δ-reduces a term-level let
       -- away (§5.1), so asking about the reduced type would make GoalTypeIsLet
@@ -167,7 +170,7 @@ matchTests =
       -- 'Thena.Engine.introduce'.
     , testCase "a goal type written as a let offers intro" $
         matching emptyGlobals (guessAt (Let (Ident "x") type0 type1 (close var type0)))
-          @?= ["intro", "solve", "regret"]
+          @?= ["intro", "solve", "regret", "prove"] ++ walkers
 
       -- The invariant checked by different code from the code that maintains
       -- it: the head says @intro@ applies, so @intro@ must actually apply. It
@@ -176,12 +179,12 @@ matchTests =
     , testCase "where the let clause is offered, intro succeeds" $
         let cur = guessAt (Let (Ident "x") type0 type1 (close var type0))
          in do
-              nameOf `map` drain (matches expectedBase emptyGlobals cur Nothing)
-                @?= ["intro", "solve", "regret"]
-              ranOk (machineAt cur [Do Ops.Intro])
+              nameOf `map` drain (matches expectedBase emptyGlobals cur)
+                @?= ["intro", "solve", "regret", "prove"] ++ walkers
+              ranOk (machineAt cur [Do (Ops.Intro Nothing)])
 
     , testCase "where the Π clause is offered, intro succeeds" $
-        ranOk (machineAt (guessAt (arrow type0 type0)) [Do Ops.Intro])
+        ranOk (machineAt (guessAt (arrow type0 type0)) [Do (Ops.Intro Nothing)])
 
       -- Every head this phase has asks about a component, so nothing applies
       -- in the core fragment. Definite, not "blocked": the focus's shape is
@@ -221,25 +224,29 @@ iteratorTests =
         let walk it = case next it of
               Nothing        -> hasNext it @?= False
               Just (_, rest) -> (hasNext it @?= True) >> walk rest
-         in walk (matches expectedBase emptyGlobals (holeAt type0) Nothing)
+         in walk (matches expectedBase emptyGlobals (holeAt type0))
 
+      -- **Drained by name rather than by a count**, since MS4 phase 49c: a guess
+      -- offers @solve@, @regret@, @prove@ and the λ case's two recursive
+      -- helpers, and a fixed number of @next@es would have to move every time a
+      -- rule is added.
     , testCase "an empty iterator has nothing" $
-        let it = matches expectedBase emptyGlobals (guessAt type0) Nothing
-         in case next it >>= next . snd >>= next . snd of
-              Nothing -> pure ()
-              Just _  -> assertFailure "expected two matches and no more"
+        let it = matches expectedBase emptyGlobals (guessAt type0)
+         in case drop (length (["solve", "regret", "prove"] ++ walkers)) (drain it) of
+              [] -> pure ()
+              rs -> assertFailure ("expected no more, got " ++ show (map nameOf rs))
 
       -- §7.6: persistent, "a frame holds one and the UI may hold the same one;
       -- if advancing mutated shared state they would interfere." A lazy list
       -- gives this outright; the test is here because the requirement is on the
       -- type, and a later representation could quietly lose it.
     , testCase "advancing one copy does not disturb another" $
-        let it = matches expectedBase emptyGlobals (holeAt type0) Nothing
+        let it = matches expectedBase emptyGlobals (holeAt type0)
             deep = drop 2 (drain it)
          in do
               _ <- pure deep
-              map nameOf (drain it) @?= ["attack", "try", "abandon", "eliminate", "unify-refine", "apply"]
-              map nameOf deep @?= ["abandon", "eliminate", "unify-refine", "apply"]
+              map nameOf (drain it) @?= everyHoleRule
+              map nameOf deep @?= drop 2 everyHoleRule
     ]
 
 -- --------------------------------------------------------------------------
@@ -363,7 +370,7 @@ producesTests =
       , ("down",        e, piHole,  [Do Ops.CrossType], Ops.Down Ops.Dom)
       , ("back",        e, hole,    [Do Ops.CrossType], Ops.Back)
       , ("attack",      e, hole,    [],            Ops.Attack)
-      , ("intro",       e, guessAt (arrow type0 type0), [], Ops.Intro)
+      , ("intro",       e, guessAt (arrow type0 type0), [], Ops.Intro Nothing)
       , ("try",         e, hole,    [],            Ops.Try (term type0))
       , ("regret",      e, hole,    tried,         Ops.Regret)
       , ("solve",       e, hole,    tried,         Ops.Solve)
@@ -371,11 +378,30 @@ producesTests =
         -- Phase 17b's four. @prove@ and @call@ both hand control to a body and
         -- get it back, so what a @Bind@ on either would name is the caller's
         -- own environment — restored on return, and without the destination.
-      , ("prove",       e, hole,    [],            Ops.Prove Nothing)
-      , ("call",        e, hole,    [],            Ops.Call (GlobalName "try") [term type0])
-      , ("parse",       e, hole,    [],            Ops.Parse (text "Type\8320"))
-      , ("resolve",     e, hole,    [],            Ops.Resolve (Lit (VSurface (RawUniverse 0))))
+      , ("prim-prove",  e, hole,    [],            Ops.Prove)
+      , ("call",        e, hole,    [],            Ops.Call (GlobalName "try-core") [term type0])
+        -- **A λ** (MS4 phase 49b): every other shape this op once handled is a
+        -- clause of @elaborate@ now, and it refuses those — so the term has to
+        -- be one of the three cases still behind it, and a λ is the one that
+        -- needs no globals. The goal is an arrow so @prim-intro@ has a binder
+        -- to take.
+        -- **The spine walk\'s vocabulary** (MS4 phase 49f). @apply-next@ needs a
+        -- head whose type is a Π and a name in scope, so it uses @nat@ like the
+        -- row that stood here before it; the three accessors only read the
+        -- surface term they are handed.
+      , ("expand-implicits", nat, holeAt natType, [], Ops.ExpandImplicits succZero)
+      , ("app-head",         e,   hole, [],           Ops.AppHead succZero)
+      , ("app-first-argument", e, hole, [],           Ops.AppFirstArgument succZero)
+      , ("app-tail",         e,   hole, [],           Ops.AppTail succZero)
+      , ("apply-next",       nat, holeAt natType, [],
+           Ops.ApplyNext (term (Global (GlobalName "succ") [])) (text "a"))
       ]
+
+    -- @succ zero@, as a focused surface term.
+    succZero =
+      Lit (VSurface (rootedAt
+        (SurfaceApp (SurfaceName "succ")
+           (SurfaceArg Explicit (SurfaceName "zero") NE.:| []))))
 
     -- @try ‹t›@, as 'expectedBase' ships it — what @call@ needs something to
     -- call.
@@ -414,7 +440,7 @@ text = Lit . VText
 -- above every 'Var' the fixtures mint, so nothing it mints collides.
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env cur is =
-  load is (Machine (Exec [] [] []) (ProofState cur) env expectedBase 1000)
+  load is (Machine (Exec [] [] []) (Development cur) [] env expectedBase [] 1000)
 
 machineAt :: Cursor -> [Instr] -> Machine
 machineAt = machineIn emptyGlobals
@@ -427,8 +453,12 @@ runOut m = case step m of
   Continue m'       -> runOut m'
   Saying _ m'       -> runOut m'
   Declaring _ m'    -> runOut m'
+  Defining _ _ _ _ m' -> runOut m'
   Certifying _ _ m' -> runOut m'
   Asking _ m'       -> runOut (resumeAt "ok" m')
+  -- Handed straight back, so a rule that yields is still exercised end to
+  -- end rather than stopping the harness (MS4 phase 45b).
+  Yielding _ m'     -> runOut (resumeYield m')
   Finished m'       -> Right m'
   Stuck r _         -> Left r
 
@@ -436,3 +466,33 @@ ranOk :: Machine -> IO ()
 ranOk m = case runOut m of
   Right _ -> pure ()
   Left r  -> assertFailure ("expected the program to run, got " ++ show r)
+
+-- | Every rule the shipped base offers at a hole, in definition order.
+--
+-- **@elaborate@ fifteen times** (MS4 phase 49): one clause per surface node,
+-- and a test about an argument nobody supplied does not exclude a clause
+-- (phase 47), so a listing with no argument shows them all. @spine-arguments@
+-- is there for @enter-binders@\' reason — a helper whose head is honest about
+-- the focus is offered wherever that focus test passes (@ms4/CLOSEOUT.md@ 27).
+everyHoleRule :: [String]
+everyHoleRule =
+  [ "attack", "try-core", "abandon", "eliminate-core", "prove", "fill"
+  , "unify-refine-core", "apply-core"
+  ]
+    ++ replicate 16 "elaborate" ++ replicate 2 "enter-binders"
+    ++ replicate 2 "spine-arguments"
+
+-- | The λ case's two recursive helpers, which every listing at a guess shows.
+--
+-- **A test about an argument nobody supplied does not exclude a clause** (phase
+-- 47), so a rule whose head only asks about its argument is offered wherever
+-- its state test passes — and @intro-binders@ really does apply at a guess.
+walkers :: [String]
+walkers =
+  [ "intro-binders", "intro-binders", "enter-binders", "enter-binders"
+  , "spine-arguments", "spine-arguments"
+  ]
+
+-- | @Nat@, as a core term, for the row above.
+natType :: Core
+natType = Global (GlobalName "Nat") []

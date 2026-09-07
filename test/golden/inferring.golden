@@ -8,7 +8,7 @@ thena spine> claim T : Type₀
 claimed T
 thena spine> claim b : T
 claimed b
-thena spine> unify-refine (Just T b)
+thena spine> unify-refine-core ⌜ Just T b ⌝
 solved: T
 thena spine> :show
   let T = Bool : Type₀ in
@@ -26,7 +26,7 @@ context
   T = Bool : Type₀
 type
   T
-thena spine> unify-refine true
+thena spine> unify-refine-core ⌜ true ⌝
 already equal
 thena spine> :show
   let T = Bool : Type₀ in

@@ -38,6 +38,7 @@ module Thena.Core.Level
   , Obligation (..)
   , Unmet (..)
   , solveLevels
+  , minimise
   , unsatisfiable
   , substObligation
   , LevelUnification (..)
@@ -396,6 +397,9 @@ data Obligation = AtMost Level Level
 data Unmet
   = Refuted Level Level
   | Unsatisfiable [Obligation]
+  | Ambiguous [LevelVar]
+    -- ^ these metas occur nowhere in the type, so nothing can ever determine
+    -- them, and 'minimise' found no least value to default them to (phase 51)
   deriving (Eq, Show)
 
 -- | Discharge what can be discharged, refuse what can never hold, and hand back
@@ -460,6 +464,103 @@ solveLevels obs = case sift obs of
       Just False -> Left (Refuted l k)
       Just True  -> sift os
       Nothing    -> (o :) <$> sift os
+
+-- --------------------------------------------------------------------------
+-- Minimisation (phase 51)
+-- --------------------------------------------------------------------------
+
+-- | Give each of these metas its **least** value consistent with the
+-- obligations, and hand back what survives — or 'Nothing' if it cannot be done.
+--
+-- **This is defaulting, and it is only ever applied to /ambiguous/ levels** —
+-- the user, 2026-09-02: /"I don't want to minimize any real polymorphism. I
+-- want minimization to get rid of the ambiguous body-only level parameters. I
+-- want it to be a kind of defaulting."/ Choosing the caller's partition is
+-- therefore the caller's job, and it is always the same one: a meta the
+-- definition's /type/ mentions is real polymorphism and is never passed here,
+-- because a use site can determine it and benefits from the choice. One the
+-- type does not mention can be determined by nobody and is what this erases.
+--
+-- **Why a least solution exists.** Every constraint is @l ≤ k@ over max-plus,
+-- so every lower bound is monotone; by Knaster–Tarski the least fixed point
+-- exists and Kleene iteration from zero finds it.
+--
+-- **Why it can still fail, and why failing is right.** A bound is extracted
+-- only when the right-hand side names exactly one of these metas — @c ≤ max ?a
+-- ?b@ is a /disjunction/ with minimal solutions @(c, 0)@ and @(0, c)@ and no
+-- least one, so nothing is extracted from it and the assignment is then checked
+-- against it like any other. His ruling, 2026-09-02: /"failing when minimization
+-- can't be done makes sense. At least for now it restricts the weirdness that
+-- ensues when there is so many ambiguous level parameters."/
+--
+-- **This is not 'unsatisfiable'.** That asks whether the constraints being
+-- /kept/ can hold over rigids; this assigns values to metas being /erased/.
+-- Same graph, different question — and they compose, because the survivors go
+-- back through 'solveLevels', which asks it.
+minimise
+  :: [LevelVar] -> [Obligation] -> Either Unmet ([(LevelVar, Level)], [Obligation])
+minimise [] obs = Right ([], obs)
+minimise bs obs = do
+    sub <- maybe (Left (Ambiguous bs)) Right
+             (settle (length bs + 1) [ (b, LZero) | b <- bs ])
+    -- **Then check, and let the checker be the one that refuses.** Everything
+    -- the extraction declined to read — a @max@ on the right, a bound this
+    -- assignment cannot meet — is still in here, so nothing is accepted merely
+    -- because it was not understood.
+    case solveLevels (map (substObligation sub) obs) of
+      Left u              -> Left u
+      Right (rest, kept)
+        -- A survivor still mentioning one of these metas means the residue
+        -- cannot be closed over them, which is the failure this is for.
+        | any mentionsB kept -> Left (Ambiguous (filter (`elem` keptVars kept) bs))
+        | otherwise          -> Right (compose sub rest, kept)
+  where
+    mentionsB (AtMost l k) =
+      any (`elem` bs) (levelVarsIn l ++ levelVarsIn k)
+
+    keptVars = concatMap (\(AtMost l k) -> levelVarsIn l ++ levelVarsIn k)
+
+    compose sub rest = [ (v, substLevel rest l) | (v, l) <- sub ] ++ rest
+
+    -- Kleene from zero. Capped rather than trusted to converge: a positive
+    -- cycle (@suc ?b ≤ ?b@) has no least solution and would raise for ever, and
+    -- refusing is the same answer this function gives everything else it cannot
+    -- settle.
+    settle 0 _   = Nothing
+    settle k sub =
+      let sub' = [ (b, foldr levelMax l (boundsFor b sub)) | (b, l) <- sub ]
+       in if map (fmap normalise) sub' == map (fmap normalise) sub
+            then Just sub
+            else settle (k - 1 :: Int) sub'
+
+    boundsFor b sub =
+      [ substLevel sub l | o <- obs, (w, l) <- lowerBound o, w == b ]
+
+    -- | What one obligation says a meta must be **at least**.
+    --
+    -- Read only when the right is a single variable over a constant floor —
+    -- @Normal d [(w, j)]@ is @max d (w + j)@. Each component of the left that
+    -- the floor does not already dominate has to fit under @w + j@ instead.
+    --
+    -- **A component needing @w ≥ v + (k - j)@ with @k < j@ is recorded as
+    -- @w ≥ v@**, not as a predecessor: the algebra has no @pred@, so @v@ is the
+    -- least /expressible/ bound and the least expressible solution is what a
+    -- least solution can mean here.
+    lowerBound (AtMost l k) = case normalise k of
+      Normal d [(w, j)] | w `elem` bs -> concatMap (need d w j) (parts (normalise l))
+      _                               -> []
+
+    parts (Normal c vs) = Left c : map Right vs
+
+    need d w j part = case part of
+      Left c
+        | c <= d    -> []
+        | otherwise -> [(w, levelOfNat (c - j))]
+      Right (v, kv)
+        | v == w, kv <= j -> []
+        | otherwise       -> [(w, bump (max 0 (kv - j)) (LVar v))]
+
+    bump n l = iterate levelSuc l !! n
 
 -- --------------------------------------------------------------------------
 -- Satisfiability (phase 35)

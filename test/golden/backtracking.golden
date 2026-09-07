@@ -5,6 +5,13 @@ thena spine> :matches
 intro
 solve
 regret
+prove
+intro-binders ‹t›
+intro-binders ‹t›
+enter-binders ‹t›
+enter-binders ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+spine-arguments ‹h› ‹f› ‹t›
 thena spine> prove
 chose 7: intro
 thena spine> :show
@@ -15,7 +22,7 @@ thena spine> :show
   ) in
   id
 thena spine> :choices
-7  intro   untried: solve, regret
+7  intro   untried: solve, regret, prove
 thena spine> into
 thena spine> along
 thena spine> :where
@@ -30,7 +37,7 @@ type
 thena spine> back
 thena spine> back
 thena spine> :choices
-7  intro   untried: solve, regret
+7  intro   untried: solve, regret, prove
 thena spine> retry
 retrying 7: solve
 backtracking to 7: regret
@@ -38,7 +45,30 @@ thena spine> :show
 ▶ let ? id : ∀ (A : Type₀) -> A -> A in
   id
 thena spine> :choices
-no choice points
+7  regret   untried: prove
 thena spine> retry
-no choice point to retry
+retrying 7: prove
+chose 10: intro
+thena spine> :abandon
+abandoned id
+thena spine> :theorem gone : Type₁
+proving gone : Type₁
+thena spine> :choices
+no choice points
+thena spine> prove
+chose 15: attack
+thena spine> :choices
+15  attack   untried: abandon, prove
+thena spine> :suspend
+suspended gone
+thena spine> :theorem lemma : Type₁
+proving lemma : Type₁
+thena spine> :choices
+no choice points
+thena spine> :abandon
+abandoned lemma
+thena spine> :resume gone
+resumed gone
+thena spine> :choices
+15  attack   untried: abandon, prove
 thena spine> :quit

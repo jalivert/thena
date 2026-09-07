@@ -4,7 +4,7 @@ thena spine> data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> E
 declared Eq
 thena spine> :theorem id0 : ∀ (A : Type₀) -> A -> A
 proving id0 : ∀ (A : Type₀) -> A -> A
-thena spine> unify-refine (\ (A : Type₀) (a : A) -> a)
+thena spine> unify-refine-core ⌜ \ (A : Type₀) (a : A) -> a ⌝
 already equal
 thena spine> :show
   let refined = λ (A : Type₀) (a : A) -> a : ∀ (A : Type₀) -> A -> A in
@@ -18,7 +18,7 @@ thena spine> claim A : Type₀
 claimed A
 thena spine> claim a : A
 claimed a
-thena spine> unify-refine (refl {0} A a)
+thena spine> unify-refine-core ⌜ refl {0} A a ⌝
 solved: A, a
 thena spine> :show
   let A = Nat : Type₀ in
@@ -33,10 +33,33 @@ refl0 : Eq {0} Nat zero zero
 refl0 = let A = Nat : Type₀ in let a = zero : A in let refined = refl {0} A a : Eq {0} A a a in let refl0 = refined : Eq {0} Nat zero zero in refl0
 thena spine> :theorem wrong : Eq {0} Nat zero (succ zero)
 proving wrong : Eq {0} Nat zero (succ zero)
-thena spine> unify-refine (refl {0} Nat zero)
+thena spine> unify-refine-core ⌜ refl {0} Nat zero ⌝
 stuck: zero and succ zero cannot be made equal
 thena spine> :show
 ▶ let ? wrong : Eq {0} Nat zero (succ zero) in
   wrong
 thena spine> :abandon
 abandoned wrong
+thena spine> :theorem split : ∀ (A : Type₀) -> A -> A
+proving split : ∀ (A : Type₀) -> A -> A
+thena spine> fill ⌜ \ (A : Type₀) (a : A) -> a ⌝
+already equal
+thena spine> :show
+  let refined = λ (A : Type₀) (a : A) -> a : ∀ (A : Type₀) -> A -> A in
+▶ let ? split : ∀ (A : Type₀) -> A -> A ≐ (
+    refined
+  ) in
+  split
+thena spine> solve
+thena spine> qed
+split : ∀ (A : Type₀) -> A -> A   ∎
+thena spine> :theorem lower : Type₂
+proving lower : Type₂
+thena spine> unify-refine-core ⌜ Type₀ ⌝
+already equal
+thena spine> :show
+  let refined = Type₀ : Type₁ in
+▶ let lower = refined : Type₂ in
+  lower
+thena spine> qed
+lower : Type₂   ∎

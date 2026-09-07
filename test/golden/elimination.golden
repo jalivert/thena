@@ -10,9 +10,9 @@ thena spine> intro
 thena spine> into
 thena spine> along
 thena spine> along
-thena spine> eliminate i
+thena spine> eliminate-core ⌜ i ⌝
 stuck: eliminating at indices needs Eq, which is not declared
-thena spine> eliminate n
+thena spine> eliminate-core ⌜ n ⌝
 subgoals: zeroMethod, succMethod
 thena spine> :abandon
 abandoned noEq
@@ -39,16 +39,38 @@ thena spine> along
 thena spine> along
 thena spine> :matches
 attack
-try ‹t›
+try-core ‹t›
 abandon
-eliminate ‹t›
-unify-refine ‹t›
-apply ‹f›
-thena spine> eliminate Type₀
+eliminate-core ‹t›
+prove
+fill ‹t›
+unify-refine-core ‹t›
+apply-core ‹f›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+enter-binders ‹t›
+enter-binders ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+thena spine> eliminate-core ⌜ Type₀ ⌝
 stuck: Type₀ is not a target: its type is Type₁, not a fully applied datatype
-thena spine> eliminate succ
+thena spine> eliminate-core ⌜ succ ⌝
 stuck: succ is not a target: its type is Nat -> Nat, not a fully applied datatype
-thena spine> eliminate b
+thena spine> eliminate-core ⌜ b ⌝
 subgoals: bzMethod, bsMethod
 thena spine> :where
 focus
@@ -65,8 +87,8 @@ type
   Nat
 thena spine> attack
 stuck: no clause of attack applies here
-thena spine> eliminate n
-stuck: no clause of eliminate applies here
+thena spine> eliminate-core ⌜ n ⌝
+stuck: no clause of eliminate-core applies here
 thena spine> :abandon
 abandoned probe
 thena spine> :theorem tied : ∀ (m : Nat) (b : Below (succ m) (fz m)) -> Nat
@@ -77,7 +99,7 @@ thena spine> intro
 thena spine> into
 thena spine> along
 thena spine> along
-thena spine> eliminate b
+thena spine> eliminate-core ⌜ b ⌝
 stuck: index 2 (i) has a type that depends on an earlier index,
   so the equation constraining it cannot be stated
 thena spine> :quit

@@ -4,7 +4,7 @@ thena spine> data Bool : Type₀ where { true : Bool ; false : Bool }
 declared Bool
 thena spine> :theorem n : Nat
 proving n : Nat
-thena spine> try true
+thena spine> try-core ⌜ true ⌝
 stuck: that term does not have the hole's type
   true has type Bool
     but Nat was expected
@@ -12,7 +12,7 @@ stuck: that term does not have the hole's type
 thena spine> :show
 ▶ let ? n : Nat in
   n
-thena spine> try zero
+thena spine> try-core ⌜ zero ⌝
 thena spine> solve
 thena spine> qed
 n : Nat   ∎
@@ -20,7 +20,7 @@ thena spine> :theorem m : Nat
 proving m : Nat
 thena spine> claim h : Nat
 claimed h
-thena spine> try (succ h)
+thena spine> try-core ⌜ succ h ⌝
 thena spine> :show
   let ? h : Nat in
 ▶ let ? m : Nat ≐ (

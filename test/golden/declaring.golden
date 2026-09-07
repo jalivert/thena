@@ -24,7 +24,7 @@ cons = λ (A : Type₀) (n : Nat) (a : A) (as : Vec A n) -> cons A n a as
 thena spine> data Empty : Type where { }
 declared Empty
 thena spine> :show Empty
-data Empty {ℓ₈} : Type (ℓ₈) where { }
+data Empty {ℓ₂₂} : Type (ℓ₂₂) where { }
 thena spine> data Nat : Type₀ where { z : Nat }
 refused: Nat is already declared
 thena spine> data Ordinal : Type₀ where { sup : (Nat -> Ordinal) -> Ordinal }

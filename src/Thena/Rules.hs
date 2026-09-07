@@ -32,7 +32,10 @@ module Thena.Rules
 
     -- * Written rules (§8, phase 21)
   , resolveRule
+  , resolveBlock
   , testWord
+  , testOperands
+  , everyTest
   ) where
 
 import Thena.Core.Reduce (whnf)
@@ -50,19 +53,20 @@ import Thena.Ops
   , Rule (..)
   , Test (..)
   , Value (..)
-  , hintName
   , operandsOf
   , partOf
   , partWords
   , produces
-  , usesHint
   )
+import Thena.Surface.Concrete
+  (Plicity (..), Surface (..), SurfaceArg (..))
+import qualified Thena.Surface.Zipper as Zipper
 import Thena.Syntax.Concrete
-  ( Raw (..)
-  , RawInstr (..)
+  ( RawInstr (..)
   , RawOp (..)
   , RawOperand (..)
   , RawRule (..)
+  , RawTest (..)
   )
 import Data.Either (partitionEithers)
 
@@ -131,9 +135,9 @@ newtype RuleIter = RuleIter [Rule]
 
 -- | Every rule whose head passes at the focus, in definition order (§7.6).
 --
--- It takes a 'Cursor' rather than a 'Thena.Engine.ProofState' because
--- @ProofState@ is "Thena.Engine"'s and this module sits below it — and it can,
--- since @ProofState@ is a newtype over exactly this cursor. It takes a
+-- It takes a 'Cursor' rather than a 'Thena.Engine.Development' because
+-- @Development@ is "Thena.Engine"'s and this module sits below it — and it can,
+-- since @Development@ is a newtype over exactly this cursor. It takes a
 -- 'GlobalEnv' because §8's head matching runs 'whnf' and 'whnf' unfolds
 -- globals. It needs no name counter: the type a head reads is the one the
 -- development /writes down/ ('expectedType'), never one @infer@ derives.
@@ -144,20 +148,14 @@ newtype RuleIter = RuleIter [Rule]
 -- speculatively executed to see whether it would succeed — that is a real
 -- feature, a far more expensive one, and it is not MS1 (§2.2, §7.6).
 --
--- **A hint partitions the base** — 'Thena.Ops.usesHint', decided by the user
--- 2026-08-23, and the argument is there. It is applied /here/ and not only in
--- 'dispatch' so that the two cannot disagree: @:matches@ would otherwise offer
--- @attack@ under a hint that the engine, dispatching, would never run it for.
--- The consequence at the REPL is that @:matches@ with no argument lists exactly
--- what it listed before this phase, and @:matches ‹hint›@ is a separate
--- question with a separate answer.
-matches :: [RuleBase] -> GlobalEnv -> Cursor -> Maybe Raw -> RuleIter
-matches bases env cur hint =
-  RuleIter [ r | r <- allRules bases, usesHint r == isHinted, all (holds env cur hint) (ruleHead r) ]
-  where
-    isHinted = case hint of
-      Just _  -> True
-      Nothing -> False
+-- **The base is no longer partitioned** (MS4 phase 41). A hint used to split it
+-- in two — rules whose head asked about one, and the rest — and both halves are
+-- gone with the hint: elaboration is a rule called by name, so nothing about it
+-- is a dispatch. Every rule whose head passes is a candidate, which is what §7.6
+-- said in the first place.
+matches :: [RuleBase] -> GlobalEnv -> Cursor -> RuleIter
+matches bases env cur =
+  RuleIter [ r | r <- allRules bases, all (holds env cur []) (ruleHead r) ]
 
 -- | The rules @Prove@ may actually run: 'matches', less the ones it could not
 -- supply arguments for.
@@ -172,9 +170,9 @@ matches bases env cur hint =
 -- questions: this one is /what the engine can run/, and 'matches' is /what
 -- could be done here/, which includes @try ‹t›@ because the user can type
 -- @try x@. @:matches@ keeps showing it.
-dispatch :: [RuleBase] -> GlobalEnv -> Cursor -> Maybe Raw -> RuleIter
-dispatch base env cur hint =
-  let RuleIter rs = matches base env cur hint
+dispatch :: [RuleBase] -> GlobalEnv -> Cursor -> RuleIter
+dispatch base env cur =
+  let RuleIter rs = matches base env cur
    in RuleIter [ r | r <- rs, null (ruleParams r) ]
 
 -- | The clauses @Call@ may run: **this name, this arity, and a head that
@@ -186,18 +184,21 @@ dispatch base env cur hint =
 -- a filter, so a name may carry a one-argument clause and a two-argument one
 -- and each call picks its own.
 --
--- **No hint**, so a rule whose head asks about one is never a call candidate.
--- 'matches' partitions on exactly this, and passing 'Nothing' here means a call
--- and a hintless dispatch agree about which half of the base they see.
-clauses :: [RuleBase] -> GlobalEnv -> Cursor -> GlobalName -> Int -> RuleIter
-clauses bases env cur nm n =
+-- **The arguments reach the head** (MS4 phase 47). A clause's head may ask
+-- about what it was called with — @when surface-is-name t@ — and each clause
+-- binds them to /its own/ parameter names, exactly as "Thena.Engine" does when
+-- it enters the body. Passing the values rather than an environment is what
+-- keeps that true: clauses of one name need not agree about what they call
+-- their parameters.
+clauses
+  :: [RuleBase] -> GlobalEnv -> Cursor -> GlobalName -> [Value] -> RuleIter
+clauses bases env cur nm vs =
   RuleIter
     [ r
     | r <- allRules bases
     , ruleName r == nm
-    , length (ruleParams r) == n
-    , not (usesHint r)
-    , all (holds env cur Nothing) (ruleHead r)
+    , length (ruleParams r) == length vs
+    , all (holds env cur (zip (ruleParams r) vs)) (ruleHead r)
     ]
 
 -- | The arities of every rule bearing this name, in search order.
@@ -230,14 +231,29 @@ hasNext (RuleIter rs) = not (null rs)
 -- matches, runs and fails in its body, and failing in a body is already handled
 -- (§7.3). Asking about the hole at the bottom of the guess instead would make
 -- the head a traversal, which is what \"shallow\" rules out.
-holds :: GlobalEnv -> Cursor -> Maybe Raw -> Test -> Bool
-holds env cur hint t = case t of
+-- **The third argument binds a call's arguments to this clause's parameters**
+-- (MS4 phase 47), and is empty for 'matches' and 'dispatch', which supply
+-- none.
+--
+-- **An argument nobody supplied does not exclude the rule.** 'matches' asks
+-- /what could be done here/, and whether @elaborate@ applies depends on a term
+-- the user has not typed yet — so the honest answer is that the question was
+-- not about the state and cannot rule the clause out. It is one reading, not a
+-- special case: under 'clauses' every parameter is bound, so the situation
+-- arises only where there is genuinely nothing to ask about, and
+-- 'validate' refuses a head that names anything but a parameter, so an unbound
+-- name here is never a mistake in the rule.
+holds :: GlobalEnv -> Cursor -> Op.Env -> Test -> Bool
+holds env cur args t = case t of
   FocusIsHole   -> case focus cur of
     OnComponent (Component.Claim {}) -> True
     _                                -> False
   FocusIsGuess  -> case focus cur of
     OnComponent (Component.Guess {}) -> True
     _                                -> False
+  FocusIsComponent -> case focus cur of
+    OnComponent _ -> True
+    _             -> False
   GoalTypeIsPi  -> case reduced of
     Just (Pi {}) -> True
     _            -> False
@@ -249,18 +265,70 @@ holds env cur hint t = case t of
   GoalTypeIsLet -> case written of
     Just (Let {}) -> True
     _             -> False
-  -- The hint is the tree as parsed, not as resolved: whether the name is in
-  -- scope is @resolve@'s answer and it is given in the body, where failing is
-  -- ordinary (§7.3). A head that resolved would be doing the work twice and
-  -- would be a head that is not shallow (§8).
-  HintIsName    -> case hint of
-    Just (RawName _) -> True
-    _                -> False
+  -- **The tests that ask about an argument rather than about the focus**
+  -- (MS4 phases 47 and 49). One per 'Thena.Surface.Concrete.Surface'
+  -- constructor, so a clause of @elaborate@ names the node it is for and no
+  -- two heads can match one term.
+  SurfaceIsName o         -> surfaceIs o isName
+  SurfaceIsUniverse o     -> surfaceIs o isUniverse
+  SurfaceIsUniverseOpen o -> surfaceIs o isUniverseOpen
+  SurfaceIsPlaceholder o  -> surfaceIs o isPlaceholder
+  SurfaceIsHole o         -> surfaceIs o isHole
+  SurfaceIsApp o          -> surfaceIs o isApp
+  SurfaceIsLambda o       -> surfaceIs o isLambda
+  SurfaceIsForall o       -> surfaceIs o isForall
+  SurfaceIsArrow o        -> surfaceIs o isArrow
+  SurfaceIsLet o          -> surfaceIs o isLet
+  SurfaceIsAscription o   -> surfaceIs o isAscription
+  SurfaceIsElim o         -> surfaceIs o isElim
+  SurfaceIsDo o           -> surfaceIs o isDo
+  AppArgsAreExplicit o    -> surfaceIs o argsExplicit
+  AppHeadIsName o         -> surfaceIs o headIsName
+  AppHeadIsElim o         -> surfaceIs o headIsElim
+  LambdaBindsMore o       -> surfaceIs o bindsMore
+  LambdaBindsOne o        -> surfaceIs o bindsOne
+  LetIsAnnotated o        -> surfaceIs o isAnnotatedLet
+  LetIsBare o             -> surfaceIs o isBareLet
   where
     -- Written down, then reduced: §8's "head matching runs whnf", because a
     -- goal typed @id Type₀ (Nat -> Nat)@ is a Π and must match.
     written = expectedType cur
     reduced = whnf env (context cur) <$> written
+
+    -- **One shape for every surface test**: read the operand, ask the predicate
+    -- of the focus. An operand that is not a surface term is a false question,
+    -- not an error — §8's shallow heads, and the reason there are no parameter
+    -- kinds (@ms4/CLOSEOUT.md@ 20).
+    --
+    -- An operand nobody bound does **not** exclude the rule — see this
+    -- function's own note above.
+    surfaceIs o p = case Op.operandIn args o of
+      Left _             -> True
+      Right (VSurface z) -> p (Zipper.focus z)
+      Right _            -> False
+
+    isName         s = case s of SurfaceName _ -> True; _ -> False
+    isUniverse     s = case s of SurfaceUniverse _ -> True; _ -> False
+    isUniverseOpen s = case s of SurfaceUniverseOpen -> True; _ -> False
+    isPlaceholder  s = case s of SurfacePlaceholder -> True; _ -> False
+    isHole         s = case s of SurfaceHole _ -> True; _ -> False
+    isApp          s = case s of SurfaceApp _ _ -> True; _ -> False
+    isLambda       s = case s of SurfaceLam _ _ -> True; _ -> False
+    isForall       s = case s of SurfacePi _ _ -> True; _ -> False
+    isArrow        s = case s of SurfaceArrow _ _ -> True; _ -> False
+    isLet          s = case s of SurfaceLet {} -> True; _ -> False
+    isAscription   s = case s of SurfaceAnnot _ _ -> True; _ -> False
+    isElim         s = case s of SurfaceElim {} -> True; _ -> False
+    isDo           s = case s of SurfaceDo _ -> True; _ -> False
+    headIsName     s = case s of SurfaceApp (SurfaceName _) _ -> True; _ -> False
+    headIsElim     s = case s of SurfaceApp (SurfaceElim {}) _ -> True; _ -> False
+    argsExplicit   s = case s of
+      SurfaceApp _ as -> all (\(SurfaceArg p _) -> p == Explicit) as
+      _               -> False
+    bindsMore      s = case s of SurfaceLam bs _ -> length bs > 1; _ -> False
+    bindsOne       s = case s of SurfaceLam bs _ -> length bs == 1; _ -> False
+    isAnnotatedLet s = case s of SurfaceLet _ (Just _) _ _ -> True; _ -> False
+    isBareLet      s = case s of SurfaceLet _ Nothing _ _  -> True; _ -> False
 
 -- --------------------------------------------------------------------------
 -- Well-formedness (§2.4, §7.2)
@@ -287,6 +355,15 @@ data RuleError
   | NoSuchTest        GlobalName String
     -- ^ a word after @when@ that names no 'Test'. No instruction index: a head
     -- is not a sequence
+  | UnboundInHead     GlobalName Name
+    -- ^ a head names something that is not one of the rule's parameters (MS4
+    -- phase 47). A head runs before the body, so its environment is the call's
+    -- arguments and nothing else — there is no earlier @Bind@ to have made a
+    -- name, which is why this is not 'UnboundInRule'
+  | BadTestOperands   GlobalName String
+    -- ^ the right test word, written with the wrong arguments (MS4 phase 47).
+    -- No instruction index, for 'NoSuchTest'\'s reason — a head is not a
+    -- sequence
   | BadOperands       GlobalName Int String
     -- ^ the right op word, written with the wrong arguments — too many, too
     -- few, or a position where a name was wanted. One error for all three: a
@@ -307,9 +384,22 @@ data RuleError
 -- states the head admits. That is not decidable shallowly, and §8 already
 -- states the answer — a rule may match, run and fail.
 validate :: Rule -> [RuleError]
-validate r = go 0 (initiallyBound r) (ruleBody r)
+validate r = headScope ++ go 0 (initiallyBound r) (ruleBody r)
   where
     nm = ruleName r
+
+    -- **A head may name only the rule's own parameters** (MS4 phase 47). It
+    -- runs before the body, so the environment it reads is the call's
+    -- arguments bound to those parameters and nothing else — there is no
+    -- earlier @Bind@ for a name to have come from. Catching it here is what
+    -- lets 'holds' read an unbound name as /a question about an argument
+    -- nobody supplied/ rather than as a mistake it has to guess about.
+    headScope =
+      [ UnboundInHead nm n
+      | t <- ruleHead r
+      , Ref n <- testOperands t
+      , n `notElem` ruleParams r
+      ]
 
     go _ _ [] = []
     go i bound (instr : rest) =
@@ -335,16 +425,13 @@ validate r = go 0 (initiallyBound r) (ruleBody r)
     scope i bound o =
       [ UnboundInRule nm i n | Ref n <- operandsOf o, n `notElem` bound ]
 
--- | The names a body may read before it binds anything of its own: its
--- parameters, and — when its head asks about the hint — 'Thena.Ops.hintName',
--- which @Prove@ seeds the environment with (§8, phase 17b).
+-- | The names a body may read before it binds anything of its own: **its
+-- parameters, and nothing else** (MS4 phase 41).
 --
--- Without this line @elab-var@ fails its own load-time check, because @hint@ is
--- a 'Ref' that no @Bind@ introduces.
+-- It used to add @hint@ when a rule's head asked about one, which was the only
+-- name a body could read that no @Bind@ introduced. Nothing is magic now.
 initiallyBound :: Rule -> [Name]
-initiallyBound r
-  | usesHint r = hintName : ruleParams r
-  | otherwise  = ruleParams r
+initiallyBound = ruleParams
 
 -- | Every rule in one base, checked.
 --
@@ -382,10 +469,39 @@ resolveRule (RawRule nm ps ts body) =
     g = GlobalName nm
 
     (headErrs, tests) = partitionEithers (map test ts)
-    test w = maybe (Left (NoSuchTest g w)) Right (testOf w)
+    test (RawTest w os) = case traverse headOperand os of
+      Nothing  -> Left (BadTestOperands g w)
+      Just os' -> case testOf w os' of
+        Right t                   -> Right t
+        Left NoSuchTestWord       -> Left (NoSuchTest g w)
+        Left (WrongTestArity _ _) -> Left (BadTestOperands g w)
 
     (bodyErrs, instrs) =
       partitionEithers (zipWith (instruction g) [0 ..] body)
+
+-- | What may be written as an operand of a test (MS4 phase 47).
+--
+-- The same two a body accepts, and 'RawPos' refused for the same reason —
+-- a position is 'Down'\'s and nothing else takes one.
+headOperand :: RawOperand -> Maybe Operand
+headOperand o = case o of
+  RawRef n  -> Just (Ref n)
+  RawText t -> Just (Lit (VText t))
+  RawPos _  -> Nothing
+
+-- | Resolve a written block of instructions (MS4 phase 45).
+--
+-- **The same resolution a rule body gets**, and deliberately the same function
+-- underneath: a @do@ block is the instruction language, so a word that names an
+-- op is an op and a word that does not is a rule call, exactly as it is in a
+-- rule (phase 25e). Nothing about a block is a second dialect.
+--
+-- The name is the one errors are reported against. A block has none of its own,
+-- so its caller supplies where it came from.
+resolveBlock :: GlobalName -> [RawInstr] -> Either [RuleError] [Instr]
+resolveBlock g body = case partitionEithers (zipWith (instruction g) [0 ..] body) of
+  ([], instrs) -> Right instrs
+  (errs, _)    -> Left errs
 
 -- | One written instruction. @‹name› = ‹op›@ is a 'Bind', a bare op is a 'Do' —
 -- §7.2\'s two cases, and the grammar has no third.
@@ -418,12 +534,16 @@ operation g i (RawOp w as)
       -- up** (phase 23): the base is searched when the call runs, which is what
       -- lets a rule call itself and call a rule defined after it, or in a base
       -- loaded after it. 'Thena.Rules.clauses' is the search.
+      -- **@prim-intro@ takes an optional name** (MS4 phase 41b): bare, the
+      -- binder keeps the one written in the type; with an argument, the
+      -- caller's. Spelled here rather than in the arity tables because it is
+      -- the one op that appears in two of them.
+      ("prim-intro", [])          -> Right (Intro Nothing)
+      ("prim-intro", [a])         -> Intro . Just <$> ref a
+      ("prim-intro", _)           -> bad
       ("call", RawRef r : rest)   -> Call (GlobalName r) <$> traverse ref rest
       ("call", _)                 -> bad
 
-      ("prove", [])               -> Right (Prove Nothing)
-      ("prove", [a])              -> Prove . Just <$> ref a
-      ("prove", _)                -> bad
 
       ("ask", [a, RawRef k])      -> case answerKind k of
         Just ak -> flip Ask ak <$> ref a
@@ -477,18 +597,43 @@ operation g i (RawOp w as)
 
     nullary =
       [ ("along", Along), ("into", Into), ("back", Back), ("reduce", Reduce)
-      , ("prim-attack", Attack), ("prim-intro", Intro), ("prim-regret", Regret)
+      , ("prim-attack", Attack), ("prim-regret", Regret)
       , ("prim-solve", Solve), ("prim-abandon", Abandon), ("goal", Goal)
+      , ("fresh-universe", Op.FreshUniverse)
+      , ("here", Here)
+      , ("prim-prove", Prove)
+      , ("pop-development", Op.PopDevelopment)
       ]
     unary =
-      [ ("say", Say), ("prim-try", Try), ("parse", Parse), ("resolve", Op.Resolve)
-      , ("goto", Goto)
+      [ ("say", Say), ("yield", Op.Yield), ("prim-try", Try)
+      , ("goto", Goto), ("push-development", Op.PushDevelopment)
       , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
-      , ("typeof", Typing), ("fresh-name", FreshName), ("prim-apply", Op.Apply)
+      , ("typeof", Typing), ("expose", Op.Expose), ("fresh-name", FreshName), ("prim-apply", Op.Apply)
+      , ("resolve-name", Op.ResolveName)
+      , ("surface-name", Op.SurfaceNameOf)
+      , ("surface-universe", Op.SurfaceUniverseOf)
+      , ("arrow-domain", Op.ArrowDomain), ("arrow-codomain", Op.ArrowCodomain)
+      , ("ascription-type", Op.AscriptionType)
+      , ("ascription-term", Op.AscriptionTerm)
+      , ("app-function", Op.AppFunction)
+      , ("app-last-argument", Op.AppLastArgument)
+      , ("app-head", Op.AppHead)
+      , ("app-first-argument", Op.AppFirstArgument)
+      , ("app-tail", Op.AppTail)
+      , ("expand-implicits", Op.ExpandImplicits)
+      , ("lambda-name", Op.LambdaName), ("lambda-tail", Op.LambdaTail)
+      , ("lambda-body", Op.LambdaBody)
+      , ("let-name", Op.LetName), ("let-type", Op.LetType)
+      , ("let-value", Op.LetValue), ("let-body", Op.LetBody)
+      , ("forall-name", Op.ForallName), ("forall-domain", Op.ForallDomain)
+      , ("forall-tail", Op.ForallTail), ("play", Op.Play)
+      , ("elim-spine", Op.ElimSpine)
       ]
     binary =
       [ ("assume", Assume), ("claim", Claim), ("define", Define)
-      , ("concat", Concat), ("unify", Unify)
+      , ("quantify", Op.Quantify)
+      , ("concat", Concat), ("unify", Unify), ("unify-into", Op.UnifyInto)
+      , ("arrow", Arrow), ("apply-to", ApplyTo), ("apply-next", Op.ApplyNext)
       ]
 
 -- | What @ask@'s second word may be — 'AnswerKind', spelled.
@@ -504,8 +649,95 @@ answerKind k = case k of
   "rule-name" -> Just ARule
   _           -> Nothing
 
-testOf :: String -> Maybe Test
-testOf w = lookup w [ (testWord t, t) | t <- everyTest ]
+-- | Build the test a word names, from the operands written after it.
+--
+-- **Shaped like 'instruction', one layer up**: the word chooses the
+-- constructor and the operand count is checked here rather than in the grammar,
+-- for §2.5's reason that the parser is shallow. 'Nothing' is /no such test/ and
+-- 'Just' with the wrong count is a different error, so the two are told apart
+-- by the caller.
+testOf :: String -> [Operand] -> Either TestError Test
+testOf w os = case [ t | t <- everyTest, testWord t == w ] of
+  []    -> Left NoSuchTestWord
+  t : _ -> maybe (Left (WrongTestArity (length (testOperands t)) (length os)))
+                 Right
+                 (withOperands t os)
+
+-- | Why a written test is not one. Local to resolution; 'RuleError' is what
+-- escapes.
+data TestError = NoSuchTestWord | WrongTestArity Int Int
+
+-- | Put the written operands into a test drawn from 'everyTest'.
+--
+-- **The words live in 'testWord' and nowhere else**, which is why resolution
+-- goes through that list rather than keeping a second table — his standing
+-- objection to a word written in two places. What is left here is only /how/ a
+-- test is rebuilt from its operands, and the final case is the arity mismatch,
+-- which is reachable and is what 'testOf' reports.
+--
+-- A test added later must extend 'testWord' and 'testOperands', both of which
+-- @-Wall@ forces; "Thena.RuleSyntaxTests" round-trips every entry of
+-- 'everyTest' through the parser, which is what catches one this function
+-- forgot.
+withOperands :: Test -> [Operand] -> Maybe Test
+withOperands t os = case (t, os) of
+  (FocusIsHole,      []) -> Just FocusIsHole
+  (FocusIsGuess,     []) -> Just FocusIsGuess
+  (FocusIsComponent, []) -> Just FocusIsComponent
+  (GoalTypeIsPi,     []) -> Just GoalTypeIsPi
+  (GoalTypeIsLet,    []) -> Just GoalTypeIsLet
+  (SurfaceIsName _, [o])         -> Just (SurfaceIsName o)
+  (SurfaceIsUniverse _, [o])     -> Just (SurfaceIsUniverse o)
+  (SurfaceIsUniverseOpen _, [o]) -> Just (SurfaceIsUniverseOpen o)
+  (SurfaceIsPlaceholder _, [o])  -> Just (SurfaceIsPlaceholder o)
+  (SurfaceIsHole _, [o])         -> Just (SurfaceIsHole o)
+  (SurfaceIsApp _, [o])          -> Just (SurfaceIsApp o)
+  (SurfaceIsLambda _, [o])       -> Just (SurfaceIsLambda o)
+  (SurfaceIsForall _, [o])       -> Just (SurfaceIsForall o)
+  (SurfaceIsArrow _, [o])        -> Just (SurfaceIsArrow o)
+  (SurfaceIsLet _, [o])          -> Just (SurfaceIsLet o)
+  (SurfaceIsAscription _, [o])   -> Just (SurfaceIsAscription o)
+  (SurfaceIsElim _, [o])         -> Just (SurfaceIsElim o)
+  (SurfaceIsDo _, [o])           -> Just (SurfaceIsDo o)
+  (AppArgsAreExplicit _, [o])    -> Just (AppArgsAreExplicit o)
+  (AppHeadIsName _, [o])         -> Just (AppHeadIsName o)
+  (AppHeadIsElim _, [o])         -> Just (AppHeadIsElim o)
+  (LambdaBindsMore _, [o])       -> Just (LambdaBindsMore o)
+  (LambdaBindsOne _, [o])        -> Just (LambdaBindsOne o)
+  (LetIsAnnotated _, [o])        -> Just (LetIsAnnotated o)
+  (LetIsBare _, [o])             -> Just (LetIsBare o)
+  _                      -> Nothing
+
+-- | What a test was written with, in written order. 'Thena.Ops.operandsOf'\'s
+-- job one type over, and what lets 'testOf' read an arity off 'everyTest'
+-- rather than keeping a second table of counts.
+testOperands :: Test -> [Operand]
+testOperands t = case t of
+  FocusIsHole     -> []
+  FocusIsGuess    -> []
+  FocusIsComponent -> []
+  GoalTypeIsPi    -> []
+  GoalTypeIsLet   -> []
+  SurfaceIsName o         -> [o]
+  SurfaceIsUniverse o     -> [o]
+  SurfaceIsUniverseOpen o -> [o]
+  SurfaceIsPlaceholder o  -> [o]
+  SurfaceIsHole o         -> [o]
+  SurfaceIsApp o          -> [o]
+  SurfaceIsLambda o       -> [o]
+  SurfaceIsForall o       -> [o]
+  SurfaceIsArrow o        -> [o]
+  SurfaceIsLet o          -> [o]
+  SurfaceIsAscription o   -> [o]
+  SurfaceIsElim o         -> [o]
+  SurfaceIsDo o           -> [o]
+  AppArgsAreExplicit o    -> [o]
+  AppHeadIsName o         -> [o]
+  AppHeadIsElim o         -> [o]
+  LambdaBindsMore o       -> [o]
+  LambdaBindsOne o        -> [o]
+  LetIsAnnotated o        -> [o]
+  LetIsBare o             -> [o]
 
 -- | The word a 'Test' is written with. Total, so @-Wall@ makes a new test say
 -- how it is spelled — 'Thena.Ops.opKeyword'\'s trick, one type over.
@@ -515,14 +747,59 @@ testOf w = lookup w [ (testWord t, t) | t <- everyTest ]
 -- phase widened an identifier.
 testWord :: Test -> String
 testWord t = case t of
-  FocusIsHole   -> "focus-is-hole"
-  FocusIsGuess  -> "focus-is-guess"
-  GoalTypeIsPi  -> "goal-type-is-pi"
-  GoalTypeIsLet -> "goal-type-is-let"
-  HintIsName    -> "hint-is-name"
+  FocusIsHole     -> "focus-is-hole"
+  FocusIsGuess    -> "focus-is-guess"
+  FocusIsComponent -> "focus-is-component"
+  GoalTypeIsPi    -> "goal-type-is-pi"
+  GoalTypeIsLet   -> "goal-type-is-let"
+  SurfaceIsName _         -> "surface-is-name"
+  SurfaceIsUniverse _     -> "surface-is-universe"
+  SurfaceIsUniverseOpen _ -> "surface-is-universe-open"
+  SurfaceIsPlaceholder _  -> "surface-is-placeholder"
+  SurfaceIsHole _         -> "surface-is-hole"
+  SurfaceIsApp _          -> "surface-is-app"
+  SurfaceIsLambda _       -> "surface-is-lambda"
+  SurfaceIsForall _       -> "surface-is-forall"
+  SurfaceIsArrow _        -> "surface-is-arrow"
+  SurfaceIsLet _          -> "surface-is-let"
+  SurfaceIsAscription _   -> "surface-is-ascription"
+  SurfaceIsElim _         -> "surface-is-elim"
+  SurfaceIsDo _           -> "surface-is-do"
+  AppArgsAreExplicit _    -> "app-args-are-explicit"
+  AppHeadIsName _         -> "app-head-is-name"
+  AppHeadIsElim _         -> "app-head-is-elim"
+  LambdaBindsMore _       -> "lambda-binds-more"
+  LambdaBindsOne _        -> "lambda-binds-one"
+  LetIsAnnotated _        -> "let-is-annotated"
+  LetIsBare _             -> "let-is-bare"
 
 -- | Every test there is. A list and not a case split, so it cannot be total —
 -- 'testWord' is what @-Wall@ guards, and "Thena.RuleSyntaxTests" checks this
 -- list against it.
+-- An argument-taking test appears here with a placeholder operand, which is
+-- all 'testWord' and 'testOperands' read: this list says what tests /exist/,
+-- not what any written one says.
 everyTest :: [Test]
-everyTest = [FocusIsHole, FocusIsGuess, GoalTypeIsPi, GoalTypeIsLet, HintIsName]
+everyTest =
+  [ FocusIsHole, FocusIsGuess, FocusIsComponent, GoalTypeIsPi, GoalTypeIsLet
+  , SurfaceIsName (Lit (VText ""))
+  , SurfaceIsUniverse (Lit (VText ""))
+  , SurfaceIsUniverseOpen (Lit (VText ""))
+  , SurfaceIsPlaceholder (Lit (VText ""))
+  , SurfaceIsHole (Lit (VText ""))
+  , SurfaceIsApp (Lit (VText ""))
+  , SurfaceIsLambda (Lit (VText ""))
+  , SurfaceIsForall (Lit (VText ""))
+  , SurfaceIsArrow (Lit (VText ""))
+  , SurfaceIsLet (Lit (VText ""))
+  , SurfaceIsAscription (Lit (VText ""))
+  , SurfaceIsElim (Lit (VText ""))
+  , SurfaceIsDo (Lit (VText ""))
+  , AppArgsAreExplicit (Lit (VText ""))
+  , AppHeadIsName (Lit (VText ""))
+  , AppHeadIsElim (Lit (VText ""))
+  , LambdaBindsMore (Lit (VText ""))
+  , LambdaBindsOne (Lit (VText ""))
+  , LetIsAnnotated (Lit (VText ""))
+  , LetIsBare (Lit (VText ""))
+  ]

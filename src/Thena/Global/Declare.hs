@@ -19,28 +19,35 @@
 module Thena.Global.Declare
   ( DeclareError (..)
   , declare
+  , buildInductive
+  , targetIndices
   ) where
 
 import Control.Monad (foldM)
 
-import Thena.Core.Context (Context, Entry (..), entryType, entryVar, lamOver)
+import Thena.Core.Context (Context, Entry (..), entryIdent, entryType, entryVar, lamOver)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Level
   ( Level (..)
+  , LevelVar
   , Obligation (..)
   , freshLevelRigid
   , levelMax
   , loneMeta
+  , minimise
   , metasIn
   , solveLevels
   )
 import Thena.Core.Typing (infer)
-import Thena.Errors (TypeError (..))
+import Thena.Errors (DataBuildError (..), ResolveError (..), TypeError (..))
 import Thena.Core.Term
   ( Core (..)
   , GlobalName
   , Ident
+  , close
+  , levelMetasIn
   , fresh
+  , instantiate
   , globalsIn
   , open
   , referencesAt
@@ -59,6 +66,8 @@ import Thena.Global.Env
   , addDefinition
   , addInductive
   , constructorType
+  , eliminatorName
+  , eliminatorWrapper
   , formerType
   , levelMetasInInductive
   , substLevelsInInductive
@@ -92,6 +101,15 @@ data DeclareError
   | ArgumentTooLarge GlobalName Ident Level Level
     -- ^ constructor, argument, the universe the argument lives in, and the
     -- datatype's own — thesis §4.1.1 (phase 8)
+  | AmbiguousLevels GlobalName
+    -- ^ the levels only this datatype's constructors mention have no least
+    -- solution, so they can be neither defaulted nor carried (phase 51)
+  | ArgumentLevelsUnmet GlobalName
+    -- ^ the level relations a constructor's arguments owe cannot all hold, and
+    -- no single argument's size restriction is the one at fault (phase 50).
+    -- Reachable since 'argumentLevels' stopped dropping typing obligations: a
+    -- datatype has nowhere to carry a conditional constraint, so an obligation
+    -- that survives 'solveLevels' has to refuse the declaration.
   | NoConfusionRejected GlobalName TypeError
     -- ^ **a generator bug, not a user mistake** (phase 14): the checker refused
     -- a definition "Thena.Global.NoConfusion" emitted. It is a refusal rather
@@ -131,12 +149,20 @@ declare env n d0 = do
   -- finished declaration, which is why the wrappers and no-confusion need to
   -- know nothing about any of it.
   (d1, n2) <- computed env n1 d0
-  n3 <- universes env n2 d1
-  let (d, n4) = generaliseInductive n3 d1
+  (sub, residue, n3) <- universes env n2 d1
+  -- **Solve before generalising** (phase 50). A meta its own constraints
+  -- determine must be substituted away here; left in, 'generaliseInductive'
+  -- turns it into a prenex parameter, and a rigid gets the /validity/ reading,
+  -- so the very bound that determined it becomes unsatisfiable. That is not a
+  -- theoretical ordering point: it is what made
+  -- @data E : Type where { k : Eq {1} Type Nat Nat -> E }@ declare a datatype
+  -- whose generated no-confusion family could not typecheck.
+  d2 <- minimised residue (substLevelsInInductive sub d1)
+  let (d, n4) = generaliseInductive n3 d2
   -- The wrappers first: the generated terms name the datatype's own former and
   -- constructors, so they must already resolve.
-  let env1 = generate d env
-  -- **Every branch gives back @n4@ or later, never an earlier counter.** A
+  let (env1, n5) = generate d n4 env
+  -- **Every branch gives back @n5@ or later, never an earlier counter.** A
   -- declined no-confusion still leaves the datatype declared, and
   -- 'generaliseInductive' has already minted its level parameters from the
   -- shared counter — so handing back the count from before them would reissue
@@ -144,11 +170,11 @@ declare env n d0 = do
   -- closeout 4f says may never happen. Phase 33c introduced the slip by
   -- renaming the post-'universes' counter and leaving these three branches
   -- naming the old one.
-  case generateNoConfusion env1 n4 d of
-    Generated env2 n5   -> Right (env2, n5, Nothing)
-    Declined NoEquality -> Right (env1, n4, Nothing)
-    Declined NoProducts -> Right (env1, n4, Nothing)
-    Declined why        -> Right (env1, n4, Just why)
+  case generateNoConfusion env1 n5 d of
+    Generated env2 n6   -> Right (env2, n6, Nothing)
+    Declined NoEquality -> Right (env1, n5, Nothing)
+    Declined NoProducts -> Right (env1, n5, Nothing)
+    Declined why        -> Right (env1, n5, Just why)
     Clash g             -> Left (AlreadyDeclared g)
     Rejected g e        -> Left (NoConfusionRejected g e)
 
@@ -175,21 +201,28 @@ declare env n d0 = do
 -- what the stored types are written against — no opening, no substitution.
 argumentLevels
   :: GlobalEnv -> Int -> InductiveDefinition
-  -> Either DeclareError ([(GlobalName, Ident, Level)], Int)
-argumentLevels env n0 d = foldM eachConstructor ([], n0) (inductiveConstructors d)
+  -> Either DeclareError ([(GlobalName, Ident, Level)], [Obligation], Int)
+argumentLevels env n0 d = foldM eachConstructor ([], [], n0) (inductiveConstructors d)
   where
     provisional = addConstant (inductiveName d) (inductiveLevels d) (formerType d) env
 
     eachConstructor acc c = go acc (inductiveParameters d) (constructorArguments c)
       where
         go seen _   []       = Right seen
-        -- Level obligations are dropped, as everywhere outside the checking
-        -- pass ("Thena.Core.Typing"'s header says why once). A declaration
-        -- names no global whose scheme could owe one.
-        go (seen, n') ctx (e : es) = case infer provisional ctx n' (entryType e) of
+        -- **The obligations are collected, not dropped** (phase 50). They used
+        -- to be, on the reading that /"a declaration names no global whose
+        -- scheme could owe one"/ — which is true of a /scheme/ constraint and
+        -- misses the ordinary kind. Typing @Eq {1} Type Nat Nat@ owes
+        -- @suc ?ℓ ≤ 1@, a bound on a meta this very declaration minted, and
+        -- dropping it let the meta reach 'generaliseInductive' undetermined and
+        -- become a rigid its own constraint then refuted. See 'universes'.
+        go (seen, owed, n') ctx (e : es) = case infer provisional ctx n' (entryType e) of
           (Left err, _, _) -> Left (ArgumentNotAType (constructorName c) (identOf e) err)
-          (Right ty, _, n'') -> case whnf provisional ctx ty of
-            Universe l -> go (seen ++ [(constructorName c, identOf e, l)], n'') (ctx ++ [e]) es
+          (Right ty, obs, n'') -> case whnf provisional ctx ty of
+            Universe l -> go ( seen ++ [(constructorName c, identOf e, l)]
+                             , owed ++ obs
+                             , n'' )
+                             (ctx ++ [e]) es
             ty' -> Left (ArgumentNotAType (constructorName c) (identOf e)
                           (notAType ctx (entryType e) ty'))
 
@@ -225,18 +258,33 @@ argumentLevels env n0 d = foldM eachConstructor ([], n0) (inductiveConstructors 
 -- cannot settle **is still refused**: a datatype has nowhere to carry a
 -- conditional constraint, because 'Thena.Global.Env.definitionConstraints' is a
 -- definition\'s and a use of a former supplies levels without proving anything.
-universes :: GlobalEnv -> Int -> InductiveDefinition -> Either DeclareError Int
+universes
+  :: GlobalEnv -> Int -> InductiveDefinition
+  -> Either DeclareError ([(LevelVar, Level)], [Obligation], Int)
 universes env n0 d = do
-  (ls, n1) <- argumentLevels env n0 d
-  let owed = [ AtMost l (inductiveLevel d) | (_, _, l) <- ls ]
+  (ls, obs, n1) <- argumentLevels env n0 d
+  let sized = [ AtMost l (inductiveLevel d) | (_, _, l) <- ls ]
+      owed  = obs ++ sized
   case solveLevels owed of
-    Right (_, []) -> Right n1
+    -- **The substitution is kept** (phase 50). It used to be discarded, so
+    -- even a bound this function itself formed pinned nothing: the comment on
+    -- 'Thena.Core.Level.solveLevels' that @suc ?ℓ ≤ 1@ pins @?ℓ@ at zero was
+    -- true of the solver and false of this caller.
+    --
+    -- **And the residue is handed on rather than refused** (phase 51). It used
+    -- to have to be empty here; minimisation runs after this and is what
+    -- settles the metas the bounds only /constrain/, so the question this
+    -- function can answer is the one it asks — whether the constraints are
+    -- outright impossible.
+    Right (sub, residue) -> Right (sub, residue, n1)
     -- Which argument to name: the first whose own relation does not hold on
-    -- its own. There is always one, because the whole set failed.
+    -- its own. There is always one when the size restriction is what failed —
+    -- and when it is not, the failure came from typing an argument rather than
+    -- from its size, so there is nothing better to name than the declaration.
     _ -> case [ (g, i, l) | (g, i, l) <- ls
               , solveLevels [AtMost l (inductiveLevel d)] /= Right ([], []) ] of
            (g, i, l) : _ -> Left (ArgumentTooLarge g i l (inductiveLevel d))
-           []            -> Right n1
+           []            -> Left (ArgumentLevelsUnmet (inductiveName d))
 
 -- | The universe a bare @Type@ in the declared position stands for: the least
 -- one that contains every constructor argument (MS3 phase 33c).
@@ -245,7 +293,7 @@ universes env n0 d = do
 -- computing** — and it is what makes @data Eq (A : Type) : A -> A -> Type@ come
 -- out as @Eq {ℓ}@ rather than @Eq {ℓ0 ℓ1}@ with @ℓ0 ≤ ℓ1@. Constraining would
 -- have given the datatype a second parameter that every use has to supply, and
--- MS3\'s own done-when — @examples\/determinacy.thena@ byte-identical — forbids
+-- MS3\'s own done-when — @examples\/determinacy.thena.script@ byte-identical — forbids
 -- that.
 --
 -- **Only a bare @Type@ is computed. A written @Typeₙ@ is still checked**, so
@@ -263,7 +311,7 @@ computed
 computed env n0 d = case loneMeta (inductiveLevel d) of
   Nothing -> Right (d, n0)
   Just m  -> do
-    (ls, n1) <- argumentLevels env n0 d
+    (ls, _, n1) <- argumentLevels env n0 d
     case [ l | (_, _, l) <- ls, m `notElem` metasIn l ] of
       -- **Nothing contributes, so nothing is computed and the meta is left for
       -- generalisation.** @Empty@ and @Unit@ are this case, and it is the whole
@@ -272,6 +320,36 @@ computed env n0 d = case loneMeta (inductiveLevel d) of
       -- zero, which would be an answer invented rather than derived.
       []      -> Right (d, n1)
       l : ls' -> Right (substLevelsInInductive [(m, foldr levelMax l ls')] d, n1)
+
+-- | Default the level metas that only the /constructors/ mention (phase 51).
+--
+-- **The partition is occurrence in the former's type**, and it is the same one
+-- 'Thena.Global.Env.generalised' uses. A meta the former's type mentions —
+-- in a parameter, an index, or the declared universe — is real polymorphism: a
+-- use of @D@ writes it and it changes what the type means. A meta only a
+-- constructor argument mentions can be determined by nobody, because a use
+-- supplies levels without proving anything, and every use would have to write
+-- it to say nothing at all.
+--
+-- Concretely, before this phase:
+--
+-- > data D9 {ℓ₃₃₄ ℓ₃₃₅ ℓ₃₃₆ ℓ₃₃₇ ℓ₃₃₈} : Type (ℓ₃₃₄) where
+-- >   { c9 : Eq {ℓ₃₃₄} Nat a1 {ℓ₃₃₅ ℓ₃₃₆} a1 {ℓ₃₃₇ ℓ₃₃₈} -> D9 {…} }
+--
+-- Four of the five said nothing and had to be written at every use.
+--
+-- **A datatype still carries no constraints**, so anything 'minimise' hands
+-- back unsolved refuses the declaration — the rule 'generaliseInductive'
+-- already stated, now applied to what is genuinely left rather than to what had
+-- merely not been minimised yet.
+minimised
+  :: [Obligation] -> InductiveDefinition -> Either DeclareError InductiveDefinition
+minimised residue d = case minimise ambiguous residue of
+  Right (sub, []) -> Right (substLevelsInInductive sub d)
+  _               -> Left (AmbiguousLevels (inductiveName d))
+  where
+    ambiguous =
+      [ v | v <- levelMetasInInductive d, v `notElem` levelMetasIn (formerType d) ]
 
 -- | Turn the level metas a declaration is left holding into its prenex
 -- parameters (MS3 phase 33c) — 'Thena.Global.Env.generalised' for declarations.
@@ -335,8 +413,18 @@ ownReferences d =
 
 -- | Every name a declaration introduces must be free, and distinct from the
 -- others it introduces.
+--
+-- **The eliminator\'s wrapper is one of them** (MS4 phase 49e). It is generated
+-- like a former\'s, so it can clash like one, and this is where a clash is
+-- caught — 'Thena.Global.NoConfusion.generateNoConfusion' answers @Clash@ for
+-- its own two names for the same reason.
 checkNames :: GlobalEnv -> InductiveDefinition -> Either DeclareError ()
-checkNames env d = go [] (inductiveName d : map constructorName (inductiveConstructors d))
+checkNames env d =
+  go []
+    ( inductiveName d
+    : eliminatorName (inductiveName d)
+    : map constructorName (inductiveConstructors d)
+    )
   where
     go _ [] = Right ()
     go seen (g : gs)
@@ -424,8 +512,9 @@ positive dn cn i = peel False
 -- This is what makes a former usable as an ordinary function value: @succ@ on
 -- its own is that global, so @map succ xs@ works, and it is why 'Core' needs no
 -- under-applied 'Canonical' (§12 invariant 6).
-generate :: InductiveDefinition -> GlobalEnv -> GlobalEnv
-generate d env = addInductive dn d (foldl former env (typeFormer : map value cs))
+generate :: InductiveDefinition -> Int -> GlobalEnv -> (GlobalEnv, Int)
+generate d n0 env =
+  (addInductive dn d (eliminator (foldl former env (typeFormer : map value cs))), n2)
   where
     dn = inductiveName d
     ps = inductiveParameters d
@@ -433,6 +522,24 @@ generate d env = addInductive dn d (foldl former env (typeFormer : map value cs)
 
     typeFormer = (dn, ps ++ inductiveIndices d, formerType d)
     value c    = (constructorName c, ps ++ constructorArguments c, constructorType d c)
+
+    -- **§3.7 item 2 for the eliminator** (MS4 phase 49e, his proposal): the
+    -- eliminator gets a wrapper too, so that @elim D …@ is an ordinary
+    -- name-headed application and elaboration needs no case of its own. It
+    -- comes after the formers because its type names @D@ and its body names
+    -- every constructor.
+    --
+    -- **The motive\'s level is a prenex parameter of the wrapper**, minted here
+    -- and instantiated at each use by phase 44\'s level-argument insertion —
+    -- where @make-elim@ minted a meta per use inside the op. The wrapper\'s
+    -- parameters are therefore the datatype\'s plus that one, in that order.
+    (mlv, n1)      = freshLevelRigid n0
+    (ety, ebody, n2) = eliminatorWrapper d (LVar mlv) n1
+    elvs           = inductiveLevels d ++ [mlv]
+
+    eliminator e =
+      addDefinition (eliminatorName dn) (MkDefinition elvs [] ety ebody)
+        (addConstant (eliminatorName dn) elvs ety e)
 
     -- **The wrapper inherits the datatype's level parameters** (phase 31b),
     -- and its body instantiates the 'Canonical' at exactly those parameters —
@@ -450,3 +557,117 @@ spine = go []
   where
     go as (App f a) = go (a : as) f
     go as t         = (t, as)
+
+-- --------------------------------------------------------------------------
+-- Building a declaration out of elaborated types (MS4 phase 42b)
+-- --------------------------------------------------------------------------
+
+-- | Assemble an 'InductiveDefinition' from types that have already been
+-- elaborated.
+--
+-- **"Thena.Syntax.Resolve"'s @resolveData@ does this from 'Raw', and it does it
+-- syntactically**: the parameters are what was written before the @:@, the
+-- indices what was written after, and a constructor's arguments are the Π
+-- binders written before its target. Elaboration cannot work that way — what it
+-- produces is a 'Core' — so the same split is made here by /peeling/, and the
+-- counts come from the surface form the driver read.
+--
+-- **The parameters must be the same variables everywhere.** A constructor's
+-- type is written in the scope of the parameters, so the driver prepends them
+-- and each constructor is elaborated as @∀ params -> ‹written›@ — which mints
+-- the parameters again, per constructor. Peeling gives one set per constructor
+-- and they are renamed onto the datatype's, which is what
+-- 'Thena.Global.Env.ConstructorDefinition'\\'s /"a telescope over the
+-- datatype's parameters"/ requires.
+buildInductive
+  :: GlobalEnv -> GlobalName -> Int -> [(GlobalName, Core)] -> Core -> Int
+  -> Either DataBuildError (InductiveDefinition, Int)
+buildInductive env dn nps cs ty n0 = do
+  (params, afterParams, n1) <- peelExactly env [] nps ty n0
+  (indices, rest, n2)       <- peelToUniverse env params afterParams n1
+  level                     <- universeOf rest
+  (cs', n3)                 <- constructorsOf params (length indices) n2 cs
+  Right (InductiveDefinition dn [] params indices level cs', n3)
+  where
+    universeOf t = case whnf env [] t of
+      Universe l -> Right l
+      _          -> Left (DeclaredTypeIsNotAUniverse dn)
+
+    constructorsOf _ _ n [] = Right ([], n)
+    constructorsOf params want n ((cn, cty) : more) = do
+      -- Peel the parameters this constructor's own type re-bound, and rename
+      -- them onto the datatype's.
+      (own, body, n1) <- peelExactly env [] nps cty n
+      let renamed = foldr rename body (zip own params)
+      (args, target, n2) <- peelAll env params renamed n1
+      ixs <- case targetIndices dn params want (show cn) target of
+               Left _   -> Left (ConstructorTargetWrong cn)
+               Right is -> Right is
+      (rest', n3) <- constructorsOf params want n2 more
+      Right (ConstructorDefinition cn args ixs : rest', n3)
+
+    -- @close@ then @instantiate@ — the two primitives a rename is, and the
+    -- same pair "Thena.Core.Unify" spells @substFree@ with.
+    rename (mine, theirs) t =
+      instantiate (Free (entryVar theirs)) (close (entryVar mine) t)
+
+-- | Peel exactly @k@ Π binders, reducing to expose each one.
+peelExactly
+  :: GlobalEnv -> Context -> Int -> Core -> Int
+  -> Either DataBuildError (Context, Core, Int)
+peelExactly env ctx k t n
+  | k <= 0    = Right ([], t, n)
+  | otherwise = case whnf env ctx t of
+      Pi i dom sc ->
+        let (v, n1) = fresh n
+            e       = Hypothesis v i dom
+         in (\(es, rest, n2) -> (e : es, rest, n2))
+              <$> peelExactly env (ctx ++ [e]) (k - 1) (instantiate (Free v) sc) n1
+      _ -> Left TooFewBinders
+
+-- | Peel Π binders until what is left is a universe.
+peelToUniverse
+  :: GlobalEnv -> Context -> Core -> Int
+  -> Either DataBuildError (Context, Core, Int)
+peelToUniverse env ctx t n = case whnf env ctx t of
+  Pi i dom sc ->
+    let (v, n1) = fresh n
+        e       = Hypothesis v i dom
+     in (\(es, rest, n2) -> (e : es, rest, n2))
+          <$> peelToUniverse env (ctx ++ [e]) (instantiate (Free v) sc) n1
+  other -> Right ([], other, n)
+
+-- | Peel every Π binder there is; what is left is the constructor's target.
+peelAll
+  :: GlobalEnv -> Context -> Core -> Int
+  -> Either DataBuildError (Context, Core, Int)
+peelAll = peelToUniverse
+
+-- **Moved here from "Thena.Syntax.Resolve" at MS4 phase 42b**, because a
+-- surface declaration needs the same check and this module is the one that is
+-- about what a declaration must be. It works on 'Core', so both callers reach
+-- it: that one has resolved the target, this one has elaborated it.
+-- | Split a constructor's target into the index expressions the record keeps.
+--
+-- The parameters are not kept, because they are fixed for the whole definition
+-- and a constructor must pass them through unchanged (§3.7, thesis §4.1.2).
+-- Checking that here is what lets "Thena.Global.Declare" rebuild the target
+-- from the record and get the same term back.
+targetIndices
+  :: GlobalName -> Context -> Int -> String -> Core
+  -> Either ResolveError [Core]
+targetIndices dn params want cn t = case spine t of
+  (Global g _, as)
+    | g == dn ->
+        if length as /= length params + want
+          then Left (TargetArgumentCount cn (length params + want) (length as))
+          else passed params (take (length params) as)
+                 >> Right (drop (length params) as)
+  _ -> Left (TargetIsNotTheDatatype cn)
+  where
+    passed [] _ = Right ()
+    passed (p : more) (a : as)
+      | a == Free (entryVar p) = passed more as
+      | otherwise              = Left (ParameterNotPassedThrough cn (entryIdent p))
+    passed (p : _) []          = Left (ParameterNotPassedThrough cn (entryIdent p))
+
