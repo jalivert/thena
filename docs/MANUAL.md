@@ -526,7 +526,24 @@ amounts to starting over. Handy for scratch work.
 `eliminate-core ⌜ target ⌝` is the induction tactic. It builds the motive, works out
 what each case has to prove, and posts one hole per case.
 
-Assume `Nat`, addition as `plus`, and congruence of `succ` are already proved.
+The example needs `Nat`, addition, and congruence of `succ`.
+`examples/tier0.thena` declares the first two; the third is one line.
+
+```
+thena spine> :load examples/tier0.thena
+module Tier0
+  declared Nat
+  declared plus
+  declared identity
+  declared one
+  declared two
+  declared plusZeroLeft
+thena spine> declare congSucc : ∀ (a b : Nat) -> Eq Nat a b -> Eq Nat (succ a) (succ b) ; congSucc = \ a b e -> elim Eq (Nat) (\ x y q -> Eq Nat (succ x) (succ y)) ((\ c -> refl Nat (succ c))) (a b) e
+…
+```
+
+(Elaborating a declaration at the prompt prints a page of `solved: ?ℓ…` lines,
+elided here. Inside a `.thena` module they are suppressed — see §11.)
 
 ```
 thena spine> :theorem plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n
@@ -565,7 +582,7 @@ thena spine> back
 thena spine> try-core ⌜ refl {0} Nat zero ⌝
 thena spine> solve
 thena spine> along
-thena spine> try-core ⌜ \ (x : Nat) (ih : Eq {0} Nat (plus x zero) x) -> congSucc (plus x zero) x ih ⌝
+thena spine> try-core ⌜ \ (x : Nat) (ih : Eq {0} Nat (plus x zero) x) -> congSucc {0 0} (plus x zero) x ih ⌝
 thena spine> solve
 thena spine> along
 thena spine> solve
@@ -585,8 +602,11 @@ corners say where the term begins and ends, and inside them nothing needs
 parenthesising.
 
 The `-core` suffix marks the tactics that take a **development-calculus** term.
-They are the ones that exist today; the surface language and the tactics that
-take *its* terms are being built beside them.
+The surface language exists beside it — `:infer`, `declare` and a `.thena` proof
+module all take surface terms, and §11 shows one — so the suffix says which of
+the two layers a tactic is written against. Note `congSucc {0 0}` above: a core
+term writes a polymorphic global's level arguments, where a surface term has
+them inferred. The names are provisional and the suffixes are meant to go.
 
 `eliminate-core` works on inductively defined **relations** too, which is what
 proofs about a reduction relation need — see §11.
@@ -778,7 +798,7 @@ it out loud instead.
 A script is command lines, run in order.
 
 ```
-thena spine> :load examples/determinacy.thena.script
+thena spine> :load examples/determinacy-tactics.thena.script
 ```
 
 A **proof module** is the surface language: a header, then declarations, laid
@@ -807,7 +827,7 @@ A comment is `--` followed by a space, running to the end of the line, and it
 works the same way in all three kinds of file. Without the space it is not a
 comment, so `-->` is still yours to use.
 
-`examples/determinacy.thena.script` is the acceptance test for the whole first
+`examples/determinacy-tactics.thena.script` is the acceptance test for the whole first
 milestone. It declares the language of chapter 3 of Pierce's *Types and
 Programming Languages* — a seven-constructor term language, a numeric-value
 predicate, and a ten-rule small-step reduction relation —
@@ -836,8 +856,20 @@ whole file loads in a couple of seconds.
 
 The proof is structured as ten inversion lemmas plus the main induction, so
 that no elimination sits inside another. The file is machine-generated —
-`examples/determinacy.thena.py` regenerates it byte for byte — because 110 of
+`examples/determinacy.py` regenerates it byte for byte — because 110 of
 its 130 case branches are mechanical constructor clashes.
+
+**The same proof exists twice.** `examples/determinacy-surface.thena` is a proof
+module in the surface language — 278 lines where the script is 1190 — and it
+proves the same theorem through the same rule base:
+
+```
+thena spine> :load examples/determinacy-surface.thena
+```
+
+One generator emits both, and the test suite asserts they arrive at the same
+statement, so a weaker version of either cannot pass quietly. Reading them side
+by side is the shortest way to see what elaboration is doing.
 
 ---
 
@@ -853,25 +885,41 @@ induction on data and on inductively defined relations; dispatch named rules
 with backtracking; check finished proofs with an independent kernel; and load
 files of commands.
 
+It also has a **surface language** — layout-sensitive, with implicit arguments
+and inferred level arguments — and elaborates it into the development calculus.
+**That elaborator is not in the binary**: it is fifteen clauses of one rule in
+`rules/standard.thena.rules`, which you can read and change. `prelude/prelude.thena`
+and `examples/determinacy-surface.thena` are both written in the surface
+language and elaborated on load.
+
 **It cannot yet:**
 
-- **No surface language.** You write the development calculus directly. There
-  is no Agda-like language to elaborate from — the elaboration *mechanism*
-  exists, but only the "this hole is that variable in scope" case is wired up.
-- **No comments in files**, and no layout-sensitive syntax.
+- **A λ binder must be plain.** `\ x -> e`, never `\ (x : Nat) -> e` and never
+  `\ {A} -> e`; the type comes from the goal. It says
+  *"expected a surface term that is a λ whose first binder is plain"*.
+- **A `let` must be annotated when its type is dependent** — when the value's
+  type mentions the value's own arguments and one of those is a local variable:
+
+  ```
+  let nc = noConfusionTerm x y q in …                          -- refused
+  let nc : NoConfusionTerm x y = noConfusionTerm x y q in …     -- fine
+  ```
+
+  This is the same requirement Agda and Idris make. **The message you get is
+  poor** — it names machine-generated holes — because the refusal happens inside
+  unification, and only the elaboration rule that made those holes knows what
+  they stand for. A simple `let n = succ zero in n` needs no annotation.
+- **A development-calculus term writes its level arguments.**
+  `⌜ congSucc {0 0} a b e ⌝`, never `⌜ congSucc a b e ⌝`. A **surface** term has
+  them inferred, which is most of the difference between the two versions of the
+  determinacy proof.
+- **No automation beyond the rule base.** There is no `auto`, no simplifier, no
+  decision procedure. Every proof step above is one you type.
 - **No completion of command or identifier names.** Line editing and history
   come from `haskeline`, so the arrow keys work, but tab completes filenames
   only — which is `haskeline`'s default, not a choice.
-- **No automation beyond the small rule base.** There is no `auto`, no
-  simplifier, no decision procedure. Every proof step above is one you type.
-- **A use of a level-polymorphic global must write its level arguments.**
-  `Eq {0} Nat x y`, never `Eq Nat x y`. The declaration side infers, the use
-  side does not — which is what most of the braces in `examples/determinacy.thena.script`
-  are.
 - **No no-confusion lemma for a constructor with dependent argument types** —
   the system tells you when it skipped one and why.
-- **No proof scripts.** A `.thena.script` file is a flat sequence of commands,
-  not a structured document; a `.thena` proof module is the structured one.
 
 ---
 
