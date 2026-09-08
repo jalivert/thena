@@ -102,7 +102,7 @@ againstTheBase =
         map baseDescription bs @?= [Just "the rules the engine starts with"]
         map (null . basePath) bs @?= [False]
 
-    , testCase "its rules are exactly the ten, in order" $ do
+    , testCase "its rules are exactly the expected ones, in order" $ do
         rs <- allRules <$> standardBases
         map ruleName rs @?= map ruleName expectedStandard
         rs @?= expectedStandard

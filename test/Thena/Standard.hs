@@ -1,10 +1,14 @@
 -- | The shipped rule base, read off disk, and what it is supposed to say.
 --
--- **Two independent encodings of the same ten rules**, which is the whole
--- point. 'standardBases' reads @rules/standard.thena.rules@ through the same
--- path the REPL uses at startup; 'expectedStandard' is the same ten rules as
--- Haskell literals, moved here from @Thena.Rules@ when phase 22 deleted
+-- **Two independent encodings of the same rule base, rule for rule**, which is
+-- the whole point. 'standardBases' reads @rules/standard.thena.rules@ through
+-- the same path the REPL uses at startup; 'expectedStandard' is the same rules
+-- as Haskell literals, moved here from @Thena.Rules@ when phase 22 deleted
 -- @standardRules@. "Thena.RuleSyntaxTests" asserts they agree.
+--
+-- **No count is written down here on purpose.** This comment said /"the same
+-- ten rules"/ until 2026-09-08, by which time there were thirty-five; the
+-- assertion had grown and the sentence had not.
 --
 -- Phase 21's load-bearing check was written text against a Haskell literal.
 -- Deleting the literal from the library would have left it comparing the file
