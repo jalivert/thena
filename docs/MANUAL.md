@@ -887,7 +887,7 @@ files of commands.
 
 It also has a **surface language** — layout-sensitive, with implicit arguments
 and inferred level arguments — and elaborates it into the development calculus.
-**That elaborator is not in the binary**: it is fifteen clauses of one rule in
+**That elaborator is not in the binary**: it is sixteen clauses of one rule in
 `rules/standard.thena.rules`, which you can read and change. `prelude/prelude.thena`
 and `examples/determinacy-surface.thena` are both written in the surface
 language and elaborated on load.
