@@ -86,6 +86,17 @@ data Surface
     -- the elaborator — head-is-a-name, and anything else — which is Brady's own
     -- split.
     --
+    -- **This is not the same question as 'SurfacePi'\'s binder group**, which
+    -- /does/ make one term representable two ways and was accepted anyway
+    -- (2026-09-09). The difference is elaboration, not representability: both
+    -- @∀@ spellings elaborate identically, because that clause peels one binder
+    -- and recurses, while both application spellings would not — this one needs
+    -- the head and the whole argument list at once.
+    --
+    -- The fallback, if a flat spine ever stops being something every producer
+    -- guarantees, is written up as @application-representation.md@ in the
+    -- project's design notes. Do not re-derive it.
+    --
     -- 'Thena.Core.Term.Core' stays binary. Elaboration flattens on the way in
     -- and nests on the way out.
 

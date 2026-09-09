@@ -304,6 +304,25 @@ name x = case x of
 -- **Documented, not enforced.** @SurfaceApp (SurfaceApp …) …@ is still a
 -- constructible value; nothing the parser produces is one, and no type stops a
 -- hand-written test from building one (@PLAN-representation.md@ §3.4's line).
+-- | Flatten a spine as it is parsed, so that @f a b@ and @(f a) b@ are the same
+-- tree and a 'SurfaceApp' never has a 'SurfaceApp' for a head.
+--
+-- **The whole design rests on this staying true of every producer of a
+-- 'Surface'**, and there is more than one — @Engine@'s @elim-spine@ assembles a
+-- 'SurfaceApp' by hand rather than through this function. The reason a clause
+-- needs the flat form is that elaborating @x ⃗a@ wants the head **and the whole
+-- argument list at once**: to expand implicits, to walk the head's real
+-- telescope, and to claim the domains in telescope order.
+--
+-- **IF THAT EVER STOPS HOLDING, DO NOT REDESIGN FROM SCRATCH.** Two ways of
+-- elaborating a nested application were worked out in 2026-09-09 and written
+-- up as @application-representation.md@ in the project's design notes —
+-- inside-out (climb back up with the zipper) and outside-in (match the outer
+-- application, ask whether its head is one too, and accumulate). The second is
+-- the one to try: it needs one new head test and one accumulating instruction,
+-- both of a kind the rule language already has. **Check first whether a
+-- producer has simply stopped flattening** — that is likelier than the design
+-- being wrong, and it is one assertion to test.
 spine :: Surface -> NonEmpty SurfaceArg -> Surface
 spine (SurfaceApp f as) bs = SurfaceApp f (as <> bs)
 spine f                 bs = SurfaceApp f bs
