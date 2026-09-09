@@ -13,6 +13,13 @@ Every transcript below is real output, captured from the program.
 
 ---
 
+> **Captured 2026-09-08, against commit `dd89e32`.** Every transcript below is
+> real output — driven through the program, not written by hand. Thena is a
+> research prototype under active development and it moves weekly: things that
+> were impossible one week are ordinary the next, and something that worked
+> yesterday can break. **If a transcript here disagrees with what you see, the
+> program is right and this document is stale** — please say so.
+
 ## 1. Starting up
 
 ```bash

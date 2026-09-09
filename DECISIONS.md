@@ -643,6 +643,13 @@ solving level metas; a file of them buries its own output. Type the declaration
 at the prompt and you still see everything. A module that fails keeps all of it,
 because that is where the reason is.
 
+**That silence covers a `say` you wrote yourself.** If a rule of yours prints
+something, you will see it at the prompt and not during a load — there is no way
+today for a rule to speak from inside one, and no flag to turn the rest back on.
+The line between *the loader's* output, *a rule's* output and *the file's* has
+not been drawn, and drawing it belongs to the interaction model rather than to
+the loader.
+
 ### A comment is `--` followed by a space, in every kind of file
 
 *Decided 2026-09-02.*
