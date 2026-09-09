@@ -538,8 +538,10 @@ operation g i (RawOp w as)
       -- binder keeps the one written in the type; with an argument, the
       -- caller's. Spelled here rather than in the arity tables because it is
       -- the one op that appears in two of them.
-      ("prim-intro", [])          -> Right (Intro Nothing)
-      ("prim-intro", [a])         -> Intro . Just <$> ref a
+      ("prim-lambda", [])         -> Right (IntroPi Nothing)
+      ("prim-lambda", [a])        -> IntroPi . Just <$> ref a
+      ("prim-let", [])            -> Right (IntroLet Nothing)
+      ("prim-let", [a])           -> IntroLet . Just <$> ref a
       ("prim-intro", _)           -> bad
       ("call", RawRef r : rest)   -> Call (GlobalName r) <$> traverse ref rest
       ("call", _)                 -> bad

@@ -188,7 +188,18 @@ data Op
     -- the component at the focus, so none takes a name: §4.0 C1's rule that a
     -- command means one thing wherever it is applies to these too.
   | Attack                    -- ^ @?x : S@ ⟹ @?x ≐ (?x' : S . x') : S@
-  | Intro (Maybe Operand)
+  | IntroPi (Maybe Operand)
+    -- ^ table 2.8's @intro-∀@, Brady's @LAMBDA@ — **the goal is normalised**
+    -- (MS4 phase 58). What a λ clause of @elaborate@ emits, and what @intro@'s
+    -- @goal-type-is-pi@ clause runs.
+  | IntroLet (Maybe Operand)
+    -- ^ table 2.8's @intro-let@, Brady's @LET@ — the type is read **as
+    -- written**, so the author's binding is kept rather than substituted away.
+    -- What @intro@'s @goal-type-is-let@ clause runs.
+    --
+    -- **There is deliberately no op that is both.** @prim-intro@ was, deciding
+    -- by reading the goal, so a clause could not say which rule it meant and
+    -- the Π clause silently ran the other one (MS4 phase 58).
     -- ^ move a hole through a Π or a @let@ in its type, **optionally naming
     -- the binder it opens** (MS4 phase 41b).
     --
@@ -519,7 +530,7 @@ data Op
     -- there: @fill@ parks every term in a @=@-binding, so the type of
     -- @foo : Nat@ comes out as @let refined = Nat in let goal = refined in
     -- goal@. That is δ-equal to @Nat@ and still wrong to store, and it does not
-    -- merely look wrong — 'Thena.Engine.introduce' reads a @Let@ /as written/
+    -- merely look wrong — 'Thena.Engine.introduceLet' reads a @Let@ /as written/
     -- and before any reduction (phase 15, deliberately), so @intro@ on a
     -- @let@-typed goal opens a definition where the λ should have been.
     --
@@ -766,7 +777,7 @@ produces o = case o of
   Block _      -> False
   Concat _ _   -> True
   Assume _ _   -> True   -- the variable it bound; §7.3's @?x <- claim S@
-  Quantify _ _ -> False  -- a hole-life op, like 'Attack' and 'Intro'
+  Quantify _ _ -> False  -- a hole-life op, like 'Attack' and 'IntroPi'
   Claim  _ _   -> True
 
   Say _        -> False
@@ -816,7 +827,8 @@ produces o = case o of
   Back         -> False
   Play _       -> False
   Attack       -> False
-  Intro _      -> False
+  IntroPi _    -> False
+  IntroLet _   -> False
   Try _        -> False
   Regret       -> False
   Solve        -> False
@@ -912,7 +924,8 @@ operandsOf o = case o of
   Back         -> []
   Reduce       -> []
   Attack       -> []
-  Intro m      -> maybe [] (: []) m
+  IntroPi m    -> maybe [] (: []) m
+  IntroLet m   -> maybe [] (: []) m
   Regret       -> []
   Solve        -> []
   Abandon      -> []
@@ -1090,7 +1103,8 @@ opKeyword o = case o of
   UnifyInto _ _ -> "unify-into"
   DefineData _ -> "data"
   Attack       -> "prim-attack"
-  Intro _      -> "prim-intro"
+  IntroPi _    -> "prim-lambda"
+  IntroLet _   -> "prim-let"
   Try _        -> "prim-try"
   Regret       -> "prim-regret"
   Solve        -> "prim-solve"

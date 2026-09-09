@@ -71,8 +71,8 @@ expectedStandard =
     -- for. Before phase 23 a call could not backtrack, so they had to be
     -- @intro-pi@ and @intro-let@; now they are @intro@, and typing @intro@ at
     -- the REPL reaches whichever one applies.
-  , Rule (GlobalName "intro")      []    [FocusIsGuess, GoalTypeIsPi]  [Do (Intro Nothing)]
-  , Rule (GlobalName "intro")      []    [FocusIsGuess, GoalTypeIsLet] [Do (Intro Nothing)]
+  , Rule (GlobalName "intro")      []    [FocusIsGuess, GoalTypeIsPi]  [Do (IntroPi Nothing)]
+  , Rule (GlobalName "intro")      []    [FocusIsGuess, GoalTypeIsLet] [Do (IntroLet Nothing)]
   , Rule (GlobalName "solve")      []    [FocusIsGuess]                [Do Solve]
   , Rule (GlobalName "regret")     []    [FocusIsGuess]                [Do Regret]
   , Rule (GlobalName "eliminate-core")  ["t"] [FocusIsHole]                 [Do (Op.Eliminate (Ref "t"))]
@@ -413,14 +413,14 @@ binderWalkers =
   [ Rule (GlobalName "intro-binders") ["t"]
       [FocusIsGuess, LambdaBindsMore (Ref "t")]
       [ Bind "x" (Op.LambdaName (Ref "t"))
-      , Do (Intro (Just (Ref "x")))
+      , Do (IntroPi (Just (Ref "x")))
       , Bind "tl" (Op.LambdaTail (Ref "t"))
       , Do (Call (GlobalName "intro-binders") [Ref "tl"])
       ]
   , Rule (GlobalName "intro-binders") ["t"]
       [FocusIsGuess, LambdaBindsOne (Ref "t")]
       [ Bind "x" (Op.LambdaName (Ref "t"))
-      , Do (Intro (Just (Ref "x")))
+      , Do (IntroPi (Just (Ref "x")))
       ]
     -- The binders are the count and nothing else about them is read.
   , Rule (GlobalName "enter-binders") ["t"]

@@ -8,9 +8,9 @@ rule try-core t :- when focus-is-hole then prim-try t
 
 rule abandon :- when focus-is-hole then prim-abandon
 
-rule intro :- when focus-is-guess goal-type-is-pi then prim-intro
+rule intro :- when focus-is-guess goal-type-is-pi then prim-lambda
 
-rule intro :- when focus-is-guess goal-type-is-let then prim-intro
+rule intro :- when focus-is-guess goal-type-is-let then prim-let
 
 rule solve :- when focus-is-guess then prim-solve
 
@@ -134,7 +134,7 @@ rule elaborate t :- when focus-is-hole (surface-is-app t) (app-args-are-explicit
      ; goto h
      ; solve
 -- E⟦\ x => e⟧ = ATTACK; LAMBDA x; E⟦e⟧; SOLVE — Brady's λ case, with one
--- prim-intro per binder of the group and one attack for the whole of it.
+-- prim-lambda per binder of the group and one attack for the whole of it.
 --
 -- **The group is walked by recursion**, not by an iterating instruction: each
 -- helper peels one binder off the surface term and calls itself on the tail, so
@@ -267,17 +267,17 @@ rule elaborate t :- when focus-is-hole (surface-is-elim t)
 -- what the user wrote, and repairing it is theirs.
 rule elaborate t :- when focus-is-hole (surface-is-do t) then play t
 
--- One prim-intro per binder, each given the SURFACE name: without it the binder
+-- One prim-lambda per binder, each given the SURFACE name: without it the binder
 -- keeps the identifier written in the type.
 rule intro-binders t :- when focus-is-guess (lambda-binds-more t)
   then x  = lambda-name t
-     ; prim-intro x
+     ; prim-lambda x
      ; tl = lambda-tail t
      ; call intro-binders tl
 
 rule intro-binders t :- when focus-is-guess (lambda-binds-one t)
   then x = lambda-name t
-     ; prim-intro x
+     ; prim-lambda x
 
 -- One along per binder, to stand where the body was written. The λ's binders
 -- are the count and nothing else about them is read.
