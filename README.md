@@ -1,5 +1,7 @@
 # Thena
 
+[![Haskell CI](https://github.com/jalivert/thena/actions/workflows/haskell.yml/badge.svg?branch=main)](https://github.com/jalivert/thena/actions/workflows/haskell.yml)
+
 Thena is an interactive proof assistant for the metatheory of programming
 languages. You describe a language as a collection of inductive families — its
 syntax, its values, its reduction and typing relations — and prove theorems
