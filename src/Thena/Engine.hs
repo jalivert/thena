@@ -784,13 +784,8 @@ perform instr rest m = case operation instr of
   -- **The name is optional** (MS4 phase 41b). Given, it is the binder's; absent,
   -- the binder keeps the one written in the type. Read through 'operandIdent',
   -- so it is checked to be something the printer can print back (§2.6).
-  Intro mn -> case traverse (operandIdent (env (exec m))) mn of
-    Left r    -> failure r m
-    Right nm  -> onHole $ \c -> case c of
-      Component.Guess x i g ty ->
-        (\(g', n1) -> (Component.Guess x i g' ty, n1))
-          <$> introduce (globals m) contextAt (names m) nm g
-      _ -> Left NotReadyToIntroduce
+  IntroPi mn -> introOp introduceLambda mn
+  IntroLet mn -> introOp introduceLet mn
 
   -- **@intro@'s twin, and the only op that can start a Π** (MS4 phase 41f).
   --
@@ -1555,6 +1550,16 @@ perform instr rest m = case operation instr of
           Right cur -> Continue (advance m { development = Development cur, names = n1 })
       _ -> failure (CannotMove NotOnTheSpine) m
 
+    -- 'Intro' and 'IntroPi' differ in exactly one thing — which of table 2.8's
+    -- introduction rules are on offer — so the op is written once and takes it.
+    introOp rule mn = case traverse (operandIdent (env (exec m))) mn of
+      Left r   -> failure r m
+      Right nm -> onHole $ \c -> case c of
+        Component.Guess x i g ty ->
+          (\(g', n1) -> (Component.Guess x i g' ty, n1))
+            <$> rule (globals m) contextAt (names m) nm g
+        _ -> Left NotReadyToIntroduce
+
     component build name ty =
       case (,) <$> operandIdent (env (exec m)) name <*> term ty of
         Left r -> failure r m
@@ -1754,26 +1759,67 @@ whereImpure i = case i of
 -- It stays inside the guess, and that is why @attack@ exists: introducing at
 -- the top of the whole development would change what the development proves,
 -- whereas inside a guess the guess's own type absorbs the binders.
-introduce
+-- | Table 2.8's @intro-∀@ — Brady's @LAMBDA@, and it **normalises** the goal.
+--
+-- **What a λ means, said by the caller rather than read off the goal**
+-- (MS4 phase 58). Elaborating @\\ x y -> e@ always means this rule, whatever
+-- shape the goal happens to have; and the shape it can happen to have is a
+-- @let@ one binder down, because elaborating @∀ (a : S) (b : T) -> U@ claims
+-- @b@\'s domain hole **inside** @a@\'s binder — a dependent domain must be in
+-- scope of the binders before it. Nothing reduces under a binder except
+-- 'Thena.Global.Declare.expose', which runs on a /declared/ type and not on a
+-- local one, so the @let@ survives and 'introduceLet' would eat the caller's
+-- binder on it.
+introduceLambda
   :: GlobalEnv -> Context -> Int -> Maybe Ident -> Partial
   -> Either FailReason (Partial, Int)
-introduce env ctx n nm p = case p of
+introduceLambda = introducing FunctionOnly
+
+-- | Table 2.8's @intro-let@ — Brady's @LET@, and it reads the type **as
+-- written**.
+--
+-- It must not reduce: 'Thena.Core.Reduce.whnf' δ-reduces a term-level @let@
+-- away (§5.1), so a whnf\'d type is never a 'Let' and this rule could not fire
+-- at all. Found planning phase 15, when the branch sat inside the @whnf@ case
+-- and was unreachable.
+--
+-- **Why keeping the binding is the point:** a type @let y = s : S. T@ states
+-- @T@ /in terms of @y@/. Reducing gives @T[s\/y]@, which is the same type and
+-- an unreadable goal. This rule is how a proof keeps the author's name.
+introduceLet
+  :: GlobalEnv -> Context -> Int -> Maybe Ident -> Partial
+  -> Either FailReason (Partial, Int)
+introduceLet = introducing LetOnly
+
+-- | Which of table 2.8's two introduction rules this is.
+--
+-- **One op each, and no op that is both** (MS4 phase 58). @prim-intro@ was
+-- both, deciding by reading the goal — so a rule clause could not say which it
+-- meant, and @intro@\'s @goal-type-is-pi@ clause silently ran the other one.
+-- McBride names two tactics and Brady names two instructions; neither has one
+-- that decides.
+--
+-- The two-entry-points-over-one-worker shape is
+-- 'Thena.Core.Convert.Direction'\'s, so the rules cannot drift apart.
+data IntroRule
+  = FunctionOnly  -- ^ @prim-lambda@
+  | LetOnly       -- ^ @prim-let@
+
+introducing
+  :: IntroRule -> GlobalEnv -> Context -> Int -> Maybe Ident -> Partial
+  -> Either FailReason (Partial, Int)
+introducing rule env ctx n nm p = case p of
   Under (Component.Claim v i s) (Trailing (Free v'))
     | v == v' -> case s of
-        -- @intro-let@ reads the type AS WRITTEN, and must come first.
-        -- 'Thena.Core.Reduce.whnf' δ-reduces a term-level @let@ away (§5.1), so
-        -- a whnf'd type is never a 'Let' and this branch was unreachable when
-        -- it sat inside the @case whnf@ below — table 2.8's second
-        -- introduction rule could not fire at all. Found and fixed planning
-        -- phase 15, while writing the @intro-let@ rule's head; §5.1 and §7.2
-        -- both carry it.
-        Let j val sty cod ->
-          Right (opened (Component.Define y (named j) val sty) (instantiate (Free y) cod))
+        Let j val sty cod
+          | LetOnly <- rule ->
+              Right (opened (Component.Define y (named j) val sty) (instantiate (Free y) cod))
         -- @intro-∀@ reduces first, because a goal typed @id Type₀ (Nat -> Nat)@
         -- is a Π and must be introduced (§8's own example, from the other side).
-        _ -> case whnf env ctx s of
-          Pi j dom cod -> Right (opened (Component.Assume y (named j) dom) (instantiate (Free y) cod))
-          _            -> Left NothingToIntroduce
+        _ | FunctionOnly <- rule -> case whnf env ctx s of
+              Pi j dom cod -> Right (opened (Component.Assume y (named j) dom) (instantiate (Free y) cod))
+              _            -> Left NothingToIntroduce
+          | otherwise -> Left NothingToIntroduce
       where
         -- The caller's name if there is one, the type's otherwise.
         named j = maybe j id nm
@@ -1783,12 +1829,15 @@ introduce env ctx n nm p = case p of
           ( Under binder (Under (Component.Claim h i rest) (Trailing (Free h)))
           , n2
           )
+  -- **The rule is threaded, not dropped.** Reverting to a both-rules reading
+  -- here would apply to every binder after the first, which is where a @let@
+  -- one binder down actually bites.
   Under c rest ->
     (\(rest', n1) -> (Under c rest', n1))
-      <$> introduce env (ctx ++ [Component.forget c]) n nm rest
+      <$> introducing rule env (ctx ++ [Component.forget c]) n nm rest
   _ -> Left NotReadyToIntroduce
 
--- | Open a ∀-binder where 'introduce' opens a λ-binder (MS4 phase 41f).
+-- | Open a ∀-binder where 'introduceLambda' opens a λ-binder (MS4 phase 41f).
 --
 -- The same shape test — table 2.8's /"only replace constructions of the shape
 -- @?x : S . x@"/ — and the same walk down the chain. Two differences, and both
