@@ -619,7 +619,29 @@ like `(\ p -> e) v` — where there is no annotation to write. Use a `let`.
 
 `:load ‹path›` reads the extension. `:load proof ‹path›`, `:load script ‹path›`
 and `:load rules ‹path›…` say it out loud instead, and the keyword wins over the
-extension.
+extension. **One `:load` may not mix kinds** — several rule bases at once is
+fine, a script and a rule base together is refused rather than ordered somehow.
+
+**A kernel refusal does not stop a load.** If a `qed` inside a script or module
+is refused by the kernel, the file **keeps going** and the lines after it run.
+So a load that reports later declarations may still have left one theorem
+unadmitted, and the refusal scrolls past among them.
+
+```
+:load proof.thena     -- a qed the kernel refuses does NOT end the load
+:revalidate           -- this is what tells you the session is sound
+```
+
+Every other way a line fails — a parse error, a rejected tactic, a halted
+machine, a refused command — stops the file. A kernel refusal is the one that
+does not, and it is the sharpest of them. **Run `:revalidate` after loading
+anything you did not write yourself.**
+
+**You cannot load a rule base while a proof is suspended.** Between theorems is
+fine; a suspended proof is one you are *inside but not at*, and loading would
+change the base under a half-built proof. That is the same argument that rules
+out a `rule` command altogether: the test is whether the half you have already
+built would replay the same afterwards.
 
 ```
 module Tier0 where
