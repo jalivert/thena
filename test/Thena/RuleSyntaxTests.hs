@@ -414,6 +414,15 @@ regions =
         case errs ("say " ++ tagged "surface" "") of
           Just [BadRegion (GlobalName "r") 0 "surface" _] -> pure ()
           other -> assertFailure ("expected a BadRegion, got " ++ show other)
+    , testCase "corners are the other spelling of a core region" $ do
+        b <- bodyOf "t = resolve-core \8988 Type\8320 \8989"
+        map opWord b @?= ["resolve-core"]
+    , testCase "and the ASCII corners are too" $ do
+        b <- bodyOf "t = resolve-core [| Type\8320 |]"
+        map opWord b @?= ["resolve-core"]
+    , testCase "angle brackets are the other spelling of a surface region" $ do
+        b <- bodyOf "elaborate \10216f x\10217"
+        map opWord b @?= ["call"]
     , testCase "a tag no language answers to is refused at load" $
         errs ("elaborate " ++ tagged "agda" "f x")
           @?= Just [NoSuchTag (GlobalName "r") 0 "agda"]

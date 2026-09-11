@@ -505,6 +505,7 @@ headOperand o = case o of
   -- applies. His ruling, 2026-09-11: heads stay a restricted fragment, and
   -- pattern matching is the only thing they are to gain.
   RawRegion _ _ -> Nothing
+  RawQuoted _   -> Nothing
 
 -- | Resolve a written block of instructions (MS4 phase 45).
 --
@@ -621,6 +622,10 @@ operation g i (RawOp w as)
       -- the languages' rather than ours: a surface term is unresolved by nature,
       -- so it is finished here; a core term needs the globals and the focus's
       -- context, which do not exist while a rule base is being read.
+      -- Corners are the other spelling of a @core@ region, and land in the
+      -- same place: unresolved, because a rule base is read before there is
+      -- anything to resolve against.
+      RawQuoted r -> Right (Lit (VRaw r))
       RawRegion tag src -> case tag of
         "surface" -> case parseSurfaceText src of
           Left e  -> Left (BadRegion g i tag e)

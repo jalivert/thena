@@ -233,6 +233,7 @@ Operand :: { RawOperand }
   : ident                                  { RawRef $1 }
   | num                                    { RawPos $1 }
   | str                                    { RawText $1 }
+  | '[|' Term '|]'                         { RawQuoted $2 }
   | tagopen raw tagclose                   { RawRegion $1 $2 }
   | tagopen tagclose                       { RawRegion $1 "" }
 

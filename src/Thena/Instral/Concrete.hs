@@ -29,6 +29,8 @@ module Thena.Instral.Concrete
   , RawTest (..)
   ) where
 
+import Thena.Syntax.Concrete (Raw)
+
 -- | A written rule (§8, phase 21) — @rule ‹name› (‹params›) :- when ‹tests› then ‹body›@.
 --
 -- Named and unresolved like every other tree here: the tests and the op words
@@ -85,7 +87,15 @@ data RawTest = RawTest String [RawOperand]
 -- need a string literal."* Without it @say@, @ask@ and @concat@ had keywords
 -- that resolved and no way to be given anything to say.
 data RawOperand
-  = RawRegion String String
+  = RawQuoted Raw
+    -- ^ @⌜ t ⌝@ — **a core term written in corners** (MS5 phase 62).
+    --
+    -- The same operand a @core@ region denotes, by the other spelling. It holds
+    -- a parsed tree rather than raw text because **Core shares Thena's lexer**:
+    -- a region carries text so that a /foreign/ language may keep its own
+    -- lexical rules, and Core has no need of that
+    -- (@discussion\/the-five-languages.md@ §7b, the permanent entry).
+  | RawRegion String String
     -- ^ @tag\`…\`@ — a **tagged region** (MS5 phase 61b): the tag, and the raw
     -- text between the fences. Which language the text is in is the tag's to
     -- say, and the text is parsed by that tag's parser during resolution.

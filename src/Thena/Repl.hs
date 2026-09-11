@@ -1274,6 +1274,10 @@ renderSurface = surf Loose
       -- Exact, because the region kept its source text: a rule listing shows
       -- the embedded term as the author wrote it.
       RawRegion tag src -> tag ++ [tick] ++ src ++ [tick]
+      -- The same gap 'renderValue' has for a 'Thena.Ops.VRaw': there is no
+      -- printer for written syntax, so this says what it is rather than what it
+      -- contains (§7b's register).
+      RawQuoted _       -> "⌜…⌝"
 
     surf _ (SurfaceName x)      = x
     surf _ (SurfaceUniverse l)  = "Type" ++ subscript l

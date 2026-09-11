@@ -19,7 +19,7 @@ $lower  = [a-z]
 $upper  = [A-Z]
 -- Reserved characters: the brackets, the separators, and every character that
 -- spells an operator on its own. Nothing else is off limits inside a name.
-$reserved = [\( \) \{ \} \[ \] \; \, \" \` λ ∀ ⊢ ≟ ≐ ≈ ▸ ⌜ ⌝]
+$reserved = [\( \) \{ \} \[ \] \; \, \" \` ⟨ ⟩ λ ∀ ⊢ ≟ ≐ ≈ ▸ ⌜ ⌝]
 
 -- A name starts with a letter — ASCII, or any non-reserved character above the
 -- ASCII range — and continues with anything that is neither reserved nor
@@ -117,6 +117,7 @@ tokens :-
   "Type"        { \p _ -> Located (posOf p) TUniverseOpen }
   @universe     { \p s -> Located (posOf p) (TUniverse (levelOf s)) }
   @ident \`      { \p str -> Located (posOf p) (TTagOpen (init str)) }
+  "⟨"           { keyword (TTagOpen "surface") }
   @ident        { \p s -> Located (posOf p) (TIdent s) }
 
 {
@@ -228,7 +229,7 @@ levelOf = foldl (\acc c -> acc * 10 + digitOf c) 0 . drop 4
 -- **It is a stack because regions nest through escapes and only through them**
 -- (@discussion\/the-five-languages.md@ §6.9): raw text never contains another
 -- region, so a tag met inside an escape pushes and everything stays decidable.
-data Mode = Raw | Esc !Int
+data Mode = Raw !Char | Esc !Int
 
 lexTokens :: String -> Either LexError [Located Token]
 lexTokens str0 = loop [] (alexStartPos, '\n', [], str0)
@@ -238,7 +239,7 @@ lexTokens str0 = loop [] (alexStartPos, '\n', [], str0)
 -- the region modes above threaded through it.
 loop :: [Mode] -> AlexInput -> Either LexError [Located Token]
 loop modes inp@(pos, _, _, str) = case modes of
-  Raw : outer -> raw outer pos str
+  Raw fence : outer -> raw fence outer pos str
   _ -> case alexScan inp 0 of
     AlexEOF
       | null modes -> Right []
@@ -256,7 +257,11 @@ loop modes inp@(pos, _, _, str) = case modes of
               (Located lp TEscapeClose :) <$> loop outer inp'
             (Esc d : outer, TRBrace) -> (t :) <$> loop (Esc (d - 1) : outer) inp'
             (Esc d : outer, TLBrace) -> (t :) <$> loop (Esc (d + 1) : outer) inp'
-            (_, TTagOpen _)          -> (t :) <$> loop (Raw : modes) inp'
+            -- Which character closes the region depends on how it was opened:
+            -- a tag's own backtick, or the ⟩ that closes the ⟨ alias.
+            (_, TTagOpen _)
+              | take 1 (take len str) == "⟨" -> (t :) <$> loop (Raw '⟩' : modes) inp'
+              | otherwise                    -> (t :) <$> loop (Raw '`' : modes) inp'
             _                        -> (t :) <$> loop modes inp'
   where
     firstOf cs = case cs of
@@ -271,28 +276,29 @@ loop modes inp@(pos, _, _, str) = case modes of
 -- carry all three literally.
 -- | What a backslash may escape inside raw text.
 rawEscapes :: String
-rawEscapes = ['`', '\\', '$']
+rawEscapes = ['`', '\\', '$', '⟩']
 
 -- | The two characters that open an escape, written without a literal brace
 -- because Alex counts braces inside a code fragment and would end this one.
 escapeOpener :: String
 escapeOpener = ['$', toEnum 123]
 
-raw :: [Mode] -> AlexPosn -> String -> Either LexError [Located Token]
-raw outer p0 s0 = chunk p0 p0 s0 ""
+raw :: Char -> [Mode] -> AlexPosn -> String -> Either LexError [Located Token]
+raw fence outer p0 s0 = chunk p0 p0 s0 ""
   where
     chunk began p cs acc = case cs of
       [] -> Left (LexError (posOf p) Nothing)
       '\\' : c : rest
         | c `elem` rawEscapes ->
             chunk began (alexMove (alexMove p '\\') c) rest (c : acc)
-      '`' : rest ->
-        ((flush began acc ++) . (Located (posOf p) TTagClose :))
-          <$> loop outer (alexMove p '`', '`', [], rest)
+      c : rest
+        | c == fence ->
+            ((flush began acc ++) . (Located (posOf p) TTagClose :))
+              <$> loop outer (alexMove p c, c, [], rest)
       _ | Just rest <- stripPrefix escapeOpener cs ->
             let p1 = foldl alexMove p escapeOpener
              in ((flush began acc ++) . (Located (posOf p) TEscapeOpen :))
-                  <$> loop (Esc 0 : Raw : outer) (p1, last escapeOpener, [], rest)
+                  <$> loop (Esc 0 : Raw fence : outer) (p1, last escapeOpener, [], rest)
       c : rest -> chunk began (alexMove p c) rest (c : acc)
 
     -- A chunk is reported at the position it began, not where it ended, so an

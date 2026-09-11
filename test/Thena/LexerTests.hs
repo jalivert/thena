@@ -112,6 +112,38 @@ tests =
             ]
         ]
     , testGroup
+        "the angle-bracket alias for a surface region (MS5 phase 62)"
+        [ lexes
+            "it opens a region tagged surface"
+            "\10216f x\10217"
+            [TTagOpen "surface", TRaw "f x", TTagClose]
+        , lexes
+            "and its contents are raw, like any region's"
+            "\10216let (] ;\10217"
+            [TTagOpen "surface", TRaw "let (] ;", TTagClose]
+        , lexes
+            "a backtick inside it is ordinary text, because it is not the fence"
+            "\10216a`b\10217"
+            [TTagOpen "surface", TRaw "a`b", TTagClose]
+        , lexes
+            "a backslash escapes the closing bracket"
+            "\10216a\\\10217b\10217"
+            [TTagOpen "surface", TRaw "a\10217b", TTagClose]
+        , lexes
+            "it nests through an escape, like any region"
+            "\10216x${ core`t` }\10217"
+            [ TTagOpen "surface"
+            , TRaw "x"
+            , TEscapeOpen
+            , TTagOpen "core"
+            , TRaw "t"
+            , TTagClose
+            , TEscapeClose
+            , TTagClose
+            ]
+        , fails "and one that is never closed" "\10216abc"
+        ]
+    , testGroup
         "failures"
         [ fails "a region that is never closed" "s`abc"
         , fails "an escape that is never closed" "s`a${x"
