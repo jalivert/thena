@@ -37,12 +37,8 @@ import Thena.Syntax.Concrete
   , RawConstraint (..)
   , RawConstructor (..)
   , RawData (..)
-  , RawInstr (..)
-  , RawOp (..)
-  , RawOperand (..)
-  , RawRule (..)
-  , RawTest (..)
   )
+import Thena.Instral.Concrete (RawRule (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 

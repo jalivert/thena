@@ -61,7 +61,7 @@ import Thena.Ops
 import Thena.Surface.Concrete
   (Plicity (..), Surface (..), SurfaceArg (..))
 import qualified Thena.Surface.Zipper as Zipper
-import Thena.Syntax.Concrete
+import Thena.Instral.Concrete
   ( RawInstr (..)
   , RawOp (..)
   , RawOperand (..)

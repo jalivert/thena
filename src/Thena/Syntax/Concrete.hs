@@ -1,4 +1,13 @@
--- | The named, unresolved tree the parser produces (§2.5).
+-- | The named, unresolved tree the parser produces (§2.5) — the Development
+-- Calculus and the Core terms inside it.
+--
+-- **`instral`'s concrete syntax moved out at MS5 phase 61a**, to
+-- "Thena.Instral.Concrete". @RawInstr@ and its neighbours never referred to
+-- 'Raw' and had nothing to do with it; keeping them here meant one module named
+-- for one language holding the syntax of three, which is the confusion the
+-- standing rule forbids. **What is left is still two languages in one type** —
+-- see 'Raw' — and that is not a module boundary but a type split, owed to the
+-- phase that retires the DC's spelling.
 --
 -- It is not 'Thena.Core.Term.Core' and cannot be: which of @Bound@, @Free@ and
 -- @Global@ a written name denotes depends on the context it is written in, and
@@ -16,11 +25,6 @@ module Thena.Syntax.Concrete
   , RawConstraint (..)
   , RawData (..)
   , RawConstructor (..)
-  , RawRule (..)
-  , RawInstr (..)
-  , RawOp (..)
-  , RawOperand (..)
-  , RawTest (..)
   ) where
 
 -- | A written term, or a written development. One tree for both fragments
@@ -76,65 +80,4 @@ data RawData = RawData String [RawBinder] Raw [RawConstructor]
 -- full. Splitting that type into arguments and a return index is a shape check,
 -- and happens in "Thena.Syntax.Resolve" with the others.
 data RawConstructor = RawConstructor String Raw
-  deriving (Eq, Show)
-
--- | A written rule (§8, phase 21) — @rule ‹name› (‹params›) :- when ‹tests› then ‹body›@.
---
--- Named and unresolved like every other tree here: the tests and the op words
--- are 'String's, and turning them into 'Thena.Ops.Test' and 'Thena.Ops.Op' is
--- "Thena.Rules"'s job. The parser cannot do it, for the same reason it cannot
--- produce a 'Thena.Core.Term.Core': the op words are not lexer keywords — if
--- they were, @solve@ and @type@ would stop being usable identifiers in terms —
--- so the grammar sees an @ident@ and only resolution knows which op it names.
---
--- **@:-@ separates the head from the conditions, and both sides of it are
--- deliberately empty for now.** DECIDED by the user 2026-08-25: pattern
--- matching on the focused term and on the goal is coming, and it will attach to
--- the head, left of @:-@ or right of it. @when@ stays underneath whatever
--- arrives — it is the low-level, manual way to ask whether a rule applies.
-data RawRule = RawRule String [String] [RawTest] [RawInstr]
-  deriving (Eq, Show)
-
--- | @‹name› = ‹op› ‹args›@ or @‹op› ‹args›@ — 'Thena.Ops.Instr''s two cases, written.
-data RawInstr
-  = RawBind String RawOp
-  | RawDo   RawOp
-  deriving (Eq, Show)
-
--- | An op word and the arguments written after it, both unresolved.
---
--- One shape for every op, however the op's own arguments are typed: @cross
--- type@, @arg 2@ and @call try t@ all parse to this and are told apart in
--- resolution. That is what keeps the grammar to two productions.
-data RawOp = RawOp String [RawOperand]
-  deriving (Eq, Show)
-
--- | One written test in a rule's head: a word, and whatever was written after
--- it (MS4 phase 47).
---
--- **The same shape 'RawOp' has, for the same reason** — which word names a test
--- and whether it was given the right number of operands is resolution's
--- question, not the parser's (§2.5, the parser is shallow).
---
--- A head is a /run/ of tests with nothing between them, so a test that takes
--- operands is written in parentheses — @when focus-is-hole (surface-is-name t)@
--- — and a bare word is a test of no operands. Without the brackets
--- @when focus-is-hole goal-type-is-pi@ would read as one test applied to
--- another word.
-data RawTest = RawTest String [RawOperand]
-  deriving (Eq, Show)
-
--- | What may be written as an argument: a name, a position, or text.
---
--- **No term literal, and that is a boundary rather than an omission.** A term
--- would have to be resolved in a context, and a rule is written where there is
--- no context — no proof is in progress and no focus exists.
---
--- 'RawText' arrives at phase 22b, at the user's instruction: *"Rules absolutely
--- need a string literal."* Without it @say@, @ask@ and @concat@ had keywords
--- that resolved and no way to be given anything to say.
-data RawOperand
-  = RawRef String
-  | RawPos Int
-  | RawText String
   deriving (Eq, Show)

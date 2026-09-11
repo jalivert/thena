@@ -15,7 +15,7 @@ import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
 import Thena.Driver (parseCore, parseSurfaceModule, parseSurfaceTerm)
 import Thena.Syntax.Lexer (lexTokens)
-import Thena.Syntax.Concrete (RawInstr, RawRule (..))
+import Thena.Instral.Concrete (RawRule (..), RawInstr (..))
 import Thena.Syntax.Parser (parseRule)
 import Thena.Global.Env (emptyGlobals)
 import Thena.Repl (renderSurface)

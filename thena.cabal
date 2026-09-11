@@ -49,6 +49,7 @@ library
         Thena.Surface.Layout
         Thena.Surface.Parser
         Thena.Surface.Zipper
+        Thena.Instral.Concrete
         Thena.Syntax.Concrete
         Thena.Syntax.Lexer
         Thena.Syntax.Parser

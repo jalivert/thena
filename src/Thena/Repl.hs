@@ -157,9 +157,7 @@ import Thena.Syntax.Parser (ParseError (..))
 
 import Data.Foldable (toList)
 import Data.List (intercalate, partition)
-import Thena.Syntax.Concrete (RawInstr (..), RawOp (..), RawOperand (..))
-
--- | Run the read-eval-print loop until @:quit@ or end of input.
+import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..))
 --
 -- The prelude is loaded first (§9, phase 11) and **silently on success** — it
 -- is three @data@ lines and announcing them at every start is noise. A failure

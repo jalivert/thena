@@ -149,7 +149,8 @@ import Thena.Surface.Concrete
 import Thena.Surface.Layout (layout)
 import Thena.Surface.Zipper (rootedAt)
 import qualified Thena.Surface.Parser as Surface
-import Thena.Syntax.Concrete (Raw (..), RawRule)
+import Thena.Syntax.Concrete (Raw (..))
+import Thena.Instral.Concrete (RawRule (..))
 import Thena.Syntax.Lexer (Located (..), Token (..), lexTokens)
 import Thena.Syntax.Parser
   ( parseData

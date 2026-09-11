@@ -35,7 +35,7 @@ import Thena.Surface.Concrete
   , SurfaceArg (..)
   , SurfaceBinder (..)
   )
-import Thena.Syntax.Concrete (RawInstr (..), RawOp (..), RawOperand (..))
+import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 

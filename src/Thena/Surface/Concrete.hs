@@ -30,14 +30,13 @@ module Thena.Surface.Concrete
 
 import Data.List.NonEmpty (NonEmpty)
 
--- | **The instruction language is shared, and it is term-free**, which is what
--- makes sharing it possible: a 'Thena.Syntax.Concrete.RawOperand' is an
--- identifier, a number or a string, and mentions neither 'Surface' nor
--- 'Thena.Syntax.Concrete.Raw'. So this import crosses no language boundary —
--- it is the machine's own syntax, which belongs to neither term language.
-import Thena.Syntax.Concrete (RawInstr)
-
--- | Whether the elaborator supplies an argument or the user writes it.
+-- | **`instral` is shared, and it is term-free**, which is what makes sharing it
+-- possible: a 'Thena.Instral.Concrete.RawOperand' is an identifier, a number or
+-- a string, and mentions neither 'Surface' nor 'Thena.Syntax.Concrete.Raw'. So
+-- this import crosses no language boundary — it is the machinery's own syntax,
+-- and a @do@ block in a surface program is `instral` written in place
+-- (@discussion\/the-five-languages.md@ §0b, table F).
+import Thena.Instral.Concrete (RawInstr (..))
 --
 -- **Icity lives here and never in "Thena.Core.Term"** — the user's decision,
 -- 2026-09-01: /"I am convinced that the DC does not need implicits. I think
