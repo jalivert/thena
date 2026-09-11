@@ -1102,11 +1102,23 @@ renderOperand n ctx o = case o of
   Ref x -> x
   Lit v -> renderValue n ctx v
 
+-- | The fence a tagged region is written with. Named rather than written
+-- inline so that a backtick never sits loose in a string literal here.
+tick :: Char
+tick = toEnum 96
+
 renderValue :: Int -> Context -> Value -> String
 renderValue n ctx v = case v of
   VText s            -> show s
   VTerm (Trailing t) -> "⌜" ++ renderCore n ctx t ++ "⌝"
   VTerm p            -> "⌜" ++ unwords (words (renderPartial n ctx p)) ++ "⌝"
+  -- **An unresolved core term prints as its shape, not its contents** (MS5
+  -- phase 61b). Printing a 'Thena.Syntax.Concrete.Raw' back would need a
+  -- printer for the written syntax, and there has never been one: every other
+  -- rendering here goes from 'Thena.Core.Term.Core', which a @core@ region has
+  -- deliberately not become yet. Owed a better rendering when a @Raw@ printer
+  -- exists; until then this says what it is and does not pretend to more.
+  VRaw _             -> "core" ++ [tick] ++ "…" ++ [tick]
   -- **The focus, printed as it was written.** A 'Thena.Ops.VSurface' carries a
   -- zipper since phase 46, and what a reader wants to see is the subterm the
   -- machine is elaborating, not the program it came from — so the path is
@@ -1183,6 +1195,8 @@ renderFailReason r = case r of
   NotAnIdentifier s -> show s ++ " is not a name"
   ExpectedText      -> "expected text"
   ExpectedTerm      -> "expected a term"
+  ExpectedRaw       -> "expected a core region"
+  CannotResolve e   -> renderSyntaxError (ResolveFailed e)
   CannotMove m      -> renderMoveError m
   NotAHole            -> "that is not a hole"
   NotAGuessHere       -> "that is not a guess"
@@ -1257,6 +1271,9 @@ renderSurface = surf Loose
       RawRef x  -> x
       RawPos k  -> show k
       RawText t -> show t
+      -- Exact, because the region kept its source text: a rule listing shows
+      -- the embedded term as the author wrote it.
+      RawRegion tag src -> tag ++ [tick] ++ src ++ [tick]
 
     surf _ (SurfaceName x)      = x
     surf _ (SurfaceUniverse l)  = "Type" ++ subscript l
@@ -1771,6 +1788,11 @@ renderRuleError e = case e of
   UnboundInHead g n         -> "in " ++ nameString g ++ ": no parameter is called " ++ n
   BadTestOperands g w      -> "in " ++ nameString g ++ ": " ++ w ++ " was written with the wrong arguments"
   BadOperands g i w        -> inRule g i ++ w ++ " was written with the wrong arguments"
+  NoSuchTag g i tag        ->
+    inRule g i ++ "no language is called " ++ tag
+      ++ " — the built-in tags are surface and core"
+  BadRegion g i tag why    ->
+    inRule g i ++ "this " ++ tag ++ " term did not parse: " ++ renderSyntaxError why
   where
     inRule g i = "in " ++ nameString g ++ ", instruction " ++ show i ++ ": "
 

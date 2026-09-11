@@ -53,6 +53,7 @@ tests =
     , shapes
     , text
     , headOperands
+    , regions
     , mistakes
     ]
 
@@ -128,6 +129,7 @@ againstTheBase =
 everyOp :: [(String, Op)]
 everyOp =
   [ ("assume x y",   Assume (Ref "x") (Ref "y"))
+  , ("resolve-core r", Op.ResolveCore (Ref "r"))
   , ("elim-spine t", Op.ElimSpine (Ref "t"))
   , ("claim x y",    Claim (Ref "x") (Ref "y"))
   , ("ask x text",   Ask (Ref "x") AText)
@@ -387,6 +389,64 @@ text =
 -- --------------------------------------------------------------------------
 -- Mistakes
 -- --------------------------------------------------------------------------
+
+-- | Tagged regions in a rule body (MS5 phase 61b).
+--
+-- The fence never appears literally in a test's source: 'tagged' builds it, so
+-- that this module stays readable and so that a stray backtick in a string
+-- literal cannot quietly change what a case is testing.
+regions :: TestTree
+regions =
+  testGroup
+    "tagged regions (MS5 phase 61b)"
+    [ testCase "a surface region resolves, and is finished at load" $ do
+        -- @elaborate@ names no op, so it is a call to the rule of that name
+        -- (phase 25e). What this checks is that the region reached it at all.
+        b <- bodyOf ("elaborate " ++ tagged "surface" "f x")
+        map opWord b @?= ["call"]
+    , testCase "a core region resolves to the instruction that will resolve it" $ do
+        b <- bodyOf ("t = resolve-core " ++ tagged "core" "Type\8320")
+        map opWord b @?= ["resolve-core"]
+    , testCase "an empty region parses as a region, and its contents still must" $
+        -- The fence is Thena's and the contents are the embedded language's.
+        -- Emptiness is legal to *delimit* and is not a surface term, so this
+        -- fails inside the region rather than at it.
+        case errs ("say " ++ tagged "surface" "") of
+          Just [BadRegion (GlobalName "r") 0 "surface" _] -> pure ()
+          other -> assertFailure ("expected a BadRegion, got " ++ show other)
+    , testCase "a tag no language answers to is refused at load" $
+        errs ("elaborate " ++ tagged "agda" "f x")
+          @?= Just [NoSuchTag (GlobalName "r") 0 "agda"]
+    , testCase "contents that do not parse in the tag's language are refused" $
+        case errs ("elaborate " ++ tagged "surface" "(") of
+          Just [BadRegion (GlobalName "r") 0 "surface" _] -> pure ()
+          other -> assertFailure ("expected a BadRegion, got " ++ show other)
+    , testCase "a region may not appear in a head" $
+        -- Parenthesised because a test with operands is (phase 47).
+        case headErrs ("(surface-is-name " ++ tagged "surface" "x" ++ ")") of
+          Just [BadTestOperands (GlobalName "r") "surface-is-name"] -> pure ()
+          other -> assertFailure ("expected the head to refuse it, got " ++ show other)
+    ]
+  where
+    tick = toEnum 96 :: Char
+
+    tagged tag src = tag ++ [tick] ++ src ++ [tick]
+
+    opWord i = case i of
+      Bind _ o -> opKeyword o
+      Do o     -> opKeyword o
+
+    errs src = readErrors ("rule r :- when focus-is-hole then " ++ src)
+
+    headErrs src = readErrors ("rule r :- when " ++ src ++ " then prim-solve")
+
+    readErrors src = case lexTokens src of
+      Left _ -> Nothing
+      Right ts -> case parseRule ts of
+        Left _ -> Nothing
+        Right raw -> case resolveRule raw of
+          Left es -> Just es
+          Right _ -> Nothing
 
 mistakes :: TestTree
 mistakes =

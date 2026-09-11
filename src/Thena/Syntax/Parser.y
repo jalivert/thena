@@ -70,6 +70,9 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   '⊢'     { Located _ TTurnstile }
   '≟'     { Located _ TEquate }
   '[|'    { Located _ TOpenQuote }
+  tagopen  { Located _ (TTagOpen $$) }
+  raw      { Located _ (TRaw $$) }
+  tagclose { Located _ TTagClose }
   '|]'    { Located _ TCloseQuote }
   let     { Located _ TLet }
   in      { Located _ TIn }
@@ -230,6 +233,8 @@ Operand :: { RawOperand }
   : ident                                  { RawRef $1 }
   | num                                    { RawPos $1 }
   | str                                    { RawText $1 }
+  | tagopen raw tagclose                   { RawRegion $1 $2 }
+  | tagopen tagclose                       { RawRegion $1 "" }
 
 
 Constraint :: { RawConstraint }

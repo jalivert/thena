@@ -100,6 +100,14 @@ data FailReason
     -- ^ an answer to an @AName@ question that cannot be a name
   | ExpectedText
     -- ^ an operand was not a @VText@
+  | ExpectedRaw
+    -- ^ an op wanting an unresolved core term — a @core@ region — got something
+    -- else (MS5 phase 61b).
+  | CannotResolve ResolveError
+    -- ^ a @core@ region parsed but does not resolve where it was used: a name it
+    -- mentions is not in scope at this focus, or is not a global (MS5 phase
+    -- 61b). It is reported here rather than at load because it cannot be known
+    -- until there is a development to resolve against.
   | ExpectedTerm
     -- ^ an operand was not a @VTerm@ holding a core term
   | CannotMove MoveError

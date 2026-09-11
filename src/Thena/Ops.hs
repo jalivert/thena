@@ -34,6 +34,7 @@ import Thena.Development.Cursor (Part (..))
 import Thena.Development.Partial (Partial)
 import Thena.Global.Env (InductiveDefinition)
 import Thena.Surface.Concrete (Plicity)
+import Thena.Syntax.Concrete (Raw)
 import Thena.Surface.Zipper (SurfaceZipper)
 
 -- | A name in a rule body's environment. Not a 'Thena.Core.Term.Var' and not an
@@ -76,9 +77,23 @@ data Value
     -- one into a term is resolution, not elaboration. Now it holds what its
     -- name says.
     --
-    -- There is deliberately no @VRaw@. Nothing wants development syntax as a
-    -- value any more: the REPL resolves a core argument before the call
-    -- (phase 38's corners), and elaboration takes this.
+  | VRaw     Raw
+    -- ^ **a parsed but unresolved core term** — what @core\`…\`@ evaluates to
+    -- (MS5 phase 61b).
+    --
+    -- This constructor was deliberately absent until 61b, on the grounds that
+    -- /nothing wants development syntax as a value: the REPL resolves a core
+    -- argument before the call (phase 38's corners), and elaboration takes a
+    -- surface term./ **A tagged region is what changed that premise** — a rule
+    -- body can now write a core term, and the REPL's trick is unavailable to it.
+    --
+    -- **It stays unresolved because it cannot be resolved when it is written.**
+    -- Turning 'Raw' into 'Thena.Core.Term.Core' needs the globals and the
+    -- context at the focus, and a rule base is read /before the prelude/ — so
+    -- @core\`Nat\`@ at load time cannot even find @Nat@. @resolve-core@ is the
+    -- instruction that does it, where there is a development to do it against,
+    -- and making that a visible step is the point: the same written term in two
+    -- places resolves to two different things.
   | VPair    Value Value
   deriving (Eq, Show)
 
@@ -519,6 +534,16 @@ data Op
     -- **@App (Canonical …) x@ is constructible here and is not well formed.**
     -- That is @PLAN-representation.md@ §3.4's line, deliberately: the checker
     -- refuses it, and no abstraction boundary is put in the way of building it.
+  | ResolveCore Operand
+    -- ^ **turn a @core@ region into a term, here** (MS5 phase 61b).
+    --
+    -- A @core\`…\`@ region is parsed when its file is read and left as a
+    -- 'VRaw', because resolving it needs the globals and the context at the
+    -- focus and a rule base is read before the prelude. This is where that
+    -- happens, and it is an instruction rather than something an operand does
+    -- quietly **so that when it happens is on the page**: the same written term
+    -- resolves differently at two different focuses, and a reader should be able
+    -- to see which one it got.
   | Expose Operand
     -- ^ **a type with elaboration's own bookkeeping reduced out of it**
     -- (MS4 phase 42, widened at 44b) — §5.1's 'Thena.Core.Reduce.whnf', and
@@ -785,6 +810,7 @@ produces o = case o of
   Certify _    -> False
   DefineGlobal {} -> False
   MakeData {} -> False
+  ResolveCore _ -> True
   Expose _ -> True
   PushDevelopment _ -> False
   PopDevelopment -> True   -- the term the nested development built
@@ -873,6 +899,7 @@ operandsOf o = case o of
   Certify a    -> [a]
   DefineGlobal _ a b c -> [a, b, c]
   MakeData _ _ _ as -> as
+  ResolveCore a -> [a]
   Expose a -> [a]
   PushDevelopment a -> [a]
   PopDevelopment -> []
@@ -1142,6 +1169,7 @@ opKeyword o = case o of
   Certify _    -> "certify"
   DefineGlobal {} -> "define-global"
   MakeData {} -> "make-data"
+  ResolveCore _ -> "resolve-core"
   Expose _ -> "expose"
   PushDevelopment _ -> "push-development"
   PopDevelopment -> "pop-development"

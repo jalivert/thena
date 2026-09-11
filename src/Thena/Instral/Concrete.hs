@@ -85,7 +85,15 @@ data RawTest = RawTest String [RawOperand]
 -- need a string literal."* Without it @say@, @ask@ and @concat@ had keywords
 -- that resolved and no way to be given anything to say.
 data RawOperand
-  = RawRef String
+  = RawRegion String String
+    -- ^ @tag\`…\`@ — a **tagged region** (MS5 phase 61b): the tag, and the raw
+    -- text between the fences. Which language the text is in is the tag's to
+    -- say, and the text is parsed by that tag's parser during resolution.
+    --
+    -- **The text is raw and not tokens**, because an embedded language has its
+    -- own lexical rules (@discussion\/the-five-languages.md@ §6.9). The lexer
+    -- found the extent; nothing here has looked inside.
+  | RawRef String
   | RawPos Int
   | RawText String
   deriving (Eq, Show)

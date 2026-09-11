@@ -94,6 +94,7 @@ import Thena.Errors
   )
 import Thena.Surface.Concrete (Plicity (..))
 import qualified Thena.Surface.Concrete as Concrete
+import Thena.Syntax.Resolve (resolve)
 import Thena.Ops
   ( AnswerKind
   , Env
@@ -690,6 +691,13 @@ perform instr rest m = case operation instr of
   -- driver's to run, exactly as a declaration's checks are.
   -- **Brady's @NEW PROOF@ and @TERM@** (MS4 phase 42) — see 'Op.PushDevelopment'
   -- for why a declaration needs them.
+  ResolveCore a -> case operandValue (env (exec m)) a of
+    Left r           -> failure r m
+    Right (VRaw raw) -> case resolve (globals m) contextAt (names m) raw of
+      Left e        -> failure (CannotResolve e) m
+      Right (t, n1) -> produce (VTerm (Trailing t)) m { names = n1 }
+    Right _          -> failure ExpectedRaw m
+
   Expose t -> case term t of
     Left r  -> failure r m
     Right t' ->

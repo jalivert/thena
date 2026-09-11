@@ -61,6 +61,11 @@ import Thena.Ops
 import Thena.Surface.Concrete
   (Plicity (..), Surface (..), SurfaceArg (..))
 import qualified Thena.Surface.Zipper as Zipper
+import Thena.Errors (SyntaxError (..))
+import Thena.Surface.Read (parseSurfaceText)
+import Thena.Surface.Zipper (rootedAt)
+import Thena.Syntax.Lexer (lexTokens)
+import Thena.Syntax.Parser (parseTerm)
 import Thena.Instral.Concrete
   ( RawInstr (..)
   , RawOp (..)
@@ -365,6 +370,12 @@ data RuleError
     -- No instruction index, for 'NoSuchTest'\'s reason — a head is not a
     -- sequence
   | BadOperands       GlobalName Int String
+  | NoSuchTag         GlobalName Int String
+    -- ^ @tag\`…\`@ where no parser answers to @tag@ (MS5 phase 61b). The two
+    -- built-in ones are @surface@ and @core@; a declared object language brings
+    -- its own, which is phase 69.
+  | BadRegion         GlobalName Int String SyntaxError
+    -- ^ a region whose contents did not parse in the language its tag named.
     -- ^ the right op word, written with the wrong arguments — too many, too
     -- few, or a position where a name was wanted. One error for all three: a
     -- rule body is one line, and the word is enough to find it
@@ -488,6 +499,12 @@ headOperand o = case o of
   RawRef n  -> Just (Ref n)
   RawText t -> Just (Lit (VText t))
   RawPos _  -> Nothing
+  -- **A tagged region may not appear in a head** (MS5 phase 61b). A head is
+  -- evaluated by 'holds' to build the match list, cheaply and without effects;
+  -- a region would make dispatch parse an embedded language to find out what
+  -- applies. His ruling, 2026-09-11: heads stay a restricted fragment, and
+  -- pattern matching is the only thing they are to gain.
+  RawRegion _ _ -> Nothing
 
 -- | Resolve a written block of instructions (MS4 phase 45).
 --
@@ -596,6 +613,24 @@ operation g i (RawOp w as)
       RawRef n  -> Right (Ref n)
       RawText t -> Right (Lit (VText t))
       RawPos _  -> Left (BadOperands g i w)
+      -- **A tagged region is parsed here, at load** (MS5 phase 61b, §6.0.1), so
+      -- that a syntax error in an embedded term arrives with every other syntax
+      -- error rather than when a rule happens to run.
+      --
+      -- The two built-in tags differ in how far they get, and the difference is
+      -- the languages' rather than ours: a surface term is unresolved by nature,
+      -- so it is finished here; a core term needs the globals and the focus's
+      -- context, which do not exist while a rule base is being read.
+      RawRegion tag src -> case tag of
+        "surface" -> case parseSurfaceText src of
+          Left e  -> Left (BadRegion g i tag e)
+          Right t -> Right (Lit (VSurface (rootedAt t)))
+        "core" -> case lexTokens src of
+          Left e   -> Left (BadRegion g i tag (LexFailed e))
+          Right ts -> case parseTerm ts of
+            Left e  -> Left (BadRegion g i tag (ParseFailed e))
+            Right r -> Right (Lit (VRaw r))
+        _ -> Left (NoSuchTag g i tag)
 
     nullary =
       [ ("along", Along), ("into", Into), ("back", Back), ("reduce", Reduce)
@@ -610,7 +645,7 @@ operation g i (RawOp w as)
       [ ("say", Say), ("yield", Op.Yield), ("prim-try", Try)
       , ("goto", Goto), ("push-development", Op.PushDevelopment)
       , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
-      , ("typeof", Typing), ("expose", Op.Expose), ("fresh-name", FreshName), ("prim-apply", Op.Apply)
+      , ("typeof", Typing), ("expose", Op.Expose), ("resolve-core", Op.ResolveCore), ("fresh-name", FreshName), ("prim-apply", Op.Apply)
       , ("resolve-name", Op.ResolveName)
       , ("surface-name", Op.SurfaceNameOf)
       , ("surface-universe", Op.SurfaceUniverseOf)
