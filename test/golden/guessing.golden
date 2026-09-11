@@ -18,8 +18,7 @@ thena spine> qed
 n : Nat   ∎
 thena spine> :theorem m : Nat
 proving m : Nat
-thena spine> claim h : Nat
-claimed h
+thena spine> claim "h" ⌜ Nat ⌝
 thena spine> try-core ⌜ succ h ⌝
 thena spine> :show
   let ? h : Nat in

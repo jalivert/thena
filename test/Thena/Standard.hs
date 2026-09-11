@@ -81,6 +81,9 @@ expectedStandard =
   , fillRule
   , unifyRefine
   , applyRule
+  , askingRule "claim"    "new hole"   Claim
+  , askingRule "assume"   "assumption" Assume
+  , askingRule "quantify" "\8704-binder"  Op.Quantify
   ]
     ++ elaborateClauses
 
@@ -146,6 +149,39 @@ applyRule = Rule (GlobalName "apply-core") ["f"] [FocusIsHole]
   [ Bind "s" (Op.Apply (Ref "f"))
   , Do (Call (GlobalName "unify-refine-core") [Ref "s"])
   ]
+
+-- | The asking half of @claim@, @assume@ and @quantify@ (MS5 phase 62b).
+--
+-- **The op takes a name and a type; written with the type alone the word is a
+-- rule** — his design, and it is what let the driver stop compiling one of two
+-- instruction sequences depending on whether a name had been typed. The arity
+-- picks the clause, which is what 'Thena.Rules.clauses' does for every other
+-- name.
+--
+-- **No head, and that is the honest answer rather than the tidy one.** A head of
+-- 'FocusIsComponent' was written first, to keep these out of the core
+-- fragment's match list, and it is /false/: the ops insert above the focus
+-- through 'Thena.Development.Cursor.insertAbove', which works from inside a core
+-- term too. A head that refused what the op it wraps allows would make two
+-- clauses of one word disagree about where the word applies. The
+-- @enter-binders@ lesson (MS4 phase 49c) is that a head must be TRUE, not that
+-- every rule must have one.
+--
+-- They cost a row in @:matches@ wherever there is a focus and nothing else:
+-- 'Thena.Rules.dispatch' runs no rule that takes parameters, so @prove@ cannot
+-- reach them.
+askingRule :: String -> String -> (Operand -> Operand -> Op) -> Rule
+askingRule word what op = Rule (GlobalName word) ["ty"] []
+  [ Bind "n" (Op.Ask (Lit (VText ("name for the " ++ what ++ "?"))) Op.AName)
+  , Do (op (Ref "n") (Ref "ty"))
+  , Bind "m" (Concat (Lit (VText (verb ++ " "))) (Ref "n"))
+  , Do (Say (Ref "m"))
+  ]
+  where
+    verb = case word of
+      "claim"    -> "claimed"
+      "assume"   -> "assumed"
+      _          -> "quantified"
 
 -- | A fresh session with 'expectedBase' installed, for the suites that drive
 -- the driver without IO.

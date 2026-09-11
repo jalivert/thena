@@ -39,6 +39,54 @@ rule apply-core f :- when focus-is-hole
      ; unify-refine-core s
 
 -- --------------------------------------------------------------------------
+-- The asking half of the three component tactics (MS5 phase 62b)
+--
+-- claim, assume and quantify are ops and take a name and a type. Written with
+-- the type alone they are these rules, which ask for the name and then run the
+-- op. His design, 2026-09-11: "the normal claim is operation (primitive and
+-- built in), the unary claim is a rule" — the arity picks the clause, which is
+-- what the engine already does for rules, and the driver compiles nothing.
+--
+-- Until this phase the REPL read `claim A : Type₀` with a grammar of its own
+-- and built one of two instruction sequences in Haskell depending on whether a
+-- name was written. That is the special-casing this replaces.
+--
+-- The prompt cannot quote the type back, because nothing in instral renders a
+-- term — ms5/CLOSEOUT.md 1.
+--
+-- NO HEAD, and that is the honest answer rather than the tidy one. The tidy one
+-- was focus-is-component, written first to keep these out of the core
+-- fragment's match list — and it is FALSE: the ops insert above the focus
+-- through Cursor.insertAbove, which works from inside a core term too, so
+-- `claim "k" ⌜ Nat ⌝` succeeds there. A head that refused what the op it wraps
+-- allows would make the two clauses of one word disagree about where the word
+-- applies. The enter-binders lesson (MS4 phase 49c) is that a head must be
+-- TRUE, not that every rule must have one.
+--
+-- So they are offered wherever there is a focus, the core fragment included.
+-- That costs a row in `:matches` and nothing else: `dispatch` runs no rule that
+-- takes parameters, so `prove` cannot reach them.
+-- --------------------------------------------------------------------------
+
+rule claim ty :-
+  then n = ask "name for the new hole?" name
+     ; claim n ty
+     ; m = concat "claimed " n
+     ; say m
+
+rule assume ty :-
+  then n = ask "name for the assumption?" name
+     ; assume n ty
+     ; m = concat "assumed " n
+     ; say m
+
+rule quantify ty :-
+  then n = ask "name for the ∀-binder?" name
+     ; quantify n ty
+     ; m = concat "quantified " n
+     ; say m
+
+-- --------------------------------------------------------------------------
 -- Elaboration, one clause per surface node (MS4 step 2)
 --
 -- Every clause names the node it is for, so at most one head matches any term

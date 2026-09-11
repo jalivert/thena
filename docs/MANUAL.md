@@ -341,7 +341,7 @@ thena spine> :show
 ```
 
 The inner hole is `id1`, not `id`: every component in a development has a name
-of its own, so that `goto ‹name›` always means one place.
+of its own, so that `goto "‹name›"` always means one place.
 
 Two λs have appeared, and the remaining hole now has type `A`. Move the cursor
 down to it — `into` enters the guess body, `along` steps past a binder — and ask
@@ -440,9 +440,9 @@ the kernel refused it
 | `solve` | accept the focused guess — it becomes a definition |
 | `regret` | throw away a guess's body, back to a plain hole |
 | `abandon` | remove the focused hole entirely |
-| `assume ‹x› : ‹S›` | add a hypothesis above the focus |
-| `claim ‹x› : ‹S›` | add a new hole above the focus |
-| `unify ‹t› ≟ ‹u›` | solve holes by unification |
+| `assume "‹x›" ⌜‹S›⌝` | add a hypothesis above the focus |
+| `claim "‹x›" ⌜‹S›⌝` | add a new hole above the focus |
+| `unify ⌜‹t›⌝ ⌜‹u›⌝` | solve holes by unification |
 | `reduce` | reduce the focused term one step, in place |
 
 `reduce` acts on whatever term the cursor is standing on, and the change is
@@ -466,8 +466,8 @@ thena core> :show
 asked on its own line, and your answer is read at the `>` prompt:
 
 ```
-thena core> claim : Nat
-name for the hole? it will have type Nat
+thena core> claim ⌜ Nat ⌝
+name for the new hole?
 > k
 claimed k
 ```
@@ -603,10 +603,17 @@ plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n   ∎
 ```
 
 **A core tactic's argument is written in corners**, `⌜ … ⌝`. A command line is
-a run of atoms, exactly as it would be inside a rule body, so
+a run of operands, exactly as it would be inside a rule body, so
 `try-core refl {0} Nat zero` would be four arguments and is refused — the
 corners say where the term begins and ends, and inside them nothing needs
 parenthesising.
+
+**A surface term is written in angle brackets**, `⟨ … ⟩`, the same way — so
+`elaborate ⟨ succ zero ⟩`. Every embedded term is written in the fence its
+language is entitled to, and an argument in no fence is neither language: it is
+a name, a number or a string, read exactly as a rule body reads one. That is why
+`goto` takes `goto "h"` and not `goto h` — the second is a *reference*, and at
+the prompt there is usually nothing bound to it.
 
 The `-core` suffix marks the tactics that take a **development-calculus** term.
 The surface language exists beside it — `:infer`, `declare` and a `.thena` proof
@@ -734,15 +741,15 @@ The kernel is an independent check. It does not trust the machine.
 | | |
 |---|---|
 | `:extract` | read the finished term off the development |
-| `certify ‹type›` | check the extracted term really has that type |
+| `certify ⌜‹type›⌝` | check the extracted term really has that type |
 | `:revalidate` | re-derive the whole development's well-formedness from scratch |
 
 ```
 thena spine> :extract
 let goal = zero : Nat in goal
-thena spine> certify Nat
+thena spine> certify ⌜ Nat ⌝
 certified
-thena spine> certify Nat -> Nat
+thena spine> certify ⌜ Nat -> Nat ⌝
 the kernel refused it
 in the term:
   let goal = zero : Nat in goal has type Nat
@@ -939,16 +946,17 @@ language and elaborated on load.
 | `attack` `intro` `solve` `regret` `abandon` | the hole operations |
 | `try-core ⌜ term ⌝` | propose a term for the focused hole |
 | `apply-core ⌜ f ⌝` / `unify-refine-core ⌜ t ⌝` | apply a function / refine by unification |
-| `goto ‹name›` | move to a hole by name |
-| `assume ‹x› : ‹S›` / `claim ‹x› : ‹S›` | add a hypothesis / a hole above the focus |
-| `unify ‹t› ≟ ‹u›` | solve by unification |
+| `goto "‹name›"` | move to a hole by name |
+| `assume "‹x›" ⌜‹S›⌝` / `claim "‹x›" ⌜‹S›⌝` | add a hypothesis / a hole above the focus |
+| `assume ⌜‹S›⌝` / `claim ⌜‹S›⌝` | the same, asking for the name |
+| `unify ⌜‹t›⌝ ⌜‹u›⌝` | solve by unification |
 | `eliminate-core ⌜ target ⌝` | induction |
 | `reduce` | reduce the focused term in place |
 | `along` `into` `back` | move on the chain |
 | `cross type` / `cross val` | move into a term |
 | `fun` `arg` `dom` `cod` `val` `type` `body` `motive` `target` | descend into a field |
 | `param ‹n›` `method ‹n›` `index ‹n›` `arg ‹n›` | descend into a numbered field |
-| `prove` / `prove ‹hint›` | let the rule engine choose and run a rule |
+| `prove` | let the rule engine choose and run a rule |
 | `retry` / `retry ‹n›` | backtrack to a choice point |
 | `data ‹D› … where { … }` | declare an inductive family |
 | `certify ‹type›` | ask the kernel |

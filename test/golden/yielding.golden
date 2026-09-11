@@ -2,14 +2,13 @@ thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
 thena spine> :theorem t : Nat
 proving t : Nat
-thena spine> elaborate (do { h = here ; yield "look at this" ; goto h ; prove })
+thena spine> elaborate ⟨ do { h = here ; yield "look at this" ; goto h ; prove } ⟩
 look at this
 (yield to hand control back)
 thena spine> :show
 ▶ let ? t : Nat in
   t
-thena spine> assume w : Nat
-assumed w
+thena spine> assume "w" ⌜ Nat ⌝
 look at this
 (yield to hand control back)
 thena spine> :show
@@ -24,7 +23,7 @@ look at this
 (yield to hand control back)
 thena spine> :revalidate
 valid
-thena spine> goto h
+thena spine> goto "h"
 stuck: that names no hole or guess
 thena spine> do { goto h }
 look at this

@@ -759,6 +759,58 @@ block's own bindings survive to the next line while a rule is suspended.
 You can break the rule you are standing in — shadow one of its locals and its
 body will go wrong. That is allowed on purpose.
 
+### A typed line is one line of `instral`, and a bare argument is not a term
+
+*Decided 2026-09-11.*
+
+```
+try-core ⌜ zero ⌝              -- a core term, in corners
+elaborate ⟨ succ zero ⟩        -- a surface term, in angle brackets
+claim "h" ⌜ Nat ⌝              -- a string, and a core term
+goto "h"                       -- a string: the hole's name
+goto h                         -- a REFERENCE, to whatever h is bound to
+```
+
+**An argument written in no fence is neither language.** It is an `instral`
+value — a name, a number or a string — read exactly as a rule body reads one.
+Until this point a bare argument at the prompt was a *surface term*, which made
+Surface the one language you could write without saying so, and forced `goto`'s
+argument to be special-cased in the implementation to get a name out of a
+position that otherwise produced a surface tree.
+
+So there is now one reading of a line, wherever you type it: the word names an
+**op** if one bears that word, and a **rule** otherwise; its arguments are
+operands. That was already true inside a rule body and inside `do { … }`.
+
+What this costs you is explicitness — `unify ⌜ a ⌝ ⌜ b ⌝` where it used to be
+`unify a ≟ b` — and what it buys is that a line means the same thing in all
+three places.
+
+### An op word at another arity calls a rule of that name
+
+*Decided 2026-09-11.*
+
+```
+claim "h" ⌜ Nat ⌝     -- two arguments: the op
+claim ⌜ Nat ⌝         -- one argument: a rule, which asks you for the name
+```
+
+A word names an **op at the arities that op has, and a rule at every other
+arity**. Rules already worked this way — clauses of one name are selected by
+name *and* number of arguments, so they need not agree about how many they take
+— and ops now agree with them instead of being a separate question.
+
+This is what lets `claim ⌜ Nat ⌝` be an ordinary rule in the rule base rather
+than a shape the REPL recognises. You can write your own clause of any op's name
+at an arity the op does not have, and it will be found.
+
+**The cost is that a mistyped word is no longer caught when a rule base loads.**
+`prim-solve x` used to be refused as *`prim-solve` was written with the wrong
+arguments*; it is now a call to a rule called `prim-solve` that takes one
+argument, and if there is none you find out when it runs. That is the same trade
+already made for `call`, where a rule may name a rule defined later or in a base
+not loaded yet.
+
 ### `:infer` takes a surface term; a core one goes in corners
 
 *Decided 2026-09-02.*
@@ -785,8 +837,9 @@ the same.
 *Decided 2026-08-31.*
 
 `:help` prints every command the REPL itself has, split by the naming rule —
-a bare word acts, a word with a colon looks — and nothing else. `attack`,
-`intro`, `try`, `solve`, `eliminate` and the rest are **not** commands: they
+a bare word acts, a word with a colon looks — **and the ops**, which are in
+the binary and which nothing else lists. `attack`, `intro`, `try`, `solve`,
+`eliminate` and the rest are **not** commands and not ops: they
 are rules in a rule base, reached by writing their name the way a rule body
 would. Listing them under `:help` would state a loaded file's contents from
 inside the binary, and would be wrong the moment you load a different base.

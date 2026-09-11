@@ -118,13 +118,17 @@ holeTests =
 
   , ok "try attaches a guess"             (natGoal ++ ["attack", "into", "try-core ⌜ zero ⌝"])
 
-    -- **The two vocabularies, at the call site** (phase 38, come true at 41).
-    -- Corners make an argument a core term and a bare word makes it a surface
-    -- one — so a core tactic given a bare argument is handed the wrong kind of
-    -- value and says so. Phase 38 refused it earlier, with a message; now the
-    -- refusal is the op's, which is where every other operand kind is settled.
+    -- **A bare argument is neither vocabulary as of MS5 phase 62b** — it is an
+    -- @instral@ reference, so this one is simply a name nothing bound. The
+    -- asymmetry it used to demonstrate (corners for Core, bare for Surface) is
+    -- what this milestone removes: both languages are written in a fence now.
+  , halts "a bare argument is a reference, not a term"
+      (natGoal ++ ["attack", "into", "try-core zero"]) (UnboundInBody "zero")
+    -- And the vocabularies still do not mix: the surface fence makes a
+    -- 'Thena.Ops.VSurface', which a core tactic will not take. The refusal is
+    -- the op's, which is where every other operand kind is settled.
   , halts "a core tactic will not take a surface argument"
-      (natGoal ++ ["attack", "into", "try-core zero"]) ExpectedTerm
+      (natGoal ++ ["attack", "into", "try-core \10216 zero \10217"]) ExpectedTerm
     -- The corners subsume phase 23b's parenthesisation rule: an argument that
     -- is not a single atom needed parentheses, and inside corners it does not.
   , ok "and inside them an argument needs no parentheses"
@@ -141,7 +145,7 @@ holeTests =
     -- @claim@ inserts above the focus and leaves it where it was, so reaching
     -- the new hole is a @back@ — the path gained a step and this pops it.
   , ok "abandon drops a hole nothing refers to"
-      (natGoal ++ ["attack", "into", "claim spare : Nat", "back", "abandon"])
+      (natGoal ++ ["attack", "into", "claim \"spare\" ⌜ Nat ⌝", "back", "abandon"])
   , halts "and refuses one that is still referred to"
       (natGoal ++ ["abandon"]) (CannotMove StillReferenced)
   ]
@@ -202,7 +206,7 @@ sessionTests =
     -- one alone would pass for the wrong reason if @qed@ ever stopped checking
     -- purity.
   , testCase "a theorem starts a fresh development, not the one it found" $
-      namesIn (developmentAfter (run ["claim spare : Type₀", ":theorem t : Type₀"]))
+      namesIn (developmentAfter (run ["claim \"spare\" ⌜ Type₀ ⌝", ":theorem t : Type₀"]))
         @?= ["t"]
     -- **Elaboration, end to end** (MS4 phase 41e). The unit tests in
     -- "Thena.ElaborateTests" run against a synthetic cursor with no globals;
@@ -211,14 +215,14 @@ sessionTests =
   , ok "an application elaborates and proves"
       [ "data " ++ natDecl
       , ":theorem t : Nat"
-      , "elaborate (succ zero)"
+      , "elaborate ⟨ succ zero ⟩"
       , "qed"
       ]
   , ok "a two-argument spine folds"
       [ "data " ++ natDecl
       , "data Pair : Type\8320 where { mk : Nat -> Nat -> Pair }"
       , ":theorem p : Pair"
-      , "elaborate (mk zero (succ zero))"
+      , "elaborate ⟨ mk zero (succ zero) ⟩"
       , "qed"
       ]
     -- **Nested lambdas were broken from the moment @here@ existed** and this is
@@ -226,14 +230,14 @@ sessionTests =
     -- name, so the outer @goto@ landed on the inner component.
   , ok "nested lambdas elaborate"
       [ ":theorem u : \8704 (A : Type\8320) (a : A) -> A"
-      , "elaborate (\\ A -> \\ y -> y)"
+      , "elaborate ⟨ \\ A -> \\ y -> y ⟩"
       , "qed"
       ]
     -- **The structural cases** (MS4 phase 41f). A @∀@ is the one that needed
     -- the fifth component; the other three needed no new op at all.
   , ok "a ∀ elaborates and proves"
       [ ":theorem a : Type\8321"
-      , "elaborate (forall (A : Type\8320) -> A)"
+      , "elaborate ⟨ forall (A : Type\8320) -> A ⟩"
       , "qed"
       ]
     -- **A binder group nests**, one @quantify@ per Π: the domain hole is
@@ -241,18 +245,18 @@ sessionTests =
     -- is not in scope.
   , ok "a ∀ with two binders nests"
       [ ":theorem a : Type\8321"
-      , "elaborate (forall (A : Type\8320) (a : A) -> A)"
+      , "elaborate ⟨ forall (A : Type\8320) (a : A) -> A ⟩"
       , "qed"
       ]
   , ok "an arrow elaborates and proves"
       [ ":theorem a : Type\8321"
-      , "elaborate (Type\8320 -> Type\8320)"
+      , "elaborate ⟨ Type\8320 -> Type\8320 ⟩"
       , "qed"
       ]
   , ok "a let elaborates and proves"
       [ "data " ++ natDecl
       , ":theorem l : Nat"
-      , "elaborate (let y = zero in y)"
+      , "elaborate ⟨ let y = zero in y ⟩"
       , "qed"
       ]
     -- **An annotated @let@ elaborates its annotation into the type hole
@@ -261,7 +265,7 @@ sessionTests =
   , ok "an annotated let takes an application value"
       [ "data " ++ natDecl
       , ":theorem l : Nat"
-      , "elaborate (let y : Nat = succ zero in succ y)"
+      , "elaborate ⟨ let y : Nat = succ zero in succ y ⟩"
       , "qed"
       ]
     -- **A @let@ binds the name the user wrote**, which is what made phase
@@ -269,19 +273,19 @@ sessionTests =
   , ok "a let may shadow"
       [ "data " ++ natDecl
       , ":theorem l : Nat"
-      , "elaborate (let y : Nat = zero in let y : Nat = succ y in y)"
+      , "elaborate ⟨ let y : Nat = zero in let y : Nat = succ y in y ⟩"
       , "qed"
       ]
   , ok "an ascription elaborates and proves"
       [ "data " ++ natDecl
       , ":theorem s : Nat"
-      , "elaborate (zero : Nat)"
+      , "elaborate ⟨ zero : Nat ⟩"
       , "qed"
       ]
   , notOk "and an ascription that disagrees with the goal is refused"
       [ "data " ++ natDecl
       , ":theorem s : Nat"
-      , "elaborate (zero : Type\8320)"
+      , "elaborate ⟨ zero : Type\8320 ⟩"
       ]
     -- **Cumulativity reaching elaboration** (MS4 phase 41g). Every one of
     -- these failed with /"Type₀ and Type₁ are different universes"/ until
@@ -291,20 +295,20 @@ sessionTests =
   , ok "a term fits a universe above its own"
       [ "data " ++ natDecl
       , ":theorem u : Type\8321"
-      , "elaborate Nat"
+      , "elaborate ⟨ Nat ⟩"
       , "qed"
       ]
   , ok "including as an argument to a parameter pinned above it"
       [ "data " ++ natDecl
       , "data Box (A : Type\8321) : Type\8321 where { box : A -> Box A }"
       , ":theorem u : Type\8321"
-      , "elaborate (Box Nat)"
+      , "elaborate ⟨ Box Nat ⟩"
       , "qed"
       ]
   , ok "and in a lambda's body"
       [ "data " ++ natDecl
       , ":theorem u : Nat -> Type\8321"
-      , "elaborate (\\ n -> Nat)"
+      , "elaborate ⟨ \\ n -> Nat ⟩"
       , "qed"
       ]
     -- **The degenerate flex-flex case** (MS4 phase 41g). An un-annotated
@@ -314,13 +318,13 @@ sessionTests =
   , ok "an un-annotated let takes an application value"
       [ "data " ++ natDecl
       , ":theorem l : Nat"
-      , "elaborate (let y = succ zero in y)"
+      , "elaborate ⟨ let y = succ zero in y ⟩"
       , "qed"
       ]
   , ok "and may still shadow"
       [ "data " ++ natDecl
       , ":theorem l : Nat"
-      , "elaborate (let y = zero in let y = succ y in y)"
+      , "elaborate ⟨ let y = zero in let y = succ y in y ⟩"
       , "qed"
       ]
     -- **Cumulativity does not reach into an argument** (MS4 phase 41h). Both
@@ -328,8 +332,8 @@ sessionTests =
     -- development valid — @ms4/CLOSEOUT.md@ 12. @F@ is opaque, so nothing
     -- relates @F Type₀@ to @F Type₁@.
   , notOk "a neutral spine's argument is not cumulative"
-      [ "assume F : Type\8322 -> Type\8320"
-      , "assume x : F Type\8320"
+      [ "assume \"F\" ⌜ Type\8322 -> Type\8320 ⌝"
+      , "assume \"x\" ⌜ F Type\8320 ⌝"
       , ":goal F Type\8321"
       , "try-core \8988 x \8989"
       ]
@@ -339,7 +343,7 @@ sessionTests =
   , notOk "nor is a datatype's parameter"
       [ "data Empty2 : Type\8320 where { }"
       , "data Fn (A : Type\8322) : Type\8322 where { fn : (A -> Empty2) -> Fn A }"
-      , "assume g : Type\8320 -> Empty2"
+      , "assume \"g\" ⌜ Type\8320 -> Empty2 ⌝"
       , ":goal Fn Type\8321"
       , "try-core \8988 fn Type\8320 g \8989"
       ]
@@ -350,7 +354,7 @@ sessionTests =
   , ok "an elim elaborates and proves"
       [ "data " ++ natDecl
       , ":theorem e : Nat"
-      , "elaborate (elim Nat () (\\ x -> Nat) (zero (\\ k ih -> succ ih)) () (succ zero))"
+      , "elaborate ⟨ elim Nat () (\\ x -> Nat) (zero (\\ k ih -> succ ih)) () (succ zero) ⟩"
       , "qed"
       ]
     -- An indexed family, so the index group is not always empty and the
@@ -360,7 +364,7 @@ sessionTests =
       , "data Ev : Nat -> Type\8320 where { evZero : Ev zero "
           ++ "; evSS : \8704 (n : Nat) (p : Ev n) -> Ev (succ (succ n)) }"
       , ":theorem e : Nat"
-      , "elaborate (elim Ev () (\\ n p -> Nat) (zero (\\ n p ih -> succ ih)) (zero) evZero)"
+      , "elaborate ⟨ elim Ev () (\\ n p -> Nat) (zero (\\ n p ih -> succ ih)) (zero) evZero ⟩"
       , "qed"
       ]
     -- **A failure after a nested call returned is still reported** (MS4 phase
@@ -428,7 +432,7 @@ sessionTests =
       [ "data " ++ natDecl
       , "data Empty : Type where { }"
       , ":theorem t : \8704 (e : Empty {0}) -> Nat"
-      , "elaborate (\\ e -> elim Empty () (\\ x -> Nat) () () e)"
+      , "elaborate ⟨ \\ e -> elim Empty () (\\ x -> Nat) () () e ⟩"
       , "qed"
       ]
     -- **The wrapper\'s name is checked for a clash like any other name a
@@ -443,7 +447,7 @@ sessionTests =
   , notOk "and a method count that does not match the datatype is refused"
       [ "data " ++ natDecl
       , ":theorem e : Nat"
-      , "elaborate (elim Nat () (\\ x -> Nat) (zero) () (succ zero))"
+      , "elaborate ⟨ elim Nat () (\\ x -> Nat) (zero) () (succ zero) ⟩"
       ]
     -- **Surface declarations** (MS4 phase 42) — Brady's
     -- @NEW PROOF Type; E⟦t⟧; t' ← TERM; TTDECL (x : t')@, run as instructions
@@ -518,7 +522,7 @@ sessionTests =
       [ "data " ++ natDecl
       , "data Box (A : Type) : Type where { box : A -> Box A }"
       , ":theorem e : Type\8320"
-      , "elaborate (Box Nat)"
+      , "elaborate ⟨ Box Nat ⟩"
       , "qed"
       ]
     -- **The dependent application rule.** @box@'s second domain is the first
@@ -528,7 +532,7 @@ sessionTests =
       [ "data " ++ natDecl
       , "data Box (A : Type) : Type where { box : A -> Box A }"
       , ":theorem e : Box {0} Nat"
-      , "elaborate (box Nat zero)"
+      , "elaborate ⟨ box Nat zero ⟩"
       , "qed"
       ]
     -- **A declaration may use an earlier one**, which is what a proof module
@@ -543,7 +547,7 @@ sessionTests =
   , notOk "and too many arguments for the head is refused"
       [ "data " ++ natDecl
       , ":theorem e : Nat"
-      , "elaborate (zero zero)"
+      , "elaborate ⟨ zero zero ⟩"
       ]
     -- **A dependent signature can be declared at all** (MS4 phase 44b). It
     -- could not before: phase 42 cleared elaboration's @=@-bindings from the
@@ -574,7 +578,7 @@ sessionTests =
       , "declare z : Nat ; z = succ {Nat} zero"
       ]
   , ok "so a hole left in the scratch cannot block qed"
-      ["claim spare : Type₀", ":theorem t : Type₁", "try-core ⌜ Type₀ ⌝", "solve", "qed"]
+      ["claim \"spare\" ⌜ Type₀ ⌝", ":theorem t : Type₁", "try-core ⌜ Type₀ ⌝", "solve", "qed"]
   ]
 
 -- --------------------------------------------------------------------------
@@ -589,8 +593,8 @@ undoTests =
     -- top level has a development to take a line back in.
     rejects "with nothing typed yet there is nothing to undo" [":undo"] NothingToUndo
   , testCase "a line at the top level is taken back like any other" $
-      sameDevelopment ["assume A : Type₀", ":undo"] []
-  , rejects "and then there is nothing left" ["assume A : Type₀", ":undo", ":undo"]
+      sameDevelopment ["assume \"A\" ⌜ Type₀ ⌝", ":undo"] []
+  , rejects "and then there is nothing left" ["assume \"A\" ⌜ Type₀ ⌝", ":undo", ":undo"]
       NothingToUndo
 
     -- Every proof boundary starts a fresh history, which is what keeps @:undo@
@@ -598,7 +602,7 @@ undoTests =
     -- @globals@, which no 'Snapshot' carries.
   , rejects "nor at the start of one" [":theorem t : Type₀", ":undo"] NothingToUndo
   , rejects "a theorem does not let you undo back past it"
-      ["assume A : Type₀", ":theorem t : Type₀", ":undo"] NothingToUndo
+      ["assume \"A\" ⌜ Type₀ ⌝", ":theorem t : Type₀", ":undo"] NothingToUndo
   , rejects "and abandoning one does not either"
       [":theorem t : Type₀", "attack", ":abandon", ":undo"] NothingToUndo
 

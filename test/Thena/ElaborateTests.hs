@@ -454,6 +454,7 @@ baseTests =
         [ n | Rule (GlobalName n) _ _ _ <- drain (matches expectedBase emptyGlobals hole) ]
           @?= [ "attack", "try-core", "abandon", "eliminate-core"
               , "prove", "fill", "unify-refine-core", "apply-core"
+              , "claim", "assume", "quantify"
               ]
               ++ replicate 16 "elaborate" ++ replicate 2 "enter-binders"
               ++ replicate 2 "spine-arguments"

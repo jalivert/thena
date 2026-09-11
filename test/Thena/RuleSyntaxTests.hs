@@ -470,18 +470,26 @@ mistakes =
       testCase "an unknown op word is a rule call" $
         bodyOf "frobnicate x"
           >>= (@?= [Do (Call (GlobalName "frobnicate") [Ref "x"])])
-    , -- An op word with the wrong arity is still a mistake about that op, not
-      -- a call to a rule of its name: the arity tables are consulted first.
-      refused "an op word with the wrong arity is not a call"
-        "rule r :- when focus-is-hole then prim-solve x y"
-        [BadOperands (GlobalName "r") 0 "prim-solve"]
-    , refused "too many arguments"
-        "rule r :- when focus-is-hole then prim-solve x"
-        [BadOperands (GlobalName "r") 0 "prim-solve"]
-    , refused "too few arguments"
-        "rule r :- when focus-is-hole then unify x"
-        [BadOperands (GlobalName "r") 0 "unify"]
-    , refused "a position where a name was wanted"
+    , -- **An op word at an arity the op does not have is a CALL** (MS5 phase
+      -- 62b, the user's decision). It was 'BadOperands' until then, so that
+      -- @claim x@ was caught when the base loaded; his design for the asking
+      -- half of the component tactics needs the other reading — @claim ty@ is
+      -- the one-argument rule of that name, and @claim n ty@ is the op.
+      testCase "an op word at another arity is a call" $
+        bodyOf "prim-solve x y"
+          >>= (@?= [Do (Call (GlobalName "prim-solve") [Ref "x", Ref "y"])])
+    , testCase "one argument too many is a call too" $
+        bodyOf "prim-solve x"
+          >>= (@?= [Do (Call (GlobalName "prim-solve") [Ref "x"])])
+    , testCase "and one too few" $
+        bodyOf "unify x" >>= (@?= [Do (Call (GlobalName "unify") [Ref "x"])])
+    , -- The arity the op /does/ have is still the op, which is what stops the
+      -- reading above from swallowing every word.
+      testCase "the arity the op has is still the op" $
+        bodyOf "unify x y" >>= (@?= [Do (Unify (Ref "x") (Ref "y"))])
+    , -- A wrong /operand/ is still a mistake about the op: this is an arity the
+      -- op has, so nothing falls through.
+      refused "a position where a name was wanted"
         "rule r :- when focus-is-hole then prim-try 3"
         [BadOperands (GlobalName "r") 0 "prim-try"]
     , -- §3.7: a declaration is a command, never a rule-body operation.
@@ -498,9 +506,9 @@ mistakes =
             Left _  -> pure ()
             Right r -> assertFailure ("parsed: " ++ show r)
     , refused "every mistake, not the first"
-        "rule r :- when focus-is-purple then frobnicate; prim-solve x"
+        "rule r :- when focus-is-purple then frobnicate; prim-try 3"
         [ NoSuchTest (GlobalName "r") "focus-is-purple"
-        , BadOperands (GlobalName "r") 1 "prim-solve"
+        , BadOperands (GlobalName "r") 1 "prim-try"
         ]
     , testCase "a body is required" $
         case readRule "rule r :- when focus-is-hole" of

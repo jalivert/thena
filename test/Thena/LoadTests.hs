@@ -46,6 +46,7 @@ import Thena.Global.Env
 import Thena.Repl (startingSession, loadProofFile, renderCore, renderEliminator)
 import Thena.Core.Convert (convert)
 import Thena.Core.Context ()
+import Thena.Standard (withRules)
 import Data.ByteString.Builder (stringUtf8, toLazyByteString)
 import Test.Tasty.Golden (goldenVsString)
 
@@ -148,7 +149,7 @@ scriptTests =
     -- an op that asks is answered by the next line of the file, exactly as it
     -- would be by the next line typed (§7.5).
   , testCase "a question is answered by the next line" $
-      let l = source ["assume : Type₀", "A"]
+      let l = sourceWithRules ["assume ⌜ Type₀ ⌝", "A"]
        in do
             loadedError l @?= Nothing
             length (loadedResponses l) @?= 2
@@ -196,7 +197,7 @@ failureTests =
             declared "A0" l @?= True
 
   , testCase "a file that ends while something is asking says so" $
-      loadedError (source ["assume : Type₀"]) @?= Just (UnansweredQuestion 1)
+      loadedError (sourceWithRules ["assume ⌜ Type₀ ⌝"]) @?= Just (UnansweredQuestion 1)
   ]
 
 -- --------------------------------------------------------------------------
@@ -206,6 +207,14 @@ failureTests =
 -- | Run lines against an empty session.
 source :: [String] -> Loaded
 source = loadSource newSession . unlines
+
+-- | The same, with the standard base installed.
+--
+-- **The asking form of @assume@ needs it** (MS5 phase 62b): @assume ⌜ T ⌝@ is a
+-- rule now, not a shape the driver recognised, so a session with no base has
+-- nothing to call — the same as for @attack@ or @intro@ since phase 23b.
+sourceWithRules :: [String] -> Loaded
+sourceWithRules = loadSource withRules . unlines
 
 -- | Run lines against a session that already has something in it.
 afterLines :: Session -> [String] -> (Loaded -> IO ()) -> IO ()
@@ -387,13 +396,16 @@ moduleTests =
       \one : Nat\n\
       \one = succ zero\n"
 
+    -- @prim-try 3@ and not @say@ with no operand: an op word at an arity the
+    -- op does not have is a call as of MS5 phase 62b, so only a wrong /operand/
+    -- is still a resolution failure. A position where a name was wanted is one.
     badBlockModule =
       "module M where\n\
       \data Nat : Type\8320 where\n\
       \  zero : Nat\n\
       \\n\
       \do\n\
-      \  say\n"
+      \  prim-try 3\n"
 
     badModule =
       "module M where\n\

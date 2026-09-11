@@ -186,13 +186,20 @@ matchTests =
     , testCase "where the Π clause is offered, intro succeeds" $
         ranOk (machineAt (guessAt (arrow type0 type0)) [Do (Ops.IntroPi Nothing)])
 
-      -- Every head this phase has asks about a component, so nothing applies
-      -- in the core fragment. Definite, not "blocked": the focus's shape is
-      -- known, which is what §7.6 distinguishes from §8.1's suspension case.
-    , testCase "nothing matches in the core fragment" $
+      -- Every head that asks about a component fails in the core fragment, so
+      -- what is left is the rules with no head at all. Definite, not
+      -- "blocked": the focus's shape is known, which is what §7.6
+      -- distinguishes from §8.1's suspension case.
+      --
+      -- **The three that remain are the asking tactics** (MS5 phase 62b), and
+      -- they are here because their head is honest: @claim@ inserts above the
+      -- focus and that works from inside a core term, so a head refusing it
+      -- would make the one-argument clause disagree with the two-argument op
+      -- about where the word applies.
+    , testCase "only the headless rules match in the core fragment" $
         case crossType (holeAt type0) of
           Left e    -> assertFailure ("could not cross: " ++ show e)
-          Right cur -> matching emptyGlobals cur @?= []
+          Right cur -> matching emptyGlobals cur @?= ["claim", "assume", "quantify"]
 
       -- Definition order is dispatch order (§8), so the match list is always a
       -- subsequence of the base and never a reordering of it.
@@ -478,6 +485,11 @@ everyHoleRule :: [String]
 everyHoleRule =
   [ "attack", "try-core", "abandon", "eliminate-core", "prove", "fill"
   , "unify-refine-core", "apply-core"
+    -- The asking half of the three component tactics (MS5 phase 62b). They
+    -- have no head, because all three apply wherever there is a focus, so they
+    -- are offered everywhere — which is what @:matches@ is for. @dispatch@
+    -- runs none of them: they take a parameter.
+  , "claim", "assume", "quantify"
   ]
     ++ replicate 16 "elaborate" ++ replicate 2 "enter-binders"
     ++ replicate 2 "spine-arguments"
@@ -489,7 +501,8 @@ everyHoleRule =
 -- its state test passes — and @intro-binders@ really does apply at a guess.
 walkers :: [String]
 walkers =
-  [ "intro-binders", "intro-binders", "enter-binders", "enter-binders"
+  [ "claim", "assume", "quantify"
+  , "intro-binders", "intro-binders", "enter-binders", "enter-binders"
   , "spine-arguments", "spine-arguments"
   ]
 

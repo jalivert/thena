@@ -22,10 +22,10 @@ tests =
     "transcripts"
     [ script
         "assume"
-        [ "assume A : Type₀"
+        [ "assume \"A\" ⌜ Type₀ ⌝"
         , ":goal A -> A"
         , ":show"
-        , "assume : A"
+        , "assume ⌜ A ⌝"
         , "x"
         , ":show"
         , ":core A"
@@ -42,7 +42,7 @@ tests =
         , ":convert succ zero \8799 succ (succ zero)"
         , ":infer \8988 zero zero \8989"
         , ":infer \8988 elim Nat () (\\ (_ : Nat) -> Nat) (zero succ) () (succ zero) \8989"
-        , "claim h : Nat"
+        , "claim \"h\" ⌜ Nat ⌝"
         , "cross type"
         , ":infer"
         , "back"
@@ -83,17 +83,17 @@ tests =
         , ":goal Nat"
         , ":revalidate"
         , ":extract"
-        , "certify Nat"
+        , "certify ⌜ Nat ⌝"
         , "along"
-        , "unify goal \8799 zero"
+        , "unify ⌜ goal ⌝ ⌜ zero ⌝"
         , ":extract"
-        , "certify Nat"
-        , "certify Nat -> Nat"
+        , "certify ⌜ Nat ⌝"
+        , "certify ⌜ Nat -> Nat ⌝"
         , ":revalidate"
         , "back"
-        , "assume A : Type\8320"
+        , "assume \"A\" ⌜ Type\8320 ⌝"
         , ":extract"
-        , "certify Nat"
+        , "certify ⌜ Nat ⌝"
         , ":quit"
         ]
       -- §9's phase-14 deliverable: @noConfusion@ for MS1's own target language,
@@ -119,10 +119,10 @@ tests =
           -- determinacy proof needs.
         , ":goal \8704 (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b"
         , "along"
-        , "unify goal \8799 \\ (a : Term) (b : Term) (e : Eq {0} Term (succ a) (succ b)) \
-          \-> noConfusionTerm (succ a) (succ b) e"
+        , "unify \8988 goal \8989 \8988 \\ (a : Term) (b : Term) (e : Eq {0} Term (succ a) (succ b)) \
+          \-> noConfusionTerm (succ a) (succ b) e \8989"
         , ":extract"
-        , "certify \8704 (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b"
+        , "certify ⌜ \8704 (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b ⌝"
         , "back"
         , "data Nat : Type\8320 where { zero' : Nat ; succ' : Nat -> Nat }"
         , "data Vec (A : Type\8320) : Nat -> Type\8320 \
@@ -320,7 +320,7 @@ tests =
           -- @quantify@ is @intro@'s twin: it acts at the guess and claims the
           -- codomain at its own universe, which is why the Π's level is not
           -- pinned to the codomain's.
-        , "quantify A : Type\8320"
+        , "quantify \"A\" ⌜ Type\8320 ⌝"
         , ":show"
         , "into"
         , "along"
@@ -336,24 +336,24 @@ tests =
         , ":dev \8704 (A : Type\8320) -> A"
         , ":dev \8988 \8704 (A : Type\8320) -> A \8989"
         , ":theorem pi : Type\8321"
-        , "elaborate (forall (A : Type\8320) -> A)"
+        , "elaborate ⟨ forall (A : Type\8320) -> A ⟩"
         , ":show"
         , "qed"
         , ":theorem arr : Type\8321"
-        , "elaborate (Type\8320 -> Type\8320)"
+        , "elaborate ⟨ Type\8320 -> Type\8320 ⟩"
         , "qed"
         , "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
         , ":theorem lt : Nat"
-        , "elaborate (let y : Nat = zero in succ y)"
+        , "elaborate ⟨ let y : Nat = zero in succ y ⟩"
         , ":show"
         , "qed"
         , ":theorem asc : Nat"
-        , "elaborate (zero : Nat)"
+        , "elaborate ⟨ zero : Nat ⟩"
         , "qed"
           -- Refused, and the message names the ∀ rather than the term.
         , ":theorem bad : Nat"
         , "attack"
-        , "quantify A : Type\8320"
+        , "quantify \"A\" ⌜ Type\8320 ⌝"
         , ":quit"
         ]
     , script
@@ -369,7 +369,7 @@ tests =
           -- Two questions, two answers: the second lists only what could
           -- elaborate that hint.
         , ":matches"
-        , "elaborate a"
+        , "elaborate ⟨ a ⟩"
         , ":show"
           -- **One more @back@ than before phase 41e.** A leaf now goes through
           -- @FILL@ — park the term in a definition, unify, attach — so the
@@ -391,11 +391,11 @@ tests =
         , "into"
         , "along"
         , "along"
-        , "elaborate b"
+        , "elaborate ⟨ b ⟩"
           -- A hint that is not an identifier does not match at all: no rule
           -- with a hint head passes, and there is nothing else in the hinted
           -- half of the base.
-        , "elaborate (a a)"
+        , "elaborate ⟨ a a ⟩"
         , ":abandon"
           -- The instruction language, seen: stepping shows the driver's own
           -- two-instruction program, the callee's body, and the return.
@@ -407,7 +407,7 @@ tests =
         , "along"
         , "along"
         , ":step on"
-        , "elaborate a"
+        , "elaborate ⟨ a ⟩"
         , ":step"
         , ":step"
         , ":step"
@@ -444,11 +444,11 @@ tests =
     , script
         "unification"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
-        , "claim h : Nat"
-        , "unify succ h \8799 succ (succ zero)"
+        , "claim \"h\" ⌜ Nat ⌝"
+        , "unify ⌜ succ h ⌝ ⌜ succ (succ zero) ⌝"
         , ":show"
-        , "claim f : Nat -> Nat"
-        , "unify \\ (x : Nat) -> f x \8799 \\ (x : Nat) -> succ x"
+        , "claim \"f\" ⌜ Nat -> Nat ⌝"
+        , "unify ⌜ \\ (x : Nat) -> f x ⌝ ⌜ \\ (x : Nat) -> succ x ⌝"
         , ":show"
           -- **Two bare holes now SOLVE, where this recorded a parking until
           -- MS4 phase 41g.** It is the degenerate flex-flex case: no spine on
@@ -459,28 +459,28 @@ tests =
           --
           -- Flex-flex **with** a spine still defers; that is Huet's case and
           -- §6.1 keeps it.
-        , "claim a : Nat"
-        , "claim b : Nat"
-        , "unify a \8799 b"
+        , "claim \"a\" ⌜ Nat ⌝"
+        , "claim \"b\" ⌜ Nat ⌝"
+        , "unify ⌜ a ⌝ ⌜ b ⌝"
         , ":show"
           -- And the solution composes: @b@ δ-unfolds to @a@, so this equation
           -- is @a ≟ zero@ and solves @a@ alone. Before 41g both were solved
           -- here at once, by the parked constraint waking.
-        , "unify b \8799 zero"
+        , "unify ⌜ b ⌝ ⌜ zero ⌝"
         , ":show"
-        , "claim c : Nat"
-        , "unify c \8799 succ c"
-        , "unify zero \8799 succ zero"
+        , "claim \"c\" ⌜ Nat ⌝"
+        , "unify ⌜ c ⌝ ⌜ succ c ⌝"
+        , "unify ⌜ zero ⌝ ⌜ succ zero ⌝"
         , ":quit"
         ]
     , script
         "stepping"
         [ ":step on"
-        , "assume A : Type\8320"
+        , "assume \"A\" ⌜ Type\8320 ⌝"
         , ":step"
         , ":step"
         , ":step off"
-        , "claim h : Type\8320"
+        , "claim \"h\" ⌜ Type\8320 ⌝"
         , ":show"
           -- **Phase 25c**: the whole of @unify-refine@\'s body, one instruction
           -- at a time. Seven ops, two of them binary and one infix, so this
@@ -500,8 +500,8 @@ tests =
         ]
     , script
         "navigation"
-        [ "assume A : Type₀"
-        , "assume B : A -> Type₀"
+        [ "assume \"A\" ⌜ Type₀ ⌝"
+        , "assume \"B\" ⌜ A -> Type₀ ⌝"
         , ":goal forall (x : A) -> B x"
         , ":where"
         , "cross type"
@@ -536,7 +536,7 @@ tests =
         , "data Ordinal : Type₀ where { sup : (Nat -> Ordinal) -> Ordinal }"
         , "data Bad : Type₀ where { bad : (Bad -> Bad) -> Bad }"
         , ":show nowhere"
-        , "assume n : Nat"
+        , "assume \"n\" ⌜ Nat ⌝"
         , ":show"
         , ":quit"
         ]
@@ -548,8 +548,8 @@ tests =
         -- holes, put a redex mentioning the first in the second's type, then
         -- navigate to it — 'back' pops the step 'claim' pushed, landing on
         -- the component itself rather than the trailing goal it left alone.
-        , "claim h : Nat"
-        , "claim g : (\\ (_ : Nat) -> Nat) h"
+        , "claim \"h\" ⌜ Nat ⌝"
+        , "claim \"g\" ⌜ (\\ (_ : Nat) -> Nat) h ⌝"
         , "back"
         , "cross type"
         , ":where"
@@ -559,7 +559,7 @@ tests =
         , ":show"
         , "back"
         , "back"
-        , "claim n : Nat"
+        , "claim \"n\" ⌜ Nat ⌝"
         -- a hand-written elim: stuck on a neutral target, so it round-trips
         -- through the printer unreduced rather than firing ι.
         , ":whnf elim Nat () (\\ (_ : Nat) -> Nat) (zero succ) () n"
@@ -761,8 +761,8 @@ tests =
           -- Holes on both sides. @refl {0} A a@ has type @Eq {0} A a a@; unifying that
           -- with @Eq {0} Nat zero zero@ solves @A@ and @a@.
         , ":theorem refl0 : Eq {0} Nat zero zero"
-        , "claim A : Type\8320"
-        , "claim a : A"
+        , "claim \"A\" ⌜ Type\8320 ⌝"
+        , "claim \"a\" ⌜ A ⌝"
         , "unify-refine-core ⌜ refl {0} A a ⌝"
         , ":show"
         , "qed"
@@ -838,7 +838,7 @@ tests =
         , ":surface f (do { attack })"
         , "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
         , ":theorem t : Nat"
-        , "elaborate (do { attack ; prove })"
+        , "elaborate ⟨ do { attack ; prove } ⟩"
           -- The block did what was written rather than what was tidy, and the
           -- development shows where it got to — the second principle.
         , ":show"
@@ -852,7 +852,7 @@ tests =
           -- live to backtrack into.
         , ":abandon"
         , ":theorem u : Nat"
-        , "elaborate (do { say })"
+        , "elaborate ⟨ do { say } ⟩"
         , ":quit"
         ]
 
@@ -866,21 +866,21 @@ tests =
         "yielding"
         [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
         , ":theorem t : Nat"
-        , "elaborate (do { h = here ; yield \"look at this\" ; goto h ; prove })"
+        , "elaborate ⟨ do { h = here ; yield \"look at this\" ; goto h ; prove } ⟩"
           -- The development is what the rule has built so far, not what it
           -- started with: @attack@ has not run, but @here@ has.
         , ":show"
           -- **Every ordinary command works, and really changes things.** That
           -- is the whole difference between a yield and a question, which takes
           -- an answer and refuses everything else.
-        , "assume w : Nat"
+        , "assume \"w\" ⌜ Nat ⌝"
         , ":show"
         , ":infer succ zero"
         , ":revalidate"
           -- **A typed block reads the rule's own locals.** A command cannot —
           -- @goto h@ looks for a hole named @h@ — which is why the REPL types
           -- the instruction language through a block.
-        , "goto h"
+        , "goto \"h\""
         , "do { goto h }"
           -- And a block's bindings survive to the next line, because a yielded
           -- machine's environment is not cleared.
@@ -900,15 +900,15 @@ tests =
           \where { Nothing : Maybe A ; Just : \8704 (a : A) -> Maybe A }"
         , ":theorem g : Maybe Bool"
           -- One hole per argument of Just, including the type parameter.
-        , "claim T : Type\8320"
-        , "claim b : T"
+        , "claim \"T\" ⌜ Type\8320 ⌝"
+        , "claim \"b\" ⌜ T ⌝"
           -- Maybe T against Maybe Bool solves T, and says so.
         , "unify-refine-core ⌜ Just T b ⌝"
         , ":show"
           -- The only hole left is the boolean, and its type is now T = Bool.
           -- @goto@ (phase 24b) goes straight to it; counting @back@s would
           -- stop scaling the moment @apply@ claims several holes at once.
-        , "goto b"
+        , "goto \"b\""
         , ":where"
         , "unify-refine-core ⌜ true ⌝"
         , ":show"
@@ -936,7 +936,7 @@ tests =
           -- A head with no Π at all: zero holes claimed, so @apply@ degenerates
           -- to @unify-refine@ exactly. That is the phase's claim that it adds
           -- no capability, in its smallest form.
-        , "goto a"
+        , "goto \"a\""
         , "apply-core ⌜ true ⌝"
         , ":show"
         , "qed"
@@ -960,7 +960,7 @@ tests =
         , "along"
         , "apply-core ⌜ f ⌝"
         , ":show"
-        , "goto _"
+        , "goto \"_\""
         , ":where"
         , ":abandon"
           -- **The failure, and that it leaves nothing** (phase 25d).
@@ -1012,7 +1012,7 @@ tests =
           -- distinction between assuming and introducing, from the other side.
         , ":theorem h : \8704 (b : Bool) -> Maybe Bool"
         , "apply-core ⌜ Just ⌝"
-        , "assume q : Bool"
+        , "assume \"q\" ⌜ Bool ⌝"
         , "apply-core ⌜ Just ⌝"
         , ":abandon"
         , ":theorem h : \8704 (b : Bool) -> Maybe Bool"
@@ -1022,9 +1022,9 @@ tests =
         , "along"
         , ":where"
         , "apply-core ⌜ Just ⌝"
-        , "goto a"
+        , "goto \"a\""
         , "apply-core ⌜ b ⌝"
-        , "goto h"
+        , "goto \"h\""
         , "solve"
         , "qed"
         , ":show h"
@@ -1057,7 +1057,7 @@ tests =
           -- @unify-refine@ depends on, since it tries a binding whose own value
           -- may still contain holes.
         , ":theorem m : Nat"
-        , "claim h : Nat"
+        , "claim \"h\" ⌜ Nat ⌝"
         , "try-core ⌜ succ h ⌝"
         , ":show"
         , ":abandon"
@@ -1201,8 +1201,8 @@ tests =
           -- Unification solves a level and writes it through the whole
           -- development — a level meta has no component to be promoted, so this
           -- is the only place a solution can be recorded.
-        , "claim h : Type -> Type"
-        , "unify \\ (x : Type) -> x \8799 \\ (x : Type\8320) -> x"
+        , "claim \"h\" ⌜ Type -> Type ⌝"
+        , "unify ⌜ \\ (x : Type) -> x ⌝ ⌜ \\ (x : Type\8320) -> x ⌝"
         , ":show"
           -- **A declaration infers its level too** (phase 33c). It could not
           -- when this script was written — phase 33 refused a bare @Type@ here,
@@ -1263,20 +1263,20 @@ tests =
         [ "wibble"
         , ":core y"
         , ":show it"
-        , "assume : Type₀"
+        , "assume ⌜ Type₀ ⌝"
         , "let"
         , ":show"
         -- Table 2.7's @Θ ⊢ S : Type@ on both binders (phase 25f). The λ is a
         -- term, not a type, so both ops refuse it and — per phase 25d — leave
         -- the proof exactly as it was.
-        , "claim h : (\\ (x : Type₀) -> x)"
-        , "assume k : (\\ (x : Type₀) -> x)"
+        , "claim \"h\" ⌜ (\\ (x : Type₀) -> x) ⌝"
+        , "assume \"k\" ⌜ (\\ (x : Type₀) -> x) ⌝"
         -- **Accepted, and this line is the point of the pair.** A type family
         -- is a perfectly good type; the condition is "S is a type", not "S is
         -- a type at level 0". Closeout 4l offered
         -- @claim h : Nat -> Nat -> Nat -> Type₀@ as an example of the defect
         -- and it never was one.
-        , "claim fam : Type₀ -> Type₀ -> Type₀"
+        , "claim \"fam\" ⌜ Type₀ -> Type₀ -> Type₀ ⌝"
         , ":show"
         ]
       -- The command list, and the one error that points at it. Pinning the

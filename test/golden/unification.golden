@@ -1,27 +1,23 @@
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
-thena spine> claim h : Nat
-claimed h
-thena spine> unify succ h ≟ succ (succ zero)
+thena spine> claim "h" ⌜ Nat ⌝
+thena spine> unify ⌜ succ h ⌝ ⌜ succ (succ zero) ⌝
 solved: h
 thena spine> :show
   let h = succ zero : Nat in
 ▶ let ? goal : Type₀ in
   goal
-thena spine> claim f : Nat -> Nat
-claimed f
-thena spine> unify \ (x : Nat) -> f x ≟ \ (x : Nat) -> succ x
+thena spine> claim "f" ⌜ Nat -> Nat ⌝
+thena spine> unify ⌜ \ (x : Nat) -> f x ⌝ ⌜ \ (x : Nat) -> succ x ⌝
 solved: f
 thena spine> :show
   let h = succ zero : Nat in
   let f = λ (x : Nat) -> succ x : Nat -> Nat in
 ▶ let ? goal : Type₀ in
   goal
-thena spine> claim a : Nat
-claimed a
-thena spine> claim b : Nat
-claimed b
-thena spine> unify a ≟ b
+thena spine> claim "a" ⌜ Nat ⌝
+thena spine> claim "b" ⌜ Nat ⌝
+thena spine> unify ⌜ a ⌝ ⌜ b ⌝
 solved: b
 thena spine> :show
   let h = succ zero : Nat in
@@ -30,7 +26,7 @@ thena spine> :show
   let b = a : Nat in
 ▶ let ? goal : Type₀ in
   goal
-thena spine> unify b ≟ zero
+thena spine> unify ⌜ b ⌝ ⌜ zero ⌝
 solved: a
 thena spine> :show
   let h = succ zero : Nat in
@@ -39,10 +35,9 @@ thena spine> :show
   let b = a : Nat in
 ▶ let ? goal : Type₀ in
   goal
-thena spine> claim c : Nat
-claimed c
-thena spine> unify c ≟ succ c
+thena spine> claim "c" ⌜ Nat ⌝
+thena spine> unify ⌜ c ⌝ ⌜ succ c ⌝
 stuck: solving c with succ c would define it in terms of itself
-thena spine> unify zero ≟ succ zero
+thena spine> unify ⌜ zero ⌝ ⌜ succ zero ⌝
 stuck: zero and succ zero cannot be made equal
 thena spine> :quit

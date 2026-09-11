@@ -29,6 +29,7 @@ module Thena.Syntax.Parser
   , parseRule
   , parseRules
   , parseAtoms
+  , parseOperandRun
   ) where
 
 import Thena.Syntax.Concrete
@@ -49,6 +50,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 %name parseRule Rule
 %name parseRules RuleFile
 %name parseAtoms AtomRun
+%name parseOperandRun OperandRun
 %tokentype { Located Token }
 %monad { Either ParseError }
 %error { parseError }
@@ -224,6 +226,12 @@ Instr :: { RawInstr }
 -- (§2.5 — the parser is shallow).
 Op :: { RawOp }
   : ident Operands                         { RawOp $1 (reverse $2) }
+
+-- | A REPL line's arguments (MS5 phase 62b) — the same run of operands a rule
+-- body writes after an op word, and its own start symbol because the driver has
+-- already split the word off.
+OperandRun :: { [RawOperand] }
+  : Operands                               { reverse $1 }
 
 Operands :: { [RawOperand] }
   :                                        { [] }

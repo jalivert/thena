@@ -23,11 +23,11 @@ thena spine> :goal ∀ (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) ->
 ▶ let ? goal : ∀ (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b in
   goal
 thena spine> along
-thena core> unify goal ≟ \ (a : Term) (b : Term) (e : Eq {0} Term (succ a) (succ b)) -> noConfusionTerm (succ a) (succ b) e
+thena core> unify ⌜ goal ⌝ ⌜ \ (a : Term) (b : Term) (e : Eq {0} Term (succ a) (succ b)) -> noConfusionTerm (succ a) (succ b) e ⌝
 solved: goal
 thena core> :extract
 let goal = λ (a : Term) (b : Term) (e : Eq {0} Term (succ a) (succ b)) -> noConfusionTerm (succ a) (succ b) e : ∀ (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b in goal
-thena core> certify ∀ (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b
+thena core> certify ⌜ ∀ (a : Term) (b : Term) -> Eq {0} Term (succ a) (succ b) -> Eq {0} Term a b ⌝
 certified
 thena core> back
 thena spine> data Nat : Type₀ where { zero' : Nat ; succ' : Nat -> Nat }

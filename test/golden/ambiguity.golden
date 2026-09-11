@@ -37,9 +37,8 @@ the kernel refused it
 1 is not at most 0
 thena spine> :abandon
 abandoned crossed
-thena spine> claim h : Type -> Type
-claimed h
-thena spine> unify \ (x : Type) -> x ≟ \ (x : Type₀) -> x
+thena spine> claim "h" ⌜ Type -> Type ⌝
+thena spine> unify ⌜ \ (x : Type) -> x ⌝ ⌜ \ (x : Type₀) -> x ⌝
 solved: ?ℓ24
 thena spine> :show
   let ? h : Type (?ℓ19) -> Type (?ℓ20) in

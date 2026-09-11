@@ -151,13 +151,15 @@ loading =
         refusal [("x.thena.rules", "rule solve :- when focus-is-guess then prim-solve")]
           @?= Just ("x.thena.rules", NoRuleHeader)
 
-    , -- @frobnicate@ is a rule call as of phase 25e, so the only mistake left
-      -- here is the arity one.
+    , -- @frobnicate@ is a rule call as of phase 25e, and @prim-solve x@ is one
+      -- too as of MS5 phase 62b — an op word at an arity the op does not have
+      -- is a call. So the mistake left here is the scope one: @x@ is bound by
+      -- nothing, which 'validate' catches when the file loads.
       testCase "a rule that does not resolve is refused, naming every mistake" $
         refusal [("x.thena.rules", "rule base b where\nrule r :- when focus-is-hole then frobnicate; prim-solve x")]
           @?= Just
                 ( "x.thena.rules"
-                , RuleIllFormed [BadOperands (GlobalName "r") 1 "prim-solve"]
+                , RuleIllFormed [UnboundInRule (GlobalName "r") 1 "x"]
                 )
 
     , -- The load-time pass §2.4 asked for, now running at load rather than in
@@ -289,9 +291,9 @@ argumentHeads =
   testGroup
     "a loaded head may ask about its argument"
     [ testCase "a name takes the clause that asks for one" $
-        said "pick foo" @?= Just "that is a name"
+        said "pick \10216 foo \10217" @?= Just "that is a name"
     , testCase "and anything else falls through to the other" $
-        said "pick (Type\8320 -> Type\8320)" @?= Just "that is not a name"
+        said "pick \10216 Type\8320 -> Type\8320 \10217" @?= Just "that is not a name"
     ]
   where
     picking =

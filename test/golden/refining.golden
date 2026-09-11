@@ -14,10 +14,8 @@ thena spine> qed
 id0 : ∀ (A : Type₀) -> A -> A   ∎
 thena spine> :theorem refl0 : Eq {0} Nat zero zero
 proving refl0 : Eq {0} Nat zero zero
-thena spine> claim A : Type₀
-claimed A
-thena spine> claim a : A
-claimed a
+thena spine> claim "A" ⌜ Type₀ ⌝
+thena spine> claim "a" ⌜ A ⌝
 thena spine> unify-refine-core ⌜ refl {0} A a ⌝
 solved: A, a
 thena spine> :show

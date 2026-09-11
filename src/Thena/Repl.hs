@@ -451,6 +451,9 @@ renderResponse s resp = case resp of
   Choices cs    -> renderChoices cs
   Ran msgs stop  -> msgs ++ renderStop s stop
   Failed e       -> [renderSyntaxError e]
+  -- The same errors a rule file is refused with, said without the /in rule ‹r›,
+  -- instruction ‹i›/ that a typed line has no use for (MS5 phase 62b).
+  LineRefused es -> map whatRuleError es
   Rejected e     -> [renderCommandError e]
   Quit           -> []
 
@@ -1784,21 +1787,42 @@ renderRuleFileError path e = case e of
   RuleIllFormed es   -> map ((path ++ ": ") ++) (map renderRuleError es)
 
 renderRuleError :: RuleError -> String
-renderRuleError e = case e of
-  DeclarationInBody g i    -> inRule g i ++ "a declaration is a command, not a rule-body operation"
-  BoundNonProducing g i n  -> inRule g i ++ n ++ " is bound to an operation that leaves nothing"
-  UnboundInRule g i n      -> inRule g i ++ "no parameter or earlier binding is called " ++ n
-  NoSuchTest g w           -> "in " ++ nameString g ++ ": no such test: " ++ w
-  UnboundInHead g n         -> "in " ++ nameString g ++ ": no parameter is called " ++ n
-  BadTestOperands g w      -> "in " ++ nameString g ++ ": " ++ w ++ " was written with the wrong arguments"
-  BadOperands g i w        -> inRule g i ++ w ++ " was written with the wrong arguments"
-  NoSuchTag g i tag        ->
-    inRule g i ++ "no language is called " ++ tag
-      ++ " — the built-in tags are surface and core"
-  BadRegion g i tag why    ->
-    inRule g i ++ "this " ++ tag ++ " term did not parse: " ++ renderSyntaxError why
+renderRuleError e = whereRuleError e ++ whatRuleError e
+
+-- | Which rule and which instruction — the half a typed line has no use for.
+--
+-- Split from the message at MS5 phase 62b, when a REPL line started being
+-- resolved by the same pass a rule file is: the reasons are identical and the
+-- placing is not, so a line says only what was wrong.
+whereRuleError :: RuleError -> String
+whereRuleError e = case e of
+  DeclarationInBody g i   -> inRule g i
+  BoundNonProducing g i _ -> inRule g i
+  UnboundInRule g i _     -> inRule g i
+  NoSuchTest g _          -> inName g
+  UnboundInHead g _       -> inName g
+  BadTestOperands g _     -> inName g
+  BadOperands g i _       -> inRule g i
+  NoSuchTag g i _         -> inRule g i
+  BadRegion g i _ _       -> inRule g i
   where
     inRule g i = "in " ++ nameString g ++ ", instruction " ++ show i ++ ": "
+    inName g   = "in " ++ nameString g ++ ": "
+
+-- | What was wrong, said without saying where.
+whatRuleError :: RuleError -> String
+whatRuleError e = case e of
+  DeclarationInBody _ _   -> "a declaration is a command, not a rule-body operation"
+  BoundNonProducing _ _ n -> n ++ " is bound to an operation that leaves nothing"
+  UnboundInRule _ _ n     -> "no parameter or earlier binding is called " ++ n
+  NoSuchTest _ w          -> "no such test: " ++ w
+  UnboundInHead _ n       -> "no parameter is called " ++ n
+  BadTestOperands _ w     -> w ++ " was written with the wrong arguments"
+  BadOperands _ _ w       -> w ++ " was written with the wrong arguments"
+  NoSuchTag _ _ tag       ->
+    "no language is called " ++ tag ++ " — the built-in tags are surface and core"
+  BadRegion _ _ tag why   ->
+    "this " ++ tag ++ " term did not parse: " ++ renderSyntaxError why
 
 renderMatches :: [Rule] -> [String]
 renderMatches [] = ["no rule applies here"]

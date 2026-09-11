@@ -4,21 +4,20 @@ thena spine> :core y
 not in scope: y
 thena spine> :show it
 nothing named it has been declared
-thena spine> assume : Type₀
-name for the assumption? it will have type Type₀
+thena spine> assume ⌜ Type₀ ⌝
+name for the assumption?
 > let
 stuck: "let" is not a name
 thena spine> :show
 ▶ let ? goal : Type₀ in
   goal
-thena spine> claim h : (\ (x : Type₀) -> x)
+thena spine> claim "h" ⌜ (\ (x : Type₀) -> x) ⌝
 stuck: that is not a type
   λ (x : Type₀) -> x is not a type — it has type Type₀ -> Type₀
-thena spine> assume k : (\ (x : Type₀) -> x)
+thena spine> assume "k" ⌜ (\ (x : Type₀) -> x) ⌝
 stuck: that is not a type
   λ (x : Type₀) -> x is not a type — it has type Type₀ -> Type₀
-thena spine> claim fam : Type₀ -> Type₀ -> Type₀
-claimed fam
+thena spine> claim "fam" ⌜ Type₀ -> Type₀ -> Type₀ ⌝
 thena spine> :show
   let ? fam : Type₀ -> Type₀ -> Type₀ in
 ▶ let ? goal : Type₀ in

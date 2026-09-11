@@ -13,6 +13,9 @@ standard
   fill ‹t›
   unify-refine-core ‹t›
   apply-core ‹f›
+  claim ‹ty›
+  assume ‹ty›
+  quantify ‹ty›
   elaborate ‹t›
   elaborate ‹t›
   elaborate ‹t›
@@ -44,6 +47,9 @@ prove
 fill ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
+claim ‹ty›
+assume ‹ty›
+quantify ‹ty›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
@@ -69,6 +75,9 @@ thena spine> :matches
 solve
 regret
 prove
+claim ‹ty›
+assume ‹ty›
+quantify ‹ty›
 intro-binders ‹t›
 intro-binders ‹t›
 enter-binders ‹t›
@@ -77,7 +86,9 @@ spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 thena spine> cross type
 thena core> :matches
-no rule applies here
+claim ‹ty›
+assume ‹ty›
+quantify ‹ty›
 thena core> back
 thena spine> :theorem id : ∀ (A : Type₀) -> A -> A
 proving id : ∀ (A : Type₀) -> A -> A
@@ -90,6 +101,9 @@ prove
 fill ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
+claim ‹ty›
+assume ‹ty›
+quantify ‹ty›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
@@ -116,6 +130,9 @@ intro
 solve
 regret
 prove
+claim ‹ty›
+assume ‹ty›
+quantify ‹ty›
 intro-binders ‹t›
 intro-binders ‹t›
 enter-binders ‹t›
@@ -143,6 +160,9 @@ prove
 fill ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
+claim ‹ty›
+assume ‹ty›
+quantify ‹ty›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
@@ -174,6 +194,9 @@ intro
 solve
 regret
 prove
+claim ‹ty›
+assume ‹ty›
+quantify ‹ty›
 intro-binders ‹t›
 intro-binders ‹t›
 enter-binders ‹t›
@@ -192,6 +215,9 @@ intro
 solve
 regret
 prove
+claim ‹ty›
+assume ‹ty›
+quantify ‹ty›
 intro-binders ‹t›
 intro-binders ‹t›
 enter-binders ‹t›

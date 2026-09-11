@@ -46,6 +46,9 @@ prove
 fill ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
+claim ‹ty›
+assume ‹ty›
+quantify ‹ty›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›

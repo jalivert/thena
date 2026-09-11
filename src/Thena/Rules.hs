@@ -577,19 +577,29 @@ operation g i (RawOp w as)
 
       _ -> case (lookup w nullary, lookup w unary, lookup w binary, as) of
         (Just o,  _, _, [])       -> Right o
-        (Just _,  _, _, _)        -> bad
         (_, Just f,  _, [a])      -> f <$> ref a
-        (_, Just _,  _, _)        -> bad
         (_, _, Just f,  [a, b])   -> f <$> ref a <*> ref b
-        (_, _, Just _,  _)        -> bad
         -- **A word that names no op is a call to a rule of that name**
         -- (phase 25e), which is what a bare word has meant at the REPL since
         -- phase 23b. The user, 2026-08-26: *"Bare word was always, always, the
         -- intended design."*
         --
-        -- An op word given the wrong arity is still 'BadOperands' and not a
-        -- call, because the arity tables above are consulted first: @claim x@
-        -- is a mistake about @claim@, not a call to a rule named @claim@.
+        -- **An op word at an arity the op does not have is a CALL** (MS5
+        -- phase 62b, the user's decision): @claim ty@ is not a mistake about
+        -- @claim@ — it is a call to the one-argument rule of that name, which
+        -- asks for a name and then runs the two-argument op. His words:
+        -- /"the normal claim is operation (primitive and built in), the unary
+        -- claim is a rule"/.
+        --
+        -- So a word names an **op at the arities the op has, and a rule at
+        -- every other arity**, which is the reading 'clauses' already uses —
+        -- it filters by name /and/ arity, so several clauses of one name may
+        -- take different numbers of arguments. Ops and rules now agree about
+        -- that instead of differing.
+        --
+        -- **It reverses this module's earlier choice**, which refused the
+        -- arity mismatch as 'BadOperands' so that @claim x@ was caught when
+        -- the base loaded. The cost is the one below, one word wider:
         --
         -- The cost: a mistyped word is no longer refused at load time; it is
         -- a call that finds no clause when it runs. @NoSuchOp@ went with this

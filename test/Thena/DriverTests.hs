@@ -27,6 +27,7 @@ import Thena.Errors (FailReason (..))
 import Thena.Global.Declare (DeclareError (..))
 import Thena.Global.Env (isDeclared)
 import Thena.Ops (AnswerKind (..), partWords)
+import Thena.Rules (RuleError (..))
 
 -- | Run a script of command lines, answering nothing, and give back the last
 -- response and the session it left.
@@ -105,16 +106,26 @@ tests =
             snd (command withRules ":corex") @?= Rejected (NoSuchCommand ":corex")
         , testCase "a view command with no argument says so" $
             snd (command withRules ":core") @?= Rejected (MissingArgument ":core")
-        , testCase "cross must say which field" $
-            snd (command withRules "cross") @?= Rejected (MissingArgument "cross")
+        , -- **These five are refused by "Thena.Rules" now** (MS5 phase 62b), not
+          -- by a case of 'dispatch' with an argument grammar of its own — the
+          -- word and its operands are read at the prompt by exactly the pass
+          -- that reads a rule body. The words are unmoved and so are the
+          -- refusals; what changed is who says so.
+          testCase "cross must say which field" $
+            snd (command withRules "cross")
+              @?= LineRefused [BadOperands (GlobalName "cross") 0 "cross"]
         , testCase "and it must be one of the two there are" $
-            snd (command withRules "cross body") @?= Rejected (UnexpectedArgument "cross")
+            snd (command withRules "cross body")
+              @?= LineRefused [BadOperands (GlobalName "cross") 0 "cross"]
         , testCase "a positional descent needs a number" $
-            snd (command withRules "param") @?= Rejected (MissingArgument "param")
+            snd (command withRules "param")
+              @?= LineRefused [BadOperands (GlobalName "param") 0 "param"]
         , testCase "and it has to be one" $
-            snd (command withRules "param x") @?= Rejected (UnexpectedArgument "param")
+            snd (command withRules "param x")
+              @?= LineRefused [BadOperands (GlobalName "param") 0 "param"]
         , testCase "a plain descent takes no argument" $
-            snd (command withRules "cod 2") @?= Rejected (UnexpectedArgument "cod")
+            snd (command withRules "cod 2")
+              @?= LineRefused [BadOperands (GlobalName "cod") 0 "cod"]
         , testCase ":where answers with the cursor, not with text" $
             case snd (command withRules ":where") of
               Where _ -> pure ()
@@ -151,7 +162,7 @@ tests =
               other    -> assertFailure ("expected Failed, got " ++ show other)
         , testCase ":core sees what the development binds" $
             -- The whole reason a view command takes the development's context.
-            case snd (say ["assume A : Type₀", ":core A"]) of
+            case snd (say ["assume \"A\" ⌜ Type₀ ⌝", ":core A"]) of
               Rendered _ -> pure ()
               other      -> assertFailure ("expected Rendered, got " ++ show other)
         , testCase ":dev resolves a development" $
@@ -163,51 +174,61 @@ tests =
               Failed _ -> pure ()
               other    -> assertFailure ("expected Failed, got " ++ show other)
         , testCase ":show renders the development the machine holds" $
-            case snd (say ["assume A : Type₀", ":show"]) of
+            case snd (say ["assume \"A\" ⌜ Type₀ ⌝", ":show"]) of
               Shown c | Under (Assume _ (Ident "A") _) _ <- rebuild c -> pure ()
               other -> assertFailure ("expected the assumption, got " ++ show other)
         ]
     , testGroup
         "commands that run"
         [ testCase "assume changes the development, through the machine" $
-            case devOf (fst (say ["assume A : Type₀"])) of
+            case devOf (fst (say ["assume \"A\" ⌜ Type₀ ⌝"])) of
               Under (Assume _ (Ident "A") _) (Under Claim {} (Trailing _)) -> pure ()
               other -> assertFailure ("wrong shape: " ++ show other)
-        , testCase "and says so" $
-            snd (say ["assume A : Type₀"]) @?= Ran ["assumed A"] Completed
-        , testCase "claim says so in its own words" $
-            snd (say ["claim h : Type₀"]) @?= Ran ["claimed h"] Completed
-        , testCase "a nameless assume asks, quoting the type as written" $
-            case snd (say ["assume : Type₀"]) of
+        , -- **And says nothing** (MS5 phase 62b). @assume@ is an op and an op is
+          -- silent: @attack@, @intro@ and @try-core@ always were. The
+          -- @"assumed A"@ line came from the driver's own @compile@, which
+          -- built a @Say@ after the op because it was building the program by
+          -- hand; there is no such place any more.
+          testCase "and says nothing, as every other tactic does" $
+            snd (say ["assume \"A\" ⌜ Type₀ ⌝"]) @?= Ran [] Completed
+        , -- **The asking form is a rule now** — @rule assume ty@ in the base —
+          -- so this is one clause of @assume@ picked by arity, not a second
+          -- instruction sequence chosen by the driver. It still says what it
+          -- did, because the rule's body ends in a @say@.
+          testCase "a nameless assume asks for the name" $
+            case snd (say ["assume ⌜ Type₀ ⌝"]) of
               Ran [] (Waiting (Question p k)) ->
-                (p, k) @?= ("name for the assumption? it will have type Type₀", AName)
+                (p, k) @?= ("name for the assumption?", AName)
               other -> assertFailure ("expected a question, got " ++ show other)
         , testCase "the answer is used, and the message is built from it" $
-            let (s, _) = say ["assume : Type₀"]
+            let (s, _) = say ["assume ⌜ Type₀ ⌝"]
              in snd (answer s "B") @?= Ran ["assumed B"] Completed
         , testCase "and the binder carries the answered name" $
-            let (s, _) = say ["assume : Type₀"]
+            let (s, _) = say ["assume ⌜ Type₀ ⌝"]
              in case devOf (fst (answer s "B")) of
                   Under (Assume _ (Ident "B") _) _ -> pure ()
                   other -> assertFailure ("wrong shape: " ++ show other)
         , testCase "an answer that is not a name gets stuck, and keeps the machine" $
-            let (s, _) = say ["assume : Type₀"]
+            let (s, _) = say ["assume ⌜ Type₀ ⌝"]
              in snd (answer s "let") @?= Ran [] (Halted (NotAnIdentifier "let"))
         , testCase "answering when nothing was asked is refused" $
             snd (answer newSession "B") @?= Rejected NotAsking
-        , testCase "assume needs a type" $
-            case snd (command withRules "assume A") of
-              Failed _ -> pure ()
-              other    -> assertFailure ("expected Failed, got " ++ show other)
+        , -- With nothing after it the word is an arity no op and no rule has,
+          -- so it is a call that finds no clause — which is what any other
+          -- word with no clause does (MS5 phase 62b).
+          testCase "assume needs a type" $
+            case snd (command withRules "assume") of
+              Ran [] (Halted (NoClauseMatched (GlobalName "assume") 0 as)) -> as @?= [1]
+              other -> assertFailure ("expected no clause, got " ++ show other)
         , testCase "assume resolves its type in the development's context" $
-            case snd (say ["assume A : Type₀", "assume x : A"]) of
-              Ran ["assumed x"] Completed -> pure ()
+            case snd (say ["assume \"A\" ⌜ Type₀ ⌝", "assume \"x\" ⌜ A ⌝"]) of
+              Ran [] Completed -> pure ()
               other -> assertFailure ("expected success, got " ++ show other)
         ]
     , testGroup
         "the goal"
         [ testCase ":goal claims a new one, in context" $
-            case snd (say ["assume A : Type₀", ":goal A -> A"]) of
+            case snd (say ["assume \"A\" ⌜ Type₀ ⌝", ":goal A -> A"]) of
               Shown c
                 | Under Assume {} (Under (Claim _ (Ident "goal") _) (Trailing _)) <-
                     rebuild c -> pure ()
@@ -217,7 +238,7 @@ tests =
               Under (Claim _ _ ty) (Trailing _) -> ty @?= Universe (levelOfNat 1)
               other -> assertFailure ("wrong shape: " ++ show other)
         , testCase "an assumption made later still lands outside the goal" $
-            case devOf (fst (say [":goal Type₀", "assume A : Type₀"])) of
+            case devOf (fst (say [":goal Type₀", "assume \"A\" ⌜ Type₀ ⌝"])) of
               Under Assume {} (Under Claim {} (Trailing _)) -> pure ()
               other -> assertFailure ("wrong shape: " ++ show other)
         ]
@@ -289,7 +310,7 @@ tests =
               Rendered _ -> pure ()
               other      -> assertFailure ("expected Rendered, got " ++ show other)
         , testCase "and can be assumed at" $
-            snd (say [natCommand, "assume n : Nat"]) @?= Ran ["assumed n"] Completed
+            snd (say [natCommand, "assume \"n\" ⌜ Nat ⌝"]) @?= Ran [] Completed
         , testCase "stepping installs the declaration before it pauses" $
             let s' = fst (say [":step on", natCommand])
              in declaredIn s' "Nat" @?= True
@@ -298,21 +319,32 @@ tests =
         ]
     , testGroup
         "stepping"
-        [ testCase ":step on makes a command stop after one instruction" $
-            case snd (say [":step on", "assume A : Type₀"]) of
+        [ -- **A line with a written term is two instructions now** (MS5 phase
+          -- 62b): @assume "A" ⌜ Type₀ ⌝@ compiles to
+          -- @⌜1⌝ = resolve-core ⌜ Type₀ ⌝ ; assume "A" ⌜1⌝@, which is what a
+          -- rule body writes by hand. So the first pause is before the
+          -- resolution and the second before the op — and that is the point of
+          -- compiling the step in rather than resolving quietly in the driver
+          -- (phase 61b: /a reader should be able to see which one it got/).
+          testCase ":step on makes a command stop after one instruction" $
+            case snd (say [":step on", "assume \"A\" ⌜ Type₀ ⌝"]) of
               Ran [] Paused -> pure ()
               other         -> assertFailure ("expected Paused, got " ++ show other)
         , testCase "and :step takes the next one" $
-            case snd (say [":step on", "assume A : Type₀", ":step"]) of
-              Ran ["assumed A"] Paused -> pure ()
-              other -> assertFailure ("expected the message, got " ++ show other)
+            case snd (say [":step on", "assume \"A\" ⌜ Type₀ ⌝", ":step"]) of
+              Ran [] Paused -> pure ()
+              other -> assertFailure ("expected a second pause, got " ++ show other)
+        , testCase "and the one after that finishes it" $
+            case snd (say [":step on", "assume \"A\" ⌜ Type₀ ⌝", ":step", ":step"]) of
+              Ran [] Completed -> pure ()
+              other -> assertFailure ("expected Completed, got " ++ show other)
         , testCase ":run finishes the program whatever the mode" $
-            case snd (say [":step on", "assume A : Type₀", ":run"]) of
-              Ran ["assumed A"] Completed -> pure ()
+            case snd (say [":step on", "assume \"A\" ⌜ Type₀ ⌝", ":run"]) of
+              Ran [] Completed -> pure ()
               other -> assertFailure ("expected Completed, got " ++ show other)
         , testCase ":step off puts it back" $
-            case snd (say [":step on", ":step off", "assume A : Type₀"]) of
-              Ran ["assumed A"] Completed -> pure ()
+            case snd (say [":step on", ":step off", "assume \"A\" ⌜ Type₀ ⌝"]) of
+              Ran [] Completed -> pure ()
               other -> assertFailure ("expected Completed, got " ++ show other)
         , testCase "stepping is a session setting and does not touch the machine" $
             sessionStepping (fst (say [":step on"])) @?= True
