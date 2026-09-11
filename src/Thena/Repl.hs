@@ -581,6 +581,14 @@ describe t = case t of
   TUniverse k   -> "Type" ++ subscript k
   TUniverseOpen -> "Type"
   TIdent s    -> s
+  -- The tagged-region tokens (MS5 phase 60). A region's own contents are raw
+  -- text, so what a reader needs back is the region's shape rather than its
+  -- characters: the tag they wrote, and the two things that punctuate it.
+  TTagOpen tag  -> tag ++ "`"
+  TTagClose     -> "`"
+  TRaw txt      -> txt
+  TEscapeOpen   -> "$" ++ ['{']
+  TEscapeClose  -> ['}']
 
 -- --------------------------------------------------------------------------
 -- Terms, made readable (§2.6)

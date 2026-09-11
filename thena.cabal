@@ -115,6 +115,7 @@ test-suite thena-test
         Thena.Standard
         Thena.Fixtures
         Thena.SessionTests
+        Thena.LexerTests
         Thena.SyntaxTests
     build-depends:
         base              ^>=4.21.2.0,
