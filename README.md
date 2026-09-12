@@ -148,13 +148,21 @@ well-typed term is a value or it takes a step:
 progress : forall (t : Term) (T : Ty) -> HasType t T -> Or (Value t) (Steps t)
 ```
 
-Load it after `canonical.thena`: Thena has no module imports, but globals
-declared by one module are in scope for the next.
+and `examples/preservation.thena` completes **type safety** with Theorem 8.3.3:
+
+```
+preservation : forall (t t' : Term) -> Step t t'
+            -> forall (U : Ty) -> HasType t U -> HasType t' U
+```
+
+Load them in order. Thena has no module imports, but globals declared by one
+module are in scope for the next, so each file contains only what it adds.
 
 ```
 cabal run thena
 thena spine> :load examples/canonical.thena
 thena spine> :load examples/progress.thena
+thena spine> :load examples/preservation.thena
 ```
 
 ## Building
