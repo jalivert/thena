@@ -14,8 +14,15 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
 import Thena.Driver (parseCore, parseSurfaceModule, parseSurfaceTerm)
+import Thena.Syntax.Concrete (Raw (..))
 import Thena.Syntax.Lexer (lexTokens)
-import Thena.Instral.Concrete (RawRule (..), RawInstr (..))
+import Thena.Instral.Concrete
+  ( RawInstr (..)
+  , RawOp (..)
+  , RawOperand (..)
+  , RawRhs (..)
+  , RawRule (..)
+  )
 import Thena.Syntax.Parser (parseRule)
 import Thena.Global.Env (emptyGlobals)
 import Thena.Repl (renderSurface)
@@ -461,8 +468,81 @@ blockTests =
         , "arg 2 ; say \"done\" ; try-core x"
         , "x = fresh-name \"a\" ; claim x y ; prove"
         ] :: [String])
+
+    -- **Crossed for EVERY operand form, not five hand-picked bodies**
+    -- (2026-09-12). Hand-picked is how both drifts got through: phase 68b's
+    -- lambda, and the tagged region, which was still missing from this grammar
+    -- when this case was written — @do { f surface`x` }@ did not parse while
+    -- the same body in a rule file did. 'spellingFor' is a case over
+    -- 'RawOperand', so @-Wall@ names a form that has no spelling here.
+  , testCase "every operand form reads the same through both grammars" $
+      mapM_ (crossed . ("f " ++)) writableOperands
+
+    -- The same forms again on the right of an @=@, which is 'RawRhs''s own
+    -- three-way split and its own mirrored nonterminal.
+  , testCase "and the same on the right of a binding" $
+      mapM_ (crossed . ("x = " ++)) writableOperands
+
+    -- The spelling has to exercise the form it claims, or the case above
+    -- crosses two grammars over the same wrong tree and says nothing.
+  , testCase "each spelling really writes the form it is listed under" $
+      mapM_ writes operandForms
   ]
   where
+    -- | A written spelling for every 'RawOperand' constructor.
+    --
+    -- **Exhaustive on purpose** — a new operand form leaves @-Wall@ with an
+    -- incomplete pattern here, which is the only thing that makes the crossing
+    -- above total rather than another hand-picked list. 'Nothing' is a form the
+    -- surface grammar cannot write, and there is exactly one.
+    spellingFor :: RawOperand -> Maybe String
+    spellingFor o = case o of
+      RawRef{}     -> Just "y"
+      RawPos{}     -> Just "2"
+      RawText{}    -> Just "\"done\""
+      RawChar{}    -> Just "'c'"
+      RawList{}    -> Just "[1, 'c', \"s\"]"
+      RawPairOf{}  -> Just "(1, y)"
+      RawNested{}  -> Just "(concat y y)"
+      RawLambda{}  -> Just "(\\ z -> concat z z)"
+      RawRegion{}  -> Just "surface`\\ x -> x`"
+      -- **Corners are the one form a @do@ block cannot write, and levelling
+      -- them is a decision rather than a line** (@ms5\/CLOSEOUT.md@ 22).
+      -- @⌜ t ⌝@ carries a parsed 'Thena.Syntax.Concrete.Raw', so the production
+      -- is @'[|' Term '|]'@ and the surface grammar would need the whole
+      -- development-calculus term grammar as a third copy. A @core@ region says
+      -- the same thing — 'Thena.Rules.operandOf' sends both to @VRaw@ — so
+      -- nothing is unsayable, only unsayable in that spelling.
+      RawQuoted{}  -> Nothing
+
+    -- One value per constructor, to apply 'spellingFor' to. It is a mirror, and
+    -- the exhaustive case above is what stops it going quietly out of date.
+    operandForms :: [RawOperand]
+    operandForms =
+      [ RawRef "y"
+      , RawPos 2
+      , RawText "done"
+      , RawChar 'c'
+      , RawList []
+      , RawPairOf (RawPos 1) (RawRef "y")
+      , RawNested "concat" []
+      , RawLambda [] (RhsOp (RawOp "concat" []))
+      , RawRegion "surface" "x"
+      , RawQuoted (RawName "x")
+      ]
+
+    writableOperands :: [String]
+    writableOperands = [ w | Just w <- map spellingFor operandForms ]
+
+    -- Parse the spelling and check the operand it yields is the form it was
+    -- listed under, by asking 'spellingFor' the question in reverse.
+    writes :: RawOperand -> Assertion
+    writes form = case spellingFor form of
+      Nothing -> pure ()
+      Just w  -> case viaRule ("f " ++ w) of
+        Just [RawDo (RawOp "f" [got])] -> spellingFor got @?= Just w
+        other -> assertFailure (w ++ ": " ++ show other)
+
     roundTrip :: String -> Assertion
     roundTrip src = case parseSurfaceTerm src of
       Left e  -> assertFailure (src ++ ": " ++ show e)

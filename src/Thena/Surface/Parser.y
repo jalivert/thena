@@ -72,6 +72,9 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   ']'     { Located _ TRBracket }
   ','     { Located _ TComma }
   univ    { Located _ (TUniverse $$) }
+  tagopen  { Located _ (TTagOpen $$) }
+  raw      { Located _ (TRaw $$) }
+  tagclose { Located _ TTagClose }
   Type    { Located _ TUniverseOpen }
   ident   { Located _ (TIdent $$) }
 
@@ -174,6 +177,13 @@ InstrValueOperand :: { RawOperand }
   | '[' InstrElements ']'                  { RawList (reverse $2) }
   | '(' InstrOperand ',' InstrOperand ')'  { RawPairOf $2 $4 }
   | '(' ident InstrOperands ')'            { RawNested $2 (reverse $3) }
+  -- **A tagged region** (MS5 phase 69) — @Thena.Syntax.Parser@\'s two
+  -- productions, one grammar over. They were missing until 2026-09-12, so
+  -- @do { f surface\`x\` }@ did not parse while the same body in a rule file
+  -- did: §7b's registered duplication drifting for the second time, and the
+  -- second time it was found by enumerating the forms rather than by reading.
+  | tagopen raw tagclose                   { RawRegion $1 $2 }
+  | tagopen tagclose                       { RawRegion $1 "" }
 
 InstrElements :: { [RawOperand] }
   : InstrOperand                           { [$1] }
