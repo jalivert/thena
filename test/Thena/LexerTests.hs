@@ -10,6 +10,7 @@ module Thena.LexerTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
+import Thena.Repl (describe)
 import Thena.Syntax.Lexer (Located (..), Token (..), lexTokens)
 
 tests :: TestTree
@@ -190,6 +191,7 @@ tests =
             "ab`c`"
             [TTagOpen "ab", TRaw "c", TTagClose]
         ]
+    , tokensReadBack
     ]
   where
     lexes what src want = testCase what $ case lexTokens src of
@@ -201,3 +203,56 @@ tests =
       Right ts -> assertFailure ("expected a lex error, got " ++ show (map tokenOf ts))
 
     tokenOf (Located _ t) = t
+
+-- --------------------------------------------------------------------------
+-- Every token the lexer produces reads back from how it is described (2026-09-13)
+-- --------------------------------------------------------------------------
+
+-- | **A message that says /unexpected X/ must be able to mean it.**
+--
+-- @Thena.Repl.describe@ turns a token into the text a syntax error names, and
+-- it is what every @unexpected …@ line is built from. If it prints something
+-- that does not lex back to the same token, the message points at a character
+-- the user did not write — which this review has already met twice, once from
+-- an invented @TSemi@ in an empty region and once from three arguments sharing
+-- a name.
+--
+-- **The list is a hand-written mirror**, because no enumeration of 'Token'
+-- exists; @describe@ itself is a total @case@, so @-Wall@ makes a new
+-- constructor say how it is spelled, and this is what checks the spelling is
+-- real. The five exclusions are stated rather than omitted.
+tokensReadBack :: TestTree
+tokensReadBack =
+  testGroup
+    "how a token is described is how it lexes"
+    [ testCase "every token that stands on its own" $
+        [ (t, describe t, lexTokens (describe t))
+        | t <- standalone
+        , fmap (map unlocated) (lexTokens (describe t)) /= Right [t]
+        ] @?= []
+
+      -- **Five are excluded and each for its own reason**, none of them a
+      -- defect: @TDeclSep@ is inserted by the driver and never lexed, so it is
+      -- described in prose rather than as a spelling; and the four region
+      -- tokens only exist inside a scan that is stateful, so one of them alone
+      -- is not a token stream.
+    , testCase "and the five that cannot, described in prose or mid-scan" $
+        map describe excluded
+          @?= [ "the start of a declaration", "s`", "`", "raw", "${", "}" ]
+    ]
+  where
+    unlocated (Located _ t) = t
+
+    standalone =
+      [ TLambda, TSignature, TLanguage, TChar 'c'
+      , TLBracket, TRBracket, TComma, TForall, TArrow
+      , TLParen, TRParen, TColon, TLBrace, TRBrace, TSemi, TEquals, TQuery
+      , TGuessed, TPending, TTurnstile, TEquate, TOpenQuote, TCloseQuote
+      , TLet, TIn, TElim, TWhere, TData, TModule, TDo
+      , TRule, TWhen, TThen, TNeck
+      , TNumber 42, TString "hi", TUniverse 3, TUniverseOpen, TIdent "foo"
+      , TDashes
+      ]
+
+    excluded =
+      [ TDeclSep, TTagOpen "s", TTagClose, TRaw "raw", TEscapeOpen, TEscapeClose ]

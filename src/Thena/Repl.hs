@@ -22,6 +22,7 @@ module Thena.Repl
   , renderCursor
   , renderWhere
   , renderMachine
+  , describe
   , renderSyntaxError
   , renderInductive
   , renderEliminator
