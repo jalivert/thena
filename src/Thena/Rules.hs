@@ -566,7 +566,11 @@ validate r = reserved ++ headScope ++ go 0 (initiallyBound r) (ruleBody r)
 -- signature cannot claim an arity its own type contradicts.
 resolveSignature :: [(String, Language)] -> RawSignature -> Either RuleError (String, Signature)
 resolveSignature ls (RawSignature nm t) = do
-  ts <- traverse (resolveTy ls nm) (chain t)
+  -- **The variable list is threaded ACROSS the links** (found by mutation
+  -- testing, 2026-09-12). Resolving each link on its own numbered every
+  -- lowercase name from zero within that link, so @a -> b -> ()@ became
+  -- @a -> a -> ()@ and every signature's variables collapsed onto each other.
+  ts <- chainOf (chain t) []
   -- **The last link is the result, and @()@ means there is none.** That is the
   -- same distinction 'Thena.Ops.resultOf' draws, said in the surface a rule
   -- author writes — and it is why @()@ anywhere else is refused rather than
@@ -577,6 +581,12 @@ resolveSignature ls (RawSignature nm t) = do
   where
     chain (RawTyArrow a b) = a : chain b
     chain u                = [u]
+
+    chainOf [] _ = Right []
+    chainOf (u : us) vs = do
+      (m, vs') <- resolveTyIn ls nm vs u
+      rest     <- chainOf us vs'
+      Right (m : rest)
 
 -- | One written type.
 --
@@ -589,7 +599,14 @@ resolveSignature ls (RawSignature nm t) = do
 -- The numbering is scheme-local, which is what 'Thena.Instral.Infer'
 -- instantiates.
 resolveTy :: [(String, Language)] -> String -> RawTy -> Either RuleError (Maybe Ty)
-resolveTy ls owner t0 = fmap fst (go [] t0)
+resolveTy ls owner t0 = fmap fst (resolveTyIn ls owner [] t0)
+
+-- | 'resolveTy', threading the scheme's variable names in and out — which is
+-- what lets one signature's links share a numbering.
+resolveTyIn
+  :: [(String, Language)] -> String -> [String] -> RawTy
+  -> Either RuleError (Maybe Ty, [String])
+resolveTyIn ls owner vs0 t0 = go vs0 t0
   where
     go vs t = case t of
       RawTyUnit -> Right (Nothing, vs)
@@ -597,13 +614,15 @@ resolveTy ls owner t0 = fmap fst (go [] t0)
       -- parenthesised one reaches here: 'resolveSignature' splits the top-level
       -- chain into parameters and a result first, so @a -> b@ at the top means
       -- /takes an a, gives a b/ and @(a -> b)@ means /a function/.
-      RawTyArrow _ _ ->
-        let links = chainOf t
-         in do
-              ms <- traverse (go' vs) links
-              case sequence ms of
-                Nothing -> Left (UnitInsideAType owner)
-                Just xs -> Right (Just (TFun (init xs) (last xs)), vs)
+      -- **The links are threaded, like every other case here.** Mapping over
+      -- them with one starting list numbered each link's variables from zero, so
+      -- a nested @(a -> b)@ became @(a -> a)@ — the same collapse the top-level
+      -- chain had (both found by mutation testing, 2026-09-12).
+      RawTyArrow _ _ -> do
+        (ms, vs') <- links vs (chainOf t)
+        case sequence ms of
+          Nothing -> Left (UnitInsideAType owner)
+          Just xs -> Right (Just (TFun (init xs) (last xs)), vs')
       RawTyPair a b -> do
         (ma, vs1) <- go vs a
         (mb, vs2) <- go vs1 b
@@ -654,10 +673,13 @@ resolveTy ls owner t0 = fmap fst (go [] t0)
             , "Development", "List", "Option" ]
     arityOf nm = if nm `elem` ["List", "Option"] then 1 else 0
 
-    -- A nested arrow's own variables share the scheme's numbering, so they are
-    -- resolved against the same list — which is why this threads it and
-    -- @go'@ does not need to give it back.
-    go' vs u = fmap fst (go vs u)
+    -- A nested arrow's own variables share the scheme's numbering, so the list
+    -- goes in and comes back out at every link.
+    links vs [] = Right ([], vs)
+    links vs (u : us) = do
+      (m, vs1)   <- go vs u
+      (ms, vs2)  <- links vs1 us
+      Right (m : ms, vs2)
 
     chainOf (RawTyArrow a b) = a : chainOf b
     chainOf u                = [u]

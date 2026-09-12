@@ -274,6 +274,37 @@ annotations =
       -- **The arity is the arrow chain's**, so this signature is about @f@ at
       -- one argument and says nothing about the @f@ of none — a different
       -- callable, which dispatch already treats as one.
+      -- **Two variables in one signature stay two** (found by mutation testing,
+      -- 2026-09-12). @resolveSignature@ resolved each link of the arrow chain on
+      -- its own, and each numbered its variables from zero — so @a -> b -> ()@
+      -- was @a -> a -> ()@ and every signature's variables collapsed. Nothing
+      -- noticed, because a collapsed signature is still a signature.
+    , testCase "keeps its variables apart" $
+        case load "signature ignore2 : a -> b -> ()\n\
+                  \rule ignore2 x y :- then prove\n\
+                  \rule use :- then h = here ; n = fresh-name \"k\" ; ignore2 h n" of
+          BasesLoaded _ -> pure ()
+          other -> assertFailure ("expected a load, got " ++ show other)
+
+      -- **A NESTED arrow's variables too** — `(a -> b)` had the same collapse as
+      -- the top-level chain, one level down, and it is the case a higher-order
+      -- signature is made of.
+    , testCase "and keeps a nested arrow's apart as well" $
+        case load "signature f : (a -> b) -> a -> b\nf g x = g x" of
+          BasesLoaded _ -> pure ()
+          other -> assertFailure ("expected a load, got " ++ show other)
+
+      -- …and a body that forces two of them TOGETHER breaks the promise as
+      -- surely as one that pins either, which is the other half of
+      -- 'Thena.Instral.Infer.generalEnough' and was untested until now.
+    , testCase "and a body may not force two of them together" $
+        case load "signature pairUp : a -> a -> ()\n\
+                  \rule pairUp x y :- then prove\n\
+                  \signature same : a -> b -> ()\n\
+                  \rule same x y :- then pairUp x y" of
+          BasesIllTyped (AnnotationTooGeneral _ _ : _) -> pure ()
+          other -> assertFailure ("expected a refusal, got " ++ show other)
+
     , testCase "is about one arity only" $
         case load "signature f : Core -> ()\nrule f x :- then prim-try x\nrule f :- then prove" of
           BasesLoaded _ -> pure ()
@@ -352,6 +383,16 @@ functions =
       -- **A function must produce.** Refused where it is written rather than by
       -- 'Thena.Rules.validate', which would report it against a binding the
       -- author never wrote.
+      -- **A function is validated like any rule** (found by mutation testing,
+      -- 2026-09-12): dropping functions from @resolveAll@'s validation pass left
+      -- the suite green, so nothing had checked that an unbound name in a
+      -- function body is refused.
+    , testCase "is validated like a rule" $
+        case load "f x = concat x y" of
+          RuleFileRefused _ (RuleIllFormed es)
+            | UnboundInRule (GlobalName "f") 0 "y" `elem` es -> pure ()
+          other -> assertFailure ("expected a refusal, got " ++ show other)
+
       -- **A name may not be a rule and a function at one arity** (MS5 review).
       -- They would be two clauses of one callable, so the function would join
       -- the rule's backtracking and a call could run either — which is exactly
@@ -443,6 +484,14 @@ lambdas =
 
       -- Its body must produce, for a function's reason and with the same
       -- message.
+      -- **A lambda's BODY is inferred**, not just its arity (found by mutation
+      -- testing, 2026-09-12: disabling the inference case left the suite green).
+      -- Without it a lambda would be a hole in the type system that anything
+      -- could be hidden in.
+    , testCase "has its body type checked too" $
+        load "rule go :- then f = \\ z -> concat z 3 ; prove"
+          @?= BasesIllTyped [Clash (InBody (GlobalName "go") 0) TString TInt]
+
     , testCase "whose body leaves nothing is refused" $
         case load "rule go :- then d = \\ s -> prim-try s ; prove" of
           RuleFileRefused _ (RuleIllFormed es)
