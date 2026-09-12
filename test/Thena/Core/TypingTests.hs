@@ -15,7 +15,10 @@
 --     /hypotheses/. If those two ever disagreed about which arguments are
 --     recursive, a datatype would reduce by a rule its own eliminator is not
 --     typed for, and only a test that runs both catches it.
-module Thena.Core.TypingTests (tests) where
+-- **'genTyped' and 'seedContext' are exported** (2026-09-13) so that
+-- @KernelTests@ can put the same terms to the kernel. A second copy of a
+-- generator drifts.
+module Thena.Core.TypingTests (tests, genTyped, seedContext) where
 
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))

@@ -19,12 +19,18 @@ module Thena.KernelTests (tests) where
 
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
+import Test.Tasty.QuickCheck (counterexample, forAll, property, testProperty, withNumTests)
+
+import Thena.Core.Context (lamOver, piOver)
+import Thena.Core.TypingTests (genTyped, seedContext)
+import Thena.Global.Env (emptyGlobals)
 
 import Thena.Core.Level (LevelVar (..), Level (..), Unmet (..), levelOfNat)
 import Thena.Core.Term
   ( Core (..)
   , Ident (..)
   , close
+  , freeVars
   , fresh
   )
 import Thena.Declared (natVec, natVecCounter)
@@ -43,6 +49,56 @@ tests =
     [ testGroup "certify" certifyTests
     , testGroup "extract — the term a finished construction stands for" extractTests
     , testGroup "revalidate — thesis §2.3" validTests
+    , generatedCertification
+    ]
+
+-- --------------------------------------------------------------------------
+-- The kernel, over generated well-typed terms (2026-09-13)
+-- --------------------------------------------------------------------------
+
+-- | **The trust boundary, asked about terms nobody wrote by hand.**
+--
+-- 'certifyTests' above puts hand-built terms to the kernel, one per behaviour.
+-- This puts it the terms @Thena.Core.TypingTests@' generator builds by the
+-- introduction rules — closed by abstracting the seed context, because
+-- @certify@ refuses an open term before it types anything, which is the whole
+-- point of the boundary.
+--
+-- **The negative half is what makes it worth having**: a kernel that accepted
+-- everything would pass the first property and fail the second. The ill-typed
+-- terms are built by taking a well-typed one and claiming it at a type it does
+-- not have.
+generatedCertification :: TestTree
+generatedCertification =
+  testGroup
+    "the kernel, over generated terms"
+    [ testProperty "a term built by the typing rules certifies" $
+        withNumTests 300 $ forAll genTyped $ \(ctx, ty, t) ->
+          counterexample (show t ++ " : " ++ show ty) $
+            case certify emptyGlobals (lamOver ctx t) (piOver ctx ty) of
+              Right _ -> property True
+              Left e  -> counterexample (show e) False
+
+    , testProperty "and claiming it at another type does not" $
+        withNumTests 300 $ forAll genTyped $ \(ctx, ty, t) ->
+          forAll genTyped $ \(_, ty', _) ->
+            let a = lamOver ctx t
+                wanted = piOver ctx ty
+                wrong  = piOver ctx ty'
+             in case (certify emptyGlobals a wanted, certify emptyGlobals a wrong) of
+                  -- The two types may coincide; only a genuinely different one
+                  -- is a claim the kernel has to refuse.
+                  (Right _, Right _) -> property (wanted == wrong)
+                  (Right _, Left _)  -> property True
+                  (Left e, _)        -> counterexample (show e) False
+
+      -- An open term is refused before typing is attempted — §5.3's own rule,
+      -- said over generated terms rather than over one fixture.
+    , testProperty "an open term is refused, whatever it would have typed as" $
+        withNumTests 300 $ forAll genTyped $ \(ctx, ty, t) ->
+          case certify emptyGlobals t (piOver ctx ty) of
+            Left (NotClosed _) -> property True
+            other              -> counterexample (show other) (null (freeVars t))
     ]
 
 -- --------------------------------------------------------------------------
