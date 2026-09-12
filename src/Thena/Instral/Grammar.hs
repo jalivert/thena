@@ -31,7 +31,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import Thena.Errors (SyntaxError (..))
 import Thena.Syntax.Parser (ParseError (..))
 import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..))
-import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..), lexTokens)
+import Thena.Syntax.Lexer (Located (..), Token (..), lexTokens)
 
 -- | A declared object language: its name, and its productions in the order they
 -- were written.
@@ -110,10 +110,15 @@ parseObject lang src = case lexTokens src of
   Left e   -> Left (LexFailed e)
   Right ts -> case [ t | (t, []) <- alternatives lang ts ] of
     t : _ -> Right t
-    []    -> Left (ParseFailed (UnexpectedToken (posOf ts) (tokenOf ts)))
+    -- **An empty region is end of input, not a token.** It said /unexpected ;/
+    -- until 2026-09-12, because the fallback for an empty list picked an
+    -- arbitrary constructor and the user was shown a character that is not
+    -- there. Found probing degenerate input.
+    []    -> Left (ParseFailed (failureIn ts))
   where
-    posOf ls = case ls of { Located p _ : _ -> p; [] -> Pos 1 1 }
-    tokenOf ls = case ls of { Located _ t : _ -> t; [] -> TSemi }
+    failureIn ls = case ls of
+      Located p t : _ -> UnexpectedToken p t
+      []              -> UnexpectedEndOfInput
 
 -- | Every way this language parses a prefix of the tokens, in production order.
 alternatives :: Language -> [Located Token] -> [(Surface, [Located Token])]

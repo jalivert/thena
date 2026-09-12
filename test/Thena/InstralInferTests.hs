@@ -22,7 +22,9 @@ import Thena.Instral.Infer
   )
 import Thena.Instral.Type (Signature (..), Ty (..), renderSignature)
 import Thena.Ops (Instr (..), Op (..), Operand (..), Rule (..), Value (..))
+import Thena.Errors (SyntaxError (..))
 import Thena.Instral.Grammar (GrammarError (..))
+import Thena.Syntax.Parser (ParseError (..))
 import Thena.Rules (RuleBase (..), RuleError (..))
 import Thena.Standard (expectedStandard)
 
@@ -568,6 +570,17 @@ objectLanguages =
     , testCase "refuses a term whose prefix parses and whose rest does not" $
         case load (tm ++ "rule go :- then t = Tm`x y` ; prove") of
           RuleFileRefused _ (RuleIllFormed (BadRegion _ _ "Tm" _ : _)) -> pure ()
+          other -> assertFailure ("expected a region error, got " ++ show other)
+
+      -- **An empty region is end of input** (found probing degenerate input,
+      -- 2026-09-12). The failure path picked a token out of the token list to
+      -- report, and an empty region has none, so it fell back on an arbitrary
+      -- constructor and told the user @unexpected ;@ about a character that is
+      -- not there.
+    , testCase "an empty region says end of input, not a token that is not there" $
+        case load (tm ++ "rule go :- then t = Tm`` ; prove") of
+          RuleFileRefused _ (RuleIllFormed (BadRegion _ _ "Tm" e : _)) ->
+            e @?= ParseFailed UnexpectedEndOfInput
           other -> assertFailure ("expected a region error, got " ++ show other)
 
       -- The three shapes the generated parser could not run, refused when the
