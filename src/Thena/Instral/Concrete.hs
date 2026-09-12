@@ -184,6 +184,15 @@ data RawOperand
     -- becomes a reference to that binding. So it is sugar with a fixed
     -- evaluation order — left to right, innermost first — and not a new kind of
     -- value.
+  | RawLambda [String] RawRhs
+    -- ^ @\\ x y -> ‹expression›@ — **a lambda** (MS5 phase 68b).
+    --
+    -- **It is an operand and not a right-hand side of its own**, so that
+    -- @t = \\ x -> e@ and @f (\\ x -> e)@ are the same thing in two places. Like
+    -- 'RawNested', resolution lifts it into a binding in front of the
+    -- instruction that wanted it — a closure has to capture the environment it
+    -- is made in, which is a thing that happens at run time, so it cannot be a
+    -- literal.
   | RawRef String
   | RawPos Int
     -- ^ a numeral. **It is a /position/ only where a field word wants one** —

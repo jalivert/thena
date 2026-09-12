@@ -1143,6 +1143,10 @@ renderValue n ctx v = case v of
   VList vs           -> "[" ++ intercalate ", " (map (renderValue n ctx) vs) ++ "]"
   VOption Nothing    -> "none"
   VOption (Just u)   -> "some " ++ renderValue n ctx u
+  -- **A closure prints as its shape** (MS5 phase 68b): its body is instructions
+  -- and its captured environment may hold anything, so printing either would say
+  -- more than a reader wants and less than they could use.
+  VClosure ps _ _    -> "\\ " ++ unwords ps ++ " -> …"
   VTerm t            -> "⌜" ++ renderCore n ctx t ++ "⌝"
   -- **An unresolved core term prints as its shape, not its contents** (MS5
   -- phase 61b). Printing a 'Thena.Syntax.Concrete.Raw' back would need a
@@ -1312,6 +1316,7 @@ renderSurface = surf Loose
     operation (RawOp w as) = unwords (w : map operand as)
 
     operand a = case a of
+      RawLambda ps b -> "\\ " ++ unwords ps ++ " -> " ++ rhs b
       RawRef x  -> x
       RawPos k  -> show k
       RawText t -> show t
@@ -1859,7 +1864,6 @@ whereRuleError e = case e of
   UnknownType n _         -> inSignature n
   TypeArity n _ _ _       -> inSignature n
   TypeVariableApplied n _ -> inSignature n
-  TypeIsAFunction n       -> inSignature n
   UnitInsideAType n       -> inSignature n
   DuplicateSignature n _  -> inSignature n
   FunctionLeavesNothing n -> "in " ++ n ++ ": "
@@ -1889,8 +1893,6 @@ whatRuleError e = case e of
     w ++ " takes " ++ show want ++ ", not " ++ show got
   TypeVariableApplied _ v ->
     v ++ " is a type variable, and a variable takes no arguments"
-  TypeIsAFunction _       ->
-    "an argument may not itself be a function"
   UnitInsideAType _       ->
     "() says a rule leaves nothing, so it can only be the result"
   DuplicateSignature _ a  ->

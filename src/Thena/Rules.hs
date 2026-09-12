@@ -445,10 +445,6 @@ data RuleError
     -- ^ @a b@ — a type variable applied to something. @instral@'s types are
     -- first order and there is nothing a variable could stand for that takes an
     -- argument
-  | TypeIsAFunction String
-    -- ^ an arrow inside an argument. A signature is a flat chain — @instral@ has
-    -- no functions as values yet (phase 68), so @(a -> b) -> c@ has nothing to
-    -- mean
   | UnitInsideAType String
     -- ^ @()@ anywhere but as the result. It says /this leaves nothing/, which is
     -- not a type a value can have
@@ -563,7 +559,17 @@ resolveTy owner t0 = fmap fst (go [] t0)
   where
     go vs t = case t of
       RawTyUnit -> Right (Nothing, vs)
-      RawTyArrow _ _ -> Left (TypeIsAFunction owner)
+      -- **A parenthesised arrow is a function value** (MS5 phase 68b). Only a
+      -- parenthesised one reaches here: 'resolveSignature' splits the top-level
+      -- chain into parameters and a result first, so @a -> b@ at the top means
+      -- /takes an a, gives a b/ and @(a -> b)@ means /a function/.
+      RawTyArrow _ _ ->
+        let links = chainOf t
+         in do
+              ms <- traverse (go' vs) links
+              case sequence ms of
+                Nothing -> Left (UnitInsideAType owner)
+                Just xs -> Right (Just (TFun (init xs) (last xs)), vs)
       RawTyPair a b -> do
         (ma, vs1) <- go vs a
         (mb, vs2) <- go vs1 b
@@ -609,6 +615,14 @@ resolveTy owner t0 = fmap fst (go [] t0)
     known = [ "String", "Name", "Int", "Char", "Bool", "Surface", "Core"
             , "Development", "List", "Option" ]
     arityOf nm = if nm `elem` ["List", "Option"] then 1 else 0
+
+    -- A nested arrow's own variables share the scheme's numbering, so they are
+    -- resolved against the same list — which is why this threads it and
+    -- @go'@ does not need to give it back.
+    go' vs u = fmap fst (go vs u)
+
+    chainOf (RawTyArrow a b) = a : chainOf b
+    chainOf u                = [u]
 
     isVarName (c : _) = c `elem` ['a' .. 'z']
     isVarName []      = False
@@ -694,6 +708,9 @@ resolveRule (RawRule nm ps ts body) =
 -- field position. It is an 'Thena.Ops.VInt' now.
 headOperand :: RawOperand -> Maybe Operand
 headOperand o = case o of
+  -- **A head takes no lambda.** It is a restricted fragment on purpose (§1.1,
+  -- his) — 'holds' must answer without running anything.
+  RawLambda _ _ -> Nothing
   RawRef "true"  -> Just (Lit (VBool True))
   RawRef "false" -> Just (Lit (VBool False))
   RawRef n  -> Just (Ref n)
@@ -739,7 +756,7 @@ resolveFunction (RawFunction nm ps rhs) = do
     []    -> Right (Rule g ps [] (is ++ [Do (Return (Ref resultName))]))
   where
     g          = GlobalName nm
-    resultName = "(=)"
+    resultName = lambdaResult
 
 -- | Resolve a written block of instructions (MS4 phase 45).
 --
@@ -769,16 +786,45 @@ instruction g i ri = case ri of
   -- **A value on the right of an @=@** (MS5 phase 68a) — @x = [1, 2]@. Its
   -- nested calls are lifted exactly as an op's arguments are, and the value
   -- itself becomes a 'Thena.Ops.Value', which is the op with no written form.
+  -- **A lambda binds directly**, without going through 'Op.Value': it is
+  -- already an op, and wrapping it would build the closure and then copy it.
+  RawBind n (RhsValue (RawLambda ps b)) -> pure . Bind n <$> closure g i ps b
   RawBind n (RhsValue o) ->
     let (binds, o') = hoistedOne i o
-     in (++) <$> traverse (\(m, x) -> Bind m <$> operation g i x) binds
+     in (++) <$> traverse (hoistedBind g i) binds
               <*> (pure . Bind n . Op.Value <$> operandOf g i "=" o')
   RawDo     o            -> lift Do       o
   where
     lift f (RawOp w as) =
       let (binds, as') = hoisted i as
-       in (++) <$> traverse (\(n, o) -> Bind n <$> operation g i o) binds
+       in (++) <$> traverse (hoistedBind g i) binds
                 <*> (pure . f <$> operation g i (RawOp w as'))
+
+-- | One binding 'hoisted' lifted out — a nested call or a lambda.
+hoistedBind :: GlobalName -> Int -> (Name, RawRhs) -> Either RuleError Instr
+hoistedBind g i (n, r) = case r of
+  RhsOp o                     -> Bind n <$> operation g i o
+  RhsValue (RawLambda ps b)   -> Bind n <$> closure g i ps b
+  RhsValue o                  -> Bind n . Op.Value <$> operandOf g i "=" o
+
+-- | A lambda, compiled the way a function is: a body that ends in @return@.
+--
+-- **The same compilation as 'resolveFunction'**, deliberately — §1.1 says a
+-- function is a rule with one clause and no head, and a lambda is that function
+-- without a name, so there is one way to build a body and not two.
+closure :: GlobalName -> Int -> [Name] -> RawRhs -> Either RuleError Op
+closure g i ps b = case resolveBlock g [RawBind lambdaResult b] of
+  Left (e : _) -> Left e
+  Left []      -> Left (BadOperands g i "λ")
+  Right is
+    | any (\x -> case x of { Bind n o -> n == lambdaResult && not (produces o)
+                            ; _ -> False }) is -> Left (FunctionLeavesNothing "λ")
+    | otherwise -> Right (Op.Lambda ps (is ++ [Do (Return (Ref lambdaResult))]))
+
+-- | Where a lambda's and a function's result is parked. It contains a token
+-- character, so nothing an author writes can collide with it.
+lambdaResult :: Name
+lambdaResult = "(=)"
 
 -- | Lift every nested call out of an operand run, innermost first.
 --
@@ -792,7 +838,7 @@ instruction g i ri = case ri of
 -- so no identifier can contain one; the pair of numbers is the written
 -- instruction's index and a counter within it, which keeps them apart across a
 -- body.
-hoisted :: Int -> [RawOperand] -> ([(Name, RawOp)], [RawOperand])
+hoisted :: Int -> [RawOperand] -> ([(Name, RawRhs)], [RawOperand])
 hoisted i as = let (_, bs, os) = go 0 as in (bs, os)
   where
     go k []       = (k, [], [])
@@ -809,7 +855,14 @@ hoisted i as = let (_, bs, os) = go 0 as in (bs, os)
       RawNested w inner ->
         let (k1, bs1, inner') = go (k + 1) inner
             n                 = "(" ++ show i ++ ":" ++ show (k :: Int) ++ ")"
-         in (k1, bs1 ++ [(n, RawOp w inner')], RawRef n)
+         in (k1, bs1 ++ [(n, RhsOp (RawOp w inner'))], RawRef n)
+      -- **A lambda is lifted like a nested call** (MS5 phase 68b), and for a
+      -- sharper reason: a closure captures the environment it is made in, so it
+      -- is built by an instruction and cannot be a literal. **Nothing is
+      -- hoisted out of its body** — that is a scope of its own.
+      RawLambda ps b ->
+        let n = "(" ++ show i ++ ":" ++ show (k :: Int) ++ ")"
+         in (k + 1, [(n, RhsValue (RawLambda ps b))], RawRef n)
       RawList os ->
         let (k1, bs, os') = go k os in (k1, bs, RawList os')
       RawPairOf a b ->
@@ -820,7 +873,7 @@ hoisted i as = let (_, bs, os) = go 0 as in (bs, os)
 
 -- | 'hoisted' for a single operand — what stands right of an @=@ (MS5 phase
 -- 68a).
-hoistedOne :: Int -> RawOperand -> ([(Name, RawOp)], RawOperand)
+hoistedOne :: Int -> RawOperand -> ([(Name, RawRhs)], RawOperand)
 hoistedOne i a = case hoisted i [a] of
   (bs, [o]) -> (bs, o)
   (bs, _)   -> (bs, a)
@@ -832,6 +885,9 @@ hoistedOne i a = case hoisted i [a] of
 -- instruction, and the word that wanted it.
 operandOf :: GlobalName -> Int -> String -> RawOperand -> Either RuleError Operand
 operandOf g i w o = case o of
+  -- **Cannot arise**, for 'RawNested'\'s reason: 'hoisted' lifts every lambda
+  -- into a binding of its own before this runs (MS5 phase 68b).
+  RawLambda _ _ -> Left (BadOperands g i w)
   -- **Cannot arise**: 'hoisted' lifts every nested call into a binding of
   -- its own before this runs, so what reaches here is always a leaf (MS5
   -- phase 63). Written out rather than left to a pattern-match failure.

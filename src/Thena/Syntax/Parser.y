@@ -205,6 +205,12 @@ Function :: { RawFunction }
 Rhs :: { RawRhs }
   : Op                                     { RhsOp $1 }
   | ValueOperand                           { RhsValue $1 }
+  | Lambda                                 { RhsValue $1 }
+
+-- @\ x y -> ‹expression›@ (MS5 phase 68b). @\@ and @λ@ are one token and both
+-- were already lexed, so this costs no new syntax.
+Lambda :: { RawOperand }
+  : 'λ' Params '->' Rhs                    { RawLambda (reverse $2) $4 }
 
 Signature :: { RawSignature }
   : signature ident ':' Ty                 { RawSignature $2 $4 }
@@ -307,6 +313,9 @@ Operand :: { RawOperand }
 -- of an @=@ can take one without @x = y@ becoming ambiguous — it is a call.
 ValueOperand :: { RawOperand }
   : '(' ident Operands ')'                 { RawNested $2 (reverse $3) }
+  -- **A lambda in an argument takes parentheses**, like every other compound
+  -- argument (§6.0.1); bare, it is what stands right of an @=@.
+  | '(' Lambda ')'                         { $2 }
   | num                                    { RawPos $1 }
   | str                                    { RawText $1 }
   | chr                                    { RawChar $1 }

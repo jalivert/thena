@@ -93,6 +93,9 @@ data InstralTypeError
     -- wanted something a literal cannot be.
   deriving (Eq, Show)
 
+nameOf :: GlobalName -> Name
+nameOf (GlobalName n) = n
+
 renderSite :: Site -> String
 renderSite si = case si of
   InHead (GlobalName n) i -> n ++ ", test " ++ show (i + 1)
@@ -166,6 +169,7 @@ deep st t = case shallow st t of
   TList a   -> TList (deep st a)
   TOption a -> TOption (deep st a)
   TPair a b -> TPair (deep st a) (deep st b)
+  TFun as r -> TFun (map (deep st) as) (deep st r)
   t'        -> t'
 
 unify :: Site -> Ty -> Ty -> St -> St
@@ -176,6 +180,12 @@ unify si want got st = case (shallow st want, shallow st got) of
   (TList a,   TList b)      -> unify si a b st
   (TOption a, TOption b)    -> unify si a b st
   (TPair a b, TPair c d)    -> unify si b d (unify si a c st)
+  -- **Invariant in both positions, and the arity must agree** (MS5 phase 68b):
+  -- @instral@ functions are n-ary and applied all at once, so a function of two
+  -- arguments is not a function of one whatever the types.
+  (TFun as x, TFun bs y)
+    | length as == length bs ->
+        unify si x y (foldl (\s (a, b) -> unify si a b s) st (zip as bs))
   (a, b) | a == b           -> st
          | otherwise        -> oops (Clash si (deep st want) (deep st got)) st
 
@@ -190,6 +200,7 @@ occurs st i t = case shallow st t of
   TList a   -> occurs st i a
   TOption a -> occurs st i a
   TPair a b -> occurs st i a || occurs st i b
+  TFun as r -> any (occurs st i) as || occurs st i r
   _         -> False
 
 -- | An op's or a test's declared types are a /scheme/: 'Thena.Instral.Type.TVar'
@@ -210,6 +221,7 @@ instantiateWith ts st0 =
         TList a   -> TList (go a)
         TOption a -> TOption (go a)
         TPair a b -> TPair (go a) (go b)
+        TFun as r -> TFun (map go as) (go r)
         _         -> t
    in ((map go ts, table), st1)
 
@@ -388,6 +400,26 @@ operation
   :: SigEnv -> Rule -> Maybe Ty -> [(Name, Ty)] -> Site -> Op -> St
   -> (Maybe Ty, St)
 operation env r res ctx si o st0 = case o of
+  -- **A lambda's type is worked out here** (MS5 phase 68b) — the table cannot,
+  -- because a lambda's parameters and result are whatever its body makes them.
+  -- The body is walked in a scope of its own with a result variable of its own,
+  -- exactly as a rule's is; it already ends in a @return@, which is what pins
+  -- the result.
+  Lambda ps b ->
+    let (vs, st1)   = freshes (length ps) st0
+        (rv, st2)   = fresh st1
+        st3         = body env r (Just rv) (zip ps vs ++ ctx) 0 st2 b
+     in (Just (TFun vs rv), st3)
+
+  -- **A local shadows a rule** — his ruling, 2026-09-12 — so a call whose name
+  -- is bound here is an application of that value, and its type says so.
+  Call nm as
+    | Just t <- lookup (nameOf nm) ctx ->
+        let (ats, st1) = freshes (length as) st0
+            (rv, st2)  = fresh st1
+            st3        = unify si t (TFun ats rv) st2
+         in (Just rv, foldl (\s (w, a) -> operandAgainst ctx si w a s) st3 (zip ats as))
+
   -- **A call is where the signature environment is read**, and the only place.
   Call nm as ->
     case lookup (nm, length as) env of
@@ -497,6 +529,12 @@ valueType si v st = case v of
     let (ta, st1) = valueType si a st
         (tb, st2) = valueType si b st1
      in (TPair ta tb, st2)
+  -- **Cannot arise**: a closure is built by 'Thena.Ops.Lambda' and never
+  -- written, so nothing puts one in a 'Thena.Ops.Lit'. Answered rather than left
+  -- to a pattern-match failure.
+  VClosure ps _ _  -> let (as, st1) = freshes (length ps) st
+                          (rv, st2) = fresh st1
+                       in (TFun as rv, st2)
   VOption Nothing  -> let (a, st1) = fresh st in (TOption a, st1)
   VOption (Just u) -> let (t, st1) = valueType si u st in (TOption t, st1)
 

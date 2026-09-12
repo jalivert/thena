@@ -141,6 +141,18 @@ data Value
     -- construction**: nothing checks that the elements agree until phase 66's
     -- type system, exactly as nothing checks that an op was given a term.
   | VOption  (Maybe Value)
+  | VClosure [Name] [Instr] Env
+    -- ^ **a lambda and the environment it was made in** (MS5 phase 68b).
+    --
+    -- **It is an anonymous rule**, which is §1.1 read the other way: a function
+    -- is a rule with one clause and no head, and a lambda is that function
+    -- without a name. The body is @[Instr]@ ending in a @return@ — the same
+    -- shape 'Thena.Rules.resolveFunction' builds — so applying one reuses the
+    -- frame a @Call@ already pushes.
+    --
+    -- **@Eq@ and @Show@ are why 'Env' is here and not a function**: a closure is
+    -- data, so a 'Thena.Engine.Choice' frame restores it like any other value
+    -- and nothing about backtracking has to know it exists.
     -- ^ @some x@ and @none@ (MS5 phase 65). **Words rather than notation**,
     -- where the list and the pair got literals: there is no obvious bracket for
     -- /absent/, and a word that says @none@ says it better than any symbol
@@ -230,6 +242,18 @@ data Op
   | Ask    Operand AnswerKind -- ^ prompt text, and what the frontend should offer
   | Say    Operand            -- ^ message text
   | Concat Operand Operand    -- ^ building prompt and message text
+  | Lambda [Name] [Instr]
+    -- ^ **make a closure** (MS5 phase 68b) — what @\\ x -> e@ runs.
+    --
+    -- **It carries the body as a field and not as an operand**, for 'Block'\'s
+    -- reason: the body is written down and never computed. What it does that
+    -- 'Block' does not is **capture the environment it is made in**, which is
+    -- why a lambda cannot be a 'Lit' — a closure is not a value the parser can
+    -- write, only one the machine can build.
+    --
+    -- The body already ends in a @return@: 'Thena.Rules' compiles a lambda the
+    -- way it compiles a function, because they are the same thing named and
+    -- unnamed.
   | Value Operand
     -- ^ **the operand itself, as a value** (MS5 phase 68a) — what @x = [1, 2]@
     -- binds.
@@ -997,6 +1021,10 @@ resultOf o = case o of
   -- played, and a body has no value.
   Block _      -> Nothing
   Concat _ _   -> Just TString
+  -- **Its type is worked out by inference, not here.** A lambda's parameters
+  -- and result are whatever its body makes them, which this table cannot see —
+  -- so it claims a variable and "Thena.Instral.Infer" pins it.
+  Lambda _ _   -> Just (TVar 0)
   Value _      -> Just (TVar 0)
   NameText _   -> Just TString
   Assume _ _   -> Just TCore  -- the variable it bound; §7.3's @?x <- claim S@
@@ -1148,6 +1176,7 @@ operandTypes o = case o of
   Say    a     -> [(a, TString)]
   Concat a b   -> [(a, TString), (b, TString)]
   Value a      -> [(a, TVar 0)]
+  Lambda _ _   -> []
   NameText a   -> [(a, TName)]
   Unify  a b   -> [(a, TCore), (b, TCore)]
   UnifyInto a b -> [(a, TCore), (b, TCore)]
@@ -1403,6 +1432,7 @@ opKeyword o = case o of
   Say    _     -> "say"
   Concat _ _   -> "concat"
   Value _      -> "value"
+  Lambda _ _   -> "lambda"
   NameText _   -> "name-text"
   Along        -> "along"
   Into         -> "into"

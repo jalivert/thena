@@ -36,6 +36,7 @@ tests =
     , annotations
     , badSignatures
     , functions
+    , lambdas
     ]
 
 -- --------------------------------------------------------------------------
@@ -292,7 +293,6 @@ badSignatures =
     [ refused "an unknown type"      "signature f : Trm -> ()"   (UnknownType "f" "Trm")
     , refused "a constructor's arity" "signature f : List -> ()" (TypeArity "f" "List" 1 0)
     , refused "a variable applied"   "signature f : a Core -> ()" (TypeVariableApplied "f" "a")
-    , refused "a function argument"  "signature f : (a -> b) -> ()" (TypeIsAFunction "f")
     , refused "() as an argument"    "signature f : () -> ()"    (UnitInsideAType "f")
     , refused "two for one callable"
         "signature f : Core -> ()\nsignature f : Surface -> ()"
@@ -374,6 +374,67 @@ functions =
       other      -> error ("expected Ran, got " ++ show other)
 
     loadRaw src = snd (loadRuleBases newSession [("i.thena.rules", src)])
+
+-- --------------------------------------------------------------------------
+-- Lambdas (MS5 phase 68b)
+-- --------------------------------------------------------------------------
+
+-- | **A lambda is a function without a name** — §1.1 read the other way — so it
+-- compiles the way a function does and is applied through the frame a call
+-- already pushes.
+lambdas :: TestTree
+lambdas =
+  testGroup
+    "a lambda"
+    [ -- Bound to a local and applied. **This is the shadowing his ruling
+      -- bought**: @k \"z\"@ is an application of the local, not a call to a rule
+      -- called @k@.
+      testCase "is bound to a local and applied" $
+        said "rule go :- then k = \\ s -> concat \"<\" s ; n = k \"z\" ; say n"
+          @?= Just "<z"
+
+      -- **Higher order, with the signature that says so.** @(a -> b)@ in a
+      -- signature was refused by name until this phase.
+    , testCase "is passed to a function that takes one" $
+        said "signature onTwice : (String -> String) -> String -> String\n\
+             \onTwice f x = f (f x)\n\
+             \rule go :- then d = \\ s -> concat s s ; m = onTwice d \"a\" ; say m"
+          @?= Just "aaaa"
+
+      -- **Parenthesised in an argument**, like every other compound one.
+    , testCase "takes parentheses in an argument position" $
+        said "signature once : (String -> String) -> String\n\
+             \once f = f \"q\"\n\
+             \rule go :- then m = once (\\ s -> concat s s) ; say m"
+          @?= Just "qq"
+
+      -- **N-ary and not curried** — a function of one is not a function of two,
+      -- whatever the types, because dispatch is on arity.
+    , testCase "applied at the wrong arity is refused" $
+        case load "rule go :- then d = \\ s -> concat s s ; m = d \"a\" \"b\" ; say m" of
+          BasesIllTyped (Clash _ _ _ : _) -> pure ()
+          other -> assertFailure ("expected a clash, got " ++ show other)
+
+      -- Its body must produce, for a function's reason and with the same
+      -- message.
+    , testCase "whose body leaves nothing is refused" $
+        case load "rule go :- then d = \\ s -> prim-try s ; prove" of
+          RuleFileRefused _ (RuleIllFormed es)
+            | FunctionLeavesNothing "λ" `elem` es -> pure ()
+          other -> assertFailure ("expected a refusal, got " ++ show other)
+
+      -- **A function type is writable in a signature now**, which it was not
+      -- before this phase — @TypeIsAFunction@ refused it and is deleted.
+    , testCase "and a function type is writable in a signature" $
+        case load "signature f : (a -> b) -> a -> b\nf g x = g x" of
+          BasesLoaded _ -> pure ()
+          other -> assertFailure ("expected a load, got " ++ show other)
+    ]
+  where
+    said src = case snd (command (fst (loadRuleBases newSession
+                 [("l.thena.rules", "rule base l where\n" ++ src ++ "\n")])) "go") of
+      Ran msgs _ -> case reverse msgs of { m : _ -> Just m; [] -> Nothing }
+      other      -> error ("expected Ran, got " ++ show other)
 
 load :: String -> Response
 load src = snd (loadRuleBases newSession [("t.thena.rules", "rule base t where\n" ++ src)])

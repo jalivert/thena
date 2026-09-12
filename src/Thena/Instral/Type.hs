@@ -69,6 +69,20 @@ data Ty
   | TList Ty             -- ^ @[a, b, c]@
   | TPair Ty Ty          -- ^ @(a, b)@
   | TOption Ty           -- ^ @some x@ and @none@
+  | TFun [Ty] Ty
+    -- ^ **a function value** (MS5 phase 68b) — what a lambda is.
+    --
+    -- **N-ary, not curried**, and written as an arrow chain: @a -> b -> c@ is a
+    -- function of /two/ arguments. That is not a spelling accident — an
+    -- @instral@ call is n-ary and dispatch is on arity
+    -- ('Thena.Rules.clauses'), so a curried reading would promise partial
+    -- application that nothing implements. It also matches 'Signature', which is
+    -- a list of parameters and a result rather than a chain.
+    --
+    -- **Parentheses are what make one a value.** A signature's top-level chain
+    -- is split into parameters and a result, so only a parenthesised arrow
+    -- reaches here: @signature f : (a -> b) -> a -> b@ takes a function and a
+    -- value.
   | TVar Int             -- ^ a scheme variable
   deriving (Eq, Show)
 
@@ -97,6 +111,7 @@ typeVarsIn t = nub (go t)
       TList a    -> go a
       TOption a  -> go a
       TPair a b  -> go a ++ go b
+      TFun as r  -> concatMap go as ++ go r
       _          -> []
 
 -- | A type, spelled as a rule author would write it.
@@ -115,6 +130,7 @@ renderTy = go False
       TSurface     -> "Surface"
       TCore        -> "Core"
       TDevelopment -> "Development"
+      TFun as r    -> wrap p (intercalate " -> " (map (go True) as ++ [go True r]))
       TList a      -> wrap p ("List " ++ go True a)
       TOption a    -> wrap p ("Option " ++ go True a)
       TPair a b    -> "(" ++ go False a ++ ", " ++ go False b ++ ")"

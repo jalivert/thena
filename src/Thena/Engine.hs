@@ -1018,6 +1018,28 @@ perform instr rest m = case operation instr of
   --
   -- Arguments are evaluated **before** the candidates are found, because their
   -- number is one of the filters.
+  -- **A local shadows a rule** — his ruling, 2026-09-12. A word in a body is an
+  -- op if one bears that name (resolution decided that already), else the local
+  -- if one is bound, else a rule call. That is the one extra step first-class
+  -- functions need, and it is what every language with them does.
+  --
+  -- **The op words stay untouchable**: a local called @say@ is still the op,
+  -- because this case is only reached for a word no op bears.
+  Op.Call nm args
+    | Just (VClosure ps body cl) <- lookup (case nm of GlobalName w -> w) (env (exec m))
+    , length ps == length args ->
+        case traverse (operandValue (env (exec m))) args of
+          Left e   -> failure e m
+          Right vs ->
+            -- **The same frame a rule call pushes**, and deliberately: a closure
+            -- is an anonymous rule, so @return@, backtracking below it and the
+            -- destination all work without a second mechanism.
+            Continue m
+              { exec = Exec body (zip ps vs ++ cl)
+                         (Thena.Engine.Call rest (env (exec m)) wants False
+                            : stack (exec m))
+              }
+
   Op.Call nm args -> case traverse (operandValue (env (exec m))) args of
     Left e   -> failure e m
     Right vs -> case next (it vs) of
@@ -1159,6 +1181,11 @@ perform instr rest m = case operation instr of
   Concat l r -> case (,) <$> text l <*> text r of
     Left e         -> failure e m
     Right (ls, rs) -> produce (VText (ls ++ rs)) m
+
+  -- **Build the closure** (MS5 phase 68b). The environment is captured here and
+  -- not written down, which is the whole reason a lambda is an op and not a
+  -- literal.
+  Op.Lambda ps body -> produce (VClosure ps body (env (exec m))) m
 
   -- **Hand the operand back as the value** (MS5 phase 68a) — what @x = [1, 2]@
   -- runs. Everything the operand needs is already done by 'operandValue', which

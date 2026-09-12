@@ -690,6 +690,33 @@ never appears in `:matches` and `prove` never runs it.
 **A function must produce a value.** `f x = say "hi"` is refused — `say` leaves
 nothing, so there is nothing for `f` to be.
 
+### `instral` has lambdas, and a local shadows a rule
+
+*Decided 2026-09-12.*
+
+```
+signature onTwice : (String -> String) -> String -> String
+onTwice f x = f (f x)
+
+rule go :- then d = \ s -> concat s s
+     ; m = onTwice d "a"                 -- aaaa
+     ; say m
+```
+
+A lambda is a function without a name — it is compiled the same way and applied
+the same way. **In an argument it takes parentheses**, like every other compound
+argument: `once (\ s -> concat s s)`.
+
+**A function type is n-ary, not curried.** `a -> b -> c` is a function of *two*
+arguments; applying a one-argument lambda to two is a type error, because
+`instral` dispatches on arity. Parentheses are what make an arrow a value: in
+`signature f : (a -> b) -> a -> b` the first argument is a function.
+
+**A local shadows a rule.** A word in a body is an op if one bears that name,
+otherwise the local if one is bound, otherwise a rule of that name. So binding a
+name that is also a rule changes what later lines mean — the op words are not
+affected, but rule names are.
+
 ### A declaration begins in column 1
 
 *Decided 2026-09-12. It is why a function needs no keyword.*
