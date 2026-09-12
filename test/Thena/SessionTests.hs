@@ -12,6 +12,8 @@ module Thena.SessionTests (tests) where
 
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
+import Test.Tasty.QuickCheck
+  (counterexample, elements, forAll, listOf1, property, testProperty, withNumTests)
 
 import Thena.Core.Term (GlobalName (..), Ident (..))
 import Thena.Development.Component (Component (..))
@@ -43,7 +45,78 @@ tests =
     , testGroup "the hole ops" holeTests
     , testGroup "the session" sessionTests
     , testGroup "undo" undoTests
+    , undoLaw
     ]
+
+-- --------------------------------------------------------------------------
+-- Undo, over generated scripts (2026-09-13)
+-- --------------------------------------------------------------------------
+
+-- | **Whatever a command did, @:undo@ puts it back.**
+--
+-- 'undoTests' above says this for the shapes phase 34 was about. This says it
+-- for any script the pool below can write, which matters more than it did: the
+-- next milestone is a UI, and a UI's whole relationship with the session is
+-- \"do a thing, then let me take it back\".
+--
+-- **Inside one proof only.** @:undo@ clears at every proof boundary and a
+-- finished @:load@ leaves no history, both because @globals@ is not in a
+-- @Snapshot@ — so the pool has no boundary and no declaration in it, and the
+-- law would be false if it did. That is documented behaviour, not a gap this
+-- test is working around.
+--
+-- **The law is about a command that CHANGED something**, and the qualification
+-- is not a hedge — it is @record@'s rule, found by writing this property
+-- without it. A line whose state is identical to the one before it replaces the
+-- head of the history rather than pushing, deliberately, so that a command that
+-- did nothing does not have to be undone; the consequence is that @:undo@
+-- undoes the last **change** and not the last **line**. Worth knowing before a
+-- UI puts a button on it.
+undoLaw :: TestTree
+undoLaw =
+  testGroup
+    "undo, over generated scripts"
+    [ testProperty "undoing a command that changed something puts it back exactly" $
+        withNumTests 60 $ forAll (listOf1 (elements pool)) $ \cmds ->
+          let prefixes = [ take k cmds | k <- [0 .. length cmds - 1] ]
+              bad =
+                [ (before, cmd, a, b)
+                | (before, cmd) <- zip prefixes cmds
+                , let a = developmentAfter (run (opening ++ before))
+                , let after = developmentAfter (run (opening ++ before ++ [cmd]))
+                , after /= a
+                , let b = developmentAfter (run (opening ++ before ++ [cmd, ":undo"]))
+                , a /= b
+                ]
+           in counterexample (show [ (x, y) | (x, y, _, _) <- take 1 bad ])
+                (property (null bad))
+
+      -- The other half, and it is phase 25d's: a line that did not do what it
+      -- said leaves the proof exactly as it was. Stated over the same pool, so
+      -- a command that fails mid-way and leaves half its work behind fails here.
+    , testProperty "a command that changed nothing is not a change to undo" $
+        withNumTests 60 $ forAll (listOf1 (elements pool)) $ \cmds ->
+          let prefixes = [ take k cmds | k <- [0 .. length cmds - 1] ]
+              bad =
+                [ (before, cmd)
+                | (before, cmd) <- zip prefixes cmds
+                , let a = developmentAfter (run (opening ++ before))
+                , developmentAfter (run (opening ++ before ++ [cmd])) == a
+                , developmentAfter (run (opening ++ before ++ [cmd, cmd])) /= a
+                ]
+           in counterexample (show (take 1 bad)) (property (null bad))
+    ]
+  where
+    opening = [":theorem t : ∀ (A : Type₀) -> A -> A"]
+
+    -- Tactics and moves, no boundary and no declaration: a boundary drops the
+    -- history on purpose and a declaration writes a global, which a snapshot
+    -- does not carry.
+    pool =
+      [ "attack", "intro", "along", "back", "into", "prove", "regret", "solve"
+      , "claim \"k\" ⌜ Type₀ ⌝", "assume \"a\" ⌜ Type₀ ⌝"
+      , "cross type", "reduce", "try-core ⌜ Type₀ ⌝"
+      ]
 
 -- --------------------------------------------------------------------------
 -- The deliverable
