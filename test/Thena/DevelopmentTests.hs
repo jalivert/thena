@@ -1,4 +1,7 @@
-module Thena.DevelopmentTests (tests) where
+-- **'genDevelopment' is exported** (2026-09-12) so that @CursorTests@ can walk
+-- the same corpus. A second copy of a generator drifts, exactly as a second copy
+-- of a word table does.
+module Thena.DevelopmentTests (tests, genDevelopment) where
 
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, testCase, (@?=))

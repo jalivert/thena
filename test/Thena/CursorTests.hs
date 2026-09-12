@@ -13,8 +13,20 @@
 -- Γ_P@ is invisible to everything else in this file.
 module Thena.CursorTests (tests) where
 
+import Data.Either (rights)
+import Data.List (isPrefixOf)
+
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.QuickCheck
+  (counterexample, forAll, property, testProperty, withNumTests)
+
+import Thena.Core.Context (entryVar)
+import Thena.Core.Term (freeVars)
+import Thena.Development.Component (forget)
+import Thena.DevelopmentTests (genDevelopment)
+import Thena.Driver (parseDevelopment)
+import Thena.Global.Env (emptyGlobals)
 
 import Thena.Core.Level (Level (..), LevelVar (..), levelOfNat)
 import Thena.Core.Context (Context, Entry (..))
@@ -63,7 +75,109 @@ tests =
     , testGroup "changing the development" changeTests
     , testGroup "display" displayTests
     , testGroup "a level solution reaches every core term" levelTests
+    , walkedLaws
     ]
+
+-- --------------------------------------------------------------------------
+-- The same laws, at every position of a generated development (2026-09-12)
+-- --------------------------------------------------------------------------
+
+-- | **This module's own header says what to check and why; this checks it
+-- everywhere instead of at hand-picked positions.**
+--
+-- Γ is the thing with teeth, because 'context' reads the prefix by §4.5's rule
+-- and the moves build the prefix by theirs — two pieces of code that never
+-- consult each other. The groups above assert Γ as an exact list at chosen
+-- positions, which is the right way to state a rule. What they cannot say is
+-- that the two agree at /every/ position of every shape.
+--
+-- The corpus is @DevelopmentTests@' generator, imported rather than copied, and
+-- parsed rather than built — so a development is well scoped by construction.
+walkedLaws :: TestTree
+walkedLaws =
+  testGroup
+    "every position of a generated development"
+    [ testProperty "rebuilds to the development it was entered from" $
+        overWalk $ \p cs ->
+          [ "rebuild changed the development" | c <- cs, rebuild c /= p ]
+
+      -- **§4.5, checked against the moves rather than against a fixture.**
+      -- Going along a component adds exactly that component, forgotten; going
+      -- past a constraint adds nothing, because a constraint binds nothing; and
+      -- descending into a guess adds nothing, which is §2.2.1 and is the case
+      -- the module header calls the sharpest.
+    , testProperty "Γ grows exactly as §4.5 says at each move" $
+        overWalk $ \_ cs -> concatMap gammaAt cs
+
+      -- 'back' is @down@\'s inverse, and the two are separate case splits over
+      -- 'TermStep' — 'down' pushes and 'termStep' reads back.
+    , testProperty "back undoes every descent" $
+        overWalk $ \_ cs ->
+          [ "back did not undo a descent"
+          | c <- cs
+          , (_, c') <- descents c
+          , back c' /= Right c
+          ]
+
+      -- **Nothing in view is out of scope.** A free variable of the focused
+      -- term must be bound by Γ at that position — the invariant §4.5 exists to
+      -- support, and the one a mis-pushed step breaks without changing what
+      -- rebuilds.
+    , testProperty "every variable in the focused term is in Γ" $
+        overWalk $ \_ cs ->
+          [ "a free variable is not in Γ: " ++ show (focus c)
+          | c <- cs
+          , OnTerm _ _ t <- [focus c]
+          , v <- freeVars t
+          , v `notElem` map entryVar (context c)
+          ]
+    ]
+  where
+    overWalk k =
+      withNumTests 300 $ forAll (genDevelopment [] 4) $ \src ->
+        case parseDevelopment emptyGlobals [] 500 src of
+          Left _       -> property True
+          Right (p, _) ->
+            let bad = k p (walk 200 [enter p] [])
+             in counterexample (src ++ "\n  " ++ unlines (take 3 bad)) (null bad)
+
+    gammaAt c = case focus c of
+      OnComponent comp ->
+        [ "along did not extend Γ by the component"
+        | c' <- rights [along c]
+        , context c' /= context c ++ [forget comp]
+        ]
+          ++ [ "into a guess changed Γ"
+             | c' <- rights [into c]
+             , context c' /= context c
+             ]
+      OnConstraint _ ->
+        [ "going past a constraint changed Γ"
+        | c' <- rights [along c]
+        , context c' /= context c
+        ]
+      OnTerm {} ->
+        [ "a descent shrank Γ or changed what was already there"
+        | (_, c') <- descents c
+        , not (context c `isPrefixOf` context c')
+        ]
+
+    descents c =
+      [ (part, c')
+      | part <- [Fun, Arg, Dom, Cod, Val, Type, Body, Motive, Target, Param 0, Method 0, Index 0, CanonArg 0]
+      , Right (c', _) <- [down part 0 c]
+      ]
+
+    -- Every position reachable by a forward move, breadth first and bounded.
+    walk :: Int -> [Cursor] -> [Cursor] -> [Cursor]
+    walk 0 _ seen = seen
+    walk _ [] seen = seen
+    walk fuel (c : rest) seen =
+      walk (fuel - 1) (rest ++ next) (c : seen)
+      where
+        next =
+          rights [along c, into c, crossType c, crossValue c]
+            ++ map snd (descents c)
 
 -- --------------------------------------------------------------------------
 -- A test-local way to name a position

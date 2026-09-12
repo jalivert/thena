@@ -46,7 +46,7 @@ tests :: TestTree
 tests =
   testGroup
     "call by name (§8)"
-    [finding, backtracking, arity, recursion, headArguments]
+    [finding, backtracking, arity, recursion, headArguments, frameLifetime]
 
 -- --------------------------------------------------------------------------
 -- Fixtures
@@ -316,3 +316,82 @@ recursion =
                    [Do (Ops.Call (GlobalName "later") [])]
     later      = Rule (GlobalName "later") [] [FocusIsHole] [Do Attack]
     callFirst  = [Do (Ops.Call (GlobalName "first") [])]
+
+
+-- --------------------------------------------------------------------------
+-- The frame stack's lifetime, checked at every step (2026-09-12)
+-- --------------------------------------------------------------------------
+
+-- | **Phase 57's invariant, stated in prose and never asserted.**
+--
+-- @reports\/2026-09-04-choice-points.md@ is the record: @resumeFrom@ used to
+-- /pop/ a returned @Call@, which deleted a frame from under a live choice point,
+-- so backtracking restored a continuation with a hole in it and the machine
+-- reported success having dropped the caller's program. The fix made both
+-- frames have one lifetime — entered, returned, stepped over — and
+-- @CLAUDE.md@ records the consequence in words: **frames are never popped, so a
+-- command's stack reaches its full call depth.**
+--
+-- Nothing checked it. Every test above looks at the outcome of a run; this one
+-- looks at every intermediate state of the same runs, and it is the shape a
+-- regression would take — a stack that shrinks mid-run is the bug that shipped.
+--
+-- The counter goes with it, for §7.4's reason: a name already handed out must
+-- never be handed out again, and a stale counter coming back is a defect this
+-- project has shipped once (MS3 phase 33c, @declare@).
+frameLifetime :: TestTree
+frameLifetime =
+  testGroup
+    "the frame stack only ever grows, and so does the counter"
+    [ check "a recursive call, which is where the depth comes from"
+        (bases [recurses, stops]) [Do (Ops.Call (GlobalName "down") [])]
+    , check "a call with two live clauses, which builds a choice point"
+        (bases [choiceA, choiceB]) [Do (Ops.Call (GlobalName "either") [])]
+    , check "…and one where the first alternative fails, so it backtracks"
+        (bases [failsFirst, choiceB]) [Do (Ops.Call (GlobalName "either") [])]
+    , check "a call inside a call, so a frame returns under a live choice point"
+        (bases [outer, choiceA, choiceB]) [Do (Ops.Call (GlobalName "outer") [])]
+    ]
+  where
+    check label base is = testCase label (walk (machine base is))
+
+    -- Step to a stop, asserting the two monotonicities at every transition.
+    walk m = go (0 :: Int) m
+      where
+        go k m0
+          | k > 400 = pure ()   -- a run that will not stop is another test's job
+          | otherwise = case step m0 of
+              Continue m1    -> compare' m0 m1 >> go (k + 1) m1
+              Saying _ m1    -> compare' m0 m1 >> go (k + 1) m1
+              Asking _ _     -> pure ()
+              Yielding _ _   -> pure ()
+              _              -> pure ()
+
+        compare' before after = do
+          let d0 = length (stack (exec before))
+              d1 = length (stack (exec after))
+          if d1 >= d0
+            then pure ()
+            else assertFailure
+                   ("the frame stack shrank from " ++ show d0 ++ " to " ++ show d1)
+          if names after >= names before
+            then pure ()
+            else assertFailure
+                   ("the counter went backwards: " ++ show (names before)
+                      ++ " then " ++ show (names after))
+
+    recurses = Rule (GlobalName "down") [] [FocusIsHole]
+                 [Do Attack, Do (Ops.Call (GlobalName "down") [])]
+    stops    = Rule (GlobalName "down") [] [FocusIsGuess] [Do Regret]
+
+    -- Two clauses of one name, both of whose heads pass at a hole: the peek
+    -- finds two candidates and builds a @Choice@.
+    choiceA  = Rule (GlobalName "either") [] [FocusIsHole] [Do Attack]
+    choiceB  = Rule (GlobalName "either") [] [FocusIsHole] [Do Attack, Do Regret]
+
+    -- The first alternative runs an op that cannot apply here, so the search
+    -- unwinds into the choice point and takes the second.
+    failsFirst = Rule (GlobalName "either") [] [FocusIsHole] [Do Regret]
+
+    outer = Rule (GlobalName "outer") [] [FocusIsHole]
+              [Do (Ops.Call (GlobalName "either") []), Do Regret]
