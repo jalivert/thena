@@ -37,6 +37,7 @@ module Thena.Driver
   , loadSource
   , loadProofSource
   , RuleFileError (..)
+  , InstralTypeError
   , loadRuleBases
   , baseHead
   , parseCore
@@ -123,6 +124,7 @@ import Thena.Ops
   , Value (..)
   )
 import Data.Either (partitionEithers)
+import Thena.Instral.Infer (InstralTypeError, inferProgram)
 import Thena.Rules
   ( RuleBase (..)
   , RuleError
@@ -132,6 +134,7 @@ import Thena.Rules
   , resolveRule
   , resolveBlock
   , RuleError (..)
+  , baseRules
   , ruleBase
   , validate
   )
@@ -417,6 +420,14 @@ data Response
   | BasesListed [RuleBase]      -- ^ @:bases@ — name, description, path
   | RulesListed [RuleBase]      -- ^ @:rules@ — the rules themselves, by base
   | RuleFileRefused FilePath RuleFileError
+  | BasesIllTyped [InstralTypeError]
+    -- ^ every file read and parsed, and the **program** they make does not type
+    -- check (MS5 phase 66c).
+    --
+    -- **It has no path**, and that is the point: inference is over every loaded
+    -- base at once, because a rule may call one written below it or one in a
+    -- base loaded later ('Thena.Ops.Call'). A per-file answer would be a
+    -- different question.
     -- ^ @:load ‹path›@. The driver may not touch a file — §12 invariant 4 puts
     -- all IO in "Thena.Repl" — so it asks, and the caller reads the file and
     -- hands the contents back to 'loadSource'
@@ -1799,12 +1810,18 @@ resolveAll raws = case (concat resolveErrs, concatMap validate ok) of
 -- **All or nothing.** A file that will not load leaves the previous list in
 -- place, so a session never ends up searching half of what was asked for.
 loadRuleBases :: Session -> [(FilePath, String)] -> (Session, Response)
-loadRuleBases s = go [] 
+loadRuleBases s = go []
   where
-    go acc [] =
-      ( s { sessionMachine = (sessionMachine s) { rules = acc } }
-      , BasesLoaded acc
-      )
+    -- **Inference runs here and nowhere earlier** (MS5 phase 66c), for the
+    -- reason in 'BasesIllTyped': a rule's signature is not decidable until every
+    -- base is in hand. 'Thena.Rules.validate' stays where it is — it is per-rule
+    -- and answers a question one rule can answer.
+    go acc [] = case snd (inferProgram (concatMap baseRules acc)) of
+      []   ->
+        ( s { sessionMachine = (sessionMachine s) { rules = acc } }
+        , BasesLoaded acc
+        )
+      errs -> (s, BasesIllTyped errs)
     go acc ((path, src) : more) =
       case readRuleBase path src of
         Left e  -> (s, RuleFileRefused path e)

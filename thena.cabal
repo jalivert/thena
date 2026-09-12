@@ -52,6 +52,7 @@ library
         Thena.Surface.Zipper
         Thena.Instral.Concrete
         Thena.Instral.Type
+        Thena.Instral.Infer
         Thena.Syntax.Concrete
         Thena.Syntax.Lexer
         Thena.Syntax.Parser
@@ -107,6 +108,7 @@ test-suite thena-test
         Thena.NoConfusionTests
         Thena.DispatchTests
         Thena.ElaborateTests
+        Thena.InstralInferTests
         Thena.InstralTypeTests
         Thena.RulesTests
         Thena.RuleSyntaxTests

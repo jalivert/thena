@@ -26,6 +26,7 @@ import qualified Thena.KernelTests
 import qualified Thena.LexerTests
 import qualified Thena.LoadTests
 import qualified Thena.NoConfusionTests
+import qualified Thena.InstralInferTests
 import qualified Thena.InstralTypeTests
 import qualified Thena.RulesTests
 import qualified Thena.RuleSyntaxTests
@@ -65,6 +66,7 @@ main =
       , Thena.LexerTests.tests
       , Thena.LoadTests.tests
       , Thena.NoConfusionTests.tests
+      , Thena.InstralInferTests.tests
       , Thena.InstralTypeTests.tests
       , Thena.RulesTests.tests
       , Thena.RuleSyntaxTests.tests

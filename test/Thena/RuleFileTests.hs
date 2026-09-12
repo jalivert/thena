@@ -365,10 +365,13 @@ returning =
       -- would not run and the answer would be @aa@.
       testCase "and a nested call in an operand is one of the steps" $
         said "once \"a\"" @?= Just "aa"
-    , -- A body with no @return@, bound. It fails where the value was wanted,
-      -- naming the binding it could not fill.
-      testCase "a rule that returns nothing fails where the value was wanted" $
-        stuck "quiet" @?= Just (NothingReturned "x")
+    , -- **A callable some of whose clauses return and some do not.** That is
+      -- the case inference cannot rule out — the clause that runs is chosen at
+      -- run time — so 'Thena.Errors.NothingReturned' is still reachable and
+      -- still names the binding it could not fill. A callable NO clause of
+      -- which returns is refused when the file loads now; see 'illTyped'.
+      testCase "a clause that does not return fails where the value was wanted" $
+        stuck "half" @?= Just (NothingReturned "x")
     ]
   where
     base =
@@ -376,8 +379,9 @@ returning =
       \rule twice t :- then s = concat t t ; return s\n\
       \rule shout t :- then m = twice (twice t) ; say m\n\
       \rule once t :- then m = twice t ; say m\n\
-      \rule mute t :- then say \"nothing to give\"\n\
-      \rule quiet t :- then x = mute t ; say x\n"
+      \rule sometimes t :- when focus-is-guess then return t\n\
+      \rule sometimes t :- then say \"nothing to give\"\n\
+      \rule half t :- then x = sometimes t ; say x\n"
 
     said line = case snd (command (loaded ()) line) of
       Ran msgs _ -> lastOf msgs

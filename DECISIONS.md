@@ -636,6 +636,38 @@ so `core\`Nat\`` cannot find `Nat` when it is written — but the type system do
 not tell the two apart, so `resolve-core : Core -> Core` and giving it a term
 that is already resolved fails when it runs, not when it loads.
 
+### A rule base is type checked when it loads
+
+*Decided 2026-09-12.*
+
+Every rule in every loaded base is inferred together, at load, and **a base that
+does not type check is not installed** — the same all-or-nothing a syntax error
+already gets. Nothing is annotated; a rule's signature comes from its head
+predicates and from the ops its body uses.
+
+```
+rule elaborate t :- when focus-is-hole (surface-is-name t) then …
+```
+
+`surface-is-name` is what makes `t` a `Surface`, so `elaborate : Surface -> ()`.
+`:load` reports what it found and leaves the previous rules in place:
+
+```
+the rules do not type check:
+  oops, instruction 1: wanted Core, got Surface
+```
+
+Two things that used to fail halfway through a proof now fail at load: a literal
+of the wrong kind (`prim-try 3`), and **binding a call to a rule no clause of
+which returns**. A rule *some* of whose clauses return can still fail at run
+time, because which clause runs is decided then.
+
+**A call to a name nothing defines is still allowed** — a rule may call one in a
+base you load later, so it is reported when the search finds no clause.
+
+**A rule is inferred at one type**, not generalised: a helper used at `Surface`
+in one place and `Core` in another is an error, not a polymorphic rule.
+
 ### `goto` takes a variable; `goto-named` takes a name
 
 *Decided 2026-09-12. Renames what you type at the prompt.*

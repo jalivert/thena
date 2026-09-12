@@ -157,6 +157,7 @@ import Thena.Syntax.Parser (ParseError (..))
 
 import Data.Foldable (toList)
 import Data.List (intercalate, partition)
+import Thena.Instral.Infer (renderInstralTypeError)
 import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..))
 --
 -- The prelude is loaded first (§9, phase 11) and **silently on success** — it
@@ -279,6 +280,10 @@ loadRuleFiles s paths = do
             -- A refusal is a problem and not output: the whole load was
             -- abandoned, so there is nothing to report as having happened.
             RuleFileRefused p e -> (s, [], renderRuleFileError p e)
+            -- **The same bargain one step later** (MS5 phase 66c): the files
+            -- all read and parsed, and the program they make does not type
+            -- check, so nothing was installed and nothing happened to report.
+            BasesIllTyped _     -> (s, [], renderResponse s resp)
             _                   -> (s', renderResponse s' resp, [])
 
 -- | Read a file and run it: the session after, **what its lines printed**, and
@@ -446,6 +451,10 @@ renderResponse s resp = case resp of
   BasesListed bs   -> renderBases bs
   RulesListed bs   -> renderRuleBases bs
   RuleFileRefused p e -> renderRuleFileError p e
+  -- **No path on the first line**, because the program is every base at once
+  -- (MS5 phase 66c) and a site names the rule and the instruction inside it.
+  BasesIllTyped errs ->
+    ("the rules do not type check:" : map (("  " ++) . renderInstralTypeError) errs)
   Helped rows   -> renderHelp rows
   Matched rs    -> renderMatches rs
   Choices cs    -> renderChoices cs
