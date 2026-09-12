@@ -18,6 +18,7 @@ module Thena.Ops
   , Op (..)
   , produces
   , operandsOf
+  , refsIn
   , opKeyword
   , partWords
   , partOf
@@ -121,11 +122,35 @@ data Value
     -- the lexer would take two constructor names away from every object
     -- language. They are read where an operand is read, before a local is
     -- looked up, which is what @cross type@ and @ask \"?\" name@ already do.
+  | VList    [Value]
+    -- ^ @[a, b, c]@ (MS5 phase 65) — **homogeneous by intention and not by
+    -- construction**: nothing checks that the elements agree until phase 66's
+    -- type system, exactly as nothing checks that an op was given a term.
+  | VOption  (Maybe Value)
+    -- ^ @some x@ and @none@ (MS5 phase 65). **Words rather than notation**,
+    -- where the list and the pair got literals: there is no obvious bracket for
+    -- /absent/, and a word that says @none@ says it better than any symbol
+    -- would.
   deriving (Eq, Show)
 
 data Operand
   = Ref Name  -- ^ read a name bound earlier in this body
   | Lit Value -- ^ a value the compiler or rule author wrote down
+  | ListOf [Operand]
+    -- ^ @[a, b, c]@ (MS5 phase 65).
+    --
+    -- **Not a 'Lit', and it could not be one**: an element may be a 'Ref', so
+    -- what the list /is/ depends on the environment and is only known when the
+    -- operand is read. That is what makes an operand a small expression rather
+    -- than a name or a constant — §6.0.1 of
+    -- @discussion\/the-five-languages.md@ saw it coming, and phase 63's nested
+    -- call was the first half of it.
+    --
+    -- It stays **pure**: building a list reads the environment and does nothing
+    -- else, where a nested call runs a rule and is therefore lifted into a
+    -- statement of its own.
+  | PairOf Operand Operand
+    -- ^ @(a, b)@ (MS5 phase 65), and the same two remarks apply.
   deriving (Eq, Show)
 
 -- | What an operand denotes, or the name that had nothing bound to it.
@@ -144,6 +169,12 @@ operandIn :: Env -> Operand -> Either Name Value
 operandIn e o = case o of
   Lit v -> Right v
   Ref n -> maybe (Left n) Right (lookup n e)
+  -- **A list and a pair are built here, not looked up** (MS5 phase 65). Their
+  -- elements are operands, so an unbound name inside one is reported as itself
+  -- and the whole operand fails — which is what makes the rule /every @Ref@ in
+  -- a body must be bound/ still true of an element.
+  ListOf os -> VList <$> traverse (operandIn e) os
+  PairOf a b -> VPair <$> operandIn e a <*> operandIn e b
 
 -- | @x = op …@ or @op …@. Binding an op that produces nothing is caught by the
 -- load-time validation pass that rules will need anyway (§2.4, §7.2, phase 15);
@@ -305,6 +336,27 @@ data Op
     -- because there is nothing to choose between — a block is one body, so
     -- there is no candidate list and no choice point. That is the whole of the
     -- difference.
+  | Some Operand
+    -- ^ @some x@ — an 'VOption' that is there (MS5 phase 65).
+  | None
+    -- ^ @none@ — one that is not.
+  | ListHead Operand
+    -- ^ @list-head xs@ — the first element, as an option, so that the empty
+    -- list needs no separate answer. **The words carry their type** because
+    -- @head@ and @first@ alone would each be the sort of name that says nothing
+    -- about what it is on — his standing objection to @-core@ is to a suffix
+    -- that means nothing, not to a name that says what it is about.
+  | ListTail Operand
+    -- ^ @list-tail xs@ — everything after the first element; the empty list's
+    -- tail is the empty list.
+  | PairFirst Operand
+    -- ^ @pair-first p@
+  | PairSecond Operand
+    -- ^ @pair-second p@
+  | OptionValue Operand
+    -- ^ @option-value o@ — what is inside, and a failure when there is nothing.
+    -- **A rule asks first**, with @option-is-some@ in its head, which is how
+    -- every other shape question is asked here.
   | Return Operand
     -- ^ **what this rule hands back to whoever called it** (MS5 phase 63) —
     -- @return ‹operand›@.
@@ -917,6 +969,13 @@ produces o = case o of
   -- with 'Thena.Errors.NothingReturned'.
   Call _ _     -> True
   Return _     -> False   -- it ends a body; there is nothing after it to bind
+  Some _       -> True
+  None         -> True
+  ListHead _   -> True
+  ListTail _   -> True
+  PairFirst _  -> True
+  PairSecond _ -> True
+  OptionValue _ -> True
   Eliminate _  -> False
   ApplyNext _ _ -> True  -- the spine, one argument longer
   ExpandImplicits _ -> True
@@ -937,6 +996,19 @@ produces o = case o of
 --
 -- A total case split, so @-Wall@ makes a new op say whether it reads
 -- anything.
+-- | Every name an operand reads, however deeply (MS5 phase 65).
+--
+-- **Needed the moment an operand stopped being a leaf.** @validate@ and the
+-- head-scope check both used to pattern-match @Ref n <- …@ over a flat list,
+-- which sees nothing inside @[a, b]@ — so an unbound name in a list would have
+-- reached the engine instead of being refused when the base loaded.
+refsIn :: Operand -> [Name]
+refsIn o = case o of
+  Ref n      -> [n]
+  Lit _      -> []
+  ListOf os  -> concatMap refsIn os
+  PairOf a b -> refsIn a ++ refsIn b
+
 operandsOf :: Op -> [Operand]
 operandsOf o = case o of
   Yield a      -> [a]
@@ -997,6 +1069,13 @@ operandsOf o = case o of
   Apply a      -> [a]
   Call _ as    -> as
   Return a     -> [a]
+  Some a       -> [a]
+  None         -> []
+  ListHead a   -> [a]
+  ListTail a   -> [a]
+  PairFirst a  -> [a]
+  PairSecond a -> [a]
+  OptionValue a -> [a]
   Prove        -> []
   DefineData _ -> []
   Along        -> []
@@ -1123,6 +1202,15 @@ data Test
     -- negation.
   | LetIsAnnotated Operand         -- ^ a @let@ whose type was written (49b)
   | LetIsBare Operand              -- ^ … and one whose type was not
+    -- **The questions @instral@ asks about its own data** (MS5 phase 65). They
+    -- are head tests and not ops because a head is how a rule branches: a rule
+    -- that walks a list is two clauses, one for each shape, exactly as
+    -- @intro-binders@ is two clauses over a surface term. That is what makes
+    -- the data usable without @if@, and without a second control structure.
+  | ListIsEmpty Operand
+  | ListIsCons Operand
+  | OptionIsSome Operand
+  | OptionIsNone Operand
     -- ^ **Two positive tests rather than one and its negation.** The head
     -- language has no negation, and the two clauses of @E⟦let⟧@ differ by
     -- whether there is an annotation to elaborate.
@@ -1196,6 +1284,13 @@ opKeyword o = case o of
   Prove        -> "prim-prove"
   Call _ _     -> "call"
   Return _     -> "return"
+  Some _       -> "some"
+  None         -> "none"
+  ListHead _   -> "list-head"
+  ListTail _   -> "list-tail"
+  PairFirst _  -> "pair-first"
+  PairSecond _ -> "pair-second"
+  OptionValue _ -> "option-value"
   FreshName _  -> "fresh-name"
   Here         -> "here"
   Arrow _ _    -> "arrow"

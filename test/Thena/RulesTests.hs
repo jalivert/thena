@@ -61,6 +61,7 @@ import Thena.Surface.Zipper (rootedAt)
 import Thena.Rules
   ( RuleBase
   , RuleError (..)
+  , clauses
   , RuleIter
   , allRules
   , hasNext
@@ -80,6 +81,7 @@ tests =
     , validateTests
     , producesTests
     , returnTests
+    , dataTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -352,6 +354,89 @@ validateTests =
 -- 'produces', checked against the engine (§7.2)
 -- --------------------------------------------------------------------------
 
+-- | @instral@'s own data (MS5 phase 65).
+--
+-- **The mechanism, not a caller** again: nothing in the shipped base builds a
+-- list. What is worth pinning is that the shapes are asked about in a /head/,
+-- which is how a rule branches — the reason the data needs no @if@ and no
+-- second control structure.
+dataTests :: TestTree
+dataTests =
+  testGroup
+    "instral's data structures"
+    [ testCase "a list is built from its elements, references and all" $
+        valueOf [Bind "x" (Ops.Concat (text "a") (text "b"))]
+                (Ops.Some (ListOf [Ref "x", text "c"]))
+          >>= (@?= Just (VOption (Just (VList [VText "ab", VText "c"]))))
+
+    , testCase "and a pair the same way" $
+        valueOf [] (Ops.PairFirst (PairOf (text "a") (Lit (VInt 1))))
+          >>= (@?= Just (VText "a"))
+
+    , -- An unbound name inside a literal is the body's mistake and is caught
+      -- when the base loads, which needs 'Thena.Ops.refsIn' to look inside.
+      testCase "an unbound name inside a list is refused at load" $
+        validate (named "r" [] [Do (Ops.Say (ListOf [Ref "nope"]))])
+          @?= [UnboundInRule (GlobalName "r") 0 "nope"]
+
+    , testCase "list-head of the empty list is none" $
+        valueOf [] (Ops.ListHead (ListOf []))
+          >>= (@?= Just (VOption Nothing))
+
+    , testCase "and of a non-empty one is some" $
+        valueOf [] (Ops.ListHead (ListOf [text "a"]))
+          >>= (@?= Just (VOption (Just (VText "a"))))
+
+    , testCase "list-tail drops one" $
+        valueOf [Bind "t" (Ops.ListTail (ListOf [text "a", text "b"]))]
+                (Ops.ListHead (Ref "t"))
+          >>= (@?= Just (VOption (Just (VText "b"))))
+    , testCase "and the empty list has an empty tail" $
+        valueOf [Bind "t" (Ops.ListTail (ListOf []))] (Ops.ListHead (Ref "t"))
+          >>= (@?= Just (VOption Nothing))
+
+    , testCase "option-value of none fails rather than answering" $
+        failureOf [Do (Ops.OptionValue (Lit (VOption Nothing)))]
+          >>= (@?= Just NothingThere)
+
+    , -- **The shape questions are asked in a HEAD**, which is how a rule
+      -- branches — so they are tested through 'clauses', the thing that
+      -- actually consults them, rather than through the predicate directly.
+      testCase "a head picks the clause the shape fits" $ do
+        clauseFor [VList []]          @?= ["empty"]
+        clauseFor [VList [VText "a"]] @?= ["cons"]
+    , -- A value of the wrong kind is simply not that shape: a head asks a
+      -- question, it does not fail.
+      testCase "and a value of the wrong kind fits neither" $
+        clauseFor [VText "a"] @?= []
+    ]
+  where
+    run is = runOut (machineIn emptyGlobals (holeAt type1) is)
+
+    valueOf before o = pure $ case run (before ++ [Bind "r" o]) of
+      Left _  -> Nothing
+      Right m -> lookup "r" (Thena.Engine.env (exec m))
+
+    failureOf is = pure $ case run is of
+      Left e  -> Just e
+      Right _ -> Nothing
+
+    -- Two clauses of one name, told apart by the shape of the argument.
+    shapes =
+      ruleBase "shapes" Nothing ""
+        [ Rule (GlobalName "shape") ["xs"] [Ops.ListIsEmpty (Ref "xs")]
+            [Do (Ops.Say (Lit (VText "empty")))]
+        , Rule (GlobalName "shape") ["xs"] [Ops.ListIsCons (Ref "xs")]
+            [Do (Ops.Say (Lit (VText "cons")))]
+        ]
+
+    clauseFor vs =
+      [ w
+      | r <- drain (clauses [shapes] emptyGlobals (holeAt type1)
+                            (GlobalName "shape") vs)
+      , Do (Ops.Say (Lit (VText w))) <- ruleBody r
+      ]
+
 -- | What a rule hands back (MS5 phase 63).
 --
 -- **The mechanism, not a caller.** Nothing in @rules/standard.thena.rules@ wants
@@ -476,6 +561,17 @@ producesTests =
       , ("app-head",         e,   hole, [],           Ops.AppHead succZero)
       , ("app-first-argument", e, hole, [],           Ops.AppFirstArgument succZero)
       , ("app-tail",         e,   hole, [],           Ops.AppTail succZero)
+        -- The data structures (MS5 phase 65). A list and a pair are built by the
+        -- operand itself, so what is exercised here is the option's two
+        -- constructors and the five accessors.
+      , ("some",         e, hole, [],            Ops.Some (text "x"))
+      , ("none",         e, hole, [],            Ops.None)
+      , ("list-head",    e, hole, [],            Ops.ListHead (ListOf [text "x"]))
+      , ("list-tail",    e, hole, [],            Ops.ListTail (ListOf [text "x"]))
+      , ("pair-first",   e, hole, [],            Ops.PairFirst (PairOf (text "x") (text "y")))
+      , ("pair-second",  e, hole, [],            Ops.PairSecond (PairOf (text "x") (text "y")))
+      , ("option-value", e, hole, [Bind "o" (Ops.Some (text "x"))],
+           Ops.OptionValue (Ref "o"))
       , ("apply-next",       nat, holeAt natType, [],
            Ops.ApplyNext (term (Global (GlobalName "succ") [])) (text "a"))
       ]

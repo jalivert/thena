@@ -759,6 +759,36 @@ block's own bindings survive to the next line while a rule is suspended.
 You can break the rule you are standing in — shadow one of its locals and its
 body will go wrong. That is allowed on purpose.
 
+### `instral` has lists, pairs and options, and you take them apart in a rule's head
+
+*Decided 2026-09-12.*
+
+```
+rule join xs :- when (list-is-empty xs) then return ""
+rule join xs :- when (list-is-cons xs)
+  then h = list-head xs ; c = option-value h ; t = list-tail xs
+     ; r = join t ; s = concat c r ; return s
+```
+
+`[a, b, c]` is a list and `(a, b)` is a pair; an option is `some x` or `none`.
+The elements are ordinary operands, so `[x, "c"]` reads `x` where the list is
+built.
+
+**There is no `if` and no `case`, and none is needed**: a rule branches on its
+head, so a function over a list is two clauses, one per shape. `list-is-empty`,
+`list-is-cons`, `option-is-some` and `option-is-none` are head tests like every
+other question a rule asks.
+
+`list-head` answers an *option*, so the empty list needs no separate answer.
+`option-value` on `none` fails — ask with `option-is-some` first.
+
+**A compound argument is parenthesised, inside a literal as anywhere else**:
+`[(g a), b]`, and `((g a), b)` for a pair whose first component is a call.
+
+**You cannot bind a literal to a name.** `x = [1, 2]` is refused: the right-hand
+side of a binding is an operation, so a value comes from an op or from a rule
+that returns one. `f [1, 2]` and `return [1, 2]` are both fine.
+
 ### `instral` has four primitive values
 
 *Decided 2026-09-12.*

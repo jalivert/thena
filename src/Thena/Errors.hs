@@ -122,6 +122,16 @@ data FailReason
     -- until there is a development to resolve against.
   | ExpectedTerm
     -- ^ an operand was not a @VTerm@ holding a core term
+  | ExpectedList
+    -- ^ an operand was not a @VList@ (MS5 phase 65)
+  | ExpectedPair
+    -- ^ an operand was not a @VPair@ (MS5 phase 65)
+  | ExpectedOption
+    -- ^ an operand was not a @VOption@ (MS5 phase 65)
+  | NothingThere
+    -- ^ @option-value none@ (MS5 phase 65). **A rule asks first** — the head
+    -- test @option-is-some@ is how, and it is the same shape as every other
+    -- question about a value here.
   | CannotMove MoveError
     -- ^ a navigation op asked for a move the focus does not have (§4.0 C4)
 

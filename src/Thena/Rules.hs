@@ -54,6 +54,7 @@ import Thena.Ops
   , Test (..)
   , Value (..)
   , operandsOf
+  , refsIn
   , partOf
   , partWords
   , produces
@@ -294,6 +295,12 @@ holds env cur args t = case t of
   LambdaBindsOne o        -> surfaceIs o bindsOne
   LetIsAnnotated o        -> surfaceIs o isAnnotatedLet
   LetIsBare o             -> surfaceIs o isBareLet
+  -- @instral@'s own data (MS5 phase 65). They read the operand and nothing
+  -- else, so they are as cheap as 'holds' needs a head to be.
+  ListIsEmpty o           -> valueIs o (\v -> case v of VList vs -> null vs; _ -> False)
+  ListIsCons o            -> valueIs o (\v -> case v of VList vs -> not (null vs); _ -> False)
+  OptionIsSome o          -> valueIs o (\v -> case v of VOption x -> x /= Nothing; _ -> False)
+  OptionIsNone o          -> valueIs o (\v -> case v of VOption x -> x == Nothing; _ -> False)
   where
     -- Written down, then reduced: §8's "head matching runs whnf", because a
     -- goal typed @id Type₀ (Nat -> Nat)@ is a Π and must match.
@@ -311,6 +318,13 @@ holds env cur args t = case t of
       Left _             -> True
       Right (VSurface z) -> p (Zipper.focus z)
       Right _            -> False
+
+    -- The same shape one layer up: an argument nobody supplied does not exclude
+    -- the rule (MS4 phase 47's reading), and a value of the wrong kind answers
+    -- False rather than failing — a head asks a question, it does not run.
+    valueIs o p = case Op.operandIn args o of
+      Left _  -> True
+      Right v -> p v
 
     isName         s = case s of SurfaceName _ -> True; _ -> False
     isUniverse     s = case s of SurfaceUniverse _ -> True; _ -> False
@@ -424,7 +438,7 @@ validate r = reserved ++ headScope ++ go 0 (initiallyBound r) (ruleBody r)
     headScope =
       [ UnboundInHead nm n
       | t <- ruleHead r
-      , Ref n <- testOperands t
+      , n <- concatMap refsIn (testOperands t)
       , n `notElem` ruleParams r
       ]
 
@@ -450,7 +464,10 @@ validate r = reserved ++ headScope ++ go 0 (initiallyBound r) (ruleBody r)
       _                           -> []
 
     scope i bound o =
-      [ UnboundInRule nm i n | Ref n <- operandsOf o, n `notElem` bound ]
+      [ UnboundInRule nm i n
+      | n <- concatMap refsIn (operandsOf o)
+      , n `notElem` bound
+      ]
 
 -- | The words @instral@ reads as literals rather than as names (MS5 phase 64).
 --
@@ -534,6 +551,12 @@ headOperand o = case o of
   RawText t -> Just (Lit (VText t))
   RawChar c -> Just (Lit (VChar c))
   RawPos k  -> Just (Lit (VInt k))
+  -- A list and a pair are built from operands and nothing is run to build one,
+  -- so a head may carry them — under the same rule as every other literal (MS5
+  -- phase 65). Their elements are checked the same way, which is what keeps a
+  -- region and a nested call out of them too.
+  RawList os   -> ListOf <$> traverse headOperand os
+  RawPairOf a b -> PairOf <$> headOperand a <*> headOperand b
   -- **A tagged region may not appear in a head** (MS5 phase 61b). A head is
   -- evaluated by 'holds' to build the match list, cheaply and without effects;
   -- a region would make dispatch parse an embedded language to find out what
@@ -593,15 +616,27 @@ hoisted :: Int -> [RawOperand] -> ([(Name, RawOp)], [RawOperand])
 hoisted i as = let (_, bs, os) = go 0 as in (bs, os)
   where
     go k []       = (k, [], [])
-    go k (o : os) = case o of
+    go k (o : os) =
+      let (k1, bs1, o') = one k o
+          (k2, bs2, os') = go k1 os
+       in (k2, bs1 ++ bs2, o' : os')
+
+    -- **A literal is walked into** (MS5 phase 65): @f [g a, b]@ must lift the
+    -- @g a@ exactly as @f (g a)@ does, or a call inside a list would reach
+    -- 'ref' — which refuses it — and the list would be unwritable with anything
+    -- computed in it.
+    one k o = case o of
       RawNested w inner ->
         let (k1, bs1, inner') = go (k + 1) inner
             n                 = "(" ++ show i ++ ":" ++ show (k :: Int) ++ ")"
-            (k2, bs2, os')    = go k1 os
-         in (k2, bs1 ++ [(n, RawOp w inner')] ++ bs2, RawRef n : os')
-      _ ->
-        let (k1, bs, os') = go k os
-         in (k1, bs, o : os')
+         in (k1, bs1 ++ [(n, RawOp w inner')], RawRef n)
+      RawList os ->
+        let (k1, bs, os') = go k os in (k1, bs, RawList os')
+      RawPairOf a b ->
+        let (k1, bs1, a') = one k a
+            (k2, bs2, b') = one k1 b
+         in (k2, bs1 ++ bs2, RawPairOf a' b')
+      _ -> (k, [], o)
 
 -- | An op word and its written arguments, resolved.
 --
@@ -719,6 +754,8 @@ operation g i (RawOp w as)
       -- it wanted a term fails with 'Thena.Errors.ExpectedTerm', and saying so
       -- earlier is the type system's job (@ms2\/CLOSEOUT.md@ 4b, phase 66).
       RawPos k  -> Right (Lit (VInt k))
+      RawList os    -> ListOf <$> traverse ref os
+      RawPairOf a b -> PairOf <$> ref a <*> ref b
       -- **A tagged region is parsed here, at load** (MS5 phase 61b, §6.0.1), so
       -- that a syntax error in an embedded term arrives with every other syntax
       -- error rather than when a rule happens to run.
@@ -748,12 +785,17 @@ operation g i (RawOp w as)
       , ("prim-solve", Solve), ("prim-abandon", Abandon), ("goal", Goal)
       , ("fresh-universe", Op.FreshUniverse)
       , ("here", Here)
+      , ("none", Op.None)
       , ("prim-prove", Prove)
       , ("pop-development", Op.PopDevelopment)
       ]
     unary =
       [ ("say", Say), ("yield", Op.Yield), ("prim-try", Try)
       , ("return", Op.Return)
+      , ("some", Op.Some)
+      , ("list-head", Op.ListHead), ("list-tail", Op.ListTail)
+      , ("pair-first", Op.PairFirst), ("pair-second", Op.PairSecond)
+      , ("option-value", Op.OptionValue)
       , ("goto", Goto), ("push-development", Op.PushDevelopment)
       , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
       , ("typeof", Typing), ("expose", Op.Expose), ("resolve-core", Op.ResolveCore), ("fresh-name", FreshName), ("prim-apply", Op.Apply)
@@ -854,6 +896,10 @@ withOperands t os = case (t, os) of
   (LambdaBindsOne _, [o])        -> Just (LambdaBindsOne o)
   (LetIsAnnotated _, [o])        -> Just (LetIsAnnotated o)
   (LetIsBare _, [o])             -> Just (LetIsBare o)
+  (ListIsEmpty _, [o])           -> Just (ListIsEmpty o)
+  (ListIsCons _, [o])            -> Just (ListIsCons o)
+  (OptionIsSome _, [o])          -> Just (OptionIsSome o)
+  (OptionIsNone _, [o])          -> Just (OptionIsNone o)
   _                      -> Nothing
 
 -- | What a test was written with, in written order. 'Thena.Ops.operandsOf'\'s
@@ -886,6 +932,10 @@ testOperands t = case t of
   LambdaBindsOne o        -> [o]
   LetIsAnnotated o        -> [o]
   LetIsBare o             -> [o]
+  ListIsEmpty o           -> [o]
+  ListIsCons o            -> [o]
+  OptionIsSome o          -> [o]
+  OptionIsNone o          -> [o]
 
 -- | The word a 'Test' is written with. Total, so @-Wall@ makes a new test say
 -- how it is spelled — 'Thena.Ops.opKeyword'\'s trick, one type over.
@@ -920,6 +970,10 @@ testWord t = case t of
   LambdaBindsOne _        -> "lambda-binds-one"
   LetIsAnnotated _        -> "let-is-annotated"
   LetIsBare _             -> "let-is-bare"
+  ListIsEmpty _           -> "list-is-empty"
+  ListIsCons _            -> "list-is-cons"
+  OptionIsSome _          -> "option-is-some"
+  OptionIsNone _          -> "option-is-none"
 
 -- | Every test there is. A list and not a case split, so it cannot be total —
 -- 'testWord' is what @-Wall@ guards, and "Thena.RuleSyntaxTests" checks this
@@ -950,4 +1004,8 @@ everyTest =
   , LambdaBindsOne (Lit (VText ""))
   , LetIsAnnotated (Lit (VText ""))
   , LetIsBare (Lit (VText ""))
+  , ListIsEmpty (Lit (VText ""))
+  , ListIsCons (Lit (VText ""))
+  , OptionIsSome (Lit (VText ""))
+  , OptionIsNone (Lit (VText ""))
   ]

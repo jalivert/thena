@@ -126,4 +126,8 @@ data RawOperand
   | RawText String
   | RawChar Char
     -- ^ @'c'@ (MS5 phase 64).
+  | RawList [RawOperand]
+    -- ^ @[a, b, c]@ (MS5 phase 65).
+  | RawPairOf RawOperand RawOperand
+    -- ^ @(a, b)@ (MS5 phase 65).
   deriving (Eq, Show)

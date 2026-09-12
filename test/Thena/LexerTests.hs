@@ -171,6 +171,19 @@ tests =
         , fails "one that is never closed" "'a"
         ]
     , testGroup
+        -- Reserved characters with no token rule until MS5 phase 65: they
+        -- could not appear in a name and could not be written either, so
+        -- giving them tokens took nothing away.
+        "brackets and the comma"
+        [ lexes "a list" "[a, b]"
+            [TLBracket, TIdent "a", TComma, TIdent "b", TRBracket]
+        , lexes "an empty one" "[]" [TLBracket, TRBracket]
+        , -- Longest match keeps corners working: @[|@ is one token and @[@ is
+          -- another, and the two cannot be confused.
+          lexes "and the corner alias still wins" "[| x |]"
+            [TOpenQuote, TIdent "x", TCloseQuote]
+        ]
+    , testGroup
         "the backtick is reserved now"
         [ lexes
             "so it no longer continues an identifier"

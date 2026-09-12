@@ -97,6 +97,9 @@ tokens :-
   "|-"          { keyword TTurnstile }
   "⊢"           { keyword TTurnstile }
   "[|"          { keyword TOpenQuote }
+  "["           { keyword TLBracket }
+  "]"           { keyword TRBracket }
+  ","           { keyword TComma }
   "⌜"           { keyword TOpenQuote }
   "|]"          { keyword TCloseQuote }
   "⌝"           { keyword TCloseQuote }
@@ -179,6 +182,9 @@ data Token
   | TNumber Int
   | TString String
   | TChar   Char
+  | TLBracket
+  | TRBracket
+  | TComma
   | TUniverse Int
   | TUniverseOpen
   | TIdent String

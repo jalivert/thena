@@ -176,6 +176,19 @@ everyOp =
   , ("say 'c'",      Say (Lit (Op.VChar 'c')))
   , ("say true",     Say (Lit (Op.VBool True)))
   , ("say false",    Say (Lit (Op.VBool False)))
+    -- The data structures (MS5 phase 65). The list and the pair are notation,
+    -- so they round-trip as operands of any op; the option is two words.
+  , ("say [x, y]",   Say (ListOf [Ref "x", Ref "y"]))
+  , ("say []",       Say (ListOf []))
+  , ("say (x, y)",   Say (PairOf (Ref "x") (Ref "y")))
+  , ("say [1, 'c']", Say (ListOf [Lit (Op.VInt 1), Lit (Op.VChar 'c')]))
+  , ("some x",       Op.Some (Ref "x"))
+  , ("none",         Op.None)
+  , ("list-head xs", Op.ListHead (Ref "xs"))
+  , ("list-tail xs", Op.ListTail (Ref "xs"))
+  , ("pair-first p", Op.PairFirst (Ref "p"))
+  , ("pair-second p", Op.PairSecond (Ref "p"))
+  , ("option-value o", Op.OptionValue (Ref "o"))
   , ("prim-regret",  Regret)
   , ("prim-solve",   Solve)
   , ("prim-abandon", Abandon)
@@ -510,6 +523,30 @@ mistakes =
                    , Do (Call (GlobalName "f") [Ref "(0:0)"])
                    ])
 
+    , -- **A literal is walked into** (MS5 phase 65): a call inside a list is
+      -- lifted exactly as one in an argument position is, or nothing computed
+      -- could go in a list at all.
+      --
+      -- **It is written in parentheses**, as every compound argument is
+      -- (phase 23b's rule): an element is an operand, and @g a@ is two of them
+      -- without the brackets.
+      testCase "a call inside a list is lifted too" $
+        bodyOf "f [(g a), b]"
+          >>= (@?= [ Bind "(0:0)" (Call (GlobalName "g") [Ref "a"])
+                   , Do (Call (GlobalName "f")
+                              [ListOf [Ref "(0:0)", Ref "b"]])
+                   ])
+    , -- The same, and in a pair's first component the parentheses are not
+      -- optional even in principle: @(g a, b)@ cannot be parsed with one token
+      -- of lookahead, because after @( ident@ the decision between /this is a
+      -- call/ and /this is a pair's first component/ has to be made before the
+      -- comma is seen. Written as below there is no ambiguity to resolve.
+      testCase "and one inside a pair" $
+        bodyOf "f ((g a), b)"
+          >>= (@?= [ Bind "(0:0)" (Call (GlobalName "g") [Ref "a"])
+                   , Do (Call (GlobalName "f")
+                              [PairOf (Ref "(0:0)") (Ref "b")])
+                   ])
     , -- The names are per written instruction, so two instructions that each
       -- nest do not collide.
       testCase "the lifted names are per instruction" $

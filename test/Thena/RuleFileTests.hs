@@ -36,7 +36,7 @@ tests :: TestTree
 tests =
   testGroup
     "rule files (§8)"
-    [headers, loading, ordering, refusals, commands, argumentHeads, returning, primitives]
+    [headers, loading, ordering, refusals, commands, argumentHeads, returning, primitives, walking]
 
 -- --------------------------------------------------------------------------
 -- The header
@@ -424,3 +424,51 @@ primitives =
     bound n line =
       let s0 = fst (load1 [("prim.thena.rules", base)])
        in lookup n (Engine.env (Engine.exec (sessionMachine (fst (command s0 line)))))
+
+-- --------------------------------------------------------------------------
+-- Walking a list with two clauses (MS5 phase 65)
+-- --------------------------------------------------------------------------
+
+-- | **The phase's point, in one rule.** A list is usable without @if@ and
+-- without a second control structure, because a rule branches on its head — so
+-- a fold is two clauses, one per shape, exactly as @intro-binders@ is two
+-- clauses over a surface term.
+--
+-- It exercises the literal, both head tests, @list-head@, @list-tail@,
+-- @option-value@ and phase 63's @return@, through the real loader.
+walking :: TestTree
+walking =
+  testGroup
+    "a rule walks a list"
+    [ testCase "an empty list" $ said "shout []" @?= Just ""
+    , testCase "and a list with elements" $
+        said "shout [\"a\", \"b\", \"c\"]" @?= Just "abc"
+    , -- The elements are operands, so a reference among them is read where the
+      -- list is built.
+      testCase "a pair, taken apart" $
+        said "both (\"a\", \"b\")" @?= Just "ab"
+    ]
+  where
+    base =
+      "rule base walk where\n\
+      \rule join xs :- when (list-is-empty xs) then return \"\"\n\
+      \rule join xs :- when (list-is-cons xs)\n\
+      \  then h = list-head xs\n\
+      \     ; c = option-value h\n\
+      \     ; t = list-tail xs\n\
+      \     ; r = join t\n\
+      \     ; s = concat c r\n\
+      \     ; return s\n\
+      \rule shout xs :- then m = join xs ; say m\n\
+      \rule both p :- then a = pair-first p\n\
+      \     ; b = pair-second p\n\
+      \     ; s = concat a b\n\
+      \     ; say s\n"
+
+    said line =
+      let s0 = fst (load1 [("walk.thena.rules", base)])
+       in case snd (command s0 line) of
+            Ran msgs _ -> case reverse msgs of
+              m : _ -> Just m
+              []    -> Nothing
+            other -> error ("expected Ran, got " ++ show other)

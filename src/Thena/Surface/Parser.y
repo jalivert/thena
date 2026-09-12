@@ -67,6 +67,10 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   do      { Located _ TDo }
   num     { Located _ (TNumber $$) }
   str     { Located _ (TString $$) }
+  chr     { Located _ (TChar $$) }
+  '['     { Located _ TLBracket }
+  ']'     { Located _ TRBracket }
+  ','     { Located _ TComma }
   univ    { Located _ (TUniverse $$) }
   Type    { Located _ TUniverseOpen }
   ident   { Located _ (TIdent $$) }
@@ -125,10 +129,28 @@ InstrOperands :: { [RawOperand] }
   :                                        { [] }
   | InstrOperands InstrOperand             { $2 : $1 }
 
+-- | **The same operands a rule body writes**, and they have to be written out
+-- again here because Happy cannot share a non-terminal between two grammars
+-- (MS5 phase 65; @discussion\/the-five-languages.md@ §7b records the
+-- duplication).
+--
+-- They were not the same until this phase: a @do@ block could write a name, a
+-- number or a string and nothing else, so the character literal of phase 64, the
+-- nested call of phase 63 and the literals below were all unwritable in one of
+-- @instral@'s three places.
 InstrOperand :: { RawOperand }
   : ident                                  { RawRef $1 }
   | num                                    { RawPos $1 }
   | str                                    { RawText $1 }
+  | chr                                    { RawChar $1 }
+  | '[' ']'                                { RawList [] }
+  | '[' InstrElements ']'                  { RawList (reverse $2) }
+  | '(' InstrOperand ',' InstrOperand ')'  { RawPairOf $2 $4 }
+  | '(' ident InstrOperands ')'            { RawNested $2 (reverse $3) }
+
+InstrElements :: { [RawOperand] }
+  : InstrOperand                           { [$1] }
+  | InstrElements ',' InstrOperand         { $3 : $1 }
 
 Decls :: { [SurfaceDecl] }
   : Decl                                   { [$1] }

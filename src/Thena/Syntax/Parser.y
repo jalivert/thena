@@ -87,6 +87,9 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   num     { Located _ (TNumber $$) }
   str     { Located _ (TString $$) }
   chr     { Located _ (TChar $$) }
+  '['     { Located _ TLBracket }
+  ']'     { Located _ TRBracket }
+  ','     { Located _ TComma }
   univ    { Located _ (TUniverse $$) }
   Type    { Located _ TUniverseOpen }
   ident   { Located _ (TIdent $$) }
@@ -244,10 +247,17 @@ Operand :: { RawOperand }
   | num                                    { RawPos $1 }
   | str                                    { RawText $1 }
   | chr                                    { RawChar $1 }
+  | '[' ']'                                { RawList [] }
+  | '[' Elements ']'                       { RawList (reverse $2) }
+  | '(' Operand ',' Operand ')'            { RawPairOf $2 $4 }
   | '[|' Term '|]'                         { RawQuoted $2 }
   | tagopen raw tagclose                   { RawRegion $1 $2 }
   | tagopen tagclose                       { RawRegion $1 "" }
 
+
+Elements :: { [RawOperand] }
+  : Operand                                { [$1] }
+  | Elements ',' Operand                   { $3 : $1 }
 
 Constraint :: { RawConstraint }
   : Binders '⊢' Term '≟' Term ':' Term   { RawConstraint (reverse $1) $3 $5 $7 }

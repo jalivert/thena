@@ -550,6 +550,9 @@ describe :: Token -> String
 describe t = case t of
   TLambda     -> "λ"
   TChar c     -> show c
+  TLBracket   -> "["
+  TRBracket   -> "]"
+  TComma      -> ","
   TForall     -> "∀"
   TArrow      -> "->"
   TLParen     -> "("
@@ -1105,6 +1108,10 @@ renderOperand :: Int -> Context -> Operand -> String
 renderOperand n ctx o = case o of
   Ref x -> x
   Lit v -> renderValue n ctx v
+  -- Written back as they were written (MS5 phase 65).
+  ListOf os  -> "[" ++ intercalate ", " (map (renderOperand n ctx) os) ++ "]"
+  PairOf a b ->
+    "(" ++ renderOperand n ctx a ++ ", " ++ renderOperand n ctx b ++ ")"
 
 -- | The fence a tagged region is written with. Named rather than written
 -- inline so that a backtick never sits loose in a string literal here.
@@ -1121,6 +1128,9 @@ renderValue n ctx v = case v of
   VChar c            -> show c
   VBool True         -> "true"
   VBool False        -> "false"
+  VList vs           -> "[" ++ intercalate ", " (map (renderValue n ctx) vs) ++ "]"
+  VOption Nothing    -> "none"
+  VOption (Just u)   -> "some " ++ renderValue n ctx u
   VTerm (Trailing t) -> "⌜" ++ renderCore n ctx t ++ "⌝"
   VTerm p            -> "⌜" ++ unwords (words (renderPartial n ctx p)) ++ "⌝"
   -- **An unresolved core term prints as its shape, not its contents** (MS5
@@ -1182,6 +1192,10 @@ renderFailReason r = case r of
   BlockOperands i w ->
     "instruction " ++ show (i + 1) ++ " of the do block gives " ++ w
       ++ " operands it does not take"
+  ExpectedList   -> "that is not a list"
+  ExpectedPair   -> "that is not a pair"
+  ExpectedOption -> "that is not an option"
+  NothingThere   -> "there is nothing in that option — ask option-is-some first"
   NothingReturned n ->
     "nothing was returned to bind to " ++ n
   NothingToReturnFrom ->
@@ -1287,6 +1301,8 @@ renderSurface = surf Loose
       RawPos k  -> show k
       RawText t -> show t
       RawChar c -> show c
+      RawList os    -> "[" ++ intercalate ", " (map operand os) ++ "]"
+      RawPairOf x y -> "(" ++ operand x ++ ", " ++ operand y ++ ")"
       -- Exact, because the region kept its source text: a rule listing shows
       -- the embedded term as the author wrote it.
       RawRegion tag src -> tag ++ [tick] ++ src ++ [tick]
