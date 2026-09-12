@@ -128,6 +128,19 @@ cabal run thena
 thena spine> :load examples/determinacy-surface.thena
 ```
 
+Its companion is `examples/canonical.thena` — the same terms, with the **typing**
+relation the determinacy example does not have, and TAPL Theorem 8.3.1 (canonical
+forms) in both halves:
+
+```
+canonicalBool : forall (v : Term) -> Value v -> HasType v bool
+             -> Or (Eq Term v true) (Eq Term v false)
+canonicalNat  : forall (v : Term) -> Value v -> HasType v nat -> NV v
+```
+
+It is a third the size and **written by hand**, where the determinacy proof is
+generated.
+
 ## Building
 
 Requires GHC (with `base` 4.21), Cabal, and `alex` + `happy` (resolved

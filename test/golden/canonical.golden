@@ -1,0 +1,15 @@
+module Canonical
+  declared Term
+  declared Ty
+  declared NV
+  declared Value
+  declared HasType
+  declared Or
+  declared absurd
+  declared trueNotNat
+  declared falseNotNat
+  declared zeroNotBool
+  declared succNotBool
+  declared nvNotBool
+  declared canonicalBool
+  declared canonicalNat
