@@ -2,6 +2,8 @@
 -- session.
 module Thena.DriverTests (tests) where
 
+import Data.List (nub)
+
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
@@ -64,6 +66,18 @@ wordsIn = concatMap (words . fst)
 colonWordsIn :: [(String, String)] -> [String]
 colonWordsIn = filter (\w -> take 1 w == ":" && length w > 1) . wordsIn
 
+-- | Every @:word@ the given text mentions.
+--
+-- A colon followed by lowercase letters, which is what a command is and what
+-- nothing else in Haskell source is: @::@ has a second colon, @:|@ has a bar,
+-- and a constructor is capitalised.
+colonWordsInSource :: String -> [String]
+colonWordsInSource src = case break (== ':') src of
+  (_, ':' : rest) ->
+    let (w, more) = span (`elem` ['a' .. 'z']) rest
+     in [ ':' : w | not (null w) ] ++ colonWordsInSource more
+  _ -> []
+
 unknown :: String -> Bool
 unknown w = case snd (command withRules w) of
   Rejected (NoSuchCommand _) -> True
@@ -86,6 +100,20 @@ everyColonCommand =
 -- in both after phase 41 made it a rule rather than a command. A mirror that
 -- shares the blind spot of what it mirrors cannot catch anything — which is the
 -- argument for @ms3\/CLOSEOUT.md@ 26, not against having it.
+-- | Colon words the driver's source mentions that are **not** commands.
+--
+-- Each is a word the module writes for another reason — a prefix it matches on,
+-- a spelling in an error message, a word from another language quoted in a
+-- comment. Listing them is the price of deriving the rest, and it is a price
+-- worth paying: the alternative is a mirror nothing crosses.
+notCommands :: [String]
+notCommands =
+  -- Both appear only in comments that say they are *not* commands: @yield@ is
+  -- bare because §2.4 says a bare word acts, and there is no @:ops@ because
+  -- @:rules@ shows the base instead. 'notReallyCommands' below checks the
+  -- driver agrees, so this list cannot be used to hide one.
+  [ ":yield", ":ops" ]
+
 everyBareCommand :: [String]
 everyBareCommand =
   [ "assume", "claim", "quantify", "data", "declare"
@@ -153,6 +181,32 @@ tests =
             filter (`notElem` colonWordsIn commandSummary) everyColonCommand @?= []
         , testCase "every bare command the driver has is listed" $
             filter (`notElem` wordsIn commandSummary) everyBareCommand @?= []
+
+          -- **The mirror, made total against the source** (2026-09-13).
+          -- 'everyColonCommand' is hand-written and cannot be derived, because
+          -- @dispatch@ is a @case@ — which is @ms3\/CLOSEOUT.md@ 26 and is his
+          -- to restructure, not mine. What /can/ be derived without touching
+          -- the design is the set of colon words the module mentions at all:
+          -- every one of them is either dispatched (and so must be listed) or
+          -- is not a command, and the second list says which.
+          --
+          -- A word the driver accepts and @:help@ does not name is the exact
+          -- failure phase 36 shipped and phase 43 found again.
+        , testCase "and no colon word in the driver's source is unaccounted for" $ do
+            src <- readFile "src/Thena/Driver.hs"
+            let mentioned = nub (colonWordsInSource src)
+                unknown =
+                  [ w
+                  | w <- mentioned
+                  , w `notElem` everyColonCommand
+                  , w `notElem` notCommands
+                  ]
+            unknown @?= []
+
+          -- The exclusion list, checked: a word here that the driver *does*
+          -- accept would be a command hidden from @:help@ by this very test.
+        , testCase "and nothing excluded is secretly a command" $
+            filter (not . unknown) notCommands @?= []
         ]
     , testGroup
         "a typed entry is an instral block"
