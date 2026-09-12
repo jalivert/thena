@@ -250,13 +250,58 @@ everyOp =
   , ("define x y",    Define (Ref "x") (Ref "y"))
   , ("fresh-universe", Op.FreshUniverse)
   , ("resolve-name x", Op.ResolveName (Ref "x"))
+
+    -- **The twenty-six rows this list did not have** (2026-09-12). Phase 68a
+    -- found it had no @goto@ row (@ms5\/CLOSEOUT.md@ 5) and added one; nobody
+    -- asked what else was missing, and the answer was over a third of the
+    -- vocabulary. @every op word has a row here@ below is the check that makes
+    -- the question answer itself.
+  , ("pop-development", Op.PopDevelopment)
+  , ("push-development x", Op.PushDevelopment (Ref "x"))
+  , ("yield x", Op.Yield (Ref "x"))
+  , ("expose x", Op.Expose (Ref "x"))
+  , ("play x", Op.Play (Ref "x"))
+  , ("surface-of t", Op.SurfaceOf (Ref "t"))
+  , ("surface-name t", Op.SurfaceNameOf (Ref "t"))
+  , ("surface-universe t", Op.SurfaceUniverseOf (Ref "t"))
+  , ("arrow-domain t", Op.ArrowDomain (Ref "t"))
+  , ("arrow-codomain t", Op.ArrowCodomain (Ref "t"))
+  , ("ascription-type t", Op.AscriptionType (Ref "t"))
+  , ("ascription-term t", Op.AscriptionTerm (Ref "t"))
+  , ("app-function t", Op.AppFunction (Ref "t"))
+  , ("app-last-argument t", Op.AppLastArgument (Ref "t"))
+  , ("lambda-name t", Op.LambdaName (Ref "t"))
+  , ("lambda-tail t", Op.LambdaTail (Ref "t"))
+  , ("lambda-body t", Op.LambdaBody (Ref "t"))
+  , ("let-name t", Op.LetName (Ref "t"))
+  , ("let-type t", Op.LetType (Ref "t"))
+  , ("let-value t", Op.LetValue (Ref "t"))
+  , ("let-body t", Op.LetBody (Ref "t"))
+  , ("forall-name t", Op.ForallName (Ref "t"))
+  , ("forall-domain t", Op.ForallDomain (Ref "t"))
+  , ("forall-tail t", Op.ForallTail (Ref "t"))
+  , ("quantify x y", Op.Quantify (Ref "x") (Ref "y"))
+  , ("unify-into x y", Op.UnifyInto (Ref "x") (Ref "y"))
   ]
 
 vocabulary :: TestTree
 vocabulary =
   testGroup
     "vocabulary"
-    [ testGroup "every op reads back" (map opCase everyOp)
+    [ -- **The mirror, made total** (2026-09-12). 'everyOp' is hand-written —
+      -- it maps a source /string/ to an 'Op' and no enumeration of 'Op' values
+      -- exists to derive it from — so the only thing that can keep it honest is
+      -- a check against a list that IS derived. 'Thena.Rules.opWords' is built
+      -- from the three word tables the resolver itself reads.
+      --
+      -- It was missing **twenty-six of seventy-one words** when this was
+      -- written, a third of the vocabulary, including every surface accessor
+      -- phase 49 added and both development-stack ops. Phase 68a had found the
+      -- @goto@ row missing and fixed that one row.
+      testCase "every op word has a row here" $
+        [ w | (w, _) <- opWords, w `notElem` [ takeWhile (/= ' ') src | (src, _) <- everyOp ] ] @?= []
+
+    , testGroup "every op reads back" (map opCase everyOp)
     , testGroup "every op's keyword is the word it is written with"
         (map keywordCase everyOp)
     , testGroup "every test reads back" (map testCase' allTests)
