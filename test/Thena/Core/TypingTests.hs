@@ -461,7 +461,7 @@ wellTyped =
             (Right (), _, _) -> property True
 
     , testProperty "and reducing it keeps it well typed, at a convertible type" $
-        withNumTests 500 $ forAll genTyped $ \(ctx, ty, t) ->
+        withNumTests 500 $ forAll genTyped $ \(ctx, _ty, t) ->
           let t' = whnf emptyGlobals ctx t
            in case (infer emptyGlobals ctx counterBase t, infer emptyGlobals ctx counterBase t') of
                 ((Right a, _, _), (Right b, _, n)) ->
