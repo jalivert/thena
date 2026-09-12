@@ -474,7 +474,7 @@ validateBase = concatMap validate . baseRules
 resolveRule :: RawRule -> Either [RuleError] Rule
 resolveRule (RawRule nm ps ts body) =
   case (headErrs, bodyErrs) of
-    ([], []) -> Right (Rule g ps tests instrs)
+    ([], []) -> Right (Rule g ps tests (concat instrs))
     _        -> Left (headErrs ++ bodyErrs)
   where
     g = GlobalName nm
@@ -506,6 +506,9 @@ headOperand o = case o of
   -- pattern matching is the only thing they are to gain.
   RawRegion _ _ -> Nothing
   RawQuoted _   -> Nothing
+  -- **A head may not run code** (§1.1): 'holds' builds the match list without
+  -- effects, and a nested call is a call (MS5 phase 63).
+  RawNested _ _ -> Nothing
 
 -- | Resolve a written block of instructions (MS4 phase 45).
 --
@@ -518,15 +521,52 @@ headOperand o = case o of
 -- so its caller supplies where it came from.
 resolveBlock :: GlobalName -> [RawInstr] -> Either [RuleError] [Instr]
 resolveBlock g body = case partitionEithers (zipWith (instruction g) [0 ..] body) of
-  ([], instrs) -> Right instrs
+  ([], instrs) -> Right (concat instrs)
   (errs, _)    -> Left errs
 
 -- | One written instruction. @‹name› = ‹op›@ is a 'Bind', a bare op is a 'Do' —
 -- §7.2\'s two cases, and the grammar has no third.
-instruction :: GlobalName -> Int -> RawInstr -> Either RuleError Instr
+--
+-- **It yields a list, as of MS5 phase 63**, because an operand may be a call:
+-- @some-rule (f a) b@ is two instructions, the nested call bound in front of the
+-- one that wanted its value. The written index is kept for errors — it is the
+-- line the author can see — so the instruction numbers in a message still count
+-- what was written and not what it expanded to.
+instruction :: GlobalName -> Int -> RawInstr -> Either RuleError [Instr]
 instruction g i ri = case ri of
-  RawBind n o -> Bind n <$> operation g i o
-  RawDo     o -> Do     <$> operation g i o
+  RawBind n o -> lift (Bind n) o
+  RawDo     o -> lift Do       o
+  where
+    lift f (RawOp w as) =
+      let (binds, as') = hoisted i as
+       in (++) <$> traverse (\(n, o) -> Bind n <$> operation g i o) binds
+                <*> (pure . f <$> operation g i (RawOp w as'))
+
+-- | Lift every nested call out of an operand run, innermost first.
+--
+-- @some-rule (f (g a)) b@ becomes @(0:1) = g a ; (0:0) = f (0:1) ; some-rule
+-- (0:0) b@ — a fixed evaluation order, left to right and innermost first, which
+-- is the order the arguments are written in and the only one a reader would
+-- guess. It matters because a call changes the development: these are
+-- statements, not expressions over a pure value.
+--
+-- **The names cannot collide with anything written.** A parenthesis is a token,
+-- so no identifier can contain one; the pair of numbers is the written
+-- instruction's index and a counter within it, which keeps them apart across a
+-- body.
+hoisted :: Int -> [RawOperand] -> ([(Name, RawOp)], [RawOperand])
+hoisted i as = let (_, bs, os) = go 0 as in (bs, os)
+  where
+    go k []       = (k, [], [])
+    go k (o : os) = case o of
+      RawNested w inner ->
+        let (k1, bs1, inner') = go (k + 1) inner
+            n                 = "(" ++ show i ++ ":" ++ show (k :: Int) ++ ")"
+            (k2, bs2, os')    = go k1 os
+         in (k2, bs1 ++ [(n, RawOp w inner')] ++ bs2, RawRef n : os')
+      _ ->
+        let (k1, bs, os') = go k os
+         in (k1, bs, o : os')
 
 -- | An op word and its written arguments, resolved.
 --
@@ -621,6 +661,10 @@ operation g i (RawOp w as)
     -- "when the instruction language gets a type system that check moves
     -- there". A grammar that policed it here would be that type system, badly.
     ref o   = case o of
+      -- **Cannot arise**: 'hoisted' lifts every nested call into a binding of
+      -- its own before this runs, so what reaches here is always a leaf (MS5
+      -- phase 63). Written out rather than left to a pattern-match failure.
+      RawNested _ _ -> Left (BadOperands g i w)
       RawRef n  -> Right (Ref n)
       RawText t -> Right (Lit (VText t))
       RawPos _  -> Left (BadOperands g i w)
@@ -658,6 +702,7 @@ operation g i (RawOp w as)
       ]
     unary =
       [ ("say", Say), ("yield", Op.Yield), ("prim-try", Try)
+      , ("return", Op.Return)
       , ("goto", Goto), ("push-development", Op.PushDevelopment)
       , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
       , ("typeof", Typing), ("expose", Op.Expose), ("resolve-core", Op.ResolveCore), ("fresh-name", FreshName), ("prim-apply", Op.Apply)

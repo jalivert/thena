@@ -224,6 +224,16 @@ data Frame
   = Call
       { resume    :: [Instr]
       , resumeEnv :: Env
+      , destination :: Maybe Op.Name
+        -- ^ **where the value goes when this call returns** (MS5 phase 63) —
+        -- the name from the @Bind@ that made the call, or 'Nothing' for a
+        -- @Do@. A body's @return@ binds here, in 'resumeEnv'; a body that ends
+        -- without one fails with 'Thena.Errors.NothingReturned' rather than
+        -- leaving the name unbound for a later @Ref@ to trip over.
+        --
+        -- A 'Op.Block' frame always carries 'Nothing': a block produces
+        -- nothing ('Thena.Ops.produces'), so @validate@ refuses a @Bind@ on one
+        -- before it can get here.
       , returned  :: Bool
         -- ^ has control already passed back out of this call? See 'resumeFrom',
         -- and it means for a 'Call' exactly what it means for a 'Choice'.
@@ -240,6 +250,12 @@ data Frame
   | Choice
       { resume    :: [Instr]
       , resumeEnv :: Env
+      , destination :: Maybe Op.Name
+        -- ^ the same field a 'Call' carries, and it means the same thing. It
+        -- has to be here too because a call with alternatives builds one of
+        -- these instead, and **each alternative returns its own value** — the
+        -- binding is made at return time, so backtracking into the next clause
+        -- simply makes it again.
       , alts      :: RuleIter    -- ^ the matches not yet tried, lazily (§7.6)
       , saved     :: Development  -- ^ the state before the first alternative ran
       , savedEnclosing :: [(Development, Int)]
@@ -515,8 +531,16 @@ resumeYield m = case pc (exec m) of
 step :: Machine -> Outcome
 step m = case pc (exec m) of
   [] -> case resumeFrom (stack (exec m)) of
-    Nothing            -> Finished m
-    Just (is, e, stk') -> Continue m { exec = Exec is e stk' }
+    Nothing                -> Finished m
+    Just (fr, is, e, stk') -> case destination fr of
+      -- **The caller asked for a value and the body never said one** (MS5
+      -- phase 63). It fails here rather than leaving the name unbound for a
+      -- later @Ref@, because those are two different mistakes and the second
+      -- reports the wrong line. This is the run-time half of
+      -- 'Thena.Ops.produces' saying 'True' for every call: which clauses a name
+      -- has is not known when a body is read.
+      Just n  -> failure (NothingReturned n) m
+      Nothing -> Continue m { exec = Exec is e stk' }
   instr : rest -> perform instr rest m
 
 -- | Where control goes when a body runs out of instructions.
@@ -532,14 +556,19 @@ step m = case pc (exec m) of
 --
 -- 'returned' is not lateral validity (§4.0 I1): every other field stays
 -- meaningful, and 'unwind' clears it again when it re-enters the call.
-resumeFrom :: [Frame] -> Maybe ([Instr], Env, [Frame])
+-- **It hands back the frame as well as the continuation** (MS5 phase 63),
+-- because the two callers want different things from it: running off the end of
+-- a body must refuse if the frame was expecting a value, and @return@ must put
+-- one in the environment it resumes with. Neither can be decided here.
+resumeFrom :: [Frame] -> Maybe (Frame, [Instr], Env, [Frame])
 resumeFrom [] = Nothing
 resumeFrom (fr : stk)
   -- A record update rather than a positional rebuild: this frame differs from
   -- @fr@ in exactly one field, and saying so is what keeps it right when a
   -- frame gains another (a 'Choice' gained @savedEnclosing@ at MS4 phase 42).
-  | not (returned fr) = Just (resume fr, resumeEnv fr, fr { returned = True } : stk)
-  | otherwise         = (\(is, e, stk') -> (is, e, fr : stk')) <$> resumeFrom stk
+  | not (returned fr) = Just (fr, resume fr, resumeEnv fr, fr { returned = True } : stk)
+  | otherwise         =
+      (\(f, is, e, stk') -> (f, is, e, fr : stk')) <$> resumeFrom stk
 
 -- | Deposit an answer into @env@ at the destination the asking instruction
 -- named, and step past it.
@@ -609,11 +638,12 @@ failure r0 m = unwind (stack (exec m))
 -- and the entry environment they seed; everything else they said was the same
 -- thing written twice, and 'savedEnclosing' (MS4 phase 42) is the field that
 -- made writing it twice cost something.
-choicePoint :: Machine -> [Instr] -> RuleIter -> Rule -> [Value] -> Env -> Frame
-choicePoint m rest it' r vs seed =
+choicePoint :: Machine -> Maybe Op.Name -> [Instr] -> RuleIter -> Rule -> [Value] -> Env -> Frame
+choicePoint m dest rest it' r vs seed =
   Choice
     { resume         = rest
     , resumeEnv      = env (exec m)
+    , destination    = dest
     , alts           = it'
     , saved          = development m
     , savedEnclosing = enclosing m
@@ -632,6 +662,7 @@ demote fr r it'
       Choice
         { resume         = resume fr
         , resumeEnv      = resumeEnv fr
+        , destination    = destination fr
         , alts           = it'
         , saved          = saved fr
         , savedEnclosing = savedEnclosing fr
@@ -646,7 +677,7 @@ demote fr r it'
     -- would demote a frame that had already returned into one that is stepped
     -- straight over, and its @resume@ — the caller\'s leftovers — would never
     -- run (MS4 phase 57).
-  | otherwise = Thena.Engine.Call (resume fr) (resumeEnv fr) False
+  | otherwise = Thena.Engine.Call (resume fr) (resumeEnv fr) (destination fr) False
 
 -- --------------------------------------------------------------------------
 -- Performing one instruction
@@ -670,7 +701,28 @@ perform instr rest m = case operation instr of
   -- arguments: a block's bindings are its own, and the surface term around it
   -- has none to pass in.
   Op.Block body ->
-    Continue m { exec = Exec body [] (Thena.Engine.Call rest (env (exec m)) False : stack (exec m)) }
+    Continue m { exec = Exec body [] (Thena.Engine.Call rest (env (exec m)) Nothing False : stack (exec m)) }
+
+  -- **What this body hands back** (MS5 phase 63) — 'Op.Return'.
+  --
+  -- It ends the body: the rest of @pc@ is dropped and control goes to the
+  -- nearest frame that has not returned, which is where the rest of the body
+  -- would have gone anyway when it ran out. The value lands in that frame's
+  -- 'destination', in the environment being resumed with — so a caller that
+  -- wrote @x = ‹rule›@ has @x@, and one that wrote @‹rule›@ discards it.
+  --
+  -- **The nearest frame may be a block's**, since 'Op.Block' builds an ordinary
+  -- 'Thena.Engine.Call' frame. So @return@ inside @do { … }@ ends the block and
+  -- not the rule around it: a block is a body, and @return@ ends the body it is
+  -- written in. A block's frame never has a destination — 'Thena.Ops.produces'
+  -- says a block produces nothing — so the value is dropped there.
+  Op.Return a -> case operandValue (env (exec m)) a of
+    Left e  -> failure e m
+    Right v -> case resumeFrom (stack (exec m)) of
+      Nothing -> failure NothingToReturnFrom m
+      Just (fr, is, e, stk') ->
+        let e' = maybe e (\n -> (n, v) : e) (destination fr)
+         in Continue m { exec = Exec is e' stk' }
 
   -- **Hand control over, and stay put** (MS4 phase 45b). @pc@ is deliberately
   -- unchanged — see 'Op.Yield' and 'resumeYield'.
@@ -898,11 +950,16 @@ perform instr rest m = case operation instr of
       -- exactly when a 'Choice' was built. A message marks a choice; where
       -- there was one candidate there was none, and a line per deterministic
       -- call would be noise (§1, §7.5).
+      -- **No destination** (MS5 phase 63), where a 'Op.Call' frame carries one:
+      -- a dispatch produces nothing ('Thena.Ops.produces'), because what the
+      -- chosen rule did is in the development. A @return@ inside the rule it
+      -- runs therefore ends that rule and its value is dropped, which is what
+      -- @x = prove@ being refused at load time already said.
       | hasNext it' ->
           Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
-                 (entering r (choicePoint m rest it' r [] []) m { names = names m + 1 })
+                 (entering r (choicePoint m Nothing rest it' r [] []) m { names = names m + 1 })
       | otherwise ->
-          Continue (entering r (Thena.Engine.Call rest (env (exec m)) False) m)
+          Continue (entering r (Thena.Engine.Call rest (env (exec m)) Nothing False) m)
     where
       it = dispatch (rules m) (globals m) (cursor (development m))
 
@@ -937,9 +994,9 @@ perform instr rest m = case operation instr of
       Just (r, it')
         | hasNext it' ->
             Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
-                   (entering vs r (choicePoint m rest it' r vs []) m { names = names m + 1 })
+                   (entering vs r (choicePoint m wants rest it' r vs []) m { names = names m + 1 })
         | otherwise ->
-            Continue (entering vs r (Thena.Engine.Call rest (env (exec m)) False) m)
+            Continue (entering vs r (Thena.Engine.Call rest (env (exec m)) wants False) m)
     where
       it vs = clauses (rules m) (globals m) (cursor (development m)) nm vs
 
@@ -1427,6 +1484,14 @@ perform instr rest m = case operation instr of
     term    = operandTerm (env (exec m))
 
     advance m' = m' { exec = (exec m') { pc = rest } }
+
+    -- **Where a call's value goes, if it was asked for** (MS5 phase 63). The
+    -- same question 'produce' asks of @instr@ below, asked one step earlier
+    -- because a call does not produce here — it produces when its callee
+    -- returns, which may be many instructions away and below a @Choice@ frame.
+    wants = case instr of
+      Bind n _ -> Just n
+      Do _     -> Nothing
 
     -- Bind the result if the instruction named a destination. An unbound
     -- destination on a producing op is fine; a bound one on an op that produces

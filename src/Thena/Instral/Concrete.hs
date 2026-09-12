@@ -103,6 +103,19 @@ data RawOperand
     -- **The text is raw and not tokens**, because an embedded language has its
     -- own lexical rules (@discussion\/the-five-languages.md@ §6.9). The lexer
     -- found the extent; nothing here has looked inside.
+  | RawNested String [RawOperand]
+    -- ^ @(‹word› ‹operands…›)@ — **an operand that is itself a call** (MS5
+    -- phase 63): @some-rule (f a) b@ is one call and one variable.
+    --
+    -- It is written in parentheses because an untagged compound argument needs
+    -- them — without, nobody can tell one argument from two
+    -- (@discussion\/the-five-languages.md@ §6.0.1).
+    --
+    -- **Resolution turns it back into a statement**: the nested call becomes a
+    -- binding in front of the instruction that wanted it, and the operand
+    -- becomes a reference to that binding. So it is sugar with a fixed
+    -- evaluation order — left to right, innermost first — and not a new kind of
+    -- value.
   | RawRef String
   | RawPos Int
   | RawText String

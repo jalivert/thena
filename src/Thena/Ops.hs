@@ -279,6 +279,28 @@ data Op
     -- because there is nothing to choose between — a block is one body, so
     -- there is no candidate list and no choice point. That is the whole of the
     -- difference.
+  | Return Operand
+    -- ^ **what this rule hands back to whoever called it** (MS5 phase 63) —
+    -- @return ‹operand›@.
+    --
+    -- **The rule's value is said, not inferred.** The alternative was /the value
+    -- of the last instruction/, which the user declined: most bodies end in an
+    -- op that produces nothing — @prim-solve@, @prim-try@, @say@ — so a rule
+    -- that wanted to return would have had to be written to end on the
+    -- producing op, which makes the return value a constraint on how the body is
+    -- ordered and leaves it invisible at the call site. This is the same
+    -- argument phase 61b made for @resolve-core@ being an instruction: when it
+    -- happens belongs on the page.
+    --
+    -- **It ends the body.** Everything after it in @pc@ is dropped as far as the
+    -- call it is returning from, exactly as a @return@ in any other imperative
+    -- language. A body with no @return@ hands nothing back, and a caller that
+    -- asked for a value gets 'Thena.Errors.NothingReturned' rather than an
+    -- unbound name later.
+    --
+    -- **It produces nothing itself** — @x = return y@ binds in a body that is
+    -- already over — and at the top level, where there is no call to return
+    -- from, it is 'Thena.Errors.NothingToReturnFrom'.
   | Call GlobalName [Operand]
     -- ^ **call a rule by name — the same search as 'Prove', with a narrower
     -- candidate list** (§8, phase 23, and the user's own framing):
@@ -860,7 +882,15 @@ produces o = case o of
   Solve        -> False
   Abandon      -> False
   Prove        -> False
-  Call _ _     -> False   -- what the callee builds is in the development
+  -- **A call produces, as of MS5 phase 63** — whatever the clause that ran
+  -- handed back with @return@. It is 'True' unconditionally and cannot be
+  -- anything else: which clauses a name has is not known when a body is read
+  -- (phase 23 — a rule may call itself, a rule below it, or one in a base
+  -- loaded later), so this question is not decidable at load time. A call to a
+  -- rule that returns nothing fails where the value was wanted, at run time,
+  -- with 'Thena.Errors.NothingReturned'.
+  Call _ _     -> True
+  Return _     -> False   -- it ends a body; there is nothing after it to bind
   Eliminate _  -> False
   ApplyNext _ _ -> True  -- the spine, one argument longer
   ExpandImplicits _ -> True
@@ -940,6 +970,7 @@ operandsOf o = case o of
   ElimSpine a  -> [a]
   Apply a      -> [a]
   Call _ as    -> as
+  Return a     -> [a]
   Prove        -> []
   DefineData _ -> []
   Along        -> []
@@ -1138,6 +1169,7 @@ opKeyword o = case o of
   Abandon      -> "prim-abandon"
   Prove        -> "prim-prove"
   Call _ _     -> "call"
+  Return _     -> "return"
   FreshName _  -> "fresh-name"
   Here         -> "here"
   Arrow _ _    -> "arrow"

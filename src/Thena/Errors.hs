@@ -86,6 +86,18 @@ data DataBuildError
 data FailReason
   = UnboundInBody String
     -- ^ a @Ref@ named nothing in the body's environment
+  | NothingReturned String
+    -- ^ @x = ‹rule›@ where the clause that ran reached the end of its body
+    -- without a @return@ (MS5 phase 63). Carries the destination.
+    --
+    -- **It fails where the value was wanted**, rather than leaving @x@ unbound
+    -- for a later @Ref@ to trip over, because the two are different mistakes
+    -- and the second one reports the wrong line. Whether a call produces cannot
+    -- be checked when the body is read — a name's clauses are not known then
+    -- (phase 23) — so this is the run-time half of 'Thena.Ops.produces'.
+  | NothingToReturnFrom
+    -- ^ @return@ with no call to return from — typed at the REPL, or in a
+    -- top-level @do@ block (MS5 phase 63).
   | NotAnIdentifier String
   | BlockOperands Int String
     -- ^ the instruction at this position in a @do@ block gave this op word the

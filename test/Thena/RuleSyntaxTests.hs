@@ -164,6 +164,7 @@ everyOp =
   , ("prim-let",      IntroLet Nothing)
   , ("prim-let x",    IntroLet (Just (Ref "x")))
   , ("prim-try x",   Try (Ref "x"))
+  , ("return x",     Op.Return (Ref "x"))
   , ("prim-regret",  Regret)
   , ("prim-solve",   Solve)
   , ("prim-abandon", Abandon)
@@ -470,6 +471,42 @@ mistakes =
       testCase "an unknown op word is a rule call" $
         bodyOf "frobnicate x"
           >>= (@?= [Do (Call (GlobalName "frobnicate") [Ref "x"])])
+
+    , -- **An operand may be a call** (MS5 phase 63), and resolution turns it
+      -- back into a statement: the nested call is bound in front of the
+      -- instruction that wanted its value. So @some-rule (f a) b@ is what
+      -- @x = f a ; some-rule x b@ had to be written as until now.
+      testCase "a nested call is lifted into a binding of its own" $
+        bodyOf "some-rule (f a) b"
+          >>= (@?= [ Bind "(0:0)" (Call (GlobalName "f") [Ref "a"])
+                   , Do (Call (GlobalName "some-rule")
+                              [Ref "(0:0)", Ref "b"])
+                   ])
+
+    , -- Innermost first, which is the order the arguments read in. It matters
+      -- because these are statements: a call changes the development.
+      testCase "and nesting goes innermost first" $
+        bodyOf "f (g (h a))"
+          >>= (@?= [ Bind "(0:1)" (Call (GlobalName "h") [Ref "a"])
+                   , Bind "(0:0)" (Call (GlobalName "g") [Ref "(0:1)"])
+                   , Do (Call (GlobalName "f") [Ref "(0:0)"])
+                   ])
+
+    , -- The names are per written instruction, so two instructions that each
+      -- nest do not collide.
+      testCase "the lifted names are per instruction" $
+        bodyOf "f (g a) ; f (g b)"
+          >>= (@?= [ Bind "(0:0)" (Call (GlobalName "g") [Ref "a"])
+                   , Do (Call (GlobalName "f") [Ref "(0:0)"])
+                   , Bind "(1:0)" (Call (GlobalName "g") [Ref "b"])
+                   , Do (Call (GlobalName "f") [Ref "(1:0)"])
+                   ])
+
+    , -- **A head may not run code** (§1.1): 'Thena.Rules.holds' builds the
+      -- match list cheaply and without effects, and a nested call is a call.
+      refused "a nested call in a head"
+        "rule r s :- when (surface-is-name (f s)) then prim-solve"
+        [BadTestOperands (GlobalName "r") "surface-is-name"]
     , -- **An op word at an arity the op does not have is a CALL** (MS5 phase
       -- 62b, the user's decision). It was 'BadOperands' until then, so that
       -- @claim x@ was caught when the base loaded; his design for the asking

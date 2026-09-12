@@ -759,6 +759,49 @@ block's own bindings survive to the next line while a rule is suspended.
 You can break the rule you are standing in — shadow one of its locals and its
 body will go wrong. That is allowed on purpose.
 
+### A rule returns what it says it returns
+
+*Decided 2026-09-12.*
+
+```
+rule twice t :- then s = concat t t ; return s
+rule shout t :- then m = twice (twice t) ; say m
+```
+
+A rule hands a value back with `return`, and a caller that wrote `x = ‹rule›`
+gets it. A rule with no `return` hands nothing back; a caller that asked for a
+value from one gets *nothing was returned to bind to x*, at the call, rather than
+an unbound name further down.
+
+**`return` ends the body** — anything after it does not run.
+
+The alternative was *the value of the last instruction*, as in a Haskell `do`
+block. It was declined because most bodies end in something that produces
+nothing — `prim-solve`, `prim-try`, `say` — so a rule that wanted to return would
+have had to be written to end on the producing op. The return value would then be
+a constraint on the order of the body, and invisible where the rule is called.
+
+`prove` is not a call and returns nothing: what the rule it chose did is in the
+development.
+
+### An argument may itself be a call
+
+*Decided 2026-09-12.*
+
+```
+shout (twice t)          -- one call, with a call as its argument
+x = twice t ; shout x    -- what it means, and what you had to write before
+```
+
+A compound untagged argument is written in parentheses, and a parenthesised
+call is evaluated before the call that wanted it — **left to right, innermost
+first**. The order is fixed and worth knowing, because these are statements: a
+rule changes the development, so when it runs is observable.
+
+**A rule's head may not contain one.** A head says what a rule is about and is
+checked to build the match list; running a call to find out whether a rule
+applies is not something a head may do.
+
 ### A typed line is one line of `instral`, and a bare argument is not a term
 
 *Decided 2026-09-11.*

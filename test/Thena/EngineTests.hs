@@ -151,7 +151,7 @@ tests =
             -- rest of the continuation. Both frames have one lifetime now:
             -- entered, returned, stepped over ever after.
             let resumed = [Do (Ops.Say (text "back"))]
-                entered = Call resumed [("x", VText "kept")] False
+                entered = Call resumed [("x", VText "kept")] Nothing False
                 m = (machine []) { exec = Exec [] [] [entered] }
              in case step m of
                   Continue m' ->

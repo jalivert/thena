@@ -239,6 +239,7 @@ Operands :: { [RawOperand] }
 
 Operand :: { RawOperand }
   : ident                                  { RawRef $1 }
+  | '(' ident Operands ')'                 { RawNested $2 (reverse $3) }
   | num                                    { RawPos $1 }
   | str                                    { RawText $1 }
   | '[|' Term '|]'                         { RawQuoted $2 }

@@ -34,7 +34,7 @@ import Thena.Engine
   , resumeYield
   , step
   )
-import Thena.Errors (FailReason)
+import Thena.Errors (FailReason (..))
 import Thena.Global.Env
   ( Definition (..)
   , GlobalEnv
@@ -59,7 +59,8 @@ import Thena.Surface.Concrete
   (Plicity (..), Surface (..), SurfaceArg (..))
 import Thena.Surface.Zipper (rootedAt)
 import Thena.Rules
-  ( RuleError (..)
+  ( RuleBase
+  , RuleError (..)
   , RuleIter
   , allRules
   , hasNext
@@ -78,6 +79,7 @@ tests =
     , iteratorTests
     , validateTests
     , producesTests
+    , returnTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -336,6 +338,64 @@ validateTests =
 -- 'produces', checked against the engine (§7.2)
 -- --------------------------------------------------------------------------
 
+-- | What a rule hands back (MS5 phase 63).
+--
+-- **The mechanism, not a caller.** Nothing in @rules/standard.thena.rules@ wants
+-- a returned value yet; the milestone's doctrine is that a piece built ahead of
+-- its first customer still gets tests, so these are them.
+returnTests :: TestTree
+returnTests =
+  testGroup
+    "a rule returns a value"
+    [ testCase "the caller's binding is filled by the callee's return" $
+        envAfter [Bind "r" (Ops.Call (GlobalName "gives") [])]
+          >>= (@?= Just (VText "a value"))
+
+    , -- @return@ ends the body, so the @say@ after it never runs. Checked
+      -- through the binding rather than through the message, because a body
+      -- that ran on would still return the same value.
+      testCase "return ends the body" $
+        ranWith [Do (Ops.Call (GlobalName "runs-on") [])]
+          >>= (@?= Right [])
+
+    , testCase "a body that never returns fails where the value was wanted" $
+        ranWith [Bind "r" (Ops.Call (GlobalName "silent") [])]
+          >>= (@?= Left (NothingReturned "r"))
+
+    , -- The same rule called for effect is fine: nothing asked it for a value.
+      testCase "and is fine when nothing asked it for one" $
+        ranWith [Do (Ops.Call (GlobalName "silent") [])]
+          >>= (@?= Right [])
+
+    , testCase "return outside a call has nothing to return from" $
+        ranWith [Do (Ops.Return (text "x"))]
+          >>= (@?= Left NothingToReturnFrom)
+
+    , -- **Each alternative returns its own value** (the reason 'Choice' carries
+      -- the destination too): the first clause of @two-ways@ fails before it
+      -- returns, so backtracking takes the second, and the binding is made from
+      -- there. Without the field on 'Choice' the binding would never happen at
+      -- all, because a call with two candidates builds one of those and not a
+      -- 'Thena.Engine.Call'.
+      testCase "backtracking rebinds from the clause that finally ran" $
+        envAfter [ Bind "r" (Ops.Call (GlobalName "two-ways") [])
+                 , Do (Ops.Say (Ref "r"))
+                 ]
+          >>= (@?= Just (VText "second"))
+    ]
+  where
+    run is = runOut (machineIn emptyGlobals (holeAt type1) is)
+
+    envAfter is = pure $ case run is of
+      Left _  -> Nothing
+      Right m -> lookup "r" (Thena.Engine.env (exec m))
+
+    -- 'Right' carries the messages, so a test can say /it got to the end/
+    -- without saying what the development looks like.
+    ranWith is = pure $ case run is of
+      Left r  -> Left r
+      Right _ -> Right ([] :: [String])
+
 -- | The standing lesson: find the invariant maintained by different code from
 -- the code that checks it (phase 5's @context@).
 --
@@ -382,11 +442,13 @@ producesTests =
       , ("regret",      e, hole,    tried,         Ops.Regret)
       , ("solve",       e, hole,    tried,         Ops.Solve)
       , ("abandon",     e, twoHoles, [],           Ops.Abandon)
-        -- Phase 17b's four. @prove@ and @call@ both hand control to a body and
-        -- get it back, so what a @Bind@ on either would name is the caller's
-        -- own environment — restored on return, and without the destination.
+        -- Phase 17b's four. **They part company at MS5 phase 63**: a @prove@
+        -- still produces nothing, because what the chosen rule did is in the
+        -- development, while a @call@ produces whatever the clause that ran
+        -- handed back with @return@. So the call here is to 'returningRule',
+        -- which does exactly that and nothing else.
       , ("prim-prove",  e, hole,    [],            Ops.Prove)
-      , ("call",        e, hole,    [],            Ops.Call (GlobalName "try-core") [term type0])
+      , ("call",        e, hole,    [],            Ops.Call (GlobalName "gives") [])
         -- **A λ** (MS4 phase 49b): every other shape this op once handled is a
         -- clause of @elaborate@ now, and it refuses those — so the term has to
         -- be one of the three cases still behind it, and a λ is the one that
@@ -447,7 +509,38 @@ text = Lit . VText
 -- above every 'Var' the fixtures mint, so nothing it mints collides.
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] env expectedBase [] 1000)
+  load is (Machine (Exec [] [] []) (Development cur) [] env
+                   (expectedBase ++ [returning]) [] 1000)
+
+-- | A base with one rule in it that returns something (MS5 phase 63).
+--
+-- It is here rather than in @rules/standard.thena.rules@ because the shipped
+-- base has nothing that wants a returned value yet, and 'Thena.Standard' has to
+-- mirror that file exactly. What needs testing is the /mechanism/ — that a
+-- @Bind@ on a call is filled by the callee's @return@ — and one rule says it.
+returning :: RuleBase
+returning =
+  ruleBase "returning" Nothing ""
+    [ returningRule
+      -- @return@ ends the body: the @prim-attack@ after it must not run, which
+      -- is what makes this rule safe to call at a hole in any state.
+    , Rule (GlobalName "runs-on") [] []
+        [Do (Ops.Return (Lit (VText "first"))), Do Ops.Attack]
+      -- A body with no @return@ at all.
+    , Rule (GlobalName "silent") [] [] [Do (Ops.Say (Lit (VText "nothing")))]
+      -- Two clauses, one arity. The first fails before it can return — it
+      -- cannot fail /after/, because @return@ ends the body — so the value the
+      -- caller ends up with is the second clause's.
+    , Rule (GlobalName "two-ways") [] []
+        [Do Ops.Into, Do (Ops.Return (Lit (VText "first")))]
+    , Rule (GlobalName "two-ways") [] []
+        [Do (Ops.Return (Lit (VText "second")))]
+    ]
+
+-- | @rule gives :- then return \"a value\"@.
+returningRule :: Rule
+returningRule =
+  Rule (GlobalName "gives") [] [] [Do (Ops.Return (Lit (VText "a value")))]
 
 machineAt :: Cursor -> [Instr] -> Machine
 machineAt = machineIn emptyGlobals

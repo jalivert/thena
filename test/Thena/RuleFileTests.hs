@@ -16,6 +16,7 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Thena.Core.Term (GlobalName (..))
 import Thena.Driver
   ( CommandError (..)
+  , Stop (..)
   , Response (..)
   , RuleFileError (..)
   , Session (..)
@@ -25,6 +26,7 @@ import Thena.Driver
   , baseHead
   )
 import Thena.Engine (Machine (rules))
+import Thena.Errors (FailReason (..))
 import Thena.Ops (Rule (..))
 import Thena.Rules (RuleBase (..), RuleError (..))
 
@@ -32,7 +34,7 @@ tests :: TestTree
 tests =
   testGroup
     "rule files (§8)"
-    [headers, loading, ordering, refusals, commands, argumentHeads]
+    [headers, loading, ordering, refusals, commands, argumentHeads, returning]
 
 -- --------------------------------------------------------------------------
 -- The header
@@ -339,3 +341,52 @@ commands =
     ruled s = case snd (command s ":rules") of
       RulesListed bs -> Just bs
       _              -> Nothing
+
+-- --------------------------------------------------------------------------
+-- A rule that returns, and a call written as an operand (MS5 phase 63)
+-- --------------------------------------------------------------------------
+
+-- | **The phase working the way a user meets it**, like 'argumentHeads' above:
+-- written in a file, loaded, and called by typing a name.
+--
+-- @twice@ returns; @shout@ binds a call and passes another call as an operand,
+-- which is what was unwritable before — it had to be split into
+-- @a = twice t ; b = twice a@. "Thena.RulesTests" asks the engine the same
+-- questions against a base built in Haskell.
+returning :: TestTree
+returning =
+  testGroup
+    "a loaded rule may return a value"
+    [ testCase "a bound call is filled by the callee's return" $
+        said "shout \"a\"" @?= Just "aaaa"
+    , -- The nested operand really is evaluated: without it the inner @twice@
+      -- would not run and the answer would be @aa@.
+      testCase "and a nested call in an operand is one of the steps" $
+        said "once \"a\"" @?= Just "aa"
+    , -- A body with no @return@, bound. It fails where the value was wanted,
+      -- naming the binding it could not fill.
+      testCase "a rule that returns nothing fails where the value was wanted" $
+        stuck "quiet" @?= Just (NothingReturned "x")
+    ]
+  where
+    base =
+      "rule base give where\n\
+      \rule twice t :- then s = concat t t ; return s\n\
+      \rule shout t :- then m = twice (twice t) ; say m\n\
+      \rule once t :- then m = twice t ; say m\n\
+      \rule mute t :- then say \"nothing to give\"\n\
+      \rule quiet t :- then x = mute t ; say x\n"
+
+    said line = case snd (command (loaded ()) line) of
+      Ran msgs _ -> lastOf msgs
+      other      -> error ("expected Ran, got " ++ show other)
+
+    stuck word = case snd (command (loaded ()) (word ++ " \"a\"")) of
+      Ran _ (Halted r) -> Just r
+      other            -> error ("expected a halt, got " ++ show other)
+
+    loaded () = fst (load1 [("give.thena.rules", base)])
+
+    lastOf ms = case reverse ms of
+      m : _ -> Just m
+      []    -> Nothing

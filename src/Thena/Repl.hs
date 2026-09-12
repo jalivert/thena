@@ -1174,6 +1174,10 @@ renderFailReason r = case r of
   BlockOperands i w ->
     "instruction " ++ show (i + 1) ++ " of the do block gives " ++ w
       ++ " operands it does not take"
+  NothingReturned n ->
+    "nothing was returned to bind to " ++ n
+  NothingToReturnFrom ->
+    "there is no call to return from here"
   Mismatch ctx a b ->
     renderCore 0 ctx a ++ " and " ++ renderCore 0 ctx b ++ " cannot be made equal"
   OccursCheck ctx x t ->
@@ -1281,6 +1285,10 @@ renderSurface = surf Loose
       -- printer for written syntax, so this says what it is rather than what it
       -- contains (§7b's register).
       RawQuoted _       -> "⌜…⌝"
+      -- A nested call, written back as it was written (MS5 phase 63). This is
+      -- the one place a rule listing shows the /written/ form rather than the
+      -- resolved one — resolution lifts it into a binding of its own.
+      RawNested w as    -> "(" ++ unwords (w : map operand as) ++ ")"
 
     surf _ (SurfaceName x)      = x
     surf _ (SurfaceUniverse l)  = "Type" ++ subscript l
