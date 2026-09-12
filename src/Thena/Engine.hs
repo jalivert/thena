@@ -1714,8 +1714,9 @@ perform instr rest m = case operation instr of
           Right cur -> Continue (advance m { development = Development cur, names = n1 })
       _ -> failure (CannotMove NotOnTheSpine) m
 
-    -- 'Intro' and 'IntroPi' differ in exactly one thing — which of table 2.8's
-    -- introduction rules are on offer — so the op is written once and takes it.
+    -- 'Op.IntroPi' and 'Op.IntroLet' differ in exactly one thing — which of
+    -- table 2.8's introduction rules is on offer (MS4 phase 58) — so the op is
+    -- written once and takes it.
     introOp rule mn = case traverse (operandIdent (env (exec m))) mn of
       Left r   -> failure r m
       Right nm -> onHole $ \c -> case c of

@@ -25,7 +25,6 @@ module Thena.Instral.Infer
   , Site (..)
   , inferProgram
   , renderInstralTypeError
-  , renderSite
   ) where
 
 import Data.List (nub)

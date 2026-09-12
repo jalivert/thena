@@ -28,12 +28,14 @@ import Thena.Ops
   , Rule (..)
   , Value (..)
   , opKeyword
+  , partWords
   )
 import qualified Thena.Ops as Op
 import Thena.Rules
   ( RuleBase (..)
   , RuleError (..)
   , allRules
+  , opWords
   , resolveRule
   , everyTest
   , testOperands
@@ -49,6 +51,7 @@ tests =
   testGroup
     "rule syntax (§8)"
     [ againstTheBase
+    , wordTableTests
     , vocabulary
     , shapes
     , text
@@ -130,6 +133,38 @@ againstTheBase =
 --
 -- @data@ is absent and is checked separately: it has a keyword and no written
 -- form (§3.7).
+-- | **The derived check** (MS5 phase 72): every word the parser's own tables
+-- name is the word 'opKeyword' prints for that op.
+--
+-- It is total over 'Thena.Rules.opWords', which is built from those tables, so
+-- nothing has to be listed a second time — where 'everyOp' below is a
+-- hand-written mirror that phase 68a found had no @goto@ row at all
+-- (@ms5\/CLOSEOUT.md@ 5). @everyOp@ stays because it checks something this
+-- cannot: that the words are also what the /resolver/ accepts, written as source.
+wordTableTests :: TestTree
+wordTableTests =
+  testGroup
+    "the parser's words and opKeyword agree"
+    [ testCase "every word the tables name is the one opKeyword prints" $
+        [ (w, opKeyword o) | (w, o) <- opWords, opKeyword o /= w ] @?= []
+    , testCase "and no word is in them twice" $
+        [ w | (w, _) <- opWords, length [ () | (v, _) <- opWords, v == w ] > 1 ]
+          @?= []
+      -- **Four words bypass the tables, and this is the list.** They are spelled
+      -- in 'Thena.Rules.operation'\'s own @case@ because each reads something
+      -- that is not an operand: a field word, an answer kind, or an optional
+      -- name. Pinned so that a fifth cannot join them unnoticed.
+    , testCase "and these are the words the tables do not carry" $
+        [ w
+        | (src, _) <- everyOp
+        , let w = takeWhile (/= ' ') src
+        , w `notElem` map fst opWords
+        , w `notElem` partWords
+        ] @?= [ "ask", "ask", "ask", "ask", "cross", "cross"
+              , "prim-lambda", "prim-lambda", "prim-let", "prim-let"
+              ]
+    ]
+
 everyOp :: [(String, Op)]
 everyOp =
   [ ("assume x y",   Assume (Ref "x") (Ref "y"))

@@ -902,7 +902,7 @@ data Op
     -- invariant 5 is what makes it the right call — a granular version needs a
     -- term-construction vocabulary nothing else has asked for.
     --
-    -- It takes an operand where the six hole ops take none, for 'Try'\'s
+    -- It takes an operand where the other hole ops take none, for 'Try'\'s
     -- reason: the goal is the focus, but the target has nowhere else to come
     -- from.
   deriving (Eq, Show)
@@ -967,7 +967,7 @@ data AnswerKind = AText | AName | ATerm | ARule
 -- reads the term off or says what stopped it — a predicate plus a fold would
 -- be two codes that could disagree about what pure means.
 
--- The six hole ops are thesis tables 2.7 and 2.8, less the five phase 13 does
+-- The hole ops are thesis tables 2.7 and 2.8, less the ones phase 13 does
 -- not need — decided by the user 2026-08-22, and §12 invariant 5's rule that
 -- the vocabulary is discovered rather than designed.
 --

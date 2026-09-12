@@ -34,6 +34,7 @@ module Thena.Rules
   , validateBase
 
     -- * Written rules (§8, phase 21)
+  , opWords
   , resolveFunction
   , resolveLanguage
   , resolveRule
@@ -1001,6 +1002,84 @@ operandOf ls g i w o = case o of
 -- A word this does not accept is a **rule call** (phase 25e); an accepted word
 -- given the wrong arguments is 'BadOperands'. Those are separate mistakes, and
 -- only the second is a load-time error now.
+-- | The op words, by how many operands they take (MS5 phase 72).
+--
+-- **Hoisted out of 'operation'\'s @where@** so that a test can walk them: they
+-- are the parser's half of the word vocabulary, 'Thena.Ops.opKeyword' is the
+-- printer's, and until this phase the only thing crossing the two was
+-- @RuleSyntaxTests@' hand-written @everyOp@ — which phase 68a found had no
+-- @goto@ row at all, so splitting that word into two would have passed the suite
+-- in silence (@ms5\/CLOSEOUT.md@ 5).
+--
+-- 'opWords' below is what makes the check total over these tables rather than
+-- over a list someone has to remember to grow.
+
+nullaryOps :: [(String, Op)]
+nullaryOps =
+  [ ("along", Along), ("into", Into), ("back", Back), ("reduce", Reduce)
+  , ("prim-attack", Attack), ("prim-regret", Regret)
+  , ("prim-solve", Solve), ("prim-abandon", Abandon), ("goal", Goal)
+  , ("fresh-universe", Op.FreshUniverse)
+  , ("here", Here)
+  , ("none", Op.None)
+  , ("prim-prove", Prove)
+  , ("pop-development", Op.PopDevelopment)
+  ]
+unaryOps :: [(String, Operand -> Op)]
+unaryOps =
+  [ ("say", Say), ("yield", Op.Yield), ("prim-try", Try)
+  , ("return", Op.Return)
+  , ("some", Op.Some)
+  , ("list-head", Op.ListHead), ("list-tail", Op.ListTail)
+  , ("pair-first", Op.PairFirst), ("pair-second", Op.PairSecond)
+  , ("option-value", Op.OptionValue)
+  , ("goto", Goto), ("goto-named", Op.GotoNamed)
+  , ("name-text", Op.NameText)
+  , ("surface-of", Op.SurfaceOf)
+  , ("push-development", Op.PushDevelopment)
+  , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
+  , ("typeof", Typing), ("expose", Op.Expose), ("resolve-core", Op.ResolveCore), ("fresh-name", FreshName), ("prim-apply", Op.Apply)
+  , ("resolve-name", Op.ResolveName)
+  , ("surface-name", Op.SurfaceNameOf)
+  , ("surface-universe", Op.SurfaceUniverseOf)
+  , ("arrow-domain", Op.ArrowDomain), ("arrow-codomain", Op.ArrowCodomain)
+  , ("ascription-type", Op.AscriptionType)
+  , ("ascription-term", Op.AscriptionTerm)
+  , ("app-function", Op.AppFunction)
+  , ("app-last-argument", Op.AppLastArgument)
+  , ("app-head", Op.AppHead)
+  , ("app-first-argument", Op.AppFirstArgument)
+  , ("app-tail", Op.AppTail)
+  , ("expand-implicits", Op.ExpandImplicits)
+  , ("lambda-name", Op.LambdaName), ("lambda-tail", Op.LambdaTail)
+  , ("lambda-body", Op.LambdaBody)
+  , ("let-name", Op.LetName), ("let-type", Op.LetType)
+  , ("let-value", Op.LetValue), ("let-body", Op.LetBody)
+  , ("forall-name", Op.ForallName), ("forall-domain", Op.ForallDomain)
+  , ("forall-tail", Op.ForallTail), ("play", Op.Play)
+  , ("elim-spine", Op.ElimSpine)
+  ]
+binaryOps :: [(String, Operand -> Operand -> Op)]
+binaryOps =
+  [ ("assume", Assume), ("claim", Claim), ("define", Define)
+  , ("quantify", Op.Quantify)
+  , ("concat", Concat), ("unify", Unify), ("unify-into", Op.UnifyInto)
+  , ("arrow", Arrow), ("apply-to", ApplyTo), ("apply-next", Op.ApplyNext)
+  ]
+
+-- | Every op word paired with an op that bears it, built from the three tables
+-- above — so nothing has to be listed a second time.
+--
+-- The operands are a placeholder: what is being crossed is the /word/, and
+-- 'Thena.Ops.opKeyword' does not read an op's operands.
+opWords :: [(String, Op)]
+opWords =
+  nullaryOps
+    ++ [ (w, f sample) | (w, f) <- unaryOps ]
+    ++ [ (w, f sample sample) | (w, f) <- binaryOps ]
+  where
+    sample = Lit (VText "x")
+
 operation :: [(String, Language)] -> GlobalName -> Int -> RawOp -> Either RuleError Op
 operation ls g i (RawOp w as)
   -- The field words come first: @arg@ is one of them and also the only word
@@ -1041,7 +1120,7 @@ operation ls g i (RawOp w as)
       -- here, one step before 'validate' would have.
       ("data", _)                 -> Left (DeclarationInBody g i)
 
-      _ -> case (lookup w nullary, lookup w unary, lookup w binary, as) of
+      _ -> case (lookup w nullaryOps, lookup w unaryOps, lookup w binaryOps, as) of
         (Just o,  _, _, [])       -> Right o
         (_, Just f,  _, [a])      -> f <$> ref a
         (_, _, Just f,  [a, b])   -> f <$> ref a <*> ref b
@@ -1088,55 +1167,6 @@ operation ls g i (RawOp w as)
     -- there". A grammar that policed it here would be that type system, badly.
     ref     = operandOf ls g i w
 
-    nullary =
-      [ ("along", Along), ("into", Into), ("back", Back), ("reduce", Reduce)
-      , ("prim-attack", Attack), ("prim-regret", Regret)
-      , ("prim-solve", Solve), ("prim-abandon", Abandon), ("goal", Goal)
-      , ("fresh-universe", Op.FreshUniverse)
-      , ("here", Here)
-      , ("none", Op.None)
-      , ("prim-prove", Prove)
-      , ("pop-development", Op.PopDevelopment)
-      ]
-    unary =
-      [ ("say", Say), ("yield", Op.Yield), ("prim-try", Try)
-      , ("return", Op.Return)
-      , ("some", Op.Some)
-      , ("list-head", Op.ListHead), ("list-tail", Op.ListTail)
-      , ("pair-first", Op.PairFirst), ("pair-second", Op.PairSecond)
-      , ("option-value", Op.OptionValue)
-      , ("goto", Goto), ("goto-named", Op.GotoNamed)
-      , ("name-text", Op.NameText)
-      , ("surface-of", Op.SurfaceOf)
-      , ("push-development", Op.PushDevelopment)
-      , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
-      , ("typeof", Typing), ("expose", Op.Expose), ("resolve-core", Op.ResolveCore), ("fresh-name", FreshName), ("prim-apply", Op.Apply)
-      , ("resolve-name", Op.ResolveName)
-      , ("surface-name", Op.SurfaceNameOf)
-      , ("surface-universe", Op.SurfaceUniverseOf)
-      , ("arrow-domain", Op.ArrowDomain), ("arrow-codomain", Op.ArrowCodomain)
-      , ("ascription-type", Op.AscriptionType)
-      , ("ascription-term", Op.AscriptionTerm)
-      , ("app-function", Op.AppFunction)
-      , ("app-last-argument", Op.AppLastArgument)
-      , ("app-head", Op.AppHead)
-      , ("app-first-argument", Op.AppFirstArgument)
-      , ("app-tail", Op.AppTail)
-      , ("expand-implicits", Op.ExpandImplicits)
-      , ("lambda-name", Op.LambdaName), ("lambda-tail", Op.LambdaTail)
-      , ("lambda-body", Op.LambdaBody)
-      , ("let-name", Op.LetName), ("let-type", Op.LetType)
-      , ("let-value", Op.LetValue), ("let-body", Op.LetBody)
-      , ("forall-name", Op.ForallName), ("forall-domain", Op.ForallDomain)
-      , ("forall-tail", Op.ForallTail), ("play", Op.Play)
-      , ("elim-spine", Op.ElimSpine)
-      ]
-    binary =
-      [ ("assume", Assume), ("claim", Claim), ("define", Define)
-      , ("quantify", Op.Quantify)
-      , ("concat", Concat), ("unify", Unify), ("unify-into", Op.UnifyInto)
-      , ("arrow", Arrow), ("apply-to", ApplyTo), ("apply-next", Op.ApplyNext)
-      ]
 
 -- | What @ask@'s second word may be — 'AnswerKind', spelled.
 --
@@ -1226,7 +1256,7 @@ withOperands t os = case (t, os) of
 -- exists before inference does: @rule elaborate t :- when (surface-is-name t)@
 -- is what says @t@ is a 'Ty.TSurface'. Phase 66c is what reads it that way.
 --
--- Every test but the four focus questions asks about a term it is handed, and
+-- Every test but the focus questions asks about a term it is handed, and
 -- all but the data ones ask about a /surface/ term — head predicates were the
 -- surface language's from MS4 phase 47 onward.
 testTypes :: Test -> [(Operand, Ty.Ty)]

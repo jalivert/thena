@@ -1359,7 +1359,8 @@ orList xs = case reverse xs of
 -- the elaborate layout decisions are 'renderCore'\'s and belong to terms.
 -- | A surface term, as written (MS4 phase 39).
 --
--- **Its own function, not a case of 'renderRaw'.** The two languages print
+-- **Its own function, not a case of the development printer.** The two
+-- languages print
 -- differently — a surface lambda's binder may have no type, its arguments carry
 -- braces, and it has @_@ and @?foo@ where the development calculus has neither.
 -- Sharing one printer would mean a printer that has to ask which language it is
