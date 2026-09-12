@@ -125,6 +125,7 @@ import Thena.Ops
   )
 import Data.Either (partitionEithers)
 import Thena.Instral.Infer (InstralTypeError, inferProgram)
+import Thena.Instral.Type (Signature (..))
 import Thena.Rules
   ( RuleBase (..)
   , RuleError
@@ -134,8 +135,10 @@ import Thena.Rules
   , resolveRule
   , resolveBlock
   , RuleError (..)
-  , baseRules
+  , allRules
+  , allSignatures
   , ruleBase
+  , resolveSignature
   , validate
   )
 import Thena.Surface.Concrete
@@ -153,10 +156,10 @@ import Thena.Surface.Zipper (rootedAt)
 import qualified Thena.Surface.Parser as Surface
 import Thena.Syntax.Concrete (Raw (..))
 import Thena.Instral.Concrete
-  ( RawInstr (..)
+  ( RawDecl (..)
+  , RawInstr (..)
   , RawOp (..)
   , RawOperand (..)
-  , RawRule (..)
   )
 import Thena.Syntax.Lexer (Located (..), Token (..), lexTokens)
 import Thena.Syntax.Parser
@@ -1787,19 +1790,34 @@ readRuleBase path src = case baseHead ls of
       let rest = replicate used "" ++ drop used ls
       ts   <- mapLeft RuleSyntaxError (tokensOf (unlines rest))
       raws <- mapLeft (RuleSyntaxError . ParseFailed) (parseRules ts)
-      rs   <- resolveAll raws
-      Right (ruleBase nm desc path rs)
+      (sigs, rs) <- resolveAll raws
+      Right (ruleBase nm desc path sigs rs)
   where
     ls = lines src
 
--- | Resolve every rule, then validate every rule. Every error, not the first —
--- 'validate'\'s reason.
-resolveAll :: [RawRule] -> Either RuleFileError [Rule]
-resolveAll raws = case (concat resolveErrs, concatMap validate ok) of
-  ([], [])     -> Right ok
+-- | Resolve every declaration, then validate every rule. Every error, not the
+-- first — 'validate'\'s reason.
+--
+-- **A signature is resolved here and checked no further** (MS5 phase 67):
+-- whether anything answers to it, and whether a body agrees with it, are
+-- questions about the whole program and belong to 'Thena.Instral.Infer'. What
+-- /is/ answered here is what one file can answer — that the type names a type,
+-- and that a callable has at most one signature.
+resolveAll :: [RawDecl] -> Either RuleFileError ([(String, Signature)], [Rule])
+resolveAll raws = case (concat ruleErrs ++ sigErrs ++ dups, concatMap validate ok) of
+  ([], [])     -> Right (sigs, ok)
   (res, valid) -> Left (RuleIllFormed (res ++ valid))
   where
-    (resolveErrs, ok) = partitionEithers (map resolveRule raws)
+    (ruleErrs, ok)  = partitionEithers [ resolveRule r | DeclRule r <- raws ]
+    (sigErrs, sigs) =
+      partitionEithers [ resolveSignature g | DeclSignature g <- raws ]
+    dups =
+      [ DuplicateSignature n (length (sigParams t))
+      | (i, (n, t)) <- zip [0 :: Int ..] sigs
+      , (n', t') <- take i sigs
+      , n' == n
+      , length (sigParams t') == length (sigParams t)
+      ]
 
 -- | Install a whole ordered list of bases, or none of them.
 --
@@ -1816,7 +1834,7 @@ loadRuleBases s = go []
     -- reason in 'BasesIllTyped': a rule's signature is not decidable until every
     -- base is in hand. 'Thena.Rules.validate' stays where it is — it is per-rule
     -- and answers a question one rule can answer.
-    go acc [] = case snd (inferProgram (concatMap baseRules acc)) of
+    go acc [] = case snd (inferProgram (allSignatures acc) (allRules acc)) of
       []   ->
         ( s { sessionMachine = (sessionMachine s) { rules = acc } }
         , BasesLoaded acc

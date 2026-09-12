@@ -668,6 +668,46 @@ base you load later, so it is reported when the search finds no clause.
 **A rule is inferred at one type**, not generalised: a helper used at `Surface`
 in one place and `Core` in another is an error, not a polymorphic rule.
 
+### A rule may declare its type, and that is what makes it reusable
+
+*Decided 2026-09-12.*
+
+A signature is its own declaration, on a line above the clauses — a name has
+several clauses and one type.
+
+```
+signature spine-arguments : Core -> Core -> Surface -> ()
+rule spine-arguments h f t :- when focus-is-component (surface-is-app t) then …
+rule spine-arguments h f t :- when focus-is-component (surface-is-name t) then …
+```
+
+**The arity is the arrow chain's.** That signature is about `spine-arguments` at
+three arguments and says nothing about one of two — a different rule, as far as
+dispatch is concerned. `()` is the result and only the result: it says the rule
+leaves nothing to bind.
+
+**A capitalised name is a type, a lowercase one is a variable.** Nothing needs a
+`forall` — a signature's variables are exactly its lowercase names.
+
+**Write one when you want a rule usable at more than one type.** Without a
+signature a rule is inferred at a single type, so this is refused:
+
+```
+rule ignore x :- then say "ignored"
+rule usesName :- then n = fresh-name "h" ; ignore n     -- a Name
+rule usesTerm :- then h = here ; ignore h               -- a Core
+```
+
+Adding `signature ignore : a -> ()` makes both uses fine, because each use gets
+its own copy of the type.
+
+**A signature is checked, not believed.** If the body needs more than the
+signature promised, the *signature* is reported:
+
+```
+signature f/1: the signature says any type here, but the body needs Core
+```
+
 ### `goto` takes a variable; `goto-named` takes a name
 
 *Decided 2026-09-12. Renames what you type at the prompt.*

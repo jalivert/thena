@@ -39,7 +39,7 @@ import Thena.Syntax.Concrete
   , RawConstructor (..)
   , RawData (..)
   )
-import Thena.Instral.Concrete (RawRule (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
+import Thena.Instral.Concrete (RawDecl (..), RawSignature (..), RawTy (..), RawRule (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
@@ -81,6 +81,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   elim    { Located _ TElim }
   where   { Located _ TWhere }
   rule    { Located _ TRule }
+  signature { Located _ TSignature }
   when    { Located _ TWhen }
   then    { Located _ TThen }
   ':-'    { Located _ TNeck }
@@ -170,15 +171,52 @@ Constructor :: { RawConstructor }
 -- by the user 2026-08-25 — so the file is parsed whole rather than split, and
 -- what ends a rule is the next 'rule' keyword or the end of input. Nothing in
 -- 'Instr' can begin with 'rule', so no terminator is needed.
-RuleFile :: { [RawRule] }
-  : Rules                                  { reverse $1 }
+RuleFile :: { [RawDecl] }
+  : Decls                                  { reverse $1 }
 
-Rules :: { [RawRule] }
+Decls :: { [RawDecl] }
   :                                        { [] }
-  | Rules Rule                             { $2 : $1 }
+  | Decls Rule                             { DeclRule $2 : $1 }
+  | Decls Signature                        { DeclSignature $2 : $1 }
 
 Rule :: { RawRule }
   : rule ident Params ':-' Tests then Body   { RawRule $2 (reverse $3) $5 (reverse $7) }
+
+-- **A signature is its own declaration** (MS5 phase 67, his choice) — one line,
+-- anywhere in the file, naming a callable and giving its whole type including
+-- the result. A callable has several clauses and one type, which is why it does
+-- not hang off a clause.
+Signature :: { RawSignature }
+  : signature ident ':' Ty                 { RawSignature $2 $4 }
+
+-- The type syntax. @->@ is already @%right@, so the chain nests to the right
+-- and the last link is the result.
+--
+-- **A constructor may take arguments and a variable may not**, so an
+-- application is @ident@ followed by a run of atoms and a bare @Core@ is that
+-- run being empty. Writing it as one production is what keeps the grammar free
+-- of a conflict between @Core@ and @List a@; whether the name takes the number
+-- of arguments it was given is 'Thena.Rules.resolveTy'\'s question.
+Ty :: { RawTy }
+  : TyApp '->' Ty                          { RawTyArrow $1 $3 }
+  | TyApp                                  { $1 }
+
+TyApp :: { RawTy }
+  : ident TyAtoms                          { RawTyCon $1 (reverse $2) }
+  | TyParen                                { $1 }
+
+TyAtoms :: { [RawTy] }
+  :                                        { [] }
+  | TyAtoms TyAtom                         { $2 : $1 }
+
+TyAtom :: { RawTy }
+  : ident                                  { RawTyCon $1 [] }
+  | TyParen                                { $1 }
+
+TyParen :: { RawTy }
+  : '(' ')'                                { RawTyUnit }
+  | '(' Ty ')'                             { $2 }
+  | '(' Ty ',' Ty ')'                      { RawTyPair $2 $4 }
 
 -- Parameters are a bare run of names, ended by @:-@ — no parentheses and no
 -- commas. CORRECTED by the user 2026-08-25, planning phase 23: a call site

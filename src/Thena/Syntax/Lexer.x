@@ -124,6 +124,12 @@ tokens :-
   -- surface language is expected to need.
   "do"          { keyword TDo }
   "rule"        { keyword TRule }
+  -- **A rule's declared signature** (MS5 phase 67), written on a line of its
+  -- own above the clauses — his choice, 2026-09-12. The fourth word to narrow
+  -- identifiers project-wide, after @data@, @module@ and @do@, and the price of
+  -- a signature being a declaration rather than something hung on a rule's own
+  -- line.
+  "signature"   { keyword TSignature }
   "when"        { keyword TWhen }
   "then"        { keyword TThen }
   ":-"          { keyword TNeck }
@@ -176,6 +182,7 @@ data Token
   | TModule
   | TDo
   | TRule
+  | TSignature
   | TWhen
   | TThen
   | TNeck

@@ -22,7 +22,10 @@
 -- an op word here is a 'String' and becomes a 'Thena.Ops.Op' only in
 -- "Thena.Rules".
 module Thena.Instral.Concrete
-  ( RawRule (..)
+  ( RawDecl (..)
+  , RawSignature (..)
+  , RawTy (..)
+  , RawRule (..)
   , RawInstr (..)
   , RawOp (..)
   , RawOperand (..)
@@ -46,6 +49,41 @@ import Thena.Syntax.Concrete (Raw)
 -- the head, left of @:-@ or right of it. @when@ stays underneath whatever
 -- arrives — it is the low-level, manual way to ask whether a rule applies.
 data RawRule = RawRule String [String] [RawTest] [RawInstr]
+  deriving (Eq, Show)
+
+-- | What a rule-base file is a list of (MS5 phase 67).
+--
+-- **A signature is a declaration of its own, not something on a rule's line** —
+-- his choice, 2026-09-12. It has to be: a callable has several clauses and one
+-- type, so a type written on a clause would be written once and read as
+-- belonging to all of them, or written on each and able to disagree.
+data RawDecl
+  = DeclRule RawRule
+  | DeclSignature RawSignature
+  deriving (Eq, Show)
+
+-- | @signature ‹name› : ‹type›@ — a rule's declared type (MS5 phase 67).
+--
+-- **The arity is in the type, not written separately.** A signature's arrow
+-- chain has one link per parameter and ends in the result, so
+-- @signature f : Core -> Surface -> ()@ is the signature of @f@ at arity two,
+-- and it says nothing about an @f@ of another arity — which is a different
+-- callable ('Thena.Rules.clauses' dispatches on both).
+data RawSignature = RawSignature String RawTy
+  deriving (Eq, Show)
+
+-- | A written type. Resolved into 'Thena.Instral.Type.Ty' by "Thena.Rules".
+--
+-- **A capitalised name is a type constructor and a lowercase one is a
+-- variable**, which is the only rule the reader has to know and the one every
+-- language with a type syntax uses. It is why nothing needs a @forall@: a
+-- signature's variables are exactly its lowercase names.
+data RawTy
+  = RawTyCon String [RawTy]  -- ^ @Core@, @List a@, @Option Surface@
+  | RawTyVar String          -- ^ @a@
+  | RawTyPair RawTy RawTy    -- ^ @(a, b)@
+  | RawTyUnit                -- ^ @()@ — an op or a rule that leaves nothing
+  | RawTyArrow RawTy RawTy   -- ^ @A -> B@
   deriving (Eq, Show)
 
 -- | @‹name› = ‹op› ‹args›@ or @‹op› ‹args›@ — 'Thena.Ops.Instr''s two cases, written.

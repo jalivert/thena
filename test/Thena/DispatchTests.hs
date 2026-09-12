@@ -89,7 +89,7 @@ descends = rule "descends" [Do Ops.Attack, Do Ops.Into]
 -- /list/ of named bases; these tests are about search order within one, so they
 -- build exactly one and give it no interesting name or path.
 bases :: [Rule] -> [RuleBase]
-bases rs = [ruleBase "test" Nothing "" rs]
+bases rs = [ruleBase "test" Nothing "" [] rs]
 
 only :: Rule -> [RuleBase]
 only r = bases [r]

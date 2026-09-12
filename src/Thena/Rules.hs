@@ -15,6 +15,7 @@ module Thena.Rules
     RuleBase (..)
   , ruleBase
   , allRules
+  , allSignatures
 
     -- * Finding rules (§7.6)
   , RuleIter
@@ -32,6 +33,8 @@ module Thena.Rules
 
     -- * Written rules (§8, phase 21)
   , resolveRule
+  , resolveSignature
+  , resolveTy
   , resolveBlock
   , testWord
   , testOperands
@@ -69,8 +72,11 @@ import Thena.Surface.Zipper (rootedAt)
 import Thena.Syntax.Lexer (lexTokens)
 import Thena.Syntax.Parser (parseTerm)
 import qualified Thena.Instral.Type as Ty
+import Thena.Instral.Type (Signature (..), Ty (..))
 import Thena.Instral.Concrete
-  ( RawInstr (..)
+  ( RawSignature (..)
+  , RawTy (..)
+  , RawInstr (..)
   , RawOp (..)
   , RawOperand (..)
   , RawRule (..)
@@ -104,13 +110,19 @@ data RuleBase = RuleBase
   { baseName        :: String
   , baseDescription :: Maybe String
   , basePath        :: FilePath
+  , baseSignatures  :: [(String, Signature)]
+    -- ^ **the types its file declared** (MS5 phase 67), keyed by name; the
+    -- arity is @length . 'Thena.Instral.Type.sigParams'@, because a signature's
+    -- arrow chain has one link per parameter.
   , baseRules       :: [Rule]
   }
   deriving (Eq, Show)
 
 -- | Build one. Nothing is checked here — 'validateBase' is separate, so that a
 -- caller who wants the errors gets them all rather than the first.
-ruleBase :: String -> Maybe String -> FilePath -> [Rule] -> RuleBase
+ruleBase
+  :: String -> Maybe String -> FilePath -> [(String, Signature)] -> [Rule]
+  -> RuleBase
 ruleBase = RuleBase
 
 -- | Every rule the engine may search, across every loaded base, **in search
@@ -121,6 +133,14 @@ ruleBase = RuleBase
 -- 'matches' takes the bases rather than the rules.
 allRules :: [RuleBase] -> [Rule]
 allRules = concatMap baseRules
+
+-- | Every declared signature, across every loaded base.
+--
+-- **A signature is a claim about a callable, not about a file**, so a base that
+-- declares one for a rule written in another base is not wrong here; whether
+-- anything answers to it is 'Thena.Instral.Infer''s question.
+allSignatures :: [RuleBase] -> [(String, Signature)]
+allSignatures = concatMap baseSignatures
 
 -- --------------------------------------------------------------------------
 -- Finding rules (§7.6)
@@ -399,6 +419,23 @@ data RuleError
     -- ^ the right op word, written with the wrong arguments — too many, too
     -- few, or a position where a name was wanted. One error for all three: a
     -- rule body is one line, and the word is enough to find it
+  | UnknownType String String
+    -- ^ in the signature of ‹name›, ‹word› names no type (MS5 phase 67)
+  | TypeArity String String Int Int
+    -- ^ …and one that does, given the wrong number of arguments
+  | TypeVariableApplied String String
+    -- ^ @a b@ — a type variable applied to something. @instral@'s types are
+    -- first order and there is nothing a variable could stand for that takes an
+    -- argument
+  | TypeIsAFunction String
+    -- ^ an arrow inside an argument. A signature is a flat chain — @instral@ has
+    -- no functions as values yet (phase 68), so @(a -> b) -> c@ has nothing to
+    -- mean
+  | UnitInsideAType String
+    -- ^ @()@ anywhere but as the result. It says /this leaves nothing/, which is
+    -- not a type a value can have
+  | DuplicateSignature String Int
+    -- ^ two signatures for one callable
   deriving (Eq, Show)
 
 -- | The load-time pass (§2.4, §7.2). Three checks, one traversal, **every**
@@ -470,6 +507,95 @@ validate r = reserved ++ headScope ++ go 0 (initiallyBound r) (ruleBody r)
       | n <- concatMap refsIn (operandsOf o)
       , n `notElem` bound
       ]
+
+-- | A written signature, resolved (MS5 phase 67).
+--
+-- **The arity comes out of the type**: an arrow chain with three links before
+-- the result is a signature at arity three, so nothing is written twice and a
+-- signature cannot claim an arity its own type contradicts.
+resolveSignature :: RawSignature -> Either RuleError (String, Signature)
+resolveSignature (RawSignature nm t) = do
+  ts <- traverse (resolveTy nm) (chain t)
+  -- **The last link is the result, and @()@ means there is none.** That is the
+  -- same distinction 'Thena.Ops.resultOf' draws, said in the surface a rule
+  -- author writes — and it is why @()@ anywhere else is refused rather than
+  -- quietly dropping a parameter.
+  case sequence (init ts) of
+    Nothing -> Left (UnitInsideAType nm)
+    Just ps -> Right (nm, Signature ps (last ts))
+  where
+    chain (RawTyArrow a b) = a : chain b
+    chain u                = [u]
+
+-- | One written type.
+--
+-- **A capitalised name is a constructor and a lowercase one is a variable.**
+-- Nothing else distinguishes them, and nothing else needs to: it is why a
+-- signature needs no @forall@ — its variables are exactly its lowercase names.
+--
+-- A variable is numbered by where it first appears, so
+-- @signature f : a -> b -> a@ resolves to 'Thena.Instral.Type.TVar' 0, 1, 0.
+-- The numbering is scheme-local, which is what 'Thena.Instral.Infer'
+-- instantiates.
+resolveTy :: String -> RawTy -> Either RuleError (Maybe Ty)
+resolveTy owner t0 = fmap fst (go [] t0)
+  where
+    go vs t = case t of
+      RawTyUnit -> Right (Nothing, vs)
+      RawTyArrow _ _ -> Left (TypeIsAFunction owner)
+      RawTyPair a b -> do
+        (ma, vs1) <- go vs a
+        (mb, vs2) <- go vs1 b
+        case (ma, mb) of
+          (Just x, Just y) -> Right (Just (TPair x y), vs2)
+          _                -> Left (UnitInsideAType owner)
+      RawTyVar v -> Right (Just (TVar (indexOf v vs)), extend v vs)
+      RawTyCon nm as
+        | not (null as) || isVarName nm ->
+            if isVarName nm
+              then if null as
+                     then Right (Just (TVar (indexOf nm vs)), extend nm vs)
+                     else Left (TypeVariableApplied owner nm)
+              else applied nm as vs
+        | otherwise -> applied nm [] vs
+
+    applied nm as vs = do
+      (ms, vs') <- args vs as
+      case traverse id ms of
+        Nothing -> Left (UnitInsideAType owner)
+        Just xs -> fmap (\x -> (Just x, vs')) (constructor nm xs)
+
+    args vs [] = Right ([], vs)
+    args vs (a : rest) = do
+      (m, vs1)  <- go vs a
+      (ms, vs2) <- args vs1 rest
+      Right (m : ms, vs2)
+
+    constructor nm xs = case (nm, xs) of
+      ("String", [])      -> Right TString
+      ("Name", [])        -> Right TName
+      ("Int", [])         -> Right TInt
+      ("Char", [])        -> Right TChar
+      ("Bool", [])        -> Right TBool
+      ("Surface", [])     -> Right TSurface
+      ("Core", [])        -> Right TCore
+      ("Development", []) -> Right TDevelopment
+      ("List", [a])       -> Right (TList a)
+      ("Option", [a])     -> Right (TOption a)
+      _ | nm `elem` known -> Left (TypeArity owner nm (arityOf nm) (length xs))
+        | otherwise       -> Left (UnknownType owner nm)
+
+    known = [ "String", "Name", "Int", "Char", "Bool", "Surface", "Core"
+            , "Development", "List", "Option" ]
+    arityOf nm = if nm `elem` ["List", "Option"] then 1 else 0
+
+    isVarName (c : _) = c `elem` ['a' .. 'z']
+    isVarName []      = False
+
+    indexOf v vs = case lookup v (zip vs [0 ..]) of
+      Just i  -> i
+      Nothing -> length vs
+    extend v vs = if v `elem` vs then vs else vs ++ [v]
 
 -- | The words @instral@ reads as literals rather than as names (MS5 phase 64).
 --

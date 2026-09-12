@@ -58,6 +58,13 @@ import Thena.Ops
 data Site
   = InHead GlobalName Int   -- ^ rule, which test
   | InBody GlobalName Int   -- ^ rule, which instruction
+  | InSignature GlobalName Int
+    -- ^ **the declaration itself, and its arity** (MS5 phase 67). His
+    -- requirement: /a wrong annotation must report against the declaration, not
+    -- only where it bites/. A body that contradicts its signature is reported
+    -- where it contradicts it — that is the author's own rule, and §6.5(a) calls
+    -- it local and clear — but the two faults that are the /declaration's/ are
+    -- reported here.
   deriving (Eq, Show)
 
 data InstralTypeError
@@ -73,6 +80,11 @@ data InstralTypeError
     -- a body is read/. That is true of reading a body and false of this pass,
     -- which has every base in hand, so the check comes back where MS5.md said
     -- it would.
+  | AnnotationTooGeneral Site Ty
+    -- ^ the signature promises a variable where the body needs a particular
+    -- type. Carries what the body pinned it to.
+  | SignatureUnanswered GlobalName Int
+    -- ^ a signature for a callable no rule defines.
   | TextNotTextual Site Ty
     -- ^ a @\"…\"@ literal where that type is wanted.
     --
@@ -85,6 +97,7 @@ renderSite :: Site -> String
 renderSite si = case si of
   InHead (GlobalName n) i -> n ++ ", test " ++ show (i + 1)
   InBody (GlobalName n) i -> n ++ ", instruction " ++ show (i + 1)
+  InSignature (GlobalName n) a -> "signature " ++ n ++ "/" ++ show a
 
 renderInstralTypeError :: InstralTypeError -> String
 renderInstralTypeError e = case e of
@@ -95,6 +108,12 @@ renderInstralTypeError e = case e of
   BindsNothing si (GlobalName n) ->
     renderSite si ++ ": no clause of " ++ n ++ " returns anything, so there is\
       \ nothing to bind"
+  AnnotationTooGeneral si t ->
+    renderSite si ++ ": the signature says any type here, but the body needs "
+      ++ renderTy t
+  SignatureUnanswered (GlobalName n) a ->
+    "signature " ++ n ++ ": no rule of that name takes " ++ show a
+      ++ (if a == 1 then " argument" else " arguments")
   TextNotTextual si t ->
     renderSite si ++ ": a string literal is a String or a Name, not "
       ++ renderTy t
@@ -177,7 +196,12 @@ occurs st i t = case shallow st t of
 -- numbered from zero, meaning "any type, the same one wherever it repeats
 -- inside this signature". Every use gets its own copy.
 instantiate :: [Ty] -> St -> ([Ty], St)
-instantiate ts st0 =
+instantiate ts st = let ((xs, _), st') = instantiateWith ts st in (xs, st')
+
+-- | 'instantiate', and the renaming it used — which a declared signature needs
+-- so that 'generalEnough' can ask what became of each variable.
+instantiateWith :: [Ty] -> St -> (([Ty], [(Int, Ty)]), St)
+instantiateWith ts st0 =
   let vs        = nub (concatMap typeVarsIn ts)
       (ns, st1) = freshes (length vs) st0
       table     = zip vs ns
@@ -187,7 +211,7 @@ instantiate ts st0 =
         TOption a -> TOption (go a)
         TPair a b -> TPair (go a) (go b)
         _         -> t
-   in (map go ts, st1)
+   in ((map go ts, table), st1)
 
 -- --------------------------------------------------------------------------
 -- The signature environment
@@ -208,7 +232,18 @@ type Callable = (GlobalName, Int)
 -- time with 'Thena.Errors.NothingReturned', which is precisely the check phase
 -- 63 had to defer and this pass can make again. Every rule in the shipped base
 -- is in that position today.
-type SigEnv = [(Callable, ([Ty], Maybe Ty))]
+type SigEnv = [(Callable, Bound)]
+
+-- | How a callable's type was arrived at, because uses of the two differ.
+--
+-- **A declared signature is a scheme and is instantiated at every use**, which
+-- is the whole reason to write one: it is what lets a rule be used at two types.
+-- An inferred one is a single set of variables shared by every use — the
+-- monomorphism a recursive group has, and @ms5\/CLOSEOUT.md@ 8.
+data Bound
+  = Inferred [Ty] (Maybe Ty)
+  | Declared Signature
+  deriving (Eq, Show)
 
 -- --------------------------------------------------------------------------
 -- The pass
@@ -224,26 +259,48 @@ type SigEnv = [(Callable, ([Ty], Maybe Ty))]
 -- single recursive group has, it is what Haskell would do inside one @let@
 -- group without a signature, and phase 67 is where an annotation lifts it.
 -- Nothing in the shipped base wants two types today.
-inferProgram :: [Rule] -> ([(Callable, Signature)], [InstralTypeError])
-inferProgram rs =
-  let (env, st0) = declareAll rs (St 0 [] [] [])
+inferProgram
+  :: [(String, Signature)] -> [Rule]
+  -> ([(Callable, Signature)], [InstralTypeError])
+inferProgram sigs rs =
+  let (env, st0) = declareAll sigs rs (St 0 [] [] [])
       st1        = foldl (clause env) st0 rs
       st2        = settleText st1
-      sigs       = [ (c, Signature (map (deep st2) ps) (fmap (deep st2) r))
-                   | (c, (ps, r)) <- env
+      out        = [ (c, whatItIs st2 b) | (c, b) <- env ]
+      unanswered = [ SignatureUnanswered (GlobalName n) (length (sigParams t))
+                   | (n, t) <- sigs
+                   , (GlobalName n, length (sigParams t)) `notElem` map fst env
                    ]
-   in (sigs, stErrors st2)
+   in (out, stErrors st2 ++ unanswered)
+
+-- | What to report as a callable's signature: the declaration if there was one,
+-- and otherwise what the solved substitution makes of its variables.
+whatItIs :: St -> Bound -> Signature
+whatItIs st b = case b of
+  Declared sg    -> sg
+  Inferred ps r  -> Signature (map (deep st) ps) (fmap (deep st) r)
 
 -- | One fresh variable per parameter, and one for the result **only if some
 -- clause of the callable returns**.
-declareAll :: [Rule] -> St -> (SigEnv, St)
-declareAll rs st0 = foldl one ([], st0) (nub (map callableOf rs))
+declareAll :: [(String, Signature)] -> [Rule] -> St -> (SigEnv, St)
+declareAll sigs rs st0 = foldl one ([], st0) (nub (map callableOf rs))
   where
-    one (env, st) c@(_, n) =
-      let (ps, st1) = freshes n st
-       in if any (returnsSomething . ruleBody) [ r | r <- rs, callableOf r == c ]
-            then let (v, st2) = fresh st1 in (env ++ [(c, (ps, Just v))], st2)
-            else (env ++ [(c, (ps, Nothing))], st1)
+    one (env, st) c@(GlobalName n, k) = case declaredFor n k of
+      -- **A declared signature is taken as given**, and the body is checked
+      -- against it rather than the other way round — which is the difference
+      -- between an annotation and a comment.
+      Just sg -> (env ++ [(c, Declared sg)], st)
+      Nothing ->
+        let (ps, st1) = freshes k st
+         in if any (returnsSomething . ruleBody) [ r | r <- rs, callableOf r == c ]
+              then let (v, st2) = fresh st1
+                    in (env ++ [(c, Inferred ps (Just v))], st2)
+              else (env ++ [(c, Inferred ps Nothing)], st1)
+
+    declaredFor n k =
+      case [ t | (n', t) <- sigs, n' == n, length (sigParams t) == k ] of
+        t : _ -> Just t
+        []    -> Nothing
 
 -- | Does this body end a call with a value?
 --
@@ -258,12 +315,42 @@ callableOf r = (ruleName r, length (ruleParams r))
 
 -- | Walk one clause: its head, then its body.
 clause :: SigEnv -> St -> Rule -> St
-clause env st0 r =
-  let (ps, res) = fromMaybe (error "declareAll missed a rule")
-                    (lookup (callableOf r) env)
-      ctx       = zip (ruleParams r) ps
-      st1       = foldl (headTest r ctx) st0 (zip [0 ..] (ruleHead r))
-   in body env r res ctx 0 st1 (ruleBody r)
+clause env st0 r = case fromMaybe (error "declareAll missed a rule")
+                          (lookup (callableOf r) env) of
+  Inferred ps res -> walk ps res st0
+  -- **A declared signature is checked, not assumed.** The clause is walked with
+  -- a fresh copy of the scheme, and then 'generalEnough' asks whether the copy's
+  -- variables are still variables: if the body pinned one, the signature
+  -- promised more than the rule delivers, and that is the declaration's fault
+  -- rather than the body's.
+  Declared sg ->
+    let ((ts, table), st1) = instantiateWith (sigParams sg ++ resultOfSig sg) st0
+        (ps, res)          = splitAt (length (sigParams sg)) ts
+        st2                = walk ps (listToMaybe res) st1
+     in generalEnough (InSignature (ruleName r) (length (sigParams sg))) table st2
+  where
+    walk ps res st =
+      let ctx = zip (ruleParams r) ps
+          st1 = foldl (headTest r ctx) st (zip [0 ..] (ruleHead r))
+       in body env r res ctx 0 st1 (ruleBody r)
+
+    resultOfSig sg = maybe [] (: []) (sigResult sg)
+
+-- | Are the scheme's variables still variables, and still distinct?
+--
+-- **Both halves matter.** A body that forces one to a particular type has
+-- contradicted the promise; two that it forced together have contradicted it
+-- just as much, because @a -> b@ said they need not be the same.
+generalEnough :: Site -> [(Int, Ty)] -> St -> St
+generalEnough si table st = foldl one st (zip [0 :: Int ..] images)
+  where
+    images = [ (v, shallow st img) | (v, img) <- table ]
+    one s (i, (_, img)) = case img of
+      TVar j
+        | j `elem` [ k | (_, TVar k) <- take i images ] ->
+            oops (AnnotationTooGeneral si (deep s img)) s
+        | otherwise -> s
+      other -> oops (AnnotationTooGeneral si (deep s other)) s
 
 headTest :: Rule -> [(Name, Ty)] -> St -> (Int, Test) -> St
 headTest r ctx st (i, t) =
@@ -289,7 +376,7 @@ body env r res ctx i st (instr : rest) =
           -- 'Thena.Ops.produces' cannot answer for one, and this pass can.
           let (t, s0) = fresh st1
               s = case o of
-                Call nm as | Just (_, Nothing) <- lookup (nm, length as) env ->
+                Call nm as | notReturning (lookup (nm, length as) env) ->
                   oops (BindsNothing si nm) s0
                 _ -> s0
            in ((n, t) : ctx, s)
@@ -310,10 +397,20 @@ operation env r res ctx si o st0 = case o of
         let st1 = foldl (\s a -> snd (operandType ctx si a s)) st0 as
             (t, st2) = fresh st1
          in (Just t, st2)
-      Just (ps, cres) ->
+      Just (Inferred ps cres) ->
         ( cres
         , foldl (\s (w, a) -> operandAgainst ctx si w a s) st0 (zip ps as)
         )
+      -- **Every use of a declared signature gets its own copy**, which is what
+      -- makes an annotated rule usable at two types where an inferred one is
+      -- not (@ms5\/CLOSEOUT.md@ 8).
+      Just (Declared sg) ->
+        let n            = length (sigParams sg)
+            (ts, st1)    = instantiate (sigParams sg ++ maybe [] (: []) (sigResult sg)) st0
+            (ps, cres)   = splitAt n ts
+         in ( listToMaybe cres
+            , foldl (\s (w, a) -> operandAgainst ctx si w a s) st1 (zip ps as)
+            )
 
   -- **@return@ is what says the rule's own result type**, and every clause of
   -- one callable says it about the same variable — which is how two clauses
@@ -340,6 +437,16 @@ operation env r res ctx si o st0 = case o of
         st2 = foldl (\s (w, a) -> operandAgainst ctx si w a s) st1
                 (zip ws (map fst declared))
      in (listToMaybe rw, st2)
+
+-- | Is this a callable that hands nothing back?
+--
+-- 'Nothing' — nothing defines it — is not: §8 allows a call to a name a later
+-- base will define, so the pass learns nothing rather than complaining.
+notReturning :: Maybe Bound -> Bool
+notReturning b = case b of
+  Just (Inferred _ Nothing) -> True
+  Just (Declared sg)        -> sigResult sg == Nothing
+  _                         -> False
 
 -- | The type of an operand, checked against what the position wants.
 operandAgainst :: [(Name, Ty)] -> Site -> Ty -> Operand -> St -> St

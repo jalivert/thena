@@ -558,6 +558,7 @@ devForm f = case f of
 describe :: Token -> String
 describe t = case t of
   TLambda     -> "λ"
+  TSignature  -> "signature"
   TChar c     -> show c
   TLBracket   -> "["
   TRBracket   -> "]"
@@ -1847,9 +1848,18 @@ whereRuleError e = case e of
   BadOperands g i _       -> inRule g i
   NoSuchTag g i _         -> inRule g i
   BadRegion g i _ _       -> inRule g i
+  -- The signature errors (MS5 phase 67) name a signature and not a rule: they
+  -- are found before anything is resolved into a 'Thena.Ops.Rule' at all.
+  UnknownType n _         -> inSignature n
+  TypeArity n _ _ _       -> inSignature n
+  TypeVariableApplied n _ -> inSignature n
+  TypeIsAFunction n       -> inSignature n
+  UnitInsideAType n       -> inSignature n
+  DuplicateSignature n _  -> inSignature n
   where
     inRule g i = "in " ++ nameString g ++ ", instruction " ++ show i ++ ": "
     inName g   = "in " ++ nameString g ++ ": "
+    inSignature n = "in the signature of " ++ n ++ ": "
 
 -- | What was wrong, said without saying where.
 whatRuleError :: RuleError -> String
@@ -1867,6 +1877,18 @@ whatRuleError e = case e of
     "no language is called " ++ tag ++ " — the built-in tags are surface and core"
   BadRegion _ _ tag why   ->
     "this " ++ tag ++ " term did not parse: " ++ renderSyntaxError why
+  UnknownType _ w         -> w ++ " is not a type"
+  TypeArity _ w want got  ->
+    w ++ " takes " ++ show want ++ ", not " ++ show got
+  TypeVariableApplied _ v ->
+    v ++ " is a type variable, and a variable takes no arguments"
+  TypeIsAFunction _       ->
+    "an argument may not itself be a function"
+  UnitInsideAType _       ->
+    "() says a rule leaves nothing, so it can only be the result"
+  DuplicateSignature _ a  ->
+    "two signatures for the same name at " ++ show a
+      ++ (if a == 1 then " argument" else " arguments")
 
 renderMatches :: [Rule] -> [String]
 renderMatches [] = ["no rule applies here"]

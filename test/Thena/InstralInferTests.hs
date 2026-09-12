@@ -11,7 +11,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (GlobalName (..))
-import Thena.Driver (Response (..), Session, loadRuleBases, newSession)
+import Thena.Driver (Response (..), RuleFileError (..), Session, loadRuleBases, newSession)
 import Thena.Engine (Machine (..))
 import Thena.Driver (Session (..))
 import Thena.Instral.Infer
@@ -22,7 +22,7 @@ import Thena.Instral.Infer
   )
 import Thena.Instral.Type (Signature (..), Ty (..), renderSignature)
 import Thena.Ops (Instr (..), Op (..), Operand (..), Rule (..), Value (..))
-import Thena.Rules (RuleBase (..))
+import Thena.Rules (RuleBase (..), RuleError (..))
 import Thena.Standard (expectedStandard)
 
 tests :: TestTree
@@ -33,6 +33,8 @@ tests =
     , illTyped
     , wellTyped
     , blockReturn
+    , annotations
+    , badSignatures
     ]
 
 -- --------------------------------------------------------------------------
@@ -47,14 +49,14 @@ shippedBase =
   testGroup
     "the shipped base"
     [ testCase "infers with no errors at all" $
-        map renderInstralTypeError (snd (inferProgram expectedStandard)) @?= []
+        map renderInstralTypeError (snd (inferProgram [] expectedStandard)) @?= []
 
       -- **Written out, not counted.** A signature is what a later phase will
       -- move by accident, and every one of these was inferred from the head
       -- predicates and the ops in the body — nothing is annotated.
     , testCase "and these are the signatures it works out" $
         [ n ++ "/" ++ show a ++ " : " ++ renderSignature s
-        | ((GlobalName n, a), s) <- fst (inferProgram expectedStandard)
+        | ((GlobalName n, a), s) <- fst (inferProgram [] expectedStandard)
         ]
           @?= [ "attack/0 : ()"
               , "try-core/1 : Core -> ()"
@@ -81,14 +83,14 @@ shippedBase =
       -- `surface-is-…` question of `t`, and 'Thena.Rules.testTypes' is what
       -- makes that an answer.
     , testCase "elaborate's parameter came from its head" $
-        lookup (GlobalName "elaborate", 1) (fst (inferProgram expectedStandard))
+        lookup (GlobalName "elaborate", 1) (fst (inferProgram [] expectedStandard))
           @?= Just (Signature [TSurface] Nothing)
 
       -- **`spine-arguments` has no head test about `h` or `f` at all.** Their
       -- types come from the body — `goto h` wants a Core, `apply-next f n` wants
       -- one — which is the part a head-only reading would miss.
     , testCase "and spine-arguments' came from its body" $
-        lookup (GlobalName "spine-arguments", 3) (fst (inferProgram expectedStandard))
+        lookup (GlobalName "spine-arguments", 3) (fst (inferProgram [] expectedStandard))
           @?= Just (Signature [TCore, TCore, TSurface] Nothing)
     ]
 
@@ -213,8 +215,93 @@ blockReturn =
                     [Do (Block [Do (Return (Lit (VText "x")))])]
         bad     = Rule (GlobalName "bad") [] []
                     [Bind "y" (Call (GlobalName "blocked") []), Do (Say (Ref "y"))]
-     in snd (inferProgram [blocked, bad])
+     in snd (inferProgram [] [blocked, bad])
           @?= [BindsNothing (InBody (GlobalName "bad") 0) (GlobalName "blocked")]
+
+-- --------------------------------------------------------------------------
+-- Declared signatures (MS5 phase 67)
+-- --------------------------------------------------------------------------
+
+-- | **What an annotation buys, and it is a capability rather than a comment.**
+--
+-- Phase 67 was originally scoped as a signature pre-pass so that bodies could be
+-- parsed; §6.0.1's tags removed that need and phase 66c demonstrated it — the
+-- whole shipped base infers with no annotations at all. What is left is these
+-- two: a rule usable at two types, and a wrong promise reported where it was
+-- made.
+annotations :: TestTree
+annotations =
+  testGroup
+    "a declared signature"
+    [ -- **The payoff.** @ignore@ is used at a Name and at a Core. Inferred, the
+      -- second use is a clash (@ms5\/CLOSEOUT.md@ 8 — one recursive group, one
+      -- type); declared, every use gets its own copy of the scheme.
+      testCase "makes a rule usable at two types" $
+        case load polymorphic of
+          BasesLoaded _ -> pure ()
+          other -> assertFailure ("expected a load, got " ++ show other)
+
+    , testCase "…and without it the same base is refused" $
+        case load (unlines (drop 1 (lines polymorphic))) of
+          BasesIllTyped [Clash _ TName TCore] -> pure ()
+          other -> assertFailure ("expected a clash, got " ++ show other)
+
+      -- **His requirement: a wrong annotation reports against the
+      -- DECLARATION.** The signature promises any type; the body hands the
+      -- parameter to an op that wants a term, so the promise is broken and it is
+      -- the promise that is at fault, not the instruction.
+    , testCase "that promises more than the body delivers is refused at the signature" $
+        load "signature f : a -> ()\nrule f x :- then prim-try x"
+          @?= BasesIllTyped
+                [AnnotationTooGeneral (InSignature (GlobalName "f") 1) TCore]
+
+      -- …and a signature that is simply the wrong type is still reported in the
+      -- body, which is §6.5(a) — the author's own rule, local and clear.
+    , testCase "that names the wrong type is refused in the body" $
+        load "signature f : Core -> ()\nrule f x :- when (surface-is-name x) then prove"
+          @?= BasesIllTyped [Clash (InHead (GlobalName "f") 0) TSurface TCore]
+
+      -- A signature is a claim about a callable, so a claim nothing answers is
+      -- a mistake — most likely a typo or a changed arity.
+    , testCase "for a callable nothing defines is refused" $
+        load "signature nobody : Core -> ()\nrule f :- then prove"
+          @?= BasesIllTyped [SignatureUnanswered (GlobalName "nobody") 1]
+
+      -- **The arity is the arrow chain's**, so this signature is about @f@ at
+      -- one argument and says nothing about the @f@ of none — a different
+      -- callable, which dispatch already treats as one.
+    , testCase "is about one arity only" $
+        case load "signature f : Core -> ()\nrule f x :- then prim-try x\nrule f :- then prove" of
+          BasesLoaded _ -> pure ()
+          other -> assertFailure ("expected a load, got " ++ show other)
+    ]
+  where
+    polymorphic =
+      "signature ignore : a -> ()\n\
+      \rule ignore x :- then say \"ignored\"\n\
+      \rule usesName :- then n = fresh-name \"h\" ; ignore n\n\
+      \rule usesTerm :- then h = here ; ignore h\n"
+
+-- | A signature that does not resolve is refused when the FILE is read, before
+-- anything is inferred — it is a question one file can answer.
+badSignatures :: TestTree
+badSignatures =
+  testGroup
+    "a signature that does not resolve"
+    [ refused "an unknown type"      "signature f : Trm -> ()"   (UnknownType "f" "Trm")
+    , refused "a constructor's arity" "signature f : List -> ()" (TypeArity "f" "List" 1 0)
+    , refused "a variable applied"   "signature f : a Core -> ()" (TypeVariableApplied "f" "a")
+    , refused "a function argument"  "signature f : (a -> b) -> ()" (TypeIsAFunction "f")
+    , refused "() as an argument"    "signature f : () -> ()"    (UnitInsideAType "f")
+    , refused "two for one callable"
+        "signature f : Core -> ()\nsignature f : Surface -> ()"
+        (DuplicateSignature "f" 1)
+    ]
+  where
+    refused label src want =
+      testCase label $ case load (src ++ "\nrule f x :- then prove") of
+        RuleFileRefused _ (RuleIllFormed es) | want `elem` es -> pure ()
+        other -> assertFailure ("expected " ++ show want ++ ", got " ++ show other)
 
 load :: String -> Response
 load src = snd (loadRuleBases newSession [("t.thena.rules", "rule base t where\n" ++ src)])
