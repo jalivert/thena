@@ -165,6 +165,14 @@ thena spine> :load examples/progress.thena
 thena spine> :load examples/preservation.thena
 ```
 
+`examples/normal.thena` adds the exclusivity half — a value takes no step
+at all, so the disjunction `progress` returns is a real case split:
+
+```
+valueNoStep : forall (v : Term) -> Value v
+           -> forall (u : Term) -> Step v u -> Empty
+```
+
 ## Building
 
 Requires GHC (with `base` 4.21), Cabal, and `alex` + `happy` (resolved

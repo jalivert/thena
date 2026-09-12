@@ -12,6 +12,7 @@ import qualified Thena.CursorTests
 import qualified Thena.DependentIndexTests
 import qualified Thena.CanonicalTests
 import qualified Thena.DeterminacyTests
+import qualified Thena.NormalTests
 import qualified Thena.PreservationTests
 import qualified Thena.ProgressTests
 import qualified Thena.ProductTests
@@ -55,6 +56,7 @@ main =
       , Thena.DependentIndexTests.tests
       , Thena.CanonicalTests.tests
       , Thena.DeterminacyTests.tests
+      , Thena.NormalTests.tests
       , Thena.PreservationTests.tests
       , Thena.ProgressTests.tests
       , Thena.ProductTests.tests
