@@ -141,6 +141,19 @@ data Value
     -- construction**: nothing checks that the elements agree until phase 66's
     -- type system, exactly as nothing checks that an op was given a term.
   | VOption  (Maybe Value)
+  | VObject String SurfaceZipper
+    -- ^ **an object-language term, and which language it is** (MS5 phase 69).
+    --
+    -- **It is a 'VSurface' wearing a brand**, because an object term /is/ a
+    -- Surface term (§6.6) — the tag is what makes the type distinct, exactly as
+    -- 'TName' and 'TString' are distinct over one 'VText'. The name is carried
+    -- so that "Thena.Instral.Infer" can give the literal the right type; nothing
+    -- at run time reads it.
+    --
+    -- **The brand is only removed by @surface-of@**, which is the one-way
+    -- coercion §6.6 asks for. There is no way back: making a @Tm@ needs the tag,
+    -- which is its only introduction form and is what makes a value of it well
+    -- formed by construction.
   | VClosure [Name] [Instr] Env
     -- ^ **a lambda and the environment it was made in** (MS5 phase 68b).
     --
@@ -242,6 +255,16 @@ data Op
   | Ask    Operand AnswerKind -- ^ prompt text, and what the frontend should offer
   | Say    Operand            -- ^ message text
   | Concat Operand Operand    -- ^ building prompt and message text
+  | SurfaceOf Operand
+    -- ^ **@surface-of ‹t›@ — an object term read as the Surface term it is**
+    -- (MS5 phase 69), §6.6's one-way coercion.
+    --
+    -- **At run time it removes a brand**, which is 'NameText' one type over.
+    --
+    -- **Its argument type is imprecise**, and that is a real limit rather than
+    -- an oversight: 'Thena.Instral.Type.Ty' can say @Tm@ and it can say /any
+    -- type/, but it cannot say /some object language/, so this takes a variable
+    -- and refuses at run time what it is not given. See @ms5\/CLOSEOUT.md@.
   | Lambda [Name] [Instr]
     -- ^ **make a closure** (MS5 phase 68b) — what @\\ x -> e@ runs.
     --
@@ -1025,6 +1048,7 @@ resultOf o = case o of
   -- and result are whatever its body makes them, which this table cannot see —
   -- so it claims a variable and "Thena.Instral.Infer" pins it.
   Lambda _ _   -> Just (TVar 0)
+  SurfaceOf _  -> Just TSurface
   Value _      -> Just (TVar 0)
   NameText _   -> Just TString
   Assume _ _   -> Just TCore  -- the variable it bound; §7.3's @?x <- claim S@
@@ -1177,6 +1201,7 @@ operandTypes o = case o of
   Concat a b   -> [(a, TString), (b, TString)]
   Value a      -> [(a, TVar 0)]
   Lambda _ _   -> []
+  SurfaceOf a  -> [(a, TVar 0)]
   NameText a   -> [(a, TName)]
   Unify  a b   -> [(a, TCore), (b, TCore)]
   UnifyInto a b -> [(a, TCore), (b, TCore)]
@@ -1433,6 +1458,7 @@ opKeyword o = case o of
   Concat _ _   -> "concat"
   Value _      -> "value"
   Lambda _ _   -> "lambda"
+  SurfaceOf _  -> "surface-of"
   NameText _   -> "name-text"
   Along        -> "along"
   Into         -> "into"

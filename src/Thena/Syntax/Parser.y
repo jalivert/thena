@@ -39,7 +39,7 @@ import Thena.Syntax.Concrete
   , RawConstructor (..)
   , RawData (..)
   )
-import Thena.Instral.Concrete (RawDecl (..), RawFunction (..), RawRhs (..), RawSignature (..), RawTy (..), RawRule (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
+import Thena.Instral.Concrete (RawDecl (..), RawLanguage (..), RawProduction (..), RawGItem (..), RawFunction (..), RawRhs (..), RawSignature (..), RawTy (..), RawRule (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
@@ -82,6 +82,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   where   { Located _ TWhere }
   rule    { Located _ TRule }
   signature { Located _ TSignature }
+  language { Located _ TLanguage }
   declsep { Located _ TDeclSep }
   when    { Located _ TWhen }
   then    { Located _ TThen }
@@ -185,6 +186,7 @@ Decls :: { [RawDecl] }
   | Decls declsep Rule                     { DeclRule $3 : $1 }
   | Decls declsep Signature                { DeclSignature $3 : $1 }
   | Decls declsep Function                 { DeclFunction $3 : $1 }
+  | Decls declsep Language                 { DeclLanguage $3 : $1 }
 
 Rule :: { RawRule }
   : rule ident Params ':-' Tests then Body   { RawRule $2 (reverse $3) $5 (reverse $7) }
@@ -211,6 +213,26 @@ Rhs :: { RawRhs }
 -- were already lexed, so this costs no new syntax.
 Lambda :: { RawOperand }
   : 'λ' Params '->' Rhs                    { RawLambda (reverse $2) $4 }
+
+-- **An object language's grammar** (MS5 phase 69). Braces and @where@ are
+-- already tokens, so this costs one keyword and no punctuation.
+Language :: { RawLanguage }
+  : language ident where '{' Prods '}'     { RawLanguage $2 (reverse $5) }
+
+Prods :: { [RawProduction] }
+  : Prod                                   { [$1] }
+  | Prods ';' Prod                         { $3 : $1 }
+
+Prod :: { RawProduction }
+  : ident ':' GItems                       { RawProduction $1 (reverse $3) }
+
+GItems :: { [RawGItem] }
+  :                                        { [] }
+  | GItems GItem                           { $2 : $1 }
+
+GItem :: { RawGItem }
+  : str                                    { GTerminal $1 }
+  | ident                                  { GWord $1 }
 
 Signature :: { RawSignature }
   : signature ident ':' Ty                 { RawSignature $2 $4 }

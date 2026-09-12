@@ -16,6 +16,7 @@ module Thena.Rules
   , ruleBase
   , allRules
   , allCallable
+  , allLanguages
   , allSignatures
 
     -- * Finding rules (§7.6)
@@ -34,6 +35,7 @@ module Thena.Rules
 
     -- * Written rules (§8, phase 21)
   , resolveFunction
+  , resolveLanguage
   , resolveRule
   , resolveSignature
   , resolveTy
@@ -73,10 +75,21 @@ import Thena.Surface.Read (parseSurfaceText)
 import Thena.Surface.Zipper (rootedAt)
 import Thena.Syntax.Lexer (lexTokens)
 import Thena.Syntax.Parser (parseTerm)
+import Thena.Instral.Grammar
+  ( GrammarError
+  , Item (..)
+  , Language
+  , Production (..)
+  , language
+  , parseObject
+  )
 import qualified Thena.Instral.Type as Ty
 import Thena.Instral.Type (Signature (..), Ty (..))
 import Thena.Instral.Concrete
   ( RawSignature (..)
+  , RawLanguage (..)
+  , RawProduction (..)
+  , RawGItem (..)
   , RawFunction (..)
   , RawRhs (..)
   , RawTy (..)
@@ -118,6 +131,10 @@ data RuleBase = RuleBase
     -- ^ **the types its file declared** (MS5 phase 67), keyed by name; the
     -- arity is @length . 'Thena.Instral.Type.sigParams'@, because a signature's
     -- arrow chain has one link per parameter.
+  , baseLanguages   :: [(String, Language)]
+    -- ^ **the object languages its file declared** (MS5 phase 69). Each one is a
+    -- tag, an opaque @instral@ type and a generated parser; see
+    -- "Thena.Instral.Grammar".
   , baseFunctions   :: [Rule]
     -- ^ **the global functions its file declared** (MS5 phase 68a), each already
     -- an ordinary 'Rule' — his §1.1: /a function is a rule with one clause and
@@ -132,8 +149,8 @@ data RuleBase = RuleBase
 -- | Build one. Nothing is checked here — 'validateBase' is separate, so that a
 -- caller who wants the errors gets them all rather than the first.
 ruleBase
-  :: String -> Maybe String -> FilePath -> [(String, Signature)] -> [Rule]
-  -> [Rule] -> RuleBase
+  :: String -> Maybe String -> FilePath -> [(String, Signature)]
+  -> [(String, Language)] -> [Rule] -> [Rule] -> RuleBase
 ruleBase = RuleBase
 
 -- | Every rule the engine may search, across every loaded base, **in search
@@ -157,6 +174,10 @@ allSignatures = concatMap baseSignatures
 --
 -- 'allRules' is what 'matches' and 'dispatch' see, and it is deliberately the
 -- smaller list — see 'baseFunctions'.
+-- | Every object language, across every loaded base.
+allLanguages :: [RuleBase] -> [(String, Language)]
+allLanguages = concatMap baseLanguages
+
 allCallable :: [RuleBase] -> [Rule]
 allCallable bs = concatMap baseRules bs ++ concatMap baseFunctions bs
 
@@ -451,6 +472,11 @@ data RuleError
   | DuplicateSignature String Int
     -- ^ two signatures for one callable
   | FunctionLeavesNothing String
+  | BadGrammarItem String String
+    -- ^ in the grammar of ‹language›, ‹word› is neither the language itself nor
+    -- @name@ (MS5 phase 69)
+  | BadGrammar String GrammarError
+    -- ^ …and a grammar the generated parser could not run
     -- ^ @f x = say "hi"@ — the right of an @=@ ran something that produces no
     -- value, so there is nothing for the function to be (MS5 phase 68a)
   deriving (Eq, Show)
@@ -530,9 +556,9 @@ validate r = reserved ++ headScope ++ go 0 (initiallyBound r) (ruleBody r)
 -- **The arity comes out of the type**: an arrow chain with three links before
 -- the result is a signature at arity three, so nothing is written twice and a
 -- signature cannot claim an arity its own type contradicts.
-resolveSignature :: RawSignature -> Either RuleError (String, Signature)
-resolveSignature (RawSignature nm t) = do
-  ts <- traverse (resolveTy nm) (chain t)
+resolveSignature :: [(String, Language)] -> RawSignature -> Either RuleError (String, Signature)
+resolveSignature ls (RawSignature nm t) = do
+  ts <- traverse (resolveTy ls nm) (chain t)
   -- **The last link is the result, and @()@ means there is none.** That is the
   -- same distinction 'Thena.Ops.resultOf' draws, said in the surface a rule
   -- author writes — and it is why @()@ anywhere else is refused rather than
@@ -554,8 +580,8 @@ resolveSignature (RawSignature nm t) = do
 -- @signature f : a -> b -> a@ resolves to 'Thena.Instral.Type.TVar' 0, 1, 0.
 -- The numbering is scheme-local, which is what 'Thena.Instral.Infer'
 -- instantiates.
-resolveTy :: String -> RawTy -> Either RuleError (Maybe Ty)
-resolveTy owner t0 = fmap fst (go [] t0)
+resolveTy :: [(String, Language)] -> String -> RawTy -> Either RuleError (Maybe Ty)
+resolveTy ls owner t0 = fmap fst (go [] t0)
   where
     go vs t = case t of
       RawTyUnit -> Right (Nothing, vs)
@@ -598,6 +624,10 @@ resolveTy owner t0 = fmap fst (go [] t0)
       (ms, vs2) <- args vs1 rest
       Right (m : ms, vs2)
 
+    -- **A declared object language is a type** (MS5 phase 69, §6.6, his): the
+    -- environment grows with what the user declares, which he ruled is *"exactly
+    -- what instral is for"*.
+    constructor nm [] | Just _ <- lookup nm ls = Right (TObject nm)
     constructor nm xs = case (nm, xs) of
       ("String", [])      -> Right TString
       ("Name", [])        -> Right TName
@@ -676,8 +706,8 @@ validateBase = concatMap validate . baseRules
 --
 -- **Every error, not the first**, for 'validate'\'s reason: instructions
 -- resolve independently, so a body with three mistakes reports three.
-resolveRule :: RawRule -> Either [RuleError] Rule
-resolveRule (RawRule nm ps ts body) =
+resolveRule :: [(String, Language)] -> RawRule -> Either [RuleError] Rule
+resolveRule ls (RawRule nm ps ts body) =
   case (headErrs, bodyErrs) of
     ([], []) -> Right (Rule g ps tests (concat instrs))
     _        -> Left (headErrs ++ bodyErrs)
@@ -693,7 +723,7 @@ resolveRule (RawRule nm ps ts body) =
         Left (WrongTestArity _ _) -> Left (BadTestOperands g w)
 
     (bodyErrs, instrs) =
-      partitionEithers (zipWith (instruction g) [0 ..] body)
+      partitionEithers (zipWith (instruction ls g) [0 ..] body)
 
 -- | What may be written as an operand of a test (MS4 phase 47).
 --
@@ -734,6 +764,27 @@ headOperand o = case o of
   -- effects, and a nested call is a call (MS5 phase 63).
   RawNested _ _ -> Nothing
 
+-- | A written grammar, resolved into the language it declares (MS5 phase 69).
+--
+-- **Two words are special inside a production and nothing else is**: the
+-- language's own name is a recursive slot, and @name@ is a bare identifier.
+-- The parser could not tell — it does not know what the language is called —
+-- which is the same division of labour an op word gets.
+resolveLanguage :: RawLanguage -> Either [RuleError] (String, Language)
+resolveLanguage (RawLanguage nm ps) = case partitionEithers (map production ps) of
+  (e : es, _) -> Left (e : es)
+  ([], ps')   -> case language nm ps' of
+    Left gs  -> Left (map (BadGrammar nm) gs)
+    Right l  -> Right (nm, l)
+  where
+    production (RawProduction c is) = Production c <$> traverse item is
+    item i = case i of
+      GTerminal t -> Right (Terminal t)
+      GWord w
+        | w == nm     -> Right Recurse
+        | w == "name" -> Right NameSlot
+        | otherwise   -> Left (BadGrammarItem nm w)
+
 -- | A written function, resolved into the rule it is (MS5 phase 68a).
 --
 -- **A function IS a rule — his §1.1** — /a rule with one clause and no head/ —
@@ -748,9 +799,9 @@ headOperand o = case o of
 --
 -- **A function must produce.** @f x = say "hi"@ is refused here rather than by
 -- 'validate', which would report it against a binding the author never wrote.
-resolveFunction :: RawFunction -> Either [RuleError] Rule
-resolveFunction (RawFunction nm ps rhs) = do
-  is <- resolveBlock g [RawBind resultName rhs]
+resolveFunction :: [(String, Language)] -> RawFunction -> Either [RuleError] Rule
+resolveFunction ls (RawFunction nm ps rhs) = do
+  is <- resolveBlock ls g [RawBind resultName rhs]
   case [ () | Bind n o <- is, n == resultName, not (produces o) ] of
     _ : _ -> Left [FunctionLeavesNothing nm]
     []    -> Right (Rule g ps [] (is ++ [Do (Return (Ref resultName))]))
@@ -767,8 +818,8 @@ resolveFunction (RawFunction nm ps rhs) = do
 --
 -- The name is the one errors are reported against. A block has none of its own,
 -- so its caller supplies where it came from.
-resolveBlock :: GlobalName -> [RawInstr] -> Either [RuleError] [Instr]
-resolveBlock g body = case partitionEithers (zipWith (instruction g) [0 ..] body) of
+resolveBlock :: [(String, Language)] -> GlobalName -> [RawInstr] -> Either [RuleError] [Instr]
+resolveBlock ls g body = case partitionEithers (zipWith (instruction ls g) [0 ..] body) of
   ([], instrs) -> Right (concat instrs)
   (errs, _)    -> Left errs
 
@@ -780,40 +831,40 @@ resolveBlock g body = case partitionEithers (zipWith (instruction g) [0 ..] body
 -- one that wanted its value. The written index is kept for errors — it is the
 -- line the author can see — so the instruction numbers in a message still count
 -- what was written and not what it expanded to.
-instruction :: GlobalName -> Int -> RawInstr -> Either RuleError [Instr]
-instruction g i ri = case ri of
+instruction :: [(String, Language)] -> GlobalName -> Int -> RawInstr -> Either RuleError [Instr]
+instruction ls g i ri = case ri of
   RawBind n (RhsOp o)    -> lift (Bind n) o
   -- **A value on the right of an @=@** (MS5 phase 68a) — @x = [1, 2]@. Its
   -- nested calls are lifted exactly as an op's arguments are, and the value
   -- itself becomes a 'Thena.Ops.Value', which is the op with no written form.
   -- **A lambda binds directly**, without going through 'Op.Value': it is
   -- already an op, and wrapping it would build the closure and then copy it.
-  RawBind n (RhsValue (RawLambda ps b)) -> pure . Bind n <$> closure g i ps b
+  RawBind n (RhsValue (RawLambda ps b)) -> pure . Bind n <$> closure ls g i ps b
   RawBind n (RhsValue o) ->
     let (binds, o') = hoistedOne i o
-     in (++) <$> traverse (hoistedBind g i) binds
-              <*> (pure . Bind n . Op.Value <$> operandOf g i "=" o')
+     in (++) <$> traverse (hoistedBind ls g i) binds
+              <*> (pure . Bind n . Op.Value <$> operandOf ls g i "=" o')
   RawDo     o            -> lift Do       o
   where
     lift f (RawOp w as) =
       let (binds, as') = hoisted i as
-       in (++) <$> traverse (hoistedBind g i) binds
-                <*> (pure . f <$> operation g i (RawOp w as'))
+       in (++) <$> traverse (hoistedBind ls g i) binds
+                <*> (pure . f <$> operation ls g i (RawOp w as'))
 
 -- | One binding 'hoisted' lifted out — a nested call or a lambda.
-hoistedBind :: GlobalName -> Int -> (Name, RawRhs) -> Either RuleError Instr
-hoistedBind g i (n, r) = case r of
-  RhsOp o                     -> Bind n <$> operation g i o
-  RhsValue (RawLambda ps b)   -> Bind n <$> closure g i ps b
-  RhsValue o                  -> Bind n . Op.Value <$> operandOf g i "=" o
+hoistedBind :: [(String, Language)] -> GlobalName -> Int -> (Name, RawRhs) -> Either RuleError Instr
+hoistedBind ls g i (n, r) = case r of
+  RhsOp o                     -> Bind n <$> operation ls g i o
+  RhsValue (RawLambda ps b)   -> Bind n <$> closure ls g i ps b
+  RhsValue o                  -> Bind n . Op.Value <$> operandOf ls g i "=" o
 
 -- | A lambda, compiled the way a function is: a body that ends in @return@.
 --
 -- **The same compilation as 'resolveFunction'**, deliberately — §1.1 says a
 -- function is a rule with one clause and no head, and a lambda is that function
 -- without a name, so there is one way to build a body and not two.
-closure :: GlobalName -> Int -> [Name] -> RawRhs -> Either RuleError Op
-closure g i ps b = case resolveBlock g [RawBind lambdaResult b] of
+closure :: [(String, Language)] -> GlobalName -> Int -> [Name] -> RawRhs -> Either RuleError Op
+closure ls g i ps b = case resolveBlock ls g [RawBind lambdaResult b] of
   Left (e : _) -> Left e
   Left []      -> Left (BadOperands g i "λ")
   Right is
@@ -883,8 +934,8 @@ hoistedOne i a = case hoisted i [a] of
 --
 -- The three arguments before the operand are only for errors: which rule, which
 -- instruction, and the word that wanted it.
-operandOf :: GlobalName -> Int -> String -> RawOperand -> Either RuleError Operand
-operandOf g i w o = case o of
+operandOf :: [(String, Language)] -> GlobalName -> Int -> String -> RawOperand -> Either RuleError Operand
+operandOf ls g i w o = case o of
   -- **Cannot arise**, for 'RawNested'\'s reason: 'hoisted' lifts every lambda
   -- into a binding of its own before this runs (MS5 phase 68b).
   RawLambda _ _ -> Left (BadOperands g i w)
@@ -911,8 +962,8 @@ operandOf g i w o = case o of
   -- it wanted a term fails with 'Thena.Errors.ExpectedTerm', and saying so
   -- earlier is the type system's job (@ms2\/CLOSEOUT.md@ 4b, phase 66).
   RawPos k  -> Right (Lit (VInt k))
-  RawList os    -> ListOf <$> traverse (operandOf g i w) os
-  RawPairOf a b -> PairOf <$> operandOf g i w a <*> operandOf g i w b
+  RawList os    -> ListOf <$> traverse (operandOf ls g i w) os
+  RawPairOf a b -> PairOf <$> operandOf ls g i w a <*> operandOf ls g i w b
   -- **A tagged region is parsed here, at load** (MS5 phase 61b, §6.0.1), so
   -- that a syntax error in an embedded term arrives with every other syntax
   -- error rather than when a rule happens to run.
@@ -925,6 +976,13 @@ operandOf g i w o = case o of
   -- same place: unresolved, because a rule base is read before there is
   -- anything to resolve against.
   RawQuoted r -> Right (Lit (VRaw r))
+  RawRegion tag src | Just l <- lookup tag ls ->
+    -- **A declared object language's parser is generated** (MS5 phase 69,
+    -- §6.0.1) and the notation is the built-in tags' — the asymmetry lives here,
+    -- in the implementation, and no rule of the language mentions it.
+    case parseObject l src of
+      Left e  -> Left (BadRegion g i tag e)
+      Right t -> Right (Lit (VObject tag (rootedAt t)))
   RawRegion tag src -> case tag of
     "surface" -> case parseSurfaceText src of
       Left e  -> Left (BadRegion g i tag e)
@@ -943,8 +1001,8 @@ operandOf g i w o = case o of
 -- A word this does not accept is a **rule call** (phase 25e); an accepted word
 -- given the wrong arguments is 'BadOperands'. Those are separate mistakes, and
 -- only the second is a load-time error now.
-operation :: GlobalName -> Int -> RawOp -> Either RuleError Op
-operation g i (RawOp w as)
+operation :: [(String, Language)] -> GlobalName -> Int -> RawOp -> Either RuleError Op
+operation ls g i (RawOp w as)
   -- The field words come first: @arg@ is one of them and also the only word
   -- that reads a position, so a general arity table could not describe it.
   | w `elem` partWords = case as of
@@ -1028,7 +1086,7 @@ operation g i (RawOp w as)
     -- kind of value fails at run time with 'Thena.Errors.ExpectedTerm', and
     -- "when the instruction language gets a type system that check moves
     -- there". A grammar that policed it here would be that type system, badly.
-    ref     = operandOf g i w
+    ref     = operandOf ls g i w
 
     nullary =
       [ ("along", Along), ("into", Into), ("back", Back), ("reduce", Reduce)
@@ -1049,6 +1107,7 @@ operation g i (RawOp w as)
       , ("option-value", Op.OptionValue)
       , ("goto", Goto), ("goto-named", Op.GotoNamed)
       , ("name-text", Op.NameText)
+      , ("surface-of", Op.SurfaceOf)
       , ("push-development", Op.PushDevelopment)
       , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
       , ("typeof", Typing), ("expose", Op.Expose), ("resolve-core", Op.ResolveCore), ("fresh-name", FreshName), ("prim-apply", Op.Apply)

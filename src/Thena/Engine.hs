@@ -121,7 +121,7 @@ import Thena.Global.Env
 import qualified Thena.Ops as Op
 import Thena.Tactics.Eliminate (Elimination (..), eliminate)
 import Thena.Rules
-  (RuleBase, RuleError (..), RuleIter, arities, clauses, dispatch, hasNext, next, resolveBlock)
+  (RuleBase, RuleError (..), allLanguages, RuleIter, arities, clauses, dispatch, hasNext, next, resolveBlock)
 import Thena.Syntax.Lexer (isIdentifier)
 import Thena.Surface.Zipper (SurfaceZipper)
 import qualified Thena.Surface.Zipper as Zipper
@@ -1182,6 +1182,13 @@ perform instr rest m = case operation instr of
     Left e         -> failure e m
     Right (ls, rs) -> produce (VText (ls ++ rs)) m
 
+  -- **Remove the brand** (MS5 phase 69) — 'Op.SurfaceOf'. An object term is a
+  -- Surface term; the tag was what made its /type/ distinct.
+  Op.SurfaceOf a -> case operandValue (env (exec m)) a of
+    Left r                -> failure r m
+    Right (VObject _ z)   -> produce (VSurface z) m
+    Right _               -> failure ExpectedSurface m
+
   -- **Build the closure** (MS5 phase 68b). The environment is captured here and
   -- not written down, which is the whole reason a lambda is an op and not a
   -- literal.
@@ -1447,7 +1454,7 @@ perform instr rest m = case operation instr of
   Op.Play x -> case surfaceAt x of
     Left r  -> failure r m
     Right (Concrete.SurfaceDo body) ->
-      case resolveBlock (GlobalName "do") body of
+      case resolveBlock (allLanguages (rules m)) (GlobalName "do") body of
         Left errs -> failure (blockFailureOf errs) m
         Right is  -> Continue (advance m) { exec = (exec m) { pc = is ++ rest } }
     Right _ -> failure (ExpectedSurfaceShape "a do block") m

@@ -337,7 +337,7 @@ moduleTests =
                  "module M where\nf : A\nf = a"
 
   , testCase "the name is kept" $
-      fmap fst (parseSurfaceModule "module Arith where { f : A ; f = a }")
+      fmap fst (parseSurfaceModule [] "module Arith where { f : A ; f = a }")
         @?= Right "Arith"
 
   , -- A datatype's own @where@ opens a block inside the module's, so the two
@@ -364,14 +364,14 @@ moduleTests =
         "module M where\nf : A\nf = a\ndata D : Type\8320 where"
 
   , testCase "a module with no declarations is refused" $
-      case parseSurfaceModule "module M where { }" of
+      case parseSurfaceModule [] "module M where { }" of
         Left _  -> pure ()
         Right r -> assertFailure ("admitted: " ++ show r)
   ]
   where
     -- Compare the **items**, not the module name, so a test says only what it
     -- is about.
-    sameModule a b = case (parseSurfaceModule a, parseSurfaceModule b) of
+    sameModule a b = case (parseSurfaceModule [] a, parseSurfaceModule [] b) of
       (Right (_, x), Right (_, y)) -> show y @?= show x
       (x, y) -> assertFailure (show x ++ "\n" ++ show y)
 

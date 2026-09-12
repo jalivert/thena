@@ -65,7 +65,7 @@ hole = enter (Under (Component.Claim v (Ident "goal") type1) (Trailing (Free v))
   where v = fst (fresh 0)
 
 bases :: [Rule] -> [RuleBase]
-bases rs = [ruleBase "test" Nothing "" [] [] rs]
+bases rs = [ruleBase "test" Nothing "" [] [] [] rs]
 
 machine :: [RuleBase] -> [Instr] -> Machine
 machine base is =

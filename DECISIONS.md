@@ -690,6 +690,42 @@ never appears in `:matches` and `prove` never runs it.
 **A function must produce a value.** `f x = say "hi"` is refused — `say` leaves
 nothing, so there is nothing for `f` to be.
 
+### An object language is declared with a grammar, and becomes a type
+
+*Decided 2026-09-12.*
+
+```
+language Tm where {
+  var : name ;
+  app : "(" Tm Tm ")" ;
+  lam : "fn" name "·" Tm
+  }
+```
+
+That one declaration gives you three things: **`Tm` as a type** you can write in
+a signature, **`` Tm`…` `` as the only way to make one**, and a one-way coercion
+`surface-of` to a Surface term.
+
+```
+signature asSurface : Tm -> Surface
+asSurface t = surface-of t
+
+rule go :- then t = Tm`(x y)` ; s = asSurface t ; …
+```
+
+A production builds its constructor applied to what its slots parsed, so
+`` Tm`(x y)` `` is the Surface term `app (var x) (var y)`. **A term you write in
+the tag is well formed by construction**, because the tag is the only way to make
+one — and it is *not* a Surface term until you coerce it:
+
+```
+go, instruction 1: wanted Surface, got Tm
+```
+
+**Terminals are Thena tokens.** A grammar is written over the same lexer
+everything else uses, so `"."` is refused (it is not a token) where `"·"` is
+fine. A production may not begin with the language itself, and may not be empty.
+
 ### `instral` has lambdas, and a local shadows a rule
 
 *Decided 2026-09-12.*

@@ -52,6 +52,7 @@ library
         Thena.Surface.Zipper
         Thena.Instral.Concrete
         Thena.Instral.Type
+        Thena.Instral.Grammar
         Thena.Instral.Infer
         Thena.Syntax.Concrete
         Thena.Syntax.Lexer

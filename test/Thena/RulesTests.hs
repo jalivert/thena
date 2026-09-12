@@ -345,7 +345,7 @@ validateTests =
               ]
 
     , testCase "validateBase checks every rule" $
-        length (validateBase (ruleBase "test" Nothing "" [] []
+        length (validateBase (ruleBase "test" Nothing "" [] [] []
                                 [ named "a" [] [Bind "x" Ops.Attack]
                                 , named "b" [] [Do (Ops.Say (Ref "z"))]
                                 ]))
@@ -425,7 +425,7 @@ dataTests =
 
     -- Two clauses of one name, told apart by the shape of the argument.
     shapes =
-      ruleBase "shapes" Nothing "" [] []
+      ruleBase "shapes" Nothing "" [] [] []
         [ Rule (GlobalName "shape") ["xs"] [Ops.ListIsEmpty (Ref "xs")]
             [Do (Ops.Say (Lit (VText "empty")))]
         , Rule (GlobalName "shape") ["xs"] [Ops.ListIsCons (Ref "xs")]
@@ -672,7 +672,7 @@ machineIn env cur is =
 -- @Bind@ on a call is filled by the callee's @return@ — and one rule says it.
 returning :: RuleBase
 returning =
-  ruleBase "returning" Nothing "" [] []
+  ruleBase "returning" Nothing "" [] [] []
     [ returningRule
       -- @return@ ends the body: the @prim-attack@ after it must not run, which
       -- is what makes this rule safe to call at a hole in any state.

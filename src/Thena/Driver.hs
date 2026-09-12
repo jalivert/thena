@@ -125,6 +125,7 @@ import Thena.Ops
   )
 import Data.Either (partitionEithers)
 import Thena.Instral.Infer (InstralTypeError, inferProgram)
+import Thena.Instral.Grammar (Language)
 import Thena.Instral.Type (Signature (..))
 import Thena.Rules
   ( RuleBase (..)
@@ -136,9 +137,11 @@ import Thena.Rules
   , resolveBlock
   , RuleError (..)
   , allCallable
+  , allLanguages
   , allSignatures
   , ruleBase
   , resolveFunction
+  , resolveLanguage
   , resolveSignature
   , validate
   )
@@ -587,13 +590,13 @@ data LineError
 -- privilege is the thing MS5 removes (@discussion\/the-five-languages.md@ §6.3):
 -- a bare argument is @instral@ now, and a term is written in the fence its
 -- language is entitled to.
-instralLine :: String -> String -> Either LineError [Instr]
-instralLine w arg = do
+instralLine :: [(String, Language)] -> String -> String -> Either LineError [Instr]
+instralLine ls w arg = do
   ts <- mapLeft LineSyntax (tokensOf arg)
   os <- mapLeft (LineSyntax . ParseFailed) (parseOperandRun ts)
   let (binds, os') = resolving w os
   mapLeft LineIllFormed
-    (resolveBlock (GlobalName w) (binds ++ [RawDo (RawOp w os')]))
+    (resolveBlock ls (GlobalName w) (binds ++ [RawDo (RawOp w os')]))
 
 -- | Hoist every written core term out of a line, resolving it first.
 --
@@ -696,12 +699,12 @@ tokensOf = mapLeft LexFailed . lexTokens
 -- a signature and its equation are adjacent and a datatype is not part of that
 -- pairing at all.
 parseSurfaceItems
-  :: String -> Either SyntaxError [Item]
-parseSurfaceItems src = do
+  :: [(String, Language)] -> String -> Either SyntaxError [Item]
+parseSurfaceItems ls src = do
   ts  <- tokensOf src
   ts' <- mapLeft LayoutFailed (layout ts)
   ds  <- mapLeft SurfaceParseFailed (Surface.parseSurfaceDecls ts')
-  regroup (reverse ds)
+  regroup ls (reverse ds)
 
 -- | A whole **proof module** (MS4 phase 43): its name, and its items.
 --
@@ -709,13 +712,13 @@ parseSurfaceItems src = do
 -- symbol instead — so a module's declaration block and a @declare@ line are the
 -- same grammar, and layout does the same work in both.
 parseSurfaceModule
-  :: String
+  :: [(String, Language)] -> String
   -> Either SyntaxError (String, [Item])
-parseSurfaceModule src = do
+parseSurfaceModule ls src = do
   ts  <- tokensOf src
   ts' <- mapLeft LayoutFailed (layout ts)
   m   <- mapLeft SurfaceParseFailed (Surface.parseSurfaceModule ts')
-  is  <- regroup (surfaceModuleDecls m)
+  is  <- regroup ls (surfaceModuleDecls m)
   Right (surfaceModuleName m, is)
 
 -- | Why a top-level block did not resolve, in terms 'SyntaxError' can hold.
@@ -748,13 +751,13 @@ data Item
 -- the same idea for theorems alone; this one also admits a @data@ item, which
 -- is why it is here and not there.
 regroup
-  :: [SurfaceDecl]
+  :: [(String, Language)] -> [SurfaceDecl]
   -> Either SyntaxError [Item]
-regroup = go
+regroup ls = go
   where
     go [] = Right []
     go (SurfaceDatatype d : rest) = (ItemData d :) <$> go rest
-    go (SurfaceBlock b : rest) = case resolveBlock (GlobalName "do") b of
+    go (SurfaceBlock b : rest) = case resolveBlock ls (GlobalName "do") b of
       Right is  -> (ItemBlock is :) <$> go rest
       Left errs -> Left (blockProblem errs)
     go (SurfaceSignature x ty : SurfaceEquation y body : rest)
@@ -896,7 +899,8 @@ surfaceProgram n0 items = foldl item ([], n0) items
 -- **Holes left over are not an error.** A module that does not finish leaves a
 -- half-built development in the session, which is what the REPL is for.
 loadProofSource :: Session -> String -> (Session, Response)
-loadProofSource s src = case parseSurfaceModule src of
+loadProofSource s src =
+  case parseSurfaceModule (allLanguages (rules (sessionMachine s))) src of
   Left e -> (s, Failed e)
   Right (nm, items) ->
     let machine  = sessionMachine s
@@ -1109,7 +1113,7 @@ dispatch s name arg = case name of
   -- already a surface atom (phase 45), so this costs a case and no syntax.
   "do" -> case parseSurfaceTerm ("do " ++ arg) of
     Left e -> (s, Failed e)
-    Right (SurfaceDo body) -> case resolveBlock (GlobalName "do") body of
+    Right (SurfaceDo body) -> case resolveBlock (allLanguages (rules machine)) (GlobalName "do") body of
       Left errs -> (s, Failed (blockProblem errs))
       Right is  -> progress (sessionStepping s)
                             s { sessionMachine = load is machine } []
@@ -1507,7 +1511,7 @@ dispatch s name arg = case name of
     --
     -- **The driver builds the program and the machine runs it**, which is what
     -- @assume@ and @claim@ already do. Nothing here elaborates.
-    declareSurface src = case parseSurfaceItems src of
+    declareSurface src = case parseSurfaceItems (allLanguages (rules machine)) src of
       Left e -> (s, Failed e)
       Right items ->
         let (is, n1) = surfaceProgram (names machine) items
@@ -1515,7 +1519,7 @@ dispatch s name arg = case name of
                      s { sessionMachine = load is machine { names = n1 } } []
 
     -- One typed line, as the program it is (MS5 phase 62b).
-    line = case instralLine name arg of
+    line = case instralLine (allLanguages (rules machine)) name arg of
       Left (LineSyntax e)     -> (s, Failed e)
       Left (LineIllFormed es) -> (s, LineRefused es)
       Right is ->
@@ -1792,8 +1796,8 @@ readRuleBase path src = case baseHead ls of
       let rest = replicate used "" ++ drop used ls
       ts   <- mapLeft RuleSyntaxError (tokensOf (unlines rest))
       raws <- mapLeft (RuleSyntaxError . ParseFailed) (parseRules (separated ts))
-      (sigs, fns, rs) <- resolveAll raws
-      Right (ruleBase nm desc path sigs fns rs)
+      (sigs, langs, fns, rs) <- resolveAll raws
+      Right (ruleBase nm desc path sigs langs fns rs)
   where
     ls = lines src
 
@@ -1819,10 +1823,26 @@ readRuleBase path src = case baseHead ls of
 separated :: [Located Token] -> [Located Token]
 separated = concatMap one
   where
-    one t@(Located p _)
-      | firstColumn p = [Located p TDeclSep, t]
-      | otherwise     = [t]
+    one t@(Located p w)
+      | firstColumn p && begins w = [Located p TDeclSep, t]
+      | otherwise                 = [t]
+
     firstColumn (Pos _ c) = c == 1
+
+    -- **Only before a token that could begin a declaration** — the three
+    -- declaration words and a name, which is what a function starts with.
+    -- Without this a language's closing @}@ in the first column would be read as
+    -- the start of something, which is what the first version did.
+    --
+    -- **The laxity it leaves is stated rather than hidden**: a continuation line
+    -- beginning with @;@ in the first column is accepted, because the rule is
+    -- about what /starts/ a declaration and a @;@ cannot.
+    begins w = case w of
+      TRule      -> True
+      TSignature -> True
+      TLanguage  -> True
+      TIdent _   -> True
+      _          -> False
 
 -- | Resolve every declaration, then validate every rule. Every error, not the
 -- first — 'validate'\'s reason.
@@ -1833,20 +1853,26 @@ separated = concatMap one
 -- /is/ answered here is what one file can answer — that the type names a type,
 -- and that a callable has at most one signature.
 resolveAll
-  :: [RawDecl] -> Either RuleFileError ([(String, Signature)], [Rule], [Rule])
+  :: [RawDecl]
+  -> Either RuleFileError
+       ([(String, Signature)], [(String, Language)], [Rule], [Rule])
 resolveAll raws =
-  case ( concat ruleErrs ++ concat fnErrs ++ sigErrs ++ dups
+  case ( concat langErrs ++ concat ruleErrs ++ concat fnErrs ++ sigErrs ++ dups
        , concatMap validate (ok ++ fns)
        ) of
-    ([], [])     -> Right (sigs, fns, ok)
+    ([], [])     -> Right (sigs, langs, fns, ok)
     (res, valid) -> Left (RuleIllFormed (res ++ valid))
   where
-    (ruleErrs, ok)  = partitionEithers [ resolveRule r | DeclRule r <- raws ]
+    -- **Languages first**, because everything else may mention one: a tag in an
+    -- operand, a type name in a signature (MS5 phase 69).
+    (langErrs, langs) =
+      partitionEithers [ resolveLanguage l | DeclLanguage l <- raws ]
+    (ruleErrs, ok)  = partitionEithers [ resolveRule langs r | DeclRule r <- raws ]
     -- **A function is validated like any rule**, because it is one
     -- ('Thena.Rules.resolveFunction').
-    (fnErrs, fns)   = partitionEithers [ resolveFunction f | DeclFunction f <- raws ]
+    (fnErrs, fns)   = partitionEithers [ resolveFunction langs f | DeclFunction f <- raws ]
     (sigErrs, sigs) =
-      partitionEithers [ resolveSignature g | DeclSignature g <- raws ]
+      partitionEithers [ resolveSignature langs g | DeclSignature g <- raws ]
     dups =
       [ DuplicateSignature n (length (sigParams t))
       | (i, (n, t)) <- zip [0 :: Int ..] sigs

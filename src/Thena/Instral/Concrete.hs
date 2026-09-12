@@ -24,6 +24,9 @@
 module Thena.Instral.Concrete
   ( RawDecl (..)
   , RawFunction (..)
+  , RawLanguage (..)
+  , RawProduction (..)
+  , RawGItem (..)
   , RawRhs (..)
   , RawSignature (..)
   , RawTy (..)
@@ -63,6 +66,7 @@ data RawDecl
   = DeclRule RawRule
   | DeclSignature RawSignature
   | DeclFunction RawFunction
+  | DeclLanguage RawLanguage
   deriving (Eq, Show)
 
 -- | @‹name› ‹params› = ‹expression›@ — a global function (MS5 phase 68a).
@@ -77,6 +81,29 @@ data RawDecl
 -- in the engine knows the difference, which is the point of there being one
 -- language.
 data RawFunction = RawFunction String [String] RawRhs
+  deriving (Eq, Show)
+
+-- | @language ‹Name› where { ‹productions› }@ (MS5 phase 69).
+--
+-- **The minimal grammar notation** — his ruling, 2026-09-12, over branding
+-- object terms with the Surface parser: build it now so the generated-parser
+-- path is exercised, and let MS6's grammar sub-language (§7) replace it.
+data RawLanguage = RawLanguage String [RawProduction]
+  deriving (Eq, Show)
+
+-- | @‹constructor› : ‹item›…@
+data RawProduction = RawProduction String [RawGItem]
+  deriving (Eq, Show)
+
+-- | A quoted terminal, or a word.
+--
+-- **Which word it is, is resolution's question**, exactly as an op word is: the
+-- language's own name is a recursive slot, @name@ is a bare identifier, and
+-- anything else is a mistake. The parser cannot tell, because it does not know
+-- what the language is called.
+data RawGItem
+  = GTerminal String
+  | GWord String
   deriving (Eq, Show)
 
 -- | What stands right of an @=@ — in a function declaration and in a binding

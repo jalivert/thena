@@ -69,6 +69,17 @@ data Ty
   | TList Ty             -- ^ @[a, b, c]@
   | TPair Ty Ty          -- ^ @(a, b)@
   | TOption Ty           -- ^ @some x@ and @none@
+  | TObject String
+    -- ^ **a declared object language** (MS5 phase 69) — @Tm@, opaque.
+    --
+    -- **Its tag is its only introduction form** (§6.6, his), so a value of this
+    -- type is well formed by construction, and there is a one-way coercion to
+    -- 'TSurface' because an object term /is/ a Surface term. @instral@ never
+    -- looks inside one.
+    --
+    -- **This is where the type environment stops being closed** — §5.3's
+    -- \"contained\" weakens from /closed/ to /extensible by declaration/, which
+    -- he ruled is *\"exactly what instral is for\"*.
   | TFun [Ty] Ty
     -- ^ **a function value** (MS5 phase 68b) — what a lambda is.
     --
@@ -127,6 +138,7 @@ renderTy = go False
       TInt         -> "Int"
       TChar        -> "Char"
       TBool        -> "Bool"
+      TObject n    -> n
       TSurface     -> "Surface"
       TCore        -> "Core"
       TDevelopment -> "Development"

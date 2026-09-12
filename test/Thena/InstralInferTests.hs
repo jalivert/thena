@@ -22,6 +22,7 @@ import Thena.Instral.Infer
   )
 import Thena.Instral.Type (Signature (..), Ty (..), renderSignature)
 import Thena.Ops (Instr (..), Op (..), Operand (..), Rule (..), Value (..))
+import Thena.Instral.Grammar (GrammarError (..))
 import Thena.Rules (RuleBase (..), RuleError (..))
 import Thena.Standard (expectedStandard)
 
@@ -37,6 +38,7 @@ tests =
     , badSignatures
     , functions
     , lambdas
+    , objectLanguages
     ]
 
 -- --------------------------------------------------------------------------
@@ -435,6 +437,66 @@ lambdas =
                  [("l.thena.rules", "rule base l where\n" ++ src ++ "\n")])) "go") of
       Ran msgs _ -> case reverse msgs of { m : _ -> Just m; [] -> Nothing }
       other      -> error ("expected Ran, got " ++ show other)
+
+-- --------------------------------------------------------------------------
+-- Object languages (MS5 phase 69)
+-- --------------------------------------------------------------------------
+
+-- | **The seam §6.6 asks for**: a declared language gets an opaque @instral@
+-- type, a tag that is its only introduction form, and a one-way coercion to
+-- Surface.
+objectLanguages :: TestTree
+objectLanguages =
+  testGroup
+    "a declared object language"
+    [ -- The whole path: declared, tagged, parsed by the generated parser, and
+      -- used at the type the declaration generated.
+      testCase "is a type, a tag and a coercion" $
+        case load (tm ++ "signature asSurface : Tm -> Surface\n\
+                         \asSurface t = surface-of t\n\
+                         \rule go :- then t = Tm`(x y)` ; s = asSurface t ; prove") of
+          BasesLoaded _ -> pure ()
+          other -> assertFailure ("expected a load, got " ++ show other)
+
+      -- **The brand is the point.** Without the coercion an object term is not a
+      -- Surface term as far as the type system is concerned, which is what makes
+      -- the tag worth having.
+    , testCase "is not a Surface term until it is coerced" $
+        load (tm ++ "signature want : Surface -> ()\n\
+                    \rule want s :- then prove\n\
+                    \rule go :- then t = Tm`(x y)` ; want t")
+          @?= BasesIllTyped [Clash (InBody (GlobalName "go") 1) TSurface (TObject "Tm")]
+
+      -- **The generated parser is a real parser**, and a term it cannot read is
+      -- a syntax error naming the tag — arriving at load, with every other one
+      -- (§6.0.1).
+    , testCase "reports a term its grammar cannot read" $
+        case load (tm ++ "rule go :- then t = Tm`(x y` ; prove") of
+          RuleFileRefused _ (RuleIllFormed (BadRegion _ _ "Tm" _ : _)) -> pure ()
+          other -> assertFailure ("expected a region error, got " ++ show other)
+
+      -- The three shapes the generated parser could not run, refused when the
+      -- grammar is declared rather than when it is used.
+    , refusedGrammar "left recursion"
+        "language Tm where { loop : Tm \"x\" }"
+        (BadGrammar "Tm" (LeftRecursive "Tm" "loop"))
+    , refusedGrammar "an empty production"
+        "language Tm where { nothing : }"
+        (BadGrammar "Tm" (EmptyProduction "Tm" "nothing"))
+    , refusedGrammar "a terminal that is not one token"
+        "language Tm where { var : \"a b\" }"
+        (BadGrammar "Tm" (TerminalDoesNotLex "Tm" "a b"))
+    , refusedGrammar "a word that is neither the language nor name"
+        "language Tm where { var : nonsense }"
+        (BadGrammarItem "Tm" "nonsense")
+    ]
+  where
+    tm = "language Tm where { var : name ; app : \"(\" Tm Tm \")\" }\n"
+
+    refusedGrammar label src want =
+      testCase label $ case load (src ++ "\nrule go :- then prove") of
+        RuleFileRefused _ (RuleIllFormed es) | want `elem` es -> pure ()
+        other -> assertFailure ("expected " ++ show want ++ ", got " ++ show other)
 
 load :: String -> Response
 load src = snd (loadRuleBases newSession [("t.thena.rules", "rule base t where\n" ++ src)])

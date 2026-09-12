@@ -130,6 +130,10 @@ tokens :-
   -- a signature being a declaration rather than something hung on a rule's own
   -- line.
   "signature"   { keyword TSignature }
+  -- **An object language's grammar declaration** (MS5 phase 69). The fifth word
+  -- to narrow identifiers project-wide; see @ms5\/CLOSEOUT.md@ 11, which is the
+  -- same judgement call one phase earlier.
+  "language"    { keyword TLanguage }
   "when"        { keyword TWhen }
   "then"        { keyword TThen }
   ":-"          { keyword TNeck }
@@ -183,6 +187,7 @@ data Token
   | TDo
   | TRule
   | TSignature
+  | TLanguage
   | TDeclSep
     -- ^ **not lexed** — inserted by "Thena.Driver" before every rule-file token
     -- that starts in column 1 (MS5 phase 68a). See 'Thena.Driver.separated'.

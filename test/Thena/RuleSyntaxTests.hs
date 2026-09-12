@@ -71,7 +71,7 @@ readRule src = case lexTokens src of
   Left e -> Left ("lex: " ++ show e)
   Right ts -> case parseRule ts of
     Left e -> Left ("parse: " ++ show e)
-    Right raw -> case resolveRule raw of
+    Right raw -> case resolveRule [] raw of
       Left es -> Left ("resolve: " ++ show es)
       Right r -> Right r
 
@@ -490,7 +490,7 @@ regions =
       Left _ -> Nothing
       Right ts -> case parseRule ts of
         Left _ -> Nothing
-        Right raw -> case resolveRule raw of
+        Right raw -> case resolveRule [] raw of
           Left es -> Just es
           Right _ -> Nothing
 
@@ -624,6 +624,6 @@ mistakes =
       Left _ -> Nothing
       Right ts -> case parseRule ts of
         Left _ -> Nothing
-        Right raw -> case resolveRule raw of
+        Right raw -> case resolveRule [] raw of
           Left es -> Just es
           Right _ -> Nothing

@@ -157,6 +157,7 @@ import Thena.Syntax.Parser (ParseError (..))
 
 import Data.Foldable (toList)
 import Data.List (intercalate, partition)
+import Thena.Instral.Grammar (GrammarError (..))
 import Thena.Instral.Infer (renderInstralTypeError)
 import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRhs (..))
 --
@@ -559,6 +560,7 @@ describe :: Token -> String
 describe t = case t of
   TLambda     -> "λ"
   TSignature  -> "signature"
+  TLanguage   -> "language"
   -- Never lexed; "Thena.Driver" inserts it at a rule file's column 1.
   TDeclSep    -> "the start of a declaration"
   TChar c     -> show c
@@ -1147,6 +1149,9 @@ renderValue n ctx v = case v of
   -- and its captured environment may hold anything, so printing either would say
   -- more than a reader wants and less than they could use.
   VClosure ps _ _    -> "\\ " ++ unwords ps ++ " -> …"
+  -- **Printed as its tag**, which is how it was written and the only thing about
+  -- it @instral@ is allowed to know (MS5 phase 69).
+  VObject tag _      -> tag ++ "`…`"
   VTerm t            -> "⌜" ++ renderCore n ctx t ++ "⌝"
   -- **An unresolved core term prints as its shape, not its contents** (MS5
   -- phase 61b). Printing a 'Thena.Syntax.Concrete.Raw' back would need a
@@ -1867,10 +1872,13 @@ whereRuleError e = case e of
   UnitInsideAType n       -> inSignature n
   DuplicateSignature n _  -> inSignature n
   FunctionLeavesNothing n -> "in " ++ n ++ ": "
+  BadGrammarItem n _      -> inLanguage n
+  BadGrammar n _          -> inLanguage n
   where
     inRule g i = "in " ++ nameString g ++ ", instruction " ++ show i ++ ": "
     inName g   = "in " ++ nameString g ++ ": "
     inSignature n = "in the signature of " ++ n ++ ": "
+    inLanguage n  = "in the grammar of " ++ n ++ ": "
 
 -- | What was wrong, said without saying where.
 whatRuleError :: RuleError -> String
@@ -1900,6 +1908,12 @@ whatRuleError e = case e of
       ++ (if a == 1 then " argument" else " arguments")
   FunctionLeavesNothing _ ->
     "the right of the = leaves no value, so there is nothing to return"
+  BadGrammarItem _ w      ->
+    w ++ " is neither this language nor name"
+  BadGrammar _ ge         -> case ge of
+    LeftRecursive _ c      -> c ++ " begins with the language itself"
+    EmptyProduction _ c    -> c ++ " has no items"
+    TerminalDoesNotLex _ t -> show t ++ " is not one token"
 
 renderMatches :: [Rule] -> [String]
 renderMatches [] = ["no rule applies here"]
