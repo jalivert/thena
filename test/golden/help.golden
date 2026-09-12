@@ -13,7 +13,7 @@ a bare word acts, a word with a colon looks.
                                 descend into a field of the focused term
   arg ‹n› param ‹n› method ‹n› index ‹n›
                                 descend into a numbered field
-  goto "‹hole›"                 move to a hole by name
+  goto-named "‹hole›"           move to a hole by name
   reduce                        reduce the focused term in place
   quantify "‹x›" ⌜‹S›⌝          add a ∀-binder above the focus
   data ‹D› … where { … }        declare an inductive family

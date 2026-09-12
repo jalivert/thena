@@ -174,7 +174,8 @@ askingRule :: String -> String -> (Operand -> Operand -> Op) -> Rule
 askingRule word what op = Rule (GlobalName word) ["ty"] []
   [ Bind "n" (Op.Ask (Lit (VText ("name for the " ++ what ++ "?"))) Op.AName)
   , Do (op (Ref "n") (Ref "ty"))
-  , Bind "m" (Concat (Lit (VText (verb ++ " "))) (Ref "n"))
+  , Bind "t" (Op.NameText (Ref "n"))
+  , Bind "m" (Concat (Lit (VText (verb ++ " "))) (Ref "t"))
   , Do (Say (Ref "m"))
   ]
   where
@@ -430,7 +431,7 @@ spineWalkers =
       [ Do (Goto (Ref "h"))
       , Bind "n" (FreshName (Lit (VText "a")))
       , Bind "f2" (Op.ApplyNext (Ref "f") (Ref "n"))
-      , Do (Goto (Ref "n"))
+      , Do (Op.GotoNamed (Ref "n"))
       , Bind "a" (Op.AppFirstArgument (Ref "t"))
       , Do (Call (GlobalName "elaborate") [Ref "a"])
       , Bind "tl" (Op.AppTail (Ref "t"))

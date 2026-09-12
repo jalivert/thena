@@ -877,10 +877,11 @@ tests =
         , ":show"
         , ":infer succ zero"
         , ":revalidate"
-          -- **A typed block reads the rule's own locals.** A command cannot —
-          -- @goto h@ looks for a hole named @h@ — which is why the REPL types
-          -- the instruction language through a block.
-        , "goto \"h\""
+          -- **A typed block reads the rule's own locals.** A typed command
+          -- cannot — @goto-named "h"@ searches for a component called @h@,
+          -- where the block's @goto h@ reads the rule's own variable. That is
+          -- why the REPL types the instruction language through a block.
+        , "goto-named \"h\""
         , "do { goto h }"
           -- And a block's bindings survive to the next line, because a yielded
           -- machine's environment is not cleared.
@@ -908,7 +909,7 @@ tests =
           -- The only hole left is the boolean, and its type is now T = Bool.
           -- @goto@ (phase 24b) goes straight to it; counting @back@s would
           -- stop scaling the moment @apply@ claims several holes at once.
-        , "goto \"b\""
+        , "goto-named \"b\""
         , ":where"
         , "unify-refine-core ⌜ true ⌝"
         , ":show"
@@ -936,7 +937,7 @@ tests =
           -- A head with no Π at all: zero holes claimed, so @apply@ degenerates
           -- to @unify-refine@ exactly. That is the phase's claim that it adds
           -- no capability, in its smallest form.
-        , "goto \"a\""
+        , "goto-named \"a\""
         , "apply-core ⌜ true ⌝"
         , ":show"
         , "qed"
@@ -960,7 +961,7 @@ tests =
         , "along"
         , "apply-core ⌜ f ⌝"
         , ":show"
-        , "goto \"_\""
+        , "goto-named \"_\""
         , ":where"
         , ":abandon"
           -- **The failure, and that it leaves nothing** (phase 25d).
@@ -1022,9 +1023,9 @@ tests =
         , "along"
         , ":where"
         , "apply-core ⌜ Just ⌝"
-        , "goto \"a\""
+        , "goto-named \"a\""
         , "apply-core ⌜ b ⌝"
-        , "goto \"h\""
+        , "goto-named \"h\""
         , "solve"
         , "qed"
         , ":show h"

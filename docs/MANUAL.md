@@ -341,7 +341,7 @@ thena spine> :show
 ```
 
 The inner hole is `id1`, not `id`: every component in a development has a name
-of its own, so that `goto "‹name›"` always means one place.
+of its own, so that `goto-named "‹name›"` always means one place.
 
 Two λs have appeared, and the remaining hole now has type `A`. Move the cursor
 down to it — `into` enters the guess body, `along` steps past a binder — and ask
@@ -612,8 +612,10 @@ parenthesising.
 `elaborate ⟨ succ zero ⟩`. Every embedded term is written in the fence its
 language is entitled to, and an argument in no fence is neither language: it is
 a name, a number or a string, read exactly as a rule body reads one. That is why
-`goto` takes `goto "h"` and not `goto h` — the second is a *reference*, and at
-the prompt there is usually nothing bound to it.
+`goto-named` takes `goto-named "h"` and not `goto-named h` — the second is a
+*reference*, and at the prompt there is usually nothing bound to it. (`goto` is
+a separate word taking the *variable* a hole binds, which a rule body holds and
+the prompt rarely does.)
 
 The `-core` suffix marks the tactics that take a **development-calculus** term.
 The surface language exists beside it — `:infer`, `declare` and a `.thena` proof
@@ -946,7 +948,7 @@ language and elaborated on load.
 | `attack` `intro` `solve` `regret` `abandon` | the hole operations |
 | `try-core ⌜ term ⌝` | propose a term for the focused hole |
 | `apply-core ⌜ f ⌝` / `unify-refine-core ⌜ t ⌝` | apply a function / refine by unification |
-| `goto "‹name›"` | move to a hole by name |
+| `goto-named "‹name›"` | move to a hole by name |
 | `assume "‹x›" ⌜‹S›⌝` / `claim "‹x›" ⌜‹S›⌝` | add a hypothesis / a hole above the focus |
 | `assume ⌜‹S›⌝` / `claim ⌜‹S›⌝` | the same, asking for the name |
 | `unify ⌜‹t›⌝ ⌜‹u›⌝` | solve by unification |

@@ -1160,6 +1160,13 @@ perform instr rest m = case operation instr of
     Left e         -> failure e m
     Right (ls, rs) -> produce (VText (ls ++ rs)) m
 
+  -- **The identity at run time** (MS5 phase 66b). Both a 'Op.Name' and a
+  -- 'Op.VText' are text; this op exists so that the conversion is a thing the
+  -- type system sees and the author writes down. See 'Op.NameText'.
+  NameText a -> case text a of
+    Left e  -> failure e m
+    Right t -> produce (VText t) m
+
   Assume name ty -> component Component.Assume name ty
   Claim  name ty -> component Component.Claim  name ty
 
@@ -1442,26 +1449,26 @@ perform instr rest m = case operation instr of
   CrossValue -> navigate (keeping crossValue)
   Back       -> navigate (keeping back)
 
-  -- Not 'navigate' with the others: it reads its operand first, and it takes
-  -- **either** shape (phase 24b).
+  -- Not 'navigate' with the others: these two read an operand first.
   --
-  --   * a name — what a person types, searched from the root, so a hole is
-  --     reachable from anywhere. The user's correction: *"This instruction is
-  --     supposed to be useful always, not only when you already can see the
-  --     hole right above you."*
-  --   * a variable — what a rule body holds, since @claim@ and @define@ produce
-  --     it. A body may **not** go by name: 'Cursor.freshIdent' means the name it
-  --     asked for is not always the name it got.
-  Goto v -> case operandValue (env (exec m)) v of
-    Left r -> failure r m
-    Right val -> case val of
-      VText n              -> move (Cursor.gotoNamed (Ident n))
-      VTerm (Free x) -> move (Cursor.goto x)
-      _                    -> failure (CannotMove NoSuchHole) m
-    where
-      move f = case f (cursor (development m)) of
-        Left e    -> failure (CannotMove e) m
-        Right cur -> Continue (advance m { development = Development cur })
+  -- **They were one op until MS5 phase 66b**, reading either a 'VText' or a
+  -- @VTerm (Free x)@ — which is why neither could be given a signature. His
+  -- ruling was to split the word; see 'Op.GotoNamed'.
+  --
+  -- 'Goto' is the exact one: a variable, which a rule body holds because
+  -- @claim@ and @define@ produce it.
+  Goto v -> case term v of
+    Left r          -> failure r m
+    Right (Free x)  -> moveTo (Cursor.goto x)
+    Right _         -> failure (CannotMove NoSuchHole) m
+
+  -- 'GotoNamed' is the searching one: a name, looked for from the root, so a
+  -- hole is reachable from anywhere. The user's correction, phase 24b: *"This
+  -- instruction is supposed to be useful always, not only when you already can
+  -- see the hole right above you."* It is what a person types at the REPL.
+  GotoNamed v -> case operandText (env (exec m)) v of
+    Left r  -> failure r m
+    Right n -> moveTo (Cursor.gotoNamed (Ident n))
   Down part  -> navigate (down part)
 
   -- Commit a whnf at the core focus (§4.7). Not 'navigate': a move never has
@@ -1550,6 +1557,12 @@ perform instr rest m = case operation instr of
 
     -- Every move but 'down' leaves the counter alone.
     keeping g n cur = fmap (\cur' -> (cur', n)) (g cur)
+
+    -- 'navigate' without the counter, for the two @goto@s: they take an
+    -- operand, so they are not written with the plain moves above.
+    moveTo f = case f (cursor (development m)) of
+      Left e    -> failure (CannotMove e) m
+      Right cur -> Continue (advance m { development = Development cur })
 
     contextAt = focusContext (development m)
 

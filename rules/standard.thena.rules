@@ -71,19 +71,22 @@ rule apply-core f :- when focus-is-hole
 rule claim ty :-
   then n = ask "name for the new hole?" name
      ; claim n ty
-     ; m = concat "claimed " n
+     ; t = name-text n
+     ; m = concat "claimed " t
      ; say m
 
 rule assume ty :-
   then n = ask "name for the assumption?" name
      ; assume n ty
-     ; m = concat "assumed " n
+     ; t = name-text n
+     ; m = concat "assumed " t
      ; say m
 
 rule quantify ty :-
   then n = ask "name for the ∀-binder?" name
      ; quantify n ty
-     ; m = concat "quantified " n
+     ; t = name-text n
+     ; m = concat "quantified " t
      ; say m
 
 -- --------------------------------------------------------------------------
@@ -355,7 +358,7 @@ rule spine-arguments h f t :- when focus-is-component (surface-is-app t)
   then goto h
      ; n  = fresh-name "a"
      ; f2 = apply-next f n
-     ; goto n
+     ; goto-named n
      ; a  = app-first-argument t
      ; call elaborate a
      ; tl = app-tail t

@@ -603,6 +603,55 @@ above are not.
 The same limit applies to an application whose head is not a name — a β-redex
 like `(\ p -> e) v` — where there is no annotation to write. Use a `let`.
 
+### `instral` has types, and a name is not a string
+
+*Decided 2026-09-12.*
+
+The instruction language is typed: `String`, `Name`, `Int`, `Char`, `Bool`,
+`List a`, `Pair`, `Option a`, and four abstract types the machine owns —
+`Surface`, `Core`, `Development`, `Name`. Every op has a signature.
+
+**`Name` is a separate type from `String`, even though both are text.** More
+types is more disambiguating power: it catches `say h` where `h` is a hole's
+name, and `goto m` where `m` is a message.
+
+```
+claim  : Name -> Core -> Core
+say    : String -> ()
+concat : String -> String -> String
+```
+
+**A string literal is accepted at either**, so `fresh-name "refined"` needs
+nothing. A *variable* is not: going from a name to a string is written down.
+
+```
+n = ask "name for the new hole?" name    -- n : Name
+t = name-text n                          -- t : String
+m = concat "claimed " t
+```
+
+**`core\`…\`` has type `Core`, and so does a resolved term.** What the tag
+evaluates to has not been resolved yet — a rule base loads before the prelude,
+so `core\`Nat\`` cannot find `Nat` when it is written — but the type system does
+not tell the two apart, so `resolve-core : Core -> Core` and giving it a term
+that is already resolved fails when it runs, not when it loads.
+
+### `goto` takes a variable; `goto-named` takes a name
+
+*Decided 2026-09-12. Renames what you type at the prompt.*
+
+They were one word taking either. They are two operations: `goto` is exact,
+`goto-named` **searches the whole development from the root** and takes the
+first component it finds.
+
+```
+goto-named "h"        -- at the prompt, and in a body that minted the name
+h = here ; goto h     -- in a body holding the variable
+```
+
+At the prompt you almost always want the second word, because a typed `"h"` is a
+name. `goto` there needs a `do` block with something bound in it.
+
 ---
 
 ## The REPL and the session

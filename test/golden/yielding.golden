@@ -23,7 +23,7 @@ look at this
 (yield to hand control back)
 thena spine> :revalidate
 valid
-thena spine> goto "h"
+thena spine> goto-named "h"
 stuck: that names no hole or guess
 thena spine> do { goto h }
 look at this

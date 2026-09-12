@@ -50,10 +50,12 @@ import Thena.Ops
   , Rule (..)
   , Value (..)
   , produces
+  , signatureOf
   )
 -- §2.5: "Thena.Ops" is qualified everywhere except "Thena.Engine", because
 -- @Assume@ and @Claim@ name both a component and an op.
 import qualified Thena.Ops as Ops
+import Thena.Instral.Type (Signature (..), Ty (..), renderTy)
 import qualified Data.List.NonEmpty as NE
 import Thena.Surface.Concrete
   (Plicity (..), Surface (..), SurfaceArg (..))
@@ -589,7 +591,47 @@ checkProduces :: GlobalEnv -> Cursor -> [Instr] -> Op -> IO ()
 checkProduces globalEnv cur before o =
   case runOut (machineIn globalEnv cur (before ++ [Bind "r" o])) of
     Left r  -> assertFailure ("the op did not run: " ++ show r)
-    Right m -> (lookup "r" (Thena.Engine.env (exec m)) /= Nothing) @?= produces o
+    Right m -> do
+      let got = lookup "r" (Thena.Engine.env (exec m))
+      (got /= Nothing) @?= produces o
+      -- **And the value is of the type the table says** (MS5 phase 66b). The
+      -- presence check above is what 'produces' was; this is the rest of
+      -- 'Thena.Ops.resultOf', aimed at the same authority — the engine — rather
+      -- than at another table. A signature that claims @Surface@ for an op that
+      -- hands back a term fails here.
+      case (got, sigResult (signatureOf o)) of
+        (Just v, Just ty) | not (v `inhabits` ty) ->
+          assertFailure (renderTy ty ++ " was claimed, but the engine produced " ++ show v)
+        _ -> pure ()
+
+-- | Does this value belong to that type?
+--
+-- **Test-local on purpose.** It is a statement about what a type /means at run
+-- time/, and putting it in @src\/@ would invite it being used as a dynamic
+-- check — which is the thing the type system is being built to replace. Here it
+-- is a measuring device and nothing else.
+--
+-- **A 'VText' inhabits both 'TString' and 'TName'**, because at run time they
+-- are the same value; the distinction is static, which is the whole of his
+-- 2026-09-12 ruling. Same for 'TCore' and an unresolved @core`…`@.
+inhabits :: Value -> Ty -> Bool
+inhabits v t = case (v, t) of
+  (VText _,    TString) -> True
+  (VText _,    TName)   -> True
+  (VTerm _,    TCore)   -> True
+  (VRaw _,     TCore)   -> True
+  (VSurface _, TSurface) -> True
+  (VInt _,     TInt)    -> True
+  (VChar _,    TChar)   -> True
+  (VBool _,    TBool)   -> True
+  (VList vs,   TList a) -> all (`inhabits` a) vs
+  (VPair a b,  TPair x y) -> inhabits a x && inhabits b y
+  (VOption Nothing,  TOption _) -> True
+  (VOption (Just u), TOption a) -> inhabits u a
+  -- A scheme variable is satisfied by anything; what it is bound to is
+  -- inference's question and not this one's.
+  (_,          TVar _)  -> True
+  _                     -> False
 
 -- | @? a : Type₀ . ? goal : Type₀ . goal@, focused on @a@ — the one shape
 -- @along@ and @abandon@ both need, and the only one in this module with a

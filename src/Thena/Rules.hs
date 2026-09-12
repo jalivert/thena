@@ -35,6 +35,7 @@ module Thena.Rules
   , resolveBlock
   , testWord
   , testOperands
+  , testTypes
   , everyTest
   ) where
 
@@ -67,6 +68,7 @@ import Thena.Surface.Read (parseSurfaceText)
 import Thena.Surface.Zipper (rootedAt)
 import Thena.Syntax.Lexer (lexTokens)
 import Thena.Syntax.Parser (parseTerm)
+import qualified Thena.Instral.Type as Ty
 import Thena.Instral.Concrete
   ( RawInstr (..)
   , RawOp (..)
@@ -796,7 +798,9 @@ operation g i (RawOp w as)
       , ("list-head", Op.ListHead), ("list-tail", Op.ListTail)
       , ("pair-first", Op.PairFirst), ("pair-second", Op.PairSecond)
       , ("option-value", Op.OptionValue)
-      , ("goto", Goto), ("push-development", Op.PushDevelopment)
+      , ("goto", Goto), ("goto-named", Op.GotoNamed)
+      , ("name-text", Op.NameText)
+      , ("push-development", Op.PushDevelopment)
       , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
       , ("typeof", Typing), ("expose", Op.Expose), ("resolve-core", Op.ResolveCore), ("fresh-name", FreshName), ("prim-apply", Op.Apply)
       , ("resolve-name", Op.ResolveName)
@@ -865,7 +869,7 @@ data TestError = NoSuchTestWord | WrongTestArity Int Int
 -- test is rebuilt from its operands, and the final case is the arity mismatch,
 -- which is reachable and is what 'testOf' reports.
 --
--- A test added later must extend 'testWord' and 'testOperands', both of which
+-- A test added later must extend 'testWord' and 'testTypes', both of which
 -- @-Wall@ forces; "Thena.RuleSyntaxTests" round-trips every entry of
 -- 'everyTest' through the parser, which is what catches one this function
 -- forgot.
@@ -905,37 +909,55 @@ withOperands t os = case (t, os) of
 -- | What a test was written with, in written order. 'Thena.Ops.operandsOf'\'s
 -- job one type over, and what lets 'testOf' read an arity off 'everyTest'
 -- rather than keeping a second table of counts.
-testOperands :: Test -> [Operand]
-testOperands t = case t of
+-- | Every operand a head test reads, **with the type it wants there** (MS5
+-- phase 66b) — 'Thena.Ops.operandTypes' one type over, and for the same reason:
+-- two case splits agreeing about arity in twenty-four places is a thing that can
+-- come apart, and one cannot disagree with itself.
+--
+-- **The head is where a rule's parameters get their types**, which is why this
+-- exists before inference does: @rule elaborate t :- when (surface-is-name t)@
+-- is what says @t@ is a 'Ty.TSurface'. Phase 66c is what reads it that way.
+--
+-- Every test but the four focus questions asks about a term it is handed, and
+-- all but the data ones ask about a /surface/ term — head predicates were the
+-- surface language's from MS4 phase 47 onward.
+testTypes :: Test -> [(Operand, Ty.Ty)]
+testTypes t = case t of
   FocusIsHole     -> []
   FocusIsGuess    -> []
   FocusIsComponent -> []
   GoalTypeIsPi    -> []
   GoalTypeIsLet   -> []
-  SurfaceIsName o         -> [o]
-  SurfaceIsUniverse o     -> [o]
-  SurfaceIsUniverseOpen o -> [o]
-  SurfaceIsPlaceholder o  -> [o]
-  SurfaceIsHole o         -> [o]
-  SurfaceIsApp o          -> [o]
-  SurfaceIsLambda o       -> [o]
-  SurfaceIsForall o       -> [o]
-  SurfaceIsArrow o        -> [o]
-  SurfaceIsLet o          -> [o]
-  SurfaceIsAscription o   -> [o]
-  SurfaceIsElim o         -> [o]
-  SurfaceIsDo o           -> [o]
-  AppArgsAreExplicit o    -> [o]
-  AppHeadIsName o         -> [o]
-  AppHeadIsElim o         -> [o]
-  LambdaBindsMore o       -> [o]
-  LambdaBindsOne o        -> [o]
-  LetIsAnnotated o        -> [o]
-  LetIsBare o             -> [o]
-  ListIsEmpty o           -> [o]
-  ListIsCons o            -> [o]
-  OptionIsSome o          -> [o]
-  OptionIsNone o          -> [o]
+  SurfaceIsName o         -> [(o, Ty.TSurface)]
+  SurfaceIsUniverse o     -> [(o, Ty.TSurface)]
+  SurfaceIsUniverseOpen o -> [(o, Ty.TSurface)]
+  SurfaceIsPlaceholder o  -> [(o, Ty.TSurface)]
+  SurfaceIsHole o         -> [(o, Ty.TSurface)]
+  SurfaceIsApp o          -> [(o, Ty.TSurface)]
+  SurfaceIsLambda o       -> [(o, Ty.TSurface)]
+  SurfaceIsForall o       -> [(o, Ty.TSurface)]
+  SurfaceIsArrow o        -> [(o, Ty.TSurface)]
+  SurfaceIsLet o          -> [(o, Ty.TSurface)]
+  SurfaceIsAscription o   -> [(o, Ty.TSurface)]
+  SurfaceIsElim o         -> [(o, Ty.TSurface)]
+  SurfaceIsDo o           -> [(o, Ty.TSurface)]
+  AppArgsAreExplicit o    -> [(o, Ty.TSurface)]
+  AppHeadIsName o         -> [(o, Ty.TSurface)]
+  AppHeadIsElim o         -> [(o, Ty.TSurface)]
+  LambdaBindsMore o       -> [(o, Ty.TSurface)]
+  LambdaBindsOne o        -> [(o, Ty.TSurface)]
+  LetIsAnnotated o        -> [(o, Ty.TSurface)]
+  LetIsBare o             -> [(o, Ty.TSurface)]
+  -- The four data questions (MS5 phase 65), and the only tests that ask about
+  -- something @instral@ owns rather than about a surface node.
+  ListIsEmpty o           -> [(o, Ty.TList (Ty.TVar 0))]
+  ListIsCons o            -> [(o, Ty.TList (Ty.TVar 0))]
+  OptionIsSome o          -> [(o, Ty.TOption (Ty.TVar 0))]
+  OptionIsNone o          -> [(o, Ty.TOption (Ty.TVar 0))]
+
+-- | Every operand a head test reads, in the order it is written.
+testOperands :: Test -> [Operand]
+testOperands = map fst . testTypes
 
 -- | The word a 'Test' is written with. Total, so @-Wall@ makes a new test say
 -- how it is spelled — 'Thena.Ops.opKeyword'\'s trick, one type over.

@@ -14,7 +14,7 @@ thena spine> :show
   let refined = Just T b : Maybe T in
 ▶ let g = refined : Maybe Bool in
   g
-thena spine> goto "b"
+thena spine> goto-named "b"
 thena spine> :where
 focus
   let ? b : T in

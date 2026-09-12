@@ -1423,7 +1423,7 @@ dispatch s name arg = case name of
             [ Bind "T" (Claim (Lit (VText "Tinfer"))
                           (Lit (VTerm (Universe (LVar l)))))
             , Bind "x" (Claim (Lit (VText "xinfer")) (Ref "T"))
-            , Do (Ops.Goto (Lit (VText "xinfer")))
+            , Do (Ops.Goto (Ref "x"))
             , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt t))])
             ]
           asking  = s { sessionMachine = load prog machine { names = n1 } }
@@ -1560,7 +1560,7 @@ commandSummary =
   , ("cross type / cross val",   "move into a term")
   , (unwords bareParts,          "descend into a field of the focused term")
   , (unwords numberedParts,      "descend into a numbered field")
-  , ("goto \"‹hole›\"",            "move to a hole by name")
+  , ("goto-named \"‹hole›\"",      "move to a hole by name")
   , ("reduce",                   "reduce the focused term in place")
   , ("quantify \"‹x›\" ⌜‹S›⌝",     "add a ∀-binder above the focus")
   , ("data ‹D› … where { … }",   "declare an inductive family")
