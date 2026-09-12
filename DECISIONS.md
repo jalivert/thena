@@ -798,6 +798,18 @@ arguments; applying a one-argument lambda to two is a type error, because
 `instral` dispatches on arity. Parentheses are what make an arrow a value: in
 `signature f : (a -> b) -> a -> b` the first argument is a function.
 
+**That holds in the result too**, so a function that gives a function says so:
+
+```
+signature mk : String -> (String -> String)   -- one argument, gives a function
+mk s = \ z -> concat s z
+
+signature two : String -> String -> String    -- two arguments
+two a b = concat a b
+```
+
+The two are different callables, and `:accepts String` lists them apart.
+
 **A local shadows a rule.** A word in a body is an op if one bears that name,
 otherwise the local if one is bound, otherwise a rule of that name. So binding a
 name that is also a rule changes what later lines mean — the op words are not

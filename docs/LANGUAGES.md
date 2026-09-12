@@ -72,7 +72,9 @@ twice s = concat s s
 - **a rule** — `rule ‹name› ‹params› :- when ‹tests› then ‹body›`. The head is a
   run of shape questions; a test with arguments is parenthesised.
 - **a signature** — `signature ‹name› : ‹type›`, on a line of its own. The arity
-  is the arrow chain's, so a signature is about one arity only.
+  is the arrow chain's, so a signature is about one arity only. Parentheses make
+  an arrow a value in either position: `(a -> b) -> a -> b` takes a function and
+  `String -> (String -> String)` gives one.
 - **a function** — `‹name› ‹params› = ‹expression›`, with no keyword. A function
   is a rule with one clause and no head; the only visible difference is that it
   is never offered as a tactic.
