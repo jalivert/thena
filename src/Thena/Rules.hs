@@ -40,6 +40,7 @@ module Thena.Rules
   , resolveRule
   , resolveSignature
   , resolveTy
+  , builtInTypes
   , resolveBlock
   , testWord
   , testOperands
@@ -480,6 +481,17 @@ data RuleError
     -- ^ a grammar declared under a built-in tag's name. @surface@ and @core@ name
     -- Thena's own parsers; 'operandOf' looks a declared language up /first/, so
     -- without this a user grammar would silently replace the fence
+  | BuiltInType String
+    -- ^ …and the same trap one layer over (2026-09-12). A language's name is a
+    -- /type/ as well as a tag, and 'resolveTyIn' looks a declared language up
+    -- before the built-ins too, so @language String where { … }@ made @String@ in
+    -- every signature mean the object language. The clash it produced said
+    -- /wanted String, got String/, and @language List where { … }@ was worse: it
+    -- loaded, and @signature f : List -> ()@ stopped being the arity error it is
+  | DuplicateLanguage String
+    -- ^ two grammars under one name (2026-09-12). The second was unreachable —
+    -- every lookup is a 'lookup', which takes the first — so it loaded and did
+    -- nothing, exactly what 'DuplicateSignature' exists to stop one layer over
   | BadGrammarItem String String
     -- ^ in the grammar of ‹language›, ‹word› is neither the language itself nor
     -- @name@ (MS5 phase 69)
@@ -673,8 +685,7 @@ resolveTyIn ls owner vs0 t0 = go vs0 t0
       _ | nm `elem` known -> Left (TypeArity owner nm (arityOf nm) (length xs))
         | otherwise       -> Left (UnknownType owner nm)
 
-    known = [ "String", "Name", "Int", "Char", "Bool", "Surface", "Core"
-            , "Development", "List", "Option" ]
+    known = builtInTypes
     arityOf nm = if nm `elem` ["List", "Option"] then 1 else 0
 
     -- A nested arrow's own variables share the scheme's numbering, so the list
@@ -805,7 +816,8 @@ headOperand o = case o of
 -- The parser could not tell — it does not know what the language is called —
 -- which is the same division of labour an op word gets.
 resolveLanguage :: RawLanguage -> Either [RuleError] (String, Language)
-resolveLanguage (RawLanguage nm _) | nm `elem` builtInTags = Left [BuiltInLanguage nm]
+resolveLanguage (RawLanguage nm _) | nm `elem` builtInTags  = Left [BuiltInLanguage nm]
+resolveLanguage (RawLanguage nm _) | nm `elem` builtInTypes = Left [BuiltInType nm]
 resolveLanguage (RawLanguage nm ps) = case partitionEithers (map production ps) of
   (e : es, _) -> Left (e : es)
   ([], ps')   -> case language nm ps' of
@@ -829,6 +841,19 @@ resolveLanguage (RawLanguage nm ps) = case partitionEithers (map production ps) 
 -- trap rather than a curiosity.
 builtInTags :: [String]
 builtInTags = ["surface", "core"]
+
+-- | The type constructors @instral@ ships with, and **the one list of them**.
+--
+-- 'resolveTyIn' reads it to tell an unknown name from one given the wrong number
+-- of arguments, and 'resolveLanguage' reads it to refuse a grammar that would
+-- take one of these names — the same trap 'builtInTags' catches for the tag,
+-- found the same way and on the same day. Written once because two copies of a
+-- list like this drift, which is what 'BuiltInType' says.
+builtInTypes :: [String]
+builtInTypes =
+  [ "String", "Name", "Int", "Char", "Bool", "Surface", "Core", "Development"
+  , "List", "Option"
+  ]
 
 -- | A written function, resolved into the rule it is (MS5 phase 68a).
 --

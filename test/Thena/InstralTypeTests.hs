@@ -16,7 +16,13 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?), (@?=))
 import Test.Tasty.QuickCheck (Gen, elements, forAll, oneof, resize, sized, testProperty, (===))
 
-import Thena.Instral.Concrete (RawSignature (..))
+import Thena.Instral.Concrete
+  ( RawGItem (..)
+  , RawLanguage (..)
+  , RawProduction (..)
+  , RawSignature (..)
+  , RawTy (..)
+  )
 import Thena.Syntax.Lexer (lexTokens)
 import Thena.Syntax.Parser (parseInstralTy)
 
@@ -32,7 +38,7 @@ import Thena.Instral.Type
 import Thena.Ops (AnswerKind (..), Op (..), Operand (..), Value (..), signatureOf)
 import qualified Thena.Ops as Op
 import Thena.Ops (Test (..))
-import Thena.Rules (opWords, resolveSignature, testTypes)
+import Thena.Rules (RuleError (..), builtInTypes, opWords, resolveLanguage, resolveSignature, resolveTy, testTypes)
 
 tests :: TestTree
 tests =
@@ -43,7 +49,66 @@ tests =
     , headTests
     , fitting
     , roundTrip
+    , theBuiltInTypes
     ]
+
+-- --------------------------------------------------------------------------
+-- The built-in type names (2026-09-12)
+-- --------------------------------------------------------------------------
+
+-- | **'Thena.Rules.builtInTypes' is a list, so it is crossed with the code that
+-- is supposed to agree with it.**
+--
+-- Two readers: 'Thena.Rules.resolveTyIn'\'s @constructor@, a @case@ with a
+-- fallthrough that the compiler cannot make total, and
+-- 'Thena.Rules.resolveLanguage', which refuses a grammar that would take one of
+-- these names. A name in the list that @constructor@ does not know would be an
+-- 'UnknownType' the arity check never reaches; a name @constructor@ knows that
+-- is not in the list would be a language name left free to shadow it.
+theBuiltInTypes :: TestTree
+theBuiltInTypes =
+  testGroup
+    "every built-in type name"
+    [ testCase "resolves as a type, at the arity it takes" $
+        mapM_ resolves builtInTypes
+    , testCase "is refused as a grammar's name" $
+        mapM_ refusedAsALanguage builtInTypes
+      -- The other direction: a name @constructor@ knows must be in the list, or
+      -- it is a name a grammar may take and shadow. Asking at an arity nothing
+      -- has separates /known/ from /unknown/, which is the split the list makes.
+    , testCase "and a name outside the list is unknown, not merely misapplied" $
+        resolveTy [] "q" (RawTyCon "Trm" []) @?= Left (UnknownType "q" "Trm")
+
+      -- **The list, written out a second time on purpose.** Walking
+      -- 'builtInTypes' can only check the names that are in it, so a name
+      -- DROPPED from it — which would leave a grammar free to shadow that type —
+      -- passes every test above by disappearing from them. This is the third
+      -- party: 'renderTy' prints exactly these words and
+      -- 'Thena.Rules.resolveTyIn' reads exactly these words, and a change to
+      -- either has to come here and say so.
+    , testCase "and the list is exactly these ten" $
+        builtInTypes
+          @?= [ "String", "Name", "Int", "Char", "Bool", "Surface", "Core"
+              , "Development", "List", "Option"
+              ]
+    , testCase "…which is what renderTy prints for each of them" $
+        map renderTy
+            [ TString, TName, TInt, TChar, TBool, TSurface, TCore, TDevelopment
+            , TList TInt, TOption TInt
+            ]
+          @?= [ "String", "Name", "Int", "Char", "Bool", "Surface", "Core"
+              , "Development", "List Int", "Option Int"
+              ]
+    ]
+  where
+    resolves n = case (resolveTy [] "q" (RawTyCon n []), resolveTy [] "q" (RawTyCon n [RawTyCon "Core" []])) of
+      (Right (Just _), _) -> pure ()
+      (_, Right (Just _)) -> pure ()
+      (a, b) -> assertFailure (n ++ ": " ++ show a ++ " / " ++ show b)
+
+    refusedAsALanguage n =
+      resolveLanguage (RawLanguage n [RawProduction "var" [GWord "name"]])
+        @?= Left [BuiltInType n]
 
 -- --------------------------------------------------------------------------
 -- Rendering and reading are inverse (2026-09-12)

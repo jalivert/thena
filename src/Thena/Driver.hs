@@ -1964,7 +1964,7 @@ resolveAll
        ([(String, Signature)], [(String, Language)], [Rule], [Rule])
 resolveAll raws =
   case ( concat langErrs ++ concat ruleErrs ++ concat fnErrs ++ sigErrs
-           ++ dups ++ collisions
+           ++ langDups ++ dups ++ collisions
        , concatMap validate (ok ++ fns)
        ) of
     ([], [])     -> Right (sigs, langs, fns, ok)
@@ -1991,6 +1991,15 @@ resolveAll raws =
       , let GlobalName n = ruleName f
       , any (\r -> ruleName r == ruleName f
                      && length (ruleParams r) == length (ruleParams f)) ok
+      ]
+
+    -- **…and two grammars under one name** (2026-09-12). Every lookup of a
+    -- language is a 'lookup', which takes the first, so the second was loaded
+    -- and unreachable.
+    langDups =
+      [ DuplicateLanguage n
+      | (i, (n, _)) <- zip [0 :: Int ..] langs
+      , n `elem` map fst (take i langs)
       ]
 
     dups =

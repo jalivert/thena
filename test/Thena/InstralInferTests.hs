@@ -631,6 +631,28 @@ objectLanguages =
     , refusedGrammar "and the other one"
         "language core where { var : name }"
         (BuiltInLanguage "core")
+      -- **A language's name is a TYPE as well as a tag** (2026-09-12), and
+      -- 'Thena.Rules.resolveTyIn' looks a declared one up before the built-ins
+      -- exactly as 'operandOf' does. Without this @language String where { … }@
+      -- made @String@ in every signature mean the object language, and the clash
+      -- said /wanted String, got String/ — the same nonsense the nullary function
+      -- type printed. @List@ was worse: it loaded, and @signature f : List -> ()@
+      -- stopped being the arity error it is.
+    , refusedGrammar "a built-in type's name"
+        "language String where { var : name }"
+        (BuiltInType "String")
+    , refusedGrammar "a built-in type that takes an argument"
+        "language List where { var : name }"
+        (BuiltInType "List")
+    , refusedGrammar "and a type whose tag is not taken"
+        "language Development where { var : name }"
+        (BuiltInType "Development")
+      -- **Two grammars under one name** (2026-09-12) — every lookup of a
+      -- language is a @lookup@, so the second was loaded and unreachable. It is
+      -- 'DuplicateSignature' one layer over.
+    , refusedGrammar "two grammars under one name"
+        "language Tm where { var : name }\nlanguage Tm where { other : name }"
+        (DuplicateLanguage "Tm")
     , refusedGrammar "a word that is neither the language nor name"
         "language Tm where { var : nonsense }"
         (BadGrammarItem "Tm" "nonsense")

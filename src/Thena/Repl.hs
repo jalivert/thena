@@ -1938,6 +1938,8 @@ whereRuleError e = case e of
   FunctionLeavesNothing n -> "in " ++ n ++ ": "
   RuleAndFunction n _     -> "in " ++ n ++ ": "
   BuiltInLanguage n       -> inLanguage n
+  BuiltInType n           -> inLanguage n
+  DuplicateLanguage n     -> inLanguage n
   BadGrammarItem n _      -> inLanguage n
   BadGrammar n _          -> inLanguage n
   where
@@ -1979,6 +1981,10 @@ whatRuleError e = case e of
       ++ (if k == 1 then " argument" else " arguments")
   BuiltInLanguage n       ->
     n ++ " is one of Thena's own languages, so a grammar may not take its name"
+  BuiltInType n           ->
+    n ++ " is one of instral's own types, so a grammar may not take its name"
+  DuplicateLanguage n     ->
+    "two grammars are declared under the name " ++ n
   BadGrammarItem _ w      ->
     w ++ " is neither this language nor name"
   BadGrammar _ ge         -> case ge of
