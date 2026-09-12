@@ -195,13 +195,13 @@ tests =
         , testCase "and no colon word in the driver's source is unaccounted for" $ do
             src <- readFile "src/Thena/Driver.hs"
             let mentioned = nub (colonWordsInSource src)
-                unknown =
+                unaccounted =
                   [ w
                   | w <- mentioned
                   , w `notElem` everyColonCommand
                   , w `notElem` notCommands
                   ]
-            unknown @?= []
+            unaccounted @?= []
 
           -- The exclusion list, checked: a word here that the driver *does*
           -- accept would be a command hidden from @:help@ by this very test.
