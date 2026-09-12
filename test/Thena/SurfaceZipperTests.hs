@@ -19,6 +19,10 @@ import qualified Data.List.NonEmpty as NE
 
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertEqual, testCase)
+import Test.Tasty.QuickCheck
+  (counterexample, forAll, property, resize, testProperty, withNumTests)
+
+import Thena.SurfaceTests (genSurface)
 
 import Thena.Surface.Concrete
   (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..))
@@ -33,6 +37,7 @@ tests =
     , testGroup "and no move loses the term" (map preserved descents)
     , testGroup "and puts a changed focus back where it came from" markers
     , testGroup "a Π binder group" [groupPeeled, groupRebuilt, nestingCollapses]
+    , walkedLaws
     ]
 
 -- --------------------------------------------------------------------------
@@ -230,3 +235,122 @@ peel :: Surface -> SurfaceZipper
 peel t@(SurfacePi bs body) = case NE.uncons bs of
   (b, rest) -> intoPiTail b (maybe body (`SurfacePi` body) rest) (rootedAt t)
 peel t = rootedAt t
+
+-- --------------------------------------------------------------------------
+-- The law at every position of a generated term (2026-09-13)
+-- --------------------------------------------------------------------------
+
+-- | **@root (into… z) == root z@, everywhere.**
+--
+-- The groups above check it one move at a time, on one fixture per node kind.
+-- That says each move is right; it does not say the moves /compose/, and a
+-- frame that keeps a stale copy of a field its node also holds — which is this
+-- zipper's deliberate shape, one redundant field per frame — goes wrong on the
+-- second descent and not on the first.
+--
+-- 'descend' is a dispatcher: it destructures the focus and calls the move for
+-- each child. It is the code an accessor op in "Thena.Engine" is, written
+-- again, and it shares nothing with 'rebuild' — which is what makes the law
+-- worth checking rather than a tautology.
+walkedLaws :: TestTree
+walkedLaws =
+  testGroup
+    "every position of a generated term"
+    [ -- **Up to the one spelling ambiguity the surface tree has.** Peeling the
+      -- last binder of a Π group leaves a tail that is itself a Π, and
+      -- 'rebuild' merges the binder into /that/ group, so
+      -- @∀ (A : S) -> ∀ (a : A) -> B@ comes back as @∀ (A : S) (a : A) -> B@ —
+      -- the same term written the other way (@ms4\/CLOSEOUT.md@ 18, and the
+      -- zipper's own header says the law is up to spelling here).
+      -- 'collapsePi' is that spelling normalised, written here, so the walk can
+      -- follow every descent instead of stepping around the one that collapses.
+      testProperty "rebuilds to the term it was rooted at, up to Π grouping" $
+        withNumTests 200 $ forAll (resize 12 genSurface) $ \t ->
+          let bad = [ z | z <- walkFrom t, collapsePi (root z) /= collapsePi t ]
+           in counterexample (show (length bad) ++ " positions lost the term")
+                (property (null bad))
+
+      -- **Without this the law above is satisfied by a dispatcher that descends
+      -- nowhere.** The denominator is computed here and not by the zipper:
+      -- every argument of every application must turn up as some position's
+      -- focus.
+    , testProperty "and every application argument is a position" $
+        withNumTests 200 $ forAll (resize 12 genSurface) $ \t ->
+          let seen = map focus (walkFrom t)
+              want = arguments t
+              missing = [ a | a <- want, a `notElem` seen ]
+           in counterexample (show (length missing) ++ " of " ++ show (length want)
+                                ++ " arguments unreachable")
+                (property (null missing))
+    ]
+  where
+    walkFrom t = walk (400 :: Int) [rootedAt t] []
+
+    walk 0 _ seen = seen
+    walk _ [] seen = seen
+    walk fuel (z : rest) seen = walk (fuel - 1) (rest ++ descend z) (z : seen)
+
+-- | Every one-step child of the focus, through the move that names it.
+descend :: SurfaceZipper -> [SurfaceZipper]
+descend z = case focus z of
+  SurfaceApp h as ->
+    intoHead as h z
+      : [ intoArg h as k a z | (k, SurfaceArg _ a) <- zip [0 ..] (NE.toList as) ]
+  SurfaceLam bs body -> [ intoLamBody bs body z ]
+  SurfacePi bs body ->
+    case NE.uncons bs of
+      (b@(SurfaceBinder p x (Just ty)), rest) ->
+        [ intoPiDomain p x (maybe [] NE.toList rest) body ty z
+        , intoPiTail b (maybe body (`SurfacePi` body) rest) z
+        ]
+      _ -> []
+  SurfaceArrow a b -> [ intoArrowDomain b a z, intoArrowCodomain a b z ]
+  SurfaceLet x ann v body ->
+    [ intoLetValue x ann body v z, intoLetBody x ann v body z ]
+      ++ [ intoLetType x v body ty z | Just ty <- [ann] ]
+  SurfaceAnnot e ty -> [ intoAnnotType e ty z, intoAnnotTerm ty e z ]
+  _ -> []
+
+-- | Nested Π groups merged into one, everywhere.
+--
+-- The surface tree admits one Π two ways and the zipper's Π descent normalises
+-- towards the grouped spelling; this is that normalisation written out, so the
+-- law above can be stated about the /term/ rather than about the spelling.
+collapsePi :: Surface -> Surface
+collapsePi t = case t of
+  SurfacePi bs b -> case collapsePi b of
+    SurfacePi cs b' -> SurfacePi (fmap binder bs <> cs) b'
+    b'              -> SurfacePi (fmap binder bs) b'
+  SurfaceApp h as -> SurfaceApp (collapsePi h) (fmap arg as)
+  SurfaceLam bs b -> SurfaceLam (fmap binder bs) (collapsePi b)
+  SurfaceArrow a b -> SurfaceArrow (collapsePi a) (collapsePi b)
+  SurfaceLet x ann v b -> SurfaceLet x (fmap collapsePi ann) (collapsePi v) (collapsePi b)
+  SurfaceAnnot e ty -> SurfaceAnnot (collapsePi e) (collapsePi ty)
+  _ -> t
+  where
+    arg (SurfaceArg p a) = SurfaceArg p (collapsePi a)
+    binder (SurfaceBinder p x ty) = SurfaceBinder p x (fmap collapsePi ty)
+
+-- | Every argument of every application, counted without asking the zipper.
+arguments :: Surface -> [Surface]
+arguments t = here ++ concatMap arguments (children t)
+  where
+    here = case t of
+      SurfaceApp _ as -> [ a | SurfaceArg _ a <- NE.toList as ]
+      _               -> []
+
+-- | **A λ binder's annotation is deliberately not a child.** The zipper has
+-- @intoLamBody@ and @intoLamTail@ and no move into a binder's type, because an
+-- annotated λ binder is refused by elaboration anyway (MS4: /an annotated or
+-- implicit λ binder/ is on the refused-by-name list). So nothing needs to reach
+-- one, and counting it here would make the coverage claim below false about the
+-- zipper rather than about the walk.
+children :: Surface -> [Surface]
+children t = case t of
+  SurfaceApp h as -> h : [ a | SurfaceArg _ a <- NE.toList as ]
+  SurfaceLam _ b -> [b]
+  SurfacePi bs b  -> [ ty | SurfaceBinder _ _ (Just ty) <- NE.toList bs ] ++ [b]
+  SurfaceArrow a b -> [a, b]
+  SurfaceLet _ ann v b -> maybe [] pure ann ++ [v, b]
+  SurfaceAnnot e ty -> [e, ty]
+  _ -> []

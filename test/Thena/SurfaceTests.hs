@@ -7,7 +7,9 @@
 -- self-consistent error agrees with itself. So every case here either builds
 -- the tree by hand and compares, or pins an exact string — and the round trip
 -- is a third check on top, over a fixed corpus, never the only one.
-module Thena.SurfaceTests (tests) where
+-- **'genSurface' is exported** so that @SurfaceZipperTests@ walks the same
+-- corpus (2026-09-13). A second copy of a generator drifts.
+module Thena.SurfaceTests (tests, genSurface) where
 
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List (intercalate)
