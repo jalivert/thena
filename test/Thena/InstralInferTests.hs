@@ -548,6 +548,28 @@ objectLanguages =
           RuleFileRefused _ (RuleIllFormed (BadRegion _ _ "Tm" _ : _)) -> pure ()
           other -> assertFailure ("expected a region error, got " ++ show other)
 
+      -- **A grammar may span lines with its closing brace in column 1** (found
+      -- by mutation testing, 2026-09-12). Phase 68a's rule is that a declaration
+      -- begins in column 1; phase 73 had to narrow it to tokens that could
+      -- actually begin one, because a @language@ block's @}@ sits there too.
+      -- Every other grammar test writes the block on one line, so the narrowing
+      -- was never pinned.
+    , testCase "a grammar may close its brace in column 1" $
+        case load "language Tm where {\n  var : name ;\n  app : \"(\" Tm Tm \")\"\n}\n\
+                  \rule go :- then t = Tm`(x y)` ; prove" of
+          BasesLoaded _ -> pure ()
+          other -> assertFailure ("expected a load, got " ++ show other)
+
+      -- **A parse must consume the WHOLE region** (found by mutation testing,
+      -- 2026-09-12). @x y@ has a valid prefix — @x@ is a @var@ — and dropping
+      -- the whole-input condition made this load with the @y@ silently thrown
+      -- away. The tests until now used inputs that either parsed completely or
+      -- not at all, so the condition was never exercised.
+    , testCase "refuses a term whose prefix parses and whose rest does not" $
+        case load (tm ++ "rule go :- then t = Tm`x y` ; prove") of
+          RuleFileRefused _ (RuleIllFormed (BadRegion _ _ "Tm" _ : _)) -> pure ()
+          other -> assertFailure ("expected a region error, got " ++ show other)
+
       -- The three shapes the generated parser could not run, refused when the
       -- grammar is declared rather than when it is used.
     , refusedGrammar "left recursion"
