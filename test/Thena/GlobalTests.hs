@@ -58,6 +58,7 @@ import Thena.Global.Env
   , formerType
   , inductiveConstructors
   , inductiveIndices
+  , inductiveLevel
   , inductiveLevels
   , inductiveName
   , inductiveParameters
@@ -90,7 +91,57 @@ tests =
     , testGroup "printed and read back" roundTripTests
     , testGroup "generalisation turns a proof into a scheme" generaliseTests
     , equipment
+    , computedLevels
     ]
+
+-- --------------------------------------------------------------------------
+-- The computed level, over generated shapes (2026-09-13)
+-- --------------------------------------------------------------------------
+
+-- | **A bare @Type@ becomes the join of what the constructors put in it**, and
+-- getting that wrong is @ms3\/CLOSEOUT.md@ 13 — the difference between @Empty@
+-- pinned at @Type₀@ and @Empty {ℓ}@ polymorphic.
+--
+-- The rule is computed here from the argument types, which is the independent
+-- reading: @Nat@ lives at 0, @Type₀@ at 1, @Type₁@ at 2, and the datatype's own
+-- level is the largest of them. **With nothing to contribute the level stays a
+-- parameter** rather than defaulting — /compute nothing when nothing
+-- contributes/ — and that is the case the item is about.
+computedLevels :: TestTree
+computedLevels =
+  testGroup
+    "a bare Type is the join of the constructor arguments"
+    [ atLevel "one argument at 0" ["Nat"] 0
+    , atLevel "one at 1" ["Type₀"] 1
+    , atLevel "one at 2" ["Type₁"] 2
+    , atLevel "the largest wins, whatever the order" ["Nat", "Type₁", "Type₀"] 2
+    , atLevel "and again" ["Type₁", "Nat"] 2
+    , atLevel "two constructors, the join is over both" ["Nat"] 0
+    , testCase "nothing contributes, so the level stays a parameter" $ do
+        env <- declaredWith []
+        case lookupInductive (GlobalName "D") env of
+          Just d | not (null (inductiveLevels d)) -> pure ()
+          other -> assertFailure ("expected a level parameter, got " ++ show other)
+    ]
+  where
+    atLevel what args want = testCase what $ do
+      env <- declaredWith args
+      case lookupInductive (GlobalName "D") env of
+        Nothing -> assertFailure "D was not declared"
+        Just d  -> inductiveLevel d @?= levelOfNat want
+
+    -- @data D : Type where { c : ‹args› -> D }@, declared through the REPL.
+    declaredWith args = do
+      (s0, _) <- startingSession
+      let ctor
+            | null args = "c : D"
+            | otherwise = "c : " ++ concatMap (++ " -> ") args ++ "D"
+          decls =
+            [ "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
+            , "data D : Type where { " ++ ctor ++ " }"
+            ]
+          (s, _) = foldl (\(sess, _) l -> command sess l) (s0, Blank) decls
+      pure (globals (sessionMachine s))
 
 -- --------------------------------------------------------------------------
 -- Everything a declaration generates is well typed (2026-09-13)
