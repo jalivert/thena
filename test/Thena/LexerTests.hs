@@ -150,6 +150,27 @@ tests =
         , fails "a stray backtick outside any region" "f ` g"
         ]
     , testGroup
+        -- **The single quote is free at the start of a token and nowhere else**
+        -- (MS5 phase 64): it is an @$idchar@ and not an @$idstart@, so no
+        -- identifier has ever been able to begin with one. That is what makes
+        -- the literal purely additive, exactly as the string literal was.
+        "character literals"
+        [ lexes "one character" "'a'" [TChar 'a']
+        , lexes "an escape" "'\\n'" [TChar '\n']
+        , lexes "the quote itself" "'\\''" [TChar '\'']
+        , lexes "a double quote needs no escape" "'\"'" [TChar '\"']
+        , lexes "and a backslash does" "'\\\\'" [TChar '\\']
+        , -- The corpus's own identifier, which must not have changed meaning:
+          -- the prime is inside the name, not in front of it.
+          lexes "a prime still continues an identifier" "t1'" [TIdent "t1'"]
+        , lexes "even two of them" "t''" [TIdent "t''"]
+        , -- Longest match settles this: @'a'@ is three characters and what
+          -- follows is a separate token.
+          lexes "a literal and a name after it" "'a' b" [TChar 'a', TIdent "b"]
+        , fails "an empty literal" "''"
+        , fails "one that is never closed" "'a"
+        ]
+    , testGroup
         "the backtick is reserved now"
         [ lexes
             "so it no longer continues an identifier"

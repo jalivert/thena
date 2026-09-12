@@ -82,6 +82,10 @@ expectRule src = either (assertFailure . ((src ++ " — ") ++)) pure (readRule s
 bodyOf :: String -> IO [Instr]
 bodyOf src = ruleBody <$> expectRule ("rule r :- when focus-is-hole then " ++ src)
 
+-- | The head of a whole written rule (MS5 phase 64), where 'bodyOf' supplies one.
+headOf :: String -> IO [Test]
+headOf src = ruleHead <$> expectRule src
+
 -- --------------------------------------------------------------------------
 -- The base, written out
 -- --------------------------------------------------------------------------
@@ -165,6 +169,13 @@ everyOp =
   , ("prim-let x",    IntroLet (Just (Ref "x")))
   , ("prim-try x",   Try (Ref "x"))
   , ("return x",     Op.Return (Ref "x"))
+    -- The primitives (MS5 phase 64), each written the way it reads back. A
+    -- numeral is an 'Op.VInt' wherever a field word is not in front of it, so
+    -- these round-trip through the same table every other operand does.
+  , ("say 42",       Say (Lit (Op.VInt 42)))
+  , ("say 'c'",      Say (Lit (Op.VChar 'c')))
+  , ("say true",     Say (Lit (Op.VBool True)))
+  , ("say false",    Say (Lit (Op.VBool False)))
   , ("prim-regret",  Regret)
   , ("prim-solve",   Solve)
   , ("prim-abandon", Abandon)
@@ -290,12 +301,19 @@ headOperands =
           Left _  -> pure ()
           Right _ -> assertFailure "no operands should not resolve"
 
-    , -- 'Down' is the only op that takes a position, so a head has no use for
-      -- one and says so rather than resolving it to something odd.
-      testCase "a position is not a head operand" $
-        case readRule "rule r s :- when (surface-is-name 2) then prim-solve" of
-          Left _  -> pure ()
-          Right _ -> assertFailure "a position should not resolve"
+    , -- **A head takes every literal** (widened at MS5 phase 64, when a numeral
+      -- became an 'Op.VInt' rather than only @arg 2@'s field position).
+      -- Reading a literal costs 'holds' nothing; what a head still refuses is
+      -- the two shapes that would make dispatch /do/ something — a region,
+      -- which parses an embedded language, and a nested call, which runs one.
+      testCase "a head takes a literal" $
+        headOf "rule r s :- when (surface-is-name 2) then prim-solve"
+          >>= (@?= [Op.SurfaceIsName (Lit (Op.VInt 2))])
+    , testCase "and a character, and a boolean" $ do
+        headOf "rule r s :- when (surface-is-name 'x') then prim-solve"
+          >>= (@?= [Op.SurfaceIsName (Lit (Op.VChar 'x'))])
+        headOf "rule r s :- when (surface-is-name true) then prim-solve"
+          >>= (@?= [Op.SurfaceIsName (Lit (Op.VBool True))])
     ]
 
 -- --------------------------------------------------------------------------
@@ -525,10 +543,12 @@ mistakes =
       testCase "the arity the op has is still the op" $
         bodyOf "unify x y" >>= (@?= [Do (Unify (Ref "x") (Ref "y"))])
     , -- A wrong /operand/ is still a mistake about the op: this is an arity the
-      -- op has, so nothing falls through.
-      refused "a position where a name was wanted"
-        "rule r :- when focus-is-hole then prim-try 3"
-        [BadOperands (GlobalName "r") 0 "prim-try"]
+      -- op has, so nothing falls through. **`cross` and not `prim-try 3`** — a
+      -- numeral is an 'Op.VInt' as of MS5 phase 64, so @prim-try 3@ resolves
+      -- and fails when it runs.
+      refused "an operand no reading of the word admits"
+        "rule r :- when focus-is-hole then cross body"
+        [BadOperands (GlobalName "r") 0 "cross"]
     , -- §3.7: a declaration is a command, never a rule-body operation.
       --
       -- **Refused one step earlier again as of MS4 phase 42b**: @data@ is a
@@ -543,9 +563,9 @@ mistakes =
             Left _  -> pure ()
             Right r -> assertFailure ("parsed: " ++ show r)
     , refused "every mistake, not the first"
-        "rule r :- when focus-is-purple then frobnicate; prim-try 3"
+        "rule r :- when focus-is-purple then frobnicate; cross body"
         [ NoSuchTest (GlobalName "r") "focus-is-purple"
-        , BadOperands (GlobalName "r") 1 "prim-try"
+        , BadOperands (GlobalName "r") 1 "cross"
         ]
     , testCase "a body is required" $
         case readRule "rule r :- when focus-is-hole" of

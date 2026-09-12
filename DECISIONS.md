@@ -759,6 +759,31 @@ block's own bindings survive to the next line while a rule is suspended.
 You can break the rule you are standing in — shadow one of its locals and its
 body will go wrong. That is allowed on purpose.
 
+### `instral` has four primitive values
+
+*Decided 2026-09-12.*
+
+```
+say "a string"     -- text, since phase 22b
+return 42          -- a number
+return 'c'         -- a character
+return true        -- a boolean; false too
+```
+
+A numeral is a number wherever a field word is not in front of it — `arg 2` and
+`param 0` still read theirs as a position, because those select a field rather
+than take a value.
+
+**`true` and `false` are reserved in `instral`, and nowhere else.** They are not
+keywords: one lexer serves every language here, and an object language is free to
+declare a constructor called `true` — `examples/determinacy-tactics.thena.script`
+does. Inside a rule they are values, so a rule may not use either as a parameter
+or a binding; it is refused when the base loads rather than silently read as a
+literal.
+
+There are no operations on any of them yet — no arithmetic, no comparison. You
+can carry a value and hand it back; computing with it comes with the type system.
+
 ### A rule returns what it says it returns
 
 *Decided 2026-09-12.*

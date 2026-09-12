@@ -118,5 +118,12 @@ data RawOperand
     -- value.
   | RawRef String
   | RawPos Int
+    -- ^ a numeral. **It is a /position/ only where a field word wants one** —
+    -- @arg 2@, @param 0@ — and an 'Thena.Ops.VInt' literal everywhere else (MS5
+    -- phase 64). The parser cannot tell the two apart, for the reason it cannot
+    -- tell an op word from a rule name: which it is depends on the word in
+    -- front, which is resolution's question.
   | RawText String
+  | RawChar Char
+    -- ^ @'c'@ (MS5 phase 64).
   deriving (Eq, Show)

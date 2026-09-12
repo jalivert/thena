@@ -274,6 +274,20 @@ validateTests =
     [ testCase "the shipped base is clean" $
         concatMap validateBase expectedBase @?= []
 
+      -- **@true@ and @false@ are values, so they cannot also be names** (MS5
+      -- phase 64). Every @Ref@ to one has already become a literal by the time
+      -- a rule is built, so a parameter or a binding of either name could never
+      -- be read back — a rule that quietly does something other than it says,
+      -- which is what a load-time refusal is for.
+    , testCase "a parameter may not be named true" $
+        validate (named "r" ["true"] [Do Ops.Solve])
+          @?= [ReservedName (GlobalName "r") "true"]
+    , testCase "nor a binding false" $
+        validate (named "r" [] [Bind "false" Ops.Here])
+          @?= [ReservedName (GlobalName "r") "false"]
+    , testCase "and an ordinary name is untouched" $
+        validate (named "r" ["t"] [Bind "x" Ops.Here]) @?= []
+
       -- §3.7's line, made structural: a declaration is a command, not a
       -- rule-body operation.
     , testCase "define-data in a body is rejected" $

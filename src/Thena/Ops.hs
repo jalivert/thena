@@ -95,6 +95,32 @@ data Value
     -- and making that a visible step is the point: the same written term in two
     -- places resolves to two different things.
   | VPair    Value Value
+    -- **The primitives** (MS5 phase 64). They are built before anything calls
+    -- them, which is this milestone's doctrine and not the usual rule: *"the
+    -- goal is correctness and completeness now"*, because a representation that
+    -- turns out to be missing a case three milestones from here is what the
+    -- milestone exists to prevent.
+    --
+    -- 'VText' is the string and keeps its name: it predates the set, every op
+    -- that says or asks anything uses it, and renaming it would be churn in
+    -- every module for a letter.
+  | VInt     Int
+    -- ^ a whole number — @arg 2@'s @2@ read as a value rather than as a field
+    -- position. **The one with no customer at all today**, and his worked
+    -- example of what the doctrine is for.
+  | VChar    Char
+    -- ^ one character, written @'c'@. The quote is free at the start of a token
+    -- — it is an @\$idchar@ but not an @\$idstart@, so no identifier has ever
+    -- begun with one — which is what makes the literal purely additive, exactly
+    -- as @\"…\"@ was at phase 22b.
+  | VBool    Bool
+    -- ^ **written @true@ and @false@, and they are reserved in @instral@ only**
+    -- — his ruling, 2026-09-12. Not lexer keywords: one lexer serves every
+    -- language, and @examples\/determinacy-tactics.thena.script@ declares
+    -- @data Term … { true : Term ; false : Term ; … }@, so reserving them in
+    -- the lexer would take two constructor names away from every object
+    -- language. They are read where an operand is read, before a local is
+    -- looked up, which is what @cross type@ and @ask \"?\" name@ already do.
   deriving (Eq, Show)
 
 data Operand

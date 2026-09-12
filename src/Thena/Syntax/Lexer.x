@@ -40,6 +40,18 @@ $strchar = [$printable \t] # [\" \\]
 @escape  = \\ [\" \\ n]
 @string  = \" ($strchar | @escape)* \"
 
+-- A character literal (MS5 phase 64), @'c'@ — the same three escapes, plus the
+-- quote itself.
+--
+-- **Purely additive, for the string literal's reason one step over.** The single
+-- quote is an @$idchar@ and not an @$idstart@, so no identifier has ever been
+-- able to /begin/ with one — @t1'@ in the determinacy script keeps lexing
+-- exactly as it did. Alex's longest match settles the rest: @'a'@ is three
+-- characters and an identifier after it would have to start with a letter.
+$chrchar = [$printable \t] # [\' \\]
+@chresc  = \\ [\' \" \\ n]
+@char    = \' ($chrchar | @chresc) \'
+
 @ident    = $idstart $idchar*
 @universe = "Type" ($digit+ | $sub+)
 
@@ -114,6 +126,7 @@ tokens :-
   ":-"          { keyword TNeck }
   $digit+       { \p s -> Located (posOf p) (TNumber (read s)) }
   @string       { \p s -> Located (posOf p) (TString (unescape s)) }
+  @char         { \p s -> Located (posOf p) (TChar (unchar s)) }
   "Type"        { \p _ -> Located (posOf p) TUniverseOpen }
   @universe     { \p s -> Located (posOf p) (TUniverse (levelOf s)) }
   @ident \`      { \p str -> Located (posOf p) (TTagOpen (init str)) }
@@ -165,6 +178,7 @@ data Token
   | TNeck
   | TNumber Int
   | TString String
+  | TChar   Char
   | TUniverse Int
   | TUniverseOpen
   | TIdent String
@@ -207,6 +221,18 @@ unescape = go . drop 1 . dropLast
       '\\' : '\"' : rest -> '\"' : go rest
       c          : rest -> c    : go rest
       []                -> []
+
+-- | One character, with its quotes taken off and its escape undone.
+--
+-- Total by construction, like 'unescape': the lexer only hands it what @\@char@
+-- matched, which is exactly one character or one escape between two quotes. The
+-- fall-through is what keeps it total rather than a crash in the lexer.
+unchar :: String -> Char
+unchar s = case drop 1 s of
+  '\\' : 'n'  : _ -> '\n'
+  '\\' : c    : _ -> c
+  c          : _ -> c
+  []             -> ' '
 
 -- | @Type₀@ and @Type0@ both mean level 0 (§2.6).
 levelOf :: String -> Int

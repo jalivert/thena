@@ -396,16 +396,18 @@ moduleTests =
       \one : Nat\n\
       \one = succ zero\n"
 
-    -- @prim-try 3@ and not @say@ with no operand: an op word at an arity the
-    -- op does not have is a call as of MS5 phase 62b, so only a wrong /operand/
-    -- is still a resolution failure. A position where a name was wanted is one.
+    -- **@cross body@**, because the other two candidates stopped being
+    -- resolution failures: an op word at an arity the op does not have is a
+    -- call (MS5 phase 62b), and a numeral is an 'Thena.Ops.VInt' rather than a
+    -- misplaced field position (MS5 phase 64). What is left is an operand no
+    -- reading of the word admits, and @cross@ takes exactly two.
     badBlockModule =
       "module M where\n\
       \data Nat : Type\8320 where\n\
       \  zero : Nat\n\
       \\n\
       \do\n\
-      \  prim-try 3\n"
+      \  cross body\n"
 
     badModule =
       "module M where\n\

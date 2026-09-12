@@ -26,6 +26,8 @@ import Thena.Driver
   , baseHead
   )
 import Thena.Engine (Machine (rules))
+import qualified Thena.Engine as Engine
+import Thena.Ops (Value (..))
 import Thena.Errors (FailReason (..))
 import Thena.Ops (Rule (..))
 import Thena.Rules (RuleBase (..), RuleError (..))
@@ -34,7 +36,7 @@ tests :: TestTree
 tests =
   testGroup
     "rule files (§8)"
-    [headers, loading, ordering, refusals, commands, argumentHeads, returning]
+    [headers, loading, ordering, refusals, commands, argumentHeads, returning, primitives]
 
 -- --------------------------------------------------------------------------
 -- The header
@@ -390,3 +392,35 @@ returning =
     lastOf ms = case reverse ms of
       m : _ -> Just m
       []    -> Nothing
+
+-- --------------------------------------------------------------------------
+-- The primitives, end to end (MS5 phase 64)
+-- --------------------------------------------------------------------------
+
+-- | **Nothing calls these yet**, which is the milestone's doctrine rather than
+-- an oversight — so the whole path is exercised here instead: written in a file,
+-- lexed, parsed, resolved, returned by a rule, and read back out of the
+-- machine's environment.
+primitives :: TestTree
+primitives =
+  testGroup
+    "instral's primitives"
+    [ testCase "a number" $ bound "a" "do { a = pick }" @?= Just (VInt 42)
+    , testCase "a character" $ bound "b" "do { b = glyph }" @?= Just (VChar 'x')
+    , testCase "true" $ bound "c" "do { c = yes }" @?= Just (VBool True)
+    , testCase "false" $ bound "d" "do { d = no }" @?= Just (VBool False)
+    , testCase "and a string, which was always here" $
+        bound "e" "do { e = word }" @?= Just (VText "hello")
+    ]
+  where
+    base =
+      "rule base prim where\n\
+      \rule pick :- then return 42\n\
+      \rule glyph :- then return 'x'\n\
+      \rule yes :- then return true\n\
+      \rule no :- then return false\n\
+      \rule word :- then return \"hello\"\n"
+
+    bound n line =
+      let s0 = fst (load1 [("prim.thena.rules", base)])
+       in lookup n (Engine.env (Engine.exec (sessionMachine (fst (command s0 line)))))

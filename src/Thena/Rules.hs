@@ -369,6 +369,10 @@ data RuleError
     -- ^ the right test word, written with the wrong arguments (MS4 phase 47).
     -- No instruction index, for 'NoSuchTest'\'s reason — a head is not a
     -- sequence
+  | ReservedName      GlobalName Name
+    -- ^ a parameter or a binding named @true@ or @false@ (MS5 phase 64) — the
+    -- two words @instral@ reads as literals wherever an operand is read, so a
+    -- variable of either name could never be read back.
   | BadOperands       GlobalName Int String
   | NoSuchTag         GlobalName Int String
     -- ^ @tag\`…\`@ where no parser answers to @tag@ (MS5 phase 61b). The two
@@ -395,9 +399,21 @@ data RuleError
 -- states the head admits. That is not decidable shallowly, and §8 already
 -- states the answer — a rule may match, run and fail.
 validate :: Rule -> [RuleError]
-validate r = headScope ++ go 0 (initiallyBound r) (ruleBody r)
+validate r = reserved ++ headScope ++ go 0 (initiallyBound r) (ruleBody r)
   where
     nm = ruleName r
+
+    -- **A name that is a literal cannot also be a variable** (MS5 phase 64).
+    -- @true@ and @false@ are read as 'Thena.Ops.VBool' wherever an operand is
+    -- read, so a parameter or a binding of either name could never be read
+    -- back — every @Ref@ to it has already become a literal. Refusing it here
+    -- is the difference between a rule that cannot be written and one that
+    -- quietly does something else than it says.
+    reserved =
+      [ ReservedName nm n
+      | n <- ruleParams r ++ [ n | Bind n _ <- ruleBody r ]
+      , n `elem` reservedNames
+      ]
 
     -- **A head may name only the rule's own parameters** (MS4 phase 47). It
     -- runs before the body, so the environment it reads is the call's
@@ -435,6 +451,15 @@ validate r = headScope ++ go 0 (initiallyBound r) (ruleBody r)
 
     scope i bound o =
       [ UnboundInRule nm i n | Ref n <- operandsOf o, n `notElem` bound ]
+
+-- | The words @instral@ reads as literals rather than as names (MS5 phase 64).
+--
+-- **Two, and they are not lexer keywords** — his ruling, 2026-09-12. One lexer
+-- serves every language, so reserving them there would take two constructor
+-- names away from every object language;
+-- @examples\/determinacy-tactics.thena.script@ uses both.
+reservedNames :: [Name]
+reservedNames = ["true", "false"]
 
 -- | The names a body may read before it binds anything of its own: **its
 -- parameters, and nothing else** (MS4 phase 41).
@@ -492,13 +517,23 @@ resolveRule (RawRule nm ps ts body) =
 
 -- | What may be written as an operand of a test (MS4 phase 47).
 --
--- The same two a body accepts, and 'RawPos' refused for the same reason —
--- a position is 'Down'\'s and nothing else takes one.
+-- **Every leaf a body accepts** (widened at MS5 phase 64, when the primitives
+-- arrived): a literal is pure data, and reading one costs 'holds' nothing. What
+-- stays refused is the two that would make dispatch /do/ something — a region,
+-- which would parse an embedded language, and a nested call, which would run
+-- one. That is the whole of the restriction, and it is his §1.1 line about
+-- heads staying a restricted fragment rather than a shorter list of shapes.
+--
+-- 'RawPos' was refused until then because a numeral was only ever @arg 2@'s
+-- field position. It is an 'Thena.Ops.VInt' now.
 headOperand :: RawOperand -> Maybe Operand
 headOperand o = case o of
+  RawRef "true"  -> Just (Lit (VBool True))
+  RawRef "false" -> Just (Lit (VBool False))
   RawRef n  -> Just (Ref n)
   RawText t -> Just (Lit (VText t))
-  RawPos _  -> Nothing
+  RawChar c -> Just (Lit (VChar c))
+  RawPos k  -> Just (Lit (VInt k))
   -- **A tagged region may not appear in a head** (MS5 phase 61b). A head is
   -- evaluated by 'holds' to build the match list, cheaply and without effects;
   -- a region would make dispatch parse an embedded language to find out what
@@ -665,9 +700,25 @@ operation g i (RawOp w as)
       -- its own before this runs, so what reaches here is always a leaf (MS5
       -- phase 63). Written out rather than left to a pattern-match failure.
       RawNested _ _ -> Left (BadOperands g i w)
+      -- **@true@ and @false@ are read here and not in the lexer** — his ruling,
+      -- 2026-09-12 (MS5 phase 64). One lexer serves every language, and an
+      -- object language may well call a constructor @true@; this table is
+      -- @instral@'s alone, so reserving them here takes nothing from Surface or
+      -- Core. 'validate' refuses a parameter or a binding of either name, so a
+      -- rule that meant to use one as a variable is told rather than silently
+      -- given a literal.
+      RawRef "true"  -> Right (Lit (VBool True))
+      RawRef "false" -> Right (Lit (VBool False))
       RawRef n  -> Right (Ref n)
       RawText t -> Right (Lit (VText t))
-      RawPos _  -> Left (BadOperands g i w)
+      RawChar c -> Right (Lit (VChar c))
+      -- **A numeral is a value here** (MS5 phase 64), where it is a field
+      -- position under a word from 'partWords' — those are read above, before
+      -- this. It was 'BadOperands' until this phase, which is one more
+      -- load-time check traded for a run-time one: an op given an @Int@ where
+      -- it wanted a term fails with 'Thena.Errors.ExpectedTerm', and saying so
+      -- earlier is the type system's job (@ms2\/CLOSEOUT.md@ 4b, phase 66).
+      RawPos k  -> Right (Lit (VInt k))
       -- **A tagged region is parsed here, at load** (MS5 phase 61b, §6.0.1), so
       -- that a syntax error in an embedded term arrives with every other syntax
       -- error rather than when a rule happens to run.

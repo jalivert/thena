@@ -549,6 +549,7 @@ devForm f = case f of
 describe :: Token -> String
 describe t = case t of
   TLambda     -> "λ"
+  TChar c     -> show c
   TForall     -> "∀"
   TArrow      -> "->"
   TLParen     -> "("
@@ -1113,6 +1114,13 @@ tick = toEnum 96
 renderValue :: Int -> Context -> Value -> String
 renderValue n ctx v = case v of
   VText s            -> show s
+  -- The primitives (MS5 phase 64), each printed as it is written. @show@ is
+  -- exactly right for the first two — Haskell's escapes are ours — and the
+  -- booleans are lowercase because that is how @instral@ spells them.
+  VInt k             -> show k
+  VChar c            -> show c
+  VBool True         -> "true"
+  VBool False        -> "false"
   VTerm (Trailing t) -> "⌜" ++ renderCore n ctx t ++ "⌝"
   VTerm p            -> "⌜" ++ unwords (words (renderPartial n ctx p)) ++ "⌝"
   -- **An unresolved core term prints as its shape, not its contents** (MS5
@@ -1278,6 +1286,7 @@ renderSurface = surf Loose
       RawRef x  -> x
       RawPos k  -> show k
       RawText t -> show t
+      RawChar c -> show c
       -- Exact, because the region kept its source text: a rule listing shows
       -- the embedded term as the author wrote it.
       RawRegion tag src -> tag ++ [tick] ++ src ++ [tick]
@@ -1810,6 +1819,7 @@ whereRuleError e = case e of
   NoSuchTest g _          -> inName g
   UnboundInHead g _       -> inName g
   BadTestOperands g _     -> inName g
+  ReservedName g _        -> inName g
   BadOperands g i _       -> inRule g i
   NoSuchTag g i _         -> inRule g i
   BadRegion g i _ _       -> inRule g i
@@ -1826,6 +1836,8 @@ whatRuleError e = case e of
   NoSuchTest _ w          -> "no such test: " ++ w
   UnboundInHead _ n       -> "no parameter is called " ++ n
   BadTestOperands _ w     -> w ++ " was written with the wrong arguments"
+  ReservedName _ n        ->
+    n ++ " is a value, not a name — it cannot be a parameter or a binding"
   BadOperands _ _ w       -> w ++ " was written with the wrong arguments"
   NoSuchTag _ _ tag       ->
     "no language is called " ++ tag ++ " — the built-in tags are surface and core"
