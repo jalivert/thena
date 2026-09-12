@@ -261,12 +261,17 @@ skipTests :: [TestTree]
 skipTests =
   [ -- The MS1 limit. @cons@ wants @Eq {0} (Vec A n) as as'@ while @as' : Vec A n'@,
     -- and a transported chain of equations is the way out — not MS1's.
+    --
+    -- **The position is asserted with the name** (2026-09-13): an anonymous
+    -- arrow argument is stored as @Ident "x"@ on purpose, so one constructor may
+    -- have several arguments of that name and the name alone does not say which
+    -- one stopped the table being written.
     testCase "Vec: cons's telescope is dependent" $
       skipped (preludeDecls ++ [natDecl]) vecDecl
-        @?= Right (Just (DependentArguments (GlobalName "cons") (Ident "as")))
+        @?= Right (Just (DependentArguments (GlobalName "cons") 3 (Ident "as")))
   , testCase "Fin: so is fs's" $
       skipped (preludeDecls ++ [natDecl]) finDecl
-        @?= Right (Just (DependentArguments (GlobalName "fs") (Ident "i")))
+        @?= Right (Just (DependentArguments (GlobalName "fs") 2 (Ident "i")))
   , -- **This asserted the opposite until MS3 phase 31g**, and the change is
     -- §2 item 2: the generator states its equations at the *datatype's own*
     -- level rather than at @Type₀@, so a family above @Type₀@ gets its table

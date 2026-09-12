@@ -1,7 +1,7 @@
 declared Term
-no noConfusionNV: nvSucc's argument n has a type that depends on an earlier argument, so its equation cannot be stated
+no noConfusionNV: nvSucc's argument 2 (n) has a type that depends on an earlier argument, so its equation cannot be stated
 declared NV
-no noConfusionStep: eIf's argument s has a type that depends on an earlier argument, so its equation cannot be stated
+no noConfusionStep: eIf's argument 5 (s) has a type that depends on an earlier argument, so its equation cannot be stated
 declared Step
 proving absurd : ∀ (C : Type₀) -> Empty {0} -> C
 absurd : ∀ (C : Type₀) -> Empty {0} -> C   ∎

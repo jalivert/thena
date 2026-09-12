@@ -2379,9 +2379,12 @@ whyNoConfusion d why = "no " ++ str (snd (noConfusionNames d)) ++ ": " ++ becaus
     because = case why of
       NoEquality -> "there is no Eq in scope"
       NoProducts -> "there is no And, Unit and Empty in scope"
-      DependentArguments c (Ident i) ->
-        str c ++ "'s argument " ++ i ++ " has a type that depends on an earlier"
-          ++ " argument, so its equation cannot be stated"
+      -- Position and name both, as 'Thena.Errors.IndexTypeDepends' says it one
+      -- telescope over: several arguments of one constructor may carry the same
+      -- 'Ident', so the name alone does not say which.
+      DependentArguments c k (Ident i) ->
+        str c ++ "'s argument " ++ show k ++ " (" ++ i ++ ") has a type that"
+          ++ " depends on an earlier argument, so its equation cannot be stated"
 
 mapLeft :: (a -> b) -> Either a c -> Either b c
 mapLeft f = either (Left . f) Right

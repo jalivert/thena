@@ -111,12 +111,21 @@ data Skipped
     -- fastidious: the prelude declares @Eq@ before @And@, so a blanket
     -- precondition would refuse @NoConfusionEq@ — which phase 14 generated —
     -- for a name it was never going to write. See 'productsInScope'.
-  | DependentArguments GlobalName Ident
+  | DependentArguments GlobalName Int Ident
     -- ^ this constructor's argument telescope is dependent, so the equation for
     -- the named argument is ill-typed. @cons : (n : Nat) (a : A) (as : Vec A n)
     -- -> Vec A (succ n)@ wants @Eq (Vec A n) as as'@ while @as' : Vec A n'@.
     -- An MS1 limit and not unsoundness — the way out is a transported chain of
     -- equations, which nothing in MS1 wants (@AGENDA.md@).
+    --
+    -- **The position is carried as well as the name** (2026-09-13), because the
+    -- name alone does not identify the argument: an anonymous arrow argument is
+    -- stored as @Ident \"x\"@ deliberately (@Syntax.Resolve@\'s @RawArrow@ case
+    -- says why, and the printer freshens a repeat), so a constructor written
+    -- @hop : ∀ (x y z : A) -> Chain A x y -> Chain A y z -> Chain A x z@ has
+    -- /three/ arguments called @x@ and this said only *argument x*.
+    -- 'Thena.Errors.IndexTypeDepends' — the same condition one telescope over —
+    -- has carried its position since it was written.
   deriving (Eq, Show)
 
 -- | What generation did.
@@ -556,13 +565,13 @@ falsityInScope env = case lookupInductive (GlobalName "Empty") env of
 dependentArgument :: InductiveDefinition -> Maybe Skipped
 dependentArgument d = firstJust (map perConstructor (inductiveConstructors d))
   where
-    perConstructor c = go [] (constructorArguments c)
+    perConstructor c = go 1 [] (constructorArguments c)
       where
-        go _    []       = Nothing
-        go seen (e : es)
+        go _ _    []       = Nothing
+        go k seen (e : es)
           | any (`elem` seen) (freeVars (entryType e)) =
-              Just (DependentArguments (constructorName c) (entryIdent e))
-          | otherwise = go (entryVar e : seen) es
+              Just (DependentArguments (constructorName c) k (entryIdent e))
+          | otherwise = go (k + 1) (entryVar e : seen) es
 
     firstJust xs = case [x | Just x <- xs] of
       x : _ -> Just x

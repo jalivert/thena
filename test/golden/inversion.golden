@@ -9,7 +9,7 @@ declared And
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat
 thena spine> data Ev : Nat -> Type₀ where { evZero : Ev zero ; evSS : ∀ (n : Nat) (p : Ev n) -> Ev (succ (succ n)) }
-no noConfusionEv: evSS's argument p has a type that depends on an earlier argument, so its equation cannot be stated
+no noConfusionEv: evSS's argument 2 (p) has a type that depends on an earlier argument, so its equation cannot be stated
 declared Ev
 thena spine> :whnf NoConfusionNat zero (succ zero)
 Empty {0}

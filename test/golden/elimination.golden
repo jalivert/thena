@@ -25,7 +25,7 @@ declared Empty
 thena spine> data And (A : Type) (B : Type) : Type where { both : ∀ (a : A) (b : B) -> And A B }
 declared And
 thena spine> data Below : ∀ (n : Nat) (i : Fin n) -> Type₀ where { bz : ∀ (m : Nat) -> Below (succ m) (fz m) ; bs : ∀ (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }
-no noConfusionBelow: bs's argument j has a type that depends on an earlier argument, so its equation cannot be stated
+no noConfusionBelow: bs's argument 2 (j) has a type that depends on an earlier argument, so its equation cannot be stated
 declared Below
 thena spine> :theorem probe : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Nat
 proving probe : ∀ (n : Nat) (i : Fin n) -> Below n i -> Nat
