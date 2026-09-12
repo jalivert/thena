@@ -141,6 +141,20 @@ data RawTy
   | RawTyPair RawTy RawTy    -- ^ @(a, b)@
   | RawTyUnit                -- ^ @()@ — an op or a rule that leaves nothing
   | RawTyArrow RawTy RawTy   -- ^ @A -> B@
+  | RawTyGroup RawTy
+    -- ^ @(‹type›)@ — **the parentheses, kept** (2026-09-12).
+    --
+    -- Dropping them made @a -> (b -> c)@ the same tree as @a -> b -> c@, so a
+    -- signature could name a function /parameter/ and never a function
+    -- /result/: 'Thena.Rules.resolveSignature' splits the top-level arrow chain
+    -- into parameters and a result, and a result that had been in parentheses
+    -- was indistinguishable from one more parameter. Inference makes such a
+    -- type readily — @mk s = \\ z -> concat s z@ is a @String@ giving a
+    -- @String -> String@ — so the declared half of the type system could not
+    -- say what the inferred half works out.
+    --
+    -- Everything else about a group is nothing: 'Thena.Rules.resolveTyIn'
+    -- unwraps it. It exists so that the arrow chain can stop at one.
   deriving (Eq, Show)
 
 -- | @‹name› = ‹op› ‹args›@ or @‹op› ‹args›@ — 'Thena.Ops.Instr''s two cases, written.

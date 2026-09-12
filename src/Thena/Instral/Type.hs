@@ -193,12 +193,17 @@ letterFor i
 -- absence is visible rather than being read as a missing word.
 renderSignature :: Signature -> String
 renderSignature (Signature ps r) =
-  intercalate " -> " (map argument ps ++ [maybe "()" renderTy r])
+  intercalate " -> " (map argument ps ++ [maybe "()" argument r])
   where
-    -- **A function-typed parameter takes parentheses** (MS5 phase 73). Without
-    -- them @(String -> String) -> String -> String@ prints as
+    -- **A function-typed parameter OR RESULT takes parentheses** (MS5 phase 73;
+    -- the result half added 2026-09-12). Without them
+    -- @(String -> String) -> String -> String@ prints as
     -- @String -> String -> String -> String@, which is a different signature —
     -- and the one thing a reader would take from the listing is its arity.
+    --
+    -- The result was still bare until the second date, so @String -> (String ->
+    -- String)@ at arity one and @String -> String -> String@ at arity two
+    -- printed the same text and @:accepts String@ listed both that way.
     argument t = case t of
       TFun _ _ -> "(" ++ renderTy t ++ ")"
       _        -> renderTy t

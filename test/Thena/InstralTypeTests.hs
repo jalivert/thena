@@ -11,7 +11,7 @@
 module Thena.InstralTypeTests (tests) where
 
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (testCase, (@?=))
+import Test.Tasty.HUnit (testCase, (@?), (@?=))
 
 import Thena.Core.Term (GlobalName (..))
 import Thena.Instral.Type
@@ -108,6 +108,16 @@ renderTests =
     , testCase "a function-typed parameter is parenthesised" $
         renderSignature (Signature [TFun [TString] TString, TString] (Just TString))
           @?= "(String -> String) -> String -> String"
+      -- **…and so does a function-typed RESULT** (2026-09-12). Bare, the two
+      -- signatures below print the same text while being different callables:
+      -- one takes a @String@ and gives a function, the other takes two.
+    , testCase "a function-typed result is parenthesised too" $
+        renderSignature (Signature [TString] (Just (TFun [TString] TString)))
+          @?= "String -> (String -> String)"
+    , testCase "so the two do not print alike" $
+        renderSignature (Signature [TString] (Just (TFun [TString] TString)))
+          /= renderSignature (Signature [TString, TString] (Just TString))
+          @? "a function result and one more argument print the same"
     , testCase "the variables a type mentions, in order" $
         typeVarsIn (TPair (TList (TVar 3)) (TOption (TVar 1))) @?= [3, 1]
     ]
@@ -150,8 +160,12 @@ signatureTests =
     , sig "prim-attack"  Attack                         "()"
       -- The data structures are where the scheme variables are.
       -- Its arity is the table's even though its types are inference's.
+      --
+      -- **The parentheses say it takes nothing and gives a function**
+      -- (2026-09-12). Bare, this printed as @b -> a@ — the spelling of an op
+      -- that takes a @b@ and gives an @a@, which is a different signature.
     , sig "lambda, one parameter"
-                         (Op.Lambda ["x"] [])           "b -> a"
+                         (Op.Lambda ["x"] [])           "(b -> a)"
     , sig "some"         (Op.Some r)                    "a -> Option a"
     , sig "none"         Op.None                        "Option a"
     , sig "list-head"    (Op.ListHead r)                "List a -> Option a"

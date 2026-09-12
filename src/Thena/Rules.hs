@@ -610,6 +610,10 @@ resolveTyIn ls owner vs0 t0 = go vs0 t0
   where
     go vs t = case t of
       RawTyUnit -> Right (Nothing, vs)
+      -- **A group is its content** — the parentheses did their work in
+      -- 'resolveSignature'\'s @chain@ and in the @chainOf@ below, both of which
+      -- stop at one (2026-09-12).
+      RawTyGroup u -> go vs u
       -- **A parenthesised arrow is a function value** (MS5 phase 68b). Only a
       -- parenthesised one reaches here: 'resolveSignature' splits the top-level
       -- chain into parameters and a result first, so @a -> b@ at the top means

@@ -311,6 +311,32 @@ annotations =
         case load "signature f : Core -> ()\nrule f x :- then prim-try x\nrule f :- then prove" of
           BasesLoaded _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
+
+      -- **A RESULT may be a function, and could not be said until 2026-09-12.**
+      -- The grammar dropped the parentheses, so @String -> (String -> String)@
+      -- and @String -> String -> String@ were one tree and the signature below
+      -- described @mk@ at arity /two/ — @SignatureUnanswered mk 2@, while the
+      -- @mk@ that exists went uncovered. Inference has always worked the type
+      -- out; the declared half of the type system simply could not spell it.
+    , testCase "may give a function, not only take one" $
+        case load "signature mk : String -> (String -> String)\n\
+                  \mk s = \\ z -> concat s z" of
+          BasesLoaded _ -> pure ()
+          other -> assertFailure ("expected a load, got " ++ show other)
+
+      -- …and it is not the same signature as the flat one, which is the whole
+      -- point of keeping the parentheses.
+    , testCase "and giving a function is not the same as taking two arguments" $
+        case load "signature mk : String -> String -> String\n\
+                  \mk s = \\ z -> concat s z" of
+          BasesIllTyped _ -> pure ()
+          other -> assertFailure ("expected a refusal, got " ++ show other)
+
+      -- A group around something that is not an arrow is nothing at all.
+    , testCase "a group around a plain type changes nothing" $
+        case load "signature f : (Core) -> (())\nrule f x :- then prim-try x" of
+          BasesLoaded _ -> pure ()
+          other -> assertFailure ("expected a load, got " ++ show other)
     ]
   where
     polymorphic =

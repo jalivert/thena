@@ -268,7 +268,10 @@ TyAtom :: { RawTy }
 
 TyParen :: { RawTy }
   : '(' ')'                                { RawTyUnit }
-  | '(' Ty ')'                             { $2 }
+  -- **The parentheses are kept** (2026-09-12) — see 'RawTyGroup'. Without
+  -- them @a -> (b -> c)@ and @a -> b -> c@ are one tree, so a signature could
+  -- not name a function result.
+  | '(' Ty ')'                             { RawTyGroup $2 }
   | '(' Ty ',' Ty ')'                      { RawTyPair $2 $4 }
 
 -- Parameters are a bare run of names, ended by @:-@ — no parentheses and no
