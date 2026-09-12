@@ -10,8 +10,12 @@
 module Thena.SurfaceTests (tests) where
 
 import Data.List.NonEmpty (NonEmpty (..))
+import Data.List.NonEmpty (nonEmpty)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
+import Test.Tasty.QuickCheck
+  ( Gen, elements, forAll, frequency, listOf1, oneof, resize, sized, testProperty
+  , withNumTests, (===) )
 
 import Thena.Driver (parseCore, parseSurfaceModule, parseSurfaceTerm)
 import Thena.Syntax.Concrete (Raw (..))
@@ -46,7 +50,99 @@ tests =
     , testGroup "proof modules (phase 43)" moduleTests
     , testGroup "comments (phase 43)" commentTests
     , testGroup "do blocks (phase 45)" blockTests
+    , printerAndParser
     ]
+
+-- --------------------------------------------------------------------------
+-- The printer and the parser, crossed over generated terms (2026-09-12)
+-- --------------------------------------------------------------------------
+
+-- | **@parse . render@ is the identity on a surface term.**
+--
+-- Every other group here is a fixture, which is right — this module's header
+-- says why a round trip is not enough on its own, and it is not the only check
+-- here. What a fixture corpus cannot say is that the printer and the parser
+-- agree on every /combination/, and the two are written by different code in
+-- different modules: "Thena.Repl"\'s @renderSurface@ decides where a
+-- parenthesis goes, @Surface.Parser@\'s precedence decides what one means.
+--
+-- The direction is the tree's and not the string's, deliberately: one Π is
+-- representable two ways (@ms4\/CLOSEOUT.md@ 18), so the printer picks a
+-- spelling and @render . parse@ over strings is not a law.
+printerAndParser :: TestTree
+printerAndParser =
+  testGroup
+    "the printer and the parser agree"
+    [ testProperty "parse . render is the identity on a surface term" $
+        withNumTests 200 $
+          forAll genSurface $ \t -> readBackSurface (renderSurface t) === Right t
+    ]
+
+readBackSurface :: String -> Either String Surface
+readBackSurface src = case parseSurfaceTerm src of
+  Left e  -> Left (show e)
+  Right t -> Right t
+
+-- | A generated surface term.
+--
+-- **No @do@ block and no @elim@.** A block's operands are the instruction
+-- language, which @blockTests@ above crosses over its own total table; @elim@\'s
+-- five argument groups are 'SurfaceElim'\'s and are pinned by fixture. What is
+-- generated is the term language proper, where the parenthesisation lives.
+genSurface :: Gen Surface
+genSurface = sized go
+  where
+    go n
+      | n <= 1 = leaf
+      | otherwise =
+          frequency
+            [ (2, leaf)
+              -- **A spine's head is never itself a spine.** @spine@ flattens on
+              -- construction and @discussion\/application-representation.md@
+              -- says it must stay so, so a nested 'SurfaceApp' is representable
+              -- and not well formed, exactly as an unannotated Π binder is.
+            , (2, SurfaceApp <$> nonSpine <*> args)
+            , (1, SurfaceLam <$> binders <*> smaller)
+              -- **A Π binder always carries its type.** The grammar has no
+              -- spelling for one that does not — @'(' Names ':' Term ')'@ and
+              -- its braced twin are the only two productions — and nothing in
+              -- @src@ builds one either, so an unannotated Π binder is
+              -- representable and not well formed (§3.4's line). Generating one
+              -- would only assert that the printer prints something for a term
+              -- the language cannot write.
+            , (1, SurfacePi <$> typedBinders <*> smaller)
+            , (1, SurfaceArrow <$> smaller <*> smaller)
+            , (1, SurfaceLet <$> name <*> annotation <*> smaller <*> smaller)
+            , (1, SurfaceAnnot <$> smaller <*> smaller)
+            ]
+      where
+        smaller    = resize (n `div` 2) genSurface
+        nonSpine   = do
+          h <- smaller
+          pure (case h of SurfaceApp g _ -> g; _ -> h)
+        annotation = oneof [pure Nothing, Just <$> smaller]
+        args       = neOr (SurfaceArg Explicit (SurfaceName "a"))
+                       (listOf1 (SurfaceArg <$> plicity <*> smaller))
+        binders    = neOr (SurfaceBinder Explicit "x" Nothing)
+                       (listOf1 (SurfaceBinder <$> plicity <*> name <*> annotation))
+        typedBinders = neOr (SurfaceBinder Explicit "x" (Just SurfaceUniverseOpen))
+                         (listOf1 (SurfaceBinder <$> plicity <*> name <*> (Just <$> smaller)))
+
+    leaf =
+      oneof
+        [ SurfaceName <$> name
+        , SurfaceUniverse <$> elements [0, 1, 2]
+        , pure SurfaceUniverseOpen
+        , pure SurfacePlaceholder
+        , SurfaceHole <$> name
+        ]
+
+    name    = elements ["x", "y", "f", "A"]
+    plicity = elements [Explicit, Implicit]
+
+    -- @listOf1@ can still hand back an empty list under a tiny size, and a
+    -- spine is never empty.
+    neOr d g = maybe (d :| []) id . nonEmpty <$> g
 
 -- --------------------------------------------------------------------------
 -- The spine
@@ -284,6 +380,17 @@ corpus =
   , "x : A -> A"
   , "(λ x -> x) a"
   , "f _ ?goal"
+    -- **An ascription in a body position keeps its parentheses** (2026-09-12).
+    -- Ascription binds looser than every one of these, so without them the
+    -- printer produced a string that read back as a different term — and
+    -- @a : b : c@, which does not read back at all. Found by
+    -- 'printerAndParser'; kept here by name because that is the shape to
+    -- recognise.
+  , "λ x -> (x : A)"
+  , "∀ (x : A) -> (x : A)"
+  , "A -> (x : A)"
+  , "let x = a in (x : A)"
+  , "a : (b : c)"
   , "elim Nat () (λ (z : Nat) -> Nat) (zero (λ k ih -> ih)) () n"
   ]
 

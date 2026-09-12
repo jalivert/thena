@@ -1416,18 +1416,24 @@ renderSurface = surf Loose
       "do { " ++ intercalate " ; " (map instruction b) ++ " }" 
     surf p (SurfaceApp f as)    =
       paren (p >= Tight) (surf Spine f ++ concatMap arg (NE.toList as))
+    -- **The body of each of these four is @Arrowed@ and not @Term@**, which is
+    -- what the grammar says and what an ascription inside one turns on. A
+    -- binder's own type and a @let@'s annotation and value are @Term@, so they
+    -- stay @Loose@.
     surf p (SurfaceLam bs b)    =
-      paren (p >= Spine) ("λ" ++ concatMap binder (NE.toList bs) ++ " -> " ++ surf Loose b)
+      paren (p >= Spine) ("λ" ++ concatMap binder (NE.toList bs) ++ " -> " ++ surf Arrowed b)
     surf p (SurfacePi bs b)     =
-      paren (p >= Spine) ("∀" ++ concatMap binder (NE.toList bs) ++ " -> " ++ surf Loose b)
+      paren (p >= Spine) ("∀" ++ concatMap binder (NE.toList bs) ++ " -> " ++ surf Arrowed b)
     surf p (SurfaceArrow a b)   =
-      paren (p >= Spine) (surf Tight a ++ " -> " ++ surf Loose b)
+      paren (p >= Spine) (surf Tight a ++ " -> " ++ surf Arrowed b)
     surf p (SurfaceLet x ty v b) =
       paren (p >= Spine)
         ("let " ++ x ++ maybe "" (\t -> " : " ++ surf Loose t) ty
-           ++ " = " ++ surf Loose v ++ " in " ++ surf Loose b)
+           ++ " = " ++ surf Loose v ++ " in " ++ surf Arrowed b)
+    -- @Term : Arrowed ':' Arrowed@ — both sides, and it needs its own
+    -- parentheses anywhere an @Arrowed@ is wanted.
     surf p (SurfaceAnnot e ty)  =
-      paren (p >= Spine) (surf Spine e ++ " : " ++ surf Loose ty)
+      paren (p >= Arrowed) (surf Arrowed e ++ " : " ++ surf Arrowed ty)
     surf p (SurfaceElim d ps mot ms is tgt) =
       paren (p >= Tight)
         ("elim " ++ d ++ " " ++ list ps ++ " " ++ surf Tight mot ++ " " ++ list ms
@@ -1447,9 +1453,20 @@ renderSurface = surf Loose
     paren False t = t
 
 -- | Where a surface term is being printed, and therefore what has to be
--- parenthesised. @Loose@ is the top, @Spine@ is the head or an argument of an
--- application, @Tight@ is an argument.
-data SurfacePrec = Loose | Spine | Tight
+-- parenthesised.
+--
+-- **One level per non-terminal of @Surface.Parser@, and they are listed in that
+-- grammar's order** — @Loose@ is @Term@, @Arrowed@ is @Arrowed@, @Spine@ is
+-- @App@, @Tight@ is @Atom@. Anything else is a guess about what nests inside
+-- what.
+--
+-- @Arrowed@ arrived 2026-09-12, and its absence was a real defect: with three
+-- levels against the grammar's four, the body of a λ, a @∀@, an arrow and a
+-- @let@ were all printed at @Term@, which admits an ascription that the body
+-- position does not. So @λ x -> (x : y)@ printed as @λ x -> x : y@ and read back
+-- as @(λ x -> x) : y@ — a different term, silently — and @a : (b : c)@ printed
+-- as @a : b : c@, which does not parse at all.
+data SurfacePrec = Loose | Arrowed | Spine | Tight
   deriving (Eq, Ord)
 
 obligation :: Obligation -> String
