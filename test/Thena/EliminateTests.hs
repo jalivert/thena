@@ -15,8 +15,13 @@
 -- golden transcripts, where the kernel accepts the finished proofs.
 module Thena.EliminateTests (tests) where
 
+import Data.List (isInfixOf)
+
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+
+import Thena.Driver (Loaded (..), loadSource)
+import Thena.Standard (withRules)
 
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Term (Core, GlobalName (..), Ident (..), fresh)
@@ -43,7 +48,96 @@ tests =
     , testGroup "no indices: the target is what gets generalised" simpleTests
     , testGroup "friendly indices are abstracted, not equated" friendlyTests
     , testGroup "what it refuses" refusalTests
+    , testGroup "a DEPENDENT motive, over the adversarial corpus" dependentMotives
     ]
+
+-- --------------------------------------------------------------------------
+-- A dependent motive, over datatypes chosen to be awkward (2026-09-13)
+-- --------------------------------------------------------------------------
+
+-- | **Phase 54's lesson, applied: every elim test used a CONSTANT motive.**
+--
+-- That is what let a real bug survive a behaviour-preserved check — the goal
+-- did not mention the target, so generalising it was a no-op and nothing about
+-- the motive was exercised. `BUGHUNT.md` H says the same thing about the
+-- type-check sweep in @GlobalTests@: it asks whether the generated equipment is
+-- well formed, not whether it is the right shape, and only a proof that /uses/
+-- it notices the difference.
+--
+-- So: each datatype below is eliminated at a goal that mentions the target, and
+-- the kernel is asked afterwards. @Eq {0} D x x@ is the smallest goal that is
+-- dependent on @x@ — generalising the target really has to abstract two
+-- occurrences of it, plus the index occurrences of an indexed family.
+--
+-- The corpus is @GlobalTests@' one, one datatype at a time: recursive; an
+-- indexed family with a dependent index telescope; a parameterised one; a
+-- parameterised one with no constructors at all; a family whose index is
+-- another datatype; and one above @Type₀@.
+dependentMotives :: [TestTree]
+dependentMotives =
+  [ eliminates "recursive, no parameters"
+      ["data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"]
+      "∀ (x : Nat) -> Eq {0} Nat x x" 1
+  , eliminates "an indexed family with a dependent index telescope"
+      [ "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
+      , "data Fin : Nat -> Type₀ where \
+        \{ fz : ∀ (n : Nat) -> Fin (succ n) \
+        \; fs : ∀ (n : Nat) (i : Fin n) -> Fin (succ n) }"
+      ]
+      "∀ (n : Nat) (x : Fin n) -> Eq {0} (Fin n) x x" 2
+  , eliminates "a parameterised one"
+      [ "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
+      , "data Wrap (A : Type) : Type where { wrap : A -> Wrap A }"
+      ]
+      "∀ (x : Wrap {0} Nat) -> Eq {0} (Wrap {0} Nat) x x" 1
+    -- **No constructors, so no methods** — the motive still has to be
+    -- abstracted correctly and the elimination still has to type.
+  , eliminates "a parameterised one with no constructors"
+      [ "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
+      , "data Void2 (A : Type) : Type where { }"
+      ]
+      -- **Two level parameters, not one**: with no constructors nothing
+      -- constrains the datatype's own level, so it stays a parameter of its
+      -- own beside the one its parameter carries — @Void2 {ℓ₀ ℓ₁} (A : Type ℓ₀)
+      -- : Type ℓ₁@. A use writes both, which is the prenex rule doing exactly
+      -- what it says.
+      "∀ (x : Void2 {0 0} Nat) -> Eq {0} (Void2 {0 0} Nat) x x" 1
+  , eliminates "a family whose index is another datatype"
+      [ "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
+      , "data Wrap (A : Type) : Type where { wrap : A -> Wrap A }"
+      , "data Uses : Wrap {0} Nat -> Type₀ where \
+        \{ uses : ∀ (w : Wrap {0} Nat) -> Uses w }"
+      ]
+      "∀ (w : Wrap {0} Nat) (x : Uses w) -> Eq {0} (Uses w) x x" 2
+  , eliminates "one above Type₀"
+      ["data Box1 : Type₁ where { box1 : ∀ (A : Type₀) -> A -> Box1 }"]
+      "∀ (x : Box1) -> Eq {1} Box1 x x" 1
+  ]
+  where
+    -- Prelude-free, like every script in the suite (phase 11), so the one
+    -- prelude type the goals need is declared here.
+    eqDecl = "data Eq (A : Type) : A -> A -> Type where { refl : ∀ (x : A) -> Eq A x x }"
+
+    eliminates what decls goal intros = testCase what $
+      let script =
+            eqDecl : decls
+              ++ [":theorem t : " ++ goal, "attack"]
+              ++ replicate intros "intro"
+              ++ ["into"]
+              ++ replicate intros "along"
+              ++ ["eliminate-core ⌜ x ⌝", ":revalidate"]
+          l = loadSource withRules (unlines script)
+       in case loadedError l of
+            Just e -> assertFailure (unlines script ++ "\n  " ++ show e)
+            -- **The kernel is the judge**, so the script ends in
+            -- @:revalidate@ and the test looks for its answer rather than for
+            -- the tactic's own report: an elimination that builds a motive the
+            -- development cannot hold would still say @subgoals:@.
+            Nothing ->
+              let said = map show (loadedResponses l)
+               in if any ("valid" `isInfixOf`) said
+                    then pure ()
+                    else assertFailure (unlines script ++ "\n  said: " ++ show said)
 
 -- --------------------------------------------------------------------------
 -- §3.7's worked example
