@@ -340,11 +340,18 @@ rule pick s :- when focus-is-hole                     then say "not a name"
 ```
 
 ```
-thena spine> pick foo
+thena spine> pick surface`foo`
+chose 681: pick
 a name
-thena spine> pick (Type₀ -> Type₀)
+thena spine> pick surface`Type₀ -> Type₀`
 not a name
 ```
+
+**The argument is written in the surface fence**, and it did not have to be when
+this was decided: a REPL line was an argument run then, so a bare `foo` was a
+surface term. Since MS5 a REPL line is one line of `instral` and a bare word is
+a *reference*, so a surface term says which language it is in — which is the
+same rule a rule body follows.
 
 **A bare word is a test of no operands**, and that is why the brackets are
 there: a head is a run of tests with nothing between them, so
