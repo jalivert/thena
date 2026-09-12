@@ -14,7 +14,7 @@ import Data.List (nub)
 
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?), (@?=))
-import Test.Tasty.QuickCheck (Arbitrary (..), Gen, elements, oneof, sized, testProperty, (===))
+import Test.Tasty.QuickCheck (Gen, elements, forAll, oneof, resize, sized, testProperty, (===))
 
 import Thena.Instral.Concrete (RawSignature (..))
 import Thena.Syntax.Lexer (lexTokens)
@@ -93,8 +93,9 @@ roundTrip =
         renderTy (TFun [] TString) @?= "-> String"
         renderTy (TList (TFun [] TString)) @?= "List (-> String)"
 
-    , testProperty "for any signature at all" $ \sg ->
-        readBack (renderSignature sg) === Right (renumbered sg)
+    , testProperty "for any signature at all" $
+        forAll genSignature $ \sg ->
+          readBack (renderSignature sg) === Right (renumbered sg)
     ]
   where
     returns sg = case readBack (renderSignature sg) of
@@ -125,35 +126,36 @@ renumbered (Signature ps r) = Signature (map go ps) (fmap go r)
       TFun as q -> TFun (map go as) (go q)
       _         -> t
 
--- | A generated type. **No 'TObject'** — an object language's name is a type
--- only where that language is declared, and 'readBack' declares none.
-instance Arbitrary Ty where
-  arbitrary = sized ty
+-- | A generated signature.
+--
+-- **No 'TObject'** — an object language's name is a type only where that
+-- language is declared, and 'readBack' declares none. **And no empty 'TFun'**,
+-- which the type language cannot write at all (@ms5\/CLOSEOUT.md@ 23).
+genSignature :: Gen Signature
+genSignature = sized $ \n -> do
+  k  <- elements [0 .. 3]
+  ps <- mapM (const (genTy (n `div` 2))) [1 .. k :: Int]
+  r  <- oneof [pure Nothing, Just <$> genTy (n `div` 2)]
+  pure (Signature ps r)
 
-instance Arbitrary Signature where
-  arbitrary = do
-    ps <- sized (\n -> mapM (const (resize' (ty (n `div` 2)))) [1 .. n `mod` 4])
-    r  <- oneof [pure Nothing, Just <$> sized (\n -> ty (n `div` 2))]
-    pure (Signature ps r)
-    where
-      resize' g = g
-
-ty :: Int -> Gen Ty
-ty n
-  | n <= 0 = atom
+genTy :: Int -> Gen Ty
+genTy n
+  | n <= 0 = genAtom
   | otherwise =
       oneof
-        [ atom
+        [ genAtom
         , TList <$> smaller
         , TOption <$> smaller
         , TPair <$> smaller <*> smaller
-        , TFun <$> mapM (const smaller) [1 .. (n `mod` 3) + 1] <*> smaller
+        , do k  <- elements [1 .. 3]
+             as <- mapM (const smaller) [1 .. k :: Int]
+             TFun as <$> smaller
         ]
   where
-    smaller = ty (n `div` 2)
+    smaller = resize (n `div` 2) (genTy (n `div` 2))
 
-atom :: Gen Ty
-atom =
+genAtom :: Gen Ty
+genAtom =
   oneof
     [ elements [TString, TName, TInt, TChar, TBool, TSurface, TCore, TDevelopment]
     , TVar <$> elements [0 .. 3]
