@@ -63,6 +63,19 @@ certifyTests =
         (nat "Nat -> Nat")
         @?= Right ([], [])
 
+    -- Certifying under a binder in an environment that has a parameterised
+    -- datatype in it. **This does NOT pin @certify@'s
+    -- @beyond (varsInEnv env)@**, and the comment says so on purpose: mutation
+    -- testing (2026-09-12) showed that counting from zero instead leaves the
+    -- whole suite green, and nothing constructed by hand could exhibit a
+    -- capture either. See @reports/2026-09-12-ms5-review.md@ — the guard is
+    -- correct and currently unobservable.
+  , testCase "a binder over a parameterised datatype certifies" $
+      certify natVec
+        (nat "\\ (v : Vec Nat zero) -> cons Nat zero zero v")
+        (nat "Vec Nat zero -> Vec Nat (succ zero)")
+        @?= Right ([], [])
+
     -- The check §5.3's context-free signature earns. @infer@ would report this
     -- as an unknown variable, which is true and says nothing about whose
     -- mistake it is: the caller's, for not abstracting it.

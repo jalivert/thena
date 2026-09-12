@@ -12,6 +12,12 @@ thena spine> :show
   id0
 thena spine> qed
 id0 : ∀ (A : Type₀) -> A -> A   ∎
+thena spine> unify-into ⌜ ∀ (x : Type₀) -> Type₀ ⌝ ⌜ ∀ (y : Type₁) -> Type₀ ⌝
+stuck: Type₀ and Type₁ are different universes
+thena spine> unify-into ⌜ ∀ (x : Type₀) -> Type₀ ⌝ ⌜ ∀ (y : Type₀) -> Type₁ ⌝
+already equal
+thena spine> unify-into ⌜ \ (x : Nat) -> Type₀ ⌝ ⌜ \ (x : Nat) -> Type₁ ⌝
+stuck: Type₀ and Type₁ are different universes
 thena spine> :theorem refl0 : Eq {0} Nat zero zero
 proving refl0 : Eq {0} Nat zero zero
 thena spine> claim "A" ⌜ Type₀ ⌝

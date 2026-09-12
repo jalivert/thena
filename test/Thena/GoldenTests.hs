@@ -760,6 +760,21 @@ tests =
         , "qed"
           -- Holes on both sides. @refl {0} A a@ has type @Eq {0} A a a@; unifying that
           -- with @Eq {0} Nat zero zero@ solves @A@ and @a@.
+          -- **A Π\'s DOMAIN is invariant even when the comparison is
+          -- cumulative** (MS4 phase 41h, in @Unify@ as well as in @Convert@),
+          -- and this is the only place it is observable: @unify-into@ the op has
+          -- no @try@ after it, where @fill@ does — so @fill@ masks the
+          -- difference and this does not. Found by mutation testing,
+          -- 2026-09-12: making the domain inherit the direction left the whole
+          -- suite green, and the line below is what it would have accepted.
+        , "unify-into \8988 \8704 (x : Type\8320) -> Type\8320 \8989 \8988 \8704 (y : Type\8321) -> Type\8320 \8989"
+          -- …and the CODOMAIN does inherit it, which is the other half of the
+          -- same rule and is why this one is accepted.
+        , "unify-into \8988 \8704 (x : Type\8320) -> Type\8320 \8989 \8988 \8704 (y : Type\8320) -> Type\8321 \8989"
+          -- **A λ's BODY is invariant too**, and for a sharper reason than the
+          -- domain's: a λ is not a type, so there is no direction for its body
+          -- to be read at. Found by the same mutation pass.
+        , "unify-into \8988 \\ (x : Nat) -> Type\8320 \8989 \8988 \\ (x : Nat) -> Type\8321 \8989"
         , ":theorem refl0 : Eq {0} Nat zero zero"
         , "claim \"A\" ⌜ Type\8320 ⌝"
         , "claim \"a\" ⌜ A ⌝"
