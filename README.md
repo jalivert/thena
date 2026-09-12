@@ -141,6 +141,22 @@ canonicalNat  : forall (v : Term) -> Value v -> HasType v nat -> NV v
 It is a third the size and **written by hand**, where the determinacy proof is
 generated.
 
+`examples/progress.thena` finishes the pair with TAPL Theorem 8.3.2 — a
+well-typed term is a value or it takes a step:
+
+```
+progress : forall (t : Term) (T : Ty) -> HasType t T -> Or (Value t) (Steps t)
+```
+
+Load it after `canonical.thena`: Thena has no module imports, but globals
+declared by one module are in scope for the next.
+
+```
+cabal run thena
+thena spine> :load examples/canonical.thena
+thena spine> :load examples/progress.thena
+```
+
 ## Building
 
 Requires GHC (with `base` 4.21), Cabal, and `alex` + `happy` (resolved

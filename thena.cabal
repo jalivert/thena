@@ -97,6 +97,7 @@ test-suite thena-test
         Thena.DependentIndexTests
         Thena.CanonicalTests
         Thena.DeterminacyTests
+        Thena.ProgressTests
         Thena.ProductTests
         Thena.DevelopmentTests
         Thena.EliminateTests
