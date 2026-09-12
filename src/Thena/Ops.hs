@@ -230,6 +230,19 @@ data Op
   | Ask    Operand AnswerKind -- ^ prompt text, and what the frontend should offer
   | Say    Operand            -- ^ message text
   | Concat Operand Operand    -- ^ building prompt and message text
+  | Value Operand
+    -- ^ **the operand itself, as a value** (MS5 phase 68a) — what @x = [1, 2]@
+    -- binds.
+    --
+    -- **It has a word and no written form**, like 'Block' and 'DefineData': the
+    -- case split over 'Op' is total, so it must be spelled, but nobody writes
+    -- it. That is what makes it different from the op he declined in
+    -- @ms5\/CLOSEOUT.md@ 3 — *\"two spellings for one idea\"* was about a
+    -- @value@ a rule author would type, and there is none.
+    --
+    -- **§7.2's two instruction shapes are untouched.** @Instr@ is still
+    -- @Bind Name Op | Do Op@; what changed is that the /written/ right of an
+    -- @=@ may be a value, and this is the node it resolves to.
   | NameText Operand
     -- ^ **a 'Name' read as a 'String'** (MS5 phase 66b) — @name-text n@.
     --
@@ -984,6 +997,7 @@ resultOf o = case o of
   -- played, and a body has no value.
   Block _      -> Nothing
   Concat _ _   -> Just TString
+  Value _      -> Just (TVar 0)
   NameText _   -> Just TString
   Assume _ _   -> Just TCore  -- the variable it bound; §7.3's @?x <- claim S@
   Quantify _ _ -> Nothing     -- a hole-life op, like 'Attack' and 'IntroPi'
@@ -1133,6 +1147,7 @@ operandTypes o = case o of
   Ask    a _   -> [(a, TString)]
   Say    a     -> [(a, TString)]
   Concat a b   -> [(a, TString), (b, TString)]
+  Value a      -> [(a, TVar 0)]
   NameText a   -> [(a, TName)]
   Unify  a b   -> [(a, TCore), (b, TCore)]
   UnifyInto a b -> [(a, TCore), (b, TCore)]
@@ -1387,6 +1402,7 @@ opKeyword o = case o of
   Ask    _ _   -> "ask"
   Say    _     -> "say"
   Concat _ _   -> "concat"
+  Value _      -> "value"
   NameText _   -> "name-text"
   Along        -> "along"
   Into         -> "into"

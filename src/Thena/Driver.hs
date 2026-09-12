@@ -135,9 +135,10 @@ import Thena.Rules
   , resolveRule
   , resolveBlock
   , RuleError (..)
-  , allRules
+  , allCallable
   , allSignatures
   , ruleBase
+  , resolveFunction
   , resolveSignature
   , validate
   )
@@ -157,11 +158,12 @@ import qualified Thena.Surface.Parser as Surface
 import Thena.Syntax.Concrete (Raw (..))
 import Thena.Instral.Concrete
   ( RawDecl (..)
+  , RawRhs (..)
   , RawInstr (..)
   , RawOp (..)
   , RawOperand (..)
   )
-import Thena.Syntax.Lexer (Located (..), Token (..), lexTokens)
+import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..), lexTokens)
 import Thena.Syntax.Parser
   ( parseData
   , parseEquation
@@ -625,7 +627,7 @@ resolving w os
       | written o =
           let n          = "\8988" ++ show k ++ "\8989"
               (bs, rest') = go (k + 1) rest
-           in (RawBind n (RawOp "resolve-core" [o]) : bs, RawRef n : rest')
+           in (RawBind n (RhsOp (RawOp "resolve-core" [o])) : bs, RawRef n : rest')
       | otherwise =
           let (bs, rest') = go k rest
            in (bs, o : rest')
@@ -1789,11 +1791,38 @@ readRuleBase path src = case baseHead ls of
       -- then names the line the user is looking at.
       let rest = replicate used "" ++ drop used ls
       ts   <- mapLeft RuleSyntaxError (tokensOf (unlines rest))
-      raws <- mapLeft (RuleSyntaxError . ParseFailed) (parseRules ts)
-      (sigs, rs) <- resolveAll raws
-      Right (ruleBase nm desc path sigs rs)
+      raws <- mapLeft (RuleSyntaxError . ParseFailed) (parseRules (separated ts))
+      (sigs, fns, rs) <- resolveAll raws
+      Right (ruleBase nm desc path sigs fns rs)
   where
     ls = lines src
+
+-- | Mark where each declaration begins (MS5 phase 68a).
+--
+-- **A declaration begins in column 1** — his ruling, 2026-09-12, and it is what
+-- makes a function declaration with no keyword of its own possible: @rule@ and
+-- @signature@ announce themselves, a plain word does not, so nothing ended the
+-- declaration before one. A 'Thena.Syntax.Lexer.TDeclSep' is inserted before
+-- every token that starts in the first column, and the grammar requires one in
+-- front of each declaration.
+--
+-- **It is done here and not in the lexer** because one lexer serves every
+-- language (@discussion\/the-five-languages.md@ §0b) and only a rule file wants
+-- this. It is the same shape as 'Thena.Surface.Layout' \— a pass between the
+-- lexer and the grammar \— at a fraction of the size, because there is one rule
+-- and no nesting.
+--
+-- **It costs nothing to what already exists**: every one of the shipped base's
+-- 39 declarations already begins in column 1 and every continuation line is
+-- already indented. A file that indented a @rule@ is now a parse error, which is
+-- the point.
+separated :: [Located Token] -> [Located Token]
+separated = concatMap one
+  where
+    one t@(Located p _)
+      | firstColumn p = [Located p TDeclSep, t]
+      | otherwise     = [t]
+    firstColumn (Pos _ c) = c == 1
 
 -- | Resolve every declaration, then validate every rule. Every error, not the
 -- first — 'validate'\'s reason.
@@ -1803,12 +1832,19 @@ readRuleBase path src = case baseHead ls of
 -- questions about the whole program and belong to 'Thena.Instral.Infer'. What
 -- /is/ answered here is what one file can answer — that the type names a type,
 -- and that a callable has at most one signature.
-resolveAll :: [RawDecl] -> Either RuleFileError ([(String, Signature)], [Rule])
-resolveAll raws = case (concat ruleErrs ++ sigErrs ++ dups, concatMap validate ok) of
-  ([], [])     -> Right (sigs, ok)
-  (res, valid) -> Left (RuleIllFormed (res ++ valid))
+resolveAll
+  :: [RawDecl] -> Either RuleFileError ([(String, Signature)], [Rule], [Rule])
+resolveAll raws =
+  case ( concat ruleErrs ++ concat fnErrs ++ sigErrs ++ dups
+       , concatMap validate (ok ++ fns)
+       ) of
+    ([], [])     -> Right (sigs, fns, ok)
+    (res, valid) -> Left (RuleIllFormed (res ++ valid))
   where
     (ruleErrs, ok)  = partitionEithers [ resolveRule r | DeclRule r <- raws ]
+    -- **A function is validated like any rule**, because it is one
+    -- ('Thena.Rules.resolveFunction').
+    (fnErrs, fns)   = partitionEithers [ resolveFunction f | DeclFunction f <- raws ]
     (sigErrs, sigs) =
       partitionEithers [ resolveSignature g | DeclSignature g <- raws ]
     dups =
@@ -1834,7 +1870,7 @@ loadRuleBases s = go []
     -- reason in 'BasesIllTyped': a rule's signature is not decidable until every
     -- base is in hand. 'Thena.Rules.validate' stays where it is — it is per-rule
     -- and answers a question one rule can answer.
-    go acc [] = case snd (inferProgram (allSignatures acc) (allRules acc)) of
+    go acc [] = case snd (inferProgram (allSignatures acc) (allCallable acc)) of
       []   ->
         ( s { sessionMachine = (sessionMachine s) { rules = acc } }
         , BasesLoaded acc

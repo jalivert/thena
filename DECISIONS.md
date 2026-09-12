@@ -668,6 +668,58 @@ base you load later, so it is reported when the search finds no clause.
 **A rule is inferred at one type**, not generalised: a helper used at `Surface`
 in one place and `Core` in another is an error, not a polymorphic rule.
 
+### A rule file may declare functions, and they need no keyword
+
+*Decided 2026-09-12.*
+
+A function is written the way Haskell writes one, beside the rules in the same
+file:
+
+```
+twice x = concat x x
+
+signature shout : String -> String
+shout x = twice (twice x)
+```
+
+**A function is a rule with one clause and no head**, and that is not an analogy
+— it becomes one. Call it from a rule body by name, exactly as you call a rule.
+The one difference you can see: a function is **not offered as a tactic**, so it
+never appears in `:matches` and `prove` never runs it.
+
+**A function must produce a value.** `f x = say "hi"` is refused — `say` leaves
+nothing, so there is nothing for `f` to be.
+
+### A declaration begins in column 1
+
+*Decided 2026-09-12. It is why a function needs no keyword.*
+
+`rule` and `signature` announce themselves; a function's name does not, so a
+rule file says where a declaration stops by indentation:
+
+```
+rule f :- then say "hi"
+     ; prove              -- indented: still part of the rule above
+g x = concat x x          -- column 1: a new declaration
+```
+
+Without the rule, `g` would be read as another argument to `say`. Rules may
+still span as many lines as you like — indent the continuations.
+
+### A value can be bound to a name
+
+*Decided 2026-09-12.*
+
+```
+p = (1, true)
+l = [1, 2, 3]
+n = 42
+```
+
+Until now the right of an `=` in a rule body had to be an operation, so a literal
+could be passed and returned but never named. `x = y` still means *call `y`* —
+that reading is unchanged.
+
 ### A rule may declare its type, and that is what makes it reusable
 
 *Decided 2026-09-12.*

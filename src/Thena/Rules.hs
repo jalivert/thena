@@ -15,6 +15,7 @@ module Thena.Rules
     RuleBase (..)
   , ruleBase
   , allRules
+  , allCallable
   , allSignatures
 
     -- * Finding rules (§7.6)
@@ -32,6 +33,7 @@ module Thena.Rules
   , validateBase
 
     -- * Written rules (§8, phase 21)
+  , resolveFunction
   , resolveRule
   , resolveSignature
   , resolveTy
@@ -75,6 +77,8 @@ import qualified Thena.Instral.Type as Ty
 import Thena.Instral.Type (Signature (..), Ty (..))
 import Thena.Instral.Concrete
   ( RawSignature (..)
+  , RawFunction (..)
+  , RawRhs (..)
   , RawTy (..)
   , RawInstr (..)
   , RawOp (..)
@@ -114,6 +118,13 @@ data RuleBase = RuleBase
     -- ^ **the types its file declared** (MS5 phase 67), keyed by name; the
     -- arity is @length . 'Thena.Instral.Type.sigParams'@, because a signature's
     -- arrow chain has one link per parameter.
+  , baseFunctions   :: [Rule]
+    -- ^ **the global functions its file declared** (MS5 phase 68a), each already
+    -- an ordinary 'Rule' — his §1.1: /a function is a rule with one clause and
+    -- no head/. They are kept apart from 'baseRules' for one reason and it is
+    -- not the engine's: a function must not appear in 'matches', because a
+    -- headless rule matches everywhere and @prove@ would run it. Phase 71's
+    -- by-type query wants the list on its own anyway.
   , baseRules       :: [Rule]
   }
   deriving (Eq, Show)
@@ -122,7 +133,7 @@ data RuleBase = RuleBase
 -- caller who wants the errors gets them all rather than the first.
 ruleBase
   :: String -> Maybe String -> FilePath -> [(String, Signature)] -> [Rule]
-  -> RuleBase
+  -> [Rule] -> RuleBase
 ruleBase = RuleBase
 
 -- | Every rule the engine may search, across every loaded base, **in search
@@ -141,6 +152,13 @@ allRules = concatMap baseRules
 -- anything answers to it is 'Thena.Instral.Infer''s question.
 allSignatures :: [RuleBase] -> [(String, Signature)]
 allSignatures = concatMap baseSignatures
+
+-- | Everything @Call@ may reach: the rules **and the functions**.
+--
+-- 'allRules' is what 'matches' and 'dispatch' see, and it is deliberately the
+-- smaller list — see 'baseFunctions'.
+allCallable :: [RuleBase] -> [Rule]
+allCallable bs = concatMap baseRules bs ++ concatMap baseFunctions bs
 
 -- --------------------------------------------------------------------------
 -- Finding rules (§7.6)
@@ -223,7 +241,7 @@ clauses
 clauses bases env cur nm vs =
   RuleIter
     [ r
-    | r <- allRules bases
+    | r <- allCallable bases
     , ruleName r == nm
     , length (ruleParams r) == length vs
     , all (holds env cur (zip (ruleParams r) vs)) (ruleHead r)
@@ -236,7 +254,7 @@ clauses bases env cur nm vs =
 -- matched/.
 arities :: [RuleBase] -> GlobalName -> [Int]
 arities bases nm =
-  [ length (ruleParams r) | r <- allRules bases, ruleName r == nm ]
+  [ length (ruleParams r) | r <- allCallable bases, ruleName r == nm ]
 
 next :: RuleIter -> Maybe (Rule, RuleIter)
 next (RuleIter rs) = case rs of
@@ -436,6 +454,9 @@ data RuleError
     -- not a type a value can have
   | DuplicateSignature String Int
     -- ^ two signatures for one callable
+  | FunctionLeavesNothing String
+    -- ^ @f x = say "hi"@ — the right of an @=@ ran something that produces no
+    -- value, so there is nothing for the function to be (MS5 phase 68a)
   deriving (Eq, Show)
 
 -- | The load-time pass (§2.4, §7.2). Three checks, one traversal, **every**
@@ -696,6 +717,30 @@ headOperand o = case o of
   -- effects, and a nested call is a call (MS5 phase 63).
   RawNested _ _ -> Nothing
 
+-- | A written function, resolved into the rule it is (MS5 phase 68a).
+--
+-- **A function IS a rule — his §1.1** — /a rule with one clause and no head/ —
+-- and this is where that stops being a description and becomes the
+-- implementation: @f x = e@ becomes a headless 'Rule' whose body evaluates @e@
+-- and returns it. The engine gains nothing, @Call@ reaches it unchanged, and
+-- 'validate' and 'Thena.Instral.Infer' see an ordinary rule.
+--
+-- **The result is bound to a name no author can write** — @(=)@ contains a
+-- token character, so nothing lexes to it — for 'hoisted'\'s reason: the
+-- generated name must not collide with a parameter.
+--
+-- **A function must produce.** @f x = say "hi"@ is refused here rather than by
+-- 'validate', which would report it against a binding the author never wrote.
+resolveFunction :: RawFunction -> Either [RuleError] Rule
+resolveFunction (RawFunction nm ps rhs) = do
+  is <- resolveBlock g [RawBind resultName rhs]
+  case [ () | Bind n o <- is, n == resultName, not (produces o) ] of
+    _ : _ -> Left [FunctionLeavesNothing nm]
+    []    -> Right (Rule g ps [] (is ++ [Do (Return (Ref resultName))]))
+  where
+    g          = GlobalName nm
+    resultName = "(=)"
+
 -- | Resolve a written block of instructions (MS4 phase 45).
 --
 -- **The same resolution a rule body gets**, and deliberately the same function
@@ -720,8 +765,15 @@ resolveBlock g body = case partitionEithers (zipWith (instruction g) [0 ..] body
 -- what was written and not what it expanded to.
 instruction :: GlobalName -> Int -> RawInstr -> Either RuleError [Instr]
 instruction g i ri = case ri of
-  RawBind n o -> lift (Bind n) o
-  RawDo     o -> lift Do       o
+  RawBind n (RhsOp o)    -> lift (Bind n) o
+  -- **A value on the right of an @=@** (MS5 phase 68a) — @x = [1, 2]@. Its
+  -- nested calls are lifted exactly as an op's arguments are, and the value
+  -- itself becomes a 'Thena.Ops.Value', which is the op with no written form.
+  RawBind n (RhsValue o) ->
+    let (binds, o') = hoistedOne i o
+     in (++) <$> traverse (\(m, x) -> Bind m <$> operation g i x) binds
+              <*> (pure . Bind n . Op.Value <$> operandOf g i "=" o')
+  RawDo     o            -> lift Do       o
   where
     lift f (RawOp w as) =
       let (binds, as') = hoisted i as
@@ -765,6 +817,68 @@ hoisted i as = let (_, bs, os) = go 0 as in (bs, os)
             (k2, bs2, b') = one k1 b
          in (k2, bs1 ++ bs2, RawPairOf a' b')
       _ -> (k, [], o)
+
+-- | 'hoisted' for a single operand — what stands right of an @=@ (MS5 phase
+-- 68a).
+hoistedOne :: Int -> RawOperand -> ([(Name, RawOp)], RawOperand)
+hoistedOne i a = case hoisted i [a] of
+  (bs, [o]) -> (bs, o)
+  (bs, _)   -> (bs, a)
+
+-- | One written operand, resolved (extracted to the top level at MS5 phase 68a
+-- so that the right of an @=@ can use it).
+--
+-- The three arguments before the operand are only for errors: which rule, which
+-- instruction, and the word that wanted it.
+operandOf :: GlobalName -> Int -> String -> RawOperand -> Either RuleError Operand
+operandOf g i w o = case o of
+  -- **Cannot arise**: 'hoisted' lifts every nested call into a binding of
+  -- its own before this runs, so what reaches here is always a leaf (MS5
+  -- phase 63). Written out rather than left to a pattern-match failure.
+  RawNested _ _ -> Left (BadOperands g i w)
+  -- **@true@ and @false@ are read here and not in the lexer** — his ruling,
+  -- 2026-09-12 (MS5 phase 64). One lexer serves every language, and an
+  -- object language may well call a constructor @true@; this table is
+  -- @instral@'s alone, so reserving them here takes nothing from Surface or
+  -- Core. 'validate' refuses a parameter or a binding of either name, so a
+  -- rule that meant to use one as a variable is told rather than silently
+  -- given a literal.
+  RawRef "true"  -> Right (Lit (VBool True))
+  RawRef "false" -> Right (Lit (VBool False))
+  RawRef n  -> Right (Ref n)
+  RawText t -> Right (Lit (VText t))
+  RawChar c -> Right (Lit (VChar c))
+  -- **A numeral is a value here** (MS5 phase 64), where it is a field
+  -- position under a word from 'partWords' — those are read above, before
+  -- this. It was 'BadOperands' until this phase, which is one more
+  -- load-time check traded for a run-time one: an op given an @Int@ where
+  -- it wanted a term fails with 'Thena.Errors.ExpectedTerm', and saying so
+  -- earlier is the type system's job (@ms2\/CLOSEOUT.md@ 4b, phase 66).
+  RawPos k  -> Right (Lit (VInt k))
+  RawList os    -> ListOf <$> traverse (operandOf g i w) os
+  RawPairOf a b -> PairOf <$> operandOf g i w a <*> operandOf g i w b
+  -- **A tagged region is parsed here, at load** (MS5 phase 61b, §6.0.1), so
+  -- that a syntax error in an embedded term arrives with every other syntax
+  -- error rather than when a rule happens to run.
+  --
+  -- The two built-in tags differ in how far they get, and the difference is
+  -- the languages' rather than ours: a surface term is unresolved by nature,
+  -- so it is finished here; a core term needs the globals and the focus's
+  -- context, which do not exist while a rule base is being read.
+  -- Corners are the other spelling of a @core@ region, and land in the
+  -- same place: unresolved, because a rule base is read before there is
+  -- anything to resolve against.
+  RawQuoted r -> Right (Lit (VRaw r))
+  RawRegion tag src -> case tag of
+    "surface" -> case parseSurfaceText src of
+      Left e  -> Left (BadRegion g i tag e)
+      Right t -> Right (Lit (VSurface (rootedAt t)))
+    "core" -> case lexTokens src of
+      Left e   -> Left (BadRegion g i tag (LexFailed e))
+      Right ts -> case parseTerm ts of
+        Left e  -> Left (BadRegion g i tag (ParseFailed e))
+        Right r -> Right (Lit (VRaw r))
+    _ -> Left (NoSuchTag g i tag)
 
 -- | An op word and its written arguments, resolved.
 --
@@ -858,54 +972,7 @@ operation g i (RawOp w as)
     -- kind of value fails at run time with 'Thena.Errors.ExpectedTerm', and
     -- "when the instruction language gets a type system that check moves
     -- there". A grammar that policed it here would be that type system, badly.
-    ref o   = case o of
-      -- **Cannot arise**: 'hoisted' lifts every nested call into a binding of
-      -- its own before this runs, so what reaches here is always a leaf (MS5
-      -- phase 63). Written out rather than left to a pattern-match failure.
-      RawNested _ _ -> Left (BadOperands g i w)
-      -- **@true@ and @false@ are read here and not in the lexer** — his ruling,
-      -- 2026-09-12 (MS5 phase 64). One lexer serves every language, and an
-      -- object language may well call a constructor @true@; this table is
-      -- @instral@'s alone, so reserving them here takes nothing from Surface or
-      -- Core. 'validate' refuses a parameter or a binding of either name, so a
-      -- rule that meant to use one as a variable is told rather than silently
-      -- given a literal.
-      RawRef "true"  -> Right (Lit (VBool True))
-      RawRef "false" -> Right (Lit (VBool False))
-      RawRef n  -> Right (Ref n)
-      RawText t -> Right (Lit (VText t))
-      RawChar c -> Right (Lit (VChar c))
-      -- **A numeral is a value here** (MS5 phase 64), where it is a field
-      -- position under a word from 'partWords' — those are read above, before
-      -- this. It was 'BadOperands' until this phase, which is one more
-      -- load-time check traded for a run-time one: an op given an @Int@ where
-      -- it wanted a term fails with 'Thena.Errors.ExpectedTerm', and saying so
-      -- earlier is the type system's job (@ms2\/CLOSEOUT.md@ 4b, phase 66).
-      RawPos k  -> Right (Lit (VInt k))
-      RawList os    -> ListOf <$> traverse ref os
-      RawPairOf a b -> PairOf <$> ref a <*> ref b
-      -- **A tagged region is parsed here, at load** (MS5 phase 61b, §6.0.1), so
-      -- that a syntax error in an embedded term arrives with every other syntax
-      -- error rather than when a rule happens to run.
-      --
-      -- The two built-in tags differ in how far they get, and the difference is
-      -- the languages' rather than ours: a surface term is unresolved by nature,
-      -- so it is finished here; a core term needs the globals and the focus's
-      -- context, which do not exist while a rule base is being read.
-      -- Corners are the other spelling of a @core@ region, and land in the
-      -- same place: unresolved, because a rule base is read before there is
-      -- anything to resolve against.
-      RawQuoted r -> Right (Lit (VRaw r))
-      RawRegion tag src -> case tag of
-        "surface" -> case parseSurfaceText src of
-          Left e  -> Left (BadRegion g i tag e)
-          Right t -> Right (Lit (VSurface (rootedAt t)))
-        "core" -> case lexTokens src of
-          Left e   -> Left (BadRegion g i tag (LexFailed e))
-          Right ts -> case parseTerm ts of
-            Left e  -> Left (BadRegion g i tag (ParseFailed e))
-            Right r -> Right (Lit (VRaw r))
-        _ -> Left (NoSuchTag g i tag)
+    ref     = operandOf g i w
 
     nullary =
       [ ("along", Along), ("into", Into), ("back", Back), ("reduce", Reduce)

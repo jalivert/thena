@@ -11,7 +11,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (GlobalName (..))
-import Thena.Driver (Response (..), RuleFileError (..), Session, loadRuleBases, newSession)
+import Thena.Driver (Response (..), RuleFileError (..), Session, command, loadRuleBases, newSession)
 import Thena.Engine (Machine (..))
 import Thena.Driver (Session (..))
 import Thena.Instral.Infer
@@ -35,6 +35,7 @@ tests =
     , blockReturn
     , annotations
     , badSignatures
+    , functions
     ]
 
 -- --------------------------------------------------------------------------
@@ -302,6 +303,77 @@ badSignatures =
       testCase label $ case load (src ++ "\nrule f x :- then prove") of
         RuleFileRefused _ (RuleIllFormed es) | want `elem` es -> pure ()
         other -> assertFailure ("expected " ++ show want ++ ", got " ++ show other)
+
+-- --------------------------------------------------------------------------
+-- Global functions (MS5 phase 68a)
+-- --------------------------------------------------------------------------
+
+-- | **A function is a rule with one clause and no head** — his §1.1 — so what
+-- is checked here is mostly that nothing had to be added to make that true.
+functions :: TestTree
+functions =
+  testGroup
+    "a global function"
+    [ -- **No keyword** — his choice, 2026-09-12. @rule@ and @signature@ are
+      -- keywords, so a declaration beginning with a plain word can only be this.
+      testCase "is declared with no keyword and is callable" $
+        said "rule go :- then m = twice \"a\" ; say m" @?= Just "aa"
+
+      -- **The boundary is column 1** — his ruling, 2026-09-12. Without it the
+      -- @g@ below is parsed as another operand of @say@, silently, because
+      -- Happy shifts.
+    , testCase "does not get swallowed by the declaration above it" $
+        said "rule go :- then m = twice \"b\" ; say m" @?= Just "bb"
+
+      -- …and the rule that buys it: an indented declaration is a parse error
+      -- now, where it was accepted (and misparsed) before.
+    , testCase "and an indented declaration is refused" $
+        case loadRaw "rule base i where\n  rule f :- then prove\n" of
+          RuleFileRefused _ (RuleSyntaxError _) -> pure ()
+          other -> assertFailure ("expected a syntax error, got " ++ show other)
+
+      -- **It is not offered as a tactic.** A function has no head, and a
+      -- headless rule matches everywhere — so if functions were kept with the
+      -- rules, @prove@ would run them. 'Thena.Rules.baseFunctions' is why they
+      -- are a separate list.
+    , testCase "is not listed among the rules" $
+        case load "twice x = concat x x\nrule go :- then prove" of
+          BasesLoaded bs -> map (map ruleNameOf . baseRules) bs @?= [["go"]]
+          other -> assertFailure ("expected a load, got " ++ show other)
+
+      -- …and its type is inferred like any rule's, because it is one.
+    , testCase "is inferred like a rule" $
+        case load "twice x = concat x x" of
+          BasesLoaded _ -> pure ()
+          other -> assertFailure ("expected a load, got " ++ show other)
+
+      -- **A function must produce.** Refused where it is written rather than by
+      -- 'Thena.Rules.validate', which would report it against a binding the
+      -- author never wrote.
+    , testCase "that leaves nothing is refused" $
+        case load "f x = say \"hi\"" of
+          RuleFileRefused _ (RuleIllFormed es)
+            | FunctionLeavesNothing "f" `elem` es -> pure ()
+          other -> assertFailure ("expected a refusal, got " ++ show other)
+
+      -- **@x = ‹value›@, which `ms5/CLOSEOUT.md` 3 owed this phase** (his
+      -- ruling, 2026-09-12). It resolves to 'Thena.Ops.Value', an op with a word
+      -- and no written form.
+    , testCase "and a literal can be bound to a name at last" $
+        case load "rule go :- then p = (1, true) ; l = [1, 2, 3] ; n = 42 ; prove" of
+          BasesLoaded _ -> pure ()
+          other -> assertFailure ("expected a load, got " ++ show other)
+    ]
+  where
+    ruleNameOf r = case ruleName r of GlobalName n -> n
+
+    said line = case snd (command (fst (loadRuleBases newSession
+                  [("f.thena.rules", "rule base f where\ntwice x = concat x x\n" ++ line ++ "\n")]))
+                  "go") of
+      Ran msgs _ -> case reverse msgs of { m : _ -> Just m; [] -> Nothing }
+      other      -> error ("expected Ran, got " ++ show other)
+
+    loadRaw src = snd (loadRuleBases newSession [("i.thena.rules", src)])
 
 load :: String -> Response
 load src = snd (loadRuleBases newSession [("t.thena.rules", "rule base t where\n" ++ src)])

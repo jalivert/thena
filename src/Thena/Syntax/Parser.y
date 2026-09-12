@@ -39,7 +39,7 @@ import Thena.Syntax.Concrete
   , RawConstructor (..)
   , RawData (..)
   )
-import Thena.Instral.Concrete (RawDecl (..), RawSignature (..), RawTy (..), RawRule (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
+import Thena.Instral.Concrete (RawDecl (..), RawFunction (..), RawRhs (..), RawSignature (..), RawTy (..), RawRule (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
@@ -82,6 +82,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   where   { Located _ TWhere }
   rule    { Located _ TRule }
   signature { Located _ TSignature }
+  declsep { Located _ TDeclSep }
   when    { Located _ TWhen }
   then    { Located _ TThen }
   ':-'    { Located _ TNeck }
@@ -174,10 +175,16 @@ Constructor :: { RawConstructor }
 RuleFile :: { [RawDecl] }
   : Decls                                  { reverse $1 }
 
+-- **A declaration begins in column 1** — his ruling, 2026-09-12. The separator
+-- is not lexed; "Thena.Driver" inserts one before every token that starts a
+-- line's first column, which is what gives a keyword-less function declaration a
+-- boundary. Without it @rule f :- then say \"hi\"@ followed by @g x = …@ parses
+-- with @g@ as another operand of @say@ — silently, because Happy shifts.
 Decls :: { [RawDecl] }
   :                                        { [] }
-  | Decls Rule                             { DeclRule $2 : $1 }
-  | Decls Signature                        { DeclSignature $2 : $1 }
+  | Decls declsep Rule                     { DeclRule $3 : $1 }
+  | Decls declsep Signature                { DeclSignature $3 : $1 }
+  | Decls declsep Function                 { DeclFunction $3 : $1 }
 
 Rule :: { RawRule }
   : rule ident Params ':-' Tests then Body   { RawRule $2 (reverse $3) $5 (reverse $7) }
@@ -186,6 +193,19 @@ Rule :: { RawRule }
 -- anywhere in the file, naming a callable and giving its whole type including
 -- the result. A callable has several clauses and one type, which is why it does
 -- not hang off a clause.
+-- **A global function, and it needs no keyword of its own** — his choice,
+-- 2026-09-12. @rule@ and @signature@ are keywords, so a declaration that begins
+-- with a plain word can only be this one.
+Function :: { RawFunction }
+  : ident Params '=' Rhs                   { RawFunction $1 (reverse $2) $4 }
+
+-- What stands right of an @=@, here and in a body: an op application, or a
+-- value written down. The second case excludes a bare @ident@ — @x = y@ is a
+-- call to @y@, which is the reading it has always had.
+Rhs :: { RawRhs }
+  : Op                                     { RhsOp $1 }
+  | ValueOperand                           { RhsValue $1 }
+
 Signature :: { RawSignature }
   : signature ident ':' Ty                 { RawSignature $2 $4 }
 
@@ -260,7 +280,7 @@ Body :: { [RawInstr] }
   | Body ';' Instr                         { $3 : $1 }
 
 Instr :: { RawInstr }
-  : ident '=' Op                           { RawBind $1 $3 }
+  : ident '=' Rhs                          { RawBind $1 $3 }
   | Op                                     { RawDo $1 }
 
 -- One shape for every op: a word and whatever was written after it. Which op
@@ -281,7 +301,12 @@ Operands :: { [RawOperand] }
 
 Operand :: { RawOperand }
   : ident                                  { RawRef $1 }
-  | '(' ident Operands ')'                 { RawNested $2 (reverse $3) }
+  | ValueOperand                           { $1 }
+
+-- Every operand but a bare name. Split out at MS5 phase 68a so that the right
+-- of an @=@ can take one without @x = y@ becoming ambiguous — it is a call.
+ValueOperand :: { RawOperand }
+  : '(' ident Operands ')'                 { RawNested $2 (reverse $3) }
   | num                                    { RawPos $1 }
   | str                                    { RawText $1 }
   | chr                                    { RawChar $1 }

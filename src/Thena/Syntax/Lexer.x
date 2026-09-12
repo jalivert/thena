@@ -183,6 +183,9 @@ data Token
   | TDo
   | TRule
   | TSignature
+  | TDeclSep
+    -- ^ **not lexed** — inserted by "Thena.Driver" before every rule-file token
+    -- that starts in column 1 (MS5 phase 68a). See 'Thena.Driver.separated'.
   | TWhen
   | TThen
   | TNeck

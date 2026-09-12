@@ -23,6 +23,8 @@
 -- "Thena.Rules".
 module Thena.Instral.Concrete
   ( RawDecl (..)
+  , RawFunction (..)
+  , RawRhs (..)
   , RawSignature (..)
   , RawTy (..)
   , RawRule (..)
@@ -60,6 +62,34 @@ data RawRule = RawRule String [String] [RawTest] [RawInstr]
 data RawDecl
   = DeclRule RawRule
   | DeclSignature RawSignature
+  | DeclFunction RawFunction
+  deriving (Eq, Show)
+
+-- | @‹name› ‹params› = ‹expression›@ — a global function (MS5 phase 68a).
+--
+-- **No keyword** — his choice, 2026-09-12: *like Haskell. no keyword, name,
+-- parameters, =, expression.* It needs none, because @rule@ and @signature@ are
+-- keywords and a declaration beginning with a plain word can only be this.
+--
+-- **A function is a rule with one clause and no head** — his §1.1 — and that is
+-- how it is built rather than how it is described: 'Thena.Rules.resolveFunction'
+-- answers with an ordinary 'Thena.Ops.Rule' whose body ends in @return@. Nothing
+-- in the engine knows the difference, which is the point of there being one
+-- language.
+data RawFunction = RawFunction String [String] RawRhs
+  deriving (Eq, Show)
+
+-- | What stands right of an @=@ — in a function declaration and in a binding
+-- inside a body, which are the same question (MS5 phase 68a).
+--
+-- **Two cases and not one, because an op application is not an operand.** A
+-- word followed by arguments is an op or a call; everything else is a value
+-- written down. Until this phase only the first was allowed after @=@, which is
+-- why @x = [1, 2]@ was unwritable (@ms5\/CLOSEOUT.md@ 3, his ruling that it
+-- waits for this phase).
+data RawRhs
+  = RhsOp RawOp        -- ^ @concat x x@ — an op or a call
+  | RhsValue RawOperand -- ^ @[1, 2]@, @(a, b)@, @42@, @⌜ t ⌝@
   deriving (Eq, Show)
 
 -- | @signature ‹name› : ‹type›@ — a rule's declared type (MS5 phase 67).
@@ -88,7 +118,7 @@ data RawTy
 
 -- | @‹name› = ‹op› ‹args›@ or @‹op› ‹args›@ — 'Thena.Ops.Instr''s two cases, written.
 data RawInstr
-  = RawBind String RawOp
+  = RawBind String RawRhs
   | RawDo   RawOp
   deriving (Eq, Show)
 

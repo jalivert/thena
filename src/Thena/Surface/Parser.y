@@ -35,7 +35,7 @@ import Thena.Surface.Concrete
   , SurfaceArg (..)
   , SurfaceBinder (..)
   )
-import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..))
+import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRhs (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
@@ -119,8 +119,16 @@ Block :: { [RawInstr] }
   | Block ';' Instr                        { $3 : $1 }
 
 Instr :: { RawInstr }
-  : ident '=' InstrOp                     { RawBind $1 $3 }
+  : ident '=' InstrRhs                     { RawBind $1 $3 }
   | InstrOp                                { RawDo $1 }
+
+-- **The same two cases the rule-file grammar has** (MS5 phase 68a) — kept level
+-- with @Thena.Syntax.Parser@\'s @Rhs@ by hand, which is §7b's registered
+-- duplication: a @do@ block is embedded in a surface term, so Happy cannot share
+-- the non-terminal.
+InstrRhs :: { RawRhs }
+  : InstrOp                                { RhsOp $1 }
+  | InstrValueOperand                      { RhsValue $1 }
 
 InstrOp :: { RawOp }
   : ident InstrOperands                    { RawOp $1 (reverse $2) }
@@ -140,7 +148,12 @@ InstrOperands :: { [RawOperand] }
 -- @instral@'s three places.
 InstrOperand :: { RawOperand }
   : ident                                  { RawRef $1 }
-  | num                                    { RawPos $1 }
+  | InstrValueOperand                      { $1 }
+
+-- Every operand but a bare name — @Thena.Syntax.Parser@\'s @ValueOperand@, one
+-- grammar over.
+InstrValueOperand :: { RawOperand }
+  : num                                    { RawPos $1 }
   | str                                    { RawText $1 }
   | chr                                    { RawChar $1 }
   | '[' ']'                                { RawList [] }

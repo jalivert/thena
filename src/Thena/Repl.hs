@@ -158,7 +158,7 @@ import Thena.Syntax.Parser (ParseError (..))
 import Data.Foldable (toList)
 import Data.List (intercalate, partition)
 import Thena.Instral.Infer (renderInstralTypeError)
-import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..))
+import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRhs (..))
 --
 -- The prelude is loaded first (§9, phase 11) and **silently on success** — it
 -- is three @data@ lines and announcing them at every start is noise. A failure
@@ -559,6 +559,8 @@ describe :: Token -> String
 describe t = case t of
   TLambda     -> "λ"
   TSignature  -> "signature"
+  -- Never lexed; "Thena.Driver" inserts it at a rule file's column 1.
+  TDeclSep    -> "the start of a declaration"
   TChar c     -> show c
   TLBracket   -> "["
   TRBracket   -> "]"
@@ -1300,8 +1302,12 @@ renderSurface :: Surface -> String
 renderSurface = surf Loose
   where
     instruction i = case i of
-      RawBind x o -> x ++ " = " ++ operation o
+      RawBind x r -> x ++ " = " ++ rhs r
       RawDo     o -> operation o
+
+    rhs r = case r of
+      RhsOp o    -> operation o
+      RhsValue a -> operand a
 
     operation (RawOp w as) = unwords (w : map operand as)
 
@@ -1856,6 +1862,7 @@ whereRuleError e = case e of
   TypeIsAFunction n       -> inSignature n
   UnitInsideAType n       -> inSignature n
   DuplicateSignature n _  -> inSignature n
+  FunctionLeavesNothing n -> "in " ++ n ++ ": "
   where
     inRule g i = "in " ++ nameString g ++ ", instruction " ++ show i ++ ": "
     inName g   = "in " ++ nameString g ++ ": "
@@ -1889,6 +1896,8 @@ whatRuleError e = case e of
   DuplicateSignature _ a  ->
     "two signatures for the same name at " ++ show a
       ++ (if a == 1 then " argument" else " arguments")
+  FunctionLeavesNothing _ ->
+    "the right of the = leaves no value, so there is nothing to return"
 
 renderMatches :: [Rule] -> [String]
 renderMatches [] = ["no rule applies here"]

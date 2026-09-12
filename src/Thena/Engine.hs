@@ -1160,6 +1160,13 @@ perform instr rest m = case operation instr of
     Left e         -> failure e m
     Right (ls, rs) -> produce (VText (ls ++ rs)) m
 
+  -- **Hand the operand back as the value** (MS5 phase 68a) — what @x = [1, 2]@
+  -- runs. Everything the operand needs is already done by 'operandValue', which
+  -- builds a list or a pair from its parts.
+  Op.Value a -> case operandValue (env (exec m)) a of
+    Left r  -> failure r m
+    Right v -> produce v m
+
   -- **The identity at run time** (MS5 phase 66b). Both a 'Op.Name' and a
   -- 'Op.VText' are text; this op exists so that the conversion is a thing the
   -- type system sees and the author writes down. See 'Op.NameText'.

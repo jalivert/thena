@@ -198,7 +198,7 @@ withRules =
 -- are; "Thena.RuleSyntaxTests" is where the literal is tied to the file, and
 -- "Thena.GoldenTests" is where the file itself is driven.
 expectedBase :: [RuleBase]
-expectedBase = [ruleBase "standard" Nothing "" [] expectedStandard]
+expectedBase = [ruleBase "standard" Nothing "" [] [] expectedStandard]
 
 -- | Search: every rule whose head passes, in definition order (MS4 phase 41).
 --
