@@ -126,7 +126,7 @@ import Thena.Ops
 import Data.Either (partitionEithers)
 import Thena.Instral.Infer (InstralTypeError, inferProgram)
 import Thena.Instral.Grammar (Language)
-import Thena.Instral.Type (Signature (..))
+import Thena.Instral.Type (Signature (..), Ty (..), fits)
 import Thena.Rules
   ( RuleBase (..)
   , RuleError
@@ -138,11 +138,13 @@ import Thena.Rules
   , RuleError (..)
   , allCallable
   , allLanguages
+  , baseRules
   , allSignatures
   , ruleBase
   , resolveFunction
   , resolveLanguage
   , resolveSignature
+  , resolveTy
   , validate
   )
 import Thena.Surface.Concrete
@@ -172,6 +174,7 @@ import Thena.Syntax.Parser
   , parseEquation
   , parseNameAndType
   , parseEntry
+  , parseInstralTy
   , parseRules
   , parseTerm
   )
@@ -447,6 +450,17 @@ data Response
     -- that a bare word acts and a colon looks, so "Thena.Repl" splits the list
     -- on the leading colon rather than being told twice
   | Matched [Rule]
+  | Fitting String Ty [(GlobalName, Int, Bool, Signature)]
+    -- ^ **what accepts or produces a type** (MS5 phase 71) — which question was
+    -- asked, the type asked about, and for each callable its name, its arity, whether it is a rule (as
+    -- opposed to a function) and its signature.
+    --
+    -- **A second matching instruction, and deliberately not a pair with
+    -- 'Matched'** — his ruling, §1.1: different input (a type, not the
+    -- development), different relation (a signature fits, no head passes),
+    -- different consumer (the engine uses 'Matched' for @Prove@ and will never
+    -- use this). *\"Let's skip the pair and only make a rule that packages them
+    -- into a pair if we ever need one.\"*
     -- ^ @:matches@ — the rules whose heads pass at the focus, in dispatch order
     -- (§7.6). A look and not an act: no body runs, and nothing is speculatively
     -- executed to find out whether one would succeed (§2.2)
@@ -1000,6 +1014,12 @@ dispatch s name arg = case name of
   -- elaborate a given term, and with the hint retired that is not a question:
   -- @elaborate ‹t›@ appears in this listing the way @try-core ‹t›@ does.
   ":matches" -> noArgument (s, Matched matching)
+  -- **The second matching instruction** (MS5 phase 71, §1.1). Two commands and
+  -- not one with a direction: /what can I pass this to/ and /what will give me
+  -- one/ are two questions, and a reader never has to remember which way round
+  -- an argument goes.
+  ":accepts"  -> withArgument (byType "takes" (\sg t -> any (`fits` t) (sigParams sg)))
+  ":produces" -> withArgument (byType "gives" (\sg t -> maybe False (`fits` t) (sigResult sg)))
   -- The live choice points, nearest first (§7.7). A look, so a colon.
   ":choices" -> noArgument (s, Choices (choicePoints machine))
   ":goal"  -> goal
@@ -1183,6 +1203,36 @@ dispatch s name arg = case name of
     matching =
       unfoldIter (matches (rules machine) (globals machine)
                           (cursor (development machine)))
+
+    -- | @:accepts@ and @:produces@ (MS5 phase 71), which differ only in the
+    -- question they ask of a signature.
+    --
+    -- **It lists everything callable, rules included** — his ruling: asking what
+    -- accepts a @Surface@ should surface @elaborate@, and a rule and a function
+    -- are one thing with and without a head (§1.1). The listing says which is
+    -- which.
+    --
+    -- **The signatures are worked out here rather than kept on the session.**
+    -- They are already recomputed at every load and a rule base is a few hundred
+    -- instructions; storing them would be session state that @:undo@ and every
+    -- snapshot would then have to carry.
+    byType verb question = case parseInstralType langs arg of
+      Left (LineSyntax e)     -> (s, Failed e)
+      Left (LineIllFormed es) -> (s, LineRefused es)
+      Right ty ->
+        ( s
+        , Fitting verb ty
+            [ (nm, k, isRule nm k, sg)
+            | ((nm, k), sg) <- fst (inferProgram (allSignatures bs) (allCallable bs))
+            , question sg ty
+            ]
+        )
+      where
+        bs     = rules machine
+        langs  = allLanguages bs
+        isRule nm k =
+          any (\r -> ruleName r == nm && length (ruleParams r) == k)
+              (concatMap baseRules bs)
 
     -- The base may not change under a half-built proof, current or suspended
     -- (the user, 2026-08-25). Answered before the file is read, so a refusal
@@ -1607,6 +1657,8 @@ commandSummary =
   , (":convert ‹t› ≟ ‹u›",      "are two terms convertible")
   , (":elim ‹D› [‹universe›]",  "a datatype’s elimination rule")
   , (":matches",                 "which rules apply here")
+  , (":accepts ‹type›",          "what takes a value of that type")
+  , (":produces ‹type›",         "what gives one back")
   , (":choices",                 "the live choice points, nearest first")
   , (":bases / :rules",          "the loaded rule bases / the rules in them")
   , (":step on / :step / :step off", "single-step the machine")
@@ -1811,6 +1863,25 @@ readRuleBase path src = case baseHead ls of
       Right (ruleBase nm desc path sigs langs fns rs)
   where
     ls = lines src
+
+-- | A written @instral@ type — what @:accepts@ and @:produces@ take (MS5 phase
+-- 71).
+--
+-- **The same grammar a signature uses**, so a type is written at the prompt the
+-- way it is written in a declaration. @()@ is refused here for the reason it is
+-- refused as a parameter: it says /nothing is left/, which is not a type a value
+-- can have.
+parseInstralType
+  :: [(String, Language)] -> String -> Either LineError Ty
+parseInstralType ls src = do
+  ts <- mapLeft LineSyntax (tokensOf src)
+  t  <- mapLeft (LineSyntax . ParseFailed) (parseInstralTy ts)
+  case resolveTy ls "a query" t of
+    Left e         -> Left (LineIllFormed [e])
+    -- @()@ says /nothing is left/, which is not a type a value can have — the
+    -- same refusal it gets as a parameter (MS5 phase 67).
+    Right Nothing  -> Left (LineIllFormed [UnitInsideAType "a query"])
+    Right (Just u) -> Right u
 
 -- | Mark where each declaration begins (MS5 phase 68a).
 --

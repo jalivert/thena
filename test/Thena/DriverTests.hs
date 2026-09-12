@@ -27,6 +27,9 @@ import Thena.Errors (FailReason (..))
 import Thena.Global.Declare (DeclareError (..))
 import Thena.Global.Env (isDeclared)
 import Thena.Repl (unfinished)
+
+-- | The names in a 'Fitting' listing, for the tests below.
+
 import Thena.Ops (AnswerKind (..), partWords)
 import Thena.Rules (RuleError (..))
 
@@ -72,7 +75,7 @@ unknown w = case snd (command withRules w) of
 -- because a mirror in the same module as the thing it mirrors checks nothing.
 everyColonCommand :: [String]
 everyColonCommand =
-  [ ":help", ":quit", ":core", ":surface", ":dev", ":show", ":elim", ":where", ":matches"
+  [ ":help", ":quit", ":core", ":surface", ":dev", ":show", ":elim", ":where", ":matches", ":accepts", ":produces"
   , ":choices", ":goal", ":whnf", ":infer", ":load", ":bases", ":rules"
   , ":revalidate", ":extract", ":theorem", ":suspend", ":resume", ":abandon"
   , ":proofs", ":undo", ":convert", ":step", ":run"
@@ -194,6 +197,30 @@ tests =
           -- continuation, so the driver gets to report it.
         , testCase "and nor does something that will not lex" $
             unfinished "\"unterminated" @?= False
+        ]
+    , testGroup
+        "the second matching instruction"
+        -- **MS5 phase 71, his §1.1.** Different input from ':matches' — a type,
+        -- not the development — different relation, different consumer. No pair.
+        [ testCase ":accepts finds a rule by its parameter" $
+            fittingNames (snd (command withRules ":accepts Surface"))
+              @?= ["elaborate", "intro-binders", "enter-binders", "spine-arguments"]
+          -- Nothing in the shipped base returns, so this is the honest answer
+          -- rather than an empty listing with no explanation.
+        , testCase ":produces says so when nothing does" $
+            case snd (command withRules ":produces Core") of
+              Fitting v _ [] -> v @?= "gives"
+              other -> assertFailure ("expected an empty listing, got " ++ show other)
+          -- **It lists rules and functions both** (his ruling), and the two are
+          -- told apart in the row rather than in two commands.
+        , testCase "a rule is marked as one" $
+            case snd (command withRules ":accepts Surface") of
+              Fitting _ _ ((_, _, isRule, _) : _) -> isRule @?= True
+              other -> assertFailure ("expected a listing, got " ++ show other)
+        , testCase "a type that is not one is refused" $
+            case snd (command withRules ":accepts Nonsense") of
+              LineRefused _ -> pure ()
+              other -> assertFailure ("expected a refusal, got " ++ show other)
         ]
     , testGroup
         "views"
@@ -395,3 +422,9 @@ tests =
             sessionStepping (fst (say [":step on"])) @?= True
         ]
     ]
+
+-- | The names a @:accepts@ / @:produces@ listing came back with (MS5 phase 71).
+fittingNames :: Response -> [String]
+fittingNames r = case r of
+  Fitting _ _ fs -> [ n | (GlobalName n, _, _, _) <- fs ]
+  _              -> []

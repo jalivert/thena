@@ -20,6 +20,7 @@ module Thena.Instral.Type
   , renderTy
   , renderSignature
   , typeVarsIn
+  , fits
   ) where
 
 import Data.List (intercalate, nub)
@@ -124,6 +125,36 @@ typeVarsIn t = nub (go t)
       TPair a b  -> go a ++ go b
       TFun as r  -> concatMap go as ++ go r
       _          -> []
+
+-- | Does a signature's type fit a type someone asked about (MS5 phase 71)?
+--
+-- **One-way, and the scheme's variables are what may move.** @:accepts Core@
+-- should list a rule whose parameter is @a@, because such a rule does accept a
+-- @Core@; it should not list one whose parameter is @Surface@. So a 'TVar' on
+-- the /signature/ side matches anything, consistently — @a -> a@ fits
+-- @Core -> Core@ and not @Core -> Surface@ — and a 'TVar' on the asked side
+-- matches only itself.
+--
+-- **It is a display question and not unification**, which is why it lives here
+-- and not in "Thena.Instral.Infer": nothing is solved and no state is threaded.
+fits :: Ty -> Ty -> Bool
+fits scheme asked = case go [] scheme asked of
+  Just _  -> True
+  Nothing -> False
+  where
+    go bs s a = case (s, a) of
+      (TVar i, _) -> case lookup i bs of
+        Just t  -> if t == a then Just bs else Nothing
+        Nothing -> Just ((i, a) : bs)
+      (TList x,   TList y)   -> go bs x y
+      (TOption x, TOption y) -> go bs x y
+      (TPair x y, TPair u v) -> go bs x u >>= \bs' -> go bs' y v
+      (TFun xs r, TFun ys q)
+        | length xs == length ys ->
+            foldl (\acc (x, y) -> acc >>= \b -> go b x y) (Just bs) (zip xs ys)
+              >>= \bs' -> go bs' r q
+      _ | s == a    -> Just bs
+        | otherwise -> Nothing
 
 -- | A type, spelled as a rule author would write it.
 --

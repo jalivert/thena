@@ -30,6 +30,7 @@ module Thena.Syntax.Parser
   , parseRules
   , parseAtoms
   , parseEntry
+  , parseInstralTy
   ) where
 
 import Thena.Syntax.Concrete
@@ -53,6 +54,8 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 -- **A whole REPL entry** (MS5 phase 70) — the same @Body@ a rule has, so a
 -- typed entry and a rule body are one grammar and not two.
 %name parseEntry Body
+-- **A written type** (MS5 phase 71) — what @:accepts@ and @:produces@ take.
+%name parseInstralTy Ty
 %tokentype { Located Token }
 %monad { Either ParseError }
 %error { parseError }

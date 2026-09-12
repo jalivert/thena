@@ -30,6 +30,8 @@ a bare word acts, a word with a colon looks.
   :convert ‹t› ≟ ‹u›            are two terms convertible
   :elim ‹D› [‹universe›]        a datatype’s elimination rule
   :matches                      which rules apply here
+  :accepts ‹type›               what takes a value of that type
+  :produces ‹type›              what gives one back
   :choices                      the live choice points, nearest first
   :bases / :rules               the loaded rule bases / the rules in them
   :step on / :step / :step off  single-step the machine

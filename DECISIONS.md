@@ -690,6 +690,29 @@ never appears in `:matches` and `prove` never runs it.
 **A function must produce a value.** `f x = say "hi"` is refused — `say` leaves
 nothing, so there is nothing for `f` to be.
 
+### Two ways to ask what applies: by state, and by type
+
+*Decided 2026-09-12.*
+
+`:matches` asks *what applies to this development* — a rule qualifies because its
+head passes. The new pair asks about a **type** instead:
+
+```
+thena spine> :accepts Surface
+  elaborate/1 : Surface -> ()   (rule)
+  spine-arguments/3 : Core -> Core -> Surface -> ()   (rule)
+thena spine> :produces String
+  twice/1 : String -> String
+```
+
+Two commands rather than one with a direction: *what can I pass this to* and
+*what will give me one*. Both list rules and functions, and mark which is which —
+a rule may also turn up in `:matches`, a function never will.
+
+**A polymorphic signature answers a concrete question.** A rule whose parameter
+is `a` is listed by `:accepts Core`, because it does accept one. Asking about `a`
+lists only what takes a variable.
+
 ### What you type at the prompt is a block
 
 *Decided 2026-09-12.*

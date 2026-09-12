@@ -159,6 +159,7 @@ import Thena.Syntax.Parser (ParseError (..))
 import Data.Foldable (toList)
 import Data.List (intercalate, partition)
 import Thena.Instral.Grammar (GrammarError (..))
+import Thena.Instral.Type (Signature, Ty, renderSignature, renderTy)
 import Thena.Instral.Infer (renderInstralTypeError)
 import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRhs (..))
 --
@@ -516,6 +517,7 @@ renderResponse s resp = case resp of
     ("the rules do not type check:" : map (("  " ++) . renderInstralTypeError) errs)
   Helped rows   -> renderHelp rows
   Matched rs    -> renderMatches rs
+  Fitting v ty fs -> renderFitting v ty fs
   Choices cs    -> renderChoices cs
   Ran msgs stop  -> msgs ++ renderStop s stop
   Failed e       -> [renderSyntaxError e]
@@ -1972,6 +1974,20 @@ whatRuleError e = case e of
     LeftRecursive _ c      -> c ++ " begins with the language itself"
     EmptyProduction _ c    -> c ++ " has no items"
     TerminalDoesNotLex _ t -> show t ++ " is not one token"
+
+-- | @:accepts@ and @:produces@ (MS5 phase 71).
+--
+-- **Each row says whether it is a rule or a function**, because the query lists
+-- both (his ruling) and the two are reached differently — a rule may also be
+-- found by @:matches@, a function never is.
+renderFitting
+  :: String -> Ty -> [(GlobalName, Int, Bool, Signature)] -> [String]
+renderFitting verb ty [] = ["nothing " ++ verb ++ " a " ++ renderTy ty]
+renderFitting _    _  fs = map one fs
+  where
+    one (GlobalName n, k, isRule, sg) =
+      "  " ++ n ++ "/" ++ show k ++ " : " ++ renderSignature sg
+        ++ (if isRule then "   (rule)" else "")
 
 renderMatches :: [Rule] -> [String]
 renderMatches [] = ["no rule applies here"]

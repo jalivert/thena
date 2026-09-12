@@ -16,6 +16,7 @@ import Test.Tasty.HUnit (testCase, (@?=))
 import Thena.Core.Term (GlobalName (..))
 import Thena.Instral.Type
   ( Signature (..)
+  , fits
   , Ty (..)
   , renderSignature
   , renderTy
@@ -33,6 +34,37 @@ tests =
     [ renderTests
     , signatureTests
     , headTests
+    , fitting
+    ]
+
+-- | The relation @:accepts@ and @:produces@ ask (MS5 phase 71).
+--
+-- **One-way**: a scheme's variable may move, the asked type's may not.
+fitting :: TestTree
+fitting =
+  testGroup
+    "fits"
+    [ testCase "a type fits itself" $ fits TCore TCore @?= True
+    , testCase "and not another" $ fits TCore TSurface @?= False
+      -- **The point of the relation.** @:accepts Core@ must list a rule whose
+      -- parameter is @a@, because such a rule does accept a Core.
+    , testCase "a scheme variable fits anything" $ fits (TVar 0) TCore @?= True
+      -- …and the other way round it does not: asking about @a@ is asking about a
+      -- variable, which only a variable answers.
+    , testCase "but not the other way round" $ fits TCore (TVar 0) @?= False
+      -- **Repeated variables must agree**, so @a -> a@ fits @Core -> Core@ and
+      -- not @Core -> Surface@.
+    , testCase "a repeated variable must agree" $
+        fits (TFun [TVar 0] (TVar 0)) (TFun [TCore] TCore) @?= True
+    , testCase "and disagreeing is a miss" $
+        fits (TFun [TVar 0] (TVar 0)) (TFun [TCore] TSurface) @?= False
+    , testCase "it goes under a constructor" $
+        fits (TList (TVar 0)) (TList TInt) @?= True
+    , testCase "and the constructor has to match" $
+        fits (TList (TVar 0)) (TOption TInt) @?= False
+      -- Arity is part of a function type (MS5 phase 68b).
+    , testCase "a function of one does not fit a function of two" $
+        fits (TFun [TVar 0] (TVar 1)) (TFun [TCore, TCore] TCore) @?= False
     ]
 
 -- | Exact strings, not a round trip. Phase 2's standing lesson: a round-trip
