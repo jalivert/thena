@@ -23,6 +23,9 @@ module Thena.Core.UnifyTests (tests) where
 import Data.List (isInfixOf)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
+import Test.Tasty.QuickCheck
+  ( Gen, counterexample, elements, forAll, oneof, property, testProperty, withNumTests
+  , (.&&.) )
 
 import Thena.Core.Level (Level (..))
 import Thena.Core.Context (Context)
@@ -51,7 +54,193 @@ tests =
     , testGroup "all or nothing, and the counter" disciplineTests
     , testGroup "the degenerate flex-flex case is solved" flexFlexTests
     , testGroup "unify-into is directed at universes" directedTests
+    , generatedSolutions
     ]
+
+-- --------------------------------------------------------------------------
+-- The unifier's own claim, over generated problems (2026-09-13)
+-- --------------------------------------------------------------------------
+
+-- | **@Solved@ means /these two are now the same/, and that is checkable.**
+--
+-- The two groups above already say it — @agreementTests@ hands the result to
+-- @convert@ and @typeTests@ hands each promoted hole to @check@ — over five and
+-- three hand-written problems. Those are the right shape and the wrong size: a
+-- solution that is wrong in a way nobody wrote a fixture for is exactly what a
+-- unifier gets wrong, and a wrong solution is unsoundness rather than a bad
+-- message.
+--
+-- The generated family is **first order with one hole**, over the @natVec@
+-- fixture: a numeral with a hole some way down, and a vector with a hole at one
+-- of its element or /length/ positions. The length ones are the interesting
+-- half — an index the unifier has to line up, where the two sides' types differ
+-- until the hole is solved.
+--
+-- Every one of these has a most general unifier, so @Solved@ is not merely
+-- permitted, it is required: 'Deferred' or 'Failed' here would be a defect on
+-- its own.
+generatedSolutions :: TestTree
+generatedSolutions =
+  testGroup
+    "a generated problem with one hole"
+    [ testProperty "solves, stays convertible, and the solution type checks" $
+        withNumTests 400 $ forAll genProblem $ \(ds, a, b, ty) ->
+          let (result, cur, dev) = run ds a b ty
+              ctx = solvedContext cur
+              (ta, n1) = readIn (devContext dev) (devNames dev) a
+              (tb, n2) = readIn (devContext dev) n1 b
+              here = counterexample (a ++ "  ≟  " ++ b ++ "   : " ++ ty)
+           in case result of
+                Failed e   -> here (counterexample ("failed: " ++ show e) False)
+                Deferred{} -> here (counterexample "deferred, and it has an mgu" False)
+                Solved _ _ ->
+                  here $
+                    counterexample "not convertible after solving"
+                      (property (verdict (convert natVec ctx n2 ta tb) == Nothing))
+                      .&&. counterexample "a solution does not have its hole's type"
+                             (property (all (typed ctx (devNames dev)) (componentsOf (rebuild cur))))
+
+      -- **Huet's other half, and it is the one a unifier gets wrong by being
+      -- eager.** A flexible head applied to something that is not a run of
+      -- distinct local variables has no most general unifier, so solving it
+      -- would be a guess. These must park, never solve.
+    , testProperty "a non-pattern is never solved" $
+        withNumTests 200 $ forAll genNonPattern $ \(ds, a, b, ty) ->
+          case resultOf ds a b ty of
+            Solved _ _ ->
+              counterexample (a ++ "  ≟  " ++ b ++ "  was solved, and it has no mgu") False
+            _ -> property True
+    ]
+  where
+    typed ctx n c = case c of
+      Define _ _ v declared -> verdict (check natVec ctx (n + 500) v declared) == Right ()
+      _                     -> True
+
+-- | A problem with a most general unifier: the hole's declaration, a concrete
+-- term, the same term with one position replaced by the hole, and the type.
+--
+-- Three families. The first two are first order — a numeral with the hole some
+-- way down, and a vector with the hole at an element or a **length** position,
+-- which is the interesting half because the two sides' types differ until it is
+-- solved. The third is a **Miller pattern**: the hole applied to a run of
+-- distinct binders, which is where @patternArgs@, @lamOver@, @demote@ and
+-- @scopeCheck@ all run and where a first-order family never goes.
+genProblem :: Gen ([Decl], String, String, String)
+genProblem = oneof [numeralProblem, vectorProblem, patternProblem]
+  where
+    natHole = [Hole "h" "Nat"]
+
+    numeralProblem = do
+      m <- elements [0 .. 4 :: Int]
+      d <- elements [0 .. m]
+      pure (natHole, numeral m, sucs d "h", "Nat")
+
+    vectorProblem = do
+      v <- genVec 3
+      let slots = vecNats v
+      if null slots
+        then pure (natHole, renderVec v [], renderVec v [], vecType v)
+        else do
+          k <- elements [0 .. length slots - 1]
+          pure ( natHole
+               , renderVec v slots
+               , renderVec v (replaceAt k "h" slots)
+               , vecType v
+               )
+
+    patternProblem = do
+      arity <- elements [1, 2 :: Int]
+      body  <- genOver (take arity ["x", "y"]) 3
+      let vs   = take arity ["x", "y"]
+          binds = concat [ " (" ++ v ++ " : Nat)" | v <- vs ]
+          ty    = concat (replicate arity "Nat -> ") ++ "Nat"
+      pure ( [Hole "f" ty]
+           , "\\" ++ binds ++ " -> " ++ body
+           , "\\" ++ binds ++ " -> (f " ++ unwords vs ++ ")"
+           , ty
+           )
+
+-- | A problem the unifier must NOT solve.
+--
+-- Two shapes, and each is refused for its own reason: a repeated argument is
+-- not a pattern, and a hole declared outside a binder may not be solved with a
+-- term that mentions it.
+genNonPattern :: Gen ([Decl], String, String, String)
+genNonPattern = oneof [repeated, outOfScope]
+  where
+    -- @f x x@ — a flexible head applied to the same variable twice. Not a
+    -- pattern whatever the other side says, so it parks.
+    repeated = do
+      body <- genOver ["x"] 2
+      pure ( [Hole "f" "Nat -> Nat -> Nat"]
+           , "\\ (x : Nat) -> " ++ body
+           , "\\ (x : Nat) -> (f x x)"
+           , "Nat -> Nat"
+           )
+
+    -- @h@ is declared outside the binder, so it may not be solved with anything
+    -- that mentions @x@ — hence the body is forced to mention it, which is the
+    -- whole difference between this and a solvable problem.
+    outOfScope = do
+      body <- genMentioning "x" 2
+      pure ( [Hole "h" "Nat"]
+           , "\\ (x : Nat) -> " ++ body
+           , "\\ (x : Nat) -> h"
+           , "Nat -> Nat"
+           )
+
+-- | A @Nat@ term that certainly mentions the given variable.
+genMentioning :: String -> Int -> Gen String
+genMentioning v n = do
+  k <- elements [0 .. n]
+  pure (sucs k v)
+
+-- | A @Nat@ term over the given variables.
+genOver :: [String] -> Int -> Gen String
+genOver vs n
+  | n <= 0 = leaf
+  | otherwise = oneof [leaf, (\t -> "(succ " ++ t ++ ")") <$> genOver vs (n - 1)]
+  where
+    leaf = oneof (pure "zero" : map pure vs)
+
+-- | A vector of @Nat@s, at most @n@ long.
+data VecT = VNil | VCons Int VecT
+
+genVec :: Int -> Gen VecT
+genVec 0 = pure VNil
+genVec n = oneof [pure VNil, VCons <$> elements [0 .. 3] <*> genVec (n - 1)]
+
+lenOf :: VecT -> Int
+lenOf VNil = 0
+lenOf (VCons _ t) = 1 + lenOf t
+
+-- | Every @Nat@ position of a vector, in the order 'renderVec' consumes them:
+-- each @cons@ contributes its element and then its tail's length.
+vecNats :: VecT -> [String]
+vecNats VNil = []
+vecNats (VCons e t) = [numeral e, numeral (lenOf t)] ++ vecNats t
+
+-- | The vector, written with those positions filled from the list — so that the
+-- concrete term and the holed one differ in exactly one place and in nothing
+-- else about their shape.
+renderVec :: VecT -> [String] -> String
+renderVec VNil _ = "(nil Nat)"
+renderVec (VCons _ t) (a : b : rest) =
+  "(cons Nat " ++ a ++ " " ++ b ++ " " ++ renderVec t rest ++ ")"
+renderVec (VCons _ _) _ = error "renderVec: too few positions"
+
+vecType :: VecT -> String
+vecType v = "Vec Nat " ++ numeral (lenOf v)
+
+numeral :: Int -> String
+numeral k = sucs k "zero"
+
+sucs :: Int -> String -> String
+sucs 0 t = t
+sucs k t = "(succ " ++ sucs (k - 1) t ++ ")"
+
+replaceAt :: Int -> a -> [a] -> [a]
+replaceAt k x xs = take k xs ++ [x] ++ drop (k + 1) xs
 
 -- --------------------------------------------------------------------------
 -- Building a development by hand
@@ -61,6 +250,7 @@ data Decl
   = Hole    String String          -- ^ @? x : S@
   | Assumed String String          -- ^ @λ x : S@
   | Guessed String String String   -- ^ @? x ≐ g : S@
+  deriving (Show)   -- for QuickCheck's counterexamples, and nothing else
 
 -- | A development, in chain order, with a trailing @Type₀@ and the focus at the
 -- root. Also gives back the context every component is in scope in, the counter
