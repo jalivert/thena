@@ -312,6 +312,32 @@ annotations =
           BasesLoaded _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
+      -- **A lambda's body is scoped at load** (found in the long hunt,
+      -- 2026-09-13). @operandsOf@ answers with what an op /reads/ and a
+      -- lambda's body is a program rather than an operand, so @validate@ walked
+      -- straight past it: the rule below loaded clean and failed at run time,
+      -- where the same name outside the lambda is a load error. Phase 68b added
+      -- lambdas and the walk was not told.
+    , testCase "an unbound name inside a lambda is a load error, like anywhere else" $
+        case load "rule go :- then g = \\ z -> concat z nosuchname ; prove" of
+          RuleFileRefused _ (RuleIllFormed es)
+            | UnboundInRule (GlobalName "go") 0 "nosuchname" `elem` es -> pure ()
+          other -> assertFailure ("expected an unbound name, got " ++ show other)
+
+      -- …and one that IS bound by the lambda is not reported, which is the
+      -- half a walk that simply refused every lambda would get wrong.
+    , testCase "and a name the lambda binds is not" $
+        case load "rule go :- then g = \\ z -> concat z z ; prove" of
+          BasesLoaded _ -> pure ()
+          other -> assertFailure ("expected a load, got " ++ show other)
+
+      -- Nested one level down, so the walk has to recurse rather than peek.
+    , testCase "and it looks inside a lambda inside a lambda" $
+        case load "rule go :- then g = \\ z -> (\\ w -> concat w deepermissing) ; prove" of
+          RuleFileRefused _ (RuleIllFormed es)
+            | UnboundInRule (GlobalName "go") 0 "deepermissing" `elem` es -> pure ()
+          other -> assertFailure ("expected an unbound name, got " ++ show other)
+
       -- **A RESULT may be a function, and could not be said until 2026-09-12.**
       -- The grammar dropped the parentheses, so @String -> (String -> String)@
       -- and @String -> String -> String@ were one tree and the signature below

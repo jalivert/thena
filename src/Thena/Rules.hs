@@ -548,10 +548,33 @@ validate r = reserved ++ headScope ++ go 0 (initiallyBound r) (ruleBody r)
     go i bound (instr : rest) =
       let o     = operationOf instr
           errs  = declaration i o ++ binding i instr o ++ scope i bound o
+                    ++ insideLambda i bound o
           bound' = case instr of
             Bind n _ -> n : bound
             Do _     -> bound
        in errs ++ go (i + 1) bound' rest
+
+    -- **A lambda's body is a body and is scoped like one** (found in the long
+    -- hunt, 2026-09-13). @operandsOf@ answers with the operands an op /reads/,
+    -- and a lambda's body is not one of them — it is a program — so until this
+    -- was written @g = \ z -> concat z nosuchname@ loaded clean and failed at
+    -- run time, where every other shape of unbound name is a load error. Phase
+    -- 68b added lambdas and this walk was not told.
+    --
+    -- **The lambda's own instruction number is what is reported.** An index
+    -- inside the body would collide with the enclosing one, and the lambda is
+    -- what the reader sees at that line — the same choice a nested call makes,
+    -- which is lifted into the instruction that wanted it.
+    insideLambda i bound o = case o of
+      Op.Lambda ps body -> inner i (ps ++ bound) body
+      _                 -> []
+
+    inner _ _ [] = []
+    inner i bound (instr : rest) =
+      let o = operationOf instr
+       in scope i bound o
+            ++ insideLambda i bound o
+            ++ inner i (case instr of { Bind n _ -> n : bound; Do _ -> bound }) rest
 
     operationOf instr = case instr of
       Bind _ o -> o
