@@ -1131,8 +1131,7 @@ renderValue n ctx v = case v of
   VList vs           -> "[" ++ intercalate ", " (map (renderValue n ctx) vs) ++ "]"
   VOption Nothing    -> "none"
   VOption (Just u)   -> "some " ++ renderValue n ctx u
-  VTerm (Trailing t) -> "⌜" ++ renderCore n ctx t ++ "⌝"
-  VTerm p            -> "⌜" ++ unwords (words (renderPartial n ctx p)) ++ "⌝"
+  VTerm t            -> "⌜" ++ renderCore n ctx t ++ "⌝"
   -- **An unresolved core term prints as its shape, not its contents** (MS5
   -- phase 61b). Printing a 'Thena.Syntax.Concrete.Raw' back would need a
   -- printer for the written syntax, and there has never been one: every other

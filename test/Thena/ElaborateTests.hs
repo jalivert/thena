@@ -364,7 +364,7 @@ hereTests =
         case snd (runOut (machineAt hole [Bind "h" Ops.Here])) of
           Left r  -> assertFailure ("did not run: " ++ show r)
           Right m -> lookup "h" (env (exec m))
-                       @?= Just (VTerm (Trailing (Free goalVar)))
+                       @?= Just (VTerm (Free goalVar))
 
       -- **It survives @attack@**, which is the whole reason the λ case can use
       -- it: @attack@ turns @? x : S@ into a guess binding the /same/ variable,
@@ -427,12 +427,12 @@ constructionTests =
           Right m -> focusedVar m @?= Just goalVar
     ]
   where
-    litTerm t = Lit (VTerm (Trailing t))
+    litTerm t = Lit (VTerm t)
     hyp       = Free hypVar
 
     built o = case snd (runOut (machineAt hole [Bind "r" o])) of
       Right m -> case lookup "r" (env (exec m)) of
-        Just (VTerm (Trailing t)) -> Just t
+        Just (VTerm t) -> Just t
         _                         -> Nothing
       Left _  -> Nothing
 

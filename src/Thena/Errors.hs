@@ -121,7 +121,7 @@ data FailReason
     -- 61b). It is reported here rather than at load because it cannot be known
     -- until there is a development to resolve against.
   | ExpectedTerm
-    -- ^ an operand was not a @VTerm@ holding a core term
+    -- ^ an operand was not a @VTerm@
   | ExpectedList
     -- ^ an operand was not a @VList@ (MS5 phase 65)
   | ExpectedPair

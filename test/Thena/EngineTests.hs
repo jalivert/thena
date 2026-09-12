@@ -44,7 +44,7 @@ type0 :: Core
 type0 = Universe (LZero)
 
 term :: Core -> Operand
-term = Lit . VTerm . Trailing
+term = Lit . VTerm
 
 text :: String -> Operand
 text = Lit . VText
@@ -213,9 +213,6 @@ tests =
             stuckWith ExpectedText (runTo (machine [Do (Ops.Say (term type0))]))
         , testCase "text where a term was wanted" $
             stuckWith ExpectedTerm (runTo (machine [Do (Ops.Assume (text "A") (text "not a term"))]))
-        , testCase "a whole development where a term was wanted" $
-            let chain = Under (Assume (fst (fresh 0)) (Ident "A") type0) (Trailing type0)
-             in stuckWith ExpectedTerm (runTo (machine [Do (Ops.Assume (text "A") (Lit (VTerm chain)))]))
         , testCase "a name that is not an identifier" $
             stuckWith (NotAnIdentifier "let") (runTo (machine [Do (Ops.Assume (text "let") (term type0))]))
         , testCase "a name that is two identifiers" $
@@ -250,7 +247,7 @@ tests =
         , testCase "assume produces the variable it bound" $
             case runTo (machine [Bind "x" (Ops.Assume (text "A") (term type0))]) of
               Finished m -> case (lookup "x" (envOf m), devOf m) of
-                (Just (VTerm (Trailing (Free v))), Under (Assume w _ _) _) -> v @?= w
+                (Just (VTerm (Free v)), Under (Assume w _ _) _) -> v @?= w
                 other -> assertFailure ("wrong shape: " ++ show other)
               other -> assertFailure ("expected Finished, got " ++ show other)
         , testCase "the counter moves on with every mint" $

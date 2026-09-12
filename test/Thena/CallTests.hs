@@ -128,13 +128,13 @@ nameClause, otherClause :: Rule
 nameClause =
   Rule (GlobalName "pick") ["s"] [FocusIsHole, SurfaceIsName (Ref "s")]
     [Do Attack]
-otherClause = Rule (GlobalName "pick") ["s"] [FocusIsHole] [Do (Try (Lit (VTerm (Trailing type0))))]
+otherClause = Rule (GlobalName "pick") ["s"] [FocusIsHole] [Do (Try (Lit (VTerm type0)))]
 
 callPick :: Surface -> [Instr]
 callPick t = [Do (Ops.Call (GlobalName "pick") [Lit (VSurface (rootedAt t))])]
 
 callStep :: [Instr]
-callStep = [Do (Ops.Call (GlobalName "step") [Lit (VTerm (Trailing type0))])]
+callStep = [Do (Ops.Call (GlobalName "step") [Lit (VTerm type0)])]
 
 -- --------------------------------------------------------------------------
 -- Finding the clauses

@@ -30,9 +30,8 @@ module Thena.Ops
   , Test (..)
   ) where
 
-import Thena.Core.Term (GlobalName)
+import Thena.Core.Term (Core, GlobalName)
 import Thena.Development.Cursor (Part (..))
-import Thena.Development.Partial (Partial)
 import Thena.Global.Env (InductiveDefinition)
 import Thena.Surface.Concrete (Plicity)
 import Thena.Syntax.Concrete (Raw)
@@ -47,11 +46,20 @@ type Name = String
 -- frame is popped (§7.5).
 type Env = [(Name, Value)]
 
--- | 'VTerm' is deliberately one case and holds a 'Partial', not a 'Core'
--- (§7.2): a core term is @Trailing t@ and a variable is @Trailing (Free x)@, so
--- there is no separate @VVar@, @VCore@ and @VPartial@ to keep in step. The
--- price is stated once in §7.2 — an op that needs a plain term checks at
--- runtime and fails with 'Thena.Errors.ExpectedTerm' if it does not have one.
+-- | 'VTerm' held a 'Thena.Development.Partial.Partial' from phase 4 until MS5
+-- phase 66a, so that a term, a variable and a whole development could share one
+-- constructor and there would be no @VVar@, @VCore@ and @VPartial@ to keep in
+-- step. **The development reading was never inhabited.** Every construction in
+-- @src\/@ — 26 of them, across "Thena.Driver" and "Thena.Engine" — was
+-- @Trailing t@; the only value that was not was hand-built in @EngineTests@ to
+-- check that 'Thena.Errors.ExpectedTerm' fires for a state the language cannot
+-- reach. So the case cost a run-time check on every op that wanted a term and
+-- bought nothing, and it is gone: 'VTerm' holds a 'Core'.
+--
+-- **A 'Value' constructor now means one thing**, which is what the type system
+-- (66b) needs of it. @Development@ stays a separate @instral@ type — his ruling,
+-- 2026-09-11 — and it has no introduction form until an op produces one; that is
+-- the separation, not a constructor standing empty beside this one.
 --
 -- **'VRule' was deleted at phase 23**, and with it §7.2's \"rules are values, so
 -- @Call@ and higher-order rules fall out\". A call names a rule and the base is
@@ -60,7 +68,7 @@ type Env = [(Name, Value)]
 -- — a body is @[Instr]@, so \"Thena.Rules\" would need this module anyway.
 data Value
   = VText    String    -- ^ what @Ask@ returns and @Say@ consumes
-  | VTerm    Partial   -- ^ a term, a variable, or a whole development
+  | VTerm    Core      -- ^ a core term; a variable is @Free x@
   | VSurface SurfaceZipper
     -- ^ **a focused surface term — elaboration's input** (MS4 phase 41,
     -- focused at phase 46).
@@ -437,8 +445,8 @@ data Op
     -- making every hole-creating op produce its hole, which was that document's
     -- own suggestion and touches every caller.
     --
-    -- It yields the variable as a term, @Trailing (Free x)@, which is the shape
-    -- @goto@ already reads.
+    -- It yields the variable as a term, @Free x@, which is the shape @goto@
+    -- already reads.
   | FreshUniverse
     -- ^ a universe at a **freshly minted level meta** (MS4 phase 48) — what
     -- the surface writes as a bare @Type@, and what typical ambiguity means at

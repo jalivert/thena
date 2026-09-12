@@ -778,14 +778,14 @@ perform instr rest m = case operation instr of
     Left r           -> failure r m
     Right (VRaw raw) -> case resolve (globals m) contextAt (names m) raw of
       Left e        -> failure (CannotResolve e) m
-      Right (t, n1) -> produce (VTerm (Trailing t)) m { names = n1 }
+      Right (t, n1) -> produce (VTerm t) m { names = n1 }
     Right _          -> failure ExpectedRaw m
 
   Expose t -> case term t of
     Left r  -> failure r m
     Right t' ->
       let (t'', n1) = exposed (globals m) contextAt (names m) t'
-       in produce (VTerm (Trailing t'')) m { names = n1 }
+       in produce (VTerm t'') m { names = n1 }
 
   PushDevelopment ty -> case term ty of
     Left r -> failure r m
@@ -825,7 +825,7 @@ perform instr rest m = case operation instr of
         -- untried alternative can be @retry@ed into — but the development it
         -- would restore has just been extracted and put away, so keeping it
         -- would let a later failure resurrect a finished proof.
-        produce (VTerm (Trailing t))
+        produce (VTerm t)
                 (unstacked m) { development = outer, enclosing = beneath }
       where
         unstacked m' =
@@ -1189,7 +1189,7 @@ perform instr rest m = case operation instr of
   -- Refused off the spine for the reason every component op is: a core subterm
   -- is not a component and has no variable of its own.
   Here -> case focus (cursor (development m)) of
-    OnComponent c -> produce (VTerm (Trailing (Free (variableOf c)))) m
+    OnComponent c -> produce (VTerm (Free (variableOf c))) m
     _             -> failure (CannotMove NotOnTheSpine) m
 
   -- **The two term-construction ops** (MS4 phase 41d) — the first ops that
@@ -1202,12 +1202,12 @@ perform instr rest m = case operation instr of
     Left r          -> failure r m
     Right (dom, cod) ->
       let (v, n1) = fresh (names m)
-       in produce (VTerm (Trailing (Pi (Ident "_") dom (close v cod))))
+       in produce (VTerm (Pi (Ident "_") dom (close v cod)))
                   m { names = n1 }
 
   ApplyTo f x -> case (,) <$> term f <*> term x of
     Left r         -> failure r m
-    Right (f', x') -> produce (VTerm (Trailing (App f' x'))) m
+    Right (f', x') -> produce (VTerm (App f' x')) m
 
   -- **A universe at a fresh level meta** (MS4 phase 48) — the surface's bare
   -- @Type@, at an operand. Typical ambiguity (phase 33) is what makes this the
@@ -1215,7 +1215,7 @@ perform instr rest m = case operation instr of
   -- it.
   FreshUniverse ->
     let (l, n1) = freshLevelMeta (names m)
-     in produce (VTerm (Trailing (Universe (LVar l)))) m { names = n1 }
+     in produce (VTerm (Universe (LVar l))) m { names = n1 }
 
   -- **What a name denotes, Γ first and then the globals, with a definition's
   -- level arguments inserted** (MS4 phase 48).
@@ -1225,14 +1225,14 @@ perform instr rest m = case operation instr of
   ResolveName x -> case operandText (env (exec m)) x of
     Left r  -> failure r m
     Right w -> case inScopeAt w of
-      Just v  -> produce (VTerm (Trailing (Free v))) m
+      Just v  -> produce (VTerm (Free v)) m
       Nothing -> case lookupDefinition (GlobalName w) (globals m) of
         Just d ->
           let (ls, n1) = levelArgsFor (length (definitionLevels d)) (names m)
-           in produce (VTerm (Trailing (Global (GlobalName w) ls))) m { names = n1 }
+           in produce (VTerm (Global (GlobalName w) ls)) m { names = n1 }
         Nothing
           | isDeclared (GlobalName w) (globals m) ->
-              produce (VTerm (Trailing (Global (GlobalName w) []))) m
+              produce (VTerm (Global (GlobalName w) [])) m
           | otherwise ->
               failure (CannotRead (ResolveFailed (NotInScope w))) m
     where
@@ -1261,7 +1261,7 @@ perform instr rest m = case operation instr of
     Left r  -> failure r m
     Right s -> case s of
       Concrete.SurfaceUniverse k ->
-        produce (VTerm (Trailing (Universe (levelOfNat k)))) m
+        produce (VTerm (Universe (levelOfNat k))) m
       _ -> failure (ExpectedSurfaceShape "a written universe") m
 
   -- **The surface moves** (MS4 phase 49b). Each destructures the focus and
@@ -1412,14 +1412,14 @@ perform instr rest m = case operation instr of
     Right _ -> failure (ExpectedSurfaceShape "a do block") m
 
   Goal -> case Cursor.expectedType (cursor (development m)) of
-    Just t  -> produce (VTerm (Trailing t)) m
+    Just t  -> produce (VTerm t) m
     Nothing -> failure NoGoalHere m
 
   Typing t -> case term t of
     Left r  -> failure r m
     Right t' -> case infer (globals m) contextAt (names m) t' of
       (Left e,   _, n1) -> failure (NotTypeable e) m { names = n1 }
-      (Right ty, _, n1) -> produce (VTerm (Trailing ty)) m { names = n1 }
+      (Right ty, _, n1) -> produce (VTerm ty) m { names = n1 }
 
   -- Thesis §2.7's @=@-binding. The type is inferred, because that is what makes
   -- it a definition: a definition's type is determined by its value.
@@ -1433,7 +1433,7 @@ perform instr rest m = case operation instr of
       (Right ty, _, n1) ->
             let (x, n2) = fresh n1
                 cur     = insertAbove (Component.Define x i val ty) (cursor (development m))
-             in produce (VTerm (Trailing (Free x)))
+             in produce (VTerm (Free x))
                         m { development = Development cur, names = n2 }
 
   Along      -> navigate (keeping along)
@@ -1456,7 +1456,7 @@ perform instr rest m = case operation instr of
     Left r -> failure r m
     Right val -> case val of
       VText n              -> move (Cursor.gotoNamed (Ident n))
-      VTerm (Trailing (Free x)) -> move (Cursor.goto x)
+      VTerm (Free x) -> move (Cursor.goto x)
       _                    -> failure (CannotMove NoSuchHole) m
     where
       move f = case f (cursor (development m)) of
@@ -1582,7 +1582,7 @@ perform instr rest m = case operation instr of
             cur     = insertAbove (Component.Claim v i' dom) (cursor (development m'))
          in saturate (App hd (Free v)) (instantiate (Free v) sc)
                      m' { development = Development cur, names = n1 }
-      _ -> produce (VTerm (Trailing hd)) m'
+      _ -> produce (VTerm hd) m'
 
     -- Claim a hole for each of the head's Π domains, in the scope of the ones
     -- already claimed — which is what makes it dependent where @arrow@ is not.
@@ -1602,7 +1602,7 @@ perform instr rest m = case operation instr of
         Pi _ dom _ ->
           let (v, n1) = fresh (names m')
               cur     = insertAbove (Component.Claim v i dom) (cursor (development m'))
-           in produce (VTerm (Trailing (App hd (Free v))))
+           in produce (VTerm (App hd (Free v)))
                 m' { development = Development cur, names = n1
                    , exec = exec m' }
         _ -> failure TooManyArgumentsForHead m'
@@ -1709,7 +1709,7 @@ perform instr rest m = case operation instr of
               (Right _, _, n1) ->
                 let (v, n2) = fresh n1
                     cur     = insertAbove (build v i t) (cursor (development m))
-                 in produce (VTerm (Trailing (Free v)))
+                 in produce (VTerm (Free v))
                             m { development = Development cur, names = n2 }
 
 -- | What @eliminate@ says: the subgoals it opened, by the names it gave them.
@@ -1820,10 +1820,10 @@ operandText e o = operandValue e o >>= \v -> case v of
   VText s -> Right s
   _       -> Left ExpectedText
 
--- | A 'VTerm' holding a chain rather than a term is not a term (§7.2).
+-- | Only a 'VTerm' is a term; every other 'Value' fails here (§7.2).
 operandTerm :: Env -> Operand -> Either FailReason Core
 operandTerm e o = operandValue e o >>= \v -> case v of
-  VTerm (Trailing t) -> Right t
+  VTerm t -> Right t
   _                  -> Left ExpectedTerm
 
 -- | An unelaborated tree and the place it sits at (§7.2). Shaped like

@@ -798,15 +798,15 @@ surfaceProgram n0 items = foldl item ([], n0) items
         full    = withParams ps (surfaceDataType d)
         tyName  = "dty" ++ show n
         conName k = "con" ++ show n ++ "_" ++ show (k :: Int)
-        selfName  = Lit (VTerm (Trailing (Global dn [])))
+        selfName  = Lit (VTerm (Global dn []))
      in ( acc ++
-            [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LVar l))))))
+            [ Do (PushDevelopment (Lit (VTerm (Universe (LVar l)))))
             , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt full))])
             , Bind (tyName ++ "raw") PopDevelopment
             , Bind tyName (Expose (Ref (tyName ++ "raw")))
             ]
             ++ concat
-                 [ [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LVar l))))))
+                 [ [ Do (PushDevelopment (Lit (VTerm (Universe (LVar l)))))
                    , Do (Assume (Lit (VText nm)) (Ref tyName))
                    , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt (withParams ps cty)))])
                    , Bind (conName k ++ "raw") PopDevelopment
@@ -842,7 +842,7 @@ surfaceProgram n0 items = foldl item ([], n0) items
   declaring (acc, n) (x, ty, body) =
     let (l, n1) = freshLevelMeta n
      in ( acc ++
-            [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LVar l))))))
+            [ Do (PushDevelopment (Lit (VTerm (Universe (LVar l)))))
             , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt ty))])
               -- **Reduced before it is used or stored.** What @extract@ hands
               -- back carries @fill@'s @=@-bindings, and a @let@-headed type
@@ -1276,7 +1276,7 @@ dispatch s name arg = case name of
             Right t  -> admit msgs (fromMaybe att (currentAttempt s')) s' t
         other -> other
         where
-          ran = load [Do (Certify (Lit (VTerm (Trailing (attemptClaim att)))))] machine
+          ran = load [Do (Certify (Lit (VTerm (attemptClaim att))))] machine
 
           -- **The proof record is re-read from @s'@, never the @pr@ above.**
           -- Certifying settles the levels the claim was written with and files
@@ -1421,7 +1421,7 @@ dispatch s name arg = case name of
           before  = snapshotOf machine
           prog =
             [ Bind "T" (Claim (Lit (VText "Tinfer"))
-                          (Lit (VTerm (Trailing (Universe (LVar l))))))
+                          (Lit (VTerm (Universe (LVar l)))))
             , Bind "x" (Claim (Lit (VText "xinfer")) (Ref "T"))
             , Do (Ops.Goto (Lit (VText "xinfer")))
             , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt t))])

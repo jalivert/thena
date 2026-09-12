@@ -610,7 +610,7 @@ someData = case parseDeclaration emptyGlobals 200 natDecl of
   Left err     -> error ("fixture does not parse: " ++ show err)
 
 term :: Core -> Operand
-term = Lit . VTerm . Trailing
+term = Lit . VTerm
 
 text :: String -> Operand
 text = Lit . VText

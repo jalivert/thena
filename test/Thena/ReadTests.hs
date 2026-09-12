@@ -88,7 +88,7 @@ goalTests =
     "goal"
     [ testCase "is the type the focus is claimed at" $ do
         v <- expectBound hole [Bind "g" Goal] "g"
-        v @?= VTerm (Trailing type0)
+        v @?= VTerm type0
 
       -- §4.5: the goal is what the development /writes down/, never what
       -- @infer@ derives. The trailing term of a chain claims nothing.
@@ -103,18 +103,18 @@ typeofTests =
   testGroup
     "typeof"
     [ testCase "infers in the context at the focus" $ do
-        v <- expectBound hole [Bind "t" (Typing (Lit (VTerm (Trailing type0))))] "t"
-        v @?= VTerm (Trailing (Universe (levelOfNat 1)))
+        v <- expectBound hole [Bind "t" (Typing (Lit (VTerm type0)))] "t"
+        v @?= VTerm (Universe (levelOfNat 1))
 
     , testCase "a variable gets its type from the context" $ do
         v <- expectBound hole
-               [ Bind "x" (Claim (Lit (VText "x")) (Lit (VTerm (Trailing type0))))
+               [ Bind "x" (Claim (Lit (VText "x")) (Lit (VTerm type0)))
                , Bind "t" (Typing (Ref "x"))
                ] "t"
-        v @?= VTerm (Trailing type0)
+        v @?= VTerm type0
 
     , testCase "and an ill-typed term fails" $
-        case run hole [Do (Typing (Lit (VTerm (Trailing (App type0 type0))))) ] of
+        case run hole [Do (Typing (Lit (VTerm (App type0 type0)))) ] of
           Left (NotTypeable _) -> pure ()
           other -> assertFailure ("expected NotTypeable, got " ++ show (fmap (const ()) other))
     ]
@@ -125,7 +125,7 @@ defineTests =
   testGroup
     "define"
     [ testCase "adds a definition above the focus, at the inferred type" $
-        case run hole [Do (Define (Lit (VText "d")) (Lit (VTerm (Trailing type0))))] of
+        case run hole [Do (Define (Lit (VText "d")) (Lit (VTerm type0)))] of
           Left r  -> assertFailure ("did not run: " ++ show r)
           Right m -> case context (cursor (development m)) of
             [Definition _ (Ident "d") v t] -> do
@@ -135,22 +135,22 @@ defineTests =
 
     , testCase "and produces the variable it bound" $ do
         v <- expectBound hole
-               [Bind "x" (Define (Lit (VText "d")) (Lit (VTerm (Trailing type0))))] "x"
+               [Bind "x" (Define (Lit (VText "d")) (Lit (VTerm type0)))] "x"
         case v of
-          VTerm (Trailing (Free _)) -> pure ()
+          VTerm (Free _) -> pure ()
           other -> assertFailure ("expected a variable, got " ++ show other)
 
       -- The focus does not move: the definition goes above it, and the hole
       -- being refined is still what the next instruction acts on.
     , testCase "the focus stays on the hole" $
-        case run hole [Do (Define (Lit (VText "d")) (Lit (VTerm (Trailing type0))))] of
+        case run hole [Do (Define (Lit (VText "d")) (Lit (VTerm type0)))] of
           Left r  -> assertFailure ("did not run: " ++ show r)
           Right m -> case focus (cursor (development m)) of
             OnComponent (Component.Claim _ (Ident "goal") _) -> pure ()
             other -> assertFailure ("focus moved: " ++ show other)
 
     , testCase "an ill-typed value fails and changes nothing" $
-        case run hole [Do (Define (Lit (VText "d")) (Lit (VTerm (Trailing (App type0 type0)))))] of
+        case run hole [Do (Define (Lit (VText "d")) (Lit (VTerm (App type0 type0))))] of
           Left (NotTypeable _) -> pure ()
           other -> assertFailure ("expected NotTypeable, got " ++ show (fmap (const ()) other))
     ]
@@ -170,7 +170,7 @@ gotoTests =
   testGroup
     "goto"
     [ testCase "finds a hole claimed above the focus" $
-        case run hole [ Bind "h" (Claim (Lit (VText "h")) (Lit (VTerm (Trailing type0))))
+        case run hole [ Bind "h" (Claim (Lit (VText "h")) (Lit (VTerm type0)))
                       , Do (Goto (Ref "h"))
                       ] of
           Left r  -> assertFailure ("did not run: " ++ show r)
@@ -180,10 +180,10 @@ gotoTests =
 
       -- The development is untouched; only the path moved.
     , testCase "and changes nothing about the development" $
-        let is  = [ Bind "h" (Claim (Lit (VText "h")) (Lit (VTerm (Trailing type0))))
+        let is  = [ Bind "h" (Claim (Lit (VText "h")) (Lit (VTerm type0)))
                   , Do (Goto (Ref "h"))
                   ]
-            before = [ Bind "h" (Claim (Lit (VText "h")) (Lit (VTerm (Trailing type0)))) ]
+            before = [ Bind "h" (Claim (Lit (VText "h")) (Lit (VTerm type0))) ]
          in case (run hole before, run hole is) of
               (Right a, Right b) ->
                 rebuild (cursor (development b)) @?= rebuild (cursor (development a))
@@ -198,7 +198,7 @@ gotoTests =
       testCase "descends into a guess body" $
         case run hole [ Do Attack
                       , Do Into
-                      , Bind "h" (Claim (Lit (VText "h")) (Lit (VTerm (Trailing type0))))
+                      , Bind "h" (Claim (Lit (VText "h")) (Lit (VTerm type0)))
                       , Do Back
                       , Do Back
                       , Do (Goto (Ref "h"))
@@ -209,7 +209,7 @@ gotoTests =
             other -> assertFailure ("focused " ++ show other)
 
     , testCase "refuses an assumption" $
-        case run hole [ Bind "a" (Assume (Lit (VText "a")) (Lit (VTerm (Trailing type0))))
+        case run hole [ Bind "a" (Assume (Lit (VText "a")) (Lit (VTerm type0)))
                       , Do (Goto (Ref "a"))
                       ] of
           Left (CannotMove NoSuchHole) -> pure ()
@@ -222,7 +222,7 @@ gotoTests =
     , testCase "by name, into a guess body the focus has left" $
         case run hole [ Do Attack
                       , Do Into
-                      , Bind "h" (Claim (Lit (VText "h")) (Lit (VTerm (Trailing type0))))
+                      , Bind "h" (Claim (Lit (VText "h")) (Lit (VTerm type0)))
                       , Do Back
                       , Do Back
                       , Do (Goto (Lit (VText "h")))
@@ -236,8 +236,8 @@ gotoTests =
       -- @TERM@. A pushed development is a claim of its own, and popping it
       -- extracts the term it built.
     , testCase "pop hands back what the nested development proved" $
-        case run hole [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LSuc LZero))))))
-                      , Do (Try (Lit (VTerm (Trailing (Universe LZero)))))
+        case run hole [ Do (PushDevelopment (Lit (VTerm (Universe (LSuc LZero)))))
+                      , Do (Try (Lit (VTerm (Universe LZero))))
                       , Do Solve
                       , Bind "t" PopDevelopment
                       ] of
@@ -248,15 +248,15 @@ gotoTests =
           -- through @whnf@ before it is stored or used: a @let@-headed type
           -- makes @intro@ open a definition instead of a binder.
           Right m -> lookup "t" (env (exec m))
-                       @?= Just (VTerm (Trailing
+                       @?= Just (VTerm
                              (Let (Ident "goal") (Universe LZero)
-                                  (Universe (LSuc LZero)) (close goalVar (Free goalVar)))))
+                                  (Universe (LSuc LZero)) (close goalVar (Free goalVar))))
 
       -- And it comes back to where it was: the outer development is the one
       -- the machine had before the push.
     , testCase "and the machine is back on the development it left" $
-        case run hole [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LSuc LZero))))))
-                      , Do (Try (Lit (VTerm (Trailing (Universe LZero)))))
+        case run hole [ Do (PushDevelopment (Lit (VTerm (Universe (LSuc LZero)))))
+                      , Do (Try (Lit (VTerm (Universe LZero))))
                       , Do Solve
                       , Do PopDevelopment
                       ] of
@@ -266,7 +266,7 @@ gotoTests =
       -- **A hole left open is reported, not silently turned into a term** —
       -- the same 'extract' @certify@ uses.
     , testCase "an unfinished nested development cannot be popped" $
-        case run hole [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LSuc LZero))))))
+        case run hole [ Do (PushDevelopment (Lit (VTerm (Universe (LSuc LZero)))))
                       , Do PopDevelopment
                       ] of
           Left (NotYetPure _) -> pure ()
@@ -289,8 +289,8 @@ gotoTests =
       -- binder's name. Elaboration's @∀@ and @let@ are what force it, since
       -- both must bind the name the user wrote.
     , testCase "a second hole may ask for a taken name and gets it" $
-        case run hole [ Do (Claim (Lit (VText "h")) (Lit (VTerm (Trailing type0))))
-                      , Do (Claim (Lit (VText "h")) (Lit (VTerm (Trailing type0))))
+        case run hole [ Do (Claim (Lit (VText "h")) (Lit (VTerm type0)))
+                      , Do (Claim (Lit (VText "h")) (Lit (VTerm type0)))
                       ] of
           Left r  -> assertFailure ("did not run: " ++ show r)
           Right m ->
@@ -298,9 +298,9 @@ gotoTests =
              in length named @?= 2
 
     , testCase "and fresh-name is how a rule gets one that is not" $
-        case run hole [ Do (Claim (Lit (VText "h")) (Lit (VTerm (Trailing type0))))
+        case run hole [ Do (Claim (Lit (VText "h")) (Lit (VTerm type0)))
                       , Bind "n" (FreshName (Lit (VText "h")))
-                      , Do (Claim (Ref "n") (Lit (VTerm (Trailing type0))))
+                      , Do (Claim (Ref "n") (Lit (VTerm type0)))
                       ] of
           Left r  -> assertFailure ("did not run: " ++ show r)
           Right m -> [ i | Hypothesis _ i _ <- context (cursor (development m)) ]
@@ -321,7 +321,7 @@ gotoTests =
             other -> assertFailure ("focused " ++ show other)
 
     , testCase "refuses a term that is not a variable" $
-        case run hole [Do (Goto (Lit (VTerm (Trailing type0))))] of
+        case run hole [Do (Goto (Lit (VTerm type0)))] of
           Left (CannotMove NoSuchHole) -> pure ()
           other -> assertFailure ("expected NoSuchHole, got " ++ show (fmap (const ()) other))
     ]
@@ -342,7 +342,7 @@ universeTests =
     "fresh-universe"
     [ testCase "is a universe at a meta drawn from the counter" $ do
         v <- expectBound hole [Bind "u" FreshUniverse] "u"
-        v @?= VTerm (Trailing (Universe (LVar (LMeta 1000))))
+        v @?= VTerm (Universe (LVar (LMeta 1000)))
 
     , testCase "and each one is its own" $ do
         m <- expectRun hole [Bind "a" FreshUniverse, Bind "b" FreshUniverse]
@@ -356,7 +356,7 @@ resolveTests =
     "resolve-name"
     [ testCase "a declared constructor is a global" $ do
         v <- expectBoundIn nat hole [Bind "z" (ResolveName (Lit (VText "zero")))] "z"
-        v @?= VTerm (Trailing (Global (GlobalName "zero") []))
+        v @?= VTerm (Global (GlobalName "zero") [])
 
       -- §3.6's one namespace: a binder shadows a global of the same name, and
       -- this is the order "Thena.Syntax.Resolve" uses for the same reason. The
@@ -364,11 +364,11 @@ resolveTests =
       -- made legal — a name is used as given.
     , testCase "a local shadows a global of the same name" $ do
         v <- expectBoundIn nat hole
-               [ Do (Assume (Lit (VText "zero")) (Lit (VTerm (Trailing type0))))
+               [ Do (Assume (Lit (VText "zero")) (Lit (VTerm type0)))
                , Bind "z" (ResolveName (Lit (VText "zero")))
                ] "z"
         case v of
-          VTerm (Trailing (Free _)) -> pure ()
+          VTerm (Free _) -> pure ()
           other -> assertFailure ("expected a local, got " ++ show other)
 
     , testCase "a name nothing bears does not resolve" $
