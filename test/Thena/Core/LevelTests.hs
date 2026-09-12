@@ -618,6 +618,12 @@ algebra =
       -- **The unifier's own claim, checked**: what it says it solved really does
       -- make the two sides equal. Nothing else in the suite applies a solution
       -- back and looks.
+      -- **The level printer is total.** It has no reader to be crossed with —
+      -- a printed scheme is a display form and nothing reads one back — so what
+      -- is checkable is that it finishes on every shape the algebra has.
+    , testProperty "every level renders" $
+        forAll genLevel $ \p -> length (renderLevel p) >= 0
+
     , testProperty "a solution from unifyLevels really equates its pairs" $
         withNumTests 2000 $ forAll genLevel $ \p -> forAll genLevel $ \q ->
           case unifyLevels [(p, q)] of

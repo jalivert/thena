@@ -119,6 +119,18 @@ walkedLaws =
           , back c' /= Right c
           ]
 
+      -- **The printers are total on every position too.** @renderCursor@ and
+      -- @renderWhere@ have no reader to be crossed with, so what is checkable
+      -- about them is that they finish: a partial function or an incomplete
+      -- case inside one is invisible until a shape nobody wrote by hand reaches
+      -- it, and the REPL prints one of these after every command.
+    , testProperty "renders, at every position" $
+        overWalk $ \_ cs ->
+          [ "a position did not render"
+          | c <- cs
+          , length (renderCursor 500 c) + sum (map length (renderWhere 500 c)) < 0
+          ]
+
       -- **Nothing in view is out of scope.** A free variable of the focused
       -- term must be bound by Γ at that position — the invariant §4.5 exists to
       -- support, and the one a mis-pushed step breaks without changing what

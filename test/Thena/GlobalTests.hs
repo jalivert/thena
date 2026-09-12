@@ -75,7 +75,7 @@ import Thena.Global.Env
   , lookupInductive
   , generalised
   )
-import Thena.Repl (renderInductive, startingSession)
+import Thena.Repl (renderEliminator, renderInductive, startingSession)
 
 tests :: TestTree
 tests =
@@ -135,6 +135,23 @@ equipment =
     , testCase "every eliminator's generated type is a type" $ do
         (env, _) <- corpus
         badEliminators env @?= []
+
+      -- **And the two printers with no reader finish on all of it.**
+      -- @renderInductive@ and @renderEliminator@ are display forms — nothing
+      -- reads one back — so what is checkable is totality, over datatypes
+      -- awkward enough to reach a case a fixture would not.
+    , testCase "every declaration and every eliminator prints" $ do
+        (env, _) <- corpus
+        let printed =
+              [ length l
+              | (_, d) <- inductives env
+              , l <- renderInductive 0 d
+              ]
+                ++ [ length l
+                   | (g, d) <- inductives env
+                   , l <- renderEliminator 0 g (fst (eliminatorType d LZero (pastEverything env)))
+                   ]
+        (sum printed >= 0) @?= True
     ]
   where
     fst3 (a, _, _) = a
