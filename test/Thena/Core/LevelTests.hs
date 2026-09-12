@@ -12,6 +12,9 @@ module Thena.Core.LevelTests (tests) where
 
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
+import Test.Tasty.QuickCheck
+  ( Gen, counterexample, elements, forAll, oneof, property, testProperty
+  , withNumTests, (===) )
 
 import Thena.Repl (renderLevel)
 
@@ -27,6 +30,8 @@ import Thena.Core.Level
   , minimise
   , normalise
   , solveLevels
+  , levelVarsIn
+  , substLevel
   , unifyLevels
   , unsatisfiable
   )
@@ -45,6 +50,7 @@ tests =
     , testGroup "unifyLevels solves, sticks, or clashes" unifyTests
     , testGroup "satisfiability — the residue as a set (phase 35)" satTests
     , testGroup "minimise defaults the ambiguous ones (phase 51)" minimiseTests
+    , algebra
     ]
 
 -- | A third meta, for the three-variable cycle.
@@ -538,3 +544,102 @@ minimiseTests =
       minimise [m] [AtMost (levelOfNat 1) (LVar m2), AtMost LZero (LVar m)]
         @?= Right ([(m, LZero)], [AtMost (levelOfNat 1) (LVar m2)])
   ]
+
+
+-- --------------------------------------------------------------------------
+-- The algebra's laws (2026-09-12)
+-- --------------------------------------------------------------------------
+
+-- | **The level order and the join have laws, and a broken one is a soundness
+-- hole rather than a wrong message.**
+--
+-- Everything above is a fixture — one hand-written pair per behaviour, which is
+-- how the two @levelLeq@ readings and the solver were built and is right for
+-- them. What a fixture cannot say is that @≤@ is an /order/: an intransitive
+-- @≤@ lets @Typing@ discharge an obligation chain that does not hold, and
+-- nothing in the suite has ever asked.
+--
+-- The generated levels are small on purpose — three rigids and three metas over
+-- a depth of three — because a counterexample to an order law is always small
+-- and a large one is unreadable.
+algebra :: TestTree
+algebra =
+  testGroup
+    "the algebra's laws"
+    [ testProperty "≤ is reflexive" $
+        forAll genLevel $ \p -> levelLeq p p === Just True
+
+      -- **The one with teeth.** @levelLeq@ answers @Nothing@ for anything it
+      -- will not decide, so the law is about the decided part: where two steps
+      -- are both known true, the third must be too.
+    , testProperty "≤ is transitive where it decides" $
+        withNumTests 2000 $ forAll genLevel $ \p -> forAll genLevel $ \q ->
+          forAll genLevel $ \r ->
+            not (levelLeq p q == Just True && levelLeq q r == Just True)
+              || levelLeq p r == Just True
+
+    , testProperty "…and antisymmetric, which is what makes Eq the right one" $
+        withNumTests 2000 $ forAll genLevel $ \p -> forAll genLevel $ \q ->
+          not (levelLeq p q == Just True && levelLeq q p == Just True) || p == q
+
+    , testProperty "equal levels compare true" $
+        forAll genLevel $ \p -> forAll genLevel $ \q ->
+          not (p == q) || levelLeq p q == Just True
+
+      -- The join is a least upper bound, and the two halves are separate
+      -- claims: it is above both, and @≤@ against it decomposes.
+    , testProperty "the join is above each side" $
+        forAll genLevel $ \p -> forAll genLevel $ \q ->
+          levelLeq p (LMax p q) === Just True
+    , testProperty "and is the LEAST such, where both sides decide" $
+        forAll genLevel $ \p -> forAll genLevel $ \q -> forAll genLevel $ \r ->
+          not (levelLeq p r == Just True && levelLeq q r == Just True)
+            || levelLeq (LMax p q) r == Just True
+
+    , testProperty "the join is commutative, associative and idempotent" $
+        forAll genLevel $ \p -> forAll genLevel $ \q -> forAll genLevel $ \r ->
+          LMax p q == LMax q p
+            && LMax p (LMax q r) == LMax (LMax p q) r
+            && LMax p p == p
+            && LMax p LZero == p
+
+    , testProperty "suc is monotone and distributes over the join" $
+        forAll genLevel $ \p -> forAll genLevel $ \q ->
+          LSuc (LMax p q) == LMax (LSuc p) (LSuc q)
+            && levelLeq p (LSuc p) == Just True
+            && (levelLeq p q /= Just True || levelLeq (LSuc p) (LSuc q) == Just True)
+
+      -- Substitution: a variable the level does not mention cannot change it,
+      -- and one it does mention is replaced everywhere.
+    , testProperty "substituting an absent variable changes nothing" $
+        forAll genLevel $ \p -> forAll genVar $ \v -> forAll genLevel $ \r ->
+          v `elem` levelVarsIn p || substLevel [(v, r)] p == p
+
+      -- **The unifier's own claim, checked**: what it says it solved really does
+      -- make the two sides equal. Nothing else in the suite applies a solution
+      -- back and looks.
+    , testProperty "a solution from unifyLevels really equates its pairs" $
+        withNumTests 2000 $ forAll genLevel $ \p -> forAll genLevel $ \q ->
+          case unifyLevels [(p, q)] of
+            LevelsSolved sub ->
+              counterexample (show (substLevel sub p, substLevel sub q)) $
+                property (substLevel sub p == substLevel sub q)
+            _ -> property True
+    ]
+
+-- | Three rigids and three metas, over a depth of three.
+genLevel :: Gen Level
+genLevel = go (3 :: Int)
+  where
+    go n
+      | n <= 0 = leaf
+      | otherwise =
+          oneof
+            [ leaf
+            , LSuc <$> go (n - 1)
+            , LMax <$> go (n - 1) <*> go (n - 1)
+            ]
+    leaf = oneof [pure LZero, LVar <$> genVar]
+
+genVar :: Gen LevelVar
+genVar = oneof [LRigid <$> elements [0, 1, 2], LMeta <$> elements [0, 1, 2]]

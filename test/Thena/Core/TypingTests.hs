@@ -19,6 +19,8 @@ module Thena.Core.TypingTests (tests) where
 
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
+import Test.Tasty.QuickCheck
+  (Gen, counterexample, elements, forAll, oneof, property, testProperty, withNumTests)
 
 import Thena.Core.Level
   ( Level (..)
@@ -26,16 +28,18 @@ import Thena.Core.Level
   , Obligation (..)
   , levelOfNat
   )
-import Thena.Core.Context (Context, Entry (..))
+import Thena.Core.Context (Context, Entry (..), entryType, entryVar)
 import Thena.Core.Convert (convert)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), close, fresh)
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Var, close, fresh, open)
 import Thena.Core.Typing (check, infer)
 import Thena.Declared (natFin, natFinCounter, natVec, natVecCounter)
 import Thena.Driver (parseCore)
 import Thena.Errors (TypeError (..))
+import Thena.Core.Context (piOver)
 import Thena.Global.Env
   ( Definition (..)
+  , emptyGlobals
   , addDefinition
   , eliminatorType
   , lookupInductive
@@ -56,6 +60,7 @@ tests =
     , testGroup "what goes wrong" errorTests
     , testGroup "the counter comes back" counterTests
     , testGroup "a use owes its definition's level constraints" schemeTests
+    , wellTyped
     ]
 
 -- | Addition, defined by recursion on the first argument — the motive is
@@ -405,3 +410,179 @@ schemeTests =
         natVec
 
     arrow a b = Pi (Ident "_") (Universe a) (close (fst (fresh 991)) (Universe b))
+
+
+-- --------------------------------------------------------------------------
+-- A second implementation of the typing rules (2026-09-12)
+-- --------------------------------------------------------------------------
+
+-- | **A generator that builds a term together with the type it must have, and
+-- then asks @infer@.**
+--
+-- The header of this module says the two groups that matter are the ones where
+-- the invariant is maintained by different code from the code that checks it.
+-- This is that idea taken to the typing rules themselves: 'genTyped' is a
+-- second, independent reading of §5.2's introduction rules — it never calls
+-- 'infer' — so agreement between the two is real evidence and disagreement is a
+-- defect in one of them.
+--
+-- **The fragment is deliberately small**: @Type₀@, variables, non-dependent Π,
+-- λ, application and @let@. It is what can be generated without a solver, and
+-- it is the fragment every elaborated proof is mostly made of. Datatypes,
+-- eliminations and level variables are covered by the fixtures above, which can
+-- state the interesting case directly.
+--
+-- Three properties, and each fails differently:
+--
+--   * @infer@ agrees with the generator — a rule read two ways.
+--   * @check@ accepts what @infer@ produced, which is @check@\'s own definition
+--     said from outside it.
+--   * **subject reduction**: reducing a well-typed term leaves it well typed at
+--     a convertible type. §5.1's whnf is the reduction and §5.2's @infer@ the
+--     judgement, and nothing else in the suite runs both over anything but a
+--     hand-built elimination.
+wellTyped :: TestTree
+wellTyped =
+  testGroup
+    "a term built by the typing rules types at the type it was built for"
+    [ testProperty "infer agrees with the way the term was built" $
+        withNumTests 500 $ forAll genTyped $ \(ctx, ty, t) ->
+          case infer emptyGlobals ctx counterBase t of
+            (Left e, _, _) ->
+              counterexample (show t ++ " : " ++ show ty ++ " — " ++ show e) False
+            (Right got, _, n) ->
+              counterexample (show t ++ "\n  built at " ++ show ty ++ "\n  inferred " ++ show got)
+                (property (converts ctx n got ty))
+
+    , testProperty "check accepts it at that type" $
+        withNumTests 500 $ forAll genTyped $ \(ctx, ty, t) ->
+          case check emptyGlobals ctx counterBase t ty of
+            (Left e, _, _) -> counterexample (show t ++ ": " ++ show e) False
+            (Right (), _, _) -> property True
+
+    , testProperty "and reducing it keeps it well typed, at a convertible type" $
+        withNumTests 500 $ forAll genTyped $ \(ctx, ty, t) ->
+          let t' = whnf emptyGlobals ctx t
+           in case (infer emptyGlobals ctx counterBase t, infer emptyGlobals ctx counterBase t') of
+                ((Right a, _, _), (Right b, _, n)) ->
+                  counterexample (show t ++ " ⟶ " ++ show t' ++ "\n  " ++ show a ++ " vs " ++ show b)
+                    (property (converts ctx n a b))
+                (_, (Left e, _, _)) ->
+                  counterexample (show t ++ " ⟶ " ++ show t' ++ ": " ++ show e) False
+                _ -> property True
+    ]
+  where
+    converts ctx n a b =
+      let (r, _, _) = convert emptyGlobals ctx n a b in r == Nothing
+
+-- | Beyond every variable the generator mints, so nothing @infer@ or @convert@
+-- freshens can collide with one already in the term.
+counterBase :: Int
+counterBase = 900
+
+-- | A context, a type in it, and a term of that type — built by the rules and
+-- not by asking anything.
+--
+-- **The context is seeded** with two base types, an inhabitant of each and a
+-- function each way, so that every type the fragment can build is inhabited and
+-- the generator never has to fail. Types are the closure of @A@ and @B@ under
+-- non-dependent Π, which is the fragment an elaborated proof is mostly made of.
+genTyped :: Gen (Context, Core, Core)
+genTyped = do
+  ty <- genSmallType 2
+  t  <- genOf seedContext ty 3
+  pure (seedContext, ty, t)
+
+-- | @A : Type₀@, @B : Type₀@, an inhabitant of each, and a function each way.
+seedContext :: Context
+seedContext =
+  [ Hypothesis vA (Ident "A") type0
+  , Hypothesis vB (Ident "B") type0
+  , Hypothesis va (Ident "a") tyA
+  , Hypothesis vb (Ident "b") tyB
+  , Hypothesis vf (Ident "f") (arrowOf tyA tyB)
+  , Hypothesis vg (Ident "g") (arrowOf tyB tyA)
+  ]
+
+vA, vB, va, vb, vf, vg :: Var
+vA = binderAt 0
+vB = binderAt 1
+va = binderAt 2
+vb = binderAt 3
+vf = binderAt 4
+vg = binderAt 5
+
+tyA, tyB :: Core
+tyA = Free vA
+tyB = Free vB
+
+-- | A non-dependent function type. The binder is closed over a variable the
+-- codomain cannot mention, which is what keeps the generator free of a scope
+-- solver.
+--
+-- Named apart from the @arrow@ inside 'universeTests', which builds one between
+-- two universes rather than between two types.
+arrowOf :: Core -> Core -> Core
+arrowOf a b = Pi (Ident "_") a (close (binderAt 99) b)
+
+-- | A type at level zero: @A@, @B@, or an arrow between two of them. **Not
+-- @Type₀@ itself**, which inhabits @Type₁@ and is a different judgement.
+genSmallType :: Int -> Gen Core
+genSmallType n
+  | n <= 0 = elements [tyA, tyB]
+  | otherwise =
+      oneof
+        [ elements [tyA, tyB]
+        , arrowOf <$> genSmallType (n - 1) <*> genSmallType (n - 1)
+        ]
+
+-- | A term of the given type, in the given context.
+--
+-- Every branch is one of §5.2's rules read in the introduction direction. The
+-- variable rule is always available for a base type because 'seedContext' seeds
+-- one, and λ is always available for an arrow, so the list is never empty.
+genOf :: Context -> Core -> Int -> Gen Core
+genOf ctx ty n
+  | n <= 0    = oneof (variables ++ lambda)
+  | otherwise = oneof (variables ++ lambda ++ applications ++ [binding])
+  where
+    variables = [ pure (Free (entryVar e)) | e <- ctx, entryType e == ty ]
+
+    lambda = case ty of
+      Pi _ a sc ->
+        [ do
+            let v = binderAt (200 + length ctx)
+            body <- genOf (ctx ++ [Hypothesis v (Ident "z") a]) (open v sc) (n - 1)
+            pure (Lam (Ident (nameAt (length ctx))) a (close v body))
+        ]
+      _ -> []
+
+    -- An application whose head is a variable of an arrow type ending in @ty@.
+    applications =
+      [ do
+          arg <- genOf ctx dom (n - 1)
+          pure (App (Free (entryVar e)) arg)
+      | e <- ctx
+      , Pi _ dom cod <- [entryType e]
+      , open (entryVar e) cod == ty
+      ]
+
+    -- A definition, which is also the one thing δ has to reduce.
+    binding = do
+      a    <- genSmallType (n - 1)
+      val  <- genOf ctx a (n - 1)
+      let v = binderAt (300 + length ctx)
+      body <- genOf (ctx ++ [Definition v (Ident "z") val a]) ty (n - 1)
+      pure (Let (Ident (nameAt (length ctx))) val a (close v body))
+
+binderAt :: Int -> Var
+binderAt k = fst (fresh (100 + k))
+
+nameAt :: Int -> String
+nameAt k = "v" ++ show k
+
+type0 :: Core
+type0 = Universe LZero
+
+_unusedPiOver :: Context -> Core -> Core
+_unusedPiOver = piOver
