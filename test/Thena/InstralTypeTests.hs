@@ -50,7 +50,76 @@ tests =
     , fitting
     , roundTrip
     , theBuiltInTypes
+    , injectivity
     ]
+
+-- --------------------------------------------------------------------------
+-- Rendering tells types apart (2026-09-12)
+-- --------------------------------------------------------------------------
+
+-- | **Two types that are not the same must not print the same.**
+--
+-- Every error @instral@ reports is a rendered 'Ty', so a rendering that
+-- collapses two types produces a message that says nothing —
+-- @wanted String, got String@, which this milestone's review met three times
+-- from three unrelated causes: collapsed scheme variables, a nullary function
+-- type printing as its own result, and a grammar that had taken the name
+-- @String@. Each was fixed where it was found; none of them was checked.
+--
+-- **Exhaustive, not random**: the set below is every shape 'Ty' has, over a
+-- small alphabet, one and two constructors deep. A collapse is a collision
+-- between two /shapes/, which is what an enumeration finds and what a pair of
+-- independently generated types almost never does.
+injectivity :: TestTree
+injectivity =
+  testGroup
+    "rendering tells two types apart"
+    [ testCase "no two of the one-deep shapes print alike" $
+        collisions oneDeep @?= []
+    , testCase "nor any of the two-deep ones" $
+        collisions twoDeep @?= []
+      -- A signature is a type and an arity, and the arity is not in the type:
+      -- @String -> (String -> String)@ and @String -> String -> String@ are
+      -- different callables. That collapse shipped.
+    , testCase "and no two signatures do either" $
+        [ (renderSignature a, renderSignature b)
+        | (i, a) <- zip [0 :: Int ..] signatures
+        , b <- take i signatures
+        , a /= b
+        , renderSignature a == renderSignature b
+        ] @?= []
+    ]
+  where
+    collisions ts =
+      [ (renderTy a, renderTy b)
+      | (i, a) <- zip [0 :: Int ..] ts
+      , b <- take i ts
+      , a /= b
+      , renderTy a == renderTy b
+      ]
+
+    -- Two atoms of each kind that has a kind: a constructor, a variable, and an
+    -- object language's brand, which is the one whose name is not Thena's.
+    alphabet = [TString, TCore, TVar 0, TVar 1, TObject "Tm"]
+
+    shapesOver us =
+      us
+        ++ [ TList a | a <- us ]
+        ++ [ TOption a | a <- us ]
+        ++ [ TPair a b | a <- us, b <- us ]
+        ++ [ TFun [] a | a <- us ]
+        ++ [ TFun [a] b | a <- us, b <- us ]
+        ++ [ TFun [a, b] c | a <- us, b <- us, c <- us ]
+
+    oneDeep = shapesOver alphabet
+    twoDeep = shapesOver (take 3 alphabet ++ take 3 (drop (length alphabet) oneDeep))
+
+    signatures =
+      [ Signature ps r
+      | ps <- [] : [ [a] | a <- small ] ++ [ [a, b] | a <- small, b <- small ]
+      , r  <- Nothing : map Just small
+      ]
+    small = [TString, TCore, TFun [] TString, TFun [TString] TString, TVar 0]
 
 -- --------------------------------------------------------------------------
 -- The built-in type names (2026-09-12)
