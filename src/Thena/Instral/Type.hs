@@ -193,4 +193,12 @@ letterFor i
 -- absence is visible rather than being read as a missing word.
 renderSignature :: Signature -> String
 renderSignature (Signature ps r) =
-  intercalate " -> " (map renderTy ps ++ [maybe "()" renderTy r])
+  intercalate " -> " (map argument ps ++ [maybe "()" renderTy r])
+  where
+    -- **A function-typed parameter takes parentheses** (MS5 phase 73). Without
+    -- them @(String -> String) -> String -> String@ prints as
+    -- @String -> String -> String -> String@, which is a different signature —
+    -- and the one thing a reader would take from the listing is its arity.
+    argument t = case t of
+      TFun _ _ -> "(" ++ renderTy t ++ ")"
+      _        -> renderTy t

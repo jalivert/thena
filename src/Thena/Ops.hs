@@ -1130,7 +1130,11 @@ resultOf o = case o of
   Return _     -> Nothing   -- it ends a body; there is nothing after it to bind
   Some _       -> Just (TOption (TVar 0))
   None         -> Just (TOption (TVar 0))
-  ListHead _   -> Just (TVar 0)
+  -- **An 'Option', not the element** — an empty list has no head, and phase 65
+  -- chose to answer with 'None' rather than to fail. The table said @a@ until
+  -- MS5 phase 73, which the engine cross-check could not catch: a bare variable
+  -- is inhabited by every value, so the row asserted nothing.
+  ListHead _   -> Just (TOption (TVar 0))
   ListTail _   -> Just (TList (TVar 0))
   PairFirst _  -> Just (TVar 0)
   PairSecond _ -> Just (TVar 1)

@@ -834,6 +834,13 @@ resolveBlock ls g body = case partitionEithers (zipWith (instruction ls g) [0 ..
 -- what was written and not what it expanded to.
 instruction :: [(String, Language)] -> GlobalName -> Int -> RawInstr -> Either RuleError [Instr]
 instruction ls g i ri = case ri of
+  -- **@x = true@ is the literal, not a call to a rule called @true@** (MS5
+  -- phase 73). @true@ and @false@ are read as values wherever an /operand/ is
+  -- read (phase 64), and the right of an @=@ is the one place a bare word goes
+  -- to 'operation' instead — so without this, @f false@ works and @b = false@
+  -- says /no rule is called false/.
+  RawBind n (RhsOp (RawOp w [])) | w `elem` reservedNames ->
+    pure . Bind n . Op.Value <$> operandOf ls g i "=" (RawRef w)
   RawBind n (RhsOp o)    -> lift (Bind n) o
   -- **A value on the right of an @=@** (MS5 phase 68a) — @x = [1, 2]@. Its
   -- nested calls are lifted exactly as an op's arguments are, and the value

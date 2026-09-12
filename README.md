@@ -139,7 +139,8 @@ cabal test
 cabal run thena
 ```
 
-`:help` lists the REPL commands. `docs/MANUAL.md` is the reference, with worked
+`:help` lists the REPL commands. `docs/LANGUAGES.md` says what can be written
+where. `docs/MANUAL.md` is the reference, with worked
 sessions and an honest account of what the system can and cannot currently do.
 
 ## Layout
@@ -151,6 +152,7 @@ sessions and an honest account of what the system can and cannot currently do.
 | `prelude/prelude.thena` | the standard prelude, itself a surface module |
 | `examples/` | worked developments, including the determinacy proof |
 | `docs/MANUAL.md` | the reference manual — worked sessions, captured from the running program |
+| `docs/LANGUAGES.md` | what can be written where — the four languages, their fences, and how they embed |
 | `DECISIONS.md` | the design decisions, written for readers who know Agda, Coq, Idris or Lean |
 
 ## Research context

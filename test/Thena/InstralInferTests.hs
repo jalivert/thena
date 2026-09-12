@@ -361,6 +361,14 @@ functions =
       -- **@x = ‹value›@, which `ms5/CLOSEOUT.md` 3 owed this phase** (his
       -- ruling, 2026-09-12). It resolves to 'Thena.Ops.Value', an op with a word
       -- and no written form.
+      -- **@x = true@ is the literal** (MS5 phase 73). @true@ and @false@ are read
+      -- as values wherever an operand is, and the right of an @=@ was the one
+      -- place a bare word went somewhere else — so this used to say /no rule is
+      -- called false/.
+    , testCase "and a boolean on the right of an = is the literal" $
+        case load "rule go :- then b = false ; prove" of
+          BasesLoaded _ -> pure ()
+          other -> assertFailure ("expected a load, got " ++ show other)
     , testCase "and a literal can be bound to a name at last" $
         case load "rule go :- then p = (1, true) ; l = [1, 2, 3] ; n = 42 ; prove" of
           BasesLoaded _ -> pure ()

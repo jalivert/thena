@@ -102,6 +102,12 @@ renderTests =
         renderSignature (Signature [TCore] Nothing) @?= "Core -> ()"
     , testCase "and no arguments either" $
         renderSignature (Signature [] (Just TCore)) @?= "Core"
+      -- **A function-typed parameter takes parentheses** (MS5 phase 73). Without
+      -- them this prints as a signature of three arguments rather than two, and
+      -- arity is the one thing a reader takes from a listing.
+    , testCase "a function-typed parameter is parenthesised" $
+        renderSignature (Signature [TFun [TString] TString, TString] (Just TString))
+          @?= "(String -> String) -> String -> String"
     , testCase "the variables a type mentions, in order" $
         typeVarsIn (TPair (TList (TVar 3)) (TOption (TVar 1))) @?= [3, 1]
     ]
@@ -145,7 +151,7 @@ signatureTests =
       -- The data structures are where the scheme variables are.
     , sig "some"         (Op.Some r)                    "a -> Option a"
     , sig "none"         Op.None                        "Option a"
-    , sig "list-head"    (Op.ListHead r)                "List a -> a"
+    , sig "list-head"    (Op.ListHead r)                "List a -> Option a"
     , sig "list-tail"    (Op.ListTail r)                "List a -> List a"
     , sig "pair-first"   (Op.PairFirst r)               "(a, b) -> a"
     , sig "pair-second"  (Op.PairSecond r)              "(a, b) -> b"

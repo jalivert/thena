@@ -435,6 +435,16 @@ blockTests =
   , testCase "operands may be numbers and strings" $
       roundTrip "do { arg 2 ; say \"done\" }"
 
+    -- **The two operand grammars are §7b's registered duplication** — Happy
+    -- cannot share a non-terminal, because a block is embedded in a surface
+    -- term — so they are levelled by hand and drift is what the register
+    -- exists to catch. Phase 68b added lambdas to the rule-file grammar and
+    -- not to this one; phase 73 found it and this is what pins it.
+  , testCase "a lambda is writable in a block, as it is in a rule file" $
+      roundTrip "do { f = \\ z -> concat z z ; m = f \"a\" }"
+  , testCase "and a literal, and a pair" $
+      roundTrip "do { p = (1, true) ; l = [1, 2, 3] }"
+
   , -- Layout, like everything else the surface language has.
     testCase "a block lays out" $
       same "do { attack ; intro }" "do attack\n   intro"

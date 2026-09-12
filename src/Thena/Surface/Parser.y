@@ -129,6 +129,19 @@ Instr :: { RawInstr }
 InstrRhs :: { RawRhs }
   : InstrOp                                { RhsOp $1 }
   | InstrValueOperand                      { RhsValue $1 }
+  | InstrLambda                            { RhsValue $1 }
+
+-- **A lambda inside a @do@ block** (MS5 phase 73) — @Thena.Syntax.Parser@\'s
+-- @Lambda@, one grammar over. It was missing until here, which is §7b's
+-- registered duplication doing exactly what it was registered to do: phase 68b
+-- added lambdas to the rule-file grammar and not to this one, so
+-- @do { f = \\ z -> … }@ did not parse.
+InstrLambda :: { RawOperand }
+  : 'λ' InstrParams '->' InstrRhs          { RawLambda (reverse $2) $4 }
+
+InstrParams :: { [String] }
+  :                                        { [] }
+  | InstrParams ident                      { $2 : $1 }
 
 InstrOp :: { RawOp }
   : ident InstrOperands                    { RawOp $1 (reverse $2) }
@@ -153,7 +166,8 @@ InstrOperand :: { RawOperand }
 -- Every operand but a bare name — @Thena.Syntax.Parser@\'s @ValueOperand@, one
 -- grammar over.
 InstrValueOperand :: { RawOperand }
-  : num                                    { RawPos $1 }
+  : '(' InstrLambda ')'                    { $2 }
+  | num                                    { RawPos $1 }
   | str                                    { RawText $1 }
   | chr                                    { RawChar $1 }
   | '[' ']'                                { RawList [] }
