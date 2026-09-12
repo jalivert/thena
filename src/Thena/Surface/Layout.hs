@@ -143,6 +143,30 @@ run cs is = case (is, cs) of
     -- ending in @;@.
     | n == m, closingNext ts -> run (Implicit m : ms) ts
     | n == m    -> (at p TSemi :) <$> run (Implicit m : ms) ts
+    -- **A closing token that is ALSO offside closes the blocks it is offside
+    -- of, and then closes no more** (2026-09-13). The offside rule and
+    -- 'closesBlock' were both firing for the same @in@, so
+    --
+    -- > let x = let y = a
+    -- >          in y
+    -- >  in x
+    --
+    -- emitted two @}@ before the inner @in@: the column rule closed the inner
+    -- block and @in@ then closed the outer one as well, leaving the inner @let@
+    -- without its @in@ — @2:11: unexpected }@. It is the ordinary Haskell
+    -- spelling of a nested @let@ and nothing in the suite wrote one.
+    --
+    -- **The Report has no such case and the reason is instructive**:
+    -- @parse-error(t)@ stops asking the moment the parser can continue, and
+    -- once the column rule has closed the inner block the parser /can/ — the
+    -- @in@ is the inner @let@'s. Standing in a list of tokens for
+    -- @parse-error(t)@ loses exactly that, so the condition has to be said
+    -- here instead. See 'closesBlock', whose note describes the case one column
+    -- over — an @in@ indented /past/ the block, where the column rule fires not
+    -- at all and one close is right.
+    | n < m, closingNext ts ->
+        let (k, ms') = offside n (Implicit m : ms)
+         in (replicate k (at p TRBrace) ++) <$> emitClosing ms' ts
     | n <  m    -> (at p TRBrace :) <$> run ms (Line p n : ts)
   (Line _ _ : ts, ms) -> run ms ts
 
@@ -201,6 +225,16 @@ run cs is = case (is, cs) of
   ([], Explicit : _)    -> Left (MissingClose endOfInput)
   ([], [])              -> Right []
   where
+    -- Every implicit block this column is offside of, and how many there are.
+    offside n (Implicit m : ms)
+      | n < m = let (k, ms') = offside n ms in (k + 1, ms')
+    offside _ ms = (0 :: Int, ms)
+
+    -- The closing token itself, emitted without a close of its own — the
+    -- @Line@ above has already done it.
+    emitClosing ms (Tok t : ts) = (t :) <$> run ms ts
+    emitClosing ms ts           = run ms ts
+
     -- Close the implicit block and put the token back.
     reclose p = case (is, cs) of
       (_, _ : ms) -> (at p TRBrace :) <$> run ms is

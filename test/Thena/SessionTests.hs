@@ -46,6 +46,7 @@ tests =
     , testGroup "the session" sessionTests
     , testGroup "undo" undoTests
     , undoLaw
+    , failureBacktracks
     ]
 
 -- --------------------------------------------------------------------------
@@ -112,11 +113,42 @@ undoLaw =
     -- Tactics and moves, no boundary and no declaration: a boundary drops the
     -- history on purpose and a declaration writes a global, which a snapshot
     -- does not carry.
+    -- **No @prove@**, and the reason is a finding rather than a convenience:
+    -- @prove@ leaves a live choice point, and a later command that fails
+    -- unwinds into it and re-runs the search instead of failing
+    -- (@ms5\/CLOSEOUT.md@ 30). That makes \"the command changed nothing\"
+    -- history-dependent, so the pool leaves it out and 'failureBacktracks'
+    -- below pins the behaviour on its own.
     pool =
-      [ "attack", "intro", "along", "back", "into", "prove", "regret", "solve"
+      [ "attack", "intro", "along", "back", "into", "regret", "solve"
       , "claim \"k\" ⌜ Type₀ ⌝", "assume \"a\" ⌜ Type₀ ⌝"
       , "cross type", "reduce", "try-core ⌜ Type₀ ⌝"
       ]
+
+-- | **A command that fails unwinds into a choice point an earlier line left,
+-- and the development changes** (found 2026-09-13, @ms5\/CLOSEOUT.md@ 30).
+--
+-- Four lines. @prove@ succeeds and leaves a choice point; @regret@ takes the
+-- guess back off; @back@ is at the root and cannot move — and instead of
+-- failing it unwinds into @prove@\'s choice point, tries the alternatives, and
+-- puts a guess back. The user typed a /navigation/ command.
+--
+-- **This is pinned, not endorsed.** Phase 25d's rule is that a line which did
+-- not do what it said leaves the proof exactly as it was, and its stated
+-- premise — /a tactic failing at the REPL has nowhere to backtrack to/ — is
+-- what is false here. @record@\'s guard never fires because the line ends up
+-- succeeding. Which way it should go is his.
+failureBacktracks :: TestTree
+failureBacktracks =
+  testCase "a failing command re-enters an earlier line's choice point" $ do
+    let before = developmentAfter (run (script ++ ["regret"]))
+        after  = developmentAfter (run (script ++ ["regret", "back"]))
+    assertBool
+      "back at the root left the development alone — if this now holds, \
+      \ms5/CLOSEOUT.md 30 has been decided and this test should say so"
+      (before /= after)
+  where
+    script = [":theorem t : ∀ (A : Type₀) -> A -> A", "prove"]
 
 -- --------------------------------------------------------------------------
 -- The deliverable

@@ -10,12 +10,13 @@
 module Thena.SurfaceTests (tests) where
 
 import Data.List.NonEmpty (NonEmpty (..))
+import Data.List (intercalate)
 import Data.List.NonEmpty (nonEmpty)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 import Test.Tasty.QuickCheck
-  ( Gen, elements, forAll, frequency, listOf1, oneof, resize, sized, testProperty
-  , withNumTests, (===) )
+  ( Gen, counterexample, elements, forAll, frequency, listOf1, oneof, property
+  , resize, sized, testProperty, withNumTests, (===) )
 
 import Thena.Driver (parseCore, parseSurfaceModule, parseSurfaceTerm)
 import Thena.Syntax.Concrete (Raw (..))
@@ -51,7 +52,115 @@ tests =
     , testGroup "comments (phase 43)" commentTests
     , testGroup "do blocks (phase 45)" blockTests
     , printerAndParser
+    , layoutAgainstBraces
     ]
+
+-- --------------------------------------------------------------------------
+-- The offside rule, against an independently written brace-inserter (2026-09-13)
+-- --------------------------------------------------------------------------
+
+-- | **His condition — /if implicit works, explicit has to work too/ — over
+-- generated programs rather than nine fixtures.**
+--
+-- 'layoutTests' above states each rule of the offside algorithm with a pair of
+-- spellings. What a fixture pair cannot say is that the rules /compose/: a
+-- @let@ inside a @let@ inside a @do@ block, each opening its context at a
+-- different column, is where an off-by-one in "Thena.Surface.Layout"'s
+-- @closesBlock@ or in the column it records would live, and no fixture nests.
+--
+-- **The oracle is 'braced'**, which writes the same tree with the braces and
+-- semicolons written out. It is a second renderer, written here and sharing
+-- nothing with the layout pass — which is the only reason agreeing means
+-- anything.
+layoutAgainstBraces :: TestTree
+layoutAgainstBraces =
+  testGroup
+    "layout and explicit braces are one language"
+    [ testProperty "a generated program means the same both ways" $
+        withNumTests 400 $ forAll (genBlocky 3) $ \b ->
+          let a = braced b
+              c = unlines (laidOut 0 b)
+           in counterexample (a ++ "\n--- vs ---\n" ++ c) $
+                case (parseSurfaceTerm a, parseSurfaceTerm c) of
+                  (Right x, Right y) -> property (x == y)
+                  (x, y) -> counterexample (show x ++ "\n" ++ show y) False
+    ]
+
+-- | A term made of the two things that carry a layout context — @let@ and a
+-- @do@ block — nested inside each other.
+data Blocky
+  = Leaf String
+  | BLet [(String, Blocky)] Blocky
+  | BDo [String]
+  deriving (Show)   -- QuickCheck only
+
+genBlocky :: Int -> Gen Blocky
+genBlocky n
+  | n <= 0 = leaf
+  | otherwise =
+      frequency
+        [ (2, leaf)
+        , (3, BLet <$> bindings <*> genBlocky (n - 1))
+        , (1, BDo <$> listOf1 (elements ["attack", "intro", "prove", "back"]))
+        ]
+  where
+    leaf = Leaf <$> elements ["a", "b", "f a", "f a b", "zero"]
+    bindings = do
+      k <- elements [1, 2, 3 :: Int]
+      mapM (\i -> (,) ("x" ++ show i) <$> genBlocky (n - 2)) [1 .. k]
+
+-- | The braces and semicolons written out, on one line.
+braced :: Blocky -> String
+braced b = case b of
+  Leaf t     -> t
+  BDo is     -> "do { " ++ intercalate " ; " is ++ " }"
+  BLet bs body ->
+    "let { " ++ intercalate " ; " [ x ++ " = " ++ braced v | (x, v) <- bs ]
+      ++ " } in " ++ braced body
+
+-- | The same tree, laid out. @col@ is the column this term starts at.
+--
+-- **Every line but the first carries its own absolute indentation**, and the
+-- first is placed by the caller. Getting that convention wrong is how the first
+-- draft of this renderer double-indented a nested binding, which is worth
+-- recording: the oracle has to be right before disagreement means anything.
+--
+-- A block's items all begin one indent in from the keyword, and the token that
+-- closes the block sits strictly left of them — the offside rule written as a
+-- renderer instead of as a reader.
+laidOut :: Int -> Blocky -> [String]
+laidOut col b = case b of
+  Leaf t -> [t]
+  BDo is -> case is of
+    []         -> ["do { }"]
+    (i : rest) -> ("do " ++ i) : [ pad (col + 3) ++ j | j <- rest ]
+  BLet bs body ->
+    case bs of
+      [] -> ["let { } in " ++ headOf bodyLines] ++ restOf bodyLines
+      (b0 : more) ->
+        let (h0, t0) = binding b0
+         in [ "let " ++ h0 ]
+              ++ t0
+              ++ concat [ (pad inner ++ h) : t | (h, t) <- map binding more ]
+              ++ [ pad (col + 1) ++ "in " ++ headOf bodyLines ]
+              ++ restOf bodyLines
+    where
+      inner = col + 4
+      bodyLines = laidOut (col + 4) body
+      binding (x, v) =
+        let ls = laidOut (inner + length x + 3) v
+         in (x ++ " = " ++ headOf ls, restOf ls)
+
+headOf :: [String] -> String
+headOf (l : _) = l
+headOf []      = ""
+
+restOf :: [String] -> [String]
+restOf (_ : ls) = ls
+restOf []       = []
+
+pad :: Int -> String
+pad k = replicate k ' '
 
 -- --------------------------------------------------------------------------
 -- The printer and the parser, crossed over generated terms (2026-09-12)
