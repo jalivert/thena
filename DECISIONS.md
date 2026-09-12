@@ -776,6 +776,17 @@ go, instruction 1: wanted Surface, got Tm
 everything else uses, so `"."` is refused (it is not a token) where `"·"` is
 fine. A production may not begin with the language itself, and may not be empty.
 
+**The name must be free — as a tag AND as a type.** A declared language is
+looked up before the built-ins in both places, so `language String where { … }`
+would have made `String` in every signature mean the grammar, and
+`language surface where { … }` would have replaced the `⟨ … ⟩` fence. Both are
+refused, and so are two grammars under one name:
+
+```
+bad.thena.rules: in the grammar of String: String is one of instral's own types,
+  so a grammar may not take its name
+```
+
 ### `instral` has lambdas, and a local shadows a rule
 
 *Decided 2026-09-12.*
