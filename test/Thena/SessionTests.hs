@@ -18,6 +18,9 @@ import Thena.Development.Component (Component (..))
 import Thena.Development.Partial (Partial (..))
 import Thena.Declared (natDecl)
 import Thena.Standard (withRules)
+import Thena.Instral.Infer (InstralTypeError (..), Site (..))
+import Thena.Instral.Type (Ty (..))
+import Thena.Rules (RuleError (..))
 import Thena.Driver
   ( CommandError (..)
   , Loaded (..)
@@ -122,13 +125,19 @@ holeTests =
     -- @instral@ reference, so this one is simply a name nothing bound. The
     -- asymmetry it used to demonstrate (corners for Core, bare for Surface) is
     -- what this milestone removes: both languages are written in a fence now.
-  , halts "a bare argument is a reference, not a term"
-      (natGoal ++ ["attack", "into", "try-core zero"]) (UnboundInBody "zero")
+    --
+    -- **It is refused rather than halted as of the MS5 review**: a typed entry is
+    -- validated and typed like a rule file now, so an unbound name is a
+    -- 'Thena.Rules.UnboundInRule' at entry time.
+  , refuses "a bare argument is a reference, not a term"
+      (natGoal ++ ["attack", "into", "try-core zero"])
+      [UnboundInRule (GlobalName "entry") 0 "zero"]
     -- And the vocabularies still do not mix: the surface fence makes a
-    -- 'Thena.Ops.VSurface', which a core tactic will not take. The refusal is
-    -- the op's, which is where every other operand kind is settled.
-  , halts "a core tactic will not take a surface argument"
-      (natGoal ++ ["attack", "into", "try-core \10216 zero \10217"]) ExpectedTerm
+    -- 'Thena.Ops.VSurface', which a core tactic will not take. **The refusal is
+    -- the type system's now**, where it used to be the op's at run time.
+  , mistyped "a core tactic will not take a surface argument"
+      (natGoal ++ ["attack", "into", "try-core \10216 zero \10217"])
+      [Clash (InBody (GlobalName "entry") 0) TCore TSurface]
     -- The corners subsume phase 23b's parenthesisation rule: an argument that
     -- is not a single atom needed parentheses, and inside corners it does not.
   , ok "and inside them an argument needs no parentheses"
@@ -654,6 +663,20 @@ halts name ls why = testCase name $
   case reverse (loadedResponses (run ls)) of
     Ran _ (Halted r) : _ -> r @?= why
     other -> assertFailure ("expected a halt: " ++ show (take 1 other))
+
+-- | The entry did not resolve: an unbound name, a bad operand run (MS5 review).
+refuses :: String -> [String] -> [RuleError] -> TestTree
+refuses name ls es = testCase name $
+  case reverse (loadedResponses (run ls)) of
+    LineRefused es' : _ -> es' @?= es
+    other -> assertFailure ("expected a refusal: " ++ show (take 1 other))
+
+-- | The entry resolved and does not type check (MS5 review).
+mistyped :: String -> [String] -> [InstralTypeError] -> TestTree
+mistyped name ls es = testCase name $
+  case reverse (loadedResponses (run ls)) of
+    EntryMistyped es' : _ -> es' @?= es
+    other -> assertFailure ("expected a type error: " ++ show (take 1 other))
 
 rejects :: String -> [String] -> CommandError -> TestTree
 rejects name ls e = testCase name $

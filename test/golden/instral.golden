@@ -1,0 +1,29 @@
+thena spine> :theorem t : Type₀
+proving t : Type₀
+thena spine> m = concat "a" "b" ; say m
+ab
+thena spine> say m
+no parameter or earlier binding is called m
+thena spine> n = 42 ; p = (1, true) ; l = [1, 2, 3] ; say "bound"
+bound
+thena spine> f = \ z -> concat z z ; r = f "q" ; say r
+qq
+thena spine> prim-try 3
+instruction 1: wanted Core, got Int
+thena spine> say 42
+instruction 1: wanted String, got Int
+thena spine> :produces Core
+nothing gives a Core
+thena spine> :accepts Surface
+  elaborate/1 : Surface -> ()   (rule)
+  intro-binders/1 : Surface -> ()   (rule)
+  enter-binders/1 : Surface -> ()   (rule)
+  spine-arguments/3 : Core -> Core -> Surface -> ()   (rule)
+thena spine> do { attack }
+thena spine> :show
+▶ let ? t : Type₀ ≐ (
+    let ? t1 : Type₀ in
+    t1
+  ) in
+  t
+thena spine> :quit

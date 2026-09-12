@@ -473,6 +473,13 @@ data RuleError
   | DuplicateSignature String Int
     -- ^ two signatures for one callable
   | FunctionLeavesNothing String
+  | RuleAndFunction String Int
+    -- ^ one name is both a rule and a function at one arity (MS5, reviewed
+    -- 2026-09-12)
+  | BuiltInLanguage String
+    -- ^ a grammar declared under a built-in tag's name. @surface@ and @core@ name
+    -- Thena's own parsers; 'operandOf' looks a declared language up /first/, so
+    -- without this a user grammar would silently replace the fence
   | BadGrammarItem String String
     -- ^ in the grammar of ‹language›, ‹word› is neither the language itself nor
     -- @name@ (MS5 phase 69)
@@ -772,6 +779,7 @@ headOperand o = case o of
 -- The parser could not tell — it does not know what the language is called —
 -- which is the same division of labour an op word gets.
 resolveLanguage :: RawLanguage -> Either [RuleError] (String, Language)
+resolveLanguage (RawLanguage nm _) | nm `elem` builtInTags = Left [BuiltInLanguage nm]
 resolveLanguage (RawLanguage nm ps) = case partitionEithers (map production ps) of
   (e : es, _) -> Left (e : es)
   ([], ps')   -> case language nm ps' of
@@ -785,6 +793,16 @@ resolveLanguage (RawLanguage nm ps) = case partitionEithers (map production ps) 
         | w == nm     -> Right Recurse
         | w == "name" -> Right NameSlot
         | otherwise   -> Left (BadGrammarItem nm w)
+
+-- | The tags that name Thena's own parsers (MS5, reviewed 2026-09-12).
+--
+-- **A declared language may not take one.** 'operandOf' resolves a declared tag
+-- before the built-ins, so @language surface where { … }@ replaced the @⟨ … ⟩@
+-- fence's sibling spelling without a word of complaint. The notation being
+-- identical for a built-in and a generated parser (§6.0.1) is what makes this a
+-- trap rather than a curiosity.
+builtInTags :: [String]
+builtInTags = ["surface", "core"]
 
 -- | A written function, resolved into the rule it is (MS5 phase 68a).
 --

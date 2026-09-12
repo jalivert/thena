@@ -157,7 +157,7 @@ import qualified Thena.Surface.Zipper as Zipper
 import Thena.Syntax.Parser (ParseError (..))
 
 import Data.Foldable (toList)
-import Data.List (intercalate, partition)
+import Data.List (stripPrefix, intercalate, partition)
 import Thena.Instral.Grammar (GrammarError (..))
 import Thena.Instral.Type (Signature, Ty, renderSignature, renderTy)
 import Thena.Instral.Infer (renderInstralTypeError)
@@ -513,6 +513,9 @@ renderResponse s resp = case resp of
   RuleFileRefused p e -> renderRuleFileError p e
   -- **No path on the first line**, because the program is every base at once
   -- (MS5 phase 66c) and a site names the rule and the instruction inside it.
+  -- A typed entry, said without the rule it was wrapped in: the line is in
+  -- front of you (MS5, reviewed 2026-09-12).
+  EntryMistyped errs -> map (dropEntry . renderInstralTypeError) errs
   BasesIllTyped errs ->
     ("the rules do not type check:" : map (("  " ++) . renderInstralTypeError) errs)
   Helped rows   -> renderHelp rows
@@ -1933,6 +1936,8 @@ whereRuleError e = case e of
   UnitInsideAType n       -> inSignature n
   DuplicateSignature n _  -> inSignature n
   FunctionLeavesNothing n -> "in " ++ n ++ ": "
+  RuleAndFunction n _     -> "in " ++ n ++ ": "
+  BuiltInLanguage n       -> inLanguage n
   BadGrammarItem n _      -> inLanguage n
   BadGrammar n _          -> inLanguage n
   where
@@ -1969,6 +1974,11 @@ whatRuleError e = case e of
       ++ (if a == 1 then " argument" else " arguments")
   FunctionLeavesNothing _ ->
     "the right of the = leaves no value, so there is nothing to return"
+  RuleAndFunction _ k     ->
+    "this name is both a rule and a function at " ++ show k
+      ++ (if k == 1 then " argument" else " arguments")
+  BuiltInLanguage n       ->
+    n ++ " is one of Thena's own languages, so a grammar may not take its name"
   BadGrammarItem _ w      ->
     w ++ " is neither this language nor name"
   BadGrammar _ ge         -> case ge of
@@ -1981,6 +1991,13 @@ whatRuleError e = case e of
 -- **Each row says whether it is a rule or a function**, because the query lists
 -- both (his ruling) and the two are reached differently — a rule may also be
 -- found by @:matches@, a function never is.
+-- | Strip the synthetic rule name a typed entry is checked under (MS5, reviewed
+-- 2026-09-12) — the line is in front of you, so naming it says nothing.
+dropEntry :: String -> String
+dropEntry t = case stripPrefix "entry, " t of
+  Just rest -> rest
+  Nothing   -> t
+
 renderFitting
   :: String -> Ty -> [(GlobalName, Int, Bool, Signature)] -> [String]
 renderFitting verb ty [] = ["nothing " ++ verb ++ " a " ++ renderTy ty]

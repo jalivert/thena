@@ -1044,10 +1044,12 @@ resultOf o = case o of
   -- played, and a body has no value.
   Block _      -> Nothing
   Concat _ _   -> Just TString
-  -- **Its type is worked out by inference, not here.** A lambda's parameters
-  -- and result are whatever its body makes them, which this table cannot see —
-  -- so it claims a variable and "Thena.Instral.Infer" pins it.
-  Lambda _ _   -> Just (TVar 0)
+  -- **Its parameter and result types are inference's, but its ARITY is not**
+  -- (MS5 review). A lambda's types are whatever its body makes them, which this
+  -- table cannot see; how many parameters it has is written down right here. A
+  -- bare variable claimed nothing at all — which is the shape @list-head@ hid
+  -- in — so it says as much as it knows.
+  Lambda ps _  -> Just (TFun (map TVar [1 .. length ps]) (TVar 0))
   SurfaceOf _  -> Just TSurface
   Value _      -> Just (TVar 0)
   NameText _   -> Just TString

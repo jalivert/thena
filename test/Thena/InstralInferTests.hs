@@ -352,6 +352,22 @@ functions =
       -- **A function must produce.** Refused where it is written rather than by
       -- 'Thena.Rules.validate', which would report it against a binding the
       -- author never wrote.
+      -- **A name may not be a rule and a function at one arity** (MS5 review).
+      -- They would be two clauses of one callable, so the function would join
+      -- the rule's backtracking and a call could run either — which is exactly
+      -- what a function is not.
+    , testCase "may not share a name and arity with a rule" $
+        case load "rule dup x :- then say \"rule\"\ndup x = concat x x" of
+          RuleFileRefused _ (RuleIllFormed es)
+            | RuleAndFunction "dup" 1 `elem` es -> pure ()
+          other -> assertFailure ("expected a refusal, got " ++ show other)
+      -- …and at a different arity they are two callables, as they are for two
+      -- rules.
+    , testCase "but may share one at a different arity" $
+        case load "rule dup x :- then say \"rule\"\ndup = concat \"a\" \"b\"" of
+          BasesLoaded _ -> pure ()
+          other -> assertFailure ("expected a load, got " ++ show other)
+
     , testCase "that leaves nothing is refused" $
         case load "f x = say \"hi\"" of
           RuleFileRefused _ (RuleIllFormed es)
@@ -494,6 +510,17 @@ objectLanguages =
     , refusedGrammar "a terminal that is not one token"
         "language Tm where { var : \"a b\" }"
         (BadGrammar "Tm" (TerminalDoesNotLex "Tm" "a b"))
+      -- **A built-in tag may not be taken** (MS5 review). 'Thena.Rules.operandOf'
+      -- looks a declared language up BEFORE the built-ins, so without this
+      -- @language surface where { … }@ silently replaced the @⟨ … ⟩@ fence's
+      -- sibling spelling — and §6.0.1 says a user cannot tell a built-in tag
+      -- from a generated one, which is what makes it a trap.
+    , refusedGrammar "a built-in tag's name"
+        "language surface where { var : name }"
+        (BuiltInLanguage "surface")
+    , refusedGrammar "and the other one"
+        "language core where { var : name }"
+        (BuiltInLanguage "core")
     , refusedGrammar "a word that is neither the language nor name"
         "language Tm where { var : nonsense }"
         (BadGrammarItem "Tm" "nonsense")

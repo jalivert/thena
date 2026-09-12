@@ -168,12 +168,12 @@ tests =
           -- **And it dies with the entry**, which is the whole of §4's argument:
           -- there is no persistent REPL environment to unwind.
         , testCase "and not in the next one" $
-            -- **It fails when it runs and not when it loads**, because a typed
-            -- entry is resolved but not validated — see @ms5\/CLOSEOUT.md@. What
-            -- this asserts is the scoping, which is the phase's claim.
+            -- **Refused at entry time as of the MS5 review** — a typed entry is
+            -- validated and typed the way a rule file is, so the binding being
+            -- gone is reported before anything runs rather than halting mid-way.
             snd (say [ natCommand, ":theorem t : Nat"
                      , "m = concat \"a\" \"b\"", "say m" ])
-              @?= Ran [] (Halted (UnboundInBody "m"))
+              @?= LineRefused [UnboundInRule (GlobalName "entry") 0 "m"]
           -- A value may be bound at the prompt now too (phase 68a's `Op.Value`).
         , testCase "a literal may be bound" $
             snd (say [natCommand, ":theorem t : Nat", "n = 42 ; say \"ok\""])

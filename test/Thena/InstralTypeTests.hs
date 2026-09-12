@@ -149,6 +149,9 @@ signatureTests =
     , sig "goal"         Goal                           "Core"
     , sig "prim-attack"  Attack                         "()"
       -- The data structures are where the scheme variables are.
+      -- Its arity is the table's even though its types are inference's.
+    , sig "lambda, one parameter"
+                         (Op.Lambda ["x"] [])           "b -> a"
     , sig "some"         (Op.Some r)                    "a -> Option a"
     , sig "none"         Op.None                        "Option a"
     , sig "list-head"    (Op.ListHead r)                "List a -> Option a"

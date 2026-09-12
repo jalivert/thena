@@ -431,6 +431,10 @@ data Response
   | BasesListed [RuleBase]      -- ^ @:bases@ — name, description, path
   | RulesListed [RuleBase]      -- ^ @:rules@ — the rules themselves, by base
   | RuleFileRefused FilePath RuleFileError
+  | EntryMistyped [InstralTypeError]
+    -- ^ a typed entry that resolved and does not type check (MS5, reviewed
+    -- 2026-09-12). Said without naming a rule, for 'LineRefused'\'s reason: the
+    -- line is in front of you.
   | BasesIllTyped [InstralTypeError]
     -- ^ every file read and parsed, and the **program** they make does not type
     -- check (MS5 phase 66c).
@@ -590,6 +594,8 @@ parseDevelopment = parseWith resolvePartial
 data LineError
   = LineSyntax SyntaxError
   | LineIllFormed [RuleError]
+  | LineMistyped [InstralTypeError]
+    -- ^ the entry resolved and does not type check (MS5, reviewed 2026-09-12)
 
 -- | A whole typed **entry**, which is an @instral@ block (MS5 phase 70).
 --
@@ -603,11 +609,26 @@ data LineError
 --
 -- **The same grammar a rule body has**, so nothing is \"@instral@, except at the
 -- REPL\".
-instralEntry :: [(String, Language)] -> String -> Either LineError [Instr]
-instralEntry ls src = do
+instralEntry
+  :: [RuleBase] -> String -> Either LineError [Instr]
+instralEntry bases src = do
   ts <- mapLeft LineSyntax (tokensOf src)
   is <- mapLeft (LineSyntax . ParseFailed) (parseEntry ts)
-  mapLeft LineIllFormed (resolveBlock ls (GlobalName "entry") (concatMap hoist (reverse is)))
+  prog <- mapLeft LineIllFormed
+            (resolveBlock (allLanguages bases) (GlobalName "entry")
+               (concatMap hoist (reverse is)))
+  -- **An entry is checked the way a rule file is** (MS5, reviewed 2026-09-12).
+  -- It was resolved and then neither validated nor typed, so @prim-try 3@ at the
+  -- prompt halted mid-run where the same instruction in a rule body is refused
+  -- when the file loads. The entry is wrapped as a headless rule and run through
+  -- both passes with every loaded base beside it, so a call in it is checked
+  -- against the real signatures.
+  let entry = Rule (GlobalName "entry") [] [] prog
+  case validate entry of
+    e : es -> Left (LineIllFormed (e : es))
+    []     -> case snd (inferProgram (allSignatures bases) (allCallable bases ++ [entry])) of
+      []   -> Right prog
+      errs -> Left (LineMistyped errs)
   where
     -- Written core terms are hoisted per instruction — @try ⌜ x ⌝@ is
     -- @⌜1⌝ = resolve-core ⌜ x ⌝ ; try ⌜1⌝@, which is what a rule body writes by
@@ -1219,6 +1240,8 @@ dispatch s name arg = case name of
     byType verb question = case parseInstralType langs arg of
       Left (LineSyntax e)     -> (s, Failed e)
       Left (LineIllFormed es) -> (s, LineRefused es)
+      -- 'parseInstralType' never types anything, so it cannot answer this.
+      Left (LineMistyped _)   -> (s, LineRefused [])
       Right ty ->
         ( s
         , Fitting verb ty
@@ -1580,9 +1603,10 @@ dispatch s name arg = case name of
     -- the split into a word and an argument run was 62b's shape and an entry has
     -- no such shape: it is a sequence of instructions, of which one op and its
     -- operands is the degenerate case.
-    line = case instralEntry (allLanguages (rules machine)) (name ++ " " ++ arg) of
+    line = case instralEntry (rules machine) (name ++ " " ++ arg) of
       Left (LineSyntax e)     -> (s, Failed e)
       Left (LineIllFormed es) -> (s, LineRefused es)
+      Left (LineMistyped es)  -> (s, EntryMistyped es)
       Right is ->
         progress (sessionStepping s) s { sessionMachine = load is machine } []
 
@@ -1939,7 +1963,8 @@ resolveAll
   -> Either RuleFileError
        ([(String, Signature)], [(String, Language)], [Rule], [Rule])
 resolveAll raws =
-  case ( concat langErrs ++ concat ruleErrs ++ concat fnErrs ++ sigErrs ++ dups
+  case ( concat langErrs ++ concat ruleErrs ++ concat fnErrs ++ sigErrs
+           ++ dups ++ collisions
        , concatMap validate (ok ++ fns)
        ) of
     ([], [])     -> Right (sigs, langs, fns, ok)
@@ -1955,6 +1980,19 @@ resolveAll raws =
     (fnErrs, fns)   = partitionEithers [ resolveFunction langs f | DeclFunction f <- raws ]
     (sigErrs, sigs) =
       partitionEithers [ resolveSignature langs g | DeclSignature g <- raws ]
+    -- **A name may not be a rule and a function at one arity** (MS5, reviewed
+    -- 2026-09-12). They would become two clauses of one callable — 'clauses'
+    -- searches 'Thena.Rules.allCallable' — so the function would join the rule's
+    -- backtracking and a call could run either. A function has one clause and no
+    -- head, which is exactly what that is not.
+    collisions =
+      [ RuleAndFunction n (length (ruleParams f))
+      | f <- fns
+      , let GlobalName n = ruleName f
+      , any (\r -> ruleName r == ruleName f
+                     && length (ruleParams r) == length (ruleParams f)) ok
+      ]
+
     dups =
       [ DuplicateSignature n (length (sigParams t))
       | (i, (n, t)) <- zip [0 :: Int ..] sigs

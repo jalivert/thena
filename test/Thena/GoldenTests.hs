@@ -856,6 +856,39 @@ tests =
         , ":quit"
         ]
 
+      -- **`instral` at the prompt, end to end** (MS5, added by the review).
+      -- Nothing pinned the milestone's own REPL surface: an entry is a block, a
+      -- value can be bound, a lambda can be made and applied, and both the
+      -- validation and the type check happen before anything runs. A golden is
+      -- the only thing that would notice all of that changing at once.
+    , script
+        "instral"
+        [ ":theorem t : Type\8320"
+          -- **An entry is a block** (phase 70): several instructions, and a
+          -- binding read later in the same entry.
+        , "m = concat \"a\" \"b\" ; say m"
+          -- …and it dies with the entry, reported before anything runs.
+        , "say m"
+          -- **A value may be bound** (phase 68a), which `Instr`'s two shapes
+          -- refused until then.
+        , "n = 42 ; p = (1, true) ; l = [1, 2, 3] ; say \"bound\""
+          -- **A lambda, made and applied** (phase 68b). A local shadows a rule,
+          -- which is what makes `f \"z\"` an application rather than a call.
+        , "f = \\ z -> concat z z ; r = f \"q\" ; say r"
+          -- **The type check runs on a typed entry** (MS5 review). Both of these
+          -- halted mid-run before it did.
+        , "prim-try 3"
+        , "say 42"
+          -- **The second matching instruction** (phase 71) — by type, where
+          -- `:matches` is by state.
+        , ":produces Core"
+        , ":accepts Surface"
+          -- A block is still written, and still means the same thing.
+        , "do { attack }"
+        , ":show"
+        , ":quit"
+        ]
+
       -- **Yielding to the REPL** (MS4 phase 45b). The rule stops where it is
       -- and hands control over; every command works, the development is the
       -- half-built one, and @yield@ hands control back. The word is the same in

@@ -566,12 +566,18 @@ producesTests =
         -- The data structures (MS5 phase 65). A list and a pair are built by the
         -- operand itself, so what is exercised here is the option's two
         -- constructors and the five accessors.
+      -- **A lambda** (MS5 review): its types are inference's, its arity is the
+      -- table's, and this is what crosses the second against the engine.
+      , ("lambda",       e, hole, [],
+           Ops.Lambda ["x"] [Do (Ops.Return (Ref "x"))])
       , ("some",         e, hole, [],            Ops.Some (text "x"))
       , ("none",         e, hole, [],            Ops.None)
       , ("list-head",    e, hole, [],            Ops.ListHead (ListOf [text "x"]))
       , ("list-tail",    e, hole, [],            Ops.ListTail (ListOf [text "x"]))
-      , ("pair-first",   e, hole, [],            Ops.PairFirst (PairOf (text "x") (text "y")))
-      , ("pair-second",  e, hole, [],            Ops.PairSecond (PairOf (text "x") (text "y")))
+      -- **The two halves are different SHAPES on purpose** (MS5 review): with
+      -- both text, a table that swapped @a@ and @b@ would still check out.
+      , ("pair-first",   e, hole, [],            Ops.PairFirst (PairOf (text "x") (Lit (VInt 1))))
+      , ("pair-second",  e, hole, [],            Ops.PairSecond (PairOf (text "x") (Lit (VInt 1))))
       , ("option-value", e, hole, [Bind "o" (Ops.Some (text "x"))],
            Ops.OptionValue (Ref "o"))
       , ("apply-next",       nat, holeAt natType, [],
@@ -592,17 +598,70 @@ checkProduces globalEnv cur before o =
   case runOut (machineIn globalEnv cur (before ++ [Bind "r" o])) of
     Left r  -> assertFailure ("the op did not run: " ++ show r)
     Right m -> do
-      let got = lookup "r" (Thena.Engine.env (exec m))
+      let e   = Thena.Engine.env (exec m)
+          got = lookup "r" e
       (got /= Nothing) @?= produces o
       -- **And the value is of the type the table says** (MS5 phase 66b). The
       -- presence check above is what 'produces' was; this is the rest of
       -- 'Thena.Ops.resultOf', aimed at the same authority — the engine — rather
       -- than at another table. A signature that claims @Surface@ for an op that
       -- hands back a term fails here.
-      case (got, sigResult (signatureOf o)) of
-        (Just v, Just ty) | not (v `inhabits` ty) ->
+      -- **The scheme's variables are bound from the operands' actual values
+      -- first** (MS5 review). Without this a row whose result is a variable
+      -- asserts nothing at all — @(_, TVar _) -> True@ — which is how
+      -- @list-head : List a -> a@ survived while the engine answered with an
+      -- @Option@. Binding @a@ from the argument makes the claim checkable.
+      let bound = foldl bindStep (Just []) (Ops.operandTypes o)
+          bindStep acc (op, ty) = acc >>= \b -> case Ops.operandIn e op of
+            Left _  -> Just b
+            Right v -> bindFrom b v ty
+      case (got, sigResult (signatureOf o), bound) of
+        (Just v, Just ty, Just b) | not (v `inhabits` substituteTy b ty) ->
+          assertFailure (renderTy (substituteTy b ty)
+                          ++ " was claimed, but the engine produced " ++ show v)
+        (Just v, Just ty, Nothing) | not (v `inhabits` ty) ->
           assertFailure (renderTy ty ++ " was claimed, but the engine produced " ++ show v)
         _ -> pure ()
+
+-- | What a scheme's variables stand for, read off the values an op was given
+-- (MS5 review).
+--
+-- **A 'VText' binds a variable to 'TString'**, and 'inhabits' accepts a 'VText'
+-- at either 'TString' or 'TName', so the text ops are not made stricter than
+-- they are.
+bindFrom :: [(Int, Ty)] -> Value -> Ty -> Maybe [(Int, Ty)]
+bindFrom b v ty = case (ty, v) of
+  (TVar i, _) -> case lookup i b of
+    Just _  -> Just b
+    Nothing -> fmap (\t -> (i, t) : b) (principal v)
+  (TList a,   VList (u : _))       -> bindFrom b u a
+  (TList _,   VList [])            -> Just b
+  (TOption a, VOption (Just u))    -> bindFrom b u a
+  (TOption _, VOption Nothing)     -> Just b
+  (TPair x y, VPair u w)           -> bindFrom b u x >>= \b' -> bindFrom b' w y
+  _                                -> Just b
+
+-- | A value's own type, where it has exactly one.
+principal :: Value -> Maybe Ty
+principal v = case v of
+  VText _    -> Just TString
+  VInt _     -> Just TInt
+  VChar _    -> Just TChar
+  VBool _    -> Just TBool
+  VTerm _    -> Just TCore
+  VRaw _     -> Just TCore
+  VSurface _ -> Just TSurface
+  VObject n _ -> Just (TObject n)
+  _          -> Nothing
+
+substituteTy :: [(Int, Ty)] -> Ty -> Ty
+substituteTy b ty = case ty of
+  TVar i    -> maybe ty id (lookup i b)
+  TList a   -> TList (substituteTy b a)
+  TOption a -> TOption (substituteTy b a)
+  TPair x y -> TPair (substituteTy b x) (substituteTy b y)
+  TFun as r -> TFun (map (substituteTy b) as) (substituteTy b r)
+  _         -> ty
 
 -- | Does this value belong to that type?
 --
@@ -626,6 +685,8 @@ inhabits v t = case (v, t) of
   (VBool _,    TBool)   -> True
   (VList vs,   TList a) -> all (`inhabits` a) vs
   (VPair a b,  TPair x y) -> inhabits a x && inhabits b y
+  -- **A closure's arity is checkable even when its types are not** (MS5 review).
+  (VClosure ps _ _, TFun as _) -> length ps == length as
   (VOption Nothing,  TOption _) -> True
   (VOption (Just u), TOption a) -> inhabits u a
   -- A scheme variable is satisfied by anything; what it is bound to is
