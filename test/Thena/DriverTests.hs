@@ -26,6 +26,7 @@ import Thena.Engine (Machine (..), Question (..), globals, development, flatten)
 import Thena.Errors (FailReason (..))
 import Thena.Global.Declare (DeclareError (..))
 import Thena.Global.Env (isDeclared)
+import Thena.Repl (unfinished)
 import Thena.Ops (AnswerKind (..), partWords)
 import Thena.Rules (RuleError (..))
 
@@ -113,19 +114,19 @@ tests =
           -- refusals; what changed is who says so.
           testCase "cross must say which field" $
             snd (command withRules "cross")
-              @?= LineRefused [BadOperands (GlobalName "cross") 0 "cross"]
+              @?= LineRefused [BadOperands (GlobalName "entry") 0 "cross"]
         , testCase "and it must be one of the two there are" $
             snd (command withRules "cross body")
-              @?= LineRefused [BadOperands (GlobalName "cross") 0 "cross"]
+              @?= LineRefused [BadOperands (GlobalName "entry") 0 "cross"]
         , testCase "a positional descent needs a number" $
             snd (command withRules "param")
-              @?= LineRefused [BadOperands (GlobalName "param") 0 "param"]
+              @?= LineRefused [BadOperands (GlobalName "entry") 0 "param"]
         , testCase "and it has to be one" $
             snd (command withRules "param x")
-              @?= LineRefused [BadOperands (GlobalName "param") 0 "param"]
+              @?= LineRefused [BadOperands (GlobalName "entry") 0 "param"]
         , testCase "a plain descent takes no argument" $
             snd (command withRules "cod 2")
-              @?= LineRefused [BadOperands (GlobalName "cod") 0 "cod"]
+              @?= LineRefused [BadOperands (GlobalName "entry") 0 "cod"]
         , testCase ":where answers with the cursor, not with text" $
             case snd (command withRules ":where") of
               Where _ -> pure ()
@@ -149,6 +150,50 @@ tests =
             filter (`notElem` colonWordsIn commandSummary) everyColonCommand @?= []
         , testCase "every bare command the driver has is listed" $
             filter (`notElem` wordsIn commandSummary) everyBareCommand @?= []
+        ]
+    , testGroup
+        "a typed entry is an instral block"
+        -- **MS5 phase 70, his §4**: a REPL entry is a block, so assignment and
+        -- sequencing are legal at the prompt and a binding dies with the entry —
+        -- not by prohibition, but because that is what block scope means.
+        [ testCase "several instructions run as one program" $
+            devOf (fst (say [natCommand, ":theorem t : Nat", "attack ; intro"]))
+              @?= devOf (fst (say [natCommand, ":theorem t : Nat", "attack", "intro"]))
+        , testCase "a binding is read later in the same entry" $
+            snd (say [natCommand, ":theorem t : Nat", "m = concat \"a\" \"b\" ; say m"])
+              @?= Ran ["ab"] Completed
+          -- **And it dies with the entry**, which is the whole of §4's argument:
+          -- there is no persistent REPL environment to unwind.
+        , testCase "and not in the next one" $
+            -- **It fails when it runs and not when it loads**, because a typed
+            -- entry is resolved but not validated — see @ms5\/CLOSEOUT.md@. What
+            -- this asserts is the scoping, which is the phase's claim.
+            snd (say [ natCommand, ":theorem t : Nat"
+                     , "m = concat \"a\" \"b\"", "say m" ])
+              @?= Ran [] (Halted (UnboundInBody "m"))
+          -- A value may be bound at the prompt now too (phase 68a's `Op.Value`).
+        , testCase "a literal may be bound" $
+            snd (say [natCommand, ":theorem t : Nat", "n = 42 ; say \"ok\""])
+              @?= Ran ["ok"] Completed
+        ]
+    , testGroup
+        "an entry keeps reading while it cannot be finished"
+        -- The trigger for a multi-line entry (MS5 phase 70). Indentation is what
+        -- a continuation must LOOK like; this is what says one is coming.
+        [ testCase "a trailing semicolon wants more" $
+            unfinished "h = here ;" @?= True
+        , testCase "an unclosed brace wants more" $
+            unfinished "do {" @?= True
+        , testCase "an unclosed bracket too" $
+            unfinished "f [1," @?= True
+        , testCase "a finished entry does not" $
+            unfinished "h = here ; goto h" @?= False
+        , testCase "a balanced block does not" $
+            unfinished "do { attack }" @?= False
+          -- Something the lexer cannot read is a syntax error and not a
+          -- continuation, so the driver gets to report it.
+        , testCase "and nor does something that will not lex" $
+            unfinished "\"unterminated" @?= False
         ]
     , testGroup
         "views"

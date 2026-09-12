@@ -29,7 +29,7 @@ module Thena.Syntax.Parser
   , parseRule
   , parseRules
   , parseAtoms
-  , parseOperandRun
+  , parseEntry
   ) where
 
 import Thena.Syntax.Concrete
@@ -50,7 +50,9 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 %name parseRule Rule
 %name parseRules RuleFile
 %name parseAtoms AtomRun
-%name parseOperandRun OperandRun
+-- **A whole REPL entry** (MS5 phase 70) — the same @Body@ a rule has, so a
+-- typed entry and a rule body are one grammar and not two.
+%name parseEntry Body
 %tokentype { Located Token }
 %monad { Either ParseError }
 %error { parseError }
@@ -320,9 +322,6 @@ Op :: { RawOp }
 -- | A REPL line's arguments (MS5 phase 62b) — the same run of operands a rule
 -- body writes after an op word, and its own start symbol because the driver has
 -- already split the word off.
-OperandRun :: { [RawOperand] }
-  : Operands                               { reverse $1 }
-
 Operands :: { [RawOperand] }
   :                                        { [] }
   | Operands Operand                       { $2 : $1 }

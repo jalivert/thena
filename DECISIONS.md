@@ -690,6 +690,33 @@ never appears in `:matches` and `prove` never runs it.
 **A function must produce a value.** `f x = say "hi"` is refused — `say` leaves
 nothing, so there is nothing for `f` to be.
 
+### What you type at the prompt is a block
+
+*Decided 2026-09-12.*
+
+An entry is an `instral` block, so assignment and sequencing work at the prompt:
+
+```
+thena spine> h = here ; claim "k" ⌜ Type₀ ⌝ ; goto h
+thena spine> n = 42 ; say "ok"
+```
+
+**A binding dies with the entry.** Not a prohibition — that is what block scope
+means, and it is why there is no persistent REPL environment for `:undo` to
+unwind. The `do { … }` workaround is no longer needed for this.
+
+**An entry may span lines.** It keeps reading while it cannot be finished — a
+trailing `;`, or an unclosed bracket — and **every continuation line must be
+indented**, the same rule a rule file uses for declarations:
+
+```
+thena spine> h = here ;
+         ...   claim "k" ⌜ Type₀ ⌝ ;
+         ...   goto h
+```
+
+An unindented continuation is refused and the entry is dropped.
+
 ### An object language is declared with a grammar, and becomes a type
 
 *Decided 2026-09-12.*

@@ -14,6 +14,7 @@ module Thena.Repl
   , turn
   , transcript
   , transcriptFrom
+  , unfinished
   , renderCore
   , renderSurface
   , renderLevel
@@ -149,7 +150,7 @@ import Thena.Ops
   )
 import Thena.Rules (RuleBase (..), RuleError (..))
 import qualified Thena.Ops as Ops
-import Thena.Syntax.Lexer (LexError (..), Pos (..), Token (..))
+import Thena.Syntax.Lexer (Located (..), lexTokens, LexError (..), Pos (..), Token (..))
 import Thena.Surface.Layout (LayoutError (..))
 import Thena.Surface.Parser (SurfaceParseError (..))
 import qualified Thena.Surface.Zipper as Zipper
@@ -176,7 +177,11 @@ loop s pending = do
   input <- getInputLine (prompt s pending)
   case input of
     Nothing   -> pure ()          -- end of input: Ctrl-D
-    Just line -> do
+    Just first -> gather first >>= \entry -> case entry of
+      Left problem -> outputStrLn problem >> loop s pending
+      Right line   -> run line
+  where
+   run line = do
       let t = turn s pending line
       mapM_ outputStrLn (turnOutput t)
       case turnResponse t of
@@ -200,6 +205,59 @@ loop s pending = do
           loop s' Nothing
         _ | turnQuit t -> pure ()
           | otherwise  -> loop (turnSession t) (turnPending t)
+
+   -- | **An entry, not a line** (MS5 phase 70, his §4 extension): keep reading
+   -- while what has been typed cannot be finished, and require every
+   -- continuation to be **indented** — the rule a rule file already has, where a
+   -- declaration begins in column 1.
+   --
+   -- **\"Cannot be finished\" is the trigger and indentation is the shape**, and
+   -- that split is deliberate: pure indentation would make the prompt lag a
+   -- line, because the REPL could not know an entry was over until it saw the
+   -- next one. See @ms5\/CLOSEOUT.md@ — his to overrule.
+   --
+   -- A colon command is never continued: it is a command, not @instral@.
+   gather firstLine
+     | take 1 (dropWhile (== ' ') firstLine) == ":" = pure (Right firstLine)
+     | otherwise = keepReading firstLine
+
+   keepReading acc
+     | not (unfinished acc) = pure (Right acc)
+     | otherwise = do
+         more <- getInputLine "         ... "
+         case more of
+           Nothing -> pure (Right acc)     -- end of input finishes it
+           Just l
+             | all (== ' ') l -> pure (Right acc)
+             | take 1 l == " " -> keepReading (acc ++ "\n" ++ l)
+             | otherwise ->
+                 pure (Left "a continuation line must be indented; entry dropped")
+
+-- | Can what has been typed so far not be a whole entry?
+--
+-- **Two shapes, and both are lexical**: an unclosed bracket, and a trailing
+-- @;@ — which is how a person says /there is more/ at a prompt where there is
+-- no next line to look at yet. Anything the lexer cannot read at all is a
+-- syntax error and not a continuation, so it is answered here as finished and
+-- reported by the driver.
+unfinished :: String -> Bool
+unfinished src = case lexTokens src of
+  Left _   -> False
+  Right ts -> depth ts > 0 || endsOpen ts
+  where
+    depth = foldl step (0 :: Int) . map (\(Located _ t) -> t)
+    step d t = case t of
+      TLBrace   -> d + 1
+      TLParen   -> d + 1
+      TLBracket -> d + 1
+      TRBrace   -> d - 1
+      TRParen   -> d - 1
+      TRBracket -> d - 1
+      _         -> d
+
+    endsOpen ts = case reverse ts of
+      Located _ TSemi : _ -> True
+      _                   -> False
 
 -- --------------------------------------------------------------------------
 -- Loading (§9, phase 11)

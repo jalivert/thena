@@ -171,7 +171,7 @@ import Thena.Syntax.Parser
   ( parseData
   , parseEquation
   , parseNameAndType
-  , parseOperandRun
+  , parseEntry
   , parseRules
   , parseTerm
   )
@@ -577,26 +577,33 @@ data LineError
   = LineSyntax SyntaxError
   | LineIllFormed [RuleError]
 
--- | One typed line, compiled to the program it is (MS5 phase 62b).
+-- | A whole typed **entry**, which is an @instral@ block (MS5 phase 70).
 --
--- **The whole of the REPL's argument handling.** The word is resolved and the
--- operands are read by "Thena.Rules", which is what a rule file and a @do@
--- block already use, so a line means at the prompt exactly what it means in a
--- body: an op if one bears that word at that arity, a call to a rule of that
--- name otherwise.
+-- **The entry is the unit and a line is the degenerate case** — his extension,
+-- §4. Until this phase a typed line was one op and its operands
+-- and its operands, so @h = here@ at the prompt was unwritable and the
+-- workaround was to type a @do@ block; §4's whole argument is that no
+-- workaround is needed, because @Bind@ is already block-scoped and a REPL entry
+-- is a block. **A binding dies with the entry**, not by prohibition but because
+-- that is what block scope means.
 --
--- It replaced @parseArguments@, which split the run by bracket depth and read
--- a cornered group as a core term and everything else as a /surface/ one. That
--- privilege is the thing MS5 removes (@discussion\/the-five-languages.md@ §6.3):
--- a bare argument is @instral@ now, and a term is written in the fence its
--- language is entitled to.
-instralLine :: [(String, Language)] -> String -> String -> Either LineError [Instr]
-instralLine ls w arg = do
-  ts <- mapLeft LineSyntax (tokensOf arg)
-  os <- mapLeft (LineSyntax . ParseFailed) (parseOperandRun ts)
-  let (binds, os') = resolving w os
-  mapLeft LineIllFormed
-    (resolveBlock ls (GlobalName w) (binds ++ [RawDo (RawOp w os')]))
+-- **The same grammar a rule body has**, so nothing is \"@instral@, except at the
+-- REPL\".
+instralEntry :: [(String, Language)] -> String -> Either LineError [Instr]
+instralEntry ls src = do
+  ts <- mapLeft LineSyntax (tokensOf src)
+  is <- mapLeft (LineSyntax . ParseFailed) (parseEntry ts)
+  mapLeft LineIllFormed (resolveBlock ls (GlobalName "entry") (concatMap hoist (reverse is)))
+  where
+    -- Written core terms are hoisted per instruction — @try ⌜ x ⌝@ is
+    -- @⌜1⌝ = resolve-core ⌜ x ⌝ ; try ⌜1⌝@, which is what a rule body writes by
+    -- hand (MS5 phase 61b).
+    hoist i = case i of
+      RawDo (RawOp w os)   -> let (bs, os') = resolving w os
+                               in bs ++ [RawDo (RawOp w os')]
+      RawBind n (RhsOp (RawOp w os)) ->
+        let (bs, os') = resolving w os in bs ++ [RawBind n (RhsOp (RawOp w os'))]
+      _ -> [i]
 
 -- | Hoist every written core term out of a line, resolving it first.
 --
@@ -1518,8 +1525,12 @@ dispatch s name arg = case name of
          in progress (sessionStepping s)
                      s { sessionMachine = load is machine { names = n1 } } []
 
-    -- One typed line, as the program it is (MS5 phase 62b).
-    line = case instralLine (allLanguages (rules machine)) name arg of
+    -- **One typed ENTRY, as the program it is** (MS5 phase 62b, widened from a
+    -- line to a block at phase 70). The two halves are put back together because
+    -- the split into a word and an argument run was 62b's shape and an entry has
+    -- no such shape: it is a sequence of instructions, of which one op and its
+    -- operands is the degenerate case.
+    line = case instralEntry (allLanguages (rules machine)) (name ++ " " ++ arg) of
       Left (LineSyntax e)     -> (s, Failed e)
       Left (LineIllFormed es) -> (s, LineRefused es)
       Right is ->
@@ -1545,7 +1556,7 @@ dispatch s name arg = case name of
 -- and the list has not shrunk to match. @assume@, @claim@, @quantify@, @unify@,
 -- @certify@, @goto@, @cross@, the moves and the field words all lost their case
 -- in 'dispatch' that phase: they are reached the way a rule is, through
--- 'instralLine'. They are kept here because an op is in the binary and nothing
+-- 'instralEntry'. They are kept here because an op is in the binary and nothing
 -- else lists one — @:rules@ shows the base, and there is no @:ops@ — so
 -- removing them would lose the only place they are written down.
 --
