@@ -22,7 +22,7 @@ import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 import Test.Tasty.QuickCheck (counterexample, forAll, property, testProperty, withNumTests)
 
 import Thena.Core.Context (lamOver, piOver)
-import Thena.Core.TypingTests (genTyped, seedContext)
+import Thena.Core.TypingTests (genTyped)
 import Thena.Global.Env (emptyGlobals)
 
 import Thena.Core.Level (LevelVar (..), Level (..), Unmet (..), levelOfNat)
