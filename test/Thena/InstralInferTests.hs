@@ -57,6 +57,21 @@ shippedBase =
     [ testCase "infers with no errors at all" $
         map renderInstralTypeError (snd (inferProgram [] expectedStandard)) @?= []
 
+      -- **What it inferred, handed back as a DECLARATION** (2026-09-13).
+      -- Inference and checking are two modes over one program — §6.5 — and
+      -- nothing crossed them: every annotation test writes a signature by hand,
+      -- so a type inference can produce but the checker will not accept has
+      -- nowhere to show up. Declaring exactly what was inferred must change
+      -- nothing.
+      --
+      -- It is also the strongest statement available that an inferred type is
+      -- /sayable/: 'generalEnough' refuses a declared scheme whose variables do
+      -- not stay distinct variables, so an inferred signature that could not be
+      -- written down fails here.
+    , testCase "and declaring exactly what it inferred changes nothing" $
+        let inferred = [ (n, sg) | ((GlobalName n, _), sg) <- fst (inferProgram [] expectedStandard) ]
+         in map renderInstralTypeError (snd (inferProgram inferred expectedStandard)) @?= []
+
       -- **Written out, not counted.** A signature is what a later phase will
       -- move by accident, and every one of these was inferred from the head
       -- predicates and the ops in the body — nothing is annotated.
