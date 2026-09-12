@@ -598,6 +598,20 @@ objectLanguages =
           RuleFileRefused _ (RuleIllFormed (BadRegion _ _ "Tm" _ : _)) -> pure ()
           other -> assertFailure ("expected a region error, got " ++ show other)
 
+      -- **A `${ … }` escape lexes and no grammar reads it** (found 2026-09-12,
+      -- @ms5\/CLOSEOUT.md@ 27). @discussion\/the-five-languages.md@ §6.9 makes
+      -- the escape the nesting mechanism and @MS5.md@ put it in phase 60's
+      -- scope; the lexer builds it and @LexerTests@ covers it in five cases,
+      -- but neither @Syntax.Parser@ nor @Surface.Parser@ declares
+      -- @TEscapeOpen@, so a region containing one is a parse error at load.
+      --
+      -- Pinned as a refusal so that the day it is implemented, this test has to
+      -- be changed on purpose rather than quietly starting to pass.
+    , testCase "a nesting escape is refused, because only the lexer knows it" $
+        case load (tm ++ "rule go t :- then u = Tm`(x ${ t })` ; prove") of
+          RuleFileRefused _ (RuleSyntaxError _) -> pure ()
+          other -> assertFailure ("expected a syntax error, got " ++ show other)
+
       -- **An empty region is end of input** (found probing degenerate input,
       -- 2026-09-12). The failure path picked a token out of the token list to
       -- report, and an empty region has none, so it fell back on an arbitrary
