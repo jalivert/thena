@@ -20,7 +20,7 @@ module Thena.ElaborateTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Test.Tasty.QuickCheck
-  (Gen, counterexample, elements, forAll, oneof, property, testProperty, withNumTests)
+  (Gen, counterexample, forAll, oneof, property, testProperty, withNumTests)
 
 import Thena.Driver (Loaded (..), loadSource)
 import Thena.Standard (withRules)
