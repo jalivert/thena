@@ -10,8 +10,15 @@
 -- the engine@ group, which now also asserts the value's shape.
 module Thena.InstralTypeTests (tests) where
 
+import Data.List (nub)
+
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (testCase, (@?), (@?=))
+import Test.Tasty.HUnit (assertFailure, testCase, (@?), (@?=))
+import Test.Tasty.QuickCheck (Arbitrary (..), Gen, elements, oneof, sized, testProperty, (===))
+
+import Thena.Instral.Concrete (RawSignature (..))
+import Thena.Syntax.Lexer (lexTokens)
+import Thena.Syntax.Parser (parseInstralTy)
 
 import Thena.Core.Term (GlobalName (..))
 import Thena.Instral.Type
@@ -25,7 +32,7 @@ import Thena.Instral.Type
 import Thena.Ops (AnswerKind (..), Op (..), Operand (..), Value (..), signatureOf)
 import qualified Thena.Ops as Op
 import Thena.Ops (Test (..))
-import Thena.Rules (testTypes)
+import Thena.Rules (opWords, resolveSignature, testTypes)
 
 tests :: TestTree
 tests =
@@ -35,6 +42,121 @@ tests =
     , signatureTests
     , headTests
     , fitting
+    , roundTrip
+    ]
+
+-- --------------------------------------------------------------------------
+-- Rendering and reading are inverse (2026-09-12)
+-- --------------------------------------------------------------------------
+
+-- | **A rendered signature must read back as the same signature.**
+--
+-- The invariant is checked by different code from the code that maintains it,
+-- which is phase 5's standing lesson: 'renderSignature' writes the arrow chain
+-- and 'Thena.Rules.resolveSignature' splits one, and neither consults the
+-- other. Both of this milestone's signature defects break it —
+-- @a -> b -> ()@ rendering and reading back as @a -> a -> ()@ (the collapsed
+-- scheme variables), and @String -> (String -> String)@ printing without its
+-- parentheses and reading back at arity two.
+--
+-- **Up to renaming**, because the numbering is positional on both sides:
+-- 'Thena.Ops.signatureOf' numbers a scheme's variables however the table wrote
+-- them and 'resolveSignature' numbers them by first appearance. 'renumbered'
+-- puts both in the second form.
+roundTrip :: TestTree
+roundTrip =
+  testGroup
+    "a rendered signature reads back"
+    [ -- Every op there is, which is the corpus that matters: the table in
+      -- "Thena.Ops" is what a reader meets through @:accepts@.
+      testCase "for every op the parser knows" $
+        mapM_ (returns . signatureOf . snd) opWords
+
+      -- …and the shapes no op happens to have. A function result, a function
+      -- inside a list, a pair of functions, an option of one.
+    , testCase "and for the shapes no op has" $
+        mapM_ returns
+          [ Signature [TString] (Just (TFun [TString] TString))
+          , Signature [] (Just (TFun [TVar 0] (TFun [TVar 1] (TVar 0))))
+          , Signature [TList (TFun [TVar 0] TBool)] (Just (TList (TVar 0)))
+          , Signature [TPair (TFun [TCore] TCore) (TFun [TSurface] TSurface)] Nothing
+          , Signature [TOption (TFun [TBool] TName)] (Just (TFun [TInt, TChar] TBool))
+          ]
+
+      -- **The one type with no syntax** (@ms5\/CLOSEOUT.md@ 23). @\\ -> e@ is
+      -- writable and builds a closure of no arguments, but the type language
+      -- has no spelling for one — an arrow chain always has a left-hand side.
+      -- So it does not read back, and what matters is only that it does not
+      -- print as its own result: a clash between the two used to say
+      -- /wanted String, got String/.
+    , testCase "a function of no arguments prints distinctly, though it cannot be read" $ do
+        renderTy (TFun [] TString) @?= "-> String"
+        renderTy (TList (TFun [] TString)) @?= "List (-> String)"
+
+    , testProperty "for any signature at all" $ \sg ->
+        readBack (renderSignature sg) === Right (renumbered sg)
+    ]
+  where
+    returns sg = case readBack (renderSignature sg) of
+      Right got | got == renumbered sg -> pure ()
+      other -> assertFailure
+        (renderSignature sg ++ ": " ++ show other ++ " /= " ++ show (renumbered sg))
+
+-- | Render's inverse: lex the text, parse a type, split the chain.
+readBack :: String -> Either String Signature
+readBack src = case lexTokens src of
+  Left e   -> Left (show e)
+  Right ts -> case parseInstralTy ts of
+    Left e  -> Left (show e)
+    Right t -> case resolveSignature [] (RawSignature "f" t) of
+      Left e       -> Left (show e)
+      Right (_, s) -> Right (renumbered s)
+
+-- | A signature's variables, numbered by where they first appear.
+renumbered :: Signature -> Signature
+renumbered (Signature ps r) = Signature (map go ps) (fmap go r)
+  where
+    table = zip (nub (concatMap typeVarsIn (ps ++ maybe [] pure r))) [0 ..]
+    go t = case t of
+      TVar i    -> maybe t TVar (lookup i table)
+      TList a   -> TList (go a)
+      TOption a -> TOption (go a)
+      TPair a b -> TPair (go a) (go b)
+      TFun as q -> TFun (map go as) (go q)
+      _         -> t
+
+-- | A generated type. **No 'TObject'** — an object language's name is a type
+-- only where that language is declared, and 'readBack' declares none.
+instance Arbitrary Ty where
+  arbitrary = sized ty
+
+instance Arbitrary Signature where
+  arbitrary = do
+    ps <- sized (\n -> mapM (const (resize' (ty (n `div` 2)))) [1 .. n `mod` 4])
+    r  <- oneof [pure Nothing, Just <$> sized (\n -> ty (n `div` 2))]
+    pure (Signature ps r)
+    where
+      resize' g = g
+
+ty :: Int -> Gen Ty
+ty n
+  | n <= 0 = atom
+  | otherwise =
+      oneof
+        [ atom
+        , TList <$> smaller
+        , TOption <$> smaller
+        , TPair <$> smaller <*> smaller
+        , TFun <$> mapM (const smaller) [1 .. (n `mod` 3) + 1] <*> smaller
+        ]
+  where
+    smaller = ty (n `div` 2)
+
+atom :: Gen Ty
+atom =
+  oneof
+    [ elements [TString, TName, TInt, TChar, TBool, TSurface, TCore, TDevelopment]
+    , TVar <$> elements [0 .. 3]
     ]
 
 -- | The relation @:accepts@ and @:produces@ ask (MS5 phase 71).
