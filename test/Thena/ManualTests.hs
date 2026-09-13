@@ -31,11 +31,34 @@ import Data.List (isPrefixOf, isSuffixOf)
 
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
+import Test.Tasty.HUnit (testCase, (@?=))
 
+import Thena.Driver (commandSummary)
 import Thena.Repl (startingSession, transcriptIO)
 
 manual :: FilePath
 manual = "docs/MANUAL.md"
+
+-- | Every command word @:help@ names, colon and bare alike.
+--
+-- **Words, not the argument placeholders beside them.** @:elim ‹D›
+-- [‹universe›]@ contributes @:elim@; how the manual spells the placeholder is
+-- prose and is not what this is about.
+summaryWords :: [String]
+summaryWords =
+  [ w
+  | entry <- map fst commandSummary
+  , w <- words entry
+  , w /= "/"
+  , not (any (`elem` w) ("‹⌜\"[{" :: String))
+  , any (`elem` (':' : ['a' .. 'z'])) w
+  ]
+
+-- | Does the manual mention it, as a word rather than as a fragment of one?
+mentionedIn :: String -> String -> Bool
+mentionedIn w src = any (== w) (concatMap (words . map plain) (lines src))
+  where
+    plain c = if c `elem` ("`|" :: String) then ' ' else c
 
 tests :: TestTree
 tests =
@@ -45,6 +68,20 @@ tests =
         src <- readFile manual
         rewritten <- redrive (lines src)
         pure (toLazyByteString (stringUtf8 (unlines rewritten)))
+
+      -- **The command reference is a third copy of the command list**, after
+      -- @dispatch@ and @Driver.commandSummary@ — @ms3\/CLOSEOUT.md@ 26 is about
+      -- the first two and this is the one outside the program altogether. It
+      -- was missing @:accepts@ and @:produces@ (MS5 phase 71) and still offered
+      -- @:matches ‹hint›@, an argument MS4 removed.
+      --
+      -- Crossed against 'commandSummary' rather than against @dispatch@,
+      -- because that is the table @:help@ prints and the manual's chapter 13 is
+      -- meant to be the same list on paper.
+    , testCase "and its command reference names every command" $ do
+        src <- readFile manual
+        let missing = [ w | w <- summaryWords, not (w `mentionedIn` src) ]
+        missing @?= []
     ]
 
 -- | A fenced block: where it starts and ends, its body, and whether the

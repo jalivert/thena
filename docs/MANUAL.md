@@ -1039,7 +1039,11 @@ language and elaborated on load.
 | `prove` | let the rule engine choose and run a rule |
 | `retry` / `retry ‹n›` | backtrack to a choice point |
 | `data ‹D› … where { … }` | declare an inductive family |
-| `certify ‹type›` | ask the kernel |
+| `declare ‹sig› ; ‹equation›` | elaborate a surface declaration |
+| `quantify "‹x›" ⌜‹S›⌝` | add a ∀-binder above the focus |
+| `do { ‹instruction› ; … }` | play a block of instructions here |
+| `yield` | hand control back to a rule that yielded |
+| `certify ⌜‹type›⌝` | ask the kernel |
 | `qed` | certify and admit the finished proof |
 
 **Colon commands look.**
@@ -1052,14 +1056,16 @@ language and elaborated on load.
 | `:surface ‹t›` | parse and print a surface term |
 | `:infer ‹t›` `:whnf ‹t›` `:convert ‹t› ≟ ‹u›` | type, reduct, convertibility |
 | `:elim ‹D›` / `:elim ‹D› ‹universe›` | the elimination rule |
-| `:matches` / `:matches ‹hint›` | which rules apply here |
+| `:matches` | which rules apply here — it takes no argument |
+| `:accepts ‹type›` / `:produces ‹type›` | what takes a value of that type / gives one |
 | `:choices` | open choice points |
 | `:step on` / `:step` / `:step off` / `:run` | single-step the machine |
 | `:theorem ‹x› : ‹T›` | start a proof |
 | `:suspend` `:resume ‹name›` `:proofs` `:abandon` `:undo` | session management |
 | `:goal ‹T›` | discard everything and start a fresh scratch goal |
 | `:extract` `:revalidate` | read off the term / recheck the development |
-| `:load ‹path›` | run a file of commands |
+| `:load ‹path›` | a proof module, a script, or rule bases |
+| `:load proof` / `rules` / `script` | say which, rather than by extension |
 | `:bases` / `:rules` | the loaded rule bases / the rules in them |
 | `:help` | this table, in one screen |
 | `:quit` | exit |
