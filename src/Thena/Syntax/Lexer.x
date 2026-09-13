@@ -124,15 +124,12 @@ tokens :-
   -- surface language is expected to need.
   "do"          { keyword TDo }
   "rule"        { keyword TRule }
-  -- **A rule's declared signature** (MS5 phase 67), written on a line of its
-  -- own above the clauses — his choice, 2026-09-12. The fourth word to narrow
-  -- identifiers project-wide, after @data@, @module@ and @do@, and the price of
-  -- a signature being a declaration rather than something hung on a rule's own
-  -- line.
-  "signature"   { keyword TSignature }
-  -- **An object language's grammar declaration** (MS5 phase 69). The fifth word
-  -- to narrow identifiers project-wide; see @ms5\/CLOSEOUT.md@ 11, which is the
-  -- same judgement call one phase earlier.
+  -- **An object language's grammar declaration** (MS5 phase 69). The fourth
+  -- word to narrow identifiers project-wide, after @data@, @module@ and @do@.
+  --
+  -- **@signature@ was the fifth and is gone** (MS5 phase 74, his ruling): an
+  -- annotation is @f : Ty@ in column 1, told from a function's @f x = e@ by the
+  -- token after the name, so it needs no word of its own. @ms5\/CLOSEOUT.md@ 11.
   "language"    { keyword TLanguage }
   "when"        { keyword TWhen }
   "then"        { keyword TThen }
@@ -186,7 +183,6 @@ data Token
   | TModule
   | TDo
   | TRule
-  | TSignature
   | TLanguage
   | TDeclSep
     -- ^ **not lexed** — inserted by "Thena.Driver" before every rule-file token

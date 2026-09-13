@@ -65,13 +65,14 @@ rule claim ty :-
   then n = ask "name for the new hole?" name
      ; claim n ty
 
-signature twice : String -> String
+twice : String -> String
 twice s = concat s s
 ```
 
 - **a rule** — `rule ‹name› ‹params› :- when ‹tests› then ‹body›`. The head is a
   run of shape questions; a test with arguments is parenthesised.
-- **a signature** — `signature ‹name› : ‹type›`, on a line of its own. The arity
+- **a signature** — `‹name› : ‹type›`, on a line of its own and needing no
+  keyword. The arity
   is the arrow chain's, so a signature is about one arity only. Parentheses make
   an arrow a value in either position: `(a -> b) -> a -> b` takes a function and
   `String -> (String -> String)` gives one.
@@ -194,7 +195,7 @@ language Tm where {
   app : "(" Tm Tm ")"
   }
 
-signature asSurface : Tm -> Surface
+asSurface : Tm -> Surface
 asSurface t = surface-of t
 ```
 

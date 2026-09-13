@@ -1910,9 +1910,9 @@ parseInstralType ls src = do
 -- | Mark where each declaration begins (MS5 phase 68a).
 --
 -- **A declaration begins in column 1** — his ruling, 2026-09-12, and it is what
--- makes a function declaration with no keyword of its own possible: @rule@ and
--- @signature@ announce themselves, a plain word does not, so nothing ended the
--- declaration before one. A 'Thena.Syntax.Lexer.TDeclSep' is inserted before
+-- makes a keyword-less declaration possible: @rule@ and @language@ announce
+-- themselves, a plain word does not, so nothing ended the declaration before a
+-- function or — since MS5 phase 74 — a signature. A 'Thena.Syntax.Lexer.TDeclSep' is inserted before
 -- every token that starts in the first column, and the grammar requires one in
 -- front of each declaration.
 --
@@ -1935,8 +1935,9 @@ separated = concatMap one
 
     firstColumn (Pos _ c) = c == 1
 
-    -- **Only before a token that could begin a declaration** — the three
-    -- declaration words and a name, which is what a function starts with.
+    -- **Only before a token that could begin a declaration** — the two
+    -- declaration words and a name, which is what a function /and/, since MS5
+    -- phase 74, a signature starts with.
     -- Without this a language's closing @}@ in the first column would be read as
     -- the start of something, which is what the first version did.
     --
@@ -1945,7 +1946,6 @@ separated = concatMap one
     -- about what /starts/ a declaration and a @;@ cannot.
     begins w = case w of
       TRule      -> True
-      TSignature -> True
       TLanguage  -> True
       TIdent _   -> True
       _          -> False

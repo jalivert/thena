@@ -244,7 +244,7 @@ tokensReadBack =
     unlocated (Located _ t) = t
 
     standalone =
-      [ TLambda, TSignature, TLanguage, TChar 'c'
+      [ TLambda, TLanguage, TChar 'c'
       , TLBracket, TRBracket, TComma, TForall, TArrow
       , TLParen, TRParen, TColon, TLBrace, TRBrace, TSemi, TEquals, TQuery
       , TGuessed, TPending, TTurnstile, TEquate, TOpenQuote, TCloseQuote

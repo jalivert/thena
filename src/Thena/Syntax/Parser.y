@@ -86,7 +86,6 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   elim    { Located _ TElim }
   where   { Located _ TWhere }
   rule    { Located _ TRule }
-  signature { Located _ TSignature }
   language { Located _ TLanguage }
   declsep { Located _ TDeclSep }
   when    { Located _ TWhen }
@@ -201,8 +200,9 @@ Rule :: { RawRule }
 -- the result. A callable has several clauses and one type, which is why it does
 -- not hang off a clause.
 -- **A global function, and it needs no keyword of its own** — his choice,
--- 2026-09-12. @rule@ and @signature@ are keywords, so a declaration that begins
--- with a plain word can only be this one.
+-- 2026-09-12. Since MS5 phase 74 neither does a signature, so a declaration
+-- beginning with a plain word is one of the two and the token after the name
+-- tells them apart: @=@ or another parameter here, @:@ there.
 Function :: { RawFunction }
   : ident Params '=' Rhs                   { RawFunction $1 (reverse $2) $4 }
 
@@ -239,8 +239,13 @@ GItem :: { RawGItem }
   : str                                    { GTerminal $1 }
   | ident                                  { GWord $1 }
 
+-- **No keyword** (MS5 phase 74, his ruling). A declaration beginning with a
+-- plain word is a signature or a function, and the token after the name says
+-- which: @:@ for a signature, another name or @=@ for a function. That is one
+-- token of lookahead, which is what an LALR parser has, so the two productions
+-- share their @ident@ and part on the next token with no conflict.
 Signature :: { RawSignature }
-  : signature ident ':' Ty                 { RawSignature $2 $4 }
+  : ident ':' Ty                           { RawSignature $1 $3 }
 
 -- The type syntax. @->@ is already @%right@, so the chain nests to the right
 -- and the last link is the result.

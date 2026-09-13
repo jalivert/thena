@@ -37,11 +37,73 @@ tests =
     , wellTyped
     , blockReturn
     , annotations
+    , noKeyword
     , badSignatures
     , functions
     , lambdas
     , objectLanguages
     ]
+
+-- --------------------------------------------------------------------------
+-- A signature needs no keyword (MS5 phase 74)
+-- --------------------------------------------------------------------------
+
+-- | **An annotation is @f : Ty@ in column 1** — his ruling, 2026-09-13, closing
+-- @ms5\/CLOSEOUT.md@ 11.
+--
+-- A declaration that begins with a plain word is a signature or a function, and
+-- the two part on the **token after the name**: @:@ there, another parameter or
+-- @=@ here. That is one token of lookahead and the grammar has no conflict, so
+-- what these check is the parting itself — each of the three shapes, read back
+-- as the declaration it is meant to be.
+--
+-- **The word is an ordinary identifier again**, which is the point of the phase:
+-- one lexer serves every language, so @signature@ had been unusable as a name in
+-- Surface, Core and every object language, not only in a rule file.
+noKeyword :: TestTree
+noKeyword =
+  testGroup
+    "a signature is written without a keyword"
+    [ loads "a name, a colon and a type is a signature"
+        "f : Core -> ()\nrule f x :- then prim-try x"
+
+      -- The two function shapes, either side of the one that is a signature.
+    , loads "a name, parameters and an = is a function"
+        "twice s = concat s s"
+
+    , loads "a name and an = with no parameters is a function too"
+        "greeting = concat \"hi\" \"!\""
+
+      -- **The word is free**, and a rule is the sharpest place to show it: a
+      -- declaration beginning @signature@ used to be a keyword and can now only
+      -- be a name.
+    , loads "signature is an ordinary name for a rule"
+        "rule signature :- then prove"
+
+    , loads "…for a function"
+        "signature s = concat s s"
+
+    , loads "…for a parameter"
+        "f : Core -> ()\nrule f signature :- then prim-try signature"
+
+      -- …and for a callable that is itself annotated, which is the one that
+      -- would have been unwritable in every spelling.
+    , loads "…and for a callable with a signature of its own"
+        "signature : String -> String\nsignature s = concat s s"
+
+      -- **The old spelling is a parse error and nothing special-cases it.**
+      -- Pinned so the message cannot drift silently: @signature f : T@ reads as
+      -- a function named @signature@ taking @f@, which then meets a @:@ where it
+      -- wanted an @=@.
+    , testCase "and the old keyword spelling is refused where the colon is" $
+        case load "signature f : Core -> ()\nrule f x :- then prim-try x" of
+          RuleFileRefused _ (RuleSyntaxError (ParseFailed (UnexpectedToken _ _))) -> pure ()
+          other -> assertFailure ("expected a parse error, got " ++ show other)
+    ]
+  where
+    loads what src = testCase what $ case load src of
+      BasesLoaded _ -> pure ()
+      other         -> assertFailure ("expected a load, got " ++ show other)
 
 -- --------------------------------------------------------------------------
 -- The done-when
@@ -272,20 +334,20 @@ annotations =
       -- parameter to an op that wants a term, so the promise is broken and it is
       -- the promise that is at fault, not the instruction.
     , testCase "that promises more than the body delivers is refused at the signature" $
-        load "signature f : a -> ()\nrule f x :- then prim-try x"
+        load "f : a -> ()\nrule f x :- then prim-try x"
           @?= BasesIllTyped
                 [AnnotationTooGeneral (InSignature (GlobalName "f") 1) TCore]
 
       -- …and a signature that is simply the wrong type is still reported in the
       -- body, which is §6.5(a) — the author's own rule, local and clear.
     , testCase "that names the wrong type is refused in the body" $
-        load "signature f : Core -> ()\nrule f x :- when (surface-is-name x) then prove"
+        load "f : Core -> ()\nrule f x :- when (surface-is-name x) then prove"
           @?= BasesIllTyped [Clash (InHead (GlobalName "f") 0) TSurface TCore]
 
       -- A signature is a claim about a callable, so a claim nothing answers is
       -- a mistake — most likely a typo or a changed arity.
     , testCase "for a callable nothing defines is refused" $
-        load "signature nobody : Core -> ()\nrule f :- then prove"
+        load "nobody : Core -> ()\nrule f :- then prove"
           @?= BasesIllTyped [SignatureUnanswered (GlobalName "nobody") 1]
 
       -- **The arity is the arrow chain's**, so this signature is about @f@ at
@@ -297,7 +359,7 @@ annotations =
       -- was @a -> a -> ()@ and every signature's variables collapsed. Nothing
       -- noticed, because a collapsed signature is still a signature.
     , testCase "keeps its variables apart" $
-        case load "signature ignore2 : a -> b -> ()\n\
+        case load "ignore2 : a -> b -> ()\n\
                   \rule ignore2 x y :- then prove\n\
                   \rule use :- then h = here ; n = fresh-name \"k\" ; ignore2 h n" of
           BasesLoaded _ -> pure ()
@@ -307,7 +369,7 @@ annotations =
       -- the top-level chain, one level down, and it is the case a higher-order
       -- signature is made of.
     , testCase "and keeps a nested arrow's apart as well" $
-        case load "signature f : (a -> b) -> a -> b\nf g x = g x" of
+        case load "f : (a -> b) -> a -> b\nf g x = g x" of
           BasesLoaded _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
@@ -315,15 +377,15 @@ annotations =
       -- surely as one that pins either, which is the other half of
       -- 'Thena.Instral.Infer.generalEnough' and was untested until now.
     , testCase "and a body may not force two of them together" $
-        case load "signature pairUp : a -> a -> ()\n\
+        case load "pairUp : a -> a -> ()\n\
                   \rule pairUp x y :- then prove\n\
-                  \signature same : a -> b -> ()\n\
+                  \same : a -> b -> ()\n\
                   \rule same x y :- then pairUp x y" of
           BasesIllTyped (AnnotationTooGeneral _ _ : _) -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
     , testCase "is about one arity only" $
-        case load "signature f : Core -> ()\nrule f x :- then prim-try x\nrule f :- then prove" of
+        case load "f : Core -> ()\nrule f x :- then prim-try x\nrule f :- then prove" of
           BasesLoaded _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
@@ -360,7 +422,7 @@ annotations =
       -- @mk@ that exists went uncovered. Inference has always worked the type
       -- out; the declared half of the type system simply could not spell it.
     , testCase "may give a function, not only take one" $
-        case load "signature mk : String -> (String -> String)\n\
+        case load "mk : String -> (String -> String)\n\
                   \mk s = \\ z -> concat s z" of
           BasesLoaded _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
@@ -368,20 +430,20 @@ annotations =
       -- …and it is not the same signature as the flat one, which is the whole
       -- point of keeping the parentheses.
     , testCase "and giving a function is not the same as taking two arguments" $
-        case load "signature mk : String -> String -> String\n\
+        case load "mk : String -> String -> String\n\
                   \mk s = \\ z -> concat s z" of
           BasesIllTyped _ -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
       -- A group around something that is not an arrow is nothing at all.
     , testCase "a group around a plain type changes nothing" $
-        case load "signature f : (Core) -> (())\nrule f x :- then prim-try x" of
+        case load "f : (Core) -> (())\nrule f x :- then prim-try x" of
           BasesLoaded _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
     ]
   where
     polymorphic =
-      "signature ignore : a -> ()\n\
+      "ignore : a -> ()\n\
       \rule ignore x :- then say \"ignored\"\n\
       \rule usesName :- then n = fresh-name \"h\" ; ignore n\n\
       \rule usesTerm :- then h = here ; ignore h\n"
@@ -392,12 +454,12 @@ badSignatures :: TestTree
 badSignatures =
   testGroup
     "a signature that does not resolve"
-    [ refused "an unknown type"      "signature f : Trm -> ()"   (UnknownType "f" "Trm")
-    , refused "a constructor's arity" "signature f : List -> ()" (TypeArity "f" "List" 1 0)
-    , refused "a variable applied"   "signature f : a Core -> ()" (TypeVariableApplied "f" "a")
-    , refused "() as an argument"    "signature f : () -> ()"    (UnitInsideAType "f")
+    [ refused "an unknown type"      "f : Trm -> ()"   (UnknownType "f" "Trm")
+    , refused "a constructor's arity" "f : List -> ()" (TypeArity "f" "List" 1 0)
+    , refused "a variable applied"   "f : a Core -> ()" (TypeVariableApplied "f" "a")
+    , refused "() as an argument"    "f : () -> ()"    (UnitInsideAType "f")
     , refused "two for one callable"
-        "signature f : Core -> ()\nsignature f : Surface -> ()"
+        "f : Core -> ()\nf : Surface -> ()"
         (DuplicateSignature "f" 1)
     ]
   where
@@ -532,14 +594,14 @@ lambdas =
       -- **Higher order, with the signature that says so.** @(a -> b)@ in a
       -- signature was refused by name until this phase.
     , testCase "is passed to a function that takes one" $
-        said "signature onTwice : (String -> String) -> String -> String\n\
+        said "onTwice : (String -> String) -> String -> String\n\
              \onTwice f x = f (f x)\n\
              \rule go :- then d = \\ s -> concat s s ; m = onTwice d \"a\" ; say m"
           @?= Just "aaaa"
 
       -- **Parenthesised in an argument**, like every other compound one.
     , testCase "takes parentheses in an argument position" $
-        said "signature once : (String -> String) -> String\n\
+        said "once : (String -> String) -> String\n\
              \once f = f \"q\"\n\
              \rule go :- then m = once (\\ s -> concat s s) ; say m"
           @?= Just "qq"
@@ -570,7 +632,7 @@ lambdas =
       -- **A function type is writable in a signature now**, which it was not
       -- before this phase — @TypeIsAFunction@ refused it and is deleted.
     , testCase "and a function type is writable in a signature" $
-        case load "signature f : (a -> b) -> a -> b\nf g x = g x" of
+        case load "f : (a -> b) -> a -> b\nf g x = g x" of
           BasesLoaded _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
     ]
@@ -594,7 +656,7 @@ objectLanguages =
     [ -- The whole path: declared, tagged, parsed by the generated parser, and
       -- used at the type the declaration generated.
       testCase "is a type, a tag and a coercion" $
-        case load (tm ++ "signature asSurface : Tm -> Surface\n\
+        case load (tm ++ "asSurface : Tm -> Surface\n\
                          \asSurface t = surface-of t\n\
                          \rule go :- then t = Tm`(x y)` ; s = asSurface t ; prove") of
           BasesLoaded _ -> pure ()
@@ -604,7 +666,7 @@ objectLanguages =
       -- Surface term as far as the type system is concerned, which is what makes
       -- the tag worth having.
     , testCase "is not a Surface term until it is coerced" $
-        load (tm ++ "signature want : Surface -> ()\n\
+        load (tm ++ "want : Surface -> ()\n\
                     \rule want s :- then prove\n\
                     \rule go :- then t = Tm`(x y)` ; want t")
           @?= BasesIllTyped [Clash (InBody (GlobalName "go") 1) TSurface (TObject "Tm")]

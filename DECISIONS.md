@@ -685,7 +685,7 @@ file:
 ```
 twice x = concat x x
 
-signature shout : String -> String
+shout : String -> String
 shout x = twice (twice x)
 ```
 
@@ -764,7 +764,7 @@ a signature, **`` Tm`…` `` as the only way to make one**, and a one-way coerci
 `surface-of` to a Surface term.
 
 ```
-signature asSurface : Tm -> Surface
+asSurface : Tm -> Surface
 asSurface t = surface-of t
 
 rule go :- then t = Tm`(x y)` ; s = asSurface t ; …
@@ -799,7 +799,7 @@ bad.thena.rules: in the grammar of String: String is one of instral's own types,
 *Decided 2026-09-12.*
 
 ```
-signature onTwice : (String -> String) -> String -> String
+onTwice : (String -> String) -> String -> String
 onTwice f x = f (f x)
 
 rule go :- then d = \ s -> concat s s
@@ -814,15 +814,15 @@ argument: `once (\ s -> concat s s)`.
 **A function type is n-ary, not curried.** `a -> b -> c` is a function of *two*
 arguments; applying a one-argument lambda to two is a type error, because
 `instral` dispatches on arity. Parentheses are what make an arrow a value: in
-`signature f : (a -> b) -> a -> b` the first argument is a function.
+`f : (a -> b) -> a -> b` the first argument is a function.
 
 **That holds in the result too**, so a function that gives a function says so:
 
 ```
-signature mk : String -> (String -> String)   -- one argument, gives a function
+mk : String -> (String -> String)   -- one argument, gives a function
 mk s = \ z -> concat s z
 
-signature two : String -> String -> String    -- two arguments
+two : String -> String -> String    -- two arguments
 two a b = concat a b
 ```
 
@@ -870,8 +870,21 @@ that reading is unchanged.
 A signature is its own declaration, on a line above the clauses — a name has
 several clauses and one type.
 
+**It needs no keyword** *(decided 2026-09-13)*. A declaration that begins with a
+plain word is a signature or a function, and the token after the name says
+which — `:` for a signature, a parameter or `=` for a function:
+
 ```
-signature spine-arguments : Core -> Core -> Surface -> ()
+shout : String -> String      -- a signature
+shout s = concat s "!"        -- the function it describes
+```
+
+`signature` was a keyword until then, and because one lexer serves every
+language it was unusable as a name in Surface, Core and every object language
+too. It is an ordinary identifier again.
+
+```
+spine-arguments : Core -> Core -> Surface -> ()
 rule spine-arguments h f t :- when focus-is-component (surface-is-app t) then …
 rule spine-arguments h f t :- when focus-is-component (surface-is-name t) then …
 ```
@@ -893,7 +906,7 @@ rule usesName :- then n = fresh-name "h" ; ignore n     -- a Name
 rule usesTerm :- then h = here ; ignore h               -- a Core
 ```
 
-Adding `signature ignore : a -> ()` makes both uses fine, because each use gets
+Adding `ignore : a -> ()` makes both uses fine, because each use gets
 its own copy of the type.
 
 **A signature is checked, not believed.** If the body needs more than the
