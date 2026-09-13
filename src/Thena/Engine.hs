@@ -94,7 +94,8 @@ import Thena.Errors
   )
 import Thena.Surface.Concrete (Plicity (..))
 import qualified Thena.Surface.Concrete as Concrete
-import Thena.Syntax.Resolve (resolve)
+import Thena.Syntax.Concrete (splicesIn)
+import Thena.Syntax.Resolve (resolveWith)
 import Thena.Ops
   ( AnswerKind
   , Env
@@ -774,11 +775,18 @@ perform instr rest m = case operation instr of
   -- driver's to run, exactly as a declaration's checks are.
   -- **Brady's @NEW PROOF@ and @TERM@** (MS4 phase 42) — see 'Op.PushDevelopment'
   -- for why a declaration needs them.
+  -- **The splices are filled here** (MS5 phase 81). The template was parsed
+  -- when the line was read; what it waits for is values, and this is where they
+  -- exist. A hole stands where a term stands — his observation — so each one
+  -- wants a 'VTerm' and anything else is the same refusal a term-typed operand
+  -- gets anywhere else.
   ResolveCore a -> case operandValue (env (exec m)) a of
     Left r           -> failure r m
-    Right (VRaw raw) -> case resolve (globals m) contextAt (names m) raw of
-      Left e        -> failure (CannotResolve e) m
-      Right (t, n1) -> produce (VTerm t) m { names = n1 }
+    Right (VRaw raw) -> case traverse (filling (env (exec m))) (splicesIn raw) of
+      Left r   -> failure r m
+      Right sp -> case resolveWith sp (globals m) contextAt (names m) raw of
+        Left e        -> failure (CannotResolve e) m
+        Right (t, n1) -> produce (VTerm t) m { names = n1 }
     Right _          -> failure ExpectedRaw m
 
   Expose t -> case term t of
@@ -1880,6 +1888,15 @@ operandTerm :: Env -> Operand -> Either FailReason Core
 operandTerm e o = operandValue e o >>= \v -> case v of
   VTerm t -> Right t
   _                  -> Left ExpectedTerm
+
+-- | One @${x}@ hole, paired with the term that fills it (MS5 phase 81).
+--
+-- **Shaped like 'operandTerm' and refusing for the same reason**: a hole stands
+-- where a term stands, so a binding that is not a term is the ordinary
+-- @ExpectedTerm@ refusal rather than an error of its own. It is unreachable
+-- from a loaded base, which types every splice when the file loads.
+filling :: Env -> String -> Either FailReason (String, Core)
+filling e x = (,) x <$> operandTerm e (Ref x)
 
 -- | An unelaborated tree and the place it sits at (§7.2). Shaped like
 -- 'operandText' and 'operandTerm', and phase 17b's reason for existing at all:

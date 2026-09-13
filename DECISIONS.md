@@ -1334,6 +1334,32 @@ any other bare word calls a rule of that name; :rules lists them.
 `:rules` prints the rules of every loaded base, in search order. If a word is
 in neither list, `no such command` says so and points back at `:help`.
 
+### A written core term may have holes
+
+*Decided 2026-09-13.*
+
+A term written in a rule can splice in values that are already terms:
+
+```
+d  = claim dn u1
+c  = claim cn u2
+ar = resolve-core core`${d} -> ${c}`
+```
+
+**A splice stands where a term stands.** So the template is parsed once, when
+the file loads — what each hole wants is known from where it sits, and a splice
+that is not a term, or that names nothing, is refused then. The values are
+filled in when the instruction runs, which is when they exist.
+
+Both core spellings take one: `` core`${d} -> ${c}` `` and `⌜ ${d} -> ${c} ⌝`.
+
+**A splice is closed**, so a binder above it does not capture it — the same
+weakening every term built under a binder gets.
+
+**This is not string substitution**, and it could not be: the terms a rule
+builds carry unsolved level metas, and `Type (suc ?ℓ683)` is not something you
+can write down and read back.
+
 ### A rule is searched; a function is called
 
 *Decided 2026-09-13.*

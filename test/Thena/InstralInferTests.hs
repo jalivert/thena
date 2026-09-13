@@ -26,7 +26,9 @@ import Thena.Errors (SyntaxError (..))
 import Thena.Instral.Grammar (GrammarError (..))
 import Thena.Syntax.Parser (ParseError (..))
 import Thena.Rules (RuleBase (..), RuleError (..))
-import Thena.Standard (expectedStandard)
+import Data.List (isInfixOf)
+import Thena.Repl (renderCursor)
+import Thena.Standard (expectedBase, expectedStandard)
 
 tests :: TestTree
 tests =
@@ -42,6 +44,7 @@ tests =
     , annotatedLocals
     , surfaceBlockTyping
     , functionsAreFunctions
+    , spliceTemplates
     , blockBodies
     , badSignatures
     , functions
@@ -291,6 +294,105 @@ functionsAreFunctions =
        in case snd (command (fst (command s0 "go")) ":choices") of
             Choices cs -> Just cs
             _          -> Nothing
+
+-- --------------------------------------------------------------------------
+-- Splices in a written core term (MS5 phase 81)
+-- --------------------------------------------------------------------------
+
+-- | **@core`${d} -> ${c}`@ — a term written in the language\'s own notation
+-- with holes filled from bindings.** His design, 2026-09-13.
+--
+-- **A splice always supplies a nonterminal** — his observation, and it is what
+-- makes the phase small: a hole stands where a term stands, so the template
+-- parses once at load, what each hole wants is known from where it sits, and
+-- the values arrive when the instruction runs.
+--
+-- **The first two cases are the crossing**, and they are the point: a spliced
+-- template and the op it replaces must build the *same term*. That is checked
+-- by proving the same theorem both ways and comparing what the kernel admitted,
+-- rather than by comparing the two terms in Haskell — which would compare this
+-- phase against itself.
+spliceTemplates :: TestTree
+spliceTemplates =
+  testGroup
+    "a written core term may have holes"
+    [ testCase "an arrow built by splicing is the arrow the op builds" $
+        builtBy "ar = resolve-core core`${d} -> ${c}`" @?= builtBy "ar = arrow d c"
+
+    , testCase "…and an application likewise" $
+        appliedBy "ap = resolve-core core`${f} ${sv}`" @?= appliedBy "ap = apply-to f sv"
+
+      -- **A splice must be a term**, and that is known when the file loads,
+      -- because the hole's type comes from the grammar position.
+    , testCase "a splice that is not a term is refused at load" $
+        case load "rule go :- then n = fresh-name \"q\" ; u = resolve-core core`${n} -> ${n}` ; prove" of
+          BasesIllTyped (Clash{} : _) -> pure ()
+          other -> assertFailure ("expected a type error, got " ++ show other)
+
+      -- …and a splice naming nothing is caught by @validate@, which sees inside
+      -- a written term now for the same reason it sees inside a list literal.
+    , testCase "a splice naming nothing is refused at load" $
+        case loadRaw "rule base s where\nrule go :- then h = here ; u = resolve-core core`${h} -> ${nope}` ; prove\n" of
+          RuleFileRefused _ (RuleIllFormed es)
+            | [UnboundInRule _ _ "nope"] <- es -> pure ()
+          other -> assertFailure ("expected a refusal, got " ++ show other)
+
+      -- **The values a splice carries are ones no text could.** Every term the
+      -- elaborator builds is at a fresh level meta, and @Type (suc ?ℓ683)@ does
+      -- not parse — which is why a template is a term with holes and not a
+      -- string with substitutions.
+      -- **Corners carry a splice too, and that was not the plan.** His scope
+      -- for the phase was the tagged spelling; what forced it is that the main
+      -- lexer had to learn @${@ so a region's reassembled text could be read
+      -- back, and an escape whose closing brace stayed a plain brace made the
+      -- layout pass report /this closes a block that was not opened/ for a
+      -- perfectly reasonable term. Pushing the escape mode fixes the message and
+      -- makes both spellings agree — which is one less divergence for
+      -- @ms5\/CLOSEOUT.md@ 22, not one more. Pinned because it works, and
+      -- untested working behaviour is what this project keeps being bitten by.
+    , testCase "and the two core spellings agree" $
+        builtBy "ar = resolve-core \8988 ${d} -> ${c} \8989"
+          @?= builtBy "ar = resolve-core core`${d} -> ${c}`"
+
+    , testCase "and it carries a term with an unsolved level meta" $
+        case builtBy "ar = resolve-core core`${d} -> ${c}`" of
+          Just t | "?\8467" `isInfixOf` t -> pure ()
+          other -> assertFailure ("expected a level meta in " ++ show other)
+    ]
+  where
+    -- Claim two holes at fresh universes, build an arrow of them, fill with it,
+    -- and answer what the development says afterwards.
+    builtBy how = shown
+      ("rule go :- then dn = fresh-name \"A\" ; u1 = fresh-universe ; d = claim dn u1\n\
+       \     ; cn = fresh-name \"B\" ; u2 = fresh-universe ; c = claim cn u2\n\
+       \     ; " ++ how ++ "\n\
+       \     ; fill ar")
+
+    appliedBy how = shown
+      ("rule go :- then dn = fresh-name \"A\" ; u1 = fresh-universe ; d = claim dn u1\n\
+       \     ; cn = fresh-name \"B\" ; u2 = fresh-universe ; c = claim cn u2\n\
+       \     ; ar = arrow d c\n\
+       \     ; fn = fresh-name \"f\" ; f = claim fn ar\n\
+       \     ; sn = fresh-name \"s\" ; sv = claim sn d\n\
+       \     ; " ++ how ++ "\n\
+       \     ; fill ap")
+
+    -- The test base is loaded on its own — a call to a rule nothing here
+    -- defines is not a load error — and the shipped rules are put beside it
+    -- afterwards, because 'loadRuleBases' replaces the list rather than adding
+    -- to it.
+    shown body =
+      let s0 = fst (loadRuleBases newSession
+                 [("s.thena.rules", "rule base s where\n" ++ body ++ "\n")])
+          m0 = sessionMachine s0
+          s0' = s0 { sessionMachine = m0 { rules = expectedBase ++ rules m0 } }
+          s1 = fst (command s0' ":theorem t : Type")
+          s2 = fst (command s1 "go")
+       in case snd (command s2 ":show") of
+            Shown c -> Just (renderCursor (names (sessionMachine s2)) c)
+            _       -> Nothing
+
+    loadRaw src = snd (loadRuleBases newSession [("s.thena.rules", src)])
 
 -- --------------------------------------------------------------------------
 -- A function body may be a block (MS5 phase 75b)
@@ -1050,10 +1152,17 @@ objectLanguages =
       --
       -- Pinned as a refusal so that the day it is implemented, this test has to
       -- be changed on purpose rather than quietly starting to pass.
-    , testCase "a nesting escape is refused, because only the lexer knows it" $
+      --
+      -- **MS5 phase 81 is that day, and only half of it.** A splice in a
+      -- @core@ region is read now — see @spliceTemplates@ below. A splice in a
+      -- **generated** parser\'s region still is not: the region\'s text reaches
+      -- @Tm@\'s parser with the @${…}@ in it and @Tm@ has no production for one,
+      -- so it is refused there rather than at the fence. Changed on purpose, and
+      -- the refusal is still pinned — one language over.
+    , testCase "a nesting escape into an object language is still refused" $
         case load (tm ++ "rule go t :- then u = Tm`(x ${ t })` ; prove") of
-          RuleFileRefused _ (RuleSyntaxError _) -> pure ()
-          other -> assertFailure ("expected a syntax error, got " ++ show other)
+          RuleFileRefused _ (RuleIllFormed [BadRegion _ _ "Tm" _]) -> pure ()
+          other -> assertFailure ("expected a refusal, got " ++ show other)
 
       -- **An empty region is end of input** (found probing degenerate input,
       -- 2026-09-12). The failure path picked a token out of the token list to

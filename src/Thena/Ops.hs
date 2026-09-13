@@ -40,7 +40,7 @@ import Thena.Instral.Type (Signature (..), Ty (..))
 import Thena.Development.Cursor (Part (..))
 import Thena.Global.Env (InductiveDefinition)
 import Thena.Surface.Concrete (Plicity)
-import Thena.Syntax.Concrete (Raw)
+import Thena.Syntax.Concrete (Raw, splicesIn)
 import Thena.Surface.Zipper (SurfaceZipper)
 
 -- | A name in a rule body's environment. Not a 'Thena.Core.Term.Var' and not an
@@ -1173,6 +1173,11 @@ signatureOf o = Signature (map snd (operandTypes o)) (resultOf o)
 refsIn :: Operand -> [Name]
 refsIn o = case o of
   Ref n      -> [n]
+  -- **A written term's @${x}@ holes are names it reads** (MS5 phase 81), and
+  -- this is the same lesson one literal over: a template whose splice named
+  -- nothing would otherwise reach the engine instead of being refused when the
+  -- base loaded.
+  Lit (VRaw raw) -> splicesIn raw
   Lit _      -> []
   ListOf os  -> concatMap refsIn os
   PairOf a b -> refsIn a ++ refsIn b

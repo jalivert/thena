@@ -635,6 +635,8 @@ renderSyntaxError e = case e of
   ResolveFailed (NotInScope n)      -> "not in scope: " ++ n
   ResolveFailed (NotACoreTerm f)    ->
     devForm f ++ " is part of a development, not a term"
+  ResolveFailed (SpliceNotFilled x) ->
+    "nothing is bound to " ++ x ++ ", so ${" ++ x ++ "} has nothing to stand for"
   ResolveFailed (LevelArgumentsOnALocal s) ->
     s ++ " is bound here, and only a definition has level parameters"
   ResolveFailed (NotAUniverse d)    ->

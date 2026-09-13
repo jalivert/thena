@@ -79,6 +79,8 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   '⊢'     { Located _ TTurnstile }
   '≟'     { Located _ TEquate }
   '[|'    { Located _ TOpenQuote }
+  '${'    { Located _ TEscapeOpen }
+  '}$'    { Located _ TEscapeClose }
   tagopen  { Located _ (TTagOpen $$) }
   raw      { Located _ (TRaw $$) }
   tagclose { Located _ TTagClose }
@@ -390,8 +392,21 @@ ValueOperand :: { RawOperand }
   | '[' Elements ']'                       { RawList (reverse $2) }
   | '(' Operand ',' Operand ')'            { RawPairOf $2 $4 }
   | '[|' Term '|]'                         { RawQuoted $2 }
-  | tagopen raw tagclose                   { RawRegion $1 $2 }
+  -- **A region's text is reassembled, escapes and all** (MS5 phase 81). The
+  -- scanner splits @${x}@ out so that a fence inside an escape cannot end the
+  -- region early; this puts it back, because what a region /is/ is text for an
+  -- embedded parser and the embedded parser reads @${x}@ itself. So the pieces
+  -- below are a reader for what the scanner produced and not a second meaning.
+  | tagopen Pieces tagclose                { RawRegion $1 (concat (reverse $2)) }
   | tagopen tagclose                       { RawRegion $1 "" }
+
+Pieces :: { [String] }
+  : Piece                                  { [$1] }
+  | Pieces Piece                           { $2 : $1 }
+
+Piece :: { String }
+  : raw                                    { $1 }
+  | '${' ident '}$'                        { "${" ++ $2 ++ "}" }
 
 
 Elements :: { [RawOperand] }
@@ -414,6 +429,12 @@ Atom :: { Raw }
   -- strictly more permissive: every place it parsed before still reaches it
   -- through @Term -> App -> Atom@.
   | '[|' Term '|]'                         { RawQuote $2 }
+  -- **A splice is an atom** (MS5 phase 81) — it stands where a term stands, so
+  -- it belongs exactly where a name does and needs no precedence of its own.
+  -- The closing brace is its own token: the region scanner emits
+  -- 'Thena.Syntax.Lexer.TEscapeClose' for the one that ends an escape, so this
+  -- cannot be confused with a level-argument brace.
+  | '${' ident '}$'                        { RawSplice $2 }
   | ident LevelArgs                        { RawAt $1 $2 }
   | univ                                   { RawUniverse $1 }
   | Type                                   { RawUniverseOpen }

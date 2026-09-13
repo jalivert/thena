@@ -570,6 +570,12 @@ data ResolveError
     -- ^ datatype, constructors it has, methods the @elim@ wrote
   | WrongNumberOfEliminationIndices String Int Int
     -- ^ datatype, indices it has, indices the @elim@ wrote
+  | SpliceNotFilled String
+    -- ^ **@${x}@ where nothing is bound to @x@** (MS5 phase 81). Unreachable
+    -- through a rule base, which refuses an unbound name in a template when the
+    -- file loads; it is answered rather than left to a pattern-match failure,
+    -- and it is what a term resolved with no splice environment at all would
+    -- say.
   | LevelArgumentsOnALocal String
     -- ^ level arguments written on a name bound by a λ or by the development.
     -- Only a definition has level parameters, so only a global can be given

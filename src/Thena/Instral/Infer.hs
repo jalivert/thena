@@ -32,6 +32,7 @@ import Data.List (elemIndex, nub, sortOn)
 import Data.Maybe (fromMaybe, listToMaybe)
 
 import Thena.Core.Term (GlobalName (..))
+import Thena.Syntax.Concrete (splicesIn)
 import Thena.Instral.Type (Signature (..), Ty (..), renderTy, typeVarsIn)
 import Thena.Rules (testTypes)
 import Thena.Ops
@@ -670,6 +671,13 @@ operandType ctx si o st = case o of
     -- 'Thena.Rules.validate' has already refused an unbound name
     -- ('Thena.Rules.UnboundInRule'); a fresh variable keeps this pass total.
     Nothing -> fresh st
+  -- **A written term's splices are checked where it sits** (MS5 phase 81).
+  -- A hole stands where a term stands — his observation — so what it wants is
+  -- known from the grammar position and not from a pass of its own: every
+  -- splice in a @Raw@ must be a 'TCore'.
+  Lit (VRaw raw) ->
+    let st1 = foldl (\s x -> operandAgainst ctx si TCore (Ref x) s) st (splicesIn raw)
+     in valueType si (VRaw raw) st1
   Lit v      -> valueType si v st
   ListOf os  ->
     let (a, st1) = fresh st

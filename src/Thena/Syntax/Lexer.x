@@ -123,6 +123,11 @@ tokens :-
   -- identifiers project-wide, after @data@ and @module@, and the last the
   -- surface language is expected to need.
   "do"          { keyword TDo }
+  -- **The escape opener is an ordinary token too** (MS5 phase 81). The region
+  -- scanner emits one when it meets @${@ inside a tagged region; this is what
+  -- lets the same spelling be read again when the region's text is lexed for
+  -- the embedded parser, so a splice is written one way and read one way.
+  "${"          { keyword TEscapeOpen }
   "rule"        { keyword TRule }
   -- **An object language's grammar declaration** (MS5 phase 69). The fourth
   -- word to narrow identifiers project-wide, after @data@, @module@ and @do@.
@@ -292,6 +297,13 @@ loop modes inp@(pos, _, _, str) = case modes of
     AlexToken inp' len act ->
       let t@(Located lp tk) = act pos (take len str)
        in case (modes, tk) of
+            -- **An escape opened by the main lexer pushes the same mode the
+            -- region scanner pushes** (MS5 phase 81), so its closing brace
+            -- becomes a 'TEscapeClose' here exactly as it does there. Without
+            -- it an escape outside a region ends in a bare closing brace, which
+            -- the layout pass then reports as closing a block nobody opened.
+            -- NB: no literal braces in this comment — Alex counts them.
+            (_, TEscapeOpen) -> (t :) <$> loop (Esc 0 : modes) inp'
             -- The brace that closes the escape, rather than one its code wrote.
             (Esc 0 : outer, TRBrace) ->
               (Located lp TEscapeClose :) <$> loop outer inp'

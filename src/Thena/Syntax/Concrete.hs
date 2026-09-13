@@ -21,6 +21,7 @@
 -- loud.
 module Thena.Syntax.Concrete
   ( Raw (..)
+  , splicesIn
   , RawBinder (..)
   , RawConstraint (..)
   , RawData (..)
@@ -50,6 +51,20 @@ data Raw
   | RawGuess String Raw Raw Raw  -- ^ @let ? x : S ≐ (g) in p@
   | RawPending RawConstraint Raw -- ^ @κ ▸ p@
   | RawQuote Raw                 -- ^ @⌜ t ⌝@
+  | RawSplice String
+    -- ^ **@${x}@ — a hole in a written term, filled from the binding @x@ when
+    -- the instruction runs** (MS5 phase 81, his design).
+    --
+    -- **A splice always supplies a nonterminal** — his observation, and it is
+    -- what makes this cheap: a splice stands where a /term/ stands, so the
+    -- template parses once, at load, into a term with holes, and what each hole
+    -- wants is known from where it sits rather than from a pass of its own.
+    --
+    -- **It names a binding rather than holding an expression**, which costs
+    -- nothing: a nested call in an operand is already lifted into a binding of
+    -- its own (MS5 phase 63), so @${f a}@ would be written as two lines
+    -- whatever this said. It also keeps "Thena.Syntax.Concrete" from importing
+    -- "Thena.Instral.Concrete", which imports this module.
   | RawElim String [Int] [Raw] Raw [Raw] [Raw] Raw
     -- ^ @elim d (params) motive (methods) (indices) target@ (§2.6, phase 7) —
     -- positional, and in exactly 'Thena.Core.Term.Core''s own field order for
@@ -81,3 +96,30 @@ data RawData = RawData String [RawBinder] Raw [RawConstructor]
 -- and happens in "Thena.Syntax.Resolve" with the others.
 data RawConstructor = RawConstructor String Raw
   deriving (Eq, Show)
+
+-- | Every binding a written term splices, outermost first (MS5 phase 81).
+--
+-- The twin of 'Thena.Surface.Concrete.blocksIn': one walk over the tree that is
+-- not resolution, so that @validate@ can see an unbound name inside a template
+-- and inference can ask what each splice must be.
+splicesIn :: Raw -> [String]
+splicesIn t = case t of
+  RawSplice x        -> [x]
+  RawLam bs b        -> concatMap binder bs ++ splicesIn b
+  RawPi bs b         -> concatMap binder bs ++ splicesIn b
+  RawArrow a b       -> splicesIn a ++ splicesIn b
+  RawApp f x         -> splicesIn f ++ splicesIn x
+  RawLet _ v ty b    -> splicesIn v ++ splicesIn ty ++ splicesIn b
+  RawClaim _ ty p    -> splicesIn ty ++ splicesIn p
+  RawGuess _ ty g p  -> splicesIn ty ++ splicesIn g ++ splicesIn p
+  RawPending _ p     -> splicesIn p
+  RawQuote q         -> splicesIn q
+  RawElim _ _ ps m ms is tg ->
+    concatMap splicesIn ps ++ splicesIn m ++ concatMap splicesIn ms
+      ++ concatMap splicesIn is ++ splicesIn tg
+  RawName _          -> []
+  RawUniverse _      -> []
+  RawUniverseOpen    -> []
+  RawAt _ _          -> []
+  where
+    binder (RawBinder _ ty) = splicesIn ty
