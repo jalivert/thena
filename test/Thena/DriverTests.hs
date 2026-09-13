@@ -28,7 +28,7 @@ import Thena.Engine (Machine (..), Question (..), globals, development, flatten)
 import Thena.Errors (FailReason (..))
 import Thena.Global.Declare (DeclareError (..))
 import Thena.Global.Env (isDeclared)
-import Thena.Repl (unfinished)
+import Thena.Repl (entriesOf, unclosedEntry)
 
 -- | The names in a 'Fitting' listing, for the tests below.
 
@@ -234,23 +234,50 @@ tests =
               @?= Ran ["ok"] Completed
         ]
     , testGroup
-        "an entry keeps reading while it cannot be finished"
-        -- The trigger for a multi-line entry (MS5 phase 70). Indentation is what
-        -- a continuation must LOOK like; this is what says one is coming.
-        [ testCase "a trailing semicolon wants more" $
-            unfinished "h = here ;" @?= True
-        , testCase "an unclosed brace wants more" $
-            unfinished "do {" @?= True
-        , testCase "an unclosed bracket too" $
-            unfinished "f [1," @?= True
-        , testCase "a finished entry does not" $
-            unfinished "h = here ; goto h" @?= False
-        , testCase "a balanced block does not" $
-            unfinished "do { attack }" @?= False
-          -- Something the lexer cannot read is a syntax error and not a
-          -- continuation, so the driver gets to report it.
-        , testCase "and nor does something that will not lex" $
-            unfinished "\"unterminated" @?= False
+        "a multi-line entry is bracketed by :{ and :}"
+        -- **MS5 phase 78, his choice**: GHCi's spelling, replacing phase 70's
+        -- /keep reading while it cannot be finished/ — @ms5\/CLOSEOUT.md@ 18
+        -- answered rather than left split. 'entriesOf' is the rule in a form
+        -- that can be driven without a terminal; 'loop' uses the same two
+        -- predicates.
+        [ testCase "an ordinary line is its own entry" $
+            entriesOf ["attack", "intro"] @?= [Right "attack", Right "intro"]
+
+        , testCase "a bracketed run is one entry, brackets dropped" $
+            entriesOf [":{", "h = here", "goto h", ":}"]
+              @?= [Right "h = here\ngoto h"]
+
+        , testCase "and the lines around it are their own" $
+            entriesOf ["attack", ":{", "a", "b", ":}", "qed"]
+              @?= [Right "attack", Right "a\nb", Right "qed"]
+
+          -- A colon command inside the brackets is just a line of the entry;
+          -- outside it, it is a command as it always was.
+        , testCase "a colon command is an entry like any other" $
+            entriesOf [":where"] @?= [Right ":where"]
+
+          -- **The brackets must stand alone**, which is GHCi's rule too, so a
+          -- line that merely begins with them is ordinary text.
+        , testCase "an opener must be alone on its line" $
+            entriesOf [":{ h = here"] @?= [Right ":{ h = here"]
+
+        , testCase "surrounding spaces are still an opener" $
+            entriesOf ["  :{  ", "a", ":}"] @?= [Right "a"]
+
+        , testCase "an empty bracket is an empty entry" $
+            entriesOf [":{", ":}"] @?= [Right ""]
+
+          -- Input that ends inside one is a problem, not a silent entry.
+        , testCase "input that ends inside one is reported" $
+            entriesOf [":{", "a"] @?= [Left unclosedEntry]
+
+          -- **A trailing @;@ is a complete entry now** (MS5 phase 78). Phase 70
+          -- read one as /more is coming/; with the bracket doing that job, it
+          -- had to mean something, and a parse error naming the @}@ layout
+          -- inserted at @0:0@ is not it.
+        , testCase "a trailing semicolon is a complete entry" $
+            snd (say [":theorem t : Type\8320", "h = here ;"])
+              @?= Ran [] Completed
         ]
     , testGroup
         "the second matching instruction"

@@ -612,8 +612,13 @@ data LineError
 instralEntry
   :: [RuleBase] -> String -> Either LineError [Instr]
 instralEntry bases src = do
-  ts <- mapLeft LineSyntax (tokensOf src)
-  is <- mapLeft (LineSyntax . ParseFailed) (parseEntry ts)
+  ts  <- mapLeft LineSyntax (tokensOf src)
+  -- **An entry is laid out, like a rule file** (MS5 phase 78). One line gets a
+  -- block around it and nothing else changes; a @:{ … :}@ entry gets a @;@
+  -- between its lines, so the offside rule is what separates instructions at
+  -- the prompt as well as in a file.
+  ts' <- mapLeft (LineSyntax . LayoutFailed) (layoutFile ts)
+  is  <- mapLeft (LineSyntax . ParseFailed) (parseEntry ts')
   prog <- mapLeft LineIllFormed
             (resolveBlock (allLanguages bases) (GlobalName "entry")
                (concatMap hoist (reverse is)))

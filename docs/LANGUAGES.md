@@ -129,15 +129,20 @@ dies with it:
 thena spine> h = here ; claim "k" ⌜ Type₀ ⌝ ; goto h
 ```
 
-An entry may span lines. It keeps reading while it cannot be finished — a
-trailing `;`, or an unclosed bracket — and **every continuation must be
-indented**:
+An entry may span lines. Open it with `:{` and close it with `:}`, each alone
+on its line, and the lines between are one entry — separated by the offside
+rule, so they need no `;`:
 
 ```
-thena spine> h = here ;
-         ...   claim "k" ⌜ Type₀ ⌝ ;
-         ...   goto h
+thena spine> :{
+         ... h = here
+         ... claim "k" ⌜ Type₀ ⌝
+         ... goto h
+         ... :}
 ```
+
+`:{` and `:}` are the only place the REPL asks for anything unusual, and they
+are GHCi's spelling.
 
 ## 5. `instral` has types, and they are checked when a file loads
 

@@ -1334,6 +1334,28 @@ any other bare word calls a rule of that name; :rules lists them.
 `:rules` prints the rules of every loaded base, in search order. If a word is
 in neither list, `no such command` says so and points back at `:help`.
 
+### A multi-line entry is bracketed by `:{` and `:}`
+
+*Decided 2026-09-13.*
+
+At the prompt, one line is one entry. To type several, open with `:{` and close
+with `:}`, each alone on its line:
+
+```
+thena spine> :{
+         ... h = here
+         ... claim "k" ⌜ Type₀ ⌝
+         ... goto h
+         ... :}
+```
+
+The lines between are laid out the way a rule file is, so they need no `;`. It
+is GHCi's spelling, and it is the only place the REPL asks for anything
+unusual — there is no rule about what a continuation must look like, because
+the brackets say where the entry ends.
+
+**A trailing `;` is a complete entry**, not a request for more.
+
 ### `:undo` takes back a line, whether or not you are proving
 
 *Decided 2026-08-29.*

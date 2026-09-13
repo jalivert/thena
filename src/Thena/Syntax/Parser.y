@@ -51,9 +51,11 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 %name parseRule Rule
 %name parseRules RuleFile
 %name parseAtoms AtomRun
--- **A whole REPL entry** (MS5 phase 70) — the same @Body@ a rule has, so a
--- typed entry and a rule body are one grammar and not two.
-%name parseEntry Body
+-- **A whole REPL entry** (MS5 phase 70) — the same body a rule has, so a typed
+-- entry and a rule body are one grammar and not two. **Since phase 78 it is the
+-- same @Block@**, laid out by the same pass, so a multi-line entry separates its
+-- instructions by the offside rule exactly as a rule file does.
+%name parseEntry Block
 -- **A written type** (MS5 phase 71) — what @:accepts@ and @:produces@ take.
 %name parseInstralTy Ty
 %tokentype { Located Token }
@@ -342,6 +344,12 @@ Body :: { [RawInstr] }
   :                                        { [] }
   | Instr                                  { [$1] }
   | Body ';' Instr                         { $3 : $1 }
+  -- **A trailing @;@ is allowed** (MS5 phase 78). Without it @h = here ;@ —
+  -- which phase 70 read as /more is coming/ and phase 78 no longer does — is a
+  -- parse error whose message names the @}@ layout inserted at end of input,
+  -- at position @0:0@: a brace the author never wrote, at a place that is not
+  -- in their file. Haskell tolerates the same thing for the same reason.
+  | Body ';'                               { $1 }
 
 Instr :: { RawInstr }
   : ident '=' Rhs                          { RawBind $1 $3 }

@@ -15,7 +15,10 @@ module Thena.Repl
   , transcript
   , transcriptFrom
   , transcriptIO
-  , unfinished
+  , entriesOf
+  , unclosedEntry
+  , opensEntry
+  , closesEntry
   , renderCore
   , renderSurface
   , renderLevel
@@ -152,7 +155,7 @@ import Thena.Ops
   )
 import Thena.Rules (RuleBase (..), RuleError (..))
 import qualified Thena.Ops as Ops
-import Thena.Syntax.Lexer (Located (..), lexTokens, LexError (..), Pos (..), Token (..))
+import Thena.Syntax.Lexer (LexError (..), Pos (..), Token (..))
 import Thena.Surface.Layout (LayoutError (..))
 import Thena.Surface.Parser (SurfaceParseError (..))
 import qualified Thena.Surface.Zipper as Zipper
@@ -195,58 +198,70 @@ loop s pending = do
         _ | turnQuit t -> pure ()
           | otherwise  -> loop (turnSession t) (turnPending t)
 
-   -- | **An entry, not a line** (MS5 phase 70, his §4 extension): keep reading
-   -- while what has been typed cannot be finished, and require every
-   -- continuation to be **indented** — the rule a rule file already has, where a
-   -- declaration begins in column 1.
+   -- | **An entry, not a line** (MS5 phase 70, rewritten at phase 78).
    --
-   -- **\"Cannot be finished\" is the trigger and indentation is the shape**, and
-   -- that split is deliberate: pure indentation would make the prompt lag a
-   -- line, because the REPL could not know an entry was over until it saw the
-   -- next one. See @ms5\/CLOSEOUT.md@ — his to overrule.
+   -- A multi-line entry is opened by @:{@ and closed by @:}@, each alone on its
+   -- line — **his choice, 2026-09-13, and GHCi\'s spelling**: /"only there I
+   -- want any sort of weirdness"/.
    --
-   -- A colon command is never continued: it is a command, not @instral@.
+   -- **It replaces phase 70\'s heuristic** — keep reading while the entry
+   -- /cannot be finished/, and require every continuation to be indented — which
+   -- is @ms5\/CLOSEOUT.md@ 18, answered rather than left split. An explicit
+   -- bracket has no lag to trade against indentation, and it is one rule where
+   -- that was two.
+   --
+   -- The same predicates drive 'entriesOf', which is the testable form of this.
    gather firstLine
-     | take 1 (dropWhile (== ' ') firstLine) == ":" = pure (Right firstLine)
-     | otherwise = keepReading firstLine
+     | opensEntry firstLine = block []
+     | otherwise            = pure (Right firstLine)
 
-   keepReading acc
-     | not (unfinished acc) = pure (Right acc)
-     | otherwise = do
-         more <- getInputLine "         ... "
-         case more of
-           Nothing -> pure (Right acc)     -- end of input finishes it
-           Just l
-             | all (== ' ') l -> pure (Right acc)
-             | take 1 l == " " -> keepReading (acc ++ "\n" ++ l)
-             | otherwise ->
-                 pure (Left "a continuation line must be indented; entry dropped")
+   block acc = do
+     more <- getInputLine continuationPrompt
+     case more of
+       Nothing -> pure (Left unclosedEntry)
+       Just l
+         | closesEntry l -> pure (Right (intercalate "\n" (reverse acc)))
+         | otherwise     -> block (l : acc)
 
--- | Can what has been typed so far not be a whole entry?
+-- | The prompt a line inside @:{ … :}@ is typed at.
+continuationPrompt :: String
+continuationPrompt = "         ... "
+
+-- | What is said when input ends inside a @:{@.
+unclosedEntry :: String
+unclosedEntry = "end of input inside :{ … :} — the entry is dropped"
+
+-- | @:{@ alone on its line opens a multi-line entry (MS5 phase 78).
+opensEntry :: String -> Bool
+opensEntry = (== ":{") . trimmed
+
+-- | @:}@ alone on its line closes one.
+closesEntry :: String -> Bool
+closesEntry = (== ":}") . trimmed
+
+trimmed :: String -> String
+trimmed = dropWhile (== ' ') . reverse . dropWhile (== ' ') . reverse
+
+-- | Group written lines into entries, the way the prompt does.
 --
--- **Two shapes, and both are lexical**: an unclosed bracket, and a trailing
--- @;@ — which is how a person says /there is more/ at a prompt where there is
--- no next line to look at yet. Anything the lexer cannot read at all is a
--- syntax error and not a continuation, so it is answered here as finished and
--- reported by the driver.
-unfinished :: String -> Bool
-unfinished src = case lexTokens src of
-  Left _   -> False
-  Right ts -> depth ts > 0 || endsOpen ts
+-- **The testable form of \'loop\'\'s reader** — the interactive one cannot be
+-- driven without a terminal, so the rule lives here and both go through
+-- \'opensEntry\' and \'closesEntry\'. A @Left@ is a problem to print instead of
+-- running anything.
+--
+-- **It is not what a @.thena.script@ gets**, which is still a line at a time;
+-- that is @ms5\/CLOSEOUT.md@\'s to decide, and nothing is lost meanwhile,
+-- because a script could not write a multi-line entry before this phase either.
+entriesOf :: [String] -> [Either String String]
+entriesOf [] = []
+entriesOf (l : ls)
+  | opensEntry l = gather [] ls
+  | otherwise    = Right l : entriesOf ls
   where
-    depth = foldl step (0 :: Int) . map (\(Located _ t) -> t)
-    step d t = case t of
-      TLBrace   -> d + 1
-      TLParen   -> d + 1
-      TLBracket -> d + 1
-      TRBrace   -> d - 1
-      TRParen   -> d - 1
-      TRBracket -> d - 1
-      _         -> d
-
-    endsOpen ts = case reverse ts of
-      Located _ TSemi : _ -> True
-      _                   -> False
+    gather _   []       = [Left unclosedEntry]
+    gather acc (m : ms)
+      | closesEntry m = Right (intercalate "\n" (reverse acc)) : entriesOf ms
+      | otherwise     = gather (m : acc) ms
 
 -- --------------------------------------------------------------------------
 -- Loading (§9, phase 11)
