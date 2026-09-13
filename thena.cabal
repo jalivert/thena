@@ -66,6 +66,7 @@ library
     build-depends:
         base       ^>=4.21.2.0,
         array      >=0.5 && <0.6,
+        containers >=0.7 && <0.9,
         haskeline  >=0.8.4 && <0.9
     build-tool-depends:
         alex:alex   >=3.5,

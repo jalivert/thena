@@ -27,7 +27,8 @@ module Thena.Instral.Infer
   , renderInstralTypeError
   ) where
 
-import Data.List (nub)
+import Data.Graph (flattenSCC, stronglyConnComp)
+import Data.List (elemIndex, nub, sortOn)
 import Data.Maybe (fromMaybe, listToMaybe)
 
 import Thena.Core.Term (GlobalName (..))
@@ -41,6 +42,7 @@ import Thena.Ops
   , Rule (..)
   , Test
   , Value (..)
+  , operandsOf
   , operandTypes
   , resultOf
   )
@@ -126,9 +128,10 @@ renderInstralTypeError e = case e of
 
 -- | Threaded rather than wrapped in a monad, and the substitution is an
 -- association list rather than a map: a rule base is a few hundred
--- instructions, @containers@ is not a dependency of this package, and neither
--- a state monad nor a new one would be earning its keep here (§12, and his
--- standing *"no @Supply@ nonsense"*).
+-- instructions, so neither a state monad nor a @Map@ would be earning its keep
+-- here (§12, and his standing *"no @Supply@ nonsense"*). MS5 phase 76 made
+-- @containers@ a dependency for @Data.Graph@; that is not a reason to reach for
+-- the rest of it.
 data St = St
   { stNext   :: Int
   , stSubst  :: [(Int, Ty)]
@@ -265,36 +268,158 @@ data Bound
 -- Answers the signature it worked out for each callable, so that a later phase
 -- can print them, and every error it found.
 --
--- **The group is not broken into strongly connected components**, so a rule
--- used at two different types is inferred at one. That is the monomorphism a
--- single recursive group has, it is what Haskell would do inside one @let@
--- group without a signature, and phase 67 is where an annotation lifts it.
--- Nothing in the shipped base wants two types today.
+-- **The callables are split into strongly connected components and each group
+-- is generalised before the next is walked** — his ruling, 2026-09-13:
+-- /"do the SCC and take the type system all the way to HM."/ So a helper called
+-- at a @Surface@ in one place and a @Core@ in another is polymorphic rather than
+-- a clash, which is @ms5\/CLOSEOUT.md@ 8, and an annotation stops being the only
+-- way to a second type.
+--
+-- **Within a group nothing generalises**, which is Hindley-Milner and not a
+-- shortcut: mutually recursive callables share one set of variables, exactly as
+-- a Haskell @let@ group does. What the split buys is that the groups are as
+-- small as the call graph allows.
+--
+-- The order the components come back in is the order they must be walked —
+-- callees first — so this is a left fold and the environment grows as it goes.
 inferProgram
   :: [(String, Signature)] -> [Rule]
   -> ([(Callable, Signature)], [InstralTypeError])
 inferProgram sigs rs =
-  let (env, st0) = declareAll sigs rs (St 0 [] [] [])
-      st1        = foldl (clause env) st0 rs
-      st2        = settleText st1
-      out        = [ (c, whatItIs st2 b) | (c, b) <- env ]
+  let (env, st) = foldl (inferGroup sigs rs) ([], St 0 [] [] []) (components rs)
+      -- **Reported in the order the file declares them, not the order they were
+      -- walked.** The call graph decides the walking order and that is an
+      -- implementation detail; @:accepts@, @:produces@ and the shipped base\'s
+      -- own signature listing should read down the file.
+      out       = [ (c, whatItIs st b) | c <- nub (map callableOf rs)
+                  , Just b <- [lookup c env] ]
       unanswered = [ SignatureUnanswered (GlobalName n) (length (sigParams t))
                    | (n, t) <- sigs
                    , (GlobalName n, length (sigParams t)) `notElem` map fst env
                    ]
-   in (out, stErrors st2 ++ unanswered)
+   in (out, inFileOrder rs (stErrors st) ++ unanswered)
 
--- | What to report as a callable's signature: the declaration if there was one,
--- and otherwise what the solved substitution makes of its variables.
-whatItIs :: St -> Bound -> Signature
-whatItIs st b = case b of
-  Declared sg    -> sg
-  Inferred ps r  -> Signature (map (deep st) ps) (fmap (deep st) r)
+-- | Report errors down the file, not along the call graph.
+--
+-- **The walking order became the call graph\'s at MS5 phase 76** and that is an
+-- implementation detail; a reader who loads a file with three mistakes in it
+-- should meet them in the order they wrote them. A stable sort on the rule a
+-- site names does it, and errors inside one rule keep the order they were
+-- found in.
+inFileOrder :: [Rule] -> [InstralTypeError] -> [InstralTypeError]
+inFileOrder rs = sortOn position
+  where
+    order = nub (map ruleName rs)
+    position e = maybe (length order) id (elemIndex (whose e) order)
+    whose e = case e of
+      Clash si _ _          -> nameIn si
+      Occurs si _           -> nameIn si
+      BindsNothing si _     -> nameIn si
+      AnnotationTooGeneral si _ -> nameIn si
+      SignatureUnanswered n _   -> n
+      TextNotTextual si _   -> nameIn si
+
+    nameIn si = case si of
+      InHead n _      -> n
+      InBody n _      -> n
+      InSignature n _ -> n
+
+-- | One strongly connected component: declare it, walk its clauses, generalise.
+--
+-- **@settleText@ runs before the generalisation and not once at the end**, and
+-- it has to: a text literal in a position still unconstrained becomes a
+-- 'TString', and generalising first would quantify that variable instead —
+-- turning /this is a string/ into /this is any type/. See 'settleText', whose
+-- comment says why leaving it free is wrong.
+inferGroup
+  :: [(String, Signature)] -> [Rule] -> (SigEnv, St) -> [Callable] -> (SigEnv, St)
+inferGroup sigs rs (env0, st0) cs =
+  let (env1, st1) = declareThese sigs rs cs (env0, st0)
+      st2         = foldl (clause env1) st1 [ r | r <- rs, callableOf r `elem` cs ]
+      st3         = settleText st2
+   in ([ (c, if c `elem` cs then generalise st3 b else b) | (c, b) <- env1 ], st3)
+
+-- | Close an inferred callable over the variables its group left free.
+--
+-- **The variables are renumbered from zero**, so an inferred scheme is spelled
+-- the way a written one is — @a -> b -> ()@ and not @a19 -> a23 -> ()@. That
+-- matters for more than looks: 'Thena.Instral.Type.letterFor' names a variable
+-- by its number, and @InstralInferTests@ compares the shipped base's inferred
+-- signatures as rendered text against what a person would write.
+--
+-- **Nothing else in the environment can be captured.** A group is declared only
+-- when it is reached, and every earlier group is already a closed scheme, so
+-- the only free variables in scope at this point are the group's own — which is
+-- the side condition Hindley-Milner generalisation needs and which the walking
+-- order supplies for free.
+generalise :: St -> Bound -> Bound
+generalise st b = case b of
+  Declared _      -> b
+  Inferred ps res ->
+    let ps'   = map (deep st) ps
+        res'  = fmap (deep st) res
+        vs    = nub (concatMap typeVarsIn (ps' ++ maybe [] (: []) res'))
+        table = zip vs [0 ..]
+     in Declared (Signature (map (renumber table) ps') (fmap (renumber table) res'))
+
+renumber :: [(Int, Int)] -> Ty -> Ty
+renumber table t = case t of
+  TVar i    -> maybe t TVar (lookup i table)
+  TList a   -> TList (renumber table a)
+  TOption a -> TOption (renumber table a)
+  TPair a c -> TPair (renumber table a) (renumber table c)
+  TFun as r -> TFun (map (renumber table) as) (renumber table r)
+  _         -> t
+
+-- | The callables, in the order they must be inferred: callees before callers,
+-- and a mutually recursive knot as one group.
+--
+-- **@Data.Graph@ answers in exactly that order** — @stronglyConnComp@ is reverse
+-- topologically sorted, which for edges that mean /calls/ is dependencies
+-- first.
+--
+-- **The edges over-approximate, and the cost of that is stated rather than
+-- hidden.** A @Call@ whose name is shadowed by a local is an application of the
+-- local and not a call at all (his ruling, @ms5\/CLOSEOUT.md@ 14), and this does
+-- not track binders, so such a name draws an edge that is not really there. The
+-- only consequence is a group larger than it needed to be — less polymorphism,
+-- never a wrong type — and a signature is the way out, as it was for everything
+-- before this phase.
+components :: [Rule] -> [[Callable]]
+components rs = map flattenSCC (stronglyConnComp nodes)
+  where
+    defined = nub (map callableOf rs)
+    nodes   = [ (c, c, calledBy c) | c <- defined ]
+    calledBy c =
+      [ d
+      | r <- rs, callableOf r == c
+      , d <- callsIn (ruleBody r)
+      , d `elem` defined
+      ]
+
+-- | Every callable a body calls, descending into lambdas and blocks.
+callsIn :: [Instr] -> [Callable]
+callsIn = concatMap one
+  where
+    one i = case i of
+      Bind _ o -> inOp o
+      Do     o -> inOp o
+
+    inOp o = case o of
+      Call nm as  -> (nm, length as) : concatMap inOperand as
+      Lambda _ b  -> callsIn b
+      Block b     -> callsIn b
+      _           -> concatMap inOperand (operandsOf o)
+
+    inOperand a = case a of
+      Lit (VClosure _ b _) -> callsIn b
+      _                    -> []
 
 -- | One fresh variable per parameter, and one for the result **only if some
--- clause of the callable returns**.
-declareAll :: [(String, Signature)] -> [Rule] -> St -> (SigEnv, St)
-declareAll sigs rs st0 = foldl one ([], st0) (nub (map callableOf rs))
+-- clause of the callable returns** — for the callables of one group.
+declareThese
+  :: [(String, Signature)] -> [Rule] -> [Callable] -> (SigEnv, St) -> (SigEnv, St)
+declareThese sigs rs cs st0 = foldl one st0 cs
   where
     one (env, st) c@(GlobalName n, k) = case declaredFor n k of
       -- **A declared signature is taken as given**, and the body is checked
@@ -312,6 +437,13 @@ declareAll sigs rs st0 = foldl one ([], st0) (nub (map callableOf rs))
       case [ t | (n', t) <- sigs, n' == n, length (sigParams t) == k ] of
         t : _ -> Just t
         []    -> Nothing
+
+-- | What to report as a callable's signature: the declaration if there was one,
+-- and otherwise what the solved substitution makes of its variables.
+whatItIs :: St -> Bound -> Signature
+whatItIs st b = case b of
+  Declared sg    -> sg
+  Inferred ps r  -> Signature (map (deep st) ps) (fmap (deep st) r)
 
 -- | Does this body end a call with a value?
 --

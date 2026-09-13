@@ -38,12 +38,76 @@ tests =
     , blockReturn
     , annotations
     , noKeyword
+    , generalisation
     , blockBodies
     , badSignatures
     , functions
     , lambdas
     , objectLanguages
     ]
+
+-- --------------------------------------------------------------------------
+-- Generalisation, per strongly connected component (MS5 phase 76)
+-- --------------------------------------------------------------------------
+
+-- | **His ruling, 2026-09-13**: /"do the SCC and take the type system all the
+-- way to HM."/
+--
+-- A top-level callable is generalised once its component is solved, so a later
+-- caller instantiates it; a local is not, which is /Let Should Not Be
+-- Generalised/ and GHC's @MonoLocalBinds@ — **his agreement, the same day**.
+-- The pair of tests below is the whole distinction, and neither passes without
+-- the other side being right.
+generalisation :: TestTree
+generalisation =
+  testGroup
+    "a top-level callable is generalised, a local is not"
+    [ -- The payoff, at its smallest: one global used at two types, no signature.
+      loads "a global used at two types is fine"
+        "idf x = do { return x }\n\
+        \rule go :- then h = here ; a = idf h ; n = fresh-name \"x\" ; b = idf n"
+
+      -- …and the same shape one level in is refused, which is /Let Should Not
+      -- Be Generalised/ and GHC's @MonoLocalBinds@ — his agreement, 2026-09-13.
+    , clashes "a local used at two types is not"
+        "rule go :- then g = \\ z -> do { return z } ; h = here ; a = g h\n\
+        \     ; n = fresh-name \"x\" ; b = g n"
+
+      -- **A mutually recursive pair is ONE component**, so within it the two
+      -- share their variables: calling @oddish@ at a Core and at a Name from
+      -- inside @evenish@ is a clash. That is the monomorphism Hindley-Milner
+      -- has and this phase did not remove.
+    , clashes "and inside one component nothing is generalised either"
+        "evenish x = do { h = here ; a = oddish h ; n = fresh-name \"q\"\n\
+        \               ; b = oddish n ; return x }\n\
+        \oddish y = do { c = evenish y ; return y }"
+
+      -- **…but the component as a whole is**, so two uses from OUTSIDE it are
+      -- independent. This is the half that would be wrong if the group were
+      -- generalised one callable at a time, or not at all.
+    , loads "…while outside it, the whole component is"
+        "evenish x = do { n = fresh-name \"q\" ; a = oddish n ; return x }\n\
+        \oddish y = do { return y }\n\
+        \rule go :- then h = here ; a = evenish h ; m = fresh-name \"x\" ; b = evenish m"
+
+      -- **Errors are still reported down the file.** The walking order is the
+      -- call graph\'s now, so @zzz@ — a leaf — is inferred before the @aaa@ that
+      -- calls it, and without a sort its mistake would be printed first.
+    , testCase "and a file's mistakes are reported in the order they were written" $
+        case load "rule aaa :- then h = here ; say h ; zzz\n\
+                  \rule zzz :- then g = here ; say g" of
+          BasesIllTyped [Clash (InBody a _) _ _, Clash (InBody z _) _ _] ->
+            (a, z) @?= (GlobalName "aaa", GlobalName "zzz")
+          other -> assertFailure ("expected two clashes, got " ++ show other)
+    ]
+  where
+    loads what src = testCase what $ case load src of
+      BasesLoaded _ -> pure ()
+      other         -> assertFailure ("expected a load, got " ++ show other)
+
+    clashes what src = testCase what $ case load src of
+      BasesIllTyped (Clash{} : _) -> pure ()
+      other -> assertFailure ("expected a clash, got " ++ show other)
 
 -- --------------------------------------------------------------------------
 -- A function body may be a block (MS5 phase 75b)
@@ -380,18 +444,32 @@ annotations :: TestTree
 annotations =
   testGroup
     "a declared signature"
-    [ -- **The payoff.** @ignore@ is used at a Name and at a Core. Inferred, the
-      -- second use is a clash (@ms5\/CLOSEOUT.md@ 8 — one recursive group, one
-      -- type); declared, every use gets its own copy of the scheme.
+    [ -- @ignore@ is used at a Name and at a Core, and a signature says so.
       testCase "makes a rule usable at two types" $
         case load polymorphic of
           BasesLoaded _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
-    , testCase "…and without it the same base is refused" $
+      -- **AND SO DOES INFERENCE, SINCE MS5 PHASE 76** — his ruling, take the
+      -- type system all the way to HM. This case asserted a @Clash@ until then,
+      -- which was @ms5\/CLOSEOUT.md@ 8: one recursive group, one type, so the
+      -- second use was an error and an annotation was the only way out.
+      -- **`ignore` is its own strongly connected component**, so it is
+      -- generalised before either caller is walked and each use gets its own
+      -- copy — exactly as the declared version does.
+    , testCase "…and now so does the same base without one" $
         case load (unlines (drop 1 (lines polymorphic))) of
-          BasesIllTyped [Clash _ TName TCore] -> pure ()
-          other -> assertFailure ("expected a clash, got " ++ show other)
+          BasesLoaded _ -> pure ()
+          other -> assertFailure ("expected a load, got " ++ show other)
+
+      -- **What the annotation still buys is the promise**, which is the whole
+      -- of its remaining job: the inferred scheme and the written one agree.
+    , testCase "…and the two agree on what it is" $
+        case load (unlines (drop 1 (lines polymorphic))) of
+          BasesLoaded (b : _) ->
+            lookup (GlobalName "ignore", 1) (fst (inferProgram [] (baseRules b)))
+              @?= Just (Signature [TVar 0] Nothing)
+          other -> assertFailure ("expected a load, got " ++ show other)
 
       -- **His requirement: a wrong annotation reports against the
       -- DECLARATION.** The signature promises any type; the body hands the
