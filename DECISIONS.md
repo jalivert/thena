@@ -1238,6 +1238,60 @@ argument, and if there is none you find out when it runs. That is the same trade
 already made for `call`, where a rule may name a rule defined later or in a base
 not loaded yet.
 
+### A rule file lays out, exactly like Haskell
+
+*Decided 2026-09-13.*
+
+A rule file is one layout block and a rule body is a block that `then` opens, so
+a body can be written as indented lines with no separators at all:
+
+```
+rule demo :- when focus-is-hole then
+  m = shout "hi"
+  say m
+```
+
+**Every older spelling still works** — one line, explicit braces, and the
+leading-`;` style the shipped base is written in:
+
+```
+rule fill t :- when focus-is-hole
+  then n = fresh-name "refined"
+     ; x = define n t
+```
+
+That last one is why **a line beginning with `;` is a continuation whatever its
+column**: the separator is already written, so there is nothing for the offside
+rule to insert and nothing to close.
+
+**Declarations line up with the first one.** The file's block takes its column
+from the first declaration, as a Haskell block takes its column from its first
+token, so a declaration that does not line up is a syntax error in either
+direction. A file indented as a whole is consistent and therefore fine.
+
+### A function body may be a `do` block
+
+*Decided 2026-09-13.*
+
+`f x = e` is one expression. For locals, write a block:
+
+```
+shout : String -> String
+shout s = do
+  wrapped = concat "<" s
+  closed  = concat wrapped ">"
+  return closed
+```
+
+The block *is* the function's body, so it says `return` itself — and the short
+form is that block with the `return` written for you. A lambda's body takes the
+same two shapes. A block that never returns is refused, as `f x = say "hi"`
+already was.
+
+**`do` and not `=`.** Making `=` open a block would reach into the surface
+language's `let x = e` bindings, which are the same token in the same lexer;
+Haskell does not make `=` a layout keyword either.
+
 ### `:infer` takes a surface term; a core one goes in corners
 
 *Decided 2026-09-02.*
