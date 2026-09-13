@@ -219,7 +219,11 @@ operandIn e o = case o of
 -- load-time validation pass that rules will need anyway (§2.4, §7.2, phase 15);
 -- that is what keeps 'Op' free of a @Maybe@.
 data Instr
-  = Bind Name Op
+  = Bind Name (Maybe Ty) Op
+    -- ^ **the type is the author's annotation, and it is only ever read by
+    -- inference** (MS5 phase 77, his ruling). It sits on the binding because
+    -- that is what it is about — a @Do@ binds nothing and correctly cannot
+    -- carry one — and 'Thena.Engine' never looks at it.
   | Do   Op
   deriving (Eq, Show)
 

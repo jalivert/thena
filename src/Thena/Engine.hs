@@ -491,7 +491,7 @@ load is m
 -- than silently swallowed.
 isAsking :: Machine -> Bool
 isAsking m = case pc (exec m) of
-  Bind _ (Ask _ _) : _ -> True
+  Bind _ _ (Ask _ _) : _ -> True
   Do     (Ask _ _) : _ -> True
   _                    -> False
 
@@ -502,7 +502,7 @@ isAsking m = case pc (exec m) of
 -- reported rather than silently doing nothing.
 isYielding :: Machine -> Bool
 isYielding m = case pc (exec m) of
-  Bind _ (Yield _) : _ -> True
+  Bind _ _ (Yield _) : _ -> True
   Do     (Yield _) : _ -> True
   _                    -> False
 
@@ -519,7 +519,7 @@ isYielding m = case pc (exec m) of
 -- any op that produces nothing.
 resumeYield :: Machine -> Machine
 resumeYield m = case pc (exec m) of
-  Bind _ (Yield _) : rest -> m { exec = (exec m) { pc = rest } }
+  Bind _ _ (Yield _) : rest -> m { exec = (exec m) { pc = rest } }
   Do     (Yield _) : rest -> m { exec = (exec m) { pc = rest } }
   _                       -> m
 
@@ -584,7 +584,7 @@ resumeFrom (fr : stk)
 -- first and reports; see "Thena.Driver".
 resumeAt :: Answer -> Machine -> Machine
 resumeAt a m = case pc (exec m) of
-  Bind n (Ask _ _) : rest -> m { exec = (exec m) { pc = rest, env = (n, VText a) : env (exec m) } }
+  Bind n _ (Ask _ _) : rest -> m { exec = (exec m) { pc = rest, env = (n, VText a) : env (exec m) } }
   Do     (Ask _ _) : rest -> m { exec = (exec m) { pc = rest } }
   _                       -> m
 
@@ -1556,7 +1556,7 @@ perform instr rest m = case operation instr of
                          (advance m { development = Development cur', names = n2 })
 
     operation i = case i of
-      Bind _ o -> o
+      Bind _ _ o -> o
       Do     o -> o
 
     text    = operandText (env (exec m))
@@ -1575,14 +1575,14 @@ perform instr rest m = case operation instr of
     -- because a call does not produce here — it produces when its callee
     -- returns, which may be many instructions away and below a @Choice@ frame.
     wants = case instr of
-      Bind n _ -> Just n
+      Bind n _ _ -> Just n
       Do _     -> Nothing
 
     -- Bind the result if the instruction named a destination. An unbound
     -- destination on a producing op is fine; a bound one on an op that produces
     -- nothing is what phase 15's load-time pass rejects (§7.2).
     produce v m' = Continue $ case instr of
-      Bind n _ -> advance m' { exec = (exec m') { env = (n, v) : env (exec m') } }
+      Bind n _ _ -> advance m' { exec = (exec m') { env = (n, v) : env (exec m') } }
       Do _     -> advance m'
 
     -- 'Assume' and 'Claim' differ only in which component they build, and both

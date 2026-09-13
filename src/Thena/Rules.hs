@@ -474,6 +474,10 @@ data RuleError
     -- not a type a value can have
   | DuplicateSignature String Int
     -- ^ two signatures for one callable
+  | AnnotationWithoutBinding GlobalName Int Name
+    -- ^ **@n : Ty@ with no @n = …@ after it** (MS5 phase 77). An annotation is
+    -- about the binding on the next line; one that is about nothing is a typo,
+    -- most often a name that was changed on one line and not the other.
   | FunctionLeavesNothing String
   | RuleAndFunction String Int
     -- ^ one name is both a rule and a function at one arity (MS5, reviewed
@@ -528,7 +532,7 @@ validate r = reserved ++ headScope ++ go 0 (initiallyBound r) (ruleBody r)
     -- quietly does something else than it says.
     reserved =
       [ ReservedName nm n
-      | n <- ruleParams r ++ [ n | Bind n _ <- ruleBody r ]
+      | n <- ruleParams r ++ [ n | Bind n _ _ <- ruleBody r ]
       , n `elem` reservedNames
       ]
 
@@ -551,7 +555,7 @@ validate r = reserved ++ headScope ++ go 0 (initiallyBound r) (ruleBody r)
           errs  = declaration i o ++ binding i instr o ++ scope i bound o
                     ++ insideLambda i bound o
           bound' = case instr of
-            Bind n _ -> n : bound
+            Bind n _ _ -> n : bound
             Do _     -> bound
        in errs ++ go (i + 1) bound' rest
 
@@ -575,10 +579,10 @@ validate r = reserved ++ headScope ++ go 0 (initiallyBound r) (ruleBody r)
       let o = operationOf instr
        in scope i bound o
             ++ insideLambda i bound o
-            ++ inner i (case instr of { Bind n _ -> n : bound; Do _ -> bound }) rest
+            ++ inner i (case instr of { Bind n _ _ -> n : bound; Do _ -> bound }) rest
 
     operationOf instr = case instr of
-      Bind _ o -> o
+      Bind _ _ o -> o
       Do     o -> o
 
     declaration i o = case o of
@@ -586,7 +590,7 @@ validate r = reserved ++ headScope ++ go 0 (initiallyBound r) (ruleBody r)
       _            -> []
 
     binding i instr o = case instr of
-      Bind n _ | not (produces o) -> [BoundNonProducing nm i n]
+      Bind n _ _ | not (produces o) -> [BoundNonProducing nm i n]
       _                           -> []
 
     scope i bound o =
@@ -775,11 +779,18 @@ validateBase = concatMap validate . baseRules
 --
 -- **Every error, not the first**, for 'validate'\'s reason: instructions
 -- resolve independently, so a body with three mistakes reports three.
+-- **The body goes through 'resolveBlock'** (MS5 phase 77, and it was a defect
+-- until then). This function used to call 'instruction' itself, so a rule body
+-- and a @do@ block were resolved by two pieces of code that were supposed to be
+-- the same one — @resolveBlock@\'s own comment says /nothing about a block is a
+-- second dialect/ — and phase 77\'s annotation pairing landed in one of them.
+-- A rule body silently ignored every @n : Ty@ it was given.
 resolveRule :: [(String, Language)] -> RawRule -> Either [RuleError] Rule
 resolveRule ls (RawRule nm ps ts body) =
-  case (headErrs, bodyErrs) of
-    ([], []) -> Right (Rule g ps tests (concat instrs))
-    _        -> Left (headErrs ++ bodyErrs)
+  case (headErrs, resolveBlock ls g body) of
+    ([], Right instrs) -> Right (Rule g ps tests instrs)
+    (_,  Right _)      -> Left headErrs
+    (_,  Left bodyErrs) -> Left (headErrs ++ bodyErrs)
   where
     g = GlobalName nm
 
@@ -790,9 +801,6 @@ resolveRule ls (RawRule nm ps ts body) =
         Right t                   -> Right t
         Left NoSuchTestWord       -> Left (NoSuchTest g w)
         Left (WrongTestArity _ _) -> Left (BadTestOperands g w)
-
-    (bodyErrs, instrs) =
-      partitionEithers (zipWith (instruction ls g) [0 ..] body)
 
 -- | What may be written as an operand of a test (MS4 phase 47).
 --
@@ -919,7 +927,7 @@ bodyInstrs
 bodyInstrs ls g nm body = case body of
   BodyRhs rhs -> do
     is <- resolveBlock ls g [RawBind lambdaResult rhs]
-    case [ () | Bind n o <- is, n == lambdaResult, not (produces o) ] of
+    case [ () | Bind n _ o <- is, n == lambdaResult, not (produces o) ] of
       _ : _ -> Left [FunctionLeavesNothing nm]
       []    -> Right (is ++ [Do (Return (Ref lambdaResult))])
   BodyBlock raws -> do
@@ -928,7 +936,7 @@ bodyInstrs ls g nm body = case body of
   where
     returns i = case i of
       Do   (Return _) -> True
-      Bind _ (Return _) -> True
+      Bind _ _ (Return _) -> True
       _               -> False
 
 -- | Resolve a written block of instructions (MS4 phase 45).
@@ -940,10 +948,33 @@ bodyInstrs ls g nm body = case body of
 --
 -- The name is the one errors are reported against. A block has none of its own,
 -- so its caller supplies where it came from.
+-- **An annotation is attached here, not parsed into an instruction** (MS5 phase
+-- 77): @n : Ty@ is about the @n = …@ that follows it, so this walks the written
+-- list in pairs rather than mapping over it. Everything else is unchanged.
 resolveBlock :: [(String, Language)] -> GlobalName -> [RawInstr] -> Either [RuleError] [Instr]
-resolveBlock ls g body = case partitionEithers (zipWith (instruction ls g) [0 ..] body) of
+resolveBlock ls g body = case partitionEithers (walk 0 body) of
   ([], instrs) -> Right (concat instrs)
   (errs, _)    -> Left errs
+  where
+    walk _ [] = []
+    walk i (RawAnnot n t : rest) = case rest of
+      RawBind m r : more | m == n ->
+        annotated i n t (instruction ls g (i + 1) (RawBind m r))
+          : walk (i + 2) more
+      _ -> [Left (AnnotationWithoutBinding g i n)]
+    walk i (ri : rest) = instruction ls g i ri : walk (i + 1) rest
+
+    -- The annotation lands on the instruction that binds the name, which is the
+    -- last of however many the binding expanded to — a nested call is lifted in
+    -- front of it (phase 63) and those liftings are not what was annotated.
+    annotated i n t got = do
+      ty <- resolveTy ls (show g) t >>= \mt -> case mt of
+        Just u  -> Right u
+        Nothing -> Left (UnitInsideAType n)
+      is <- got
+      case reverse is of
+        Bind m _ o : front | m == n -> Right (reverse (Bind m (Just ty) o : front))
+        _ -> Left (AnnotationWithoutBinding g i n)
 
 -- | One written instruction. @‹name› = ‹op›@ is a 'Bind', a bare op is a 'Do' —
 -- §7.2\'s two cases, and the grammar has no third.
@@ -961,19 +992,23 @@ instruction ls g i ri = case ri of
   -- to 'operation' instead — so without this, @f false@ works and @b = false@
   -- says /no rule is called false/.
   RawBind n (RhsOp (RawOp w [])) | w `elem` reservedNames ->
-    pure . Bind n . Op.Value <$> operandOf ls g i "=" (RawRef w)
-  RawBind n (RhsOp o)    -> lift (Bind n) o
+    pure . Bind n Nothing . Op.Value <$> operandOf ls g i "=" (RawRef w)
+  RawBind n (RhsOp o)    -> lift (Bind n Nothing) o
   -- **A value on the right of an @=@** (MS5 phase 68a) — @x = [1, 2]@. Its
   -- nested calls are lifted exactly as an op's arguments are, and the value
   -- itself becomes a 'Thena.Ops.Value', which is the op with no written form.
   -- **A lambda binds directly**, without going through 'Op.Value': it is
   -- already an op, and wrapping it would build the closure and then copy it.
-  RawBind n (RhsValue (RawLambda ps b)) -> pure . Bind n <$> closure ls g i ps b
+  RawBind n (RhsValue (RawLambda ps b)) -> pure . Bind n Nothing <$> closure ls g i ps b
   RawBind n (RhsValue o) ->
     let (binds, o') = hoistedOne i o
      in (++) <$> traverse (hoistedBind ls g i) binds
-              <*> (pure . Bind n . Op.Value <$> operandOf ls g i "=" o')
+              <*> (pure . Bind n Nothing . Op.Value <$> operandOf ls g i "=" o')
   RawDo     o            -> lift Do       o
+  -- **Unreachable from 'resolveBlock'**, which takes an annotation and the
+  -- binding after it together. A block that is only an annotation is refused
+  -- there; this answers rather than leaving a pattern-match failure.
+  RawAnnot n _           -> Left (AnnotationWithoutBinding g i n)
   where
     lift f (RawOp w as) =
       let (binds, as') = hoisted i as
@@ -983,9 +1018,9 @@ instruction ls g i ri = case ri of
 -- | One binding 'hoisted' lifted out — a nested call or a lambda.
 hoistedBind :: [(String, Language)] -> GlobalName -> Int -> (Name, RawRhs) -> Either RuleError Instr
 hoistedBind ls g i (n, r) = case r of
-  RhsOp o                     -> Bind n <$> operation ls g i o
-  RhsValue (RawLambda ps b)   -> Bind n <$> closure ls g i ps b
-  RhsValue o                  -> Bind n . Op.Value <$> operandOf ls g i "=" o
+  RhsOp o                     -> Bind n Nothing <$> operation ls g i o
+  RhsValue (RawLambda ps b)   -> Bind n Nothing <$> closure ls g i ps b
+  RhsValue o                  -> Bind n Nothing . Op.Value <$> operandOf ls g i "=" o
 
 -- | A lambda, compiled the way a function is: a body that ends in @return@.
 --

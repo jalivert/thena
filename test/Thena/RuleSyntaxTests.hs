@@ -450,7 +450,7 @@ shapes =
         b @?= [Do Attack, Do Along, Do Solve]
     , testCase "a binding instruction" $ do
         b <- bodyOf "x = typeof y"
-        b @?= [Bind "x" (Typing (Ref "y"))]
+        b @?= [Bind "x" Nothing (Typing (Ref "y"))]
     , -- The hyphens are the reason the lexer was widened this phase: §8 and
       -- OBJECTIVE.md have always written rule and test names this way.
       testCase "a hyphenated name is one identifier" $ do
@@ -475,12 +475,12 @@ text =
 
     , testCase "concat, both sides" $ do
         b <- bodyOf "m = concat \"no rule for \" g"
-        b @?= [Bind "m" (Concat (Lit (VText "no rule for ")) (Ref "g"))]
+        b @?= [Bind "m" Nothing (Concat (Lit (VText "no rule for ")) (Ref "g"))]
 
     , -- The op this was really missing: a rule can now interrogate the user.
       testCase "ask" $ do
         b <- bodyOf "x = ask \"which one?\" name"
-        b @?= [Bind "x" (Ask (Lit (VText "which one?")) AName)]
+        b @?= [Bind "x" Nothing (Ask (Lit (VText "which one?")) AName)]
 
     , testCase "the empty string" $ do
         b <- bodyOf "say \"\""
@@ -569,7 +569,7 @@ regions =
     tagged tag src = tag ++ [tick] ++ src ++ [tick]
 
     opWord i = case i of
-      Bind _ o -> opKeyword o
+      Bind _ _ o -> opKeyword o
       Do o     -> opKeyword o
 
     errs src = readErrors ("rule r :- when focus-is-hole then " ++ src)
@@ -604,7 +604,7 @@ mistakes =
       -- @x = f a ; some-rule x b@ had to be written as until now.
       testCase "a nested call is lifted into a binding of its own" $
         bodyOf "some-rule (f a) b"
-          >>= (@?= [ Bind "(0:0)" (Call (GlobalName "f") [Ref "a"])
+          >>= (@?= [ Bind "(0:0)" Nothing (Call (GlobalName "f") [Ref "a"])
                    , Do (Call (GlobalName "some-rule")
                               [Ref "(0:0)", Ref "b"])
                    ])
@@ -613,8 +613,8 @@ mistakes =
       -- because these are statements: a call changes the development.
       testCase "and nesting goes innermost first" $
         bodyOf "f (g (h a))"
-          >>= (@?= [ Bind "(0:1)" (Call (GlobalName "h") [Ref "a"])
-                   , Bind "(0:0)" (Call (GlobalName "g") [Ref "(0:1)"])
+          >>= (@?= [ Bind "(0:1)" Nothing (Call (GlobalName "h") [Ref "a"])
+                   , Bind "(0:0)" Nothing (Call (GlobalName "g") [Ref "(0:1)"])
                    , Do (Call (GlobalName "f") [Ref "(0:0)"])
                    ])
 
@@ -627,7 +627,7 @@ mistakes =
       -- without the brackets.
       testCase "a call inside a list is lifted too" $
         bodyOf "f [(g a), b]"
-          >>= (@?= [ Bind "(0:0)" (Call (GlobalName "g") [Ref "a"])
+          >>= (@?= [ Bind "(0:0)" Nothing (Call (GlobalName "g") [Ref "a"])
                    , Do (Call (GlobalName "f")
                               [ListOf [Ref "(0:0)", Ref "b"]])
                    ])
@@ -638,7 +638,7 @@ mistakes =
       -- comma is seen. Written as below there is no ambiguity to resolve.
       testCase "and one inside a pair" $
         bodyOf "f ((g a), b)"
-          >>= (@?= [ Bind "(0:0)" (Call (GlobalName "g") [Ref "a"])
+          >>= (@?= [ Bind "(0:0)" Nothing (Call (GlobalName "g") [Ref "a"])
                    , Do (Call (GlobalName "f")
                               [PairOf (Ref "(0:0)") (Ref "b")])
                    ])
@@ -646,9 +646,9 @@ mistakes =
       -- nest do not collide.
       testCase "the lifted names are per instruction" $
         bodyOf "f (g a) ; f (g b)"
-          >>= (@?= [ Bind "(0:0)" (Call (GlobalName "g") [Ref "a"])
+          >>= (@?= [ Bind "(0:0)" Nothing (Call (GlobalName "g") [Ref "a"])
                    , Do (Call (GlobalName "f") [Ref "(0:0)"])
-                   , Bind "(1:0)" (Call (GlobalName "g") [Ref "b"])
+                   , Bind "(1:0)" Nothing (Call (GlobalName "g") [Ref "b"])
                    , Do (Call (GlobalName "f") [Ref "(1:0)"])
                    ])
 

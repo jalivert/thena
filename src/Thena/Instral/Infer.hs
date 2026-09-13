@@ -402,7 +402,7 @@ callsIn :: [Instr] -> [Callable]
 callsIn = concatMap one
   where
     one i = case i of
-      Bind _ o -> inOp o
+      Bind _ _ o -> inOp o
       Do     o -> inOp o
 
     inOp o = case o of
@@ -451,7 +451,7 @@ whatItIs st b = case b of
 -- ordinary call frame, so @return@ there ends the block and the value is
 -- dropped — see "Thena.Engine"'s 'Thena.Ops.Return' case, which says so.
 returnsSomething :: [Instr] -> Bool
-returnsSomething is = or [ True | Do (Return _) <- is ] || or [ True | Bind _ (Return _) <- is ]
+returnsSomething is = or [ True | Do (Return _) <- is ] || or [ True | Bind _ _ (Return _) <- is ]
 
 callableOf :: Rule -> Callable
 callableOf r = (ruleName r, length (ruleParams r))
@@ -473,7 +473,7 @@ clause env st0 r = case fromMaybe (error "declareAll missed a rule")
      in generalEnough (InSignature (ruleName r) (length (sigParams sg))) table st2
   where
     walk ps res st =
-      let ctx = zip (ruleParams r) ps
+      let ctx = zip (ruleParams r) (map Mono ps)
           st1 = foldl (headTest r ctx) st (zip [0 ..] (ruleHead r))
        in body env r res ctx 0 st1 (ruleBody r)
 
@@ -495,7 +495,7 @@ generalEnough si table st = foldl one st (zip [0 :: Int ..] images)
         | otherwise -> s
       other -> oops (AnnotationTooGeneral si (deep s other)) s
 
-headTest :: Rule -> [(Name, Ty)] -> St -> (Int, Test) -> St
+headTest :: Rule -> [(Name, Local)] -> St -> (Int, Test) -> St
 headTest r ctx st (i, t) =
   let si          = InHead (ruleName r) i
       declared    = testTypes t
@@ -503,32 +503,72 @@ headTest r ctx st (i, t) =
    in foldl (\s (w, a) -> operandAgainst ctx si w a s) st'
         (zip want (map fst declared))
 
+-- | What a name in scope inside a body stands for.
+--
+-- **A local is monomorphic unless it is annotated** — his ruling, 2026-09-13,
+-- agreeing with /Let Should Not Be Generalised/ and GHC's @MonoLocalBinds@.
+-- An annotation makes it a scheme, instantiated at every use exactly as a
+-- declared top-level signature is, so there is one rule for annotations at both
+-- levels and not two.
+data Local
+  = Mono Ty  -- ^ one type, shared by every use
+  | Poly Ty  -- ^ a scheme: its 'TVar's are quantified, and each use gets a copy
+
+-- | The type a use of this name has here.
+useOf :: Local -> St -> (Ty, St)
+useOf l st = case l of
+  Mono t -> (t, st)
+  Poly t -> case instantiate [t] st of
+    (u : _, st1) -> (u, st1)
+    ([],    st1) -> (t, st1)
+
 -- | Walk a body, threading what each @Bind@ adds to scope.
-body :: SigEnv -> Rule -> Maybe Ty -> [(Name, Ty)] -> Int -> St -> [Instr] -> St
+body :: SigEnv -> Rule -> Maybe Ty -> [(Name, Local)] -> Int -> St -> [Instr] -> St
 body _   _ _   _   _ st []             = st
 body env r res ctx i st (instr : rest) =
   let si = InBody (ruleName r) i
-      o  = case instr of { Bind _ x -> x; Do x -> x }
+      o  = case instr of { Bind _ _ x -> x; Do x -> x }
       (mres, st1) = operation env r res ctx si o st
       (ctx', st2) = case (instr, mres) of
-        (Bind n _, Just t)  -> ((n, t) : ctx, st1)
-        (Bind n _, Nothing) ->
+        -- **An annotated local is checked here and kept as a scheme** (MS5
+        -- phase 77): a fresh copy of the annotation is unified with what the op
+        -- leaves, and 'generalEnough' then asks whether the copy\'s variables
+        -- survived as variables — the same instantiate-then-verify a declared
+        -- top-level signature gets, one level down.
+        (Bind n (Just ann) _, Just t) ->
+          let ((us, table), sA) = instantiateWith [ann] st1
+              sB = case us of
+                u : _ -> unify si u t sA
+                []    -> sA
+           in ((n, Poly ann) : ctx, generalEnough si table sB)
+        (Bind n (Just ann) _, Nothing) ->
+          -- Annotated, but the op leaves nothing to annotate. The @Nothing@
+          -- branch below already reports what is wrong; the annotation is kept
+          -- so a later use is measured against what the author said.
+          ((n, Poly ann) : ctx, bindsNothing st1)
+        (Bind n Nothing _, Just t)  -> ((n, Mono t) : ctx, st1)
+        (Bind n Nothing _, Nothing) ->
           -- **A call is the case worth reporting.** For every other op
           -- 'Thena.Rules.validate' has already refused this
           -- ('Thena.Rules.BoundNonProducing'); a call passes that check because
           -- 'Thena.Ops.produces' cannot answer for one, and this pass can.
-          let (t, s0) = fresh st1
-              s = case o of
-                Call nm as | notReturning (lookup (nm, length as) env) ->
-                  oops (BindsNothing si nm) s0
-                _ -> s0
-           in ((n, t) : ctx, s)
+          let (t, s0) = fresh (bindsNothing st1)
+           in ((n, Mono t) : ctx, s0)
         (Do _, _)           -> (ctx, st1)
+
+      -- **A call is the case worth reporting.** For every other op
+      -- 'Thena.Rules.validate' has already refused this
+      -- ('Thena.Rules.BoundNonProducing'); a call passes that check because
+      -- 'Thena.Ops.produces' cannot answer for one, and this pass can.
+      bindsNothing s = case o of
+        Call nm as | notReturning (lookup (nm, length as) env) ->
+          oops (BindsNothing si nm) s
+        _ -> s
    in body env r res ctx' (i + 1) st2 rest
 
 -- | One op: check its operands, answer the type it leaves.
 operation
-  :: SigEnv -> Rule -> Maybe Ty -> [(Name, Ty)] -> Site -> Op -> St
+  :: SigEnv -> Rule -> Maybe Ty -> [(Name, Local)] -> Site -> Op -> St
   -> (Maybe Ty, St)
 operation env r res ctx si o st0 = case o of
   -- **A lambda's type is worked out here** (MS5 phase 68b) — the table cannot,
@@ -539,17 +579,20 @@ operation env r res ctx si o st0 = case o of
   Lambda ps b ->
     let (vs, st1)   = freshes (length ps) st0
         (rv, st2)   = fresh st1
-        st3         = body env r (Just rv) (zip ps vs ++ ctx) 0 st2 b
+        st3         = body env r (Just rv) (zip ps (map Mono vs) ++ ctx) 0 st2 b
      in (Just (TFun vs rv), st3)
 
   -- **A local shadows a rule** — his ruling, 2026-09-12 — so a call whose name
   -- is bound here is an application of that value, and its type says so.
   Call nm as
-    | Just t <- lookup (nameOf nm) ctx ->
-        let (ats, st1) = freshes (length as) st0
-            (rv, st2)  = fresh st1
-            st3        = unify si t (TFun ats rv) st2
-         in (Just rv, foldl (\s (w, a) -> operandAgainst ctx si w a s) st3 (zip ats as))
+    | Just l <- lookup (nameOf nm) ctx ->
+        -- **Its own copy if it was annotated**, which is what an annotated
+        -- local buys: a use here does not pin the local for every other use.
+        let (t, st1)   = useOf l st0
+            (ats, st2) = freshes (length as) st1
+            (rv, st3)  = fresh st2
+            st4        = unify si t (TFun ats rv) st3
+         in (Just rv, foldl (\s (w, a) -> operandAgainst ctx si w a s) st4 (zip ats as))
 
   -- **A call is where the signature environment is read**, and the only place.
   Call nm as ->
@@ -612,7 +655,7 @@ notReturning b = case b of
   _                         -> False
 
 -- | The type of an operand, checked against what the position wants.
-operandAgainst :: [(Name, Ty)] -> Site -> Ty -> Operand -> St -> St
+operandAgainst :: [(Name, Local)] -> Site -> Ty -> Operand -> St -> St
 operandAgainst ctx si want o st = case o of
   -- **Deferred, not decided here** — see 'stText'.
   Lit (VText _) -> st { stText = stText st ++ [(si, want)] }
@@ -620,10 +663,10 @@ operandAgainst ctx si want o st = case o of
                     in unify si want got st'
 
 -- | …and its type when nothing constrains it.
-operandType :: [(Name, Ty)] -> Site -> Operand -> St -> (Ty, St)
+operandType :: [(Name, Local)] -> Site -> Operand -> St -> (Ty, St)
 operandType ctx si o st = case o of
   Ref n -> case lookup n ctx of
-    Just t  -> (t, st)
+    Just l  -> useOf l st
     -- 'Thena.Rules.validate' has already refused an unbound name
     -- ('Thena.Rules.UnboundInRule'); a fresh variable keeps this pass total.
     Nothing -> fresh st

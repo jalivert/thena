@@ -39,6 +39,7 @@ tests =
     , annotations
     , noKeyword
     , generalisation
+    , annotatedLocals
     , blockBodies
     , badSignatures
     , functions
@@ -108,6 +109,79 @@ generalisation =
     clashes what src = testCase what $ case load src of
       BasesIllTyped (Clash{} : _) -> pure ()
       other -> assertFailure ("expected a clash, got " ++ show other)
+
+-- --------------------------------------------------------------------------
+-- Annotated locals (MS5 phase 77)
+-- --------------------------------------------------------------------------
+
+-- | **@n : Ty@ on a line of its own, above the binding it is about.**
+--
+-- His, 2026-09-13: /"When I want poly let-bound (in expressions) or poly local
+-- variables in rules, I will write annotation."/ So an annotation does not
+-- merely constrain a local — it makes it a **scheme**, instantiated at every
+-- use, which is what a declared top-level signature already did one level up.
+--
+-- The spelling is the same one level up too, which is the point: a signature is
+-- @f : Ty@ in column 1 since phase 74, and this is that line indented.
+annotatedLocals :: TestTree
+annotatedLocals =
+  testGroup
+    "a local may be annotated, and then it is polymorphic"
+    [ loads "an annotated local is usable at two types"
+        "rule go :- then\n\
+        \  g : a -> a\n\
+        \  g = \\ z -> do { return z }\n\
+        \  h = here\n\
+        \  x = g h\n\
+        \  n = fresh-name \"q\"\n\
+        \  y = g n"
+
+      -- …and the same body without the annotation is the monomorphic one.
+    , clashes "…where the same local without one is not"
+        "rule go :- then\n\
+        \  g = \\ z -> do { return z }\n\
+        \  h = here\n\
+        \  x = g h\n\
+        \  n = fresh-name \"q\"\n\
+        \  y = g n"
+
+      -- **An annotation is checked, not believed** — the same
+      -- instantiate-then-verify a top-level signature gets, so a promise the
+      -- binding does not keep is refused.
+    , testCase "an annotation the binding does not keep is refused" $
+        case load "rule go :- then\n\
+                  \  g : a -> a\n\
+                  \  g = \\ z -> do { return (concat z \"!\") }\n\
+                  \  h = here\n\
+                  \  x = g h" of
+          BasesIllTyped (AnnotationTooGeneral{} : _) -> pure ()
+          other -> assertFailure ("expected a refusal, got " ++ show other)
+
+      -- **A concrete annotation is an ordinary constraint**, and wrong is wrong.
+    , testCase "and a concrete one still has to be true" $
+        case load "rule go :- then\n\
+                  \  h : Name\n\
+                  \  h = here" of
+          BasesIllTyped (Clash{} : _) -> pure ()
+          other -> assertFailure ("expected a clash, got " ++ show other)
+
+      -- **An annotation about nothing is a typo, most often a renamed line.**
+    , testCase "an annotation with no binding after it is refused" $
+        case loadRaw "rule base a where\nrule go :- then\n  g : a -> a\n  say \"hi\"\n" of
+          RuleFileRefused _ (RuleIllFormed es)
+            | [AnnotationWithoutBinding _ _ "g"] <- es -> pure ()
+          other -> assertFailure ("expected a refusal, got " ++ show other)
+    ]
+  where
+    loads what src = testCase what $ case load src of
+      BasesLoaded _ -> pure ()
+      other         -> assertFailure ("expected a load, got " ++ show other)
+
+    clashes what src = testCase what $ case load src of
+      BasesIllTyped (Clash{} : _) -> pure ()
+      other -> assertFailure ("expected a clash, got " ++ show other)
+
+    loadRaw src = snd (loadRuleBases newSession [("a.thena.rules", src)])
 
 -- --------------------------------------------------------------------------
 -- A function body may be a block (MS5 phase 75b)
@@ -425,7 +499,7 @@ blockReturn =
     let blocked = Rule (GlobalName "blocked") [] []
                     [Do (Block [Do (Return (Lit (VText "x")))])]
         bad     = Rule (GlobalName "bad") [] []
-                    [Bind "y" (Call (GlobalName "blocked") []), Do (Say (Ref "y"))]
+                    [Bind "y" Nothing (Call (GlobalName "blocked") []), Do (Say (Ref "y"))]
      in snd (inferProgram [] [blocked, bad])
           @?= [BindsNothing (InBody (GlobalName "bad") 0) (GlobalName "blocked")]
 

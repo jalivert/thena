@@ -184,6 +184,12 @@ data RawTy
 data RawInstr
   = RawBind String RawRhs
   | RawDo   RawOp
+  | RawAnnot String RawTy
+    -- ^ **@n : Ty@, a local's declared type** (MS5 phase 77). It is written as
+    -- a line of its own, above the binding it is about, which is the spelling a
+    -- top-level signature uses one level up — his uniformity. It is not an
+    -- instruction: resolution attaches it to the binding that follows and
+    -- nothing of it reaches 'Thena.Ops.Instr' but the type.
   deriving (Eq, Show)
 
 -- | An op word and the arguments written after it, both unresolved.

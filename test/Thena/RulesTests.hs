@@ -287,10 +287,10 @@ validateTests =
         validate (named "r" ["true"] [Do Ops.Solve])
           @?= [ReservedName (GlobalName "r") "true"]
     , testCase "nor a binding false" $
-        validate (named "r" [] [Bind "false" Ops.Here])
+        validate (named "r" [] [Bind "false" Nothing Ops.Here])
           @?= [ReservedName (GlobalName "r") "false"]
     , testCase "and an ordinary name is untouched" $
-        validate (named "r" ["t"] [Bind "x" Ops.Here]) @?= []
+        validate (named "r" ["t"] [Bind "x" Nothing Ops.Here]) @?= []
 
       -- §3.7's line, made structural: a declaration is a command, not a
       -- rule-body operation.
@@ -299,11 +299,11 @@ validateTests =
           @?= [DeclarationInBody (GlobalName "bad") 0]
 
     , testCase "binding an op that produces nothing is rejected" $
-        validate (named "bad" [] [Bind "x" Ops.Attack])
+        validate (named "bad" [] [Bind "x" Nothing Ops.Attack])
           @?= [BoundNonProducing (GlobalName "bad") 0 "x"]
 
     , testCase "binding an op that produces something is fine" $
-        validate (named "ok" [] [Bind "x" (Ops.Concat (Lit (VText "a")) (Lit (VText "b")))])
+        validate (named "ok" [] [Bind "x" Nothing (Ops.Concat (Lit (VText "a")) (Lit (VText "b")))])
           @?= []
 
     , testCase "a Ref to nothing is rejected" $
@@ -316,7 +316,7 @@ validateTests =
     , testCase "an earlier Bind binds it" $
         validate
           (named "ok" []
-            [ Bind "z" (Ops.Concat (Lit (VText "a")) (Lit (VText "b")))
+            [ Bind "z" Nothing (Ops.Concat (Lit (VText "a")) (Lit (VText "b")))
             , Do (Ops.Say (Ref "z"))
             ])
           @?= []
@@ -326,7 +326,7 @@ validateTests =
         validate
           (named "bad" []
             [ Do (Ops.Say (Ref "z"))
-            , Bind "z" (Ops.Concat (Lit (VText "a")) (Lit (VText "b")))
+            , Bind "z" Nothing (Ops.Concat (Lit (VText "a")) (Lit (VText "b")))
             ])
           @?= [UnboundInRule (GlobalName "bad") 0 "z"]
 
@@ -335,7 +335,7 @@ validateTests =
     , testCase "all three are reported, with their positions" $
         validate
           (named "bad" []
-            [ Bind "x" Ops.Attack
+            [ Bind "x" Nothing Ops.Attack
             , Do (Ops.DefineData someData)
             , Do (Ops.Say (Ref "z"))
             ])
@@ -346,7 +346,7 @@ validateTests =
 
     , testCase "validateBase checks every rule" $
         length (validateBase (ruleBase "test" Nothing "" [] [] []
-                                [ named "a" [] [Bind "x" Ops.Attack]
+                                [ named "a" [] [Bind "x" Nothing Ops.Attack]
                                 , named "b" [] [Do (Ops.Say (Ref "z"))]
                                 ]))
           @?= 2
@@ -367,7 +367,7 @@ dataTests =
   testGroup
     "instral's data structures"
     [ testCase "a list is built from its elements, references and all" $
-        valueOf [Bind "x" (Ops.Concat (text "a") (text "b"))]
+        valueOf [Bind "x" Nothing (Ops.Concat (text "a") (text "b"))]
                 (Ops.Some (ListOf [Ref "x", text "c"]))
           >>= (@?= Just (VOption (Just (VList [VText "ab", VText "c"]))))
 
@@ -390,11 +390,11 @@ dataTests =
           >>= (@?= Just (VOption (Just (VText "a"))))
 
     , testCase "list-tail drops one" $
-        valueOf [Bind "t" (Ops.ListTail (ListOf [text "a", text "b"]))]
+        valueOf [Bind "t" Nothing (Ops.ListTail (ListOf [text "a", text "b"]))]
                 (Ops.ListHead (Ref "t"))
           >>= (@?= Just (VOption (Just (VText "b"))))
     , testCase "and the empty list has an empty tail" $
-        valueOf [Bind "t" (Ops.ListTail (ListOf []))] (Ops.ListHead (Ref "t"))
+        valueOf [Bind "t" Nothing (Ops.ListTail (ListOf []))] (Ops.ListHead (Ref "t"))
           >>= (@?= Just (VOption Nothing))
 
     , testCase "option-value of none fails rather than answering" $
@@ -415,7 +415,7 @@ dataTests =
   where
     run is = runOut (machineIn emptyGlobals (holeAt type1) is)
 
-    valueOf before o = pure $ case run (before ++ [Bind "r" o]) of
+    valueOf before o = pure $ case run (before ++ [Bind "r" Nothing o]) of
       Left _  -> Nothing
       Right m -> lookup "r" (Thena.Engine.env (exec m))
 
@@ -449,7 +449,7 @@ returnTests =
   testGroup
     "a rule returns a value"
     [ testCase "the caller's binding is filled by the callee's return" $
-        envAfter [Bind "r" (Ops.Call (GlobalName "gives") [])]
+        envAfter [Bind "r" Nothing (Ops.Call (GlobalName "gives") [])]
           >>= (@?= Just (VText "a value"))
 
     , -- @return@ ends the body, so the @say@ after it never runs. Checked
@@ -460,7 +460,7 @@ returnTests =
           >>= (@?= Right [])
 
     , testCase "a body that never returns fails where the value was wanted" $
-        ranWith [Bind "r" (Ops.Call (GlobalName "silent") [])]
+        ranWith [Bind "r" Nothing (Ops.Call (GlobalName "silent") [])]
           >>= (@?= Left (NothingReturned "r"))
 
     , -- The same rule called for effect is fine: nothing asked it for a value.
@@ -479,7 +479,7 @@ returnTests =
       -- all, because a call with two candidates builds one of those and not a
       -- 'Thena.Engine.Call'.
       testCase "backtracking rebinds from the clause that finally ran" $
-        envAfter [ Bind "r" (Ops.Call (GlobalName "two-ways") [])
+        envAfter [ Bind "r" Nothing (Ops.Call (GlobalName "two-ways") [])
                  , Do (Ops.Say (Ref "r"))
                  ]
           >>= (@?= Just (VText "second"))
@@ -578,7 +578,7 @@ producesTests =
       -- both text, a table that swapped @a@ and @b@ would still check out.
       , ("pair-first",   e, hole, [],            Ops.PairFirst (PairOf (text "x") (Lit (VInt 1))))
       , ("pair-second",  e, hole, [],            Ops.PairSecond (PairOf (text "x") (Lit (VInt 1))))
-      , ("option-value", e, hole, [Bind "o" (Ops.Some (text "x"))],
+      , ("option-value", e, hole, [Bind "o" Nothing (Ops.Some (text "x"))],
            Ops.OptionValue (Ref "o"))
       , ("apply-next",       nat, holeAt natType, [],
            Ops.ApplyNext (term (Global (GlobalName "succ") [])) (text "a"))
@@ -595,7 +595,7 @@ producesTests =
 
 checkProduces :: GlobalEnv -> Cursor -> [Instr] -> Op -> IO ()
 checkProduces globalEnv cur before o =
-  case runOut (machineIn globalEnv cur (before ++ [Bind "r" o])) of
+  case runOut (machineIn globalEnv cur (before ++ [Bind "r" Nothing o])) of
     Left r  -> assertFailure ("the op did not run: " ++ show r)
     Right m -> do
       let e   = Thena.Engine.env (exec m)

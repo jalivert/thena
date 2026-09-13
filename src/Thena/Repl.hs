@@ -1175,8 +1175,12 @@ renderMachine n ctx m =
 
 renderInstr :: Int -> Context -> Instr -> String
 renderInstr n ctx instr = case instr of
-  Bind x op -> x ++ " = " ++ renderOp n ctx op
-  Do op     -> renderOp n ctx op
+  -- **An annotation prints as the line the author wrote** (MS5 phase 77) — its
+  -- own, before the binding — because that is the only spelling the grammar
+  -- reads back. Stepping mode shows one instruction per line either way.
+  Bind x (Just t) op -> x ++ " : " ++ renderTy t ++ " ; " ++ x ++ " = " ++ renderOp n ctx op
+  Bind x Nothing  op -> x ++ " = " ++ renderOp n ctx op
+  Do op              -> renderOp n ctx op
 
 -- | One instruction's op, as stepping mode shows it.
 --
@@ -1406,8 +1410,14 @@ renderSurface :: Surface -> String
 renderSurface = surf Loose
   where
     instruction i = case i of
-      RawBind x r -> x ++ " = " ++ rhs r
-      RawDo     o -> operation o
+      RawBind x r  -> x ++ " = " ++ rhs r
+      RawDo     o  -> operation o
+      -- **A surface @do@ block cannot contain one** (MS5 phase 77): the surface
+      -- grammar has no type notation, and a block in a surface term is not
+      -- type-checked anyway (@ms5\/CLOSEOUT.md@ 20), so an annotation there
+      -- would be decoration. This printer never meets one; it answers rather
+      -- than leaving the case open.
+      RawAnnot x _ -> x
 
     rhs r = case r of
       RhsOp o    -> operation o
@@ -1991,6 +2001,7 @@ whereRuleError e = case e of
   TypeVariableApplied n _ -> inSignature n
   UnitInsideAType n       -> inSignature n
   DuplicateSignature n _  -> inSignature n
+  AnnotationWithoutBinding g i _ -> inRule g i
   FunctionLeavesNothing n -> "in " ++ n ++ ": "
   RuleAndFunction n _     -> "in " ++ n ++ ": "
   BuiltInLanguage n       -> inLanguage n
@@ -2030,6 +2041,8 @@ whatRuleError e = case e of
   DuplicateSignature _ a  ->
     "two signatures for the same name at " ++ show a
       ++ (if a == 1 then " argument" else " arguments")
+  AnnotationWithoutBinding _ _ n ->
+    "there is no " ++ n ++ " = … after this type, so it says nothing about anything"
   FunctionLeavesNothing _ ->
     "the right of the = leaves no value, so there is nothing to return"
   RuleAndFunction _ k     ->

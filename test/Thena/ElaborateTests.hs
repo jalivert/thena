@@ -479,7 +479,7 @@ hereTests =
       -- could answer this before: @claim@ and @define@ yield the variables of
       -- holes they make, and @goal@ gives a type.
       testCase "it yields the focused component's variable" $
-        case snd (runOut (machineAt hole [Bind "h" Ops.Here])) of
+        case snd (runOut (machineAt hole [Bind "h" Nothing Ops.Here])) of
           Left r  -> assertFailure ("did not run: " ++ show r)
           Right m -> lookup "h" (env (exec m))
                        @?= Just (VTerm (Free goalVar))
@@ -488,7 +488,7 @@ hereTests =
       -- it: @attack@ turns @? x : S@ into a guess binding the /same/ variable,
       -- so a @goto@ afterwards finds what @here@ named.
     , testCase "and goto finds it again after attack" $
-        case snd (runOut (machineAt hole [ Bind "h" Ops.Here
+        case snd (runOut (machineAt hole [ Bind "h" Nothing Ops.Here
                                          , Do Ops.Attack
                                          , Do Ops.Into
                                          , Do (Ops.Goto (Ref "h"))
@@ -499,7 +499,7 @@ hereTests =
       -- Off the spine there is no component and no variable, which is the same
       -- refusal every component op gives.
     , testCase "and it is refused in the core fragment" $
-        case snd (runOut (machineAt hole [Do Ops.CrossType, Bind "h" Ops.Here])) of
+        case snd (runOut (machineAt hole [Do Ops.CrossType, Bind "h" Nothing Ops.Here])) of
           Left (CannotMove NotOnTheSpine) -> pure ()
           other -> assertFailure ("expected a refusal: " ++ show other)
     ]
@@ -540,7 +540,7 @@ constructionTests =
 
       -- Pure: the development is untouched, which is why they need no focus.
     , testCase "and neither touches the development" $
-        case snd (runOut (machineAt hole [Bind "r" (Ops.Arrow (litTerm type0) (litTerm type0))])) of
+        case snd (runOut (machineAt hole [Bind "r" Nothing (Ops.Arrow (litTerm type0) (litTerm type0))])) of
           Left r  -> assertFailure ("did not run: " ++ show r)
           Right m -> focusedVar m @?= Just goalVar
     ]
@@ -548,7 +548,7 @@ constructionTests =
     litTerm t = Lit (VTerm t)
     hyp       = Free hypVar
 
-    built o = case snd (runOut (machineAt hole [Bind "r" o])) of
+    built o = case snd (runOut (machineAt hole [Bind "r" Nothing o])) of
       Right m -> case lookup "r" (env (exec m)) of
         Just (VTerm t) -> Just t
         _                         -> Nothing

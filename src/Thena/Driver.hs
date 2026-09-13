@@ -863,17 +863,17 @@ surfaceProgram n0 items = foldl item ([], n0) items
      in ( acc ++
             [ Do (PushDevelopment (Lit (VTerm (Universe (LVar l)))))
             , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt full))])
-            , Bind (tyName ++ "raw") PopDevelopment
-            , Bind tyName (Expose (Ref (tyName ++ "raw")))
+            , Bind (tyName ++ "raw") Nothing PopDevelopment
+            , Bind tyName Nothing (Expose (Ref (tyName ++ "raw")))
             ]
             ++ concat
                  [ [ Do (PushDevelopment (Lit (VTerm (Universe (LVar l)))))
                    , Do (Assume (Lit (VText nm)) (Ref tyName))
                    , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt (withParams ps cty)))])
-                   , Bind (conName k ++ "raw") PopDevelopment
-                   , Bind (conName k ++ "app")
+                   , Bind (conName k ++ "raw") Nothing PopDevelopment
+                   , Bind (conName k ++ "app") Nothing
                        (ApplyTo (Ref (conName k ++ "raw")) selfName)
-                   , Bind (conName k) (Expose (Ref (conName k ++ "app")))
+                   , Bind (conName k) Nothing (Expose (Ref (conName k ++ "app")))
                    ]
                  | (k, SurfaceConstructor _ cty) <- zip [0 ..] cs
                  ]
@@ -910,11 +910,11 @@ surfaceProgram n0 items = foldl item ([], n0) items
               -- is not merely ugly: @intro@ reads a @Let@ as written, so the
               -- body's λ would open a definition instead. See
               -- 'Thena.Ops.Whnf'.
-            , Bind ("raw" ++ show n) PopDevelopment
-            , Bind ("ty" ++ show n) (Expose (Ref ("raw" ++ show n)))
+            , Bind ("raw" ++ show n) Nothing PopDevelopment
+            , Bind ("ty" ++ show n) Nothing (Expose (Ref ("raw" ++ show n)))
             , Do (PushDevelopment (Ref ("ty" ++ show n)))
             , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt body))])
-            , Bind ("tm" ++ show n) PopDevelopment
+            , Bind ("tm" ++ show n) Nothing PopDevelopment
               -- **The plicities come from the signature as written** (MS4
               -- phase 44b): a leading run of @∀@ binder groups, each in
               -- braces or not. That is the whole of the surface signature
@@ -1520,9 +1520,9 @@ dispatch s name arg = case name of
       let (l, n1) = freshLevelMeta (names machine)
           before  = snapshotOf machine
           prog =
-            [ Bind "T" (Claim (Lit (VText "Tinfer"))
+            [ Bind "T" Nothing (Claim (Lit (VText "Tinfer"))
                           (Lit (VTerm (Universe (LVar l)))))
-            , Bind "x" (Claim (Lit (VText "xinfer")) (Ref "T"))
+            , Bind "x" Nothing (Claim (Lit (VText "xinfer")) (Ref "T"))
             , Do (Ops.Goto (Ref "x"))
             , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt t))])
             ]

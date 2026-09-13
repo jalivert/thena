@@ -345,6 +345,10 @@ Body :: { [RawInstr] }
 
 Instr :: { RawInstr }
   : ident '=' Rhs                          { RawBind $1 $3 }
+  -- **A local's type, written as its own line** (MS5 phase 77) — the same
+  -- spelling a declaration uses one level up, and told from a binding by the
+  -- token after the name exactly as a signature is told from a function.
+  | ident ':' Ty                           { RawAnnot $1 $3 }
   | Op                                     { RawDo $1 }
 
 -- One shape for every op: a word and whatever was written after it. Which op
