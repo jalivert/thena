@@ -163,7 +163,7 @@ import Data.List (stripPrefix, intercalate, partition)
 import Thena.Instral.Grammar (GrammarError (..))
 import Thena.Instral.Type (Signature, Ty, renderSignature, renderTy)
 import Thena.Instral.Infer (renderInstralTypeError)
-import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRhs (..))
+import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRhs (..), RawBody (..))
 --
 -- The prelude is loaded first (§9, phase 11) and **silently on success** — it
 -- is three @data@ lines and announcing them at every start is noise. A failure
@@ -1413,10 +1413,18 @@ renderSurface = surf Loose
       RhsOp o    -> operation o
       RhsValue a -> operand a
 
+    -- **A block body prints explicitly** (MS5 phase 75b). This printer is
+    -- crossed against its reader, and layout is a pass the reader runs before
+    -- the grammar sees anything — so printing an indented block would be
+    -- printing something this module cannot claim reads back. Braces do.
+    funBody b = case b of
+      BodyRhs r      -> rhs r
+      BodyBlock is   -> "do { " ++ intercalate " ; " (map instruction is) ++ " }"
+
     operation (RawOp w as) = unwords (w : map operand as)
 
     operand a = case a of
-      RawLambda ps b -> "\\ " ++ unwords ps ++ " -> " ++ rhs b
+      RawLambda ps b -> "\\ " ++ unwords ps ++ " -> " ++ funBody b
       RawRef x  -> x
       RawPos k  -> show k
       RawText t -> show t

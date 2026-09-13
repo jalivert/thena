@@ -28,6 +28,7 @@ module Thena.Instral.Concrete
   , RawProduction (..)
   , RawGItem (..)
   , RawRhs (..)
+  , RawBody (..)
   , RawSignature (..)
   , RawTy (..)
   , RawRule (..)
@@ -80,7 +81,7 @@ data RawDecl
 -- answers with an ordinary 'Thena.Ops.Rule' whose body ends in @return@. Nothing
 -- in the engine knows the difference, which is the point of there being one
 -- language.
-data RawFunction = RawFunction String [String] RawRhs
+data RawFunction = RawFunction String [String] RawBody
   deriving (Eq, Show)
 
 -- | @language ‹Name› where { ‹productions› }@ (MS5 phase 69).
@@ -117,6 +118,28 @@ data RawGItem
 data RawRhs
   = RhsOp RawOp        -- ^ @concat x x@ — an op or a call
   | RhsValue RawOperand -- ^ @[1, 2]@, @(a, b)@, @42@, @⌜ t ⌝@
+  deriving (Eq, Show)
+
+-- | What stands right of a function's @=@ or a lambda's @->@ (MS5 phase 75b).
+--
+-- **Two shapes, and the first is the second written short.** @f x = e@ is one
+-- expression; @f x = do ‹block›@ is a block of instructions that says @return@
+-- itself, which is what lets a function have locals at all.
+--
+-- **@do@ is his choice of opener**, 2026-09-13, over making @=@ a layout
+-- keyword: @=@ is not one in Haskell either, and here it would reach into the
+-- surface language's @let x = e@ bindings. @do@ is already a layout keyword and
+-- already means /a block of instructions/, so the block's braces arrive from
+-- the offside rule with nothing added to it.
+--
+-- **It is a separate type from 'RawRhs' on purpose.** A block is a body and not
+-- an expression: @n = do ‹block›@ inside a body would be a different thing —
+-- 'Thena.Ops.Block', whose @return@ ends the block and drops the value — and
+-- giving 'RawRhs' the constructor would put an unreachable case in every
+-- function that matches one.
+data RawBody
+  = BodyRhs RawRhs       -- ^ @f x = concat x x@
+  | BodyBlock [RawInstr] -- ^ @f x = do ‹block›@
   deriving (Eq, Show)
 
 -- | @signature ‹name› : ‹type›@ — a rule's declared type (MS5 phase 67).
@@ -225,7 +248,7 @@ data RawOperand
     -- becomes a reference to that binding. So it is sugar with a fixed
     -- evaluation order — left to right, innermost first — and not a new kind of
     -- value.
-  | RawLambda [String] RawRhs
+  | RawLambda [String] RawBody
     -- ^ @\\ x y -> ‹expression›@ — **a lambda** (MS5 phase 68b).
     --
     -- **It is an operand and not a right-hand side of its own**, so that

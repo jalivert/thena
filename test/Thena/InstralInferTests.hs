@@ -38,11 +38,75 @@ tests =
     , blockReturn
     , annotations
     , noKeyword
+    , blockBodies
     , badSignatures
     , functions
     , lambdas
     , objectLanguages
     ]
+
+-- --------------------------------------------------------------------------
+-- A function body may be a block (MS5 phase 75b)
+-- --------------------------------------------------------------------------
+
+-- | **@f x = do ‹block›@** — his choice of opener, 2026-09-13, which is what
+-- lets a function have locals at all.
+--
+-- A block body /is/ the rule's body, so it says @return@ itself and the short
+-- form @f x = e@ is that block with the @return@ written for you. The two go
+-- through one compiler, 'Thena.Rules.bodyInstrs'.
+--
+-- **The first three assert the VALUE and not merely that it loads**, and that
+-- is deliberate: the grammar accumulates a block in reverse, so the first build
+-- of this phase ran every block backwards and still loaded — @shout@ reported
+-- /no earlier binding is called closed/ only because the two locals happened to
+-- depend on each other. A block of independent instructions would have run in
+-- the wrong order in silence.
+blockBodies :: TestTree
+blockBodies =
+  testGroup
+    "a function body may be a do block"
+    [ testCase "with locals, in the order they are written" $
+        said "shout s = do { wrapped = concat \"<\" s ; closed = concat wrapped \">\" ; return closed }\n\
+             \rule go :- then m = shout \"hi\" ; say m"
+          @?= Just "<hi>"
+
+      -- The short form is unchanged and goes through the same compiler.
+    , testCase "…and the one-expression form still means what it did" $
+        said "short s = concat s \"!\"\n\
+             \rule go :- then m = short \"yo\" ; say m"
+          @?= Just "yo!"
+
+      -- **A lambda gets it too**, because §1.1 reads both ways: a lambda is a
+      -- function without a name, so there is one body compiler and not two.
+    , testCase "…and so may a lambda's body" $
+        said "apply2 f x = f (f x)\n\
+             \rule go :- then m = apply2 (\\ z -> do { p = concat z \".\" ; return p }) \"q\" ; say m"
+          @?= Just "q.."
+
+      -- **A block that never returns is refused**, which is the block form of
+      -- the check @f x = say \"hi\"@ already got. It is reported against the
+      -- name, not against a binding the author never wrote.
+    , testCase "a block that returns nothing is refused" $
+        case loadRaw "rule base b where\nf s = do { say s }\n" of
+          RuleFileRefused _ (RuleIllFormed es)
+            | FunctionLeavesNothing "f" `elem` es -> pure ()
+          other -> assertFailure ("expected a refusal, got " ++ show other)
+
+      -- It is an ordinary rule body by the time anything else sees it, so
+      -- inference reads it with no case of its own.
+    , testCase "and inference types it like any other body" $
+        case load "f : String -> String\nf s = do { a = concat s s ; return a }" of
+          BasesLoaded _ -> pure ()
+          other -> assertFailure ("expected a load, got " ++ show other)
+    ]
+  where
+    said src = case snd (command (fst (loadRuleBases newSession
+                 [("b.thena.rules", "rule base b where\n" ++ src ++ "\n")])) "go") of
+      Ran msgs _ -> case reverse msgs of { m : _ -> Just m; [] -> Nothing }
+      other      -> error ("expected Ran, got " ++ show other)
+
+    loadRaw src = snd (loadRuleBases newSession [("b.thena.rules", src)])
 
 -- --------------------------------------------------------------------------
 -- A signature needs no keyword (MS5 phase 74)

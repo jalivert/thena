@@ -40,7 +40,7 @@ import Thena.Syntax.Concrete
   , RawConstructor (..)
   , RawData (..)
   )
-import Thena.Instral.Concrete (RawDecl (..), RawLanguage (..), RawProduction (..), RawGItem (..), RawFunction (..), RawRhs (..), RawSignature (..), RawTy (..), RawRule (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
+import Thena.Instral.Concrete (RawDecl (..), RawLanguage (..), RawProduction (..), RawGItem (..), RawFunction (..), RawRhs (..), RawBody (..), RawSignature (..), RawTy (..), RawRule (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
@@ -86,6 +86,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   elim    { Located _ TElim }
   where   { Located _ TWhere }
   rule    { Located _ TRule }
+  do      { Located _ TDo }
   language { Located _ TLanguage }
   when    { Located _ TWhen }
   then    { Located _ TThen }
@@ -219,7 +220,14 @@ Block :: { [RawInstr] }
 -- beginning with a plain word is one of the two and the token after the name
 -- tells them apart: @=@ or another parameter here, @:@ there.
 Function :: { RawFunction }
-  : ident Params '=' Rhs                   { RawFunction $1 (reverse $2) $4 }
+  : ident Params '=' FunBody               { RawFunction $1 (reverse $2) $4 }
+
+-- **A body is one expression or a @do@ block** (MS5 phase 75b, his choice of
+-- opener). @do@ is already a layout keyword, so the block's braces come from
+-- the offside rule and a one-line @do { a ; b }@ works too.
+FunBody :: { RawBody }
+  : Rhs                                    { BodyRhs $1 }
+  | do Block                               { BodyBlock (reverse $2) }
 
 -- What stands right of an @=@, here and in a body: an op application, or a
 -- value written down. The second case excludes a bare @ident@ — @x = y@ is a
@@ -232,7 +240,7 @@ Rhs :: { RawRhs }
 -- @\ x y -> ‹expression›@ (MS5 phase 68b). @\@ and @λ@ are one token and both
 -- were already lexed, so this costs no new syntax.
 Lambda :: { RawOperand }
-  : 'λ' Params '->' Rhs                    { RawLambda (reverse $2) $4 }
+  : 'λ' Params '->' FunBody                { RawLambda (reverse $2) $4 }
 
 -- **An object language's grammar** (MS5 phase 69). Braces and @where@ are
 -- already tokens, so this costs one keyword and no punctuation.

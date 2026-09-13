@@ -26,6 +26,7 @@ import Thena.Syntax.Lexer (lexTokens)
 import Thena.Surface.Layout (layout)
 import Thena.Instral.Concrete
   ( RawInstr (..)
+  , RawBody (..)
   , RawOp (..)
   , RawOperand (..)
   , RawRhs (..)
@@ -670,6 +671,12 @@ blockTests =
       roundTrip "do { f = \\ z -> concat z z ; m = f \"a\" }"
   , testCase "and a literal, and a pair" $
       roundTrip "do { p = (1, true) ; l = [1, 2, 3] }"
+    -- **A block-bodied lambda prints with its braces** (MS5 phase 75b): the
+    -- printer cannot emit an indented block, because layout is a pass its
+    -- reader runs before the grammar and this test is the printer crossed
+    -- against that reader.
+  , testCase "and a lambda whose body is a block" $
+      roundTrip "do { f = \\ z -> do { p = concat z z ; return p } ; m = f \"a\" }"
 
   , -- Layout, like everything else the surface language has.
     testCase "a block lays out" $
@@ -686,6 +693,10 @@ blockTests =
         , "h = here ; goto h"
         , "arg 2 ; say \"done\" ; try-core x"
         , "x = fresh-name \"a\" ; claim x y ; prove"
+          -- **The form MS5 phase 75b added**, crossed in the same phase that
+          -- added it rather than two phases later, which is what §7b's register
+          -- is for.
+        , "f = \\ z -> do { p = concat z z ; return p }"
         ] :: [String])
 
     -- **Crossed for EVERY operand form, not five hand-picked bodies**
@@ -745,7 +756,7 @@ blockTests =
       , RawList []
       , RawPairOf (RawPos 1) (RawRef "y")
       , RawNested "concat" []
-      , RawLambda [] (RhsOp (RawOp "concat" []))
+      , RawLambda [] (BodyRhs (RhsOp (RawOp "concat" [])))
       , RawRegion "surface" "x"
       , RawQuoted (RawName "x")
       ]

@@ -94,6 +94,7 @@ import Thena.Instral.Concrete
   , RawGItem (..)
   , RawFunction (..)
   , RawRhs (..)
+  , RawBody (..)
   , RawTy (..)
   , RawInstr (..)
   , RawOp (..)
@@ -893,14 +894,42 @@ builtInTypes =
 -- **A function must produce.** @f x = say "hi"@ is refused here rather than by
 -- 'validate', which would report it against a binding the author never wrote.
 resolveFunction :: [(String, Language)] -> RawFunction -> Either [RuleError] Rule
-resolveFunction ls (RawFunction nm ps rhs) = do
-  is <- resolveBlock ls g [RawBind resultName rhs]
-  case [ () | Bind n o <- is, n == resultName, not (produces o) ] of
-    _ : _ -> Left [FunctionLeavesNothing nm]
-    []    -> Right (Rule g ps [] (is ++ [Do (Return (Ref resultName))]))
+resolveFunction ls (RawFunction nm ps body) =
+  Rule (GlobalName nm) ps [] <$> bodyInstrs ls (GlobalName nm) nm body
+
+-- | Compile what stands right of a function's @=@ or a lambda's @->@.
+--
+-- **One expression and a block are the same thing one step apart** (MS5 phase
+-- 75b). @f x = e@ parks @e@ in a binding and returns it; @f x = do ‹block›@ is
+-- the block, which says @return@ itself. So the short form is the block form
+-- with the @return@ written for you, and there is one compilation and not two.
+--
+-- **A block body is NOT a @Thena.Ops.Block@.** That op builds a call frame
+-- whose @return@ ends the block and drops the value; here the instructions
+-- /are/ the rule's body, so a @return@ in one is the function's result for the
+-- same reason it is a rule's. Nothing in the engine changed for this phase.
+--
+-- **A function must produce**, and the check differs by shape: the short form
+-- asks whether the parked binding produces, the block form whether it returns
+-- at all. Both are reported against the name rather than against a binding the
+-- author never wrote.
+bodyInstrs
+  :: [(String, Language)] -> GlobalName -> String -> RawBody
+  -> Either [RuleError] [Instr]
+bodyInstrs ls g nm body = case body of
+  BodyRhs rhs -> do
+    is <- resolveBlock ls g [RawBind lambdaResult rhs]
+    case [ () | Bind n o <- is, n == lambdaResult, not (produces o) ] of
+      _ : _ -> Left [FunctionLeavesNothing nm]
+      []    -> Right (is ++ [Do (Return (Ref lambdaResult))])
+  BodyBlock raws -> do
+    is <- resolveBlock ls g raws
+    if any returns is then Right is else Left [FunctionLeavesNothing nm]
   where
-    g          = GlobalName nm
-    resultName = lambdaResult
+    returns i = case i of
+      Do   (Return _) -> True
+      Bind _ (Return _) -> True
+      _               -> False
 
 -- | Resolve a written block of instructions (MS4 phase 45).
 --
@@ -963,14 +992,11 @@ hoistedBind ls g i (n, r) = case r of
 -- **The same compilation as 'resolveFunction'**, deliberately — §1.1 says a
 -- function is a rule with one clause and no head, and a lambda is that function
 -- without a name, so there is one way to build a body and not two.
-closure :: [(String, Language)] -> GlobalName -> Int -> [Name] -> RawRhs -> Either RuleError Op
-closure ls g i ps b = case resolveBlock ls g [RawBind lambdaResult b] of
+closure :: [(String, Language)] -> GlobalName -> Int -> [Name] -> RawBody -> Either RuleError Op
+closure ls g i ps b = case bodyInstrs ls g "λ" b of
   Left (e : _) -> Left e
   Left []      -> Left (BadOperands g i "λ")
-  Right is
-    | any (\x -> case x of { Bind n o -> n == lambdaResult && not (produces o)
-                            ; _ -> False }) is -> Left (FunctionLeavesNothing "λ")
-    | otherwise -> Right (Op.Lambda ps (is ++ [Do (Return (Ref lambdaResult))]))
+  Right is     -> Right (Op.Lambda ps is)
 
 -- | Where a lambda's and a function's result is parked. It contains a token
 -- character, so nothing an author writes can collide with it.

@@ -35,7 +35,7 @@ import Thena.Surface.Concrete
   , SurfaceArg (..)
   , SurfaceBinder (..)
   )
-import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRhs (..))
+import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRhs (..), RawBody (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
@@ -140,7 +140,14 @@ InstrRhs :: { RawRhs }
 -- added lambdas to the rule-file grammar and not to this one, so
 -- @do { f = \\ z -> … }@ did not parse.
 InstrLambda :: { RawOperand }
-  : 'λ' InstrParams '->' InstrRhs          { RawLambda (reverse $2) $4 }
+  : 'λ' InstrParams '->' InstrFunBody      { RawLambda (reverse $2) $4 }
+
+-- **Level with @Thena.Syntax.Parser@\'s @FunBody@** (MS5 phase 75b) — §7b's
+-- registered duplication again, and added here in the same phase this time
+-- rather than two phases later.
+InstrFunBody :: { RawBody }
+  : InstrRhs                               { BodyRhs $1 }
+  | do '{' Block '}'                       { BodyBlock (reverse $3) }
 
 InstrParams :: { [String] }
   :                                        { [] }
