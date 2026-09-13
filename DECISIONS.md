@@ -1334,6 +1334,63 @@ any other bare word calls a rule of that name; :rules lists them.
 `:rules` prints the rules of every loaded base, in search order. If a word is
 in neither list, `no such command` says so and points back at `:help`.
 
+### A rule or function used at two types is inferred, not refused
+
+*Decided 2026-09-13.*
+
+Callables are split by the call graph and each group is generalised before
+anything that calls it is checked — Hindley-Milner. So a helper used at two
+types is fine with no annotation:
+
+```
+idf x = do { return x }
+
+rule go :- then h = here ; a = idf h ; n = fresh-name "x" ; b = idf n
+```
+
+**A local is not generalised.** The same shape one level in is refused:
+
+```
+rule go :- then
+  g = \ z -> do { return z }
+  h = here ; a = g h
+  n = fresh-name "x" ; b = g n     -- wanted Core, got Name
+```
+
+That is *Let Should Not Be Generalised*, and it is what an annotation is for —
+see below.
+
+**Inside one group nothing is generalised either.** Two mutually recursive
+callables share their variables, so calling one at two types *from inside the
+group* is an error. From outside, the group is a scheme and each use is
+independent.
+
+**An annotation is documentation and a promise now, not the only way to a second
+type.**
+
+### A local may be annotated, and then it is polymorphic
+
+*Decided 2026-09-13.*
+
+`‹name› : ‹type›` on a line of its own, above the binding it is about — the same
+spelling a top-level signature uses, one level in:
+
+```
+rule go :- then
+  g : a -> a
+  g = \ z -> do { return z }
+  h = here ; a = g h
+  n = fresh-name "x" ; b = g n       -- fine, because g is a scheme
+```
+
+**An annotation is checked, not believed.** A body that pins one of the
+annotation's variables to a particular type has broken the promise, and the
+*annotation* is what is reported. A concrete annotation is an ordinary
+constraint and has to be true.
+
+**An annotation with no binding after it is refused** — it is a typo, most often
+a name changed on one line and not the other.
+
 ### A written core term may have holes
 
 *Decided 2026-09-13.*
