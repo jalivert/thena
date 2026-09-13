@@ -42,6 +42,7 @@ module Thena.Rules
   , resolveTy
   , builtInTypes
   , resolveBlock
+  , surfaceBlocks
   , testWord
   , testOperands
   , testTypes
@@ -70,7 +71,7 @@ import Thena.Ops
   , produces
   )
 import Thena.Surface.Concrete
-  (Plicity (..), Surface (..), SurfaceArg (..))
+  (Plicity (..), Surface (..), SurfaceArg (..), blocksIn)
 import qualified Thena.Surface.Zipper as Zipper
 import Thena.Errors (SyntaxError (..))
 import Thena.Surface.Read (parseSurfaceText)
@@ -478,6 +479,14 @@ data RuleError
     -- ^ **@n : Ty@ with no @n = …@ after it** (MS5 phase 77). An annotation is
     -- about the binding on the next line; one that is about nothing is a typo,
     -- most often a name that was changed on one line and not the other.
+  | ReturnInSurfaceBlock GlobalName Int
+    -- ^ **@return@ inside a @do@ block written in a surface term** (MS5 phase
+    -- 79). A block there /is/ the solution to the hole it stands in —
+    -- @E⟦do { … }⟧@ is /play the block/ — so its product is the term it built
+    -- and there is nothing for a value to be returned to. 'Thena.Ops.Play'
+    -- splices the instructions into the running program rather than opening a
+    -- frame, so before this check a @return@ there quietly abandoned the
+    -- elaboration that played it.
   | FunctionLeavesNothing String
   | RuleAndFunction String Int
     -- ^ one name is both a rule and a function at one arity (MS5, reviewed
@@ -1529,3 +1538,58 @@ everyTest =
   , OptionIsSome (Lit (VText ""))
   , OptionIsNone (Lit (VText ""))
   ]
+
+-- | Every @do@ block written inside a surface literal these instructions hold,
+-- resolved, and named for where it was found (MS5 phase 79).
+--
+-- **The load-time twin of what 'Thena.Ops.Play' does as it runs.** Both go
+-- through 'resolveBlock' and both are handed the same language list, so they
+-- cannot come to disagree about what a word means; what this adds is that the
+-- answer is known before the machine starts, which is what lets a block be
+-- validated and typed like any other body (@ms5\/CLOSEOUT.md@ 20).
+--
+-- **It recurses**, because a block\'s own instructions may hold another surface
+-- literal holding another block.
+--
+-- The name each block is given is the enclosing rule\'s with an index, so an
+-- error in one says which block of which rule it was in.
+surfaceBlocks
+  :: [(String, Language)] -> GlobalName -> [Instr] -> Either [RuleError] [Rule]
+surfaceBlocks ls g is = concat <$> traverse one (zip [0 :: Int ..] (blocksUnder is))
+  where
+    one (k, raws) = do
+      body <- resolveBlock ls nm raws
+      case [ ReturnInSurfaceBlock nm i | (i, instr) <- zip [0 ..] body, returns instr ] of
+        e : es -> Left (e : es)
+        []     -> do
+          inner <- surfaceBlocks ls nm body
+          Right (Rule nm [] [] body : inner)
+      where
+        nm = GlobalName (unGlobal g ++ ", do block " ++ show (k + 1))
+
+    returns i = case i of
+      Do   (Return _)   -> True
+      Bind _ _ (Return _) -> True
+      _                 -> False
+
+    unGlobal (GlobalName n) = n
+
+-- | The written blocks inside every surface literal an instruction run holds.
+blocksUnder :: [Instr] -> [[RawInstr]]
+blocksUnder = concatMap one
+  where
+    one i = case i of
+      Bind _ _ o -> inOp o
+      Do       o -> inOp o
+
+    inOp o = case o of
+      Op.Lambda _ b -> blocksUnder b
+      Op.Block b    -> blocksUnder b
+      _             -> concatMap inOperand (operandsOf o)
+
+    inOperand a = case a of
+      Lit (VSurface z) -> blocksIn (Zipper.root z)
+      Lit (VClosure _ b _) -> blocksUnder b
+      ListOf os        -> concatMap inOperand os
+      PairOf x y       -> inOperand x ++ inOperand y
+      _                -> []

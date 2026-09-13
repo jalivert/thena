@@ -2017,6 +2017,7 @@ whereRuleError e = case e of
   UnitInsideAType n       -> inSignature n
   DuplicateSignature n _  -> inSignature n
   AnnotationWithoutBinding g i _ -> inRule g i
+  ReturnInSurfaceBlock g i -> inRule g i
   FunctionLeavesNothing n -> "in " ++ n ++ ": "
   RuleAndFunction n _     -> "in " ++ n ++ ": "
   BuiltInLanguage n       -> inLanguage n
@@ -2058,6 +2059,9 @@ whatRuleError e = case e of
       ++ (if a == 1 then " argument" else " arguments")
   AnnotationWithoutBinding _ _ n ->
     "there is no " ++ n ++ " = … after this type, so it says nothing about anything"
+  ReturnInSurfaceBlock _ _ ->
+    "a do block in a surface term is the solution to the hole it stands in, "
+      ++ "so there is nothing for a return to answer"
   FunctionLeavesNothing _ ->
     "the right of the = leaves no value, so there is nothing to return"
   RuleAndFunction _ k     ->

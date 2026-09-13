@@ -234,6 +234,44 @@ tests =
               @?= Ran ["ok"] Completed
         ]
     , testGroup
+        "a do block in a surface term is checked before it runs"
+        -- **MS5 phase 79, and @ms5\/CLOSEOUT.md@ 20.** Until then
+        -- 'Thena.Ops.Play' resolved a block as it ran, so a mistake in one
+        -- halted the machine with half a proof already built. The block is a
+        -- body like any other now: resolved, validated and typed when the term
+        -- it sits in is read.
+        [ testCase "a mistake in one is refused" $
+            case snd (say [":theorem t : Type\8320", "elaborate \10216 do { say 3 } \10217"]) of
+              EntryMistyped (_ : _) -> pure ()
+              other -> assertFailure ("expected a type error, got " ++ show other)
+
+          -- **The point of doing it early**: the development is exactly as it
+          -- was, where before the machine ran until it hit the bad instruction.
+        , testCase "and nothing of the term was elaborated" $
+            let before = devOf (fst (say [":theorem t : Type\8320"]))
+                after  = devOf (fst (say [":theorem t : Type\8320"
+                                         , "elaborate \10216 do { say 3 } \10217"]))
+             in after @?= before
+
+          -- **A @return@ has nothing to answer.** A block in a surface term is
+          -- the solution to the hole it stands in, and 'Thena.Ops.Play' splices
+          -- it into the running program rather than opening a frame — so before
+          -- this check a @return@ there quietly abandoned the elaboration.
+        , testCase "a return in one is refused" $
+            case snd (say [":theorem t : Type\8320"
+                          , "elaborate \10216 do { u = fresh-universe ; return u } \10217"]) of
+              LineRefused (_ : _) -> pure ()
+              other -> assertFailure ("expected a refusal, got " ++ show other)
+
+          -- …and a good one still elaborates, which is the case the check must
+          -- not break: the block fills the hole it stands in.
+        , testCase "a good one still runs" $
+            case snd (say [":theorem t : Type\8320"
+                          , "elaborate \10216 let x : Type\8320 = do { u = fresh-universe ; fill u ; solve } in x \10217"]) of
+              Ran _ Completed -> pure ()
+              other -> assertFailure ("expected it to run, got " ++ show other)
+        ]
+    , testGroup
         "a multi-line entry is bracketed by :{ and :}"
         -- **MS5 phase 78, his choice**: GHCi's spelling, replacing phase 70's
         -- /keep reading while it cannot be finished/ — @ms5\/CLOSEOUT.md@ 18

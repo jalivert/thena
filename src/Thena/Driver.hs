@@ -135,6 +135,7 @@ import Thena.Rules
   , next
   , resolveRule
   , resolveBlock
+  , surfaceBlocks
   , RuleError (..)
   , allCallable
   , allLanguages
@@ -597,6 +598,43 @@ data LineError
   | LineMistyped [InstralTypeError]
     -- ^ the entry resolved and does not type check (MS5, reviewed 2026-09-12)
 
+-- | What was wrong with the @do@ blocks a surface term holds.
+data BlockProblem
+  = BlockIll [RuleError]
+  | BlockMistyped [InstralTypeError]
+
+-- | Resolve, validate and type every @do@ block written inside a surface term
+-- this program holds (MS5 phase 79).
+--
+-- **One checker, and its callers differ only in how they say what it found** —
+-- 'instralEntry' turns it into a 'LineError', the driver's surface commands into
+-- a 'Response'. Phase 77 found what two copies of one check cost, and this is
+-- the same shape one phase later.
+--
+-- Until this existed, 'Thena.Ops.Play' resolved a block as it ran, so @say 3@
+-- inside one halted the machine mid-proof where the same instruction anywhere
+-- else is refused before anything starts — @ms5\/CLOSEOUT.md@ 20.
+--
+-- **The blocks are typed as extra bodies, not as callables.** Nothing can call
+-- one — it has no name a user could write — so it is handed to 'inferProgram'
+-- beside 'allCallable' rather than inside it.
+checkSurfaceBlocks :: [RuleBase] -> GlobalName -> [Instr] -> Maybe BlockProblem
+checkSurfaceBlocks bases nm prog = case surfaceBlocks (allLanguages bases) nm prog of
+  Left errs -> Just (BlockIll errs)
+  Right bs  -> case concatMap validate bs of
+    e : es -> Just (BlockIll (e : es))
+    []     -> case snd (inferProgram (allSignatures bases) (allCallable bases ++ bs)) of
+      []   -> Nothing
+      errs -> Just (BlockMistyped errs)
+
+-- | 'checkSurfaceBlocks', said as the driver says things.
+blockResponse :: Session -> String -> [Instr] -> Maybe Response
+blockResponse s what prog =
+  case checkSurfaceBlocks (rules (sessionMachine s)) (GlobalName what) prog of
+    Just (BlockIll es)      -> Just (LineRefused es)
+    Just (BlockMistyped es) -> Just (EntryMistyped es)
+    Nothing                 -> Nothing
+
 -- | A whole typed **entry**, which is an @instral@ block (MS5 phase 70).
 --
 -- **The entry is the unit and a line is the degenerate case** — his extension,
@@ -629,11 +667,18 @@ instralEntry bases src = do
   -- both passes with every loaded base beside it, so a call in it is checked
   -- against the real signatures.
   let entry = Rule (GlobalName "entry") [] [] prog
+  -- **A @do@ block written in a surface term is checked with it** (MS5 phase
+  -- 79). Until then 'Thena.Ops.Play' resolved one as it ran, so @say 3@ inside
+  -- one halted the machine where the same instruction anywhere else is refused
+  -- before it starts.
   case validate entry of
     e : es -> Left (LineIllFormed (e : es))
     []     -> case snd (inferProgram (allSignatures bases) (allCallable bases ++ [entry])) of
-      []   -> Right prog
-      errs -> Left (LineMistyped errs)
+      errs@(_ : _) -> Left (LineMistyped errs)
+      []           -> case checkSurfaceBlocks bases (GlobalName "entry") prog of
+        Just (BlockIll es)      -> Left (LineIllFormed es)
+        Just (BlockMistyped es) -> Left (LineMistyped es)
+        Nothing                 -> Right prog
   where
     -- Written core terms are hoisted per instruction — @try ⌜ x ⌝@ is
     -- @⌜1⌝ = resolve-core ⌜ x ⌝ ; try ⌜1⌝@, which is what a rule body writes by
@@ -952,7 +997,11 @@ loadProofSource s src =
   Right (nm, items) ->
     let machine  = sessionMachine s
         (is, n1) = surfaceProgram (names machine) items
-     in case progress False s { sessionMachine = load is machine { names = n1 } } [] of
+     in case blockResponse s "this module" is of
+      -- A module's @do@ blocks are checked before any of it is elaborated, so a
+      -- mistake in one does not leave half a module declared (MS5 phase 79).
+      Just r  -> (s, r)
+      Nothing -> case progress False s { sessionMachine = load is machine { names = n1 } } [] of
           (s', Ran _ Completed) ->
             ( s'
             , ProofLoaded nm [ n | Just n <- map declaredName items ]
@@ -1532,7 +1581,9 @@ dispatch s name arg = case name of
             , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt t))])
             ]
           asking  = s { sessionMachine = load prog machine { names = n1 } }
-       in case progress False asking [] of
+       in case blockResponse s "this term" prog of
+        Just r  -> (s, r)
+        Nothing -> case progress False asking [] of
             (s', Ran _ Completed) ->
               let m'   = sessionMachine s'
                   back = s' { sessionMachine = restore before m' }
@@ -1600,8 +1651,10 @@ dispatch s name arg = case name of
       Left e -> (s, Failed e)
       Right items ->
         let (is, n1) = surfaceProgram (names machine) items
-         in progress (sessionStepping s)
-                     s { sessionMachine = load is machine { names = n1 } } []
+         in case blockResponse s "this declaration" is of
+              Just r  -> (s, r)
+              Nothing -> progress (sessionStepping s)
+                           s { sessionMachine = load is machine { names = n1 } } []
 
     -- **One typed ENTRY, as the program it is** (MS5 phase 62b, widened from a
     -- line to a block at phase 70). The two halves are put back together because
@@ -1994,16 +2047,38 @@ loadRuleBases s = go []
     -- reason in 'BasesIllTyped': a rule's signature is not decidable until every
     -- base is in hand. 'Thena.Rules.validate' stays where it is — it is per-rule
     -- and answers a question one rule can answer.
-    go acc [] = case snd (inferProgram (allSignatures acc) (allCallable acc)) of
-      []   ->
-        ( s { sessionMachine = (sessionMachine s) { rules = acc } }
-        , BasesLoaded acc
-        )
-      errs -> (s, BasesIllTyped errs)
+    -- **The surface blocks are typed beside the rules** (MS5 phase 79). They are
+    -- not callables — nothing can call one — so they are not in 'allCallable';
+    -- they are handed to 'inferProgram' as extra bodies so that a mistake in one
+    -- is found when the file loads.
+    go acc [] = case traverse (blocksOf acc) acc of
+      -- A block that does not resolve or does not validate is the file's
+      -- problem and is reported against the file, as any other rule's would be.
+      Left (path, errs) -> (s, RuleFileRefused path (RuleIllFormed errs))
+      Right bss ->
+        case snd (inferProgram (allSignatures acc) (allCallable acc ++ concat bss)) of
+          []   ->
+            ( s { sessionMachine = (sessionMachine s) { rules = acc } }
+            , BasesLoaded acc
+            )
+          errs -> (s, BasesIllTyped errs)
+
     go acc ((path, src) : more) =
       case readRuleBase path src of
         Left e  -> (s, RuleFileRefused path e)
         Right b -> go (acc ++ [b]) more
+
+    -- **Resolved here and not in 'readRuleBase'**, because a block is resolved
+    -- with EVERY loaded base's languages — which is what 'Thena.Ops.Play' does
+    -- at run time — and a file does not know what will be loaded beside it.
+    blocksOf acc b = case surfaceBlocks (allLanguages acc) (GlobalName (baseName b))
+                            (concatMap ruleBody (baseRules b ++ baseFunctions b)) of
+      Left errs -> Left (basePath b, errs)
+      Right bs  -> case concatMap validate bs of
+        []   -> Right bs
+        errs -> Left (basePath b, errs)
+    -- Typing them is 'go''s job, because a block may call a rule in a base that
+    -- has not been read yet.
 
 -- | Read something and hand it back for rendering.
 --

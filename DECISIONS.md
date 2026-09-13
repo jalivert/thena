@@ -1334,6 +1334,31 @@ any other bare word calls a rule of that name; :rules lists them.
 `:rules` prints the rules of every loaded base, in search order. If a word is
 in neither list, `no such command` says so and points back at `:help`.
 
+### A `do` block in a surface term is checked before any of it runs
+
+*Decided 2026-09-13.*
+
+A `do` block written inside a surface term **is the solution to the hole it
+stands in** — `E⟦do { … }⟧` is *play the block*, and what it leaves behind is
+the term it built. So it sits wherever a term does, including the right of a
+`let`:
+
+```
+let x : Type₀ = do { u = fresh-universe ; fill u ; solve } in x
+```
+
+It has no type of its own to declare, and **a `return` in one is refused**:
+there is nothing for a value to be returned to.
+
+Its instructions are resolved, validated and type-checked when the term is
+read — in a rule file, at the prompt, in a module, in a `declare`. A mistake in
+one is reported before anything is elaborated, so nothing is half-built:
+
+```
+thena spine> elaborate ⟨ do { say 3 } ⟩
+do block 1, instruction 1: wanted String, got Int
+```
+
 ### A multi-line entry is bracketed by `:{` and `:}`
 
 *Decided 2026-09-13.*

@@ -40,6 +40,7 @@ tests =
     , noKeyword
     , generalisation
     , annotatedLocals
+    , surfaceBlockTyping
     , blockBodies
     , badSignatures
     , functions
@@ -182,6 +183,54 @@ annotatedLocals =
       other -> assertFailure ("expected a clash, got " ++ show other)
 
     loadRaw src = snd (loadRuleBases newSession [("a.thena.rules", src)])
+
+-- --------------------------------------------------------------------------
+-- A do block in a surface term is typed (MS5 phase 79)
+-- --------------------------------------------------------------------------
+
+-- | **@ms5\/CLOSEOUT.md@ 20, closed.**
+--
+-- A @do@ block written inside a surface term is @instral@, and until this phase
+-- it was the only @instral@ nothing checked: 'Thena.Ops.Play' resolved it as it
+-- ran. It is resolved, validated and typed when the term it sits in is read
+-- now — in a rule file here, and at the prompt, in a module and in a
+-- @declare@ (@DriverTests@ drives those).
+--
+-- **The block is typed as an extra body, not as a callable.** Nothing can call
+-- one, so it goes to 'inferProgram' beside the callables rather than among
+-- them.
+surfaceBlockTyping :: TestTree
+surfaceBlockTyping =
+  testGroup
+    "a do block inside a surface literal is typed with the file"
+    [ loads "a good one loads"
+        "rule go :- then call elaborate surface`do { u = fresh-universe ; fill u ; solve }`"
+
+    , testCase "a bad one is refused when the file loads" $
+        case load "rule go :- then call elaborate surface`do { say 3 }`" of
+          BasesIllTyped (Clash{} : _) -> pure ()
+          other -> assertFailure ("expected a type error, got " ++ show other)
+
+      -- **A block inside a block.** A block's own instructions may hold another
+      -- surface literal, and 'Thena.Rules.surfaceBlocks' recurses for it.
+    , testCase "and so is one nested inside another" $
+        case load "rule go :- then call elaborate surface`do { call elaborate surface\\`do { say 3 }\\` }`" of
+          BasesIllTyped (Clash{} : _) -> pure ()
+          other -> assertFailure ("expected a type error, got " ++ show other)
+
+      -- A @return@ in one is refused at resolution, before typing.
+    , testCase "a return in one is refused" $
+        case loadRaw "rule base b where\nrule go :- then call elaborate surface`do { u = fresh-universe ; return u }`\n" of
+          RuleFileRefused _ (RuleIllFormed es)
+            | [ReturnInSurfaceBlock _ _] <- es -> pure ()
+          other -> assertFailure ("expected a refusal, got " ++ show other)
+    ]
+  where
+    loads what src = testCase what $ case load src of
+      BasesLoaded _ -> pure ()
+      other         -> assertFailure ("expected a load, got " ++ show other)
+
+    loadRaw src = snd (loadRuleBases newSession [("b.thena.rules", src)])
 
 -- --------------------------------------------------------------------------
 -- A function body may be a block (MS5 phase 75b)
