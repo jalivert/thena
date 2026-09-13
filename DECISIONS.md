@@ -1334,6 +1334,31 @@ any other bare word calls a rule of that name; :rules lists them.
 `:rules` prints the rules of every loaded base, in search order. If a word is
 in neither list, `no such command` says so and points back at `:help`.
 
+### A rule is searched; a function is called
+
+*Decided 2026-09-13.*
+
+A rule may have many clauses and calling it is a **search**: the engine builds a
+choice point, tries each clause whose head passes, and backtracks into the rest
+if one fails. `:choices` lists it and `retry` reaches it.
+
+A function is not that. It is **called** — one clause, entered and stayed in.
+Nothing about it appears in `:choices`, `retry` cannot reach it, and a failure
+inside it is the caller's failure rather than a reason to try something else.
+
+**So a function has one clause per arity**, and a second is refused:
+
+```
+f x = concat x "a"
+f x = concat x "b"     -- in f: a function has one clause, and nothing tells a
+                       -- second one at 1 argument apart from the first
+```
+
+Different arities are different functions, as they are for rules. Until there
+are patterns nothing can tell two clauses apart, so the second could only ever
+be reached by the first one *failing* — which is a rule's behaviour, and writing
+a rule is how you ask for it.
+
 ### A `do` block in a surface term is checked before any of it runs
 
 *Decided 2026-09-13.*

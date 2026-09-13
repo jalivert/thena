@@ -488,6 +488,17 @@ data RuleError
     -- frame, so before this check a @return@ there quietly abandoned the
     -- elaboration that played it.
   | FunctionLeavesNothing String
+  | FunctionClauseUnreachable String Int
+    -- ^ **a second clause of a function at one arity** (MS5 phase 80, his
+    -- ruling). A function is called and a rule is searched: a call enters one
+    -- clause and stays in it, so a second clause is reached only if something
+    -- tells the two apart — and until there are patterns, nothing can. It was
+    -- accepted before this phase, and reached by the first clause /failing/,
+    -- which is a rule's behaviour and not a function's.
+    --
+    -- **The phase that adds patterns lifts this**, and is where a function's
+    -- clause selection stops being /the only one/ and becomes /the first that
+    -- matches/.
   | RuleAndFunction String Int
     -- ^ one name is both a rule and a function at one arity (MS5, reviewed
     -- 2026-09-12)

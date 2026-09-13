@@ -2019,6 +2019,7 @@ whereRuleError e = case e of
   AnnotationWithoutBinding g i _ -> inRule g i
   ReturnInSurfaceBlock g i -> inRule g i
   FunctionLeavesNothing n -> "in " ++ n ++ ": "
+  FunctionClauseUnreachable n _ -> "in " ++ n ++ ": "
   RuleAndFunction n _     -> "in " ++ n ++ ": "
   BuiltInLanguage n       -> inLanguage n
   BuiltInType n           -> inLanguage n
@@ -2064,6 +2065,10 @@ whatRuleError e = case e of
       ++ "so there is nothing for a return to answer"
   FunctionLeavesNothing _ ->
     "the right of the = leaves no value, so there is nothing to return"
+  FunctionClauseUnreachable _ k ->
+    "a function has one clause, and nothing tells a second one at " ++ show k
+      ++ (if k == 1 then " argument" else " arguments")
+      ++ " apart from the first — write a rule if you want the clauses searched"
   RuleAndFunction _ k     ->
     "this name is both a rule and a function at " ++ show k
       ++ (if k == 1 then " argument" else " arguments")

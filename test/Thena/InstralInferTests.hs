@@ -41,6 +41,7 @@ tests =
     , generalisation
     , annotatedLocals
     , surfaceBlockTyping
+    , functionsAreFunctions
     , blockBodies
     , badSignatures
     , functions
@@ -231,6 +232,65 @@ surfaceBlockTyping =
       other         -> assertFailure ("expected a load, got " ++ show other)
 
     loadRaw src = snd (loadRuleBases newSession [("b.thena.rules", src)])
+
+-- --------------------------------------------------------------------------
+-- A function is called, a rule is searched (MS5 phase 80)
+-- --------------------------------------------------------------------------
+
+-- | **His ruling, 2026-09-13.** A rule with several clauses is a search: the
+-- engine builds a choice point and tries each clause that matches. A function
+-- is not — it is called, it enters one clause, and it stays there.
+--
+-- **A function therefore has one clause until there are patterns**, because a
+-- second is reached only where something tells the two apart and nothing can.
+-- Before this phase it was reached by the FIRST clause failing, which is a
+-- rule\'s behaviour wearing a function\'s spelling.
+--
+-- **Refusing the second clause is the whole change.** "Thena.Engine" decides
+-- @Choice@ against @Call@ by @hasNext@ alone and never asks what kind of
+-- callable it has, so with one clause it already builds a @Call@ frame — which
+-- is why the last two cases here pass without a line of engine code.
+functionsAreFunctions :: TestTree
+functionsAreFunctions =
+  testGroup
+    "a function has one clause"
+    [ testCase "a second clause at the same arity is refused" $
+        case loadRaw "rule base f where\nf x = concat x \"a\"\nf x = concat x \"b\"\n" of
+          RuleFileRefused _ (RuleIllFormed es)
+            | [FunctionClauseUnreachable "f" 1] <- es -> pure ()
+          other -> assertFailure ("expected a refusal, got " ++ show other)
+
+      -- **A different arity is a different callable**, which is how dispatch
+      -- has always read a name, so these are two functions and not two clauses.
+    , loads "…but another arity is another function"
+        "f x = concat x \"a\"\nf x y = concat x y"
+
+      -- **A rule is unchanged**: several clauses, searched.
+    , loads "…and a rule may still have as many clauses as it likes"
+        "rule g :- when focus-is-hole then prove\nrule g :- when focus-is-guess then solve"
+
+      -- **The positive half, and it needed no engine code.** A call to a
+      -- function leaves the stack with no live decision on it — before the
+      -- phase, a two-clause one announced @chose@, was listed by @:choices@ and
+      -- was re-entered by @retry@, so the view whose job is /the live decisions
+      -- in your proof/ listed a call to a string function among them.
+    , testCase "and calling one leaves no choice point" $
+        choicesAfter "twice x = concat x x\nrule go :- then m = twice \"a\" ; say m"
+          @?= Just []
+    ]
+  where
+    loads what src = testCase what $ case load src of
+      BasesLoaded _ -> pure ()
+      other         -> assertFailure ("expected a load, got " ++ show other)
+
+    loadRaw src = snd (loadRuleBases newSession [("f.thena.rules", src)])
+
+    -- Load, run @go@, and ask what decisions are left standing.
+    choicesAfter src =
+      let s0 = fst (loadRuleBases newSession [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])
+       in case snd (command (fst (command s0 "go")) ":choices") of
+            Choices cs -> Just cs
+            _          -> Nothing
 
 -- --------------------------------------------------------------------------
 -- A function body may be a block (MS5 phase 75b)

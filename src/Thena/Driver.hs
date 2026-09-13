@@ -1986,7 +1986,7 @@ resolveAll
        ([(String, Signature)], [(String, Language)], [Rule], [Rule])
 resolveAll raws =
   case ( concat langErrs ++ concat ruleErrs ++ concat fnErrs ++ sigErrs
-           ++ langDups ++ dups ++ collisions
+           ++ langDups ++ dups ++ collisions ++ overlapping
        , concatMap validate (ok ++ fns)
        ) of
     ([], [])     -> Right (sigs, langs, fns, ok)
@@ -2013,6 +2013,30 @@ resolveAll raws =
       , let GlobalName n = ruleName f
       , any (\r -> ruleName r == ruleName f
                      && length (ruleParams r) == length (ruleParams f)) ok
+      ]
+
+    -- **A function has ONE clause — his ruling, 2026-09-13**, and until this
+    -- phase the comment above saying so was not true of the code.
+    --
+    -- **A rule is searched and a function is called.** A call enters one clause
+    -- and stays in it, so a second is reached only where something tells the two
+    -- apart; with no head and no patterns, nothing can. What a second clause
+    -- actually did before this was catch the first one\'s **failure** — the
+    -- engine built a choice point over the two and backtracked into the second —
+    -- which is a rule\'s behaviour written in a function\'s spelling.
+    --
+    -- **Nothing else was needed to make a function deterministic.**
+    -- @Thena.Engine@ decides @Choice@ versus @Call@ by @hasNext@ alone and never
+    -- asks what kind of callable it has; with one clause it already builds a
+    -- @Call@ frame, so a function call already makes no choice point, shows in
+    -- no @:choices@ and is unreachable by @retry@. Refusing the second clause is
+    -- the whole change.
+    overlapping =
+      [ FunctionClauseUnreachable n (length (ruleParams f))
+      | (i, f) <- zip [0 :: Int ..] fns
+      , let GlobalName n = ruleName f
+      , any (\g -> ruleName g == ruleName f
+                     && length (ruleParams g) == length (ruleParams f)) (take i fns)
       ]
 
     -- **…and two grammars under one name** (2026-09-12). Every lookup of a
