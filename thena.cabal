@@ -121,6 +121,7 @@ test-suite thena-test
         Thena.CallTests
         Thena.ReadTests
         Thena.LoadTests
+        Thena.ManualTests
         Thena.DriverTests
         Thena.Declared
         Thena.Standard

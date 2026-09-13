@@ -14,6 +14,7 @@ module Thena.Repl
   , turn
   , transcript
   , transcriptFrom
+  , transcriptIO
   , unfinished
   , renderCore
   , renderSurface
@@ -186,24 +187,10 @@ loop s pending = do
    run line = do
       let t = turn s pending line
       mapM_ outputStrLn (turnOutput t)
-      case turnResponse t of
-        -- The one response the driver cannot act on itself: it named a file,
-        -- and reading files is this module's (§12 invariant 4).
-        LoadRequested path | not (turnQuit t) -> do
-          (s', out, problems) <- liftIO (loadFile (turnSession t) path)
-          mapM_ outputStrLn (out ++ problems)
-          loop s' Nothing
-        -- And the same shape again for a proof module (MS4 phase 43). The
-        -- driver elaborates it; this only reads the file.
-        ProofRequested path | not (turnQuit t) -> do
-          (s', out) <- liftIO (loadProofFile (turnSession t) path)
+      case following (turnSession t) (turnResponse t) of
+        Just act | not (turnQuit t) -> do
+          (s', out) <- liftIO act
           mapM_ outputStrLn out
-          loop s' Nothing
-        -- The same shape for rule bases, and several paths rather than one:
-        -- a load replaces the whole ordered list (phase 22).
-        RulesRequested paths | not (turnQuit t) -> do
-          (s', out, problems) <- liftIO (loadRuleFiles (turnSession t) paths)
-          mapM_ outputStrLn (out ++ problems)
           loop s' Nothing
         _ | turnQuit t -> pure ()
           | otherwise  -> loop (turnSession t) (turnPending t)
@@ -435,6 +422,51 @@ turn s pending line = Turn (renderResponse s' resp) s' asking (resp == Quit) res
 -- "Thena.LoadTests" covers both, against the real 'loadPrelude'.
 transcript :: [String] -> String
 transcript = transcriptFrom newSession
+
+-- | **The three responses the driver cannot act on itself**: each named a file,
+-- and reading files is this module's (§12 invariant 4).
+--
+-- Written once (2026-09-13) because there are now two callers — the interactive
+-- 'loop' and 'transcriptIO' — and three near-identical cases in each would be
+-- six places for a fourth kind of load to be forgotten in.
+following :: Session -> Response -> Maybe (IO (Session, [String]))
+following s resp = case resp of
+  LoadRequested path   -> Just (withProblems (loadFile s path))
+  -- A proof module: the driver elaborates it, this only reads the file.
+  ProofRequested path  -> Just (loadProofFile s path)
+  -- Several paths rather than one — a load replaces the whole ordered list.
+  RulesRequested paths -> Just (withProblems (loadRuleFiles s paths))
+  _                    -> Nothing
+  where
+    withProblems = fmap (\(s', out, problems) -> (s', out ++ problems))
+
+-- | 'transcriptFrom', in IO, so that a @:load@ is followed.
+--
+-- **The pure one cannot**, and says so: reading a file is not pure, so a script
+-- that loads something replays as though the line did nothing. That was
+-- harmless while nothing replayed a script with a load in it, and
+-- @docs\/MANUAL.md@ is full of them — a manual that cannot be re-driven is
+-- exactly the hand-patched transcript the standing rule is about
+-- (@ms5\/CLOSEOUT.md@ 31, and @.claude\/bin\/manual-check@ is the harness).
+--
+-- Otherwise identical to 'transcriptFrom', through the same 'turn', so the two
+-- cannot come to disagree about what a terminal would have shown.
+transcriptIO :: Session -> [String] -> IO String
+transcriptIO s0 = fmap unlines . replay s0 Nothing
+  where
+    replay _ _ []           = pure []
+    replay s pending (l : ls) = do
+      let t    = turn s pending l
+          echo = prompt s pending ++ l
+      case following (turnSession t) (turnResponse t) of
+        Just act | not (turnQuit t) -> do
+          (s', out) <- act
+          rest <- replay s' Nothing ls
+          pure ((echo : turnOutput t ++ out) ++ rest)
+        _ | turnQuit t -> pure (echo : turnOutput t)
+          | otherwise  -> do
+              rest <- replay (turnSession t) (turnPending t) ls
+              pure ((echo : turnOutput t) ++ rest)
 
 -- | The same, from a session that has already had something loaded into it.
 --

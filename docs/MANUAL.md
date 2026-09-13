@@ -13,12 +13,18 @@ Every transcript below is real output, captured from the program.
 
 ---
 
-> **Captured 2026-09-08, against commit `dd89e32`.** Every transcript below is
-> real output — driven through the program, not written by hand. Thena is a
-> research prototype under active development and it moves weekly: things that
-> were impossible one week are ordinary the next, and something that worked
-> yesterday can break. **If a transcript here disagrees with what you see, the
-> program is right and this document is stale** — please say so.
+> **Captured 2026-09-13, against commit `aa451f5`.** Every transcript below is
+> real output — driven through the program, not written by hand, and re-driven
+> whenever the manual changes. Thena is a research prototype under active
+> development and it moves weekly: things that were impossible one week are
+> ordinary the next, and something that worked yesterday can break. **If a
+> transcript here disagrees with what you see, the program is right and this
+> document is stale** — please say so.
+>
+> **Read it in order and type along.** Each chapter continues the session before
+> it, so the state builds up as you go; where that is not true the text says
+> *From a fresh session.* just above the block, and means it. A `…` inside a
+> block stands for output left out for length.
 
 ## 1. Starting up
 
@@ -114,7 +120,7 @@ the level left to be worked out:
 thena spine> :infer Type₀
 Type₀ : Type₁
 thena spine> :infer Type
-Type (?ℓ229) : Type (suc ?ℓ229)
+Type : Type (suc ?ℓ690)
 ```
 
 `?ℓ229` is an unknown level. It is not a default and it is not zero — it is
@@ -125,9 +131,13 @@ serve every level.
 `Type₁` is wanted:
 
 ```
-thena spine> :infer (\ (A : Type₁) -> A) Type₀
+thena spine> :infer ⌜ (\ (A : Type₁) -> A) Type₀ ⌝
 (λ (A : Type₁) -> A) Type₀ : Type₁
 ```
+
+The corners are not decoration here. A bare argument is a *surface* term and a
+surface λ binder carries no type, so `\ (A : Type₁) -> A` is the development
+calculus's λ and has to say so.
 
 They are still different universes, so nothing collapses:
 
@@ -142,19 +152,28 @@ of it writes that level in braces:
 
 ```
 thena spine> :show Eq
-data Eq {ℓ₇} (A : Type (ℓ₇)) : A -> A -> Type (ℓ₇) where
-  { refl : ∀ (a : A) -> Eq {ℓ₇} A a a }
+data Eq {ℓ₇₅} (A : Type (ℓ₇₅)) : A -> A -> Type (ℓ₇₅) where
+  { refl : ∀ (a : A) -> Eq {ℓ₇₅} A a a }
 ```
 
-So `Eq` on its own is not a term — `Eq {0} Nat x y` is. The parameters are
-prenex, which means a use writes all of them or none:
+So `Eq` on its own is not a term — `Eq {0} Nat x y` is. **Written on the
+surface, the levels are yours not to write**: a use of a polymorphic name gets
+one unknown per parameter, and unification settles them.
 
 ```
 thena spine> :infer refl
-refl has 1 level parameter, and was given 0 level arguments
-its level parameters are prenex, so a use writes every one of them
-thena spine> :infer refl {1}
+refl : ∀ (A : Type (?ℓ697)) (a : A) -> Eq {?ℓ697} A a a
+```
+
+Written in the development calculus they are explicit, and **prenex** — a use
+writes all of them or none:
+
+```
+thena spine> :infer ⌜ refl {1} ⌝
 refl {1} : ∀ (A : Type₁) (a : A) -> Eq {1} A a a
+thena spine> :infer ⌜ refl {1 0} ⌝
+refl has 1 level parameter, and was given 2 level arguments
+its level parameters are prenex, so a use writes every one of them
 ```
 
 A datatype over two of them gets two parameters, and its own level is their
@@ -162,8 +181,8 @@ join:
 
 ```
 thena spine> :show And
-data And {ℓ₇₂ ℓ₇₃} (A : Type (ℓ₇₂)) (B : Type (ℓ₇₃)) : Type (ℓ₇₂ ⊔ ℓ₇₃) where
-  { both : A -> B -> And {ℓ₇₂ ℓ₇₃} A B }
+data And {ℓ₂₂₅ ℓ₂₂₆} (A : Type (ℓ₂₂₅)) (B : Type (ℓ₂₂₆)) : Type (ℓ₂₂₅ ⊔ ℓ₂₂₆) where
+  { both : A -> B -> And {ℓ₂₂₅ ℓ₂₂₆} A B }
 ```
 
 `⊔` is the one symbol that is printed and never written: the join is computed
@@ -227,15 +246,6 @@ The indentation-sensitive spelling needs more than one line, and the REPL reads
 one line at a time — so until surface **files** arrive you can only write a
 block with explicit braces here.
 
-```
-thena spine> :core succ (succ zero)
-succ (succ zero)
-thena spine> :infer succ (succ zero)
-succ (succ zero) : Nat
-thena spine> :convert succ zero ≟ succ zero
-succ zero ≟ succ zero   yes
-```
-
 ---
 
 ## 4. Declaring a datatype
@@ -249,6 +259,17 @@ data Nat : Type₀ where
   ; succ : Nat -> Nat }
 ```
 
+Now the three commands of the last chapter have something to look at:
+
+```
+thena spine> :core succ (succ zero)
+succ (succ zero)
+thena spine> :infer succ (succ zero)
+succ (succ zero) : Nat
+thena spine> :convert succ zero ≟ succ zero
+succ zero ≟ succ zero   yes
+```
+
 **Write the universe as a bare `Type` and it is worked out for you**, from the
 constructors' own levels, and becomes a level parameter if nothing pins it:
 
@@ -256,8 +277,8 @@ constructors' own levels, and becomes a level parameter if nothing pins it:
 thena spine> data Box (A : Type) : Type where { box : A -> Box A }
 declared Box
 thena spine> :show Box
-data Box {ℓ₂₅₆} (A : Type (ℓ₂₅₆)) : Type (ℓ₂₅₆) where
-  { box : A -> Box {ℓ₂₅₆} A }
+data Box {ℓ₇₄₆} (A : Type (ℓ₇₄₆)) : Type (ℓ₇₄₆) where
+  { box : A -> Box {ℓ₇₄₆} A }
 ```
 
 A written `Typeₙ` is still checked rather than believed:
@@ -390,11 +411,12 @@ same way, and the theorem comes out polymorphic — the level that was left
 unknown becomes a parameter:
 
 ```
-thena spine> :theorem id : ∀ (A : Type) -> A -> A
-proving id : ∀ (A : Type (?ℓ229)) -> A -> A
-…
+thena spine> :theorem idPoly : ∀ (A : Type) -> A -> A
+proving idPoly : ∀ (A : Type (?ℓ781)) -> A -> A
+thena spine> try-core ⌜ \ (A : Type) (a : A) -> a ⌝
+thena spine> solve
 thena spine> qed
-id {ℓ₂₄₀} : ∀ (A : Type (ℓ₂₄₀)) -> A -> A   ∎
+idPoly {ℓ₇₉₃} : ∀ (A : Type (ℓ₇₉₃)) -> A -> A   ∎
 ```
 
 Sometimes one level is not enough, and the proof leaves a *relation* between two
@@ -403,11 +425,11 @@ before a `⊢`:
 
 ```
 thena spine> :theorem lift : Type -> Type
-proving lift : Type (?ℓ229) -> Type (?ℓ230)
+proving lift : Type (?ℓ795) -> Type (?ℓ796)
 thena spine> try-core ⌜ \ (x : Type) -> x ⌝
 thena spine> solve
 thena spine> qed
-lift {ℓ₂₃₈ ℓ₂₃₉} : (ℓ₂₃₈ ≤ ℓ₂₃₉) ⊢ Type (ℓ₂₃₈) -> Type (ℓ₂₃₉)   ∎
+lift {ℓ₈₀₄ ℓ₈₀₅} : (ℓ₈₀₄ ≤ ℓ₈₀₅) ⊢ Type (ℓ₈₀₄) -> Type (ℓ₈₀₅)   ∎
 ```
 
 Read it as *given `ℓ₂₃₈ ≤ ℓ₂₃₉`, this type*. A constraint that held at every
@@ -426,9 +448,15 @@ thena spine> solve
 thena spine> qed
 the kernel refused it
 1 is not at most 0
+thena spine> :abandon
+abandoned bad
 ```
 
 `:revalidate` says the same thing at any point, without closing the proof.
+
+**A refused `qed` leaves the proof open**, which is the point — nothing is
+thrown away because the kernel said no. `:abandon` is how you put it down, and
+until you do, `:theorem` will tell you there is one in progress.
 
 ### The proof commands
 
@@ -449,6 +477,10 @@ the kernel refused it
 committed to the development:
 
 ```
+thena spine> :theorem two : Nat
+proving two : Nat
+thena spine> try-core ⌜ (\ (x : Nat) -> succ x) zero ⌝
+thena spine> into
 thena core> :show
   let ? two : Nat ≐ (
 ▶   (λ (x : Nat) -> succ x) zero
@@ -470,6 +502,8 @@ thena core> claim ⌜ Nat ⌝
 name for the new hole?
 > k
 claimed k
+thena core> :abandon
+abandoned two
 ```
 
 ---
@@ -534,7 +568,10 @@ amounts to starting over. Handy for scratch work.
 what each case has to prove, and posts one hole per case.
 
 The example needs `Nat`, addition, and congruence of `succ`.
-`examples/tier0.thena` declares the first two; the third is one line.
+`examples/tier0.thena` declares the first two; the third is one line. It
+declares its own `Nat`, so it wants a session that has not already got one.
+
+*From a fresh session.*
 
 ```
 thena spine> :load examples/tier0.thena
@@ -570,7 +607,7 @@ thena spine> :show
   let ? plusZero : ∀ (n : Nat) -> Eq {0} Nat (plus n zero) n ≐ (
     λ (n : Nat) ->
     let ? zeroMethod : Eq {0} Nat (plus zero zero) zero in
-    let ? succMethod : ∀ (x : Nat) -> Eq {0} Nat (plus x zero) x -> Eq {0} Nat (plus (succ x) zero) (succ x) in
+    let ? succMethod : ∀ (_ : Nat) -> Eq {0} Nat (plus _ zero) _ -> Eq {0} Nat (plus (succ _) zero) (succ _) in
 ▶   let ? plusZero1 : Eq {0} Nat (plus n zero) n ≐ (
       elim Nat () (λ (target : Nat) -> Eq {0} Nat (plus target zero) target) (zeroMethod succMethod) () n
     ) in
@@ -648,8 +685,18 @@ thena spine> :matches
 intro
 solve
 regret
+prove
+claim ‹ty›
+assume ‹ty›
+quantify ‹ty›
+intro-binders ‹t›
+intro-binders ‹t›
+enter-binders ‹t›
+enter-binders ‹t›
+spine-arguments ‹h› ‹f› ‹t›
+spine-arguments ‹h› ‹f› ‹t›
 thena spine> prove
-chose 235: intro
+chose 1027: intro
 ```
 
 Three rules matched, so the engine reports which one it took and leaves a
@@ -657,7 +704,7 @@ Three rules matched, so the engine reports which one it took and leaves a
 
 ```
 thena spine> :choices
-235  intro   untried: solve, regret
+1027  intro   untried: solve, regret, prove
 ```
 
 `retry` backtracks to the nearest choice point and takes the next alternative.
@@ -666,13 +713,13 @@ undoes the whole thing:
 
 ```
 thena spine> retry
-retrying 235: solve
-backtracking to 235: regret
+retrying 1027: solve
+backtracking to 1027: regret
 thena spine> :show
 ▶ let ? id : ∀ (A : Type₀) -> A -> A in
   id
 thena spine> :choices
-no choice points
+1027  regret   untried: prove
 ```
 
 Search is meant to be inspectable, not a black box: you can always see what was
@@ -681,10 +728,12 @@ chosen, what is untried, and undo it.
 Choice-point numbers are unique but **not consecutive** — they are drawn from
 the same counter as variable names, so the first one in a session is rarely `1`.
 
-### Elaboration by hint
+### What is on offer here
 
-`prove ‹name›` and `:matches ‹name›` narrow the rule base to rules that can use
-the hint:
+`:matches` lists every rule whose head passes at the focus — the same list the
+engine would search, in the order it would search it. **It takes no argument.**
+A rule that wants one is shown with a placeholder for it, and elaboration's
+clauses are in the list like everything else, because elaboration is search:
 
 ```
 thena spine> :matches
@@ -692,44 +741,40 @@ attack
 try-core ‹t›
 abandon
 eliminate-core ‹t›
-unify-refine-core ‹t›
-apply-core ‹f›
-thena spine> :matches a
-elab-var
+prove
+…
 ```
 
 ### Watching the machine
 
 `:step on` puts the engine in single-step mode, and `:step` advances one
-instruction. This is how you see what a rule actually does:
+instruction. This is how you see what a rule actually does — `attack` is a rule
+whose body is one primitive:
 
 ```
 thena spine> :step on
-thena spine> prove a
+thena spine> attack
 pc
-  0  prove with hint
+  0  prim-attack
 env
-  hint = ‹a›
-stack
   (empty)
-thena spine> :step
-pc
-  0  t = resolve hint
-  1  call try-core t
-  2  prim-solve
-env
-  hint = ‹a›
 stack
   call, 0 instruction(s) to resume
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
 thena spine> :step
 pc
-  0  call try-core t
-  1  prim-solve
+  (empty)
 env
-  t = ⌜a⌝
-  hint = ‹a›
+  (empty)
 stack
   call, 0 instruction(s) to resume
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+  call, 0 instruction(s) to resume (returned)
+thena spine> :run
+thena spine> :step off
 ```
 
 `:run` finishes the current run without stepping; `:step off` leaves the mode.
@@ -746,7 +791,16 @@ The kernel is an independent check. It does not trust the machine.
 | `certify ⌜‹type›⌝` | check the extracted term really has that type |
 | `:revalidate` | re-derive the whole development's well-formedness from scratch |
 
+*From a fresh session.*
+
 ```
+thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
+declared Nat
+thena spine> :goal Nat
+▶ let ? goal : Nat in
+  goal
+thena spine> try-core ⌜ zero ⌝
+thena spine> solve
 thena spine> :extract
 let goal = zero : Nat in goal
 thena spine> certify ⌜ Nat ⌝
@@ -763,6 +817,7 @@ An unfinished proof cannot be extracted, and the message says exactly what is
 still open:
 
 ```
+thena spine> claim "k" ⌜ Nat ⌝
 thena spine> :extract
 stuck: not finished: the hole k is still open, so there is no term yet
 ```
@@ -787,6 +842,8 @@ You can have several proofs open, park them, and come back.
 | `qed` | certify and admit |
 
 ```
+thena spine> :theorem two : Nat
+proving two : Nat
 thena spine> attack
 thena spine> :undo
 ▶ let ? two : Nat in
@@ -798,6 +855,12 @@ suspended two
 thena spine> :proofs
   two : Nat
 ```
+
+**`:undo` goes back one *change*, not one line.** A command that succeeded and
+altered nothing does not have to be undone twice — so it does not take a step of
+its own, and the next `:undo` reaches past it to the last thing that did
+something. A proof boundary clears the history, which is why the second one here
+has nothing left to do.
 
 Declarations made while a proof is suspended are still there when you resume —
 globals are session-wide, proofs are not.
@@ -811,16 +874,23 @@ globals are session-wide, proofs are not.
 `.thena.rules` rule bases. `:load proof`, `:load script` and `:load rules` say
 it out loud instead.
 
-A script is command lines, run in order.
+A script is command lines, run in order, and the output is everything those
+lines would have printed at the prompt.
+
+*From a fresh session.*
 
 ```
 thena spine> :load examples/determinacy-tactics.thena.script
+…
+determinacy : ∀ (t : Term) (t1 : Term) -> Step t t1 -> ∀ (t2 : Term) -> Step t t2 -> Eq {0} Term t1 t2   ∎
 ```
 
 A **proof module** is the surface language: a header, then declarations, laid
 out by indentation. It reports what it declared and nothing else — elaborating
 one declaration prints a dozen lines of unification chatter, and a file of them
 would bury its own output.
+
+*From a fresh session.*
 
 ```
 thena spine> :load examples/tier0.thena
@@ -848,7 +918,11 @@ milestone. It declares the language of chapter 3 of Pierce's *Types and
 Programming Languages* — a seven-constructor term language, a numeric-value
 predicate, and a ten-rule small-step reduction relation —
 
+*From a fresh session.*
+
 ```
+thena spine> :load examples/determinacy-tactics.thena.script
+…
 thena spine> :show Term
 data Term : Type₀ where
   { true : Term
@@ -879,8 +953,12 @@ its 130 case branches are mechanical constructor clashes.
 module in the surface language — 278 lines where the script is 1190 — and it
 proves the same theorem through the same rule base:
 
+*From a fresh session.*
+
 ```
 thena spine> :load examples/determinacy-surface.thena
+module Determinacy
+…
 ```
 
 One generator emits both, and the test suite asserts they arrive at the same
