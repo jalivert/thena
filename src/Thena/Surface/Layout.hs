@@ -1,10 +1,16 @@
 -- | The offside rule for the surface language (MS4 phase 40).
 --
--- **A pass over the token stream, and only the surface language's.** The user,
--- 2026-08-21: /"Surface will be using Haskell's implicit rules for inserting
--- @{@ and @,@ and @}@ but doing all that for a parser for the development
--- calculus is a massive overkill."/ So this module sits between
--- "Thena.Syntax.Lexer" and "Thena.Surface.Parser" and nothing else calls it.
+-- **A pass over the token stream.** The user, 2026-08-21: /"Surface will be
+-- using Haskell's implicit rules for inserting @{@ and @,@ and @}@ but doing
+-- all that for a parser for the development calculus is a massive overkill."/
+-- So it sits between "Thena.Syntax.Lexer" and a parser, and the development
+-- calculus is still not one of its customers.
+--
+-- **Since MS5 phase 75 a rule file is** — his ruling, 2026-09-13: /"the ideal
+-- solution would be to give the rule-base a simple layout too, exactly like
+-- Haskell"/. One pass and one keyword set serve both languages, because layout
+-- is about columns and not about what the tokens mean. The module keeps its
+-- name; see @ms5\/CLOSEOUT.md@ for the note on that.
 --
 -- **Implicit and explicit must agree**, which is his condition, 2026-09-01:
 -- /"if implicit works, explicit has to work too."/ The grammar therefore sees
@@ -17,6 +23,7 @@
 module Thena.Surface.Layout
   ( LayoutError (..)
   , layout
+  , layoutFile
   , layoutKeyword
   ) where
 
@@ -49,6 +56,13 @@ layoutKeyword t = case t of
   -- the instruction language rather than the surface one, which changes nothing
   -- here: layout is about columns, not about what the tokens mean.
   TDo    -> True
+  -- **Added at MS5 phase 75**, and it is what gives a rule body the offside
+  -- rule: @then@ opens the block of instructions, which closes when a line
+  -- comes back to the column a declaration starts in. The keyword set is shared
+  -- by every language rather than being one set per grammar — layout is about
+  -- columns, not about what the tokens mean, and @then@ is a token only a rule
+  -- file writes, so nothing else can see it.
+  TThen  -> True
   _      -> False
 
 -- | Tokens that close an implicit block by appearing.
@@ -89,6 +103,33 @@ data Item
 -- makes the two spellings one language rather than two.
 layout :: [Located Token] -> Either LayoutError [Located Token]
 layout = run [] . mark
+
+-- | 'layout', with the whole stream wrapped in one block (MS5 phase 75).
+--
+-- **A rule file is one block and nothing in the file opens it** — its header is
+-- read textually and blanked before the lexer runs, so there is no @where@ token
+-- for 'mark' to hang a block on. Opening one around the stream is what supplies
+-- it, and everything else follows from the ordinary rules: a declaration at the
+-- block's column gets a @;@, an indented line is a continuation, and the end of
+-- input closes the block.
+--
+-- **The column is the first token's, which is Haskell's rule and not "column
+-- 1"** — his /"exactly like Haskell"/, 2026-09-13. Every file anyone writes
+-- starts its declarations in column 1 and is unaffected; what changes is that
+-- the invariant is now /every declaration at the same column as the first/
+-- rather than /every declaration at column 1/, which is strictly stronger,
+-- since a second declaration at a different column is a parse error either way
+-- and a whole file written indented is no longer a special case to refuse.
+--
+-- **It is also what makes an empty rule body an empty BLOCK.** Without an
+-- enclosing block, @then@ at the end of a line opens one at the /next/ token's
+-- column — the next declaration — and swallows the rest of the file. With a
+-- block around it the Report's own rule fires instead: a block that is not
+-- indented past the one around it is @{ }@, and the line is looked at again.
+-- Two clauses of the shipped base have an empty body, so this is not a corner.
+layoutFile :: [Located Token] -> Either LayoutError [Located Token]
+layoutFile []                       = Right [at endOfInput TLBrace, at endOfInput TRBrace]
+layoutFile ts@(Located p@(Pos _ c) _ : _) = run [] (Open p c : mark ts)
 
 -- | The Report's two markers.
 --
@@ -141,6 +182,23 @@ run cs is = case (is, cs) of
     -- trailing separator. Haskell's grammar tolerates that; ours does not, and
     -- the one-item lookahead is cheaper than a grammar that accepts a list
     -- ending in @;@.
+    -- **A line that begins with an explicit @;@ is a continuation, whatever
+    -- its column** (MS5 phase 75). The offside rule must not fire for it: the
+    -- separator is already written, so there is nothing to insert, and the line
+    -- is plainly part of the block whether it is indented past the block's
+    -- column or — as every rule file written before this phase does it —
+    -- short of it:
+    --
+    -- > then n = fresh-name "refined"
+    -- >    ; x = define n t
+    --
+    -- Without this, @;@ at column 4 against a block opened at column 8 is
+    -- offside, the block closes, and the @;@ is a stray token. That is the
+    -- whole of the shipped base, so the choice is between reformatting every
+    -- rule ever written and saying what a leading @;@ means. **It is the same
+    -- kind of departure 'closesBlock' already is**, and the same justification:
+    -- the Report defers to @parse-error(t)@ where we name the token.
+    | semiNext ts -> run (Implicit m : ms) ts
     | n == m, closingNext ts -> run (Implicit m : ms) ts
     | n == m    -> (at p TSemi :) <$> run (Implicit m : ms) ts
     -- **A closing token that is ALSO offside closes the blocks it is offside
@@ -244,6 +302,12 @@ run cs is = case (is, cs) of
 closingNext :: [Item] -> Bool
 closingNext (Tok (Located _ k) : _) = closesBlock k
 closingNext _                       = False
+
+-- | Does this line begin with an explicit separator? See the @Line@ case that
+-- uses it (MS5 phase 75).
+semiNext :: [Item] -> Bool
+semiNext (Tok (Located _ TSemi) : _) = True
+semiNext _                           = False
 
 at :: Pos -> Token -> Located Token
 at = Located

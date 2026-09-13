@@ -23,6 +23,7 @@ import Test.Tasty.QuickCheck
 import Thena.Driver (parseCore, parseSurfaceModule, parseSurfaceTerm)
 import Thena.Syntax.Concrete (Raw (..))
 import Thena.Syntax.Lexer (lexTokens)
+import Thena.Surface.Layout (layout)
 import Thena.Instral.Concrete
   ( RawInstr (..)
   , RawOp (..)
@@ -778,8 +779,13 @@ blockTests =
       _                    -> Nothing
 
     viaRule :: String -> Maybe [RawInstr]
+    -- **Laid out first** (MS5 phase 75): @then@ opens a block now, so a rule
+    -- written on one line gets its braces from the offside rule exactly as a
+    -- rule file does. The surface side has been laid out since MS4 phase 40.
     viaRule body = case lexTokens ("rule r :- when focus-is-hole then " ++ body) of
       Left _   -> Nothing
-      Right ts -> case parseRule ts of
+      Right ts0 -> case layout ts0 of
+       Left _  -> Nothing
+       Right ts -> case parseRule ts of
         Right (RawRule _ _ _ is) -> Just is
         Left _                   -> Nothing

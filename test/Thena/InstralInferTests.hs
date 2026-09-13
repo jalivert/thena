@@ -489,12 +489,27 @@ functions =
     , testCase "does not get swallowed by the declaration above it" $
         said "rule go :- then m = twice \"b\" ; say m" @?= Just "bb"
 
-      -- …and the rule that buys it: an indented declaration is a parse error
-      -- now, where it was accepted (and misparsed) before.
-    , testCase "and an indented declaration is refused" $
-        case loadRaw "rule base i where\n  rule f :- then prove\n" of
+      -- …and the rule that buys it. **MS5 phase 75 restated it as Haskell's**:
+      -- the file is one layout block whose column is the FIRST declaration's, so
+      -- what is refused is a declaration that does not line up with the others.
+      -- A whole file written indented is consistent and therefore fine — it is
+      -- the disagreement that is the mistake, and that is what used to be
+      -- misparsed in silence.
+    , testCase "and a declaration that does not line up is refused" $
+        case loadRaw "rule base i where\nrule f :- then prove\n  rule g :- then prove\n" of
           RuleFileRefused _ (RuleSyntaxError _) -> pure ()
           other -> assertFailure ("expected a syntax error, got " ++ show other)
+
+    , testCase "…in either direction" $
+        case loadRaw "rule base i where\n  rule f :- then prove\nrule g :- then prove\n" of
+          RuleFileRefused _ (RuleSyntaxError _) -> pure ()
+          other -> assertFailure ("expected a syntax error, got " ++ show other)
+
+      -- **A file indented as a whole is a file**, which is the half that is new.
+    , testCase "…but a file that lines up at another column loads" $
+        case loadRaw "rule base i where\n  rule f :- then prove\n  rule g :- then prove\n" of
+          BasesLoaded _ -> pure ()
+          other -> assertFailure ("expected a load, got " ++ show other)
 
       -- **It is not offered as a tactic.** A function has no head, and a
       -- headless rule matches everywhere — so if functions were kept with the

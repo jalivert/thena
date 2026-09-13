@@ -87,7 +87,6 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   where   { Located _ TWhere }
   rule    { Located _ TRule }
   language { Located _ TLanguage }
-  declsep { Located _ TDeclSep }
   when    { Located _ TWhen }
   then    { Located _ TThen }
   ':-'    { Located _ TNeck }
@@ -177,23 +176,39 @@ Constructor :: { RawConstructor }
 -- by the user 2026-08-25 — so the file is parsed whole rather than split, and
 -- what ends a rule is the next 'rule' keyword or the end of input. Nothing in
 -- 'Instr' can begin with 'rule', so no terminator is needed.
+-- **The file is one layout block** (MS5 phase 75). A declaration begins in
+-- column 1 — his ruling, 2026-09-12 — and that is now said by the offside rule
+-- rather than by a separator the driver inserts: "Thena.Surface.Layout" is run
+-- over the token stream with a block already open at column 1, so a declaration
+-- at that column gets a @;@ and anything indented past it is a continuation.
+--
+-- **@separated@ and @TDeclSep@ are gone with it**, and so is the laxity they
+-- left: a line beginning @;@ in column 1 used to be accepted in silence, and is
+-- now what it looks like, an empty declaration.
 RuleFile :: { [RawDecl] }
-  : Decls                                  { reverse $1 }
+  : '{' Decls '}'                          { reverse $2 }
 
--- **A declaration begins in column 1** — his ruling, 2026-09-12. The separator
--- is not lexed; "Thena.Driver" inserts one before every token that starts a
--- line's first column, which is what gives a keyword-less function declaration a
--- boundary. Without it @rule f :- then say \"hi\"@ followed by @g x = …@ parses
--- with @g@ as another operand of @say@ — silently, because Happy shifts.
 Decls :: { [RawDecl] }
   :                                        { [] }
-  | Decls declsep Rule                     { DeclRule $3 : $1 }
-  | Decls declsep Signature                { DeclSignature $3 : $1 }
-  | Decls declsep Function                 { DeclFunction $3 : $1 }
-  | Decls declsep Language                 { DeclLanguage $3 : $1 }
+  | Decl                                   { [$1] }
+  | Decls ';' Decl                         { $3 : $1 }
+
+Decl :: { RawDecl }
+  : Rule                                   { DeclRule $1 }
+  | Signature                              { DeclSignature $1 }
+  | Function                               { DeclFunction $1 }
+  | Language                               { DeclLanguage $1 }
 
 Rule :: { RawRule }
-  : rule ident Params ':-' Tests then Body   { RawRule $2 (reverse $3) $5 (reverse $7) }
+  : rule ident Params ':-' Tests then Block  { RawRule $2 (reverse $3) $5 (reverse $7) }
+
+-- **A body is a block** (MS5 phase 75). @then@ is a layout keyword, so
+-- "Thena.Surface.Layout" inserts these braces where the offside rule says they
+-- belong and a file that writes them itself passes through untouched — the same
+-- bargain the surface language struck at MS4 phase 40, and his condition:
+-- /"if implicit works, explicit has to work too."/
+Block :: { [RawInstr] }
+  : '{' Body '}'                           { $2 }
 
 -- **A signature is its own declaration** (MS5 phase 67, his choice) — one line,
 -- anywhere in the file, naming a callable and giving its whole type including

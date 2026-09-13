@@ -657,7 +657,6 @@ describe t = case t of
   TLambda     -> "λ"
   TLanguage   -> "language"
   -- Never lexed; "Thena.Driver" inserts it at a rule file's column 1.
-  TDeclSep    -> "the start of a declaration"
   TChar c     -> show c
   TLBracket   -> "["
   TRBracket   -> "]"

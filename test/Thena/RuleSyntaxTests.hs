@@ -43,7 +43,8 @@ import Thena.Rules
   , validate
   )
 import Thena.Standard (expectedStandard, standardBases)
-import Thena.Syntax.Lexer (lexTokens)
+import Thena.Syntax.Lexer (Located, Token, lexTokens)
+import Thena.Surface.Layout (layout)
 import Thena.Syntax.Parser (parseRule)
 
 tests :: TestTree
@@ -69,9 +70,18 @@ tests =
 -- else, DECIDED by the user 2026-08-25) and no file to load one from until
 -- phase 22, so the composition lives here and moves to the loader when there
 -- is one.
+-- | Lex, then lay out — which is what a rule file gets (MS5 phase 75), so a
+-- rule written on one line with no braces is the same program either way.
+laidOut :: String -> Either String [Located Token]
+laidOut src = case lexTokens src of
+  Left e   -> Left ("lex: " ++ show e)
+  Right ts -> case layout ts of
+    Left e    -> Left ("layout: " ++ show e)
+    Right ts' -> Right ts'
+
 readRule :: String -> Either String Rule
-readRule src = case lexTokens src of
-  Left e -> Left ("lex: " ++ show e)
+readRule src = case laidOut src of
+  Left e -> Left e
   Right ts -> case parseRule ts of
     Left e -> Left ("parse: " ++ show e)
     Right raw -> case resolveRule [] raw of
@@ -566,7 +576,7 @@ regions =
 
     headErrs src = readErrors ("rule r :- when " ++ src ++ " then prim-solve")
 
-    readErrors src = case lexTokens src of
+    readErrors src = case laidOut src of
       Left _ -> Nothing
       Right ts -> case parseRule ts of
         Left _ -> Nothing
@@ -679,7 +689,7 @@ mistakes =
       -- back as @DeclarationInBody@, which is why 'validate''s own check has
       -- been reachable only for a rule built in Haskell since before that.
       testCase "a declaration in a body" $
-        case lexTokens "rule r :- when focus-is-hole then data" of
+        case laidOut "rule r :- when focus-is-hole then data" of
           Left _  -> pure ()
           Right ts -> case parseRule ts of
             Left _  -> pure ()
@@ -700,7 +710,7 @@ mistakes =
         Just es -> es @?= expected
         Nothing -> assertFailure ("was accepted: " ++ src)
 
-    readRuleErrors src = case lexTokens src of
+    readRuleErrors src = case laidOut src of
       Left _ -> Nothing
       Right ts -> case parseRule ts of
         Left _ -> Nothing

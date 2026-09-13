@@ -231,14 +231,13 @@ tokensReadBack =
         , fmap (map unlocated) (lexTokens (describe t)) /= Right [t]
         ] @?= []
 
-      -- **Five are excluded and each for its own reason**, none of them a
-      -- defect: @TDeclSep@ is inserted by the driver and never lexed, so it is
-      -- described in prose rather than as a spelling; and the four region
-      -- tokens only exist inside a scan that is stateful, so one of them alone
-      -- is not a token stream.
-    , testCase "and the five that cannot, described in prose or mid-scan" $
+      -- **Four are excluded and all for one reason**, which is not a defect:
+      -- the region tokens only exist inside a scan that is stateful, so one of
+      -- them alone is not a token stream. @TDeclSep@ was the fifth until MS5
+      -- phase 75 deleted it along with the pass that inserted it.
+    , testCase "and the four that cannot, described mid-scan" $
         map describe excluded
-          @?= [ "the start of a declaration", "s`", "`", "raw", "${", "}" ]
+          @?= [ "s`", "`", "raw", "${", "}" ]
     ]
   where
     unlocated (Located _ t) = t
@@ -255,4 +254,4 @@ tokensReadBack =
       ]
 
     excluded =
-      [ TDeclSep, TTagOpen "s", TTagClose, TRaw "raw", TEscapeOpen, TEscapeClose ]
+      [ TTagOpen "s", TTagClose, TRaw "raw", TEscapeOpen, TEscapeClose ]

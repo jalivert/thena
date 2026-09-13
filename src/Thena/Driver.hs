@@ -157,7 +157,7 @@ import Thena.Surface.Concrete
   , SurfaceModule (..)
   , PairingError (..)
   )
-import Thena.Surface.Layout (layout)
+import Thena.Surface.Layout (layout, layoutFile)
 import Thena.Surface.Zipper (rootedAt)
 import qualified Thena.Surface.Parser as Surface
 import Thena.Syntax.Concrete (Raw (..))
@@ -168,7 +168,7 @@ import Thena.Instral.Concrete
   , RawOp (..)
   , RawOperand (..)
   )
-import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..), lexTokens)
+import Thena.Syntax.Lexer (Located (..), Token (..), lexTokens)
 import Thena.Syntax.Parser
   ( parseData
   , parseEquation
@@ -1882,7 +1882,14 @@ readRuleBase path src = case baseHead ls of
       -- then names the line the user is looking at.
       let rest = replicate used "" ++ drop used ls
       ts   <- mapLeft RuleSyntaxError (tokensOf (unlines rest))
-      raws <- mapLeft (RuleSyntaxError . ParseFailed) (parseRules (separated ts))
+      -- **The whole file is one layout block, opened at column 1** (MS5 phase
+      -- 75). Declarations are separated by the offside rule rather than by a
+      -- pass of their own — @separated@ and @TDeclSep@ are deleted — and a rule
+      -- body is a block that @then@ opens. A file written with explicit braces
+      -- and semicolons passes through untouched, which is his standing
+      -- condition that the two spellings be one language.
+      ts'  <- mapLeft (RuleSyntaxError . LayoutFailed) (layoutFile ts)
+      raws <- mapLeft (RuleSyntaxError . ParseFailed) (parseRules ts')
       (sigs, langs, fns, rs) <- resolveAll raws
       Right (ruleBase nm desc path sigs langs fns rs)
   where
@@ -1906,49 +1913,6 @@ parseInstralType ls src = do
     -- same refusal it gets as a parameter (MS5 phase 67).
     Right Nothing  -> Left (LineIllFormed [UnitInsideAType "a query"])
     Right (Just u) -> Right u
-
--- | Mark where each declaration begins (MS5 phase 68a).
---
--- **A declaration begins in column 1** — his ruling, 2026-09-12, and it is what
--- makes a keyword-less declaration possible: @rule@ and @language@ announce
--- themselves, a plain word does not, so nothing ended the declaration before a
--- function or — since MS5 phase 74 — a signature. A 'Thena.Syntax.Lexer.TDeclSep' is inserted before
--- every token that starts in the first column, and the grammar requires one in
--- front of each declaration.
---
--- **It is done here and not in the lexer** because one lexer serves every
--- language (@discussion\/the-five-languages.md@ §0b) and only a rule file wants
--- this. It is the same shape as 'Thena.Surface.Layout' \— a pass between the
--- lexer and the grammar \— at a fraction of the size, because there is one rule
--- and no nesting.
---
--- **It costs nothing to what already exists**: every one of the shipped base's
--- 39 declarations already begins in column 1 and every continuation line is
--- already indented. A file that indented a @rule@ is now a parse error, which is
--- the point.
-separated :: [Located Token] -> [Located Token]
-separated = concatMap one
-  where
-    one t@(Located p w)
-      | firstColumn p && begins w = [Located p TDeclSep, t]
-      | otherwise                 = [t]
-
-    firstColumn (Pos _ c) = c == 1
-
-    -- **Only before a token that could begin a declaration** — the two
-    -- declaration words and a name, which is what a function /and/, since MS5
-    -- phase 74, a signature starts with.
-    -- Without this a language's closing @}@ in the first column would be read as
-    -- the start of something, which is what the first version did.
-    --
-    -- **The laxity it leaves is stated rather than hidden**: a continuation line
-    -- beginning with @;@ in the first column is accepted, because the rule is
-    -- about what /starts/ a declaration and a @;@ cannot.
-    begins w = case w of
-      TRule      -> True
-      TLanguage  -> True
-      TIdent _   -> True
-      _          -> False
 
 -- | Resolve every declaration, then validate every rule. Every error, not the
 -- first — 'validate'\'s reason.
