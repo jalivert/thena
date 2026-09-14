@@ -809,7 +809,7 @@ blockTests =
     -- **Laid out first** (MS5 phase 75): @then@ opens a block now, so a rule
     -- written on one line gets its braces from the offside rule exactly as a
     -- rule file does. The surface side has been laid out since MS4 phase 40.
-    viaRule body = case lexTokens ("rule r :- when focus-is-hole then " ++ body) of
+    viaRule body = case lexTokens ("rule r :- when focus-is-hole do " ++ body) of
       Left _   -> Nothing
       Right ts0 -> case layout ts0 of
        Left _  -> Nothing

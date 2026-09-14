@@ -143,7 +143,6 @@ tokens :-
   -- token after the name, so it needs no word of its own. @ms5\/CLOSEOUT.md@ 11.
   "language"    { keyword TLanguage }
   "when"        { keyword TWhen }
-  "then"        { keyword TThen }
   ":-"          { keyword TNeck }
   $digit+       { \p s -> Located (posOf p) (TNumber (read s)) }
   @string       { \p s -> Located (posOf p) (TString (unescape s)) }
@@ -196,7 +195,6 @@ data Token
   | TRule
   | TLanguage
   | TWhen
-  | TThen
   | TNeck
   | TNumber Int
   | TString String

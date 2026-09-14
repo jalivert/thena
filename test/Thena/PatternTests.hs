@@ -112,7 +112,7 @@ readParams src = case lexTokens text of
         Left es -> Left ("resolve: " ++ show es)
         Right r -> Right (ruleParams r)
   where
-    text = "rule r " ++ src ++ " :- then solve"
+    text = "rule r " ++ src ++ " :- do solve"
 
 spelling :: TestTree
 spelling =
@@ -162,31 +162,31 @@ destructuring =
   testGroup
     "on the left of a binding"
     [ testCase "a compound pattern parses where a name did" $
-        readBindings "rule r :- then (x, y) = f ; say x"
+        readBindings "rule r :- do (x, y) = f ; say x"
           @?= Right [PPair (PVar "x") (PVar "y"), PWild]
 
     , testCase "…and a list one" $
-        readBindings "rule r :- then [a, ...rest] = f ; say a"
+        readBindings "rule r :- do [a, ...rest] = f ; say a"
           @?= Right [PList [PVar "a"] (Just (PVar "rest")), PWild]
 
       -- A plain name is the pattern that binds it, so nothing that could be
       -- written before means anything different.
     , testCase "a plain name is still a plain name" $
-        readBindings "rule r :- then x = f" @?= Right [PVar "x"]
+        readBindings "rule r :- do x = f" @?= Right [PVar "x"]
 
       -- @_ = ‹op›@ is run-and-discard, and it is not a special case: @_@ is a
       -- pattern like any other and 'PWild' binds nothing.
     , testCase "a wildcard binding is writable" $
-        readBindings "rule r :- then _ = f" @?= Right [PWild]
+        readBindings "rule r :- do _ = f" @?= Right [PWild]
 
       -- **The scope walk must see what the pattern binds**, or a later line
       -- naming one of them is refused at load. This is the case that catches
       -- 'Thena.Rules.resolveBlock' forgetting to thread them.
     , testCase "what a compound pattern binds is in scope below it" $
-        loadsCleanly "rule r :- then (x, y) = f ; m = concat x y ; say m"
+        loadsCleanly "rule r :- do (x, y) = f ; m = concat x y ; say m"
 
     , testCase "…and a name it does NOT bind is still refused" $
-        refuses "rule r :- then (x, y) = f ; say z" "UnboundInRule"
+        refuses "rule r :- do (x, y) = f ; say z" "UnboundInRule"
     ]
   where
     readBindings src = map leftOf <$> readBody src
@@ -320,9 +320,9 @@ refusals =
     , -- Patterns are linear. Matching a value against another value is a
       -- different feature and nothing has asked for it.
       testCase "the same name twice in one clause" $
-        expectRefusal' "rule r x x :- then solve" "RepeatedInPattern"
+        expectRefusal' "rule r x x :- do solve" "RepeatedInPattern"
     , testCase "…including through a nesting" $
-        expectRefusal' "rule r (a, b) [a] :- then solve" "RepeatedInPattern"
+        expectRefusal' "rule r (a, b) [a] :- do solve" "RepeatedInPattern"
     ]
   where
     expectRefusal src want = case readPattern src of

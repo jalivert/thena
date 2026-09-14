@@ -75,7 +75,7 @@ reserved:
 
 **`rule`, `when` and `then` are keywords** and cannot be used as names. Op words
 are not: `solve`, `type`, `goal` and the rest stay perfectly good identifiers,
-which is why a rule is written `rule ‹name› :- when … then …` and not with the
+which is why a rule is written `rule ‹name› :- when … do …` and not with the
 op words reserved.
 
 ---
@@ -335,8 +335,8 @@ first always won. A test may now take operands, and it is written in
 parentheses:
 
 ```
-rule pick s :- when focus-is-hole (surface-is-name s) then say "a name"
-rule pick s :- when focus-is-hole                     then say "not a name"
+rule pick s :- when focus-is-hole (surface-is-name s) do say "a name"
+rule pick s :- when focus-is-hole                     do say "not a name"
 ```
 
 ```
@@ -380,7 +380,7 @@ rule fill t :- when focus-is-hole
   then n = fresh-name "refined" ; x = define n t
      ; s = typeof x ; g = goal ; unify-into s g ; prim-try x
 
-rule unify-refine-core t :- when focus-is-hole then fill t ; solve
+rule unify-refine-core t :- when focus-is-hole do fill t ; solve
 ```
 
 `fill ⌜ t ⌝` parks `t` in a `=`-binding, unifies its type with the goal's
@@ -422,7 +422,7 @@ through.
 rule elaborate t :- when focus-is-hole (surface-is-name t)
   then w = surface-name t ; x = resolve-name w ; fill t ; solve
 
-rule elaborate t :- when focus-is-hole (surface-is-placeholder t) then
+rule elaborate t :- when focus-is-hole (surface-is-placeholder t) do
 ```
 
 So `:step` through an elaboration shows the clause, not one opaque instruction:
@@ -653,7 +653,7 @@ already gets. Nothing is annotated; a rule's signature comes from its head
 predicates and from the ops its body uses.
 
 ```
-rule elaborate t :- when focus-is-hole (surface-is-name t) then …
+rule elaborate t :- when focus-is-hole (surface-is-name t) do …
 ```
 
 `surface-is-name` is what makes `t` a `Surface`, so `elaborate : Surface -> ()`.
@@ -767,7 +767,7 @@ a signature, **`` Tm`…` `` as the only way to make one**, and a one-way coerci
 asSurface : Tm -> Surface
 asSurface t = surface-of t
 
-rule go :- then t = Tm`(x y)` ; s = asSurface t ; …
+rule go :- do t = Tm`(x y)` ; s = asSurface t ; …
 ```
 
 A production builds its constructor applied to what its slots parsed, so
@@ -802,7 +802,7 @@ bad.thena.rules: in the grammar of String: String is one of instral's own types,
 onTwice : (String -> String) -> String -> String
 onTwice f x = f (f x)
 
-rule go :- then d = \ s -> concat s s
+rule go :- do d = \ s -> concat s s
      ; m = onTwice d "a"                 -- aaaa
      ; say m
 ```
@@ -841,7 +841,7 @@ affected, but rule names are.
 rule file says where a declaration stops by indentation:
 
 ```
-rule f :- then say "hi"
+rule f :- do say "hi"
      ; prove              -- indented: still part of the rule above
 g x = concat x x          -- column 1: a new declaration
 ```
@@ -885,8 +885,8 @@ too. It is an ordinary identifier again.
 
 ```
 spine-arguments : Core -> Core -> Surface -> ()
-rule spine-arguments h f t :- when focus-is-component (surface-is-app t) then …
-rule spine-arguments h f t :- when focus-is-component (surface-is-name t) then …
+rule spine-arguments h f t :- when focus-is-component (surface-is-app t) do …
+rule spine-arguments h f t :- when focus-is-component (surface-is-name t) do …
 ```
 
 **The arity is the arrow chain's.** That signature is about `spine-arguments` at
@@ -901,9 +901,9 @@ leaves nothing to bind.
 signature a rule is inferred at a single type, so this is refused:
 
 ```
-rule ignore x :- then say "ignored"
-rule usesName :- then n = fresh-name "h" ; ignore n     -- a Name
-rule usesTerm :- then h = here ; ignore h               -- a Core
+rule ignore x :- do say "ignored"
+rule usesName :- do n = fresh-name "h" ; ignore n     -- a Name
+rule usesTerm :- do h = here ; ignore h               -- a Core
 ```
 
 Adding `ignore : a -> ()` makes both uses fine, because each use gets
@@ -1093,7 +1093,7 @@ body will go wrong. That is allowed on purpose.
 *Decided 2026-09-12.*
 
 ```
-rule join xs :- when (list-is-empty xs) then return ""
+rule join xs :- when (list-is-empty xs) do return ""
 rule join xs :- when (list-is-cons xs)
   then h = list-head xs ; c = option-value h ; t = list-tail xs
      ; r = join t ; s = concat c r ; return s
@@ -1148,8 +1148,8 @@ can carry a value and hand it back; computing with it comes with the type system
 *Decided 2026-09-12.*
 
 ```
-rule twice t :- then s = concat t t ; return s
-rule shout t :- then m = twice (twice t) ; say m
+rule twice t :- do s = concat t t ; return s
+rule shout t :- do m = twice (twice t) ; say m
 ```
 
 A rule hands a value back with `return`, and a caller that wrote `x = ‹rule›`
@@ -1246,7 +1246,7 @@ A rule file is one layout block and a rule body is a block that `then` opens, so
 a body can be written as indented lines with no separators at all:
 
 ```
-rule demo :- when focus-is-hole then
+rule demo :- when focus-is-hole do
   m = shout "hi"
   say m
 ```
@@ -1345,13 +1345,13 @@ types is fine with no annotation:
 ```
 idf x = do { return x }
 
-rule go :- then h = here ; a = idf h ; n = fresh-name "x" ; b = idf n
+rule go :- do h = here ; a = idf h ; n = fresh-name "x" ; b = idf n
 ```
 
 **A local is not generalised.** The same shape one level in is refused:
 
 ```
-rule go :- then
+rule go :- do
   g = \ z -> do { return z }
   h = here ; a = g h
   n = fresh-name "x" ; b = g n     -- wanted Core, got Name
@@ -1376,7 +1376,7 @@ type.**
 spelling a top-level signature uses, one level in:
 
 ```
-rule go :- then
+rule go :- do
   g : a -> a
   g = \ z -> do { return z }
   h = here ; a = g h

@@ -2,28 +2,28 @@
 
 rule base standard where
 
-rule attack :- when focus-is-hole then prim-attack
+rule attack :- when focus-is-hole do prim-attack
 
-rule try-core t :- when focus-is-hole then prim-try t
+rule try-core t :- when focus-is-hole do prim-try t
 
-rule abandon :- when focus-is-hole then prim-abandon
+rule abandon :- when focus-is-hole do prim-abandon
 
-rule intro :- when focus-is-guess goal-type-is-pi then prim-lambda
+rule intro :- when focus-is-guess goal-type-is-pi do prim-lambda
 
-rule intro :- when focus-is-guess goal-type-is-let then prim-let
+rule intro :- when focus-is-guess goal-type-is-let do prim-let
 
-rule solve :- when focus-is-guess then prim-solve
+rule solve :- when focus-is-guess do prim-solve
 
-rule regret :- when focus-is-guess then prim-regret
+rule regret :- when focus-is-guess do prim-regret
 
-rule eliminate-core t :- when focus-is-hole then prim-eliminate t
+rule eliminate-core t :- when focus-is-hole do prim-eliminate t
 
-rule prove :- when focus-is-hole then prim-prove
+rule prove :- when focus-is-hole do prim-prove
 
-rule prove :- when focus-is-guess then prim-prove
+rule prove :- when focus-is-guess do prim-prove
 
 rule fill t :- when focus-is-hole
-  then n = fresh-name "refined"
+  do n = fresh-name "refined"
      ; x = define n t
      ; s = typeof x
      ; g = goal
@@ -31,11 +31,11 @@ rule fill t :- when focus-is-hole
      ; prim-try x
 
 rule unify-refine-core t :- when focus-is-hole
-  then fill t
+  do fill t
      ; solve
 
 rule apply-core f :- when focus-is-hole
-  then s = prim-apply f
+  do s = prim-apply f
      ; unify-refine-core s
 
 -- --------------------------------------------------------------------------
@@ -69,21 +69,21 @@ rule apply-core f :- when focus-is-hole
 -- --------------------------------------------------------------------------
 
 rule claim ty :-
-  then n = ask "name for the new hole?" name
+  do n = ask "name for the new hole?" name
      ; claim n ty
      ; t = name-text n
      ; m = concat "claimed " t
      ; say m
 
 rule assume ty :-
-  then n = ask "name for the assumption?" name
+  do n = ask "name for the assumption?" name
      ; assume n ty
      ; t = name-text n
      ; m = concat "assumed " t
      ; say m
 
 rule quantify ty :-
-  then n = ask "name for the ∀-binder?" name
+  do n = ask "name for the ∀-binder?" name
      ; quantify n ty
      ; t = name-text n
      ; m = concat "quantified " t
@@ -103,28 +103,28 @@ rule quantify ty :-
 
 -- E⟦x⟧ = FILL x ; SOLVE — Brady's variable case.
 rule elaborate t :- when focus-is-hole (surface-is-name t)
-  then w = surface-name t
+  do w = surface-name t
      ; x = resolve-name w
      ; fill x
      ; solve
 
 -- E⟦Typeₙ⟧ — the level is written, so the term is too.
 rule elaborate t :- when focus-is-hole (surface-is-universe t)
-  then u = surface-universe t
+  do u = surface-universe t
      ; fill u
      ; solve
 
 -- E⟦Type⟧ — typical ambiguity: the level is a fresh meta, unification decides.
 rule elaborate t :- when focus-is-hole (surface-is-universe-open t)
-  then u = fresh-universe
+  do u = fresh-universe
      ; fill u
      ; solve
 
 -- E⟦_⟧ — "those elaborate just by not elaborating". The hole is already there.
-rule elaborate t :- when focus-is-hole (surface-is-placeholder t) then
+rule elaborate t :- when focus-is-hole (surface-is-placeholder t) do
 
 -- E⟦?foo⟧ — a named placeholder is a real hole, which the focus already is.
-rule elaborate t :- when focus-is-hole (surface-is-hole t) then
+rule elaborate t :- when focus-is-hole (surface-is-hole t) do
 
 -- E⟦(elim D … t) ⃗a⟧ — an elimination applied to something more, which is how a
 -- proof discharges the equation an unfriendly index carries:
@@ -134,7 +134,7 @@ rule elaborate t :- when focus-is-hole (surface-is-hole t) then
 -- telescope. elim-spine folds the extra arguments into the eliminator's own
 -- spine, so what is elaborated is one name-headed application.
 rule elaborate t :- when focus-is-hole (surface-is-app t) (app-head-is-elim t)
-  then a = elim-spine t
+  do a = elim-spine t
      ; call elaborate a
 
 -- E⟦x ⃗a⟧ — Brady's OTHER application rule, taken whenever the head is a name.
@@ -151,7 +151,7 @@ rule elaborate t :- when focus-is-hole (surface-is-app t) (app-head-is-elim t)
 -- application of a head with recorded plicities — is an ordinary binary
 -- application.
 rule elaborate t :- when focus-is-hole (surface-is-app t) (app-head-is-name t)
-  then h  = here
+  do h  = here
      ; e  = expand-implicits t
      ; hd = app-head e
      ; w  = surface-name hd
@@ -162,7 +162,7 @@ rule elaborate t :- when focus-is-hole (surface-is-app t) (app-head-is-name t)
 -- CLAIM (B : Type); CLAIM (f : A -> B); CLAIM (s : A); FILL (f s); FOCUS f;
 -- E⟦e⟧; FOCUS s; E⟦a⟧; SOLVE.
 rule elaborate t :- when focus-is-hole (surface-is-app t) (app-args-are-explicit t)
-  then h  = here
+  do h  = here
      ; dn = fresh-name "A"
      ; u1 = fresh-universe
      ; d  = claim dn u1
@@ -193,7 +193,7 @@ rule elaborate t :- when focus-is-hole (surface-is-app t) (app-args-are-explicit
 -- λs and put an extra let round each — a different proof term, which is why the
 -- run is emitted here rather than by peeling in this clause.
 rule elaborate t :- when focus-is-hole (surface-is-lambda t)
-  then h = here
+  do h = here
      ; prim-attack
      ; call intro-binders t
      ; into
@@ -209,7 +209,7 @@ rule elaborate t :- when focus-is-hole (surface-is-lambda t)
 -- scope. The domain is elaborated before the body — Brady's order, and not a
 -- preference: the other way round the body's FILL solves the domain hole.
 rule elaborate t :- when focus-is-hole (surface-is-forall t)
-  then x  = forall-name t
+  do x  = forall-name t
      ; ty = forall-domain t
      ; tl = forall-tail t
      ; h  = here
@@ -231,7 +231,7 @@ rule elaborate t :- when focus-is-hole (surface-is-forall t)
 -- `apply-to`. Not the ∀ case with an anonymous binder: an arrow's codomain
 -- cannot mention the domain, so there is nothing to put in Γ and no attack.
 rule elaborate t :- when focus-is-hole (surface-is-arrow t)
-  then h  = here
+  do h  = here
      ; dn = fresh-name "A"
      ; u1 = fresh-universe
      ; d  = claim dn u1
@@ -255,7 +255,7 @@ rule elaborate t :- when focus-is-hole (surface-is-arrow t)
 -- Two clauses, because the annotation is optional and the head language has no
 -- negation. With one, X is left for the value's own FILL to unify against.
 rule elaborate t :- when focus-is-hole (let-is-annotated t)
-  then h  = here
+  do h  = here
      ; xn = fresh-name "X"
      ; u  = fresh-universe
      ; x  = claim xn u
@@ -274,7 +274,7 @@ rule elaborate t :- when focus-is-hole (let-is-annotated t)
      ; call elaborate b
 
 rule elaborate t :- when focus-is-hole (let-is-bare t)
-  then h  = here
+  do h  = here
      ; xn = fresh-name "X"
      ; u  = fresh-universe
      ; x  = claim xn u
@@ -292,7 +292,7 @@ rule elaborate t :- when focus-is-hole (let-is-bare t)
 -- elaborate e at the same hole. An ascription does not build a term; it narrows
 -- the one the goal was already asking for, so there is no fill and no solve.
 rule elaborate t :- when focus-is-hole (surface-is-ascription t)
-  then h  = here
+  do h  = here
      ; xn = fresh-name "X"
      ; u  = fresh-universe
      ; x  = claim xn u
@@ -311,33 +311,33 @@ rule elaborate t :- when focus-is-hole (surface-is-ascription t)
 -- the same term and this clause is the rewriting of one into the other. There
 -- is nothing here about eliminations that is not about applications.
 rule elaborate t :- when focus-is-hole (surface-is-elim t)
-  then a = elim-spine t
+  do a = elim-spine t
      ; call elaborate a
 -- E⟦do { … }⟧ = play the block. It leaves the focus wherever the block left
 -- it, which is the one way it differs from every other clause: the block does
 -- what the user wrote, and repairing it is theirs.
-rule elaborate t :- when focus-is-hole (surface-is-do t) then play t
+rule elaborate t :- when focus-is-hole (surface-is-do t) do play t
 
 -- One prim-lambda per binder, each given the SURFACE name: without it the binder
 -- keeps the identifier written in the type.
 rule intro-binders t :- when focus-is-guess (lambda-binds-more t)
-  then x  = lambda-name t
+  do x  = lambda-name t
      ; prim-lambda x
      ; tl = lambda-tail t
      ; call intro-binders tl
 
 rule intro-binders t :- when focus-is-guess (lambda-binds-one t)
-  then x = lambda-name t
+  do x = lambda-name t
      ; prim-lambda x
 
 -- One along per binder, to stand where the body was written. The λ's binders
 -- are the count and nothing else about them is read.
 rule enter-binders t :- when focus-is-component (lambda-binds-more t)
-  then along
+  do along
      ; tl = lambda-tail t
      ; call enter-binders tl
 
-rule enter-binders t :- when focus-is-component (lambda-binds-one t) then along
+rule enter-binders t :- when focus-is-component (lambda-binds-one t) do along
 
 -- The walk itself, and it is a recursion over the surface spine: take the first
 -- argument, claim a hole for it, elaborate into that hole, and call on what is
@@ -355,7 +355,7 @@ rule enter-binders t :- when focus-is-component (lambda-binds-one t) then along
 -- list — the focus is the hole on the way in and the argument just elaborated
 -- on the way round.
 rule spine-arguments h f t :- when focus-is-component (surface-is-app t)
-  then goto h
+  do goto h
      ; n  = fresh-name "a"
      ; f2 = apply-next f n
      ; goto-named n
@@ -370,6 +370,6 @@ rule spine-arguments h f t :- when focus-is-component (surface-is-app t)
 -- goal solves the argument holes and a solved hole is a definition, so a goto
 -- afterwards would find nothing.
 rule spine-arguments h f t :- when focus-is-component (surface-is-name t)
-  then goto h
+  do goto h
      ; fill f
      ; solve

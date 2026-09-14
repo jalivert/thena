@@ -69,7 +69,7 @@ twice : String -> String
 twice s = concat s s
 ```
 
-- **a rule** — `rule ‹name› ‹params› :- when ‹tests› then ‹body›`. The head is a
+- **a rule** — `rule ‹name› ‹params› :- when ‹tests› do ‹body›`. The head is a
   run of shape questions; a test with arguments is parenthesised.
 - **a signature** — `‹name› : ‹type›`, on a line of its own and needing no
   keyword. The arity
@@ -84,7 +84,7 @@ twice s = concat s s
 what lets a function need no keyword of its own:
 
 ```
-rule f :- then say "hi"
+rule f :- do say "hi"
      ; prove              -- indented: still the rule above
 g x = concat x x          -- column 1: a new declaration
 ```
@@ -100,7 +100,7 @@ The body of a rule, a `do { … }` block inside a Surface term, and what you typ
 at the prompt are all the same language.
 
 ```
-rule demo :- then p = (1, true)
+rule demo :- do p = (1, true)
      ; l = [1, 2, 3]
      ; m = twice "ab"
      ; say m

@@ -758,7 +758,7 @@ returning =
         [Do (Ops.Return (Lit (VText "second")))]
     ]
 
--- | @rule gives :- then return \"a value\"@.
+-- | @rule gives :- do return \"a value\"@.
 returningRule :: Rule
 returningRule =
   Rule (GlobalName "gives") [] [] [Do (Ops.Return (Lit (VText "a value")))]

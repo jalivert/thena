@@ -93,7 +93,6 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   do      { Located _ TDo }
   language { Located _ TLanguage }
   when    { Located _ TWhen }
-  then    { Located _ TThen }
   ':-'    { Located _ TNeck }
   num     { Located _ (TNumber $$) }
   str     { Located _ (TString $$) }
@@ -206,13 +205,20 @@ Decl :: { RawDecl }
   | Language                               { DeclLanguage $1 }
 
 Rule :: { RawRule }
-  : rule ident Params ':-' Tests then Block  { RawRule $2 (reverse $3) $5 (reverse $7) }
+  : rule ident Params ':-' Tests do Block    { RawRule $2 (reverse $3) $5 (reverse $7) }
 
--- **A body is a block** (MS5 phase 75). @then@ is a layout keyword, so
+-- **A body is a block** (MS5 phase 75). @do@ is a layout keyword, so
 -- "Thena.Surface.Layout" inserts these braces where the offside rule says they
 -- belong and a file that writes them itself passes through untouched — the same
 -- bargain the surface language struck at MS4 phase 40, and his condition:
 -- /"if implicit works, explicit has to work too."/
+--
+-- **@do@ and not @then@ — HIS, MS5 phase 85.** Two reasons, and the second is
+-- the one that made him raise it: @:-@ is Prolog\'s neck, so @:- then@ read as
+-- /then then/; and a block of instructions is spelled @do@ everywhere else in
+-- the system — a function\'s body, a surface term\'s block, a REPL entry — so
+-- this was the one place with a word of its own. @then@ is an ordinary
+-- identifier again in every language.
 Block :: { [RawInstr] }
   : '{' Body '}'                           { $2 }
 

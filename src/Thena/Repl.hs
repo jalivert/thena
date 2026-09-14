@@ -707,7 +707,6 @@ describe t = case t of
   TDashes     -> "--"
   TRule       -> "rule"
   TWhen       -> "when"
-  TThen       -> "then"
   TNeck       -> ":-"
   TNumber k   -> show k
   TString txt -> show txt

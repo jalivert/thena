@@ -74,12 +74,12 @@ generalisation =
     [ -- The payoff, at its smallest: one global used at two types, no signature.
       loads "a global used at two types is fine"
         "idf x = do { return x }\n\
-        \rule go :- then h = here ; a = idf h ; n = fresh-name \"x\" ; b = idf n"
+        \rule go :- do h = here ; a = idf h ; n = fresh-name \"x\" ; b = idf n"
 
       -- …and the same shape one level in is refused, which is /Let Should Not
       -- Be Generalised/ and GHC's @MonoLocalBinds@ — his agreement, 2026-09-13.
     , clashes "a local used at two types is not"
-        "rule go :- then g = \\ z -> do { return z } ; h = here ; a = g h\n\
+        "rule go :- do g = \\ z -> do { return z } ; h = here ; a = g h\n\
         \     ; n = fresh-name \"x\" ; b = g n"
 
       -- **A mutually recursive pair is ONE component**, so within it the two
@@ -97,14 +97,14 @@ generalisation =
     , loads "…while outside it, the whole component is"
         "evenish x = do { n = fresh-name \"q\" ; a = oddish n ; return x }\n\
         \oddish y = do { return y }\n\
-        \rule go :- then h = here ; a = evenish h ; m = fresh-name \"x\" ; b = evenish m"
+        \rule go :- do h = here ; a = evenish h ; m = fresh-name \"x\" ; b = evenish m"
 
       -- **Errors are still reported down the file.** The walking order is the
       -- call graph\'s now, so @zzz@ — a leaf — is inferred before the @aaa@ that
       -- calls it, and without a sort its mistake would be printed first.
     , testCase "and a file's mistakes are reported in the order they were written" $
-        case load "rule aaa :- then h = here ; say h ; zzz\n\
-                  \rule zzz :- then g = here ; say g" of
+        case load "rule aaa :- do h = here ; say h ; zzz\n\
+                  \rule zzz :- do g = here ; say g" of
           BasesIllTyped [Clash (InBody a _) _ _, Clash (InBody z _) _ _] ->
             (a, z) @?= (GlobalName "aaa", GlobalName "zzz")
           other -> assertFailure ("expected two clashes, got " ++ show other)
@@ -136,7 +136,7 @@ annotatedLocals =
   testGroup
     "a local may be annotated, and then it is polymorphic"
     [ loads "an annotated local is usable at two types"
-        "rule go :- then\n\
+        "rule go :- do\n\
         \  g : a -> a\n\
         \  g = \\ z -> do { return z }\n\
         \  h = here\n\
@@ -146,7 +146,7 @@ annotatedLocals =
 
       -- …and the same body without the annotation is the monomorphic one.
     , clashes "…where the same local without one is not"
-        "rule go :- then\n\
+        "rule go :- do\n\
         \  g = \\ z -> do { return z }\n\
         \  h = here\n\
         \  x = g h\n\
@@ -157,7 +157,7 @@ annotatedLocals =
       -- instantiate-then-verify a top-level signature gets, so a promise the
       -- binding does not keep is refused.
     , testCase "an annotation the binding does not keep is refused" $
-        case load "rule go :- then\n\
+        case load "rule go :- do\n\
                   \  g : a -> a\n\
                   \  g = \\ z -> do { return (concat z \"!\") }\n\
                   \  h = here\n\
@@ -167,7 +167,7 @@ annotatedLocals =
 
       -- **A concrete annotation is an ordinary constraint**, and wrong is wrong.
     , testCase "and a concrete one still has to be true" $
-        case load "rule go :- then\n\
+        case load "rule go :- do\n\
                   \  h : Name\n\
                   \  h = here" of
           BasesIllTyped (Clash{} : _) -> pure ()
@@ -175,7 +175,7 @@ annotatedLocals =
 
       -- **An annotation about nothing is a typo, most often a renamed line.**
     , testCase "an annotation with no binding after it is refused" $
-        case loadRaw "rule base a where\nrule go :- then\n  g : a -> a\n  say \"hi\"\n" of
+        case loadRaw "rule base a where\nrule go :- do\n  g : a -> a\n  say \"hi\"\n" of
           RuleFileRefused _ (RuleIllFormed es)
             | [AnnotationWithoutBinding _ _ "g"] <- es -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
@@ -211,23 +211,23 @@ surfaceBlockTyping =
   testGroup
     "a do block inside a surface literal is typed with the file"
     [ loads "a good one loads"
-        "rule go :- then call elaborate surface`do { u = fresh-universe ; fill u ; solve }`"
+        "rule go :- do call elaborate surface`do { u = fresh-universe ; fill u ; solve }`"
 
     , testCase "a bad one is refused when the file loads" $
-        case load "rule go :- then call elaborate surface`do { say 3 }`" of
+        case load "rule go :- do call elaborate surface`do { say 3 }`" of
           BasesIllTyped (Clash{} : _) -> pure ()
           other -> assertFailure ("expected a type error, got " ++ show other)
 
       -- **A block inside a block.** A block's own instructions may hold another
       -- surface literal, and 'Thena.Rules.surfaceBlocks' recurses for it.
     , testCase "and so is one nested inside another" $
-        case load "rule go :- then call elaborate surface`do { call elaborate surface\\`do { say 3 }\\` }`" of
+        case load "rule go :- do call elaborate surface`do { call elaborate surface\\`do { say 3 }\\` }`" of
           BasesIllTyped (Clash{} : _) -> pure ()
           other -> assertFailure ("expected a type error, got " ++ show other)
 
       -- A @return@ in one is refused at resolution, before typing.
     , testCase "a return in one is refused" $
-        case loadRaw "rule base b where\nrule go :- then call elaborate surface`do { u = fresh-universe ; return u }`\n" of
+        case loadRaw "rule base b where\nrule go :- do call elaborate surface`do { u = fresh-universe ; return u }`\n" of
           RuleFileRefused _ (RuleIllFormed es)
             | [ReturnInSurfaceBlock _ _] <- es -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
@@ -273,7 +273,7 @@ functionsAreFunctions =
 
       -- **A rule is unchanged**: several clauses, searched.
     , loads "…and a rule may still have as many clauses as it likes"
-        "rule g :- when focus-is-hole then prove\nrule g :- when focus-is-guess then solve"
+        "rule g :- when focus-is-hole do prove\nrule g :- when focus-is-guess do solve"
 
       -- **The positive half, and it needed no engine code.** A call to a
       -- function leaves the stack with no live decision on it — before the
@@ -281,7 +281,7 @@ functionsAreFunctions =
       -- was re-entered by @retry@, so the view whose job is /the live decisions
       -- in your proof/ listed a call to a string function among them.
     , testCase "and calling one leaves no choice point" $
-        choicesAfter "twice x = concat x x\nrule go :- then m = twice \"a\" ; say m"
+        choicesAfter "twice x = concat x x\nrule go :- do m = twice \"a\" ; say m"
           @?= Just []
 
       -- ----------------------------------------------------------------
@@ -307,15 +307,15 @@ functionsAreFunctions =
       -- and the engine built a @Choice@ over them by @hasNext@ alone, which is
       -- exactly the behaviour phase 80 removed, arriving again by another road.
     , testCase "a multi-clause function takes the first match and leaves nothing" $
-        choicesAfter (sizeBase ++ "rule go :- then m = size [\"a\"] ; say m")
+        choicesAfter (sizeBase ++ "rule go :- do m = size [\"a\"] ; say m")
           @?= Just []
 
     , testCase "…and where two clauses overlap, the FIRST one runs" $
-        ranBy (sizeBase ++ "rule go :- then m = size [\"a\"] ; say m")
+        ranBy (sizeBase ++ "rule go :- do m = size [\"a\"] ; say m")
           @?= Just ["one"]
 
     , testCase "…while a value only the second matches reaches the second" $
-        ranBy (sizeBase ++ "rule go :- then m = size [\"a\", \"b\"] ; say m")
+        ranBy (sizeBase ++ "rule go :- do m = size [\"a\", \"b\"] ; say m")
           @?= Just ["many"]
 
       -- **A RULE is searched**, with the very same patterns — which is the
@@ -323,9 +323,9 @@ functionsAreFunctions =
       -- function must not do and a rule must.
     , testCase "a multi-clause rule with patterns still builds a choice point" $
         (length <$> choicesAfter
-           ("rule pick [a, ..._] :- then say a\n"
-              ++ "rule pick x :- then say \"fallback\"\n"
-              ++ "rule go :- then pick [\"one\"]"))
+           ("rule pick [a, ..._] :- do say a\n"
+              ++ "rule pick x :- do say \"fallback\"\n"
+              ++ "rule go :- do pick [\"one\"]"))
           @?= Just 1
     ]
   where
@@ -373,21 +373,21 @@ destructuringRuns =
   testGroup
     "destructuring a binding"
     [ testCase "a pair is taken apart and both halves are bound" $
-        ranBy (pairs ++ "rule go :- then p = mk \"l\" \"r\" ; (x, y) = p ; m = concat x y ; say m")
+        ranBy (pairs ++ "rule go :- do p = mk \"l\" \"r\" ; (x, y) = p ; m = concat x y ; say m")
           @?= Just ["lr"]
 
     , testCase "a list pattern binds the head and the rest" $
-        ranBy (lists ++ "rule go :- then [a, ...r] = three ; say a ; [b, ..._] = r ; say b")
+        ranBy (lists ++ "rule go :- do [a, ...r] = three ; say a ; [b, ..._] = r ; say b")
           @?= Just ["alpha", "beta"]
 
       -- The destination of a CALL is a pattern too, so the answer is taken
       -- apart where it lands rather than in a following line.
     , testCase "a call's answer is destructured where it lands" $
-        ranBy (pairs ++ "rule go :- then (u, v) = mk \"U\" \"V\" ; say v")
+        ranBy (pairs ++ "rule go :- do (u, v) = mk \"U\" \"V\" ; say v")
           @?= Just ["V"]
 
     , testCase "a wildcard runs the op and discards it" $
-        ranBy (pairs ++ "rule go :- then _ = mk \"a\" \"b\" ; say \"discarded\"")
+        ranBy (pairs ++ "rule go :- do _ = mk \"a\" \"b\" ; say \"discarded\"")
           @?= Just ["discarded"]
 
       -- **HIS RULING, the rule half**: the first clause's @[only]@ refuses a
@@ -399,18 +399,18 @@ destructuringRuns =
       -- special-cased into a skip.
     , testCase "a refused pattern backtracks to the next clause of a rule" $
         ranBy (lists
-                 ++ "rule go :- then xs = three ; [only] = xs ; say only\n"
-                 ++ "rule go :- then xs = three ; [a, b, c] = xs ; say c")
+                 ++ "rule go :- do xs = three ; [only] = xs ; say only\n"
+                 ++ "rule go :- do xs = three ; [a, b, c] = xs ; say c")
           @?= Just ["chose 1: go", "backtracking to 1: go", "gamma"]
 
       -- **…and the function half**: one clause, no head, nothing to search, so
       -- the refusal is the answer.
     , testCase "…and in a function it is the caller's failure" $
-        stoppedBy ("single [a] = a\nrule go :- then m = single [\"x\", \"y\"] ; say m")
+        stoppedBy ("single [a] = a\nrule go :- do m = single [\"x\", \"y\"] ; say m")
 
       -- The binding's own refusal, where nothing is left to backtrack into.
     , testCase "a refused binding with no alternative stops the command" $
-        stoppedBy (lists ++ "rule go :- then xs = three ; [only] = xs ; say only")
+        stoppedBy (lists ++ "rule go :- do xs = three ; [only] = xs ; say only")
 
       -- **A binding's pattern is TYPED, at load, against what the op leaves.**
       -- The same 'patternCtx' a parameter gets — a binding and a parameter ask
@@ -422,7 +422,7 @@ destructuringRuns =
       -- not from the list pattern. A mutation found that; the fixture now has
       -- no second reason to fail.
     , testCase "a pattern that cannot fit the op's result is a clash" $
-        clashAt (pairs ++ "rule go :- then p = mk \"l\" \"r\" ; [x] = p ; prove")
+        clashAt (pairs ++ "rule go :- do p = mk \"l\" \"r\" ; [x] = p ; prove")
 
       -- **An ASK's answer lands through the pattern too**, and this is the one
       -- shape that can tell the difference: a compound pattern is refused by
@@ -441,7 +441,7 @@ destructuringRuns =
         -- so the prompt appears once and the confirmation still appears. Two
         -- prompts is the only thing that says the refusal happened.
         asking [ "confirm", "no", "yes" ]
-          "rule confirm :- then \"yes\" = ask \"say yes: \" text ; say \"confirmed\""
+          "rule confirm :- do \"yes\" = ask \"say yes: \" text ; say \"confirmed\""
           2 "confirmed"
 
       -- **…and it is reported as an INSTRUCTION, not a parameter.** The first
@@ -450,7 +450,7 @@ destructuringRuns =
       -- @ms5\/CLOSEOUT.md@ 28's class exactly: a message must identify the
       -- thing it is about uniquely.
     , testCase "…reported against the instruction, not a parameter" $
-        siteOf (pairs ++ "rule go :- then p = mk \"l\" \"r\" ; [x] = p ; prove")
+        siteOf (pairs ++ "rule go :- do p = mk \"l\" \"r\" ; [x] = p ; prove")
           @?= Just (InBody (GlobalName "go") 1)
     ]
   where
@@ -517,17 +517,17 @@ bareWordRightOfEquals =
   testGroup
     "a bare word right of an ="
     [ testCase "a parameter is that value — the identity function" $
-        ranBy "id x = x\nrule go :- then m = id \"hello\" ; say m"
+        ranBy "id x = x\nrule go :- do m = id \"hello\" ; say m"
           @?= Just ["hello"]
 
       -- **The design conversation's own first snippet**, which did not parse
       -- until this phase (@discussion\/pattern-matching.md@ §2).
     , testCase "…and so is a base case that hands a parameter back" $
-        ranBy (firstOr ++ "rule go :- then m = firstOr \"d\" [] ; say m")
+        ranBy (firstOr ++ "rule go :- do m = firstOr \"d\" [] ; say m")
           @?= Just ["d"]
 
     , testCase "…while the other clause hands back an element" $
-        ranBy (firstOr ++ "rule go :- then m = firstOr \"d\" [\"x\"] ; say m")
+        ranBy (firstOr ++ "rule go :- do m = firstOr \"d\" [\"x\"] ; say m")
           @?= Just ["x"]
 
       -- **The local beats a callable of the same name** — his ruling, and
@@ -536,7 +536,7 @@ bareWordRightOfEquals =
       -- and the binding above it as a thunk.
     , testCase "a local beats a function of the same name" $
         ranBy ("helper = \"from the function\"\n"
-                 ++ "rule go :- then helper = \"from the local\" ; m = helper ; say m")
+                 ++ "rule go :- do helper = \"from the local\" ; m = helper ; say m")
           @?= Just ["from the local"]
 
       -- **…and an op beats the local**, which is the top of his three-way rule
@@ -544,12 +544,12 @@ bareWordRightOfEquals =
       -- the focused component's variable, so binding a local of that name and
       -- reading it back gives a 'Thena.Instral.Type.TCore' and not the string.
     , clashes "an op word beats a local of the same name"
-        "rule go :- then here = \"shadow\" ; m = here ; say m"
+        "rule go :- do here = \"shadow\" ; m = here ; say m"
 
       -- The bottom of the rule, unchanged, and worth a regression guard: a word
       -- nothing binds is still a call.
     , testCase "a word that is not bound is still a call" $
-        ranBy "helper = \"from the function\"\nrule go :- then m = helper ; say m"
+        ranBy "helper = \"from the function\"\nrule go :- do m = helper ; say m"
           @?= Just ["from the function"]
 
       -- **A lambda's own parameters are in scope in its body**, which is the
@@ -557,12 +557,12 @@ bareWordRightOfEquals =
       -- body the names its patterns bind. Without it @\\ x -> x@ is the
       -- identity spelled as a call to a rule called @x@.
     , testCase "a lambda's parameter is in scope in its own body" $
-        ranBy "rule go :- then f = \\ x -> x ; m = f \"through a lambda\" ; say m"
+        ranBy "rule go :- do f = \\ x -> x ; m = f \"through a lambda\" ; say m"
           @?= Just ["through a lambda"]
 
       -- Phase 73's case, which this one generalises rather than replaces.
     , loads "true right of an = is still the literal"
-        "rule go :- then b = true ; m = bool-text b ; say m"
+        "rule go :- do b = true ; m = bool-text b ; say m"
     ]
   where
     firstOr = "firstOr d [] = d\nfirstOr _ [x, ..._] = x\n"
@@ -641,7 +641,7 @@ patternTyping =
       -- the case passes either way — which is how the first draft of it was
       -- wrong.
     , loads "a text pattern is accepted where a name is wanted"
-        "rule h \"x\" :- then solve\nrule h n :- then goto-named n"
+        "rule h \"x\" :- do solve\nrule h n :- do goto-named n"
     ]
   where
     loads what src = testCase what $ case load (src ++ "\n") of
@@ -682,14 +682,14 @@ spliceTemplates =
       -- **A splice must be a term**, and that is known when the file loads,
       -- because the hole's type comes from the grammar position.
     , testCase "a splice that is not a term is refused at load" $
-        case load "rule go :- then n = fresh-name \"q\" ; u = resolve-core core`${n} -> ${n}` ; prove" of
+        case load "rule go :- do n = fresh-name \"q\" ; u = resolve-core core`${n} -> ${n}` ; prove" of
           BasesIllTyped (Clash{} : _) -> pure ()
           other -> assertFailure ("expected a type error, got " ++ show other)
 
       -- …and a splice naming nothing is caught by @validate@, which sees inside
       -- a written term now for the same reason it sees inside a list literal.
     , testCase "a splice naming nothing is refused at load" $
-        case loadRaw "rule base s where\nrule go :- then h = here ; u = resolve-core core`${h} -> ${nope}` ; prove\n" of
+        case loadRaw "rule base s where\nrule go :- do h = here ; u = resolve-core core`${h} -> ${nope}` ; prove\n" of
           RuleFileRefused _ (RuleIllFormed es)
             | [UnboundInRule _ _ "nope"] <- es -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
@@ -720,13 +720,13 @@ spliceTemplates =
     -- Claim two holes at fresh universes, build an arrow of them, fill with it,
     -- and answer what the development says afterwards.
     builtBy how = shown
-      ("rule go :- then dn = fresh-name \"A\" ; u1 = fresh-universe ; d = claim dn u1\n\
+      ("rule go :- do dn = fresh-name \"A\" ; u1 = fresh-universe ; d = claim dn u1\n\
        \     ; cn = fresh-name \"B\" ; u2 = fresh-universe ; c = claim cn u2\n\
        \     ; " ++ how ++ "\n\
        \     ; fill ar")
 
     appliedBy how = shown
-      ("rule go :- then dn = fresh-name \"A\" ; u1 = fresh-universe ; d = claim dn u1\n\
+      ("rule go :- do dn = fresh-name \"A\" ; u1 = fresh-universe ; d = claim dn u1\n\
        \     ; cn = fresh-name \"B\" ; u2 = fresh-universe ; c = claim cn u2\n\
        \     ; ar = arrow d c\n\
        \     ; fn = fresh-name \"f\" ; f = claim fn ar\n\
@@ -774,20 +774,20 @@ blockBodies =
     "a function body may be a do block"
     [ testCase "with locals, in the order they are written" $
         said "shout s = do { wrapped = concat \"<\" s ; closed = concat wrapped \">\" ; return closed }\n\
-             \rule go :- then m = shout \"hi\" ; say m"
+             \rule go :- do m = shout \"hi\" ; say m"
           @?= Just "<hi>"
 
       -- The short form is unchanged and goes through the same compiler.
     , testCase "…and the one-expression form still means what it did" $
         said "short s = concat s \"!\"\n\
-             \rule go :- then m = short \"yo\" ; say m"
+             \rule go :- do m = short \"yo\" ; say m"
           @?= Just "yo!"
 
       -- **A lambda gets it too**, because §1.1 reads both ways: a lambda is a
       -- function without a name, so there is one body compiler and not two.
     , testCase "…and so may a lambda's body" $
         said "apply2 f x = f (f x)\n\
-             \rule go :- then m = apply2 (\\ z -> do { p = concat z \".\" ; return p }) \"q\" ; say m"
+             \rule go :- do m = apply2 (\\ z -> do { p = concat z \".\" ; return p }) \"q\" ; say m"
           @?= Just "q.."
 
       -- **A block that never returns is refused**, which is the block form of
@@ -835,7 +835,7 @@ noKeyword =
   testGroup
     "a signature is written without a keyword"
     [ loads "a name, a colon and a type is a signature"
-        "f : Core -> ()\nrule f x :- then prim-try x"
+        "f : Core -> ()\nrule f x :- do prim-try x"
 
       -- The two function shapes, either side of the one that is a signature.
     , loads "a name, parameters and an = is a function"
@@ -848,13 +848,13 @@ noKeyword =
       -- declaration beginning @signature@ used to be a keyword and can now only
       -- be a name.
     , loads "signature is an ordinary name for a rule"
-        "rule signature :- then prove"
+        "rule signature :- do prove"
 
     , loads "…for a function"
         "signature s = concat s s"
 
     , loads "…for a parameter"
-        "f : Core -> ()\nrule f signature :- then prim-try signature"
+        "f : Core -> ()\nrule f signature :- do prim-try signature"
 
       -- …and for a callable that is itself annotated, which is the one that
       -- would have been unwritable in every spelling.
@@ -866,7 +866,7 @@ noKeyword =
       -- a function named @signature@ taking @f@, which then meets a @:@ where it
       -- wanted an @=@.
     , testCase "and the old keyword spelling is refused where the colon is" $
-        case load "signature f : Core -> ()\nrule f x :- then prim-try x" of
+        case load "signature f : Core -> ()\nrule f x :- do prim-try x" of
           RuleFileRefused _ (RuleSyntaxError (ParseFailed (UnexpectedToken _ _))) -> pure ()
           other -> assertFailure ("expected a parse error, got " ++ show other)
     ]
@@ -957,7 +957,7 @@ illTyped =
     "a program that does not type check is refused"
     [ -- The head says Surface, the body hands it to an op that wants Core.
       refused "a parameter used at two types"
-        "rule bad t :- when (surface-is-name t) then prim-try t"
+        "rule bad t :- when (surface-is-name t) do prim-try t"
         [ Clash (InBody (GlobalName "bad") 0) TCore TSurface ]
 
       -- **A literal is checked against the position**, and this one cannot be.
@@ -965,13 +965,13 @@ illTyped =
       -- three checks phase 63 and 64 had to defer to run time** — MS5.md says
       -- phase 66 is where it comes back, and this is it.
     , refused "a numeral where a term was wanted"
-        "rule bad :- then prim-try 3"
+        "rule bad :- do prim-try 3"
         [ Clash (InBody (GlobalName "bad") 0) TCore TInt ]
 
       -- …and its text sibling, which is a separate error because a string
       -- literal is the one whose type the position decides.
     , refused "a string where a term was wanted"
-        "rule bad :- then prim-try \"x\""
+        "rule bad :- do prim-try \"x\""
         [ TextNotTextual (InBody (GlobalName "bad") 0) TCore ]
 
       -- **The other deferred check** (MS5 phase 63): binding a call to a rule
@@ -979,21 +979,21 @@ illTyped =
       -- time because /which clauses a name has is not known when a body is
       -- read/ — true of reading one body, false of a pass over every base.
     , refused "binding a call that cannot return"
-        "rule mute t :- then say \"nothing\"\n\
-        \rule bad t :- then x = mute t ; say x"
+        "rule mute t :- do say \"nothing\"\n\
+        \rule bad t :- do x = mute t ; say x"
         [ BindsNothing (InBody (GlobalName "bad") 0) (GlobalName "mute") ]
 
       -- **Two clauses of one name must agree**, because they are one callable:
       -- dispatch chooses between them at run time and a caller cannot know
       -- which it got.
     , refused "two clauses that disagree about a parameter"
-        "rule two t :- when (surface-is-name t) then prim-prove\n\
-        \rule two t :- then prim-try t"
+        "rule two t :- when (surface-is-name t) do prim-prove\n\
+        \rule two t :- do prim-try t"
         [ Clash (InBody (GlobalName "two") 0) TCore TSurface ]
 
       -- A list is homogeneous, and the literal is where that is enforced.
     , refused "a list of two different things"
-        "rule bad :- then prim-try [3, 'c']"
+        "rule bad :- do prim-try [3, 'c']"
         [ Clash (InBody (GlobalName "bad") 0) TInt TChar
         , Clash (InBody (GlobalName "bad") 0) TCore (TList TInt)
         ]
@@ -1015,24 +1015,24 @@ wellTyped =
     [ -- **A string literal is accepted where a Name is wanted** — his ruling,
       -- 2026-09-12 — so nothing about how a rule is written changes.
       accepted "a string literal at a name position"
-        "rule fine :- then n = fresh-name \"h\" ; goto-named n"
+        "rule fine :- do n = fresh-name \"h\" ; goto-named n"
 
       -- …and the coercion is what carries it the other way, because @n@ here is
       -- a variable and not a literal.
     , accepted "and name-text carries a name back to a string"
-        "rule fine :- then n = fresh-name \"h\" ; t = name-text n ; say t"
+        "rule fine :- do n = fresh-name \"h\" ; t = name-text n ; say t"
 
       -- **A call to a name nothing defines constrains nothing**, and is not an
       -- error: §8 has always allowed it and the machine reports it when the
       -- search finds no clause.
     , accepted "a call to a rule nothing defines"
-        "rule fine t :- then call nowhere t"
+        "rule fine t :- do call nowhere t"
 
       -- **A rule used before it is written**, which is why the pass is over the
       -- whole program rather than one rule at a time.
     , accepted "a call to a rule written below it"
-        "rule fine t :- then call later t\n\
-        \rule later t :- when (surface-is-name t) then prove"
+        "rule fine t :- do call later t\n\
+        \rule later t :- when (surface-is-name t) do prove"
 
       -- **Recursion**: the one that would not terminate if a rule's signature
       -- had to be known before its own body was walked.
@@ -1041,10 +1041,10 @@ wellTyped =
       -- error. It is the one of the three checks deferred at 62b–64 that this
       -- pass does NOT bring back; see @ms5/CLOSEOUT.md@.
     , accepted "an op word at the wrong arity is an unknown call"
-        "rule fine t :- then call say t t"
+        "rule fine t :- do call say t t"
 
     , accepted "a rule that calls itself"
-        "rule walk t :- when (surface-is-app t) then a = app-tail t ; call walk a"
+        "rule walk t :- when (surface-is-app t) do a = app-tail t ; call walk a"
 
     ]
   where
@@ -1118,20 +1118,20 @@ annotations =
       -- parameter to an op that wants a term, so the promise is broken and it is
       -- the promise that is at fault, not the instruction.
     , testCase "that promises more than the body delivers is refused at the signature" $
-        load "f : a -> ()\nrule f x :- then prim-try x"
+        load "f : a -> ()\nrule f x :- do prim-try x"
           @?= BasesIllTyped
                 [AnnotationTooGeneral (InSignature (GlobalName "f") 1) TCore]
 
       -- …and a signature that is simply the wrong type is still reported in the
       -- body, which is §6.5(a) — the author's own rule, local and clear.
     , testCase "that names the wrong type is refused in the body" $
-        load "f : Core -> ()\nrule f x :- when (surface-is-name x) then prove"
+        load "f : Core -> ()\nrule f x :- when (surface-is-name x) do prove"
           @?= BasesIllTyped [Clash (InHead (GlobalName "f") 0) TSurface TCore]
 
       -- A signature is a claim about a callable, so a claim nothing answers is
       -- a mistake — most likely a typo or a changed arity.
     , testCase "for a callable nothing defines is refused" $
-        load "nobody : Core -> ()\nrule f :- then prove"
+        load "nobody : Core -> ()\nrule f :- do prove"
           @?= BasesIllTyped [SignatureUnanswered (GlobalName "nobody") 1]
 
       -- **The arity is the arrow chain's**, so this signature is about @f@ at
@@ -1144,8 +1144,8 @@ annotations =
       -- noticed, because a collapsed signature is still a signature.
     , testCase "keeps its variables apart" $
         case load "ignore2 : a -> b -> ()\n\
-                  \rule ignore2 x y :- then prove\n\
-                  \rule use :- then h = here ; n = fresh-name \"k\" ; ignore2 h n" of
+                  \rule ignore2 x y :- do prove\n\
+                  \rule use :- do h = here ; n = fresh-name \"k\" ; ignore2 h n" of
           BasesLoaded _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
@@ -1162,14 +1162,14 @@ annotations =
       -- 'Thena.Instral.Infer.generalEnough' and was untested until now.
     , testCase "and a body may not force two of them together" $
         case load "pairUp : a -> a -> ()\n\
-                  \rule pairUp x y :- then prove\n\
+                  \rule pairUp x y :- do prove\n\
                   \same : a -> b -> ()\n\
-                  \rule same x y :- then pairUp x y" of
+                  \rule same x y :- do pairUp x y" of
           BasesIllTyped (AnnotationTooGeneral _ _ : _) -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
     , testCase "is about one arity only" $
-        case load "f : Core -> ()\nrule f x :- then prim-try x\nrule f :- then prove" of
+        case load "f : Core -> ()\nrule f x :- do prim-try x\nrule f :- do prove" of
           BasesLoaded _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
@@ -1180,7 +1180,7 @@ annotations =
       -- where the same name outside the lambda is a load error. Phase 68b added
       -- lambdas and the walk was not told.
     , testCase "an unbound name inside a lambda is a load error, like anywhere else" $
-        case load "rule go :- then g = \\ z -> concat z nosuchname ; prove" of
+        case load "rule go :- do g = \\ z -> concat z nosuchname ; prove" of
           RuleFileRefused _ (RuleIllFormed es)
             | UnboundInRule (GlobalName "go") 0 "nosuchname" `elem` es -> pure ()
           other -> assertFailure ("expected an unbound name, got " ++ show other)
@@ -1188,13 +1188,13 @@ annotations =
       -- …and one that IS bound by the lambda is not reported, which is the
       -- half a walk that simply refused every lambda would get wrong.
     , testCase "and a name the lambda binds is not" $
-        case load "rule go :- then g = \\ z -> concat z z ; prove" of
+        case load "rule go :- do g = \\ z -> concat z z ; prove" of
           BasesLoaded _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
       -- Nested one level down, so the walk has to recurse rather than peek.
     , testCase "and it looks inside a lambda inside a lambda" $
-        case load "rule go :- then g = \\ z -> (\\ w -> concat w deepermissing) ; prove" of
+        case load "rule go :- do g = \\ z -> (\\ w -> concat w deepermissing) ; prove" of
           RuleFileRefused _ (RuleIllFormed es)
             | UnboundInRule (GlobalName "go") 0 "deepermissing" `elem` es -> pure ()
           other -> assertFailure ("expected an unbound name, got " ++ show other)
@@ -1221,16 +1221,16 @@ annotations =
 
       -- A group around something that is not an arrow is nothing at all.
     , testCase "a group around a plain type changes nothing" $
-        case load "f : (Core) -> (())\nrule f x :- then prim-try x" of
+        case load "f : (Core) -> (())\nrule f x :- do prim-try x" of
           BasesLoaded _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
     ]
   where
     polymorphic =
       "ignore : a -> ()\n\
-      \rule ignore x :- then say \"ignored\"\n\
-      \rule usesName :- then n = fresh-name \"h\" ; ignore n\n\
-      \rule usesTerm :- then h = here ; ignore h\n"
+      \rule ignore x :- do say \"ignored\"\n\
+      \rule usesName :- do n = fresh-name \"h\" ; ignore n\n\
+      \rule usesTerm :- do h = here ; ignore h\n"
 
 -- | A signature that does not resolve is refused when the FILE is read, before
 -- anything is inferred — it is a question one file can answer.
@@ -1248,7 +1248,7 @@ badSignatures =
     ]
   where
     refused label src want =
-      testCase label $ case load (src ++ "\nrule f x :- then prove") of
+      testCase label $ case load (src ++ "\nrule f x :- do prove") of
         RuleFileRefused _ (RuleIllFormed es) | want `elem` es -> pure ()
         other -> assertFailure ("expected " ++ show want ++ ", got " ++ show other)
 
@@ -1265,13 +1265,13 @@ functions =
     [ -- **No keyword** — his choice, 2026-09-12. @rule@ and @signature@ are
       -- keywords, so a declaration beginning with a plain word can only be this.
       testCase "is declared with no keyword and is callable" $
-        said "rule go :- then m = twice \"a\" ; say m" @?= Just "aa"
+        said "rule go :- do m = twice \"a\" ; say m" @?= Just "aa"
 
       -- **The boundary is column 1** — his ruling, 2026-09-12. Without it the
       -- @g@ below is parsed as another operand of @say@, silently, because
       -- Happy shifts.
     , testCase "does not get swallowed by the declaration above it" $
-        said "rule go :- then m = twice \"b\" ; say m" @?= Just "bb"
+        said "rule go :- do m = twice \"b\" ; say m" @?= Just "bb"
 
       -- …and the rule that buys it. **MS5 phase 75 restated it as Haskell's**:
       -- the file is one layout block whose column is the FIRST declaration's, so
@@ -1280,18 +1280,18 @@ functions =
       -- the disagreement that is the mistake, and that is what used to be
       -- misparsed in silence.
     , testCase "and a declaration that does not line up is refused" $
-        case loadRaw "rule base i where\nrule f :- then prove\n  rule g :- then prove\n" of
+        case loadRaw "rule base i where\nrule f :- do prove\n  rule g :- do prove\n" of
           RuleFileRefused _ (RuleSyntaxError _) -> pure ()
           other -> assertFailure ("expected a syntax error, got " ++ show other)
 
     , testCase "…in either direction" $
-        case loadRaw "rule base i where\n  rule f :- then prove\nrule g :- then prove\n" of
+        case loadRaw "rule base i where\n  rule f :- do prove\nrule g :- do prove\n" of
           RuleFileRefused _ (RuleSyntaxError _) -> pure ()
           other -> assertFailure ("expected a syntax error, got " ++ show other)
 
       -- **A file indented as a whole is a file**, which is the half that is new.
     , testCase "…but a file that lines up at another column loads" $
-        case loadRaw "rule base i where\n  rule f :- then prove\n  rule g :- then prove\n" of
+        case loadRaw "rule base i where\n  rule f :- do prove\n  rule g :- do prove\n" of
           BasesLoaded _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
@@ -1300,7 +1300,7 @@ functions =
       -- rules, @prove@ would run them. 'Thena.Rules.baseFunctions' is why they
       -- are a separate list.
     , testCase "is not listed among the rules" $
-        case load "twice x = concat x x\nrule go :- then prove" of
+        case load "twice x = concat x x\nrule go :- do prove" of
           BasesLoaded bs -> map (map ruleNameOf . baseRules) bs @?= [["go"]]
           other -> assertFailure ("expected a load, got " ++ show other)
 
@@ -1328,14 +1328,14 @@ functions =
       -- the rule's backtracking and a call could run either — which is exactly
       -- what a function is not.
     , testCase "may not share a name and arity with a rule" $
-        case load "rule dup x :- then say \"rule\"\ndup x = concat x x" of
+        case load "rule dup x :- do say \"rule\"\ndup x = concat x x" of
           RuleFileRefused _ (RuleIllFormed es)
             | RuleAndFunction "dup" 1 `elem` es -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
       -- …and at a different arity they are two callables, as they are for two
       -- rules.
     , testCase "but may share one at a different arity" $
-        case load "rule dup x :- then say \"rule\"\ndup = concat \"a\" \"b\"" of
+        case load "rule dup x :- do say \"rule\"\ndup = concat \"a\" \"b\"" of
           BasesLoaded _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
@@ -1353,11 +1353,11 @@ functions =
       -- place a bare word went somewhere else — so this used to say /no rule is
       -- called false/.
     , testCase "and a boolean on the right of an = is the literal" $
-        case load "rule go :- then b = false ; prove" of
+        case load "rule go :- do b = false ; prove" of
           BasesLoaded _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
     , testCase "and a literal can be bound to a name at last" $
-        case load "rule go :- then p = (1, true) ; l = [1, 2, 3] ; n = 42 ; prove" of
+        case load "rule go :- do p = (1, true) ; l = [1, 2, 3] ; n = 42 ; prove" of
           BasesLoaded _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
     ]
@@ -1387,7 +1387,7 @@ lambdas =
       -- bought**: @k \"z\"@ is an application of the local, not a call to a rule
       -- called @k@.
       testCase "is bound to a local and applied" $
-        said "rule go :- then k = \\ s -> concat \"<\" s ; n = k \"z\" ; say n"
+        said "rule go :- do k = \\ s -> concat \"<\" s ; n = k \"z\" ; say n"
           @?= Just "<z"
 
       -- **Higher order, with the signature that says so.** @(a -> b)@ in a
@@ -1395,20 +1395,20 @@ lambdas =
     , testCase "is passed to a function that takes one" $
         said "onTwice : (String -> String) -> String -> String\n\
              \onTwice f x = f (f x)\n\
-             \rule go :- then d = \\ s -> concat s s ; m = onTwice d \"a\" ; say m"
+             \rule go :- do d = \\ s -> concat s s ; m = onTwice d \"a\" ; say m"
           @?= Just "aaaa"
 
       -- **Parenthesised in an argument**, like every other compound one.
     , testCase "takes parentheses in an argument position" $
         said "once : (String -> String) -> String\n\
              \once f = f \"q\"\n\
-             \rule go :- then m = once (\\ s -> concat s s) ; say m"
+             \rule go :- do m = once (\\ s -> concat s s) ; say m"
           @?= Just "qq"
 
       -- **N-ary and not curried** — a function of one is not a function of two,
       -- whatever the types, because dispatch is on arity.
     , testCase "applied at the wrong arity is refused" $
-        case load "rule go :- then d = \\ s -> concat s s ; m = d \"a\" \"b\" ; say m" of
+        case load "rule go :- do d = \\ s -> concat s s ; m = d \"a\" \"b\" ; say m" of
           BasesIllTyped (Clash _ _ _ : _) -> pure ()
           other -> assertFailure ("expected a clash, got " ++ show other)
 
@@ -1419,11 +1419,11 @@ lambdas =
       -- Without it a lambda would be a hole in the type system that anything
       -- could be hidden in.
     , testCase "has its body type checked too" $
-        load "rule go :- then f = \\ z -> concat z 3 ; prove"
+        load "rule go :- do f = \\ z -> concat z 3 ; prove"
           @?= BasesIllTyped [Clash (InBody (GlobalName "go") 0) TString TInt]
 
     , testCase "whose body leaves nothing is refused" $
-        case load "rule go :- then d = \\ s -> prim-try s ; prove" of
+        case load "rule go :- do d = \\ s -> prim-try s ; prove" of
           RuleFileRefused _ (RuleIllFormed es)
             | FunctionLeavesNothing "λ" `elem` es -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
@@ -1457,7 +1457,7 @@ objectLanguages =
       testCase "is a type, a tag and a coercion" $
         case load (tm ++ "asSurface : Tm -> Surface\n\
                          \asSurface t = surface-of t\n\
-                         \rule go :- then t = Tm`(x y)` ; s = asSurface t ; prove") of
+                         \rule go :- do t = Tm`(x y)` ; s = asSurface t ; prove") of
           BasesLoaded _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
@@ -1466,15 +1466,15 @@ objectLanguages =
       -- the tag worth having.
     , testCase "is not a Surface term until it is coerced" $
         load (tm ++ "want : Surface -> ()\n\
-                    \rule want s :- then prove\n\
-                    \rule go :- then t = Tm`(x y)` ; want t")
+                    \rule want s :- do prove\n\
+                    \rule go :- do t = Tm`(x y)` ; want t")
           @?= BasesIllTyped [Clash (InBody (GlobalName "go") 1) TSurface (TObject "Tm")]
 
       -- **The generated parser is a real parser**, and a term it cannot read is
       -- a syntax error naming the tag — arriving at load, with every other one
       -- (§6.0.1).
     , testCase "reports a term its grammar cannot read" $
-        case load (tm ++ "rule go :- then t = Tm`(x y` ; prove") of
+        case load (tm ++ "rule go :- do t = Tm`(x y` ; prove") of
           RuleFileRefused _ (RuleIllFormed (BadRegion _ _ "Tm" _ : _)) -> pure ()
           other -> assertFailure ("expected a region error, got " ++ show other)
 
@@ -1486,7 +1486,7 @@ objectLanguages =
       -- was never pinned.
     , testCase "a grammar may close its brace in column 1" $
         case load "language Tm where {\n  var : name ;\n  app : \"(\" Tm Tm \")\"\n}\n\
-                  \rule go :- then t = Tm`(x y)` ; prove" of
+                  \rule go :- do t = Tm`(x y)` ; prove" of
           BasesLoaded _ -> pure ()
           other -> assertFailure ("expected a load, got " ++ show other)
 
@@ -1496,7 +1496,7 @@ objectLanguages =
       -- away. The tests until now used inputs that either parsed completely or
       -- not at all, so the condition was never exercised.
     , testCase "refuses a term whose prefix parses and whose rest does not" $
-        case load (tm ++ "rule go :- then t = Tm`x y` ; prove") of
+        case load (tm ++ "rule go :- do t = Tm`x y` ; prove") of
           RuleFileRefused _ (RuleIllFormed (BadRegion _ _ "Tm" _ : _)) -> pure ()
           other -> assertFailure ("expected a region error, got " ++ show other)
 
@@ -1517,7 +1517,7 @@ objectLanguages =
       -- so it is refused there rather than at the fence. Changed on purpose, and
       -- the refusal is still pinned — one language over.
     , testCase "a nesting escape into an object language is still refused" $
-        case load (tm ++ "rule go t :- then u = Tm`(x ${ t })` ; prove") of
+        case load (tm ++ "rule go t :- do u = Tm`(x ${ t })` ; prove") of
           RuleFileRefused _ (RuleIllFormed [BadRegion _ _ "Tm" _]) -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
@@ -1527,7 +1527,7 @@ objectLanguages =
       -- constructor and told the user @unexpected ;@ about a character that is
       -- not there.
     , testCase "an empty region says end of input, not a token that is not there" $
-        case load (tm ++ "rule go :- then t = Tm`` ; prove") of
+        case load (tm ++ "rule go :- do t = Tm`` ; prove") of
           RuleFileRefused _ (RuleIllFormed (BadRegion _ _ "Tm" e : _)) ->
             e @?= ParseFailed UnexpectedEndOfInput
           other -> assertFailure ("expected a region error, got " ++ show other)
@@ -1584,7 +1584,7 @@ objectLanguages =
     tm = "language Tm where { var : name ; app : \"(\" Tm Tm \")\" }\n"
 
     refusedGrammar label src want =
-      testCase label $ case load (src ++ "\nrule go :- then prove") of
+      testCase label $ case load (src ++ "\nrule go :- do prove") of
         RuleFileRefused _ (RuleIllFormed es) | want `elem` es -> pure ()
         other -> assertFailure ("expected " ++ show want ++ ", got " ++ show other)
 

@@ -55,14 +55,11 @@ layoutKeyword t = case t of
   -- **Added at phase 45**, the third and last one phase 40 named. Its block is
   -- the instruction language rather than the surface one, which changes nothing
   -- here: layout is about columns, not about what the tokens mean.
+  --
+  -- **It gives a RULE BODY the offside rule too, since MS5 phase 85** — that
+  -- was @then@\'s job from phase 75 until @then@ stopped being a word. One
+  -- keyword now opens every block of instructions there is.
   TDo    -> True
-  -- **Added at MS5 phase 75**, and it is what gives a rule body the offside
-  -- rule: @then@ opens the block of instructions, which closes when a line
-  -- comes back to the column a declaration starts in. The keyword set is shared
-  -- by every language rather than being one set per grammar — layout is about
-  -- columns, not about what the tokens mean, and @then@ is a token only a rule
-  -- file writes, so nothing else can see it.
-  TThen  -> True
   _      -> False
 
 -- | Tokens that close an implicit block by appearing.

@@ -41,7 +41,7 @@ module Thena.Instral.Concrete
 
 import Thena.Syntax.Concrete (Raw)
 
--- | A written rule (§8, phase 21) — @rule ‹name› (‹params›) :- when ‹tests› then ‹body›@.
+-- | A written rule (§8, phase 21) — @rule ‹name› (‹params›) :- when ‹tests› do ‹body›@.
 --
 -- Named and unresolved like every other tree here: the tests and the op words
 -- are 'String's, and turning them into 'Thena.Ops.Test' and 'Thena.Ops.Op' is

@@ -93,7 +93,7 @@ expectRule src = either (assertFailure . ((src ++ " — ") ++)) pure (readRule s
 
 -- | A rule whose body is the one instruction under test.
 bodyOf :: String -> IO [Instr]
-bodyOf src = ruleBody <$> expectRule ("rule r :- when focus-is-hole then " ++ src)
+bodyOf src = ruleBody <$> expectRule ("rule r :- when focus-is-hole do " ++ src)
 
 -- | The head of a whole written rule (MS5 phase 64), where 'bodyOf' supplies one.
 headOf :: String -> IO [Test]
@@ -348,7 +348,7 @@ vocabulary =
       testCase (testWord t) $ do
         r <- expectRule
                ("rule r " ++ unwords params ++ " :- when " ++ written
-                  ++ " then prim-solve")
+                  ++ " do prim-solve")
         map testWord (ruleHead r) @?= [testWord t]
         map testOperands (ruleHead r) @?= [map Ref params]
       where
@@ -375,37 +375,37 @@ headOperands =
   testGroup
     "a test may take operands"
     [ testCase "parenthesised, it takes a parameter" $ do
-        r <- expectRule "rule r s :- when (surface-is-name s) then prim-solve"
+        r <- expectRule "rule r s :- when (surface-is-name s) do prim-solve"
         ruleHead r @?= [SurfaceIsName (Ref "s")]
 
     , testCase "beside bare ones, in either order" $ do
         r <- expectRule
                "rule r s :- when focus-is-hole (surface-is-name s) goal-type-is-pi \
-               \then prim-solve"
+               \do prim-solve"
         ruleHead r @?= [FocusIsHole, SurfaceIsName (Ref "s"), GoalTypeIsPi]
 
     , testCase "a literal is accepted where a name is" $ do
-        r <- expectRule "rule r :- when (surface-is-name \"x\") then prim-solve"
+        r <- expectRule "rule r :- when (surface-is-name \"x\") do prim-solve"
         ruleHead r @?= [SurfaceIsName (Lit (VText "x"))]
 
     , -- Every operand of a head must be one of the rule's own parameters: a
       -- head runs before the body, so there is no earlier binding it could
       -- have come from.
       testCase "a head naming something that is not a parameter is refused" $ do
-        r <- expectRule "rule r s :- when (surface-is-name q) then prim-solve"
+        r <- expectRule "rule r s :- when (surface-is-name q) do prim-solve"
         validate r @?= [UnboundInHead (GlobalName "r") "q"]
 
     , testCase "and a parameter it does name is fine" $ do
-        r <- expectRule "rule r s :- when (surface-is-name s) then prim-solve"
+        r <- expectRule "rule r s :- when (surface-is-name s) do prim-solve"
         validate r @?= []
 
     , testCase "the wrong number of operands is refused" $
-        case readRule "rule r s :- when (surface-is-name s s) then prim-solve" of
+        case readRule "rule r s :- when (surface-is-name s s) do prim-solve" of
           Left _  -> pure ()
           Right _ -> assertFailure "two operands should not resolve"
 
     , testCase "and so is a bare word that wanted one" $
-        case readRule "rule r s :- when surface-is-name then prim-solve" of
+        case readRule "rule r s :- when surface-is-name do prim-solve" of
           Left _  -> pure ()
           Right _ -> assertFailure "no operands should not resolve"
 
@@ -415,12 +415,12 @@ headOperands =
       -- the two shapes that would make dispatch /do/ something — a region,
       -- which parses an embedded language, and a nested call, which runs one.
       testCase "a head takes a literal" $
-        headOf "rule r s :- when (surface-is-name 2) then prim-solve"
+        headOf "rule r s :- when (surface-is-name 2) do prim-solve"
           >>= (@?= [Op.SurfaceIsName (Lit (Op.VInt 2))])
     , testCase "and a character, and a boolean" $ do
-        headOf "rule r s :- when (surface-is-name 'x') then prim-solve"
+        headOf "rule r s :- when (surface-is-name 'x') do prim-solve"
           >>= (@?= [Op.SurfaceIsName (Lit (Op.VChar 'x'))])
-        headOf "rule r s :- when (surface-is-name true) then prim-solve"
+        headOf "rule r s :- when (surface-is-name true) do prim-solve"
           >>= (@?= [Op.SurfaceIsName (Lit (Op.VBool True))])
     ]
 
@@ -433,17 +433,17 @@ shapes =
   testGroup
     "shape"
     [ testCase "no parameters, no parentheses" $ do
-        r <- expectRule "rule r :- when focus-is-hole then prim-solve"
+        r <- expectRule "rule r :- when focus-is-hole do prim-solve"
         ruleParams r @?= []
     , -- **No parentheses and no commas** — corrected by the user 2026-08-25,
       -- so that a definition and a call site write their arguments alike.
       testCase "parameters are a bare run of names" $ do
-        r <- expectRule "rule r a b c :- when focus-is-hole then prim-solve"
+        r <- expectRule "rule r a b c :- when focus-is-hole do prim-solve"
         ruleParams r @?= map Op.PVar ["a", "b", "c"]
     , -- A rule may apply everywhere, so 'when' is optional; a rule with no body
       -- does nothing, so 'then' is not.
       testCase "when is optional" $ do
-        r <- expectRule "rule r :- then prim-solve"
+        r <- expectRule "rule r :- do prim-solve"
         ruleHead r @?= []
     , testCase "several instructions, separated by semicolons" $ do
         b <- bodyOf "prim-attack; along; prim-solve"
@@ -454,7 +454,7 @@ shapes =
     , -- The hyphens are the reason the lexer was widened this phase: §8 and
       -- OBJECTIVE.md have always written rule and test names this way.
       testCase "a hyphenated name is one identifier" $ do
-        r <- expectRule "rule elab-app :- when focus-is-hole then prim-solve"
+        r <- expectRule "rule elab-app :- when focus-is-hole do prim-solve"
         ruleName r @?= GlobalName "elab-app"
     ]
 
@@ -503,12 +503,12 @@ text =
         b @?= [Do (Try (Lit (VText "not a term")))]
 
     , testCase "an unterminated string does not lex" $
-        case readRule "rule r :- when focus-is-hole then say \"oops" of
+        case readRule "rule r :- when focus-is-hole do say \"oops" of
           Left _  -> pure ()
           Right r -> assertFailure ("read: " ++ show r)
 
     , testCase "a rule name is still a name, not text" $
-        case readRule "rule r :- when focus-is-hole then call \"try\" x" of
+        case readRule "rule r :- when focus-is-hole do call \"try\" x" of
           Left _  -> pure ()
           Right r -> assertFailure ("read: " ++ show r)
     ]
@@ -572,9 +572,9 @@ regions =
       Bind _ _ o -> opKeyword o
       Do o     -> opKeyword o
 
-    errs src = readErrors ("rule r :- when focus-is-hole then " ++ src)
+    errs src = readErrors ("rule r :- when focus-is-hole do " ++ src)
 
-    headErrs src = readErrors ("rule r :- when " ++ src ++ " then prim-solve")
+    headErrs src = readErrors ("rule r :- when " ++ src ++ " do prim-solve")
 
     readErrors src = case laidOut src of
       Left _ -> Nothing
@@ -589,7 +589,7 @@ mistakes =
   testGroup
     "mistakes"
     [ refused "an unknown test word"
-        "rule r :- when focus-is-purple then prim-solve"
+        "rule r :- when focus-is-purple do prim-solve"
         [NoSuchTest (GlobalName "r") "focus-is-purple"]
     , -- **A word that names no op is a call** (phase 25e), so this is no
       -- longer a load-time refusal: it resolves, and finds no clause when it
@@ -655,7 +655,7 @@ mistakes =
     , -- **A head may not run code** (§1.1): 'Thena.Rules.holds' builds the
       -- match list cheaply and without effects, and a nested call is a call.
       refused "a nested call in a head"
-        "rule r s :- when (surface-is-name (f s)) then prim-solve"
+        "rule r s :- when (surface-is-name (f s)) do prim-solve"
         [BadTestOperands (GlobalName "r") "surface-is-name"]
     , -- **An op word at an arity the op does not have is a CALL** (MS5 phase
       -- 62b, the user's decision). It was 'BadOperands' until then, so that
@@ -679,7 +679,7 @@ mistakes =
       -- numeral is an 'Op.VInt' as of MS5 phase 64, so @prim-try 3@ resolves
       -- and fails when it runs.
       refused "an operand no reading of the word admits"
-        "rule r :- when focus-is-hole then cross body"
+        "rule r :- when focus-is-hole do cross body"
         [BadOperands (GlobalName "r") 0 "cross"]
     , -- §3.7: a declaration is a command, never a rule-body operation.
       --
@@ -689,13 +689,13 @@ mistakes =
       -- back as @DeclarationInBody@, which is why 'validate''s own check has
       -- been reachable only for a rule built in Haskell since before that.
       testCase "a declaration in a body" $
-        case laidOut "rule r :- when focus-is-hole then data" of
+        case laidOut "rule r :- when focus-is-hole do data" of
           Left _  -> pure ()
           Right ts -> case parseRule ts of
             Left _  -> pure ()
             Right r -> assertFailure ("parsed: " ++ show r)
     , refused "every mistake, not the first"
-        "rule r :- when focus-is-purple then frobnicate; cross body"
+        "rule r :- when focus-is-purple do frobnicate; cross body"
         [ NoSuchTest (GlobalName "r") "focus-is-purple"
         , BadOperands (GlobalName "r") 1 "cross"
         ]

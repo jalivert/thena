@@ -248,7 +248,7 @@ tokensReadBack =
       , TLParen, TRParen, TColon, TLBrace, TRBrace, TSemi, TEquals, TQuery
       , TGuessed, TPending, TTurnstile, TEquate, TOpenQuote, TCloseQuote
       , TLet, TIn, TElim, TWhere, TData, TModule, TDo
-      , TRule, TWhen, TThen, TNeck
+      , TRule, TWhen, TNeck
       , TNumber 42, TString "hi", TUniverse 3, TUniverseOpen, TIdent "foo"
       , TDashes
       ]
