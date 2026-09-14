@@ -22,7 +22,9 @@
 module Thena.Syntax.Concrete
   ( Raw (..)
   , splicesIn
+  , nameSplicesIn
   , RawBinder (..)
+  , RawIdent (..)
   , RawConstraint (..)
   , RawData (..)
   , RawConstructor (..)
@@ -40,15 +42,15 @@ data Raw
   = RawName String
   | RawUniverse Int
   | RawUniverseOpen              -- ^ @Type@ — a universe whose level is inferred
-  | RawAt String [Int]           -- ^ @foo {0 1}@ — a global at level arguments
+  | RawAt RawIdent [Int]         -- ^ @foo {0 1}@ — a global at level arguments
 
   | RawLam [RawBinder] Raw       -- ^ @λ (x : S) (y : T) -> b@
   | RawPi [RawBinder] Raw        -- ^ @∀ (x : S) (y : T) -> B@
   | RawArrow Raw Raw             -- ^ @S -> B@, the non-dependent case
   | RawApp Raw Raw
-  | RawLet String Raw Raw Raw    -- ^ @let x = s : S in t@
-  | RawClaim String Raw Raw      -- ^ @let ? x : S in p@
-  | RawGuess String Raw Raw Raw  -- ^ @let ? x : S ≐ (g) in p@
+  | RawLet RawIdent Raw Raw Raw  -- ^ @let x = s : S in t@
+  | RawClaim RawIdent Raw Raw    -- ^ @let ? x : S in p@
+  | RawGuess RawIdent Raw Raw Raw -- ^ @let ? x : S ≐ (g) in p@
   | RawPending RawConstraint Raw -- ^ @κ ▸ p@
   | RawQuote Raw                 -- ^ @⌜ t ⌝@
   | RawSplice String
@@ -65,7 +67,7 @@ data Raw
     -- its own (MS5 phase 63), so @${f a}@ would be written as two lines
     -- whatever this said. It also keeps "Thena.Syntax.Concrete" from importing
     -- "Thena.Instral.Concrete", which imports this module.
-  | RawElim String [Int] [Raw] Raw [Raw] [Raw] Raw
+  | RawElim RawIdent [Int] [Raw] Raw [Raw] [Raw] Raw
     -- ^ @elim d (params) motive (methods) (indices) target@ (§2.6, phase 7) —
     -- positional, and in exactly 'Thena.Core.Term.Core''s own field order for
     -- 'Thena.Core.Term.Eliminate', so where a field goes needs no name.
@@ -74,7 +76,27 @@ data Raw
 -- | @(x : S)@ — one parenthesised binding. Always annotated: there is no
 -- inference at this level, and a binder with no type is a parse error rather
 -- than a hole (§2.6).
-data RawBinder = RawBinder String Raw
+-- | A NAME in the source, which may itself be spliced (MS5 phase 88).
+--
+-- **His principle, applied all the way**: /a splice supplies a nonterminal/.
+-- Phase 81 built the production at one nonterminal — a 'Raw' term — so
+-- @core\`${d} -> ${d}\`@ worked and @core\`λ (${n} : ${d}) -> ${d}\`@ was a
+-- parse error, because a binder's name is a position where the grammar wants a
+-- /name/ and there was no splice production there.
+--
+-- **Every position where the grammar wants a name now takes one**: a λ or ∀
+-- binder, a @let@, a claim, a guess, an @elim@\'s datatype and a global at
+-- level arguments. What the position wants decides what the binding must hold —
+-- a 'Thena.Instral.Type.TName' here, where a term position wants a
+-- 'Thena.Instral.Type.TCore' — so nothing has to be annotated and the two
+-- readings cannot be confused.
+data RawIdent
+  = RawWord   String  -- ^ written down
+  | RawIdentSplice String
+    -- ^ @${x}@ — the name comes from the binding @x@ when the instruction runs.
+  deriving (Eq, Show)
+
+data RawBinder = RawBinder RawIdent Raw
   deriving (Eq, Show)
 
 -- | @Ξ ⊢ s ≟ t : T@ — the binders, then the two sides, then the type.
@@ -102,6 +124,41 @@ data RawConstructor = RawConstructor String Raw
 -- The twin of 'Thena.Surface.Concrete.blocksIn': one walk over the tree that is
 -- not resolution, so that @validate@ can see an unbound name inside a template
 -- and inference can ask what each splice must be.
+-- | Just the splices that stand in a NAME position (MS5 phase 88).
+--
+-- **The position is what decides**, so this is a second walk rather than a flag
+-- on the first: a hole reached through 'RawIdentSplice' wants a name and one
+-- reached through 'RawSplice' wants a term, and no position accepts both.
+-- 'Thena.Engine' fills each from its own list and
+-- "Thena.Instral.Infer" types each against its own type.
+nameSplicesIn :: Raw -> [String]
+nameSplicesIn t = case t of
+  RawSplice _        -> []
+  RawLam bs b        -> concatMap binder bs ++ nameSplicesIn b
+  RawPi bs b         -> concatMap binder bs ++ nameSplicesIn b
+  RawArrow a b       -> nameSplicesIn a ++ nameSplicesIn b
+  RawApp f x         -> nameSplicesIn f ++ nameSplicesIn x
+  RawLet n v ty b    -> named n ++ nameSplicesIn v ++ nameSplicesIn ty ++ nameSplicesIn b
+  RawClaim n ty p    -> named n ++ nameSplicesIn ty ++ nameSplicesIn p
+  RawGuess n ty g p  -> named n ++ nameSplicesIn ty ++ nameSplicesIn g ++ nameSplicesIn p
+  RawPending _ p     -> nameSplicesIn p
+  RawQuote q         -> nameSplicesIn q
+  RawElim d _ ps m ms is tg ->
+    named d ++ concatMap nameSplicesIn ps ++ nameSplicesIn m
+      ++ concatMap nameSplicesIn ms ++ concatMap nameSplicesIn is ++ nameSplicesIn tg
+  RawName _          -> []
+  RawUniverse _      -> []
+  RawUniverseOpen    -> []
+  RawAt n _          -> named n
+  where
+    binder (RawBinder n ty) = named n ++ nameSplicesIn ty
+
+    named i = case i of { RawIdentSplice x -> [x] ; RawWord _ -> [] }
+
+-- | **Every splice the template waits for, term and NAME alike** (MS5 phase 88
+-- widened it). A name splice is filled from the same environment and refused
+-- the same way if the binding is missing; what differs is only the /type/ the
+-- position demands, which "Thena.Instral.Infer" reads off the position.
 splicesIn :: Raw -> [String]
 splicesIn t = case t of
   RawSplice x        -> [x]
@@ -109,17 +166,19 @@ splicesIn t = case t of
   RawPi bs b         -> concatMap binder bs ++ splicesIn b
   RawArrow a b       -> splicesIn a ++ splicesIn b
   RawApp f x         -> splicesIn f ++ splicesIn x
-  RawLet _ v ty b    -> splicesIn v ++ splicesIn ty ++ splicesIn b
-  RawClaim _ ty p    -> splicesIn ty ++ splicesIn p
-  RawGuess _ ty g p  -> splicesIn ty ++ splicesIn g ++ splicesIn p
+  RawLet n v ty b    -> named n ++ splicesIn v ++ splicesIn ty ++ splicesIn b
+  RawClaim n ty p    -> named n ++ splicesIn ty ++ splicesIn p
+  RawGuess n ty g p  -> named n ++ splicesIn ty ++ splicesIn g ++ splicesIn p
   RawPending _ p     -> splicesIn p
   RawQuote q         -> splicesIn q
-  RawElim _ _ ps m ms is tg ->
-    concatMap splicesIn ps ++ splicesIn m ++ concatMap splicesIn ms
+  RawElim d _ ps m ms is tg ->
+    named d ++ concatMap splicesIn ps ++ splicesIn m ++ concatMap splicesIn ms
       ++ concatMap splicesIn is ++ splicesIn tg
   RawName _          -> []
   RawUniverse _      -> []
   RawUniverseOpen    -> []
-  RawAt _ _          -> []
+  RawAt n _          -> named n
   where
-    binder (RawBinder _ ty) = splicesIn ty
+    binder (RawBinder n ty) = named n ++ splicesIn ty
+
+    named i = case i of { RawIdentSplice x -> [x] ; RawWord _ -> [] }

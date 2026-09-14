@@ -95,8 +95,8 @@ import Thena.Errors
   )
 import Thena.Surface.Concrete (Plicity (..))
 import qualified Thena.Surface.Concrete as Concrete
-import Thena.Syntax.Concrete (splicesIn)
-import Thena.Syntax.Resolve (resolveWith)
+import Thena.Syntax.Concrete (Raw, splicesIn, nameSplicesIn)
+import Thena.Syntax.Resolve (resolveWith, Filling (..))
 import Thena.Instral.Ops
   ( AnswerKind
   , Env
@@ -773,9 +773,13 @@ perform instr rest m = case operation instr of
   -- gets anywhere else.
   ResolveCore a -> case operandValue (env (exec m)) a of
     Left r           -> failure r m
-    Right (VRaw raw) -> case traverse (filling (env (exec m))) (splicesIn raw) of
+    -- **Two kinds of hole, filled from two walks** (MS5 phase 88). The
+    -- position decides which a hole is, so a term splice is looked up as a
+    -- term and a name splice as a name; neither can be handed the other.
+    Right (VRaw raw) -> case (,) <$> traverse (filling (env (exec m))) (termSplices raw)
+                                 <*> traverse (nameFilling (env (exec m))) (nameSplicesIn raw) of
       Left r   -> failure r m
-      Right sp -> case resolveWith sp (globals m) contextAt (names m) raw of
+      Right (ts, ns) -> case resolveWith (ts ++ ns) (globals m) contextAt (names m) raw of
         Left e        -> failure (CannotResolve e) m
         Right (t, n1) -> produce (VTerm t) m { names = n1 }
     Right _          -> failure ExpectedRaw m
@@ -1907,8 +1911,20 @@ operandTerm e o = operandValue e o >>= \v -> case v of
 -- where a term stands, so a binding that is not a term is the ordinary
 -- @ExpectedTerm@ refusal rather than an error of its own. It is unreachable
 -- from a loaded base, which types every splice when the file loads.
-filling :: Env -> String -> Either FailReason (String, Core)
-filling e x = (,) x <$> operandTerm e (Ref x)
+filling :: Env -> String -> Either FailReason (String, Filling)
+filling e x = (,) x . FillTerm <$> operandTerm e (Ref x)
+
+-- | …and one that stands in a name position (MS5 phase 88).
+nameFilling :: Env -> String -> Either FailReason (String, Filling)
+nameFilling e x = (,) x . FillName . Ident <$> operandText e (Ref x)
+
+-- | The splices that are NOT name splices — everything 'splicesIn' finds, less
+-- what 'nameSplicesIn' does. Written this way so the two walks stay one
+-- traversal each and neither has to know about the other.
+termSplices :: Raw -> [String]
+termSplices raw =
+  let ns = nameSplicesIn raw
+   in [ x | x <- splicesIn raw, x `notElem` ns ]
 
 -- | An unelaborated tree and the place it sits at (§7.2). Shaped like
 -- 'operandText' and 'operandTerm', and phase 17b's reason for existing at all:

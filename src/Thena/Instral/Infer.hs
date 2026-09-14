@@ -32,7 +32,7 @@ import Data.List (elemIndex, nub, sortOn)
 import Data.Maybe (fromMaybe, listToMaybe)
 
 import Thena.Core.Term (GlobalName (..))
-import Thena.Syntax.Concrete (splicesIn)
+import Thena.Syntax.Concrete (splicesIn, nameSplicesIn)
 import Thena.Instral.Type (Signature (..), Ty (..), renderTy, typeVarsIn)
 import Thena.Rules (testTypes)
 import Thena.Instral.Ops
@@ -765,7 +765,14 @@ operandType ctx si o st = case o of
   -- known from the grammar position and not from a pass of its own: every
   -- splice in a @Raw@ must be a 'TCore'.
   Lit (VRaw raw) ->
-    let st1 = foldl (\s x -> operandAgainst ctx si TCore (Ref x) s) st (splicesIn raw)
+    -- **The position decides the type** (MS5 phase 88). A term splice must be
+    -- filled with a 'TCore' and a name splice with a 'TName', and the grammar
+    -- has already sorted them: nothing is annotated and nothing is guessed.
+    let ns  = nameSplicesIn raw
+        st1 = foldl (\s x -> operandAgainst ctx si TName (Ref x) s)
+                    (foldl (\s x -> operandAgainst ctx si TCore (Ref x) s) st
+                           [ x | x <- splicesIn raw, x `notElem` ns ])
+                    ns
      in valueType si (VRaw raw) st1
   Lit v      -> valueType si v st
   ListOf os  ->

@@ -1184,6 +1184,9 @@ refsIn o = case o of
   -- this is the same lesson one literal over: a template whose splice named
   -- nothing would otherwise reach the engine instead of being refused when the
   -- base loaded.
+  -- **Every splice, term and name alike** (MS5 phase 88 widened 'splicesIn').
+  -- So an unfilled name splice is a load-time scope error exactly as an
+  -- unfilled term one is — 'Thena.Rules.validate' sees both as references.
   Lit (VRaw raw) -> splicesIn raw
   Lit _      -> []
   ListOf os  -> concatMap refsIn os

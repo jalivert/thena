@@ -715,8 +715,64 @@ spliceTemplates =
         case builtBy "ar = resolve-core core`${d} -> ${c}`" of
           Just t | "?\8467" `isInfixOf` t -> pure ()
           other -> assertFailure ("expected a level meta in " ++ show other)
+
+      -- ----------------------------------------------------------------
+      -- MS5 phase 88 — a splice supplies a nonterminal, and there is more
+      -- than one of them.
+      -- ----------------------------------------------------------------
+
+      -- **Phase 81 built the production at ONE nonterminal**, a term, so a
+      -- binder's name — a position where the grammar wants a /name/ — was a
+      -- parse error. These four are every name position the core grammar has.
+    , loadsWith "a λ binder's name may be spliced"
+        "n = fresh-name \"z\" ; d = goal ; t = resolve-core core`\955 (${n} : ${d}) -> ${d}`"
+
+    , loadsWith "…a ∀ binder's"
+        "n = fresh-name \"z\" ; d = goal ; t = resolve-core core`\8704 (${n} : ${d}) -> ${d}`"
+
+    , loadsWith "…a let's"
+        "n = fresh-name \"z\" ; d = goal ; t = resolve-core core`let ${n} = ${d} : ${d} in ${d}`"
+
+    , loadsWith "…and the corner spelling agrees"
+        "n = fresh-name \"z\" ; d = goal ; t = resolve-core \8988 \955 (${n} : ${d}) -> ${d} \8989"
+
+      -- **THE POSITION DECIDES THE TYPE, and these two are what says so.**
+      -- Nothing is annotated: the same @${x}@ demands a @Core@ in one place and
+      -- a @Name@ in the other, and the grammar is what tells them apart.
+    , clashesWith "a term where the position wants a name"
+        "d = goal ; t = resolve-core core`\955 (${d} : ${d}) -> ${d}`"
+
+    , clashesWith "…and a name where the position wants a term"
+        "n = fresh-name \"z\" ; t = resolve-core core`${n} -> ${n}`"
+
+      -- **AND IT IS RUN, not merely loaded.** The four cases above check that a
+      -- name position parses; this checks that the name actually arrives —
+      -- which the load-only ones do not, and a mutation that filled a name
+      -- splice as a term survived them all.
+    , testCase "the spliced name is the name the term ends up with" $
+        case builtBy "n = fresh-name \"zz\" ; ar = resolve-core core`\955 (${n} : ${d}) -> ${c}`" of
+          Just t | "zz" `isInfixOf` t -> pure ()
+          other -> assertFailure ("expected the spliced binder name in " ++ show other)
+
+      -- An unfilled name splice is a load-time scope error, exactly as an
+      -- unfilled term one is — 'Thena.Instral.Ops.refsIn' sees both.
+    , testCase "a name splice naming nothing is refused at load" $
+        case loadRaw "rule base s where\nrule go :- do d = goal ; t = resolve-core core`\955 (${nope} : ${d}) -> ${d}` ; prove\n" of
+          RuleFileRefused _ (RuleIllFormed es)
+            | [UnboundInRule _ _ "nope"] <- es -> pure ()
+          other -> assertFailure ("expected a refusal, got " ++ show other)
     ]
   where
+    loadsWith what body = testCase what $
+      case load ("rule go :- do " ++ body ++ " ; prove") of
+        BasesLoaded _ -> pure ()
+        other -> assertFailure ("expected a load, got " ++ show other)
+
+    clashesWith what body = testCase what $
+      case load ("rule go :- do " ++ body ++ " ; prove") of
+        BasesIllTyped (Clash{} : _) -> pure ()
+        other -> assertFailure ("expected a type error, got " ++ show other)
+
     -- Claim two holes at fresh universes, build an arrow of them, fill with it,
     -- and answer what the development says afterwards.
     builtBy how = shown

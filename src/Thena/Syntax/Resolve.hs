@@ -4,6 +4,7 @@ module Thena.Syntax.Resolve
   ( resolve
   , resolveWith
   , Splices
+  , Filling (..)
   , resolvePartial
   , resolveData
   ) where
@@ -36,6 +37,7 @@ import Thena.Global.Env
 import Thena.Syntax.Concrete
   ( Raw (..)
   , RawBinder (..)
+  , RawIdent (..)
   , RawConstraint (..)
   , RawConstructor (..)
   , RawData (..)
@@ -74,7 +76,35 @@ globalsOf = map fst . definitions
 -- exactly where a term stands and what fills it is a term. The list is by name
 -- because 'Thena.Syntax.Concrete.RawSplice' names a binding; see its comment
 -- for why it names one rather than holding an expression.
-type Splices = [(String, Core)]
+type Splices = [(String, Filling)]
+
+-- | What a splice is filled with, and it is decided by the POSITION (MS5 phase
+-- 88).
+--
+-- **A splice supplies a nonterminal** — his principle — so the grammar already
+-- knows which of these a given hole wants: a term position parses to
+-- 'Thena.Syntax.Concrete.RawSplice' and wants a 'Core'; a name position parses
+-- to 'Thena.Syntax.Concrete.RawIdentSplice' and wants an 'Ident'. Nothing has
+-- to be annotated and the two cannot be confused, because no position accepts
+-- both.
+data Filling
+  = FillTerm Core
+  | FillName Ident
+  deriving (Eq, Show)
+
+-- | A written name, or the one a splice supplies (MS5 phase 88).
+--
+-- **The one place a name splice is read**, so every position that wants a name
+-- gets the same behaviour and the same error for an unfilled one.
+nameOf :: Splices -> RawIdent -> Either ResolveError String
+nameOf sp i = case i of
+  RawWord x        -> Right x
+  RawIdentSplice x -> case lookup x sp of
+    Just (FillName (Ident nm)) -> Right nm
+    -- Cannot arise for the same reason the term case cannot: a name position
+    -- parses to 'RawIdentSplice' and only a name can be asked for it.
+    Just (FillTerm _)          -> Left (SpliceNotFilled x)
+    Nothing                    -> Left (SpliceNotFilled x)
 
 -- | Resolve a raw tree as a core term. Holes, guesses and constraints are
 -- rejected here: they live only in a development (§3.1).
@@ -126,8 +156,11 @@ core env gs sp ctx local n raw = case raw of
   -- spliced as it stands, and a binder above it weakens it, which is what
   -- @close@ does for every other term this function builds.
   RawSplice x -> case lookup x sp of
-    Just t  -> Right (t, n)
-    Nothing -> Left (SpliceNotFilled x)
+    Just (FillTerm t) -> Right (t, n)
+    -- Cannot arise: a term position parses to 'RawSplice' and a name position
+    -- to 'RawIdentSplice', so what fills one is decided before this runs.
+    Just (FillName _) -> Left (SpliceNotFilled x)
+    Nothing           -> Left (SpliceNotFilled x)
 
   RawUniverse k -> Right (Universe (levelOfNat k), n)
 
@@ -142,7 +175,7 @@ core env gs sp ctx local n raw = case raw of
 
   -- @foo {ℓ 0}@ — a global at level arguments. **Refused on a local**: only a
   -- definition has level parameters, and a λ-bound name has none to give.
-  RawAt s rls -> case lookup s local of
+  RawAt i rls -> nameOf sp i >>= \s -> case lookup s local of
     Just _  -> Left (LevelArgumentsOnALocal s)
     Nothing -> case lookupEntry s ctx of
       Just _ -> Left (LevelArgumentsOnALocal s)
@@ -167,7 +200,8 @@ core env gs sp ctx local n raw = case raw of
   RawLam bs b -> binders env gs sp Lam ctx local n bs b
   RawPi bs b  -> binders env gs sp Pi ctx local n bs b
 
-  RawLet x val ty b -> do
+  RawLet i val ty b -> do
+    x          <- nameOf sp i
     (val', n1) <- core env gs sp ctx local n val
     (ty', n2)  <- core env gs sp ctx local n1 ty
     let (v, n3) = fresh n2
@@ -194,7 +228,8 @@ core env gs sp ctx local n raw = case raw of
   -- §3.6's "one namespace, the innermost wins" that round-tripped perfectly
   -- and so was invisible to every test. Now a shadowed name resolves to the
   -- local and is refused, because a local is not a datatype.
-  RawElim d rls ps m ms is t -> do
+  RawElim di rls ps m ms is t -> do
+    d         <- nameOf sp di
     dn        <- datatypeNamed env gs sp ctx local d
     def       <- maybe (Left (NotADatatype d)) Right (lookupInductive dn env)
     let dls = map levelOfNat rls
@@ -259,7 +294,8 @@ binders
   -> Either ResolveError (Core, Int)
 binders env gs sp con ctx local n bs b = case bs of
   [] -> core env gs sp ctx local n b
-  RawBinder x ty : rest -> do
+  RawBinder i ty : rest -> do
+    x         <- nameOf sp i
     (ty', n1) <- core env gs sp ctx local n ty
     let (v, n2) = fresh n1
     (b', n3) <- binders env gs sp con ctx ((x, v) : local) n2 rest b
@@ -285,14 +321,16 @@ partial env gs sp ctx local n raw = case raw of
   -- is the escape, and 'RawQuote' below is where it stops the spine.
   RawPi bs b -> binderLinks env gs sp Quantify ctx local n bs b
 
-  RawLet x val ty b -> do
+  RawLet i val ty b -> do
+    x          <- nameOf sp i
     (val', n1) <- core env gs sp ctx local n val
     (ty', n2)  <- core env gs sp ctx local n1 ty
     let (v, n3) = fresh n2
     (b', n4)   <- partial env gs sp ctx ((x, v) : local) n3 b
     Right (Under (Define v (Ident x) val' ty') b', n4)
 
-  RawClaim x ty b -> do
+  RawClaim i ty b -> do
+    x         <- nameOf sp i
     (ty', n1) <- core env gs sp ctx local n ty
     let (v, n2) = fresh n1
     (b', n3)  <- partial env gs sp ctx ((x, v) : local) n2 b
@@ -300,7 +338,8 @@ partial env gs sp ctx local n raw = case raw of
 
   -- The guess body does NOT see the hole it fills: Γ_(?x ≐ P : S . p) = Γ_P
   -- (§4.5). Resolved with 'local' as it was; only the continuation gains @x@.
-  RawGuess x ty g b -> do
+  RawGuess i ty g b -> do
+    x         <- nameOf sp i
     (ty', n1) <- core env gs sp ctx local n ty
     (g', n2)  <- partial env gs sp ctx local n1 g
     let (v, n3) = fresh n2
@@ -335,7 +374,8 @@ binderLinks
   -> [RawBinder] -> Raw -> Either ResolveError (Partial, Int)
 binderLinks env gs sp build ctx local n bs b = case bs of
   [] -> partial env gs sp ctx local n b
-  RawBinder x ty : rest -> do
+  RawBinder i ty : rest -> do
+    x         <- nameOf sp i
     (ty', n1) <- core env gs sp ctx local n ty
     let (v, n2) = fresh n1
     (b', n3) <- binderLinks env gs sp build ctx ((x, v) : local) n2 rest b
@@ -415,7 +455,12 @@ telescope
   :: GlobalEnv -> Globals -> Context -> Local -> Int
   -> [RawBinder] -> Either ResolveError (Context, Local, Int)
 telescope _ _ _ local n [] = Right ([], local, n)
-telescope env gs ctx local n (RawBinder x ty : rest) = do
+-- **No splices here** (MS5 phase 88): a telescope is a declaration's, read
+-- from a file rather than built by a rule, so there is no environment for a
+-- splice to be filled from — which is why 'core' is called with @[]@ below and
+-- was before this phase too.
+telescope env gs ctx local n (RawBinder i ty : rest) = do
+  x         <- nameOf [] i
   (ty', n1) <- core env gs [] ctx local n ty
   let (v, n2) = fresh n1
   (xi, local', n3) <- telescope env gs ctx ((x, v) : local) n2 rest

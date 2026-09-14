@@ -36,6 +36,7 @@ module Thena.Syntax.Parser
 import Thena.Syntax.Concrete
   ( Raw (..)
   , RawBinder (..)
+  , RawIdent (..)
   , RawConstraint (..)
   , RawConstructor (..)
   , RawData (..)
@@ -112,17 +113,17 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 Term :: { Raw }
   : 'λ' Binders '->' Term                          { RawLam (reverse $2) $4 }
   | '∀' Binders '->' Term                          { RawPi (reverse $2) $4 }
-  | let ident '=' Term ':' Term in Term            { RawLet $2 $4 $6 $8 }
-  | let '?' ident ':' Term in Term                 { RawClaim $3 $5 $7 }
-  | let '?' ident ':' Term '≐' '(' Term ')' in Term
+  | let Ident '=' Term ':' Term in Term            { RawLet $2 $4 $6 $8 }
+  | let '?' Ident ':' Term in Term                 { RawClaim $3 $5 $7 }
+  | let '?' Ident ':' Term '≐' '(' Term ')' in Term
                                                    { RawGuess $3 $5 $8 $11 }
   | Constraint '▸' Term                            { RawPending $1 $3 }
   -- **Level arguments are written or omitted** (MS3 phase 31c). Omitting them
   -- is the only spelling for a monomorphic family, which is every family
   -- written before this phase, so nothing existing moves.
-  | elim ident '(' Atoms ')' Atom '(' Atoms ')' '(' Atoms ')' Atom
+  | elim Ident '(' Atoms ')' Atom '(' Atoms ')' '(' Atoms ')' Atom
       { RawElim $2 [] (reverse $4) $6 (reverse $8) (reverse $11) $13 }
-  | elim ident LevelArgs '(' Atoms ')' Atom '(' Atoms ')' '(' Atoms ')' Atom
+  | elim Ident LevelArgs '(' Atoms ')' Atom '(' Atoms ')' '(' Atoms ')' Atom
       { RawElim $2 $3 (reverse $5) $7 (reverse $9) (reverse $12) $14 }
   | App '->' Term                                  { RawArrow $1 $3 }
   | App                                            { $1 }
@@ -490,7 +491,7 @@ Atom :: { Raw }
   -- 'Thena.Syntax.Lexer.TEscapeClose' for the one that ends an escape, so this
   -- cannot be confused with a level-argument brace.
   | '${' ident '}$'                        { RawSplice $2 }
-  | ident LevelArgs                        { RawAt $1 $2 }
+  | ident LevelArgs                        { RawAt (RawWord $1) $2 }
   | univ                                   { RawUniverse $1 }
   | Type                                   { RawUniverseOpen }
   | '(' Term ')'                           { $2 }
@@ -528,8 +529,17 @@ Binders :: { [RawBinder] }
   : Binder                                 { [$1] }
   | Binders Binder                         { $2 : $1 }
 
+-- **A name, written or spliced** (MS5 phase 88). Every position below that
+-- wants a name goes through this, so @${x}@ is accepted wherever a name is and
+-- nowhere else — which is what makes the two splice readings unambiguous: a
+-- term position yields a 'Thena.Syntax.Concrete.RawSplice' and holds a
+-- @Core@, a name position yields a 'RawIdentSplice' and holds a @Name@.
+Ident :: { RawIdent }
+  : ident                                  { RawWord $1 }
+  | '${' ident '}$'                        { RawIdentSplice $2 }
+
 Binder :: { RawBinder }
-  : '(' ident ':' Term ')'                 { RawBinder $2 $4 }
+  : '(' Ident ':' Term ')'                 { RawBinder $2 $4 }
 
 {
 
