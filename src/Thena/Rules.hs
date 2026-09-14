@@ -42,6 +42,7 @@ module Thena.Rules
   , resolveTy
   , builtInTypes
   , resolveBlock
+  , isOpWord
   , surfaceBlocks
   , testWord
   , testOperands
@@ -62,6 +63,9 @@ import Thena.Ops
   , Op (..)
   , Operand (..)
   , Rule (..)
+  , Pattern (..)
+  , patternBinds
+  , matchClause
   , Test (..)
   , Value (..)
   , operandsOf
@@ -101,6 +105,7 @@ import Thena.Instral.Concrete
   , RawOp (..)
   , RawOperand (..)
   , RawRule (..)
+  , RawPattern (..)
   , RawTest (..)
   )
 import Data.Either (partitionEithers)
@@ -261,16 +266,39 @@ dispatch base env cur =
 -- it enters the body. Passing the values rather than an environment is what
 -- keeps that true: clauses of one name need not agree about what they call
 -- their parameters.
+--
+-- == A rule is searched and a function is called — MS5 phase 82
+--
+-- **This is where his ruling becomes true of the code**, and until patterns it
+-- did not have to be. Phase 80's note says the engine needed no change because
+-- it decides @Choice@ against @Call@ by @hasNext@ alone, and with /one/ clause
+-- per function that already gave a function a plain call frame. Patterns give a
+-- function several clauses, so @hasNext@ would say yes and a function call would
+-- build a choice point, show in @:choices@ and be reachable by @retry@ — which
+-- is a rule\'s behaviour in a function\'s spelling, exactly what 80 removed.
+--
+-- **@take 1@ is the whole of it.** A function\'s matching clauses are cut to the
+-- first; a rule\'s are all offered, as they always were. The two lists cannot
+-- both be non-empty for one name at one arity — 'Thena.Errors.RuleAndFunction'
+-- refuses that at load — so this is a choice between them and not a merge.
+--
+-- **First-match is what a pattern language means by order**, and it is the
+-- other half of lifting @FunctionClauseUnreachable@: @size []@ before
+-- @size [_, ..._]@ reads as Haskell does, top to bottom, no backtracking.
 clauses
   :: [RuleBase] -> GlobalEnv -> Cursor -> GlobalName -> [Value] -> RuleIter
-clauses bases env cur nm vs =
-  RuleIter
-    [ r
-    | r <- allCallable bases
-    , ruleName r == nm
-    , length (ruleParams r) == length vs
-    , all (holds env cur (zip (ruleParams r) vs)) (ruleHead r)
-    ]
+clauses bases env cur nm vs = RuleIter (searched ++ take 1 called)
+  where
+    fitting rs =
+      [ r
+      | r <- rs
+      , ruleName r == nm
+      , Just bound <- [matchClause r vs]
+      , all (holds env cur bound) (ruleHead r)
+      ]
+
+    searched = fitting (concatMap baseRules bases)
+    called   = fitting (concatMap baseFunctions bases)
 
 -- | The arities of every rule bearing this name, in search order.
 --
@@ -448,6 +476,15 @@ data RuleError
     -- ^ the right test word, written with the wrong arguments (MS4 phase 47).
     -- No instruction index, for 'NoSuchTest'\'s reason — a head is not a
     -- sequence
+  | BadPattern        GlobalName String
+    -- ^ a parenthesised parameter whose word is not @some@, or is @some@ with
+    -- the wrong number of arguments (MS5 phase 82). @instral@'s own data has
+    -- exactly one named constructor that takes an argument
+  | RepeatedInPattern GlobalName Name
+    -- ^ one clause's parameters bind the same name twice (MS5 phase 82).
+    -- Patterns are linear: @f x x@ is refused rather than read as /and the two
+    -- are equal/, which is a match on a value's identity and a different
+    -- feature
   | ReservedName      GlobalName Name
     -- ^ a parameter or a binding named @true@ or @false@ (MS5 phase 64) — the
     -- two words @instral@ reads as literals wherever an operand is read, so a
@@ -540,20 +577,38 @@ data RuleError
 -- states the head admits. That is not decidable shallowly, and §8 already
 -- states the answer — a rule may match, run and fail.
 validate :: Rule -> [RuleError]
-validate r = reserved ++ headScope ++ go 0 (initiallyBound r) (ruleBody r)
+validate r = reserved ++ repeated ++ headScope ++ go 0 (initiallyBound r) (ruleBody r)
   where
     nm = ruleName r
 
     -- **A name that is a literal cannot also be a variable** (MS5 phase 64).
     -- @true@ and @false@ are read as 'Thena.Ops.VBool' wherever an operand is
-    -- read, so a parameter or a binding of either name could never be read
-    -- back — every @Ref@ to it has already become a literal. Refusing it here
-    -- is the difference between a rule that cannot be written and one that
-    -- quietly does something else than it says.
+    -- read, so a binding of either name could never be read back — every @Ref@
+    -- to it has already become a literal. Refusing it here is the difference
+    -- between a rule that cannot be written and one that quietly does something
+    -- else than it says.
+    --
+    -- **It no longer looks at the parameters, because it cannot fire there**
+    -- (MS5 phase 82). 'Thena.Rules.resolvePattern' reads a parameter\'s @true@
+    -- as 'Thena.Ops.PBool' before this runs, so no pattern can bind the name and
+    -- the check was unreachable from that side. Removing what a change has made
+    -- dead is the standing rule; the /binding/ half is untouched and still
+    -- fires.
     reserved =
       [ ReservedName nm n
-      | n <- ruleParams r ++ [ n | Bind n _ _ <- ruleBody r ]
+      | n <- [ n | Bind n _ _ <- ruleBody r ]
       , n `elem` reservedNames
+      ]
+
+    -- **Patterns are linear** (MS5 phase 82). @f x x@ is refused rather than
+    -- read as /and the two are equal/: matching a value against another value
+    -- is a different feature, it needs @Eq@ on every 'Thena.Ops.Value'
+    -- including a closure, and nothing has asked for it. Haskell refuses it for
+    -- the same reason.
+    repeated =
+      [ RepeatedInPattern nm n
+      | (i, n) <- zip [0 :: Int ..] boundByParams
+      , n `elem` take i boundByParams
       ]
 
     -- **A head may name only the rule's own parameters** (MS4 phase 47). It
@@ -566,8 +621,15 @@ validate r = reserved ++ headScope ++ go 0 (initiallyBound r) (ruleBody r)
       [ UnboundInHead nm n
       | t <- ruleHead r
       , n <- concatMap refsIn (testOperands t)
-      , n `notElem` ruleParams r
+      , n `notElem` boundByParams
       ]
+
+    -- **A head sees what the PATTERNS bind, not the parameters** (MS5 phase
+    -- 82), and that is strictly more than before: @rule f [a, ...rest] :- when
+    -- (surface-is-name a)@ can ask about an element. 'clauses' passes the very
+    -- environment 'Thena.Ops.matchClause' built, so what this admits and what
+    -- 'holds' is given cannot drift.
+    boundByParams = concatMap patternBinds (ruleParams r)
 
     go _ _ [] = []
     go i bound (instr : rest) =
@@ -591,7 +653,7 @@ validate r = reserved ++ headScope ++ go 0 (initiallyBound r) (ruleBody r)
     -- what the reader sees at that line — the same choice a nested call makes,
     -- which is lifted into the instruction that wanted it.
     insideLambda i bound o = case o of
-      Op.Lambda ps body -> inner i (ps ++ bound) body
+      Op.Lambda ps body -> inner i (concatMap patternBinds ps ++ bound) body
       _                 -> []
 
     inner _ _ [] = []
@@ -770,7 +832,7 @@ reservedNames = ["true", "false"]
 -- It used to add @hint@ when a rule's head asked about one, which was the only
 -- name a body could read that no @Bind@ introduced. Nothing is magic now.
 initiallyBound :: Rule -> [Name]
-initiallyBound = ruleParams
+initiallyBound = concatMap patternBinds . ruleParams
 
 -- | Every rule in one base, checked.
 --
@@ -807,12 +869,14 @@ validateBase = concatMap validate . baseRules
 -- A rule body silently ignored every @n : Ty@ it was given.
 resolveRule :: [(String, Language)] -> RawRule -> Either [RuleError] Rule
 resolveRule ls (RawRule nm ps ts body) =
-  case (headErrs, resolveBlock ls g body) of
-    ([], Right instrs) -> Right (Rule g ps tests instrs)
-    (_,  Right _)      -> Left headErrs
-    (_,  Left bodyErrs) -> Left (headErrs ++ bodyErrs)
+  case (patErrs, headErrs, resolveBlock ls g (concatMap patternBinds qs) body) of
+    ([], [], Right instrs) -> Right (Rule g qs tests instrs)
+    (_,  _,  Right _)      -> Left (patErrs ++ headErrs)
+    (_,  _,  Left bodyErrs) -> Left (patErrs ++ headErrs ++ bodyErrs)
   where
     g = GlobalName nm
+
+    (patErrs, qs) = partitionEithers (map (resolvePattern g) ps)
 
     (headErrs, tests) = partitionEithers (map test ts)
     test (RawTest w os) = case traverse headOperand os of
@@ -923,7 +987,11 @@ builtInTypes =
 -- 'validate', which would report it against a binding the author never wrote.
 resolveFunction :: [(String, Language)] -> RawFunction -> Either [RuleError] Rule
 resolveFunction ls (RawFunction nm ps body) =
-  Rule (GlobalName nm) ps [] <$> bodyInstrs ls (GlobalName nm) nm body
+  case partitionEithers (map (resolvePattern g) ps) of
+    ([], qs) -> Rule g qs [] <$> bodyInstrs ls g nm (concatMap patternBinds qs) body
+    (es, _)  -> Left es
+  where
+    g = GlobalName nm
 
 -- | Compile what stands right of a function's @=@ or a lambda's @->@.
 --
@@ -942,16 +1010,16 @@ resolveFunction ls (RawFunction nm ps body) =
 -- at all. Both are reported against the name rather than against a binding the
 -- author never wrote.
 bodyInstrs
-  :: [(String, Language)] -> GlobalName -> String -> RawBody
+  :: [(String, Language)] -> GlobalName -> String -> [Name] -> RawBody
   -> Either [RuleError] [Instr]
-bodyInstrs ls g nm body = case body of
+bodyInstrs ls g nm bound body = case body of
   BodyRhs rhs -> do
-    is <- resolveBlock ls g [RawBind lambdaResult rhs]
+    is <- resolveBlock ls g bound [RawBind lambdaResult rhs]
     case [ () | Bind n _ o <- is, n == lambdaResult, not (produces o) ] of
       _ : _ -> Left [FunctionLeavesNothing nm]
       []    -> Right (is ++ [Do (Return (Ref lambdaResult))])
   BodyBlock raws -> do
-    is <- resolveBlock ls g raws
+    is <- resolveBlock ls g bound raws
     if any returns is then Right is else Left [FunctionLeavesNothing nm]
   where
     returns i = case i of
@@ -971,18 +1039,31 @@ bodyInstrs ls g nm body = case body of
 -- **An annotation is attached here, not parsed into an instruction** (MS5 phase
 -- 77): @n : Ty@ is about the @n = …@ that follows it, so this walks the written
 -- list in pairs rather than mapping over it. Everything else is unchanged.
-resolveBlock :: [(String, Language)] -> GlobalName -> [RawInstr] -> Either [RuleError] [Instr]
-resolveBlock ls g body = case partitionEithers (walk 0 body) of
+resolveBlock
+  :: [(String, Language)] -> GlobalName -> [Name] -> [RawInstr]
+  -> Either [RuleError] [Instr]
+resolveBlock ls g bound0 body = case partitionEithers (walk 0 bound0 body) of
   ([], instrs) -> Right (concat instrs)
   (errs, _)    -> Left errs
   where
-    walk _ [] = []
-    walk i (RawAnnot n t : rest) = case rest of
+    walk _ _ [] = []
+    walk i bound (RawAnnot n t : rest) = case rest of
       RawBind m r : more | m == n ->
-        annotated i n t (instruction ls g (i + 1) (RawBind m r))
-          : walk (i + 2) more
+        annotated i n t (instruction ls g bound (i + 1) (RawBind m r))
+          : walk (i + 2) (m : bound) more
       _ -> [Left (AnnotationWithoutBinding g i n)]
-    walk i (ri : rest) = instruction ls g i ri : walk (i + 1) rest
+    walk i bound (ri : rest) =
+      instruction ls g bound i ri : walk (i + 1) (binds ri ++ bound) rest
+
+    -- **What is in scope for the NEXT instruction**, which is the one thing
+    -- 'instruction' could not work out for itself (MS5 phase 82). A body is a
+    -- sequence and a name is bound from the line after the one that binds it,
+    -- which is exactly what 'validate' has always walked; this is the same walk
+    -- one pass earlier, because the decision it feeds — /is this bare word a
+    -- value or a call?/ — has to be made while the 'Op' is built.
+    binds ri = case ri of
+      RawBind n _ -> [n]
+      _           -> []
 
     -- The annotation lands on the instruction that binds the name, which is the
     -- last of however many the binding expanded to — a nested call is lifted in
@@ -1004,14 +1085,33 @@ resolveBlock ls g body = case partitionEithers (walk 0 body) of
 -- one that wanted its value. The written index is kept for errors — it is the
 -- line the author can see — so the instruction numbers in a message still count
 -- what was written and not what it expanded to.
-instruction :: [(String, Language)] -> GlobalName -> Int -> RawInstr -> Either RuleError [Instr]
-instruction ls g i ri = case ri of
+instruction
+  :: [(String, Language)] -> GlobalName -> [Name] -> Int -> RawInstr
+  -> Either RuleError [Instr]
+instruction ls g bound i ri = case ri of
   -- **@x = true@ is the literal, not a call to a rule called @true@** (MS5
   -- phase 73). @true@ and @false@ are read as values wherever an /operand/ is
   -- read (phase 64), and the right of an @=@ is the one place a bare word goes
   -- to 'operation' instead — so without this, @f false@ works and @b = false@
   -- says /no rule is called false/.
   RawBind n (RhsOp (RawOp w [])) | w `elem` reservedNames ->
+    pure . Bind n Nothing . Op.Value <$> operandOf ls g i "=" (RawRef w)
+  -- **@x = y@ where @y@ is a LOCAL is that value, not a call to a rule called
+  -- @y@** (MS5 phase 82) — the same defect one guard over, and phase 73's
+  -- comment above is its own best statement: the right of an @=@ is the one
+  -- place a bare word goes to 'operation' instead of being read as an operand.
+  --
+  -- **This is his three-way rule finally written down where it is decided**:
+  -- /an op if one bears the name, else the local if one is bound, else a rule
+  -- call/ (his, 2026-09-12). "Thena.Engine" states it in a comment and
+  -- implemented only the closure half, so @id x = x@ asked for @x@ applied to
+  -- no arguments — a 'Thena.Instral.Type.TFun' @[]@, which is
+  -- @ms5\/CLOSEOUT.md@ 23's unwritable type — and failed at run time with
+  -- /no rule is called x/.
+  --
+  -- **An op word still wins**, because 'operation' is not reached: a word that
+  -- names an op never gets here, exactly as @true@ does not.
+  RawBind n (RhsOp (RawOp w [])) | w `elem` bound, not (isOpWord w) ->
     pure . Bind n Nothing . Op.Value <$> operandOf ls g i "=" (RawRef w)
   RawBind n (RhsOp o)    -> lift (Bind n Nothing) o
   -- **A value on the right of an @=@** (MS5 phase 68a) — @x = [1, 2]@. Its
@@ -1042,16 +1142,57 @@ hoistedBind ls g i (n, r) = case r of
   RhsValue (RawLambda ps b)   -> Bind n Nothing <$> closure ls g i ps b
   RhsValue o                  -> Bind n Nothing . Op.Value <$> operandOf ls g i "=" o
 
+-- | Turn a written parameter into a 'Pattern' (MS5 phase 82).
+--
+-- **Which of five things a bare word is, is decided here and nowhere else** —
+-- a variable, @_@, @true@, @false@ or @none@ — for the reason 'operandOf'
+-- already has: one lexer serves every language, so none of those is a keyword
+-- and the grammar can only see an @ident@. Reading them in the same place as an
+-- operand's is what keeps @f true@ meaning the same thing on both sides of the
+-- @=@.
+--
+-- **@_@ is a pattern and not a name**, which costs nothing: it is a perfectly
+-- good identifier everywhere else and stays one, because this function is the
+-- only reader of a parameter position.
+--
+-- **Linearity is NOT checked here** — 'validate' does it, with every other
+-- name question about a rule, so that a function and a rule get the same answer
+-- and the message carries the rule\'s name.
+resolvePattern :: GlobalName -> RawPattern -> Either RuleError Pattern
+resolvePattern g = go
+  where
+    go rp = case rp of
+      RawPWord "_"     -> Right PWild
+      RawPWord "true"  -> Right (PBool True)
+      RawPWord "false" -> Right (PBool False)
+      RawPWord "none"  -> Right PNone
+      RawPWord n       -> Right (PVar n)
+      RawPInt  i       -> Right (PInt i)
+      RawPChar c       -> Right (PChar c)
+      RawPText t       -> Right (PText t)
+      RawPPair a b     -> PPair <$> go a <*> go b
+      RawPList ps mt   -> PList <$> traverse go ps <*> traverse go mt
+      -- **@some@ is the only word that takes an argument**, and a word that is
+      -- not it is refused rather than read as an application: @instral@\'s own
+      -- data has no other named constructor, and stage a of
+      -- @discussion\/pattern-matching.md@ is @instral@\'s own data.
+      RawPApp "some" [a] -> PSome <$> go a
+      RawPApp w _        -> Left (BadPattern g w)
+
 -- | A lambda, compiled the way a function is: a body that ends in @return@.
 --
 -- **The same compilation as 'resolveFunction'**, deliberately — §1.1 says a
 -- function is a rule with one clause and no head, and a lambda is that function
 -- without a name, so there is one way to build a body and not two.
-closure :: [(String, Language)] -> GlobalName -> Int -> [Name] -> RawBody -> Either RuleError Op
-closure ls g i ps b = case bodyInstrs ls g "λ" b of
-  Left (e : _) -> Left e
-  Left []      -> Left (BadOperands g i "λ")
-  Right is     -> Right (Op.Lambda ps is)
+closure :: [(String, Language)] -> GlobalName -> Int -> [RawPattern] -> RawBody -> Either RuleError Op
+closure ls g i ps b = case traverse (resolvePattern g) ps of
+  Left e   -> Left e
+  -- **A lambda's own parameters are in scope in its body**, which is what makes
+  -- @\\ x -> x@ read as the identity rather than as a call (MS5 phase 82).
+  Right qs -> case bodyInstrs ls g "λ" (concatMap patternBinds qs) b of
+    Left (e : _) -> Left e
+    Left []      -> Left (BadOperands g i "λ")
+    Right is     -> Right (Op.Lambda qs is)
 
 -- | Where a lambda's and a function's result is parked. It contains a token
 -- character, so nothing an author writes can collide with it.
@@ -1246,6 +1387,15 @@ binaryOps =
   , ("concat", Concat), ("unify", Unify), ("unify-into", Op.UnifyInto)
   , ("arrow", Arrow), ("apply-to", ApplyTo), ("apply-next", Op.ApplyNext)
   ]
+
+-- | Does some op bear this word at /some/ arity?
+--
+-- **The shadowing guard** (MS5 phase 82, and his 2026-09-12 ruling one layer
+-- up): a word an op bears is the op, whatever a local is called. It is asked
+-- only where a bare word right of an @=@ could be a local, so an op word never
+-- has to compete with one.
+isOpWord :: String -> Bool
+isOpWord w = w `elem` partWords || w `elem` map fst opWords
 
 -- | Every op word paired with an op that bears it, built from the three tables
 -- above — so nothing has to be listed a second time.
@@ -1569,7 +1719,7 @@ surfaceBlocks
 surfaceBlocks ls g is = concat <$> traverse one (zip [0 :: Int ..] (blocksUnder is))
   where
     one (k, raws) = do
-      body <- resolveBlock ls nm raws
+      body <- resolveBlock ls nm [] raws
       case [ ReturnInSurfaceBlock nm i | (i, instr) <- zip [0 ..] body, returns instr ] of
         e : es -> Left (e : es)
         []     -> do

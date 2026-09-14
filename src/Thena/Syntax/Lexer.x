@@ -97,6 +97,12 @@ tokens :-
   "|-"          { keyword TTurnstile }
   "⊢"           { keyword TTurnstile }
   "[|"          { keyword TOpenQuote }
+  -- **@...@ is a token and reserves nothing** (MS5 phase 82). @.@ is an
+  -- @$idchar@ but not an @$idstart@, so no identifier has ever begun with one
+  -- and @...rest@ lexes as this token and then a name. An identifier that
+  -- /contains/ dots — @a...b@ — is untouched, because this rule can only win at
+  -- the start of a token.
+  "..."         { keyword TSpread }
   "["           { keyword TLBracket }
   "]"           { keyword TRBracket }
   ","           { keyword TComma }
@@ -198,6 +204,7 @@ data Token
   | TLBracket
   | TRBracket
   | TComma
+  | TSpread      -- ^ @...@, the list-pattern tail marker (MS5 phase 82)
   | TUniverse Int
   | TUniverseOpen
   | TIdent String

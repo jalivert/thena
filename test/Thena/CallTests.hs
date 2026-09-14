@@ -103,8 +103,8 @@ isGuess m = case focus (cursor (development m)) of
 -- arguments to its own, which is why the @Choice@ frame keeps the argument
 -- /values/ rather than a ready-made environment.
 badClause, goodClause :: Rule
-badClause  = Rule (GlobalName "step") ["x"] [FocusIsHole] [Do Solve]
-goodClause = Rule (GlobalName "step") ["y"] [FocusIsHole] [Do (Try (Ref "y"))]
+badClause  = Rule (GlobalName "step") [Ops.PVar "x"] [FocusIsHole] [Do Solve]
+goodClause = Rule (GlobalName "step") [Ops.PVar "y"] [FocusIsHole] [Do (Try (Ref "y"))]
 
 -- | Same name, one argument fewer. Never a candidate for a two-argument call.
 nullary :: Rule
@@ -112,7 +112,7 @@ nullary = Rule (GlobalName "step") [] [FocusIsHole] [Do Attack]
 
 -- | Same name and arity, but a head that cannot pass at a hole.
 guessOnly :: Rule
-guessOnly = Rule (GlobalName "step") ["x"] [FocusIsGuess] [Do Solve]
+guessOnly = Rule (GlobalName "step") [Ops.PVar "x"] [FocusIsGuess] [Do Solve]
 
 -- --------------------------------------------------------------------------
 -- A head that asks about an argument (MS4 phase 47)
@@ -126,9 +126,9 @@ guessOnly = Rule (GlobalName "step") ["x"] [FocusIsGuess] [Do Solve]
 -- chosen by a test over the argument.
 nameClause, otherClause :: Rule
 nameClause =
-  Rule (GlobalName "pick") ["s"] [FocusIsHole, SurfaceIsName (Ref "s")]
+  Rule (GlobalName "pick") [Ops.PVar "s"] [FocusIsHole, SurfaceIsName (Ref "s")]
     [Do Attack]
-otherClause = Rule (GlobalName "pick") ["s"] [FocusIsHole] [Do (Try (Lit (VTerm type0)))]
+otherClause = Rule (GlobalName "pick") [Ops.PVar "s"] [FocusIsHole] [Do (Try (Lit (VTerm type0)))]
 
 callPick :: Surface -> [Instr]
 callPick t = [Do (Ops.Call (GlobalName "pick") [Lit (VSurface (rootedAt t))])]

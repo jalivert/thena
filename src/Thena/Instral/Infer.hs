@@ -41,6 +41,7 @@ import Thena.Ops
   , Op (..)
   , Operand (..)
   , Rule (..)
+  , Pattern (..)
   , Test
   , Value (..)
   , operandsOf
@@ -60,6 +61,12 @@ import Thena.Ops
 data Site
   = InHead GlobalName Int   -- ^ rule, which test
   | InBody GlobalName Int   -- ^ rule, which instruction
+  | InPattern GlobalName Int
+    -- ^ **a rule or function's parameter, and which one** (MS5 phase 82),
+    -- counted from zero. Its own site rather than 'InHead' or 'InBody': a
+    -- pattern runs before both, and a message that named the first instruction
+    -- for a fault in a parameter is exactly the class @ms5\/CLOSEOUT.md@ 28
+    -- records — /a message must identify the thing it is about uniquely/.
   | InSignature GlobalName Int
     -- ^ **the declaration itself, and its arity** (MS5 phase 67). His
     -- requirement: /a wrong annotation must report against the declaration, not
@@ -103,6 +110,10 @@ renderSite si = case si of
   InHead (GlobalName n) i -> n ++ ", test " ++ show (i + 1)
   InBody (GlobalName n) i -> n ++ ", instruction " ++ show (i + 1)
   InSignature (GlobalName n) a -> "signature " ++ n ++ "/" ++ show a
+  -- **Counted from one, like a test and an instruction**, and named /parameter/
+  -- rather than given a number alone: a clause's parameters are where the
+  -- reader's eye goes last, so the word is worth the four characters.
+  InPattern (GlobalName n) i -> n ++ ", parameter " ++ show (i + 1)
 
 renderInstralTypeError :: InstralTypeError -> String
 renderInstralTypeError e = case e of
@@ -323,6 +334,7 @@ inFileOrder rs = sortOn position
     nameIn si = case si of
       InHead n _      -> n
       InBody n _      -> n
+      InPattern n _   -> n
       InSignature n _ -> n
 
 -- | One strongly connected component: declare it, walk its clauses, generalise.
@@ -474,11 +486,70 @@ clause env st0 r = case fromMaybe (error "declareAll missed a rule")
      in generalEnough (InSignature (ruleName r) (length (sigParams sg))) table st2
   where
     walk ps res st =
-      let ctx = zip (ruleParams r) (map Mono ps)
-          st1 = foldl (headTest r ctx) st (zip [0 ..] (ruleHead r))
-       in body env r res ctx 0 st1 (ruleBody r)
+      let (ctx, st1)  = patternCtx (ruleName r) (ruleParams r) ps st
+          st2         = foldl (headTest r ctx) st1 (zip [0 ..] (ruleHead r))
+       in body env r res ctx 0 st2 (ruleBody r)
 
     resultOfSig sg = maybe [] (: []) (sigResult sg)
+
+-- | Type a run of patterns against a run of parameter types (MS5 phase 82).
+--
+-- **A pattern says its parameter\'s type directly**, which is why the phase
+-- made typing simpler rather than harder: @f [a, ...rest]@ needs no annotation
+-- and no head test to be known to take a list. Before patterns the only thing
+-- that could say so was 'testTypes', which maps a /head test/ to a type — one
+-- mechanism for heads and nothing at all for parameters.
+--
+-- **A literal pattern constrains and binds nothing**: @f 0@ pins the parameter
+-- to 'TInt' and adds no name. That is the same shape a head test has, one layer
+-- down.
+patternCtx :: GlobalName -> [Pattern] -> [Ty] -> St -> ([(Name, Local)], St)
+patternCtx g ps ts st0 = foldl one ([], st0) (zip3 [0 ..] ps ts)
+  where
+    one (acc, st) (i, pt, t) =
+      let (bs, st') = go' (InPattern g i) pt t st in (acc ++ bs, st')
+
+    go' si = go si
+
+    go si pt t st = case pt of
+      PVar n   -> ([(n, Mono t)], st)
+      PWild    -> ([], st)
+      PInt _   -> ([], unify si t TInt st)
+      PChar _  -> ([], unify si t TChar st)
+      PBool _  -> ([], unify si t TBool st)
+      -- **A text literal's type is DEFERRED, exactly as an operand's is** —
+      -- see 'settleText'. @f "x"@ therefore matches a 'TName' parameter as
+      -- readily as a 'TString' one, which is his 2026-09-12 ruling that a
+      -- string literal is accepted at either, holding on both sides of the @=@.
+      PText _  -> ([], st { stText = stText st ++ [(si, t)] })
+      PPair a b ->
+        let ((u, v), st1)  = two st
+            st2            = unify si t (TPair u v) st1
+            (bs1, st3)     = go si a u st2
+            (bs2, st4)     = go si b v st3
+         in (bs1 ++ bs2, st4)
+      PSome a ->
+        let (e, st1) = fresh st
+            st2      = unify si t (TOption e) st1
+         in go si a e st2
+      PNone ->
+        let (e, st1) = fresh st in ([], unify si t (TOption e) st1)
+      -- **Every element and the tail are typed against ONE element variable**,
+      -- which is what makes @[a, ...rest]@ say /a list of the same thing/
+      -- rather than three unrelated demands. The tail is a whole pattern, so it
+      -- is typed against @TList e@ and not against @e@.
+      PList qs mt ->
+        let (e, st1)   = fresh st
+            st2        = unify si t (TList e) st1
+            (bs, st3)  = foldl (\(a, k) q -> let (b, k') = go si q e k in (a ++ b, k'))
+                               ([], st2) qs
+         in case mt of
+              Nothing -> (bs, st3)
+              Just tl -> let (b2, st4) = go si tl (TList e) st3 in (bs ++ b2, st4)
+
+    two st = let (u, st1) = fresh st
+                 (v, st2) = fresh st1
+              in ((u, v), st2)
 
 -- | Are the scheme's variables still variables, and still distinct?
 --
@@ -578,10 +649,11 @@ operation env r res ctx si o st0 = case o of
   -- exactly as a rule's is; it already ends in a @return@, which is what pins
   -- the result.
   Lambda ps b ->
-    let (vs, st1)   = freshes (length ps) st0
-        (rv, st2)   = fresh st1
-        st3         = body env r (Just rv) (zip ps (map Mono vs) ++ ctx) 0 st2 b
-     in (Just (TFun vs rv), st3)
+    let (vs, st1)    = freshes (length ps) st0
+        (rv, st2)    = fresh st1
+        (bs, st3)    = patternCtx (ruleName r) ps vs st2
+        st4          = body env r (Just rv) (bs ++ ctx) 0 st3 b
+     in (Just (TFun vs rv), st4)
 
   -- **A local shadows a rule** — his ruling, 2026-09-12 — so a call whose name
   -- is bound here is an application of that value, and its type says so.

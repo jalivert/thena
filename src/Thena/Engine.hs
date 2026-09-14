@@ -45,6 +45,7 @@ module Thena.Engine
   ) where
 
 import Data.List (intercalate, nub)
+import Data.Maybe (fromMaybe)
 import qualified Data.List.NonEmpty as NE
 
 import Thena.Core.Level (Level (..), freshLevelMeta, levelOfNat, levelVarName)
@@ -104,6 +105,7 @@ import Thena.Ops
   , Op (..)
   , Operand (..)
   , Value (..)
+  , matchClause
   )
 import Thena.Global.Declare (buildInductive)
 import Thena.Global.Env
@@ -1038,12 +1040,19 @@ perform instr rest m = case operation instr of
     , length ps == length args ->
         case traverse (operandValue (env (exec m))) args of
           Left e   -> failure e m
+          -- **A closure's patterns are matched, not zipped** (MS5 phase 82),
+          -- and a refusal is an ordinary failure: @(\ [a, ...r] -> …) []@ has
+          -- nothing to bind. §2's ruling is that a refutable pattern that does
+          -- not match /fails/ — in a rule that backtracks, which is what he
+          -- wanted; in a lambda it is the caller\'s failure, as in Haskell.
+          Right vs | Nothing <- Op.matchPatterns ps vs ->
+            failure (PatternDidNotMatch nm (length vs)) m
           Right vs ->
             -- **The same frame a rule call pushes**, and deliberately: a closure
             -- is an anonymous rule, so @return@, backtracking below it and the
             -- destination all work without a second mechanism.
             Continue m
-              { exec = Exec body (zip ps vs ++ cl)
+              { exec = Exec body (fromMaybe [] (Op.matchPatterns ps vs) ++ cl)
                          (Thena.Engine.Call rest (env (exec m)) wants False
                             : stack (exec m))
               }
@@ -1065,8 +1074,13 @@ perform instr rest m = case operation instr of
       -- filtered on arity, so the two lists agree by construction — and the
       -- frame keeps @vs@ rather than this, because the next clause may name its
       -- parameters differently ('seedFor').
+      -- @fromMaybe []@ cannot arise: 'clauses' answered with @r@ only because
+      -- 'Op.matchClause' succeeded on these very values. Written this way
+      -- rather than with a partial pattern so that the total function stays
+      -- total, which is what the one-matcher design is for.
       entering vs r fr k =
-        k { exec = Exec (ruleBody r) (zip (ruleParams r) vs) (fr : stack (exec m)) }
+        k { exec = Exec (ruleBody r) (fromMaybe [] (matchClause r vs))
+                     (fr : stack (exec m)) }
 
   -- §3.7's elimination tactic (phase 17). The goal is the focus, as with the
   -- six hole ops; the target is an operand, for the reason 'Try' takes one —
@@ -1459,10 +1473,16 @@ perform instr rest m = case operation instr of
   -- **@E⟦do { … }⟧ = play the block@** — the whole of that case. A block is
   -- written down, so there is nothing to elaborate; the instruction that plays
   -- it is the elaboration.
+  --
+  -- **Nothing is in scope for it** (the @[]@, MS5 phase 82), and that is not an
+  -- approximation: a block written in a surface term is validated in an empty
+  -- scope, so @do { goto n }@ naming an enclosing rule\'s local is already
+  -- refused at load. Passing the live environment here would make a bare word
+  -- resolve one way at load and another at run.
   Op.Play x -> case surfaceAt x of
     Left r  -> failure r m
     Right (Concrete.SurfaceDo body) ->
-      case resolveBlock (allLanguages (rules m)) (GlobalName "do") body of
+      case resolveBlock (allLanguages (rules m)) (GlobalName "do") [] body of
         Left errs -> failure (blockFailureOf errs) m
         Right is  -> Continue (advance m) { exec = (exec m) { pc = is ++ rest } }
     Right _ -> failure (ExpectedSurfaceShape "a do block") m
@@ -2114,10 +2134,14 @@ data RetryError = NoChoicePoint | UnknownChoice Int
 -- @Call@ could stop being a separate mechanism. A dispatch has no arguments and
 -- 'Thena.Rules.dispatch' skips parameterised rules, so this is just its
 -- 'entryEnv' — the hint, or nothing. A call carries no hint and binds its
--- arguments to the clause's own parameters, and 'Thena.Rules.clauses' has
--- already guaranteed the two lists are the same length.
+-- arguments to the clause's own parameters by MATCHING them (MS5 phase 82),
+-- which 'Thena.Rules.clauses' has already done once to choose this clause.
+--
+-- **It is the same 'Thena.Ops.matchClause' call**, and that is the point: the
+-- clause that was chosen and the environment it runs in cannot disagree about
+-- what a pattern bound. Before patterns both were @zip@ and agreeing was free.
 seedFor :: Frame -> Rule -> Env
-seedFor fr r = entryEnv fr ++ zip (ruleParams r) (callArgs fr)
+seedFor fr r = entryEnv fr ++ fromMaybe [] (matchClause r (callArgs fr))
 
 retryFrom :: Maybe Int -> Machine -> Either RetryError (Machine, String)
 retryFrom target m = go (0 :: Int) (stack (exec m))

@@ -23,6 +23,7 @@ module Thena.Repl
   , renderSurface
   , renderLevel
   , renderPartial
+  , renderPattern
   , renderCursor
   , renderWhere
   , renderMachine
@@ -150,6 +151,7 @@ import Thena.Ops
   , Op
   , Operand (..)
   , Rule (..)
+  , Pattern (..)
   , Value (..)
   , operandsOf
   )
@@ -166,7 +168,7 @@ import Data.List (stripPrefix, intercalate, partition)
 import Thena.Instral.Grammar (GrammarError (..))
 import Thena.Instral.Type (Signature, Ty, renderSignature, renderTy)
 import Thena.Instral.Infer (renderInstralTypeError)
-import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRhs (..), RawBody (..))
+import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRhs (..), RawBody (..), RawPattern (..))
 --
 -- The prelude is loaded first (§9, phase 11) and **silently on success** — it
 -- is three @data@ lines and announcing them at every start is noise. A failure
@@ -675,6 +677,7 @@ describe t = case t of
   TLanguage   -> "language"
   -- Never lexed; "Thena.Driver" inserts it at a rule file's column 1.
   TChar c     -> show c
+  TSpread     -> "..."
   TLBracket   -> "["
   TRBracket   -> "]"
   TComma      -> ","
@@ -1263,7 +1266,7 @@ renderValue n ctx v = case v of
   -- **A closure prints as its shape** (MS5 phase 68b): its body is instructions
   -- and its captured environment may hold anything, so printing either would say
   -- more than a reader wants and less than they could use.
-  VClosure ps _ _    -> "\\ " ++ unwords ps ++ " -> …"
+  VClosure ps _ _    -> "\\ " ++ unwords (map renderPattern ps) ++ " -> …"
   -- **Printed as its tag**, which is how it was written and the only thing about
   -- it @instral@ is allowed to know (MS5 phase 69).
   VObject tag _      -> tag ++ "`…`"
@@ -1399,6 +1402,10 @@ renderFailReason r = case r of
     | otherwise        ->
         "no clause of " ++ nameString g ++ " applies here"
 
+  PatternDidNotMatch g got ->
+    nameString g ++ " was given " ++ show got
+      ++ " argument(s) that its pattern does not match"
+
 -- | @a@, @a or b@, @a, b or c@ — for a message that lists alternatives.
 orList :: [String] -> String
 orList xs = case reverse xs of
@@ -1448,10 +1455,23 @@ renderSurface = surf Loose
       BodyRhs r      -> rhs r
       BodyBlock is   -> "do { " ++ intercalate " ; " (map instruction is) ++ " }"
 
+    rawPattern rp = case rp of
+      RawPWord w   -> w
+      RawPInt k    -> show k
+      RawPChar c   -> show c
+      RawPText t   -> show t
+      RawPApp w as -> "(" ++ unwords (w : map rawPattern as) ++ ")"
+      RawPPair a b -> "(" ++ rawPattern a ++ ", " ++ rawPattern b ++ ")"
+      RawPList ps mt ->
+        "[" ++ intercalate ", " (map rawPattern ps ++ tl) ++ "]"
+        where tl = case mt of
+                     Nothing -> []
+                     Just t  -> ["..." ++ rawPattern t]
+
     operation (RawOp w as) = unwords (w : map operand as)
 
     operand a = case a of
-      RawLambda ps b -> "\\ " ++ unwords ps ++ " -> " ++ funBody b
+      RawLambda ps b -> "\\ " ++ unwords (map rawPattern ps) ++ " -> " ++ funBody b
       RawRef x  -> x
       RawPos k  -> show k
       RawText t -> show t
@@ -2008,6 +2028,8 @@ whereRuleError e = case e of
   UnboundInHead g _       -> inName g
   BadTestOperands g _     -> inName g
   ReservedName g _        -> inName g
+  BadPattern g _          -> inName g
+  RepeatedInPattern g _   -> inName g
   BadOperands g i _       -> inRule g i
   NoSuchTag g i _         -> inRule g i
   BadRegion g i _ _       -> inRule g i
@@ -2045,6 +2067,11 @@ whatRuleError e = case e of
   BadTestOperands _ w     -> w ++ " was written with the wrong arguments"
   ReservedName _ n        ->
     n ++ " is a value, not a name — it cannot be a parameter or a binding"
+  BadPattern _ w          ->
+    "no pattern is written (" ++ w
+      ++ " …) — some takes one argument and nothing else takes any"
+  RepeatedInPattern _ n   ->
+    n ++ " is bound twice by one clause's parameters"
   BadOperands _ _ w       -> w ++ " was written with the wrong arguments"
   NoSuchTag _ _ tag       ->
     "no language is called " ++ tag ++ " — the built-in tags are surface and core"
@@ -2108,12 +2135,45 @@ renderFitting _    _  fs = map one fs
       "  " ++ n ++ "/" ++ show k ++ " : " ++ renderSignature sg
         ++ (if isRule then "   (rule)" else "")
 
+-- | A pattern, spelled the way it is written (MS5 phase 82).
+--
+-- **Crossed with the grammar by @RuleSyntaxTests@**, which is this codebase's
+-- standing rule after @ms5\/CLOSEOUT.md@ 26: a printer and its reader disagreed
+-- about a structure neither owns, twice in two days, and both had shipped. Every
+-- form below parses back to the pattern it came from.
+renderPattern :: Pattern -> String
+renderPattern pt = case pt of
+  PVar n      -> n
+  PWild       -> "_"
+  PInt k      -> show k
+  PChar c     -> show c
+  PBool True  -> "true"
+  PBool False -> "false"
+  PText t     -> show t
+  PPair a b   -> "(" ++ renderPattern a ++ ", " ++ renderPattern b ++ ")"
+  -- **@some@ takes parentheses because it takes an argument** and @none@ does
+  -- not, which is §6.0.1 at a parameter position and not a special case.
+  PSome a     -> "(some " ++ renderPattern a ++ ")"
+  PNone       -> "none"
+  PList ps mt ->
+    "[" ++ intercalate ", " (map renderPattern ps ++ tl) ++ "]"
+    where tl = case mt of
+                 Nothing -> []
+                 Just t  -> ["..." ++ renderPattern t]
+
 renderMatches :: [Rule] -> [String]
 renderMatches [] = ["no rule applies here"]
 renderMatches rs = map one rs
   where
     one r = unwords (nameString (ruleName r) : map placeholder (ruleParams r))
-    placeholder n = "‹" ++ n ++ "›"
+    -- **A variable keeps its corners and anything else is shown as written.**
+    -- The corners say /put something here/, which is true of @x@ and false of
+    -- @[a, ...rest]@ — that one says what shape the something must be, and
+    -- hiding it behind a placeholder would make two clauses of one name print
+    -- identically (MS5 phase 82).
+    placeholder pt = case pt of
+      PVar n -> "‹" ++ n ++ "›"
+      _      -> renderPattern pt
 
 -- | @:choices@ — the live choice points, nearest first (§7.7).
 --

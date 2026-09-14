@@ -713,6 +713,22 @@ blockTests =
   , testCase "and the same on the right of a binding" $
       mapM_ (crossed . ("x = " ++)) writableOperands
 
+    -- **A lambda's PARAMETERS, crossed for every pattern form** (MS5 phase 82).
+    -- @InstrParams@ became a run of patterns in this grammar too, which is
+    -- §7b's registered duplication for the third time — and for the third time
+    -- it is crossed in the phase that added it rather than found drifted two
+    -- phases later. The list is 'Thena.PatternTests.everyPattern''s spellings,
+    -- and that list is kept total against 'Pattern' there.
+  , testCase "a lambda takes the same patterns through both grammars" $
+      mapM_ (\src -> crossed ("f = \\ " ++ src ++ " -> do { return " ++ src ++ " }"))
+            (["x", "_", "3", "'c'", "true", "false", "[]", "(x, y)", "none"] :: [String])
+
+  , testCase "…including the list forms, whose tail token is new" $
+      mapM_ (\src -> crossed ("f = \\ " ++ src ++ " -> attack"))
+            ([ "[a]", "[a, b]", "[a, ...rest]", "[a, ..._]", "[a, ...[]]"
+             , "[...xs]", "((a, b), c)", "(some x)", "(some [a])"
+             ] :: [String])
+
     -- The spelling has to exercise the form it claims, or the case above
     -- crosses two grammars over the same wrong tree and says nothing.
   , testCase "each spelling really writes the form it is listed under" $

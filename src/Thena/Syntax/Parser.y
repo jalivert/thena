@@ -40,7 +40,7 @@ import Thena.Syntax.Concrete
   , RawConstructor (..)
   , RawData (..)
   )
-import Thena.Instral.Concrete (RawDecl (..), RawLanguage (..), RawProduction (..), RawGItem (..), RawFunction (..), RawRhs (..), RawBody (..), RawSignature (..), RawTy (..), RawRule (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
+import Thena.Instral.Concrete (RawDecl (..), RawLanguage (..), RawProduction (..), RawGItem (..), RawFunction (..), RawRhs (..), RawBody (..), RawSignature (..), RawTy (..), RawRule (..), RawPattern (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
@@ -98,6 +98,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   num     { Located _ (TNumber $$) }
   str     { Located _ (TString $$) }
   chr     { Located _ (TChar $$) }
+  '...'   { Located _ TSpread }
   '['     { Located _ TLBracket }
   ']'     { Located _ TRBracket }
   ','     { Located _ TComma }
@@ -306,13 +307,49 @@ TyParen :: { RawTy }
   | '(' Ty ')'                             { RawTyGroup $2 }
   | '(' Ty ',' Ty ')'                      { RawTyPair $2 $4 }
 
--- Parameters are a bare run of names, ended by @:-@ — no parentheses and no
--- commas. CORRECTED by the user 2026-08-25, planning phase 23: a call site
--- writes its arguments as every other op writes them, @call f x y@, so a
--- definition that wrapped its parameters would have been the odd one out.
-Params :: { [String] }
+-- Parameters are a bare run, ended by @:-@ (or @=@, or @->@) — no parentheses
+-- around the run and no commas in it. CORRECTED by the user 2026-08-25,
+-- planning phase 23: a call site writes its arguments as every other op writes
+-- them, @call f x y@, so a definition that wrapped its parameters would have
+-- been the odd one out.
+--
+-- **Each element is a PATTERN since MS5 phase 82** and was a bare name before.
+-- A name is still a pattern, so nothing that was written stops parsing; what is
+-- new is everything else in 'PatAtom'.
+Params :: { [RawPattern] }
   :                                        { [] }
-  | Params ident                           { $2 : $1 }
+  | Params PatAtom                         { $2 : $1 }
+
+-- **A pattern is written in the language of the value it matches** — his
+-- correction (@discussion\/pattern-matching.md@ §2), so a list pattern is a
+-- list literal and a pair pattern is a pair. The productions below are
+-- 'ValueOperand'\'s, less the ones no value of @instral@\'s own has: no tagged
+-- region, no corners, no lambda.
+--
+-- **@(some x)@ takes parentheses and @none@ does not**, which is not a special
+-- case but §6.0.1 applying to a pattern: an untagged compound argument needs
+-- them or nobody can tell one argument from two. The @'(' ident PatAtoms ')'@
+-- and @'(' PatAtom ',' PatAtom ')'@ pair is the same shape 'ValueOperand'
+-- already carries, and parts on the same one token of lookahead.
+PatAtom :: { RawPattern }
+  : ident                                  { RawPWord $1 }
+  | num                                    { RawPInt $1 }
+  | str                                    { RawPText $1 }
+  | chr                                    { RawPChar $1 }
+  | '[' ']'                                { RawPList [] Nothing }
+  | '[' PatItems ']'                       { RawPList (reverse $2) Nothing }
+  | '[' PatItems ',' '...' PatAtom ']'     { RawPList (reverse $2) (Just $5) }
+  | '[' '...' PatAtom ']'                  { RawPList [] (Just $3) }
+  | '(' ident PatAtoms ')'                 { RawPApp $2 (reverse $3) }
+  | '(' PatAtom ',' PatAtom ')'            { RawPPair $2 $4 }
+
+PatAtoms :: { [RawPattern] }
+  :                                        { [] }
+  | PatAtoms PatAtom                       { $2 : $1 }
+
+PatItems :: { [RawPattern] }
+  : PatAtom                                { [$1] }
+  | PatItems ',' PatAtom                   { $3 : $1 }
 
 -- A head is a run of tests with nothing between them, so a test that takes
 -- operands is parenthesised — @when focus-is-hole (surface-is-name t)@ — and a

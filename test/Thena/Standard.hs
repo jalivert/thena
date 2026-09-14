@@ -31,6 +31,7 @@ import Thena.Ops
   , Op (..)
   , Operand (..)
   , Rule (..)
+  , Pattern (..)
   , Test (..)
   )
 import Thena.Ops (Value (VText))
@@ -64,7 +65,7 @@ standardVisible = allRules <$> standardBases
 expectedStandard :: [Rule]
 expectedStandard =
   [ Rule (GlobalName "attack")     []    [FocusIsHole]                 [Do Attack]
-  , Rule (GlobalName "try-core") ["t"] [FocusIsHole] [Do (Try (Ref "t"))]
+  , Rule (GlobalName "try-core") [PVar "t"] [FocusIsHole] [Do (Try (Ref "t"))]
   , Rule (GlobalName "abandon")    []    [FocusIsHole]                 [Do Abandon]
     -- **Two clauses of one name** (phase 23b): table 2.8 has two intro rules and
     -- they differ only in their head, which is exactly what a second clause is
@@ -75,7 +76,7 @@ expectedStandard =
   , Rule (GlobalName "intro")      []    [FocusIsGuess, GoalTypeIsLet] [Do (IntroLet Nothing)]
   , Rule (GlobalName "solve")      []    [FocusIsGuess]                [Do Solve]
   , Rule (GlobalName "regret")     []    [FocusIsGuess]                [Do Regret]
-  , Rule (GlobalName "eliminate-core")  ["t"] [FocusIsHole]                 [Do (Op.Eliminate (Ref "t"))]
+  , Rule (GlobalName "eliminate-core")  [PVar "t"] [FocusIsHole]                 [Do (Op.Eliminate (Ref "t"))]
   , proveRule
   , proveGuess
   , fillRule
@@ -118,7 +119,7 @@ expectedStandard =
 -- check — and left this rule symmetric, so the same operation answered
 -- differently depending on which one you reached it through.
 fillRule :: Rule
-fillRule = Rule (GlobalName "fill") ["t"] [FocusIsHole]
+fillRule = Rule (GlobalName "fill") [PVar "t"] [FocusIsHole]
   [ Bind "n" Nothing (FreshName (Lit (VText "refined")))
   , Bind "x" Nothing (Define (Ref "n") (Ref "t"))
   , Bind "s" Nothing (Typing (Ref "x"))
@@ -134,7 +135,7 @@ fillRule = Rule (GlobalName "fill") ["t"] [FocusIsHole]
 -- discharge. It calls the /rules/ and not the primitives, so the seam Brady
 -- needs — @FILL@, the two @FOCUS@es, @SOLVE@ — is one a caller can get at.
 unifyRefine :: Rule
-unifyRefine = Rule (GlobalName "unify-refine-core") ["t"] [FocusIsHole]
+unifyRefine = Rule (GlobalName "unify-refine-core") [PVar "t"] [FocusIsHole]
   [ Do (Call (GlobalName "fill") [Ref "t"])
   , Do (Call (GlobalName "solve") [])
   ]
@@ -145,7 +146,7 @@ unifyRefine = Rule (GlobalName "unify-refine-core") ["t"] [FocusIsHole]
 -- saturated spine and 'unifyRefine' is what makes it fit, unchanged. @apply@
 -- adds no capability the two of them did not already have.
 applyRule :: Rule
-applyRule = Rule (GlobalName "apply-core") ["f"] [FocusIsHole]
+applyRule = Rule (GlobalName "apply-core") [PVar "f"] [FocusIsHole]
   [ Bind "s" Nothing (Op.Apply (Ref "f"))
   , Do (Call (GlobalName "unify-refine-core") [Ref "s"])
   ]
@@ -171,7 +172,7 @@ applyRule = Rule (GlobalName "apply-core") ["f"] [FocusIsHole]
 -- 'Thena.Rules.dispatch' runs no rule that takes parameters, so @prove@ cannot
 -- reach them.
 askingRule :: String -> String -> (Operand -> Operand -> Op) -> Rule
-askingRule word what op = Rule (GlobalName word) ["ty"] []
+askingRule word what op = Rule (GlobalName word) [PVar "ty"] []
   [ Bind "n" Nothing (Op.Ask (Lit (VText ("name for the " ++ what ++ "?"))) Op.AName)
   , Do (op (Ref "n") (Ref "ty"))
   , Bind "t" Nothing (Op.NameText (Ref "n"))
@@ -262,12 +263,12 @@ elaborateClauses =
     -- to the second, which is what the Haskell @case@ did: a partial
     -- application of a head with recorded plicities is an ordinary binary
     -- application.
-  , Rule (GlobalName "elaborate") ["t"]
+  , Rule (GlobalName "elaborate") [PVar "t"]
       [FocusIsHole, SurfaceIsApp (Ref "t"), AppHeadIsElim (Ref "t")]
       [ Bind "a" Nothing (Op.ElimSpine (Ref "t"))
       , call "elaborate" [Ref "a"]
       ]
-  , Rule (GlobalName "elaborate") ["t"]
+  , Rule (GlobalName "elaborate") [PVar "t"]
       [FocusIsHole, SurfaceIsApp (Ref "t"), AppHeadIsName (Ref "t")]
       [ Bind "h" Nothing Here
       , Bind "e" Nothing (Op.ExpandImplicits (Ref "t"))
@@ -276,7 +277,7 @@ elaborateClauses =
       , Bind "f" Nothing (Op.ResolveName (Ref "w"))
       , Do (Call (GlobalName "spine-arguments") [Ref "h", Ref "f", Ref "e"])
       ]
-  , Rule (GlobalName "elaborate") ["t"]
+  , Rule (GlobalName "elaborate") [PVar "t"]
       [FocusIsHole, SurfaceIsApp (Ref "t"), AppArgsAreExplicit (Ref "t")]
       [ Bind "h" Nothing Here
       , Bind "dn" Nothing (FreshName (Lit (VText "A")))
@@ -355,13 +356,13 @@ elaborateClauses =
       ]
     -- **Two clauses for @let@**, because the annotation is optional and the
     -- head language has no negation.
-  , Rule (GlobalName "elaborate") ["t"] [FocusIsHole, LetIsAnnotated (Ref "t")]
+  , Rule (GlobalName "elaborate") [PVar "t"] [FocusIsHole, LetIsAnnotated (Ref "t")]
       (letPrelude ++
         [ Do (Goto (Ref "x"))
         , Bind "ty" Nothing (Op.LetType (Ref "t"))
         , call "elaborate" [Ref "ty"]
         ] ++ letBody)
-  , Rule (GlobalName "elaborate") ["t"] [FocusIsHole, LetIsBare (Ref "t")]
+  , Rule (GlobalName "elaborate") [PVar "t"] [FocusIsHole, LetIsBare (Ref "t")]
       (letPrelude ++ letBody)
   , clause SurfaceIsAscription
       [ Bind "h" Nothing Here
@@ -386,7 +387,7 @@ elaborateClauses =
     ++ binderWalkers
     ++ spineWalkers
   where
-    clause test = Rule (GlobalName "elaborate") ["t"] [FocusIsHole, test (Ref "t")]
+    clause test = Rule (GlobalName "elaborate") [PVar "t"] [FocusIsHole, test (Ref "t")]
     call nm as = Do (Call (GlobalName nm) as)
 
     letPrelude =
@@ -426,7 +427,7 @@ elaborateClauses =
 -- rule therefore cannot hand a value back.
 spineWalkers :: [Rule]
 spineWalkers =
-  [ Rule (GlobalName "spine-arguments") ["h", "f", "t"]
+  [ Rule (GlobalName "spine-arguments") [PVar "h", PVar "f", PVar "t"]
       [FocusIsComponent, SurfaceIsApp (Ref "t")]
       [ Do (Goto (Ref "h"))
       , Bind "n" Nothing (FreshName (Lit (VText "a")))
@@ -437,7 +438,7 @@ spineWalkers =
       , Bind "tl" Nothing (Op.AppTail (Ref "t"))
       , Do (Call (GlobalName "spine-arguments") [Ref "h", Ref "f2", Ref "tl"])
       ]
-  , Rule (GlobalName "spine-arguments") ["h", "f", "t"]
+  , Rule (GlobalName "spine-arguments") [PVar "h", PVar "f", PVar "t"]
       [FocusIsComponent, SurfaceIsName (Ref "t")]
       [ Do (Goto (Ref "h"))
       , Do (Call (GlobalName "fill") [Ref "f"])
@@ -447,26 +448,26 @@ spineWalkers =
 
 binderWalkers :: [Rule]
 binderWalkers =
-  [ Rule (GlobalName "intro-binders") ["t"]
+  [ Rule (GlobalName "intro-binders") [PVar "t"]
       [FocusIsGuess, LambdaBindsMore (Ref "t")]
       [ Bind "x" Nothing (Op.LambdaName (Ref "t"))
       , Do (IntroPi (Just (Ref "x")))
       , Bind "tl" Nothing (Op.LambdaTail (Ref "t"))
       , Do (Call (GlobalName "intro-binders") [Ref "tl"])
       ]
-  , Rule (GlobalName "intro-binders") ["t"]
+  , Rule (GlobalName "intro-binders") [PVar "t"]
       [FocusIsGuess, LambdaBindsOne (Ref "t")]
       [ Bind "x" Nothing (Op.LambdaName (Ref "t"))
       , Do (IntroPi (Just (Ref "x")))
       ]
     -- The binders are the count and nothing else about them is read.
-  , Rule (GlobalName "enter-binders") ["t"]
+  , Rule (GlobalName "enter-binders") [PVar "t"]
       [FocusIsComponent, LambdaBindsMore (Ref "t")]
       [ Do Along
       , Bind "tl" Nothing (Op.LambdaTail (Ref "t"))
       , Do (Call (GlobalName "enter-binders") [Ref "tl"])
       ]
-  , Rule (GlobalName "enter-binders") ["t"]
+  , Rule (GlobalName "enter-binders") [PVar "t"]
       [FocusIsComponent, LambdaBindsOne (Ref "t")]
       [Do Along]
   ]

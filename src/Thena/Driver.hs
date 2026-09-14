@@ -658,7 +658,13 @@ instralEntry bases src = do
   ts' <- mapLeft (LineSyntax . LayoutFailed) (layoutFile ts)
   is  <- mapLeft (LineSyntax . ParseFailed) (parseEntry ts')
   prog <- mapLeft LineIllFormed
-            (resolveBlock (allLanguages bases) (GlobalName "entry")
+            -- **A prompt entry starts with nothing bound** (the @[]@, MS5
+            -- phase 82). Its own lines bind as it goes, which 'resolveBlock'
+            -- threads; what it does not inherit is a yielded rule\'s
+            -- environment, and that is the behaviour already recorded — the
+            -- driver has only ever built literals, so a typed command names a
+            -- hole and never a reference.
+            (resolveBlock (allLanguages bases) (GlobalName "entry") []
                (concatMap hoist (reverse is)))
   -- **An entry is checked the way a rule file is** (MS5, reviewed 2026-09-12).
   -- It was resolved and then neither validated nor typed, so @prim-try 3@ at the
@@ -849,7 +855,7 @@ regroup ls = go
   where
     go [] = Right []
     go (SurfaceDatatype d : rest) = (ItemData d :) <$> go rest
-    go (SurfaceBlock b : rest) = case resolveBlock ls (GlobalName "do") b of
+    go (SurfaceBlock b : rest) = case resolveBlock ls (GlobalName "do") [] b of
       Right is  -> (ItemBlock is :) <$> go rest
       Left errs -> Left (blockProblem errs)
     go (SurfaceSignature x ty : SurfaceEquation y body : rest)
@@ -1215,7 +1221,7 @@ dispatch s name arg = case name of
   -- already a surface atom (phase 45), so this costs a case and no syntax.
   "do" -> case parseSurfaceTerm ("do " ++ arg) of
     Left e -> (s, Failed e)
-    Right (SurfaceDo body) -> case resolveBlock (allLanguages (rules machine)) (GlobalName "do") body of
+    Right (SurfaceDo body) -> case resolveBlock (allLanguages (rules machine)) (GlobalName "do") [] body of
       Left errs -> (s, Failed (blockProblem errs))
       Right is  -> progress (sessionStepping s)
                             s { sessionMachine = load is machine } []
@@ -2031,12 +2037,27 @@ resolveAll raws =
     -- @Call@ frame, so a function call already makes no choice point, shows in
     -- no @:choices@ and is unreachable by @retry@. Refusing the second clause is
     -- the whole change.
+    -- **NARROWED BY PATTERNS — MS5 phase 82**, which is the lifting
+    -- @discussion\/pattern-matching.md@ §5 promises of stage a. The paragraph
+    -- above stands and its last sentence is what changed: /with no head and no
+    -- patterns, nothing can tell two clauses apart/. There are patterns now, so
+    -- a later clause is unreachable only where an earlier one of the same arity
+    -- matches **everything** — and that is what 'Ops.patternIrrefutable' asks,
+    -- clause by clause.
+    --
+    -- **It is an under-approximation and deliberately the safe way round.**
+    -- @f [] = …@ followed by @f [a] = …@ is admitted, and so is @f 0@ then
+    -- @f 0@ — the second is genuinely dead and nothing says so. Refusing a
+    -- clause that would in fact run is the mistake worth avoiding; admitting
+    -- dead code the author can see is not, and a real overlap checker is the
+    -- coverage question stage c opens rather than something owed here.
     overlapping =
       [ FunctionClauseUnreachable n (length (ruleParams f))
       | (i, f) <- zip [0 :: Int ..] fns
       , let GlobalName n = ruleName f
       , any (\g -> ruleName g == ruleName f
-                     && length (ruleParams g) == length (ruleParams f)) (take i fns)
+                     && length (ruleParams g) == length (ruleParams f)
+                     && all Ops.patternIrrefutable (ruleParams g)) (take i fns)
       ]
 
     -- **…and two grammars under one name** (2026-09-12). Every lookup of a

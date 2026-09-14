@@ -34,6 +34,7 @@ import qualified Thena.NoConfusionTests
 import qualified Thena.InstralInferTests
 import qualified Thena.InstralTypeTests
 import qualified Thena.RulesTests
+import qualified Thena.PatternTests
 import qualified Thena.RuleSyntaxTests
 import qualified Thena.RuleFileTests
 import qualified Thena.CallTests
@@ -79,6 +80,7 @@ main =
       , Thena.InstralInferTests.tests
       , Thena.InstralTypeTests.tests
       , Thena.RulesTests.tests
+      , Thena.PatternTests.tests
       , Thena.RuleSyntaxTests.tests
       , Thena.RuleFileTests.tests
       , Thena.CallTests.tests

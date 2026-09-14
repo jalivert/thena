@@ -439,7 +439,7 @@ shapes =
       -- so that a definition and a call site write their arguments alike.
       testCase "parameters are a bare run of names" $ do
         r <- expectRule "rule r a b c :- when focus-is-hole then prim-solve"
-        ruleParams r @?= ["a", "b", "c"]
+        ruleParams r @?= map Op.PVar ["a", "b", "c"]
     , -- A rule may apply everywhere, so 'when' is optional; a rule with no body
       -- does nothing, so 'then' is not.
       testCase "when is optional" $ do

@@ -266,8 +266,12 @@ iteratorTests =
 -- Well-formedness (§2.4, §7.2)
 -- --------------------------------------------------------------------------
 
+-- **Its parameters are still written as names** (MS5 phase 82): every rule
+-- built here asks a question about /bindings/ and not about patterns, so the
+-- helper turns each name into the pattern that binds it and the fixtures below
+-- read exactly as they did.
 named :: String -> [Name'] -> [Instr] -> Rule
-named n ps = Rule (GlobalName n) ps []
+named n ps = Rule (GlobalName n) (map Ops.PVar ps) []
 
 type Name' = String
 
@@ -280,12 +284,16 @@ validateTests =
 
       -- **@true@ and @false@ are values, so they cannot also be names** (MS5
       -- phase 64). Every @Ref@ to one has already become a literal by the time
-      -- a rule is built, so a parameter or a binding of either name could never
-      -- be read back — a rule that quietly does something other than it says,
-      -- which is what a load-time refusal is for.
-    , testCase "a parameter may not be named true" $
-        validate (named "r" ["true"] [Do Ops.Solve])
-          @?= [ReservedName (GlobalName "r") "true"]
+      -- a rule is built, so a binding of either name could never be read back —
+      -- a rule that quietly does something other than it says, which is what a
+      -- load-time refusal is for.
+      -- **A PARAMETER cannot reach this check since MS5 phase 82.**
+      -- 'Thena.Rules.resolvePattern' reads @true@ in a parameter position as
+      -- the boolean /pattern/, so the name never exists to be refused and the
+      -- case that used to stand here would assert nothing. What replaces it is
+      -- in "Thena.PatternTests", where there is a parser to write the source
+      -- line with — recorded here so the disappearance is deliberate rather
+      -- than a check quietly lost.
     , testCase "nor a binding false" $
         validate (named "r" [] [Bind "false" Nothing Ops.Here])
           @?= [ReservedName (GlobalName "r") "false"]
@@ -426,9 +434,9 @@ dataTests =
     -- Two clauses of one name, told apart by the shape of the argument.
     shapes =
       ruleBase "shapes" Nothing "" [] [] []
-        [ Rule (GlobalName "shape") ["xs"] [Ops.ListIsEmpty (Ref "xs")]
+        [ Rule (GlobalName "shape") [Ops.PVar "xs"] [Ops.ListIsEmpty (Ref "xs")]
             [Do (Ops.Say (Lit (VText "empty")))]
-        , Rule (GlobalName "shape") ["xs"] [Ops.ListIsCons (Ref "xs")]
+        , Rule (GlobalName "shape") [Ops.PVar "xs"] [Ops.ListIsCons (Ref "xs")]
             [Do (Ops.Say (Lit (VText "cons")))]
         ]
 
@@ -569,7 +577,7 @@ producesTests =
       -- **A lambda** (MS5 review): its types are inference's, its arity is the
       -- table's, and this is what crosses the second against the engine.
       , ("lambda",       e, hole, [],
-           Ops.Lambda ["x"] [Do (Ops.Return (Ref "x"))])
+           Ops.Lambda [Ops.PVar "x"] [Do (Ops.Return (Ref "x"))])
       , ("some",         e, hole, [],            Ops.Some (text "x"))
       , ("none",         e, hole, [],            Ops.None)
       , ("list-head",    e, hole, [],            Ops.ListHead (ListOf [text "x"]))

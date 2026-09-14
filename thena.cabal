@@ -117,6 +117,7 @@ test-suite thena-test
         Thena.InstralInferTests
         Thena.InstralTypeTests
         Thena.RulesTests
+        Thena.PatternTests
         Thena.RuleSyntaxTests
         Thena.RuleFileTests
         Thena.CallTests

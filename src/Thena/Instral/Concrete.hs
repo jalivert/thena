@@ -32,6 +32,7 @@ module Thena.Instral.Concrete
   , RawSignature (..)
   , RawTy (..)
   , RawRule (..)
+  , RawPattern (..)
   , RawInstr (..)
   , RawOp (..)
   , RawOperand (..)
@@ -54,7 +55,36 @@ import Thena.Syntax.Concrete (Raw)
 -- matching on the focused term and on the goal is coming, and it will attach to
 -- the head, left of @:-@ or right of it. @when@ stays underneath whatever
 -- arrives — it is the low-level, manual way to ask whether a rule applies.
-data RawRule = RawRule String [String] [RawTest] [RawInstr]
+data RawRule = RawRule String [RawPattern] [RawTest] [RawInstr]
+  deriving (Eq, Show)
+
+-- | A written parameter (MS5 phase 82) — @x@, @_@, @[a, ...rest]@, @(x, y)@,
+-- @some x@, @none@, or a literal.
+--
+-- **Unresolved like everything else here, and it barely needs to be**: a
+-- pattern over @instral@'s own data mentions no op word, no tag and no global,
+-- so 'Thena.Rules.resolvePattern' is a rename from 'String' to
+-- 'Thena.Ops.Name'. It is a separate tree anyway, because stages b and c of
+-- @discussion\/pattern-matching.md@ add a Surface pattern and a Core one, and
+-- both of those /do/ need resolving.
+--
+-- **@...@ prefixes any list pattern**, so the tail is a 'RawPattern'. It lexes
+-- without reserving anything: @.@ is an @\$idchar@ but not an @\$idstart@, so no
+-- identifier has ever begun with a dot and @...rest@ is two tokens.
+data RawPattern
+  = RawPWord String
+    -- ^ a bare word. **Which of five things it is, is resolution's question** —
+    -- a variable, @_@, @true@, @false@ or @none@ — for the same reason an
+    -- operand's @true@ is: one lexer serves every language, so none of them is
+    -- a keyword and the grammar sees an @ident@.
+  | RawPApp String [RawPattern]
+    -- ^ @(some x)@. **Parenthesised, because an untagged compound argument is**
+    -- (§6.0.1) — bare, @f some x@ could not be told from two parameters.
+  | RawPInt Int
+  | RawPChar Char
+  | RawPText String
+  | RawPList [RawPattern] (Maybe RawPattern)
+  | RawPPair RawPattern RawPattern
   deriving (Eq, Show)
 
 -- | What a rule-base file is a list of (MS5 phase 67).
@@ -81,7 +111,7 @@ data RawDecl
 -- answers with an ordinary 'Thena.Ops.Rule' whose body ends in @return@. Nothing
 -- in the engine knows the difference, which is the point of there being one
 -- language.
-data RawFunction = RawFunction String [String] RawBody
+data RawFunction = RawFunction String [RawPattern] RawBody
   deriving (Eq, Show)
 
 -- | @language ‹Name› where { ‹productions› }@ (MS5 phase 69).
@@ -254,7 +284,7 @@ data RawOperand
     -- becomes a reference to that binding. So it is sugar with a fixed
     -- evaluation order — left to right, innermost first — and not a new kind of
     -- value.
-  | RawLambda [String] RawBody
+  | RawLambda [RawPattern] RawBody
     -- ^ @\\ x y -> ‹expression›@ — **a lambda** (MS5 phase 68b).
     --
     -- **It is an operand and not a right-hand side of its own**, so that

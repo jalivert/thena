@@ -35,7 +35,7 @@ import Thena.Surface.Concrete
   , SurfaceArg (..)
   , SurfaceBinder (..)
   )
-import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRhs (..), RawBody (..))
+import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRhs (..), RawBody (..), RawPattern (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
@@ -68,6 +68,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   num     { Located _ (TNumber $$) }
   str     { Located _ (TString $$) }
   chr     { Located _ (TChar $$) }
+  '...'   { Located _ TSpread }
   '['     { Located _ TLBracket }
   ']'     { Located _ TRBracket }
   ','     { Located _ TComma }
@@ -149,9 +150,33 @@ InstrFunBody :: { RawBody }
   : InstrRhs                               { BodyRhs $1 }
   | do '{' Block '}'                       { BodyBlock (reverse $3) }
 
-InstrParams :: { [String] }
+-- **Level with @Thena.Syntax.Parser@\'s @Params@ and @PatAtom@** (MS5 phase
+-- 82) — §7b's registered duplication a third time, and added in the same phase
+-- again. A lambda written inside a @do@ block in a surface term takes the same
+-- patterns one written in a rule file does.
+InstrParams :: { [RawPattern] }
   :                                        { [] }
-  | InstrParams ident                      { $2 : $1 }
+  | InstrParams InstrPatAtom               { $2 : $1 }
+
+InstrPatAtom :: { RawPattern }
+  : ident                                  { RawPWord $1 }
+  | num                                    { RawPInt $1 }
+  | str                                    { RawPText $1 }
+  | chr                                    { RawPChar $1 }
+  | '[' ']'                                { RawPList [] Nothing }
+  | '[' InstrPatItems ']'                  { RawPList (reverse $2) Nothing }
+  | '[' InstrPatItems ',' '...' InstrPatAtom ']' { RawPList (reverse $2) (Just $5) }
+  | '[' '...' InstrPatAtom ']'             { RawPList [] (Just $3) }
+  | '(' ident InstrPatAtoms ')'            { RawPApp $2 (reverse $3) }
+  | '(' InstrPatAtom ',' InstrPatAtom ')'  { RawPPair $2 $4 }
+
+InstrPatAtoms :: { [RawPattern] }
+  :                                        { [] }
+  | InstrPatAtoms InstrPatAtom             { $2 : $1 }
+
+InstrPatItems :: { [RawPattern] }
+  : InstrPatAtom                           { [$1] }
+  | InstrPatItems ',' InstrPatAtom         { $3 : $1 }
 
 InstrOp :: { RawOp }
   : ident InstrOperands                    { RawOp $1 (reverse $2) }

@@ -44,6 +44,8 @@ tests =
     , annotatedLocals
     , surfaceBlockTyping
     , functionsAreFunctions
+    , patternTyping
+    , bareWordRightOfEquals
     , spliceTemplates
     , blockBodies
     , badSignatures
@@ -280,6 +282,50 @@ functionsAreFunctions =
     , testCase "and calling one leaves no choice point" $
         choicesAfter "twice x = concat x x\nrule go :- then m = twice \"a\" ; say m"
           @?= Just []
+
+      -- ----------------------------------------------------------------
+      -- MS5 phase 82 — patterns narrow the refusal above, and make the
+      -- searched/called split something the code has to do rather than
+      -- something that fell out of a function having one clause.
+      -- ----------------------------------------------------------------
+
+      -- **The lifting.** The paragraph above says /with no head and no
+      -- patterns, nothing can tell two clauses apart/. There are patterns now.
+    , loads "a second clause IS admitted when the first is refutable"
+        "size [] = \"empty\"\nsize [_, ..._] = \"many\""
+
+      -- …and the refusal is still there, narrowed to the case it was about.
+    , testCase "…and still refused when the first matches everything" $
+        case loadRaw "rule base f where\nf x = concat x \"a\"\nf [] = \"b\"\n" of
+          RuleFileRefused _ (RuleIllFormed es)
+            | [FunctionClauseUnreachable "f" 1] <- es -> pure ()
+          other -> assertFailure ("expected a refusal, got " ++ show other)
+
+      -- **A function is CALLED**: first match, no decision left standing.
+      -- Before this phase 'Thena.Rules.clauses' offered every matching clause
+      -- and the engine built a @Choice@ over them by @hasNext@ alone, which is
+      -- exactly the behaviour phase 80 removed, arriving again by another road.
+    , testCase "a multi-clause function takes the first match and leaves nothing" $
+        choicesAfter (sizeBase ++ "rule go :- then m = size [\"a\"] ; say m")
+          @?= Just []
+
+    , testCase "…and where two clauses overlap, the FIRST one runs" $
+        ranBy (sizeBase ++ "rule go :- then m = size [\"a\"] ; say m")
+          @?= Just ["one"]
+
+    , testCase "…while a value only the second matches reaches the second" $
+        ranBy (sizeBase ++ "rule go :- then m = size [\"a\", \"b\"] ; say m")
+          @?= Just ["many"]
+
+      -- **A RULE is searched**, with the very same patterns — which is the
+      -- split made visible. @retry@ reaching the second clause is what a
+      -- function must not do and a rule must.
+    , testCase "a multi-clause rule with patterns still builds a choice point" $
+        (length <$> choicesAfter
+           ("rule pick [a, ..._] :- then say a\n"
+              ++ "rule pick x :- then say \"fallback\"\n"
+              ++ "rule go :- then pick [\"one\"]"))
+          @?= Just 1
     ]
   where
     loads what src = testCase what $ case load src of
@@ -288,12 +334,189 @@ functionsAreFunctions =
 
     loadRaw src = snd (loadRuleBases newSession [("f.thena.rules", src)])
 
+    -- **Two clauses that OVERLAP**, and that is the whole point of the
+    -- fixture: @["a"]@ matches both @[_]@ and @[_, ..._]@. A non-overlapping
+    -- pair would leave 'Thena.Rules.clauses' with one candidate whatever it
+    -- did, so it would say nothing about first-match — and it did not: the
+    -- first draft of these cases used @[]@ against @[]@ / @[_, ..._]@ and
+    -- survived deleting the @take 1@.
+    sizeBase = "size [_] = \"one\"\nsize [_, ..._] = \"many\"\n"
+
+    -- Load, run @go@, and report what the machine said.
+    ranBy src =
+      let s0 = fst (loadRuleBases newSession [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])
+       in case snd (command s0 "go") of
+            Ran ms _ -> Just ms
+            _        -> Nothing
+
     -- Load, run @go@, and ask what decisions are left standing.
     choicesAfter src =
       let s0 = fst (loadRuleBases newSession [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])
        in case snd (command (fst (command s0 "go")) ":choices") of
             Choices cs -> Just cs
             _          -> Nothing
+
+-- --------------------------------------------------------------------------
+-- What a bare word right of an = means (MS5 phase 82)
+-- --------------------------------------------------------------------------
+
+-- | **@id x = x@ gave /no rule is called x/, and that was a gap, not a
+-- spelling.** His, 2026-09-14: *"@x@ is clearly just an occurrence. This needs
+-- fixing, if this is what we are doing that's a massive gap."*
+--
+-- The right of an @=@ is the one place a bare word goes to
+-- 'Thena.Rules.operation' instead of being read as an operand, so @= x@ asked
+-- for @x@ applied to no arguments. That types as @TFun []@ —
+-- @ms5\/CLOSEOUT.md@ 23's unwritable type — and the thunk leaked into a
+-- user-facing message: @a string literal is a String or a Name, not -> String@.
+--
+-- **Phase 73 had already fixed the same defect one guard over**, for @true@ and
+-- @false@, and its comment is the best statement of the class. This is that
+-- guard with @bound@ in place of @reservedNames@.
+--
+-- **The rule is his, 2026-09-12, and "Thena.Engine" states it in a comment**:
+-- /an op if one bears the name, else the local if one is bound, else a rule
+-- call/. All three layers are asserted below, because until this phase the
+-- middle one was implemented only for a closure.
+bareWordRightOfEquals :: TestTree
+bareWordRightOfEquals =
+  testGroup
+    "a bare word right of an ="
+    [ testCase "a parameter is that value — the identity function" $
+        ranBy "id x = x\nrule go :- then m = id \"hello\" ; say m"
+          @?= Just ["hello"]
+
+      -- **The design conversation's own first snippet**, which did not parse
+      -- until this phase (@discussion\/pattern-matching.md@ §2).
+    , testCase "…and so is a base case that hands a parameter back" $
+        ranBy (firstOr ++ "rule go :- then m = firstOr \"d\" [] ; say m")
+          @?= Just ["d"]
+
+    , testCase "…while the other clause hands back an element" $
+        ranBy (firstOr ++ "rule go :- then m = firstOr \"d\" [\"x\"] ; say m")
+          @?= Just ["x"]
+
+      -- **The local beats a callable of the same name** — his ruling, and
+      -- @ms5\/CLOSEOUT.md@ 14 records the cost he took with it. Before this
+      -- phase the base did not even load: the bare @helper@ was read as a call
+      -- and the binding above it as a thunk.
+    , testCase "a local beats a function of the same name" $
+        ranBy ("helper = \"from the function\"\n"
+                 ++ "rule go :- then helper = \"from the local\" ; m = helper ; say m")
+          @?= Just ["from the local"]
+
+      -- **…and an op beats the local**, which is the top of his three-way rule
+      -- and is why the guard asks 'Thena.Rules.isOpWord'. @here@ answers with
+      -- the focused component's variable, so binding a local of that name and
+      -- reading it back gives a 'Thena.Instral.Type.TCore' and not the string.
+    , clashes "an op word beats a local of the same name"
+        "rule go :- then here = \"shadow\" ; m = here ; say m"
+
+      -- The bottom of the rule, unchanged, and worth a regression guard: a word
+      -- nothing binds is still a call.
+    , testCase "a word that is not bound is still a call" $
+        ranBy "helper = \"from the function\"\nrule go :- then m = helper ; say m"
+          @?= Just ["from the function"]
+
+      -- **A lambda's own parameters are in scope in its body**, which is the
+      -- same question one nesting down and is answered by handing 'closure''s
+      -- body the names its patterns bind. Without it @\\ x -> x@ is the
+      -- identity spelled as a call to a rule called @x@.
+    , testCase "a lambda's parameter is in scope in its own body" $
+        ranBy "rule go :- then f = \\ x -> x ; m = f \"through a lambda\" ; say m"
+          @?= Just ["through a lambda"]
+
+      -- Phase 73's case, which this one generalises rather than replaces.
+    , loads "true right of an = is still the literal"
+        "rule go :- then b = true ; m = bool-text b ; say m"
+    ]
+  where
+    firstOr = "firstOr d [] = d\nfirstOr _ [x, ..._] = x\n"
+
+    ranBy src =
+      let s0 = fst (loadRuleBases newSession [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])
+       in case snd (command s0 "go") of
+            Ran ms _ -> Just ms
+            _        -> Nothing
+
+    loads what src = testCase what $ case load (src ++ "\n") of
+      BasesLoaded _ -> pure ()
+      other         -> assertFailure ("expected a load, got " ++ show other)
+
+    clashes what src = testCase what $ case load (src ++ "\n") of
+      BasesIllTyped (Clash{} : _) -> pure ()
+      other -> assertFailure ("expected a clash, got " ++ show other)
+
+-- --------------------------------------------------------------------------
+-- Patterns say what a parameter takes (MS5 phase 82)
+-- --------------------------------------------------------------------------
+
+-- | **A pattern says its parameter's type directly**, which is why stage a of
+-- @discussion\/pattern-matching.md@ makes typing simpler rather than harder.
+--
+-- Before it, the only thing that could say a parameter's type was a head test
+-- ('Thena.Rules.testTypes') or a written signature. A pattern says it as part of
+-- saying what the clause is about, and — the half worth testing — it says it
+-- __consistently across the clauses of one callable__, so two clauses that
+-- disagree are a clash rather than a silently widened type.
+patternTyping :: TestTree
+patternTyping =
+  testGroup
+    "a pattern types its parameter"
+    [ loads "a list pattern makes the parameter a list"
+        "f [] = \"a\"\nf [_, ..._] = \"b\"\ng = do { m = f [\"x\"] ; return m }"
+
+    , clashes "…so passing something else is a clash"
+        "f [] = \"a\"\nf [_, ..._] = \"b\"\ng = do { m = f 3 ; return m }"
+
+    , loads "a pair pattern makes it a pair"
+        "swap (x, y) = do { return (y, x) }\ng = do { m = swap (1, 2) ; return m }"
+
+    , clashes "…and a non-pair is a clash"
+        "swap (x, y) = do { return (y, x) }\ng = do { m = swap 3 ; return m }"
+
+    , loads "an option pattern makes it an option"
+        "d none = \"n\"\nd (some _) = \"s\"\ng = do { o = some 1 ; m = d o ; return m }"
+
+    , clashes "…and a bare value is a clash"
+        "d none = \"n\"\nd (some _) = \"s\"\ng = do { m = d 1 ; return m }"
+
+    , loads "a literal pattern pins the parameter to its own type"
+        "yes true = \"y\"\nyes false = \"n\"\ng = do { m = yes true ; return m }"
+
+    , clashes "…so another type there is a clash"
+        "yes true = \"y\"\nyes false = \"n\"\ng = do { m = yes 1 ; return m }"
+
+      -- **One element variable, not one per element.** @[a, ...rest]@ says /a
+      -- list of the same thing/, so elements that disagree must clash — this is
+      -- what a per-element fresh variable would silently allow.
+    , clashes "every element of a list pattern shares one type"
+        "f [a, b] = do { m = concat a b ; return m }\ng = do { m = f [\"x\", 1] ; return m }"
+
+      -- The tail is a whole pattern, typed against the LIST, not the element.
+    , clashes "…and the tail is the list, not an element"
+        "f [_, ...r] = do { m = concat r \"a\" ; return m }"
+
+      -- His 2026-09-12 ruling — a string literal is accepted at either — now
+      -- holding on the left of the @=@ as well as the right.
+      -- **Deferred, not pinned** — his 2026-09-12 ruling that a string literal
+      -- is accepted at a 'TName' or a 'TString', now holding on the left of the
+      -- @=@ too. The second clause is what makes the case bite: its body forces
+      -- the parameter to a name, so a text pattern pinned to 'TString' would
+      -- clash here. Without that clause nothing constrains the parameter and
+      -- the case passes either way — which is how the first draft of it was
+      -- wrong.
+    , loads "a text pattern is accepted where a name is wanted"
+        "rule h \"x\" :- then solve\nrule h n :- then goto-named n"
+    ]
+  where
+    loads what src = testCase what $ case load (src ++ "\n") of
+      BasesLoaded _ -> pure ()
+      other         -> assertFailure ("expected a load, got " ++ show other)
+
+    clashes what src = testCase what $ case load (src ++ "\n") of
+      BasesIllTyped (Clash{} : _) -> pure ()
+      other -> assertFailure ("expected a clash, got " ++ show other)
 
 -- --------------------------------------------------------------------------
 -- Splices in a written core term (MS5 phase 81)

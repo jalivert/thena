@@ -264,6 +264,17 @@ data FailReason
     -- @WrongNumberOfArguments@ were its two predecessors and are gone, because
     -- a call no longer takes a rule /value/ and arity is a filter rather than
     -- an error.
+  | PatternDidNotMatch GlobalName Int
+    -- ^ a LAMBDA\'s parameters did not match what it was applied to (MS5 phase
+    -- 82) — the local\'s name and how many arguments it was given.
+    --
+    -- **A rule gets 'NoClauseMatched' for the same event**, and the two are
+    -- different on purpose: a rule\'s clauses are searched, so a pattern that
+    -- refuses is one candidate declining and the message is about the search. A
+    -- closure has one clause and no head, so there is nothing to search and the
+    -- refusal is the whole answer. His ruling was that a refutable pattern which
+    -- does not match is a /failure/ — in a rule it backtracks, in a function it
+    -- is the caller\'s failure, as in Haskell.
   deriving (Eq, Show)
 
 -- | Why a move was impossible (§4.0 C4, §12 invariant 2).

@@ -423,7 +423,7 @@ signatureTests =
       -- (2026-09-12). Bare, this printed as @b -> a@ — the spelling of an op
       -- that takes a @b@ and gives an @a@, which is a different signature.
     , sig "lambda, one parameter"
-                         (Op.Lambda ["x"] [])           "(b -> a)"
+                         (Op.Lambda [Op.PVar "x"] [])           "(b -> a)"
     , sig "some"         (Op.Some r)                    "a -> Option a"
     , sig "none"         Op.None                        "Option a"
     , sig "list-head"    (Op.ListHead r)                "List a -> Option a"
