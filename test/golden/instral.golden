@@ -13,7 +13,7 @@ instruction 1: wanted Core, got Int
 thena spine> say 42
 instruction 1: wanted String, got Int
 thena spine> :produces Core
-nothing gives a Core
+  fresh-universe/0 : Core
 thena spine> :accepts Surface
   elaborate/1 : Surface -> ()   (rule)
   intro-binders/1 : Surface -> ()   (rule)

@@ -2,6 +2,20 @@
 
 rule base standard where
 
+-- **@fresh-universe@ is a FUNCTION now** (MS5 phase 89): it was one op doing
+-- two things — mint a level, then wrap it — and the two are `fresh-level` and
+-- `universe-at`. Every use of the word below is unchanged.
+--
+-- **A function and not a rule**, and that is not a preference: it has no head,
+-- and a headless rule matches everywhere, so `:matches` would offer it at every
+-- focus and `prove` would run it. That is phase 49c's `enter-binders` lesson —
+-- a helper wants a head that is TRUE, and there is no true head here because it
+-- reads nothing about the development at all.
+fresh-universe = do
+  l = fresh-level
+  u = universe-at l
+  return u
+
 rule attack :- when focus-is-hole do prim-attack
 
 rule try-core t :- when focus-is-hole do prim-try t

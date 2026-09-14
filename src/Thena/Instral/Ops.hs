@@ -45,6 +45,7 @@ module Thena.Instral.Ops
 import Control.Monad (zipWithM)
 import Data.Maybe (isJust)
 
+import Thena.Core.Level (Level)
 import Thena.Core.Term (Core, GlobalName)
 import Thena.Instral.Pattern (Pattern (..), patternBinds, patternIrrefutable)
 import Thena.Instral.Type (Signature (..), Ty (..))
@@ -152,6 +153,14 @@ data Value
     -- construction**: nothing checks that the elements agree until phase 66's
     -- type system, exactly as nothing checks that an op was given a term.
   | VOption  (Maybe Value)
+  | VLevel Level
+    -- ^ **a universe level** (MS5 phase 89).
+    --
+    -- **Levels were the one nonterminal of the core grammar with nothing in
+    -- @instral@ to be.** Phase 88 gave every /name/ position a splice; a level
+    -- position had none, because @Value@ had no case for one and
+    -- @fresh-universe@ answered with a whole @Universe@ term rather than the
+    -- level inside it.
   | VObject String SurfaceZipper
     -- ^ **an object-language term, and which language it is** (MS5 phase 69).
     --
@@ -575,20 +584,27 @@ data Op
     --
     -- It yields the variable as a term, @Free x@, which is the shape @goto@
     -- already reads.
-  | FreshUniverse
-    -- ^ a universe at a **freshly minted level meta** (MS4 phase 48) — what
-    -- the surface writes as a bare @Type@, and what typical ambiguity means at
-    -- an operand.
+  | FreshLevel
+    -- ^ a **freshly minted level meta** (MS5 phase 89) — the level a bare
+    -- @Type@ means, on its own.
     --
-    -- **It is the literal the elaborator does not write.** Seven of the nine
-    -- @Lit (VTerm …)@ operands the Haskell elaborator emitted, before MS4 phase
-    -- 49f deleted it, were a @Universe@ at a level drawn from the counter — the type a claimed domain, codomain or
-    -- ascription is claimed at, before anything is known about it. A rule
-    -- cannot write that down: the point of the meta is that it is fresh at
-    -- every node.
+    -- **@fresh-universe@ was two operations wearing one name** and this is the
+    -- first: mint a level, then wrap it. The second is 'UniverseAt', and
+    -- @fresh-universe@ is a /rule/ over the two now, so its nine sites in the
+    -- shipped base are unchanged.
+  | LevelOf Operand
+    -- ^ an **exact** level from a numeral (MS5 phase 89) — @level 0@.
     --
-    -- Yielded as a term, not as a level: 'Value' has no level case, and
-    -- @Universe@ is the only place the elaborator puts one.
+    -- **A numeral is not an algebra**, which is the line this phase draws: what
+    -- it builds is closed and ground, exactly what @Type₀@ has always yielded
+    -- when written. @LSuc@ and @LMax@ get no ops, because those are the algebra
+    -- and "Thena.Core.Level"\'s solver stays their only author.
+    --
+    -- **It is what a written @Typeₙ@ could not give a rule**: writing one fixes
+    -- the level when the /rule/ is written, where this takes one the rule
+    -- computed.
+  | UniverseAt Operand
+    -- ^ the universe at a level (MS5 phase 89) — @universe-at l@.
   | ResolveName Operand
     -- ^ what a name denotes, with its level arguments inserted (MS4 phase 48).
     -- The other two of those nine operands.
@@ -1090,7 +1106,9 @@ resultOf o = case o of
   Here         -> Just TCore
   Arrow _ _    -> Just TCore
   ApplyTo _ _  -> Just TCore
-  FreshUniverse  -> Just TCore
+  FreshLevel     -> Just TLevel
+  LevelOf _      -> Just TLevel
+  UniverseAt _   -> Just TCore
   ResolveName _  -> Just TCore
   SurfaceNameOf _ -> Just TName
   SurfaceUniverseOf _ -> Just TCore
@@ -1244,7 +1262,9 @@ operandTypes o = case o of
   Here         -> []
   Arrow a b    -> [(a, TCore), (b, TCore)]
   ApplyTo a b  -> [(a, TCore), (b, TCore)]
-  FreshUniverse  -> []
+  FreshLevel     -> []
+  LevelOf a      -> [(a, TInt)]
+  UniverseAt a   -> [(a, TLevel)]
   ResolveName x  -> [(x, TName)]
   SurfaceNameOf x -> [(x, TSurface)]
   SurfaceUniverseOf x -> [(x, TSurface)]
@@ -1560,7 +1580,9 @@ opKeyword o = case o of
   Here         -> "here"
   Arrow _ _    -> "arrow"
   ApplyTo _ _  -> "apply-to"
-  FreshUniverse  -> "fresh-universe"
+  FreshLevel     -> "fresh-level"
+  LevelOf _      -> "level"
+  UniverseAt _   -> "universe-at"
   ResolveName _  -> "resolve-name"
   SurfaceNameOf _ -> "surface-name"
   SurfaceUniverseOf _ -> "surface-universe"

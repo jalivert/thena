@@ -324,12 +324,16 @@ tests =
         [ testCase ":accepts finds a rule by its parameter" $
             fittingNames (snd (command withRules ":accepts Surface"))
               @?= ["elaborate", "intro-binders", "enter-binders", "spine-arguments"]
-          -- Nothing in the shipped base returns, so this is the honest answer
-          -- rather than an empty listing with no explanation.
-        , testCase ":produces says so when nothing does" $
+          -- **One thing in the shipped base returns a @Core@ since MS5 phase
+          -- 89** — @fresh-universe@, which stopped being an op and became a
+          -- function over @fresh-level@ and @universe-at@. Before that nothing
+          -- did, and this case asserted an empty listing.
+        , testCase ":produces finds the one callable that gives a Core" $
             case snd (command withRules ":produces Core") of
-              Fitting v _ [] -> v @?= "gives"
-              other -> assertFailure ("expected an empty listing, got " ++ show other)
+              Fitting v _ rows -> do
+                v @?= "gives"
+                [ n | (GlobalName n, _, _, _) <- rows ] @?= ["fresh-universe"]
+              other -> assertFailure ("expected a listing, got " ++ show other)
           -- **It lists rules and functions both** (his ruling), and the two are
           -- told apart in the row rather than in two commands.
         , testCase "a rule is marked as one" $

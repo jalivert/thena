@@ -788,6 +788,7 @@ resolveTyIn ls owner vs0 t0 = go vs0 t0
       ("Surface", [])     -> Right TSurface
       ("Core", [])        -> Right TCore
       ("Development", []) -> Right TDevelopment
+      ("Level", [])       -> Right TLevel
       ("List", [a])       -> Right (TList a)
       ("Option", [a])     -> Right (TOption a)
       _ | nm `elem` known -> Left (TypeArity owner nm (arityOf nm) (length xs))
@@ -966,6 +967,7 @@ builtInTags = ["surface", "core"]
 builtInTypes :: [String]
 builtInTypes =
   [ "String", "Name", "Int", "Char", "Bool", "Surface", "Core", "Development"
+  , "Level"
   , "List", "Option"
   ]
 
@@ -1354,7 +1356,7 @@ nullaryOps =
   [ ("along", Along), ("into", Into), ("back", Back), ("reduce", Reduce)
   , ("prim-attack", Attack), ("prim-regret", Regret)
   , ("prim-solve", Solve), ("prim-abandon", Abandon), ("goal", Goal)
-  , ("fresh-universe", Op.FreshUniverse)
+  , ("fresh-level", Op.FreshLevel)
   , ("here", Here)
   , ("none", Op.None)
   , ("prim-prove", Prove)
@@ -1367,6 +1369,7 @@ unaryOps =
   , ("some", Op.Some)
   , ("goto", Goto), ("goto-named", Op.GotoNamed)
   , ("name-text", Op.NameText)
+  , ("level", Op.LevelOf), ("universe-at", Op.UniverseAt)
   , ("surface-of", Op.SurfaceOf)
   , ("push-development", Op.PushDevelopment)
   , ("certify", Certify), ("prim-eliminate", Op.Eliminate)

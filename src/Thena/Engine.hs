@@ -1279,9 +1279,25 @@ perform instr rest m = case operation instr of
   -- @Type@, at an operand. Typical ambiguity (phase 33) is what makes this the
   -- right shape: nothing is known about the level yet, and unification decides
   -- it.
-  FreshUniverse ->
+  -- **The two halves @fresh-universe@ used to be** (MS5 phase 89). It is now a
+  -- rule over them, so nothing that calls it moved.
+  FreshLevel ->
     let (l, n1) = freshLevelMeta (names m)
-     in produce (VTerm (Universe (LVar l))) m { names = n1 }
+     in produce (VLevel (LVar l)) m { names = n1 }
+
+  -- **An exact level from a numeral**, which is what @Typeₙ@ has always meant
+  -- when written; @levelOfNat@ is the same function the resolver uses, so a
+  -- computed level and a written one cannot come out different.
+  LevelOf a -> case operandValue (env (exec m)) a of
+    Left e          -> failure e m
+    Right (VInt k)
+      | k >= 0      -> produce (VLevel (levelOfNat k)) m
+    Right _         -> failure ExpectedInt m
+
+  UniverseAt a -> case operandValue (env (exec m)) a of
+    Left e           -> failure e m
+    Right (VLevel l) -> produce (VTerm (Universe l)) m
+    Right _          -> failure ExpectedLevel m
 
   -- **What a name denotes, Γ first and then the globals, with a definition's
   -- level arguments inserted** (MS4 phase 48).

@@ -1271,6 +1271,10 @@ renderValue n ctx v = case v of
   -- **Printed as its tag**, which is how it was written and the only thing about
   -- it @instral@ is allowed to know (MS5 phase 69).
   VObject tag _      -> tag ++ "`…`"
+  -- **A level prints the way one prints inside a type** (MS5 phase 89), which
+  -- is the printer a scheme already uses — so @0@, @ℓ₇@ and @?ℓ12@ all read as
+  -- they do everywhere else.
+  VLevel l           -> renderLevel l
   VTerm t            -> "⌜" ++ renderCore n ctx t ++ "⌝"
   -- **An unresolved core term prints as its shape, not its contents** (MS5
   -- phase 61b). Printing a 'Thena.Syntax.Concrete.Raw' back would need a
@@ -1334,6 +1338,8 @@ renderFailReason r = case r of
   ExpectedList   -> "that is not a list"
   ExpectedPair   -> "that is not a pair"
   ExpectedOption -> "that is not an option"
+  ExpectedLevel -> "expected a level"
+  ExpectedInt   -> "expected a whole number that is not negative"
   NothingThere   -> "there is nothing in that option — ask option-is-some first"
   NothingReturned p ->
     "nothing was returned to bind to " ++ renderPattern p

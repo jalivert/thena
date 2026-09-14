@@ -128,6 +128,14 @@ data FailReason
   | ExpectedPair
     -- ^ an operand was not a @VPair@ (MS5 phase 65)
   | ExpectedOption
+  | ExpectedLevel
+    -- ^ an op wanted a 'Thena.Instral.Type.TLevel' and was given something else
+    -- (MS5 phase 89)
+  | ExpectedInt
+    -- ^ …and one wanted an 'Thena.Instral.Type.TInt'. @level ‹n›@ is the only
+    -- op that does, and a NEGATIVE numeral reaches it too — there is no
+    -- negative level, and the numeral token cannot carry a sign, so this is the
+    -- refusal for a value computed rather than written
     -- ^ an operand was not a @VOption@ (MS5 phase 65)
   | NothingThere
     -- ^ @option-value none@ (MS5 phase 65). **A rule asks first** — the head

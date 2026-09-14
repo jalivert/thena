@@ -70,6 +70,19 @@ data Ty
   | TList Ty             -- ^ @[a, b, c]@
   | TPair Ty Ty          -- ^ @(a, b)@
   | TOption Ty           -- ^ @some x@ and @none@
+  | TLevel
+    -- ^ **a universe level** (MS5 phase 89) — @Thena.Core.Level.Level@, which
+    -- is an algebra (@LZero | LSuc | LMax | LVar@) and not a number.
+    --
+    -- **It is its own type and not 'TInt' for the reason the algebra exists**:
+    -- a level a rule holds is usually a /meta/ the solver has not decided, and
+    -- no numeral can be one. @fresh-level@ mints exactly that.
+    --
+    -- **@instral@ can make one two ways and compute with it in none**:
+    -- @fresh-level@ and @level ‹n›@ build, @universe-at@ consumes. @LSuc@ and
+    -- @LMax@ have no ops on purpose — those are the /algebra/, and
+    -- "Thena.Core.Level"'s solver stays their only author until something asks
+    -- (@ms5\/CLOSEOUT.md@ 40).
   | TObject String
     -- ^ **a declared object language** (MS5 phase 69) — @Tm@, opaque.
     --
@@ -169,6 +182,7 @@ renderTy = go False
       TInt         -> "Int"
       TChar        -> "Char"
       TBool        -> "Bool"
+      TLevel       -> "Level"
       TObject n    -> n
       TSurface     -> "Surface"
       TCore        -> "Core"

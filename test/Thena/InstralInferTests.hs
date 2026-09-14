@@ -754,6 +754,36 @@ spliceTemplates =
           Just t | "zz" `isInfixOf` t -> pure ()
           other -> assertFailure ("expected the spliced binder name in " ++ show other)
 
+      -- ----------------------------------------------------------------
+      -- MS5 phase 89 — levels, and why the grammar needed no third splice
+      -- ----------------------------------------------------------------
+
+      -- **A level reaches a template as a TERM**, and that is the phase's
+      -- finding: @level@ and @fresh-level@ build one, @universe-at@ wraps it,
+      -- and what gets spliced is the universe. So the remaining nonterminal —
+      -- a level position — needs no splice production at all, because the ops
+      -- compose and a term splice already exists.
+    , loadsWith "a universe at an exact computed level, spliced"
+        "l = level 2 ; u = universe-at l ; t = resolve-core core`${u} -> ${u}`"
+
+    , loadsWith "…and at a fresh meta, the same route"
+        "l = fresh-level ; u = universe-at l ; t = resolve-core core`${u}`"
+
+      -- @fresh-universe@ is a function over the two now; its word is unchanged.
+    , loadsWith "…and fresh-universe still reads as it always did"
+        "u = fresh-universe ; t = resolve-core core`${u} -> ${u}`"
+
+      -- **The types are what keep the two apart.** A level is not a term and
+      -- not an Int, and both confusions are refused when the file loads.
+    , clashesWith "a level where a term is wanted"
+        "l = fresh-level ; t = resolve-core core`${l} -> ${l}`"
+
+    , clashesWith "…and a term where a level is wanted"
+        "d = goal ; u = universe-at d"
+
+    , clashesWith "…and a level where universe-at's own operand wants one, given an Int"
+        "u = universe-at 2"
+
       -- An unfilled name splice is a load-time scope error, exactly as an
       -- unfilled term one is — 'Thena.Instral.Ops.refsIn' sees both.
     , testCase "a name splice naming nothing is refused at load" $

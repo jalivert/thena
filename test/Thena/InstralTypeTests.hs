@@ -154,10 +154,10 @@ theBuiltInTypes =
       -- party: 'renderTy' prints exactly these words and
       -- 'Thena.Rules.resolveTyIn' reads exactly these words, and a change to
       -- either has to come here and say so.
-    , testCase "and the list is exactly these ten" $
+    , testCase "and the list is exactly these eleven" $
         builtInTypes
           @?= [ "String", "Name", "Int", "Char", "Bool", "Surface", "Core"
-              , "Development", "List", "Option"
+              , "Development", "Level", "List", "Option"
               ]
     , testCase "…which is what renderTy prints for each of them" $
         map renderTy

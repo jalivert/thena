@@ -796,6 +796,7 @@ valueType si v st = case v of
   VChar _    -> (TChar, st)
   VBool _    -> (TBool, st)
   VTerm _    -> (TCore, st)
+  VLevel _   -> (TLevel, st)
   -- **An unresolved written term is a 'TCore' too** — his ruling, 2026-09-12.
   VRaw _     -> (TCore, st)
   VSurface _ -> (TSurface, st)

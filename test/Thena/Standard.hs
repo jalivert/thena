@@ -199,7 +199,19 @@ withRules =
 -- are; "Thena.RuleSyntaxTests" is where the literal is tied to the file, and
 -- "Thena.GoldenTests" is where the file itself is driven.
 expectedBase :: [RuleBase]
-expectedBase = [ruleBase "standard" Nothing "" [] [] [] expectedStandard]
+expectedBase = [ruleBase "standard" Nothing "" [] [] expectedFunctions expectedStandard]
+
+-- | The base's FUNCTIONS, which are deliberately not among its rules (MS5
+-- phase 89): a function has no head, and a headless rule would be offered by
+-- @:matches@ at every focus.
+expectedFunctions :: [Rule]
+expectedFunctions =
+  [ Rule (GlobalName "fresh-universe") [] []
+      [ Bind (Op.PVar "l") Nothing Op.FreshLevel
+      , Bind (Op.PVar "u") Nothing (Op.UniverseAt (Ref "l"))
+      , Do (Op.Return (Ref "u"))
+      ]
+  ]
 
 -- | Search: every rule whose head passes, in definition order (MS4 phase 41).
 --
@@ -248,7 +260,7 @@ elaborateClauses =
       , call "fill" [Ref "u"], call "solve" []
       ]
   , clause SurfaceIsUniverseOpen
-      [ Bind (Op.PVar "u") Nothing Op.FreshUniverse
+      [ Bind (Op.PVar "u") Nothing (Op.Call "fresh-universe" [])
       , call "fill" [Ref "u"], call "solve" []
       ]
     -- **Two empty bodies**, which the rule grammar did not admit before phase
@@ -281,10 +293,10 @@ elaborateClauses =
       [FocusIsHole, SurfaceIsApp (Ref "t"), AppArgsAreExplicit (Ref "t")]
       [ Bind (Op.PVar "h") Nothing Here
       , Bind (Op.PVar "dn") Nothing (FreshName (Lit (VText "A")))
-      , Bind (Op.PVar "u1") Nothing Op.FreshUniverse
+      , Bind (Op.PVar "u1") Nothing (Op.Call "fresh-universe" [])
       , Bind (Op.PVar "d") Nothing (Claim (Ref "dn") (Ref "u1"))
       , Bind (Op.PVar "cn") Nothing (FreshName (Lit (VText "B")))
-      , Bind (Op.PVar "u2") Nothing Op.FreshUniverse
+      , Bind (Op.PVar "u2") Nothing (Op.Call "fresh-universe" [])
       , Bind (Op.PVar "c") Nothing (Claim (Ref "cn") (Ref "u2"))
       , Bind (Op.PVar "ar") Nothing (Arrow (Ref "d") (Ref "c"))
       , Bind (Op.PVar "fn") Nothing (FreshName (Lit (VText "f")))
@@ -324,7 +336,7 @@ elaborateClauses =
       , Bind (Op.PVar "tl") Nothing (Op.ForallTail (Ref "t"))
       , Bind (Op.PVar "h") Nothing Here
       , Bind (Op.PVar "dn") Nothing (FreshName (Lit (VText "A")))
-      , Bind (Op.PVar "u") Nothing Op.FreshUniverse
+      , Bind (Op.PVar "u") Nothing (Op.Call "fresh-universe" [])
       , Bind (Op.PVar "d") Nothing (Claim (Ref "dn") (Ref "u"))
       , Do Attack
       , Do (Op.Quantify (Ref "x") (Ref "d"))
@@ -339,10 +351,10 @@ elaborateClauses =
   , clause SurfaceIsArrow
       [ Bind (Op.PVar "h") Nothing Here
       , Bind (Op.PVar "dn") Nothing (FreshName (Lit (VText "A")))
-      , Bind (Op.PVar "u1") Nothing Op.FreshUniverse
+      , Bind (Op.PVar "u1") Nothing (Op.Call "fresh-universe" [])
       , Bind (Op.PVar "d") Nothing (Claim (Ref "dn") (Ref "u1"))
       , Bind (Op.PVar "cn") Nothing (FreshName (Lit (VText "B")))
-      , Bind (Op.PVar "u2") Nothing Op.FreshUniverse
+      , Bind (Op.PVar "u2") Nothing (Op.Call "fresh-universe" [])
       , Bind (Op.PVar "c") Nothing (Claim (Ref "cn") (Ref "u2"))
       , Bind (Op.PVar "ar") Nothing (Arrow (Ref "d") (Ref "c"))
       , call "fill" [Ref "ar"]
@@ -367,7 +379,7 @@ elaborateClauses =
   , clause SurfaceIsAscription
       [ Bind (Op.PVar "h") Nothing Here
       , Bind (Op.PVar "xn") Nothing (FreshName (Lit (VText "X")))
-      , Bind (Op.PVar "u") Nothing Op.FreshUniverse
+      , Bind (Op.PVar "u") Nothing (Op.Call "fresh-universe" [])
       , Bind (Op.PVar "x") Nothing (Claim (Ref "xn") (Ref "u"))
       , Do (Goto (Ref "x"))
       , Bind (Op.PVar "ty") Nothing (Op.AscriptionType (Ref "t"))
@@ -393,7 +405,7 @@ elaborateClauses =
     letPrelude =
       [ Bind (Op.PVar "h") Nothing Here
       , Bind (Op.PVar "xn") Nothing (FreshName (Lit (VText "X")))
-      , Bind (Op.PVar "u") Nothing Op.FreshUniverse
+      , Bind (Op.PVar "u") Nothing (Op.Call "fresh-universe" [])
       , Bind (Op.PVar "x") Nothing (Claim (Ref "xn") (Ref "u"))
       , Bind (Op.PVar "vn") Nothing (FreshName (Lit (VText "V")))
       , Bind (Op.PVar "v") Nothing (Claim (Ref "vn") (Ref "x"))

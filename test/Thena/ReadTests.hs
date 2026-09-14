@@ -354,14 +354,44 @@ gotoTests =
 universeTests :: TestTree
 universeTests =
   testGroup
-    "fresh-universe"
-    [ testCase "is a universe at a meta drawn from the counter" $ do
-        v <- expectBound hole [Bind (Op.PVar "u") Nothing FreshUniverse] "u"
-        v @?= VTerm (Universe (LVar (LMeta 1000)))
+    -- **The op became two at MS5 phase 89** and @fresh-universe@ is a rule over
+    -- them, so these test the halves: @fresh-level@ mints, @universe-at@ wraps.
+    "fresh-level and universe-at"
+    [ testCase "a fresh level is a meta drawn from the counter" $ do
+        v <- expectBound hole [Bind (Op.PVar "l") Nothing FreshLevel] "l"
+        v @?= VLevel (LVar (LMeta 1000))
 
     , testCase "and each one is its own" $ do
-        m <- expectRun hole [Bind (Op.PVar "a") Nothing FreshUniverse, Bind (Op.PVar "b") Nothing FreshUniverse]
+        m <- expectRun hole [Bind (Op.PVar "a") Nothing FreshLevel, Bind (Op.PVar "b") Nothing FreshLevel]
         (bound "a" m == bound "b" m) @?= False
+
+    , testCase "wrapping one is the universe fresh-universe used to build" $ do
+        v <- expectBound hole
+               [ Bind (Op.PVar "l") Nothing FreshLevel
+               , Bind (Op.PVar "u") Nothing (Op.UniverseAt (Ref "l"))
+               ] "u"
+        v @?= VTerm (Universe (LVar (LMeta 1000)))
+
+      -- **An exact level, which is what @Typeₙ@ has always meant when written**
+      -- — and the point of the op is that the numeral can be computed rather
+      -- than written into the rule.
+    , testCase "an exact level from a numeral" $ do
+        v <- expectBound hole [Bind (Op.PVar "l") Nothing (Op.LevelOf (Lit (VInt 2)))] "l"
+        v @?= VLevel (levelOfNat 2)
+
+    , testCase "…and wrapping it gives that universe exactly" $ do
+        v <- expectBound hole
+               [ Bind (Op.PVar "l") Nothing (Op.LevelOf (Lit (VInt 2)))
+               , Bind (Op.PVar "u") Nothing (Op.UniverseAt (Ref "l"))
+               ] "u"
+        v @?= VTerm (Universe (levelOfNat 2))
+
+      -- There is no negative level, and a numeral token cannot carry a sign —
+      -- so this is reachable only from a computed value.
+    , testCase "a negative numeral is refused" $
+        case run hole [Bind (Op.PVar "l") Nothing (Op.LevelOf (Lit (VInt (-1))))] of
+          Left r  -> r @?= ExpectedInt
+          Right _ -> assertFailure "expected a refusal"
     ]
 
 -- | @resolve-name@ — Γ first, then the globals, with level arguments inserted.
