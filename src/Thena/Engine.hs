@@ -227,7 +227,7 @@ data Frame
   = Call
       { resume    :: [Instr]
       , resumeEnv :: Env
-      , destination :: Maybe Op.Name
+      , destination :: Maybe Op.Pattern
         -- ^ **where the value goes when this call returns** (MS5 phase 63) —
         -- the name from the @Bind@ that made the call, or 'Nothing' for a
         -- @Do@. A body's @return@ binds here, in 'resumeEnv'; a body that ends
@@ -253,7 +253,7 @@ data Frame
   | Choice
       { resume    :: [Instr]
       , resumeEnv :: Env
-      , destination :: Maybe Op.Name
+      , destination :: Maybe Op.Pattern
         -- ^ the same field a 'Call' carries, and it means the same thing. It
         -- has to be here too because a call with alternatives builds one of
         -- these instead, and **each alternative returns its own value** — the
@@ -586,8 +586,14 @@ resumeFrom (fr : stk)
 -- Called on a machine that is not asking, it changes nothing. The driver checks
 -- first and reports; see "Thena.Driver".
 resumeAt :: Answer -> Machine -> Machine
+-- **The answer lands through the pattern** (MS5 phase 84). An @Ask@ answers
+-- with text, so a compound pattern can only be a literal or a wildcard and a
+-- refusal leaves the machine exactly as it was — which is right for an
+-- interaction: the driver asks again rather than failing on the user's behalf.
 resumeAt a m = case pc (exec m) of
-  Bind n _ (Ask _ _) : rest -> m { exec = (exec m) { pc = rest, env = (n, VText a) : env (exec m) } }
+  Bind p _ (Ask _ _) : rest
+    | Just bs <- Op.matchPattern p (VText a) ->
+        m { exec = (exec m) { pc = rest, env = bs ++ env (exec m) } }
   Do     (Ask _ _) : rest -> m { exec = (exec m) { pc = rest } }
   _                       -> m
 
@@ -641,7 +647,7 @@ failure r0 m = unwind (stack (exec m))
 -- and the entry environment they seed; everything else they said was the same
 -- thing written twice, and 'savedEnclosing' (MS4 phase 42) is the field that
 -- made writing it twice cost something.
-choicePoint :: Machine -> Maybe Op.Name -> [Instr] -> RuleIter -> Rule -> [Value] -> Env -> Frame
+choicePoint :: Machine -> Maybe Op.Pattern -> [Instr] -> RuleIter -> Rule -> [Value] -> Env -> Frame
 choicePoint m dest rest it' r vs seed =
   Choice
     { resume         = rest
@@ -754,9 +760,14 @@ perform instr rest m = case operation instr of
     Left e  -> failure e m
     Right v -> case resumeFrom (stack (exec m)) of
       Nothing -> failure NothingToReturnFrom m
-      Just (fr, is, e, stk') ->
-        let e' = maybe e (\n -> (n, v) : e) (destination fr)
-         in Continue m { exec = Exec is e' stk' }
+      -- **Matched into the destination** (MS5 phase 84), so
+      -- @(x, y) = some-rule@ takes the answer apart where it lands. A frame
+      -- with no destination drops the value, as it always did.
+      Just (fr, is, e, stk') -> case destination fr of
+        Nothing -> Continue m { exec = Exec is e stk' }
+        Just p  -> case Op.matchPattern p v of
+          Nothing -> failure (BindingDidNotMatch p) m
+          Just bs -> Continue m { exec = Exec is (bs ++ e) stk' }
 
   -- **Hand control over, and stay put** (MS4 phase 45b). @pc@ is deliberately
   -- unchanged — see 'Op.Yield' and 'resumeYield'.
@@ -1612,9 +1623,15 @@ perform instr rest m = case operation instr of
     -- Bind the result if the instruction named a destination. An unbound
     -- destination on a producing op is fine; a bound one on an op that produces
     -- nothing is what phase 15's load-time pass rejects (§7.2).
-    produce v m' = Continue $ case instr of
-      Bind n _ _ -> advance m' { exec = (exec m') { env = (n, v) : env (exec m') } }
-      Do _     -> advance m'
+    -- **The value is MATCHED into the binding** (MS5 phase 84), where it used
+    -- to be zipped onto a name. A refutable pattern that does not fit is a
+    -- failure — his ruling — so this is the one place an op that /succeeded/
+    -- can still fail the instruction.
+    produce v m' = case instr of
+      Do _ -> Continue (advance m')
+      Bind p _ _ -> case Op.matchPattern p v of
+        Nothing -> failure (BindingDidNotMatch p) m'
+        Just bs -> Continue (advance m' { exec = (exec m') { env = bs ++ env (exec m') } })
 
     -- 'Assume' and 'Claim' differ only in which component they build, and both
     -- produce the variable they bound: §7.3's sketch reads @?x <- claim S@.

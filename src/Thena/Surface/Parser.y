@@ -122,8 +122,12 @@ Block :: { [RawInstr] }
   : Instr                                  { [$1] }
   | Block ';' Instr                        { $3 : $1 }
 
+-- **A binding's left is a pattern** (MS5 phase 84) — @Thena.Syntax.Parser@'s
+-- @Instr@, one grammar over, and §7b's registered duplication for the fourth
+-- time. There is no annotation case here, so an @ident@ parts on @=@ alone.
 Instr :: { RawInstr }
-  : ident '=' InstrRhs                     { RawBind $1 $3 }
+  : ident '=' InstrRhs                     { RawBind (RawPWord $1) $3 }
+  | InstrCompoundPat '=' InstrRhs          { RawBind $1 $3 }
   | InstrOp                                { RawDo $1 }
 
 -- **The same two cases the rule-file grammar has** (MS5 phase 68a) — kept level
@@ -160,7 +164,10 @@ InstrParams :: { [RawPattern] }
 
 InstrPatAtom :: { RawPattern }
   : ident                                  { RawPWord $1 }
-  | num                                    { RawPInt $1 }
+  | InstrCompoundPat                       { $1 }
+
+InstrCompoundPat :: { RawPattern }
+  : num                                    { RawPInt $1 }
   | str                                    { RawPText $1 }
   | chr                                    { RawPChar $1 }
   | '[' ']'                                { RawPList [] Nothing }

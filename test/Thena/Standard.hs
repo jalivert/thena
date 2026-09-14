@@ -120,10 +120,10 @@ expectedStandard =
 -- differently depending on which one you reached it through.
 fillRule :: Rule
 fillRule = Rule (GlobalName "fill") [PVar "t"] [FocusIsHole]
-  [ Bind "n" Nothing (FreshName (Lit (VText "refined")))
-  , Bind "x" Nothing (Define (Ref "n") (Ref "t"))
-  , Bind "s" Nothing (Typing (Ref "x"))
-  , Bind "g" Nothing Goal
+  [ Bind (Op.PVar "n") Nothing (FreshName (Lit (VText "refined")))
+  , Bind (Op.PVar "x") Nothing (Define (Ref "n") (Ref "t"))
+  , Bind (Op.PVar "s") Nothing (Typing (Ref "x"))
+  , Bind (Op.PVar "g") Nothing Goal
   , Do (Op.UnifyInto (Ref "s") (Ref "g"))
   , Do (Try (Ref "x"))
   ]
@@ -147,7 +147,7 @@ unifyRefine = Rule (GlobalName "unify-refine-core") [PVar "t"] [FocusIsHole]
 -- adds no capability the two of them did not already have.
 applyRule :: Rule
 applyRule = Rule (GlobalName "apply-core") [PVar "f"] [FocusIsHole]
-  [ Bind "s" Nothing (Op.Apply (Ref "f"))
+  [ Bind (Op.PVar "s") Nothing (Op.Apply (Ref "f"))
   , Do (Call "unify-refine-core" [Ref "s"])
   ]
 
@@ -173,10 +173,10 @@ applyRule = Rule (GlobalName "apply-core") [PVar "f"] [FocusIsHole]
 -- reach them.
 askingRule :: String -> String -> (Operand -> Operand -> Op) -> Rule
 askingRule word what op = Rule (GlobalName word) [PVar "ty"] []
-  [ Bind "n" Nothing (Op.Ask (Lit (VText ("name for the " ++ what ++ "?"))) Op.AName)
+  [ Bind (Op.PVar "n") Nothing (Op.Ask (Lit (VText ("name for the " ++ what ++ "?"))) Op.AName)
   , Do (op (Ref "n") (Ref "ty"))
-  , Bind "t" Nothing (Op.NameText (Ref "n"))
-  , Bind "m" Nothing (Concat (Lit (VText (verb ++ " "))) (Ref "t"))
+  , Bind (Op.PVar "t") Nothing (Op.NameText (Ref "n"))
+  , Bind (Op.PVar "m") Nothing (Concat (Lit (VText (verb ++ " "))) (Ref "t"))
   , Do (Say (Ref "m"))
   ]
   where
@@ -239,16 +239,16 @@ proveGuess = Rule (GlobalName "prove") [] [FocusIsGuess] [Do Prove]
 elaborateClauses :: [Rule]
 elaborateClauses =
   [ clause SurfaceIsName
-      [ Bind "w" Nothing (Op.SurfaceNameOf (Ref "t"))
-      , Bind "x" Nothing (Op.ResolveName (Ref "w"))
+      [ Bind (Op.PVar "w") Nothing (Op.SurfaceNameOf (Ref "t"))
+      , Bind (Op.PVar "x") Nothing (Op.ResolveName (Ref "w"))
       , call "fill" [Ref "x"], call "solve" []
       ]
   , clause SurfaceIsUniverse
-      [ Bind "u" Nothing (Op.SurfaceUniverseOf (Ref "t"))
+      [ Bind (Op.PVar "u") Nothing (Op.SurfaceUniverseOf (Ref "t"))
       , call "fill" [Ref "u"], call "solve" []
       ]
   , clause SurfaceIsUniverseOpen
-      [ Bind "u" Nothing Op.FreshUniverse
+      [ Bind (Op.PVar "u") Nothing Op.FreshUniverse
       , call "fill" [Ref "u"], call "solve" []
       ]
     -- **Two empty bodies**, which the rule grammar did not admit before phase
@@ -265,39 +265,39 @@ elaborateClauses =
     -- application.
   , Rule (GlobalName "elaborate") [PVar "t"]
       [FocusIsHole, SurfaceIsApp (Ref "t"), AppHeadIsElim (Ref "t")]
-      [ Bind "a" Nothing (Op.ElimSpine (Ref "t"))
+      [ Bind (Op.PVar "a") Nothing (Op.ElimSpine (Ref "t"))
       , call "elaborate" [Ref "a"]
       ]
   , Rule (GlobalName "elaborate") [PVar "t"]
       [FocusIsHole, SurfaceIsApp (Ref "t"), AppHeadIsName (Ref "t")]
-      [ Bind "h" Nothing Here
-      , Bind "e" Nothing (Op.ExpandImplicits (Ref "t"))
-      , Bind "hd" Nothing (Op.AppHead (Ref "e"))
-      , Bind "w" Nothing (Op.SurfaceNameOf (Ref "hd"))
-      , Bind "f" Nothing (Op.ResolveName (Ref "w"))
+      [ Bind (Op.PVar "h") Nothing Here
+      , Bind (Op.PVar "e") Nothing (Op.ExpandImplicits (Ref "t"))
+      , Bind (Op.PVar "hd") Nothing (Op.AppHead (Ref "e"))
+      , Bind (Op.PVar "w") Nothing (Op.SurfaceNameOf (Ref "hd"))
+      , Bind (Op.PVar "f") Nothing (Op.ResolveName (Ref "w"))
       , Do (Call "spine-arguments" [Ref "h", Ref "f", Ref "e"])
       ]
   , Rule (GlobalName "elaborate") [PVar "t"]
       [FocusIsHole, SurfaceIsApp (Ref "t"), AppArgsAreExplicit (Ref "t")]
-      [ Bind "h" Nothing Here
-      , Bind "dn" Nothing (FreshName (Lit (VText "A")))
-      , Bind "u1" Nothing Op.FreshUniverse
-      , Bind "d" Nothing (Claim (Ref "dn") (Ref "u1"))
-      , Bind "cn" Nothing (FreshName (Lit (VText "B")))
-      , Bind "u2" Nothing Op.FreshUniverse
-      , Bind "c" Nothing (Claim (Ref "cn") (Ref "u2"))
-      , Bind "ar" Nothing (Arrow (Ref "d") (Ref "c"))
-      , Bind "fn" Nothing (FreshName (Lit (VText "f")))
-      , Bind "f" Nothing (Claim (Ref "fn") (Ref "ar"))
-      , Bind "sn" Nothing (FreshName (Lit (VText "s")))
-      , Bind "sv" Nothing (Claim (Ref "sn") (Ref "d"))
-      , Bind "ap" Nothing (ApplyTo (Ref "f") (Ref "sv"))
+      [ Bind (Op.PVar "h") Nothing Here
+      , Bind (Op.PVar "dn") Nothing (FreshName (Lit (VText "A")))
+      , Bind (Op.PVar "u1") Nothing Op.FreshUniverse
+      , Bind (Op.PVar "d") Nothing (Claim (Ref "dn") (Ref "u1"))
+      , Bind (Op.PVar "cn") Nothing (FreshName (Lit (VText "B")))
+      , Bind (Op.PVar "u2") Nothing Op.FreshUniverse
+      , Bind (Op.PVar "c") Nothing (Claim (Ref "cn") (Ref "u2"))
+      , Bind (Op.PVar "ar") Nothing (Arrow (Ref "d") (Ref "c"))
+      , Bind (Op.PVar "fn") Nothing (FreshName (Lit (VText "f")))
+      , Bind (Op.PVar "f") Nothing (Claim (Ref "fn") (Ref "ar"))
+      , Bind (Op.PVar "sn") Nothing (FreshName (Lit (VText "s")))
+      , Bind (Op.PVar "sv") Nothing (Claim (Ref "sn") (Ref "d"))
+      , Bind (Op.PVar "ap") Nothing (ApplyTo (Ref "f") (Ref "sv"))
       , call "fill" [Ref "ap"]
       , Do (Goto (Ref "f"))
-      , Bind "g" Nothing (Op.AppFunction (Ref "t"))
+      , Bind (Op.PVar "g") Nothing (Op.AppFunction (Ref "t"))
       , call "elaborate" [Ref "g"]
       , Do (Goto (Ref "sv"))
-      , Bind "a" Nothing (Op.AppLastArgument (Ref "t"))
+      , Bind (Op.PVar "a") Nothing (Op.AppLastArgument (Ref "t"))
       , call "elaborate" [Ref "a"]
       , Do (Goto (Ref "h")), call "solve" []
       ]
@@ -307,29 +307,29 @@ elaborateClauses =
     -- instead would nest the λs and put an extra @let@ round each — a different
     -- proof term.
   , clause SurfaceIsLambda
-      [ Bind "h" Nothing Here
+      [ Bind (Op.PVar "h") Nothing Here
       , Do Attack
       , call "intro-binders" [Ref "t"]
       , Do Into
       , call "enter-binders" [Ref "t"]
-      , Bind "b" Nothing (Op.LambdaBody (Ref "t"))
+      , Bind (Op.PVar "b") Nothing (Op.LambdaBody (Ref "t"))
       , call "elaborate" [Ref "b"]
       , Do (Goto (Ref "h")), call "solve" []
       ]
     -- **The parts are read before the development is touched**, so a binder
     -- with no type fails without having claimed or quantified anything.
   , clause SurfaceIsForall
-      [ Bind "x" Nothing (Op.ForallName (Ref "t"))
-      , Bind "ty" Nothing (Op.ForallDomain (Ref "t"))
-      , Bind "tl" Nothing (Op.ForallTail (Ref "t"))
-      , Bind "h" Nothing Here
-      , Bind "dn" Nothing (FreshName (Lit (VText "A")))
-      , Bind "u" Nothing Op.FreshUniverse
-      , Bind "d" Nothing (Claim (Ref "dn") (Ref "u"))
+      [ Bind (Op.PVar "x") Nothing (Op.ForallName (Ref "t"))
+      , Bind (Op.PVar "ty") Nothing (Op.ForallDomain (Ref "t"))
+      , Bind (Op.PVar "tl") Nothing (Op.ForallTail (Ref "t"))
+      , Bind (Op.PVar "h") Nothing Here
+      , Bind (Op.PVar "dn") Nothing (FreshName (Lit (VText "A")))
+      , Bind (Op.PVar "u") Nothing Op.FreshUniverse
+      , Bind (Op.PVar "d") Nothing (Claim (Ref "dn") (Ref "u"))
       , Do Attack
       , Do (Op.Quantify (Ref "x") (Ref "d"))
       , Do Into, Do Along
-      , Bind "c" Nothing Here
+      , Bind (Op.PVar "c") Nothing Here
       , Do (Goto (Ref "d"))
       , call "elaborate" [Ref "ty"]
       , Do (Goto (Ref "c"))
@@ -337,20 +337,20 @@ elaborateClauses =
       , Do (Goto (Ref "h")), call "solve" []
       ]
   , clause SurfaceIsArrow
-      [ Bind "h" Nothing Here
-      , Bind "dn" Nothing (FreshName (Lit (VText "A")))
-      , Bind "u1" Nothing Op.FreshUniverse
-      , Bind "d" Nothing (Claim (Ref "dn") (Ref "u1"))
-      , Bind "cn" Nothing (FreshName (Lit (VText "B")))
-      , Bind "u2" Nothing Op.FreshUniverse
-      , Bind "c" Nothing (Claim (Ref "cn") (Ref "u2"))
-      , Bind "ar" Nothing (Arrow (Ref "d") (Ref "c"))
+      [ Bind (Op.PVar "h") Nothing Here
+      , Bind (Op.PVar "dn") Nothing (FreshName (Lit (VText "A")))
+      , Bind (Op.PVar "u1") Nothing Op.FreshUniverse
+      , Bind (Op.PVar "d") Nothing (Claim (Ref "dn") (Ref "u1"))
+      , Bind (Op.PVar "cn") Nothing (FreshName (Lit (VText "B")))
+      , Bind (Op.PVar "u2") Nothing Op.FreshUniverse
+      , Bind (Op.PVar "c") Nothing (Claim (Ref "cn") (Ref "u2"))
+      , Bind (Op.PVar "ar") Nothing (Arrow (Ref "d") (Ref "c"))
       , call "fill" [Ref "ar"]
       , Do (Goto (Ref "d"))
-      , Bind "a" Nothing (Op.ArrowDomain (Ref "t"))
+      , Bind (Op.PVar "a") Nothing (Op.ArrowDomain (Ref "t"))
       , call "elaborate" [Ref "a"]
       , Do (Goto (Ref "c"))
-      , Bind "b" Nothing (Op.ArrowCodomain (Ref "t"))
+      , Bind (Op.PVar "b") Nothing (Op.ArrowCodomain (Ref "t"))
       , call "elaborate" [Ref "b"]
       , Do (Goto (Ref "h")), call "solve" []
       ]
@@ -359,27 +359,27 @@ elaborateClauses =
   , Rule (GlobalName "elaborate") [PVar "t"] [FocusIsHole, LetIsAnnotated (Ref "t")]
       (letPrelude ++
         [ Do (Goto (Ref "x"))
-        , Bind "ty" Nothing (Op.LetType (Ref "t"))
+        , Bind (Op.PVar "ty") Nothing (Op.LetType (Ref "t"))
         , call "elaborate" [Ref "ty"]
         ] ++ letBody)
   , Rule (GlobalName "elaborate") [PVar "t"] [FocusIsHole, LetIsBare (Ref "t")]
       (letPrelude ++ letBody)
   , clause SurfaceIsAscription
-      [ Bind "h" Nothing Here
-      , Bind "xn" Nothing (FreshName (Lit (VText "X")))
-      , Bind "u" Nothing Op.FreshUniverse
-      , Bind "x" Nothing (Claim (Ref "xn") (Ref "u"))
+      [ Bind (Op.PVar "h") Nothing Here
+      , Bind (Op.PVar "xn") Nothing (FreshName (Lit (VText "X")))
+      , Bind (Op.PVar "u") Nothing Op.FreshUniverse
+      , Bind (Op.PVar "x") Nothing (Claim (Ref "xn") (Ref "u"))
       , Do (Goto (Ref "x"))
-      , Bind "ty" Nothing (Op.AscriptionType (Ref "t"))
+      , Bind (Op.PVar "ty") Nothing (Op.AscriptionType (Ref "t"))
       , call "elaborate" [Ref "ty"]
       , Do (Goto (Ref "h"))
-      , Bind "g" Nothing Goal
+      , Bind (Op.PVar "g") Nothing Goal
       , Do (Op.UnifyInto (Ref "x") (Ref "g"))
-      , Bind "e" Nothing (Op.AscriptionTerm (Ref "t"))
+      , Bind (Op.PVar "e") Nothing (Op.AscriptionTerm (Ref "t"))
       , call "elaborate" [Ref "e"]
       ]
   , clause SurfaceIsElim
-      [ Bind "a" Nothing (Op.ElimSpine (Ref "t"))
+      [ Bind (Op.PVar "a") Nothing (Op.ElimSpine (Ref "t"))
       , call "elaborate" [Ref "a"]
       ]
   , clause SurfaceIsDo [Do (Op.Play (Ref "t"))]
@@ -391,21 +391,21 @@ elaborateClauses =
     call nm as = Do (Call nm as)
 
     letPrelude =
-      [ Bind "h" Nothing Here
-      , Bind "xn" Nothing (FreshName (Lit (VText "X")))
-      , Bind "u" Nothing Op.FreshUniverse
-      , Bind "x" Nothing (Claim (Ref "xn") (Ref "u"))
-      , Bind "vn" Nothing (FreshName (Lit (VText "V")))
-      , Bind "v" Nothing (Claim (Ref "vn") (Ref "x"))
+      [ Bind (Op.PVar "h") Nothing Here
+      , Bind (Op.PVar "xn") Nothing (FreshName (Lit (VText "X")))
+      , Bind (Op.PVar "u") Nothing Op.FreshUniverse
+      , Bind (Op.PVar "x") Nothing (Claim (Ref "xn") (Ref "u"))
+      , Bind (Op.PVar "vn") Nothing (FreshName (Lit (VText "V")))
+      , Bind (Op.PVar "v") Nothing (Claim (Ref "vn") (Ref "x"))
       ]
     letBody =
       [ Do (Goto (Ref "v"))
-      , Bind "val" Nothing (Op.LetValue (Ref "t"))
+      , Bind (Op.PVar "val") Nothing (Op.LetValue (Ref "t"))
       , Do (Call "elaborate" [Ref "val"])
       , Do (Goto (Ref "h"))
-      , Bind "w" Nothing (Op.LetName (Ref "t"))
+      , Bind (Op.PVar "w") Nothing (Op.LetName (Ref "t"))
       , Do (Define (Ref "w") (Ref "v"))
-      , Bind "b" Nothing (Op.LetBody (Ref "t"))
+      , Bind (Op.PVar "b") Nothing (Op.LetBody (Ref "t"))
       , Do (Call "elaborate" [Ref "b"])
       ]
 
@@ -430,12 +430,12 @@ spineWalkers =
   [ Rule (GlobalName "spine-arguments") [PVar "h", PVar "f", PVar "t"]
       [FocusIsComponent, SurfaceIsApp (Ref "t")]
       [ Do (Goto (Ref "h"))
-      , Bind "n" Nothing (FreshName (Lit (VText "a")))
-      , Bind "f2" Nothing (Op.ApplyNext (Ref "f") (Ref "n"))
+      , Bind (Op.PVar "n") Nothing (FreshName (Lit (VText "a")))
+      , Bind (Op.PVar "f2") Nothing (Op.ApplyNext (Ref "f") (Ref "n"))
       , Do (Op.GotoNamed (Ref "n"))
-      , Bind "a" Nothing (Op.AppFirstArgument (Ref "t"))
+      , Bind (Op.PVar "a") Nothing (Op.AppFirstArgument (Ref "t"))
       , Do (Call "elaborate" [Ref "a"])
-      , Bind "tl" Nothing (Op.AppTail (Ref "t"))
+      , Bind (Op.PVar "tl") Nothing (Op.AppTail (Ref "t"))
       , Do (Call "spine-arguments" [Ref "h", Ref "f2", Ref "tl"])
       ]
   , Rule (GlobalName "spine-arguments") [PVar "h", PVar "f", PVar "t"]
@@ -450,21 +450,21 @@ binderWalkers :: [Rule]
 binderWalkers =
   [ Rule (GlobalName "intro-binders") [PVar "t"]
       [FocusIsGuess, LambdaBindsMore (Ref "t")]
-      [ Bind "x" Nothing (Op.LambdaName (Ref "t"))
+      [ Bind (Op.PVar "x") Nothing (Op.LambdaName (Ref "t"))
       , Do (IntroPi (Just (Ref "x")))
-      , Bind "tl" Nothing (Op.LambdaTail (Ref "t"))
+      , Bind (Op.PVar "tl") Nothing (Op.LambdaTail (Ref "t"))
       , Do (Call "intro-binders" [Ref "tl"])
       ]
   , Rule (GlobalName "intro-binders") [PVar "t"]
       [FocusIsGuess, LambdaBindsOne (Ref "t")]
-      [ Bind "x" Nothing (Op.LambdaName (Ref "t"))
+      [ Bind (Op.PVar "x") Nothing (Op.LambdaName (Ref "t"))
       , Do (IntroPi (Just (Ref "x")))
       ]
     -- The binders are the count and nothing else about them is read.
   , Rule (GlobalName "enter-binders") [PVar "t"]
       [FocusIsComponent, LambdaBindsMore (Ref "t")]
       [ Do Along
-      , Bind "tl" Nothing (Op.LambdaTail (Ref "t"))
+      , Bind (Op.PVar "tl") Nothing (Op.LambdaTail (Ref "t"))
       , Do (Call "enter-binders" [Ref "tl"])
       ]
   , Rule (GlobalName "enter-binders") [PVar "t"]

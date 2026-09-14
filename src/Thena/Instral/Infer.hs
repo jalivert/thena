@@ -487,7 +487,7 @@ clause env st0 r = case fromMaybe (error "declareAll missed a rule")
      in generalEnough (InSignature (ruleName r) (length (sigParams sg))) table st2
   where
     walk ps res st =
-      let (ctx, st1)  = patternCtx (ruleName r) (ruleParams r) ps st
+      let (ctx, st1)  = patternCtx (InPattern (ruleName r)) (ruleParams r) ps st
           st2         = foldl (headTest r ctx) st1 (zip [0 ..] (ruleHead r))
        in body env r res ctx 0 st2 (ruleBody r)
 
@@ -504,13 +504,16 @@ clause env st0 r = case fromMaybe (error "declareAll missed a rule")
 -- **A literal pattern constrains and binds nothing**: @f 0@ pins the parameter
 -- to 'TInt' and adds no name. That is the same shape a head test has, one layer
 -- down.
-patternCtx :: GlobalName -> [Pattern] -> [Ty] -> St -> ([(Name, Local)], St)
-patternCtx g ps ts st0 = foldl one ([], st0) (zip3 [0 ..] ps ts)
+-- **The SITE comes from the caller** (MS5 phase 84). A parameter says
+-- @‹rule›, parameter n@ and a binding says @‹rule›, instruction n@ — the same
+-- typing, two different things to point at, and a binding reported as a
+-- parameter is exactly the class @ms5\/CLOSEOUT.md@ 28 is about: /a message
+-- must identify the thing it is about uniquely/.
+patternCtx :: (Int -> Site) -> [Pattern] -> [Ty] -> St -> ([(Name, Local)], St)
+patternCtx site ps ts st0 = foldl one ([], st0) (zip3 [0 ..] ps ts)
   where
     one (acc, st) (i, pt, t) =
-      let (bs, st') = go' (InPattern g i) pt t st in (acc ++ bs, st')
-
-    go' si = go si
+      let (bs, st') = go (site i) pt t st in (acc ++ bs, st')
 
     go si pt t st = case pt of
       PVar n   -> ([(n, Mono t)], st)
@@ -608,26 +611,39 @@ body env r res ctx i st (instr : rest) =
         -- leaves, and 'generalEnough' then asks whether the copy\'s variables
         -- survived as variables — the same instantiate-then-verify a declared
         -- top-level signature gets, one level down.
-        (Bind n (Just ann) _, Just t) ->
+        -- **An annotation only ever meets a plain name** —
+        -- 'Thena.Rules.resolveBlock' pairs one with a @RawPWord@ binding and
+        -- nothing else (MS5 phase 84), so the 'PVar' here is the whole of that
+        -- restriction showing up in the type checker.
+        (Bind (PVar n) (Just ann) _, Just t) ->
           let ((us, table), sA) = instantiateWith [ann] st1
               sB = case us of
                 u : _ -> unify si u t sA
                 []    -> sA
            in ((n, Poly ann) : ctx, generalEnough si table sB)
-        (Bind n (Just ann) _, Nothing) ->
+        (Bind (PVar n) (Just ann) _, Nothing) ->
           -- Annotated, but the op leaves nothing to annotate. The @Nothing@
           -- branch below already reports what is wrong; the annotation is kept
           -- so a later use is measured against what the author said.
           ((n, Poly ann) : ctx, bindsNothing st1)
-        (Bind n Nothing _, Just t)  -> ((n, Mono t) : ctx, st1)
-        (Bind n Nothing _, Nothing) ->
+        -- **A pattern types what it binds against what the op leaves** (MS5
+        -- phase 84), which is 'patternCtx' — the very function phase 82 wrote
+        -- for a parameter. A binding and a parameter ask the same question of a
+        -- pattern, so they get the same answer from the same code.
+        (Bind p Nothing _, Just t)  ->
+          let (bs, s0) = patternCtx (const si) [p] [t] st1
+           in (bs ++ ctx, s0)
+        (Bind p Nothing _, Nothing) ->
           -- **A call is the case worth reporting.** For every other op
           -- 'Thena.Rules.validate' has already refused this
           -- ('Thena.Rules.BoundNonProducing'); a call passes that check because
           -- 'Thena.Ops.produces' cannot answer for one, and this pass can.
-          let (t, s0) = fresh (bindsNothing st1)
-           in ((n, Mono t) : ctx, s0)
-        (Do _, _)           -> (ctx, st1)
+          let (t, s0)  = fresh (bindsNothing st1)
+              (bs, s1) = patternCtx (const si) [p] [t] s0
+           in (bs ++ ctx, s1)
+        -- Unreachable: an annotation is paired only with a plain name.
+        (Bind _ (Just _) _, _) -> (ctx, st1)
+        (Do _, _)              -> (ctx, st1)
 
       -- **A call is the case worth reporting.** For every other op
       -- 'Thena.Rules.validate' has already refused this
@@ -652,7 +668,7 @@ operation env r res ctx si o st0 = case o of
   Lambda ps b ->
     let (vs, st1)    = freshes (length ps) st0
         (rv, st2)    = fresh st1
-        (bs, st3)    = patternCtx (ruleName r) ps vs st2
+        (bs, st3)    = patternCtx (InPattern (ruleName r)) ps vs st2
         st4          = body env r (Just rv) (bs ++ ctx) 0 st3 b
      in (Just (TFun vs rv), st4)
 

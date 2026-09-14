@@ -168,6 +168,7 @@ import Thena.Instral.Concrete
   , RawInstr (..)
   , RawOp (..)
   , RawOperand (..)
+  , RawPattern (..)
   )
 import Thena.Syntax.Lexer (Located (..), Token (..), lexTokens)
 import Thena.Syntax.Parser
@@ -728,7 +729,7 @@ resolving w os
       | written o =
           let n          = "\8988" ++ show k ++ "\8989"
               (bs, rest') = go (k + 1) rest
-           in (RawBind n (RhsOp (RawOp "resolve-core" [o])) : bs, RawRef n : rest')
+           in (RawBind (RawPWord n) (RhsOp (RawOp "resolve-core" [o])) : bs, RawRef n : rest')
       | otherwise =
           let (bs, rest') = go k rest
            in (bs, o : rest')
@@ -919,17 +920,17 @@ surfaceProgram n0 items = foldl item ([], n0) items
      in ( acc ++
             [ Do (PushDevelopment (Lit (VTerm (Universe (LVar l)))))
             , Do (Call "elaborate" [Lit (VSurface (rootedAt full))])
-            , Bind (tyName ++ "raw") Nothing PopDevelopment
-            , Bind tyName Nothing (Expose (Ref (tyName ++ "raw")))
+            , Bind (Ops.PVar (tyName ++ "raw")) Nothing PopDevelopment
+            , Bind (Ops.PVar tyName) Nothing (Expose (Ref (tyName ++ "raw")))
             ]
             ++ concat
                  [ [ Do (PushDevelopment (Lit (VTerm (Universe (LVar l)))))
                    , Do (Assume (Lit (VText nm)) (Ref tyName))
                    , Do (Call "elaborate" [Lit (VSurface (rootedAt (withParams ps cty)))])
-                   , Bind (conName k ++ "raw") Nothing PopDevelopment
-                   , Bind (conName k ++ "app") Nothing
+                   , Bind (Ops.PVar (conName k ++ "raw")) Nothing PopDevelopment
+                   , Bind (Ops.PVar (conName k ++ "app")) Nothing
                        (ApplyTo (Ref (conName k ++ "raw")) selfName)
-                   , Bind (conName k) Nothing (Expose (Ref (conName k ++ "app")))
+                   , Bind (Ops.PVar (conName k)) Nothing (Expose (Ref (conName k ++ "app")))
                    ]
                  | (k, SurfaceConstructor _ cty) <- zip [0 ..] cs
                  ]
@@ -966,11 +967,11 @@ surfaceProgram n0 items = foldl item ([], n0) items
               -- is not merely ugly: @intro@ reads a @Let@ as written, so the
               -- body's λ would open a definition instead. See
               -- 'Thena.Ops.Whnf'.
-            , Bind ("raw" ++ show n) Nothing PopDevelopment
-            , Bind ("ty" ++ show n) Nothing (Expose (Ref ("raw" ++ show n)))
+            , Bind (Ops.PVar ("raw" ++ show n)) Nothing PopDevelopment
+            , Bind (Ops.PVar ("ty" ++ show n)) Nothing (Expose (Ref ("raw" ++ show n)))
             , Do (PushDevelopment (Ref ("ty" ++ show n)))
             , Do (Call "elaborate" [Lit (VSurface (rootedAt body))])
-            , Bind ("tm" ++ show n) Nothing PopDevelopment
+            , Bind (Ops.PVar ("tm" ++ show n)) Nothing PopDevelopment
               -- **The plicities come from the signature as written** (MS4
               -- phase 44b): a leading run of @∀@ binder groups, each in
               -- braces or not. That is the whole of the surface signature
@@ -1580,9 +1581,9 @@ dispatch s name arg = case name of
       let (l, n1) = freshLevelMeta (names machine)
           before  = snapshotOf machine
           prog =
-            [ Bind "T" Nothing (Claim (Lit (VText "Tinfer"))
+            [ Bind (Ops.PVar "T") Nothing (Claim (Lit (VText "Tinfer"))
                           (Lit (VTerm (Universe (LVar l)))))
-            , Bind "x" Nothing (Claim (Lit (VText "xinfer")) (Ref "T"))
+            , Bind (Ops.PVar "x") Nothing (Claim (Lit (VText "xinfer")) (Ref "T"))
             , Do (Ops.Goto (Ref "x"))
             , Do (Call "elaborate" [Lit (VSurface (rootedAt t))])
             ]

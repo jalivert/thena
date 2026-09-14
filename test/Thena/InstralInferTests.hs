@@ -8,10 +8,10 @@
 module Thena.InstralInferTests (tests) where
 
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (GlobalName (..))
-import Thena.Driver (Response (..), RuleFileError (..), Session, command, loadRuleBases, newSession)
+import Thena.Driver (Response (..), RuleFileError (..), Session, Stop (..), command, loadRuleBases, newSession)
 import Thena.Engine (Machine (..))
 import Thena.Driver (Session (..))
 import Thena.Instral.Infer
@@ -21,13 +21,13 @@ import Thena.Instral.Infer
   , renderInstralTypeError
   )
 import Thena.Instral.Type (Signature (..), Ty (..), renderSignature)
-import Thena.Ops (Instr (..), Op (..), Operand (..), Rule (..), Value (..))
+import Thena.Ops (Instr (..), Op (..), Operand (..), Pattern (..), Rule (..), Value (..))
 import Thena.Errors (SyntaxError (..))
 import Thena.Instral.Grammar (GrammarError (..))
 import Thena.Syntax.Parser (ParseError (..))
 import Thena.Rules (RuleBase (..), RuleError (..))
 import Data.List (isInfixOf)
-import Thena.Repl (renderCursor)
+import Thena.Repl (renderCursor, transcriptFrom)
 import Thena.Standard (expectedBase, expectedStandard)
 
 tests :: TestTree
@@ -46,6 +46,7 @@ tests =
     , functionsAreFunctions
     , patternTyping
     , bareWordRightOfEquals
+    , destructuringRuns
     , spliceTemplates
     , blockBodies
     , badSignatures
@@ -355,6 +356,139 @@ functionsAreFunctions =
        in case snd (command (fst (command s0 "go")) ":choices") of
             Choices cs -> Just cs
             _          -> Nothing
+
+-- --------------------------------------------------------------------------
+-- Destructuring in a body (MS5 phase 84 — stage d)
+-- --------------------------------------------------------------------------
+
+-- | **@(x, y) = some-rule@**, and what happens when it does not fit.
+--
+-- **His ruling is the whole design:** a refutable pattern that does not match is
+-- a __failure__ — *"you write for the happy path and let it fail"* — so in a
+-- rule it backtracks like any other failure and in a function it is the
+-- caller\'s, as in Haskell. The two halves are asserted separately below,
+-- because they are two different mechanisms reaching the same ruling.
+destructuringRuns :: TestTree
+destructuringRuns =
+  testGroup
+    "destructuring a binding"
+    [ testCase "a pair is taken apart and both halves are bound" $
+        ranBy (pairs ++ "rule go :- then p = mk \"l\" \"r\" ; (x, y) = p ; m = concat x y ; say m")
+          @?= Just ["lr"]
+
+    , testCase "a list pattern binds the head and the rest" $
+        ranBy (lists ++ "rule go :- then [a, ...r] = three ; say a ; [b, ..._] = r ; say b")
+          @?= Just ["alpha", "beta"]
+
+      -- The destination of a CALL is a pattern too, so the answer is taken
+      -- apart where it lands rather than in a following line.
+    , testCase "a call's answer is destructured where it lands" $
+        ranBy (pairs ++ "rule go :- then (u, v) = mk \"U\" \"V\" ; say v")
+          @?= Just ["V"]
+
+    , testCase "a wildcard runs the op and discards it" $
+        ranBy (pairs ++ "rule go :- then _ = mk \"a\" \"b\" ; say \"discarded\"")
+          @?= Just ["discarded"]
+
+      -- **HIS RULING, the rule half**: the first clause's @[only]@ refuses a
+      -- two-element list, and that is an ordinary failure, so the search takes
+      -- the second clause.
+      -- **The announcement is asserted, not just the answer.** §1 asks that
+      -- search be visible, and @backtracking to@ is the evidence that the
+      -- refusal went through the ordinary failure path rather than being
+      -- special-cased into a skip.
+    , testCase "a refused pattern backtracks to the next clause of a rule" $
+        ranBy (lists
+                 ++ "rule go :- then xs = three ; [only] = xs ; say only\n"
+                 ++ "rule go :- then xs = three ; [a, b, c] = xs ; say c")
+          @?= Just ["chose 1: go", "backtracking to 1: go", "gamma"]
+
+      -- **…and the function half**: one clause, no head, nothing to search, so
+      -- the refusal is the answer.
+    , testCase "…and in a function it is the caller's failure" $
+        stoppedBy ("single [a] = a\nrule go :- then m = single [\"x\", \"y\"] ; say m")
+
+      -- The binding's own refusal, where nothing is left to backtrack into.
+    , testCase "a refused binding with no alternative stops the command" $
+        stoppedBy (lists ++ "rule go :- then xs = three ; [only] = xs ; say only")
+
+      -- **A binding's pattern is TYPED, at load, against what the op leaves.**
+      -- The same 'patternCtx' a parameter gets — a binding and a parameter ask
+      -- the same question of a pattern, so they get the same answer from the
+      -- same code, and this is what says so.
+      -- **Nothing downstream uses @x@**, deliberately. The first draft ended
+      -- the body with @say x@ and passed with the typing of the pattern
+      -- disabled — the clash it was seeing came from @say@ wanting a String,
+      -- not from the list pattern. A mutation found that; the fixture now has
+      -- no second reason to fail.
+    , testCase "a pattern that cannot fit the op's result is a clash" $
+        clashAt (pairs ++ "rule go :- then p = mk \"l\" \"r\" ; [x] = p ; prove")
+
+      -- **An ASK's answer lands through the pattern too**, and this is the one
+      -- shape that can tell the difference: a compound pattern is refused by
+      -- the type checker (an @ask@ answers with text), so only a literal can
+      -- refuse at run time. **A refusal leaves the machine exactly as it was**,
+      -- which for an interaction means the prompt comes back rather than the
+      -- command failing on the user's behalf — the right answer for a question,
+      -- and the opposite of what a binding in a body does.
+      --
+      -- Written because a mutation survived without it: bypassing the match
+      -- here changed nothing any test could see.
+    , testCase "an ask whose answer does not match the pattern asks again" $
+        -- **The COUNT is the assertion.** A first draft asked only whether the
+        -- prompt and the confirmation appeared, and a mutation that skipped the
+        -- match passed it: with the match skipped the wrong answer is accepted,
+        -- so the prompt appears once and the confirmation still appears. Two
+        -- prompts is the only thing that says the refusal happened.
+        asking [ "confirm", "no", "yes" ]
+          "rule confirm :- then \"yes\" = ask \"say yes: \" text ; say \"confirmed\""
+          2 "confirmed"
+
+      -- **…and it is reported as an INSTRUCTION, not a parameter.** The first
+      -- build of this phase reused the parameter site and said
+      -- @go, parameter 1@ for a fault on the body's second line — which is
+      -- @ms5\/CLOSEOUT.md@ 28's class exactly: a message must identify the
+      -- thing it is about uniquely.
+    , testCase "…reported against the instruction, not a parameter" $
+        siteOf (pairs ++ "rule go :- then p = mk \"l\" \"r\" ; [x] = p ; prove")
+          @?= Just (InBody (GlobalName "go") 1)
+    ]
+  where
+    pairs = "mk a b = (a, b)\n"
+    lists = "three = do { return [\"alpha\", \"beta\", \"gamma\"] }\n"
+
+    run src = snd (command
+      (fst (loadRuleBases newSession
+              [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])) "go")
+
+    ranBy src = case run src of
+      Ran ms _ -> Just ms
+      _        -> Nothing
+
+    stoppedBy src = case run src of
+      Ran _ (Halted _) -> pure ()
+      other            -> assertFailure ("expected a halt, got " ++ show other)
+
+    clashAt src = case load (src ++ "\n") of
+      BasesIllTyped (Clash{} : _) -> pure ()
+      other -> assertFailure ("expected a clash, got " ++ show other)
+
+    siteOf src = case load (src ++ "\n") of
+      BasesIllTyped (Clash si _ _ : _) -> Just si
+      _                                -> Nothing
+
+    -- Drive the prompt, and assert on the lines it printed rather than on the
+    -- shape of the session: what is being tested is what the user sees.
+    asking ls src prompts final =
+      let s0 = fst (loadRuleBases newSession
+                     [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])
+          out = lines (transcriptFrom s0 ls)
+          n   = length [ () | l <- out, "say yes: " `isInfixOf` l ]
+       in do
+            assertBool ("expected " ++ show prompts ++ " prompts in " ++ show out)
+                       (n == prompts)
+            assertBool (final ++ " not in " ++ show out)
+                       (any (final `isInfixOf`) out)
 
 -- --------------------------------------------------------------------------
 -- What a bare word right of an = means (MS5 phase 82)
@@ -933,7 +1067,7 @@ blockReturn =
     let blocked = Rule (GlobalName "blocked") [] []
                     [Do (Block [Do (Return (Lit (VText "x")))])]
         bad     = Rule (GlobalName "bad") [] []
-                    [Bind "y" Nothing (Call "blocked" []), Do (Say (Ref "y"))]
+                    [Bind (PVar "y") Nothing (Call "blocked" []), Do (Say (Ref "y"))]
      in snd (inferProgram [] [blocked, bad])
           @?= [BindsNothing (InBody (GlobalName "bad") 0) (GlobalName "blocked")]
 

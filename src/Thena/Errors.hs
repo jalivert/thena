@@ -56,6 +56,7 @@ module Thena.Errors
 import Thena.Core.Level (Level, Unmet)
 import Thena.Core.Context (Context)
 import Thena.Core.Term (Core, GlobalName, Ident, Var)
+import Thena.Instral.Pattern (Pattern)
 import Thena.Syntax.Lexer (LexError)
 import Thena.Surface.Concrete (PairingError (..))
 import Thena.Surface.Layout (LayoutError (..))
@@ -86,7 +87,7 @@ data DataBuildError
 data FailReason
   = UnboundInBody String
     -- ^ a @Ref@ named nothing in the body's environment
-  | NothingReturned String
+  | NothingReturned Pattern
     -- ^ @x = ‹rule›@ where the clause that ran reached the end of its body
     -- without a @return@ (MS5 phase 63). Carries the destination.
     --
@@ -264,6 +265,13 @@ data FailReason
     -- @WrongNumberOfArguments@ were its two predecessors and are gone, because
     -- a call no longer takes a rule /value/ and arity is a filter rather than
     -- an error.
+  | BindingDidNotMatch Pattern
+    -- ^ **@‹pattern› = ‹op›@ ran, and the answer does not fit** (MS5 phase 84).
+    -- His ruling is that this is a failure and not a refusal: in a rule it
+    -- backtracks like any other, and in a function it is the caller's.
+    --
+    -- Carries the pattern, which is what the reader needs — the value is in the
+    -- development the failure is reported against.
   | PatternDidNotMatch String Int
     -- ^ a LAMBDA\'s parameters did not match what it was applied to (MS5 phase
     -- 82) — the local\'s name and how many arguments it was given.

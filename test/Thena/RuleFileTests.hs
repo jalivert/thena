@@ -29,7 +29,7 @@ import Thena.Engine (Machine (rules))
 import qualified Thena.Engine as Engine
 import Thena.Ops (Value (..))
 import Thena.Errors (FailReason (..))
-import Thena.Ops (Rule (..))
+import Thena.Ops (Rule (..), Pattern (..))
 import Thena.Rules (RuleBase (..), RuleError (..))
 
 tests :: TestTree
@@ -371,7 +371,7 @@ returning =
       -- still names the binding it could not fill. A callable NO clause of
       -- which returns is refused when the file loads now; see 'illTyped'.
       testCase "a clause that does not return fails where the value was wanted" $
-        stuck "half" @?= Just (NothingReturned "x")
+        stuck "half" @?= Just (NothingReturned (PVar "x"))
     ]
   where
     base =

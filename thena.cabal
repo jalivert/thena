@@ -51,6 +51,7 @@ library
         Thena.Surface.Read
         Thena.Surface.Zipper
         Thena.Instral.Concrete
+        Thena.Instral.Pattern
         Thena.Instral.Type
         Thena.Instral.Grammar
         Thena.Instral.Infer

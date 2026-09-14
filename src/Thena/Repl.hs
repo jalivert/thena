@@ -1198,8 +1198,10 @@ renderInstr n ctx instr = case instr of
   -- **An annotation prints as the line the author wrote** (MS5 phase 77) — its
   -- own, before the binding — because that is the only spelling the grammar
   -- reads back. Stepping mode shows one instruction per line either way.
-  Bind x (Just t) op -> x ++ " : " ++ renderTy t ++ " ; " ++ x ++ " = " ++ renderOp n ctx op
-  Bind x Nothing  op -> x ++ " = " ++ renderOp n ctx op
+  Bind x (Just t) op ->
+    renderPattern x ++ " : " ++ renderTy t ++ " ; "
+      ++ renderPattern x ++ " = " ++ renderOp n ctx op
+  Bind x Nothing  op -> renderPattern x ++ " = " ++ renderOp n ctx op
   Do op              -> renderOp n ctx op
 
 -- | One instruction's op, as stepping mode shows it.
@@ -1334,8 +1336,14 @@ renderFailReason r = case r of
   ExpectedPair   -> "that is not a pair"
   ExpectedOption -> "that is not an option"
   NothingThere   -> "there is nothing in that option — ask option-is-some first"
-  NothingReturned n ->
-    "nothing was returned to bind to " ++ n
+  NothingReturned p ->
+    "nothing was returned to bind to " ++ renderPattern p
+  -- **Says the pattern, not the value** (MS5 phase 84). The value is in the
+  -- development the failure is reported against, and a rule that backtracks
+  -- will try another clause — so what the reader needs is which binding
+  -- refused.
+  BindingDidNotMatch p ->
+    renderPattern p ++ " does not match what was bound to it"
   NothingToReturnFrom ->
     "there is no call to return from here"
   Mismatch ctx a b ->
@@ -1434,7 +1442,7 @@ renderSurface :: Surface -> String
 renderSurface = surf Loose
   where
     instruction i = case i of
-      RawBind x r  -> x ++ " = " ++ rhs r
+      RawBind x r  -> rawPattern x ++ " = " ++ rhs r
       RawDo     o  -> operation o
       -- **A surface @do@ block cannot contain one** (MS5 phase 77): the surface
       -- grammar has no type notation, and a block in a surface term is not

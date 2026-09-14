@@ -212,7 +212,10 @@ data RawTy
 
 -- | @‹name› = ‹op› ‹args›@ or @‹op› ‹args›@ — 'Thena.Ops.Instr''s two cases, written.
 data RawInstr
-  = RawBind String RawRhs
+  = RawBind RawPattern RawRhs
+    -- ^ **The left is a PATTERN since MS5 phase 84** — stage d of
+    -- @discussion\/pattern-matching.md@. A plain name is 'RawPWord', so every
+    -- binding that could be written before still parses to what it did.
   | RawDo   RawOp
   | RawAnnot String RawTy
     -- ^ **@n : Ty@, a local's declared type** (MS5 phase 77). It is written as

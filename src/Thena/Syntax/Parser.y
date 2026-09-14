@@ -333,7 +333,12 @@ Params :: { [RawPattern] }
 -- already carries, and parts on the same one token of lookahead.
 PatAtom :: { RawPattern }
   : ident                                  { RawPWord $1 }
-  | num                                    { RawPInt $1 }
+  | CompoundPat                            { $1 }
+
+-- Every pattern form but a bare name — what a binding's left may be without
+-- colliding with an op word or an annotation (MS5 phase 84).
+CompoundPat :: { RawPattern }
+  : num                                    { RawPInt $1 }
   | str                                    { RawPText $1 }
   | chr                                    { RawPChar $1 }
   | '[' ']'                                { RawPList [] Nothing }
@@ -390,8 +395,15 @@ Body :: { [RawInstr] }
   -- in their file. Haskell tolerates the same thing for the same reason.
   | Body ';'                               { $1 }
 
+-- **A binding's left is a pattern** (MS5 phase 84). The bare-name case keeps
+-- its own production rather than going through 'PatAtom': an @ident@ at the
+-- start of an instruction may still become an annotation or an op, and parting
+-- those three on the token after the name is the one token of lookahead an LALR
+-- parser has. 'CompoundPat' is 'PatAtom' without that case, so nothing here can
+-- begin with an @ident@ twice.
 Instr :: { RawInstr }
-  : ident '=' Rhs                          { RawBind $1 $3 }
+  : ident '=' Rhs                          { RawBind (RawPWord $1) $3 }
+  | CompoundPat '=' Rhs                    { RawBind $1 $3 }
   -- **A local's type, written as its own line** (MS5 phase 77) — the same
   -- spelling a declaration uses one level up, and told from a binding by the
   -- token after the name exactly as a signature is told from a function.

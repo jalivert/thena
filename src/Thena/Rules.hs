@@ -596,7 +596,7 @@ validate r = reserved ++ repeated ++ headScope ++ go 0 (initiallyBound r) (ruleB
     -- fires.
     reserved =
       [ ReservedName nm n
-      | n <- [ n | Bind n _ _ <- ruleBody r ]
+      | n <- concat [ patternBinds p | Bind p _ _ <- ruleBody r ]
       , n `elem` reservedNames
       ]
 
@@ -636,9 +636,12 @@ validate r = reserved ++ repeated ++ headScope ++ go 0 (initiallyBound r) (ruleB
       let o     = operationOf instr
           errs  = declaration i o ++ binding i instr o ++ scope i bound o
                     ++ insideLambda i bound o
+          -- **A binding brings in what its PATTERN binds** (MS5 phase 84),
+          -- which for the overwhelmingly common plain name is the same one
+          -- name it always was.
           bound' = case instr of
-            Bind n _ _ -> n : bound
-            Do _     -> bound
+            Bind p _ _ -> patternBinds p ++ bound
+            Do _       -> bound
        in errs ++ go (i + 1) bound' rest
 
     -- **A lambda's body is a body and is scoped like one** (found in the long
@@ -661,7 +664,7 @@ validate r = reserved ++ repeated ++ headScope ++ go 0 (initiallyBound r) (ruleB
       let o = operationOf instr
        in scope i bound o
             ++ insideLambda i bound o
-            ++ inner i (case instr of { Bind n _ _ -> n : bound; Do _ -> bound }) rest
+            ++ inner i (case instr of { Bind p _ _ -> patternBinds p ++ bound; Do _ -> bound }) rest
 
     operationOf instr = case instr of
       Bind _ _ o -> o
@@ -671,9 +674,15 @@ validate r = reserved ++ repeated ++ headScope ++ go 0 (initiallyBound r) (ruleB
       DefineData _ -> [DeclarationInBody nm i]
       _            -> []
 
+    -- **Reported against the first name the pattern binds**, or the rule when
+    -- it binds none (@_ = ‹op›@). The error is about the /op/ leaving nothing,
+    -- so the name is a pointer at the line and not the subject.
     binding i instr o = case instr of
-      Bind n _ _ | not (produces o) -> [BoundNonProducing nm i n]
-      _                           -> []
+      Bind p _ _ | not (produces o) ->
+        [BoundNonProducing nm i (headOr "_" (patternBinds p))]
+      _ -> []
+
+    headOr d xs = case xs of { x : _ -> x ; [] -> d }
 
     scope i bound o =
       [ UnboundInRule nm i n
@@ -1014,8 +1023,8 @@ bodyInstrs
   -> Either [RuleError] [Instr]
 bodyInstrs ls g nm bound body = case body of
   BodyRhs rhs -> do
-    is <- resolveBlock ls g bound [RawBind lambdaResult rhs]
-    case [ () | Bind n _ o <- is, n == lambdaResult, not (produces o) ] of
+    is <- resolveBlock ls g bound [RawBind (RawPWord lambdaResult) rhs]
+    case [ () | Bind p _ o <- is, p == PVar lambdaResult, not (produces o) ] of
       _ : _ -> Left [FunctionLeavesNothing nm]
       []    -> Right (is ++ [Do (Return (Ref lambdaResult))])
   BodyBlock raws -> do
@@ -1047,9 +1056,16 @@ resolveBlock ls g bound0 body = case partitionEithers (walk 0 bound0 body) of
   (errs, _)    -> Left errs
   where
     walk _ _ [] = []
+    -- **An annotation pairs with a PLAIN-NAME binding only** (MS5 phase 84).
+    -- @n : Ty@ says /this local is a scheme of this type/ (phase 77), and a
+    -- compound pattern binds several names with several types, so there is
+    -- nothing for one annotation to be about. A destructuring binding is
+    -- therefore un-annotatable, and that is recorded rather than worked around:
+    -- the alternative — an annotation naming one of the names a pattern binds —
+    -- is a real option and is @ms5\/CLOSEOUT.md@ 39.
     walk i bound (RawAnnot n t : rest) = case rest of
-      RawBind m r : more | m == n ->
-        annotated i n t (instruction ls g bound (i + 1) (RawBind m r))
+      RawBind (RawPWord m) r : more | m == n ->
+        annotated i n t (instruction ls g bound (i + 1) (RawBind (RawPWord m) r))
           : walk (i + 2) (m : bound) more
       _ -> [Left (AnnotationWithoutBinding g i n)]
     walk i bound (ri : rest) =
@@ -1062,7 +1078,7 @@ resolveBlock ls g bound0 body = case partitionEithers (walk 0 bound0 body) of
     -- one pass earlier, because the decision it feeds — /is this bare word a
     -- value or a call?/ — has to be made while the 'Op' is built.
     binds ri = case ri of
-      RawBind n _ -> [n]
+      RawBind p _ -> either (const []) patternBinds (resolvePattern g p)
       _           -> []
 
     -- The annotation lands on the instruction that binds the name, which is the
@@ -1074,7 +1090,7 @@ resolveBlock ls g bound0 body = case partitionEithers (walk 0 bound0 body) of
         Nothing -> Left (UnitInsideAType n)
       is <- got
       case reverse is of
-        Bind m _ o : front | m == n -> Right (reverse (Bind m (Just ty) o : front))
+        Bind m _ o : front | m == PVar n -> Right (reverse (Bind m (Just ty) o : front))
         _ -> Left (AnnotationWithoutBinding g i n)
 
 -- | One written instruction. @‹name› = ‹op›@ is a 'Bind', a bare op is a 'Do' —
@@ -1089,13 +1105,25 @@ instruction
   :: [(String, Language)] -> GlobalName -> [Name] -> Int -> RawInstr
   -> Either RuleError [Instr]
 instruction ls g bound i ri = case ri of
+  -- **The left is resolved first** (MS5 phase 84), so that every binding clause
+  -- below works with a 'Pattern' and none of them repeats the question. A
+  -- pattern over @instral@'s own data mentions no op word and no tag, so this
+  -- cannot fail for any reason the clauses care about.
+  RawBind p rhs -> resolvePattern g p >>= \q -> bound' q rhs
   -- **@x = true@ is the literal, not a call to a rule called @true@** (MS5
   -- phase 73). @true@ and @false@ are read as values wherever an /operand/ is
   -- read (phase 64), and the right of an @=@ is the one place a bare word goes
   -- to 'operation' instead — so without this, @f false@ works and @b = false@
   -- says /no rule is called false/.
-  RawBind n (RhsOp (RawOp w [])) | w `elem` reservedNames ->
-    pure . Bind n Nothing . Op.Value <$> operandOf ls g i "=" (RawRef w)
+  RawDo     o            -> lift Do       o
+  -- **Unreachable from 'resolveBlock'**, which takes an annotation and the
+  -- binding after it together. A block that is only an annotation is refused
+  -- there; this answers rather than leaving a pattern-match failure.
+  RawAnnot n _           -> Left (AnnotationWithoutBinding g i n)
+  where
+   bound' n rhs = case rhs of
+    RhsOp (RawOp w []) | w `elem` reservedNames ->
+      pure . Bind n Nothing . Op.Value <$> operandOf ls g i "=" (RawRef w)
   -- **@x = y@ where @y@ is a LOCAL is that value, not a call to a rule called
   -- @y@** (MS5 phase 82) — the same defect one guard over, and phase 73's
   -- comment above is its own best statement: the right of an @=@ is the one
@@ -1111,36 +1139,33 @@ instruction ls g bound i ri = case ri of
   --
   -- **An op word still wins**, because 'operation' is not reached: a word that
   -- names an op never gets here, exactly as @true@ does not.
-  RawBind n (RhsOp (RawOp w [])) | w `elem` bound, not (isOpWord w) ->
-    pure . Bind n Nothing . Op.Value <$> operandOf ls g i "=" (RawRef w)
-  RawBind n (RhsOp o)    -> lift (Bind n Nothing) o
+    RhsOp (RawOp w []) | w `elem` bound, not (isOpWord w) ->
+      pure . Bind n Nothing . Op.Value <$> operandOf ls g i "=" (RawRef w)
+    RhsOp o    -> lift (Bind n Nothing) o
   -- **A value on the right of an @=@** (MS5 phase 68a) — @x = [1, 2]@. Its
   -- nested calls are lifted exactly as an op's arguments are, and the value
   -- itself becomes a 'Thena.Ops.Value', which is the op with no written form.
   -- **A lambda binds directly**, without going through 'Op.Value': it is
   -- already an op, and wrapping it would build the closure and then copy it.
-  RawBind n (RhsValue (RawLambda ps b)) -> pure . Bind n Nothing <$> closure ls g i ps b
-  RawBind n (RhsValue o) ->
-    let (binds, o') = hoistedOne i o
-     in (++) <$> traverse (hoistedBind ls g i) binds
-              <*> (pure . Bind n Nothing . Op.Value <$> operandOf ls g i "=" o')
-  RawDo     o            -> lift Do       o
-  -- **Unreachable from 'resolveBlock'**, which takes an annotation and the
-  -- binding after it together. A block that is only an annotation is refused
-  -- there; this answers rather than leaving a pattern-match failure.
-  RawAnnot n _           -> Left (AnnotationWithoutBinding g i n)
-  where
-    lift f (RawOp w as) =
+    RhsValue (RawLambda ps b) -> pure . Bind n Nothing <$> closure ls g i ps b
+    RhsValue o ->
+      let (bs, o') = hoistedOne i o
+       in (++) <$> traverse (hoistedBind ls g i) bs
+                <*> (pure . Bind n Nothing . Op.Value <$> operandOf ls g i "=" o')
+
+   lift f (RawOp w as) =
       let (binds, as') = hoisted i as
        in (++) <$> traverse (hoistedBind ls g i) binds
                 <*> (pure . f <$> operation ls g i (RawOp w as'))
 
 -- | One binding 'hoisted' lifted out — a nested call or a lambda.
 hoistedBind :: [(String, Language)] -> GlobalName -> Int -> (Name, RawRhs) -> Either RuleError Instr
+-- **A generated name, so a plain 'PVar'** (MS5 phase 84): a hoisted binding is
+-- machinery and never destructures.
 hoistedBind ls g i (n, r) = case r of
-  RhsOp o                     -> Bind n Nothing <$> operation ls g i o
-  RhsValue (RawLambda ps b)   -> Bind n Nothing <$> closure ls g i ps b
-  RhsValue o                  -> Bind n Nothing . Op.Value <$> operandOf ls g i "=" o
+  RhsOp o                     -> Bind (PVar n) Nothing <$> operation ls g i o
+  RhsValue (RawLambda ps b)   -> Bind (PVar n) Nothing <$> closure ls g i ps b
+  RhsValue o                  -> Bind (PVar n) Nothing . Op.Value <$> operandOf ls g i "=" o
 
 -- | Turn a written parameter into a 'Pattern' (MS5 phase 82).
 --

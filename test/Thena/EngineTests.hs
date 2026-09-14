@@ -159,7 +159,7 @@ tests =
                       @?= (resumed, [("x", VText "kept")], [entered { returned = True }])
                   other       -> assertFailure ("expected Continue, got " ++ show other)
         , testCase "Bind names the op's result" $
-            case runTo (machine [Bind "s" Nothing (Ops.Concat (text "a") (text "b"))]) of
+            case runTo (machine [Bind (Ops.PVar "s") Nothing (Ops.Concat (text "a") (text "b"))]) of
               Finished m -> envOf m @?= [("s", VText "ab")]
               other      -> assertFailure ("expected Finished, got " ++ show other)
         , testCase "Do discards it" $
@@ -167,7 +167,7 @@ tests =
               Finished m -> envOf m @?= []
               other      -> assertFailure ("expected Finished, got " ++ show other)
         , testCase "Ref reads a name bound earlier in the body" $
-            case runTo (machine [Bind "s" Nothing (Ops.Concat (text "a") (text "b")), Bind "t" Nothing (Ops.Concat (Ref "s") (text "!"))]) of
+            case runTo (machine [Bind (Ops.PVar "s") Nothing (Ops.Concat (text "a") (text "b")), Bind (Ops.PVar "t") Nothing (Ops.Concat (Ref "s") (text "!"))]) of
               Finished m -> lookup "t" (envOf m) @?= Just (VText "ab!")
               other      -> assertFailure ("expected Finished, got " ++ show other)
         , testCase "a stuck machine keeps stepping to the same reason" $
@@ -178,17 +178,17 @@ tests =
     , testGroup
         "asking"
         [ testCase "Ask yields the prompt the body built" $
-            case runTo (machine [Bind "p" Nothing (Ops.Concat (text "who? ") (text "type A")), Bind "x" Nothing (Ops.Ask (Ref "p") AName)]) of
+            case runTo (machine [Bind (Ops.PVar "p") Nothing (Ops.Concat (text "who? ") (text "type A")), Bind (Ops.PVar "x") Nothing (Ops.Ask (Ref "p") AName)]) of
               Asking q _ -> q @?= Question "who? type A" AName
               other      -> assertFailure ("expected Asking, got " ++ show other)
         , testCase "the asking instruction stays at the head of pc" $
             -- What lets 'resumeAt' know the destination without a field in
             -- 'Machine' that is meaningful only sometimes (§7.5).
-            case runTo (machine [Bind "x" Nothing (Ops.Ask (text "?") AName), Do (Ops.Say (Ref "x"))]) of
-              Asking _ m -> (pc (exec m), isAsking m) @?= ([Bind "x" Nothing (Ops.Ask (text "?") AName), Do (Ops.Say (Ref "x"))], True)
+            case runTo (machine [Bind (Ops.PVar "x") Nothing (Ops.Ask (text "?") AName), Do (Ops.Say (Ref "x"))]) of
+              Asking _ m -> (pc (exec m), isAsking m) @?= ([Bind (Ops.PVar "x") Nothing (Ops.Ask (text "?") AName), Do (Ops.Say (Ref "x"))], True)
               other      -> assertFailure ("expected Asking, got " ++ show other)
         , testCase "resumeAt binds the answer where the instruction named" $
-            case runTo (machine [Bind "x" Nothing (Ops.Ask (text "?") AName), Do (Ops.Say (Ref "x"))]) of
+            case runTo (machine [Bind (Ops.PVar "x") Nothing (Ops.Ask (text "?") AName), Do (Ops.Say (Ref "x"))]) of
               Asking _ m ->
                 let m' = resumeAt "hello" m
                  in (lookup "x" (envOf m'), pc (exec m')) @?= (Just (VText "hello"), [Do (Ops.Say (Ref "x"))])
@@ -245,7 +245,7 @@ tests =
                 other -> assertFailure ("wrong shape: " ++ show other)
               other -> assertFailure ("expected Finished, got " ++ show other)
         , testCase "assume produces the variable it bound" $
-            case runTo (machine [Bind "x" Nothing (Ops.Assume (text "A") (term type0))]) of
+            case runTo (machine [Bind (Ops.PVar "x") Nothing (Ops.Assume (text "A") (term type0))]) of
               Finished m -> case (lookup "x" (envOf m), devOf m) of
                 (Just (VTerm (Free v)), Under (Assume w _ _) _) -> v @?= w
                 other -> assertFailure ("wrong shape: " ++ show other)

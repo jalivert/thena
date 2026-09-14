@@ -22,7 +22,8 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Ops
-  ( Pattern (..)
+  ( Instr (..)
+  , Pattern (..)
   , Value (..)
   , matchPattern
   , matchPatterns
@@ -43,6 +44,7 @@ tests =
     [ matching
     , binding
     , spelling
+    , destructuring
     , refusals
     , totality
     ]
@@ -79,6 +81,18 @@ everyPattern =
   , ("(some [a])",    PSome (PList [PVar "a"] Nothing))
   , ("none",          PNone)
   ]
+
+-- | Read a whole rule, for the binding cases above.
+readWhole :: String -> Either String Rule
+readWhole text = case lexTokens text of
+  Left e -> Left ("lex: " ++ show e)
+  Right ts -> case layout ts of
+    Left e -> Left ("layout: " ++ show e)
+    Right ts' -> case parseRule ts' of
+      Left e -> Left ("parse: " ++ show e)
+      Right raw -> case resolveRule [] raw of
+        Left es -> Left ("resolve: " ++ show es)
+        Right r -> Right r
 
 -- | Read one pattern by putting it in a rule's parameter position.
 readPattern :: String -> Either String Pattern
@@ -131,6 +145,71 @@ spelling =
     roundTrip p = case readPattern (renderPattern p) of
       Left e   -> assertFailure (renderPattern p ++ " — " ++ e)
       Right p' -> p' @?= p
+
+-- --------------------------------------------------------------------------
+-- On the left of a binding (MS5 phase 84 — stage d)
+-- --------------------------------------------------------------------------
+
+-- | **@(x, y) = some-rule@ takes the answer apart where it lands.**
+--
+-- Stage d of @discussion\/pattern-matching.md@, and his ruling is what makes it
+-- small: __a refutable pattern that does not match is a FAILURE__ — in a rule it
+-- backtracks like any other, in a function it is the caller\'s, as in Haskell.
+-- No irrefutable\/refutable distinction is invented, so there is no second kind
+-- of binding and no new instruction shape.
+destructuring :: TestTree
+destructuring =
+  testGroup
+    "on the left of a binding"
+    [ testCase "a compound pattern parses where a name did" $
+        readBindings "rule r :- then (x, y) = f ; say x"
+          @?= Right [PPair (PVar "x") (PVar "y"), PWild]
+
+    , testCase "…and a list one" $
+        readBindings "rule r :- then [a, ...rest] = f ; say a"
+          @?= Right [PList [PVar "a"] (Just (PVar "rest")), PWild]
+
+      -- A plain name is the pattern that binds it, so nothing that could be
+      -- written before means anything different.
+    , testCase "a plain name is still a plain name" $
+        readBindings "rule r :- then x = f" @?= Right [PVar "x"]
+
+      -- @_ = ‹op›@ is run-and-discard, and it is not a special case: @_@ is a
+      -- pattern like any other and 'PWild' binds nothing.
+    , testCase "a wildcard binding is writable" $
+        readBindings "rule r :- then _ = f" @?= Right [PWild]
+
+      -- **The scope walk must see what the pattern binds**, or a later line
+      -- naming one of them is refused at load. This is the case that catches
+      -- 'Thena.Rules.resolveBlock' forgetting to thread them.
+    , testCase "what a compound pattern binds is in scope below it" $
+        loadsCleanly "rule r :- then (x, y) = f ; m = concat x y ; say m"
+
+    , testCase "…and a name it does NOT bind is still refused" $
+        refuses "rule r :- then (x, y) = f ; say z" "UnboundInRule"
+    ]
+  where
+    readBindings src = map leftOf <$> readBody src
+
+    leftOf i = case i of
+      Bind p _ _ -> p
+      Do _       -> PWild   -- only to give `say x` a shape in the lists above
+
+    readBody src = case readWhole src of
+      Left e  -> Left e
+      Right r -> Right (ruleBody r)
+
+    loadsCleanly src = case readWhole src of
+      Left e  -> assertFailure (src ++ " — " ++ e)
+      Right r -> case validate r of
+        [] -> pure ()
+        es -> assertFailure (src ++ " — " ++ show es)
+
+    refuses src want = case readWhole src of
+      Left e  -> assertBool (src ++ " said " ++ e) (want `isInfixOf` e)
+      Right r -> case validate r of
+        [] -> assertFailure ("expected a refusal for " ++ src)
+        es -> assertBool (src ++ " said " ++ show es) (want `isInfixOf` show es)
 
 -- --------------------------------------------------------------------------
 -- What the matcher does
