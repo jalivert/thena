@@ -232,7 +232,7 @@ elaborating = elaboratingAt hole
 elaboratingAt :: Cursor -> Surface -> Either FailReason Machine
 elaboratingAt cur s =
   snd (runOut (machineAt cur
-        [Do (Ops.Call (GlobalName "elaborate") [Lit (VSurface (rootedAt s))])]))
+        [Do (Ops.Call "elaborate" [Lit (VSurface (rootedAt s))])]))
 
 -- | A machine at a cursor, loaded with a program.
 --

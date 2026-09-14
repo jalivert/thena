@@ -136,8 +136,8 @@ fillRule = Rule (GlobalName "fill") [PVar "t"] [FocusIsHole]
 -- needs — @FILL@, the two @FOCUS@es, @SOLVE@ — is one a caller can get at.
 unifyRefine :: Rule
 unifyRefine = Rule (GlobalName "unify-refine-core") [PVar "t"] [FocusIsHole]
-  [ Do (Call (GlobalName "fill") [Ref "t"])
-  , Do (Call (GlobalName "solve") [])
+  [ Do (Call "fill" [Ref "t"])
+  , Do (Call "solve" [])
   ]
 
 -- | Phase 25's claiming half — §2.7's @naive-refine@ with the search left out.
@@ -148,7 +148,7 @@ unifyRefine = Rule (GlobalName "unify-refine-core") [PVar "t"] [FocusIsHole]
 applyRule :: Rule
 applyRule = Rule (GlobalName "apply-core") [PVar "f"] [FocusIsHole]
   [ Bind "s" Nothing (Op.Apply (Ref "f"))
-  , Do (Call (GlobalName "unify-refine-core") [Ref "s"])
+  , Do (Call "unify-refine-core" [Ref "s"])
   ]
 
 -- | The asking half of @claim@, @assume@ and @quantify@ (MS5 phase 62b).
@@ -275,7 +275,7 @@ elaborateClauses =
       , Bind "hd" Nothing (Op.AppHead (Ref "e"))
       , Bind "w" Nothing (Op.SurfaceNameOf (Ref "hd"))
       , Bind "f" Nothing (Op.ResolveName (Ref "w"))
-      , Do (Call (GlobalName "spine-arguments") [Ref "h", Ref "f", Ref "e"])
+      , Do (Call "spine-arguments" [Ref "h", Ref "f", Ref "e"])
       ]
   , Rule (GlobalName "elaborate") [PVar "t"]
       [FocusIsHole, SurfaceIsApp (Ref "t"), AppArgsAreExplicit (Ref "t")]
@@ -388,7 +388,7 @@ elaborateClauses =
     ++ spineWalkers
   where
     clause test = Rule (GlobalName "elaborate") [PVar "t"] [FocusIsHole, test (Ref "t")]
-    call nm as = Do (Call (GlobalName nm) as)
+    call nm as = Do (Call nm as)
 
     letPrelude =
       [ Bind "h" Nothing Here
@@ -401,12 +401,12 @@ elaborateClauses =
     letBody =
       [ Do (Goto (Ref "v"))
       , Bind "val" Nothing (Op.LetValue (Ref "t"))
-      , Do (Call (GlobalName "elaborate") [Ref "val"])
+      , Do (Call "elaborate" [Ref "val"])
       , Do (Goto (Ref "h"))
       , Bind "w" Nothing (Op.LetName (Ref "t"))
       , Do (Define (Ref "w") (Ref "v"))
       , Bind "b" Nothing (Op.LetBody (Ref "t"))
-      , Do (Call (GlobalName "elaborate") [Ref "b"])
+      , Do (Call "elaborate" [Ref "b"])
       ]
 
 -- | The two rules that walk a λ's binder group (MS4 phase 49c).
@@ -434,15 +434,15 @@ spineWalkers =
       , Bind "f2" Nothing (Op.ApplyNext (Ref "f") (Ref "n"))
       , Do (Op.GotoNamed (Ref "n"))
       , Bind "a" Nothing (Op.AppFirstArgument (Ref "t"))
-      , Do (Call (GlobalName "elaborate") [Ref "a"])
+      , Do (Call "elaborate" [Ref "a"])
       , Bind "tl" Nothing (Op.AppTail (Ref "t"))
-      , Do (Call (GlobalName "spine-arguments") [Ref "h", Ref "f2", Ref "tl"])
+      , Do (Call "spine-arguments" [Ref "h", Ref "f2", Ref "tl"])
       ]
   , Rule (GlobalName "spine-arguments") [PVar "h", PVar "f", PVar "t"]
       [FocusIsComponent, SurfaceIsName (Ref "t")]
       [ Do (Goto (Ref "h"))
-      , Do (Call (GlobalName "fill") [Ref "f"])
-      , Do (Call (GlobalName "solve") [])
+      , Do (Call "fill" [Ref "f"])
+      , Do (Call "solve" [])
       ]
   ]
 
@@ -453,7 +453,7 @@ binderWalkers =
       [ Bind "x" Nothing (Op.LambdaName (Ref "t"))
       , Do (IntroPi (Just (Ref "x")))
       , Bind "tl" Nothing (Op.LambdaTail (Ref "t"))
-      , Do (Call (GlobalName "intro-binders") [Ref "tl"])
+      , Do (Call "intro-binders" [Ref "tl"])
       ]
   , Rule (GlobalName "intro-binders") [PVar "t"]
       [FocusIsGuess, LambdaBindsOne (Ref "t")]
@@ -465,7 +465,7 @@ binderWalkers =
       [FocusIsComponent, LambdaBindsMore (Ref "t")]
       [ Do Along
       , Bind "tl" Nothing (Op.LambdaTail (Ref "t"))
-      , Do (Call (GlobalName "enter-binders") [Ref "tl"])
+      , Do (Call "enter-binders" [Ref "tl"])
       ]
   , Rule (GlobalName "enter-binders") [PVar "t"]
       [FocusIsComponent, LambdaBindsOne (Ref "t")]

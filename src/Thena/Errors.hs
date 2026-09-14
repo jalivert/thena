@@ -254,7 +254,7 @@ data FailReason
     -- **Each reader is paired with the test that makes it total in the clause
     -- using it** — @when (surface-is-name s) then w = surface-name s@ — so this
     -- is what a body reaching one any other way gets, rather than a guess.
-  | NoClauseMatched GlobalName Int [Int]
+  | NoClauseMatched String Int [Int]
     -- ^ @call ‹name› ‹args›@ found nothing to run: the name, the number of
     -- arguments it was given, and the arities of the rules that do bear that
     -- name. **One reason for three mistakes**, told apart by the renderer —
@@ -264,7 +264,7 @@ data FailReason
     -- @WrongNumberOfArguments@ were its two predecessors and are gone, because
     -- a call no longer takes a rule /value/ and arity is a filter rather than
     -- an error.
-  | PatternDidNotMatch GlobalName Int
+  | PatternDidNotMatch String Int
     -- ^ a LAMBDA\'s parameters did not match what it was applied to (MS5 phase
     -- 82) — the local\'s name and how many arguments it was given.
     --

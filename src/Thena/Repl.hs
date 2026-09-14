@@ -1230,7 +1230,7 @@ renderOp n ctx op = case op of
   Ops.CrossValue  -> word ++ " val"
   -- Written the way a rule file writes it (phase 23): the name, then the
   -- arguments as any other op\'s, spaced and unwrapped.
-  Ops.Call nm as  -> unwords (word : nameString nm : map operand as)
+  Ops.Call nm as  -> unwords (word : nm : map operand as)
   _               -> unwords (word : map operand (operandsOf op))
   where
     word    = Ops.opKeyword op
@@ -1395,15 +1395,15 @@ renderFailReason r = case r of
   -- is known at other arities, or clauses of the right arity all failed their
   -- heads. Which one it is falls out of the arities the reason carries.
   NoClauseMatched g got want
-    | null want        -> "no rule is called " ++ nameString g
+    | null want        -> "no rule is called " ++ g
     | got `notElem` want ->
-        nameString g ++ " takes " ++ orList (map show want)
+        g ++ " takes " ++ orList (map show want)
           ++ " argument(s), given " ++ show got
     | otherwise        ->
-        "no clause of " ++ nameString g ++ " applies here"
+        "no clause of " ++ g ++ " applies here"
 
   PatternDidNotMatch g got ->
-    nameString g ++ " was given " ++ show got
+    g ++ " was given " ++ show got
       ++ " argument(s) that its pattern does not match"
 
 -- | @a@, @a or b@, @a, b or c@ — for a message that lists alternatives.

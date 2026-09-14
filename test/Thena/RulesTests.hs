@@ -457,23 +457,23 @@ returnTests =
   testGroup
     "a rule returns a value"
     [ testCase "the caller's binding is filled by the callee's return" $
-        envAfter [Bind "r" Nothing (Ops.Call (GlobalName "gives") [])]
+        envAfter [Bind "r" Nothing (Ops.Call "gives" [])]
           >>= (@?= Just (VText "a value"))
 
     , -- @return@ ends the body, so the @say@ after it never runs. Checked
       -- through the binding rather than through the message, because a body
       -- that ran on would still return the same value.
       testCase "return ends the body" $
-        ranWith [Do (Ops.Call (GlobalName "runs-on") [])]
+        ranWith [Do (Ops.Call "runs-on" [])]
           >>= (@?= Right [])
 
     , testCase "a body that never returns fails where the value was wanted" $
-        ranWith [Bind "r" Nothing (Ops.Call (GlobalName "silent") [])]
+        ranWith [Bind "r" Nothing (Ops.Call "silent" [])]
           >>= (@?= Left (NothingReturned "r"))
 
     , -- The same rule called for effect is fine: nothing asked it for a value.
       testCase "and is fine when nothing asked it for one" $
-        ranWith [Do (Ops.Call (GlobalName "silent") [])]
+        ranWith [Do (Ops.Call "silent" [])]
           >>= (@?= Right [])
 
     , testCase "return outside a call has nothing to return from" $
@@ -487,7 +487,7 @@ returnTests =
       -- all, because a call with two candidates builds one of those and not a
       -- 'Thena.Engine.Call'.
       testCase "backtracking rebinds from the clause that finally ran" $
-        envAfter [ Bind "r" Nothing (Ops.Call (GlobalName "two-ways") [])
+        envAfter [ Bind "r" Nothing (Ops.Call "two-ways" [])
                  , Do (Ops.Say (Ref "r"))
                  ]
           >>= (@?= Just (VText "second"))
@@ -557,7 +557,7 @@ producesTests =
         -- handed back with @return@. So the call here is to 'returningRule',
         -- which does exactly that and nothing else.
       , ("prim-prove",  e, hole,    [],            Ops.Prove)
-      , ("call",        e, hole,    [],            Ops.Call (GlobalName "gives") [])
+      , ("call",        e, hole,    [],            Ops.Call "gives" [])
         -- **A λ** (MS4 phase 49b): every other shape this op once handled is a
         -- clause of @elaborate@ now, and it refuses those — so the term has to
         -- be one of the three cases still behind it, and a λ is the one that

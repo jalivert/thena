@@ -933,7 +933,7 @@ blockReturn =
     let blocked = Rule (GlobalName "blocked") [] []
                     [Do (Block [Do (Return (Lit (VText "x")))])]
         bad     = Rule (GlobalName "bad") [] []
-                    [Bind "y" Nothing (Call (GlobalName "blocked") []), Do (Say (Ref "y"))]
+                    [Bind "y" Nothing (Call "blocked" []), Do (Say (Ref "y"))]
      in snd (inferProgram [] [blocked, bad])
           @?= [BindsNothing (InBody (GlobalName "bad") 0) (GlobalName "blocked")]
 

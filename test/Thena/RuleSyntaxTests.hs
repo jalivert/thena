@@ -319,11 +319,11 @@ vocabulary =
       -- what lets a rule call itself and call rules written after it.
       testCase "call records a name, and resolves nothing" $ do
         b <- bodyOf "call try x"
-        b @?= [Do (Call (GlobalName "try") [Ref "x"])]
+        b @?= [Do (Call "try" [Ref "x"])]
 
     , testCase "including a name no rule bears" $ do
         b <- bodyOf "call nonesuch x"
-        b @?= [Do (Call (GlobalName "nonesuch") [Ref "x"])]
+        b @?= [Do (Call "nonesuch" [Ref "x"])]
     ]
   where
     opCase (src, expected) =
@@ -596,7 +596,7 @@ mistakes =
       -- runs. The same trade phase 23 took for explicit @call@.
       testCase "an unknown op word is a rule call" $
         bodyOf "frobnicate x"
-          >>= (@?= [Do (Call (GlobalName "frobnicate") [Ref "x"])])
+          >>= (@?= [Do (Call "frobnicate" [Ref "x"])])
 
     , -- **An operand may be a call** (MS5 phase 63), and resolution turns it
       -- back into a statement: the nested call is bound in front of the
@@ -604,8 +604,8 @@ mistakes =
       -- @x = f a ; some-rule x b@ had to be written as until now.
       testCase "a nested call is lifted into a binding of its own" $
         bodyOf "some-rule (f a) b"
-          >>= (@?= [ Bind "(0:0)" Nothing (Call (GlobalName "f") [Ref "a"])
-                   , Do (Call (GlobalName "some-rule")
+          >>= (@?= [ Bind "(0:0)" Nothing (Call "f" [Ref "a"])
+                   , Do (Call "some-rule"
                               [Ref "(0:0)", Ref "b"])
                    ])
 
@@ -613,9 +613,9 @@ mistakes =
       -- because these are statements: a call changes the development.
       testCase "and nesting goes innermost first" $
         bodyOf "f (g (h a))"
-          >>= (@?= [ Bind "(0:1)" Nothing (Call (GlobalName "h") [Ref "a"])
-                   , Bind "(0:0)" Nothing (Call (GlobalName "g") [Ref "(0:1)"])
-                   , Do (Call (GlobalName "f") [Ref "(0:0)"])
+          >>= (@?= [ Bind "(0:1)" Nothing (Call "h" [Ref "a"])
+                   , Bind "(0:0)" Nothing (Call "g" [Ref "(0:1)"])
+                   , Do (Call "f" [Ref "(0:0)"])
                    ])
 
     , -- **A literal is walked into** (MS5 phase 65): a call inside a list is
@@ -627,8 +627,8 @@ mistakes =
       -- without the brackets.
       testCase "a call inside a list is lifted too" $
         bodyOf "f [(g a), b]"
-          >>= (@?= [ Bind "(0:0)" Nothing (Call (GlobalName "g") [Ref "a"])
-                   , Do (Call (GlobalName "f")
+          >>= (@?= [ Bind "(0:0)" Nothing (Call "g" [Ref "a"])
+                   , Do (Call "f"
                               [ListOf [Ref "(0:0)", Ref "b"]])
                    ])
     , -- The same, and in a pair's first component the parentheses are not
@@ -638,18 +638,18 @@ mistakes =
       -- comma is seen. Written as below there is no ambiguity to resolve.
       testCase "and one inside a pair" $
         bodyOf "f ((g a), b)"
-          >>= (@?= [ Bind "(0:0)" Nothing (Call (GlobalName "g") [Ref "a"])
-                   , Do (Call (GlobalName "f")
+          >>= (@?= [ Bind "(0:0)" Nothing (Call "g" [Ref "a"])
+                   , Do (Call "f"
                               [PairOf (Ref "(0:0)") (Ref "b")])
                    ])
     , -- The names are per written instruction, so two instructions that each
       -- nest do not collide.
       testCase "the lifted names are per instruction" $
         bodyOf "f (g a) ; f (g b)"
-          >>= (@?= [ Bind "(0:0)" Nothing (Call (GlobalName "g") [Ref "a"])
-                   , Do (Call (GlobalName "f") [Ref "(0:0)"])
-                   , Bind "(1:0)" Nothing (Call (GlobalName "g") [Ref "b"])
-                   , Do (Call (GlobalName "f") [Ref "(1:0)"])
+          >>= (@?= [ Bind "(0:0)" Nothing (Call "g" [Ref "a"])
+                   , Do (Call "f" [Ref "(0:0)"])
+                   , Bind "(1:0)" Nothing (Call "g" [Ref "b"])
+                   , Do (Call "f" [Ref "(1:0)"])
                    ])
 
     , -- **A head may not run code** (§1.1): 'Thena.Rules.holds' builds the
@@ -664,12 +664,12 @@ mistakes =
       -- the one-argument rule of that name, and @claim n ty@ is the op.
       testCase "an op word at another arity is a call" $
         bodyOf "prim-solve x y"
-          >>= (@?= [Do (Call (GlobalName "prim-solve") [Ref "x", Ref "y"])])
+          >>= (@?= [Do (Call "prim-solve" [Ref "x", Ref "y"])])
     , testCase "one argument too many is a call too" $
         bodyOf "prim-solve x"
-          >>= (@?= [Do (Call (GlobalName "prim-solve") [Ref "x"])])
+          >>= (@?= [Do (Call "prim-solve" [Ref "x"])])
     , testCase "and one too few" $
-        bodyOf "unify x" >>= (@?= [Do (Call (GlobalName "unify") [Ref "x"])])
+        bodyOf "unify x" >>= (@?= [Do (Call "unify" [Ref "x"])])
     , -- The arity the op /does/ have is still the op, which is what stops the
       -- reading above from swallowing every word.
       testCase "the arity the op has is still the op" $

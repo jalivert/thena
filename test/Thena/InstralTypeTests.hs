@@ -26,7 +26,6 @@ import Thena.Instral.Concrete
 import Thena.Syntax.Lexer (lexTokens)
 import Thena.Syntax.Parser (parseInstralTy)
 
-import Thena.Core.Term (GlobalName (..))
 import Thena.Instral.Type
   ( Signature (..)
   , fits
@@ -435,7 +434,7 @@ signatureTests =
       -- known when a body is read, so every argument and the result are their
       -- own variable until phase 66c takes them from the rule.
     , sig "call, two arguments"
-                         (Call (GlobalName "f") [r, r]) "a -> b -> c"
+                         (Call "f" [r, r]) "a -> b -> c"
       -- **A variadic op is not a special shape**, because the table takes the
       -- 'Op' and not a tag: an @intro@ with a name and one without are two
       -- values, so they simply have two signatures.

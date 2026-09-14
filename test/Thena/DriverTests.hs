@@ -133,7 +133,7 @@ tests =
         , testCase ":quit leaves the loop" $
             snd (command withRules ":quit") @?= Quit
         , testCase "an unknown word is not a term, it is a mistake" $
-            snd (command withRules "hello") @?= Ran [] (Halted (NoClauseMatched (GlobalName "hello") 0 []))
+            snd (command withRules "hello") @?= Ran [] (Halted (NoClauseMatched "hello" 0 []))
         , testCase "a command that merely starts with :core is not :core" $
             snd (command withRules ":corex") @?= Rejected (NoSuchCommand ":corex")
         , testCase "a view command with no argument says so" $
@@ -409,7 +409,7 @@ tests =
           -- word with no clause does (MS5 phase 62b).
           testCase "assume needs a type" $
             case snd (command withRules "assume") of
-              Ran [] (Halted (NoClauseMatched (GlobalName "assume") 0 as)) -> as @?= [1]
+              Ran [] (Halted (NoClauseMatched "assume" 0 as)) -> as @?= [1]
               other -> assertFailure ("expected no clause, got " ++ show other)
         , testCase "assume resolves its type in the development's context" $
             case snd (say ["assume \"A\" ⌜ Type₀ ⌝", "assume \"x\" ⌜ A ⌝"]) of

@@ -102,9 +102,6 @@ data InstralTypeError
     -- wanted something a literal cannot be.
   deriving (Eq, Show)
 
-nameOf :: GlobalName -> Name
-nameOf (GlobalName n) = n
-
 renderSite :: Site -> String
 renderSite si = case si of
   InHead (GlobalName n) i -> n ++ ", test " ++ show (i + 1)
@@ -419,7 +416,11 @@ callsIn = concatMap one
       Do     o -> inOp o
 
     inOp o = case o of
-      Call nm as  -> (nm, length as) : concatMap inOperand as
+      -- **Wrapped here, because a 'Callable' is keyed by a RULE's name** and
+      -- @Call@ carries only a word (MS5 phase 83). The boundary is one line and
+      -- is the whole cost of the narrow rename; widening 'Thena.Ops.Rule''s own
+      -- @ruleName@ is @ms5\/CLOSEOUT.md@ 38 and is not done here.
+      Call nm as  -> (GlobalName nm, length as) : concatMap inOperand as
       Lambda _ b  -> callsIn b
       Block b     -> callsIn b
       _           -> concatMap inOperand (operandsOf o)
@@ -633,8 +634,8 @@ body env r res ctx i st (instr : rest) =
       -- ('Thena.Rules.BoundNonProducing'); a call passes that check because
       -- 'Thena.Ops.produces' cannot answer for one, and this pass can.
       bindsNothing s = case o of
-        Call nm as | notReturning (lookup (nm, length as) env) ->
-          oops (BindsNothing si nm) s
+        Call nm as | notReturning (lookup (GlobalName nm, length as) env) ->
+          oops (BindsNothing si (GlobalName nm)) s
         _ -> s
    in body env r res ctx' (i + 1) st2 rest
 
@@ -658,7 +659,7 @@ operation env r res ctx si o st0 = case o of
   -- **A local shadows a rule** — his ruling, 2026-09-12 — so a call whose name
   -- is bound here is an application of that value, and its type says so.
   Call nm as
-    | Just l <- lookup (nameOf nm) ctx ->
+    | Just l <- lookup nm ctx ->
         -- **Its own copy if it was annotated**, which is what an annotated
         -- local buys: a use here does not pin the local for every other use.
         let (t, st1)   = useOf l st0
@@ -669,7 +670,7 @@ operation env r res ctx si o st0 = case o of
 
   -- **A call is where the signature environment is read**, and the only place.
   Call nm as ->
-    case lookup (nm, length as) env of
+    case lookup (GlobalName nm, length as) env of
       Nothing ->
         -- Nothing defines it — see the module header. Its arguments are still
         -- walked, so a mistake inside one is still found.

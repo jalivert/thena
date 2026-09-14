@@ -1036,7 +1036,10 @@ perform instr rest m = case operation instr of
   -- **The op words stay untouchable**: a local called @say@ is still the op,
   -- because this case is only reached for a word no op bears.
   Op.Call nm args
-    | Just (VClosure ps body cl) <- lookup (case nm of GlobalName w -> w) (env (exec m))
+    -- **A plain lookup now** (MS5 phase 83): @Call@ carries the word itself,
+    -- so the unwrapping that used to stand here — and which was the evidence
+    -- that the 'GlobalName' was wrong — is gone.
+    | Just (VClosure ps body cl) <- lookup nm (env (exec m))
     , length ps == length args ->
         case traverse (operandValue (env (exec m))) args of
           Left e   -> failure e m
@@ -1060,7 +1063,7 @@ perform instr rest m = case operation instr of
   Op.Call nm args -> case traverse (operandValue (env (exec m))) args of
     Left e   -> failure e m
     Right vs -> case next (it vs) of
-      Nothing -> failure (NoClauseMatched nm (length vs) (arities (rules m) nm)) m
+      Nothing -> failure (NoClauseMatched nm (length vs) (arities (rules m) (GlobalName nm))) m
       Just (r, it')
         | hasNext it' ->
             Saying ("chose " ++ show (names m) ++ ": " ++ nameOfRule r)
@@ -1068,7 +1071,7 @@ perform instr rest m = case operation instr of
         | otherwise ->
             Continue (entering vs r (Thena.Engine.Call rest (env (exec m)) wants False) m)
     where
-      it vs = clauses (rules m) (globals m) (cursor (development m)) nm vs
+      it vs = clauses (rules m) (globals m) (cursor (development m)) (GlobalName nm) vs
 
       -- The callee's parameters, bound to the arguments. 'clauses' has already
       -- filtered on arity, so the two lists agree by construction — and the

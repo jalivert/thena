@@ -216,11 +216,11 @@ holeTests =
     -- @let@ said @NothingToIntroduce@ and now says only that no clause applies.
     -- On MS2's closeout list.
   , halts "and refuses a focus that is not a hole at all"
-      (goal ++ ["along", "attack"]) (NoClauseMatched (GlobalName "attack") 0 [0])
+      (goal ++ ["along", "attack"]) (NoClauseMatched "attack" 0 [0])
   , halts "intro refuses a hole that has not been attacked"
-      (goal ++ ["intro"]) (NoClauseMatched (GlobalName "intro") 0 [0, 0])
+      (goal ++ ["intro"]) (NoClauseMatched "intro" 0 [0, 0])
   , halts "and a guess whose type is neither a ∀ nor a let"
-      (natGoal ++ ["attack", "intro"]) (NoClauseMatched (GlobalName "intro") 0 [0, 0])
+      (natGoal ++ ["attack", "intro"]) (NoClauseMatched "intro" 0 [0, 0])
   , ok "intro walks a Π"        (arrowGoal ++ ["attack", "intro"])
   , ok "and then the next one"  (arrowGoal ++ ["attack", "intro", "intro"])
 
@@ -250,7 +250,7 @@ holeTests =
   , ok "and regret takes it off again"
       (natGoal ++ ["attack", "into", "try-core ⌜ zero ⌝", "regret"])
   , halts "regret needs a guess" (natGoal ++ ["regret"])
-      (NoClauseMatched (GlobalName "regret") 0 [0])
+      (NoClauseMatched "regret" 0 [0])
 
   , ok "solve commits a pure guess"
       (natGoal ++ ["attack", "into", "try-core ⌜ zero ⌝", "solve"])

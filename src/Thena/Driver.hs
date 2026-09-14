@@ -918,14 +918,14 @@ surfaceProgram n0 items = foldl item ([], n0) items
         selfName  = Lit (VTerm (Global dn []))
      in ( acc ++
             [ Do (PushDevelopment (Lit (VTerm (Universe (LVar l)))))
-            , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt full))])
+            , Do (Call "elaborate" [Lit (VSurface (rootedAt full))])
             , Bind (tyName ++ "raw") Nothing PopDevelopment
             , Bind tyName Nothing (Expose (Ref (tyName ++ "raw")))
             ]
             ++ concat
                  [ [ Do (PushDevelopment (Lit (VTerm (Universe (LVar l)))))
                    , Do (Assume (Lit (VText nm)) (Ref tyName))
-                   , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt (withParams ps cty)))])
+                   , Do (Call "elaborate" [Lit (VSurface (rootedAt (withParams ps cty)))])
                    , Bind (conName k ++ "raw") Nothing PopDevelopment
                    , Bind (conName k ++ "app") Nothing
                        (ApplyTo (Ref (conName k ++ "raw")) selfName)
@@ -960,7 +960,7 @@ surfaceProgram n0 items = foldl item ([], n0) items
     let (l, n1) = freshLevelMeta n
      in ( acc ++
             [ Do (PushDevelopment (Lit (VTerm (Universe (LVar l)))))
-            , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt ty))])
+            , Do (Call "elaborate" [Lit (VSurface (rootedAt ty))])
               -- **Reduced before it is used or stored.** What @extract@ hands
               -- back carries @fill@'s @=@-bindings, and a @let@-headed type
               -- is not merely ugly: @intro@ reads a @Let@ as written, so the
@@ -969,7 +969,7 @@ surfaceProgram n0 items = foldl item ([], n0) items
             , Bind ("raw" ++ show n) Nothing PopDevelopment
             , Bind ("ty" ++ show n) Nothing (Expose (Ref ("raw" ++ show n)))
             , Do (PushDevelopment (Ref ("ty" ++ show n)))
-            , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt body))])
+            , Do (Call "elaborate" [Lit (VSurface (rootedAt body))])
             , Bind ("tm" ++ show n) Nothing PopDevelopment
               -- **The plicities come from the signature as written** (MS4
               -- phase 44b): a leading run of @∀@ binder groups, each in
@@ -1584,7 +1584,7 @@ dispatch s name arg = case name of
                           (Lit (VTerm (Universe (LVar l)))))
             , Bind "x" Nothing (Claim (Lit (VText "xinfer")) (Ref "T"))
             , Do (Ops.Goto (Ref "x"))
-            , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt t))])
+            , Do (Call "elaborate" [Lit (VSurface (rootedAt t))])
             ]
           asking  = s { sessionMachine = load prog machine { names = n1 } }
        in case blockResponse s "this term" prog of

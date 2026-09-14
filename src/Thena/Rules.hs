@@ -1436,7 +1436,7 @@ operation ls g i (RawOp w as)
       ("prim-let", [])            -> Right (IntroLet Nothing)
       ("prim-let", [a])           -> IntroLet . Just <$> ref a
       ("prim-intro", _)           -> bad
-      ("call", RawRef r : rest)   -> Call (GlobalName r) <$> traverse ref rest
+      ("call", RawRef r : rest)   -> Call r <$> traverse ref rest
       ("call", _)                 -> bad
 
 
@@ -1483,7 +1483,7 @@ operation ls g i (RawOp w as)
         -- call itself, a rule below it, or one in a base loaded later, so no
         -- name can be resolved at load time), and it is what the rule
         -- language's type system is for (closeout 4b).
-        _                         -> Call (GlobalName w) <$> traverse ref as
+        _                         -> Call w <$> traverse ref as
   where
     bad     = Left (BadOperands g i w)
     part k  = maybe bad (Right . Down) (partOf w k)

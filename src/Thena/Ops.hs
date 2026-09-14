@@ -510,7 +510,17 @@ data Op
     -- **It produces nothing itself** — @x = return y@ binds in a body that is
     -- already over — and at the top level, where there is no call to return
     -- from, it is 'Thena.Errors.NothingToReturnFrom'.
-  | Call GlobalName [Operand]
+  | Call Name [Operand]
+    -- ^ **A 'Name' and not a 'Thena.Core.Term.GlobalName' — MS5 phase 83, his
+    -- ruling.** What this holds is /a word naming a callable/, and the engine's
+    -- first act was to unwrap the constructor and look that word up in the
+    -- LOCAL environment: a local closure is called through this node, so the
+    -- old type said global about something that is usually not one. The
+    -- standing rule is that a confusion costs nothing to remove when the
+    -- literal alternative is the correct one.
+    --
+    -- **'Thena.Ops.Rule'\'s @ruleName@ is the same confusion one level over**
+    -- and is deliberately left alone here — @ms5\/CLOSEOUT.md@ 38.
     -- ^ **call a rule by name — the same search as 'Prove', with a narrower
     -- candidate list** (§8, phase 23, and the user's own framing):
     --
