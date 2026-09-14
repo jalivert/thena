@@ -438,8 +438,11 @@ primitives =
 -- a fold is two clauses, one per shape, exactly as @intro-binders@ is two
 -- clauses over a surface term.
 --
--- It exercises the literal, both head tests, @list-head@, @list-tail@,
--- @option-value@ and phase 63's @return@, through the real loader.
+-- **Rewritten in patterns at MS5 phase 86**, which is the phase's own
+-- demonstration: it used to exercise two head tests and three ops that no
+-- longer exist — @list-is-empty@, @list-is-cons@, @list-head@, @list-tail@,
+-- @option-value@ — and says exactly the same thing with a parameter pattern per
+-- clause and a destructuring binding. **The assertions did not move.**
 walking :: TestTree
 walking =
   testGroup
@@ -451,23 +454,41 @@ walking =
       -- list is built.
       testCase "a pair, taken apart" $
         said "both (\"a\", \"b\")" @?= Just "ab"
+
+      -- **The two ops that needed a FUNCTION and not a pattern** (MS5 phase
+      -- 86). @list-head@ was **total** — it answered @none@ on the empty list,
+      -- which its own comment called deliberate, /"so that the empty list needs
+      -- no second answer and no caller has to ask before asking"/ — and a bare
+      -- pattern is partial. Two clauses restore the totality, and these four
+      -- cases are the ones that used to test the ops.
+    , testCase "head' of the empty list is none" $
+        said "peek []" @?= Just "none"
+    , testCase "…and of a non-empty one is some" $
+        said "peek [\"a\", \"b\"]" @?= Just "a"
+    , testCase "tail' drops one" $
+        said "rest [\"a\", \"b\"]" @?= Just "b"
+    , testCase "…and the empty list has an empty tail" $
+        said "rest []" @?= Just "none"
     ]
   where
     base =
       "rule base walk where\n\
-      \rule join xs :- when (list-is-empty xs) do return \"\"\n\
-      \rule join xs :- when (list-is-cons xs)\n\
-      \  do h = list-head xs\n\
-      \     ; c = option-value h\n\
-      \     ; t = list-tail xs\n\
-      \     ; r = join t\n\
+      \rule join [] :- do return \"\"\n\
+      \rule join [c, ...t] :- do r = join t\n\
       \     ; s = concat c r\n\
       \     ; return s\n\
       \rule shout xs :- do m = join xs ; say m\n\
-      \rule both p :- do a = pair-first p\n\
-      \     ; b = pair-second p\n\
+      \rule both p :- do (a, b) = p\n\
       \     ; s = concat a b\n\
-      \     ; say s\n"
+      \     ; say s\n\
+      \head\x27 [] = none\n\
+      \head\x27 [a, ..._] = some a\n\
+      \tail\x27 [] = do { return [] }\n\
+      \tail\x27 [_, ...r] = do { return r }\n\
+      \rule peek xs :- do h = head\x27 xs ; say-option h\n\
+      \rule rest xs :- do t = tail\x27 xs ; h = head\x27 t ; say-option h\n\
+      \rule say-option none :- do say \"none\"\n\
+      \rule say-option (some v) :- do say v\n"
 
     said line =
       let s0 = fst (load1 [("walk.thena.rules", base)])

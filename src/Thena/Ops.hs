@@ -483,23 +483,6 @@ data Op
     -- ^ @some x@ — an 'VOption' that is there (MS5 phase 65).
   | None
     -- ^ @none@ — one that is not.
-  | ListHead Operand
-    -- ^ @list-head xs@ — the first element, as an option, so that the empty
-    -- list needs no separate answer. **The words carry their type** because
-    -- @head@ and @first@ alone would each be the sort of name that says nothing
-    -- about what it is on — his standing objection to @-core@ is to a suffix
-    -- that means nothing, not to a name that says what it is about.
-  | ListTail Operand
-    -- ^ @list-tail xs@ — everything after the first element; the empty list's
-    -- tail is the empty list.
-  | PairFirst Operand
-    -- ^ @pair-first p@
-  | PairSecond Operand
-    -- ^ @pair-second p@
-  | OptionValue Operand
-    -- ^ @option-value o@ — what is inside, and a failure when there is nothing.
-    -- **A rule asks first**, with @option-is-some@ in its head, which is how
-    -- every other shape question is asked here.
   | Return Operand
     -- ^ **what this rule hands back to whoever called it** (MS5 phase 63) —
     -- @return ‹operand›@.
@@ -1169,11 +1152,6 @@ resultOf o = case o of
   -- chose to answer with 'None' rather than to fail. The table said @a@ until
   -- MS5 phase 73, which the engine cross-check could not catch: a bare variable
   -- is inhabited by every value, so the row asserted nothing.
-  ListHead _   -> Just (TOption (TVar 0))
-  ListTail _   -> Just (TList (TVar 0))
-  PairFirst _  -> Just (TVar 0)
-  PairSecond _ -> Just (TVar 1)
-  OptionValue _ -> Just (TVar 0)
   Eliminate _  -> Nothing
   ApplyNext _ _ -> Just TCore  -- the spine, one argument longer
   ExpandImplicits _ -> Just TSurface
@@ -1303,11 +1281,6 @@ operandTypes o = case o of
   Return a     -> [(a, TVar 0)]
   Some a       -> [(a, TVar 0)]
   None         -> []
-  ListHead a   -> [(a, TList (TVar 0))]
-  ListTail a   -> [(a, TList (TVar 0))]
-  PairFirst a  -> [(a, TPair (TVar 0) (TVar 1))]
-  PairSecond a -> [(a, TPair (TVar 0) (TVar 1))]
-  OptionValue a -> [(a, TOption (TVar 0))]
   Prove        -> []
   DefineData _ -> []
   Along        -> []
@@ -1503,13 +1476,6 @@ data Test
     -- that walks a list is two clauses, one for each shape, exactly as
     -- @intro-binders@ is two clauses over a surface term. That is what makes
     -- the data usable without @if@, and without a second control structure.
-  | ListIsEmpty Operand
-  | ListIsCons Operand
-  | OptionIsSome Operand
-  | OptionIsNone Operand
-    -- ^ **Two positive tests rather than one and its negation.** The head
-    -- language has no negation, and the two clauses of @E⟦let⟧@ differ by
-    -- whether there is an annotation to elaborate.
   deriving (Eq, Show)
 
 
@@ -1587,11 +1553,6 @@ opKeyword o = case o of
   Return _     -> "return"
   Some _       -> "some"
   None         -> "none"
-  ListHead _   -> "list-head"
-  ListTail _   -> "list-tail"
-  PairFirst _  -> "pair-first"
-  PairSecond _ -> "pair-second"
-  OptionValue _ -> "option-value"
   FreshName _  -> "fresh-name"
   Here         -> "here"
   Arrow _ _    -> "arrow"

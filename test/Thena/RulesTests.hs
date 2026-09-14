@@ -379,8 +379,12 @@ dataTests =
                 (Ops.Some (ListOf [Ref "x", text "c"]))
           >>= (@?= Just (VOption (Just (VList [VText "ab", VText "c"]))))
 
+      -- **Observed by destructuring** (MS5 phase 86) — @pair-first@ used to do
+      -- this and is gone, because a binding's left side takes the pair apart.
     , testCase "and a pair the same way" $
-        valueOf [] (Ops.PairFirst (PairOf (text "a") (Lit (VInt 1))))
+        valueOf [Bind (Ops.PPair (Ops.PVar "a") (Ops.PVar "b")) Nothing
+                      (Ops.Value (PairOf (text "a") (Lit (VInt 1))))]
+                (Ops.Value (Ref "a"))
           >>= (@?= Just (VText "a"))
 
     , -- An unbound name inside a literal is the body's mistake and is caught
@@ -389,25 +393,13 @@ dataTests =
         validate (named "r" [] [Do (Ops.Say (ListOf [Ref "nope"]))])
           @?= [UnboundInRule (GlobalName "r") 0 "nope"]
 
-    , testCase "list-head of the empty list is none" $
-        valueOf [] (Ops.ListHead (ListOf []))
-          >>= (@?= Just (VOption Nothing))
-
-    , testCase "and of a non-empty one is some" $
-        valueOf [] (Ops.ListHead (ListOf [text "a"]))
-          >>= (@?= Just (VOption (Just (VText "a"))))
-
-    , testCase "list-tail drops one" $
-        valueOf [Bind (Ops.PVar "t") Nothing (Ops.ListTail (ListOf [text "a", text "b"]))]
-                (Ops.ListHead (Ref "t"))
-          >>= (@?= Just (VOption (Just (VText "b"))))
-    , testCase "and the empty list has an empty tail" $
-        valueOf [Bind (Ops.PVar "t") Nothing (Ops.ListTail (ListOf []))] (Ops.ListHead (Ref "t"))
-          >>= (@?= Just (VOption Nothing))
-
-    , testCase "option-value of none fails rather than answering" $
-        failureOf [Do (Ops.OptionValue (Lit (VOption Nothing)))]
-          >>= (@?= Just NothingThere)
+      -- **The five destructors are gone** (MS5 phase 86): @list-head@,
+      -- @list-tail@, @pair-first@, @pair-second@ and @option-value@. What they
+      -- did is a pattern now — the pair above, and
+      -- @Thena.RuleFileTests.walking@ for the list and option ones, which is
+      -- where the two-clause replacements for the list pair are written out and
+      -- run. Nothing that was asserted here stopped being asserted; it moved to
+      -- where the replacement lives.
 
     , -- **The shape questions are asked in a HEAD**, which is how a rule
       -- branches — so they are tested through 'clauses', the thing that
@@ -427,16 +419,18 @@ dataTests =
       Left _  -> Nothing
       Right m -> lookup "r" (Thena.Engine.env (exec m))
 
-    failureOf is = pure $ case run is of
-      Left e  -> Just e
-      Right _ -> Nothing
-
     -- Two clauses of one name, told apart by the shape of the argument.
+    --
+    -- **By their PARAMETER PATTERNS since MS5 phase 86**, where they used to be
+    -- told apart by the head tests @list-is-empty@ and @list-is-cons@. The
+    -- clause 'Thena.Rules.clauses' picks is the same one; what changed is that
+    -- the shape question is asked where the argument is named, and binds its
+    -- pieces while it is there.
     shapes =
       ruleBase "shapes" Nothing "" [] [] []
-        [ Rule (GlobalName "shape") [Ops.PVar "xs"] [Ops.ListIsEmpty (Ref "xs")]
+        [ Rule (GlobalName "shape") [Ops.PList [] Nothing] []
             [Do (Ops.Say (Lit (VText "empty")))]
-        , Rule (GlobalName "shape") [Ops.PVar "xs"] [Ops.ListIsCons (Ref "xs")]
+        , Rule (GlobalName "shape") [Ops.PList [Ops.PWild] (Just Ops.PWild)] []
             [Do (Ops.Say (Lit (VText "cons")))]
         ]
 
@@ -580,14 +574,11 @@ producesTests =
            Ops.Lambda [Ops.PVar "x"] [Do (Ops.Return (Ref "x"))])
       , ("some",         e, hole, [],            Ops.Some (text "x"))
       , ("none",         e, hole, [],            Ops.None)
-      , ("list-head",    e, hole, [],            Ops.ListHead (ListOf [text "x"]))
-      , ("list-tail",    e, hole, [],            Ops.ListTail (ListOf [text "x"]))
-      -- **The two halves are different SHAPES on purpose** (MS5 review): with
-      -- both text, a table that swapped @a@ and @b@ would still check out.
-      , ("pair-first",   e, hole, [],            Ops.PairFirst (PairOf (text "x") (Lit (VInt 1))))
-      , ("pair-second",  e, hole, [],            Ops.PairSecond (PairOf (text "x") (Lit (VInt 1))))
-      , ("option-value", e, hole, [Bind (Ops.PVar "o") Nothing (Ops.Some (text "x"))],
-           Ops.OptionValue (Ref "o"))
+      -- **The five destructors left at MS5 phase 86** and have no rows here any
+      -- more — @list-head@, @list-tail@, @pair-first@, @pair-second@,
+      -- @option-value@. A pattern is not an op, so it has nothing to cross
+      -- against this table; @Thena.PatternTests@ crosses it against the matcher
+      -- instead.
       , ("apply-next",       nat, holeAt natType, [],
            Ops.ApplyNext (term (Global (GlobalName "succ") [])) (text "a"))
       ]

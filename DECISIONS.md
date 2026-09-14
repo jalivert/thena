@@ -1088,28 +1088,50 @@ block's own bindings survive to the next line while a rule is suspended.
 You can break the rule you are standing in — shadow one of its locals and its
 body will go wrong. That is allowed on purpose.
 
-### `instral` has lists, pairs and options, and you take them apart in a rule's head
+### `instral` has lists, pairs and options, and you take them apart with patterns
 
-*Decided 2026-09-12.*
+*Decided 2026-09-12; **rewritten 2026-09-14**, when patterns replaced the nine
+words this section used to teach.*
 
 ```
-rule join xs :- when (list-is-empty xs) do return ""
-rule join xs :- when (list-is-cons xs)
-  then h = list-head xs ; c = option-value h ; t = list-tail xs
-     ; r = join t ; s = concat c r ; return s
+rule join [] :- do return ""
+rule join [c, ...t] :- do r = join t ; s = concat c r ; return s
 ```
 
 `[a, b, c]` is a list and `(a, b)` is a pair; an option is `some x` or `none`.
 The elements are ordinary operands, so `[x, "c"]` reads `x` where the list is
 built.
 
-**There is no `if` and no `case`, and none is needed**: a rule branches on its
-head, so a function over a list is two clauses, one per shape. `list-is-empty`,
-`list-is-cons`, `option-is-some` and `option-is-none` are head tests like every
-other question a rule asks.
+**There is no `if` and no `case`, and none is needed**: a clause's parameters are
+patterns, so a function over a list is two clauses, one per shape — and each one
+names the pieces while it tests for them.
 
-`list-head` answers an *option*, so the empty list needs no separate answer.
-`option-value` on `none` fails — ask with `option-is-some` first.
+**A pattern also stands on the left of a binding**, which is how you take a pair
+or an option apart in the middle of a body:
+
+```
+(a, b)   = p
+(some v) = o
+```
+
+**A refutable pattern that does not match is a failure.** In a rule that means
+the search tries the next clause; in a function it is the caller's failure, as
+in Haskell.
+
+**Nine words went when patterns arrived** and none of them has a replacement in
+the language, because the language no longer needs one: `list-head`,
+`list-tail`, `pair-first`, `pair-second` and `option-value` were ops, and
+`list-is-empty`, `list-is-cons`, `option-is-some` and `option-is-none` were head
+tests. Write the pattern instead.
+
+**The one thing a pattern does not give you is a total head.** `list-head` used
+to answer an *option*, so the empty list needed no separate answer; a pattern is
+partial. Two clauses say it:
+
+```
+head' []        = none
+head' [a, ..._] = some a
+```
 
 **A compound argument is parenthesised, inside a literal as anywhere else**:
 `[(g a), b]`, and `((g a), b)` for a pair whose first component is a call.

@@ -721,28 +721,6 @@ perform instr rest m = case operation instr of
     Right v -> produce (VOption (Just v)) m
   Op.None -> produce (VOption Nothing) m
 
-  -- **The first element as an option**, so that the empty list needs no second
-  -- answer and no caller has to ask before asking.
-  Op.ListHead a -> withList a $ \vs -> case vs of
-    []    -> produce (VOption Nothing) m
-    v : _ -> produce (VOption (Just v)) m
-  Op.ListTail a -> withList a $ \vs -> produce (VList (drop 1 vs)) m
-
-  Op.PairFirst a -> case operandValue (env (exec m)) a of
-    Left e            -> failure e m
-    Right (VPair u _) -> produce u m
-    Right _           -> failure ExpectedPair m
-  Op.PairSecond a -> case operandValue (env (exec m)) a of
-    Left e            -> failure e m
-    Right (VPair _ u) -> produce u m
-    Right _           -> failure ExpectedPair m
-
-  Op.OptionValue a -> case operandValue (env (exec m)) a of
-    Left e                     -> failure e m
-    Right (VOption (Just u))   -> produce u m
-    Right (VOption Nothing)    -> failure NothingThere m
-    Right _                    -> failure ExpectedOption m
-
   -- **What this body hands back** (MS5 phase 63) — 'Op.Return'.
   --
   -- It ends the body: the rest of @pc@ is dropped and control goes to the
@@ -1605,12 +1583,6 @@ perform instr rest m = case operation instr of
     term    = operandTerm (env (exec m))
 
     advance m' = m' { exec = (exec m') { pc = rest } }
-
-    -- The two list ops read the same operand the same way (MS5 phase 65).
-    withList a k = case operandValue (env (exec m)) a of
-      Left e            -> failure e m
-      Right (VList vs)  -> k vs
-      Right _           -> failure ExpectedList m
 
     -- **Where a call's value goes, if it was asked for** (MS5 phase 63). The
     -- same question 'produce' asks of @instr@ below, asked one step earlier

@@ -390,10 +390,6 @@ holds env cur args t = case t of
   LetIsBare o             -> surfaceIs o isBareLet
   -- @instral@'s own data (MS5 phase 65). They read the operand and nothing
   -- else, so they are as cheap as 'holds' needs a head to be.
-  ListIsEmpty o           -> valueIs o (\v -> case v of VList vs -> null vs; _ -> False)
-  ListIsCons o            -> valueIs o (\v -> case v of VList vs -> not (null vs); _ -> False)
-  OptionIsSome o          -> valueIs o (\v -> case v of VOption x -> x /= Nothing; _ -> False)
-  OptionIsNone o          -> valueIs o (\v -> case v of VOption x -> x == Nothing; _ -> False)
   where
     -- Written down, then reduced: §8's "head matching runs whnf", because a
     -- goal typed @id Type₀ (Nat -> Nat)@ is a Π and must match.
@@ -411,13 +407,6 @@ holds env cur args t = case t of
       Left _             -> True
       Right (VSurface z) -> p (Zipper.focus z)
       Right _            -> False
-
-    -- The same shape one layer up: an argument nobody supplied does not exclude
-    -- the rule (MS4 phase 47's reading), and a value of the wrong kind answers
-    -- False rather than failing — a head asks a question, it does not run.
-    valueIs o p = case Op.operandIn args o of
-      Left _  -> True
-      Right v -> p v
 
     isName         s = case s of SurfaceName _ -> True; _ -> False
     isUniverse     s = case s of SurfaceUniverse _ -> True; _ -> False
@@ -1376,9 +1365,6 @@ unaryOps =
   [ ("say", Say), ("yield", Op.Yield), ("prim-try", Try)
   , ("return", Op.Return)
   , ("some", Op.Some)
-  , ("list-head", Op.ListHead), ("list-tail", Op.ListTail)
-  , ("pair-first", Op.PairFirst), ("pair-second", Op.PairSecond)
-  , ("option-value", Op.OptionValue)
   , ("goto", Goto), ("goto-named", Op.GotoNamed)
   , ("name-text", Op.NameText)
   , ("surface-of", Op.SurfaceOf)
@@ -1593,10 +1579,6 @@ withOperands t os = case (t, os) of
   (LambdaBindsOne _, [o])        -> Just (LambdaBindsOne o)
   (LetIsAnnotated _, [o])        -> Just (LetIsAnnotated o)
   (LetIsBare _, [o])             -> Just (LetIsBare o)
-  (ListIsEmpty _, [o])           -> Just (ListIsEmpty o)
-  (ListIsCons _, [o])            -> Just (ListIsCons o)
-  (OptionIsSome _, [o])          -> Just (OptionIsSome o)
-  (OptionIsNone _, [o])          -> Just (OptionIsNone o)
   _                      -> Nothing
 
 -- | What a test was written with, in written order. 'Thena.Ops.operandsOf'\'s
@@ -1643,10 +1625,6 @@ testTypes t = case t of
   LetIsBare o             -> [(o, Ty.TSurface)]
   -- The four data questions (MS5 phase 65), and the only tests that ask about
   -- something @instral@ owns rather than about a surface node.
-  ListIsEmpty o           -> [(o, Ty.TList (Ty.TVar 0))]
-  ListIsCons o            -> [(o, Ty.TList (Ty.TVar 0))]
-  OptionIsSome o          -> [(o, Ty.TOption (Ty.TVar 0))]
-  OptionIsNone o          -> [(o, Ty.TOption (Ty.TVar 0))]
 
 -- | Every operand a head test reads, in the order it is written.
 testOperands :: Test -> [Operand]
@@ -1685,10 +1663,6 @@ testWord t = case t of
   LambdaBindsOne _        -> "lambda-binds-one"
   LetIsAnnotated _        -> "let-is-annotated"
   LetIsBare _             -> "let-is-bare"
-  ListIsEmpty _           -> "list-is-empty"
-  ListIsCons _            -> "list-is-cons"
-  OptionIsSome _          -> "option-is-some"
-  OptionIsNone _          -> "option-is-none"
 
 -- | Every test there is. A list and not a case split, so it cannot be total —
 -- 'testWord' is what @-Wall@ guards, and "Thena.RuleSyntaxTests" checks this
@@ -1719,10 +1693,6 @@ everyTest =
   , LambdaBindsOne (Lit (VText ""))
   , LetIsAnnotated (Lit (VText ""))
   , LetIsBare (Lit (VText ""))
-  , ListIsEmpty (Lit (VText ""))
-  , ListIsCons (Lit (VText ""))
-  , OptionIsSome (Lit (VText ""))
-  , OptionIsNone (Lit (VText ""))
   ]
 
 -- | Every @do@ block written inside a surface literal these instructions hold,

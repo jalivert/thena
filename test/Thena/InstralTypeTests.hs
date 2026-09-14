@@ -425,11 +425,6 @@ signatureTests =
                          (Op.Lambda [Op.PVar "x"] [])           "(b -> a)"
     , sig "some"         (Op.Some r)                    "a -> Option a"
     , sig "none"         Op.None                        "Option a"
-    , sig "list-head"    (Op.ListHead r)                "List a -> Option a"
-    , sig "list-tail"    (Op.ListTail r)                "List a -> List a"
-    , sig "pair-first"   (Op.PairFirst r)               "(a, b) -> a"
-    , sig "pair-second"  (Op.PairSecond r)              "(a, b) -> b"
-    , sig "option-value" (Op.OptionValue r)             "Option a -> a"
       -- **A call says nothing**, and cannot: which clauses a name has is not
       -- known when a body is read, so every argument and the result are their
       -- own variable until phase 66c takes them from the rule.
@@ -458,12 +453,11 @@ headTests =
         map snd (testTypes (SurfaceIsLambda r)) @?= [TSurface]
     , testCase "and so does every other one" $
         map snd (testTypes (AppHeadIsName r)) @?= [TSurface]
-      -- The four data questions are the only head tests that ask about
-      -- something @instral@ owns rather than about a surface node.
-    , testCase "a list question wants a list" $
-        map snd (testTypes (ListIsCons r)) @?= [TList (TVar 0)]
-    , testCase "an option question wants an option" $
-        map snd (testTypes (OptionIsNone r)) @?= [TOption (TVar 0)]
+      -- **Every head test asks about a SURFACE node now** (MS5 phase 86). The
+      -- four that asked about @instral@'s own data — @list-is-empty@,
+      -- @list-is-cons@, @option-is-some@, @option-is-none@ — are gone: a
+      -- parameter pattern says the same thing and binds the pieces while it is
+      -- at it. @PatternTests@ is where that is asserted.
     ]
   where
     r = Lit (VText "x")
