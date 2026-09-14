@@ -8,7 +8,7 @@
 -- writing tactics, not designed up front. Phase 4 has the five ops its two
 -- commands need, and every later phase adds the ops its own deliverable
 -- exercises.
-module Thena.Ops
+module Thena.Instral.Ops
   ( Name
   , Env
   , Value (..)
@@ -31,7 +31,7 @@ module Thena.Ops
     -- * Rules (§8)
   , Rule (..)
     -- | Re-exported from "Thena.Instral.Pattern" (MS5 phase 84), so that every
-    -- existing @import Thena.Ops (Pattern (..))@ still reads. The type moved a
+    -- existing @import Thena.Instral.Ops (Pattern (..))@ still reads. The type moved a
     -- layer down because "Thena.Errors" must name it; nothing else changed.
   , Pattern (..)
   , patternBinds
@@ -514,7 +514,7 @@ data Op
     -- standing rule is that a confusion costs nothing to remove when the
     -- literal alternative is the correct one.
     --
-    -- **'Thena.Ops.Rule'\'s @ruleName@ is the same confusion one level over**
+    -- **'Thena.Instral.Ops.Rule'\'s @ruleName@ is the same confusion one level over**
     -- and is deliberately left alone here — @ms5\/CLOSEOUT.md@ 38.
     -- ^ **call a rule by name — the same search as 'Prove', with a narrower
     -- candidate list** (§8, phase 23, and the user's own framing):

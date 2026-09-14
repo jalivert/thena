@@ -117,7 +117,7 @@ data Surface
     -- ^ @do { ‹instruction› ; … }@ (MS4 phase 45) — **a block of the
     -- instruction language, written down and never computed.** Its elaboration
     -- is to play it, which is why it holds the block as a field rather than
-    -- anything to be evaluated: the same shape 'Thena.Ops.DefineData' has, and
+    -- anything to be evaluated: the same shape 'Thena.Instral.Ops.DefineData' has, and
     -- for the same reason.
     --
     -- **It holds @RawInstr@, not @Instr@**, because parsing precedes
@@ -242,7 +242,7 @@ paired ds = case ds of
 --
 -- **The one walk over 'Surface' that is not elaboration** (MS5 phase 79). It
 -- exists so a block can be resolved and type-checked when the term is /read/,
--- where until then 'Thena.Ops.Play' resolved it as it ran — so @say 3@ in one
+-- where until then 'Thena.Instral.Ops.Play' resolved it as it ran — so @say 3@ in one
 -- halted the machine mid-proof rather than being refused at load
 -- (@ms5\/CLOSEOUT.md@ 20).
 --

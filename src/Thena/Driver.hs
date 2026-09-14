@@ -112,8 +112,8 @@ import Thena.Global.Env
   )
 import Thena.Core.Convert (convert)
 import Thena.Core.Typing (infer, sortOf)
-import qualified Thena.Ops as Ops
-import Thena.Ops
+import qualified Thena.Instral.Ops as Ops
+import Thena.Instral.Ops
   ( partOf
   , partWords
   , Instr (..)
@@ -443,7 +443,7 @@ data Response
     --
     -- **It has no path**, and that is the point: inference is over every loaded
     -- base at once, because a rule may call one written below it or one in a
-    -- base loaded later ('Thena.Ops.Call'). A per-file answer would be a
+    -- base loaded later ('Thena.Instral.Ops.Call'). A per-file answer would be a
     -- different question.
     -- ^ @:load ‹path›@. The driver may not touch a file — §12 invariant 4 puts
     -- all IO in "Thena.Repl" — so it asks, and the caller reads the file and
@@ -612,7 +612,7 @@ data BlockProblem
 -- a 'Response'. Phase 77 found what two copies of one check cost, and this is
 -- the same shape one phase later.
 --
--- Until this existed, 'Thena.Ops.Play' resolved a block as it ran, so @say 3@
+-- Until this existed, 'Thena.Instral.Ops.Play' resolved a block as it ran, so @say 3@
 -- inside one halted the machine mid-proof where the same instruction anywhere
 -- else is refused before anything starts — @ms5\/CLOSEOUT.md@ 20.
 --
@@ -675,7 +675,7 @@ instralEntry bases src = do
   -- against the real signatures.
   let entry = Rule (GlobalName "entry") [] [] prog
   -- **A @do@ block written in a surface term is checked with it** (MS5 phase
-  -- 79). Until then 'Thena.Ops.Play' resolved one as it ran, so @say 3@ inside
+  -- 79). Until then 'Thena.Instral.Ops.Play' resolved one as it ran, so @say 3@ inside
   -- one halted the machine where the same instruction anywhere else is refused
   -- before it starts.
   case validate entry of
@@ -716,7 +716,7 @@ instralEntry bases src = do
 -- and no identifier may contain one. That matters while the machine is yielding:
 -- @env@ is the suspended rule's and a name it chose must not be shadowed.
 --
--- The one word that is not rewritten is 'Thena.Ops.ResolveCore'\'s own: it
+-- The one word that is not rewritten is 'Thena.Instral.Ops.ResolveCore'\'s own: it
 -- /wants/ the unresolved tree, and at the prompt it is the long way of writing
 -- what every other word now gets for free.
 resolving :: String -> [RawOperand] -> ([RawInstr], [RawOperand])
@@ -892,7 +892,7 @@ surfaceProgram n0 items = foldl item ([], n0) items
   -- instructions at the top of one is @++@: no frame, no op, and nothing that
   -- could tell it from the instructions the elaborator emitted around it.
   --
-  -- **Not 'Thena.Ops.Block'**, which is the /expression/ form: that one needs a
+  -- **Not 'Thena.Instral.Ops.Block'**, which is the /expression/ form: that one needs a
   -- frame because it has to return to the term it stands in. A top-level block
   -- has nothing to return to, so it needs no frame and gets none.
   item (acc, n) (ItemBlock is) = (acc ++ is, n)
@@ -966,7 +966,7 @@ surfaceProgram n0 items = foldl item ([], n0) items
               -- back carries @fill@'s @=@-bindings, and a @let@-headed type
               -- is not merely ugly: @intro@ reads a @Let@ as written, so the
               -- body's λ would open a definition instead. See
-              -- 'Thena.Ops.Whnf'.
+              -- 'Thena.Instral.Ops.Whnf'.
             , Bind (Ops.PVar ("raw" ++ show n)) Nothing PopDevelopment
             , Bind (Ops.PVar ("ty" ++ show n)) Nothing (Expose (Ref ("raw" ++ show n)))
             , Do (PushDevelopment (Ref ("ty" ++ show n)))
@@ -1702,7 +1702,7 @@ dispatch s name arg = case name of
 -- **So the boundary this list draws is now /the driver's commands and the ops/,
 -- not /the driver's commands/**, and that is a judgement call rather than a
 -- principle: the principled fix is an op listing derived from
--- 'Thena.Ops.opKeyword', which is total, alongside @ms3\/CLOSEOUT.md@ 26's
+-- 'Thena.Instral.Ops.opKeyword', which is total, alongside @ms3\/CLOSEOUT.md@ 26's
 -- table-driven 'dispatch'. Neither is this phase's.
 --
 -- **The spellings moved with the phase**: an argument is an operand now, so it
@@ -2115,7 +2115,7 @@ loadRuleBases s = go []
         Right b -> go (acc ++ [b]) more
 
     -- **Resolved here and not in 'readRuleBase'**, because a block is resolved
-    -- with EVERY loaded base's languages — which is what 'Thena.Ops.Play' does
+    -- with EVERY loaded base's languages — which is what 'Thena.Instral.Ops.Play' does
     -- at run time — and a file does not know what will be loaded beside it.
     blocksOf acc b = case surfaceBlocks (allLanguages acc) (GlobalName (baseName b))
                             (concatMap ruleBody (baseRules b ++ baseFunctions b)) of
@@ -2394,7 +2394,7 @@ progress oneStep s msgs = case step (sessionMachine s) of
   -- type came from — an 'Attempt' there, the declaration itself here.
   --
   -- **It says nothing**, per his instruction: the command that ran it reports
-  -- when it is over. See 'Thena.Ops.DefineGlobal'.
+  -- when it is over. See 'Thena.Instral.Ops.DefineGlobal'.
   Engine.Defining nm ps ty t m -> case certify (globals m) t ty of
     Left e -> stop (load [] m) msgs (Uncertified e)
     Right (sub, residue) -> case generalised (names m) residue (substLevelsIn sub ty) t of

@@ -32,7 +32,7 @@ import Thena.Repl (entriesOf, unclosedEntry)
 
 -- | The names in a 'Fitting' listing, for the tests below.
 
-import Thena.Ops (AnswerKind (..), partWords)
+import Thena.Instral.Ops (AnswerKind (..), partWords)
 import Thena.Rules (RuleError (..))
 
 -- | Run a script of command lines, answering nothing, and give back the last
@@ -236,7 +236,7 @@ tests =
     , testGroup
         "a do block in a surface term is checked before it runs"
         -- **MS5 phase 79, and @ms5\/CLOSEOUT.md@ 20.** Until then
-        -- 'Thena.Ops.Play' resolved a block as it ran, so a mistake in one
+        -- 'Thena.Instral.Ops.Play' resolved a block as it ran, so a mistake in one
         -- halted the machine with half a proof already built. The block is a
         -- body like any other now: resolved, validated and typed when the term
         -- it sits in is read.
@@ -254,7 +254,7 @@ tests =
              in after @?= before
 
           -- **A @return@ has nothing to answer.** A block in a surface term is
-          -- the solution to the hole it stands in, and 'Thena.Ops.Play' splices
+          -- the solution to the hole it stands in, and 'Thena.Instral.Ops.Play' splices
           -- it into the running program rather than opening a frame — so before
           -- this check a @return@ there quietly abandoned the elaboration.
         , testCase "a return in one is refused" $

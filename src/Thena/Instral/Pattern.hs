@@ -3,12 +3,12 @@
 --
 -- **Its own module for the reason 'Thena.Instral.Type' is** (MS5 phase 84):
 -- "Thena.Errors" has to name a 'Pattern' — a call's destination is one, so
--- @NothingReturned@ carries one — and it cannot import "Thena.Ops", which
+-- @NothingReturned@ carries one — and it cannot import "Thena.Instral.Ops", which
 -- reaches "Thena.Errors" through "Thena.Development.Cursor". The type is pure
 -- syntax and depends on nothing, so it moves down a layer and both import it.
 --
--- **The matcher stays in "Thena.Ops"**, because matching needs a
--- 'Thena.Ops.Value' and a value is what the machine has. What lives here is the
+-- **The matcher stays in "Thena.Instral.Ops"**, because matching needs a
+-- 'Thena.Instral.Ops.Value' and a value is what the machine has. What lives here is the
 -- shape and the two questions that are about the shape alone.
 module Thena.Instral.Pattern
   ( Pattern (..)

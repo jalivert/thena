@@ -59,7 +59,7 @@ import Thena.Core.Term
   , fresh
   , instantiate
   )
--- Only for 'Core'\'s @Eliminate@, which "Thena.Ops" also has a constructor
+-- Only for 'Core'\'s @Eliminate@, which "Thena.Instral.Ops" also has a constructor
 -- named: the op that builds one and the node it builds must be told apart.
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Typing (check, infer, sortOf)
@@ -97,7 +97,7 @@ import Thena.Surface.Concrete (Plicity (..))
 import qualified Thena.Surface.Concrete as Concrete
 import Thena.Syntax.Concrete (splicesIn)
 import Thena.Syntax.Resolve (resolveWith)
-import Thena.Ops
+import Thena.Instral.Ops
   ( AnswerKind
   , Env
   , Rule (..)
@@ -121,7 +121,7 @@ import Thena.Global.Env
   , inductiveParameters
   , lookupInductive
   )
-import qualified Thena.Ops as Op
+import qualified Thena.Instral.Ops as Op
 import Thena.Tactics.Eliminate (Elimination (..), eliminate)
 import Thena.Rules
   (RuleBase, RuleError (..), allLanguages, RuleIter, arities, clauses, dispatch, hasNext, next, resolveBlock)
@@ -143,7 +143,7 @@ import qualified Thena.Surface.Zipper as Zipper
 --
 -- 'rules' is the fifth field, added phase 15 and chosen by the user: the rule
 -- base cannot live in 'GlobalEnv', because "Thena.Global.Env" sits below
--- "Thena.Ops" and so cannot mention a 'Thena.Ops.Rule' (@AGENDA.md@ item 25).
+-- "Thena.Instral.Ops" and so cannot mention a 'Thena.Instral.Ops.Rule' (@AGENDA.md@ item 25).
 -- It does not backtrack for 'globals'\' reason — proving something is not what
 -- changes the set of rules that exist.
 --
@@ -235,7 +235,7 @@ data Frame
         -- leaving the name unbound for a later @Ref@ to trip over.
         --
         -- A 'Op.Block' frame always carries 'Nothing': a block produces
-        -- nothing ('Thena.Ops.produces'), so @validate@ refuses a @Bind@ on one
+        -- nothing ('Thena.Instral.Ops.produces'), so @validate@ refuses a @Bind@ on one
         -- before it can get here.
       , returned  :: Bool
         -- ^ has control already passed back out of this call? See 'resumeFrom',
@@ -285,7 +285,7 @@ data Frame
         --
         -- Without it, backtracking into a second elaboration rule would enter
         -- it with @hint@ unbound and it would fail as an unbound 'Ref'. MS1
-        -- never reaches that — the partition (\'Thena.Ops.usesHint\') leaves one
+        -- never reaches that — the partition (\'Thena.Instral.Ops.usesHint\') leaves one
         -- hint rule, so a hinted dispatch is always deterministic and builds a
         -- @Call@ — so this field is on @AGENDA.md@'s standing list of things
         -- defined and not exercised. It is here rather than deferred because a
@@ -383,7 +383,7 @@ flatten = rebuild . cursor
 --
 -- @whnf@ at every position a Π chain has, so elaboration's @=@-bindings are
 -- gone from the domains and the codomain as well as from the front. See
--- 'Thena.Ops.Expose' for why a declared type needs it and why this is not a
+-- 'Thena.Instral.Ops.Expose' for why a declared type needs it and why this is not a
 -- normaliser.
 exposed :: GlobalEnv -> Context -> Int -> Core -> (Core, Int)
 exposed env ctx n t = case whnf env ctx t of
@@ -540,7 +540,7 @@ step m = case pc (exec m) of
       -- phase 63). It fails here rather than leaving the name unbound for a
       -- later @Ref@, because those are two different mistakes and the second
       -- reports the wrong line. This is the run-time half of
-      -- 'Thena.Ops.produces' saying 'True' for every call: which clauses a name
+      -- 'Thena.Instral.Ops.produces' saying 'True' for every call: which clauses a name
       -- has is not known when a body is read.
       Just n  -> failure (NothingReturned n) m
       Nothing -> Continue m { exec = Exec is e stk' }
@@ -713,7 +713,7 @@ perform instr rest m = case operation instr of
     Continue m { exec = Exec body [] (Thena.Engine.Call rest (env (exec m)) Nothing False : stack (exec m)) }
 
   -- **The data structures** (MS5 phase 65). A list and a pair are built by the
-  -- operand itself — 'Thena.Ops.operandIn' does it, because neither runs
+  -- operand itself — 'Thena.Instral.Ops.operandIn' does it, because neither runs
   -- anything — so what is left here is the option's two constructors and the
   -- five accessors.
   Op.Some a -> case operandValue (env (exec m)) a of
@@ -732,7 +732,7 @@ perform instr rest m = case operation instr of
   -- **The nearest frame may be a block's**, since 'Op.Block' builds an ordinary
   -- 'Thena.Engine.Call' frame. So @return@ inside @do { … }@ ends the block and
   -- not the rule around it: a block is a body, and @return@ ends the body it is
-  -- written in. A block's frame never has a destination — 'Thena.Ops.produces'
+  -- written in. A block's frame never has a destination — 'Thena.Instral.Ops.produces'
   -- says a block produces nothing — so the value is dropped there.
   Op.Return a -> case operandValue (env (exec m)) a of
     Left e  -> failure e m
@@ -981,7 +981,7 @@ perform instr rest m = case operation instr of
       -- there was one candidate there was none, and a line per deterministic
       -- call would be noise (§1, §7.5).
       -- **No destination** (MS5 phase 63), where a 'Op.Call' frame carries one:
-      -- a dispatch produces nothing ('Thena.Ops.produces'), because what the
+      -- a dispatch produces nothing ('Thena.Instral.Ops.produces'), because what the
       -- chosen rule did is in the development. A @return@ inside the rule it
       -- runs therefore ends that rule and its value is dropped, which is what
       -- @x = prove@ being refused at load time already said.
@@ -1556,7 +1556,7 @@ perform instr rest m = case operation instr of
 
   -- **@unify@'s directed sibling** (MS4 phase 41g), and the only difference is
   -- which entry point of "Thena.Core.Unify" it calls — the whole of it is
-  -- there. Elaboration's @FILL@ is what wanted it; see 'Thena.Ops.UnifyInto'.
+  -- there. Elaboration's @FILL@ is what wanted it; see 'Thena.Instral.Ops.UnifyInto'.
   UnifyInto l r -> unifying unifyInto l r
   where
     -- The two unification ops differ in one argument and share everything
@@ -1642,7 +1642,7 @@ perform instr rest m = case operation instr of
 
     -- Claim a hole for every Π domain, extending the spine as it goes, and
     -- stop at the first type that is not a Π — that is what makes @apply@
-    -- saturating rather than searching (§2.7, 'Thena.Ops.Apply').
+    -- saturating rather than searching (§2.7, 'Thena.Instral.Ops.Apply').
     --
     -- **Each hole goes above the focus, and the context is re-read each time**,
     -- so a later domain may mention an earlier hole and still be in scope:
@@ -1855,7 +1855,7 @@ orphanMessage is = "reduced; now unreachable: " ++ intercalate ", " (map identSt
   where
     identString (Ident s) = s
 
--- | 'Thena.Ops.operandIn', with an unbound name read as a body's fatal error.
+-- | 'Thena.Instral.Ops.operandIn', with an unbound name read as a body's fatal error.
 -- A head reads the same failure differently — see 'Thena.Rules.holds'.
 -- | One fresh level meta per prenex parameter (MS4 phase 48), inserted at a
 -- use site — his /"we have them implicitly inserted"/.
@@ -2129,7 +2129,7 @@ data RetryError = NoChoicePoint | UnknownChoice Int
 -- arguments to the clause's own parameters by MATCHING them (MS5 phase 82),
 -- which 'Thena.Rules.clauses' has already done once to choose this clause.
 --
--- **It is the same 'Thena.Ops.matchClause' call**, and that is the point: the
+-- **It is the same 'Thena.Instral.Ops.matchClause' call**, and that is the point: the
 -- clause that was chosen and the environment it runs in cannot disagree about
 -- what a pattern bound. Before patterns both were @zip@ and agreeing was free.
 seedFor :: Frame -> Rule -> Env

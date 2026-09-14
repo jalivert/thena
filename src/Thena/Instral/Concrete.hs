@@ -19,7 +19,7 @@
 --
 -- The constructors keep their @Raw@ prefix. It no longer names the type they
 -- used to live beside; it says /named and unresolved/, which is what they are —
--- an op word here is a 'String' and becomes a 'Thena.Ops.Op' only in
+-- an op word here is a 'String' and becomes a 'Thena.Instral.Ops.Op' only in
 -- "Thena.Rules".
 module Thena.Instral.Concrete
   ( RawDecl (..)
@@ -44,7 +44,7 @@ import Thena.Syntax.Concrete (Raw)
 -- | A written rule (§8, phase 21) — @rule ‹name› (‹params›) :- when ‹tests› do ‹body›@.
 --
 -- Named and unresolved like every other tree here: the tests and the op words
--- are 'String's, and turning them into 'Thena.Ops.Test' and 'Thena.Ops.Op' is
+-- are 'String's, and turning them into 'Thena.Instral.Ops.Test' and 'Thena.Instral.Ops.Op' is
 -- "Thena.Rules"'s job. The parser cannot do it, for the same reason it cannot
 -- produce a 'Thena.Core.Term.Core': the op words are not lexer keywords — if
 -- they were, @solve@ and @type@ would stop being usable identifiers in terms —
@@ -64,7 +64,7 @@ data RawRule = RawRule String [RawPattern] [RawTest] [RawInstr]
 -- **Unresolved like everything else here, and it barely needs to be**: a
 -- pattern over @instral@'s own data mentions no op word, no tag and no global,
 -- so 'Thena.Rules.resolvePattern' is a rename from 'String' to
--- 'Thena.Ops.Name'. It is a separate tree anyway, because stages b and c of
+-- 'Thena.Instral.Ops.Name'. It is a separate tree anyway, because stages b and c of
 -- @discussion\/pattern-matching.md@ add a Surface pattern and a Core one, and
 -- both of those /do/ need resolving.
 --
@@ -108,7 +108,7 @@ data RawDecl
 --
 -- **A function is a rule with one clause and no head** — his §1.1 — and that is
 -- how it is built rather than how it is described: 'Thena.Rules.resolveFunction'
--- answers with an ordinary 'Thena.Ops.Rule' whose body ends in @return@. Nothing
+-- answers with an ordinary 'Thena.Instral.Ops.Rule' whose body ends in @return@. Nothing
 -- in the engine knows the difference, which is the point of there being one
 -- language.
 data RawFunction = RawFunction String [RawPattern] RawBody
@@ -164,7 +164,7 @@ data RawRhs
 --
 -- **It is a separate type from 'RawRhs' on purpose.** A block is a body and not
 -- an expression: @n = do ‹block›@ inside a body would be a different thing —
--- 'Thena.Ops.Block', whose @return@ ends the block and drops the value — and
+-- 'Thena.Instral.Ops.Block', whose @return@ ends the block and drops the value — and
 -- giving 'RawRhs' the constructor would put an unreachable case in every
 -- function that matches one.
 data RawBody
@@ -210,7 +210,7 @@ data RawTy
     -- unwraps it. It exists so that the arrow chain can stop at one.
   deriving (Eq, Show)
 
--- | @‹name› = ‹op› ‹args›@ or @‹op› ‹args›@ — 'Thena.Ops.Instr''s two cases, written.
+-- | @‹name› = ‹op› ‹args›@ or @‹op› ‹args›@ — 'Thena.Instral.Ops.Instr''s two cases, written.
 data RawInstr
   = RawBind RawPattern RawRhs
     -- ^ **The left is a PATTERN since MS5 phase 84** — stage d of
@@ -222,7 +222,7 @@ data RawInstr
     -- a line of its own, above the binding it is about, which is the spelling a
     -- top-level signature uses one level up — his uniformity. It is not an
     -- instruction: resolution attaches it to the binding that follows and
-    -- nothing of it reaches 'Thena.Ops.Instr' but the type.
+    -- nothing of it reaches 'Thena.Instral.Ops.Instr' but the type.
   deriving (Eq, Show)
 
 -- | An op word and the arguments written after it, both unresolved.
@@ -299,7 +299,7 @@ data RawOperand
   | RawRef String
   | RawPos Int
     -- ^ a numeral. **It is a /position/ only where a field word wants one** —
-    -- @arg 2@, @param 0@ — and an 'Thena.Ops.VInt' literal everywhere else (MS5
+    -- @arg 2@, @param 0@ — and an 'Thena.Instral.Ops.VInt' literal everywhere else (MS5
     -- phase 64). The parser cannot tell the two apart, for the reason it cannot
     -- tell an op word from a rule name: which it is depends on the word in
     -- front, which is resolution's question.

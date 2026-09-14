@@ -21,7 +21,7 @@ import Data.List (isInfixOf)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
-import Thena.Ops
+import Thena.Instral.Ops
   ( Instr (..)
   , Pattern (..)
   , Value (..)
@@ -35,7 +35,7 @@ import Thena.Rules (resolveRule, validate)
 import Thena.Syntax.Lexer (lexTokens)
 import Thena.Surface.Layout (layout)
 import Thena.Syntax.Parser (parseRule)
-import Thena.Ops (Rule (..))
+import Thena.Instral.Ops (Rule (..))
 
 tests :: TestTree
 tests =

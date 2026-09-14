@@ -7,7 +7,7 @@
 -- shared a mistake, which is the standing lesson from phases 2–5.
 --
 -- The op and test vocabularies get the same treatment from the other side:
--- 'Thena.Ops.opKeyword' and 'Thena.Rules.testWord' are total case splits, so
+-- 'Thena.Instral.Ops.opKeyword' and 'Thena.Rules.testWord' are total case splits, so
 -- @-Wall@ makes a new op or test say how it is spelled, and 'everyOp' below
 -- checks that what they say is a word the parser and resolver actually accept.
 module Thena.RuleSyntaxTests (tests) where
@@ -19,7 +19,7 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (GlobalName (..))
 import Thena.Development.Cursor (Part (..))
-import Thena.Ops
+import Thena.Instral.Ops
   ( AnswerKind (..)
   , Test (..)
   , Instr (..)
@@ -30,7 +30,7 @@ import Thena.Ops
   , opKeyword
   , partWords
   )
-import qualified Thena.Ops as Op
+import qualified Thena.Instral.Ops as Op
 import Thena.Rules
   ( RuleBase (..)
   , RuleError (..)
@@ -136,7 +136,7 @@ againstTheBase =
 
 -- | Every op that has a written form, with the text that writes it.
 --
--- 'Thena.Ops.opKeyword' is the total case split @-Wall@ guards; this is the
+-- 'Thena.Instral.Ops.opKeyword' is the total case split @-Wall@ guards; this is the
 -- list the parser is checked against, and the two are crossed below — the word
 -- the table gives must be the word the text starts with, and the text must
 -- resolve to the op the table was asked about.

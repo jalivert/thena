@@ -36,8 +36,8 @@ import Thena.Engine
   )
 import Thena.Errors (FailReason (..))
 import Thena.Global.Env (emptyGlobals)
-import Thena.Ops (Instr (..), Op (..), Operand (..), Rule (..), Test (..), Value (..))
-import qualified Thena.Ops as Ops
+import Thena.Instral.Ops (Instr (..), Op (..), Operand (..), Rule (..), Test (..), Value (..))
+import qualified Thena.Instral.Ops as Ops
 import Thena.Rules (RuleBase, matches, next, ruleBase)
 import Thena.Surface.Concrete (Surface (..))
 import Thena.Surface.Zipper (rootedAt)

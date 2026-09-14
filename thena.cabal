@@ -42,7 +42,6 @@ library
         Thena.Global.Env
         Thena.Global.NoConfusion
         Thena.Kernel
-        Thena.Ops
         Thena.Repl
         Thena.Rules
         Thena.Surface.Concrete
@@ -50,6 +49,7 @@ library
         Thena.Surface.Parser
         Thena.Surface.Read
         Thena.Surface.Zipper
+        Thena.Instral.Ops
         Thena.Instral.Concrete
         Thena.Instral.Pattern
         Thena.Instral.Type

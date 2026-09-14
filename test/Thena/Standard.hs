@@ -26,7 +26,7 @@ module Thena.Standard
 import Thena.Core.Term (GlobalName (..))
 import Thena.Driver (Session (..), newSession)
 import Thena.Engine (Machine (..))
-import Thena.Ops
+import Thena.Instral.Ops
   ( Instr (..)
   , Op (..)
   , Operand (..)
@@ -34,8 +34,8 @@ import Thena.Ops
   , Pattern (..)
   , Test (..)
   )
-import Thena.Ops (Value (VText))
-import qualified Thena.Ops as Op
+import Thena.Instral.Ops (Value (VText))
+import qualified Thena.Instral.Ops as Op
 import Thena.Repl (loadStandardRules)
 import Thena.Rules (RuleBase (..), allRules, ruleBase)
 

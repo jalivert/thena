@@ -42,13 +42,13 @@ import Thena.Engine
   )
 import Thena.Errors (FailReason (..), MoveError (..), ResolveError (..), SyntaxError (..))
 import Thena.Global.Env (emptyGlobals)
-import Thena.Ops
+import Thena.Instral.Ops
   ( Instr (..)
   , Operand (..)
   , Rule (..)
   , Value (..)
   )
-import qualified Thena.Ops as Ops
+import qualified Thena.Instral.Ops as Ops
 import Thena.Rules
   ( RuleIter
   , matches

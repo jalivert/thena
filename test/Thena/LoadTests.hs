@@ -398,7 +398,7 @@ moduleTests =
 
     -- **@cross body@**, because the other two candidates stopped being
     -- resolution failures: an op word at an arity the op does not have is a
-    -- call (MS5 phase 62b), and a numeral is an 'Thena.Ops.VInt' rather than a
+    -- call (MS5 phase 62b), and a numeral is an 'Thena.Instral.Ops.VInt' rather than a
     -- misplaced field position (MS5 phase 64). What is left is an operand no
     -- reading of the word admits, and @cross@ takes exactly two.
     badBlockModule =

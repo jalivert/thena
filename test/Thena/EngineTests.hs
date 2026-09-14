@@ -37,8 +37,8 @@ import Thena.Engine
 import Thena.Global.Env (emptyGlobals)
 import Thena.Standard (expectedBase)
 import Thena.Errors (FailReason (..), MoveError (..))
-import Thena.Ops (AnswerKind (..), Instr (..), Operand (..), Value (..))
-import qualified Thena.Ops as Ops
+import Thena.Instral.Ops (AnswerKind (..), Instr (..), Operand (..), Value (..))
+import qualified Thena.Instral.Ops as Ops
 
 type0 :: Core
 type0 = Universe (LZero)

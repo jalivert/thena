@@ -31,8 +31,8 @@ import Thena.Engine
 import Thena.Errors (FailReason (..), MoveError (..))
 import Thena.Global.Env (GlobalEnv, emptyGlobals)
 import Thena.Declared (nat)
-import qualified Thena.Ops as Op
-import Thena.Ops (Instr (..), Op (..), Operand (..), Value (..))
+import qualified Thena.Instral.Ops as Op
+import Thena.Instral.Ops (Instr (..), Op (..), Operand (..), Value (..))
 
 tests :: TestTree
 tests =
@@ -328,7 +328,7 @@ gotoTests =
 
       -- **The two words do not accept each other's operand** (MS5 phase 66b).
       -- One op read either shape until here, which is why neither half could
-      -- be given a signature; see 'Thena.Ops.GotoNamed'.
+      -- be given a signature; see 'Thena.Instral.Ops.GotoNamed'.
     , testCase "goto refuses a name" $
         case run hole [Do (Goto (Lit (VText "h")))] of
           Left ExpectedTerm -> pure ()

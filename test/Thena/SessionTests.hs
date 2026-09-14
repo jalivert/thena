@@ -238,7 +238,7 @@ holeTests =
       (natGoal ++ ["attack", "into", "try-core zero"])
       [UnboundInRule (GlobalName "entry") 0 "zero"]
     -- And the vocabularies still do not mix: the surface fence makes a
-    -- 'Thena.Ops.VSurface', which a core tactic will not take. **The refusal is
+    -- 'Thena.Instral.Ops.VSurface', which a core tactic will not take. **The refusal is
     -- the type system's now**, where it used to be the op's at run time.
   , mistyped "a core tactic will not take a surface argument"
       (natGoal ++ ["attack", "into", "try-core \10216 zero \10217"])

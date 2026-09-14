@@ -21,7 +21,7 @@ import Thena.Instral.Infer
   , renderInstralTypeError
   )
 import Thena.Instral.Type (Signature (..), Ty (..), renderSignature)
-import Thena.Ops (Instr (..), Op (..), Operand (..), Pattern (..), Rule (..), Value (..))
+import Thena.Instral.Ops (Instr (..), Op (..), Operand (..), Pattern (..), Rule (..), Value (..))
 import Thena.Errors (SyntaxError (..))
 import Thena.Instral.Grammar (GrammarError (..))
 import Thena.Syntax.Parser (ParseError (..))
@@ -198,7 +198,7 @@ annotatedLocals =
 -- | **@ms5\/CLOSEOUT.md@ 20, closed.**
 --
 -- A @do@ block written inside a surface term is @instral@, and until this phase
--- it was the only @instral@ nothing checked: 'Thena.Ops.Play' resolved it as it
+-- it was the only @instral@ nothing checked: 'Thena.Instral.Ops.Play' resolved it as it
 -- ran. It is resolved, validated and typed when the term it sits in is read
 -- now — in a rule file here, and at the prompt, in a module and in a
 -- @declare@ (@DriverTests@ drives those).
@@ -961,7 +961,7 @@ illTyped =
         [ Clash (InBody (GlobalName "bad") 0) TCore TSurface ]
 
       -- **A literal is checked against the position**, and this one cannot be.
-      -- 'Thena.Ops.Try' wants a term; a number is not one. **This is one of the
+      -- 'Thena.Instral.Ops.Try' wants a term; a number is not one. **This is one of the
       -- three checks phase 63 and 64 had to defer to run time** — MS5.md says
       -- phase 66 is where it comes back, and this is it.
     , refused "a numeral where a term was wanted"
@@ -1054,10 +1054,10 @@ wellTyped =
         other -> assertFailure ("expected a load, got " ++ show other)
 
 -- | **A @return@ inside a @do@ block ends the BLOCK, not the rule** — see
--- "Thena.Engine"'s 'Thena.Ops.Return' case, which says so in as many words.
+-- "Thena.Engine"'s 'Thena.Instral.Ops.Return' case, which says so in as many words.
 --
 -- Built by hand rather than written in a file, because a block is never spelled
--- in a rule body ('Thena.Ops.Block'): it comes from a surface @do { … }@. So
+-- in a rule body ('Thena.Instral.Ops.Block'): it comes from a surface @do { … }@. So
 -- @blocked@ returns nothing, and binding a call to it is refused. Read the
 -- other way — the block's @return@ taken for the rule's — this would type check
 -- and then fail at run time with 'Thena.Errors.NothingReturned'.
@@ -1346,7 +1346,7 @@ functions =
           other -> assertFailure ("expected a refusal, got " ++ show other)
 
       -- **@x = ‹value›@, which `ms5/CLOSEOUT.md` 3 owed this phase** (his
-      -- ruling, 2026-09-12). It resolves to 'Thena.Ops.Value', an op with a word
+      -- ruling, 2026-09-12). It resolves to 'Thena.Instral.Ops.Value', an op with a word
       -- and no written form.
       -- **@x = true@ is the literal** (MS5 phase 73). @true@ and @false@ are read
       -- as values wherever an operand is, and the right of an @=@ was the one

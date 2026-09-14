@@ -7,7 +7,7 @@
 -- whose heads pass at the focus, and the validation pass that says whether a
 -- rule is well formed at all.
 --
--- 'Rule' and 'Test' themselves are "Thena.Ops"' — §2.5's layering was wrong and
+-- 'Rule' and 'Test' themselves are "Thena.Instral.Ops"' — §2.5's layering was wrong and
 -- the user corrected it 2026-08-23 (@AGENDA.md@ item 25). The rest of §2.5's
 -- listing for this module stands.
 module Thena.Rules
@@ -55,8 +55,8 @@ import Thena.Core.Term (Core (..), GlobalName (..))
 import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor (Cursor, Focus (..), context, expectedType, focus)
 import Thena.Global.Env (GlobalEnv)
-import qualified Thena.Ops as Op
-import Thena.Ops
+import qualified Thena.Instral.Ops as Op
+import Thena.Instral.Ops
   ( AnswerKind (..)
   , Instr (..)
   , Name
@@ -509,7 +509,7 @@ data RuleError
     -- ^ **@return@ inside a @do@ block written in a surface term** (MS5 phase
     -- 79). A block there /is/ the solution to the hole it stands in —
     -- @E⟦do { … }⟧@ is /play the block/ — so its product is the term it built
-    -- and there is nothing for a value to be returned to. 'Thena.Ops.Play'
+    -- and there is nothing for a value to be returned to. 'Thena.Instral.Ops.Play'
     -- splices the instructions into the running program rather than opening a
     -- frame, so before this check a @return@ there quietly abandoned the
     -- elaboration that played it.
@@ -571,7 +571,7 @@ validate r = reserved ++ repeated ++ headScope ++ go 0 (initiallyBound r) (ruleB
     nm = ruleName r
 
     -- **A name that is a literal cannot also be a variable** (MS5 phase 64).
-    -- @true@ and @false@ are read as 'Thena.Ops.VBool' wherever an operand is
+    -- @true@ and @false@ are read as 'Thena.Instral.Ops.VBool' wherever an operand is
     -- read, so a binding of either name could never be read back — every @Ref@
     -- to it has already become a literal. Refusing it here is the difference
     -- between a rule that cannot be written and one that quietly does something
@@ -579,7 +579,7 @@ validate r = reserved ++ repeated ++ headScope ++ go 0 (initiallyBound r) (ruleB
     --
     -- **It no longer looks at the parameters, because it cannot fire there**
     -- (MS5 phase 82). 'Thena.Rules.resolvePattern' reads a parameter\'s @true@
-    -- as 'Thena.Ops.PBool' before this runs, so no pattern can bind the name and
+    -- as 'Thena.Instral.Ops.PBool' before this runs, so no pattern can bind the name and
     -- the check was unreachable from that side. Removing what a change has made
     -- dead is the standing rule; the /binding/ half is untouched and still
     -- fires.
@@ -591,7 +591,7 @@ validate r = reserved ++ repeated ++ headScope ++ go 0 (initiallyBound r) (ruleB
 
     -- **Patterns are linear** (MS5 phase 82). @f x x@ is refused rather than
     -- read as /and the two are equal/: matching a value against another value
-    -- is a different feature, it needs @Eq@ on every 'Thena.Ops.Value'
+    -- is a different feature, it needs @Eq@ on every 'Thena.Instral.Ops.Value'
     -- including a closure, and nothing has asked for it. Haskell refuses it for
     -- the same reason.
     repeated =
@@ -616,7 +616,7 @@ validate r = reserved ++ repeated ++ headScope ++ go 0 (initiallyBound r) (ruleB
     -- **A head sees what the PATTERNS bind, not the parameters** (MS5 phase
     -- 82), and that is strictly more than before: @rule f [a, ...rest] :- when
     -- (surface-is-name a)@ can ask about an element. 'clauses' passes the very
-    -- environment 'Thena.Ops.matchClause' built, so what this admits and what
+    -- environment 'Thena.Instral.Ops.matchClause' built, so what this admits and what
     -- 'holds' is given cannot drift.
     boundByParams = concatMap patternBinds (ruleParams r)
 
@@ -692,7 +692,7 @@ resolveSignature ls (RawSignature nm t) = do
   -- @a -> a -> ()@ and every signature's variables collapsed onto each other.
   ts <- chainOf (chain t) []
   -- **The last link is the result, and @()@ means there is none.** That is the
-  -- same distinction 'Thena.Ops.resultOf' draws, said in the surface a rule
+  -- same distinction 'Thena.Instral.Ops.resultOf' draws, said in the surface a rule
   -- author writes — and it is why @()@ anywhere else is refused rather than
   -- quietly dropping a parameter.
   case sequence (init ts) of
@@ -894,7 +894,7 @@ resolveRule ls (RawRule nm ps ts body) =
 -- heads staying a restricted fragment rather than a shorter list of shapes.
 --
 -- 'RawPos' was refused until then because a numeral was only ever @arg 2@'s
--- field position. It is an 'Thena.Ops.VInt' now.
+-- field position. It is an 'Thena.Instral.Ops.VInt' now.
 headOperand :: RawOperand -> Maybe Operand
 headOperand o = case o of
   -- **A head takes no lambda.** It is a restricted fragment on purpose (§1.1,
@@ -998,7 +998,7 @@ resolveFunction ls (RawFunction nm ps body) =
 -- the block, which says @return@ itself. So the short form is the block form
 -- with the @return@ written for you, and there is one compilation and not two.
 --
--- **A block body is NOT a @Thena.Ops.Block@.** That op builds a call frame
+-- **A block body is NOT a @Thena.Instral.Ops.Block@.** That op builds a call frame
 -- whose @return@ ends the block and drops the value; here the instructions
 -- /are/ the rule's body, so a @return@ in one is the function's result for the
 -- same reason it is a rule's. Nothing in the engine changed for this phase.
@@ -1133,7 +1133,7 @@ instruction ls g bound i ri = case ri of
     RhsOp o    -> lift (Bind n Nothing) o
   -- **A value on the right of an @=@** (MS5 phase 68a) — @x = [1, 2]@. Its
   -- nested calls are lifted exactly as an op's arguments are, and the value
-  -- itself becomes a 'Thena.Ops.Value', which is the op with no written form.
+  -- itself becomes a 'Thena.Instral.Ops.Value', which is the op with no written form.
   -- **A lambda binds directly**, without going through 'Op.Value': it is
   -- already an op, and wrapping it would build the closure and then copy it.
     RhsValue (RawLambda ps b) -> pure . Bind n Nothing <$> closure ls g i ps b
@@ -1332,7 +1332,7 @@ operandOf ls g i w o = case o of
 
 -- | An op word and its written arguments, resolved.
 --
--- The whole word vocabulary is 'Thena.Ops.opKeyword'\'s, read backwards, and
+-- The whole word vocabulary is 'Thena.Instral.Ops.opKeyword'\'s, read backwards, and
 -- the arities are here because that is where they are known. A word this does
 -- A word this does not accept is a **rule call** (phase 25e); an accepted word
 -- given the wrong arguments is 'BadOperands'. Those are separate mistakes, and
@@ -1340,7 +1340,7 @@ operandOf ls g i w o = case o of
 -- | The op words, by how many operands they take (MS5 phase 72).
 --
 -- **Hoisted out of 'operation'\'s @where@** so that a test can walk them: they
--- are the parser's half of the word vocabulary, 'Thena.Ops.opKeyword' is the
+-- are the parser's half of the word vocabulary, 'Thena.Instral.Ops.opKeyword' is the
 -- printer's, and until this phase the only thing crossing the two was
 -- @RuleSyntaxTests@' hand-written @everyOp@ — which phase 68a found had no
 -- @goto@ row at all, so splitting that word into two would have passed the suite
@@ -1412,7 +1412,7 @@ isOpWord w = w `elem` partWords || w `elem` map fst opWords
 -- above — so nothing has to be listed a second time.
 --
 -- The operands are a placeholder: what is being crossed is the /word/, and
--- 'Thena.Ops.opKeyword' does not read an op's operands.
+-- 'Thena.Instral.Ops.opKeyword' does not read an op's operands.
 opWords :: [(String, Op)]
 opWords =
   nullaryOps
@@ -1457,7 +1457,7 @@ operation ls g i (RawOp w as)
       ("ask", _)                  -> bad
 
       -- §3.7: a declaration is a command, not a rule-body operation. The word
-      -- exists ('Thena.Ops.opKeyword' is total) and resolving it is refused
+      -- exists ('Thena.Instral.Ops.opKeyword' is total) and resolving it is refused
       -- here, one step before 'validate' would have.
       ("data", _)                 -> Left (DeclarationInBody g i)
 
@@ -1581,11 +1581,11 @@ withOperands t os = case (t, os) of
   (LetIsBare _, [o])             -> Just (LetIsBare o)
   _                      -> Nothing
 
--- | What a test was written with, in written order. 'Thena.Ops.operandsOf'\'s
+-- | What a test was written with, in written order. 'Thena.Instral.Ops.operandsOf'\'s
 -- job one type over, and what lets 'testOf' read an arity off 'everyTest'
 -- rather than keeping a second table of counts.
 -- | Every operand a head test reads, **with the type it wants there** (MS5
--- phase 66b) — 'Thena.Ops.operandTypes' one type over, and for the same reason:
+-- phase 66b) — 'Thena.Instral.Ops.operandTypes' one type over, and for the same reason:
 -- two case splits agreeing about arity in twenty-four places is a thing that can
 -- come apart, and one cannot disagree with itself.
 --
@@ -1631,7 +1631,7 @@ testOperands :: Test -> [Operand]
 testOperands = map fst . testTypes
 
 -- | The word a 'Test' is written with. Total, so @-Wall@ makes a new test say
--- how it is spelled — 'Thena.Ops.opKeyword'\'s trick, one type over.
+-- how it is spelled — 'Thena.Instral.Ops.opKeyword'\'s trick, one type over.
 --
 -- Hyphenated, which is what §8 and @OBJECTIVE.md@ have always written
 -- (@focus-is-hole@, @hint-is-app@) and what the lexer could not read until this
@@ -1698,7 +1698,7 @@ everyTest =
 -- | Every @do@ block written inside a surface literal these instructions hold,
 -- resolved, and named for where it was found (MS5 phase 79).
 --
--- **The load-time twin of what 'Thena.Ops.Play' does as it runs.** Both go
+-- **The load-time twin of what 'Thena.Instral.Ops.Play' does as it runs.** Both go
 -- through 'resolveBlock' and both are handed the same language list, so they
 -- cannot come to disagree about what a word means; what this adds is that the
 -- answer is known before the machine starts, which is what lets a block be

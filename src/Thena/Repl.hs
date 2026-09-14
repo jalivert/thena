@@ -145,7 +145,7 @@ import Thena.Global.Env
   , InductiveDefinition (..)
   , constructorTarget
   )
-import Thena.Ops
+import Thena.Instral.Ops
   ( AnswerKind (..)
   , Instr (..)
   , Op
@@ -156,7 +156,7 @@ import Thena.Ops
   , operandsOf
   )
 import Thena.Rules (RuleBase (..), RuleError (..))
-import qualified Thena.Ops as Ops
+import qualified Thena.Instral.Ops as Ops
 import Thena.Syntax.Lexer (LexError (..), Pos (..), Token (..))
 import Thena.Surface.Layout (LayoutError (..))
 import Thena.Surface.Parser (SurfaceParseError (..))
@@ -1205,18 +1205,18 @@ renderInstr n ctx instr = case instr of
 
 -- | One instruction's op, as stepping mode shows it.
 --
--- **The word comes from 'Thena.Ops.opKeyword' and the operands from
--- 'Thena.Ops.operandsOf'** — phase 25c. Until then this was a second spelling
+-- **The word comes from 'Thena.Instral.Ops.opKeyword' and the operands from
+-- 'Thena.Instral.Ops.operandsOf'** — phase 25c. Until then this was a second spelling
 -- table, and at phase 23b the two drifted: the @prim-@ renames moved
--- 'Thena.Ops.opKeyword' and left this printing @try@, @attack@, @solve@ and
+-- 'Thena.Instral.Ops.opKeyword' and left this printing @try@, @attack@, @solve@ and
 -- @eliminate@, which since that phase name the /rules/ and not the ops this is
 -- displaying. The user, 2026-08-25: *"Fix the other seven right away - we are
 -- not leaving something like this behind."*
 --
 -- So only the shapes that are **not** "the word, then its operands in order"
 -- are written out below. The wildcard is deliberate and is not a loss of
--- @-Wall@\'s totality: a new op still has to answer 'Thena.Ops.opKeyword' and
--- 'Thena.Ops.operandsOf', both total, and now renders correctly by default
+-- @-Wall@\'s totality: a new op still has to answer 'Thena.Instral.Ops.opKeyword' and
+-- 'Thena.Instral.Ops.operandsOf', both total, and now renders correctly by default
 -- instead of needing a third case that can be written wrong. Totality here
 -- bought nothing — the case that drifted at 23b existed; it was just wrong.
 renderOp :: Int -> Context -> Op -> String
@@ -1279,7 +1279,7 @@ renderValue n ctx v = case v of
   -- deliberately not become yet. Owed a better rendering when a @Raw@ printer
   -- exists; until then this says what it is and does not pretend to more.
   VRaw _             -> "core" ++ [tick] ++ "…" ++ [tick]
-  -- **The focus, printed as it was written.** A 'Thena.Ops.VSurface' carries a
+  -- **The focus, printed as it was written.** A 'Thena.Instral.Ops.VSurface' carries a
   -- zipper since phase 46, and what a reader wants to see is the subterm the
   -- machine is elaborating, not the program it came from — so the path is
   -- carried and not shown. Where it belongs on screen is a presentation
@@ -1488,7 +1488,7 @@ renderSurface = surf Loose
       -- Exact, because the region kept its source text: a rule listing shows
       -- the embedded term as the author wrote it.
       RawRegion tag src -> tag ++ [tick] ++ src ++ [tick]
-      -- The same gap 'renderValue' has for a 'Thena.Ops.VRaw': there is no
+      -- The same gap 'renderValue' has for a 'Thena.Instral.Ops.VRaw': there is no
       -- printer for written syntax, so this says what it is rather than what it
       -- contains (§7b's register).
       RawQuoted _       -> "⌜…⌝"
@@ -2041,7 +2041,7 @@ whereRuleError e = case e of
   NoSuchTag g i _         -> inRule g i
   BadRegion g i _ _       -> inRule g i
   -- The signature errors (MS5 phase 67) name a signature and not a rule: they
-  -- are found before anything is resolved into a 'Thena.Ops.Rule' at all.
+  -- are found before anything is resolved into a 'Thena.Instral.Ops.Rule' at all.
   UnknownType n _         -> inSignature n
   TypeArity n _ _ _       -> inSignature n
   TypeVariableApplied n _ -> inSignature n

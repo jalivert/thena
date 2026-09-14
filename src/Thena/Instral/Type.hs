@@ -1,9 +1,9 @@
 -- | @instral@'s types (MS5 phase 66b).
 --
 -- **The type language, and nothing that uses it.** This module declares what a
--- type /is/; the signature every op has is 'Thena.Ops.signatureOf', and
+-- type /is/; the signature every op has is 'Thena.Instral.Ops.signatureOf', and
 -- inference over rule bodies is phase 66c. Splitting them that way is his call,
--- 2026-09-12: a signature that disagrees with 'Thena.Ops.operandsOf' is a bug
+-- 2026-09-12: a signature that disagrees with 'Thena.Instral.Ops.operandsOf' is a bug
 -- this phase can catch on its own, before inference exists to hide it behind a
 -- type error somewhere else.
 --
@@ -31,7 +31,7 @@ import Data.List (intercalate, nub)
 -- list, 2026-09-11. @instral@ never looks inside any of them; they are handles
 -- on things the machine owns.
 --
--- 'TVar' is a variable in a /scheme/. The table in "Thena.Ops" numbers them
+-- 'TVar' is a variable in a /scheme/. The table in "Thena.Instral.Ops" numbers them
 -- from zero per signature and inference instantiates them fresh at each use;
 -- nothing here does the instantiating.
 data Ty
@@ -43,11 +43,11 @@ data Ty
     --
     -- **A string literal is accepted at either** (his, same day), so nothing
     -- about how anything is written changes. A /variable/ is not: going from a
-    -- name to a string is written down, with 'Thena.Ops.NameText'.
+    -- name to a string is written down, with 'Thena.Instral.Ops.NameText'.
   | TInt                 -- ^ a whole number
   | TChar                -- ^ one character, written @'c'@
   | TBool                -- ^ @true@ or @false@
-  | TSurface             -- ^ a focused surface term — 'Thena.Ops.VSurface'
+  | TSurface             -- ^ a focused surface term — 'Thena.Instral.Ops.VSurface'
   | TCore
     -- ^ a core term.
     --
@@ -62,7 +62,7 @@ data Ty
     --
     -- **Nothing has this type yet, and it is here because he said so** —
     -- 2026-09-12, ruling on the question 66a raised. Phase 66a separated
-    -- 'Thena.Ops.VTerm' from a development by /removing/ the case rather than
+    -- 'Thena.Instral.Ops.VTerm' from a development by /removing/ the case rather than
     -- standing an empty one beside it, and the same argument would have kept
     -- this constructor out; he decided the language's vocabulary is fixed here
     -- even where the signature table never mentions it. MS5's doctrine is
@@ -101,7 +101,7 @@ data Ty
 -- | What an op takes and what it leaves.
 --
 -- **'sigResult' is 'Nothing' when the op produces nothing**, which is the whole
--- of 'Thena.Ops.produces' — and that function is derived from this one now
+-- of 'Thena.Instral.Ops.produces' — and that function is derived from this one now
 -- rather than being written twice (his ruling, 2026-09-12). The gain is a real
 -- check and not tidiness: @RulesTests@ already runs every op through
 -- "Thena.Engine" and asserts a name appears in the environment exactly when

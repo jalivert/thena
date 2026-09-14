@@ -34,8 +34,8 @@ import Thena.Engine
   )
 import Thena.Errors (FailReason (..))
 import Thena.Global.Env (emptyGlobals)
-import Thena.Ops (Instr (..), Rule (..), Test (..))
-import qualified Thena.Ops as Ops
+import Thena.Instral.Ops (Instr (..), Rule (..), Test (..))
+import qualified Thena.Instral.Ops as Ops
 import qualified Thena.Rules
 import Thena.Rules (RuleBase, dispatch, matches, ruleBase)
 import Thena.Standard (expectedBase)

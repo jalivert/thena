@@ -12,7 +12,7 @@
 -- terms before unification's reasons do — and, from phase 17b, the two leaves of
 -- the syntax branch. What it still may
 -- not import is anything above @Core@: a reason that carried a
--- 'Thena.Ops.Value' would put the instruction language below @Core.Unify@,
+-- 'Thena.Instral.Ops.Value' would put the instruction language below @Core.Unify@,
 -- which is backwards, so the operand-shape reasons say what was expected and
 -- nothing more. Nothing is lost: 'Thena.Engine.Stuck' carries the whole machine
 -- (§7.5), whose @pc@ still begins with the instruction that failed and whose
@@ -95,7 +95,7 @@ data FailReason
     -- for a later @Ref@ to trip over, because the two are different mistakes
     -- and the second one reports the wrong line. Whether a call produces cannot
     -- be checked when the body is read — a name's clauses are not known then
-    -- (phase 23) — so this is the run-time half of 'Thena.Ops.produces'.
+    -- (phase 23) — so this is the run-time half of 'Thena.Instral.Ops.produces'.
   | NothingToReturnFrom
     -- ^ @return@ with no call to return from — typed at the REPL, or in a
     -- top-level @do@ block (MS5 phase 63).
@@ -244,7 +244,7 @@ data FailReason
     -- bundles exactly these three failures for the driver's own @parseCore@ —
     -- so "Thena.Repl" renders an op\'s failure with the renderer it already has
   | ExpectedSurface
-    -- ^ an operand was not a 'Thena.Ops.VSurface'. Shaped like 'ExpectedText'
+    -- ^ an operand was not a 'Thena.Instral.Ops.VSurface'. Shaped like 'ExpectedText'
     -- and 'ExpectedTerm', and here for their reason: the value itself may not
     -- be named below @Core@
   | ExpectedSurfaceShape String

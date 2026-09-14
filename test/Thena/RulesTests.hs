@@ -42,7 +42,7 @@ import Thena.Global.Env
   , addDefinition
   , emptyGlobals
   )
-import Thena.Ops
+import Thena.Instral.Ops
   ( AnswerKind (..)
   , Instr (..)
   , Op
@@ -52,9 +52,9 @@ import Thena.Ops
   , produces
   , signatureOf
   )
--- §2.5: "Thena.Ops" is qualified everywhere except "Thena.Engine", because
+-- §2.5: "Thena.Instral.Ops" is qualified everywhere except "Thena.Engine", because
 -- @Assume@ and @Claim@ name both a component and an op.
-import qualified Thena.Ops as Ops
+import qualified Thena.Instral.Ops as Ops
 import Thena.Instral.Type (Signature (..), Ty (..), renderTy)
 import qualified Data.List.NonEmpty as NE
 import Thena.Surface.Concrete
@@ -388,7 +388,7 @@ dataTests =
           >>= (@?= Just (VText "a"))
 
     , -- An unbound name inside a literal is the body's mistake and is caught
-      -- when the base loads, which needs 'Thena.Ops.refsIn' to look inside.
+      -- when the base loads, which needs 'Thena.Instral.Ops.refsIn' to look inside.
       testCase "an unbound name inside a list is refused at load" $
         validate (named "r" [] [Do (Ops.Say (ListOf [Ref "nope"]))])
           @?= [UnboundInRule (GlobalName "r") 0 "nope"]
@@ -502,7 +502,7 @@ returnTests =
 -- | The standing lesson: find the invariant maintained by different code from
 -- the code that checks it (phase 5's @context@).
 --
--- 'Thena.Ops.produces' is a table, and a table agrees with itself. What decides
+-- 'Thena.Instral.Ops.produces' is a table, and a table agrees with itself. What decides
 -- the question is 'Thena.Engine.perform', so every op is run — in a state where
 -- it actually succeeds, which the 'ranOk' half enforces — and the answer is
 -- read off @env@. An op that grows a result later, or loses one, fails here
@@ -602,7 +602,7 @@ checkProduces globalEnv cur before o =
       (got /= Nothing) @?= produces o
       -- **And the value is of the type the table says** (MS5 phase 66b). The
       -- presence check above is what 'produces' was; this is the rest of
-      -- 'Thena.Ops.resultOf', aimed at the same authority — the engine — rather
+      -- 'Thena.Instral.Ops.resultOf', aimed at the same authority — the engine — rather
       -- than at another table. A signature that claims @Surface@ for an op that
       -- hands back a term fails here.
       -- **The scheme's variables are bound from the operands' actual values

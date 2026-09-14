@@ -1,13 +1,13 @@
 -- | Type inference for @instral@ (MS5 phase 66c).
 --
 -- **Hindley-Milner over the signature table**, which is phase 66b's
--- ("Thena.Ops.operandTypes", "Thena.Ops.resultOf", "Thena.Rules.testTypes").
+-- ("Thena.Instral.Ops.operandTypes", "Thena.Instral.Ops.resultOf", "Thena.Rules.testTypes").
 -- Nothing here knows what an op /does/; it knows what each one takes and leaves,
 -- and works out the rest.
 --
 -- **The unit is every loaded base at once, not one base and not one rule.** A
 -- call may name a rule written below it, a rule in a base loaded later, or
--- itself ("Thena.Ops.Call"), so a rule's signature is not decidable until the
+-- itself ("Thena.Instral.Ops.Call"), so a rule's signature is not decidable until the
 -- whole program is in hand. 'inferProgram' is therefore what a load runs, after
 -- every base is read and before any is installed — where 'Thena.Rules.validate'
 -- is per-rule and runs as each is resolved.
@@ -35,7 +35,7 @@ import Thena.Core.Term (GlobalName (..))
 import Thena.Syntax.Concrete (splicesIn)
 import Thena.Instral.Type (Signature (..), Ty (..), renderTy, typeVarsIn)
 import Thena.Rules (testTypes)
-import Thena.Ops
+import Thena.Instral.Ops
   ( Instr (..)
   , Name
   , Op (..)
@@ -418,7 +418,7 @@ callsIn = concatMap one
     inOp o = case o of
       -- **Wrapped here, because a 'Callable' is keyed by a RULE's name** and
       -- @Call@ carries only a word (MS5 phase 83). The boundary is one line and
-      -- is the whole cost of the narrow rename; widening 'Thena.Ops.Rule''s own
+      -- is the whole cost of the narrow rename; widening 'Thena.Instral.Ops.Rule''s own
       -- @ruleName@ is @ms5\/CLOSEOUT.md@ 38 and is not done here.
       Call nm as  -> (GlobalName nm, length as) : concatMap inOperand as
       Lambda _ b  -> callsIn b
@@ -461,9 +461,9 @@ whatItIs st b = case b of
 
 -- | Does this body end a call with a value?
 --
--- **A @return@ inside a @do@ block does not count.** 'Thena.Ops.Block' builds an
+-- **A @return@ inside a @do@ block does not count.** 'Thena.Instral.Ops.Block' builds an
 -- ordinary call frame, so @return@ there ends the block and the value is
--- dropped — see "Thena.Engine"'s 'Thena.Ops.Return' case, which says so.
+-- dropped — see "Thena.Engine"'s 'Thena.Instral.Ops.Return' case, which says so.
 returnsSomething :: [Instr] -> Bool
 returnsSomething is = or [ True | Do (Return _) <- is ] || or [ True | Bind _ _ (Return _) <- is ]
 
@@ -637,7 +637,7 @@ body env r res ctx i st (instr : rest) =
           -- **A call is the case worth reporting.** For every other op
           -- 'Thena.Rules.validate' has already refused this
           -- ('Thena.Rules.BoundNonProducing'); a call passes that check because
-          -- 'Thena.Ops.produces' cannot answer for one, and this pass can.
+          -- 'Thena.Instral.Ops.produces' cannot answer for one, and this pass can.
           let (t, s0)  = fresh (bindsNothing st1)
               (bs, s1) = patternCtx (const si) [p] [t] s0
            in (bs ++ ctx, s1)
@@ -648,7 +648,7 @@ body env r res ctx i st (instr : rest) =
       -- **A call is the case worth reporting.** For every other op
       -- 'Thena.Rules.validate' has already refused this
       -- ('Thena.Rules.BoundNonProducing'); a call passes that check because
-      -- 'Thena.Ops.produces' cannot answer for one, and this pass can.
+      -- 'Thena.Instral.Ops.produces' cannot answer for one, and this pass can.
       bindsNothing s = case o of
         Call nm as | notReturning (lookup (GlobalName nm, length as) env) ->
           oops (BindsNothing si (GlobalName nm)) s
@@ -803,8 +803,8 @@ valueType si v st = case v of
     let (ta, st1) = valueType si a st
         (tb, st2) = valueType si b st1
      in (TPair ta tb, st2)
-  -- **Cannot arise**: a closure is built by 'Thena.Ops.Lambda' and never
-  -- written, so nothing puts one in a 'Thena.Ops.Lit'. Answered rather than left
+  -- **Cannot arise**: a closure is built by 'Thena.Instral.Ops.Lambda' and never
+  -- written, so nothing puts one in a 'Thena.Instral.Ops.Lit'. Answered rather than left
   -- to a pattern-match failure.
   VClosure ps _ _  -> let (as, st1) = freshes (length ps) st
                           (rv, st2) = fresh st1

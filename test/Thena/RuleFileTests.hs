@@ -27,9 +27,9 @@ import Thena.Driver
   )
 import Thena.Engine (Machine (rules))
 import qualified Thena.Engine as Engine
-import Thena.Ops (Value (..))
+import Thena.Instral.Ops (Value (..))
 import Thena.Errors (FailReason (..))
-import Thena.Ops (Rule (..), Pattern (..))
+import Thena.Instral.Ops (Rule (..), Pattern (..))
 import Thena.Rules (RuleBase (..), RuleError (..))
 
 tests :: TestTree
@@ -289,7 +289,7 @@ refusals =
 --
 -- "Thena.CallTests" asks the same question of the engine; this asks it of the
 -- driver, which is where a bare REPL argument becomes a
--- 'Thena.Ops.VSurface' in the first place.
+-- 'Thena.Instral.Ops.VSurface' in the first place.
 argumentHeads :: TestTree
 argumentHeads =
   testGroup

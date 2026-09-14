@@ -3,9 +3,9 @@
 -- **What is checked here is the readable half**: that a type spells the way a
 -- rule author would write it, and that a representative op says what it takes.
 -- The two structural properties — a signature's arity agreeing with
--- 'Thena.Ops.operandsOf', and 'Thena.Ops.produces' agreeing with the result
+-- 'Thena.Instral.Ops.operandsOf', and 'Thena.Instral.Ops.produces' agreeing with the result
 -- column — are not tested, because neither can fail: both are derived from one
--- case split (see 'Thena.Ops.operandTypes'). What the table's result column
+-- case split (see 'Thena.Instral.Ops.operandTypes'). What the table's result column
 -- /is/ checked against is the engine, in @RulesTests@' @produces agrees with
 -- the engine@ group, which now also asserts the value's shape.
 module Thena.InstralTypeTests (tests) where
@@ -34,9 +34,9 @@ import Thena.Instral.Type
   , renderTy
   , typeVarsIn
   )
-import Thena.Ops (AnswerKind (..), Op (..), Operand (..), Value (..), signatureOf)
-import qualified Thena.Ops as Op
-import Thena.Ops (Test (..))
+import Thena.Instral.Ops (AnswerKind (..), Op (..), Operand (..), Value (..), signatureOf)
+import qualified Thena.Instral.Ops as Op
+import Thena.Instral.Ops (Test (..))
 import Thena.Rules (RuleError (..), builtInTypes, opWords, resolveLanguage, resolveSignature, resolveTy, testTypes)
 
 tests :: TestTree
@@ -193,7 +193,7 @@ theBuiltInTypes =
 -- parentheses and reading back at arity two.
 --
 -- **Up to renaming**, because the numbering is positional on both sides:
--- 'Thena.Ops.signatureOf' numbers a scheme's variables however the table wrote
+-- 'Thena.Instral.Ops.signatureOf' numbers a scheme's variables however the table wrote
 -- them and 'resolveSignature' numbers them by first appearance. 'renumbered'
 -- puts both in the second form.
 roundTrip :: TestTree
@@ -201,7 +201,7 @@ roundTrip =
   testGroup
     "a rendered signature reads back"
     [ -- Every op there is, which is the corpus that matters: the table in
-      -- "Thena.Ops" is what a reader meets through @:accepts@.
+      -- "Thena.Instral.Ops" is what a reader meets through @:accepts@.
       testCase "for every op the parser knows" $
         mapM_ (returns . signatureOf . snd) opWords
 
