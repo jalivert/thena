@@ -1117,6 +1117,24 @@ which may mean reworking how they are treated; it is not scheduled.
 have the types their values have — so `do { goto h }` reads the rule's `h`, and
 `do { say h }` is refused when `h` holds a term.
 
+### Levels: `instral` holds one, but has no level arithmetic
+
+*Decided 2026-09-14, confirmed as intentional 2026-09-15.*
+
+A rule can make a level and build a universe at it, and nothing more:
+
+```
+l = level 2            -- a closed level, exactly what Type₂ writes
+m = fresh-level        -- a fresh unknown, what a bare Type writes
+u = universe-at l      -- the term Type₂
+```
+
+There is no `level-suc` and no `level-max`. The level **algebra** — successor and
+join — is built only by the level solver, whose normal form and satisfiability
+check are written against a single source of level expressions. A rule that could
+write `level-max a b` would be a second source. It can be added the day something
+needs it.
+
 ### An instruction number is the line you wrote, counted from 1
 
 *Decided 2026-09-15.*
