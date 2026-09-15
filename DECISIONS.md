@@ -1117,6 +1117,23 @@ which may mean reworking how they are treated; it is not scheduled.
 have the types their values have — so `do { goto h }` reads the rule's `h`, and
 `do { say h }` is refused when `h` holds a term.
 
+### An instruction number is the line you wrote, counted from 1
+
+*Decided 2026-09-15.*
+
+Every message about a rule body names the statement as written, whichever check
+found the mistake. A nested call does not add a line, and a type annotation is a
+line of its own:
+
+```
+rule go :-
+  do k : String
+     k = "x"
+     prim-try k      -- go, instruction 3: wanted Core, got String
+```
+
+A mistake inside a lambda names the line the lambda is on.
+
 ### `yield` goes both ways, because it names one thing
 
 *Decided 2026-09-03.*
