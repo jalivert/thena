@@ -10,7 +10,11 @@ import qualified Thena.Core.TypingTests
 import qualified Thena.Core.UnifyTests
 import qualified Thena.CursorTests
 import qualified Thena.DependentIndexTests
+import qualified Thena.CanonicalTests
 import qualified Thena.DeterminacyTests
+import qualified Thena.NormalTests
+import qualified Thena.PreservationTests
+import qualified Thena.ProgressTests
 import qualified Thena.ProductTests
 import qualified Thena.DispatchTests
 import qualified Thena.ElaborateTests
@@ -23,9 +27,14 @@ import qualified Thena.EliminatorTests
 import qualified Thena.EngineTests
 import qualified Thena.GlobalTests
 import qualified Thena.KernelTests
+import qualified Thena.LexerTests
 import qualified Thena.LoadTests
+import qualified Thena.ManualTests
 import qualified Thena.NoConfusionTests
+import qualified Thena.InstralInferTests
+import qualified Thena.InstralTypeTests
 import qualified Thena.RulesTests
+import qualified Thena.PatternTests
 import qualified Thena.RuleSyntaxTests
 import qualified Thena.RuleFileTests
 import qualified Thena.CallTests
@@ -47,7 +56,11 @@ main =
       , Thena.Core.UnifyTests.tests
       , Thena.CursorTests.tests
       , Thena.DependentIndexTests.tests
+      , Thena.CanonicalTests.tests
       , Thena.DeterminacyTests.tests
+      , Thena.NormalTests.tests
+      , Thena.PreservationTests.tests
+      , Thena.ProgressTests.tests
       , Thena.ProductTests.tests
       , Thena.DispatchTests.tests
       , Thena.ElaborateTests.tests
@@ -60,9 +73,14 @@ main =
       , Thena.EngineTests.tests
       , Thena.GlobalTests.tests
       , Thena.KernelTests.tests
+      , Thena.LexerTests.tests
       , Thena.LoadTests.tests
+  , Thena.ManualTests.tests
       , Thena.NoConfusionTests.tests
+      , Thena.InstralInferTests.tests
+      , Thena.InstralTypeTests.tests
       , Thena.RulesTests.tests
+      , Thena.PatternTests.tests
       , Thena.RuleSyntaxTests.tests
       , Thena.RuleFileTests.tests
       , Thena.CallTests.tests

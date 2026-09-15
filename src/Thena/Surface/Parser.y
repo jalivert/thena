@@ -35,7 +35,7 @@ import Thena.Surface.Concrete
   , SurfaceArg (..)
   , SurfaceBinder (..)
   )
-import Thena.Syntax.Concrete (RawInstr (..), RawOp (..), RawOperand (..))
+import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRhs (..), RawBody (..), RawPattern (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
@@ -67,7 +67,15 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   do      { Located _ TDo }
   num     { Located _ (TNumber $$) }
   str     { Located _ (TString $$) }
+  chr     { Located _ (TChar $$) }
+  '...'   { Located _ TSpread }
+  '['     { Located _ TLBracket }
+  ']'     { Located _ TRBracket }
+  ','     { Located _ TComma }
   univ    { Located _ (TUniverse $$) }
+  tagopen  { Located _ (TTagOpen $$) }
+  raw      { Located _ (TRaw $$) }
+  tagclose { Located _ TTagClose }
   Type    { Located _ TUniverseOpen }
   ident   { Located _ (TIdent $$) }
 
@@ -114,9 +122,70 @@ Block :: { [RawInstr] }
   : Instr                                  { [$1] }
   | Block ';' Instr                        { $3 : $1 }
 
+-- **A binding's left is a pattern** (MS5 phase 84) — @Thena.Syntax.Parser@'s
+-- @Instr@, one grammar over, and §7b's registered duplication for the fourth
+-- time. There is no annotation case here, so an @ident@ parts on @=@ alone.
 Instr :: { RawInstr }
-  : ident '=' InstrOp                     { RawBind $1 $3 }
+  : ident '=' InstrRhs                     { RawBind (RawPWord $1) $3 }
+  | InstrCompoundPat '=' InstrRhs          { RawBind $1 $3 }
   | InstrOp                                { RawDo $1 }
+
+-- **The same two cases the rule-file grammar has** (MS5 phase 68a) — kept level
+-- with @Thena.Syntax.Parser@\'s @Rhs@ by hand, which is §7b's registered
+-- duplication: a @do@ block is embedded in a surface term, so Happy cannot share
+-- the non-terminal.
+InstrRhs :: { RawRhs }
+  : InstrOp                                { RhsOp $1 }
+  | InstrValueOperand                      { RhsValue $1 }
+  | InstrLambda                            { RhsValue $1 }
+
+-- **A lambda inside a @do@ block** (MS5 phase 73) — @Thena.Syntax.Parser@\'s
+-- @Lambda@, one grammar over. It was missing until here, which is §7b's
+-- registered duplication doing exactly what it was registered to do: phase 68b
+-- added lambdas to the rule-file grammar and not to this one, so
+-- @do { f = \\ z -> … }@ did not parse.
+InstrLambda :: { RawOperand }
+  : 'λ' InstrLambdaParams '->' InstrFunBody { RawLambda (reverse $2) $4 }
+
+-- **Level with @Thena.Syntax.Parser@\'s @FunBody@** (MS5 phase 75b) — §7b's
+-- registered duplication again, and added here in the same phase this time
+-- rather than two phases later.
+InstrFunBody :: { RawBody }
+  : InstrRhs                               { BodyRhs $1 }
+  | do '{' Block '}'                       { BodyBlock (reverse $3) }
+
+-- **Level with @Thena.Syntax.Parser@\'s @LambdaParams@ and @PatAtom@** (MS5
+-- phases 82 and 94) — §7b's registered duplication. A lambda written inside a
+-- @do@ block in a surface term takes the same patterns one written in a rule
+-- file does. **A lambda's parameters are never empty** (MS5 phase 94), level with
+-- @Thena.Syntax.Parser@\'s @LambdaParams@. A lambda was this grammar's only
+-- user of a possibly-empty parameter list, so that production went with it.
+InstrLambdaParams :: { [RawPattern] }
+  : InstrPatAtom                           { [$1] }
+  | InstrLambdaParams InstrPatAtom         { $2 : $1 }
+
+InstrPatAtom :: { RawPattern }
+  : ident                                  { RawPWord $1 }
+  | InstrCompoundPat                       { $1 }
+
+InstrCompoundPat :: { RawPattern }
+  : num                                    { RawPInt $1 }
+  | str                                    { RawPText $1 }
+  | chr                                    { RawPChar $1 }
+  | '[' ']'                                { RawPList [] Nothing }
+  | '[' InstrPatItems ']'                  { RawPList (reverse $2) Nothing }
+  | '[' InstrPatItems ',' '...' InstrPatAtom ']' { RawPList (reverse $2) (Just $5) }
+  | '[' '...' InstrPatAtom ']'             { RawPList [] (Just $3) }
+  | '(' ident InstrPatAtoms ')'            { RawPApp $2 (reverse $3) }
+  | '(' InstrPatAtom ',' InstrPatAtom ')'  { RawPPair $2 $4 }
+
+InstrPatAtoms :: { [RawPattern] }
+  :                                        { [] }
+  | InstrPatAtoms InstrPatAtom             { $2 : $1 }
+
+InstrPatItems :: { [RawPattern] }
+  : InstrPatAtom                           { [$1] }
+  | InstrPatItems ',' InstrPatAtom         { $3 : $1 }
 
 InstrOp :: { RawOp }
   : ident InstrOperands                    { RawOp $1 (reverse $2) }
@@ -125,10 +194,41 @@ InstrOperands :: { [RawOperand] }
   :                                        { [] }
   | InstrOperands InstrOperand             { $2 : $1 }
 
+-- | **The same operands a rule body writes**, and they have to be written out
+-- again here because Happy cannot share a non-terminal between two grammars
+-- (MS5 phase 65; @discussion\/the-five-languages.md@ §7b records the
+-- duplication).
+--
+-- They were not the same until this phase: a @do@ block could write a name, a
+-- number or a string and nothing else, so the character literal of phase 64, the
+-- nested call of phase 63 and the literals below were all unwritable in one of
+-- @instral@'s three places.
 InstrOperand :: { RawOperand }
   : ident                                  { RawRef $1 }
+  | InstrValueOperand                      { $1 }
+
+-- Every operand but a bare name — @Thena.Syntax.Parser@\'s @ValueOperand@, one
+-- grammar over.
+InstrValueOperand :: { RawOperand }
+  : '(' InstrLambda ')'                    { $2 }
   | num                                    { RawPos $1 }
   | str                                    { RawText $1 }
+  | chr                                    { RawChar $1 }
+  | '[' ']'                                { RawList [] }
+  | '[' InstrElements ']'                  { RawList (reverse $2) }
+  | '(' InstrOperand ',' InstrOperand ')'  { RawPairOf $2 $4 }
+  | '(' ident InstrOperands ')'            { RawNested $2 (reverse $3) }
+  -- **A tagged region** (MS5 phase 69) — @Thena.Syntax.Parser@\'s two
+  -- productions, one grammar over. They were missing until 2026-09-12, so
+  -- @do { f surface\`x\` }@ did not parse while the same body in a rule file
+  -- did: §7b's registered duplication drifting for the second time, and the
+  -- second time it was found by enumerating the forms rather than by reading.
+  | tagopen raw tagclose                   { RawRegion $1 $2 }
+  | tagopen tagclose                       { RawRegion $1 "" }
+
+InstrElements :: { [RawOperand] }
+  : InstrOperand                           { [$1] }
+  | InstrElements ',' InstrOperand         { $3 : $1 }
 
 Decls :: { [SurfaceDecl] }
   : Decl                                   { [$1] }

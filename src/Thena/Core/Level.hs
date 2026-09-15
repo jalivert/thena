@@ -721,7 +721,7 @@ equated obs =
 --
 -- **A meta whose bounds have crossed is solved to its lower bound anyway**, so
 -- that the next round's 'levelLeq' reports a 'Refuted' obligation the user can
--- read rather than an 'Undetermined' one that says nothing.
+-- read rather than leaving one that says nothing.
 forced :: [Obligation] -> [(LevelVar, Level)]
 forced obs =
   [ (v, levelOfNat lo)

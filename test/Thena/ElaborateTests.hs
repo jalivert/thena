@@ -19,6 +19,11 @@ module Thena.ElaborateTests (tests) where
 
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.QuickCheck
+  (Gen, counterexample, forAll, oneof, property, testProperty, withNumTests)
+
+import Thena.Driver (Loaded (..), loadSource)
+import Thena.Standard (withRules)
 
 import Thena.Core.Level (Level (..))
 import qualified Thena.Core.Term
@@ -37,13 +42,13 @@ import Thena.Engine
   )
 import Thena.Errors (FailReason (..), MoveError (..), ResolveError (..), SyntaxError (..))
 import Thena.Global.Env (emptyGlobals)
-import Thena.Ops
+import Thena.Instral.Ops
   ( Instr (..)
   , Operand (..)
   , Rule (..)
   , Value (..)
   )
-import qualified Thena.Ops as Ops
+import qualified Thena.Instral.Ops as Ops
 import Thena.Rules
   ( RuleIter
   , matches
@@ -64,7 +69,120 @@ tests =
     , elimTests
     , unsupportedTests
     , baseTests
+    , endToEnd
     ]
+
+-- --------------------------------------------------------------------------
+-- The whole stack, over generated programs (2026-09-13)
+-- --------------------------------------------------------------------------
+
+-- | **Write a program, run it, and let the kernel say whether it worked.**
+--
+-- Everything else in this file looks at one clause of @elaborate@ and the
+-- instructions it emits. This looks at nothing: it writes a well-typed surface
+-- program, declares it, and asks only that the load reported no error — which
+-- means layout, the surface parser, all sixteen clauses of @elaborate@ in
+-- @rules\/standard.thena.rules@, the machine, unification, the level solver and
+-- @certify@ all agreed, because a declaration ends in @qed@ and @qed@ certifies.
+--
+-- **The generator is a second reading of the typing rules**, exactly as
+-- @TypingTests@' is, one language up: it builds a term together with the type it
+-- must have and never asks the system anything. So a program it writes that
+-- does not declare is a defect somewhere in that stack, and the counterexample
+-- is the program.
+--
+-- **Binders are plain.** An annotated λ binder is refused by name (@\\ (x : A) ->@
+-- is a development-calculus λ, not a surface one), which is a real fact about
+-- the language and not a limit of the generator.
+endToEnd :: TestTree
+endToEnd =
+  testGroup
+    "a generated program elaborates and certifies"
+    [ testProperty "it declares, which means the kernel accepted it" $
+        withNumTests 300 $ forAll genProgram $ \(ty, tm) ->
+          counterexample (ty ++ "\n  " ++ tm) $
+            case loadedError (declaring ty tm) of
+              Nothing -> property True
+              Just e  -> counterexample (show e) False
+
+      -- **The harness has to have teeth, and this is what says so.** A property
+      -- that only ever sees programs that work cannot tell a working stack from
+      -- a load that quietly reports nothing, so the two cases below are the
+      -- negative control: they must fail, and they fail in different places —
+      -- one in elaboration, one in scope resolution.
+    , testCase "a program of the wrong type does not declare" $
+        case loadedError (declaring "Nat" "(\\ v0 -> v0)") of
+          Just _  -> pure ()
+          Nothing -> assertFailure "an ill-typed program declared"
+    , testCase "and neither does one naming something that is not there" $
+        case loadedError (declaring "Nat" "nonsense") of
+          Just _  -> pure ()
+          Nothing -> assertFailure "a program with an unbound name declared"
+    ]
+  where
+    declaring ty tm =
+      loadSource withRules $ unlines
+        [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "declare it : " ++ ty ++ " ; it = " ++ tm
+        ]
+
+-- | A surface type, and a term of it. Non-dependent, over @Nat@.
+genProgram :: Gen (String, String)
+genProgram = do
+  t <- genSurfaceTy 3
+  e <- genSurfaceOf [] t 4
+  pure (renderSurfaceTy False t, e)
+
+data SurfaceTy = SNat | SArr SurfaceTy SurfaceTy
+
+genSurfaceTy :: Int -> Gen SurfaceTy
+genSurfaceTy n
+  | n <= 0 = pure SNat
+  | otherwise = oneof [pure SNat, SArr <$> genSurfaceTy (n - 1) <*> genSurfaceTy (n - 1)]
+
+renderSurfaceTy :: Bool -> SurfaceTy -> String
+renderSurfaceTy _ SNat = "Nat"
+renderSurfaceTy p (SArr a b) =
+  wrap p (renderSurfaceTy True a ++ " -> " ++ renderSurfaceTy False b)
+  where wrap q x = if q then "(" ++ x ++ ")" else x
+
+sameTy :: SurfaceTy -> SurfaceTy -> Bool
+sameTy SNat SNat = True
+sameTy (SArr a b) (SArr c d) = sameTy a c && sameTy b d
+sameTy _ _ = False
+
+-- | A term of the given type, in a scope of @(name, type)@ pairs.
+genSurfaceOf :: [(String, SurfaceTy)] -> SurfaceTy -> Int -> Gen String
+genSurfaceOf scope ty n = oneof (variables ++ introduction ++ eliminations)
+  where
+    variables = [ pure v | (v, t) <- scope, sameTy t ty ]
+
+    introduction = case ty of
+      SArr a b ->
+        [ do
+            let v = "v" ++ show (length scope)
+            body <- genSurfaceOf ((v, a) : scope) b (n - 1)
+            pure ("(\\ " ++ v ++ " -> " ++ body ++ ")")
+        ]
+      SNat -> pure "zero" : [ (\t -> "(succ " ++ t ++ ")") <$> genSurfaceOf scope SNat (n - 1) | n > 0 ]
+
+    eliminations
+      | n <= 0 = []
+      | otherwise =
+          [ do
+              arg <- genSurfaceOf scope a (n - 1)
+              pure ("(" ++ f ++ " " ++ arg ++ ")")
+          | (f, SArr a b) <- scope
+          , sameTy b ty
+          ]
+            ++ [ do
+                   a    <- genSurfaceTy (n - 1)
+                   val  <- genSurfaceOf scope a (n - 1)
+                   let v = "v" ++ show (length scope)
+                   body <- genSurfaceOf ((v, a) : scope) ty (n - 1)
+                   pure ("(let " ++ v ++ " : " ++ renderSurfaceTy False a
+                           ++ " = " ++ val ++ " in " ++ body ++ ")")
+               ]
 
 -- --------------------------------------------------------------------------
 -- Fixtures
@@ -114,7 +232,7 @@ elaborating = elaboratingAt hole
 elaboratingAt :: Cursor -> Surface -> Either FailReason Machine
 elaboratingAt cur s =
   snd (runOut (machineAt cur
-        [Do (Ops.Call (GlobalName "elaborate") [Lit (VSurface (rootedAt s))])]))
+        [Do (Ops.Call "elaborate" [Lit (VSurface (rootedAt s))])]))
 
 -- | A machine at a cursor, loaded with a program.
 --
@@ -361,16 +479,16 @@ hereTests =
       -- could answer this before: @claim@ and @define@ yield the variables of
       -- holes they make, and @goal@ gives a type.
       testCase "it yields the focused component's variable" $
-        case snd (runOut (machineAt hole [Bind "h" Ops.Here])) of
+        case snd (runOut (machineAt hole [Bind (Ops.PVar "h") Nothing Ops.Here])) of
           Left r  -> assertFailure ("did not run: " ++ show r)
           Right m -> lookup "h" (env (exec m))
-                       @?= Just (VTerm (Trailing (Free goalVar)))
+                       @?= Just (VTerm (Free goalVar))
 
       -- **It survives @attack@**, which is the whole reason the λ case can use
       -- it: @attack@ turns @? x : S@ into a guess binding the /same/ variable,
       -- so a @goto@ afterwards finds what @here@ named.
     , testCase "and goto finds it again after attack" $
-        case snd (runOut (machineAt hole [ Bind "h" Ops.Here
+        case snd (runOut (machineAt hole [ Bind (Ops.PVar "h") Nothing Ops.Here
                                          , Do Ops.Attack
                                          , Do Ops.Into
                                          , Do (Ops.Goto (Ref "h"))
@@ -381,7 +499,7 @@ hereTests =
       -- Off the spine there is no component and no variable, which is the same
       -- refusal every component op gives.
     , testCase "and it is refused in the core fragment" $
-        case snd (runOut (machineAt hole [Do Ops.CrossType, Bind "h" Ops.Here])) of
+        case snd (runOut (machineAt hole [Do Ops.CrossType, Bind (Ops.PVar "h") Nothing Ops.Here])) of
           Left (CannotMove NotOnTheSpine) -> pure ()
           other -> assertFailure ("expected a refusal: " ++ show other)
     ]
@@ -422,17 +540,17 @@ constructionTests =
 
       -- Pure: the development is untouched, which is why they need no focus.
     , testCase "and neither touches the development" $
-        case snd (runOut (machineAt hole [Bind "r" (Ops.Arrow (litTerm type0) (litTerm type0))])) of
+        case snd (runOut (machineAt hole [Bind (Ops.PVar "r") Nothing (Ops.Arrow (litTerm type0) (litTerm type0))])) of
           Left r  -> assertFailure ("did not run: " ++ show r)
           Right m -> focusedVar m @?= Just goalVar
     ]
   where
-    litTerm t = Lit (VTerm (Trailing t))
+    litTerm t = Lit (VTerm t)
     hyp       = Free hypVar
 
-    built o = case snd (runOut (machineAt hole [Bind "r" o])) of
+    built o = case snd (runOut (machineAt hole [Bind (Ops.PVar "r") Nothing o])) of
       Right m -> case lookup "r" (env (exec m)) of
-        Just (VTerm (Trailing t)) -> Just t
+        Just (VTerm t) -> Just t
         _                         -> Nothing
       Left _  -> Nothing
 
@@ -454,6 +572,7 @@ baseTests =
         [ n | Rule (GlobalName n) _ _ _ <- drain (matches expectedBase emptyGlobals hole) ]
           @?= [ "attack", "try-core", "abandon", "eliminate-core"
               , "prove", "fill", "unify-refine-core", "apply-core"
+              , "claim", "assume", "quantify"
               ]
               ++ replicate 16 "elaborate" ++ replicate 2 "enter-binders"
               ++ replicate 2 "spine-arguments"

@@ -1,7 +1,13 @@
-module Thena.DevelopmentTests (tests) where
+-- **'genDevelopment' is exported** (2026-09-12) so that @CursorTests@ can walk
+-- the same corpus. A second copy of a generator drifts, exactly as a second copy
+-- of a word table does.
+module Thena.DevelopmentTests (tests, genDevelopment) where
 
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, testCase, (@?=))
+import Test.Tasty.QuickCheck
+  ( Gen, counterexample, elements, forAll, frequency, oneof, property, testProperty
+  , withNumTests )
 
 import Thena.Core.Level (Level (..), levelOfNat)
 import Thena.Core.Context (Entry (..))
@@ -29,7 +35,141 @@ tests =
     , testGroup "longest prefix" prefixTests
     , testGroup "scope" scopeTests
     , testGroup "round trip" roundTripTests
+    , generatedRoundTrip
     ]
+
+-- --------------------------------------------------------------------------
+-- The printer and the reader, over generated developments (2026-09-12)
+-- --------------------------------------------------------------------------
+
+-- | **Everything the printer writes must read back as what it printed.**
+--
+-- 'roundTripTests' above says this on six hand-built developments. What a
+-- fixture corpus cannot say is that it holds for every /combination/ of link,
+-- and the printer and the reader are different code in different modules:
+-- 'renderPartial' decides where a newline, a parenthesis and a freshened name
+-- go, and @Syntax.Parser@ plus @Syntax.Resolve@ decide what those mean. The
+-- surface printer had exactly this shape of defect and a fixed corpus did not
+-- see it (@ms5\/CLOSEOUT.md@ 26).
+--
+-- **Generated as SOURCE and not as a 'Partial'**, which is what makes it cheap:
+-- a generated development is well scoped by construction — a name is written
+-- only where it is bound — and needs no var supply threaded through the
+-- generator. It also checks something the value-level version could not, that
+-- everything the /grammar/ admits is something the printer can print.
+--
+-- The property is the printer's own: @render . parse@ is idempotent. It cannot
+-- be @parse . render == id@ because 'Partial'\'s 'Eq' compares 'Var's literally
+-- and re-reading mints fresh ones — 'reprint' says so.
+generatedRoundTrip :: TestTree
+generatedRoundTrip =
+  testGroup
+    "any development the grammar admits"
+    [ testProperty "parses, and printing it is idempotent" $
+        withNumTests 1000 $ forAll (genDevelopment [] 5) $ \src ->
+          case parseDevelopment emptyGlobals [] 500 src of
+            Left e -> counterexample (src ++ "\n  did not parse: " ++ show e) False
+            -- **Rendered with the counter the parse handed back**, not with
+            -- the one it started from: the vars in @p@ were minted from 500
+            -- upward, so rendering at 500 lets the printer mint a display name
+            -- that collides with one already there — §13e, and 'reprint' is
+            -- safe from it only because its fixtures mint from zero.
+            Right (p, n) ->
+              let once = renderPartial n [] p
+                  twice = case parseDevelopment emptyGlobals [] n once of
+                    Left e            -> "PARSE FAILED: " ++ show e
+                    Right (p', n')    -> renderPartial n' [] p'
+               in counterexample
+                    (src ++ "\n  printed:\n" ++ once ++ "\n  reprinted:\n" ++ twice)
+                    (property (twice == once))
+    ]
+
+-- | A written development, well scoped by construction.
+--
+-- @scope@ is the names a term here may mention. A guess's body is generated in
+-- the scope /outside/ the hole, because a guess body does not see the hole's
+-- name — which is what @guessShadowing@ above is about.
+genDevelopment :: [String] -> Int -> Gen String
+genDevelopment scope n
+  | n <= 0 = genTerm' scope 2
+  | otherwise =
+      frequency
+        [ (2, genTerm' scope 2)
+        , (3, do
+              x  <- genName
+              ty <- genTerm' scope 1
+              k  <- elements ["λ", "∀"]
+              r  <- genDevelopment (x : scope) (n - 1)
+              pure (k ++ " (" ++ x ++ " : " ++ ty ++ ") ->\n" ++ r))
+        , (2, do
+              x  <- genName
+              v  <- genTerm' scope 1
+              ty <- genTerm' scope 1
+              r  <- genDevelopment (x : scope) (n - 1)
+              pure ("let " ++ x ++ " = " ++ v ++ " : " ++ ty ++ " in\n" ++ r))
+        , (2, do
+              x  <- genName
+              ty <- genTerm' scope 1
+              r  <- genDevelopment (x : scope) (n - 1)
+              pure ("let ? " ++ x ++ " : " ++ ty ++ " in\n" ++ r))
+        , (2, do
+              x  <- genName
+              ty <- genTerm' scope 1
+              g  <- genDevelopment scope (n - 2)
+              r  <- genDevelopment (x : scope) (n - 1)
+              pure ("let ? " ++ x ++ " : " ++ ty ++ " ≐ (\n" ++ g ++ "\n) in\n" ++ r))
+          -- A constraint binds nothing, so the scope does not grow — but Ξ's
+          -- own binders scope over the equation and nowhere else (§3.3).
+        , (1, do
+              y     <- genName
+              yty   <- genTerm' scope 1
+              inner <- elements [True, False]
+              let below = if inner then y : scope else scope
+              a  <- genTerm' below 1
+              b  <- genTerm' below 1
+              ty <- genTerm' below 1
+              r  <- genDevelopment scope (n - 1)
+              let xi = if inner then "(" ++ y ++ " : " ++ yty ++ ") " else ""
+              pure (xi ++ "⊢ " ++ a ++ " ≟ " ++ b ++ " : " ++ ty ++ " ▸\n" ++ r))
+        ]
+
+-- | A written core term over @scope@.
+--
+-- **Every compound form is parenthesised**, so that a generated term can stand
+-- as a development's trailing term without a leading @λ@ being read as one more
+-- link — which is a real reading of the grammar and not something to generate
+-- around by accident.
+genTerm' :: [String] -> Int -> Gen String
+genTerm' scope n
+  | n <= 0 = atom
+  | otherwise =
+      oneof
+        [ atom
+        , do { a <- half; b <- half; pure ("(" ++ a ++ " -> " ++ b ++ ")") }
+        , do { f <- half; a <- half; pure ("(" ++ f ++ " " ++ a ++ ")") }
+        , do
+            x <- genName
+            t <- half
+            b <- genTerm' (x : scope) (n - 1)
+            k <- elements ["λ", "∀"]
+            pure ("(" ++ k ++ " (" ++ x ++ " : " ++ t ++ ") -> " ++ b ++ ")")
+        , do
+            x <- genName
+            v <- half
+            t <- half
+            b <- genTerm' (x : scope) (n - 1)
+            pure ("(let " ++ x ++ " = " ++ v ++ " : " ++ t ++ " in " ++ b ++ ")")
+        ]
+  where
+    half = genTerm' scope (n - 1)
+    atom
+      | null scope = universe
+      | otherwise  = oneof [universe, elements scope]
+    universe = elements ["Type₀", "Type₁"]
+
+-- | Four names, so that shadowing happens often rather than never.
+genName :: Gen String
+genName = elements ["x", "y", "A", "h"]
 
 -- --------------------------------------------------------------------------
 -- forget — §3.2's table, as four cases

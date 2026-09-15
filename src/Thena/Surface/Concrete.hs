@@ -26,18 +26,18 @@ module Thena.Surface.Concrete
   , SurfaceArg (..)
   , SurfaceBinder (..)
   , Plicity (..)
+  , blocksIn
   ) where
 
-import Data.List.NonEmpty (NonEmpty)
+import Data.List.NonEmpty (NonEmpty, toList)
 
--- | **The instruction language is shared, and it is term-free**, which is what
--- makes sharing it possible: a 'Thena.Syntax.Concrete.RawOperand' is an
--- identifier, a number or a string, and mentions neither 'Surface' nor
--- 'Thena.Syntax.Concrete.Raw'. So this import crosses no language boundary —
--- it is the machine's own syntax, which belongs to neither term language.
-import Thena.Syntax.Concrete (RawInstr)
-
--- | Whether the elaborator supplies an argument or the user writes it.
+-- | **`instral` is shared, and it is term-free**, which is what makes sharing it
+-- possible: a 'Thena.Instral.Concrete.RawOperand' is an identifier, a number or
+-- a string, and mentions neither 'Surface' nor 'Thena.Syntax.Concrete.Raw'. So
+-- this import crosses no language boundary — it is the machinery's own syntax,
+-- and a @do@ block in a surface program is `instral` written in place
+-- (@discussion\/the-five-languages.md@ §0b, table F).
+import Thena.Instral.Concrete (RawInstr (..))
 --
 -- **Icity lives here and never in "Thena.Core.Term"** — the user's decision,
 -- 2026-09-01: /"I am convinced that the DC does not need implicits. I think
@@ -117,7 +117,7 @@ data Surface
     -- ^ @do { ‹instruction› ; … }@ (MS4 phase 45) — **a block of the
     -- instruction language, written down and never computed.** Its elaboration
     -- is to play it, which is why it holds the block as a field rather than
-    -- anything to be evaluated: the same shape 'Thena.Ops.DefineData' has, and
+    -- anything to be evaluated: the same shape 'Thena.Instral.Ops.DefineData' has, and
     -- for the same reason.
     --
     -- **It holds @RawInstr@, not @Instr@**, because parsing precedes
@@ -237,3 +237,37 @@ paired ds = case ds of
   SurfaceEquation  x _ : _ -> Left (EquationWithNoSignature x)
   SurfaceDatatype _    : _ -> Left DatatypeInATheoremList
   SurfaceBlock _       : _ -> Left BlockInATheoremList
+
+-- | Every @do@ block written inside a surface term, outermost first.
+--
+-- **The one walk over 'Surface' that is not elaboration** (MS5 phase 79). It
+-- exists so a block can be resolved and type-checked when the term is /read/,
+-- where until then 'Thena.Instral.Ops.Play' resolved it as it ran — so @say 3@ in one
+-- halted the machine mid-proof rather than being refused at load
+-- (@ms5\/CLOSEOUT.md@ 20).
+--
+-- **A nested block is found too**: a block\'s instructions can hold a surface
+-- literal of their own, and that literal can hold a block. The recursion goes
+-- through 'RawInstr' without this module knowing what an operand is, because
+-- it cannot — @instral@ is term-free and a surface literal reaches an operand
+-- only after resolution. So nesting is picked up on the next pass instead, by
+-- the caller, which walks resolved instructions.
+blocksIn :: Surface -> [[RawInstr]]
+blocksIn t = case t of
+  SurfaceDo is        -> [is]
+  SurfaceApp f as     -> blocksIn f ++ concatMap (\(SurfaceArg _ a) -> blocksIn a) (toList as)
+  SurfaceLam bs b     -> concatMap binder (toList bs) ++ blocksIn b
+  SurfacePi bs b      -> concatMap binder (toList bs) ++ blocksIn b
+  SurfaceArrow a b    -> blocksIn a ++ blocksIn b
+  SurfaceLet _ mt v b -> maybe [] blocksIn mt ++ blocksIn v ++ blocksIn b
+  SurfaceAnnot e ty   -> blocksIn e ++ blocksIn ty
+  SurfaceElim _ ls m is ms tg ->
+    concatMap blocksIn ls ++ blocksIn m ++ concatMap blocksIn is
+      ++ concatMap blocksIn ms ++ blocksIn tg
+  SurfaceName _       -> []
+  SurfaceUniverse _   -> []
+  SurfaceUniverseOpen -> []
+  SurfacePlaceholder  -> []
+  SurfaceHole _       -> []
+  where
+    binder (SurfaceBinder _ _ mt) = maybe [] blocksIn mt

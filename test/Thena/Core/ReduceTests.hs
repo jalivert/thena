@@ -6,8 +6,14 @@
 -- arity check shows up here rather than only in a hand-built 'Eliminate'.
 module Thena.Core.ReduceTests (tests) where
 
+import Data.List (nub)
+
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.QuickCheck (counterexample, forAll, property, testProperty, withNumTests)
+
+import Thena.Core.Term (freeVars)
+import Thena.Core.TermTests (genTerm, poolVars)
 
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Reduce (whnf)
@@ -29,6 +35,50 @@ tests =
     , testGroup "iota refuses an unsaturated target" iotaSaturationTests
     , testGroup "whnf leaves neutral terms alone" neutralTests
     , testGroup "elim's arity is checked at resolve time" elimShapeTests
+    , laws
+    ]
+
+-- --------------------------------------------------------------------------
+-- What whnf must always do (2026-09-13)
+-- --------------------------------------------------------------------------
+
+-- | **Two things reduction must not do, over generated terms.**
+--
+-- Every group above is a fixture per rule, which is how §5.1's four rules were
+-- built and is right for them. Neither of these is about a rule: they are about
+-- the walk that applies them, and both are the kind of thing that goes wrong
+-- once and silently.
+--
+-- **Idempotence** is what /weak head/ normal form means: once the head cannot
+-- reduce, reducing again finds nothing. A rule that leaves a redex at the head
+-- — an ι that rebuilds an elimination it could have stepped, a δ that unfolds
+-- to another definition without re-entering — breaks it, and the fixtures cannot
+-- see it because each of them reduces once.
+--
+-- **No new free variable** is the capture check. Reduction substitutes, and a
+-- substitution that opens a 'Thena.Core.Term.Scope' with the wrong variable
+-- invents one; §3.5's whole point is that this cannot happen, and nothing said
+-- so out loud.
+--
+-- The globals are @natVec@'s, so δ and ι have something to do; the generator is
+-- @TermTests@' own, imported rather than copied.
+laws :: TestTree
+laws =
+  testGroup
+    "whnf's own laws"
+    [ testProperty "reducing twice is reducing once" $
+        withNumTests 500 $ forAll genTerm $ \t ->
+          let once = whnf natVec [] t
+           in counterexample (show t ++ "\n  ⟶ " ++ show once)
+                (property (whnf natVec [] once == once))
+
+    , testProperty "reduction invents no free variable" $
+        withNumTests 500 $ forAll genTerm $ \t ->
+          let before = nub (freeVars t) ++ poolVars
+              after  = nub (freeVars (whnf natVec [] t))
+              new    = [ v | v <- after, v `notElem` before ]
+           in counterexample (show t ++ "\n  new: " ++ show new)
+                (property (null new))
     ]
 
 -- --------------------------------------------------------------------------

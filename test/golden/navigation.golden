@@ -1,7 +1,5 @@
-thena spine> assume A : Type₀
-assumed A
-thena spine> assume B : A -> Type₀
-assumed B
+thena spine> assume "A" ⌜ Type₀ ⌝
+thena spine> assume "B" ⌜ A -> Type₀ ⌝
 thena spine> :goal forall (x : A) -> B x
   λ (A : Type₀) ->
   λ (B : A -> Type₀) ->

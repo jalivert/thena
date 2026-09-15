@@ -1,4 +1,9 @@
-module Thena.Core.TermTests (tests) where
+-- **'genTerm' and 'poolVars' are exported**, and that is deliberate (2026-09-12).
+-- @Thena.Core.ConvertTests@ states the laws relating 'Thena.Core.Convert.convert'
+-- and 'Thena.Core.Convert.subsumes' over generated terms, and a second copy of a
+-- generator is the same mistake a second copy of a word table is: it drifts, and
+-- the copy is the one that stops covering the new case.
+module Thena.Core.TermTests (tests, genTerm, poolVars) where
 
 import Data.List (nub, sort)
 

@@ -1,0 +1,92 @@
+-- A value is a normal form — the companion to progress, proved in Thena's
+-- surface language.
+--
+-- LOAD AFTER canonical.thena AND progress.thena. Thena has no module imports;
+-- globals declared by one module are in scope for the next.
+--
+-- Progress says a well-typed term is a value OR it takes a step. Nothing said
+-- those were exclusive, and this does: a value takes no step at all, well typed
+-- or not. Together they say the disjunction progress returns is a real case
+-- split rather than a possibly-overlapping pair.
+--
+-- Every proof here is an inversion on the STEP relation under a motive that
+-- states an equation about its source term — the same shape every other proof
+-- in these files has. The one case that is not immediate is `succ`, where the
+-- step must be a congruence and the induction hypothesis is what kills it.
+
+module Normal where
+
+trueNoStep : forall (u : Term) (s : Step true u) -> Empty
+trueNoStep = \ u s ->
+  elim Step () (\ x y r -> Eq Term x true -> Empty)
+    ((\ c2 c3 q -> absurd (Empty) (noConfusionTerm (ifthen true c2 c3) true q))
+     (\ c2 c3 q -> absurd (Empty) (noConfusionTerm (ifthen false c2 c3) true q))
+     (\ a1 a2 a3 a4 sr ih q -> absurd (Empty) (noConfusionTerm (ifthen a1 a3 a4) true q))
+     (\ a1 a2 sr ih q -> absurd (Empty) (noConfusionTerm (succ a1) true q))
+     (\ q -> absurd (Empty) (noConfusionTerm (pred zero) true q))
+     (\ vv nvv q -> absurd (Empty) (noConfusionTerm (pred (succ vv)) true q))
+     (\ a1 a2 sr ih q -> absurd (Empty) (noConfusionTerm (pred a1) true q))
+     (\ q -> absurd (Empty) (noConfusionTerm (iszero zero) true q))
+     (\ vv nvv q -> absurd (Empty) (noConfusionTerm (iszero (succ vv)) true q))
+     (\ a1 a2 sr ih q -> absurd (Empty) (noConfusionTerm (iszero a1) true q)))
+    (true u) s (refl Term true)
+
+falseNoStep : forall (u : Term) (s : Step false u) -> Empty
+falseNoStep = \ u s ->
+  elim Step () (\ x y r -> Eq Term x false -> Empty)
+    ((\ c2 c3 q -> absurd (Empty) (noConfusionTerm (ifthen true c2 c3) false q))
+     (\ c2 c3 q -> absurd (Empty) (noConfusionTerm (ifthen false c2 c3) false q))
+     (\ a1 a2 a3 a4 sr ih q -> absurd (Empty) (noConfusionTerm (ifthen a1 a3 a4) false q))
+     (\ a1 a2 sr ih q -> absurd (Empty) (noConfusionTerm (succ a1) false q))
+     (\ q -> absurd (Empty) (noConfusionTerm (pred zero) false q))
+     (\ vv nvv q -> absurd (Empty) (noConfusionTerm (pred (succ vv)) false q))
+     (\ a1 a2 sr ih q -> absurd (Empty) (noConfusionTerm (pred a1) false q))
+     (\ q -> absurd (Empty) (noConfusionTerm (iszero zero) false q))
+     (\ vv nvv q -> absurd (Empty) (noConfusionTerm (iszero (succ vv)) false q))
+     (\ a1 a2 sr ih q -> absurd (Empty) (noConfusionTerm (iszero a1) false q)))
+    (false u) s (refl Term false)
+
+zeroNoStep : forall (u : Term) (s : Step zero u) -> Empty
+zeroNoStep = \ u s ->
+  elim Step () (\ x y r -> Eq Term x zero -> Empty)
+    ((\ c2 c3 q -> absurd (Empty) (noConfusionTerm (ifthen true c2 c3) zero q))
+     (\ c2 c3 q -> absurd (Empty) (noConfusionTerm (ifthen false c2 c3) zero q))
+     (\ a1 a2 a3 a4 sr ih q -> absurd (Empty) (noConfusionTerm (ifthen a1 a3 a4) zero q))
+     (\ a1 a2 sr ih q -> absurd (Empty) (noConfusionTerm (succ a1) zero q))
+     (\ q -> absurd (Empty) (noConfusionTerm (pred zero) zero q))
+     (\ vv nvv q -> absurd (Empty) (noConfusionTerm (pred (succ vv)) zero q))
+     (\ a1 a2 sr ih q -> absurd (Empty) (noConfusionTerm (pred a1) zero q))
+     (\ q -> absurd (Empty) (noConfusionTerm (iszero zero) zero q))
+     (\ vv nvv q -> absurd (Empty) (noConfusionTerm (iszero (succ vv)) zero q))
+     (\ a1 a2 sr ih q -> absurd (Empty) (noConfusionTerm (iszero a1) zero q)))
+    (zero u) s (refl Term zero)
+
+subst : forall (A : Type₀) (P : A -> Type₀) (a : A) (b : A) (e : Eq A a b) (p : P a) -> P b
+subst = \ A P a b e p -> elim Eq (A) (\ x y q -> P x -> P y) ((\ c -> \ z -> z)) (a b) e p
+
+nvNoStep : forall (t : Term) (n : NV t) (u : Term) (s : Step t u) -> Empty
+nvNoStep = \ t n ->
+  elim NV () (\ x r -> forall (u : Term) (s : Step x u) -> Empty)
+    ((\ u s -> zeroNoStep u s)
+     (\ c1 nn ih u s ->
+        elim Step () (\ x y r -> Eq Term x (succ c1) -> Empty)
+          ((\ b2 b3 q -> absurd (Empty) (noConfusionTerm (ifthen true b2 b3) (succ c1) q))
+           (\ b2 b3 q -> absurd (Empty) (noConfusionTerm (ifthen false b2 b3) (succ c1) q))
+           (\ a1 a2 a3 a4 sr ii q -> absurd (Empty) (noConfusionTerm (ifthen a1 a3 a4) (succ c1) q))
+           (\ a1 a2 sr ii q -> ih a2 (subst Term (\ z -> Step z a2) a1 c1 (noConfusionTerm (succ a1) (succ c1) q) sr))
+           (\ q -> absurd (Empty) (noConfusionTerm (pred zero) (succ c1) q))
+           (\ vv nvv q -> absurd (Empty) (noConfusionTerm (pred (succ vv)) (succ c1) q))
+           (\ a1 a2 sr ii q -> absurd (Empty) (noConfusionTerm (pred a1) (succ c1) q))
+           (\ q -> absurd (Empty) (noConfusionTerm (iszero zero) (succ c1) q))
+           (\ vv nvv q -> absurd (Empty) (noConfusionTerm (iszero (succ vv)) (succ c1) q))
+           (\ a1 a2 sr ii q -> absurd (Empty) (noConfusionTerm (iszero a1) (succ c1) q)))
+          ((succ c1) u) s (refl Term (succ c1))))
+    (t) n
+
+valueNoStep : forall (v : Term) (p : Value v) (u : Term) (s : Step v u) -> Empty
+valueNoStep = \ v p ->
+  elim Value () (\ x r -> forall (u : Term) (s : Step x u) -> Empty)
+    ((\ u s -> trueNoStep u s)
+     (\ u s -> falseNoStep u s)
+     (\ c1 nn u s -> nvNoStep c1 nn u s))
+    (v) p

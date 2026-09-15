@@ -23,7 +23,7 @@ import Thena.Driver (parseCore, parseDeclaration)
 import Thena.Global.Declare (declare)
 import Thena.Global.Env (GlobalEnv, emptyGlobals)
 import Thena.Repl (renderCore)
-import Thena.Syntax.Concrete (Raw (..), RawBinder (..))
+import Thena.Syntax.Concrete (Raw (..), RawBinder (..), RawIdent (..))
 import Thena.Syntax.Resolve (resolve)
 
 -- | The environment the generator resolves against.
@@ -92,10 +92,10 @@ genRaw = sized . go
             v <- half
             ty <- half
             b <- resize (n `div` 2) (genRaw (x : scope))
-            pure (RawLet x v ty b)
+            pure (RawLet (RawWord x) v ty b)
         , -- Nat has no parameters, no indices, and two constructors, so the
           -- shape is fixed: () motive (mz ms) ().
-          RawElim "Nat" [] [] <$> half <*> ((\a b -> [a, b]) <$> half <*> half)
+          RawElim (RawWord "Nat") [] [] <$> half <*> ((\a b -> [a, b]) <$> half <*> half)
                               <*> pure [] <*> half
         ]
       where
@@ -104,7 +104,7 @@ genRaw = sized . go
           x <- elements namePool
           ty <- half
           b <- resize (n `div` 2) (genRaw (x : scope))
-          pure (con [RawBinder x ty] b)
+          pure (con [RawBinder (RawWord x) ty] b)
 
 -- | 'genRaw' only ever names something in scope, so resolution cannot fail; if
 -- it ever does, the generator is wrong and the test should say so loudly.

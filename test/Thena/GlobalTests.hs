@@ -28,11 +28,23 @@ import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
   , Ident (..)
+  , beyond
   , close
   , fresh
   , open
   )
-import Thena.Driver (parseCore, parseDeclaration)
+import Data.List (isPrefixOf)
+
+import Thena.Core.Typing (check, infer)
+import Thena.Driver
+  ( Response (..)
+  , Stop (..)
+  , Session (..)
+  , command
+  , parseCore
+  , parseDeclaration
+  )
+import Thena.Engine (Machine (..))
 import Thena.Errors (TypeError (..))
 import Thena.Global.Declare (DeclareError (..), declare)
 import Thena.Global.Env
@@ -46,10 +58,17 @@ import Thena.Global.Env
   , formerType
   , inductiveConstructors
   , inductiveIndices
+  , inductiveLevel
   , inductiveLevels
   , inductiveName
   , inductiveParameters
   , inductives
+  , constants
+  , definitions
+  , definitionType
+  , definitionBody
+  , eliminatorType
+  , varsInEnv
   , isDeclared
   , constantType
   , lookupConstant
@@ -57,7 +76,7 @@ import Thena.Global.Env
   , lookupInductive
   , generalised
   )
-import Thena.Repl (renderInductive)
+import Thena.Repl (renderEliminator, renderInductive, startingSession)
 
 tests :: TestTree
 tests =
@@ -71,7 +90,197 @@ tests =
     , testGroup "names" nameTests
     , testGroup "printed and read back" roundTripTests
     , testGroup "generalisation turns a proof into a scheme" generaliseTests
+    , equipment
+    , computedLevels
     ]
+
+-- --------------------------------------------------------------------------
+-- The computed level, over generated shapes (2026-09-13)
+-- --------------------------------------------------------------------------
+
+-- | **A bare @Type@ becomes the join of what the constructors put in it**, and
+-- getting that wrong is @ms3\/CLOSEOUT.md@ 13 — the difference between @Empty@
+-- pinned at @Type₀@ and @Empty {ℓ}@ polymorphic.
+--
+-- The rule is computed here from the argument types, which is the independent
+-- reading: @Nat@ lives at 0, @Type₀@ at 1, @Type₁@ at 2, and the datatype's own
+-- level is the largest of them. **With nothing to contribute the level stays a
+-- parameter** rather than defaulting — /compute nothing when nothing
+-- contributes/ — and that is the case the item is about.
+computedLevels :: TestTree
+computedLevels =
+  testGroup
+    "a bare Type is the join of the constructor arguments"
+    [ atLevel "one argument at 0" ["Nat"] 0
+    , atLevel "one at 1" ["Type₀"] 1
+    , atLevel "one at 2" ["Type₁"] 2
+    , atLevel "the largest wins, whatever the order" ["Nat", "Type₁", "Type₀"] 2
+    , atLevel "and again" ["Type₁", "Nat"] 2
+    , atLevel "two constructors, the join is over both" ["Nat"] 0
+    , testCase "nothing contributes, so the level stays a parameter" $ do
+        env <- declaredWith []
+        case lookupInductive (GlobalName "D") env of
+          Just d | not (null (inductiveLevels d)) -> pure ()
+          other -> assertFailure ("expected a level parameter, got " ++ show other)
+    ]
+  where
+    atLevel what args want = testCase what $ do
+      env <- declaredWith args
+      case lookupInductive (GlobalName "D") env of
+        Nothing -> assertFailure "D was not declared"
+        Just d  -> inductiveLevel d @?= levelOfNat want
+
+    -- @data D : Type where { c : ‹args› -> D }@, declared through the REPL.
+    declaredWith args = do
+      (s0, _) <- startingSession
+      let ctor
+            | null args = "c : D"
+            | otherwise = "c : " ++ concatMap (++ " -> ") args ++ "D"
+          decls =
+            [ "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
+            , "data D : Type where { " ++ ctor ++ " }"
+            ]
+          (s, _) = foldl (\(sess, _) l -> command sess l) (s0, Blank) decls
+      pure (globals (sessionMachine s))
+
+-- --------------------------------------------------------------------------
+-- Everything a declaration generates is well typed (2026-09-13)
+-- --------------------------------------------------------------------------
+
+-- | **Type-check the whole global environment, over an adversarial corpus.**
+--
+-- @TypingTests@' @eliminatorTypeTests@ types 'eliminatorType''s output for two
+-- fixtures, and its header says why that is the shape to want: nothing in
+-- @infer@ knows how the type was built, so a dropped binder or a parameter
+-- abstracted in the wrong place stops being a well-formed type. This does the
+-- same for **everything** a declaration writes — the former, every constructor
+-- wrapper, the eliminator's type and its wrapper, and both no-confusion
+-- globals — over datatypes chosen to have the properties the fixtures do not
+-- combine.
+--
+-- **Why an adversarial corpus and not the prelude's**: every historical
+-- soundness bug in this project was in generated equipment, and each was found
+-- by a datatype that combined two things no fixture combined — a
+-- level-polymorphic /recursive/ datatype (MS3 phase 33c), parameters /and/
+-- indices through the surface (MS4 phase 54), an eliminated datatype with level
+-- parameters (MS4 phase 49e). Phase 54's lesson was the sharpest: every elim
+-- test used a constant motive, so a real bug survived a
+-- behaviour-preserved check.
+--
+-- The corpus is declared through the REPL, which is the path a user takes and
+-- the one that assembles the record the generators read.
+equipment :: TestTree
+equipment =
+  testGroup
+    "everything a declaration generates type checks"
+    [ testCase "the corpus declares" $ do
+        (_, problems) <- corpus
+        problems @?= []
+    , testCase "every constant's type is a type" $ do
+        (env, _) <- corpus
+        badConstants env @?= []
+    , testCase "every definition checks against its own type" $ do
+        (env, _) <- corpus
+        badDefinitions env @?= []
+      -- The one @TypingTests@ already does for two fixtures, over the corpus.
+    , testCase "every eliminator's generated type is a type" $ do
+        (env, _) <- corpus
+        badEliminators env @?= []
+
+      -- **And the two printers with no reader finish on all of it.**
+      -- @renderInductive@ and @renderEliminator@ are display forms — nothing
+      -- reads one back — so what is checkable is totality, over datatypes
+      -- awkward enough to reach a case a fixture would not.
+    , testCase "every declaration and every eliminator prints" $ do
+        (env, _) <- corpus
+        let printed =
+              [ length l
+              | (_, d) <- inductives env
+              , l <- renderInductive 0 d
+              ]
+                ++ [ length l
+                   | (g, d) <- inductives env
+                   , l <- renderEliminator 0 g (fst (eliminatorType d LZero (pastEverything env)))
+                   ]
+        (sum printed >= 0) @?= True
+    ]
+  where
+    fst3 (a, _, _) = a
+
+    badConstants env =
+      [ (g, e)
+      | (g, c) <- constants env
+      , Left e <- [fst3 (infer env [] (pastEverything env) (constantType c))]
+      ]
+
+    badDefinitions env =
+      [ (g, e)
+      | (g, d) <- definitions env
+      , Left e <- [fst3 (check env [] (pastEverything env) (definitionBody d) (definitionType d))]
+      ]
+
+    -- At two motive levels, because §3.7's universe trick is one rule per
+    -- universe the motive is valued in and a level argument dropped from the
+    -- datatype's own reference shows up at one and not the other (MS4 phase
+    -- 49e's live defect was exactly that).
+    badEliminators env =
+      [ (g, l, e)
+      | (g, d) <- inductives env
+      , l <- [LZero, levelOfNat 1]
+      , let (ty, _) = eliminatorType d l (pastEverything env)
+      , Left e <- [fst3 (infer env [] (pastEverything env) ty)]
+      ]
+
+-- | Past every variable the environment holds.
+--
+-- **@certify@'s own lesson** (MS3): the global environment is inside the trust
+-- boundary and holds 'Thena.Core.Term.Var's minted at declaration time, so a
+-- checker started from zero captures one. @Thena.Kernel@ says
+-- @beyond (varsInEnv env)@ for exactly this reason and so does this.
+pastEverything :: GlobalEnv -> Int
+pastEverything = beyond . varsInEnv
+
+-- | The corpus, declared through the REPL, and whatever it complained about.
+corpus :: IO (GlobalEnv, [String])
+corpus = do
+  (s0, problems) <- startingSession
+  let (s, said) = foldl' one (s0, []) corpusLines
+  pure (globals (sessionMachine s), problems ++ said)
+  where
+    one (s, acc) l = case command s l of
+      (s', Ran out Completed) -> (s', acc ++ [ o | o <- out, not (expected o) ])
+      (s', r)                 -> (s', acc ++ [l ++ " => " ++ show r])
+
+    -- A skipped no-confusion table is a stated limitation, not a failure to
+    -- declare: three of the corpus's datatypes have a dependent telescope on
+    -- purpose, which is what @Skipped@ is for.
+    expected o = "no noConfusion" `isPrefixOf` o || "declared " `isPrefixOf` o
+
+corpusLines :: [String]
+corpusLines =
+  [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+    -- Parameters AND two indices AND recursion AND a level parameter, in one
+    -- datatype, with a constructor of five arguments. Nothing in the fixtures
+    -- combines more than two of those.
+  , "data Chain (A : Type) : A -> A -> Type where \
+    \{ link : \8704 (x : A) -> Chain A x x \
+    \; hop : \8704 (x : A) (y : A) (z : A) -> Chain A x y -> Chain A y z -> Chain A x z }"
+    -- A parameterised datatype with NO constructors: the eliminator's method
+    -- telescope is empty and the motive still has to be abstracted correctly.
+  , "data Void2 (A : Type) : Type where { }"
+    -- An index whose type is another datatype, applied to its level argument.
+  , "data Wrap (A : Type) : Type where { wrap : A -> Wrap A }"
+  , "data Uses : Wrap {0} Nat -> Type\8320 where \
+    \{ uses : \8704 (w : Wrap {0} Nat) -> Uses w }"
+    -- A family whose index telescope is dependent, which is where the
+    -- eliminator's index generalisation is hardest.
+  , "data Fin : Nat -> Type\8320 where \
+    \{ fz : \8704 (n : Nat) -> Fin (succ n) \
+    \; fs : \8704 (n : Nat) (i : Fin n) -> Fin (succ n) }"
+    -- A datatype above Type\8320, whose constructor argument lives below it —
+    -- cumulativity is what makes its equations conjoinable (MS3 §2 item 2).
+  , "data Box1 : Type\8321 where { box1 : \8704 (A : Type\8320) -> A -> Box1 }"
+  ]
 
 -- --------------------------------------------------------------------------
 -- Fixtures

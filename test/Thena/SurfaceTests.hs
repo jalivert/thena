@@ -7,15 +7,31 @@
 -- self-consistent error agrees with itself. So every case here either builds
 -- the tree by hand and compares, or pins an exact string — and the round trip
 -- is a third check on top, over a fixed corpus, never the only one.
-module Thena.SurfaceTests (tests) where
+-- **'genSurface' is exported** so that @SurfaceZipperTests@ walks the same
+-- corpus (2026-09-13). A second copy of a generator drifts.
+module Thena.SurfaceTests (tests, genSurface) where
 
 import Data.List.NonEmpty (NonEmpty (..))
+import Data.List (intercalate)
+import Data.List.NonEmpty (nonEmpty)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
+import Test.Tasty.QuickCheck
+  ( Gen, counterexample, elements, forAll, frequency, listOf1, oneof, property
+  , resize, sized, testProperty, withNumTests, (===) )
 
 import Thena.Driver (parseCore, parseSurfaceModule, parseSurfaceTerm)
+import Thena.Syntax.Concrete (Raw (..))
 import Thena.Syntax.Lexer (lexTokens)
-import Thena.Syntax.Concrete (RawInstr, RawRule (..))
+import Thena.Surface.Layout (layout)
+import Thena.Instral.Concrete
+  ( RawInstr (..)
+  , RawBody (..)
+  , RawOp (..)
+  , RawOperand (..)
+  , RawRhs (..)
+  , RawRule (..)
+  )
 import Thena.Syntax.Parser (parseRule)
 import Thena.Global.Env (emptyGlobals)
 import Thena.Repl (renderSurface)
@@ -39,7 +55,207 @@ tests =
     , testGroup "proof modules (phase 43)" moduleTests
     , testGroup "comments (phase 43)" commentTests
     , testGroup "do blocks (phase 45)" blockTests
+    , printerAndParser
+    , layoutAgainstBraces
     ]
+
+-- --------------------------------------------------------------------------
+-- The offside rule, against an independently written brace-inserter (2026-09-13)
+-- --------------------------------------------------------------------------
+
+-- | **His condition — /if implicit works, explicit has to work too/ — over
+-- generated programs rather than nine fixtures.**
+--
+-- 'layoutTests' above states each rule of the offside algorithm with a pair of
+-- spellings. What a fixture pair cannot say is that the rules /compose/: a
+-- @let@ inside a @let@ inside a @do@ block, each opening its context at a
+-- different column, is where an off-by-one in "Thena.Surface.Layout"'s
+-- @closesBlock@ or in the column it records would live, and no fixture nests.
+--
+-- **The oracle is 'braced'**, which writes the same tree with the braces and
+-- semicolons written out. It is a second renderer, written here and sharing
+-- nothing with the layout pass — which is the only reason agreeing means
+-- anything.
+layoutAgainstBraces :: TestTree
+layoutAgainstBraces =
+  testGroup
+    "layout and explicit braces are one language"
+    [ testProperty "a generated program means the same both ways" $
+        withNumTests 400 $ forAll (genBlocky 3) $ \b ->
+          let a = braced b
+              c = unlines (laidOut 0 b)
+           in counterexample (a ++ "\n--- vs ---\n" ++ c) $
+                case (parseSurfaceTerm a, parseSurfaceTerm c) of
+                  (Right x, Right y) -> property (x == y)
+                  (x, y) -> counterexample (show x ++ "\n" ++ show y) False
+    ]
+
+-- | A term made of the two things that carry a layout context — @let@ and a
+-- @do@ block — nested inside each other.
+data Blocky
+  = Leaf String
+  | BLet [(String, Blocky)] Blocky
+  | BDo [String]
+  deriving (Show)   -- QuickCheck only
+
+genBlocky :: Int -> Gen Blocky
+genBlocky n
+  | n <= 0 = leaf
+  | otherwise =
+      frequency
+        [ (2, leaf)
+        , (3, BLet <$> bindings <*> genBlocky (n - 1))
+        , (1, BDo <$> listOf1 (elements ["attack", "intro", "prove", "back"]))
+        ]
+  where
+    leaf = Leaf <$> elements ["a", "b", "f a", "f a b", "zero"]
+    bindings = do
+      k <- elements [1, 2, 3 :: Int]
+      mapM (\i -> (,) ("x" ++ show i) <$> genBlocky (n - 2)) [1 .. k]
+
+-- | The braces and semicolons written out, on one line.
+braced :: Blocky -> String
+braced b = case b of
+  Leaf t     -> t
+  BDo is     -> "do { " ++ intercalate " ; " is ++ " }"
+  BLet bs body ->
+    "let { " ++ intercalate " ; " [ x ++ " = " ++ braced v | (x, v) <- bs ]
+      ++ " } in " ++ braced body
+
+-- | The same tree, laid out. @col@ is the column this term starts at.
+--
+-- **Every line but the first carries its own absolute indentation**, and the
+-- first is placed by the caller. Getting that convention wrong is how the first
+-- draft of this renderer double-indented a nested binding, which is worth
+-- recording: the oracle has to be right before disagreement means anything.
+--
+-- A block's items all begin one indent in from the keyword, and the token that
+-- closes the block sits strictly left of them — the offside rule written as a
+-- renderer instead of as a reader.
+laidOut :: Int -> Blocky -> [String]
+laidOut col b = case b of
+  Leaf t -> [t]
+  BDo is -> case is of
+    []         -> ["do { }"]
+    (i : rest) -> ("do " ++ i) : [ pad (col + 3) ++ j | j <- rest ]
+  BLet bs body ->
+    case bs of
+      [] -> ["let { } in " ++ headOf bodyLines] ++ restOf bodyLines
+      (b0 : more) ->
+        let (h0, t0) = binding b0
+         in [ "let " ++ h0 ]
+              ++ t0
+              ++ concat [ (pad inner ++ h) : t | (h, t) <- map binding more ]
+              ++ [ pad (col + 1) ++ "in " ++ headOf bodyLines ]
+              ++ restOf bodyLines
+    where
+      inner = col + 4
+      bodyLines = laidOut (col + 4) body
+      binding (x, v) =
+        let ls = laidOut (inner + length x + 3) v
+         in (x ++ " = " ++ headOf ls, restOf ls)
+
+headOf :: [String] -> String
+headOf (l : _) = l
+headOf []      = ""
+
+restOf :: [String] -> [String]
+restOf (_ : ls) = ls
+restOf []       = []
+
+pad :: Int -> String
+pad k = replicate k ' '
+
+-- --------------------------------------------------------------------------
+-- The printer and the parser, crossed over generated terms (2026-09-12)
+-- --------------------------------------------------------------------------
+
+-- | **@parse . render@ is the identity on a surface term.**
+--
+-- Every other group here is a fixture, which is right — this module's header
+-- says why a round trip is not enough on its own, and it is not the only check
+-- here. What a fixture corpus cannot say is that the printer and the parser
+-- agree on every /combination/, and the two are written by different code in
+-- different modules: "Thena.Repl"\'s @renderSurface@ decides where a
+-- parenthesis goes, @Surface.Parser@\'s precedence decides what one means.
+--
+-- The direction is the tree's and not the string's, deliberately: one Π is
+-- representable two ways (@ms4\/CLOSEOUT.md@ 18), so the printer picks a
+-- spelling and @render . parse@ over strings is not a law.
+printerAndParser :: TestTree
+printerAndParser =
+  testGroup
+    "the printer and the parser agree"
+    [ testProperty "parse . render is the identity on a surface term" $
+        withNumTests 200 $
+          forAll genSurface $ \t -> readBackSurface (renderSurface t) === Right t
+    ]
+
+readBackSurface :: String -> Either String Surface
+readBackSurface src = case parseSurfaceTerm src of
+  Left e  -> Left (show e)
+  Right t -> Right t
+
+-- | A generated surface term.
+--
+-- **No @do@ block and no @elim@.** A block's operands are the instruction
+-- language, which @blockTests@ above crosses over its own total table; @elim@\'s
+-- five argument groups are 'SurfaceElim'\'s and are pinned by fixture. What is
+-- generated is the term language proper, where the parenthesisation lives.
+genSurface :: Gen Surface
+genSurface = sized go
+  where
+    go n
+      | n <= 1 = leaf
+      | otherwise =
+          frequency
+            [ (2, leaf)
+              -- **A spine's head is never itself a spine.** @spine@ flattens on
+              -- construction and @discussion\/application-representation.md@
+              -- says it must stay so, so a nested 'SurfaceApp' is representable
+              -- and not well formed, exactly as an unannotated Π binder is.
+            , (2, SurfaceApp <$> nonSpine <*> args)
+            , (1, SurfaceLam <$> binders <*> smaller)
+              -- **A Π binder always carries its type.** The grammar has no
+              -- spelling for one that does not — @'(' Names ':' Term ')'@ and
+              -- its braced twin are the only two productions — and nothing in
+              -- @src@ builds one either, so an unannotated Π binder is
+              -- representable and not well formed (§3.4's line). Generating one
+              -- would only assert that the printer prints something for a term
+              -- the language cannot write.
+            , (1, SurfacePi <$> typedBinders <*> smaller)
+            , (1, SurfaceArrow <$> smaller <*> smaller)
+            , (1, SurfaceLet <$> name <*> annotation <*> smaller <*> smaller)
+            , (1, SurfaceAnnot <$> smaller <*> smaller)
+            ]
+      where
+        smaller    = resize (n `div` 2) genSurface
+        nonSpine   = do
+          h <- smaller
+          pure (case h of SurfaceApp g _ -> g; _ -> h)
+        annotation = oneof [pure Nothing, Just <$> smaller]
+        args       = neOr (SurfaceArg Explicit (SurfaceName "a"))
+                       (listOf1 (SurfaceArg <$> plicity <*> smaller))
+        binders    = neOr (SurfaceBinder Explicit "x" Nothing)
+                       (listOf1 (SurfaceBinder <$> plicity <*> name <*> annotation))
+        typedBinders = neOr (SurfaceBinder Explicit "x" (Just SurfaceUniverseOpen))
+                         (listOf1 (SurfaceBinder <$> plicity <*> name <*> (Just <$> smaller)))
+
+    leaf =
+      oneof
+        [ SurfaceName <$> name
+        , SurfaceUniverse <$> elements [0, 1, 2]
+        , pure SurfaceUniverseOpen
+        , pure SurfacePlaceholder
+        , SurfaceHole <$> name
+        ]
+
+    name    = elements ["x", "y", "f", "A"]
+    plicity = elements [Explicit, Implicit]
+
+    -- @listOf1@ can still hand back an empty list under a tiny size, and a
+    -- spine is never empty.
+    neOr d g = maybe (d :| []) id . nonEmpty <$> g
 
 -- --------------------------------------------------------------------------
 -- The spine
@@ -277,6 +493,17 @@ corpus =
   , "x : A -> A"
   , "(λ x -> x) a"
   , "f _ ?goal"
+    -- **An ascription in a body position keeps its parentheses** (2026-09-12).
+    -- Ascription binds looser than every one of these, so without them the
+    -- printer produced a string that read back as a different term — and
+    -- @a : b : c@, which does not read back at all. Found by
+    -- 'printerAndParser'; kept here by name because that is the shape to
+    -- recognise.
+  , "λ x -> (x : A)"
+  , "∀ (x : A) -> (x : A)"
+  , "A -> (x : A)"
+  , "let x = a in (x : A)"
+  , "a : (b : c)"
   , "elim Nat () (λ (z : Nat) -> Nat) (zero (λ k ih -> ih)) () n"
   ]
 
@@ -337,7 +564,7 @@ moduleTests =
                  "module M where\nf : A\nf = a"
 
   , testCase "the name is kept" $
-      fmap fst (parseSurfaceModule "module Arith where { f : A ; f = a }")
+      fmap fst (parseSurfaceModule [] "module Arith where { f : A ; f = a }")
         @?= Right "Arith"
 
   , -- A datatype's own @where@ opens a block inside the module's, so the two
@@ -364,14 +591,14 @@ moduleTests =
         "module M where\nf : A\nf = a\ndata D : Type\8320 where"
 
   , testCase "a module with no declarations is refused" $
-      case parseSurfaceModule "module M where { }" of
+      case parseSurfaceModule [] "module M where { }" of
         Left _  -> pure ()
         Right r -> assertFailure ("admitted: " ++ show r)
   ]
   where
     -- Compare the **items**, not the module name, so a test says only what it
     -- is about.
-    sameModule a b = case (parseSurfaceModule a, parseSurfaceModule b) of
+    sameModule a b = case (parseSurfaceModule [] a, parseSurfaceModule [] b) of
       (Right (_, x), Right (_, y)) -> show y @?= show x
       (x, y) -> assertFailure (show x ++ "\n" ++ show y)
 
@@ -435,6 +662,22 @@ blockTests =
   , testCase "operands may be numbers and strings" $
       roundTrip "do { arg 2 ; say \"done\" }"
 
+    -- **The two operand grammars are §7b's registered duplication** — Happy
+    -- cannot share a non-terminal, because a block is embedded in a surface
+    -- term — so they are levelled by hand and drift is what the register
+    -- exists to catch. Phase 68b added lambdas to the rule-file grammar and
+    -- not to this one; phase 73 found it and this is what pins it.
+  , testCase "a lambda is writable in a block, as it is in a rule file" $
+      roundTrip "do { f = \\ z -> concat z z ; m = f \"a\" }"
+  , testCase "and a literal, and a pair" $
+      roundTrip "do { p = (1, true) ; l = [1, 2, 3] }"
+    -- **A block-bodied lambda prints with its braces** (MS5 phase 75b): the
+    -- printer cannot emit an indented block, because layout is a pass its
+    -- reader runs before the grammar and this test is the printer crossed
+    -- against that reader.
+  , testCase "and a lambda whose body is a block" $
+      roundTrip "do { f = \\ z -> do { p = concat z z ; return p } ; m = f \"a\" }"
+
   , -- Layout, like everything else the surface language has.
     testCase "a block lays out" $
       same "do { attack ; intro }" "do attack\n   intro"
@@ -450,9 +693,102 @@ blockTests =
         , "h = here ; goto h"
         , "arg 2 ; say \"done\" ; try-core x"
         , "x = fresh-name \"a\" ; claim x y ; prove"
+          -- **The form MS5 phase 75b added**, crossed in the same phase that
+          -- added it rather than two phases later, which is what §7b's register
+          -- is for.
+        , "f = \\ z -> do { p = concat z z ; return p }"
         ] :: [String])
+
+    -- **Crossed for EVERY operand form, not five hand-picked bodies**
+    -- (2026-09-12). Hand-picked is how both drifts got through: phase 68b's
+    -- lambda, and the tagged region, which was still missing from this grammar
+    -- when this case was written — @do { f surface`x` }@ did not parse while
+    -- the same body in a rule file did. 'spellingFor' is a case over
+    -- 'RawOperand', so @-Wall@ names a form that has no spelling here.
+  , testCase "every operand form reads the same through both grammars" $
+      mapM_ (crossed . ("f " ++)) writableOperands
+
+    -- The same forms again on the right of an @=@, which is 'RawRhs''s own
+    -- three-way split and its own mirrored nonterminal.
+  , testCase "and the same on the right of a binding" $
+      mapM_ (crossed . ("x = " ++)) writableOperands
+
+    -- **A lambda's PARAMETERS, crossed for every pattern form** (MS5 phase 82).
+    -- @InstrParams@ became a run of patterns in this grammar too, which is
+    -- §7b's registered duplication for the third time — and for the third time
+    -- it is crossed in the phase that added it rather than found drifted two
+    -- phases later. The list is 'Thena.PatternTests.everyPattern''s spellings,
+    -- and that list is kept total against 'Pattern' there.
+  , testCase "a lambda takes the same patterns through both grammars" $
+      mapM_ (\src -> crossed ("f = \\ " ++ src ++ " -> do { return " ++ src ++ " }"))
+            (["x", "_", "3", "'c'", "true", "false", "[]", "(x, y)", "none"] :: [String])
+
+  , testCase "…including the list forms, whose tail token is new" $
+      mapM_ (\src -> crossed ("f = \\ " ++ src ++ " -> attack"))
+            ([ "[a]", "[a, b]", "[a, ...rest]", "[a, ..._]", "[a, ...[]]"
+             , "[...xs]", "((a, b), c)", "(some x)", "(some [a])"
+             ] :: [String])
+
+    -- The spelling has to exercise the form it claims, or the case above
+    -- crosses two grammars over the same wrong tree and says nothing.
+  , testCase "each spelling really writes the form it is listed under" $
+      mapM_ writes operandForms
   ]
   where
+    -- | A written spelling for every 'RawOperand' constructor.
+    --
+    -- **Exhaustive on purpose** — a new operand form leaves @-Wall@ with an
+    -- incomplete pattern here, which is the only thing that makes the crossing
+    -- above total rather than another hand-picked list. 'Nothing' is a form the
+    -- surface grammar cannot write, and there is exactly one.
+    spellingFor :: RawOperand -> Maybe String
+    spellingFor o = case o of
+      RawRef{}     -> Just "y"
+      RawPos{}     -> Just "2"
+      RawText{}    -> Just "\"done\""
+      RawChar{}    -> Just "'c'"
+      RawList{}    -> Just "[1, 'c', \"s\"]"
+      RawPairOf{}  -> Just "(1, y)"
+      RawNested{}  -> Just "(concat y y)"
+      RawLambda{}  -> Just "(\\ z -> concat z z)"
+      RawRegion{}  -> Just "surface`\\ x -> x`"
+      -- **Corners are the one form a @do@ block cannot write, and levelling
+      -- them is a decision rather than a line** (@ms5\/CLOSEOUT.md@ 22).
+      -- @⌜ t ⌝@ carries a parsed 'Thena.Syntax.Concrete.Raw', so the production
+      -- is @'[|' Term '|]'@ and the surface grammar would need the whole
+      -- development-calculus term grammar as a third copy. A @core@ region says
+      -- the same thing — 'Thena.Rules.operandOf' sends both to @VRaw@ — so
+      -- nothing is unsayable, only unsayable in that spelling.
+      RawQuoted{}  -> Nothing
+
+    -- One value per constructor, to apply 'spellingFor' to. It is a mirror, and
+    -- the exhaustive case above is what stops it going quietly out of date.
+    operandForms :: [RawOperand]
+    operandForms =
+      [ RawRef "y"
+      , RawPos 2
+      , RawText "done"
+      , RawChar 'c'
+      , RawList []
+      , RawPairOf (RawPos 1) (RawRef "y")
+      , RawNested "concat" []
+      , RawLambda [] (BodyRhs (RhsOp (RawOp "concat" [])))
+      , RawRegion "surface" "x"
+      , RawQuoted (RawName "x")
+      ]
+
+    writableOperands :: [String]
+    writableOperands = [ w | Just w <- map spellingFor operandForms ]
+
+    -- Parse the spelling and check the operand it yields is the form it was
+    -- listed under, by asking 'spellingFor' the question in reverse.
+    writes :: RawOperand -> Assertion
+    writes form = case spellingFor form of
+      Nothing -> pure ()
+      Just w  -> case viaRule ("f " ++ w) of
+        Just [RawDo (RawOp "f" [got])] -> spellingFor got @?= Just w
+        other -> assertFailure (w ++ ": " ++ show other)
+
     roundTrip :: String -> Assertion
     roundTrip src = case parseSurfaceTerm src of
       Left e  -> assertFailure (src ++ ": " ++ show e)
@@ -470,8 +806,13 @@ blockTests =
       _                    -> Nothing
 
     viaRule :: String -> Maybe [RawInstr]
-    viaRule body = case lexTokens ("rule r :- when focus-is-hole then " ++ body) of
+    -- **Laid out first** (MS5 phase 75): @then@ opens a block now, so a rule
+    -- written on one line gets its braces from the offside rule exactly as a
+    -- rule file does. The surface side has been laid out since MS4 phase 40.
+    viaRule body = case lexTokens ("rule r :- when focus-is-hole do " ++ body) of
       Left _   -> Nothing
-      Right ts -> case parseRule ts of
+      Right ts0 -> case layout ts0 of
+       Left _  -> Nothing
+       Right ts -> case parseRule ts of
         Right (RawRule _ _ _ is) -> Just is
         Left _                   -> Nothing

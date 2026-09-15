@@ -34,7 +34,7 @@ import Thena.Engine
   , resumeYield
   , step
   )
-import Thena.Errors (FailReason)
+import Thena.Errors (FailReason (..))
 import Thena.Global.Env
   ( Definition (..)
   , GlobalEnv
@@ -42,7 +42,7 @@ import Thena.Global.Env
   , addDefinition
   , emptyGlobals
   )
-import Thena.Ops
+import Thena.Instral.Ops
   ( AnswerKind (..)
   , Instr (..)
   , Op
@@ -50,16 +50,20 @@ import Thena.Ops
   , Rule (..)
   , Value (..)
   , produces
+  , signatureOf
   )
--- §2.5: "Thena.Ops" is qualified everywhere except "Thena.Engine", because
+-- §2.5: "Thena.Instral.Ops" is qualified everywhere except "Thena.Engine", because
 -- @Assume@ and @Claim@ name both a component and an op.
-import qualified Thena.Ops as Ops
+import qualified Thena.Instral.Ops as Ops
+import Thena.Instral.Type (Signature (..), Ty (..), renderTy)
 import qualified Data.List.NonEmpty as NE
 import Thena.Surface.Concrete
   (Plicity (..), Surface (..), SurfaceArg (..))
 import Thena.Surface.Zipper (rootedAt)
 import Thena.Rules
-  ( RuleError (..)
+  ( RuleBase
+  , RuleError (..)
+  , clauses
   , RuleIter
   , allRules
   , hasNext
@@ -78,6 +82,8 @@ tests =
     , iteratorTests
     , validateTests
     , producesTests
+    , returnTests
+    , dataTests
     ]
 
 -- --------------------------------------------------------------------------
@@ -186,13 +192,20 @@ matchTests =
     , testCase "where the Π clause is offered, intro succeeds" $
         ranOk (machineAt (guessAt (arrow type0 type0)) [Do (Ops.IntroPi Nothing)])
 
-      -- Every head this phase has asks about a component, so nothing applies
-      -- in the core fragment. Definite, not "blocked": the focus's shape is
-      -- known, which is what §7.6 distinguishes from §8.1's suspension case.
-    , testCase "nothing matches in the core fragment" $
+      -- Every head that asks about a component fails in the core fragment, so
+      -- what is left is the rules with no head at all. Definite, not
+      -- "blocked": the focus's shape is known, which is what §7.6
+      -- distinguishes from §8.1's suspension case.
+      --
+      -- **The three that remain are the asking tactics** (MS5 phase 62b), and
+      -- they are here because their head is honest: @claim@ inserts above the
+      -- focus and that works from inside a core term, so a head refusing it
+      -- would make the one-argument clause disagree with the two-argument op
+      -- about where the word applies.
+    , testCase "only the headless rules match in the core fragment" $
         case crossType (holeAt type0) of
           Left e    -> assertFailure ("could not cross: " ++ show e)
-          Right cur -> matching emptyGlobals cur @?= []
+          Right cur -> matching emptyGlobals cur @?= ["claim", "assume", "quantify"]
 
       -- Definition order is dispatch order (§8), so the match list is always a
       -- subsequence of the base and never a reordering of it.
@@ -253,8 +266,12 @@ iteratorTests =
 -- Well-formedness (§2.4, §7.2)
 -- --------------------------------------------------------------------------
 
+-- **Its parameters are still written as names** (MS5 phase 82): every rule
+-- built here asks a question about /bindings/ and not about patterns, so the
+-- helper turns each name into the pattern that binds it and the fixtures below
+-- read exactly as they did.
 named :: String -> [Name'] -> [Instr] -> Rule
-named n ps = Rule (GlobalName n) ps []
+named n ps = Rule (GlobalName n) (map Ops.PVar ps) []
 
 type Name' = String
 
@@ -265,6 +282,24 @@ validateTests =
     [ testCase "the shipped base is clean" $
         concatMap validateBase expectedBase @?= []
 
+      -- **@true@ and @false@ are values, so they cannot also be names** (MS5
+      -- phase 64). Every @Ref@ to one has already become a literal by the time
+      -- a rule is built, so a binding of either name could never be read back —
+      -- a rule that quietly does something other than it says, which is what a
+      -- load-time refusal is for.
+      -- **A PARAMETER cannot reach this check since MS5 phase 82.**
+      -- 'Thena.Rules.resolvePattern' reads @true@ in a parameter position as
+      -- the boolean /pattern/, so the name never exists to be refused and the
+      -- case that used to stand here would assert nothing. What replaces it is
+      -- in "Thena.PatternTests", where there is a parser to write the source
+      -- line with — recorded here so the disappearance is deliberate rather
+      -- than a check quietly lost.
+    , testCase "nor a binding false" $
+        validate (named "r" [] [Bind (Ops.PVar "false") Nothing Ops.Here])
+          @?= [ReservedName (GlobalName "r") "false"]
+    , testCase "and an ordinary name is untouched" $
+        validate (named "r" ["t"] [Bind (Ops.PVar "x") Nothing Ops.Here]) @?= []
+
       -- §3.7's line, made structural: a declaration is a command, not a
       -- rule-body operation.
     , testCase "define-data in a body is rejected" $
@@ -272,11 +307,11 @@ validateTests =
           @?= [DeclarationInBody (GlobalName "bad") 0]
 
     , testCase "binding an op that produces nothing is rejected" $
-        validate (named "bad" [] [Bind "x" Ops.Attack])
+        validate (named "bad" [] [Bind (Ops.PVar "x") Nothing Ops.Attack])
           @?= [BoundNonProducing (GlobalName "bad") 0 "x"]
 
     , testCase "binding an op that produces something is fine" $
-        validate (named "ok" [] [Bind "x" (Ops.Concat (Lit (VText "a")) (Lit (VText "b")))])
+        validate (named "ok" [] [Bind (Ops.PVar "x") Nothing (Ops.Concat (Lit (VText "a")) (Lit (VText "b")))])
           @?= []
 
     , testCase "a Ref to nothing is rejected" $
@@ -289,7 +324,7 @@ validateTests =
     , testCase "an earlier Bind binds it" $
         validate
           (named "ok" []
-            [ Bind "z" (Ops.Concat (Lit (VText "a")) (Lit (VText "b")))
+            [ Bind (Ops.PVar "z") Nothing (Ops.Concat (Lit (VText "a")) (Lit (VText "b")))
             , Do (Ops.Say (Ref "z"))
             ])
           @?= []
@@ -299,7 +334,7 @@ validateTests =
         validate
           (named "bad" []
             [ Do (Ops.Say (Ref "z"))
-            , Bind "z" (Ops.Concat (Lit (VText "a")) (Lit (VText "b")))
+            , Bind (Ops.PVar "z") Nothing (Ops.Concat (Lit (VText "a")) (Lit (VText "b")))
             ])
           @?= [UnboundInRule (GlobalName "bad") 0 "z"]
 
@@ -308,7 +343,7 @@ validateTests =
     , testCase "all three are reported, with their positions" $
         validate
           (named "bad" []
-            [ Bind "x" Ops.Attack
+            [ Bind (Ops.PVar "x") Nothing Ops.Attack
             , Do (Ops.DefineData someData)
             , Do (Ops.Say (Ref "z"))
             ])
@@ -318,8 +353,8 @@ validateTests =
               ]
 
     , testCase "validateBase checks every rule" $
-        length (validateBase (ruleBase "test" Nothing ""
-                                [ named "a" [] [Bind "x" Ops.Attack]
+        length (validateBase (ruleBase "test" Nothing "" [] [] []
+                                [ named "a" [] [Bind (Ops.PVar "x") Nothing Ops.Attack]
                                 , named "b" [] [Do (Ops.Say (Ref "z"))]
                                 ]))
           @?= 2
@@ -329,10 +364,145 @@ validateTests =
 -- 'produces', checked against the engine (§7.2)
 -- --------------------------------------------------------------------------
 
+-- | @instral@'s own data (MS5 phase 65).
+--
+-- **The mechanism, not a caller** again: nothing in the shipped base builds a
+-- list. What is worth pinning is that the shapes are asked about in a /head/,
+-- which is how a rule branches — the reason the data needs no @if@ and no
+-- second control structure.
+dataTests :: TestTree
+dataTests =
+  testGroup
+    "instral's data structures"
+    [ testCase "a list is built from its elements, references and all" $
+        valueOf [Bind (Ops.PVar "x") Nothing (Ops.Concat (text "a") (text "b"))]
+                (Ops.Some (ListOf [Ref "x", text "c"]))
+          >>= (@?= Just (VOption (Just (VList [VText "ab", VText "c"]))))
+
+      -- **Observed by destructuring** (MS5 phase 86) — @pair-first@ used to do
+      -- this and is gone, because a binding's left side takes the pair apart.
+    , testCase "and a pair the same way" $
+        valueOf [Bind (Ops.PPair (Ops.PVar "a") (Ops.PVar "b")) Nothing
+                      (Ops.Value (PairOf (text "a") (Lit (VInt 1))))]
+                (Ops.Value (Ref "a"))
+          >>= (@?= Just (VText "a"))
+
+    , -- An unbound name inside a literal is the body's mistake and is caught
+      -- when the base loads, which needs 'Thena.Instral.Ops.refsIn' to look inside.
+      testCase "an unbound name inside a list is refused at load" $
+        validate (named "r" [] [Do (Ops.Say (ListOf [Ref "nope"]))])
+          @?= [UnboundInRule (GlobalName "r") 0 "nope"]
+
+      -- **The five destructors are gone** (MS5 phase 86): @list-head@,
+      -- @list-tail@, @pair-first@, @pair-second@ and @option-value@. What they
+      -- did is a pattern now — the pair above, and
+      -- @Thena.RuleFileTests.walking@ for the list and option ones, which is
+      -- where the two-clause replacements for the list pair are written out and
+      -- run. Nothing that was asserted here stopped being asserted; it moved to
+      -- where the replacement lives.
+
+    , -- **The shape questions are asked in a HEAD**, which is how a rule
+      -- branches — so they are tested through 'clauses', the thing that
+      -- actually consults them, rather than through the predicate directly.
+      testCase "a head picks the clause the shape fits" $ do
+        clauseFor [VList []]          @?= ["empty"]
+        clauseFor [VList [VText "a"]] @?= ["cons"]
+    , -- A value of the wrong kind is simply not that shape: a head asks a
+      -- question, it does not fail.
+      testCase "and a value of the wrong kind fits neither" $
+        clauseFor [VText "a"] @?= []
+    ]
+  where
+    run is = runOut (machineIn emptyGlobals (holeAt type1) is)
+
+    valueOf before o = pure $ case run (before ++ [Bind (Ops.PVar "r") Nothing o]) of
+      Left _  -> Nothing
+      Right m -> lookup "r" (Thena.Engine.env (exec m))
+
+    -- Two clauses of one name, told apart by the shape of the argument.
+    --
+    -- **By their PARAMETER PATTERNS since MS5 phase 86**, where they used to be
+    -- told apart by the head tests @list-is-empty@ and @list-is-cons@. The
+    -- clause 'Thena.Rules.clauses' picks is the same one; what changed is that
+    -- the shape question is asked where the argument is named, and binds its
+    -- pieces while it is there.
+    shapes =
+      ruleBase "shapes" Nothing "" [] [] []
+        [ Rule (GlobalName "shape") [Ops.PList [] Nothing] []
+            [Do (Ops.Say (Lit (VText "empty")))]
+        , Rule (GlobalName "shape") [Ops.PList [Ops.PWild] (Just Ops.PWild)] []
+            [Do (Ops.Say (Lit (VText "cons")))]
+        ]
+
+    clauseFor vs =
+      [ w
+      | r <- drain (clauses [shapes] emptyGlobals (holeAt type1)
+                            (GlobalName "shape") vs)
+      , Do (Ops.Say (Lit (VText w))) <- ruleBody r
+      ]
+
+-- | What a rule hands back (MS5 phase 63).
+--
+-- **The mechanism, not a caller.** Nothing in @rules/standard.thena.rules@ wants
+-- a returned value yet; the milestone's doctrine is that a piece built ahead of
+-- its first customer still gets tests, so these are them.
+returnTests :: TestTree
+returnTests =
+  testGroup
+    "a rule returns a value"
+    [ testCase "the caller's binding is filled by the callee's return" $
+        envAfter [Bind (Ops.PVar "r") Nothing (Ops.Call "gives" [])]
+          >>= (@?= Just (VText "a value"))
+
+    , -- @return@ ends the body, so the @say@ after it never runs. Checked
+      -- through the binding rather than through the message, because a body
+      -- that ran on would still return the same value.
+      testCase "return ends the body" $
+        ranWith [Do (Ops.Call "runs-on" [])]
+          >>= (@?= Right [])
+
+    , testCase "a body that never returns fails where the value was wanted" $
+        ranWith [Bind (Ops.PVar "r") Nothing (Ops.Call "silent" [])]
+          >>= (@?= Left (NothingReturned (Ops.PVar "r")))
+
+    , -- The same rule called for effect is fine: nothing asked it for a value.
+      testCase "and is fine when nothing asked it for one" $
+        ranWith [Do (Ops.Call "silent" [])]
+          >>= (@?= Right [])
+
+    , testCase "return outside a call has nothing to return from" $
+        ranWith [Do (Ops.Return (text "x"))]
+          >>= (@?= Left NothingToReturnFrom)
+
+    , -- **Each alternative returns its own value** (the reason 'Choice' carries
+      -- the destination too): the first clause of @two-ways@ fails before it
+      -- returns, so backtracking takes the second, and the binding is made from
+      -- there. Without the field on 'Choice' the binding would never happen at
+      -- all, because a call with two candidates builds one of those and not a
+      -- 'Thena.Engine.Call'.
+      testCase "backtracking rebinds from the clause that finally ran" $
+        envAfter [ Bind (Ops.PVar "r") Nothing (Ops.Call "two-ways" [])
+                 , Do (Ops.Say (Ref "r"))
+                 ]
+          >>= (@?= Just (VText "second"))
+    ]
+  where
+    run is = runOut (machineIn emptyGlobals (holeAt type1) is)
+
+    envAfter is = pure $ case run is of
+      Left _  -> Nothing
+      Right m -> lookup "r" (Thena.Engine.env (exec m))
+
+    -- 'Right' carries the messages, so a test can say /it got to the end/
+    -- without saying what the development looks like.
+    ranWith is = pure $ case run is of
+      Left r  -> Left r
+      Right _ -> Right ([] :: [String])
+
 -- | The standing lesson: find the invariant maintained by different code from
 -- the code that checks it (phase 5's @context@).
 --
--- 'Thena.Ops.produces' is a table, and a table agrees with itself. What decides
+-- 'Thena.Instral.Ops.produces' is a table, and a table agrees with itself. What decides
 -- the question is 'Thena.Engine.perform', so every op is run — in a state where
 -- it actually succeeds, which the 'ranOk' half enforces — and the answer is
 -- read off @env@. An op that grows a result later, or loses one, fails here
@@ -375,11 +545,13 @@ producesTests =
       , ("regret",      e, hole,    tried,         Ops.Regret)
       , ("solve",       e, hole,    tried,         Ops.Solve)
       , ("abandon",     e, twoHoles, [],           Ops.Abandon)
-        -- Phase 17b's four. @prove@ and @call@ both hand control to a body and
-        -- get it back, so what a @Bind@ on either would name is the caller's
-        -- own environment — restored on return, and without the destination.
+        -- Phase 17b's four. **They part company at MS5 phase 63**: a @prove@
+        -- still produces nothing, because what the chosen rule did is in the
+        -- development, while a @call@ produces whatever the clause that ran
+        -- handed back with @return@. So the call here is to 'returningRule',
+        -- which does exactly that and nothing else.
       , ("prim-prove",  e, hole,    [],            Ops.Prove)
-      , ("call",        e, hole,    [],            Ops.Call (GlobalName "try-core") [term type0])
+      , ("call",        e, hole,    [],            Ops.Call "gives" [])
         -- **A λ** (MS4 phase 49b): every other shape this op once handled is a
         -- clause of @elaborate@ now, and it refuses those — so the term has to
         -- be one of the three cases still behind it, and a λ is the one that
@@ -393,6 +565,20 @@ producesTests =
       , ("app-head",         e,   hole, [],           Ops.AppHead succZero)
       , ("app-first-argument", e, hole, [],           Ops.AppFirstArgument succZero)
       , ("app-tail",         e,   hole, [],           Ops.AppTail succZero)
+        -- The data structures (MS5 phase 65). A list and a pair are built by the
+        -- operand itself, so what is exercised here is the option's two
+        -- constructors and the five accessors.
+      -- **A lambda** (MS5 review): its types are inference's, its arity is the
+      -- table's, and this is what crosses the second against the engine.
+      , ("lambda",       e, hole, [],
+           Ops.Lambda [Ops.PVar "x"] [Do (Ops.Return (Ref "x"))])
+      , ("some",         e, hole, [],            Ops.Some (text "x"))
+      , ("none",         e, hole, [],            Ops.None)
+      -- **The five destructors left at MS5 phase 86** and have no rows here any
+      -- more — @list-head@, @list-tail@, @pair-first@, @pair-second@,
+      -- @option-value@. A pattern is not an op, so it has nothing to cross
+      -- against this table; @Thena.PatternTests@ crosses it against the matcher
+      -- instead.
       , ("apply-next",       nat, holeAt natType, [],
            Ops.ApplyNext (term (Global (GlobalName "succ") [])) (text "a"))
       ]
@@ -408,9 +594,104 @@ producesTests =
 
 checkProduces :: GlobalEnv -> Cursor -> [Instr] -> Op -> IO ()
 checkProduces globalEnv cur before o =
-  case runOut (machineIn globalEnv cur (before ++ [Bind "r" o])) of
+  case runOut (machineIn globalEnv cur (before ++ [Bind (Ops.PVar "r") Nothing o])) of
     Left r  -> assertFailure ("the op did not run: " ++ show r)
-    Right m -> (lookup "r" (Thena.Engine.env (exec m)) /= Nothing) @?= produces o
+    Right m -> do
+      let e   = Thena.Engine.env (exec m)
+          got = lookup "r" e
+      (got /= Nothing) @?= produces o
+      -- **And the value is of the type the table says** (MS5 phase 66b). The
+      -- presence check above is what 'produces' was; this is the rest of
+      -- 'Thena.Instral.Ops.resultOf', aimed at the same authority — the engine — rather
+      -- than at another table. A signature that claims @Surface@ for an op that
+      -- hands back a term fails here.
+      -- **The scheme's variables are bound from the operands' actual values
+      -- first** (MS5 review). Without this a row whose result is a variable
+      -- asserts nothing at all — @(_, TVar _) -> True@ — which is how
+      -- @list-head : List a -> a@ survived while the engine answered with an
+      -- @Option@. Binding @a@ from the argument makes the claim checkable.
+      let bound = foldl bindStep (Just []) (Ops.operandTypes o)
+          bindStep acc (op, ty) = acc >>= \b -> case Ops.operandIn e op of
+            Left _  -> Just b
+            Right v -> bindFrom b v ty
+      case (got, sigResult (signatureOf o), bound) of
+        (Just v, Just ty, Just b) | not (v `inhabits` substituteTy b ty) ->
+          assertFailure (renderTy (substituteTy b ty)
+                          ++ " was claimed, but the engine produced " ++ show v)
+        (Just v, Just ty, Nothing) | not (v `inhabits` ty) ->
+          assertFailure (renderTy ty ++ " was claimed, but the engine produced " ++ show v)
+        _ -> pure ()
+
+-- | What a scheme's variables stand for, read off the values an op was given
+-- (MS5 review).
+--
+-- **A 'VText' binds a variable to 'TString'**, and 'inhabits' accepts a 'VText'
+-- at either 'TString' or 'TName', so the text ops are not made stricter than
+-- they are.
+bindFrom :: [(Int, Ty)] -> Value -> Ty -> Maybe [(Int, Ty)]
+bindFrom b v ty = case (ty, v) of
+  (TVar i, _) -> case lookup i b of
+    Just _  -> Just b
+    Nothing -> fmap (\t -> (i, t) : b) (principal v)
+  (TList a,   VList (u : _))       -> bindFrom b u a
+  (TList _,   VList [])            -> Just b
+  (TOption a, VOption (Just u))    -> bindFrom b u a
+  (TOption _, VOption Nothing)     -> Just b
+  (TPair x y, VPair u w)           -> bindFrom b u x >>= \b' -> bindFrom b' w y
+  _                                -> Just b
+
+-- | A value's own type, where it has exactly one.
+principal :: Value -> Maybe Ty
+principal v = case v of
+  VText _    -> Just TString
+  VInt _     -> Just TInt
+  VChar _    -> Just TChar
+  VBool _    -> Just TBool
+  VTerm _    -> Just TCore
+  VRaw _     -> Just TCore
+  VSurface _ -> Just TSurface
+  VObject n _ -> Just (TObject n)
+  _          -> Nothing
+
+substituteTy :: [(Int, Ty)] -> Ty -> Ty
+substituteTy b ty = case ty of
+  TVar i    -> maybe ty id (lookup i b)
+  TList a   -> TList (substituteTy b a)
+  TOption a -> TOption (substituteTy b a)
+  TPair x y -> TPair (substituteTy b x) (substituteTy b y)
+  TFun as r -> TFun (map (substituteTy b) as) (substituteTy b r)
+  _         -> ty
+
+-- | Does this value belong to that type?
+--
+-- **Test-local on purpose.** It is a statement about what a type /means at run
+-- time/, and putting it in @src\/@ would invite it being used as a dynamic
+-- check — which is the thing the type system is being built to replace. Here it
+-- is a measuring device and nothing else.
+--
+-- **A 'VText' inhabits both 'TString' and 'TName'**, because at run time they
+-- are the same value; the distinction is static, which is the whole of his
+-- 2026-09-12 ruling. Same for 'TCore' and an unresolved @core`…`@.
+inhabits :: Value -> Ty -> Bool
+inhabits v t = case (v, t) of
+  (VText _,    TString) -> True
+  (VText _,    TName)   -> True
+  (VTerm _,    TCore)   -> True
+  (VRaw _,     TCore)   -> True
+  (VSurface _, TSurface) -> True
+  (VInt _,     TInt)    -> True
+  (VChar _,    TChar)   -> True
+  (VBool _,    TBool)   -> True
+  (VList vs,   TList a) -> all (`inhabits` a) vs
+  (VPair a b,  TPair x y) -> inhabits a x && inhabits b y
+  -- **A closure's arity is checkable even when its types are not** (MS5 review).
+  (VClosure ps _ _, TFun as _) -> length ps == length as
+  (VOption Nothing,  TOption _) -> True
+  (VOption (Just u), TOption a) -> inhabits u a
+  -- A scheme variable is satisfied by anything; what it is bound to is
+  -- inference's question and not this one's.
+  (_,          TVar _)  -> True
+  _                     -> False
 
 -- | @? a : Type₀ . ? goal : Type₀ . goal@, focused on @a@ — the one shape
 -- @along@ and @abandon@ both need, and the only one in this module with a
@@ -431,7 +712,7 @@ someData = case parseDeclaration emptyGlobals 200 natDecl of
   Left err     -> error ("fixture does not parse: " ++ show err)
 
 term :: Core -> Operand
-term = Lit . VTerm . Trailing
+term = Lit . VTerm
 
 text :: String -> Operand
 text = Lit . VText
@@ -440,7 +721,38 @@ text = Lit . VText
 -- above every 'Var' the fixtures mint, so nothing it mints collides.
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] env expectedBase [] 1000)
+  load is (Machine (Exec [] [] []) (Development cur) [] env
+                   (expectedBase ++ [returning]) [] 1000)
+
+-- | A base with one rule in it that returns something (MS5 phase 63).
+--
+-- It is here rather than in @rules/standard.thena.rules@ because the shipped
+-- base has nothing that wants a returned value yet, and 'Thena.Standard' has to
+-- mirror that file exactly. What needs testing is the /mechanism/ — that a
+-- @Bind@ on a call is filled by the callee's @return@ — and one rule says it.
+returning :: RuleBase
+returning =
+  ruleBase "returning" Nothing "" [] [] []
+    [ returningRule
+      -- @return@ ends the body: the @prim-attack@ after it must not run, which
+      -- is what makes this rule safe to call at a hole in any state.
+    , Rule (GlobalName "runs-on") [] []
+        [Do (Ops.Return (Lit (VText "first"))), Do Ops.Attack]
+      -- A body with no @return@ at all.
+    , Rule (GlobalName "silent") [] [] [Do (Ops.Say (Lit (VText "nothing")))]
+      -- Two clauses, one arity. The first fails before it can return — it
+      -- cannot fail /after/, because @return@ ends the body — so the value the
+      -- caller ends up with is the second clause's.
+    , Rule (GlobalName "two-ways") [] []
+        [Do Ops.Into, Do (Ops.Return (Lit (VText "first")))]
+    , Rule (GlobalName "two-ways") [] []
+        [Do (Ops.Return (Lit (VText "second")))]
+    ]
+
+-- | @rule gives :- do return \"a value\"@.
+returningRule :: Rule
+returningRule =
+  Rule (GlobalName "gives") [] [] [Do (Ops.Return (Lit (VText "a value")))]
 
 machineAt :: Cursor -> [Instr] -> Machine
 machineAt = machineIn emptyGlobals
@@ -478,6 +790,11 @@ everyHoleRule :: [String]
 everyHoleRule =
   [ "attack", "try-core", "abandon", "eliminate-core", "prove", "fill"
   , "unify-refine-core", "apply-core"
+    -- The asking half of the three component tactics (MS5 phase 62b). They
+    -- have no head, because all three apply wherever there is a focus, so they
+    -- are offered everywhere — which is what @:matches@ is for. @dispatch@
+    -- runs none of them: they take a parameter.
+  , "claim", "assume", "quantify"
   ]
     ++ replicate 16 "elaborate" ++ replicate 2 "enter-binders"
     ++ replicate 2 "spine-arguments"
@@ -489,7 +806,8 @@ everyHoleRule =
 -- its state test passes — and @intro-binders@ really does apply at a guess.
 walkers :: [String]
 walkers =
-  [ "intro-binders", "intro-binders", "enter-binders", "enter-binders"
+  [ "claim", "assume", "quantify"
+  , "intro-binders", "intro-binders", "enter-binders", "enter-binders"
   , "spine-arguments", "spine-arguments"
   ]
 

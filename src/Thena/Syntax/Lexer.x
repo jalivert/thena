@@ -7,6 +7,8 @@ module Thena.Syntax.Lexer
   , lexTokens
   , isIdentifier
   ) where
+
+import Data.List (stripPrefix)
 }
 
 %wrapper "posn"
@@ -17,7 +19,7 @@ $lower  = [a-z]
 $upper  = [A-Z]
 -- Reserved characters: the brackets, the separators, and every character that
 -- spells an operator on its own. Nothing else is off limits inside a name.
-$reserved = [\( \) \{ \} \[ \] \; \, \" λ ∀ ⊢ ≟ ≐ ≈ ▸ ⌜ ⌝]
+$reserved = [\( \) \{ \} \[ \] \; \, \" \` ⟨ ⟩ λ ∀ ⊢ ≟ ≐ ≈ ▸ ⌜ ⌝]
 
 -- A name starts with a letter — ASCII, or any non-reserved character above the
 -- ASCII range — and continues with anything that is neither reserved nor
@@ -37,6 +39,18 @@ $idchar  = [\x21-\x10ffff] # $reserved
 $strchar = [$printable \t] # [\" \\]
 @escape  = \\ [\" \\ n]
 @string  = \" ($strchar | @escape)* \"
+
+-- A character literal (MS5 phase 64), @'c'@ — the same three escapes, plus the
+-- quote itself.
+--
+-- **Purely additive, for the string literal's reason one step over.** The single
+-- quote is an @$idchar@ and not an @$idstart@, so no identifier has ever been
+-- able to /begin/ with one — @t1'@ in the determinacy script keeps lexing
+-- exactly as it did. Alex's longest match settles the rest: @'a'@ is three
+-- characters and an identifier after it would have to start with a letter.
+$chrchar = [$printable \t] # [\' \\]
+@chresc  = \\ [\' \" \\ n]
+@char    = \' ($chrchar | @chresc) \'
 
 @ident    = $idstart $idchar*
 @universe = "Type" ($digit+ | $sub+)
@@ -83,6 +97,15 @@ tokens :-
   "|-"          { keyword TTurnstile }
   "⊢"           { keyword TTurnstile }
   "[|"          { keyword TOpenQuote }
+  -- **@...@ is a token and reserves nothing** (MS5 phase 82). @.@ is an
+  -- @$idchar@ but not an @$idstart@, so no identifier has ever begun with one
+  -- and @...rest@ lexes as this token and then a name. An identifier that
+  -- /contains/ dots — @a...b@ — is untouched, because this rule can only win at
+  -- the start of a token.
+  "..."         { keyword TSpread }
+  "["           { keyword TLBracket }
+  "]"           { keyword TRBracket }
+  ","           { keyword TComma }
   "⌜"           { keyword TOpenQuote }
   "|]"          { keyword TCloseQuote }
   "⌝"           { keyword TCloseQuote }
@@ -106,14 +129,28 @@ tokens :-
   -- identifiers project-wide, after @data@ and @module@, and the last the
   -- surface language is expected to need.
   "do"          { keyword TDo }
+  -- **The escape opener is an ordinary token too** (MS5 phase 81). The region
+  -- scanner emits one when it meets @${@ inside a tagged region; this is what
+  -- lets the same spelling be read again when the region's text is lexed for
+  -- the embedded parser, so a splice is written one way and read one way.
+  "${"          { keyword TEscapeOpen }
   "rule"        { keyword TRule }
+  -- **An object language's grammar declaration** (MS5 phase 69). The fourth
+  -- word to narrow identifiers project-wide, after @data@, @module@ and @do@.
+  --
+  -- **@signature@ was the fifth and is gone** (MS5 phase 74, his ruling): an
+  -- annotation is @f : Ty@ in column 1, told from a function's @f x = e@ by the
+  -- token after the name, so it needs no word of its own. @ms5\/CLOSEOUT.md@ 11.
+  "language"    { keyword TLanguage }
   "when"        { keyword TWhen }
-  "then"        { keyword TThen }
   ":-"          { keyword TNeck }
   $digit+       { \p s -> Located (posOf p) (TNumber (read s)) }
   @string       { \p s -> Located (posOf p) (TString (unescape s)) }
+  @char         { \p s -> Located (posOf p) (TChar (unchar s)) }
   "Type"        { \p _ -> Located (posOf p) TUniverseOpen }
   @universe     { \p s -> Located (posOf p) (TUniverse (levelOf s)) }
+  @ident \`      { \p str -> Located (posOf p) (TTagOpen (init str)) }
+  "⟨"           { keyword (TTagOpen "surface") }
   @ident        { \p s -> Located (posOf p) (TIdent s) }
 
 {
@@ -156,14 +193,28 @@ data Token
   | TModule
   | TDo
   | TRule
+  | TLanguage
   | TWhen
-  | TThen
   | TNeck
   | TNumber Int
   | TString String
+  | TChar   Char
+  | TLBracket
+  | TRBracket
+  | TComma
+  | TSpread      -- ^ @...@, the list-pattern tail marker (MS5 phase 82)
   | TUniverse Int
   | TUniverseOpen
   | TIdent String
+    -- The tagged-region tokens (MS5 phase 60). A region is @name\`…\`@: the
+    -- lexer finds its extent and hands over **raw text**, because an object
+    -- language has its own lexical rules and tokenising it here would impose
+    -- Thena's (@discussion\/the-five-languages.md@ §6.9).
+  | TTagOpen String   -- ^ @name\`@ — the tag, without its backtick
+  | TRaw String       -- ^ a run of raw text inside a region
+  | TEscapeOpen       -- ^ the escape opener: raw text stops, ordinary lexing resumes
+  | TEscapeClose      -- ^ the brace that closes an escape
+  | TTagClose         -- ^ the backtick that closes a region
   deriving (Eq, Show)
 
 -- | Structured, per §12 invariant 2: the position and the offending character,
@@ -195,6 +246,18 @@ unescape = go . drop 1 . dropLast
       c          : rest -> c    : go rest
       []                -> []
 
+-- | One character, with its quotes taken off and its escape undone.
+--
+-- Total by construction, like 'unescape': the lexer only hands it what @\@char@
+-- matched, which is exactly one character or one escape between two quotes. The
+-- fall-through is what keeps it total rather than a crash in the lexer.
+unchar :: String -> Char
+unchar s = case drop 1 s of
+  '\\' : 'n'  : _ -> '\n'
+  '\\' : c    : _ -> c
+  c          : _ -> c
+  []             -> ' '
+
 -- | @Type₀@ and @Type0@ both mean level 0 (§2.6).
 levelOf :: String -> Int
 levelOf = foldl (\acc c -> acc * 10 + digitOf c) 0 . drop 4
@@ -205,19 +268,101 @@ levelOf = foldl (\acc c -> acc * 10 + digitOf c) 0 . drop 4
 
 -- | The @posn@ wrapper's own 'alexScanTokens' calls 'error' on a bad character.
 -- This loop is the same traversal with a structured failure instead.
-lexTokens :: String -> Either LexError [Located Token]
-lexTokens str0 = go (alexStartPos, '\n', [], str0)
-  where
-    go inp@(pos, _, _, str) =
-      case alexScan inp 0 of
-        AlexEOF                   -> Right []
-        AlexError (p, _, _, rest) -> Left (LexError (posOf p) (firstOf rest))
-        AlexSkip inp' _           -> go inp'
-        AlexToken inp' len act    -> (act pos (take len str) :) <$> go inp'
+-- | Where the scanner is standing (MS5 phase 60).
+--
+-- Outside every region the list is empty and Alex does the work. 'Raw' means
+-- the characters belong to an embedded language and are handed over untouched;
+-- 'Esc' means an escape inside a region has resumed ordinary lexing, and the
+-- 'Int' is how many braces are open inside it, so that the escape's own closing
+-- brace can be told from a brace the escaped code wrote.
+--
+-- **It is a stack because regions nest through escapes and only through them**
+-- (@discussion\/the-five-languages.md@ §6.9): raw text never contains another
+-- region, so a tag met inside an escape pushes and everything stays decidable.
+data Mode = Raw !Char | Esc !Int
 
+lexTokens :: String -> Either LexError [Located Token]
+lexTokens str0 = loop [] (alexStartPos, '\n', [], str0)
+
+-- | The @posn@ wrapper's own 'alexScanTokens' calls 'error' on a bad character.
+-- This loop is the same traversal with a structured failure instead, and with
+-- the region modes above threaded through it.
+loop :: [Mode] -> AlexInput -> Either LexError [Located Token]
+loop modes inp@(pos, _, _, str) = case modes of
+  Raw fence : outer -> raw fence outer pos str
+  _ -> case alexScan inp 0 of
+    AlexEOF
+      | null modes -> Right []
+      -- An escape that never closed. Reported where scanning gave up, which is
+      -- the end of input rather than the region's start — the same imprecision
+      -- an unterminated string literal has, and owed the same better message.
+      | otherwise  -> Left (LexError (posOf pos) Nothing)
+    AlexError (p, _, _, rest) -> Left (LexError (posOf p) (firstOf rest))
+    AlexSkip inp' _           -> loop modes inp'
+    AlexToken inp' len act ->
+      let t@(Located lp tk) = act pos (take len str)
+       in case (modes, tk) of
+            -- **An escape opened by the main lexer pushes the same mode the
+            -- region scanner pushes** (MS5 phase 81), so its closing brace
+            -- becomes a 'TEscapeClose' here exactly as it does there. Without
+            -- it an escape outside a region ends in a bare closing brace, which
+            -- the layout pass then reports as closing a block nobody opened.
+            -- NB: no literal braces in this comment — Alex counts them.
+            (_, TEscapeOpen) -> (t :) <$> loop (Esc 0 : modes) inp'
+            -- The brace that closes the escape, rather than one its code wrote.
+            (Esc 0 : outer, TRBrace) ->
+              (Located lp TEscapeClose :) <$> loop outer inp'
+            (Esc d : outer, TRBrace) -> (t :) <$> loop (Esc (d - 1) : outer) inp'
+            (Esc d : outer, TLBrace) -> (t :) <$> loop (Esc (d + 1) : outer) inp'
+            -- Which character closes the region depends on how it was opened:
+            -- a tag's own backtick, or the ⟩ that closes the ⟨ alias.
+            (_, TTagOpen _)
+              | take 1 (take len str) == "⟨" -> (t :) <$> loop (Raw '⟩' : modes) inp'
+              | otherwise                    -> (t :) <$> loop (Raw '`' : modes) inp'
+            _                        -> (t :) <$> loop modes inp'
+  where
     firstOf cs = case cs of
       c : _ -> Just c
       []    -> Nothing
+
+-- | Raw text, to the fence that closes the region.
+--
+-- Three things end a chunk: the closing backtick, an escape opener (a dollar
+-- followed by an open brace), and the end of input, which is a failure. A
+-- backslash escapes a backtick, a backslash, and a dollar, so a region can
+-- carry all three literally.
+-- | What a backslash may escape inside raw text.
+rawEscapes :: String
+rawEscapes = ['`', '\\', '$', '⟩']
+
+-- | The two characters that open an escape, written without a literal brace
+-- because Alex counts braces inside a code fragment and would end this one.
+escapeOpener :: String
+escapeOpener = ['$', toEnum 123]
+
+raw :: Char -> [Mode] -> AlexPosn -> String -> Either LexError [Located Token]
+raw fence outer p0 s0 = chunk p0 p0 s0 ""
+  where
+    chunk began p cs acc = case cs of
+      [] -> Left (LexError (posOf p) Nothing)
+      '\\' : c : rest
+        | c `elem` rawEscapes ->
+            chunk began (alexMove (alexMove p '\\') c) rest (c : acc)
+      c : rest
+        | c == fence ->
+            ((flush began acc ++) . (Located (posOf p) TTagClose :))
+              <$> loop outer (alexMove p c, c, [], rest)
+      _ | Just rest <- stripPrefix escapeOpener cs ->
+            let p1 = foldl alexMove p escapeOpener
+             in ((flush began acc ++) . (Located (posOf p) TEscapeOpen :))
+                  <$> loop (Esc 0 : Raw fence : outer) (p1, last escapeOpener, [], rest)
+      c : rest -> chunk began (alexMove p c) rest (c : acc)
+
+    -- A chunk is reported at the position it began, not where it ended, so an
+    -- embedded parser's own positions can be offset from something meaningful.
+    flush began acc
+      | null acc  = []
+      | otherwise = [Located (posOf began) (TRaw (reverse acc))]
 
 -- | Is this string one identifier and nothing else?
 --

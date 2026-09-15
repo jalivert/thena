@@ -8,7 +8,7 @@
 --
 -- **It is one coarse operation, deliberately — decided by the user
 -- 2026-08-23** (@AGENDA.md@ item 35). §7.2 grants MS1 the liberty of leaving a
--- whole tactic behind one 'Thena.Ops.Op', and this is the case it was granted
+-- whole tactic behind one 'Thena.Instral.Ops.Op', and this is the case it was granted
 -- for: everything here is term construction over an 'InductiveDefinition', the
 -- same kind of thing as 'Thena.Global.Env.eliminatorType' and
 -- "Thena.Global.NoConfusion". A granular rule body would need a term-building
@@ -67,7 +67,7 @@ import Thena.Global.Env
 -- 'elimMethods' is one entry per constructor, **in declaration order**, which
 -- is the order 'Thena.Core.Term.Eliminate' expects its methods in. Each is a
 -- hole the caller must put into the development /above/ the goal, so that the
--- goal can see it — the same placement 'Thena.Ops.Claim' already uses.
+-- goal can see it — the same placement 'Thena.Instral.Ops.Claim' already uses.
 --
 -- 'elimTerm' mentions those holes as @'Free' v@, so it is well typed only in a
 -- context extended by them. 'eliminate' has already checked it there.

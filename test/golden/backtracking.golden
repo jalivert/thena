@@ -6,6 +6,9 @@ intro
 solve
 regret
 prove
+claim ‹ty›
+assume ‹ty›
+quantify ‹ty›
 intro-binders ‹t›
 intro-binders ‹t›
 enter-binders ‹t›

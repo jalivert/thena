@@ -7,7 +7,7 @@
 -- whose heads pass at the focus, and the validation pass that says whether a
 -- rule is well formed at all.
 --
--- 'Rule' and 'Test' themselves are "Thena.Ops"' — §2.5's layering was wrong and
+-- 'Rule' and 'Test' themselves are "Thena.Instral.Ops"' — §2.5's layering was wrong and
 -- the user corrected it 2026-08-23 (@AGENDA.md@ item 25). The rest of §2.5's
 -- listing for this module stands.
 module Thena.Rules
@@ -15,6 +15,9 @@ module Thena.Rules
     RuleBase (..)
   , ruleBase
   , allRules
+  , allCallable
+  , allLanguages
+  , allSignatures
 
     -- * Finding rules (§7.6)
   , RuleIter
@@ -29,12 +32,23 @@ module Thena.Rules
   , RuleError (..)
   , validate
   , validateBase
+  , writtenPositions
 
     -- * Written rules (§8, phase 21)
+  , opWords
+  , resolveFunction
+  , resolveLanguage
   , resolveRule
+  , resolveSignature
+  , resolveTy
+  , builtInTypes
   , resolveBlock
+  , isOpWord
+  , opArities
+  , surfaceBlocks
   , testWord
   , testOperands
+  , testTypes
   , everyTest
   ) where
 
@@ -43,29 +57,57 @@ import Thena.Core.Term (Core (..), GlobalName (..))
 import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor (Cursor, Focus (..), context, expectedType, focus)
 import Thena.Global.Env (GlobalEnv)
-import qualified Thena.Ops as Op
-import Thena.Ops
+import qualified Thena.Instral.Ops as Op
+import Thena.Instral.Ops
   ( AnswerKind (..)
   , Instr (..)
   , Name
   , Op (..)
   , Operand (..)
   , Rule (..)
+  , Pattern (..)
+  , patternBinds
+  , matchClause
   , Test (..)
   , Value (..)
   , operandsOf
+  , refsIn
   , partOf
   , partWords
   , produces
   )
 import Thena.Surface.Concrete
-  (Plicity (..), Surface (..), SurfaceArg (..))
+  (Plicity (..), Surface (..), SurfaceArg (..), blocksIn)
 import qualified Thena.Surface.Zipper as Zipper
-import Thena.Syntax.Concrete
-  ( RawInstr (..)
+import Thena.Errors (SyntaxError (..))
+import Thena.Surface.Read (parseSurfaceText)
+import Thena.Surface.Zipper (rootedAt)
+import Thena.Syntax.Lexer (isIdentifier, lexTokens)
+import Thena.Syntax.Parser (parseTerm)
+import Thena.Instral.Grammar
+  ( GrammarError
+  , Item (..)
+  , Language
+  , Production (..)
+  , language
+  , parseObject
+  )
+import qualified Thena.Instral.Type as Ty
+import Thena.Instral.Type (Signature (..), Ty (..))
+import Thena.Instral.Concrete
+  ( RawSignature (..)
+  , RawLanguage (..)
+  , RawProduction (..)
+  , RawGItem (..)
+  , RawFunction (..)
+  , RawRhs (..)
+  , RawBody (..)
+  , RawTy (..)
+  , RawInstr (..)
   , RawOp (..)
   , RawOperand (..)
   , RawRule (..)
+  , RawPattern (..)
   , RawTest (..)
   )
 import Data.Either (partitionEithers)
@@ -96,13 +138,30 @@ data RuleBase = RuleBase
   { baseName        :: String
   , baseDescription :: Maybe String
   , basePath        :: FilePath
+  , baseSignatures  :: [(String, Signature)]
+    -- ^ **the types its file declared** (MS5 phase 67), keyed by name; the
+    -- arity is @length . 'Thena.Instral.Type.sigParams'@, because a signature's
+    -- arrow chain has one link per parameter.
+  , baseLanguages   :: [(String, Language)]
+    -- ^ **the object languages its file declared** (MS5 phase 69). Each one is a
+    -- tag, an opaque @instral@ type and a generated parser; see
+    -- "Thena.Instral.Grammar".
+  , baseFunctions   :: [Rule]
+    -- ^ **the global functions its file declared** (MS5 phase 68a), each already
+    -- an ordinary 'Rule' — his §1.1: /a function is a rule with one clause and
+    -- no head/. They are kept apart from 'baseRules' for one reason and it is
+    -- not the engine's: a function must not appear in 'matches', because a
+    -- headless rule matches everywhere and @prove@ would run it. Phase 71's
+    -- by-type query wants the list on its own anyway.
   , baseRules       :: [Rule]
   }
   deriving (Eq, Show)
 
 -- | Build one. Nothing is checked here — 'validateBase' is separate, so that a
 -- caller who wants the errors gets them all rather than the first.
-ruleBase :: String -> Maybe String -> FilePath -> [Rule] -> RuleBase
+ruleBase
+  :: String -> Maybe String -> FilePath -> [(String, Signature)]
+  -> [(String, Language)] -> [Rule] -> [Rule] -> RuleBase
 ruleBase = RuleBase
 
 -- | Every rule the engine may search, across every loaded base, **in search
@@ -113,6 +172,25 @@ ruleBase = RuleBase
 -- 'matches' takes the bases rather than the rules.
 allRules :: [RuleBase] -> [Rule]
 allRules = concatMap baseRules
+
+-- | Every declared signature, across every loaded base.
+--
+-- **A signature is a claim about a callable, not about a file**, so a base that
+-- declares one for a rule written in another base is not wrong here; whether
+-- anything answers to it is 'Thena.Instral.Infer''s question.
+allSignatures :: [RuleBase] -> [(String, Signature)]
+allSignatures = concatMap baseSignatures
+
+-- | Everything @Call@ may reach: the rules **and the functions**.
+--
+-- 'allRules' is what 'matches' and 'dispatch' see, and it is deliberately the
+-- smaller list — see 'baseFunctions'.
+-- | Every object language, across every loaded base.
+allLanguages :: [RuleBase] -> [(String, Language)]
+allLanguages = concatMap baseLanguages
+
+allCallable :: [RuleBase] -> [Rule]
+allCallable bs = concatMap baseRules bs ++ concatMap baseFunctions bs
 
 -- --------------------------------------------------------------------------
 -- Finding rules (§7.6)
@@ -190,16 +268,39 @@ dispatch base env cur =
 -- it enters the body. Passing the values rather than an environment is what
 -- keeps that true: clauses of one name need not agree about what they call
 -- their parameters.
+--
+-- == A rule is searched and a function is called — MS5 phase 82
+--
+-- **This is where his ruling becomes true of the code**, and until patterns it
+-- did not have to be. Phase 80's note says the engine needed no change because
+-- it decides @Choice@ against @Call@ by @hasNext@ alone, and with /one/ clause
+-- per function that already gave a function a plain call frame. Patterns give a
+-- function several clauses, so @hasNext@ would say yes and a function call would
+-- build a choice point, show in @:choices@ and be reachable by @retry@ — which
+-- is a rule\'s behaviour in a function\'s spelling, exactly what 80 removed.
+--
+-- **@take 1@ is the whole of it.** A function\'s matching clauses are cut to the
+-- first; a rule\'s are all offered, as they always were. The two lists cannot
+-- both be non-empty for one name at one arity — 'Thena.Errors.RuleAndFunction'
+-- refuses that at load — so this is a choice between them and not a merge.
+--
+-- **First-match is what a pattern language means by order**, and it is the
+-- other half of lifting @FunctionClauseUnreachable@: @size []@ before
+-- @size [_, ..._]@ reads as Haskell does, top to bottom, no backtracking.
 clauses
   :: [RuleBase] -> GlobalEnv -> Cursor -> GlobalName -> [Value] -> RuleIter
-clauses bases env cur nm vs =
-  RuleIter
-    [ r
-    | r <- allRules bases
-    , ruleName r == nm
-    , length (ruleParams r) == length vs
-    , all (holds env cur (zip (ruleParams r) vs)) (ruleHead r)
-    ]
+clauses bases env cur nm vs = RuleIter (searched ++ take 1 called)
+  where
+    fitting rs =
+      [ r
+      | r <- rs
+      , ruleName r == nm
+      , Just bound <- [matchClause r vs]
+      , all (holds env cur bound) (ruleHead r)
+      ]
+
+    searched = fitting (concatMap baseRules bases)
+    called   = fitting (concatMap baseFunctions bases)
 
 -- | The arities of every rule bearing this name, in search order.
 --
@@ -208,7 +309,7 @@ clauses bases env cur nm vs =
 -- matched/.
 arities :: [RuleBase] -> GlobalName -> [Int]
 arities bases nm =
-  [ length (ruleParams r) | r <- allRules bases, ruleName r == nm ]
+  [ length (ruleParams r) | r <- allCallable bases, ruleName r == nm ]
 
 next :: RuleIter -> Maybe (Rule, RuleIter)
 next (RuleIter rs) = case rs of
@@ -289,6 +390,8 @@ holds env cur args t = case t of
   LambdaBindsOne o        -> surfaceIs o bindsOne
   LetIsAnnotated o        -> surfaceIs o isAnnotatedLet
   LetIsBare o             -> surfaceIs o isBareLet
+  -- @instral@'s own data (MS5 phase 65). They read the operand and nothing
+  -- else, so they are as cheap as 'holds' needs a head to be.
   where
     -- Written down, then reduced: §8's "head matching runs whnf", because a
     -- goal typed @id Type₀ (Nat -> Nat)@ is a Π and must match.
@@ -364,10 +467,96 @@ data RuleError
     -- ^ the right test word, written with the wrong arguments (MS4 phase 47).
     -- No instruction index, for 'NoSuchTest'\'s reason — a head is not a
     -- sequence
+  | BadPattern        GlobalName String
+    -- ^ a parenthesised parameter whose word is not @some@, or is @some@ with
+    -- the wrong number of arguments (MS5 phase 82). @instral@'s own data has
+    -- exactly one named constructor that takes an argument
+  | RepeatedInPattern GlobalName Name
+    -- ^ one clause's parameters bind the same name twice (MS5 phase 82).
+    -- Patterns are linear: @f x x@ is refused rather than read as /and the two
+    -- are equal/, which is a match on a value's identity and a different
+    -- feature
+  | ReservedName      GlobalName Name
+    -- ^ a parameter or a binding named @true@ or @false@ (MS5 phase 64) — the
+    -- two words @instral@ reads as literals wherever an operand is read, so a
+    -- variable of either name could never be read back.
   | BadOperands       GlobalName Int String
+  | NoSuchTag         GlobalName Int String
+    -- ^ @tag\`…\`@ where no parser answers to @tag@ (MS5 phase 61b). The two
+    -- built-in ones are @surface@ and @core@; a declared object language brings
+    -- its own, which is phase 69.
+  | BadRegion         GlobalName Int String SyntaxError
+    -- ^ a region whose contents did not parse in the language its tag named.
     -- ^ the right op word, written with the wrong arguments — too many, too
     -- few, or a position where a name was wanted. One error for all three: a
     -- rule body is one line, and the word is enough to find it
+  | UnknownType String String
+    -- ^ in the signature of ‹name›, ‹word› names no type (MS5 phase 67)
+  | TypeArity String String Int Int
+    -- ^ …and one that does, given the wrong number of arguments
+  | TypeVariableApplied String String
+    -- ^ @a b@ — a type variable applied to something. @instral@'s types are
+    -- first order and there is nothing a variable could stand for that takes an
+    -- argument
+  | UnitInsideAType String
+    -- ^ @()@ anywhere but as the result. It says /this leaves nothing/, which is
+    -- not a type a value can have
+  | DuplicateSignature String Int
+    -- ^ two signatures for one callable
+  | InAnnotation GlobalName Int Name RuleError
+    -- ^ **a mistake in the type written for a local** (MS5 phase 90): the rule,
+    -- the instruction, the local, and what was wrong with the type. It wraps
+    -- the signature errors because the type language is the same one; what
+    -- differs is where it was written.
+  | AnnotationWithoutBinding GlobalName Int Name
+    -- ^ **@n : Ty@ with no @n = …@ after it** (MS5 phase 77). An annotation is
+    -- about the binding on the next line; one that is about nothing is a typo,
+    -- most often a name that was changed on one line and not the other.
+  | ReturnInSurfaceBlock GlobalName Int
+    -- ^ **@return@ inside a @do@ block written in a surface term** (MS5 phase
+    -- 79). A block there /is/ the solution to the hole it stands in —
+    -- @E⟦do { … }⟧@ is /play the block/ — so its product is the term it built
+    -- and there is nothing for a value to be returned to. 'Thena.Instral.Ops.Play'
+    -- splices the instructions into the running program rather than opening a
+    -- frame, so before this check a @return@ there quietly abandoned the
+    -- elaboration that played it.
+  | FunctionLeavesNothing String
+  | FunctionClauseUnreachable String Int
+    -- ^ **a second clause of a function at one arity** (MS5 phase 80, his
+    -- ruling). A function is called and a rule is searched: a call enters one
+    -- clause and stays in it, so a second clause is reached only if something
+    -- tells the two apart — and until there are patterns, nothing can. It was
+    -- accepted before this phase, and reached by the first clause /failing/,
+    -- which is a rule's behaviour and not a function's.
+    --
+    -- **The phase that adds patterns lifts this**, and is where a function's
+    -- clause selection stops being /the only one/ and becomes /the first that
+    -- matches/.
+  | RuleAndFunction String Int
+    -- ^ one name is both a rule and a function at one arity (MS5, reviewed
+    -- 2026-09-12)
+  | BuiltInLanguage String
+    -- ^ a grammar declared under a built-in tag's name. @surface@ and @core@ name
+    -- Thena's own parsers; 'operandOf' looks a declared language up /first/, so
+    -- without this a user grammar would silently replace the fence
+  | BuiltInType String
+    -- ^ …and the same trap one layer over (2026-09-12). A language's name is a
+    -- /type/ as well as a tag, and 'resolveTyIn' looks a declared language up
+    -- before the built-ins too, so @language String where { … }@ made @String@ in
+    -- every signature mean the object language. The clash it produced said
+    -- /wanted String, got String/, and @language List where { … }@ was worse: it
+    -- loaded, and @signature f : List -> ()@ stopped being the arity error it is
+  | DuplicateLanguage String
+    -- ^ two grammars under one name (2026-09-12). The second was unreachable —
+    -- every lookup is a 'lookup', which takes the first — so it loaded and did
+    -- nothing, exactly what 'DuplicateSignature' exists to stop one layer over
+  | BadGrammarItem String String
+    -- ^ in the grammar of ‹language›, ‹word› is neither the language itself nor
+    -- @name@ (MS5 phase 69)
+  | BadGrammar String GrammarError
+    -- ^ …and a grammar the generated parser could not run
+    -- ^ @f x = say "hi"@ — the right of an @=@ ran something that produces no
+    -- value, so there is nothing for the function to be (MS5 phase 68a)
   deriving (Eq, Show)
 
 -- | The load-time pass (§2.4, §7.2). Three checks, one traversal, **every**
@@ -384,9 +573,40 @@ data RuleError
 -- states the head admits. That is not decidable shallowly, and §8 already
 -- states the answer — a rule may match, run and fail.
 validate :: Rule -> [RuleError]
-validate r = headScope ++ go 0 (initiallyBound r) (ruleBody r)
+validate r = reserved ++ repeated ++ headScope
+               ++ go (writtenPositions (ruleBody r)) (initiallyBound r) (ruleBody r)
   where
     nm = ruleName r
+
+    -- **A name that is a literal cannot also be a variable** (MS5 phase 64).
+    -- @true@ and @false@ are read as 'Thena.Instral.Ops.VBool' wherever an operand is
+    -- read, so a binding of either name could never be read back — every @Ref@
+    -- to it has already become a literal. Refusing it here is the difference
+    -- between a rule that cannot be written and one that quietly does something
+    -- else than it says.
+    --
+    -- **It no longer looks at the parameters, because it cannot fire there**
+    -- (MS5 phase 82). 'Thena.Rules.resolvePattern' reads a parameter\'s @true@
+    -- as 'Thena.Instral.Ops.PBool' before this runs, so no pattern can bind the name and
+    -- the check was unreachable from that side. Removing what a change has made
+    -- dead is the standing rule; the /binding/ half is untouched and still
+    -- fires.
+    reserved =
+      [ ReservedName nm n
+      | n <- concat [ patternBinds p | Bind p _ _ <- ruleBody r ]
+      , n `elem` reservedNames
+      ]
+
+    -- **Patterns are linear** (MS5 phase 82). @f x x@ is refused rather than
+    -- read as /and the two are equal/: matching a value against another value
+    -- is a different feature, it needs @Eq@ on every 'Thena.Instral.Ops.Value'
+    -- including a closure, and nothing has asked for it. Haskell refuses it for
+    -- the same reason.
+    repeated =
+      [ RepeatedInPattern nm n
+      | (i, n) <- zip [0 :: Int ..] boundByParams
+      , n `elem` take i boundByParams
+      ]
 
     -- **A head may name only the rule's own parameters** (MS4 phase 47). It
     -- runs before the body, so the environment it reads is the call's
@@ -397,33 +617,222 @@ validate r = headScope ++ go 0 (initiallyBound r) (ruleBody r)
     headScope =
       [ UnboundInHead nm n
       | t <- ruleHead r
-      , Ref n <- testOperands t
-      , n `notElem` ruleParams r
+      , n <- concatMap refsIn (testOperands t)
+      , n `notElem` boundByParams
       ]
 
+    -- **A head sees what the PATTERNS bind, not the parameters** (MS5 phase
+    -- 82), and that is strictly more than before: @rule f [a, ...rest] :- when
+    -- (surface-is-name a)@ can ask about an element. 'clauses' passes the very
+    -- environment 'Thena.Instral.Ops.matchClause' built, so what this admits and what
+    -- 'holds' is given cannot drift.
+    boundByParams = concatMap patternBinds (ruleParams r)
+
     go _ _ [] = []
-    go i bound (instr : rest) =
-      let o     = operationOf instr
+    go ps bound (instr : rest) =
+      let i     = case ps of { p : _ -> p ; [] -> 0 }
+          o     = operationOf instr
           errs  = declaration i o ++ binding i instr o ++ scope i bound o
+                    ++ insideLambda i bound o
+          -- **A binding brings in what its PATTERN binds** (MS5 phase 84),
+          -- which for the overwhelmingly common plain name is the same one
+          -- name it always was.
           bound' = case instr of
-            Bind n _ -> n : bound
-            Do _     -> bound
-       in errs ++ go (i + 1) bound' rest
+            Bind p _ _ -> patternBinds p ++ bound
+            Do _       -> bound
+       in errs ++ go (drop 1 ps) bound' rest
+
+    -- **A lambda's body is a body and is scoped like one** (found in the long
+    -- hunt, 2026-09-13). @operandsOf@ answers with the operands an op /reads/,
+    -- and a lambda's body is not one of them — it is a program — so until this
+    -- was written @g = \ z -> concat z nosuchname@ loaded clean and failed at
+    -- run time, where every other shape of unbound name is a load error. Phase
+    -- 68b added lambdas and this walk was not told.
+    --
+    -- **The lambda's own instruction number is what is reported.** An index
+    -- inside the body would collide with the enclosing one, and the lambda is
+    -- what the reader sees at that line — the same choice a nested call makes,
+    -- which is lifted into the instruction that wanted it.
+    insideLambda i bound o = case o of
+      Op.Lambda ps body -> inner i (concatMap patternBinds ps ++ bound) body
+      _                 -> []
+
+    inner _ _ [] = []
+    inner i bound (instr : rest) =
+      let o = operationOf instr
+       in scope i bound o
+            ++ insideLambda i bound o
+            ++ inner i (case instr of { Bind p _ _ -> patternBinds p ++ bound; Do _ -> bound }) rest
 
     operationOf instr = case instr of
-      Bind _ o -> o
+      Bind _ _ o -> o
       Do     o -> o
 
     declaration i o = case o of
       DefineData _ -> [DeclarationInBody nm i]
       _            -> []
 
+    -- **Reported against the first name the pattern binds**, or the rule when
+    -- it binds none (@_ = ‹op›@). The error is about the /op/ leaving nothing,
+    -- so the name is a pointer at the line and not the subject.
     binding i instr o = case instr of
-      Bind n _ | not (produces o) -> [BoundNonProducing nm i n]
-      _                           -> []
+      Bind p _ _ | not (produces o) ->
+        [BoundNonProducing nm i (headOr "_" (patternBinds p))]
+      _ -> []
+
+    headOr d xs = case xs of { x : _ -> x ; [] -> d }
 
     scope i bound o =
-      [ UnboundInRule nm i n | Ref n <- operandsOf o, n `notElem` bound ]
+      [ UnboundInRule nm i n
+      | n <- concatMap refsIn (operandsOf o)
+      , n `notElem` bound
+      ]
+
+-- | A written signature, resolved (MS5 phase 67).
+--
+-- **The arity comes out of the type**: an arrow chain with three links before
+-- the result is a signature at arity three, so nothing is written twice and a
+-- signature cannot claim an arity its own type contradicts.
+resolveSignature :: [(String, Language)] -> RawSignature -> Either RuleError (String, Signature)
+resolveSignature ls (RawSignature nm t) = do
+  -- **The variable list is threaded ACROSS the links** (found by mutation
+  -- testing, 2026-09-12). Resolving each link on its own numbered every
+  -- lowercase name from zero within that link, so @a -> b -> ()@ became
+  -- @a -> a -> ()@ and every signature's variables collapsed onto each other.
+  ts <- chainOf (chain t) []
+  -- **The last link is the result, and @()@ means there is none.** That is the
+  -- same distinction 'Thena.Instral.Ops.resultOf' draws, said in the surface a rule
+  -- author writes — and it is why @()@ anywhere else is refused rather than
+  -- quietly dropping a parameter.
+  case sequence (init ts) of
+    Nothing -> Left (UnitInsideAType nm)
+    Just ps -> Right (nm, Signature ps (last ts))
+  where
+    chain (RawTyArrow a b) = a : chain b
+    chain u                = [u]
+
+    chainOf [] _ = Right []
+    chainOf (u : us) vs = do
+      (m, vs') <- resolveTyIn ls nm vs u
+      rest     <- chainOf us vs'
+      Right (m : rest)
+
+-- | One written type.
+--
+-- **A capitalised name is a constructor and a lowercase one is a variable.**
+-- Nothing else distinguishes them, and nothing else needs to: it is why a
+-- signature needs no @forall@ — its variables are exactly its lowercase names.
+--
+-- A variable is numbered by where it first appears, so
+-- @signature f : a -> b -> a@ resolves to 'Thena.Instral.Type.TVar' 0, 1, 0.
+-- The numbering is scheme-local, which is what 'Thena.Instral.Infer'
+-- instantiates.
+resolveTy :: [(String, Language)] -> String -> RawTy -> Either RuleError (Maybe Ty)
+resolveTy ls owner t0 = fmap fst (resolveTyIn ls owner [] t0)
+
+-- | 'resolveTy', threading the scheme's variable names in and out — which is
+-- what lets one signature's links share a numbering.
+resolveTyIn
+  :: [(String, Language)] -> String -> [String] -> RawTy
+  -> Either RuleError (Maybe Ty, [String])
+resolveTyIn ls owner vs0 t0 = go vs0 t0
+  where
+    go vs t = case t of
+      RawTyUnit -> Right (Nothing, vs)
+      -- **A group is its content** — the parentheses did their work in
+      -- 'resolveSignature'\'s @chain@ and in the @chainOf@ below, both of which
+      -- stop at one (2026-09-12).
+      RawTyGroup u -> go vs u
+      -- **A parenthesised arrow is a function value** (MS5 phase 68b). Only a
+      -- parenthesised one reaches here: 'resolveSignature' splits the top-level
+      -- chain into parameters and a result first, so @a -> b@ at the top means
+      -- /takes an a, gives a b/ and @(a -> b)@ means /a function/.
+      -- **The links are threaded, like every other case here.** Mapping over
+      -- them with one starting list numbered each link's variables from zero, so
+      -- a nested @(a -> b)@ became @(a -> a)@ — the same collapse the top-level
+      -- chain had (both found by mutation testing, 2026-09-12).
+      RawTyArrow _ _ -> do
+        (ms, vs') <- links vs (chainOf t)
+        case sequence ms of
+          Nothing -> Left (UnitInsideAType owner)
+          Just xs -> Right (Just (TFun (init xs) (last xs)), vs')
+      RawTyPair a b -> do
+        (ma, vs1) <- go vs a
+        (mb, vs2) <- go vs1 b
+        case (ma, mb) of
+          (Just x, Just y) -> Right (Just (TPair x y), vs2)
+          _                -> Left (UnitInsideAType owner)
+      RawTyVar v -> Right (Just (TVar (indexOf v vs)), extend v vs)
+      RawTyCon nm as
+        | not (null as) || isVarName nm ->
+            if isVarName nm
+              then if null as
+                     then Right (Just (TVar (indexOf nm vs)), extend nm vs)
+                     else Left (TypeVariableApplied owner nm)
+              else applied nm as vs
+        | otherwise -> applied nm [] vs
+
+    applied nm as vs = do
+      (ms, vs') <- args vs as
+      case traverse id ms of
+        Nothing -> Left (UnitInsideAType owner)
+        Just xs -> fmap (\x -> (Just x, vs')) (constructor nm xs)
+
+    args vs [] = Right ([], vs)
+    args vs (a : rest) = do
+      (m, vs1)  <- go vs a
+      (ms, vs2) <- args vs1 rest
+      Right (m : ms, vs2)
+
+    -- **A declared object language is a type** (MS5 phase 69, §6.6, his): the
+    -- environment grows with what the user declares, which he ruled is *"exactly
+    -- what instral is for"*.
+    constructor nm [] | Just _ <- lookup nm ls = Right (TObject nm)
+    constructor nm xs = case (nm, xs) of
+      ("String", [])      -> Right TString
+      ("Name", [])        -> Right TName
+      ("Int", [])         -> Right TInt
+      ("Char", [])        -> Right TChar
+      ("Bool", [])        -> Right TBool
+      ("Surface", [])     -> Right TSurface
+      ("Core", [])        -> Right TCore
+      ("Development", []) -> Right TDevelopment
+      ("Level", [])       -> Right TLevel
+      ("List", [a])       -> Right (TList a)
+      ("Option", [a])     -> Right (TOption a)
+      _ | nm `elem` known -> Left (TypeArity owner nm (arityOf nm) (length xs))
+        | otherwise       -> Left (UnknownType owner nm)
+
+    known = builtInTypes
+    arityOf nm = if nm `elem` ["List", "Option"] then 1 else 0
+
+    -- A nested arrow's own variables share the scheme's numbering, so the list
+    -- goes in and comes back out at every link.
+    links vs [] = Right ([], vs)
+    links vs (u : us) = do
+      (m, vs1)   <- go vs u
+      (ms, vs2)  <- links vs1 us
+      Right (m : ms, vs2)
+
+    chainOf (RawTyArrow a b) = a : chainOf b
+    chainOf u                = [u]
+
+    isVarName (c : _) = c `elem` ['a' .. 'z']
+    isVarName []      = False
+
+    indexOf v vs = case lookup v (zip vs [0 ..]) of
+      Just i  -> i
+      Nothing -> length vs
+    extend v vs = if v `elem` vs then vs else vs ++ [v]
+
+-- | The words @instral@ reads as literals rather than as names (MS5 phase 64).
+--
+-- **Two, and they are not lexer keywords** — his ruling, 2026-09-12. One lexer
+-- serves every language, so reserving them there would take two constructor
+-- names away from every object language;
+-- @examples\/determinacy-tactics.thena.script@ uses both.
+reservedNames :: [Name]
+reservedNames = ["true", "false"]
 
 -- | The names a body may read before it binds anything of its own: **its
 -- parameters, and nothing else** (MS4 phase 41).
@@ -431,7 +840,7 @@ validate r = headScope ++ go 0 (initiallyBound r) (ruleBody r)
 -- It used to add @hint@ when a rule's head asked about one, which was the only
 -- name a body could read that no @Bind@ introduced. Nothing is magic now.
 initiallyBound :: Rule -> [Name]
-initiallyBound = ruleParams
+initiallyBound = concatMap patternBinds . ruleParams
 
 -- | Every rule in one base, checked.
 --
@@ -439,6 +848,35 @@ initiallyBound = ruleParams
 -- calls it on every rule as it resolves one, so a base that would not validate
 -- is refused rather than installed. §2.4 asked for a load-time pass and until
 -- there was a load there was only a test.
+-- | Which written statement each instruction of a resolved body came from,
+-- counted from zero (MS5 phase 91, @ms5\/CLOSEOUT.md@ 44).
+--
+-- **Resolution expands a statement into several instructions** and the checks
+-- after it see only the expansion: a nested call is lifted into a binding in
+-- front of the statement (@(i:k)@, phase 63), a written core term at the prompt
+-- likewise (@⌜1⌝@, 61b), a short function body is parked and returned
+-- (@(=)@, 68a), and an annotation is folded into the binding after it (77). So
+-- counting instructions told the author about a line they never wrote.
+--
+-- **One rule covers every expansion: a binding the author could not have
+-- written belongs to the statement after it.** Each of those generators already
+-- chose a name no identifier can equal — that is how it avoids collisions — so
+-- the lexer's own 'isIdentifier' is the whole test, and nothing here knows how
+-- any one of them spells its names. The other expansion is the annotation: an
+-- annotated binding was written as two statements, and the binding is the
+-- second. That is the count 'resolveBlock' keeps for the errors it raises
+-- itself, so a resolution error and a type error name the same line.
+writtenPositions :: [Instr] -> [Int]
+writtenPositions = go 0 0
+  where
+    -- Nothing after a held binding cannot happen from the resolver; it is
+    -- answered with the next line rather than a shorter list.
+    go line held [] = replicate held line
+    go line held (instr : rest) = case instr of
+      Bind (PVar n) Nothing _ | not (isIdentifier n) -> go line (held + 1) rest
+      Bind _ (Just _) _ -> replicate (held + 1) (line + 1) ++ go (line + 2) 0 rest
+      _                 -> replicate (held + 1) line ++ go (line + 1) 0 rest
+
 validateBase :: RuleBase -> [RuleError]
 validateBase = concatMap validate . baseRules
 
@@ -460,13 +898,22 @@ validateBase = concatMap validate . baseRules
 --
 -- **Every error, not the first**, for 'validate'\'s reason: instructions
 -- resolve independently, so a body with three mistakes reports three.
-resolveRule :: RawRule -> Either [RuleError] Rule
-resolveRule (RawRule nm ps ts body) =
-  case (headErrs, bodyErrs) of
-    ([], []) -> Right (Rule g ps tests instrs)
-    _        -> Left (headErrs ++ bodyErrs)
+-- **The body goes through 'resolveBlock'** (MS5 phase 77, and it was a defect
+-- until then). This function used to call 'instruction' itself, so a rule body
+-- and a @do@ block were resolved by two pieces of code that were supposed to be
+-- the same one — @resolveBlock@\'s own comment says /nothing about a block is a
+-- second dialect/ — and phase 77\'s annotation pairing landed in one of them.
+-- A rule body silently ignored every @n : Ty@ it was given.
+resolveRule :: [(String, Language)] -> RawRule -> Either [RuleError] Rule
+resolveRule ls (RawRule nm ps ts body) =
+  case (patErrs, headErrs, resolveBlock ls g (concatMap patternBinds qs) body) of
+    ([], [], Right instrs) -> Right (Rule g qs tests instrs)
+    (_,  _,  Right _)      -> Left (patErrs ++ headErrs)
+    (_,  _,  Left bodyErrs) -> Left (patErrs ++ headErrs ++ bodyErrs)
   where
     g = GlobalName nm
+
+    (patErrs, qs) = partitionEithers (map (resolvePattern g) ps)
 
     (headErrs, tests) = partitionEithers (map test ts)
     test (RawTest w os) = case traverse headOperand os of
@@ -476,18 +923,147 @@ resolveRule (RawRule nm ps ts body) =
         Left NoSuchTestWord       -> Left (NoSuchTest g w)
         Left (WrongTestArity _ _) -> Left (BadTestOperands g w)
 
-    (bodyErrs, instrs) =
-      partitionEithers (zipWith (instruction g) [0 ..] body)
-
 -- | What may be written as an operand of a test (MS4 phase 47).
 --
--- The same two a body accepts, and 'RawPos' refused for the same reason —
--- a position is 'Down'\'s and nothing else takes one.
+-- **Every leaf a body accepts** (widened at MS5 phase 64, when the primitives
+-- arrived): a literal is pure data, and reading one costs 'holds' nothing. What
+-- stays refused is the two that would make dispatch /do/ something — a region,
+-- which would parse an embedded language, and a nested call, which would run
+-- one. That is the whole of the restriction, and it is his §1.1 line about
+-- heads staying a restricted fragment rather than a shorter list of shapes.
+--
+-- 'RawPos' was refused until then because a numeral was only ever @arg 2@'s
+-- field position. It is an 'Thena.Instral.Ops.VInt' now.
 headOperand :: RawOperand -> Maybe Operand
 headOperand o = case o of
+  -- **A head takes no lambda.** It is a restricted fragment on purpose (§1.1,
+  -- his) — 'holds' must answer without running anything.
+  RawLambda _ _ -> Nothing
+  RawRef "true"  -> Just (Lit (VBool True))
+  RawRef "false" -> Just (Lit (VBool False))
   RawRef n  -> Just (Ref n)
   RawText t -> Just (Lit (VText t))
-  RawPos _  -> Nothing
+  RawChar c -> Just (Lit (VChar c))
+  RawPos k  -> Just (Lit (VInt k))
+  -- A list and a pair are built from operands and nothing is run to build one,
+  -- so a head may carry them — under the same rule as every other literal (MS5
+  -- phase 65). Their elements are checked the same way, which is what keeps a
+  -- region and a nested call out of them too.
+  RawList os   -> ListOf <$> traverse headOperand os
+  RawPairOf a b -> PairOf <$> headOperand a <*> headOperand b
+  -- **A tagged region may not appear in a head** (MS5 phase 61b). A head is
+  -- evaluated by 'holds' to build the match list, cheaply and without effects;
+  -- a region would make dispatch parse an embedded language to find out what
+  -- applies. His ruling, 2026-09-11: heads stay a restricted fragment, and
+  -- pattern matching is the only thing they are to gain.
+  RawRegion _ _ -> Nothing
+  RawQuoted _   -> Nothing
+  -- **A head may not run code** (§1.1): 'holds' builds the match list without
+  -- effects, and a nested call is a call (MS5 phase 63).
+  RawNested _ _ -> Nothing
+
+-- | A written grammar, resolved into the language it declares (MS5 phase 69).
+--
+-- **Two words are special inside a production and nothing else is**: the
+-- language's own name is a recursive slot, and @name@ is a bare identifier.
+-- The parser could not tell — it does not know what the language is called —
+-- which is the same division of labour an op word gets.
+resolveLanguage :: RawLanguage -> Either [RuleError] (String, Language)
+resolveLanguage (RawLanguage nm _) | nm `elem` builtInTags  = Left [BuiltInLanguage nm]
+resolveLanguage (RawLanguage nm _) | nm `elem` builtInTypes = Left [BuiltInType nm]
+resolveLanguage (RawLanguage nm ps) = case partitionEithers (map production ps) of
+  (e : es, _) -> Left (e : es)
+  ([], ps')   -> case language nm ps' of
+    Left gs  -> Left (map (BadGrammar nm) gs)
+    Right l  -> Right (nm, l)
+  where
+    production (RawProduction c is) = Production c <$> traverse item is
+    item i = case i of
+      GTerminal t -> Right (Terminal t)
+      GWord w
+        | w == nm     -> Right Recurse
+        | w == "name" -> Right NameSlot
+        | otherwise   -> Left (BadGrammarItem nm w)
+
+-- | The tags that name Thena's own parsers (MS5, reviewed 2026-09-12).
+--
+-- **A declared language may not take one.** 'operandOf' resolves a declared tag
+-- before the built-ins, so @language surface where { … }@ replaced the @⟨ … ⟩@
+-- fence's sibling spelling without a word of complaint. The notation being
+-- identical for a built-in and a generated parser (§6.0.1) is what makes this a
+-- trap rather than a curiosity.
+builtInTags :: [String]
+builtInTags = ["surface", "core"]
+
+-- | The type constructors @instral@ ships with, and **the one list of them**.
+--
+-- 'resolveTyIn' reads it to tell an unknown name from one given the wrong number
+-- of arguments, and 'resolveLanguage' reads it to refuse a grammar that would
+-- take one of these names — the same trap 'builtInTags' catches for the tag,
+-- found the same way and on the same day. Written once because two copies of a
+-- list like this drift, which is what 'BuiltInType' says.
+builtInTypes :: [String]
+builtInTypes =
+  [ "String", "Name", "Int", "Char", "Bool", "Surface", "Core", "Development"
+  , "Level"
+  , "List", "Option"
+  ]
+
+-- | A written function, resolved into the rule it is (MS5 phase 68a).
+--
+-- **A function IS a rule — his §1.1** — /a rule with one clause and no head/ —
+-- and this is where that stops being a description and becomes the
+-- implementation: @f x = e@ becomes a headless 'Rule' whose body evaluates @e@
+-- and returns it. The engine gains nothing, @Call@ reaches it unchanged, and
+-- 'validate' and 'Thena.Instral.Infer' see an ordinary rule.
+--
+-- **The result is bound to a name no author can write** — @(=)@ contains a
+-- token character, so nothing lexes to it — for 'hoisted'\'s reason: the
+-- generated name must not collide with a parameter.
+--
+-- **A function must produce.** @f x = say "hi"@ is refused here rather than by
+-- 'validate', which would report it against a binding the author never wrote.
+resolveFunction :: [(String, Language)] -> RawFunction -> Either [RuleError] Rule
+resolveFunction ls (RawFunction nm ps body) =
+  case partitionEithers (map (resolvePattern g) ps) of
+    ([], qs) -> Rule g qs [] <$> bodyInstrs ls g nm (concatMap patternBinds qs) body
+    (es, _)  -> Left es
+  where
+    g = GlobalName nm
+
+-- | Compile what stands right of a function's @=@ or a lambda's @->@.
+--
+-- **One expression and a block are the same thing one step apart** (MS5 phase
+-- 75b). @f x = e@ parks @e@ in a binding and returns it; @f x = do ‹block›@ is
+-- the block, which says @return@ itself. So the short form is the block form
+-- with the @return@ written for you, and there is one compilation and not two.
+--
+-- **A block body is NOT a @Thena.Instral.Ops.Block@.** That op builds a call frame
+-- whose @return@ ends the block and drops the value; here the instructions
+-- /are/ the rule's body, so a @return@ in one is the function's result for the
+-- same reason it is a rule's. Nothing in the engine changed for this phase.
+--
+-- **A function must produce**, and the check differs by shape: the short form
+-- asks whether the parked binding produces, the block form whether it returns
+-- at all. Both are reported against the name rather than against a binding the
+-- author never wrote.
+bodyInstrs
+  :: [(String, Language)] -> GlobalName -> String -> [Name] -> RawBody
+  -> Either [RuleError] [Instr]
+bodyInstrs ls g nm bound body = case body of
+  BodyRhs rhs -> do
+    is <- resolveBlock ls g bound [RawBind (RawPWord lambdaResult) rhs]
+    case [ () | Bind p _ o <- is, p == PVar lambdaResult, not (produces o) ] of
+      _ : _ -> Left [FunctionLeavesNothing nm]
+      []    -> Right (is ++ [Do (Return (Ref lambdaResult))])
+  BodyBlock raws -> do
+    is <- resolveBlock ls g bound raws
+    if any returns is then Right is else Left [FunctionLeavesNothing nm]
+  where
+    returns i = case i of
+      Do   (Return _) -> True
+      Bind _ _ (Return _) -> True
+      _               -> False
 
 -- | Resolve a written block of instructions (MS4 phase 45).
 --
@@ -498,27 +1074,426 @@ headOperand o = case o of
 --
 -- The name is the one errors are reported against. A block has none of its own,
 -- so its caller supplies where it came from.
-resolveBlock :: GlobalName -> [RawInstr] -> Either [RuleError] [Instr]
-resolveBlock g body = case partitionEithers (zipWith (instruction g) [0 ..] body) of
-  ([], instrs) -> Right instrs
+-- **An annotation is attached here, not parsed into an instruction** (MS5 phase
+-- 77): @n : Ty@ is about the @n = …@ that follows it, so this walks the written
+-- list in pairs rather than mapping over it. Everything else is unchanged.
+resolveBlock
+  :: [(String, Language)] -> GlobalName -> [Name] -> [RawInstr]
+  -> Either [RuleError] [Instr]
+resolveBlock ls g bound0 body = case partitionEithers (walk 0 bound0 body) of
+  ([], instrs) -> Right (concat instrs)
   (errs, _)    -> Left errs
+  where
+    walk _ _ [] = []
+    -- **An annotation pairs with a PLAIN-NAME binding only** (MS5 phase 84).
+    -- @n : Ty@ says /this local is a scheme of this type/ (phase 77), and a
+    -- compound pattern binds several names with several types, so there is
+    -- nothing for one annotation to be about. A destructuring binding is
+    -- therefore un-annotatable, and that is recorded rather than worked around:
+    -- the alternative — an annotation naming one of the names a pattern binds —
+    -- is a real option and is @ms5\/CLOSEOUT.md@ 39.
+    walk i bound (RawAnnot n t : rest) = case rest of
+      RawBind (RawPWord m) r : more | m == n ->
+        annotated i n t (instruction ls g bound (i + 1) (RawBind (RawPWord m) r))
+          : walk (i + 2) (m : bound) more
+      _ -> [Left (AnnotationWithoutBinding g i n)]
+    walk i bound (ri : rest) =
+      instruction ls g bound i ri : walk (i + 1) (binds ri ++ bound) rest
+
+    -- **What is in scope for the NEXT instruction**, which is the one thing
+    -- 'instruction' could not work out for itself (MS5 phase 82). A body is a
+    -- sequence and a name is bound from the line after the one that binds it,
+    -- which is exactly what 'validate' has always walked; this is the same walk
+    -- one pass earlier, because the decision it feeds — /is this bare word a
+    -- value or a call?/ — has to be made while the 'Op' is built.
+    binds ri = case ri of
+      RawBind p _ -> either (const []) patternBinds (resolvePattern g p)
+      _           -> []
+
+    -- The annotation lands on the instruction that binds the name, which is the
+    -- last of however many the binding expanded to — a nested call is lifted in
+    -- front of it (phase 63) and those liftings are not what was annotated.
+    --
+    -- **A mistake in the type is said about the local, where it was written**
+    -- (MS5 phase 90, @ms5\/CLOSEOUT.md@ 43). 'resolveTy' reports against an
+    -- owner as a signature does, and this passed it @show g@ — so a user read
+    -- /in the signature of GlobalName "go"/, about a local that is not a
+    -- signature. 'InAnnotation' carries the rule, the instruction and the local.
+    annotated i n t got = do
+      ty <- either (Left . InAnnotation g i n) Right (resolveTy ls n t) >>= \mt -> case mt of
+        Just u  -> Right u
+        Nothing -> Left (InAnnotation g i n (UnitInsideAType n))
+      is <- got
+      case reverse is of
+        Bind m _ o : front | m == PVar n -> Right (reverse (Bind m (Just ty) o : front))
+        _ -> Left (AnnotationWithoutBinding g i n)
 
 -- | One written instruction. @‹name› = ‹op›@ is a 'Bind', a bare op is a 'Do' —
 -- §7.2\'s two cases, and the grammar has no third.
-instruction :: GlobalName -> Int -> RawInstr -> Either RuleError Instr
-instruction g i ri = case ri of
-  RawBind n o -> Bind n <$> operation g i o
-  RawDo     o -> Do     <$> operation g i o
+--
+-- **It yields a list, as of MS5 phase 63**, because an operand may be a call:
+-- @some-rule (f a) b@ is two instructions, the nested call bound in front of the
+-- one that wanted its value. The written index is kept for errors — it is the
+-- line the author can see — so the instruction numbers in a message still count
+-- what was written and not what it expanded to.
+instruction
+  :: [(String, Language)] -> GlobalName -> [Name] -> Int -> RawInstr
+  -> Either RuleError [Instr]
+instruction ls g bound i ri = case ri of
+  -- **The left is resolved first** (MS5 phase 84), so that every binding clause
+  -- below works with a 'Pattern' and none of them repeats the question. A
+  -- pattern over @instral@'s own data mentions no op word and no tag, so this
+  -- cannot fail for any reason the clauses care about.
+  RawBind p rhs -> resolvePattern g p >>= \q -> bound' q rhs
+  -- **@x = true@ is the literal, not a call to a rule called @true@** (MS5
+  -- phase 73). @true@ and @false@ are read as values wherever an /operand/ is
+  -- read (phase 64), and the right of an @=@ is the one place a bare word goes
+  -- to 'operation' instead — so without this, @f false@ works and @b = false@
+  -- says /no rule is called false/.
+  RawDo     o            -> lift Do       o
+  -- **Unreachable from 'resolveBlock'**, which takes an annotation and the
+  -- binding after it together. A block that is only an annotation is refused
+  -- there; this answers rather than leaving a pattern-match failure.
+  RawAnnot n _           -> Left (AnnotationWithoutBinding g i n)
+  where
+   bound' n rhs = case rhs of
+    RhsOp (RawOp w []) | w `elem` reservedNames ->
+      pure . Bind n Nothing . Op.Value <$> operandOf ls g i "=" (RawRef w)
+  -- **@x = y@ where @y@ is a LOCAL is that value, not a call to a rule called
+  -- @y@** (MS5 phase 82) — the same defect one guard over, and phase 73's
+  -- comment above is its own best statement: the right of an @=@ is the one
+  -- place a bare word goes to 'operation' instead of being read as an operand.
+  --
+  -- **This is his three-way rule finally written down where it is decided**:
+  -- /an op if one bears the name, else the local if one is bound, else a rule
+  -- call/ (his, 2026-09-12). "Thena.Engine" states it in a comment and
+  -- implemented only the closure half, so @id x = x@ asked for @x@ applied to
+  -- no arguments — a 'Thena.Instral.Type.TFun' @[]@, which is
+  -- @ms5\/CLOSEOUT.md@ 23's unwritable type — and failed at run time with
+  -- /no rule is called x/.
+  --
+  -- **An op word still wins**, because 'operation' is not reached: a word that
+  -- names an op never gets here, exactly as @true@ does not.
+    RhsOp (RawOp w []) | w `elem` bound, not (isOpWord w) ->
+      pure . Bind n Nothing . Op.Value <$> operandOf ls g i "=" (RawRef w)
+    RhsOp o    -> lift (Bind n Nothing) o
+  -- **A value on the right of an @=@** (MS5 phase 68a) — @x = [1, 2]@. Its
+  -- nested calls are lifted exactly as an op's arguments are, and the value
+  -- itself becomes a 'Thena.Instral.Ops.Value', which is the op with no written form.
+  -- **A lambda binds directly**, without going through 'Op.Value': it is
+  -- already an op, and wrapping it would build the closure and then copy it.
+    RhsValue (RawLambda ps b) -> pure . Bind n Nothing <$> closure ls g i ps b
+    RhsValue o ->
+      let (bs, o') = hoistedOne i o
+       in (++) <$> traverse (hoistedBind ls g i) bs
+                <*> (pure . Bind n Nothing . Op.Value <$> operandOf ls g i "=" o')
+
+   lift f (RawOp w as) =
+      let (binds, as') = hoisted i as
+       in (++) <$> traverse (hoistedBind ls g i) binds
+                <*> (pure . f <$> operation ls g i (RawOp w as'))
+
+-- | One binding 'hoisted' lifted out — a nested call or a lambda.
+hoistedBind :: [(String, Language)] -> GlobalName -> Int -> (Name, RawRhs) -> Either RuleError Instr
+-- **A generated name, so a plain 'PVar'** (MS5 phase 84): a hoisted binding is
+-- machinery and never destructures.
+hoistedBind ls g i (n, r) = case r of
+  RhsOp o                     -> Bind (PVar n) Nothing <$> operation ls g i o
+  RhsValue (RawLambda ps b)   -> Bind (PVar n) Nothing <$> closure ls g i ps b
+  RhsValue o                  -> Bind (PVar n) Nothing . Op.Value <$> operandOf ls g i "=" o
+
+-- | Turn a written parameter into a 'Pattern' (MS5 phase 82).
+--
+-- **Which of five things a bare word is, is decided here and nowhere else** —
+-- a variable, @_@, @true@, @false@ or @none@ — for the reason 'operandOf'
+-- already has: one lexer serves every language, so none of those is a keyword
+-- and the grammar can only see an @ident@. Reading them in the same place as an
+-- operand's is what keeps @f true@ meaning the same thing on both sides of the
+-- @=@.
+--
+-- **@_@ is a pattern and not a name**, which costs nothing: it is a perfectly
+-- good identifier everywhere else and stays one, because this function is the
+-- only reader of a parameter position.
+--
+-- **Linearity is NOT checked here** — 'validate' does it, with every other
+-- name question about a rule, so that a function and a rule get the same answer
+-- and the message carries the rule\'s name.
+resolvePattern :: GlobalName -> RawPattern -> Either RuleError Pattern
+resolvePattern g = go
+  where
+    go rp = case rp of
+      RawPWord "_"     -> Right PWild
+      RawPWord "true"  -> Right (PBool True)
+      RawPWord "false" -> Right (PBool False)
+      RawPWord "none"  -> Right PNone
+      RawPWord n       -> Right (PVar n)
+      RawPInt  i       -> Right (PInt i)
+      RawPChar c       -> Right (PChar c)
+      RawPText t       -> Right (PText t)
+      RawPPair a b     -> PPair <$> go a <*> go b
+      RawPList ps mt   -> PList <$> traverse go ps <*> traverse go mt
+      -- **@some@ is the only word that takes an argument**, and a word that is
+      -- not it is refused rather than read as an application: @instral@\'s own
+      -- data has no other named constructor, and stage a of
+      -- @discussion\/pattern-matching.md@ is @instral@\'s own data.
+      RawPApp "some" [a] -> PSome <$> go a
+      RawPApp w _        -> Left (BadPattern g w)
+
+-- | A lambda, compiled the way a function is: a body that ends in @return@.
+--
+-- **The same compilation as 'resolveFunction'**, deliberately — §1.1 says a
+-- function is a rule with one clause and no head, and a lambda is that function
+-- without a name, so there is one way to build a body and not two.
+closure :: [(String, Language)] -> GlobalName -> Int -> [RawPattern] -> RawBody -> Either RuleError Op
+closure ls g i ps b = case traverse (resolvePattern g) ps of
+  Left e   -> Left e
+  -- **A lambda's own parameters are in scope in its body**, which is what makes
+  -- @\\ x -> x@ read as the identity rather than as a call (MS5 phase 82).
+  Right qs -> case bodyInstrs ls g "λ" (concatMap patternBinds qs) b of
+    Left (e : _) -> Left e
+    Left []      -> Left (BadOperands g i "λ")
+    Right is     -> Right (Op.Lambda qs is)
+
+-- | Where a lambda's and a function's result is parked. It contains a token
+-- character, so nothing an author writes can collide with it.
+lambdaResult :: Name
+lambdaResult = "(=)"
+
+-- | Lift every nested call out of an operand run, innermost first.
+--
+-- @some-rule (f (g a)) b@ becomes @(0:1) = g a ; (0:0) = f (0:1) ; some-rule
+-- (0:0) b@ — a fixed evaluation order, left to right and innermost first, which
+-- is the order the arguments are written in and the only one a reader would
+-- guess. It matters because a call changes the development: these are
+-- statements, not expressions over a pure value.
+--
+-- **The names cannot collide with anything written.** A parenthesis is a token,
+-- so no identifier can contain one; the pair of numbers is the written
+-- instruction's index and a counter within it, which keeps them apart across a
+-- body.
+hoisted :: Int -> [RawOperand] -> ([(Name, RawRhs)], [RawOperand])
+hoisted i as = let (_, bs, os) = go 0 as in (bs, os)
+  where
+    go k []       = (k, [], [])
+    go k (o : os) =
+      let (k1, bs1, o') = one k o
+          (k2, bs2, os') = go k1 os
+       in (k2, bs1 ++ bs2, o' : os')
+
+    -- **A literal is walked into** (MS5 phase 65): @f [g a, b]@ must lift the
+    -- @g a@ exactly as @f (g a)@ does, or a call inside a list would reach
+    -- 'ref' — which refuses it — and the list would be unwritable with anything
+    -- computed in it.
+    one k o = case o of
+      RawNested w inner ->
+        let (k1, bs1, inner') = go (k + 1) inner
+            n                 = "(" ++ show i ++ ":" ++ show (k :: Int) ++ ")"
+         in (k1, bs1 ++ [(n, RhsOp (RawOp w inner'))], RawRef n)
+      -- **A lambda is lifted like a nested call** (MS5 phase 68b), and for a
+      -- sharper reason: a closure captures the environment it is made in, so it
+      -- is built by an instruction and cannot be a literal. **Nothing is
+      -- hoisted out of its body** — that is a scope of its own.
+      RawLambda ps b ->
+        let n = "(" ++ show i ++ ":" ++ show (k :: Int) ++ ")"
+         in (k + 1, [(n, RhsValue (RawLambda ps b))], RawRef n)
+      RawList os ->
+        let (k1, bs, os') = go k os in (k1, bs, RawList os')
+      RawPairOf a b ->
+        let (k1, bs1, a') = one k a
+            (k2, bs2, b') = one k1 b
+         in (k2, bs1 ++ bs2, RawPairOf a' b')
+      _ -> (k, [], o)
+
+-- | 'hoisted' for a single operand — what stands right of an @=@ (MS5 phase
+-- 68a).
+hoistedOne :: Int -> RawOperand -> ([(Name, RawRhs)], RawOperand)
+hoistedOne i a = case hoisted i [a] of
+  (bs, [o]) -> (bs, o)
+  (bs, _)   -> (bs, a)
+
+-- | One written operand, resolved (extracted to the top level at MS5 phase 68a
+-- so that the right of an @=@ can use it).
+--
+-- The three arguments before the operand are only for errors: which rule, which
+-- instruction, and the word that wanted it.
+operandOf :: [(String, Language)] -> GlobalName -> Int -> String -> RawOperand -> Either RuleError Operand
+operandOf ls g i w o = case o of
+  -- **Cannot arise**, for 'RawNested'\'s reason: 'hoisted' lifts every lambda
+  -- into a binding of its own before this runs (MS5 phase 68b).
+  RawLambda _ _ -> Left (BadOperands g i w)
+  -- **Cannot arise**: 'hoisted' lifts every nested call into a binding of
+  -- its own before this runs, so what reaches here is always a leaf (MS5
+  -- phase 63). Written out rather than left to a pattern-match failure.
+  RawNested _ _ -> Left (BadOperands g i w)
+  -- **@true@ and @false@ are read here and not in the lexer** — his ruling,
+  -- 2026-09-12 (MS5 phase 64). One lexer serves every language, and an
+  -- object language may well call a constructor @true@; this table is
+  -- @instral@'s alone, so reserving them here takes nothing from Surface or
+  -- Core. 'validate' refuses a parameter or a binding of either name, so a
+  -- rule that meant to use one as a variable is told rather than silently
+  -- given a literal.
+  RawRef "true"  -> Right (Lit (VBool True))
+  RawRef "false" -> Right (Lit (VBool False))
+  RawRef n  -> Right (Ref n)
+  RawText t -> Right (Lit (VText t))
+  RawChar c -> Right (Lit (VChar c))
+  -- **A numeral is a value here** (MS5 phase 64), where it is a field
+  -- position under a word from 'partWords' — those are read above, before
+  -- this. It was 'BadOperands' until this phase, which is one more
+  -- load-time check traded for a run-time one: an op given an @Int@ where
+  -- it wanted a term fails with 'Thena.Errors.ExpectedTerm', and saying so
+  -- earlier is the type system's job (@ms2\/CLOSEOUT.md@ 4b, phase 66).
+  RawPos k  -> Right (Lit (VInt k))
+  RawList os    -> ListOf <$> traverse (operandOf ls g i w) os
+  RawPairOf a b -> PairOf <$> operandOf ls g i w a <*> operandOf ls g i w b
+  -- **A tagged region is parsed here, at load** (MS5 phase 61b, §6.0.1), so
+  -- that a syntax error in an embedded term arrives with every other syntax
+  -- error rather than when a rule happens to run.
+  --
+  -- The two built-in tags differ in how far they get, and the difference is
+  -- the languages' rather than ours: a surface term is unresolved by nature,
+  -- so it is finished here; a core term needs the globals and the focus's
+  -- context, which do not exist while a rule base is being read.
+  -- Corners are the other spelling of a @core@ region, and land in the
+  -- same place: unresolved, because a rule base is read before there is
+  -- anything to resolve against.
+  RawQuoted r -> Right (Lit (VRaw r))
+  RawRegion tag src | Just l <- lookup tag ls ->
+    -- **A declared object language's parser is generated** (MS5 phase 69,
+    -- §6.0.1) and the notation is the built-in tags' — the asymmetry lives here,
+    -- in the implementation, and no rule of the language mentions it.
+    case parseObject l src of
+      Left e  -> Left (BadRegion g i tag e)
+      Right t -> Right (Lit (VObject tag (rootedAt t)))
+  RawRegion tag src -> case tag of
+    "surface" -> case parseSurfaceText src of
+      Left e  -> Left (BadRegion g i tag e)
+      Right t -> Right (Lit (VSurface (rootedAt t)))
+    "core" -> case lexTokens src of
+      Left e   -> Left (BadRegion g i tag (LexFailed e))
+      Right ts -> case parseTerm ts of
+        Left e  -> Left (BadRegion g i tag (ParseFailed e))
+        Right r -> Right (Lit (VRaw r))
+    _ -> Left (NoSuchTag g i tag)
 
 -- | An op word and its written arguments, resolved.
 --
--- The whole word vocabulary is 'Thena.Ops.opKeyword'\'s, read backwards, and
+-- The whole word vocabulary is 'Thena.Instral.Ops.opKeyword'\'s, read backwards, and
 -- the arities are here because that is where they are known. A word this does
 -- A word this does not accept is a **rule call** (phase 25e); an accepted word
 -- given the wrong arguments is 'BadOperands'. Those are separate mistakes, and
 -- only the second is a load-time error now.
-operation :: GlobalName -> Int -> RawOp -> Either RuleError Op
-operation g i (RawOp w as)
+-- | The op words, by how many operands they take (MS5 phase 72).
+--
+-- **Hoisted out of 'operation'\'s @where@** so that a test can walk them: they
+-- are the parser's half of the word vocabulary, 'Thena.Instral.Ops.opKeyword' is the
+-- printer's, and until this phase the only thing crossing the two was
+-- @RuleSyntaxTests@' hand-written @everyOp@ — which phase 68a found had no
+-- @goto@ row at all, so splitting that word into two would have passed the suite
+-- in silence (@ms5\/CLOSEOUT.md@ 5).
+--
+-- 'opWords' below is what makes the check total over these tables rather than
+-- over a list someone has to remember to grow.
+
+nullaryOps :: [(String, Op)]
+nullaryOps =
+  [ ("along", Along), ("into", Into), ("back", Back), ("reduce", Reduce)
+  , ("prim-attack", Attack), ("prim-regret", Regret)
+  , ("prim-solve", Solve), ("prim-abandon", Abandon), ("goal", Goal)
+  , ("fresh-level", Op.FreshLevel)
+  , ("here", Here)
+  , ("none", Op.None)
+  , ("prim-prove", Prove)
+  , ("pop-development", Op.PopDevelopment)
+  ]
+unaryOps :: [(String, Operand -> Op)]
+unaryOps =
+  [ ("say", Say), ("yield", Op.Yield), ("prim-try", Try)
+  , ("return", Op.Return)
+  , ("some", Op.Some)
+  , ("goto", Goto), ("goto-named", Op.GotoNamed)
+  , ("name-text", Op.NameText)
+  , ("level", Op.LevelOf), ("universe-at", Op.UniverseAt)
+  , ("surface-of", Op.SurfaceOf)
+  , ("push-development", Op.PushDevelopment)
+  , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
+  , ("typeof", Typing), ("expose", Op.Expose), ("resolve-core", Op.ResolveCore), ("fresh-name", FreshName), ("prim-apply", Op.Apply)
+  , ("resolve-name", Op.ResolveName)
+  , ("surface-name", Op.SurfaceNameOf)
+  , ("surface-universe", Op.SurfaceUniverseOf)
+  , ("arrow-domain", Op.ArrowDomain), ("arrow-codomain", Op.ArrowCodomain)
+  , ("ascription-type", Op.AscriptionType)
+  , ("ascription-term", Op.AscriptionTerm)
+  , ("app-function", Op.AppFunction)
+  , ("app-last-argument", Op.AppLastArgument)
+  , ("app-head", Op.AppHead)
+  , ("app-first-argument", Op.AppFirstArgument)
+  , ("app-tail", Op.AppTail)
+  , ("expand-implicits", Op.ExpandImplicits)
+  , ("lambda-name", Op.LambdaName), ("lambda-tail", Op.LambdaTail)
+  , ("lambda-body", Op.LambdaBody)
+  , ("let-name", Op.LetName), ("let-type", Op.LetType)
+  , ("let-value", Op.LetValue), ("let-body", Op.LetBody)
+  , ("forall-name", Op.ForallName), ("forall-domain", Op.ForallDomain)
+  , ("forall-tail", Op.ForallTail), ("play", Op.Play)
+  , ("elim-spine", Op.ElimSpine)
+  ]
+binaryOps :: [(String, Operand -> Operand -> Op)]
+binaryOps =
+  [ ("assume", Assume), ("claim", Claim), ("define", Define)
+  , ("quantify", Op.Quantify)
+  , ("concat", Concat), ("unify", Unify), ("unify-into", Op.UnifyInto)
+  , ("arrow", Arrow), ("apply-to", ApplyTo), ("apply-next", Op.ApplyNext)
+  ]
+
+-- | Does some op bear this word at /some/ arity?
+--
+-- **The shadowing guard** (MS5 phase 82, and his 2026-09-12 ruling one layer
+-- up): a word an op bears is the op, whatever a local is called. It is asked
+-- only where a bare word right of an @=@ could be a local, so an op word never
+-- has to compete with one.
+isOpWord :: String -> Bool
+isOpWord w = w `elem` partWords || w `elem` map fst opWords
+
+-- | The numbers of arguments an op word takes, asked of 'operation' itself
+-- (MS5 phase 92) — so an undefined call written with an op's word can say the
+-- op takes one argument, rather than that no rule is called @say@. **Nothing is
+-- listed a second time**: a written op that 'operation' resolves to anything but
+-- a 'Call' is that op, and @arg@'s position and @cross@'s field are covered
+-- because a sample of each shape is tried.
+opArities :: String -> [Int]
+opArities w =
+  [ k
+  | k <- [0 .. 4]
+  , any resolves [ as | as <- samples k, length as == k ]
+  ]
+  where
+    resolves as = case operation [] (GlobalName "") 0 (RawOp w as) of
+      Right (Call _ _) -> False
+      Right _          -> True
+      Left _           -> False
+    samples k =
+      [ replicate k (RawRef "x")
+      , replicate k (RawRef "type")
+      , [ RawPos 1 | k == 1 ]
+      , take k [RawRef "x", RawRef "name"]
+      ]
+
+-- | Every op word paired with an op that bears it, built from the three tables
+-- above — so nothing has to be listed a second time.
+--
+-- The operands are a placeholder: what is being crossed is the /word/, and
+-- 'Thena.Instral.Ops.opKeyword' does not read an op's operands.
+opWords :: [(String, Op)]
+opWords =
+  nullaryOps
+    ++ [ (w, f sample) | (w, f) <- unaryOps ]
+    ++ [ (w, f sample sample) | (w, f) <- binaryOps ]
+  where
+    sample = Lit (VText "x")
+
+operation :: [(String, Language)] -> GlobalName -> Int -> RawOp -> Either RuleError Op
+operation ls g i (RawOp w as)
   -- The field words come first: @arg@ is one of them and also the only word
   -- that reads a position, so a general arity table could not describe it.
   | w `elem` partWords = case as of
@@ -543,7 +1518,7 @@ operation g i (RawOp w as)
       ("prim-let", [])            -> Right (IntroLet Nothing)
       ("prim-let", [a])           -> IntroLet . Just <$> ref a
       ("prim-intro", _)           -> bad
-      ("call", RawRef r : rest)   -> Call (GlobalName r) <$> traverse ref rest
+      ("call", RawRef r : rest)   -> Call r <$> traverse ref rest
       ("call", _)                 -> bad
 
 
@@ -553,34 +1528,42 @@ operation g i (RawOp w as)
       ("ask", _)                  -> bad
 
       -- §3.7: a declaration is a command, not a rule-body operation. The word
-      -- exists ('Thena.Ops.opKeyword' is total) and resolving it is refused
+      -- exists ('Thena.Instral.Ops.opKeyword' is total) and resolving it is refused
       -- here, one step before 'validate' would have.
       ("data", _)                 -> Left (DeclarationInBody g i)
 
-      _ -> case (lookup w nullary, lookup w unary, lookup w binary, as) of
+      _ -> case (lookup w nullaryOps, lookup w unaryOps, lookup w binaryOps, as) of
         (Just o,  _, _, [])       -> Right o
-        (Just _,  _, _, _)        -> bad
         (_, Just f,  _, [a])      -> f <$> ref a
-        (_, Just _,  _, _)        -> bad
         (_, _, Just f,  [a, b])   -> f <$> ref a <*> ref b
-        (_, _, Just _,  _)        -> bad
         -- **A word that names no op is a call to a rule of that name**
         -- (phase 25e), which is what a bare word has meant at the REPL since
         -- phase 23b. The user, 2026-08-26: *"Bare word was always, always, the
         -- intended design."*
         --
-        -- An op word given the wrong arity is still 'BadOperands' and not a
-        -- call, because the arity tables above are consulted first: @claim x@
-        -- is a mistake about @claim@, not a call to a rule named @claim@.
+        -- **An op word at an arity the op does not have is a CALL** (MS5
+        -- phase 62b, the user's decision): @claim ty@ is not a mistake about
+        -- @claim@ — it is a call to the one-argument rule of that name, which
+        -- asks for a name and then runs the two-argument op. His words:
+        -- /"the normal claim is operation (primitive and built in), the unary
+        -- claim is a rule"/.
         --
-        -- The cost: a mistyped word is no longer refused at load time; it is
-        -- a call that finds no clause when it runs. @NoSuchOp@ went with this
-        -- change, being an error that can no longer happen. **That is the
-        -- trade phase 23 already took for explicit @call@** (§8: a rule may
-        -- call itself, a rule below it, or one in a base loaded later, so no
-        -- name can be resolved at load time), and it is what the rule
-        -- language's type system is for (closeout 4b).
-        _                         -> Call (GlobalName w) <$> traverse ref as
+        -- So a word names an **op at the arities the op has, and a rule at
+        -- every other arity**, which is the reading 'clauses' already uses —
+        -- it filters by name /and/ arity, so several clauses of one name may
+        -- take different numbers of arguments. Ops and rules now agree about
+        -- that instead of differing.
+        --
+        -- **It reverses this module's earlier choice**, which refused the
+        -- arity mismatch as 'BadOperands' so that @claim x@ was caught when
+        -- the base loaded. The cost is the one below, one word wider:
+        --
+        -- **A mistyped word is still refused at load time**, one pass later:
+        -- it resolves to a call, and inference refuses a call nothing loaded
+        -- defines and names the arity the op does take (MS5 phase 92). Until
+        -- then it failed only when it ran, on phase 23's note that a base
+        -- loaded later might define it — which was never his ruling and is gone.
+        _                         -> Call w <$> traverse ref as
   where
     bad     = Left (BadOperands g i w)
     part k  = maybe bad (Right . Down) (partOf w k)
@@ -592,51 +1575,8 @@ operation g i (RawOp w as)
     -- kind of value fails at run time with 'Thena.Errors.ExpectedTerm', and
     -- "when the instruction language gets a type system that check moves
     -- there". A grammar that policed it here would be that type system, badly.
-    ref o   = case o of
-      RawRef n  -> Right (Ref n)
-      RawText t -> Right (Lit (VText t))
-      RawPos _  -> Left (BadOperands g i w)
+    ref     = operandOf ls g i w
 
-    nullary =
-      [ ("along", Along), ("into", Into), ("back", Back), ("reduce", Reduce)
-      , ("prim-attack", Attack), ("prim-regret", Regret)
-      , ("prim-solve", Solve), ("prim-abandon", Abandon), ("goal", Goal)
-      , ("fresh-universe", Op.FreshUniverse)
-      , ("here", Here)
-      , ("prim-prove", Prove)
-      , ("pop-development", Op.PopDevelopment)
-      ]
-    unary =
-      [ ("say", Say), ("yield", Op.Yield), ("prim-try", Try)
-      , ("goto", Goto), ("push-development", Op.PushDevelopment)
-      , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
-      , ("typeof", Typing), ("expose", Op.Expose), ("fresh-name", FreshName), ("prim-apply", Op.Apply)
-      , ("resolve-name", Op.ResolveName)
-      , ("surface-name", Op.SurfaceNameOf)
-      , ("surface-universe", Op.SurfaceUniverseOf)
-      , ("arrow-domain", Op.ArrowDomain), ("arrow-codomain", Op.ArrowCodomain)
-      , ("ascription-type", Op.AscriptionType)
-      , ("ascription-term", Op.AscriptionTerm)
-      , ("app-function", Op.AppFunction)
-      , ("app-last-argument", Op.AppLastArgument)
-      , ("app-head", Op.AppHead)
-      , ("app-first-argument", Op.AppFirstArgument)
-      , ("app-tail", Op.AppTail)
-      , ("expand-implicits", Op.ExpandImplicits)
-      , ("lambda-name", Op.LambdaName), ("lambda-tail", Op.LambdaTail)
-      , ("lambda-body", Op.LambdaBody)
-      , ("let-name", Op.LetName), ("let-type", Op.LetType)
-      , ("let-value", Op.LetValue), ("let-body", Op.LetBody)
-      , ("forall-name", Op.ForallName), ("forall-domain", Op.ForallDomain)
-      , ("forall-tail", Op.ForallTail), ("play", Op.Play)
-      , ("elim-spine", Op.ElimSpine)
-      ]
-    binary =
-      [ ("assume", Assume), ("claim", Claim), ("define", Define)
-      , ("quantify", Op.Quantify)
-      , ("concat", Concat), ("unify", Unify), ("unify-into", Op.UnifyInto)
-      , ("arrow", Arrow), ("apply-to", ApplyTo), ("apply-next", Op.ApplyNext)
-      ]
 
 -- | What @ask@'s second word may be — 'AnswerKind', spelled.
 --
@@ -677,7 +1617,7 @@ data TestError = NoSuchTestWord | WrongTestArity Int Int
 -- test is rebuilt from its operands, and the final case is the arity mismatch,
 -- which is reachable and is what 'testOf' reports.
 --
--- A test added later must extend 'testWord' and 'testOperands', both of which
+-- A test added later must extend 'testWord' and 'testTypes', both of which
 -- @-Wall@ forces; "Thena.RuleSyntaxTests" round-trips every entry of
 -- 'everyTest' through the parser, which is what catches one this function
 -- forgot.
@@ -710,39 +1650,57 @@ withOperands t os = case (t, os) of
   (LetIsBare _, [o])             -> Just (LetIsBare o)
   _                      -> Nothing
 
--- | What a test was written with, in written order. 'Thena.Ops.operandsOf'\'s
+-- | What a test was written with, in written order. 'Thena.Instral.Ops.operandsOf'\'s
 -- job one type over, and what lets 'testOf' read an arity off 'everyTest'
 -- rather than keeping a second table of counts.
-testOperands :: Test -> [Operand]
-testOperands t = case t of
+-- | Every operand a head test reads, **with the type it wants there** (MS5
+-- phase 66b) — 'Thena.Instral.Ops.operandTypes' one type over, and for the same reason:
+-- two case splits agreeing about arity in twenty-four places is a thing that can
+-- come apart, and one cannot disagree with itself.
+--
+-- **The head is where a rule's parameters get their types**, which is why this
+-- exists before inference does: @rule elaborate t :- when (surface-is-name t)@
+-- is what says @t@ is a 'Ty.TSurface'. Phase 66c is what reads it that way.
+--
+-- Every test but the focus questions asks about a term it is handed, and
+-- all but the data ones ask about a /surface/ term — head predicates were the
+-- surface language's from MS4 phase 47 onward.
+testTypes :: Test -> [(Operand, Ty.Ty)]
+testTypes t = case t of
   FocusIsHole     -> []
   FocusIsGuess    -> []
   FocusIsComponent -> []
   GoalTypeIsPi    -> []
   GoalTypeIsLet   -> []
-  SurfaceIsName o         -> [o]
-  SurfaceIsUniverse o     -> [o]
-  SurfaceIsUniverseOpen o -> [o]
-  SurfaceIsPlaceholder o  -> [o]
-  SurfaceIsHole o         -> [o]
-  SurfaceIsApp o          -> [o]
-  SurfaceIsLambda o       -> [o]
-  SurfaceIsForall o       -> [o]
-  SurfaceIsArrow o        -> [o]
-  SurfaceIsLet o          -> [o]
-  SurfaceIsAscription o   -> [o]
-  SurfaceIsElim o         -> [o]
-  SurfaceIsDo o           -> [o]
-  AppArgsAreExplicit o    -> [o]
-  AppHeadIsName o         -> [o]
-  AppHeadIsElim o         -> [o]
-  LambdaBindsMore o       -> [o]
-  LambdaBindsOne o        -> [o]
-  LetIsAnnotated o        -> [o]
-  LetIsBare o             -> [o]
+  SurfaceIsName o         -> [(o, Ty.TSurface)]
+  SurfaceIsUniverse o     -> [(o, Ty.TSurface)]
+  SurfaceIsUniverseOpen o -> [(o, Ty.TSurface)]
+  SurfaceIsPlaceholder o  -> [(o, Ty.TSurface)]
+  SurfaceIsHole o         -> [(o, Ty.TSurface)]
+  SurfaceIsApp o          -> [(o, Ty.TSurface)]
+  SurfaceIsLambda o       -> [(o, Ty.TSurface)]
+  SurfaceIsForall o       -> [(o, Ty.TSurface)]
+  SurfaceIsArrow o        -> [(o, Ty.TSurface)]
+  SurfaceIsLet o          -> [(o, Ty.TSurface)]
+  SurfaceIsAscription o   -> [(o, Ty.TSurface)]
+  SurfaceIsElim o         -> [(o, Ty.TSurface)]
+  SurfaceIsDo o           -> [(o, Ty.TSurface)]
+  AppArgsAreExplicit o    -> [(o, Ty.TSurface)]
+  AppHeadIsName o         -> [(o, Ty.TSurface)]
+  AppHeadIsElim o         -> [(o, Ty.TSurface)]
+  LambdaBindsMore o       -> [(o, Ty.TSurface)]
+  LambdaBindsOne o        -> [(o, Ty.TSurface)]
+  LetIsAnnotated o        -> [(o, Ty.TSurface)]
+  LetIsBare o             -> [(o, Ty.TSurface)]
+  -- The four data questions (MS5 phase 65), and the only tests that ask about
+  -- something @instral@ owns rather than about a surface node.
+
+-- | Every operand a head test reads, in the order it is written.
+testOperands :: Test -> [Operand]
+testOperands = map fst . testTypes
 
 -- | The word a 'Test' is written with. Total, so @-Wall@ makes a new test say
--- how it is spelled — 'Thena.Ops.opKeyword'\'s trick, one type over.
+-- how it is spelled — 'Thena.Instral.Ops.opKeyword'\'s trick, one type over.
 --
 -- Hyphenated, which is what §8 and @OBJECTIVE.md@ have always written
 -- (@focus-is-hole@, @hint-is-app@) and what the lexer could not read until this
@@ -805,3 +1763,58 @@ everyTest =
   , LetIsAnnotated (Lit (VText ""))
   , LetIsBare (Lit (VText ""))
   ]
+
+-- | Every @do@ block written inside a surface literal these instructions hold,
+-- resolved, and named for where it was found (MS5 phase 79).
+--
+-- **The load-time twin of what 'Thena.Instral.Ops.Play' does as it runs.** Both go
+-- through 'resolveBlock' and both are handed the same language list, so they
+-- cannot come to disagree about what a word means; what this adds is that the
+-- answer is known before the machine starts, which is what lets a block be
+-- validated and typed like any other body (@ms5\/CLOSEOUT.md@ 20).
+--
+-- **It recurses**, because a block\'s own instructions may hold another surface
+-- literal holding another block.
+--
+-- The name each block is given is the enclosing rule\'s with an index, so an
+-- error in one says which block of which rule it was in.
+surfaceBlocks
+  :: [(String, Language)] -> GlobalName -> [Instr] -> Either [RuleError] [Rule]
+surfaceBlocks ls g is = concat <$> traverse one (zip [0 :: Int ..] (blocksUnder is))
+  where
+    one (k, raws) = do
+      body <- resolveBlock ls nm [] raws
+      case [ ReturnInSurfaceBlock nm i | (i, instr) <- zip (writtenPositions body) body, returns instr ] of
+        e : es -> Left (e : es)
+        []     -> do
+          inner <- surfaceBlocks ls nm body
+          Right (Rule nm [] [] body : inner)
+      where
+        nm = GlobalName (unGlobal g ++ ", do block " ++ show (k + 1))
+
+    returns i = case i of
+      Do   (Return _)   -> True
+      Bind _ _ (Return _) -> True
+      _                 -> False
+
+    unGlobal (GlobalName n) = n
+
+-- | The written blocks inside every surface literal an instruction run holds.
+blocksUnder :: [Instr] -> [[RawInstr]]
+blocksUnder = concatMap one
+  where
+    one i = case i of
+      Bind _ _ o -> inOp o
+      Do       o -> inOp o
+
+    inOp o = case o of
+      Op.Lambda _ b -> blocksUnder b
+      Op.Block b    -> blocksUnder b
+      _             -> concatMap inOperand (operandsOf o)
+
+    inOperand a = case a of
+      Lit (VSurface z) -> blocksIn (Zipper.root z)
+      Lit (VClosure _ b _) -> blocksUnder b
+      ListOf os        -> concatMap inOperand os
+      PairOf x y       -> inOperand x ++ inOperand y
+      _                -> []

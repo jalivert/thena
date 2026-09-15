@@ -46,6 +46,8 @@ import Thena.Global.Env
 import Thena.Repl (startingSession, loadProofFile, renderCore, renderEliminator)
 import Thena.Core.Convert (convert)
 import Thena.Core.Context ()
+import Thena.Standard (withRules)
+import Thena.Rules (RuleError (..))
 import Data.ByteString.Builder (stringUtf8, toLazyByteString)
 import Test.Tasty.Golden (goldenVsString)
 
@@ -148,7 +150,7 @@ scriptTests =
     -- an op that asks is answered by the next line of the file, exactly as it
     -- would be by the next line typed (§7.5).
   , testCase "a question is answered by the next line" $
-      let l = source ["assume : Type₀", "A"]
+      let l = sourceWithRules ["assume ⌜ Type₀ ⌝", "A"]
        in do
             loadedError l @?= Nothing
             length (loadedResponses l) @?= 2
@@ -196,7 +198,7 @@ failureTests =
             declared "A0" l @?= True
 
   , testCase "a file that ends while something is asking says so" $
-      loadedError (source ["assume : Type₀"]) @?= Just (UnansweredQuestion 1)
+      loadedError (sourceWithRules ["assume ⌜ Type₀ ⌝"]) @?= Just (UnansweredQuestion 1)
   ]
 
 -- --------------------------------------------------------------------------
@@ -206,6 +208,14 @@ failureTests =
 -- | Run lines against an empty session.
 source :: [String] -> Loaded
 source = loadSource newSession . unlines
+
+-- | The same, with the standard base installed.
+--
+-- **The asking form of @assume@ needs it** (MS5 phase 62b): @assume ⌜ T ⌝@ is a
+-- rule now, not a shape the driver recognised, so a session with no base has
+-- nothing to call — the same as for @attack@ or @intro@ since phase 23b.
+sourceWithRules :: [String] -> Loaded
+sourceWithRules = loadSource withRules . unlines
 
 -- | Run lines against a session that already has something in it.
 afterLines :: Session -> [String] -> (Loaded -> IO ()) -> IO ()
@@ -347,6 +357,24 @@ moduleTests =
         (_, Failed _) -> pure ()
         (_, other)    -> assertFailure (show other)
 
+  , -- **And it is typed before anything in the module runs** (MS5 phase 90,
+    -- @ms5\/CLOSEOUT.md@ 41). Phase 79 checked the blocks inside surface terms
+    -- and not this one, so @prim-try 3@ halted after the items above it had
+    -- already been declared.
+    testCase "a top-level block that does not type check is refused" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 mistypedBlockModule of
+        (s1, EntryMistyped (_ : _)) ->
+          isDeclared (GlobalName "Nat") (globals (sessionMachine s1)) @?= False
+        (_, other) -> assertFailure (show other)
+
+  , -- **Each top-level block is its own scope**, as a block is.
+    testCase "a name bound in one top-level block is not in scope in the next" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 twoBlockModule of
+        (_, LineRefused [UnboundInRule _ _ "x"]) -> pure ()
+        (_, other) -> assertFailure (show other)
+
   , testCase "a file that is not a module at all is a syntax error" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 "data Nat : Type\8320 where { zero : Nat }" of
@@ -387,13 +415,34 @@ moduleTests =
       \one : Nat\n\
       \one = succ zero\n"
 
+    -- **@cross body@**, because the other two candidates stopped being
+    -- resolution failures: an op word at an arity the op does not have is a
+    -- call (MS5 phase 62b), and a numeral is an 'Thena.Instral.Ops.VInt' rather than a
+    -- misplaced field position (MS5 phase 64). What is left is an operand no
+    -- reading of the word admits, and @cross@ takes exactly two.
+    mistypedBlockModule =
+      "module M where\n\
+      \data Nat : Type\8320 where\n\
+      \  zero : Nat\n\
+      \\n\
+      \do\n\
+      \  prim-try 3\n"
+
+    twoBlockModule =
+      "module M where\n\
+      \do\n\
+      \  x = \"one\"\n\
+      \\n\
+      \do\n\
+      \  say x\n"
+
     badBlockModule =
       "module M where\n\
       \data Nat : Type\8320 where\n\
       \  zero : Nat\n\
       \\n\
       \do\n\
-      \  say\n"
+      \  cross body\n"
 
     badModule =
       "module M where\n\

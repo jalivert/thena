@@ -9,16 +9,16 @@ thena spine> :revalidate
 valid
 thena spine> :extract
 stuck: not finished: the hole goal is still open, so there is no term yet
-thena spine> certify Nat
+thena spine> certify ⌜ Nat ⌝
 stuck: not finished: the hole goal is still open, so there is no term yet
 thena spine> along
-thena core> unify goal ≟ zero
+thena core> unify ⌜ goal ⌝ ⌜ zero ⌝
 solved: goal
 thena core> :extract
 let goal = zero : Nat in goal
-thena core> certify Nat
+thena core> certify ⌜ Nat ⌝
 certified
-thena core> certify Nat -> Nat
+thena core> certify ⌜ Nat -> Nat ⌝
 the kernel refused it
 in the term:
   let goal = zero : Nat in goal has type Nat
@@ -27,11 +27,10 @@ in the term:
 thena core> :revalidate
 valid
 thena core> back
-thena spine> assume A : Type₀
-assumed A
+thena spine> assume "A" ⌜ Type₀ ⌝
 thena spine> :extract
 λ (A : Type₀) -> let goal = zero : Nat in goal
-thena spine> certify Nat
+thena spine> certify ⌜ Nat ⌝
 the kernel refused it
 in the term:
   λ (A : Type₀) -> let goal = zero : Nat in goal has type Type₀ -> Nat

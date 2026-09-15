@@ -37,6 +37,7 @@ module Thena.Driver
   , loadSource
   , loadProofSource
   , RuleFileError (..)
+  , InstralTypeError
   , loadRuleBases
   , baseHead
   , parseCore
@@ -48,16 +49,16 @@ module Thena.Driver
   , kindOf
   ) where
 
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), substLevelsIn)
 import Data.Char (isSpace)
-import Data.List (dropWhileEnd, isSuffixOf, stripPrefix)
+import Data.List (dropWhileEnd, isSuffixOf, nub, stripPrefix)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
-import Thena.Development.Cursor (expectedType, Cursor, Focus (..), Part (..), focus, overLevels)
+import Thena.Development.Cursor (expectedType, Cursor, Focus (..), focus, overLevels)
 import Thena.Development.Partial (Partial (..), extract)
 import Thena.Engine
   ( ChoicePoint (..)
@@ -111,10 +112,9 @@ import Thena.Global.Env
   )
 import Thena.Core.Convert (convert)
 import Thena.Core.Typing (infer, sortOf)
-import qualified Thena.Ops as Ops
-import Thena.Ops
-  ( AnswerKind (..)
-  , partOf
+import qualified Thena.Instral.Ops as Ops
+import Thena.Instral.Ops
+  ( partOf
   , partWords
   , Instr (..)
   , Rule (..)
@@ -124,6 +124,9 @@ import Thena.Ops
   , Value (..)
   )
 import Data.Either (partitionEithers)
+import Thena.Instral.Infer (InstralTypeError, inferBlock, inferProgram)
+import Thena.Instral.Grammar (Language)
+import Thena.Instral.Type (Signature (..), Ty (..), fits)
 import Thena.Rules
   ( RuleBase (..)
   , RuleError
@@ -132,8 +135,17 @@ import Thena.Rules
   , next
   , resolveRule
   , resolveBlock
+  , surfaceBlocks
   , RuleError (..)
+  , allCallable
+  , allLanguages
+  , baseRules
+  , allSignatures
   , ruleBase
+  , resolveFunction
+  , resolveLanguage
+  , resolveSignature
+  , resolveTy
   , validate
   )
 import Thena.Surface.Concrete
@@ -146,15 +158,25 @@ import Thena.Surface.Concrete
   , SurfaceModule (..)
   , PairingError (..)
   )
-import Thena.Surface.Layout (layout)
+import Thena.Surface.Layout (layout, layoutFile)
 import Thena.Surface.Zipper (rootedAt)
 import qualified Thena.Surface.Parser as Surface
-import Thena.Syntax.Concrete (Raw (..), RawRule)
+import Thena.Syntax.Concrete (Raw (..))
+import Thena.Instral.Concrete
+  ( RawDecl (..)
+  , RawRhs (..)
+  , RawInstr (..)
+  , RawOp (..)
+  , RawOperand (..)
+  , RawPattern (..)
+  )
 import Thena.Syntax.Lexer (Located (..), Token (..), lexTokens)
 import Thena.Syntax.Parser
   ( parseData
   , parseEquation
   , parseNameAndType
+  , parseEntry
+  , parseInstralTy
   , parseRules
   , parseTerm
   )
@@ -411,6 +433,18 @@ data Response
   | BasesListed [RuleBase]      -- ^ @:bases@ — name, description, path
   | RulesListed [RuleBase]      -- ^ @:rules@ — the rules themselves, by base
   | RuleFileRefused FilePath RuleFileError
+  | EntryMistyped [InstralTypeError]
+    -- ^ a typed entry that resolved and does not type check (MS5, reviewed
+    -- 2026-09-12). Said without naming a rule, for 'LineRefused'\'s reason: the
+    -- line is in front of you.
+  | BasesIllTyped [InstralTypeError]
+    -- ^ every file read and parsed, and the **program** they make does not type
+    -- check (MS5 phase 66c).
+    --
+    -- **It has no path**, and that is the point: inference is over every loaded
+    -- base at once, because a rule may call one written below it or one in
+    -- another base loaded with it ('Thena.Instral.Ops.Call'). A per-file answer
+    -- would be a different question.
     -- ^ @:load ‹path›@. The driver may not touch a file — §12 invariant 4 puts
     -- all IO in "Thena.Repl" — so it asks, and the caller reads the file and
     -- hands the contents back to 'loadSource'
@@ -422,11 +456,27 @@ data Response
     -- that a bare word acts and a colon looks, so "Thena.Repl" splits the list
     -- on the leading colon rather than being told twice
   | Matched [Rule]
+  | Fitting String Ty [(GlobalName, Int, Bool, Signature)]
+    -- ^ **what accepts or produces a type** (MS5 phase 71) — which question was
+    -- asked, the type asked about, and for each callable its name, its arity, whether it is a rule (as
+    -- opposed to a function) and its signature.
+    --
+    -- **A second matching instruction, and deliberately not a pair with
+    -- 'Matched'** — his ruling, §1.1: different input (a type, not the
+    -- development), different relation (a signature fits, no head passes),
+    -- different consumer (the engine uses 'Matched' for @Prove@ and will never
+    -- use this). *\"Let's skip the pair and only make a rule that packages them
+    -- into a pair if we ever need one.\"*
     -- ^ @:matches@ — the rules whose heads pass at the focus, in dispatch order
     -- (§7.6). A look and not an act: no body runs, and nothing is speculatively
     -- executed to find out whether one would succeed (§2.2)
   | Ran [Message] Stop        -- ^ what the machine said, and where it stopped
   | Failed SyntaxError
+  | LineRefused [RuleError]
+    -- ^ the line parsed, and then said something no op or rule could be given
+    -- (MS5 phase 62b) — an unknown tag, a region that did not parse, a word
+    -- written with operands it does not take. The same errors a rule file is
+    -- refused with, because it is the same pass: 'Thena.Rules.resolveBlock'.
   | Rejected CommandError
   | Quit
   deriving (Eq, Show)
@@ -537,81 +587,174 @@ parseDevelopment = parseWith resolvePartial
 -- differently: a malformed argument is the user's typo and reports as
 -- 'Failed', while an argument that is merely not in corners is a 'Rejected'
 -- with its own sentence (phase 38).
-newtype ArgumentError = Syntax SyntaxError
 
--- | The arguments of a bare-word rule call — **each one a surface term, or a
--- core term in corners** (MS4 phase 41).
+-- | What one REPL line could not be (MS5 phase 62b).
 --
--- **This is where phase 38's error message comes true.** That phase refused a
--- bare argument and said the corners were for a core term, reserving the bare
--- spelling for the surface one; here the bare spelling starts meaning it. So
--- @try-core ⌜ x ⌝@ hands a rule a 'Thena.Ops.VTerm' and @elaborate x@ hands it
--- a 'Thena.Ops.VSurface', and which one a rule wanted is settled where every
--- other operand kind is — at run time, by the op (§7.2, and MS2 closeout 4b's
--- type system when it arrives).
+-- Two cases because there are two readers: the grammar, and 'resolveBlock'\'s
+-- pass over what it produced. Both can refuse a line and they refuse it for
+-- different reasons, so collapsing them would lose which.
+data LineError
+  = LineSyntax SyntaxError
+  | LineIllFormed [RuleError]
+  | LineMistyped [InstralTypeError]
+    -- ^ the entry resolved and does not type check (MS5, reviewed 2026-09-12)
+
+-- | What was wrong with the @do@ blocks a surface term holds.
+data BlockProblem
+  = BlockIll [RuleError]
+  | BlockMistyped [InstralTypeError]
+
+-- | Resolve, validate and type every @do@ block written inside a surface term
+-- this program holds (MS5 phase 79).
 --
--- The run is split by bracket depth first, because the two spellings need two
--- different grammars and one token stream cannot be handed to both.
-parseArguments
-  :: GlobalEnv -> Context -> Int -> String -> Either ArgumentError ([Value], Int)
-parseArguments env ctx n src = do
-  ts <- mapLeft Syntax (tokensOf src)
-  go n (groups ts)
+-- **One checker, and its callers differ only in how they say what it found** —
+-- 'instralEntry' turns it into a 'LineError', the driver's surface commands into
+-- a 'Response'. Phase 77 found what two copies of one check cost, and this is
+-- the same shape one phase later.
+--
+-- Until this existed, 'Thena.Instral.Ops.Play' resolved a block as it ran, so @say 3@
+-- inside one halted the machine mid-proof where the same instruction anywhere
+-- else is refused before anything starts — @ms5\/CLOSEOUT.md@ 20.
+--
+-- **The blocks are typed as extra bodies, not as callables.** Nothing can call
+-- one — it has no name a user could write — so it is handed to 'inferProgram'
+-- beside 'allCallable' rather than inside it.
+checkSurfaceBlocks :: [RuleBase] -> GlobalName -> [Instr] -> Maybe BlockProblem
+checkSurfaceBlocks bases nm prog = case surfaceBlocks (allLanguages bases) nm prog of
+  Left errs -> Just (BlockIll errs)
+  Right bs  -> case concatMap validate bs of
+    e : es -> Just (BlockIll (e : es))
+    []     -> case snd (inferProgram (allSignatures bases) (allCallable bases ++ bs)) of
+      []   -> Nothing
+      errs -> Just (BlockMistyped errs)
+
+-- | Resolve-time checks for one block that runs where it is written: validated,
+-- typed, and every surface block inside it checked too (MS5 phase 90).
+--
+-- **Every block a user can type at the top goes through this** — a prompt
+-- entry, the REPL's @do { … }@ and a module's top-level @do@. Phase 79 checked
+-- blocks written inside a surface term and counted four places; the REPL's @do@
+-- and a module's top-level block were two more, and both ran unchecked
+-- (@ms5\/CLOSEOUT.md@ 41). Three callers, one checker — phase 77's lesson.
+--
+-- **@bound@ is what is already in scope, with its values**, and it is empty
+-- except while a rule is yielding: then the block shares the rule's
+-- environment ('Thena.Engine.load'), so the names it reads are in scope and have
+-- the types their values have.
+checkBlock :: [RuleBase] -> [(Ops.Name, Value)] -> Rule -> Maybe BlockProblem
+checkBlock bases bound r =
+  case validate r { ruleParams = map Ops.PVar (nub (map fst bound)) } of
+    e : es -> Just (BlockIll (e : es))
+    []     -> case inferBlock (allSignatures bases) (allCallable bases) bound r of
+      errs@(_ : _) -> Just (BlockMistyped errs)
+      []           -> checkSurfaceBlocks bases (ruleName r) (ruleBody r)
+
+-- | 'checkSurfaceBlocks', said as the driver says things.
+blockResponse :: Session -> String -> [Instr] -> Maybe Response
+blockResponse s what prog =
+  case checkSurfaceBlocks (rules (sessionMachine s)) (GlobalName what) prog of
+    Just (BlockIll es)      -> Just (LineRefused es)
+    Just (BlockMistyped es) -> Just (EntryMistyped es)
+    Nothing                 -> Nothing
+
+-- | A whole typed **entry**, which is an @instral@ block (MS5 phase 70).
+--
+-- **The entry is the unit and a line is the degenerate case** — his extension,
+-- §4. Until this phase a typed line was one op and its operands
+-- and its operands, so @h = here@ at the prompt was unwritable and the
+-- workaround was to type a @do@ block; §4's whole argument is that no
+-- workaround is needed, because @Bind@ is already block-scoped and a REPL entry
+-- is a block. **A binding dies with the entry**, not by prohibition but because
+-- that is what block scope means.
+--
+-- **The same grammar a rule body has**, so nothing is \"@instral@, except at the
+-- REPL\".
+instralEntry
+  :: [RuleBase] -> String -> Either LineError [Instr]
+instralEntry bases src = do
+  ts  <- mapLeft LineSyntax (tokensOf src)
+  -- **An entry is laid out, like a rule file** (MS5 phase 78). One line gets a
+  -- block around it and nothing else changes; a @:{ … :}@ entry gets a @;@
+  -- between its lines, so the offside rule is what separates instructions at
+  -- the prompt as well as in a file.
+  ts' <- mapLeft (LineSyntax . LayoutFailed) (layoutFile ts)
+  is  <- mapLeft (LineSyntax . ParseFailed) (parseEntry ts')
+  prog <- mapLeft LineIllFormed
+            -- **A prompt entry starts with nothing bound** (the @[]@, MS5
+            -- phase 82). Its own lines bind as it goes, which 'resolveBlock'
+            -- threads; what it does not inherit is a yielded rule\'s
+            -- environment, and that is the behaviour already recorded — the
+            -- driver has only ever built literals, so a typed command names a
+            -- hole and never a reference.
+            (resolveBlock (allLanguages bases) (GlobalName "entry") []
+               (concatMap hoist (reverse is)))
+  -- **An entry is checked the way a rule file is** (MS5, reviewed 2026-09-12).
+  -- It was resolved and then neither validated nor typed, so @prim-try 3@ at the
+  -- prompt halted mid-run where the same instruction in a rule body is refused
+  -- when the file loads. The entry is wrapped as a headless rule and run through
+  -- both passes with every loaded base beside it, so a call in it is checked
+  -- against the real signatures.
+  --
+  -- **A @do@ block written in a surface term is checked with it** (MS5 phase
+  -- 79). Until then 'Thena.Instral.Ops.Play' resolved one as it ran, so @say 3@ inside
+  -- one halted the machine where the same instruction anywhere else is refused
+  -- before it starts. All three checks are 'checkBlock' since phase 90.
+  case checkBlock bases [] (Rule (GlobalName "entry") [] [] prog) of
+    Just (BlockIll es)      -> Left (LineIllFormed es)
+    Just (BlockMistyped es) -> Left (LineMistyped es)
+    Nothing                 -> Right prog
   where
-    go k []       = Right ([], k)
-    go k (g : gs) = do
-      (v, k1)  <- one k g
-      (vs, k2) <- go k1 gs
-      Right (v : vs, k2)
+    -- Written core terms are hoisted per instruction — @try ⌜ x ⌝@ is
+    -- @⌜1⌝ = resolve-core ⌜ x ⌝ ; try ⌜1⌝@, which is what a rule body writes by
+    -- hand (MS5 phase 61b).
+    hoist i = case i of
+      RawDo (RawOp w os)   -> let (bs, os') = resolving w os
+                               in bs ++ [RawDo (RawOp w os')]
+      RawBind n (RhsOp (RawOp w os)) ->
+        let (bs, os') = resolving w os in bs ++ [RawBind n (RhsOp (RawOp w os'))]
+      _ -> [i]
 
-    -- In corners: a development-calculus term, resolved here as it always was.
-    one k (Cornered inner) = do
-      raw     <- mapLeft (Syntax . ParseFailed) (parseTerm inner)
-      (t, k1) <- mapLeft (Syntax . ResolveFailed) (resolve env ctx k raw)
-      Right (VTerm (Trailing t), k1)
-    -- Bare: a surface term. Laid out, because a surface term always is.
-    one k (Bare g) = do
-      g' <- mapLeft (Syntax . LayoutFailed) (layout g)
-      t  <- mapLeft (Syntax . SurfaceParseFailed) (Surface.parseSurface g')
-      Right (VSurface (rootedAt t), k)
-
--- | One written argument, before it is parsed.
-data Group
-  = Cornered [Located Token]  -- ^ @⌜ … ⌝@, corners stripped
-  | Bare     [Located Token]
-
--- | Split an argument run into its arguments, by bracket depth.
+-- | Hoist every written core term out of a line, resolving it first.
 --
--- **Why the driver splits and neither grammar does**: the two spellings need
--- two different grammars, and one token stream cannot be handed to both. An
--- argument is an atom (phase 23b), so its extent is a single token or a
--- balanced group — which is decidable here without either parser.
-groups :: [Located Token] -> [Group]
-groups [] = []
-groups (t@(Located _ k) : ts) = case k of
-  TOpenQuote -> let (inner, rest) = corners 1 [] ts in Cornered inner : groups rest
-  TLParen    -> let (inner, rest) = bracketed 1 [t] ts in Bare inner : groups rest
-  TLBrace    -> let (inner, rest) = bracketed 1 [t] ts in Bare inner : groups rest
-  -- @?foo@ is two tokens and one argument (phase 39).
-  TQuery     -> case ts of
-    u : us -> Bare [t, u] : groups us
-    []     -> [Bare [t]]
-  _          -> Bare [t] : groups ts
+-- @try ⌜ x ⌝@ is compiled to @⌜1⌝ = resolve-core ⌜ x ⌝ ; try ⌜1⌝@, which is what
+-- a rule body writes by hand. The op needs a term and @⌜ … ⌝@ is a 'VRaw' — a
+-- tree that has been parsed and not resolved — so something has to resolve it,
+-- and phase 61b decided deliberately that an operand does not do it quietly:
+-- /"the same written term resolves differently at two different focuses, and a
+-- reader should be able to see which one it got"/. Compiling the step in is how
+-- the REPL keeps that visible: @:step@ shows it happening.
+--
+-- **It threads no counter and reads no context**, which is the point — the
+-- engine resolves each term in order, at the focus, with its own supply of
+-- names. @parseEquated@\'s comment about resolving two terms /in one continuous
+-- supply/ is satisfied by the sequence rather than by an argument.
+--
+-- **The binding names cannot collide with a rule's own**, because @⌜@ is a token
+-- and no identifier may contain one. That matters while the machine is yielding:
+-- @env@ is the suspended rule's and a name it chose must not be shadowed.
+--
+-- The one word that is not rewritten is 'Thena.Instral.Ops.ResolveCore'\'s own: it
+-- /wants/ the unresolved tree, and at the prompt it is the long way of writing
+-- what every other word now gets for free.
+resolving :: String -> [RawOperand] -> ([RawInstr], [RawOperand])
+resolving w os
+  | w == "resolve-core" = ([], os)
+  | otherwise           = go (1 :: Int) os
   where
-    corners _ acc [] = (reverse acc, [])
-    corners d acc (u@(Located _ w) : us) = case w of
-      TCloseQuote | d == (1 :: Int) -> (reverse acc, us)
-                  | otherwise       -> corners (d - 1) (u : acc) us
-      TOpenQuote                    -> corners (d + 1) (u : acc) us
-      _                             -> corners d (u : acc) us
+    go _ [] = ([], [])
+    go k (o : rest)
+      | written o =
+          let n          = "\8988" ++ show k ++ "\8989"
+              (bs, rest') = go (k + 1) rest
+           in (RawBind (RawPWord n) (RhsOp (RawOp "resolve-core" [o])) : bs, RawRef n : rest')
+      | otherwise =
+          let (bs, rest') = go k rest
+           in (bs, o : rest')
 
-    bracketed _ acc [] = (reverse acc, [])
-    bracketed d acc (u@(Located _ w) : us)
-      | w == TLParen || w == TLBrace = bracketed (d + 1) (u : acc) us
-      | w == TRParen || w == TRBrace =
-          if d == (1 :: Int) then (reverse (u : acc), us)
-                             else bracketed (d - 1) (u : acc) us
-      | otherwise                    = bracketed d (u : acc) us
+    written o = case o of
+      RawQuoted _        -> True
+      RawRegion "core" _ -> True
+      _                  -> False
 
 parseWith
   :: (GlobalEnv -> Context -> Int -> Raw -> Either ResolveError (a, Int))
@@ -672,12 +815,12 @@ tokensOf = mapLeft LexFailed . lexTokens
 -- a signature and its equation are adjacent and a datatype is not part of that
 -- pairing at all.
 parseSurfaceItems
-  :: String -> Either SyntaxError [Item]
-parseSurfaceItems src = do
+  :: [(String, Language)] -> String -> Either SyntaxError [Item]
+parseSurfaceItems ls src = do
   ts  <- tokensOf src
   ts' <- mapLeft LayoutFailed (layout ts)
   ds  <- mapLeft SurfaceParseFailed (Surface.parseSurfaceDecls ts')
-  regroup (reverse ds)
+  regroup ls (reverse ds)
 
 -- | A whole **proof module** (MS4 phase 43): its name, and its items.
 --
@@ -685,13 +828,13 @@ parseSurfaceItems src = do
 -- symbol instead — so a module's declaration block and a @declare@ line are the
 -- same grammar, and layout does the same work in both.
 parseSurfaceModule
-  :: String
+  :: [(String, Language)] -> String
   -> Either SyntaxError (String, [Item])
-parseSurfaceModule src = do
+parseSurfaceModule ls src = do
   ts  <- tokensOf src
   ts' <- mapLeft LayoutFailed (layout ts)
   m   <- mapLeft SurfaceParseFailed (Surface.parseSurfaceModule ts')
-  is  <- regroup (surfaceModuleDecls m)
+  is  <- regroup ls (surfaceModuleDecls m)
   Right (surfaceModuleName m, is)
 
 -- | Why a top-level block did not resolve, in terms 'SyntaxError' can hold.
@@ -724,13 +867,13 @@ data Item
 -- the same idea for theorems alone; this one also admits a @data@ item, which
 -- is why it is here and not there.
 regroup
-  :: [SurfaceDecl]
+  :: [(String, Language)] -> [SurfaceDecl]
   -> Either SyntaxError [Item]
-regroup = go
+regroup ls = go
   where
     go [] = Right []
     go (SurfaceDatatype d : rest) = (ItemData d :) <$> go rest
-    go (SurfaceBlock b : rest) = case resolveBlock (GlobalName "do") b of
+    go (SurfaceBlock b : rest) = case resolveBlock ls (GlobalName "do") [] b of
       Right is  -> (ItemBlock is :) <$> go rest
       Left errs -> Left (blockProblem errs)
     go (SurfaceSignature x ty : SurfaceEquation y body : rest)
@@ -766,7 +909,7 @@ surfaceProgram n0 items = foldl item ([], n0) items
   -- instructions at the top of one is @++@: no frame, no op, and nothing that
   -- could tell it from the instructions the elaborator emitted around it.
   --
-  -- **Not 'Thena.Ops.Block'**, which is the /expression/ form: that one needs a
+  -- **Not 'Thena.Instral.Ops.Block'**, which is the /expression/ form: that one needs a
   -- frame because it has to return to the term it stands in. A top-level block
   -- has nothing to return to, so it needs no frame and gets none.
   item (acc, n) (ItemBlock is) = (acc ++ is, n)
@@ -790,21 +933,21 @@ surfaceProgram n0 items = foldl item ([], n0) items
         full    = withParams ps (surfaceDataType d)
         tyName  = "dty" ++ show n
         conName k = "con" ++ show n ++ "_" ++ show (k :: Int)
-        selfName  = Lit (VTerm (Trailing (Global dn [])))
+        selfName  = Lit (VTerm (Global dn []))
      in ( acc ++
-            [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LVar l))))))
-            , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt full))])
-            , Bind (tyName ++ "raw") PopDevelopment
-            , Bind tyName (Expose (Ref (tyName ++ "raw")))
+            [ Do (PushDevelopment (Lit (VTerm (Universe (LVar l)))))
+            , Do (Call "elaborate" [Lit (VSurface (rootedAt full))])
+            , Bind (Ops.PVar (tyName ++ "raw")) Nothing PopDevelopment
+            , Bind (Ops.PVar tyName) Nothing (Expose (Ref (tyName ++ "raw")))
             ]
             ++ concat
-                 [ [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LVar l))))))
+                 [ [ Do (PushDevelopment (Lit (VTerm (Universe (LVar l)))))
                    , Do (Assume (Lit (VText nm)) (Ref tyName))
-                   , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt (withParams ps cty)))])
-                   , Bind (conName k ++ "raw") PopDevelopment
-                   , Bind (conName k ++ "app")
+                   , Do (Call "elaborate" [Lit (VSurface (rootedAt (withParams ps cty)))])
+                   , Bind (Ops.PVar (conName k ++ "raw")) Nothing PopDevelopment
+                   , Bind (Ops.PVar (conName k ++ "app")) Nothing
                        (ApplyTo (Ref (conName k ++ "raw")) selfName)
-                   , Bind (conName k) (Expose (Ref (conName k ++ "app")))
+                   , Bind (Ops.PVar (conName k)) Nothing (Expose (Ref (conName k ++ "app")))
                    ]
                  | (k, SurfaceConstructor _ cty) <- zip [0 ..] cs
                  ]
@@ -834,18 +977,18 @@ surfaceProgram n0 items = foldl item ([], n0) items
   declaring (acc, n) (x, ty, body) =
     let (l, n1) = freshLevelMeta n
      in ( acc ++
-            [ Do (PushDevelopment (Lit (VTerm (Trailing (Universe (LVar l))))))
-            , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt ty))])
+            [ Do (PushDevelopment (Lit (VTerm (Universe (LVar l)))))
+            , Do (Call "elaborate" [Lit (VSurface (rootedAt ty))])
               -- **Reduced before it is used or stored.** What @extract@ hands
               -- back carries @fill@'s @=@-bindings, and a @let@-headed type
               -- is not merely ugly: @intro@ reads a @Let@ as written, so the
               -- body's λ would open a definition instead. See
-              -- 'Thena.Ops.Whnf'.
-            , Bind ("raw" ++ show n) PopDevelopment
-            , Bind ("ty" ++ show n) (Expose (Ref ("raw" ++ show n)))
+              -- 'Thena.Instral.Ops.Whnf'.
+            , Bind (Ops.PVar ("raw" ++ show n)) Nothing PopDevelopment
+            , Bind (Ops.PVar ("ty" ++ show n)) Nothing (Expose (Ref ("raw" ++ show n)))
             , Do (PushDevelopment (Ref ("ty" ++ show n)))
-            , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt body))])
-            , Bind ("tm" ++ show n) PopDevelopment
+            , Do (Call "elaborate" [Lit (VSurface (rootedAt body))])
+            , Bind (Ops.PVar ("tm" ++ show n)) Nothing PopDevelopment
               -- **The plicities come from the signature as written** (MS4
               -- phase 44b): a leading run of @∀@ binder groups, each in
               -- braces or not. That is the whole of the surface signature
@@ -872,18 +1015,40 @@ surfaceProgram n0 items = foldl item ([], n0) items
 -- **Holes left over are not an error.** A module that does not finish leaves a
 -- half-built development in the session, which is what the REPL is for.
 loadProofSource :: Session -> String -> (Session, Response)
-loadProofSource s src = case parseSurfaceModule src of
+loadProofSource s src =
+  case parseSurfaceModule (allLanguages (rules (sessionMachine s))) src of
   Left e -> (s, Failed e)
   Right (nm, items) ->
     let machine  = sessionMachine s
         (is, n1) = surfaceProgram (names machine) items
-     in case progress False s { sessionMachine = load is machine { names = n1 } } [] of
+     in case listToMaybe (topLevelBlocks s items ++ maybe [] (: []) (blockResponse s "this module" is)) of
+      -- A module's @do@ blocks are checked before any of it is elaborated, so a
+      -- mistake in one does not leave half a module declared (MS5 phase 79) —
+      -- its top-level blocks too, which 79 missed (phase 90).
+      Just r  -> (s, r)
+      Nothing -> case progress False s { sessionMachine = load is machine { names = n1 } } [] of
           (s', Ran _ Completed) ->
             ( s'
             , ProofLoaded nm [ n | Just n <- map declaredName items ]
                              (length [ () | ItemBlock _ <- items ])
             )
           (s', other)           -> (s', other)
+
+-- | What is wrong with a module's top-level @do@ blocks, block by block
+-- (MS5 phase 90). **Each is checked in a scope of its own**, as a block is:
+-- nothing is bound when one begins, so a name bound in one block is not in
+-- scope in the next.
+topLevelBlocks :: Session -> [Item] -> [Response]
+topLevelBlocks s items =
+  [ said p
+  | (k, is) <- zip [1 :: Int ..] [ is' | ItemBlock is' <- items ]
+  , Just p <- [checkBlock (rules (sessionMachine s))
+                 [] (Rule (GlobalName ("this module, top-level do block " ++ show k)) [] [] is)]
+  ]
+  where
+    said p = case p of
+      BlockIll es      -> LineRefused es
+      BlockMistyped es -> EntryMistyped es
 
 -- | What an item adds to the environment, for the summary line.
 declaredName :: Item -> Maybe String
@@ -965,6 +1130,12 @@ dispatch s name arg = case name of
   -- elaborate a given term, and with the hint retired that is not a question:
   -- @elaborate ‹t›@ appears in this listing the way @try-core ‹t›@ does.
   ":matches" -> noArgument (s, Matched matching)
+  -- **The second matching instruction** (MS5 phase 71, §1.1). Two commands and
+  -- not one with a direction: /what can I pass this to/ and /what will give me
+  -- one/ are two questions, and a reader never has to remember which way round
+  -- an argument goes.
+  ":accepts"  -> withArgument (byType "takes" (\sg t -> any (`fits` t) (sigParams sg)))
+  ":produces" -> withArgument (byType "gives" (\sg t -> maybe False (`fits` t) (sigResult sg)))
   -- The live choice points, nearest first (§7.7). A look, so a colon.
   ":choices" -> noArgument (s, Choices (choicePoints machine))
   ":goal"  -> goal
@@ -1030,18 +1201,6 @@ dispatch s name arg = case name of
     case extract (flatten (development machine)) of
       Right t  -> (s, Extracted t)
       Left why -> (s, Ran [] (Halted (NotYetPure (whereImpure why))))
-  -- A bare word: it is an op, and it is written as the op is written (§2.4).
-  -- The argument is the type the development is claimed to prove — see
-  -- 'Thena.Ops.Certify' for why the op needs one.
-  "certify" -> withArgument $
-    case parseCore (globals machine) ctx (names machine) arg of
-      Left e -> (s, Failed e)
-      Right (ty, n1) ->
-        progress
-          (sessionStepping s)
-          s { sessionMachine =
-                load [Do (Certify (Lit (VTerm (Trailing ty))))] machine { names = n1 } }
-          []
   -- Proof mode (§2.4). A colon on the session commands, because they manage
   -- the session rather than the development; @qed@ is bare, because it is an
   -- op program and is written as the op is written. That also keeps @:abandon@
@@ -1057,37 +1216,12 @@ dispatch s name arg = case name of
   ":convert" -> conversion
   ":step"  -> stepping
   ":run"   -> noArgument (progress False s [])
-  "assume" -> tactic "assumption" "assumed" Assume
-  "claim"  -> tactic "hole" "claimed" Claim
-  -- @assume@'s twin (MS4 phase 41f): the same two arguments, and the chain
-  -- below it extracts as a Π rather than a λ.
-  "quantify" -> tactic "∀-binder" "quantified" Quantify
   "data"   -> declaration
   -- **A surface declaration** (MS4 phase 42) — a bare word, because it acts
   -- (§2.4). It compiles to instructions rather than being run here, so
   -- @:step@ can watch it and phase 49 can move the program into a rule body.
   "declare" -> withArgument (declareSurface arg)
 
-  -- The moves (§4.3). Three take no argument, @cross@ takes which field, and
-  -- every core-term descent is its own word so that none of them changes
-  -- meaning with what is in focus (§4.0 C1).
-  "along"  -> noArgument (run [Do Along])
-  "into"   -> noArgument (run [Do Into])
-  "back"   -> noArgument (run [Do Back])
-  "reduce" -> noArgument (run [Do Reduce])
-  -- A bare word, not @:unify@ as §9 first wrote it: unification rewrites the
-  -- development, and §2.4's rule is that a bare word acts and a colon looks.
-  -- The argument is @t ≟ u@, the same two-sided form @:convert@ reads.
-  "unify"  -> withArgument $
-    case parseEquated (globals machine) ctx (names machine) arg of
-      Left e -> (s, Failed e)
-      Right ((a, b), n1) ->
-        progress
-          (sessionStepping s)
-          s { sessionMachine =
-                load [Do (Unify (Lit (VTerm (Trailing a))) (Lit (VTerm (Trailing b))))]
-                     machine { names = n1 } }
-          []
   -- Dispatch the rule engine at the focus (§7.3). An op, so a bare word.
   --
   -- **With an argument it is elaboration** (§8, phase 17b), and the argument
@@ -1122,10 +1256,19 @@ dispatch s name arg = case name of
   -- already a surface atom (phase 45), so this costs a case and no syntax.
   "do" -> case parseSurfaceTerm ("do " ++ arg) of
     Left e -> (s, Failed e)
-    Right (SurfaceDo body) -> case resolveBlock (GlobalName "do") body of
-      Left errs -> (s, Failed (blockProblem errs))
-      Right is  -> progress (sessionStepping s)
-                            s { sessionMachine = load is machine } []
+    -- **Checked like any other entry** (MS5 phase 90, @ms5\/CLOSEOUT.md@ 41),
+    -- with one difference that is not a mode: while a rule is yielding the block
+    -- shares its environment, so what the rule bound is in scope and typed by
+    -- its value. Outside a yield 'load' clears the environment, and nothing is.
+    Right (SurfaceDo body) ->
+      let bound = if Engine.isYielding machine then env (exec machine) else []
+       in case resolveBlock (allLanguages (rules machine)) (GlobalName "entry") (map fst bound) body of
+        Left errs -> (s, Failed (blockProblem errs))
+        Right is  -> case checkBlock (rules machine) bound (Rule (GlobalName "entry") [] [] is) of
+          Just (BlockIll es)      -> (s, LineRefused es)
+          Just (BlockMistyped es) -> (s, EntryMistyped es)
+          Nothing -> progress (sessionStepping s)
+                              s { sessionMachine = load is machine } []
     Right _ -> (s, Rejected (UnexpectedArgument name))
 
   -- **@yield@ hands control back to a rule that yielded** — his, 2026-09-03,
@@ -1154,51 +1297,29 @@ dispatch s name arg = case name of
     _  -> case reads arg of
       [(n, "")] -> retryAt (Just n)
       _         -> (s, Rejected (UnexpectedArgument name))
-  -- A move, so a bare word, and it needs a driver case because it is an /op/
-  -- and not a rule (phase 24b). Its argument is a term — a variable naming the
-  -- hole to go to — which is why it cannot reach the rule-call fallback below:
-  -- that would read it as a rule name. @AGENDA.md@'s closeout item 4e is this
-  -- divergence in general.
-  -- **The argument is a name and is not parsed as a term** (phase 24b): the
-  -- hole you want may be nowhere near the focus, and a term would have to
-  -- resolve in Γ, which holds only what is above you. The move searches the
-  -- development from the root instead.
-  "goto"   -> withArgument (run [Do (Ops.Goto (Lit (VText arg)))])
-  "cross"  -> case arg of
-    "type" -> run [Do CrossType]
-    "val"  -> run [Do CrossValue]
-    ""     -> (s, Rejected (MissingArgument name))
-    _      -> (s, Rejected (UnexpectedArgument name))
-
-  _ | name `elem` partWords -> case corePart name arg of
-        Left e  -> (s, Rejected e)
-        Right p -> run [Do (Down p)]
-    -- **Anything else is a rule, called by name** — the user, 2026-08-25:
-    -- *"They should just be called by name, like what happens in rule's body.
-    -- No additional `call` keyword. The point was — REPL is literally as if you
-    -- are inside a rule's body."*
+  _ -- **Anything else is one line of @instral@** (MS5 phase 62b) — an op if a
+    -- word names one at this arity, and a call to a rule of that name
+    -- otherwise. Exactly what the word means inside a rule body, because it is
+    -- resolved by the same function: "Thena.Rules"\'s 'resolveBlock'.
     --
-    -- So @attack@, @try ‹t›@, @intro@, @solve@, @regret@, @abandon@ and
-    -- @eliminate ‹t›@ stopped being cases of this function: they are rules now,
-    -- and this is how they are reached. The seven primitives they run were
-    -- renamed @prim-…@ so the words could go to the tactics (§8).
+    -- The user, 2026-08-25, is what this finally makes true: *"They should just
+    -- be called by name, like what happens in rule's body. No additional `call`
+    -- keyword. The point was — REPL is literally as if you are inside a rule's
+    -- body."* Until this phase the driver had a case of its own for @claim@,
+    -- @assume@, @quantify@, @unify@, @certify@, @goto@, @cross@, the four moves
+    -- and the field words, each with its own argument grammar, and only what
+    -- was left over reached the rule base. @ms2\/CLOSEOUT.md@ 4e and
+    -- @ms4\/CLOSEOUT.md@ 17 are that divergence, and this is where it goes.
     --
-    -- Arguments are a **run of atoms**, as a rule body writes its operands, so
-    -- @f a b@ is two arguments here exactly as it is there. A compound argument
-    -- is parenthesised — @try (λ (x : A) -> x)@ — which is also what @elim@'s
-    -- field groups have always required (§2.6).
+    -- Arguments are a **run of operands**, as a rule body writes them: a name,
+    -- a number, a string, a term in corners, or a tagged region. A term is
+    -- written @⌜ … ⌝@ for Core and @⟨ … ⟩@ for Surface (MS5 phase 62a) — a bare
+    -- argument is no longer a surface term, which is the asymmetry §6.3 of
+    -- @discussion\/the-five-languages.md@ rejects.
     -- A colon word is the driver's own and is never a rule: §2.4's split says
     -- a colon looks, and nothing that looks lives in the rule base.
     | take 1 name == ":" -> (s, Rejected (NoSuchCommand name))
-    | otherwise -> case parseArguments (globals machine) ctx (names machine) arg of
-        Left (Syntax e) -> (s, Failed e)
-        Right (vs, n1)  ->
-          progress
-            (sessionStepping s)
-            s { sessionMachine =
-                  load [Do (Ops.Call (GlobalName name) (map Lit vs))]
-                       machine { names = n1 } }
-            []
+    | otherwise -> line
   where
     machine = sessionMachine s
     ctx     = focusContext (development machine)
@@ -1207,6 +1328,38 @@ dispatch s name arg = case name of
     matching =
       unfoldIter (matches (rules machine) (globals machine)
                           (cursor (development machine)))
+
+    -- | @:accepts@ and @:produces@ (MS5 phase 71), which differ only in the
+    -- question they ask of a signature.
+    --
+    -- **It lists everything callable, rules included** — his ruling: asking what
+    -- accepts a @Surface@ should surface @elaborate@, and a rule and a function
+    -- are one thing with and without a head (§1.1). The listing says which is
+    -- which.
+    --
+    -- **The signatures are worked out here rather than kept on the session.**
+    -- They are already recomputed at every load and a rule base is a few hundred
+    -- instructions; storing them would be session state that @:undo@ and every
+    -- snapshot would then have to carry.
+    byType verb question = case parseInstralType langs arg of
+      Left (LineSyntax e)     -> (s, Failed e)
+      Left (LineIllFormed es) -> (s, LineRefused es)
+      -- 'parseInstralType' never types anything, so it cannot answer this.
+      Left (LineMistyped _)   -> (s, LineRefused [])
+      Right ty ->
+        ( s
+        , Fitting verb ty
+            [ (nm, k, isRule nm k, sg)
+            | ((nm, k), sg) <- fst (inferProgram (allSignatures bs) (allCallable bs))
+            , question sg ty
+            ]
+        )
+      where
+        bs     = rules machine
+        langs  = allLanguages bs
+        isRule nm k =
+          any (\r -> ruleName r == nm && length (ruleParams r) == k)
+              (concatMap baseRules bs)
 
     -- The base may not change under a half-built proof, current or suspended
     -- (the user, 2026-08-25). Answered before the file is read, so a refusal
@@ -1327,7 +1480,7 @@ dispatch s name arg = case name of
             Right t  -> admit msgs (fromMaybe att (currentAttempt s')) s' t
         other -> other
         where
-          ran = load [Do (Certify (Lit (VTerm (Trailing (attemptClaim att)))))] machine
+          ran = load [Do (Certify (Lit (VTerm (attemptClaim att))))] machine
 
           -- **The proof record is re-read from @s'@, never the @pr@ above.**
           -- Certifying settles the levels the claim was written with and files
@@ -1471,14 +1624,16 @@ dispatch s name arg = case name of
       let (l, n1) = freshLevelMeta (names machine)
           before  = snapshotOf machine
           prog =
-            [ Bind "T" (Claim (Lit (VText "Tinfer"))
-                          (Lit (VTerm (Trailing (Universe (LVar l))))))
-            , Bind "x" (Claim (Lit (VText "xinfer")) (Ref "T"))
-            , Do (Ops.Goto (Lit (VText "xinfer")))
-            , Do (Call (GlobalName "elaborate") [Lit (VSurface (rootedAt t))])
+            [ Bind (Ops.PVar "T") Nothing (Claim (Lit (VText "Tinfer"))
+                          (Lit (VTerm (Universe (LVar l)))))
+            , Bind (Ops.PVar "x") Nothing (Claim (Lit (VText "xinfer")) (Ref "T"))
+            , Do (Ops.Goto (Ref "x"))
+            , Do (Call "elaborate" [Lit (VSurface (rootedAt t))])
             ]
           asking  = s { sessionMachine = load prog machine { names = n1 } }
-       in case progress False asking [] of
+       in case blockResponse s "this term" prog of
+        Just r  -> (s, r)
+        Nothing -> case progress False asking [] of
             (s', Ran _ Completed) ->
               let m'   = sessionMachine s'
                   back = s' { sessionMachine = restore before m' }
@@ -1513,8 +1668,6 @@ dispatch s name arg = case name of
       "off" -> (s { sessionStepping = False }, Ran [] Completed)
       _     -> (s, Rejected (UnexpectedArgument name))
 
-    run is = progress (sessionStepping s) s { sessionMachine = load is machine } []
-
     -- Unwind to a choice point and take its next alternative, then let the
     -- machine run as any other command does. 'Thena.Engine.retryFrom' is what
     -- knows how; the driver only decides which one and reports what happened,
@@ -1544,18 +1697,26 @@ dispatch s name arg = case name of
     --
     -- **The driver builds the program and the machine runs it**, which is what
     -- @assume@ and @claim@ already do. Nothing here elaborates.
-    declareSurface src = case parseSurfaceItems src of
+    declareSurface src = case parseSurfaceItems (allLanguages (rules machine)) src of
       Left e -> (s, Failed e)
       Right items ->
         let (is, n1) = surfaceProgram (names machine) items
-         in progress (sessionStepping s)
-                     s { sessionMachine = load is machine { names = n1 } } []
+         in case blockResponse s "this declaration" is of
+              Just r  -> (s, r)
+              Nothing -> progress (sessionStepping s)
+                           s { sessionMachine = load is machine { names = n1 } } []
 
-    tactic what verb op = withArgument $
-      case compile what verb op (globals machine) ctx (names machine) arg of
-      Left e -> (s, Failed e)
-      Right (is, n1) ->
-        progress (sessionStepping s) s { sessionMachine = load is machine { names = n1 } } []
+    -- **One typed ENTRY, as the program it is** (MS5 phase 62b, widened from a
+    -- line to a block at phase 70). The two halves are put back together because
+    -- the split into a word and an argument run was 62b's shape and an entry has
+    -- no such shape: it is a sequence of instructions, of which one op and its
+    -- operands is the degenerate case.
+    line = case instralEntry (rules machine) (name ++ " " ++ arg) of
+      Left (LineSyntax e)     -> (s, Failed e)
+      Left (LineIllFormed es) -> (s, LineRefused es)
+      Left (LineMistyped es)  -> (s, EntryMistyped es)
+      Right is ->
+        progress (sessionStepping s) s { sessionMachine = load is machine } []
 
 -- | What @:help@ shows: one line per command the driver has, the spelling on
 -- the left and what it does on the right.
@@ -1573,6 +1734,25 @@ dispatch s name arg = case name of
 -- here would state the base's contents in a second place, and it would go
 -- stale the moment a base is loaded. The last line points at @:rules@ instead.
 --
+-- **Half of what is left is an OP rather than a command, as of MS5 phase 62b**,
+-- and the list has not shrunk to match. @assume@, @claim@, @quantify@, @unify@,
+-- @certify@, @goto@, @cross@, the moves and the field words all lost their case
+-- in 'dispatch' that phase: they are reached the way a rule is, through
+-- 'instralEntry'. They are kept here because an op is in the binary and nothing
+-- else lists one — @:rules@ shows the base, and there is no @:ops@ — so
+-- removing them would lose the only place they are written down.
+--
+-- **So the boundary this list draws is now /the driver's commands and the ops/,
+-- not /the driver's commands/**, and that is a judgement call rather than a
+-- principle: the principled fix is an op listing derived from
+-- 'Thena.Instral.Ops.opKeyword', which is total, alongside @ms3\/CLOSEOUT.md@ 26's
+-- table-driven 'dispatch'. Neither is this phase's.
+--
+-- **The spellings moved with the phase**: an argument is an operand now, so it
+-- is @claim \"h\" ⌜Nat⌝@ and not @claim h : Nat@. The one-argument forms that
+-- ask for a name are **rules**, in @rules\/standard.thena.rules@, and are
+-- absent for the paragraph above's reason.
+--
 -- **@prove@ was listed and is not any more** (MS4 phase 43). Phase 41 made it a
 -- rule over @prim-prove@, at which point the paragraph above started applying
 -- to it and nothing noticed — the same phase left @prove ‹hint›@ and
@@ -1583,9 +1763,9 @@ dispatch s name arg = case name of
 -- @DriverTests@ mirrors had the same gaps, so they could not have caught it.
 commandSummary :: [(String, String)]
 commandSummary =
-  [ ("assume ‹x› : ‹S›",        "add a hypothesis above the focus")
-  , ("claim ‹x› : ‹S›",         "add a hole above the focus")
-  , ("unify ‹t› ≟ ‹u›",         "solve the focus by unification")
+  [ ("assume \"‹x›\" ⌜‹S›⌝",       "add a hypothesis above the focus")
+  , ("claim \"‹x›\" ⌜‹S›⌝",        "add a hole above the focus")
+  , ("unify ⌜‹t›⌝ ⌜‹u›⌝",        "solve the focus by unification")
   , ("do { ‹instruction› ; … }", "play a block of instructions here")
   , ("yield",                    "hand control back to a rule that yielded")
   , ("retry / retry ‹n›",        "backtrack to a choice point")
@@ -1593,12 +1773,12 @@ commandSummary =
   , ("cross type / cross val",   "move into a term")
   , (unwords bareParts,          "descend into a field of the focused term")
   , (unwords numberedParts,      "descend into a numbered field")
-  , ("goto ‹hole›",              "move to a hole by name")
+  , ("goto-named \"‹hole›\"",      "move to a hole by name")
   , ("reduce",                   "reduce the focused term in place")
-  , ("quantify ‹x› : ‹S›",       "add a ∀-binder above the focus")
+  , ("quantify \"‹x›\" ⌜‹S›⌝",     "add a ∀-binder above the focus")
   , ("data ‹D› … where { … }",   "declare an inductive family")
   , ("declare ‹sig› ; ‹equation›", "elaborate a surface declaration")
-  , ("certify ‹type›",           "ask the kernel about the development")
+  , ("certify ⌜‹type›⌝",         "ask the kernel about the development")
   , ("qed",                      "certify and admit the finished proof")
   , (":show / :show ‹name›",     "the development / a global")
   , (":where",                   "focus, path, context, expected type")
@@ -1609,6 +1789,8 @@ commandSummary =
   , (":convert ‹t› ≟ ‹u›",      "are two terms convertible")
   , (":elim ‹D› [‹universe›]",  "a datatype’s elimination rule")
   , (":matches",                 "which rules apply here")
+  , (":accepts ‹type›",          "what takes a value of that type")
+  , (":produces ‹type›",         "what gives one back")
   , (":choices",                 "the live choice points, nearest first")
   , (":bases / :rules",          "the loaded rule bases / the rules in them")
   , (":step on / :step / :step off", "single-step the machine")
@@ -1636,28 +1818,6 @@ commandSummary =
 -- | The core-term descents, as the user types them (§4.7).
 --
 -- One word per 'Part', and the words are the field names of §2.6's syntax. The
--- three that take a position are one-based, because the printer numbers from
--- one and nothing else here counts.
---
--- @arg@ is both @f □@\'s and a former's, and takes a position in the second
--- case only — a saturated 'Thena.Core.Term.Canonical' has many arguments and an
--- application has exactly one, so no form has both readings and no word changes
--- meaning.
--- | @fun@, @arg 2@ … — "Thena.Ops"\'s table, with this module\'s two error
--- messages laid over it.
---
--- **The table moved down in phase 21** so that a field word means the same
--- thing at the REPL and inside a rule body, from one place rather than two.
--- What stays here is the refinement a command line wants and a rule body does
--- not: @param@ with no number is a /missing/ argument, @fun 2@ an /unexpected/
--- one, and 'Thena.Ops.partOf' answers 'Nothing' to both.
-corePart :: String -> String -> Either CommandError Part
-corePart w a = case a of
-  "" -> maybe (Left (MissingArgument w)) Right (partOf w Nothing)
-  _  -> case reads a of
-    [(k, "")] -> maybe (Left (UnexpectedArgument w)) Right (partOf w (Just k))
-    _         -> Left (UnexpectedArgument w)
-
 -- --------------------------------------------------------------------------
 -- Rule bases (§8, phase 22)
 -- --------------------------------------------------------------------------
@@ -1830,20 +1990,136 @@ readRuleBase path src = case baseHead ls of
       -- then names the line the user is looking at.
       let rest = replicate used "" ++ drop used ls
       ts   <- mapLeft RuleSyntaxError (tokensOf (unlines rest))
-      raws <- mapLeft (RuleSyntaxError . ParseFailed) (parseRules ts)
-      rs   <- resolveAll raws
-      Right (ruleBase nm desc path rs)
+      -- **The whole file is one layout block, opened at column 1** (MS5 phase
+      -- 75). Declarations are separated by the offside rule rather than by a
+      -- pass of their own — @separated@ and @TDeclSep@ are deleted — and a rule
+      -- body is a block that @then@ opens. A file written with explicit braces
+      -- and semicolons passes through untouched, which is his standing
+      -- condition that the two spellings be one language.
+      ts'  <- mapLeft (RuleSyntaxError . LayoutFailed) (layoutFile ts)
+      raws <- mapLeft (RuleSyntaxError . ParseFailed) (parseRules ts')
+      (sigs, langs, fns, rs) <- resolveAll raws
+      Right (ruleBase nm desc path sigs langs fns rs)
   where
     ls = lines src
 
--- | Resolve every rule, then validate every rule. Every error, not the first —
--- 'validate'\'s reason.
-resolveAll :: [RawRule] -> Either RuleFileError [Rule]
-resolveAll raws = case (concat resolveErrs, concatMap validate ok) of
-  ([], [])     -> Right ok
-  (res, valid) -> Left (RuleIllFormed (res ++ valid))
+-- | A written @instral@ type — what @:accepts@ and @:produces@ take (MS5 phase
+-- 71).
+--
+-- **The same grammar a signature uses**, so a type is written at the prompt the
+-- way it is written in a declaration. @()@ is refused here for the reason it is
+-- refused as a parameter: it says /nothing is left/, which is not a type a value
+-- can have.
+parseInstralType
+  :: [(String, Language)] -> String -> Either LineError Ty
+parseInstralType ls src = do
+  ts <- mapLeft LineSyntax (tokensOf src)
+  t  <- mapLeft (LineSyntax . ParseFailed) (parseInstralTy ts)
+  case resolveTy ls "a query" t of
+    Left e         -> Left (LineIllFormed [e])
+    -- @()@ says /nothing is left/, which is not a type a value can have — the
+    -- same refusal it gets as a parameter (MS5 phase 67).
+    Right Nothing  -> Left (LineIllFormed [UnitInsideAType "a query"])
+    Right (Just u) -> Right u
+
+-- | Resolve every declaration, then validate every rule. Every error, not the
+-- first — 'validate'\'s reason.
+--
+-- **A signature is resolved here and checked no further** (MS5 phase 67):
+-- whether anything answers to it, and whether a body agrees with it, are
+-- questions about the whole program and belong to 'Thena.Instral.Infer'. What
+-- /is/ answered here is what one file can answer — that the type names a type,
+-- and that a callable has at most one signature.
+resolveAll
+  :: [RawDecl]
+  -> Either RuleFileError
+       ([(String, Signature)], [(String, Language)], [Rule], [Rule])
+resolveAll raws =
+  case ( concat langErrs ++ concat ruleErrs ++ concat fnErrs ++ sigErrs
+           ++ langDups ++ dups ++ collisions ++ overlapping
+       , concatMap validate (ok ++ fns)
+       ) of
+    ([], [])     -> Right (sigs, langs, fns, ok)
+    (res, valid) -> Left (RuleIllFormed (res ++ valid))
   where
-    (resolveErrs, ok) = partitionEithers (map resolveRule raws)
+    -- **Languages first**, because everything else may mention one: a tag in an
+    -- operand, a type name in a signature (MS5 phase 69).
+    (langErrs, langs) =
+      partitionEithers [ resolveLanguage l | DeclLanguage l <- raws ]
+    (ruleErrs, ok)  = partitionEithers [ resolveRule langs r | DeclRule r <- raws ]
+    -- **A function is validated like any rule**, because it is one
+    -- ('Thena.Rules.resolveFunction').
+    (fnErrs, fns)   = partitionEithers [ resolveFunction langs f | DeclFunction f <- raws ]
+    (sigErrs, sigs) =
+      partitionEithers [ resolveSignature langs g | DeclSignature g <- raws ]
+    -- **A name may not be a rule and a function at one arity** (MS5, reviewed
+    -- 2026-09-12). They would become two clauses of one callable — 'clauses'
+    -- searches 'Thena.Rules.allCallable' — so the function would join the rule's
+    -- backtracking and a call could run either. A function has one clause and no
+    -- head, which is exactly what that is not.
+    collisions =
+      [ RuleAndFunction n (length (ruleParams f))
+      | f <- fns
+      , let GlobalName n = ruleName f
+      , any (\r -> ruleName r == ruleName f
+                     && length (ruleParams r) == length (ruleParams f)) ok
+      ]
+
+    -- **A function has ONE clause — his ruling, 2026-09-13**, and until this
+    -- phase the comment above saying so was not true of the code.
+    --
+    -- **A rule is searched and a function is called.** A call enters one clause
+    -- and stays in it, so a second is reached only where something tells the two
+    -- apart; with no head and no patterns, nothing can. What a second clause
+    -- actually did before this was catch the first one\'s **failure** — the
+    -- engine built a choice point over the two and backtracked into the second —
+    -- which is a rule\'s behaviour written in a function\'s spelling.
+    --
+    -- **Nothing else was needed to make a function deterministic.**
+    -- @Thena.Engine@ decides @Choice@ versus @Call@ by @hasNext@ alone and never
+    -- asks what kind of callable it has; with one clause it already builds a
+    -- @Call@ frame, so a function call already makes no choice point, shows in
+    -- no @:choices@ and is unreachable by @retry@. Refusing the second clause is
+    -- the whole change.
+    -- **NARROWED BY PATTERNS — MS5 phase 82**, which is the lifting
+    -- @discussion\/pattern-matching.md@ §5 promises of stage a. The paragraph
+    -- above stands and its last sentence is what changed: /with no head and no
+    -- patterns, nothing can tell two clauses apart/. There are patterns now, so
+    -- a later clause is unreachable only where an earlier one of the same arity
+    -- matches **everything** — and that is what 'Ops.patternIrrefutable' asks,
+    -- clause by clause.
+    --
+    -- **It is an under-approximation and deliberately the safe way round.**
+    -- @f [] = …@ followed by @f [a] = …@ is admitted, and so is @f 0@ then
+    -- @f 0@ — the second is genuinely dead and nothing says so. Refusing a
+    -- clause that would in fact run is the mistake worth avoiding; admitting
+    -- dead code the author can see is not, and a real overlap checker is the
+    -- coverage question stage c opens rather than something owed here.
+    overlapping =
+      [ FunctionClauseUnreachable n (length (ruleParams f))
+      | (i, f) <- zip [0 :: Int ..] fns
+      , let GlobalName n = ruleName f
+      , any (\g -> ruleName g == ruleName f
+                     && length (ruleParams g) == length (ruleParams f)
+                     && all Ops.patternIrrefutable (ruleParams g)) (take i fns)
+      ]
+
+    -- **…and two grammars under one name** (2026-09-12). Every lookup of a
+    -- language is a 'lookup', which takes the first, so the second was loaded
+    -- and unreachable.
+    langDups =
+      [ DuplicateLanguage n
+      | (i, (n, _)) <- zip [0 :: Int ..] langs
+      , n `elem` map fst (take i langs)
+      ]
+
+    dups =
+      [ DuplicateSignature n (length (sigParams t))
+      | (i, (n, t)) <- zip [0 :: Int ..] sigs
+      , (n', t') <- take i sigs
+      , n' == n
+      , length (sigParams t') == length (sigParams t)
+      ]
 
 -- | Install a whole ordered list of bases, or none of them.
 --
@@ -1854,16 +2130,44 @@ resolveAll raws = case (concat resolveErrs, concatMap validate ok) of
 -- **All or nothing.** A file that will not load leaves the previous list in
 -- place, so a session never ends up searching half of what was asked for.
 loadRuleBases :: Session -> [(FilePath, String)] -> (Session, Response)
-loadRuleBases s = go [] 
+loadRuleBases s = go []
   where
-    go acc [] =
-      ( s { sessionMachine = (sessionMachine s) { rules = acc } }
-      , BasesLoaded acc
-      )
+    -- **Inference runs here and nowhere earlier** (MS5 phase 66c), for the
+    -- reason in 'BasesIllTyped': a rule's signature is not decidable until every
+    -- base is in hand. 'Thena.Rules.validate' stays where it is — it is per-rule
+    -- and answers a question one rule can answer.
+    -- **The surface blocks are typed beside the rules** (MS5 phase 79). They are
+    -- not callables — nothing can call one — so they are not in 'allCallable';
+    -- they are handed to 'inferProgram' as extra bodies so that a mistake in one
+    -- is found when the file loads.
+    go acc [] = case traverse (blocksOf acc) acc of
+      -- A block that does not resolve or does not validate is the file's
+      -- problem and is reported against the file, as any other rule's would be.
+      Left (path, errs) -> (s, RuleFileRefused path (RuleIllFormed errs))
+      Right bss ->
+        case snd (inferProgram (allSignatures acc) (allCallable acc ++ concat bss)) of
+          []   ->
+            ( s { sessionMachine = (sessionMachine s) { rules = acc } }
+            , BasesLoaded acc
+            )
+          errs -> (s, BasesIllTyped errs)
+
     go acc ((path, src) : more) =
       case readRuleBase path src of
         Left e  -> (s, RuleFileRefused path e)
         Right b -> go (acc ++ [b]) more
+
+    -- **Resolved here and not in 'readRuleBase'**, because a block is resolved
+    -- with EVERY loaded base's languages — which is what 'Thena.Instral.Ops.Play' does
+    -- at run time — and a file does not know what will be loaded beside it.
+    blocksOf acc b = case surfaceBlocks (allLanguages acc) (GlobalName (baseName b))
+                            (concatMap ruleBody (baseRules b ++ baseFunctions b)) of
+      Left errs -> Left (basePath b, errs)
+      Right bs  -> case concatMap validate bs of
+        []   -> Right bs
+        errs -> Left (basePath b, errs)
+    -- Typing them is 'go''s job, because a block may call a rule in a base that
+    -- has not been read yet.
 
 -- | Read something and hand it back for rendering.
 --
@@ -1886,44 +2190,6 @@ view s rd f arg =
   Right (x, n1) -> (s { sessionMachine = machine { names = n1 } }, f x)
   where
     machine = sessionMachine s
-
--- | A command becomes a program (§2.4, §12 invariant 3).
---
--- Two paths, and the nameless one is §2.2's motivating example: @assume :
--- Type₀@ has no name to give the binder, so the program asks for one and the
--- answer lands in @env@ where the op reads it.
---
--- The prompt quotes the type as the user wrote it rather than as the printer
--- would render it: rendering lives in "Thena.Repl" (§2.5) and the driver
--- cannot reach it. §7.5's illustrative body builds the same prompt with a
--- @show@ op, which phase 4 does not have.
-compile
-  :: String -> String -> (Operand -> Operand -> Op)
-  -> GlobalEnv -> Context -> Int -> String -> Either SyntaxError ([Instr], Int)
-compile what verb op env ctx n arg = do
-  ts       <- tokensOf arg
-  (mx, ty) <- mapLeft ParseFailed (parseNameAndType ts)
-  (t, n1)  <- mapLeft ResolveFailed (resolve env ctx n ty)
-  let term = Lit (VTerm (Trailing t))
-  pure $ case mx of
-    Just x ->
-      ( [ Do (op (Lit (VText x)) term)
-        , Do (Say (Lit (VText (verb ++ " " ++ x))))
-        ]
-      , n1
-      )
-    Nothing ->
-      ( [ Bind "name"    (Ask (Lit (VText prompt)) AName)
-        , Do             (op (Ref "name") term)
-        , Bind "message" (Concat (Lit (VText (verb ++ " "))) (Ref "name"))
-        , Do             (Say (Ref "message"))
-        ]
-      , n1
-      )
-  where
-    prompt =
-      "name for the " ++ what ++ "? it will have type "
-        ++ dropWhile (\c -> c == ':' || c == ' ') arg
 
 -- --------------------------------------------------------------------------
 -- The loop of §7.8
@@ -2171,7 +2437,7 @@ progress oneStep s msgs = case step (sessionMachine s) of
   -- type came from — an 'Attempt' there, the declaration itself here.
   --
   -- **It says nothing**, per his instruction: the command that ran it reports
-  -- when it is over. See 'Thena.Ops.DefineGlobal'.
+  -- when it is over. See 'Thena.Instral.Ops.DefineGlobal'.
   Engine.Defining nm ps ty t m -> case certify (globals m) t ty of
     Left e -> stop (load [] m) msgs (Uncertified e)
     Right (sub, residue) -> case generalised (names m) residue (substLevelsIn sub ty) t of
@@ -2246,9 +2512,12 @@ whyNoConfusion d why = "no " ++ str (snd (noConfusionNames d)) ++ ": " ++ becaus
     because = case why of
       NoEquality -> "there is no Eq in scope"
       NoProducts -> "there is no And, Unit and Empty in scope"
-      DependentArguments c (Ident i) ->
-        str c ++ "'s argument " ++ i ++ " has a type that depends on an earlier"
-          ++ " argument, so its equation cannot be stated"
+      -- Position and name both, as 'Thena.Errors.IndexTypeDepends' says it one
+      -- telescope over: several arguments of one constructor may carry the same
+      -- 'Ident', so the name alone does not say which.
+      DependentArguments c k (Ident i) ->
+        str c ++ "'s argument " ++ show k ++ " (" ++ i ++ ") has a type that"
+          ++ " depends on an earlier argument, so its equation cannot be stated"
 
 mapLeft :: (a -> b) -> Either a c -> Either b c
 mapLeft f = either (Left . f) Right

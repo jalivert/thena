@@ -1,0 +1,162 @@
+-- Preservation for TAPL chapter 8's typed arithmetic expressions — Theorem
+-- 8.3.3, proved in Thena's surface language.
+--
+-- IT BUILDS ON canonical.thena AND progress.thena AND MUST BE LOADED AFTER
+-- BOTH. Thena has no module imports; it has a session, and globals declared by
+-- one module are in scope for the next. This file needs Term, Ty, HasType from
+-- the first and Step from the second.
+--
+-- With progress beside it this is type safety for the language: a well-typed
+-- term never gets stuck, and evaluation never changes its type.
+--
+-- == How it is proved
+--
+-- **Induction on the STEP derivation**, not the typing one. Each of the ten
+-- rules knows the shape of the term it acts on, so what each case needs is the
+-- typing derivation taken apart at that shape — which is what the nine lemmas
+-- above do, one per shape and per piece.
+--
+-- **The `…AtNat` and `…AtBool` lemmas are the trick worth reading.** A rule like
+-- E-PredZero has to produce `HasType zero U` for the U the original derivation
+-- had, and all that is known about U is that `pred t` had it — so U is `nat`.
+-- Rather than extract an equation `U = nat` and rewrite along it, the lemma is
+-- stated as *anything of type nat also has type U*, and the elimination motive
+-- does the rewriting. Only the `if` lemmas need `subst`, because there the
+-- pieces are the constructor's own variables and have to be moved to the
+-- caller's.
+
+module Preservation where
+
+subst : forall (A : Type₀) (P : A -> Type₀) (a : A) (b : A) (e : Eq A a b) (p : P a) -> P b
+subst = \ A P a b e p -> elim Eq (A) (\ x y q -> P x -> P y) ((\ c -> \ z -> z)) (a b) e p
+
+ifGuard : forall (t1 : Term) (t2 : Term) (t3 : Term) (U : Ty) (d : HasType (ifthen t1 t2 t3) U) -> HasType t1 bool
+ifGuard = \ t1 t2 t3 U d ->
+  elim HasType () (\ x V r -> Eq Term x (ifthen t1 t2 t3) -> HasType t1 bool)
+    ((\ q -> absurd (HasType t1 bool) (noConfusionTerm true (ifthen t1 t2 t3) q))
+     (\ q -> absurd (HasType t1 bool) (noConfusionTerm false (ifthen t1 t2 t3) q))
+     (\ c1 c2 c3 V d1 d2 d3 i1 i2 i3 q ->
+        subst Term (\ z -> HasType z bool) c1 t1
+          (andLeft (Eq Term c1 t1) (And (Eq Term c2 t2) (Eq Term c3 t3))
+             (noConfusionTerm (ifthen c1 c2 c3) (ifthen t1 t2 t3) q))
+          d1)
+     (\ q -> absurd (HasType t1 bool) (noConfusionTerm zero (ifthen t1 t2 t3) q))
+     (\ c1 dd ih q -> absurd (HasType t1 bool) (noConfusionTerm (succ c1) (ifthen t1 t2 t3) q))
+     (\ c1 dd ih q -> absurd (HasType t1 bool) (noConfusionTerm (pred c1) (ifthen t1 t2 t3) q))
+     (\ c1 dd ih q -> absurd (HasType t1 bool) (noConfusionTerm (iszero c1) (ifthen t1 t2 t3) q)))
+    ((ifthen t1 t2 t3) U) d (refl Term (ifthen t1 t2 t3))
+ifThen : forall (t1 : Term) (t2 : Term) (t3 : Term) (U : Ty) (d : HasType (ifthen t1 t2 t3) U) -> HasType t2 U
+ifThen = \ t1 t2 t3 U d ->
+  elim HasType () (\ x V r -> Eq Term x (ifthen t1 t2 t3) -> HasType t2 V)
+    ((\ q -> absurd (HasType t2 bool) (noConfusionTerm true (ifthen t1 t2 t3) q))
+     (\ q -> absurd (HasType t2 bool) (noConfusionTerm false (ifthen t1 t2 t3) q))
+     (\ c1 c2 c3 V d1 d2 d3 i1 i2 i3 q -> subst Term (\ z -> HasType z V) c2 t2 (andLeft (Eq Term c2 t2) (Eq Term c3 t3) (andRight (Eq Term c1 t1) (And (Eq Term c2 t2) (Eq Term c3 t3)) (noConfusionTerm (ifthen c1 c2 c3) (ifthen t1 t2 t3) q))) d2)
+     (\ q -> absurd (HasType t2 nat) (noConfusionTerm zero (ifthen t1 t2 t3) q))
+     (\ c1 dd ih q -> absurd (HasType t2 nat) (noConfusionTerm (succ c1) (ifthen t1 t2 t3) q))
+     (\ c1 dd ih q -> absurd (HasType t2 nat) (noConfusionTerm (pred c1) (ifthen t1 t2 t3) q))
+     (\ c1 dd ih q -> absurd (HasType t2 bool) (noConfusionTerm (iszero c1) (ifthen t1 t2 t3) q)))
+    ((ifthen t1 t2 t3) U) d (refl Term (ifthen t1 t2 t3))
+
+ifElse : forall (t1 : Term) (t2 : Term) (t3 : Term) (U : Ty) (d : HasType (ifthen t1 t2 t3) U) -> HasType t3 U
+ifElse = \ t1 t2 t3 U d ->
+  elim HasType () (\ x V r -> Eq Term x (ifthen t1 t2 t3) -> HasType t3 V)
+    ((\ q -> absurd (HasType t3 bool) (noConfusionTerm true (ifthen t1 t2 t3) q))
+     (\ q -> absurd (HasType t3 bool) (noConfusionTerm false (ifthen t1 t2 t3) q))
+     (\ c1 c2 c3 V d1 d2 d3 i1 i2 i3 q -> subst Term (\ z -> HasType z V) c3 t3 (andRight (Eq Term c2 t2) (Eq Term c3 t3) (andRight (Eq Term c1 t1) (And (Eq Term c2 t2) (Eq Term c3 t3)) (noConfusionTerm (ifthen c1 c2 c3) (ifthen t1 t2 t3) q))) d3)
+     (\ q -> absurd (HasType t3 nat) (noConfusionTerm zero (ifthen t1 t2 t3) q))
+     (\ c1 dd ih q -> absurd (HasType t3 nat) (noConfusionTerm (succ c1) (ifthen t1 t2 t3) q))
+     (\ c1 dd ih q -> absurd (HasType t3 nat) (noConfusionTerm (pred c1) (ifthen t1 t2 t3) q))
+     (\ c1 dd ih q -> absurd (HasType t3 bool) (noConfusionTerm (iszero c1) (ifthen t1 t2 t3) q)))
+    ((ifthen t1 t2 t3) U) d (refl Term (ifthen t1 t2 t3))
+
+succArg : forall (t : Term) (U : Ty) (d : HasType (succ t) U) -> HasType t nat
+succArg = \ t U d ->
+  elim HasType () (\ x V r -> Eq Term x (succ t) -> HasType t nat)
+    ((\ q -> absurd (HasType t nat) (noConfusionTerm true (succ t) q))
+     (\ q -> absurd (HasType t nat) (noConfusionTerm false (succ t) q))
+     (\ c1 c2 c3 V d1 d2 d3 i1 i2 i3 q -> absurd (HasType t nat) (noConfusionTerm (ifthen c1 c2 c3) (succ t) q))
+     (\ q -> absurd (HasType t nat) (noConfusionTerm zero (succ t) q))
+     (\ c1 dd ih q -> subst Term (\ z -> HasType z nat) c1 t (noConfusionTerm (succ c1) (succ t) q) dd)
+     (\ c1 dd ih q -> absurd (HasType t nat) (noConfusionTerm (pred c1) (succ t) q))
+     (\ c1 dd ih q -> absurd (HasType t nat) (noConfusionTerm (iszero c1) (succ t) q)))
+    ((succ t) U) d (refl Term (succ t))
+
+predArg : forall (t : Term) (U : Ty) (d : HasType (pred t) U) -> HasType t nat
+predArg = \ t U d ->
+  elim HasType () (\ x V r -> Eq Term x (pred t) -> HasType t nat)
+    ((\ q -> absurd (HasType t nat) (noConfusionTerm true (pred t) q))
+     (\ q -> absurd (HasType t nat) (noConfusionTerm false (pred t) q))
+     (\ c1 c2 c3 V d1 d2 d3 i1 i2 i3 q -> absurd (HasType t nat) (noConfusionTerm (ifthen c1 c2 c3) (pred t) q))
+     (\ q -> absurd (HasType t nat) (noConfusionTerm zero (pred t) q))
+     (\ c1 dd ih q -> absurd (HasType t nat) (noConfusionTerm (succ c1) (pred t) q))
+     (\ c1 dd ih q -> subst Term (\ z -> HasType z nat) c1 t (noConfusionTerm (pred c1) (pred t) q) dd)
+     (\ c1 dd ih q -> absurd (HasType t nat) (noConfusionTerm (iszero c1) (pred t) q)))
+    ((pred t) U) d (refl Term (pred t))
+
+isZeroArg : forall (t : Term) (U : Ty) (d : HasType (iszero t) U) -> HasType t nat
+isZeroArg = \ t U d ->
+  elim HasType () (\ x V r -> Eq Term x (iszero t) -> HasType t nat)
+    ((\ q -> absurd (HasType t nat) (noConfusionTerm true (iszero t) q))
+     (\ q -> absurd (HasType t nat) (noConfusionTerm false (iszero t) q))
+     (\ c1 c2 c3 V d1 d2 d3 i1 i2 i3 q -> absurd (HasType t nat) (noConfusionTerm (ifthen c1 c2 c3) (iszero t) q))
+     (\ q -> absurd (HasType t nat) (noConfusionTerm zero (iszero t) q))
+     (\ c1 dd ih q -> absurd (HasType t nat) (noConfusionTerm (succ c1) (iszero t) q))
+     (\ c1 dd ih q -> absurd (HasType t nat) (noConfusionTerm (pred c1) (iszero t) q))
+     (\ c1 dd ih q -> subst Term (\ z -> HasType z nat) c1 t (noConfusionTerm (iszero c1) (iszero t) q) dd))
+    ((iszero t) U) d (refl Term (iszero t))
+
+succAtNat : forall (t : Term) (U : Ty) (d : HasType (succ t) U) (w : Term) (dw : HasType w nat) -> HasType w U
+succAtNat = \ t U d w dw ->
+  elim HasType () (\ x V r -> Eq Term x (succ t) -> forall (w : Term) (dw : HasType w nat) -> HasType w V)
+    ((\ q -> absurd (forall (w : Term) (dw : HasType w nat) -> HasType w bool) (noConfusionTerm true (succ t) q))
+     (\ q -> absurd (forall (w : Term) (dw : HasType w nat) -> HasType w bool) (noConfusionTerm false (succ t) q))
+     (\ c1 c2 c3 V d1 d2 d3 i1 i2 i3 q -> absurd (forall (w : Term) (dw : HasType w nat) -> HasType w V) (noConfusionTerm (ifthen c1 c2 c3) (succ t) q))
+     (\ q -> absurd (forall (w : Term) (dw : HasType w nat) -> HasType w nat) (noConfusionTerm zero (succ t) q))
+     (\ c1 dd ih q -> \ w dw -> dw)
+     (\ c1 dd ih q -> absurd (forall (w : Term) (dw : HasType w nat) -> HasType w nat) (noConfusionTerm (pred c1) (succ t) q))
+     (\ c1 dd ih q -> absurd (forall (w : Term) (dw : HasType w nat) -> HasType w bool) (noConfusionTerm (iszero c1) (succ t) q)))
+    ((succ t) U) d (refl Term (succ t)) w dw
+
+predAtNat : forall (t : Term) (U : Ty) (d : HasType (pred t) U) (w : Term) (dw : HasType w nat) -> HasType w U
+predAtNat = \ t U d w dw ->
+  elim HasType () (\ x V r -> Eq Term x (pred t) -> forall (w : Term) (dw : HasType w nat) -> HasType w V)
+    ((\ q -> absurd (forall (w : Term) (dw : HasType w nat) -> HasType w bool) (noConfusionTerm true (pred t) q))
+     (\ q -> absurd (forall (w : Term) (dw : HasType w nat) -> HasType w bool) (noConfusionTerm false (pred t) q))
+     (\ c1 c2 c3 V d1 d2 d3 i1 i2 i3 q -> absurd (forall (w : Term) (dw : HasType w nat) -> HasType w V) (noConfusionTerm (ifthen c1 c2 c3) (pred t) q))
+     (\ q -> absurd (forall (w : Term) (dw : HasType w nat) -> HasType w nat) (noConfusionTerm zero (pred t) q))
+     (\ c1 dd ih q -> absurd (forall (w : Term) (dw : HasType w nat) -> HasType w nat) (noConfusionTerm (succ c1) (pred t) q))
+     (\ c1 dd ih q -> \ w dw -> dw)
+     (\ c1 dd ih q -> absurd (forall (w : Term) (dw : HasType w nat) -> HasType w bool) (noConfusionTerm (iszero c1) (pred t) q)))
+    ((pred t) U) d (refl Term (pred t)) w dw
+
+isZeroAtBool : forall (t : Term) (U : Ty) (d : HasType (iszero t) U) (w : Term) (dw : HasType w bool) -> HasType w U
+isZeroAtBool = \ t U d w dw ->
+  elim HasType () (\ x V r -> Eq Term x (iszero t) -> forall (w : Term) (dw : HasType w bool) -> HasType w V)
+    ((\ q -> absurd (forall (w : Term) (dw : HasType w bool) -> HasType w bool) (noConfusionTerm true (iszero t) q))
+     (\ q -> absurd (forall (w : Term) (dw : HasType w bool) -> HasType w bool) (noConfusionTerm false (iszero t) q))
+     (\ c1 c2 c3 V d1 d2 d3 i1 i2 i3 q -> absurd (forall (w : Term) (dw : HasType w bool) -> HasType w V) (noConfusionTerm (ifthen c1 c2 c3) (iszero t) q))
+     (\ q -> absurd (forall (w : Term) (dw : HasType w bool) -> HasType w nat) (noConfusionTerm zero (iszero t) q))
+     (\ c1 dd ih q -> absurd (forall (w : Term) (dw : HasType w bool) -> HasType w nat) (noConfusionTerm (succ c1) (iszero t) q))
+     (\ c1 dd ih q -> absurd (forall (w : Term) (dw : HasType w bool) -> HasType w nat) (noConfusionTerm (pred c1) (iszero t) q))
+     (\ c1 dd ih q -> \ w dw -> dw))
+    ((iszero t) U) d (refl Term (iszero t)) w dw
+
+preservation : forall (t : Term) (t' : Term) (s : Step t t') (U : Ty) (d : HasType t U) -> HasType t' U
+preservation = \ t t' s ->
+  elim Step () (\ x y r -> forall (V : Ty) (dd : HasType x V) -> HasType y V)
+    ((\ c2 c3 V dd -> ifThen true c2 c3 V dd)
+     (\ c2 c3 V dd -> ifElse false c2 c3 V dd)
+     (\ c1 c1' c2 c3 sr ih V dd ->
+        tIf c1' c2 c3 V (ih bool (ifGuard c1 c2 c3 V dd))
+            (ifThen c1 c2 c3 V dd) (ifElse c1 c2 c3 V dd))
+     (\ c1 c1' sr ih V dd ->
+        succAtNat c1 V dd (succ c1') (tSucc c1' (ih nat (succArg c1 V dd))))
+     (\ V dd -> predAtNat zero V dd zero tZero)
+     (\ v nv V dd -> predAtNat (succ v) V dd v (succArg v nat (predArg (succ v) V dd)))
+     (\ c1 c1' sr ih V dd ->
+        predAtNat c1 V dd (pred c1') (tPred c1' (ih nat (predArg c1 V dd))))
+     (\ V dd -> isZeroAtBool zero V dd true tTrue)
+     (\ v nv V dd -> isZeroAtBool (succ v) V dd false tFalse)
+     (\ c1 c1' sr ih V dd ->
+        isZeroAtBool c1 V dd (iszero c1') (tIsZero c1' (ih nat (isZeroArg c1 V dd)))))
+    (t t') s

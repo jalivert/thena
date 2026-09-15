@@ -12,7 +12,7 @@
 -- terms before unification's reasons do — and, from phase 17b, the two leaves of
 -- the syntax branch. What it still may
 -- not import is anything above @Core@: a reason that carried a
--- 'Thena.Ops.Value' would put the instruction language below @Core.Unify@,
+-- 'Thena.Instral.Ops.Value' would put the instruction language below @Core.Unify@,
 -- which is backwards, so the operand-shape reasons say what was expected and
 -- nothing more. Nothing is lost: 'Thena.Engine.Stuck' carries the whole machine
 -- (§7.5), whose @pc@ still begins with the instruction that failed and whose
@@ -56,6 +56,7 @@ module Thena.Errors
 import Thena.Core.Level (Level, Unmet)
 import Thena.Core.Context (Context)
 import Thena.Core.Term (Core, GlobalName, Ident, Var)
+import Thena.Instral.Pattern (Pattern)
 import Thena.Syntax.Lexer (LexError)
 import Thena.Surface.Concrete (PairingError (..))
 import Thena.Surface.Layout (LayoutError (..))
@@ -86,6 +87,18 @@ data DataBuildError
 data FailReason
   = UnboundInBody String
     -- ^ a @Ref@ named nothing in the body's environment
+  | NothingReturned Pattern
+    -- ^ @x = ‹rule›@ where the clause that ran reached the end of its body
+    -- without a @return@ (MS5 phase 63). Carries the destination.
+    --
+    -- **It fails where the value was wanted**, rather than leaving @x@ unbound
+    -- for a later @Ref@ to trip over, because the two are different mistakes
+    -- and the second one reports the wrong line. Whether a call produces cannot
+    -- be checked when the body is read — a name's clauses are not known then
+    -- (phase 23) — so this is the run-time half of 'Thena.Instral.Ops.produces'.
+  | NothingToReturnFrom
+    -- ^ @return@ with no call to return from — typed at the REPL, or in a
+    -- top-level @do@ block (MS5 phase 63).
   | NotAnIdentifier String
   | BlockOperands Int String
     -- ^ the instruction at this position in a @do@ block gave this op word the
@@ -100,8 +113,34 @@ data FailReason
     -- ^ an answer to an @AName@ question that cannot be a name
   | ExpectedText
     -- ^ an operand was not a @VText@
+  | ExpectedRaw
+    -- ^ an op wanting an unresolved core term — a @core@ region — got something
+    -- else (MS5 phase 61b).
+  | CannotResolve ResolveError
+    -- ^ a @core@ region parsed but does not resolve where it was used: a name it
+    -- mentions is not in scope at this focus, or is not a global (MS5 phase
+    -- 61b). It is reported here rather than at load because it cannot be known
+    -- until there is a development to resolve against.
   | ExpectedTerm
-    -- ^ an operand was not a @VTerm@ holding a core term
+    -- ^ an operand was not a @VTerm@
+  | ExpectedList
+    -- ^ an operand was not a @VList@ (MS5 phase 65)
+  | ExpectedPair
+    -- ^ an operand was not a @VPair@ (MS5 phase 65)
+  | ExpectedOption
+  | ExpectedLevel
+    -- ^ an op wanted a 'Thena.Instral.Type.TLevel' and was given something else
+    -- (MS5 phase 89)
+  | ExpectedInt
+    -- ^ …and one wanted an 'Thena.Instral.Type.TInt'. @level ‹n›@ is the only
+    -- op that does, and a NEGATIVE numeral reaches it too — there is no
+    -- negative level, and the numeral token cannot carry a sign, so this is the
+    -- refusal for a value computed rather than written
+    -- ^ an operand was not a @VOption@ (MS5 phase 65)
+  | NothingThere
+    -- ^ @option-value none@ (MS5 phase 65). **A rule asks first** — the head
+    -- test @option-is-some@ is how, and it is the same shape as every other
+    -- question about a value here.
   | CannotMove MoveError
     -- ^ a navigation op asked for a move the focus does not have (§4.0 C4)
 
@@ -213,7 +252,7 @@ data FailReason
     -- bundles exactly these three failures for the driver's own @parseCore@ —
     -- so "Thena.Repl" renders an op\'s failure with the renderer it already has
   | ExpectedSurface
-    -- ^ an operand was not a 'Thena.Ops.VSurface'. Shaped like 'ExpectedText'
+    -- ^ an operand was not a 'Thena.Instral.Ops.VSurface'. Shaped like 'ExpectedText'
     -- and 'ExpectedTerm', and here for their reason: the value itself may not
     -- be named below @Core@
   | ExpectedSurfaceShape String
@@ -224,7 +263,7 @@ data FailReason
     -- **Each reader is paired with the test that makes it total in the clause
     -- using it** — @when (surface-is-name s) then w = surface-name s@ — so this
     -- is what a body reaching one any other way gets, rather than a guess.
-  | NoClauseMatched GlobalName Int [Int]
+  | NoClauseMatched String Int [Int]
     -- ^ @call ‹name› ‹args›@ found nothing to run: the name, the number of
     -- arguments it was given, and the arities of the rules that do bear that
     -- name. **One reason for three mistakes**, told apart by the renderer —
@@ -234,6 +273,24 @@ data FailReason
     -- @WrongNumberOfArguments@ were its two predecessors and are gone, because
     -- a call no longer takes a rule /value/ and arity is a filter rather than
     -- an error.
+  | BindingDidNotMatch Pattern
+    -- ^ **@‹pattern› = ‹op›@ ran, and the answer does not fit** (MS5 phase 84).
+    -- His ruling is that this is a failure and not a refusal: in a rule it
+    -- backtracks like any other, and in a function it is the caller's.
+    --
+    -- Carries the pattern, which is what the reader needs — the value is in the
+    -- development the failure is reported against.
+  | PatternDidNotMatch String Int
+    -- ^ a LAMBDA\'s parameters did not match what it was applied to (MS5 phase
+    -- 82) — the local\'s name and how many arguments it was given.
+    --
+    -- **A rule gets 'NoClauseMatched' for the same event**, and the two are
+    -- different on purpose: a rule\'s clauses are searched, so a pattern that
+    -- refuses is one candidate declining and the message is about the search. A
+    -- closure has one clause and no head, so there is nothing to search and the
+    -- refusal is the whole answer. His ruling was that a refutable pattern which
+    -- does not match is a /failure/ — in a rule it backtracks, in a function it
+    -- is the caller\'s failure, as in Haskell.
   deriving (Eq, Show)
 
 -- | Why a move was impossible (§4.0 C4, §12 invariant 2).
@@ -540,6 +597,12 @@ data ResolveError
     -- ^ datatype, constructors it has, methods the @elim@ wrote
   | WrongNumberOfEliminationIndices String Int Int
     -- ^ datatype, indices it has, indices the @elim@ wrote
+  | SpliceNotFilled String
+    -- ^ **@${x}@ where nothing is bound to @x@** (MS5 phase 81). Unreachable
+    -- through a rule base, which refuses an unbound name in a template when the
+    -- file loads; it is answered rather than left to a pattern-match failure,
+    -- and it is what a term resolved with no splice environment at all would
+    -- say.
   | LevelArgumentsOnALocal String
     -- ^ level arguments written on a name bound by a λ or by the development.
     -- Only a definition has level parameters, so only a global can be given
