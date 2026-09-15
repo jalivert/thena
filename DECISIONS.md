@@ -1075,8 +1075,9 @@ thena spine> do { prim-try 3 }
 instruction 1: wanted Core, got Int
 ```
 
-**Each top-level block in a module is its own scope.** A name bound in one is
-not in scope in the next:
+**Each `do` block is its own scope, and what it sees from the module is the
+globals declared above it.** A name bound in one block is not in scope in the
+next, and a declaration further down does not exist yet:
 
 ```
 module M where
@@ -1087,6 +1088,23 @@ do
 do
   say x          -- refused: no parameter or earlier binding is called x
 ```
+
+```
+module M where
+
+data Nat : Type₀ where
+  zero : Nat
+
+do
+  t = resolve-core core`one`     -- stuck: not in scope: one
+
+one : Nat
+one = zero
+```
+
+The local half is refused when the file loads. The global half is refused when
+the block runs, because a written core term is resolved at run time — so the
+declarations above the block have already been made by then.
 
 **While a rule is yielding, a block you type sees the rule's locals**, and they
 have the types their values have — so `do { goto h }` reads the rule's `h`, and
