@@ -1106,6 +1106,13 @@ The local half is refused when the file loads. The global half is refused when
 the block runs, because a written core term is resolved at run time — so the
 declarations above the block have already been made by then.
 
+**That timing is a current limit, not the intent.** A core term's names are
+resolved against the development as it stands when the instruction runs — Γ at
+the focus, then the globals — and a global's name can itself be computed
+(`define-global` takes a name value), so the check cannot simply be moved as
+things are. The direction is to check tagged term literals when the file loads,
+which may mean reworking how they are treated; it is not scheduled.
+
 **While a rule is yielding, a block you type sees the rule's locals**, and they
 have the types their values have — so `do { goto h }` reads the rule's `h`, and
 `do { say h }` is refused when `h` holds a term.
