@@ -62,7 +62,7 @@ A `.thena.rules` file holds three kinds of declaration, side by side.
 
 ```
 rule claim ty :-
-  then n = ask "name for the new hole?" name
+  do n = ask "name for the new hole?" name
      ; claim n ty
 
 twice : String -> String
@@ -76,23 +76,33 @@ twice s = concat s s
   is the arrow chain's, so a signature is about one arity only. Parentheses make
   an arrow a value in either position: `(a -> b) -> a -> b` takes a function and
   `String -> (String -> String)` gives one.
-- **a function** — `‹name› ‹params› = ‹expression›`, with no keyword. A function
-  is a rule with one clause and no head; the only visible difference is that it
-  is never offered as a tactic.
+- **a function** — `‹name› ‹params› = ‹expression›` or `‹name› ‹params› = do
+  ‹block›`, with no keyword. A function may have several clauses, tried in
+  order as in Haskell.
 
-**A declaration begins in column 1.** Indent every continuation line. That is
-what lets a function need no keyword of its own:
+**A rule is searched; a function is called.** A rule's clauses are alternatives:
+the first that matches runs, and if it fails the next is tried, so a rule can
+leave a choice point. A function makes no choice point, is never offered by
+`:matches`, and is never run by `prove`.
+
+**A declaration begins in column 1**, and a block's lines line up under its
+first instruction. That is what lets a function need no keyword of its own:
 
 ```
-rule f :- do say "hi"
-     ; prove              -- indented: still the rule above
-g x = concat x x          -- column 1: a new declaration
+rule base indented where
+
+rule f :-
+  do say "hi"
+     prove                -- lined up under say: still the rule above
+ g x = concat x x         -- column 2: neither part of f nor a new declaration
 ```
 
 ```
-thena spine> :load bad.thena.rules
-bad.thena.rules: 2:3: unexpected rule
+thena spine> :load indented.thena.rules
+indented.thena.rules: 6:2: unexpected g
 ```
+
+Written in column 1, `g x = concat x x` is a new declaration and the file loads.
 
 ## 4. `instral`: statements
 
@@ -115,12 +125,54 @@ abab
 <z
 ```
 
-- `‹name› = ‹expression›` binds; a bare expression is run for effect.
+- `‹pattern› = ‹expression›` binds; a bare expression is run for effect.
 - `return ‹value›` ends the body and is what the caller gets.
-- A word is **an op** if one bears that name, otherwise **the local** if one is
-  bound, otherwise **a call to a rule** of that name. The op words are never
-  shadowed.
-- A lambda is `\ x -> e`; in an argument it takes parentheses.
+- A word is **an op** if one bears that name at that number of arguments,
+  otherwise **the local** if one is bound, otherwise **a call to a rule or
+  function** of that name.
+- A lambda is `\ x -> e`; in an argument it takes parentheses. A lambda of no
+  arguments, `\ -> e`, is run with `call d`.
+- `‹name› : ‹type›` on its own line, just above a binding, annotates that local.
+
+### Patterns
+
+A parameter and the left of a binding are both **patterns** over `instral`'s own
+data: `x`, `_`, a literal, `[]`, `[a, b]`, `[a, ...rest]`, `(x, y)`, `(some x)`,
+`none`. A shape is asked in the pattern rather than by a test, so a fold is two
+clauses:
+
+```
+rule walk [] :- do say "done"
+rule walk [x, ...t] :-
+  do say x
+     walk t
+
+rule go :- do walk ["a", "b"]
+```
+
+```
+thena spine> go
+a
+b
+done
+```
+
+**A pattern that does not match is a failure.** In a rule that means the next
+clause is tried, and you can see it:
+
+```
+three = ["one", "two", "three"]
+
+rule pick :- do [only] = three ; say only
+rule pick :- do [a, b, _] = three ; m = concat a b ; say m
+```
+
+```
+thena spine> pick
+chose 680: pick
+backtracking to 680: pick
+onetwo
+```
 
 **What you type at the prompt is a block**, so a binding lives for the entry and
 dies with it:
@@ -147,13 +199,13 @@ are GHCi's spelling.
 ## 5. `instral` has types, and they are checked when a file loads
 
 ```
-String   Name   Int   Char   Bool
+String   Name   Int   Char   Bool   Level
 List a   Option a   (a, b)   a -> b
 Surface   Core   Development
 ```
 
 Nothing is annotated unless you want it to be: a rule's type is inferred from its
-head predicates and from the ops its body uses. **A base that does not type check
+head predicates, its patterns and the ops its body uses. **A base that does not type check
 is not installed**, and the previous rules stay in place.
 
 ```
@@ -167,9 +219,12 @@ Two rules about types worth knowing:
 - **`Name` is not `String`.** A string literal is accepted at either, so
   `fresh-name "h"` needs nothing; a *variable* going from a name to a string is
   written down, with `name-text`.
-- **Write a signature when you want a rule usable at more than one type.**
-  Without one a rule is inferred at a single type. A signature is *checked*, and
-  a promise the body does not keep is reported against the signature:
+- **Inference is Hindley-Milner.** A rule or function is generalised, so
+  `rule ignore x :- do say "ignored"` can be used at a `Name` in one place and a
+  `Core` in another with no signature. **A local is not generalised**: a lambda
+  bound in a body is used at one type unless you annotate it.
+- **A signature is documentation that is checked.** A promise the body does not
+  keep is reported against the signature:
 
 ```
 thena spine> :load over.thena.rules
@@ -186,6 +241,8 @@ thena spine> :accepts String
 thena spine> :produces String
   twice/1 : String -> String
 ```
+
+The signatures shown are the inferred ones, functions included.
 
 `:matches` asks the other question — what applies to *this development* — and a
 rule qualifies there because its head passes, not because its signature fits.
@@ -220,7 +277,57 @@ thena spine> :load loop.thena.rules
 loop.thena.rules: in the grammar of Tm: loop begins with the language itself
 ```
 
-## 7. REPL commands are not a language
+## 7. Splices: holes in a written core term
+
+A written core term may have holes, filled from `instral` bindings when the
+instruction runs:
+
+```
+rule arrow-demo :-
+  do d = resolve-core core`Type₀`
+     t = resolve-core core`${d} -> ${d}`
+     claim "k" t
+
+rule level-demo :-
+  do l = level 2
+     u = universe-at l
+     t = resolve-core core`${u} -> ${u}`
+     claim "big" t
+```
+
+```
+thena spine> arrow-demo
+thena spine> level-demo
+thena spine> :show
+  let ? k : Type₀ -> Type₀ in
+  let ? big : Type₂ -> Type₂ in
+▶ let ? t : Type₀ in
+  t
+```
+
+**A splice stands for what the grammar expects in that position**, so the
+template is parsed when the file loads and only the values wait. A term position
+wants a `Core` and a name position — a binder, a `let`, a claim — wants a
+`Name`, and both are checked at load:
+
+```
+rule wrong :-
+  do d = resolve-core core`Type₀`
+     t = resolve-core core`λ (${d} : ${d}) -> ${d}`
+```
+
+```
+the rules do not type check:
+  wrong, instruction 2: wanted Name, got Core
+```
+
+A level needs no splice of its own: build a universe with `level ‹n›` or
+`fresh-level` and `universe-at`, and splice the term.
+
+**Only the core grammar takes a splice today.** Neither `` surface`…` `` nor an
+object language's region does.
+
+## 8. REPL commands are not a language
 
 A **bare word acts** and a **word with a colon looks**. The colon commands manage
 the session or show you something; `:help` lists them. Everything else you type
@@ -229,7 +336,7 @@ is `instral`, which is why there is no separate REPL grammar to learn.
 The one exception is `:goal`, which is a colon command that changes the
 development. It is known and kept deliberately for now.
 
-## 8. Where this is written down
+## 9. Where this is written down
 
 `DECISIONS.md` at the repository root records each of these as a decision, with
 the shortest example that shows it, in the order they were taken.

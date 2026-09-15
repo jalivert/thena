@@ -674,6 +674,8 @@ base you load later, so it is reported when the search finds no clause.
 
 **A rule is inferred at one type**, not generalised: a helper used at `Surface`
 in one place and `Core` in another is an error, not a polymorphic rule.
+*Superseded 2026-09-13 — see "A rule or function used at two types is inferred,
+not refused".*
 
 ### A rule file may declare functions, and they need no keyword
 
@@ -908,6 +910,10 @@ rule usesTerm :- do h = here ; ignore h               -- a Core
 
 Adding `ignore : a -> ()` makes both uses fine, because each use gets
 its own copy of the type.
+
+*Superseded 2026-09-13: that example now loads with no signature — see "A rule
+or function used at two types is inferred, not refused". A signature is still
+checked, as below.*
 
 **A signature is checked, not believed.** If the body needs more than the
 signature promised, the *signature* is reported:
