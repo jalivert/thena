@@ -95,6 +95,10 @@ data Ty
     -- \"contained\" weakens from /closed/ to /extensible by declaration/, which
     -- he ruled is *\"exactly what instral is for\"*.
   | TFun [Ty] Ty
+    -- ^ **the argument list is never empty** (MS5 phase 94): a lambda takes at
+    -- least one parameter, and calling a local with none is refused before a
+    -- type is built for it. @ms5\/CLOSEOUT.md@ 23 is why — a function of no
+    -- arguments had a type nothing could write.
     -- ^ **a function value** (MS5 phase 68b) — what a lambda is.
     --
     -- **N-ary, not curried**, and written as an arrow chain: @a -> b -> c@ is a
@@ -187,13 +191,6 @@ renderTy = go False
       TSurface     -> "Surface"
       TCore        -> "Core"
       TDevelopment -> "Development"
-      -- **A function of no arguments still shows its arrow** (2026-09-12).
-      -- Without the special case @TFun [] String@ printed as @String@, so a
-      -- clash between the two read /wanted String, got String/ — which is what
-      -- @say d@ says of a @d@ bound to @\\ -> "ab"@. There is no syntax for the
-      -- type (@ms5\/CLOSEOUT.md@ 23), so this spelling is a message's and a
-      -- listing's, not something to read back.
-      TFun [] r    -> wrap p ("-> " ++ go True r)
       TFun as r    -> wrap p (intercalate " -> " (map (go True) as ++ [go True r]))
       TList a      -> wrap p ("List " ++ go True a)
       TOption a    -> wrap p ("Option " ++ go True a)

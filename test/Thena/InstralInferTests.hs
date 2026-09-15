@@ -1576,6 +1576,24 @@ lambdas =
         said "rule go :- do k = \\ s -> concat \"<\" s ; n = k \"z\" ; say n"
           @?= Just "<z"
 
+      -- **A lambda takes at least one parameter** — his ruling, 2026-09-15
+      -- (MS5 phase 94, @ms5\/CLOSEOUT.md@ 23). @\\ -> e@ built a closure of no
+      -- arguments whose type nothing could write; it is a parse error now.
+    , testCase "of no parameters does not parse" $
+        case snd (loadRuleBases newSession [("i.thena.rules", "rule base i where\nrule go :- do d = \\ -> concat \"a\" \"b\"\n")]) of
+          RuleFileRefused _ (RuleSyntaxError _) -> pure ()
+          other -> assertFailure ("expected a syntax error, got " ++ show other)
+
+      -- **…and a local called with nothing is refused**, because no local can
+      -- hold a function of no arguments. @d@ names a value; @x = d@ is how it is
+      -- used, and that needs no @call@.
+    , testCase "a local called with no arguments is refused, not typed" $
+        load "rule go :- do d = \"text\" ; call d"
+          @?= BasesIllTyped [NotCallable (InBody (GlobalName "go") 1) "d"]
+    , testCase "…and a local used as a value needs no call" $
+        said "rule go :- do d = \"text\" ; r = d ; say r"
+          @?= Just "text"
+
       -- **Higher order, with the signature that says so.** @(a -> b)@ in a
       -- signature was refused by name until this phase.
     , testCase "is passed to a function that takes one" $

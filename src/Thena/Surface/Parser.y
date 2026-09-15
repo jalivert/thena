@@ -145,7 +145,7 @@ InstrRhs :: { RawRhs }
 -- added lambdas to the rule-file grammar and not to this one, so
 -- @do { f = \\ z -> … }@ did not parse.
 InstrLambda :: { RawOperand }
-  : 'λ' InstrParams '->' InstrFunBody      { RawLambda (reverse $2) $4 }
+  : 'λ' InstrLambdaParams '->' InstrFunBody { RawLambda (reverse $2) $4 }
 
 -- **Level with @Thena.Syntax.Parser@\'s @FunBody@** (MS5 phase 75b) — §7b's
 -- registered duplication again, and added here in the same phase this time
@@ -154,13 +154,15 @@ InstrFunBody :: { RawBody }
   : InstrRhs                               { BodyRhs $1 }
   | do '{' Block '}'                       { BodyBlock (reverse $3) }
 
--- **Level with @Thena.Syntax.Parser@\'s @Params@ and @PatAtom@** (MS5 phase
--- 82) — §7b's registered duplication a third time, and added in the same phase
--- again. A lambda written inside a @do@ block in a surface term takes the same
--- patterns one written in a rule file does.
-InstrParams :: { [RawPattern] }
-  :                                        { [] }
-  | InstrParams InstrPatAtom               { $2 : $1 }
+-- **Level with @Thena.Syntax.Parser@\'s @LambdaParams@ and @PatAtom@** (MS5
+-- phases 82 and 94) — §7b's registered duplication. A lambda written inside a
+-- @do@ block in a surface term takes the same patterns one written in a rule
+-- file does. **A lambda's parameters are never empty** (MS5 phase 94), level with
+-- @Thena.Syntax.Parser@\'s @LambdaParams@. A lambda was this grammar's only
+-- user of a possibly-empty parameter list, so that production went with it.
+InstrLambdaParams :: { [RawPattern] }
+  : InstrPatAtom                           { [$1] }
+  | InstrLambdaParams InstrPatAtom         { $2 : $1 }
 
 InstrPatAtom :: { RawPattern }
   : ident                                  { RawPWord $1 }

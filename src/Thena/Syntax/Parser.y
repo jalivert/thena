@@ -252,7 +252,16 @@ Rhs :: { RawRhs }
 -- @\ x y -> ‹expression›@ (MS5 phase 68b). @\@ and @λ@ are one token and both
 -- were already lexed, so this costs no new syntax.
 Lambda :: { RawOperand }
-  : 'λ' Params '->' FunBody                { RawLambda (reverse $2) $4 }
+  : 'λ' LambdaParams '->' FunBody          { RawLambda (reverse $2) $4 }
+
+-- **A lambda takes at least one parameter** — his ruling, 2026-09-15 (MS5 phase
+-- 94, @ms5\/CLOSEOUT.md@ 23): /"I don't like the nullary function… we should
+-- nip that in the bud."/ It reused 'Params', which may be empty because a
+-- rule's may, so @\ -> e@ parsed for free and built a value whose type
+-- nothing could spell. A value is what @x = e@ already names.
+LambdaParams :: { [RawPattern] }
+  : PatAtom                                { [$1] }
+  | LambdaParams PatAtom                   { $2 : $1 }
 
 -- **An object language's grammar** (MS5 phase 69). Braces and @where@ are
 -- already tokens, so this costs one keyword and no punctuation.

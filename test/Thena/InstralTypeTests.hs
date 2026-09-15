@@ -106,7 +106,6 @@ injectivity =
         ++ [ TList a | a <- us ]
         ++ [ TOption a | a <- us ]
         ++ [ TPair a b | a <- us, b <- us ]
-        ++ [ TFun [] a | a <- us ]
         ++ [ TFun [a] b | a <- us, b <- us ]
         ++ [ TFun [a, b] c | a <- us, b <- us, c <- us ]
 
@@ -118,7 +117,7 @@ injectivity =
       | ps <- [] : [ [a] | a <- small ] ++ [ [a, b] | a <- small, b <- small ]
       , r  <- Nothing : map Just small
       ]
-    small = [TString, TCore, TFun [] TString, TFun [TString] TString, TVar 0]
+    small = [TString, TCore, TFun [TString] TString, TVar 0]
 
 -- --------------------------------------------------------------------------
 -- The built-in type names (2026-09-12)
@@ -215,16 +214,6 @@ roundTrip =
           , Signature [TPair (TFun [TCore] TCore) (TFun [TSurface] TSurface)] Nothing
           , Signature [TOption (TFun [TBool] TName)] (Just (TFun [TInt, TChar] TBool))
           ]
-
-      -- **The one type with no syntax** (@ms5\/CLOSEOUT.md@ 23). @\\ -> e@ is
-      -- writable and builds a closure of no arguments, but the type language
-      -- has no spelling for one — an arrow chain always has a left-hand side.
-      -- So it does not read back, and what matters is only that it does not
-      -- print as its own result: a clash between the two used to say
-      -- /wanted String, got String/.
-    , testCase "a function of no arguments prints distinctly, though it cannot be read" $ do
-        renderTy (TFun [] TString) @?= "-> String"
-        renderTy (TList (TFun [] TString)) @?= "List (-> String)"
 
     , testProperty "for any signature at all" $
         forAll genSignature $ \sg ->

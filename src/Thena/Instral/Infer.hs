@@ -98,6 +98,9 @@ data InstralTypeError
     -- type. Carries what the body pinned it to.
   | SignatureUnanswered GlobalName Int
     -- ^ a signature for a callable no rule defines.
+  | NotCallable Site String
+    -- ^ **a local named as if it were called with no arguments** (MS5 phase
+    -- 94): @call d@, or @d@ alone on a line, where @d@ holds a value.
   | Undefined Site String Int [Int]
     -- ^ **a call to a name no loaded rule or function defines at that arity**
     -- (MS5 phase 92): the name, the arity written, and the arities that do
@@ -139,6 +142,9 @@ renderInstralTypeError e = case e of
   TextNotTextual si t ->
     renderSite si ++ ": a string literal is a String or a Name, not "
       ++ renderTy t
+  NotCallable si n ->
+    renderSite si ++ ": " ++ n ++ " holds a value, not something to call with\
+      \ no arguments — write r = " ++ n ++ " to use it"
   Undefined si n _ [] ->
     renderSite si ++ ": no rule or function is called " ++ n
   Undefined si n a as ->
@@ -373,6 +379,7 @@ inFileOrder rs = sortOn position
       SignatureUnanswered n _   -> n
       TextNotTextual si _   -> nameIn si
       Undefined si _ _ _    -> nameIn si
+      NotCallable si _      -> nameIn si
 
     nameIn si = case si of
       InHead n _      -> n
@@ -731,6 +738,16 @@ operation env r res ctx si o st0 = case o of
 
   -- **A local shadows a rule** — his ruling, 2026-09-12 — so a call whose name
   -- is bound here is an application of that value, and its type says so.
+  -- **A local called with nothing is not a call** (MS5 phase 94). A lambda
+  -- takes at least one parameter, so no local holds a function of none; @d@
+  -- alone on a line, or @call d@, names a value and does nothing with it.
+  -- Refused here rather than unified with a function type of no arguments,
+  -- which is the type phase 94 removed.
+  Call nm []
+    | Just l <- lookup nm ctx ->
+        let (_, st1) = useOf l st0
+         in (Nothing, oops (NotCallable si nm) st1)
+
   Call nm as
     | Just l <- lookup nm ctx ->
         -- **Its own copy if it was annotated**, which is what an annotated
