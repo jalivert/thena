@@ -1062,6 +1062,36 @@ construct. Term literals in a body are a later phase.
 the driver's and are not instructions; a `.thena.script` file is where those
 live.
 
+### Every `do` block is checked before it runs, and a top-level one is its own scope
+
+*Decided 2026-09-15.*
+
+A `do` block is validated and type checked before any of it runs, wherever it is
+written — inside a surface term, at the prompt, or at the top of a module. A
+mistake is refused and nothing it would have done happens:
+
+```
+thena spine> do { prim-try 3 }
+instruction 1: wanted Core, got Int
+```
+
+**Each top-level block in a module is its own scope.** A name bound in one is
+not in scope in the next:
+
+```
+module M where
+
+do
+  x = "one"
+
+do
+  say x          -- refused: no parameter or earlier binding is called x
+```
+
+**While a rule is yielding, a block you type sees the rule's locals**, and they
+have the types their values have — so `do { goto h }` reads the rule's `h`, and
+`do { say h }` is refused when `h` holds a term.
+
 ### `yield` goes both ways, because it names one thing
 
 *Decided 2026-09-03.*
