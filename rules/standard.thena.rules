@@ -2,6 +2,11 @@
 
 rule base standard where
 
+-- **Every callable here carries its signature** (MS5 phase 93, his ruling —
+-- "that's why we have annotations"). None is needed: inference works each one
+-- out, and `InstralInferTests` asserts that what is written here is exactly
+-- what it works out, so a signature cannot drift from its rule.
+
 -- **@fresh-universe@ is a FUNCTION now** (MS5 phase 89): it was one op doing
 -- two things — mint a level, then wrap it — and the two are `fresh-level` and
 -- `universe-at`. Every use of the word below is unchanged.
@@ -11,31 +16,41 @@ rule base standard where
 -- focus and `prove` would run it. That is phase 49c's `enter-binders` lesson —
 -- a helper wants a head that is TRUE, and there is no true head here because it
 -- reads nothing about the development at all.
+fresh-universe : Core
 fresh-universe = do
   l = fresh-level
   u = universe-at l
   return u
 
+attack : ()
 rule attack :- when focus-is-hole do prim-attack
 
+try-core : Core -> ()
 rule try-core t :- when focus-is-hole do prim-try t
 
+abandon : ()
 rule abandon :- when focus-is-hole do prim-abandon
 
+intro : ()
 rule intro :- when focus-is-guess goal-type-is-pi do prim-lambda
 
 rule intro :- when focus-is-guess goal-type-is-let do prim-let
 
+solve : ()
 rule solve :- when focus-is-guess do prim-solve
 
+regret : ()
 rule regret :- when focus-is-guess do prim-regret
 
+eliminate-core : Core -> ()
 rule eliminate-core t :- when focus-is-hole do prim-eliminate t
 
+prove : ()
 rule prove :- when focus-is-hole do prim-prove
 
 rule prove :- when focus-is-guess do prim-prove
 
+fill : Core -> ()
 rule fill t :- when focus-is-hole
   do n = fresh-name "refined"
      ; x = define n t
@@ -44,10 +59,12 @@ rule fill t :- when focus-is-hole
      ; unify-into s g
      ; prim-try x
 
+unify-refine-core : Core -> ()
 rule unify-refine-core t :- when focus-is-hole
   do fill t
      ; solve
 
+apply-core : Core -> ()
 rule apply-core f :- when focus-is-hole
   do s = prim-apply f
      ; unify-refine-core s
@@ -82,6 +99,7 @@ rule apply-core f :- when focus-is-hole
 -- takes parameters, so `prove` cannot reach them.
 -- --------------------------------------------------------------------------
 
+claim : Core -> ()
 rule claim ty :-
   do n = ask "name for the new hole?" name
      ; claim n ty
@@ -89,6 +107,7 @@ rule claim ty :-
      ; m = concat "claimed " t
      ; say m
 
+assume : Core -> ()
 rule assume ty :-
   do n = ask "name for the assumption?" name
      ; assume n ty
@@ -96,6 +115,7 @@ rule assume ty :-
      ; m = concat "assumed " t
      ; say m
 
+quantify : Core -> ()
 rule quantify ty :-
   do n = ask "name for the ∀-binder?" name
      ; quantify n ty
@@ -116,6 +136,7 @@ rule quantify ty :-
 -- follows is the whole of E⟦·⟧.
 
 -- E⟦x⟧ = FILL x ; SOLVE — Brady's variable case.
+elaborate : Surface -> ()
 rule elaborate t :- when focus-is-hole (surface-is-name t)
   do w = surface-name t
      ; x = resolve-name w
@@ -334,6 +355,7 @@ rule elaborate t :- when focus-is-hole (surface-is-do t) do play t
 
 -- One prim-lambda per binder, each given the SURFACE name: without it the binder
 -- keeps the identifier written in the type.
+intro-binders : Surface -> ()
 rule intro-binders t :- when focus-is-guess (lambda-binds-more t)
   do x  = lambda-name t
      ; prim-lambda x
@@ -346,6 +368,7 @@ rule intro-binders t :- when focus-is-guess (lambda-binds-one t)
 
 -- One along per binder, to stand where the body was written. The λ's binders
 -- are the count and nothing else about them is read.
+enter-binders : Surface -> ()
 rule enter-binders t :- when focus-is-component (lambda-binds-more t)
   do along
      ; tl = lambda-tail t
@@ -368,6 +391,7 @@ rule enter-binders t :- when focus-is-component (lambda-binds-one t) do along
 -- everywhere. It is a test that is TRUE here, not one chosen to tidy the match
 -- list — the focus is the hole on the way in and the argument just elaborated
 -- on the way round.
+spine-arguments : Core -> Core -> Surface -> ()
 rule spine-arguments h f t :- when focus-is-component (surface-is-app t)
   do goto h
      ; n  = fresh-name "a"

@@ -26,9 +26,9 @@ import Thena.Errors (SyntaxError (..))
 import Thena.Instral.Grammar (GrammarError (..))
 import Thena.Syntax.Parser (ParseError (..))
 import Thena.Rules (RuleBase (..), RuleError (..), writtenPositions)
-import Data.List (isInfixOf)
+import Data.List (isInfixOf, sort)
 import Thena.Repl (renderCursor, renderRuleError, transcriptFrom)
-import Thena.Standard (expectedBase, expectedStandard)
+import Thena.Standard (expectedBase, expectedStandard, standardBases)
 
 tests :: TestTree
 tests =
@@ -1085,32 +1085,26 @@ shippedBase =
         let inferred = [ (n, sg) | ((GlobalName n, _), sg) <- fst (inferProgram [] shipped) ]
          in map renderInstralTypeError (snd (inferProgram inferred shipped)) @?= []
 
-      -- **Written out, not counted.** A signature is what a later phase will
-      -- move by accident, and every one of these was inferred from the head
-      -- predicates and the ops in the body — nothing is annotated.
-    , testCase "and these are the signatures it works out" $
-        [ n ++ "/" ++ show a ++ " : " ++ renderSignature s
-        | ((GlobalName n, a), s) <- fst (inferProgram [] expectedStandard)
-        ]
-          @?= [ "attack/0 : ()"
-              , "try-core/1 : Core -> ()"
-              , "abandon/0 : ()"
-              , "intro/0 : ()"
-              , "solve/0 : ()"
-              , "regret/0 : ()"
-              , "eliminate-core/1 : Core -> ()"
-              , "prove/0 : ()"
-              , "fill/1 : Core -> ()"
-              , "unify-refine-core/1 : Core -> ()"
-              , "apply-core/1 : Core -> ()"
-              , "claim/1 : Core -> ()"
-              , "assume/1 : Core -> ()"
-              , "quantify/1 : Core -> ()"
-              , "elaborate/1 : Surface -> ()"
-              , "intro-binders/1 : Surface -> ()"
-              , "enter-binders/1 : Surface -> ()"
-              , "spine-arguments/3 : Core -> Core -> Surface -> ()"
-              ]
+      -- **Written out, not counted — and written in the base itself** (MS5
+      -- phase 93). Every callable in @rules/standard.thena.rules@ carries a
+      -- signature, and this asserts each is exactly what inference works out
+      -- from the rules with NO signatures — the Haskell mirror has none. So the
+      -- file is the listing, a signature cannot drift from its rule, and no
+      -- second copy of the eighteen lines lives here.
+    , testCase "and its written signatures are exactly what inference works out" $ do
+        bases <- standardBases
+        let written  = [ n ++ "/" ++ show (length (sigParams sg)) ++ " : " ++ renderSignature sg
+                       | b <- bases, (n, sg) <- baseSignatures b ]
+            inferred = [ n ++ "/" ++ show a ++ " : " ++ renderSignature sg
+                       | ((GlobalName n, a), sg) <- fst (inferProgram [] shipped) ]
+        sort written @?= sort inferred
+
+      -- **…and every callable has one**, so a rule added without a signature
+      -- fails here rather than quietly going unannotated.
+    , testCase "and every callable in it is annotated" $ do
+        bases <- standardBases
+        length [ () | b <- bases, _ <- baseSignatures b ]
+          @?= length (fst (inferProgram [] shipped))
 
       -- **`elaborate`'s parameter is a Surface term and nothing says so.** It
       -- comes from the head predicates: sixteen clauses each ask a
