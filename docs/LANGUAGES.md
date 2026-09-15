@@ -130,8 +130,13 @@ abab
 - A word is **an op** if one bears that name at that number of arguments,
   otherwise **the local** if one is bound, otherwise **a call to a rule or
   function** of that name.
-- A lambda is `\ x -> e`; in an argument it takes parentheses. A lambda of no
-  arguments, `\ -> e`, is run with `call d`.
+- A lambda is `\ x -> e`; in an argument it takes parentheses. **A lambda takes
+  at least one parameter** — a value needs no lambda: `x = e` names it and
+  `r = x` uses it.
+- **A function is not curried.** `join a b = concat a b` takes two arguments,
+  and `join "x"` is refused — *join takes 2 arguments, not 1 argument*. A
+  function that gives a function says so in its type:
+  `adder : String -> (String -> String)`, `adder a = \ b -> concat a b`.
 - `‹name› : ‹type›` on its own line, just above a binding, annotates that local.
 
 ### Patterns

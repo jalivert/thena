@@ -1148,6 +1148,26 @@ check are written against a single source of level expressions. A rule that coul
 write `level-max a b` would be a second source. It can be added the day something
 needs it.
 
+### A lambda takes at least one parameter, and a function is not curried
+
+*Decided 2026-09-15.*
+
+`\ -> e` does not parse. A value needs no lambda — `x = e` names it and `r = x`
+uses it — and calling a local with no arguments is refused:
+
+```
+rule go :- do d = "text" ; call d
+```
+```
+go, instruction 2: d holds a value, not something to call with no arguments — write r = d to use it
+```
+
+**Functions are not curried.** A function's type is n-ary: `join a b = concat a b`
+takes exactly two arguments, and `join "x"` is refused with *join takes 2
+arguments, not 1 argument*. A function that returns a function says so, with
+parentheses: `adder : String -> (String -> String)` and `adder a = \ b -> concat a
+b`, after which `p = adder "x" ; m = p "y"` works.
+
 ### An instruction number is the line you wrote, counted from 1
 
 *Decided 2026-09-15.*
