@@ -669,8 +669,22 @@ of the wrong kind (`prim-try 3`), and **binding a call to a rule no clause of
 which returns**. A rule *some* of whose clauses return can still fail at run
 time, because which clause runs is decided then.
 
-**A call to a name nothing defines is still allowed** — a rule may call one in a
-base you load later, so it is reported when the search finds no clause.
+**A call to a name nothing defines is refused when the bases load** (*decided
+2026-09-15*). The bases you load together are the program — in any order, and a
+rule may call one written below it — and a call to a name none of them defines,
+or to a name at an arity it does not have, is a type error:
+
+```
+rule go :- do helper 1 2
+rule helper x :- do prim-prove
+```
+```
+the rules do not type check:
+  go, instruction 1: helper takes 1 argument, not 2 arguments
+```
+
+So a rule file that uses the shipped tactics is loaded together with the shipped
+base: `:load rules standard.thena.rules mine.thena.rules`.
 
 **A rule is inferred at one type**, not generalised: a helper used at `Surface`
 in one place and `Core` in another is an error, not a polymorphic rule.
@@ -1108,9 +1122,8 @@ declarations above the block have already been made by then.
 
 **That timing is a current limit, not the intent.** A core term's names are
 resolved against the development as it stands when the instruction runs — Γ at
-the focus, then the globals — and a global's name can itself be computed
-(`define-global` takes a name value), so the check cannot simply be moved as
-things are. The direction is to check tagged term literals when the file loads,
+the focus, then the globals — and a name may be a hypothesis the proof binds
+before that instruction, so the check cannot simply be moved as things are. The direction is to check tagged term literals when the file loads,
 which may mean reworking how they are treated; it is not scheduled.
 
 **While a rule is yielding, a block you type sees the rule's locals**, and they
@@ -1349,12 +1362,10 @@ This is what lets `claim ⌜ Nat ⌝` be an ordinary rule in the rule base rathe
 than a shape the REPL recognises. You can write your own clause of any op's name
 at an arity the op does not have, and it will be found.
 
-**The cost is that a mistyped word is no longer caught when a rule base loads.**
-`prim-solve x` used to be refused as *`prim-solve` was written with the wrong
-arguments*; it is now a call to a rule called `prim-solve` that takes one
-argument, and if there is none you find out when it runs. That is the same trade
-already made for `call`, where a rule may name a rule defined later or in a base
-not loaded yet.
+**A mistyped word is still caught when a rule base loads.** `prim-solve x` is a
+call to a rule called `prim-solve` that takes one argument, and if no loaded base
+has one it is refused, saying the op takes none (*since 2026-09-15; before that
+it failed only when it ran*).
 
 ### A rule file lays out, exactly like Haskell
 
