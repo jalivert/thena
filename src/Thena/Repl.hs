@@ -29,6 +29,7 @@ module Thena.Repl
   , renderMachine
   , describe
   , renderSyntaxError
+  , renderRuleError
   , renderInductive
   , renderEliminator
   , preludePath
@@ -2054,7 +2055,7 @@ whereRuleError e = case e of
   UnitInsideAType n       -> inSignature n
   DuplicateSignature n _  -> inSignature n
   AnnotationWithoutBinding g i _ -> inRule g i
-  InAnnotation g i n _    -> "in " ++ nameString g ++ ", instruction " ++ show i
+  InAnnotation g i n _    -> "in " ++ nameString g ++ ", instruction " ++ show (i + 1)
                                ++ ", the type of " ++ n ++ ": "
   ReturnInSurfaceBlock g i -> inRule g i
   FunctionLeavesNothing n -> "in " ++ n ++ ": "
@@ -2066,7 +2067,10 @@ whereRuleError e = case e of
   BadGrammarItem n _      -> inLanguage n
   BadGrammar n _          -> inLanguage n
   where
-    inRule g i = "in " ++ nameString g ++ ", instruction " ++ show i ++ ": "
+    -- **Counted from 1, as a type error is** (MS5 phase 91, @ms5\/CLOSEOUT.md@
+    -- 44). The index is the written statement from zero — the same count
+    -- 'Thena.Instral.Infer' keeps — so the two passes name one line one way.
+    inRule g i = "in " ++ nameString g ++ ", instruction " ++ show (i + 1) ++ ": "
     inName g   = "in " ++ nameString g ++ ": "
     inSignature n = "in the signature of " ++ n ++ ": "
     inLanguage n  = "in the grammar of " ++ n ++ ": "

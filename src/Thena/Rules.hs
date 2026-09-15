@@ -32,6 +32,7 @@ module Thena.Rules
   , RuleError (..)
   , validate
   , validateBase
+  , writtenPositions
 
     -- * Written rules (§8, phase 21)
   , opWords
@@ -80,7 +81,7 @@ import qualified Thena.Surface.Zipper as Zipper
 import Thena.Errors (SyntaxError (..))
 import Thena.Surface.Read (parseSurfaceText)
 import Thena.Surface.Zipper (rootedAt)
-import Thena.Syntax.Lexer (lexTokens)
+import Thena.Syntax.Lexer (isIdentifier, lexTokens)
 import Thena.Syntax.Parser (parseTerm)
 import Thena.Instral.Grammar
   ( GrammarError
@@ -571,7 +572,8 @@ data RuleError
 -- states the head admits. That is not decidable shallowly, and §8 already
 -- states the answer — a rule may match, run and fail.
 validate :: Rule -> [RuleError]
-validate r = reserved ++ repeated ++ headScope ++ go 0 (initiallyBound r) (ruleBody r)
+validate r = reserved ++ repeated ++ headScope
+               ++ go (writtenPositions (ruleBody r)) (initiallyBound r) (ruleBody r)
   where
     nm = ruleName r
 
@@ -626,8 +628,9 @@ validate r = reserved ++ repeated ++ headScope ++ go 0 (initiallyBound r) (ruleB
     boundByParams = concatMap patternBinds (ruleParams r)
 
     go _ _ [] = []
-    go i bound (instr : rest) =
-      let o     = operationOf instr
+    go ps bound (instr : rest) =
+      let i     = case ps of { p : _ -> p ; [] -> 0 }
+          o     = operationOf instr
           errs  = declaration i o ++ binding i instr o ++ scope i bound o
                     ++ insideLambda i bound o
           -- **A binding brings in what its PATTERN binds** (MS5 phase 84),
@@ -636,7 +639,7 @@ validate r = reserved ++ repeated ++ headScope ++ go 0 (initiallyBound r) (ruleB
           bound' = case instr of
             Bind p _ _ -> patternBinds p ++ bound
             Do _       -> bound
-       in errs ++ go (i + 1) bound' rest
+       in errs ++ go (drop 1 ps) bound' rest
 
     -- **A lambda's body is a body and is scoped like one** (found in the long
     -- hunt, 2026-09-13). @operandsOf@ answers with the operands an op /reads/,
@@ -844,6 +847,35 @@ initiallyBound = concatMap patternBinds . ruleParams
 -- calls it on every rule as it resolves one, so a base that would not validate
 -- is refused rather than installed. §2.4 asked for a load-time pass and until
 -- there was a load there was only a test.
+-- | Which written statement each instruction of a resolved body came from,
+-- counted from zero (MS5 phase 91, @ms5\/CLOSEOUT.md@ 44).
+--
+-- **Resolution expands a statement into several instructions** and the checks
+-- after it see only the expansion: a nested call is lifted into a binding in
+-- front of the statement (@(i:k)@, phase 63), a written core term at the prompt
+-- likewise (@⌜1⌝@, 61b), a short function body is parked and returned
+-- (@(=)@, 68a), and an annotation is folded into the binding after it (77). So
+-- counting instructions told the author about a line they never wrote.
+--
+-- **One rule covers every expansion: a binding the author could not have
+-- written belongs to the statement after it.** Each of those generators already
+-- chose a name no identifier can equal — that is how it avoids collisions — so
+-- the lexer's own 'isIdentifier' is the whole test, and nothing here knows how
+-- any one of them spells its names. The other expansion is the annotation: an
+-- annotated binding was written as two statements, and the binding is the
+-- second. That is the count 'resolveBlock' keeps for the errors it raises
+-- itself, so a resolution error and a type error name the same line.
+writtenPositions :: [Instr] -> [Int]
+writtenPositions = go 0 0
+  where
+    -- Nothing after a held binding cannot happen from the resolver; it is
+    -- answered with the next line rather than a shorter list.
+    go line held [] = replicate held line
+    go line held (instr : rest) = case instr of
+      Bind (PVar n) Nothing _ | not (isIdentifier n) -> go line (held + 1) rest
+      Bind _ (Just _) _ -> replicate (held + 1) (line + 1) ++ go (line + 2) 0 rest
+      _                 -> replicate (held + 1) line ++ go (line + 1) 0 rest
+
 validateBase :: RuleBase -> [RuleError]
 validateBase = concatMap validate . baseRules
 
@@ -1729,7 +1761,7 @@ surfaceBlocks ls g is = concat <$> traverse one (zip [0 :: Int ..] (blocksUnder 
   where
     one (k, raws) = do
       body <- resolveBlock ls nm [] raws
-      case [ ReturnInSurfaceBlock nm i | (i, instr) <- zip [0 ..] body, returns instr ] of
+      case [ ReturnInSurfaceBlock nm i | (i, instr) <- zip (writtenPositions body) body, returns instr ] of
         e : es -> Left (e : es)
         []     -> do
           inner <- surfaceBlocks ls nm body

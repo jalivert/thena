@@ -25,9 +25,9 @@ import Thena.Instral.Ops (Instr (..), Op (..), Operand (..), Pattern (..), Rule 
 import Thena.Errors (SyntaxError (..))
 import Thena.Instral.Grammar (GrammarError (..))
 import Thena.Syntax.Parser (ParseError (..))
-import Thena.Rules (RuleBase (..), RuleError (..))
+import Thena.Rules (RuleBase (..), RuleError (..), writtenPositions)
 import Data.List (isInfixOf)
-import Thena.Repl (renderCursor, transcriptFrom)
+import Thena.Repl (renderCursor, renderRuleError, transcriptFrom)
 import Thena.Standard (expectedBase, expectedStandard)
 
 tests :: TestTree
@@ -53,7 +53,68 @@ tests =
     , functions
     , lambdas
     , objectLanguages
+    , writtenLines
     ]
+
+-- --------------------------------------------------------------------------
+-- An instruction number names the line as written (MS5 phase 91)
+-- --------------------------------------------------------------------------
+
+-- | **@ms5\/CLOSEOUT.md@ 44.** Three conventions were in use: resolution counted
+-- written statements from 0, 'Thena.Rules.validate' counted instructions after
+-- lifting from 0, and inference counted them from 1 with annotations folded
+-- away — so one rule could be told about one line under three numbers. Each
+-- case below printed a different number before.
+writtenLines :: TestTree
+writtenLines =
+  testGroup
+    "an instruction number names the line as written"
+    [ testCase "a nested call is part of the line that wanted it" $
+        case load "twice s = concat s s\nrule go t :- do\n  m = twice (twice t)\n  prim-try m" of
+          BasesIllTyped (Clash (InBody (GlobalName "go") 1) _ _ : _) -> pure ()
+          other -> assertFailure ("expected a clash at the second line, got " ++ show other)
+
+    , testCase "an annotation is a line of its own" $
+        case load "rule go :- do\n  k : String\n  k = \"x\"\n  prim-try k" of
+          BasesIllTyped (Clash (InBody (GlobalName "go") 2) _ _ : _) -> pure ()
+          other -> assertFailure ("expected a clash at the third line, got " ++ show other)
+
+    , testCase "the scope check counts the same lines" $
+        case loadRaw "rule base a where\ntwice s = concat s s\nrule go t :- do\n  m = twice (twice t)\n  say nope\n" of
+          RuleFileRefused _ (RuleIllFormed [UnboundInRule (GlobalName "go") 1 "nope"]) -> pure ()
+          other -> assertFailure ("expected nope refused at the second line, got " ++ show other)
+
+      -- **Inside a lambda, the lambda's own line is what is named** — the
+      -- choice 'Thena.Rules.validate' already made. The mistake is the second
+      -- instruction of the lambda's body and the lambda is the third line, so
+      -- the two counts differ and only one of them is right.
+    , testCase "a mistake inside a lambda names the lambda's line" $
+        case load "rule go :- do\n  say \"a\"\n  say \"b\"\n  f = \\ z -> do { say \"in\" ; prim-try \"s\" ; return z }" of
+          BasesIllTyped (TextNotTextual (InBody (GlobalName "go") 2) _ : _) -> pure ()
+          other -> assertFailure ("expected a refusal at the third line, got " ++ show other)
+
+      -- **The one function both passes go through**, on a body built by hand:
+      -- a generated binding joins the line after it, and an annotated binding
+      -- is the second of two lines.
+    , testCase "writtenPositions reads a resolved body back into lines" $
+        writtenPositions
+          [ Bind (PVar "(0:0)") Nothing (Value (Lit (VInt 1)))
+          , Do (Value (Ref "(0:0)"))
+          , Bind (PVar "k") (Just TString) (Value (Lit (VText "x")))
+          , Bind (PVar "(=)") Nothing (Value (Lit (VText "y")))
+          , Do (Return (Ref "(=)"))
+          ]
+          @?= [0, 0, 2, 3, 3]
+
+      -- **And both print from 1.**
+    , testCase "a rule error and a type error print the same number" $
+        assertBool "both say instruction 2"
+          (all ("instruction 2" `isInfixOf`)
+             [ renderRuleError (UnboundInRule (GlobalName "go") 1 "nope")
+             , renderInstralTypeError (Clash (InBody (GlobalName "go") 1) TCore TString) ])
+    ]
+  where
+    loadRaw src = snd (loadRuleBases newSession [("a.thena.rules", src)])
 
 -- --------------------------------------------------------------------------
 -- Generalisation, per strongly connected component (MS5 phase 76)

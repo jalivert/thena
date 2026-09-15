@@ -35,7 +35,7 @@ import Data.Maybe (fromMaybe, listToMaybe)
 import Thena.Core.Term (GlobalName (..))
 import Thena.Syntax.Concrete (Splice (..), splices)
 import Thena.Instral.Type (Signature (..), Ty (..), renderTy, typeVarsIn)
-import Thena.Rules (testTypes)
+import Thena.Rules (testTypes, writtenPositions)
 import Thena.Instral.Ops
   ( Instr (..)
   , Name
@@ -327,7 +327,13 @@ inferBlock sigs rs bound r =
       (ctx, st1)  = foldr seed ([], st0) bound
       seed (n, v) (acc, st) = let (t, st') = valueType site v st in ((n, Mono t) : acc, st')
       (res, st2)  = fresh st1
-   in stErrors (settleText (body env r (Just res) ctx 0 st2 (ruleBody r)))
+   in stErrors (settleText (body env r (Just res) ctx (writtenPositions (ruleBody r)) st2 (ruleBody r)))
+
+-- | The statement a body site points at; anything else counts as the first.
+siteIndex :: Site -> Int
+siteIndex si = case si of
+  InBody _ i -> i
+  _          -> 0
 
 -- | Report errors down the file, not along the call graph.
 --
@@ -510,7 +516,7 @@ clause env st0 r = case fromMaybe (error "declareAll missed a rule")
     walk ps res st =
       let (ctx, st1)  = patternCtx (InPattern (ruleName r)) (ruleParams r) ps st
           st2         = foldl (headTest r ctx) st1 (zip [0 ..] (ruleHead r))
-       in body env r res ctx 0 st2 (ruleBody r)
+       in body env r res ctx (writtenPositions (ruleBody r)) st2 (ruleBody r)
 
     resultOfSig sg = maybe [] (: []) (sigResult sg)
 
@@ -620,10 +626,16 @@ useOf l st = case l of
     ([],    st1) -> (t, st1)
 
 -- | Walk a body, threading what each @Bind@ adds to scope.
-body :: SigEnv -> Rule -> Maybe Ty -> [(Name, Local)] -> Int -> St -> [Instr] -> St
+--
+-- **The positions are the written statements, not the instructions** (MS5 phase
+-- 91): a caller walking a rule's own body passes 'writtenPositions' of it, and
+-- one walking a lambda's or a block's body passes the enclosing statement's
+-- position for every instruction — the lambda is what the reader sees on that
+-- line, which is the choice 'Thena.Rules.validate' already made.
+body :: SigEnv -> Rule -> Maybe Ty -> [(Name, Local)] -> [Int] -> St -> [Instr] -> St
 body _   _ _   _   _ st []             = st
-body env r res ctx i st (instr : rest) =
-  let si = InBody (ruleName r) i
+body env r res ctx ps st (instr : rest) =
+  let si = InBody (ruleName r) (case ps of { p : _ -> p ; [] -> 0 })
       o  = case instr of { Bind _ _ x -> x; Do x -> x }
       (mres, st1) = operation env r res ctx si o st
       (ctx', st2) = case (instr, mres) of
@@ -674,7 +686,7 @@ body env r res ctx i st (instr : rest) =
         Call nm as | notReturning (lookup (GlobalName nm, length as) env) ->
           oops (BindsNothing si (GlobalName nm)) s
         _ -> s
-   in body env r res ctx' (i + 1) st2 rest
+   in body env r res ctx' (drop 1 ps) st2 rest
 
 -- | One op: check its operands, answer the type it leaves.
 operation
@@ -690,7 +702,7 @@ operation env r res ctx si o st0 = case o of
     let (vs, st1)    = freshes (length ps) st0
         (rv, st2)    = fresh st1
         (bs, st3)    = patternCtx (InPattern (ruleName r)) ps vs st2
-        st4          = body env r (Just rv) (bs ++ ctx) 0 st3 b
+        st4          = body env r (Just rv) (bs ++ ctx) (repeat (siteIndex si)) st3 b
      in (Just (TFun vs rv), st4)
 
   -- **A local shadows a rule** — his ruling, 2026-09-12 — so a call whose name
@@ -742,7 +754,7 @@ operation env r res ctx si o st0 = case o of
   -- why 'res' is passed straight through.
   Block is ->
     let (v, st1) = fresh st0
-     in (Nothing, body env r (Just v) ctx 0 st1 is)
+     in (Nothing, body env r (Just v) ctx (repeat (siteIndex si)) st1 is)
 
   -- Everything else is the table, instantiated once: the operand types and the
   -- result together, so a scheme variable shared between them stays shared.
