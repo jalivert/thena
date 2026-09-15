@@ -1540,3 +1540,88 @@ theorem admitted, which is worse than refusing.
 **Loading a file leaves no undo history**, for the same reason: a file declares
 datatypes and admits theorems, and neither is something `:undo` could honestly
 reverse.
+
+### Patterns — in a parameter, and on the left of a binding
+
+*Decided 2026-09-14.*
+
+A clause's parameters are **patterns**, and so is the left of a `=` in a body:
+
+```
+size []           = "empty"
+size [_, ...rest] = "many"
+
+rule go :- do
+  p = mk "l" "r"
+  (x, y) = p
+  m = concat x y
+  say m
+```
+
+`[a, b]`, `[a, ...rest]`, `(x, y)`, `(some x)`, `none`, `true`, `3`, `'c'`,
+`"text"` and `_` are all patterns. A plain name is the pattern that binds it, so
+nothing that could be written before means anything different.
+
+**A refutable pattern that does not match is a failure.** In a rule the search
+tries the next clause; in a function it is the caller's failure, as in Haskell.
+There is no irrefutable/refutable distinction to learn.
+
+**Patterns are linear** — `f x x` is refused. Matching a value against another
+value is a different feature.
+
+**A destructuring binding cannot be annotated**: `n : Ty` above a binding says
+*this local is a scheme of this type*, and a compound pattern binds several
+names with several types.
+
+### A rule body opens with `do`
+
+*Decided 2026-09-14; it was `then` until then.*
+
+```
+rule attack :- when focus-is-hole do prim-attack
+```
+
+Two reasons: `:-` is Prolog's neck, so `:- then` read as *then then*; and a block
+of instructions is spelled `do` **everywhere else** — a function's body, a
+surface term's block, a REPL `do { … }`. This was the one place with a word of
+its own. **`then` is an ordinary identifier again** in every language.
+
+### `instral` has a `Level`, and `fresh-universe` is not a primitive
+
+*Decided 2026-09-15.*
+
+```
+l = level 2          -- an exact level, the one Type₂ means
+l = fresh-level      -- a fresh meta, the one a bare Type means
+u = universe-at l
+```
+
+`Level` is its own type and not `Int`, because a level a rule holds is usually a
+**meta the solver has not decided**, and no numeral can be one.
+
+**`fresh-universe` is a function over the two**, not an op — it was two
+operations wearing one name. Its spelling is unchanged.
+
+**There is no `level-suc` and no `level-max`**, deliberately: those are the level
+*algebra*, and the solver stays their only author. A numeral is not an algebra.
+
+### A splice supplies a nonterminal — a term, or a name
+
+*Decided 2026-09-14.*
+
+```
+core`${d} -> ${d}`                  a term
+core`λ (${n} : ${d}) -> ${d}`       a NAME, and a term
+⌜ λ (${n} : ${d}) -> ${d} ⌝          the same, in corners
+```
+
+**The position decides what the binding must hold** — a term position wants a
+`Core`, a name position wants a `Name` — so nothing is annotated and the two
+cannot be confused. Both are checked when the file loads, along with a splice
+that names nothing.
+
+Every name position takes one: a λ or ∀ binder, a `let`, a claim, a guess, an
+`elim`'s datatype, and a global at level arguments.
+
+**A level position needs no splice**: build the universe with `universe-at` and
+splice the term.
