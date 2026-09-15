@@ -2054,6 +2054,8 @@ whereRuleError e = case e of
   UnitInsideAType n       -> inSignature n
   DuplicateSignature n _  -> inSignature n
   AnnotationWithoutBinding g i _ -> inRule g i
+  InAnnotation g i n _    -> "in " ++ nameString g ++ ", instruction " ++ show i
+                               ++ ", the type of " ++ n ++ ": "
   ReturnInSurfaceBlock g i -> inRule g i
   FunctionLeavesNothing n -> "in " ++ n ++ ": "
   FunctionClauseUnreachable n _ -> "in " ++ n ++ ": "
@@ -2097,6 +2099,11 @@ whatRuleError e = case e of
     v ++ " is a type variable, and a variable takes no arguments"
   UnitInsideAType _       ->
     "() says a rule leaves nothing, so it can only be the result"
+  -- A local always holds a value, so for one @()@ is not misplaced: it is
+  -- impossible, whether it is the whole type or what a function type gives.
+  InAnnotation _ _ n (UnitInsideAType _) ->
+    "() is nothing, and " ++ n ++ " holds a value — a local's type cannot be () or give ()"
+  InAnnotation _ _ _ inner -> whatRuleError inner
   DuplicateSignature _ a  ->
     "two signatures for the same name at " ++ show a
       ++ (if a == 1 then " argument" else " arguments")

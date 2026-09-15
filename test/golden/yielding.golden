@@ -34,6 +34,8 @@ look at this
 thena spine> do { goto k }
 look at this
 (yield to hand control back)
+thena spine> do { say h }
+instruction 1: wanted String, got Core
 thena spine> yield
 chose 18: attack
 thena spine> yield

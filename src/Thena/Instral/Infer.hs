@@ -24,6 +24,7 @@ module Thena.Instral.Infer
   ( InstralTypeError (..)
   , Site (..)
   , inferProgram
+  , inferBlock
   , renderInstralTypeError
   ) where
 
@@ -32,7 +33,7 @@ import Data.List (elemIndex, nub, sortOn)
 import Data.Maybe (fromMaybe, listToMaybe)
 
 import Thena.Core.Term (GlobalName (..))
-import Thena.Syntax.Concrete (splicesIn, nameSplicesIn)
+import Thena.Syntax.Concrete (Splice (..), splices)
 import Thena.Instral.Type (Signature (..), Ty (..), renderTy, typeVarsIn)
 import Thena.Rules (testTypes)
 import Thena.Instral.Ops
@@ -307,6 +308,26 @@ inferProgram sigs rs =
                    , (GlobalName n, length (sigParams t)) `notElem` map fst env
                    ]
    in (out, inFileOrder rs (stErrors st) ++ unanswered)
+
+-- | Type one block that runs where it is written, beside every callable, with
+-- some names already holding values (MS5 phase 90, @ms5\/CLOSEOUT.md@ 41).
+--
+-- **A block is not a callable** — nothing can call it and it has no name a user
+-- could write — so it is walked after the callables' groups and not among them.
+--
+-- **A name that already holds a value has that value's type**, read off the
+-- value by 'valueType'. That is how a block typed while a rule is yielding sees
+-- the rule's own locals: @do { goto h }@ reads the @h@ the rule bound, and is
+-- checked against what @h@ actually is rather than refused as unbound.
+inferBlock
+  :: [(String, Signature)] -> [Rule] -> [(Name, Value)] -> Rule -> [InstralTypeError]
+inferBlock sigs rs bound r =
+  let (env, st0)  = foldl (inferGroup sigs rs) ([], St 0 [] [] []) (components rs)
+      site        = InBody (ruleName r) 0
+      (ctx, st1)  = foldr seed ([], st0) bound
+      seed (n, v) (acc, st) = let (t, st') = valueType site v st in ((n, Mono t) : acc, st')
+      (res, st2)  = fresh st1
+   in stErrors (settleText (body env r (Just res) ctx 0 st2 (ruleBody r)))
 
 -- | Report errors down the file, not along the call graph.
 --
@@ -768,11 +789,12 @@ operandType ctx si o st = case o of
     -- **The position decides the type** (MS5 phase 88). A term splice must be
     -- filled with a 'TCore' and a name splice with a 'TName', and the grammar
     -- has already sorted them: nothing is annotated and nothing is guessed.
-    let ns  = nameSplicesIn raw
-        st1 = foldl (\s x -> operandAgainst ctx si TName (Ref x) s)
-                    (foldl (\s x -> operandAgainst ctx si TCore (Ref x) s) st
-                           [ x | x <- splicesIn raw, x `notElem` ns ])
-                    ns
+    -- **Each occurrence is typed where it sits** (phase 90): a binding used
+    -- in both kinds of position is asked both questions, and one of them fails.
+    let hole s sp = case sp of
+          TermSplice x -> operandAgainst ctx si TCore (Ref x) s
+          NameSplice x -> operandAgainst ctx si TName (Ref x) s
+        st1 = foldl hole st (splices raw)
      in valueType si (VRaw raw) st1
   Lit v      -> valueType si v st
   ListOf os  ->

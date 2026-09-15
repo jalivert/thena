@@ -47,6 +47,7 @@ import Thena.Repl (startingSession, loadProofFile, renderCore, renderEliminator)
 import Thena.Core.Convert (convert)
 import Thena.Core.Context ()
 import Thena.Standard (withRules)
+import Thena.Rules (RuleError (..))
 import Data.ByteString.Builder (stringUtf8, toLazyByteString)
 import Test.Tasty.Golden (goldenVsString)
 
@@ -356,6 +357,24 @@ moduleTests =
         (_, Failed _) -> pure ()
         (_, other)    -> assertFailure (show other)
 
+  , -- **And it is typed before anything in the module runs** (MS5 phase 90,
+    -- @ms5\/CLOSEOUT.md@ 41). Phase 79 checked the blocks inside surface terms
+    -- and not this one, so @prim-try 3@ halted after the items above it had
+    -- already been declared.
+    testCase "a top-level block that does not type check is refused" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 mistypedBlockModule of
+        (s1, EntryMistyped (_ : _)) ->
+          isDeclared (GlobalName "Nat") (globals (sessionMachine s1)) @?= False
+        (_, other) -> assertFailure (show other)
+
+  , -- **Each top-level block is its own scope**, as a block is.
+    testCase "a name bound in one top-level block is not in scope in the next" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 twoBlockModule of
+        (_, LineRefused [UnboundInRule _ _ "x"]) -> pure ()
+        (_, other) -> assertFailure (show other)
+
   , testCase "a file that is not a module at all is a syntax error" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 "data Nat : Type\8320 where { zero : Nat }" of
@@ -401,6 +420,22 @@ moduleTests =
     -- call (MS5 phase 62b), and a numeral is an 'Thena.Instral.Ops.VInt' rather than a
     -- misplaced field position (MS5 phase 64). What is left is an operand no
     -- reading of the word admits, and @cross@ takes exactly two.
+    mistypedBlockModule =
+      "module M where\n\
+      \data Nat : Type\8320 where\n\
+      \  zero : Nat\n\
+      \\n\
+      \do\n\
+      \  prim-try 3\n"
+
+    twoBlockModule =
+      "module M where\n\
+      \do\n\
+      \  x = \"one\"\n\
+      \\n\
+      \do\n\
+      \  say x\n"
+
     badBlockModule =
       "module M where\n\
       \data Nat : Type\8320 where\n\

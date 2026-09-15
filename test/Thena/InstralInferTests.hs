@@ -179,6 +179,23 @@ annotatedLocals =
           RuleFileRefused _ (RuleIllFormed es)
             | [AnnotationWithoutBinding _ _ "g"] <- es -> pure ()
           other -> assertFailure ("expected a refusal, got " ++ show other)
+
+      -- **A mistake in a local's type is said about the local** (MS5 phase 90,
+      -- @ms5\/CLOSEOUT.md@ 43). It was reported as /in the signature of
+      -- GlobalName "go"/ — Haskell's rendering of the rule, called a signature.
+    , testCase "a mistake in a local's type names the rule, the line and the local" $
+        case loadRaw "rule base a where\nrule go :- do\n  k : Nope\n  k = \"x\"\n" of
+          RuleFileRefused _ (RuleIllFormed es)
+            | [InAnnotation (GlobalName "go") 0 "k" (UnknownType _ "Nope")] <- es -> pure ()
+          other -> assertFailure ("expected a refusal, got " ++ show other)
+
+      -- **…and () is impossible for a local**, not merely misplaced: a local
+      -- always holds a value, so a type that is () or gives () has no inhabitant.
+    , testCase "a local's type may not give ()" $
+        case loadRaw "rule base a where\nrule go :- do\n  k : a -> ()\n  k = \\ x -> \"k\"\n" of
+          RuleFileRefused _ (RuleIllFormed es)
+            | [InAnnotation (GlobalName "go") 0 "k" (UnitInsideAType _)] <- es -> pure ()
+          other -> assertFailure ("expected a refusal, got " ++ show other)
     ]
   where
     loads what src = testCase what $ case load src of
@@ -744,6 +761,13 @@ spliceTemplates =
 
     , clashesWith "…and a name where the position wants a term"
         "n = fresh-name \"z\" ; t = resolve-core core`${n} -> ${n}`"
+
+      -- **The kind belongs to the OCCURRENCE** (MS5 phase 90, @ms5\/CLOSEOUT.md@
+      -- 42). Phase 88 found the term splices by subtracting the name splices,
+      -- so a binding in both kinds of position was a name everywhere: this
+      -- loaded, and failed when it ran saying /nothing is bound to n/.
+    , clashesWith "…and a binding in both kinds of position is asked both questions"
+        "n = fresh-name \"z\" ; d = goal ; t = resolve-core core`\8704 (${n} : ${d}) -> ${n}`"
 
       -- **AND IT IS RUN, not merely loaded.** The four cases above check that a
       -- name position parses; this checks that the name actually arrives —

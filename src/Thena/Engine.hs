@@ -95,7 +95,7 @@ import Thena.Errors
   )
 import Thena.Surface.Concrete (Plicity (..))
 import qualified Thena.Surface.Concrete as Concrete
-import Thena.Syntax.Concrete (Raw, splicesIn, nameSplicesIn)
+import Thena.Syntax.Concrete (termSplicesIn, nameSplicesIn)
 import Thena.Syntax.Resolve (resolveWith, Filling (..))
 import Thena.Instral.Ops
   ( AnswerKind
@@ -776,7 +776,7 @@ perform instr rest m = case operation instr of
     -- **Two kinds of hole, filled from two walks** (MS5 phase 88). The
     -- position decides which a hole is, so a term splice is looked up as a
     -- term and a name splice as a name; neither can be handed the other.
-    Right (VRaw raw) -> case (,) <$> traverse (filling (env (exec m))) (termSplices raw)
+    Right (VRaw raw) -> case (,) <$> traverse (filling (env (exec m))) (termSplicesIn raw)
                                  <*> traverse (nameFilling (env (exec m))) (nameSplicesIn raw) of
       Left r   -> failure r m
       Right (ts, ns) -> case resolveWith (ts ++ ns) (globals m) contextAt (names m) raw of
@@ -1933,14 +1933,6 @@ filling e x = (,) x . FillTerm <$> operandTerm e (Ref x)
 -- | …and one that stands in a name position (MS5 phase 88).
 nameFilling :: Env -> String -> Either FailReason (String, Filling)
 nameFilling e x = (,) x . FillName . Ident <$> operandText e (Ref x)
-
--- | The splices that are NOT name splices — everything 'splicesIn' finds, less
--- what 'nameSplicesIn' does. Written this way so the two walks stay one
--- traversal each and neither has to know about the other.
-termSplices :: Raw -> [String]
-termSplices raw =
-  let ns = nameSplicesIn raw
-   in [ x | x <- splicesIn raw, x `notElem` ns ]
 
 -- | An unelaborated tree and the place it sits at (§7.2). Shaped like
 -- 'operandText' and 'operandTerm', and phase 17b's reason for existing at all:

@@ -21,7 +21,10 @@
 -- loud.
 module Thena.Syntax.Concrete
   ( Raw (..)
+  , Splice (..)
+  , splices
   , splicesIn
+  , termSplicesIn
   , nameSplicesIn
   , RawBinder (..)
   , RawIdent (..)
@@ -119,66 +122,60 @@ data RawData = RawData String [RawBinder] Raw [RawConstructor]
 data RawConstructor = RawConstructor String Raw
   deriving (Eq, Show)
 
--- | Every binding a written term splices, outermost first (MS5 phase 81).
+-- | One hole in a written term, and which kind of position it stands in.
+--
+-- **The kind belongs to the OCCURRENCE, not to the binding** (MS5 phase 90,
+-- @ms5\/CLOSEOUT.md@ 42). Phase 88 kept two walks and found the term splices by
+-- subtracting the name splices from all of them, so a binding used once as a
+-- name and once as a term was a name everywhere: @∀ (${n} : ${d}) -> ${n}@
+-- asked only whether @n@ was a name, loaded, and failed when it ran.
+data Splice
+  = TermSplice String  -- ^ @${x}@ where the grammar wants a term
+  | NameSplice String  -- ^ @${x}@ where the grammar wants a name
+  deriving (Eq, Show)
+
+-- | Every hole a written term waits for, outermost first (MS5 phases 81, 88).
 --
 -- The twin of 'Thena.Surface.Concrete.blocksIn': one walk over the tree that is
 -- not resolution, so that @validate@ can see an unbound name inside a template
--- and inference can ask what each splice must be.
--- | Just the splices that stand in a NAME position (MS5 phase 88).
---
--- **The position is what decides**, so this is a second walk rather than a flag
--- on the first: a hole reached through 'RawIdentSplice' wants a name and one
+-- and inference can ask what each hole must be. **The position is what
+-- decides**: a hole reached through 'RawIdentSplice' wants a name and one
 -- reached through 'RawSplice' wants a term, and no position accepts both.
--- 'Thena.Engine' fills each from its own list and
--- "Thena.Instral.Infer" types each against its own type.
-nameSplicesIn :: Raw -> [String]
-nameSplicesIn t = case t of
-  RawSplice _        -> []
-  RawLam bs b        -> concatMap binder bs ++ nameSplicesIn b
-  RawPi bs b         -> concatMap binder bs ++ nameSplicesIn b
-  RawArrow a b       -> nameSplicesIn a ++ nameSplicesIn b
-  RawApp f x         -> nameSplicesIn f ++ nameSplicesIn x
-  RawLet n v ty b    -> named n ++ nameSplicesIn v ++ nameSplicesIn ty ++ nameSplicesIn b
-  RawClaim n ty p    -> named n ++ nameSplicesIn ty ++ nameSplicesIn p
-  RawGuess n ty g p  -> named n ++ nameSplicesIn ty ++ nameSplicesIn g ++ nameSplicesIn p
-  RawPending _ p     -> nameSplicesIn p
-  RawQuote q         -> nameSplicesIn q
+splices :: Raw -> [Splice]
+splices t = case t of
+  RawSplice x        -> [TermSplice x]
+  RawLam bs b        -> concatMap binder bs ++ splices b
+  RawPi bs b         -> concatMap binder bs ++ splices b
+  RawArrow a b       -> splices a ++ splices b
+  RawApp f x         -> splices f ++ splices x
+  RawLet n v ty b    -> named n ++ splices v ++ splices ty ++ splices b
+  RawClaim n ty p    -> named n ++ splices ty ++ splices p
+  RawGuess n ty g p  -> named n ++ splices ty ++ splices g ++ splices p
+  RawPending _ p     -> splices p
+  RawQuote q         -> splices q
   RawElim d _ ps m ms is tg ->
-    named d ++ concatMap nameSplicesIn ps ++ nameSplicesIn m
-      ++ concatMap nameSplicesIn ms ++ concatMap nameSplicesIn is ++ nameSplicesIn tg
+    named d ++ concatMap splices ps ++ splices m ++ concatMap splices ms
+      ++ concatMap splices is ++ splices tg
   RawName _          -> []
   RawUniverse _      -> []
   RawUniverseOpen    -> []
   RawAt n _          -> named n
   where
-    binder (RawBinder n ty) = named n ++ nameSplicesIn ty
+    binder (RawBinder n ty) = named n ++ splices ty
 
-    named i = case i of { RawIdentSplice x -> [x] ; RawWord _ -> [] }
+    named i = case i of { RawIdentSplice x -> [NameSplice x] ; RawWord _ -> [] }
 
--- | **Every splice the template waits for, term and NAME alike** (MS5 phase 88
--- widened it). A name splice is filled from the same environment and refused
--- the same way if the binding is missing; what differs is only the /type/ the
--- position demands, which "Thena.Instral.Infer" reads off the position.
+-- | The binding each hole is filled from, term and name alike — what @validate@
+-- needs, since a missing binding is refused the same way whatever it was for.
 splicesIn :: Raw -> [String]
-splicesIn t = case t of
-  RawSplice x        -> [x]
-  RawLam bs b        -> concatMap binder bs ++ splicesIn b
-  RawPi bs b         -> concatMap binder bs ++ splicesIn b
-  RawArrow a b       -> splicesIn a ++ splicesIn b
-  RawApp f x         -> splicesIn f ++ splicesIn x
-  RawLet n v ty b    -> named n ++ splicesIn v ++ splicesIn ty ++ splicesIn b
-  RawClaim n ty p    -> named n ++ splicesIn ty ++ splicesIn p
-  RawGuess n ty g p  -> named n ++ splicesIn ty ++ splicesIn g ++ splicesIn p
-  RawPending _ p     -> splicesIn p
-  RawQuote q         -> splicesIn q
-  RawElim d _ ps m ms is tg ->
-    named d ++ concatMap splicesIn ps ++ splicesIn m ++ concatMap splicesIn ms
-      ++ concatMap splicesIn is ++ splicesIn tg
-  RawName _          -> []
-  RawUniverse _      -> []
-  RawUniverseOpen    -> []
-  RawAt n _          -> named n
+splicesIn = map bindingOf . splices
   where
-    binder (RawBinder n ty) = named n ++ splicesIn ty
+    bindingOf sp = case sp of { TermSplice x -> x ; NameSplice x -> x }
 
-    named i = case i of { RawIdentSplice x -> [x] ; RawWord _ -> [] }
+-- | The holes standing in a TERM position, one entry per occurrence.
+termSplicesIn :: Raw -> [String]
+termSplicesIn t = [ x | TermSplice x <- splices t ]
+
+-- | The holes standing in a NAME position, one entry per occurrence.
+nameSplicesIn :: Raw -> [String]
+nameSplicesIn t = [ x | NameSplice x <- splices t ]

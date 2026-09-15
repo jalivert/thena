@@ -234,6 +234,22 @@ tests =
               @?= Ran ["ok"] Completed
         ]
     , testGroup
+        "the REPL's do command is checked like any other entry"
+        -- **MS5 phase 90, @ms5\/CLOSEOUT.md@ 41.** It resolved its block and
+        -- loaded it, so @prim-try 3@ halted mid-run where the same instruction
+        -- typed bare is refused before anything starts.
+        [ testCase "a type error in one is refused" $
+            case snd (say [":theorem t : Type\8320", "do { prim-try 3 }"]) of
+              EntryMistyped (_ : _) -> pure ()
+              other -> assertFailure ("expected a type error, got " ++ show other)
+        , testCase "and an unbound name in one is refused" $
+            snd (say [":theorem t : Type\8320", "do { say nope }"])
+              @?= LineRefused [UnboundInRule (GlobalName "entry") 0 "nope"]
+        , testCase "and the development is as it was" $
+            devOf (fst (say [":theorem t : Type\8320", "do { attack ; prim-try 3 }"]))
+              @?= devOf (fst (say [":theorem t : Type\8320"]))
+        ]
+    , testGroup
         "a do block in a surface term is checked before it runs"
         -- **MS5 phase 79, and @ms5\/CLOSEOUT.md@ 20.** Until then
         -- 'Thena.Instral.Ops.Play' resolved a block as it ran, so a mistake in one

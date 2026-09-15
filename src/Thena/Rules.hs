@@ -501,6 +501,11 @@ data RuleError
     -- not a type a value can have
   | DuplicateSignature String Int
     -- ^ two signatures for one callable
+  | InAnnotation GlobalName Int Name RuleError
+    -- ^ **a mistake in the type written for a local** (MS5 phase 90): the rule,
+    -- the instruction, the local, and what was wrong with the type. It wraps
+    -- the signature errors because the type language is the same one; what
+    -- differs is where it was written.
   | AnnotationWithoutBinding GlobalName Int Name
     -- ^ **@n : Ty@ with no @n = …@ after it** (MS5 phase 77). An annotation is
     -- about the binding on the next line; one that is about nothing is a typo,
@@ -1075,10 +1080,16 @@ resolveBlock ls g bound0 body = case partitionEithers (walk 0 bound0 body) of
     -- The annotation lands on the instruction that binds the name, which is the
     -- last of however many the binding expanded to — a nested call is lifted in
     -- front of it (phase 63) and those liftings are not what was annotated.
+    --
+    -- **A mistake in the type is said about the local, where it was written**
+    -- (MS5 phase 90, @ms5\/CLOSEOUT.md@ 43). 'resolveTy' reports against an
+    -- owner as a signature does, and this passed it @show g@ — so a user read
+    -- /in the signature of GlobalName "go"/, about a local that is not a
+    -- signature. 'InAnnotation' carries the rule, the instruction and the local.
     annotated i n t got = do
-      ty <- resolveTy ls (show g) t >>= \mt -> case mt of
+      ty <- either (Left . InAnnotation g i n) Right (resolveTy ls n t) >>= \mt -> case mt of
         Just u  -> Right u
-        Nothing -> Left (UnitInsideAType n)
+        Nothing -> Left (InAnnotation g i n (UnitInsideAType n))
       is <- got
       case reverse is of
         Bind m _ o : front | m == PVar n -> Right (reverse (Bind m (Just ty) o : front))

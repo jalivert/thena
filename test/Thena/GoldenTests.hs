@@ -935,6 +935,10 @@ tests =
           -- machine's environment is not cleared.
         , "do { k = here }"
         , "do { goto k }"
+          -- **And what the block reads is typed by its value** (MS5 phase 90):
+          -- @h@ holds a term, so @say h@ is refused before it runs rather than
+          -- halting inside the yield.
+        , "do { say h }"
           -- The yield is not consumed, so the prompt keeps coming back until
           -- this word advances past it.
         , "yield"

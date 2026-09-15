@@ -49,13 +49,13 @@ module Thena.Driver
   , kindOf
   ) where
 
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), substLevelsIn)
 import Data.Char (isSpace)
-import Data.List (dropWhileEnd, isSuffixOf, stripPrefix)
+import Data.List (dropWhileEnd, isSuffixOf, nub, stripPrefix)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Thena.Development.Cursor (expectedType, Cursor, Focus (..), focus, overLevels)
@@ -124,7 +124,7 @@ import Thena.Instral.Ops
   , Value (..)
   )
 import Data.Either (partitionEithers)
-import Thena.Instral.Infer (InstralTypeError, inferProgram)
+import Thena.Instral.Infer (InstralTypeError, inferBlock, inferProgram)
 import Thena.Instral.Grammar (Language)
 import Thena.Instral.Type (Signature (..), Ty (..), fits)
 import Thena.Rules
@@ -628,6 +628,27 @@ checkSurfaceBlocks bases nm prog = case surfaceBlocks (allLanguages bases) nm pr
       []   -> Nothing
       errs -> Just (BlockMistyped errs)
 
+-- | Resolve-time checks for one block that runs where it is written: validated,
+-- typed, and every surface block inside it checked too (MS5 phase 90).
+--
+-- **Every block a user can type at the top goes through this** — a prompt
+-- entry, the REPL's @do { … }@ and a module's top-level @do@. Phase 79 checked
+-- blocks written inside a surface term and counted four places; the REPL's @do@
+-- and a module's top-level block were two more, and both ran unchecked
+-- (@ms5\/CLOSEOUT.md@ 41). Three callers, one checker — phase 77's lesson.
+--
+-- **@bound@ is what is already in scope, with its values**, and it is empty
+-- except while a rule is yielding: then the block shares the rule's
+-- environment ('Thena.Engine.load'), so the names it reads are in scope and have
+-- the types their values have.
+checkBlock :: [RuleBase] -> [(Ops.Name, Value)] -> Rule -> Maybe BlockProblem
+checkBlock bases bound r =
+  case validate r { ruleParams = map Ops.PVar (nub (map fst bound)) } of
+    e : es -> Just (BlockIll (e : es))
+    []     -> case inferBlock (allSignatures bases) (allCallable bases) bound r of
+      errs@(_ : _) -> Just (BlockMistyped errs)
+      []           -> checkSurfaceBlocks bases (ruleName r) (ruleBody r)
+
 -- | 'checkSurfaceBlocks', said as the driver says things.
 blockResponse :: Session -> String -> [Instr] -> Maybe Response
 blockResponse s what prog =
@@ -673,19 +694,15 @@ instralEntry bases src = do
   -- when the file loads. The entry is wrapped as a headless rule and run through
   -- both passes with every loaded base beside it, so a call in it is checked
   -- against the real signatures.
-  let entry = Rule (GlobalName "entry") [] [] prog
+  --
   -- **A @do@ block written in a surface term is checked with it** (MS5 phase
   -- 79). Until then 'Thena.Instral.Ops.Play' resolved one as it ran, so @say 3@ inside
   -- one halted the machine where the same instruction anywhere else is refused
-  -- before it starts.
-  case validate entry of
-    e : es -> Left (LineIllFormed (e : es))
-    []     -> case snd (inferProgram (allSignatures bases) (allCallable bases ++ [entry])) of
-      errs@(_ : _) -> Left (LineMistyped errs)
-      []           -> case checkSurfaceBlocks bases (GlobalName "entry") prog of
-        Just (BlockIll es)      -> Left (LineIllFormed es)
-        Just (BlockMistyped es) -> Left (LineMistyped es)
-        Nothing                 -> Right prog
+  -- before it starts. All three checks are 'checkBlock' since phase 90.
+  case checkBlock bases [] (Rule (GlobalName "entry") [] [] prog) of
+    Just (BlockIll es)      -> Left (LineIllFormed es)
+    Just (BlockMistyped es) -> Left (LineMistyped es)
+    Nothing                 -> Right prog
   where
     -- Written core terms are hoisted per instruction — @try ⌜ x ⌝@ is
     -- @⌜1⌝ = resolve-core ⌜ x ⌝ ; try ⌜1⌝@, which is what a rule body writes by
@@ -1004,9 +1021,10 @@ loadProofSource s src =
   Right (nm, items) ->
     let machine  = sessionMachine s
         (is, n1) = surfaceProgram (names machine) items
-     in case blockResponse s "this module" is of
+     in case listToMaybe (topLevelBlocks s items ++ maybe [] (: []) (blockResponse s "this module" is)) of
       -- A module's @do@ blocks are checked before any of it is elaborated, so a
-      -- mistake in one does not leave half a module declared (MS5 phase 79).
+      -- mistake in one does not leave half a module declared (MS5 phase 79) —
+      -- its top-level blocks too, which 79 missed (phase 90).
       Just r  -> (s, r)
       Nothing -> case progress False s { sessionMachine = load is machine { names = n1 } } [] of
           (s', Ran _ Completed) ->
@@ -1015,6 +1033,22 @@ loadProofSource s src =
                              (length [ () | ItemBlock _ <- items ])
             )
           (s', other)           -> (s', other)
+
+-- | What is wrong with a module's top-level @do@ blocks, block by block
+-- (MS5 phase 90). **Each is checked in a scope of its own**, as a block is:
+-- nothing is bound when one begins, so a name bound in one block is not in
+-- scope in the next.
+topLevelBlocks :: Session -> [Item] -> [Response]
+topLevelBlocks s items =
+  [ said p
+  | (k, is) <- zip [1 :: Int ..] [ is' | ItemBlock is' <- items ]
+  , Just p <- [checkBlock (rules (sessionMachine s))
+                 [] (Rule (GlobalName ("this module, top-level do block " ++ show k)) [] [] is)]
+  ]
+  where
+    said p = case p of
+      BlockIll es      -> LineRefused es
+      BlockMistyped es -> EntryMistyped es
 
 -- | What an item adds to the environment, for the summary line.
 declaredName :: Item -> Maybe String
@@ -1222,10 +1256,19 @@ dispatch s name arg = case name of
   -- already a surface atom (phase 45), so this costs a case and no syntax.
   "do" -> case parseSurfaceTerm ("do " ++ arg) of
     Left e -> (s, Failed e)
-    Right (SurfaceDo body) -> case resolveBlock (allLanguages (rules machine)) (GlobalName "do") [] body of
-      Left errs -> (s, Failed (blockProblem errs))
-      Right is  -> progress (sessionStepping s)
-                            s { sessionMachine = load is machine } []
+    -- **Checked like any other entry** (MS5 phase 90, @ms5\/CLOSEOUT.md@ 41),
+    -- with one difference that is not a mode: while a rule is yielding the block
+    -- shares its environment, so what the rule bound is in scope and typed by
+    -- its value. Outside a yield 'load' clears the environment, and nothing is.
+    Right (SurfaceDo body) ->
+      let bound = if Engine.isYielding machine then env (exec machine) else []
+       in case resolveBlock (allLanguages (rules machine)) (GlobalName "entry") (map fst bound) body of
+        Left errs -> (s, Failed (blockProblem errs))
+        Right is  -> case checkBlock (rules machine) bound (Rule (GlobalName "entry") [] [] is) of
+          Just (BlockIll es)      -> (s, LineRefused es)
+          Just (BlockMistyped es) -> (s, EntryMistyped es)
+          Nothing -> progress (sessionStepping s)
+                              s { sessionMachine = load is machine } []
     Right _ -> (s, Rejected (UnexpectedArgument name))
 
   -- **@yield@ hands control back to a rule that yielded** — his, 2026-09-03,
