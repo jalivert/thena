@@ -545,9 +545,10 @@ data Op
     --   * clauses of one name **need not share arity**. Arity is a filter, not
     --     an error, so the load-time check @MS2.md@ proposed was dropped rather
     --     than added.
-    --   * the callee is resolved **when the call runs**, not when the rule is
-    --     read, so a rule may call itself and may call a rule defined later or
-    --     in a base loaded after it.
+    --   * the callee is looked up **when the call runs**, not when the rule is
+    --     read, so a rule may call itself or a rule written below it. **That a
+    --     call may name nothing loaded is NOT a consequence**: since MS5 phase
+    --     92 inference refuses it when the bases load.
     --
     -- **A call carries no hint**, so a rule whose head asks about one is never
     -- a call candidate; it is reached by @prove ‹hint›@. Hints are on MS2's
@@ -1152,12 +1153,11 @@ resultOf o = case o of
   Abandon      -> Nothing
   Prove        -> Nothing
   -- **A call produces, as of MS5 phase 63** — whatever the clause that ran
-  -- handed back with @return@. It is a value unconditionally and cannot be
-  -- anything else: which clauses a name has is not known when a body is read
-  -- (phase 23 — a rule may call itself, a rule below it, or one in a base
-  -- loaded later), so this question is not decidable at load time. A call to a
-  -- rule that returns nothing fails where the value was wanted, at run time,
-  -- with 'Thena.Errors.NothingReturned'.
+  -- handed back with @return@. It is a value unconditionally here, because
+  -- which clauses a name has is not known when ONE body is read (a rule may
+  -- call itself or one below it). Inference, which holds every loaded base,
+  -- answers both halves: a name nothing defines is 'Thena.Instral.Infer.Undefined'
+  -- (phase 92) and a callable that returns nothing is @BindsNothing@ (66c).
   --
   -- **Its type says nothing either**, for the same reason: the variable after
   -- the arguments' is where the called rule's own result type goes, and that is

@@ -442,9 +442,9 @@ data Response
     -- check (MS5 phase 66c).
     --
     -- **It has no path**, and that is the point: inference is over every loaded
-    -- base at once, because a rule may call one written below it or one in a
-    -- base loaded later ('Thena.Instral.Ops.Call'). A per-file answer would be a
-    -- different question.
+    -- base at once, because a rule may call one written below it or one in
+    -- another base loaded with it ('Thena.Instral.Ops.Call'). A per-file answer
+    -- would be a different question.
     -- ^ @:load ‹path›@. The driver may not touch a file — §12 invariant 4 puts
     -- all IO in "Thena.Repl" — so it asks, and the caller reads the file and
     -- hands the contents back to 'loadSource'

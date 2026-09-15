@@ -33,6 +33,7 @@ import Thena.Repl (entriesOf, unclosedEntry)
 -- | The names in a 'Fitting' listing, for the tests below.
 
 import Thena.Instral.Ops (AnswerKind (..), partWords)
+import Thena.Instral.Infer (InstralTypeError (..), Site (..))
 import Thena.Rules (RuleError (..))
 
 -- | Run a script of command lines, answering nothing, and give back the last
@@ -133,7 +134,10 @@ tests =
         , testCase ":quit leaves the loop" $
             snd (command withRules ":quit") @?= Quit
         , testCase "an unknown word is not a term, it is a mistake" $
-            snd (command withRules "hello") @?= Ran [] (Halted (NoClauseMatched "hello" 0 []))
+            -- **Refused before it runs** since MS5 phase 92: a name nothing
+            -- defines is a type error, at the prompt as in a file.
+            snd (command withRules "hello")
+              @?= EntryMistyped [Undefined (InBody (GlobalName "entry") 0) "hello" 0 []]
         , testCase "a command that merely starts with :core is not :core" $
             snd (command withRules ":corex") @?= Rejected (NoSuchCommand ":corex")
         , testCase "a view command with no argument says so" $
@@ -425,12 +429,12 @@ tests =
         , testCase "answering when nothing was asked is refused" $
             snd (answer newSession "B") @?= Rejected NotAsking
         , -- With nothing after it the word is an arity no op and no rule has,
-          -- so it is a call that finds no clause — which is what any other
-          -- word with no clause does (MS5 phase 62b).
+          -- so it is a call nothing answers (MS5 phase 62b) — refused before it
+          -- runs since phase 92, naming the arities that exist: the rule
+          -- that asks for the name, and the op that is given one.
           testCase "assume needs a type" $
-            case snd (command withRules "assume") of
-              Ran [] (Halted (NoClauseMatched "assume" 0 as)) -> as @?= [1]
-              other -> assertFailure ("expected no clause, got " ++ show other)
+            snd (command withRules "assume")
+              @?= EntryMistyped [Undefined (InBody (GlobalName "entry") 0) "assume" 0 [1, 2]]
         , testCase "assume resolves its type in the development's context" $
             case snd (say ["assume \"A\" ⌜ Type₀ ⌝", "assume \"x\" ⌜ A ⌝"]) of
               Ran [] Completed -> pure ()

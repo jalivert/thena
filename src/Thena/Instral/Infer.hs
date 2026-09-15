@@ -6,16 +6,19 @@
 -- and works out the rest.
 --
 -- **The unit is every loaded base at once, not one base and not one rule.** A
--- call may name a rule written below it, a rule in a base loaded later, or
--- itself ("Thena.Instral.Ops.Call"), so a rule's signature is not decidable until the
+-- call may name a rule written below it, one in another loaded base, or itself
+-- ("Thena.Instral.Ops.Call"), so a rule's signature is not decidable until the
 -- whole program is in hand. 'inferProgram' is therefore what a load runs, after
 -- every base is read and before any is installed — where 'Thena.Rules.validate'
 -- is per-rule and runs as each is resolved.
 --
--- **A call to a name nothing defines constrains nothing.** It is not an error:
--- §8 has always allowed it, and the machine reports it at run time when the
--- search finds no clause. Its arguments and its result get fresh variables and
--- the inference simply learns nothing from it.
+-- **A call to a name nothing defines is a type error** — his ruling, 2026-09-15
+-- (MS5 phase 92, @ms5\/CLOSEOUT.md@ 7): /"any use of a name that is not defined
+-- should absolutely fail at load time, what do we have type system for?"/ Until
+-- then it constrained nothing — its arguments and result got fresh variables,
+-- which unify with anything — on the strength of a note from MS2 phase 23 that a
+-- rule may call one in a base loaded later. That note was never his ruling, and
+-- since @:load@ replaces the whole list there is no later base to wait for.
 --
 -- **Every error, not the first** — 'Thena.Rules.validate'\'s rule, for its
 -- reason: a rule base is edited as a file, and being told one mistake at a time
@@ -29,13 +32,13 @@ module Thena.Instral.Infer
   ) where
 
 import Data.Graph (flattenSCC, stronglyConnComp)
-import Data.List (elemIndex, nub, sortOn)
+import Data.List (elemIndex, intercalate, nub, sort, sortOn)
 import Data.Maybe (fromMaybe, listToMaybe)
 
 import Thena.Core.Term (GlobalName (..))
 import Thena.Syntax.Concrete (Splice (..), splices)
 import Thena.Instral.Type (Signature (..), Ty (..), renderTy, typeVarsIn)
-import Thena.Rules (testTypes, writtenPositions)
+import Thena.Rules (opArities, testTypes, writtenPositions)
 import Thena.Instral.Ops
   ( Instr (..)
   , Name
@@ -95,6 +98,11 @@ data InstralTypeError
     -- type. Carries what the body pinned it to.
   | SignatureUnanswered GlobalName Int
     -- ^ a signature for a callable no rule defines.
+  | Undefined Site String Int [Int]
+    -- ^ **a call to a name no loaded rule or function defines at that arity**
+    -- (MS5 phase 92): the name, the arity written, and the arities that do
+    -- exist, so a call with one argument too many says so rather than claiming
+    -- the name is unknown.
   | TextNotTextual Site Ty
     -- ^ a @\"…\"@ literal where that type is wanted.
     --
@@ -131,6 +139,16 @@ renderInstralTypeError e = case e of
   TextNotTextual si t ->
     renderSite si ++ ": a string literal is a String or a Name, not "
       ++ renderTy t
+  Undefined si n _ [] ->
+    renderSite si ++ ": no rule or function is called " ++ n
+  Undefined si n a as ->
+    renderSite si ++ ": " ++ n ++ " takes " ++ alternatives (sort as)
+      ++ ", not " ++ args a
+  where
+    args k = show k ++ (if k == 1 then " argument" else " arguments")
+    alternatives as = case as of
+      [k] -> args k
+      _   -> intercalate " or " (map show (init as)) ++ " or " ++ args (last as)
 
 -- --------------------------------------------------------------------------
 -- The state
@@ -354,6 +372,7 @@ inFileOrder rs = sortOn position
       AnnotationTooGeneral si _ -> nameIn si
       SignatureUnanswered n _   -> n
       TextNotTextual si _   -> nameIn si
+      Undefined si _ _ _    -> nameIn si
 
     nameIn si = case si of
       InHead n _      -> n
@@ -427,11 +446,16 @@ components rs = map flattenSCC (stronglyConnComp nodes)
   where
     defined = nub (map callableOf rs)
     nodes   = [ (c, c, calledBy c) | c <- defined ]
+    -- **Every arity of a called name is an edge, not only the one written**
+    -- (MS5 phase 92): a call at an arity nothing defines is an 'Undefined'
+    -- error, and it can only say which arities do exist if those were walked
+    -- first. Over-approximating, like the shadowed-name case above.
     calledBy c =
       [ d
       | r <- rs, callableOf r == c
-      , d <- callsIn (ruleBody r)
-      , d `elem` defined
+      , (GlobalName m, _) <- callsIn (ruleBody r)
+      , d@(GlobalName m', _) <- defined
+      , m == m'
       ]
 
 -- | Every callable a body calls, descending into lambdas and blocks.
@@ -721,11 +745,14 @@ operation env r res ctx si o st0 = case o of
   Call nm as ->
     case lookup (GlobalName nm, length as) env of
       Nothing ->
-        -- Nothing defines it — see the module header. Its arguments are still
-        -- walked, so a mistake inside one is still found.
+        -- **Nothing defines it, and that is an error** — see the module header.
+        -- Its arguments are still walked, so a mistake inside one is still
+        -- found, and the result is a fresh variable only so that one undefined
+        -- name is reported once rather than again wherever its value goes.
         let st1 = foldl (\s a -> snd (operandType ctx si a s)) st0 as
             (t, st2) = fresh st1
-         in (Just t, st2)
+            others   = [ k | ((GlobalName m, k), _) <- env, m == nm ] ++ opArities nm
+         in (Just t, oops (Undefined si nm (length as) (nub others)) st2)
       Just (Inferred ps cres) ->
         ( cres
         , foldl (\s (w, a) -> operandAgainst ctx si w a s) st0 (zip ps as)
@@ -769,8 +796,9 @@ operation env r res ctx si o st0 = case o of
 
 -- | Is this a callable that hands nothing back?
 --
--- 'Nothing' — nothing defines it — is not: §8 allows a call to a name a later
--- base will define, so the pass learns nothing rather than complaining.
+-- 'Nothing' — nothing defines it — is not asked here: that call is already an
+-- 'Undefined' error, and reporting that it also binds nothing would say one
+-- mistake twice.
 notReturning :: Maybe Bound -> Bool
 notReturning b = case b of
   Just (Inferred _ Nothing) -> True

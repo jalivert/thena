@@ -201,8 +201,11 @@ ordering =
         map baseName (basesOf (fst (load1 [a, caller]))) @?= ["a", "calls"]
         map baseName (basesOf (fst (load1 [caller, a]))) @?= ["calls", "a"]
 
-    , testCase "and calling a name nothing defines still loads" $
-        map baseName (basesOf (fst (load1 [caller]))) @?= ["calls"]
+    , -- **But a name no loaded base defines is refused** — his ruling,
+      -- 2026-09-15 (MS5 phase 92). The bases loaded together are the program,
+      -- in either order; a call outside all of them is a type error.
+      testCase "and calling a name nothing defines is refused" $
+        map baseName (basesOf (fst (load1 [caller]))) @?= []
 
     , -- All or nothing: a bad second file leaves the first uninstalled, so a
       -- session never searches half of what was asked for.

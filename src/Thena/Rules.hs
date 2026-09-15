@@ -44,6 +44,7 @@ module Thena.Rules
   , builtInTypes
   , resolveBlock
   , isOpWord
+  , opArities
   , surfaceBlocks
   , testWord
   , testOperands
@@ -1454,6 +1455,30 @@ binaryOps =
 isOpWord :: String -> Bool
 isOpWord w = w `elem` partWords || w `elem` map fst opWords
 
+-- | The numbers of arguments an op word takes, asked of 'operation' itself
+-- (MS5 phase 92) — so an undefined call written with an op's word can say the
+-- op takes one argument, rather than that no rule is called @say@. **Nothing is
+-- listed a second time**: a written op that 'operation' resolves to anything but
+-- a 'Call' is that op, and @arg@'s position and @cross@'s field are covered
+-- because a sample of each shape is tried.
+opArities :: String -> [Int]
+opArities w =
+  [ k
+  | k <- [0 .. 4]
+  , any resolves [ as | as <- samples k, length as == k ]
+  ]
+  where
+    resolves as = case operation [] (GlobalName "") 0 (RawOp w as) of
+      Right (Call _ _) -> False
+      Right _          -> True
+      Left _           -> False
+    samples k =
+      [ replicate k (RawRef "x")
+      , replicate k (RawRef "type")
+      , [ RawPos 1 | k == 1 ]
+      , take k [RawRef "x", RawRef "name"]
+      ]
+
 -- | Every op word paired with an op that bears it, built from the three tables
 -- above — so nothing has to be listed a second time.
 --
@@ -1533,13 +1558,11 @@ operation ls g i (RawOp w as)
         -- arity mismatch as 'BadOperands' so that @claim x@ was caught when
         -- the base loaded. The cost is the one below, one word wider:
         --
-        -- The cost: a mistyped word is no longer refused at load time; it is
-        -- a call that finds no clause when it runs. @NoSuchOp@ went with this
-        -- change, being an error that can no longer happen. **That is the
-        -- trade phase 23 already took for explicit @call@** (§8: a rule may
-        -- call itself, a rule below it, or one in a base loaded later, so no
-        -- name can be resolved at load time), and it is what the rule
-        -- language's type system is for (closeout 4b).
+        -- **A mistyped word is still refused at load time**, one pass later:
+        -- it resolves to a call, and inference refuses a call nothing loaded
+        -- defines and names the arity the op does take (MS5 phase 92). Until
+        -- then it failed only when it ran, on phase 23's note that a base
+        -- loaded later might define it — which was never his ruling and is gone.
         _                         -> Call w <$> traverse ref as
   where
     bad     = Left (BadOperands g i w)
