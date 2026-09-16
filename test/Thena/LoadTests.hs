@@ -190,6 +190,59 @@ failureTests =
   , testCase "a syntax error stops it too" $
       (loadedError (source ["data ohno"]) @?= Just (LoadStopped 1))
 
+    -- **A refused line stops it too, and did not until phase 96** (found
+    -- 2026-09-16). 'Thena.Driver.stopped' said it listed /the four ways a line
+    -- does not do what it said/ and 'Thena.Driver.LineRefused' was not one of
+    -- them, so a line that printed an error was stepped over and the file
+    -- carried on — taking away the whole reason a load is worth more than
+    -- typing the lines, which is that the failure has an address.
+    --
+    -- The second assertion is what says it was really skipped before: a test
+    -- that only checked the error could pass on a load that stopped for some
+    -- other reason entirely.
+  , testCase "a line no op or rule will take stops it" $
+      let l = sourceWithRules
+                [ "say nosuchtag`x y`"
+                , "data A0 : Type₀ where { a0 : A0 }"
+                ]
+       in do
+            loadedError l @?= Just (LoadStopped 1)
+            declared "A0" l @?= False
+
+    -- And it really is the refusal that stopped it, not something else: a tag
+    -- naming no language is resolution's complaint, not the parser's.
+  , testCase "and the refusal is the last response" $
+      case reverse (loadedResponses (sourceWithRules ["say nosuchtag`x y`"])) of
+        LineRefused _ : _ -> pure ()
+        other             -> assertFailure ("not a refusal: " ++ show (take 1 other))
+
+    -- **The kernel refusing a @qed@ stops it too, and did not until phase 96.**
+    -- 'Thena.Driver.Uncertified'\'s own comment says it is /shaped like
+    -- 'Thena.Driver.Refused'/, which was in the list; it was not, so a script
+    -- whose theorem the kernel would not accept carried on as if it had been
+    -- admitted.
+    --
+    -- @lift@ is level-polymorphic with @ℓ₂₄ ≤ ℓ₂₅@ owed, so @lift {1 0}@ infers
+    -- and @try@ accepts it — the obligation is collected only by the kernel
+    -- (§5.3) — and @qed@ is where it is refused. That makes this the one shape
+    -- where a line gets all the way to the end and still did not do what it
+    -- said.
+  , testCase "a qed the kernel refuses stops it" $
+      let l = sourceWithRules
+                [ ":theorem lift : ∀ (A : Type) -> Type"
+                , "try-core ⌜ \\ (A : Type) -> A ⌝"
+                , "solve"
+                , "qed"
+                , ":theorem bad : Type₁ -> Type₀"
+                , "try-core ⌜ lift {1 0} ⌝"
+                , "solve"
+                , "qed"
+                , "data A0 : Type₀ where { a0 : A0 }"
+                ]
+       in do
+            loadedError l @?= Just (LoadStopped 8)
+            declared "A0" l @?= False
+
   , testCase "nested :load is refused, not followed" $
       let l = source ["data A0 : Type₀ where { a0 : A0 }", ":load somewhere.thena.script"]
        in do

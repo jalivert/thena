@@ -2374,14 +2374,33 @@ boundary resp = case resp of
 --
 -- Deliberately narrow: an @:infer@ that reports an ill-typed term is a question
 -- answered, not a script that failed, so 'IllTyped' is not here. What is here
--- is the four ways a line does not do what it said.
+-- is **every way a line does not do what it said**.
+--
+-- **It said /four/ and listed four, and two were missing** (MS5 phase 96, found
+-- 2026-09-16 while working out what a failing command is). A load is worth more
+-- than typing the lines because the failure has an address, and a line that
+-- reported an error and was stepped over had no address at all:
+--
+-- * 'LineRefused' — the line parsed and no op or rule would take it (an unknown
+--   tag, a region that did not parse, a word given operands it does not have).
+--   @say nosuchtag\`x y\`@ printed its error and the file carried on.
+-- * @'Ran' _ ('Uncertified' _)@ — the kernel refused what the development
+--   built. Its own comment says it is /shaped like 'Refused'/, which is in this
+--   list; it was not.
+--
+-- **This is also the guard phase 25d's rewind fires on**, so the two additions
+-- put a failed line's development back as well. For these two that is a no-op —
+-- neither runs the machine past the point of failure — and that is the point:
+-- one rule, and no case analysis about which failures dirty the state.
 stopped :: Response -> Bool
 stopped resp = case resp of
-  Failed _            -> True
-  Rejected _          -> True
-  Ran _ (Halted _)    -> True
-  Ran _ (Refused _)   -> True
-  _                   -> False
+  Failed _              -> True
+  LineRefused _         -> True
+  Rejected _            -> True
+  Ran _ (Halted _)      -> True
+  Ran _ (Refused _)     -> True
+  Ran _ (Uncertified _) -> True
+  _                     -> False
 
 -- | Run until the machine needs the user, honouring stepping mode.
 --
