@@ -1665,6 +1665,51 @@ different context with nothing on screen to say so.
 There is one REPL and one rule for it. Working at the prompt means the same thing
 whether or not a rule is waiting on you.
 
+### `apply` saturates; `fit` searches for the arity
+
+*Decided 2026-09-16.*
+
+`apply-core` reads the head's whole telescope and claims a hole for every
+argument at once. **`fit-core` does not know the arity and does not ask** — it
+tries the spine as it stands, and if that does not fit the goal it claims one
+more argument and tries again.
+
+```
+thena spine> :theorem t2 : P                  -- mk : Nat -> Nat -> P
+thena spine> fit-core ⌜ mk ⌝
+chose 34: fit-core
+backtracking to 34: fit-core
+chose 39: fit-core
+backtracking to 39: fit-core
+chose 43: fit-core
+already equal
+```
+
+Each `backtracking to` line is an arity being given up. **It stops at the first
+one that fits**, so a head whose result type already matches is applied to
+nothing at all:
+
+```
+thena spine> :theorem t0 : Nat -> Nat
+thena spine> fit-core ⌜ succ ⌝                -- fits as it stands
+thena spine> apply-core ⌜ succ ⌝              -- saturates, lands on Nat
+stuck: Nat and Nat -> Nat cannot be made equal
+```
+
+**It is two clauses of a rule and nothing else** — no loop, no new operation:
+
+```
+rule fit-core f :- when focus-is-hole
+  do fill f ; solve
+
+rule fit-core f :- when focus-is-hole
+  do n = fresh-name "a" ; f2 = apply-next f n ; call fit-core f2
+```
+
+Nothing sequences them. Both heads pass, so the engine builds a choice point,
+and the first clause *failing* is what reaches the second. `:choices` shows the
+choice point afterwards, and `retry` pushes the search to a longer spine.
+
 ### A rule is searched; a function is called
 
 *Decided 2026-09-13.*
