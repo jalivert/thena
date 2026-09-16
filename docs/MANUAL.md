@@ -728,6 +728,37 @@ chosen, what is untried, and undo it.
 Choice-point numbers are unique but **not consecutive** — they are drawn from
 the same counter as variable names, so the first one in a session is rarely `1`.
 
+### A choice point is not reached by accident
+
+A failing command unwinds looking for an alternative — that is what makes a
+tactic a search. **It stops at the line you typed.** A choice point an earlier
+line left is yours to reach with `retry`, and nothing reaches it for you:
+
+*From a fresh session.*
+
+```
+thena spine> :theorem t : ∀ (A : Type₀) -> A -> A
+proving t : ∀ (A : Type₀) -> A -> A
+thena spine> prove
+chose 685: attack
+thena spine> regret
+thena spine> back
+stuck: already at the root
+  undoing that would backtrack to 685, which was chosen before this line — retry 685 to take it
+```
+
+`regret` took the guess back off and `back` had nothing left to pop. Without the
+boundary, that `back` would have taken `prove`'s untried alternatives and put the
+guess back — a navigation command undoing the line before it.
+
+Nothing is forbidden: `retry 685` still takes it. The point is that crossing out
+of your own line is something you ask for, because backtracking past a line
+takes a route on which that line was never typed — so the command that caused it
+could not have been given.
+
+A choice point the *current* line made is reached as it always was, which is why
+`retry` above still falls through `solve` into `regret` in one command.
+
 ### What is on offer here
 
 `:matches` lists every rule whose head passes at the focus — the same list the

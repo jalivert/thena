@@ -1613,6 +1613,58 @@ weakening every term built under a binder gets.
 builds carry unsolved level metas, and `Type (suc ?ℓ683)` is not something you
 can write down and read back.
 
+### A failing command never backtracks past the line you typed
+
+*Decided 2026-09-16.*
+
+A command that fails unwinds the machine's stack looking for an alternative —
+that is what makes a tactic a search. **It stops at the line you typed.** A
+choice point an earlier line left is not reached implicitly:
+
+```
+thena spine> prove
+chose 685: attack
+thena spine> regret                 -- take the guess back off
+thena spine> back                   -- at the root: nothing to pop
+stuck: already at the root
+  undoing that would backtrack to 685, which was chosen before this line — retry 685 to take it
+```
+
+Before this, `back` would have taken `prove`'s untried alternatives and put the
+guess back — **undoing the `regret` you had just typed, with a navigation
+command.**
+
+**Nothing is forbidden.** `retry 685` still takes it, and `:choices` still lists
+it. What changed is that crossing a line boundary is now something you ask for.
+
+**Why.** Backtracking past the running line takes a route on which that line was
+never typed — the command that caused the backtracking could not have been
+given. Nothing replays a prompt, so the command is lost either way; making it
+explicit costs nothing and shows you what happened.
+
+**A choice point *this* line made is reached exactly as before.** A rule driving
+its own search is untouched, and so is `retry`, which lowers the boundary to the
+choice point you named — so an alternative that fails on its own still falls
+through to the next one inside that command.
+
+**The same rule applies while a rule has yielded to you**, and that is the case
+worth understanding, because it is the one that bites hardest:
+
+```
+rule pause :- do prove ; yield "over to you" ; say "rule resumed"
+```
+
+`prove` leaves a choice point, then the rule hands you the prompt. If a command
+you type there fell past that choice point, **control would be taken back from
+you** — the rest of your line discarded, your bindings replaced, and the rule
+re-entered on another alternative. And because the choice point was made *inside*
+the rule, what it re-runs is the rest of that body — **so the rule yields again,
+printing a message identical to the one you are looking at.** You would be in a
+different context with nothing on screen to say so.
+
+There is one REPL and one rule for it. Working at the prompt means the same thing
+whether or not a rule is waiting on you.
+
 ### A rule is searched; a function is called
 
 *Decided 2026-09-13.*
