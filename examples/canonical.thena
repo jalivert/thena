@@ -1,0 +1,127 @@
+-- Canonical forms for TAPL chapter 8's typed arithmetic expressions, proved in
+-- Thena's surface language — Theorem 8.3.1, both halves.
+--
+-- A companion to examples/determinacy-surface.thena. That file models the same
+-- terms and their small-step semantics and proves determinacy (TAPL 3.5.4);
+-- this one adds the TYPING relation those terms were missing and proves what
+-- a well-typed value must look like.
+--
+-- WRITTEN BY HAND, unlike the determinacy example, which is generated. It is
+-- about a third the size, and the shape of every proof is the same: eliminate a
+-- derivation under a motive that states an equation about its indices, and kill
+-- the impossible constructors with no-confusion.
+--
+-- The two theorems are what a progress proof needs as its lemmas, which is what
+-- canonical forms is FOR in TAPL: knowing that a well-typed value of type bool
+-- really is true or false is what lets an `if` take a step.
+
+module Canonical where
+
+data Term : Type₀ where
+  true : Term
+  false : Term
+  ifthen : Term -> Term -> Term -> Term
+  zero : Term
+  succ : Term -> Term
+  pred : Term -> Term
+  iszero : Term -> Term
+
+data Ty : Type₀ where
+  bool : Ty
+  nat : Ty
+
+data NV : Term -> Type₀ where
+  nvZero : NV zero
+  nvSucc : forall (t : Term) (n : NV t) -> NV (succ t)
+
+data Value : Term -> Type₀ where
+  vTrue : Value true
+  vFalse : Value false
+  vNat : forall (t : Term) (n : NV t) -> Value t
+
+data HasType : Term -> Ty -> Type₀ where
+  tTrue : HasType true bool
+  tFalse : HasType false bool
+  tIf : forall (t1 : Term) (t2 : Term) (t3 : Term) (T : Ty) (d1 : HasType t1 bool) (d2 : HasType t2 T) (d3 : HasType t3 T) -> HasType (ifthen t1 t2 t3) T
+  tZero : HasType zero nat
+  tSucc : forall (t : Term) (d : HasType t nat) -> HasType (succ t) nat
+  tPred : forall (t : Term) (d : HasType t nat) -> HasType (pred t) nat
+  tIsZero : forall (t : Term) (d : HasType t nat) -> HasType (iszero t) bool
+
+data Or (A : Type₀) (B : Type₀) : Type₀ where
+  inl : forall (a : A) -> Or A B
+  inr : forall (b : B) -> Or A B
+
+absurd : forall (C : Type₀) (e : Empty) -> C
+absurd = \ C e -> elim Empty () (\ t -> C) () () e
+
+trueNotNat : forall (d : HasType true nat) -> Empty
+trueNotNat = \ d ->
+  elim HasType () (\ x U r -> Eq Term x true -> Eq Ty U nat -> Empty)
+    ((\ q p -> absurd (Empty) (noConfusionTy bool nat p))
+     (\ q p -> absurd (Empty) (noConfusionTerm false true q))
+     (\ c1 c2 c3 U d1 d2 d3 i1 i2 i3 q p -> absurd (Empty) (noConfusionTerm (ifthen c1 c2 c3) true q))
+     (\ q p -> absurd (Empty) (noConfusionTerm zero true q))
+     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTerm (succ c1) true q))
+     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTerm (pred c1) true q))
+     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTerm (iszero c1) true q)))
+    (true nat) d (refl Term true) (refl Ty nat)
+
+falseNotNat : forall (d : HasType false nat) -> Empty
+falseNotNat = \ d ->
+  elim HasType () (\ x U r -> Eq Term x false -> Eq Ty U nat -> Empty)
+    ((\ q p -> absurd (Empty) (noConfusionTerm true false q))
+     (\ q p -> absurd (Empty) (noConfusionTy bool nat p))
+     (\ c1 c2 c3 U d1 d2 d3 i1 i2 i3 q p -> absurd (Empty) (noConfusionTerm (ifthen c1 c2 c3) false q))
+     (\ q p -> absurd (Empty) (noConfusionTerm zero false q))
+     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTerm (succ c1) false q))
+     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTerm (pred c1) false q))
+     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTerm (iszero c1) false q)))
+    (false nat) d (refl Term false) (refl Ty nat)
+
+zeroNotBool : forall (d : HasType zero bool) -> Empty
+zeroNotBool = \ d ->
+  elim HasType () (\ x U r -> Eq Term x zero -> Eq Ty U bool -> Empty)
+    ((\ q p -> absurd (Empty) (noConfusionTerm true zero q))
+     (\ q p -> absurd (Empty) (noConfusionTerm false zero q))
+     (\ c1 c2 c3 U d1 d2 d3 i1 i2 i3 q p -> absurd (Empty) (noConfusionTerm (ifthen c1 c2 c3) zero q))
+     (\ q p -> absurd (Empty) (noConfusionTy nat bool p))
+     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTerm (succ c1) zero q))
+     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTerm (pred c1) zero q))
+     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTerm (iszero c1) zero q)))
+    (zero bool) d (refl Term zero) (refl Ty bool)
+
+succNotBool : forall (t : Term) (d : HasType (succ t) bool) -> Empty
+succNotBool = \ t d ->
+  elim HasType () (\ x U r -> Eq Term x (succ t) -> Eq Ty U bool -> Empty)
+    ((\ q p -> absurd (Empty) (noConfusionTerm true (succ t) q))
+     (\ q p -> absurd (Empty) (noConfusionTerm false (succ t) q))
+     (\ c1 c2 c3 U d1 d2 d3 i1 i2 i3 q p -> absurd (Empty) (noConfusionTerm (ifthen c1 c2 c3) (succ t) q))
+     (\ q p -> absurd (Empty) (noConfusionTerm zero (succ t) q))
+     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTy nat bool p))
+     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTerm (pred c1) (succ t) q))
+     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTerm (iszero c1) (succ t) q)))
+    ((succ t) bool) d (refl Term (succ t)) (refl Ty bool)
+
+nvNotBool : forall (t : Term) (n : NV t) (d : HasType t bool) -> Empty
+nvNotBool = \ t n ->
+  elim NV () (\ x r -> HasType x bool -> Empty)
+    ((\ dd -> zeroNotBool dd)
+     (\ c1 nn ih dd -> succNotBool c1 dd))
+    (t) n
+
+canonicalBool : forall (v : Term) (p : Value v) (d : HasType v bool) -> Or (Eq Term v true) (Eq Term v false)
+canonicalBool = \ v p ->
+  elim Value () (\ x r -> HasType x bool -> Or (Eq Term x true) (Eq Term x false))
+    ((\ dd -> inl (Eq Term true true) (Eq Term true false) (refl Term true))
+     (\ dd -> inr (Eq Term false true) (Eq Term false false) (refl Term false))
+     (\ c1 nn dd -> absurd (Or (Eq Term c1 true) (Eq Term c1 false)) (nvNotBool c1 nn dd)))
+    (v) p
+
+canonicalNat : forall (v : Term) (p : Value v) (d : HasType v nat) -> NV v
+canonicalNat = \ v p ->
+  elim Value () (\ x r -> HasType x nat -> NV x)
+    ((\ dd -> absurd (NV true) (trueNotNat dd))
+     (\ dd -> absurd (NV false) (falseNotNat dd))
+     (\ c1 nn dd -> nn))
+    (v) p

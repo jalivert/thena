@@ -14,14 +14,22 @@ module Thena.Repl
   , turn
   , transcript
   , transcriptFrom
+  , transcriptIO
+  , entriesOf
+  , unclosedEntry
+  , opensEntry
+  , closesEntry
   , renderCore
   , renderSurface
   , renderLevel
   , renderPartial
+  , renderPattern
   , renderCursor
   , renderWhere
   , renderMachine
+  , describe
   , renderSyntaxError
+  , renderRuleError
   , renderInductive
   , renderEliminator
   , preludePath
@@ -138,17 +146,18 @@ import Thena.Global.Env
   , InductiveDefinition (..)
   , constructorTarget
   )
-import Thena.Ops
+import Thena.Instral.Ops
   ( AnswerKind (..)
   , Instr (..)
   , Op
   , Operand (..)
   , Rule (..)
+  , Pattern (..)
   , Value (..)
   , operandsOf
   )
 import Thena.Rules (RuleBase (..), RuleError (..))
-import qualified Thena.Ops as Ops
+import qualified Thena.Instral.Ops as Ops
 import Thena.Syntax.Lexer (LexError (..), Pos (..), Token (..))
 import Thena.Surface.Layout (LayoutError (..))
 import Thena.Surface.Parser (SurfaceParseError (..))
@@ -156,10 +165,11 @@ import qualified Thena.Surface.Zipper as Zipper
 import Thena.Syntax.Parser (ParseError (..))
 
 import Data.Foldable (toList)
-import Data.List (intercalate, partition)
-import Thena.Syntax.Concrete (RawInstr (..), RawOp (..), RawOperand (..))
-
--- | Run the read-eval-print loop until @:quit@ or end of input.
+import Data.List (stripPrefix, intercalate, partition)
+import Thena.Instral.Grammar (GrammarError (..))
+import Thena.Instral.Type (Signature, Ty, renderSignature, renderTy)
+import Thena.Instral.Infer (renderInstralTypeError)
+import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRhs (..), RawBody (..), RawPattern (..))
 --
 -- The prelude is loaded first (§9, phase 11) and **silently on success** — it
 -- is three @data@ lines and announcing them at every start is noise. A failure
@@ -176,30 +186,85 @@ loop s pending = do
   input <- getInputLine (prompt s pending)
   case input of
     Nothing   -> pure ()          -- end of input: Ctrl-D
-    Just line -> do
+    Just first -> gather first >>= \entry -> case entry of
+      Left problem -> outputStrLn problem >> loop s pending
+      Right line   -> run line
+  where
+   run line = do
       let t = turn s pending line
       mapM_ outputStrLn (turnOutput t)
-      case turnResponse t of
-        -- The one response the driver cannot act on itself: it named a file,
-        -- and reading files is this module's (§12 invariant 4).
-        LoadRequested path | not (turnQuit t) -> do
-          (s', out, problems) <- liftIO (loadFile (turnSession t) path)
-          mapM_ outputStrLn (out ++ problems)
-          loop s' Nothing
-        -- And the same shape again for a proof module (MS4 phase 43). The
-        -- driver elaborates it; this only reads the file.
-        ProofRequested path | not (turnQuit t) -> do
-          (s', out) <- liftIO (loadProofFile (turnSession t) path)
+      case following (turnSession t) (turnResponse t) of
+        Just act | not (turnQuit t) -> do
+          (s', out) <- liftIO act
           mapM_ outputStrLn out
-          loop s' Nothing
-        -- The same shape for rule bases, and several paths rather than one:
-        -- a load replaces the whole ordered list (phase 22).
-        RulesRequested paths | not (turnQuit t) -> do
-          (s', out, problems) <- liftIO (loadRuleFiles (turnSession t) paths)
-          mapM_ outputStrLn (out ++ problems)
           loop s' Nothing
         _ | turnQuit t -> pure ()
           | otherwise  -> loop (turnSession t) (turnPending t)
+
+   -- | **An entry, not a line** (MS5 phase 70, rewritten at phase 78).
+   --
+   -- A multi-line entry is opened by @:{@ and closed by @:}@, each alone on its
+   -- line — **his choice, 2026-09-13, and GHCi\'s spelling**: /"only there I
+   -- want any sort of weirdness"/.
+   --
+   -- **It replaces phase 70\'s heuristic** — keep reading while the entry
+   -- /cannot be finished/, and require every continuation to be indented — which
+   -- is @ms5\/CLOSEOUT.md@ 18, answered rather than left split. An explicit
+   -- bracket has no lag to trade against indentation, and it is one rule where
+   -- that was two.
+   --
+   -- The same predicates drive 'entriesOf', which is the testable form of this.
+   gather firstLine
+     | opensEntry firstLine = block []
+     | otherwise            = pure (Right firstLine)
+
+   block acc = do
+     more <- getInputLine continuationPrompt
+     case more of
+       Nothing -> pure (Left unclosedEntry)
+       Just l
+         | closesEntry l -> pure (Right (intercalate "\n" (reverse acc)))
+         | otherwise     -> block (l : acc)
+
+-- | The prompt a line inside @:{ … :}@ is typed at.
+continuationPrompt :: String
+continuationPrompt = "         ... "
+
+-- | What is said when input ends inside a @:{@.
+unclosedEntry :: String
+unclosedEntry = "end of input inside :{ … :} — the entry is dropped"
+
+-- | @:{@ alone on its line opens a multi-line entry (MS5 phase 78).
+opensEntry :: String -> Bool
+opensEntry = (== ":{") . trimmed
+
+-- | @:}@ alone on its line closes one.
+closesEntry :: String -> Bool
+closesEntry = (== ":}") . trimmed
+
+trimmed :: String -> String
+trimmed = dropWhile (== ' ') . reverse . dropWhile (== ' ') . reverse
+
+-- | Group written lines into entries, the way the prompt does.
+--
+-- **The testable form of \'loop\'\'s reader** — the interactive one cannot be
+-- driven without a terminal, so the rule lives here and both go through
+-- \'opensEntry\' and \'closesEntry\'. A @Left@ is a problem to print instead of
+-- running anything.
+--
+-- **It is not what a @.thena.script@ gets**, which is still a line at a time;
+-- that is @ms5\/CLOSEOUT.md@\'s to decide, and nothing is lost meanwhile,
+-- because a script could not write a multi-line entry before this phase either.
+entriesOf :: [String] -> [Either String String]
+entriesOf [] = []
+entriesOf (l : ls)
+  | opensEntry l = gather [] ls
+  | otherwise    = Right l : entriesOf ls
+  where
+    gather _   []       = [Left unclosedEntry]
+    gather acc (m : ms)
+      | closesEntry m = Right (intercalate "\n" (reverse acc)) : entriesOf ms
+      | otherwise     = gather (m : acc) ms
 
 -- --------------------------------------------------------------------------
 -- Loading (§9, phase 11)
@@ -281,6 +346,10 @@ loadRuleFiles s paths = do
             -- A refusal is a problem and not output: the whole load was
             -- abandoned, so there is nothing to report as having happened.
             RuleFileRefused p e -> (s, [], renderRuleFileError p e)
+            -- **The same bargain one step later** (MS5 phase 66c): the files
+            -- all read and parsed, and the program they make does not type
+            -- check, so nothing was installed and nothing happened to report.
+            BasesIllTyped _     -> (s, [], renderResponse s resp)
             _                   -> (s', renderResponse s' resp, [])
 
 -- | Read a file and run it: the session after, **what its lines printed**, and
@@ -372,6 +441,51 @@ turn s pending line = Turn (renderResponse s' resp) s' asking (resp == Quit) res
 transcript :: [String] -> String
 transcript = transcriptFrom newSession
 
+-- | **The three responses the driver cannot act on itself**: each named a file,
+-- and reading files is this module's (§12 invariant 4).
+--
+-- Written once (2026-09-13) because there are now two callers — the interactive
+-- 'loop' and 'transcriptIO' — and three near-identical cases in each would be
+-- six places for a fourth kind of load to be forgotten in.
+following :: Session -> Response -> Maybe (IO (Session, [String]))
+following s resp = case resp of
+  LoadRequested path   -> Just (withProblems (loadFile s path))
+  -- A proof module: the driver elaborates it, this only reads the file.
+  ProofRequested path  -> Just (loadProofFile s path)
+  -- Several paths rather than one — a load replaces the whole ordered list.
+  RulesRequested paths -> Just (withProblems (loadRuleFiles s paths))
+  _                    -> Nothing
+  where
+    withProblems = fmap (\(s', out, problems) -> (s', out ++ problems))
+
+-- | 'transcriptFrom', in IO, so that a @:load@ is followed.
+--
+-- **The pure one cannot**, and says so: reading a file is not pure, so a script
+-- that loads something replays as though the line did nothing. That was
+-- harmless while nothing replayed a script with a load in it, and
+-- @docs\/MANUAL.md@ is full of them — a manual that cannot be re-driven is
+-- exactly the hand-patched transcript the standing rule is about
+-- (@ms5\/CLOSEOUT.md@ 31, and @.claude\/bin\/manual-check@ is the harness).
+--
+-- Otherwise identical to 'transcriptFrom', through the same 'turn', so the two
+-- cannot come to disagree about what a terminal would have shown.
+transcriptIO :: Session -> [String] -> IO String
+transcriptIO s0 = fmap unlines . replay s0 Nothing
+  where
+    replay _ _ []           = pure []
+    replay s pending (l : ls) = do
+      let t    = turn s pending l
+          echo = prompt s pending ++ l
+      case following (turnSession t) (turnResponse t) of
+        Just act | not (turnQuit t) -> do
+          (s', out) <- act
+          rest <- replay s' Nothing ls
+          pure ((echo : turnOutput t ++ out) ++ rest)
+        _ | turnQuit t -> pure (echo : turnOutput t)
+          | otherwise  -> do
+              rest <- replay (turnSession t) (turnPending t) ls
+              pure ((echo : turnOutput t) ++ rest)
+
 -- | The same, from a session that has already had something loaded into it.
 --
 -- Phase 22: the rule base comes off disk now, so a transcript that uses
@@ -448,11 +562,22 @@ renderResponse s resp = case resp of
   BasesListed bs   -> renderBases bs
   RulesListed bs   -> renderRuleBases bs
   RuleFileRefused p e -> renderRuleFileError p e
+  -- **No path on the first line**, because the program is every base at once
+  -- (MS5 phase 66c) and a site names the rule and the instruction inside it.
+  -- A typed entry, said without the rule it was wrapped in: the line is in
+  -- front of you (MS5, reviewed 2026-09-12).
+  EntryMistyped errs -> map (dropEntry . renderInstralTypeError) errs
+  BasesIllTyped errs ->
+    ("the rules do not type check:" : map (("  " ++) . renderInstralTypeError) errs)
   Helped rows   -> renderHelp rows
   Matched rs    -> renderMatches rs
+  Fitting v ty fs -> renderFitting v ty fs
   Choices cs    -> renderChoices cs
   Ran msgs stop  -> msgs ++ renderStop s stop
   Failed e       -> [renderSyntaxError e]
+  -- The same errors a rule file is refused with, said without the /in rule ‹r›,
+  -- instruction ‹i›/ that a typed line has no use for (MS5 phase 62b).
+  LineRefused es -> map whatRuleError es
   Rejected e     -> [renderCommandError e]
   Quit           -> []
 
@@ -513,6 +638,8 @@ renderSyntaxError e = case e of
   ResolveFailed (NotInScope n)      -> "not in scope: " ++ n
   ResolveFailed (NotACoreTerm f)    ->
     devForm f ++ " is part of a development, not a term"
+  ResolveFailed (SpliceNotFilled x) ->
+    "nothing is bound to " ++ x ++ ", so ${" ++ x ++ "} has nothing to stand for"
   ResolveFailed (LevelArgumentsOnALocal s) ->
     s ++ " is bound here, and only a definition has level parameters"
   ResolveFailed (NotAUniverse d)    ->
@@ -548,6 +675,13 @@ devForm f = case f of
 describe :: Token -> String
 describe t = case t of
   TLambda     -> "λ"
+  TLanguage   -> "language"
+  -- Never lexed; "Thena.Driver" inserts it at a rule file's column 1.
+  TChar c     -> show c
+  TSpread     -> "..."
+  TLBracket   -> "["
+  TRBracket   -> "]"
+  TComma      -> ","
   TForall     -> "∀"
   TArrow      -> "->"
   TLParen     -> "("
@@ -574,13 +708,20 @@ describe t = case t of
   TDashes     -> "--"
   TRule       -> "rule"
   TWhen       -> "when"
-  TThen       -> "then"
   TNeck       -> ":-"
   TNumber k   -> show k
   TString txt -> show txt
   TUniverse k   -> "Type" ++ subscript k
   TUniverseOpen -> "Type"
   TIdent s    -> s
+  -- The tagged-region tokens (MS5 phase 60). A region's own contents are raw
+  -- text, so what a reader needs back is the region's shape rather than its
+  -- characters: the tag they wrote, and the two things that punctuate it.
+  TTagOpen tag  -> tag ++ "`"
+  TTagClose     -> "`"
+  TRaw txt      -> txt
+  TEscapeOpen   -> "$" ++ ['{']
+  TEscapeClose  -> ['}']
 
 -- --------------------------------------------------------------------------
 -- Terms, made readable (§2.6)
@@ -1054,23 +1195,29 @@ renderMachine n ctx m =
 
 renderInstr :: Int -> Context -> Instr -> String
 renderInstr n ctx instr = case instr of
-  Bind x op -> x ++ " = " ++ renderOp n ctx op
-  Do op     -> renderOp n ctx op
+  -- **An annotation prints as the line the author wrote** (MS5 phase 77) — its
+  -- own, before the binding — because that is the only spelling the grammar
+  -- reads back. Stepping mode shows one instruction per line either way.
+  Bind x (Just t) op ->
+    renderPattern x ++ " : " ++ renderTy t ++ " ; "
+      ++ renderPattern x ++ " = " ++ renderOp n ctx op
+  Bind x Nothing  op -> renderPattern x ++ " = " ++ renderOp n ctx op
+  Do op              -> renderOp n ctx op
 
 -- | One instruction's op, as stepping mode shows it.
 --
--- **The word comes from 'Thena.Ops.opKeyword' and the operands from
--- 'Thena.Ops.operandsOf'** — phase 25c. Until then this was a second spelling
+-- **The word comes from 'Thena.Instral.Ops.opKeyword' and the operands from
+-- 'Thena.Instral.Ops.operandsOf'** — phase 25c. Until then this was a second spelling
 -- table, and at phase 23b the two drifted: the @prim-@ renames moved
--- 'Thena.Ops.opKeyword' and left this printing @try@, @attack@, @solve@ and
+-- 'Thena.Instral.Ops.opKeyword' and left this printing @try@, @attack@, @solve@ and
 -- @eliminate@, which since that phase name the /rules/ and not the ops this is
 -- displaying. The user, 2026-08-25: *"Fix the other seven right away - we are
 -- not leaving something like this behind."*
 --
 -- So only the shapes that are **not** "the word, then its operands in order"
 -- are written out below. The wildcard is deliberate and is not a loss of
--- @-Wall@\'s totality: a new op still has to answer 'Thena.Ops.opKeyword' and
--- 'Thena.Ops.operandsOf', both total, and now renders correctly by default
+-- @-Wall@\'s totality: a new op still has to answer 'Thena.Instral.Ops.opKeyword' and
+-- 'Thena.Instral.Ops.operandsOf', both total, and now renders correctly by default
 -- instead of needing a third case that can be written wrong. Totality here
 -- bought nothing — the case that drifted at 23b existed; it was just wrong.
 renderOp :: Int -> Context -> Op -> String
@@ -1085,7 +1232,7 @@ renderOp n ctx op = case op of
   Ops.CrossValue  -> word ++ " val"
   -- Written the way a rule file writes it (phase 23): the name, then the
   -- arguments as any other op\'s, spaced and unwrapped.
-  Ops.Call nm as  -> unwords (word : nameString nm : map operand as)
+  Ops.Call nm as  -> unwords (word : nm : map operand as)
   _               -> unwords (word : map operand (operandsOf op))
   where
     word    = Ops.opKeyword op
@@ -1095,13 +1242,49 @@ renderOperand :: Int -> Context -> Operand -> String
 renderOperand n ctx o = case o of
   Ref x -> x
   Lit v -> renderValue n ctx v
+  -- Written back as they were written (MS5 phase 65).
+  ListOf os  -> "[" ++ intercalate ", " (map (renderOperand n ctx) os) ++ "]"
+  PairOf a b ->
+    "(" ++ renderOperand n ctx a ++ ", " ++ renderOperand n ctx b ++ ")"
+
+-- | The fence a tagged region is written with. Named rather than written
+-- inline so that a backtick never sits loose in a string literal here.
+tick :: Char
+tick = toEnum 96
 
 renderValue :: Int -> Context -> Value -> String
 renderValue n ctx v = case v of
   VText s            -> show s
-  VTerm (Trailing t) -> "⌜" ++ renderCore n ctx t ++ "⌝"
-  VTerm p            -> "⌜" ++ unwords (words (renderPartial n ctx p)) ++ "⌝"
-  -- **The focus, printed as it was written.** A 'Thena.Ops.VSurface' carries a
+  -- The primitives (MS5 phase 64), each printed as it is written. @show@ is
+  -- exactly right for the first two — Haskell's escapes are ours — and the
+  -- booleans are lowercase because that is how @instral@ spells them.
+  VInt k             -> show k
+  VChar c            -> show c
+  VBool True         -> "true"
+  VBool False        -> "false"
+  VList vs           -> "[" ++ intercalate ", " (map (renderValue n ctx) vs) ++ "]"
+  VOption Nothing    -> "none"
+  VOption (Just u)   -> "some " ++ renderValue n ctx u
+  -- **A closure prints as its shape** (MS5 phase 68b): its body is instructions
+  -- and its captured environment may hold anything, so printing either would say
+  -- more than a reader wants and less than they could use.
+  VClosure ps _ _    -> "\\ " ++ unwords (map renderPattern ps) ++ " -> …"
+  -- **Printed as its tag**, which is how it was written and the only thing about
+  -- it @instral@ is allowed to know (MS5 phase 69).
+  VObject tag _      -> tag ++ "`…`"
+  -- **A level prints the way one prints inside a type** (MS5 phase 89), which
+  -- is the printer a scheme already uses — so @0@, @ℓ₇@ and @?ℓ12@ all read as
+  -- they do everywhere else.
+  VLevel l           -> renderLevel l
+  VTerm t            -> "⌜" ++ renderCore n ctx t ++ "⌝"
+  -- **An unresolved core term prints as its shape, not its contents** (MS5
+  -- phase 61b). Printing a 'Thena.Syntax.Concrete.Raw' back would need a
+  -- printer for the written syntax, and there has never been one: every other
+  -- rendering here goes from 'Thena.Core.Term.Core', which a @core@ region has
+  -- deliberately not become yet. Owed a better rendering when a @Raw@ printer
+  -- exists; until then this says what it is and does not pretend to more.
+  VRaw _             -> "core" ++ [tick] ++ "…" ++ [tick]
+  -- **The focus, printed as it was written.** A 'Thena.Instral.Ops.VSurface' carries a
   -- zipper since phase 46, and what a reader wants to see is the subterm the
   -- machine is elaborating, not the program it came from — so the path is
   -- carried and not shown. Where it belongs on screen is a presentation
@@ -1153,6 +1336,22 @@ renderFailReason r = case r of
   BlockOperands i w ->
     "instruction " ++ show (i + 1) ++ " of the do block gives " ++ w
       ++ " operands it does not take"
+  ExpectedList   -> "that is not a list"
+  ExpectedPair   -> "that is not a pair"
+  ExpectedOption -> "that is not an option"
+  ExpectedLevel -> "expected a level"
+  ExpectedInt   -> "expected a whole number that is not negative"
+  NothingThere   -> "there is nothing in that option — ask option-is-some first"
+  NothingReturned p ->
+    "nothing was returned to bind to " ++ renderPattern p
+  -- **Says the pattern, not the value** (MS5 phase 84). The value is in the
+  -- development the failure is reported against, and a rule that backtracks
+  -- will try another clause — so what the reader needs is which binding
+  -- refused.
+  BindingDidNotMatch p ->
+    renderPattern p ++ " does not match what was bound to it"
+  NothingToReturnFrom ->
+    "there is no call to return from here"
   Mismatch ctx a b ->
     renderCore 0 ctx a ++ " and " ++ renderCore 0 ctx b ++ " cannot be made equal"
   OccursCheck ctx x t ->
@@ -1172,11 +1371,23 @@ renderFailReason r = case r of
       ++ concatMap ("\n  " ++) (renderTypeError 0 e)
   NoGoalHere        -> "nothing is written down here, so there is no goal"
   NoRuleMatched     -> "no rule applies here"
+  -- **Two sentences, and the second is the offer** (MS5 phase 95). The first is
+  -- whatever went wrong; the second says the machine declined to backtrack past
+  -- this line and names the word that would.
+  WouldLeaveTheLine why i ->
+    renderFailReason why
+      ++ "\n  undoing that would backtrack to "
+      ++ show i
+      ++ ", which was chosen before this line — retry "
+      ++ show i
+      ++ " to take it"
   CannotEliminate e -> renderElimError e
   UnboundInBody x   -> "nothing named " ++ x ++ " in this body"
   NotAnIdentifier s -> show s ++ " is not a name"
   ExpectedText      -> "expected text"
   ExpectedTerm      -> "expected a term"
+  ExpectedRaw       -> "expected a core region"
+  CannotResolve e   -> renderSyntaxError (ResolveFailed e)
   CannotMove m      -> renderMoveError m
   NotAHole            -> "that is not a hole"
   NotAGuessHere       -> "that is not a guess"
@@ -1208,12 +1419,16 @@ renderFailReason r = case r of
   -- is known at other arities, or clauses of the right arity all failed their
   -- heads. Which one it is falls out of the arities the reason carries.
   NoClauseMatched g got want
-    | null want        -> "no rule is called " ++ nameString g
+    | null want        -> "no rule is called " ++ g
     | got `notElem` want ->
-        nameString g ++ " takes " ++ orList (map show want)
+        g ++ " takes " ++ orList (map show want)
           ++ " argument(s), given " ++ show got
     | otherwise        ->
-        "no clause of " ++ nameString g ++ " applies here"
+        "no clause of " ++ g ++ " applies here"
+
+  PatternDidNotMatch g got ->
+    g ++ " was given " ++ show got
+      ++ " argument(s) that its pattern does not match"
 
 -- | @a@, @a or b@, @a, b or c@ — for a message that lists alternatives.
 orList :: [String] -> String
@@ -1230,7 +1445,8 @@ orList xs = case reverse xs of
 -- the elaborate layout decisions are 'renderCore'\'s and belong to terms.
 -- | A surface term, as written (MS4 phase 39).
 --
--- **Its own function, not a case of 'renderRaw'.** The two languages print
+-- **Its own function, not a case of the development printer.** The two
+-- languages print
 -- differently — a surface lambda's binder may have no type, its arguments carry
 -- braces, and it has @_@ and @?foo@ where the development calculus has neither.
 -- Sharing one printer would mean a printer that has to ask which language it is
@@ -1242,15 +1458,61 @@ renderSurface :: Surface -> String
 renderSurface = surf Loose
   where
     instruction i = case i of
-      RawBind x o -> x ++ " = " ++ operation o
-      RawDo     o -> operation o
+      RawBind x r  -> rawPattern x ++ " = " ++ rhs r
+      RawDo     o  -> operation o
+      -- **A surface @do@ block cannot contain one** (MS5 phase 77): the surface
+      -- grammar has no type notation, and a block in a surface term is not
+      -- type-checked anyway (@ms5\/CLOSEOUT.md@ 20), so an annotation there
+      -- would be decoration. This printer never meets one; it answers rather
+      -- than leaving the case open.
+      RawAnnot x _ -> x
+
+    rhs r = case r of
+      RhsOp o    -> operation o
+      RhsValue a -> operand a
+
+    -- **A block body prints explicitly** (MS5 phase 75b). This printer is
+    -- crossed against its reader, and layout is a pass the reader runs before
+    -- the grammar sees anything — so printing an indented block would be
+    -- printing something this module cannot claim reads back. Braces do.
+    funBody b = case b of
+      BodyRhs r      -> rhs r
+      BodyBlock is   -> "do { " ++ intercalate " ; " (map instruction is) ++ " }"
+
+    rawPattern rp = case rp of
+      RawPWord w   -> w
+      RawPInt k    -> show k
+      RawPChar c   -> show c
+      RawPText t   -> show t
+      RawPApp w as -> "(" ++ unwords (w : map rawPattern as) ++ ")"
+      RawPPair a b -> "(" ++ rawPattern a ++ ", " ++ rawPattern b ++ ")"
+      RawPList ps mt ->
+        "[" ++ intercalate ", " (map rawPattern ps ++ tl) ++ "]"
+        where tl = case mt of
+                     Nothing -> []
+                     Just t  -> ["..." ++ rawPattern t]
 
     operation (RawOp w as) = unwords (w : map operand as)
 
     operand a = case a of
+      RawLambda ps b -> "\\ " ++ unwords (map rawPattern ps) ++ " -> " ++ funBody b
       RawRef x  -> x
       RawPos k  -> show k
       RawText t -> show t
+      RawChar c -> show c
+      RawList os    -> "[" ++ intercalate ", " (map operand os) ++ "]"
+      RawPairOf x y -> "(" ++ operand x ++ ", " ++ operand y ++ ")"
+      -- Exact, because the region kept its source text: a rule listing shows
+      -- the embedded term as the author wrote it.
+      RawRegion tag src -> tag ++ [tick] ++ src ++ [tick]
+      -- The same gap 'renderValue' has for a 'Thena.Instral.Ops.VRaw': there is no
+      -- printer for written syntax, so this says what it is rather than what it
+      -- contains (§7b's register).
+      RawQuoted _       -> "⌜…⌝"
+      -- A nested call, written back as it was written (MS5 phase 63). This is
+      -- the one place a rule listing shows the /written/ form rather than the
+      -- resolved one — resolution lifts it into a binding of its own.
+      RawNested w as    -> "(" ++ unwords (w : map operand as) ++ ")"
 
     surf _ (SurfaceName x)      = x
     surf _ (SurfaceUniverse l)  = "Type" ++ subscript l
@@ -1264,18 +1526,24 @@ renderSurface = surf Loose
       "do { " ++ intercalate " ; " (map instruction b) ++ " }" 
     surf p (SurfaceApp f as)    =
       paren (p >= Tight) (surf Spine f ++ concatMap arg (NE.toList as))
+    -- **The body of each of these four is @Arrowed@ and not @Term@**, which is
+    -- what the grammar says and what an ascription inside one turns on. A
+    -- binder's own type and a @let@'s annotation and value are @Term@, so they
+    -- stay @Loose@.
     surf p (SurfaceLam bs b)    =
-      paren (p >= Spine) ("λ" ++ concatMap binder (NE.toList bs) ++ " -> " ++ surf Loose b)
+      paren (p >= Spine) ("λ" ++ concatMap binder (NE.toList bs) ++ " -> " ++ surf Arrowed b)
     surf p (SurfacePi bs b)     =
-      paren (p >= Spine) ("∀" ++ concatMap binder (NE.toList bs) ++ " -> " ++ surf Loose b)
+      paren (p >= Spine) ("∀" ++ concatMap binder (NE.toList bs) ++ " -> " ++ surf Arrowed b)
     surf p (SurfaceArrow a b)   =
-      paren (p >= Spine) (surf Tight a ++ " -> " ++ surf Loose b)
+      paren (p >= Spine) (surf Tight a ++ " -> " ++ surf Arrowed b)
     surf p (SurfaceLet x ty v b) =
       paren (p >= Spine)
         ("let " ++ x ++ maybe "" (\t -> " : " ++ surf Loose t) ty
-           ++ " = " ++ surf Loose v ++ " in " ++ surf Loose b)
+           ++ " = " ++ surf Loose v ++ " in " ++ surf Arrowed b)
+    -- @Term : Arrowed ':' Arrowed@ — both sides, and it needs its own
+    -- parentheses anywhere an @Arrowed@ is wanted.
     surf p (SurfaceAnnot e ty)  =
-      paren (p >= Spine) (surf Spine e ++ " : " ++ surf Loose ty)
+      paren (p >= Arrowed) (surf Arrowed e ++ " : " ++ surf Arrowed ty)
     surf p (SurfaceElim d ps mot ms is tgt) =
       paren (p >= Tight)
         ("elim " ++ d ++ " " ++ list ps ++ " " ++ surf Tight mot ++ " " ++ list ms
@@ -1295,9 +1563,20 @@ renderSurface = surf Loose
     paren False t = t
 
 -- | Where a surface term is being printed, and therefore what has to be
--- parenthesised. @Loose@ is the top, @Spine@ is the head or an argument of an
--- application, @Tight@ is an argument.
-data SurfacePrec = Loose | Spine | Tight
+-- parenthesised.
+--
+-- **One level per non-terminal of @Surface.Parser@, and they are listed in that
+-- grammar's order** — @Loose@ is @Term@, @Arrowed@ is @Arrowed@, @Spine@ is
+-- @App@, @Tight@ is @Atom@. Anything else is a guess about what nests inside
+-- what.
+--
+-- @Arrowed@ arrived 2026-09-12, and its absence was a real defect: with three
+-- levels against the grammar's four, the body of a λ, a @∀@, an arrow and a
+-- @let@ were all printed at @Term@, which admits an ascription that the body
+-- position does not. So @λ x -> (x : y)@ printed as @λ x -> x : y@ and read back
+-- as @(λ x -> x) : y@ — a different term, silently — and @a : (b : c)@ printed
+-- as @a : b : c@, which does not parse at all.
+data SurfacePrec = Loose | Arrowed | Spine | Tight
   deriving (Eq, Ord)
 
 obligation :: Obligation -> String
@@ -1757,23 +2036,178 @@ renderRuleFileError path e = case e of
   RuleIllFormed es   -> map ((path ++ ": ") ++) (map renderRuleError es)
 
 renderRuleError :: RuleError -> String
-renderRuleError e = case e of
-  DeclarationInBody g i    -> inRule g i ++ "a declaration is a command, not a rule-body operation"
-  BoundNonProducing g i n  -> inRule g i ++ n ++ " is bound to an operation that leaves nothing"
-  UnboundInRule g i n      -> inRule g i ++ "no parameter or earlier binding is called " ++ n
-  NoSuchTest g w           -> "in " ++ nameString g ++ ": no such test: " ++ w
-  UnboundInHead g n         -> "in " ++ nameString g ++ ": no parameter is called " ++ n
-  BadTestOperands g w      -> "in " ++ nameString g ++ ": " ++ w ++ " was written with the wrong arguments"
-  BadOperands g i w        -> inRule g i ++ w ++ " was written with the wrong arguments"
+renderRuleError e = whereRuleError e ++ whatRuleError e
+
+-- | Which rule and which instruction — the half a typed line has no use for.
+--
+-- Split from the message at MS5 phase 62b, when a REPL line started being
+-- resolved by the same pass a rule file is: the reasons are identical and the
+-- placing is not, so a line says only what was wrong.
+whereRuleError :: RuleError -> String
+whereRuleError e = case e of
+  DeclarationInBody g i   -> inRule g i
+  BoundNonProducing g i _ -> inRule g i
+  UnboundInRule g i _     -> inRule g i
+  NoSuchTest g _          -> inName g
+  UnboundInHead g _       -> inName g
+  BadTestOperands g _     -> inName g
+  ReservedName g _        -> inName g
+  BadPattern g _          -> inName g
+  RepeatedInPattern g _   -> inName g
+  BadOperands g i _       -> inRule g i
+  NoSuchTag g i _         -> inRule g i
+  BadRegion g i _ _       -> inRule g i
+  -- The signature errors (MS5 phase 67) name a signature and not a rule: they
+  -- are found before anything is resolved into a 'Thena.Instral.Ops.Rule' at all.
+  UnknownType n _         -> inSignature n
+  TypeArity n _ _ _       -> inSignature n
+  TypeVariableApplied n _ -> inSignature n
+  UnitInsideAType n       -> inSignature n
+  DuplicateSignature n _  -> inSignature n
+  AnnotationWithoutBinding g i _ -> inRule g i
+  InAnnotation g i n _    -> "in " ++ nameString g ++ ", instruction " ++ show (i + 1)
+                               ++ ", the type of " ++ n ++ ": "
+  ReturnInSurfaceBlock g i -> inRule g i
+  FunctionLeavesNothing n -> "in " ++ n ++ ": "
+  FunctionClauseUnreachable n _ -> "in " ++ n ++ ": "
+  RuleAndFunction n _     -> "in " ++ n ++ ": "
+  BuiltInLanguage n       -> inLanguage n
+  BuiltInType n           -> inLanguage n
+  DuplicateLanguage n     -> inLanguage n
+  BadGrammarItem n _      -> inLanguage n
+  BadGrammar n _          -> inLanguage n
   where
-    inRule g i = "in " ++ nameString g ++ ", instruction " ++ show i ++ ": "
+    -- **Counted from 1, as a type error is** (MS5 phase 91, @ms5\/CLOSEOUT.md@
+    -- 44). The index is the written statement from zero — the same count
+    -- 'Thena.Instral.Infer' keeps — so the two passes name one line one way.
+    inRule g i = "in " ++ nameString g ++ ", instruction " ++ show (i + 1) ++ ": "
+    inName g   = "in " ++ nameString g ++ ": "
+    inSignature n = "in the signature of " ++ n ++ ": "
+    inLanguage n  = "in the grammar of " ++ n ++ ": "
+
+-- | What was wrong, said without saying where.
+whatRuleError :: RuleError -> String
+whatRuleError e = case e of
+  DeclarationInBody _ _   -> "a declaration is a command, not a rule-body operation"
+  BoundNonProducing _ _ n -> n ++ " is bound to an operation that leaves nothing"
+  UnboundInRule _ _ n     -> "no parameter or earlier binding is called " ++ n
+  NoSuchTest _ w          -> "no such test: " ++ w
+  UnboundInHead _ n       -> "no parameter is called " ++ n
+  BadTestOperands _ w     -> w ++ " was written with the wrong arguments"
+  ReservedName _ n        ->
+    n ++ " is a value, not a name — it cannot be a parameter or a binding"
+  BadPattern _ w          ->
+    "no pattern is written (" ++ w
+      ++ " …) — some takes one argument and nothing else takes any"
+  RepeatedInPattern _ n   ->
+    n ++ " is bound twice by one clause's parameters"
+  BadOperands _ _ w       -> w ++ " was written with the wrong arguments"
+  NoSuchTag _ _ tag       ->
+    "no language is called " ++ tag ++ " — the built-in tags are surface and core"
+  BadRegion _ _ tag why   ->
+    "this " ++ tag ++ " term did not parse: " ++ renderSyntaxError why
+  UnknownType _ w         -> w ++ " is not a type"
+  TypeArity _ w want got  ->
+    w ++ " takes " ++ show want ++ ", not " ++ show got
+  TypeVariableApplied _ v ->
+    v ++ " is a type variable, and a variable takes no arguments"
+  UnitInsideAType _       ->
+    "() says a rule leaves nothing, so it can only be the result"
+  -- A local always holds a value, so for one @()@ is not misplaced: it is
+  -- impossible, whether it is the whole type or what a function type gives.
+  InAnnotation _ _ n (UnitInsideAType _) ->
+    "() is nothing, and " ++ n ++ " holds a value — a local's type cannot be () or give ()"
+  InAnnotation _ _ _ inner -> whatRuleError inner
+  DuplicateSignature _ a  ->
+    "two signatures for the same name at " ++ show a
+      ++ (if a == 1 then " argument" else " arguments")
+  AnnotationWithoutBinding _ _ n ->
+    "there is no " ++ n ++ " = … after this type, so it says nothing about anything"
+  ReturnInSurfaceBlock _ _ ->
+    "a do block in a surface term is the solution to the hole it stands in, "
+      ++ "so there is nothing for a return to answer"
+  FunctionLeavesNothing _ ->
+    "the right of the = leaves no value, so there is nothing to return"
+  FunctionClauseUnreachable _ k ->
+    "a function has one clause, and nothing tells a second one at " ++ show k
+      ++ (if k == 1 then " argument" else " arguments")
+      ++ " apart from the first — write a rule if you want the clauses searched"
+  RuleAndFunction _ k     ->
+    "this name is both a rule and a function at " ++ show k
+      ++ (if k == 1 then " argument" else " arguments")
+  BuiltInLanguage n       ->
+    n ++ " is one of Thena's own languages, so a grammar may not take its name"
+  BuiltInType n           ->
+    n ++ " is one of instral's own types, so a grammar may not take its name"
+  DuplicateLanguage n     ->
+    "two grammars are declared under the name " ++ n
+  BadGrammarItem _ w      ->
+    w ++ " is neither this language nor name"
+  BadGrammar _ ge         -> case ge of
+    LeftRecursive _ c      -> c ++ " begins with the language itself"
+    EmptyProduction _ c    -> c ++ " has no items"
+    TerminalDoesNotLex _ t -> show t ++ " is not one token"
+
+-- | @:accepts@ and @:produces@ (MS5 phase 71).
+--
+-- **Each row says whether it is a rule or a function**, because the query lists
+-- both (his ruling) and the two are reached differently — a rule may also be
+-- found by @:matches@, a function never is.
+-- | Strip the synthetic rule name a typed entry is checked under (MS5, reviewed
+-- 2026-09-12) — the line is in front of you, so naming it says nothing.
+dropEntry :: String -> String
+dropEntry t = case stripPrefix "entry, " t of
+  Just rest -> rest
+  Nothing   -> t
+
+renderFitting
+  :: String -> Ty -> [(GlobalName, Int, Bool, Signature)] -> [String]
+renderFitting verb ty [] = ["nothing " ++ verb ++ " a " ++ renderTy ty]
+renderFitting _    _  fs = map one fs
+  where
+    one (GlobalName n, k, isRule, sg) =
+      "  " ++ n ++ "/" ++ show k ++ " : " ++ renderSignature sg
+        ++ (if isRule then "   (rule)" else "")
+
+-- | A pattern, spelled the way it is written (MS5 phase 82).
+--
+-- **Crossed with the grammar by @RuleSyntaxTests@**, which is this codebase's
+-- standing rule after @ms5\/CLOSEOUT.md@ 26: a printer and its reader disagreed
+-- about a structure neither owns, twice in two days, and both had shipped. Every
+-- form below parses back to the pattern it came from.
+renderPattern :: Pattern -> String
+renderPattern pt = case pt of
+  PVar n      -> n
+  PWild       -> "_"
+  PInt k      -> show k
+  PChar c     -> show c
+  PBool True  -> "true"
+  PBool False -> "false"
+  PText t     -> show t
+  PPair a b   -> "(" ++ renderPattern a ++ ", " ++ renderPattern b ++ ")"
+  -- **@some@ takes parentheses because it takes an argument** and @none@ does
+  -- not, which is §6.0.1 at a parameter position and not a special case.
+  PSome a     -> "(some " ++ renderPattern a ++ ")"
+  PNone       -> "none"
+  PList ps mt ->
+    "[" ++ intercalate ", " (map renderPattern ps ++ tl) ++ "]"
+    where tl = case mt of
+                 Nothing -> []
+                 Just t  -> ["..." ++ renderPattern t]
 
 renderMatches :: [Rule] -> [String]
 renderMatches [] = ["no rule applies here"]
 renderMatches rs = map one rs
   where
     one r = unwords (nameString (ruleName r) : map placeholder (ruleParams r))
-    placeholder n = "‹" ++ n ++ "›"
+    -- **A variable keeps its corners and anything else is shown as written.**
+    -- The corners say /put something here/, which is true of @x@ and false of
+    -- @[a, ...rest]@ — that one says what shape the something must be, and
+    -- hiding it behind a placeholder would make two clauses of one name print
+    -- identically (MS5 phase 82).
+    placeholder pt = case pt of
+      PVar n -> "‹" ++ n ++ "›"
+      _      -> renderPattern pt
 
 -- | @:choices@ — the live choice points, nearest first (§7.7).
 --

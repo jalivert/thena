@@ -37,21 +37,21 @@ import Thena.Engine
 import Thena.Global.Env (emptyGlobals)
 import Thena.Standard (expectedBase)
 import Thena.Errors (FailReason (..), MoveError (..))
-import Thena.Ops (AnswerKind (..), Instr (..), Operand (..), Value (..))
-import qualified Thena.Ops as Ops
+import Thena.Instral.Ops (AnswerKind (..), Instr (..), Operand (..), Value (..))
+import qualified Thena.Instral.Ops as Ops
 
 type0 :: Core
 type0 = Universe (LZero)
 
 term :: Core -> Operand
-term = Lit . VTerm . Trailing
+term = Lit . VTerm
 
 text :: String -> Operand
 text = Lit . VText
 
 -- | A machine holding the program, with the session's opening development.
 machine :: [Instr] -> Machine
-machine is = load is (Machine (Exec [] [] []) ps [] emptyGlobals expectedBase [] n)
+machine is = load is (Machine (Exec [] [] []) ps [] emptyGlobals expectedBase [] n 0)
   where
     (ps, n) = newDevelopment 0
 
@@ -151,7 +151,7 @@ tests =
             -- rest of the continuation. Both frames have one lifetime now:
             -- entered, returned, stepped over ever after.
             let resumed = [Do (Ops.Say (text "back"))]
-                entered = Call resumed [("x", VText "kept")] False
+                entered = Call resumed [("x", VText "kept")] Nothing False
                 m = (machine []) { exec = Exec [] [] [entered] }
              in case step m of
                   Continue m' ->
@@ -159,7 +159,7 @@ tests =
                       @?= (resumed, [("x", VText "kept")], [entered { returned = True }])
                   other       -> assertFailure ("expected Continue, got " ++ show other)
         , testCase "Bind names the op's result" $
-            case runTo (machine [Bind "s" (Ops.Concat (text "a") (text "b"))]) of
+            case runTo (machine [Bind (Ops.PVar "s") Nothing (Ops.Concat (text "a") (text "b"))]) of
               Finished m -> envOf m @?= [("s", VText "ab")]
               other      -> assertFailure ("expected Finished, got " ++ show other)
         , testCase "Do discards it" $
@@ -167,7 +167,7 @@ tests =
               Finished m -> envOf m @?= []
               other      -> assertFailure ("expected Finished, got " ++ show other)
         , testCase "Ref reads a name bound earlier in the body" $
-            case runTo (machine [Bind "s" (Ops.Concat (text "a") (text "b")), Bind "t" (Ops.Concat (Ref "s") (text "!"))]) of
+            case runTo (machine [Bind (Ops.PVar "s") Nothing (Ops.Concat (text "a") (text "b")), Bind (Ops.PVar "t") Nothing (Ops.Concat (Ref "s") (text "!"))]) of
               Finished m -> lookup "t" (envOf m) @?= Just (VText "ab!")
               other      -> assertFailure ("expected Finished, got " ++ show other)
         , testCase "a stuck machine keeps stepping to the same reason" $
@@ -178,17 +178,17 @@ tests =
     , testGroup
         "asking"
         [ testCase "Ask yields the prompt the body built" $
-            case runTo (machine [Bind "p" (Ops.Concat (text "who? ") (text "type A")), Bind "x" (Ops.Ask (Ref "p") AName)]) of
+            case runTo (machine [Bind (Ops.PVar "p") Nothing (Ops.Concat (text "who? ") (text "type A")), Bind (Ops.PVar "x") Nothing (Ops.Ask (Ref "p") AName)]) of
               Asking q _ -> q @?= Question "who? type A" AName
               other      -> assertFailure ("expected Asking, got " ++ show other)
         , testCase "the asking instruction stays at the head of pc" $
             -- What lets 'resumeAt' know the destination without a field in
             -- 'Machine' that is meaningful only sometimes (§7.5).
-            case runTo (machine [Bind "x" (Ops.Ask (text "?") AName), Do (Ops.Say (Ref "x"))]) of
-              Asking _ m -> (pc (exec m), isAsking m) @?= ([Bind "x" (Ops.Ask (text "?") AName), Do (Ops.Say (Ref "x"))], True)
+            case runTo (machine [Bind (Ops.PVar "x") Nothing (Ops.Ask (text "?") AName), Do (Ops.Say (Ref "x"))]) of
+              Asking _ m -> (pc (exec m), isAsking m) @?= ([Bind (Ops.PVar "x") Nothing (Ops.Ask (text "?") AName), Do (Ops.Say (Ref "x"))], True)
               other      -> assertFailure ("expected Asking, got " ++ show other)
         , testCase "resumeAt binds the answer where the instruction named" $
-            case runTo (machine [Bind "x" (Ops.Ask (text "?") AName), Do (Ops.Say (Ref "x"))]) of
+            case runTo (machine [Bind (Ops.PVar "x") Nothing (Ops.Ask (text "?") AName), Do (Ops.Say (Ref "x"))]) of
               Asking _ m ->
                 let m' = resumeAt "hello" m
                  in (lookup "x" (envOf m'), pc (exec m')) @?= (Just (VText "hello"), [Do (Ops.Say (Ref "x"))])
@@ -213,9 +213,6 @@ tests =
             stuckWith ExpectedText (runTo (machine [Do (Ops.Say (term type0))]))
         , testCase "text where a term was wanted" $
             stuckWith ExpectedTerm (runTo (machine [Do (Ops.Assume (text "A") (text "not a term"))]))
-        , testCase "a whole development where a term was wanted" $
-            let chain = Under (Assume (fst (fresh 0)) (Ident "A") type0) (Trailing type0)
-             in stuckWith ExpectedTerm (runTo (machine [Do (Ops.Assume (text "A") (Lit (VTerm chain)))]))
         , testCase "a name that is not an identifier" $
             stuckWith (NotAnIdentifier "let") (runTo (machine [Do (Ops.Assume (text "let") (term type0))]))
         , testCase "a name that is two identifiers" $
@@ -248,9 +245,9 @@ tests =
                 other -> assertFailure ("wrong shape: " ++ show other)
               other -> assertFailure ("expected Finished, got " ++ show other)
         , testCase "assume produces the variable it bound" $
-            case runTo (machine [Bind "x" (Ops.Assume (text "A") (term type0))]) of
+            case runTo (machine [Bind (Ops.PVar "x") Nothing (Ops.Assume (text "A") (term type0))]) of
               Finished m -> case (lookup "x" (envOf m), devOf m) of
-                (Just (VTerm (Trailing (Free v))), Under (Assume w _ _) _) -> v @?= w
+                (Just (VTerm (Free v)), Under (Assume w _ _) _) -> v @?= w
                 other -> assertFailure ("wrong shape: " ++ show other)
               other -> assertFailure ("expected Finished, got " ++ show other)
         , testCase "the counter moves on with every mint" $
@@ -270,7 +267,7 @@ tests =
             -- hole. It pins the rule, which is one sentence — everything from
             -- the focus down is discarded (§4.0 F6).
             let (v, n) = fresh 0
-                bare   = Machine (Exec [] [] []) (Development (enter (Under (Assume v (Ident "A") type0) (Trailing type0)))) [] emptyGlobals expectedBase [] n
+                bare   = Machine (Exec [] [] []) (Development (enter (Under (Assume v (Ident "A") type0) (Trailing type0)))) [] emptyGlobals expectedBase [] n 0
              in case fmap (flatten . development) (setGoal type0 bare) of
                   Right (Under (Claim x _ _) (Trailing (Free y))) -> x @?= y
                   other -> assertFailure ("wrong shape: " ++ show other)

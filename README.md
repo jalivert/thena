@@ -128,6 +128,51 @@ cabal run thena
 thena spine> :load examples/determinacy-surface.thena
 ```
 
+Its companion is `examples/canonical.thena` — the same terms, with the **typing**
+relation the determinacy example does not have, and TAPL Theorem 8.3.1 (canonical
+forms) in both halves:
+
+```
+canonicalBool : forall (v : Term) -> Value v -> HasType v bool
+             -> Or (Eq Term v true) (Eq Term v false)
+canonicalNat  : forall (v : Term) -> Value v -> HasType v nat -> NV v
+```
+
+It is a third the size and **written by hand**, where the determinacy proof is
+generated.
+
+`examples/progress.thena` finishes the pair with TAPL Theorem 8.3.2 — a
+well-typed term is a value or it takes a step:
+
+```
+progress : forall (t : Term) (T : Ty) -> HasType t T -> Or (Value t) (Steps t)
+```
+
+and `examples/preservation.thena` completes **type safety** with Theorem 8.3.3:
+
+```
+preservation : forall (t t' : Term) -> Step t t'
+            -> forall (U : Ty) -> HasType t U -> HasType t' U
+```
+
+Load them in order. Thena has no module imports, but globals declared by one
+module are in scope for the next, so each file contains only what it adds.
+
+```
+cabal run thena
+thena spine> :load examples/canonical.thena
+thena spine> :load examples/progress.thena
+thena spine> :load examples/preservation.thena
+```
+
+`examples/normal.thena` adds the exclusivity half — a value takes no step
+at all, so the disjunction `progress` returns is a real case split:
+
+```
+valueNoStep : forall (v : Term) -> Value v
+           -> forall (u : Term) -> Step v u -> Empty
+```
+
 ## Building
 
 Requires GHC (with `base` 4.21), Cabal, and `alex` + `happy` (resolved
@@ -139,7 +184,8 @@ cabal test
 cabal run thena
 ```
 
-`:help` lists the REPL commands. `docs/MANUAL.md` is the reference, with worked
+`:help` lists the REPL commands. `docs/LANGUAGES.md` says what can be written
+where. `docs/MANUAL.md` is the reference, with worked
 sessions and an honest account of what the system can and cannot currently do.
 
 ## Layout
@@ -151,6 +197,7 @@ sessions and an honest account of what the system can and cannot currently do.
 | `prelude/prelude.thena` | the standard prelude, itself a surface module |
 | `examples/` | worked developments, including the determinacy proof |
 | `docs/MANUAL.md` | the reference manual — worked sessions, captured from the running program |
+| `docs/LANGUAGES.md` | what can be written where — the four languages, their fences, and how they embed |
 | `DECISIONS.md` | the design decisions, written for readers who know Agda, Coq, Idris or Lean |
 
 ## Research context

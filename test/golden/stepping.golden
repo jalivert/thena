@@ -1,23 +1,21 @@
 thena spine> :step on
-thena spine> assume A : Type₀
+thena spine> assume "A" ⌜ Type₀ ⌝
 pc
-  0  say "assumed A"
+  0  assume "A" ⌜1⌝
 env
-  (empty)
+  ⌜1⌝ = ⌜Type₀⌝
 stack
   (empty)
 thena spine> :step
-assumed A
 pc
   (empty)
 env
-  (empty)
+  ⌜1⌝ = ⌜Type₀⌝
 stack
   (empty)
 thena spine> :step
 thena spine> :step off
-thena spine> claim h : Type₀
-claimed h
+thena spine> claim "h" ⌜ Type₀ ⌝
 thena spine> :show
   λ (A : Type₀) ->
   let ? h : Type₀ in
@@ -30,6 +28,13 @@ thena spine> :goal Type₀
   goal
 thena spine> :step on
 thena spine> unify-refine-core ⌜ A ⌝
+pc
+  0  call unify-refine-core ⌜1⌝
+env
+  ⌜1⌝ = ⌜A⌝
+stack
+  (empty)
+thena spine> :step
 pc
   0  call fill t
   1  call solve
@@ -82,19 +87,6 @@ pc
   1  unify-into s g
   2  prim-try x
 env
-  s = ⌜Type₀⌝
-  x = ⌜refined⌝
-  n = "refined"
-  t = ⌜A⌝
-stack
-  call, 1 instruction(s) to resume
-  call, 0 instruction(s) to resume
-thena spine> :step
-pc
-  0  unify-into s g
-  1  prim-try x
-env
-  g = ⌜Type₀⌝
   s = ⌜Type₀⌝
   x = ⌜refined⌝
   n = "refined"

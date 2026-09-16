@@ -36,8 +36,8 @@ import Thena.Engine
   )
 import Thena.Errors (FailReason (..))
 import Thena.Global.Env (emptyGlobals)
-import Thena.Ops (Instr (..), Op (..), Operand (..), Rule (..), Test (..), Value (..))
-import qualified Thena.Ops as Ops
+import Thena.Instral.Ops (Instr (..), Op (..), Operand (..), Rule (..), Test (..), Value (..))
+import qualified Thena.Instral.Ops as Ops
 import Thena.Rules (RuleBase, matches, next, ruleBase)
 import Thena.Surface.Concrete (Surface (..))
 import Thena.Surface.Zipper (rootedAt)
@@ -46,7 +46,7 @@ tests :: TestTree
 tests =
   testGroup
     "call by name (§8)"
-    [finding, backtracking, arity, recursion, headArguments]
+    [finding, backtracking, arity, recursion, headArguments, frameLifetime]
 
 -- --------------------------------------------------------------------------
 -- Fixtures
@@ -65,11 +65,11 @@ hole = enter (Under (Component.Claim v (Ident "goal") type1) (Trailing (Free v))
   where v = fst (fresh 0)
 
 bases :: [Rule] -> [RuleBase]
-bases rs = [ruleBase "test" Nothing "" rs]
+bases rs = [ruleBase "test" Nothing "" [] [] [] rs]
 
 machine :: [RuleBase] -> [Instr] -> Machine
 machine base is =
-  load is (Machine (Exec [] [] []) (Development hole) [] emptyGlobals base [] 1000)
+  load is (Machine (Exec [] [] []) (Development hole) [] emptyGlobals base [] 1000 0)
 
 runOut :: Machine -> ([String], Either FailReason Machine)
 runOut m = case step m of
@@ -103,8 +103,8 @@ isGuess m = case focus (cursor (development m)) of
 -- arguments to its own, which is why the @Choice@ frame keeps the argument
 -- /values/ rather than a ready-made environment.
 badClause, goodClause :: Rule
-badClause  = Rule (GlobalName "step") ["x"] [FocusIsHole] [Do Solve]
-goodClause = Rule (GlobalName "step") ["y"] [FocusIsHole] [Do (Try (Ref "y"))]
+badClause  = Rule (GlobalName "step") [Ops.PVar "x"] [FocusIsHole] [Do Solve]
+goodClause = Rule (GlobalName "step") [Ops.PVar "y"] [FocusIsHole] [Do (Try (Ref "y"))]
 
 -- | Same name, one argument fewer. Never a candidate for a two-argument call.
 nullary :: Rule
@@ -112,7 +112,7 @@ nullary = Rule (GlobalName "step") [] [FocusIsHole] [Do Attack]
 
 -- | Same name and arity, but a head that cannot pass at a hole.
 guessOnly :: Rule
-guessOnly = Rule (GlobalName "step") ["x"] [FocusIsGuess] [Do Solve]
+guessOnly = Rule (GlobalName "step") [Ops.PVar "x"] [FocusIsGuess] [Do Solve]
 
 -- --------------------------------------------------------------------------
 -- A head that asks about an argument (MS4 phase 47)
@@ -126,15 +126,15 @@ guessOnly = Rule (GlobalName "step") ["x"] [FocusIsGuess] [Do Solve]
 -- chosen by a test over the argument.
 nameClause, otherClause :: Rule
 nameClause =
-  Rule (GlobalName "pick") ["s"] [FocusIsHole, SurfaceIsName (Ref "s")]
+  Rule (GlobalName "pick") [Ops.PVar "s"] [FocusIsHole, SurfaceIsName (Ref "s")]
     [Do Attack]
-otherClause = Rule (GlobalName "pick") ["s"] [FocusIsHole] [Do (Try (Lit (VTerm (Trailing type0))))]
+otherClause = Rule (GlobalName "pick") [Ops.PVar "s"] [FocusIsHole] [Do (Try (Lit (VTerm type0)))]
 
 callPick :: Surface -> [Instr]
-callPick t = [Do (Ops.Call (GlobalName "pick") [Lit (VSurface (rootedAt t))])]
+callPick t = [Do (Ops.Call "pick" [Lit (VSurface (rootedAt t))])]
 
 callStep :: [Instr]
-callStep = [Do (Ops.Call (GlobalName "step") [Lit (VTerm (Trailing type0))])]
+callStep = [Do (Ops.Call "step" [Lit (VTerm type0)])]
 
 -- --------------------------------------------------------------------------
 -- Finding the clauses
@@ -162,12 +162,12 @@ finding =
     , -- **The head is tested**, which is what phase 15's note reversed.
       testCase "a clause whose head fails is not a candidate" $
         case snd (runOut (machine (bases [guessOnly]) callStep)) of
-          Left (NoClauseMatched (GlobalName "step") 1 [1]) -> pure ()
+          Left (NoClauseMatched "step" 1 [1]) -> pure ()
           other -> assertFailure ("expected NoClauseMatched, got " ++ show other)
 
     , testCase "no rule of that name at all" $
         case snd (runOut (machine (bases []) callStep)) of
-          Left (NoClauseMatched (GlobalName "step") 1 []) -> pure ()
+          Left (NoClauseMatched "step" 1 []) -> pure ()
           other -> assertFailure ("expected NoClauseMatched, got " ++ show other)
     ]
 
@@ -190,7 +190,7 @@ headArguments =
 
     , testCase "and is not one for anything else" $
         case snd (runOut (machine (bases [nameClause]) (callPick SurfaceUniverseOpen))) of
-          Left (NoClauseMatched (GlobalName "pick") 1 [1]) -> pure ()
+          Left (NoClauseMatched "pick" 1 [1]) -> pure ()
           other -> assertFailure ("expected NoClauseMatched, got " ++ show other)
 
     , -- Both clauses match a name, so this is an ordinary two-candidate call
@@ -273,7 +273,7 @@ arity =
 
     , testCase "and a call with no clause of its arity says which arities exist" $
         case snd (runOut (machine (bases [nullary]) callStep)) of
-          Left (NoClauseMatched (GlobalName "step") 1 [0]) -> pure ()
+          Left (NoClauseMatched "step" 1 [0]) -> pure ()
           other -> assertFailure ("expected NoClauseMatched, got " ++ show other)
 
     , testCase "the arities are reported in search order" $
@@ -308,11 +308,90 @@ recursion =
     -- /other/ clause and stops. A clause that recursed without changing the
     -- state would not terminate, and would not in Prolog either.
     recurses = Rule (GlobalName "down") [] [FocusIsHole]
-                 [Do Attack, Do (Ops.Call (GlobalName "down") [])]
+                 [Do Attack, Do (Ops.Call "down" [])]
     stops    = Rule (GlobalName "down") [] [FocusIsGuess] [Do Regret]
-    callDown = [Do (Ops.Call (GlobalName "down") [])]
+    callDown = [Do (Ops.Call "down" [])]
 
     callsLater = Rule (GlobalName "first") [] [FocusIsHole]
-                   [Do (Ops.Call (GlobalName "later") [])]
+                   [Do (Ops.Call "later" [])]
     later      = Rule (GlobalName "later") [] [FocusIsHole] [Do Attack]
-    callFirst  = [Do (Ops.Call (GlobalName "first") [])]
+    callFirst  = [Do (Ops.Call "first" [])]
+
+
+-- --------------------------------------------------------------------------
+-- The frame stack's lifetime, checked at every step (2026-09-12)
+-- --------------------------------------------------------------------------
+
+-- | **Phase 57's invariant, stated in prose and never asserted.**
+--
+-- @reports\/2026-09-04-choice-points.md@ is the record: @resumeFrom@ used to
+-- /pop/ a returned @Call@, which deleted a frame from under a live choice point,
+-- so backtracking restored a continuation with a hole in it and the machine
+-- reported success having dropped the caller's program. The fix made both
+-- frames have one lifetime — entered, returned, stepped over — and
+-- @CLAUDE.md@ records the consequence in words: **frames are never popped, so a
+-- command's stack reaches its full call depth.**
+--
+-- Nothing checked it. Every test above looks at the outcome of a run; this one
+-- looks at every intermediate state of the same runs, and it is the shape a
+-- regression would take — a stack that shrinks mid-run is the bug that shipped.
+--
+-- The counter goes with it, for §7.4's reason: a name already handed out must
+-- never be handed out again, and a stale counter coming back is a defect this
+-- project has shipped once (MS3 phase 33c, @declare@).
+frameLifetime :: TestTree
+frameLifetime =
+  testGroup
+    "the frame stack only ever grows, and so does the counter"
+    [ check "a recursive call, which is where the depth comes from"
+        (bases [recurses, stops]) [Do (Ops.Call "down" [])]
+    , check "a call with two live clauses, which builds a choice point"
+        (bases [choiceA, choiceB]) [Do (Ops.Call "either" [])]
+    , check "…and one where the first alternative fails, so it backtracks"
+        (bases [failsFirst, choiceB]) [Do (Ops.Call "either" [])]
+    , check "a call inside a call, so a frame returns under a live choice point"
+        (bases [outer, choiceA, choiceB]) [Do (Ops.Call "outer" [])]
+    ]
+  where
+    check label base is = testCase label (walk (machine base is))
+
+    -- Step to a stop, asserting the two monotonicities at every transition.
+    walk m = go (0 :: Int) m
+      where
+        go k m0
+          | k > 400 = pure ()   -- a run that will not stop is another test's job
+          | otherwise = case step m0 of
+              Continue m1    -> compare' m0 m1 >> go (k + 1) m1
+              Saying _ m1    -> compare' m0 m1 >> go (k + 1) m1
+              Asking _ _     -> pure ()
+              Yielding _ _   -> pure ()
+              _              -> pure ()
+
+        compare' before after = do
+          let d0 = length (stack (exec before))
+              d1 = length (stack (exec after))
+          if d1 >= d0
+            then pure ()
+            else assertFailure
+                   ("the frame stack shrank from " ++ show d0 ++ " to " ++ show d1)
+          if names after >= names before
+            then pure ()
+            else assertFailure
+                   ("the counter went backwards: " ++ show (names before)
+                      ++ " then " ++ show (names after))
+
+    recurses = Rule (GlobalName "down") [] [FocusIsHole]
+                 [Do Attack, Do (Ops.Call "down" [])]
+    stops    = Rule (GlobalName "down") [] [FocusIsGuess] [Do Regret]
+
+    -- Two clauses of one name, both of whose heads pass at a hole: the peek
+    -- finds two candidates and builds a @Choice@.
+    choiceA  = Rule (GlobalName "either") [] [FocusIsHole] [Do Attack]
+    choiceB  = Rule (GlobalName "either") [] [FocusIsHole] [Do Attack, Do Regret]
+
+    -- The first alternative runs an op that cannot apply here, so the search
+    -- unwinds into the choice point and takes the second.
+    failsFirst = Rule (GlobalName "either") [] [FocusIsHole] [Do Regret]
+
+    outer = Rule (GlobalName "outer") [] [FocusIsHole]
+              [Do (Ops.Call "either" []), Do Regret]

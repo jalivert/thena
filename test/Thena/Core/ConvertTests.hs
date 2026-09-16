@@ -2,14 +2,20 @@
 -- cumulativity — and the structured reason when it says no.
 module Thena.Core.ConvertTests (tests) where
 
+import Data.Maybe (isNothing)
+
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
+import Test.Tasty.QuickCheck (forAll, testProperty, (===))
+
+import Thena.Core.TermTests (genTerm)
 
 import Thena.Core.Level (Level (..), LevelVar (..), Obligation (..), levelOfNat)
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Convert (convert, subsumes)
 import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), close, fresh)
 import Thena.Declared (natVec, natVecCounter)
+import Thena.Global.Env (emptyGlobals)
 import Thena.Driver (parseCore)
 import Thena.Errors (Clash (..), ConversionFailure (..), Site (..))
 
@@ -25,7 +31,63 @@ tests =
     , testGroup "the counter comes back, and only ever goes up" counterTests
     , testGroup "an undecided level is owed, not refused" obligationTests
     , testGroup "only a Pi's codomain varies" varianceTests
+    , laws
     ]
+
+-- --------------------------------------------------------------------------
+-- The laws relating the two entry points (2026-09-12)
+-- --------------------------------------------------------------------------
+
+-- | **'convert' and 'subsumes' are one worker read two ways, so they have laws,
+-- and the laws are checked by code that is not the worker.**
+--
+-- This module's other groups are fixtures — a hand-written pair per behaviour.
+-- What a fixture cannot say is that the /relation/ holds everywhere, and the one
+-- time these two disagreed (MS4 phase 41h, an invariant position inheriting the
+-- direction) the whole suite passed and no golden moved: nothing had asked.
+--
+-- The generator is @Thena.Core.TermTests@\'s, imported rather than copied.
+laws :: TestTree
+laws =
+  testGroup
+    "the two relations agree where they must"
+    [ -- α-equivalence is convertibility, which is the syntactic fast path's
+      -- stated soundness (§5.2) said as a property rather than as a comment.
+      testProperty "convert is reflexive" $
+        forAll genTerm $ \t -> converts t t === True
+
+    , testProperty "subsumes is reflexive" $
+        forAll genTerm $ \t -> subsumesTo t t === True
+
+      -- **Conversion is the strong relation.** Subsumption weakens it in one
+      -- position, so anything convertible is usable — in either argument order,
+      -- because convertibility has no direction and its own header says so.
+    , testProperty "convertible implies usable, both ways round" $
+        forAll genTerm $ \t -> forAll genTerm $ \u ->
+          not (converts t u) || (subsumesTo t u && subsumesTo u t)
+
+      -- …and conversion really is symmetric, which is what makes the clause
+      -- above well posed. A position that inherited the direction inside
+      -- @convert@ would break this before it broke anything else.
+    , testProperty "convert is symmetric" $
+        forAll genTerm $ \t -> forAll genTerm $ \u ->
+          converts t u === converts u t
+
+      -- §7.4: a variable already shown to the user is never handed out again,
+      -- so the counter a failing comparison returns is still a valid one. The
+      -- fixtures check it on four pairs; this checks it on the failing branch of
+      -- anything.
+    , testProperty "the counter never goes backwards" $
+        forAll genTerm $ \t -> forAll genTerm $ \u ->
+          let (_, _, n) = convert emptyGlobals [] 200 t u
+              (_, _, m) = subsumes emptyGlobals [] 200 t u
+           in n >= 200 && m >= 200
+    ]
+  where
+    converts t u =
+      let (r, _, _) = convert emptyGlobals [] 200 t u in isNothing r
+    subsumesTo t u =
+      let (r, _, _) = subsumes emptyGlobals [] 200 t u in isNothing r
 
 -- --------------------------------------------------------------------------
 -- Fixtures

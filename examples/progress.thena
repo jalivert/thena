@@ -1,0 +1,101 @@
+-- Progress for TAPL chapter 8's typed arithmetic expressions — Theorem 8.3.2,
+-- proved in Thena's surface language.
+--
+-- IT BUILDS ON examples/canonical.thena AND MUST BE LOADED AFTER IT. Thena has
+-- no module imports; what it has is a session, and globals declared by one
+-- module are in scope for the next. So this file declares only what canonical
+-- forms did not: the ten-rule small-step relation, three lemmas that produce a
+-- step, and the theorem.
+--
+-- The Step relation is the one examples/determinacy-surface.thena proves
+-- determinacy for, written out again because that proof is a separate
+-- development. Between the three files the same language now has its semantics,
+-- its typing, and both halves of what TAPL proves about them before subject
+-- reduction.
+--
+-- Progress is an induction on the TYPING derivation, and each case is decided by
+-- what the induction hypothesis says about the subterm: if it is already a value
+-- the canonical-forms lemma says which value, and that is what produces the
+-- step; if it steps, the congruence rule lifts that step to the whole term.
+
+module Progress where
+
+data Step : Term -> Term -> Type₀ where
+  eIfTrue : forall (t2 : Term) (t3 : Term) -> Step (ifthen true t2 t3) t2
+  eIfFalse : forall (t2 : Term) (t3 : Term) -> Step (ifthen false t2 t3) t3
+  eIf : forall (t1 : Term) (t1' : Term) (t2 : Term) (t3 : Term) (s : Step t1 t1') -> Step (ifthen t1 t2 t3) (ifthen t1' t2 t3)
+  eSucc : forall (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (succ t1) (succ t1')
+  ePredZero : Step (pred zero) zero
+  ePredSucc : forall (v : Term) (nv : NV v) -> Step (pred (succ v)) v
+  ePred : forall (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (pred t1) (pred t1')
+  eIsZeroZero : Step (iszero zero) true
+  eIsZeroSucc : forall (v : Term) (nv : NV v) -> Step (iszero (succ v)) false
+  eIsZero : forall (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (iszero t1) (iszero t1')
+
+ifSteps : forall (t1 : Term) (t2 : Term) (t3 : Term) (p : Value t1) (d : HasType t1 bool) -> Sigma Term (\ u -> Step (ifthen t1 t2 t3) u)
+ifSteps = \ t1 t2 t3 p ->
+  elim Value () (\ x r -> HasType x bool -> Sigma Term (\ u -> Step (ifthen x t2 t3) u))
+    ((\ dd -> pair Term (\ u -> Step (ifthen true t2 t3) u) t2 (eIfTrue t2 t3))
+     (\ dd -> pair Term (\ u -> Step (ifthen false t2 t3) u) t3 (eIfFalse t2 t3))
+     (\ c1 nn dd -> absurd (Sigma Term (\ u -> Step (ifthen c1 t2 t3) u)) (nvNotBool c1 nn dd)))
+    (t1) p
+
+predSteps : forall (t : Term) (n : NV t) -> Sigma Term (\ u -> Step (pred t) u)
+predSteps = \ t n ->
+  elim NV () (\ x r -> Sigma Term (\ u -> Step (pred x) u))
+    ((pair Term (\ u -> Step (pred zero) u) zero ePredZero)
+     (\ c1 nn ih -> pair Term (\ u -> Step (pred (succ c1)) u) c1 (ePredSucc c1 nn)))
+    (t) n
+
+isZeroSteps : forall (t : Term) (n : NV t) -> Sigma Term (\ u -> Step (iszero t) u)
+isZeroSteps = \ t n ->
+  elim NV () (\ x r -> Sigma Term (\ u -> Step (iszero x) u))
+    ((pair Term (\ u -> Step (iszero zero) u) true eIsZeroZero)
+     (\ c1 nn ih -> pair Term (\ u -> Step (iszero (succ c1)) u) false (eIsZeroSucc c1 nn)))
+    (t) n
+
+Steps : Term -> Type₀
+Steps = \ t -> Sigma Term (\ u -> Step t u)
+
+Progresses : Term -> Type₀
+Progresses = \ t -> Or (Value t) (Steps t)
+
+progress : forall (t : Term) (T : Ty) (d : HasType t T) -> Progresses t
+progress = \ t T d ->
+  elim HasType () (\ x U r -> Progresses x)
+    ((inl (Value true) (Steps true) vTrue)
+     (inl (Value false) (Steps false) vFalse)
+     (\ c1 c2 c3 U d1 d2 d3 i1 i2 i3 ->
+        elim Or ((Value c1) (Steps c1)) (\ r -> Progresses (ifthen c1 c2 c3))
+          ((\ v1 -> inr (Value (ifthen c1 c2 c3)) (Steps (ifthen c1 c2 c3)) (ifSteps c1 c2 c3 v1 d1))
+           (\ s1 -> elim Sigma (Term (\ u -> Step c1 u)) (\ r -> Progresses (ifthen c1 c2 c3))
+                      ((\ a b -> inr (Value (ifthen c1 c2 c3)) (Steps (ifthen c1 c2 c3))
+                                   (pair Term (\ u -> Step (ifthen c1 c2 c3) u) (ifthen a c2 c3) (eIf c1 a c2 c3 b))))
+                      () s1))
+          () i1)
+     (inl (Value zero) (Steps zero) (vNat zero nvZero))
+     (\ c1 dd ih ->
+        elim Or ((Value c1) (Steps c1)) (\ r -> Progresses (succ c1))
+          ((\ v1 -> inl (Value (succ c1)) (Steps (succ c1)) (vNat (succ c1) (nvSucc c1 (canonicalNat c1 v1 dd))))
+           (\ s1 -> elim Sigma (Term (\ u -> Step c1 u)) (\ r -> Progresses (succ c1))
+                      ((\ a b -> inr (Value (succ c1)) (Steps (succ c1))
+                                   (pair Term (\ u -> Step (succ c1) u) (succ a) (eSucc c1 a b))))
+                      () s1))
+          () ih)
+     (\ c1 dd ih ->
+        elim Or ((Value c1) (Steps c1)) (\ r -> Progresses (pred c1))
+          ((\ v1 -> inr (Value (pred c1)) (Steps (pred c1)) (predSteps c1 (canonicalNat c1 v1 dd)))
+           (\ s1 -> elim Sigma (Term (\ u -> Step c1 u)) (\ r -> Progresses (pred c1))
+                      ((\ a b -> inr (Value (pred c1)) (Steps (pred c1))
+                                   (pair Term (\ u -> Step (pred c1) u) (pred a) (ePred c1 a b))))
+                      () s1))
+          () ih)
+     (\ c1 dd ih ->
+        elim Or ((Value c1) (Steps c1)) (\ r -> Progresses (iszero c1))
+          ((\ v1 -> inr (Value (iszero c1)) (Steps (iszero c1)) (isZeroSteps c1 (canonicalNat c1 v1 dd)))
+           (\ s1 -> elim Sigma (Term (\ u -> Step c1 u)) (\ r -> Progresses (iszero c1))
+                      ((\ a b -> inr (Value (iszero c1)) (Steps (iszero c1))
+                                   (pair Term (\ u -> Step (iszero c1) u) (iszero a) (eIsZero c1 a b))))
+                      () s1))
+          () ih))
+    (t T) d

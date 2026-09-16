@@ -281,7 +281,7 @@ levelMetasInInductive d =
 -- 'Thena.Core.Term.GlobalName' needs no tag (§3.6).
 --
 -- Association lists, newest first. There is no @Map@ here for the same reason
--- 'Thena.Ops.Env' and 'Context' are lists: speed is a stated non-goal (§1), and
+-- 'Thena.Instral.Ops.Env' and 'Context' are lists: speed is a stated non-goal (§1), and
 -- a dependency is not worth adding for a table that holds a prelude.
 data GlobalEnv = GlobalEnv
   { constants   :: [(GlobalName, Constant)]             -- ^ a type and no body

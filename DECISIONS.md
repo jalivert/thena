@@ -75,7 +75,7 @@ reserved:
 
 **`rule`, `when` and `then` are keywords** and cannot be used as names. Op words
 are not: `solve`, `type`, `goal` and the rest stay perfectly good identifiers,
-which is why a rule is written `rule ‹name› :- when … then …` and not with the
+which is why a rule is written `rule ‹name› :- when … do …` and not with the
 op words reserved.
 
 ---
@@ -335,16 +335,23 @@ first always won. A test may now take operands, and it is written in
 parentheses:
 
 ```
-rule pick s :- when focus-is-hole (surface-is-name s) then say "a name"
-rule pick s :- when focus-is-hole                     then say "not a name"
+rule pick s :- when focus-is-hole (surface-is-name s) do say "a name"
+rule pick s :- when focus-is-hole                     do say "not a name"
 ```
 
 ```
-thena spine> pick foo
+thena spine> pick surface`foo`
+chose 681: pick
 a name
-thena spine> pick (Type₀ -> Type₀)
+thena spine> pick surface`Type₀ -> Type₀`
 not a name
 ```
+
+**The argument is written in the surface fence**, and it did not have to be when
+this was decided: a REPL line was an argument run then, so a bare `foo` was a
+surface term. Since MS5 a REPL line is one line of `instral` and a bare word is
+a *reference*, so a surface term says which language it is in — which is the
+same rule a rule body follows.
 
 **A bare word is a test of no operands**, and that is why the brackets are
 there: a head is a run of tests with nothing between them, so
@@ -373,7 +380,7 @@ rule fill t :- when focus-is-hole
   then n = fresh-name "refined" ; x = define n t
      ; s = typeof x ; g = goal ; unify-into s g ; prim-try x
 
-rule unify-refine-core t :- when focus-is-hole then fill t ; solve
+rule unify-refine-core t :- when focus-is-hole do fill t ; solve
 ```
 
 `fill ⌜ t ⌝` parks `t` in a `=`-binding, unifies its type with the goal's
@@ -415,7 +422,7 @@ through.
 rule elaborate t :- when focus-is-hole (surface-is-name t)
   then w = surface-name t ; x = resolve-name w ; fill t ; solve
 
-rule elaborate t :- when focus-is-hole (surface-is-placeholder t) then
+rule elaborate t :- when focus-is-hole (surface-is-placeholder t) do
 ```
 
 So `:step` through an elaboration shows the clause, not one opaque instruction:
@@ -603,6 +610,395 @@ above are not.
 The same limit applies to an application whose head is not a name — a β-redex
 like `(\ p -> e) v` — where there is no annotation to write. Use a `let`.
 
+### `instral` has types, and a name is not a string
+
+*Decided 2026-09-12.*
+
+The instruction language is typed: `String`, `Name`, `Int`, `Char`, `Bool`,
+`List a`, `Pair`, `Option a`, and four abstract types the machine owns —
+`Surface`, `Core`, `Development`, `Name`. Every op has a signature.
+
+**`Name` is a separate type from `String`, even though both are text.** More
+types is more disambiguating power: it catches `say h` where `h` is a hole's
+name, and `goto m` where `m` is a message.
+
+```
+claim  : Name -> Core -> Core
+say    : String -> ()
+concat : String -> String -> String
+```
+
+**A string literal is accepted at either**, so `fresh-name "refined"` needs
+nothing. A *variable* is not: going from a name to a string is written down.
+
+```
+n = ask "name for the new hole?" name    -- n : Name
+t = name-text n                          -- t : String
+m = concat "claimed " t
+```
+
+**`core\`…\`` has type `Core`, and so does a resolved term.** What the tag
+evaluates to has not been resolved yet — a rule base loads before the prelude,
+so `core\`Nat\`` cannot find `Nat` when it is written — but the type system does
+not tell the two apart, so `resolve-core : Core -> Core` and giving it a term
+that is already resolved fails when it runs, not when it loads.
+
+### A rule base is type checked when it loads
+
+*Decided 2026-09-12.*
+
+Every rule in every loaded base is inferred together, at load, and **a base that
+does not type check is not installed** — the same all-or-nothing a syntax error
+already gets. Nothing is annotated; a rule's signature comes from its head
+predicates and from the ops its body uses.
+
+```
+rule elaborate t :- when focus-is-hole (surface-is-name t) do …
+```
+
+`surface-is-name` is what makes `t` a `Surface`, so `elaborate : Surface -> ()`.
+`:load` reports what it found and leaves the previous rules in place:
+
+```
+the rules do not type check:
+  oops, instruction 1: wanted Core, got Surface
+```
+
+Two things that used to fail halfway through a proof now fail at load: a literal
+of the wrong kind (`prim-try 3`), and **binding a call to a rule no clause of
+which returns**. A rule *some* of whose clauses return can still fail at run
+time, because which clause runs is decided then.
+
+**A call to a name nothing defines is refused when the bases load** (*decided
+2026-09-15*). The bases you load together are the program — in any order, and a
+rule may call one written below it — and a call to a name none of them defines,
+or to a name at an arity it does not have, is a type error:
+
+```
+rule go :- do helper 1 2
+rule helper x :- do prim-prove
+```
+```
+the rules do not type check:
+  go, instruction 1: helper takes 1 argument, not 2 arguments
+```
+
+So a rule file that uses the shipped tactics is loaded together with the shipped
+base: `:load rules standard.thena.rules mine.thena.rules`.
+
+**A rule is inferred at one type**, not generalised: a helper used at `Surface`
+in one place and `Core` in another is an error, not a polymorphic rule.
+*Superseded 2026-09-13 — see "A rule or function used at two types is inferred,
+not refused".*
+
+### A rule file may declare functions, and they need no keyword
+
+*Decided 2026-09-12.*
+
+A function is written the way Haskell writes one, beside the rules in the same
+file:
+
+```
+twice x = concat x x
+
+shout : String -> String
+shout x = twice (twice x)
+```
+
+**A function is a rule with one clause and no head**, and that is not an analogy
+— it becomes one. Call it from a rule body by name, exactly as you call a rule.
+The one difference you can see: a function is **not offered as a tactic**, so it
+never appears in `:matches` and `prove` never runs it.
+
+**A function must produce a value.** `f x = say "hi"` is refused — `say` leaves
+nothing, so there is nothing for `f` to be.
+
+### Two ways to ask what applies: by state, and by type
+
+*Decided 2026-09-12.*
+
+`:matches` asks *what applies to this development* — a rule qualifies because its
+head passes. The new pair asks about a **type** instead:
+
+```
+thena spine> :accepts Surface
+  elaborate/1 : Surface -> ()   (rule)
+  spine-arguments/3 : Core -> Core -> Surface -> ()   (rule)
+thena spine> :produces String
+  twice/1 : String -> String
+```
+
+Two commands rather than one with a direction: *what can I pass this to* and
+*what will give me one*. Both list rules and functions, and mark which is which —
+a rule may also turn up in `:matches`, a function never will.
+
+**A polymorphic signature answers a concrete question.** A rule whose parameter
+is `a` is listed by `:accepts Core`, because it does accept one. Asking about `a`
+lists only what takes a variable.
+
+### What you type at the prompt is a block
+
+*Decided 2026-09-12.*
+
+An entry is an `instral` block, so assignment and sequencing work at the prompt:
+
+```
+thena spine> h = here ; claim "k" ⌜ Type₀ ⌝ ; goto h
+thena spine> n = 42 ; say "ok"
+```
+
+**A binding dies with the entry.** Not a prohibition — that is what block scope
+means, and it is why there is no persistent REPL environment for `:undo` to
+unwind. The `do { … }` workaround is no longer needed for this.
+
+**An entry may span lines.** It keeps reading while it cannot be finished — a
+trailing `;`, or an unclosed bracket — and **every continuation line must be
+indented**, the same rule a rule file uses for declarations:
+
+```
+thena spine> h = here ;
+         ...   claim "k" ⌜ Type₀ ⌝ ;
+         ...   goto h
+```
+
+An unindented continuation is refused and the entry is dropped.
+
+### An object language is declared with a grammar, and becomes a type
+
+*Decided 2026-09-12.*
+
+```
+language Tm where {
+  var : name ;
+  app : "(" Tm Tm ")" ;
+  lam : "fn" name "·" Tm
+  }
+```
+
+That one declaration gives you three things: **`Tm` as a type** you can write in
+a signature, **`` Tm`…` `` as the only way to make one**, and a one-way coercion
+`surface-of` to a Surface term.
+
+```
+asSurface : Tm -> Surface
+asSurface t = surface-of t
+
+rule go :- do t = Tm`(x y)` ; s = asSurface t ; …
+```
+
+A production builds its constructor applied to what its slots parsed, so
+`` Tm`(x y)` `` is the Surface term `app (var x) (var y)`. **A term you write in
+the tag is well formed by construction**, because the tag is the only way to make
+one — and it is *not* a Surface term until you coerce it:
+
+```
+go, instruction 1: wanted Surface, got Tm
+```
+
+**Terminals are Thena tokens.** A grammar is written over the same lexer
+everything else uses, so `"."` is refused (it is not a token) where `"·"` is
+fine. A production may not begin with the language itself, and may not be empty.
+
+**The name must be free — as a tag AND as a type.** A declared language is
+looked up before the built-ins in both places, so `language String where { … }`
+would have made `String` in every signature mean the grammar, and
+`language surface where { … }` would have replaced the `⟨ … ⟩` fence. Both are
+refused, and so are two grammars under one name:
+
+```
+bad.thena.rules: in the grammar of String: String is one of instral's own types,
+  so a grammar may not take its name
+```
+
+### There are three name spaces, and a name may be reused across them
+
+*Decided 2026-09-16.*
+
+A name you write is read in one of three places, and Thena keeps a separate
+space for each. **Within a space a name means one thing; across spaces the same
+word is free to mean three.**
+
+| space | what is in it | who may add to it |
+|---|---|---|
+| **types** | `String` `Name` `Int` `Char` `Bool` `Surface` `Core` `Development` `Level` `List` `Option` | a `language` declaration |
+| **tags** | `surface` `core` | a `language` declaration |
+| **callables** | op words, rule names, function names, locals | a rule, a function, a binding |
+
+So this loads, and the two `twice`es never meet — one is only ever written as a
+type or in a tag, the other only ever called:
+
+```
+language twice where { var : name }
+
+twice : String -> String
+twice s = concat s s
+```
+
+**A `language` declaration is the one thing that enters two spaces at once**, a
+type and a tag together, so its name is checked against both lists:
+
+```
+bad.thena.rules: in the grammar of String: String is one of instral's own types,
+  so a grammar may not take its name
+```
+
+Inside a space, a collision is refused. Two grammars under one name, and:
+
+```
+ns.thena.rules: in twice: this name is both a rule and a function at 1 argument
+```
+
+**The callable space is shared on purpose and is the subtle one**, because it
+holds four kinds of thing. The rules that sort them out are elsewhere in this
+document: an op word at another arity calls a rule of that name, a local shadows
+a rule, and a bare word right of an `=` is the local it names.
+
+**Reserved words are in no space.** The eleven (`forall let in elim where data
+module do rule language when`) are taken from every language at once, because
+one lexer serves them all.
+
+### `instral` has lambdas, and a local shadows a rule
+
+*Decided 2026-09-12.*
+
+```
+onTwice : (String -> String) -> String -> String
+onTwice f x = f (f x)
+
+rule go :- do d = \ s -> concat s s
+     ; m = onTwice d "a"                 -- aaaa
+     ; say m
+```
+
+A lambda is a function without a name — it is compiled the same way and applied
+the same way. **In an argument it takes parentheses**, like every other compound
+argument: `once (\ s -> concat s s)`.
+
+**A function type is n-ary, not curried.** `a -> b -> c` is a function of *two*
+arguments; applying a one-argument lambda to two is a type error, because
+`instral` dispatches on arity. Parentheses are what make an arrow a value: in
+`f : (a -> b) -> a -> b` the first argument is a function.
+
+**That holds in the result too**, so a function that gives a function says so:
+
+```
+mk : String -> (String -> String)   -- one argument, gives a function
+mk s = \ z -> concat s z
+
+two : String -> String -> String    -- two arguments
+two a b = concat a b
+```
+
+The two are different callables, and `:accepts String` lists them apart.
+
+**A local shadows a rule.** A word in a body is an op if one bears that name,
+otherwise the local if one is bound, otherwise a rule of that name. So binding a
+name that is also a rule changes what later lines mean — the op words are not
+affected, but rule names are.
+
+### A declaration begins in column 1
+
+*Decided 2026-09-12. It is why a function needs no keyword.*
+
+`rule` and `signature` announce themselves; a function's name does not, so a
+rule file says where a declaration stops by indentation:
+
+```
+rule f :- do say "hi"
+     ; prove              -- indented: still part of the rule above
+g x = concat x x          -- column 1: a new declaration
+```
+
+Without the rule, `g` would be read as another argument to `say`. Rules may
+still span as many lines as you like — indent the continuations.
+
+### A value can be bound to a name
+
+*Decided 2026-09-12.*
+
+```
+p = (1, true)
+l = [1, 2, 3]
+n = 42
+```
+
+Until now the right of an `=` in a rule body had to be an operation, so a literal
+could be passed and returned but never named. `x = y` still means *call `y`* —
+that reading is unchanged.
+
+### A rule may declare its type, and that is what makes it reusable
+
+*Decided 2026-09-12.*
+
+A signature is its own declaration, on a line above the clauses — a name has
+several clauses and one type.
+
+**It needs no keyword** *(decided 2026-09-13)*. A declaration that begins with a
+plain word is a signature or a function, and the token after the name says
+which — `:` for a signature, a parameter or `=` for a function:
+
+```
+shout : String -> String      -- a signature
+shout s = concat s "!"        -- the function it describes
+```
+
+`signature` was a keyword until then, and because one lexer serves every
+language it was unusable as a name in Surface, Core and every object language
+too. It is an ordinary identifier again.
+
+```
+spine-arguments : Core -> Core -> Surface -> ()
+rule spine-arguments h f t :- when focus-is-component (surface-is-app t) do …
+rule spine-arguments h f t :- when focus-is-component (surface-is-name t) do …
+```
+
+**The arity is the arrow chain's.** That signature is about `spine-arguments` at
+three arguments and says nothing about one of two — a different rule, as far as
+dispatch is concerned. `()` is the result and only the result: it says the rule
+leaves nothing to bind.
+
+**A capitalised name is a type, a lowercase one is a variable.** Nothing needs a
+`forall` — a signature's variables are exactly its lowercase names.
+
+**Write one when you want a rule usable at more than one type.** Without a
+signature a rule is inferred at a single type, so this is refused:
+
+```
+rule ignore x :- do say "ignored"
+rule usesName :- do n = fresh-name "h" ; ignore n     -- a Name
+rule usesTerm :- do h = here ; ignore h               -- a Core
+```
+
+Adding `ignore : a -> ()` makes both uses fine, because each use gets
+its own copy of the type.
+
+*Superseded 2026-09-13: that example now loads with no signature — see "A rule
+or function used at two types is inferred, not refused". A signature is still
+checked, as below.*
+
+**A signature is checked, not believed.** If the body needs more than the
+signature promised, the *signature* is reported:
+
+```
+signature f/1: the signature says any type here, but the body needs Core
+```
+
+### `goto` takes a variable; `goto-named` takes a name
+
+*Decided 2026-09-12. Renames what you type at the prompt.*
+
+They were one word taking either. They are two operations: `goto` is exact,
+`goto-named` **searches the whole development from the root** and takes the
+first component it finds.
+
+```
+goto-named "h"        -- at the prompt, and in a body that minted the name
+h = here ; goto h     -- in a body holding the variable
+```
+
+At the prompt you almost always want the second word, because a typed `"h"` is a
+name. `goto` there needs a `do` block with something bound in it.
+
 ---
 
 ## The REPL and the session
@@ -727,6 +1123,115 @@ construct. Term literals in a body are a later phase.
 the driver's and are not instructions; a `.thena.script` file is where those
 live.
 
+### Every `do` block is checked before it runs, and a top-level one is its own scope
+
+*Decided 2026-09-15.*
+
+A `do` block is validated and type checked before any of it runs, wherever it is
+written — inside a surface term, at the prompt, or at the top of a module. A
+mistake is refused and nothing it would have done happens:
+
+```
+thena spine> do { prim-try 3 }
+instruction 1: wanted Core, got Int
+```
+
+**Each `do` block is its own scope, and what it sees from the module is the
+globals declared above it.** A name bound in one block is not in scope in the
+next, and a declaration further down does not exist yet:
+
+```
+module M where
+
+do
+  x = "one"
+
+do
+  say x          -- refused: no parameter or earlier binding is called x
+```
+
+```
+module M where
+
+data Nat : Type₀ where
+  zero : Nat
+
+do
+  t = resolve-core core`one`     -- stuck: not in scope: one
+
+one : Nat
+one = zero
+```
+
+The local half is refused when the file loads. The global half is refused when
+the block runs, because a written core term is resolved at run time — so the
+declarations above the block have already been made by then.
+
+**That timing is a current limit, not the intent.** A core term's names are
+resolved against the development as it stands when the instruction runs — Γ at
+the focus, then the globals — and a name may be a hypothesis the proof binds
+before that instruction, so the check cannot simply be moved as things are. The direction is to check tagged term literals when the file loads,
+which may mean reworking how they are treated; it is not scheduled.
+
+**While a rule is yielding, a block you type sees the rule's locals**, and they
+have the types their values have — so `do { goto h }` reads the rule's `h`, and
+`do { say h }` is refused when `h` holds a term.
+
+### Levels: `instral` holds one, but has no level arithmetic
+
+*Decided 2026-09-14, confirmed as intentional 2026-09-15.*
+
+A rule can make a level and build a universe at it, and nothing more:
+
+```
+l = level 2            -- a closed level, exactly what Type₂ writes
+m = fresh-level        -- a fresh unknown, what a bare Type writes
+u = universe-at l      -- the term Type₂
+```
+
+There is no `level-suc` and no `level-max`. The level **algebra** — successor and
+join — is built only by the level solver, whose normal form and satisfiability
+check are written against a single source of level expressions. A rule that could
+write `level-max a b` would be a second source. It can be added the day something
+needs it.
+
+### A lambda takes at least one parameter, and a function is not curried
+
+*Decided 2026-09-15.*
+
+`\ -> e` does not parse. A value needs no lambda — `x = e` names it and `r = x`
+uses it — and calling a local with no arguments is refused:
+
+```
+rule go :- do d = "text" ; call d
+```
+```
+go, instruction 2: d holds a value, not something to call with no arguments — write r = d to use it
+```
+
+**Functions are not curried.** A function's type is n-ary: `join a b = concat a b`
+takes exactly two arguments, and `join "x"` is refused with *join takes 2
+arguments, not 1 argument*. A function that returns a function says so, with
+parentheses: `adder : String -> (String -> String)` and `adder a = \ b -> concat a
+b`, after which `p = adder "x" ; m = p "y"` works.
+
+### An instruction number is the line you wrote, counted from 1
+
+*Decided 2026-09-15.*
+
+Every message about a rule body names the statement as written, whichever check
+found the mistake. A nested call does not add a line, and a type annotation is a
+line of its own:
+
+```
+rule go :-
+  do k : String
+     k = "x"
+     prim-try k      -- go, instruction 3: wanted Core, got String
+```
+
+A mistake inside a lambda names the line the lambda is on.
+
 ### `yield` goes both ways, because it names one thing
 
 *Decided 2026-09-03.*
@@ -759,6 +1264,230 @@ block's own bindings survive to the next line while a rule is suspended.
 You can break the rule you are standing in — shadow one of its locals and its
 body will go wrong. That is allowed on purpose.
 
+### `instral` has lists, pairs and options, and you take them apart with patterns
+
+*Decided 2026-09-12; **rewritten 2026-09-14**, when patterns replaced the nine
+words this section used to teach.*
+
+```
+rule join [] :- do return ""
+rule join [c, ...t] :- do r = join t ; s = concat c r ; return s
+```
+
+`[a, b, c]` is a list and `(a, b)` is a pair; an option is `some x` or `none`.
+The elements are ordinary operands, so `[x, "c"]` reads `x` where the list is
+built.
+
+**There is no `if` and no `case`, and none is needed**: a clause's parameters are
+patterns, so a function over a list is two clauses, one per shape — and each one
+names the pieces while it tests for them.
+
+**A pattern also stands on the left of a binding**, which is how you take a pair
+or an option apart in the middle of a body:
+
+```
+(a, b)   = p
+(some v) = o
+```
+
+**A refutable pattern that does not match is a failure.** In a rule that means
+the search tries the next clause; in a function it is the caller's failure, as
+in Haskell.
+
+**Nine words went when patterns arrived** and none of them has a replacement in
+the language, because the language no longer needs one: `list-head`,
+`list-tail`, `pair-first`, `pair-second` and `option-value` were ops, and
+`list-is-empty`, `list-is-cons`, `option-is-some` and `option-is-none` were head
+tests. Write the pattern instead.
+
+**The one thing a pattern does not give you is a total head.** `list-head` used
+to answer an *option*, so the empty list needed no separate answer; a pattern is
+partial. Two clauses say it:
+
+```
+head' []        = none
+head' [a, ..._] = some a
+```
+
+**A compound argument is parenthesised, inside a literal as anywhere else**:
+`[(g a), b]`, and `((g a), b)` for a pair whose first component is a call.
+
+**You cannot bind a literal to a name.** `x = [1, 2]` is refused: the right-hand
+side of a binding is an operation, so a value comes from an op or from a rule
+that returns one. `f [1, 2]` and `return [1, 2]` are both fine.
+
+### `instral` has four primitive values
+
+*Decided 2026-09-12.*
+
+```
+say "a string"     -- text, since phase 22b
+return 42          -- a number
+return 'c'         -- a character
+return true        -- a boolean; false too
+```
+
+A numeral is a number wherever a field word is not in front of it — `arg 2` and
+`param 0` still read theirs as a position, because those select a field rather
+than take a value.
+
+**`true` and `false` are reserved in `instral`, and nowhere else.** They are not
+keywords: one lexer serves every language here, and an object language is free to
+declare a constructor called `true` — `examples/determinacy-tactics.thena.script`
+does. Inside a rule they are values, so a rule may not use either as a parameter
+or a binding; it is refused when the base loads rather than silently read as a
+literal.
+
+There are no operations on any of them yet — no arithmetic, no comparison. You
+can carry a value and hand it back; computing with it comes with the type system.
+
+### A rule returns what it says it returns
+
+*Decided 2026-09-12.*
+
+```
+rule twice t :- do s = concat t t ; return s
+rule shout t :- do m = twice (twice t) ; say m
+```
+
+A rule hands a value back with `return`, and a caller that wrote `x = ‹rule›`
+gets it. A rule with no `return` hands nothing back; a caller that asked for a
+value from one gets *nothing was returned to bind to x*, at the call, rather than
+an unbound name further down.
+
+**`return` ends the body** — anything after it does not run.
+
+The alternative was *the value of the last instruction*, as in a Haskell `do`
+block. It was declined because most bodies end in something that produces
+nothing — `prim-solve`, `prim-try`, `say` — so a rule that wanted to return would
+have had to be written to end on the producing op. The return value would then be
+a constraint on the order of the body, and invisible where the rule is called.
+
+`prove` is not a call and returns nothing: what the rule it chose did is in the
+development.
+
+### An argument may itself be a call
+
+*Decided 2026-09-12.*
+
+```
+shout (twice t)          -- one call, with a call as its argument
+x = twice t ; shout x    -- what it means, and what you had to write before
+```
+
+A compound untagged argument is written in parentheses, and a parenthesised
+call is evaluated before the call that wanted it — **left to right, innermost
+first**. The order is fixed and worth knowing, because these are statements: a
+rule changes the development, so when it runs is observable.
+
+**A rule's head may not contain one.** A head says what a rule is about and is
+checked to build the match list; running a call to find out whether a rule
+applies is not something a head may do.
+
+### A typed line is one line of `instral`, and a bare argument is not a term
+
+*Decided 2026-09-11.*
+
+```
+try-core ⌜ zero ⌝              -- a core term, in corners
+elaborate ⟨ succ zero ⟩        -- a surface term, in angle brackets
+claim "h" ⌜ Nat ⌝              -- a string, and a core term
+goto "h"                       -- a string: the hole's name
+goto h                         -- a REFERENCE, to whatever h is bound to
+```
+
+**An argument written in no fence is neither language.** It is an `instral`
+value — a name, a number or a string — read exactly as a rule body reads one.
+Until this point a bare argument at the prompt was a *surface term*, which made
+Surface the one language you could write without saying so, and forced `goto`'s
+argument to be special-cased in the implementation to get a name out of a
+position that otherwise produced a surface tree.
+
+So there is now one reading of a line, wherever you type it: the word names an
+**op** if one bears that word, and a **rule** otherwise; its arguments are
+operands. That was already true inside a rule body and inside `do { … }`.
+
+What this costs you is explicitness — `unify ⌜ a ⌝ ⌜ b ⌝` where it used to be
+`unify a ≟ b` — and what it buys is that a line means the same thing in all
+three places.
+
+### An op word at another arity calls a rule of that name
+
+*Decided 2026-09-11.*
+
+```
+claim "h" ⌜ Nat ⌝     -- two arguments: the op
+claim ⌜ Nat ⌝         -- one argument: a rule, which asks you for the name
+```
+
+A word names an **op at the arities that op has, and a rule at every other
+arity**. Rules already worked this way — clauses of one name are selected by
+name *and* number of arguments, so they need not agree about how many they take
+— and ops now agree with them instead of being a separate question.
+
+This is what lets `claim ⌜ Nat ⌝` be an ordinary rule in the rule base rather
+than a shape the REPL recognises. You can write your own clause of any op's name
+at an arity the op does not have, and it will be found.
+
+**A mistyped word is still caught when a rule base loads.** `prim-solve x` is a
+call to a rule called `prim-solve` that takes one argument, and if no loaded base
+has one it is refused, saying the op takes none (*since 2026-09-15; before that
+it failed only when it ran*).
+
+### A rule file lays out, exactly like Haskell
+
+*Decided 2026-09-13.*
+
+A rule file is one layout block and a rule body is a block that `then` opens, so
+a body can be written as indented lines with no separators at all:
+
+```
+rule demo :- when focus-is-hole do
+  m = shout "hi"
+  say m
+```
+
+**Every older spelling still works** — one line, explicit braces, and the
+leading-`;` style the shipped base is written in:
+
+```
+rule fill t :- when focus-is-hole
+  then n = fresh-name "refined"
+     ; x = define n t
+```
+
+That last one is why **a line beginning with `;` is a continuation whatever its
+column**: the separator is already written, so there is nothing for the offside
+rule to insert and nothing to close.
+
+**Declarations line up with the first one.** The file's block takes its column
+from the first declaration, as a Haskell block takes its column from its first
+token, so a declaration that does not line up is a syntax error in either
+direction. A file indented as a whole is consistent and therefore fine.
+
+### A function body may be a `do` block
+
+*Decided 2026-09-13.*
+
+`f x = e` is one expression. For locals, write a block:
+
+```
+shout : String -> String
+shout s = do
+  wrapped = concat "<" s
+  closed  = concat wrapped ">"
+  return closed
+```
+
+The block *is* the function's body, so it says `return` itself — and the short
+form is that block with the `return` written for you. A lambda's body takes the
+same two shapes. A block that never returns is refused, as `f x = say "hi"`
+already was.
+
+**`do` and not `=`.** Making `=` open a block would reach into the surface
+language's `let x = e` bindings, which are the same token in the same lexer;
+Haskell does not make `=` a layout keyword either.
+
 ### `:infer` takes a surface term; a core one goes in corners
 
 *Decided 2026-09-02.*
@@ -785,8 +1514,9 @@ the same.
 *Decided 2026-08-31.*
 
 `:help` prints every command the REPL itself has, split by the naming rule —
-a bare word acts, a word with a colon looks — and nothing else. `attack`,
-`intro`, `try`, `solve`, `eliminate` and the rest are **not** commands: they
+a bare word acts, a word with a colon looks — **and the ops**, which are in
+the binary and which nothing else lists. `attack`, `intro`, `try`, `solve`,
+`eliminate` and the rest are **not** commands and not ops: they
 are rules in a rule base, reached by writing their name the way a rule body
 would. Listing them under `:help` would state a loaded file's contents from
 inside the binary, and would be wrong the moment you load a different base.
@@ -799,6 +1529,258 @@ any other bare word calls a rule of that name; :rules lists them.
 
 `:rules` prints the rules of every loaded base, in search order. If a word is
 in neither list, `no such command` says so and points back at `:help`.
+
+### A rule or function used at two types is inferred, not refused
+
+*Decided 2026-09-13.*
+
+Callables are split by the call graph and each group is generalised before
+anything that calls it is checked — Hindley-Milner. So a helper used at two
+types is fine with no annotation:
+
+```
+idf x = do { return x }
+
+rule go :- do h = here ; a = idf h ; n = fresh-name "x" ; b = idf n
+```
+
+**A local is not generalised.** The same shape one level in is refused:
+
+```
+rule go :- do
+  g = \ z -> do { return z }
+  h = here ; a = g h
+  n = fresh-name "x" ; b = g n     -- wanted Core, got Name
+```
+
+That is *Let Should Not Be Generalised*, and it is what an annotation is for —
+see below.
+
+**Inside one group nothing is generalised either.** Two mutually recursive
+callables share their variables, so calling one at two types *from inside the
+group* is an error. From outside, the group is a scheme and each use is
+independent.
+
+**An annotation is documentation and a promise now, not the only way to a second
+type.**
+
+### A local may be annotated, and then it is polymorphic
+
+*Decided 2026-09-13.*
+
+`‹name› : ‹type›` on a line of its own, above the binding it is about — the same
+spelling a top-level signature uses, one level in:
+
+```
+rule go :- do
+  g : a -> a
+  g = \ z -> do { return z }
+  h = here ; a = g h
+  n = fresh-name "x" ; b = g n       -- fine, because g is a scheme
+```
+
+**An annotation is checked, not believed.** A body that pins one of the
+annotation's variables to a particular type has broken the promise, and the
+*annotation* is what is reported. A concrete annotation is an ordinary
+constraint and has to be true.
+
+**An annotation with no binding after it is refused** — it is a typo, most often
+a name changed on one line and not the other.
+
+### A written core term may have holes
+
+*Decided 2026-09-13.*
+
+A term written in a rule can splice in values that are already terms:
+
+```
+d  = claim dn u1
+c  = claim cn u2
+ar = resolve-core core`${d} -> ${c}`
+```
+
+**A splice stands where a term stands.** So the template is parsed once, when
+the file loads — what each hole wants is known from where it sits, and a splice
+that is not a term, or that names nothing, is refused then. The values are
+filled in when the instruction runs, which is when they exist.
+
+Both core spellings take one: `` core`${d} -> ${c}` `` and `⌜ ${d} -> ${c} ⌝`.
+
+**A splice is closed**, so a binder above it does not capture it — the same
+weakening every term built under a binder gets.
+
+**This is not string substitution**, and it could not be: the terms a rule
+builds carry unsolved level metas, and `Type (suc ?ℓ683)` is not something you
+can write down and read back.
+
+### A failing command never backtracks past the line you typed
+
+*Decided 2026-09-16.*
+
+A command that fails unwinds the machine's stack looking for an alternative —
+that is what makes a tactic a search. **It stops at the line you typed.** A
+choice point an earlier line left is not reached implicitly:
+
+```
+thena spine> prove
+chose 685: attack
+thena spine> regret                 -- take the guess back off
+thena spine> back                   -- at the root: nothing to pop
+stuck: already at the root
+  undoing that would backtrack to 685, which was chosen before this line — retry 685 to take it
+```
+
+Before this, `back` would have taken `prove`'s untried alternatives and put the
+guess back — **undoing the `regret` you had just typed, with a navigation
+command.**
+
+**Nothing is forbidden.** `retry 685` still takes it, and `:choices` still lists
+it. What changed is that crossing a line boundary is now something you ask for.
+
+**Why.** Backtracking past the running line takes a route on which that line was
+never typed — the command that caused the backtracking could not have been
+given. Nothing replays a prompt, so the command is lost either way; making it
+explicit costs nothing and shows you what happened.
+
+**A choice point *this* line made is reached exactly as before.** A rule driving
+its own search is untouched, and so is `retry`, which lowers the boundary to the
+choice point you named — so an alternative that fails on its own still falls
+through to the next one inside that command.
+
+**The same rule applies while a rule has yielded to you**, and that is the case
+worth understanding, because it is the one that bites hardest:
+
+```
+rule pause :- do prove ; yield "over to you" ; say "rule resumed"
+```
+
+`prove` leaves a choice point, then the rule hands you the prompt. If a command
+you type there fell past that choice point, **control would be taken back from
+you** — the rest of your line discarded, your bindings replaced, and the rule
+re-entered on another alternative. And because the choice point was made *inside*
+the rule, what it re-runs is the rest of that body — **so the rule yields again,
+printing a message identical to the one you are looking at.** You would be in a
+different context with nothing on screen to say so.
+
+There is one REPL and one rule for it. Working at the prompt means the same thing
+whether or not a rule is waiting on you.
+
+### `apply` saturates; `fit` searches for the arity
+
+*Decided 2026-09-16.*
+
+`apply-core` reads the head's whole telescope and claims a hole for every
+argument at once. **`fit-core` does not know the arity and does not ask** — it
+tries the spine as it stands, and if that does not fit the goal it claims one
+more argument and tries again.
+
+```
+thena spine> :theorem t2 : P                  -- mk : Nat -> Nat -> P
+thena spine> fit-core ⌜ mk ⌝
+chose 34: fit-core
+backtracking to 34: fit-core
+chose 39: fit-core
+backtracking to 39: fit-core
+chose 43: fit-core
+already equal
+```
+
+Each `backtracking to` line is an arity being given up. **It stops at the first
+one that fits**, so a head whose result type already matches is applied to
+nothing at all:
+
+```
+thena spine> :theorem t0 : Nat -> Nat
+thena spine> fit-core ⌜ succ ⌝                -- fits as it stands
+thena spine> apply-core ⌜ succ ⌝              -- saturates, lands on Nat
+stuck: Nat and Nat -> Nat cannot be made equal
+```
+
+**It is two clauses of a rule and nothing else** — no loop, no new operation:
+
+```
+rule fit-core f :- when focus-is-hole
+  do fill f ; solve
+
+rule fit-core f :- when focus-is-hole
+  do n = fresh-name "a" ; f2 = apply-next f n ; call fit-core f2
+```
+
+Nothing sequences them. Both heads pass, so the engine builds a choice point,
+and the first clause *failing* is what reaches the second. `:choices` shows the
+choice point afterwards, and `retry` pushes the search to a longer spine.
+
+### A rule is searched; a function is called
+
+*Decided 2026-09-13.*
+
+A rule may have many clauses and calling it is a **search**: the engine builds a
+choice point, tries each clause whose head passes, and backtracks into the rest
+if one fails. `:choices` lists it and `retry` reaches it.
+
+A function is not that. It is **called** — one clause, entered and stayed in.
+Nothing about it appears in `:choices`, `retry` cannot reach it, and a failure
+inside it is the caller's failure rather than a reason to try something else.
+
+**So a function has one clause per arity**, and a second is refused:
+
+```
+f x = concat x "a"
+f x = concat x "b"     -- in f: a function has one clause, and nothing tells a
+                       -- second one at 1 argument apart from the first
+```
+
+Different arities are different functions, as they are for rules. Until there
+are patterns nothing can tell two clauses apart, so the second could only ever
+be reached by the first one *failing* — which is a rule's behaviour, and writing
+a rule is how you ask for it.
+
+### A `do` block in a surface term is checked before any of it runs
+
+*Decided 2026-09-13.*
+
+A `do` block written inside a surface term **is the solution to the hole it
+stands in** — `E⟦do { … }⟧` is *play the block*, and what it leaves behind is
+the term it built. So it sits wherever a term does, including the right of a
+`let`:
+
+```
+let x : Type₀ = do { u = fresh-universe ; fill u ; solve } in x
+```
+
+It has no type of its own to declare, and **a `return` in one is refused**:
+there is nothing for a value to be returned to.
+
+Its instructions are resolved, validated and type-checked when the term is
+read — in a rule file, at the prompt, in a module, in a `declare`. A mistake in
+one is reported before anything is elaborated, so nothing is half-built:
+
+```
+thena spine> elaborate ⟨ do { say 3 } ⟩
+do block 1, instruction 1: wanted String, got Int
+```
+
+### A multi-line entry is bracketed by `:{` and `:}`
+
+*Decided 2026-09-13.*
+
+At the prompt, one line is one entry. To type several, open with `:{` and close
+with `:}`, each alone on its line:
+
+```
+thena spine> :{
+         ... h = here
+         ... claim "k" ⌜ Type₀ ⌝
+         ... goto h
+         ... :}
+```
+
+The lines between are laid out the way a rule file is, so they need no `;`. It
+is GHCi's spelling, and it is the only place the REPL asks for anything
+unusual — there is no rule about what a continuation must look like, because
+the brackets say where the entry ends.
+
+**A trailing `;` is a complete entry**, not a request for more.
 
 ### `:undo` takes back a line, whether or not you are proving
 
@@ -829,3 +1811,88 @@ theorem admitted, which is worse than refusing.
 **Loading a file leaves no undo history**, for the same reason: a file declares
 datatypes and admits theorems, and neither is something `:undo` could honestly
 reverse.
+
+### Patterns — in a parameter, and on the left of a binding
+
+*Decided 2026-09-14.*
+
+A clause's parameters are **patterns**, and so is the left of a `=` in a body:
+
+```
+size []           = "empty"
+size [_, ...rest] = "many"
+
+rule go :- do
+  p = mk "l" "r"
+  (x, y) = p
+  m = concat x y
+  say m
+```
+
+`[a, b]`, `[a, ...rest]`, `(x, y)`, `(some x)`, `none`, `true`, `3`, `'c'`,
+`"text"` and `_` are all patterns. A plain name is the pattern that binds it, so
+nothing that could be written before means anything different.
+
+**A refutable pattern that does not match is a failure.** In a rule the search
+tries the next clause; in a function it is the caller's failure, as in Haskell.
+There is no irrefutable/refutable distinction to learn.
+
+**Patterns are linear** — `f x x` is refused. Matching a value against another
+value is a different feature.
+
+**A destructuring binding cannot be annotated**: `n : Ty` above a binding says
+*this local is a scheme of this type*, and a compound pattern binds several
+names with several types.
+
+### A rule body opens with `do`
+
+*Decided 2026-09-14; it was `then` until then.*
+
+```
+rule attack :- when focus-is-hole do prim-attack
+```
+
+Two reasons: `:-` is Prolog's neck, so `:- then` read as *then then*; and a block
+of instructions is spelled `do` **everywhere else** — a function's body, a
+surface term's block, a REPL `do { … }`. This was the one place with a word of
+its own. **`then` is an ordinary identifier again** in every language.
+
+### `instral` has a `Level`, and `fresh-universe` is not a primitive
+
+*Decided 2026-09-15.*
+
+```
+l = level 2          -- an exact level, the one Type₂ means
+l = fresh-level      -- a fresh meta, the one a bare Type means
+u = universe-at l
+```
+
+`Level` is its own type and not `Int`, because a level a rule holds is usually a
+**meta the solver has not decided**, and no numeral can be one.
+
+**`fresh-universe` is a function over the two**, not an op — it was two
+operations wearing one name. Its spelling is unchanged.
+
+**There is no `level-suc` and no `level-max`**, deliberately: those are the level
+*algebra*, and the solver stays their only author. A numeral is not an algebra.
+
+### A splice supplies a nonterminal — a term, or a name
+
+*Decided 2026-09-14.*
+
+```
+core`${d} -> ${d}`                  a term
+core`λ (${n} : ${d}) -> ${d}`       a NAME, and a term
+⌜ λ (${n} : ${d}) -> ${d} ⌝          the same, in corners
+```
+
+**The position decides what the binding must hold** — a term position wants a
+`Core`, a name position wants a `Name` — so nothing is annotated and the two
+cannot be confused. Both are checked when the file loads, along with a splice
+that names nothing.
+
+Every name position takes one: a λ or ∀ binder, a `let`, a claim, a guess, an
+`elim`'s datatype, and a global at level arguments.
+
+**A level position needs no splice**: build the universe with `universe-at` and
+splice the term.

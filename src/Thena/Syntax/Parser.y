@@ -29,20 +29,19 @@ module Thena.Syntax.Parser
   , parseRule
   , parseRules
   , parseAtoms
+  , parseEntry
+  , parseInstralTy
   ) where
 
 import Thena.Syntax.Concrete
   ( Raw (..)
   , RawBinder (..)
+  , RawIdent (..)
   , RawConstraint (..)
   , RawConstructor (..)
   , RawData (..)
-  , RawInstr (..)
-  , RawOp (..)
-  , RawOperand (..)
-  , RawRule (..)
-  , RawTest (..)
   )
+import Thena.Instral.Concrete (RawDecl (..), RawLanguage (..), RawProduction (..), RawGItem (..), RawFunction (..), RawRhs (..), RawBody (..), RawSignature (..), RawTy (..), RawRule (..), RawPattern (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
@@ -53,6 +52,13 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 %name parseRule Rule
 %name parseRules RuleFile
 %name parseAtoms AtomRun
+-- **A whole REPL entry** (MS5 phase 70) — the same body a rule has, so a typed
+-- entry and a rule body are one grammar and not two. **Since phase 78 it is the
+-- same @Block@**, laid out by the same pass, so a multi-line entry separates its
+-- instructions by the offside rule exactly as a rule file does.
+%name parseEntry Block
+-- **A written type** (MS5 phase 71) — what @:accepts@ and @:produces@ take.
+%name parseInstralTy Ty
 %tokentype { Located Token }
 %monad { Either ParseError }
 %error { parseError }
@@ -74,17 +80,28 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   '⊢'     { Located _ TTurnstile }
   '≟'     { Located _ TEquate }
   '[|'    { Located _ TOpenQuote }
+  '${'    { Located _ TEscapeOpen }
+  '}$'    { Located _ TEscapeClose }
+  tagopen  { Located _ (TTagOpen $$) }
+  raw      { Located _ (TRaw $$) }
+  tagclose { Located _ TTagClose }
   '|]'    { Located _ TCloseQuote }
   let     { Located _ TLet }
   in      { Located _ TIn }
   elim    { Located _ TElim }
   where   { Located _ TWhere }
   rule    { Located _ TRule }
+  do      { Located _ TDo }
+  language { Located _ TLanguage }
   when    { Located _ TWhen }
-  then    { Located _ TThen }
   ':-'    { Located _ TNeck }
   num     { Located _ (TNumber $$) }
   str     { Located _ (TString $$) }
+  chr     { Located _ (TChar $$) }
+  '...'   { Located _ TSpread }
+  '['     { Located _ TLBracket }
+  ']'     { Located _ TRBracket }
+  ','     { Located _ TComma }
   univ    { Located _ (TUniverse $$) }
   Type    { Located _ TUniverseOpen }
   ident   { Located _ (TIdent $$) }
@@ -96,17 +113,17 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 Term :: { Raw }
   : 'λ' Binders '->' Term                          { RawLam (reverse $2) $4 }
   | '∀' Binders '->' Term                          { RawPi (reverse $2) $4 }
-  | let ident '=' Term ':' Term in Term            { RawLet $2 $4 $6 $8 }
-  | let '?' ident ':' Term in Term                 { RawClaim $3 $5 $7 }
-  | let '?' ident ':' Term '≐' '(' Term ')' in Term
+  | let Ident '=' Term ':' Term in Term            { RawLet $2 $4 $6 $8 }
+  | let '?' Ident ':' Term in Term                 { RawClaim $3 $5 $7 }
+  | let '?' Ident ':' Term '≐' '(' Term ')' in Term
                                                    { RawGuess $3 $5 $8 $11 }
   | Constraint '▸' Term                            { RawPending $1 $3 }
   -- **Level arguments are written or omitted** (MS3 phase 31c). Omitting them
   -- is the only spelling for a monomorphic family, which is every family
   -- written before this phase, so nothing existing moves.
-  | elim ident '(' Atoms ')' Atom '(' Atoms ')' '(' Atoms ')' Atom
+  | elim Ident '(' Atoms ')' Atom '(' Atoms ')' '(' Atoms ')' Atom
       { RawElim $2 [] (reverse $4) $6 (reverse $8) (reverse $11) $13 }
-  | elim ident LevelArgs '(' Atoms ')' Atom '(' Atoms ')' '(' Atoms ')' Atom
+  | elim Ident LevelArgs '(' Atoms ')' Atom '(' Atoms ')' '(' Atoms ')' Atom
       { RawElim $2 $3 (reverse $5) $7 (reverse $9) (reverse $12) $14 }
   | App '->' Term                                  { RawArrow $1 $3 }
   | App                                            { $1 }
@@ -165,23 +182,195 @@ Constructor :: { RawConstructor }
 -- by the user 2026-08-25 — so the file is parsed whole rather than split, and
 -- what ends a rule is the next 'rule' keyword or the end of input. Nothing in
 -- 'Instr' can begin with 'rule', so no terminator is needed.
-RuleFile :: { [RawRule] }
-  : Rules                                  { reverse $1 }
+-- **The file is one layout block** (MS5 phase 75). A declaration begins in
+-- column 1 — his ruling, 2026-09-12 — and that is now said by the offside rule
+-- rather than by a separator the driver inserts: "Thena.Surface.Layout" is run
+-- over the token stream with a block already open at column 1, so a declaration
+-- at that column gets a @;@ and anything indented past it is a continuation.
+--
+-- **@separated@ and @TDeclSep@ are gone with it**, and so is the laxity they
+-- left: a line beginning @;@ in column 1 used to be accepted in silence, and is
+-- now what it looks like, an empty declaration.
+RuleFile :: { [RawDecl] }
+  : '{' Decls '}'                          { reverse $2 }
 
-Rules :: { [RawRule] }
+Decls :: { [RawDecl] }
   :                                        { [] }
-  | Rules Rule                             { $2 : $1 }
+  | Decl                                   { [$1] }
+  | Decls ';' Decl                         { $3 : $1 }
+
+Decl :: { RawDecl }
+  : Rule                                   { DeclRule $1 }
+  | Signature                              { DeclSignature $1 }
+  | Function                               { DeclFunction $1 }
+  | Language                               { DeclLanguage $1 }
 
 Rule :: { RawRule }
-  : rule ident Params ':-' Tests then Body   { RawRule $2 (reverse $3) $5 (reverse $7) }
+  : rule ident Params ':-' Tests do Block    { RawRule $2 (reverse $3) $5 (reverse $7) }
 
--- Parameters are a bare run of names, ended by @:-@ — no parentheses and no
--- commas. CORRECTED by the user 2026-08-25, planning phase 23: a call site
--- writes its arguments as every other op writes them, @call f x y@, so a
--- definition that wrapped its parameters would have been the odd one out.
-Params :: { [String] }
+-- **A body is a block** (MS5 phase 75). @do@ is a layout keyword, so
+-- "Thena.Surface.Layout" inserts these braces where the offside rule says they
+-- belong and a file that writes them itself passes through untouched — the same
+-- bargain the surface language struck at MS4 phase 40, and his condition:
+-- /"if implicit works, explicit has to work too."/
+--
+-- **@do@ and not @then@ — HIS, MS5 phase 85.** Two reasons, and the second is
+-- the one that made him raise it: @:-@ is Prolog\'s neck, so @:- then@ read as
+-- /then then/; and a block of instructions is spelled @do@ everywhere else in
+-- the system — a function\'s body, a surface term\'s block, a REPL entry — so
+-- this was the one place with a word of its own. @then@ is an ordinary
+-- identifier again in every language.
+Block :: { [RawInstr] }
+  : '{' Body '}'                           { $2 }
+
+-- **A signature is its own declaration** (MS5 phase 67, his choice) — one line,
+-- anywhere in the file, naming a callable and giving its whole type including
+-- the result. A callable has several clauses and one type, which is why it does
+-- not hang off a clause.
+-- **A global function, and it needs no keyword of its own** — his choice,
+-- 2026-09-12. Since MS5 phase 74 neither does a signature, so a declaration
+-- beginning with a plain word is one of the two and the token after the name
+-- tells them apart: @=@ or another parameter here, @:@ there.
+Function :: { RawFunction }
+  : ident Params '=' FunBody               { RawFunction $1 (reverse $2) $4 }
+
+-- **A body is one expression or a @do@ block** (MS5 phase 75b, his choice of
+-- opener). @do@ is already a layout keyword, so the block's braces come from
+-- the offside rule and a one-line @do { a ; b }@ works too.
+FunBody :: { RawBody }
+  : Rhs                                    { BodyRhs $1 }
+  | do Block                               { BodyBlock (reverse $2) }
+
+-- What stands right of an @=@, here and in a body: an op application, or a
+-- value written down. The second case excludes a bare @ident@ — @x = y@ is a
+-- call to @y@, which is the reading it has always had.
+Rhs :: { RawRhs }
+  : Op                                     { RhsOp $1 }
+  | ValueOperand                           { RhsValue $1 }
+  | Lambda                                 { RhsValue $1 }
+
+-- @\ x y -> ‹expression›@ (MS5 phase 68b). @\@ and @λ@ are one token and both
+-- were already lexed, so this costs no new syntax.
+Lambda :: { RawOperand }
+  : 'λ' LambdaParams '->' FunBody          { RawLambda (reverse $2) $4 }
+
+-- **A lambda takes at least one parameter** — his ruling, 2026-09-15 (MS5 phase
+-- 94, @ms5\/CLOSEOUT.md@ 23): /"I don't like the nullary function… we should
+-- nip that in the bud."/ It reused 'Params', which may be empty because a
+-- rule's may, so @\ -> e@ parsed for free and built a value whose type
+-- nothing could spell. A value is what @x = e@ already names.
+LambdaParams :: { [RawPattern] }
+  : PatAtom                                { [$1] }
+  | LambdaParams PatAtom                   { $2 : $1 }
+
+-- **An object language's grammar** (MS5 phase 69). Braces and @where@ are
+-- already tokens, so this costs one keyword and no punctuation.
+Language :: { RawLanguage }
+  : language ident where '{' Prods '}'     { RawLanguage $2 (reverse $5) }
+
+Prods :: { [RawProduction] }
+  : Prod                                   { [$1] }
+  | Prods ';' Prod                         { $3 : $1 }
+
+Prod :: { RawProduction }
+  : ident ':' GItems                       { RawProduction $1 (reverse $3) }
+
+GItems :: { [RawGItem] }
   :                                        { [] }
-  | Params ident                           { $2 : $1 }
+  | GItems GItem                           { $2 : $1 }
+
+GItem :: { RawGItem }
+  : str                                    { GTerminal $1 }
+  | ident                                  { GWord $1 }
+
+-- **No keyword** (MS5 phase 74, his ruling). A declaration beginning with a
+-- plain word is a signature or a function, and the token after the name says
+-- which: @:@ for a signature, another name or @=@ for a function. That is one
+-- token of lookahead, which is what an LALR parser has, so the two productions
+-- share their @ident@ and part on the next token with no conflict.
+Signature :: { RawSignature }
+  : ident ':' Ty                           { RawSignature $1 $3 }
+
+-- The type syntax. @->@ is already @%right@, so the chain nests to the right
+-- and the last link is the result.
+--
+-- **A constructor may take arguments and a variable may not**, so an
+-- application is @ident@ followed by a run of atoms and a bare @Core@ is that
+-- run being empty. Writing it as one production is what keeps the grammar free
+-- of a conflict between @Core@ and @List a@; whether the name takes the number
+-- of arguments it was given is 'Thena.Rules.resolveTy'\'s question.
+Ty :: { RawTy }
+  : TyApp '->' Ty                          { RawTyArrow $1 $3 }
+  | TyApp                                  { $1 }
+
+TyApp :: { RawTy }
+  : ident TyAtoms                          { RawTyCon $1 (reverse $2) }
+  | TyParen                                { $1 }
+
+TyAtoms :: { [RawTy] }
+  :                                        { [] }
+  | TyAtoms TyAtom                         { $2 : $1 }
+
+TyAtom :: { RawTy }
+  : ident                                  { RawTyCon $1 [] }
+  | TyParen                                { $1 }
+
+TyParen :: { RawTy }
+  : '(' ')'                                { RawTyUnit }
+  -- **The parentheses are kept** (2026-09-12) — see 'RawTyGroup'. Without
+  -- them @a -> (b -> c)@ and @a -> b -> c@ are one tree, so a signature could
+  -- not name a function result.
+  | '(' Ty ')'                             { RawTyGroup $2 }
+  | '(' Ty ',' Ty ')'                      { RawTyPair $2 $4 }
+
+-- Parameters are a bare run, ended by @:-@ (or @=@, or @->@) — no parentheses
+-- around the run and no commas in it. CORRECTED by the user 2026-08-25,
+-- planning phase 23: a call site writes its arguments as every other op writes
+-- them, @call f x y@, so a definition that wrapped its parameters would have
+-- been the odd one out.
+--
+-- **Each element is a PATTERN since MS5 phase 82** and was a bare name before.
+-- A name is still a pattern, so nothing that was written stops parsing; what is
+-- new is everything else in 'PatAtom'.
+Params :: { [RawPattern] }
+  :                                        { [] }
+  | Params PatAtom                         { $2 : $1 }
+
+-- **A pattern is written in the language of the value it matches** — his
+-- correction (@discussion\/pattern-matching.md@ §2), so a list pattern is a
+-- list literal and a pair pattern is a pair. The productions below are
+-- 'ValueOperand'\'s, less the ones no value of @instral@\'s own has: no tagged
+-- region, no corners, no lambda.
+--
+-- **@(some x)@ takes parentheses and @none@ does not**, which is not a special
+-- case but §6.0.1 applying to a pattern: an untagged compound argument needs
+-- them or nobody can tell one argument from two. The @'(' ident PatAtoms ')'@
+-- and @'(' PatAtom ',' PatAtom ')'@ pair is the same shape 'ValueOperand'
+-- already carries, and parts on the same one token of lookahead.
+PatAtom :: { RawPattern }
+  : ident                                  { RawPWord $1 }
+  | CompoundPat                            { $1 }
+
+-- Every pattern form but a bare name — what a binding's left may be without
+-- colliding with an op word or an annotation (MS5 phase 84).
+CompoundPat :: { RawPattern }
+  : num                                    { RawPInt $1 }
+  | str                                    { RawPText $1 }
+  | chr                                    { RawPChar $1 }
+  | '[' ']'                                { RawPList [] Nothing }
+  | '[' PatItems ']'                       { RawPList (reverse $2) Nothing }
+  | '[' PatItems ',' '...' PatAtom ']'     { RawPList (reverse $2) (Just $5) }
+  | '[' '...' PatAtom ']'                  { RawPList [] (Just $3) }
+  | '(' ident PatAtoms ')'                 { RawPApp $2 (reverse $3) }
+  | '(' PatAtom ',' PatAtom ')'            { RawPPair $2 $4 }
+
+PatAtoms :: { [RawPattern] }
+  :                                        { [] }
+  | PatAtoms PatAtom                       { $2 : $1 }
+
+PatItems :: { [RawPattern] }
+  : PatAtom                                { [$1] }
+  | PatItems ',' PatAtom                   { $3 : $1 }
 
 -- A head is a run of tests with nothing between them, so a test that takes
 -- operands is parenthesised — @when focus-is-hole (surface-is-name t)@ — and a
@@ -215,9 +404,26 @@ Body :: { [RawInstr] }
   :                                        { [] }
   | Instr                                  { [$1] }
   | Body ';' Instr                         { $3 : $1 }
+  -- **A trailing @;@ is allowed** (MS5 phase 78). Without it @h = here ;@ —
+  -- which phase 70 read as /more is coming/ and phase 78 no longer does — is a
+  -- parse error whose message names the @}@ layout inserted at end of input,
+  -- at position @0:0@: a brace the author never wrote, at a place that is not
+  -- in their file. Haskell tolerates the same thing for the same reason.
+  | Body ';'                               { $1 }
 
+-- **A binding's left is a pattern** (MS5 phase 84). The bare-name case keeps
+-- its own production rather than going through 'PatAtom': an @ident@ at the
+-- start of an instruction may still become an annotation or an op, and parting
+-- those three on the token after the name is the one token of lookahead an LALR
+-- parser has. 'CompoundPat' is 'PatAtom' without that case, so nothing here can
+-- begin with an @ident@ twice.
 Instr :: { RawInstr }
-  : ident '=' Op                           { RawBind $1 $3 }
+  : ident '=' Rhs                          { RawBind (RawPWord $1) $3 }
+  | CompoundPat '=' Rhs                    { RawBind $1 $3 }
+  -- **A local's type, written as its own line** (MS5 phase 77) — the same
+  -- spelling a declaration uses one level up, and told from a binding by the
+  -- token after the name exactly as a signature is told from a function.
+  | ident ':' Ty                           { RawAnnot $1 $3 }
   | Op                                     { RawDo $1 }
 
 -- One shape for every op: a word and whatever was written after it. Which op
@@ -226,15 +432,51 @@ Instr :: { RawInstr }
 Op :: { RawOp }
   : ident Operands                         { RawOp $1 (reverse $2) }
 
+-- | A REPL line's arguments (MS5 phase 62b) — the same run of operands a rule
+-- body writes after an op word, and its own start symbol because the driver has
+-- already split the word off.
 Operands :: { [RawOperand] }
   :                                        { [] }
   | Operands Operand                       { $2 : $1 }
 
 Operand :: { RawOperand }
   : ident                                  { RawRef $1 }
+  | ValueOperand                           { $1 }
+
+-- Every operand but a bare name. Split out at MS5 phase 68a so that the right
+-- of an @=@ can take one without @x = y@ becoming ambiguous — it is a call.
+ValueOperand :: { RawOperand }
+  : '(' ident Operands ')'                 { RawNested $2 (reverse $3) }
+  -- **A lambda in an argument takes parentheses**, like every other compound
+  -- argument (§6.0.1); bare, it is what stands right of an @=@.
+  | '(' Lambda ')'                         { $2 }
   | num                                    { RawPos $1 }
   | str                                    { RawText $1 }
+  | chr                                    { RawChar $1 }
+  | '[' ']'                                { RawList [] }
+  | '[' Elements ']'                       { RawList (reverse $2) }
+  | '(' Operand ',' Operand ')'            { RawPairOf $2 $4 }
+  | '[|' Term '|]'                         { RawQuoted $2 }
+  -- **A region's text is reassembled, escapes and all** (MS5 phase 81). The
+  -- scanner splits @${x}@ out so that a fence inside an escape cannot end the
+  -- region early; this puts it back, because what a region /is/ is text for an
+  -- embedded parser and the embedded parser reads @${x}@ itself. So the pieces
+  -- below are a reader for what the scanner produced and not a second meaning.
+  | tagopen Pieces tagclose                { RawRegion $1 (concat (reverse $2)) }
+  | tagopen tagclose                       { RawRegion $1 "" }
 
+Pieces :: { [String] }
+  : Piece                                  { [$1] }
+  | Pieces Piece                           { $2 : $1 }
+
+Piece :: { String }
+  : raw                                    { $1 }
+  | '${' ident '}$'                        { "${" ++ $2 ++ "}" }
+
+
+Elements :: { [RawOperand] }
+  : Operand                                { [$1] }
+  | Elements ',' Operand                   { $3 : $1 }
 
 Constraint :: { RawConstraint }
   : Binders '⊢' Term '≟' Term ':' Term   { RawConstraint (reverse $1) $3 $5 $7 }
@@ -252,7 +494,13 @@ Atom :: { Raw }
   -- strictly more permissive: every place it parsed before still reaches it
   -- through @Term -> App -> Atom@.
   | '[|' Term '|]'                         { RawQuote $2 }
-  | ident LevelArgs                        { RawAt $1 $2 }
+  -- **A splice is an atom** (MS5 phase 81) — it stands where a term stands, so
+  -- it belongs exactly where a name does and needs no precedence of its own.
+  -- The closing brace is its own token: the region scanner emits
+  -- 'Thena.Syntax.Lexer.TEscapeClose' for the one that ends an escape, so this
+  -- cannot be confused with a level-argument brace.
+  | '${' ident '}$'                        { RawSplice $2 }
+  | ident LevelArgs                        { RawAt (RawWord $1) $2 }
   | univ                                   { RawUniverse $1 }
   | Type                                   { RawUniverseOpen }
   | '(' Term ')'                           { $2 }
@@ -290,8 +538,17 @@ Binders :: { [RawBinder] }
   : Binder                                 { [$1] }
   | Binders Binder                         { $2 : $1 }
 
+-- **A name, written or spliced** (MS5 phase 88). Every position below that
+-- wants a name goes through this, so @${x}@ is accepted wherever a name is and
+-- nowhere else — which is what makes the two splice readings unambiguous: a
+-- term position yields a 'Thena.Syntax.Concrete.RawSplice' and holds a
+-- @Core@, a name position yields a 'RawIdentSplice' and holds a @Name@.
+Ident :: { RawIdent }
+  : ident                                  { RawWord $1 }
+  | '${' ident '}$'                        { RawIdentSplice $2 }
+
 Binder :: { RawBinder }
-  : '(' ident ':' Term ')'                 { RawBinder $2 $4 }
+  : '(' Ident ':' Term ')'                 { RawBinder $2 $4 }
 
 {
 

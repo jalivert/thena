@@ -34,8 +34,8 @@ import Thena.Engine
   )
 import Thena.Errors (FailReason (..))
 import Thena.Global.Env (emptyGlobals)
-import Thena.Ops (Instr (..), Rule (..), Test (..))
-import qualified Thena.Ops as Ops
+import Thena.Instral.Ops (Instr (..), Rule (..), Test (..))
+import qualified Thena.Instral.Ops as Ops
 import qualified Thena.Rules
 import Thena.Rules (RuleBase, dispatch, matches, ruleBase)
 import Thena.Standard (expectedBase)
@@ -89,14 +89,14 @@ descends = rule "descends" [Do Ops.Attack, Do Ops.Into]
 -- /list/ of named bases; these tests are about search order within one, so they
 -- build exactly one and give it no interesting name or path.
 bases :: [Rule] -> [RuleBase]
-bases rs = [ruleBase "test" Nothing "" rs]
+bases rs = [ruleBase "test" Nothing "" [] [] [] rs]
 
 only :: Rule -> [RuleBase]
 only r = bases [r]
 
 machine :: [RuleBase] -> Cursor -> [Instr] -> Machine
 machine base cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals base [] 1000)
+  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals base [] 1000 0)
 
 -- | Run as the driver does, following every channel, and keep the messages.
 runOut :: Machine -> ([String], Either FailReason Machine)
@@ -245,7 +245,7 @@ retryTests =
         let base = bases [works, fails]
             -- A Call frame between the choice point and the top of the stack.
             m0 = (ranTo (machine base hole [Do Ops.Prove]))
-            m1 = m0 { exec = (exec m0) { stack = Call [] [] False : stack (exec m0) } }
+            m1 = m0 { exec = (exec m0) { stack = Call [] [] Nothing False : stack (exec m0) } }
         case retryFrom Nothing m1 of
           Right (_, note) -> note @?= "retrying 1000: fails (1 frame(s) dropped)"
           Left e          -> assertFailure ("expected a retry, got " ++ show e)
@@ -294,7 +294,12 @@ dispatchableTests =
         let std = expectedBase
         names' (matches std emptyGlobals hole)
           @?= ["attack", "try-core", "abandon", "eliminate-core", "prove", "fill"
-             , "unify-refine-core", "apply-core"]
+             , "unify-refine-core", "apply-core"
+               -- **@fit-core@'s two clauses both pass, and dispatch runs
+               -- neither** (MS2 phase 27) — it takes a parameter, exactly like
+               -- @try-core@ above, which is what this test is about.
+             , "fit-core", "fit-core"
+             , "claim", "assume", "quantify"]
                ++ replicate 16 "elaborate" ++ replicate 2 "enter-binders"
                ++ replicate 2 "spine-arguments"
         names' (dispatch std emptyGlobals hole)

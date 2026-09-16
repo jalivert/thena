@@ -42,13 +42,19 @@ library
         Thena.Global.Env
         Thena.Global.NoConfusion
         Thena.Kernel
-        Thena.Ops
         Thena.Repl
         Thena.Rules
         Thena.Surface.Concrete
         Thena.Surface.Layout
         Thena.Surface.Parser
+        Thena.Surface.Read
         Thena.Surface.Zipper
+        Thena.Instral.Ops
+        Thena.Instral.Concrete
+        Thena.Instral.Pattern
+        Thena.Instral.Type
+        Thena.Instral.Grammar
+        Thena.Instral.Infer
         Thena.Syntax.Concrete
         Thena.Syntax.Lexer
         Thena.Syntax.Parser
@@ -61,6 +67,7 @@ library
     build-depends:
         base       ^>=4.21.2.0,
         array      >=0.5 && <0.6,
+        containers >=0.7 && <0.9,
         haskeline  >=0.8.4 && <0.9
     build-tool-depends:
         alex:alex   >=3.5,
@@ -90,7 +97,11 @@ test-suite thena-test
         Thena.Core.UnifyTests
         Thena.CursorTests
         Thena.DependentIndexTests
+        Thena.CanonicalTests
         Thena.DeterminacyTests
+        Thena.NormalTests
+        Thena.PreservationTests
+        Thena.ProgressTests
         Thena.ProductTests
         Thena.DevelopmentTests
         Thena.EliminateTests
@@ -104,17 +115,22 @@ test-suite thena-test
         Thena.NoConfusionTests
         Thena.DispatchTests
         Thena.ElaborateTests
+        Thena.InstralInferTests
+        Thena.InstralTypeTests
         Thena.RulesTests
+        Thena.PatternTests
         Thena.RuleSyntaxTests
         Thena.RuleFileTests
         Thena.CallTests
         Thena.ReadTests
         Thena.LoadTests
+        Thena.ManualTests
         Thena.DriverTests
         Thena.Declared
         Thena.Standard
         Thena.Fixtures
         Thena.SessionTests
+        Thena.LexerTests
         Thena.SyntaxTests
     build-depends:
         base              ^>=4.21.2.0,

@@ -7,7 +7,7 @@ declared Empty
 thena spine> data And (A : Type) (B : Type) : Type where { both : ∀ (a : A) (b : B) -> And A B }
 declared And
 thena spine> data Box1 : Type₀ -> Type₁ where { box1 : ∀ (A : Type₀) -> A -> Box1 A }
-no noConfusionBox1: box1's argument x has a type that depends on an earlier argument, so its equation cannot be stated
+no noConfusionBox1: box1's argument 2 (x) has a type that depends on an earlier argument, so its equation cannot be stated
 declared Box1
 thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
 declared Nat

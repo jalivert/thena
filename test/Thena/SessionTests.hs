@@ -12,12 +12,17 @@ module Thena.SessionTests (tests) where
 
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
+import Test.Tasty.QuickCheck
+  (counterexample, elements, forAll, listOf1, property, testProperty, withNumTests)
 
 import Thena.Core.Term (GlobalName (..), Ident (..))
 import Thena.Development.Component (Component (..))
 import Thena.Development.Partial (Partial (..))
 import Thena.Declared (natDecl)
 import Thena.Standard (withRules)
+import Thena.Instral.Infer (InstralTypeError (..), Site (..))
+import Thena.Instral.Type (Ty (..))
+import Thena.Rules (RuleError (..))
 import Thena.Driver
   ( CommandError (..)
   , Loaded (..)
@@ -40,7 +45,173 @@ tests =
     , testGroup "the hole ops" holeTests
     , testGroup "the session" sessionTests
     , testGroup "undo" undoTests
+    , undoLaw
+    , failureStaysInTheLine
     ]
+
+-- --------------------------------------------------------------------------
+-- Undo, over generated scripts (2026-09-13)
+-- --------------------------------------------------------------------------
+
+-- | **Whatever a command did, @:undo@ puts it back.**
+--
+-- 'undoTests' above says this for the shapes phase 34 was about. This says it
+-- for any script the pool below can write, which matters more than it did: the
+-- next milestone is a UI, and a UI's whole relationship with the session is
+-- \"do a thing, then let me take it back\".
+--
+-- **Inside one proof only.** @:undo@ clears at every proof boundary and a
+-- finished @:load@ leaves no history, both because @globals@ is not in a
+-- @Snapshot@ — so the pool has no boundary and no declaration in it, and the
+-- law would be false if it did. That is documented behaviour, not a gap this
+-- test is working around.
+--
+-- **The law is about a command that CHANGED something**, and the qualification
+-- is not a hedge — it is @record@'s rule, found by writing this property
+-- without it. A line whose state is identical to the one before it replaces the
+-- head of the history rather than pushing, deliberately, so that a command that
+-- did nothing does not have to be undone; the consequence is that @:undo@
+-- undoes the last **change** and not the last **line**. Worth knowing before a
+-- UI puts a button on it.
+undoLaw :: TestTree
+undoLaw =
+  testGroup
+    "undo, over generated scripts"
+    [ testProperty "undoing a command that changed something puts it back exactly" $
+        withNumTests 60 $ forAll (listOf1 (elements pool)) $ \cmds ->
+          let prefixes = [ take k cmds | k <- [0 .. length cmds - 1] ]
+              bad =
+                [ (before, cmd, a, b)
+                | (before, cmd) <- zip prefixes cmds
+                , let a = developmentAfter (run (opening ++ before))
+                , let after = developmentAfter (run (opening ++ before ++ [cmd]))
+                , after /= a
+                , let b = developmentAfter (run (opening ++ before ++ [cmd, ":undo"]))
+                , a /= b
+                ]
+           in counterexample (show [ (x, y) | (x, y, _, _) <- take 1 bad ])
+                (property (null bad))
+
+      -- The other half, and it is phase 25d's: a line that did not do what it
+      -- said leaves the proof exactly as it was. Stated over the same pool, so
+      -- a command that fails mid-way and leaves half its work behind fails here.
+    , testProperty "a command that changed nothing is not a change to undo" $
+        withNumTests 60 $ forAll (listOf1 (elements pool)) $ \cmds ->
+          let prefixes = [ take k cmds | k <- [0 .. length cmds - 1] ]
+              bad =
+                [ (before, cmd)
+                | (before, cmd) <- zip prefixes cmds
+                , let a = developmentAfter (run (opening ++ before))
+                , developmentAfter (run (opening ++ before ++ [cmd])) == a
+                , developmentAfter (run (opening ++ before ++ [cmd, cmd])) /= a
+                ]
+           in counterexample (show (take 1 bad)) (property (null bad))
+    ]
+  where
+    opening = [":theorem t : ∀ (A : Type₀) -> A -> A"]
+
+    -- Tactics and moves, no boundary and no declaration: a boundary drops the
+    -- history on purpose and a declaration writes a global, which a snapshot
+    -- does not carry.
+    -- **No @prove@**, and the reason is a finding rather than a convenience:
+    -- @prove@ leaves a live choice point, and a later command that fails
+    -- unwinds into it and re-runs the search instead of failing
+    -- (@ms5\/CLOSEOUT.md@ 30). That makes \"the command changed nothing\"
+    -- history-dependent, so the pool leaves it out and 'failureBacktracks'
+    -- below pins the behaviour on its own.
+    pool =
+      [ "attack", "intro", "along", "back", "into", "regret", "solve"
+      , "claim \"k\" ⌜ Type₀ ⌝", "assume \"a\" ⌜ Type₀ ⌝"
+      , "cross type", "reduce", "try-core ⌜ Type₀ ⌝"
+      ]
+
+-- | **A command that fails does NOT reach a choice point an earlier line left**
+-- (@ms5\/CLOSEOUT.md@ 30, his ruling 2026-09-16, built as phase 95).
+--
+-- Four lines. @prove@ succeeds and leaves a choice point; @regret@ takes the
+-- guess back off; @back@ is at the root and cannot move. It used to unwind into
+-- @prove@'s choice point, re-run the search and put a guess back — undoing the
+-- @regret@ the user had just typed.
+--
+-- **His argument for refusing it**: backtracking past the running line takes a
+-- route on which that line was never typed, and nothing replays a prompt —
+-- /"it's literally like going back in time to prevent yourself from becoming a
+-- time traveller. It creates a paradox."/ The command is lost either way, so
+-- making the user type @retry@ costs them nothing and shows them what happened.
+--
+-- **Three things are asserted, and the third is the one that would otherwise rot
+-- quietly**: the development is left alone, the halt names the real reason /and/
+-- the choice point, and @retry@ really does still take it. Without the third
+-- this passes just as well if the alternative had been thrown away rather than
+-- declined — which is a different system and a worse one.
+failureStaysInTheLine :: TestTree
+failureStaysInTheLine =
+  testGroup
+    "a failing command does not reach an earlier line's choice point"
+    [ testCase "the development is exactly as the failing line found it" $ do
+        let before = developmentAfter (run (script ++ ["regret"]))
+            after  = developmentAfter (run (script ++ ["regret", "back"]))
+        assertBool
+          "back at the root changed the development — it unwound past its line"
+          (before == after)
+
+      -- **The offer, not only the refusal**, and the original reason with it: a
+      -- user told just \"no\" is stuck, and one told only about backtracking has
+      -- not been told why their command failed.
+    , testCase "and the halt carries both the reason and the choice point" $
+        case reverse (loadedResponses (run (script ++ ["regret", "back"]))) of
+          Ran _ (Halted (WouldLeaveTheLine why _)) : _ ->
+            why @?= CannotMove AtRoot
+          other -> assertFailure ("expected a declined backtrack: " ++ show (take 1 other))
+
+      -- **The explicit reach still reaches.** Declining is not discarding, and
+      -- this is the assertion that says so.
+      --
+      -- **It asks whether the frame is STILL THERE, not whether the
+      -- development moved**, and the difference is a real one this test got
+      -- wrong first time round: @retry@ does reach the choice point, takes
+      -- @abandon@, and @abandon@ fails on its own — so phase 25d rewinds the
+      -- line and the development ends up equal. Comparing developments would
+      -- have called that \"the frame is gone\" and been wrong.
+    , testCase "and retry still finds it" $
+        case reverse (loadedResponses (run (script ++ ["regret", "back", "retry"]))) of
+          Rejected NothingToRetry : _ ->
+            assertFailure "retry found no choice point — declining had discarded it"
+          _ -> pure ()
+
+      -- **The topmost frame is the boundary case, and nothing above caught it**
+      -- (found by mutation, 2026-09-16). Every assertion so far runs @regret@
+      -- between @prove@ and the failing line, and @regret@ is a rule — so it
+      -- leaves a @Call@ frame on top and the old @Choice@ sits one deeper.
+      -- Failing directly after @prove@ puts the live choice point at the very
+      -- top, where @depth@ has fallen to exactly the floor: with @<@ in place of
+      -- @<=@ the whole suite stayed green and this line backtracked across.
+    , testCase "even when the old choice point is the topmost frame" $ do
+        let before = developmentAfter (run script)
+            after  = developmentAfter (run (script ++ ["back"]))
+        assertBool
+          "back straight after prove unwound into prove's own choice point"
+          (before == after)
+
+      -- **And inside a yield, which is the same paradox** (found by mutation,
+      -- 2026-09-16 — 'Thena.Engine.load' sets the floor in both branches, and
+      -- removing it from the yielding one left the suite green).
+      --
+      -- A command typed while a rule is yielding is a line like any other:
+      -- backtracking into the yielding rule's own earlier choice point takes a
+      -- route on which that rule never yielded, so the command that was typed
+      -- could not have been given. One rule, and no case analysis about what
+      -- kind of line it was.
+    , testCase "and the same holds for a command typed inside a yield" $ do
+        let yielded = [":theorem t : ∀ (A : Type₀) -> A -> A", "do { prove ; yield \"paused\" }"]
+            before  = developmentAfter (run yielded)
+            after   = developmentAfter (run (yielded ++ ["back"]))
+        assertBool
+          "back inside a yield unwound into the yielding rule's choice point"
+          (before == after)
+    ]
+  where
+    script = [":theorem t : ∀ (A : Type₀) -> A -> A", "prove"]
 
 -- --------------------------------------------------------------------------
 -- The deliverable
@@ -108,23 +279,33 @@ holeTests =
     -- @let@ said @NothingToIntroduce@ and now says only that no clause applies.
     -- On MS2's closeout list.
   , halts "and refuses a focus that is not a hole at all"
-      (goal ++ ["along", "attack"]) (NoClauseMatched (GlobalName "attack") 0 [0])
+      (goal ++ ["along", "attack"]) (NoClauseMatched "attack" 0 [0])
   , halts "intro refuses a hole that has not been attacked"
-      (goal ++ ["intro"]) (NoClauseMatched (GlobalName "intro") 0 [0, 0])
+      (goal ++ ["intro"]) (NoClauseMatched "intro" 0 [0, 0])
   , halts "and a guess whose type is neither a ∀ nor a let"
-      (natGoal ++ ["attack", "intro"]) (NoClauseMatched (GlobalName "intro") 0 [0, 0])
+      (natGoal ++ ["attack", "intro"]) (NoClauseMatched "intro" 0 [0, 0])
   , ok "intro walks a Π"        (arrowGoal ++ ["attack", "intro"])
   , ok "and then the next one"  (arrowGoal ++ ["attack", "intro", "intro"])
 
   , ok "try attaches a guess"             (natGoal ++ ["attack", "into", "try-core ⌜ zero ⌝"])
 
-    -- **The two vocabularies, at the call site** (phase 38, come true at 41).
-    -- Corners make an argument a core term and a bare word makes it a surface
-    -- one — so a core tactic given a bare argument is handed the wrong kind of
-    -- value and says so. Phase 38 refused it earlier, with a message; now the
-    -- refusal is the op's, which is where every other operand kind is settled.
-  , halts "a core tactic will not take a surface argument"
-      (natGoal ++ ["attack", "into", "try-core zero"]) ExpectedTerm
+    -- **A bare argument is neither vocabulary as of MS5 phase 62b** — it is an
+    -- @instral@ reference, so this one is simply a name nothing bound. The
+    -- asymmetry it used to demonstrate (corners for Core, bare for Surface) is
+    -- what this milestone removes: both languages are written in a fence now.
+    --
+    -- **It is refused rather than halted as of the MS5 review**: a typed entry is
+    -- validated and typed like a rule file now, so an unbound name is a
+    -- 'Thena.Rules.UnboundInRule' at entry time.
+  , refuses "a bare argument is a reference, not a term"
+      (natGoal ++ ["attack", "into", "try-core zero"])
+      [UnboundInRule (GlobalName "entry") 0 "zero"]
+    -- And the vocabularies still do not mix: the surface fence makes a
+    -- 'Thena.Instral.Ops.VSurface', which a core tactic will not take. **The refusal is
+    -- the type system's now**, where it used to be the op's at run time.
+  , mistyped "a core tactic will not take a surface argument"
+      (natGoal ++ ["attack", "into", "try-core \10216 zero \10217"])
+      [Clash (InBody (GlobalName "entry") 0) TCore TSurface]
     -- The corners subsume phase 23b's parenthesisation rule: an argument that
     -- is not a single atom needed parentheses, and inside corners it does not.
   , ok "and inside them an argument needs no parentheses"
@@ -132,7 +313,7 @@ holeTests =
   , ok "and regret takes it off again"
       (natGoal ++ ["attack", "into", "try-core ⌜ zero ⌝", "regret"])
   , halts "regret needs a guess" (natGoal ++ ["regret"])
-      (NoClauseMatched (GlobalName "regret") 0 [0])
+      (NoClauseMatched "regret" 0 [0])
 
   , ok "solve commits a pure guess"
       (natGoal ++ ["attack", "into", "try-core ⌜ zero ⌝", "solve"])
@@ -141,7 +322,7 @@ holeTests =
     -- @claim@ inserts above the focus and leaves it where it was, so reaching
     -- the new hole is a @back@ — the path gained a step and this pops it.
   , ok "abandon drops a hole nothing refers to"
-      (natGoal ++ ["attack", "into", "claim spare : Nat", "back", "abandon"])
+      (natGoal ++ ["attack", "into", "claim \"spare\" ⌜ Nat ⌝", "back", "abandon"])
   , halts "and refuses one that is still referred to"
       (natGoal ++ ["abandon"]) (CannotMove StillReferenced)
   ]
@@ -202,7 +383,7 @@ sessionTests =
     -- one alone would pass for the wrong reason if @qed@ ever stopped checking
     -- purity.
   , testCase "a theorem starts a fresh development, not the one it found" $
-      namesIn (developmentAfter (run ["claim spare : Type₀", ":theorem t : Type₀"]))
+      namesIn (developmentAfter (run ["claim \"spare\" ⌜ Type₀ ⌝", ":theorem t : Type₀"]))
         @?= ["t"]
     -- **Elaboration, end to end** (MS4 phase 41e). The unit tests in
     -- "Thena.ElaborateTests" run against a synthetic cursor with no globals;
@@ -211,14 +392,14 @@ sessionTests =
   , ok "an application elaborates and proves"
       [ "data " ++ natDecl
       , ":theorem t : Nat"
-      , "elaborate (succ zero)"
+      , "elaborate ⟨ succ zero ⟩"
       , "qed"
       ]
   , ok "a two-argument spine folds"
       [ "data " ++ natDecl
       , "data Pair : Type\8320 where { mk : Nat -> Nat -> Pair }"
       , ":theorem p : Pair"
-      , "elaborate (mk zero (succ zero))"
+      , "elaborate ⟨ mk zero (succ zero) ⟩"
       , "qed"
       ]
     -- **Nested lambdas were broken from the moment @here@ existed** and this is
@@ -226,14 +407,14 @@ sessionTests =
     -- name, so the outer @goto@ landed on the inner component.
   , ok "nested lambdas elaborate"
       [ ":theorem u : \8704 (A : Type\8320) (a : A) -> A"
-      , "elaborate (\\ A -> \\ y -> y)"
+      , "elaborate ⟨ \\ A -> \\ y -> y ⟩"
       , "qed"
       ]
     -- **The structural cases** (MS4 phase 41f). A @∀@ is the one that needed
     -- the fifth component; the other three needed no new op at all.
   , ok "a ∀ elaborates and proves"
       [ ":theorem a : Type\8321"
-      , "elaborate (forall (A : Type\8320) -> A)"
+      , "elaborate ⟨ forall (A : Type\8320) -> A ⟩"
       , "qed"
       ]
     -- **A binder group nests**, one @quantify@ per Π: the domain hole is
@@ -241,18 +422,18 @@ sessionTests =
     -- is not in scope.
   , ok "a ∀ with two binders nests"
       [ ":theorem a : Type\8321"
-      , "elaborate (forall (A : Type\8320) (a : A) -> A)"
+      , "elaborate ⟨ forall (A : Type\8320) (a : A) -> A ⟩"
       , "qed"
       ]
   , ok "an arrow elaborates and proves"
       [ ":theorem a : Type\8321"
-      , "elaborate (Type\8320 -> Type\8320)"
+      , "elaborate ⟨ Type\8320 -> Type\8320 ⟩"
       , "qed"
       ]
   , ok "a let elaborates and proves"
       [ "data " ++ natDecl
       , ":theorem l : Nat"
-      , "elaborate (let y = zero in y)"
+      , "elaborate ⟨ let y = zero in y ⟩"
       , "qed"
       ]
     -- **An annotated @let@ elaborates its annotation into the type hole
@@ -261,7 +442,7 @@ sessionTests =
   , ok "an annotated let takes an application value"
       [ "data " ++ natDecl
       , ":theorem l : Nat"
-      , "elaborate (let y : Nat = succ zero in succ y)"
+      , "elaborate ⟨ let y : Nat = succ zero in succ y ⟩"
       , "qed"
       ]
     -- **A @let@ binds the name the user wrote**, which is what made phase
@@ -269,19 +450,19 @@ sessionTests =
   , ok "a let may shadow"
       [ "data " ++ natDecl
       , ":theorem l : Nat"
-      , "elaborate (let y : Nat = zero in let y : Nat = succ y in y)"
+      , "elaborate ⟨ let y : Nat = zero in let y : Nat = succ y in y ⟩"
       , "qed"
       ]
   , ok "an ascription elaborates and proves"
       [ "data " ++ natDecl
       , ":theorem s : Nat"
-      , "elaborate (zero : Nat)"
+      , "elaborate ⟨ zero : Nat ⟩"
       , "qed"
       ]
   , notOk "and an ascription that disagrees with the goal is refused"
       [ "data " ++ natDecl
       , ":theorem s : Nat"
-      , "elaborate (zero : Type\8320)"
+      , "elaborate ⟨ zero : Type\8320 ⟩"
       ]
     -- **Cumulativity reaching elaboration** (MS4 phase 41g). Every one of
     -- these failed with /"Type₀ and Type₁ are different universes"/ until
@@ -291,20 +472,20 @@ sessionTests =
   , ok "a term fits a universe above its own"
       [ "data " ++ natDecl
       , ":theorem u : Type\8321"
-      , "elaborate Nat"
+      , "elaborate ⟨ Nat ⟩"
       , "qed"
       ]
   , ok "including as an argument to a parameter pinned above it"
       [ "data " ++ natDecl
       , "data Box (A : Type\8321) : Type\8321 where { box : A -> Box A }"
       , ":theorem u : Type\8321"
-      , "elaborate (Box Nat)"
+      , "elaborate ⟨ Box Nat ⟩"
       , "qed"
       ]
   , ok "and in a lambda's body"
       [ "data " ++ natDecl
       , ":theorem u : Nat -> Type\8321"
-      , "elaborate (\\ n -> Nat)"
+      , "elaborate ⟨ \\ n -> Nat ⟩"
       , "qed"
       ]
     -- **The degenerate flex-flex case** (MS4 phase 41g). An un-annotated
@@ -314,13 +495,13 @@ sessionTests =
   , ok "an un-annotated let takes an application value"
       [ "data " ++ natDecl
       , ":theorem l : Nat"
-      , "elaborate (let y = succ zero in y)"
+      , "elaborate ⟨ let y = succ zero in y ⟩"
       , "qed"
       ]
   , ok "and may still shadow"
       [ "data " ++ natDecl
       , ":theorem l : Nat"
-      , "elaborate (let y = zero in let y = succ y in y)"
+      , "elaborate ⟨ let y = zero in let y = succ y in y ⟩"
       , "qed"
       ]
     -- **Cumulativity does not reach into an argument** (MS4 phase 41h). Both
@@ -328,8 +509,8 @@ sessionTests =
     -- development valid — @ms4/CLOSEOUT.md@ 12. @F@ is opaque, so nothing
     -- relates @F Type₀@ to @F Type₁@.
   , notOk "a neutral spine's argument is not cumulative"
-      [ "assume F : Type\8322 -> Type\8320"
-      , "assume x : F Type\8320"
+      [ "assume \"F\" ⌜ Type\8322 -> Type\8320 ⌝"
+      , "assume \"x\" ⌜ F Type\8320 ⌝"
       , ":goal F Type\8321"
       , "try-core \8988 x \8989"
       ]
@@ -339,7 +520,7 @@ sessionTests =
   , notOk "nor is a datatype's parameter"
       [ "data Empty2 : Type\8320 where { }"
       , "data Fn (A : Type\8322) : Type\8322 where { fn : (A -> Empty2) -> Fn A }"
-      , "assume g : Type\8320 -> Empty2"
+      , "assume \"g\" ⌜ Type\8320 -> Empty2 ⌝"
       , ":goal Fn Type\8321"
       , "try-core \8988 fn Type\8320 g \8989"
       ]
@@ -350,7 +531,7 @@ sessionTests =
   , ok "an elim elaborates and proves"
       [ "data " ++ natDecl
       , ":theorem e : Nat"
-      , "elaborate (elim Nat () (\\ x -> Nat) (zero (\\ k ih -> succ ih)) () (succ zero))"
+      , "elaborate ⟨ elim Nat () (\\ x -> Nat) (zero (\\ k ih -> succ ih)) () (succ zero) ⟩"
       , "qed"
       ]
     -- An indexed family, so the index group is not always empty and the
@@ -360,7 +541,7 @@ sessionTests =
       , "data Ev : Nat -> Type\8320 where { evZero : Ev zero "
           ++ "; evSS : \8704 (n : Nat) (p : Ev n) -> Ev (succ (succ n)) }"
       , ":theorem e : Nat"
-      , "elaborate (elim Ev () (\\ n p -> Nat) (zero (\\ n p ih -> succ ih)) (zero) evZero)"
+      , "elaborate ⟨ elim Ev () (\\ n p -> Nat) (zero (\\ n p ih -> succ ih)) (zero) evZero ⟩"
       , "qed"
       ]
     -- **A failure after a nested call returned is still reported** (MS4 phase
@@ -428,7 +609,7 @@ sessionTests =
       [ "data " ++ natDecl
       , "data Empty : Type where { }"
       , ":theorem t : \8704 (e : Empty {0}) -> Nat"
-      , "elaborate (\\ e -> elim Empty () (\\ x -> Nat) () () e)"
+      , "elaborate ⟨ \\ e -> elim Empty () (\\ x -> Nat) () () e ⟩"
       , "qed"
       ]
     -- **The wrapper\'s name is checked for a clash like any other name a
@@ -443,7 +624,7 @@ sessionTests =
   , notOk "and a method count that does not match the datatype is refused"
       [ "data " ++ natDecl
       , ":theorem e : Nat"
-      , "elaborate (elim Nat () (\\ x -> Nat) (zero) () (succ zero))"
+      , "elaborate ⟨ elim Nat () (\\ x -> Nat) (zero) () (succ zero) ⟩"
       ]
     -- **Surface declarations** (MS4 phase 42) — Brady's
     -- @NEW PROOF Type; E⟦t⟧; t' ← TERM; TTDECL (x : t')@, run as instructions
@@ -518,7 +699,7 @@ sessionTests =
       [ "data " ++ natDecl
       , "data Box (A : Type) : Type where { box : A -> Box A }"
       , ":theorem e : Type\8320"
-      , "elaborate (Box Nat)"
+      , "elaborate ⟨ Box Nat ⟩"
       , "qed"
       ]
     -- **The dependent application rule.** @box@'s second domain is the first
@@ -528,7 +709,7 @@ sessionTests =
       [ "data " ++ natDecl
       , "data Box (A : Type) : Type where { box : A -> Box A }"
       , ":theorem e : Box {0} Nat"
-      , "elaborate (box Nat zero)"
+      , "elaborate ⟨ box Nat zero ⟩"
       , "qed"
       ]
     -- **A declaration may use an earlier one**, which is what a proof module
@@ -543,7 +724,7 @@ sessionTests =
   , notOk "and too many arguments for the head is refused"
       [ "data " ++ natDecl
       , ":theorem e : Nat"
-      , "elaborate (zero zero)"
+      , "elaborate ⟨ zero zero ⟩"
       ]
     -- **A dependent signature can be declared at all** (MS4 phase 44b). It
     -- could not before: phase 42 cleared elaboration's @=@-bindings from the
@@ -574,7 +755,7 @@ sessionTests =
       , "declare z : Nat ; z = succ {Nat} zero"
       ]
   , ok "so a hole left in the scratch cannot block qed"
-      ["claim spare : Type₀", ":theorem t : Type₁", "try-core ⌜ Type₀ ⌝", "solve", "qed"]
+      ["claim \"spare\" ⌜ Type₀ ⌝", ":theorem t : Type₁", "try-core ⌜ Type₀ ⌝", "solve", "qed"]
   ]
 
 -- --------------------------------------------------------------------------
@@ -589,8 +770,8 @@ undoTests =
     -- top level has a development to take a line back in.
     rejects "with nothing typed yet there is nothing to undo" [":undo"] NothingToUndo
   , testCase "a line at the top level is taken back like any other" $
-      sameDevelopment ["assume A : Type₀", ":undo"] []
-  , rejects "and then there is nothing left" ["assume A : Type₀", ":undo", ":undo"]
+      sameDevelopment ["assume \"A\" ⌜ Type₀ ⌝", ":undo"] []
+  , rejects "and then there is nothing left" ["assume \"A\" ⌜ Type₀ ⌝", ":undo", ":undo"]
       NothingToUndo
 
     -- Every proof boundary starts a fresh history, which is what keeps @:undo@
@@ -598,7 +779,7 @@ undoTests =
     -- @globals@, which no 'Snapshot' carries.
   , rejects "nor at the start of one" [":theorem t : Type₀", ":undo"] NothingToUndo
   , rejects "a theorem does not let you undo back past it"
-      ["assume A : Type₀", ":theorem t : Type₀", ":undo"] NothingToUndo
+      ["assume \"A\" ⌜ Type₀ ⌝", ":theorem t : Type₀", ":undo"] NothingToUndo
   , rejects "and abandoning one does not either"
       [":theorem t : Type₀", "attack", ":abandon", ":undo"] NothingToUndo
 
@@ -650,6 +831,20 @@ halts name ls why = testCase name $
   case reverse (loadedResponses (run ls)) of
     Ran _ (Halted r) : _ -> r @?= why
     other -> assertFailure ("expected a halt: " ++ show (take 1 other))
+
+-- | The entry did not resolve: an unbound name, a bad operand run (MS5 review).
+refuses :: String -> [String] -> [RuleError] -> TestTree
+refuses name ls es = testCase name $
+  case reverse (loadedResponses (run ls)) of
+    LineRefused es' : _ -> es' @?= es
+    other -> assertFailure ("expected a refusal: " ++ show (take 1 other))
+
+-- | The entry resolved and does not type check (MS5 review).
+mistyped :: String -> [String] -> [InstralTypeError] -> TestTree
+mistyped name ls es = testCase name $
+  case reverse (loadedResponses (run ls)) of
+    EntryMistyped es' : _ -> es' @?= es
+    other -> assertFailure ("expected a type error: " ++ show (take 1 other))
 
 rejects :: String -> [String] -> CommandError -> TestTree
 rejects name ls e = testCase name $

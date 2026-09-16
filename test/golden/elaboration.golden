@@ -25,6 +25,11 @@ prove
 fill ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
+fit-core ‹f›
+fit-core ‹f›
+claim ‹ty›
+assume ‹ty›
+quantify ‹ty›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
@@ -45,7 +50,7 @@ enter-binders ‹t›
 enter-binders ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
-thena spine> elaborate a
+thena spine> elaborate ⟨ a ⟩
 already equal
 thena spine> :show
   let ? const : ∀ (A : Type₀) -> A -> A ≐ (
@@ -74,9 +79,9 @@ thena spine> intro
 thena spine> into
 thena spine> along
 thena spine> along
-thena spine> elaborate b
+thena spine> elaborate ⟨ b ⟩
 stuck: not in scope: b
-thena spine> elaborate (a a)
+thena spine> elaborate ⟨ a a ⟩
 chose 23: elaborate
 backtracking to 23: elaborate
 solved: B
@@ -92,7 +97,7 @@ thena spine> into
 thena spine> along
 thena spine> along
 thena spine> :step on
-thena spine> elaborate a
+thena spine> elaborate ⟨ a ⟩
 pc
   0  w = surface-name t
   1  x = resolve-name w

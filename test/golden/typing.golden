@@ -20,8 +20,7 @@ thena spine> :infer ⌜ elim Nat () (\ (_ : Nat) -> Nat) (zero succ) () (succ ze
 succ has type Nat -> Nat
   but ∀ (x : Nat) -> (λ (_ : Nat) -> Nat) x -> (λ (_ : Nat) -> Nat) (succ x) was expected
   under x, (λ (_ : Nat) -> Nat) x -> (λ (_ : Nat) -> Nat) (succ x) and Nat do not match
-thena spine> claim h : Nat
-claimed h
+thena spine> claim "h" ⌜ Nat ⌝
 thena spine> cross type
 thena core> :infer
 Type₀ : Type₁

@@ -13,6 +13,11 @@ prove
 fill ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
+fit-core ‹f›
+fit-core ‹f›
+claim ‹ty›
+assume ‹ty›
+quantify ‹ty›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
@@ -41,7 +46,7 @@ thena spine> :show
   let refined = Just A a : Maybe A in
 ▶ let g = refined : Maybe Bool in
   g
-thena spine> goto a
+thena spine> goto-named "a"
 thena spine> apply-core ⌜ true ⌝
 already equal
 thena spine> :show
@@ -80,7 +85,7 @@ thena spine> :show
     ap21
   ) in
   ap2
-thena spine> goto _
+thena spine> goto-named "_"
 thena spine> :where
 focus
   let ? _ : A in
@@ -147,8 +152,7 @@ thena spine> :theorem h : ∀ (b : Bool) -> Maybe Bool
 proving h : Bool -> Maybe Bool
 thena spine> apply-core ⌜ Just ⌝
 stuck: Maybe A and Bool -> Maybe Bool cannot be made equal
-thena spine> assume q : Bool
-assumed q
+thena spine> assume "q" ⌜ Bool ⌝
 thena spine> apply-core ⌜ Just ⌝
 stuck: Maybe A and Bool -> Maybe Bool cannot be made equal
 thena spine> :abandon
@@ -170,10 +174,10 @@ type
   Maybe Bool
 thena spine> apply-core ⌜ Just ⌝
 solved: A
-thena spine> goto a
+thena spine> goto-named "a"
 thena spine> apply-core ⌜ b ⌝
 already equal
-thena spine> goto h
+thena spine> goto-named "h"
 thena spine> solve
 thena spine> qed
 h : Bool -> Maybe Bool   ∎

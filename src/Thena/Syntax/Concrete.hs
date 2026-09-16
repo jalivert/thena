@@ -1,4 +1,13 @@
--- | The named, unresolved tree the parser produces (§2.5).
+-- | The named, unresolved tree the parser produces (§2.5) — the Development
+-- Calculus and the Core terms inside it.
+--
+-- **`instral`'s concrete syntax moved out at MS5 phase 61a**, to
+-- "Thena.Instral.Concrete". @RawInstr@ and its neighbours never referred to
+-- 'Raw' and had nothing to do with it; keeping them here meant one module named
+-- for one language holding the syntax of three, which is the confusion the
+-- standing rule forbids. **What is left is still two languages in one type** —
+-- see 'Raw' — and that is not a module boundary but a type split, owed to the
+-- phase that retires the DC's spelling.
 --
 -- It is not 'Thena.Core.Term.Core' and cannot be: which of @Bound@, @Free@ and
 -- @Global@ a written name denotes depends on the context it is written in, and
@@ -12,15 +21,16 @@
 -- loud.
 module Thena.Syntax.Concrete
   ( Raw (..)
+  , Splice (..)
+  , splices
+  , splicesIn
+  , termSplicesIn
+  , nameSplicesIn
   , RawBinder (..)
+  , RawIdent (..)
   , RawConstraint (..)
   , RawData (..)
   , RawConstructor (..)
-  , RawRule (..)
-  , RawInstr (..)
-  , RawOp (..)
-  , RawOperand (..)
-  , RawTest (..)
   ) where
 
 -- | A written term, or a written development. One tree for both fragments
@@ -35,18 +45,32 @@ data Raw
   = RawName String
   | RawUniverse Int
   | RawUniverseOpen              -- ^ @Type@ — a universe whose level is inferred
-  | RawAt String [Int]           -- ^ @foo {0 1}@ — a global at level arguments
+  | RawAt RawIdent [Int]         -- ^ @foo {0 1}@ — a global at level arguments
 
   | RawLam [RawBinder] Raw       -- ^ @λ (x : S) (y : T) -> b@
   | RawPi [RawBinder] Raw        -- ^ @∀ (x : S) (y : T) -> B@
   | RawArrow Raw Raw             -- ^ @S -> B@, the non-dependent case
   | RawApp Raw Raw
-  | RawLet String Raw Raw Raw    -- ^ @let x = s : S in t@
-  | RawClaim String Raw Raw      -- ^ @let ? x : S in p@
-  | RawGuess String Raw Raw Raw  -- ^ @let ? x : S ≐ (g) in p@
+  | RawLet RawIdent Raw Raw Raw  -- ^ @let x = s : S in t@
+  | RawClaim RawIdent Raw Raw    -- ^ @let ? x : S in p@
+  | RawGuess RawIdent Raw Raw Raw -- ^ @let ? x : S ≐ (g) in p@
   | RawPending RawConstraint Raw -- ^ @κ ▸ p@
   | RawQuote Raw                 -- ^ @⌜ t ⌝@
-  | RawElim String [Int] [Raw] Raw [Raw] [Raw] Raw
+  | RawSplice String
+    -- ^ **@${x}@ — a hole in a written term, filled from the binding @x@ when
+    -- the instruction runs** (MS5 phase 81, his design).
+    --
+    -- **A splice always supplies a nonterminal** — his observation, and it is
+    -- what makes this cheap: a splice stands where a /term/ stands, so the
+    -- template parses once, at load, into a term with holes, and what each hole
+    -- wants is known from where it sits rather than from a pass of its own.
+    --
+    -- **It names a binding rather than holding an expression**, which costs
+    -- nothing: a nested call in an operand is already lifted into a binding of
+    -- its own (MS5 phase 63), so @${f a}@ would be written as two lines
+    -- whatever this said. It also keeps "Thena.Syntax.Concrete" from importing
+    -- "Thena.Instral.Concrete", which imports this module.
+  | RawElim RawIdent [Int] [Raw] Raw [Raw] [Raw] Raw
     -- ^ @elim d (params) motive (methods) (indices) target@ (§2.6, phase 7) —
     -- positional, and in exactly 'Thena.Core.Term.Core''s own field order for
     -- 'Thena.Core.Term.Eliminate', so where a field goes needs no name.
@@ -55,7 +79,27 @@ data Raw
 -- | @(x : S)@ — one parenthesised binding. Always annotated: there is no
 -- inference at this level, and a binder with no type is a parse error rather
 -- than a hole (§2.6).
-data RawBinder = RawBinder String Raw
+-- | A NAME in the source, which may itself be spliced (MS5 phase 88).
+--
+-- **His principle, applied all the way**: /a splice supplies a nonterminal/.
+-- Phase 81 built the production at one nonterminal — a 'Raw' term — so
+-- @core\`${d} -> ${d}\`@ worked and @core\`λ (${n} : ${d}) -> ${d}\`@ was a
+-- parse error, because a binder's name is a position where the grammar wants a
+-- /name/ and there was no splice production there.
+--
+-- **Every position where the grammar wants a name now takes one**: a λ or ∀
+-- binder, a @let@, a claim, a guess, an @elim@\'s datatype and a global at
+-- level arguments. What the position wants decides what the binding must hold —
+-- a 'Thena.Instral.Type.TName' here, where a term position wants a
+-- 'Thena.Instral.Type.TCore' — so nothing has to be annotated and the two
+-- readings cannot be confused.
+data RawIdent
+  = RawWord   String  -- ^ written down
+  | RawIdentSplice String
+    -- ^ @${x}@ — the name comes from the binding @x@ when the instruction runs.
+  deriving (Eq, Show)
+
+data RawBinder = RawBinder RawIdent Raw
   deriving (Eq, Show)
 
 -- | @Ξ ⊢ s ≟ t : T@ — the binders, then the two sides, then the type.
@@ -78,63 +122,60 @@ data RawData = RawData String [RawBinder] Raw [RawConstructor]
 data RawConstructor = RawConstructor String Raw
   deriving (Eq, Show)
 
--- | A written rule (§8, phase 21) — @rule ‹name› (‹params›) :- when ‹tests› then ‹body›@.
+-- | One hole in a written term, and which kind of position it stands in.
 --
--- Named and unresolved like every other tree here: the tests and the op words
--- are 'String's, and turning them into 'Thena.Ops.Test' and 'Thena.Ops.Op' is
--- "Thena.Rules"'s job. The parser cannot do it, for the same reason it cannot
--- produce a 'Thena.Core.Term.Core': the op words are not lexer keywords — if
--- they were, @solve@ and @type@ would stop being usable identifiers in terms —
--- so the grammar sees an @ident@ and only resolution knows which op it names.
---
--- **@:-@ separates the head from the conditions, and both sides of it are
--- deliberately empty for now.** DECIDED by the user 2026-08-25: pattern
--- matching on the focused term and on the goal is coming, and it will attach to
--- the head, left of @:-@ or right of it. @when@ stays underneath whatever
--- arrives — it is the low-level, manual way to ask whether a rule applies.
-data RawRule = RawRule String [String] [RawTest] [RawInstr]
+-- **The kind belongs to the OCCURRENCE, not to the binding** (MS5 phase 90,
+-- @ms5\/CLOSEOUT.md@ 42). Phase 88 kept two walks and found the term splices by
+-- subtracting the name splices from all of them, so a binding used once as a
+-- name and once as a term was a name everywhere: @∀ (${n} : ${d}) -> ${n}@
+-- asked only whether @n@ was a name, loaded, and failed when it ran.
+data Splice
+  = TermSplice String  -- ^ @${x}@ where the grammar wants a term
+  | NameSplice String  -- ^ @${x}@ where the grammar wants a name
   deriving (Eq, Show)
 
--- | @‹name› = ‹op› ‹args›@ or @‹op› ‹args›@ — 'Thena.Ops.Instr''s two cases, written.
-data RawInstr
-  = RawBind String RawOp
-  | RawDo   RawOp
-  deriving (Eq, Show)
+-- | Every hole a written term waits for, outermost first (MS5 phases 81, 88).
+--
+-- The twin of 'Thena.Surface.Concrete.blocksIn': one walk over the tree that is
+-- not resolution, so that @validate@ can see an unbound name inside a template
+-- and inference can ask what each hole must be. **The position is what
+-- decides**: a hole reached through 'RawIdentSplice' wants a name and one
+-- reached through 'RawSplice' wants a term, and no position accepts both.
+splices :: Raw -> [Splice]
+splices t = case t of
+  RawSplice x        -> [TermSplice x]
+  RawLam bs b        -> concatMap binder bs ++ splices b
+  RawPi bs b         -> concatMap binder bs ++ splices b
+  RawArrow a b       -> splices a ++ splices b
+  RawApp f x         -> splices f ++ splices x
+  RawLet n v ty b    -> named n ++ splices v ++ splices ty ++ splices b
+  RawClaim n ty p    -> named n ++ splices ty ++ splices p
+  RawGuess n ty g p  -> named n ++ splices ty ++ splices g ++ splices p
+  RawPending _ p     -> splices p
+  RawQuote q         -> splices q
+  RawElim d _ ps m ms is tg ->
+    named d ++ concatMap splices ps ++ splices m ++ concatMap splices ms
+      ++ concatMap splices is ++ splices tg
+  RawName _          -> []
+  RawUniverse _      -> []
+  RawUniverseOpen    -> []
+  RawAt n _          -> named n
+  where
+    binder (RawBinder n ty) = named n ++ splices ty
 
--- | An op word and the arguments written after it, both unresolved.
---
--- One shape for every op, however the op's own arguments are typed: @cross
--- type@, @arg 2@ and @call try t@ all parse to this and are told apart in
--- resolution. That is what keeps the grammar to two productions.
-data RawOp = RawOp String [RawOperand]
-  deriving (Eq, Show)
+    named i = case i of { RawIdentSplice x -> [NameSplice x] ; RawWord _ -> [] }
 
--- | One written test in a rule's head: a word, and whatever was written after
--- it (MS4 phase 47).
---
--- **The same shape 'RawOp' has, for the same reason** — which word names a test
--- and whether it was given the right number of operands is resolution's
--- question, not the parser's (§2.5, the parser is shallow).
---
--- A head is a /run/ of tests with nothing between them, so a test that takes
--- operands is written in parentheses — @when focus-is-hole (surface-is-name t)@
--- — and a bare word is a test of no operands. Without the brackets
--- @when focus-is-hole goal-type-is-pi@ would read as one test applied to
--- another word.
-data RawTest = RawTest String [RawOperand]
-  deriving (Eq, Show)
+-- | The binding each hole is filled from, term and name alike — what @validate@
+-- needs, since a missing binding is refused the same way whatever it was for.
+splicesIn :: Raw -> [String]
+splicesIn = map bindingOf . splices
+  where
+    bindingOf sp = case sp of { TermSplice x -> x ; NameSplice x -> x }
 
--- | What may be written as an argument: a name, a position, or text.
---
--- **No term literal, and that is a boundary rather than an omission.** A term
--- would have to be resolved in a context, and a rule is written where there is
--- no context — no proof is in progress and no focus exists.
---
--- 'RawText' arrives at phase 22b, at the user's instruction: *"Rules absolutely
--- need a string literal."* Without it @say@, @ask@ and @concat@ had keywords
--- that resolved and no way to be given anything to say.
-data RawOperand
-  = RawRef String
-  | RawPos Int
-  | RawText String
-  deriving (Eq, Show)
+-- | The holes standing in a TERM position, one entry per occurrence.
+termSplicesIn :: Raw -> [String]
+termSplicesIn t = [ x | TermSplice x <- splices t ]
+
+-- | The holes standing in a NAME position, one entry per occurrence.
+nameSplicesIn :: Raw -> [String]
+nameSplicesIn t = [ x | NameSplice x <- splices t ]

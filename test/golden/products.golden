@@ -1,5 +1,5 @@
 declared Nat
-no noConfusionEven: evenSS's argument p has a type that depends on an earlier argument, so its equation cannot be stated
+no noConfusionEven: evenSS's argument 2 (p) has a type that depends on an earlier argument, so its equation cannot be stated
 declared Even
 Unit {0}
 Empty {0}
