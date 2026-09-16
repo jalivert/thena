@@ -1371,6 +1371,16 @@ renderFailReason r = case r of
       ++ concatMap ("\n  " ++) (renderTypeError 0 e)
   NoGoalHere        -> "nothing is written down here, so there is no goal"
   NoRuleMatched     -> "no rule applies here"
+  -- **Two sentences, and the second is the offer** (MS5 phase 95). The first is
+  -- whatever went wrong; the second says the machine declined to backtrack past
+  -- this line and names the word that would.
+  WouldLeaveTheLine why i ->
+    renderFailReason why
+      ++ "\n  undoing that would backtrack to "
+      ++ show i
+      ++ ", which was chosen before this line — retry "
+      ++ show i
+      ++ " to take it"
   CannotEliminate e -> renderElimError e
   UnboundInBody x   -> "nothing named " ++ x ++ " in this body"
   NotAnIdentifier s -> show s ++ " is not a name"

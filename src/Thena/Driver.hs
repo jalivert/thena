@@ -335,7 +335,9 @@ currentAttempt s = case sessionWork s of
 
 newSession :: Session
 newSession = Session
-  { sessionMachine   = Machine (Exec [] [] []) ps [] emptyGlobals [] [] n
+  -- The trailing @0@ is 'Engine.lineFloor' (MS5 phase 95): an empty stack, so
+  -- the first line's failures have nothing below them to decline.
+  { sessionMachine   = Machine (Exec [] [] []) ps [] emptyGlobals [] [] n 0
   , sessionWork      = Scratch
   , sessionSuspended = []
   , sessionHistory   = (Exec [] [] [], ps, []) :| []

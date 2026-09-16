@@ -96,7 +96,7 @@ only r = bases [r]
 
 machine :: [RuleBase] -> Cursor -> [Instr] -> Machine
 machine base cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals base [] 1000)
+  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals base [] 1000 0)
 
 -- | Run as the driver does, following every channel, and keep the messages.
 runOut :: Machine -> ([String], Either FailReason Machine)

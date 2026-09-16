@@ -201,6 +201,26 @@ data Machine = Machine
     -- Written when a declaration is installed, read when a use of that name is
     -- elaborated.
   , names       :: Int        -- ^ NOT backtrackable (§7.4)
+  , lineFloor   :: Int
+    -- ^ **how many frames were already on the stack when this line's program
+    -- was loaded** (MS5 phase 95) — the depth below which a failure will not
+    -- unwind. NOT backtrackable, like 'names' above it.
+    --
+    -- **His ruling, 2026-09-16.** A failure that unwinds past the line that is
+    -- running takes a route on which that line was never typed, and nothing
+    -- replays a prompt — /"this is the wrong kind of 'time travel' - it's
+    -- literally like going back in time to prevent yourself from becoming a
+    -- time traveller. It creates a paradox."/ So a choice point made by an
+    -- earlier line is reachable only by @retry@, which is the explicit reach,
+    -- and 'failure' stops at this depth and says so instead.
+    --
+    -- **It is a depth and not a mark on a frame**, the same shape phase 53 used
+    -- for 'enclosing'\'s @Int@: a frame does not need to know which line made
+    -- it, and giving it one would be a field every other reader has to ignore.
+    --
+    -- **Nothing is prevented**, which is the second principle rather than a
+    -- guard rail: 'retryFrom' does not consult this, so the alternative is one
+    -- word away — what changes is that the word is the user's.
   }
   deriving (Eq, Show)
 
@@ -486,8 +506,17 @@ load is m
   -- state in which the rest of the program is still wanted. That is not a mode:
   -- it is one statable rule about what is live, and 'isYielding' is the test
   -- for it.
-  | isYielding m = m { exec = (exec m) { pc = is ++ pc (exec m) } }
-  | otherwise    = m { exec = (exec m) { pc = is, env = [] } }
+  --
+  -- **This is where a line begins, so this is where 'lineFloor' is set** (MS5
+  -- phase 95), and it is set in **both** branches from the same expression. A
+  -- command typed inside a yield is the same paradox as any other: backtracking
+  -- into the yielding rule's own earlier choice point takes a route on which
+  -- that rule never yielded, so the command that was typed could not have been.
+  -- One rule, no case analysis about which kind of line it was.
+  | isYielding m = (floored m) { exec = (exec m) { pc = is ++ pc (exec m) } }
+  | otherwise    = (floored m) { exec = (exec m) { pc = is, env = [] } }
+  where
+    floored k = k { lineFloor = length (stack (exec k)) }
 
 -- | Is the machine waiting for an answer? The driver asks this before it calls
 -- 'resumeAt', so that a line typed when nothing was asked is reported rather
@@ -603,33 +632,63 @@ resumeAt a m = case pc (exec m) of
 -- Phase 16 gives this the unwind of §7.3 — pop frames until one has an
 -- alternative left, restore the state it saved, run the next alternative. Until
 -- @Choice@ exists there is nothing to unwind /to/, so every failure is 'Stuck'.
+-- **The unwind stops at 'lineFloor'** (MS5 phase 95, his ruling). A frame that
+-- was already on the stack when this line's program was loaded belongs to an
+-- earlier line, and taking its alternative would take a route on which this line
+-- was never typed. So the search is not run: the failure is reported with the
+-- choice point named, and @retry ‹n›@ takes it if that is what the user meant.
+--
+-- **A choice point THIS line made is reached exactly as before** — a rule
+-- driving its own search is what rules do, and nothing here changes it.
 failure :: FailReason -> Machine -> Outcome
-failure r0 m = unwind (stack (exec m))
+failure r0 m = unwind (length (stack (exec m))) (stack (exec m))
   where
-    unwind [] = Stuck r0 m
-    unwind (fr : stk) = case fr of
-      Thena.Engine.Call {} -> unwind stk
-      Choice {} -> case next (alts fr) of
-        -- Cannot arise: the peek in 'perform' never builds a 'Choice' without
-        -- a live alternative, and 'demote' unbuilds one the moment its last is
-        -- taken. Written out rather than left to a pattern-match failure.
-        Nothing       -> unwind stk
-        -- **Announced, not silent.** §1 asks that search be a transparent,
-        -- inspectable part of the machine rather than something that happens
-        -- between commands, and an alternative taken inside a failing command
-        -- is otherwise invisible: the user typed @retry 77@, @solve@ failed,
-        -- @regret@ ran, and only the development moved.
-        -- **Every frame below comes back to life** (MS4 phase 57). Their
-        -- continuations belong to the branch being abandoned; in the branch
-        -- about to be taken they have not run, so a frame that was stepped
-        -- over must be entered again. Without this the alternative would run
-        -- and the caller\'s remaining program would not — which is the same
-        -- hole from the other side.
-        Just (r, it') -> Saying (took "backtracking to" fr r) m
-          { development = saved fr
-          , exec  = Exec (ruleBody r) (seedFor fr r)
-                         (demote fr r it' : map unreturned stk)
-          }
+    -- @depth@ is how many frames are left including the one in hand, so the
+    -- frame at the head belongs to an earlier line exactly when @depth@ has
+    -- fallen to the floor. Counted down rather than measured with 'length' at
+    -- each step, which would be quadratic in the stack.
+    unwind _ [] = Stuck r0 m
+    unwind depth frames@(fr : stk)
+      | depth <= lineFloor m = declined frames
+      | otherwise = case fr of
+          Thena.Engine.Call {} -> unwind (depth - 1) stk
+          Choice {} -> case next (alts fr) of
+            -- Cannot arise: the peek in 'perform' never builds a 'Choice'
+            -- without a live alternative, and 'demote' unbuilds one the moment
+            -- its last is taken. Written out rather than left to a
+            -- pattern-match failure.
+            Nothing       -> unwind (depth - 1) stk
+            -- **Announced, not silent.** §1 asks that search be a transparent,
+            -- inspectable part of the machine rather than something that
+            -- happens between commands, and an alternative taken inside a
+            -- failing command is otherwise invisible: the user typed
+            -- @retry 77@, @solve@ failed, @regret@ ran, and only the
+            -- development moved.
+            -- **Every frame below comes back to life** (MS4 phase 57). Their
+            -- continuations belong to the branch being abandoned; in the
+            -- branch about to be taken they have not run, so a frame that was
+            -- stepped over must be entered again. Without this the alternative
+            -- would run and the caller\'s remaining program would not — which
+            -- is the same hole from the other side.
+            Just (r, it') -> Saying (took "backtracking to" fr r) m
+              { development = saved fr
+              , exec  = Exec (ruleBody r) (seedFor fr r)
+                             (demote fr r it' : map unreturned stk)
+              }
+
+    -- **Below the floor: report, do not run** (MS5 phase 95). The first live
+    -- choice point down there is what @retry@ would take, so it is named; with
+    -- none to name this is an ordinary 'Stuck', and nothing is claimed about a
+    -- backtracking that could not have happened.
+    --
+    -- The @hasNext@ filter is the same defence as the @Nothing@ branch above
+    -- and, like it, **cannot fire**: 'demote' unbuilds a 'Choice' the moment its
+    -- last alternative is taken. Mutation says so — dropping the filter changes
+    -- no test — and it is written out for the same reason the neighbour is,
+    -- rather than left to name a dead frame if that ever stops being true.
+    declined frames = case [ fr | fr@Choice {} <- frames, hasNext (alts fr) ] of
+      fr : _ -> Stuck (WouldLeaveTheLine r0 (choiceId fr)) m
+      []     -> Stuck r0 m
 
     took verb fr r = verb ++ " " ++ show (choiceId fr) ++ ": " ++ nameOfRule r
 
@@ -2171,6 +2230,20 @@ retryFrom target m = go (0 :: Int) (stack (exec m))
         Just (r, it') -> Right
           ( m { development = saved fr
               , exec  = Exec (ruleBody r) (seedFor fr r) (demote fr r it' : stk)
+                -- **@retry@ lowers the floor to the frame it entered** (MS5
+                -- phase 95). 'lineFloor' records where /this line's/ work
+                -- begins, and this is a line that deliberately begins its work
+                -- at an older choice point: having asked for it by name, the
+                -- user has made it theirs. So an alternative that fails on its
+                -- own still falls through to the next one inside this command,
+                -- which is §7.7's \"@retry@ takes one alternative, not one
+                -- command\" and is what @test\/golden\/backtracking.golden@
+                -- pins.
+                --
+                -- **It is not an exception to his ruling, it is the explicit
+                -- reach it names.** Nothing below this frame becomes reachable:
+                -- the floor moves to exactly this frame's depth and no further.
+              , lineFloor = length stk
               }
           , note (choiceId fr) (ruleName r) popped
           )

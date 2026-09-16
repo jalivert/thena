@@ -69,7 +69,7 @@ bases rs = [ruleBase "test" Nothing "" [] [] [] rs]
 
 machine :: [RuleBase] -> [Instr] -> Machine
 machine base is =
-  load is (Machine (Exec [] [] []) (Development hole) [] emptyGlobals base [] 1000)
+  load is (Machine (Exec [] [] []) (Development hole) [] emptyGlobals base [] 1000 0)
 
 runOut :: Machine -> ([String], Either FailReason Machine)
 runOut m = case step m of

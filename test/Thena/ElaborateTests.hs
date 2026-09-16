@@ -239,7 +239,7 @@ elaboratingAt cur s =
 -- **With the standard base installed**, because elaboration lives in it.
 machineAt :: Cursor -> [Instr] -> Machine
 machineAt cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals expectedBase [] 1000)
+  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals expectedBase [] 1000 0)
 
 -- | @? goal : ∀ (a : Type₀) (b : Type₀) -> Type₀@ — two binders, so a miscount
 -- would show.

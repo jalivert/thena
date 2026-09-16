@@ -722,7 +722,7 @@ text = Lit . VText
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env cur is =
   load is (Machine (Exec [] [] []) (Development cur) [] env
-                   (expectedBase ++ [returning]) [] 1000)
+                   (expectedBase ++ [returning]) [] 1000 0)
 
 -- | A base with one rule in it that returns something (MS5 phase 63).
 --

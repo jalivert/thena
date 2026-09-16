@@ -46,7 +46,7 @@ tests =
     , testGroup "the session" sessionTests
     , testGroup "undo" undoTests
     , undoLaw
-    , failureBacktracks
+    , failureStaysInTheLine
     ]
 
 -- --------------------------------------------------------------------------
@@ -125,28 +125,91 @@ undoLaw =
       , "cross type", "reduce", "try-core ⌜ Type₀ ⌝"
       ]
 
--- | **A command that fails unwinds into a choice point an earlier line left,
--- and the development changes** (found 2026-09-13, @ms5\/CLOSEOUT.md@ 30).
+-- | **A command that fails does NOT reach a choice point an earlier line left**
+-- (@ms5\/CLOSEOUT.md@ 30, his ruling 2026-09-16, built as phase 95).
 --
 -- Four lines. @prove@ succeeds and leaves a choice point; @regret@ takes the
--- guess back off; @back@ is at the root and cannot move — and instead of
--- failing it unwinds into @prove@\'s choice point, tries the alternatives, and
--- puts a guess back. The user typed a /navigation/ command.
+-- guess back off; @back@ is at the root and cannot move. It used to unwind into
+-- @prove@'s choice point, re-run the search and put a guess back — undoing the
+-- @regret@ the user had just typed.
 --
--- **This is pinned, not endorsed.** Phase 25d's rule is that a line which did
--- not do what it said leaves the proof exactly as it was, and its stated
--- premise — /a tactic failing at the REPL has nowhere to backtrack to/ — is
--- what is false here. @record@\'s guard never fires because the line ends up
--- succeeding. Which way it should go is his.
-failureBacktracks :: TestTree
-failureBacktracks =
-  testCase "a failing command re-enters an earlier line's choice point" $ do
-    let before = developmentAfter (run (script ++ ["regret"]))
-        after  = developmentAfter (run (script ++ ["regret", "back"]))
-    assertBool
-      "back at the root left the development alone — if this now holds, \
-      \ms5/CLOSEOUT.md 30 has been decided and this test should say so"
-      (before /= after)
+-- **His argument for refusing it**: backtracking past the running line takes a
+-- route on which that line was never typed, and nothing replays a prompt —
+-- /"it's literally like going back in time to prevent yourself from becoming a
+-- time traveller. It creates a paradox."/ The command is lost either way, so
+-- making the user type @retry@ costs them nothing and shows them what happened.
+--
+-- **Three things are asserted, and the third is the one that would otherwise rot
+-- quietly**: the development is left alone, the halt names the real reason /and/
+-- the choice point, and @retry@ really does still take it. Without the third
+-- this passes just as well if the alternative had been thrown away rather than
+-- declined — which is a different system and a worse one.
+failureStaysInTheLine :: TestTree
+failureStaysInTheLine =
+  testGroup
+    "a failing command does not reach an earlier line's choice point"
+    [ testCase "the development is exactly as the failing line found it" $ do
+        let before = developmentAfter (run (script ++ ["regret"]))
+            after  = developmentAfter (run (script ++ ["regret", "back"]))
+        assertBool
+          "back at the root changed the development — it unwound past its line"
+          (before == after)
+
+      -- **The offer, not only the refusal**, and the original reason with it: a
+      -- user told just \"no\" is stuck, and one told only about backtracking has
+      -- not been told why their command failed.
+    , testCase "and the halt carries both the reason and the choice point" $
+        case reverse (loadedResponses (run (script ++ ["regret", "back"]))) of
+          Ran _ (Halted (WouldLeaveTheLine why _)) : _ ->
+            why @?= CannotMove AtRoot
+          other -> assertFailure ("expected a declined backtrack: " ++ show (take 1 other))
+
+      -- **The explicit reach still reaches.** Declining is not discarding, and
+      -- this is the assertion that says so.
+      --
+      -- **It asks whether the frame is STILL THERE, not whether the
+      -- development moved**, and the difference is a real one this test got
+      -- wrong first time round: @retry@ does reach the choice point, takes
+      -- @abandon@, and @abandon@ fails on its own — so phase 25d rewinds the
+      -- line and the development ends up equal. Comparing developments would
+      -- have called that \"the frame is gone\" and been wrong.
+    , testCase "and retry still finds it" $
+        case reverse (loadedResponses (run (script ++ ["regret", "back", "retry"]))) of
+          Rejected NothingToRetry : _ ->
+            assertFailure "retry found no choice point — declining had discarded it"
+          _ -> pure ()
+
+      -- **The topmost frame is the boundary case, and nothing above caught it**
+      -- (found by mutation, 2026-09-16). Every assertion so far runs @regret@
+      -- between @prove@ and the failing line, and @regret@ is a rule — so it
+      -- leaves a @Call@ frame on top and the old @Choice@ sits one deeper.
+      -- Failing directly after @prove@ puts the live choice point at the very
+      -- top, where @depth@ has fallen to exactly the floor: with @<@ in place of
+      -- @<=@ the whole suite stayed green and this line backtracked across.
+    , testCase "even when the old choice point is the topmost frame" $ do
+        let before = developmentAfter (run script)
+            after  = developmentAfter (run (script ++ ["back"]))
+        assertBool
+          "back straight after prove unwound into prove's own choice point"
+          (before == after)
+
+      -- **And inside a yield, which is the same paradox** (found by mutation,
+      -- 2026-09-16 — 'Thena.Engine.load' sets the floor in both branches, and
+      -- removing it from the yielding one left the suite green).
+      --
+      -- A command typed while a rule is yielding is a line like any other:
+      -- backtracking into the yielding rule's own earlier choice point takes a
+      -- route on which that rule never yielded, so the command that was typed
+      -- could not have been given. One rule, and no case analysis about what
+      -- kind of line it was.
+    , testCase "and the same holds for a command typed inside a yield" $ do
+        let yielded = [":theorem t : ∀ (A : Type₀) -> A -> A", "do { prove ; yield \"paused\" }"]
+            before  = developmentAfter (run yielded)
+            after   = developmentAfter (run (yielded ++ ["back"]))
+        assertBool
+          "back inside a yield unwound into the yielding rule's choice point"
+          (before == after)
+    ]
   where
     script = [":theorem t : ∀ (A : Type₀) -> A -> A", "prove"]
 

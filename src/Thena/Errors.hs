@@ -202,6 +202,22 @@ data FailReason
     -- **This is the definite case, not §8.1's suspension.** The focus's shape
     -- is known, so "no rule will ever match" is the answer. Blocked-on-a-hole
     -- is a different outcome and a later milestone (§12 invariant 2).
+  | WouldLeaveTheLine FailReason Int
+    -- ^ **the line failed, and the only alternative left was made before it**
+    -- (MS5 phase 95) — the reason it failed, and the choice point that was not
+    -- taken. @retry ‹n›@ takes it.
+    --
+    -- **His ruling, 2026-09-16**, and the argument is the reason this is a
+    -- refusal rather than a silent backtrack: unwinding past the running line
+    -- takes a route on which that line was never typed, so the command that
+    -- caused the backtracking could not have been given. /"It creates a
+    -- paradox."/ Nothing caches prompts to replay, so the command is lost
+    -- whichever way it goes — which is why making the user say @retry@ costs
+    -- them nothing and shows them what happened.
+    --
+    -- **It carries the original reason rather than replacing it**, because the
+    -- user still has to be told why their command failed; the choice point is a
+    -- second sentence, not a substitute for the first.
   | GuessIllTyped TypeError
     -- ^ @try@ handed a term that does not have the hole's type (phase 25b).
     -- Thesis table 2.7 gives @try@ the side condition @Θ ⊩ t : S@, and until
