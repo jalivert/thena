@@ -1,3 +1,116 @@
+# =============================================================================
+# What this program is for, and what it would take to delete it
+# =============================================================================
+#
+# Written down 2026-09-16, after he asked the question directly and the answer
+# turned out not to be the one either of us had been assuming.
+#
+# ---------------------------------------------------------------------------
+# It is not a template, and it is not standing in for the engine
+# ---------------------------------------------------------------------------
+#
+# Every line this emits is a line Thena's engine already runs, and already ran
+# when this was written at the end of MS1. `attack`, `intro`, `along`,
+# `eliminate-core`, `try-core`, `solve`, `qed` are all ordinary tactics. Nothing
+# here is a workaround for a missing machine.
+#
+# It is also not a template: 628 lines of Python produce 1468 lines of Thena
+# across the two targets. A template is bigger than its output. This is smaller,
+# because it computes.
+#
+# ---------------------------------------------------------------------------
+# What it actually writes
+# ---------------------------------------------------------------------------
+#
+# Of the 1190 lines of `determinacy-tactics.thena.script`:
+#
+#   * 989 are single bare words — `intro`, `along`, `back`, `solve`. One `intro`
+#     per binder, one `along` per binder, one `back` per method. Tedious to
+#     count by hand, but not hard, and `proof()` below is all of it.
+#
+#   * 157 are `try-core` lines, and between them they carry about 38,000
+#     characters of proof term. The longest single line is 1,214 characters.
+#
+# The second group is the point of this program. Determinacy is a double case
+# analysis — ten step rules against ten step rules — and roughly 110 of those
+# pairs are IMPOSSIBLE: `eIfTrue` and `ePredZero` cannot both have produced the
+# same term. Each impossible pair is discharged by an appeal to no-confusion,
+# written out in full, with one equation per constructor argument, chained with
+# `trans`, `cong` and `subst`.
+#
+# `decompose()` is the rule that generates all of them, and it is short:
+# different constructors means the case is absurd; the same constructor means
+# make an equation per argument position and recurse. One small idea, applied
+# 110 times, expanding into 38KB of text.
+#
+# ---------------------------------------------------------------------------
+# Why a program instead of just checking in the output
+# ---------------------------------------------------------------------------
+#
+# In a mature proof assistant nobody writes those 110 branches. In Coq it is
+# about four words:
+#
+#     destruct s1; destruct s2; try discriminate; congruence.
+#
+# `discriminate` IS "different constructors, therefore absurd" — as a tactic
+# that builds the term for you, at proof time.
+#
+# **Thena has no `discriminate` and no `congruence`.** So the choice at the end
+# of MS1 was: type 110 branches by hand, or write the rule down once here and
+# expand it ahead of time. This program is that expansion.
+#
+# So it stands in for TACTICS THENA DOES NOT HAVE — not for the engine, and not
+# for a human author. The lemma statements below, and the interesting cases
+# spelled as Python lambdas, are genuine authorship and would survive any
+# rewrite; they are the mathematical input, not the generated part.
+#
+# ---------------------------------------------------------------------------
+# What deleting it would actually require
+# ---------------------------------------------------------------------------
+#
+# A Thena tactic that does `decompose`'s job: look at two constructor
+# applications, find whether the heads differ, and either build the
+# no-confusion appeal or produce an equation per argument and recurse.
+#
+# **That tactic cannot be written today, and the blocker is precise**: it must
+# take a CORE TERM APART. Every accessor in the op vocabulary is a *surface*
+# accessor (`arrow-domain`, `app-head`, `forall-domain`, …); nothing
+# destructures a Core term, and a tagged Core pattern — `core`∀ (${x} : ${d}) ->
+# ${b}`` — does not parse. That is stage b of
+# `.claude/discussion/pattern-matching.md`, designed and unbuilt.
+#
+# It is the same wall `apply-next` sits on: the Surface is destructurable but
+# not computable, the Core is computable but not destructurable.
+#
+# ---------------------------------------------------------------------------
+# The standing decision, HIS, 2026-09-16
+# ---------------------------------------------------------------------------
+#
+# **This file stays until the type theory and the machine stop moving.** His
+# words: *"eventually, when our type theory is stable and our machine is stable,
+# we delete the generator, because the script and the surface program will not
+# need any modifications anymore so there is no need for a generator. But I
+# don't think that we need to drop the generator yet. No need to be rash."*
+#
+# Deleting it is NOT a milestone gate and proves nothing about tactics — that
+# was MS2's original reading of its own done-when, restated on 2026-09-16 once
+# the two claims inside it came apart. See `.claude/plans/LONG-TERM.md` 26 and
+# `.claude/plans/milestones/ms2/MS2.md`'s done-when block.
+#
+# **Two ways to finish, and they are different:**
+#   1. Build the tactic above. The 38KB collapses to a few words and the file
+#      becomes short and human-readable. This was MS2's intent.
+#   2. Freeze the output and delete this file. Safe only once nothing will move
+#      the output again — and note that what is frozen is ~1200 lines of
+#      machine-derived proof that nobody will ever maintain by hand.
+#
+# **Both targets must reproduce byte for byte** — `python3 determinacy.py
+# script` and `… surface`. If the elimination tactic's output shape moves,
+# REGENERATE; do not hand-patch. They were out of step for a week in MS3 when
+# one was patched instead.
+#
+# =============================================================================
+
 SCRIPT_BASE = r'''data Term : Type₀ where { true : Term ; false : Term ; ifthen : Term -> Term -> Term -> Term ; zero : Term ; succ : Term -> Term ; pred : Term -> Term ; iszero : Term -> Term }
 data NV : Term -> Type₀ where { nvZero : NV zero ; nvSucc : ∀ (t : Term) (n : NV t) -> NV (succ t) }
 data Step : Term -> Term -> Type₀ where { eIfTrue : ∀ (t2 : Term) (t3 : Term) -> Step (ifthen true t2 t3) t2 ; eIfFalse : ∀ (t2 : Term) (t3 : Term) -> Step (ifthen false t2 t3) t3 ; eIf : ∀ (t1 : Term) (t1' : Term) (t2 : Term) (t3 : Term) (s : Step t1 t1') -> Step (ifthen t1 t2 t3) (ifthen t1' t2 t3) ; eSucc : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (succ t1) (succ t1') ; ePredZero : Step (pred zero) zero ; ePredSucc : ∀ (v : Term) (nv : NV v) -> Step (pred (succ v)) v ; ePred : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (pred t1) (pred t1') ; eIsZeroZero : Step (iszero zero) true ; eIsZeroSucc : ∀ (v : Term) (nv : NV v) -> Step (iszero (succ v)) false ; eIsZero : ∀ (t1 : Term) (t1' : Term) (s : Step t1 t1') -> Step (iszero t1) (iszero t1') }
