@@ -810,6 +810,53 @@ bad.thena.rules: in the grammar of String: String is one of instral's own types,
   so a grammar may not take its name
 ```
 
+### There are three name spaces, and a name may be reused across them
+
+*Decided 2026-09-16.*
+
+A name you write is read in one of three places, and Thena keeps a separate
+space for each. **Within a space a name means one thing; across spaces the same
+word is free to mean three.**
+
+| space | what is in it | who may add to it |
+|---|---|---|
+| **types** | `String` `Name` `Int` `Char` `Bool` `Surface` `Core` `Development` `Level` `List` `Option` | a `language` declaration |
+| **tags** | `surface` `core` | a `language` declaration |
+| **callables** | op words, rule names, function names, locals | a rule, a function, a binding |
+
+So this loads, and the two `twice`es never meet — one is only ever written as a
+type or in a tag, the other only ever called:
+
+```
+language twice where { var : name }
+
+twice : String -> String
+twice s = concat s s
+```
+
+**A `language` declaration is the one thing that enters two spaces at once**, a
+type and a tag together, so its name is checked against both lists:
+
+```
+bad.thena.rules: in the grammar of String: String is one of instral's own types,
+  so a grammar may not take its name
+```
+
+Inside a space, a collision is refused. Two grammars under one name, and:
+
+```
+ns.thena.rules: in twice: this name is both a rule and a function at 1 argument
+```
+
+**The callable space is shared on purpose and is the subtle one**, because it
+holds four kinds of thing. The rules that sort them out are elsewhere in this
+document: an op word at another arity calls a rule of that name, a local shadows
+a rule, and a bare word right of an `=` is the local it names.
+
+**Reserved words are in no space.** The eleven (`forall let in elim where data
+module do rule language when`) are taken from every language at once, because
+one lexer serves them all.
+
 ### `instral` has lambdas, and a local shadows a rule
 
 *Decided 2026-09-12.*

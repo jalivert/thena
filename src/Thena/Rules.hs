@@ -42,6 +42,7 @@ module Thena.Rules
   , resolveSignature
   , resolveTy
   , builtInTypes
+  , builtInTags
   , resolveBlock
   , isOpWord
   , opArities
