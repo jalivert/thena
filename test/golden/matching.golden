@@ -13,6 +13,8 @@ standard
   fill ‹t›
   unify-refine-core ‹t›
   apply-core ‹f›
+  fit-core ‹f›
+  fit-core ‹f›
   claim ‹ty›
   assume ‹ty›
   quantify ‹ty›
@@ -47,6 +49,8 @@ prove
 fill ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
+fit-core ‹f›
+fit-core ‹f›
 claim ‹ty›
 assume ‹ty›
 quantify ‹ty›
@@ -101,6 +105,8 @@ prove
 fill ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
+fit-core ‹f›
+fit-core ‹f›
 claim ‹ty›
 assume ‹ty›
 quantify ‹ty›
@@ -160,6 +166,8 @@ prove
 fill ‹t›
 unify-refine-core ‹t›
 apply-core ‹f›
+fit-core ‹f›
+fit-core ‹f›
 claim ‹ty›
 assume ‹ty›
 quantify ‹ty›

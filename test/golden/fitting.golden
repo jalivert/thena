@@ -1,0 +1,73 @@
+thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
+declared Nat
+thena spine> data P : Type₀ where { mk : Nat -> Nat -> P }
+declared P
+thena spine> :theorem t0 : Nat -> Nat
+proving t0 : Nat -> Nat
+thena spine> fit-core ⌜ succ ⌝
+chose 19: fit-core
+already equal
+thena spine> :show
+  let refined = succ : Nat -> Nat in
+▶ let t0 = refined : Nat -> Nat in
+  t0
+thena spine> :choices
+19  fit-core   untried: fit-core
+thena spine> :undo
+▶ let ? t0 : Nat -> Nat in
+  t0
+thena spine> apply-core ⌜ succ ⌝
+stuck: Nat and Nat -> Nat cannot be made equal
+thena spine> :abandon
+abandoned t0
+thena spine> :theorem t1 : Nat
+proving t1 : Nat
+thena spine> fit-core ⌜ succ ⌝
+chose 26: fit-core
+backtracking to 26: fit-core
+chose 30: fit-core
+already equal
+thena spine> :show
+  let ? a : Nat in
+  let refined = succ a : Nat in
+▶ let t1 = refined : Nat in
+  t1
+thena spine> :abandon
+abandoned t1
+thena spine> :theorem t2 : P
+proving t2 : P
+thena spine> fit-core ⌜ mk ⌝
+chose 34: fit-core
+backtracking to 34: fit-core
+chose 39: fit-core
+backtracking to 39: fit-core
+chose 43: fit-core
+already equal
+thena spine> :show
+  let ? a : Nat in
+  let ? a1 : Nat in
+  let refined = mk a a1 : P in
+▶ let t2 = refined : P in
+  t2
+thena spine> :abandon
+abandoned t2
+thena spine> data Bool : Type₀ where { true : Bool ; false : Bool }
+declared Bool
+thena spine> data Maybe (A : Type₀) : Type₀ where { Nothing : Maybe A ; Just : ∀ (a : A) -> Maybe A }
+declared Maybe
+thena spine> :goal ∀ (b : Bool) -> Maybe Bool
+▶ let ? goal : Bool -> Maybe Bool in
+  goal
+thena spine> fit-core ⌜ Just ⌝
+chose 62: fit-core
+backtracking to 62: fit-core
+chose 67: fit-core
+solved: a
+thena spine> :show
+  let a = Bool : Type₀ in
+  let refined = Just a : a -> Maybe a in
+▶ let goal = refined : Bool -> Maybe Bool in
+  goal
+thena spine> :choices
+67  fit-core   untried: fit-core
+thena spine> :quit

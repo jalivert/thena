@@ -564,14 +564,22 @@ baseTests =
     "the shipped base"
     [ -- Every rule whose head passes, and no partition to divide them.
       --
-      -- **@elaborate@ appears thirteen times** (MS4 phase 49): one clause per
-      -- surface node, and a test about an argument nobody supplied does not
-      -- exclude a clause (phase 47), so a bare @:matches@ lists them all. What
-      -- to show a reader is presentation, deliberately unexamined (§8).
+      -- **@elaborate@ appears once per surface node** (MS4 phase 49), and a
+      -- test about an argument nobody supplied does not exclude a clause (phase
+      -- 47), so a bare @:matches@ lists them all. What to show a reader is
+      -- presentation, deliberately unexamined (§8).
+      --
+      -- **The counts live in the 'replicate's and are deliberately not restated
+      -- here**: this comment said /thirteen/ against an assertion of sixteen
+      -- until MS2 phase 27 — a count in prose beside an assertion that grows.
+      --
+      -- **@fit-core@ is two clauses and both heads pass**, which is the point
+      -- of it: the choice point between them is the search.
       testCase "every rule whose head passes is a candidate" $
         [ n | Rule (GlobalName n) _ _ _ <- drain (matches expectedBase emptyGlobals hole) ]
           @?= [ "attack", "try-core", "abandon", "eliminate-core"
               , "prove", "fill", "unify-refine-core", "apply-core"
+              , "fit-core", "fit-core"
               , "claim", "assume", "quantify"
               ]
               ++ replicate 16 "elaborate" ++ replicate 2 "enter-binders"

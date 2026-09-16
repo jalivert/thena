@@ -295,6 +295,10 @@ dispatchableTests =
         names' (matches std emptyGlobals hole)
           @?= ["attack", "try-core", "abandon", "eliminate-core", "prove", "fill"
              , "unify-refine-core", "apply-core"
+               -- **@fit-core@'s two clauses both pass, and dispatch runs
+               -- neither** (MS2 phase 27) — it takes a parameter, exactly like
+               -- @try-core@ above, which is what this test is about.
+             , "fit-core", "fit-core"
              , "claim", "assume", "quantify"]
                ++ replicate 16 "elaborate" ++ replicate 2 "enter-binders"
                ++ replicate 2 "spine-arguments"

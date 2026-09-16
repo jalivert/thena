@@ -82,6 +82,8 @@ expectedStandard =
   , fillRule
   , unifyRefine
   , applyRule
+  , fitFits
+  , fitMore
   , askingRule "claim"    "new hole"   Claim
   , askingRule "assume"   "assumption" Assume
   , askingRule "quantify" "\8704-binder"  Op.Quantify
@@ -149,6 +151,31 @@ applyRule :: Rule
 applyRule = Rule (GlobalName "apply-core") [PVar "f"] [FocusIsHole]
   [ Bind (Op.PVar "s") Nothing (Op.Apply (Ref "f"))
   , Do (Call "unify-refine-core" [Ref "s"])
+  ]
+
+-- | @apply-core@'s searching sibling — MS2 phase 27's deliverable, and his
+-- design of 2026-08-24 unchanged.
+--
+-- **Two clauses of one name, ordered and not exclusive.** 'fitFits' is tried
+-- first, so the search is minimal-arity-first and stops as soon as the spine
+-- fits; 'fitMore' claims one more argument and recurses. **Nothing sequences
+-- them** — both heads pass, so the engine builds a choice point, and the first
+-- clause /failing/ is what reaches the second.
+--
+-- **It needed no op that MS4 had not already built.** @apply-next@ came from
+-- phase 49f for 'spineArguments', which is this same recursion with a surface
+-- term saying how many arguments there are instead of the search finding out.
+fitFits :: Rule
+fitFits = Rule (GlobalName "fit-core") [PVar "f"] [FocusIsHole]
+  [ Do (Call "fill" [Ref "f"])
+  , Do (Call "solve" [])
+  ]
+
+fitMore :: Rule
+fitMore = Rule (GlobalName "fit-core") [PVar "f"] [FocusIsHole]
+  [ Bind (Op.PVar "n") Nothing (FreshName (Lit (VText "a")))
+  , Bind (Op.PVar "f2") Nothing (Op.ApplyNext (Ref "f") (Ref "n"))
+  , Do (Call "fit-core" [Ref "f2"])
   ]
 
 -- | The asking half of @claim@, @assume@ and @quantify@ (MS5 phase 62b).

@@ -781,15 +781,23 @@ ranOk m = case runOut m of
 
 -- | Every rule the shipped base offers at a hole, in definition order.
 --
--- **@elaborate@ fifteen times** (MS4 phase 49): one clause per surface node,
--- and a test about an argument nobody supplied does not exclude a clause
--- (phase 47), so a listing with no argument shows them all. @spine-arguments@
--- is there for @enter-binders@\' reason — a helper whose head is honest about
--- the focus is offered wherever that focus test passes (@ms4/CLOSEOUT.md@ 27).
+-- **@elaborate@ once per surface node** (MS4 phase 49), and a test about an
+-- argument nobody supplied does not exclude a clause (phase 47), so a listing
+-- with no argument shows them all. @spine-arguments@ is there for
+-- @enter-binders@\' reason — a helper whose head is honest about the focus is
+-- offered wherever that focus test passes (@ms4/CLOSEOUT.md@ 27).
+--
+-- **The counts live in the 'replicate's and are deliberately not restated
+-- here**: this comment said /fifteen/ against an assertion of sixteen until MS2
+-- phase 27, which found the same rot in 'Thena.ElaborateTests' the same hour.
+--
+-- **@fit-core@ is two clauses and both heads pass** (MS2 phase 27) — the choice
+-- point between them is what makes it a search rather than a loop.
 everyHoleRule :: [String]
 everyHoleRule =
   [ "attack", "try-core", "abandon", "eliminate-core", "prove", "fill"
   , "unify-refine-core", "apply-core"
+  , "fit-core", "fit-core"
     -- The asking half of the three component tactics (MS5 phase 62b). They
     -- have no head, because all three apply wherever there is a focus, so they
     -- are offered everywhere — which is what @:matches@ is for. @dispatch@

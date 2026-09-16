@@ -69,6 +69,34 @@ rule apply-core f :- when focus-is-hole
   do s = prim-apply f
      ; unify-refine-core s
 
+-- fit-core — apply-core's searching sibling, and MS2 phase 27's deliverable.
+--
+-- apply-core SATURATES: prim-apply reads the whole telescope in Haskell and
+-- claims a hole for every argument at once. fit-core does not know the arity
+-- and does not ask. It tries the spine as it stands, and if that does not fit
+-- the goal it claims ONE more argument and tries again.
+--
+-- The two clauses are ORDERED and NOT EXCLUSIVE, which is the design rather
+-- than an accident of writing: clause 1 comes first, so this is
+-- minimal-arity-first, and it stops as soon as the spine fits rather than
+-- guessing past a metavariable. Nothing sequences them — the engine builds a
+-- choice point because both heads pass, and clause 1 FAILING is what reaches
+-- clause 2. The `backtracking to` lines are it backing off through the arities,
+-- and `:choices` shows it mid-search.
+--
+-- His design, 2026-08-24, unchanged. It needed no op MS4 had not already built
+-- for `spine-arguments`, which is this same recursion with a surface term
+-- saying how many arguments there are instead of the search finding out.
+fit-core : Core -> ()
+rule fit-core f :- when focus-is-hole
+  do fill f
+     ; solve
+
+rule fit-core f :- when focus-is-hole
+  do n  = fresh-name "a"
+     ; f2 = apply-next f n
+     ; call fit-core f2
+
 -- --------------------------------------------------------------------------
 -- The asking half of the three component tactics (MS5 phase 62b)
 --

@@ -1088,6 +1088,68 @@ tests =
         , ":abandon"
         ]
 
+    , -- **MS2 phase 27's deliverable: search, as two clauses and backtracking.**
+      --
+      -- @fit-core@ does not know the head's arity and does not ask. Clause 1
+      -- tries the spine as it stands; clause 2 claims one more argument and
+      -- recurses. Nothing sequences them — both heads pass, so the engine builds
+      -- a choice point, and clause 1 FAILING is what reaches clause 2. Every
+      -- @backtracking to@ line below is it giving up on an arity.
+      --
+      -- **This is the argument that the rule system earns its place** (his,
+      -- 2026-08-24): the intelligent @apply@ falls out of two rules and the
+      -- engine, not out of a loop buried in Haskell.
+      script
+        "fitting"
+        [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "data P : Type\8320 where { mk : Nat -> Nat -> P }"
+          -- **Arity 0: it fits as it stands, so there is no @backtracking to@
+          -- line at all** — clause 1 succeeded first time.
+          --
+          -- **The choice point is still there afterwards, with clause 2
+          -- untried**, which is his 2026-08-20 decision that a choice point
+          -- survives success: the search settled on an arity and @retry@ can
+          -- still push it further. Not an accident of this rule.
+        , ":theorem t0 : Nat -> Nat"
+        , "fit-core ⌜ succ ⌝"
+        , ":show"
+        , ":choices"
+          -- **The contrast that says why this is not @apply-core@.**
+          -- @prim-apply@ saturates: it reads the whole telescope and claims a
+          -- hole for every argument, so at this goal it lands on @Nat@ and
+          -- cannot get back. @fit-core@ never went past arity 0.
+        , ":undo"
+        , "apply-core ⌜ succ ⌝"
+        , ":abandon"
+          -- Arity 1: one backtrack, one hole.
+        , ":theorem t1 : Nat"
+        , "fit-core ⌜ succ ⌝"
+        , ":show"
+        , ":abandon"
+          -- Arity 2: two backtracks, two holes, minted one per step of the
+          -- recursion rather than from a list a body cannot build.
+        , ":theorem t2 : P"
+        , "fit-core ⌜ mk ⌝"
+        , ":show"
+        , ":abandon"
+          -- **The case @test\/golden\/applying.golden@ wrote down and could not
+          -- do** — its comment says /phase 27's @fit@ will get this by stopping
+          -- an argument early/, and this is that, working. @Just@ applied to its
+          -- type parameter alone is @?A -> Maybe ?A@, which unifies with the
+          -- goal, and unification then solves @?A@ to @Bool@. Saturating past
+          -- it, as @apply-core@ must, lands on @Maybe ?A@ and fails.
+        , "data Bool : Type\8320 where { true : Bool ; false : Bool }"
+        , "data Maybe (A : Type\8320) : Type\8320 \
+          \where { Nothing : Maybe A ; Just : \8704 (a : A) -> Maybe A }"
+        , ":goal \8704 (b : Bool) -> Maybe Bool"
+        , "fit-core ⌜ Just ⌝"
+        , ":show"
+          -- **And the choice point survives success** (his, 2026-08-20), so the
+          -- arity it settled on is still there to be taken further.
+        , ":choices"
+        , ":quit"
+        ]
+
     , -- **Phase 25b's deliverable**: thesis table 2.7 gives @try@ the side
       -- condition @Θ ⊩ t : S@ and it is now enforced, so a guess that does not
       -- fit is refused on the line that wrote it rather than at @qed@.
