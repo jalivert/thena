@@ -315,7 +315,7 @@ argumentHeads =
           run s l = fst (command s l)
           s1 = foldl run s0 [":theorem t : Type\8321"]
        in case snd (command s1 line) of
-            Ran msgs _ -> lastOf msgs
+            Ran msgs _ _ -> lastOf msgs
             other      -> error ("expected Ran, got " ++ show other)
 
     lastOf ms = case reverse ms of
@@ -387,11 +387,11 @@ returning =
       \rule half t :- do x = sometimes t ; say x\n"
 
     said line = case snd (command (loaded ()) line) of
-      Ran msgs _ -> lastOf msgs
+      Ran msgs _ _ -> lastOf msgs
       other      -> error ("expected Ran, got " ++ show other)
 
     stuck word = case snd (command (loaded ()) (word ++ " \"a\"")) of
-      Ran _ (Halted r) -> Just r
+      Ran _ _ (Halted r) -> Just r
       other            -> error ("expected a halt, got " ++ show other)
 
     loaded () = fst (load1 [("give.thena.rules", base)])
@@ -496,7 +496,7 @@ walking =
     said line =
       let s0 = fst (load1 [("walk.thena.rules", base)])
        in case snd (command s0 line) of
-            Ran msgs _ -> case reverse msgs of
+            Ran msgs _ _ -> case reverse msgs of
               m : _ -> Just m
               []    -> Nothing
             other -> error ("expected Ran, got " ++ show other)

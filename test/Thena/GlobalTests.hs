@@ -248,7 +248,7 @@ corpus = do
   pure (globals (sessionMachine s), problems ++ said)
   where
     one (s, acc) l = case command s l of
-      (s', Ran out Completed) -> (s', acc ++ [ o | o <- out, not (expected o) ])
+      (s', Ran out _ Completed) -> (s', acc ++ [ o | o <- out, not (expected o) ])
       (s', r)                 -> (s', acc ++ [l ++ " => " ++ show r])
 
     -- A skipped no-confusion table is a stated limitation, not a failure to

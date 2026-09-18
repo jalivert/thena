@@ -21,6 +21,7 @@ module Thena.Global.Declare
   , declare
   , buildInductive
   , targetIndices
+  , Warning (..)
   ) where
 
 import Control.Monad (foldM)
@@ -83,6 +84,31 @@ import Thena.Global.Env
 -- they are deliberately separate from 'NotStrictlyPositive', which is the real
 -- thing. Keeping them apart is what lets the message say "not yet" rather than
 -- "never".
+-- | Something worth telling the user about a load that nonetheless succeeded
+-- (MS6 phase 98).
+--
+-- **A warning never changes what is installed**, which is the whole of what
+-- separates it from a 'DeclareError': an error abandons the declaration, a
+-- warning is a remark about one that went in. Structured, like every other
+-- diagnostic (@PLAN.md@ §12), so the renderer decides the words and a test can
+-- ask which warning it was rather than grep a sentence.
+--
+-- **It lives here rather than in "Thena.Errors" for one concrete reason**:
+-- 'Skipped'\'s constructors are @NoEquality@ and @NoProducts@, and
+-- 'Thena.Errors.ElimError' already has a @NoEquality@ of its own. This module
+-- already owns 'DeclareError' and re-exports 'Skipped', so it is the one place
+-- both halves are in scope. **When @ms6\/SPEC.md@ §4.5's grammar warnings
+-- arrive they will not want to import a declaration module** — that is the
+-- moment to move this type and rename whichever @NoEquality@ is the less
+-- established.
+data Warning
+  = NoConfusionSkipped GlobalName Skipped
+    -- ^ the datatype went in, and its no-confusion equipment did not. **The
+    -- one diagnostic the system already had and could not report during a
+    -- module load**, because a load discards the op-level messages a prompt
+    -- shows — which is what phase 98 was written to fix.
+  deriving (Eq, Show)
+
 data DeclareError
   = NoSuchPrimitive GlobalName
     -- ^ @primitive foo : …@ where nothing has a reduction rule called @foo@

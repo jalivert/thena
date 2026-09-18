@@ -222,7 +222,7 @@ tests =
               @?= devOf (fst (say [natCommand, ":theorem t : Nat", "attack", "intro"]))
         , testCase "a binding is read later in the same entry" $
             snd (say [natCommand, ":theorem t : Nat", "m = concat \"a\" \"b\" ; say m"])
-              @?= Ran ["ab"] Completed
+              @?= Ran ["ab"] [] Completed
           -- **And it dies with the entry**, which is the whole of §4's argument:
           -- there is no persistent REPL environment to unwind.
         , testCase "and not in the next one" $
@@ -235,7 +235,7 @@ tests =
           -- A value may be bound at the prompt now too (phase 68a's `Op.Value`).
         , testCase "a literal may be bound" $
             snd (say [natCommand, ":theorem t : Nat", "n = 42 ; say \"ok\""])
-              @?= Ran ["ok"] Completed
+              @?= Ran ["ok"] [] Completed
         ]
     , testGroup
         "the REPL's do command is checked like any other entry"
@@ -288,7 +288,7 @@ tests =
         , testCase "a good one still runs" $
             case snd (say [":theorem t : Type\8320"
                           , "elaborate \10216 let x : Type\8320 = do { u = fresh-universe ; fill u ; solve } in x \10217"]) of
-              Ran _ Completed -> pure ()
+              Ran _ _ Completed -> pure ()
               other -> assertFailure ("expected it to run, got " ++ show other)
         ]
     , testGroup
@@ -335,7 +335,7 @@ tests =
           -- inserted at @0:0@ is not it.
         , testCase "a trailing semicolon is a complete entry" $
             snd (say [":theorem t : Type\8320", "h = here ;"])
-              @?= Ran [] Completed
+              @?= Ran [] [] Completed
         ]
     , testGroup
         "the second matching instruction"
@@ -405,19 +405,19 @@ tests =
           -- built a @Say@ after the op because it was building the program by
           -- hand; there is no such place any more.
           testCase "and says nothing, as every other tactic does" $
-            snd (say ["assume \"A\" ⌜ Type₀ ⌝"]) @?= Ran [] Completed
+            snd (say ["assume \"A\" ⌜ Type₀ ⌝"]) @?= Ran [] [] Completed
         , -- **The asking form is a rule now** — @rule assume ty@ in the base —
           -- so this is one clause of @assume@ picked by arity, not a second
           -- instruction sequence chosen by the driver. It still says what it
           -- did, because the rule's body ends in a @say@.
           testCase "a nameless assume asks for the name" $
             case snd (say ["assume ⌜ Type₀ ⌝"]) of
-              Ran [] (Waiting (Question p k)) ->
+              Ran [] _ (Waiting (Question p k)) ->
                 (p, k) @?= ("name for the assumption?", AName)
               other -> assertFailure ("expected a question, got " ++ show other)
         , testCase "the answer is used, and the message is built from it" $
             let (s, _) = say ["assume ⌜ Type₀ ⌝"]
-             in snd (answer s "B") @?= Ran ["assumed B"] Completed
+             in snd (answer s "B") @?= Ran ["assumed B"] [] Completed
         , testCase "and the binder carries the answered name" $
             let (s, _) = say ["assume ⌜ Type₀ ⌝"]
              in case devOf (fst (answer s "B")) of
@@ -425,7 +425,7 @@ tests =
                   other -> assertFailure ("wrong shape: " ++ show other)
         , testCase "an answer that is not a name gets stuck, and keeps the machine" $
             let (s, _) = say ["assume ⌜ Type₀ ⌝"]
-             in snd (answer s "let") @?= Ran [] (Halted (NotAnIdentifier "let"))
+             in snd (answer s "let") @?= Ran [] [] (Halted (NotAnIdentifier "let"))
         , testCase "answering when nothing was asked is refused" $
             snd (answer newSession "B") @?= Rejected NotAsking
         , -- With nothing after it the word is an arity no op and no rule has,
@@ -437,7 +437,7 @@ tests =
               @?= EntryMistyped [Undefined (InBody (GlobalName "entry") 0) "assume" 0 [1, 2]]
         , testCase "assume resolves its type in the development's context" $
             case snd (say ["assume \"A\" ⌜ Type₀ ⌝", "assume \"x\" ⌜ A ⌝"]) of
-              Ran [] Completed -> pure ()
+              Ran [] _ Completed -> pure ()
               other -> assertFailure ("expected success, got " ++ show other)
         ]
     , testGroup
@@ -487,7 +487,7 @@ tests =
     , testGroup
         "declarations"
         [ testCase "data says what it declared" $
-            snd (say [natCommand]) @?= Ran ["declared Nat"] Completed
+            snd (say [natCommand]) @?= Ran ["declared Nat"] [] Completed
         , testCase "and the globals hold it afterwards" $
             declaredIn (fst (say [natCommand])) "Nat" @?= True
         , testCase "so do the names it generated" $
@@ -502,7 +502,7 @@ tests =
               other    -> assertFailure ("expected Failed, got " ++ show other)
         , testCase "a declaration the checker refuses stops the run" $
             snd (say [natCommand, "data T : Type\8320 where { c : (T -> T) -> T }"])
-              @?= Ran [] (Refused (NotStrictlyPositive (GlobalName "c") (Ident "x")))
+              @?= Ran [] [] (Refused (NotStrictlyPositive (GlobalName "c") (Ident "x")))
         , testCase "and writes nothing" $
             declaredIn (fst (say [natCommand, "data T : Type\8320 where { c : (T -> T) -> T }"])) "T"
               @?= False
@@ -511,7 +511,7 @@ tests =
               @?= True
         , testCase "a refused declaration abandons the rest of the program" $
             case fst (say [natCommand, "data T : Type\8320 where { c : (T -> T) -> T }", ":run"]) of
-              s' -> snd (command s' ":run") @?= Ran [] Completed
+              s' -> snd (command s' ":run") @?= Ran [] [] Completed
         , testCase ":show ‹datatype› is the declaration" $
             case snd (say [natCommand, ":show Nat"]) of
               ShownData _ -> pure ()
@@ -525,12 +525,12 @@ tests =
               Rendered _ -> pure ()
               other      -> assertFailure ("expected Rendered, got " ++ show other)
         , testCase "and can be assumed at" $
-            snd (say [natCommand, "assume \"n\" ⌜ Nat ⌝"]) @?= Ran [] Completed
+            snd (say [natCommand, "assume \"n\" ⌜ Nat ⌝"]) @?= Ran [] [] Completed
         , testCase "stepping installs the declaration before it pauses" $
             let s' = fst (say [":step on", natCommand])
              in declaredIn s' "Nat" @?= True
         , testCase "and the message is still to come" $
-            snd (say [":step on", natCommand]) @?= Ran [] Paused
+            snd (say [":step on", natCommand]) @?= Ran [] [] Paused
         ]
     , testGroup
         "stepping"
@@ -543,23 +543,23 @@ tests =
           -- (phase 61b: /a reader should be able to see which one it got/).
           testCase ":step on makes a command stop after one instruction" $
             case snd (say [":step on", "assume \"A\" ⌜ Type₀ ⌝"]) of
-              Ran [] Paused -> pure ()
+              Ran [] _ Paused -> pure ()
               other         -> assertFailure ("expected Paused, got " ++ show other)
         , testCase "and :step takes the next one" $
             case snd (say [":step on", "assume \"A\" ⌜ Type₀ ⌝", ":step"]) of
-              Ran [] Paused -> pure ()
+              Ran [] _ Paused -> pure ()
               other -> assertFailure ("expected a second pause, got " ++ show other)
         , testCase "and the one after that finishes it" $
             case snd (say [":step on", "assume \"A\" ⌜ Type₀ ⌝", ":step", ":step"]) of
-              Ran [] Completed -> pure ()
+              Ran [] _ Completed -> pure ()
               other -> assertFailure ("expected Completed, got " ++ show other)
         , testCase ":run finishes the program whatever the mode" $
             case snd (say [":step on", "assume \"A\" ⌜ Type₀ ⌝", ":run"]) of
-              Ran [] Completed -> pure ()
+              Ran [] _ Completed -> pure ()
               other -> assertFailure ("expected Completed, got " ++ show other)
         , testCase ":step off puts it back" $
             case snd (say [":step on", ":step off", "assume \"A\" ⌜ Type₀ ⌝"]) of
-              Ran [] Completed -> pure ()
+              Ran [] _ Completed -> pure ()
               other -> assertFailure ("expected Completed, got " ++ show other)
         , testCase "stepping is a session setting and does not touch the machine" $
             sessionStepping (fst (say [":step on"])) @?= True

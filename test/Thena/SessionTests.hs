@@ -160,7 +160,7 @@ failureStaysInTheLine =
       -- not been told why their command failed.
     , testCase "and the halt carries both the reason and the choice point" $
         case reverse (loadedResponses (run (script ++ ["regret", "back"]))) of
-          Ran _ (Halted (WouldLeaveTheLine why _)) : _ ->
+          Ran _ _ (Halted (WouldLeaveTheLine why _)) : _ ->
             why @?= CannotMove AtRoot
           other -> assertFailure ("expected a declined backtrack: " ++ show (take 1 other))
 
@@ -829,7 +829,7 @@ notOk name ls = testCase name $
 halts :: String -> [String] -> FailReason -> TestTree
 halts name ls why = testCase name $
   case reverse (loadedResponses (run ls)) of
-    Ran _ (Halted r) : _ -> r @?= why
+    Ran _ _ (Halted r) : _ -> r @?= why
     other -> assertFailure ("expected a halt: " ++ show (take 1 other))
 
 -- | The entry did not resolve: an unbound name, a bad operand run (MS5 review).
@@ -884,5 +884,5 @@ countsAre ls current suspended = do
 notYetPure :: String -> [String] -> TestTree
 notYetPure name ls = testCase name $
   case reverse (loadedResponses (run ls)) of
-    Ran _ (Halted (NotYetPure _)) : _ -> pure ()
+    Ran _ _ (Halted (NotYetPure _)) : _ -> pure ()
     other -> assertFailure ("expected a purity failure: " ++ show (take 1 other))

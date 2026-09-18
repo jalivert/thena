@@ -20,6 +20,8 @@ import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Level (Level (..), instantiateLevels)
 import Thena.Core.Term (GlobalName (..))
+import Thena.Global.Declare (Warning (..))
+import Thena.Global.NoConfusion (Skipped (..))
 import Thena.Driver
   ( LoadError (..)
   , Loaded (..)
@@ -345,13 +347,60 @@ kindTests =
 -- These go through 'loadProofSource', which is pure and takes the contents,
 -- for the same reason 'loadSource' does: §12 invariant 4 keeps IO in
 -- "Thena.Repl".
+-- | A datatype whose constructor has a dependent argument telescope, so
+-- no-confusion is skipped and the load warns (MS6 phase 98).
+dependentModule :: String
+dependentModule =
+  unlines
+    [ "module W where"
+    , ""
+    , "data Chain (A : Type\8320) : A -> A -> Type\8320 where"
+    , "  link : forall (x : A) (y : A) (z : A) (p : Chain A x y) (q : Chain A y z) -> Chain A x z"
+    ]
+
 moduleTests :: [TestTree]
 moduleTests =
   [ testCase "a module declares what it says it declares" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 natModule of
-        (_, ProofLoaded nm ds _) -> (nm, ds) @?= ("M", ["Nat", "one"])
+        (_, ProofLoaded nm ds _ _) -> (nm, ds) @?= ("M", ["Nat", "one"])
         (_, other)             -> assertFailure (show other)
+
+  -- **The warning channel** (MS6 phase 98). Before it, this diagnostic was a
+  -- 'Thena.Engine.Message', and a module load drops those — so the one thing
+  -- the system had to warn about was reported at the prompt and silently lost
+  -- in a file. These three say what a warning is: it reaches the caller, it is
+  -- structured, and it changes nothing.
+  , testCase "a load that warns still says what it declared" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 dependentModule of
+        (_, ProofLoaded nm ds _ ws) -> do
+          (nm, ds) @?= ("W", ["Chain"])
+          length ws @?= 1
+        (_, other) -> assertFailure (show other)
+
+  , testCase "and the warning names the datatype and why" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 dependentModule of
+        (_, ProofLoaded _ _ _ [NoConfusionSkipped d why]) -> do
+          d @?= GlobalName "Chain"
+          case why of
+            DependentArguments c k _ -> (c, k) @?= (GlobalName "link", 4)
+            other -> assertFailure ("wrong reason: " ++ show other)
+        (_, other) -> assertFailure (show other)
+
+  -- A warning is a remark about a declaration that went in, which is the whole
+  -- of what separates it from a refusal.
+  , testCase "and what it warned about is installed anyway" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 dependentModule
+      isDeclared (GlobalName "Chain") (globals (sessionMachine s1)) @?= True
+
+  , testCase "a load with nothing to say warns about nothing" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 natModule of
+        (_, ProofLoaded _ _ _ ws) -> ws @?= []
+        (_, other) -> assertFailure (show other)
 
   , testCase "and the globals are really there afterwards" $ do
       (s0, _) <- startingSession
@@ -376,7 +425,7 @@ moduleTests =
     testCase "a comment line in a proof module is skipped" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 commentedModule of
-        (_, ProofLoaded nm ds _) -> (nm, ds) @?= ("M", ["Nat", "one"])
+        (_, ProofLoaded nm ds _ _) -> (nm, ds) @?= ("M", ["Nat", "one"])
         (_, other)             -> assertFailure (show other)
 
   , testCase "a comment line in a script is a blank line" $
@@ -394,7 +443,7 @@ moduleTests =
     testCase "a top-level do block runs and the module goes on" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 blockModule of
-        (_, ProofLoaded nm ds n) -> (nm, ds, n) @?= ("M", ["Nat", "one"], 1)
+        (_, ProofLoaded nm ds n _) -> (nm, ds, n) @?= ("M", ["Nat", "one"], 1)
         (_, other)               -> assertFailure (show other)
 
   , testCase "and what it declared is really there" $ do

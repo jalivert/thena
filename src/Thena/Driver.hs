@@ -54,7 +54,7 @@ import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (primitiveNames, whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), fresh, open, substLevelsIn)
+import Thena.Core.Term (Core (..), GlobalName (..), fresh, open, substLevelsIn)
 import Data.Char (isSpace)
 import Data.List (dropWhileEnd, isSuffixOf, nub, stripPrefix)
 import Data.List.NonEmpty (NonEmpty (..))
@@ -92,8 +92,8 @@ import Thena.Errors
   , TypeError
   )
 import Thena.Development.Validate (revalidate)
-import Thena.Global.Declare (DeclareError (..), declare)
-import Thena.Global.NoConfusion (Skipped (..), noConfusionNames)
+import Thena.Global.Declare (DeclareError (..), Warning (..), declare)
+
 import Thena.Kernel (certify)
 import Thena.Global.Env
   ( Constant (..)
@@ -418,7 +418,7 @@ data Response
     -- surface declarations and not command lines. Like 'LoadRequested' it only
     -- names the file; "Thena.Repl" reads it and hands the contents back to
     -- 'loadProofSource'
-  | ProofLoaded String [String] Int
+  | ProofLoaded String [String] Int [Warning]
     -- ^ a proof module went in: its name, and what it declared, in order. **The
     -- op-level messages are discarded** — his call, 2026-09-02, the same bargain
     -- @loadPrelude@ already makes: elaborating one declaration prints a dozen
@@ -475,7 +475,15 @@ data Response
     -- ^ @:matches@ — the rules whose heads pass at the focus, in dispatch order
     -- (§7.6). A look and not an act: no body runs, and nothing is speculatively
     -- executed to find out whether one would succeed (§2.2)
-  | Ran [Message] Stop        -- ^ what the machine said, and where it stopped
+  | Ran [Message] [Warning] Stop
+    -- ^ what the machine said, what is worth warning about, and where it
+    -- stopped.
+    --
+    -- **Two lists and not one** (MS6 phase 98): a load discards the messages —
+    -- elaborating a file prints a dozen @solved: ?ℓ229@ lines — and a warning
+    -- is precisely the thing that must survive that. Before this, the one
+    -- warning the system had (no-confusion skipped) was a 'Message', so it was
+    -- shown at the prompt and lost in a file.
   | Failed SyntaxError
   | LineRefused [RuleError]
     -- ^ the line parsed, and then said something no op or rule could be given
@@ -1031,11 +1039,12 @@ loadProofSource s src =
       -- mistake in one does not leave half a module declared (MS5 phase 79) —
       -- its top-level blocks too, which 79 missed (phase 90).
       Just r  -> (s, r)
-      Nothing -> case progress False s { sessionMachine = load is machine { names = n1 } } [] of
-          (s', Ran _ Completed) ->
+      Nothing -> case progress False s { sessionMachine = load is machine { names = n1 } } [] [] of
+          (s', Ran _ ws Completed) ->
             ( s'
             , ProofLoaded nm [ n | Just n <- map declaredName items ]
                              (length [ () | ItemBlock _ <- items ])
+                             ws
             )
           (s', other)           -> (s', other)
 
@@ -1205,7 +1214,7 @@ dispatch s name arg = case name of
   ":extract" -> noArgument $
     case extract (flatten (development machine)) of
       Right t  -> (s, Extracted t)
-      Left why -> (s, Ran [] (Halted (NotYetPure (whereImpure why))))
+      Left why -> (s, Ran [] [] (Halted (NotYetPure (whereImpure why))))
   -- Proof mode (§2.4). A colon on the session commands, because they manage
   -- the session rather than the development; @qed@ is bare, because it is an
   -- op program and is written as the op is written. That also keeps @:abandon@
@@ -1220,7 +1229,7 @@ dispatch s name arg = case name of
   ":undo"    -> noArgument undo
   ":convert" -> conversion
   ":step"  -> stepping
-  ":run"   -> noArgument (progress False s [])
+  ":run"   -> noArgument (progress False s [] [])
   "data"   -> declaration
   -- **A surface declaration** (MS4 phase 42) — a bare word, because it acts
   -- (§2.4). It compiles to instructions rather than being run here, so
@@ -1273,7 +1282,7 @@ dispatch s name arg = case name of
           Just (BlockIll es)      -> (s, LineRefused es)
           Just (BlockMistyped es) -> (s, EntryMistyped es)
           Nothing -> progress (sessionStepping s)
-                              s { sessionMachine = load is machine } []
+                              s { sessionMachine = load is machine } [] []
     Right _ -> (s, Rejected (UnexpectedArgument name))
 
   -- **@yield@ hands control back to a rule that yielded** — his, 2026-09-03,
@@ -1295,7 +1304,7 @@ dispatch s name arg = case name of
   "yield" -> noArgument $
     if Engine.isYielding machine
       then progress (sessionStepping s)
-                    s { sessionMachine = Engine.resumeYield machine } []
+                    s { sessionMachine = Engine.resumeYield machine } [] []
       else (s, Rejected NotYielding)
   "retry"  -> case arg of
     "" -> retryAt Nothing
@@ -1478,11 +1487,11 @@ dispatch s name arg = case name of
     -- second home for something the development already says.
     closeProof = case sessionWork s of
       Scratch -> (s, Rejected NotProving)
-      Attempting att -> case progress False s { sessionMachine = ran } [] of
-        (s', Ran msgs Completed) ->
+      Attempting att -> case progress False s { sessionMachine = ran } [] [] of
+        (s', Ran msgs ws Completed) ->
           case extract (flatten (development (sessionMachine s'))) of
-            Left why -> (s', Ran msgs (Halted (NotYetPure (whereImpure why))))
-            Right t  -> admit msgs (fromMaybe att (currentAttempt s')) s' t
+            Left why -> (s', Ran msgs ws (Halted (NotYetPure (whereImpure why))))
+            Right t  -> admit msgs ws (fromMaybe att (currentAttempt s')) s' t
         other -> other
         where
           ran = load [Do (Certify (Lit (VTerm (attemptClaim att))))] machine
@@ -1498,8 +1507,8 @@ dispatch s name arg = case name of
           -- least value there is nothing to default it to. The proof is left
           -- standing rather than admitted, so the development is still there to
           -- look at.
-          admit msgs att' s' t = case admitted s' att' t of
-            Left u -> (s', Ran msgs (Uncertified (Levels u)))
+          admit msgs ws att' s' t = case admitted s' att' t of
+            Left u -> (s', Ran msgs ws (Uncertified (Levels u)))
             Right (s'', lvs, owed, scheme) ->
               (s'', Proved (attemptName att') lvs owed scheme)
 
@@ -1588,6 +1597,7 @@ dispatch s name arg = case name of
                 (sessionStepping s)
                 s { sessionMachine = load is machine { names = n1 } }
                 []
+                []
 
     goal = withArgument $ case parseCore (globals machine) ctx (names machine) arg of
       Left e -> (s, Failed e)
@@ -1638,8 +1648,8 @@ dispatch s name arg = case name of
           asking  = s { sessionMachine = load prog machine { names = n1 } }
        in case blockResponse s "this term" prog of
         Just r  -> (s, r)
-        Nothing -> case progress False asking [] of
-            (s', Ran _ Completed) ->
+        Nothing -> case progress False asking [] [] of
+            (s', Ran _ _ Completed) ->
               let m'   = sessionMachine s'
                   back = s' { sessionMachine = restore before m' }
                   dev  = development m'
@@ -1668,9 +1678,9 @@ dispatch s name arg = case name of
           (why, owed, n2) -> (bump n2, Converted a b why owed)
 
     stepping = case arg of
-      ""    -> progress True s []
-      "on"  -> (s { sessionStepping = True }, Ran [] Completed)
-      "off" -> (s { sessionStepping = False }, Ran [] Completed)
+      ""    -> progress True s [] []
+      "on"  -> (s { sessionStepping = True }, Ran [] [] Completed)
+      "off" -> (s { sessionStepping = False }, Ran [] [] Completed)
       _     -> (s, Rejected (UnexpectedArgument name))
 
     -- Unwind to a choice point and take its next alternative, then let the
@@ -1682,14 +1692,14 @@ dispatch s name arg = case name of
       Left Engine.NoChoicePoint   -> (s, Rejected NothingToRetry)
       Left (Engine.UnknownChoice n) -> (s, Rejected (NoSuchChoice n))
       Right (m, note) ->
-        let (s', resp) = progress (sessionStepping s) s { sessionMachine = m } []
+        let (s', resp) = progress (sessionStepping s) s { sessionMachine = m } [] []
          in (s', withNote note resp)
 
     -- The note goes in front of whatever the alternative itself said, as a
     -- 'Message' — the same shape as @"declared X"@ and @"certified"@, which
     -- the driver also builds because they are things the driver decided (§7.5).
     withNote note resp = case resp of
-      Ran msgs stop -> Ran (note : msgs) stop
+      Ran msgs ws stop -> Ran (note : msgs) ws stop
       _             -> resp
 
     -- **Brady's @ELAB (x : t)@, as a program** (@IDRIS.md@ §4.6):
@@ -1709,7 +1719,7 @@ dispatch s name arg = case name of
          in case blockResponse s "this declaration" is of
               Just r  -> (s, r)
               Nothing -> progress (sessionStepping s)
-                           s { sessionMachine = load is machine { names = n1 } } []
+                           s { sessionMachine = load is machine { names = n1 } } [] []
 
     -- **One typed ENTRY, as the program it is** (MS5 phase 62b, widened from a
     -- line to a block at phase 70). The two halves are put back together because
@@ -1721,7 +1731,7 @@ dispatch s name arg = case name of
       Left (LineIllFormed es) -> (s, LineRefused es)
       Left (LineMistyped es)  -> (s, EntryMistyped es)
       Right is ->
-        progress (sessionStepping s) s { sessionMachine = load is machine } []
+        progress (sessionStepping s) s { sessionMachine = load is machine } [] []
 
 -- | What @:help@ shows: one line per command the driver has, the spelling on
 -- the left and what it does on the right.
@@ -2204,7 +2214,7 @@ view s rd f arg =
 answer :: Session -> String -> (Session, Response)
 answer s a
   | isAsking (sessionMachine s) =
-      progress (sessionStepping s) s { sessionMachine = resumeAt a (sessionMachine s) } []
+      progress (sessionStepping s) s { sessionMachine = resumeAt a (sessionMachine s) } [] []
   | otherwise = (s, Rejected NotAsking)
 
 -- | One line of input, whichever kind it is: an answer while something is
@@ -2221,7 +2231,7 @@ oneLine s pending line = (record s', resp, asking)
       Nothing -> command s line
 
     asking = case resp of
-      Ran _ (Waiting q) -> Just q
+      Ran _ _ (Waiting q) -> Just q
       _                 -> Nothing
 
     -- Keep the current proof's snapshot in step with the machine, and push the
@@ -2400,9 +2410,9 @@ stopped resp = case resp of
   Failed _              -> True
   LineRefused _         -> True
   Rejected _            -> True
-  Ran _ (Halted _)      -> True
-  Ran _ (Refused _)     -> True
-  Ran _ (Uncertified _) -> True
+  Ran _ _ (Halted _)      -> True
+  Ran _ _ (Refused _)     -> True
+  Ran _ _ (Uncertified _) -> True
   _                     -> False
 
 -- | Run until the machine needs the user, honouring stepping mode.
@@ -2415,33 +2425,35 @@ stopped resp = case resp of
 -- 'Halted' for @retry@\'s sake, which phase 25d found was never reachable —
 -- see 'Halted'. The machine still comes back here; what changed is that
 -- 'oneLine' does not let a failed line's development survive into the session.
-progress :: Bool -> Session -> [Message] -> (Session, Response)
-progress oneStep s msgs = case step (sessionMachine s) of
+progress :: Bool -> Session -> [Message] -> [Warning] -> (Session, Response)
+progress oneStep s msgs warns = case step (sessionMachine s) of
   Engine.Continue m
-    | oneStep   -> stop m msgs Paused
-    | otherwise -> progress oneStep s { sessionMachine = m } msgs
+    | oneStep   -> stop m msgs warns Paused
+    | otherwise -> progress oneStep s { sessionMachine = m } msgs warns
   Engine.Saying msg m
-    | oneStep   -> stop m (msg : msgs) Paused
-    | otherwise -> progress oneStep s { sessionMachine = m } (msg : msgs)
+    | oneStep   -> stop m (msg : msgs) warns Paused
+    | otherwise -> progress oneStep s { sessionMachine = m } (msg : msgs) warns
   -- **A yield stops the run and keeps the machine** (MS4 phase 45b), exactly as
   -- a question does. Stepping it again would yield again — the instruction is
   -- not consumed — so the driver has to stop here or spin.
-  Engine.Yielding msg m -> stop m msgs (Yielded msg)
+  Engine.Yielding msg m -> stop m msgs warns (Yielded msg)
   -- The declaration is checked and installed here, outside the machine: the
   -- global environment is not part of 'Development' and no instruction writes it
   -- (§7.4, §7.5). On refusal the rest of the program is dropped — the command
   -- is abandoned, and there is nothing to retry the way there is at 'Halted'.
   Engine.Declaring d m -> case declare (globals m) (names m) d of
-    Left e -> stop (load [] m) msgs (Refused e)
+    Left e -> stop (load [] m) msgs warns (Refused e)
     Right (g, n1, skip)
-      | oneStep   -> stop installed msgs' Paused
-      | otherwise -> progress oneStep s { sessionMachine = installed } msgs'
+      | oneStep   -> stop installed msgs warns' Paused
+      | otherwise -> progress oneStep s { sessionMachine = installed } msgs warns'
       where
         installed = m { globals = g, names = n1 }
-        -- Said here rather than by a 'Say' in the program, because the program
-        -- is built before 'declare' runs and cannot know (§7.5: the driver owns
-        -- what the driver decides).
-        msgs' = maybe msgs (\why -> whyNoConfusion (inductiveName d) why : msgs) skip
+        -- **A warning and no longer a message** (MS6 phase 98). Raised here
+        -- rather than by a 'Say' in the program, because the program is built
+        -- before 'declare' runs and cannot know (§7.5: the driver owns what the
+        -- driver decides) — and carried in the warning list so that a module
+        -- load, which throws the messages away, still reports it.
+        warns' = maybe warns (\why -> NoConfusionSkipped (inductiveName d) why : warns) skip
   -- The kernel runs here, outside the machine, for 'Declaring'\'s reason: it is
   -- policy, and §7.5 has the driver own policy. On refusal the rest of the
   -- program is dropped.
@@ -2463,9 +2475,9 @@ progress oneStep s msgs = case step (sessionMachine s) of
   -- **It says nothing**, per his instruction: the command that ran it reports
   -- when it is over. See 'Thena.Instral.Ops.DefineGlobal'.
   Engine.Defining nm ps ty t m -> case certify (globals m) t ty of
-    Left e -> stop (load [] m) msgs (Uncertified e)
+    Left e -> stop (load [] m) msgs warns (Uncertified e)
     Right (sub, residue) -> case generalised (names m) residue (substLevelsIn sub ty) t of
-      Left u -> stop (load [] m) msgs (Uncertified (Levels u))
+      Left u -> stop (load [] m) msgs warns (Uncertified (Levels u))
       Right (d, n1) ->
         let
           -- **The plicities are installed beside the definition** (MS4 phase
@@ -2478,8 +2490,8 @@ progress oneStep s msgs = case step (sessionMachine s) of
                                        else (nm, ps) : signatures m
                       }
        in if oneStep
-            then stop m' msgs Paused
-            else progress oneStep s { sessionMachine = m' } msgs
+            then stop m' msgs warns Paused
+            else progress oneStep s { sessionMachine = m' } msgs warns
 
   -- **A primitive is installed only if the system can reduce it** (MS6 phase
   -- 97b). Two checks, and both are the reason @primitive@ is not a postulate:
@@ -2490,28 +2502,28 @@ progress oneStep s msgs = case step (sessionMachine s) of
   -- A user may therefore write @primitive eqString : String -> String -> Bool@
   -- and choose what @Bool@ is; they may not write @primitive myAxiom : Empty@.
   Engine.Primitively nm ty m -> case checkedPrimitive (globals m) nm ty of
-    Left e   -> stop (load [] m) msgs (Refused e)
+    Left e   -> stop (load [] m) msgs warns (Refused e)
     Right () ->
       let m' = m { globals = addPrimitive nm ty (globals m) }
        in if oneStep
-            then stop m' msgs Paused
-            else progress oneStep s { sessionMachine = m' } msgs
+            then stop m' msgs warns Paused
+            else progress oneStep s { sessionMachine = m' } msgs warns
 
   Engine.Certifying t ty m -> case certify (globals m) t ty of
-    Left e -> stop (load [] m) msgs (Uncertified e)
+    Left e -> stop (load [] m) msgs warns (Uncertified e)
     Right (sub, residue)
-      | oneStep   -> stop settled' (say : msgs) Paused
-      | otherwise -> progress oneStep s' (say : msgs)
+      | oneStep   -> stop settled' (say : msgs) warns Paused
+      | otherwise -> progress oneStep s' (say : msgs) warns
       where
         say = "certified"
         settled' = m { development = Engine.Development
                                  (overLevels sub (cursor (development m))) }
         s' = (settled sub residue s) { sessionMachine = settled' }
-  Engine.Asking q m   -> stop m msgs (Waiting q)
-  Engine.Finished m   -> stop m msgs Completed
-  Engine.Stuck r m    -> stop m msgs (Halted r)
+  Engine.Asking q m   -> stop m msgs warns (Waiting q)
+  Engine.Finished m   -> stop m msgs warns Completed
+  Engine.Stuck r m    -> stop m msgs warns (Halted r)
   where
-    stop m out what = (s { sessionMachine = m }, Ran (reverse out) what)
+    stop m out ws what = (s { sessionMachine = m }, Ran (reverse out) (reverse ws) what)
 
 -- | Is this a primitive the system knows, declared at the type its rule needs?
 --
@@ -2580,20 +2592,6 @@ nameOf d = case inductiveName d of GlobalName x -> x
 -- line of a prelude-free script. They are given wordings anyway rather than an
 -- @error@ call: a message that cannot be printed is still cheaper to write than
 -- a partial function to explain.
-whyNoConfusion :: GlobalName -> Skipped -> String
-whyNoConfusion d why = "no " ++ str (snd (noConfusionNames d)) ++ ": " ++ because
-  where
-    str (GlobalName x) = x
-    because = case why of
-      NoEquality -> "there is no Eq in scope"
-      NoProducts -> "there is no And, Unit and Empty in scope"
-      -- Position and name both, as 'Thena.Errors.IndexTypeDepends' says it one
-      -- telescope over: several arguments of one constructor may carry the same
-      -- 'Ident', so the name alone does not say which.
-      DependentArguments c k (Ident i) ->
-        str c ++ "'s argument " ++ show k ++ " (" ++ i ++ ") has a type that"
-          ++ " depends on an earlier argument, so its equation cannot be stated"
-
 mapLeft :: (a -> b) -> Either a c -> Either b c
 mapLeft f = either (Left . f) Right
 

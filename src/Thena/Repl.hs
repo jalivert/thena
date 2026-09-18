@@ -133,7 +133,9 @@ import Thena.Errors
   , Site (..)
   , TypeError (..)
   )
-import Thena.Global.Declare (DeclareError (..))
+import Thena.Global.Declare (DeclareError (..), Warning (..))
+import Thena.Global.NoConfusion (noConfusionNames)
+import qualified Thena.Global.NoConfusion as NoConfusion
 import qualified Data.List.NonEmpty as NE
 import Thena.Surface.Concrete
   ( PairingError (..)
@@ -553,10 +555,14 @@ renderResponse s resp = case resp of
   -- **One line per declaration and nothing else** (MS4 phase 43). The op-level
   -- messages the run produced are already gone — 'Thena.Driver.loadProofSource'
   -- drops them on success — so what is left is the shape of the file.
-  ProofLoaded nm ds blocks ->
+  -- **The warnings come after what was loaded** (MS6 phase 98,
+  -- @ms6\/SPEC.md@ §2.2), because they are remarks about declarations that
+  -- went in: the file's shape is the answer, and a warning is a footnote to it.
+  ProofLoaded nm ds blocks ws ->
     ("module " ++ nm)
       : map ("  declared " ++) ds
       ++ [ "  and " ++ plural blocks "do block" | blocks > 0 ]
+      ++ map renderWarning ws
   -- Nothing to print: the caller reads the files and prints what that produced.
   RulesRequested _ -> []
   BasesLoaded bs   -> map loadedLine bs
@@ -574,7 +580,7 @@ renderResponse s resp = case resp of
   Matched rs    -> renderMatches rs
   Fitting v ty fs -> renderFitting v ty fs
   Choices cs    -> renderChoices cs
-  Ran msgs stop  -> msgs ++ renderStop s stop
+  Ran msgs ws stop -> msgs ++ map renderWarning ws ++ renderStop s stop
   Failed e       -> [renderSyntaxError e]
   -- The same errors a rule file is refused with, said without the /in rule ‹r›,
   -- instruction ‹i›/ that a typed line has no use for (MS5 phase 62b).
@@ -1832,6 +1838,29 @@ signature n0 ps0 ty0 = braced n0 [] ps0 ty0
        in "∀ {" ++ identString i ++ " : " ++ renderCore n ctx dom ++ "} -> "
             ++ braced n1 (ctx ++ [Hypothesis v i dom]) more (open v sc)
     braced n ctx _ ty = renderCore n ctx ty
+
+-- | A warning, as one line beginning @warning:@ (MS6 phase 98).
+--
+-- **The word is what tells a reader it is not a failure.** A load that warns
+-- has installed everything it named, and the line says what was not done
+-- rather than what went wrong.
+renderWarning :: Warning -> String
+renderWarning w = "warning: " ++ case w of
+  NoConfusionSkipped d why ->
+    "no " ++ nameString (snd (noConfusionNames d)) ++ ": " ++ because
+    where
+      -- Qualified, because 'Thena.Errors.ElimError' has a @NoEquality@ of its
+      -- own and this module renders both.
+      because = case why of
+        NoConfusion.NoEquality -> "there is no Eq in scope"
+        NoConfusion.NoProducts -> "there is no And, Unit and Empty in scope"
+        -- Position and name both, as 'Thena.Errors.IndexTypeDepends' says it
+        -- one telescope over: several arguments of one constructor may carry
+        -- the same 'Ident', so the name alone does not say which.
+        NoConfusion.DependentArguments c k (Ident i) ->
+          nameString c ++ "'s argument " ++ show k ++ " (" ++ i ++ ") has a type"
+            ++ " that depends on an earlier argument, so its equation cannot be"
+            ++ " stated"
 
 renderDeclareError :: DeclareError -> String
 renderDeclareError e = case e of

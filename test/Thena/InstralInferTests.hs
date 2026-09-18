@@ -429,7 +429,7 @@ functionsAreFunctions =
     ranBy src =
       let s0 = fst (loadRuleBases newSession [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])
        in case snd (command s0 "go") of
-            Ran ms _ -> Just ms
+            Ran ms _ _ -> Just ms
             _        -> Nothing
 
     -- Load, run @go@, and ask what decisions are left standing.
@@ -544,11 +544,11 @@ destructuringRuns =
               [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])) "go")
 
     ranBy src = case run src of
-      Ran ms _ -> Just ms
+      Ran ms _ _ -> Just ms
       _        -> Nothing
 
     stoppedBy src = case run src of
-      Ran _ (Halted _) -> pure ()
+      Ran _ _ (Halted _) -> pure ()
       other            -> assertFailure ("expected a halt, got " ++ show other)
 
     clashAt src = case load (src ++ "\n") of
@@ -652,7 +652,7 @@ bareWordRightOfEquals =
     ranBy src =
       let s0 = fst (loadRuleBases newSession [("f.thena.rules", "rule base f where\n" ++ src ++ "\n")])
        in case snd (command s0 "go") of
-            Ran ms _ -> Just ms
+            Ran ms _ _ -> Just ms
             _        -> Nothing
 
     loads what src = testCase what $ case load (src ++ "\n") of
@@ -990,7 +990,7 @@ blockBodies =
   where
     said src = case snd (command (fst (loadRuleBases newSession
                  [("b.thena.rules", "rule base b where\n" ++ src ++ "\n")])) "go") of
-      Ran msgs _ -> case reverse msgs of { m : _ -> Just m; [] -> Nothing }
+      Ran msgs _ _ -> case reverse msgs of { m : _ -> Just m; [] -> Nothing }
       other      -> error ("expected Ran, got " ++ show other)
 
     loadRaw src = snd (loadRuleBases newSession [("b.thena.rules", src)])
@@ -1553,7 +1553,7 @@ functions =
     said line = case snd (command (fst (loadRuleBases newSession
                   [("f.thena.rules", "rule base f where\ntwice x = concat x x\n" ++ line ++ "\n")]))
                   "go") of
-      Ran msgs _ -> case reverse msgs of { m : _ -> Just m; [] -> Nothing }
+      Ran msgs _ _ -> case reverse msgs of { m : _ -> Just m; [] -> Nothing }
       other      -> error ("expected Ran, got " ++ show other)
 
     loadRaw src = snd (loadRuleBases newSession [("i.thena.rules", src)])
@@ -1642,7 +1642,7 @@ lambdas =
   where
     said src = case snd (command (fst (loadRuleBases newSession
                  [("l.thena.rules", "rule base l where\n" ++ src ++ "\n")])) "go") of
-      Ran msgs _ -> case reverse msgs of { m : _ -> Just m; [] -> Nothing }
+      Ran msgs _ _ -> case reverse msgs of { m : _ -> Just m; [] -> Nothing }
       other      -> error ("expected Ran, got " ++ show other)
 
 -- --------------------------------------------------------------------------

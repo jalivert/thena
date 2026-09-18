@@ -13,3 +13,6 @@ module Canonical
   declared nvNotBool
   declared canonicalBool
   declared canonicalNat
+warning: no noConfusionNV: nvSucc's argument 2 (n) has a type that depends on an earlier argument, so its equation cannot be stated
+warning: no noConfusionValue: vNat's argument 2 (n) has a type that depends on an earlier argument, so its equation cannot be stated
+warning: no noConfusionHasType: tIf's argument 5 (d1) has a type that depends on an earlier argument, so its equation cannot be stated
