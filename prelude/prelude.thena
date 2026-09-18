@@ -11,6 +11,33 @@ data Empty : Type where
 data And (A : Type) (B : Type) : Type where
   both : forall (a : A) (b : B) -> And A B
 
+-- What a primitive comparison answers with (MS6 phase 97b).
+--
+-- **Not @Bool@, and the reason is the one namespace.** An object language
+-- modelled in Thena routinely has its own booleans — @examples/canonical.thena@
+-- declares @true@ and @false@ as constructors of TAPL's @Term@ — and a prelude
+-- that took those names would collide with every such language. The two
+-- constructors say what they are about instead, which is also what the
+-- comparison rule means by them: the first for literals that agree, the second
+-- for literals that differ.
+data Comparison : Type₀ where
+  same : Comparison
+  different : Comparison
+
+-- The three primitive types compare, and this is where the system is told so
+-- (MS6 phase 97b). @declare-primitive@ takes the name and the type; it accepts
+-- only names it has a reduction rule for, and checks the type is the shape the
+-- rule reads — two arguments of the primitive's own type, answering with a
+-- datatype of two constructors that take nothing.
+--
+-- **Nothing in the rule names @Comparison@**: it reads the declared type and
+-- answers with that datatype's first constructor for equal literals and its
+-- second for unequal ones, so a user who declares their own two-constructor
+-- answer gets the same rule.
+do declare-primitive "eqString" (resolve-core core`String -> String -> Comparison`)
+   ; declare-primitive "eqChar" (resolve-core core`Char -> Char -> Comparison`)
+   ; declare-primitive "eqInt" (resolve-core core`Int -> Int -> Comparison`)
+
 data Sigma (A : Type₀) (B : A -> Type₀) : Type₀ where
   pair : forall (a : A) (b : B a) -> Sigma A B
 

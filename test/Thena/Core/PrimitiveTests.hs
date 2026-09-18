@@ -24,13 +24,28 @@ import Thena.Core.Context (Context)
 import Thena.Core.Convert (convert)
 import Thena.Core.Level (levelOfNat)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), primitiveType)
+import Thena.Core.Term
+  ( Core (..)
+  , GlobalName (..)
+  , Ident (..)
+  , Literal (..)
+  , close
+  , fresh
+  , primitiveType
+  )
 import Thena.Core.Typing (infer)
-import Thena.Driver (parseCore)
-import Thena.Global.Env (Constant (..), GlobalEnv, emptyGlobals, lookupConstant)
+import Thena.Driver (checkedPrimitive, parseCore)
+import Thena.Global.Env
+  ( Constant (..)
+  , GlobalEnv
+  , addPrimitive
+  , emptyGlobals
+  , lookupConstant
+  )
 import Thena.Repl (renderCore)
 
 import Thena.Core.TermTests (genLiteral)
+import Thena.Declared (declared)
 
 env :: GlobalEnv
 env = emptyGlobals
@@ -48,6 +63,8 @@ tests =
     , testGroup "equality is by the literal, and across the three types" equality
     , testGroup "conversion tells two literals apart" conversion
     , testGroup "printing and reading are inverse" roundTrip
+    , testGroup "a declared primitive computes on literals" computing
+    , testGroup "a primitive declaration the system cannot keep is refused" refusals
     ]
 
 -- --------------------------------------------------------------------------
@@ -150,6 +167,72 @@ awkward =
   , LInt 0
   , LInt 1234567890123456789012345678901234567890  -- wider than a machine word
   ]
+
+-- --------------------------------------------------------------------------
+-- The primitives' rule (MS6 phase 97b)
+-- --------------------------------------------------------------------------
+
+-- | An environment with a two-constructor answer type and @eqString@ declared
+-- to answer with it.
+--
+-- **The answer type is deliberately not the prelude's** @Comparison@: the rule
+-- is supposed to read the declared type and use /its/ two constructors, never
+-- a name written in the reducer. If the rule ever hard-codes one, these tests
+-- are what notices, because @yes@ and @no@ appear nowhere in @src/@.
+answering :: GlobalEnv
+answering = addPrimitive (GlobalName "eqString") eqTy withAnswer
+  where
+    withAnswer = fst (declared ["Answer : Type₀ where { yes : Answer ; no : Answer }"])
+    eqTy = arrow str (arrow str (Global (GlobalName "Answer") []))
+    str = Global (GlobalName "String") []
+    arrow a b = Pi (Ident "_") a (close (fst (fresh 900)) b)
+
+answer :: String -> Core
+answer c = Canonical (GlobalName c) [] []
+
+computing :: [TestTree]
+computing =
+  [ testCase "two literals that agree take the first constructor" $
+      reduced (apply [str "a", str "a"]) @?= answer "yes"
+  , testCase "two that differ take the second" $
+      reduced (apply [str "a", str "b"]) @?= answer "no"
+  -- A comparison of anything but two literals has no rule and must stay as it
+  -- is: reduction that guessed here would decide equality of open terms.
+  , testCase "a variable is not compared" $
+      reduced (apply [Free v, str "a"]) @?= apply [Free v, str "a"]
+  , testCase "nor is one argument alone enough" $
+      reduced (apply [str "a"]) @?= apply [str "a"]
+  ]
+  where
+    v = fst (fresh 500)
+    str s = Primitive (LString s)
+    apply = foldl App (Global (GlobalName "eqString") [])
+    reduced = whnf answering ctx
+
+-- | What @declare-primitive@ does with a declaration it cannot honour.
+--
+-- **This is the whole of why @primitive@ is not a postulate**, so each case is
+-- one way of trying to smuggle an axiom in.
+refusals :: [TestTree]
+refusals =
+  [ refusedCase "a name with no rule" (GlobalName "myAxiom") (twoOf "String")
+  , refusedCase "the wrong argument type" (GlobalName "eqString") (twoOf "Int")
+  , refusedCase "too few arguments" (GlobalName "eqString") oneArgument
+  , refusedCase "an answer that is not a datatype" (GlobalName "eqString") intoAUniverse
+  , refusedCase "an answer with the wrong constructors" (GlobalName "eqInt") intoAnswerOfOne
+  , testCase "and the declaration this phase ships is accepted" $
+      isRight (checkedPrimitive answering (GlobalName "eqString") (twoOf "String")) @?= True
+  ]
+  where
+    refusedCase what nm ty =
+      testCase what (isRight (checkedPrimitive answering nm ty) @?= False)
+    twoOf p = arrow (named p) (arrow (named p) (named "Answer"))
+    oneArgument = arrow (named "String") (named "Answer")
+    intoAUniverse = arrow (named "String") (arrow (named "String") (Universe (levelOfNat 0)))
+    intoAnswerOfOne = arrow (named "Int") (arrow (named "Int") (named "One"))
+    named n = Global (GlobalName n) []
+    arrow a b = Pi (Ident "_") a (close (fst (fresh 900)) b)
+    isRight = either (const False) (const True)
 
 printsAndReadsBack :: Core -> Bool
 printsAndReadsBack t =

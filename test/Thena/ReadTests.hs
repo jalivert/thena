@@ -69,6 +69,7 @@ go m = case step m of
   Saying _ m'       -> go m'
   Declaring _ m'    -> go m'
   Defining _ _ _ _ m' -> go m'
+  Primitively _ _ m' -> go m'
   Certifying _ _ m' -> go m'
   Asking _ m'       -> Right m'
   Yielding _ m'     -> Right m'

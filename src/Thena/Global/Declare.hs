@@ -84,7 +84,15 @@ import Thena.Global.Env
 -- thing. Keeping them apart is what lets the message say "not yet" rather than
 -- "never".
 data DeclareError
-  = AlreadyDeclared GlobalName
+  = NoSuchPrimitive GlobalName
+    -- ^ @primitive foo : …@ where nothing has a reduction rule called @foo@
+    -- (MS6 phase 97b). **This is what stops @primitive@ being a postulate**:
+    -- a name the system cannot compute with is refused rather than installed
+    -- as a constant nothing could ever eliminate
+  | PrimitiveWrongShape GlobalName String
+    -- ^ the name is known but the declared type is not the shape its rule
+    -- reads — the message says what shape was wanted
+  | AlreadyDeclared GlobalName
     -- ^ one namespace, shared with generated names (§3.6)
   | RepeatedName GlobalName
     -- ^ the declaration itself uses the name twice

@@ -766,6 +766,7 @@ runOut m = case step m of
   Saying _ m'       -> runOut m'
   Declaring _ m'    -> runOut m'
   Defining _ _ _ _ m' -> runOut m'
+  Primitively _ _ m' -> runOut m'
   Certifying _ _ m' -> runOut m'
   Asking _ m'       -> runOut (resumeAt "ok" m')
   -- Handed straight back, so a rule that yields is still exercised end to

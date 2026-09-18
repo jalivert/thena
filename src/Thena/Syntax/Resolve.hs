@@ -29,6 +29,7 @@ import Thena.Global.Env
   , GlobalEnv
   , InductiveDefinition (..)
   , definitions
+  , primitives
   , inductiveConstructors
   , inductiveIndices
   , inductiveParameters
@@ -68,7 +69,7 @@ type Local = [(String, Var)]
 type Globals = [GlobalName]
 
 globalsOf :: GlobalEnv -> Globals
-globalsOf = map fst . definitions
+globalsOf e = map fst (definitions e) ++ map fst (primitives e)
 
 -- | What a written term's @${x}@ holes are filled with (MS5 phase 81).
 --

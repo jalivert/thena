@@ -867,6 +867,16 @@ data Op
     -- does — the whole of "Thena.Global.Declare"'s @declare@ runs on the
     -- result, so a surface datatype is checked by the same code a written one
     -- is.
+  | DeclarePrimitive Operand Operand
+    -- ^ name, type — **install a primitive constant** (MS6 phase 97b), the way
+    -- 'DefineGlobal' installs a definition and for the same reason: no
+    -- instruction writes globals, so this yields and the driver installs.
+    --
+    -- **It is not a postulate.** The driver accepts only the names the system
+    -- has a reduction rule for ('Thena.Driver.primitiveRules'), and checks the
+    -- declared type has the shape that rule needs. A user may not add an axiom
+    -- with it: an unknown name is a load error, which is what keeps @primitive@
+    -- from being a hole in the trust story.
   | DefineGlobal [Plicity] Operand Operand Operand
     -- ^ the plicities its signature wrote, then name, type and term — **hand a finished definition out through the
     -- channel** (MS4 phase 42), the way 'DefineData' hands out a datatype.
@@ -1093,6 +1103,7 @@ resultOf o = case o of
   Say _        -> Nothing
   DefineData _ -> Nothing
   Certify _    -> Nothing
+  DeclarePrimitive {} -> Nothing
   DefineGlobal {} -> Nothing
   MakeData {} -> Nothing
   -- **@Core@ in and @Core@ out** — his ruling, 2026-09-12. What @core`…`@
@@ -1250,6 +1261,7 @@ operandTypes o = case o of
   UnifyInto a b -> [(a, TCore), (b, TCore)]
   Try    a     -> [(a, TCore)]
   Certify a    -> [(a, TCore)]
+  DeclarePrimitive a b -> [(a, TName), (b, TCore)]
   DefineGlobal _ a b c -> [(a, TName), (b, TCore), (c, TCore)]
   -- The datatype's own type first, then one per constructor — all core, all
   -- elaborated by the time they get here.
@@ -1607,6 +1619,7 @@ opKeyword o = case o of
   Typing _     -> "typeof"
   Define _ _   -> "define"
   Certify _    -> "certify"
+  DeclarePrimitive {} -> "declare-primitive"
   DefineGlobal {} -> "define-global"
   MakeData {} -> "make-data"
   ResolveCore _ -> "resolve-core"

@@ -7,19 +7,30 @@
 -- definition without this module needing to know how either was checked.
 module Thena.Core.Reduce
   ( whnf
+  , primitiveNames
   ) where
 
 import Data.List (find)
 
-import Thena.Core.Level (Level, LevelVar, instantiateLevels)
+import Thena.Core.Level (Level (..), LevelVar, instantiateLevels)
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar)
-import Thena.Core.Term (Core (..), GlobalName, Var, close, instantiate, substLevelsIn)
+import Thena.Core.Term
+  ( Core (..)
+  , GlobalName (..)
+  , Var
+  , close
+  , instantiate
+  , primitiveType
+  , substLevelsIn
+  )
 import Thena.Global.Env
   ( ConstructorDefinition (..)
   , Definition (..)
   , GlobalEnv
   , InductiveDefinition (..)
+  , Constant (..)
   , formerArity
+  , lookupConstant
   , lookupDefinition
   , lookupInductive
   , recursiveArgument
@@ -93,7 +104,13 @@ whnf env ctx = go 0
 
       App f a -> case go (nargs + 1) f of
         Lam i dom sc -> go nargs (Let i a dom sc)  -- β: produces a definition
-        f'           -> App f' a
+        -- **The primitives' rule** (MS6 phase 97b): a known primitive applied
+        -- to two literals computes, and to anything else stays neutral. It sits
+        -- here rather than in the 'Global' case because it fires on the
+        -- /saturated/ application, exactly as ι does on a saturated target.
+        f'
+          | Just u <- primitiveStep env f' a -> go nargs u
+          | otherwise                        -> App f' a
 
       -- δ on a term-level 'Let': the net effect of "δ, iterated, then ν" from
       -- table 2.1 is a substitution, and 'instantiate' is already exactly that
@@ -109,6 +126,56 @@ whnf env ctx = go 0
               Canonical cg _ cargs
                 | Just result <- iota env d ls ps m ms cg cargs -> go nargs result
               _ -> Eliminate d ls ps m ms is tgt'
+
+-- --------------------------------------------------------------------------
+-- The primitives' rule (MS6 phase 97b)
+-- --------------------------------------------------------------------------
+
+-- | The primitive functions the system computes with, and the type each
+-- compares.
+--
+-- **This list is the whole of what @primitive@ may declare.** A name absent
+-- from it has no rule, so the driver refuses the declaration rather than
+-- installing a constant that would sit there as an axiom
+-- (@ms6\/SPEC.md@ §2.1).
+primitiveNames :: [(GlobalName, GlobalName)]
+primitiveNames =
+  [ (GlobalName ("eq" ++ p), GlobalName p) | p <- ["String", "Char", "Int"] ]
+
+-- | @eqP a b@ where both arguments are literals of @P@: the first constructor
+-- of the result datatype when they agree, the second when they do not.
+--
+-- **The two constructors come from the declared type, not from a name written
+-- here.** The constant's type is @P -> P -> B@, and @B@\'s own declaration
+-- says what its constructors are called — so the rule never mentions @true@ or
+-- @Bool@, and a user who declares the result to be their own two-constructor
+-- datatype gets the same rule. The driver has already checked that shape
+-- ('Thena.Driver.checkedPrimitive'), which is why this can read it back
+-- without a second opinion.
+primitiveStep :: GlobalEnv -> Core -> Core -> Maybe Core
+primitiveStep env f arg = case f of
+  App (Global g []) x
+    | Just p <- lookup g primitiveNames
+    , Primitive l <- x
+    , Primitive r <- arg
+    , primitiveType l == p
+    , primitiveType r == p
+    , Just result <- resultDatatype env g
+    , (c : d : _) <- map constructorName (inductiveConstructors result) ->
+        Just (Canonical (if l == r then c else d) [] [])
+  _ -> Nothing
+
+-- | The datatype a declared primitive answers with, read off its own type.
+resultDatatype :: GlobalEnv -> GlobalName -> Maybe InductiveDefinition
+resultDatatype env g = do
+  c <- lookupConstant g env
+  b <- resultOf (constantType c)
+  lookupInductive b env
+  where
+    resultOf ty = case ty of
+      Pi _ _ sc   -> resultOf (instantiate (Universe LZero) sc)
+      Global b [] -> Just b
+      _           -> Nothing
 
 -- --------------------------------------------------------------------------
 -- ι — computed from the inductive-definition record, not generated (§3.7)

@@ -77,6 +77,7 @@ runOut m = case step m of
   Saying msg m'     -> let (ms, r) = runOut m' in (msg : ms, r)
   Declaring _ m'    -> runOut m'
   Defining _ _ _ _ m' -> runOut m'
+  Primitively _ _ m' -> runOut m'
   Certifying _ _ m' -> runOut m'
   Asking _ m'       -> ([], Right m')
   -- A yield stands still, like a question: there is no user here to hand

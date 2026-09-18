@@ -476,6 +476,10 @@ data Outcome
   | Declaring InductiveDefinition Machine
                                   -- ^ the driver checks, installs, then steps again
   | Defining GlobalName [Plicity] Core Core Machine
+  | Primitively GlobalName Core Machine
+    -- ^ a primitive constant on its way out to the driver (MS6 phase 97b).
+    -- Same shape as 'Defining' and for §7.5's reason: the machine never writes
+    -- the global environment.
                                   -- ^ a finished definition — name, type, term
                                   -- (MS4 phase 42). The driver runs the kernel,
                                   -- generalises and installs, then steps again.
@@ -906,6 +910,12 @@ perform instr rest m = case operation instr of
             case buildInductive (globals m) d nps (zip cns ctys) dty (names m) of
               Left e            -> failure (CannotBuildDatatype e) m
               Right (def, n1)   -> Declaring def (advance m { names = n1 })
+
+  -- Out through the channel, exactly as 'DefineGlobal' goes: the driver checks
+  -- the name is one with a reduction rule and installs the constant.
+  DeclarePrimitive nm ty -> case (,) <$> text nm <*> term ty of
+    Left r -> failure r m
+    Right (x, t) -> Primitively (GlobalName x) t (advance m)
 
   DefineGlobal ps nm ty tm -> case (,,) <$> text nm <*> term ty <*> term tm of
     Left r -> failure r m

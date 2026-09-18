@@ -1445,6 +1445,7 @@ binaryOps =
   , ("quantify", Op.Quantify)
   , ("concat", Concat), ("unify", Unify), ("unify-into", Op.UnifyInto)
   , ("arrow", Arrow), ("apply-to", ApplyTo), ("apply-next", Op.ApplyNext)
+  , ("declare-primitive", Op.DeclarePrimitive)
   ]
 
 -- | Does some op bear this word at /some/ arity?

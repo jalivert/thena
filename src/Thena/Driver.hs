@@ -41,6 +41,7 @@ module Thena.Driver
   , loadRuleBases
   , baseHead
   , parseCore
+  , checkedPrimitive
   , parseDevelopment
   , parseDeclaration
   , parseSurfaceTerm
@@ -52,8 +53,8 @@ module Thena.Driver
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
-import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), substLevelsIn)
+import Thena.Core.Reduce (primitiveNames, whnf)
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), fresh, open, substLevelsIn)
 import Data.Char (isSpace)
 import Data.List (dropWhileEnd, isSuffixOf, nub, stripPrefix)
 import Data.List.NonEmpty (NonEmpty (..))
@@ -91,15 +92,17 @@ import Thena.Errors
   , TypeError
   )
 import Thena.Development.Validate (revalidate)
-import Thena.Global.Declare (DeclareError, declare)
+import Thena.Global.Declare (DeclareError (..), declare)
 import Thena.Global.NoConfusion (Skipped (..), noConfusionNames)
 import Thena.Kernel (certify)
 import Thena.Global.Env
   ( Constant (..)
+  , ConstructorDefinition (..)
   , Definition (..)
   , GlobalEnv
-  , InductiveDefinition
+  , InductiveDefinition (..)
   , addDefinition
+  , addPrimitive
   , generalised
   , emptyGlobals
   , inductiveName
@@ -2478,6 +2481,22 @@ progress oneStep s msgs = case step (sessionMachine s) of
             then stop m' msgs Paused
             else progress oneStep s { sessionMachine = m' } msgs
 
+  -- **A primitive is installed only if the system can reduce it** (MS6 phase
+  -- 97b). Two checks, and both are the reason @primitive@ is not a postulate:
+  -- the name must be one 'primitiveNames' has a rule for, and the declared
+  -- type must be the shape that rule reads — @P -> P -> B@ for the primitive's
+  -- own @P@, with @B@ a datatype of two constructors that take nothing.
+  --
+  -- A user may therefore write @primitive eqString : String -> String -> Bool@
+  -- and choose what @Bool@ is; they may not write @primitive myAxiom : Empty@.
+  Engine.Primitively nm ty m -> case checkedPrimitive (globals m) nm ty of
+    Left e   -> stop (load [] m) msgs (Refused e)
+    Right () ->
+      let m' = m { globals = addPrimitive nm ty (globals m) }
+       in if oneStep
+            then stop m' msgs Paused
+            else progress oneStep s { sessionMachine = m' } msgs
+
   Engine.Certifying t ty m -> case certify (globals m) t ty of
     Left e -> stop (load [] m) msgs (Uncertified e)
     Right (sub, residue)
@@ -2493,6 +2512,41 @@ progress oneStep s msgs = case step (sessionMachine s) of
   Engine.Stuck r m    -> stop m msgs (Halted r)
   where
     stop m out what = (s { sessionMachine = m }, Ran (reverse out) what)
+
+-- | Is this a primitive the system knows, declared at the type its rule needs?
+--
+-- Written here rather than in 'Thena.Core.Reduce' because it is a /load-time/
+-- question about a declaration, where the reduction rule is a run-time one
+-- about a term; the two share 'primitiveNames', which is the only thing that
+-- has to agree.
+checkedPrimitive :: GlobalEnv -> GlobalName -> Core -> Either DeclareError ()
+checkedPrimitive env nm ty = case lookup nm primitiveNames of
+  Nothing -> Left (NoSuchPrimitive nm)
+  Just p@(GlobalName pn) -> case argumentsOf ty of
+    Just ([a, b], Global d [])
+      | a /= Global p [] || b /= Global p [] -> wrong ("with two arguments of type " ++ pn)
+      | otherwise -> case lookupInductive d env of
+          Nothing  -> wrong "to answer with a datatype"
+          Just def -> case inductiveConstructors def of
+            [c1, c2] | nullary c1 && nullary c2 -> Right ()
+            _ -> wrong "to answer with a datatype of two constructors that take nothing"
+    _ -> wrong ("with two arguments of type " ++ pn)
+  where
+    wrong want = Left (PrimitiveWrongShape nm want)
+    nullary c = null (constructorArguments c)
+
+-- | A type's argument types and its result, with each binder opened.
+--
+-- 'Scope'\'s constructor is hidden (§3.4), so this walks with 'open' and a
+-- counter drawn from beyond the term rather than looking inside.
+argumentsOf :: Core -> Maybe ([Core], Core)
+argumentsOf = go (0 :: Int) []
+  where
+    go depth acc ty = case ty of
+      Pi _ dom sc ->
+        let (v, _) = fresh (1000 + depth)
+         in go (depth + 1) (dom : acc) (open v sc)
+      result -> Just (reverse acc, result)
 
 -- | Write a level solution into the proof's own statement.
 --

@@ -1831,6 +1831,9 @@ signature n0 ps0 ty0 = braced n0 [] ps0 ty0
 
 renderDeclareError :: DeclareError -> String
 renderDeclareError e = case e of
+  NoSuchPrimitive g -> "there is no primitive called " ++ nameString g
+  PrimitiveWrongShape g want ->
+    nameString g ++ " must be declared " ++ want
   AlreadyDeclared g -> nameString g ++ " is already declared"
   RepeatedName g    -> "this declaration uses the name " ++ nameString g ++ " twice"
   WrongNumberOfIndices g want got ->
