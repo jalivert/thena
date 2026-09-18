@@ -251,6 +251,7 @@ everyOp =
   , ("arrow x y",     Arrow (Ref "x") (Ref "y"))
   , ("apply-to x y",  ApplyTo (Ref "x") (Ref "y"))
   , ("declare-primitive x y", Op.DeclarePrimitive (Ref "x") (Ref "y"))
+  , ("surface-literal t", Op.SurfaceLiteralOf (Ref "t"))
   , ("fresh-name x",  FreshName (Ref "x"))
   , ("typeof x",      Typing (Ref "x"))
   , ("define x y",    Define (Ref "x") (Ref "y"))

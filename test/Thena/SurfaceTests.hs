@@ -20,6 +20,7 @@ import Test.Tasty.QuickCheck
   ( Gen, counterexample, elements, forAll, frequency, listOf1, oneof, property
   , resize, sized, testProperty, withNumTests, (===) )
 
+import Thena.Core.TermTests (genLiteral)
 import Thena.Driver (parseCore, parseSurfaceModule, parseSurfaceTerm)
 import Thena.Syntax.Concrete (Raw (..))
 import Thena.Syntax.Lexer (lexTokens)
@@ -248,6 +249,11 @@ genSurface = sized go
         , pure SurfaceUniverseOpen
         , pure SurfacePlaceholder
         , SurfaceHole <$> name
+        -- A literal is a leaf (MS6 phase 97c), and it goes in the shared
+        -- generator so the printer-and-parser property sees one in every
+        -- position a term can stand — which is what caught that a printed
+        -- string has to be escaped the way the lexer reads it back.
+        , SurfaceLiteral <$> genLiteral
         ]
 
     name    = elements ["x", "y", "f", "A"]

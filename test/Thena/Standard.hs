@@ -282,6 +282,10 @@ elaborateClauses =
       , Bind (Op.PVar "x") Nothing (Op.ResolveName (Ref "w"))
       , call "fill" [Ref "x"], call "solve" []
       ]
+  , clause SurfaceIsLiteral
+      [ Bind (Op.PVar "l") Nothing (Op.SurfaceLiteralOf (Ref "t"))
+      , call "fill" [Ref "l"], call "solve" []
+      ]
   , clause SurfaceIsUniverse
       [ Bind (Op.PVar "u") Nothing (Op.SurfaceUniverseOf (Ref "t"))
       , call "fill" [Ref "u"], call "solve" []

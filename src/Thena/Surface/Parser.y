@@ -36,6 +36,7 @@ import Thena.Surface.Concrete
   , SurfaceBinder (..)
   )
 import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRhs (..), RawBody (..), RawPattern (..))
+import Thena.Core.Term (Literal (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
@@ -309,6 +310,10 @@ Atom :: { Surface }
   -- name, where it already is.
   | '?' ident                              { SurfaceHole $2 }
   | univ                                   { SurfaceUniverse $1 }
+  -- A literal is an atom, exactly as it is in the DC's grammar (phase 97a).
+  | str                                    { SurfaceLiteral (LString $1) }
+  | chr                                    { SurfaceLiteral (LChar $1) }
+  | num                                    { SurfaceLiteral (LInt $1) }
   | Type                                   { SurfaceUniverseOpen }
   | '(' Term ')'                           { $2 }
   -- **An atom, so it needs no parentheses in an argument run** — @try (do { … })@

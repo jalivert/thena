@@ -31,6 +31,8 @@ module Thena.Surface.Concrete
 
 import Data.List.NonEmpty (NonEmpty, toList)
 
+import Thena.Core.Term (Literal (..))
+
 -- | **`instral` is shared, and it is term-free**, which is what makes sharing it
 -- possible: a 'Thena.Instral.Concrete.RawOperand' is an identifier, a number or
 -- a string, and mentions neither 'Surface' nor 'Thena.Syntax.Concrete.Raw'. So
@@ -55,6 +57,11 @@ data Surface
   = SurfaceName String
     -- ^ what a name denotes is elaboration's answer, not the tree's
   | SurfaceUniverse Int          -- ^ @Type₀@
+  | SurfaceLiteral Literal
+    -- ^ @"ab"@, @'c'@, @3@ (MS6 phase 97c). A leaf, and the only surface node
+    -- whose elaboration is settled by the node alone: its 'Thena.Core.Term.Core'
+    -- is itself and its type is fixed, so the clause is @fill@ then @solve@ like
+    -- a written universe's.
   | SurfaceUniverseOpen          -- ^ @Type@, whose level is inferred
 
   | SurfacePlaceholder
@@ -266,6 +273,7 @@ blocksIn t = case t of
       ++ concatMap blocksIn ms ++ blocksIn tg
   SurfaceName _       -> []
   SurfaceUniverse _   -> []
+  SurfaceLiteral _    -> []
   SurfaceUniverseOpen -> []
   SurfacePlaceholder  -> []
   SurfaceHole _       -> []

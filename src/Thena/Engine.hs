@@ -1408,6 +1408,15 @@ perform instr rest m = case operation instr of
       Concrete.SurfaceName w -> produce (VText w) m
       _                      -> failure (ExpectedSurfaceShape "a name") m
 
+  -- The literal at the focus, as the term it elaborates to (MS6 phase 97c).
+  -- A literal resolves to itself, so unlike a name this needs neither the
+  -- context nor the globals.
+  Op.SurfaceLiteralOf x -> case surfaceAt x of
+    Left r  -> failure r m
+    Right s -> case s of
+      Concrete.SurfaceLiteral l -> produce (VTerm (Primitive l)) m
+      _ -> failure (ExpectedSurfaceShape "a literal") m
+
   Op.SurfaceUniverseOf x -> case surfaceAt x of
     Left r  -> failure r m
     Right s -> case s of

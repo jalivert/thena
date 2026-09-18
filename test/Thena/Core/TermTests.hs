@@ -129,7 +129,11 @@ genCore depth = sized go
 -- way each type's equality has to notice.
 genLiteral :: Gen Literal
 genLiteral =
-  elements [LString "a", LString "ab", LChar 'a', LChar 'b', LInt 0, LInt 7]
+  elements
+    [ LString "a", LString "ab", LString "", LString "a\"b", LString "tab\there"
+    , LChar 'a', LChar 'b', LChar '\'', LChar '\n'
+    , LInt 0, LInt 7, LInt 12345678901234567890
+    ]
 
 genIdent :: Gen Ident
 genIdent = Ident <$> elements ["x", "y", "z", "n"]

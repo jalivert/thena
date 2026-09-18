@@ -730,6 +730,10 @@ data Op
     -- playing it — the whole of @E⟦do { … }⟧@. It is an op and not a value a
     -- body could hold, because 'Value' has no case for instructions and the
     -- @do@ node keeps 'Thena.Syntax.Concrete.RawInstr' until something runs it.
+  | SurfaceLiteralOf Operand
+    -- ^ the literal at the focus, as the 'Thena.Core.Term.Core' it elaborates
+    -- to — the same shape as 'SurfaceUniverseOf', whose answer is also a term
+    -- rather than a part to look at (MS6 phase 97c).
   | SurfaceUniverseOf Operand
     -- ^ the universe a surface @Typeₙ@ denotes, as a term (MS4 phase 49).
     --
@@ -1123,6 +1127,7 @@ resultOf o = case o of
   UniverseAt _   -> Just TCore
   ResolveName _  -> Just TCore
   SurfaceNameOf _ -> Just TName
+  SurfaceLiteralOf _ -> Just TCore
   SurfaceUniverseOf _ -> Just TCore
   ArrowDomain _ -> Just TSurface
   AppFunction _ -> Just TSurface
@@ -1279,6 +1284,7 @@ operandTypes o = case o of
   UniverseAt a   -> [(a, TLevel)]
   ResolveName x  -> [(x, TName)]
   SurfaceNameOf x -> [(x, TSurface)]
+  SurfaceLiteralOf x -> [(x, TSurface)]
   SurfaceUniverseOf x -> [(x, TSurface)]
   ArrowDomain x -> [(x, TSurface)]
   AppFunction x -> [(x, TSurface)]
@@ -1466,6 +1472,7 @@ data Test
     -- /"those head-predicates can be useful in the future. And what's more —
     -- adding them is not payed in design. They are not a design decision. If we
     -- never use them after MS4, we just drop them during a cleanup refactor."/
+  | SurfaceIsLiteral Operand       -- ^ @"ab"@, @'c'@, @3@ (MS6 phase 97c)
   | SurfaceIsUniverse Operand      -- ^ @Typeₙ@
   | SurfaceIsUniverseOpen Operand  -- ^ a bare @Type@
   | SurfaceIsPlaceholder Operand   -- ^ @_@
@@ -1597,6 +1604,7 @@ opKeyword o = case o of
   UniverseAt _   -> "universe-at"
   ResolveName _  -> "resolve-name"
   SurfaceNameOf _ -> "surface-name"
+  SurfaceLiteralOf _ -> "surface-literal"
   SurfaceUniverseOf _ -> "surface-universe"
   ArrowDomain _ -> "arrow-domain"
   AppFunction _ -> "app-function"

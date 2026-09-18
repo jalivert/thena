@@ -171,6 +171,15 @@ rule elaborate t :- when focus-is-hole (surface-is-name t)
      ; fill x
      ; solve
 
+-- E⟦"ab"⟧, E⟦'c'⟧, E⟦3⟧ — a literal is its own term (MS6 phase 97c). The same
+-- two instructions a written universe needs, and for the same reason: nothing
+-- has to be looked up, so the term is ready and @solve@ checks it against the
+-- goal.
+rule elaborate t :- when focus-is-hole (surface-is-literal t)
+  do l = surface-literal t
+     ; fill l
+     ; solve
+
 -- E⟦Typeₙ⟧ — the level is written, so the term is too.
 rule elaborate t :- when focus-is-hole (surface-is-universe t)
   do u = surface-universe t

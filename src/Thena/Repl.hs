@@ -1549,6 +1549,10 @@ renderSurface = surf Loose
 
     surf _ (SurfaceName x)      = x
     surf _ (SurfaceUniverse l)  = "Type" ++ subscript l
+    surf _ (SurfaceLiteral l)   = case l of
+      LString s -> escapeString s
+      LChar c   -> escapeChar c
+      LInt k    -> show k
     surf _ SurfaceUniverseOpen  = "Type"
     surf _ SurfacePlaceholder   = "_"
     surf _ (SurfaceHole h)      = "?" ++ h
