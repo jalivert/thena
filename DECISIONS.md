@@ -255,7 +255,30 @@ is nothing to default to, and nothing is guessed.
 
 ## The core language and its type theory
 
-*Nothing recorded yet.*
+### There are three primitive types, and a literal is a term
+
+*Decided 2026-09-18.*
+
+`String`, `Char` and `Int` are types the system knows, at `Type₀`, and their
+literals are ordinary terms:
+
+```
+thena spine> :infer ⌜ "hello" ⌝
+"hello" : String
+thena spine> :infer ⌜ 42 ⌝
+42 : Int
+```
+
+**They are not datatypes.** They have no constructors and no eliminator, an
+`Int` is arbitrary precision, and the only thing you can do with two literals
+is compare them. **The three names are taken**: a declaration called `String`
+is refused the way any clash is.
+
+They exist for language modelling: an object language's identifiers are
+strings, and a language that has numerals or characters needs somewhere to put
+them. The alternative — building them from an inductive numeral, as Coq does —
+was weighed and refused, because it makes every identifier in every
+object-language term a chain of constructors.
 
 ---
 
