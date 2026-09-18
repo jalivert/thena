@@ -42,6 +42,7 @@ library
         Thena.Global.Env
         Thena.Global.NoConfusion
         Thena.Kernel
+        Thena.Language.Regex
         Thena.Repl
         Thena.Rules
         Thena.Surface.Concrete
@@ -132,6 +133,7 @@ test-suite thena-test
         Thena.Fixtures
         Thena.SessionTests
         Thena.LexerTests
+        Thena.RegexTests
         Thena.SyntaxTests
     build-depends:
         base              ^>=4.21.2.0,
