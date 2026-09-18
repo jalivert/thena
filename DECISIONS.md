@@ -274,6 +274,27 @@ thena spine> :infer ⌜ 42 ⌝
 is compare them. **The three names are taken**: a declaration called `String`
 is refused the way any clash is.
 
+A literal is written where a term is written — in a surface definition, in a
+theorem, or inside corners — and it elaborates to itself:
+
+```
+greeting : String
+greeting = "hello"
+```
+
+Two literals of a primitive type are compared with `eqString`, `eqChar` or
+`eqInt`, which answer with the prelude's `Comparison` (`same` or `different`)
+and compute only on literals:
+
+```
+thena spine> :whnf ⌜ eqString "a" "b" ⌝
+different
+```
+
+**`Comparison` and not `Bool`**, because an object language you model routinely
+declares its own `true` and `false` — Thena has one namespace, and the prelude
+leaves those names to you.
+
 They exist for language modelling: an object language's identifiers are
 strings, and a language that has numerals or characters needs somewhere to put
 them. The alternative — building them from an inductive numeral, as Coq does —
