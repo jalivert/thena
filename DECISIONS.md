@@ -1112,6 +1112,33 @@ The line between *the loader's* output, *a rule's* output and *the file's* has
 not been drawn, and drawing it belongs to the interaction model rather than to
 the loader.
 
+### A load can warn, and a warning changes nothing
+
+*Decided 2026-09-18.*
+
+`:load` used to either install everything or refuse everything. It can now also
+**succeed and say something**:
+
+```
+thena spine> :load proof examples/canonical.thena
+module Canonical
+  declared Term
+  ...
+warning: no noConfusionNV: nvSucc's argument 2 (n) has a type that depends on an
+  earlier argument, so its equation cannot be stated
+```
+
+Everything named as declared **is** declared — a warning is a remark about a
+declaration that went in, never a half-refusal. The warnings come after the
+list, in the order the file caused them, and each names what it is about rather
+than a line number.
+
+This is why it exists: a warning survives where a message does not. Loading a
+file discards the running commentary (elaborating one declaration prints a
+dozen level solutions), and before this the one thing worth warning about —
+equipment a declaration did not get — was shown at the prompt and lost in a
+file.
+
 ### A comment is `--` followed by a space, in every kind of file
 
 *Decided 2026-09-02.*
