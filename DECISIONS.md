@@ -78,6 +78,30 @@ are not: `solve`, `type`, `goal` and the rest stay perfectly good identifiers,
 which is why a rule is written `rule ‹name› :- when … do …` and not with the
 op words reserved.
 
+### A token class's regular expression is small, and refuses what it does not mean
+
+*Decided 2026-09-18.*
+
+An object language's identifiers and numerals are regular expressions, written
+between slashes. The syntax is exactly: characters, `\` escapes, classes
+`[a-z]` and `[^…]`, `.`, `*` `+` `?`, sequence, `|` and parentheses. No
+captures, no backreferences, no lookaround, no lazy quantifiers.
+
+**What other dialects give a meaning and this one does not is refused rather
+than read as a literal:**
+
+```
+/[^ \t\n]+/      fine — not whitespace
+/\S+/            refused — \S is not supported
+/a{3}/           refused — unexpected '{'
+/^[a-z]+$/       refused — unexpected '^'
+/\{\$/           fine — escaped, they are literal
+```
+
+Read as literals, `/\S+/` would quietly mean `S+`, and someone coming from
+Perl or POSIX would find out much later. Refusing them also means `\s` or `{n}`
+can be added later without changing what any accepted expression means.
+
 ---
 
 ## Universes and levels
