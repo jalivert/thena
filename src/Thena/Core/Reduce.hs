@@ -55,6 +55,7 @@ whnf env ctx = go 0
     -- position) or resets it to 0 (a subterm in argument position).
     go nargs t = case t of
       Bound _        -> t          -- never the top of a term whnf is asked about
+      Primitive _    -> t          -- a literal is already a value (MS6 phase 97a)
       Free x         -> case find ((== x) . entryVar) ctx of
         Just (Definition _ _ val _) -> go nargs val
         _                            -> t   -- a 'Hypothesis', or not in scope: neutral

@@ -64,6 +64,7 @@ import Thena.Core.Level
   )
 import Thena.Core.Term
   ( Core (..)
+  , Literal (..)
   , GlobalName (..)
   , Ident (..)
   , Scope
@@ -765,6 +766,16 @@ go n env prec term = case term of
   Global (GlobalName g) ls -> g ++ levelArgs ls
   Universe l            -> renderLevel l
 
+  -- A literal prints as it is written (MS6 phase 97a). Not @show@: Haskell
+  -- escapes more than 'Thena.Syntax.Lexer' reads back — a tab inside a string
+  -- literal is legal there and @show@ would render it @\t@, which the lexer
+  -- refuses. 'escapeString' and 'escapeChar' escape exactly what the lexer
+  -- unescapes, so printing and reading are inverse (the round trip is a test).
+  Primitive l           -> case l of
+    LString s -> escapeString s
+    LChar c   -> escapeChar c
+    LInt k    -> show k
+
   App f a -> parensIf (prec > AtApp) (go n env AtApp f ++ " " ++ go n env AtAtom a)
 
   Lam {} -> parensIf (prec > AtTop) ("λ " ++ chainLam n env [] term)
@@ -1251,6 +1262,28 @@ renderOperand n ctx o = case o of
 -- inline so that a backtick never sits loose in a string literal here.
 tick :: Char
 tick = toEnum 96
+
+-- | A string literal as the lexer reads it back: @\"@, @\\@ and @\n@ are the
+-- three escapes @\@escape@ accepts, and every other character stands for
+-- itself — a tab included, which is why this is not @show@.
+escapeString :: String -> String
+escapeString s = "\"" ++ concatMap esc s ++ "\""
+  where
+    esc c = case c of
+      '"'  -> "\\\""
+      '\\' -> "\\\\"
+      '\n' -> "\\n"
+      _    -> [c]
+
+-- | A character literal, escaped as @\@chresc@ reads it.
+escapeChar :: Char -> String
+escapeChar c = "'" ++ esc ++ "'"
+  where
+    esc = case c of
+      '\'' -> "\\'"
+      '\\' -> "\\\\"
+      '\n' -> "\\n"
+      _    -> [c]
 
 renderValue :: Int -> Context -> Value -> String
 renderValue n ctx v = case v of

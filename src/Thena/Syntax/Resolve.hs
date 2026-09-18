@@ -164,6 +164,10 @@ core env gs sp ctx local n raw = case raw of
 
   RawUniverse k -> Right (Universe (levelOfNat k), n)
 
+  -- A literal resolves to itself: it binds nothing and mentions nothing
+  -- (MS6 phase 97a).
+  RawPrimitive l -> Right (Primitive l, n)
+
   -- @Type@ — a universe whose level is left to be worked out (phase 33).
   -- **Typical ambiguity is this line**: the level is a meta from the shared
   -- counter, and conversion, unification and the collector at @qed@ are what

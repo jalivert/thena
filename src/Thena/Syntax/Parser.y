@@ -33,6 +33,7 @@ module Thena.Syntax.Parser
   , parseInstralTy
   ) where
 
+import Thena.Core.Term (Literal (..))
 import Thena.Syntax.Concrete
   ( Raw (..)
   , RawBinder (..)
@@ -354,7 +355,7 @@ PatAtom :: { RawPattern }
 -- Every pattern form but a bare name — what a binding's left may be without
 -- colliding with an op word or an annotation (MS5 phase 84).
 CompoundPat :: { RawPattern }
-  : num                                    { RawPInt $1 }
+  : num                                    { RawPInt (fromInteger $1) }
   | str                                    { RawPText $1 }
   | chr                                    { RawPChar $1 }
   | '[' ']'                                { RawPList [] Nothing }
@@ -450,7 +451,7 @@ ValueOperand :: { RawOperand }
   -- **A lambda in an argument takes parentheses**, like every other compound
   -- argument (§6.0.1); bare, it is what stands right of an @=@.
   | '(' Lambda ')'                         { $2 }
-  | num                                    { RawPos $1 }
+  | num                                    { RawPos (fromInteger $1) }
   | str                                    { RawText $1 }
   | chr                                    { RawChar $1 }
   | '[' ']'                                { RawList [] }
@@ -503,6 +504,11 @@ Atom :: { Raw }
   | ident LevelArgs                        { RawAt (RawWord $1) $2 }
   | univ                                   { RawUniverse $1 }
   | Type                                   { RawUniverseOpen }
+  -- A literal of a primitive type is an atom, for a name's reason: it stands
+  -- where a name stands and needs no precedence (MS6 phase 97a).
+  | str                                    { RawPrimitive (LString $1) }
+  | chr                                    { RawPrimitive (LChar $1) }
+  | num                                    { RawPrimitive (LInt $1) }
   | '(' Term ')'                           { $2 }
 
 -- | @{ ℓ 0 }@ — a brace-enclosed run of level atoms, no commas, exactly as
@@ -515,7 +521,7 @@ LevelAtoms :: { [Int] }
   | LevelAtoms LevelAtom                   { $2 : $1 }
 
 LevelAtom :: { Int }
-  : num                                    { $1 }
+  : num                                    { fromInteger $1 }
 
 -- The argument list of a rule invoked at the REPL (phase 23b): a run of atoms,
 -- exactly as a rule body writes its operands. @try (\ x -> x)@ is one argument

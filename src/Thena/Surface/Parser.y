@@ -169,7 +169,7 @@ InstrPatAtom :: { RawPattern }
   | InstrCompoundPat                       { $1 }
 
 InstrCompoundPat :: { RawPattern }
-  : num                                    { RawPInt $1 }
+  : num                                    { RawPInt (fromInteger $1) }
   | str                                    { RawPText $1 }
   | chr                                    { RawPChar $1 }
   | '[' ']'                                { RawPList [] Nothing }
@@ -211,7 +211,7 @@ InstrOperand :: { RawOperand }
 -- grammar over.
 InstrValueOperand :: { RawOperand }
   : '(' InstrLambda ')'                    { $2 }
-  | num                                    { RawPos $1 }
+  | num                                    { RawPos (fromInteger $1) }
   | str                                    { RawText $1 }
   | chr                                    { RawChar $1 }
   | '[' ']'                                { RawList [] }

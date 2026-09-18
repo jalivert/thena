@@ -33,6 +33,10 @@ module Thena.Syntax.Concrete
   , RawConstructor (..)
   ) where
 
+-- The one thing 'Raw' takes from 'Core': a literal needs no raw form of its own
+-- because it resolves to itself (MS6 phase 97a).
+import Thena.Core.Term (Literal (..))
+
 -- | A written term, or a written development. One tree for both fragments
 -- (§2.7): 'RawClaim', 'RawGuess' and 'RawPending' can only resolve to
 -- development components, everything else can appear in either, and nothing
@@ -44,6 +48,7 @@ module Thena.Syntax.Concrete
 data Raw
   = RawName String
   | RawUniverse Int
+  | RawPrimitive Literal         -- ^ @"ab"@, @'c'@, @3@ (MS6 phase 97a)
   | RawUniverseOpen              -- ^ @Type@ — a universe whose level is inferred
   | RawAt RawIdent [Int]         -- ^ @foo {0 1}@ — a global at level arguments
 
@@ -144,6 +149,7 @@ data Splice
 splices :: Raw -> [Splice]
 splices t = case t of
   RawSplice x        -> [TermSplice x]
+  RawPrimitive _     -> []
   RawLam bs b        -> concatMap binder bs ++ splices b
   RawPi bs b         -> concatMap binder bs ++ splices b
   RawArrow a b       -> splices a ++ splices b

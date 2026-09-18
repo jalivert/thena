@@ -196,7 +196,7 @@ data Token
   | TLanguage
   | TWhen
   | TNeck
-  | TNumber Int
+  | TNumber Integer
   | TString String
   | TChar   Char
   | TLBracket

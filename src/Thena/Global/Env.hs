@@ -290,8 +290,26 @@ data GlobalEnv = GlobalEnv
   }
   deriving (Eq, Show)
 
+-- | Every environment starts with the three primitive types (MS6 phase 97a).
+--
+-- They are 'constants' — a type and no body — because that is exactly what they
+-- are: @String@, @Char@ and @Int@ have no constructors and no eliminator, and
+-- their only inhabitants are 'Thena.Core.Term.Lit' literals. Seeding them here
+-- rather than in a prelude file means 'isDeclared' protects the three names
+-- everywhere, so @data String …@ is refused by the check that already exists
+-- rather than by one written for the purpose.
 emptyGlobals :: GlobalEnv
-emptyGlobals = GlobalEnv [] [] []
+emptyGlobals = GlobalEnv primitives [] []
+
+-- | The three primitive types, each at @Type₀@.
+--
+-- 'Thena.Core.Term.primitiveType' is the other half of the association and the
+-- only other place these names are written.
+primitives :: [(GlobalName, Constant)]
+primitives =
+  [ (GlobalName n, MkConstant [] (Universe LZero))
+  | n <- ["String", "Char", "Int"]
+  ]
 
 -- | The type of a saturated former or, from phase 10, of an eliminator.
 lookupConstant :: GlobalName -> GlobalEnv -> Maybe Constant
