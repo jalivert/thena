@@ -405,6 +405,37 @@ metavariable may not be named like an existing one or a class. A block sees
 what is above it, as every declaration does. It is checked when the module
 loads, and a binder that binds in nothing is a warning, not an error.
 
+
+### An object term is parsed by its grammar, and `:parse` shows how
+
+*Decided 2026-09-19.*
+
+A language's terms are parsed character by character from its grammar. There
+is no separate lexer, so what a token is depends on where you are, and
+whitespace between tokens is optional. A token class tries every length it
+matches, not just the longest. Nothing has precedence, and a term that parses
+two ways is refused, with both readings shown:
+
+```
+thena spine> :parse LC (λf:(ι->ι).(λy:ι.f y))
+abs(f, arrow(base, base), abs(y, base, app(var(f), var(y))))
+thena spine> :parse LC f a b
+in LC`f a b`: this term parses two ways, as app(var(f), app(var(a), var(b))) and as app(app(var(f), var(a)), var(b))
+```
+
+A name a production writes twice must read the same both times, and the error
+says so when it doesn't. **`?` is a missing sub-term**, and only a sub-term,
+never a piece of notation:
+
+```
+thena spine> :parse LC ( λ ? : ι . ? )
+abs(?, base, ?)
+```
+
+`?` can be written only until the structural editor exists. The editor will
+make a missing piece with a keystroke, and `?` will then be free for object
+languages to use.
+
 ---
 
 ## The development calculus
