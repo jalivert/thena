@@ -55,7 +55,7 @@ machine = machineIn emptyGlobals
 
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env' cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] env' [] [] 1000 0)
+  load is (Machine (Exec [] [] []) (Development cur) [] env' [] [] [] 1000 0)
 
 -- | Run to a stop, and hand back the environment or the reason.
 run :: Cursor -> [Instr] -> Either FailReason Machine
@@ -70,6 +70,7 @@ go m = case step m of
   Declaring _ m'    -> go m'
   Defining _ _ _ _ m' -> go m'
   Primitively _ _ m' -> go m'
+  DeclaringGrammar _ m' -> go m'
   Certifying _ _ m' -> go m'
   Asking _ m'       -> Right m'
   Yielding _ m'     -> Right m'

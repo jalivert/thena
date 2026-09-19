@@ -103,9 +103,10 @@ import Thena.Errors
   , ResolveError (..)
   , SyntaxError (..)
   , TypeError
+  , Warning (..)
   )
 import Thena.Development.Validate (revalidate)
-import Thena.Global.Declare (DeclareError (..), TokenClassError (..), Warning (..), declare)
+import Thena.Global.Declare (DeclareError (..), TokenClassError (..), declare)
 
 import Thena.Kernel (certify)
 import Thena.Global.Env
@@ -186,7 +187,9 @@ import Thena.Instral.Concrete
   , RawOperand (..)
   , RawPattern (..)
   )
-import Thena.Syntax.Lexer (Located (..), Token (..), lexTokens)
+import Thena.Syntax.Lexer (Located (..), Token (..), lexModule, lexTokens)
+import Thena.Language.Reader (Block (..), readBlock)
+import Thena.Language.Grammar (checkGrammar)
 import Thena.Syntax.Parser
   ( parseData
   , parseEquation
@@ -353,7 +356,7 @@ newSession :: Session
 newSession = Session
   -- The trailing @0@ is 'Engine.lineFloor' (MS5 phase 95): an empty stack, so
   -- the first line's failures have nothing below them to decline.
-  { sessionMachine   = Machine (Exec [] [] []) ps [] emptyGlobals [] [] n 0
+  { sessionMachine   = Machine (Exec [] [] []) ps [] emptyGlobals [] [] [] n 0
   , sessionWork      = Scratch
   , sessionSuspended = []
   , sessionHistory   = (Exec [] [] [], ps, []) :| []
@@ -857,7 +860,9 @@ parseSurfaceModule
   :: [(String, Language)] -> String
   -> Either SyntaxError (String, [Item])
 parseSurfaceModule ls src = do
-  ts  <- tokensOf src
+  -- 'lexModule', not 'lexTokens': only a module's lexing takes an
+  -- object-language block whole (MS6 phase 101).
+  ts  <- mapLeft LexFailed (lexModule src)
   ts' <- mapLeft LayoutFailed (layout ts)
   m   <- mapLeft SurfaceParseFailed (Surface.parseSurfaceModule ts')
   is  <- regroup ls (surfaceModuleDecls m)
@@ -882,6 +887,7 @@ data Item
   = ItemData SurfaceData
   | ItemTheorem String Surface Surface   -- ^ a signature and the equation after it
   | ItemBlock [Instr]
+  | ItemGrammar Block   -- ^ a @language@ or @context@ block, read (MS6 phase 101)
     -- ^ a top-level @do@ block (phase 45), **already resolved**: 'regroup'
     -- resolves it while the file is being read, so a block with bad operands is
     -- a syntax error at the right place rather than a failure at run time.
@@ -899,6 +905,12 @@ regroup ls = go
   where
     go [] = Right []
     go (SurfaceDatatype d : rest) = (ItemData d :) <$> go rest
+    -- **Read here, so an unreadable block is a syntax error** and the module
+    -- stops before anything in it elaborates (MS6 phase 101). What its names
+    -- mean is asked later, at its place in the load ('DeclaringGrammar').
+    go (SurfaceGrammar k l txt : rest) = case readBlock k l txt of
+      Right b -> (ItemGrammar b :) <$> go rest
+      Left e  -> Left (BlockUnreadable e)
     go (SurfaceBlock b : rest) = case resolveBlock ls (GlobalName "do") [] b of
       Right is  -> (ItemBlock is :) <$> go rest
       Left errs -> Left (blockProblem errs)
@@ -939,6 +951,9 @@ surfaceProgram n0 items = foldl item ([], n0) items
   -- frame because it has to return to the term it stands in. A top-level block
   -- has nothing to return to, so it needs no frame and gets none.
   item (acc, n) (ItemBlock is) = (acc ++ is, n)
+  -- One instruction that yields the block to the driver, which checks it
+  -- against what the module has declared so far (MS6 phase 101).
+  item (acc, n) (ItemGrammar b) = (acc ++ [Do (DeclareGrammar b)], n)
 
   -- **Brady's data rule** (@IDRIS.md@ §4.6): the datatype's own type is
   -- elaborated first /"so that the type is in scope when elaborating the
@@ -1086,6 +1101,9 @@ declaredName i = case i of
   -- instructions install is known only by running them, so it is counted rather
   -- than named — see 'ProofLoaded'.
   ItemBlock _       -> Nothing
+  -- The language's name. Until phase 103 generates its datatype, what it
+  -- declares is the grammar alone — the metavariables and the notation.
+  ItemGrammar b     -> Just (blockName b)
 
 -- | Lex and parse a **surface** term (phase 39). No context, because nothing is
 -- resolved: what a name denotes is elaboration's answer, and elaboration is
@@ -2523,6 +2541,16 @@ progress oneStep s msgs warns = case step (sessionMachine s) of
   --
   -- A user may therefore write @primitive eqString : String -> String -> Bool@
   -- and choose what @Bool@ is; they may not write @primitive myAxiom : Empty@.
+  -- **A grammar is installed only if every check of §4.5 passes** (MS6 phase
+  -- 101); its warnings join the load's, in source order.
+  Engine.DeclaringGrammar b m -> case checkGrammar (grammars m) (globals m) b of
+    Left e -> stop (load [] m) msgs warns (Refused (GrammarRefused e))
+    Right (g, ws) ->
+      let m' = m { grammars = g : grammars m }
+       in if oneStep
+            then stop m' msgs (reverse ws ++ warns) Paused
+            else progress oneStep s { sessionMachine = m' } msgs (reverse ws ++ warns)
+
   Engine.Primitively nm ty m -> case checkedPrimitive (globals m) nm ty of
     Left e   -> stop (load [] m) msgs warns (Refused e)
     Right () ->
@@ -2650,7 +2678,7 @@ nameOf d = case inductiveName d of GlobalName x -> x
 -- @"certified"@ rather than structured data rendered in "Thena.Repl". The
 -- declaration succeeded; this says what it does not come with.
 --
--- 'Thena.Global.NoConfusion.NoEquality' and
+-- 'Thena.Errors.NoEqInScope' and
 -- 'Thena.Global.NoConfusion.NoProducts' never reach here —
 -- "Thena.Global.Declare" keeps both quiet, because each is a fact about the
 -- environment rather than about the declaration and would fire on every @data@

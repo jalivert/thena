@@ -37,7 +37,7 @@ import Thena.Surface.Concrete
   )
 import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRhs (..), RawBody (..), RawPattern (..))
 import Thena.Core.Term (Literal (..))
-import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
+import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..))
 }
 
 %name parseSurface Term
@@ -70,6 +70,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   str     { Located _ (TString $$) }
   chr     { Located _ (TChar $$) }
   regex   { Located _ (TRegex $$) }
+  block   { Located _ (TBlock _ _) }
   '...'   { Located _ TSpread }
   '['     { Located _ TLBracket }
   ']'     { Located _ TRBracket }
@@ -247,6 +248,10 @@ Decl :: { SurfaceDecl }
   -- Same syntax, different role: at the top of a module it plays where the
   -- other items declare.
   | do '{' Block '}'                       { SurfaceBlock (reverse $3) }
+  -- **An object-language block, whole** (MS6 phase 101). The lexer took its
+  -- text raw ('Thena.Syntax.Lexer.lexModule'); it is read after parsing, by
+  -- "Thena.Language.Reader", so that its notation never meets this grammar.
+  | block                                  { case $1 of Located (Pos l _) (TBlock k txt) -> SurfaceGrammar k l txt; _ -> error "the block token is TBlock" }
 
 -- | **The same shape "Thena.Syntax.Parser"'s @Data@ has**, because §3.7's split
 -- between parameters and indices is syntactic in both: the parameters are the

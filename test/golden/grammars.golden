@@ -1,0 +1,167 @@
+-- the spec's STLC
+module STLC
+  declared x
+  declared Ty
+  declared LC
+  declared Ctx
+warning: in the grammar of LC, production vacuous: x binds in nothing
+-- a binding form's head is not a metavariable
+chose 720: elaborate
+already equal
+solved: ?ℓ717
+solved: T
+chose 728: elaborate
+already equal
+solved: ?ℓ718
+solved: T
+refused: in the grammar of L, production bad: q is not a metavariable
+-- a binder that is not a String
+chose 720: elaborate
+already equal
+solved: ?ℓ717
+solved: T
+chose 728: elaborate
+already equal
+solved: ?ℓ718
+solved: T
+refused: in the grammar of L, production num: a binder must be a String, and n is an Int
+-- an occurrence that is not a String
+chose 720: elaborate
+already equal
+solved: ?ℓ717
+solved: T
+chose 728: elaborate
+already equal
+solved: ?ℓ718
+solved: T
+refused: in the grammar of L, production num: an occurrence must be a String, and n is an Int
+-- a bracket naming what is not an argument
+chose 720: elaborate
+already equal
+solved: ?ℓ717
+solved: T
+chose 728: elaborate
+already equal
+solved: ?ℓ718
+solved: T
+refused: in the grammar of L, production f: x is not an argument of f
+-- a bracket naming an occurrence
+chose 720: elaborate
+already equal
+solved: ?ℓ717
+solved: T
+chose 728: elaborate
+already equal
+solved: ?ℓ718
+solved: T
+refused: in the grammar of L, production f: x is an occurrence, so it binds nothing
+-- a bracket naming what the declared binders do not
+chose 720: elaborate
+already equal
+solved: ?ℓ717
+solved: T
+chose 728: elaborate
+already equal
+solved: ?ℓ718
+solved: T
+refused: in the grammar of L, production f: n is not one of the binders declared
+-- metadata naming what is not written
+chose 720: elaborate
+already equal
+solved: ?ℓ717
+solved: T
+chose 728: elaborate
+already equal
+solved: ?ℓ718
+solved: T
+refused: in the grammar of L, production f: x is not an argument of f
+-- one argument written with two scopes
+chose 720: elaborate
+already equal
+solved: ?ℓ717
+solved: T
+chose 728: elaborate
+already equal
+solved: ?ℓ718
+solved: T
+refused: in the grammar of L, production f: M is written with different binders free in it
+-- a production with no items
+chose 720: elaborate
+already equal
+solved: ?ℓ717
+solved: T
+chose 728: elaborate
+already equal
+solved: ?ℓ718
+solved: T
+refused: in the grammar of L, production f: it has no items
+-- a metavariable named twice
+chose 720: elaborate
+already equal
+solved: ?ℓ717
+solved: T
+chose 728: elaborate
+already equal
+solved: ?ℓ718
+solved: T
+refused: in the grammar of L: M is named twice
+-- a metavariable that is already a token class
+chose 720: elaborate
+already equal
+solved: ?ℓ717
+solved: T
+chose 728: elaborate
+already equal
+solved: ?ℓ718
+solved: T
+refused: in the grammar of L: x is already a metavariable or a token class
+-- a language named like something declared
+chose 720: elaborate
+already equal
+solved: ?ℓ717
+solved: T
+chose 728: elaborate
+already equal
+solved: ?ℓ718
+solved: T
+refused: x is already declared
+-- a constructor named like something declared
+chose 720: elaborate
+already equal
+solved: ?ℓ717
+solved: T
+chose 728: elaborate
+already equal
+solved: ?ℓ718
+solved: T
+refused: L's constructor x is already declared
+-- two productions of one name
+chose 720: elaborate
+already equal
+solved: ?ℓ717
+solved: T
+chose 728: elaborate
+already equal
+solved: ?ℓ718
+solved: T
+refused: L's constructor f is already declared
+-- a context without one empty and one extension production
+chose 720: elaborate
+already equal
+solved: ?ℓ717
+solved: T
+chose 728: elaborate
+already equal
+solved: ?ℓ718
+solved: T
+refused: in the context C: a context needs one empty and one extension production
+-- no where
+line 3: a block's first line names it and ends in where
+-- metadata that is none of the three
+line 4: x as whatever is not ‹x› as occurrence, ‹x› as binder or { ‹x›, … } as binders
+-- a production with no arrow
+line 4: a production is ‹name› -> ‹items›, or ‹name› : ‹metadata› -> ‹items›
+-- a bracket never closed
+line 4: a [ is never closed
+-- a line indented less
+line 5: this line is indented less than the productions above it

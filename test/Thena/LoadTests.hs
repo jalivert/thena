@@ -20,8 +20,7 @@ import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Level (Level (..), instantiateLevels)
 import Thena.Core.Term (GlobalName (..))
-import Thena.Global.Declare (Warning (..))
-import Thena.Global.NoConfusion (Skipped (..))
+import Thena.Errors (Skipped (..), Warning (..))
 import Thena.Driver
   ( LoadError (..)
   , Loaded (..)

@@ -4,7 +4,9 @@ module Thena.Syntax.Lexer
   , Located (..)
   , Pos (..)
   , LexError (..)
+  , BlockKind (..)
   , lexTokens
+  , lexModule
   , isIdentifier
   ) where
 
@@ -154,6 +156,12 @@ tokens :-
   -- annotation is @f : Ty@ in column 1, told from a function's @f x = e@ by the
   -- token after the name, so it needs no word of its own. @ms5\/CLOSEOUT.md@ 11.
   "language"    { keyword TLanguage }
+  -- **Reserved at MS6 phase 101, his ruling of 2026-09-19**, for the other two
+  -- object-language blocks (@ms6\/SPEC.md@ §5, §6), so that all three block
+  -- words are read one way. The fifth and sixth words to narrow identifiers
+  -- project-wide; nothing in the repository used either as a name.
+  "context"     { keyword TContext }
+  "judgment"    { keyword TJudgment }
   "when"        { keyword TWhen }
   ":-"          { keyword TNeck }
   $digit+       { \p s -> Located (posOf p) (TNumber (read s)) }
@@ -207,6 +215,12 @@ data Token
   | TDo
   | TRule
   | TLanguage
+  | TContext
+  | TJudgment
+  | TBlock BlockKind String
+    -- ^ a whole object-language block of a surface module, keyword excluded,
+    -- as raw text (MS6 phase 101, @ms6\/SPEC.md@ §7.0). Only 'lexModule'
+    -- produces one; see 'blockText'.
   | TWhen
   | TNeck
   | TNumber Integer
@@ -296,14 +310,22 @@ levelOf = foldl (\acc c -> acc * 10 + digitOf c) 0 . drop 4
 data Mode = Raw !Char | Esc !Int
 
 lexTokens :: String -> Either LexError [Located Token]
-lexTokens str0 = loop [] (alexStartPos, '\n', [], str0)
+lexTokens str0 = loop False [] (alexStartPos, '\n', [], str0)
+
+-- | The tokens of a **surface module**, where a @language@ or @context@ block
+-- at column 1 is taken whole, as raw text (MS6 phase 101, @ms6\/SPEC.md@
+-- §7.0). Everywhere else — a rule file, a REPL line, a surface term — lexes
+-- with 'lexTokens', so MS5's rule-file @language@ declarations are untouched
+-- until phase 106 removes them.
+lexModule :: String -> Either LexError [Located Token]
+lexModule str0 = loop True [] (alexStartPos, '\n', [], str0)
 
 -- | The @posn@ wrapper's own 'alexScanTokens' calls 'error' on a bad character.
 -- This loop is the same traversal with a structured failure instead, and with
 -- the region modes above threaded through it.
-loop :: [Mode] -> AlexInput -> Either LexError [Located Token]
-loop modes inp@(pos, _, _, str) = case modes of
-  Raw fence : outer -> raw fence outer pos str
+loop :: Bool -> [Mode] -> AlexInput -> Either LexError [Located Token]
+loop blocks modes inp@(pos, _, _, str) = case modes of
+  Raw fence : outer -> raw blocks fence outer pos str
   _ -> case alexScan inp 0 of
     AlexEOF
       | null modes -> Right []
@@ -312,7 +334,7 @@ loop modes inp@(pos, _, _, str) = case modes of
       -- an unterminated string literal has, and owed the same better message.
       | otherwise  -> Left (LexError (posOf pos) Nothing)
     AlexError (p, _, _, rest) -> Left (LexError (posOf p) (firstOf rest))
-    AlexSkip inp' _           -> loop modes inp'
+    AlexSkip inp' _           -> loop blocks modes inp'
     AlexToken inp' len act ->
       let t@(Located lp tk) = act pos (take len str)
        in case (modes, tk) of
@@ -322,18 +344,28 @@ loop modes inp@(pos, _, _, str) = case modes of
             -- it an escape outside a region ends in a bare closing brace, which
             -- the layout pass then reports as closing a block nobody opened.
             -- NB: no literal braces in this comment — Alex counts them.
-            (_, TEscapeOpen) -> (t :) <$> loop (Esc 0 : modes) inp'
+            -- **An object-language block is taken whole** (MS6 phase 101): its
+            -- keyword at column 1 of a module, outside every region. Its
+            -- contents are an object language's notation, which Thena's
+            -- lexer must not tokenise — @[@, @λ@ and a regex's characters are
+            -- reserved here — so they are handed over as text, exactly as a
+            -- tagged region's are.
+            ([], _)
+              | blocks, Pos _ 1 <- lp, Just k <- blockKindOf tk ->
+                  let (body, inp'') = blockText inp'
+                   in (Located lp (TBlock k body) :) <$> loop blocks modes inp''
+            (_, TEscapeOpen) -> (t :) <$> loop blocks (Esc 0 : modes) inp'
             -- The brace that closes the escape, rather than one its code wrote.
             (Esc 0 : outer, TRBrace) ->
-              (Located lp TEscapeClose :) <$> loop outer inp'
-            (Esc d : outer, TRBrace) -> (t :) <$> loop (Esc (d - 1) : outer) inp'
-            (Esc d : outer, TLBrace) -> (t :) <$> loop (Esc (d + 1) : outer) inp'
+              (Located lp TEscapeClose :) <$> loop blocks outer inp'
+            (Esc d : outer, TRBrace) -> (t :) <$> loop blocks (Esc (d - 1) : outer) inp'
+            (Esc d : outer, TLBrace) -> (t :) <$> loop blocks (Esc (d + 1) : outer) inp'
             -- Which character closes the region depends on how it was opened:
             -- a tag's own backtick, or the ⟩ that closes the ⟨ alias.
             (_, TTagOpen _)
-              | take 1 (take len str) == "⟨" -> (t :) <$> loop (Raw '⟩' : modes) inp'
-              | otherwise                    -> (t :) <$> loop (Raw '`' : modes) inp'
-            _                        -> (t :) <$> loop modes inp'
+              | take 1 (take len str) == "⟨" -> (t :) <$> loop blocks (Raw '⟩' : modes) inp'
+              | otherwise                    -> (t :) <$> loop blocks (Raw '`' : modes) inp'
+            _                        -> (t :) <$> loop blocks modes inp'
   where
     firstOf cs = case cs of
       c : _ -> Just c
@@ -354,8 +386,8 @@ rawEscapes = ['`', '\\', '$', '⟩']
 escapeOpener :: String
 escapeOpener = ['$', toEnum 123]
 
-raw :: Char -> [Mode] -> AlexPosn -> String -> Either LexError [Located Token]
-raw fence outer p0 s0 = chunk p0 p0 s0 ""
+raw :: Bool -> Char -> [Mode] -> AlexPosn -> String -> Either LexError [Located Token]
+raw blocks fence outer p0 s0 = chunk p0 p0 s0 ""
   where
     chunk began p cs acc = case cs of
       [] -> Left (LexError (posOf p) Nothing)
@@ -365,11 +397,11 @@ raw fence outer p0 s0 = chunk p0 p0 s0 ""
       c : rest
         | c == fence ->
             ((flush began acc ++) . (Located (posOf p) TTagClose :))
-              <$> loop outer (alexMove p c, c, [], rest)
+              <$> loop blocks outer (alexMove p c, c, [], rest)
       _ | Just rest <- stripPrefix escapeOpener cs ->
             let p1 = foldl alexMove p escapeOpener
              in ((flush began acc ++) . (Located (posOf p) TEscapeOpen :))
-                  <$> loop (Esc 0 : Raw fence : outer) (p1, last escapeOpener, [], rest)
+                  <$> loop blocks (Esc 0 : Raw fence : outer) (p1, last escapeOpener, [], rest)
       c : rest -> chunk began (alexMove p c) rest (c : acc)
 
     -- A chunk is reported at the position it began, not where it ended, so an
@@ -377,6 +409,38 @@ raw fence outer p0 s0 = chunk p0 p0 s0 ""
     flush began acc
       | null acc  = []
       | otherwise = [Located (posOf began) (TRaw (reverse acc))]
+
+-- | Which object-language block a keyword opens (MS6 phase 101). @judgment@ is
+-- reserved but not yet read as a block — that is phase 108.
+data BlockKind = LanguageBlock | ContextBlock
+  deriving (Eq, Show)
+
+blockKindOf :: Token -> Maybe BlockKind
+blockKindOf t = case t of
+  TLanguage -> Just LanguageBlock
+  TContext  -> Just ContextBlock
+  _         -> Nothing
+
+-- | The rest of a block, from just after its keyword (@ms6\/SPEC.md@ §7.0):
+-- the rest of the keyword's line, then every line that is blank or indented.
+-- **The block ends at the first line indented no further than the keyword**,
+-- and the keyword is at column 1, so that is the next line with anything in
+-- column 1 — the next top-level item, or a comment at the margin.
+blockText :: AlexInput -> (String, AlexInput)
+blockText (p0, c0, _, s0) = go p0 c0 (takeLine s0)
+  where
+    go p c (line, rest) =
+      let p' = foldl alexMove p line
+          c' = if null line then c else last line
+       in case rest of
+            (x : _) | x `notElem` " \t\n" -> (line, (p', c', [], rest))
+            [] -> (line, (p', c', [], rest))
+            _ -> let (more, inp) = go p' c' (takeLine rest)
+                  in (line ++ more, inp)
+    -- One line with its newline, if it has one.
+    takeLine s = case break (== '\n') s of
+      (l, '\n' : r) -> (l ++ "\n", r)
+      (l, r)         -> (l, r)
 
 -- | Is this string one identifier and nothing else?
 --

@@ -51,6 +51,7 @@ import Thena.Instral.Pattern (Pattern (..), patternBinds, patternIrrefutable)
 import Thena.Instral.Type (Signature (..), Ty (..))
 import Thena.Development.Cursor (Part (..))
 import Thena.Global.Env (InductiveDefinition)
+import Thena.Language.Reader (Block)
 import Thena.Surface.Concrete (Plicity)
 import Thena.Syntax.Concrete (Raw, splicesIn)
 import Thena.Surface.Zipper (SurfaceZipper)
@@ -871,6 +872,13 @@ data Op
     -- does — the whole of "Thena.Global.Declare"'s @declare@ runs on the
     -- result, so a surface datatype is checked by the same code a written one
     -- is.
+  | DeclareGrammar Block
+    -- ^ **install an object-language grammar** (MS6 phase 101), a @language@ or
+    -- @context@ block as read. A field rather than an operand for
+    -- 'MakeData'\'s reason: it is written down, never computed. It yields and
+    -- the driver checks and installs, as 'DeclarePrimitive' does — so the check
+    -- runs at the block's own place in the module, after the token classes
+    -- above it.
   | DeclarePrimitive Operand Operand
     -- ^ name, type — **install a primitive constant** (MS6 phase 97b), the way
     -- 'DefineGlobal' installs a definition and for the same reason: no
@@ -1108,6 +1116,7 @@ resultOf o = case o of
   DefineData _ -> Nothing
   Certify _    -> Nothing
   DeclarePrimitive {} -> Nothing
+  DeclareGrammar {} -> Nothing
   DefineGlobal {} -> Nothing
   MakeData {} -> Nothing
   -- **@Core@ in and @Core@ out** — his ruling, 2026-09-12. What @core`…`@
@@ -1267,6 +1276,7 @@ operandTypes o = case o of
   Try    a     -> [(a, TCore)]
   Certify a    -> [(a, TCore)]
   DeclarePrimitive a b -> [(a, TName), (b, TCore)]
+  DeclareGrammar _ -> []
   DefineGlobal _ a b c -> [(a, TName), (b, TCore), (c, TCore)]
   -- The datatype's own type first, then one per constructor — all core, all
   -- elaborated by the time they get here.
@@ -1628,6 +1638,7 @@ opKeyword o = case o of
   Define _ _   -> "define"
   Certify _    -> "certify"
   DeclarePrimitive {} -> "declare-primitive"
+  DeclareGrammar {} -> "declare-grammar"
   DefineGlobal {} -> "define-global"
   MakeData {} -> "make-data"
   ResolveCore _ -> "resolve-core"

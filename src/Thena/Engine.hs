@@ -97,6 +97,8 @@ import Thena.Surface.Concrete (Plicity (..))
 import qualified Thena.Surface.Concrete as Concrete
 import Thena.Syntax.Concrete (termSplicesIn, nameSplicesIn)
 import Thena.Syntax.Resolve (resolveWith, Filling (..))
+import Thena.Language.Grammar (Grammar)
+import Thena.Language.Reader (Block)
 import Thena.Instral.Ops
   ( AnswerKind
   , Env
@@ -200,6 +202,12 @@ data Machine = Machine
     --
     -- Written when a declaration is installed, read when a use of that name is
     -- elaborated.
+  , grammars    :: [Grammar]
+    -- ^ **the object-language grammars installed so far, latest first** (MS6
+    -- phase 101). NOT backtrackable, like 'signatures'. **Here beside it and
+    -- not in 'GlobalEnv' — his ruling, 2026-09-19**, for 'signatures'\' reason:
+    -- a grammar is notation for a declared name, which the surface and
+    -- elaboration read and the kernel never does.
   , names       :: Int        -- ^ NOT backtrackable (§7.4)
   , lineFloor   :: Int
     -- ^ **how many frames were already on the stack when this line's program
@@ -477,6 +485,8 @@ data Outcome
                                   -- ^ the driver checks, installs, then steps again
   | Defining GlobalName [Plicity] Core Core Machine
   | Primitively GlobalName Core Machine
+  | DeclaringGrammar Block Machine
+    -- ^ a @language@ or @context@ block to check and install (MS6 phase 101)
     -- ^ a primitive constant on its way out to the driver (MS6 phase 97b).
     -- Same shape as 'Defining' and for §7.5's reason: the machine never writes
     -- the global environment.
@@ -913,6 +923,8 @@ perform instr rest m = case operation instr of
 
   -- Out through the channel, exactly as 'DefineGlobal' goes: the driver checks
   -- the name is one with a reduction rule and installs the constant.
+  DeclareGrammar b -> DeclaringGrammar b (advance m)
+
   DeclarePrimitive nm ty -> case (,) <$> text nm <*> term ty of
     Left r -> failure r m
     Right (x, t) -> Primitively (GlobalName x) t (advance m)

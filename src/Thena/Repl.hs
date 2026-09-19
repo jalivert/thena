@@ -122,6 +122,8 @@ import Thena.Engine
   )
 import Thena.Errors
   ( DataBuildError (..)
+  , Skipped (..)
+  , Warning (..)
   , Clash (..)
   , ConversionFailure (..)
   , DevForm (..)
@@ -134,10 +136,11 @@ import Thena.Errors
   , Site (..)
   , TypeError (..)
   )
-import Thena.Global.Declare (DeclareError (..), TokenClassError (..), Warning (..))
+import Thena.Global.Declare (DeclareError (..), TokenClassError (..))
+import Thena.Language.Grammar (GrammarError (..), GrammarProblem (..), ProductionProblem (..), Sort (..))
+import Thena.Language.Reader (ReadError (..))
 import Thena.Language.Regex (RegexError (..))
 import Thena.Global.NoConfusion (noConfusionNames)
-import qualified Thena.Global.NoConfusion as NoConfusion
 import qualified Data.List.NonEmpty as NE
 import Thena.Surface.Concrete
   ( PairingError (..)
@@ -163,7 +166,7 @@ import Thena.Instral.Ops
   )
 import Thena.Rules (RuleBase (..), RuleError (..))
 import qualified Thena.Instral.Ops as Ops
-import Thena.Syntax.Lexer (LexError (..), Pos (..), Token (..))
+import Thena.Syntax.Lexer (BlockKind (..), LexError (..), Pos (..), Token (..))
 import Thena.Surface.Layout (LayoutError (..))
 import Thena.Surface.Parser (SurfaceParseError (..))
 import qualified Thena.Surface.Zipper as Zipper
@@ -621,12 +624,20 @@ renderStop s stop = case stop of
 
 renderSyntaxError :: SyntaxError -> String
 renderSyntaxError e = case e of
+  -- MS6 phase 101. The line is the module's, counted from 1.
+  BlockUnreadable r -> case r of
+    HeaderWithoutWhere l -> line l ++ "a block's first line names it and ends in where"
+    HeaderMalformed l -> line l ++ "a block's first line is its name and metavariables, separated by commas"
+    ProductionWithoutArrow l -> line l ++ "a production is ‹name› -> ‹items›, or ‹name› : ‹metadata› -> ‹items›"
+    MetadataMalformed l t ->
+      line l ++ t ++ " is not ‹x› as occurrence, ‹x› as binder or { ‹x›, … } as binders"
+    BindingMalformed l w
+      | null w -> line l ++ "a [ is never closed"
+      | otherwise -> line l ++ w ++ " is not a binding form ‹E›[‹x›, …]"
+    IndentedLess l -> line l ++ "this line is indented less than the productions above it"
+    where line l = "line " ++ show l ++ ": "
   DeclarationsUnpaired (SignatureWithNoEquation x) ->
     x ++ " has a type but no definition — write " ++ x ++ " = ‹term› after it"
-  DeclarationsUnpaired DatatypeInATheoremList ->
-    "a datatype cannot be declared here"
-  DeclarationsUnpaired BlockInATheoremList ->
-    "a do block cannot appear here"
   -- **Numbered from one**, because the user counts instructions the way the
   -- printer numbers everything else, and the word is quoted back so the line is
   -- findable in a block that repeats an op.
@@ -685,6 +696,11 @@ describe :: Token -> String
 describe t = case t of
   TLambda     -> "λ"
   TLanguage   -> "language"
+  TContext    -> "context"
+  TJudgment   -> "judgment"
+  TBlock k _  -> case k of
+    LanguageBlock -> "a language block"
+    ContextBlock  -> "a context block"
   -- Never lexed; "Thena.Driver" inserts it at a rule file's column 1.
   TChar c     -> show c
   TSpread     -> "..."
@@ -1851,24 +1867,39 @@ signature n0 ps0 ty0 = braced n0 [] ps0 ty0
 -- rather than what went wrong.
 renderWarning :: Warning -> String
 renderWarning w = "warning: " ++ case w of
+  VacuousBinder k g p x -> blockAt k g ++ ", production " ++ p ++ ": " ++ x ++ " binds in nothing"
   NoConfusionSkipped d why ->
     "no " ++ nameString (snd (noConfusionNames d)) ++ ": " ++ because
     where
-      -- Qualified, because 'Thena.Errors.ElimError' has a @NoEquality@ of its
-      -- own and this module renders both.
       because = case why of
-        NoConfusion.NoEquality -> "there is no Eq in scope"
-        NoConfusion.NoProducts -> "there is no And, Unit and Empty in scope"
+        NoEqInScope -> "there is no Eq in scope"
+        NoProducts -> "there is no And, Unit and Empty in scope"
         -- Position and name both, as 'Thena.Errors.IndexTypeDepends' says it
         -- one telescope over: several arguments of one constructor may carry
         -- the same 'Ident', so the name alone does not say which.
-        NoConfusion.DependentArguments c k (Ident i) ->
+        DependentArguments c k (Ident i) ->
           nameString c ++ "'s argument " ++ show k ++ " (" ++ i ++ ") has a type"
             ++ " that depends on an earlier argument, so its equation cannot be"
             ++ " stated"
 
 renderDeclareError :: DeclareError -> String
 renderDeclareError e = case e of
+  -- @ms6\/SPEC.md@ §4.5's wording, and §5.1's (MS6 phase 101).
+  GrammarRefused (GrammarError k g problem) -> case problem of
+    MetavariableRepeated x -> blockAt k g ++ ": " ++ x ++ " is named twice"
+    MetavariableTaken x -> blockAt k g ++ ": " ++ x ++ " is already a metavariable or a token class"
+    NameTaken -> g ++ " is already declared"
+    ConstructorTaken p -> g ++ "'s constructor " ++ p ++ " is already declared"
+    ContextShape -> blockAt k g ++ ": a context needs one empty and one extension production"
+    InProduction p why -> blockAt k g ++ ", production " ++ p ++ ": " ++ case why of
+      NoItems -> "it has no items"
+      NotAMetavariable x -> x ++ " is not a metavariable"
+      NotAnArgument x -> x ++ " is not an argument of " ++ p
+      OccurrenceBinds x -> x ++ " is an occurrence, so it binds nothing"
+      NotADeclaredBinder x -> x ++ " is not one of the binders declared"
+      BinderNotString x s -> "a binder must be a String, and " ++ x ++ " is " ++ sortPhrase s
+      OccurrenceNotString x s -> "an occurrence must be a String, and " ++ x ++ " is " ++ sortPhrase s
+      ScopesDiffer x -> x ++ " is written with different binders free in it"
   -- @ms6\/SPEC.md@ §3.2's wording. The regex is quoted as written, between its
   -- slashes; the witness as a string literal, so a newline in it is visible.
   TokenClassRefused g why -> "in the token class " ++ nameString g ++ ": " ++ case why of
@@ -2349,3 +2380,18 @@ levelParams vs = " {" ++ unwords (map levelVarName vs) ++ "}"
 -- | @1 thing@, @2 things@ — so a message never reads "1 level arguments".
 count :: Int -> String -> String
 count k what = show k ++ " " ++ what ++ (if k == 1 then "" else "s")
+
+-- | @in the grammar of LC@ or @in the context Ctx@ (MS6 phase 101).
+blockAt :: BlockKind -> String -> String
+blockAt k g = case k of
+  LanguageBlock -> "in the grammar of " ++ g
+  ContextBlock  -> "in the context " ++ g
+
+-- | @an Int@, @a Ty@ — what an argument ranges over, with its article.
+sortPhrase :: Sort -> String
+sortPhrase s = article (nameString n)
+  where
+    n = case s of
+      OfLanguage g -> g
+      OfClass _ t -> t
+    article w = (if take 1 w `elem` map (: []) "AEIOU" then "an " else "a ") ++ w

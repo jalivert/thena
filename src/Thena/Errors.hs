@@ -29,6 +29,8 @@
 -- above @Core@; it mentions nothing this module did not already have.
 module Thena.Errors
   ( DataBuildError (..)
+  , Warning (..)
+  , Skipped (..)
   , FailReason (..)
   , MoveError (..)
 
@@ -57,11 +59,81 @@ import Thena.Core.Level (Level, Unmet)
 import Thena.Core.Context (Context)
 import Thena.Core.Term (Core, GlobalName, Ident, Var)
 import Thena.Instral.Pattern (Pattern)
-import Thena.Syntax.Lexer (LexError)
+import Thena.Syntax.Lexer (BlockKind, LexError)
+import Thena.Language.Reader (ReadError)
 import Thena.Surface.Concrete (PairingError (..))
 import Thena.Surface.Layout (LayoutError (..))
 import Thena.Surface.Parser (SurfaceParseError (..))
 import Thena.Syntax.Parser (ParseError)
+
+-- | Something worth telling the user about a load that nonetheless succeeded
+-- (MS6 phase 98).
+--
+-- **A warning never changes what is installed**, which is the whole of what
+-- separates it from a 'DeclareError': an error abandons the declaration, a
+-- warning is a remark about one that went in. Structured, like every other
+-- diagnostic (@PLAN.md@ §12), so the renderer decides the words and a test can
+-- ask which warning it was rather than grep a sentence.
+--
+-- **Here since MS6 phase 101**, when §4.5's grammar warnings arrived: phase 98
+-- put it in "Thena.Global.Declare" only because 'Skipped' and 'ElimError' both
+-- had a @NoEquality@, and a grammar warning should not import a declaration
+-- module to raise one.
+data Warning
+  = NoConfusionSkipped GlobalName Skipped
+    -- ^ the datatype went in, and its no-confusion equipment did not. **The
+    -- one diagnostic the system already had and could not report during a
+    -- module load**, because a load discards the op-level messages a prompt
+    -- shows — which is what phase 98 was written to fix.
+  | VacuousBinder BlockKind String String String
+    -- ^ the block, the production, and a binder declared @as binders@ that no
+    -- @[…]@ mentions (@ms6\/SPEC.md@ §4.5, MS6 phase 101). A vacuous binder is
+    -- allowed — that is why it can be declared — and worth saying.
+  deriving (Eq, Show)
+
+
+-- | Why a datatype gets no no-confusion. Structured, per §12 invariant 2.
+--
+-- **Moved here from "Thena.Global.NoConfusion" at MS6 phase 101**, with
+-- 'Warning', which carries it. Its first constructor was @NoEquality@ and was
+-- renamed 'NoEqInScope': 'ElimError' has a @NoEquality@ of its own, older (MS1)
+-- and naming the missing global, so this is the one whose name said less.
+--
+-- The three are ordered by how much they are about the /user's/ declaration.
+-- 'NoEqInScope' is about the environment and is reported to nobody (see
+-- 'generateNoConfusion'); the other two are properties of what was just
+-- written, and "Thena.Driver" says them.
+data Skipped
+  = NoEqInScope
+    -- ^ no well-shaped @Eq@ is in scope, so no equation can be stated. Arises
+    -- only before the prelude is loaded — @repl@ loads it at startup — which is
+    -- why it is silent.
+  | NoProducts
+    -- ^ a prelude type this datatype's own table would be written out of —
+    -- @And@, @Unit@ or @Empty@ — is missing or misshapen. Silent for
+    -- 'NoEqInScope'\'s reason and arising in the same situation, a prelude-free
+    -- script, which is why the two are tested together.
+    --
+    -- **Asked per datatype, not once**, and that is load-bearing rather than
+    -- fastidious: the prelude declares @Eq@ before @And@, so a blanket
+    -- precondition would refuse @NoConfusionEq@ — which phase 14 generated —
+    -- for a name it was never going to write. See 'productsInScope'.
+  | DependentArguments GlobalName Int Ident
+    -- ^ this constructor's argument telescope is dependent, so the equation for
+    -- the named argument is ill-typed. @cons : (n : Nat) (a : A) (as : Vec A n)
+    -- -> Vec A (succ n)@ wants @Eq (Vec A n) as as'@ while @as' : Vec A n'@.
+    -- An MS1 limit and not unsoundness — the way out is a transported chain of
+    -- equations, which nothing in MS1 wants (@AGENDA.md@).
+    --
+    -- **The position is carried as well as the name** (2026-09-13), because the
+    -- name alone does not identify the argument: an anonymous arrow argument is
+    -- stored as @Ident \"x\"@ deliberately (@Syntax.Resolve@\'s @RawArrow@ case
+    -- says why, and the printer freshens a repeat), so a constructor written
+    -- @hop : ∀ (x y z : A) -> Chain A x y -> Chain A y z -> Chain A x z@ has
+    -- /three/ arguments called @x@ and this said only *argument x*.
+    -- 'Thena.Errors.IndexTypeDepends' — the same condition one telescope over —
+    -- has carried its position since it was written.
+  deriving (Eq, Show)
 
 -- | Why an operation failed. Structured, never a string (§12 invariant 2).
 --
@@ -566,6 +638,10 @@ data SyntaxError
     -- ^ the offside rule could not lay the surface program out (MS4 phase 40)
   | SurfaceParseFailed SurfaceParseError
   | DeclarationsUnpaired PairingError
+  | BlockUnreadable ReadError
+    -- ^ a @language@ or @context@ block the reader could not take apart
+    -- (MS6 phase 101). A syntax error, reported before anything in the module
+    -- elaborates, as a malformed top-level @do@ block is.
   | BlockIllFormed Int String
     -- ^ the instruction at this position in a **top-level** @do@ block gave this
     -- op word the wrong operands (MS4 phase 45).

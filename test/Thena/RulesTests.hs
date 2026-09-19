@@ -722,7 +722,7 @@ text = Lit . VText
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env cur is =
   load is (Machine (Exec [] [] []) (Development cur) [] env
-                   (expectedBase ++ [returning]) [] 1000 0)
+                   (expectedBase ++ [returning]) [] [] 1000 0)
 
 -- | A base with one rule in it that returns something (MS5 phase 63).
 --
@@ -767,6 +767,7 @@ runOut m = case step m of
   Declaring _ m'    -> runOut m'
   Defining _ _ _ _ m' -> runOut m'
   Primitively _ _ m' -> runOut m'
+  DeclaringGrammar _ m' -> runOut m'
   Certifying _ _ m' -> runOut m'
   Asking _ m'       -> runOut (resumeAt "ok" m')
   -- Handed straight back, so a rule that yields is still exercised end to

@@ -22,7 +22,6 @@ module Thena.Surface.Concrete
   , SurfaceData (..)
   , SurfaceConstructor (..)
   , PairingError (..)
-  , paired
   , SurfaceArg (..)
   , SurfaceBinder (..)
   , Plicity (..)
@@ -40,6 +39,7 @@ import Thena.Core.Term (Literal (..))
 -- and a @do@ block in a surface program is `instral` written in place
 -- (@discussion\/the-five-languages.md@ §0b, table F).
 import Thena.Instral.Concrete (RawInstr (..))
+import Thena.Syntax.Lexer (BlockKind)
 --
 -- **Icity lives here and never in "Thena.Core.Term"** — the user's decision,
 -- 2026-09-01: /"I am convinced that the DC does not need implicits. I think
@@ -187,6 +187,9 @@ data SurfaceDecl
   = SurfaceSignature String Surface   -- ^ @foo : T@
   | SurfaceEquation  String Surface   -- ^ @foo = e@
   | SurfaceDatatype  SurfaceData      -- ^ @data D … where { … }@ (phase 42b)
+  | SurfaceGrammar   BlockKind Int String
+    -- ^ a @language@ or @context@ block (MS6 phase 101): its kind, the line of
+    -- its keyword, and its text, raw. "Thena.Driver.regroup" reads it.
   | SurfaceBlock     [RawInstr]
     -- ^ a top-level @do@ block (MS4 phase 45) — **his, 2026-09-03**. At the top
     -- of a module a block is not an expression but an /item/: it plays where
@@ -217,33 +220,12 @@ data SurfaceData = SurfaceData
 data SurfaceConstructor = SurfaceConstructor String Surface
   deriving (Eq, Show)
 
--- | What went wrong pairing them.
+-- | What went wrong pairing a signature with its equation
+-- ("Thena.Driver.regroup").
 data PairingError
   = SignatureWithNoEquation String
   | EquationWithNoSignature String
-  | DatatypeInATheoremList
-  | BlockInATheoremList
-    -- ^ and neither is a top-level @do@ block (MS4 phase 45), for the same
-    -- reason: 'paired' is about theorems.
-    -- ^ 'paired' is about theorems; a caller that can also take a datatype
-    -- splits the list first. Phase 43's loader does; phase 42b's @declare@
-    -- keeps them apart at the command.
   deriving (Eq, Show)
-
--- | Pair each signature with the equation that follows it.
---
--- **Adjacent and in that order**, which is the rule Haskell and Agda both use;
--- nothing here searches, so a declaration cannot pick up an equation from the
--- far end of a module.
-paired :: [SurfaceDecl] -> Either PairingError [(String, Surface, Surface)]
-paired ds = case ds of
-  [] -> Right []
-  SurfaceSignature x ty : SurfaceEquation y body : rest
-    | x == y -> ((x, ty, body) :) <$> paired rest
-  SurfaceSignature x _ : _ -> Left (SignatureWithNoEquation x)
-  SurfaceEquation  x _ : _ -> Left (EquationWithNoSignature x)
-  SurfaceDatatype _    : _ -> Left DatatypeInATheoremList
-  SurfaceBlock _       : _ -> Left BlockInATheoremList
 
 -- | Every @do@ block written inside a surface term, outermost first.
 --

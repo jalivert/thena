@@ -231,6 +231,7 @@ runOut m = case step m of
   Declaring _ m'    -> runOut m'
   Defining _ _ _ _ m' -> runOut m'
   Primitively _ _ m' -> runOut m'
+  DeclaringGrammar _ m' -> runOut m'
   Certifying _ _ m' -> runOut m'
   Asking _ m'       -> ([], Right m')
   Yielding _ m'     -> ([], Right m')
@@ -256,7 +257,7 @@ elaboratingAt cur s =
 -- **With the standard base installed**, because elaboration lives in it.
 machineAt :: Cursor -> [Instr] -> Machine
 machineAt cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals expectedBase [] 1000 0)
+  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals expectedBase [] [] 1000 0)
 
 -- | @? goal : ∀ (a : Type₀) (b : Type₀) -> Type₀@ — two binders, so a miscount
 -- would show.

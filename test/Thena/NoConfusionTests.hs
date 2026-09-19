@@ -44,7 +44,7 @@ import Thena.Declared
 import Thena.Driver (parseCore, parseDeclaration)
 import Thena.Global.Declare (DeclareError (..), declare)
 import Thena.Global.Env (GlobalEnv, definitionBody, definitionType, lookupDefinition)
-import Thena.Global.NoConfusion (Skipped (..))
+import Thena.Errors (Skipped (..))
 import Thena.Kernel (certify)
 import Thena.Repl (renderCore)
 

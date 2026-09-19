@@ -43,6 +43,8 @@ library
         Thena.Global.NoConfusion
         Thena.Kernel
         Thena.Language.Regex
+        Thena.Language.Reader
+        Thena.Language.Grammar
         Thena.Repl
         Thena.Rules
         Thena.Surface.Concrete
@@ -134,6 +136,7 @@ test-suite thena-test
         Thena.SessionTests
         Thena.LexerTests
         Thena.RegexTests
+        Thena.GrammarTests
         Thena.TokenTests
         Thena.SyntaxTests
     build-depends:

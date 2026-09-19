@@ -22,7 +22,6 @@ module Thena.Global.Declare
   , declare
   , buildInductive
   , targetIndices
-  , Warning (..)
   ) where
 
 import Control.Monad (foldM)
@@ -41,7 +40,7 @@ import Thena.Core.Level
   , solveLevels
   )
 import Thena.Core.Typing (infer)
-import Thena.Errors (DataBuildError (..), ResolveError (..), TypeError (..))
+import Thena.Errors (DataBuildError (..), ResolveError (..), Skipped (..), TypeError (..))
 import Thena.Core.Term
   ( Core (..)
   , GlobalName
@@ -55,9 +54,9 @@ import Thena.Core.Term
   , referencesAt
   )
 import Thena.Language.Regex (RegexError)
+import Thena.Language.Grammar (GrammarError)
 import Thena.Global.NoConfusion
   ( Generated (..)
-  , Skipped (..)
   , generateNoConfusion
   )
 import Thena.Global.Env
@@ -86,31 +85,6 @@ import Thena.Global.Env
 -- they are deliberately separate from 'NotStrictlyPositive', which is the real
 -- thing. Keeping them apart is what lets the message say "not yet" rather than
 -- "never".
--- | Something worth telling the user about a load that nonetheless succeeded
--- (MS6 phase 98).
---
--- **A warning never changes what is installed**, which is the whole of what
--- separates it from a 'DeclareError': an error abandons the declaration, a
--- warning is a remark about one that went in. Structured, like every other
--- diagnostic (@PLAN.md@ §12), so the renderer decides the words and a test can
--- ask which warning it was rather than grep a sentence.
---
--- **It lives here rather than in "Thena.Errors" for one concrete reason**:
--- 'Skipped'\'s constructors are @NoEquality@ and @NoProducts@, and
--- 'Thena.Errors.ElimError' already has a @NoEquality@ of its own. This module
--- already owns 'DeclareError' and re-exports 'Skipped', so it is the one place
--- both halves are in scope. **When @ms6\/SPEC.md@ §4.5's grammar warnings
--- arrive they will not want to import a declaration module** — that is the
--- moment to move this type and rename whichever @NoEquality@ is the less
--- established.
-data Warning
-  = NoConfusionSkipped GlobalName Skipped
-    -- ^ the datatype went in, and its no-confusion equipment did not. **The
-    -- one diagnostic the system already had and could not report during a
-    -- module load**, because a load discards the op-level messages a prompt
-    -- shows — which is what phase 98 was written to fix.
-  deriving (Eq, Show)
-
 -- | Why a definition of type @Token T@ is not a token class (MS6 phase 100,
 -- @ms6\/SPEC.md@ §3.2). In the order they are checked.
 data TokenClassError
@@ -134,6 +108,9 @@ data DeclareError
   | PrimitiveWrongShape GlobalName String
     -- ^ the name is known but the declared type is not the shape its rule
     -- reads — the message says what shape was wanted
+  | GrammarRefused GrammarError
+    -- ^ a @language@ or @context@ block that failed a check of
+    -- @ms6\/SPEC.md@ §4.5 or §5.1 (MS6 phase 101)
   | TokenClassRefused GlobalName TokenClassError
     -- ^ a definition whose type is @Token T@ that is not a token class
     -- (MS6 phase 100, @ms6\/SPEC.md@ §3.2). The kernel accepted it — a regex
@@ -185,7 +162,7 @@ data DeclareError
 -- policy for @Certify@ at phase 12. No instruction writes globals.
 -- **Also reports what no-confusion did not do.** The 'Skipped' is a fact about
 -- the declaration the user just wrote — @Vec@ gets no @noConfusionVec@ — and
--- the driver says it. 'Thena.Global.NoConfusion.NoEquality' is the one case
+-- the driver says it. 'Thena.Global.NoConfusion.NoEqInScope' is the one case
 -- that is about the environment instead, and it is silent.
 declare
   :: GlobalEnv -> Int -> InductiveDefinition
@@ -227,7 +204,7 @@ declare env n d0 = do
   -- naming the old one.
   case generateNoConfusion env1 n5 d of
     Generated env2 n6   -> Right (env2, n6, Nothing)
-    Declined NoEquality -> Right (env1, n5, Nothing)
+    Declined NoEqInScope -> Right (env1, n5, Nothing)
     Declined NoProducts -> Right (env1, n5, Nothing)
     Declined why        -> Right (env1, n5, Just why)
     Clash g             -> Left (AlreadyDeclared g)
