@@ -325,6 +325,52 @@ them. The alternative — building them from an inductive numeral, as Coq does �
 was weighed and refused, because it makes every identifier in every
 object-language term a chain of constructors.
 
+### A token class is an ordinary definition, and its regex takes its type as an argument
+
+*Decided 2026-09-19.*
+
+A token class is a definition of type `Token T`, written like every other
+definition, with a signature and an equation. `T` is what a matched token
+becomes in an object-language term:
+
+```
+ident : Token String
+ident = /[a-z][a-zA-Z0-9']*/
+
+digit : Token Char
+digit = /[0-9]/
+```
+
+**There is no one-line form, and the annotation is required.** `ident = /…/`
+alone is refused, as any equation without a signature is.
+
+**The literal holds only its text; `T` is found by unification.** A regex
+literal has type `∀ (T : Type₀) -> Token T`, so `/[0-9]/` elaborates to
+`/[0-9]/ ?T` and the signature solves `?T`. What gets stored is `/[0-9]/ Char`,
+which is what `:show` prints. Nothing is defaulted: with nothing to say what
+`T` is, elaboration fails.
+
+```
+thena spine> :infer (/[a-z]/ : Token Char)
+/[a-z]/ : Token Char : Token Char
+```
+
+**The checks run when the class is declared, not in the kernel.** Core accepts
+`/[a-z]+/ Char`, since the literal is well typed at every `T`, and loading it
+refuses it:
+
+```
+refused: in the token class n: /[a-z]+/ accepts "a", which is not an Int
+```
+
+Nothing can take a `Token` apart, so a wrong one cannot prove anything; what
+the check protects is the grammar that reads the class. It refuses:
+- a `T` other than `String`, `Char` or `Int`;
+- a regex that does not parse;
+- a regex that matches the empty string;
+- a regex that accepts something `T` cannot hold. The witness shown is a
+  shortest such string.
+
 ---
 
 ## The development calculus
