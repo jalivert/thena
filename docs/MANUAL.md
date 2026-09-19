@@ -1086,6 +1086,7 @@ language and elaborated on load.
 | `:core ‹t›` `:dev ‹p›` | parse and print |
 | `:surface ‹t›` | parse and print a surface term |
 | `:parse ‹L› ‹text›` | parse an object term with a language's grammar; `?` is a missing slot |
+| `:parse ‹L›` … `:done` | every line is an L term; Tab at the cursor shows what fits, and completes a production |
 | `:infer ‹t›` `:whnf ‹t›` `:convert ‹t› ≟ ‹u›` | type, reduct, convertibility |
 | `:elim ‹D›` / `:elim ‹D› ‹universe›` | the elimination rule |
 | `:matches` | which rules apply here — it takes no argument |

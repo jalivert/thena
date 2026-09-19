@@ -14,6 +14,7 @@
 module Thena.EarleyTests (tests) where
 
 import Data.ByteString.Builder (stringUtf8, toLazyByteString)
+import Data.List (sort)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
@@ -22,7 +23,7 @@ import Test.Tasty.QuickCheck (Gen, Property, choose, counterexample, elements, f
 import Thena.Driver (loadProofSource)
 import Thena.Language.Earley
 import Thena.Language.Regex (Regex, parseRegex)
-import Thena.Repl (startingSession, transcriptFrom)
+import Thena.Repl (startingSession, tabComplete, transcriptFrom)
 
 tests :: TestTree
 tests =
@@ -33,6 +34,7 @@ tests =
     , testGroup "holes and splices (§7.6)" holes
     , testGroup "the chart is a value (§7.7)" charting
     , testProperty "printed and parsed back, a tree is itself" roundTrip
+    , testGroup "Tab at the cursor (phase 102b)" tabbing
     , goldenVsString "parsing" "test/golden/parsing.golden" $ do
         (s0, problems) <- startingSession
         let (s1, _) = loadProofSource s0 stlc
@@ -256,4 +258,54 @@ prompt =
   , ":parse Ty ( \953 -> ( \953 -> \953 ) )"
   , ":parse Nope x"
   , ":parse LC"
+  , "( \955 x : \953 . x )"
+  , "f a b"
+  , ":parse LC"
+  , ":done"
+  , ":parse LC ( \955 y : \953 . y )"
+  ]
+
+-- ---------------------------------------------------------------------------
+-- Tab (phase 102b)
+
+-- | Tab as haskeline calls it: the text left of the cursor, reversed, and the
+-- text right of it.
+tab :: [Rule] -> String -> String -> String -> (String, [(String, String)])
+tab rs lang left right = tabComplete rs lang (reverse left, right)
+
+tabbing :: [TestTree]
+tabbing =
+  [ testCase "after ( λ, the rest of abs is inserted, slots as ?" $
+      tab lc "LC" "( λ" "" @?= (reverse "( λ", [(" ? : ? . ? )", "? : ? . ? )")])
+  , testCase "after ( λ x : , too — the last terminal still belongs to abs alone" $
+      tab lc "LC" "( λ x : " "" @?= (reverse "( λ x : ", [("? . ? )", "? . ? )")])
+  , testCase "after ( alone, abs and paren both fit, so the options are listed" $ do
+      let (kept, cs) = tab lc "LC" "( " ""
+      kept @?= reverse "( "
+      map fst cs @?= map (const "") cs   -- nothing inserted: haskeline lists
+      sort [ d | (_, d) <- cs, d `elem` ["\955", "(", "\8249LC\8250"] ]
+        @?= sort ["\955", "\8249LC\8250", "("]
+  , -- The completion rule is about a terminal: after f, which ends a var,
+    -- app has begun but nothing has been decided, so nothing is completed.
+    testCase "after a finished var, no production is completed" $
+      map fst (snd (tab lc "LC" "f" "")) @?= map (const "") (snd (tab lc "LC" "f" ""))
+  , -- The cursor inside the production being written: what follows it is the
+    -- rest, so the slot must still be offered.
+    testCase "a slot of the production under the cursor is offered" $ do
+      let (_, cs) = tab lc "LC" "( \955 ? : " " . ? )"
+      [ d | (_, d) <- cs, d == "\8249Ty\8250" ] @?= ["\8249Ty\8250"]
+  , testCase "the text after the cursor filters the options" $ do
+      let (_, cs) = tab lc "LC" "( \955 x : \953 . x " ")"
+      [ d | (_, d) <- cs, d == ")" ] @?= []
+  , -- With text after the cursor the rest of abs is not inserted; the one
+    -- thing that fits there — a hole for the bound name — is.
+    testCase "the rest of a production is never inserted into a line's middle" $
+      tab lc "LC" "( \955" " x" @?= (reverse "( \955", [(" ?", "?")])
+  , testCase "on a ?, a single answer replaces the hole" $
+      tab [rule "e" "E" [lit "<", nt "T", lit ">"], rule "base" "T" [lit "\953"]] "E" "< ?" " >"
+        @?= (reverse "< ", [("\953", "\953")])
+  , testCase "and several leave it standing and are listed" $ do
+      let (kept, cs) = tab lc "LC" "( \955 ? : ?" " . ? )"
+      kept @?= reverse "( \955 ? : ?"
+      sort [ d | ("", d) <- cs, d `elem` ["\953", "("] ] @?= sort ["\953", "("]
   ]

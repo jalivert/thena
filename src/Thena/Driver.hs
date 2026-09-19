@@ -249,6 +249,11 @@ data Session = Session
     -- environment only ever grows), so an @:undo@ that crossed it would rewind
     -- the development and leave the theorem admitted.
   , sessionStepping  :: Bool
+  , sessionParsing   :: Maybe String
+    -- ^ **the language whose terms the lines are, in @:parse@'s interactive
+    -- mode** (MS6 phase 102b, his request of 2026-09-19). Every line is parsed
+    -- as a term of it until @:done@. On the session, as 'sessionStepping' is,
+    -- so a transcript drives the mode exactly as the terminal does.
   }
   deriving (Eq, Show)
 
@@ -362,6 +367,7 @@ newSession = Session
   , sessionSuspended = []
   , sessionHistory   = (Exec [] [] [], ps, []) :| []
   , sessionStepping  = False
+  , sessionParsing   = Nothing
   }
   where
     (ps, n) = newDevelopment 0
@@ -428,6 +434,8 @@ data Response
     -- ^ @:parse@ (MS6 phase 102): the one reading of an object term, holes
     -- and all
   | ObjectUnparsed String String Earley.ParseFailure
+  | ParsingEntered String   -- ^ @:parse ‹L›@: the interactive mode began (phase 102b)
+  | ParsingLeft String      -- ^ @:done@: it ended
     -- ^ @:parse@: the language, the text, and why it is not one term
   | InferredSurface Surface Core
     -- ^ @:infer ‹surface›@ (MS4 phase 43): the term as written and the type
@@ -557,6 +565,10 @@ data CommandError
     -- nothing would be worse than one that says so.
   | NoSuchGlobal String
   | NoSuchLanguage String
+  | NotParsing
+    -- ^ @:done@ outside @:parse@'s mode (phase 102b), as @qed@ outside a proof
+    -- is 'NotProving': a word that did nothing would be worse than one that
+    -- says so
     -- ^ @:parse@ named a language no @language@ or @context@ block declared
   | NotProving
     -- ^ @qed@, @:suspend@, @:abandon@ or @:undo@ outside a proof. §2.4: outside
@@ -1132,14 +1144,24 @@ parseSurfaceTerm src = do
 -- @claim@ are ops and read exactly as they will read inside a rule body;
 -- everything with a colon is the driver's own.
 command :: Session -> String -> (Session, Response)
-command s line = case break (== ' ') (dropWhile (== ' ') line) of
-  ("", _)      -> (s, Blank)
-  -- **A line that is only a comment is a blank line** (MS4 phase 43). The lexer
-  -- drops @-- @ wherever it appears, but a command word is split off before
-  -- anything is lexed, so a comment standing alone would otherwise be
-  -- dispatched as a rule named @--@.
-  _ | commentLine line -> (s, Blank)
-  (name, rest) -> dispatch s name (dropWhile (== ' ') rest)
+command s line
+  -- **In @:parse@'s mode a line is a term** (MS6 phase 102b), and the one
+  -- line that is not is @:done@, which leaves. Nothing else is a command
+  -- there: an object language may well begin a term with a colon.
+  | Just lang <- sessionParsing s = case trimmedLine of
+      ":done" -> (s { sessionParsing = Nothing }, ParsingLeft lang)
+      ""      -> (s, Blank)
+      _       -> (s, parseObject (sessionMachine s) lang trimmedLine)
+  | otherwise = case break (== ' ') (dropWhile (== ' ') line) of
+    ("", _)      -> (s, Blank)
+    -- **A line that is only a comment is a blank line** (MS4 phase 43). The
+    -- lexer drops @-- @ wherever it appears, but a command word is split off
+    -- before anything is lexed, so a comment standing alone would otherwise be
+    -- dispatched as a rule named @--@.
+    _ | commentLine line -> (s, Blank)
+    (name, rest) -> dispatch s name (dropWhile (== ' ') rest)
+  where
+    trimmedLine = dropWhile (== ' ') (reverse (dropWhile (== ' ') (reverse line)))
 
 dispatch :: Session -> String -> String -> (Session, Response)
 dispatch s name arg = case name of
@@ -1160,19 +1182,20 @@ dispatch s name arg = case name of
     Left e  -> (s, Failed e)
     Right t -> (s, RenderedSurface t)
   ":dev"   -> withArgument (view s parseDevelopment RenderedDev arg)
+  -- In @:parse@'s mode 'command' takes @:done@ before it gets here.
+  ":done"  -> noArgument (s, Rejected NotParsing)
   -- | @:parse ‹Language› ‹text›@ — parse an object term with an installed
   -- grammar and print its reading (MS6 phase 102, his request, 2026-09-19).
   -- A @?@ in the text is a missing slot. It changes no state.
+  -- With no text, **enter the interactive mode** (phase 102b): every line is
+  -- a term of the language until @:done@, and Tab at the cursor asks the
+  -- parser what fits there ("Thena.Repl").
   ":parse" -> withArgument $ case break (== ' ') arg of
     (lang, rest)
-      | null (dropWhile (== ' ') rest) -> (s, Rejected (MissingArgument ":parse"))
       | GlobalName lang `notElem` map grammarName (grammars machine) ->
           (s, Rejected (NoSuchLanguage lang))
-      | otherwise ->
-          let text = dropWhile (== ' ') rest
-           in case Earley.parse (earleyRules (grammars machine)) (Earley.StartAt lang) (Earley.pieces text) of
-                Right t -> (s, ParsedObject t)
-                Left why -> (s, ObjectUnparsed lang text why)
+      | null (dropWhile (== ' ') rest) -> (s { sessionParsing = Just lang }, ParsingEntered lang)
+      | otherwise -> (s, parseObject machine lang (dropWhile (== ' ') rest))
   -- The only command that means two things, and they do not overlap: with no
   -- argument it is the development, with one it is a global (§9, phase 6).
   ":show"  -> case arg of
@@ -1857,6 +1880,7 @@ commandSummary =
   , (":surface ‹t›",             "parse a surface term and print it")
   , (":infer / :infer ‹t›",      "the type of the focus / of a surface term")
   , (":parse ‹L› ‹text›",         "parse an object term; ? is a missing slot")
+  , (":parse ‹L› … :done",         "parse every line as an L term; Tab at the cursor")
   , (":whnf / :whnf ‹t›",        "reduce the focus / a term, without committing")
   , (":convert ‹t› ≟ ‹u›",      "are two terms convertible")
   , (":elim ‹D› [‹universe›]",  "a datatype’s elimination rule")
@@ -2720,3 +2744,10 @@ unfoldIter :: RuleIter -> [Rule]
 unfoldIter it = case next it of
   Nothing        -> []
   Just (r, rest) -> r : unfoldIter rest
+
+-- | Parse a term of an installed language and say what it is (MS6 phase 102).
+parseObject :: Machine -> String -> String -> Response
+parseObject m lang text =
+  case Earley.parse (earleyRules (grammars m)) (Earley.StartAt lang) (Earley.pieces text) of
+    Right t  -> ParsedObject t
+    Left why -> ObjectUnparsed lang text why

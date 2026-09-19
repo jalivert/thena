@@ -27,6 +27,7 @@ a bare word acts, a word with a colon looks.
   :surface ‹t›                  parse a surface term and print it
   :infer / :infer ‹t›           the type of the focus / of a surface term
   :parse ‹L› ‹text›             parse an object term; ? is a missing slot
+  :parse ‹L› … :done            parse every line as an L term; Tab at the cursor
   :whnf / :whnf ‹t›             reduce the focus / a term, without committing
   :convert ‹t› ≟ ‹u›            are two terms convertible
   :elim ‹D› [‹universe›]        a datatype’s elimination rule

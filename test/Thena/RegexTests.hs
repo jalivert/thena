@@ -18,7 +18,7 @@
 -- not have that way out.
 module Thena.RegexTests (tests) where
 
-import Data.List (nub, sort)
+import Data.List (nub, sort, (\\))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Test.Tasty.QuickCheck
@@ -176,19 +176,35 @@ crossed =
 
 -- | Every length of a prefix the expression accepts, by 'reference'.
 lengths :: Regex -> String -> [Int]
-lengths r w = sort (nub [length w - length rest | rest <- reference r w])
+lengths r w = reference r w 0
 
--- | A backtracking matcher: the rest of the input after each way of matching a
--- prefix. A star only takes an iteration that consumes something, which is
--- what keeps it finite and loses no match.
-reference :: Regex -> String -> [String]
-reference NoMatch _ = []
-reference EmptyString w = [w]
-reference (OneOf s) (c : w) | member c s = [w]
-reference (OneOf _) _ = []
-reference (Sequence r s) w = concatMap (reference s) (reference r w)
-reference (Alternatives rs) w = concatMap (`reference` w) rs
-reference (Star r) w = w : concat [reference (Star r) w' | w' <- reference r w, length w' < length w]
+-- | A matcher over **positions**: the positions a match that starts at
+-- @i@ can end at. No derivatives, no normal form, no automaton — it shares no
+-- line with "Thena.Language.Regex" beyond 'member'.
+--
+-- **Positions, not remainders** (fixed in MS6 phase 102b). The first
+-- version returned every way of matching, and a nested star finds the same
+-- end position exponentially many ways; on one seed in six it ran for hours.
+-- A list of at most @length w + 1@ positions cannot blow up, and a star is its
+-- least fixed point: the positions reachable by repeating the body, each step
+-- making progress.
+reference :: Regex -> String -> Int -> [Int]
+reference re w i = sort (nub (go re i))
+  where
+    go r j = case r of
+      NoMatch -> []
+      EmptyString -> [j]
+      OneOf set
+        | j < length w, member (w !! j) set -> [j + 1]
+        | otherwise -> []
+      Sequence a b -> nub (concat [ go b k | k <- nub (go a j) ])
+      Alternatives rs -> nub (concatMap (`go` j) rs)
+      Star a -> grow [j] [j]
+        where
+          grow seen [] = seen
+          grow seen (k : todo) =
+            let new = nub (filter (> k) (go a k)) \\ seen
+             in grow (seen ++ new) (todo ++ new)
 
 -- | Every string over the test alphabet up to this length.
 upTo :: Int -> [String]
@@ -197,8 +213,7 @@ upTo n = concat [sequence (replicate k alphabet) | k <- [0 .. n]]
 alphabet :: String
 alphabet = "abc\n"
 
--- | Short, because 'reference' is exponential in the length of the input under
--- nested stars — the price of being obviously right.
+-- | Short, so that the exhaustive searches below stay small.
 genString :: Gen String
 genString = do
   n <- choose (0, 8)

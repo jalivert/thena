@@ -42,15 +42,21 @@ module Thena.Repl
   , loadProofFile
   , renderResponse
   , renderLoadError
+  , tabComplete
   ) where
 
 import Control.Monad.IO.Class (liftIO)
+import Data.Char (isSpace)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import System.Console.Haskeline
-  ( InputT
+  ( Completion (..)
+  , InputT
+  , completeFilename
   , defaultSettings
   , getInputLine
   , outputStrLn
   , runInputT
+  , setComplete
   )
 
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar, piOver)
@@ -137,7 +143,7 @@ import Thena.Errors
   , TypeError (..)
   )
 import Thena.Global.Declare (DeclareError (..), TokenClassError (..))
-import Thena.Language.Grammar (GrammarError (..), GrammarProblem (..), ProductionProblem (..), Sort (..))
+import Thena.Language.Grammar (GrammarError (..), GrammarProblem (..), ProductionProblem (..), Sort (..), earleyRules)
 import Thena.Language.Reader (ReadError (..))
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Regex (RegexError (..))
@@ -188,15 +194,33 @@ import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRh
 repl :: IO ()
 repl = do
   (s, problems) <- startingSession
-  runInputT defaultSettings (mapM_ outputStrLn problems >> loop s Nothing)
+  -- **Tab reads the session through a reference** (MS6 phase 102b): haskeline
+  -- fixes its completion function when the loop starts, and what Tab should do
+  -- depends on the session at the moment it is pressed. The loop writes the
+  -- session before every prompt; nothing else writes it.
+  current <- newIORef s
+  let settings = setComplete (completion current) defaultSettings
+  runInputT settings (mapM_ outputStrLn problems >> loop current s Nothing)
 
-loop :: Session -> Maybe Question -> InputT IO ()
-loop s pending = do
+-- | In @:parse@'s mode, the parser's 'tabComplete'; anywhere else, file names,
+-- as haskeline did before.
+completion :: IORef Session -> (String, String) -> IO (String, [Completion])
+completion current input = do
+  s <- readIORef current
+  case sessionParsing s of
+    Just lang ->
+      let (kept, cs) = tabComplete (earleyRules (grammars (sessionMachine s))) lang input
+       in pure (kept, [ Completion r d False | (r, d) <- cs ])
+    Nothing   -> completeFilename input
+
+loop :: IORef Session -> Session -> Maybe Question -> InputT IO ()
+loop current s pending = do
+  liftIO (writeIORef current s)
   input <- getInputLine (prompt s pending)
   case input of
     Nothing   -> pure ()          -- end of input: Ctrl-D
     Just first -> gather first >>= \entry -> case entry of
-      Left problem -> outputStrLn problem >> loop s pending
+      Left problem -> outputStrLn problem >> loop current s pending
       Right line   -> run line
   where
    run line = do
@@ -206,9 +230,9 @@ loop s pending = do
         Just act | not (turnQuit t) -> do
           (s', out) <- liftIO act
           mapM_ outputStrLn out
-          loop s' Nothing
+          loop current s' Nothing
         _ | turnQuit t -> pure ()
-          | otherwise  -> loop (turnSession t) (turnPending t)
+          | otherwise  -> loop current (turnSession t) (turnPending t)
 
    -- | **An entry, not a line** (MS5 phase 70, rewritten at phase 78).
    --
@@ -413,7 +437,9 @@ renderLoadError path e = case e of
 -- constraint focus reads as @spine@ too: it is a link in the chain.
 prompt :: Session -> Maybe Question -> String
 prompt _ (Just _) = "> "
-prompt s Nothing  = "thena " ++ fragment ++ "> "
+prompt s Nothing
+  | Just lang <- sessionParsing s = "parse " ++ lang ++ "> "   -- MS6 phase 102b
+  | otherwise = "thena " ++ fragment ++ "> "
   where
     fragment = case focus (cursor (development (sessionMachine s))) of
       OnTerm {} -> "core"
@@ -517,6 +543,9 @@ renderResponse s resp = case resp of
   Blank          -> []
   RenderedSurface t -> [renderSurface t]
   ParsedObject t -> [renderTree t]
+  ParsingEntered lang ->
+    [ "each line is an " ++ lang ++ " term: Tab shows what fits at the cursor, ? is a missing slot, :done leaves" ]
+  ParsingLeft lang -> ["done parsing " ++ lang]
   ObjectUnparsed lang text why -> [renderUnparsed lang text why]
   Rendered t     -> [renderCore (counter s) (contextOf s) t]
   RenderedDev p  -> [renderPartial (counter s) (contextOf s) p]
@@ -1374,6 +1403,7 @@ renderCommandError e = case e of
   NotYielding          -> "nothing has yielded"
   NoSuchGlobal x       -> "nothing named " ++ x ++ " has been declared"
   NoSuchLanguage x     -> "no language called " ++ x ++ " has been declared"
+  NotParsing           -> ":done leaves :parse's mode, and this is not it"
   NotProving           -> "no proof is being worked on"
   AlreadyProving g     -> nameString g ++ " is still being proved — :suspend or :abandon it first"
   NoSuchProof x        -> "no suspended proof called " ++ x
@@ -2437,3 +2467,49 @@ renderUnparsed lang text why = "in " ++ lang ++ "`" ++ text ++ "`: " ++ case why
       [w] -> w
       w : rest -> intercalate ", " (reverse rest) ++ " or " ++ w
       [] -> ""
+
+-- | **Tab in @:parse@'s mode** (MS6 phase 102b, his request of 2026-09-19).
+-- Haskeline hands over the text left of the cursor, reversed, and the text
+-- right of it; this answers with what to keep of the left and what to insert.
+--
+-- * **One production is the only one the last terminal belongs to**, and
+--   nothing follows the cursor: the rest of it is inserted, its terminals as
+--   text and its slots as @?@. After @( λ@ that is @? : ? . ? )@.
+-- * **One thing fits**: it is inserted.
+-- * **Several fit**: they are listed. Every candidate's replacement is empty,
+--   because haskeline inserts the candidates' longest common prefix and lists
+--   them only if that inserted nothing — two slots both inserting @?@ would
+--   otherwise put a @?@ in instead of showing the choice.
+-- * **The cursor is just after a @?@**: the hole is what is being filled, so
+--   the question is asked as if it were not there, and a single answer
+--   replaces it.
+--
+-- Answered as @(replacement, display)@ pairs, so that it is a function of the
+-- parser alone; 'completion' makes them haskeline's.
+tabComplete :: [Earley.Rule] -> String -> (String, String) -> (String, [(String, String)])
+tabComplete rules lang (leftReversed, right) =
+  case leftReversed of
+    '?' : before -> answer (reverse before) True
+    _ -> answer (reverse leftReversed) False
+  where
+    answer before replacing =
+      let o = Earley.offer rules (Earley.StartAt lang) (Earley.pieces before) (Earley.pieces right)
+          spaced t = if null before || isSpace (last before) then t else ' ' : t
+          single t = (reverse before, [(spaced t, t)])
+          -- Filling a hole with a hole says nothing: on a @?@, only terminals.
+          options = [ x | x <- Earley.offerOptions o, not replacing || isLiteral x ]
+       in case (Earley.offerCompletion o, options) of
+            (Just rest@(_ : _), _) | not replacing -> single (unwords (map written rest))
+            (_, [s]) -> single (written s)
+            (_, []) -> (leftReversed, [])
+            (_, ss) -> (leftReversed, [ ("", shown s) | s <- ss ])
+    written s = case s of
+      Earley.Literal t -> t
+      _ -> "?"
+    isLiteral s = case s of
+      Earley.Literal _ -> True
+      _ -> False
+    shown s = case s of
+      Earley.Literal t -> t
+      Earley.Scan n _ -> "\8249" ++ n ++ "\8250"
+      Earley.Nonterminal n -> "\8249" ++ n ++ "\8250"

@@ -45,6 +45,9 @@ module Thena.Language.Earley
   , readings
   , ParseFailure (..)
   , parse
+    -- * At a cursor
+  , Offer (..)
+  , offer
   ) where
 
 import Data.Char (isSpace)
@@ -130,12 +133,15 @@ itemsAt c k = maybe [] Set.toList (Map.lookup k (chartColumns c))
 -- expect @λ@ sit at column 1, and position 2 — where a cursor would be — has
 -- none of its own.
 expectedAt :: Chart -> Int -> [Symbol]
-expectedAt c k = nub [ s | i <- itemsAt c (settled k), Just s <- [next c i] ]
-  where
-    settled j
-      | j > 0, null (itemsAt c j), Just (Char ch) <- Map.lookup (j - 1) (chartInput c), isSpace ch =
-          settled (j - 1)
-      | otherwise = j
+expectedAt c k = nub [ s | i <- itemsAt c (settled c k), Just s <- [next c i] ]
+
+-- | The column whose items speak for a position: back over whitespace to the
+-- last column that has any.
+settled :: Chart -> Int -> Int
+settled c j
+  | j > 0, null (itemsAt c j), Just (Char ch) <- Map.lookup (j - 1) (chartInput c), isSpace ch =
+      settled c (j - 1)
+  | otherwise = j
 
 -- | The last column any item reached. Past it, nothing could be scanned.
 furthest :: Chart -> Int
@@ -391,3 +397,70 @@ parse rs start input = case take 2 [ t | Reading t <- all' ] of
     terminal s = case s of
       Nonterminal _ -> False
       _ -> True
+
+-- ---------------------------------------------------------------------------
+-- At a cursor
+
+-- | What the parser can say at a cursor (phase 102b's Tab, his request of
+-- 2026-09-19): what may be written there, and — when the terminal just before
+-- the cursor belongs to one production only — the rest of that production.
+data Offer = Offer
+  { offerOptions    :: [Symbol]
+    -- ^ **what may be written at the cursor such that the line can still be
+    -- finished** — the text after the cursor included. A symbol is tried
+    -- together with some of the rest of its own production, holes for its
+    -- slots: @(@ opening an arrow type is tried as @( ? -> ? )@, since @(@
+    -- alone could never be followed by what closes the /enclosing/ term. A
+    -- slot is offered as its 'Nonterminal' or 'Scan'.
+  , offerCompletion :: Maybe [Symbol]
+    -- ^ the symbols left of the one production the last terminal belongs to.
+    -- **Only when nothing but whitespace follows the cursor**: the rest of a
+    -- production is inserted at the end of what is written, never into the
+    -- middle of it.
+  }
+  deriving (Eq, Show)
+
+-- | The cursor sits between @left@ and @right@.
+--
+-- **The completion rule is one sentence**: if the terminal just before the
+-- cursor was scanned by items of exactly one production, the rest of that
+-- production is offered. After @( λ@ that is @abs@; after @(@ alone it is
+-- @abs@ and @paren@, so nothing is completed and both are listed. An item whose
+-- symbol before the dot is a 'Literal' is in its column only because it
+-- scanned that literal there, so the chart answers this directly.
+offer :: [Rule] -> Start -> [Piece] -> [Piece] -> Offer
+offer rs start left right = Offer options completion
+  where
+    c = chart rs start left
+    k = settled c (length left)
+    candidates =
+      [ symbols | i <- itemsAt c k, symbols@(_ : _) <- [drop (itemDot i) (ruleBody (chartRule c i))] ]
+    options = nub [ s | symbols@(s : _) <- candidates, viable symbols ]
+
+    -- The symbol, and some prefix of the rest of its production, written at the
+    -- cursor with a space between each: does the line then scan to its end?
+    -- **Some prefix, not all of it**, because when the cursor is inside the
+    -- production the text after the cursor may already hold the rest — after
+    -- @( λ ? : @ with @ . ? )@ following, the @Ty@ slot needs nothing more.
+    viable symbols = any reaches [ take n symbols | n <- [length symbols, length symbols - 1 .. 1] ]
+    reaches symbols =
+      let line = left ++ concatMap (\x -> Char ' ' : written x) symbols ++ [Char ' '] ++ right
+          c' = chart rs start line
+       in skipSpace (chartInput c') (furthest c') == length line
+    written s = case s of
+      Literal t -> map Char t
+      _ -> [Hole]
+
+    justScanned =
+      nub [ (itemRule i, itemDot i)
+          | i <- itemsAt c k
+          , let body = ruleBody (chartRule c i)
+          , itemDot i > 0, itemDot i < length body
+          , Literal _ <- [body !! (itemDot i - 1)]
+          ]
+    completion = case justScanned of
+      [(r, d)] | all blank right -> Just (drop d (ruleBody (chartRules c Map.! r)))
+      _ -> Nothing
+    blank p = case p of
+      Char ch -> isSpace ch
+      _ -> False
