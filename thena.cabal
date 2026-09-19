@@ -45,6 +45,7 @@ library
         Thena.Language.Regex
         Thena.Language.Reader
         Thena.Language.Grammar
+        Thena.Language.Earley
         Thena.Repl
         Thena.Rules
         Thena.Surface.Concrete
@@ -137,6 +138,7 @@ test-suite thena-test
         Thena.LexerTests
         Thena.RegexTests
         Thena.GrammarTests
+        Thena.EarleyTests
         Thena.TokenTests
         Thena.SyntaxTests
     build-depends:

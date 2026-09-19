@@ -139,6 +139,7 @@ import Thena.Errors
 import Thena.Global.Declare (DeclareError (..), TokenClassError (..))
 import Thena.Language.Grammar (GrammarError (..), GrammarProblem (..), ProductionProblem (..), Sort (..))
 import Thena.Language.Reader (ReadError (..))
+import qualified Thena.Language.Earley as Earley
 import Thena.Language.Regex (RegexError (..))
 import Thena.Global.NoConfusion (noConfusionNames)
 import qualified Data.List.NonEmpty as NE
@@ -515,6 +516,8 @@ renderResponse :: Session -> Response -> [String]
 renderResponse s resp = case resp of
   Blank          -> []
   RenderedSurface t -> [renderSurface t]
+  ParsedObject t -> [renderTree t]
+  ObjectUnparsed lang text why -> [renderUnparsed lang text why]
   Rendered t     -> [renderCore (counter s) (contextOf s) t]
   RenderedDev p  -> [renderPartial (counter s) (contextOf s) p]
   Shown c        -> [renderCursor (counter s) c]
@@ -1370,6 +1373,7 @@ renderCommandError e = case e of
   NotAsking            -> "nothing was asked"
   NotYielding          -> "nothing has yielded"
   NoSuchGlobal x       -> "nothing named " ++ x ++ " has been declared"
+  NoSuchLanguage x     -> "no language called " ++ x ++ " has been declared"
   NotProving           -> "no proof is being worked on"
   AlreadyProving g     -> nameString g ++ " is still being proved — :suspend or :abandon it first"
   NoSuchProof x        -> "no suspended proof called " ++ x
@@ -2393,5 +2397,43 @@ sortPhrase s = article (nameString n)
   where
     n = case s of
       OfLanguage g -> g
-      OfClass _ t -> t
+      OfClass _ t _ -> t
     article w = (if take 1 w `elem` map (: []) "AEIOU" then "an " else "a ") ++ w
+
+-- | A reading, as the production names applied to their slots (MS6 phase
+-- 102): @abs(x, base, var(x))@. A class's match is its text, a hole is @?@.
+renderTree :: Earley.Tree -> String
+renderTree t = case t of
+  Earley.Node n [] -> n
+  Earley.Node n cs -> n ++ "(" ++ intercalate ", " (map renderTree cs) ++ ")"
+  Earley.Token x -> x
+  Earley.HoleAt _ -> "?"
+  Earley.SpliceOf k -> "${" ++ show k ++ "}"
+
+-- | Why an object term did not parse, in @ms6\/SPEC.md@ §7.5's form: the
+-- language and the text first, as a tagged literal would be written.
+renderUnparsed :: String -> String -> Earley.ParseFailure -> String
+renderUnparsed lang text why = "in " ++ lang ++ "`" ++ text ++ "`: " ++ case why of
+  Earley.Ambiguous a b ->
+    "this term parses two ways, as " ++ renderTree a ++ " and as " ++ renderTree b
+  Earley.Disagrees r x a b ->
+    r ++ "'s " ++ x ++ " is written more than once and must read the same each time, "
+      ++ "but here it is " ++ renderTree a ++ " and " ++ renderTree b
+  Earley.Unbounded h ->
+    "this term parses without end, because " ++ h ++ " can derive itself from the same text"
+  Earley.Stuck p expected
+    | p >= length text -> "the term ends too soon" ++ expecting expected
+    | otherwise ->
+        "unexpected " ++ escapeChar (text !! p) ++ " at character " ++ show (p + 1)
+          ++ expecting expected
+  where
+    expecting [] = ""
+    expecting ss = ", expecting " ++ oneOf (map symbolText ss)
+    symbolText s = case s of
+      Earley.Literal x -> x
+      Earley.Scan n _ -> n
+      Earley.Nonterminal n -> n
+    oneOf ws = case reverse ws of
+      [w] -> w
+      w : rest -> intercalate ", " (reverse rest) ++ " or " ++ w
+      [] -> ""

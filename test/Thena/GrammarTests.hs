@@ -29,6 +29,7 @@ import Thena.Errors (SyntaxError (..), Warning (..))
 import Thena.Global.Declare (DeclareError (..))
 import Thena.Language.Grammar
 import Thena.Language.Reader
+import Thena.Language.Regex (Regex, parseRegex)
 import Thena.Repl (renderResponse, startingSession)
 import Thena.Syntax.Lexer
   (BlockKind (..), Located (..), Token (..), isIdentifier, lexModule, lexTokens)
@@ -184,7 +185,7 @@ meaning =
         (_, other) -> assertFailure (show other)
   ]
   where
-    str = OfClass (GlobalName "x") (GlobalName "String")
+    str = OfClass (GlobalName "x") (GlobalName "String") (regex "[a-z][a-zA-Z0-9']*")
     lang = OfLanguage . GlobalName
     installed src = do
       (s0, _) <- startingSession
@@ -223,7 +224,7 @@ refused =
       "context C, G where\n  e -> \183\n  f -> G G" ContextShape
   ]
   where
-    int = OfClass (GlobalName "n") (GlobalName "Int")
+    int = OfClass (GlobalName "n") (GlobalName "Int") (regex "[0-9]+")
     wrap body =
       "module M where\n\nx : Token String\nx = /[a-z]+/\n\nn : Token Int\nn = /[0-9]+/\n\n" ++ body ++ "\n"
     inProduction title body p why = ((title, wrap body), GrammarError LanguageBlock "L" (InProduction p why))
@@ -255,3 +256,6 @@ refusals =
         , IndentedLess 5
         ]
   ]
+
+regex :: String -> Regex
+regex = either (error . show) id . parseRegex

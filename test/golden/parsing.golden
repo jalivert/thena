@@ -1,0 +1,22 @@
+thena spine> :parse LC ( λ x : ι . x )
+abs(x, base, var(x))
+thena spine> :parse LC (λf:(ι->ι).(λy:ι.f y))
+abs(f, arrow(base, base), abs(y, base, app(var(f), var(y))))
+thena spine> :parse LC ( λ ? : ι . ? )
+abs(?, base, ?)
+thena spine> :parse LC f a b
+in LC`f a b`: this term parses two ways, as app(var(f), app(var(a), var(b))) and as app(app(var(f), var(a)), var(b))
+thena spine> :parse LC { a a }
+repeat(var(a), var(a))
+thena spine> :parse LC { a b }
+in LC`{ a b }`: repeat's M is written more than once and must read the same each time, but here it is var(a) and var(b)
+thena spine> :parse LC ( λ x ι )
+in LC`( λ x ι )`: unexpected 'ι' at character 7, expecting :
+thena spine> :parse LC ( λ x : ι .
+in LC`( λ x : ι .`: the term ends too soon, expecting x, ( or {
+thena spine> :parse Ty ( ι -> ( ι -> ι ) )
+arrow(base, arrow(base, base))
+thena spine> :parse Nope x
+no language called Nope has been declared
+thena spine> :parse LC
+:parse needs an argument

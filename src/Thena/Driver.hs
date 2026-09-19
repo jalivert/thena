@@ -189,7 +189,8 @@ import Thena.Instral.Concrete
   )
 import Thena.Syntax.Lexer (Located (..), Token (..), lexModule, lexTokens)
 import Thena.Language.Reader (Block (..), readBlock)
-import Thena.Language.Grammar (checkGrammar)
+import Thena.Language.Grammar (Grammar (..), checkGrammar, earleyRules)
+import qualified Thena.Language.Earley as Earley
 import Thena.Syntax.Parser
   ( parseData
   , parseEquation
@@ -423,6 +424,11 @@ data Response
     -- own look, because @certify@ is an op and an op's answer comes back as a
     -- 'Message', which the driver may not build out of a term: rendering is
     -- "Thena.Repl"'s (§2.5)
+  | ParsedObject Earley.Tree
+    -- ^ @:parse@ (MS6 phase 102): the one reading of an object term, holes
+    -- and all
+  | ObjectUnparsed String String Earley.ParseFailure
+    -- ^ @:parse@: the language, the text, and why it is not one term
   | InferredSurface Surface Core
     -- ^ @:infer ‹surface›@ (MS4 phase 43): the term as written and the type
     -- elaborating it produced. The **surface** term, not the core one it built,
@@ -550,6 +556,8 @@ data CommandError
     -- 'NotAsking''s twin, and it exists for the same reason: a word that did
     -- nothing would be worse than one that says so.
   | NoSuchGlobal String
+  | NoSuchLanguage String
+    -- ^ @:parse@ named a language no @language@ or @context@ block declared
   | NotProving
     -- ^ @qed@, @:suspend@, @:abandon@ or @:undo@ outside a proof. §2.4: outside
     -- a proof there is nothing to undo, and definitions are not undoable
@@ -1152,6 +1160,19 @@ dispatch s name arg = case name of
     Left e  -> (s, Failed e)
     Right t -> (s, RenderedSurface t)
   ":dev"   -> withArgument (view s parseDevelopment RenderedDev arg)
+  -- | @:parse ‹Language› ‹text›@ — parse an object term with an installed
+  -- grammar and print its reading (MS6 phase 102, his request, 2026-09-19).
+  -- A @?@ in the text is a missing slot. It changes no state.
+  ":parse" -> withArgument $ case break (== ' ') arg of
+    (lang, rest)
+      | null (dropWhile (== ' ') rest) -> (s, Rejected (MissingArgument ":parse"))
+      | GlobalName lang `notElem` map grammarName (grammars machine) ->
+          (s, Rejected (NoSuchLanguage lang))
+      | otherwise ->
+          let text = dropWhile (== ' ') rest
+           in case Earley.parse (earleyRules (grammars machine)) (Earley.StartAt lang) (Earley.pieces text) of
+                Right t -> (s, ParsedObject t)
+                Left why -> (s, ObjectUnparsed lang text why)
   -- The only command that means two things, and they do not overlap: with no
   -- argument it is the development, with one it is a global (§9, phase 6).
   ":show"  -> case arg of
@@ -1835,6 +1856,7 @@ commandSummary =
   , (":core ‹t› / :dev ‹p›",     "parse a term / a development and print it")
   , (":surface ‹t›",             "parse a surface term and print it")
   , (":infer / :infer ‹t›",      "the type of the focus / of a surface term")
+  , (":parse ‹L› ‹text›",         "parse an object term; ? is a missing slot")
   , (":whnf / :whnf ‹t›",        "reduce the focus / a term, without committing")
   , (":convert ‹t› ≟ ‹u›",      "are two terms convertible")
   , (":elim ‹D› [‹universe›]",  "a datatype’s elimination rule")

@@ -27,15 +27,18 @@ module Thena.Language.Grammar
   , ProductionProblem (..)
   , checkGrammar
   , tokenClassOf
+  , earleyRules
   ) where
 
 import Data.List (nub, (\\))
 import Data.Maybe (isJust)
 
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), tokenName)
+import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), tokenName)
+import qualified Thena.Language.Earley as Earley
+import Thena.Language.Regex (Regex, parseRegex)
 import Thena.Errors (Warning (..))
-import Thena.Global.Env (GlobalEnv, definitionType, isDeclared, lookupDefinition)
+import Thena.Global.Env (GlobalEnv, definitionBody, definitionType, isDeclared, lookupDefinition)
 import Thena.Language.Reader (Block (..), Metadata (..), Production (..), RawItem (..))
 import Thena.Syntax.Lexer (BlockKind (..))
 
@@ -60,7 +63,8 @@ data GProduction = GProduction
 -- | An item, resolved.
 data Item
   = Terminal String
-  | Slot String [String]   -- ^ a metavariable or class; the binders free in it
+  | Slot String Sort [String]
+    -- ^ a metavariable or class, what it ranges over, and the binders free in it
   deriving (Eq, Show)
 
 data Argument = Argument
@@ -73,7 +77,9 @@ data Argument = Argument
 -- | What an argument ranges over.
 data Sort
   = OfLanguage GlobalName            -- ^ a metavariable's grammar
-  | OfClass GlobalName GlobalName    -- ^ a token class, and its @T@
+  | OfClass GlobalName GlobalName Regex
+    -- ^ a token class, its @T@, and its expression — read once, when the
+    -- grammar is checked, so that parsing never looks the class up again
   deriving (Eq, Show)
 
 -- | §4.7's roles, the ones phase 103 puts on the constructor.
@@ -170,13 +176,13 @@ checkGrammar installed env b = do
     sortOf x
       | x == name || x `elem` blockMetavars b = Just (OfLanguage (GlobalName name))
       | Just g <- lookup x metavarsElsewhere = Just (OfLanguage g)
-      | Just t <- tokenClassOf env x = Just (OfClass (GlobalName x) t)
+      | Just (t, re) <- tokenClassOf env x = Just (OfClass (GlobalName x) t re)
       | otherwise = Nothing
 
     production p = do
       items <- traverse item (productionItems p)
       if null items then Left NoItems else Right ()
-      let slots = [ (x, bs) | Slot x bs <- items ]
+      let slots = [ (x, bs) | Slot x _ bs <- items ]
           args = nub (map fst slots)
           scopeOf x = nub [ bs | (y, bs) <- slots, y == x ]
           bracketed = nub (concatMap snd slots)
@@ -197,17 +203,15 @@ checkGrammar installed env b = do
             | (bs : _) <- scopeOf x, not (null bs) =
                 Scope [ i | (y, i) <- zip args [0 ..], y `elem` bs ]
             | otherwise = Plain
-          arguments = [ Argument x s (role x) | x <- args, Just s <- [sortOf x] ]
+          arguments = [ Argument x srt (role x) | x <- args, srt <- take 1 [ t | Slot y t _ <- items, y == x ] ]
           vacuous = [ VacuousBinder kind name (productionName p) x
                     | Just xs <- [declared], x <- xs, x `notElem` bracketed ]
       Right (GProduction (GlobalName (productionName p)) items arguments, vacuous)
 
     item i = case i of
-      Word w
-        | isJust (sortOf w) -> Right (Slot w [])
-        | otherwise -> Right (Terminal w)
+      Word w -> Right (maybe (Terminal w) (\srt -> Slot w srt []) (sortOf w))
       Binding hd bs -> case sortOf hd of
-        Just (OfLanguage _) -> Right (Slot hd bs)
+        Just srt@(OfLanguage _) -> Right (Slot hd srt bs)
         _ -> Left (NotAMetavariable hd)
 
     named args x
@@ -222,7 +226,7 @@ checkGrammar installed env b = do
       | otherwise = Right ()
 
     stringClass wrong x = case sortOf x of
-      Just (OfClass _ (GlobalName "String")) -> Right ()
+      Just (OfClass _ (GlobalName "String") _) -> Right ()
       Just s -> Left (wrong x s)
       Nothing -> Left (NotAMetavariable x)
 
@@ -233,15 +237,41 @@ contextShaped own g =
   case map ownSlots (grammarProductions g) of
     counts -> length counts == 2 && 0 `elem` counts && 1 `elem` counts
   where
-    ownSlots p = length [ () | Slot x _ <- gproductionItems p, x `elem` own ]
+    ownSlots p = length [ () | Slot x _ _ <- gproductionItems p, x `elem` own ]
 
--- | The @T@ of a token class: a definition whose type reduces to @Token T@,
--- with @T@ one of the primitive types (MS6 phase 100 refuses any other).
-tokenClassOf :: GlobalEnv -> String -> Maybe GlobalName
+-- | The @T@ of a token class, and its expression: a definition whose type
+-- reduces to @Token T@ and whose value to a regex literal (MS6 phase 100
+-- refused any other).
+tokenClassOf :: GlobalEnv -> String -> Maybe (GlobalName, Regex)
 tokenClassOf env x = do
   d <- lookupDefinition (GlobalName x) env
-  case whnf env [] (definitionType d) of
+  t <- case whnf env [] (definitionType d) of
     App (Global g []) t | g == tokenName -> case whnf env [] t of
       Global tn [] -> Just tn
       _ -> Nothing
     _ -> Nothing
+  re <- case whnf env [] (definitionBody d) of
+    App (Primitive (LRegex src)) _ -> either (const Nothing) Just (parseRegex src)
+    _ -> Nothing
+  Just (t, re)
+
+-- | The installed grammars as one Earley grammar (phase 102): a production is a
+-- rule of its language's nonterminal; a terminal is a literal, a class slot a
+-- scan with the class's expression, a metavariable slot its language's
+-- nonterminal. The non-linear groups are the slot positions of each name
+-- written more than once.
+earleyRules :: [Grammar] -> [Earley.Rule]
+earleyRules gs =
+  [ Earley.Rule (nameOf (gproductionName p)) (nameOf (grammarName g)) (map symbol items) same
+  | g <- reverse gs
+  , p <- grammarProductions g
+  , let items = gproductionItems p
+        slots = [ x | Slot x _ _ <- items ]
+        same = [ (x, ps) | x <- nub slots, let ps = [ k | (y, k) <- zip slots [0 ..], y == x ], length ps > 1 ]
+  ]
+  where
+    nameOf (GlobalName n) = n
+    symbol i = case i of
+      Terminal t -> Earley.Literal t
+      Slot x (OfClass _ _ re) _ -> Earley.Scan x re
+      Slot _ (OfLanguage h) _ -> Earley.Nonterminal (nameOf h)
