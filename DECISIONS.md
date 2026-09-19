@@ -371,6 +371,40 @@ the check protects is the grammar that reads the class. It refuses:
 - a regex that accepts something `T` cannot hold. The witness shown is a
   shortest such string.
 
+
+### An object language's grammar is a block of its own notation
+
+*Decided 2026-09-19.*
+
+A `language` or `context` block at the margin of a module is read by its own
+reader, not by Thena's lexer, so its notation can use `[`, `λ`, `⌜` or `/`:
+
+```
+x : Token String
+x = /[a-z]+/
+
+language LC, M, N, E where
+  var : x as occurrence -> x
+  abs : x as binder     -> ( λ x : T . E[x] )
+  app                   -> ( M N )
+
+context Ctx, Γ where
+  empty  -> ·
+  extend -> Γ , x : T
+```
+
+**Items are separated by whitespace**, so `Γ ,` and not `Γ,`. The
+separation is needed only in the grammar; a term is written `Γ, x : T`,
+because whitespace between object tokens is optional when it is parsed. A
+binding form is the exception: `E[x, y]` is one item, bracket adjacent. A
+production is one line, and a deeper line continues it.
+
+**`context` and `judgment` are reserved words**, like `language`. A name in a
+production is a metavariable, then a token class, then a terminal, and a
+metavariable may not be named like an existing one or a class. A block sees
+what is above it, as every declaration does. It is checked when the module
+loads, and a binder that binds in nothing is a warning, not an error.
+
 ---
 
 ## The development calculus
