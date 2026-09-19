@@ -436,6 +436,23 @@ abs(?, base, ?)
 make a missing piece with a keystroke, and `?` will then be free for object
 languages to use.
 
+**`:parse` with no text is a mode where every line is a term**, until `:done`.
+In it, **Tab asks the parser what fits at the cursor**:
+
+```
+parse LC> ( λ‸              Tab →   ( λ ? : ? . ? )
+parse LC> ( ‸               Tab →   lists  λ  (  ‹LC›  ‹x›  {
+parse LC> ( λ x : ?‸ . x )  Tab →   lists  ι  (      (what can replace the ?)
+```
+
+When the terminal just before the cursor belongs to one production only, Tab
+inserts the rest of it, `?` for its slots. That happens only at the end of the
+line, never in the middle. Otherwise Tab lists what can go at the cursor such
+that the line can still be finished, counting what's already written after
+the cursor. On a `?`, Tab fills that hole, so it offers only notation. The
+options appear when you press Tab, not as you move; options that follow the
+cursor are the structural editor's job.
+
 ---
 
 ## The development calculus
