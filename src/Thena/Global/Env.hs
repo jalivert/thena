@@ -71,6 +71,8 @@ import Thena.Core.Term
   , fresh
   , levelMetasIn
   , substLevelsIn
+  , tokenName
+  , tokenType
   )
 
 -- | A global with a body — the @definition@ kind of §3.3.1's table: proved
@@ -301,7 +303,8 @@ data GlobalEnv = GlobalEnv
   }
   deriving (Eq, Show)
 
--- | Every environment starts with the three primitive types (MS6 phase 97a).
+-- | Every environment starts with the three primitive types (MS6 phase 97a) and
+-- @Token@ (phase 100).
 --
 -- They are 'constants' — a type and no body — because that is exactly what they
 -- are: @String@, @Char@ and @Int@ have no constructors and no eliminator, and
@@ -312,7 +315,8 @@ data GlobalEnv = GlobalEnv
 emptyGlobals :: GlobalEnv
 emptyGlobals = GlobalEnv [] primitiveTypes [] []
 
--- | The three primitive types, each at @Type₀@.
+-- | The three primitive types, each at @Type₀@, and @Token : Type₀ -> Type₀@
+-- (MS6 phase 100) — the type of a token class, whose values are regex literals.
 --
 -- 'Thena.Core.Term.primitiveType' is the other half of the association and the
 -- only other place these names are written.
@@ -321,6 +325,7 @@ primitiveTypes =
   [ (GlobalName n, MkConstant [] (Universe LZero))
   | n <- ["String", "Char", "Int"]
   ]
+  ++ [(tokenName, MkConstant [] tokenType)]
 
 -- | Install a primitive function (MS6 phase 97b). The driver has already
 -- checked the name has a rule and the type has the shape that rule reads.

@@ -31,13 +31,14 @@ import Thena.Core.Term
   , Literal (..)
   , close
   , fresh
-  , primitiveType
   )
 import Thena.Core.Typing (infer)
 import Thena.Driver (checkedPrimitive, parseCore)
 import Thena.Global.Env
   ( Constant (..)
+  , Definition (..)
   , GlobalEnv
+  , addDefinition
   , addPrimitive
   , emptyGlobals
   , lookupConstant
@@ -89,10 +90,16 @@ seeded =
 typed :: [TestTree]
 typed =
   [ testCase (show l) $ case infer env ctx 0 (Primitive l) of
-      (Right ty, _, _) -> ty @?= Global (primitiveType l) []
+      (Right ty, _, _) -> ty @?= expected
       (Left e, _, _)   -> assertFailure (show e)
-  | l <- [LString "ab", LChar 'c', LInt 7]
+  | (l, expected) <-
+      [ (LString "ab", named "String")
+      , (LChar 'c', named "Char")
+      , (LInt 7, named "Int")
+      ]
   ]
+  where
+    named g = Global (GlobalName g) []
 
 values :: [TestTree]
 values =
@@ -202,12 +209,25 @@ computing =
       reduced (apply [Free v, str "a"]) @?= apply [Free v, str "a"]
   , testCase "nor is one argument alone enough" $
       reduced (apply [str "a"]) @?= apply [str "a"]
+  -- **An argument is reduced before it is read** (phase 100, closeout item 7).
+  -- These were stuck: the rule matched a literal as the argument stood, so a
+  -- closed comparison of something that /is/ a literal did not compute.
+  , testCase "a definition of a literal is compared, in either place" $
+      map reduced [apply [named "a", str "a"], apply [str "b", named "a"]]
+        @?= [answer "yes", answer "no"]
+  , testCase "so is a redex that reduces to one" $
+      reduced (apply [App identity (str "a"), str "a"]) @?= answer "yes"
   ]
   where
     v = fst (fresh 500)
     str s = Primitive (LString s)
+    named g = Global (GlobalName g) []
     apply = foldl App (Global (GlobalName "eqString") [])
-    reduced = whnf answering ctx
+    reduced = whnf withA ctx
+    withA = addDefinition (GlobalName "a") (MkDefinition [] [] stringTy (str "a")) answering
+    stringTy = Global (GlobalName "String") []
+    identity = Lam (Ident "x") stringTy (close x (Free x))
+    x = fst (fresh 501)
 
 -- | What @declare-primitive@ does with a declaration it cannot honour.
 --

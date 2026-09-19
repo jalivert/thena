@@ -133,6 +133,7 @@ genLiteral =
     [ LString "a", LString "ab", LString "", LString "a\"b", LString "tab\there"
     , LChar 'a', LChar 'b', LChar '\'', LChar '\n'
     , LInt 0, LInt 7, LInt 12345678901234567890
+    , LRegex "[a-z]+", LRegex "a\\/b", LRegex "(x|y)*\\.", LRegex "[^ \\t]"
     ]
 
 genIdent :: Gen Ident

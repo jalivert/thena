@@ -1,0 +1,89 @@
+-- a module of classes
+module Good
+  declared ident
+  declared digit
+  declared numeral
+  declared again
+  declared Name
+  declared var
+-- T is not one of the three
+solved: ?ℓ717
+solved: ?ℓ717
+solved: ?ℓ717
+chose 750: elaborate
+already equal
+solved: ?ℓ718
+solved: T
+refused: in the token class t: Bool is not String, Char or Int
+-- the regex does not parse: a stray metacharacter
+chose 719: elaborate
+already equal
+solved: ?ℓ717
+solved: T
+refused: in the token class f: unexpected '{' in the regular expression
+-- the regex does not parse: it ends too soon
+chose 719: elaborate
+already equal
+solved: ?ℓ717
+solved: T
+refused: in the token class g: the regular expression ends too soon
+-- the regex does not parse: an escape other dialects have
+chose 719: elaborate
+already equal
+solved: ?ℓ717
+solved: T
+refused: in the token class c: \S is not supported in a regular expression
+-- the regex does not parse: a reversed range
+chose 719: elaborate
+already equal
+solved: ?ℓ717
+solved: T
+refused: in the token class d: the range z-a is empty, because z comes after a
+-- it matches the empty string
+chose 719: elaborate
+already equal
+solved: ?ℓ717
+solved: T
+refused: in the token class b: the regular expression matches the empty string
+-- it accepts something that is not a Char
+chose 719: elaborate
+already equal
+solved: ?ℓ717
+solved: T
+refused: in the token class e: /ab|c/ accepts "ab", which is not a Char
+-- it accepts something that is not an Int, and says the shortest
+chose 719: elaborate
+already equal
+solved: ?ℓ717
+solved: T
+refused: in the token class n: /[a-z]+/ accepts "a", which is not an Int
+thena spine> :theorem d : Token Char
+proving d : Token Char
+thena spine> fill ⌜ /[a-z]+/ Char ⌝
+already equal
+thena spine> solve
+thena spine> qed
+certified
+refused: in the token class d: /[a-z]+/ accepts "aa", which is not a Char
+thena spine> :abandon
+abandoned d
+thena spine> :theorem e : Token Char
+proving e : Token Char
+thena spine> fill ⌜ /[a-z]/ Char ⌝
+already equal
+thena spine> solve
+thena spine> qed
+e : Token Char   ∎
+thena spine> :show e
+e : Token Char
+e = let refined = /[a-z]/ Char : Token Char in let e = refined : Token Char in e
+thena spine> :core /a\/b/ Comparison
+/a\/b/ Comparison
+thena spine> :infer (/[a-z]/ : Token Char)
+/[a-z]/ : Token Char : Token Char
+thena spine> :infer /[a-z]/
+parked 1 constraint(s), blocked on T, Tinfer
+stuck: that term does not have the hole's type
+  refined has type Token T
+    but Tinfer was expected
+    Tinfer and Token T do not match

@@ -134,6 +134,7 @@ test-suite thena-test
         Thena.SessionTests
         Thena.LexerTests
         Thena.RegexTests
+        Thena.TokenTests
         Thena.SyntaxTests
     build-depends:
         base              ^>=4.21.2.0,

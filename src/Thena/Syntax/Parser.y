@@ -99,6 +99,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   num     { Located _ (TNumber $$) }
   str     { Located _ (TString $$) }
   chr     { Located _ (TChar $$) }
+  regex   { Located _ (TRegex $$) }
   '...'   { Located _ TSpread }
   '['     { Located _ TLBracket }
   ']'     { Located _ TRBracket }
@@ -509,6 +510,7 @@ Atom :: { Raw }
   | str                                    { RawPrimitive (LString $1) }
   | chr                                    { RawPrimitive (LChar $1) }
   | num                                    { RawPrimitive (LInt $1) }
+  | regex                                  { RawPrimitive (LRegex $1) }
   | '(' Term ')'                           { $2 }
 
 -- | @{ ℓ 0 }@ — a brace-enclosed run of level atoms, no commas, exactly as

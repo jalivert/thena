@@ -40,6 +40,7 @@ module Thena.Repl
   , loadRuleFiles
   , loadFile
   , loadProofFile
+  , renderResponse
   , renderLoadError
   ) where
 
@@ -133,7 +134,8 @@ import Thena.Errors
   , Site (..)
   , TypeError (..)
   )
-import Thena.Global.Declare (DeclareError (..), Warning (..))
+import Thena.Global.Declare (DeclareError (..), TokenClassError (..), Warning (..))
+import Thena.Language.Regex (RegexError (..))
 import Thena.Global.NoConfusion (noConfusionNames)
 import qualified Thena.Global.NoConfusion as NoConfusion
 import qualified Data.List.NonEmpty as NE
@@ -718,6 +720,7 @@ describe t = case t of
   TNeck       -> ":-"
   TNumber k   -> show k
   TString txt -> show txt
+  TRegex r    -> "/" ++ r ++ "/"
   TUniverse k   -> "Type" ++ subscript k
   TUniverseOpen -> "Type"
   TIdent s    -> s
@@ -781,6 +784,7 @@ go n env prec term = case term of
     LString s -> escapeString s
     LChar c   -> escapeChar c
     LInt k    -> show k
+    LRegex r  -> "/" ++ r ++ "/"   -- the text as written, escapes and all
 
   App f a -> parensIf (prec > AtApp) (go n env AtApp f ++ " " ++ go n env AtAtom a)
 
@@ -1559,6 +1563,7 @@ renderSurface = surf Loose
       LString s -> escapeString s
       LChar c   -> escapeChar c
       LInt k    -> show k
+      LRegex r  -> "/" ++ r ++ "/"
     surf _ SurfaceUniverseOpen  = "Type"
     surf _ SurfacePlaceholder   = "_"
     surf _ (SurfaceHole h)      = "?" ++ h
@@ -1864,6 +1869,22 @@ renderWarning w = "warning: " ++ case w of
 
 renderDeclareError :: DeclareError -> String
 renderDeclareError e = case e of
+  -- @ms6\/SPEC.md@ §3.2's wording. The regex is quoted as written, between its
+  -- slashes; the witness as a string literal, so a newline in it is visible.
+  TokenClassRefused g why -> "in the token class " ++ nameString g ++ ": " ++ case why of
+    TokenTypeUnsupported t -> renderCore 0 [] t ++ " is not String, Char or Int"
+    TokenValueNotLiteral v -> renderCore 0 [] v ++ " is not a regular expression"
+    TokenRegexRefused _ r -> case r of
+      RegexUnexpected _ c -> "unexpected " ++ escapeChar c ++ " in the regular expression"
+      RegexUnexpectedEnd -> "the regular expression ends too soon"
+      RegexUnsupportedEscape _ c -> "\\" ++ [c] ++ " is not supported in a regular expression"
+      RegexReversedRange _ a b ->
+        "the range " ++ [a] ++ "-" ++ [b] ++ " is empty, because " ++ [a] ++ " comes after " ++ [b]
+    TokenMatchesEmpty _ -> "the regular expression matches the empty string"
+    TokenNotIncluded src t w ->
+      let n = nameString t
+          article = if take 1 n == "I" then "an " else "a "   -- Int, String, Char
+       in "/" ++ src ++ "/ accepts " ++ escapeString w ++ ", which is not " ++ article ++ n
   NoSuchPrimitive g -> "there is no primitive called " ++ nameString g
   PrimitiveWrongShape g want ->
     nameString g ++ " must be declared " ++ want

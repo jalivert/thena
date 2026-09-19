@@ -54,7 +54,20 @@ import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (primitiveNames, whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), fresh, open, substLevelsIn)
+import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), fresh, open, substLevelsIn, tokenName)
+import Thena.Language.Regex
+  ( Inclusion (..)
+  , Regex (..)
+  , alternatives
+  , andThen
+  , fromRanges
+  , inclusion
+  , nullable
+  , oneOf
+  , parseRegex
+  , singleChar
+  , star
+  )
 import Data.Char (isSpace)
 import Data.List (dropWhileEnd, isSuffixOf, nub, stripPrefix)
 import Data.List.NonEmpty (NonEmpty (..))
@@ -92,7 +105,7 @@ import Thena.Errors
   , TypeError
   )
 import Thena.Development.Validate (revalidate)
-import Thena.Global.Declare (DeclareError (..), Warning (..), declare)
+import Thena.Global.Declare (DeclareError (..), TokenClassError (..), Warning (..), declare)
 
 import Thena.Kernel (certify)
 import Thena.Global.Env
@@ -1507,7 +1520,11 @@ dispatch s name arg = case name of
           -- least value there is nothing to default it to. The proof is left
           -- standing rather than admitted, so the development is still there to
           -- look at.
-          admit msgs ws att' s' t = case admitted s' att' t of
+          admit msgs ws att' s' t
+            | Left e <- checkedTokenClass (globals (sessionMachine s'))
+                                          (attemptName att') (attemptClaim att') t =
+                (s', Ran msgs ws (Refused e))
+            | otherwise = case admitted s' att' t of
             Left u -> (s', Ran msgs ws (Uncertified (Levels u)))
             Right (s'', lvs, owed, scheme) ->
               (s'', Proved (attemptName att') lvs owed scheme)
@@ -2476,6 +2493,11 @@ progress oneStep s msgs warns = case step (sessionMachine s) of
   -- when it is over. See 'Thena.Instral.Ops.DefineGlobal'.
   Engine.Defining nm ps ty t m -> case certify (globals m) t ty of
     Left e -> stop (load [] m) msgs warns (Uncertified e)
+    -- **A token class is checked once the kernel has accepted it** (MS6 phase
+    -- 100): the kernel says it is well typed, which a regex literal applied to
+    -- any type is, and 'checkedTokenClass' says whether it is a class.
+    Right _ | Left e <- checkedTokenClass (globals m) nm ty t ->
+      stop (load [] m) msgs warns (Refused e)
     Right (sub, residue) -> case generalised (names m) residue (substLevelsIn sub ty) t of
       Left u -> stop (load [] m) msgs warns (Uncertified (Levels u))
       Right (d, n1) ->
@@ -2546,6 +2568,49 @@ checkedPrimitive env nm ty = case lookup nm primitiveNames of
   where
     wrong want = Left (PrimitiveWrongShape nm want)
     nullary c = null (constructorArguments c)
+
+-- | Is a definition of type @Token T@ a token class (MS6 phase 100,
+-- @ms6\/SPEC.md@ §3.2)? Anything whose type is not @Token T@ is not asked.
+--
+-- **Run at declaration, not in the kernel — his ruling, 2026-09-19.** The
+-- kernel accepts @\/[a-z]+\/ Char@: a regex literal's type is
+-- @∀ (T : Type₀) -> Token T@, so it is well typed at every @T@. That cannot be
+-- unsound, because nothing eliminates a @Token@; what the check protects is the
+-- grammar machinery that will read the class. So the regex engine is not part
+-- of what 'certify' trusts.
+--
+-- Both @T@ and the value are reduced first, so @x = y@ with @y@ a class, or a
+-- @T@ written through a definition, are judged by what they are.
+checkedTokenClass :: GlobalEnv -> GlobalName -> Core -> Core -> Either DeclareError ()
+checkedTokenClass env nm ty value = case whnf env [] ty of
+  App (Global g []) t | g == tokenName ->
+    either (Left . TokenClassRefused nm) Right (classOf (whnf env [] t))
+  _ -> Right ()
+  where
+    classOf t = do
+      (tn, allowed) <- case t of
+        Global g@(GlobalName n) [] | Just l <- lookup n tokenLanguages -> Right (g, l)
+        _ -> Left (TokenTypeUnsupported t)
+      src <- case whnf env [] value of
+        App (Primitive (LRegex s)) _ -> Right s
+        other -> Left (TokenValueNotLiteral other)
+      r <- either (Left . TokenRegexRefused src) Right (parseRegex src)
+      if nullable r then Left (TokenMatchesEmpty src) else Right ()
+      case inclusion r allowed of
+        Included      -> Right ()
+        NotIncluded w -> Left (TokenNotIncluded src tn w)
+
+-- | What each type a token class may produce can hold (@ms6\/SPEC.md@ §3.2).
+-- A class's language must lie inside its type's.
+tokenLanguages :: [(String, Regex)]
+tokenLanguages =
+  [ ("String", star anyChar)
+  , ("Char", anyChar)
+  , ("Int", andThen (alternatives [EmptyString, oneOf (singleChar '-')]) (andThen digit (star digit)))
+  ]
+  where
+    anyChar = oneOf (fromRanges [(minBound, maxBound)])
+    digit = oneOf (fromRanges [('0', '9')])
 
 -- | A type's argument types and its result, with each binder opened.
 --

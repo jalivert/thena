@@ -23,6 +23,8 @@ module Thena.Core.Term
   , Core (..)
   , Literal (..)
   , primitiveType
+  , tokenName
+  , tokenType
   , Scope  -- NB: the type only. Hiding 'MkScope' is the point of the module.
 
     -- * Binding
@@ -40,7 +42,7 @@ module Thena.Core.Term
 
 import Data.List (nub)
 
-import Thena.Core.Level (Level, LevelVar, metasIn, substLevel)
+import Thena.Core.Level (Level (..), LevelVar, metasIn, substLevel)
 
 -- | A reference to a binding, globally unique within a session.
 --
@@ -81,27 +83,60 @@ newtype GlobalName = GlobalName String
 newtype Scope a = MkScope a
   deriving (Eq, Show)
 
--- | A literal of one of the three primitive types (MS6 phase 97a).
+-- | A literal (MS6 phases 97a and 100).
 --
--- The three sit here rather than in three constructors of 'Core' because
--- nothing about the term language distinguishes them: they are opaque values
--- whose type is fixed ('primitiveType') and whose only operation is equality.
+-- The four sit here rather than in constructors of 'Core' because nothing about
+-- the term language distinguishes them: they are opaque values whose type is
+-- fixed ('primitiveType') and whose only operation is equality.
 data Literal
   = LString String
   | LChar Char
   | LInt Integer                       -- ^ arbitrary precision, per @ms6\/SPEC.md@ §2.1
+  | LRegex String
+    -- ^ a token class's regular expression, as its source text between the
+    -- slashes (MS6 phase 100, @ms6\/SPEC.md@ §3.1). **Only the text**: which of
+    -- @String@, @Char@, @Int@ a match becomes is an /argument/, not a field —
+    -- see 'primitiveType'. Two are equal when their text is, as strings are:
+    -- @\/a|b\/@ and @\/b|a\/@ accept the same strings and are different terms.
   deriving (Eq, Show)
 
--- | The primitive type a literal inhabits.
+-- | The type a literal inhabits, read off the literal alone.
 --
--- The three names are seeded into every environment as constants
--- ('Thena.Global.Env.primitives'), so a user cannot declare something else by
--- those names, and this function is the only place the association is written.
-primitiveType :: Literal -> GlobalName
-primitiveType l = GlobalName $ case l of
-  LString{} -> "String"
-  LChar{}   -> "Char"
-  LInt{}    -> "Int"
+-- The three primitive types and @Token@ are seeded into every environment as
+-- constants ('Thena.Global.Env.primitives'), so a user cannot declare something
+-- else by those names, and this function is the only place the association is
+-- written.
+--
+-- **A regex literal's type is a Π — HIS RULING, 2026-09-19.** @\/[a-z]\/@ is a
+-- @Token String@ in one declaration and a @Token Char@ in another, so the
+-- literal takes its @T@ as an argument:
+--
+-- @
+-- \/[a-z]\/ : ∀ (T : Type₀) -> Token T
+-- @
+--
+-- and elaboration applies it to a hole that unification solves from the goal.
+-- The alternative, @T@ carried /inside/ the literal, would need @T@ before
+-- @fill@ — it is only in the goal, which nothing in @instral@ can take apart —
+-- or a literal holding a Core term, which every traversal here would then have
+-- to look inside. @\/[a-z]\/ Bool@ is therefore well typed; it is refused by the
+-- token-class checks at declaration (@Thena.Driver.checkedTokenClass@), and
+-- cannot be unsound because nothing eliminates a @Token@.
+primitiveType :: Literal -> Core
+primitiveType l = case l of
+  LString{} -> Global (GlobalName "String") []
+  LChar{}   -> Global (GlobalName "Char") []
+  LInt{}    -> Global (GlobalName "Int") []
+  LRegex{}  -> Pi (Ident "T") (Universe LZero) (MkScope (App (Global tokenName []) (Bound 0)))
+
+-- | @Token : Type₀ -> Type₀@, the type former of token classes (MS6 phase 100).
+tokenName :: GlobalName
+tokenName = GlobalName "Token"
+
+-- | 'tokenName'\'s type. Seeded by 'Thena.Global.Env.emptyGlobals'; written
+-- here because 'Scope' can only be built in this module.
+tokenType :: Core
+tokenType = Pi (Ident "T") (Universe LZero) (MkScope (Universe LZero))
 
 -- | The core language (§3.6).
 --

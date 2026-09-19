@@ -69,6 +69,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   num     { Located _ (TNumber $$) }
   str     { Located _ (TString $$) }
   chr     { Located _ (TChar $$) }
+  regex   { Located _ (TRegex $$) }
   '...'   { Located _ TSpread }
   '['     { Located _ TLBracket }
   ']'     { Located _ TRBracket }
@@ -314,6 +315,7 @@ Atom :: { Surface }
   | str                                    { SurfaceLiteral (LString $1) }
   | chr                                    { SurfaceLiteral (LChar $1) }
   | num                                    { SurfaceLiteral (LInt $1) }
+  | regex                                  { SurfaceLiteral (LRegex $1) }
   | Type                                   { SurfaceUniverseOpen }
   | '(' Term ')'                           { $2 }
   -- **An atom, so it needs no parentheses in an argument run** — @try (do { … })@

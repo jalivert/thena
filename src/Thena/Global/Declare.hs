@@ -18,6 +18,7 @@
 -- 2, the former wrappers, which are purely syntactic and need no typing.
 module Thena.Global.Declare
   ( DeclareError (..)
+  , TokenClassError (..)
   , declare
   , buildInductive
   , targetIndices
@@ -53,6 +54,7 @@ import Thena.Core.Term
   , open
   , referencesAt
   )
+import Thena.Language.Regex (RegexError)
 import Thena.Global.NoConfusion
   ( Generated (..)
   , Skipped (..)
@@ -109,6 +111,20 @@ data Warning
     -- shows — which is what phase 98 was written to fix.
   deriving (Eq, Show)
 
+-- | Why a definition of type @Token T@ is not a token class (MS6 phase 100,
+-- @ms6\/SPEC.md@ §3.2). In the order they are checked.
+data TokenClassError
+  = TokenTypeUnsupported Core
+    -- ^ @T@, reduced, is not @String@, @Char@ or @Int@
+  | TokenValueNotLiteral Core
+    -- ^ the value, reduced, is not a regex literal applied to a type
+  | TokenRegexRefused String RegexError
+    -- ^ the text between the slashes, and why it does not parse
+  | TokenMatchesEmpty String
+  | TokenNotIncluded String GlobalName String
+    -- ^ the text, @T@, and a shortest string it accepts that is not a @T@
+  deriving (Eq, Show)
+
 data DeclareError
   = NoSuchPrimitive GlobalName
     -- ^ @primitive foo : …@ where nothing has a reduction rule called @foo@
@@ -118,6 +134,11 @@ data DeclareError
   | PrimitiveWrongShape GlobalName String
     -- ^ the name is known but the declared type is not the shape its rule
     -- reads — the message says what shape was wanted
+  | TokenClassRefused GlobalName TokenClassError
+    -- ^ a definition whose type is @Token T@ that is not a token class
+    -- (MS6 phase 100, @ms6\/SPEC.md@ §3.2). The kernel accepted it — a regex
+    -- literal applied to any type is well typed — and this is the check that
+    -- decides whether the grammar machinery may rely on it
   | AlreadyDeclared GlobalName
     -- ^ one namespace, shared with generated names (§3.6)
   | RepeatedName GlobalName

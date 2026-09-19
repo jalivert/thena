@@ -284,7 +284,7 @@ elaborateClauses =
       ]
   , clause SurfaceIsLiteral
       [ Bind (Op.PVar "l") Nothing (Op.SurfaceLiteralOf (Ref "t"))
-      , call "fill" [Ref "l"], call "solve" []
+      , call "apply-core" [Ref "l"]
       ]
   , clause SurfaceIsUniverse
       [ Bind (Op.PVar "u") Nothing (Op.SurfaceUniverseOf (Ref "t"))

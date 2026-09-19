@@ -171,14 +171,17 @@ rule elaborate t :- when focus-is-hole (surface-is-name t)
      ; fill x
      ; solve
 
--- E⟦"ab"⟧, E⟦'c'⟧, E⟦3⟧ — a literal is its own term (MS6 phase 97c). The same
--- two instructions a written universe needs, and for the same reason: nothing
--- has to be looked up, so the term is ready and @solve@ checks it against the
--- goal.
+-- E⟦"ab"⟧, E⟦'c'⟧, E⟦3⟧, E⟦/[a-z]/⟧ — a literal is its own term (MS6 phases
+-- 97c and 100). Nothing has to be looked up, so the term is ready; apply-core
+-- claims a hole for each argument its type asks for and then fills and solves.
+-- A string's type asks for none, so for it this is exactly fill; solve. A regex
+-- literal's is ∀ (T : Type₀) -> Token T, so it becomes /[a-z]/ ?T and solve
+-- unifies Token ?T with the goal — which is where T comes from (his ruling,
+-- 2026-09-19). A T nothing determines stays an unsolved hole; nothing is
+-- defaulted.
 rule elaborate t :- when focus-is-hole (surface-is-literal t)
   do l = surface-literal t
-     ; fill l
-     ; solve
+     ; apply-core l
 
 -- E⟦Typeₙ⟧ — the level is written, so the term is too.
 rule elaborate t :- when focus-is-hole (surface-is-universe t)

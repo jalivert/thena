@@ -109,7 +109,7 @@ whnf env ctx = go 0
         -- here rather than in the 'Global' case because it fires on the
         -- /saturated/ application, exactly as ι does on a saturated target.
         f'
-          | Just u <- primitiveStep env f' a -> go nargs u
+          | Just u <- primitiveStep env (whnf env ctx) f' a -> go nargs u
           | otherwise                        -> App f' a
 
       -- δ on a term-level 'Let': the net effect of "δ, iterated, then ν" from
@@ -152,14 +152,20 @@ primitiveNames =
 -- datatype gets the same rule. The driver has already checked that shape
 -- ('Thena.Driver.checkedPrimitive'), which is why this can read it back
 -- without a second opinion.
-primitiveStep :: GlobalEnv -> Core -> Core -> Maybe Core
-primitiveStep env f arg = case f of
+--
+-- **Both arguments are reduced before they are read** — @reduce@ is 'whnf' in
+-- the caller's context. Matching them as they stood left @eqString a "x"@
+-- stuck when @a@ is a definition of @"x"@, which is reduction incomplete on a
+-- closed term (found in phase 100, @ms6\/CLOSEOUT.md@ 7). They are reduced
+-- only once the head is known to be a primitive, so no other application pays.
+primitiveStep :: GlobalEnv -> (Core -> Core) -> Core -> Core -> Maybe Core
+primitiveStep env reduce f arg = case f of
   App (Global g []) x
     | Just p <- lookup g primitiveNames
-    , Primitive l <- x
-    , Primitive r <- arg
-    , primitiveType l == p
-    , primitiveType r == p
+    , Primitive l <- reduce x
+    , Primitive r <- reduce arg
+    , primitiveType l == Global p []
+    , primitiveType r == Global p []
     , Just result <- resultDatatype env g
     , (c : d : _) <- map constructorName (inductiveConstructors result) ->
         Just (Canonical (if l == r then c else d) [] [])

@@ -52,6 +52,18 @@ $chrchar = [$printable \t] # [\' \\]
 @chresc  = \\ [\' \" \\ n]
 @char    = \' ($chrchar | @chresc) \'
 
+-- A regex literal (MS6 phase 100, @ms6\/SPEC.md@ §3.2), @/[a-z]+/@.
+--
+-- **Purely additive, for the character literal's reason:** @/@ is an
+-- @$idchar@ and not an @$idstart@, so no token has ever begun with one, and
+-- @∂f/∂x@ is still one identifier. The lexer only finds the extent — a
+-- backslash takes the next character with it, so @\/@ does not close — and
+-- hands over the text between the slashes **as written**, escapes and all:
+-- 'Thena.Language.Regex.parseRegex' reads them, and the printer writes the same
+-- text back. It does not span a line.
+$rechar = [$printable \t] # [\/ \\]
+@regex  = \/ ($rechar | \\ [$printable \t])+ \/
+
 @ident    = $idstart $idchar*
 @universe = "Type" ($digit+ | $sub+)
 
@@ -147,6 +159,7 @@ tokens :-
   $digit+       { \p s -> Located (posOf p) (TNumber (read s)) }
   @string       { \p s -> Located (posOf p) (TString (unescape s)) }
   @char         { \p s -> Located (posOf p) (TChar (unchar s)) }
+  @regex        { \p s -> Located (posOf p) (TRegex (init (drop 1 s))) }
   "Type"        { \p _ -> Located (posOf p) TUniverseOpen }
   @universe     { \p s -> Located (posOf p) (TUniverse (levelOf s)) }
   @ident \`      { \p str -> Located (posOf p) (TTagOpen (init str)) }
@@ -199,6 +212,7 @@ data Token
   | TNumber Integer
   | TString String
   | TChar   Char
+  | TRegex  String  -- ^ @/…/@, the text between the slashes (MS6 phase 100)
   | TLBracket
   | TRBracket
   | TComma
