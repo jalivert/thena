@@ -453,6 +453,100 @@ the cursor. On a `?`, Tab fills that hole, so it offers only notation. The
 options appear when you press Tab, not as you move; options that follow the
 cursor are the structural editor's job.
 
+
+### A language block declares a datatype, and its terms are ordinary terms
+
+*Decided 2026-09-20.*
+
+The grammar is the declaration. From it come a datatype, one constructor per
+production, its arguments the production's distinct names in order of first
+appearance:
+
+```
+language LC, M, N, E where
+  var : x as occurrence -> x
+  abs : x as binder     -> ( λ x : T . E[x] )
+  app                   -> ( M N )
+```
+
+```
+thena spine> :show LC
+data LC : Type₀ where
+  { var : String -> LC
+  ; abs : String -> Ty -> LC -> LC
+  ; app : LC -> LC -> LC }
+```
+
+**It is an ordinary datatype**: it has the eliminator, the constructor wrappers
+and the no-confusion equipment any `data` has, and you could have written it by
+hand. A `context` block declares one too. **A name written twice in a
+production is one argument** (`twice -> { M M }` gives `twice : LC -> LC`),
+because the two occurrences must read the same.
+
+So a term of an object language is an ordinary term:
+
+```
+thena spine> :infer ⌜ abs "x" base (var "x") ⌝
+abs "x" base (var "x") : LC
+```
+
+What the block records beyond the datatype is which argument **binds** and
+which is an **occurrence** of a name — the metadata generated substitution
+reads. That is why `x as binder` and `x as occurrence` are written at all.
+
+
+### Grouping is part of your grammar — Thena reserves nothing
+
+*Decided 2026-09-20.*
+
+An object term is parsed **only** by the productions you declare. Thena has no
+grouping parentheses of its own, no precedence, no associativity and no
+implicit anything. If `( f x )` is to be writable, some production must say so.
+
+There are two ways to get grouping, and they differ in what ends up in the
+datatype.
+
+**Parenthesize inside the productions**, the fully-parenthesized style of most
+paper grammars:
+
+```
+app -> ( M N )        app : LC -> LC -> LC
+```
+
+The parentheses are terminals of that production. They cost nothing: the
+datatype has exactly the constructors your language has.
+
+**Or declare grouping as a production of its own:**
+
+```
+paren -> ( M )        paren : LC -> LC
+```
+
+Now grouping is a **constructor**. `paren e` and `e` are different terms, every
+proof by `elim LC` gets a `paren` case, and a lemma about `app` says nothing
+about `paren (app …)`. That is usually not what you want, and it is the reason
+to prefer the first style.
+
+**Ambiguity is reported, never resolved.** Write `app -> M N` and `f a b` has
+two readings, so Thena refuses it and shows you both. Nothing picks one for
+you, because nothing knows which you meant.
+
+**What this buys.** The grammar is the whole of the notation: what you declare
+is what you write, and what Thena prints back — a production is also a printing
+rule. There is no fixity table to learn or to get wrong, and every character is
+yours, brackets and `λ` included, because none of them is reserved.
+
+**What it costs.** You design your grammar to be unambiguous yourself, and you
+find out when a term is read rather than when the grammar is declared. Deeply
+nested notation needs care that a built-in precedence would have handled.
+
+**Others draw the line elsewhere.** SASyLF keeps parentheses for itself: they
+group object-language terms, you disambiguate with them, and a literal
+parenthesis in your language has to be quoted. Agda gives you mixfix operators
+with fixity declarations, and its own parentheses group. Both take a piece of
+the notation back from the object language in exchange for grouping you do not
+have to write. Thena takes none of it, and you write the production.
+
 ---
 
 ## The development calculus
