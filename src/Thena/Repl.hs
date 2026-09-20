@@ -650,6 +650,11 @@ renderStop s stop = case stop of
   Halted r               -> ["stuck: " ++ renderFailReason r]
   Refused e              -> ["refused: " ++ renderDeclareError e]
   Uncertified e          -> "the kernel refused it" : renderKernelError (counter s) e
+  -- The same words the prompt gives for the same two mistakes ('LineRefused'
+  -- and 'EntryMistyped'), because a block is checked by the same checker —
+  -- it is only reached later now (MS6 phase 104b).
+  BlockRefused es        -> map whatRuleError es
+  BlockIllTyped errs     -> map (dropEntry . renderInstralTypeError) errs
   Paused                 -> renderMachine (counter s) (contextOf s) (sessionMachine s)
 
 -- --------------------------------------------------------------------------

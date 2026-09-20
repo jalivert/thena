@@ -16,6 +16,7 @@ thena spine> :produces Core
   fresh-universe/0 : Core
 thena spine> :accepts Surface
   elaborate/1 : Surface -> ()   (rule)
+  run-block/1 : Surface -> ()   (rule)
   intro-binders/1 : Surface -> ()   (rule)
   enter-binders/1 : Surface -> ()   (rule)
   spine-arguments/3 : Core -> Core -> Surface -> ()   (rule)

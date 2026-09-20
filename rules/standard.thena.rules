@@ -403,6 +403,18 @@ rule elaborate t :- when focus-is-hole (surface-is-elim t)
 -- what the user wrote, and repairing it is theirs.
 rule elaborate t :- when focus-is-hole (surface-is-do t) do play t
 
+-- A module's own top-level do block, played where it stands among the
+-- declarations (MS6 phase 104b). The driver calls this rule rather than
+-- splicing the block's instructions into the module's program, so how a module
+-- treats its blocks is written here, in user space, and can be replaced or
+-- added to like any other rule.
+--
+-- It has no head test. A top-level block has no goal and nothing to take
+-- apart: there is a block and it is played. A clause of your own may test
+-- whatever it likes and will be offered first if it is written above this one.
+run-block : Surface -> ()
+rule run-block t :- do play t
+
 -- One prim-lambda per binder, each given the SURFACE name: without it the binder
 -- keeps the identifier written in the type.
 intro-binders : Surface -> ()

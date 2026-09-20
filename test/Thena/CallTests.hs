@@ -33,6 +33,7 @@ import Thena.Engine
   , development
   , retryFrom
   , step
+  , splicing
   )
 import Thena.Errors (FailReason (..))
 import Thena.Global.Env (emptyGlobals)
@@ -79,6 +80,8 @@ runOut m = case step m of
   Defining _ _ _ _ m' -> runOut m'
   Primitively _ _ m' -> runOut m'
   DeclaringGrammar _ m' -> runOut m'
+  -- A block the driver would have typed; the harness splices and runs it.
+  Playing is m' -> runOut (splicing is m')
   Certifying _ _ m' -> runOut m'
   Asking _ m'       -> ([], Right m')
   -- A yield stands still, like a question: there is no user here to hand

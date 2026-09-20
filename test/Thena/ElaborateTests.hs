@@ -39,6 +39,7 @@ import Thena.Engine
   , Development (..)
   , load
   , step
+  , splicing
   )
 import Thena.Errors (FailReason (..), MoveError (..), ResolveError (..), SyntaxError (..))
 import Thena.Global.Env (emptyGlobals)
@@ -232,6 +233,8 @@ runOut m = case step m of
   Defining _ _ _ _ m' -> runOut m'
   Primitively _ _ m' -> runOut m'
   DeclaringGrammar _ m' -> runOut m'
+  -- A block the driver would have typed; the harness splices and runs it.
+  Playing is m' -> runOut (splicing is m')
   Certifying _ _ m' -> runOut m'
   Asking _ m'       -> ([], Right m')
   Yielding _ m'     -> ([], Right m')
@@ -614,7 +617,7 @@ baseTests =
               , "fit-core", "fit-core"
               , "claim", "assume", "quantify"
               ]
-              ++ replicate 18 "elaborate" ++ replicate 2 "enter-binders"
+              ++ replicate 18 "elaborate" ++ ["run-block"] ++ replicate 2 "enter-binders"
               ++ replicate 2 "spine-arguments"
 
     , testCase "prove is a rule over prim-prove" $

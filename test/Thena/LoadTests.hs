@@ -20,20 +20,23 @@ import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Level (Level (..), instantiateLevels)
 import Thena.Core.Term (GlobalName (..))
-import Thena.Errors (Skipped (..), Warning (..))
+import Thena.Errors (FailReason (..), Skipped (..), Warning (..))
 import Thena.Driver
   ( LoadError (..)
   , Loaded (..)
   , LoadKind (..)
   , Response (..)
   , Session (..)
+  , Stop (..)
   , command
   , kindOf
   , loadProofSource
+  , loadRuleBases
   , loadSource
   , newSession
   )
 import Thena.Engine (Machine (..))
+import Thena.Repl (rulesPath)
 import Thena.Core.Term (Core, substLevelsIn)
 import Thena.Global.Env
   ( Definition (..)
@@ -450,30 +453,64 @@ moduleTests =
       let (s1, _) = loadProofSource s0 blockModule
       isDeclared (GlobalName "one") (globals (sessionMachine s1)) @?= True
 
-  , -- Resolution happens while the file is read, so a block whose op is given
-    -- the wrong operands is a syntax error and not a run-time failure.
-    testCase "a block with bad operands is refused as a syntax error" $ do
+  , -- **Resolution happens where the block runs** (MS6 phase 104b), so a block
+    -- whose op is given the wrong operands stops the run rather than refusing
+    -- the file before it starts. It was a syntax error until this phase,
+    -- because the words were turned into ops while the file was still being
+    -- read — which asked what they meant before the declarations above them
+    -- had run.
+    testCase "a block with bad operands stops the run where it stands" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 badBlockModule of
-        (_, Failed _) -> pure ()
-        (_, other)    -> assertFailure (show other)
-
-  , -- **And it is typed before anything in the module runs** (MS5 phase 90,
-    -- @ms5\/CLOSEOUT.md@ 41). Phase 79 checked the blocks inside surface terms
-    -- and not this one, so @prim-try 3@ halted after the items above it had
-    -- already been declared.
-    testCase "a top-level block that does not type check is refused" $ do
-      (s0, _) <- startingSession
-      case loadProofSource s0 mistypedBlockModule of
-        (s1, EntryMistyped (_ : _)) ->
-          isDeclared (GlobalName "Nat") (globals (sessionMachine s1)) @?= False
+        (_, Ran _ _ (Halted (BlockOperands _ "cross"))) -> pure ()
         (_, other) -> assertFailure (show other)
 
-  , -- **Each top-level block is its own scope**, as a block is.
+  , -- **And it is typed the moment it is about to run** (MS6 phase 104b),
+    -- by the checker the prompt uses, so the message is the one it always was.
+    -- **What changed is what is declared by then**: the items above it have
+    -- run, because a module is a sequence and its blocks are no longer hoisted
+    -- out of it. MS5 phase 90 checked every block before the module started,
+    -- which is what made a @language@ block above a block unusable.
+    testCase "a top-level block that does not type check stops the run" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 mistypedBlockModule of
+        (s1, Ran _ _ (BlockIllTyped (_ : _))) ->
+          isDeclared (GlobalName "Nat") (globals (sessionMachine s1)) @?= True
+        (_, other) -> assertFailure (show other)
+
+  , -- **Each top-level block is its own scope**, as a block is — and since
+    -- MS6 phase 104b that is a fact about the run and not only about the
+    -- check. A block is a call to @run-block@, so its instructions run in a
+    -- frame; until this phase they were spliced into the module's one program
+    -- and shared its one environment, while the checker typed each in a scope
+    -- of its own and refused the disagreement.
     testCase "a name bound in one top-level block is not in scope in the next" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 twoBlockModule of
-        (_, LineRefused [UnboundInRule _ _ "x"]) -> pure ()
+        (_, Ran _ _ (BlockRefused [UnboundInRule _ _ "x"])) -> pure ()
+        (_, other) -> assertFailure (show other)
+
+  , -- **A global block is a call to a rule** (MS6 phase 104b), so how a module
+    -- treats its blocks is written in the shipped base and a user may replace
+    -- it. Proved by a block that fails when it is played: the shipped
+    -- @run-block@ plays it and the load stops, and a base of one's own that
+    -- does not play it lets the module through.
+    testCase "the shipped run-block plays a block, and a failing one stops the load" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 failingBlockModule of
+        (_, Ran _ _ (Halted _)) -> pure ()
+        (_, other) -> assertFailure (show other)
+
+  , testCase "and a base of one's own may take the block over entirely" $ do
+      (s0, _) <- startingSession
+      shipped <- rulesPath >>= readFile
+      let mine = "rule base mine where\n\n\
+                 \run-block : Surface -> ()\n\
+                 \rule run-block t :- do say \"intercepted\"\n"
+      case loadRuleBases s0 [("mine", mine), ("shipped", shipped)] of
+        (s1, BasesLoaded _) -> case loadProofSource s1 failingBlockModule of
+          (_, ProofLoaded {}) -> pure ()
+          (_, other) -> assertFailure (show other)
         (_, other) -> assertFailure (show other)
 
   , testCase "a file that is not a module at all is a syntax error" $ do
@@ -515,6 +552,16 @@ moduleTests =
       \\n\
       \one : Nat\n\
       \one = succ zero\n"
+
+    -- A block whose instruction fails when it runs, for the two tests about
+    -- @run-block@: @goto-named@ is given a name no component has.
+    failingBlockModule =
+      "module F where\n\
+      \data Nat : Type\8320 where\n\
+      \  zero : Nat\n\
+      \\n\
+      \do\n\
+      \  goto-named \"nowhere\"\n"
 
     -- **@cross body@**, because the other two candidates stopped being
     -- resolution failures: an op word at an arity the op does not have is a

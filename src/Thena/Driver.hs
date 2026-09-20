@@ -50,7 +50,7 @@ module Thena.Driver
   , kindOf
   ) where
 
-import Data.Maybe (fromMaybe, isJust, listToMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (primitiveNames, whnf)
@@ -142,7 +142,7 @@ import Thena.Instral.Ops
   , Value (..)
   )
 import Data.Either (partitionEithers)
-import Thena.Instral.Infer (InstralTypeError, inferBlock, inferProgram)
+import Thena.Instral.Infer (InstralTypeError (..), inferBlock, inferProgram)
 import Thena.Instral.Grammar (Language)
 import Thena.Instral.Type (Signature (..), Ty (..), fits)
 import Thena.Rules
@@ -548,6 +548,14 @@ data Stop
     -- @:choices@ after one says so. What the machine is kept /for/ is the
     -- messages and the reason; the proof itself is rewound by 'oneLine'.
   | Refused DeclareError -- ^ a @data@ declaration the checker would not admit
+  | BlockRefused [RuleError]
+    -- ^ a @do@ block reached by the program did not validate (MS6 phase 104b).
+    --
+    -- **Two stops rather than one**, matching the two ways a block is wrong
+    -- and the two responses the prompt already gives for them — 'LineRefused'
+    -- and 'EntryMistyped'. A block is checked where it runs now, so the same
+    -- two answers have to be sayable from a run as well as from a command.
+  | BlockIllTyped [InstralTypeError]
   | Uncertified KernelError
     -- ^ the kernel would not accept what the development built (§5.3). Shaped
     -- like 'Refused': the command is abandoned, and there is nothing to retry
@@ -698,14 +706,6 @@ checkBlock bases bound r =
     []     -> case inferBlock (allSignatures bases) (allCallable bases) bound r of
       errs@(_ : _) -> Just (BlockMistyped errs)
       []           -> checkSurfaceBlocks bases (ruleName r) (ruleBody r)
-
--- | 'checkSurfaceBlocks', said as the driver says things.
-blockResponse :: Session -> String -> [Instr] -> Maybe Response
-blockResponse s what prog =
-  case checkSurfaceBlocks (rules (sessionMachine s)) (GlobalName what) prog of
-    Just (BlockIll es)      -> Just (LineRefused es)
-    Just (BlockMistyped es) -> Just (EntryMistyped es)
-    Nothing                 -> Nothing
 
 -- | A whole typed **entry**, which is an @instral@ block (MS5 phase 70).
 --
@@ -864,29 +864,26 @@ tokensOf = mapLeft LexFailed . lexTokens
 -- **The split happens here rather than in 'paired'**, which is about theorems:
 -- a signature and its equation are adjacent and a datatype is not part of that
 -- pairing at all.
-parseSurfaceItems
-  :: [(String, Language)] -> String -> Either SyntaxError [Item]
-parseSurfaceItems ls src = do
+parseSurfaceItems :: String -> Either SyntaxError [Item]
+parseSurfaceItems src = do
   ts  <- tokensOf src
   ts' <- mapLeft LayoutFailed (layout ts)
   ds  <- mapLeft SurfaceParseFailed (Surface.parseSurfaceDecls ts')
-  regroup ls (reverse ds)
+  regroup (reverse ds)
 
 -- | A whole **proof module** (MS4 phase 43): its name, and its items.
 --
 -- The same three passes 'parseSurfaceItems' makes, through the module start
 -- symbol instead — so a module's declaration block and a @declare@ line are the
 -- same grammar, and layout does the same work in both.
-parseSurfaceModule
-  :: [(String, Language)] -> String
-  -> Either SyntaxError (String, [Item])
-parseSurfaceModule ls src = do
+parseSurfaceModule :: String -> Either SyntaxError (String, [Item])
+parseSurfaceModule src = do
   -- 'lexModule', not 'lexTokens': only a module's lexing takes an
   -- object-language block whole (MS6 phase 101).
   ts  <- mapLeft LexFailed (lexModule src)
   ts' <- mapLeft LayoutFailed (layout ts)
   m   <- mapLeft SurfaceParseFailed (Surface.parseSurfaceModule ts')
-  is  <- regroup ls (surfaceModuleDecls m)
+  is  <- regroup (surfaceModuleDecls m)
   Right (surfaceModuleName m, is)
 
 -- | Why a top-level block did not resolve, in terms 'SyntaxError' can hold.
@@ -907,7 +904,7 @@ blockProblem errs = case errs of
 data Item
   = ItemData SurfaceData
   | ItemTheorem String Surface Surface   -- ^ a signature and the equation after it
-  | ItemBlock [Instr]
+  | ItemBlock [RawInstr]
   | ItemGrammar Block   -- ^ a @language@ or @context@ block, read (MS6 phase 101)
     -- ^ a top-level @do@ block (phase 45), **already resolved**: 'regroup'
     -- resolves it while the file is being read, so a block with bad operands is
@@ -919,10 +916,8 @@ data Item
 -- Shared by the two above since phase 43. 'Thena.Surface.Concrete.paired' is
 -- the same idea for theorems alone; this one also admits a @data@ item, which
 -- is why it is here and not there.
-regroup
-  :: [(String, Language)] -> [SurfaceDecl]
-  -> Either SyntaxError [Item]
-regroup ls = go
+regroup :: [SurfaceDecl] -> Either SyntaxError [Item]
+regroup = go
   where
     go [] = Right []
     go (SurfaceDatatype d : rest) = (ItemData d :) <$> go rest
@@ -932,9 +927,11 @@ regroup ls = go
     go (SurfaceGrammar k l txt : rest) = case readBlock k l txt of
       Right b -> (ItemGrammar b :) <$> go rest
       Left e  -> Left (BlockUnreadable e)
-    go (SurfaceBlock b : rest) = case resolveBlock ls (GlobalName "do") [] b of
-      Right is  -> (ItemBlock is :) <$> go rest
-      Left errs -> Left (blockProblem errs)
+    -- **Carried as it was written** (MS6 phase 104b). Resolving it here would
+    -- ask what its words mean before the declarations above it have run — and
+    -- a @language@ block above it is exactly such a declaration. It is
+    -- resolved, checked and played where it stands, by @run-block@.
+    go (SurfaceBlock b : rest) = (ItemBlock b :) <$> go rest
     go (SurfaceSignature x ty : SurfaceEquation y body : rest)
       | x == y = (ItemTheorem x ty body :) <$> go rest
     go (SurfaceSignature x _ : _) =
@@ -963,15 +960,21 @@ surfaceProgram n0 items = foldl item ([], n0) items
   where
   item (acc, n) (ItemData d)       = let (is, n1) = datatypeProgram n d Nothing in (acc ++ is, n1)
   item acc (ItemTheorem x ty body) = declaring acc (x, ty, body)
-  -- **A top-level block is spliced, and that is the whole of it** — his,
-  -- 2026-09-03. A module is already one instruction program, so a block of
-  -- instructions at the top of one is @++@: no frame, no op, and nothing that
-  -- could tell it from the instructions the elaborator emitted around it.
+  -- **A top-level block is a call to a rule** (MS6 phase 104b), and the rule is
+  -- @run-block@ in the shipped base, whose whole body is @play t@. So how a
+  -- module\'s blocks are treated is written in user space and a user may
+  -- replace it — his ruling, 2026-09-20: *"all of that will eventually move to
+  -- rules… that\'s the whole principle of this tool."*
   --
-  -- **Not 'Thena.Instral.Ops.Block'**, which is the /expression/ form: that one needs a
-  -- frame because it has to return to the term it stands in. A top-level block
-  -- has nothing to return to, so it needs no frame and gets none.
-  item (acc, n) (ItemBlock is) = (acc ++ is, n)
+  -- **This OVERRULES his 2026-09-03 ruling that a top-level block is spliced**
+  -- — /"no frame, no op, and nothing that could tell it from the instructions
+  -- the elaborator emitted around it"/ — which he withdrew on the same day,
+  -- against evidence: a module is one instruction program with **one**
+  -- environment, so spliced blocks shared a scope at run time while
+  -- @topLevelBlocks@ typed each in a scope of its own and refused the
+  -- disagreement. The call\'s frame is what makes the scope real.
+  item (acc, n) (ItemBlock b) =
+    (acc ++ [Do (Call "run-block" [Lit (VSurface (rootedAt (SurfaceDo b)))])], n)
   -- One instruction that yields the block to the driver, which checks it
   -- against what the module has declared so far (MS6 phase 101).
   item (acc, n) (ItemGrammar b) = (acc ++ [Do (DeclareGrammar b)], n)
@@ -1134,17 +1137,18 @@ paramsAround ps t =
 
 loadProofSource :: Session -> String -> (Session, Response)
 loadProofSource s src =
-  case parseSurfaceModule (allLanguages (rules (sessionMachine s))) src of
+  case parseSurfaceModule src of
   Left e -> (s, Failed e)
   Right (nm, items) ->
     let machine  = sessionMachine s
         (is, n1) = surfaceProgram (names machine) items
-     in case listToMaybe (topLevelBlocks s items ++ maybe [] (: []) (blockResponse s "this module" is)) of
-      -- A module's @do@ blocks are checked before any of it is elaborated, so a
-      -- mistake in one does not leave half a module declared (MS5 phase 79) —
-      -- its top-level blocks too, which 79 missed (phase 90).
-      Just r  -> (s, r)
-      Nothing -> case progress False s { sessionMachine = load is machine { names = n1 } } [] [] of
+        -- **No block is checked before the module runs** (MS6 phase 104b).
+        -- Every one of them is resolved, validated and typed where the program
+        -- reaches it, in the environment that exists there —
+        -- 'Thena.Instral.Ops.Play' does it for both kinds. Checking them here
+        -- asked what their words meant before the declarations above them had
+        -- run, which no dependency-ordered language does.
+     in case progress False s { sessionMachine = load is machine { names = n1 } } [] [] of
           (s', Ran _ ws Completed) ->
             ( s'
             , ProofLoaded nm [ n | Just n <- map declaredName items ]
@@ -1152,22 +1156,6 @@ loadProofSource s src =
                              ws
             )
           (s', other)           -> (s', other)
-
--- | What is wrong with a module's top-level @do@ blocks, block by block
--- (MS5 phase 90). **Each is checked in a scope of its own**, as a block is:
--- nothing is bound when one begins, so a name bound in one block is not in
--- scope in the next.
-topLevelBlocks :: Session -> [Item] -> [Response]
-topLevelBlocks s items =
-  [ said p
-  | (k, is) <- zip [1 :: Int ..] [ is' | ItemBlock is' <- items ]
-  , Just p <- [checkBlock (rules (sessionMachine s))
-                 [] (Rule (GlobalName ("this module, top-level do block " ++ show k)) [] [] is)]
-  ]
-  where
-    said p = case p of
-      BlockIll es      -> LineRefused es
-      BlockMistyped es -> EntryMistyped es
 
 -- | What an item adds to the environment, for the summary line.
 declaredName :: Item -> Maybe String
@@ -1782,9 +1770,9 @@ dispatch s name arg = case name of
             , Do (Call "elaborate" [Lit (VSurface (rootedAt t))])
             ]
           asking  = s { sessionMachine = load prog machine { names = n1 } }
-       in case blockResponse s "this term" prog of
-        Just r  -> (s, r)
-        Nothing -> case progress False asking [] [] of
+          -- **Its blocks are checked where they run** (MS6 phase 104b), by
+          -- 'Thena.Instral.Ops.Play', as a module's are.
+       in case progress False asking [] [] of
             (s', Ran _ _ Completed) ->
               let m'   = sessionMachine s'
                   back = s' { sessionMachine = restore before m' }
@@ -1848,14 +1836,12 @@ dispatch s name arg = case name of
     --
     -- **The driver builds the program and the machine runs it**, which is what
     -- @assume@ and @claim@ already do. Nothing here elaborates.
-    declareSurface src = case parseSurfaceItems (allLanguages (rules machine)) src of
+    declareSurface src = case parseSurfaceItems src of
       Left e -> (s, Failed e)
       Right items ->
         let (is, n1) = surfaceProgram (names machine) items
-         in case blockResponse s "this declaration" is of
-              Just r  -> (s, r)
-              Nothing -> progress (sessionStepping s)
-                           s { sessionMachine = load is machine { names = n1 } } [] []
+         in progress (sessionStepping s)
+              s { sessionMachine = load is machine { names = n1 } } [] []
 
     -- **One typed ENTRY, as the program it is** (MS5 phase 62b, widened from a
     -- line to a block at phase 70). The two halves are put back together because
@@ -2656,13 +2642,26 @@ progress oneStep s msgs warns = case step (sessionMachine s) of
       -- and declared exactly as a written one is.
       let (is, n1) = datatypeProgram (names m) sd (Just roles)
           (sd, roles) = grammarDatatype g
-          m' = m { grammars = g : grammars m
-                 , names = n1
-                 , exec = (exec m) { pc = is ++ pc (exec m) }
-                 }
+          m' = (Engine.splicing is m) { grammars = g : grammars m, names = n1 }
        in if oneStep
             then stop m' msgs (reverse ws ++ warns) Paused
             else progress oneStep s { sessionMachine = m' } msgs (reverse ws ++ warns)
+
+  -- **A block is validated and typed the moment it is about to run** (MS6
+  -- phase 104b), against the rule bases and the globals as they are then —
+  -- which is the whole of what that phase changed. It was checked while the
+  -- file was still being read, so a block could not mention anything the file
+  -- itself declared above it, and a @language@ block is exactly such a thing.
+  --
+  -- **The same checker the prompt uses**, so the messages are unchanged.
+  Engine.Playing is m -> case checkBlock (rules m) [] (Rule (GlobalName "do") [] [] is) of
+    Just (BlockIll errs)      -> stop (load [] m) msgs warns (BlockRefused errs)
+    Just (BlockMistyped errs) -> stop (load [] m) msgs warns (BlockIllTyped errs)
+    Nothing ->
+      let m' = Engine.splicing is m
+       in if oneStep
+            then stop m' msgs warns Paused
+            else progress oneStep s { sessionMachine = m' } msgs warns
 
   Engine.Primitively nm ty m -> case checkedPrimitive (globals m) nm ty of
     Left e   -> stop (load [] m) msgs warns (Refused e)

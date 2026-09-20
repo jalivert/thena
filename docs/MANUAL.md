@@ -689,6 +689,7 @@ prove
 claim ‹ty›
 assume ‹ty›
 quantify ‹ty›
+run-block ‹t›
 intro-binders ‹t›
 intro-binders ‹t›
 enter-binders ‹t›

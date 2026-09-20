@@ -343,7 +343,7 @@ tests =
         -- not the development — different relation, different consumer. No pair.
         [ testCase ":accepts finds a rule by its parameter" $
             fittingNames (snd (command withRules ":accepts Surface"))
-              @?= ["elaborate", "intro-binders", "enter-binders", "spine-arguments"]
+              @?= ["elaborate", "run-block", "intro-binders", "enter-binders", "spine-arguments"]
           -- **One thing in the shipped base returns a @Core@ since MS5 phase
           -- 89** — @fresh-universe@, which stopped being an op and became a
           -- function over @fresh-level@ and @universe-at@. Before that nothing

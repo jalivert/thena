@@ -33,6 +33,7 @@ module Thena.Engine
   , isYielding
   , resumeYield
   , step
+  , splicing
   , resumeAt
   , failure
   , whereImpure
@@ -490,6 +491,14 @@ data Outcome
   | Primitively GlobalName Core Machine
   | DeclaringGrammar Block Machine
     -- ^ a @language@ or @context@ block to check and install (MS6 phase 101)
+  | Playing [Instr] Machine
+    -- ^ a @do@ block, resolved where it stands, on its way to the driver to be
+    -- validated and typed before it runs (MS6 phase 104b).
+    --
+    -- **Its own yield for 'Declaring'\'s reason**: what counts as a well-typed
+    -- block is policy, and §7.5 has the driver own policy. The driver splices
+    -- the instructions in front of what is left of the program, which is what
+    -- 'DeclaringGrammar' does with a generated datatype.
     -- ^ a primitive constant on its way out to the driver (MS6 phase 97b).
     -- Same shape as 'Defining' and for §7.5's reason: the machine never writes
     -- the global environment.
@@ -1613,12 +1622,24 @@ perform instr rest m = case operation instr of
   -- scope, so @do { goto n }@ naming an enclosing rule\'s local is already
   -- refused at load. Passing the live environment here would make a bare word
   -- resolve one way at load and another at run.
+  -- **A block is resolved and played here, and nowhere earlier** (MS6 phase
+  -- 104b). It was resolved twice until this phase: once while the file was
+  -- read, to check it, and again here to run it — in two different
+  -- environments, which could disagree the moment a block mentioned anything
+  -- the file itself declares. Now the words become ops in the environment the
+  -- block actually runs in.
+  --
+  -- **The type check is the driver\'s** and is asked for by yielding
+  -- 'Playing', exactly as 'Declaring' asks for the kernel and
+  -- 'DeclaringGrammar' for §4.5: every check in the system is policy, and
+  -- §7.5 has the driver own policy. The machine does not know what a
+  -- well-typed block is.
   Op.Play x -> case surfaceAt x of
     Left r  -> failure r m
     Right (Concrete.SurfaceDo body) ->
       case resolveBlock (allLanguages (rules m)) (GlobalName "do") [] body of
         Left errs -> failure (blockFailureOf errs) m
-        Right is  -> Continue (advance m) { exec = (exec m) { pc = is ++ rest } }
+        Right is  -> Playing is (advance m)
     Right _ -> failure (ExpectedSurfaceShape "a do block") m
 
   Goal -> case Cursor.expectedType (cursor (development m)) of
@@ -2015,6 +2036,15 @@ levelArgsFor k n = case k of
 -- other 'RuleError' comes from @validate@, which a block does not go through —
 -- so the fallback is unreachable as things stand and says so rather than
 -- inventing a second story.
+-- | Put instructions in front of what is left of the program (MS6 phase 104b).
+--
+-- **The one way anything is spliced**, and there are two things that splice: a
+-- @do@ block once the driver has typed it ('Playing'), and the datatype a
+-- @language@ block generates ('DeclaringGrammar'). Both are instructions that
+-- did not exist when the program was built and must run before the rest of it.
+splicing :: [Instr] -> Machine -> Machine
+splicing is m = m { exec = (exec m) { pc = is ++ pc (exec m) } }
+
 blockFailureOf :: [RuleError] -> FailReason
 blockFailureOf errs = case errs of
   BadOperands _ i w : _ -> BlockOperands i w

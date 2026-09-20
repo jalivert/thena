@@ -431,6 +431,10 @@ elaborateClauses =
       ]
   , clause SurfaceIsDo [Do (Op.Play (Ref "t"))]
   ]
+    -- **A module's top-level block, and it is not a clause of @elaborate@**
+    -- (MS6 phase 104b): no head test, its own name, and the driver calls it
+    -- by that name.
+    ++ [Rule (GlobalName "run-block") [PVar "t"] [] [Do (Op.Play (Ref "t"))]]
     ++ binderWalkers
     ++ spineWalkers
   where

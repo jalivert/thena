@@ -27,6 +27,7 @@ import Thena.Engine
   , load
   , development
   , step
+  , splicing
   )
 import Thena.Errors (FailReason (..), MoveError (..))
 import Thena.Global.Env (GlobalEnv, emptyGlobals)
@@ -71,6 +72,8 @@ go m = case step m of
   Defining _ _ _ _ m' -> go m'
   Primitively _ _ m' -> go m'
   DeclaringGrammar _ m' -> go m'
+  -- A block the driver would have typed; the harness splices and runs it.
+  Playing is m' -> go (splicing is m')
   Certifying _ _ m' -> go m'
   Asking _ m'       -> Right m'
   Yielding _ m'     -> Right m'

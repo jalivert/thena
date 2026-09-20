@@ -33,6 +33,7 @@ import Thena.Engine
   , resumeAt
   , resumeYield
   , step
+  , splicing
   )
 import Thena.Errors (FailReason (..))
 import Thena.Global.Env
@@ -205,7 +206,7 @@ matchTests =
     , testCase "only the headless rules match in the core fragment" $
         case crossType (holeAt type0) of
           Left e    -> assertFailure ("could not cross: " ++ show e)
-          Right cur -> matching emptyGlobals cur @?= ["claim", "assume", "quantify"]
+          Right cur -> matching emptyGlobals cur @?= ["claim", "assume", "quantify", "run-block"]
 
       -- Definition order is dispatch order (§8), so the match list is always a
       -- subsequence of the base and never a reordering of it.
@@ -768,6 +769,8 @@ runOut m = case step m of
   Defining _ _ _ _ m' -> runOut m'
   Primitively _ _ m' -> runOut m'
   DeclaringGrammar _ m' -> runOut m'
+  -- A block the driver would have typed; the harness splices and runs it.
+  Playing is m' -> runOut (splicing is m')
   Certifying _ _ m' -> runOut m'
   Asking _ m'       -> runOut (resumeAt "ok" m')
   -- Handed straight back, so a rule that yields is still exercised end to
@@ -806,7 +809,7 @@ everyHoleRule =
     -- runs none of them: they take a parameter.
   , "claim", "assume", "quantify"
   ]
-    ++ replicate 18 "elaborate" ++ replicate 2 "enter-binders"
+    ++ replicate 18 "elaborate" ++ ["run-block"] ++ replicate 2 "enter-binders"
     ++ replicate 2 "spine-arguments"
 
 -- | The λ case's two recursive helpers, which every listing at a guess shows.
@@ -816,7 +819,7 @@ everyHoleRule =
 -- its state test passes — and @intro-binders@ really does apply at a guess.
 walkers :: [String]
 walkers =
-  [ "claim", "assume", "quantify"
+  [ "claim", "assume", "quantify", "run-block"
   , "intro-binders", "intro-binders", "enter-binders", "enter-binders"
   , "spine-arguments", "spine-arguments"
   ]
