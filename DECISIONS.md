@@ -547,6 +547,56 @@ with fixity declarations, and its own parentheses group. Both take a piece of
 the notation back from the object language in exchange for grouping you do not
 have to write. Thena takes none of it, and you write the production.
 
+### You write an object term in backticks, and splice into it
+
+*Decided 2026-09-20.*
+
+A term of a language you declared is written with the language's name and a
+pair of backticks. It elaborates to the constructor application it denotes —
+an ordinary value of the ordinary datatype the block generated, with no branded
+type and no coercion:
+
+```
+identity : LC
+identity = LC`( λ x : ι . x )`      -- abs "x" base (var "x")
+```
+
+**The text inside is your language's, not Thena's.** Nothing in it is reserved:
+`λ`, `[`, `?` and the rest are whatever your grammar says they are. Three
+characters have to be written behind a backslash, because they are how the
+region itself is delimited: `` \` ``, `\\` and `\$`.
+
+**`${ … }` splices a term in**, and the slot it stands in decides its type:
+
+```
+applied : LC
+applied = LC`( ${identity} ${identity} )`
+```
+
+A splice is a whole term and not a name — ``LC`( ${f x} y )`` — and it is
+elaborated where it stands, at the type the constructor's argument has. A slot
+that is a token class takes one too, at `String`, `Char` or `Int`.
+
+**Brackets start the parse at one production.** `` LC`…` `` reads any term of
+`LC`; `` LC[var]`…` `` reads a variable occurrence and nothing else:
+
+```
+y : LC
+y = LC[var]`y`                      -- var "y"
+z : LC
+z = LC[var]`( λ x : ι . x )`        -- refused: that is not a var
+```
+
+**A literal is parsed when it elaborates, not when the file is read.** A module
+is parsed whole before its own `language` block is installed, so the grammar
+does not exist yet when the region is lexed. What this costs you: a term your
+grammar cannot read is reported as the definition elaborates, with the position
+in the text and what was expected there, rather than as a syntax error.
+
+**There is no hole.** `?` inside a literal is an ordinary character of your
+language. It is a hole in `:parse` only, and a term with one is not a term —
+a constructor has no missing argument.
+
 ---
 
 ## The development calculus
