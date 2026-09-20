@@ -60,7 +60,8 @@ import Thena.Global.NoConfusion
   , generateNoConfusion
   )
 import Thena.Global.Env
-  ( ConstructorDefinition (..)
+  ( ArgRole (..)
+  , ConstructorDefinition (..)
   , Definition (..)
   , GlobalEnv
   , InductiveDefinition (..)
@@ -612,7 +613,7 @@ spine = go []
 -- 'Thena.Global.Env.ConstructorDefinition'\\'s /"a telescope over the
 -- datatype's parameters"/ requires.
 buildInductive
-  :: GlobalEnv -> GlobalName -> Int -> [(GlobalName, Core)] -> Core -> Int
+  :: GlobalEnv -> GlobalName -> Int -> [(GlobalName, Core, Maybe [ArgRole])] -> Core -> Int
   -> Either DataBuildError (InductiveDefinition, Int)
 buildInductive env dn nps cs ty n0 = do
   (params, afterParams, n1) <- peelExactly env [] nps ty n0
@@ -626,7 +627,9 @@ buildInductive env dn nps cs ty n0 = do
       _          -> Left (DeclaredTypeIsNotAUniverse dn)
 
     constructorsOf _ _ n [] = Right ([], n)
-    constructorsOf params want n ((cn, cty) : more) = do
+    -- A constructor's roles are its grammar's (MS6 phase 103), or all 'Plain'
+    -- for one written by hand.
+    constructorsOf params want n ((cn, cty, roles) : more) = do
       -- Peel the parameters this constructor's own type re-bound, and rename
       -- them onto the datatype's.
       (own, body, n1) <- peelExactly env [] nps cty n
@@ -636,7 +639,7 @@ buildInductive env dn nps cs ty n0 = do
                Left _   -> Left (ConstructorTargetWrong cn)
                Right is -> Right is
       (rest', n3) <- constructorsOf params want n2 more
-      Right (ConstructorDefinition cn args ixs : rest', n3)
+      Right (ConstructorDefinition cn args ixs (maybe (map (const Plain) args) id roles) : rest', n3)
 
     -- @close@ then @instantiate@ — the two primitives a rename is, and the
     -- same pair "Thena.Core.Unify" spells @substFree@ with.

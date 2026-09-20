@@ -17,6 +17,7 @@ module Thena.Global.Env
     -- * Inductive definitions (§3.7)
   , InductiveDefinition (..)
   , ConstructorDefinition (..)
+  , ArgRole (..)
 
     -- * The environment
   , GlobalEnv (..)
@@ -233,7 +234,22 @@ data ConstructorDefinition = ConstructorDefinition
   { constructorName      :: GlobalName
   , constructorArguments :: Context
   , constructorIndices   :: [Core]
+  , constructorRoles     :: [ArgRole]
+    -- ^ **one per argument, what it is to the object language** (MS6 phase 103,
+    -- @ms6\/SPEC.md@ §4.7). All 'Plain' for a datatype written by hand; a
+    -- datatype a @language@ block generates carries its grammar's, and generated
+    -- substitution (phase 105) reads them. Here, on the table every type check
+    -- already consults, so that no 'Core' node has to change.
   }
+  deriving (Eq, Show)
+
+-- | What an argument of a constructor is to the object language it models
+-- (@ms6\/SPEC.md@ §4.7).
+data ArgRole
+  = Plain
+  | Occurrence        -- ^ an occurrence of an object identifier
+  | Binder            -- ^ binds in the arguments that list it
+  | Scope [Int]       -- ^ the binder arguments free in this one, by position
   deriving (Eq, Show)
 
 -- | Apply a level substitution to a whole declaration (MS3 phase 33c).

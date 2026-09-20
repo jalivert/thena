@@ -25,7 +25,8 @@ import Thena.Development.Partial (Constraint (..), Partial (..))
 import Thena.Errors (DevForm (..), ResolveError (..))
 import Thena.Global.Declare (targetIndices)
 import Thena.Global.Env
-  ( ConstructorDefinition (..)
+  ( ArgRole (..)
+  , ConstructorDefinition (..)
   , GlobalEnv
   , InductiveDefinition (..)
   , definitions
@@ -448,7 +449,7 @@ constructors env gs dn params want local n (RawConstructor cn ty : rest) = do
   (tgt', n2)              <- core env gs [] [] inside n1 tgt
   ixs                     <- targetIndices dn params want cn tgt'
   (rest', n3)             <- constructors env gs dn params want local n2 rest
-  Right (ConstructorDefinition (GlobalName cn) args ixs : rest', n3)
+  Right (ConstructorDefinition (GlobalName cn) args ixs (map (const Plain) args) : rest', n3)
 
 -- --------------------------------------------------------------------------
 -- Telescopes

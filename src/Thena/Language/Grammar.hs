@@ -38,7 +38,7 @@ import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), tokenName)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Regex (Regex, parseRegex)
 import Thena.Errors (Warning (..))
-import Thena.Global.Env (GlobalEnv, definitionBody, definitionType, isDeclared, lookupDefinition)
+import Thena.Global.Env (ArgRole (..), GlobalEnv, definitionBody, definitionType, isDeclared, lookupDefinition)
 import Thena.Language.Reader (Block (..), Metadata (..), Production (..), RawItem (..))
 import Thena.Syntax.Lexer (BlockKind (..))
 
@@ -80,14 +80,6 @@ data Sort
   | OfClass GlobalName GlobalName Regex
     -- ^ a token class, its @T@, and its expression — read once, when the
     -- grammar is checked, so that parsing never looks the class up again
-  deriving (Eq, Show)
-
--- | §4.7's roles, the ones phase 103 puts on the constructor.
-data ArgRole
-  = Plain
-  | Occurrence        -- ^ an occurrence of an object identifier
-  | Binder            -- ^ binds in the arguments that list it
-  | Scope [Int]       -- ^ the binder arguments free in this one, by position
   deriving (Eq, Show)
 
 -- | Why a block was refused. The kind and name say which block, and the

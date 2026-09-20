@@ -910,14 +910,15 @@ perform instr rest m = case operation instr of
   -- **A surface datatype reaches the driver as a written one does** (MS4 phase
   -- 42b): this assembles the record and 'Declaring' carries it out, so
   -- @Thena.Global.Declare.declare@ checks both by the same code.
-  MakeData d nps cns tys -> case traverse term tys of
+  MakeData d nps cns roles tys -> case traverse term tys of
     Left r -> failure r m
     Right ts -> case ts of
       [] -> failure (NotTypeable (UnknownDatatype d)) m
       dty : ctys
         | length ctys /= length cns -> failure (NotTypeable (UnknownDatatype d)) m
         | otherwise ->
-            case buildInductive (globals m) d nps (zip cns ctys) dty (names m) of
+            case buildInductive (globals m) d nps
+                   (zip3 cns ctys (maybe (map (const Nothing) cns) (map Just) roles)) dty (names m) of
               Left e            -> failure (CannotBuildDatatype e) m
               Right (def, n1)   -> Declaring def (advance m { names = n1 })
 

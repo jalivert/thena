@@ -32,6 +32,7 @@ import qualified Thena.LexerTests
 import qualified Thena.RegexTests
 import qualified Thena.GrammarTests
 import qualified Thena.EarleyTests
+import qualified Thena.BuildTests
 import qualified Thena.TokenTests
 import qualified Thena.LoadTests
 import qualified Thena.ManualTests
@@ -83,6 +84,7 @@ main =
       , Thena.RegexTests.tests
       , Thena.GrammarTests.tests
       , Thena.EarleyTests.tests
+      , Thena.BuildTests.tests
       , Thena.TokenTests.tests
       , Thena.LoadTests.tests
   , Thena.ManualTests.tests

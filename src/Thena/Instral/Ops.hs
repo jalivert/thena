@@ -50,7 +50,7 @@ import Thena.Core.Term (Core, GlobalName)
 import Thena.Instral.Pattern (Pattern (..), patternBinds, patternIrrefutable)
 import Thena.Instral.Type (Signature (..), Ty (..))
 import Thena.Development.Cursor (Part (..))
-import Thena.Global.Env (InductiveDefinition)
+import Thena.Global.Env (ArgRole, InductiveDefinition)
 import Thena.Language.Reader (Block)
 import Thena.Surface.Concrete (Plicity)
 import Thena.Syntax.Concrete (Raw, splicesIn)
@@ -856,11 +856,13 @@ data Op
     --
     -- Refused at the outermost development: there is nothing to pop back to,
     -- and a machine with no development is not a state this language has.
-  | MakeData GlobalName Int [GlobalName] [Operand]
+  | MakeData GlobalName Int [GlobalName] (Maybe [[ArgRole]]) [Operand]
     -- ^ **assemble a datatype from elaborated types and hand it out through
     -- the channel** (MS4 phase 42b) — the datatype's name, how many parameters
     -- were written, the constructors' names, and the types: the datatype's own
-    -- first and then one per constructor, in order.
+    -- first and then one per constructor, in order. The roles, when there
+    -- are any, are a generated datatype's (MS6 phase 103): one list per
+    -- constructor, from its grammar.
     --
     -- The names and the parameter count are fields rather than operands for
     -- 'DefineData'\'s reason — they are written down, never computed — and the
@@ -1280,7 +1282,7 @@ operandTypes o = case o of
   DefineGlobal _ a b c -> [(a, TName), (b, TCore), (c, TCore)]
   -- The datatype's own type first, then one per constructor — all core, all
   -- elaborated by the time they get here.
-  MakeData _ _ _ as -> [(a, TCore) | a <- as]
+  MakeData _ _ _ _ as -> [(a, TCore) | a <- as]
   ResolveCore a -> [(a, TCore)]
   Expose a -> [(a, TCore)]
   PushDevelopment a -> [(a, TCore)]

@@ -110,7 +110,8 @@ import Thena.Global.Declare (DeclareError (..), TokenClassError (..), declare)
 
 import Thena.Kernel (certify)
 import Thena.Global.Env
-  ( Constant (..)
+  ( ArgRole (..)
+  , Constant (..)
   , ConstructorDefinition (..)
   , Definition (..)
   , GlobalEnv
@@ -189,7 +190,7 @@ import Thena.Instral.Concrete
   )
 import Thena.Syntax.Lexer (Located (..), Token (..), lexModule, lexTokens)
 import Thena.Language.Reader (Block (..), readBlock)
-import Thena.Language.Grammar (Grammar (..), checkGrammar, earleyRules)
+import Thena.Language.Grammar (Argument (..), GProduction (..), Grammar (..), Sort (..), checkGrammar, earleyRules)
 import qualified Thena.Language.Earley as Earley
 import Thena.Syntax.Parser
   ( parseData
@@ -960,7 +961,7 @@ surfaceProgram
   :: Int -> [Item] -> ([Instr], Int)
 surfaceProgram n0 items = foldl item ([], n0) items
   where
-  item acc (ItemData d)            = datatype acc d
+  item (acc, n) (ItemData d)       = let (is, n1) = datatypeProgram n d Nothing in (acc ++ is, n1)
   item acc (ItemTheorem x ty body) = declaring acc (x, ty, body)
   -- **A top-level block is spliced, and that is the whole of it** — his,
   -- 2026-09-03. A module is already one instruction program, so a block of
@@ -974,49 +975,6 @@ surfaceProgram n0 items = foldl item ([], n0) items
   -- One instruction that yields the block to the driver, which checks it
   -- against what the module has declared so far (MS6 phase 101).
   item (acc, n) (ItemGrammar b) = (acc ++ [Do (DeclareGrammar b)], n)
-
-  -- **Brady's data rule** (@IDRIS.md@ §4.6): the datatype's own type is
-  -- elaborated first /"so that the type is in scope when elaborating the
-  -- constructor types"/, then each constructor the same way.
-  --
-  -- **Being in scope is an assumption, and then a β-step.** A constructor's
-  -- type mentions the datatype, which is not declared yet, so it is
-  -- elaborated under @assume D : ‹its type›@ — and popping a development
-  -- extracts, so what comes back is @λ D : ty . ‹the type›@. Applying that to
-  -- @D@ as a global and reducing puts the real reference in. Both ops
-  -- already existed; neither needed a mode.
-  datatype (acc, n) d =
-    let nm      = surfaceDataName d
-        dn      = GlobalName nm
-        ps      = surfaceDataParameters d
-        cs      = surfaceDataConstructors d
-        (l, n1) = freshLevelMeta n
-        full    = withParams ps (surfaceDataType d)
-        tyName  = "dty" ++ show n
-        conName k = "con" ++ show n ++ "_" ++ show (k :: Int)
-        selfName  = Lit (VTerm (Global dn []))
-     in ( acc ++
-            [ Do (PushDevelopment (Lit (VTerm (Universe (LVar l)))))
-            , Do (Call "elaborate" [Lit (VSurface (rootedAt full))])
-            , Bind (Ops.PVar (tyName ++ "raw")) Nothing PopDevelopment
-            , Bind (Ops.PVar tyName) Nothing (Expose (Ref (tyName ++ "raw")))
-            ]
-            ++ concat
-                 [ [ Do (PushDevelopment (Lit (VTerm (Universe (LVar l)))))
-                   , Do (Assume (Lit (VText nm)) (Ref tyName))
-                   , Do (Call "elaborate" [Lit (VSurface (rootedAt (withParams ps cty)))])
-                   , Bind (Ops.PVar (conName k ++ "raw")) Nothing PopDevelopment
-                   , Bind (Ops.PVar (conName k ++ "app")) Nothing
-                       (ApplyTo (Ref (conName k ++ "raw")) selfName)
-                   , Bind (Ops.PVar (conName k)) Nothing (Expose (Ref (conName k ++ "app")))
-                   ]
-                 | (k, SurfaceConstructor _ cty) <- zip [0 ..] cs
-                 ]
-            ++ [ Do (MakeData dn (length ps)
-                       [ GlobalName cn | SurfaceConstructor cn _ <- cs ]
-                       (Ref tyName : [ Ref (conName k) | k <- [0 .. length cs - 1] ]))
-               ]
-        , n1 )
 
   -- | The plicity of each argument position a signature writes.
   --
@@ -1032,8 +990,6 @@ surfaceProgram n0 items = foldl item ([], n0) items
   -- A constructor's type is written in the scope of the parameters, so they
   -- are put back in front of it and peeled off again by
   -- 'Thena.Global.Declare.buildInductive'.
-  withParams ps t =
-    foldr (\(x, ty) rest -> SurfacePi (SurfaceBinder Explicit x (Just ty) NE.:| []) rest) t ps
 
   declaring (acc, n) (x, ty, body) =
     let (l, n1) = freshLevelMeta n
@@ -1075,6 +1031,107 @@ surfaceProgram n0 items = foldl item ([], n0) items
 --
 -- **Holes left over are not an error.** A module that does not finish leaves a
 -- half-built development in the session, which is what the REPL is for.
+-- **Brady's data rule** (@IDRIS.md@ §4.6): the datatype's own type is
+-- elaborated first /"so that the type is in scope when elaborating the
+-- constructor types"/, then each constructor the same way.
+--
+-- **Being in scope is an assumption, and then a β-step.** A constructor's
+-- type mentions the datatype, which is not declared yet, so it is elaborated
+-- under @assume D : ‹its type›@ — and popping a development extracts, so what
+-- comes back is @λ D : ty . ‹the type›@. Applying that to @D@ as a global and
+-- reducing puts the real reference in. Both ops already existed; neither
+-- needed a mode.
+--
+-- **Lifted out of 'surfaceProgram' at MS6 phase 103**, because a @language@
+-- block generates a datatype too — with its grammar's roles (§4.7), where a
+-- written @data@ has none.
+datatypeProgram :: Int -> SurfaceData -> Maybe [[ArgRole]] -> ([Instr], Int)
+datatypeProgram n d roles =
+  let nm      = surfaceDataName d
+      dn      = GlobalName nm
+      ps      = surfaceDataParameters d
+      cs      = surfaceDataConstructors d
+      (l, n1) = freshLevelMeta n
+      full    = paramsAround ps (surfaceDataType d)
+      tyName  = "dty" ++ show n
+      conName k = "con" ++ show n ++ "_" ++ show (k :: Int)
+      selfName  = Lit (VTerm (Global dn []))
+   in (
+          [ Do (PushDevelopment (Lit (VTerm (Universe (LVar l)))))
+          , Do (Call "elaborate" [Lit (VSurface (rootedAt full))])
+          , Bind (Ops.PVar (tyName ++ "raw")) Nothing PopDevelopment
+          , Bind (Ops.PVar tyName) Nothing (Expose (Ref (tyName ++ "raw")))
+          ]
+          ++ concat
+               [ [ Do (PushDevelopment (Lit (VTerm (Universe (LVar l)))))
+                 , Do (Assume (Lit (VText nm)) (Ref tyName))
+                 , Do (Call "elaborate" [Lit (VSurface (rootedAt (paramsAround ps cty)))])
+                 , Bind (Ops.PVar (conName k ++ "raw")) Nothing PopDevelopment
+                 , Bind (Ops.PVar (conName k ++ "app")) Nothing
+                     (ApplyTo (Ref (conName k ++ "raw")) selfName)
+                 , Bind (Ops.PVar (conName k)) Nothing (Expose (Ref (conName k ++ "app")))
+                 ]
+               | (k, SurfaceConstructor _ cty) <- zip [0 ..] cs
+               ]
+          ++ [ Do (MakeData dn (length ps)
+                     [ GlobalName cn | SurfaceConstructor cn _ <- cs ] roles
+                     (Ref tyName : [ Ref (conName k) | k <- [0 .. length cs - 1] ]))
+             ]
+      , n1 )
+
+
+-- | The datatype a @language@ or @context@ block generates (MS6 phase 103,
+-- @ms6\/SPEC.md@ §4.6): one constructor per production, its arguments the
+-- production's distinct names in order of first appearance, each at its
+-- metavariable's language or its class's type.
+--
+-- Written as a 'SurfaceData' and elaborated by 'datatypeProgram', so that what
+-- a block generates is an ordinary declaration — §1: nothing a block makes is
+-- unreachable by hand. The roles (§4.7) ride along beside it.
+--
+-- **A binder is renamed when it would shadow a type the constructor mentions**:
+-- @paren -> ( LC )@ has an argument called @LC@, and @∀ (LC : LC) -> LC@ would
+-- read the binder where the datatype is meant.
+grammarDatatype :: Grammar -> (SurfaceData, [[ArgRole]])
+grammarDatatype g =
+  ( SurfaceData (plainName (grammarName g)) [] (SurfaceUniverse 0) (map constructor prods)
+  , map (map argumentRole . gproductionArguments) prods
+  )
+  where
+    prods = grammarProductions g
+    plainName (GlobalName n) = n
+
+    constructor p = SurfaceConstructor (plainName (gproductionName p)) (typeOf p)
+    typeOf p = case gproductionArguments p of
+      [] -> self
+      args -> SurfacePi (NE.fromList (map binder (renamed args))) self
+    self = SurfaceName (plainName (grammarName g))
+
+    binder (x, srt) = SurfaceBinder Explicit x (Just (SurfaceName (typeName srt)))
+    typeName srt = case srt of
+      OfLanguage l -> plainName l
+      OfClass _ t _ -> plainName t
+
+    -- Primed until it shadows nothing the types name.
+    renamed args = go [] args
+      where
+        taken = [ typeName (argumentSort a) | a <- args ]
+        go _ [] = []
+        go used (a : rest) =
+          let x = unshadowed (argumentName a)
+              unshadowed y
+                | y `elem` taken || y `elem` used = unshadowed (y ++ "'")
+                | otherwise = y
+           in (x, argumentSort a) : go (x : used) rest
+
+-- | A constructor's type is written in the scope of the parameters, so they go
+-- back in front of it and are peeled off again by
+-- 'Thena.Global.Declare.buildInductive'.
+paramsAround :: [(String, Surface)] -> Surface -> Surface
+paramsAround ps t =
+  foldr (\(x, ty) rest -> SurfacePi (SurfaceBinder Explicit x (Just ty) NE.:| []) rest) t ps
+
+
 loadProofSource :: Session -> String -> (Session, Response)
 loadProofSource s src =
   case parseSurfaceModule (allLanguages (rules (sessionMachine s))) src of
@@ -2592,7 +2649,17 @@ progress oneStep s msgs warns = case step (sessionMachine s) of
   Engine.DeclaringGrammar b m -> case checkGrammar (grammars m) (globals m) b of
     Left e -> stop (load [] m) msgs warns (Refused (GrammarRefused e))
     Right (g, ws) ->
-      let m' = m { grammars = g : grammars m }
+      -- **Its datatype is generated here and runs next** (MS6 phase 103): the
+      -- block had to be checked before anything could be generated from it, and
+      -- that could only happen once the load reached it. So the instructions go
+      -- in front of what is left of the program, and the datatype is elaborated
+      -- and declared exactly as a written one is.
+      let (is, n1) = datatypeProgram (names m) sd (Just roles)
+          (sd, roles) = grammarDatatype g
+          m' = m { grammars = g : grammars m
+                 , names = n1
+                 , exec = (exec m) { pc = is ++ pc (exec m) }
+                 }
        in if oneStep
             then stop m' msgs (reverse ws ++ warns) Paused
             else progress oneStep s { sessionMachine = m' } msgs (reverse ws ++ warns)
