@@ -547,6 +547,57 @@ with fixity declarations, and its own parentheses group. Both take a piece of
 the notation back from the object language in exchange for grouping you do not
 have to write. Thena takes none of it, and you write the production.
 
+### A `do` block is resolved and checked where it runs, and a module's own goes through a rule
+
+*Decided 2026-09-20.*
+
+A module is a **sequence**. Its declarations run in the order you wrote them,
+and each one sees exactly what is above it. Until this decision, `do` blocks
+were the exception: they were turned into instructions and type checked while
+the file was still being read, before any declaration in it had run.
+
+```
+language LC, M, N, E where
+  var : x as occurrence -> x
+  app                   -> ( M N )
+
+do
+  ...                             -- this block is read after the block above
+                                  -- has been checked and installed
+```
+
+**What this changes for you.** A block's words become operations, and its types
+are checked, at the moment the program reaches it. So a mistake in a block is
+reported *after* the declarations above it have gone in, the way a mistake in a
+term already was — where before it refused the whole file and declared nothing.
+Blocks were the only construct with that behaviour, and nothing else in a
+module has it.
+
+**A module's top-level block is a call to a rule**, `run-block`, which lives in
+the shipped base and is two lines:
+
+```
+run-block : Surface -> ()
+rule run-block t :- do play t
+```
+
+So **how a module treats its own blocks is yours to change**: load a base that
+defines `run-block` ahead of the shipped one and every top-level block in every
+module goes through your version instead. A clause of your own is offered first
+if it is written first, as for any rule.
+
+**Each top-level block is its own scope**, and now really is: the call gives it
+a frame, so a name bound in one block is not in scope in the next. Before, the
+instructions were spliced into the module's one program and shared its one
+environment — the checker refused a block that read a name from the block above
+it, but the run would have found it.
+
+**Reading a module now consults nothing.** Lexing, layout, parsing and grouping
+are a pure function of the text; every question about what a name means is
+asked while the module runs.
+
+---
+
 ### You write an object term in backticks, and splice into it
 
 *Decided 2026-09-20.*
