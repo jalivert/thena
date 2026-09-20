@@ -127,7 +127,8 @@ import Thena.Engine
   , focusContext
   )
 import Thena.Errors
-  ( DataBuildError (..)
+  ( BuildError (..)
+  , DataBuildError (..)
   , Skipped (..)
   , Warning (..)
   , Clash (..)
@@ -150,7 +151,8 @@ import Thena.Language.Regex (RegexError (..))
 import Thena.Global.NoConfusion (noConfusionNames)
 import qualified Data.List.NonEmpty as NE
 import Thena.Surface.Concrete
-  ( PairingError (..)
+  ( ObjectPiece (..)
+  , PairingError (..)
   , Plicity (..)
   , Surface (..)
   , SurfaceArg (..)
@@ -776,6 +778,7 @@ describe t = case t of
   -- text, so what a reader needs back is the region's shape rather than its
   -- characters: the tag they wrote, and the two things that punctuate it.
   TTagOpen tag  -> tag ++ "`"
+  TTagOpenAt tag prod -> tag ++ "[" ++ prod ++ "]`"
   TTagClose     -> "`"
   TRaw txt      -> txt
   TEscapeOpen   -> "$" ++ ['{']
@@ -1508,6 +1511,18 @@ renderFailReason r = case r of
   -- that it *"is misleading and ambiguous"*.
   ExpectedSurface   -> "expected a surface term"
   ExpectedSurfaceShape what -> "expected a surface term that is " ++ what
+  -- **The four ways a tagged term literal does not become a term** (MS6 phase
+  -- 104). The third is the message @:parse@ gives, from the same renderer:
+  -- it is the same parser and the same grammar, so it should read the same.
+  NoSuchObjectLanguage lang ->
+    "no language called " ++ lang ++ " has been declared"
+  NoSuchObjectProduction lang w ->
+    lang ++ " has no production called " ++ w
+  ObjectNotParsed lang text why -> renderUnparsed lang text why
+  ObjectNotATerm lang why -> "in " ++ lang ++ "`…`: " ++ case why of
+    NoSuchProduction n -> n ++ " is not a production of any language"
+    Incomplete x -> "the " ++ x ++ " is missing, and a constructor has no missing argument"
+    NotForSlot n x -> n ++ " cannot take " ++ x ++ " there"
   -- One reason, three messages (§8, phase 23): the name is unknown, the name
   -- is known at other arities, or clauses of the right arity all failed their
   -- heads. Which one it is falls out of the arities the reason carries.
@@ -1614,6 +1629,13 @@ renderSurface = surf Loose
       LChar c   -> escapeChar c
       LInt k    -> show k
       LRegex r  -> "/" ++ r ++ "/"
+    -- **A tagged term literal prints as it was written** (MS6 phase 104): its
+    -- text is kept, and only the three characters the region scanner reads
+    -- specially are put back behind a backslash. A splice prints as a term,
+    -- because that is what it holds.
+    surf _ (SurfaceObject lang prod ps) =
+      lang ++ maybe "" (\p -> "[" ++ p ++ "]") prod
+        ++ [tick] ++ concatMap objectPiece ps ++ [tick]
     surf _ SurfaceUniverseOpen  = "Type"
     surf _ SurfacePlaceholder   = "_"
     surf _ (SurfaceHole h)      = "?" ++ h
@@ -1646,6 +1668,17 @@ renderSurface = surf Loose
       paren (p >= Tight)
         ("elim " ++ d ++ " " ++ list ps ++ " " ++ surf Tight mot ++ " " ++ list ms
            ++ " " ++ list is ++ " " ++ surf Tight tgt)
+
+    objectPiece pc = case pc of
+      ObjectText txt -> concatMap escapeRaw txt
+      ObjectSplice e -> "$" ++ ['{'] ++ surf Loose e ++ ['}']
+
+    -- The region scanner reads a backslash before any of these as the
+    -- character itself, so writing them this way is what makes the printer's
+    -- output readable again.
+    escapeRaw c
+      | c `elem` [tick, '\\', '$'] = ['\\', c]
+      | otherwise                  = [c]
 
     arg (SurfaceArg Explicit t) = " " ++ surf Tight t
     arg (SurfaceArg Implicit t) = " {" ++ surf Loose t ++ "}"

@@ -97,7 +97,10 @@ import Thena.Surface.Concrete (Plicity (..))
 import qualified Thena.Surface.Concrete as Concrete
 import Thena.Syntax.Concrete (termSplicesIn, nameSplicesIn)
 import Thena.Syntax.Resolve (resolveWith, Filling (..))
-import Thena.Language.Grammar (Grammar)
+import qualified Thena.Language.Earley as Earley
+import Thena.Language.Build (buildSurface)
+import Thena.Language.Grammar
+  (GProduction (..), Grammar (..), earleyRules)
 import Thena.Language.Reader (Block)
 import Thena.Instral.Ops
   ( AnswerKind
@@ -1430,6 +1433,34 @@ perform instr rest m = case operation instr of
       Concrete.SurfaceLiteral l -> produce (VTerm (Primitive l)) m
       _ -> failure (ExpectedSurfaceShape "a literal") m
 
+  -- **A tagged term literal, parsed and written out** (MS6 phase 104,
+  -- @ms6\/SPEC.md@ §8). Four things can go wrong and each says which: the tag
+  -- names no language, the brackets name no production of it, the text is not
+  -- one term of the grammar, or the reading is not a term.
+  --
+  -- **A @?@ here is an ordinary character**, not a hole: §7.6 gives MS6 no
+  -- surface syntax for a hole, and a hole could not be built anyway, because a
+  -- constructor has no missing argument. @:parse@ is where @?@ is a hole.
+  Op.ObjectTerm x -> case surfaceAt x of
+    Left r  -> failure r m
+    Right s -> case s of
+      Concrete.SurfaceObject lang prod ps
+        | lang `notElem` languageNames (grammars m) ->
+            failure (NoSuchObjectLanguage lang) m
+        | Just w <- prod, w `notElem` productionNames (grammars m) lang ->
+            failure (NoSuchObjectProduction lang w) m
+        | otherwise ->
+            case Earley.parse (earleyRules (grammars m))
+                              (maybe (Earley.StartAt lang) Earley.StartRule prod)
+                              (objectInput ps) of
+              Left why ->
+                failure (ObjectNotParsed lang (objectText ps) (atCharacters ps why)) m
+              Right tree ->
+                case buildSurface (grammars m) [ e | Concrete.ObjectSplice e <- ps ] tree of
+                  Left why -> failure (ObjectNotATerm lang why) m
+                  Right t  -> produce (VSurface (Zipper.rootedAt t)) m
+      _ -> failure (ExpectedSurfaceShape "a tagged term literal") m
+
   Op.SurfaceUniverseOf x -> case surfaceAt x of
     Left r  -> failure r m
     Right s -> case s of
@@ -2032,6 +2063,62 @@ operandSurface :: Env -> Operand -> Either FailReason SurfaceZipper
 operandSurface e o = operandValue e o >>= \v -> case v of
   VSurface z -> Right z
   _          -> Left ExpectedSurface
+
+-- ---------------------------------------------------------------------------
+-- Tagged term literals (MS6 phase 104)
+-- ---------------------------------------------------------------------------
+
+-- | The languages installed, by the name a tag would write.
+languageNames :: [Grammar] -> [String]
+languageNames gs = [ n | g <- gs, let GlobalName n = grammarName g ]
+
+-- | The productions of one installed language, by name.
+--
+-- **Of that language and not of any**, which is what @LC[app]@ asks: a
+-- production name is unique across grammars (phase 101), so the filter changes
+-- no accepted literal and it is what lets the refusal name the language.
+productionNames :: [Grammar] -> String -> [String]
+productionNames gs lang =
+  [ n | g <- gs, GlobalName lang == grammarName g
+      , p <- grammarProductions g, let GlobalName n = gproductionName p ]
+
+-- | The pieces the object parser reads.
+--
+-- **A splice is one column**, whatever term it holds, because it completes one
+-- slot (@ms6\/SPEC.md@ §7.6). Its number is its position among the splices,
+-- which is how 'Thena.Language.Build.buildSurface' finds the term again.
+objectInput :: [Concrete.ObjectPiece] -> [Earley.Piece]
+objectInput = go 0
+  where
+    go _ [] = []
+    go k (Concrete.ObjectText txt : rest) = map Earley.Char txt ++ go k rest
+    go k (Concrete.ObjectSplice _ : rest) = Earley.Splice k : go (k + 1) rest
+
+-- | What the region says, for a message. A splice stands for itself: the
+-- printer is "Thena.Repl"\'s and this module sits below it.
+objectText :: [Concrete.ObjectPiece] -> String
+objectText = concatMap piece
+  where
+    piece pc = case pc of
+      Concrete.ObjectText txt -> txt
+      Concrete.ObjectSplice _ -> spliceMark
+
+spliceMark :: String
+spliceMark = "$" ++ ['{'] ++ "…" ++ ['}']
+
+-- | A parser position is a column and a message is about characters.
+--
+-- A splice is one column and several characters, so 'Earley.Stuck' is moved to
+-- where its column begins in 'objectText'. Everything else says the same thing
+-- in both.
+atCharacters :: [Concrete.ObjectPiece] -> Earley.ParseFailure -> Earley.ParseFailure
+atCharacters ps why = case why of
+  Earley.Stuck p expected -> Earley.Stuck (sum (take p (concatMap widths ps))) expected
+  other -> other
+  where
+    widths pc = case pc of
+      Concrete.ObjectText txt -> map (const 1) txt
+      Concrete.ObjectSplice _ -> [length spliceMark]
 
 -- | The name a component will display. Checked against the lexer's own notion
 -- of an identifier, because an 'Ident' that does not lex is one the printer

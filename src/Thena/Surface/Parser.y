@@ -28,6 +28,7 @@ import qualified Data.List.NonEmpty as NE
 import Thena.Surface.Concrete
   ( Plicity (..)
   , Surface (..)
+  , ObjectPiece (..)
   , SurfaceDecl (..)
   , SurfaceModule (..)
   , SurfaceData (..)
@@ -77,8 +78,11 @@ import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..))
   ','     { Located _ TComma }
   univ    { Located _ (TUniverse $$) }
   tagopen  { Located _ (TTagOpen $$) }
+  tagat    { Located _ (TTagOpenAt _ _) }
   raw      { Located _ (TRaw $$) }
   tagclose { Located _ TTagClose }
+  '${'     { Located _ TEscapeOpen }
+  '}$'     { Located _ TEscapeClose }
   Type    { Located _ TUniverseOpen }
   ident   { Located _ (TIdent $$) }
 
@@ -321,6 +325,16 @@ Atom :: { Surface }
   | chr                                    { SurfaceLiteral (LChar $1) }
   | num                                    { SurfaceLiteral (LInt $1) }
   | regex                                  { SurfaceLiteral (LRegex $1) }
+  -- **A tagged term literal is an atom** (MS6 phase 104): it is a term of an
+  -- object language, so it stands wherever a name does and needs no
+  -- parentheses to be an argument. Its text reaches here as the pieces the
+  -- lexer made of the region, and it is parsed with the object grammar at
+  -- elaboration, not here — the grammar is not installed until the load
+  -- reaches its block.
+  | tagopen ObjectPieces tagclose          { SurfaceObject $1 Nothing (pieces $2) }
+  | tagopen tagclose                       { SurfaceObject $1 Nothing [] }
+  | tagat ObjectPieces tagclose            { tagged $1 (pieces $2) }
+  | tagat tagclose                         { tagged $1 [] }
   | Type                                   { SurfaceUniverseOpen }
   | '(' Term ')'                           { $2 }
   -- **An atom, so it needs no parentheses in an argument run** — @try (do { … })@
@@ -328,6 +342,21 @@ Atom :: { Surface }
   | do '{' Block '}'                       { SurfaceDo (reverse $3) }
   | elim ident '(' Terms ')' Atom '(' Terms ')' '(' Terms ')' Atom
       { SurfaceElim $2 (reverse $4) $6 (reverse $8) (reverse $11) $13 }
+
+-- | The pieces of a tagged term literal, reversed.
+--
+-- **A splice holds a whole term**, where MS5's regions carry @${name}@ and put
+-- the text back for an embedded parser to read again ("Thena.Syntax.Parser").
+-- The difference is which parser reads the splice: there it is the /object/
+-- parser, here it is this one, because a splice supplies a slot\'s value and
+-- that value is a surface term (§7.6).
+ObjectPieces :: { [ObjectPiece] }
+  : ObjectPiece                            { [$1] }
+  | ObjectPieces ObjectPiece               { $2 : $1 }
+
+ObjectPiece :: { ObjectPiece }
+  : raw                                    { ObjectText $1 }
+  | '${' Term '}$'                         { ObjectSplice $2 }
 
 Terms :: { [Surface] }
   :                                        { [] }
@@ -457,4 +486,19 @@ lets bs body = foldr (\(x, ty, v) b -> SurfaceLet x ty v b) body bs
 -- names shared a pair of parentheses.
 group :: Plicity -> [String] -> Maybe Surface -> [SurfaceBinder]
 group p xs ty = [ SurfaceBinder p x ty | x <- xs ]
+
+-- | A tagged term literal\'s pieces, in the order they were written.
+--
+-- **Only reversed, never merged.** The lexer emits one chunk per run of text
+-- between escapes and drops an empty one, so two 'ObjectText' pieces can never
+-- be adjacent and a rule that joined them could not fire.
+pieces :: [ObjectPiece] -> [ObjectPiece]
+pieces = reverse
+
+-- | @LC[var]\`…\`@ — the tag carries two names, so the token is taken whole
+-- rather than through @$$@.
+tagged :: Located Token -> [ObjectPiece] -> Surface
+tagged t ps = case t of
+  Located _ (TTagOpenAt lang prod) -> SurfaceObject lang (Just prod) ps
+  _ -> error "the tag token is TTagOpenAt"
 }

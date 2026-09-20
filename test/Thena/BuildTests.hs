@@ -18,18 +18,22 @@ import Test.Tasty.QuickCheck
   (Gen, counterexample, elements, forAll, ioProperty, oneof, property, sized, testProperty, withNumTests, (===))
 
 import Thena.Core.Context (entryType)
+import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
 import Thena.Core.Typing (infer)
-import Thena.Driver (Response (..), Session (..), loadProofSource)
+import Thena.Driver (Response (..), Session (..), Stop (..), loadProofSource)
 import Thena.Engine (Machine (..))
 import Thena.Global.Env
   ( ArgRole (..)
   , ConstructorDefinition (..)
   , GlobalEnv
   , InductiveDefinition (..)
+  , definitionBody
+  , lookupDefinition
   , lookupInductive
   )
-import Thena.Language.Build (BuildError (..), buildTerm, printTerm)
+import Thena.Errors (BuildError (..), FailReason (..))
+import Thena.Language.Build (buildTerm, printTerm)
 import Thena.Language.Earley (parse, pieces)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Grammar (Grammar, earleyRules)
@@ -42,6 +46,7 @@ tests =
     [ testGroup "what the block generated (§4.6)" generated
     , testGroup "the roles on the constructors (§4.7)" roles
     , testGroup "a reading becomes a term, and back (§8)" terms
+    , testGroup "a tagged term literal elaborates (§8)" literals
     , roundTrip
     ]
 
@@ -169,6 +174,100 @@ terms =
       (env, gs) <- loaded
       printTerm env gs (Primitive (LString "x")) @?= Nothing
   ]
+
+-- ---------------------------------------------------------------------------
+
+-- | What a definition written with a tagged term literal elaborated to, or why
+-- the load stopped (MS6 phase 104).
+--
+-- **The whole load and not the op alone**, because what §8 claims is that
+-- @LC`( \955 x : \953 . x )`@ /is/ @abs "x" base (var "x")@ — the application the
+-- op writes out has still to elaborate, and its splices with it. The body is
+-- reduced because elaboration leaves a chain of @let@s (@ms4\/CLOSEOUT.md@ 8).
+elaborated :: String -> IO (Either FailReason Core)
+elaborated decls = do
+  (s0, _) <- startingSession
+  case loadProofSource s0 (stlc ++ "\n" ++ decls ++ "\n") of
+    (s1, ProofLoaded {}) ->
+      let env = globals (sessionMachine s1)
+       in case lookupDefinition (GlobalName "t") env of
+            Just d  -> pure (Right (whnf env [] (definitionBody d)))
+            Nothing -> assertFailure "t was not declared"
+    (_, Ran _ _ (Halted why)) -> pure (Left why)
+    (_, other) -> assertFailure (show other)
+
+-- | @t = \8249literal\8250@, and nothing else.
+elaboratedTerm :: String -> IO (Either FailReason Core)
+elaboratedTerm src = elaborated ("t : LC\nt = " ++ src)
+
+literals :: [TestTree]
+literals =
+  [ -- **The wrapper applied, and reduced**, which is what elaborating any
+    -- application gives: 'buildTerm' writes the same term unreduced, and
+    -- 'printTerm' takes either.
+    testCase "the text is parsed with the language's grammar" $
+      elaboratedTerm ("LC" ++ region "( \955 x : \953 . x )")
+        >>= (@?= Right (canon "abs" [Primitive (LString "x"), con "base" [], con "var" [Primitive (LString "x")]]))
+    -- **Elaboration against the printer**, which is MS6's done-when 3: the
+    -- term a literal elaborates to writes back as the text it was written as.
+  , testCase "and it prints back as the text it was written as" $ do
+      (env, gs) <- loaded
+      r <- elaboratedTerm ("LC" ++ region "( \955 x : \953 . x )")
+      fmap (printTerm env gs) r @?= Right (Just "( \955 x : \953 . x )")
+  , testCase "a splice supplies the slot it stands in" $ do
+      r <- elaborated
+             ("u : LC\nu = LC[var]" ++ region "q"
+                ++ "\n\nt : LC\nt = LC" ++ region "( ${u} ${u} )")
+      r @?= Right (canon "app" [Global (GlobalName "u") [], Global (GlobalName "u") []])
+    -- **A class slot takes one too**, and what it supplies is the literal: the
+    -- constructor's argument there is a @String@, so the splice elaborates at
+    -- that type like any other term.
+  , testCase "including a slot that is a token class" $ do
+      r <- elaboratedTerm ("LC[var]" ++ region "${\"hi\"}")
+      r @?= Right (canon "var" [Primitive (LString "hi")])
+    -- The region scanner stacks its modes, so a literal inside a splice inside
+    -- a literal reads — which is what makes a splice a term and not a name.
+  , testCase "and a splice may hold another literal" $ do
+      r <- elaboratedTerm
+             ("LC" ++ region ("( ${LC[var]" ++ region "a" ++ "} ${LC[var]" ++ region "b" ++ "} )"))
+      r @?= Right (canon "app" [con "var" [Primitive (LString "a")], con "var" [Primitive (LString "b")]])
+    -- **The brackets really do restrict**, which is the whole of what
+    -- @LC[var]@ is for: text that reads as a term does not read as a variable.
+  , testCase "a production in brackets starts the parse there, and only there" $ do
+      r <- elaboratedTerm ("LC[var]" ++ region "( \955 x : \953 . x )")
+      case r of
+        Left (ObjectNotParsed "LC" _ (Earley.Stuck 0 _)) -> pure ()
+        other -> assertFailure (show other)
+    -- **A splice is one column to the parser and several characters to a
+    -- reader**, so a position it reports is moved to where that column begins
+    -- in the text the message shows.
+  , testCase "a position after a splice is reported where the splice is written" $ do
+      r <- elaboratedTerm ("LC" ++ region ("( ${LC[var]" ++ region "a" ++ "} @ )"))
+      case r of
+        Left (ObjectNotParsed "LC" text (Earley.Stuck p _)) -> (text, p) @?= ("( ${\8230} @ )", 7)
+        other -> assertFailure (show other)
+  , testCase "a tag naming no language is refused" $
+      elaboratedTerm ("Nope" ++ region "x") >>= (@?= Left (NoSuchObjectLanguage "Nope"))
+  , testCase "so is a production the language does not have" $
+      elaboratedTerm ("LC[nope]" ++ region "x") >>= (@?= Left (NoSuchObjectProduction "LC" "nope"))
+    -- **A @?@ is an ordinary character here** (§7.6): MS6 gives a hole no
+    -- surface syntax, so this is text the grammar cannot read rather than a
+    -- hole that could not be built.
+  , testCase "a ? in a literal is a character, not a hole" $ do
+      r <- elaboratedTerm ("LC" ++ region "?")
+      case r of
+        Left (ObjectNotParsed "LC" "?" (Earley.Stuck 0 _)) -> pure ()
+        other -> assertFailure (show other)
+  ]
+  where
+    region txt = [toEnum 96] ++ txt ++ [toEnum 96]
+
+-- | A constructor applied, as 'whnf' leaves the head of an elaborated term.
+--
+-- **Only the head**, which is why the arguments below are written with 'con':
+-- weak head normal form reduces the wrapper it is given and nothing under it.
+canon :: String -> [Core] -> Core
+canon name = Canonical (GlobalName name) []
 
 readTerm :: [Grammar] -> String -> Either BuildError Core
 readTerm gs src = case parse (earleyRules gs) (Earley.StartAt "LC") (pieces src) of

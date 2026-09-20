@@ -171,6 +171,11 @@ tokens :-
   "Type"        { \p _ -> Located (posOf p) TUniverseOpen }
   @universe     { \p s -> Located (posOf p) (TUniverse (levelOf s)) }
   @ident \`      { \p str -> Located (posOf p) (TTagOpen (init str)) }
+  -- **A tag may name the production to start at** (MS6 phase 104,
+  -- @ms6\/SPEC.md@ §8): @LC[var]\`…\`@ reads a variable occurrence where
+  -- @LC\`…\`@ reads any term. The brackets are reserved characters, so no
+  -- identifier contains one and this rule cannot take a longer name apart.
+  @ident \[ @ident \] \` { \p str -> Located (posOf p) (tagAt (init str)) }
   "⟨"           { keyword (TTagOpen "surface") }
   @ident        { \p s -> Located (posOf p) (TIdent s) }
 
@@ -239,6 +244,12 @@ data Token
     -- language has its own lexical rules and tokenising it here would impose
     -- Thena's (@discussion\/the-five-languages.md@ §6.9).
   | TTagOpen String   -- ^ @name\`@ — the tag, without its backtick
+  | TTagOpenAt String String
+    -- ^ @name[production]\`@ — a tag that says which production to start at
+    -- (MS6 phase 104). **Its own token rather than a field on 'TTagOpen'**:
+    -- three grammars read a tag and only one of them accepts this form, so a
+    -- 'Maybe' would put the refusal in three places instead of leaving it to
+    -- the grammars that simply do not mention this terminal.
   | TRaw String       -- ^ a run of raw text inside a region
   | TEscapeOpen       -- ^ the escape opener: raw text stops, ordinary lexing resumes
   | TEscapeClose      -- ^ the brace that closes an escape
@@ -252,6 +263,15 @@ data LexError = LexError Pos (Maybe Char)
 
 keyword :: Token -> AlexPosn -> String -> Located Token
 keyword t p _ = Located (posOf p) t
+
+-- | @LC[var]@ split into its language and its production (MS6 phase 104).
+--
+-- Takes the tag without its backtick. The brackets are reserved characters, so
+-- the first @[@ is the one the rule matched and there is nothing to search for.
+tagAt :: String -> Token
+tagAt str = case break (== '[') str of
+  (lang, _ : rest) -> TTagOpenAt lang (takeWhile (/= ']') rest)
+  (lang, [])       -> TTagOpen lang
 
 posOf :: AlexPosn -> Pos
 posOf (AlexPn _ line col) = Pos line col
@@ -365,6 +385,7 @@ loop blocks modes inp@(pos, _, _, str) = case modes of
             (_, TTagOpen _)
               | take 1 (take len str) == "⟨" -> (t :) <$> loop blocks (Raw '⟩' : modes) inp'
               | otherwise                    -> (t :) <$> loop blocks (Raw '`' : modes) inp'
+            (_, TTagOpenAt _ _)              -> (t :) <$> loop blocks (Raw '`' : modes) inp'
             _                        -> (t :) <$> loop blocks modes inp'
   where
     firstOf cs = case cs of

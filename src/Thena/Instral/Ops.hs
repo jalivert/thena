@@ -735,6 +735,24 @@ data Op
     -- ^ the literal at the focus, as the 'Thena.Core.Term.Core' it elaborates
     -- to — the same shape as 'SurfaceUniverseOf', whose answer is also a term
     -- rather than a part to look at (MS6 phase 97c).
+  | ObjectTerm Operand
+    -- ^ **the application a tagged term literal means** (MS6 phase 104,
+    -- @ms6\/SPEC.md@ §8): the region\'s text parsed with the named language\'s
+    -- installed grammar, and the reading written out as the constructor
+    -- application it denotes — @LC\`( \955 x : \953 . x )\`@ becomes
+    -- @abs "x" base (var "x")@.
+    --
+    -- **It answers with a surface term and not a core one**, which is what
+    -- makes a splice need no mechanism: @${e}@ stands in the application where
+    -- its slot is, and elaborating the application elaborates it there, at the
+    -- constructor argument\'s type. Building a 'Thena.Core.Term.Core' here
+    -- would have to elaborate the splices itself, and an op cannot — a call is
+    -- a statement.
+    --
+    -- **The parse happens here and not at load**, because the grammar is not
+    -- installed until the load reaches its block and a module is parsed whole
+    -- before that (@ms6\/CLOSEOUT.md@). 'ElimSpine'\'s remark applies to the
+    -- answer: it is a node nobody wrote, so it is rooted rather than a move.
   | SurfaceUniverseOf Operand
     -- ^ the universe a surface @Typeₙ@ denotes, as a term (MS4 phase 49).
     --
@@ -1139,6 +1157,7 @@ resultOf o = case o of
   ResolveName _  -> Just TCore
   SurfaceNameOf _ -> Just TName
   SurfaceLiteralOf _ -> Just TCore
+  ObjectTerm _ -> Just TSurface
   SurfaceUniverseOf _ -> Just TCore
   ArrowDomain _ -> Just TSurface
   AppFunction _ -> Just TSurface
@@ -1297,6 +1316,7 @@ operandTypes o = case o of
   ResolveName x  -> [(x, TName)]
   SurfaceNameOf x -> [(x, TSurface)]
   SurfaceLiteralOf x -> [(x, TSurface)]
+  ObjectTerm x -> [(x, TSurface)]
   SurfaceUniverseOf x -> [(x, TSurface)]
   ArrowDomain x -> [(x, TSurface)]
   AppFunction x -> [(x, TSurface)]
@@ -1485,6 +1505,8 @@ data Test
     -- adding them is not payed in design. They are not a design decision. If we
     -- never use them after MS4, we just drop them during a cleanup refactor."/
   | SurfaceIsLiteral Operand       -- ^ @"ab"@, @'c'@, @3@ (MS6 phase 97c)
+  | SurfaceIsObject Operand
+    -- ^ @LC\`( \955 x : \953 . x )\`@ — a tagged term literal (MS6 phase 104)
   | SurfaceIsUniverse Operand      -- ^ @Typeₙ@
   | SurfaceIsUniverseOpen Operand  -- ^ a bare @Type@
   | SurfaceIsPlaceholder Operand   -- ^ @_@
@@ -1617,6 +1639,7 @@ opKeyword o = case o of
   ResolveName _  -> "resolve-name"
   SurfaceNameOf _ -> "surface-name"
   SurfaceLiteralOf _ -> "surface-literal"
+  ObjectTerm _ -> "object-term"
   SurfaceUniverseOf _ -> "surface-universe"
   ArrowDomain _ -> "arrow-domain"
   AppFunction _ -> "app-function"

@@ -302,7 +302,7 @@ dispatchableTests =
                -- @try-core@ above, which is what this test is about.
              , "fit-core", "fit-core"
              , "claim", "assume", "quantify"]
-               ++ replicate 17 "elaborate" ++ replicate 2 "enter-binders"
+               ++ replicate 18 "elaborate" ++ replicate 2 "enter-binders"
                ++ replicate 2 "spine-arguments"
         names' (dispatch std emptyGlobals hole)
           @?= ["attack", "abandon", "prove"]

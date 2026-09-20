@@ -373,6 +373,7 @@ holds env cur args t = case t of
   -- two heads can match one term.
   SurfaceIsName o         -> surfaceIs o isName
   SurfaceIsLiteral o      -> surfaceIs o isLiteral
+  SurfaceIsObject o       -> surfaceIs o isObject
   SurfaceIsUniverse o     -> surfaceIs o isUniverse
   SurfaceIsUniverseOpen o -> surfaceIs o isUniverseOpen
   SurfaceIsPlaceholder o  -> surfaceIs o isPlaceholder
@@ -414,6 +415,7 @@ holds env cur args t = case t of
 
     isName         s = case s of SurfaceName _ -> True; _ -> False
     isLiteral      s = case s of SurfaceLiteral _ -> True; _ -> False
+    isObject       s = case s of SurfaceObject {} -> True; _ -> False
     isUniverse     s = case s of SurfaceUniverse _ -> True; _ -> False
     isUniverseOpen s = case s of SurfaceUniverseOpen -> True; _ -> False
     isPlaceholder  s = case s of SurfacePlaceholder -> True; _ -> False
@@ -1421,6 +1423,7 @@ unaryOps =
   , ("push-development", Op.PushDevelopment)
   , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
   , ("surface-literal", Op.SurfaceLiteralOf)
+  , ("object-term", Op.ObjectTerm)
   , ("typeof", Typing), ("expose", Op.Expose), ("resolve-core", Op.ResolveCore), ("fresh-name", FreshName), ("prim-apply", Op.Apply)
   , ("resolve-name", Op.ResolveName)
   , ("surface-name", Op.SurfaceNameOf)
@@ -1635,6 +1638,7 @@ withOperands t os = case (t, os) of
   (GoalTypeIsLet,    []) -> Just GoalTypeIsLet
   (SurfaceIsName _, [o])         -> Just (SurfaceIsName o)
   (SurfaceIsLiteral _, [o])      -> Just (SurfaceIsLiteral o)
+  (SurfaceIsObject _, [o])       -> Just (SurfaceIsObject o)
   (SurfaceIsUniverse _, [o])     -> Just (SurfaceIsUniverse o)
   (SurfaceIsUniverseOpen _, [o]) -> Just (SurfaceIsUniverseOpen o)
   (SurfaceIsPlaceholder _, [o])  -> Just (SurfaceIsPlaceholder o)
@@ -1680,6 +1684,7 @@ testTypes t = case t of
   GoalTypeIsLet   -> []
   SurfaceIsName o         -> [(o, Ty.TSurface)]
   SurfaceIsLiteral o      -> [(o, Ty.TSurface)]
+  SurfaceIsObject o       -> [(o, Ty.TSurface)]
   SurfaceIsUniverse o     -> [(o, Ty.TSurface)]
   SurfaceIsUniverseOpen o -> [(o, Ty.TSurface)]
   SurfaceIsPlaceholder o  -> [(o, Ty.TSurface)]
@@ -1721,6 +1726,7 @@ testWord t = case t of
   GoalTypeIsLet   -> "goal-type-is-let"
   SurfaceIsName _         -> "surface-is-name"
   SurfaceIsLiteral _      -> "surface-is-literal"
+  SurfaceIsObject _       -> "surface-is-object"
   SurfaceIsUniverse _     -> "surface-is-universe"
   SurfaceIsUniverseOpen _ -> "surface-is-universe-open"
   SurfaceIsPlaceholder _  -> "surface-is-placeholder"
@@ -1752,6 +1758,7 @@ everyTest =
   [ FocusIsHole, FocusIsGuess, FocusIsComponent, GoalTypeIsPi, GoalTypeIsLet
   , SurfaceIsName (Lit (VText ""))
   , SurfaceIsLiteral (Lit (VText ""))
+  , SurfaceIsObject (Lit (VText ""))
   , SurfaceIsUniverse (Lit (VText ""))
   , SurfaceIsUniverseOpen (Lit (VText ""))
   , SurfaceIsPlaceholder (Lit (VText ""))

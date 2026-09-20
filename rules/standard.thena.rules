@@ -183,6 +183,16 @@ rule elaborate t :- when focus-is-hole (surface-is-literal t)
   do l = surface-literal t
      ; apply-core l
 
+-- E⟦LC`( λ x : ι . x )`⟧ — a term of an object language (MS6 phase 104). The
+-- text is parsed with LC's own grammar and the reading is written out as the
+-- constructor application it denotes, which is then elaborated like any other
+-- application. A ${e} in the region is an ordinary surface term standing where
+-- its slot is, so it is elaborated there, at the constructor argument's type,
+-- and nothing here has to know it was written as a splice.
+rule elaborate t :- when focus-is-hole (surface-is-object t)
+  do a = object-term t
+     ; call elaborate a
+
 -- E⟦Typeₙ⟧ — the level is written, so the term is too.
 rule elaborate t :- when focus-is-hole (surface-is-universe t)
   do u = surface-universe t

@@ -17,7 +17,7 @@ import Data.List.NonEmpty (nonEmpty)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 import Test.Tasty.QuickCheck
-  ( Gen, counterexample, elements, forAll, frequency, listOf1, oneof, property
+  ( Gen, counterexample, elements, forAll, frequency, listOf, listOf1, oneof, property
   , resize, sized, testProperty, withNumTests, (===) )
 
 import Thena.Core.TermTests (genLiteral)
@@ -37,7 +37,8 @@ import Thena.Syntax.Parser (parseRule)
 import Thena.Global.Env (emptyGlobals)
 import Thena.Repl (renderSurface)
 import Thena.Surface.Concrete
-  ( Plicity (..)
+  ( ObjectPiece (..)
+  , Plicity (..)
   , Surface (..)
   , SurfaceArg (..)
   , SurfaceBinder (..)
@@ -228,6 +229,11 @@ genSurface = sized go
             , (1, SurfaceArrow <$> smaller <*> smaller)
             , (1, SurfaceLet <$> name <*> annotation <*> smaller <*> smaller)
             , (1, SurfaceAnnot <$> smaller <*> smaller)
+              -- A tagged term literal (MS6 phase 104), in the shared generator
+              -- for 'SurfaceLiteral'\'s reason: the printer has to escape a
+              -- region's text the way the region scanner reads it back, and a
+              -- splice holds a whole term, so the two printers meet here.
+            , (1, genObject smaller)
             ]
       where
         smaller    = resize (n `div` 2) genSurface
@@ -262,6 +268,32 @@ genSurface = sized go
     -- @listOf1@ can still hand back an empty list under a tiny size, and a
     -- spine is never empty.
     neOr d g = maybe (d :| []) id . nonEmpty <$> g
+
+-- | A tagged term literal, with pieces that could have been written.
+--
+-- **Nothing here is object-language text**: the term is never elaborated in
+-- this module, so what is generated is exactly what the printer and the reader
+-- must agree about — the tag, the production if one is written, and the
+-- region's pieces.
+--
+-- **The pieces alternate, and that is not a convenience.** The lexer emits one
+-- chunk per run of text between escapes and drops an empty one, so two
+-- 'ObjectText' pieces in a row are not something it can produce; generating a
+-- pair would be asserting that the printer can write a distinction the reader
+-- has no way to keep.
+genObject :: Gen Surface -> Gen Surface
+genObject inner =
+  SurfaceObject
+    <$> elements ["LC", "Ty"]
+    <*> oneof [pure Nothing, Just <$> elements ["var", "app"]]
+    <*> (alternate <$> listOf (oneof [ObjectText <$> chunk, ObjectSplice <$> inner]))
+  where
+    chunk = elements ["x", "( \955 x . x )", "a" ++ [toEnum 96] ++ "b", "$", "\\", "?", " ", "a${b"]
+    alternate ps = case ps of
+      ObjectText a : ObjectText b : rest -> alternate (ObjectText (a ++ b) : rest)
+      ObjectText "" : rest -> alternate rest
+      p : rest -> p : alternate rest
+      [] -> []
 
 -- --------------------------------------------------------------------------
 -- The spine

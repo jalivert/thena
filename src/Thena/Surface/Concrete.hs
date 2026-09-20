@@ -17,6 +17,7 @@
 -- different things that have to be distinguishable said out loud.
 module Thena.Surface.Concrete
   ( Surface (..)
+  , ObjectPiece (..)
   , SurfaceDecl (..)
   , SurfaceModule (..)
   , SurfaceData (..)
@@ -76,6 +77,20 @@ data Surface
     -- a clause may run automatically, ask the user, offer a choice, or hand
     -- control over.
 
+  | SurfaceObject String (Maybe String) [ObjectPiece]
+    -- ^ @LC\`( \955 x : \953 . x )\`@ — **a tagged term literal** (MS6 phase
+    -- 104, @ms6\/SPEC.md@ §8): the language, the production to start at if one
+    -- was written, and the region's text split at its splices.
+    --
+    -- **It denotes an ordinary value of an ordinary datatype.** Its
+    -- elaboration parses the text with that language's installed grammar and
+    -- elaborates the constructor application the reading denotes — so
+    -- @LC\`( \955 x : \953 . x )\`@ /is/ @abs "x" base (var "x")@, with no branded
+    -- type and no coercion.
+    --
+    -- **The text cannot be parsed when it is read**: a module is parsed whole
+    -- before its own @language@ block is installed, so what survives to here is
+    -- the region, and the grammar is asked for at elaboration.
   | SurfaceApp Surface (NonEmpty SurfaceArg)
     -- ^ **a spine, and there is exactly one application constructor.** The
     -- head is any 'Surface' and the argument list is never empty — the user,
@@ -144,6 +159,18 @@ data Surface
     --
     -- **No level arguments.** A use writes them in the development calculus and
     -- phase 44 decides how, or whether, they are written here.
+  deriving (Eq, Show)
+
+-- | A piece of a tagged term literal (MS6 phase 104).
+--
+-- **A splice holds a whole 'Surface' term**, not a name: §7.6 says a splice
+-- supplies the slot's value and its type is the slot's, so what stands there is
+-- an ordinary term elaborated at the slot\'s type. Nothing about the slot is
+-- recorded here — which slot it is is the parser\'s answer, from where the
+-- splice fell in the text.
+data ObjectPiece
+  = ObjectText String     -- ^ text, with its escapes already undone
+  | ObjectSplice Surface  -- ^ @${ e }@
   deriving (Eq, Show)
 
 -- | One argument of a spine, and whether it was written in braces.
@@ -253,6 +280,8 @@ blocksIn t = case t of
   SurfaceElim _ ls m is ms tg ->
     concatMap blocksIn ls ++ blocksIn m ++ concatMap blocksIn is
       ++ concatMap blocksIn ms ++ blocksIn tg
+  -- A splice is a term like any other, so a block inside one is found here.
+  SurfaceObject _ _ ps -> concatMap piece ps
   SurfaceName _       -> []
   SurfaceUniverse _   -> []
   SurfaceLiteral _    -> []
@@ -261,3 +290,6 @@ blocksIn t = case t of
   SurfaceHole _       -> []
   where
     binder (SurfaceBinder _ _ mt) = maybe [] blocksIn mt
+    piece pc = case pc of
+      ObjectText _   -> []
+      ObjectSplice e -> blocksIn e

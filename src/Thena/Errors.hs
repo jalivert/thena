@@ -29,6 +29,7 @@
 -- above @Core@; it mentions nothing this module did not already have.
 module Thena.Errors
   ( DataBuildError (..)
+  , BuildError (..)
   , Warning (..)
   , Skipped (..)
   , FailReason (..)
@@ -60,6 +61,7 @@ import Thena.Core.Context (Context)
 import Thena.Core.Term (Core, GlobalName, Ident, Var)
 import Thena.Instral.Pattern (Pattern)
 import Thena.Syntax.Lexer (BlockKind, LexError)
+import Thena.Language.Earley (ParseFailure)
 import Thena.Language.Reader (ReadError)
 import Thena.Surface.Concrete (PairingError (..))
 import Thena.Surface.Layout (LayoutError (..))
@@ -91,6 +93,21 @@ data Warning
     -- allowed — that is why it can be declared — and worth saying.
   deriving (Eq, Show)
 
+
+-- | Why a reading of an object term is not a term (MS6 phases 103 and 104).
+--
+-- **Here rather than in "Thena.Language.Build", for the reason 'Warning' is
+-- here** (phase 101): a 'Failure' carries one, and "Thena.Language.Build"
+-- reaches this module through "Thena.Language.Grammar", so the type has to sit
+-- below both.
+data BuildError
+  = NoSuchProduction String
+    -- ^ a reading of a production no installed grammar has
+  | Incomplete String
+    -- ^ a hole: a constructor cannot have a missing argument (§7.6)
+  | NotForSlot String String
+    -- ^ the production, and a slot whose reading is not what it takes
+  deriving (Eq, Show)
 
 -- | Why a datatype gets no no-confusion. Structured, per §12 invariant 2.
 --
@@ -343,6 +360,19 @@ data FailReason
     -- ^ an operand was not a 'Thena.Instral.Ops.VSurface'. Shaped like 'ExpectedText'
     -- and 'ExpectedTerm', and here for their reason: the value itself may not
     -- be named below @Core@
+  | NoSuchObjectLanguage String
+    -- ^ a tagged term literal named a language no @language@ block has
+    -- declared (MS6 phase 104). **Raised when the literal elaborates**, not
+    -- when it is read: a module is parsed whole before its own block is
+    -- installed, so this is the earliest the question can be asked.
+  | NoSuchObjectProduction String String
+    -- ^ @LC[nope]\`…\`@ — the language, and a production it does not have.
+  | ObjectNotParsed String String ParseFailure
+    -- ^ the language, the region's text, and why the object grammar did not
+    -- read it as one term (MS6 phase 104). The same three answers @:parse@
+    -- gives, because it is the same parser.
+  | ObjectNotATerm String BuildError
+    -- ^ it parsed, and the reading does not denote a term.
   | ExpectedSurfaceShape String
     -- ^ a surface reader was given a term of the wrong shape (MS4 phase 49):
     -- @surface-name@ on something that is not a name, @surface-universe@ on

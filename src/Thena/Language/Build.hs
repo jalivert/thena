@@ -16,15 +16,17 @@
 -- elaboration produces for the same text, and 'printTerm' reduces what it is
 -- given, so either form prints.
 module Thena.Language.Build
-  ( BuildError (..)
-  , buildTerm
+  ( buildTerm
+  , buildSurface
   , printTerm
   ) where
 
 import Data.List (elemIndex)
+import qualified Data.List.NonEmpty as NE
 
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
+import Thena.Errors (BuildError (..))
 import Thena.Global.Env (GlobalEnv)
 import Thena.Language.Earley (Tree (..))
 import Thena.Language.Grammar
@@ -35,47 +37,89 @@ import Thena.Language.Grammar
   , Sort (..)
   )
 import Thena.Language.Regex (matches)
-
-data BuildError
-  = NoSuchProduction String
-    -- ^ a reading of a production no installed grammar has
-  | Incomplete String
-    -- ^ a hole: a constructor cannot have a missing argument (§7.6)
-  | SpliceUnsupported String
-    -- ^ a splice; supplying one is phase 104's
-  | NotForSlot String String
-    -- ^ the production, and a slot whose reading is not what it takes
-  deriving (Eq, Show)
+import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..))
 
 -- | The term a reading denotes.
+--
+-- **A reading alone, so a splice has nothing to be**: 'buildSurface' is the
+-- one that is given the terms the splices stand for.
 buildTerm :: [Grammar] -> Tree -> Either BuildError Core
 buildTerm gs tree = case tree of
-  HoleAt _ -> Left (Incomplete "")
-  SpliceOf _ -> Left (SpliceUnsupported "")
-  Token t -> Left (NotForSlot "" t)
   Node name children -> do
     p <- maybe (Left (NoSuchProduction name)) Right (production gs name)
-    let names = [ x | Slot x _ _ <- gproductionItems p ]
-    args <- traverse (argument name children names) (gproductionArguments p)
+    args <- traverse (slot name) =<< arguments p children
     Right (foldl App (Global (GlobalName name) []) args)
+  _ -> Left (NotForSlot "" (shapeOf tree))
   where
-    -- **The distinct names in order of first appearance** (§4.6): a name
-    -- written twice is one argument, and the occurrences agree, because the
-    -- parser's filter kept only the readings where they do (§7.4).
-    argument name children names a = case elemIndex (argumentName a) names of
-      Nothing -> Left (NotForSlot name (argumentName a))
-      Just k -> case (argumentSort a, drop k children) of
-        (OfClass _ t _, child : _) -> literal name (argumentName a) t child
-        (OfLanguage _, child : _) -> buildTerm gs child
-        _ -> Left (NotForSlot name (argumentName a))
+    slot name (a, child) = case argumentSort a of
+      OfClass _ t _ -> Primitive <$> literal name (argumentName a) t child
+      OfLanguage _  -> buildTerm gs child
 
-    literal name x t child = case (child, t) of
-      (Token s, GlobalName "String") -> Right (Primitive (LString s))
-      (Token [c], GlobalName "Char") -> Right (Primitive (LChar c))
-      (Token s, GlobalName "Int") | [(k, "")] <- reads s -> Right (Primitive (LInt k))
-      (HoleAt _, _) -> Left (Incomplete x)
-      (SpliceOf _, _) -> Left (SpliceUnsupported x)
-      _ -> Left (NotForSlot name x)
+-- | The **surface** term a reading denotes, with the splices supplied (MS6
+-- phase 104; @ms6\/SPEC.md@ §8).
+--
+-- The same walk 'buildTerm' makes, writing a 'Thena.Surface.Concrete.Surface'
+-- application instead of a 'Core' one — so what it hands back is a term whose
+-- splices are ordinary sub-terms, elaborated where they stand and at the type
+-- the constructor's argument has. That is what keeps §7.6's rule (/a splice
+-- supplies a slot's value and its type is the slot's/) from needing any
+-- mechanism of its own.
+--
+-- The splices are indexed as the input pieces numbered them, so the @k@th
+-- 'Thena.Language.Earley.Splice' reads the @k@th term here.
+buildSurface :: [Grammar] -> [Surface] -> Tree -> Either BuildError Surface
+buildSurface gs splices = build
+  where
+    build tree = case tree of
+      SpliceOf k -> supplied k
+      Node name children -> do
+        p <- maybe (Left (NoSuchProduction name)) Right (production gs name)
+        args <- traverse (slot name) =<< arguments p children
+        Right $ case args of
+          [] -> SurfaceName name
+          a : as -> SurfaceApp (SurfaceName name)
+                      (NE.map (SurfaceArg Explicit) (a NE.:| as))
+      _ -> Left (NotForSlot "" (shapeOf tree))
+
+    slot name (a, child) = case (argumentSort a, child) of
+      (_, SpliceOf k) -> supplied k
+      (OfClass _ t _, _) -> SurfaceLiteral <$> literal name (argumentName a) t child
+      (OfLanguage _, _) -> build child
+
+    supplied k = case drop k splices of
+      e : _ -> Right e
+      []    -> Left (NotForSlot "" (shapeOf (SpliceOf k)))
+
+-- | Each argument of a production, with the child that reads it.
+--
+-- **The distinct names in order of first appearance** (§4.6): a name written
+-- twice is one argument, and the occurrences agree, because the parser's
+-- filter kept only the readings where they do (§7.4).
+arguments :: GProduction -> [Tree] -> Either BuildError [(Argument, Tree)]
+arguments p children = traverse one (gproductionArguments p)
+  where
+    names = [ x | Slot x _ _ <- gproductionItems p ]
+    name = case gproductionName p of GlobalName n -> n
+    one a = case elemIndex (argumentName a) names of
+      Just k | child : _ <- drop k children -> Right (a, child)
+      _ -> Left (NotForSlot name (argumentName a))
+
+-- | What a token class matched, as the literal it stands for.
+literal :: String -> String -> GlobalName -> Tree -> Either BuildError Literal
+literal name x t child = case (child, t) of
+  (Token s, GlobalName "String") -> Right (LString s)
+  (Token [c], GlobalName "Char") -> Right (LChar c)
+  (Token s, GlobalName "Int") | [(k, "")] <- reads s -> Right (LInt k)
+  (HoleAt _, _) -> Left (Incomplete x)
+  _ -> Left (NotForSlot name x)
+
+-- | What a tree is, for a message about one that is not a term.
+shapeOf :: Tree -> String
+shapeOf tree = case tree of
+  Node n _   -> n
+  Token t    -> t
+  HoleAt _   -> "?"
+  SpliceOf k -> "${" ++ show k ++ "}"
 
 -- | The text a term is written as, or 'Nothing' when it is not one an object
 -- language can write: something that is not a constructor of a grammar, or a
