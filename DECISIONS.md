@@ -1238,6 +1238,13 @@ An unindented continuation is refused and the entry is dropped.
 
 *Decided 2026-09-12.*
 
+*Superseded 2026-09-21 (MS6 phase 106): the rule-file `language` declaration,
+the type it gave, and `surface-of` are deleted, and `language` in a rule file
+is now a syntax error. A language is declared in a module and its terms are
+`Core` values — see "A language block declares a datatype, and its terms are
+ordinary terms" and "An object term is written the same way in a rule". A
+language may still not take a built-in tag's name.*
+
 ```
 language Tm where {
   var : name ;
@@ -1291,29 +1298,33 @@ word is free to mean three.**
 
 | space | what is in it | who may add to it |
 |---|---|---|
-| **types** | `String` `Name` `Int` `Char` `Bool` `Surface` `Core` `Development` `Level` `List` `Option` | a `language` declaration |
-| **tags** | `surface` `core` | a `language` declaration |
+| **types** | `String` `Name` `Int` `Char` `Bool` `Surface` `Core` `Development` `Level` `List` `Option` | nothing — the set is closed |
+| **tags** | `surface` `core` | a `language` block in a module |
 | **callables** | op words, rule names, function names, locals | a rule, a function, a binding |
 
-So this loads, and the two `twice`es never meet — one is only ever written as a
-type or in a tag, the other only ever called:
+So these load together, and the two `twice`es never meet — one is only ever
+written as a tag, the other only ever called:
 
 ```
-language twice where { var : name }
+language twice, M where          -- in a module
+  one -> 1
 
-twice : String -> String
+twice : String -> String         -- in a rule file
 twice s = concat s s
 ```
 
-**A `language` declaration is the one thing that enters two spaces at once**, a
-type and a tag together, so its name is checked against both lists:
+**A language's name is checked against the built-in tags**, because a rule file
+reads an installed language's tag before its own:
 
 ```
-bad.thena.rules: in the grammar of String: String is one of instral's own types,
-  so a grammar may not take its name
+refused: core is one of Thena's own tags, so a language may not take its name
 ```
 
-Inside a space, a collision is refused. Two grammars under one name, and:
+*Updated 2026-09-21 (MS6 phase 106): until then a rule-file `language`
+declaration also entered the type space, and was checked against the type
+list too.*
+
+Inside a space, a collision is refused. Two languages under one name, and:
 
 ```
 ns.thena.rules: in twice: this name is both a rule and a function at 1 argument
