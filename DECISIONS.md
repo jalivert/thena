@@ -690,6 +690,53 @@ a constructor has no missing argument.
 
 ---
 
+### A context gets a lookup relation, written `x : T ∈ Γ`
+
+*Decided 2026-09-21.* A `context` block declares its datatype and, beside it,
+the relation that looks a name up:
+
+```
+context Ctx, Γ where
+  empty  -> ·
+  extend -> Γ , x : T
+```
+
+```
+data Ctx-in : String -> Ty -> Ctx -> Type₀ where
+  Ctx-here  : ∀ (Γ : Ctx) (x : String) (T : Ty) -> Ctx-in x T (extend Γ x T)
+  Ctx-there : ∀ (Γ : Ctx) (x : String) (T : Ty) (x' : String) (T' : Ty)
+                -> (Eq String x x' -> Empty) -> Ctx-in x T Γ -> Ctx-in x T (extend Γ x' T')
+```
+
+**Its notation is the extension with the context taken out, then `∈` and the
+context**, and it is a grammar like any other: `` Ctx-in`x : ι ∈ ·, x : ι` `` is
+the type `Ctx-in "x" base (extend empty "x" base)`, `:parse Ctx-in …` reads it,
+and it prints back. The separator goes with the context: `Γ , x : T` gives
+`x : T ∈ Γ`, and so does `x : T ; Γ`. **The indices are the notation's slots
+in order**, as a judgment's are, so the context comes last.
+
+**A later binding shadows an earlier one of the same name.** `Ctx-there` asks
+for a proof that the two names differ. For two literals that proof needs no
+axiom; `eqString` and `Eq`'s eliminator give it:
+
+```
+xNotY : Eq String "x" "y" -> Empty
+xNotY = \ q ->
+  elim Eq (String)
+    (\ a b r -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "x" a)
+                -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "x" b))
+    ((\ a d -> d))
+    ("x" "y") q unit
+```
+
+Reaching an `x` under a later `x` would need `Eq String "x" "x" -> Empty`, and
+nothing proves that.
+
+The constructors are named after the context, as `Ctx-in` is, so two contexts
+in one session do not clash. **The extension must have exactly one name** (a
+`Token String` argument), because that is what the lookup compares. Weakening
+and exchange are not generated.
+
 ### A language gets substitution for free, and a binder is renamed only when it would capture
 
 *Decided 2026-09-21.* A `language` block with a variable production
