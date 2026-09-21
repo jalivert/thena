@@ -325,6 +325,37 @@ them. The alternative — building them from an inductive numeral, as Coq does �
 was weighed and refused, because it makes every identifier in every
 object-language term a chain of constructors.
 
+### `decString` compares two strings and hands you the proof
+
+*Decided 2026-09-21.* Beside `eqString`, `eqChar` and `eqInt`, the prelude
+declares `decString`, `decChar` and `decInt`:
+
+```
+decString : ∀ (a : String) (b : String) -> Dec (Eq String a b)
+
+data Dec (A : Type) : Type where
+  yes : forall (p : A) -> Dec A
+  no : forall (n : A -> Empty) -> Dec A
+```
+
+On two literals it computes to `yes (refl String "a")`, or to `no ‹a
+refutation›` — a real proof of `Eq String "a" "b" -> Empty` that the kernel
+checks like any other. On a name you do not know it does not compute, and that
+is where it earns its place: **eliminating `decString y x` gives you
+`Eq String y x` in one branch and its refutation in the other**, where
+`eqString y x` tells you only which branch you are in. So a proof about a
+name nobody knows can follow the decision:
+
+```
+varMiss : forall (y : String) (x : String) (N : LC) (ne : Eq String y x -> Empty)
+            -> Eq LC (LC-subst (var y) x N) (var y)
+```
+
+**Generated substitution decides with `decString`**, which is what lets a
+proof about `LC-subst` follow it at all. What is trusted is the same as for
+`eqString`: the verdict on two literals. The refutation it writes is built
+from `decString` itself and checked by the kernel.
+
 ### A token class is an ordinary definition, and its regex takes its type as an argument
 
 *Decided 2026-09-19.*
