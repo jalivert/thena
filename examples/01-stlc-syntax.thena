@@ -1,6 +1,6 @@
 -- The simply typed λ-calculus: its syntax, written as a grammar.
 --
--- Load it with   :load .examples/01-stlc-syntax.thena
+-- Load it with   :load examples/01-stlc-syntax.thena
 -- then try       :show LC      :show LC-subst      :parse LC ( λ x : ι . x )
 
 module StlcSyntax where

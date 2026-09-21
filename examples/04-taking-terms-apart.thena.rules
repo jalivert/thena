@@ -5,8 +5,8 @@ rule base inspecting where
 --
 -- LOAD AFTER 01-stlc-syntax.thena, alongside the shipped rules:
 --
---   :load .examples/01-stlc-syntax.thena
---   :load rules rules/standard.thena.rules .examples/04-taking-terms-apart.thena.rules
+--   :load examples/01-stlc-syntax.thena
+--   :load rules rules/standard.thena.rules examples/04-taking-terms-apart.thena.rules
 --
 -- A rule file is read with the grammars the session already has, which is why
 -- the module declaring LC comes first.

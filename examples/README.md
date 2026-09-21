@@ -1,15 +1,14 @@
 # Example programs
 
-Real Thena programs, written to show **what the language can do right now**.
-Each file loads as it stands, and the files grow as features land. Read them in
-order, since each one builds on the one before.
+Real Thena programs. **Every file here loads as it stands**, and together they
+show what the language can do at this point. There are two sets.
 
-The older `examples/` directory holds MS4-era proofs (`canonical`, `progress`,
-`preservation`, `normal`) over a hand-written TAPL language. The files here use
-the object-language features instead: grammars, notation, contexts, and
-generated substitution.
+## The object-language series — numbered, read in order
 
-## The files
+Written for MS6, and extended as each feature lands. Each file builds on the
+ones before it. **A test loads every numbered file in order**
+(`Thena.ExamplesTests`), so if one stops loading the suite fails, and the fix is
+to the file.
 
 | file | what it shows |
 |---|---|
@@ -18,14 +17,34 @@ generated substitution.
 | `03-typing-and-reduction.thena` | Typing, values and call-by-value reduction as ordinary inductive families; typing derivations; reduction steps whose right-hand side the kernel computes by substitution, one of them capture-avoiding |
 | `04-taking-terms-apart.thena.rules` | A rule base that matches `LC` terms in their own notation (`LC[app]`( ${f} ${a} )``) and builds them (`LC`( ${t} ${t} )``) |
 
-## Loading them
+## The earlier proofs — TAPL's arithmetic language, by hand
+
+Written in MS4 and MS5, before object languages existed. The language is a
+hand-written `data Term`, and the proofs use `elim` throughout. All but the last
+two rows are also test fixtures, loaded by path from their own tests; those two
+load today, and nothing checks that they keep doing so.
+
+| file | what it is |
+|---|---|
+| `canonical.thena` | Canonical forms, TAPL 8.3.1. Load first |
+| `progress.thena` | Progress, TAPL 8.3.2. After `canonical` |
+| `preservation.thena` | Preservation, TAPL 8.3.3. After `canonical` and `progress` |
+| `normal.thena` | A value is a normal form. After `canonical` and `progress` |
+| `determinacy-surface.thena` | Determinacy, TAPL 3.5.4, in the surface language. **Generated** by `determinacy.py`: regenerate it, never patch it |
+| `determinacy-tactics.thena.script` | The same proof driven by tactics. **Generated** too |
+| `tier0.thena` | MS4's first checkpoint: a datatype, a function by elimination, a theorem |
+| `dependent-index.thena.script`, `products.thena.script` | REPL scripts: elimination over an indexed family, and no-confusion |
+| `choice-points.thena.rules` | What a choice point resumes into |
+| `trying.thena` | A scratch module, with a `Bool` and two commented-out attempts |
+
+## Loading the series
 
 ```
 cabal run thena
-:load .examples/01-stlc-syntax.thena
-:load .examples/02-contexts.thena
-:load .examples/03-typing-and-reduction.thena
-:load rules rules/standard.thena.rules .examples/04-taking-terms-apart.thena.rules
+:load examples/01-stlc-syntax.thena
+:load examples/02-contexts.thena
+:load examples/03-typing-and-reduction.thena
+:load rules rules/standard.thena.rules examples/04-taking-terms-apart.thena.rules
 ```
 
 A module's declarations stay in scope for the next module loaded in the same
@@ -78,5 +97,3 @@ what can come next. Leave it with `:done`.
 - **Loading `02` prints one warning**, that `Ctx-in` gets no no-confusion
   lemma. It is accurate and harmless here.
 
-Every file in this directory loads without an error. If one ever stops loading,
-the file is out of date and should be fixed, not the check skipped.

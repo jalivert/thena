@@ -35,6 +35,7 @@ import qualified Thena.EarleyTests
 import qualified Thena.BuildTests
 import qualified Thena.SubstitutionTests
 import qualified Thena.ContextTests
+import qualified Thena.ExamplesTests
 import qualified Thena.ObjectTermTests
 import qualified Thena.TokenTests
 import qualified Thena.LoadTests
@@ -90,6 +91,7 @@ main =
       , Thena.BuildTests.tests
       , Thena.SubstitutionTests.tests
       , Thena.ContextTests.tests
+      , Thena.ExamplesTests.tests
       , Thena.ObjectTermTests.tests
       , Thena.TokenTests.tests
       , Thena.LoadTests.tests
