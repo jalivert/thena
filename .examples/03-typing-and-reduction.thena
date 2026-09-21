@@ -1,0 +1,92 @@
+-- Typing and reduction for the λ-calculus of 01 and 02, and some derivations.
+--
+-- LOAD AFTER 01-stlc-syntax.thena AND 02-contexts.thena.
+--
+-- **These relations are written by hand**, as ordinary inductive families.
+-- That is what a `judgment` block will generate (MS6 phase 108) from the paper
+-- notation — for example T-abs will be written
+--
+--     T-abs:  Γ, x : S ⊢ E[x] : T
+--             ---------------------------------
+--             Γ ⊢ ( λ x : S . E[x] ) : ( S -> T )
+--
+-- — so this file is what the paper notation will stand for, and what `:show`
+-- will print for it.
+
+module StlcRelations where
+
+-- Γ ⊢ M : T
+data typing : Ctx -> LC -> Ty -> Type₀ where
+  T-var : forall (G : Ctx) (x : String) (T : Ty) (i : Ctx-in x T G)
+            -> typing G (var x) T
+  T-abs : forall (G : Ctx) (x : String) (S : Ty) (T : Ty) (E : LC)
+            (d : typing (extend G x S) E T)
+            -> typing G (abs x S E) (arrow S T)
+  T-app : forall (G : Ctx) (M : LC) (N : LC) (S : Ty) (T : Ty)
+            (d1 : typing G M (arrow S T)) (d2 : typing G N S)
+            -> typing G (app M N) T
+
+-- M value
+data value : LC -> Type₀ where
+  V-abs : forall (x : String) (T : Ty) (E : LC) -> value (abs x T E)
+
+-- M --> N, call by value. E-beta's result is the generated substitution, so
+-- a step computes its own right-hand side.
+data step : LC -> LC -> Type₀ where
+  E-beta : forall (x : String) (T : Ty) (E : LC) (N : LC) (v : value N)
+             -> step (app (abs x T E) N) (LC-subst E x N)
+  E-app1 : forall (M : LC) (M' : LC) (N : LC) (s : step M M')
+             -> step (app M N) (app M' N)
+  E-app2 : forall (M : LC) (N : LC) (N' : LC) (v : value M) (s : step N N')
+             -> step (app M N) (app M N')
+
+
+-- ---------------------------------------------------------------------------
+-- Typing derivations.
+
+-- ⊢ λ x : ι . x  :  ι -> ι
+identityTyped : typing Ctx`·` identity Ty`( ι -> ι )`
+identityTyped =
+  T-abs Ctx`·` "x" base base LC`x`
+    (T-var Ctx`·, x : ι` "x" base (Ctx-here Ctx`·` "x" base))
+
+-- ⊢ λ x : ι . λ y : ι . x  :  ι -> ι -> ι
+-- The x in the body is found past y, so the lookup needs x ≠ y.
+xNotY : Eq String "x" "y" -> Empty
+xNotY = \ q ->
+  elim Eq (String)
+    (\ a b r -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "x" a)
+                -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "x" b))
+    ((\ a d -> d))
+    ("x" "y") q unit
+
+constTyped : typing Ctx`·` LC`( λ x : ι . ( λ y : ι . x ) )` Ty`( ι -> ( ι -> ι ) )`
+constTyped =
+  T-abs Ctx`·` "x" base Ty`( ι -> ι )` LC`( λ y : ι . x )`
+    (T-abs Ctx`·, x : ι` "y" base base LC`x`
+      (T-var Ctx`·, x : ι, y : ι` "x" base
+        (Ctx-there Ctx`·, x : ι` "x" base "y" base xNotY (Ctx-here Ctx`·` "x" base))))
+
+
+-- ---------------------------------------------------------------------------
+-- Reduction steps. The right-hand side is checked by the kernel running
+-- LC-subst, so each of these is a small test of substitution too.
+
+-- ( λ x : ι -> ι . x ) ( λ y : ι . y )  -->  λ y : ι . y
+betaStep : step LC`( ( λ x : ( ι -> ι ) . x ) ( λ y : ι . y ) )` LC`( λ y : ι . y )`
+betaStep = E-beta "x" Ty`( ι -> ι )` LC`x` LC`( λ y : ι . y )` (V-abs "y" base LC`y`)
+
+-- ( λ x . λ y . x ) ( λ z . y )  -->  λ y' . λ z . y
+-- The argument mentions a free y, so the inner binder is renamed on the way in.
+captureAvoidingStep :
+  step LC`( ( λ x : ( ι -> ι ) . ( λ y : ι . x ) ) ( λ z : ι . y ) )`
+       LC`( λ y' : ι . ( λ z : ι . y ) )`
+captureAvoidingStep =
+  E-beta "x" Ty`( ι -> ι )` LC`( λ y : ι . x )` LC`( λ z : ι . y )` (V-abs "z" base LC`y`)
+
+-- A step inside the function position of an application.
+congruenceStep :
+  step LC`( ( ( λ x : ( ι -> ι ) . x ) ( λ y : ι . y ) ) w )`
+       LC`( ( λ y : ι . y ) w )`
+congruenceStep =
+  E-app1 LC`( ( λ x : ( ι -> ι ) . x ) ( λ y : ι . y ) )` LC`( λ y : ι . y )` LC`w` betaStep

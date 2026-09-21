@@ -1,0 +1,46 @@
+rule base inspecting where
+
+-- Rules that take λ-terms apart and put them together, in the terms' own
+-- notation.
+--
+-- LOAD AFTER 01-stlc-syntax.thena, alongside the shipped rules:
+--
+--   :load .examples/01-stlc-syntax.thena
+--   :load rules rules/standard.thena.rules .examples/04-taking-terms-apart.thena.rules
+--
+-- A rule file is read with the grammars the session already has, which is why
+-- the module declaring LC comes first.
+--
+-- In a rule an object term is a Core value, like any other term. Written in a
+-- pattern it MATCHES, and ${…} binds what stands in that slot; written in an
+-- operand it BUILDS, and ${…} supplies it.
+
+-- `describe t` says what kind of term t is. One clause per production; the
+-- rule is searched, so the clause whose pattern matches is the one that runs.
+-- At a token-class slot ${…} binds the String itself, not a term.
+--
+--   thena spine> describe LC`( λ x : ι . x )`
+--   a function binding x
+--   thena spine> describe LC`y`
+--   a variable called y
+--   thena spine> describe LC`( f y )`
+--   an application
+describe : Core -> ()
+rule describe LC[var]`${s}` :- do
+  say (concat "a variable called " s)
+rule describe LC[abs]`( λ ${x} : ${T} . ${E} )` :- do
+  say (concat "a function binding " x)
+rule describe LC[app]`( ${f} ${a} )` :- do
+  say "an application"
+
+-- At a hole of type LC, `self-apply t` fills it with ( t t ):
+--
+--   thena spine> :theorem w : LC
+--   thena spine> self-apply LC`( λ x : ι . x )`
+--   thena spine> qed
+--   thena spine> :show w
+--   w = … app (abs "x" base (var "x")) (abs "x" base (var "x")) …
+self-apply : Core -> ()
+rule self-apply t :- do
+  fill LC`( ${t} ${t} )`
+  ; solve

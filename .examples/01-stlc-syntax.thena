@@ -1,0 +1,90 @@
+-- The simply typed λ-calculus: its syntax, written as a grammar.
+--
+-- Load it with   :load .examples/01-stlc-syntax.thena
+-- then try       :show LC      :show LC-subst      :parse LC ( λ x : ι . x )
+
+module StlcSyntax where
+
+-- A token class: which strings are identifiers. It is an ordinary definition,
+-- and the regular expression takes its type from the signature.
+x : Token String
+x = /[a-z][a-zA-Z0-9']*/
+
+-- Types. `ι` is the one base type.
+language Ty, T, S where
+  base  -> ι
+  arrow -> ( T -> S )
+
+-- Terms. `var` is where an identifier is used, `abs` binds one, and `E[x]`
+-- says the body is where it is bound. Each production becomes a constructor:
+--
+--   data LC : Type₀ where
+--     var : String -> LC
+--     abs : String -> Ty -> LC -> LC
+--     app : LC -> LC -> LC
+language LC, M, N, E where
+  var : x as occurrence -> x
+  abs : x as binder     -> ( λ x : T . E[x] )
+  app                   -> ( M N )
+
+
+-- ---------------------------------------------------------------------------
+-- Terms are written in their own notation, between backticks.
+
+identity : LC
+identity = LC`( λ x : ι . x )`
+
+-- …and they are ordinary values: the literal IS the constructor application.
+identityIsAbs : Eq LC identity (abs "x" base (var "x"))
+identityIsAbs = refl LC (abs "x" base (var "x"))
+
+-- `${…}` splices a Thena term into the notation.
+selfApplied : LC
+selfApplied = LC`( ${identity} ${identity} )`
+
+-- `LC[var]` starts the parse at one production, so this can only be a variable.
+why : LC
+why = LC[var]`y`
+
+-- Types are a language too.
+idType : Ty
+idType = Ty`( ι -> ι )`
+
+
+-- ---------------------------------------------------------------------------
+-- Substitution comes with the language. The block declared
+--
+--   LC-subst     : LC -> String -> LC -> LC            E[x->N]
+--   LC-subst-all : LC -> List (And String LC) -> LC    simultaneous
+--   LC-fv        : LC -> List String
+--   LC-fresh     : String -> List String -> String
+--
+-- They compute, so each fact below is proved by `refl`: the kernel runs the
+-- substitution and compares.
+
+-- (λ y . x y)[x -> z]  =  λ y . z y
+replaces : Eq LC (LC-subst LC`( λ y : ι . ( x y ) )` "x" LC`z`)
+                 LC`( λ y : ι . ( z y ) )`
+replaces = refl LC LC`( λ y : ι . ( z y ) )`
+
+-- (λ y . x y)[x -> y]  =  λ y' . y y'
+-- The binder would capture the y coming in, so it is primed. It is renamed
+-- ONLY then: nothing is renamed behind your back.
+avoidsCapture : Eq LC (LC-subst LC`( λ y : ι . ( x y ) )` "x" LC`y`)
+                      LC`( λ y' : ι . ( y y' ) )`
+avoidsCapture = refl LC LC`( λ y' : ι . ( y y' ) )`
+
+-- (λ x . x)[x -> y]  =  λ x . x         a bound x is not free
+leavesBound : Eq LC (LC-subst identity "x" LC`y`) identity
+leavesBound = refl LC identity
+
+-- (x y)[x -> y, y -> x]  =  y x         a list substitutes all at once
+swaps : Eq LC (LC-subst-all LC`( x y )`
+                 (cons (And String LC) (both String LC "x" LC`y`)
+                   (cons (And String LC) (both String LC "y" LC`x`) (nil (And String LC)))))
+              LC`( y x )`
+swaps = refl LC LC`( y x )`
+
+-- The free variables of λ y . x y are just x.
+freeOf : Eq (List String) (LC-fv LC`( λ y : ι . ( x y ) )`) (cons String "x" (nil String))
+freeOf = refl (List String) (cons String "x" (nil String))
