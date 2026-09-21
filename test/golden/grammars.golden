@@ -155,6 +155,26 @@ already equal
 solved: ?ℓ821
 solved: T
 refused: in the context C: a context needs one empty and one extension production
+-- a language named like the built-in tag surface
+chose 823: elaborate
+already equal
+solved: ?ℓ820
+solved: T
+chose 831: elaborate
+already equal
+solved: ?ℓ821
+solved: T
+refused: surface is one of Thena's own tags, so a language may not take its name
+-- a language named like the built-in tag core
+chose 823: elaborate
+already equal
+solved: ?ℓ820
+solved: T
+chose 831: elaborate
+already equal
+solved: ?ℓ821
+solved: T
+refused: core is one of Thena's own tags, so a language may not take its name
 -- no where
 line 3: a block's first line names it and ends in where
 -- metadata that is none of the three

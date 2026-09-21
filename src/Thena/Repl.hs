@@ -183,7 +183,6 @@ import Thena.Syntax.Parser (ParseError (..))
 
 import Data.Foldable (toList)
 import Data.List (stripPrefix, intercalate, partition)
-import Thena.Instral.Grammar (GrammarError (..))
 import Thena.Instral.Type (Signature, Ty, renderSignature, renderTy)
 import Thena.Instral.Infer (renderInstralTypeError)
 import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRhs (..), RawBody (..), RawPattern (..))
@@ -1388,9 +1387,6 @@ renderValue n ctx v = case v of
   -- and its captured environment may hold anything, so printing either would say
   -- more than a reader wants and less than they could use.
   VClosure ps _ _    -> "\\ " ++ unwords (map renderPattern ps) ++ " -> …"
-  -- **Printed as its tag**, which is how it was written and the only thing about
-  -- it @instral@ is allowed to know (MS5 phase 69).
-  VObject tag _      -> tag ++ "`…`"
   -- **A level prints the way one prints inside a type** (MS5 phase 89), which
   -- is the printer a scheme already uses — so @0@, @ℓ₇@ and @?ℓ12@ all read as
   -- they do everywhere else.
@@ -1985,6 +1981,7 @@ renderDeclareError e = case e of
     MetavariableRepeated x -> blockAt k g ++ ": " ++ x ++ " is named twice"
     MetavariableTaken x -> blockAt k g ++ ": " ++ x ++ " is already a metavariable or a token class"
     NameTaken -> g ++ " is already declared"
+    BuiltInTag -> g ++ " is one of Thena's own tags, so a language may not take its name"
     ConstructorTaken p -> g ++ "'s constructor " ++ p ++ " is already declared"
     ContextShape -> blockAt k g ++ ": a context needs one empty and one extension production"
     -- MS6 phase 105: what generated substitution needs of a language (§4.7).
@@ -2299,11 +2296,6 @@ whereRuleError e = case e of
   FunctionLeavesNothing n -> "in " ++ n ++ ": "
   FunctionClauseUnreachable n _ -> "in " ++ n ++ ": "
   RuleAndFunction n _     -> "in " ++ n ++ ": "
-  BuiltInLanguage n       -> inLanguage n
-  BuiltInType n           -> inLanguage n
-  DuplicateLanguage n     -> inLanguage n
-  BadGrammarItem n _      -> inLanguage n
-  BadGrammar n _          -> inLanguage n
   where
     -- **Counted from 1, as a type error is** (MS5 phase 91, @ms5\/CLOSEOUT.md@
     -- 44). The index is the written statement from zero — the same count
@@ -2311,7 +2303,6 @@ whereRuleError e = case e of
     inRule g i = "in " ++ nameString g ++ ", instruction " ++ show (i + 1) ++ ": "
     inName g   = "in " ++ nameString g ++ ": "
     inSignature n = "in the signature of " ++ n ++ ": "
-    inLanguage n  = "in the grammar of " ++ n ++ ": "
 
 -- | What was wrong, said without saying where.
 whatRuleError :: RuleError -> String
@@ -2371,18 +2362,6 @@ whatRuleError e = case e of
   RuleAndFunction _ k     ->
     "this name is both a rule and a function at " ++ show k
       ++ (if k == 1 then " argument" else " arguments")
-  BuiltInLanguage n       ->
-    n ++ " is one of Thena's own languages, so a grammar may not take its name"
-  BuiltInType n           ->
-    n ++ " is one of instral's own types, so a grammar may not take its name"
-  DuplicateLanguage n     ->
-    "two grammars are declared under the name " ++ n
-  BadGrammarItem _ w      ->
-    w ++ " is neither this language nor name"
-  BadGrammar _ ge         -> case ge of
-    LeftRecursive _ c      -> c ++ " begins with the language itself"
-    EmptyProduction _ c    -> c ++ " has no items"
-    TerminalDoesNotLex _ t -> show t ++ " is not one token"
 
 -- | @:accepts@ and @:produces@ (MS5 phase 71).
 --

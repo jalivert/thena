@@ -911,9 +911,6 @@ valueType si v st = case v of
   -- **An unresolved written term is a 'TCore' too** — his ruling, 2026-09-12.
   VRaw _     -> (TCore, st)
   VSurface _ -> (TSurface, st)
-  -- **The brand is the type** (MS5 phase 69): the tag is what makes an object
-  -- term's type distinct from a bare Surface one.
-  VObject n _ -> (TObject n, st)
   VList vs   ->
     let (a, st1) = fresh st
         st2 = foldl (\s u -> let (t, s') = valueType si u s in unify si a t s') st1 vs

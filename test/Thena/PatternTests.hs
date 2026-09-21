@@ -91,7 +91,7 @@ readWhole text = case lexTokens text of
     Left e -> Left ("layout: " ++ show e)
     Right ts' -> case parseRule ts' of
       Left e -> Left ("parse: " ++ show e)
-      Right raw -> case resolveRule [] [] raw of
+      Right raw -> case resolveRule [] raw of
         Left es -> Left ("resolve: " ++ show es)
         Right r -> Right r
 
@@ -109,7 +109,7 @@ readParams src = case lexTokens text of
     Left e -> Left ("layout: " ++ show e)
     Right ts' -> case parseRule ts' of
       Left e -> Left ("parse: " ++ show e)
-      Right raw -> case resolveRule [] [] raw of
+      Right raw -> case resolveRule [] raw of
         Left es -> Left ("resolve: " ++ show es)
         Right r -> Right (ruleParams r)
   where
@@ -345,7 +345,7 @@ refusals =
         Left e -> Left ("layout: " ++ show e)
         Right ts' -> case parseRule ts' of
           Left e -> Left ("parse: " ++ show e)
-          Right raw -> case resolveRule [] [] raw of
+          Right raw -> case resolveRule [] raw of
             Left es -> Left ("resolve: " ++ show es)
             Right r -> Right r
 

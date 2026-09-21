@@ -26,6 +26,7 @@ module Thena.Language.Grammar
   , GrammarProblem (..)
   , ProductionProblem (..)
   , checkGrammar
+  , builtInTags
   , substitutionNames
   , variableProduction
   , tokenClassOf
@@ -102,6 +103,9 @@ data GrammarProblem
     -- production. **No magic** (§4.5): the user disambiguates
   | ContextShape
     -- ^ §5.1: a context needs one empty and one extension production
+  | BuiltInTag
+    -- ^ the language is named like one of Thena's own tags (MS6 phase 106):
+    -- a rule base reads an installed grammar's tag before the built-ins
   | FunctionTaken String
     -- ^ a function generated substitution would declare (§4.7) is already
     -- declared, by anything or by a production of this block
@@ -149,6 +153,7 @@ checkGrammar installed env b = do
   -- The block's own name first: a language named like something declared is
   -- that, before it is anything about metavariables.
   if taken name then refuse NameTaken else Right ()
+  if name `elem` builtInTags then refuse BuiltInTag else Right ()
   case heads \\ nub heads of
     x : _ -> refuse (MetavariableRepeated x)
     [] -> Right ()
@@ -242,6 +247,16 @@ checkGrammar installed env b = do
       Just (OfClass _ (GlobalName "String") _) -> Right ()
       Just s -> Left (wrong x s)
       Nothing -> Left (NotAMetavariable x)
+
+-- | The tags that name Thena's own parsers: @surface`…`@ and @core`…`@.
+--
+-- **A language may not take one** (MS5's review, 2026-09-12; moved here at MS6
+-- phase 106). A tag in a rule base is looked up among the installed grammars
+-- /first/ ('Thena.Rules.operandOf'), so @language core, M where …@ in a module
+-- silently turned every later @core`…`@ into a term of that grammar. MS5's
+-- check guarded only MS5's own languages, which phase 106 deleted.
+builtInTags :: [String]
+builtInTags = ["surface", "core"]
 
 -- | Can substitution be generated for this language (§4.7, MS6 phase 105)?
 --

@@ -149,8 +149,11 @@ tokens :-
   -- the embedded parser, so a splice is written one way and read one way.
   "${"          { keyword TEscapeOpen }
   "rule"        { keyword TRule }
-  -- **An object language's grammar declaration** (MS5 phase 69). The fourth
-  -- word to narrow identifiers project-wide, after @data@, @module@ and @do@.
+  -- **An object language's grammar** — MS5 phase 69 reserved it for the rule
+  -- file's declaration, which phase 106 of MS6 deleted; it now opens a block in
+  -- a module (MS6 phase 101) and is a plain syntax error anywhere else. The
+  -- fourth word to narrow identifiers project-wide, after @data@, @module@ and
+  -- @do@.
   --
   -- **@signature@ was the fifth and is gone** (MS5 phase 74, his ruling): an
   -- annotation is @f : Ty@ in column 1, told from a function's @f x = e@ by the

@@ -59,7 +59,6 @@ library
         Thena.Instral.Concrete
         Thena.Instral.Pattern
         Thena.Instral.Type
-        Thena.Instral.Grammar
         Thena.Instral.Infer
         Thena.Syntax.Concrete
         Thena.Syntax.Lexer

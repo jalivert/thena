@@ -42,7 +42,7 @@ import Thena.Syntax.Concrete
   , RawConstructor (..)
   , RawData (..)
   )
-import Thena.Instral.Concrete (RawDecl (..), RawLanguage (..), RawProduction (..), RawGItem (..), RawFunction (..), RawRhs (..), RawBody (..), RawSignature (..), RawTy (..), RawRule (..), RawPattern (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
+import Thena.Instral.Concrete (RawDecl (..), RawFunction (..), RawRhs (..), RawBody (..), RawSignature (..), RawTy (..), RawRule (..), RawPattern (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
@@ -94,7 +94,6 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   where   { Located _ TWhere }
   rule    { Located _ TRule }
   do      { Located _ TDo }
-  language { Located _ TLanguage }
   when    { Located _ TWhen }
   ':-'    { Located _ TNeck }
   num     { Located _ (TNumber $$) }
@@ -206,7 +205,6 @@ Decl :: { RawDecl }
   : Rule                                   { DeclRule $1 }
   | Signature                              { DeclSignature $1 }
   | Function                               { DeclFunction $1 }
-  | Language                               { DeclLanguage $1 }
 
 Rule :: { RawRule }
   : rule ident Params ':-' Tests do Block    { RawRule $2 (reverse $3) $5 (reverse $7) }
@@ -265,26 +263,6 @@ Lambda :: { RawOperand }
 LambdaParams :: { [RawPattern] }
   : PatAtom                                { [$1] }
   | LambdaParams PatAtom                   { $2 : $1 }
-
--- **An object language's grammar** (MS5 phase 69). Braces and @where@ are
--- already tokens, so this costs one keyword and no punctuation.
-Language :: { RawLanguage }
-  : language ident where '{' Prods '}'     { RawLanguage $2 (reverse $5) }
-
-Prods :: { [RawProduction] }
-  : Prod                                   { [$1] }
-  | Prods ';' Prod                         { $3 : $1 }
-
-Prod :: { RawProduction }
-  : ident ':' GItems                       { RawProduction $1 (reverse $3) }
-
-GItems :: { [RawGItem] }
-  :                                        { [] }
-  | GItems GItem                           { $2 : $1 }
-
-GItem :: { RawGItem }
-  : str                                    { GTerminal $1 }
-  | ident                                  { GWord $1 }
 
 -- **No keyword** (MS5 phase 74, his ruling). A declaration beginning with a
 -- plain word is a signature or a function, and the token after the name says

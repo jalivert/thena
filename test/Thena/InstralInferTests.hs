@@ -23,7 +23,6 @@ import Thena.Instral.Infer
 import Thena.Instral.Type (Signature (..), Ty (..), renderSignature)
 import Thena.Instral.Ops (Instr (..), Op (..), Operand (..), Pattern (..), Rule (..), Value (..))
 import Thena.Errors (SyntaxError (..))
-import Thena.Instral.Grammar (GrammarError (..))
 import Thena.Syntax.Parser (ParseError (..))
 import Thena.Rules (RuleBase (..), RuleError (..), writtenPositions)
 import Data.List (isInfixOf, sort)
@@ -52,7 +51,6 @@ tests =
     , badSignatures
     , functions
     , lambdas
-    , objectLanguages
     , writtenLines
     ]
 
@@ -1644,153 +1642,6 @@ lambdas =
                  [("l.thena.rules", "rule base l where\n" ++ src ++ "\n")])) "go") of
       Ran msgs _ _ -> case reverse msgs of { m : _ -> Just m; [] -> Nothing }
       other      -> error ("expected Ran, got " ++ show other)
-
--- --------------------------------------------------------------------------
--- Object languages (MS5 phase 69)
--- --------------------------------------------------------------------------
-
--- | **The seam §6.6 asks for**: a declared language gets an opaque @instral@
--- type, a tag that is its only introduction form, and a one-way coercion to
--- Surface.
-objectLanguages :: TestTree
-objectLanguages =
-  testGroup
-    "a declared object language"
-    [ -- The whole path: declared, tagged, parsed by the generated parser, and
-      -- used at the type the declaration generated.
-      testCase "is a type, a tag and a coercion" $
-        case load (tm ++ "asSurface : Tm -> Surface\n\
-                         \asSurface t = surface-of t\n\
-                         \rule go :- do t = Tm`(x y)` ; s = asSurface t ; prim-prove") of
-          BasesLoaded _ -> pure ()
-          other -> assertFailure ("expected a load, got " ++ show other)
-
-      -- **The brand is the point.** Without the coercion an object term is not a
-      -- Surface term as far as the type system is concerned, which is what makes
-      -- the tag worth having.
-    , testCase "is not a Surface term until it is coerced" $
-        load (tm ++ "want : Surface -> ()\n\
-                    \rule want s :- do prim-prove\n\
-                    \rule go :- do t = Tm`(x y)` ; want t")
-          @?= BasesIllTyped [Clash (InBody (GlobalName "go") 1) TSurface (TObject "Tm")]
-
-      -- **The generated parser is a real parser**, and a term it cannot read is
-      -- a syntax error naming the tag — arriving at load, with every other one
-      -- (§6.0.1).
-    , testCase "reports a term its grammar cannot read" $
-        case load (tm ++ "rule go :- do t = Tm`(x y` ; prim-prove") of
-          RuleFileRefused _ (RuleIllFormed (BadRegion _ _ "Tm" _ : _)) -> pure ()
-          other -> assertFailure ("expected a region error, got " ++ show other)
-
-      -- **A grammar may span lines with its closing brace in column 1** (found
-      -- by mutation testing, 2026-09-12). Phase 68a's rule is that a declaration
-      -- begins in column 1; phase 73 had to narrow it to tokens that could
-      -- actually begin one, because a @language@ block's @}@ sits there too.
-      -- Every other grammar test writes the block on one line, so the narrowing
-      -- was never pinned.
-    , testCase "a grammar may close its brace in column 1" $
-        case load "language Tm where {\n  var : name ;\n  app : \"(\" Tm Tm \")\"\n}\n\
-                  \rule go :- do t = Tm`(x y)` ; prim-prove" of
-          BasesLoaded _ -> pure ()
-          other -> assertFailure ("expected a load, got " ++ show other)
-
-      -- **A parse must consume the WHOLE region** (found by mutation testing,
-      -- 2026-09-12). @x y@ has a valid prefix — @x@ is a @var@ — and dropping
-      -- the whole-input condition made this load with the @y@ silently thrown
-      -- away. The tests until now used inputs that either parsed completely or
-      -- not at all, so the condition was never exercised.
-    , testCase "refuses a term whose prefix parses and whose rest does not" $
-        case load (tm ++ "rule go :- do t = Tm`x y` ; prim-prove") of
-          RuleFileRefused _ (RuleIllFormed (BadRegion _ _ "Tm" _ : _)) -> pure ()
-          other -> assertFailure ("expected a region error, got " ++ show other)
-
-      -- **A `${ … }` escape lexes and no grammar reads it** (found 2026-09-12,
-      -- @ms5\/CLOSEOUT.md@ 27). @discussion\/the-five-languages.md@ §6.9 makes
-      -- the escape the nesting mechanism and @MS5.md@ put it in phase 60's
-      -- scope; the lexer builds it and @LexerTests@ covers it in five cases,
-      -- but neither @Syntax.Parser@ nor @Surface.Parser@ declares
-      -- @TEscapeOpen@, so a region containing one is a parse error at load.
-      --
-      -- Pinned as a refusal so that the day it is implemented, this test has to
-      -- be changed on purpose rather than quietly starting to pass.
-      --
-      -- **MS5 phase 81 is that day, and only half of it.** A splice in a
-      -- @core@ region is read now — see @spliceTemplates@ below. A splice in a
-      -- **generated** parser\'s region still is not: the region\'s text reaches
-      -- @Tm@\'s parser with the @${…}@ in it and @Tm@ has no production for one,
-      -- so it is refused there rather than at the fence. Changed on purpose, and
-      -- the refusal is still pinned — one language over.
-    , testCase "a nesting escape into an object language is still refused" $
-        case load (tm ++ "rule go t :- do u = Tm`(x ${ t })` ; prim-prove") of
-          RuleFileRefused _ (RuleIllFormed [BadRegion _ _ "Tm" _]) -> pure ()
-          other -> assertFailure ("expected a refusal, got " ++ show other)
-
-      -- **An empty region is end of input** (found probing degenerate input,
-      -- 2026-09-12). The failure path picked a token out of the token list to
-      -- report, and an empty region has none, so it fell back on an arbitrary
-      -- constructor and told the user @unexpected ;@ about a character that is
-      -- not there.
-    , testCase "an empty region says end of input, not a token that is not there" $
-        case load (tm ++ "rule go :- do t = Tm`` ; prim-prove") of
-          RuleFileRefused _ (RuleIllFormed (BadRegion _ _ "Tm" e : _)) ->
-            e @?= ParseFailed UnexpectedEndOfInput
-          other -> assertFailure ("expected a region error, got " ++ show other)
-
-      -- The three shapes the generated parser could not run, refused when the
-      -- grammar is declared rather than when it is used.
-    , refusedGrammar "left recursion"
-        "language Tm where { loop : Tm \"x\" }"
-        (BadGrammar "Tm" (LeftRecursive "Tm" "loop"))
-    , refusedGrammar "an empty production"
-        "language Tm where { nothing : }"
-        (BadGrammar "Tm" (EmptyProduction "Tm" "nothing"))
-    , refusedGrammar "a terminal that is not one token"
-        "language Tm where { var : \"a b\" }"
-        (BadGrammar "Tm" (TerminalDoesNotLex "Tm" "a b"))
-      -- **A built-in tag may not be taken** (MS5 review). 'Thena.Rules.operandOf'
-      -- looks a declared language up BEFORE the built-ins, so without this
-      -- @language surface where { … }@ silently replaced the @⟨ … ⟩@ fence's
-      -- sibling spelling — and §6.0.1 says a user cannot tell a built-in tag
-      -- from a generated one, which is what makes it a trap.
-    , refusedGrammar "a built-in tag's name"
-        "language surface where { var : name }"
-        (BuiltInLanguage "surface")
-    , refusedGrammar "and the other one"
-        "language core where { var : name }"
-        (BuiltInLanguage "core")
-      -- **A language's name is a TYPE as well as a tag** (2026-09-12), and
-      -- 'Thena.Rules.resolveTyIn' looks a declared one up before the built-ins
-      -- exactly as 'operandOf' does. Without this @language String where { … }@
-      -- made @String@ in every signature mean the object language, and the clash
-      -- said /wanted String, got String/ — the same nonsense the nullary function
-      -- type printed. @List@ was worse: it loaded, and @signature f : List -> ()@
-      -- stopped being the arity error it is.
-    , refusedGrammar "a built-in type's name"
-        "language String where { var : name }"
-        (BuiltInType "String")
-    , refusedGrammar "a built-in type that takes an argument"
-        "language List where { var : name }"
-        (BuiltInType "List")
-    , refusedGrammar "and a type whose tag is not taken"
-        "language Development where { var : name }"
-        (BuiltInType "Development")
-      -- **Two grammars under one name** (2026-09-12) — every lookup of a
-      -- language is a @lookup@, so the second was loaded and unreachable. It is
-      -- 'DuplicateSignature' one layer over.
-    , refusedGrammar "two grammars under one name"
-        "language Tm where { var : name }\nlanguage Tm where { other : name }"
-        (DuplicateLanguage "Tm")
-    , refusedGrammar "a word that is neither the language nor name"
-        "language Tm where { var : nonsense }"
-        (BadGrammarItem "Tm" "nonsense")
-    ]
-  where
-    tm = "language Tm where { var : name ; app : \"(\" Tm Tm \")\" }\n"
-
-    refusedGrammar label src want =
-      testCase label $ case load (src ++ "\nrule go :- do prim-prove") of
-        RuleFileRefused _ (RuleIllFormed es) | want `elem` es -> pure ()
-        other -> assertFailure ("expected " ++ show want ++ ", got " ++ show other)
 
 load :: String -> Response
 load src = snd (loadRuleBases newSession [("t.thena.rules", "rule base t where\n" ++ src)])

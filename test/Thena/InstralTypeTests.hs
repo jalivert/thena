@@ -17,10 +17,7 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?), (@?=))
 import Test.Tasty.QuickCheck (Gen, elements, forAll, oneof, resize, sized, testProperty, (===))
 
 import Thena.Instral.Concrete
-  ( RawGItem (..)
-  , RawLanguage (..)
-  , RawProduction (..)
-  , RawSignature (..)
+  ( RawSignature (..)
   , RawTy (..)
   )
 import Thena.Syntax.Lexer (lexTokens)
@@ -37,7 +34,7 @@ import Thena.Instral.Type
 import Thena.Instral.Ops (AnswerKind (..), Op (..), Operand (..), Value (..), signatureOf)
 import qualified Thena.Instral.Ops as Op
 import Thena.Instral.Ops (Test (..))
-import Thena.Rules (RuleError (..), builtInTags, builtInTypes, opWords, resolveLanguage, resolveSignature, resolveTy, testTypes)
+import Thena.Rules (RuleError (..), builtInTypes, opWords, resolveSignature, resolveTy, testTypes)
 
 tests :: TestTree
 tests =
@@ -49,7 +46,6 @@ tests =
     , fitting
     , roundTrip
     , theBuiltInTypes
-    , theBuiltInTags
     , injectivity
     ]
 
@@ -98,9 +94,8 @@ injectivity =
       , renderTy a == renderTy b
       ]
 
-    -- Two atoms of each kind that has a kind: a constructor, a variable, and an
-    -- object language's brand, which is the one whose name is not Thena's.
-    alphabet = [TString, TCore, TVar 0, TVar 1, TObject "Tm"]
+    -- Two atoms of each kind: a constructor and a variable.
+    alphabet = [TString, TCore, TVar 0, TVar 1]
 
     shapesOver us =
       us
@@ -127,30 +122,27 @@ injectivity =
 -- | **'Thena.Rules.builtInTypes' is a list, so it is crossed with the code that
 -- is supposed to agree with it.**
 --
--- Two readers: 'Thena.Rules.resolveTyIn'\'s @constructor@, a @case@ with a
--- fallthrough that the compiler cannot make total, and
--- 'Thena.Rules.resolveLanguage', which refuses a grammar that would take one of
--- these names. A name in the list that @constructor@ does not know would be an
--- 'UnknownType' the arity check never reaches; a name @constructor@ knows that
--- is not in the list would be a language name left free to shadow it.
+-- Its reader is 'Thena.Rules.resolveTyIn'\'s @constructor@, a @case@ with a
+-- fallthrough that the compiler cannot make total. A name in the list that
+-- @constructor@ does not know would be an 'UnknownType' the arity check never
+-- reaches. (Until MS6 phase 106 MS5's grammars read it too, to refuse a
+-- language that would shadow a type; an object language is no @instral@ type
+-- any more.)
 theBuiltInTypes :: TestTree
 theBuiltInTypes =
   testGroup
     "every built-in type name"
     [ testCase "resolves as a type, at the arity it takes" $
         mapM_ resolves builtInTypes
-    , testCase "is refused as a grammar's name" $
-        mapM_ refusedAsALanguage builtInTypes
-      -- The other direction: a name @constructor@ knows must be in the list, or
-      -- it is a name a grammar may take and shadow. Asking at an arity nothing
-      -- has separates /known/ from /unknown/, which is the split the list makes.
+      -- The other direction: a name @constructor@ knows must be in the list.
+      -- Asking at an arity nothing has separates /known/ from /unknown/, which
+      -- is the split the list makes.
     , testCase "and a name outside the list is unknown, not merely misapplied" $
-        resolveTy [] "q" (RawTyCon "Trm" []) @?= Left (UnknownType "q" "Trm")
+        resolveTy "q" (RawTyCon "Trm" []) @?= Left (UnknownType "q" "Trm")
 
       -- **The list, written out a second time on purpose.** Walking
       -- 'builtInTypes' can only check the names that are in it, so a name
-      -- DROPPED from it — which would leave a grammar free to shadow that type —
-      -- passes every test above by disappearing from them. This is the third
+      -- DROPPED from it passes every test above by disappearing from them. This is the third
       -- party: 'renderTy' prints exactly these words and
       -- 'Thena.Rules.resolveTyIn' reads exactly these words, and a change to
       -- either has to come here and say so.
@@ -169,44 +161,10 @@ theBuiltInTypes =
               ]
     ]
   where
-    resolves n = case (resolveTy [] "q" (RawTyCon n []), resolveTy [] "q" (RawTyCon n [RawTyCon "Core" []])) of
+    resolves n = case (resolveTy "q" (RawTyCon n []), resolveTy "q" (RawTyCon n [RawTyCon "Core" []])) of
       (Right (Just _), _) -> pure ()
       (_, Right (Just _)) -> pure ()
       (a, b) -> assertFailure (n ++ ": " ++ show a ++ " / " ++ show b)
-
-    refusedAsALanguage n =
-      resolveLanguage (RawLanguage n [RawProduction "var" [GWord "name"]])
-        @?= Left [BuiltInType n]
-
--- | **The tag half of the same guard** (`ms5/CLOSEOUT.md` 24, 2026-09-16).
---
--- A @language@ declaration is the one thing that enters two name spaces at
--- once — a type and a tag — so it is checked against two lists, and this is the
--- second. It walks 'builtInTags' for the same reason 'theBuiltInTypes' walks
--- 'builtInTypes': the two cases were written out by hand, so a third tag would
--- have been added to the list and to nothing else.
-theBuiltInTags :: TestTree
-theBuiltInTags =
-  testGroup
-    "every built-in tag"
-    [ testCase "is refused as a grammar's name" $
-        mapM_ refusedAsALanguage builtInTags
-      -- Written out a second time, exactly as the type list is and for the same
-      -- reason: a name DROPPED from the list passes the walk above by
-      -- disappearing from it, and what it would leave behind is a grammar free
-      -- to replace one of Thena's own fences.
-    , testCase "and the list is exactly these two" $
-        builtInTags @?= ["surface", "core"]
-      -- **The spaces are separate, and that is the decision, not an accident.**
-      -- A tag is lowercase and a type is capitalised, so no name is in both
-      -- lists; the guard is two lists because one declaration joins both.
-    , testCase "and no word is both a built-in tag and a built-in type" $
-        filter (`elem` builtInTypes) builtInTags @?= []
-    ]
-  where
-    refusedAsALanguage n =
-      resolveLanguage (RawLanguage n [RawProduction "var" [GWord "name"]])
-        @?= Left [BuiltInLanguage n]
 
 -- --------------------------------------------------------------------------
 -- Rendering and reading are inverse (2026-09-12)
@@ -262,7 +220,7 @@ readBack src = case lexTokens src of
   Left e   -> Left (show e)
   Right ts -> case parseInstralTy ts of
     Left e  -> Left (show e)
-    Right t -> case resolveSignature [] (RawSignature "f" t) of
+    Right t -> case resolveSignature (RawSignature "f" t) of
       Left e       -> Left (show e)
       Right (_, s) -> Right (renumbered s)
 
@@ -281,9 +239,7 @@ renumbered (Signature ps r) = Signature (map go ps) (fmap go r)
 
 -- | A generated signature.
 --
--- **No 'TObject'** — an object language's name is a type only where that
--- language is declared, and 'readBack' declares none. **And no empty 'TFun'**,
--- which the type language cannot write at all (@ms5\/CLOSEOUT.md@ 23).
+-- **No empty 'TFun'**, which the type language cannot write at all (@ms5\/CLOSEOUT.md@ 23).
 genSignature :: Gen Signature
 genSignature = sized $ \n -> do
   k  <- elements [0 .. 3]

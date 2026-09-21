@@ -354,7 +354,7 @@ validateTests =
               ]
 
     , testCase "validateBase checks every rule" $
-        length (validateBase (ruleBase "test" Nothing "" [] [] []
+        length (validateBase (ruleBase "test" Nothing "" [] []
                                 [ named "a" [] [Bind (Ops.PVar "x") Nothing Ops.Attack]
                                 , named "b" [] [Do (Ops.Say (Ref "z"))]
                                 ]))
@@ -428,7 +428,7 @@ dataTests =
     -- the shape question is asked where the argument is named, and binds its
     -- pieces while it is there.
     shapes =
-      ruleBase "shapes" Nothing "" [] [] []
+      ruleBase "shapes" Nothing "" [] []
         [ Rule (GlobalName "shape") [Ops.PList [] Nothing] []
             [Do (Ops.Say (Lit (VText "empty")))]
         , Rule (GlobalName "shape") [Ops.PList [Ops.PWild] (Just Ops.PWild)] []
@@ -651,7 +651,6 @@ principal v = case v of
   VTerm _    -> Just TCore
   VRaw _     -> Just TCore
   VSurface _ -> Just TSurface
-  VObject n _ -> Just (TObject n)
   _          -> Nothing
 
 substituteTy :: [(Int, Ty)] -> Ty -> Ty
@@ -733,7 +732,7 @@ machineIn env cur is =
 -- @Bind@ on a call is filled by the callee's @return@ — and one rule says it.
 returning :: RuleBase
 returning =
-  ruleBase "returning" Nothing "" [] [] []
+  ruleBase "returning" Nothing "" [] []
     [ returningRule
       -- @return@ ends the body: the @prim-attack@ after it must not run, which
       -- is what makes this rule safe to call at a hole in any state.

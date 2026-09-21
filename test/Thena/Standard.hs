@@ -226,7 +226,7 @@ withRules =
 -- are; "Thena.RuleSyntaxTests" is where the literal is tied to the file, and
 -- "Thena.GoldenTests" is where the file itself is driven.
 expectedBase :: [RuleBase]
-expectedBase = [ruleBase "standard" Nothing "" [] [] expectedFunctions expectedStandard]
+expectedBase = [ruleBase "standard" Nothing "" [] expectedFunctions expectedStandard]
 
 -- | The base's FUNCTIONS, which are deliberately not among its rules (MS5
 -- phase 89): a function has no head, and a headless rule would be offered by

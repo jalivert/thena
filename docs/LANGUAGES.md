@@ -12,7 +12,8 @@ own — you should not have to read anything else to know where a term goes.
 | **`instral`** | the instruction language — rules, functions, and what you type at the prompt | `.thena.rules` files; `do { … }` blocks; REPL entries |
 
 An object language you declare yourself is a fifth thing, but it is not a fifth
-language of Thena's: it is Surface data with a grammar, and §6 covers it.
+language of Thena's: it is a grammar and the datatype it generates, and §6
+covers it.
 
 ---
 
@@ -35,7 +36,7 @@ one variable; without them nobody can tell one argument from two.
 ```
 ⟨ \ A a -> a ⟩             -- Surface
 ⌜ succ zero ⌝              -- Core
-Tm`(x y)`                  -- an object language you declared
+LC`( M N )`                -- an object language you declared
 ```
 
 The fences are self-delimiting, so they nest and need no parentheses of their
@@ -254,33 +255,38 @@ rule qualifies there because its head passes, not because its signature fits.
 
 ## 6. Declaring an object language
 
-A grammar declaration gives you a type, a tag, and a coercion.
+A language is declared in a **proof module**, not in a rule file, with a block
+of its own notation. The block generates an ordinary datatype, so a term of the
+language is an ordinary Thena value:
 
 ```
-language Tm where {
-  var : name ;
-  app : "(" Tm Tm ")"
-  }
+module Stlc where
 
-asSurface : Tm -> Surface
-asSurface t = surface-of t
+x : Token String
+x = /[a-z][a-zA-Z0-9']*/
+
+language LC, M, N, E where
+  var : x as occurrence -> x
+  abs : x as binder     -> ( λ x : T . E[x] )
+  app                   -> ( M N )
 ```
 
-- **`Tm` is a type** you can write in a signature.
-- **`` Tm`…` `` is the only way to make one**, so a value of it is well formed by
-  construction. A production builds its constructor applied to what its slots
-  parsed, so `` Tm`(x y)` `` is the Surface term `app (var x) (var y)`.
-- **`surface-of` is the one-way coercion.** Until you apply it, a `Tm` is not a
-  Surface term as far as the type system is concerned.
+- **`` LC`…` `` is a term of it**, in a surface term and in `instral` alike, and
+  it is the constructor application the text denotes:
+  `` LC`( λ x : ι . x )` `` is `abs "x" base (var "x")`.
+- **In a rule it is a `Core` value**, at the type `Core`. There is no type per
+  language and nothing to coerce: an object term is a term.
+- **In a pattern it matches**, and `${…}` binds what stands in its slot:
 
-**A grammar is written over Thena's own tokens**, so a terminal must be exactly
-one: `"·"` is fine, `"."` is not. A production may not begin with the language
-itself, and may not be empty.
+  ```
+  rule beta LC[app]`( ( λ ${x} : ${A} . ${B} ) ${N} )` :- do …
+  ```
 
-```
-thena spine> :load loop.thena.rules
-loop.thena.rules: in the grammar of Tm: loop begins with the language itself
-```
+- **Load the module before the rule file that uses its tag.** A rule file is
+  read with the grammars the session already has.
+
+`language` in a rule file is a syntax error. MS5 declared languages there, with a
+type of their own and a coercion `surface-of`; both are gone.
 
 ## 7. Splices: holes in a written core term
 
@@ -329,8 +335,8 @@ the rules do not type check:
 A level needs no splice of its own: build a universe with `level ‹n›` or
 `fresh-level` and `universe-at`, and splice the term.
 
-**Only the core grammar takes a splice today.** Neither `` surface`…` `` nor an
-object language's region does.
+**`` surface`…` `` takes no splice.** The core grammar does, and so does an
+object language's region (§6).
 
 ## 8. REPL commands are not a language
 

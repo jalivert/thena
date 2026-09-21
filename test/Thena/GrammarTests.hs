@@ -23,7 +23,7 @@ import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (GlobalName (..))
-import Thena.Driver (Response (..), Session (..), Stop (..), loadProofSource)
+import Thena.Driver (Response (..), RuleFileError (..), Session (..), Stop (..), loadProofSource, loadRuleBases, newSession)
 import Thena.Engine (Machine (..))
 import Thena.Errors (SyntaxError (..), Warning (..))
 import Thena.Global.Declare (DeclareError (..))
@@ -177,6 +177,18 @@ meaning =
       case loadProofSource s1 "module More where\n\nlanguage P, Q where\n  tuple -> ( M , T )\n" of
         (_, ProofLoaded {}) -> pure ()
         (_, other) -> assertFailure (show other)
+  -- Written out a second time: a name DROPPED from 'builtInTags' would pass
+  -- the walk in 'refused' by disappearing from it.
+  , testCase "the built-in tags are exactly these two" $
+      builtInTags @?= ["surface", "core"]
+    -- **The MS5 form is gone with no trace** (phase 106, his ruling): in a rule
+    -- file @language@ is a reserved word that nothing reads, so it is a plain
+    -- syntax error and not a message about where languages went.
+  , testCase "a rule file may not declare a language" $
+      case snd (loadRuleBases newSession
+                  [("t.thena.rules", "rule base t where\nlanguage Tm where { var : name }\n")]) of
+        RuleFileRefused _ (RuleSyntaxError _) -> pure ()
+        other -> assertFailure (show other)
   , testCase "and may not declare a language of the same name" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 stlc
@@ -223,6 +235,13 @@ refused =
   , contextBlock "a context without one empty and one extension production"
       "context C, G where\n  e -> \183\n  f -> G G" ContextShape
   ]
+    -- **A built-in tag may not name a language** (moved here from MS5's
+    -- grammars at phase 106). A rule base reads an installed grammar's tag
+    -- first, so @language core@ took every later @core`…`@ for its own. It walks
+    -- 'builtInTags' so that a third tag cannot be added to the list alone.
+    ++ [ block ("a language named like the built-in tag " ++ t)
+               ("language " ++ t ++ ", M where\n  f -> a") BuiltInTag
+       | t <- builtInTags ]
   where
     int = OfClass (GlobalName "n") (GlobalName "Int") (regex "[0-9]+")
     wrap body =

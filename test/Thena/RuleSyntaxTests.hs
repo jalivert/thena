@@ -84,7 +84,7 @@ readRule src = case laidOut src of
   Left e -> Left e
   Right ts -> case parseRule ts of
     Left e -> Left ("parse: " ++ show e)
-    Right raw -> case resolveRule [] [] raw of
+    Right raw -> case resolveRule [] raw of
       Left es -> Left ("resolve: " ++ show es)
       Right r -> Right r
 
@@ -271,7 +271,6 @@ everyOp =
   , ("yield x", Op.Yield (Ref "x"))
   , ("expose x", Op.Expose (Ref "x"))
   , ("play x", Op.Play (Ref "x"))
-  , ("surface-of t", Op.SurfaceOf (Ref "t"))
   , ("surface-name t", Op.SurfaceNameOf (Ref "t"))
   , ("surface-universe t", Op.SurfaceUniverseOf (Ref "t"))
   , ("arrow-domain t", Op.ArrowDomain (Ref "t"))
@@ -580,7 +579,7 @@ regions =
       Left _ -> Nothing
       Right ts -> case parseRule ts of
         Left _ -> Nothing
-        Right raw -> case resolveRule [] [] raw of
+        Right raw -> case resolveRule [] raw of
           Left es -> Just es
           Right _ -> Nothing
 
@@ -714,6 +713,6 @@ mistakes =
       Left _ -> Nothing
       Right ts -> case parseRule ts of
         Left _ -> Nothing
-        Right raw -> case resolveRule [] [] raw of
+        Right raw -> case resolveRule [] raw of
           Left es -> Just es
           Right _ -> Nothing
