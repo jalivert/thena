@@ -739,6 +739,7 @@ describe t = case t of
   TBlock k _  -> case k of
     LanguageBlock -> "a language block"
     ContextBlock  -> "a context block"
+    JudgmentBlock -> "a judgment block"
   -- Never lexed; "Thena.Driver" inserts it at a rule file's column 1.
   TChar c     -> show c
   TSpread     -> "..."
@@ -1986,6 +1987,10 @@ renderDeclareError e = case e of
     ContextShape -> blockAt k g ++ ": a context needs one empty and one extension production"
     -- MS6 phase 105: what generated substitution needs of a language (§4.7).
     FunctionTaken f -> g ++ "'s substitution function " ++ f ++ " is already declared"
+    -- MS6 phase 107: what the generated lookup needs of a context (§5.3).
+    ContextKey xs -> blockAt k g ++ ": its extension needs exactly one name to look up, and it has "
+      ++ (case xs of { [] -> "none"; _ -> intercalate ", " xs })
+    LookupTaken f -> g ++ "'s lookup " ++ f ++ " is already declared"
     NoVariableProduction ->
       blockAt k g ++ ": it has binders, so it needs a production ‹x› as occurrence for a renamed binder to become"
     VariableProductions ps ->
@@ -2481,6 +2486,7 @@ blockAt :: BlockKind -> String -> String
 blockAt k g = case k of
   LanguageBlock -> "in the grammar of " ++ g
   ContextBlock  -> "in the context " ++ g
+  JudgmentBlock -> "in the judgment " ++ g
 
 -- | @an Int@, @a Ty@ — what an argument ranges over, with its article.
 sortPhrase :: Sort -> String

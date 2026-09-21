@@ -436,7 +436,11 @@ raw blocks fence outer p0 s0 = chunk p0 p0 s0 ""
 
 -- | Which object-language block a keyword opens (MS6 phase 101). @judgment@ is
 -- reserved but not yet read as a block — that is phase 108.
-data BlockKind = LanguageBlock | ContextBlock
+--
+-- **'JudgmentBlock' exists before the block does** (phase 107): a context's
+-- generated lookup relation, @x : T ∈ Γ@, is installed as a judgment's grammar,
+-- and it is the first one. 'blockKindOf' does not return it until 108.
+data BlockKind = LanguageBlock | ContextBlock | JudgmentBlock
   deriving (Eq, Show)
 
 blockKindOf :: Token -> Maybe BlockKind

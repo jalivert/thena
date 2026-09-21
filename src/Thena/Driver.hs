@@ -55,6 +55,7 @@ import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), fresh, open, substLevelsIn, tokenName)
+import Thena.Language.Lookup (lookupDatatype, lookupGrammar)
 import Thena.Language.Substitution (substitutionDefinitions)
 import Thena.Language.Regex
   ( Inclusion (..)
@@ -2632,7 +2633,15 @@ progress oneStep s msgs warns = case step (sessionMachine s) of
           -- right after the datatype they are about.
           (fs, n2) = surfaceProgram n1
                        [ ItemTheorem x ty body | (x, ty, body) <- substitutionDefinitions g ]
-          m' = (Engine.splicing (is ++ fs) m) { grammars = g : grammars m, names = n2 }
+          -- **A context's lookup relation, and its notation** (MS6 phase 107,
+          -- §5.3): a datatype like any other, and a grammar installed beside the
+          -- context's, so that @x : T ∈ Γ@ is read, built and printed the way
+          -- every object term is.
+          (ls, n3) = case lookupDatatype g of
+            Just (ld, lroles) -> datatypeProgram n2 ld (Just lroles)
+            Nothing -> ([], n2)
+          installed = maybe [g] (: [g]) (lookupGrammar g)
+          m' = (Engine.splicing (is ++ fs ++ ls) m) { grammars = installed ++ grammars m, names = n3 }
        in if oneStep
             then stop m' msgs (reverse ws ++ warns) Paused
             else progress oneStep s { sessionMachine = m' } msgs (reverse ws ++ warns)

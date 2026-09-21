@@ -5,6 +5,7 @@ module STLC
   declared LC
   declared Ctx
 warning: in the grammar of LC, production vacuous: x binds in nothing
+warning: no noConfusionCtx-in: Ctx-there's argument 6 (ne) has a type that depends on an earlier argument, so its equation cannot be stated
 -- a binding form's head is not a metavariable
 chose 823: elaborate
 already equal

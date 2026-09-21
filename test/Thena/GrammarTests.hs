@@ -22,10 +22,10 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Term (GlobalName (..), Ident (..))
 import Thena.Driver (Response (..), RuleFileError (..), Session (..), Stop (..), loadProofSource, loadRuleBases, newSession)
 import Thena.Engine (Machine (..))
-import Thena.Errors (SyntaxError (..), Warning (..))
+import Thena.Errors (Skipped (..), SyntaxError (..), Warning (..))
 import Thena.Global.Declare (DeclareError (..))
 import Thena.Language.Grammar
 import Thena.Language.Reader
@@ -152,7 +152,12 @@ meaning =
       case loadProofSource s0 stlc of
         (_, ProofLoaded _ names _ ws) -> do
           names @?= ["x", "Ty", "LC", "Ctx"]
-          ws @?= [VacuousBinder LanguageBlock "LC" "vacuous" "x"]
+          -- The second is the context's generated lookup (phase 107): its
+          -- @ne@ premise depends on earlier arguments, which the no-confusion
+          -- generator states no equation for (@ms6\/CLOSEOUT.md@ 25).
+          ws @?= [ VacuousBinder LanguageBlock "LC" "vacuous" "x"
+                 , NoConfusionSkipped (GlobalName "Ctx-in")
+                     (DependentArguments (GlobalName "Ctx-there") 6 (Ident "ne")) ]
         (_, other) -> assertFailure (show other)
   , testCase "the arguments and roles of LC, production by production" $ do
       gs <- installed stlc

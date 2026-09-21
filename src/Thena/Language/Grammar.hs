@@ -28,6 +28,9 @@ module Thena.Language.Grammar
   , checkGrammar
   , builtInTags
   , substitutionNames
+  , lookupNames
+  , extensionOf
+  , isName
   , variableProduction
   , tokenClassOf
   , earleyRules
@@ -106,6 +109,13 @@ data GrammarProblem
   | BuiltInTag
     -- ^ the language is named like one of Thena's own tags (MS6 phase 106):
     -- a rule base reads an installed grammar's tag before the built-ins
+  | ContextKey [String]
+    -- ^ the extension production's @String@ arguments, when there is not
+    -- exactly one: the generated lookup compares one name (§5.3's @ne@), and
+    -- which argument that is has to be unambiguous (MS6 phase 107)
+  | LookupTaken String
+    -- ^ a name the context's lookup relation would declare — @Ctx-in@,
+    -- @Ctx-here@, @Ctx-there@ — is already declared (MS6 phase 107)
   | FunctionTaken String
     -- ^ a function generated substitution would declare (§4.7) is already
     -- declared, by anything or by a production of this block
@@ -169,6 +179,14 @@ checkGrammar installed env b = do
              (blockProductions b)
   let g = Grammar kind (GlobalName name) heads (map fst prods)
   if kind == ContextBlock && not (contextShaped heads g) then refuse ContextShape else Right ()
+  case (kind, extensionOf g) of
+    (ContextBlock, Just e) -> case [ argumentName a | a <- gproductionArguments e, isName a ] of
+      [_] -> Right ()
+      xs -> refuse (ContextKey xs)
+    _ -> Right ()
+  case [ f | f <- lookupNames g, taken f || f `elem` prodNames ] of
+    f : _ -> refuse (LookupTaken f)
+    [] -> Right ()
   if kind == LanguageBlock then either refuse Right (substitutable g) else Right ()
   case [ f | f <- substitutionNames g, taken f || f `elem` prodNames ] of
     f : _ -> refuse (FunctionTaken f)
@@ -309,6 +327,31 @@ variableProduction g
                          , any ((== Occurrence) . argumentRole) (gproductionArguments p) ] of
       p : _ -> Just p
       [] -> Nothing
+
+-- | A context's extension production — the one with a slot of the context's
+-- own sort (§5.1). 'Nothing' for anything that is not a context.
+extensionOf :: Grammar -> Maybe GProduction
+extensionOf g
+  | grammarKind g /= ContextBlock = Nothing
+  | otherwise = case [ p | p <- grammarProductions g
+                         , any ((== OfLanguage (grammarName g)) . argumentSort) (gproductionArguments p) ] of
+      p : _ -> Just p
+      [] -> Nothing
+
+-- | An argument that is a name: a @Token String@ class's match.
+isName :: Argument -> Bool
+isName a = case argumentSort a of
+  OfClass _ (GlobalName "String") _ -> True
+  _ -> False
+
+-- | What a context's lookup relation declares (§5.3, MS6 phase 107), in order:
+-- the relation, then its two constructors — prefixed with the context's name,
+-- his answer of 2026-09-21, so that two contexts in one session cannot clash.
+lookupNames :: Grammar -> [String]
+lookupNames g
+  | grammarKind g /= ContextBlock = []
+  | otherwise = [ n ++ suffix | suffix <- ["-in", "-here", "-there"] ]
+  where GlobalName n = grammarName g
 
 -- | §5.1: exactly two productions, one with no slot of the context's own sort
 -- and one with exactly one.
