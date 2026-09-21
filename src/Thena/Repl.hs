@@ -144,7 +144,7 @@ import Thena.Errors
   , TypeError (..)
   )
 import Thena.Global.Declare (DeclareError (..), TokenClassError (..))
-import Thena.Language.Grammar (GrammarError (..), GrammarProblem (..), ProductionProblem (..), Sort (..), earleyRules)
+import Thena.Language.Grammar (GrammarError (..), GrammarProblem (..), ProductionProblem (..), RulePart (..), RuleProblem (..), Sort (..), earleyRules)
 import Thena.Language.Reader (ReadError (..))
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Regex (RegexError (..))
@@ -673,6 +673,13 @@ renderSyntaxError e = case e of
       | null w -> line l ++ "a [ is never closed"
       | otherwise -> line l ++ w ++ " is not a binding form ‹E›[‹x›, …]"
     IndentedLess l -> line l ++ "this line is indented less than the productions above it"
+    -- MS6 phase 108: a judgment's header and rules (§6.1, §6.4).
+    JudgmentHeaderMalformed l -> line l ++ "a judgment's first line is ‹name› = ‹notation› where"
+    RuleUnnamed l -> line l ++ "a rule starts with its name, ‹name›:, or with rule ‹name› where ∀ … ->"
+    RuleWithoutLine l -> line l ++ "a rule needs a line of three or more - between its premises and its conclusion"
+    RuleWithoutConclusion l -> line l ++ "a rule needs a conclusion below its line"
+    QuantifierMalformed l -> line l ++ "rule ‹name› where is followed by ∀ (‹x› : ‹T›) … ->, with the -> ending its line"
+    PremiseIndentedLess l -> line l ++ "a premise line starts where the first premise does, and a line indented further continues it"
     where line l = "line " ++ show l ++ ": "
   DeclarationsUnpaired (SignatureWithNoEquation x) ->
     x ++ " has a type but no definition — write " ++ x ++ " = ‹term› after it"
@@ -2006,6 +2013,23 @@ renderDeclareError e = case e of
       ScopesDiffer x -> x ++ " is written with different binders free in it"
       OccurrenceNotAlone x -> "the occurrence " ++ x ++ " must be the production's only argument, because substitution replaces the whole of it"
       ScopeElsewhere x -> "a binder is free in " ++ x ++ ", which is not of this language, so substitution could not rename in it"
+      NotationBinds x -> x ++ " is written as a binding form, and a judgment's notation binds nothing"
+    -- MS6 phase 108, §6.2–6.4.
+    InRule r why -> blockAt k g ++ ", rule " ++ r ++ ": " ++ case why of
+      RuleUnparsed part what text failure ->
+        (case part of { Premises -> "its premises"; Conclusion -> "its conclusion" })
+          ++ " `" ++ text ++ "`" ++ (case part of { Conclusion -> " is not a " ++ what ++ " judgment: "; Premises -> " do not parse: " })
+          ++ parseFailureReason text failure
+      RuleNotAMetavariable x -> x ++ " is not a metavariable"
+      PremiseNameIsMetavariable x -> "a premise may not be named " ++ x ++ ", which is a metavariable"
+      PremiseNameTaken x -> "a premise may not be named " ++ x ++ ", which the rule already uses"
+      QuantifierUnreadable se -> "its ∀ does not read: " ++ renderSyntaxError se
+      NotQuantified x -> x ++ " is used but not quantified"
+      QuantifiedTwice x -> x ++ " is quantified twice"
+      RuleUnbuilt be -> case be of
+        NoSuchProduction n -> n ++ " is not a production of any language"
+        Incomplete x -> "the " ++ x ++ " is missing"
+        NotForSlot n x -> n ++ " cannot take " ++ x ++ " there"
   -- @ms6\/SPEC.md@ §3.2's wording. The regex is quoted as written, between its
   -- slashes; the witness as a string literal, so a newline in it is visible.
   TokenClassRefused g why -> "in the token class " ++ nameString g ++ ": " ++ case why of
@@ -2510,7 +2534,11 @@ renderTree t = case t of
 -- | Why an object term did not parse, in @ms6\/SPEC.md@ §7.5's form: the
 -- language and the text first, as a tagged literal would be written.
 renderUnparsed :: String -> String -> Earley.ParseFailure -> String
-renderUnparsed lang text why = "in " ++ lang ++ "`" ++ text ++ "`: " ++ case why of
+renderUnparsed lang text why = "in " ++ lang ++ "`" ++ text ++ "`: " ++ parseFailureReason text why
+
+-- | Why a text did not parse, without saying which text.
+parseFailureReason :: String -> Earley.ParseFailure -> String
+parseFailureReason text why = case why of
   Earley.Ambiguous a b ->
     "this term parses two ways, as " ++ renderTree a ++ " and as " ++ renderTree b
   Earley.Disagrees r x a b ->

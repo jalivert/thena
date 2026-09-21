@@ -25,6 +25,8 @@ module Thena.Language.Grammar
   , GrammarError (..)
   , GrammarProblem (..)
   , ProductionProblem (..)
+  , RulePart (..)
+  , RuleProblem (..)
   , checkGrammar
   , builtInTags
   , substitutionNames
@@ -43,9 +45,9 @@ import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), tokenName)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Regex (Regex, parseRegex)
-import Thena.Errors (Warning (..))
+import Thena.Errors (BuildError, SyntaxError, Warning (..))
 import Thena.Global.Env (ArgRole (..), GlobalEnv, definitionBody, definitionType, isDeclared, lookupDefinition)
-import Thena.Language.Reader (Block (..), Metadata (..), Production (..), RawItem (..))
+import Thena.Language.Reader (Block (..), Metadata (..), Production (..), RawItem (..), RawRule (..))
 import Thena.Syntax.Lexer (BlockKind (..))
 
 -- | A validated grammar.
@@ -126,6 +128,37 @@ data GrammarProblem
     -- ^ more than one production declares an occurrence; substitution would
     -- not know which one a renamed binder becomes
   | InProduction String ProductionProblem
+  | InRule String RuleProblem
+    -- ^ a judgment's rule (MS6 phase 108, §6)
+  deriving (Eq, Show)
+
+-- | Which part of a rule a parse was of.
+data RulePart = Premises | Conclusion
+  deriving (Eq, Show)
+
+-- | Why a judgment's rule was refused (MS6 phase 108, §6.1–6.4).
+data RuleProblem
+  = RuleUnparsed RulePart String String Earley.ParseFailure
+    -- ^ the part, what it had to be (@typing@, or @premises@) and its text
+  | RuleNotAMetavariable String
+    -- ^ §6.2: a name where a metavariable was expected that is not one, with
+    -- any suffix — never an implicit binding
+  | PremiseNameIsMetavariable String
+    -- ^ a premise named like a metavariable, which it would then shadow
+  | PremiseNameTaken String
+    -- ^ two premises of one rule named alike, or a premise named like a type
+    -- the rule mentions
+  | QuantifierUnreadable SyntaxError
+    -- ^ the annotated tier's @∀ …@ is not a surface telescope
+  | NotQuantified String
+    -- ^ the annotated tier writes its quantification, and this metavariable
+    -- is used in the rule without being bound there
+  | QuantifiedTwice String
+    -- ^ the annotated tier's @∀@ binds a name twice: it lists the rule's
+    -- metavariables, and there is nothing for the first one to scope over
+  | RuleUnbuilt BuildError
+    -- ^ a reading the parser gave that is not a term — what
+    -- "Thena.Language.Build" refuses for any object term
   deriving (Eq, Show)
 
 data ProductionProblem
@@ -154,6 +187,9 @@ data ProductionProblem
   | ScopeElsewhere String
     -- ^ a binder is free in an argument of another language, which
     -- substitution over this one could not rename in (MS6 phase 105)
+  | NotationBinds String
+    -- ^ a judgment's notation writes a binding form: its slots are indices,
+    -- and nothing binds in an index (MS6 phase 108)
   deriving (Eq, Show)
 
 -- | Validate a block against the grammars already installed and the global
@@ -170,7 +206,11 @@ checkGrammar installed env b = do
   case [ x | x <- heads, isJust (lookup x metavarsElsewhere) || isJust (tokenClassOf env x) ] of
     x : _ -> refuse (MetavariableTaken x)
     [] -> Right ()
-  let prodNames = map productionName (blockProductions b)
+  -- A judgment's constructors are its rules; its one production is its
+  -- notation and carries the judgment's own name.
+  let prodNames
+        | kind == JudgmentBlock = map ruleName (blockRules b)
+        | otherwise = map productionName (blockProductions b)
   case [ p | (p, k) <- zip prodNames [0 :: Int ..]
            , taken p || p == name || p `elem` take k prodNames ] of
     p : _ -> refuse (ConstructorTaken p)
@@ -195,7 +235,11 @@ checkGrammar installed env b = do
   where
     kind = blockKind b
     name = blockName b
-    heads = name : blockMetavars b
+    -- **A judgment's name is not a metavariable**: its header has none, and
+    -- its notation's are the languages' (§6.1).
+    heads
+      | kind == JudgmentBlock = []
+      | otherwise = name : blockMetavars b
 
     refuse :: GrammarProblem -> Either GrammarError a
     refuse = Left . GrammarError kind name
@@ -210,7 +254,7 @@ checkGrammar installed env b = do
              [ grammarName g : map gproductionName (grammarProductions g) | g <- installed ]
 
     sortOf x
-      | x == name || x `elem` blockMetavars b = Just (OfLanguage (GlobalName name))
+      | x `elem` heads = Just (OfLanguage (GlobalName name))
       | Just g <- lookup x metavarsElsewhere = Just (OfLanguage g)
       | Just (t, re) <- tokenClassOf env x = Just (OfClass (GlobalName x) t re)
       | otherwise = Nothing
@@ -246,6 +290,7 @@ checkGrammar installed env b = do
 
     item i = case i of
       Word w -> Right (maybe (Terminal w) (\srt -> Slot w srt []) (sortOf w))
+      Binding hd _ | kind == JudgmentBlock -> Left (NotationBinds hd)
       Binding hd bs -> case sortOf hd of
         Just srt@(OfLanguage _) -> Right (Slot hd srt bs)
         _ -> Left (NotAMetavariable hd)

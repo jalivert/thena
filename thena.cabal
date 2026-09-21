@@ -49,6 +49,7 @@ library
         Thena.Language.Build
         Thena.Language.Substitution
         Thena.Language.Lookup
+        Thena.Language.Judgment
         Thena.Repl
         Thena.Rules
         Thena.Surface.Concrete
@@ -144,6 +145,7 @@ test-suite thena-test
         Thena.BuildTests
         Thena.SubstitutionTests
         Thena.ContextTests
+        Thena.JudgmentTests
         Thena.ExamplesTests
         Thena.ObjectTermTests
         Thena.TokenTests

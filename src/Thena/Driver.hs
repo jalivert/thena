@@ -55,6 +55,7 @@ import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
 import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), fresh, open, substLevelsIn, tokenName)
+import Thena.Language.Judgment (judgmentDatatype)
 import Thena.Language.Lookup (lookupDatatype, lookupGrammar)
 import Thena.Language.Substitution (substitutionDefinitions)
 import Thena.Language.Regex
@@ -187,7 +188,7 @@ import Thena.Instral.Concrete
   , RawOperand (..)
   , RawPattern (..)
   )
-import Thena.Syntax.Lexer (Located (..), Token (..), lexModule, lexTokens)
+import Thena.Syntax.Lexer (BlockKind (..), Located (..), Token (..), lexModule, lexTokens)
 import Thena.Language.Reader (Block (..), readBlock)
 import Thena.Language.Grammar (Argument (..), GProduction (..), Grammar (..), Sort (..), checkGrammar, earleyRules)
 import qualified Thena.Language.Earley as Earley
@@ -2620,6 +2621,19 @@ progress oneStep s msgs warns = case step (sessionMachine s) of
   -- 101); its warnings join the load's, in source order.
   Engine.DeclaringGrammar b m -> case checkGrammar (grammars m) (globals m) b of
     Left e -> stop (load [] m) msgs warns (Refused (GrammarRefused e))
+    -- **A judgment's datatype is its rules** (MS6 phase 108, §6.5), read with
+    -- its own notation installed, since a rule may have a premise of the
+    -- judgment it defines. The notation is installed as a context's lookup is,
+    -- and nothing else is generated: a judgment has no substitution.
+    Right (g, ws) | grammarKind g == JudgmentBlock ->
+      case judgmentDatatype (g : grammars m) g (blockRules b) of
+        Left e -> stop (load [] m) msgs warns (Refused (GrammarRefused e))
+        Right (sd, roles) ->
+          let (is, n1) = datatypeProgram (names m) sd (Just roles)
+              m' = (Engine.splicing is m) { grammars = g : grammars m, names = n1 }
+           in if oneStep
+                then stop m' msgs (reverse ws ++ warns) Paused
+                else progress oneStep s { sessionMachine = m' } msgs (reverse ws ++ warns)
     Right (g, ws) ->
       -- **Its datatype is generated here and runs next** (MS6 phase 103): the
       -- block had to be checked before anything could be generated from it, and

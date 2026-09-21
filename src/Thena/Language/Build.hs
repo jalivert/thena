@@ -20,6 +20,8 @@ module Thena.Language.Build
   , buildSurface
   , skeletonOf
   , printTerm
+  , production
+  , arguments
   ) where
 
 import Data.List (elemIndex)

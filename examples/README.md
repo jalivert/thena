@@ -14,7 +14,7 @@ to the file.
 |---|---|
 | `01-stlc-syntax.thena` | A token class; `Ty` and `LC` declared as grammars; terms written in their own notation; `${…}` splices; `LC[var]`; generated substitution, with capture avoidance, simultaneity and free variables proved by `refl` |
 | `02-contexts.thena` | A `context` block; its lookup relation `x : T ∈ Γ`; lookups proved with `Ctx-here` and `Ctx-there`; a disequality `x ≠ f` proved with no axiom; why a shadowed binding cannot be reached |
-| `03-typing-and-reduction.thena` | Typing, values and call-by-value reduction as ordinary inductive families; typing derivations; reduction steps whose right-hand side the kernel computes by substitution, one of them capture-avoiding |
+| `03-typing-and-reduction.thena` | Typing, values and call-by-value reduction as `judgment` blocks in paper notation; a named premise; `E[x->N]` in a rule; typing derivations stated as judgment literals; reduction steps whose right-hand side the kernel computes by substitution, one of them capture-avoiding |
 | `04-taking-terms-apart.thena.rules` | A rule base that matches `LC` terms in their own notation (`LC[app]`( ${f} ${a} )``) and builds them (`LC`( ${t} ${t} )``) |
 | `05-grouping-by-splicing.thena` | A language with no parentheses, where `f a b` reads two ways; a splice as a group (`` Ex`${Ex`f a`} b` ``), to any depth; a name or a computation spliced in as a group; why printing is the open half |
 
@@ -74,6 +74,9 @@ data Ctx-in : String -> Ty -> Ctx -> Type₀ where
   { Ctx-here : ∀ (Γ : Ctx) (x : String) (T : Ty) -> Ctx-in x T (extend Γ x T)
   ; Ctx-there : ∀ (Γ : Ctx) (x : String) (T : Ty) (x' : String) (T' : Ty) -> (Eq {0} String x x' -> Empty {0}) -> Ctx-in x T Γ -> Ctx-in x T (extend Γ x' T') }
 
+thena spine> :parse typing · ⊢ ( λ x : ι . x ) : ( ι -> ι )
+typing(empty, abs(x, base, var(x)), arrow(base, base))
+
 thena spine> :parse Ex f a b
 in Ex`f a b`: this term parses two ways, as juxt(ref(f), juxt(ref(a), ref(b))) and as juxt(juxt(ref(f), ref(a)), ref(b))
 
@@ -92,13 +95,12 @@ what can come next. Leave it with `:done`.
 
 ## What these do not show yet, and why
 
-- **`judgment` blocks.** `03` writes `typing` and `step` by hand as `data`,
-  which is what a `judgment` block will generate from paper notation. That is
-  phase 108.
 - **Preservation for STLC.** That is phase 109, the milestone's goal.
 - **Terms printed in their own notation.** `:show` prints
   `app (abs "x" base (var "x")) …`, not `` LC`( ( λ x : ι . x ) … )` ``. That is
   not wired in yet.
 - **Loading `02` prints one warning**, that `Ctx-in` gets no no-confusion
-  lemma. It is accurate and harmless here.
+  lemma, and **`03` prints two**, for `typing` and `step`: a constructor whose
+  premise's type mentions an earlier argument gets none, and every rule with a
+  premise is such a constructor. They are accurate and harmless here.
 

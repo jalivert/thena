@@ -87,7 +87,7 @@ reading =
           (Block LanguageBlock "LC" ["M", "N"]
              [ Production 2 "var" (Just (AsOccurrence "x")) [Word "x"]
              , Production 3 "app" Nothing (map Word ["(", "M", "N", ")"])
-             ])
+             ] [])
   , testCase "the three metadata forms" $
       map (fmap (map productionMetadata . blockProductions) . readBlock LanguageBlock 1)
         [ " L where\n  f : x as binder -> x\n"
