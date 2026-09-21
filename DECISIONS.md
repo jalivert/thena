@@ -690,6 +690,46 @@ a constructor has no missing argument.
 
 ---
 
+### A language gets substitution for free, and a binder is renamed only when it would capture
+
+*Decided 2026-09-21.* A `language` block with a variable production
+(`var : x as occurrence -> x`) also declares four functions, right after its
+datatype:
+
+```
+LC-fresh     : String -> List String -> String
+LC-fv        : LC -> List String
+LC-subst-all : LC -> List (And String LC) -> LC     -- simultaneous
+LC-subst     : LC -> String -> LC -> LC             -- LC-subst E x N is E[x->N]
+```
+
+They are ordinary definitions, written by `elim` and elaborated like anything
+you write. They compute, so a substitution's answer is provable by `refl`:
+
+```
+captured : Eq LC (LC-subst (abs "y" base (var "x")) "x" (var "y")) (abs "y'" base (var "y"))
+captured = refl LC (abs "y'" base (var "y"))
+```
+
+**A binder keeps its name unless keeping it would capture**, and is then primed
+until it is free: `y`, `y'`, `y''`. Nothing is renamed behind your back, so
+capture is something you can see happen and see avoided. A list substitutes
+simultaneously (`[x->y, y->x]` swaps), and of two pairs for one name the first
+wins.
+
+What it needs of the language, each refused at the block with a message:
+exactly one variable production, taking only its occurrence; and a binder free
+only in arguments of the language itself. A language with no occurrence (`Ty`)
+gets nothing. The four names are yours to keep free — declaring `LC-fv` first
+is refused.
+
+Two things arrived with it. **`List`, with `nil` and `cons`, is in the
+prelude**, so those names are taken from every object language until imports
+exist. **`appendString : String -> String -> String`** is the one way to build
+a `String`, and it computes only on two literals. The types that mention `List`
+carry a level parameter, `LC-fv {ℓ}`, because a list of names is a list at any
+level and nothing is defaulted.
+
 ## The development calculus
 
 ### There are five components, not McBride's four — the fifth is `∀`
