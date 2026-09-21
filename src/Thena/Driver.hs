@@ -677,8 +677,8 @@ data BlockProblem
 -- **The blocks are typed as extra bodies, not as callables.** Nothing can call
 -- one — it has no name a user could write — so it is handed to 'inferProgram'
 -- beside 'allCallable' rather than inside it.
-checkSurfaceBlocks :: [RuleBase] -> GlobalName -> [Instr] -> Maybe BlockProblem
-checkSurfaceBlocks bases nm prog = case surfaceBlocks (allLanguages bases) nm prog of
+checkSurfaceBlocks :: [Grammar] -> [RuleBase] -> GlobalName -> [Instr] -> Maybe BlockProblem
+checkSurfaceBlocks gs bases nm prog = case surfaceBlocks gs (allLanguages bases) nm prog of
   Left errs -> Just (BlockIll errs)
   Right bs  -> case concatMap validate bs of
     e : es -> Just (BlockIll (e : es))
@@ -699,13 +699,13 @@ checkSurfaceBlocks bases nm prog = case surfaceBlocks (allLanguages bases) nm pr
 -- except while a rule is yielding: then the block shares the rule's
 -- environment ('Thena.Engine.load'), so the names it reads are in scope and have
 -- the types their values have.
-checkBlock :: [RuleBase] -> [(Ops.Name, Value)] -> Rule -> Maybe BlockProblem
-checkBlock bases bound r =
+checkBlock :: [Grammar] -> [RuleBase] -> [(Ops.Name, Value)] -> Rule -> Maybe BlockProblem
+checkBlock gs bases bound r =
   case validate r { ruleParams = map Ops.PVar (nub (map fst bound)) } of
     e : es -> Just (BlockIll (e : es))
     []     -> case inferBlock (allSignatures bases) (allCallable bases) bound r of
       errs@(_ : _) -> Just (BlockMistyped errs)
-      []           -> checkSurfaceBlocks bases (ruleName r) (ruleBody r)
+      []           -> checkSurfaceBlocks gs bases (ruleName r) (ruleBody r)
 
 -- | A whole typed **entry**, which is an @instral@ block (MS5 phase 70).
 --
@@ -720,8 +720,8 @@ checkBlock bases bound r =
 -- **The same grammar a rule body has**, so nothing is \"@instral@, except at the
 -- REPL\".
 instralEntry
-  :: [RuleBase] -> String -> Either LineError [Instr]
-instralEntry bases src = do
+  :: [Grammar] -> [RuleBase] -> String -> Either LineError [Instr]
+instralEntry gs bases src = do
   ts  <- mapLeft LineSyntax (tokensOf src)
   -- **An entry is laid out, like a rule file** (MS5 phase 78). One line gets a
   -- block around it and nothing else changes; a @:{ … :}@ entry gets a @;@
@@ -736,7 +736,7 @@ instralEntry bases src = do
             -- environment, and that is the behaviour already recorded — the
             -- driver has only ever built literals, so a typed command names a
             -- hole and never a reference.
-            (resolveBlock (allLanguages bases) (GlobalName "entry") []
+            (resolveBlock gs (allLanguages bases) (GlobalName "entry") []
                (concatMap hoist (reverse is)))
   -- **An entry is checked the way a rule file is** (MS5, reviewed 2026-09-12).
   -- It was resolved and then neither validated nor typed, so @prim-try 3@ at the
@@ -749,7 +749,7 @@ instralEntry bases src = do
   -- 79). Until then 'Thena.Instral.Ops.Play' resolved one as it ran, so @say 3@ inside
   -- one halted the machine where the same instruction anywhere else is refused
   -- before it starts. All three checks are 'checkBlock' since phase 90.
-  case checkBlock bases [] (Rule (GlobalName "entry") [] [] prog) of
+  case checkBlock gs bases [] (Rule (GlobalName "entry") [] [] prog) of
     Just (BlockIll es)      -> Left (LineIllFormed es)
     Just (BlockMistyped es) -> Left (LineMistyped es)
     Nothing                 -> Right prog
@@ -803,7 +803,7 @@ resolving w os
 
     written o = case o of
       RawQuoted _        -> True
-      RawRegion "core" _ -> True
+      RawRegion "core" _ _ -> True
       _                  -> False
 
 parseWith
@@ -1396,9 +1396,9 @@ dispatch s name arg = case name of
     -- its value. Outside a yield 'load' clears the environment, and nothing is.
     Right (SurfaceDo body) ->
       let bound = if Engine.isYielding machine then env (exec machine) else []
-       in case resolveBlock (allLanguages (rules machine)) (GlobalName "entry") (map fst bound) body of
+       in case resolveBlock (grammars machine) (allLanguages (rules machine)) (GlobalName "entry") (map fst bound) body of
         Left errs -> (s, Failed (blockProblem errs))
-        Right is  -> case checkBlock (rules machine) bound (Rule (GlobalName "entry") [] [] is) of
+        Right is  -> case checkBlock (grammars machine) (rules machine) bound (Rule (GlobalName "entry") [] [] is) of
           Just (BlockIll es)      -> (s, LineRefused es)
           Just (BlockMistyped es) -> (s, EntryMistyped es)
           Nothing -> progress (sessionStepping s)
@@ -1848,7 +1848,7 @@ dispatch s name arg = case name of
     -- the split into a word and an argument run was 62b's shape and an entry has
     -- no such shape: it is a sequence of instructions, of which one op and its
     -- operands is the degenerate case.
-    line = case instralEntry (rules machine) (name ++ " " ++ arg) of
+    line = case instralEntry (grammars machine) (rules machine) (name ++ " " ++ arg) of
       Left (LineSyntax e)     -> (s, Failed e)
       Left (LineIllFormed es) -> (s, LineRefused es)
       Left (LineMistyped es)  -> (s, EntryMistyped es)
@@ -2121,8 +2121,8 @@ breakOn needle = go ""
 -- call a rule written below it, and call a rule in a base loaded after it.
 --
 -- Takes contents and not a path (§12 invariant 4).
-readRuleBase :: FilePath -> String -> Either RuleFileError RuleBase
-readRuleBase path src = case baseHead ls of
+readRuleBase :: [Grammar] -> FilePath -> String -> Either RuleFileError RuleBase
+readRuleBase gs path src = case baseHead ls of
   Nothing -> Left NoRuleHeader
   Just (nm, desc, used) -> do
       -- The head is blanked, not dropped: every position the lexer reports
@@ -2137,7 +2137,7 @@ readRuleBase path src = case baseHead ls of
       -- condition that the two spellings be one language.
       ts'  <- mapLeft (RuleSyntaxError . LayoutFailed) (layoutFile ts)
       raws <- mapLeft (RuleSyntaxError . ParseFailed) (parseRules ts')
-      (sigs, langs, fns, rs) <- resolveAll raws
+      (sigs, langs, fns, rs) <- resolveAll gs raws
       Right (ruleBase nm desc path sigs langs fns rs)
   where
     ls = lines src
@@ -2170,10 +2170,10 @@ parseInstralType ls src = do
 -- /is/ answered here is what one file can answer — that the type names a type,
 -- and that a callable has at most one signature.
 resolveAll
-  :: [RawDecl]
+  :: [Grammar] -> [RawDecl]
   -> Either RuleFileError
        ([(String, Signature)], [(String, Language)], [Rule], [Rule])
-resolveAll raws =
+resolveAll gs raws =
   case ( concat langErrs ++ concat ruleErrs ++ concat fnErrs ++ sigErrs
            ++ langDups ++ dups ++ collisions ++ overlapping
        , concatMap validate (ok ++ fns)
@@ -2185,10 +2185,10 @@ resolveAll raws =
     -- operand, a type name in a signature (MS5 phase 69).
     (langErrs, langs) =
       partitionEithers [ resolveLanguage l | DeclLanguage l <- raws ]
-    (ruleErrs, ok)  = partitionEithers [ resolveRule langs r | DeclRule r <- raws ]
+    (ruleErrs, ok)  = partitionEithers [ resolveRule gs langs r | DeclRule r <- raws ]
     -- **A function is validated like any rule**, because it is one
     -- ('Thena.Rules.resolveFunction').
-    (fnErrs, fns)   = partitionEithers [ resolveFunction langs f | DeclFunction f <- raws ]
+    (fnErrs, fns)   = partitionEithers [ resolveFunction gs langs f | DeclFunction f <- raws ]
     (sigErrs, sigs) =
       partitionEithers [ resolveSignature langs g | DeclSignature g <- raws ]
     -- **A name may not be a rule and a function at one arity** (MS5, reviewed
@@ -2292,14 +2292,14 @@ loadRuleBases s = go []
           errs -> (s, BasesIllTyped errs)
 
     go acc ((path, src) : more) =
-      case readRuleBase path src of
+      case readRuleBase (grammars (sessionMachine s)) path src of
         Left e  -> (s, RuleFileRefused path e)
         Right b -> go (acc ++ [b]) more
 
     -- **Resolved here and not in 'readRuleBase'**, because a block is resolved
     -- with EVERY loaded base's languages — which is what 'Thena.Instral.Ops.Play' does
     -- at run time — and a file does not know what will be loaded beside it.
-    blocksOf acc b = case surfaceBlocks (allLanguages acc) (GlobalName (baseName b))
+    blocksOf acc b = case surfaceBlocks (grammars (sessionMachine s)) (allLanguages acc) (GlobalName (baseName b))
                             (concatMap ruleBody (baseRules b ++ baseFunctions b)) of
       Left errs -> Left (basePath b, errs)
       Right bs  -> case concatMap validate bs of
@@ -2654,7 +2654,7 @@ progress oneStep s msgs warns = case step (sessionMachine s) of
   -- itself declared above it, and a @language@ block is exactly such a thing.
   --
   -- **The same checker the prompt uses**, so the messages are unchanged.
-  Engine.Playing is m -> case checkBlock (rules m) [] (Rule (GlobalName "do") [] [] is) of
+  Engine.Playing is m -> case checkBlock (grammars m) (rules m) [] (Rule (GlobalName "do") [] [] is) of
     Just (BlockIll errs)      -> stop (load [] m) msgs warns (BlockRefused errs)
     Just (BlockMistyped errs) -> stop (load [] m) msgs warns (BlockIllTyped errs)
     Nothing ->
@@ -2817,3 +2817,4 @@ parseObject m lang text =
   case Earley.parse (earleyRules (grammars m)) (Earley.StartAt lang) (Earley.pieces text) of
     Right t  -> ParsedObject t
     Left why -> ObjectUnparsed lang text why
+

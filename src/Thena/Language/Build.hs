@@ -18,6 +18,7 @@
 module Thena.Language.Build
   ( buildTerm
   , buildSurface
+  , skeletonOf
   , printTerm
   ) where
 
@@ -36,13 +37,14 @@ import Thena.Language.Grammar
   , Item (..)
   , Sort (..)
   )
+import Thena.Instral.Pattern (Skeleton (..), Slot (..))
 import Thena.Language.Regex (matches)
 import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..))
 
 -- | The term a reading denotes.
 --
--- **A reading alone, so a splice has nothing to be**: 'buildSurface' is the
--- one that is given the terms the splices stand for.
+-- **A reading alone, so a splice has nothing to be**: 'buildSurface' supplies
+-- them from a surface term, and 'skeletonOf' leaves them as holes.
 buildTerm :: [Grammar] -> Tree -> Either BuildError Core
 buildTerm gs tree = case tree of
   Node name children -> do
@@ -88,6 +90,39 @@ buildSurface gs splices = build
 
     supplied k = case drop k splices of
       e : _ -> Right e
+      []    -> Left (NotForSlot "" (shapeOf (SpliceOf k)))
+
+-- | A reading as a grammar-free shape, with @holes@ put at its splices in
+-- order (MS6 phase 104c; @ms6\/SPEC.md@ §8).
+--
+-- **This is where a grammar is consulted for the last time.** Everything a
+-- later stage needs to know — which constructor a node is, which argument each
+-- slot fills, what a token class matched, and whether a hole takes a term or a
+-- literal — is written into the 'Skeleton' here. So neither the machine nor
+-- the matcher has to be told about grammars at all.
+--
+-- The @k@th 'Thena.Language.Earley.Splice' takes the @k@th hole. A reading
+-- with fewer splices than holes, or more, is the caller's mistake and is
+-- refused.
+skeletonOf :: [Grammar] -> [a] -> Tree -> Either BuildError (Skeleton a)
+skeletonOf gs holes = go
+  where
+    go tree = case tree of
+      SpliceOf k -> hole AtTerm k
+      Node name children -> do
+        p <- maybe (Left (NoSuchProduction name)) Right (production gs name)
+        kids <- traverse (slot name) =<< arguments p children
+        Right (SNode (GlobalName name) kids)
+      _ -> Left (NotForSlot "" (shapeOf tree))
+
+    slot name (a, child) = case (argumentSort a, child) of
+      (OfClass _ t _, SpliceOf k) -> hole (AtPrimitive t) k
+      (OfLanguage _, SpliceOf k)  -> hole AtTerm k
+      (OfClass _ t _, _) -> SLit <$> literal name (argumentName a) t child
+      (OfLanguage _, _)  -> go child
+
+    hole what k = case drop k holes of
+      h : _ -> Right (SHole what h)
       []    -> Left (NotForSlot "" (shapeOf (SpliceOf k)))
 
 -- | Each argument of a production, with the child that reads it.

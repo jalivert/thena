@@ -46,6 +46,8 @@ import Thena.Instral.Ops
   , Operand (..)
   , Rule (..)
   , Pattern (..)
+  , Skeleton (..)
+  , Slot (..)
   , Test
   , Value (..)
   , operandsOf
@@ -576,6 +578,15 @@ patternCtx site ps ts st0 = foldl one ([], st0) (zip3 [0 ..] ps ts)
     go si pt t st = case pt of
       PVar n   -> ([(n, Mono t)], st)
       PWild    -> ([], st)
+      -- **An object term is a 'TCore', and each hole takes the slot's type**
+      -- (MS6 phase 104c). Which slot is which was settled when the pattern
+      -- was read — the skeleton says so — which is the whole reason the
+      -- grammar does not have to reach this pass.
+      PObject sk ->
+        let st1 = unify si t TCore st
+            hole (acc, k) (slot, q) =
+              let (bs, k') = go si q (slotType slot) k in (acc ++ bs, k')
+         in foldl hole ([], st1) (holesOf sk)
       PInt _   -> ([], unify si t TInt st)
       PChar _  -> ([], unify si t TChar st)
       PBool _  -> ([], unify si t TBool st)
@@ -830,9 +841,30 @@ operandAgainst ctx si want o st = case o of
   _             -> let (got, st') = operandType ctx si o st
                     in unify si want got st'
 
+-- | What an object term's hole takes (MS6 phase 104c).
+slotType :: Slot -> Ty
+slotType slot = case slot of
+  AtTerm                        -> TCore
+  AtPrimitive (GlobalName "Char") -> TChar
+  AtPrimitive (GlobalName "Int")  -> TInt
+  -- Every other token class is over @String@; §3 admits three primitive types
+  -- and the check at declaration refuses the rest.
+  AtPrimitive _                 -> TString
+
+-- | Each hole with the slot it stands at, left to right.
+holesOf :: Skeleton a -> [(Slot, a)]
+holesOf sk = case sk of
+  SNode _ kids -> concatMap holesOf kids
+  SLit _       -> []
+  SHole slot a -> [(slot, a)]
+
 -- | …and its type when nothing constrains it.
 operandType :: [(Name, Local)] -> Site -> Operand -> St -> (Ty, St)
 operandType ctx si o st = case o of
+  -- **An object term is a 'TCore'**, and its holes are checked at the slots'
+  -- types (MS6 phase 104c) — the same table the pattern side reads.
+  ObjectOf sk ->
+    (TCore, foldl (\k (slot, o') -> operandAgainst ctx si (slotType slot) o' k) st (holesOf sk))
   Ref n -> case lookup n ctx of
     Just l  -> useOf l st
     -- 'Thena.Rules.validate' has already refused an unbound name
@@ -913,3 +945,4 @@ settleText st0 = foldl one st0 (stText st0)
       TString -> st
       TVar i  -> st { stSubst = (i, TString) : stSubst st }
       other   -> oops (TextNotTextual si (deep st other)) st
+

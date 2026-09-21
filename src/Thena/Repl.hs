@@ -1323,6 +1323,26 @@ renderOperand n ctx o = case o of
   ListOf os  -> "[" ++ intercalate ", " (map (renderOperand n ctx) os) ++ "]"
   PairOf a b ->
     "(" ++ renderOperand n ctx a ++ ", " ++ renderOperand n ctx b ++ ")"
+  -- **An object term prints as the shape it is**, not as the region it was
+  -- written as (MS6 phase 104c): the text is gone by the time a rule is
+  -- listed, and printing it back would need the grammar here.
+  ObjectOf sk -> renderSkeleton (renderOperand n ctx) sk
+
+-- | An object term's shape, with whatever stands at its holes (MS6 phase
+-- 104c). Written as the constructor application it is — @app(var("f"), x)@ —
+-- because the region's own notation needs the grammar and this printer has
+-- none.
+renderSkeleton :: (a -> String) -> Ops.Skeleton a -> String
+renderSkeleton at sk = case sk of
+  Ops.SNode (GlobalName nm) [] -> nm
+  Ops.SNode (GlobalName nm) kids ->
+    nm ++ "(" ++ intercalate ", " (map (renderSkeleton at) kids) ++ ")"
+  Ops.SLit l -> case l of
+    LString x -> escapeString x
+    LChar c   -> escapeChar c
+    LInt k    -> show k
+    LRegex r  -> "/" ++ r ++ "/"
+  Ops.SHole _ a -> "$" ++ ['{'] ++ at a ++ ['}']
 
 -- | The fence a tagged region is written with. Named rather than written
 -- inline so that a backtick never sits loose in a string literal here.
@@ -1599,6 +1619,9 @@ renderSurface = surf Loose
       RawPText t   -> show t
       RawPApp w as -> "(" ++ unwords (w : map rawPattern as) ++ ")"
       RawPPair a b -> "(" ++ rawPattern a ++ ", " ++ rawPattern b ++ ")"
+      -- Exact, because a region keeps its source text (MS6 phase 104c).
+      RawPObject tag prod src ->
+        tag ++ maybe "" (\w -> "[" ++ w ++ "]") prod ++ [tick] ++ src ++ [tick]
       RawPList ps mt ->
         "[" ++ intercalate ", " (map rawPattern ps ++ tl) ++ "]"
         where tl = case mt of
@@ -1617,7 +1640,8 @@ renderSurface = surf Loose
       RawPairOf x y -> "(" ++ operand x ++ ", " ++ operand y ++ ")"
       -- Exact, because the region kept its source text: a rule listing shows
       -- the embedded term as the author wrote it.
-      RawRegion tag src -> tag ++ [tick] ++ src ++ [tick]
+      RawRegion tag prod src ->
+        tag ++ maybe "" (\w -> "[" ++ w ++ "]") prod ++ [tick] ++ src ++ [tick]
       -- The same gap 'renderValue' has for a 'Thena.Instral.Ops.VRaw': there is no
       -- printer for written syntax, so this says what it is rather than what it
       -- contains (§7b's register).
@@ -2242,6 +2266,9 @@ whereRuleError e = case e of
   BoundNonProducing g i _ -> inRule g i
   UnboundInRule g i _     -> inRule g i
   NoSuchTest g _          -> inName g
+  ObjectRegionUnparsed g i _ _ _ -> inRule g i
+  ObjectRegionNotATerm g i _ _   -> inRule g i
+  NoObjectProduction g i _ _     -> inRule g i
   UnboundInHead g _       -> inName g
   BadTestOperands g _     -> inName g
   ReservedName g _        -> inName g
@@ -2285,6 +2312,14 @@ whatRuleError e = case e of
   BoundNonProducing _ _ n -> n ++ " is bound to an operation that leaves nothing"
   UnboundInRule _ _ n     -> "no parameter or earlier binding is called " ++ n
   NoSuchTest _ w          -> "no such test: " ++ w
+  -- **The words @:parse@ uses**, from the same renderer, because it is the
+  -- same parser and the same grammar (MS6 phase 104c).
+  ObjectRegionUnparsed _ _ lang src why -> renderUnparsed lang src why
+  ObjectRegionNotATerm _ _ lang why -> "in " ++ lang ++ "`\8230`: " ++ case why of
+    NoSuchProduction n -> n ++ " is not a production of any language"
+    Incomplete _       -> "a splice stands where a term has to be written out"
+    NotForSlot n x     -> n ++ " cannot take " ++ x ++ " there"
+  NoObjectProduction _ _ lang w -> lang ++ " has no production called " ++ w
   UnboundInHead _ n       -> "no parameter is called " ++ n
   BadTestOperands _ w     -> w ++ " was written with the wrong arguments"
   ReservedName _ n        ->
@@ -2382,6 +2417,7 @@ renderPattern pt = case pt of
   -- not, which is §6.0.1 at a parameter position and not a special case.
   PSome a     -> "(some " ++ renderPattern a ++ ")"
   PNone       -> "none"
+  PObject sk  -> renderSkeleton renderPattern sk
   PList ps mt ->
     "[" ++ intercalate ", " (map renderPattern ps ++ tl) ++ "]"
     where tl = case mt of
@@ -2551,3 +2587,4 @@ tabComplete rules lang (leftReversed, right) =
       Earley.Literal t -> t
       Earley.Scan n _ -> "\8249" ++ n ++ "\8250"
       Earley.Nonterminal n -> "\8249" ++ n ++ "\8250"
+

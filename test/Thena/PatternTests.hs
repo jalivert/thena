@@ -21,6 +21,7 @@ import Data.List (isInfixOf)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
+import Thena.Global.Env (emptyGlobals)
 import Thena.Instral.Ops
   ( Instr (..)
   , Pattern (..)
@@ -90,7 +91,7 @@ readWhole text = case lexTokens text of
     Left e -> Left ("layout: " ++ show e)
     Right ts' -> case parseRule ts' of
       Left e -> Left ("parse: " ++ show e)
-      Right raw -> case resolveRule [] raw of
+      Right raw -> case resolveRule [] [] raw of
         Left es -> Left ("resolve: " ++ show es)
         Right r -> Right r
 
@@ -108,7 +109,7 @@ readParams src = case lexTokens text of
     Left e -> Left ("layout: " ++ show e)
     Right ts' -> case parseRule ts' of
       Left e -> Left ("parse: " ++ show e)
-      Right raw -> case resolveRule [] raw of
+      Right raw -> case resolveRule [] [] raw of
         Left es -> Left ("resolve: " ++ show es)
         Right r -> Right (ruleParams r)
   where
@@ -220,55 +221,55 @@ matching =
   testGroup
     "matching"
     [ testCase "a variable takes anything and binds it" $
-        matchPattern (PVar "x") (VInt 3) @?= Just [("x", VInt 3)]
+        matchPattern emptyGlobals (PVar "x") (VInt 3) @?= Just [("x", VInt 3)]
     , testCase "a wildcard takes anything and binds nothing" $
-        matchPattern PWild (VInt 3) @?= Just []
+        matchPattern emptyGlobals PWild (VInt 3) @?= Just []
     , testCase "a literal matches its own value" $
-        matchPattern (PInt 3) (VInt 3) @?= Just []
+        matchPattern emptyGlobals (PInt 3) (VInt 3) @?= Just []
     , testCase "…and refuses another" $
-        matchPattern (PInt 3) (VInt 4) @?= Nothing
+        matchPattern emptyGlobals (PInt 3) (VInt 4) @?= Nothing
     , testCase "…and refuses another type" $
-        matchPattern (PInt 3) (VText "3") @?= Nothing
+        matchPattern emptyGlobals (PInt 3) (VText "3") @?= Nothing
     , testCase "true and false are told apart" $ do
-        matchPattern (PBool True) (VBool True) @?= Just []
-        matchPattern (PBool True) (VBool False) @?= Nothing
+        matchPattern emptyGlobals (PBool True) (VBool True) @?= Just []
+        matchPattern emptyGlobals (PBool True) (VBool False) @?= Nothing
     , testCase "a closed list must exhaust the value" $ do
-        matchPattern (PList [PVar "a"] Nothing) (VList [VInt 1])
+        matchPattern emptyGlobals (PList [PVar "a"] Nothing) (VList [VInt 1])
           @?= Just [("a", VInt 1)]
-        matchPattern (PList [PVar "a"] Nothing) (VList [VInt 1, VInt 2])
+        matchPattern emptyGlobals (PList [PVar "a"] Nothing) (VList [VInt 1, VInt 2])
           @?= Nothing
-        matchPattern (PList [PVar "a"] Nothing) (VList []) @?= Nothing
+        matchPattern emptyGlobals (PList [PVar "a"] Nothing) (VList []) @?= Nothing
     , testCase "an open list binds the remainder" $
-        matchPattern (PList [PVar "a"] (Just (PVar "r"))) (VList [VInt 1, VInt 2])
+        matchPattern emptyGlobals (PList [PVar "a"] (Just (PVar "r"))) (VList [VInt 1, VInt 2])
           @?= Just [("a", VInt 1), ("r", VList [VInt 2])]
     , testCase "…and the remainder may be empty" $
-        matchPattern (PList [PVar "a"] (Just (PVar "r"))) (VList [VInt 1])
+        matchPattern emptyGlobals (PList [PVar "a"] (Just (PVar "r"))) (VList [VInt 1])
           @?= Just [("a", VInt 1), ("r", VList [])]
     , -- The tail is a whole pattern, which is what makes this the long way of
       -- saying "exactly one element".
       testCase "a list tail is itself matched" $ do
-        matchPattern (PList [PVar "a"] (Just (PList [] Nothing))) (VList [VInt 1])
+        matchPattern emptyGlobals (PList [PVar "a"] (Just (PList [] Nothing))) (VList [VInt 1])
           @?= Just [("a", VInt 1)]
-        matchPattern (PList [PVar "a"] (Just (PList [] Nothing)))
+        matchPattern emptyGlobals (PList [PVar "a"] (Just (PList [] Nothing)))
                      (VList [VInt 1, VInt 2])
           @?= Nothing
     , testCase "a pair takes a pair apart" $
-        matchPattern (PPair (PVar "x") (PVar "y")) (VPair (VInt 1) (VInt 2))
+        matchPattern emptyGlobals (PPair (PVar "x") (PVar "y")) (VPair (VInt 1) (VInt 2))
           @?= Just [("x", VInt 1), ("y", VInt 2)]
     , testCase "some and none are told apart" $ do
-        matchPattern (PSome (PVar "x")) (VOption (Just (VInt 1)))
+        matchPattern emptyGlobals (PSome (PVar "x")) (VOption (Just (VInt 1)))
           @?= Just [("x", VInt 1)]
-        matchPattern (PSome (PVar "x")) (VOption Nothing) @?= Nothing
-        matchPattern PNone (VOption Nothing) @?= Just []
-        matchPattern PNone (VOption (Just (VInt 1))) @?= Nothing
+        matchPattern emptyGlobals (PSome (PVar "x")) (VOption Nothing) @?= Nothing
+        matchPattern emptyGlobals PNone (VOption Nothing) @?= Just []
+        matchPattern emptyGlobals PNone (VOption (Just (VInt 1))) @?= Nothing
     , -- **Arity is part of matching**, which is why 'matchPatterns' answers
       -- 'Nothing' rather than being paired with a length test.
       testCase "a run of the wrong length does not match" $ do
-        matchPatterns [PVar "a"] [VInt 1, VInt 2] @?= Nothing
-        matchPatterns [PVar "a", PVar "b"] [VInt 1] @?= Nothing
+        matchPatterns emptyGlobals [PVar "a"] [VInt 1, VInt 2] @?= Nothing
+        matchPatterns emptyGlobals [PVar "a", PVar "b"] [VInt 1] @?= Nothing
     , -- §3: a pattern matches as written. Nothing here reduces or coerces.
       testCase "a text pattern matches a name, because both are VText" $
-        matchPattern (PText "h") (VText "h") @?= Just []
+        matchPattern emptyGlobals (PText "h") (VText "h") @?= Just []
     ]
 
 binding :: TestTree
@@ -301,7 +302,7 @@ binding =
         assertBool "refutable" (not (patternIrrefutable (PList [PVar "a"] (Just (PVar "r")))))
     ]
   where
-    agree (p, v) = case matchPattern p v of
+    agree (p, v) = case matchPattern emptyGlobals p v of
       Nothing -> assertFailure ("expected a match for " ++ renderPattern p)
       Just bs -> map fst bs @?= patternBinds p
 
@@ -344,7 +345,7 @@ refusals =
         Left e -> Left ("layout: " ++ show e)
         Right ts' -> case parseRule ts' of
           Left e -> Left ("parse: " ++ show e)
-          Right raw -> case resolveRule [] raw of
+          Right raw -> case resolveRule [] [] raw of
             Left es -> Left ("resolve: " ++ show es)
             Right r -> Right r
 
@@ -392,6 +393,7 @@ tagOf p = case p of
   PBool _   -> "PBool"
   PText _   -> "PText"
   PList _ _ -> "PList"
+  PObject _ -> "PObject"
   PPair _ _ -> "PPair"
   PSome _   -> "PSome"
   PNone     -> "PNone"

@@ -84,6 +84,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   '${'    { Located _ TEscapeOpen }
   '}$'    { Located _ TEscapeClose }
   tagopen  { Located _ (TTagOpen $$) }
+  tagat    { Located _ (TTagOpenAt _ _) }
   raw      { Located _ (TRaw $$) }
   tagclose { Located _ TTagClose }
   '|]'    { Located _ TCloseQuote }
@@ -365,6 +366,14 @@ CompoundPat :: { RawPattern }
   | '[' '...' PatAtom ']'                  { RawPList [] (Just $3) }
   | '(' ident PatAtoms ')'                 { RawPApp $2 (reverse $3) }
   | '(' PatAtom ',' PatAtom ')'            { RawPPair $2 $4 }
+  -- **A term of an object language, as a pattern** (MS6 phase 104c). It reads
+  -- the same as the operand form above and means the other direction: a
+  -- @${x}@ binds here where it supplies there (@patterns-and-the-editor.md@
+  -- \u00a75).
+  | tagopen Pieces tagclose                { RawPObject $1 Nothing (concat (reverse $2)) }
+  | tagopen tagclose                       { RawPObject $1 Nothing "" }
+  | tagat Pieces tagclose                  { patternAt $1 (concat (reverse $2)) }
+  | tagat tagclose                         { patternAt $1 "" }
 
 PatAtoms :: { [RawPattern] }
   :                                        { [] }
@@ -464,8 +473,12 @@ ValueOperand :: { RawOperand }
   -- region early; this puts it back, because what a region /is/ is text for an
   -- embedded parser and the embedded parser reads @${x}@ itself. So the pieces
   -- below are a reader for what the scanner produced and not a second meaning.
-  | tagopen Pieces tagclose                { RawRegion $1 (concat (reverse $2)) }
-  | tagopen tagclose                       { RawRegion $1 "" }
+  | tagopen Pieces tagclose                { RawRegion $1 Nothing (concat (reverse $2)) }
+  | tagopen tagclose                       { RawRegion $1 Nothing "" }
+  -- **A tag may name the production to start at** (MS6 phase 104c), which is
+  -- what tells @LC[var]\`…\`@ from @LC\`…\`@: a variable occurrence, or any term.
+  | tagat Pieces tagclose                  { regionAt $1 (concat (reverse $2)) }
+  | tagat tagclose                         { regionAt $1 "" }
 
 Pieces :: { [String] }
   : Piece                                  { [$1] }
@@ -561,6 +574,19 @@ Binder :: { RawBinder }
 {
 
 -- | Structured, per §12 invariant 2.
+-- | @LC[app]\`…\`@ — the tag carries two names, so the token is taken whole
+-- rather than through @$$@ (MS6 phase 104c). "Thena.Surface.Parser" has the
+-- same pair for the same reason.
+regionAt :: Located Token -> String -> RawOperand
+regionAt t src = case t of
+  Located _ (TTagOpenAt lang prod) -> RawRegion lang (Just prod) src
+  _ -> error "the tag token is TTagOpenAt"
+
+patternAt :: Located Token -> String -> RawPattern
+patternAt t src = case t of
+  Located _ (TTagOpenAt lang prod) -> RawPObject lang (Just prod) src
+  _ -> error "the tag token is TTagOpenAt"
+
 data ParseError
   = UnexpectedToken Pos Token
   | UnexpectedEndOfInput

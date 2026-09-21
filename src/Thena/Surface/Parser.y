@@ -185,6 +185,10 @@ InstrCompoundPat :: { RawPattern }
   | '[' '...' InstrPatAtom ']'             { RawPList [] (Just $3) }
   | '(' ident InstrPatAtoms ')'            { RawPApp $2 (reverse $3) }
   | '(' InstrPatAtom ',' InstrPatAtom ')'  { RawPPair $2 $4 }
+  | tagopen InstrPieces tagclose           { RawPObject $1 Nothing (concat (reverse $2)) }
+  | tagopen tagclose                       { RawPObject $1 Nothing "" }
+  | tagat InstrPieces tagclose             { patternAt $1 (concat (reverse $2)) }
+  | tagat tagclose                         { patternAt $1 "" }
 
 InstrPatAtoms :: { [RawPattern] }
   :                                        { [] }
@@ -230,8 +234,22 @@ InstrValueOperand :: { RawOperand }
   -- @do { f surface\`x\` }@ did not parse while the same body in a rule file
   -- did: §7b's registered duplication drifting for the second time, and the
   -- second time it was found by enumerating the forms rather than by reading.
-  | tagopen raw tagclose                   { RawRegion $1 $2 }
-  | tagopen tagclose                       { RawRegion $1 "" }
+  -- **The same four the DC's grammar has** ("Thena.Syntax.Parser"), because a
+  -- @do@ block is the same language wherever it is written (MS6 phase 104c).
+  -- A @${x}@ is put back as text here and read again by whoever resolves the
+  -- region, exactly as it is there.
+  | tagopen InstrPieces tagclose           { RawRegion $1 Nothing (concat (reverse $2)) }
+  | tagopen tagclose                       { RawRegion $1 Nothing "" }
+  | tagat InstrPieces tagclose             { regionAt $1 (concat (reverse $2)) }
+  | tagat tagclose                         { regionAt $1 "" }
+
+InstrPieces :: { [String] }
+  : InstrPiece                             { [$1] }
+  | InstrPieces InstrPiece                 { $2 : $1 }
+
+InstrPiece :: { String }
+  : raw                                    { $1 }
+  | '${' ident '}$'                        { "$" ++ ['{'] ++ $2 ++ ['}'] }
 
 InstrElements :: { [RawOperand] }
   : InstrOperand                           { [$1] }
@@ -494,6 +512,18 @@ group p xs ty = [ SurfaceBinder p x ty | x <- xs ]
 -- be adjacent and a rule that joined them could not fire.
 pieces :: [ObjectPiece] -> [ObjectPiece]
 pieces = reverse
+
+-- | @LC[app]\`…\`@ in an @instral@ operand or pattern (MS6 phase 104c), where
+-- "Thena.Syntax.Parser" has the identical pair.
+regionAt :: Located Token -> String -> RawOperand
+regionAt t src = case t of
+  Located _ (TTagOpenAt lang prod) -> RawRegion lang (Just prod) src
+  _ -> error "the tag token is TTagOpenAt"
+
+patternAt :: Located Token -> String -> RawPattern
+patternAt t src = case t of
+  Located _ (TTagOpenAt lang prod) -> RawPObject lang (Just prod) src
+  _ -> error "the tag token is TTagOpenAt"
 
 -- | @LC[var]\`…\`@ — the tag carries two names, so the token is taken whole
 -- rather than through @$$@.

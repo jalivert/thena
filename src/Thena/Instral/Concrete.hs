@@ -85,6 +85,11 @@ data RawPattern
   | RawPText String
   | RawPList [RawPattern] (Maybe RawPattern)
   | RawPPair RawPattern RawPattern
+  | RawPObject String (Maybe String) String
+    -- ^ @LC[app]\`( ${f} ${a} )\`@ — a tagged term literal as a pattern (MS6
+    -- phase 104c): the language, the production if one was written, and the
+    -- region's text with its @${…}@ left in it, exactly as 'RawRegion' keeps
+    -- it. What the text means needs the grammar, which is resolution's.
   deriving (Eq, Show)
 
 -- | What a rule-base file is a list of (MS5 phase 67).
@@ -266,7 +271,7 @@ data RawOperand
     -- a region carries text so that a /foreign/ language may keep its own
     -- lexical rules, and Core has no need of that
     -- (@discussion\/the-five-languages.md@ §7b, the permanent entry).
-  | RawRegion String String
+  | RawRegion String (Maybe String) String
     -- ^ @tag\`…\`@ — a **tagged region** (MS5 phase 61b): the tag, and the raw
     -- text between the fences. Which language the text is in is the tag's to
     -- say, and the text is parsed by that tag's parser during resolution.

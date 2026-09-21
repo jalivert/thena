@@ -811,7 +811,7 @@ blockTests =
       , RawPairOf (RawPos 1) (RawRef "y")
       , RawNested "concat" []
       , RawLambda [] (BodyRhs (RhsOp (RawOp "concat" [])))
-      , RawRegion "surface" "x"
+      , RawRegion "surface" Nothing "x"
       , RawQuoted (RawName "x")
       ]
 

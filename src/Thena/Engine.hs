@@ -647,7 +647,7 @@ resumeAt :: Answer -> Machine -> Machine
 -- interaction: the driver asks again rather than failing on the user's behalf.
 resumeAt a m = case pc (exec m) of
   Bind p _ (Ask _ _) : rest
-    | Just bs <- Op.matchPattern p (VText a) ->
+    | Just bs <- Op.matchPattern (globals m) p (VText a) ->
         m { exec = (exec m) { pc = rest, env = bs ++ env (exec m) } }
   Do     (Ask _ _) : rest -> m { exec = (exec m) { pc = rest } }
   _                       -> m
@@ -698,7 +698,7 @@ failure r0 m = unwind (length (stack (exec m))) (stack (exec m))
             -- is the same hole from the other side.
             Just (r, it') -> Saying (took "backtracking to" fr r) m
               { development = saved fr
-              , exec  = Exec (ruleBody r) (seedFor fr r)
+              , exec  = Exec (ruleBody r) (seedFor (globals m) fr r)
                              (demote fr r it' : map unreturned stk)
               }
 
@@ -828,7 +828,7 @@ perform instr rest m = case operation instr of
       -- with no destination drops the value, as it always did.
       Just (fr, is, e, stk') -> case destination fr of
         Nothing -> Continue m { exec = Exec is e stk' }
-        Just p  -> case Op.matchPattern p v of
+        Just p  -> case Op.matchPattern (globals m) p v of
           Nothing -> failure (BindingDidNotMatch p) m
           Just bs -> Continue m { exec = Exec is (bs ++ e) stk' }
 
@@ -1135,14 +1135,14 @@ perform instr rest m = case operation instr of
           -- nothing to bind. §2's ruling is that a refutable pattern that does
           -- not match /fails/ — in a rule that backtracks, which is what he
           -- wanted; in a lambda it is the caller\'s failure, as in Haskell.
-          Right vs | Nothing <- Op.matchPatterns ps vs ->
+          Right vs | Nothing <- Op.matchPatterns (globals m) ps vs ->
             failure (PatternDidNotMatch nm (length vs)) m
           Right vs ->
             -- **The same frame a rule call pushes**, and deliberately: a closure
             -- is an anonymous rule, so @return@, backtracking below it and the
             -- destination all work without a second mechanism.
             Continue m
-              { exec = Exec body (fromMaybe [] (Op.matchPatterns ps vs) ++ cl)
+              { exec = Exec body (fromMaybe [] (Op.matchPatterns (globals m) ps vs) ++ cl)
                          (Thena.Engine.Call rest (env (exec m)) wants False
                             : stack (exec m))
               }
@@ -1169,7 +1169,7 @@ perform instr rest m = case operation instr of
       -- rather than with a partial pattern so that the total function stays
       -- total, which is what the one-matcher design is for.
       entering vs r fr k =
-        k { exec = Exec (ruleBody r) (fromMaybe [] (matchClause r vs))
+        k { exec = Exec (ruleBody r) (fromMaybe [] (matchClause (globals m) r vs))
                      (fr : stack (exec m)) }
 
   -- §3.7's elimination tactic (phase 17). The goal is the focus, as with the
@@ -1637,7 +1637,7 @@ perform instr rest m = case operation instr of
   Op.Play x -> case surfaceAt x of
     Left r  -> failure r m
     Right (Concrete.SurfaceDo body) ->
-      case resolveBlock (allLanguages (rules m)) (GlobalName "do") [] body of
+      case resolveBlock (grammars m) (allLanguages (rules m)) (GlobalName "do") [] body of
         Left errs -> failure (blockFailureOf errs) m
         Right is  -> Playing is (advance m)
     Right _ -> failure (ExpectedSurfaceShape "a do block") m
@@ -1764,7 +1764,7 @@ perform instr rest m = case operation instr of
     -- can still fail the instruction.
     produce v m' = case instr of
       Do _ -> Continue (advance m')
-      Bind p _ _ -> case Op.matchPattern p v of
+      Bind p _ _ -> case Op.matchPattern (globals m) p v of
         Nothing -> failure (BindingDidNotMatch p) m'
         Just bs -> Continue (advance m' { exec = (exec m') { env = bs ++ env (exec m') } })
 
@@ -2364,8 +2364,8 @@ data RetryError = NoChoicePoint | UnknownChoice Int
 -- **It is the same 'Thena.Instral.Ops.matchClause' call**, and that is the point: the
 -- clause that was chosen and the environment it runs in cannot disagree about
 -- what a pattern bound. Before patterns both were @zip@ and agreeing was free.
-seedFor :: Frame -> Rule -> Env
-seedFor fr r = entryEnv fr ++ fromMaybe [] (matchClause r (callArgs fr))
+seedFor :: GlobalEnv -> Frame -> Rule -> Env
+seedFor env fr r = entryEnv fr ++ fromMaybe [] (matchClause env r (callArgs fr))
 
 retryFrom :: Maybe Int -> Machine -> Either RetryError (Machine, String)
 retryFrom target m = go (0 :: Int) (stack (exec m))
@@ -2378,7 +2378,7 @@ retryFrom target m = go (0 :: Int) (stack (exec m))
         Nothing       -> Left missing      -- cannot arise; see 'demote'
         Just (r, it') -> Right
           ( m { development = saved fr
-              , exec  = Exec (ruleBody r) (seedFor fr r) (demote fr r it' : stk)
+              , exec  = Exec (ruleBody r) (seedFor (globals m) fr r) (demote fr r it' : stk)
                 -- **@retry@ lowers the floor to the frame it entered** (MS5
                 -- phase 95). 'lineFloor' records where /this line's/ work
                 -- begins, and this is a line that deliberately begins its work
@@ -2413,3 +2413,4 @@ variableOf c = case c of
   Component.Claim  v _ _   -> v
   Component.Guess  v _ _ _ -> v
   Component.Quantify v _ _ -> v
+

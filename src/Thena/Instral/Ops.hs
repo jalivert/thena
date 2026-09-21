@@ -34,6 +34,8 @@ module Thena.Instral.Ops
     -- existing @import Thena.Instral.Ops (Pattern (..))@ still reads. The type moved a
     -- layer down because "Thena.Errors" must name it; nothing else changed.
   , Pattern (..)
+  , Skeleton (..)
+  , Slot (..)
   , patternBinds
   , patternIrrefutable
   , matchPattern
@@ -46,11 +48,14 @@ import Control.Monad (zipWithM)
 import Data.Maybe (isJust)
 
 import Thena.Core.Level (Level)
-import Thena.Core.Term (Core, GlobalName)
-import Thena.Instral.Pattern (Pattern (..), patternBinds, patternIrrefutable)
+import Thena.Core.Term
+  (Core (App, Canonical, Global, Primitive), GlobalName (..), Literal (..))
+import Thena.Instral.Pattern
+  (Pattern (..), Skeleton (..), Slot (..), skeletonHoles, patternBinds, patternIrrefutable)
 import Thena.Instral.Type (Signature (..), Ty (..))
 import Thena.Development.Cursor (Part (..))
-import Thena.Global.Env (ArgRole, InductiveDefinition)
+import Thena.Core.Reduce (whnf)
+import Thena.Global.Env (ArgRole, GlobalEnv, InductiveDefinition)
 import Thena.Language.Reader (Block)
 import Thena.Surface.Concrete (Plicity)
 import Thena.Syntax.Concrete (Raw, splicesIn)
@@ -211,6 +216,15 @@ data Operand
     -- statement of its own.
   | PairOf Operand Operand
     -- ^ @(a, b)@ (MS5 phase 65), and the same two remarks apply.
+  | ObjectOf (Skeleton Operand)
+    -- ^ @LC\`( ${f} ${a} )\`@ — **a term of an object language with splices to
+    -- fill** (MS6 phase 104c): the reading, and one operand per splice in the
+    -- order the reading numbered them.
+    --
+    -- **Not a 'Lit', for 'ListOf'\'s reason**: what the term /is/ depends on
+    -- the environment, so it is only known when the operand is read. A region
+    -- with no splices does not reach here — it is built at resolution and
+    -- becomes a 'Lit'.
   deriving (Eq, Show)
 
 -- | What an operand denotes, or the name that had nothing bound to it.
@@ -235,6 +249,30 @@ operandIn e o = case o of
   -- a body must be bound/ still true of an element.
   ListOf os -> VList <$> traverse (operandIn e) os
   PairOf a b -> VPair <$> operandIn e a <*> operandIn e b
+  -- **Assembled here, and it needs no grammar** (MS6 phase 104c): resolution
+  -- did everything the grammar was for and left a shape with holes, so this
+  -- is a fold that reads an operand at each one.
+  --
+  -- **A hole at a token class takes the value, not a term**: @LC[var]\`${s}\`@
+  -- with @s : String@ writes the @String@ in where the constructor wants one.
+  -- A value of the wrong kind there is a run-time failure like any other
+  -- operand of the wrong type.
+  ObjectOf sk -> VTerm <$> assemble sk
+  where
+    assemble sk' = case sk' of
+      SNode nm kids -> foldl App (Global nm []) <$> traverse assemble kids
+      SLit l        -> Right (Primitive l)
+      SHole AtTerm o' -> operandIn e o' >>= \v -> case v of
+        VTerm t -> Right t
+        _       -> Left (spliceName o')
+      SHole (AtPrimitive _) o' -> operandIn e o' >>= \v -> case v of
+        VText x -> Right (Primitive (LString x))
+        VChar c -> Right (Primitive (LChar c))
+        VInt k  -> Right (Primitive (LInt (fromIntegral k)))
+        _       -> Left (spliceName o')
+    spliceName o' = case o' of
+      Ref n -> n
+      _     -> "a splice"
 
 -- | @x = op …@ or @op …@. Binding an op that produces nothing is caught by the
 -- load-time validation pass that rules will need anyway (§2.4, §7.2, phase 15);
@@ -1255,6 +1293,8 @@ refsIn o = case o of
   Lit _      -> []
   ListOf os  -> concatMap refsIn os
   PairOf a b -> refsIn a ++ refsIn b
+  -- An object term's splices are names it reads, for the reason above.
+  ObjectOf sk -> concatMap refsIn (skeletonHoles sk)
 
 -- | Every operand an op reads, in the order it is written, **each with the type
 -- the op wants there** (MS5 phase 66b).
@@ -1408,29 +1448,34 @@ data Rule = Rule
 -- **A pattern matches AS WRITTEN** — §3, his observation, and it is the line
 -- that keeps this function small: nothing here reduces, normalises or coerces.
 -- @3@ matches 'VInt' @3@ and nothing else.
-matchPattern :: Pattern -> Value -> Maybe Env
-matchPattern pt v = case (pt, v) of
+matchPattern :: GlobalEnv -> Pattern -> Value -> Maybe Env
+matchPattern env pt v = case (pt, v) of
   (PVar n, _)              -> Just [(n, v)]
   (PWild, _)               -> Just []
   (PInt i,  VInt j)  | i == j -> Just []
   (PChar c, VChar d) | c == d -> Just []
   (PBool b, VBool c) | b == c -> Just []
   (PText t, VText u) | t == u -> Just []
-  (PPair a b, VPair x y)   -> (++) <$> matchPattern a x <*> matchPattern b y
-  (PSome a, VOption (Just x)) -> matchPattern a x
+  (PPair a b, VPair x y)   -> (++) <$> matchPattern' a x <*> matchPattern' b y
+  (PSome a, VOption (Just x)) -> matchPattern' a x
   (PNone,   VOption Nothing)  -> Just []
   (PList ps mt, VList xs)  -> list ps mt xs
+  -- **An object term, matched against the 'Core' it denotes** (MS6 phase
+  -- 104c). See 'matchSkeleton' for the reduction rule, which is the whole of
+  -- what is interesting here.
+  (PObject sk, VTerm t)    -> matchSkeleton env sk t
   _                        -> Nothing
   where
+    matchPattern' = matchPattern env
     -- A closed pattern must exhaust the list; an open one binds the remainder,
     -- and the remainder is itself matched, which is what makes @[a, ...[]]@ the
     -- long way of saying one element.
     list [] Nothing   []   = Just []
     list [] Nothing   _    = Nothing
-    list [] (Just t)  rest = matchPattern t (VList rest)
+    list [] (Just t)  rest = matchPattern' t (VList rest)
     list _  _         []   = Nothing
     list (q : qs) mt' (x : rest) =
-      (++) <$> matchPattern q x <*> list qs mt' rest
+      (++) <$> matchPattern' q x <*> list qs mt' rest
 
 -- | Match a call's arguments against a clause's parameters (MS5 phase 82).
 --
@@ -1443,8 +1488,8 @@ matchPattern pt v = case (pt, v) of
 -- **Arity is part of matching**, which is why this answers 'Nothing' rather
 -- than being paired with a length test: a name may carry a one-argument clause
 -- and a two-argument one, and each call picks its own ('Thena.Rules.clauses').
-matchClause :: Rule -> [Value] -> Maybe Env
-matchClause r = matchPatterns (ruleParams r)
+matchClause :: GlobalEnv -> Rule -> [Value] -> Maybe Env
+matchClause env r = matchPatterns env (ruleParams r)
 
 -- | Match a run of patterns against a run of values (MS5 phase 82).
 --
@@ -1455,10 +1500,71 @@ matchClause r = matchPatterns (ruleParams r)
 -- **Arity is part of matching**, which is why this answers 'Nothing' rather
 -- than being paired with a length test: a name may carry a one-argument clause
 -- and a two-argument one, and each call picks its own ('Thena.Rules.clauses').
-matchPatterns :: [Pattern] -> [Value] -> Maybe Env
-matchPatterns ps vs
+matchPatterns :: GlobalEnv -> [Pattern] -> [Value] -> Maybe Env
+matchPatterns env ps vs
   | length ps /= length vs = Nothing
-  | otherwise              = concat <$> zipWithM matchPattern ps vs
+  | otherwise              = concat <$> zipWithM (matchPattern env) ps vs
+
+-- | Match an object term's shape against a 'Core' (MS6 phase 104c).
+--
+-- **A term is tried as it is written, and then reduced and tried again** —
+-- his rule, 2026-09-20, and it is one rule for every pattern rather than a
+-- special case for object terms. It is what makes a pattern match the term
+-- elaboration actually produced, which is a chain of @let@s under a wrapper,
+-- while leaving a pattern that /wants/ an unreduced shape able to see it,
+-- because the unreduced attempt comes first.
+--
+-- **So it is strictly more permissive than matching as written**, and the
+-- consequence @discussion\/pattern-matching.md@ §3 records — that a Core
+-- pattern will not match where @goal-type-is-pi@ does — goes away: under this
+-- rule it does.
+--
+-- Reduction is weak head normal form, so it exposes one level; the recursion
+-- does the rest as it descends.
+matchSkeleton :: GlobalEnv -> Skeleton Pattern -> Core -> Maybe Env
+matchSkeleton env sk t = case here t of
+  Just bs -> Just bs
+  Nothing -> here (whnf env [] t)
+  where
+    here term = case sk of
+      SHole AtTerm p          -> matchPattern env p (VTerm term)
+      SHole (AtPrimitive _) p -> case term of
+        Primitive l -> matchPattern env p (primitiveValue l)
+        _           -> Nothing
+      SLit l -> case term of
+        Primitive l' | l == l' -> Just []
+        _                      -> Nothing
+      SNode nm kids -> case spineOf term of
+        Just (nm', args)
+          | nm == nm', length args == length kids ->
+              concat <$> zipWithM (matchSkeleton env) kids args
+        _ -> Nothing
+
+-- | A constructor application, however it is spelled.
+--
+-- **Both spellings arise and neither is wrong**: elaboration leaves a
+-- 'Canonical' once the wrapper has reduced, and a term written out by
+-- 'Thena.Language.Build.buildTerm' is the wrapper applied.
+spineOf :: Core -> Maybe (GlobalName, [Core])
+spineOf term = case term of
+  Canonical c _ args -> Just (c, args)
+  Global c _         -> Just (c, [])
+  App {}             -> case flatten term [] of
+    (Global c _, args) -> Just (c, args)
+    _                  -> Nothing
+  _ -> Nothing
+  where
+    flatten u acc = case u of
+      App f a -> flatten f (a : acc)
+      _       -> (u, acc)
+
+-- | A @Core@ literal as the @instral@ value a hole at a token class binds.
+primitiveValue :: Literal -> Value
+primitiveValue l = case l of
+  LString x -> VText x
+  LChar c   -> VChar c
+  LInt k    -> VInt (fromInteger k)
+  LRegex r  -> VText r
 
 -- | A shallow shape question — **a small closed set, and there is no pattern
 -- language** (§8, DECIDED 2026-08-20).
@@ -1728,3 +1834,4 @@ partWord p = case p of
   Param _    -> "param"
   Method _   -> "method"
   Index _    -> "index"
+

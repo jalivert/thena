@@ -141,6 +141,7 @@ test-suite thena-test
         Thena.GrammarTests
         Thena.EarleyTests
         Thena.BuildTests
+        Thena.ObjectTermTests
         Thena.TokenTests
         Thena.SyntaxTests
     build-depends:
