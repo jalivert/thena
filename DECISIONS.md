@@ -690,6 +690,73 @@ a constructor has no missing argument.
 
 ---
 
+### A judgment is written as on paper, and it is an inductive family
+
+*Decided 2026-09-21.* A `judgment` block gives a notation, whose slots are the
+judgment's indices **in the order they are written**, and its rules:
+
+```
+judgment typing = Γ ⊢ M : T where
+
+  T-var:  x : T ∈ Γ
+          -----------
+          Γ ⊢ x : T
+
+  T-app:  Γ ⊢ M : ( S -> T )    Γ ⊢ N : S
+          --------------------------------
+          Γ ⊢ ( M N ) : T
+```
+
+It declares an ordinary datatype, one constructor per rule, and `:show typing`
+prints it:
+
+```
+data typing : Ctx -> LC -> Ty -> Type₀ where
+  T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> Ctx-in x T Γ -> typing Γ (var x) T
+  T-app : ∀ (Γ : Ctx) (M : LC) (S : Ty) (T : Ty) (N : LC)
+            -> typing Γ M (arrow S T) -> typing Γ N S -> typing Γ (app M N) T
+```
+
+**Every metavariable is quantified, in the order it first appears**, reading
+the premises and then the conclusion. A metavariable is one a `language` or
+`context` declared, or a token class's name, with any suffix of primes, digits,
+subscripts or underscore subscripts: `M'`, `N₁`, `T2`, `x'`, `M_1`, `T_left`. **Nothing else is a name in a rule**: a
+rule has no object literals, so `Γ ⊢ p : T` is refused (`p is not a
+metavariable`) rather than quantifying a `p`.
+
+**A line break ends a premise.** Several may share a line, separated by
+whitespace, and parsing decides where one ends; a line indented further than
+the first premise continues the one above:
+
+```
+  T-app:  Γ ⊢ M :
+              ( S -> T )
+          Γ ⊢ N : S
+          ---------------
+          Γ ⊢ ( M N ) : T
+```
+
+A premise may be named, `d : Γ ⊢ M : T`; one that is
+not is `d1`, `d2`, … by position. A premise is never named like a
+metavariable, so `x : T ∈ Γ` is always the lookup. `E[x->N]` is `LC-subst E x
+N`; `E[x->M, y->N]` is `LC-subst-all`, simultaneous; `E[x->M][y->N]` is one
+after the other.
+
+**The annotated tier writes the quantification**, which fixes the argument
+order and may range over a derivation:
+
+```
+  rule A where ∀ (T : Ty) (M : LC) (Γ : Ctx) (d : typing Γ M T) ->
+      Γ ⊢ M : T
+      ---------
+      Γ ⊢ M :: T
+```
+
+There, a metavariable the `∀` does not bind is refused, and so is a name it
+binds twice: the `∀` lists the rule's metavariables, it does not nest. **The notation is
+installed**, as a context's lookup is: `` typing`· ⊢ ( λ x : ι . x ) : ( ι -> ι )` ``
+is a type, and `:parse typing …` reads one.
+
 ### A context gets a lookup relation, written `x : T ∈ Γ`
 
 *Decided 2026-09-21.* A `context` block declares its datatype and, beside it,
