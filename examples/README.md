@@ -17,6 +17,7 @@ to the file.
 | `03-typing-and-reduction.thena` | Typing, values and call-by-value reduction as `judgment` blocks in paper notation; a named premise; `E[x->N]` in a rule; typing derivations stated as judgment literals; reduction steps whose right-hand side the kernel computes by substitution, one of them capture-avoiding |
 | `04-taking-terms-apart.thena.rules` | A rule base that matches `LC` terms in their own notation (`LC[app]`( ${f} ${a} )``) and builds them (`LC`( ${t} ${t} )``) |
 | `05-grouping-by-splicing.thena` | A language with no parentheses, where `f a b` reads two ways; a splice as a group (`` Ex`${Ex`f a`} b` ``), to any depth; a name or a computation spliced in as a group; why printing is the open half |
+| `06-more-judgments.thena` | Many steps as a judgment built on `step`, with a two-step run; the annotated tier (`rule … where ∀ … ->`) ranging over a derivation; a swap by simultaneous substitution with Redex-style subscripts (`x_1`, `x_2`) beside the sequential version that gets it wrong; a premise continued onto a second line |
 
 ## The earlier proofs — TAPL's arithmetic language, by hand
 
@@ -47,6 +48,7 @@ cabal run thena
 :load examples/03-typing-and-reduction.thena
 :load rules rules/standard.thena.rules examples/04-taking-terms-apart.thena.rules
 :load examples/05-grouping-by-splicing.thena
+:load examples/06-more-judgments.thena
 ```
 
 A module's declarations stay in scope for the next module loaded in the same
@@ -77,6 +79,11 @@ data Ctx-in : String -> Ty -> Ctx -> Type₀ where
 thena spine> :parse typing · ⊢ ( λ x : ι . x ) : ( ι -> ι )
 typing(empty, abs(x, base, var(x)), arrow(base, base))
 
+thena spine> :show halts
+data halts : LC -> Type₀ where
+  { H-value : ∀ (M : LC) -> value M -> halts M
+  ; H-step : ∀ (M : LC) (M' : LC) -> step M M' -> halts M' -> halts M }
+
 thena spine> :parse Ex f a b
 in Ex`f a b`: this term parses two ways, as juxt(ref(f), juxt(ref(a), ref(b))) and as juxt(juxt(ref(f), ref(a)), ref(b))
 
@@ -100,7 +107,7 @@ what can come next. Leave it with `:done`.
   `app (abs "x" base (var "x")) …`, not `` LC`( ( λ x : ι . x ) … )` ``. That is
   not wired in yet.
 - **Loading `02` prints one warning**, that `Ctx-in` gets no no-confusion
-  lemma, and **`03` prints two**, for `typing` and `step`: a constructor whose
-  premise's type mentions an earlier argument gets none, and every rule with a
-  premise is such a constructor. They are accurate and harmless here.
+  lemma, **`03` prints two**, for `typing` and `step`, and **`06` three**: a
+  constructor whose premise's type mentions an earlier argument gets none, and
+  every rule with a premise is such a constructor. They are accurate and harmless here.
 

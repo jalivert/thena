@@ -1,0 +1,120 @@
+-- More judgments: many steps, halting, a swap by simultaneous substitution,
+-- and the layout a long rule may use.
+--
+-- LOAD AFTER 01, 02 AND 03.
+--
+-- Then try   :show steps      :show halts      :show swap
+
+module MoreJudgments where
+
+-- ---------------------------------------------------------------------------
+-- Many steps: the reflexive-transitive closure of 03's `step`. A premise may
+-- be a judgment declared earlier, or the one being declared.
+
+judgment steps = M -->* N where
+
+  S-refl:  ----------
+           M -->* M
+
+  S-step:  M --> M'    M' -->* N
+           ---------------------
+           M -->* N
+
+-- The terms of a two-step run, named so the derivations below can say them.
+twice : LC
+twice = LC`( ( ( λ x : ( ( ι -> ι ) -> ( ι -> ι ) ) . x ) ( λ y : ( ι -> ι ) . y ) ) ( λ z : ι . z ) )`
+
+once : LC
+once = LC`( ( λ y : ( ι -> ι ) . y ) ( λ z : ι . z ) )`
+
+done : LC
+done = LC`( λ z : ι . z )`
+
+-- The first step is inside the function position, the second is a β-step.
+firstStep : step`${twice} --> ${once}`
+firstStep =
+  E-app1 LC`( ( λ x : ( ( ι -> ι ) -> ( ι -> ι ) ) . x ) ( λ y : ( ι -> ι ) . y ) )`
+         LC`( λ y : ( ι -> ι ) . y )` done
+    (E-beta LC`( λ y : ( ι -> ι ) . y )` "x" Ty`( ( ι -> ι ) -> ( ι -> ι ) )` LC`x`
+      (V-abs "y" Ty`( ι -> ι )` LC`y`))
+
+secondStep : step`${once} --> ${done}`
+secondStep = E-beta done "y" Ty`( ι -> ι )` LC`y` (V-abs "z" base LC`z`)
+
+-- S-step's arguments are M, M', N — in the order they first appear — then its
+-- two premises.
+run : steps`${twice} -->* ${done}`
+run = S-step twice once done firstStep (S-step once done done secondStep (S-refl done))
+
+
+-- ---------------------------------------------------------------------------
+-- The annotated tier: the quantification is written, so it fixes the order of
+-- the arguments, and it may bind a derivation the rule text never mentions —
+-- here H-step ranges over the step `s` itself.
+--
+-- The rule text still reads as paper: M and M' are LC's metavariables, and
+-- the ∀ must bind each one it uses. A name bound twice is refused.
+
+judgment halts = M ⇓ where
+
+  rule H-value where ∀ (M : LC) ->
+      M value
+      -------
+      M ⇓
+
+  rule H-step where ∀ (M M' : LC) (s : step M M') ->
+      M' ⇓
+      ----
+      M ⇓
+
+onceHalts : halts`${once} ⇓`
+onceHalts = H-step once done secondStep (H-value done (V-abs "z" base LC`z`))
+
+
+-- ---------------------------------------------------------------------------
+-- A list substitution is simultaneous. Swapping two variables is the case a
+-- one-at-a-time substitution gets wrong: [x_1->x_2] then [x_2->x_1] would
+-- leave both as x_1.
+--
+-- x_1 and x_2 are two further metavariables of the class x: a suffix may be a
+-- prime, a digit, a subscript, or `_` and letters or digits, as in Redex.
+
+judgment swap = M ⇄ N where
+
+  Swap:  ------------------------------------------
+         ( x_1 x_2 ) ⇄ ( x_1 x_2 )[x_1->x_2, x_2->x_1]
+
+-- The kernel runs LC-subst-all to check the right-hand side.
+swapped : swap`( a b ) ⇄ ( b a )`
+swapped = Swap "a" "b"
+
+-- Chained brackets are one after the other, and that is the wrong swap:
+-- ( a b ) becomes ( b b ), then ( a a ).
+judgment swapInTurn = M ⇉ N where
+
+  InTurn:  ----------------------------------------
+           ( x_1 x_2 ) ⇉ ( x_1 x_2 )[x_1->x_2][x_2->x_1]
+
+inTurn : swapInTurn`( a b ) ⇉ ( a a )`
+inTurn = InTurn "a" "b"
+
+
+-- ---------------------------------------------------------------------------
+-- Layout. A line break ends a premise and several may share a line; a line
+-- indented further than the first premise continues the one above. Here the
+-- third premise is broken across two lines.
+
+judgment keepsType = Γ ⊢ M ⇒ N : T where
+
+  K-run:  Γ ⊢ M : T    M -->* N
+          Γ ⊢ N :
+              T
+          -------------------------
+          Γ ⊢ M ⇒ N : T
+
+-- A value runs to itself and keeps its type.
+doneTyped : typing`· ⊢ ${done} : ( ι -> ι )`
+doneTyped = T-abs Ctx`·` "z" base LC`z` base (T-var "z" base Ctx`·, z : ι` (Ctx-here Ctx`·` "z" base))
+
+doneKeeps : keepsType`· ⊢ ${done} ⇒ ${done} : ( ι -> ι )`
+doneKeeps = K-run Ctx`·` done Ty`( ι -> ι )` done doneTyped (S-refl done) doneTyped
