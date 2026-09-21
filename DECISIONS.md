@@ -547,6 +547,46 @@ with fixity declarations, and its own parentheses group. Both take a piece of
 the notation back from the object language in exchange for grouping you do not
 have to write. Thena takes none of it, and you write the production.
 
+### An object term is written the same way in a rule — and there it also matches
+
+*Decided 2026-09-20.*
+
+The notation you write a term of your language with works in `instral` too, and
+**which direction it means is decided by where it stands**. In an operand it
+builds; in a pattern it matches. `${…}` supplies a value in the first and binds
+one in the second.
+
+```
+rule beta LC[app]`( ( λ ${x} : ${A} . ${B} ) ${N} )` :- do
+  ...                                   -- x, A, B, N are bound here
+  t = LC`( ${B} ${N} )`                 -- and spliced back in here
+```
+
+**What a splice binds is the slot's type.** At a language slot it is a term; at
+a token class it is the value the class matched — a `String`, a `Char` or an
+`Int`, not a term wrapping one. So `LC[var]`${s}`` gives you `s` to `say`, and
+using it where a term is wanted is a type error when the file loads.
+
+**Brackets restrict, here as in a surface term.** `` LC`…` `` matches any term
+of the language, `` LC[var]`…` `` only a variable occurrence. Text with no
+splice matches itself: `` LC[var]`x` `` is the variable called `x` and nothing
+else.
+
+**A pattern is tried as written, and then reduced and tried again.** An object
+term in a goal is whatever elaboration produced — a global, a chain of `let`s,
+a wrapper not yet reduced — so matching only the written shape would almost
+never fire. Trying the written shape *first* keeps a pattern that wants an
+unreduced form able to see it. It is one rule for every pattern, not a rule
+about object terms.
+
+**Load the language's file before the rules that take it apart.** A rule file
+is read with the grammars the session already has, so the module declaring
+`language LC` has to have been loaded first. Load them the other way round and
+the tag names a language nothing has declared, which is the error it looks
+like.
+
+---
+
 ### A `do` block is resolved and checked where it runs, and a module's own goes through a rule
 
 *Decided 2026-09-20.*
