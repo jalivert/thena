@@ -16,6 +16,7 @@ to the file.
 | `02-contexts.thena` | A `context` block; its lookup relation `x : T ∈ Γ`; lookups proved with `Ctx-here` and `Ctx-there`; a disequality `x ≠ f` proved with no axiom; why a shadowed binding cannot be reached |
 | `03-typing-and-reduction.thena` | Typing, values and call-by-value reduction as ordinary inductive families; typing derivations; reduction steps whose right-hand side the kernel computes by substitution, one of them capture-avoiding |
 | `04-taking-terms-apart.thena.rules` | A rule base that matches `LC` terms in their own notation (`LC[app]`( ${f} ${a} )``) and builds them (`LC`( ${t} ${t} )``) |
+| `05-grouping-by-splicing.thena` | A language with no parentheses, where `f a b` reads two ways; a splice as a group (`` Ex`${Ex`f a`} b` ``), to any depth; a name or a computation spliced in as a group; why printing is the open half |
 
 ## The earlier proofs — TAPL's arithmetic language, by hand
 
@@ -45,6 +46,7 @@ cabal run thena
 :load examples/02-contexts.thena
 :load examples/03-typing-and-reduction.thena
 :load rules rules/standard.thena.rules examples/04-taking-terms-apart.thena.rules
+:load examples/05-grouping-by-splicing.thena
 ```
 
 A module's declarations stay in scope for the next module loaded in the same
@@ -71,6 +73,9 @@ thena spine> :show Ctx-in
 data Ctx-in : String -> Ty -> Ctx -> Type₀ where
   { Ctx-here : ∀ (Γ : Ctx) (x : String) (T : Ty) -> Ctx-in x T (extend Γ x T)
   ; Ctx-there : ∀ (Γ : Ctx) (x : String) (T : Ty) (x' : String) (T' : Ty) -> (Eq {0} String x x' -> Empty {0}) -> Ctx-in x T Γ -> Ctx-in x T (extend Γ x' T') }
+
+thena spine> :parse Ex f a b
+in Ex`f a b`: this term parses two ways, as juxt(ref(f), juxt(ref(a), ref(b))) and as juxt(juxt(ref(f), ref(a)), ref(b))
 
 thena spine> describe LC`( λ x : ι . x )`
 a function binding x
