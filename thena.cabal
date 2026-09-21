@@ -47,6 +47,7 @@ library
         Thena.Language.Grammar
         Thena.Language.Earley
         Thena.Language.Build
+        Thena.Language.Substitution
         Thena.Repl
         Thena.Rules
         Thena.Surface.Concrete
@@ -141,6 +142,7 @@ test-suite thena-test
         Thena.GrammarTests
         Thena.EarleyTests
         Thena.BuildTests
+        Thena.SubstitutionTests
         Thena.ObjectTermTests
         Thena.TokenTests
         Thena.SyntaxTests

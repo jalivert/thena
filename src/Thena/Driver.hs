@@ -53,8 +53,9 @@ module Thena.Driver
 import Data.Maybe (fromMaybe, isJust)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
-import Thena.Core.Reduce (primitiveNames, whnf)
+import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), fresh, open, substLevelsIn, tokenName)
+import Thena.Language.Substitution (substitutionDefinitions)
 import Thena.Language.Regex
   ( Inclusion (..)
   , Regex (..)
@@ -2642,7 +2643,12 @@ progress oneStep s msgs warns = case step (sessionMachine s) of
       -- and declared exactly as a written one is.
       let (is, n1) = datatypeProgram (names m) sd (Just roles)
           (sd, roles) = grammarDatatype g
-          m' = (Engine.splicing is m) { grammars = g : grammars m, names = n1 }
+          -- **Then its substitution** (MS6 phase 105, §4.7): four ordinary
+          -- definitions, elaborated by the same instructions a written one is,
+          -- right after the datatype they are about.
+          (fs, n2) = surfaceProgram n1
+                       [ ItemTheorem x ty body | (x, ty, body) <- substitutionDefinitions g ]
+          m' = (Engine.splicing (is ++ fs) m) { grammars = g : grammars m, names = n2 }
        in if oneStep
             then stop m' msgs (reverse ws ++ warns) Paused
             else progress oneStep s { sessionMachine = m' } msgs (reverse ws ++ warns)
@@ -2696,7 +2702,10 @@ progress oneStep s msgs warns = case step (sessionMachine s) of
 checkedPrimitive :: GlobalEnv -> GlobalName -> Core -> Either DeclareError ()
 checkedPrimitive env nm ty = case lookup nm primitiveNames of
   Nothing -> Left (NoSuchPrimitive nm)
-  Just p@(GlobalName pn) -> case argumentsOf ty of
+  Just Appending -> case argumentsOf ty of
+    Just ([a, b], r) | all (== Global (GlobalName "String") []) [a, b, r] -> Right ()
+    _ -> wrong "at String -> String -> String"
+  Just (Comparing p@(GlobalName pn)) -> case argumentsOf ty of
     Just ([a, b], Global d [])
       | a /= Global p [] || b /= Global p [] -> wrong ("with two arguments of type " ++ pn)
       | otherwise -> case lookupInductive d env of

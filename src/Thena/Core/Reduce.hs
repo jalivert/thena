@@ -7,6 +7,7 @@
 -- definition without this module needing to know how either was checked.
 module Thena.Core.Reduce
   ( whnf
+  , PrimitiveRule (..)
   , primitiveNames
   ) where
 
@@ -17,6 +18,7 @@ import Thena.Core.Context (Context, Entry (..), entryType, entryVar)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
+  , Literal (..)
   , Var
   , close
   , instantiate
@@ -131,19 +133,36 @@ whnf env ctx = go 0
 -- The primitives' rule (MS6 phase 97b)
 -- --------------------------------------------------------------------------
 
--- | The primitive functions the system computes with, and the type each
--- compares.
+-- | The primitive functions the system computes with, and the rule each
+-- computes by.
 --
 -- **This list is the whole of what @primitive@ may declare.** A name absent
 -- from it has no rule, so the driver refuses the declaration rather than
 -- installing a constant that would sit there as an axiom
 -- (@ms6\/SPEC.md@ §2.1).
-primitiveNames :: [(GlobalName, GlobalName)]
+primitiveNames :: [(GlobalName, PrimitiveRule)]
 primitiveNames =
-  [ (GlobalName ("eq" ++ p), GlobalName p) | p <- ["String", "Char", "Int"] ]
+  [ (GlobalName ("eq" ++ p), Comparing (GlobalName p)) | p <- ["String", "Char", "Int"] ]
+  ++ [ (GlobalName "appendString", Appending) ]
 
--- | @eqP a b@ where both arguments are literals of @P@: the first constructor
--- of the result datatype when they agree, the second when they do not.
+-- | What a primitive computes, and so what type the driver will accept it at
+-- ('Thena.Driver.checkedPrimitive').
+data PrimitiveRule
+  = Comparing GlobalName
+    -- ^ @P -> P -> B@ for this @P@: the first constructor of @B@ for literals
+    -- that agree, the second for literals that differ (MS6 phase 97b)
+  | Appending
+    -- ^ @String -> String -> String@: the two literals, one after the other
+    -- (MS6 phase 105). **The one way a @String@ is built**, and generated
+    -- substitution needs it: a fresh name is a name primed until it is not
+    -- among the ones it must avoid (§4.7)
+  deriving (Eq, Show)
+
+-- | A primitive applied to two literals, computed; anything else is neutral.
+--
+-- For 'Comparing': @eqP a b@ where both arguments are literals of @P@ is the
+-- first constructor of the result datatype when they agree, the second when
+-- they do not.
 --
 -- **The two constructors come from the declared type, not from a name written
 -- here.** The constant's type is @P -> P -> B@, and @B@\'s own declaration
@@ -161,14 +180,17 @@ primitiveNames =
 primitiveStep :: GlobalEnv -> (Core -> Core) -> Core -> Core -> Maybe Core
 primitiveStep env reduce f arg = case f of
   App (Global g []) x
-    | Just p <- lookup g primitiveNames
+    | Just rule <- lookup g primitiveNames
     , Primitive l <- reduce x
-    , Primitive r <- reduce arg
-    , primitiveType l == Global p []
-    , primitiveType r == Global p []
-    , Just result <- resultDatatype env g
-    , (c : d : _) <- map constructorName (inductiveConstructors result) ->
-        Just (Canonical (if l == r then c else d) [] [])
+    , Primitive r <- reduce arg -> case (rule, l, r) of
+        (Comparing p, _, _)
+          | primitiveType l == Global p []
+          , primitiveType r == Global p []
+          , Just result <- resultDatatype env g
+          , (c : d : _) <- map constructorName (inductiveConstructors result) ->
+              Just (Canonical (if l == r then c else d) [] [])
+        (Appending, LString a, LString b) -> Just (Primitive (LString (a ++ b)))
+        _ -> Nothing
   _ -> Nothing
 
 -- | The datatype a declared primitive answers with, read off its own type.

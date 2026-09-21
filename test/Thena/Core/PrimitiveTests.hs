@@ -139,9 +139,21 @@ conversion =
       isJust (failureOf (Primitive (LChar 'a')) (Primitive (LString "a"))) @?= True
   , testCase "nor a literal and a universe" $
       isJust (failureOf (Primitive (LInt 0)) (Universe (levelOfNat 0))) @?= True
+  -- **Found in phase 105**: the two sides were compared syntactically first,
+  -- so "a" against "a" converted, but "a" against a definition of "a" reduced
+  -- to two literals and fell through to a clash. @refl String "a"@ was refused
+  -- at @Eq String "a" "a"@ because of it.
+  , testCase "a literal and a definition of that literal convert" $
+      failureInA (Primitive (LString "a")) named @?= Nothing
+  , testCase "and of a different one do not" $
+      isJust (failureInA (Primitive (LString "b")) named) @?= True
   ]
   where
     failureOf s t = let (why, _, _) = convert env ctx 0 s t in why
+    failureInA s t = let (why, _, _) = convert withA ctx 0 s t in why
+    named = Global (GlobalName "a") []
+    withA = addDefinition (GlobalName "a")
+              (MkDefinition [] [] (Global (GlobalName "String") []) (Primitive (LString "a"))) env
 
 -- --------------------------------------------------------------------------
 -- The round trip
@@ -217,12 +229,20 @@ computing =
         @?= [answer "yes", answer "no"]
   , testCase "so is a redex that reduces to one" $
       reduced (apply [App identity (str "a"), str "a"]) @?= answer "yes"
+  -- appendString (MS6 phase 105): the one way a String is built.
+  , testCase "appendString puts two literals together" $
+      reduced (append [str "x", str "'"]) @?= str "x'"
+  , testCase "and reads a definition of one, as a comparison does" $
+      reduced (append [named "a", str "b"]) @?= str "ab"
+  , testCase "and leaves a variable where it is" $
+      reduced (append [Free v, str "'"]) @?= append [Free v, str "'"]
   ]
   where
     v = fst (fresh 500)
     str s = Primitive (LString s)
     named g = Global (GlobalName g) []
     apply = foldl App (Global (GlobalName "eqString") [])
+    append = foldl App (Global (GlobalName "appendString") [])
     reduced = whnf withA ctx
     withA = addDefinition (GlobalName "a") (MkDefinition [] [] stringTy (str "a")) answering
     stringTy = Global (GlobalName "String") []
@@ -242,6 +262,14 @@ refusals =
   , refusedCase "an answer with the wrong constructors" (GlobalName "eqInt") intoAnswerOfOne
   , testCase "and the declaration this phase ships is accepted" $
       isRight (checkedPrimitive answering (GlobalName "eqString") (twoOf "String")) @?= True
+  -- appendString's rule reads no declared type: it is String -> String ->
+  -- String exactly, and a comparison's shape is not that.
+  , refusedCase "appendString answering with a datatype" (GlobalName "appendString") (twoOf "String")
+  , refusedCase "appendString over Int" (GlobalName "appendString")
+      (arrow (named "Int") (arrow (named "Int") (named "Int")))
+  , testCase "appendString at its own type is accepted" $
+      isRight (checkedPrimitive answering (GlobalName "appendString")
+                 (arrow (named "String") (arrow (named "String") (named "String")))) @?= True
   ]
   where
     refusedCase what nm ty =

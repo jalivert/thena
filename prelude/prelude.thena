@@ -11,6 +11,17 @@ data Empty : Type where
 data And (A : Type) (B : Type) : Type where
   both : forall (a : A) (b : B) -> And A B
 
+-- What generated substitution works over (MS6 phase 105): a language's free
+-- variables are a list of names, and a simultaneous substitution is a list of
+-- name-and-term pairs, the pair being `And`.
+--
+-- **`nil` and `cons` are names no object language may now use** — his choice,
+-- 2026-09-21, knowing that the prelude's namespace is every modelled
+-- language's (`ms6/CLOSEOUT.md` 3).
+data List (A : Type) : Type where
+  nil : List A
+  cons : forall (a : A) (rest : List A) -> List A
+
 -- What a primitive comparison answers with (MS6 phase 97b).
 --
 -- **Not @Bool@, and the reason is the one namespace.** An object language
@@ -37,6 +48,7 @@ data Comparison : Type₀ where
 do declare-primitive "eqString" (resolve-core core`String -> String -> Comparison`)
    ; declare-primitive "eqChar" (resolve-core core`Char -> Char -> Comparison`)
    ; declare-primitive "eqInt" (resolve-core core`Int -> Int -> Comparison`)
+   ; declare-primitive "appendString" (resolve-core core`String -> String -> String`)
 
 data Sigma (A : Type₀) (B : A -> Type₀) : Type₀ where
   pair : forall (a : A) (b : B a) -> Sigma A B

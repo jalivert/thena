@@ -1987,6 +1987,12 @@ renderDeclareError e = case e of
     NameTaken -> g ++ " is already declared"
     ConstructorTaken p -> g ++ "'s constructor " ++ p ++ " is already declared"
     ContextShape -> blockAt k g ++ ": a context needs one empty and one extension production"
+    -- MS6 phase 105: what generated substitution needs of a language (§4.7).
+    FunctionTaken f -> g ++ "'s substitution function " ++ f ++ " is already declared"
+    NoVariableProduction ->
+      blockAt k g ++ ": it has binders, so it needs a production ‹x› as occurrence for a renamed binder to become"
+    VariableProductions ps ->
+      blockAt k g ++ ": " ++ intercalate ", " ps ++ " all declare an occurrence, and a language has one variable production"
     InProduction p why -> blockAt k g ++ ", production " ++ p ++ ": " ++ case why of
       NoItems -> "it has no items"
       NotAMetavariable x -> x ++ " is not a metavariable"
@@ -1996,6 +2002,8 @@ renderDeclareError e = case e of
       BinderNotString x s -> "a binder must be a String, and " ++ x ++ " is " ++ sortPhrase s
       OccurrenceNotString x s -> "an occurrence must be a String, and " ++ x ++ " is " ++ sortPhrase s
       ScopesDiffer x -> x ++ " is written with different binders free in it"
+      OccurrenceNotAlone x -> "the occurrence " ++ x ++ " must be the production's only argument, because substitution replaces the whole of it"
+      ScopeElsewhere x -> "a binder is free in " ++ x ++ ", which is not of this language, so substitution could not rename in it"
   -- @ms6\/SPEC.md@ §3.2's wording. The regex is quoted as written, between its
   -- slashes; the witness as a string literal, so a newline in it is visible.
   TokenClassRefused g why -> "in the token class " ++ nameString g ++ ": " ++ case why of

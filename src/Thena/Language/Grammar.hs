@@ -26,6 +26,8 @@ module Thena.Language.Grammar
   , GrammarProblem (..)
   , ProductionProblem (..)
   , checkGrammar
+  , substitutionNames
+  , variableProduction
   , tokenClassOf
   , earleyRules
   ) where
@@ -100,6 +102,15 @@ data GrammarProblem
     -- production. **No magic** (§4.5): the user disambiguates
   | ContextShape
     -- ^ §5.1: a context needs one empty and one extension production
+  | FunctionTaken String
+    -- ^ a function generated substitution would declare (§4.7) is already
+    -- declared, by anything or by a production of this block
+  | NoVariableProduction
+    -- ^ a language with binders and no production @‹x› as occurrence@, so a
+    -- renamed binder has no term to become (§4.7)
+  | VariableProductions [String]
+    -- ^ more than one production declares an occurrence; substitution would
+    -- not know which one a renamed binder becomes
   | InProduction String ProductionProblem
   deriving (Eq, Show)
 
@@ -123,6 +134,12 @@ data ProductionProblem
   | ScopesDiffer String
     -- ^ a name written twice with different binders free in it — one
     -- argument (§4.3) cannot have two scopes
+  | OccurrenceNotAlone String
+    -- ^ the occurrence is not the production's only argument (MS6 phase 105):
+    -- substitution replaces the whole node, so anything beside it would be lost
+  | ScopeElsewhere String
+    -- ^ a binder is free in an argument of another language, which
+    -- substitution over this one could not rename in (MS6 phase 105)
   deriving (Eq, Show)
 
 -- | Validate a block against the grammars already installed and the global
@@ -147,6 +164,10 @@ checkGrammar installed env b = do
              (blockProductions b)
   let g = Grammar kind (GlobalName name) heads (map fst prods)
   if kind == ContextBlock && not (contextShaped heads g) then refuse ContextShape else Right ()
+  if kind == LanguageBlock then either refuse Right (substitutable g) else Right ()
+  case [ f | f <- substitutionNames g, taken f || f `elem` prodNames ] of
+    f : _ -> refuse (FunctionTaken f)
+    [] -> Right ()
   Right (g, concatMap snd prods)
   where
     kind = blockKind b
@@ -221,6 +242,58 @@ checkGrammar installed env b = do
       Just (OfClass _ (GlobalName "String") _) -> Right ()
       Just s -> Left (wrong x s)
       Nothing -> Left (NotAMetavariable x)
+
+-- | Can substitution be generated for this language (§4.7, MS6 phase 105)?
+--
+-- A language with no binder and no occurrence has nothing to generate, and
+-- passes. One that has either needs **exactly one variable production** — the
+-- one production that declares an occurrence, taking only that — because a
+-- binder renamed to avoid capture must become a term, and that production is
+-- the only way to make a name one. **That is what "one identifier class"
+-- (§4.7) comes to**: every binder is already a @String@, and one variable
+-- production means one sort of name. It cannot mean one class /name/, since
+-- §4.4's own @let : { x, y } as binders@ needs two. And a binder is free only
+-- in arguments **of this language**, the only ones substitution over it walks
+-- into.
+substitutable :: Grammar -> Either GrammarProblem ()
+substitutable g
+  | null named = Right ()
+  | otherwise = do
+      -- The metadata names at most one occurrence per production, so a
+      -- production appears here once for each it declares, which is once.
+      case [ (p, a) | (p, a) <- named, isOccurrence a ] of
+        [] -> Left NoVariableProduction
+        [(p, a)]
+          | length (gproductionArguments p) == 1 -> Right ()
+          | otherwise -> inProduction p (OccurrenceNotAlone (argumentName a))
+        pas -> Left (VariableProductions [ n | (p, _) <- pas, let GlobalName n = gproductionName p ])
+      case [ (p, a) | p <- grammarProductions g, a@(Argument _ srt (Scope _)) <- gproductionArguments p
+                    , srt /= OfLanguage (grammarName g) ] of
+        (p, a) : _ -> inProduction p (ScopeElsewhere (argumentName a))
+        [] -> Right ()
+  where
+    named = [ (p, a) | p <- grammarProductions g, a <- gproductionArguments p, isNamed (argumentRole a) ]
+    isNamed r = r == Occurrence || r == Binder
+    isOccurrence a = argumentRole a == Occurrence
+    inProduction p why = let GlobalName n = gproductionName p in Left (InProduction n why)
+
+-- | The functions generated substitution declares for a language (§4.7), in
+-- the order they are declared; none for a language with no occurrence.
+substitutionNames :: Grammar -> [String]
+substitutionNames g = case variableProduction g of
+  Nothing -> []
+  Just _ -> [ n ++ suffix | suffix <- ["-fresh", "-fv", "-subst-all", "-subst"] ]
+  where GlobalName n = grammarName g
+
+-- | A language's variable production, if it has one — the production that
+-- declares an occurrence. 'substitutable' has checked there is at most one.
+variableProduction :: Grammar -> Maybe GProduction
+variableProduction g
+  | grammarKind g /= LanguageBlock = Nothing
+  | otherwise = case [ p | p <- grammarProductions g
+                         , any ((== Occurrence) . argumentRole) (gproductionArguments p) ] of
+      p : _ -> Just p
+      [] -> Nothing
 
 -- | §5.1: exactly two productions, one with no slot of the context's own sort
 -- and one with exactly one.
