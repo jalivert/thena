@@ -120,7 +120,7 @@ the level left to be worked out:
 thena spine> :infer Type₀
 Type₀ : Type₁
 thena spine> :infer Type
-Type : Type (suc ?ℓ830)
+Type : Type (suc ?ℓ943)
 ```
 
 `?ℓ229` is an unknown level. It is not a default and it is not zero — it is
@@ -152,8 +152,8 @@ of it writes that level in braces:
 
 ```
 thena spine> :show Eq
-data Eq {ℓ₇₇} (A : Type (ℓ₇₇)) : A -> A -> Type (ℓ₇₇) where
-  { refl : ∀ (a : A) -> Eq {ℓ₇₇} A a a }
+data Eq {ℓ₇₈} (A : Type (ℓ₇₈)) : A -> A -> Type (ℓ₇₈) where
+  { refl : ∀ (a : A) -> Eq {ℓ₇₈} A a a }
 ```
 
 So `Eq` on its own is not a term — `Eq {0} Nat x y` is. **Written on the
@@ -162,7 +162,7 @@ one unknown per parameter, and unification settles them.
 
 ```
 thena spine> :infer refl
-refl : ∀ (A : Type (?ℓ837)) (a : A) -> Eq {?ℓ837} A a a
+refl : ∀ (A : Type (?ℓ950)) (a : A) -> Eq {?ℓ950} A a a
 ```
 
 Written in the development calculus they are explicit, and **prenex** — a use
@@ -181,8 +181,8 @@ join:
 
 ```
 thena spine> :show And
-data And {ℓ₂₂₇ ℓ₂₂₈} (A : Type (ℓ₂₂₇)) (B : Type (ℓ₂₂₈)) : Type (ℓ₂₂₇ ⊔ ℓ₂₂₈) where
-  { both : A -> B -> And {ℓ₂₂₇ ℓ₂₂₈} A B }
+data And {ℓ₂₂₈ ℓ₂₂₉} (A : Type (ℓ₂₂₈)) (B : Type (ℓ₂₂₉)) : Type (ℓ₂₂₈ ⊔ ℓ₂₂₉) where
+  { both : A -> B -> And {ℓ₂₂₈ ℓ₂₂₉} A B }
 ```
 
 `⊔` is the one symbol that is printed and never written: the join is computed
@@ -277,8 +277,8 @@ constructors' own levels, and becomes a level parameter if nothing pins it:
 thena spine> data Box (A : Type) : Type where { box : A -> Box A }
 declared Box
 thena spine> :show Box
-data Box {ℓ₈₈₆} (A : Type (ℓ₈₈₆)) : Type (ℓ₈₈₆) where
-  { box : A -> Box {ℓ₈₈₆} A }
+data Box {ℓ₉₉₉} (A : Type (ℓ₉₉₉)) : Type (ℓ₉₉₉) where
+  { box : A -> Box {ℓ₉₉₉} A }
 ```
 
 A written `Typeₙ` is still checked rather than believed:
@@ -412,11 +412,11 @@ unknown becomes a parameter:
 
 ```
 thena spine> :theorem idPoly : ∀ (A : Type) -> A -> A
-proving idPoly : ∀ (A : Type (?ℓ921)) -> A -> A
+proving idPoly : ∀ (A : Type (?ℓ1034)) -> A -> A
 thena spine> try-core ⌜ \ (A : Type) (a : A) -> a ⌝
 thena spine> solve
 thena spine> qed
-idPoly {ℓ₉₃₃} : ∀ (A : Type (ℓ₉₃₃)) -> A -> A   ∎
+idPoly {ℓ₁₀₄₆} : ∀ (A : Type (ℓ₁₀₄₆)) -> A -> A   ∎
 ```
 
 Sometimes one level is not enough, and the proof leaves a *relation* between two
@@ -425,11 +425,11 @@ before a `⊢`:
 
 ```
 thena spine> :theorem lift : Type -> Type
-proving lift : Type (?ℓ935) -> Type (?ℓ936)
+proving lift : Type (?ℓ1048) -> Type (?ℓ1049)
 thena spine> try-core ⌜ \ (x : Type) -> x ⌝
 thena spine> solve
 thena spine> qed
-lift {ℓ₉₄₄ ℓ₉₄₅} : (ℓ₉₄₄ ≤ ℓ₉₄₅) ⊢ Type (ℓ₉₄₄) -> Type (ℓ₉₄₅)   ∎
+lift {ℓ₁₀₅₇ ℓ₁₀₅₈} : (ℓ₁₀₅₇ ≤ ℓ₁₀₅₈) ⊢ Type (ℓ₁₀₅₇) -> Type (ℓ₁₀₅₈)   ∎
 ```
 
 Read it as *given `ℓ₂₃₈ ≤ ℓ₂₃₉`, this type*. A constraint that held at every
@@ -697,7 +697,7 @@ enter-binders ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 thena spine> prove
-chose 1167: intro
+chose 1280: intro
 ```
 
 Three rules matched, so the engine reports which one it took and leaves a
@@ -705,7 +705,7 @@ Three rules matched, so the engine reports which one it took and leaves a
 
 ```
 thena spine> :choices
-1167  intro   untried: solve, regret, prove
+1280  intro   untried: solve, regret, prove
 ```
 
 `retry` backtracks to the nearest choice point and takes the next alternative.
@@ -714,13 +714,13 @@ undoes the whole thing:
 
 ```
 thena spine> retry
-retrying 1167: solve
-backtracking to 1167: regret
+retrying 1280: solve
+backtracking to 1280: regret
 thena spine> :show
 ▶ let ? id : ∀ (A : Type₀) -> A -> A in
   id
 thena spine> :choices
-1167  regret   untried: prove
+1280  regret   untried: prove
 ```
 
 Search is meant to be inspectable, not a black box: you can always see what was
@@ -741,11 +741,11 @@ line left is yours to reach with `retry`, and nothing reaches it for you:
 thena spine> :theorem t : ∀ (A : Type₀) -> A -> A
 proving t : ∀ (A : Type₀) -> A -> A
 thena spine> prove
-chose 825: attack
+chose 938: attack
 thena spine> regret
 thena spine> back
 stuck: already at the root
-  undoing that would backtrack to 825, which was chosen before this line — retry 825 to take it
+  undoing that would backtrack to 938, which was chosen before this line — retry 938 to take it
 ```
 
 `regret` took the guess back off and `back` had nothing left to pop. Without the

@@ -50,6 +50,7 @@ tests =
       , testGroup "worked cases" (worked io)
       , testGroup "against the nameless oracle" (crossing io)
       , testGroup "what can and cannot be generated" refused
+      , testGroup "a proof can follow the decision (phase 109a)" followed
       ]
 
 -- ---------------------------------------------------------------------------
@@ -414,3 +415,42 @@ refused =
       let (s1, r) = loadProofSource s0 (unlines
             (["module Refused where", "", "x : Token String", "x = /[a-z]+/", ""] ++ body))
       last (renderResponse s1 r) @?= want
+
+-- ---------------------------------------------------------------------------
+-- Following the decision (MS6 phase 109a, ms6/CLOSEOUT.md 32)
+
+-- | **What @decString@ was for.** At @var y@ the generated code eliminates
+-- @decString y x@; a proof about a name it does not know eliminates the same
+-- term, and each branch hands it the evidence it needs. With @eqString@ there
+-- the @same@ branch had no @Eq String y x@ and neither lemma could be stated
+-- and proved. These are the base case of the substitution lemma phase 109b
+-- builds.
+followed :: [TestTree]
+followed =
+  [ testCase "x[x -> N] is N, and y[x -> N] is y when y is not x, for names nobody knows" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 (source ++ unlines lemmas) of
+        (_, ProofLoaded {}) -> pure ()
+        (s1, other) -> assertFailure (unlines (renderResponse s1 other))
+  ]
+  where
+    lemmas =
+      [ ""
+      , "absurdly : forall (C : Type\8320) (e : Empty) -> C"
+      , "absurdly = \\ C e -> elim Empty () (\\ t -> C) () () e"
+      , ""
+      , "varHit : forall (x : String) (N : LC) -> Eq LC (LC-subst (var x) x N) N"
+      , "varHit = \\ x N ->"
+      , "  elim Dec ((Eq String x x))"
+      , "    (\\ d -> Eq LC (elim Dec ((Eq String x x)) (\\ d -> LC) ((\\ p -> N) (\\ n -> var x)) () d) N)"
+      , "    ((\\ p -> refl LC N) (\\ n -> absurdly (Eq LC (var x) N) (n (refl String x))))"
+      , "    () (decString x x)"
+      , ""
+      , "varMiss : forall (y : String) (x : String) (N : LC) (ne : Eq String y x -> Empty) -> Eq LC (LC-subst (var y) x N) (var y)"
+      , "varMiss = \\ y x N ne ->"
+      , "  elim Dec ((Eq String y x))"
+      , "    (\\ d -> Eq LC (elim Dec ((Eq String y x)) (\\ d -> LC) ((\\ p -> N) (\\ n -> var y)) () d) (var y))"
+      , "    ((\\ p -> absurdly (Eq LC N (var y)) (ne p)) (\\ n -> refl LC (var y)))"
+      , "    () (decString y x)"
+      ]
+

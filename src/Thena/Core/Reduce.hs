@@ -20,7 +20,9 @@ import Thena.Core.Term
   , GlobalName (..)
   , Literal (..)
   , Var
+  , Ident (..)
   , close
+  , fresh
   , instantiate
   , primitiveType
   , substLevelsIn
@@ -143,6 +145,7 @@ whnf env ctx = go 0
 primitiveNames :: [(GlobalName, PrimitiveRule)]
 primitiveNames =
   [ (GlobalName ("eq" ++ p), Comparing (GlobalName p)) | p <- ["String", "Char", "Int"] ]
+  ++ [ (GlobalName ("dec" ++ p), Deciding (GlobalName p)) | p <- ["String", "Char", "Int"] ]
   ++ [ (GlobalName "appendString", Appending) ]
 
 -- | What a primitive computes, and so what type the driver will accept it at
@@ -151,6 +154,14 @@ data PrimitiveRule
   = Comparing GlobalName
     -- ^ @P -> P -> B@ for this @P@: the first constructor of @B@ for literals
     -- that agree, the second for literals that differ (MS6 phase 97b)
+  | Deciding GlobalName
+    -- ^ @(a b : P) -> D (Eq P a b)@ for this @P@, with @D@ a datatype of one
+    -- parameter and two constructors — @yes : A -> D A@ and
+    -- @no : (A -> E) -> D A@. Two literals answer with **the evidence**, not
+    -- only the verdict (MS6 phase 109a, his choice on @ms6\/CLOSEOUT.md@ 32):
+    -- a proof that eliminates the same @decP y x@ on names it does not know
+    -- gets @Eq P y x@ in one branch and its refutation in the other, which
+    -- @Comparing@ cannot give
   | Appending
     -- ^ @String -> String -> String@: the two literals, one after the other
     -- (MS6 phase 105). **The one way a @String@ is built**, and generated
@@ -189,9 +200,78 @@ primitiveStep env reduce f arg = case f of
           , Just result <- resultDatatype env g
           , (c : d : _) <- map constructorName (inductiveConstructors result) ->
               Just (Canonical (if l == r then c else d) [] [])
+        (Deciding p, _, _)
+          | primitiveType l == Global p []
+          , primitiveType r == Global p [] -> decided env g (Primitive l) (Primitive r) (l == r)
         (Appending, LString a, LString b) -> Just (Primitive (LString (a ++ b)))
         _ -> Nothing
   _ -> Nothing
+
+-- | What @decP a b@ is for two literals: @yes (refl P a)@ when they agree,
+-- and when they differ @no@ with a refutation of @Eq P a b@.
+--
+-- **Every name comes from the declared type**, as 'Comparing'\'s constructors
+-- do: @D@, @Eq@, their constructors, their levels and the @E@ of @no@'s
+-- argument. The driver has checked the shape ('Thena.Driver.checkedPrimitive').
+--
+-- **The refutation is an honest closed term, and it uses @decP@ itself.** With
+-- @T t@ the type @Eq P a a@ when @decP a t@ is @yes@ and @E@ when it is @no@,
+--
+-- > λ q. elim Eq P (λ u v r. T u -> T v) (λ c z. z) a b q (refl P a)
+--
+-- carries @refl P a : T a@ along @q : Eq P a b@ to @T b@, which is @E@
+-- because @a@ and @b@ are literals that differ. So nothing here is trusted but
+-- the verdict on two literals — the same thing 'Comparing' trusts.
+decided :: GlobalEnv -> GlobalName -> Core -> Core -> Bool -> Maybe Core
+decided env g a b agree = do
+  c <- lookupConstant g env
+  (dN, l1, eqN, l2, pty) <- case instantiateBoth (constantType c) of
+    Just (App (Global dN l1) eqAB)
+      | App (App (App (Global eqN l2) pty) _) _ <- eqAB -> Just (dN, l1, eqN, l2, pty)
+    _ -> Nothing
+  dDef <- lookupInductive dN env
+  [yesC, noC] <- Just (inductiveConstructors dDef)
+  eDef <- lookupInductive eqN env
+  [reflC] <- Just (inductiveConstructors eDef)
+  [noArg] <- Just (constructorArguments noC)
+  e <- case entryType noArg of
+    -- Written against @D@'s own level parameters, so instantiated at this use's.
+    Pi _ _ sc -> Just (atLevels (inductiveLevels dDef) l1 (instantiate (Universe LZero) sc))
+    _ -> Nothing
+  let eqOf x y = App (App (App (Global eqN l2) pty) x) y
+      reflOf x = Canonical (constructorName reflC) l2 [pty, x]
+      -- The universe @Eq P a a@ lives in, at this use's levels.
+      eqSort = atLevels (inductiveLevels eDef) l2 (Universe (inductiveLevel eDef))
+      decOf x y = App (App (Global g []) x) y
+      -- Variables only ever closed over again before this returns, so any
+      -- distinct numbers do.
+      var k = fst (fresh k)
+      (u, v, r, q, cv, z, w, pv, nv) = (var 0, var 1, var 2, var 3, var 4, var 5, var 6, var 7, var 8)
+      -- T t: what knowing @decP a t@ tells you.
+      told t = Eliminate dN l1 [eqOf a t]
+        (Lam (Ident "w") (App (Global dN l1) (eqOf a t)) (close w eqSort))
+        [ Lam (Ident "p") (eqOf a t) (close pv (eqOf a a))
+        , Lam (Ident "n") (arrowTo (eqOf a t) e) (close nv e) ]
+        [] (decOf a t)
+      motive =
+        Lam (Ident "u") pty $ close u $
+        Lam (Ident "v") pty $ close v $
+        Lam (Ident "r") (eqOf (Free u) (Free v)) $ close r $
+        Pi (Ident "_") (told (Free u)) (close r (told (Free v)))
+      method = Lam (Ident "c") pty $ close cv $ Lam (Ident "z") (told (Free cv)) $ close z (Free z)
+      refutation =
+        Lam (Ident "q") (eqOf a b) $ close q $
+          App (Eliminate eqN l2 [pty] motive [method] [a, b] (Free q)) (reflOf a)
+  Just $ if agree
+    then Canonical (constructorName yesC) l1 [eqOf a b, reflOf a]
+    else Canonical (constructorName noC) l1 [eqOf a b, refutation]
+  where
+    instantiateBoth ty = case ty of
+      Pi _ _ sa -> case instantiate a sa of
+        Pi _ _ sb -> Just (instantiate b sb)
+        _ -> Nothing
+      _ -> Nothing
+    arrowTo dom cod = Pi (Ident "_") dom (close (fst (fresh (-1))) cod)
 
 -- | The datatype a declared primitive answers with, read off its own type.
 resultDatatype :: GlobalEnv -> GlobalName -> Maybe InductiveDefinition

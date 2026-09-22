@@ -50,6 +50,24 @@ do declare-primitive "eqString" (resolve-core core`String -> String -> Compariso
    ; declare-primitive "eqInt" (resolve-core core`Int -> Int -> Comparison`)
    ; declare-primitive "appendString" (resolve-core core`String -> String -> String`)
 
+-- A decision with its evidence (MS6 phase 109a): either a proof, or a
+-- refutation. It has two level parameters, its own and `Empty`'s, because
+-- nothing is defaulted.
+data Dec (A : Type) : Type where
+  yes : forall (p : A) -> Dec A
+  no : forall (n : A -> Empty) -> Dec A
+
+-- **Comparison with evidence** (his choice, `ms6/CLOSEOUT.md` 32). On two
+-- literals `decString a b` is `yes (refl String a)` or `no ‹a refutation›`, and
+-- on a name nobody knows it is stuck — so a proof that eliminates it gets
+-- `Eq String y x` in one branch and `Eq String y x -> Empty` in the other.
+-- `eqString` says only which, and that is why a proof about a name it does not
+-- know could not use it. Generated substitution decides with `decString`, so
+-- a proof about it follows the same decision.
+do declare-primitive "decString" (resolve-core core`∀ (a : String) (b : String) -> Dec {0 0} (Eq {0} String a b)`)
+   ; declare-primitive "decChar" (resolve-core core`∀ (a : Char) (b : Char) -> Dec {0 0} (Eq {0} Char a b)`)
+   ; declare-primitive "decInt" (resolve-core core`∀ (a : Int) (b : Int) -> Dec {0 0} (Eq {0} Int a b)`)
+
 data Sigma (A : Type₀) (B : A -> Type₀) : Type₀ where
   pair : forall (a : A) (b : B a) -> Sigma A B
 

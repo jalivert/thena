@@ -2712,6 +2712,24 @@ checkedPrimitive env nm ty = case lookup nm primitiveNames of
   Just Appending -> case argumentsOf ty of
     Just ([a, b], r) | all (== Global (GlobalName "String") []) [a, b, r] -> Right ()
     _ -> wrong "at String -> String -> String"
+  -- MS6 phase 109a: @(a b : P) -> D (Eq P a b)@, what 'Thena.Core.Reduce.decided'
+  -- reads back — @D@ of one parameter and two one-argument constructors, and
+  -- @Eq@ of one constructor.
+  Just (Deciding p@(GlobalName pn)) -> case ty of
+    Pi _ pa sa | pa == Global p [] -> let (va, n1) = fresh 0 in case open va sa of
+      Pi _ pb sb | pb == Global p [] -> let (vb, _) = fresh n1 in case open vb sb of
+        App (Global dN _) (App (App (App (Global eqN _) pty) (Free xa)) (Free xb))
+          | pty == Global p [], xa == va, xb == vb
+          , Just dDef <- lookupInductive dN env
+          , Just eDef <- lookupInductive eqN env
+          , length (inductiveParameters dDef) == 1
+          , [c1, c2] <- inductiveConstructors dDef
+          , [_] <- constructorArguments c1
+          , [_] <- constructorArguments c2
+          , [_] <- inductiveConstructors eDef -> Right ()
+        _ -> wrong ("at (a : " ++ pn ++ ") (b : " ++ pn ++ ") -> D (Eq " ++ pn ++ " a b), with D a datatype of one parameter and two constructors of one argument")
+      _ -> wrong ("with two arguments of type " ++ pn)
+    _ -> wrong ("with two arguments of type " ++ pn)
   Just (Comparing p@(GlobalName pn)) -> case argumentsOf ty of
     Just ([a, b], Global d [])
       | a /= Global p [] || b /= Global p [] -> wrong ("with two arguments of type " ++ pn)

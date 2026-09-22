@@ -22,9 +22,16 @@
 -- them — so @x@ itself whenever nothing would be captured, and capture stays
 -- something a user can see happen and not happen.
 --
--- **Everything is done by @elim@**, and the only primitives are @eqString@ and
--- @appendString@: a name is looked up by eliminating a 'Comparison', and a
--- fresh one is made by priming.
+-- **Everything is done by @elim@**, and the only primitives are @decString@ and
+-- @appendString@: two names are compared by eliminating a @Dec@, and a fresh one
+-- is made by priming.
+--
+-- **@decString@, not @eqString@** (MS6 phase 109a, his choice on
+-- @ms6\/CLOSEOUT.md@ 32). A proof about substitution has to follow the same
+-- decision the function makes, and on a name it does not know it can only do
+-- that by eliminating the same term. @decString y x@ hands each branch its
+-- evidence — @Eq String y x@ or its refutation — where @eqString y x@ said only
+-- which branch, so no proof over an open name could get past it.
 module Thena.Language.Substitution
   ( substitutionDefinitions
   ) where
@@ -71,7 +78,7 @@ substitutionDefinitions g = case (variableProduction g, substitutionNames g) of
     -- as 'Thena.Driver.grammarDatatype' primes a constructor's binders.
     referenced = lang : map conName prods
       ++ [ "String", "List", "And", "Comparison", "nil", "cons", "both", "same", "different"
-         , "eqString", "appendString" ]
+         , "Dec", "yes", "no", "Eq", "decString", "appendString" ]
       ++ substitutionNames g
     local x | x `elem` referenced = local (x ++ "'")
             | otherwise = x
@@ -86,9 +93,17 @@ substitutionDefinitions g = case (variableProduction g, substitutionNames g) of
       elimOn "List" [string] (lamL ["l"] (name "Comparison"))
         [ name "different"
         , lamL ["b", "bs", "rb"]
-            (decide (name "Comparison") (app (name "eqString") [y, v "b"]) (name "same") (v "rb"))
+            (compareNames (name "Comparison") y (v "b") (name "same") (v "rb"))
         ]
         xs
+
+    -- The first method when @y@ and @k@ are the same name, the second
+    -- otherwise, deciding with @decString@ — whose evidence each method is
+    -- given and ignores.
+    compareNames ty y k whenSame whenDifferent =
+      elimOn "Dec" [app (name "Eq") [string, y, k]] (lamL ["d"] ty)
+        [lamL ["p"] whenSame, lamL ["n"] whenDifferent]
+        (app (name "decString") [y, k])
 
     -- The first constructor's method when @c@ is @same@, the second's otherwise.
     decide ty c whenSame whenDifferent =
@@ -146,7 +161,7 @@ substitutionDefinitions g = case (variableProduction g, substitutionNames g) of
         [ var y
         , lamL ["p", "ps", "rp"]
             (elimOn "And" [string, self] (lamL ["q"] self)
-               [ lamL ["k", "w"] (decide self (app (name "eqString") [y, v "k"]) (v "w") (v "rp")) ]
+               [ lamL ["k", "w"] (compareNames self y (v "k") (v "w") (v "rp")) ]
                (v "p"))
         ]
         s

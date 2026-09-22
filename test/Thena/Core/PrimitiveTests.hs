@@ -22,7 +22,7 @@ import Data.Maybe (isJust)
 
 import Thena.Core.Context (Context)
 import Thena.Core.Convert (convert)
-import Thena.Core.Level (levelOfNat)
+import Thena.Core.Level (Level (..), levelOfNat)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term
   ( Core (..)
@@ -32,7 +32,7 @@ import Thena.Core.Term
   , close
   , fresh
   )
-import Thena.Core.Typing (infer)
+import Thena.Core.Typing (check, infer)
 import Thena.Driver (checkedPrimitive, parseCore)
 import Thena.Global.Env
   ( Constant (..)
@@ -66,6 +66,7 @@ tests =
     , testGroup "printing and reading are inverse" roundTrip
     , testGroup "a declared primitive computes on literals" computing
     , testGroup "a primitive declaration the system cannot keep is refused" refusals
+    , testGroup "a deciding primitive answers with its evidence (phase 109a)" deciding
     ]
 
 -- --------------------------------------------------------------------------
@@ -287,3 +288,90 @@ printsAndReadsBack t =
   case parseCore env ctx 0 (renderCore 0 ctx t) of
     Right (t', _) -> t' == t
     Left _        -> False
+
+-- --------------------------------------------------------------------------
+-- Deciding, with evidence (MS6 phase 109a, ms6/CLOSEOUT.md 32)
+-- --------------------------------------------------------------------------
+
+-- | @decString@, @decInt@ and @decChar@ declared over an equality and a
+-- decision type **that are not the prelude's**: @Same@ and @Verdict@, with
+-- @Void@ for what a refutation reaches. The rule reads every one of those names
+-- off the declared type; if it ever writes @Eq@, @Dec@, @yes@ or @Empty@
+-- itself, these are what notice.
+decidingEnv :: GlobalEnv
+decidingEnv = foldr declareOne base ["String", "Int", "Char"]
+  where
+    base = fst (declared
+      [ "Same (A : Type) : A -> A -> Type where { itself : \8704 (a : A) -> Same A a a }"
+      , "Void : Type where { }"
+      , "Verdict (A : Type) : Type where { proved : \8704 (p : A) -> Verdict A ; refuted : \8704 (n : A -> Void {0}) -> Verdict A }" ])
+    declareOne p = addPrimitive (GlobalName ("dec" ++ p)) (decType p)
+
+-- | @(a b : P) -> Verdict {0} (Same {0} P a b)@.
+decType :: String -> Core
+decType p =
+  Pi (Ident "a") (prim p) $ close va $
+  Pi (Ident "b") (prim p) $ close vb $
+  App (Global (GlobalName "Verdict") [LZero]) (same p (Free va) (Free vb))
+  where
+    va = fst (fresh 700)
+    vb = fst (fresh 701)
+
+prim :: String -> Core
+prim p = Global (GlobalName p) []
+
+same :: String -> Core -> Core -> Core
+same p x y = App (App (App (Global (GlobalName "Same") [LZero]) (prim p)) x) y
+
+deciding :: [TestTree]
+deciding =
+  [ testCase "two literals that agree are proved, by the equality's own constructor" $
+      reduced (decide "String" [str "a", str "a"])
+        @?= Canonical (GlobalName "proved") [LZero]
+              [same "String" (str "a") (str "a"), Canonical (GlobalName "itself") [LZero] [prim "String", str "a"]]
+  , testCase "two that differ are refuted" $
+      case reduced (decide "String" [str "a", str "b"]) of
+        Canonical (GlobalName "refuted") _ [_, _] -> pure ()
+        other -> assertFailure (show other)
+    -- **The load-bearing one.** The refutation is a term the reducer wrote;
+    -- the kernel checks it, at exactly the type the constructor wants.
+  , testCase "and the refutation the reducer writes is a proof the kernel accepts" $
+      case reduced (decide "String" [str "a", str "b"]) of
+        Canonical _ _ [_, refutation] ->
+          fst3 (check decidingEnv ctx 0 refutation
+                  (Pi (Ident "_") (same "String" (str "a") (str "b"))
+                      (close (fst (fresh 702)) (Global (GlobalName "Void") [LZero]))))
+            @?= Right ()
+        other -> assertFailure (show other)
+  , testCase "so is the whole answer, at the primitive's own result type" $
+      mapM_ (\(p, a, b) ->
+               fst3 (check decidingEnv ctx 0 (reduced (decide p [a, b]))
+                       (App (Global (GlobalName "Verdict") [LZero]) (same p a b)))
+                 @?= Right ())
+        [ ("String", str "a", str "a"), ("String", str "a", str "b")
+        , ("Int", Primitive (LInt 1), Primitive (LInt 2)), ("Char", Primitive (LChar 'x'), Primitive (LChar 'x')) ]
+  , testCase "a variable is not decided" $
+      reduced (decide "String" [Free v, str "a"]) @?= decide "String" [Free v, str "a"]
+  , testCase "the declaration the prelude makes is accepted" $
+      isRight (checkedPrimitive decidingEnv (GlobalName "decString") (decType "String")) @?= True
+  , testCase "a comparison's type is not a decision's" $
+      isRight (checkedPrimitive answering (GlobalName "decString")
+                 (arrow (prim "String") (arrow (prim "String") (prim "Answer")))) @?= False
+  , testCase "nor is a decision over the wrong primitive type" $
+      isRight (checkedPrimitive decidingEnv (GlobalName "decString") (decType "Int")) @?= False
+  , testCase "nor one whose answer has the wrong number of constructors" $
+      isRight (checkedPrimitive threeWay (GlobalName "decString") (decType "String")) @?= False
+  ]
+  where
+    v = fst (fresh 703)
+    str s = Primitive (LString s)
+    decide p = foldl App (Global (GlobalName ("dec" ++ p)) [])
+    reduced = whnf decidingEnv ctx
+    fst3 (a, _, _) = a
+    arrow a b = Pi (Ident "_") a (close (fst (fresh 900)) b)
+    isRight = either (const False) (const True)
+    threeWay = fst (declared
+      [ "Same (A : Type) : A -> A -> Type where { itself : \8704 (a : A) -> Same A a a }"
+      , "Void : Type where { }"
+      , "Verdict (A : Type) : Type where { proved : \8704 (p : A) -> Verdict A ; refuted : \8704 (n : A -> Void {0}) -> Verdict A ; unsure : \8704 (p : A) -> Verdict A }" ])
+
