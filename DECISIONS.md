@@ -325,6 +325,26 @@ them. The alternative — building them from an inductive numeral, as Coq does �
 was weighed and refused, because it makes every identifier in every
 object-language term a chain of constructors.
 
+### Preservation for a modelled language is proved about the substitution Thena generates
+
+*Decided 2026-09-22.* `examples/07-preservation.thena` proves, for the λ-calculus
+of `01`–`03`,
+
+```
+preservation : ∀ (M : LC) (M1 : LC) (T : Ty) -> typing empty M T -> step M M1 -> typing empty M1 T
+```
+
+in the surface language, with `elim` and no proof sugar. **It is about the
+generated `LC-subst-all`**, not a substitution written for the proof: the
+proof names the generated function's pieces, checks with `refl` that they are
+the same terms, and follows its `decString` decisions case by case.
+
+**It is stated for closed terms**, as Software Foundations states it. The
+argument substituted in a β-step is then closed, so no binder is ever renamed.
+For any context the argument may have free names, a binder may be renamed, and
+proving the renamed binder fresh needs facts about strings that Thena cannot
+state yet.
+
 ### `decString` compares two strings and hands you the proof
 
 *Decided 2026-09-21.* Beside `eqString`, `eqChar` and `eqInt`, the prelude
