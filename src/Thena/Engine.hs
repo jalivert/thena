@@ -88,6 +88,7 @@ import qualified Thena.Development.Cursor as Cursor
 import Thena.Development.Partial (Impure (..), Partial (..), extract)
 import Thena.Errors
   ( FailReason (..)
+  , ObjectError (..)
   , MoveError (..)
   , Position (..)
   , ResolveError (..)
@@ -99,9 +100,16 @@ import qualified Thena.Surface.Concrete as Concrete
 import Thena.Syntax.Concrete (termSplicesIn, nameSplicesIn)
 import Thena.Syntax.Resolve (resolveWith, Filling (..))
 import qualified Thena.Language.Earley as Earley
-import Thena.Language.Build (buildSurface)
+import Thena.Language.Build
+  ( atCharacters
+  , buildSurface
+  , languageNames
+  , objectInput
+  , objectText
+  , productionNames
+  )
 import Thena.Language.Grammar
-  (GProduction (..), Grammar (..), earleyRules)
+  (Grammar (..), earleyRules)
 import Thena.Language.Reader (Block)
 import Thena.Instral.Ops
   ( AnswerKind
@@ -864,7 +872,7 @@ perform instr rest m = case operation instr of
     Right (VRaw raw) -> case (,) <$> traverse (filling (env (exec m))) (termSplicesIn raw)
                                  <*> traverse (nameFilling (env (exec m))) (nameSplicesIn raw) of
       Left r   -> failure r m
-      Right (ts, ns) -> case resolveWith (ts ++ ns) (globals m) contextAt (names m) raw of
+      Right (ts, ns) -> case resolveWith (grammars m) (ts ++ ns) (globals m) contextAt (names m) raw of
         Left e        -> failure (CannotResolve e) m
         Right (t, n1) -> produce (VTerm t) m { names = n1 }
     Right _          -> failure ExpectedRaw m
@@ -1448,18 +1456,18 @@ perform instr rest m = case operation instr of
     Right s -> case s of
       Concrete.SurfaceObject lang prod ps
         | lang `notElem` languageNames (grammars m) ->
-            failure (NoSuchObjectLanguage lang) m
+            failure (ObjectFailed (NoSuchObjectLanguage lang)) m
         | Just w <- prod, w `notElem` productionNames (grammars m) lang ->
-            failure (NoSuchObjectProduction lang w) m
+            failure (ObjectFailed (NoSuchObjectProduction lang w)) m
         | otherwise ->
             case Earley.parse (earleyRules (grammars m))
                               (maybe (Earley.StartAt lang) Earley.StartRule prod)
-                              (objectInput ps) of
+                              (objectInput (regionBits ps)) of
               Left why ->
-                failure (ObjectNotParsed lang (objectText ps) (atCharacters ps why)) m
+                failure (ObjectFailed (ObjectNotParsed lang (objectText (regionBits ps)) (atCharacters (regionBits ps) why))) m
               Right tree ->
                 case buildSurface (grammars m) [ e | Concrete.ObjectSplice e <- ps ] tree of
-                  Left why -> failure (ObjectNotATerm lang why) m
+                  Left why -> failure (ObjectFailed (ObjectNotATerm lang why)) m
                   Right t  -> produce (VSurface (Zipper.rootedAt t)) m
       _ -> failure (ExpectedSurfaceShape "a tagged term literal") m
 
@@ -2091,57 +2099,14 @@ operandSurface e o = operandValue e o >>= \v -> case v of
 -- Tagged term literals (MS6 phase 104)
 -- ---------------------------------------------------------------------------
 
--- | The languages installed, by the name a tag would write.
-languageNames :: [Grammar] -> [String]
-languageNames gs = [ n | g <- gs, let GlobalName n = grammarName g ]
-
--- | The productions of one installed language, by name.
---
--- **Of that language and not of any**, which is what @LC[app]@ asks: a
--- production name is unique across grammars (phase 101), so the filter changes
--- no accepted literal and it is what lets the refusal name the language.
-productionNames :: [Grammar] -> String -> [String]
-productionNames gs lang =
-  [ n | g <- gs, GlobalName lang == grammarName g
-      , p <- grammarProductions g, let GlobalName n = gproductionName p ]
-
--- | The pieces the object parser reads.
---
--- **A splice is one column**, whatever term it holds, because it completes one
--- slot (@ms6\/SPEC.md@ §7.6). Its number is its position among the splices,
--- which is how 'Thena.Language.Build.buildSurface' finds the term again.
-objectInput :: [Concrete.ObjectPiece] -> [Earley.Piece]
-objectInput = go 0
-  where
-    go _ [] = []
-    go k (Concrete.ObjectText txt : rest) = map Earley.Char txt ++ go k rest
-    go k (Concrete.ObjectSplice _ : rest) = Earley.Splice k : go (k + 1) rest
-
--- | What the region says, for a message. A splice stands for itself: the
--- printer is "Thena.Repl"\'s and this module sits below it.
-objectText :: [Concrete.ObjectPiece] -> String
-objectText = concatMap piece
+-- | A surface region's pieces in the shape both readers share (phase 110):
+-- text on the left, what fills a slot on the right.
+regionBits :: [Concrete.ObjectPiece] -> [Either String Concrete.Surface]
+regionBits = map piece
   where
     piece pc = case pc of
-      Concrete.ObjectText txt -> txt
-      Concrete.ObjectSplice _ -> spliceMark
-
-spliceMark :: String
-spliceMark = "$" ++ ['{'] ++ "…" ++ ['}']
-
--- | A parser position is a column and a message is about characters.
---
--- A splice is one column and several characters, so 'Earley.Stuck' is moved to
--- where its column begins in 'objectText'. Everything else says the same thing
--- in both.
-atCharacters :: [Concrete.ObjectPiece] -> Earley.ParseFailure -> Earley.ParseFailure
-atCharacters ps why = case why of
-  Earley.Stuck p expected -> Earley.Stuck (sum (take p (concatMap widths ps))) expected
-  other -> other
-  where
-    widths pc = case pc of
-      Concrete.ObjectText txt -> map (const 1) txt
-      Concrete.ObjectSplice _ -> [length spliceMark]
+      Concrete.ObjectText txt -> Left txt
+      Concrete.ObjectSplice e -> Right e
 
 -- | The name a component will display. Checked against the lexer's own notion
 -- of an identifier, because an 'Ident' that does not lex is one the printer

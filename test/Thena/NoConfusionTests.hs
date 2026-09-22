@@ -64,14 +64,14 @@ tests =
 -- --------------------------------------------------------------------------
 
 termIn :: GlobalEnv -> Int -> Context -> String -> Core
-termIn env n ctx src = case parseCore env ctx n src of
+termIn env n ctx src = case parseCore [] env ctx n src of
   Left e       -> error ("fixture term does not resolve: " ++ show e)
   Right (t, _) -> t
 
 -- | Reduce a term of the family to weak head normal form and render it.
 reduces :: GlobalEnv -> Int -> String -> String -> Assertion
 reduces env n src expect =
-  renderCore n [] (whnf env [] (termIn env n [] src)) @?= expect
+  renderCore [] n [] (whnf env [] (termIn env n [] src)) @?= expect
 
 natReduces, taplReduces :: String -> String -> Assertion
 natReduces  = reduces eqNat eqNatCounter
@@ -123,7 +123,7 @@ caseTests =
 
 typeOfGlobal :: GlobalEnv -> Int -> String -> Maybe String
 typeOfGlobal env n g =
-  renderCore n [] . definitionType <$> lookupDefinition (GlobalName g) env
+  renderCore [] n [] . definitionType <$> lookupDefinition (GlobalName g) env
 
 -- --------------------------------------------------------------------------
 -- Using it
@@ -252,7 +252,7 @@ certified env g = case lookupDefinition (GlobalName g) env of
 
 -- | Declare one datatype into an environment and keep what no-confusion did.
 skipped :: [String] -> String -> Either DeclareError (Maybe Skipped)
-skipped before src = case parseDeclaration env n src of
+skipped before src = case parseDeclaration [] env n src of
   Left e       -> error ("fixture does not parse: " ++ show e)
   Right (d, n1) -> (\(_, _, s) -> s) <$> declare env n1 d
   where (env, n) = declared before

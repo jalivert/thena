@@ -128,7 +128,7 @@ walkedLaws =
         overWalk $ \_ cs ->
           [ "a position did not render"
           | c <- cs
-          , length (renderCursor 500 c) + sum (map length (renderWhere 500 c)) < 0
+          , length (renderCursor [] 500 c) + sum (map length (renderWhere [] 500 c)) < 0
           ]
 
       -- **Nothing in view is out of scope.** A free variable of the focused
@@ -147,7 +147,7 @@ walkedLaws =
   where
     overWalk k =
       withNumTests 300 $ forAll (genDevelopment [] 4) $ \src ->
-        case parseDevelopment emptyGlobals [] 500 src of
+        case parseDevelopment [] emptyGlobals [] 500 src of
           Left _       -> property True
           Right (p, _) ->
             let bad = k p (walk 200 [enter p] [])
@@ -487,7 +487,7 @@ changeTests =
 displayTests :: [TestTree]
 displayTests =
   [ testCase ":show marks the link the focus is on" $
-      renderCursor start (at allFour [mAlong, mAlong])
+      renderCursor [] start (at allFour [mAlong, mAlong])
         @?= unlines'
           [ "  λ (A : Type₀) ->"
           , "  let d = A : Type₀ in"
@@ -498,7 +498,7 @@ displayTests =
           , "  g"
           ]
   , testCase ":show marks a line inside a guess body, indent and all" $
-      renderCursor start (at allFour [mAlong, mAlong, mAlong, mInto])
+      renderCursor [] start (at allFour [mAlong, mAlong, mAlong, mInto])
         @?= unlines'
           [ "  λ (A : Type₀) ->"
           , "  let d = A : Type₀ in"
@@ -509,7 +509,7 @@ displayTests =
           , "  g"
           ]
   , testCase ":show marks the component a core focus is inside" $
-      renderCursor start (at allFour [mAlong, mCrossType])
+      renderCursor [] start (at allFour [mAlong, mCrossType])
         @?= unlines'
           [ "  λ (A : Type₀) ->"
           , "▶ let d = A : Type₀ in"
@@ -520,7 +520,7 @@ displayTests =
           , "  g"
           ]
   , testCase ":show marks a constraint" $
-      renderCursor start (at withConstraint [mAlong, mAlong, mAlong])
+      renderCursor [] start (at withConstraint [mAlong, mAlong, mAlong])
         @?= unlines'
           [ "  λ (A : Type₀) ->"
           , "  λ (a : A) ->"
@@ -530,7 +530,7 @@ displayTests =
           ]
 
   , testCase ":where on the spine" $
-      renderWhere start (at idMidway [mAlong])
+      renderWhere [] start (at idMidway [mAlong])
         @?= [ "focus"
             , "  let ? id' : A -> A ≐ ("
             , "path"
@@ -541,7 +541,7 @@ displayTests =
             , "  A -> A"
             ]
   , testCase ":where inside a guess — the hole is on the path and not in Γ" $
-      renderWhere start (at idMidway [mAlong, mInto])
+      renderWhere [] start (at idMidway [mAlong, mInto])
         @?= [ "focus"
             , "  λ (a : A) ->"
             , "path"
@@ -552,7 +552,7 @@ displayTests =
             , "  A"
             ]
   , testCase ":where in the core fragment names every step of the way in" $
-      renderWhere start (at richTypes [mAlong, mAlong, mAlong, mCrossType, mDown Cod, mDown Body])
+      renderWhere [] start (at richTypes [mAlong, mAlong, mAlong, mCrossType, mDown Cod, mDown Body])
         @?= [ "focus"
             , "  f y"
             , "path"
@@ -565,7 +565,7 @@ displayTests =
             , "  y = x : A"
             ]
   , testCase ":where at a position with nothing in scope and no type written down" $
-      renderWhere start (at allFour [mAlong, mAlong, mAlong, mAlong])
+      renderWhere [] start (at allFour [mAlong, mAlong, mAlong, mAlong])
         @?= [ "focus"
             , "  g"
             , "path"

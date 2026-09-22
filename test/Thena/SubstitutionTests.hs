@@ -248,7 +248,7 @@ declared io =
       env <- io
       case lookupDefinition (GlobalName f) env of
         Nothing -> assertFailure (f ++ " was not declared")
-        Just d -> (unlevelled (renderCore 0 [] (definitionType d)), length (definitionLevels d))
+        Just d -> (unlevelled (renderCore [] 0 [] (definitionType d)), length (definitionLevels d))
                     @?= (ty, levels)
   -- **A level parameter for every level nothing fixes**: List and And are
   -- polymorphic and a list of names is a list at any level, so the functions

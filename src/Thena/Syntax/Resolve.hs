@@ -22,7 +22,7 @@ import Thena.Core.Term
    )
 import Thena.Development.Component (Component (..))
 import Thena.Development.Partial (Constraint (..), Partial (..))
-import Thena.Errors (DevForm (..), ResolveError (..))
+import Thena.Errors (DevForm (..), ObjectError (..), ResolveError (..))
 import Thena.Global.Declare (targetIndices)
 import Thena.Global.Env
   ( ArgRole (..)
@@ -36,8 +36,19 @@ import Thena.Global.Env
   , inductiveParameters
   , lookupInductive
   )
+import qualified Thena.Language.Earley as Earley
+import Thena.Language.Build
+  ( atCharacters
+  , buildCore
+  , languageNames
+  , objectInput
+  , objectText
+  , productionNames
+  )
+import Thena.Language.Grammar (Grammar, earleyRules)
 import Thena.Syntax.Concrete
   ( Raw (..)
+  , RawPiece (..)
   , RawBinder (..)
   , RawIdent (..)
   , RawConstraint (..)
@@ -54,7 +65,7 @@ type Local = [(String, Var)]
 -- The definitions of the environment — not the constants, and not the inductive
 -- records — plus, while a declaration is resolving its own constructors, the
 -- datatype being declared, which is not in the environment yet and cannot be:
--- its own constructors mention it (see 'resolveData'). A 'Global' node names
+-- its own constructors gr mention it (see 'resolveData'). A 'Global' node names
 -- something with a body (§3.6), which is what makes it the third form of δ.
 --
 -- A constant with no body is reached from 'Canonical' or 'Eliminate' instead.
@@ -108,10 +119,10 @@ nameOf sp i = case i of
     Just (FillTerm _)          -> Left (SpliceNotFilled x)
     Nothing                    -> Left (SpliceNotFilled x)
 
--- | Resolve a raw tree as a core term. Holes, guesses and constraints are
+-- | Resolve a raw tree as a core gr term. Holes, guesses and constraints are
 -- rejected here: they live only in a development (§3.1).
-resolve :: GlobalEnv -> Context -> Int -> Raw -> Either ResolveError (Core, Int)
-resolve = resolveWith []
+resolve :: [Grammar] -> GlobalEnv -> Context -> Int -> Raw -> Either ResolveError (Core, Int)
+resolve gr = resolveWith gr []
 
 -- | 'resolve', with the template's splices filled (MS5 phase 81).
 --
@@ -120,15 +131,16 @@ resolve = resolveWith []
 -- with no @${…}@ in it resolves identically either way, so nothing that existed
 -- before this phase can have changed meaning.
 resolveWith
-  :: Splices -> GlobalEnv -> Context -> Int -> Raw -> Either ResolveError (Core, Int)
-resolveWith sp env ctx = core env (globalsOf env) sp ctx []
+  :: [Grammar] -> Splices -> GlobalEnv -> Context -> Int -> Raw
+  -> Either ResolveError (Core, Int)
+resolveWith gr sp env ctx = core gr env (globalsOf env) sp ctx []
 
 
 -- | Resolve a raw tree as a development, taking the LONGEST PREFIX (§2.7):
 -- every leading binder becomes a chain link, so 'Trailing' ends up holding
 -- something that is not a binder unless @⌜ ⌝@ says otherwise.
-resolvePartial :: GlobalEnv -> Context -> Int -> Raw -> Either ResolveError (Partial, Int)
-resolvePartial env ctx = partial env (globalsOf env) [] ctx []
+resolvePartial :: [Grammar] -> GlobalEnv -> Context -> Int -> Raw -> Either ResolveError (Partial, Int)
+resolvePartial gr env ctx = partial gr env (globalsOf env) [] ctx []
 
 -- --------------------------------------------------------------------------
 -- Core terms
@@ -138,9 +150,46 @@ resolvePartial env ctx = partial env (globalsOf env) [] ctx []
 -- @elim@ (phase 7); @gs@ answers "is @s@ in scope as an ordinary name" for
 -- everything else, and is not always @globalsOf env@ — see 'Globals'.
 core
-  :: GlobalEnv -> Globals -> Splices -> Context -> Local -> Int
+  :: [Grammar] -> GlobalEnv -> Globals -> Splices -> Context -> Local -> Int
   -> Raw -> Either ResolveError (Core, Int)
-core env gs sp ctx local n raw = case raw of
+core gr env gs sp ctx local n raw = case raw of
+  -- **A tagged term literal resolves to the constructor application it
+  -- denotes** (MS6 phase 110) — the same four checks the surface makes when
+  -- one elaborates, on the same 'ObjectError', so a region that is refused
+  -- says the same thing wherever it was written.
+  --
+  -- **Its splices are ordinary terms of this language**, resolved here and
+  -- passed to 'buildCore' in the order they were written, which is the order
+  -- the parser numbers them in.
+  RawObject lang prod ps
+    | lang `notElem` languageNames gr ->
+        Left (NotAnObjectTerm (NoSuchObjectLanguage lang))
+    | Just w <- prod, w `notElem` productionNames gr lang ->
+        Left (NotAnObjectTerm (NoSuchObjectProduction lang w))
+    | otherwise -> do
+        (ts, n1) <- spliced n ps
+        let bits = [ either Left (const (Right ())) (piece pc) | pc <- ps ]
+        tree <- case Earley.parse (earleyRules gr)
+                       (maybe (Earley.StartAt lang) Earley.StartRule prod)
+                       (objectInput bits) of
+          Left why -> Left (NotAnObjectTerm
+                              (ObjectNotParsed lang (objectText bits)
+                                 (atCharacters bits why)))
+          Right tree -> Right tree
+        case buildCore gr ts tree of
+          Left why -> Left (NotAnObjectTerm (ObjectNotATerm lang why))
+          Right t  -> Right (t, n1)
+    where
+      piece pc = case pc of
+        RawChunk txt -> Left txt
+        RawSpliced e -> Right e
+      spliced k [] = Right ([], k)
+      spliced k (RawChunk _ : rest) = spliced k rest
+      spliced k (RawSpliced e : rest) = do
+        (t, k1) <- core gr env gs sp ctx local k e
+        (ts, k2) <- spliced k1 rest
+        Right (t : ts, k2)
+
   -- Local, then the ambient context, then the globals. A binder shadows a
   -- global of the same name, which is what one namespace (§3.6) requires: the
   -- names collide and the innermost wins.
@@ -192,33 +241,33 @@ core env gs sp ctx local n raw = case raw of
         | otherwise -> Left (NotInScope s)
 
   RawApp f a -> do
-    (f', n1) <- core env gs sp ctx local n f
-    (a', n2) <- core env gs sp ctx local n1 a
+    (f', n1) <- core gr env gs sp ctx local n f
+    (a', n2) <- core gr env gs sp ctx local n1 a
     Right (App f' a', n2)
 
   -- A non-dependent arrow is a 'Pi' whose variable does not occur.
   RawArrow s b -> do
-    (s', n1) <- core env gs sp ctx local n s
-    (b', n2) <- core env gs sp ctx local n1 b
+    (s', n1) <- core gr env gs sp ctx local n s
+    (b', n2) <- core gr env gs sp ctx local n1 b
     let (v, n3) = fresh n2
     Right (Pi (Ident "_") s' (close v b'), n3)
 
-  RawLam bs b -> binders env gs sp Lam ctx local n bs b
-  RawPi bs b  -> binders env gs sp Pi ctx local n bs b
+  RawLam bs b -> binders gr env gs sp Lam ctx local n bs b
+  RawPi bs b  -> binders gr env gs sp Pi ctx local n bs b
 
   RawLet i val ty b -> do
     x          <- nameOf sp i
-    (val', n1) <- core env gs sp ctx local n val
-    (ty', n2)  <- core env gs sp ctx local n1 ty
+    (val', n1) <- core gr env gs sp ctx local n val
+    (ty', n2)  <- core gr env gs sp ctx local n1 ty
     let (v, n3) = fresh n2
-    (b', n4)   <- core env gs sp ctx ((x, v) : local) n3 b
+    (b', n4)   <- core gr env gs sp ctx ((x, v) : local) n3 b
     Right (Let (Ident x) val' ty' (close v b'), n4)
 
   -- Transparent here: the corners only say something in a development
   -- position, where they stop the spine. A no-op rather than an error, because
   -- rejecting them would make the printer's own output fail to re-read in a
   -- nested position.
-  RawQuote t -> core env gs sp ctx local n t
+  RawQuote t -> core gr env gs sp ctx local n t
 
   -- Phase 7: no concrete syntax existed for 'Eliminate' before this. Checked
   -- against the datatype's own record, exactly as a constructor's target is
@@ -236,14 +285,14 @@ core env gs sp ctx local n raw = case raw of
   -- local and is refused, because a local is not a datatype.
   RawElim di rls ps m ms is t -> do
     d         <- nameOf sp di
-    dn        <- datatypeNamed env gs sp ctx local d
+    dn        <- datatypeNamed gr env gs sp ctx local d
     def       <- maybe (Left (NotADatatype d)) Right (lookupInductive dn env)
     let dls = map levelOfNat rls
-    (ps', n1) <- coreList env gs sp ctx local n ps
-    (m', n2)  <- core env gs sp ctx local n1 m
-    (ms', n3) <- coreList env gs sp ctx local n2 ms
-    (is', n4) <- coreList env gs sp ctx local n3 is
-    (t', n5)  <- core env gs sp ctx local n4 t
+    (ps', n1) <- coreList gr env gs sp ctx local n ps
+    (m', n2)  <- core gr env gs sp ctx local n1 m
+    (ms', n3) <- coreList gr env gs sp ctx local n2 ms
+    (is', n4) <- coreList gr env gs sp ctx local n3 is
+    (t', n5)  <- core gr env gs sp ctx local n4 t
     let wantP = length (inductiveParameters def)
         wantM = length (inductiveConstructors def)
         wantI = length (inductiveIndices def)
@@ -271,40 +320,40 @@ core env gs sp ctx local n raw = case raw of
 -- A name that is a 'Global' but has no inductive record is left for the
 -- caller's 'lookupInductive' to refuse, which is also what reports a datatype
 -- named inside its own declaration. That refusal is correct and stays
--- (@AGENDA.md@ item 28) — the constructors are checked in a context where the
+-- (@AGENDA.md@ item 28) — the constructors gr are checked in a context where the
 -- type former exists but its eliminator does not, because the eliminator is
 -- generated from the completed declaration.
 datatypeNamed
-  :: GlobalEnv -> Globals -> Splices -> Context -> Local -> String
+  :: [Grammar] -> GlobalEnv -> Globals -> Splices -> Context -> Local -> String
   -> Either ResolveError GlobalName
-datatypeNamed env gs sp ctx local d = case core env gs sp ctx local 0 (RawName d) of
+datatypeNamed gr env gs sp ctx local d = case core gr env gs sp ctx local 0 (RawName d) of
   Right (Global g _, _) -> Right g
   _                   -> Left (NotADatatype d)
 
 -- | A run of terms in the same local scope, left to right, threading the
 -- counter — what @elim@\'s three list-valued fields need (§2.6).
 coreList
-  :: GlobalEnv -> Globals -> Splices -> Context -> Local -> Int
+  :: [Grammar] -> GlobalEnv -> Globals -> Splices -> Context -> Local -> Int
   -> [Raw] -> Either ResolveError ([Core], Int)
-coreList _ _ _ _ _ n [] = Right ([], n)
-coreList env gs sp ctx local n (r : rs) = do
-  (t, n1)  <- core env gs sp ctx local n r
-  (ts, n2) <- coreList env gs sp ctx local n1 rs
+coreList _ _ _ _ _ _ n [] = Right ([], n)
+coreList gr env gs sp ctx local n (r : rs) = do
+  (t, n1)  <- core gr env gs sp ctx local n r
+  (ts, n2) <- coreList gr env gs sp ctx local n1 rs
   Right (t : ts, n2)
 
 -- | One binder group at a time, each nested inside the last.
 binders
-  :: GlobalEnv -> Globals -> Splices
+  :: [Grammar] -> GlobalEnv -> Globals -> Splices
   -> (Ident -> Core -> Scope Core -> Core)
   -> Context -> Local -> Int -> [RawBinder] -> Raw
   -> Either ResolveError (Core, Int)
-binders env gs sp con ctx local n bs b = case bs of
-  [] -> core env gs sp ctx local n b
+binders gr env gs sp con ctx local n bs b = case bs of
+  [] -> core gr env gs sp ctx local n b
   RawBinder i ty : rest -> do
     x         <- nameOf sp i
-    (ty', n1) <- core env gs sp ctx local n ty
+    (ty', n1) <- core gr env gs sp ctx local n ty
     let (v, n2) = fresh n1
-    (b', n3) <- binders env gs sp con ctx ((x, v) : local) n2 rest b
+    (b', n3) <- binders gr env gs sp con ctx ((x, v) : local) n2 rest b
     Right (con (Ident x) ty' (close v b'), n3)
 
 -- --------------------------------------------------------------------------
@@ -312,61 +361,61 @@ binders env gs sp con ctx local n bs b = case bs of
 -- --------------------------------------------------------------------------
 
 partial
-  :: GlobalEnv -> Globals -> Splices -> Context -> Local -> Int
+  :: [Grammar] -> GlobalEnv -> Globals -> Splices -> Context -> Local -> Int
   -> Raw -> Either ResolveError (Partial, Int)
-partial env gs sp ctx local n raw = case raw of
-  RawLam bs b -> binderLinks env gs sp Assume ctx local n bs b
+partial gr env gs sp ctx local n raw = case raw of
+  RawLam bs b -> binderLinks gr env gs sp Assume ctx local n bs b
 
   -- **A leading @∀@ run is components, exactly as a leading @λ@ run is** (MS4
   -- phase 41f). The fifth component is a ∀-binder, so the concrete syntax it
-  -- needs is the one a core Π already has, and adding it here is the whole of
+  -- needs is the one a core gr Π already has, and adding it here is the whole of
   -- what the DC's syntax owes it — no token, no production.
   --
   -- It costs what the @λ@ case has always cost: a development whose trailing
   -- term is a bare Π cannot be written without corners. @⌜ ∀ (x : A) -> B ⌝@
   -- is the escape, and 'RawQuote' below is where it stops the spine.
-  RawPi bs b -> binderLinks env gs sp Quantify ctx local n bs b
+  RawPi bs b -> binderLinks gr env gs sp Quantify ctx local n bs b
 
   RawLet i val ty b -> do
     x          <- nameOf sp i
-    (val', n1) <- core env gs sp ctx local n val
-    (ty', n2)  <- core env gs sp ctx local n1 ty
+    (val', n1) <- core gr env gs sp ctx local n val
+    (ty', n2)  <- core gr env gs sp ctx local n1 ty
     let (v, n3) = fresh n2
-    (b', n4)   <- partial env gs sp ctx ((x, v) : local) n3 b
+    (b', n4)   <- partial gr env gs sp ctx ((x, v) : local) n3 b
     Right (Under (Define v (Ident x) val' ty') b', n4)
 
   RawClaim i ty b -> do
     x         <- nameOf sp i
-    (ty', n1) <- core env gs sp ctx local n ty
+    (ty', n1) <- core gr env gs sp ctx local n ty
     let (v, n2) = fresh n1
-    (b', n3)  <- partial env gs sp ctx ((x, v) : local) n2 b
+    (b', n3)  <- partial gr env gs sp ctx ((x, v) : local) n2 b
     Right (Under (Claim v (Ident x) ty') b', n3)
 
   -- The guess body does NOT see the hole it fills: Γ_(?x ≐ P : S . p) = Γ_P
   -- (§4.5). Resolved with 'local' as it was; only the continuation gains @x@.
   RawGuess i ty g b -> do
     x         <- nameOf sp i
-    (ty', n1) <- core env gs sp ctx local n ty
-    (g', n2)  <- partial env gs sp ctx local n1 g
+    (ty', n1) <- core gr env gs sp ctx local n ty
+    (g', n2)  <- partial gr env gs sp ctx local n1 g
     let (v, n3) = fresh n2
-    (b', n4)  <- partial env gs sp ctx ((x, v) : local) n3 b
+    (b', n4)  <- partial gr env gs sp ctx ((x, v) : local) n3 b
     Right (Under (Guess v (Ident x) g' ty') b', n4)
 
   RawPending k b -> do
-    (k', n1) <- constraint env gs sp ctx local n k
-    (b', n2) <- partial env gs sp ctx local n1 b
+    (k', n1) <- constraint gr env gs sp ctx local n k
+    (b', n2) <- partial gr env gs sp ctx local n1 b
     Right (Pending k' b', n2)
 
   -- The corners stop the spine: what is inside is a term, not a chain.
   RawQuote t -> do
-    (t', n1) <- core env gs sp ctx local n t
+    (t', n1) <- core gr env gs sp ctx local n t
     Right (Trailing t', n1)
 
   -- Everything else is the trailing term. This is the whole of longest prefix:
   -- the binder cases above consume as much as they can, and this catches the
   -- first thing that is not a binder.
   _ -> do
-    (t', n1) <- core env gs sp ctx local n raw
+    (t', n1) <- core gr env gs sp ctx local n raw
     Right (Trailing t', n1)
 
 -- | Each binder group in a @λ@ or a @∀@ becomes its own link.
@@ -375,27 +424,27 @@ partial env gs sp ctx local n raw = case raw of
 -- parameterised by 'Thena.Core.Term.Lam' or 'Thena.Core.Term.Pi': the two runs
 -- differ in exactly that and in nothing else.
 binderLinks
-  :: GlobalEnv -> Globals -> Splices -> (Var -> Ident -> Core -> Component)
+  :: [Grammar] -> GlobalEnv -> Globals -> Splices -> (Var -> Ident -> Core -> Component)
   -> Context -> Local -> Int
   -> [RawBinder] -> Raw -> Either ResolveError (Partial, Int)
-binderLinks env gs sp build ctx local n bs b = case bs of
-  [] -> partial env gs sp ctx local n b
+binderLinks gr env gs sp build ctx local n bs b = case bs of
+  [] -> partial gr env gs sp ctx local n b
   RawBinder i ty : rest -> do
     x         <- nameOf sp i
-    (ty', n1) <- core env gs sp ctx local n ty
+    (ty', n1) <- core gr env gs sp ctx local n ty
     let (v, n2) = fresh n1
-    (b', n3) <- binderLinks env gs sp build ctx ((x, v) : local) n2 rest b
+    (b', n3) <- binderLinks gr env gs sp build ctx ((x, v) : local) n2 rest b
     Right (Under (build v (Ident x) ty') b', n3)
 
--- | Ξ's binders scope over @s@, @t@ and @T@ and nothing else.
+-- | Ξ's binders gr scope over @s@, @t@ and @T@ and nothing else.
 constraint
-  :: GlobalEnv -> Globals -> Splices -> Context -> Local -> Int
+  :: [Grammar] -> GlobalEnv -> Globals -> Splices -> Context -> Local -> Int
   -> RawConstraint -> Either ResolveError (Constraint, Int)
-constraint env gs sp ctx local n (RawConstraint bs s t ty) = do
-  (xi, local', n1) <- telescope env gs ctx local n bs
-  (s', n2)  <- core env gs sp ctx local' n1 s
-  (t', n3)  <- core env gs sp ctx local' n2 t
-  (ty', n4) <- core env gs sp ctx local' n3 ty
+constraint gr env gs sp ctx local n (RawConstraint bs s t ty) = do
+  (xi, local', n1) <- telescope gr env gs ctx local n bs
+  (s', n2)  <- core gr env gs sp ctx local' n1 s
+  (t', n3)  <- core gr env gs sp ctx local' n2 t
+  (ty', n4) <- core gr env gs sp ctx local' n3 ty
   Right (Equate xi s' t' ty', n4)
 
 -- --------------------------------------------------------------------------
@@ -411,19 +460,19 @@ constraint env gs sp ctx local n (RawConstraint bs s t ty) = do
 --
 -- **The indices are not in scope in the constructors.** Each constructor
 -- supplies its own index expressions and the record keeps those; the type
--- former's index binders name positions, not values (§3.7).
+-- former's index binders gr name positions, not values (§3.7).
 resolveData
-  :: GlobalEnv -> Int -> RawData
+  :: [Grammar] -> GlobalEnv -> Int -> RawData
   -> Either ResolveError (InductiveDefinition, Int)
-resolveData env n (RawData name ps ty cs) = do
+resolveData gr env n (RawData name ps ty cs) = do
   -- **A declaration writes no level parameters** (MS3 phase 33c). It used to —
   -- @data D {ℓ}@, minted here as 'LRigid's and in scope throughout — and that
   -- was scaffolding, the only way to make a datatype polymorphic before metas
   -- existed. Now every written @Type@ mints a meta like any other, and
   -- "Thena.Global.Declare" computes the declared universe from the
   -- constructors' arguments and generalises whatever is left.
-  (params, afterParams, n1)  <- telescope env gs [] [] n ps
-  (indices, _, rest, n2)     <- prefix env gs afterParams n1 ty
+  (params, afterParams, n1)  <- telescope gr env gs [] [] n ps
+  (indices, _, rest, n2)     <- prefix gr env gs afterParams n1 ty
   (level, n3) <- case rest of
     RawUniverse k   -> Right (levelOfNat k, n2)
     -- A bare @Type@: the level is worked out by the declaration path, which is
@@ -433,22 +482,22 @@ resolveData env n (RawData name ps ty cs) = do
   -- The datatype being declared joins 'Globals' here, and only here: a
   -- constructor may recursively mention it (@succ : Nat -> Nat@), and
   -- 'lookupInductive' would find nothing for it in @env@ mid-declaration.
-  (cs', n4) <- constructors env (dn : gs) dn params (length indices) afterParams n3 cs
+  (cs', n4) <- constructors gr env (dn : gs) dn params (length indices) afterParams n3 cs
   Right (InductiveDefinition dn [] params indices level cs', n4)
   where
     gs = globalsOf env
     dn = GlobalName name
 
 constructors
-  :: GlobalEnv -> Globals -> GlobalName -> Context -> Int -> Local
+  :: [Grammar] -> GlobalEnv -> Globals -> GlobalName -> Context -> Int -> Local
   -> Int -> [RawConstructor]
   -> Either ResolveError ([ConstructorDefinition], Int)
-constructors _ _ _ _ _ _ n [] = Right ([], n)
-constructors env gs dn params want local n (RawConstructor cn ty : rest) = do
-  (args, inside, tgt, n1) <- prefix env gs local n ty
-  (tgt', n2)              <- core env gs [] [] inside n1 tgt
+constructors _ _ _ _ _ _ _ n [] = Right ([], n)
+constructors gr env gs dn params want local n (RawConstructor cn ty : rest) = do
+  (args, inside, tgt, n1) <- prefix gr env gs local n ty
+  (tgt', n2)              <- core gr env gs [] [] inside n1 tgt
   ixs                     <- targetIndices dn params want cn tgt'
-  (rest', n3)             <- constructors env gs dn params want local n2 rest
+  (rest', n3)             <- constructors gr env gs dn params want local n2 rest
   Right (ConstructorDefinition (GlobalName cn) args ixs (map (const Plain) args) : rest', n3)
 
 -- --------------------------------------------------------------------------
@@ -458,34 +507,34 @@ constructors env gs dn params want local n (RawConstructor cn ty : rest) = do
 -- | A binder group list, outermost first. Only 'Hypothesis' entries ever
 -- appear (§3.3).
 telescope
-  :: GlobalEnv -> Globals -> Context -> Local -> Int
+  :: [Grammar] -> GlobalEnv -> Globals -> Context -> Local -> Int
   -> [RawBinder] -> Either ResolveError (Context, Local, Int)
-telescope _ _ _ local n [] = Right ([], local, n)
--- **No splices here** (MS5 phase 88): a telescope is a declaration's, read
+telescope _ _ _ _ local n [] = Right ([], local, n)
+-- **No splices here** (MS5 phase 88): a telescope gr is a declaration's, read
 -- from a file rather than built by a rule, so there is no environment for a
 -- splice to be filled from — which is why 'core' is called with @[]@ below and
 -- was before this phase too.
-telescope env gs ctx local n (RawBinder i ty : rest) = do
+telescope gr env gs ctx local n (RawBinder i ty : rest) = do
   x         <- nameOf [] i
-  (ty', n1) <- core env gs [] ctx local n ty
+  (ty', n1) <- core gr env gs [] ctx local n ty
   let (v, n2) = fresh n1
-  (xi, local', n3) <- telescope env gs ctx ((x, v) : local) n2 rest
+  (xi, local', n3) <- telescope gr env gs ctx ((x, v) : local) n2 rest
   Right (Hypothesis v (Ident x) ty' : xi, local', n3)
 
--- | Peel the binder prefix of a declared type, and hand back what is left.
+-- | Peel the binder prefix gr of a declared type, and hand back what is left.
 --
 -- Used at the two places a declaration writes a telescope: the type former's
--- own type, whose prefix is the indices and whose tail must be a universe, and
--- a constructor's type, whose prefix is its arguments and whose tail is its
+-- own type, whose prefix gr is the indices and whose tail must be a universe, and
+-- a constructor's type, whose prefix gr is its arguments and whose tail is its
 -- target. @∀@ groups and bare arrows both contribute — @succ : Nat -> Nat@ has
 -- one argument and it happens to be nameless.
 prefix
-  :: GlobalEnv -> Globals -> Local -> Int -> Raw
+  :: [Grammar] -> GlobalEnv -> Globals -> Local -> Int -> Raw
   -> Either ResolveError (Context, Local, Raw, Int)
-prefix env gs local n raw = case raw of
+prefix gr env gs local n raw = case raw of
   RawPi bs b -> do
-    (tel, local1, n1)        <- telescope env gs [] local n bs
-    (tel', local2, rest, n2) <- prefix env gs local1 n1 b
+    (tel, local1, n1)        <- telescope gr env gs [] local n bs
+    (tel', local2, rest, n2) <- prefix gr env gs local1 n1 b
     Right (tel ++ tel', local2, rest, n2)
 
   -- An arrow's argument has no written name, and unlike the @Ident "_"@ that
@@ -494,9 +543,9 @@ prefix env gs local n raw = case raw of
   -- hand a student (§3.7 — the point of generating into the environment is that
   -- it can be read). The printer freshens a repeat to @x1@.
   RawArrow s b -> do
-    (s', n1) <- core env gs [] [] local n s
+    (s', n1) <- core gr env gs [] [] local n s
     let (v, n2) = fresh n1
-    (tel, local', rest, n3) <- prefix env gs local n2 b
+    (tel, local', rest, n3) <- prefix gr env gs local n2 b
     Right (Hypothesis v (Ident "x") s' : tel, local', rest, n3)
 
   _ -> Right ([], local, raw, n)

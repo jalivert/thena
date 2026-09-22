@@ -32,12 +32,12 @@ import Thena.Global.Env
   , lookupDefinition
   , lookupInductive
   )
-import Thena.Errors (BuildError (..), FailReason (..))
-import Thena.Language.Build (buildTerm, printTerm)
+import Thena.Errors (ObjectError (..), BuildError (..), FailReason (..))
+import Thena.Language.Build (buildTerm, printRegion)
 import Thena.Language.Earley (parse, pieces)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Grammar (Grammar, earleyRules)
-import Thena.Repl (startingSession)
+import Thena.Repl (renderCore, startingSession)
 
 tests :: TestTree
 tests =
@@ -158,24 +158,30 @@ terms =
         (Right t, _, _) -> t @?= Global (GlobalName "LC") []
         (Left e, _, _) -> assertFailure (show e)
   , testCase "the term prints as the text" $ do
-      (env, gs) <- loaded
-      printTerm env gs identity @?= Just "( \955 x : \953 . x )"
+      (_, gs) <- loaded
+      printRegion gs host identity @?= Just "( \955 x : \953 . x )"
   , testCase "a name written twice is one argument, and prints twice" $ do
-      (env, gs) <- loaded
+      (_, gs) <- loaded
       let t = con "twice" [con "var" [Primitive (LString "a")]]
-      (readTerm gs "{ a a }", printTerm env gs t) @?= (Right t, Just "{ a a }")
+      (readTerm gs "{ a a }", printRegion gs host t) @?= (Right t, Just "{ a a }")
   , testCase "a hole is not a term" $ do
       (_, gs) <- loaded
       readTerm gs "( \955 ? : \953 . x )" @?= Left (Incomplete "x")
-  , testCase "a name the class would not read back does not print" $ do
-      (env, gs) <- loaded
-      printTerm env gs (con "var" [Primitive (LString "a b")]) @?= Nothing
+  , testCase "a name the class would not read back is spliced instead" $ do
+      (_, gs) <- loaded
+      printRegion gs host (con "var" [Primitive (LString "a b")])
+        @?= Just "${\"a b\"}"
   , testCase "nor does a term that is not a constructor of a grammar" $ do
-      (env, gs) <- loaded
-      printTerm env gs (Primitive (LString "x")) @?= Nothing
+      (_, gs) <- loaded
+      printRegion gs host (Primitive (LString "x")) @?= Nothing
   ]
 
 -- ---------------------------------------------------------------------------
+
+-- | The host\'s printer, for what a splice holds. The real one, so that a
+-- spliced term is written the way a reader would take it back.
+host :: Core -> String
+host = renderCore [] 0 []
 
 -- | What a definition written with a tagged term literal elaborated to, or why
 -- the load stopped (MS6 phase 104).
@@ -211,9 +217,9 @@ literals =
     -- **Elaboration against the printer**, which is MS6's done-when 3: the
     -- term a literal elaborates to writes back as the text it was written as.
   , testCase "and it prints back as the text it was written as" $ do
-      (env, gs) <- loaded
+      (_, gs) <- loaded
       r <- elaboratedTerm ("LC" ++ region "( \955 x : \953 . x )")
-      fmap (printTerm env gs) r @?= Right (Just "( \955 x : \953 . x )")
+      fmap (printRegion gs host) r @?= Right (Just "( \955 x : \953 . x )")
   , testCase "a splice supplies the slot it stands in" $ do
       r <- elaborated
              ("u : LC\nu = LC[var]" ++ region "q"
@@ -236,7 +242,7 @@ literals =
   , testCase "a production in brackets starts the parse there, and only there" $ do
       r <- elaboratedTerm ("LC[var]" ++ region "( \955 x : \953 . x )")
       case r of
-        Left (ObjectNotParsed "LC" _ (Earley.Stuck 0 _)) -> pure ()
+        Left (ObjectFailed (ObjectNotParsed "LC" _ (Earley.Stuck 0 _)))  -> pure ()
         other -> assertFailure (show other)
     -- **A splice is one column to the parser and several characters to a
     -- reader**, so a position it reports is moved to where that column begins
@@ -244,19 +250,19 @@ literals =
   , testCase "a position after a splice is reported where the splice is written" $ do
       r <- elaboratedTerm ("LC" ++ region ("( ${LC[var]" ++ region "a" ++ "} @ )"))
       case r of
-        Left (ObjectNotParsed "LC" text (Earley.Stuck p _)) -> (text, p) @?= ("( ${\8230} @ )", 7)
+        Left (ObjectFailed (ObjectNotParsed "LC" text (Earley.Stuck p _)))  -> (text, p) @?= ("( ${\8230} @ )", 7)
         other -> assertFailure (show other)
   , testCase "a tag naming no language is refused" $
-      elaboratedTerm ("Nope" ++ region "x") >>= (@?= Left (NoSuchObjectLanguage "Nope"))
+      elaboratedTerm ("Nope" ++ region "x") >>= (@?= Left (ObjectFailed (NoSuchObjectLanguage "Nope")))
   , testCase "so is a production the language does not have" $
-      elaboratedTerm ("LC[nope]" ++ region "x") >>= (@?= Left (NoSuchObjectProduction "LC" "nope"))
+      elaboratedTerm ("LC[nope]" ++ region "x") >>= (@?= Left (ObjectFailed (NoSuchObjectProduction "LC" "nope")))
     -- **A @?@ is an ordinary character here** (§7.6): MS6 gives a hole no
     -- surface syntax, so this is text the grammar cannot read rather than a
     -- hole that could not be built.
   , testCase "a ? in a literal is a character, not a hole" $ do
       r <- elaboratedTerm ("LC" ++ region "?")
       case r of
-        Left (ObjectNotParsed "LC" "?" (Earley.Stuck 0 _)) -> pure ()
+        Left (ObjectFailed (ObjectNotParsed "LC" "?" (Earley.Stuck 0 _)))  -> pure ()
         other -> assertFailure (show other)
   ]
   where
@@ -302,7 +308,7 @@ roundTrip =
   withResource loaded (const (pure ())) $ \io ->
     testProperty "printed and read back, a term is itself" $
       withNumTests 200 $ forAll genTerm $ \t -> ioProperty $ do
-        (env, gs) <- io
-        pure $ case printTerm env gs t of
+        (_, gs) <- io
+        pure $ case printRegion gs host t of
           Nothing -> counterexample "it did not print" (property False)
           Just src -> counterexample src (readTerm gs src === Right t)

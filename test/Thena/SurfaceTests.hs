@@ -493,8 +493,8 @@ layoutTests =
     -- that the development calculus never meets this pass — a line break means
     -- nothing there, and no brace is inserted.
   , testCase "the development calculus is not laid out" $
-      case ( parseCore emptyGlobals [] 0 "let x = Type\8320 : Type\8321 in x"
-           , parseCore emptyGlobals [] 0 "let x = Type\8320 : Type\8321\n  in x"
+      case ( parseCore [] emptyGlobals [] 0 "let x = Type\8320 : Type\8321 in x"
+           , parseCore [] emptyGlobals [] 0 "let x = Type\8320 : Type\8321\n  in x"
            ) of
         (Right (a, _), Right (b, _)) -> b @?= a
         (other, _)                   -> assertFailure (show other)

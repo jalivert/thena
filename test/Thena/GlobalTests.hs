@@ -196,11 +196,11 @@ equipment =
         let printed =
               [ length l
               | (_, d) <- inductives env
-              , l <- renderInductive 0 d
+              , l <- renderInductive [] 0 d
               ]
                 ++ [ length l
                    | (g, d) <- inductives env
-                   , l <- renderEliminator 0 g (fst (eliminatorType d LZero (pastEverything env)))
+                   , l <- renderEliminator [] 0 g (fst (eliminatorType d LZero (pastEverything env)))
                    ]
         (sum printed >= 0) @?= True
     ]
@@ -308,7 +308,7 @@ declareAll = foldl one (Right (emptyGlobals, 0))
   where
     one acc src = do
       (env, n)  <- acc
-      (d, n1)      <- shown (parseDeclaration env n src)
+      (d, n1)      <- shown (parseDeclaration [] env n src)
       (env', n2, _) <- shown (declare env n1 d)
       Right (env', n2)
 
@@ -431,7 +431,7 @@ formerNames env =
 -- is one call to the term resolver on a Π-chain.
 agreesWithTheResolver :: [TestTree]
 agreesWithTheResolver =
-  [ testCase name $ case parseCore natVec [] 0 written of
+  [ testCase name $ case parseCore [] natVec [] 0 written of
       Left e  -> assertFailure (show e)
       Right (t, _) -> fmap constantType (lookupConstant (named name) natVec) @?= Just t
   | (name, written) <-
@@ -569,7 +569,7 @@ roundTripTests :: [TestTree]
 roundTripTests =
   [ testCase name $ case lookupInductive (named name) natVec of
       Nothing -> assertFailure (name ++ " was not declared")
-      Just d  -> case reread (renderInductive natVecCounter d) of
+      Just d  -> case reread (renderInductive [] natVecCounter d) of
         Left e   -> assertFailure e
         Right d' -> do
           formerType d' @?= formerType d
@@ -582,7 +582,7 @@ roundTripTests =
   where
     -- The printer emits the whole command; the parser is handed what follows
     -- the command word, and the grammar does not care about the line breaks.
-    reread ls = case parseDeclaration natVec natVecCounter (drop 5 (unwords ls)) of
+    reread ls = case parseDeclaration [] natVec natVecCounter (drop 5 (unwords ls)) of
       Left e       -> Left (show e)
       Right (d, _) -> Right d
 
@@ -603,7 +603,7 @@ refused name src expect = testCase name $ case afterFixtures src of
 -- | Run one declaration against the fixtures' environment, keeping the
 -- 'DeclareError' rather than rendering it.
 afterFixtures :: String -> Either DeclareError ()
-afterFixtures src = case parseDeclaration natVec 0 src of
+afterFixtures src = case parseDeclaration [] natVec 0 src of
   Left e       -> error ("fixture does not parse: " ++ show e)
   Right (d, n) -> () <$ declare natVec n d
 

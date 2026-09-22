@@ -925,7 +925,7 @@ spliceTemplates =
       let s1 = fst (command s0 ":theorem t : Type")
           s2 = fst (command s1 "go")
       case snd (command s2 ":show") of
-        Shown c -> pure (renderCursor (names (sessionMachine s2)) c)
+        Shown c -> pure (renderCursor [] (names (sessionMachine s2)) c)
         other   -> assertFailure ("the test rule built nothing: " ++ show other) >> pure ""
 
     loadRaw src = snd (loadRuleBases newSession [("s.thena.rules", src)])
@@ -1416,7 +1416,7 @@ annotations =
       \rule usesName :- do n = fresh-name \"h\" ; ignore n\n\
       \rule usesTerm :- do h = here ; ignore h\n"
 
--- | A signature that does not resolve is refused when the FILE is read, before
+-- | A signature that does not resolve [] is refused when the FILE is read, before
 -- anything is inferred — it is a question one file can answer.
 badSignatures :: TestTree
 badSignatures =

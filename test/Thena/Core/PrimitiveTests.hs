@@ -285,7 +285,7 @@ refusals =
 
 printsAndReadsBack :: Core -> Bool
 printsAndReadsBack t =
-  case parseCore env ctx 0 (renderCore 0 ctx t) of
+  case parseCore [] env ctx 0 (renderCore [] 0 ctx t) of
     Right (t', _) -> t' == t
     Left _        -> False
 

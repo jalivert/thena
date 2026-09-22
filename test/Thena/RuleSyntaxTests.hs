@@ -139,7 +139,7 @@ againstTheBase =
 -- 'Thena.Instral.Ops.opKeyword' is the total case split @-Wall@ guards; this is the
 -- list the parser is checked against, and the two are crossed below — the word
 -- the table gives must be the word the text starts with, and the text must
--- resolve to the op the table was asked about.
+-- resolve [] to the op the table was asked about.
 --
 -- @data@ is absent and is checked separately: it has a keyword and no written
 -- form (§3.7).
@@ -530,7 +530,7 @@ regions =
         -- (phase 25e). What this checks is that the region reached it at all.
         b <- bodyOf ("elaborate " ++ tagged "surface" "f x")
         map opWord b @?= ["call"]
-    , testCase "a core region resolves to the instruction that will resolve it" $ do
+    , testCase "a core region resolves to the instruction that will resolve [] it" $ do
         b <- bodyOf ("t = resolve-core " ++ tagged "core" "Type\8320")
         map opWord b @?= ["resolve-core"]
     , testCase "an empty region parses as a region, and its contents still must" $

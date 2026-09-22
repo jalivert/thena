@@ -623,14 +623,14 @@ data CommandError
 -- --------------------------------------------------------------------------
 
 -- | Lex, parse, resolve as a core term, in the given environment and context.
-parseCore :: GlobalEnv -> Context -> Int -> String -> Either SyntaxError (Core, Int)
-parseCore = parseWith resolve
+parseCore :: [Grammar] -> GlobalEnv -> Context -> Int -> String -> Either SyntaxError (Core, Int)
+parseCore gr = parseWith gr resolve
 
 
 -- | Lex, parse, resolve as a development (§2.7's longest-prefix convention).
 parseDevelopment
-  :: GlobalEnv -> Context -> Int -> String -> Either SyntaxError (Partial, Int)
-parseDevelopment = parseWith resolvePartial
+  :: [Grammar] -> GlobalEnv -> Context -> Int -> String -> Either SyntaxError (Partial, Int)
+parseDevelopment gr = parseWith gr resolvePartial
 
 -- | The arguments of a rule called by name at the REPL (phase 23b): a run of
 -- atoms, each resolved as a core term in the context at the focus.
@@ -807,12 +807,14 @@ resolving w os
       _                  -> False
 
 parseWith
-  :: (GlobalEnv -> Context -> Int -> Raw -> Either ResolveError (a, Int))
+  :: [Grammar]
+  -> ([Grammar] -> GlobalEnv -> Context -> Int -> Raw
+      -> Either ResolveError (a, Int))
   -> GlobalEnv -> Context -> Int -> String -> Either SyntaxError (a, Int)
-parseWith res env ctx n src = do
+parseWith gr res env ctx n src = do
   ts  <- tokensOf src
   raw <- mapLeft ParseFailed (parseTerm ts)
-  mapLeft ResolveFailed (res env ctx n raw)
+  mapLeft ResolveFailed (res gr env ctx n raw)
 
 -- | Lex, parse, resolve a @data@ declaration (§3.7).
 --
@@ -820,11 +822,11 @@ parseWith res env ctx n src = do
 -- is not a term: it has its own start symbol in the grammar and it is read in
 -- the empty context, never in the development's.
 parseDeclaration
-  :: GlobalEnv -> Int -> String -> Either SyntaxError (InductiveDefinition, Int)
-parseDeclaration env n src = do
+  :: [Grammar] -> GlobalEnv -> Int -> String -> Either SyntaxError (InductiveDefinition, Int)
+parseDeclaration gr env n src = do
   ts  <- tokensOf src
   raw <- mapLeft ParseFailed (parseData ts)
-  mapLeft ResolveFailed (resolveData env n raw)
+  mapLeft ResolveFailed (resolveData gr env n raw)
 
 -- | Lex, parse and resolve the two sides of @:convert t ≟ u@.
 --
@@ -833,13 +835,13 @@ parseDeclaration env n src = do
 -- the two are resolved in one continuous supply of names rather than two that
 -- overlap.
 parseEquated
-  :: GlobalEnv -> Context -> Int -> String
+  :: [Grammar] -> GlobalEnv -> Context -> Int -> String
   -> Either SyntaxError ((Core, Core), Int)
-parseEquated env ctx n src = do
+parseEquated gr env ctx n src = do
   ts       <- tokensOf src
   (r1, r2) <- mapLeft ParseFailed (parseEquation ts)
-  (a, n1)  <- mapLeft ResolveFailed (resolve env ctx n r1)
-  (b, n2)  <- mapLeft ResolveFailed (resolve env ctx n1 r2)
+  (a, n1)  <- mapLeft ResolveFailed (resolve gr env ctx n r1)
+  (b, n2)  <- mapLeft ResolveFailed (resolve gr env ctx n1 r2)
   Right ((a, b), n2)
 
 -- | Lex, parse and resolve @‹name› : ‹type›@ for @:theorem@.
@@ -848,12 +850,12 @@ parseEquated env ctx n src = do
 -- (§5.3), and resolving it where a scratch @assume@ happens to be in scope
 -- would let one in.
 parseStatement
-  :: GlobalEnv -> Int -> String
+  :: [Grammar] -> GlobalEnv -> Int -> String
   -> Either SyntaxError (Maybe String, (Core, Int))
-parseStatement env n src = do
+parseStatement gr env n src = do
   ts        <- tokensOf src
   (mx, raw) <- mapLeft ParseFailed (parseNameAndType ts)
-  r         <- mapLeft ResolveFailed (resolve env [] n raw)
+  r         <- mapLeft ResolveFailed (resolve gr env [] n raw)
   Right (mx, r)
 
 tokensOf :: String -> Either SyntaxError [Located Token]
@@ -1215,7 +1217,7 @@ dispatch s name arg = case name of
   -- the rule base a second time.
   ":help"  -> noArgument (s, Helped commandSummary)
   ":quit"  -> noArgument (s, Quit)
-  ":core"  -> withArgument (view s parseCore Rendered arg)
+  ":core"  -> withArgument (view s (parseCore (grammars machine)) Rendered arg)
   -- | @:surface ‹term›@ — parse a **surface** term and print it back (phase
   -- 39). The analogue of @:core@, and for the same reason: it is the only way
   -- to see what the parser made of what you wrote, and until phase 41 it is the
@@ -1226,7 +1228,7 @@ dispatch s name arg = case name of
   ":surface" -> withArgument $ case parseSurfaceTerm arg of
     Left e  -> (s, Failed e)
     Right t -> (s, RenderedSurface t)
-  ":dev"   -> withArgument (view s parseDevelopment RenderedDev arg)
+  ":dev"   -> withArgument (view s (parseDevelopment (grammars machine)) RenderedDev arg)
   -- In @:parse@'s mode 'command' takes @:done@ before it gets here.
   ":done"  -> noArgument (s, Rejected NotParsing)
   -- | @:parse ‹Language› ‹text›@ — parse an object term with an installed
@@ -1281,7 +1283,7 @@ dispatch s name arg = case name of
     "" -> case focus (cursor (development machine)) of
       OnTerm _ _ t -> (s, Rendered (whnf (globals machine) ctx t))
       _            -> (s, Rejected (NotThere NotInCore))
-    _  -> view s parseCore (Rendered . whnf (globals machine) ctx) arg
+    _  -> view s (parseCore (grammars machine)) (Rendered . whnf (globals machine) ctx) arg
   -- The same no-argument/with-argument split as @:whnf@ and @:show@: with no
   -- argument it is the core focus, with one it is a term the user writes.
   -- **A bare argument is a surface term; corners are a core one** (MS4 phase
@@ -1292,7 +1294,7 @@ dispatch s name arg = case name of
       OnTerm _ _ t -> inferred t (names machine)
       _            -> (s, Rejected (NotThere NotInCore))
     _ | Just inner <- cornered arg ->
-          case parseCore (globals machine) ctx (names machine) inner of
+          case parseCore (grammars machine) (globals machine) ctx (names machine) inner of
             Left e        -> (s, Failed e)
             Right (t, n1) -> inferred t n1
       | otherwise -> case parseSurfaceTerm arg of
@@ -1559,7 +1561,7 @@ dispatch s name arg = case name of
     level :: InductiveDefinition -> String -> Either (Session, Response) Level
     level d u
       | null u    = Right (inductiveLevel d)
-      | otherwise = case parseCore (globals machine) [] (names machine) u of
+      | otherwise = case parseCore (grammars machine) (globals machine) [] (names machine) u of
           Left e                -> Left (s, Failed e)
           Right (Universe l, _) -> Right l
           Right _               -> Left (s, Rejected (LevelExpected u))
@@ -1570,7 +1572,7 @@ dispatch s name arg = case name of
     -- @:revalidate@: a proof of a non-type is not worth entering.
     theorem = case sessionWork s of
       Attempting att -> (s, Rejected (AlreadyProving (attemptName att)))
-      Scratch -> case parseStatement (globals machine) (names machine) arg of
+      Scratch -> case parseStatement (grammars machine) (globals machine) (names machine) arg of
         Left e             -> (s, Failed e)
         Right (Nothing, _) -> (s, Rejected (MissingArgument ":theorem"))
         Right (Just x, (ty, n1))
@@ -1710,7 +1712,7 @@ dispatch s name arg = case name of
         )
 
     declaration = withArgument $
-      case parseDeclaration (globals machine) (names machine) arg of
+      case parseDeclaration (grammars machine) (globals machine) (names machine) arg of
         Left e -> (s, Failed e)
         Right (d, n1) ->
           let is = [ Do (DefineData d)
@@ -1722,7 +1724,7 @@ dispatch s name arg = case name of
                 []
                 []
 
-    goal = withArgument $ case parseCore (globals machine) ctx (names machine) arg of
+    goal = withArgument $ case parseCore (grammars machine) (globals machine) ctx (names machine) arg of
       Left e -> (s, Failed e)
       Right (t, n1) -> case setGoal t machine { names = n1 } of
         Left e   -> (s, Rejected (NotThere e))
@@ -1795,7 +1797,7 @@ dispatch s name arg = case name of
             (s', other) -> (s' { sessionMachine = restore before (sessionMachine s') }, other)
 
     conversion = withArgument $
-      case parseEquated (globals machine) ctx (names machine) arg of
+      case parseEquated (grammars machine) (globals machine) ctx (names machine) arg of
         Left e -> (s, Failed e)
         Right ((a, b), n1) -> case convert (globals machine) ctx n1 a b of
           (why, owed, n2) -> (bump n2, Converted a b why owed)

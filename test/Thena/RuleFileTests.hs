@@ -159,7 +159,7 @@ loading =
       -- too as of MS5 phase 62b — an op word at an arity the op does not have
       -- is a call. So the mistake left here is the scope one: @x@ is bound by
       -- nothing, which 'validate' catches when the file loads.
-      testCase "a rule that does not resolve is refused, naming every mistake" $
+      testCase "a rule that does not resolve [] is refused, naming every mistake" $
         refusal [("x.thena.rules", "rule base b where\nrule r :- when focus-is-hole do frobnicate; prim-solve x")]
           @?= Just
                 ( "x.thena.rules"

@@ -377,4 +377,4 @@ nat src = case parse src of
   Left e       -> error ("fixture does not resolve: " ++ show e)
   Right (t, _) -> t
   where
-    parse = parseCore natVec [] natVecCounter
+    parse = parseCore [] natVec [] natVecCounter

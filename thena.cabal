@@ -109,6 +109,7 @@ test-suite thena-test
         Thena.DeterminacyTests
         Thena.NormalTests
         Thena.PreservationTests
+        Thena.PrintTests
         Thena.ProgressTests
         Thena.ProductTests
         Thena.DevelopmentTests

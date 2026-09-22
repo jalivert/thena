@@ -288,7 +288,7 @@ devOf ds = Dev
                in (cs ++ [Guess v (Ident nm) (Trailing g) t], vs ++ [(nm, v)], k3)
 
 readIn :: Context -> Int -> String -> (Core, Int)
-readIn ctx n src = case parseCore natVec ctx n src of
+readIn ctx n src = case parseCore [] natVec ctx n src of
   Left e  -> error ("fixture term does not resolve: " ++ show e)
   Right r -> r
 

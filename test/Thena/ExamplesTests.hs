@@ -48,7 +48,7 @@ tests =
                , "examples/03-typing-and-reduction.thena", "examples/07-preservation.thena" ]
         let (s', r) = command s ":infer preservation"
         renderResponse s' r @?=
-          [ "preservation : \8704 (M : LC) (M1 : LC) (T : Ty) -> typing empty M T -> step M M1 -> typing empty M1 T" ]
+          [ "preservation : ∀ (M : LC) (M1 : LC) (T : Ty) -> typing`· ⊢ ${M} : ${T}` -> step`${M} --> ${M1}` -> typing`· ⊢ ${M1} : ${T}`" ]
     -- **And by tactics** (his ruling, 2026-09-21: both ways). 08 proves every
     -- lemma again with attack, intro, eliminate-core and elaborate, and ends
     -- at the same statement.
@@ -64,7 +64,7 @@ tests =
         if null stopped then pure () else assertFailure (unlines out)
         let (s', r) = command s1 ":infer preservation-tactics"
         renderResponse s' r @?=
-          [ "preservation-tactics : \8704 (M : LC) (M1 : LC) (T : Ty) -> typing empty M T -> step M M1 -> typing empty M1 T" ]
+          [ "preservation-tactics : ∀ (M : LC) (M1 : LC) (T : Ty) -> typing`· ⊢ ${M} : ${T}` -> step`${M} --> ${M1}` -> typing`· ⊢ ${M1} : ${T}`" ]
     ]
   where
     numbered f = case f of

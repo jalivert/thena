@@ -102,7 +102,7 @@ recursiveFunctionTests =
 -- --------------------------------------------------------------------------
 
 termAt :: Int -> Context -> String -> Core
-termAt n ctx src = case parseCore natVec ctx n src of
+termAt n ctx src = case parseCore [] natVec ctx n src of
   Left e       -> error ("fixture term does not resolve: " ++ show e)
   Right (t, _) -> t
 

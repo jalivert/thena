@@ -36,6 +36,7 @@ module Thena.Syntax.Parser
 import Thena.Core.Term (Literal (..))
 import Thena.Syntax.Concrete
   ( Raw (..)
+  , RawPiece (..)
   , RawBinder (..)
   , RawIdent (..)
   , RawConstraint (..)
@@ -502,7 +503,24 @@ Atom :: { Raw }
   | chr                                    { RawPrimitive (LChar $1) }
   | num                                    { RawPrimitive (LInt $1) }
   | regex                                  { RawPrimitive (LRegex $1) }
+  -- **A tagged term literal is an atom** (MS6 phase 110), for a name's reason:
+  -- a region is delimited by its backticks, so it needs no precedence. The
+  -- surface has had one since phase 104; this is the same region, read by the
+  -- same lexer, in the development calculus's own grammar.
+  | tagopen ObjectBits tagclose            { RawObject $1 Nothing (reverse $2) }
+  | tagopen tagclose                       { RawObject $1 Nothing [] }
+  | tagat ObjectBits tagclose              { taggedRaw $1 (reverse $2) }
+  | tagat tagclose                         { taggedRaw $1 [] }
   | '(' Term ')'                           { $2 }
+
+-- Accumulated in reverse, like every other run here.
+ObjectBits :: { [RawPiece] }
+  : ObjectBit                              { [$1] }
+  | ObjectBits ObjectBit                   { $2 : $1 }
+
+ObjectBit :: { RawPiece }
+  : raw                                    { RawChunk $1 }
+  | '${' Term '}$'                         { RawSpliced $2 }
 
 -- | @{ ℓ 0 }@ — a brace-enclosed run of level atoms, no commas, exactly as
 -- rule parameters and call arguments are a bare run of names (phase 23).
@@ -575,5 +593,12 @@ parseError ts = Left $ case ts of
   Located p t : _ -> UnexpectedToken p t
   []              -> UnexpectedEndOfInput
 
+
+-- | @LC[var]`…`@ in development-calculus text: the production the reading
+-- starts at (MS6 phase 110).
+taggedRaw :: Located Token -> [RawPiece] -> Raw
+taggedRaw t ps = case t of
+  Located _ (TTagOpenAt lang prod) -> RawObject lang (Just prod) ps
+  _ -> error "the tag token is TTagOpenAt"
 
 }

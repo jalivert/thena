@@ -8,6 +8,7 @@ module Thena.Syntax.Lexer
   , lexTokens
   , lexModule
   , isIdentifier
+  , rawEscapes
   ) where
 
 import Data.List (stripPrefix)

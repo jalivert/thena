@@ -84,7 +84,7 @@ tests =
     ]
   where
     statementOf s' =
-      renderCore (names (sessionMachine s')) [] . definitionType
+      renderCore [] (names (sessionMachine s')) [] . definitionType
         <$> lookupDefinition (GlobalName "determinacy") (globals (sessionMachine s'))
 
     theorem = "∀ (t : Term) (t1 : Term) -> Step t t1 \

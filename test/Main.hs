@@ -15,6 +15,7 @@ import qualified Thena.CanonicalTests
 import qualified Thena.DeterminacyTests
 import qualified Thena.NormalTests
 import qualified Thena.PreservationTests
+import qualified Thena.PrintTests
 import qualified Thena.ProgressTests
 import qualified Thena.ProductTests
 import qualified Thena.DispatchTests
@@ -72,6 +73,7 @@ main =
       , Thena.DeterminacyTests.tests
       , Thena.NormalTests.tests
       , Thena.PreservationTests.tests
+      , Thena.PrintTests.tests
       , Thena.ProgressTests.tests
       , Thena.ProductTests.tests
       , Thena.DispatchTests.tests

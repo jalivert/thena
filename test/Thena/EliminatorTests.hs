@@ -106,7 +106,7 @@ rule name env n0 d l expect = testCase name $
     -- **Instantiated at the datatype's own levels** (MS3 phase 31g), which is
     -- what a use site sees. Rendering it uninstantiated would pin @ℓ@'s number
     -- — a counter value, and no business of an assertion about the shape.
-    Just def -> renderEliminator n0 g (atZero def (fst (eliminatorType def l n0))) @?= [expect]
+    Just def -> renderEliminator [] n0 g (atZero def (fst (eliminatorType def l n0))) @?= [expect]
   where
     g = GlobalName d
 

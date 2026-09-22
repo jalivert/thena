@@ -42,6 +42,6 @@ tests =
         case lookupDefinition (GlobalName "belowRefl") (globals (sessionMachine s')) of
           Nothing -> assertFailure "belowRefl was not admitted"
           Just d  ->
-            renderCore (names (sessionMachine s')) [] (definitionType d)
+            renderCore [] (names (sessionMachine s')) [] (definitionType d)
               @?= "∀ (n : Nat) (i : Fin n) -> Below n i -> Eq {0} (Fin n) i i"
     ]

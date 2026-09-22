@@ -603,6 +603,54 @@ with fixity declarations, and its own parentheses group. Both take a piece of
 the notation back from the object language in exchange for grouping you do not
 have to write. Thena takes none of it, and you write the production.
 
+### A term prints in its language's notation, and the printer finds its own fences
+
+*Decided 2026-09-22.*
+
+A term of a language you declared is shown in that language's notation, in
+`:show`, in `:infer` and in every goal — not as the constructor application it
+is:
+
+```
+idIsValue : value`( λ x : ι . x ) value`      -- and not: value (abs "x" base (var "x"))
+```
+
+**A judgment prints the same way**, because a judgment is a production too, so
+a theorem's statement reads as it would on paper:
+
+```
+preservation : ∀ (M : LC) (M1 : LC) (T : Ty)
+  -> typing`· ⊢ ${M} : ${T}` -> step`${M} --> ${M1}` -> typing`· ⊢ ${M1} : ${T}`
+```
+
+**What the notation cannot write stands in a splice**, in Thena's own syntax: a
+variable, a stuck call, a name you gave a term. **The printer does not reduce**,
+so `theId` is shown as `value`${theId} value`` rather than unfolded into the
+term it stands for.
+
+**Where a grammar groups by splicing, the printer splices.** It writes the term
+flat, reads its own text back with the same parser, and fences the smallest
+subterm the reading disagrees about, until what it wrote reads back as what it
+meant. A grammar that brackets its productions never reaches the second
+attempt; one that does not gets what you would have written by hand:
+
+```
+Ex`${Ex`f a`} b`        -- juxt (juxt f a) b, in a language with no parentheses
+Ex`f ${Ex`a b`}`        -- juxt f (juxt a b)
+```
+
+**The check is on the text, not on the shape of the grammar** — which matters
+because nothing is reserved inside an object language. The same position with
+the same child production needs a fence when a name collides with one of your
+terminals and not otherwise, so `let f = a b in c` prints flat while
+`let f = a in in b` does not. No table over positions could tell those apart.
+
+**What is printed can be typed back.** The development calculus reads a tagged
+term literal too, so a goal you are shown is text you can paste into `:core`,
+`:theorem` or a tactic argument, splices and all. `Core` gained nothing for any
+of this: a literal is notation, and it resolves to the constructor application
+it denotes.
+
 ### An object term is written the same way in a rule — and there it also matches
 
 *Decided 2026-09-20.*

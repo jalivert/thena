@@ -507,14 +507,14 @@ contextOf env = contextOf' env []
 contextOf' :: GlobalEnv -> Context -> Int -> [(String, String)] -> (Context, Int)
 contextOf' env ctx0 n0 = foldl one (ctx0, n0)
   where
-    one (ctx, n) (name, src) = case parseCore env ctx n src of
+    one (ctx, n) (name, src) = case parseCore [] env ctx n src of
       Left e -> error ("fixture does not parse: " ++ show e)
       Right (ty, n1) ->
         let (v, n2) = fresh n1
          in (ctx ++ [Hypothesis v (Ident name) ty], n2)
 
 parsed :: GlobalEnv -> Context -> Int -> String -> (Core, Int)
-parsed env ctx n src = case parseCore env ctx n src of
+parsed env ctx n src = case parseCore [] env ctx n src of
   Left e        -> error ("fixture does not parse: " ++ show e)
   Right (t, n1) -> (t, n1)
 
@@ -528,9 +528,9 @@ run label env ctx n goal tgt = case fst (attempt env ctx n goal tgt) of
 attempt
   :: GlobalEnv -> Context -> Int -> String -> String
   -> (Either ElimError Elimination, Int)
-attempt env ctx n goal tgt = case parseCore env ctx n goal of
+attempt env ctx n goal tgt = case parseCore [] env ctx n goal of
   Left e -> error ("fixture does not parse: " ++ show e)
-  Right (g, n1) -> case parseCore env ctx n1 tgt of
+  Right (g, n1) -> case parseCore [] env ctx n1 tgt of
     Left e        -> error ("fixture does not parse: " ++ show e)
     Right (t, n2) -> eliminate env ctx n2 g t
 
@@ -543,7 +543,7 @@ withMethods ctx el =
 
 -- | One line, so that an exact-string case reads as one line.
 rendered :: Context -> Core -> String
-rendered ctx = unwords . words . renderCore 0 ctx
+rendered ctx = unwords . words . renderCore [] 0 ctx
 
 
 -- --------------------------------------------------------------------------

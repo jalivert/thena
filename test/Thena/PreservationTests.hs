@@ -57,5 +57,5 @@ tests =
 
     statementOf n = do
       s <- loaded
-      pure ( renderCore (names (sessionMachine s)) [] . definitionType
+      pure ( renderCore [] (names (sessionMachine s)) [] . definitionType
                <$> lookupDefinition (GlobalName n) (globals (sessionMachine s)) )

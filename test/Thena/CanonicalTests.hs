@@ -62,5 +62,5 @@ tests =
     statementOf n = do
       (s, _) <- startingSession
       (s', _) <- loadProofFile s target
-      pure ( renderCore (names (sessionMachine s')) [] . definitionType
+      pure ( renderCore [] (names (sessionMachine s')) [] . definitionType
                <$> lookupDefinition (GlobalName n) (globals (sessionMachine s')) )

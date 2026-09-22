@@ -707,7 +707,7 @@ twoHoles =
     g = fst (fresh 9)
 
 someData :: InductiveDefinition
-someData = case parseDeclaration emptyGlobals 200 natDecl of
+someData = case parseDeclaration [] emptyGlobals 200 natDecl of
   Right (d, _) -> d
   Left err     -> error ("fixture does not parse: " ++ show err)
 

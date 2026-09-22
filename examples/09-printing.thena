@@ -1,0 +1,134 @@
+-- Printing: a term of an object language is shown in that language's notation,
+-- and what is shown can be read back.
+--
+-- LOAD AFTER 01, 02, 03 AND 05.
+--
+-- Until this phase a term of LC printed as the constructor application it is —
+-- `abs "x" base (var "x")` — which is true and unreadable. Now it prints as
+-- LC`( λ x : ι . x )`, in `:show`, in `:infer`, and in every goal. A judgment
+-- prints the same way, because a judgment is a grammar production too.
+--
+-- Nothing about Core changed. A tagged term literal is notation, not a term:
+-- it is how the printer writes a constructor application and how both readers
+-- read one.
+
+module Printing where
+
+-- ---------------------------------------------------------------------------
+-- Notation, in and out
+
+-- 03's `value` judgment, about the identity function. The statement was
+-- written with constructors; it is shown in LC's own notation, and `M value`
+-- is the judgment's notation, because a judgment is a production too.
+--
+--   thena spine> :infer idIsValue
+--   idIsValue : value`( λ x : ι . x ) value`
+idIsValue : value (abs "x" base (var "x"))
+idIsValue = V-abs "x" base LC`x`
+
+-- **The printer does not reduce.** A name the user gave a term stays that name
+-- and goes in a splice, printed in the development calculus's own syntax —
+-- rather than being unfolded into the term it is defined as.
+--
+--   thena spine> :infer theIdIsValue
+--   theIdIsValue : value`${theId} value`
+theId : LC
+theId = LC`( λ x : ι . x )`
+
+theIdIsValue : value theId
+theIdIsValue = V-abs "x" base LC`x`
+
+
+-- ---------------------------------------------------------------------------
+-- Grouping: the printer writes the splices 05 writes by hand
+
+-- 05 groups by splicing, because `Ex` declares no parentheses. The printer has
+-- the same problem and reaches for the same answer: it writes the term flat,
+-- reads its own text back with the same parser, and fences the outermost
+-- subterm the reading disagrees about — repeating until what it wrote reads
+-- back as what it meant.
+--
+-- A grammar that brackets its productions — 01's LC, above — never reaches the
+-- second attempt, and nothing is fenced.
+
+-- The judgment's own terminal is `!` rather than a word, because `written`
+-- would itself be a legal Ex identifier — and then the printer would have to
+-- fence the whole term to keep the two apart, which is the next section's
+-- subject.
+judgment written = U ! where
+
+  W:  -----
+      U !
+
+--   thena spine> :infer leftWritten
+--   leftWritten : written`${Ex`f a`} b !`
+leftWritten : written (juxt (juxt (ref "f") (ref "a")) (ref "b"))
+leftWritten = W (juxt (juxt (ref "f") (ref "a")) (ref "b"))
+
+--   thena spine> :infer rightWritten
+--   rightWritten : written`f ${Ex`a b`} !`
+rightWritten : written (juxt (ref "f") (juxt (ref "a") (ref "b")))
+rightWritten = W (juxt (ref "f") (juxt (ref "a") (ref "b")))
+
+
+-- ---------------------------------------------------------------------------
+-- The check is on the text, not on the shape of the grammar
+
+-- Nothing is reserved inside an object language, so a variable may be spelled
+-- like one of the grammar's own terminals. Then whether a fence is needed
+-- depends on the term, not on the position — and a rule computed from the
+-- grammar alone could not see it.
+--
+-- `Coll` is contrived: its identifiers are one letter and its keywords are `l`
+-- and `i`, so that a name can collide with a terminal without the language
+-- also being unclear about where one identifier ends. Read `l x = M i N` as
+-- `let x = M in N`.
+one : Token String
+one = /[a-z]/
+
+language Coll, P, Q where
+  cref  : one as occurrence -> one
+  cjux                      -> P Q
+  clet  : one as binder     -> l one = P i Q[one]
+
+judgment fine = P ! where
+
+  F:  -----
+      P !
+
+-- Nothing is ambiguous here, so nothing is fenced:
+--
+--   thena spine> :infer plainLet
+--   plainLet : fine`l f = a b i c !`
+plainLet : fine (clet "f" (cjux (cref "a") (cref "b")) (cref "c"))
+plainLet = F (clet "f" (cjux (cref "a") (cref "b")) (cref "c"))
+
+-- The same production in the same position, with the bound name spelled `i`:
+-- `l f = a i i b` reads two ways, so the first slot is fenced. No rule
+-- computed from the grammar alone could know that — it is the text that
+-- collides, not the position.
+--
+--   thena spine> :infer collidingLet
+--   collidingLet : fine`l f = ${Coll`a i`} i b !`
+collidingLet : fine (clet "f" (cjux (cref "a") (cref "i")) (cref "b"))
+collidingLet = F (clet "f" (cjux (cref "a") (cref "i")) (cref "b"))
+
+
+-- ---------------------------------------------------------------------------
+-- What is printed can be typed back
+
+-- The development calculus reads a tagged term literal too, so a goal shown in
+-- an object language's notation is text you can paste into `:core`, `:theorem`
+-- or a tactic argument. Splices hold ordinary terms, and a splice may hold a
+-- region again.
+--
+--   thena spine> :core LC`( λ x : ι . x )`
+--   LC`( λ x : ι . x )`
+--
+--   thena spine> :core LC`( ${app LC`x` LC`y`} z )`
+--   LC`( ( x y ) z )`
+--
+-- And it is refused in the same words the surface uses:
+--
+--   thena spine> :core Nope`x`
+--   no language called Nope has been declared

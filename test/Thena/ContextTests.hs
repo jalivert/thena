@@ -18,11 +18,11 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
 import Thena.Driver (Response (..), Session (..), command, loadProofSource)
 import Thena.Engine (Machine (..))
-import Thena.Language.Build (buildTerm, printTerm)
+import Thena.Language.Build (buildTerm, printRegion)
 import Thena.Language.Earley (parse, pieces)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Grammar (earleyRules)
-import Thena.Repl (renderResponse, startingSession)
+import Thena.Repl (renderCore, renderResponse, startingSession)
 
 tests :: TestTree
 tests =
@@ -89,10 +89,11 @@ declared =
   [ testCase ":show prints the relation and both constructors" $ do
       s <- loaded header
       said s ":show Ctx-in" @?=
-        [ "data Ctx-in : String -> Ty -> Ctx -> Type\8320 where"
-        , "  { Ctx-here : \8704 (\915 : Ctx) (x : String) (T : Ty) -> Ctx-in x T (extend \915 x T)"
-        , "  ; Ctx-there : \8704 (\915 : Ctx) (x : String) (T : Ty) (x' : String) (T' : Ty)"
-            ++ " -> (Eq {0} String x x' -> Empty {0}) -> Ctx-in x T \915 -> Ctx-in x T (extend \915 x' T') }"
+        [ "data Ctx-in : String -> Ty -> Ctx -> Type₀ where"
+        , "  { Ctx-here : ∀ (Γ : Ctx) (x : String) (T : Ty) -> Ctx-in`${x} : ${T} ∈ ${Γ} , ${x} : ${T}`"
+        , "  ; Ctx-there : ∀ (Γ : Ctx) (x : String) (T : Ty) (x' : String) (T' : Ty)"
+            ++ " -> (Eq {0} String x x' -> Empty {0})"
+            ++ " -> Ctx-in`${x} : ${T} ∈ ${Γ}` -> Ctx-in`${x} : ${T} ∈ ${Γ} , ${x'} : ${T'}` }"
         ]
   ]
 
@@ -108,7 +109,7 @@ notation =
   , testCase "and prints back as the text it was read from" $ do
       s <- loaded header
       let m = sessionMachine s
-      printTerm (globals m) (grammars m)
+      printRegion (grammars m) (renderCore [] 0 [])
           (apps "Ctx-in" [str "x", con "base", apps "extend" [con "empty", str "x", con "base"]])
         @?= Just "x : \953 \8712 \183 , x : \953"
   , testCase "a lookup literal is a type" $ do

@@ -33,6 +33,7 @@ module Thena.Errors
   , Warning (..)
   , Skipped (..)
   , FailReason (..)
+  , ObjectError (..)
   , MoveError (..)
 
     -- * Conversion (§5.2)
@@ -360,19 +361,10 @@ data FailReason
     -- ^ an operand was not a 'Thena.Instral.Ops.VSurface'. Shaped like 'ExpectedText'
     -- and 'ExpectedTerm', and here for their reason: the value itself may not
     -- be named below @Core@
-  | NoSuchObjectLanguage String
-    -- ^ a tagged term literal named a language no @language@ block has
-    -- declared (MS6 phase 104). **Raised when the literal elaborates**, not
-    -- when it is read: a module is parsed whole before its own block is
-    -- installed, so this is the earliest the question can be asked.
-  | NoSuchObjectProduction String String
-    -- ^ @LC[nope]\`…\`@ — the language, and a production it does not have.
-  | ObjectNotParsed String String ParseFailure
-    -- ^ the language, the region's text, and why the object grammar did not
-    -- read it as one term (MS6 phase 104). The same three answers @:parse@
-    -- gives, because it is the same parser.
-  | ObjectNotATerm String BuildError
-    -- ^ it parsed, and the reading does not denote a term.
+  | ObjectFailed ObjectError
+    -- ^ a tagged term literal that is not one term of its language (MS6 phase
+    -- 104). The four ways are 'ObjectError', which the development calculus
+    -- reader answers with too (phase 110) — one region, one set of checks.
   | ExpectedSurfaceShape String
     -- ^ a surface reader was given a term of the wrong shape (MS4 phase 49):
     -- @surface-name@ on something that is not a name, @surface-universe@ on
@@ -699,6 +691,26 @@ data SyntaxError
 -- Moved here from "Thena.Syntax.Resolve" at phase 17b, with 'DevForm'. It could
 -- not be imported from there — @Resolve@ is above @Core@ — and it needs nothing
 -- that module has: every case is a 'String', an 'Int' or an 'Ident'.
+-- | **Why a tagged term literal is not one term of its language** (MS6 phase
+-- 110). Both readers ask the same four questions of a region — the surface's,
+-- when the literal elaborates, and the development calculus's, when the text
+-- is resolved — so both carry this rather than spelling it twice.
+data ObjectError
+  = NoSuchObjectLanguage String
+    -- ^ a region named a language no @language@ block has declared. **Asked
+    -- when the literal is resolved or elaborated**, not when it is read: a
+    -- module is parsed whole before its own block is installed, so this is the
+    -- earliest the question can be asked.
+  | NoSuchObjectProduction String String
+    -- ^ @LC[nope]\`…\`@ — the language, and a production it does not have.
+  | ObjectNotParsed String String ParseFailure
+    -- ^ the language, the region's text, and why the object grammar did not
+    -- read it as one term. The same three answers @:parse@ gives, because it
+    -- is the same parser.
+  | ObjectNotATerm String BuildError
+    -- ^ it parsed, and the reading does not denote a term.
+  deriving (Eq, Show)
+
 data ResolveError
   = NotInScope String
   | NotACoreTerm DevForm
@@ -725,6 +737,11 @@ data ResolveError
     -- file loads; it is answered rather than left to a pattern-match failure,
     -- and it is what a term resolved with no splice environment at all would
     -- say.
+  | NotAnObjectTerm ObjectError
+    -- ^ **a tagged term literal in development-calculus text** (MS6 phase
+    -- 110): @LC\`( λ x : ι . x )\`@ resolves to the constructor application it
+    -- denotes, and this is why it did not. It is what the printer writes, so
+    -- what a goal shows can be typed back.
   | LevelArgumentsOnALocal String
     -- ^ level arguments written on a name bound by a λ or by the development.
     -- Only a definition has level parameters, so only a global can be given
