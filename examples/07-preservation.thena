@@ -235,7 +235,7 @@ ctxInvExtend = \ G a S y U i ->
 -- Weakening: a derivation survives into any context that finds at least as much
 
 Incl : Ctx -> Ctx -> Type₀
-Incl = \ G G1 -> forall (y : String) (U : Ty) -> Ctx-in y U G -> Ctx-in y U G1
+Incl = \ G G1 -> forall (y : String) (U : Ty) (i : Ctx-in y U G) -> Ctx-in y U G1
 
 inclExtend : forall (G : Ctx) (G1 : Ctx) (x : String) (S : Ty) (inc : Incl G G1) -> Incl (extend G x S) (extend G1 x S)
 inclExtend = \ G G1 x S inc y U i ->

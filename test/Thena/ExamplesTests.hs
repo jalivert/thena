@@ -23,7 +23,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Driver (Response (..), Session, command, loadProofSource, loadRuleBases)
-import Thena.Repl (renderResponse, rulesPath, startingSession)
+import Thena.Repl (loadFile, renderResponse, rulesPath, startingSession)
 
 tests :: TestTree
 tests =
@@ -49,6 +49,22 @@ tests =
         let (s', r) = command s ":infer preservation"
         renderResponse s' r @?=
           [ "preservation : \8704 (M : LC) (M1 : LC) (T : Ty) -> typing empty M T -> step M M1 -> typing empty M1 T" ]
+    -- **And by tactics** (his ruling, 2026-09-21: both ways). 08 proves every
+    -- lemma again with attack, intro, eliminate-core and elaborate, and ends
+    -- at the same statement.
+    , testCase "and again by tactics, at the same statement" $ do
+        (s0, _) <- startingSession
+        s <- foldl (\ms p -> ms >>= \s1 -> readFile p >>= \src -> case loadProofSource s1 src of
+                               (s2, ProofLoaded {}) -> pure s2
+                               (s2, other) -> refused p s2 other)
+               (pure s0)
+               [ "examples/01-stlc-syntax.thena", "examples/02-contexts.thena"
+               , "examples/03-typing-and-reduction.thena", "examples/07-preservation.thena" ]
+        (s1, out, stopped) <- loadFile s "examples/08-preservation-by-tactics.thena.script"
+        if null stopped then pure () else assertFailure (unlines out)
+        let (s', r) = command s1 ":infer preservation-tactics"
+        renderResponse s' r @?=
+          [ "preservation-tactics : \8704 (M : LC) (M1 : LC) (T : Ty) -> typing empty M T -> step M M1 -> typing empty M1 T" ]
     ]
   where
     numbered f = case f of
@@ -70,7 +86,14 @@ tests =
           then case loadProofSource s src of
             (s', ProofLoaded {}) -> go s' bases more
             (s', other) -> refused path s' other
-          else assertFailure (path ++ " is a numbered example of a kind this test does not load")
+          -- A script of command lines (phase 109c), run as `:load` runs one:
+          -- it fails if any line stops.
+          else if ".thena.script" `isSuffixOf` f
+            then do
+              (s', out, stopped) <- loadFile s path
+              if null stopped then go s' bases more
+                else assertFailure (unlines ((path ++ " stopped:") : out))
+            else assertFailure (path ++ " is a numbered example of a kind this test does not load")
 
 refused :: FilePath -> Session -> Response -> IO a
 refused path s r = assertFailure (unlines ((path ++ " did not load:") : renderResponse s r))
