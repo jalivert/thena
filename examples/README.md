@@ -18,6 +18,7 @@ to the file.
 | `04-taking-terms-apart.thena.rules` | A rule base that matches `LC` terms in their own notation (`LC[app]`( ${f} ${a} )``) and builds them (`LC`( ${t} ${t} )``) |
 | `05-grouping-by-splicing.thena` | A language with no parentheses, where `f a b` reads two ways; a splice as a group (`` Ex`${Ex`f a`} b` ``), to any depth; a name or a computation spliced in as a group; why printing is the open half |
 | `06-more-judgments.thena` | Many steps as a judgment built on `step`, with a two-step run; the annotated tier (`rule … where ∀ … ->`) ranging over a derivation; a swap by simultaneous substitution with Redex-style subscripts (`x_1`, `x_2`) beside the sequential version that gets it wrong; a premise continued onto a second line |
+| `07-preservation.thena` | **Preservation for STLC, for closed terms** — the milestone's goal. A proof about the substitution Thena generated in 01, following its `decString` decisions: weakening, free variables, why no binder is renamed, the substitution lemma over a whole map, inversion, preservation. Ends by typing a reduct through `preservation` |
 
 ## The earlier proofs — TAPL's arithmetic language, by hand
 
@@ -49,6 +50,7 @@ cabal run thena
 :load rules rules/standard.thena.rules examples/04-taking-terms-apart.thena.rules
 :load examples/05-grouping-by-splicing.thena
 :load examples/06-more-judgments.thena
+:load examples/07-preservation.thena
 ```
 
 A module's declarations stay in scope for the next module loaded in the same
@@ -102,7 +104,10 @@ what can come next. Leave it with `:done`.
 
 ## What these do not show yet, and why
 
-- **Preservation for STLC.** That is phase 109, the milestone's goal.
+- **Preservation for any context.** `07` proves it for closed terms. With
+  open ones a binder can be renamed, and proving the new name fresh needs facts
+  about strings Thena cannot state yet.
+- **Preservation as a tactic script.** That is phase 109c.
 - **Terms printed in their own notation.** `:show` prints
   `app (abs "x" base (var "x")) …`, not `` LC`( ( λ x : ι . x ) … )` ``. That is
   not wired in yet.
