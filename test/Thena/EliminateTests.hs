@@ -37,7 +37,8 @@ import Thena.Declared
 import Thena.Driver (parseCore)
 import Thena.Errors (ElimError (..))
 import Thena.Global.Env (GlobalEnv)
-import Thena.Repl (renderCore)
+import Thena.Driver (Response (..), command, loadProofSource)
+import Thena.Repl (renderCore, renderResponse, startingSession)
 import Thena.Tactics.Eliminate (Elimination (..), eliminate)
 
 tests :: TestTree
@@ -49,6 +50,7 @@ tests =
     , testGroup "friendly indices are abstracted, not equated" friendlyTests
     , testGroup "what it refuses" refusalTests
     , testGroup "a DEPENDENT motive, over the adversarial corpus" dependentMotives
+    , testGroup "a goal that is an unfolded definition (MS6 phase 109c)" unfoldedGoal
     ]
 
 -- --------------------------------------------------------------------------
@@ -112,6 +114,14 @@ dependentMotives =
   , eliminates "one above Type₀"
       ["data Box1 : Type₁ where { box1 : ∀ (A : Type₀) -> A -> Box1 }"]
       "∀ (x : Box1) -> Eq {1} Box1 x x" 1
+    -- **An elimination of a polymorphic family inside the goal** (MS6 phase
+    -- 109c). Generalising the target used to rebuild it at no level
+    -- arguments, and the kernel refused the motive.
+  , eliminates "a goal holding an elim of a polymorphic family"
+      [ "data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }"
+      , "data List (A : Type) : Type where { nil : List A ; cons : A -> List A -> List A }"
+      ]
+      "∀ (s : List {0} Nat) (x : Nat) -> Eq {0} Nat (elim List {0} (Nat) (\\ (l : List {0} Nat) -> Nat) (zero (\\ (b : Nat) (bs : List {0} Nat) (r : Nat) -> r)) () s) zero" 2
   ]
   where
     -- Prelude-free, like every script in the suite (phase 11), so the one
@@ -534,3 +544,41 @@ withMethods ctx el =
 -- | One line, so that an exact-string case reads as one line.
 rendered :: Context -> Core -> String
 rendered ctx = unwords . words . renderCore 0 ctx
+
+
+-- --------------------------------------------------------------------------
+-- A goal that is an unfolded surface definition (MS6 phase 109c)
+-- --------------------------------------------------------------------------
+
+-- | **Abstracting the target kept a node's shape and dropped its levels.**
+-- `intro` unfolds `Same s` to the body elaboration stored, which holds
+-- `List` applied as a saturated former at level 0; generalising the target
+-- rebuilt that node at no levels, and the kernel refused the motive —
+-- `List has 1 level parameter, and was given 0 level arguments`. The target
+-- here does not even occur in the goal: the failure was about the goal alone.
+-- **The kernel is the judge**, as above: the script ends in `:revalidate`.
+unfoldedGoal :: [TestTree]
+unfoldedGoal =
+  [ unfolds "a saturated List former in the goal" ""
+      "Same = \\ s -> forall (y : String) -> Eq (List String) s s"
+  -- The same for an elimination: `elim List` in the stored body keeps its
+  -- level argument through the abstraction too.
+  -- This one has a level parameter, the motive's, so a use writes it.
+  , unfolds "an elim List in the goal" " {0}"
+      "Same = \\ s -> forall (y : String) -> Eq Comparison (elim List (String) (\\ l -> Comparison) ((same) (\\ b bs r -> r)) () s) same"
+  ]
+  where
+    unfolds what levels body = testCase what $ do
+      (s0, _) <- startingSession
+      s1 <- case loadProofSource s0 (unlines
+              [ "module Unfolded where", "", "Same : List String -> Type\8320", body ]) of
+              (s, ProofLoaded {}) -> pure s
+              (s, other) -> assertFailure (unlines (renderResponse s other))
+      let said = snd (foldl step (s1, [])
+            [ ":theorem r : \8704 (s : List {0} String) (c : Comparison) -> Same" ++ levels ++ " s"
+            , "attack", "intro", "intro", "intro"
+            , "goto-named \"r1\"", "eliminate-core \8988 c \8989", ":revalidate" ])
+          step (s, out) line = let (s', r) = command s line in (s', out ++ renderResponse s' r)
+      if "subgoals: sameMethod, differentMethod" `elem` said && any ("valid" `isInfixOf`) said
+        then pure ()
+        else assertFailure (unlines said)

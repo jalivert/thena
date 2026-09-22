@@ -296,7 +296,7 @@ qed
 -- ---------------------------------------------------------------------------
 -- The invariant survives a binder — a case split on the lookup
 
-:theorem goodExtend-tactics : ∀ (G : Ctx) (D : Ctx) (s : List {0} (And {0 0} String LC)) (x : String) (S : Ty) (g : Good {0 0 0} G D s) (y : String) (U : Ty) (i : Ctx-in y U (extend G x S)) -> Entry (extend D x S) y U (look {0 0 0} y (cons {0} (And {0 0} String LC) (both {0 0} String LC x (var x)) s))
+:theorem goodExtend-tactics : ∀ (G : Ctx) (D : Ctx) (s : List {0} (And {0 0} String LC)) (x : String) (S : Ty) (g : Good {0 0 0} G D s) -> Good {0 0 0} (extend G x S) (extend D x S) (cons {0} (And {0 0} String LC) (both {0 0} String LC x (var x)) s)
 attack
 intro
 intro

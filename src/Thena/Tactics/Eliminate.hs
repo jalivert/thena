@@ -460,15 +460,19 @@ replaceTerm needle v = go
             let (f', n1) = go n f
                 (a', n2) = go n1 a
              in (App f' a', n2)
-          Canonical g _ as ->
-            let (as', n1) = list n as in (Canonical g [] as', n1)
-          Eliminate d _ ps m ms is tg ->
+          -- **The level arguments go back unchanged** (MS6 phase 109c). They
+          -- were rebuilt as @[]@ from MS3 phase 29 on, which the kernel then
+          -- refused as a use of a polymorphic family at no levels — found
+          -- when a goal first held an unfolded definition over @List@.
+          Canonical g ls as ->
+            let (as', n1) = list n as in (Canonical g ls as', n1)
+          Eliminate d ls ps m ms is tg ->
             let (ps', n1) = list n ps
                 (m',  n2) = go n1 m
                 (ms', n3) = list n2 ms
                 (is', n4) = list n3 is
                 (tg', n5) = go n4 tg
-             in (Eliminate d [] ps' m' ms' is' tg', n5)
+             in (Eliminate d ls ps' m' ms' is' tg', n5)
           _ -> (t, n)
 
     binder con i s sc n =
