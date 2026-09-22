@@ -339,6 +339,11 @@ generated `LC-subst-all`**, not a substitution written for the proof: the
 proof names the generated function's pieces, checks with `refl` that they are
 the same terms, and follows its `decString` decisions case by case.
 
+**It is proved twice.** `examples/08-preservation-by-tactics.thena.script`
+proves every lemma again by tactics — `:theorem`, `attack`, `intro`,
+`eliminate-core` for each induction and case split, `elaborate ⟨ … ⟩` for each
+case — and reaches the same statement as `preservation-tactics`.
+
 **It is stated for closed terms**, as Software Foundations states it. The
 argument substituted in a β-step is then closed, so no binder is ever renamed.
 For any context the argument may have free names, a binder may be renamed, and
