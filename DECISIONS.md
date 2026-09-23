@@ -96,11 +96,15 @@ than read as a literal:**
 /a{3}/           refused — unexpected '{'
 /^[a-z]+$/       refused — unexpected '^'
 /\{\$/           fine — escaped, they are literal
+/(a)\1/          refused — a backslash before a digit is a backreference elsewhere
+/[[:alpha:]]/    refused — an unescaped [ inside a class
+/[\[a-z]/        fine — escaped, it is literal
 ```
 
 Read as literals, `/\S+/` would quietly mean `S+`, and someone coming from
-Perl or POSIX would find out much later. Refusing them also means `\s` or `{n}`
-can be added later without changing what any accepted expression means.
+Perl or POSIX would find out much later. Refusing them also means `\s`, `{n}`
+or POSIX classes can be added later without changing what any accepted
+expression means.
 
 ---
 
@@ -405,6 +409,13 @@ literal has type `∀ (T : Type₀) -> Token T`, so `/[0-9]/` elaborates to
 `/[0-9]/ ?T` and the signature solves `?T`. What gets stored is `/[0-9]/ Char`,
 which is what `:show` prints. Nothing is defaulted: with nothing to say what
 `T` is, elaboration fails.
+
+**It is the one literal that is not a value of a primitive type on its own.**
+A string, a character and a number each have a type; a regex has a Π, and what
+it stands for depends on the argument. So `/[a-z]/ Bool` is a well typed term
+of `Token Bool` as far as the kernel is concerned — nothing can take a `Token`
+apart, so it proves nothing — and it is the declaration check below, not
+typing, that refuses it.
 
 ```
 thena spine> :infer (/[a-z]/ : Token Char)
