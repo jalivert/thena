@@ -24,6 +24,7 @@ module Thena.Repl
   , renderLevel
   , renderPartial
   , renderPattern
+  , renderValue
   , renderCursor
   , renderWhere
   , renderMachine
@@ -151,15 +152,8 @@ import Thena.Language.Reader (ReadError (..))
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Regex (RegexError (..))
 import Thena.Global.NoConfusion (noConfusionNames)
-import qualified Data.List.NonEmpty as NE
-import Thena.Surface.Concrete
-  ( ObjectPiece (..)
-  , PairingError (..)
-  , Plicity (..)
-  , Surface (..)
-  , SurfaceArg (..)
-  , SurfaceBinder (..)
-  )
+import Thena.Syntax.Print (escapeChar, escapeString, renderSurface, subscript, tick)
+import Thena.Surface.Concrete (PairingError (..), Plicity (..))
 import Thena.Global.Env
   ( ConstructorDefinition (..)
   , InductiveDefinition (..)
@@ -187,7 +181,6 @@ import Data.Foldable (toList)
 import Data.List (stripPrefix, intercalate, partition)
 import Thena.Instral.Type (Signature, Ty, renderSignature, renderTy)
 import Thena.Instral.Infer (renderInstralTypeError)
-import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRhs (..), RawBody (..), RawPattern (..))
 --
 -- The prelude is loaded first (§9, phase 11) and **silently on success** — it
 -- is three @data@ lines and announcing them at every start is noise. A failure
@@ -970,10 +963,6 @@ freshen hint env
     ok s = s `notElem` taken && s `notElem` ["let", "in", "forall"]
     pick k = let s = hint ++ show k in if ok s then s else pick (k + 1)
 
-subscript :: Int -> String
-subscript = map sub . show
-  where
-    sub c = toEnum (fromEnum '₀' + (fromEnum c - fromEnum '0'))
 
 -- | Render a universe, **normalising first** (phase 28).
 --
@@ -1368,39 +1357,24 @@ renderSkeleton at sk = case sk of
 
 -- | The fence a tagged region is written with. Named rather than written
 -- inline so that a backtick never sits loose in a string literal here.
-tick :: Char
-tick = toEnum 96
-
--- | A string literal as the lexer reads it back: @\"@, @\\@ and @\n@ are the
--- three escapes @\@escape@ accepts, and every other character stands for
--- itself — a tab included, which is why this is not @show@.
-escapeString :: String -> String
-escapeString s = "\"" ++ concatMap esc s ++ "\""
-  where
-    esc c = case c of
-      '"'  -> "\\\""
-      '\\' -> "\\\\"
-      '\n' -> "\\n"
-      _    -> [c]
-
--- | A character literal, escaped as @\@chresc@ reads it.
-escapeChar :: Char -> String
-escapeChar c = "'" ++ esc ++ "'"
-  where
-    esc = case c of
-      '\'' -> "\\'"
-      '\\' -> "\\\\"
-      '\n' -> "\\n"
-      _    -> [c]
 
 renderValue :: [Grammar] -> Int -> Context -> Value -> String
 renderValue gs n ctx v = case v of
-  VText s            -> show s
-  -- The primitives (MS5 phase 64), each printed as it is written. @show@ is
-  -- exactly right for the first two — Haskell's escapes are ours — and the
-  -- booleans are lowercase because that is how @instral@ spells them.
+  -- The primitives (MS5 phase 64), each printed as it is written.
+  --
+  -- **Text and characters go through 'escapeString' and 'escapeChar', not
+  -- @show@ — `ms6/CLOSEOUT.md` 2, fixed at MS7 phase 112c.** The comment here
+  -- used to say @show@ was *"exactly right… Haskell's escapes are ours"*, and
+  -- it is not: @\@escape@ reads back only @\\"@, @\\\\@ and @\\n@, while a
+  -- literal tab is legal inside a string literal and @show@ renders it as
+  -- @\\t@, which the lexer refuses. @show@ also renders @∀@ as @\\8704@. Either
+  -- way the printer emitted something its own reader could not take back.
+  --
+  -- An 'Int' is unaffected; the booleans are lowercase because that is how
+  -- @instral@ spells them.
+  VText s            -> escapeString s
   VInt k             -> show k
-  VChar c            -> show c
+  VChar c            -> escapeChar c
   VBool True         -> "true"
   VBool False        -> "false"
   VList vs           -> "[" ++ intercalate ", " (map (renderValue gs n ctx) vs) ++ "]"
@@ -1588,168 +1562,6 @@ orList xs = case reverse xs of
 -- of the resolver: no context is consulted and no name is looked up. Parenthesised
 -- wherever a subterm could otherwise re-associate, which is enough for a hint —
 -- the elaborate layout decisions are 'renderCore'\'s and belong to terms.
--- | A surface term, as written (MS4 phase 39).
---
--- **Its own function, not a case of the development printer.** The two
--- languages print
--- differently — a surface lambda's binder may have no type, its arguments carry
--- braces, and it has @_@ and @?foo@ where the development calculus has neither.
--- Sharing one printer would mean a printer that has to ask which language it is
--- in, which is the special case the first design principle refuses.
---
--- Parenthesised by precedence, and it round-trips: 'Thena.Surface.Parser.parseSurface'
--- on this output gives the same tree back.
-renderSurface :: Surface -> String
-renderSurface = surf Loose
-  where
-    instruction i = case i of
-      RawBind x r  -> rawPattern x ++ " = " ++ rhs r
-      RawDo     o  -> operation o
-      -- **A surface @do@ block cannot contain one** (MS5 phase 77): the surface
-      -- grammar has no type notation, and a block in a surface term is not
-      -- type-checked anyway (@ms5\/CLOSEOUT.md@ 20), so an annotation there
-      -- would be decoration. This printer never meets one; it answers rather
-      -- than leaving the case open.
-      RawAnnot x _ -> x
-
-    rhs r = case r of
-      RhsOp o    -> operation o
-      RhsValue a -> operand a
-
-    -- **A block body prints explicitly** (MS5 phase 75b). This printer is
-    -- crossed against its reader, and layout is a pass the reader runs before
-    -- the grammar sees anything — so printing an indented block would be
-    -- printing something this module cannot claim reads back. Braces do.
-    funBody b = case b of
-      BodyRhs r      -> rhs r
-      BodyBlock is   -> "do { " ++ intercalate " ; " (map instruction is) ++ " }"
-
-    rawPattern rp = case rp of
-      RawPWord w   -> w
-      RawPInt k    -> show k
-      RawPChar c   -> show c
-      RawPText t   -> show t
-      RawPApp w as -> "(" ++ unwords (w : map rawPattern as) ++ ")"
-      RawPPair a b -> "(" ++ rawPattern a ++ ", " ++ rawPattern b ++ ")"
-      -- Exact, because a region keeps its source text (MS6 phase 104c).
-      RawPObject tag prod src ->
-        tag ++ maybe "" (\w -> "[" ++ w ++ "]") prod ++ [tick] ++ src ++ [tick]
-      RawPList ps mt ->
-        "[" ++ intercalate ", " (map rawPattern ps ++ tl) ++ "]"
-        where tl = case mt of
-                     Nothing -> []
-                     Just t  -> ["..." ++ rawPattern t]
-
-    operation (RawOp w as) = unwords (w : map operand as)
-
-    operand a = case a of
-      RawLambda ps b -> "\\ " ++ unwords (map rawPattern ps) ++ " -> " ++ funBody b
-      RawRef x  -> x
-      RawPos k  -> show k
-      RawText t -> show t
-      RawChar c -> show c
-      RawList os    -> "[" ++ intercalate ", " (map operand os) ++ "]"
-      RawPairOf x y -> "(" ++ operand x ++ ", " ++ operand y ++ ")"
-      -- Exact, because the region kept its source text: a rule listing shows
-      -- the embedded term as the author wrote it.
-      RawRegion tag prod src ->
-        tag ++ maybe "" (\w -> "[" ++ w ++ "]") prod ++ [tick] ++ src ++ [tick]
-      -- The same gap 'renderValue' has for a 'Thena.Instral.Ops.VRaw': there is no
-      -- printer for written syntax, so this says what it is rather than what it
-      -- contains (§7b's register).
-      RawQuoted _       -> "⌜…⌝"
-      -- A nested call, written back as it was written (MS5 phase 63). This is
-      -- the one place a rule listing shows the /written/ form rather than the
-      -- resolved one — resolution lifts it into a binding of its own.
-      RawNested w as    -> "(" ++ unwords (w : map operand as) ++ ")"
-
-    surf _ (SurfaceName x)      = x
-    surf _ (SurfaceUniverse l)  = "Type" ++ subscript l
-    surf _ (SurfaceLiteral l)   = case l of
-      LString s -> escapeString s
-      LChar c   -> escapeChar c
-      LInt k    -> show k
-      LRegex r  -> "/" ++ r ++ "/"
-    -- **A tagged term literal prints as it was written** (MS6 phase 104): its
-    -- text is kept, and only the three characters the region scanner reads
-    -- specially are put back behind a backslash. A splice prints as a term,
-    -- because that is what it holds.
-    surf _ (SurfaceObject lang prod ps) =
-      lang ++ maybe "" (\p -> "[" ++ p ++ "]") prod
-        ++ [tick] ++ concatMap objectPiece ps ++ [tick]
-    surf _ SurfaceUniverseOpen  = "Type"
-    surf _ SurfacePlaceholder   = "_"
-    surf _ (SurfaceHole h)      = "?" ++ h
-    -- **Printed with explicit braces and semicolons**, never re-laid-out: the
-    -- grammar accepts both spellings and this is the one that is unambiguous on
-    -- one line, which is what every other case here produces too.
-    surf _ (SurfaceDo b)        =
-      "do { " ++ intercalate " ; " (map instruction b) ++ " }" 
-    surf p (SurfaceApp f as)    =
-      paren (p >= Tight) (surf Spine f ++ concatMap arg (NE.toList as))
-    -- **The body of each of these four is @Arrowed@ and not @Term@**, which is
-    -- what the grammar says and what an ascription inside one turns on. A
-    -- binder's own type and a @let@'s annotation and value are @Term@, so they
-    -- stay @Loose@.
-    surf p (SurfaceLam bs b)    =
-      paren (p >= Spine) ("λ" ++ concatMap binder (NE.toList bs) ++ " -> " ++ surf Arrowed b)
-    surf p (SurfacePi bs b)     =
-      paren (p >= Spine) ("∀" ++ concatMap binder (NE.toList bs) ++ " -> " ++ surf Arrowed b)
-    surf p (SurfaceArrow a b)   =
-      paren (p >= Spine) (surf Tight a ++ " -> " ++ surf Arrowed b)
-    surf p (SurfaceLet x ty v b) =
-      paren (p >= Spine)
-        ("let " ++ x ++ maybe "" (\t -> " : " ++ surf Loose t) ty
-           ++ " = " ++ surf Loose v ++ " in " ++ surf Arrowed b)
-    -- @Term : Arrowed ':' Arrowed@ — both sides, and it needs its own
-    -- parentheses anywhere an @Arrowed@ is wanted.
-    surf p (SurfaceAnnot e ty)  =
-      paren (p >= Arrowed) (surf Arrowed e ++ " : " ++ surf Arrowed ty)
-    surf p (SurfaceElim d ps mot ms is tgt) =
-      paren (p >= Tight)
-        ("elim " ++ d ++ " " ++ list ps ++ " " ++ surf Tight mot ++ " " ++ list ms
-           ++ " " ++ list is ++ " " ++ surf Tight tgt)
-
-    objectPiece pc = case pc of
-      ObjectText txt -> concatMap escapeRaw txt
-      ObjectSplice e -> "$" ++ ['{'] ++ surf Loose e ++ ['}']
-
-    -- The region scanner reads a backslash before any of these as the
-    -- character itself, so writing them this way is what makes the printer's
-    -- output readable again.
-    escapeRaw c
-      | c `elem` [tick, '\\', '$'] = ['\\', c]
-      | otherwise                  = [c]
-
-    arg (SurfaceArg Explicit t) = " " ++ surf Tight t
-    arg (SurfaceArg Implicit t) = " {" ++ surf Loose t ++ "}"
-
-    binder (SurfaceBinder Explicit x Nothing)   = " " ++ x
-    binder (SurfaceBinder Explicit x (Just ty)) = " (" ++ x ++ " : " ++ surf Loose ty ++ ")"
-    binder (SurfaceBinder Implicit x Nothing)   = " {" ++ x ++ "}"
-    binder (SurfaceBinder Implicit x (Just ty)) = " {" ++ x ++ " : " ++ surf Loose ty ++ "}"
-
-    list ts = "(" ++ unwords (map (surf Tight) ts) ++ ")"
-
-    paren True t  = "(" ++ t ++ ")"
-    paren False t = t
-
--- | Where a surface term is being printed, and therefore what has to be
--- parenthesised.
---
--- **One level per non-terminal of @Surface.Parser@, and they are listed in that
--- grammar's order** — @Loose@ is @Term@, @Arrowed@ is @Arrowed@, @Spine@ is
--- @App@, @Tight@ is @Atom@. Anything else is a guess about what nests inside
--- what.
---
--- @Arrowed@ arrived 2026-09-12, and its absence was a real defect: with three
--- levels against the grammar's four, the body of a λ, a @∀@, an arrow and a
--- @let@ were all printed at @Term@, which admits an ascription that the body
--- position does not. So @λ x -> (x : y)@ printed as @λ x -> x : y@ and read back
--- as @(λ x -> x) : y@ — a different term, silently — and @a : (b : c)@ printed
--- as @a : b : c@, which does not parse at all.
-data SurfacePrec = Loose | Arrowed | Spine | Tight
-  deriving (Eq, Ord)
 
 obligation :: Obligation -> String
 obligation (AtMost l k) = renderLevelAtom l ++ " ≤ " ++ renderLevelAtom k

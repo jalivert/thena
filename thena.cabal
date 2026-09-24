@@ -47,6 +47,7 @@ library
         Thena.Protocol.Concrete
         Thena.Protocol.Json
         Thena.Protocol.Project
+        Thena.Protocol.Text
         Thena.Protocol.Message
         Thena.Language.Regex
         Thena.Language.Reader
@@ -71,6 +72,7 @@ library
         Thena.Syntax.Concrete
         Thena.Syntax.Lexer
         Thena.Syntax.Parser
+        Thena.Syntax.Print
         Thena.Syntax.Resolve
         Thena.Tactics.Eliminate
     other-modules:

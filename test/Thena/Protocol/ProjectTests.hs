@@ -26,6 +26,7 @@ import Thena.Driver
   , parseSurfaceModule
   , rawRuleDecls
   )
+import Thena.Protocol.Text (printProject)
 import Thena.Protocol.Project
   ( Project (..)
   , ProjectError (..)
@@ -44,6 +45,7 @@ tests =
     , testCase "and loads to the same session as its text does" sameSession
     , testCase "a missing module file is named" missingNamed
     , testCase "the manifest has the name the format says" manifestIsNamed
+    , testCase "and written as text, read back, it is the same session too" textSameSession
     ]
 
 -- | The shipped project: the standard base, the prelude, then the numbered
@@ -97,6 +99,32 @@ sameSession = do
       | otherwise = (fst (loadProofSource s src), i + 1)
     name i = pad (show i) <> ".json"
     pad s = replicate (max 0 (3 - length s)) '0' <> s
+
+-- | MS7 done-when 4's **text** half.
+--
+-- The shipped project, written out as text, read back with the ordinary
+-- parsers, and loaded — against the same project loaded from its trees. They
+-- must reach the same 'Session'.
+--
+-- **Session and not tree, and the difference is real.** A @language@, @context@
+-- or @judgment@ block records the source line each production and rule was
+-- written on; a printer that lays a block out canonically cannot reproduce
+-- those. Nothing outside "Thena.Language.Reader" reads them, so they never
+-- reach a session — which is exactly why this is the claim worth making for
+-- text, and why tree equality is the claim for JSON.
+textSameSession :: IO ()
+textSameSession = do
+  fs <- shipped
+  case projectOf fs of
+    Left e -> assertFailure e
+    Right p -> case projectOf (printProject p) of
+      Left e -> assertFailure ("the printed project did not parse: " <> e)
+      Right p' -> do
+        let fromTrees = fst (loadInto newSession p)
+            fromText  = fst (loadInto newSession p')
+        if fromTrees == fromText
+          then pure ()
+          else assertFailure "the project and its printed text gave different sessions"
 
 -- | A project is many files, so "it did not read" has to say which one.
 missingNamed :: IO ()

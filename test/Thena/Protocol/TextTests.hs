@@ -16,10 +16,12 @@ import System.Directory (listDirectory)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase)
 
+import Thena.Core.Term (Literal (..))
 import Thena.Driver (Item (..), parseSurfaceModule, parseSurfaceTerm)
-import Thena.Repl (renderSurface)
+import Thena.Instral.Ops (Value (..))
+import Thena.Repl (renderSurface, renderValue)
 import Thena.Surface.Concrete
-  ( Surface
+  ( Surface (..)
   , SurfaceConstructor (..)
   , SurfaceData (..)
   )
@@ -29,6 +31,7 @@ tests =
   testGroup
     "Thena.Protocol.Text"
     [ testCase "every surface term in the corpus re-parses from its rendering" corpus
+    , testCase "a printed value re-reads, tabs and all" valueReReads
     , testCase "and the corpus really holds terms" notVacuous
     ]
 
@@ -42,6 +45,24 @@ notVacuous = do
   if n >= 100
     then pure ()
     else assertFailure ("the corpus yielded only " <> show n <> " surface terms")
+
+-- | @ms6\/CLOSEOUT.md@ 2, asserted rather than assumed.
+--
+-- **The whole suite passed the moment 'renderValue' was fixed, which is the
+-- reason this exists**: nothing in the corpus holds a tab or a non-ASCII
+-- character inside a printed value, so the bug was invisible and so was its
+-- repair. A printer is only fixed if something reads its output back.
+--
+-- The crossing is the real reader: the text goes through 'parseSurfaceTerm',
+-- not through a second copy of the escaping rules.
+valueReReads :: IO ()
+valueReReads = mapM_ one ["a\tb", "\8704", "quote \" and \\ back", "\n", "ℓ≐⌜x⌝"]
+  where
+    one txt = case parseSurfaceTerm (renderValue [] 0 [] (VText txt)) of
+      Right (SurfaceLiteral (LString back))
+        | back == txt -> pure ()
+        | otherwise   -> assertFailure ("came back as " <> show back <> " from " <> show txt)
+      other -> assertFailure ("did not re-read " <> show txt <> ": " <> take 120 (show other))
 
 -- | Every surface term an item carries, at the top level.
 termsOf :: Item -> [Surface]
