@@ -46,6 +46,8 @@ module Thena.Driver
   , parseDeclaration
   , parseSurfaceTerm
   , parseSurfaceModule
+  , Item (..)
+  , rawRuleDecls
   , LoadKind (..)
   , kindOf
   ) where
@@ -2123,7 +2125,20 @@ breakOn needle = go ""
 --
 -- Takes contents and not a path (§12 invariant 4).
 readRuleBase :: [Grammar] -> FilePath -> String -> Either RuleFileError RuleBase
-readRuleBase gs path src = case baseHead ls of
+readRuleBase gs path src = do
+  (nm, desc, raws) <- rawRuleDecls src
+  (sigs, fns, rs) <- resolveAll gs raws
+  Right (ruleBase nm desc path sigs fns rs)
+
+-- | A rule file's header and its declarations, parsed and /not/ resolved.
+--
+-- **Split out of 'readRuleBase' at MS7 phase 112a**, which needs exactly this
+-- half: the project's storage format is the tree as written (his decision of
+-- 2026-09-24), and resolution is what turns a written tree into something that
+-- depends on what is loaded. 'readRuleBase' is this plus 'resolveAll', so there
+-- is one parse and not two.
+rawRuleDecls :: String -> Either RuleFileError (String, Maybe String, [RawDecl])
+rawRuleDecls src = case baseHead ls of
   Nothing -> Left NoRuleHeader
   Just (nm, desc, used) -> do
       -- The head is blanked, not dropped: every position the lexer reports
@@ -2138,8 +2153,7 @@ readRuleBase gs path src = case baseHead ls of
       -- condition that the two spellings be one language.
       ts'  <- mapLeft (RuleSyntaxError . LayoutFailed) (layoutFile ts)
       raws <- mapLeft (RuleSyntaxError . ParseFailed) (parseRules ts')
-      (sigs, fns, rs) <- resolveAll gs raws
-      Right (ruleBase nm desc path sigs fns rs)
+      Right (nm, desc, raws)
   where
     ls = lines src
 
