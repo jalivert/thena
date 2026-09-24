@@ -42,6 +42,8 @@ library
         Thena.Global.Env
         Thena.Global.NoConfusion
         Thena.Kernel
+        Thena.Protocol.Address
+        Thena.Protocol.Message
         Thena.Language.Regex
         Thena.Language.Reader
         Thena.Language.Grammar
@@ -104,6 +106,8 @@ test-suite thena-test
         Thena.Core.TypingTests
         Thena.Core.UnifyTests
         Thena.CursorTests
+        Thena.Protocol.AddressTests
+        Thena.Protocol.MessageTests
         Thena.DependentIndexTests
         Thena.CanonicalTests
         Thena.DeterminacyTests
