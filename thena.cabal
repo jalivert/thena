@@ -44,6 +44,7 @@ library
         Thena.Kernel
         Thena.Protocol.Address
         Thena.Protocol.Codec
+        Thena.Protocol.Display
         Thena.Protocol.Concrete
         Thena.Protocol.Json
         Thena.Protocol.Project
@@ -121,6 +122,7 @@ test-suite thena-test
         Thena.CursorTests
         Thena.Protocol.AddressTests
         Thena.Protocol.ConcreteTests
+        Thena.Protocol.DisplayTests
         Thena.Protocol.ProjectTests
         Thena.Protocol.ServerTests
         Thena.Protocol.SocketTests

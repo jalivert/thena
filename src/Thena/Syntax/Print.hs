@@ -35,12 +35,21 @@ module Thena.Syntax.Print
   , tick
   , escapeString
   , escapeChar
+    -- * Naming and levels, shared by both printers and by the display builder
+  , Env
+  , nameOf
+  , freshen
+  , renderLevel
+  , renderLevelBody
+  , renderLevelAtom
+  , levelArgs
   ) where
 
 import Data.List (intercalate)
 import qualified Data.List.NonEmpty as NE
 
-import Thena.Core.Term (Literal (..))
+import Thena.Core.Level (Level, Normal (..), levelVarName, normalise)
+import Thena.Core.Term (Literal (..), Var)
 import Thena.Instral.Concrete
   ( RawDecl (..)
   , RawFunction (..)
@@ -436,3 +445,89 @@ kindWord k = case k of
   LanguageBlock -> "language"
   ContextBlock  -> "context"
   JudgmentBlock -> "judgment"
+
+
+-- --------------------------------------------------------------------------
+-- Naming and levels
+-- --------------------------------------------------------------------------
+--
+-- **Moved out of "Thena.Repl" at MS7 phase 115a.** They were the terminal
+-- printer's, and the display builder the editor is served from needs exactly the
+-- same answers — what a variable is called here, and what a level normalises to.
+-- Keeping one copy is what stops a term displaying under one name in the
+-- terminal and another in the editor.
+
+-- | The freshening environment: minted variables paired with their display
+-- names. Threaded through both the term and the development printers.
+type Env = [(Var, String)]
+
+nameOf :: Var -> Env -> String
+nameOf v env = case lookup v env of
+  Just s  -> s
+  Nothing -> "‹" ++ show v ++ "›"
+
+-- | A binder whose identifier is already in scope is renamed, because a term
+-- whose body refers to the /outer/ one would otherwise print as one that
+-- re-parses to the inner (§2.6). Keywords are avoided for the same reason.
+freshen :: String -> Env -> String
+freshen hint env
+  | ok hint   = hint
+  | otherwise = pick (1 :: Int)
+  where
+    taken = map snd env
+    ok s = s `notElem` taken && s `notElem` ["let", "in", "forall"]
+    pick k = let s = hint ++ show k in if ok s then s else pick (k + 1)
+
+
+-- | Render a universe, **normalising first** (phase 28).
+--
+-- Normalising is not cosmetic. 'Thena.Core.Typing' builds a Π's level with
+-- @levelMax@ and does not evaluate it, so @:infer Type₀ -> Type₀@ now arrives
+-- here as @LMax (LSuc LZero) (LSuc LZero)@ where it used to arrive as
+-- @Level 1@. It must still print @Type₁@ — which is most of what this phase's
+-- "the test suite does not move" check is checking.
+--
+-- A level with variables in it prints as an expression over @⊔@, Agda's
+-- spelling of the join. **Nothing constructs one before phase 29**, so that
+-- branch is exercised by unit tests rather than by the REPL; it is written now
+-- because rendering is total and a partial renderer would be worse than an
+-- unexercised one.
+renderLevel :: Level -> String
+renderLevel l = case normalise l of
+  Normal c [] -> "Type" ++ subscript c
+  nf          -> "Type (" ++ renderLevelBody nf ++ ")"
+
+-- | A level's own notation, without the @Type@ a universe wears — what goes
+-- inside @{…}@ at a use site, and inside the parentheses of a @Typeₙ@ that has
+-- variables in it.
+renderLevelBody :: Normal -> String
+renderLevelBody (Normal c vs) =
+  intercalate " ⊔ " ([show c | c > 0 || null vs] ++ map var vs)
+  where
+    var (v, k)
+      | k == 0    = levelVarName v
+      | otherwise = "suc" ++ concat (replicate (k - 1) " (suc") ++ " "
+                      ++ levelVarName v ++ concat (replicate (k - 1) ")")
+
+-- | A level argument inside @{…}@ — bare, without the @Type@ a universe wears.
+renderLevelAtom :: Level -> String
+renderLevelAtom l = case normalise l of
+  nf@(Normal _ []) -> renderLevelBody nf
+  nf@(Normal 0 [(_, 0)]) -> renderLevelBody nf
+  -- **Not writable, and it says so by parenthesising.** The surface only admits
+  -- atoms (phase 30 §3), so a compound level can only have been built by
+  -- inference — which arrives in phase 33. Printing it as an expression is
+  -- honest; printing it as an atom would produce text that does not re-read.
+  nf -> "(" ++ renderLevelBody nf ++ ")"
+
+-- | A reference's level **arguments**, as a use site writes them: @{0 ℓ}@, and
+-- nothing at all when there are none (MS3 phase 31c).
+--
+-- **Printing them is what keeps output re-readable.** A polymorphic @Id@
+-- printed as @Id A a b@ re-parses to a reference with no level arguments, which
+-- is an arity error — so the printer would have been producing text the reader
+-- could not feed back in. Everything monomorphic prints exactly as before,
+-- since its list is empty.
+levelArgs :: [Level] -> String
+levelArgs [] = ""
+levelArgs ls = " {" ++ unwords (map renderLevelAtom ls) ++ "}"
