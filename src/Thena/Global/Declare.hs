@@ -18,6 +18,7 @@
 -- 2, the former wrappers, which are purely syntactic and need no typing.
 module Thena.Global.Declare
   ( DeclareError (..)
+  , TokenClassError (..)
   , declare
   , buildInductive
   , targetIndices
@@ -39,7 +40,7 @@ import Thena.Core.Level
   , solveLevels
   )
 import Thena.Core.Typing (infer)
-import Thena.Errors (DataBuildError (..), ResolveError (..), TypeError (..))
+import Thena.Errors (DataBuildError (..), ResolveError (..), Skipped (..), TypeError (..))
 import Thena.Core.Term
   ( Core (..)
   , GlobalName
@@ -52,13 +53,15 @@ import Thena.Core.Term
   , open
   , referencesAt
   )
+import Thena.Language.Regex (RegexError)
+import Thena.Language.Grammar (GrammarError)
 import Thena.Global.NoConfusion
   ( Generated (..)
-  , Skipped (..)
   , generateNoConfusion
   )
 import Thena.Global.Env
-  ( ConstructorDefinition (..)
+  ( ArgRole (..)
+  , ConstructorDefinition (..)
   , Definition (..)
   , GlobalEnv
   , InductiveDefinition (..)
@@ -83,8 +86,38 @@ import Thena.Global.Env
 -- they are deliberately separate from 'NotStrictlyPositive', which is the real
 -- thing. Keeping them apart is what lets the message say "not yet" rather than
 -- "never".
+-- | Why a definition of type @Token T@ is not a token class (MS6 phase 100,
+-- @ms6\/SPEC.md@ §3.2). In the order they are checked.
+data TokenClassError
+  = TokenTypeUnsupported Core
+    -- ^ @T@, reduced, is not @String@, @Char@ or @Int@
+  | TokenValueNotLiteral Core
+    -- ^ the value, reduced, is not a regex literal applied to a type
+  | TokenRegexRefused String RegexError
+    -- ^ the text between the slashes, and why it does not parse
+  | TokenMatchesEmpty String
+  | TokenNotIncluded String GlobalName String
+    -- ^ the text, @T@, and a shortest string it accepts that is not a @T@
+  deriving (Eq, Show)
+
 data DeclareError
-  = AlreadyDeclared GlobalName
+  = NoSuchPrimitive GlobalName
+    -- ^ @primitive foo : …@ where nothing has a reduction rule called @foo@
+    -- (MS6 phase 97b). **This is what stops @primitive@ being a postulate**:
+    -- a name the system cannot compute with is refused rather than installed
+    -- as a constant nothing could ever eliminate
+  | PrimitiveWrongShape GlobalName String
+    -- ^ the name is known but the declared type is not the shape its rule
+    -- reads — the message says what shape was wanted
+  | GrammarRefused GrammarError
+    -- ^ a @language@ or @context@ block that failed a check of
+    -- @ms6\/SPEC.md@ §4.5 or §5.1 (MS6 phase 101)
+  | TokenClassRefused GlobalName TokenClassError
+    -- ^ a definition whose type is @Token T@ that is not a token class
+    -- (MS6 phase 100, @ms6\/SPEC.md@ §3.2). The kernel accepted it — a regex
+    -- literal applied to any type is well typed — and this is the check that
+    -- decides whether the grammar machinery may rely on it
+  | AlreadyDeclared GlobalName
     -- ^ one namespace, shared with generated names (§3.6)
   | RepeatedName GlobalName
     -- ^ the declaration itself uses the name twice
@@ -130,7 +163,7 @@ data DeclareError
 -- policy for @Certify@ at phase 12. No instruction writes globals.
 -- **Also reports what no-confusion did not do.** The 'Skipped' is a fact about
 -- the declaration the user just wrote — @Vec@ gets no @noConfusionVec@ — and
--- the driver says it. 'Thena.Global.NoConfusion.NoEquality' is the one case
+-- the driver says it. 'Thena.Global.NoConfusion.NoEqInScope' is the one case
 -- that is about the environment instead, and it is silent.
 declare
   :: GlobalEnv -> Int -> InductiveDefinition
@@ -172,7 +205,7 @@ declare env n d0 = do
   -- naming the old one.
   case generateNoConfusion env1 n5 d of
     Generated env2 n6   -> Right (env2, n6, Nothing)
-    Declined NoEquality -> Right (env1, n5, Nothing)
+    Declined NoEqInScope -> Right (env1, n5, Nothing)
     Declined NoProducts -> Right (env1, n5, Nothing)
     Declined why        -> Right (env1, n5, Just why)
     Clash g             -> Left (AlreadyDeclared g)
@@ -580,7 +613,7 @@ spine = go []
 -- 'Thena.Global.Env.ConstructorDefinition'\\'s /"a telescope over the
 -- datatype's parameters"/ requires.
 buildInductive
-  :: GlobalEnv -> GlobalName -> Int -> [(GlobalName, Core)] -> Core -> Int
+  :: GlobalEnv -> GlobalName -> Int -> [(GlobalName, Core, Maybe [ArgRole])] -> Core -> Int
   -> Either DataBuildError (InductiveDefinition, Int)
 buildInductive env dn nps cs ty n0 = do
   (params, afterParams, n1) <- peelExactly env [] nps ty n0
@@ -594,7 +627,9 @@ buildInductive env dn nps cs ty n0 = do
       _          -> Left (DeclaredTypeIsNotAUniverse dn)
 
     constructorsOf _ _ n [] = Right ([], n)
-    constructorsOf params want n ((cn, cty) : more) = do
+    -- A constructor's roles are its grammar's (MS6 phase 103), or all 'Plain'
+    -- for one written by hand.
+    constructorsOf params want n ((cn, cty, roles) : more) = do
       -- Peel the parameters this constructor's own type re-bound, and rename
       -- them onto the datatype's.
       (own, body, n1) <- peelExactly env [] nps cty n
@@ -604,7 +639,7 @@ buildInductive env dn nps cs ty n0 = do
                Left _   -> Left (ConstructorTargetWrong cn)
                Right is -> Right is
       (rest', n3) <- constructorsOf params want n2 more
-      Right (ConstructorDefinition cn args ixs : rest', n3)
+      Right (ConstructorDefinition cn args ixs (maybe (map (const Plain) args) id roles) : rest', n3)
 
     -- @close@ then @instantiate@ — the two primitives a rename is, and the
     -- same pair "Thena.Core.Unify" spells @substFree@ with.

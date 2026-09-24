@@ -612,6 +612,10 @@ rigidRigidLevels dir env st ctx k@(Equate xi s t ty) = case levelPairs of
       (Global f ks, Global g ls)
         | f == g, length ks == length ls -> Right st
 
+      -- A literal has no sub-terms either, and two are equal when they are
+      -- the same literal (MS6 phase 105, the gap 'Thena.Core.Convert' had too).
+      (Primitive l, Primitive r) | l == r -> Right st
+
       -- **The codomain is the only covariant position in the language**, so it
       -- is the only place @dir@ survives a decomposition.
       (Pi i dom sc, Pi _ dom' sc') -> binder dir i dom sc dom' sc'

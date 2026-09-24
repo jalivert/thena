@@ -226,7 +226,7 @@ withRules =
 -- are; "Thena.RuleSyntaxTests" is where the literal is tied to the file, and
 -- "Thena.GoldenTests" is where the file itself is driven.
 expectedBase :: [RuleBase]
-expectedBase = [ruleBase "standard" Nothing "" [] [] expectedFunctions expectedStandard]
+expectedBase = [ruleBase "standard" Nothing "" [] expectedFunctions expectedStandard]
 
 -- | The base's FUNCTIONS, which are deliberately not among its rules (MS5
 -- phase 89): a function has no head, and a headless rule would be offered by
@@ -281,6 +281,14 @@ elaborateClauses =
       [ Bind (Op.PVar "w") Nothing (Op.SurfaceNameOf (Ref "t"))
       , Bind (Op.PVar "x") Nothing (Op.ResolveName (Ref "w"))
       , call "fill" [Ref "x"], call "solve" []
+      ]
+  , clause SurfaceIsLiteral
+      [ Bind (Op.PVar "l") Nothing (Op.SurfaceLiteralOf (Ref "t"))
+      , call "apply-core" [Ref "l"]
+      ]
+  , clause SurfaceIsObject
+      [ Bind (Op.PVar "a") Nothing (Op.ObjectTerm (Ref "t"))
+      , call "elaborate" [Ref "a"]
       ]
   , clause SurfaceIsUniverse
       [ Bind (Op.PVar "u") Nothing (Op.SurfaceUniverseOf (Ref "t"))
@@ -423,6 +431,10 @@ elaborateClauses =
       ]
   , clause SurfaceIsDo [Do (Op.Play (Ref "t"))]
   ]
+    -- **A module's top-level block, and it is not a clause of @elaborate@**
+    -- (MS6 phase 104b): no head test, its own name, and the driver calls it
+    -- by that name.
+    ++ [Rule (GlobalName "run-block") [PVar "t"] [] [Do (Op.Play (Ref "t"))]]
     ++ binderWalkers
     ++ spineWalkers
   where

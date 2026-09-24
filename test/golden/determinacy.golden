@@ -1,8 +1,8 @@
 declared Term
-no noConfusionNV: nvSucc's argument 2 (n) has a type that depends on an earlier argument, so its equation cannot be stated
 declared NV
-no noConfusionStep: eIf's argument 5 (s) has a type that depends on an earlier argument, so its equation cannot be stated
+warning: no noConfusionNV: nvSucc's argument 2 (n) has a type that depends on an earlier argument, so its equation cannot be stated
 declared Step
+warning: no noConfusionStep: eIf's argument 5 (s) has a type that depends on an earlier argument, so its equation cannot be stated
 proving absurd : ∀ (C : Type₀) -> Empty {0} -> C
 absurd : ∀ (C : Type₀) -> Empty {0} -> C   ∎
 proving sym : ∀ (A : Type₀) (a : A) (b : A) -> Eq {0} A a b -> Eq {0} A b a

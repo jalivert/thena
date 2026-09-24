@@ -1,0 +1,70 @@
+-- Typing contexts, and looking a variable up in one.
+--
+-- LOAD AFTER 01-stlc-syntax.thena — a module's declarations are in scope for
+-- the next one loaded in the same session.
+--
+-- Then try   :show Ctx-in      :parse Ctx-in x : ι ∈ ·, x : ι, y : ( ι -> ι )
+
+module StlcContexts where
+
+-- A context is declared like a language: an empty one, and one extended by an
+-- entry. The block gives you the datatype
+--
+--   data Ctx : Type₀ where
+--     empty  : Ctx
+--     extend : Ctx -> String -> Ty -> Ctx
+--
+-- and a lookup relation, whose notation is the extension with the context
+-- moved to the right of `∈`:
+--
+--   data Ctx-in : String -> Ty -> Ctx -> Type₀ where       -- x : T ∈ Γ
+--     Ctx-here  : ∀ (Γ : Ctx) (x : String) (T : Ty) -> Ctx-in x T (extend Γ x T)
+--     Ctx-there : ∀ (Γ : Ctx) (x : String) (T : Ty) (x' : String) (T' : Ty)
+--                   -> (Eq String x x' -> Empty)        -- the names differ
+--                   -> Ctx-in x T Γ
+--                   -> Ctx-in x T (extend Γ x' T')
+context Ctx, Γ where
+  empty  -> ·
+  extend -> Γ , x : T
+
+-- A context is written in its own notation too.
+twoVars : Ctx
+twoVars = Ctx`·, x : ι, f : ( ι -> ι )`
+
+
+-- ---------------------------------------------------------------------------
+-- A lookup is a type, and a proof of it says where the variable is.
+
+-- f is the last entry, so it is `here`.
+fIsThere : Ctx-in`f : ( ι -> ι ) ∈ ·, x : ι, f : ( ι -> ι )`
+fIsThere = Ctx-here Ctx`·, x : ι` "f" Ty`( ι -> ι )`
+
+-- x is one further down, past f. `Ctx-there` asks for a proof that x is not f.
+-- There is no axiom for that: `eqString` compares the two literals, and
+-- eliminating `Eq` carries a proof of one fact to the other.
+xNotF : Eq String "x" "f" -> Empty
+xNotF = \ q ->
+  elim Eq (String)
+    (\ a b r -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "x" a)
+                -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "x" b))
+    ((\ a d -> d))
+    ("x" "f") q unit
+
+xIsFurther : Ctx-in`x : ι ∈ ·, x : ι, f : ( ι -> ι )`
+-- Read it as: under ·, x : ι there is x : ι (that is `here`), and the entry
+-- on top, f, is a different name.
+xIsFurther = Ctx-there Ctx`·, x : ι` "x" base "f" Ty`( ι -> ι )` xNotF (Ctx-here Ctx`·` "x" base)
+
+
+-- ---------------------------------------------------------------------------
+-- A later binding hides an earlier one of the same name.
+--
+-- In  ·, x : ι, x : ( ι -> ι )  the x you find is the function. Reaching the
+-- first x would need `Ctx-there` with a proof that x is not x — so the lookup
+-- below can only be built from an absurdity, and here is the absurdity it needs:
+reachingTheHiddenX : (Eq String "x" "x" -> Empty) -> Ctx-in`x : ι ∈ ·, x : ι, x : ( ι -> ι )`
+reachingTheHiddenX = \ ne -> Ctx-there Ctx`·, x : ι` "x" base "x" Ty`( ι -> ι )` ne (Ctx-here Ctx`·` "x" base)
+
+-- …and that absurdity is refuted by `refl`.
+xIsX : (Eq String "x" "x" -> Empty) -> Empty
+xIsX = \ ne -> ne (refl String "x")

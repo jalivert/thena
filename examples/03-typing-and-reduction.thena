@@ -1,0 +1,109 @@
+-- Typing and reduction for the λ-calculus of 01 and 02, and some derivations.
+--
+-- LOAD AFTER 01-stlc-syntax.thena AND 02-contexts.thena.
+--
+-- Then try   :show typing      :show step
+--            :parse typing · ⊢ ( λ x : ι . x ) : ( ι -> ι )
+
+module StlcRelations where
+
+-- A judgment is written as on paper: its notation, then its rules. The
+-- notation's slots are the judgment's indices, in order, so this one is
+--
+--   typing : Ctx -> LC -> Ty -> Type₀
+--
+-- In a rule, a metavariable of any language stands for a term of it — Γ, M,
+-- T, and x for a name — and a suffix makes another one: M', N₁, T2. Every
+-- metavariable is quantified, in the order it first appears.
+judgment typing = Γ ⊢ M : T where
+
+  T-var:  x : T ∈ Γ
+          -----------
+          Γ ⊢ x : T
+
+  T-abs:  Γ , x : S ⊢ E : T
+          ----------------------------------
+          Γ ⊢ ( λ x : S . E ) : ( S -> T )
+
+  T-app:  Γ ⊢ M : ( S -> T )    Γ ⊢ N : S
+          --------------------------------
+          Γ ⊢ ( M N ) : T
+
+-- Each rule is a constructor, and `:show typing` prints them:
+--
+--   T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> Ctx-in x T Γ -> typing Γ (var x) T
+--   T-abs : ∀ (Γ : Ctx) (x : String) (S : Ty) (E : LC) (T : Ty)
+--             -> typing (extend Γ x S) E T -> typing Γ (abs x S E) (arrow S T)
+--   T-app : ∀ (Γ : Ctx) (M : LC) (S : Ty) (T : Ty) (N : LC)
+--             -> typing Γ M (arrow S T) -> typing Γ N S -> typing Γ (app M N) T
+
+judgment value = M value where
+
+  V-abs:  ------------------------
+          ( λ x : T . E ) value
+
+-- Call by value. `E[x->N]` is the generated substitution, LC-subst E x N, so
+-- a step computes its own right-hand side. A premise may be named, as `v` and
+-- `s` are in E-app2.
+judgment step = M --> N where
+
+  E-beta:  N value
+           -------------------------------------
+           ( ( λ x : T . E ) N ) --> E[x->N]
+
+  E-app1:  M --> M'
+           ------------------------
+           ( M N ) --> ( M' N )
+
+  E-app2:  v : M value    s : N --> N'
+           ----------------------------
+           ( M N ) --> ( M N' )
+
+
+-- ---------------------------------------------------------------------------
+-- Typing derivations. A judgment is written in its own notation, like a term.
+
+-- ⊢ λ x : ι . x  :  ι -> ι
+identityTyped : typing`· ⊢ ( λ x : ι . x ) : ( ι -> ι )`
+identityTyped =
+  T-abs Ctx`·` "x" base LC`x` base
+    (T-var "x" base Ctx`·, x : ι` (Ctx-here Ctx`·` "x" base))
+
+-- ⊢ λ x : ι . λ y : ι . x  :  ι -> ι -> ι
+-- The x in the body is found past y, so the lookup needs x ≠ y.
+xNotY : Eq String "x" "y" -> Empty
+xNotY = \ q ->
+  elim Eq (String)
+    (\ a b r -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "x" a)
+                -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "x" b))
+    ((\ a d -> d))
+    ("x" "y") q unit
+
+constTyped : typing`· ⊢ ( λ x : ι . ( λ y : ι . x ) ) : ( ι -> ( ι -> ι ) )`
+constTyped =
+  T-abs Ctx`·` "x" base LC`( λ y : ι . x )` Ty`( ι -> ι )`
+    (T-abs Ctx`·, x : ι` "y" base LC`x` base
+      (T-var "x" base Ctx`·, x : ι, y : ι`
+        (Ctx-there Ctx`·, x : ι` "x" base "y" base xNotY (Ctx-here Ctx`·` "x" base))))
+
+
+-- ---------------------------------------------------------------------------
+-- Reduction steps. The right-hand side is checked by the kernel running
+-- LC-subst, so each of these is a small test of substitution too.
+
+-- ( λ x : ι -> ι . x ) ( λ y : ι . y )  -->  λ y : ι . y
+betaStep : step`( ( λ x : ( ι -> ι ) . x ) ( λ y : ι . y ) ) --> ( λ y : ι . y )`
+betaStep = E-beta LC`( λ y : ι . y )` "x" Ty`( ι -> ι )` LC`x` (V-abs "y" base LC`y`)
+
+-- ( λ x . λ y . x ) ( λ z . y )  -->  λ y' . λ z . y
+-- The argument mentions a free y, so the inner binder is renamed on the way in.
+captureAvoidingStep :
+  step`( ( λ x : ( ι -> ι ) . ( λ y : ι . x ) ) ( λ z : ι . y ) ) --> ( λ y' : ι . ( λ z : ι . y ) )`
+captureAvoidingStep =
+  E-beta LC`( λ z : ι . y )` "x" Ty`( ι -> ι )` LC`( λ y : ι . x )` (V-abs "z" base LC`y`)
+
+-- A step inside the function position of an application.
+congruenceStep :
+  step`( ( ( λ x : ( ι -> ι ) . x ) ( λ y : ι . y ) ) w ) --> ( ( λ y : ι . y ) w )`
+congruenceStep =
+  E-app1 LC`( ( λ x : ( ι -> ι ) . x ) ( λ y : ι . y ) )` LC`( λ y : ι . y )` LC`w` betaStep

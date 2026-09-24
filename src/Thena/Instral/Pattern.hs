@@ -12,9 +12,14 @@
 -- shape and the two questions that are about the shape alone.
 module Thena.Instral.Pattern
   ( Pattern (..)
+  , Skeleton (..)
+  , Slot (..)
+  , skeletonHoles
   , patternBinds
   , patternIrrefutable
   ) where
+
+import Thena.Core.Term (GlobalName, Literal)
 
 type Name = String
 
@@ -56,7 +61,54 @@ data Pattern
   | PPair Pattern Pattern -- ^ @(x, y)@ — the pair /value/ needs nothing new
   | PSome Pattern         -- ^ @some x@
   | PNone                 -- ^ @none@
+  | PObject (Skeleton Pattern)
+    -- ^ @LC[app]\`( ${f} ${a} )\`@ — **a term of an object language** (MS6
+    -- phase 104c), matched against the 'Thena.Core.Term.Core' it denotes.
+    --
+    -- **The reading is already compiled away**: what is left is the skeleton,
+    -- which names constructors and knows which holes are terms and which are a
+    -- token class\'s literal. The grammar was consulted when the pattern was
+    -- read and is never needed again.
   deriving (Eq, Show)
+
+-- | A term of an object language with something at each of its splices (MS6
+-- phase 104c).
+--
+-- **One type, two directions** — @discussion\/patterns-and-the-editor.md@ §5:
+-- /splice a value IN when building, bind a value OUT when matching/. A
+-- @Skeleton Pattern@ is the matching direction and a
+-- @Skeleton Thena.Instral.Ops.Operand@ the building one; the position decides
+-- which.
+--
+-- **It is grammar-free on purpose.** Resolution has the grammars and does all
+-- the work that needs them — which production a node is, which argument each
+-- slot fills, what a token class matched. What reaches the machine is a shape
+-- with holes, so nothing about grammars has to be threaded into the engine.
+data Skeleton a
+  = SNode GlobalName [Skeleton a]
+    -- ^ a constructor of the generated datatype, applied to its arguments in
+    -- the order §4.6 gives them
+  | SLit Literal
+    -- ^ a token class's match, written out as the literal it denotes
+  | SHole Slot a
+    -- ^ a splice, and what the slot at it takes
+  deriving (Eq, Show)
+
+-- | What the term at a hole has to be.
+data Slot
+  = AtTerm
+    -- ^ a language slot: an object term, so a 'Thena.Core.Term.Core'
+  | AtPrimitive GlobalName
+    -- ^ a token class's slot — @String@, @Char@ or @Int@ — so an @instral@
+    -- value of that type on either side of the hole
+  deriving (Eq, Show)
+
+-- | What sits at each hole, left to right.
+skeletonHoles :: Skeleton a -> [a]
+skeletonHoles sk = case sk of
+  SNode _ kids -> concatMap skeletonHoles kids
+  SLit _       -> []
+  SHole _ a    -> [a]
 
 -- | The names a pattern binds, left to right.
 --
@@ -76,6 +128,7 @@ patternBinds pt = case pt of
   PPair a b   -> patternBinds a ++ patternBinds b
   PSome a     -> patternBinds a
   PNone       -> []
+  PObject sk  -> concatMap patternBinds (skeletonHoles sk)
 
 -- | Does this pattern match every value of its type?
 --

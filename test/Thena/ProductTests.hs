@@ -60,7 +60,7 @@ tests =
       (s, _) <- startingSession
       case lookupDefinition (GlobalName g) (globals (sessionMachine s)) of
         Nothing -> assertFailure (g ++ " is not in the prelude")
-        Just d  -> renderCore (names (sessionMachine s)) [] (definitionType d) @?= ty
+        Just d  -> renderCore [] (names (sessionMachine s)) [] (definitionType d) @?= ty
 
     declares g want =
       testCase (g ++ (if want then " is generated" else " is not")) $ do

@@ -27,7 +27,7 @@ import Thena.Standard (withRules)
 
 import Thena.Core.Level (Level (..))
 import qualified Thena.Core.Term
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Var, fresh)
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Literal (..), Var, fresh)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, enter, focus)
 import qualified Thena.Development.Cursor as Cursor
@@ -39,6 +39,7 @@ import Thena.Engine
   , Development (..)
   , load
   , step
+  , splicing
   )
 import Thena.Errors (FailReason (..), MoveError (..), ResolveError (..), SyntaxError (..))
 import Thena.Global.Env (emptyGlobals)
@@ -197,6 +198,22 @@ hypVar  = fst (fresh 1)
 
 -- | @λ a : Type₀ . ? goal : Type₀ . goal@, focused on the hole — so there is
 -- something in scope at the focus for a surface name to denote (§4.5).
+-- | A hole claimed at a type of your own (MS6 phase 97c), shaped exactly like
+-- 'hole' so the two differ in nothing but the goal.
+holeAt :: Core -> Cursor
+holeAt ty = case Cursor.along top of
+  Right cur -> cur
+  Left e    -> error ("fixture will not move: " ++ show e)
+  where
+    top =
+      enter
+        ( Under (Assume hypVar (Ident "a") type0)
+            (Under (Claim goalVar (Ident "goal") ty) (Trailing (Free goalVar)))
+        )
+
+stringType :: Core
+stringType = Global (GlobalName "String") []
+
 hole :: Cursor
 hole = case Cursor.along top of
   Right cur -> cur
@@ -214,6 +231,10 @@ runOut m = case step m of
   Saying msg m'     -> let (ms, r) = runOut m' in (msg : ms, r)
   Declaring _ m'    -> runOut m'
   Defining _ _ _ _ m' -> runOut m'
+  Primitively _ _ m' -> runOut m'
+  DeclaringGrammar _ m' -> runOut m'
+  -- A block the driver would have typed; the harness splices and runs it.
+  Playing is m' -> runOut (splicing is m')
   Certifying _ _ m' -> runOut m'
   Asking _ m'       -> ([], Right m')
   Yielding _ m'     -> ([], Right m')
@@ -239,7 +260,7 @@ elaboratingAt cur s =
 -- **With the standard base installed**, because elaboration lives in it.
 machineAt :: Cursor -> [Instr] -> Machine
 machineAt cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals expectedBase [] 1000 0)
+  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals expectedBase [] [] 1000 0)
 
 -- | @? goal : ∀ (a : Type₀) (b : Type₀) -> Type₀@ — two binders, so a miscount
 -- would show.
@@ -333,6 +354,20 @@ leafTests =
         case elaborating (SurfaceUniverse 0) of
           Left (UniverseMismatch _ _) -> pure ()
           other -> assertFailure ("expected unification to object: " ++ show other)
+
+      -- **A literal is the one leaf that needs nothing looked up** (MS6 phase
+      -- 97c): its term is itself and its type is fixed, so the clause is the
+      -- written universe's two instructions. Both directions are stated,
+      -- because a clause that filled without checking would pass the first.
+    , testCase "a literal elaborates at its own type" $
+        case elaboratingAt (holeAt stringType) (SurfaceLiteral (LString "hi")) of
+          Left r  -> assertFailure ("did not elaborate: " ++ show r)
+          Right m -> isGuess m @?= False
+    , testCase "and is refused at another type" $
+        case elaboratingAt (holeAt stringType) (SurfaceLiteral (LInt 3)) of
+          Left (Mismatch _ got want) ->
+            (got, want) @?= (Global (GlobalName "Int") [], stringType)
+          other -> assertFailure ("expected a clash of the two types: " ++ show other)
 
       -- **The placeholder elaborates by not elaborating** — his words. The
       -- hole is still a hole afterwards, which is the whole of the behaviour
@@ -582,7 +617,7 @@ baseTests =
               , "fit-core", "fit-core"
               , "claim", "assume", "quantify"
               ]
-              ++ replicate 16 "elaborate" ++ replicate 2 "enter-binders"
+              ++ replicate 18 "elaborate" ++ ["run-block"] ++ replicate 2 "enter-binders"
               ++ replicate 2 "spine-arguments"
 
     , testCase "prove is a rule over prim-prove" $

@@ -21,6 +21,10 @@ module Thena.Core.Term
 
     -- * Terms
   , Core (..)
+  , Literal (..)
+  , primitiveType
+  , tokenName
+  , tokenType
   , Scope  -- NB: the type only. Hiding 'MkScope' is the point of the module.
 
     -- * Binding
@@ -38,7 +42,7 @@ module Thena.Core.Term
 
 import Data.List (nub)
 
-import Thena.Core.Level (Level, LevelVar, metasIn, substLevel)
+import Thena.Core.Level (Level (..), LevelVar, metasIn, substLevel)
 
 -- | A reference to a binding, globally unique within a session.
 --
@@ -79,8 +83,72 @@ newtype GlobalName = GlobalName String
 newtype Scope a = MkScope a
   deriving (Eq, Show)
 
--- | The core language (§3.6). Settled and closed: no later phase adds a
--- constructor here.
+-- | A literal (MS6 phases 97a and 100).
+--
+-- The four sit here rather than in constructors of 'Core' because nothing about
+-- the term language distinguishes them: they are opaque values whose type is
+-- fixed ('primitiveType') and whose only operation is equality.
+data Literal
+  = LString String
+  | LChar Char
+  | LInt Integer                       -- ^ arbitrary precision, per @ms6\/SPEC.md@ §2.1
+  | LRegex String
+    -- ^ a token class's regular expression, as its source text between the
+    -- slashes (MS6 phase 100, @ms6\/SPEC.md@ §3.1). **Only the text**: which of
+    -- @String@, @Char@, @Int@ a match becomes is an /argument/, not a field —
+    -- see 'primitiveType'. Two are equal when their text is, as strings are:
+    -- @\/a|b\/@ and @\/b|a\/@ accept the same strings and are different terms.
+  deriving (Eq, Show)
+
+-- | The type a literal inhabits, read off the literal alone.
+--
+-- The three primitive types and @Token@ are seeded into every environment as
+-- constants ('Thena.Global.Env.primitives'), so a user cannot declare something
+-- else by those names, and this function is the only place the association is
+-- written.
+--
+-- **A regex literal's type is a Π — HIS RULING, 2026-09-19.** @\/[a-z]\/@ is a
+-- @Token String@ in one declaration and a @Token Char@ in another, so the
+-- literal takes its @T@ as an argument:
+--
+-- @
+-- \/[a-z]\/ : ∀ (T : Type₀) -> Token T
+-- @
+--
+-- and elaboration applies it to a hole that unification solves from the goal.
+-- The alternative, @T@ carried /inside/ the literal, would need @T@ before
+-- @fill@ — it is only in the goal, which nothing in @instral@ can take apart —
+-- or a literal holding a Core term, which every traversal here would then have
+-- to look inside. @\/[a-z]\/ Bool@ is therefore well typed; it is refused by the
+-- token-class checks at declaration (@Thena.Driver.checkedTokenClass@), and
+-- cannot be unsound because nothing eliminates a @Token@.
+primitiveType :: Literal -> Core
+primitiveType l = case l of
+  LString{} -> Global (GlobalName "String") []
+  LChar{}   -> Global (GlobalName "Char") []
+  LInt{}    -> Global (GlobalName "Int") []
+  LRegex{}  -> Pi (Ident "T") (Universe LZero) (MkScope (App (Global tokenName []) (Bound 0)))
+
+-- | @Token : Type₀ -> Type₀@, the type former of token classes (MS6 phase 100).
+tokenName :: GlobalName
+tokenName = GlobalName "Token"
+
+-- | 'tokenName'\'s type. Seeded by 'Thena.Global.Env.emptyGlobals'; written
+-- here because 'Scope' can only be built in this module.
+tokenType :: Core
+tokenType = Pi (Ident "T") (Universe LZero) (MkScope (Universe LZero))
+
+-- | The core language (§3.6).
+--
+-- **§3.6 said "settled and closed: no later phase adds a constructor here", and
+-- MS6 phase 97a is the one exception, with his ruling of 2026-09-18 behind it.**
+-- The level change of MS3 stayed inside the letter of that sentence by making
+-- 'Global' carry a field; a literal cannot, because a literal /is/ a term and
+-- there is no node it could be without pretending to be a 'Canonical' of a
+-- former nothing declares. The alternative he weighed and refused was building
+-- @Char@ and @String@ from an inductive numeral in the prelude, which costs a
+-- constructor chain per identifier in every object-language term.
+-- See @discussion\/object-language-modelling.md@ §9.11 and @ms6\/SPEC.md@ §2.1.
 data Core
   = Bound Int                          -- ^ a binder inside this term
   | Free Var                           -- ^ a component in the context
@@ -91,6 +159,7 @@ data Core
   | App Core Core
   | Let Ident Core Core (Scope Core)   -- ^ @x = s : S . t@
   | Canonical GlobalName [Level] [Core] -- ^ saturated former, at level arguments
+  | Primitive Literal                        -- ^ a literal of a primitive type (MS6 phase 97a)
   | Eliminate                          -- ^ saturated use of an eliminator
       { eliminated :: GlobalName
       , levels     :: [Level]
@@ -112,8 +181,12 @@ data Core
 -- application has exactly one spelling (§12 invariant 6).
 --
 -- The final catch-all makes a missing case compare 'False' rather than warn.
--- That is tolerable only because 'Core' is closed (§3.6) — if a constructor is
--- ever added, this instance is the first place to look.
+-- That is tolerable only because 'Core' changes rarely — and when MS6 phase 97a
+-- added 'Primitive', this instance was indeed the first place that needed a
+-- line. Two literals compare by 'Literal'\'s own derived instance, so a 'LChar'
+-- and a one-character 'LString' are unequal, which is what keeps @'a'@ and
+-- @\"a\"@ from converting (@Thena.Core.PrimitiveTests@ states that as a test,
+-- because 'Thena.Core.Convert' has no case of its own for a literal).
 --
 -- **All four places a 'Thena.Core.Level.Level' can sit are compared** — a
 -- 'Universe' and the three reference forms' arguments (MS3, his ruling of
@@ -138,6 +211,7 @@ instance Eq Core where
   Lam _ s b      == Lam _ s' b'      = s == s' && b == b'
   App f a        == App g c          = f == g && a == c
   Let _ v s b    == Let _ v' s' b'   = v == v' && s == s' && b == b'
+  Primitive a    == Primitive b      = a == b
   Canonical f ks as == Canonical g ls bs = f == g && ks == ls && as == bs
   Eliminate d ks ps m ms is t == Eliminate d' ls ps' m' ms' is' t' =
     d == d' && ks == ls && ps == ps' && m == m' && ms == ms' && is == is' && t == t'
@@ -154,6 +228,7 @@ close x = MkScope . go 0
       Free y         -> if y == x then Bound d else Free y
       Global g ls    -> Global g ls
       Universe k     -> Universe k
+      Primitive l    -> Primitive l
       Pi i s b       -> Pi i (go d s) (under d b)
       Lam i s b      -> Lam i (go d s) (under d b)
       App f a        -> App (go d f) (go d a)
@@ -184,6 +259,7 @@ instantiate v (MkScope body) = go 0 body
       Free y         -> Free y
       Global g ls    -> Global g ls
       Universe k     -> Universe k
+      Primitive l    -> Primitive l
       Pi i s b       -> Pi i (go d s) (under d b)
       Lam i s b      -> Lam i (go d s) (under d b)
       App f a        -> App (go d f) (go d a)
@@ -214,6 +290,7 @@ freeVars = nub . go
     go :: Core -> [Var]
     go t = case t of
       Bound _                     -> []
+      Primitive _                 -> []
       Free y                      -> [y]
       Global _ _                  -> []
       Universe _                  -> []
@@ -239,6 +316,7 @@ globalsIn = nub . go
     go :: Core -> [GlobalName]
     go t = case t of
       Bound _                     -> []
+      Primitive _                 -> []
       Free _                      -> []
       Global g _                  -> [g]
       Universe _                  -> []
@@ -269,6 +347,7 @@ substLevelsIn sub = go
 
     go t = case t of
       Bound i        -> Bound i
+      Primitive l    -> Primitive l
       Free x         -> Free x
       Global g ls    -> Global g (map at ls)
       Universe l     -> Universe (at l)
@@ -301,6 +380,7 @@ referencesAt g ls = go
   where
     go t = case t of
       Bound i             -> Bound i
+      Primitive l         -> Primitive l
       Free x              -> Free x
       Global h []
         | h == g          -> Global h ls
@@ -335,6 +415,7 @@ levelMetasIn = nub . concatMap metasIn . go
   where
     go t = case t of
       Bound _                       -> []
+      Primitive _                   -> []
       Free _                        -> []
       Global _ ls                   -> ls
       Universe l                    -> [l]

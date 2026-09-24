@@ -41,6 +41,7 @@ module Thena.Driver
   , loadRuleBases
   , baseHead
   , parseCore
+  , checkedPrimitive
   , parseDevelopment
   , parseDeclaration
   , parseSurfaceTerm
@@ -49,11 +50,27 @@ module Thena.Driver
   , kindOf
   ) where
 
-import Data.Maybe (fromMaybe, isJust, listToMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Thena.Core.Level (Level (..), LevelVar, Obligation, freshLevelMeta)
 import Thena.Core.Context (Context)
-import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), substLevelsIn)
+import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
+import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), fresh, open, substLevelsIn, tokenName)
+import Thena.Language.Judgment (judgmentDatatype)
+import Thena.Language.Lookup (lookupDatatype, lookupGrammar)
+import Thena.Language.Substitution (substitutionDefinitions)
+import Thena.Language.Regex
+  ( Inclusion (..)
+  , Regex (..)
+  , alternatives
+  , andThen
+  , fromRanges
+  , inclusion
+  , nullable
+  , oneOf
+  , parseRegex
+  , singleChar
+  , star
+  )
 import Data.Char (isSpace)
 import Data.List (dropWhileEnd, isSuffixOf, nub, stripPrefix)
 import Data.List.NonEmpty (NonEmpty (..))
@@ -89,17 +106,21 @@ import Thena.Errors
   , ResolveError (..)
   , SyntaxError (..)
   , TypeError
+  , Warning (..)
   )
 import Thena.Development.Validate (revalidate)
-import Thena.Global.Declare (DeclareError, declare)
-import Thena.Global.NoConfusion (Skipped (..), noConfusionNames)
+import Thena.Global.Declare (DeclareError (..), TokenClassError (..), declare)
+
 import Thena.Kernel (certify)
 import Thena.Global.Env
-  ( Constant (..)
+  ( ArgRole (..)
+  , Constant (..)
+  , ConstructorDefinition (..)
   , Definition (..)
   , GlobalEnv
-  , InductiveDefinition
+  , InductiveDefinition (..)
   , addDefinition
+  , addPrimitive
   , generalised
   , emptyGlobals
   , inductiveName
@@ -124,8 +145,7 @@ import Thena.Instral.Ops
   , Value (..)
   )
 import Data.Either (partitionEithers)
-import Thena.Instral.Infer (InstralTypeError, inferBlock, inferProgram)
-import Thena.Instral.Grammar (Language)
+import Thena.Instral.Infer (InstralTypeError (..), inferBlock, inferProgram)
 import Thena.Instral.Type (Signature (..), Ty (..), fits)
 import Thena.Rules
   ( RuleBase (..)
@@ -138,12 +158,10 @@ import Thena.Rules
   , surfaceBlocks
   , RuleError (..)
   , allCallable
-  , allLanguages
   , baseRules
   , allSignatures
   , ruleBase
   , resolveFunction
-  , resolveLanguage
   , resolveSignature
   , resolveTy
   , validate
@@ -170,7 +188,10 @@ import Thena.Instral.Concrete
   , RawOperand (..)
   , RawPattern (..)
   )
-import Thena.Syntax.Lexer (Located (..), Token (..), lexTokens)
+import Thena.Syntax.Lexer (BlockKind (..), Located (..), Token (..), lexModule, lexTokens)
+import Thena.Language.Reader (Block (..), readBlock)
+import Thena.Language.Grammar (Argument (..), GProduction (..), Grammar (..), Sort (..), checkGrammar, earleyRules)
+import qualified Thena.Language.Earley as Earley
 import Thena.Syntax.Parser
   ( parseData
   , parseEquation
@@ -229,6 +250,11 @@ data Session = Session
     -- environment only ever grows), so an @:undo@ that crossed it would rewind
     -- the development and leave the theorem admitted.
   , sessionStepping  :: Bool
+  , sessionParsing   :: Maybe String
+    -- ^ **the language whose terms the lines are, in @:parse@'s interactive
+    -- mode** (MS6 phase 102b, his request of 2026-09-19). Every line is parsed
+    -- as a term of it until @:done@. On the session, as 'sessionStepping' is,
+    -- so a transcript drives the mode exactly as the terminal does.
   }
   deriving (Eq, Show)
 
@@ -337,11 +363,12 @@ newSession :: Session
 newSession = Session
   -- The trailing @0@ is 'Engine.lineFloor' (MS5 phase 95): an empty stack, so
   -- the first line's failures have nothing below them to decline.
-  { sessionMachine   = Machine (Exec [] [] []) ps [] emptyGlobals [] [] n 0
+  { sessionMachine   = Machine (Exec [] [] []) ps [] emptyGlobals [] [] [] n 0
   , sessionWork      = Scratch
   , sessionSuspended = []
   , sessionHistory   = (Exec [] [] [], ps, []) :| []
   , sessionStepping  = False
+  , sessionParsing   = Nothing
   }
   where
     (ps, n) = newDevelopment 0
@@ -404,6 +431,13 @@ data Response
     -- own look, because @certify@ is an op and an op's answer comes back as a
     -- 'Message', which the driver may not build out of a term: rendering is
     -- "Thena.Repl"'s (§2.5)
+  | ParsedObject Earley.Tree
+    -- ^ @:parse@ (MS6 phase 102): the one reading of an object term, holes
+    -- and all
+  | ObjectUnparsed String String Earley.ParseFailure
+  | ParsingEntered String   -- ^ @:parse ‹L›@: the interactive mode began (phase 102b)
+  | ParsingLeft String      -- ^ @:done@: it ended
+    -- ^ @:parse@: the language, the text, and why it is not one term
   | InferredSurface Surface Core
     -- ^ @:infer ‹surface›@ (MS4 phase 43): the term as written and the type
     -- elaborating it produced. The **surface** term, not the core one it built,
@@ -415,7 +449,7 @@ data Response
     -- surface declarations and not command lines. Like 'LoadRequested' it only
     -- names the file; "Thena.Repl" reads it and hands the contents back to
     -- 'loadProofSource'
-  | ProofLoaded String [String] Int
+  | ProofLoaded String [String] Int [Warning]
     -- ^ a proof module went in: its name, and what it declared, in order. **The
     -- op-level messages are discarded** — his call, 2026-09-02, the same bargain
     -- @loadPrelude@ already makes: elaborating one declaration prints a dozen
@@ -472,7 +506,15 @@ data Response
     -- ^ @:matches@ — the rules whose heads pass at the focus, in dispatch order
     -- (§7.6). A look and not an act: no body runs, and nothing is speculatively
     -- executed to find out whether one would succeed (§2.2)
-  | Ran [Message] Stop        -- ^ what the machine said, and where it stopped
+  | Ran [Message] [Warning] Stop
+    -- ^ what the machine said, what is worth warning about, and where it
+    -- stopped.
+    --
+    -- **Two lists and not one** (MS6 phase 98): a load discards the messages —
+    -- elaborating a file prints a dozen @solved: ?ℓ229@ lines — and a warning
+    -- is precisely the thing that must survive that. Before this, the one
+    -- warning the system had (no-confusion skipped) was a 'Message', so it was
+    -- shown at the prompt and lost in a file.
   | Failed SyntaxError
   | LineRefused [RuleError]
     -- ^ the line parsed, and then said something no op or rule could be given
@@ -506,6 +548,14 @@ data Stop
     -- @:choices@ after one says so. What the machine is kept /for/ is the
     -- messages and the reason; the proof itself is rewound by 'oneLine'.
   | Refused DeclareError -- ^ a @data@ declaration the checker would not admit
+  | BlockRefused [RuleError]
+    -- ^ a @do@ block reached by the program did not validate (MS6 phase 104b).
+    --
+    -- **Two stops rather than one**, matching the two ways a block is wrong
+    -- and the two responses the prompt already gives for them — 'LineRefused'
+    -- and 'EntryMistyped'. A block is checked where it runs now, so the same
+    -- two answers have to be sayable from a run as well as from a command.
+  | BlockIllTyped [InstralTypeError]
   | Uncertified KernelError
     -- ^ the kernel would not accept what the development built (§5.3). Shaped
     -- like 'Refused': the command is abandoned, and there is nothing to retry
@@ -523,6 +573,12 @@ data CommandError
     -- 'NotAsking''s twin, and it exists for the same reason: a word that did
     -- nothing would be worse than one that says so.
   | NoSuchGlobal String
+  | NoSuchLanguage String
+  | NotParsing
+    -- ^ @:done@ outside @:parse@'s mode (phase 102b), as @qed@ outside a proof
+    -- is 'NotProving': a word that did nothing would be worse than one that
+    -- says so
+    -- ^ @:parse@ named a language no @language@ or @context@ block declared
   | NotProving
     -- ^ @qed@, @:suspend@, @:abandon@ or @:undo@ outside a proof. §2.4: outside
     -- a proof there is nothing to undo, and definitions are not undoable
@@ -567,14 +623,14 @@ data CommandError
 -- --------------------------------------------------------------------------
 
 -- | Lex, parse, resolve as a core term, in the given environment and context.
-parseCore :: GlobalEnv -> Context -> Int -> String -> Either SyntaxError (Core, Int)
-parseCore = parseWith resolve
+parseCore :: [Grammar] -> GlobalEnv -> Context -> Int -> String -> Either SyntaxError (Core, Int)
+parseCore gr = parseWith gr resolve
 
 
 -- | Lex, parse, resolve as a development (§2.7's longest-prefix convention).
 parseDevelopment
-  :: GlobalEnv -> Context -> Int -> String -> Either SyntaxError (Partial, Int)
-parseDevelopment = parseWith resolvePartial
+  :: [Grammar] -> GlobalEnv -> Context -> Int -> String -> Either SyntaxError (Partial, Int)
+parseDevelopment gr = parseWith gr resolvePartial
 
 -- | The arguments of a rule called by name at the REPL (phase 23b): a run of
 -- atoms, each resolved as a core term in the context at the focus.
@@ -621,8 +677,8 @@ data BlockProblem
 -- **The blocks are typed as extra bodies, not as callables.** Nothing can call
 -- one — it has no name a user could write — so it is handed to 'inferProgram'
 -- beside 'allCallable' rather than inside it.
-checkSurfaceBlocks :: [RuleBase] -> GlobalName -> [Instr] -> Maybe BlockProblem
-checkSurfaceBlocks bases nm prog = case surfaceBlocks (allLanguages bases) nm prog of
+checkSurfaceBlocks :: [Grammar] -> [RuleBase] -> GlobalName -> [Instr] -> Maybe BlockProblem
+checkSurfaceBlocks gs bases nm prog = case surfaceBlocks gs nm prog of
   Left errs -> Just (BlockIll errs)
   Right bs  -> case concatMap validate bs of
     e : es -> Just (BlockIll (e : es))
@@ -643,21 +699,13 @@ checkSurfaceBlocks bases nm prog = case surfaceBlocks (allLanguages bases) nm pr
 -- except while a rule is yielding: then the block shares the rule's
 -- environment ('Thena.Engine.load'), so the names it reads are in scope and have
 -- the types their values have.
-checkBlock :: [RuleBase] -> [(Ops.Name, Value)] -> Rule -> Maybe BlockProblem
-checkBlock bases bound r =
+checkBlock :: [Grammar] -> [RuleBase] -> [(Ops.Name, Value)] -> Rule -> Maybe BlockProblem
+checkBlock gs bases bound r =
   case validate r { ruleParams = map Ops.PVar (nub (map fst bound)) } of
     e : es -> Just (BlockIll (e : es))
     []     -> case inferBlock (allSignatures bases) (allCallable bases) bound r of
       errs@(_ : _) -> Just (BlockMistyped errs)
-      []           -> checkSurfaceBlocks bases (ruleName r) (ruleBody r)
-
--- | 'checkSurfaceBlocks', said as the driver says things.
-blockResponse :: Session -> String -> [Instr] -> Maybe Response
-blockResponse s what prog =
-  case checkSurfaceBlocks (rules (sessionMachine s)) (GlobalName what) prog of
-    Just (BlockIll es)      -> Just (LineRefused es)
-    Just (BlockMistyped es) -> Just (EntryMistyped es)
-    Nothing                 -> Nothing
+      []           -> checkSurfaceBlocks gs bases (ruleName r) (ruleBody r)
 
 -- | A whole typed **entry**, which is an @instral@ block (MS5 phase 70).
 --
@@ -672,8 +720,8 @@ blockResponse s what prog =
 -- **The same grammar a rule body has**, so nothing is \"@instral@, except at the
 -- REPL\".
 instralEntry
-  :: [RuleBase] -> String -> Either LineError [Instr]
-instralEntry bases src = do
+  :: [Grammar] -> [RuleBase] -> String -> Either LineError [Instr]
+instralEntry gs bases src = do
   ts  <- mapLeft LineSyntax (tokensOf src)
   -- **An entry is laid out, like a rule file** (MS5 phase 78). One line gets a
   -- block around it and nothing else changes; a @:{ … :}@ entry gets a @;@
@@ -688,7 +736,7 @@ instralEntry bases src = do
             -- environment, and that is the behaviour already recorded — the
             -- driver has only ever built literals, so a typed command names a
             -- hole and never a reference.
-            (resolveBlock (allLanguages bases) (GlobalName "entry") []
+            (resolveBlock gs (GlobalName "entry") []
                (concatMap hoist (reverse is)))
   -- **An entry is checked the way a rule file is** (MS5, reviewed 2026-09-12).
   -- It was resolved and then neither validated nor typed, so @prim-try 3@ at the
@@ -701,7 +749,7 @@ instralEntry bases src = do
   -- 79). Until then 'Thena.Instral.Ops.Play' resolved one as it ran, so @say 3@ inside
   -- one halted the machine where the same instruction anywhere else is refused
   -- before it starts. All three checks are 'checkBlock' since phase 90.
-  case checkBlock bases [] (Rule (GlobalName "entry") [] [] prog) of
+  case checkBlock gs bases [] (Rule (GlobalName "entry") [] [] prog) of
     Just (BlockIll es)      -> Left (LineIllFormed es)
     Just (BlockMistyped es) -> Left (LineMistyped es)
     Nothing                 -> Right prog
@@ -755,16 +803,18 @@ resolving w os
 
     written o = case o of
       RawQuoted _        -> True
-      RawRegion "core" _ -> True
+      RawRegion "core" _ _ -> True
       _                  -> False
 
 parseWith
-  :: (GlobalEnv -> Context -> Int -> Raw -> Either ResolveError (a, Int))
+  :: [Grammar]
+  -> ([Grammar] -> GlobalEnv -> Context -> Int -> Raw
+      -> Either ResolveError (a, Int))
   -> GlobalEnv -> Context -> Int -> String -> Either SyntaxError (a, Int)
-parseWith res env ctx n src = do
+parseWith gr res env ctx n src = do
   ts  <- tokensOf src
   raw <- mapLeft ParseFailed (parseTerm ts)
-  mapLeft ResolveFailed (res env ctx n raw)
+  mapLeft ResolveFailed (res gr env ctx n raw)
 
 -- | Lex, parse, resolve a @data@ declaration (§3.7).
 --
@@ -772,11 +822,11 @@ parseWith res env ctx n src = do
 -- is not a term: it has its own start symbol in the grammar and it is read in
 -- the empty context, never in the development's.
 parseDeclaration
-  :: GlobalEnv -> Int -> String -> Either SyntaxError (InductiveDefinition, Int)
-parseDeclaration env n src = do
+  :: [Grammar] -> GlobalEnv -> Int -> String -> Either SyntaxError (InductiveDefinition, Int)
+parseDeclaration gr env n src = do
   ts  <- tokensOf src
   raw <- mapLeft ParseFailed (parseData ts)
-  mapLeft ResolveFailed (resolveData env n raw)
+  mapLeft ResolveFailed (resolveData gr env n raw)
 
 -- | Lex, parse and resolve the two sides of @:convert t ≟ u@.
 --
@@ -785,13 +835,13 @@ parseDeclaration env n src = do
 -- the two are resolved in one continuous supply of names rather than two that
 -- overlap.
 parseEquated
-  :: GlobalEnv -> Context -> Int -> String
+  :: [Grammar] -> GlobalEnv -> Context -> Int -> String
   -> Either SyntaxError ((Core, Core), Int)
-parseEquated env ctx n src = do
+parseEquated gr env ctx n src = do
   ts       <- tokensOf src
   (r1, r2) <- mapLeft ParseFailed (parseEquation ts)
-  (a, n1)  <- mapLeft ResolveFailed (resolve env ctx n r1)
-  (b, n2)  <- mapLeft ResolveFailed (resolve env ctx n1 r2)
+  (a, n1)  <- mapLeft ResolveFailed (resolve gr env ctx n r1)
+  (b, n2)  <- mapLeft ResolveFailed (resolve gr env ctx n1 r2)
   Right ((a, b), n2)
 
 -- | Lex, parse and resolve @‹name› : ‹type›@ for @:theorem@.
@@ -800,12 +850,12 @@ parseEquated env ctx n src = do
 -- (§5.3), and resolving it where a scratch @assume@ happens to be in scope
 -- would let one in.
 parseStatement
-  :: GlobalEnv -> Int -> String
+  :: [Grammar] -> GlobalEnv -> Int -> String
   -> Either SyntaxError (Maybe String, (Core, Int))
-parseStatement env n src = do
+parseStatement gr env n src = do
   ts        <- tokensOf src
   (mx, raw) <- mapLeft ParseFailed (parseNameAndType ts)
-  r         <- mapLeft ResolveFailed (resolve env [] n raw)
+  r         <- mapLeft ResolveFailed (resolve gr env [] n raw)
   Right (mx, r)
 
 tokensOf :: String -> Either SyntaxError [Located Token]
@@ -816,27 +866,26 @@ tokensOf = mapLeft LexFailed . lexTokens
 -- **The split happens here rather than in 'paired'**, which is about theorems:
 -- a signature and its equation are adjacent and a datatype is not part of that
 -- pairing at all.
-parseSurfaceItems
-  :: [(String, Language)] -> String -> Either SyntaxError [Item]
-parseSurfaceItems ls src = do
+parseSurfaceItems :: String -> Either SyntaxError [Item]
+parseSurfaceItems src = do
   ts  <- tokensOf src
   ts' <- mapLeft LayoutFailed (layout ts)
   ds  <- mapLeft SurfaceParseFailed (Surface.parseSurfaceDecls ts')
-  regroup ls (reverse ds)
+  regroup (reverse ds)
 
 -- | A whole **proof module** (MS4 phase 43): its name, and its items.
 --
 -- The same three passes 'parseSurfaceItems' makes, through the module start
 -- symbol instead — so a module's declaration block and a @declare@ line are the
 -- same grammar, and layout does the same work in both.
-parseSurfaceModule
-  :: [(String, Language)] -> String
-  -> Either SyntaxError (String, [Item])
-parseSurfaceModule ls src = do
-  ts  <- tokensOf src
+parseSurfaceModule :: String -> Either SyntaxError (String, [Item])
+parseSurfaceModule src = do
+  -- 'lexModule', not 'lexTokens': only a module's lexing takes an
+  -- object-language block whole (MS6 phase 101).
+  ts  <- mapLeft LexFailed (lexModule src)
   ts' <- mapLeft LayoutFailed (layout ts)
   m   <- mapLeft SurfaceParseFailed (Surface.parseSurfaceModule ts')
-  is  <- regroup ls (surfaceModuleDecls m)
+  is  <- regroup (surfaceModuleDecls m)
   Right (surfaceModuleName m, is)
 
 -- | Why a top-level block did not resolve, in terms 'SyntaxError' can hold.
@@ -857,7 +906,8 @@ blockProblem errs = case errs of
 data Item
   = ItemData SurfaceData
   | ItemTheorem String Surface Surface   -- ^ a signature and the equation after it
-  | ItemBlock [Instr]
+  | ItemBlock [RawInstr]
+  | ItemGrammar Block   -- ^ a @language@ or @context@ block, read (MS6 phase 101)
     -- ^ a top-level @do@ block (phase 45), **already resolved**: 'regroup'
     -- resolves it while the file is being read, so a block with bad operands is
     -- a syntax error at the right place rather than a failure at run time.
@@ -868,16 +918,22 @@ data Item
 -- Shared by the two above since phase 43. 'Thena.Surface.Concrete.paired' is
 -- the same idea for theorems alone; this one also admits a @data@ item, which
 -- is why it is here and not there.
-regroup
-  :: [(String, Language)] -> [SurfaceDecl]
-  -> Either SyntaxError [Item]
-regroup ls = go
+regroup :: [SurfaceDecl] -> Either SyntaxError [Item]
+regroup = go
   where
     go [] = Right []
     go (SurfaceDatatype d : rest) = (ItemData d :) <$> go rest
-    go (SurfaceBlock b : rest) = case resolveBlock ls (GlobalName "do") [] b of
-      Right is  -> (ItemBlock is :) <$> go rest
-      Left errs -> Left (blockProblem errs)
+    -- **Read here, so an unreadable block is a syntax error** and the module
+    -- stops before anything in it elaborates (MS6 phase 101). What its names
+    -- mean is asked later, at its place in the load ('DeclaringGrammar').
+    go (SurfaceGrammar k l txt : rest) = case readBlock k l txt of
+      Right b -> (ItemGrammar b :) <$> go rest
+      Left e  -> Left (BlockUnreadable e)
+    -- **Carried as it was written** (MS6 phase 104b). Resolving it here would
+    -- ask what its words mean before the declarations above it have run — and
+    -- a @language@ block above it is exactly such a declaration. It is
+    -- resolved, checked and played where it stands, by @run-block@.
+    go (SurfaceBlock b : rest) = (ItemBlock b :) <$> go rest
     go (SurfaceSignature x ty : SurfaceEquation y body : rest)
       | x == y = (ItemTheorem x ty body :) <$> go rest
     go (SurfaceSignature x _ : _) =
@@ -904,60 +960,26 @@ surfaceProgram
   :: Int -> [Item] -> ([Instr], Int)
 surfaceProgram n0 items = foldl item ([], n0) items
   where
-  item acc (ItemData d)            = datatype acc d
+  item (acc, n) (ItemData d)       = let (is, n1) = datatypeProgram n d Nothing in (acc ++ is, n1)
   item acc (ItemTheorem x ty body) = declaring acc (x, ty, body)
-  -- **A top-level block is spliced, and that is the whole of it** — his,
-  -- 2026-09-03. A module is already one instruction program, so a block of
-  -- instructions at the top of one is @++@: no frame, no op, and nothing that
-  -- could tell it from the instructions the elaborator emitted around it.
+  -- **A top-level block is a call to a rule** (MS6 phase 104b), and the rule is
+  -- @run-block@ in the shipped base, whose whole body is @play t@. So how a
+  -- module\'s blocks are treated is written in user space and a user may
+  -- replace it — his ruling, 2026-09-20: *"all of that will eventually move to
+  -- rules… that\'s the whole principle of this tool."*
   --
-  -- **Not 'Thena.Instral.Ops.Block'**, which is the /expression/ form: that one needs a
-  -- frame because it has to return to the term it stands in. A top-level block
-  -- has nothing to return to, so it needs no frame and gets none.
-  item (acc, n) (ItemBlock is) = (acc ++ is, n)
-
-  -- **Brady's data rule** (@IDRIS.md@ §4.6): the datatype's own type is
-  -- elaborated first /"so that the type is in scope when elaborating the
-  -- constructor types"/, then each constructor the same way.
-  --
-  -- **Being in scope is an assumption, and then a β-step.** A constructor's
-  -- type mentions the datatype, which is not declared yet, so it is
-  -- elaborated under @assume D : ‹its type›@ — and popping a development
-  -- extracts, so what comes back is @λ D : ty . ‹the type›@. Applying that to
-  -- @D@ as a global and reducing puts the real reference in. Both ops
-  -- already existed; neither needed a mode.
-  datatype (acc, n) d =
-    let nm      = surfaceDataName d
-        dn      = GlobalName nm
-        ps      = surfaceDataParameters d
-        cs      = surfaceDataConstructors d
-        (l, n1) = freshLevelMeta n
-        full    = withParams ps (surfaceDataType d)
-        tyName  = "dty" ++ show n
-        conName k = "con" ++ show n ++ "_" ++ show (k :: Int)
-        selfName  = Lit (VTerm (Global dn []))
-     in ( acc ++
-            [ Do (PushDevelopment (Lit (VTerm (Universe (LVar l)))))
-            , Do (Call "elaborate" [Lit (VSurface (rootedAt full))])
-            , Bind (Ops.PVar (tyName ++ "raw")) Nothing PopDevelopment
-            , Bind (Ops.PVar tyName) Nothing (Expose (Ref (tyName ++ "raw")))
-            ]
-            ++ concat
-                 [ [ Do (PushDevelopment (Lit (VTerm (Universe (LVar l)))))
-                   , Do (Assume (Lit (VText nm)) (Ref tyName))
-                   , Do (Call "elaborate" [Lit (VSurface (rootedAt (withParams ps cty)))])
-                   , Bind (Ops.PVar (conName k ++ "raw")) Nothing PopDevelopment
-                   , Bind (Ops.PVar (conName k ++ "app")) Nothing
-                       (ApplyTo (Ref (conName k ++ "raw")) selfName)
-                   , Bind (Ops.PVar (conName k)) Nothing (Expose (Ref (conName k ++ "app")))
-                   ]
-                 | (k, SurfaceConstructor _ cty) <- zip [0 ..] cs
-                 ]
-            ++ [ Do (MakeData dn (length ps)
-                       [ GlobalName cn | SurfaceConstructor cn _ <- cs ]
-                       (Ref tyName : [ Ref (conName k) | k <- [0 .. length cs - 1] ]))
-               ]
-        , n1 )
+  -- **This OVERRULES his 2026-09-03 ruling that a top-level block is spliced**
+  -- — /"no frame, no op, and nothing that could tell it from the instructions
+  -- the elaborator emitted around it"/ — which he withdrew on the same day,
+  -- against evidence: a module is one instruction program with **one**
+  -- environment, so spliced blocks shared a scope at run time while
+  -- @topLevelBlocks@ typed each in a scope of its own and refused the
+  -- disagreement. The call\'s frame is what makes the scope real.
+  item (acc, n) (ItemBlock b) =
+    (acc ++ [Do (Call "run-block" [Lit (VSurface (rootedAt (SurfaceDo b)))])], n)
+  -- One instruction that yields the block to the driver, which checks it
+  -- against what the module has declared so far (MS6 phase 101).
+  item (acc, n) (ItemGrammar b) = (acc ++ [Do (DeclareGrammar b)], n)
 
   -- | The plicity of each argument position a signature writes.
   --
@@ -973,8 +995,6 @@ surfaceProgram n0 items = foldl item ([], n0) items
   -- A constructor's type is written in the scope of the parameters, so they
   -- are put back in front of it and peeled off again by
   -- 'Thena.Global.Declare.buildInductive'.
-  withParams ps t =
-    foldr (\(x, ty) rest -> SurfacePi (SurfaceBinder Explicit x (Just ty) NE.:| []) rest) t ps
 
   declaring (acc, n) (x, ty, body) =
     let (l, n1) = freshLevelMeta n
@@ -1016,41 +1036,128 @@ surfaceProgram n0 items = foldl item ([], n0) items
 --
 -- **Holes left over are not an error.** A module that does not finish leaves a
 -- half-built development in the session, which is what the REPL is for.
+-- **Brady's data rule** (@IDRIS.md@ §4.6): the datatype's own type is
+-- elaborated first /"so that the type is in scope when elaborating the
+-- constructor types"/, then each constructor the same way.
+--
+-- **Being in scope is an assumption, and then a β-step.** A constructor's
+-- type mentions the datatype, which is not declared yet, so it is elaborated
+-- under @assume D : ‹its type›@ — and popping a development extracts, so what
+-- comes back is @λ D : ty . ‹the type›@. Applying that to @D@ as a global and
+-- reducing puts the real reference in. Both ops already existed; neither
+-- needed a mode.
+--
+-- **Lifted out of 'surfaceProgram' at MS6 phase 103**, because a @language@
+-- block generates a datatype too — with its grammar's roles (§4.7), where a
+-- written @data@ has none.
+datatypeProgram :: Int -> SurfaceData -> Maybe [[ArgRole]] -> ([Instr], Int)
+datatypeProgram n d roles =
+  let nm      = surfaceDataName d
+      dn      = GlobalName nm
+      ps      = surfaceDataParameters d
+      cs      = surfaceDataConstructors d
+      (l, n1) = freshLevelMeta n
+      full    = paramsAround ps (surfaceDataType d)
+      tyName  = "dty" ++ show n
+      conName k = "con" ++ show n ++ "_" ++ show (k :: Int)
+      selfName  = Lit (VTerm (Global dn []))
+   in (
+          [ Do (PushDevelopment (Lit (VTerm (Universe (LVar l)))))
+          , Do (Call "elaborate" [Lit (VSurface (rootedAt full))])
+          , Bind (Ops.PVar (tyName ++ "raw")) Nothing PopDevelopment
+          , Bind (Ops.PVar tyName) Nothing (Expose (Ref (tyName ++ "raw")))
+          ]
+          ++ concat
+               [ [ Do (PushDevelopment (Lit (VTerm (Universe (LVar l)))))
+                 , Do (Assume (Lit (VText nm)) (Ref tyName))
+                 , Do (Call "elaborate" [Lit (VSurface (rootedAt (paramsAround ps cty)))])
+                 , Bind (Ops.PVar (conName k ++ "raw")) Nothing PopDevelopment
+                 , Bind (Ops.PVar (conName k ++ "app")) Nothing
+                     (ApplyTo (Ref (conName k ++ "raw")) selfName)
+                 , Bind (Ops.PVar (conName k)) Nothing (Expose (Ref (conName k ++ "app")))
+                 ]
+               | (k, SurfaceConstructor _ cty) <- zip [0 ..] cs
+               ]
+          ++ [ Do (MakeData dn (length ps)
+                     [ GlobalName cn | SurfaceConstructor cn _ <- cs ] roles
+                     (Ref tyName : [ Ref (conName k) | k <- [0 .. length cs - 1] ]))
+             ]
+      , n1 )
+
+
+-- | The datatype a @language@ or @context@ block generates (MS6 phase 103,
+-- @ms6\/SPEC.md@ §4.6): one constructor per production, its arguments the
+-- production's distinct names in order of first appearance, each at its
+-- metavariable's language or its class's type.
+--
+-- Written as a 'SurfaceData' and elaborated by 'datatypeProgram', so that what
+-- a block generates is an ordinary declaration — §1: nothing a block makes is
+-- unreachable by hand. The roles (§4.7) ride along beside it.
+--
+-- **A binder is renamed when it would shadow a type the constructor mentions**:
+-- @paren -> ( LC )@ has an argument called @LC@, and @∀ (LC : LC) -> LC@ would
+-- read the binder where the datatype is meant.
+grammarDatatype :: Grammar -> (SurfaceData, [[ArgRole]])
+grammarDatatype g =
+  ( SurfaceData (plainName (grammarName g)) [] (SurfaceUniverse 0) (map constructor prods)
+  , map (map argumentRole . gproductionArguments) prods
+  )
+  where
+    prods = grammarProductions g
+    plainName (GlobalName n) = n
+
+    constructor p = SurfaceConstructor (plainName (gproductionName p)) (typeOf p)
+    typeOf p = case gproductionArguments p of
+      [] -> self
+      args -> SurfacePi (NE.fromList (map binder (renamed args))) self
+    self = SurfaceName (plainName (grammarName g))
+
+    binder (x, srt) = SurfaceBinder Explicit x (Just (SurfaceName (typeName srt)))
+    typeName srt = case srt of
+      OfLanguage l -> plainName l
+      OfClass _ t _ -> plainName t
+
+    -- Primed until it shadows nothing the types name.
+    renamed args = go [] args
+      where
+        taken = [ typeName (argumentSort a) | a <- args ]
+        go _ [] = []
+        go used (a : rest) =
+          let x = unshadowed (argumentName a)
+              unshadowed y
+                | y `elem` taken || y `elem` used = unshadowed (y ++ "'")
+                | otherwise = y
+           in (x, argumentSort a) : go (x : used) rest
+
+-- | A constructor's type is written in the scope of the parameters, so they go
+-- back in front of it and are peeled off again by
+-- 'Thena.Global.Declare.buildInductive'.
+paramsAround :: [(String, Surface)] -> Surface -> Surface
+paramsAround ps t =
+  foldr (\(x, ty) rest -> SurfacePi (SurfaceBinder Explicit x (Just ty) NE.:| []) rest) t ps
+
+
 loadProofSource :: Session -> String -> (Session, Response)
 loadProofSource s src =
-  case parseSurfaceModule (allLanguages (rules (sessionMachine s))) src of
+  case parseSurfaceModule src of
   Left e -> (s, Failed e)
   Right (nm, items) ->
     let machine  = sessionMachine s
         (is, n1) = surfaceProgram (names machine) items
-     in case listToMaybe (topLevelBlocks s items ++ maybe [] (: []) (blockResponse s "this module" is)) of
-      -- A module's @do@ blocks are checked before any of it is elaborated, so a
-      -- mistake in one does not leave half a module declared (MS5 phase 79) —
-      -- its top-level blocks too, which 79 missed (phase 90).
-      Just r  -> (s, r)
-      Nothing -> case progress False s { sessionMachine = load is machine { names = n1 } } [] of
-          (s', Ran _ Completed) ->
+        -- **No block is checked before the module runs** (MS6 phase 104b).
+        -- Every one of them is resolved, validated and typed where the program
+        -- reaches it, in the environment that exists there —
+        -- 'Thena.Instral.Ops.Play' does it for both kinds. Checking them here
+        -- asked what their words meant before the declarations above them had
+        -- run, which no dependency-ordered language does.
+     in case progress False s { sessionMachine = load is machine { names = n1 } } [] [] of
+          (s', Ran _ ws Completed) ->
             ( s'
             , ProofLoaded nm [ n | Just n <- map declaredName items ]
                              (length [ () | ItemBlock _ <- items ])
+                             ws
             )
           (s', other)           -> (s', other)
-
--- | What is wrong with a module's top-level @do@ blocks, block by block
--- (MS5 phase 90). **Each is checked in a scope of its own**, as a block is:
--- nothing is bound when one begins, so a name bound in one block is not in
--- scope in the next.
-topLevelBlocks :: Session -> [Item] -> [Response]
-topLevelBlocks s items =
-  [ said p
-  | (k, is) <- zip [1 :: Int ..] [ is' | ItemBlock is' <- items ]
-  , Just p <- [checkBlock (rules (sessionMachine s))
-                 [] (Rule (GlobalName ("this module, top-level do block " ++ show k)) [] [] is)]
-  ]
-  where
-    said p = case p of
-      BlockIll es      -> LineRefused es
-      BlockMistyped es -> EntryMistyped es
 
 -- | What an item adds to the environment, for the summary line.
 declaredName :: Item -> Maybe String
@@ -1061,6 +1168,9 @@ declaredName i = case i of
   -- instructions install is known only by running them, so it is counted rather
   -- than named — see 'ProofLoaded'.
   ItemBlock _       -> Nothing
+  -- The language's name. Until phase 103 generates its datatype, what it
+  -- declares is the grammar alone — the metavariables and the notation.
+  ItemGrammar b     -> Just (blockName b)
 
 -- | Lex and parse a **surface** term (phase 39). No context, because nothing is
 -- resolved: what a name denotes is elaboration's answer, and elaboration is
@@ -1081,14 +1191,24 @@ parseSurfaceTerm src = do
 -- @claim@ are ops and read exactly as they will read inside a rule body;
 -- everything with a colon is the driver's own.
 command :: Session -> String -> (Session, Response)
-command s line = case break (== ' ') (dropWhile (== ' ') line) of
-  ("", _)      -> (s, Blank)
-  -- **A line that is only a comment is a blank line** (MS4 phase 43). The lexer
-  -- drops @-- @ wherever it appears, but a command word is split off before
-  -- anything is lexed, so a comment standing alone would otherwise be
-  -- dispatched as a rule named @--@.
-  _ | commentLine line -> (s, Blank)
-  (name, rest) -> dispatch s name (dropWhile (== ' ') rest)
+command s line
+  -- **In @:parse@'s mode a line is a term** (MS6 phase 102b), and the one
+  -- line that is not is @:done@, which leaves. Nothing else is a command
+  -- there: an object language may well begin a term with a colon.
+  | Just lang <- sessionParsing s = case trimmedLine of
+      ":done" -> (s { sessionParsing = Nothing }, ParsingLeft lang)
+      ""      -> (s, Blank)
+      _       -> (s, parseObject (sessionMachine s) lang trimmedLine)
+  | otherwise = case break (== ' ') (dropWhile (== ' ') line) of
+    ("", _)      -> (s, Blank)
+    -- **A line that is only a comment is a blank line** (MS4 phase 43). The
+    -- lexer drops @-- @ wherever it appears, but a command word is split off
+    -- before anything is lexed, so a comment standing alone would otherwise be
+    -- dispatched as a rule named @--@.
+    _ | commentLine line -> (s, Blank)
+    (name, rest) -> dispatch s name (dropWhile (== ' ') rest)
+  where
+    trimmedLine = dropWhile (== ' ') (reverse (dropWhile (== ' ') (reverse line)))
 
 dispatch :: Session -> String -> String -> (Session, Response)
 dispatch s name arg = case name of
@@ -1097,7 +1217,7 @@ dispatch s name arg = case name of
   -- the rule base a second time.
   ":help"  -> noArgument (s, Helped commandSummary)
   ":quit"  -> noArgument (s, Quit)
-  ":core"  -> withArgument (view s parseCore Rendered arg)
+  ":core"  -> withArgument (view s (parseCore (grammars machine)) Rendered arg)
   -- | @:surface ‹term›@ — parse a **surface** term and print it back (phase
   -- 39). The analogue of @:core@, and for the same reason: it is the only way
   -- to see what the parser made of what you wrote, and until phase 41 it is the
@@ -1108,7 +1228,21 @@ dispatch s name arg = case name of
   ":surface" -> withArgument $ case parseSurfaceTerm arg of
     Left e  -> (s, Failed e)
     Right t -> (s, RenderedSurface t)
-  ":dev"   -> withArgument (view s parseDevelopment RenderedDev arg)
+  ":dev"   -> withArgument (view s (parseDevelopment (grammars machine)) RenderedDev arg)
+  -- In @:parse@'s mode 'command' takes @:done@ before it gets here.
+  ":done"  -> noArgument (s, Rejected NotParsing)
+  -- | @:parse ‹Language› ‹text›@ — parse an object term with an installed
+  -- grammar and print its reading (MS6 phase 102, his request, 2026-09-19).
+  -- A @?@ in the text is a missing slot. It changes no state.
+  -- With no text, **enter the interactive mode** (phase 102b): every line is
+  -- a term of the language until @:done@, and Tab at the cursor asks the
+  -- parser what fits there ("Thena.Repl").
+  ":parse" -> withArgument $ case break (== ' ') arg of
+    (lang, rest)
+      | GlobalName lang `notElem` map grammarName (grammars machine) ->
+          (s, Rejected (NoSuchLanguage lang))
+      | null (dropWhile (== ' ') rest) -> (s { sessionParsing = Just lang }, ParsingEntered lang)
+      | otherwise -> (s, parseObject machine lang (dropWhile (== ' ') rest))
   -- The only command that means two things, and they do not overlap: with no
   -- argument it is the development, with one it is a global (§9, phase 6).
   ":show"  -> case arg of
@@ -1149,7 +1283,7 @@ dispatch s name arg = case name of
     "" -> case focus (cursor (development machine)) of
       OnTerm _ _ t -> (s, Rendered (whnf (globals machine) ctx t))
       _            -> (s, Rejected (NotThere NotInCore))
-    _  -> view s parseCore (Rendered . whnf (globals machine) ctx) arg
+    _  -> view s (parseCore (grammars machine)) (Rendered . whnf (globals machine) ctx) arg
   -- The same no-argument/with-argument split as @:whnf@ and @:show@: with no
   -- argument it is the core focus, with one it is a term the user writes.
   -- **A bare argument is a surface term; corners are a core one** (MS4 phase
@@ -1160,7 +1294,7 @@ dispatch s name arg = case name of
       OnTerm _ _ t -> inferred t (names machine)
       _            -> (s, Rejected (NotThere NotInCore))
     _ | Just inner <- cornered arg ->
-          case parseCore (globals machine) ctx (names machine) inner of
+          case parseCore (grammars machine) (globals machine) ctx (names machine) inner of
             Left e        -> (s, Failed e)
             Right (t, n1) -> inferred t n1
       | otherwise -> case parseSurfaceTerm arg of
@@ -1202,7 +1336,7 @@ dispatch s name arg = case name of
   ":extract" -> noArgument $
     case extract (flatten (development machine)) of
       Right t  -> (s, Extracted t)
-      Left why -> (s, Ran [] (Halted (NotYetPure (whereImpure why))))
+      Left why -> (s, Ran [] [] (Halted (NotYetPure (whereImpure why))))
   -- Proof mode (§2.4). A colon on the session commands, because they manage
   -- the session rather than the development; @qed@ is bare, because it is an
   -- op program and is written as the op is written. That also keeps @:abandon@
@@ -1217,7 +1351,7 @@ dispatch s name arg = case name of
   ":undo"    -> noArgument undo
   ":convert" -> conversion
   ":step"  -> stepping
-  ":run"   -> noArgument (progress False s [])
+  ":run"   -> noArgument (progress False s [] [])
   "data"   -> declaration
   -- **A surface declaration** (MS4 phase 42) — a bare word, because it acts
   -- (§2.4). It compiles to instructions rather than being run here, so
@@ -1264,13 +1398,13 @@ dispatch s name arg = case name of
     -- its value. Outside a yield 'load' clears the environment, and nothing is.
     Right (SurfaceDo body) ->
       let bound = if Engine.isYielding machine then env (exec machine) else []
-       in case resolveBlock (allLanguages (rules machine)) (GlobalName "entry") (map fst bound) body of
+       in case resolveBlock (grammars machine) (GlobalName "entry") (map fst bound) body of
         Left errs -> (s, Failed (blockProblem errs))
-        Right is  -> case checkBlock (rules machine) bound (Rule (GlobalName "entry") [] [] is) of
+        Right is  -> case checkBlock (grammars machine) (rules machine) bound (Rule (GlobalName "entry") [] [] is) of
           Just (BlockIll es)      -> (s, LineRefused es)
           Just (BlockMistyped es) -> (s, EntryMistyped es)
           Nothing -> progress (sessionStepping s)
-                              s { sessionMachine = load is machine } []
+                              s { sessionMachine = load is machine } [] []
     Right _ -> (s, Rejected (UnexpectedArgument name))
 
   -- **@yield@ hands control back to a rule that yielded** — his, 2026-09-03,
@@ -1292,7 +1426,7 @@ dispatch s name arg = case name of
   "yield" -> noArgument $
     if Engine.isYielding machine
       then progress (sessionStepping s)
-                    s { sessionMachine = Engine.resumeYield machine } []
+                    s { sessionMachine = Engine.resumeYield machine } [] []
       else (s, Rejected NotYielding)
   "retry"  -> case arg of
     "" -> retryAt Nothing
@@ -1343,7 +1477,7 @@ dispatch s name arg = case name of
     -- They are already recomputed at every load and a rule base is a few hundred
     -- instructions; storing them would be session state that @:undo@ and every
     -- snapshot would then have to carry.
-    byType verb question = case parseInstralType langs arg of
+    byType verb question = case parseInstralType arg of
       Left (LineSyntax e)     -> (s, Failed e)
       Left (LineIllFormed es) -> (s, LineRefused es)
       -- 'parseInstralType' never types anything, so it cannot answer this.
@@ -1358,7 +1492,6 @@ dispatch s name arg = case name of
         )
       where
         bs     = rules machine
-        langs  = allLanguages bs
         isRule nm k =
           any (\r -> ruleName r == nm && length (ruleParams r) == k)
               (concatMap baseRules bs)
@@ -1428,7 +1561,7 @@ dispatch s name arg = case name of
     level :: InductiveDefinition -> String -> Either (Session, Response) Level
     level d u
       | null u    = Right (inductiveLevel d)
-      | otherwise = case parseCore (globals machine) [] (names machine) u of
+      | otherwise = case parseCore (grammars machine) (globals machine) [] (names machine) u of
           Left e                -> Left (s, Failed e)
           Right (Universe l, _) -> Right l
           Right _               -> Left (s, Rejected (LevelExpected u))
@@ -1439,7 +1572,7 @@ dispatch s name arg = case name of
     -- @:revalidate@: a proof of a non-type is not worth entering.
     theorem = case sessionWork s of
       Attempting att -> (s, Rejected (AlreadyProving (attemptName att)))
-      Scratch -> case parseStatement (globals machine) (names machine) arg of
+      Scratch -> case parseStatement (grammars machine) (globals machine) (names machine) arg of
         Left e             -> (s, Failed e)
         Right (Nothing, _) -> (s, Rejected (MissingArgument ":theorem"))
         Right (Just x, (ty, n1))
@@ -1475,11 +1608,11 @@ dispatch s name arg = case name of
     -- second home for something the development already says.
     closeProof = case sessionWork s of
       Scratch -> (s, Rejected NotProving)
-      Attempting att -> case progress False s { sessionMachine = ran } [] of
-        (s', Ran msgs Completed) ->
+      Attempting att -> case progress False s { sessionMachine = ran } [] [] of
+        (s', Ran msgs ws Completed) ->
           case extract (flatten (development (sessionMachine s'))) of
-            Left why -> (s', Ran msgs (Halted (NotYetPure (whereImpure why))))
-            Right t  -> admit msgs (fromMaybe att (currentAttempt s')) s' t
+            Left why -> (s', Ran msgs ws (Halted (NotYetPure (whereImpure why))))
+            Right t  -> admit msgs ws (fromMaybe att (currentAttempt s')) s' t
         other -> other
         where
           ran = load [Do (Certify (Lit (VTerm (attemptClaim att))))] machine
@@ -1495,8 +1628,12 @@ dispatch s name arg = case name of
           -- least value there is nothing to default it to. The proof is left
           -- standing rather than admitted, so the development is still there to
           -- look at.
-          admit msgs att' s' t = case admitted s' att' t of
-            Left u -> (s', Ran msgs (Uncertified (Levels u)))
+          admit msgs ws att' s' t
+            | Left e <- checkedTokenClass (globals (sessionMachine s'))
+                                          (attemptName att') (attemptClaim att') t =
+                (s', Ran msgs ws (Refused e))
+            | otherwise = case admitted s' att' t of
+            Left u -> (s', Ran msgs ws (Uncertified (Levels u)))
             Right (s'', lvs, owed, scheme) ->
               (s'', Proved (attemptName att') lvs owed scheme)
 
@@ -1575,7 +1712,7 @@ dispatch s name arg = case name of
         )
 
     declaration = withArgument $
-      case parseDeclaration (globals machine) (names machine) arg of
+      case parseDeclaration (grammars machine) (globals machine) (names machine) arg of
         Left e -> (s, Failed e)
         Right (d, n1) ->
           let is = [ Do (DefineData d)
@@ -1585,8 +1722,9 @@ dispatch s name arg = case name of
                 (sessionStepping s)
                 s { sessionMachine = load is machine { names = n1 } }
                 []
+                []
 
-    goal = withArgument $ case parseCore (globals machine) ctx (names machine) arg of
+    goal = withArgument $ case parseCore (grammars machine) (globals machine) ctx (names machine) arg of
       Left e -> (s, Failed e)
       Right (t, n1) -> case setGoal t machine { names = n1 } of
         Left e   -> (s, Rejected (NotThere e))
@@ -1633,10 +1771,10 @@ dispatch s name arg = case name of
             , Do (Call "elaborate" [Lit (VSurface (rootedAt t))])
             ]
           asking  = s { sessionMachine = load prog machine { names = n1 } }
-       in case blockResponse s "this term" prog of
-        Just r  -> (s, r)
-        Nothing -> case progress False asking [] of
-            (s', Ran _ Completed) ->
+          -- **Its blocks are checked where they run** (MS6 phase 104b), by
+          -- 'Thena.Instral.Ops.Play', as a module's are.
+       in case progress False asking [] [] of
+            (s', Ran _ _ Completed) ->
               let m'   = sessionMachine s'
                   back = s' { sessionMachine = restore before m' }
                   dev  = development m'
@@ -1659,15 +1797,15 @@ dispatch s name arg = case name of
             (s', other) -> (s' { sessionMachine = restore before (sessionMachine s') }, other)
 
     conversion = withArgument $
-      case parseEquated (globals machine) ctx (names machine) arg of
+      case parseEquated (grammars machine) (globals machine) ctx (names machine) arg of
         Left e -> (s, Failed e)
         Right ((a, b), n1) -> case convert (globals machine) ctx n1 a b of
           (why, owed, n2) -> (bump n2, Converted a b why owed)
 
     stepping = case arg of
-      ""    -> progress True s []
-      "on"  -> (s { sessionStepping = True }, Ran [] Completed)
-      "off" -> (s { sessionStepping = False }, Ran [] Completed)
+      ""    -> progress True s [] []
+      "on"  -> (s { sessionStepping = True }, Ran [] [] Completed)
+      "off" -> (s { sessionStepping = False }, Ran [] [] Completed)
       _     -> (s, Rejected (UnexpectedArgument name))
 
     -- Unwind to a choice point and take its next alternative, then let the
@@ -1679,14 +1817,14 @@ dispatch s name arg = case name of
       Left Engine.NoChoicePoint   -> (s, Rejected NothingToRetry)
       Left (Engine.UnknownChoice n) -> (s, Rejected (NoSuchChoice n))
       Right (m, note) ->
-        let (s', resp) = progress (sessionStepping s) s { sessionMachine = m } []
+        let (s', resp) = progress (sessionStepping s) s { sessionMachine = m } [] []
          in (s', withNote note resp)
 
     -- The note goes in front of whatever the alternative itself said, as a
     -- 'Message' — the same shape as @"declared X"@ and @"certified"@, which
     -- the driver also builds because they are things the driver decided (§7.5).
     withNote note resp = case resp of
-      Ran msgs stop -> Ran (note : msgs) stop
+      Ran msgs ws stop -> Ran (note : msgs) ws stop
       _             -> resp
 
     -- **Brady's @ELAB (x : t)@, as a program** (@IDRIS.md@ §4.6):
@@ -1699,26 +1837,24 @@ dispatch s name arg = case name of
     --
     -- **The driver builds the program and the machine runs it**, which is what
     -- @assume@ and @claim@ already do. Nothing here elaborates.
-    declareSurface src = case parseSurfaceItems (allLanguages (rules machine)) src of
+    declareSurface src = case parseSurfaceItems src of
       Left e -> (s, Failed e)
       Right items ->
         let (is, n1) = surfaceProgram (names machine) items
-         in case blockResponse s "this declaration" is of
-              Just r  -> (s, r)
-              Nothing -> progress (sessionStepping s)
-                           s { sessionMachine = load is machine { names = n1 } } []
+         in progress (sessionStepping s)
+              s { sessionMachine = load is machine { names = n1 } } [] []
 
     -- **One typed ENTRY, as the program it is** (MS5 phase 62b, widened from a
     -- line to a block at phase 70). The two halves are put back together because
     -- the split into a word and an argument run was 62b's shape and an entry has
     -- no such shape: it is a sequence of instructions, of which one op and its
     -- operands is the degenerate case.
-    line = case instralEntry (rules machine) (name ++ " " ++ arg) of
+    line = case instralEntry (grammars machine) (rules machine) (name ++ " " ++ arg) of
       Left (LineSyntax e)     -> (s, Failed e)
       Left (LineIllFormed es) -> (s, LineRefused es)
       Left (LineMistyped es)  -> (s, EntryMistyped es)
       Right is ->
-        progress (sessionStepping s) s { sessionMachine = load is machine } []
+        progress (sessionStepping s) s { sessionMachine = load is machine } [] []
 
 -- | What @:help@ shows: one line per command the driver has, the spelling on
 -- the left and what it does on the right.
@@ -1787,6 +1923,8 @@ commandSummary =
   , (":core ‹t› / :dev ‹p›",     "parse a term / a development and print it")
   , (":surface ‹t›",             "parse a surface term and print it")
   , (":infer / :infer ‹t›",      "the type of the focus / of a surface term")
+  , (":parse ‹L› ‹text›",         "parse an object term; ? is a missing slot")
+  , (":parse ‹L› … :done",         "parse every line as an L term; Tab at the cursor")
   , (":whnf / :whnf ‹t›",        "reduce the focus / a term, without committing")
   , (":convert ‹t› ≟ ‹u›",      "are two terms convertible")
   , (":elim ‹D› [‹universe›]",  "a datatype’s elimination rule")
@@ -1984,8 +2122,8 @@ breakOn needle = go ""
 -- call a rule written below it, and call a rule in a base loaded after it.
 --
 -- Takes contents and not a path (§12 invariant 4).
-readRuleBase :: FilePath -> String -> Either RuleFileError RuleBase
-readRuleBase path src = case baseHead ls of
+readRuleBase :: [Grammar] -> FilePath -> String -> Either RuleFileError RuleBase
+readRuleBase gs path src = case baseHead ls of
   Nothing -> Left NoRuleHeader
   Just (nm, desc, used) -> do
       -- The head is blanked, not dropped: every position the lexer reports
@@ -2000,8 +2138,8 @@ readRuleBase path src = case baseHead ls of
       -- condition that the two spellings be one language.
       ts'  <- mapLeft (RuleSyntaxError . LayoutFailed) (layoutFile ts)
       raws <- mapLeft (RuleSyntaxError . ParseFailed) (parseRules ts')
-      (sigs, langs, fns, rs) <- resolveAll raws
-      Right (ruleBase nm desc path sigs langs fns rs)
+      (sigs, fns, rs) <- resolveAll gs raws
+      Right (ruleBase nm desc path sigs fns rs)
   where
     ls = lines src
 
@@ -2013,11 +2151,11 @@ readRuleBase path src = case baseHead ls of
 -- refused as a parameter: it says /nothing is left/, which is not a type a value
 -- can have.
 parseInstralType
-  :: [(String, Language)] -> String -> Either LineError Ty
-parseInstralType ls src = do
+  :: String -> Either LineError Ty
+parseInstralType src = do
   ts <- mapLeft LineSyntax (tokensOf src)
   t  <- mapLeft (LineSyntax . ParseFailed) (parseInstralTy ts)
-  case resolveTy ls "a query" t of
+  case resolveTy "a query" t of
     Left e         -> Left (LineIllFormed [e])
     -- @()@ says /nothing is left/, which is not a type a value can have — the
     -- same refusal it gets as a parameter (MS5 phase 67).
@@ -2033,27 +2171,23 @@ parseInstralType ls src = do
 -- /is/ answered here is what one file can answer — that the type names a type,
 -- and that a callable has at most one signature.
 resolveAll
-  :: [RawDecl]
+  :: [Grammar] -> [RawDecl]
   -> Either RuleFileError
-       ([(String, Signature)], [(String, Language)], [Rule], [Rule])
-resolveAll raws =
-  case ( concat langErrs ++ concat ruleErrs ++ concat fnErrs ++ sigErrs
-           ++ langDups ++ dups ++ collisions ++ overlapping
+       ([(String, Signature)], [Rule], [Rule])
+resolveAll gs raws =
+  case ( concat ruleErrs ++ concat fnErrs ++ sigErrs
+           ++ dups ++ collisions ++ overlapping
        , concatMap validate (ok ++ fns)
        ) of
-    ([], [])     -> Right (sigs, langs, fns, ok)
+    ([], [])     -> Right (sigs, fns, ok)
     (res, valid) -> Left (RuleIllFormed (res ++ valid))
   where
-    -- **Languages first**, because everything else may mention one: a tag in an
-    -- operand, a type name in a signature (MS5 phase 69).
-    (langErrs, langs) =
-      partitionEithers [ resolveLanguage l | DeclLanguage l <- raws ]
-    (ruleErrs, ok)  = partitionEithers [ resolveRule langs r | DeclRule r <- raws ]
+    (ruleErrs, ok)  = partitionEithers [ resolveRule gs r | DeclRule r <- raws ]
     -- **A function is validated like any rule**, because it is one
     -- ('Thena.Rules.resolveFunction').
-    (fnErrs, fns)   = partitionEithers [ resolveFunction langs f | DeclFunction f <- raws ]
+    (fnErrs, fns)   = partitionEithers [ resolveFunction gs f | DeclFunction f <- raws ]
     (sigErrs, sigs) =
-      partitionEithers [ resolveSignature langs g | DeclSignature g <- raws ]
+      partitionEithers [ resolveSignature g | DeclSignature g <- raws ]
     -- **A name may not be a rule and a function at one arity** (MS5, reviewed
     -- 2026-09-12). They would become two clauses of one callable — 'clauses'
     -- searches 'Thena.Rules.allCallable' — so the function would join the rule's
@@ -2106,15 +2240,6 @@ resolveAll raws =
                      && all Ops.patternIrrefutable (ruleParams g)) (take i fns)
       ]
 
-    -- **…and two grammars under one name** (2026-09-12). Every lookup of a
-    -- language is a 'lookup', which takes the first, so the second was loaded
-    -- and unreachable.
-    langDups =
-      [ DuplicateLanguage n
-      | (i, (n, _)) <- zip [0 :: Int ..] langs
-      , n `elem` map fst (take i langs)
-      ]
-
     dups =
       [ DuplicateSignature n (length (sigParams t))
       | (i, (n, t)) <- zip [0 :: Int ..] sigs
@@ -2142,7 +2267,7 @@ loadRuleBases s = go []
     -- not callables — nothing can call one — so they are not in 'allCallable';
     -- they are handed to 'inferProgram' as extra bodies so that a mistake in one
     -- is found when the file loads.
-    go acc [] = case traverse (blocksOf acc) acc of
+    go acc [] = case traverse blocksOf acc of
       -- A block that does not resolve or does not validate is the file's
       -- problem and is reported against the file, as any other rule's would be.
       Left (path, errs) -> (s, RuleFileRefused path (RuleIllFormed errs))
@@ -2155,14 +2280,15 @@ loadRuleBases s = go []
           errs -> (s, BasesIllTyped errs)
 
     go acc ((path, src) : more) =
-      case readRuleBase path src of
+      case readRuleBase (grammars (sessionMachine s)) path src of
         Left e  -> (s, RuleFileRefused path e)
         Right b -> go (acc ++ [b]) more
 
-    -- **Resolved here and not in 'readRuleBase'**, because a block is resolved
-    -- with EVERY loaded base's languages — which is what 'Thena.Instral.Ops.Play' does
-    -- at run time — and a file does not know what will be loaded beside it.
-    blocksOf acc b = case surfaceBlocks (allLanguages acc) (GlobalName (baseName b))
+    -- **Resolved here and not in 'readRuleBase'**, because what it answers is
+    -- not kept: the blocks are handed to 'inferProgram' as extra bodies and then
+    -- dropped, and a 'RuleBase' has no field for them. (Until MS6 phase 106 the
+    -- reason was also that a block needed every base's MS5 languages.)
+    blocksOf b = case surfaceBlocks (grammars (sessionMachine s)) (GlobalName (baseName b))
                             (concatMap ruleBody (baseRules b ++ baseFunctions b)) of
       Left errs -> Left (basePath b, errs)
       Right bs  -> case concatMap validate bs of
@@ -2201,7 +2327,7 @@ view s rd f arg =
 answer :: Session -> String -> (Session, Response)
 answer s a
   | isAsking (sessionMachine s) =
-      progress (sessionStepping s) s { sessionMachine = resumeAt a (sessionMachine s) } []
+      progress (sessionStepping s) s { sessionMachine = resumeAt a (sessionMachine s) } [] []
   | otherwise = (s, Rejected NotAsking)
 
 -- | One line of input, whichever kind it is: an answer while something is
@@ -2218,7 +2344,7 @@ oneLine s pending line = (record s', resp, asking)
       Nothing -> command s line
 
     asking = case resp of
-      Ran _ (Waiting q) -> Just q
+      Ran _ _ (Waiting q) -> Just q
       _                 -> Nothing
 
     -- Keep the current proof's snapshot in step with the machine, and push the
@@ -2397,9 +2523,9 @@ stopped resp = case resp of
   Failed _              -> True
   LineRefused _         -> True
   Rejected _            -> True
-  Ran _ (Halted _)      -> True
-  Ran _ (Refused _)     -> True
-  Ran _ (Uncertified _) -> True
+  Ran _ _ (Halted _)      -> True
+  Ran _ _ (Refused _)     -> True
+  Ran _ _ (Uncertified _) -> True
   _                     -> False
 
 -- | Run until the machine needs the user, honouring stepping mode.
@@ -2412,33 +2538,35 @@ stopped resp = case resp of
 -- 'Halted' for @retry@\'s sake, which phase 25d found was never reachable —
 -- see 'Halted'. The machine still comes back here; what changed is that
 -- 'oneLine' does not let a failed line's development survive into the session.
-progress :: Bool -> Session -> [Message] -> (Session, Response)
-progress oneStep s msgs = case step (sessionMachine s) of
+progress :: Bool -> Session -> [Message] -> [Warning] -> (Session, Response)
+progress oneStep s msgs warns = case step (sessionMachine s) of
   Engine.Continue m
-    | oneStep   -> stop m msgs Paused
-    | otherwise -> progress oneStep s { sessionMachine = m } msgs
+    | oneStep   -> stop m msgs warns Paused
+    | otherwise -> progress oneStep s { sessionMachine = m } msgs warns
   Engine.Saying msg m
-    | oneStep   -> stop m (msg : msgs) Paused
-    | otherwise -> progress oneStep s { sessionMachine = m } (msg : msgs)
+    | oneStep   -> stop m (msg : msgs) warns Paused
+    | otherwise -> progress oneStep s { sessionMachine = m } (msg : msgs) warns
   -- **A yield stops the run and keeps the machine** (MS4 phase 45b), exactly as
   -- a question does. Stepping it again would yield again — the instruction is
   -- not consumed — so the driver has to stop here or spin.
-  Engine.Yielding msg m -> stop m msgs (Yielded msg)
+  Engine.Yielding msg m -> stop m msgs warns (Yielded msg)
   -- The declaration is checked and installed here, outside the machine: the
   -- global environment is not part of 'Development' and no instruction writes it
   -- (§7.4, §7.5). On refusal the rest of the program is dropped — the command
   -- is abandoned, and there is nothing to retry the way there is at 'Halted'.
   Engine.Declaring d m -> case declare (globals m) (names m) d of
-    Left e -> stop (load [] m) msgs (Refused e)
+    Left e -> stop (load [] m) msgs warns (Refused e)
     Right (g, n1, skip)
-      | oneStep   -> stop installed msgs' Paused
-      | otherwise -> progress oneStep s { sessionMachine = installed } msgs'
+      | oneStep   -> stop installed msgs warns' Paused
+      | otherwise -> progress oneStep s { sessionMachine = installed } msgs warns'
       where
         installed = m { globals = g, names = n1 }
-        -- Said here rather than by a 'Say' in the program, because the program
-        -- is built before 'declare' runs and cannot know (§7.5: the driver owns
-        -- what the driver decides).
-        msgs' = maybe msgs (\why -> whyNoConfusion (inductiveName d) why : msgs) skip
+        -- **A warning and no longer a message** (MS6 phase 98). Raised here
+        -- rather than by a 'Say' in the program, because the program is built
+        -- before 'declare' runs and cannot know (§7.5: the driver owns what the
+        -- driver decides) — and carried in the warning list so that a module
+        -- load, which throws the messages away, still reports it.
+        warns' = maybe warns (\why -> NoConfusionSkipped (inductiveName d) why : warns) skip
   -- The kernel runs here, outside the machine, for 'Declaring'\'s reason: it is
   -- policy, and §7.5 has the driver own policy. On refusal the rest of the
   -- program is dropped.
@@ -2460,9 +2588,14 @@ progress oneStep s msgs = case step (sessionMachine s) of
   -- **It says nothing**, per his instruction: the command that ran it reports
   -- when it is over. See 'Thena.Instral.Ops.DefineGlobal'.
   Engine.Defining nm ps ty t m -> case certify (globals m) t ty of
-    Left e -> stop (load [] m) msgs (Uncertified e)
+    Left e -> stop (load [] m) msgs warns (Uncertified e)
+    -- **A token class is checked once the kernel has accepted it** (MS6 phase
+    -- 100): the kernel says it is well typed, which a regex literal applied to
+    -- any type is, and 'checkedTokenClass' says whether it is a class.
+    Right _ | Left e <- checkedTokenClass (globals m) nm ty t ->
+      stop (load [] m) msgs warns (Refused e)
     Right (sub, residue) -> case generalised (names m) residue (substLevelsIn sub ty) t of
-      Left u -> stop (load [] m) msgs (Uncertified (Levels u))
+      Left u -> stop (load [] m) msgs warns (Uncertified (Levels u))
       Right (d, n1) ->
         let
           -- **The plicities are installed beside the definition** (MS4 phase
@@ -2475,24 +2608,198 @@ progress oneStep s msgs = case step (sessionMachine s) of
                                        else (nm, ps) : signatures m
                       }
        in if oneStep
-            then stop m' msgs Paused
-            else progress oneStep s { sessionMachine = m' } msgs
+            then stop m' msgs warns Paused
+            else progress oneStep s { sessionMachine = m' } msgs warns
+
+  -- **A primitive is installed only if the system can reduce it** (MS6 phase
+  -- 97b). Two checks, and both are the reason @primitive@ is not a postulate:
+  -- the name must be one 'primitiveNames' has a rule for, and the declared
+  -- type must be the shape that rule reads — @P -> P -> B@ for the primitive's
+  -- own @P@, with @B@ a datatype of two constructors that take nothing.
+  --
+  -- A user may therefore write @primitive eqString : String -> String -> Bool@
+  -- and choose what @Bool@ is; they may not write @primitive myAxiom : Empty@.
+  -- **A grammar is installed only if every check of §4.5 passes** (MS6 phase
+  -- 101); its warnings join the load's, in source order.
+  Engine.DeclaringGrammar b m -> case checkGrammar (grammars m) (globals m) b of
+    Left e -> stop (load [] m) msgs warns (Refused (GrammarRefused e))
+    -- **A judgment's datatype is its rules** (MS6 phase 108, §6.5), read with
+    -- its own notation installed, since a rule may have a premise of the
+    -- judgment it defines. The notation is installed as a context's lookup is,
+    -- and nothing else is generated: a judgment has no substitution.
+    Right (g, ws) | grammarKind g == JudgmentBlock ->
+      case judgmentDatatype (g : grammars m) g (blockRules b) of
+        Left e -> stop (load [] m) msgs warns (Refused (GrammarRefused e))
+        Right (sd, roles) ->
+          let (is, n1) = datatypeProgram (names m) sd (Just roles)
+              m' = (Engine.splicing is m) { grammars = g : grammars m, names = n1 }
+           in if oneStep
+                then stop m' msgs (reverse ws ++ warns) Paused
+                else progress oneStep s { sessionMachine = m' } msgs (reverse ws ++ warns)
+    Right (g, ws) ->
+      -- **Its datatype is generated here and runs next** (MS6 phase 103): the
+      -- block had to be checked before anything could be generated from it, and
+      -- that could only happen once the load reached it. So the instructions go
+      -- in front of what is left of the program, and the datatype is elaborated
+      -- and declared exactly as a written one is.
+      let (is, n1) = datatypeProgram (names m) sd (Just roles)
+          (sd, roles) = grammarDatatype g
+          -- **Then its substitution** (MS6 phase 105, §4.7): four ordinary
+          -- definitions, elaborated by the same instructions a written one is,
+          -- right after the datatype they are about.
+          (fs, n2) = surfaceProgram n1
+                       [ ItemTheorem x ty body | (x, ty, body) <- substitutionDefinitions g ]
+          -- **A context's lookup relation, and its notation** (MS6 phase 107,
+          -- §5.3): a datatype like any other, and a grammar installed beside the
+          -- context's, so that @x : T ∈ Γ@ is read, built and printed the way
+          -- every object term is.
+          (ls, n3) = case lookupDatatype g of
+            Just (ld, lroles) -> datatypeProgram n2 ld (Just lroles)
+            Nothing -> ([], n2)
+          installed = maybe [g] (: [g]) (lookupGrammar g)
+          m' = (Engine.splicing (is ++ fs ++ ls) m) { grammars = installed ++ grammars m, names = n3 }
+       in if oneStep
+            then stop m' msgs (reverse ws ++ warns) Paused
+            else progress oneStep s { sessionMachine = m' } msgs (reverse ws ++ warns)
+
+  -- **A block is validated and typed the moment it is about to run** (MS6
+  -- phase 104b), against the rule bases and the globals as they are then —
+  -- which is the whole of what that phase changed. It was checked while the
+  -- file was still being read, so a block could not mention anything the file
+  -- itself declared above it, and a @language@ block is exactly such a thing.
+  --
+  -- **The same checker the prompt uses**, so the messages are unchanged.
+  Engine.Playing is m -> case checkBlock (grammars m) (rules m) [] (Rule (GlobalName "do") [] [] is) of
+    Just (BlockIll errs)      -> stop (load [] m) msgs warns (BlockRefused errs)
+    Just (BlockMistyped errs) -> stop (load [] m) msgs warns (BlockIllTyped errs)
+    Nothing ->
+      let m' = Engine.splicing is m
+       in if oneStep
+            then stop m' msgs warns Paused
+            else progress oneStep s { sessionMachine = m' } msgs warns
+
+  Engine.Primitively nm ty m -> case checkedPrimitive (globals m) nm ty of
+    Left e   -> stop (load [] m) msgs warns (Refused e)
+    Right () ->
+      let m' = m { globals = addPrimitive nm ty (globals m) }
+       in if oneStep
+            then stop m' msgs warns Paused
+            else progress oneStep s { sessionMachine = m' } msgs warns
 
   Engine.Certifying t ty m -> case certify (globals m) t ty of
-    Left e -> stop (load [] m) msgs (Uncertified e)
+    Left e -> stop (load [] m) msgs warns (Uncertified e)
     Right (sub, residue)
-      | oneStep   -> stop settled' (say : msgs) Paused
-      | otherwise -> progress oneStep s' (say : msgs)
+      | oneStep   -> stop settled' (say : msgs) warns Paused
+      | otherwise -> progress oneStep s' (say : msgs) warns
       where
         say = "certified"
         settled' = m { development = Engine.Development
                                  (overLevels sub (cursor (development m))) }
         s' = (settled sub residue s) { sessionMachine = settled' }
-  Engine.Asking q m   -> stop m msgs (Waiting q)
-  Engine.Finished m   -> stop m msgs Completed
-  Engine.Stuck r m    -> stop m msgs (Halted r)
+  Engine.Asking q m   -> stop m msgs warns (Waiting q)
+  Engine.Finished m   -> stop m msgs warns Completed
+  Engine.Stuck r m    -> stop m msgs warns (Halted r)
   where
-    stop m out what = (s { sessionMachine = m }, Ran (reverse out) what)
+    stop m out ws what = (s { sessionMachine = m }, Ran (reverse out) (reverse ws) what)
+
+-- | Is this a primitive the system knows, declared at the type its rule needs?
+--
+-- Written here rather than in 'Thena.Core.Reduce' because it is a /load-time/
+-- question about a declaration, where the reduction rule is a run-time one
+-- about a term; the two share 'primitiveNames', which is the only thing that
+-- has to agree.
+checkedPrimitive :: GlobalEnv -> GlobalName -> Core -> Either DeclareError ()
+checkedPrimitive env nm ty = case lookup nm primitiveNames of
+  Nothing -> Left (NoSuchPrimitive nm)
+  Just Appending -> case argumentsOf ty of
+    Just ([a, b], r) | all (== Global (GlobalName "String") []) [a, b, r] -> Right ()
+    _ -> wrong "at String -> String -> String"
+  -- MS6 phase 109a: @(a b : P) -> D (Eq P a b)@, what 'Thena.Core.Reduce.decided'
+  -- reads back — @D@ of one parameter and two one-argument constructors, and
+  -- @Eq@ of one constructor.
+  Just (Deciding p@(GlobalName pn)) -> case ty of
+    Pi _ pa sa | pa == Global p [] -> let (va, n1) = fresh 0 in case open va sa of
+      Pi _ pb sb | pb == Global p [] -> let (vb, _) = fresh n1 in case open vb sb of
+        App (Global dN _) (App (App (App (Global eqN _) pty) (Free xa)) (Free xb))
+          | pty == Global p [], xa == va, xb == vb
+          , Just dDef <- lookupInductive dN env
+          , Just eDef <- lookupInductive eqN env
+          , length (inductiveParameters dDef) == 1
+          , [c1, c2] <- inductiveConstructors dDef
+          , [_] <- constructorArguments c1
+          , [_] <- constructorArguments c2
+          , [_] <- inductiveConstructors eDef -> Right ()
+        _ -> wrong ("at (a : " ++ pn ++ ") (b : " ++ pn ++ ") -> D (Eq " ++ pn ++ " a b), with D a datatype of one parameter and two constructors of one argument")
+      _ -> wrong ("with two arguments of type " ++ pn)
+    _ -> wrong ("with two arguments of type " ++ pn)
+  Just (Comparing p@(GlobalName pn)) -> case argumentsOf ty of
+    Just ([a, b], Global d [])
+      | a /= Global p [] || b /= Global p [] -> wrong ("with two arguments of type " ++ pn)
+      | otherwise -> case lookupInductive d env of
+          Nothing  -> wrong "to answer with a datatype"
+          Just def -> case inductiveConstructors def of
+            [c1, c2] | nullary c1 && nullary c2 -> Right ()
+            _ -> wrong "to answer with a datatype of two constructors that take nothing"
+    _ -> wrong ("with two arguments of type " ++ pn)
+  where
+    wrong want = Left (PrimitiveWrongShape nm want)
+    nullary c = null (constructorArguments c)
+
+-- | Is a definition of type @Token T@ a token class (MS6 phase 100,
+-- @ms6\/SPEC.md@ §3.2)? Anything whose type is not @Token T@ is not asked.
+--
+-- **Run at declaration, not in the kernel — his ruling, 2026-09-19.** The
+-- kernel accepts @\/[a-z]+\/ Char@: a regex literal's type is
+-- @∀ (T : Type₀) -> Token T@, so it is well typed at every @T@. That cannot be
+-- unsound, because nothing eliminates a @Token@; what the check protects is the
+-- grammar machinery that will read the class. So the regex engine is not part
+-- of what 'certify' trusts.
+--
+-- Both @T@ and the value are reduced first, so @x = y@ with @y@ a class, or a
+-- @T@ written through a definition, are judged by what they are.
+checkedTokenClass :: GlobalEnv -> GlobalName -> Core -> Core -> Either DeclareError ()
+checkedTokenClass env nm ty value = case whnf env [] ty of
+  App (Global g []) t | g == tokenName ->
+    either (Left . TokenClassRefused nm) Right (classOf (whnf env [] t))
+  _ -> Right ()
+  where
+    classOf t = do
+      (tn, allowed) <- case t of
+        Global g@(GlobalName n) [] | Just l <- lookup n tokenLanguages -> Right (g, l)
+        _ -> Left (TokenTypeUnsupported t)
+      src <- case whnf env [] value of
+        App (Primitive (LRegex s)) _ -> Right s
+        other -> Left (TokenValueNotLiteral other)
+      r <- either (Left . TokenRegexRefused src) Right (parseRegex src)
+      if nullable r then Left (TokenMatchesEmpty src) else Right ()
+      case inclusion r allowed of
+        Included      -> Right ()
+        NotIncluded w -> Left (TokenNotIncluded src tn w)
+
+-- | What each type a token class may produce can hold (@ms6\/SPEC.md@ §3.2).
+-- A class's language must lie inside its type's.
+tokenLanguages :: [(String, Regex)]
+tokenLanguages =
+  [ ("String", star anyChar)
+  , ("Char", anyChar)
+  , ("Int", andThen (alternatives [EmptyString, oneOf (singleChar '-')]) (andThen digit (star digit)))
+  ]
+  where
+    anyChar = oneOf (fromRanges [(minBound, maxBound)])
+    digit = oneOf (fromRanges [('0', '9')])
+
+-- | A type's argument types and its result, with each binder opened.
+--
+-- 'Scope'\'s constructor is hidden (§3.4), so this walks with 'open' and a
+-- counter drawn from beyond the term rather than looking inside.
+argumentsOf :: Core -> Maybe ([Core], Core)
+argumentsOf = go (0 :: Int) []
+  where
+    go depth acc ty = case ty of
+      Pi _ dom sc ->
+        let (v, _) = fresh (1000 + depth)
+         in go (depth + 1) (dom : acc) (open v sc)
+      result -> Just (reverse acc, result)
 
 -- | Write a level solution into the proof's own statement.
 --
@@ -2519,27 +2826,13 @@ nameOf d = case inductiveName d of GlobalName x -> x
 -- @"certified"@ rather than structured data rendered in "Thena.Repl". The
 -- declaration succeeded; this says what it does not come with.
 --
--- 'Thena.Global.NoConfusion.NoEquality' and
+-- 'Thena.Errors.NoEqInScope' and
 -- 'Thena.Global.NoConfusion.NoProducts' never reach here —
 -- "Thena.Global.Declare" keeps both quiet, because each is a fact about the
 -- environment rather than about the declaration and would fire on every @data@
 -- line of a prelude-free script. They are given wordings anyway rather than an
 -- @error@ call: a message that cannot be printed is still cheaper to write than
 -- a partial function to explain.
-whyNoConfusion :: GlobalName -> Skipped -> String
-whyNoConfusion d why = "no " ++ str (snd (noConfusionNames d)) ++ ": " ++ because
-  where
-    str (GlobalName x) = x
-    because = case why of
-      NoEquality -> "there is no Eq in scope"
-      NoProducts -> "there is no And, Unit and Empty in scope"
-      -- Position and name both, as 'Thena.Errors.IndexTypeDepends' says it one
-      -- telescope over: several arguments of one constructor may carry the same
-      -- 'Ident', so the name alone does not say which.
-      DependentArguments c k (Ident i) ->
-        str c ++ "'s argument " ++ show k ++ " (" ++ i ++ ") has a type that"
-          ++ " depends on an earlier argument, so its equation cannot be stated"
-
 mapLeft :: (a -> b) -> Either a c -> Either b c
 mapLeft f = either (Left . f) Right
 
@@ -2553,3 +2846,11 @@ unfoldIter :: RuleIter -> [Rule]
 unfoldIter it = case next it of
   Nothing        -> []
   Just (r, rest) -> r : unfoldIter rest
+
+-- | Parse a term of an installed language and say what it is (MS6 phase 102).
+parseObject :: Machine -> String -> String -> Response
+parseObject m lang text =
+  case Earley.parse (earleyRules (grammars m)) (Earley.StartAt lang) (Earley.pieces text) of
+    Right t  -> ParsedObject t
+    Left why -> ObjectUnparsed lang text why
+

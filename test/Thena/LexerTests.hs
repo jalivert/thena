@@ -21,6 +21,13 @@ tests =
         "the extent of a region"
         [ lexes "a plain region" "s`f x`" [TTagOpen "s", TRaw "f x", TTagClose]
         , lexes "an empty one emits no chunk" "s``" [TTagOpen "s", TTagClose]
+          -- **A tag may name the production to start at** (MS6 phase 104). The
+          -- brackets are reserved characters, so no identifier holds one and
+          -- the rule cannot take a longer name apart.
+        , lexes "a tag with a production" "LC[var]`x`"
+            [TTagOpenAt "LC" "var", TRaw "x", TTagClose]
+        , lexes "and it opens a region like any other tag" "LC[var]``"
+            [TTagOpenAt "LC" "var", TTagClose]
         , lexes
             "the tag may be any identifier, including one above ASCII"
             "\120138`x`"

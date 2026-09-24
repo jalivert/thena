@@ -17,12 +17,12 @@
 -- different things that have to be distinguishable said out loud.
 module Thena.Surface.Concrete
   ( Surface (..)
+  , ObjectPiece (..)
   , SurfaceDecl (..)
   , SurfaceModule (..)
   , SurfaceData (..)
   , SurfaceConstructor (..)
   , PairingError (..)
-  , paired
   , SurfaceArg (..)
   , SurfaceBinder (..)
   , Plicity (..)
@@ -31,6 +31,8 @@ module Thena.Surface.Concrete
 
 import Data.List.NonEmpty (NonEmpty, toList)
 
+import Thena.Core.Term (Literal (..))
+
 -- | **`instral` is shared, and it is term-free**, which is what makes sharing it
 -- possible: a 'Thena.Instral.Concrete.RawOperand' is an identifier, a number or
 -- a string, and mentions neither 'Surface' nor 'Thena.Syntax.Concrete.Raw'. So
@@ -38,6 +40,7 @@ import Data.List.NonEmpty (NonEmpty, toList)
 -- and a @do@ block in a surface program is `instral` written in place
 -- (@discussion\/the-five-languages.md@ §0b, table F).
 import Thena.Instral.Concrete (RawInstr (..))
+import Thena.Syntax.Lexer (BlockKind)
 --
 -- **Icity lives here and never in "Thena.Core.Term"** — the user's decision,
 -- 2026-09-01: /"I am convinced that the DC does not need implicits. I think
@@ -55,6 +58,11 @@ data Surface
   = SurfaceName String
     -- ^ what a name denotes is elaboration's answer, not the tree's
   | SurfaceUniverse Int          -- ^ @Type₀@
+  | SurfaceLiteral Literal
+    -- ^ @"ab"@, @'c'@, @3@ (MS6 phase 97c). A leaf, and the only surface node
+    -- whose elaboration is settled by the node alone: its 'Thena.Core.Term.Core'
+    -- is itself and its type is fixed, so the clause is @fill@ then @solve@ like
+    -- a written universe's.
   | SurfaceUniverseOpen          -- ^ @Type@, whose level is inferred
 
   | SurfacePlaceholder
@@ -69,6 +77,20 @@ data Surface
     -- a clause may run automatically, ask the user, offer a choice, or hand
     -- control over.
 
+  | SurfaceObject String (Maybe String) [ObjectPiece]
+    -- ^ @LC\`( \955 x : \953 . x )\`@ — **a tagged term literal** (MS6 phase
+    -- 104, @ms6\/SPEC.md@ §8): the language, the production to start at if one
+    -- was written, and the region's text split at its splices.
+    --
+    -- **It denotes an ordinary value of an ordinary datatype.** Its
+    -- elaboration parses the text with that language's installed grammar and
+    -- elaborates the constructor application the reading denotes — so
+    -- @LC\`( \955 x : \953 . x )\`@ /is/ @abs "x" base (var "x")@, with no branded
+    -- type and no coercion.
+    --
+    -- **The text cannot be parsed when it is read**: a module is parsed whole
+    -- before its own @language@ block is installed, so what survives to here is
+    -- the region, and the grammar is asked for at elaboration.
   | SurfaceApp Surface (NonEmpty SurfaceArg)
     -- ^ **a spine, and there is exactly one application constructor.** The
     -- head is any 'Surface' and the argument list is never empty — the user,
@@ -139,6 +161,18 @@ data Surface
     -- phase 44 decides how, or whether, they are written here.
   deriving (Eq, Show)
 
+-- | A piece of a tagged term literal (MS6 phase 104).
+--
+-- **A splice holds a whole 'Surface' term**, not a name: §7.6 says a splice
+-- supplies the slot's value and its type is the slot's, so what stands there is
+-- an ordinary term elaborated at the slot\'s type. Nothing about the slot is
+-- recorded here — which slot it is is the parser\'s answer, from where the
+-- splice fell in the text.
+data ObjectPiece
+  = ObjectText String     -- ^ text, with its escapes already undone
+  | ObjectSplice Surface  -- ^ @${ e }@
+  deriving (Eq, Show)
+
 -- | One argument of a spine, and whether it was written in braces.
 data SurfaceArg = SurfaceArg Plicity Surface
   deriving (Eq, Show)
@@ -180,6 +214,9 @@ data SurfaceDecl
   = SurfaceSignature String Surface   -- ^ @foo : T@
   | SurfaceEquation  String Surface   -- ^ @foo = e@
   | SurfaceDatatype  SurfaceData      -- ^ @data D … where { … }@ (phase 42b)
+  | SurfaceGrammar   BlockKind Int String
+    -- ^ a @language@ or @context@ block (MS6 phase 101): its kind, the line of
+    -- its keyword, and its text, raw. "Thena.Driver.regroup" reads it.
   | SurfaceBlock     [RawInstr]
     -- ^ a top-level @do@ block (MS4 phase 45) — **his, 2026-09-03**. At the top
     -- of a module a block is not an expression but an /item/: it plays where
@@ -210,33 +247,12 @@ data SurfaceData = SurfaceData
 data SurfaceConstructor = SurfaceConstructor String Surface
   deriving (Eq, Show)
 
--- | What went wrong pairing them.
+-- | What went wrong pairing a signature with its equation
+-- ("Thena.Driver.regroup").
 data PairingError
   = SignatureWithNoEquation String
   | EquationWithNoSignature String
-  | DatatypeInATheoremList
-  | BlockInATheoremList
-    -- ^ and neither is a top-level @do@ block (MS4 phase 45), for the same
-    -- reason: 'paired' is about theorems.
-    -- ^ 'paired' is about theorems; a caller that can also take a datatype
-    -- splits the list first. Phase 43's loader does; phase 42b's @declare@
-    -- keeps them apart at the command.
   deriving (Eq, Show)
-
--- | Pair each signature with the equation that follows it.
---
--- **Adjacent and in that order**, which is the rule Haskell and Agda both use;
--- nothing here searches, so a declaration cannot pick up an equation from the
--- far end of a module.
-paired :: [SurfaceDecl] -> Either PairingError [(String, Surface, Surface)]
-paired ds = case ds of
-  [] -> Right []
-  SurfaceSignature x ty : SurfaceEquation y body : rest
-    | x == y -> ((x, ty, body) :) <$> paired rest
-  SurfaceSignature x _ : _ -> Left (SignatureWithNoEquation x)
-  SurfaceEquation  x _ : _ -> Left (EquationWithNoSignature x)
-  SurfaceDatatype _    : _ -> Left DatatypeInATheoremList
-  SurfaceBlock _       : _ -> Left BlockInATheoremList
 
 -- | Every @do@ block written inside a surface term, outermost first.
 --
@@ -264,10 +280,16 @@ blocksIn t = case t of
   SurfaceElim _ ls m is ms tg ->
     concatMap blocksIn ls ++ blocksIn m ++ concatMap blocksIn is
       ++ concatMap blocksIn ms ++ blocksIn tg
+  -- A splice is a term like any other, so a block inside one is found here.
+  SurfaceObject _ _ ps -> concatMap piece ps
   SurfaceName _       -> []
   SurfaceUniverse _   -> []
+  SurfaceLiteral _    -> []
   SurfaceUniverseOpen -> []
   SurfacePlaceholder  -> []
   SurfaceHole _       -> []
   where
     binder (SurfaceBinder _ _ mt) = maybe [] blocksIn mt
+    piece pc = case pc of
+      ObjectText _   -> []
+      ObjectSplice e -> blocksIn e

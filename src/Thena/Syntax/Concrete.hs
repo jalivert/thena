@@ -21,6 +21,7 @@
 -- loud.
 module Thena.Syntax.Concrete
   ( Raw (..)
+  , RawPiece (..)
   , Splice (..)
   , splices
   , splicesIn
@@ -33,6 +34,10 @@ module Thena.Syntax.Concrete
   , RawConstructor (..)
   ) where
 
+-- The one thing 'Raw' takes from 'Core': a literal needs no raw form of its own
+-- because it resolves to itself (MS6 phase 97a).
+import Thena.Core.Term (Literal (..))
+
 -- | A written term, or a written development. One tree for both fragments
 -- (§2.7): 'RawClaim', 'RawGuess' and 'RawPending' can only resolve to
 -- development components, everything else can appear in either, and nothing
@@ -44,6 +49,7 @@ module Thena.Syntax.Concrete
 data Raw
   = RawName String
   | RawUniverse Int
+  | RawPrimitive Literal         -- ^ @"ab"@, @'c'@, @3@ (MS6 phase 97a)
   | RawUniverseOpen              -- ^ @Type@ — a universe whose level is inferred
   | RawAt RawIdent [Int]         -- ^ @foo {0 1}@ — a global at level arguments
 
@@ -70,10 +76,31 @@ data Raw
     -- its own (MS5 phase 63), so @${f a}@ would be written as two lines
     -- whatever this said. It also keeps "Thena.Syntax.Concrete" from importing
     -- "Thena.Instral.Concrete", which imports this module.
+  | RawObject String (Maybe String) [RawPiece]
+    -- ^ **@LC\`( \955 x : \953 . x )\`@ — a tagged term literal, in the
+    -- development calculus** (MS6 phase 110): the language, the production to
+    -- start at if one was written, and the region's text split at its splices.
+    --
+    -- **It is the same region the surface has** ('Thena.Surface.Concrete.SurfaceObject'),
+    -- and for the same reason: it resolves to the constructor application the
+    -- reading denotes and leaves no trace in 'Thena.Core.Term.Core', which has
+    -- no node for a literal and gains none. What it buys is that the printer's
+    -- output can be read back — a goal shown in an object language's notation
+    -- is text the reader accepts.
+    --
+    -- **The grammars are asked for at resolution**, not here: a module is
+    -- parsed whole before its own @language@ block is installed.
   | RawElim RawIdent [Int] [Raw] Raw [Raw] [Raw] Raw
     -- ^ @elim d (params) motive (methods) (indices) target@ (§2.6, phase 7) —
     -- positional, and in exactly 'Thena.Core.Term.Core''s own field order for
     -- 'Thena.Core.Term.Eliminate', so where a field goes needs no name.
+  deriving (Eq, Show)
+
+-- | A piece of a tagged term literal: text, or a term spliced into a slot.
+-- The mirror of 'Thena.Surface.Concrete.ObjectPiece', over 'Raw'.
+data RawPiece
+  = RawChunk String   -- ^ text, with its escapes already undone
+  | RawSpliced Raw    -- ^ @${ t }@
   deriving (Eq, Show)
 
 -- | @(x : S)@ — one parenthesised binding. Always annotated: there is no
@@ -144,6 +171,7 @@ data Splice
 splices :: Raw -> [Splice]
 splices t = case t of
   RawSplice x        -> [TermSplice x]
+  RawPrimitive _     -> []
   RawLam bs b        -> concatMap binder bs ++ splices b
   RawPi bs b         -> concatMap binder bs ++ splices b
   RawArrow a b       -> splices a ++ splices b
@@ -156,6 +184,9 @@ splices t = case t of
   RawElim d _ ps m ms is tg ->
     named d ++ concatMap splices ps ++ splices m ++ concatMap splices ms
       ++ concatMap splices is ++ splices tg
+  -- **A region's splices are the terms it holds** (MS6 phase 110), in the
+  -- order they were written, which is the order they fill the reading's slots.
+  RawObject _ _ ps   -> concat [ splices e | RawSpliced e <- ps ]
   RawName _          -> []
   RawUniverse _      -> []
   RawUniverseOpen    -> []

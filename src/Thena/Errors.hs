@@ -29,7 +29,11 @@
 -- above @Core@; it mentions nothing this module did not already have.
 module Thena.Errors
   ( DataBuildError (..)
+  , BuildError (..)
+  , Warning (..)
+  , Skipped (..)
   , FailReason (..)
+  , ObjectError (..)
   , MoveError (..)
 
     -- * Conversion (§5.2)
@@ -57,11 +61,97 @@ import Thena.Core.Level (Level, Unmet)
 import Thena.Core.Context (Context)
 import Thena.Core.Term (Core, GlobalName, Ident, Var)
 import Thena.Instral.Pattern (Pattern)
-import Thena.Syntax.Lexer (LexError)
+import Thena.Syntax.Lexer (BlockKind, LexError)
+import Thena.Language.Earley (ParseFailure)
+import Thena.Language.Reader (ReadError)
 import Thena.Surface.Concrete (PairingError (..))
 import Thena.Surface.Layout (LayoutError (..))
 import Thena.Surface.Parser (SurfaceParseError (..))
 import Thena.Syntax.Parser (ParseError)
+
+-- | Something worth telling the user about a load that nonetheless succeeded
+-- (MS6 phase 98).
+--
+-- **A warning never changes what is installed**, which is the whole of what
+-- separates it from a 'DeclareError': an error abandons the declaration, a
+-- warning is a remark about one that went in. Structured, like every other
+-- diagnostic (@PLAN.md@ §12), so the renderer decides the words and a test can
+-- ask which warning it was rather than grep a sentence.
+--
+-- **Here since MS6 phase 101**, when §4.5's grammar warnings arrived: phase 98
+-- put it in "Thena.Global.Declare" only because 'Skipped' and 'ElimError' both
+-- had a @NoEquality@, and a grammar warning should not import a declaration
+-- module to raise one.
+data Warning
+  = NoConfusionSkipped GlobalName Skipped
+    -- ^ the datatype went in, and its no-confusion equipment did not. **The
+    -- one diagnostic the system already had and could not report during a
+    -- module load**, because a load discards the op-level messages a prompt
+    -- shows — which is what phase 98 was written to fix.
+  | VacuousBinder BlockKind String String String
+    -- ^ the block, the production, and a binder declared @as binders@ that no
+    -- @[…]@ mentions (@ms6\/SPEC.md@ §4.5, MS6 phase 101). A vacuous binder is
+    -- allowed — that is why it can be declared — and worth saying.
+  deriving (Eq, Show)
+
+
+-- | Why a reading of an object term is not a term (MS6 phases 103 and 104).
+--
+-- **Here rather than in "Thena.Language.Build", for the reason 'Warning' is
+-- here** (phase 101): a 'Failure' carries one, and "Thena.Language.Build"
+-- reaches this module through "Thena.Language.Grammar", so the type has to sit
+-- below both.
+data BuildError
+  = NoSuchProduction String
+    -- ^ a reading of a production no installed grammar has
+  | Incomplete String
+    -- ^ a hole: a constructor cannot have a missing argument (§7.6)
+  | NotForSlot String String
+    -- ^ the production, and a slot whose reading is not what it takes
+  deriving (Eq, Show)
+
+-- | Why a datatype gets no no-confusion. Structured, per §12 invariant 2.
+--
+-- **Moved here from "Thena.Global.NoConfusion" at MS6 phase 101**, with
+-- 'Warning', which carries it. Its first constructor was @NoEquality@ and was
+-- renamed 'NoEqInScope': 'ElimError' has a @NoEquality@ of its own, older (MS1)
+-- and naming the missing global, so this is the one whose name said less.
+--
+-- The three are ordered by how much they are about the /user's/ declaration.
+-- 'NoEqInScope' is about the environment and is reported to nobody (see
+-- 'generateNoConfusion'); the other two are properties of what was just
+-- written, and "Thena.Driver" says them.
+data Skipped
+  = NoEqInScope
+    -- ^ no well-shaped @Eq@ is in scope, so no equation can be stated. Arises
+    -- only before the prelude is loaded — @repl@ loads it at startup — which is
+    -- why it is silent.
+  | NoProducts
+    -- ^ a prelude type this datatype's own table would be written out of —
+    -- @And@, @Unit@ or @Empty@ — is missing or misshapen. Silent for
+    -- 'NoEqInScope'\'s reason and arising in the same situation, a prelude-free
+    -- script, which is why the two are tested together.
+    --
+    -- **Asked per datatype, not once**, and that is load-bearing rather than
+    -- fastidious: the prelude declares @Eq@ before @And@, so a blanket
+    -- precondition would refuse @NoConfusionEq@ — which phase 14 generated —
+    -- for a name it was never going to write. See 'productsInScope'.
+  | DependentArguments GlobalName Int Ident
+    -- ^ this constructor's argument telescope is dependent, so the equation for
+    -- the named argument is ill-typed. @cons : (n : Nat) (a : A) (as : Vec A n)
+    -- -> Vec A (succ n)@ wants @Eq (Vec A n) as as'@ while @as' : Vec A n'@.
+    -- An MS1 limit and not unsoundness — the way out is a transported chain of
+    -- equations, which nothing in MS1 wants (@AGENDA.md@).
+    --
+    -- **The position is carried as well as the name** (2026-09-13), because the
+    -- name alone does not identify the argument: an anonymous arrow argument is
+    -- stored as @Ident \"x\"@ deliberately (@Syntax.Resolve@\'s @RawArrow@ case
+    -- says why, and the printer freshens a repeat), so a constructor written
+    -- @hop : ∀ (x y z : A) -> Chain A x y -> Chain A y z -> Chain A x z@ has
+    -- /three/ arguments called @x@ and this said only *argument x*.
+    -- 'Thena.Errors.IndexTypeDepends' — the same condition one telescope over —
+    -- has carried its position since it was written.
+  deriving (Eq, Show)
 
 -- | Why an operation failed. Structured, never a string (§12 invariant 2).
 --
@@ -271,6 +361,10 @@ data FailReason
     -- ^ an operand was not a 'Thena.Instral.Ops.VSurface'. Shaped like 'ExpectedText'
     -- and 'ExpectedTerm', and here for their reason: the value itself may not
     -- be named below @Core@
+  | ObjectFailed ObjectError
+    -- ^ a tagged term literal that is not one term of its language (MS6 phase
+    -- 104). The four ways are 'ObjectError', which the development calculus
+    -- reader answers with too (phase 110) — one region, one set of checks.
   | ExpectedSurfaceShape String
     -- ^ a surface reader was given a term of the wrong shape (MS4 phase 49):
     -- @surface-name@ on something that is not a name, @surface-universe@ on
@@ -566,6 +660,10 @@ data SyntaxError
     -- ^ the offside rule could not lay the surface program out (MS4 phase 40)
   | SurfaceParseFailed SurfaceParseError
   | DeclarationsUnpaired PairingError
+  | BlockUnreadable ReadError
+    -- ^ a @language@ or @context@ block the reader could not take apart
+    -- (MS6 phase 101). A syntax error, reported before anything in the module
+    -- elaborates, as a malformed top-level @do@ block is.
   | BlockIllFormed Int String
     -- ^ the instruction at this position in a **top-level** @do@ block gave this
     -- op word the wrong operands (MS4 phase 45).
@@ -593,6 +691,26 @@ data SyntaxError
 -- Moved here from "Thena.Syntax.Resolve" at phase 17b, with 'DevForm'. It could
 -- not be imported from there — @Resolve@ is above @Core@ — and it needs nothing
 -- that module has: every case is a 'String', an 'Int' or an 'Ident'.
+-- | **Why a tagged term literal is not one term of its language** (MS6 phase
+-- 110). Both readers ask the same four questions of a region — the surface's,
+-- when the literal elaborates, and the development calculus's, when the text
+-- is resolved — so both carry this rather than spelling it twice.
+data ObjectError
+  = NoSuchObjectLanguage String
+    -- ^ a region named a language no @language@ block has declared. **Asked
+    -- when the literal is resolved or elaborated**, not when it is read: a
+    -- module is parsed whole before its own block is installed, so this is the
+    -- earliest the question can be asked.
+  | NoSuchObjectProduction String String
+    -- ^ @LC[nope]\`…\`@ — the language, and a production it does not have.
+  | ObjectNotParsed String String ParseFailure
+    -- ^ the language, the region's text, and why the object grammar did not
+    -- read it as one term. The same three answers @:parse@ gives, because it
+    -- is the same parser.
+  | ObjectNotATerm String BuildError
+    -- ^ it parsed, and the reading does not denote a term.
+  deriving (Eq, Show)
+
 data ResolveError
   = NotInScope String
   | NotACoreTerm DevForm
@@ -619,6 +737,11 @@ data ResolveError
     -- file loads; it is answered rather than left to a pattern-match failure,
     -- and it is what a term resolved with no splice environment at all would
     -- say.
+  | NotAnObjectTerm ObjectError
+    -- ^ **a tagged term literal in development-calculus text** (MS6 phase
+    -- 110): @LC\`( λ x : ι . x )\`@ resolves to the constructor application it
+    -- denotes, and this is why it did not. It is what the printer writes, so
+    -- what a goal shows can be typed back.
   | LevelArgumentsOnALocal String
     -- ^ level arguments written on a name bound by a λ or by the development.
     -- Only a definition has level parameters, so only a global can be given

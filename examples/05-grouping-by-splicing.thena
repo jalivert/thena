@@ -1,0 +1,99 @@
+-- Grouping without parentheses: a splice is a group.
+--
+-- LOAD AFTER 01-stlc-syntax.thena, which declares the token class x.
+--
+-- Thena reserves nothing inside an object language's notation — not even
+-- parentheses. `LC` in 01 has them because its grammar writes them into its
+-- productions: `app -> ( M N )`. A language that does not is a language in
+-- which `(` is simply not a character, and nothing groups for you.
+--
+-- This file shows the other way to group: the splice. `${ … }` fills one slot
+-- with one whole term, and the parse around it never looks inside. So
+-- nesting one tagged literal in another is grouping, and it belongs to
+-- Thena — the host — rather than to the language being modelled.
+
+module Grouping where
+
+-- Applicative expressions with application as bare juxtaposition, as in
+-- Haskell, and no parenthesis production at all.
+language Ex, U, V where
+  ref : x as occurrence -> x
+  juxt -> U V
+
+
+-- ---------------------------------------------------------------------------
+-- What the notation alone cannot say.
+--
+-- A term of one application is fine:
+
+fa : Ex
+fa = Ex`f a`
+
+-- …but three names in a row can be read two ways, and Thena reports that rather
+-- than picking one:
+--
+--   thena spine> :parse Ex f a b
+--   in Ex`f a b`: this term parses two ways, as juxt(ref(f), juxt(ref(a), ref(b)))
+--     and as juxt(juxt(ref(f), ref(a)), ref(b))
+--
+-- …and parentheses are not a way out, because this grammar has none:
+--
+--   thena spine> :parse Ex (f a) b
+--   in Ex`(f a) b`: unexpected '(' at character 1, expecting x
+
+
+-- ---------------------------------------------------------------------------
+-- Splices group.
+
+-- (f a) b — the spliced term is the left operand, whole.
+leftNested : Ex
+leftNested = Ex`${Ex`f a`} b`
+
+-- f (a b) — the same three names, the other way.
+rightNested : Ex
+rightNested = Ex`f ${Ex`a b`}`
+
+-- The two really are the two trees, and each is exactly what it says:
+leftIs : Eq Ex leftNested (juxt (juxt (ref "f") (ref "a")) (ref "b"))
+leftIs = refl Ex (juxt (juxt (ref "f") (ref "a")) (ref "b"))
+
+rightIs : Eq Ex rightNested (juxt (ref "f") (juxt (ref "a") (ref "b")))
+rightIs = refl Ex (juxt (ref "f") (juxt (ref "a") (ref "b")))
+
+-- (f a) (g b) — both sides grouped at once.
+pairOfPairs : Ex
+pairOfPairs = Ex`${Ex`f a`} ${Ex`g b`}`
+
+pairOfPairsIs : Eq Ex pairOfPairs (juxt (juxt (ref "f") (ref "a")) (juxt (ref "g") (ref "b")))
+pairOfPairsIs = refl Ex (juxt (juxt (ref "f") (ref "a")) (juxt (ref "g") (ref "b")))
+
+-- ((f a) b) c — nesting as deep as the tree is.
+deeper : Ex
+deeper = Ex`${Ex`${Ex`f a`} b`} c`
+
+deeperIs : Eq Ex deeper (juxt (juxt (juxt (ref "f") (ref "a")) (ref "b")) (ref "c"))
+deeperIs = refl Ex (juxt (juxt (juxt (ref "f") (ref "a")) (ref "b")) (ref "c"))
+
+
+-- ---------------------------------------------------------------------------
+-- A splice holds any Thena term of the slot's type, not only a literal. So a
+-- name is a group too, and so is a computation.
+
+-- A definition, spliced: (f a) b again, written through fa.
+throughAName : Eq Ex Ex`${fa} b` leftNested
+throughAName = refl Ex leftNested
+
+-- A substitution, spliced: ([a -> g b] (f a)) c, which is ((f (g b)) c).
+throughSubstitution : Eq Ex Ex`${Ex-subst fa "a" Ex`g b`} c`
+                            (juxt (juxt (ref "f") (juxt (ref "g") (ref "b"))) (ref "c"))
+throughSubstitution = refl Ex (juxt (juxt (ref "f") (juxt (ref "g") (ref "b"))) (ref "c"))
+
+
+-- ---------------------------------------------------------------------------
+-- The other direction is open.
+--
+-- Reading groups by splices; printing does not yet. Printing leftNested
+-- in this notation would write `f a b`, which reads two ways, because the
+-- printer only has the grammar's own items to write with. A printer could put
+-- ${…} back exactly where the grammar would otherwise be ambiguous — whether it
+-- should is still open (CLOSEOUT 30).

@@ -60,13 +60,13 @@
 -- eliminator is J), which fixes @y@ to be @x@, and then the datatype once, which
 -- is why only the diagonal cases are ever proved: @λ C k . k refl … refl@.
 module Thena.Global.NoConfusion
-  ( Skipped (..)
-  , Generated (..)
+  ( Generated (..)
   , noConfusionNames
   , generateNoConfusion
   ) where
 
 import Thena.Core.Level (Level (..))
+import Thena.Errors (Skipped (..))
 import Thena.Core.Context (Context, Entry (..), entryIdent, entryType, entryVar, lamOver, piOver)
 import Thena.Core.Term
   ( Core (..)
@@ -89,44 +89,6 @@ import Thena.Global.Env
   , lookupInductive
   , recursiveArgument
   )
-
--- | Why a datatype gets no no-confusion. Structured, per §12 invariant 2.
---
--- The three are ordered by how much they are about the /user's/ declaration.
--- 'NoEquality' is about the environment and is reported to nobody (see
--- 'generateNoConfusion'); the other two are properties of what was just
--- written, and "Thena.Driver" says them.
-data Skipped
-  = NoEquality
-    -- ^ no well-shaped @Eq@ is in scope, so no equation can be stated. Arises
-    -- only before the prelude is loaded — @repl@ loads it at startup — which is
-    -- why it is silent.
-  | NoProducts
-    -- ^ a prelude type this datatype's own table would be written out of —
-    -- @And@, @Unit@ or @Empty@ — is missing or misshapen. Silent for
-    -- 'NoEquality'\'s reason and arising in the same situation, a prelude-free
-    -- script, which is why the two are tested together.
-    --
-    -- **Asked per datatype, not once**, and that is load-bearing rather than
-    -- fastidious: the prelude declares @Eq@ before @And@, so a blanket
-    -- precondition would refuse @NoConfusionEq@ — which phase 14 generated —
-    -- for a name it was never going to write. See 'productsInScope'.
-  | DependentArguments GlobalName Int Ident
-    -- ^ this constructor's argument telescope is dependent, so the equation for
-    -- the named argument is ill-typed. @cons : (n : Nat) (a : A) (as : Vec A n)
-    -- -> Vec A (succ n)@ wants @Eq (Vec A n) as as'@ while @as' : Vec A n'@.
-    -- An MS1 limit and not unsoundness — the way out is a transported chain of
-    -- equations, which nothing in MS1 wants (@AGENDA.md@).
-    --
-    -- **The position is carried as well as the name** (2026-09-13), because the
-    -- name alone does not identify the argument: an anonymous arrow argument is
-    -- stored as @Ident \"x\"@ deliberately (@Syntax.Resolve@\'s @RawArrow@ case
-    -- says why, and the printer freshens a repeat), so a constructor written
-    -- @hop : ∀ (x y z : A) -> Chain A x y -> Chain A y z -> Chain A x z@ has
-    -- /three/ arguments called @x@ and this said only *argument x*.
-    -- 'Thena.Errors.IndexTypeDepends' — the same condition one telescope over —
-    -- has carried its position since it was written.
-  deriving (Eq, Show)
 
 -- | What generation did.
 --
@@ -164,7 +126,7 @@ noConfusionNames (GlobalName d) =
 -- @Vec@ reaches the third and is told.
 generateNoConfusion :: GlobalEnv -> Int -> InductiveDefinition -> Generated
 generateNoConfusion env n0 d
-  | not (equalityInScope env)          = Declined NoEquality
+  | not (equalityInScope env)          = Declined NoEqInScope
   | not (productsInScope env d)        = Declined NoProducts
   | Just why <- dependentArgument d    = Declined why
   | isDeclared famName env             = Clash famName

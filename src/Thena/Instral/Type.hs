@@ -83,17 +83,6 @@ data Ty
     -- @LMax@ have no ops on purpose — those are the /algebra/, and
     -- "Thena.Core.Level"'s solver stays their only author until something asks
     -- (@ms5\/CLOSEOUT.md@ 40).
-  | TObject String
-    -- ^ **a declared object language** (MS5 phase 69) — @Tm@, opaque.
-    --
-    -- **Its tag is its only introduction form** (§6.6, his), so a value of this
-    -- type is well formed by construction, and there is a one-way coercion to
-    -- 'TSurface' because an object term /is/ a Surface term. @instral@ never
-    -- looks inside one.
-    --
-    -- **This is where the type environment stops being closed** — §5.3's
-    -- \"contained\" weakens from /closed/ to /extensible by declaration/, which
-    -- he ruled is *\"exactly what instral is for\"*.
   | TFun [Ty] Ty
     -- ^ **the argument list is never empty** (MS5 phase 94): a lambda takes at
     -- least one parameter, and calling a local with none is refused before a
@@ -187,7 +176,6 @@ renderTy = go False
       TChar        -> "Char"
       TBool        -> "Bool"
       TLevel       -> "Level"
-      TObject n    -> n
       TSurface     -> "Surface"
       TCore        -> "Core"
       TDevelopment -> "Development"

@@ -33,15 +33,17 @@ module Thena.Syntax.Parser
   , parseInstralTy
   ) where
 
+import Thena.Core.Term (Literal (..))
 import Thena.Syntax.Concrete
   ( Raw (..)
+  , RawPiece (..)
   , RawBinder (..)
   , RawIdent (..)
   , RawConstraint (..)
   , RawConstructor (..)
   , RawData (..)
   )
-import Thena.Instral.Concrete (RawDecl (..), RawLanguage (..), RawProduction (..), RawGItem (..), RawFunction (..), RawRhs (..), RawBody (..), RawSignature (..), RawTy (..), RawRule (..), RawPattern (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
+import Thena.Instral.Concrete (RawDecl (..), RawFunction (..), RawRhs (..), RawBody (..), RawSignature (..), RawTy (..), RawRule (..), RawPattern (..), RawInstr (..), RawOp (..), RawOperand (..), RawTest (..))
 import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
 }
 
@@ -83,6 +85,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   '${'    { Located _ TEscapeOpen }
   '}$'    { Located _ TEscapeClose }
   tagopen  { Located _ (TTagOpen $$) }
+  tagat    { Located _ (TTagOpenAt _ _) }
   raw      { Located _ (TRaw $$) }
   tagclose { Located _ TTagClose }
   '|]'    { Located _ TCloseQuote }
@@ -92,12 +95,12 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   where   { Located _ TWhere }
   rule    { Located _ TRule }
   do      { Located _ TDo }
-  language { Located _ TLanguage }
   when    { Located _ TWhen }
   ':-'    { Located _ TNeck }
   num     { Located _ (TNumber $$) }
   str     { Located _ (TString $$) }
   chr     { Located _ (TChar $$) }
+  regex   { Located _ (TRegex $$) }
   '...'   { Located _ TSpread }
   '['     { Located _ TLBracket }
   ']'     { Located _ TRBracket }
@@ -203,7 +206,6 @@ Decl :: { RawDecl }
   : Rule                                   { DeclRule $1 }
   | Signature                              { DeclSignature $1 }
   | Function                               { DeclFunction $1 }
-  | Language                               { DeclLanguage $1 }
 
 Rule :: { RawRule }
   : rule ident Params ':-' Tests do Block    { RawRule $2 (reverse $3) $5 (reverse $7) }
@@ -262,26 +264,6 @@ Lambda :: { RawOperand }
 LambdaParams :: { [RawPattern] }
   : PatAtom                                { [$1] }
   | LambdaParams PatAtom                   { $2 : $1 }
-
--- **An object language's grammar** (MS5 phase 69). Braces and @where@ are
--- already tokens, so this costs one keyword and no punctuation.
-Language :: { RawLanguage }
-  : language ident where '{' Prods '}'     { RawLanguage $2 (reverse $5) }
-
-Prods :: { [RawProduction] }
-  : Prod                                   { [$1] }
-  | Prods ';' Prod                         { $3 : $1 }
-
-Prod :: { RawProduction }
-  : ident ':' GItems                       { RawProduction $1 (reverse $3) }
-
-GItems :: { [RawGItem] }
-  :                                        { [] }
-  | GItems GItem                           { $2 : $1 }
-
-GItem :: { RawGItem }
-  : str                                    { GTerminal $1 }
-  | ident                                  { GWord $1 }
 
 -- **No keyword** (MS5 phase 74, his ruling). A declaration beginning with a
 -- plain word is a signature or a function, and the token after the name says
@@ -354,7 +336,7 @@ PatAtom :: { RawPattern }
 -- Every pattern form but a bare name — what a binding's left may be without
 -- colliding with an op word or an annotation (MS5 phase 84).
 CompoundPat :: { RawPattern }
-  : num                                    { RawPInt $1 }
+  : num                                    { RawPInt (fromInteger $1) }
   | str                                    { RawPText $1 }
   | chr                                    { RawPChar $1 }
   | '[' ']'                                { RawPList [] Nothing }
@@ -363,6 +345,14 @@ CompoundPat :: { RawPattern }
   | '[' '...' PatAtom ']'                  { RawPList [] (Just $3) }
   | '(' ident PatAtoms ')'                 { RawPApp $2 (reverse $3) }
   | '(' PatAtom ',' PatAtom ')'            { RawPPair $2 $4 }
+  -- **A term of an object language, as a pattern** (MS6 phase 104c). It reads
+  -- the same as the operand form above and means the other direction: a
+  -- @${x}@ binds here where it supplies there (@patterns-and-the-editor.md@
+  -- \u00a75).
+  | tagopen Pieces tagclose                { RawPObject $1 Nothing (concat (reverse $2)) }
+  | tagopen tagclose                       { RawPObject $1 Nothing "" }
+  | tagat Pieces tagclose                  { patternAt $1 (concat (reverse $2)) }
+  | tagat tagclose                         { patternAt $1 "" }
 
 PatAtoms :: { [RawPattern] }
   :                                        { [] }
@@ -450,7 +440,7 @@ ValueOperand :: { RawOperand }
   -- **A lambda in an argument takes parentheses**, like every other compound
   -- argument (§6.0.1); bare, it is what stands right of an @=@.
   | '(' Lambda ')'                         { $2 }
-  | num                                    { RawPos $1 }
+  | num                                    { RawPos (fromInteger $1) }
   | str                                    { RawText $1 }
   | chr                                    { RawChar $1 }
   | '[' ']'                                { RawList [] }
@@ -462,8 +452,12 @@ ValueOperand :: { RawOperand }
   -- region early; this puts it back, because what a region /is/ is text for an
   -- embedded parser and the embedded parser reads @${x}@ itself. So the pieces
   -- below are a reader for what the scanner produced and not a second meaning.
-  | tagopen Pieces tagclose                { RawRegion $1 (concat (reverse $2)) }
-  | tagopen tagclose                       { RawRegion $1 "" }
+  | tagopen Pieces tagclose                { RawRegion $1 Nothing (concat (reverse $2)) }
+  | tagopen tagclose                       { RawRegion $1 Nothing "" }
+  -- **A tag may name the production to start at** (MS6 phase 104c), which is
+  -- what tells @LC[var]\`…\`@ from @LC\`…\`@: a variable occurrence, or any term.
+  | tagat Pieces tagclose                  { regionAt $1 (concat (reverse $2)) }
+  | tagat tagclose                         { regionAt $1 "" }
 
 Pieces :: { [String] }
   : Piece                                  { [$1] }
@@ -503,7 +497,30 @@ Atom :: { Raw }
   | ident LevelArgs                        { RawAt (RawWord $1) $2 }
   | univ                                   { RawUniverse $1 }
   | Type                                   { RawUniverseOpen }
+  -- A literal of a primitive type is an atom, for a name's reason: it stands
+  -- where a name stands and needs no precedence (MS6 phase 97a).
+  | str                                    { RawPrimitive (LString $1) }
+  | chr                                    { RawPrimitive (LChar $1) }
+  | num                                    { RawPrimitive (LInt $1) }
+  | regex                                  { RawPrimitive (LRegex $1) }
+  -- **A tagged term literal is an atom** (MS6 phase 110), for a name's reason:
+  -- a region is delimited by its backticks, so it needs no precedence. The
+  -- surface has had one since phase 104; this is the same region, read by the
+  -- same lexer, in the development calculus's own grammar.
+  | tagopen ObjectBits tagclose            { RawObject $1 Nothing (reverse $2) }
+  | tagopen tagclose                       { RawObject $1 Nothing [] }
+  | tagat ObjectBits tagclose              { taggedRaw $1 (reverse $2) }
+  | tagat tagclose                         { taggedRaw $1 [] }
   | '(' Term ')'                           { $2 }
+
+-- Accumulated in reverse, like every other run here.
+ObjectBits :: { [RawPiece] }
+  : ObjectBit                              { [$1] }
+  | ObjectBits ObjectBit                   { $2 : $1 }
+
+ObjectBit :: { RawPiece }
+  : raw                                    { RawChunk $1 }
+  | '${' Term '}$'                         { RawSpliced $2 }
 
 -- | @{ ℓ 0 }@ — a brace-enclosed run of level atoms, no commas, exactly as
 -- rule parameters and call arguments are a bare run of names (phase 23).
@@ -515,7 +532,7 @@ LevelAtoms :: { [Int] }
   | LevelAtoms LevelAtom                   { $2 : $1 }
 
 LevelAtom :: { Int }
-  : num                                    { $1 }
+  : num                                    { fromInteger $1 }
 
 -- The argument list of a rule invoked at the REPL (phase 23b): a run of atoms,
 -- exactly as a rule body writes its operands. @try (\ x -> x)@ is one argument
@@ -553,6 +570,19 @@ Binder :: { RawBinder }
 {
 
 -- | Structured, per §12 invariant 2.
+-- | @LC[app]\`…\`@ — the tag carries two names, so the token is taken whole
+-- rather than through @$$@ (MS6 phase 104c). "Thena.Surface.Parser" has the
+-- same pair for the same reason.
+regionAt :: Located Token -> String -> RawOperand
+regionAt t src = case t of
+  Located _ (TTagOpenAt lang prod) -> RawRegion lang (Just prod) src
+  _ -> error "the tag token is TTagOpenAt"
+
+patternAt :: Located Token -> String -> RawPattern
+patternAt t src = case t of
+  Located _ (TTagOpenAt lang prod) -> RawPObject lang (Just prod) src
+  _ -> error "the tag token is TTagOpenAt"
+
 data ParseError
   = UnexpectedToken Pos Token
   | UnexpectedEndOfInput
@@ -563,5 +593,12 @@ parseError ts = Left $ case ts of
   Located p t : _ -> UnexpectedToken p t
   []              -> UnexpectedEndOfInput
 
+
+-- | @LC[var]`…`@ in development-calculus text: the production the reading
+-- starts at (MS6 phase 110).
+taggedRaw :: Located Token -> [RawPiece] -> Raw
+taggedRaw t ps = case t of
+  Located _ (TTagOpenAt lang prod) -> RawObject lang (Just prod) ps
+  _ -> error "the tag token is TTagOpenAt"
 
 }

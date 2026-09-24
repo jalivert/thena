@@ -33,6 +33,7 @@ import Thena.Engine
   , resumeAt
   , resumeYield
   , step
+  , splicing
   )
 import Thena.Errors (FailReason (..))
 import Thena.Global.Env
@@ -205,7 +206,7 @@ matchTests =
     , testCase "only the headless rules match in the core fragment" $
         case crossType (holeAt type0) of
           Left e    -> assertFailure ("could not cross: " ++ show e)
-          Right cur -> matching emptyGlobals cur @?= ["claim", "assume", "quantify"]
+          Right cur -> matching emptyGlobals cur @?= ["claim", "assume", "quantify", "run-block"]
 
       -- Definition order is dispatch order (§8), so the match list is always a
       -- subsequence of the base and never a reordering of it.
@@ -353,7 +354,7 @@ validateTests =
               ]
 
     , testCase "validateBase checks every rule" $
-        length (validateBase (ruleBase "test" Nothing "" [] [] []
+        length (validateBase (ruleBase "test" Nothing "" [] []
                                 [ named "a" [] [Bind (Ops.PVar "x") Nothing Ops.Attack]
                                 , named "b" [] [Do (Ops.Say (Ref "z"))]
                                 ]))
@@ -427,7 +428,7 @@ dataTests =
     -- the shape question is asked where the argument is named, and binds its
     -- pieces while it is there.
     shapes =
-      ruleBase "shapes" Nothing "" [] [] []
+      ruleBase "shapes" Nothing "" [] []
         [ Rule (GlobalName "shape") [Ops.PList [] Nothing] []
             [Do (Ops.Say (Lit (VText "empty")))]
         , Rule (GlobalName "shape") [Ops.PList [Ops.PWild] (Just Ops.PWild)] []
@@ -650,7 +651,6 @@ principal v = case v of
   VTerm _    -> Just TCore
   VRaw _     -> Just TCore
   VSurface _ -> Just TSurface
-  VObject n _ -> Just (TObject n)
   _          -> Nothing
 
 substituteTy :: [(Int, Ty)] -> Ty -> Ty
@@ -707,7 +707,7 @@ twoHoles =
     g = fst (fresh 9)
 
 someData :: InductiveDefinition
-someData = case parseDeclaration emptyGlobals 200 natDecl of
+someData = case parseDeclaration [] emptyGlobals 200 natDecl of
   Right (d, _) -> d
   Left err     -> error ("fixture does not parse: " ++ show err)
 
@@ -722,7 +722,7 @@ text = Lit . VText
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env cur is =
   load is (Machine (Exec [] [] []) (Development cur) [] env
-                   (expectedBase ++ [returning]) [] 1000 0)
+                   (expectedBase ++ [returning]) [] [] 1000 0)
 
 -- | A base with one rule in it that returns something (MS5 phase 63).
 --
@@ -732,7 +732,7 @@ machineIn env cur is =
 -- @Bind@ on a call is filled by the callee's @return@ — and one rule says it.
 returning :: RuleBase
 returning =
-  ruleBase "returning" Nothing "" [] [] []
+  ruleBase "returning" Nothing "" [] []
     [ returningRule
       -- @return@ ends the body: the @prim-attack@ after it must not run, which
       -- is what makes this rule safe to call at a hole in any state.
@@ -766,6 +766,10 @@ runOut m = case step m of
   Saying _ m'       -> runOut m'
   Declaring _ m'    -> runOut m'
   Defining _ _ _ _ m' -> runOut m'
+  Primitively _ _ m' -> runOut m'
+  DeclaringGrammar _ m' -> runOut m'
+  -- A block the driver would have typed; the harness splices and runs it.
+  Playing is m' -> runOut (splicing is m')
   Certifying _ _ m' -> runOut m'
   Asking _ m'       -> runOut (resumeAt "ok" m')
   -- Handed straight back, so a rule that yields is still exercised end to
@@ -804,7 +808,7 @@ everyHoleRule =
     -- runs none of them: they take a parameter.
   , "claim", "assume", "quantify"
   ]
-    ++ replicate 16 "elaborate" ++ replicate 2 "enter-binders"
+    ++ replicate 18 "elaborate" ++ ["run-block"] ++ replicate 2 "enter-binders"
     ++ replicate 2 "spine-arguments"
 
 -- | The λ case's two recursive helpers, which every listing at a guess shows.
@@ -814,7 +818,7 @@ everyHoleRule =
 -- its state test passes — and @intro-binders@ really does apply at a guess.
 walkers :: [String]
 walkers =
-  [ "claim", "assume", "quantify"
+  [ "claim", "assume", "quantify", "run-block"
   , "intro-binders", "intro-binders", "enter-binders", "enter-binders"
   , "spine-arguments", "spine-arguments"
   ]

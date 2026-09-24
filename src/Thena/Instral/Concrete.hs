@@ -24,9 +24,6 @@
 module Thena.Instral.Concrete
   ( RawDecl (..)
   , RawFunction (..)
-  , RawLanguage (..)
-  , RawProduction (..)
-  , RawGItem (..)
   , RawRhs (..)
   , RawBody (..)
   , RawSignature (..)
@@ -85,6 +82,11 @@ data RawPattern
   | RawPText String
   | RawPList [RawPattern] (Maybe RawPattern)
   | RawPPair RawPattern RawPattern
+  | RawPObject String (Maybe String) String
+    -- ^ @LC[app]\`( ${f} ${a} )\`@ — a tagged term literal as a pattern (MS6
+    -- phase 104c): the language, the production if one was written, and the
+    -- region's text with its @${…}@ left in it, exactly as 'RawRegion' keeps
+    -- it. What the text means needs the grammar, which is resolution's.
   deriving (Eq, Show)
 
 -- | What a rule-base file is a list of (MS5 phase 67).
@@ -97,7 +99,6 @@ data RawDecl
   = DeclRule RawRule
   | DeclSignature RawSignature
   | DeclFunction RawFunction
-  | DeclLanguage RawLanguage
   deriving (Eq, Show)
 
 -- | @‹name› ‹params› = ‹expression›@ — a global function (MS5 phase 68a).
@@ -112,29 +113,6 @@ data RawDecl
 -- in the engine knows the difference, which is the point of there being one
 -- language.
 data RawFunction = RawFunction String [RawPattern] RawBody
-  deriving (Eq, Show)
-
--- | @language ‹Name› where { ‹productions› }@ (MS5 phase 69).
---
--- **The minimal grammar notation** — his ruling, 2026-09-12, over branding
--- object terms with the Surface parser: build it now so the generated-parser
--- path is exercised, and let MS6's grammar sub-language (§7) replace it.
-data RawLanguage = RawLanguage String [RawProduction]
-  deriving (Eq, Show)
-
--- | @‹constructor› : ‹item›…@
-data RawProduction = RawProduction String [RawGItem]
-  deriving (Eq, Show)
-
--- | A quoted terminal, or a word.
---
--- **Which word it is, is resolution's question**, exactly as an op word is: the
--- language's own name is a recursive slot, @name@ is a bare identifier, and
--- anything else is a mistake. The parser cannot tell, because it does not know
--- what the language is called.
-data RawGItem
-  = GTerminal String
-  | GWord String
   deriving (Eq, Show)
 
 -- | What stands right of an @=@ — in a function declaration and in a binding
@@ -266,7 +244,7 @@ data RawOperand
     -- a region carries text so that a /foreign/ language may keep its own
     -- lexical rules, and Core has no need of that
     -- (@discussion\/the-five-languages.md@ §7b, the permanent entry).
-  | RawRegion String String
+  | RawRegion String (Maybe String) String
     -- ^ @tag\`…\`@ — a **tagged region** (MS5 phase 61b): the tag, and the raw
     -- text between the fences. Which language the text is in is the tag's to
     -- say, and the text is parsed by that tag's parser during resolution.

@@ -57,6 +57,7 @@ import Thena.Core.Reduce (whnf)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName
+  , primitiveType
   , close
   , fresh
   , instantiate
@@ -84,6 +85,11 @@ infer
   -> (Either TypeError Core, [Obligation], Int)
 infer env ctx n term = case term of
   Bound i -> (Left (LooseIndex i), [], n)
+
+  -- A literal's type is fixed and needs nothing from the environment
+  -- (MS6 phase 97a). @String@, @Char@, @Int@ and @Token@ are seeded into every
+  -- 'GlobalEnv' as constants, so the names it mentions always resolve.
+  Primitive l -> (Right (primitiveType l), [], n)
 
   Free x -> case find ((== x) . entryVar) ctx of
     Just e  -> (Right (entryType e), [], n)

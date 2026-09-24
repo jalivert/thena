@@ -34,6 +34,9 @@ standard
   elaborate ‹t›
   elaborate ‹t›
   elaborate ‹t›
+  elaborate ‹t›
+  elaborate ‹t›
+  run-block ‹t›
   intro-binders ‹t›
   intro-binders ‹t›
   enter-binders ‹t›
@@ -70,6 +73,9 @@ elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+run-block ‹t›
 enter-binders ‹t›
 enter-binders ‹t›
 spine-arguments ‹h› ‹f› ‹t›
@@ -82,6 +88,7 @@ prove
 claim ‹ty›
 assume ‹ty›
 quantify ‹ty›
+run-block ‹t›
 intro-binders ‹t›
 intro-binders ‹t›
 enter-binders ‹t›
@@ -93,6 +100,7 @@ thena core> :matches
 claim ‹ty›
 assume ‹ty›
 quantify ‹ty›
+run-block ‹t›
 thena core> back
 thena spine> :theorem id : ∀ (A : Type₀) -> A -> A
 proving id : ∀ (A : Type₀) -> A -> A
@@ -126,6 +134,9 @@ elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+run-block ‹t›
 enter-binders ‹t›
 enter-binders ‹t›
 spine-arguments ‹h› ‹f› ‹t›
@@ -139,6 +150,7 @@ prove
 claim ‹ty›
 assume ‹ty›
 quantify ‹ty›
+run-block ‹t›
 intro-binders ‹t›
 intro-binders ‹t›
 enter-binders ‹t›
@@ -187,6 +199,9 @@ elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+run-block ‹t›
 enter-binders ‹t›
 enter-binders ‹t›
 spine-arguments ‹h› ‹f› ‹t›
@@ -205,6 +220,7 @@ prove
 claim ‹ty›
 assume ‹ty›
 quantify ‹ty›
+run-block ‹t›
 intro-binders ‹t›
 intro-binders ‹t›
 enter-binders ‹t›
@@ -226,6 +242,7 @@ prove
 claim ‹ty›
 assume ‹ty›
 quantify ‹ty›
+run-block ‹t›
 intro-binders ‹t›
 intro-binders ‹t›
 enter-binders ‹t›

@@ -128,7 +128,7 @@ stepDecl =
 declared :: [String] -> (GlobalEnv, Int)
 declared = foldl one (emptyGlobals, 0)
   where
-    one (env, n) src = case parseDeclaration env n src of
+    one (env, n) src = case parseDeclaration [] env n src of
       Left e -> error ("fixture does not parse: " ++ show e)
       Right (d, n1) -> case declare env n1 d of
         Left e              -> error ("fixture refused: " ++ show e)

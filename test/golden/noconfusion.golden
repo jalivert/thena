@@ -33,8 +33,8 @@ thena core> back
 thena spine> data Nat : Type₀ where { zero' : Nat ; succ' : Nat -> Nat }
 declared Nat
 thena spine> data Vec (A : Type₀) : Nat -> Type₀ where { nil : Vec A zero' ; cons : ∀ (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ' n) }
-no noConfusionVec: cons's argument 3 (as) has a type that depends on an earlier argument, so its equation cannot be stated
 declared Vec
+warning: no noConfusionVec: cons's argument 3 (as) has a type that depends on an earlier argument, so its equation cannot be stated
 thena spine> :show noConfusionVec
 nothing named noConfusionVec has been declared
 thena spine> :quit

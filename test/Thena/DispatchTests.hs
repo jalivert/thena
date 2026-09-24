@@ -31,6 +31,7 @@ import Thena.Engine
   , load
   , retryFrom
   , step
+  , splicing
   )
 import Thena.Errors (FailReason (..))
 import Thena.Global.Env (emptyGlobals)
@@ -89,14 +90,14 @@ descends = rule "descends" [Do Ops.Attack, Do Ops.Into]
 -- /list/ of named bases; these tests are about search order within one, so they
 -- build exactly one and give it no interesting name or path.
 bases :: [Rule] -> [RuleBase]
-bases rs = [ruleBase "test" Nothing "" [] [] [] rs]
+bases rs = [ruleBase "test" Nothing "" [] [] rs]
 
 only :: Rule -> [RuleBase]
 only r = bases [r]
 
 machine :: [RuleBase] -> Cursor -> [Instr] -> Machine
 machine base cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals base [] 1000 0)
+  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals base [] [] 1000 0)
 
 -- | Run as the driver does, following every channel, and keep the messages.
 runOut :: Machine -> ([String], Either FailReason Machine)
@@ -105,6 +106,10 @@ runOut m = case step m of
   Saying msg m'     -> let (ms, r) = runOut m' in (msg : ms, r)
   Declaring _ m'    -> runOut m'
   Defining _ _ _ _ m' -> runOut m'
+  Primitively _ _ m' -> runOut m'
+  DeclaringGrammar _ m' -> runOut m'
+  -- A block the driver would have typed; the harness splices and runs it.
+  Playing is m' -> runOut (splicing is m')
   Certifying _ _ m' -> runOut m'
   Asking _ m'       -> ([], Right m')
   Yielding _ m'     -> ([], Right m')
@@ -300,7 +305,7 @@ dispatchableTests =
                -- @try-core@ above, which is what this test is about.
              , "fit-core", "fit-core"
              , "claim", "assume", "quantify"]
-               ++ replicate 16 "elaborate" ++ replicate 2 "enter-binders"
+               ++ replicate 18 "elaborate" ++ ["run-block"] ++ replicate 2 "enter-binders"
                ++ replicate 2 "spine-arguments"
         names' (dispatch std emptyGlobals hole)
           @?= ["attack", "abandon", "prove"]

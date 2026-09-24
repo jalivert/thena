@@ -33,6 +33,7 @@ import Thena.Engine
   , development
   , retryFrom
   , step
+  , splicing
   )
 import Thena.Errors (FailReason (..))
 import Thena.Global.Env (emptyGlobals)
@@ -65,11 +66,11 @@ hole = enter (Under (Component.Claim v (Ident "goal") type1) (Trailing (Free v))
   where v = fst (fresh 0)
 
 bases :: [Rule] -> [RuleBase]
-bases rs = [ruleBase "test" Nothing "" [] [] [] rs]
+bases rs = [ruleBase "test" Nothing "" [] [] rs]
 
 machine :: [RuleBase] -> [Instr] -> Machine
 machine base is =
-  load is (Machine (Exec [] [] []) (Development hole) [] emptyGlobals base [] 1000 0)
+  load is (Machine (Exec [] [] []) (Development hole) [] emptyGlobals base [] [] 1000 0)
 
 runOut :: Machine -> ([String], Either FailReason Machine)
 runOut m = case step m of
@@ -77,6 +78,10 @@ runOut m = case step m of
   Saying msg m'     -> let (ms, r) = runOut m' in (msg : ms, r)
   Declaring _ m'    -> runOut m'
   Defining _ _ _ _ m' -> runOut m'
+  Primitively _ _ m' -> runOut m'
+  DeclaringGrammar _ m' -> runOut m'
+  -- A block the driver would have typed; the harness splices and runs it.
+  Playing is m' -> runOut (splicing is m')
   Certifying _ _ m' -> runOut m'
   Asking _ m'       -> ([], Right m')
   -- A yield stands still, like a question: there is no user here to hand

@@ -3,7 +3,7 @@
 -- and 'Thena.Core.Convert.subsumes' over generated terms, and a second copy of a
 -- generator is the same mistake a second copy of a word table is: it drifts, and
 -- the copy is the one that stops covering the new case.
-module Thena.Core.TermTests (tests, genTerm, poolVars) where
+module Thena.Core.TermTests (tests, genTerm, genLiteral, poolVars) where
 
 import Data.List (nub, sort)
 
@@ -26,6 +26,7 @@ import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
   , Ident (..)
+  , Literal (..)
   , Var
   , close
   , freeVars
@@ -97,6 +98,11 @@ genCore depth = sized go
         [ Free <$> elements inScope
         , (\g -> Global g []) <$> genGlobalName
         , Universe . levelOfNat <$> elements [0, 1]
+        -- A literal is a leaf like a 'Universe' (MS6 phase 97a). It is here
+        -- rather than only in 'Thena.Core.PrimitiveTests' so that every
+        -- property stated over 'genTerm' — well-scopedness here, conversion
+        -- and subsumption in @Thena.Core.ConvertTests@ — sees one.
+        , Primitive <$> genLiteral
         ]
 
     genNode :: Int -> Gen Core
@@ -118,6 +124,17 @@ genCore depth = sized go
       where
         half   = resize (n `div` 2) (genCore depth)
         deeper = resize (n `div` 2) (genCore (depth + 1))
+
+-- | Literals worth generating: two of each type, and the pairs differ in the
+-- way each type's equality has to notice.
+genLiteral :: Gen Literal
+genLiteral =
+  elements
+    [ LString "a", LString "ab", LString "", LString "a\"b", LString "tab\there"
+    , LChar 'a', LChar 'b', LChar '\'', LChar '\n'
+    , LInt 0, LInt 7, LInt 12345678901234567890
+    , LRegex "[a-z]+", LRegex "a\\/b", LRegex "(x|y)*\\.", LRegex "[^ \\t]"
+    ]
 
 genIdent :: Gen Ident
 genIdent = Ident <$> elements ["x", "y", "z", "n"]
@@ -148,6 +165,7 @@ wellScoped = go 1000
       Free _         -> True
       Global _ _     -> True
       Universe _     -> True
+      Primitive _    -> True
       Pi _ s b       -> go c s && under c b
       Lam _ s b      -> go c s && under c b
       App f a        -> go c f && go c a

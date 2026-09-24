@@ -78,6 +78,34 @@ are not: `solve`, `type`, `goal` and the rest stay perfectly good identifiers,
 which is why a rule is written `rule ‹name› :- when … do …` and not with the
 op words reserved.
 
+### A token class's regular expression is small, and refuses what it does not mean
+
+*Decided 2026-09-18.*
+
+An object language's identifiers and numerals are regular expressions, written
+between slashes. The syntax is exactly: characters, `\` escapes, classes
+`[a-z]` and `[^…]`, `.`, `*` `+` `?`, sequence, `|` and parentheses. No
+captures, no backreferences, no lookaround, no lazy quantifiers.
+
+**What other dialects give a meaning and this one does not is refused rather
+than read as a literal:**
+
+```
+/[^ \t\n]+/      fine — not whitespace
+/\S+/            refused — \S is not supported
+/a{3}/           refused — unexpected '{'
+/^[a-z]+$/       refused — unexpected '^'
+/\{\$/           fine — escaped, they are literal
+/(a)\1/          refused — a backslash before a digit is a backreference elsewhere
+/[[:alpha:]]/    refused — an unescaped [ inside a class
+/[\[a-z]/        fine — escaped, it is literal
+```
+
+Read as literals, `/\S+/` would quietly mean `S+`, and someone coming from
+Perl or POSIX would find out much later. Refusing them also means `\s`, `{n}`
+or POSIX classes can be added later without changing what any accepted
+expression means.
+
 ---
 
 ## Universes and levels
@@ -255,9 +283,681 @@ is nothing to default to, and nothing is guessed.
 
 ## The core language and its type theory
 
-*Nothing recorded yet.*
+### There are three primitive types, and a literal is a term
+
+*Decided 2026-09-18.*
+
+`String`, `Char` and `Int` are types the system knows, at `Type₀`, and their
+literals are ordinary terms:
+
+```
+thena spine> :infer ⌜ "hello" ⌝
+"hello" : String
+thena spine> :infer ⌜ 42 ⌝
+42 : Int
+```
+
+**They are not datatypes.** They have no constructors and no eliminator, an
+`Int` is arbitrary precision, and the only thing you can do with two literals
+is compare them. **The three names are taken**: a declaration called `String`
+is refused the way any clash is.
+
+A literal is written where a term is written — in a surface definition, in a
+theorem, or inside corners — and it elaborates to itself:
+
+```
+greeting : String
+greeting = "hello"
+```
+
+Two literals of a primitive type are compared with `eqString`, `eqChar` or
+`eqInt`, which answer with the prelude's `Comparison` (`same` or `different`)
+and compute only on literals:
+
+```
+thena spine> :whnf ⌜ eqString "a" "b" ⌝
+different
+```
+
+**`Comparison` and not `Bool`**, because an object language you model routinely
+declares its own `true` and `false` — Thena has one namespace, and the prelude
+leaves those names to you.
+
+They exist for language modelling: an object language's identifiers are
+strings, and a language that has numerals or characters needs somewhere to put
+them. The alternative — building them from an inductive numeral, as Coq does —
+was weighed and refused, because it makes every identifier in every
+object-language term a chain of constructors.
+
+### Preservation for a modelled language is proved about the substitution Thena generates
+
+*Decided 2026-09-22.* `examples/07-preservation.thena` proves, for the λ-calculus
+of `01`–`03`,
+
+```
+preservation : ∀ (M : LC) (M1 : LC) (T : Ty) -> typing empty M T -> step M M1 -> typing empty M1 T
+```
+
+in the surface language, with `elim` and no proof sugar. **It is about the
+generated `LC-subst-all`**, not a substitution written for the proof: the
+proof names the generated function's pieces, checks with `refl` that they are
+the same terms, and follows its `decString` decisions case by case.
+
+**It is proved twice.** `examples/08-preservation-by-tactics.thena.script`
+proves every lemma again by tactics — `:theorem`, `attack`, `intro`,
+`eliminate-core` for each induction and case split, `elaborate ⟨ … ⟩` for each
+case — and reaches the same statement as `preservation-tactics`.
+
+**It is stated for closed terms**, as Software Foundations states it. The
+argument substituted in a β-step is then closed, so no binder is ever renamed.
+For any context the argument may have free names, a binder may be renamed, and
+proving the renamed binder fresh needs facts about strings that Thena cannot
+state yet.
+
+### `decString` compares two strings and hands you the proof
+
+*Decided 2026-09-21.* Beside `eqString`, `eqChar` and `eqInt`, the prelude
+declares `decString`, `decChar` and `decInt`:
+
+```
+decString : ∀ (a : String) (b : String) -> Dec (Eq String a b)
+
+data Dec (A : Type) : Type where
+  yes : forall (p : A) -> Dec A
+  no : forall (n : A -> Empty) -> Dec A
+```
+
+On two literals it computes to `yes (refl String "a")`, or to `no ‹a
+refutation›` — a real proof of `Eq String "a" "b" -> Empty` that the kernel
+checks like any other. On a name you do not know it does not compute, and that
+is where it earns its place: **eliminating `decString y x` gives you
+`Eq String y x` in one branch and its refutation in the other**, where
+`eqString y x` tells you only which branch you are in. So a proof about a
+name nobody knows can follow the decision:
+
+```
+varMiss : forall (y : String) (x : String) (N : LC) (ne : Eq String y x -> Empty)
+            -> Eq LC (LC-subst (var y) x N) (var y)
+```
+
+**Generated substitution decides with `decString`**, which is what lets a
+proof about `LC-subst` follow it at all. What is trusted is the same as for
+`eqString`: the verdict on two literals. The refutation it writes is built
+from `decString` itself and checked by the kernel.
+
+### A token class is an ordinary definition, and its regex takes its type as an argument
+
+*Decided 2026-09-19.*
+
+A token class is a definition of type `Token T`, written like every other
+definition, with a signature and an equation. `T` is what a matched token
+becomes in an object-language term:
+
+```
+ident : Token String
+ident = /[a-z][a-zA-Z0-9']*/
+
+digit : Token Char
+digit = /[0-9]/
+```
+
+**There is no one-line form, and the annotation is required.** `ident = /…/`
+alone is refused, as any equation without a signature is.
+
+**The literal holds only its text; `T` is found by unification.** A regex
+literal has type `∀ (T : Type₀) -> Token T`, so `/[0-9]/` elaborates to
+`/[0-9]/ ?T` and the signature solves `?T`. What gets stored is `/[0-9]/ Char`,
+which is what `:show` prints. Nothing is defaulted: with nothing to say what
+`T` is, elaboration fails.
+
+**It is the one literal that is not a value of a primitive type on its own.**
+A string, a character and a number each have a type; a regex has a Π, and what
+it stands for depends on the argument. So `/[a-z]/ Bool` is a well typed term
+of `Token Bool` as far as the kernel is concerned — nothing can take a `Token`
+apart, so it proves nothing — and it is the declaration check below, not
+typing, that refuses it.
+
+```
+thena spine> :infer (/[a-z]/ : Token Char)
+/[a-z]/ : Token Char : Token Char
+```
+
+**The checks run when the class is declared, not in the kernel.** Core accepts
+`/[a-z]+/ Char`, since the literal is well typed at every `T`, and loading it
+refuses it:
+
+```
+refused: in the token class n: /[a-z]+/ accepts "a", which is not an Int
+```
+
+Nothing can take a `Token` apart, so a wrong one cannot prove anything; what
+the check protects is the grammar that reads the class. It refuses:
+- a `T` other than `String`, `Char` or `Int`;
+- a regex that does not parse;
+- a regex that matches the empty string;
+- a regex that accepts something `T` cannot hold. The witness shown is a
+  shortest such string.
+
+
+### An object language's grammar is a block of its own notation
+
+*Decided 2026-09-19.*
+
+A `language` or `context` block at the margin of a module is read by its own
+reader, not by Thena's lexer, so its notation can use `[`, `λ`, `⌜` or `/`:
+
+```
+x : Token String
+x = /[a-z]+/
+
+language LC, M, N, E where
+  var : x as occurrence -> x
+  abs : x as binder     -> ( λ x : T . E[x] )
+  app                   -> ( M N )
+
+context Ctx, Γ where
+  empty  -> ·
+  extend -> Γ , x : T
+```
+
+**Items are separated by whitespace**, so `Γ ,` and not `Γ,`. The
+separation is needed only in the grammar; a term is written `Γ, x : T`,
+because whitespace between object tokens is optional when it is parsed. A
+binding form is the exception: `E[x, y]` is one item, bracket adjacent. A
+production is one line, and a deeper line continues it.
+
+**`context` and `judgment` are reserved words**, like `language`. A name in a
+production is a metavariable, then a token class, then a terminal, and a
+metavariable may not be named like an existing one or a class. A block sees
+what is above it, as every declaration does. It is checked when the module
+loads, and a binder that binds in nothing is a warning, not an error.
+
+
+### An object term is parsed by its grammar, and `:parse` shows how
+
+*Decided 2026-09-19.*
+
+A language's terms are parsed character by character from its grammar. There
+is no separate lexer, so what a token is depends on where you are, and
+whitespace between tokens is optional. A token class tries every length it
+matches, not just the longest. Nothing has precedence, and a term that parses
+two ways is refused, with both readings shown:
+
+```
+thena spine> :parse LC (λf:(ι->ι).(λy:ι.f y))
+abs(f, arrow(base, base), abs(y, base, app(var(f), var(y))))
+thena spine> :parse LC f a b
+in LC`f a b`: this term parses two ways, as app(var(f), app(var(a), var(b))) and as app(app(var(f), var(a)), var(b))
+```
+
+A name a production writes twice must read the same both times, and the error
+says so when it doesn't. **`?` is a missing sub-term**, and only a sub-term,
+never a piece of notation:
+
+```
+thena spine> :parse LC ( λ ? : ι . ? )
+abs(?, base, ?)
+```
+
+`?` can be written only until the structural editor exists. The editor will
+make a missing piece with a keystroke, and `?` will then be free for object
+languages to use.
+
+**`:parse` with no text is a mode where every line is a term**, until `:done`.
+In it, **Tab asks the parser what fits at the cursor**:
+
+```
+parse LC> ( λ‸              Tab →   ( λ ? : ? . ? )
+parse LC> ( ‸               Tab →   lists  λ  (  ‹LC›  ‹x›  {
+parse LC> ( λ x : ?‸ . x )  Tab →   lists  ι  (      (what can replace the ?)
+```
+
+When the terminal just before the cursor belongs to one production only, Tab
+inserts the rest of it, `?` for its slots. That happens only at the end of the
+line, never in the middle. Otherwise Tab lists what can go at the cursor such
+that the line can still be finished, counting what's already written after
+the cursor. On a `?`, Tab fills that hole, so it offers only notation. The
+options appear when you press Tab, not as you move; options that follow the
+cursor are the structural editor's job.
+
+
+### A language block declares a datatype, and its terms are ordinary terms
+
+*Decided 2026-09-20.*
+
+The grammar is the declaration. From it come a datatype, one constructor per
+production, its arguments the production's distinct names in order of first
+appearance:
+
+```
+language LC, M, N, E where
+  var : x as occurrence -> x
+  abs : x as binder     -> ( λ x : T . E[x] )
+  app                   -> ( M N )
+```
+
+```
+thena spine> :show LC
+data LC : Type₀ where
+  { var : String -> LC
+  ; abs : String -> Ty -> LC -> LC
+  ; app : LC -> LC -> LC }
+```
+
+**It is an ordinary datatype**: it has the eliminator, the constructor wrappers
+and the no-confusion equipment any `data` has, and you could have written it by
+hand. A `context` block declares one too. **A name written twice in a
+production is one argument** (`twice -> { M M }` gives `twice : LC -> LC`),
+because the two occurrences must read the same.
+
+So a term of an object language is an ordinary term:
+
+```
+thena spine> :infer ⌜ abs "x" base (var "x") ⌝
+abs "x" base (var "x") : LC
+```
+
+What the block records beyond the datatype is which argument **binds** and
+which is an **occurrence** of a name — the metadata generated substitution
+reads. That is why `x as binder` and `x as occurrence` are written at all.
+
+
+### Grouping is part of your grammar — Thena reserves nothing
+
+*Decided 2026-09-20.*
+
+An object term is parsed **only** by the productions you declare. Thena has no
+grouping parentheses of its own, no precedence, no associativity and no
+implicit anything. If `( f x )` is to be writable, some production must say so.
+
+There are two ways to get grouping, and they differ in what ends up in the
+datatype.
+
+**Parenthesize inside the productions**, the fully-parenthesized style of most
+paper grammars:
+
+```
+app -> ( M N )        app : LC -> LC -> LC
+```
+
+The parentheses are terminals of that production. They cost nothing: the
+datatype has exactly the constructors your language has.
+
+**Or declare grouping as a production of its own:**
+
+```
+paren -> ( M )        paren : LC -> LC
+```
+
+Now grouping is a **constructor**. `paren e` and `e` are different terms, every
+proof by `elim LC` gets a `paren` case, and a lemma about `app` says nothing
+about `paren (app …)`. That is usually not what you want, and it is the reason
+to prefer the first style.
+
+**Ambiguity is reported, never resolved.** Write `app -> M N` and `f a b` has
+two readings, so Thena refuses it and shows you both. Nothing picks one for
+you, because nothing knows which you meant.
+
+**What this buys.** The grammar is the whole of the notation: what you declare
+is what you write, and what Thena prints back — a production is also a printing
+rule. There is no fixity table to learn or to get wrong, and every character is
+yours, brackets and `λ` included, because none of them is reserved.
+
+**What it costs.** You design your grammar to be unambiguous yourself, and you
+find out when a term is read rather than when the grammar is declared. Deeply
+nested notation needs care that a built-in precedence would have handled.
+
+**Others draw the line elsewhere.** SASyLF keeps parentheses for itself: they
+group object-language terms, you disambiguate with them, and a literal
+parenthesis in your language has to be quoted. Agda gives you mixfix operators
+with fixity declarations, and its own parentheses group. Both take a piece of
+the notation back from the object language in exchange for grouping you do not
+have to write. Thena takes none of it, and you write the production.
+
+### A term prints in its language's notation, and the printer finds its own fences
+
+*Decided 2026-09-22.*
+
+A term of a language you declared is shown in that language's notation, in
+`:show`, in `:infer` and in every goal — not as the constructor application it
+is:
+
+```
+idIsValue : value`( λ x : ι . x ) value`      -- and not: value (abs "x" base (var "x"))
+```
+
+**A judgment prints the same way**, because a judgment is a production too, so
+a theorem's statement reads as it would on paper:
+
+```
+preservation : ∀ (M : LC) (M1 : LC) (T : Ty)
+  -> typing`· ⊢ ${M} : ${T}` -> step`${M} --> ${M1}` -> typing`· ⊢ ${M1} : ${T}`
+```
+
+**What the notation cannot write stands in a splice**, in Thena's own syntax: a
+variable, a stuck call, a name you gave a term. **The printer does not reduce**,
+so `theId` is shown as `value`${theId} value`` rather than unfolded into the
+term it stands for.
+
+**Where a grammar groups by splicing, the printer splices.** It writes the term
+flat, reads its own text back with the same parser, and fences the smallest
+subterm the reading disagrees about, until what it wrote reads back as what it
+meant. A grammar that brackets its productions never reaches the second
+attempt; one that does not gets what you would have written by hand:
+
+```
+Ex`${Ex`f a`} b`        -- juxt (juxt f a) b, in a language with no parentheses
+Ex`f ${Ex`a b`}`        -- juxt f (juxt a b)
+```
+
+**The check is on the text, not on the shape of the grammar** — which matters
+because nothing is reserved inside an object language. The same position with
+the same child production needs a fence when a name collides with one of your
+terminals and not otherwise, so `let f = a b in c` prints flat while
+`let f = a in in b` does not. No table over positions could tell those apart.
+
+**What is printed can be typed back.** The development calculus reads a tagged
+term literal too, so a goal you are shown is text you can paste into `:core`,
+`:theorem` or a tactic argument, splices and all. `Core` gained nothing for any
+of this: a literal is notation, and it resolves to the constructor application
+it denotes.
+
+### An object term is written the same way in a rule — and there it also matches
+
+*Decided 2026-09-20.*
+
+The notation you write a term of your language with works in `instral` too, and
+**which direction it means is decided by where it stands**. In an operand it
+builds; in a pattern it matches. `${…}` supplies a value in the first and binds
+one in the second.
+
+```
+rule beta LC[app]`( ( λ ${x} : ${A} . ${B} ) ${N} )` :- do
+  ...                                   -- x, A, B, N are bound here
+  t = LC`( ${B} ${N} )`                 -- and spliced back in here
+```
+
+**What a splice binds is the slot's type.** At a language slot it is a term; at
+a token class it is the value the class matched — a `String`, a `Char` or an
+`Int`, not a term wrapping one. So `LC[var]`${s}`` gives you `s` to `say`, and
+using it where a term is wanted is a type error when the file loads.
+
+**Brackets restrict, here as in a surface term.** `` LC`…` `` matches any term
+of the language, `` LC[var]`…` `` only a variable occurrence. Text with no
+splice matches itself: `` LC[var]`x` `` is the variable called `x` and nothing
+else.
+
+**A pattern is tried as written, and then reduced and tried again.** An object
+term in a goal is whatever elaboration produced — a global, a chain of `let`s,
+a wrapper not yet reduced — so matching only the written shape would almost
+never fire. Trying the written shape *first* keeps a pattern that wants an
+unreduced form able to see it. It is one rule for every pattern, not a rule
+about object terms.
+
+**Load the language's file before the rules that take it apart.** A rule file
+is read with the grammars the session already has, so the module declaring
+`language LC` has to have been loaded first. Load them the other way round and
+the tag names a language nothing has declared, which is the error it looks
+like.
 
 ---
+
+### A `do` block is resolved and checked where it runs, and a module's own goes through a rule
+
+*Decided 2026-09-20.*
+
+A module is a **sequence**. Its declarations run in the order you wrote them,
+and each one sees exactly what is above it. Until this decision, `do` blocks
+were the exception: they were turned into instructions and type checked while
+the file was still being read, before any declaration in it had run.
+
+```
+language LC, M, N, E where
+  var : x as occurrence -> x
+  app                   -> ( M N )
+
+do
+  ...                             -- this block is read after the block above
+                                  -- has been checked and installed
+```
+
+**What this changes for you.** A block's words become operations, and its types
+are checked, at the moment the program reaches it. So a mistake in a block is
+reported *after* the declarations above it have gone in, the way a mistake in a
+term already was — where before it refused the whole file and declared nothing.
+Blocks were the only construct with that behaviour, and nothing else in a
+module has it.
+
+**A module's top-level block is a call to a rule**, `run-block`, which lives in
+the shipped base and is two lines:
+
+```
+run-block : Surface -> ()
+rule run-block t :- do play t
+```
+
+So **how a module treats its own blocks is yours to change**: load a base that
+defines `run-block` ahead of the shipped one and every top-level block in every
+module goes through your version instead. A clause of your own is offered first
+if it is written first, as for any rule.
+
+**Each top-level block is its own scope**, and now really is: the call gives it
+a frame, so a name bound in one block is not in scope in the next. Before, the
+instructions were spliced into the module's one program and shared its one
+environment — the checker refused a block that read a name from the block above
+it, but the run would have found it.
+
+**Reading a module now consults nothing.** Lexing, layout, parsing and grouping
+are a pure function of the text; every question about what a name means is
+asked while the module runs.
+
+---
+
+### You write an object term in backticks, and splice into it
+
+*Decided 2026-09-20.*
+
+A term of a language you declared is written with the language's name and a
+pair of backticks. It elaborates to the constructor application it denotes —
+an ordinary value of the ordinary datatype the block generated, with no branded
+type and no coercion:
+
+```
+identity : LC
+identity = LC`( λ x : ι . x )`      -- abs "x" base (var "x")
+```
+
+**The text inside is your language's, not Thena's.** Nothing in it is reserved:
+`λ`, `[`, `?` and the rest are whatever your grammar says they are. Three
+characters have to be written behind a backslash, because they are how the
+region itself is delimited: `` \` ``, `\\` and `\$`.
+
+**`${ … }` splices a term in**, and the slot it stands in decides its type:
+
+```
+applied : LC
+applied = LC`( ${identity} ${identity} )`
+```
+
+A splice is a whole term and not a name — ``LC`( ${f x} y )`` — and it is
+elaborated where it stands, at the type the constructor's argument has. A slot
+that is a token class takes one too, at `String`, `Char` or `Int`.
+
+**Brackets start the parse at one production.** `` LC`…` `` reads any term of
+`LC`; `` LC[var]`…` `` reads a variable occurrence and nothing else:
+
+```
+y : LC
+y = LC[var]`y`                      -- var "y"
+z : LC
+z = LC[var]`( λ x : ι . x )`        -- refused: that is not a var
+```
+
+**A literal is parsed when it elaborates, not when the file is read.** A module
+is parsed whole before its own `language` block is installed, so the grammar
+does not exist yet when the region is lexed. What this costs you: a term your
+grammar cannot read is reported as the definition elaborates, with the position
+in the text and what was expected there, rather than as a syntax error.
+
+**There is no hole.** `?` inside a literal is an ordinary character of your
+language. It is a hole in `:parse` only, and a term with one is not a term —
+a constructor has no missing argument.
+
+---
+
+### A judgment is written as on paper, and it is an inductive family
+
+*Decided 2026-09-21.* A `judgment` block gives a notation, whose slots are the
+judgment's indices **in the order they are written**, and its rules:
+
+```
+judgment typing = Γ ⊢ M : T where
+
+  T-var:  x : T ∈ Γ
+          -----------
+          Γ ⊢ x : T
+
+  T-app:  Γ ⊢ M : ( S -> T )    Γ ⊢ N : S
+          --------------------------------
+          Γ ⊢ ( M N ) : T
+```
+
+It declares an ordinary datatype, one constructor per rule, and `:show typing`
+prints it:
+
+```
+data typing : Ctx -> LC -> Ty -> Type₀ where
+  T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> Ctx-in x T Γ -> typing Γ (var x) T
+  T-app : ∀ (Γ : Ctx) (M : LC) (S : Ty) (T : Ty) (N : LC)
+            -> typing Γ M (arrow S T) -> typing Γ N S -> typing Γ (app M N) T
+```
+
+**Every metavariable is quantified, in the order it first appears**, reading
+the premises and then the conclusion. A metavariable is one a `language` or
+`context` declared, or a token class's name, with any suffix of primes, digits,
+subscripts or underscore subscripts: `M'`, `N₁`, `T2`, `x'`, `M_1`, `T_left`. **Nothing else is a name in a rule**: a
+rule has no object literals, so `Γ ⊢ p : T` is refused (`p is not a
+metavariable`) rather than quantifying a `p`.
+
+**A line break ends a premise.** Several may share a line, separated by
+whitespace, and parsing decides where one ends; a line indented further than
+the first premise continues the one above:
+
+```
+  T-app:  Γ ⊢ M :
+              ( S -> T )
+          Γ ⊢ N : S
+          ---------------
+          Γ ⊢ ( M N ) : T
+```
+
+A premise may be named, `d : Γ ⊢ M : T`; one that is
+not is `d1`, `d2`, … by position. A premise is never named like a
+metavariable, so `x : T ∈ Γ` is always the lookup. `E[x->N]` is `LC-subst E x
+N`; `E[x->M, y->N]` is `LC-subst-all`, simultaneous; `E[x->M][y->N]` is one
+after the other.
+
+**The annotated tier writes the quantification**, which fixes the argument
+order and may range over a derivation:
+
+```
+  rule A where ∀ (T : Ty) (M : LC) (Γ : Ctx) (d : typing Γ M T) ->
+      Γ ⊢ M : T
+      ---------
+      Γ ⊢ M :: T
+```
+
+There, a metavariable the `∀` does not bind is refused, and so is a name it
+binds twice: the `∀` lists the rule's metavariables, it does not nest. **The notation is
+installed**, as a context's lookup is: `` typing`· ⊢ ( λ x : ι . x ) : ( ι -> ι )` ``
+is a type, and `:parse typing …` reads one.
+
+### A context gets a lookup relation, written `x : T ∈ Γ`
+
+*Decided 2026-09-21.* A `context` block declares its datatype and, beside it,
+the relation that looks a name up:
+
+```
+context Ctx, Γ where
+  empty  -> ·
+  extend -> Γ , x : T
+```
+
+```
+data Ctx-in : String -> Ty -> Ctx -> Type₀ where
+  Ctx-here  : ∀ (Γ : Ctx) (x : String) (T : Ty) -> Ctx-in x T (extend Γ x T)
+  Ctx-there : ∀ (Γ : Ctx) (x : String) (T : Ty) (x' : String) (T' : Ty)
+                -> (Eq String x x' -> Empty) -> Ctx-in x T Γ -> Ctx-in x T (extend Γ x' T')
+```
+
+**Its notation is the extension with the context taken out, then `∈` and the
+context**, and it is a grammar like any other: `` Ctx-in`x : ι ∈ ·, x : ι` `` is
+the type `Ctx-in "x" base (extend empty "x" base)`, `:parse Ctx-in …` reads it,
+and it prints back. The separator goes with the context: `Γ , x : T` gives
+`x : T ∈ Γ`, and so does `x : T ; Γ`. **The indices are the notation's slots
+in order**, as a judgment's are, so the context comes last.
+
+**A later binding shadows an earlier one of the same name.** `Ctx-there` asks
+for a proof that the two names differ. For two literals that proof needs no
+axiom; `eqString` and `Eq`'s eliminator give it:
+
+```
+xNotY : Eq String "x" "y" -> Empty
+xNotY = \ q ->
+  elim Eq (String)
+    (\ a b r -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "x" a)
+                -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "x" b))
+    ((\ a d -> d))
+    ("x" "y") q unit
+```
+
+Reaching an `x` under a later `x` would need `Eq String "x" "x" -> Empty`, and
+nothing proves that.
+
+The constructors are named after the context, as `Ctx-in` is, so two contexts
+in one session do not clash. **The extension must have exactly one name** (a
+`Token String` argument), because that is what the lookup compares. Weakening
+and exchange are not generated.
+
+### A language gets substitution for free, and a binder is renamed only when it would capture
+
+*Decided 2026-09-21.* A `language` block with a variable production
+(`var : x as occurrence -> x`) also declares four functions, right after its
+datatype:
+
+```
+LC-fresh     : String -> List String -> String
+LC-fv        : LC -> List String
+LC-subst-all : LC -> List (And String LC) -> LC     -- simultaneous
+LC-subst     : LC -> String -> LC -> LC             -- LC-subst E x N is E[x->N]
+```
+
+They are ordinary definitions, written by `elim` and elaborated like anything
+you write. They compute, so a substitution's answer is provable by `refl`:
+
+```
+captured : Eq LC (LC-subst (abs "y" base (var "x")) "x" (var "y")) (abs "y'" base (var "y"))
+captured = refl LC (abs "y'" base (var "y"))
+```
+
+**A binder keeps its name unless keeping it would capture**, and is then primed
+until it is free: `y`, `y'`, `y''`. Nothing is renamed behind your back, so
+capture is something you can see happen and see avoided. A list substitutes
+simultaneously (`[x->y, y->x]` swaps), and of two pairs for one name the first
+wins.
+
+What it needs of the language, each refused at the block with a message:
+exactly one variable production, taking only its occurrence; and a binder free
+only in arguments of the language itself. A language with no occurrence (`Ty`)
+gets nothing. The four names are yours to keep free — declaring `LC-fv` first
+is refused.
+
+Two things arrived with it. **`List`, with `nil` and `cons`, is in the
+prelude**, so those names are taken from every object language until imports
+exist. **`appendString : String -> String -> String`** is the one way to build
+a `String`, and it computes only on two literals. The types that mention `List`
+carry a level parameter, `LC-fv {ℓ}`, because a list of names is a list at any
+level and nothing is defaulted.
 
 ## The development calculus
 
@@ -767,6 +1467,13 @@ An unindented continuation is refused and the entry is dropped.
 
 *Decided 2026-09-12.*
 
+*Superseded 2026-09-21 (MS6 phase 106): the rule-file `language` declaration,
+the type it gave, and `surface-of` are deleted, and `language` in a rule file
+is now a syntax error. A language is declared in a module and its terms are
+`Core` values — see "A language block declares a datatype, and its terms are
+ordinary terms" and "An object term is written the same way in a rule". A
+language may still not take a built-in tag's name.*
+
 ```
 language Tm where {
   var : name ;
@@ -820,29 +1527,33 @@ word is free to mean three.**
 
 | space | what is in it | who may add to it |
 |---|---|---|
-| **types** | `String` `Name` `Int` `Char` `Bool` `Surface` `Core` `Development` `Level` `List` `Option` | a `language` declaration |
-| **tags** | `surface` `core` | a `language` declaration |
+| **types** | `String` `Name` `Int` `Char` `Bool` `Surface` `Core` `Development` `Level` `List` `Option` | nothing — the set is closed |
+| **tags** | `surface` `core` | a `language` block in a module |
 | **callables** | op words, rule names, function names, locals | a rule, a function, a binding |
 
-So this loads, and the two `twice`es never meet — one is only ever written as a
-type or in a tag, the other only ever called:
+So these load together, and the two `twice`es never meet — one is only ever
+written as a tag, the other only ever called:
 
 ```
-language twice where { var : name }
+language twice, M where          -- in a module
+  one -> 1
 
-twice : String -> String
+twice : String -> String         -- in a rule file
 twice s = concat s s
 ```
 
-**A `language` declaration is the one thing that enters two spaces at once**, a
-type and a tag together, so its name is checked against both lists:
+**A language's name is checked against the built-in tags**, because a rule file
+reads an installed language's tag before its own:
 
 ```
-bad.thena.rules: in the grammar of String: String is one of instral's own types,
-  so a grammar may not take its name
+refused: core is one of Thena's own tags, so a language may not take its name
 ```
 
-Inside a space, a collision is refused. Two grammars under one name, and:
+*Updated 2026-09-21 (MS6 phase 106): until then a rule-file `language`
+declaration also entered the type space, and was checked against the type
+list too.*
+
+Inside a space, a collision is refused. Two languages under one name, and:
 
 ```
 ns.thena.rules: in twice: this name is both a rule and a function at 1 argument
@@ -1067,6 +1778,33 @@ today for a rule to speak from inside one, and no flag to turn the rest back on.
 The line between *the loader's* output, *a rule's* output and *the file's* has
 not been drawn, and drawing it belongs to the interaction model rather than to
 the loader.
+
+### A load can warn, and a warning changes nothing
+
+*Decided 2026-09-18.*
+
+`:load` used to either install everything or refuse everything. It can now also
+**succeed and say something**:
+
+```
+thena spine> :load proof examples/canonical.thena
+module Canonical
+  declared Term
+  ...
+warning: no noConfusionNV: nvSucc's argument 2 (n) has a type that depends on an
+  earlier argument, so its equation cannot be stated
+```
+
+Everything named as declared **is** declared — a warning is a remark about a
+declaration that went in, never a half-refusal. The warnings come after the
+list, in the order the file caused them, and each names what it is about rather
+than a line number.
+
+This is why it exists: a warning survives where a message does not. Loading a
+file discards the running commentary (elaborating one declaration prints a
+dozen level solutions), and before this the one thing worth warning about —
+equipment a declaration did not get — was shown at the prompt and lost in a
+file.
 
 ### A comment is `--` followed by a space, in every kind of file
 

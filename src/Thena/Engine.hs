@@ -33,6 +33,7 @@ module Thena.Engine
   , isYielding
   , resumeYield
   , step
+  , splicing
   , resumeAt
   , failure
   , whereImpure
@@ -87,6 +88,7 @@ import qualified Thena.Development.Cursor as Cursor
 import Thena.Development.Partial (Impure (..), Partial (..), extract)
 import Thena.Errors
   ( FailReason (..)
+  , ObjectError (..)
   , MoveError (..)
   , Position (..)
   , ResolveError (..)
@@ -97,6 +99,18 @@ import Thena.Surface.Concrete (Plicity (..))
 import qualified Thena.Surface.Concrete as Concrete
 import Thena.Syntax.Concrete (termSplicesIn, nameSplicesIn)
 import Thena.Syntax.Resolve (resolveWith, Filling (..))
+import qualified Thena.Language.Earley as Earley
+import Thena.Language.Build
+  ( atCharacters
+  , buildSurface
+  , languageNames
+  , objectInput
+  , objectText
+  , productionNames
+  )
+import Thena.Language.Grammar
+  (Grammar (..), earleyRules)
+import Thena.Language.Reader (Block)
 import Thena.Instral.Ops
   ( AnswerKind
   , Env
@@ -124,7 +138,7 @@ import Thena.Global.Env
 import qualified Thena.Instral.Ops as Op
 import Thena.Tactics.Eliminate (Elimination (..), eliminate)
 import Thena.Rules
-  (RuleBase, RuleError (..), allLanguages, RuleIter, arities, clauses, dispatch, hasNext, next, resolveBlock)
+  (RuleBase, RuleError (..), RuleIter, arities, clauses, dispatch, hasNext, next, resolveBlock)
 import Thena.Syntax.Lexer (isIdentifier)
 import Thena.Surface.Zipper (SurfaceZipper)
 import qualified Thena.Surface.Zipper as Zipper
@@ -200,6 +214,12 @@ data Machine = Machine
     --
     -- Written when a declaration is installed, read when a use of that name is
     -- elaborated.
+  , grammars    :: [Grammar]
+    -- ^ **the object-language grammars installed so far, latest first** (MS6
+    -- phase 101). NOT backtrackable, like 'signatures'. **Here beside it and
+    -- not in 'GlobalEnv' — his ruling, 2026-09-19**, for 'signatures'\' reason:
+    -- a grammar is notation for a declared name, which the surface and
+    -- elaboration read and the kernel never does.
   , names       :: Int        -- ^ NOT backtrackable (§7.4)
   , lineFloor   :: Int
     -- ^ **how many frames were already on the stack when this line's program
@@ -476,6 +496,20 @@ data Outcome
   | Declaring InductiveDefinition Machine
                                   -- ^ the driver checks, installs, then steps again
   | Defining GlobalName [Plicity] Core Core Machine
+  | Primitively GlobalName Core Machine
+  | DeclaringGrammar Block Machine
+    -- ^ a @language@ or @context@ block to check and install (MS6 phase 101)
+  | Playing [Instr] Machine
+    -- ^ a @do@ block, resolved where it stands, on its way to the driver to be
+    -- validated and typed before it runs (MS6 phase 104b).
+    --
+    -- **Its own yield for 'Declaring'\'s reason**: what counts as a well-typed
+    -- block is policy, and §7.5 has the driver own policy. The driver splices
+    -- the instructions in front of what is left of the program, which is what
+    -- 'DeclaringGrammar' does with a generated datatype.
+    -- ^ a primitive constant on its way out to the driver (MS6 phase 97b).
+    -- Same shape as 'Defining' and for §7.5's reason: the machine never writes
+    -- the global environment.
                                   -- ^ a finished definition — name, type, term
                                   -- (MS4 phase 42). The driver runs the kernel,
                                   -- generalises and installs, then steps again.
@@ -621,7 +655,7 @@ resumeAt :: Answer -> Machine -> Machine
 -- interaction: the driver asks again rather than failing on the user's behalf.
 resumeAt a m = case pc (exec m) of
   Bind p _ (Ask _ _) : rest
-    | Just bs <- Op.matchPattern p (VText a) ->
+    | Just bs <- Op.matchPattern (globals m) p (VText a) ->
         m { exec = (exec m) { pc = rest, env = bs ++ env (exec m) } }
   Do     (Ask _ _) : rest -> m { exec = (exec m) { pc = rest } }
   _                       -> m
@@ -672,7 +706,7 @@ failure r0 m = unwind (length (stack (exec m))) (stack (exec m))
             -- is the same hole from the other side.
             Just (r, it') -> Saying (took "backtracking to" fr r) m
               { development = saved fr
-              , exec  = Exec (ruleBody r) (seedFor fr r)
+              , exec  = Exec (ruleBody r) (seedFor (globals m) fr r)
                              (demote fr r it' : map unreturned stk)
               }
 
@@ -802,7 +836,7 @@ perform instr rest m = case operation instr of
       -- with no destination drops the value, as it always did.
       Just (fr, is, e, stk') -> case destination fr of
         Nothing -> Continue m { exec = Exec is e stk' }
-        Just p  -> case Op.matchPattern p v of
+        Just p  -> case Op.matchPattern (globals m) p v of
           Nothing -> failure (BindingDidNotMatch p) m
           Just bs -> Continue m { exec = Exec is (bs ++ e) stk' }
 
@@ -838,7 +872,7 @@ perform instr rest m = case operation instr of
     Right (VRaw raw) -> case (,) <$> traverse (filling (env (exec m))) (termSplicesIn raw)
                                  <*> traverse (nameFilling (env (exec m))) (nameSplicesIn raw) of
       Left r   -> failure r m
-      Right (ts, ns) -> case resolveWith (ts ++ ns) (globals m) contextAt (names m) raw of
+      Right (ts, ns) -> case resolveWith (grammars m) (ts ++ ns) (globals m) contextAt (names m) raw of
         Left e        -> failure (CannotResolve e) m
         Right (t, n1) -> produce (VTerm t) m { names = n1 }
     Right _          -> failure ExpectedRaw m
@@ -896,16 +930,25 @@ perform instr rest m = case operation instr of
   -- **A surface datatype reaches the driver as a written one does** (MS4 phase
   -- 42b): this assembles the record and 'Declaring' carries it out, so
   -- @Thena.Global.Declare.declare@ checks both by the same code.
-  MakeData d nps cns tys -> case traverse term tys of
+  MakeData d nps cns roles tys -> case traverse term tys of
     Left r -> failure r m
     Right ts -> case ts of
       [] -> failure (NotTypeable (UnknownDatatype d)) m
       dty : ctys
         | length ctys /= length cns -> failure (NotTypeable (UnknownDatatype d)) m
         | otherwise ->
-            case buildInductive (globals m) d nps (zip cns ctys) dty (names m) of
+            case buildInductive (globals m) d nps
+                   (zip3 cns ctys (maybe (map (const Nothing) cns) (map Just) roles)) dty (names m) of
               Left e            -> failure (CannotBuildDatatype e) m
               Right (def, n1)   -> Declaring def (advance m { names = n1 })
+
+  -- Out through the channel, exactly as 'DefineGlobal' goes: the driver checks
+  -- the name is one with a reduction rule and installs the constant.
+  DeclareGrammar b -> DeclaringGrammar b (advance m)
+
+  DeclarePrimitive nm ty -> case (,) <$> text nm <*> term ty of
+    Left r -> failure r m
+    Right (x, t) -> Primitively (GlobalName x) t (advance m)
 
   DefineGlobal ps nm ty tm -> case (,,) <$> text nm <*> term ty <*> term tm of
     Left r -> failure r m
@@ -1100,14 +1143,14 @@ perform instr rest m = case operation instr of
           -- nothing to bind. §2's ruling is that a refutable pattern that does
           -- not match /fails/ — in a rule that backtracks, which is what he
           -- wanted; in a lambda it is the caller\'s failure, as in Haskell.
-          Right vs | Nothing <- Op.matchPatterns ps vs ->
+          Right vs | Nothing <- Op.matchPatterns (globals m) ps vs ->
             failure (PatternDidNotMatch nm (length vs)) m
           Right vs ->
             -- **The same frame a rule call pushes**, and deliberately: a closure
             -- is an anonymous rule, so @return@, backtracking below it and the
             -- destination all work without a second mechanism.
             Continue m
-              { exec = Exec body (fromMaybe [] (Op.matchPatterns ps vs) ++ cl)
+              { exec = Exec body (fromMaybe [] (Op.matchPatterns (globals m) ps vs) ++ cl)
                          (Thena.Engine.Call rest (env (exec m)) wants False
                             : stack (exec m))
               }
@@ -1134,7 +1177,7 @@ perform instr rest m = case operation instr of
       -- rather than with a partial pattern so that the total function stays
       -- total, which is what the one-matcher design is for.
       entering vs r fr k =
-        k { exec = Exec (ruleBody r) (fromMaybe [] (matchClause r vs))
+        k { exec = Exec (ruleBody r) (fromMaybe [] (matchClause (globals m) r vs))
                      (fr : stack (exec m)) }
 
   -- §3.7's elimination tactic (phase 17). The goal is the focus, as with the
@@ -1258,13 +1301,6 @@ perform instr rest m = case operation instr of
   Concat l r -> case (,) <$> text l <*> text r of
     Left e         -> failure e m
     Right (ls, rs) -> produce (VText (ls ++ rs)) m
-
-  -- **Remove the brand** (MS5 phase 69) — 'Op.SurfaceOf'. An object term is a
-  -- Surface term; the tag was what made its /type/ distinct.
-  Op.SurfaceOf a -> case operandValue (env (exec m)) a of
-    Left r                -> failure r m
-    Right (VObject _ z)   -> produce (VSurface z) m
-    Right _               -> failure ExpectedSurface m
 
   -- **Build the closure** (MS5 phase 68b). The environment is captured here and
   -- not written down, which is the whole reason a lambda is an op and not a
@@ -1397,6 +1433,43 @@ perform instr rest m = case operation instr of
     Right s -> case s of
       Concrete.SurfaceName w -> produce (VText w) m
       _                      -> failure (ExpectedSurfaceShape "a name") m
+
+  -- The literal at the focus, as the term it elaborates to (MS6 phase 97c).
+  -- A literal resolves to itself, so unlike a name this needs neither the
+  -- context nor the globals.
+  Op.SurfaceLiteralOf x -> case surfaceAt x of
+    Left r  -> failure r m
+    Right s -> case s of
+      Concrete.SurfaceLiteral l -> produce (VTerm (Primitive l)) m
+      _ -> failure (ExpectedSurfaceShape "a literal") m
+
+  -- **A tagged term literal, parsed and written out** (MS6 phase 104,
+  -- @ms6\/SPEC.md@ §8). Four things can go wrong and each says which: the tag
+  -- names no language, the brackets name no production of it, the text is not
+  -- one term of the grammar, or the reading is not a term.
+  --
+  -- **A @?@ here is an ordinary character**, not a hole: §7.6 gives MS6 no
+  -- surface syntax for a hole, and a hole could not be built anyway, because a
+  -- constructor has no missing argument. @:parse@ is where @?@ is a hole.
+  Op.ObjectTerm x -> case surfaceAt x of
+    Left r  -> failure r m
+    Right s -> case s of
+      Concrete.SurfaceObject lang prod ps
+        | lang `notElem` languageNames (grammars m) ->
+            failure (ObjectFailed (NoSuchObjectLanguage lang)) m
+        | Just w <- prod, w `notElem` productionNames (grammars m) lang ->
+            failure (ObjectFailed (NoSuchObjectProduction lang w)) m
+        | otherwise ->
+            case Earley.parse (earleyRules (grammars m))
+                              (maybe (Earley.StartAt lang) Earley.StartRule prod)
+                              (objectInput (regionBits ps)) of
+              Left why ->
+                failure (ObjectFailed (ObjectNotParsed lang (objectText (regionBits ps)) (atCharacters (regionBits ps) why))) m
+              Right tree ->
+                case buildSurface (grammars m) [ e | Concrete.ObjectSplice e <- ps ] tree of
+                  Left why -> failure (ObjectFailed (ObjectNotATerm lang why)) m
+                  Right t  -> produce (VSurface (Zipper.rootedAt t)) m
+      _ -> failure (ExpectedSurfaceShape "a tagged term literal") m
 
   Op.SurfaceUniverseOf x -> case surfaceAt x of
     Left r  -> failure r m
@@ -1550,12 +1623,24 @@ perform instr rest m = case operation instr of
   -- scope, so @do { goto n }@ naming an enclosing rule\'s local is already
   -- refused at load. Passing the live environment here would make a bare word
   -- resolve one way at load and another at run.
+  -- **A block is resolved and played here, and nowhere earlier** (MS6 phase
+  -- 104b). It was resolved twice until this phase: once while the file was
+  -- read, to check it, and again here to run it — in two different
+  -- environments, which could disagree the moment a block mentioned anything
+  -- the file itself declares. Now the words become ops in the environment the
+  -- block actually runs in.
+  --
+  -- **The type check is the driver\'s** and is asked for by yielding
+  -- 'Playing', exactly as 'Declaring' asks for the kernel and
+  -- 'DeclaringGrammar' for §4.5: every check in the system is policy, and
+  -- §7.5 has the driver own policy. The machine does not know what a
+  -- well-typed block is.
   Op.Play x -> case surfaceAt x of
     Left r  -> failure r m
     Right (Concrete.SurfaceDo body) ->
-      case resolveBlock (allLanguages (rules m)) (GlobalName "do") [] body of
+      case resolveBlock (grammars m) (GlobalName "do") [] body of
         Left errs -> failure (blockFailureOf errs) m
-        Right is  -> Continue (advance m) { exec = (exec m) { pc = is ++ rest } }
+        Right is  -> Playing is (advance m)
     Right _ -> failure (ExpectedSurfaceShape "a do block") m
 
   Goal -> case Cursor.expectedType (cursor (development m)) of
@@ -1680,7 +1765,7 @@ perform instr rest m = case operation instr of
     -- can still fail the instruction.
     produce v m' = case instr of
       Do _ -> Continue (advance m')
-      Bind p _ _ -> case Op.matchPattern p v of
+      Bind p _ _ -> case Op.matchPattern (globals m) p v of
         Nothing -> failure (BindingDidNotMatch p) m'
         Just bs -> Continue (advance m' { exec = (exec m') { env = bs ++ env (exec m') } })
 
@@ -1952,6 +2037,15 @@ levelArgsFor k n = case k of
 -- other 'RuleError' comes from @validate@, which a block does not go through —
 -- so the fallback is unreachable as things stand and says so rather than
 -- inventing a second story.
+-- | Put instructions in front of what is left of the program (MS6 phase 104b).
+--
+-- **The one way anything is spliced**, and there are two things that splice: a
+-- @do@ block once the driver has typed it ('Playing'), and the datatype a
+-- @language@ block generates ('DeclaringGrammar'). Both are instructions that
+-- did not exist when the program was built and must run before the rest of it.
+splicing :: [Instr] -> Machine -> Machine
+splicing is m = m { exec = (exec m) { pc = is ++ pc (exec m) } }
+
 blockFailureOf :: [RuleError] -> FailReason
 blockFailureOf errs = case errs of
   BadOperands _ i w : _ -> BlockOperands i w
@@ -2000,6 +2094,19 @@ operandSurface :: Env -> Operand -> Either FailReason SurfaceZipper
 operandSurface e o = operandValue e o >>= \v -> case v of
   VSurface z -> Right z
   _          -> Left ExpectedSurface
+
+-- ---------------------------------------------------------------------------
+-- Tagged term literals (MS6 phase 104)
+-- ---------------------------------------------------------------------------
+
+-- | A surface region's pieces in the shape both readers share (phase 110):
+-- text on the left, what fills a slot on the right.
+regionBits :: [Concrete.ObjectPiece] -> [Either String Concrete.Surface]
+regionBits = map piece
+  where
+    piece pc = case pc of
+      Concrete.ObjectText txt -> Left txt
+      Concrete.ObjectSplice e -> Right e
 
 -- | The name a component will display. Checked against the lexer's own notion
 -- of an identifier, because an 'Ident' that does not lex is one the printer
@@ -2215,8 +2322,8 @@ data RetryError = NoChoicePoint | UnknownChoice Int
 -- **It is the same 'Thena.Instral.Ops.matchClause' call**, and that is the point: the
 -- clause that was chosen and the environment it runs in cannot disagree about
 -- what a pattern bound. Before patterns both were @zip@ and agreeing was free.
-seedFor :: Frame -> Rule -> Env
-seedFor fr r = entryEnv fr ++ fromMaybe [] (matchClause r (callArgs fr))
+seedFor :: GlobalEnv -> Frame -> Rule -> Env
+seedFor env fr r = entryEnv fr ++ fromMaybe [] (matchClause env r (callArgs fr))
 
 retryFrom :: Maybe Int -> Machine -> Either RetryError (Machine, String)
 retryFrom target m = go (0 :: Int) (stack (exec m))
@@ -2229,7 +2336,7 @@ retryFrom target m = go (0 :: Int) (stack (exec m))
         Nothing       -> Left missing      -- cannot arise; see 'demote'
         Just (r, it') -> Right
           ( m { development = saved fr
-              , exec  = Exec (ruleBody r) (seedFor fr r) (demote fr r it' : stk)
+              , exec  = Exec (ruleBody r) (seedFor (globals m) fr r) (demote fr r it' : stk)
                 -- **@retry@ lowers the floor to the frame it entered** (MS5
                 -- phase 95). 'lineFloor' records where /this line's/ work
                 -- begins, and this is a line that deliberately begins its work
@@ -2264,3 +2371,4 @@ variableOf c = case c of
   Component.Claim  v _ _   -> v
   Component.Guess  v _ _ _ -> v
   Component.Quantify v _ _ -> v
+

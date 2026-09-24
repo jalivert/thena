@@ -17,9 +17,10 @@ import Data.List.NonEmpty (nonEmpty)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 import Test.Tasty.QuickCheck
-  ( Gen, counterexample, elements, forAll, frequency, listOf1, oneof, property
+  ( Gen, counterexample, elements, forAll, frequency, listOf, listOf1, oneof, property
   , resize, sized, testProperty, withNumTests, (===) )
 
+import Thena.Core.TermTests (genLiteral)
 import Thena.Driver (parseCore, parseSurfaceModule, parseSurfaceTerm)
 import Thena.Syntax.Concrete (Raw (..))
 import Thena.Syntax.Lexer (lexTokens)
@@ -36,7 +37,8 @@ import Thena.Syntax.Parser (parseRule)
 import Thena.Global.Env (emptyGlobals)
 import Thena.Repl (renderSurface)
 import Thena.Surface.Concrete
-  ( Plicity (..)
+  ( ObjectPiece (..)
+  , Plicity (..)
   , Surface (..)
   , SurfaceArg (..)
   , SurfaceBinder (..)
@@ -227,6 +229,11 @@ genSurface = sized go
             , (1, SurfaceArrow <$> smaller <*> smaller)
             , (1, SurfaceLet <$> name <*> annotation <*> smaller <*> smaller)
             , (1, SurfaceAnnot <$> smaller <*> smaller)
+              -- A tagged term literal (MS6 phase 104), in the shared generator
+              -- for 'SurfaceLiteral'\'s reason: the printer has to escape a
+              -- region's text the way the region scanner reads it back, and a
+              -- splice holds a whole term, so the two printers meet here.
+            , (1, genObject smaller)
             ]
       where
         smaller    = resize (n `div` 2) genSurface
@@ -248,6 +255,11 @@ genSurface = sized go
         , pure SurfaceUniverseOpen
         , pure SurfacePlaceholder
         , SurfaceHole <$> name
+        -- A literal is a leaf (MS6 phase 97c), and it goes in the shared
+        -- generator so the printer-and-parser property sees one in every
+        -- position a term can stand — which is what caught that a printed
+        -- string has to be escaped the way the lexer reads it back.
+        , SurfaceLiteral <$> genLiteral
         ]
 
     name    = elements ["x", "y", "f", "A"]
@@ -256,6 +268,32 @@ genSurface = sized go
     -- @listOf1@ can still hand back an empty list under a tiny size, and a
     -- spine is never empty.
     neOr d g = maybe (d :| []) id . nonEmpty <$> g
+
+-- | A tagged term literal, with pieces that could have been written.
+--
+-- **Nothing here is object-language text**: the term is never elaborated in
+-- this module, so what is generated is exactly what the printer and the reader
+-- must agree about — the tag, the production if one is written, and the
+-- region's pieces.
+--
+-- **The pieces alternate, and that is not a convenience.** The lexer emits one
+-- chunk per run of text between escapes and drops an empty one, so two
+-- 'ObjectText' pieces in a row are not something it can produce; generating a
+-- pair would be asserting that the printer can write a distinction the reader
+-- has no way to keep.
+genObject :: Gen Surface -> Gen Surface
+genObject inner =
+  SurfaceObject
+    <$> elements ["LC", "Ty"]
+    <*> oneof [pure Nothing, Just <$> elements ["var", "app"]]
+    <*> (alternate <$> listOf (oneof [ObjectText <$> chunk, ObjectSplice <$> inner]))
+  where
+    chunk = elements ["x", "( \955 x . x )", "a" ++ [toEnum 96] ++ "b", "$", "\\", "?", " ", "a${b"]
+    alternate ps = case ps of
+      ObjectText a : ObjectText b : rest -> alternate (ObjectText (a ++ b) : rest)
+      ObjectText "" : rest -> alternate rest
+      p : rest -> p : alternate rest
+      [] -> []
 
 -- --------------------------------------------------------------------------
 -- The spine
@@ -455,8 +493,8 @@ layoutTests =
     -- that the development calculus never meets this pass — a line break means
     -- nothing there, and no brace is inserted.
   , testCase "the development calculus is not laid out" $
-      case ( parseCore emptyGlobals [] 0 "let x = Type\8320 : Type\8321 in x"
-           , parseCore emptyGlobals [] 0 "let x = Type\8320 : Type\8321\n  in x"
+      case ( parseCore [] emptyGlobals [] 0 "let x = Type\8320 : Type\8321 in x"
+           , parseCore [] emptyGlobals [] 0 "let x = Type\8320 : Type\8321\n  in x"
            ) of
         (Right (a, _), Right (b, _)) -> b @?= a
         (other, _)                   -> assertFailure (show other)
@@ -564,7 +602,7 @@ moduleTests =
                  "module M where\nf : A\nf = a"
 
   , testCase "the name is kept" $
-      fmap fst (parseSurfaceModule [] "module Arith where { f : A ; f = a }")
+      fmap fst (parseSurfaceModule "module Arith where { f : A ; f = a }")
         @?= Right "Arith"
 
   , -- A datatype's own @where@ opens a block inside the module's, so the two
@@ -591,14 +629,14 @@ moduleTests =
         "module M where\nf : A\nf = a\ndata D : Type\8320 where"
 
   , testCase "a module with no declarations is refused" $
-      case parseSurfaceModule [] "module M where { }" of
+      case parseSurfaceModule "module M where { }" of
         Left _  -> pure ()
         Right r -> assertFailure ("admitted: " ++ show r)
   ]
   where
     -- Compare the **items**, not the module name, so a test says only what it
     -- is about.
-    sameModule a b = case (parseSurfaceModule [] a, parseSurfaceModule [] b) of
+    sameModule a b = case (parseSurfaceModule a, parseSurfaceModule b) of
       (Right (_, x), Right (_, y)) -> show y @?= show x
       (x, y) -> assertFailure (show x ++ "\n" ++ show y)
 
@@ -773,7 +811,7 @@ blockTests =
       , RawPairOf (RawPos 1) (RawRef "y")
       , RawNested "concat" []
       , RawLambda [] (BodyRhs (RhsOp (RawOp "concat" [])))
-      , RawRegion "surface" "x"
+      , RawRegion "surface" Nothing "x"
       , RawQuoted (RawName "x")
       ]
 

@@ -162,6 +162,15 @@ related dir env = go
         | i == j    -> ok n
         | otherwise -> bad n [] (HeadsDiffer ctx s t)
 
+      -- **Two literals are convertible when they are the same literal** (MS6
+      -- phase 105). Missing until then, and hidden by the @s == t@ test above:
+      -- @"a"@ against @"a"@ never got here, but @"a"@ against a definition of
+      -- @"a"@ reduces to this case, and @refl String "a"@ was refused at
+      -- @Eq String "a" "a"@ because one side was the argument hole.
+      (Primitive l, Primitive r)
+        | l == r    -> ok n
+        | otherwise -> bad n [] (HeadsDiffer ctx s t)
+
       -- **A Π's codomain is the one covariant position in the language.**
       (Pi i dom sc, Pi _ dom' sc') -> binder dir ctx n i dom sc dom' sc'
       -- A λ is not a type, so a direction has nothing to mean under one.

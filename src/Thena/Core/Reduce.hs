@@ -7,19 +7,34 @@
 -- definition without this module needing to know how either was checked.
 module Thena.Core.Reduce
   ( whnf
+  , PrimitiveRule (..)
+  , primitiveNames
   ) where
 
 import Data.List (find)
 
-import Thena.Core.Level (Level, LevelVar, instantiateLevels)
+import Thena.Core.Level (Level (..), LevelVar, instantiateLevels)
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar)
-import Thena.Core.Term (Core (..), GlobalName, Var, close, instantiate, substLevelsIn)
+import Thena.Core.Term
+  ( Core (..)
+  , GlobalName (..)
+  , Literal (..)
+  , Var
+  , Ident (..)
+  , close
+  , fresh
+  , instantiate
+  , primitiveType
+  , substLevelsIn
+  )
 import Thena.Global.Env
   ( ConstructorDefinition (..)
   , Definition (..)
   , GlobalEnv
   , InductiveDefinition (..)
+  , Constant (..)
   , formerArity
+  , lookupConstant
   , lookupDefinition
   , lookupInductive
   , recursiveArgument
@@ -55,6 +70,7 @@ whnf env ctx = go 0
     -- position) or resets it to 0 (a subterm in argument position).
     go nargs t = case t of
       Bound _        -> t          -- never the top of a term whnf is asked about
+      Primitive _    -> t          -- a literal is already a value (MS6 phase 97a)
       Free x         -> case find ((== x) . entryVar) ctx of
         Just (Definition _ _ val _) -> go nargs val
         _                            -> t   -- a 'Hypothesis', or not in scope: neutral
@@ -92,7 +108,13 @@ whnf env ctx = go 0
 
       App f a -> case go (nargs + 1) f of
         Lam i dom sc -> go nargs (Let i a dom sc)  -- β: produces a definition
-        f'           -> App f' a
+        -- **The primitives' rule** (MS6 phase 97b): a known primitive applied
+        -- to two literals computes, and to anything else stays neutral. It sits
+        -- here rather than in the 'Global' case because it fires on the
+        -- /saturated/ application, exactly as ι does on a saturated target.
+        f'
+          | Just u <- primitiveStep env (whnf env ctx) f' a -> go nargs u
+          | otherwise                        -> App f' a
 
       -- δ on a term-level 'Let': the net effect of "δ, iterated, then ν" from
       -- table 2.1 is a substitution, and 'instantiate' is already exactly that
@@ -108,6 +130,160 @@ whnf env ctx = go 0
               Canonical cg _ cargs
                 | Just result <- iota env d ls ps m ms cg cargs -> go nargs result
               _ -> Eliminate d ls ps m ms is tgt'
+
+-- --------------------------------------------------------------------------
+-- The primitives' rule (MS6 phase 97b)
+-- --------------------------------------------------------------------------
+
+-- | The primitive functions the system computes with, and the rule each
+-- computes by.
+--
+-- **This list is the whole of what @primitive@ may declare.** A name absent
+-- from it has no rule, so the driver refuses the declaration rather than
+-- installing a constant that would sit there as an axiom
+-- (@ms6\/SPEC.md@ §2.1).
+primitiveNames :: [(GlobalName, PrimitiveRule)]
+primitiveNames =
+  [ (GlobalName ("eq" ++ p), Comparing (GlobalName p)) | p <- ["String", "Char", "Int"] ]
+  ++ [ (GlobalName ("dec" ++ p), Deciding (GlobalName p)) | p <- ["String", "Char", "Int"] ]
+  ++ [ (GlobalName "appendString", Appending) ]
+
+-- | What a primitive computes, and so what type the driver will accept it at
+-- ('Thena.Driver.checkedPrimitive').
+data PrimitiveRule
+  = Comparing GlobalName
+    -- ^ @P -> P -> B@ for this @P@: the first constructor of @B@ for literals
+    -- that agree, the second for literals that differ (MS6 phase 97b)
+  | Deciding GlobalName
+    -- ^ @(a b : P) -> D (Eq P a b)@ for this @P@, with @D@ a datatype of one
+    -- parameter and two constructors — @yes : A -> D A@ and
+    -- @no : (A -> E) -> D A@. Two literals answer with **the evidence**, not
+    -- only the verdict (MS6 phase 109a, his choice on @ms6\/CLOSEOUT.md@ 32):
+    -- a proof that eliminates the same @decP y x@ on names it does not know
+    -- gets @Eq P y x@ in one branch and its refutation in the other, which
+    -- @Comparing@ cannot give
+  | Appending
+    -- ^ @String -> String -> String@: the two literals, one after the other
+    -- (MS6 phase 105). **The one way a @String@ is built**, and generated
+    -- substitution needs it: a fresh name is a name primed until it is not
+    -- among the ones it must avoid (§4.7)
+  deriving (Eq, Show)
+
+-- | A primitive applied to two literals, computed; anything else is neutral.
+--
+-- For 'Comparing': @eqP a b@ where both arguments are literals of @P@ is the
+-- first constructor of the result datatype when they agree, the second when
+-- they do not.
+--
+-- **The two constructors come from the declared type, not from a name written
+-- here.** The constant's type is @P -> P -> B@, and @B@\'s own declaration
+-- says what its constructors are called — so the rule never mentions @true@ or
+-- @Bool@, and a user who declares the result to be their own two-constructor
+-- datatype gets the same rule. The driver has already checked that shape
+-- ('Thena.Driver.checkedPrimitive'), which is why this can read it back
+-- without a second opinion.
+--
+-- **Both arguments are reduced before they are read** — @reduce@ is 'whnf' in
+-- the caller's context. Matching them as they stood left @eqString a "x"@
+-- stuck when @a@ is a definition of @"x"@, which is reduction incomplete on a
+-- closed term (found in phase 100, @ms6\/CLOSEOUT.md@ 7). They are reduced
+-- only once the head is known to be a primitive, so no other application pays.
+primitiveStep :: GlobalEnv -> (Core -> Core) -> Core -> Core -> Maybe Core
+primitiveStep env reduce f arg = case f of
+  App (Global g []) x
+    | Just rule <- lookup g primitiveNames
+    , Primitive l <- reduce x
+    , Primitive r <- reduce arg -> case (rule, l, r) of
+        (Comparing p, _, _)
+          | primitiveType l == Global p []
+          , primitiveType r == Global p []
+          , Just result <- resultDatatype env g
+          , (c : d : _) <- map constructorName (inductiveConstructors result) ->
+              Just (Canonical (if l == r then c else d) [] [])
+        (Deciding p, _, _)
+          | primitiveType l == Global p []
+          , primitiveType r == Global p [] -> decided env g (Primitive l) (Primitive r) (l == r)
+        (Appending, LString a, LString b) -> Just (Primitive (LString (a ++ b)))
+        _ -> Nothing
+  _ -> Nothing
+
+-- | What @decP a b@ is for two literals: @yes (refl P a)@ when they agree,
+-- and when they differ @no@ with a refutation of @Eq P a b@.
+--
+-- **Every name comes from the declared type**, as 'Comparing'\'s constructors
+-- do: @D@, @Eq@, their constructors, their levels and the @E@ of @no@'s
+-- argument. The driver has checked the shape ('Thena.Driver.checkedPrimitive').
+--
+-- **The refutation is an honest closed term, and it uses @decP@ itself.** With
+-- @T t@ the type @Eq P a a@ when @decP a t@ is @yes@ and @E@ when it is @no@,
+--
+-- > λ q. elim Eq P (λ u v r. T u -> T v) (λ c z. z) a b q (refl P a)
+--
+-- carries @refl P a : T a@ along @q : Eq P a b@ to @T b@, which is @E@
+-- because @a@ and @b@ are literals that differ. So nothing here is trusted but
+-- the verdict on two literals — the same thing 'Comparing' trusts.
+decided :: GlobalEnv -> GlobalName -> Core -> Core -> Bool -> Maybe Core
+decided env g a b agree = do
+  c <- lookupConstant g env
+  (dN, l1, eqN, l2, pty) <- case instantiateBoth (constantType c) of
+    Just (App (Global dN l1) eqAB)
+      | App (App (App (Global eqN l2) pty) _) _ <- eqAB -> Just (dN, l1, eqN, l2, pty)
+    _ -> Nothing
+  dDef <- lookupInductive dN env
+  [yesC, noC] <- Just (inductiveConstructors dDef)
+  eDef <- lookupInductive eqN env
+  [reflC] <- Just (inductiveConstructors eDef)
+  [noArg] <- Just (constructorArguments noC)
+  e <- case entryType noArg of
+    -- Written against @D@'s own level parameters, so instantiated at this use's.
+    Pi _ _ sc -> Just (atLevels (inductiveLevels dDef) l1 (instantiate (Universe LZero) sc))
+    _ -> Nothing
+  let eqOf x y = App (App (App (Global eqN l2) pty) x) y
+      reflOf x = Canonical (constructorName reflC) l2 [pty, x]
+      -- The universe @Eq P a a@ lives in, at this use's levels.
+      eqSort = atLevels (inductiveLevels eDef) l2 (Universe (inductiveLevel eDef))
+      decOf x y = App (App (Global g []) x) y
+      -- Variables only ever closed over again before this returns, so any
+      -- distinct numbers do.
+      var k = fst (fresh k)
+      (u, v, r, q, cv, z, w, pv, nv) = (var 0, var 1, var 2, var 3, var 4, var 5, var 6, var 7, var 8)
+      -- T t: what knowing @decP a t@ tells you.
+      told t = Eliminate dN l1 [eqOf a t]
+        (Lam (Ident "w") (App (Global dN l1) (eqOf a t)) (close w eqSort))
+        [ Lam (Ident "p") (eqOf a t) (close pv (eqOf a a))
+        , Lam (Ident "n") (arrowTo (eqOf a t) e) (close nv e) ]
+        [] (decOf a t)
+      motive =
+        Lam (Ident "u") pty $ close u $
+        Lam (Ident "v") pty $ close v $
+        Lam (Ident "r") (eqOf (Free u) (Free v)) $ close r $
+        Pi (Ident "_") (told (Free u)) (close r (told (Free v)))
+      method = Lam (Ident "c") pty $ close cv $ Lam (Ident "z") (told (Free cv)) $ close z (Free z)
+      refutation =
+        Lam (Ident "q") (eqOf a b) $ close q $
+          App (Eliminate eqN l2 [pty] motive [method] [a, b] (Free q)) (reflOf a)
+  Just $ if agree
+    then Canonical (constructorName yesC) l1 [eqOf a b, reflOf a]
+    else Canonical (constructorName noC) l1 [eqOf a b, refutation]
+  where
+    instantiateBoth ty = case ty of
+      Pi _ _ sa -> case instantiate a sa of
+        Pi _ _ sb -> Just (instantiate b sb)
+        _ -> Nothing
+      _ -> Nothing
+    arrowTo dom cod = Pi (Ident "_") dom (close (fst (fresh (-1))) cod)
+
+-- | The datatype a declared primitive answers with, read off its own type.
+resultDatatype :: GlobalEnv -> GlobalName -> Maybe InductiveDefinition
+resultDatatype env g = do
+  c <- lookupConstant g env
+  b <- resultOf (constantType c)
+  lookupInductive b env
+  where
+    resultOf ty = case ty of
+      Pi _ _ sc   -> resultOf (instantiate (Universe LZero) sc)
+      Global b [] -> Just b
+      _           -> Nothing
 
 -- --------------------------------------------------------------------------
 -- ι — computed from the inductive-definition record, not generated (§3.7)

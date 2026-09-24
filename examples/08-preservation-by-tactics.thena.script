@@ -1,0 +1,545 @@
+-- Preservation for STLC again — the same lemmas as 07, proved by tactics.
+--
+-- LOAD AFTER 01, 02, 03 AND 07: this reuses 07's definitions (In, look, Good…)
+-- and its small logic (subst, sym, trans, absurdly), and proves every lemma
+-- again, by tactics, under a name ending in -tactics.
+--
+-- Run it with   :load examples/08-preservation-by-tactics.thena.script
+
+-- ---------------------------------------------------------------------------
+-- What `member` answers — induction on the list
+
+:theorem memberSpec-tactics : ∀ (c : String) (xs : List {0} String) -> MemberSpec {0} c xs
+attack
+intro
+intro
+into
+along
+along
+eliminate-core ⌜ xs ⌝
+goto-named "nilMethod"
+elaborate ⟨ orRight (And (Eq Comparison different same) Empty) (And (Eq Comparison different different) (Empty -> Empty)) (both (Eq Comparison different different) (Empty -> Empty) (refl Comparison different) (\ i -> i)) ⟩
+goto-named "consMethod"
+elaborate ⟨ \ b bs rb -> elim Dec ((Eq String c b)) (\ d -> Or (And (Eq Comparison (elim Dec ((Eq String c b)) (\ d1 -> Comparison) ((\ p -> same) (\ n -> member c bs)) () d) same) (Or (Eq String c b) (In c bs))) (And (Eq Comparison (elim Dec ((Eq String c b)) (\ d1 -> Comparison) ((\ p -> same) (\ n -> member c bs)) () d) different) (Or (Eq String c b) (In c bs) -> Empty))) ((\ p -> orLeft (And (Eq Comparison same same) (Or (Eq String c b) (In c bs))) (And (Eq Comparison same different) (Or (Eq String c b) (In c bs) -> Empty)) (both (Eq Comparison same same) (Or (Eq String c b) (In c bs)) (refl Comparison same) (orLeft (Eq String c b) (In c bs) p))) (\ n -> elim Or ((And (Eq Comparison (member c bs) same) (In c bs)) (And (Eq Comparison (member c bs) different) (In c bs -> Empty))) (\ o -> Or (And (Eq Comparison (member c bs) same) (Or (Eq String c b) (In c bs))) (And (Eq Comparison (member c bs) different) (Or (Eq String c b) (In c bs) -> Empty))) ((\ h -> orLeft (And (Eq Comparison (member c bs) same) (Or (Eq String c b) (In c bs))) (And (Eq Comparison (member c bs) different) (Or (Eq String c b) (In c bs) -> Empty)) (both (Eq Comparison (member c bs) same) (Or (Eq String c b) (In c bs)) (andLeft (Eq Comparison (member c bs) same) (In c bs) h) (orRight (Eq String c b) (In c bs) (andRight (Eq Comparison (member c bs) same) (In c bs) h)))) (\ h -> orRight (And (Eq Comparison (member c bs) same) (Or (Eq String c b) (In c bs))) (And (Eq Comparison (member c bs) different) (Or (Eq String c b) (In c bs) -> Empty)) (both (Eq Comparison (member c bs) different) (Or (Eq String c b) (In c bs) -> Empty) (andLeft (Eq Comparison (member c bs) different) (In c bs -> Empty) h) (\ o -> elim Or ((Eq String c b) (In c bs)) (\ o1 -> Empty) ((\ e -> n e) (\ i -> andRight (Eq Comparison (member c bs) different) (In c bs -> Empty) h i)) () o)))) () rb)) () (decString c b) ⟩
+goto-named "memberSpec-tactics1"
+solve
+goto-named "memberSpec-tactics"
+solve
+qed
+
+-- ---------------------------------------------------------------------------
+-- LC-fresh keeps a name nothing forbids — induction on the list to avoid
+
+:theorem freshKeeps-tactics : ∀ (c : String) (avoid : List {0} String) -> (In {0} c avoid -> Empty {0}) -> Eq {0} String (LC-fresh {0} c avoid) c
+attack
+intro
+intro
+into
+along
+along
+eliminate-core ⌜ avoid ⌝
+goto-named "nilMethod"
+elaborate ⟨ \ ni -> refl String c ⟩
+goto-named "consMethod"
+elaborate ⟨ \ a rest r ni -> elim Or ((And (Eq Comparison (member c (cons String a rest)) same) (In c (cons String a rest))) (And (Eq Comparison (member c (cons String a rest)) different) (In c (cons String a rest) -> Empty))) (\ o -> Eq String (LC-fresh c (cons String a rest)) c) ((\ h -> absurdly _ (ni (andRight _ _ h))) (\ h -> pickDifferent c _ (member c (cons String a rest)) (andLeft _ _ h))) () (memberSpec-tactics c (cons String a rest)) ⟩
+goto-named "freshKeeps-tactics1"
+solve
+goto-named "freshKeeps-tactics"
+solve
+qed
+
+-- ---------------------------------------------------------------------------
+-- Context lookups taken apart. A lookup's context is an index, so each is
+-- proved for any context equal to the one wanted, by induction on the lookup,
+-- and then for that context with `refl`.
+
+:theorem ctxInvEmpty-general : ∀ (y : String) (U : Ty) (G : Ctx) (i : Ctx-in y U G) -> Eq {0} Ctx G empty -> Empty {0}
+attack
+intro
+intro
+intro
+intro
+into
+along
+along
+along
+along
+eliminate-core ⌜ i ⌝
+goto-named "Ctx-hereMethod"
+elaborate ⟨ \ G x T e -> noConfusionCtx (extend G x T) empty e ⟩
+goto-named "Ctx-thereMethod"
+elaborate ⟨ \ G x T x1 T1 ne i1 ih e -> noConfusionCtx (extend G x1 T1) empty e ⟩
+goto-named "ctxInvEmpty-general1"
+solve
+goto-named "ctxInvEmpty-general"
+solve
+qed
+
+:theorem ctxInvEmpty-tactics : ∀ (y : String) (U : Ty) -> Ctx-in y U empty -> Empty {0}
+elaborate ⟨ \ y U i -> ctxInvEmpty-general y U empty i (refl Ctx empty) ⟩
+qed
+
+:theorem ctxInvExtend-general : ∀ (y : String) (U : Ty) (G1 : Ctx) (i : Ctx-in y U G1) (G : Ctx) (a : String) (S : Ty) -> Eq {0} Ctx G1 (extend G a S) -> CtxFound G a S y U
+attack
+intro
+intro
+intro
+intro
+into
+along
+along
+along
+along
+eliminate-core ⌜ i ⌝
+goto-named "Ctx-hereMethod"
+elaborate ⟨ \ G0 x T G a S e -> orLeft (And (Eq String x a) (Eq Ty T S)) (And (Eq String x a -> Empty) (Ctx-in x T G)) (both (Eq String x a) (Eq Ty T S) (extendName G0 x T G a S e) (extendTy G0 x T G a S e)) ⟩
+goto-named "Ctx-thereMethod"
+elaborate ⟨ \ G0 x T x1 T1 ne i1 ih G a S e -> orRight (And (Eq String x a) (Eq Ty T S)) (And (Eq String x a -> Empty) (Ctx-in x T G)) (both (Eq String x a -> Empty) (Ctx-in x T G) (\ q -> ne (trans String x a x1 q (sym String x1 a (extendName G0 x1 T1 G a S e)))) (subst Ctx (\ g -> Ctx-in x T g) G0 G (extendCtx G0 x1 T1 G a S e) i1)) ⟩
+goto-named "ctxInvExtend-general1"
+solve
+goto-named "ctxInvExtend-general"
+solve
+qed
+
+:theorem ctxInvExtend-tactics : ∀ (G : Ctx) (a : String) (S : Ty) (y : String) (U : Ty) -> Ctx-in y U (extend G a S) -> CtxFound G a S y U
+elaborate ⟨ \ G a S y U i -> ctxInvExtend-general y U (extend G a S) i G a S (refl Ctx (extend G a S)) ⟩
+qed
+
+-- ---------------------------------------------------------------------------
+-- Weakening — a case split on a lookup, then induction on the derivation
+
+:theorem inclExtend-tactics : ∀ (G : Ctx) (G1 : Ctx) (x : String) (S : Ty) (inc : Incl G G1) -> Incl (extend G x S) (extend G1 x S)
+attack
+intro
+intro
+intro
+intro
+intro
+intro
+intro
+intro
+into
+along
+along
+along
+along
+along
+along
+along
+along
+eliminate-core ⌜ ctxInvExtend-tactics G x S y U i ⌝
+goto-named "orLeftMethod"
+elaborate ⟨ \ h -> subst String (\ z -> Ctx-in z U (extend G1 x S)) x y (sym String y x (andLeft (Eq String y x) (Eq Ty U S) h)) (subst Ty (\ V -> Ctx-in x V (extend G1 x S)) S U (sym Ty U S (andRight (Eq String y x) (Eq Ty U S) h)) (Ctx-here G1 x S)) ⟩
+goto-named "orRightMethod"
+elaborate ⟨ \ h -> Ctx-there G1 y U x S (andLeft (Eq String y x -> Empty) (Ctx-in y U G) h) (inc y U (andRight (Eq String y x -> Empty) (Ctx-in y U G) h)) ⟩
+goto-named "inclExtend-tactics1"
+solve
+goto-named "inclExtend-tactics"
+solve
+qed
+
+:theorem weaken-tactics : ∀ (G : Ctx) (t : LC) (T : Ty) (d : typing G t T) (G1 : Ctx) (inc : Incl G G1) -> typing G1 t T
+attack
+intro
+intro
+intro
+intro
+into
+along
+along
+along
+along
+eliminate-core ⌜ d ⌝
+goto-named "T-varMethod"
+elaborate ⟨ \ x T1 G0 i G1 inc -> T-var x T1 G1 (inc x T1 i) ⟩
+goto-named "T-absMethod"
+elaborate ⟨ \ G0 x S E T1 d0 ih G1 inc -> T-abs G1 x S E T1 (ih (extend G1 x S) (inclExtend-tactics G0 G1 x S inc)) ⟩
+goto-named "T-appMethod"
+elaborate ⟨ \ G0 M S T1 N d1 d2 ih1 ih2 G1 inc -> T-app G1 M S T1 N (ih1 G1 inc) (ih2 G1 inc) ⟩
+goto-named "weaken-tactics1"
+solve
+goto-named "weaken-tactics"
+solve
+qed
+
+:theorem weakenEmpty-tactics : ∀ (t : LC) (T : Ty) -> typing empty t T -> ∀ (D : Ctx) -> typing D t T
+elaborate ⟨ \ t T d D -> weaken-tactics empty t T d D (\ y U i -> absurdly (Ctx-in y U D) (ctxInvEmpty-tactics y U i)) ⟩
+qed
+
+-- ---------------------------------------------------------------------------
+-- A typed term's free names are in its context — induction on the derivation
+
+:theorem fvInCtx-tactics : ∀ (G : Ctx) (t : LC) (T : Ty) (d : typing G t T) (bound : List {0} String) (acc : List {0} String) (w : String) (h : In {0} w (fvA {0 0} t bound acc)) -> FvSpec {0 0} G bound acc w
+attack
+intro
+intro
+intro
+intro
+into
+along
+along
+along
+along
+eliminate-core ⌜ d ⌝
+goto-named "T-varMethod"
+elaborate ⟨ \ x T0 G0 i bound acc w h -> elim Or ((And (Eq Comparison (member x bound) same) (In x bound)) (And (Eq Comparison (member x bound) different) (In x bound -> Empty))) (\ o -> FvSpec G0 bound acc w) ((\ hs -> orLeft (In w acc) (And (In w bound -> Empty) (Dom G0 w)) (subst Comparison (\ q -> In w (elim Comparison () (\ q1 -> List String) ((acc) (cons String x acc)) () q)) (member x bound) same (andLeft (Eq Comparison (member x bound) same) (In x bound) hs) h)) (\ hs -> elim Or ((Eq String w x) (In w acc)) (\ o1 -> FvSpec G0 bound acc w) ((\ q -> orRight (In w acc) (And (In w bound -> Empty) (Dom G0 w)) (both (In w bound -> Empty) (Dom G0 w) (\ ib -> andRight (Eq Comparison (member x bound) different) (In x bound -> Empty) hs (subst String (\ z -> In z bound) w x q ib)) (pair Ty (\ U -> Ctx-in w U G0) T0 (subst String (\ z -> Ctx-in z T0 G0) x w (sym String w x q) i)))) (\ ia -> orLeft (In w acc) (And (In w bound -> Empty) (Dom G0 w)) ia)) () (subst Comparison (\ q -> In w (elim Comparison () (\ q1 -> List String) ((acc) (cons String x acc)) () q)) (member x bound) different (andLeft (Eq Comparison (member x bound) different) (In x bound -> Empty) hs) h))) () (memberSpec-tactics x bound) ⟩
+goto-named "T-absMethod"
+elaborate ⟨ \ G0 x S E T0 d0 ih bound acc w h -> elim Or ((In w acc) (And (In w (cons String x bound) -> Empty) (Dom (extend G0 x S) w))) (\ o -> FvSpec G0 bound acc w) ((\ ia -> orLeft (In w acc) (And (In w bound -> Empty) (Dom G0 w)) ia) (\ hb -> elim Sigma (Ty (\ U -> Ctx-in w U (extend G0 x S))) (\ z -> FvSpec G0 bound acc w) ((\ U i -> elim Or ((And (Eq String w x) (Eq Ty U S)) (And (Eq String w x -> Empty) (Ctx-in w U G0))) (\ o1 -> FvSpec G0 bound acc w) ((\ isX -> absurdly (FvSpec G0 bound acc w) (andLeft (In w (cons String x bound) -> Empty) (Dom (extend G0 x S) w) hb (orLeft (Eq String w x) (In w bound) (andLeft (Eq String w x) (Eq Ty U S) isX)))) (\ other -> orRight (In w acc) (And (In w bound -> Empty) (Dom G0 w)) (both (In w bound -> Empty) (Dom G0 w) (\ ib -> andLeft (In w (cons String x bound) -> Empty) (Dom (extend G0 x S) w) hb (orRight (Eq String w x) (In w bound) ib)) (pair Ty (\ U1 -> Ctx-in w U1 G0) U (andRight (Eq String w x -> Empty) (Ctx-in w U G0) other))))) () (ctxInvExtend-tactics G0 x S w U i))) () (andRight (In w (cons String x bound) -> Empty) (Dom (extend G0 x S) w) hb))) () (ih (cons String x bound) acc w h) ⟩
+goto-named "T-appMethod"
+elaborate ⟨ \ G0 M S T0 N d1 d2 ih1 ih2 bound acc w h -> elim Or ((In w (fvA N bound acc)) (And (In w bound -> Empty) (Dom G0 w))) (\ o -> FvSpec G0 bound acc w) ((\ h2 -> ih2 bound acc w h2) (\ r -> orRight (In w acc) (And (In w bound -> Empty) (Dom G0 w)) r)) () (ih1 bound (fvA N bound acc) w h) ⟩
+goto-named "fvInCtx-tactics1"
+solve
+goto-named "fvInCtx-tactics"
+solve
+qed
+
+-- ---------------------------------------------------------------------------
+-- Where an avoided name comes from — inductions on lists
+
+:theorem appendIn-tactics : ∀ (l : List {0} String) (r : List {0} String) (w : String) (h : In {0} w (appendL {0 0} l r)) -> Or (In {0} w l) (In {0} w r)
+attack
+intro
+intro
+intro
+into
+along
+along
+along
+eliminate-core ⌜ l ⌝
+goto-named "nilMethod"
+elaborate ⟨ \ h -> orRight Empty (In w r) h ⟩
+goto-named "consMethod"
+elaborate ⟨ \ a as ra h -> elim Or ((Eq String w a) (In w (appendL as r))) (\ o -> Or (Or (Eq String w a) (In w as)) (In w r)) ((\ q -> orLeft (Or (Eq String w a) (In w as)) (In w r) (orLeft (Eq String w a) (In w as) q)) (\ h1 -> elim Or ((In w as) (In w r)) (\ o1 -> Or (Or (Eq String w a) (In w as)) (In w r)) ((\ i -> orLeft (Or (Eq String w a) (In w as)) (In w r) (orRight (Eq String w a) (In w as) i)) (\ i -> orRight (Or (Eq String w a) (In w as)) (In w r) i)) () (ra h1))) () h ⟩
+goto-named "appendIn-tactics1"
+solve
+goto-named "appendIn-tactics"
+solve
+qed
+
+
+
+:theorem imagesIn-tactics : ∀ (s : List {0} (And {0 0} String LC)) (ys : List {0} String) (w : String) (h : In {0} w (images {0 0 0 0 0} s ys)) -> FromImage {0 0 0 0} s ys w
+attack
+intro
+intro
+intro
+into
+along
+along
+along
+eliminate-core ⌜ ys ⌝
+goto-named "nilMethod"
+elaborate ⟨ \ h -> absurdly (FromImage s (nil String) w) h ⟩
+goto-named "consMethod"
+elaborate ⟨ \ y ys1 ry h -> elim Or ((In w (LC-fv (look y s))) (In w (images s ys1))) (\ o -> FromImage s (cons String y ys1) w) ((\ h1 -> pair String (\ y1 -> And (In y1 (cons String y ys1)) (In w (LC-fv (look y1 s)))) y (both (In y (cons String y ys1)) (In w (LC-fv (look y s))) (orLeft (Eq String y y) (In y ys1) (refl String y)) h1)) (\ h2 -> elim Sigma (String (\ y1 -> And (In y1 ys1) (In w (LC-fv (look y1 s))))) (\ z -> FromImage s (cons String y ys1) w) ((\ y1 p -> pair String (\ y2 -> And (In y2 (cons String y ys1)) (In w (LC-fv (look y2 s)))) y1 (both (In y1 (cons String y ys1)) (In w (LC-fv (look y1 s))) (orRight (Eq String y1 y) (In y1 ys1) (andLeft (In y1 ys1) (In w (LC-fv (look y1 s))) p)) (andRight (In y1 ys1) (In w (LC-fv (look y1 s))) p)))) () (ry h2))) () (appendIn-tactics (LC-fv (look y s)) (images s ys1) w h) ⟩
+goto-named "imagesIn-tactics1"
+solve
+goto-named "imagesIn-tactics"
+solve
+qed
+
+
+
+:theorem listNil-tactics : ∀ (l : List {0} String) (f : ∀ (w : String) -> In {0} w l -> Empty {0}) -> Eq {0} (List {0} String) l (nil {0} String)
+attack
+intro
+into
+along
+eliminate-core ⌜ l ⌝
+goto-named "nilMethod"
+elaborate ⟨ \ f -> refl (List String) (nil String) ⟩
+goto-named "consMethod"
+elaborate ⟨ \ a as ra f -> absurdly (Eq (List String) (cons String a as) (nil String)) (f a (orLeft (Eq String a a) (In a as) (refl String a))) ⟩
+goto-named "listNil-tactics1"
+solve
+goto-named "listNil-tactics"
+solve
+qed
+
+-- A closed term has no free name — a case split on what fvInCtx says
+
+:theorem closedNoFv-tactics : ∀ (N : LC) (S : Ty) (d : typing empty N S) (w : String) (h : In {0} w (LC-fv {0} N)) -> Empty {0}
+attack
+intro
+intro
+intro
+intro
+intro
+into
+along
+along
+along
+along
+along
+eliminate-core ⌜ fvInCtx-tactics empty N S d (nil {0} String) (nil {0} String) w h ⌝
+goto-named "orLeftMethod"
+elaborate ⟨ \ e -> e ⟩
+goto-named "orRightMethod"
+elaborate ⟨ \ r -> elim Sigma (Ty (\ U -> Ctx-in w U empty)) (\ z -> Empty) ((\ U i -> ctxInvEmpty-tactics w U i)) () (andRight (In w (nil String) -> Empty) (Dom empty w) r) ⟩
+goto-named "closedNoFv-tactics1"
+solve
+goto-named "closedNoFv-tactics"
+solve
+qed
+
+-- ---------------------------------------------------------------------------
+-- Looking up in a substitution, following decString
+
+:theorem lookHit-tactics : ∀ (x : String) (w : LC) (s : List {0} (And {0 0} String LC)) -> Eq {0} LC (look {0 0 0} x (cons {0} (And {0 0} String LC) (both {0 0} String LC x w) s)) w
+elaborate ⟨ \ x w s -> elim Dec ((Eq String x x)) (\ d -> Eq LC (elim Dec ((Eq String x x)) (\ d1 -> LC) ((\ p1 -> w) (\ n -> look x s)) () d) w) ((\ p -> refl LC w) (\ n -> absurdly (Eq LC (look x s) w) (n (refl String x)))) () (decString x x) ⟩
+qed
+
+:theorem lookMiss-tactics : ∀ (y : String) (x : String) (w : LC) (s : List {0} (And {0 0} String LC)) (ne : Eq {0} String y x -> Empty {0}) -> Eq {0} LC (look {0 0 0} y (cons {0} (And {0 0} String LC) (both {0 0} String LC x w) s)) (look {0 0 0} y s)
+elaborate ⟨ \ y x w s ne -> elim Dec ((Eq String y x)) (\ d -> Eq LC (elim Dec ((Eq String y x)) (\ d1 -> LC) ((\ p1 -> w) (\ n -> look y s)) () d) (look y s)) ((\ p -> absurdly (Eq LC w (look y s)) (ne p)) (\ n -> refl LC (look y s))) () (decString y x) ⟩
+qed
+
+-- ---------------------------------------------------------------------------
+-- The invariant survives a binder — a case split on the lookup
+
+:theorem goodExtend-tactics : ∀ (G : Ctx) (D : Ctx) (s : List {0} (And {0 0} String LC)) (x : String) (S : Ty) (g : Good {0 0 0} G D s) -> Good {0 0 0} (extend G x S) (extend D x S) (cons {0} (And {0 0} String LC) (both {0 0} String LC x (var x)) s)
+attack
+intro
+intro
+intro
+intro
+intro
+intro
+intro
+intro
+intro
+into
+along
+along
+along
+along
+along
+along
+along
+along
+along
+eliminate-core ⌜ ctxInvExtend-tactics G x S y U i ⌝
+goto-named "orLeftMethod"
+elaborate ⟨ \ h -> subst String (\ z -> Entry (extend D x S) z U (look z (cons (And String LC) (both String LC x (var x)) s))) x y (sym String y x (andLeft (Eq String y x) (Eq Ty U S) h)) (subst Ty (\ V -> Entry (extend D x S) x V (look x (cons (And String LC) (both String LC x (var x)) s))) S U (sym Ty U S (andRight (Eq String y x) (Eq Ty U S) h)) (orLeft (And (Eq LC (look x (cons (And String LC) (both String LC x (var x)) s)) (var x)) (Ctx-in x S (extend D x S))) (And (typing empty (look x (cons (And String LC) (both String LC x (var x)) s)) S) (Eq (List String) (LC-fv (look x (cons (And String LC) (both String LC x (var x)) s))) (nil String))) (both (Eq LC (look x (cons (And String LC) (both String LC x (var x)) s)) (var x)) (Ctx-in x S (extend D x S)) (lookHit-tactics x (var x) s) (Ctx-here D x S)))) ⟩
+goto-named "orRightMethod"
+elaborate ⟨ \ h -> subst LC (\ m -> Entry (extend D x S) y U m) (look y s) (look y (cons (And String LC) (both String LC x (var x)) s)) (sym LC (look y (cons (And String LC) (both String LC x (var x)) s)) (look y s) (lookMiss-tactics y x (var x) s (andLeft (Eq String y x -> Empty) (Ctx-in y U G) h))) (elim Or ((And (Eq LC (look y s) (var y)) (Ctx-in y U D)) (And (typing empty (look y s) U) (Eq (List String) (LC-fv (look y s)) (nil String)))) (\ o1 -> Entry (extend D x S) y U (look y s)) ((\ e -> orLeft (And (Eq LC (look y s) (var y)) (Ctx-in y U (extend D x S))) (And (typing empty (look y s) U) (Eq (List String) (LC-fv (look y s)) (nil String))) (both (Eq LC (look y s) (var y)) (Ctx-in y U (extend D x S)) (andLeft (Eq LC (look y s) (var y)) (Ctx-in y U D) e) (Ctx-there D y U x S (andLeft (Eq String y x -> Empty) (Ctx-in y U G) h) (andRight (Eq LC (look y s) (var y)) (Ctx-in y U D) e)))) (\ c -> orRight (And (Eq LC (look y s) (var y)) (Ctx-in y U (extend D x S))) (And (typing empty (look y s) U) (Eq (List String) (LC-fv (look y s)) (nil String))) c)) () (g y U (andRight (Eq String y x -> Empty) (Ctx-in y U G) h))) ⟩
+goto-named "goodExtend-tactics1"
+solve
+goto-named "goodExtend-tactics"
+solve
+qed
+
+-- ---------------------------------------------------------------------------
+-- No binder is captured — a case split on where an avoided name comes from
+
+:theorem notCaptured-tactics : ∀ (G : Ctx) (D : Ctx) (s : List {0} (And {0 0} String LC)) (x : String) (S : Ty) (E : LC) (T : Ty) (d : typing (extend G x S) E T) (g : Good {0 0 0} G D s) (h : In {0} x (images {0 0 0 0 0} s (LC-fv {0} (abs x S E)))) -> Empty {0}
+attack
+intro
+intro
+intro
+intro
+intro
+intro
+intro
+intro
+intro
+intro
+into
+along
+along
+along
+along
+along
+along
+along
+along
+along
+along
+eliminate-core ⌜ imagesIn-tactics s (LC-fv {0} (abs x S E)) x h ⌝
+goto-named "pairMethod"
+elaborate ⟨ \ y p -> elim Or ((In y (nil String)) (And (In y (cons String x (nil String)) -> Empty) (Dom (extend G x S) y))) (\ o -> Empty) ((\ e -> e) (\ r -> elim Sigma (Ty (\ U -> Ctx-in y U (extend G x S))) (\ z -> Empty) ((\ U i -> elim Or ((And (Eq String y x) (Eq Ty U S)) (And (Eq String y x -> Empty) (Ctx-in y U G))) (\ o -> Empty) ((\ h1 -> andLeft (In y (cons String x (nil String)) -> Empty) (Dom (extend G x S) y) r (orLeft (Eq String y x) (In y (nil String)) (andLeft (Eq String y x) (Eq Ty U S) h1))) (\ h2 -> elim Or ((And (Eq LC (look y s) (var y)) (Ctx-in y U D)) (And (typing empty (look y s) U) (Eq (List String) (LC-fv (look y s)) (nil String)))) (\ o -> Empty) ((\ e -> elim Or ((Eq String x y) Empty) (\ o1 -> Empty) ((\ q -> andLeft (Eq String y x -> Empty) (Ctx-in y U G) h2 (sym String x y q)) (\ e1 -> e1)) () (subst LC (\ m -> In x (LC-fv m)) (look y s) (var y) (andLeft (Eq LC (look y s) (var y)) (Ctx-in y U D) e) (andRight (In y (LC-fv (abs x S E))) (In x (LC-fv (look y s))) p))) (\ c -> subst (List String) (\ l -> In x l) (LC-fv (look y s)) (nil String) (andRight (typing empty (look y s) U) (Eq (List String) (LC-fv (look y s)) (nil String)) c) (andRight (In y (LC-fv (abs x S E))) (In x (LC-fv (look y s))) p))) () (g y U (andRight (Eq String y x -> Empty) (Ctx-in y U G) h2)))) () (ctxInvExtend-tactics G x S y U i))) () (andRight (In y (cons String x (nil String)) -> Empty) (Dom (extend G x S) y) r))) () (fvInCtx-tactics (extend G x S) E T d (cons String x (nil String)) (nil String) y (andLeft (In y (LC-fv (abs x S E))) (In x (LC-fv (look y s))) p)) ⟩
+goto-named "notCaptured-tactics1"
+solve
+goto-named "notCaptured-tactics"
+solve
+qed
+
+-- ---------------------------------------------------------------------------
+-- The substitution lemma — induction on the derivation
+
+:theorem substAll-tactics : ∀ (G : Ctx) (E : LC) (T : Ty) (d : typing G E T) (D : Ctx) (s : List {0} (And {0 0} String LC)) (g : Good {0 0 0} G D s) -> typing D (LC-subst-all {0 0 0} E s) T
+attack
+intro
+intro
+intro
+intro
+into
+along
+along
+along
+along
+eliminate-core ⌜ d ⌝
+goto-named "T-varMethod"
+elaborate ⟨ \ x T0 G0 i D s g -> elim Or ((And (Eq LC (look x s) (var x)) (Ctx-in x T0 D)) (And (typing empty (look x s) T0) (Eq (List String) (LC-fv (look x s)) (nil String)))) (\ o -> typing D (look x s) T0) ((\ e -> subst LC (\ m -> typing D m T0) (var x) (look x s) (sym LC (look x s) (var x) (andLeft (Eq LC (look x s) (var x)) (Ctx-in x T0 D) e)) (T-var x T0 D (andRight (Eq LC (look x s) (var x)) (Ctx-in x T0 D) e))) (\ c -> weakenEmpty-tactics (look x s) T0 (andLeft (typing empty (look x s) T0) (Eq (List String) (LC-fv (look x s)) (nil String)) c) D)) () (g x T0 i) ⟩
+goto-named "T-absMethod"
+elaborate ⟨ \ G0 x S E0 T0 d0 ih D s g -> subst String (\ z -> typing D (abs z S (LC-subst-all E0 (cons (And String LC) (both String LC x (var z)) s))) (arrow S T0)) x (LC-fresh x (images s (LC-fv (abs x S E0)))) (sym String (LC-fresh x (images s (LC-fv (abs x S E0)))) x (freshKeeps-tactics x (images s (LC-fv (abs x S E0))) (notCaptured-tactics G0 D s x S E0 T0 d0 g))) (T-abs D x S (LC-subst-all E0 (cons (And String LC) (both String LC x (var x)) s)) T0 (ih (extend D x S) (cons (And String LC) (both String LC x (var x)) s) (goodExtend-tactics G0 D s x S g))) ⟩
+goto-named "T-appMethod"
+elaborate ⟨ \ G0 M S T0 N d1 d2 ih1 ih2 D s g -> T-app D (LC-subst-all M s) S T0 (LC-subst-all N s) (ih1 D s g) (ih2 D s g) ⟩
+goto-named "substAll-tactics1"
+solve
+goto-named "substAll-tactics"
+solve
+qed
+
+:theorem substLemma-tactics : ∀ (x : String) (S : Ty) (E : LC) (T : Ty) (N : LC) (d : typing (extend empty x S) E T) (dn : typing empty N S) -> typing empty (LC-subst E x N) T
+elaborate ⟨ \ x S E T N d dn -> substAll-tactics (extend empty x S) E T d empty (cons (And String LC) (both String LC x N) (nil (And String LC))) (\ y U i -> elim Or ((And (Eq String y x) (Eq Ty U S)) (And (Eq String y x -> Empty) (Ctx-in y U empty))) (\ o -> Entry empty y U (look y (cons (And String LC) (both String LC x N) (nil (And String LC))))) ((\ h -> subst String (\ z -> Entry empty z U (look z (cons (And String LC) (both String LC x N) (nil (And String LC))))) x y (sym String y x (andLeft (Eq String y x) (Eq Ty U S) h)) (subst Ty (\ V -> Entry empty x V (look x (cons (And String LC) (both String LC x N) (nil (And String LC))))) S U (sym Ty U S (andRight (Eq String y x) (Eq Ty U S) h)) (subst LC (\ m -> Entry empty x S m) N (look x (cons (And String LC) (both String LC x N) (nil (And String LC)))) (sym LC (look x (cons (And String LC) (both String LC x N) (nil (And String LC)))) N (lookHit-tactics x N (nil (And String LC)))) (orRight (And (Eq LC N (var x)) (Ctx-in x S empty)) (And (typing empty N S) (Eq (List String) (LC-fv N) (nil String))) (both (typing empty N S) (Eq (List String) (LC-fv N) (nil String)) dn (listNil-tactics (LC-fv N) (closedNoFv-tactics N S dn))))))) (\ h -> absurdly (Entry empty y U (look y (cons (And String LC) (both String LC x N) (nil (And String LC))))) (ctxInvEmpty-tactics y U (andRight (Eq String y x -> Empty) (Ctx-in y U empty) h)))) () (ctxInvExtend-tactics empty x S y U i)) ⟩
+qed
+
+-- ---------------------------------------------------------------------------
+-- Inversion — for any term equal to the shape wanted, then for the shape
+
+:theorem invApp-general : ∀ (G : Ctx) (t : LC) (T : Ty) (d : typing G t T) (M : LC) (N : LC) (e : Eq {0} LC t (app M N)) -> AppInv G M N T
+attack
+intro
+intro
+intro
+intro
+into
+along
+along
+along
+along
+eliminate-core ⌜ d ⌝
+goto-named "T-varMethod"
+elaborate ⟨ \ x T0 G0 i M N e -> absurdly (AppInv G0 M N T0) (noConfusionLC (var x) (app M N) e) ⟩
+goto-named "T-absMethod"
+elaborate ⟨ \ G0 x S E T0 d0 ih M N e -> absurdly (AppInv G0 M N (arrow S T0)) (noConfusionLC (abs x S E) (app M N) e) ⟩
+goto-named "T-appMethod"
+elaborate ⟨ \ G0 M0 S T0 N0 d1 d2 ih1 ih2 M N e -> pair Ty (\ S1 -> And (typing G0 M (arrow S1 T0)) (typing G0 N S1)) S (both (typing G0 M (arrow S T0)) (typing G0 N S) (subst LC (\ m -> typing G0 m (arrow S T0)) M0 M (andLeft (Eq LC M0 M) (Eq LC N0 N) (appInj M0 N0 M N e)) d1) (subst LC (\ n -> typing G0 n S) N0 N (andRight (Eq LC M0 M) (Eq LC N0 N) (appInj M0 N0 M N e)) d2)) ⟩
+goto-named "invApp-general1"
+solve
+goto-named "invApp-general"
+solve
+qed
+
+:theorem invApp-tactics : ∀ (G : Ctx) (M : LC) (N : LC) (T : Ty) (d : typing G (app M N) T) -> AppInv G M N T
+elaborate ⟨ \ G M N T d -> invApp-general G (app M N) T d M N (refl LC (app M N)) ⟩
+qed
+
+:theorem invAbs-general : ∀ (G : Ctx) (t : LC) (T : Ty) (d : typing G t T) (x : String) (S : Ty) (E : LC) (e : Eq {0} LC t (abs x S E)) -> AbsInv G x S E T
+attack
+intro
+intro
+intro
+intro
+into
+along
+along
+along
+along
+eliminate-core ⌜ d ⌝
+goto-named "T-varMethod"
+elaborate ⟨ \ y T0 G0 i x S E e -> absurdly (AbsInv G0 x S E T0) (noConfusionLC (var y) (abs x S E) e) ⟩
+goto-named "T-absMethod"
+elaborate ⟨ \ G0 x0 S0 E0 T0 d0 ih x S E e -> pair Ty (\ U -> And (Eq Ty (arrow S0 T0) (arrow S U)) (typing (extend G0 x S) E U)) T0 (both (Eq Ty (arrow S0 T0) (arrow S T0)) (typing (extend G0 x S) E T0) (subst Ty (\ V -> Eq Ty (arrow S0 T0) (arrow V T0)) S0 S (andLeft (Eq Ty S0 S) (Eq LC E0 E) (andRight (Eq String x0 x) (And (Eq Ty S0 S) (Eq LC E0 E)) (absInj x0 S0 E0 x S E e))) (refl Ty (arrow S0 T0))) (subst String (\ z -> typing (extend G0 z S) E T0) x0 x (andLeft (Eq String x0 x) (And (Eq Ty S0 S) (Eq LC E0 E)) (absInj x0 S0 E0 x S E e)) (subst Ty (\ V -> typing (extend G0 x0 V) E T0) S0 S (andLeft (Eq Ty S0 S) (Eq LC E0 E) (andRight (Eq String x0 x) (And (Eq Ty S0 S) (Eq LC E0 E)) (absInj x0 S0 E0 x S E e))) (subst LC (\ m -> typing (extend G0 x0 S0) m T0) E0 E (andRight (Eq Ty S0 S) (Eq LC E0 E) (andRight (Eq String x0 x) (And (Eq Ty S0 S) (Eq LC E0 E)) (absInj x0 S0 E0 x S E e))) d0)))) ⟩
+goto-named "T-appMethod"
+elaborate ⟨ \ G0 M S0 T0 N d1 d2 ih1 ih2 x S E e -> absurdly (AbsInv G0 x S E T0) (noConfusionLC (app M N) (abs x S E) e) ⟩
+goto-named "invAbs-general1"
+solve
+goto-named "invAbs-general"
+solve
+qed
+
+:theorem invAbs-tactics : ∀ (G : Ctx) (x : String) (S : Ty) (E : LC) (T : Ty) (d : typing G (abs x S E) T) -> AbsInv G x S E T
+elaborate ⟨ \ G x S E T d -> invAbs-general G (abs x S E) T d x S E (refl LC (abs x S E)) ⟩
+qed
+
+-- ---------------------------------------------------------------------------
+-- Preservation — induction on the step, and in the β case two case splits by
+-- tactic: typing the application apart, then typing the function apart.
+--
+-- The statement takes the step before the type, so that the step can be
+-- eliminated with the typing still in the goal; `preservation-tactics` below
+-- puts the arguments back in 07's order. The type is called U, not T: the
+-- β rule's own T is a binder of the method, and two binders named T would
+-- leave the rule's unreachable.
+
+:theorem preservation-step : ∀ (M : LC) (M1 : LC) (s : step M M1) (U : Ty) (d : typing empty M U) -> typing empty M1 U
+attack
+intro
+intro
+intro
+goto-named "preservation-step1"
+eliminate-core ⌜ s ⌝
+goto-named "E-betaMethod"
+attack
+intro
+intro
+intro
+intro
+intro
+intro
+intro
+goto-named "E-betaMethod1"
+eliminate-core ⌜ invApp-tactics empty (abs x T E) N U d ⌝
+goto-named "pairMethod"
+attack
+intro
+intro
+goto-named "pairMethod1"
+eliminate-core ⌜ invAbs-tactics empty x T E (arrow a U) (andLeft {0 0} (typing empty (abs x T E) (arrow a U)) (typing empty N a) b) ⌝
+goto-named "pairMethod2"
+elaborate ⟨ \ U1 q -> substLemma-tactics x T E U N (subst Ty (\ V -> typing (extend empty x T) E V) U1 U (sym Ty U U1 (andRight (Eq Ty a T) (Eq Ty U U1) (arrowInj a U T U1 (andLeft (Eq Ty (arrow a U) (arrow T U1)) (typing (extend empty x T) E U1) q)))) (andRight (Eq Ty (arrow a U) (arrow T U1)) (typing (extend empty x T) E U1) q)) (subst Ty (\ V -> typing empty N V) a T (andLeft (Eq Ty a T) (Eq Ty U U1) (arrowInj a U T U1 (andLeft (Eq Ty (arrow a U) (arrow T U1)) (typing (extend empty x T) E U1) q))) (andRight (typing empty (abs x T E) (arrow a U)) (typing empty N a) b)) ⟩
+goto-named "pairMethod1"
+solve
+goto-named "pairMethod"
+solve
+goto-named "E-betaMethod1"
+solve
+goto-named "E-betaMethod"
+solve
+goto-named "E-app1Method"
+attack
+intro
+intro
+intro
+intro
+intro
+intro
+intro
+goto-named "E-app1Method1"
+eliminate-core ⌜ invApp-tactics empty M N U d ⌝
+goto-named "pairMethod"
+elaborate ⟨ \ S p -> T-app empty M' S U N (ih (arrow S U) (andLeft (typing empty M (arrow S U)) (typing empty N S) p)) (andRight (typing empty M (arrow S U)) (typing empty N S) p) ⟩
+goto-named "E-app1Method1"
+solve
+goto-named "E-app1Method"
+solve
+goto-named "E-app2Method"
+attack
+intro
+intro
+intro
+intro
+intro
+intro
+intro
+intro
+goto-named "E-app2Method1"
+eliminate-core ⌜ invApp-tactics empty M N U d ⌝
+goto-named "pairMethod"
+elaborate ⟨ \ S p -> T-app empty M S U N' (andLeft (typing empty M (arrow S U)) (typing empty N S) p) (ih S (andRight (typing empty M (arrow S U)) (typing empty N S) p)) ⟩
+goto-named "E-app2Method1"
+solve
+goto-named "E-app2Method"
+solve
+goto-named "preservation-step1"
+solve
+goto-named "preservation-step"
+solve
+qed
+
+-- The statement 07 proves, in 07's order.
+
+:theorem preservation-tactics : ∀ (M : LC) (M1 : LC) (T : Ty) (d : typing empty M T) (s : step M M1) -> typing empty M1 T
+elaborate ⟨ \ M M1 T d s -> preservation-step M M1 s T d ⟩
+qed

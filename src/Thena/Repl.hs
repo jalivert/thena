@@ -40,16 +40,23 @@ module Thena.Repl
   , loadRuleFiles
   , loadFile
   , loadProofFile
+  , renderResponse
   , renderLoadError
+  , tabComplete
   ) where
 
 import Control.Monad.IO.Class (liftIO)
+import Data.Char (isSpace)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import System.Console.Haskeline
-  ( InputT
+  ( Completion (..)
+  , InputT
+  , completeFilename
   , defaultSettings
   , getInputLine
   , outputStrLn
   , runInputT
+  , setComplete
   )
 
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar, piOver)
@@ -64,6 +71,7 @@ import Thena.Core.Level
   )
 import Thena.Core.Term
   ( Core (..)
+  , Literal (..)
   , GlobalName (..)
   , Ident (..)
   , Scope
@@ -119,7 +127,11 @@ import Thena.Engine
   , focusContext
   )
 import Thena.Errors
-  ( DataBuildError (..)
+  ( BuildError (..)
+  , ObjectError (..)
+  , DataBuildError (..)
+  , Skipped (..)
+  , Warning (..)
   , Clash (..)
   , ConversionFailure (..)
   , DevForm (..)
@@ -132,10 +144,17 @@ import Thena.Errors
   , Site (..)
   , TypeError (..)
   )
-import Thena.Global.Declare (DeclareError (..))
+import Thena.Global.Declare (DeclareError (..), TokenClassError (..))
+import Thena.Language.Build (printTerm)
+import Thena.Language.Grammar (Grammar, GrammarError (..), GrammarProblem (..), ProductionProblem (..), RulePart (..), RuleProblem (..), Sort (..), earleyRules)
+import Thena.Language.Reader (ReadError (..))
+import qualified Thena.Language.Earley as Earley
+import Thena.Language.Regex (RegexError (..))
+import Thena.Global.NoConfusion (noConfusionNames)
 import qualified Data.List.NonEmpty as NE
 import Thena.Surface.Concrete
-  ( PairingError (..)
+  ( ObjectPiece (..)
+  , PairingError (..)
   , Plicity (..)
   , Surface (..)
   , SurfaceArg (..)
@@ -158,7 +177,7 @@ import Thena.Instral.Ops
   )
 import Thena.Rules (RuleBase (..), RuleError (..))
 import qualified Thena.Instral.Ops as Ops
-import Thena.Syntax.Lexer (LexError (..), Pos (..), Token (..))
+import Thena.Syntax.Lexer (BlockKind (..), LexError (..), Pos (..), Token (..))
 import Thena.Surface.Layout (LayoutError (..))
 import Thena.Surface.Parser (SurfaceParseError (..))
 import qualified Thena.Surface.Zipper as Zipper
@@ -166,7 +185,6 @@ import Thena.Syntax.Parser (ParseError (..))
 
 import Data.Foldable (toList)
 import Data.List (stripPrefix, intercalate, partition)
-import Thena.Instral.Grammar (GrammarError (..))
 import Thena.Instral.Type (Signature, Ty, renderSignature, renderTy)
 import Thena.Instral.Infer (renderInstralTypeError)
 import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRhs (..), RawBody (..), RawPattern (..))
@@ -179,15 +197,33 @@ import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRh
 repl :: IO ()
 repl = do
   (s, problems) <- startingSession
-  runInputT defaultSettings (mapM_ outputStrLn problems >> loop s Nothing)
+  -- **Tab reads the session through a reference** (MS6 phase 102b): haskeline
+  -- fixes its completion function when the loop starts, and what Tab should do
+  -- depends on the session at the moment it is pressed. The loop writes the
+  -- session before every prompt; nothing else writes it.
+  current <- newIORef s
+  let settings = setComplete (completion current) defaultSettings
+  runInputT settings (mapM_ outputStrLn problems >> loop current s Nothing)
 
-loop :: Session -> Maybe Question -> InputT IO ()
-loop s pending = do
+-- | In @:parse@'s mode, the parser's 'tabComplete'; anywhere else, file names,
+-- as haskeline did before.
+completion :: IORef Session -> (String, String) -> IO (String, [Completion])
+completion current input = do
+  s <- readIORef current
+  case sessionParsing s of
+    Just lang ->
+      let (kept, cs) = tabComplete (earleyRules (grammars (sessionMachine s))) lang input
+       in pure (kept, [ Completion r d False | (r, d) <- cs ])
+    Nothing   -> completeFilename input
+
+loop :: IORef Session -> Session -> Maybe Question -> InputT IO ()
+loop current s pending = do
+  liftIO (writeIORef current s)
   input <- getInputLine (prompt s pending)
   case input of
     Nothing   -> pure ()          -- end of input: Ctrl-D
     Just first -> gather first >>= \entry -> case entry of
-      Left problem -> outputStrLn problem >> loop s pending
+      Left problem -> outputStrLn problem >> loop current s pending
       Right line   -> run line
   where
    run line = do
@@ -197,9 +233,9 @@ loop s pending = do
         Just act | not (turnQuit t) -> do
           (s', out) <- liftIO act
           mapM_ outputStrLn out
-          loop s' Nothing
+          loop current s' Nothing
         _ | turnQuit t -> pure ()
-          | otherwise  -> loop (turnSession t) (turnPending t)
+          | otherwise  -> loop current (turnSession t) (turnPending t)
 
    -- | **An entry, not a line** (MS5 phase 70, rewritten at phase 78).
    --
@@ -404,7 +440,9 @@ renderLoadError path e = case e of
 -- constraint focus reads as @spine@ too: it is a link in the chain.
 prompt :: Session -> Maybe Question -> String
 prompt _ (Just _) = "> "
-prompt s Nothing  = "thena " ++ fragment ++ "> "
+prompt s Nothing
+  | Just lang <- sessionParsing s = "parse " ++ lang ++ "> "   -- MS6 phase 102b
+  | otherwise = "thena " ++ fragment ++ "> "
   where
     fragment = case focus (cursor (development (sessionMachine s))) of
       OnTerm {} -> "core"
@@ -504,58 +542,67 @@ transcriptFrom s0 = unlines . replay s0 Nothing
        in (prompt s pending ++ l) : turnOutput t ++ rest
 
 renderResponse :: Session -> Response -> [String]
-renderResponse s resp = case resp of
+renderResponse s resp = let gs = grammars (sessionMachine s) in case resp of
   Blank          -> []
   RenderedSurface t -> [renderSurface t]
-  Rendered t     -> [renderCore (counter s) (contextOf s) t]
-  RenderedDev p  -> [renderPartial (counter s) (contextOf s) p]
-  Shown c        -> [renderCursor (counter s) c]
-  ShownData d    -> renderInductive (counter s) d
-  ShownEliminator g ty  -> renderEliminator (counter s) g ty
-  ShownGlobal g lvs cs ps ty body -> renderGlobal (counter s) g lvs cs ps ty body
-  Where c        -> renderWhere (counter s) c
+  ParsedObject t -> [renderTree t]
+  ParsingEntered lang ->
+    [ "each line is an " ++ lang ++ " term: Tab shows what fits at the cursor, ? is a missing slot, :done leaves" ]
+  ParsingLeft lang -> ["done parsing " ++ lang]
+  ObjectUnparsed lang text why -> [renderUnparsed lang text why]
+  Rendered t     -> [renderCore gs (counter s) (contextOf s) t]
+  RenderedDev p  -> [renderPartial gs (counter s) (contextOf s) p]
+  Shown c        -> [renderCursor gs (counter s) c]
+  ShownData d    -> renderInductive gs (counter s) d
+  ShownEliminator g ty  -> renderEliminator gs (counter s) g ty
+  ShownGlobal g lvs cs ps ty body -> renderGlobal gs (counter s) g lvs cs ps ty body
+  Where c        -> renderWhere gs (counter s) c
   Inferred t ty  ->
-    [renderCore (counter s) (contextOf s) t ++ " : " ++ renderCore (counter s) (contextOf s) ty]
+    [renderCore gs (counter s) (contextOf s) t ++ " : " ++ renderCore gs (counter s) (contextOf s) ty]
   -- **The surface term as written, and the type elaborating it found** (MS4
   -- phase 43). The core term it built is deliberately not shown: it was rewound
   -- with the rest of the line, and naming a hole the session no longer has
   -- would invite a @goto@ into nothing.
   InferredSurface t ty ->
-    [renderSurface t ++ " : " ++ renderCore (counter s) (contextOf s) ty]
-  IllTyped e     -> renderTypeError (counter s) e
+    [renderSurface t ++ " : " ++ renderCore gs (counter s) (contextOf s) ty]
+  IllTyped e     -> renderTypeError gs (counter s) e
   -- The two terms are restated, because with η a yes is printed about terms
   -- that still look different (§5.2).
   Converted a b why owed ->
-    let q = renderCore (counter s) (contextOf s) a
-              ++ " ≟ " ++ renderCore (counter s) (contextOf s) b
+    let q = renderCore gs (counter s) (contextOf s) a
+              ++ " ≟ " ++ renderCore gs (counter s) (contextOf s) b
      in case why of
           -- A yes that holds only for some levels says so. Empty unless a bare
           -- @Type@ is involved, which is why no golden moved when this arrived.
           Nothing -> (q ++ "   yes") : map (("  provided " ++) . obligation) owed
-          Just f  -> (q ++ "   no") : renderConversionFailure (counter s) f
+          Just f  -> (q ++ "   no") : renderConversionFailure gs (counter s) f
   -- Nothing to print: the caller reads the file and prints what that produced.
   LoadRequested _ -> []
   Revalidated Nothing  -> ["valid"]
-  Revalidated (Just e) -> renderKernelError (counter s) e
-  Extracted t          -> [renderCore (counter s) [] t]
-  Proving g ty  -> ["proving " ++ nameString g ++ " : " ++ renderCore (counter s) [] ty]
+  Revalidated (Just e) -> renderKernelError gs (counter s) e
+  Extracted t          -> [renderCore gs (counter s) [] t]
+  Proving g ty  -> ["proving " ++ nameString g ++ " : " ++ renderCore gs (counter s) [] ty]
   Proved g lvs owed ty ->
-    [nameString g ++ scheme (counter s) lvs owed [] ty ++ "   ∎"]
+    [nameString g ++ scheme gs (counter s) lvs owed [] ty ++ "   ∎"]
   Suspended g   -> ["suspended " ++ nameString g]
   Resumed g     -> ["resumed " ++ nameString g]
   Abandoned g   -> ["abandoned " ++ nameString g]
   -- Show where it landed: an undo with no output looks like nothing happened.
-  Undone        -> [renderCursor (counter s) (cursor (development (sessionMachine s)))]
-  Proofs cur ps -> renderProofs (counter s) cur ps
+  Undone        -> [renderCursor gs (counter s) (cursor (development (sessionMachine s)))]
+  Proofs cur ps -> renderProofs gs (counter s) cur ps
   -- Nothing to print: the caller reads the file and prints what that produced.
   ProofRequested _ -> []
   -- **One line per declaration and nothing else** (MS4 phase 43). The op-level
   -- messages the run produced are already gone — 'Thena.Driver.loadProofSource'
   -- drops them on success — so what is left is the shape of the file.
-  ProofLoaded nm ds blocks ->
+  -- **The warnings come after what was loaded** (MS6 phase 98,
+  -- @ms6\/SPEC.md@ §2.2), because they are remarks about declarations that
+  -- went in: the file's shape is the answer, and a warning is a footnote to it.
+  ProofLoaded nm ds blocks ws ->
     ("module " ++ nm)
       : map ("  declared " ++) ds
       ++ [ "  and " ++ plural blocks "do block" | blocks > 0 ]
+      ++ map renderWarning ws
   -- Nothing to print: the caller reads the files and prints what that produced.
   RulesRequested _ -> []
   BasesLoaded bs   -> map loadedLine bs
@@ -573,7 +620,7 @@ renderResponse s resp = case resp of
   Matched rs    -> renderMatches rs
   Fitting v ty fs -> renderFitting v ty fs
   Choices cs    -> renderChoices cs
-  Ran msgs stop  -> msgs ++ renderStop s stop
+  Ran msgs ws stop -> msgs ++ map renderWarning ws ++ renderStop gs s stop
   Failed e       -> [renderSyntaxError e]
   -- The same errors a rule file is refused with, said without the /in rule ‹r›,
   -- instruction ‹i›/ that a typed line has no use for (MS5 phase 62b).
@@ -593,18 +640,23 @@ counter = names . sessionMachine
 contextOf :: Session -> Context
 contextOf = focusContext . development . sessionMachine
 
-renderStop :: Session -> Stop -> [String]
-renderStop s stop = case stop of
+renderStop :: [Grammar] -> Session -> Stop -> [String]
+renderStop gs s stop = case stop of
   Completed              -> []
   Waiting (Question p _) -> [p]
   -- **The message, then how to get out.** A yield takes every command the REPL
   -- has, so unlike a question it cannot say what it wants — what it can say is
   -- the one word that is not otherwise reachable from here.
   Yielded msg            -> [msg, "(yield to hand control back)"]
-  Halted r               -> ["stuck: " ++ renderFailReason r]
-  Refused e              -> ["refused: " ++ renderDeclareError e]
-  Uncertified e          -> "the kernel refused it" : renderKernelError (counter s) e
-  Paused                 -> renderMachine (counter s) (contextOf s) (sessionMachine s)
+  Halted r               -> ["stuck: " ++ renderFailReason gs r]
+  Refused e              -> ["refused: " ++ renderDeclareError gs e]
+  Uncertified e          -> "the kernel refused it" : renderKernelError gs (counter s) e
+  -- The same words the prompt gives for the same two mistakes ('LineRefused'
+  -- and 'EntryMistyped'), because a block is checked by the same checker —
+  -- it is only reached later now (MS6 phase 104b).
+  BlockRefused es        -> map whatRuleError es
+  BlockIllTyped errs     -> map (dropEntry . renderInstralTypeError) errs
+  Paused                 -> renderMachine gs (counter s) (contextOf s) (sessionMachine s)
 
 -- --------------------------------------------------------------------------
 -- Errors, made readable
@@ -612,12 +664,27 @@ renderStop s stop = case stop of
 
 renderSyntaxError :: SyntaxError -> String
 renderSyntaxError e = case e of
+  -- MS6 phase 101. The line is the module's, counted from 1.
+  BlockUnreadable r -> case r of
+    HeaderWithoutWhere l -> line l ++ "a block's first line names it and ends in where"
+    HeaderMalformed l -> line l ++ "a block's first line is its name and metavariables, separated by commas"
+    ProductionWithoutArrow l -> line l ++ "a production is ‹name› -> ‹items›, or ‹name› : ‹metadata› -> ‹items›"
+    MetadataMalformed l t ->
+      line l ++ t ++ " is not ‹x› as occurrence, ‹x› as binder or { ‹x›, … } as binders"
+    BindingMalformed l w
+      | null w -> line l ++ "a [ is never closed"
+      | otherwise -> line l ++ w ++ " is not a binding form ‹E›[‹x›, …]"
+    IndentedLess l -> line l ++ "this line is indented less than the productions above it"
+    -- MS6 phase 108: a judgment's header and rules (§6.1, §6.4).
+    JudgmentHeaderMalformed l -> line l ++ "a judgment's first line is ‹name› = ‹notation› where"
+    RuleUnnamed l -> line l ++ "a rule starts with its name, ‹name›:, or with rule ‹name› where ∀ … ->"
+    RuleWithoutLine l -> line l ++ "a rule needs a line of three or more - between its premises and its conclusion"
+    RuleWithoutConclusion l -> line l ++ "a rule needs a conclusion below its line"
+    QuantifierMalformed l -> line l ++ "rule ‹name› where is followed by ∀ (‹x› : ‹T›) … ->, with the -> ending its line"
+    PremiseIndentedLess l -> line l ++ "a premise line starts where the first premise does, and a line indented further continues it"
+    where line l = "line " ++ show l ++ ": "
   DeclarationsUnpaired (SignatureWithNoEquation x) ->
     x ++ " has a type but no definition — write " ++ x ++ " = ‹term› after it"
-  DeclarationsUnpaired DatatypeInATheoremList ->
-    "a datatype cannot be declared here"
-  DeclarationsUnpaired BlockInATheoremList ->
-    "a do block cannot appear here"
   -- **Numbered from one**, because the user counts instructions the way the
   -- printer numbers everything else, and the word is quoted back so the line is
   -- findable in a block that repeats an op.
@@ -663,6 +730,9 @@ renderSyntaxError e = case e of
       ++ show want ++ " method(s), not " ++ show got
   ResolveFailed (WrongNumberOfEliminationIndices d want got) ->
     d ++ " has " ++ show want ++ " index/indices, not " ++ show got
+  -- A tagged term literal in development-calculus text (MS6 phase 110): the
+  -- same message the surface's reader gives, from the same renderer.
+  ResolveFailed (NotAnObjectTerm why) -> renderObjectError why
   where
     at (Pos line col) = show line ++ ":" ++ show col ++ ": "
 
@@ -676,6 +746,12 @@ describe :: Token -> String
 describe t = case t of
   TLambda     -> "λ"
   TLanguage   -> "language"
+  TContext    -> "context"
+  TJudgment   -> "judgment"
+  TBlock k _  -> case k of
+    LanguageBlock -> "a language block"
+    ContextBlock  -> "a context block"
+    JudgmentBlock -> "a judgment block"
   -- Never lexed; "Thena.Driver" inserts it at a rule file's column 1.
   TChar c     -> show c
   TSpread     -> "..."
@@ -711,6 +787,7 @@ describe t = case t of
   TNeck       -> ":-"
   TNumber k   -> show k
   TString txt -> show txt
+  TRegex r    -> "/" ++ r ++ "/"
   TUniverse k   -> "Type" ++ subscript k
   TUniverseOpen -> "Type"
   TIdent s    -> s
@@ -718,6 +795,7 @@ describe t = case t of
   -- text, so what a reader needs back is the region's shape rather than its
   -- characters: the tag they wrote, and the two things that punctuate it.
   TTagOpen tag  -> tag ++ "`"
+  TTagOpenAt tag prod -> tag ++ "[" ++ prod ++ "]`"
   TTagClose     -> "`"
   TRaw txt      -> txt
   TEscapeOpen   -> "$" ++ ['{']
@@ -744,8 +822,8 @@ type Env = [(Var, String)]
 -- descend, 'open' needs a 'Var', and only 'fresh' mints one. It cannot inspect
 -- the term's existing 'Var's to pick a safe number instead — 'Var'\'s
 -- constructor is hidden (§2.6, §3.4).
-renderCore :: Int -> Context -> Core -> String
-renderCore n ctx = go n (envOf ctx) AtTop
+renderCore :: [Grammar] -> Int -> Context -> Core -> String
+renderCore gs n ctx = go gs n (envOf ctx) AtTop
 
 -- | Display names for a context's variables, freshened as the chain printer
 -- freshens a component's.
@@ -758,32 +836,53 @@ envOf = foldl add []
             Definition x (Ident h) _ _ -> (x, h)
        in (v, freshen hint e) : e
 
-go :: Int -> Env -> Prec -> Core -> String
-go n env prec term = case term of
+go :: [Grammar] -> Int -> Env -> Prec -> Core -> String
+
+-- **A term of an object language prints in that language's notation** (MS6
+-- phase 110): @LC`( λ x : ι . x )`@ rather than @abs "x" base (var "x")@, and
+-- a judgment the same, because a judgment is a production too. What the
+-- notation cannot write stands in a splice, printed by this same function, so
+-- a goal about an open term reads @LC`( ${M} ${N} )`@.
+--
+-- **A literal is atomic**, so it needs no parentheses at any precedence.
+go gs n env _ term
+  | Just txt <- printTerm gs (go gs n env AtTop) term = txt
+go gs n env prec term = case term of
   Bound i               -> "‹bound " ++ show i ++ "›"
   Free v                -> nameOf v env
   Global (GlobalName g) ls -> g ++ levelArgs ls
   Universe l            -> renderLevel l
 
-  App f a -> parensIf (prec > AtApp) (go n env AtApp f ++ " " ++ go n env AtAtom a)
+  -- A literal prints as it is written (MS6 phase 97a). Not @show@: Haskell
+  -- escapes more than 'Thena.Syntax.Lexer' reads back — a tab inside a string
+  -- literal is legal there and @show@ would render it @\t@, which the lexer
+  -- refuses. 'escapeString' and 'escapeChar' escape exactly what the lexer
+  -- unescapes, so printing and reading are inverse (the round trip is a test).
+  Primitive l           -> case l of
+    LString s -> escapeString s
+    LChar c   -> escapeChar c
+    LInt k    -> show k
+    LRegex r  -> "/" ++ r ++ "/"   -- the text as written, escapes and all
 
-  Lam {} -> parensIf (prec > AtTop) ("λ " ++ chainLam n env [] term)
+  App f a -> parensIf (prec > AtApp) (go gs n env AtApp f ++ " " ++ go gs n env AtAtom a)
+
+  Lam {} -> parensIf (prec > AtTop) ("λ " ++ chainLam gs n env [] term)
 
   Pi _ dom sc
-    | dependent n sc -> parensIf (prec > AtTop) ("∀ " ++ chainPi n env [] term)
+    | dependent n sc -> parensIf (prec > AtTop) ("∀ " ++ chainPi gs n env [] term)
     | otherwise ->
         let (v, n1) = fresh n
          in parensIf (prec > AtTop)
-              (go n1 env AtApp dom ++ " -> " ++ go n1 env AtTop (open v sc))
+              (go gs n1 env AtApp dom ++ " -> " ++ go gs n1 env AtTop (open v sc))
 
   Let (Ident hint) val ty sc ->
     let (v, n1) = fresh n
         name    = freshen hint env
      in parensIf (prec > AtTop) $
           "let " ++ name
-            ++ " = " ++ go n1 env AtTop val
-            ++ " : " ++ go n1 env AtTop ty
-            ++ " in " ++ go n1 ((v, name) : env) AtTop (open v sc)
+            ++ " = " ++ go gs n1 env AtTop val
+            ++ " : " ++ go gs n1 env AtTop ty
+            ++ " in " ++ go gs n1 ((v, name) : env) AtTop (open v sc)
 
   -- A 'Canonical' prints as its own wrapper applied — @succ zero@, not a
   -- bracketed internal form. DECIDED by the user 2026-08-22.
@@ -807,7 +906,7 @@ go n env prec term = case term of
     | null as   -> f ++ levelArgs ls
     | otherwise ->
         parensIf (prec > AtApp)
-          (unwords ((f ++ levelArgs ls) : map (go n env AtAtom) as))
+          (unwords ((f ++ levelArgs ls) : map (go gs n env AtAtom) as))
 
   -- @elim d (params) motive (methods) (indices) target@ (§2.6, phase 7) —
   -- positional, in 'Eliminate'\'s own field order, each group parenthesized
@@ -818,13 +917,13 @@ go n env prec term = case term of
       unwords
         [ "elim", d ++ levelArgs ls
         , atoms ps
-        , go n env AtAtom m
+        , go gs n env AtAtom m
         , atoms ms
         , atoms is
-        , go n env AtAtom t
+        , go gs n env AtAtom t
         ]
     where
-      atoms = paren . unwords . map (go n env AtAtom)
+      atoms = paren . unwords . map (go gs n env AtAtom)
       paren s = "(" ++ s ++ ")"
 
 -- | Does the scope's variable actually occur? This is the whole of the
@@ -833,26 +932,26 @@ dependent :: Int -> Scope Core -> Bool
 dependent n sc = let (v, _) = fresh n in v `elem` freeVars (open v sc)
 
 -- | A run of λs prints as one λ with several binder groups.
-chainLam :: Int -> Env -> [String] -> Core -> String
-chainLam n env acc term = case term of
+chainLam :: [Grammar] -> Int -> Env -> [String] -> Core -> String
+chainLam gs n env acc term = case term of
   Lam (Ident hint) dom sc ->
     let (v, n1) = fresh n
         name    = freshen hint env
-        group   = "(" ++ name ++ " : " ++ go n1 env AtTop dom ++ ")"
-     in chainLam n1 ((v, name) : env) (group : acc) (open v sc)
-  _ -> unwords (reverse acc) ++ " -> " ++ go n env AtTop term
+        group   = "(" ++ name ++ " : " ++ go gs n1 env AtTop dom ++ ")"
+     in chainLam gs n1 ((v, name) : env) (group : acc) (open v sc)
+  _ -> unwords (reverse acc) ++ " -> " ++ go gs n env AtTop term
 
 -- | The same for ∀, except that a non-dependent 'Pi' ends the run — it goes on
 -- to render as @S -> B@ through 'go'.
-chainPi :: Int -> Env -> [String] -> Core -> String
-chainPi n env acc term = case term of
+chainPi :: [Grammar] -> Int -> Env -> [String] -> Core -> String
+chainPi gs n env acc term = case term of
   Pi (Ident hint) dom sc
     | dependent n sc ->
         let (v, n1) = fresh n
             name    = freshen hint env
-            group   = "(" ++ name ++ " : " ++ go n1 env AtTop dom ++ ")"
-         in chainPi n1 ((v, name) : env) (group : acc) (open v sc)
-  _ -> unwords (reverse acc) ++ " -> " ++ go n env AtTop term
+            group   = "(" ++ name ++ " : " ++ go gs n1 env AtTop dom ++ ")"
+         in chainPi gs n1 ((v, name) : env) (group : acc) (open v sc)
+  _ -> unwords (reverse acc) ++ " -> " ++ go gs n env AtTop term
 
 nameOf :: Var -> Env -> String
 nameOf v env = case lookup v env of
@@ -929,8 +1028,8 @@ type Route = Maybe ([Step], Focus)
 
 -- | One chain link per line, at the current indent; a guess body indented one
 -- level inside its parentheses. Structural breaks only — no width, no reflow.
-renderPartial :: Int -> Context -> Partial -> String
-renderPartial n ctx = layout . goP n (envOf ctx) 0 Nothing
+renderPartial :: [Grammar] -> Int -> Context -> Partial -> String
+renderPartial gs n ctx = layout . goP gs n (envOf ctx) 0 Nothing
   where
     layout = intercalate "\n" . map (\(Line _ ind t) -> pad ind ++ t)
 
@@ -939,25 +1038,25 @@ renderPartial n ctx = layout . goP n (envOf ctx) 0 Nothing
 -- The marker is chain-link precision: it names the link the focus is in, and
 -- @:where@ says where inside it. Rendered from the root with no seed context,
 -- because rendering from the root introduces every binder on the way down.
-renderCursor :: Int -> Cursor -> String
-renderCursor n cur = intercalate "\n" (map gutter lines')
+renderCursor :: [Grammar] -> Int -> Cursor -> String
+renderCursor gs n cur = intercalate "\n" (map gutter lines')
   where
-    lines' = goP n [] 0 (Just (toList (prefix cur), focus cur)) (rebuild cur)
+    lines' = goP gs n [] 0 (Just (toList (prefix cur), focus cur)) (rebuild cur)
     -- A different glyph from the ▸ that ends a constraint line and separates
     -- the breadcrumb: those are §2.7's "then", and this is not that.
     gutter (Line marked ind t) = (if marked then "▶ " else "  ") ++ pad ind ++ t
 
-goP :: Int -> Env -> Int -> Route -> Partial -> [Line]
-goP n env ind route p = case p of
-  Trailing t -> [Line (isHere route) ind (trailing n env t)]
+goP :: [Grammar] -> Int -> Env -> Int -> Route -> Partial -> [Line]
+goP gs n env ind route p = case p of
+  Trailing t -> [Line (isHere route) ind (trailing gs n env t)]
 
   Pending k rest ->
-    Line (isHere route) ind (renderConstraint n env k ++ " ▸")
-      : goP n env ind (past route) rest
+    Line (isHere route) ind (renderConstraint gs n env k ++ " ▸")
+      : goP gs n env ind (past route) rest
 
   Under c rest ->
-    let (text, env') = link n env c
-        after = goP n env' ind (onward route) rest
+    let (text, env') = link gs n env c
+        after = goP gs n env' ind (onward route) rest
      in Line (isHere route) ind text
           : case c of
               -- The body is rendered in 'env' WITHOUT the hole's own name,
@@ -965,7 +1064,7 @@ goP n env ind route p = case p of
               -- invisible unless the body binds the hole's identifier — see
               -- phase 3's §7.2.
               Guess _ _ g _ ->
-                goP n env (ind + 2) (inward route) g ++ Line False ind ") in" : after
+                goP gs n env (ind + 2) (inward route) g ++ Line False ind ") in" : after
               _ -> after
 
 -- | The line a chain link prints as, and the environment for what follows it.
@@ -973,23 +1072,23 @@ goP n env ind route p = case p of
 -- A guess prints as its opening line only; its body is separate lines and the
 -- caller places them. Shared with @:where@, which prints exactly this line for
 -- a component focus.
-link :: Int -> Env -> Component -> (String, Env)
-link n env c = (text, (v, name) : env)
+link :: [Grammar] -> Int -> Env -> Component -> (String, Env)
+link gs n env c = (text, (v, name) : env)
   where
     (v, hint) = bound c
     name      = freshen hint env
     text      = case c of
-      Assume _ _ ty     -> "λ (" ++ name ++ " : " ++ go n env AtTop ty ++ ") ->"
+      Assume _ _ ty     -> "λ (" ++ name ++ " : " ++ go gs n env AtTop ty ++ ") ->"
       Define _ _ val ty ->
-        "let " ++ name ++ " = " ++ go n env AtTop val
-          ++ " : " ++ go n env AtTop ty ++ " in"
-      Claim _ _ ty      -> "let ? " ++ name ++ " : " ++ go n env AtTop ty ++ " in"
-      Guess _ _ _ ty    -> "let ? " ++ name ++ " : " ++ go n env AtTop ty ++ " ≐ ("
+        "let " ++ name ++ " = " ++ go gs n env AtTop val
+          ++ " : " ++ go gs n env AtTop ty ++ " in"
+      Claim _ _ ty      -> "let ? " ++ name ++ " : " ++ go gs n env AtTop ty ++ " in"
+      Guess _ _ _ ty    -> "let ? " ++ name ++ " : " ++ go gs n env AtTop ty ++ " ≐ ("
       -- The same spelling a core Π's binder has, for the reason the λ line
       -- above has a core λ's: the DC's concrete syntax reads a leading binder
       -- run as components (§2.7, "Thena.Syntax.Resolve"'s @partial@), so what
       -- is printed here is what is parsed back.
-      Quantify _ _ ty   -> "∀ (" ++ name ++ " : " ++ go n env AtTop ty ++ ") ->"
+      Quantify _ _ ty   -> "∀ (" ++ name ++ " : " ++ go gs n env AtTop ty ++ ") ->"
 
 -- | The variable a component binds, and the name it would like.
 bound :: Component -> (Var, String)
@@ -1024,12 +1123,12 @@ inward _                             = Nothing
 -- The type section is absent when the structure does not carry one. That is not
 -- a failure to look: deriving a type for an arbitrary core subterm is @infer@'s
 -- job and arrives at phase 8. See 'Thena.Development.Cursor.expectedType'.
-renderWhere :: Int -> Cursor -> [String]
-renderWhere n cur =
+renderWhere :: [Grammar] -> Int -> Cursor -> [String]
+renderWhere gs n cur =
   section "focus"   [focusText]
     ++ section "path"    [intercalate " ▸ " ("root" : crumbs ++ coreCrumbs)]
     ++ section "context" (if null ctx then ["(nothing in scope)"] else map entry ctx)
-    ++ maybe [] (\t -> section "type" [go n env' AtTop t]) (expectedType cur)
+    ++ maybe [] (\t -> section "type" [go gs n env' AtTop t]) (expectedType cur)
   where
     section heading ls = heading : map ("  " ++) ls
 
@@ -1037,17 +1136,17 @@ renderWhere n cur =
     (env, crumbs) = walkSteps (toList (prefix cur))
 
     (env', coreCrumbs, focusText) = case focus cur of
-      OnComponent c  -> (env, [], fst (link n env c))
-      OnConstraint k -> (env, [], renderConstraint n env k)
+      OnComponent c  -> (env, [], fst (link gs n env c))
+      OnConstraint k -> (env, [], renderConstraint gs n env k)
       OnTerm x ts t  ->
         let (e, ws) = walkTerm env (toList ts)
-         in (e, crossingWord x : ws, go n e AtTop t)
+         in (e, crossingWord x : ws, go gs n e AtTop t)
 
     entry e = case e of
       Hypothesis v _ ty ->
-        nameOf v env' ++ " : " ++ go n env' AtTop ty
+        nameOf v env' ++ " : " ++ go gs n env' AtTop ty
       Definition v _ val ty ->
-        nameOf v env' ++ " = " ++ go n env' AtTop val ++ " : " ++ go n env' AtTop ty
+        nameOf v env' ++ " = " ++ go gs n env' AtTop val ++ " : " ++ go gs n env' AtTop ty
 
 -- | Walk the prefix root first, collecting display names and breadcrumb words.
 --
@@ -1123,11 +1222,11 @@ partWord p = case p of
 -- | A 'Trailing' term that is itself a binder would re-read as another chain
 -- link, so it is quoted. This is longest prefix's escape hatch, and it is what
 -- keeps print-then-read stable (§2.7).
-trailing :: Int -> Env -> Core -> String
-trailing n env t = case t of
-  Lam {} -> "⌜ " ++ go n env AtTop t ++ " ⌝"
-  Let {} -> "⌜ " ++ go n env AtTop t ++ " ⌝"
-  _      -> go n env AtTop t
+trailing :: [Grammar] -> Int -> Env -> Core -> String
+trailing gs n env t = case t of
+  Lam {} -> "⌜ " ++ go gs n env AtTop t ++ " ⌝"
+  Let {} -> "⌜ " ++ go gs n env AtTop t ++ " ⌝"
+  _      -> go gs n env AtTop t
 
 -- | The one fragment change, named for what was crossed into.
 crossingWord :: Crossing -> String
@@ -1141,24 +1240,24 @@ crossingWord x = case x of
     TypeOfGuess   _ (Ident h) _ -> "type of " ++ h
     TypeOfQuantify _ (Ident h)  -> "type of " ++ h
 
-renderConstraint :: Int -> Env -> Constraint -> String
-renderConstraint n env (Equate xi s t ty) =
-  let (groups, env') = telescopeOf n env xi
+renderConstraint :: [Grammar] -> Int -> Env -> Constraint -> String
+renderConstraint gs n env (Equate xi s t ty) =
+  let (groups, env') = telescopeOf gs n env xi
    in concatMap (++ " ") groups
-        ++ "⊢ " ++ go n env' AtTop s
-        ++ " ≟ " ++ go n env' AtTop t
-        ++ " : " ++ go n env' AtTop ty
+        ++ "⊢ " ++ go gs n env' AtTop s
+        ++ " ≟ " ++ go gs n env' AtTop t
+        ++ " : " ++ go gs n env' AtTop ty
 
 -- | Ξ prints as §2.6 binder groups, outermost first, each scoping over the rest.
-telescopeOf :: Int -> Env -> [Entry] -> ([String], Env)
-telescopeOf _ env [] = ([], env)
-telescopeOf n env (e : rest) =
+telescopeOf :: [Grammar] -> Int -> Env -> [Entry] -> ([String], Env)
+telescopeOf _ _ env [] = ([], env)
+telescopeOf gs n env (e : rest) =
   let (v, hint, ty) = case e of
         Hypothesis x (Ident h) s   -> (x, h, s)
         Definition x (Ident h) _ s -> (x, h, s)
       name  = freshen hint env
-      group = "(" ++ name ++ " : " ++ go n env AtTop ty ++ ")"
-      (groups, env') = telescopeOf n ((v, name) : env) rest
+      group = "(" ++ name ++ " : " ++ go gs n env AtTop ty ++ ")"
+      (groups, env') = telescopeOf gs n ((v, name) : env) rest
    in (group : groups, env')
 
 pad :: Int -> String
@@ -1175,16 +1274,16 @@ pad ind = replicate ind ' '
 -- This is a /display/ of the instruction data, not a concrete syntax for the
 -- instruction language — that is MS2's and is deliberately not in the build
 -- order. Nothing here parses back.
-renderMachine :: Int -> Context -> Machine -> [String]
-renderMachine n ctx m =
+renderMachine :: [Grammar] -> Int -> Context -> Machine -> [String]
+renderMachine gs n ctx m =
   ["pc"]    ++ indented (zipWith instruction [0 :: Int ..] (pc (exec m)))
     ++ ["env"]   ++ indented (map binding (env (exec m)))
     ++ ["stack"] ++ indented (map frame (stack (exec m)))
   where
     indented []  = ["  (empty)"]
     indented xs  = map ("  " ++) xs
-    instruction i instr = show i ++ "  " ++ renderInstr n ctx instr
-    binding (x, v) = x ++ " = " ++ renderValue n ctx v
+    instruction i instr = show i ++ "  " ++ renderInstr gs n ctx instr
+    binding (x, v) = x ++ " = " ++ renderValue gs n ctx v
     -- **A returned frame says so** (MS4 phase 57). Both frames are kept and
     -- stepped over once control has passed back out of them, so the stack
     -- shows callers that are still standing and callers that are only being
@@ -1193,16 +1292,16 @@ renderMachine n ctx m =
       "call, " ++ show (length (resume fr)) ++ " instruction(s) to resume"
         ++ if returned fr then " (returned)" else ""
 
-renderInstr :: Int -> Context -> Instr -> String
-renderInstr n ctx instr = case instr of
+renderInstr :: [Grammar] -> Int -> Context -> Instr -> String
+renderInstr gs n ctx instr = case instr of
   -- **An annotation prints as the line the author wrote** (MS5 phase 77) — its
   -- own, before the binding — because that is the only spelling the grammar
   -- reads back. Stepping mode shows one instruction per line either way.
   Bind x (Just t) op ->
     renderPattern x ++ " : " ++ renderTy t ++ " ; "
-      ++ renderPattern x ++ " = " ++ renderOp n ctx op
-  Bind x Nothing  op -> renderPattern x ++ " = " ++ renderOp n ctx op
-  Do op              -> renderOp n ctx op
+      ++ renderPattern x ++ " = " ++ renderOp gs n ctx op
+  Bind x Nothing  op -> renderPattern x ++ " = " ++ renderOp gs n ctx op
+  Do op              -> renderOp gs n ctx op
 
 -- | One instruction's op, as stepping mode shows it.
 --
@@ -1220,8 +1319,8 @@ renderInstr n ctx instr = case instr of
 -- 'Thena.Instral.Ops.operandsOf', both total, and now renders correctly by default
 -- instead of needing a third case that can be written wrong. Totality here
 -- bought nothing — the case that drifted at 23b existed; it was just wrong.
-renderOp :: Int -> Context -> Op -> String
-renderOp n ctx op = case op of
+renderOp :: [Grammar] -> Int -> Context -> Op -> String
+renderOp gs n ctx op = case op of
   Ops.Ask    p k  -> word ++ " " ++ operand p ++ " " ++ answerKind k
   -- The one infix operand shape.
   Ops.Unify  l r  -> word ++ " " ++ operand l ++ " \8799 " ++ operand r
@@ -1236,24 +1335,66 @@ renderOp n ctx op = case op of
   _               -> unwords (word : map operand (operandsOf op))
   where
     word    = Ops.opKeyword op
-    operand = renderOperand n ctx
+    operand = renderOperand gs n ctx
 
-renderOperand :: Int -> Context -> Operand -> String
-renderOperand n ctx o = case o of
+renderOperand :: [Grammar] -> Int -> Context -> Operand -> String
+renderOperand gs n ctx o = case o of
   Ref x -> x
-  Lit v -> renderValue n ctx v
+  Lit v -> renderValue gs n ctx v
   -- Written back as they were written (MS5 phase 65).
-  ListOf os  -> "[" ++ intercalate ", " (map (renderOperand n ctx) os) ++ "]"
+  ListOf os  -> "[" ++ intercalate ", " (map (renderOperand gs n ctx) os) ++ "]"
   PairOf a b ->
-    "(" ++ renderOperand n ctx a ++ ", " ++ renderOperand n ctx b ++ ")"
+    "(" ++ renderOperand gs n ctx a ++ ", " ++ renderOperand gs n ctx b ++ ")"
+  -- **An object term prints as the shape it is**, not as the region it was
+  -- written as (MS6 phase 104c): the text is gone by the time a rule is
+  -- listed, and printing it back would need the grammar here.
+  ObjectOf sk -> renderSkeleton (renderOperand gs n ctx) sk
+
+-- | An object term's shape, with whatever stands at its holes (MS6 phase
+-- 104c). Written as the constructor application it is — @app(var("f"), x)@ —
+-- because the region's own notation needs the grammar and this printer has
+-- none.
+renderSkeleton :: (a -> String) -> Ops.Skeleton a -> String
+renderSkeleton at sk = case sk of
+  Ops.SNode (GlobalName nm) [] -> nm
+  Ops.SNode (GlobalName nm) kids ->
+    nm ++ "(" ++ intercalate ", " (map (renderSkeleton at) kids) ++ ")"
+  Ops.SLit l -> case l of
+    LString x -> escapeString x
+    LChar c   -> escapeChar c
+    LInt k    -> show k
+    LRegex r  -> "/" ++ r ++ "/"
+  Ops.SHole _ a -> "$" ++ ['{'] ++ at a ++ ['}']
 
 -- | The fence a tagged region is written with. Named rather than written
 -- inline so that a backtick never sits loose in a string literal here.
 tick :: Char
 tick = toEnum 96
 
-renderValue :: Int -> Context -> Value -> String
-renderValue n ctx v = case v of
+-- | A string literal as the lexer reads it back: @\"@, @\\@ and @\n@ are the
+-- three escapes @\@escape@ accepts, and every other character stands for
+-- itself — a tab included, which is why this is not @show@.
+escapeString :: String -> String
+escapeString s = "\"" ++ concatMap esc s ++ "\""
+  where
+    esc c = case c of
+      '"'  -> "\\\""
+      '\\' -> "\\\\"
+      '\n' -> "\\n"
+      _    -> [c]
+
+-- | A character literal, escaped as @\@chresc@ reads it.
+escapeChar :: Char -> String
+escapeChar c = "'" ++ esc ++ "'"
+  where
+    esc = case c of
+      '\'' -> "\\'"
+      '\\' -> "\\\\"
+      '\n' -> "\\n"
+      _    -> [c]
+
+renderValue :: [Grammar] -> Int -> Context -> Value -> String
+renderValue gs n ctx v = case v of
   VText s            -> show s
   -- The primitives (MS5 phase 64), each printed as it is written. @show@ is
   -- exactly right for the first two — Haskell's escapes are ours — and the
@@ -1262,21 +1403,18 @@ renderValue n ctx v = case v of
   VChar c            -> show c
   VBool True         -> "true"
   VBool False        -> "false"
-  VList vs           -> "[" ++ intercalate ", " (map (renderValue n ctx) vs) ++ "]"
+  VList vs           -> "[" ++ intercalate ", " (map (renderValue gs n ctx) vs) ++ "]"
   VOption Nothing    -> "none"
-  VOption (Just u)   -> "some " ++ renderValue n ctx u
+  VOption (Just u)   -> "some " ++ renderValue gs n ctx u
   -- **A closure prints as its shape** (MS5 phase 68b): its body is instructions
   -- and its captured environment may hold anything, so printing either would say
   -- more than a reader wants and less than they could use.
   VClosure ps _ _    -> "\\ " ++ unwords (map renderPattern ps) ++ " -> …"
-  -- **Printed as its tag**, which is how it was written and the only thing about
-  -- it @instral@ is allowed to know (MS5 phase 69).
-  VObject tag _      -> tag ++ "`…`"
   -- **A level prints the way one prints inside a type** (MS5 phase 89), which
-  -- is the printer a scheme already uses — so @0@, @ℓ₇@ and @?ℓ12@ all read as
+  -- is the printer a scheme gs already uses — so @0@, @ℓ₇@ and @?ℓ12@ all read as
   -- they do everywhere else.
   VLevel l           -> renderLevel l
-  VTerm t            -> "⌜" ++ renderCore n ctx t ++ "⌝"
+  VTerm t            -> "⌜" ++ renderCore gs n ctx t ++ "⌝"
   -- **An unresolved core term prints as its shape, not its contents** (MS5
   -- phase 61b). Printing a 'Thena.Syntax.Concrete.Raw' back would need a
   -- printer for the written syntax, and there has never been one: every other
@@ -1292,7 +1430,7 @@ renderValue n ctx v = case v of
   VSurface z         -> "‹" ++ renderSurface (Zipper.focus z) ++ "›"
   -- A rule in an operand is a rule being passed to another rule, so its name
   -- is what identifies it; its body belongs to @:show@ on the rule, not here.
-  VPair a b          -> "(" ++ renderValue n ctx a ++ ", " ++ renderValue n ctx b ++ ")"
+  VPair a b          -> "(" ++ renderValue gs n ctx a ++ ", " ++ renderValue gs n ctx b ++ ")"
 
 answerKind :: AnswerKind -> String
 answerKind k = case k of
@@ -1311,6 +1449,8 @@ renderCommandError e = case e of
   NotAsking            -> "nothing was asked"
   NotYielding          -> "nothing has yielded"
   NoSuchGlobal x       -> "nothing named " ++ x ++ " has been declared"
+  NoSuchLanguage x     -> "no language called " ++ x ++ " has been declared"
+  NotParsing           -> ":done leaves :parse's mode, and this is not it"
   NotProving           -> "no proof is being worked on"
   AlreadyProving g     -> nameString g ++ " is still being proved — :suspend or :abandon it first"
   NoSuchProof x        -> "no suspended proof called " ++ x
@@ -1323,12 +1463,12 @@ renderCommandError e = case e of
   MixedLoad w          -> w ++ " takes either one script or any number of " ++ ruleSuffix ++ " files"
   ProofUnderway g      ->
     "a rule base may not be loaded while " ++ nameString g ++ " is being proved"
-  ProofsSuspended gs   ->
+  ProofsSuspended names ->
     "a rule base may not be loaded while proofs are suspended: "
-      ++ intercalate ", " (map nameString gs)
+      ++ intercalate ", " (map nameString names)
 
-renderFailReason :: FailReason -> String
-renderFailReason r = case r of
+renderFailReason :: [Grammar] -> FailReason -> String
+renderFailReason gs r = case r of
   -- MS4 phase 41: the elaborator met a node it has no case for. Phase 41b's
   -- list, said to the user rather than swallowed.
   NoElaborationRule what ->
@@ -1353,35 +1493,35 @@ renderFailReason r = case r of
   NothingToReturnFrom ->
     "there is no call to return from here"
   Mismatch ctx a b ->
-    renderCore 0 ctx a ++ " and " ++ renderCore 0 ctx b ++ " cannot be made equal"
+    renderCore gs 0 ctx a ++ " and " ++ renderCore gs 0 ctx b ++ " cannot be made equal"
   OccursCheck ctx x t ->
-    "solving " ++ nameIn ctx x ++ " with " ++ renderCore 0 ctx t
+    "solving " ++ nameIn ctx x ++ " with " ++ renderCore gs 0 ctx t
       ++ " would define it in terms of itself"
   ScopeViolation ctx x y ->
     nameIn ctx y ++ " is not bound before " ++ nameIn ctx x
       ++ ", so there is no solution for it there"
   UniverseMismatch a b ->
     renderLevel a ++ " and " ++ renderLevel b ++ " are different universes"
-  NotTypeable e -> "that term has no type" ++ concatMap ("\n  " ++) (renderTypeError 0 e)
+  NotTypeable e -> "that term has no type" ++ concatMap ("\n  " ++) (renderTypeError gs 0 e)
   BinderNotAType e ->
     "that is not a type"
-      ++ concatMap ("\n  " ++) (renderTypeError 0 e)
+      ++ concatMap ("\n  " ++) (renderTypeError gs 0 e)
   GuessIllTyped e ->
     "that term does not have the hole's type"
-      ++ concatMap ("\n  " ++) (renderTypeError 0 e)
+      ++ concatMap ("\n  " ++) (renderTypeError gs 0 e)
   NoGoalHere        -> "nothing is written down here, so there is no goal"
   NoRuleMatched     -> "no rule applies here"
   -- **Two sentences, and the second is the offer** (MS5 phase 95). The first is
   -- whatever went wrong; the second says the machine declined to backtrack past
   -- this line and names the word that would.
   WouldLeaveTheLine why i ->
-    renderFailReason why
+    renderFailReason gs why
       ++ "\n  undoing that would backtrack to "
       ++ show i
       ++ ", which was chosen before this line — retry "
       ++ show i
       ++ " to take it"
-  CannotEliminate e -> renderElimError e
+  CannotEliminate e -> renderElimError gs e
   UnboundInBody x   -> "nothing named " ++ x ++ " in this body"
   NotAnIdentifier s -> show s ++ " is not a name"
   ExpectedText      -> "expected text"
@@ -1415,6 +1555,11 @@ renderFailReason r = case r of
   -- that it *"is misleading and ambiguous"*.
   ExpectedSurface   -> "expected a surface term"
   ExpectedSurfaceShape what -> "expected a surface term that is " ++ what
+  -- **The four ways a tagged term literal does not become a term** (MS6 phase
+  -- 104). One renderer, because both readers raise the same 'ObjectError'
+  -- (phase 110); the third is the message @:parse@ gives, from the same
+  -- renderer again, since it is the same parser and the same grammar.
+  ObjectFailed why -> renderObjectError why
   -- One reason, three messages (§8, phase 23): the name is unknown, the name
   -- is known at other arities, or clauses of the right arity all failed their
   -- heads. Which one it is falls out of the arities the reason carries.
@@ -1486,6 +1631,9 @@ renderSurface = surf Loose
       RawPText t   -> show t
       RawPApp w as -> "(" ++ unwords (w : map rawPattern as) ++ ")"
       RawPPair a b -> "(" ++ rawPattern a ++ ", " ++ rawPattern b ++ ")"
+      -- Exact, because a region keeps its source text (MS6 phase 104c).
+      RawPObject tag prod src ->
+        tag ++ maybe "" (\w -> "[" ++ w ++ "]") prod ++ [tick] ++ src ++ [tick]
       RawPList ps mt ->
         "[" ++ intercalate ", " (map rawPattern ps ++ tl) ++ "]"
         where tl = case mt of
@@ -1504,7 +1652,8 @@ renderSurface = surf Loose
       RawPairOf x y -> "(" ++ operand x ++ ", " ++ operand y ++ ")"
       -- Exact, because the region kept its source text: a rule listing shows
       -- the embedded term as the author wrote it.
-      RawRegion tag src -> tag ++ [tick] ++ src ++ [tick]
+      RawRegion tag prod src ->
+        tag ++ maybe "" (\w -> "[" ++ w ++ "]") prod ++ [tick] ++ src ++ [tick]
       -- The same gap 'renderValue' has for a 'Thena.Instral.Ops.VRaw': there is no
       -- printer for written syntax, so this says what it is rather than what it
       -- contains (§7b's register).
@@ -1516,6 +1665,18 @@ renderSurface = surf Loose
 
     surf _ (SurfaceName x)      = x
     surf _ (SurfaceUniverse l)  = "Type" ++ subscript l
+    surf _ (SurfaceLiteral l)   = case l of
+      LString s -> escapeString s
+      LChar c   -> escapeChar c
+      LInt k    -> show k
+      LRegex r  -> "/" ++ r ++ "/"
+    -- **A tagged term literal prints as it was written** (MS6 phase 104): its
+    -- text is kept, and only the three characters the region scanner reads
+    -- specially are put back behind a backslash. A splice prints as a term,
+    -- because that is what it holds.
+    surf _ (SurfaceObject lang prod ps) =
+      lang ++ maybe "" (\p -> "[" ++ p ++ "]") prod
+        ++ [tick] ++ concatMap objectPiece ps ++ [tick]
     surf _ SurfaceUniverseOpen  = "Type"
     surf _ SurfacePlaceholder   = "_"
     surf _ (SurfaceHole h)      = "?" ++ h
@@ -1548,6 +1709,17 @@ renderSurface = surf Loose
       paren (p >= Tight)
         ("elim " ++ d ++ " " ++ list ps ++ " " ++ surf Tight mot ++ " " ++ list ms
            ++ " " ++ list is ++ " " ++ surf Tight tgt)
+
+    objectPiece pc = case pc of
+      ObjectText txt -> concatMap escapeRaw txt
+      ObjectSplice e -> "$" ++ ['{'] ++ surf Loose e ++ ['}']
+
+    -- The region scanner reads a backslash before any of these as the
+    -- character itself, so writing them this way is what makes the printer's
+    -- output readable again.
+    escapeRaw c
+      | c `elem` [tick, '\\', '$'] = ['\\', c]
+      | otherwise                  = [c]
 
     arg (SurfaceArg Explicit t) = " " ++ surf Tight t
     arg (SurfaceArg Implicit t) = " {" ++ surf Loose t ++ "}"
@@ -1583,17 +1755,17 @@ obligation :: Obligation -> String
 obligation (AtMost l k) = renderLevelAtom l ++ " ≤ " ++ renderLevelAtom k
 
 -- | Why the kernel refused, or where a development stopped being valid (§5.3).
-renderKernelError :: Int -> KernelError -> [String]
-renderKernelError n e = case e of
+renderKernelError :: [Grammar] -> Int -> KernelError -> [String]
+renderKernelError gs n e = case e of
   NotClosed x  ->
     ["the term mentions " ++ show x ++ ", which nothing binds"]
   Overabstracted _ i ty ->
     [ "the assumption " ++ identString i ++ " has no matching binder in "
-        ++ renderCore n [] ty
+        ++ renderCore gs n [] ty
     ]
   NotAUniverseAbove _ i ty ->
     [ "the ∀-binder " ++ identString i ++ " builds a type, but "
-        ++ renderCore n [] ty ++ " is not a universe"
+        ++ renderCore gs n [] ty ++ " is not a universe"
     ]
   Levels (Refuted l k) ->
     [ renderLevelAtom l ++ " is not at most " ++ renderLevelAtom k ]
@@ -1610,7 +1782,7 @@ renderKernelError n e = case e of
     [ "these universe levels appear only in the term, and nothing determines "
         ++ "them: " ++ unwords (map levelVarName vs) ]
   Ill pos te   ->
-    ("in " ++ renderPosition pos ++ ":") : map ("  " ++) (renderTypeError n te)
+    ("in " ++ renderPosition pos ++ ":") : map ("  " ++) (renderTypeError gs n te)
 
 -- | Where in a development, said the way the user would say it.
 renderPosition :: Position -> String
@@ -1624,15 +1796,15 @@ renderPosition p = case p of
   Inside _ i inner -> renderPosition inner ++ ", inside the guess for " ++ identString i
 
 -- | @:proofs@ — what the session is holding (§2.4).
-renderProofs :: Int -> Maybe Attempt -> [Parked] -> [String]
-renderProofs n cur ps
+renderProofs :: [Grammar] -> Int -> Maybe Attempt -> [Parked] -> [String]
+renderProofs gs n cur ps
   | null everything = ["no proofs"]
   | otherwise       = everything
   where
     everything = maybe [] (pure . line "▶ ") cur
                  ++ map (line "  " . parkedAttempt) ps
     line mark att =
-      mark ++ nameString (attemptName att) ++ " : " ++ renderCore n [] (attemptClaim att)
+      mark ++ nameString (attemptName att) ++ " : " ++ renderCore gs n [] (attemptClaim att)
 
 renderMoveError :: MoveError -> String
 renderMoveError m = case m of
@@ -1662,8 +1834,8 @@ renderMoveError m = case m of
 -- (§3.7), while the indices are printed as the type they bind, so that
 -- 'renderCore' decides between @Nat -> Type\8320@ and @\8704 (n : Nat) -> \8230@ by
 -- its own rule (§2.6).
-renderInductive :: Int -> InductiveDefinition -> [String]
-renderInductive n d = case inductiveConstructors d of
+renderInductive :: [Grammar] -> Int -> InductiveDefinition -> [String]
+renderInductive gs n d = case inductiveConstructors d of
   -- @header@ already ends in @where@ — a datatype with no constructors gets
   -- the empty brace group and nothing else. It said @where where { }@ until
   -- phase 33c, which is when a bare @Type@ made @data Box : Type where { }@
@@ -1680,7 +1852,7 @@ renderInductive n d = case inductiveConstructors d of
         ++ levelParams (inductiveLevels d)
         ++ concatMap group (zip [0 ..] ps)
         ++ " : "
-        ++ renderCore n ps (piOver (inductiveIndices d) (Universe (inductiveLevel d)))
+        ++ renderCore gs n ps (piOver (inductiveIndices d) (Universe (inductiveLevel d)))
         ++ " where"
 
     -- A parameter's type sees the parameters before it and no more.
@@ -1688,7 +1860,7 @@ renderInductive n d = case inductiveConstructors d of
       " ("
         ++ nameOf (entryVar e) penv
         ++ " : "
-        ++ renderCore n (take i ps) (entryType e)
+        ++ renderCore gs n (take i ps) (entryType e)
         ++ ")"
 
     -- The parameters are already in scope, so a constructor line binds only its
@@ -1698,7 +1870,7 @@ renderInductive n d = case inductiveConstructors d of
     line c =
       nameString (constructorName c)
         ++ " : "
-        ++ renderCore n ps (piOver (constructorArguments c) (constructorTarget d c))
+        ++ renderCore gs n ps (piOver (constructorArguments c) (constructorTarget d c))
 
     closed ls = init ls ++ [last ls ++ " }"]
 
@@ -1708,16 +1880,16 @@ renderInductive n d = case inductiveConstructors d of
 -- no such constant and inventing a name for the display would suggest one
 -- (§3.7, reversed 2026-08-22). What is printed on the left is the concrete
 -- syntax the user actually writes.
-renderEliminator :: Int -> GlobalName -> Core -> [String]
-renderEliminator n g ty =
-  ["elim " ++ nameString g ++ " : " ++ renderCore n [] ty]
+renderEliminator :: [Grammar] -> Int -> GlobalName -> Core -> [String]
+renderEliminator gs n g ty =
+  ["elim " ++ nameString g ++ " : " ++ renderCore gs n [] ty]
 
 -- | @:show ‹name›@ on anything that is not a datatype.
 --
 -- The body is on its own line because it is what a generated wrapper /is/, and
 -- the point of generating into the environment rather than conjuring inside a
 -- tactic is that the student can go and look at it (§3.7).
--- | A global, with its level scheme (MS3 phase 33b).
+-- | A global, with its level scheme gs (MS3 phase 33b).
 --
 -- **The parameters and the constraints are printed, and until this phase
 -- neither was.** Nothing had level parameters that reached here while theorems
@@ -1725,16 +1897,16 @@ renderEliminator n g ty =
 -- every polymorphic theorem one, and a type mentioning @ℓ0@ with nothing
 -- binding it is unreadable.
 --
--- The constraints have **no surface spelling** — nothing writes a scheme by
+-- The constraints have **no surface spelling** — nothing writes a scheme gs by
 -- hand any more — so they are shown the way @:convert@ shows what it owes.
 renderGlobal
-  :: Int -> GlobalName -> [LevelVar] -> [Obligation] -> [Plicity] -> Core
+  :: [Grammar] -> Int -> GlobalName -> [LevelVar] -> [Obligation] -> [Plicity] -> Core
   -> Maybe Core -> [String]
-renderGlobal n g lvs cs ps ty body =
-  (nameString g ++ scheme n lvs cs ps ty)
+renderGlobal gs n g lvs cs ps ty body =
+  (nameString g ++ scheme gs n lvs cs ps ty)
     : case body of
         Nothing -> []
-        Just b  -> [nameString g ++ " = " ++ renderCore n [] b]
+        Just b  -> [nameString g ++ " = " ++ renderCore gs n [] b]
 
 -- | A level scheme, from the colon rightwards:
 -- @ {ℓ₁ ℓ₂} : (ℓ₁ ≤ ℓ₂) ⊢ Type ℓ₁ -> Type ℓ₂@
@@ -1743,7 +1915,7 @@ renderGlobal n g lvs cs ps ty body =
 -- 2026-08-30, on the @provided@ lines this replaces: *"I don't like the
 -- 'provided' part, it reads as if it is not even part of the type."* It is
 -- part of it. A use supplies the parameters and **owes** the constraints, so a
--- scheme read without them is a scheme read wrong.
+-- scheme gs read without them is a scheme gs read wrong.
 --
 -- **@⊢@ and not @⊨@.** The constraints are hypotheses the use site discharges,
 -- which is the turnstile's own reading — /given these, this type/. @⊨@ would
@@ -1751,7 +1923,7 @@ renderGlobal n g lvs cs ps ty body =
 -- not: a constraint that held for every instantiation would have been
 -- discharged by 'Thena.Core.Level.solveLevels' and never stored. @⊢@ is also
 -- already a reserved character (§2.6), so it costs no lexer change if a
--- scheme ever becomes writable.
+-- scheme gs ever becomes writable.
 --
 -- **Each constraint gets its own parens, even when there is only one**, so a
 -- run of them cannot be misread — @(ℓ₁ ≤ ℓ₂) (suc ℓ₂ ≤ 3)@ rather than one
@@ -1760,28 +1932,28 @@ renderGlobal n g lvs cs ps ty body =
 --
 -- **No constraints, no turnstile.** Every monomorphic theorem would otherwise
 -- grow an empty one.
-scheme :: Int -> [LevelVar] -> [Obligation] -> [Plicity] -> Core -> String
-scheme n lvs cs ps ty =
-  levelParams lvs ++ " : " ++ owed ++ signature n ps ty
+scheme :: [Grammar] -> Int -> [LevelVar] -> [Obligation] -> [Plicity] -> Core -> String
+scheme gs n lvs cs ps ty =
+  levelParams lvs ++ " : " ++ owed ++ signature gs n ps ty
   where
     owed
       | null cs   = ""
       | otherwise = unwords [ "(" ++ obligation c ++ ")" | c <- cs ] ++ " ⊢ "
 
--- | A declared type, with the binders the signature wrote in braces shown in
+-- | A declared type, with the binders the signature gs wrote in braces shown in
 -- braces (MS4 phase 44b).
 --
 -- **Only the leading run, and only as far as the plicities go.** The record is
 -- surface information about the /name/ (see 'Thena.Engine.signatures'), so it
--- runs out exactly where the written signature did; the rest is an ordinary
+-- runs out exactly where the written signature gs did; the rest is an ordinary
 -- core type and 'renderCore' prints it.
 --
 -- **A term is NOT hidden the same way**, and deliberately: @:show@ prints the
 -- core term a definition holds, and the core has no implicits at all — an
 -- application with its inserted arguments dropped would not be the term that
 -- is there.
-signature :: Int -> [Plicity] -> Core -> String
-signature n0 ps0 ty0 = braced n0 [] ps0 ty0
+signature :: [Grammar] -> Int -> [Plicity] -> Core -> String
+signature gs n0 ps0 ty0 = braced n0 [] ps0 ty0
   where
     -- Only the **leading** implicit binders are peeled. The moment a position
     -- is explicit the rest is an ordinary core type and 'renderCore' prints it
@@ -1792,12 +1964,99 @@ signature n0 ps0 ty0 = braced n0 [] ps0 ty0
     -- name rather than as a bare variable.
     braced n ctx (Implicit : more) (Pi i dom sc) =
       let (v, n1) = fresh n
-       in "∀ {" ++ identString i ++ " : " ++ renderCore n ctx dom ++ "} -> "
+       in "∀ {" ++ identString i ++ " : " ++ renderCore gs n ctx dom ++ "} -> "
             ++ braced n1 (ctx ++ [Hypothesis v i dom]) more (open v sc)
-    braced n ctx _ ty = renderCore n ctx ty
+    braced n ctx _ ty = renderCore gs n ctx ty
 
-renderDeclareError :: DeclareError -> String
-renderDeclareError e = case e of
+-- | A warning, as one line beginning @warning:@ (MS6 phase 98).
+--
+-- **The word is what tells a reader it is not a failure.** A load that warns
+-- has installed everything it named, and the line says what was not done
+-- rather than what went wrong.
+renderWarning :: Warning -> String
+renderWarning w = "warning: " ++ case w of
+  VacuousBinder k g p x -> blockAt k g ++ ", production " ++ p ++ ": " ++ x ++ " binds in nothing"
+  NoConfusionSkipped d why ->
+    "no " ++ nameString (snd (noConfusionNames d)) ++ ": " ++ because
+    where
+      because = case why of
+        NoEqInScope -> "there is no Eq in scope"
+        NoProducts -> "there is no And, Unit and Empty in scope"
+        -- Position and name both, as 'Thena.Errors.IndexTypeDepends' says it
+        -- one telescope over: several arguments of one constructor may carry
+        -- the same 'Ident', so the name alone does not say which.
+        DependentArguments c k (Ident i) ->
+          nameString c ++ "'s argument " ++ show k ++ " (" ++ i ++ ") has a type"
+            ++ " that depends on an earlier argument, so its equation cannot be"
+            ++ " stated"
+
+renderDeclareError :: [Grammar] -> DeclareError -> String
+renderDeclareError gs e = case e of
+  -- @ms6\/SPEC.md@ §4.5's wording, and §5.1's (MS6 phase 101).
+  GrammarRefused (GrammarError k g problem) -> case problem of
+    MetavariableRepeated x -> blockAt k g ++ ": " ++ x ++ " is named twice"
+    MetavariableTaken x -> blockAt k g ++ ": " ++ x ++ " is already a metavariable or a token class"
+    NameTaken -> g ++ " is already declared"
+    BuiltInTag -> g ++ " is one of Thena's own tags, so a language may not take its name"
+    ConstructorTaken p -> g ++ "'s constructor " ++ p ++ " is already declared"
+    ContextShape -> blockAt k g ++ ": a context needs one empty and one extension production"
+    -- MS6 phase 105: what generated substitution needs of a language (§4.7).
+    FunctionTaken f -> g ++ "'s substitution function " ++ f ++ " is already declared"
+    -- MS6 phase 107: what the generated lookup needs of a context (§5.3).
+    ContextKey xs -> blockAt k g ++ ": its extension needs exactly one name to look up, and it has "
+      ++ (case xs of { [] -> "none"; _ -> intercalate ", " xs })
+    LookupTaken f -> g ++ "'s lookup " ++ f ++ " is already declared"
+    NoVariableProduction ->
+      blockAt k g ++ ": it has binders, so it needs a production ‹x› as occurrence for a renamed binder to become"
+    VariableProductions ps ->
+      blockAt k g ++ ": " ++ intercalate ", " ps ++ " all declare an occurrence, and a language has one variable production"
+    InProduction p why -> blockAt k g ++ ", production " ++ p ++ ": " ++ case why of
+      NoItems -> "it has no items"
+      NotAMetavariable x -> x ++ " is not a metavariable"
+      NotAnArgument x -> x ++ " is not an argument of " ++ p
+      OccurrenceBinds x -> x ++ " is an occurrence, so it binds nothing"
+      NotADeclaredBinder x -> x ++ " is not one of the binders declared"
+      BinderNotString x s -> "a binder must be a String, and " ++ x ++ " is " ++ sortPhrase s
+      OccurrenceNotString x s -> "an occurrence must be a String, and " ++ x ++ " is " ++ sortPhrase s
+      ScopesDiffer x -> x ++ " is written with different binders free in it"
+      OccurrenceNotAlone x -> "the occurrence " ++ x ++ " must be the production's only argument, because substitution replaces the whole of it"
+      ScopeElsewhere x -> "a binder is free in " ++ x ++ ", which is not of this language, so substitution could not rename in it"
+      NotationBinds x -> x ++ " is written as a binding form, and a judgment's notation binds nothing"
+    -- MS6 phase 108, §6.2–6.4.
+    InRule r why -> blockAt k g ++ ", rule " ++ r ++ ": " ++ case why of
+      RuleUnparsed part what text failure ->
+        (case part of { Premises -> "its premises"; Conclusion -> "its conclusion" })
+          ++ " `" ++ text ++ "`" ++ (case part of { Conclusion -> " is not a " ++ what ++ " judgment: "; Premises -> " do not parse: " })
+          ++ parseFailureReason text failure
+      RuleNotAMetavariable x -> x ++ " is not a metavariable"
+      PremiseNameIsMetavariable x -> "a premise may not be named " ++ x ++ ", which is a metavariable"
+      PremiseNameTaken x -> "a premise may not be named " ++ x ++ ", which the rule already uses"
+      QuantifierUnreadable se -> "its ∀ does not read: " ++ renderSyntaxError se
+      NotQuantified x -> x ++ " is used but not quantified"
+      QuantifiedTwice x -> x ++ " is quantified twice"
+      RuleUnbuilt be -> case be of
+        NoSuchProduction n -> n ++ " is not a production of any language"
+        Incomplete x -> "the " ++ x ++ " is missing"
+        NotForSlot n x -> n ++ " cannot take " ++ x ++ " there"
+  -- @ms6\/SPEC.md@ §3.2's wording. The regex is quoted as written, between its
+  -- slashes; the witness as a string literal, so a newline in it is visible.
+  TokenClassRefused g why -> "in the token class " ++ nameString g ++ ": " ++ case why of
+    TokenTypeUnsupported t -> renderCore gs 0 [] t ++ " is not String, Char or Int"
+    TokenValueNotLiteral v -> renderCore gs 0 [] v ++ " is not a regular expression"
+    TokenRegexRefused _ r -> case r of
+      RegexUnexpected _ c -> "unexpected " ++ escapeChar c ++ " in the regular expression"
+      RegexUnexpectedEnd -> "the regular expression ends too soon"
+      RegexUnsupportedEscape _ c -> "\\" ++ [c] ++ " is not supported in a regular expression"
+      RegexReversedRange _ a b ->
+        "the range " ++ [a] ++ "-" ++ [b] ++ " is empty, because " ++ [a] ++ " comes after " ++ [b]
+    TokenMatchesEmpty _ -> "the regular expression matches the empty string"
+    TokenNotIncluded src t w ->
+      let n = nameString t
+          article = if take 1 n == "I" then "an " else "a "   -- Int, String, Char
+       in "/" ++ src ++ "/ accepts " ++ escapeString w ++ ", which is not " ++ article ++ n
+  NoSuchPrimitive g -> "there is no primitive called " ++ nameString g
+  PrimitiveWrongShape g want ->
+    nameString g ++ " must be declared " ++ want
   AlreadyDeclared g -> nameString g ++ " is already declared"
   RepeatedName g    -> "this declaration uses the name " ++ nameString g ++ " twice"
   WrongNumberOfIndices g want got ->
@@ -1844,12 +2103,12 @@ renderDeclareError e = case e of
       ++ "'s constructor arguments require cannot all hold"
   ArgumentNotAType g i te ->
     "the argument " ++ identString i ++ " of " ++ nameString g ++ " is ill-typed"
-      ++ concatMap ("\n  " ++) (renderTypeError 0 te)
+      ++ concatMap ("\n  " ++) (renderTypeError gs 0 te)
   -- Worded as a bug report because it is one: nothing the user wrote is wrong,
   -- and the term the checker refused is one they never saw (phase 14).
   NoConfusionRejected g te ->
     "the generated " ++ nameString g ++ " does not typecheck, which is a bug in Thena"
-      ++ concatMap ("\n  " ++) (renderTypeError 0 te)
+      ++ concatMap ("\n  " ++) (renderTypeError gs 0 te)
 
 -- --------------------------------------------------------------------------
 -- Typing and conversion (§5.2)
@@ -1870,12 +2129,12 @@ renderDeclareError e = case e of
 -- actually states an equation. A friendly index is abstracted outright and its
 -- type may depend on an earlier index freely, which is why eliminating a
 -- @Below n i@ whose indices are plain variables now works.
-renderElimError :: ElimError -> String
-renderElimError e = case e of
+renderElimError :: [Grammar] -> ElimError -> String
+renderElimError gs e = case e of
   TargetNotTypeable te ->
-    "that target has no type" ++ concatMap ("\n  " ++) (renderTypeError 0 te)
+    "that target has no type" ++ concatMap ("\n  " ++) (renderTypeError gs 0 te)
   TargetNotInductive ctx t ty ->
-    renderCore 0 ctx t ++ " is not a target: its type is " ++ renderCore 0 ctx ty
+    renderCore gs 0 ctx t ++ " is not a target: its type is " ++ renderCore gs 0 ctx ty
       ++ ", not a fully applied datatype"
   NoEquality g ->
     "eliminating at indices needs " ++ nameString g ++ ", which is not declared"
@@ -1884,16 +2143,16 @@ renderElimError e = case e of
       ++ "\n  so the equation constraining it cannot be stated"
   IndexTypeIllTyped te ->
     "the type of a tied index has no universe, so its equation cannot be stated"
-      ++ concatMap ("\n  " ++) (renderTypeError 0 te)
+      ++ concatMap ("\n  " ++) (renderTypeError gs 0 te)
   MotiveIllTyped te ->
     "the goal does not survive generalising the target"
-      ++ concatMap ("\n  " ++) (renderTypeError 0 te)
+      ++ concatMap ("\n  " ++) (renderTypeError gs 0 te)
   SchemeIllTyped te ->
     "the elimination does not prove this goal"
-      ++ concatMap ("\n  " ++) (renderTypeError 0 te)
+      ++ concatMap ("\n  " ++) (renderTypeError gs 0 te)
 
-renderTypeError :: Int -> TypeError -> [String]
-renderTypeError n e = case e of
+renderTypeError :: [Grammar] -> Int -> TypeError -> [String]
+renderTypeError gs n e = case e of
   UnknownVariable ctx x       -> [nameIn ctx x ++ " is not in scope"]
   UnknownGlobal g        -> [nameString g ++ " is not declared"]
   WrongNumberOfLevelArguments g want got ->
@@ -1903,26 +2162,26 @@ renderTypeError n e = case e of
     ]
   LooseIndex i           -> ["a loose de Bruijn index " ++ show i ++ " reached the checker"]
   NotAType ctx t ty      ->
-    [renderCore n ctx t ++ " is not a type — it has type " ++ renderCore n ctx ty]
+    [renderCore gs n ctx t ++ " is not a type — it has type " ++ renderCore gs n ctx ty]
   NotAFunction ctx t ty  ->
-    [renderCore n ctx t ++ " cannot be applied — it has type " ++ renderCore n ctx ty]
+    [renderCore gs n ctx t ++ " cannot be applied — it has type " ++ renderCore gs n ctx ty]
   NotOfType ctx t want got why ->
-    [ renderCore n ctx t ++ " has type " ++ renderCore n ctx got
-    , "  but " ++ renderCore n ctx want ++ " was expected"
-    ] ++ renderConversionFailure n why
+    [ renderCore gs n ctx t ++ " has type " ++ renderCore gs n ctx got
+    , "  but " ++ renderCore gs n ctx want ++ " was expected"
+    ] ++ renderConversionFailure gs n why
   UnknownDatatype g         -> [nameString g ++ " is not a declared datatype"]
   NotAMotive ctx m ty    ->
-    [ renderCore n ctx m ++ " is not a motive for this family"
-    , "  it has type " ++ renderCore n ctx ty ++ ", which does not end in a universe"
+    [ renderCore gs n ctx m ++ " is not a motive for this family"
+    , "  it has type " ++ renderCore gs n ctx ty ++ ", which does not end in a universe"
     ]
   Unsaturated g ty       ->
-    [nameString g ++ " is not given enough arguments — " ++ renderCore n [] ty ++ " is left over"]
+    [nameString g ++ " is not given enough arguments — " ++ renderCore gs n [] ty ++ " is left over"]
   OverApplied g          -> [nameString g ++ " is given too many arguments"]
 
 -- | Why two terms are not convertible: where, then what.
-renderConversionFailure :: Int -> ConversionFailure -> [String]
-renderConversionFailure n (ConversionFailure sites clash) =
-  [ "  " ++ where_ ++ renderClash n clash ]
+renderConversionFailure :: [Grammar] -> Int -> ConversionFailure -> [String]
+renderConversionFailure gs n (ConversionFailure sites clash) =
+  [ "  " ++ where_ ++ renderClash gs n clash ]
   where
     where_
       | null sites = ""
@@ -1941,9 +2200,9 @@ siteWord site = case site of
   TheIndex k         -> "in index " ++ show (k + 1)
   TheTarget          -> "in the target"
 
-renderClash :: Int -> Clash -> String
-renderClash n clash = case clash of
-  HeadsDiffer ctx a b  -> renderCore n ctx a ++ " and " ++ renderCore n ctx b ++ " do not match"
+renderClash :: [Grammar] -> Int -> Clash -> String
+renderClash gs n clash = case clash of
+  HeadsDiffer ctx a b  -> renderCore gs n ctx a ++ " and " ++ renderCore gs n ctx b ++ " do not match"
   LevelsDiffer a b ->
     renderLevel a ++ " and " ++ renderLevel b ++ " are different universes"
   NamesDiffer a b      -> nameString a ++ " and " ++ nameString b ++ " are different names"
@@ -2049,6 +2308,9 @@ whereRuleError e = case e of
   BoundNonProducing g i _ -> inRule g i
   UnboundInRule g i _     -> inRule g i
   NoSuchTest g _          -> inName g
+  ObjectRegionUnparsed g i _ _ _ -> inRule g i
+  ObjectRegionNotATerm g i _ _   -> inRule g i
+  NoObjectProduction g i _ _     -> inRule g i
   UnboundInHead g _       -> inName g
   BadTestOperands g _     -> inName g
   ReservedName g _        -> inName g
@@ -2057,7 +2319,7 @@ whereRuleError e = case e of
   BadOperands g i _       -> inRule g i
   NoSuchTag g i _         -> inRule g i
   BadRegion g i _ _       -> inRule g i
-  -- The signature errors (MS5 phase 67) name a signature and not a rule: they
+  -- The signature gs errors (MS5 phase 67) name a signature gs and not a rule: they
   -- are found before anything is resolved into a 'Thena.Instral.Ops.Rule' at all.
   UnknownType n _         -> inSignature n
   TypeArity n _ _ _       -> inSignature n
@@ -2071,19 +2333,13 @@ whereRuleError e = case e of
   FunctionLeavesNothing n -> "in " ++ n ++ ": "
   FunctionClauseUnreachable n _ -> "in " ++ n ++ ": "
   RuleAndFunction n _     -> "in " ++ n ++ ": "
-  BuiltInLanguage n       -> inLanguage n
-  BuiltInType n           -> inLanguage n
-  DuplicateLanguage n     -> inLanguage n
-  BadGrammarItem n _      -> inLanguage n
-  BadGrammar n _          -> inLanguage n
   where
     -- **Counted from 1, as a type error is** (MS5 phase 91, @ms5\/CLOSEOUT.md@
     -- 44). The index is the written statement from zero — the same count
     -- 'Thena.Instral.Infer' keeps — so the two passes name one line one way.
     inRule g i = "in " ++ nameString g ++ ", instruction " ++ show (i + 1) ++ ": "
     inName g   = "in " ++ nameString g ++ ": "
-    inSignature n = "in the signature of " ++ n ++ ": "
-    inLanguage n  = "in the grammar of " ++ n ++ ": "
+    inSignature n = "in the signature gs of " ++ n ++ ": "
 
 -- | What was wrong, said without saying where.
 whatRuleError :: RuleError -> String
@@ -2092,6 +2348,14 @@ whatRuleError e = case e of
   BoundNonProducing _ _ n -> n ++ " is bound to an operation that leaves nothing"
   UnboundInRule _ _ n     -> "no parameter or earlier binding is called " ++ n
   NoSuchTest _ w          -> "no such test: " ++ w
+  -- **The words @:parse@ uses**, from the same renderer, because it is the
+  -- same parser and the same grammar (MS6 phase 104c).
+  ObjectRegionUnparsed _ _ lang src why -> renderUnparsed lang src why
+  ObjectRegionNotATerm _ _ lang why -> "in " ++ lang ++ "`\8230`: " ++ case why of
+    NoSuchProduction n -> n ++ " is not a production of any language"
+    Incomplete _       -> "a splice stands where a term has to be written out"
+    NotForSlot n x     -> n ++ " cannot take " ++ x ++ " there"
+  NoObjectProduction _ _ lang w -> lang ++ " has no production called " ++ w
   UnboundInHead _ n       -> "no parameter is called " ++ n
   BadTestOperands _ w     -> w ++ " was written with the wrong arguments"
   ReservedName _ n        ->
@@ -2135,18 +2399,6 @@ whatRuleError e = case e of
   RuleAndFunction _ k     ->
     "this name is both a rule and a function at " ++ show k
       ++ (if k == 1 then " argument" else " arguments")
-  BuiltInLanguage n       ->
-    n ++ " is one of Thena's own languages, so a grammar may not take its name"
-  BuiltInType n           ->
-    n ++ " is one of instral's own types, so a grammar may not take its name"
-  DuplicateLanguage n     ->
-    "two grammars are declared under the name " ++ n
-  BadGrammarItem _ w      ->
-    w ++ " is neither this language nor name"
-  BadGrammar _ ge         -> case ge of
-    LeftRecursive _ c      -> c ++ " begins with the language itself"
-    EmptyProduction _ c    -> c ++ " has no items"
-    TerminalDoesNotLex _ t -> show t ++ " is not one token"
 
 -- | @:accepts@ and @:produces@ (MS5 phase 71).
 --
@@ -2189,6 +2441,7 @@ renderPattern pt = case pt of
   -- not, which is §6.0.1 at a parameter position and not a special case.
   PSome a     -> "(some " ++ renderPattern a ++ ")"
   PNone       -> "none"
+  PObject sk  -> renderSkeleton renderPattern sk
   PList ps mt ->
     "[" ++ intercalate ", " (map renderPattern ps ++ tl) ++ "]"
     where tl = case mt of
@@ -2259,3 +2512,123 @@ levelParams vs = " {" ++ unwords (map levelVarName vs) ++ "}"
 -- | @1 thing@, @2 things@ — so a message never reads "1 level arguments".
 count :: Int -> String -> String
 count k what = show k ++ " " ++ what ++ (if k == 1 then "" else "s")
+
+-- | @in the grammar of LC@ or @in the context Ctx@ (MS6 phase 101).
+blockAt :: BlockKind -> String -> String
+blockAt k g = case k of
+  LanguageBlock -> "in the grammar of " ++ g
+  ContextBlock  -> "in the context " ++ g
+  JudgmentBlock -> "in the judgment " ++ g
+
+-- | @an Int@, @a Ty@ — what an argument ranges over, with its article.
+sortPhrase :: Sort -> String
+sortPhrase s = article (nameString n)
+  where
+    n = case s of
+      OfLanguage g -> g
+      OfClass _ t _ -> t
+    article w = (if take 1 w `elem` map (: []) "AEIOU" then "an " else "a ") ++ w
+
+-- | A reading, as the production names applied to their slots (MS6 phase
+-- 102): @abs(x, base, var(x))@. A class's match is its text, a hole is @?@.
+renderTree :: Earley.Tree -> String
+renderTree t = case t of
+  Earley.Node n [] -> n
+  Earley.Node n cs -> n ++ "(" ++ intercalate ", " (map renderTree cs) ++ ")"
+  Earley.Token x -> x
+  Earley.HoleAt _ -> "?"
+  Earley.SpliceOf k -> "${" ++ show k ++ "}"
+
+-- | Why a tagged term literal is not one term of its language. Shared by the
+-- surface's reader and the development calculus's (MS6 phase 110), so a region
+-- that is refused says the same thing wherever it was written.
+renderObjectError :: ObjectError -> String
+renderObjectError e = case e of
+  NoSuchObjectLanguage lang ->
+    "no language called " ++ lang ++ " has been declared"
+  NoSuchObjectProduction lang w ->
+    lang ++ " has no production called " ++ w
+  ObjectNotParsed lang text why -> renderUnparsed lang text why
+  ObjectNotATerm lang why -> "in " ++ lang ++ "`\8230`: " ++ case why of
+    NoSuchProduction n -> n ++ " is not a production of any language"
+    Incomplete x -> "the " ++ x ++ " is missing, and a constructor has no missing argument"
+    NotForSlot n x -> n ++ " cannot take " ++ x ++ " there"
+
+-- | Why an object term did not parse, in @ms6\/SPEC.md@ §7.5's form: the
+-- language and the text first, as a tagged literal would be written.
+renderUnparsed :: String -> String -> Earley.ParseFailure -> String
+renderUnparsed lang text why = "in " ++ lang ++ "`" ++ text ++ "`: " ++ parseFailureReason text why
+
+-- | Why a text did not parse, without saying which text.
+parseFailureReason :: String -> Earley.ParseFailure -> String
+parseFailureReason text why = case why of
+  Earley.Ambiguous a b ->
+    "this term parses two ways, as " ++ renderTree a ++ " and as " ++ renderTree b
+  Earley.Disagrees r x a b ->
+    r ++ "'s " ++ x ++ " is written more than once and must read the same each time, "
+      ++ "but here it is " ++ renderTree a ++ " and " ++ renderTree b
+  Earley.Unbounded h ->
+    "this term parses without end, because " ++ h ++ " can derive itself from the same text"
+  Earley.Stuck p expected
+    | p >= length text -> "the term ends too soon" ++ expecting expected
+    | otherwise ->
+        "unexpected " ++ escapeChar (text !! p) ++ " at character " ++ show (p + 1)
+          ++ expecting expected
+  where
+    expecting [] = ""
+    expecting ss = ", expecting " ++ oneOf (map symbolText ss)
+    symbolText s = case s of
+      Earley.Literal x -> x
+      Earley.Scan n _ -> n
+      Earley.Nonterminal n -> n
+    oneOf ws = case reverse ws of
+      [w] -> w
+      w : rest -> intercalate ", " (reverse rest) ++ " or " ++ w
+      [] -> ""
+
+-- | **Tab in @:parse@'s mode** (MS6 phase 102b, his request of 2026-09-19).
+-- Haskeline hands over the text left of the cursor, reversed, and the text
+-- right of it; this answers with what to keep of the left and what to insert.
+--
+-- * **One production is the only one the last terminal belongs to**, and
+--   nothing follows the cursor: the rest of it is inserted, its terminals as
+--   text and its slots as @?@. After @( λ@ that is @? : ? . ? )@.
+-- * **One thing fits**: it is inserted.
+-- * **Several fit**: they are listed. Every candidate's replacement is empty,
+--   because haskeline inserts the candidates' longest common prefix and lists
+--   them only if that inserted nothing — two slots both inserting @?@ would
+--   otherwise put a @?@ in instead of showing the choice.
+-- * **The cursor is just after a @?@**: the hole is what is being filled, so
+--   the question is asked as if it were not there, and a single answer
+--   replaces it.
+--
+-- Answered as @(replacement, display)@ pairs, so that it is a function of the
+-- parser alone; 'completion' makes them haskeline's.
+tabComplete :: [Earley.Rule] -> String -> (String, String) -> (String, [(String, String)])
+tabComplete rules lang (leftReversed, right) =
+  case leftReversed of
+    '?' : before -> answer (reverse before) True
+    _ -> answer (reverse leftReversed) False
+  where
+    answer before replacing =
+      let o = Earley.offer rules (Earley.StartAt lang) (Earley.pieces before) (Earley.pieces right)
+          spaced t = if null before || isSpace (last before) then t else ' ' : t
+          single t = (reverse before, [(spaced t, t)])
+          -- Filling a hole with a hole says nothing: on a @?@, only terminals.
+          options = [ x | x <- Earley.offerOptions o, not replacing || isLiteral x ]
+       in case (Earley.offerCompletion o, options) of
+            (Just rest@(_ : _), _) | not replacing -> single (unwords (map written rest))
+            (_, [s]) -> single (written s)
+            (_, []) -> (leftReversed, [])
+            (_, ss) -> (leftReversed, [ ("", shown s) | s <- ss ])
+    written s = case s of
+      Earley.Literal t -> t
+      _ -> "?"
+    isLiteral s = case s of
+      Earley.Literal _ -> True
+      _ -> False
+    shown s = case s of
+      Earley.Literal t -> t
+      Earley.Scan n _ -> "\8249" ++ n ++ "\8250"
+      Earley.Nonterminal n -> "\8249" ++ n ++ "\8250"
+

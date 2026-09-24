@@ -42,6 +42,14 @@ library
         Thena.Global.Env
         Thena.Global.NoConfusion
         Thena.Kernel
+        Thena.Language.Regex
+        Thena.Language.Reader
+        Thena.Language.Grammar
+        Thena.Language.Earley
+        Thena.Language.Build
+        Thena.Language.Substitution
+        Thena.Language.Lookup
+        Thena.Language.Judgment
         Thena.Repl
         Thena.Rules
         Thena.Surface.Concrete
@@ -53,7 +61,6 @@ library
         Thena.Instral.Concrete
         Thena.Instral.Pattern
         Thena.Instral.Type
-        Thena.Instral.Grammar
         Thena.Instral.Infer
         Thena.Syntax.Concrete
         Thena.Syntax.Lexer
@@ -92,6 +99,7 @@ test-suite thena-test
         Thena.Core.ConvertTests
         Thena.Core.ReduceTests
         Thena.Core.LevelTests
+        Thena.Core.PrimitiveTests
         Thena.Core.TermTests
         Thena.Core.TypingTests
         Thena.Core.UnifyTests
@@ -101,6 +109,7 @@ test-suite thena-test
         Thena.DeterminacyTests
         Thena.NormalTests
         Thena.PreservationTests
+        Thena.PrintTests
         Thena.ProgressTests
         Thena.ProductTests
         Thena.DevelopmentTests
@@ -131,11 +140,22 @@ test-suite thena-test
         Thena.Fixtures
         Thena.SessionTests
         Thena.LexerTests
+        Thena.RegexTests
+        Thena.GrammarTests
+        Thena.EarleyTests
+        Thena.BuildTests
+        Thena.SubstitutionTests
+        Thena.ContextTests
+        Thena.JudgmentTests
+        Thena.ExamplesTests
+        Thena.ObjectTermTests
+        Thena.TokenTests
         Thena.SyntaxTests
     build-depends:
         base              ^>=4.21.2.0,
         thena,
         bytestring        >=0.12 && <0.13,
+        directory         >=1.3  && <1.4,
         tasty             >=1.5  && <1.6,
         tasty-golden      >=2.3  && <2.4,
         tasty-hunit       >=0.10 && <0.11,

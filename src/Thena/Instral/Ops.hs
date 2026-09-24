@@ -34,6 +34,8 @@ module Thena.Instral.Ops
     -- existing @import Thena.Instral.Ops (Pattern (..))@ still reads. The type moved a
     -- layer down because "Thena.Errors" must name it; nothing else changed.
   , Pattern (..)
+  , Skeleton (..)
+  , Slot (..)
   , patternBinds
   , patternIrrefutable
   , matchPattern
@@ -46,11 +48,15 @@ import Control.Monad (zipWithM)
 import Data.Maybe (isJust)
 
 import Thena.Core.Level (Level)
-import Thena.Core.Term (Core, GlobalName)
-import Thena.Instral.Pattern (Pattern (..), patternBinds, patternIrrefutable)
+import Thena.Core.Term
+  (Core (App, Canonical, Global, Primitive), GlobalName (..), Literal (..))
+import Thena.Instral.Pattern
+  (Pattern (..), Skeleton (..), Slot (..), skeletonHoles, patternBinds, patternIrrefutable)
 import Thena.Instral.Type (Signature (..), Ty (..))
 import Thena.Development.Cursor (Part (..))
-import Thena.Global.Env (InductiveDefinition)
+import Thena.Core.Reduce (whnf)
+import Thena.Global.Env (ArgRole, GlobalEnv, InductiveDefinition)
+import Thena.Language.Reader (Block)
 import Thena.Surface.Concrete (Plicity)
 import Thena.Syntax.Concrete (Raw, splicesIn)
 import Thena.Surface.Zipper (SurfaceZipper)
@@ -161,19 +167,6 @@ data Value
     -- position had none, because @Value@ had no case for one and
     -- @fresh-universe@ answered with a whole @Universe@ term rather than the
     -- level inside it.
-  | VObject String SurfaceZipper
-    -- ^ **an object-language term, and which language it is** (MS5 phase 69).
-    --
-    -- **It is a 'VSurface' wearing a brand**, because an object term /is/ a
-    -- Surface term (§6.6) — the tag is what makes the type distinct, exactly as
-    -- 'TName' and 'TString' are distinct over one 'VText'. The name is carried
-    -- so that "Thena.Instral.Infer" can give the literal the right type; nothing
-    -- at run time reads it.
-    --
-    -- **The brand is only removed by @surface-of@**, which is the one-way
-    -- coercion §6.6 asks for. There is no way back: making a @Tm@ needs the tag,
-    -- which is its only introduction form and is what makes a value of it well
-    -- formed by construction.
   | VClosure [Pattern] [Instr] Env
     -- ^ **a lambda and the environment it was made in** (MS5 phase 68b).
     --
@@ -210,6 +203,15 @@ data Operand
     -- statement of its own.
   | PairOf Operand Operand
     -- ^ @(a, b)@ (MS5 phase 65), and the same two remarks apply.
+  | ObjectOf (Skeleton Operand)
+    -- ^ @LC\`( ${f} ${a} )\`@ — **a term of an object language with splices to
+    -- fill** (MS6 phase 104c): the reading, and one operand per splice in the
+    -- order the reading numbered them.
+    --
+    -- **Not a 'Lit', for 'ListOf'\'s reason**: what the term /is/ depends on
+    -- the environment, so it is only known when the operand is read. A region
+    -- with no splices does not reach here — it is built at resolution and
+    -- becomes a 'Lit'.
   deriving (Eq, Show)
 
 -- | What an operand denotes, or the name that had nothing bound to it.
@@ -234,6 +236,30 @@ operandIn e o = case o of
   -- a body must be bound/ still true of an element.
   ListOf os -> VList <$> traverse (operandIn e) os
   PairOf a b -> VPair <$> operandIn e a <*> operandIn e b
+  -- **Assembled here, and it needs no grammar** (MS6 phase 104c): resolution
+  -- did everything the grammar was for and left a shape with holes, so this
+  -- is a fold that reads an operand at each one.
+  --
+  -- **A hole at a token class takes the value, not a term**: @LC[var]\`${s}\`@
+  -- with @s : String@ writes the @String@ in where the constructor wants one.
+  -- A value of the wrong kind there is a run-time failure like any other
+  -- operand of the wrong type.
+  ObjectOf sk -> VTerm <$> assemble sk
+  where
+    assemble sk' = case sk' of
+      SNode nm kids -> foldl App (Global nm []) <$> traverse assemble kids
+      SLit l        -> Right (Primitive l)
+      SHole AtTerm o' -> operandIn e o' >>= \v -> case v of
+        VTerm t -> Right t
+        _       -> Left (spliceName o')
+      SHole (AtPrimitive _) o' -> operandIn e o' >>= \v -> case v of
+        VText x -> Right (Primitive (LString x))
+        VChar c -> Right (Primitive (LChar c))
+        VInt k  -> Right (Primitive (LInt (fromIntegral k)))
+        _       -> Left (spliceName o')
+    spliceName o' = case o' of
+      Ref n -> n
+      _     -> "a splice"
 
 -- | @x = op …@ or @op …@. Binding an op that produces nothing is caught by the
 -- load-time validation pass that rules will need anyway (§2.4, §7.2, phase 15);
@@ -287,16 +313,6 @@ data Op
   | Ask    Operand AnswerKind -- ^ prompt text, and what the frontend should offer
   | Say    Operand            -- ^ message text
   | Concat Operand Operand    -- ^ building prompt and message text
-  | SurfaceOf Operand
-    -- ^ **@surface-of ‹t›@ — an object term read as the Surface term it is**
-    -- (MS5 phase 69), §6.6's one-way coercion.
-    --
-    -- **At run time it removes a brand**, which is 'NameText' one type over.
-    --
-    -- **Its argument type is imprecise**, and that is a real limit rather than
-    -- an oversight: 'Thena.Instral.Type.Ty' can say @Tm@ and it can say /any
-    -- type/, but it cannot say /some object language/, so this takes a variable
-    -- and refuses at run time what it is not given. See @ms5\/CLOSEOUT.md@.
   | Lambda [Pattern] [Instr]
     -- ^ **make a closure** (MS5 phase 68b) — what @\\ x -> e@ runs.
     --
@@ -730,6 +746,28 @@ data Op
     -- playing it — the whole of @E⟦do { … }⟧@. It is an op and not a value a
     -- body could hold, because 'Value' has no case for instructions and the
     -- @do@ node keeps 'Thena.Syntax.Concrete.RawInstr' until something runs it.
+  | SurfaceLiteralOf Operand
+    -- ^ the literal at the focus, as the 'Thena.Core.Term.Core' it elaborates
+    -- to — the same shape as 'SurfaceUniverseOf', whose answer is also a term
+    -- rather than a part to look at (MS6 phase 97c).
+  | ObjectTerm Operand
+    -- ^ **the application a tagged term literal means** (MS6 phase 104,
+    -- @ms6\/SPEC.md@ §8): the region\'s text parsed with the named language\'s
+    -- installed grammar, and the reading written out as the constructor
+    -- application it denotes — @LC\`( \955 x : \953 . x )\`@ becomes
+    -- @abs "x" base (var "x")@.
+    --
+    -- **It answers with a surface term and not a core one**, which is what
+    -- makes a splice need no mechanism: @${e}@ stands in the application where
+    -- its slot is, and elaborating the application elaborates it there, at the
+    -- constructor argument\'s type. Building a 'Thena.Core.Term.Core' here
+    -- would have to elaborate the splices itself, and an op cannot — a call is
+    -- a statement.
+    --
+    -- **The parse happens here and not at load**, because the grammar is not
+    -- installed until the load reaches its block and a module is parsed whole
+    -- before that (@ms6\/CLOSEOUT.md@). 'ElimSpine'\'s remark applies to the
+    -- answer: it is a node nobody wrote, so it is rooted rather than a move.
   | SurfaceUniverseOf Operand
     -- ^ the universe a surface @Typeₙ@ denotes, as a term (MS4 phase 49).
     --
@@ -851,11 +889,13 @@ data Op
     --
     -- Refused at the outermost development: there is nothing to pop back to,
     -- and a machine with no development is not a state this language has.
-  | MakeData GlobalName Int [GlobalName] [Operand]
+  | MakeData GlobalName Int [GlobalName] (Maybe [[ArgRole]]) [Operand]
     -- ^ **assemble a datatype from elaborated types and hand it out through
     -- the channel** (MS4 phase 42b) — the datatype's name, how many parameters
     -- were written, the constructors' names, and the types: the datatype's own
-    -- first and then one per constructor, in order.
+    -- first and then one per constructor, in order. The roles, when there
+    -- are any, are a generated datatype's (MS6 phase 103): one list per
+    -- constructor, from its grammar.
     --
     -- The names and the parameter count are fields rather than operands for
     -- 'DefineData'\'s reason — they are written down, never computed — and the
@@ -867,6 +907,23 @@ data Op
     -- does — the whole of "Thena.Global.Declare"'s @declare@ runs on the
     -- result, so a surface datatype is checked by the same code a written one
     -- is.
+  | DeclareGrammar Block
+    -- ^ **install an object-language grammar** (MS6 phase 101), a @language@ or
+    -- @context@ block as read. A field rather than an operand for
+    -- 'MakeData'\'s reason: it is written down, never computed. It yields and
+    -- the driver checks and installs, as 'DeclarePrimitive' does — so the check
+    -- runs at the block's own place in the module, after the token classes
+    -- above it.
+  | DeclarePrimitive Operand Operand
+    -- ^ name, type — **install a primitive constant** (MS6 phase 97b), the way
+    -- 'DefineGlobal' installs a definition and for the same reason: no
+    -- instruction writes globals, so this yields and the driver installs.
+    --
+    -- **It is not a postulate.** The driver accepts only the names the system
+    -- has a reduction rule for ('Thena.Driver.primitiveRules'), and checks the
+    -- declared type has the shape that rule needs. A user may not add an axiom
+    -- with it: an unknown name is a load error, which is what keeps @primitive@
+    -- from being a hole in the trust story.
   | DefineGlobal [Plicity] Operand Operand Operand
     -- ^ the plicities its signature wrote, then name, type and term — **hand a finished definition out through the
     -- channel** (MS4 phase 42), the way 'DefineData' hands out a datatype.
@@ -1083,7 +1140,6 @@ resultOf o = case o of
   -- bare variable claimed nothing at all — which is the shape @list-head@ hid
   -- in — so it says as much as it knows.
   Lambda ps _  -> Just (TFun (map TVar [1 .. length ps]) (TVar 0))
-  SurfaceOf _  -> Just TSurface
   Value _      -> Just (TVar 0)
   NameText _   -> Just TString
   Assume _ _   -> Just TCore  -- the variable it bound; §7.3's @?x <- claim S@
@@ -1093,6 +1149,8 @@ resultOf o = case o of
   Say _        -> Nothing
   DefineData _ -> Nothing
   Certify _    -> Nothing
+  DeclarePrimitive {} -> Nothing
+  DeclareGrammar {} -> Nothing
   DefineGlobal {} -> Nothing
   MakeData {} -> Nothing
   -- **@Core@ in and @Core@ out** — his ruling, 2026-09-12. What @core`…`@
@@ -1112,6 +1170,8 @@ resultOf o = case o of
   UniverseAt _   -> Just TCore
   ResolveName _  -> Just TCore
   SurfaceNameOf _ -> Just TName
+  SurfaceLiteralOf _ -> Just TCore
+  ObjectTerm _ -> Just TSurface
   SurfaceUniverseOf _ -> Just TCore
   ArrowDomain _ -> Just TSurface
   AppFunction _ -> Just TSurface
@@ -1209,6 +1269,8 @@ refsIn o = case o of
   Lit _      -> []
   ListOf os  -> concatMap refsIn os
   PairOf a b -> refsIn a ++ refsIn b
+  -- An object term's splices are names it reads, for the reason above.
+  ObjectOf sk -> concatMap refsIn (skeletonHoles sk)
 
 -- | Every operand an op reads, in the order it is written, **each with the type
 -- the op wants there** (MS5 phase 66b).
@@ -1244,16 +1306,17 @@ operandTypes o = case o of
   Concat a b   -> [(a, TString), (b, TString)]
   Value a      -> [(a, TVar 0)]
   Lambda _ _   -> []
-  SurfaceOf a  -> [(a, TVar 0)]
   NameText a   -> [(a, TName)]
   Unify  a b   -> [(a, TCore), (b, TCore)]
   UnifyInto a b -> [(a, TCore), (b, TCore)]
   Try    a     -> [(a, TCore)]
   Certify a    -> [(a, TCore)]
+  DeclarePrimitive a b -> [(a, TName), (b, TCore)]
+  DeclareGrammar _ -> []
   DefineGlobal _ a b c -> [(a, TName), (b, TCore), (c, TCore)]
   -- The datatype's own type first, then one per constructor — all core, all
   -- elaborated by the time they get here.
-  MakeData _ _ _ as -> [(a, TCore) | a <- as]
+  MakeData _ _ _ _ as -> [(a, TCore) | a <- as]
   ResolveCore a -> [(a, TCore)]
   Expose a -> [(a, TCore)]
   PushDevelopment a -> [(a, TCore)]
@@ -1267,6 +1330,8 @@ operandTypes o = case o of
   UniverseAt a   -> [(a, TLevel)]
   ResolveName x  -> [(x, TName)]
   SurfaceNameOf x -> [(x, TSurface)]
+  SurfaceLiteralOf x -> [(x, TSurface)]
+  ObjectTerm x -> [(x, TSurface)]
   SurfaceUniverseOf x -> [(x, TSurface)]
   ArrowDomain x -> [(x, TSurface)]
   AppFunction x -> [(x, TSurface)]
@@ -1358,29 +1423,34 @@ data Rule = Rule
 -- **A pattern matches AS WRITTEN** — §3, his observation, and it is the line
 -- that keeps this function small: nothing here reduces, normalises or coerces.
 -- @3@ matches 'VInt' @3@ and nothing else.
-matchPattern :: Pattern -> Value -> Maybe Env
-matchPattern pt v = case (pt, v) of
+matchPattern :: GlobalEnv -> Pattern -> Value -> Maybe Env
+matchPattern env pt v = case (pt, v) of
   (PVar n, _)              -> Just [(n, v)]
   (PWild, _)               -> Just []
   (PInt i,  VInt j)  | i == j -> Just []
   (PChar c, VChar d) | c == d -> Just []
   (PBool b, VBool c) | b == c -> Just []
   (PText t, VText u) | t == u -> Just []
-  (PPair a b, VPair x y)   -> (++) <$> matchPattern a x <*> matchPattern b y
-  (PSome a, VOption (Just x)) -> matchPattern a x
+  (PPair a b, VPair x y)   -> (++) <$> matchPattern' a x <*> matchPattern' b y
+  (PSome a, VOption (Just x)) -> matchPattern' a x
   (PNone,   VOption Nothing)  -> Just []
   (PList ps mt, VList xs)  -> list ps mt xs
+  -- **An object term, matched against the 'Core' it denotes** (MS6 phase
+  -- 104c). See 'matchSkeleton' for the reduction rule, which is the whole of
+  -- what is interesting here.
+  (PObject sk, VTerm t)    -> matchSkeleton env sk t
   _                        -> Nothing
   where
+    matchPattern' = matchPattern env
     -- A closed pattern must exhaust the list; an open one binds the remainder,
     -- and the remainder is itself matched, which is what makes @[a, ...[]]@ the
     -- long way of saying one element.
     list [] Nothing   []   = Just []
     list [] Nothing   _    = Nothing
-    list [] (Just t)  rest = matchPattern t (VList rest)
+    list [] (Just t)  rest = matchPattern' t (VList rest)
     list _  _         []   = Nothing
     list (q : qs) mt' (x : rest) =
-      (++) <$> matchPattern q x <*> list qs mt' rest
+      (++) <$> matchPattern' q x <*> list qs mt' rest
 
 -- | Match a call's arguments against a clause's parameters (MS5 phase 82).
 --
@@ -1393,8 +1463,8 @@ matchPattern pt v = case (pt, v) of
 -- **Arity is part of matching**, which is why this answers 'Nothing' rather
 -- than being paired with a length test: a name may carry a one-argument clause
 -- and a two-argument one, and each call picks its own ('Thena.Rules.clauses').
-matchClause :: Rule -> [Value] -> Maybe Env
-matchClause r = matchPatterns (ruleParams r)
+matchClause :: GlobalEnv -> Rule -> [Value] -> Maybe Env
+matchClause env r = matchPatterns env (ruleParams r)
 
 -- | Match a run of patterns against a run of values (MS5 phase 82).
 --
@@ -1405,10 +1475,71 @@ matchClause r = matchPatterns (ruleParams r)
 -- **Arity is part of matching**, which is why this answers 'Nothing' rather
 -- than being paired with a length test: a name may carry a one-argument clause
 -- and a two-argument one, and each call picks its own ('Thena.Rules.clauses').
-matchPatterns :: [Pattern] -> [Value] -> Maybe Env
-matchPatterns ps vs
+matchPatterns :: GlobalEnv -> [Pattern] -> [Value] -> Maybe Env
+matchPatterns env ps vs
   | length ps /= length vs = Nothing
-  | otherwise              = concat <$> zipWithM matchPattern ps vs
+  | otherwise              = concat <$> zipWithM (matchPattern env) ps vs
+
+-- | Match an object term's shape against a 'Core' (MS6 phase 104c).
+--
+-- **A term is tried as it is written, and then reduced and tried again** —
+-- his rule, 2026-09-20, and it is one rule for every pattern rather than a
+-- special case for object terms. It is what makes a pattern match the term
+-- elaboration actually produced, which is a chain of @let@s under a wrapper,
+-- while leaving a pattern that /wants/ an unreduced shape able to see it,
+-- because the unreduced attempt comes first.
+--
+-- **So it is strictly more permissive than matching as written**, and the
+-- consequence @discussion\/pattern-matching.md@ §3 records — that a Core
+-- pattern will not match where @goal-type-is-pi@ does — goes away: under this
+-- rule it does.
+--
+-- Reduction is weak head normal form, so it exposes one level; the recursion
+-- does the rest as it descends.
+matchSkeleton :: GlobalEnv -> Skeleton Pattern -> Core -> Maybe Env
+matchSkeleton env sk t = case here t of
+  Just bs -> Just bs
+  Nothing -> here (whnf env [] t)
+  where
+    here term = case sk of
+      SHole AtTerm p          -> matchPattern env p (VTerm term)
+      SHole (AtPrimitive _) p -> case term of
+        Primitive l -> matchPattern env p (primitiveValue l)
+        _           -> Nothing
+      SLit l -> case term of
+        Primitive l' | l == l' -> Just []
+        _                      -> Nothing
+      SNode nm kids -> case spineOf term of
+        Just (nm', args)
+          | nm == nm', length args == length kids ->
+              concat <$> zipWithM (matchSkeleton env) kids args
+        _ -> Nothing
+
+-- | A constructor application, however it is spelled.
+--
+-- **Both spellings arise and neither is wrong**: elaboration leaves a
+-- 'Canonical' once the wrapper has reduced, and a term written out by
+-- 'Thena.Language.Build.buildTerm' is the wrapper applied.
+spineOf :: Core -> Maybe (GlobalName, [Core])
+spineOf term = case term of
+  Canonical c _ args -> Just (c, args)
+  Global c _         -> Just (c, [])
+  App {}             -> case flatten term [] of
+    (Global c _, args) -> Just (c, args)
+    _                  -> Nothing
+  _ -> Nothing
+  where
+    flatten u acc = case u of
+      App f a -> flatten f (a : acc)
+      _       -> (u, acc)
+
+-- | A @Core@ literal as the @instral@ value a hole at a token class binds.
+primitiveValue :: Literal -> Value
+primitiveValue l = case l of
+  LString x -> VText x
+  LChar c   -> VChar c
+  LInt k    -> VInt (fromInteger k)
+  LRegex r  -> VText r
 
 -- | A shallow shape question — **a small closed set, and there is no pattern
 -- language** (§8, DECIDED 2026-08-20).
@@ -1454,6 +1585,9 @@ data Test
     -- /"those head-predicates can be useful in the future. And what's more —
     -- adding them is not payed in design. They are not a design decision. If we
     -- never use them after MS4, we just drop them during a cleanup refactor."/
+  | SurfaceIsLiteral Operand       -- ^ @"ab"@, @'c'@, @3@ (MS6 phase 97c)
+  | SurfaceIsObject Operand
+    -- ^ @LC\`( \955 x : \953 . x )\`@ — a tagged term literal (MS6 phase 104)
   | SurfaceIsUniverse Operand      -- ^ @Typeₙ@
   | SurfaceIsUniverseOpen Operand  -- ^ a bare @Type@
   | SurfaceIsPlaceholder Operand   -- ^ @_@
@@ -1550,7 +1684,6 @@ opKeyword o = case o of
   Concat _ _   -> "concat"
   Value _      -> "value"
   Lambda _ _   -> "lambda"
-  SurfaceOf _  -> "surface-of"
   NameText _   -> "name-text"
   Along        -> "along"
   Into         -> "into"
@@ -1585,6 +1718,8 @@ opKeyword o = case o of
   UniverseAt _   -> "universe-at"
   ResolveName _  -> "resolve-name"
   SurfaceNameOf _ -> "surface-name"
+  SurfaceLiteralOf _ -> "surface-literal"
+  ObjectTerm _ -> "object-term"
   SurfaceUniverseOf _ -> "surface-universe"
   ArrowDomain _ -> "arrow-domain"
   AppFunction _ -> "app-function"
@@ -1607,6 +1742,8 @@ opKeyword o = case o of
   Typing _     -> "typeof"
   Define _ _   -> "define"
   Certify _    -> "certify"
+  DeclarePrimitive {} -> "declare-primitive"
+  DeclareGrammar {} -> "declare-grammar"
   DefineGlobal {} -> "define-global"
   MakeData {} -> "make-data"
   ResolveCore _ -> "resolve-core"
@@ -1671,3 +1808,4 @@ partWord p = case p of
   Param _    -> "param"
   Method _   -> "method"
   Index _    -> "index"
+

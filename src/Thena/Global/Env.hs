@@ -17,6 +17,7 @@ module Thena.Global.Env
     -- * Inductive definitions (§3.7)
   , InductiveDefinition (..)
   , ConstructorDefinition (..)
+  , ArgRole (..)
 
     -- * The environment
   , GlobalEnv (..)
@@ -28,6 +29,7 @@ module Thena.Global.Env
   , isDeclared
   , declaredNames
   , addConstant
+  , addPrimitive
   , generalised
   , substLevelsInInductive
   , levelMetasInInductive
@@ -70,6 +72,8 @@ import Thena.Core.Term
   , fresh
   , levelMetasIn
   , substLevelsIn
+  , tokenName
+  , tokenType
   )
 
 -- | A global with a body — the @definition@ kind of §3.3.1's table: proved
@@ -230,7 +234,22 @@ data ConstructorDefinition = ConstructorDefinition
   { constructorName      :: GlobalName
   , constructorArguments :: Context
   , constructorIndices   :: [Core]
+  , constructorRoles     :: [ArgRole]
+    -- ^ **one per argument, what it is to the object language** (MS6 phase 103,
+    -- @ms6\/SPEC.md@ §4.7). All 'Plain' for a datatype written by hand; a
+    -- datatype a @language@ block generates carries its grammar's, and generated
+    -- substitution (phase 105) reads them. Here, on the table every type check
+    -- already consults, so that no 'Core' node has to change.
   }
+  deriving (Eq, Show)
+
+-- | What an argument of a constructor is to the object language it models
+-- (@ms6\/SPEC.md@ §4.7).
+data ArgRole
+  = Plain
+  | Occurrence        -- ^ an occurrence of an object identifier
+  | Binder            -- ^ binds in the arguments that list it
+  | Scope [Int]       -- ^ the binder arguments free in this one, by position
   deriving (Eq, Show)
 
 -- | Apply a level substitution to a whole declaration (MS3 phase 33c).
@@ -285,17 +304,55 @@ levelMetasInInductive d =
 -- a dependency is not worth adding for a table that holds a prelude.
 data GlobalEnv = GlobalEnv
   { constants   :: [(GlobalName, Constant)]             -- ^ a type and no body
+  , primitives  :: [(GlobalName, Constant)]
+    -- ^ **the constants a user may write** (MS6 phase 97b): the three primitive
+    -- types, and the primitive functions @declare-primitive@ installs.
+    --
+    -- They are apart from 'constants' because 'Thena.Syntax.Resolve' does not
+    -- resolve a name in that table, deliberately — an eliminator there /"would
+    -- be a trap: it would resolve in term position"/. A primitive is the
+    -- opposite case: @String@ and @eqString@ are written in ordinary terms and
+    -- have to resolve. One table each, rather than a flag on 'Constant', so the
+    -- resolver asks a question with one answer.
   , definitions :: [(GlobalName, Definition)]           -- ^ a type and a body
   , inductives  :: [(GlobalName, InductiveDefinition)]  -- ^ what the checker and ι consult
   }
   deriving (Eq, Show)
 
+-- | Every environment starts with the three primitive types (MS6 phase 97a) and
+-- @Token@ (phase 100).
+--
+-- They are 'constants' — a type and no body — because that is exactly what they
+-- are: @String@, @Char@ and @Int@ have no constructors and no eliminator, and
+-- their only inhabitants are 'Thena.Core.Term.Lit' literals. Seeding them here
+-- rather than in a prelude file means 'isDeclared' protects the three names
+-- everywhere, so @data String …@ is refused by the check that already exists
+-- rather than by one written for the purpose.
 emptyGlobals :: GlobalEnv
-emptyGlobals = GlobalEnv [] [] []
+emptyGlobals = GlobalEnv [] primitiveTypes [] []
+
+-- | The three primitive types, each at @Type₀@, and @Token : Type₀ -> Type₀@
+-- (MS6 phase 100) — the type of a token class, whose values are regex literals.
+--
+-- 'Thena.Core.Term.primitiveType' is the other half of the association and the
+-- only other place these names are written.
+primitiveTypes :: [(GlobalName, Constant)]
+primitiveTypes =
+  [ (GlobalName n, MkConstant [] (Universe LZero))
+  | n <- ["String", "Char", "Int"]
+  ]
+  ++ [(tokenName, MkConstant [] tokenType)]
+
+-- | Install a primitive function (MS6 phase 97b). The driver has already
+-- checked the name has a rule and the type has the shape that rule reads.
+addPrimitive :: GlobalName -> Core -> GlobalEnv -> GlobalEnv
+addPrimitive g ty e = e { primitives = (g, MkConstant [] ty) : primitives e }
 
 -- | The type of a saturated former or, from phase 10, of an eliminator.
 lookupConstant :: GlobalName -> GlobalEnv -> Maybe Constant
-lookupConstant g = lookup g . constants
+lookupConstant g e = case lookup g (constants e) of
+  Just c  -> Just c
+  Nothing -> lookup g (primitives e)
 
 -- | What a 'Thena.Core.Term.Global' names: the third form of δ (§3.6).
 lookupDefinition :: GlobalName -> GlobalEnv -> Maybe Definition
@@ -313,6 +370,7 @@ lookupInductive g = lookup g . inductives
 isDeclared :: GlobalName -> GlobalEnv -> Bool
 isDeclared g e =
   g `elem` map fst (constants e)
+    || g `elem` map fst (primitives e)
     || g `elem` map fst (definitions e)
     || g `elem` map fst (inductives e)
 
@@ -323,7 +381,10 @@ isDeclared g e =
 -- a rule author cannot anticipate and a reader would find baffling.
 declaredNames :: GlobalEnv -> [GlobalName]
 declaredNames e =
-  map fst (constants e) ++ map fst (definitions e) ++ map fst (inductives e)
+  map fst (constants e)
+    ++ map fst (primitives e)
+    ++ map fst (definitions e)
+    ++ map fst (inductives e)
 
 addConstant :: GlobalName -> [LevelVar] -> Core -> GlobalEnv -> GlobalEnv
 addConstant g ls t e = e { constants = (g, MkConstant ls t) : constants e }

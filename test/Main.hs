@@ -5,6 +5,7 @@ import Test.Tasty (defaultMain, testGroup)
 import qualified Thena.Core.ConvertTests
 import qualified Thena.Core.LevelTests
 import qualified Thena.Core.ReduceTests
+import qualified Thena.Core.PrimitiveTests
 import qualified Thena.Core.TermTests
 import qualified Thena.Core.TypingTests
 import qualified Thena.Core.UnifyTests
@@ -14,6 +15,7 @@ import qualified Thena.CanonicalTests
 import qualified Thena.DeterminacyTests
 import qualified Thena.NormalTests
 import qualified Thena.PreservationTests
+import qualified Thena.PrintTests
 import qualified Thena.ProgressTests
 import qualified Thena.ProductTests
 import qualified Thena.DispatchTests
@@ -28,6 +30,16 @@ import qualified Thena.EngineTests
 import qualified Thena.GlobalTests
 import qualified Thena.KernelTests
 import qualified Thena.LexerTests
+import qualified Thena.RegexTests
+import qualified Thena.GrammarTests
+import qualified Thena.EarleyTests
+import qualified Thena.BuildTests
+import qualified Thena.SubstitutionTests
+import qualified Thena.ContextTests
+import qualified Thena.JudgmentTests
+import qualified Thena.ExamplesTests
+import qualified Thena.ObjectTermTests
+import qualified Thena.TokenTests
 import qualified Thena.LoadTests
 import qualified Thena.ManualTests
 import qualified Thena.NoConfusionTests
@@ -51,6 +63,7 @@ main =
       [ Thena.Core.ConvertTests.tests
       , Thena.Core.LevelTests.tests
       , Thena.Core.ReduceTests.tests
+      , Thena.Core.PrimitiveTests.tests
       , Thena.Core.TermTests.tests
       , Thena.Core.TypingTests.tests
       , Thena.Core.UnifyTests.tests
@@ -60,6 +73,7 @@ main =
       , Thena.DeterminacyTests.tests
       , Thena.NormalTests.tests
       , Thena.PreservationTests.tests
+      , Thena.PrintTests.tests
       , Thena.ProgressTests.tests
       , Thena.ProductTests.tests
       , Thena.DispatchTests.tests
@@ -74,6 +88,16 @@ main =
       , Thena.GlobalTests.tests
       , Thena.KernelTests.tests
       , Thena.LexerTests.tests
+      , Thena.RegexTests.tests
+      , Thena.GrammarTests.tests
+      , Thena.EarleyTests.tests
+      , Thena.BuildTests.tests
+      , Thena.SubstitutionTests.tests
+      , Thena.ContextTests.tests
+      , Thena.JudgmentTests.tests
+      , Thena.ExamplesTests.tests
+      , Thena.ObjectTermTests.tests
+      , Thena.TokenTests.tests
       , Thena.LoadTests.tests
   , Thena.ManualTests.tests
       , Thena.NoConfusionTests.tests

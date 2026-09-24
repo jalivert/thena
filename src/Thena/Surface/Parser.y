@@ -28,6 +28,7 @@ import qualified Data.List.NonEmpty as NE
 import Thena.Surface.Concrete
   ( Plicity (..)
   , Surface (..)
+  , ObjectPiece (..)
   , SurfaceDecl (..)
   , SurfaceModule (..)
   , SurfaceData (..)
@@ -36,7 +37,8 @@ import Thena.Surface.Concrete
   , SurfaceBinder (..)
   )
 import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRhs (..), RawBody (..), RawPattern (..))
-import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
+import Thena.Core.Term (Literal (..))
+import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..))
 }
 
 %name parseSurface Term
@@ -68,14 +70,19 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   num     { Located _ (TNumber $$) }
   str     { Located _ (TString $$) }
   chr     { Located _ (TChar $$) }
+  regex   { Located _ (TRegex $$) }
+  block   { Located _ (TBlock _ _) }
   '...'   { Located _ TSpread }
   '['     { Located _ TLBracket }
   ']'     { Located _ TRBracket }
   ','     { Located _ TComma }
   univ    { Located _ (TUniverse $$) }
   tagopen  { Located _ (TTagOpen $$) }
+  tagat    { Located _ (TTagOpenAt _ _) }
   raw      { Located _ (TRaw $$) }
   tagclose { Located _ TTagClose }
+  '${'     { Located _ TEscapeOpen }
+  '}$'     { Located _ TEscapeClose }
   Type    { Located _ TUniverseOpen }
   ident   { Located _ (TIdent $$) }
 
@@ -169,7 +176,7 @@ InstrPatAtom :: { RawPattern }
   | InstrCompoundPat                       { $1 }
 
 InstrCompoundPat :: { RawPattern }
-  : num                                    { RawPInt $1 }
+  : num                                    { RawPInt (fromInteger $1) }
   | str                                    { RawPText $1 }
   | chr                                    { RawPChar $1 }
   | '[' ']'                                { RawPList [] Nothing }
@@ -178,6 +185,10 @@ InstrCompoundPat :: { RawPattern }
   | '[' '...' InstrPatAtom ']'             { RawPList [] (Just $3) }
   | '(' ident InstrPatAtoms ')'            { RawPApp $2 (reverse $3) }
   | '(' InstrPatAtom ',' InstrPatAtom ')'  { RawPPair $2 $4 }
+  | tagopen InstrPieces tagclose           { RawPObject $1 Nothing (concat (reverse $2)) }
+  | tagopen tagclose                       { RawPObject $1 Nothing "" }
+  | tagat InstrPieces tagclose             { patternAt $1 (concat (reverse $2)) }
+  | tagat tagclose                         { patternAt $1 "" }
 
 InstrPatAtoms :: { [RawPattern] }
   :                                        { [] }
@@ -211,7 +222,7 @@ InstrOperand :: { RawOperand }
 -- grammar over.
 InstrValueOperand :: { RawOperand }
   : '(' InstrLambda ')'                    { $2 }
-  | num                                    { RawPos $1 }
+  | num                                    { RawPos (fromInteger $1) }
   | str                                    { RawText $1 }
   | chr                                    { RawChar $1 }
   | '[' ']'                                { RawList [] }
@@ -223,8 +234,22 @@ InstrValueOperand :: { RawOperand }
   -- @do { f surface\`x\` }@ did not parse while the same body in a rule file
   -- did: §7b's registered duplication drifting for the second time, and the
   -- second time it was found by enumerating the forms rather than by reading.
-  | tagopen raw tagclose                   { RawRegion $1 $2 }
-  | tagopen tagclose                       { RawRegion $1 "" }
+  -- **The same four the DC's grammar has** ("Thena.Syntax.Parser"), because a
+  -- @do@ block is the same language wherever it is written (MS6 phase 104c).
+  -- A @${x}@ is put back as text here and read again by whoever resolves the
+  -- region, exactly as it is there.
+  | tagopen InstrPieces tagclose           { RawRegion $1 Nothing (concat (reverse $2)) }
+  | tagopen tagclose                       { RawRegion $1 Nothing "" }
+  | tagat InstrPieces tagclose             { regionAt $1 (concat (reverse $2)) }
+  | tagat tagclose                         { regionAt $1 "" }
+
+InstrPieces :: { [String] }
+  : InstrPiece                             { [$1] }
+  | InstrPieces InstrPiece                 { $2 : $1 }
+
+InstrPiece :: { String }
+  : raw                                    { $1 }
+  | '${' ident '}$'                        { "$" ++ ['{'] ++ $2 ++ ['}'] }
 
 InstrElements :: { [RawOperand] }
   : InstrOperand                           { [$1] }
@@ -245,6 +270,10 @@ Decl :: { SurfaceDecl }
   -- Same syntax, different role: at the top of a module it plays where the
   -- other items declare.
   | do '{' Block '}'                       { SurfaceBlock (reverse $3) }
+  -- **An object-language block, whole** (MS6 phase 101). The lexer took its
+  -- text raw ('Thena.Syntax.Lexer.lexModule'); it is read after parsing, by
+  -- "Thena.Language.Reader", so that its notation never meets this grammar.
+  | block                                  { case $1 of Located (Pos l _) (TBlock k txt) -> SurfaceGrammar k l txt; _ -> error "the block token is TBlock" }
 
 -- | **The same shape "Thena.Syntax.Parser"'s @Data@ has**, because §3.7's split
 -- between parameters and indices is syntactic in both: the parameters are the
@@ -309,6 +338,21 @@ Atom :: { Surface }
   -- name, where it already is.
   | '?' ident                              { SurfaceHole $2 }
   | univ                                   { SurfaceUniverse $1 }
+  -- A literal is an atom, exactly as it is in the DC's grammar (phase 97a).
+  | str                                    { SurfaceLiteral (LString $1) }
+  | chr                                    { SurfaceLiteral (LChar $1) }
+  | num                                    { SurfaceLiteral (LInt $1) }
+  | regex                                  { SurfaceLiteral (LRegex $1) }
+  -- **A tagged term literal is an atom** (MS6 phase 104): it is a term of an
+  -- object language, so it stands wherever a name does and needs no
+  -- parentheses to be an argument. Its text reaches here as the pieces the
+  -- lexer made of the region, and it is parsed with the object grammar at
+  -- elaboration, not here — the grammar is not installed until the load
+  -- reaches its block.
+  | tagopen ObjectPieces tagclose          { SurfaceObject $1 Nothing (pieces $2) }
+  | tagopen tagclose                       { SurfaceObject $1 Nothing [] }
+  | tagat ObjectPieces tagclose            { tagged $1 (pieces $2) }
+  | tagat tagclose                         { tagged $1 [] }
   | Type                                   { SurfaceUniverseOpen }
   | '(' Term ')'                           { $2 }
   -- **An atom, so it needs no parentheses in an argument run** — @try (do { … })@
@@ -316,6 +360,21 @@ Atom :: { Surface }
   | do '{' Block '}'                       { SurfaceDo (reverse $3) }
   | elim ident '(' Terms ')' Atom '(' Terms ')' '(' Terms ')' Atom
       { SurfaceElim $2 (reverse $4) $6 (reverse $8) (reverse $11) $13 }
+
+-- | The pieces of a tagged term literal, reversed.
+--
+-- **A splice holds a whole term**, where MS5's regions carry @${name}@ and put
+-- the text back for an embedded parser to read again ("Thena.Syntax.Parser").
+-- The difference is which parser reads the splice: there it is the /object/
+-- parser, here it is this one, because a splice supplies a slot\'s value and
+-- that value is a surface term (§7.6).
+ObjectPieces :: { [ObjectPiece] }
+  : ObjectPiece                            { [$1] }
+  | ObjectPieces ObjectPiece               { $2 : $1 }
+
+ObjectPiece :: { ObjectPiece }
+  : raw                                    { ObjectText $1 }
+  | '${' Term '}$'                         { ObjectSplice $2 }
 
 Terms :: { [Surface] }
   :                                        { [] }
@@ -445,4 +504,31 @@ lets bs body = foldr (\(x, ty, v) b -> SurfaceLet x ty v b) body bs
 -- names shared a pair of parentheses.
 group :: Plicity -> [String] -> Maybe Surface -> [SurfaceBinder]
 group p xs ty = [ SurfaceBinder p x ty | x <- xs ]
+
+-- | A tagged term literal\'s pieces, in the order they were written.
+--
+-- **Only reversed, never merged.** The lexer emits one chunk per run of text
+-- between escapes and drops an empty one, so two 'ObjectText' pieces can never
+-- be adjacent and a rule that joined them could not fire.
+pieces :: [ObjectPiece] -> [ObjectPiece]
+pieces = reverse
+
+-- | @LC[app]\`…\`@ in an @instral@ operand or pattern (MS6 phase 104c), where
+-- "Thena.Syntax.Parser" has the identical pair.
+regionAt :: Located Token -> String -> RawOperand
+regionAt t src = case t of
+  Located _ (TTagOpenAt lang prod) -> RawRegion lang (Just prod) src
+  _ -> error "the tag token is TTagOpenAt"
+
+patternAt :: Located Token -> String -> RawPattern
+patternAt t src = case t of
+  Located _ (TTagOpenAt lang prod) -> RawPObject lang (Just prod) src
+  _ -> error "the tag token is TTagOpenAt"
+
+-- | @LC[var]\`…\`@ — the tag carries two names, so the token is taken whole
+-- rather than through @$$@.
+tagged :: Located Token -> [ObjectPiece] -> Surface
+tagged t ps = case t of
+  Located _ (TTagOpenAt lang prod) -> SurfaceObject lang (Just prod) ps
+  _ -> error "the tag token is TTagOpenAt"
 }

@@ -139,7 +139,7 @@ againstTheBase =
 -- 'Thena.Instral.Ops.opKeyword' is the total case split @-Wall@ guards; this is the
 -- list the parser is checked against, and the two are crossed below — the word
 -- the table gives must be the word the text starts with, and the text must
--- resolve to the op the table was asked about.
+-- resolve [] to the op the table was asked about.
 --
 -- @data@ is absent and is checked separately: it has a keyword and no written
 -- form (§3.7).
@@ -250,6 +250,9 @@ everyOp =
   , ("here",          Here)
   , ("arrow x y",     Arrow (Ref "x") (Ref "y"))
   , ("apply-to x y",  ApplyTo (Ref "x") (Ref "y"))
+  , ("declare-primitive x y", Op.DeclarePrimitive (Ref "x") (Ref "y"))
+  , ("surface-literal t", Op.SurfaceLiteralOf (Ref "t"))
+  , ("object-term t", Op.ObjectTerm (Ref "t"))
   , ("fresh-name x",  FreshName (Ref "x"))
   , ("typeof x",      Typing (Ref "x"))
   , ("define x y",    Define (Ref "x") (Ref "y"))
@@ -268,7 +271,6 @@ everyOp =
   , ("yield x", Op.Yield (Ref "x"))
   , ("expose x", Op.Expose (Ref "x"))
   , ("play x", Op.Play (Ref "x"))
-  , ("surface-of t", Op.SurfaceOf (Ref "t"))
   , ("surface-name t", Op.SurfaceNameOf (Ref "t"))
   , ("surface-universe t", Op.SurfaceUniverseOf (Ref "t"))
   , ("arrow-domain t", Op.ArrowDomain (Ref "t"))
@@ -528,7 +530,7 @@ regions =
         -- (phase 25e). What this checks is that the region reached it at all.
         b <- bodyOf ("elaborate " ++ tagged "surface" "f x")
         map opWord b @?= ["call"]
-    , testCase "a core region resolves to the instruction that will resolve it" $ do
+    , testCase "a core region resolves to the instruction that will resolve [] it" $ do
         b <- bodyOf ("t = resolve-core " ++ tagged "core" "Type\8320")
         map opWord b @?= ["resolve-core"]
     , testCase "an empty region parses as a region, and its contents still must" $
