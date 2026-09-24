@@ -2,6 +2,7 @@ dist-newstyle/
 docs/api/
 
 .claude/
+.muse/
 discussion/
 reports/
 resources/
