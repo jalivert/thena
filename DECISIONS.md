@@ -2634,3 +2634,45 @@ Every name position takes one: a λ or ∀ binder, a `let`, a claim, a guess, an
 
 **A level position needs no splice**: build the universe with `universe-at` and
 splice the term.
+
+## The editor interface
+
+*Added 2026-09-24, MS7. None of this is an editor — it is the server side an
+editor is built against.*
+
+### Thena speaks a protocol, and the REPL is one of its clients
+
+```
+thena                  -- the terminal REPL
+thena --socket 9000    -- the same session, on a WebSocket
+```
+
+The terminal REPL no longer reaches into the system directly: it sends messages
+and renders what comes back, exactly as a remote client does. Only the transport
+differs — in one case a function call, in the other a socket.
+
+**Why you might care:** anything the REPL can do, a client can do, and the golden
+transcripts that pin the REPL's behaviour are therefore also the protocol's
+regression tests. The socket listens on loopback only.
+
+### A project is an ordered list of modules, and it is stored as written
+
+A project can be stored as JSON or as text, and **both load to the same session**.
+The order is part of the project, not presentation: a module's globals are in
+scope for the next one loaded.
+
+**Stored as written, not resolved.** If a tactic that is a builtin today becomes
+an ordinary rule tomorrow and keeps its name, every stored project keeps working.
+Rename it and they break — which is what a text file would do, and is the point:
+JSON and text are two spellings of one artifact rather than two artifacts.
+
+### A printed value can be read back
+
+`instral` values printed at the prompt used Haskell's escaping, which renders `∀`
+as `\8704` and a tab as `\t` — neither of which the lexer accepts. So a string
+holding a tab, or any non-ASCII character, printed in a form that could not be
+typed back.
+
+It now uses the escaping the reader actually implements. **If you print a value
+and paste it back, it is the same value.**
+
