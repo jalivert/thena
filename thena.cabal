@@ -47,6 +47,7 @@ library
         Thena.Protocol.Concrete
         Thena.Protocol.Json
         Thena.Protocol.Project
+        Thena.Protocol.Server
         Thena.Protocol.Text
         Thena.Protocol.Message
         Thena.Language.Regex
@@ -115,6 +116,7 @@ test-suite thena-test
         Thena.Protocol.AddressTests
         Thena.Protocol.ConcreteTests
         Thena.Protocol.ProjectTests
+        Thena.Protocol.ServerTests
         Thena.Protocol.TextTests
         Thena.Protocol.JsonTests
         Thena.Protocol.MessageTests

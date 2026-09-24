@@ -108,6 +108,11 @@ data ProtocolError
   | VersionMismatch Int Int
     -- ^ what the client asked for, and what this server speaks.
   | NoSuchJob JobId
+  | NotServedYet
+    -- ^ this server does not answer that message yet. **Not a stub payload and
+    -- not a lie about the request**: phases 117 and 118 add the keys and the
+    -- jobs, and until they do the honest answer is that this one does not serve
+    -- them.
   deriving (Eq, Show)
 
 -- | Run one line, and say what happened.

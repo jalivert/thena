@@ -34,6 +34,7 @@ module Thena.Driver
   , commandSummary
   , answer
   , oneLine
+  , oneProgram
   , loadSource
   , loadProofSource
   , loadProofItems
@@ -2400,11 +2401,31 @@ answer s a
 -- terminal turn and 'loadSource' below — and the pending-question bookkeeping
 -- is the part a second copy would get subtly wrong.
 oneLine :: Session -> Maybe Question -> String -> (Session, Response, Maybe Question)
-oneLine s pending line = (record s', resp, asking)
+oneLine s pending line = settle (case pending of
+  Just _  -> answer s line
+  Nothing -> command s line)
+
+-- | Run a program the way a typed line's program is run (MS7 phase 113).
+--
+-- **The same tail as 'oneLine', and that is the whole point.** A client that
+-- points at a position sends an address, and
+-- 'Thena.Protocol.Message.focusing' compiles it into the movement instructions
+-- the user would have typed. Those instructions have to be run /as a line is
+-- run/ — snapshotted for @:undo@, rewound if they fail, and asked about if they
+-- ask — or a click would be a second way into the machine with different rules,
+-- which is the special case the first design principle refuses.
+oneProgram :: Session -> [Instr] -> (Session, Response, Maybe Question)
+oneProgram s is =
+  settle (progress (sessionStepping s) s { sessionMachine = load is (sessionMachine s) } [] [])
+
+-- | What every line and every program does after it has run: notice a pending
+-- question, and keep the undo history straight.
+--
+-- Factored out of 'oneLine' at MS7 phase 113, when 'oneProgram' became its
+-- second caller. Nothing here depends on how @(s', resp)@ was produced.
+settle :: (Session, Response) -> (Session, Response, Maybe Question)
+settle (s', resp) = (record s', resp, asking)
   where
-    (s', resp) = case pending of
-      Just _  -> answer s line
-      Nothing -> command s line
 
     asking = case resp of
       Ran _ _ (Waiting q) -> Just q
