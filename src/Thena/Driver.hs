@@ -36,9 +36,12 @@ module Thena.Driver
   , oneLine
   , loadSource
   , loadProofSource
+  , loadProofItems
   , RuleFileError (..)
   , InstralTypeError
   , loadRuleBases
+  , loadRuleDecls
+  , ruleBaseOfDecls
   , baseHead
   , parseCore
   , checkedPrimitive
@@ -1140,10 +1143,22 @@ paramsAround ps t =
 
 
 loadProofSource :: Session -> String -> (Session, Response)
-loadProofSource s src =
-  case parseSurfaceModule src of
-  Left e -> (s, Failed e)
-  Right (nm, items) ->
+loadProofSource s src = case parseSurfaceModule src of
+  Left e            -> (s, Failed e)
+  Right (nm, items) -> loadProofItems s nm items
+
+-- | Load a module that has already been read.
+--
+-- **Split out of 'loadProofSource' at MS7 phase 112b, and it is the seam the
+-- whole storage design rests on.** A module reaches the session as a name and a
+-- list of items; whether those items came from a text file through
+-- 'parseSurfaceModule' or from a stored JSON tree is not something anything
+-- below this line can tell. That is what makes loading **one pipeline with two
+-- front doors** rather than two paths to keep in step
+-- (@discussion\/editor-protocol.md@ §4 A2, @ms7\/MS7.md@), and it is only true
+-- because the stored form is the tree as written.
+loadProofItems :: Session -> String -> [Item] -> (Session, Response)
+loadProofItems s nm items =
     let machine  = sessionMachine s
         (is, n1) = surfaceProgram (names machine) items
         -- **No block is checked before the module runs** (MS6 phase 104b).
@@ -2127,6 +2142,16 @@ breakOn needle = go ""
 readRuleBase :: [Grammar] -> FilePath -> String -> Either RuleFileError RuleBase
 readRuleBase gs path src = do
   (nm, desc, raws) <- rawRuleDecls src
+  ruleBaseOfDecls gs path nm desc raws
+
+-- | Resolve a rule file's declarations into a base.
+--
+-- The second half of 'readRuleBase', split out at MS7 phase 112b so a stored
+-- project can reach it without going back through text.
+ruleBaseOfDecls
+  :: [Grammar] -> FilePath -> String -> Maybe String -> [RawDecl]
+  -> Either RuleFileError RuleBase
+ruleBaseOfDecls gs path nm desc raws = do
   (sigs, fns, rs) <- resolveAll gs raws
   Right (ruleBase nm desc path sigs fns rs)
 
@@ -2271,7 +2296,32 @@ resolveAll gs raws =
 -- **All or nothing.** A file that will not load leaves the previous list in
 -- place, so a session never ends up searching half of what was asked for.
 loadRuleBases :: Session -> [(FilePath, String)] -> (Session, Response)
-loadRuleBases s = go []
+loadRuleBases s ps =
+  loadReadBases s [(path, readRuleBase gs path src) | (path, src) <- ps]
+  where
+    gs = grammars (sessionMachine s)
+
+-- | The same, for bases whose declarations were stored rather than written.
+--
+-- **Added at MS7 phase 112b**, and it is the rule-file half of the seam
+-- 'loadProofItems' is the surface half of: a stored project holds the tree as
+-- written, so it joins the pipeline after parsing and before resolution. Both
+-- go through 'loadReadBases', so all-or-nothing, inference and the block check
+-- happen once and identically whichever door a base came in by.
+loadRuleDecls :: Session -> [(FilePath, String, Maybe String, [RawDecl])] -> (Session, Response)
+loadRuleDecls s ps =
+  loadReadBases s [(path, ruleBaseOfDecls gs path nm desc ds) | (path, nm, desc, ds) <- ps]
+  where
+    gs = grammars (sessionMachine s)
+
+-- | Install bases that have already been built, or none of them.
+--
+-- **The grammars a base is read against are the session's and do not change as
+-- the list is walked**, which is what lets the reading happen before this rather
+-- than inside it — and is why there is one fold here and not one per kind of
+-- source.
+loadReadBases :: Session -> [(FilePath, Either RuleFileError RuleBase)] -> (Session, Response)
+loadReadBases s = go []
   where
     -- **Inference runs here and nowhere earlier** (MS5 phase 66c), for the
     -- reason in 'BasesIllTyped': a rule's signature is not decidable until every
@@ -2293,10 +2343,9 @@ loadRuleBases s = go []
             )
           errs -> (s, BasesIllTyped errs)
 
-    go acc ((path, src) : more) =
-      case readRuleBase (grammars (sessionMachine s)) path src of
-        Left e  -> (s, RuleFileRefused path e)
-        Right b -> go (acc ++ [b]) more
+    go acc ((path, built) : more) = case built of
+      Left e  -> (s, RuleFileRefused path e)
+      Right b -> go (acc ++ [b]) more
 
     -- **Resolved here and not in 'readRuleBase'**, because what it answers is
     -- not kept: the blocks are handed to 'inferProgram' as extra bodies and then
