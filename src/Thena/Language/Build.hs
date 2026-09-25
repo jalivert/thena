@@ -29,6 +29,10 @@ module Thena.Language.Build
   , objectText
   , atCharacters
   , arguments
+  , Draft (..)
+  , spineOf
+  , settled
+  , objectDraft
   ) where
 
 import Data.List (elemIndex, intercalate)
@@ -229,7 +233,7 @@ draftLanguage d = case d of
 -- printer never writes a text the reader would take apart differently.
 draft :: [Grammar] -> Core -> Maybe Draft
 draft gs term = do
-  (name@(GlobalName n), args) <- spine term
+  (name@(GlobalName n), args) <- spineOf term
   p <- production gs n
   g <- grammarOf gs name
   let names = map argumentName (gproductionArguments p)
@@ -243,17 +247,6 @@ draft gs term = do
   children <- traverse slotOf [ (x, s) | Slot x s _ <- gproductionItems p ]
   pure (DNode p (grammarName g) children term)
   where
-    spine t = case t of
-      Canonical c ls as | null ls -> Just (c, as)
-      Global c ls       | null ls -> Just (c, [])
-      App {}                      -> case flatten t [] of
-        (Global c ls, as) | null ls -> Just (c, as)
-        _                           -> Nothing
-      _ -> Nothing
-    flatten t acc = case t of
-      App f a -> flatten f (a : acc)
-      _       -> (t, acc)
-
     token re a = case a of
       Primitive (LString s) | readsBack re s        -> DToken s
       Primitive (LChar c)   | readsBack re [c]      -> DToken [c]
@@ -291,17 +284,37 @@ grammarOf gs name =
 -- 'Nothing' when fencing everything still does not read back. The caller then
 -- prints the term in the host's syntax, which always reads.
 settle :: [Grammar] -> (Core -> String) -> Draft -> Maybe String
-settle gs render = go
+settle gs render d = do
+  d' <- settled gs render d
+  let (chunks, _, _) = laid gs render d'
+  pure (concatMap escaped chunks)
+
+-- | The fencing loop alone, stopping at the draft rather than its text (MS7
+-- phase 115b) — a caller that lays a draft out itself, rather than printing
+-- it, wants the placed fences and nothing more.
+settled :: [Grammar] -> (Core -> String) -> Draft -> Maybe Draft
+settled gs render = go
   where
     rules = earleyRules gs
     go d =
-      let (chunks, input, tree) = laid gs render d
-          GlobalName lang       = draftLanguage d
+      let (_, input, tree) = laid gs render d
+          GlobalName lang  = draftLanguage d
        in if Earley.parse rules (Earley.StartAt lang) input == Right tree
-            then Just (concatMap escaped chunks)
+            then Just d
             else case loose d of
               path : _ -> go (fenceAt path d)
               []       -> Nothing
+
+-- | A term's fenced layout, structure only — no text (MS7 phase 115b), for a
+-- caller that will lay it out itself rather than print it.
+--
+-- **A stub renderer is exact here, not an approximation.** The round trip
+-- 'settled' checks only asks the parser for the shape of the input, and every
+-- piece a foreign subterm could contribute is one opaque 'Earley.Splice' —
+-- its text never reaches the grammar, so no renderer's output could change
+-- which fences the check settles on.
+objectDraft :: [Grammar] -> Core -> Maybe Draft
+objectDraft gs t = draft gs t >>= settled gs (const "")
 
 -- | A piece of a region's text: object text, which is escaped as the lexer
 -- unescapes it, or a splice, which is the host's syntax and already written.
@@ -391,6 +404,26 @@ production gs name =
   case [ p | g <- gs, p <- grammarProductions g, gproductionName p == GlobalName name ] of
     p : _ -> Just p
     [] -> Nothing
+
+-- | A saturated constructor application, however it is spelled — a
+-- 'Canonical', or a bare 'Global' still standing as 'App's (phase 110's "both
+-- spellings"). 'Nothing' for anything else, including a constructor at level
+-- arguments (a grammar's production never carries one).
+--
+-- **Shared with "Thena.Protocol.Display" (phase 115b)**, which needs the same
+-- name and arguments to address them — move the two together.
+spineOf :: Core -> Maybe (GlobalName, [Core])
+spineOf t = case t of
+  Canonical c ls as | null ls -> Just (c, as)
+  Global c ls       | null ls -> Just (c, [])
+  App {}                      -> case flatten t [] of
+    (Global c ls, as) | null ls -> Just (c, as)
+    _                           -> Nothing
+  _ -> Nothing
+  where
+    flatten u acc = case u of
+      App f a -> flatten f (a : acc)
+      _       -> (u, acc)
 
 -- ---------------------------------------------------------------------------
 -- Regions (MS6 phase 104, shared by both readers at phase 110)
