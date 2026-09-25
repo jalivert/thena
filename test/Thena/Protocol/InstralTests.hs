@@ -27,7 +27,7 @@ import Thena.Protocol.Instral
   , ValueView (..)
   , displayBlock
   )
-import Thena.Protocol.Redraw (redraw)
+import Thena.Protocol.Redraw (redraw, redrawSurface)
 import Thena.Repl (renderInstr, startingSession)
 import Thena.Rules (allRules)
 
@@ -123,9 +123,12 @@ redrawValue v = case v of
   -- exactly rather than approximated — the one place this crossing compares
   -- a term's own text byte for byte.
   ValTerm d -> "\8988" <> redraw d <> "\8989"
-  -- Never reached by this corpus: a closure, a surface focus and an
-  -- unresolved core region are built by ops at run time ('Lambda',
-  -- elaboration, 'resolve-core'), never written as a literal operand in a
-  -- rule's own source — so 'Thena.Instral.Ops.operandsOf' never hands one to
-  -- a statically-written body. Kept total rather than partial.
+  -- 115h gave 'ValSurface' a real display; crossed the same way 'ValTerm'
+  -- already is, against 'Thena.Repl.renderValue's own corner for it.
+  ValSurface sh -> "\8249" <> redrawSurface sh <> "\8250"
+  -- Never reached by this corpus: a closure and an unresolved core region
+  -- are built by ops at run time ('Lambda', 'resolve-core'), never written
+  -- as a literal operand in a rule's own source — so
+  -- 'Thena.Instral.Ops.operandsOf' never hands one to a statically-written
+  -- body. Kept total rather than partial.
   ValOpaque other -> "\8249" <> other <> "\8250"

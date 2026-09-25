@@ -35,7 +35,7 @@ import Thena.Protocol.Instral
   , ValueView (..)
   )
 import Thena.Protocol.Machine (FrameView (..), MachineView (..), displayMachine)
-import Thena.Protocol.Redraw (redraw)
+import Thena.Protocol.Redraw (redraw, redrawSurface)
 import Thena.Repl (renderMachine, startingSession)
 
 tests :: TestTree
@@ -152,4 +152,5 @@ redrawValue v = case v of
   ValPair a b -> "(" <> redrawValue a <> ", " <> redrawValue b <> ")"
   ValLevel l -> l
   ValTerm d -> "\8988" <> redraw d <> "\8989"
+  ValSurface sh -> "\8249" <> redrawSurface sh <> "\8250"
   ValOpaque other -> "\8249" <> other <> "\8250"

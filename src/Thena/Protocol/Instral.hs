@@ -45,6 +45,8 @@ import Thena.Instral.Type (renderTy)
 import Thena.Language.Grammar (Grammar)
 import Thena.Protocol.Address (Address)
 import Thena.Protocol.Display (Budget, Display, displayCore)
+import Thena.Protocol.Surface (SurfaceShape, displaySurface)
+import Thena.Surface.Zipper (focus)
 import Thena.Syntax.Print (Env, escapeChar, escapeString, renderLevel)
 import Thena.Core.Term (Var)
 
@@ -124,12 +126,20 @@ data SkeletonView a
 
 -- | A runtime value, generically — 'Thena.Instral.Ops.Value's own shapes.
 --
--- **A closure, a surface focus and an unresolved core region show their
--- shape and not their contents** — 'Thena.Repl.renderValue's own choice, for
--- its own reason: a closure's body and captured environment "would say more
--- than a reader wants and less than they could use", a surface printer does
--- not exist, and neither does one for 'Thena.Syntax.Concrete.Raw'. 'ValOpaque'
--- is that shape, named, until each has a display of its own.
+-- **A closure and an unresolved core region show their shape and not their
+-- contents** — 'Thena.Repl.renderValue's own choice, for its own reason: a
+-- closure's body and captured environment "would say more than a reader
+-- wants and less than they could use", and there is no printer for
+-- 'Thena.Syntax.Concrete.Raw', written syntax that has not become a term.
+-- 'ValOpaque' is that shape, named, until each has a display of its own.
+--
+-- **A surface focus is not one of them, and 115d's own comment here was
+-- wrong to say so.** 'Thena.Repl.renderValue' already shows a 'VSurface'\'s
+-- content, not its shape — @"\8249" ++ renderSurface (Zipper.focus z) ++
+-- "\8250"@ — because 'Thena.Syntax.Print.renderSurface' has existed since
+-- phase 112c. 115h built the structured version of that printer
+-- ('Thena.Protocol.Surface'); 'ValSurface' uses it, so this stops being the
+-- one place 'ValueView' quietly disagreed with what the terminal shows.
 data ValueView
   = ValText String
   | ValInt Int
@@ -144,6 +154,7 @@ data ValueView
   | ValPair ValueView ValueView
   | ValLevel String
   | ValTerm Display
+  | ValSurface SurfaceShape
   | ValOpaque String
   deriving (Eq, Show)
 
@@ -230,7 +241,7 @@ displayValue gs budget env bs n at v = case v of
   VTerm t -> ValTerm (displayCore gs budget env bs n at t)
   VClosure {} -> ValOpaque "closure"
   VRaw _ -> ValOpaque "core-region"
-  VSurface _ -> ValOpaque "surface"
+  VSurface z -> ValSurface (displaySurface (focus z))
   where
     go = displayValue gs budget env bs n at
 

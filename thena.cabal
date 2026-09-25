@@ -50,6 +50,7 @@ library
         Thena.Protocol.Instral
         Thena.Protocol.Machine
         Thena.Protocol.Rules
+        Thena.Protocol.Surface
         Thena.Protocol.Concrete
         Thena.Protocol.Json
         Thena.Protocol.Project
@@ -134,6 +135,7 @@ test-suite thena-test
         Thena.Protocol.MachineTests
         Thena.Protocol.Redraw
         Thena.Protocol.RulesTests
+        Thena.Protocol.SurfaceTests
         Thena.Protocol.ProjectTests
         Thena.Protocol.ServerTests
         Thena.Protocol.SocketTests

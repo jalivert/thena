@@ -12,7 +12,14 @@
 -- whether the bound variable occurs, which it can see because occurrences
 -- carry their binder), **how to chain consecutive binders**, and, for an
 -- object term, **the fence, not its contents** (§6). None of that crosses.
-module Thena.Protocol.Redraw (redraw, occurs) where
+--
+-- **'redrawSurface' joined it at 115h**, for the same reason and one more:
+-- once 115h gave 'Thena.Protocol.Instral.ValueView' a real
+-- 'Thena.Protocol.Surface.SurfaceShape' case, every module that already drew
+-- a 'ValueView' (115d, 115f, 115g) needed a 'ValSurface' case too, and a
+-- fourth copy of a fifty-line printer is exactly the drift this module
+-- exists to stop.
+module Thena.Protocol.Redraw (redraw, occurs, redrawSurface) where
 
 import Thena.Protocol.Address (Address)
 import Thena.Protocol.Display
@@ -21,6 +28,14 @@ import Thena.Protocol.Display
   , ObjectItem (..)
   , Shape (..)
   )
+import Thena.Protocol.Surface
+  ( SurfaceArgView (..)
+  , SurfaceBinding (..)
+  , SurfacePieceView (..)
+  , SurfaceShape (..)
+  )
+import Thena.Surface.Concrete (Plicity (..))
+import Thena.Syntax.Print (tick)
 
 -- | What an editor is: a function from a 'Display' to text, and nothing else.
 redraw :: Display -> String
@@ -133,3 +148,71 @@ occurs a (Display _ s) = case s of
     occursItem i = case i of
       ObjectChild _ d -> occurs a d
       _               -> False
+
+-- ---------------------------------------------------------------------------
+-- A surface term (115h), crossed against 'Thena.Repl.renderSurface'. Its own
+-- 'SurfacePrec' is not imported from 'Thena.Syntax.Print' — an independent
+-- precedence scheme is the whole point of a crossing rather than a round
+-- trip.
+
+data SurfacePrec = SLoose | SArrowed | SSpine | STight
+  deriving (Eq, Ord)
+
+-- | What an editor is, for a surface term: a function from a 'SurfaceShape'
+-- to text, and nothing else.
+redrawSurface :: SurfaceShape -> String
+redrawSurface = surf SLoose
+  where
+    surf _ (ASurfaceName x) = x
+    surf _ (ASurfaceUniverse l) = "Type" ++ subscriptOf l
+    surf _ ASurfaceUniverseOpen = "Type"
+    surf _ (ASurfaceLiteral t) = t
+    surf _ ASurfacePlaceholder = "_"
+    surf _ (ASurfaceHole h) = "?" ++ h
+    surf _ (ASurfaceObjectTerm lang prod ps) =
+      lang ++ maybe "" (\p -> "[" ++ p ++ "]") prod
+        ++ [tick] ++ concatMap piece ps ++ [tick]
+    surf p (ASurfaceApplication f as) =
+      paren (p >= STight) (surf SSpine f ++ concatMap arg as)
+    surf p (ASurfaceFunction bs b) =
+      paren (p >= SSpine) ("\955" ++ concatMap binding bs ++ " -> " ++ surf SArrowed b)
+    surf p (ASurfaceQuantifier bs b) =
+      paren (p >= SSpine) ("\8704" ++ concatMap binding bs ++ " -> " ++ surf SArrowed b)
+    surf p (ASurfaceArrow a b) =
+      paren (p >= SSpine) (surf STight a ++ " -> " ++ surf SArrowed b)
+    surf p (ASurfaceLet x ty v b) =
+      paren (p >= SSpine)
+        ("let " ++ x ++ maybe "" (\t -> " : " ++ surf SLoose t) ty
+           ++ " = " ++ surf SLoose v ++ " in " ++ surf SArrowed b)
+    surf p (ASurfaceAnnotation e ty) =
+      paren (p >= SArrowed) (surf SArrowed e ++ " : " ++ surf SArrowed ty)
+    surf p (ASurfaceElimination d ps mot ms is tgt) =
+      paren (p >= STight)
+        ("elim " ++ d ++ " " ++ list ps ++ " " ++ surf STight mot ++ " " ++ list ms
+           ++ " " ++ list is ++ " " ++ surf STight tgt)
+    surf _ (ASurfaceDo t) = "do { " ++ t ++ " }"
+
+    arg (SurfaceArgView Explicit t) = " " ++ surf STight t
+    arg (SurfaceArgView Implicit t) = " {" ++ surf SLoose t ++ "}"
+
+    binding (SurfaceBinding Explicit x Nothing) = " " ++ x
+    binding (SurfaceBinding Explicit x (Just ty)) = " (" ++ x ++ " : " ++ surf SLoose ty ++ ")"
+    binding (SurfaceBinding Implicit x Nothing) = " {" ++ x ++ "}"
+    binding (SurfaceBinding Implicit x (Just ty)) = " {" ++ x ++ " : " ++ surf SLoose ty ++ "}"
+
+    list ts = "(" ++ unwords (map (surf STight) ts) ++ ")"
+
+    piece p = case p of
+      ASurfacePieceText txt -> concatMap escapeRaw txt
+      ASurfacePieceSplice e -> "$" ++ "{" ++ surf SLoose e ++ "}"
+
+    escapeRaw c
+      | c `elem` [tick, '\\', '$'] = ['\\', c]
+      | otherwise = [c]
+
+    paren True t = "(" ++ t ++ ")"
+    paren False t = t
+
+    subscriptOf n = map digit (show n)
+      where
+        digit c = "\8320\8321\8322\8323\8324\8325\8326\8327\8328\8329" !! (fromEnum c - fromEnum '0')
