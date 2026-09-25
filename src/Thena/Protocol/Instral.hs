@@ -23,6 +23,7 @@ module Thena.Protocol.Instral
   , SkeletonView (..)
   , displayBlock
   , displayValue
+  , displayOperand
   , patternText
   ) where
 
@@ -189,7 +190,7 @@ displayBlock gs budget env bs n at next instrs =
         , statementBind = bindOf instr
         , statementAnnotation = annotationOf instr
         , statementWord = opKeyword (opOf instr)
-        , statementOperands = map operand (operandsOf (opOf instr))
+        , statementOperands = map (displayOperand gs budget env bs n at) (operandsOf (opOf instr))
         , statementDetail = detailOf (opOf instr)
         }
 
@@ -213,17 +214,21 @@ displayBlock gs budget env bs n at next instrs =
       CrossValue   -> Just (Crosses "val")
       _            -> Nothing
 
-    operand o = case o of
-      Ref x -> OpndRef x
-      Lit v -> OpndLiteral (displayValue gs budget env bs n at v)
-      ListOf os -> OpndList (map operand os)
-      PairOf a b -> OpndPair (operand a) (operand b)
-      ObjectOf sk -> OpndObject (skeleton sk)
-
+-- | An operand, generically — shared with 'Thena.Protocol.Rules', whose head
+-- tests carry operands with no statement around them at all.
+displayOperand :: [Grammar] -> Budget -> Env -> [(Var, Address)] -> Int -> Address -> Operand -> OperandView
+displayOperand gs budget env bs n at o = case o of
+  Ref x -> OpndRef x
+  Lit v -> OpndLiteral (displayValue gs budget env bs n at v)
+  ListOf os -> OpndList (map go os)
+  PairOf a b -> OpndPair (go a) (go b)
+  ObjectOf sk -> OpndObject (skeleton sk)
+  where
+    go = displayOperand gs budget env bs n at
     skeleton sk = case sk of
       SNode (GlobalName nm) kids -> SkelNode nm (map skeleton kids)
       SLit l -> SkelLiteral (literalText l)
-      SHole _ o -> SkelHole (operand o)
+      SHole _ o' -> SkelHole (go o')
 
 -- | A runtime value, generically — shared with 'Thena.Protocol.Machine',
 -- whose @env@ pane is values with no operand around them at all.
