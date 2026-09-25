@@ -54,7 +54,7 @@ import Thena.Language.Grammar
   , Item (..)
   , Sort (..)
   )
-import Thena.Protocol.Address (Address (..), Move (..))
+import Thena.Protocol.Address (Address, Move (..), extend)
 import Thena.Syntax.Print
   ( Env
   , escapeChar
@@ -341,4 +341,4 @@ displayCore grammars budget env binders counter here term =
 
 -- | One step deeper.
 down :: Address -> Part -> Address
-down (Address ms) p = Address (ms ++ [GoDown p])
+down at p = extend at (GoDown p)

@@ -12,6 +12,7 @@ import qualified Thena.Core.UnifyTests
 import qualified Thena.CursorTests
 import qualified Thena.Protocol.AddressTests
 import qualified Thena.Protocol.ConcreteTests
+import qualified Thena.Protocol.DevelopmentTests
 import qualified Thena.Protocol.DisplayTests
 import qualified Thena.Protocol.ProjectTests
 import qualified Thena.Protocol.ServerTests
@@ -79,6 +80,7 @@ main =
       , Thena.Core.UnifyTests.tests
       , Thena.Protocol.JsonTests.tests
       , Thena.Protocol.ConcreteTests.tests
+      , Thena.Protocol.DevelopmentTests.tests
       , Thena.Protocol.DisplayTests.tests
       , Thena.Protocol.ProjectTests.tests
       , Thena.Protocol.ServerTests.tests

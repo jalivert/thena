@@ -20,6 +20,7 @@
 module Thena.Protocol.Address
   ( Address (..)
   , Move (..)
+  , extend
   , addressOf
   , follow
   , AddressError (..)
@@ -53,6 +54,12 @@ import Thena.Errors (MoveError)
 -- reads. The empty address is the root.
 newtype Address = Address [Move]
   deriving (Eq, Show)
+
+-- | One move deeper (MS7 phase 115c). The one place an 'Address' is built by
+-- appending, so 'Thena.Protocol.Display' and 'Thena.Protocol.Development'
+-- share it rather than each keeping its own @down@.
+extend :: Address -> Move -> Address
+extend (Address ms) m = Address (ms ++ [m])
 
 -- | One move. These are exactly the cursor's descents (§4.3) and nothing else:
 -- @back@ is history rather than structure, and @goto@ and @goto-named@ are
