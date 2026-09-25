@@ -2676,3 +2676,57 @@ typed back.
 It now uses the escaping the reader actually implements. **If you print a value
 and paste it back, it is the same value.**
 
+### A Core term displays as a labelled tree, not text
+
+The editor cannot be handed the string the terminal prints — it needs to hover
+a binder, highlight its occurrences, fold a subterm, point at "the motive"
+rather than "argument four". None of that is answerable from text.
+
+So a Core term has a *display representation*: every node carries its address
+and what it is — never what it looks like. A variable carries the address of
+its binder, not a de Bruijn index; a universe carries its level already
+normalised; an eliminator's slots are labelled (parameters, motive, methods,
+indices, target) instead of one flat argument list. **No text, no
+parentheses, no layout crosses** — whether a Π prints as an arrow is only
+whether its bound variable occurs, which the editor can already see, so it is
+the editor's call and not the server's.
+
+### A modelled language's term is a production, not a shape
+
+A term written in an object language — `LC\`( \955 x : \953 . x )\`` — could
+have displayed as a generic constructor application, the way the terminal
+falls back to when it cannot print one in its own notation. It does not: the
+display says *this is `abs`, with these three slots*, in the grammar's own
+written order, and the editor lays it out from the grammar it holds. Nothing
+about notation crosses.
+
+Two things the grammar alone cannot say still have to: where a splice was
+needed for grouping, because a person cannot always write a term flat and
+have it read back what it means — that is the parser's answer, computed once
+and handed across rather than asked of the editor. And which slot is a
+binder versus an occurrence, so a variable in an object language highlights
+the way one in Core does — not yet built.
+
+### The development displays as its own chain
+
+The development — the components a proof is built from, with a focus in
+it — displays as the chain it is, one entry per assumption, definition,
+claim, guess or pending constraint, ending in the term at the end. A guess's
+own body is a chain of its own, nested inside its link, because a guess is
+the one place the chain branches.
+
+Three things only the server knows: whether a link is the focus (at
+chain-link precision — a focus somewhere inside a type is a separate,
+already-addressed question), whether a guess is pure enough for `solve` to
+take, and whether anything later in the development still depends on a
+given hole.
+
+### A statement's display reuses the printer's own generalisation
+
+`instral`'s instruction set has grown past sixty operations, and the
+terminal printer stopped needing one case per operation early on: a
+statement is *the word, then its operands*, for all but a handful. The
+editor's display is generic for the same reason and reuses the same two
+functions that decide it, rather than keeping a second table that could
+drift from the first the way one already has.
+
