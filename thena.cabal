@@ -48,6 +48,7 @@ library
         Thena.Protocol.Development
         Thena.Protocol.Display
         Thena.Protocol.Instral
+        Thena.Protocol.Machine
         Thena.Protocol.Concrete
         Thena.Protocol.Json
         Thena.Protocol.Project
@@ -129,6 +130,7 @@ test-suite thena-test
         Thena.Protocol.DevelopmentTests
         Thena.Protocol.DisplayTests
         Thena.Protocol.InstralTests
+        Thena.Protocol.MachineTests
         Thena.Protocol.Redraw
         Thena.Protocol.ProjectTests
         Thena.Protocol.ServerTests

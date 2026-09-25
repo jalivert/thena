@@ -22,6 +22,7 @@ module Thena.Protocol.Instral
   , ValueView (..)
   , SkeletonView (..)
   , displayBlock
+  , displayValue
   ) where
 
 import Data.List (intercalate)
@@ -202,7 +203,7 @@ displayBlock gs budget env bs n at next instrs =
 
     operand o = case o of
       Ref x -> OpndRef x
-      Lit v -> OpndLiteral (value v)
+      Lit v -> OpndLiteral (displayValue gs budget env bs n at v)
       ListOf os -> OpndList (map operand os)
       PairOf a b -> OpndPair (operand a) (operand b)
       ObjectOf sk -> OpndObject (skeleton sk)
@@ -212,26 +213,32 @@ displayBlock gs budget env bs n at next instrs =
       SLit l -> SkelLiteral (literalText l)
       SHole _ o -> SkelHole (operand o)
 
-    value v = case v of
-      VText s -> ValText (escapeString s)
-      VInt k -> ValInt k
-      VChar c -> ValChar (escapeChar c)
-      VBool b -> ValBool b
-      VList vs -> ValList (map value vs)
-      VOption Nothing -> ValNone
-      VOption (Just v') -> ValSome (value v')
-      VPair a b -> ValPair (value a) (value b)
-      VLevel l -> ValLevel (renderLevel l)
-      VTerm t -> ValTerm (displayCore gs budget env bs n at t)
-      VClosure {} -> ValOpaque "closure"
-      VRaw _ -> ValOpaque "core-region"
-      VSurface _ -> ValOpaque "surface"
+-- | A runtime value, generically — shared with 'Thena.Protocol.Machine',
+-- whose @env@ pane is values with no operand around them at all.
+displayValue :: [Grammar] -> Budget -> Env -> [(Var, Address)] -> Int -> Address -> Value -> ValueView
+displayValue gs budget env bs n at v = case v of
+  VText s -> ValText (escapeString s)
+  VInt k -> ValInt k
+  VChar c -> ValChar (escapeChar c)
+  VBool b -> ValBool b
+  VList vs -> ValList (map go vs)
+  VOption Nothing -> ValNone
+  VOption (Just v') -> ValSome (go v')
+  VPair a b -> ValPair (go a) (go b)
+  VLevel l -> ValLevel (renderLevel l)
+  VTerm t -> ValTerm (displayCore gs budget env bs n at t)
+  VClosure {} -> ValOpaque "closure"
+  VRaw _ -> ValOpaque "core-region"
+  VSurface _ -> ValOpaque "surface"
+  where
+    go = displayValue gs budget env bs n at
 
-    literalText l = case l of
-      LString s -> escapeString s
-      LChar c   -> escapeChar c
-      LInt k    -> show k
-      LRegex r  -> "/" ++ r ++ "/"
+literalText :: Literal -> String
+literalText l = case l of
+  LString s -> escapeString s
+  LChar c   -> escapeChar c
+  LInt k    -> show k
+  LRegex r  -> "/" ++ r ++ "/"
 
 answerKindText :: AnswerKind -> String
 answerKindText k = case k of
