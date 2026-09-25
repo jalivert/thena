@@ -23,6 +23,7 @@ module Thena.Protocol.Instral
   , SkeletonView (..)
   , displayBlock
   , displayValue
+  , patternText
   ) where
 
 import Data.List (intercalate)

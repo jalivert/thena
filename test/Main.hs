@@ -17,6 +17,7 @@ import qualified Thena.Protocol.DevelopmentTests
 import qualified Thena.Protocol.DisplayTests
 import qualified Thena.Protocol.InstralTests
 import qualified Thena.Protocol.MachineTests
+import qualified Thena.Protocol.RulesTests
 import qualified Thena.Protocol.ProjectTests
 import qualified Thena.Protocol.ServerTests
 import qualified Thena.Protocol.SocketTests
@@ -88,6 +89,7 @@ main =
       , Thena.Protocol.DisplayTests.tests
       , Thena.Protocol.InstralTests.tests
       , Thena.Protocol.MachineTests.tests
+      , Thena.Protocol.RulesTests.tests
       , Thena.Protocol.ProjectTests.tests
       , Thena.Protocol.ServerTests.tests
       , Thena.Protocol.SocketTests.tests

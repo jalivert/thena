@@ -47,6 +47,7 @@ module Thena.Repl
   , tabComplete
   , renderTree
   , parseFailureReason
+  , renderMatches
   ) where
 
 import Control.Monad.IO.Class (liftIO)
