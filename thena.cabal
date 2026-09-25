@@ -43,6 +43,7 @@ library
         Thena.Global.NoConfusion
         Thena.Kernel
         Thena.Protocol.Address
+        Thena.Protocol.Chart
         Thena.Protocol.Codec
         Thena.Protocol.Development
         Thena.Protocol.Display
@@ -123,6 +124,7 @@ test-suite thena-test
         Thena.Core.UnifyTests
         Thena.CursorTests
         Thena.Protocol.AddressTests
+        Thena.Protocol.ChartTests
         Thena.Protocol.ConcreteTests
         Thena.Protocol.DevelopmentTests
         Thena.Protocol.DisplayTests
