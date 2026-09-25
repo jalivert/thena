@@ -24,6 +24,7 @@ module Thena.Repl
   , renderLevel
   , renderPartial
   , renderPattern
+  , renderInstr
   , renderValue
   , renderCursor
   , renderWhere
