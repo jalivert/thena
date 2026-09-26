@@ -2343,18 +2343,26 @@ parseFailureReason text why = case why of
       w : rest -> intercalate ", " (reverse rest) ++ " or " ++ w
       [] -> ""
 
--- | **Tab in @:parse@'s mode** (MS6 phase 102b, his request of 2026-09-19).
--- Haskeline hands over the text left of the cursor, reversed, and the text
--- right of it; this answers with what to keep of the left and what to insert.
+-- | **Tab in @:parse@'s mode** (MS6 phase 102b, his request of 2026-09-19;
+-- corrected in MS7 phase 120). Haskeline hands over the text left of the
+-- cursor, reversed, and the text right of it; this answers with what to keep
+-- of the left and what to insert.
 --
--- * **One production is the only one the last terminal belongs to**, and
---   nothing follows the cursor: the rest of it is inserted, its terminals as
---   text and its slots as @?@. After @( λ@ that is @? : ? . ? )@.
--- * **One thing fits**: it is inserted.
--- * **Several fit**: they are listed. Every candidate's replacement is empty,
---   because haskeline inserts the candidates' longest common prefix and lists
---   them only if that inserted nothing — two slots both inserting @?@ would
---   otherwise put a @?@ in instead of showing the choice.
+-- * **One production is open at the cursor**: the rest of it is inserted, its
+--   terminals as text and its slots as @?@ — but only as much of it as the
+--   text after the cursor does not already supply. After @( λ@ that is
+--   @? : ? . ? )@, and with @ )@ already written after the cursor,
+--   @? : ? . ?@ ('Earley.offerRest').
+-- * **One thing fits, and it is notation**: it is inserted. A lone /slot/ is
+--   listed instead — writing a @?@ in front of what the user has already
+--   written makes that text the hole's neighbour in a larger term, which is
+--   not what Tab was asked for.
+-- * **Several fit**: they are listed, and so is anything the position is
+--   waiting for but cannot have ('Earley.offerWanted') — orientation beats
+--   silence. Every candidate's replacement is empty, because haskeline
+--   inserts the candidates' longest common prefix and lists them only if that
+--   inserted nothing — two slots both inserting @?@ would otherwise put a @?@
+--   in instead of showing the choice.
 -- * **The cursor is just after a @?@**: the hole is what is being filled, so
 --   the question is asked as if it were not there, and a single answer
 --   replaces it.
@@ -2372,11 +2380,10 @@ tabComplete rules lang (leftReversed, right) =
           spaced t = if null before || isSpace (last before) then t else ' ' : t
           single t = (reverse before, [(spaced t, t)])
           -- Filling a hole with a hole says nothing: on a @?@, only terminals.
-          options = [ x | x <- Earley.offerOptions o, not replacing || isLiteral x ]
-       in case (Earley.offerCompletion o, options) of
-            (Just rest@(_ : _), _) | not replacing -> single (unwords (map written rest))
-            (_, [s]) -> single (written s)
-            (_, []) -> (leftReversed, [])
+          options = [ x | x <- Earley.offerOptions o ++ Earley.offerWanted o, not replacing || isLiteral x ]
+       in case (Earley.offerRest o, options) of
+            (Just rest, _) | not replacing -> single (unwords (map written rest))
+            (_, [s]) | isLiteral s -> single (written s)
             (_, ss) -> (leftReversed, [ ("", shown s) | s <- ss ])
     written s = case s of
       Earley.Literal t -> t

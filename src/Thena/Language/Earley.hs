@@ -51,9 +51,10 @@ module Thena.Language.Earley
   ) where
 
 import Data.Char (isSpace)
-import Data.List (nub)
+import Data.List (nub, sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (listToMaybe)
 import Data.Set (Set)
 import qualified Data.Set as Set
 
@@ -402,65 +403,147 @@ parse rs start input = case take 2 [ t | Reading t <- all' ] of
 -- At a cursor
 
 -- | What the parser can say at a cursor (phase 102b's Tab, his request of
--- 2026-09-19): what may be written there, and — when the terminal just before
--- the cursor belongs to one production only — the rest of that production.
+-- 2026-09-19): what may be written there, what the position is waiting for,
+-- and the rest of the production the cursor is inside.
 data Offer = Offer
-  { offerOptions    :: [Symbol]
+  { offerOptions :: [Symbol]
     -- ^ **what may be written at the cursor such that the line can still be
     -- finished** — the text after the cursor included. A symbol is tried
     -- together with some of the rest of its own production, holes for its
     -- slots: @(@ opening an arrow type is tried as @( ? -> ? )@, since @(@
     -- alone could never be followed by what closes the /enclosing/ term. A
     -- slot is offered as its 'Nonterminal' or 'Scan'.
-  , offerCompletion :: Maybe [Symbol]
-    -- ^ the symbols left of the one production the last terminal belongs to.
-    -- **Only when nothing but whitespace follows the cursor**: the rest of a
-    -- production is inserted at the end of what is written, never into the
-    -- middle of it.
+  , offerWanted :: [Symbol]
+    -- ^ **what a production already open is waiting for, whether or not it
+    -- can be had** — and never anything 'offerOptions' already says. After
+    -- @( λ x : @ with @? . ? )@ following, no insertion leaves that line
+    -- finishable, but the position still wants a @Ty@, and orientation beats
+    -- silence.
+    --
+    -- Slots only, and continuations only. A prediction has recognised
+    -- nothing, so it is not waiting for anything; and a terminal here would
+    -- be /written/ by a frontend into a line it does not fit — a @)@ already
+    -- closed must not offer to close itself again.
+  , offerRest :: Maybe [Symbol]
+    -- ^ the rest of the one production the cursor is inside, **as much of it
+    -- as the text after the cursor does not already supply**. After @( λ@ at
+    -- the end of a line that is @? : ? . ? )@; with @ )@ following it is
+    -- @? : ? . ?@, the closer being the one already written; with @? )@
+    -- following, @? : ? .@.
+    --
+    -- **Nothing unless exactly one production is open** — one item at the
+    -- cursor's column that has recognised something and not finished. After
+    -- @(@ both @abs@ and @paren@ have, so nothing is offered here and
+    -- 'offerOptions' does the talking.
+    --
+    -- **Nothing when the text after the cursor already supplies the slot the
+    -- production wants next.** After @( λ@ with @x@ following, the rest would
+    -- reinterpret the binder the user wrote as the argument of an
+    -- application — and since @( λ ? : ? . ? ) x@ /is/ a term, the test
+    -- below cannot rule it out.
+    --
+    -- **Never a lone slot**, which is 'offerOptions' and 'offerWanted's
+    -- business: writing a hole in front of text the user has already written
+    -- makes that text the hole's neighbour in some larger term, which is not
+    -- what pressing Tab asked for.
   }
   deriving (Eq, Show)
 
 -- | The cursor sits between @left@ and @right@.
 --
--- **The completion rule is one sentence**: if the terminal just before the
--- cursor was scanned by items of exactly one production, the rest of that
--- production is offered. After @( λ@ that is @abs@; after @(@ alone it is
--- @abs@ and @paren@, so nothing is completed and both are listed. An item whose
--- symbol before the dot is a 'Literal' is in its column only because it
--- scanned that literal there, so the chart answers this directly.
+-- **The two answers ask different things of the same line.** An option has
+-- only to leave it /finishable/ — scanning reaches its end, with the text
+-- after the cursor included. The rest has to /close the production it
+-- belongs to/: with the insertion in place, the very item that was open is
+-- completed somewhere in the line, and the line is still finishable. That is
+-- why the rest is a prefix of what the production has left rather than all of
+-- it — what the cursor already holds is not written twice — and why a nested
+-- position at the end of a line still gets the whole rest, the enclosing
+-- productions being someone else's business.
 offer :: [Rule] -> Start -> [Piece] -> [Piece] -> Offer
-offer rs start left right = Offer options completion
+offer rs start left right = Offer options wanted rest
   where
     c = chart rs start left
     k = settled c (length left)
-    candidates =
-      [ symbols | i <- itemsAt c k, symbols@(_ : _) <- [drop (itemDot i) (ruleBody (chartRule c i))] ]
-    options = nub [ s | symbols@(s : _) <- candidates, viable symbols ]
+    here = itemsAt c k
+    restOf i = drop (itemDot i) (ruleBody (chartRule c i))
+
+    options = nub [ s | i <- here, symbols@(s : _) <- [restOf i], viable symbols ]
+
+    wanted = nub
+      [ s | i <- here, s : _ <- [restOf i]
+          , itemDot i > 0
+          , not (isLiteral s)
+          , s `notElem` options
+      ]
 
     -- The symbol, and some prefix of the rest of its production, written at the
     -- cursor with a space between each: does the line then scan to its end?
     -- **Some prefix, not all of it**, because when the cursor is inside the
     -- production the text after the cursor may already hold the rest — after
     -- @( λ ? : @ with @ . ? )@ following, the @Ty@ slot needs nothing more.
-    viable symbols = any reaches [ take n symbols | n <- [length symbols, length symbols - 1 .. 1] ]
+    viable symbols = any reaches (prefixes symbols)
     reaches symbols =
-      let line = left ++ concatMap (\x -> Char ' ' : written x) symbols ++ [Char ' '] ++ right
-          c' = chart rs start line
-       in skipSpace (chartInput c') (furthest c') == length line
+      let c' = with symbols
+       in skipSpace (chartInput c') (furthest c') == inputLength c'
+
+    -- The one item that has recognised something and not finished.
+    -- Predictions are excluded by the dot, completions by the body left.
+    open = case [ i | i <- here, itemDot i > 0, itemDot i < length (ruleBody (chartRule c i)) ] of
+      [i] -> Just i
+      _   -> Nothing
+
+    rest = case open of
+      Just i | s : _ <- restOf i, not (supplied s) -> pick i
+      _ -> Nothing
+
+    -- Of the prefixes that close the production, the one writing fewest holes,
+    -- and the longest of those. A longer prefix that writes no extra hole only
+    -- writes terminals the user needs anyway, while one that writes a hole the
+    -- text after the cursor already holds — @( λ@ with @? )@ following, taking
+    -- the body slot as well as its own — duplicates it into a phantom
+    -- application. So that case takes @? : ? .@ over @? : ? . ?@.
+    pick i = listToMaybe
+      [ pfx | pfx <- sortOn cost (prefixes (restOf i))
+            , not (loneSlot pfx)
+            , closes i pfx
+      ]
+    cost pfx = (length (filter (not . isLiteral) pfx), negate (length pfx))
+    loneSlot pfx = case pfx of
+      [s] -> not (isLiteral s)
+      _   -> False
+
+    -- With this written at the cursor, is the open item completed — the same
+    -- rule, from the same column — and does the line still reach its end?
+    closes i pfx =
+      let c' = with pfx
+          done = Item (itemRule i) (length (ruleBody (chartRule c i))) (itemOrigin i)
+       in reaches pfx && any (\j -> done `elem` itemsAt c' j) [itemOrigin i .. inputLength c']
+
+    -- Is the slot the production wants next already written after the cursor?
+    -- Only a token class can answer yes: a hole or a splice supplies nothing,
+    -- and a terminal is written rather than supplied. A nonterminal slot is
+    -- left to 'offerOptions', which says how it may be written.
+    supplied s = case s of
+      Scan _ re -> any (> 0) (matches re runAfter)
+      _         -> False
+
+    -- The run of characters after the cursor: spaces skipped, to the first
+    -- hole, splice or end. What a token class is checked against.
+    runAfter = charsFrom (Map.fromList (zip [0 ..] (dropWhile blank right))) 0
+
+    prefixes symbols = [ take n symbols | n <- [length symbols, length symbols - 1 .. 1] ]
+    with symbols =
+      chart rs start (left ++ concatMap (\x -> Char ' ' : written x) symbols ++ [Char ' '] ++ right)
     written s = case s of
       Literal t -> map Char t
       _ -> [Hole]
 
-    justScanned =
-      nub [ (itemRule i, itemDot i)
-          | i <- itemsAt c k
-          , let body = ruleBody (chartRule c i)
-          , itemDot i > 0, itemDot i < length body
-          , Literal _ <- [body !! (itemDot i - 1)]
-          ]
-    completion = case justScanned of
-      [(r, d)] | all blank right -> Just (drop d (ruleBody (chartRules c Map.! r)))
-      _ -> Nothing
     blank p = case p of
       Char ch -> isSpace ch
       _ -> False
+
+isLiteral :: Symbol -> Bool
+isLiteral s = case s of
+  Literal _ -> True
+  _ -> False

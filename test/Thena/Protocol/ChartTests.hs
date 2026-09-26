@@ -158,6 +158,14 @@ offerCases =
       "( \955 x : " " . x )"
   , agree "the text after the cursor filters the options"
       "( \955 x : \953 . x " ")"
+  , -- Phase 120: the rest is fitted to what follows the cursor, and a
+    -- position that can have nothing still says what it wants — both of
+    -- which the view has to carry, the first as 'offeredRest' and the
+    -- second as 'offeredWanted'.
+    agree "the rest is cut short by the closer already written"
+      "( \955" " )"
+  , agree "a contradicted type slot still says it wants a T"
+      "( \955 x : " "? . x )"
   ]
   where
     agree name before after = testCase name $ do
@@ -176,15 +184,19 @@ mismatchOffer gs lang before after
 -- which is the REPL's own hole spelling and not this phase's concern),
 -- replayed over an 'OfferView' rather than a raw 'Earley.Offer'.
 redrawOffer :: String -> OfferView -> (String, [(String, String)])
-redrawOffer before (OfferView options completion) =
-  case (completion, options) of
-    (Just rest@(_ : _), _) -> single (unwords (map redrawWritten rest))
-    (_, [s]) -> single (redrawWritten s)
-    (_, []) -> (reverse before, [])
+redrawOffer before (OfferView options wanted rest) =
+  case (rest, options ++ wanted) of
+    (Just pfx, _) -> single (unwords (map redrawWritten pfx))
+    (_, [s]) | isLiteralView s -> single (redrawWritten s)
     (_, ss) -> (reverse before, [ ("", redrawSymbolText' s) | s <- ss ])
   where
     single t = (reverse before, [(spaced t, t)])
     spaced t = if null before || isSpace (last before) then t else ' ' : t
+
+isLiteralView :: SymbolView -> Bool
+isLiteralView s = case s of
+  ALiteralSymbol _ -> True
+  _ -> False
 
 redrawWritten :: SymbolView -> String
 redrawWritten s = case s of

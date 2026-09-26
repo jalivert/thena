@@ -508,17 +508,24 @@ In it, **Tab asks the parser what fits at the cursor**:
 
 ```
 parse LC> ( λ‸              Tab →   ( λ ? : ? . ? )
+parse LC> ( λ‸ )            Tab →   ( λ ? : ? . ? )     (the closer was already there)
+parse LC> ( λ‸ x            Tab →   lists  ‹x›          (your binder is not written over)
 parse LC> ( ‸               Tab →   lists  λ  (  ‹LC›  ‹x›  {
+parse LC> ( λ x : ‸? . ? )  Tab →   lists  ‹Ty›         (nothing fits, but the slot wants one)
 parse LC> ( λ x : ?‸ . x )  Tab →   lists  ι  (      (what can replace the ?)
 ```
 
-When the terminal just before the cursor belongs to one production only, Tab
-inserts the rest of it, `?` for its slots. That happens only at the end of the
-line, never in the middle. Otherwise Tab lists what can go at the cursor such
-that the line can still be finished, counting what's already written after
-the cursor. On a `?`, Tab fills that hole, so it offers only notation. The
-options appear when you press Tab, not as you move; options that follow the
-cursor are the structural editor's job.
+When exactly one production is open at the cursor — one that has recognised
+something and has not finished — Tab writes the rest of it, `?` for its slots,
+and **only as much of it as the text after the cursor does not already
+supply**: a closer already written is not written twice, and a hole is never
+put in front of something you typed. Otherwise Tab lists what can go at the
+cursor such that the line can still be finished, counting what's already
+written after the cursor; and when nothing at all fits there, it lists what
+the open position is waiting for, so the parser's expectation is visible
+rather than silent. On a `?`, Tab fills that hole, so it offers only notation.
+The options appear when you press Tab, not as you move; options that follow
+the cursor are the structural editor's job.
 
 
 ### A language block declares a datatype, and its terms are ordinary terms

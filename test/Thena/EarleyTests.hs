@@ -277,16 +277,22 @@ tabbing :: [TestTree]
 tabbing =
   [ testCase "after ( λ, the rest of abs is inserted, slots as ?" $
       tab lc "LC" "( λ" "" @?= (reverse "( λ", [(" ? : ? . ? )", "? : ? . ? )")])
-  , testCase "after ( λ x : , too — the last terminal still belongs to abs alone" $
+  , testCase "after ( λ x : , too — abs is the one production open there" $
       tab lc "LC" "( λ x : " "" @?= (reverse "( λ x : ", [("? . ? )", "? . ? )")])
+  , -- Phase 120: a dot moved by a token class is as decisive as one moved by
+    -- a literal — after the binder, abs is still the only production open —
+    -- so Tab writes the rest of it rather than only its next @:@.
+    testCase "and after the binder, where the previous symbol is a token class" $
+      tab lc "LC" "( λ x " "" @?= (reverse "( λ x ", [(": ? . ? )", ": ? . ? )")])
   , testCase "after ( alone, abs and paren both fit, so the options are listed" $ do
       let (kept, cs) = tab lc "LC" "( " ""
       kept @?= reverse "( "
       map fst cs @?= map (const "") cs   -- nothing inserted: haskeline lists
       sort [ d | (_, d) <- cs, d `elem` ["\955", "(", "\8249LC\8250"] ]
         @?= sort ["\955", "\8249LC\8250", "("]
-  , -- The completion rule is about a terminal: after f, which ends a var,
-    -- app has begun but nothing has been decided, so nothing is completed.
+  , -- The rest is about a production that has recognised something and not
+    -- finished: after f, which ends a var, app has begun but all it wants is
+    -- a slot, and a slot is listed rather than written.
     testCase "after a finished var, no production is completed" $
       map fst (snd (tab lc "LC" "f" "")) @?= map (const "") (snd (tab lc "LC" "f" ""))
   , -- The cursor inside the production being written: what follows it is the
@@ -297,10 +303,40 @@ tabbing =
   , testCase "the text after the cursor filters the options" $ do
       let (_, cs) = tab lc "LC" "( \955 x : \953 . x " ")"
       [ d | (_, d) <- cs, d == ")" ] @?= []
-  , -- With text after the cursor the rest of abs is not inserted; the one
-    -- thing that fits there — a hole for the bound name — is.
-    testCase "the rest of a production is never inserted into a line's middle" $
-      tab lc "LC" "( \955" " x" @?= (reverse "( \955", [(" ?", "?")])
+  , -- Phase 120's three faces. Before it, the rest of a production was
+    -- offered only at the end of a line, and mid-line Tab fell through to
+    -- inserting one option on its own — which for a slot is a @?@ written in
+    -- front of what the user had already typed.
+    testCase "the binder already written is listed, not overwritten with a hole" $
+      tab lc "LC" "( \955" " x" @?= (reverse "( \955", [("", "\8249x\8250")])
+  , testCase "a top-level abs is completed against its own closer" $
+      tab lc "LC" "( \955" " )" @?= (reverse "( \955", [(" ? : ? . ?", "? : ? . ?")])
+  , testCase "a nested abs is completed against the outer term's closer" $
+      tab lc "LC" "( \955 fn : ( \953 -> \953 ) . ( \955" " )"
+        @?= (reverse "( \955 fn : ( \953 -> \953 ) . ( \955", [(" ? : ? . ? )", "? : ? . ? )")])
+  , -- What the cursor already holds is not written twice: the body hole and
+    -- the closer on the right finish the production, so the rest stops at
+    -- the dot. Writing the body slot as well would read the two holes as an
+    -- application.
+    testCase "the rest stops where the text after the cursor takes over" $
+      tab lc "LC" "( \955" "? )" @?= (reverse "( \955", [(" ? : ? .", "? : ? .")])
+  , -- Nothing can be written here that leaves the line finishable — abs
+    -- would need a second @.@ — but the position wants a Ty, and saying so
+    -- beats saying nothing.
+    testCase "a contradicted type slot still names its nonterminal" $
+      tab lc "LC" "( \955 x : " "? . ? )" @?= (reverse "( \955 x : ", [("", "\8249Ty\8250")])
+  , testCase "and that is offerWanted, with nothing fitting and no rest" $ do
+      let o = offer lc (StartAt "LC") (pieces "( \955 x : ") (pieces "? . ? )")
+      (offerOptions o, offerWanted o, offerRest o) @?= ([], [nt "Ty"], Nothing)
+  , -- The two answers, side by side, and the line between them: at the open
+    -- paren of an abs already written, @(@ fits — a paren or an arrow type
+    -- could still be finished around it — while the LC that paren and app
+    -- are waiting for cannot be had at all. A /prediction/ waits for nothing,
+    -- having recognised nothing, so var's token class stays out even though
+    -- it too is unwritable here.
+    testCase "what is wanted is not what fits, and a prediction wants nothing" $ do
+      let o = offer lc (StartAt "LC") (pieces "(") (pieces " \955 x : \953 . x )")
+      (offerOptions o, offerWanted o) @?= ([lit "("], [nt "LC"])
   , testCase "on a ?, a single answer replaces the hole" $
       tab [rule "e" "E" [lit "<", nt "T", lit ">"], rule "base" "T" [lit "\953"]] "E" "< ?" " >"
         @?= (reverse "< ", [("\953", "\953")])

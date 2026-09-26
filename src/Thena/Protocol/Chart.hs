@@ -13,10 +13,11 @@
 -- **Two questions, because the engine already has two functions for them.**
 -- 'Earley.parse' is "is the whole text one term, and if not, why" — one
 -- reading, an ambiguity between two, an unbounded rule, a non-linear clash,
--- or how far it got before it was stuck. 'Earley.offer' is "what may be
--- written at the cursor such that the line can still be finished" — the
--- dropdown itself. Nothing here composes them further than the engine
--- already does; 'displayParse' and 'displayOffer' are direct wrappers.
+-- or how far it got before it was stuck. 'Earley.offer' is what may be
+-- written at the cursor, what the position is waiting for, and the rest of
+-- the production the cursor is inside — the dropdown itself. Nothing here
+-- composes them further than the engine already does; 'displayParse' and
+-- 'displayOffer' are direct wrappers.
 --
 -- **A 'Earley.Symbol' does not cross whole.** Its 'Thena.Language.Regex.Regex'
 -- is how a scan recognises text, not something the editor renders or acts
@@ -69,14 +70,20 @@ data FailureView
 
 -- | What may stand at the cursor, mirroring 'Earley.Offer'.
 data OfferView = OfferView
-  { offeredOptions    :: [SymbolView]
+  { offeredOptions :: [SymbolView]
     -- ^ what may be written at the cursor such that the line can still be
     -- finished, each tried together with enough of its own production to
     -- know it reaches — see 'Earley.offerOptions'.
-  , offeredCompletion :: Maybe [SymbolView]
-    -- ^ the rest of the one production the text just before the cursor
-    -- belongs to, when nothing but whitespace follows — see
-    -- 'Earley.offerCompletion'.
+  , offeredWanted :: [SymbolView]
+    -- ^ what a production already open is waiting for even though no
+    -- insertion would leave the line finishable, and which 'offeredOptions'
+    -- therefore does not carry — see 'Earley.offerWanted'. A frontend that
+    -- wants to say so may mark these differently; the terminal, which cannot,
+    -- lists them beside the rest.
+  , offeredRest :: Maybe [SymbolView]
+    -- ^ the rest of the one production the cursor is inside, as much of it as
+    -- the text after the cursor does not already supply — see
+    -- 'Earley.offerRest'.
   }
   deriving (Eq, Show)
 
@@ -98,7 +105,11 @@ displayOffer gs lang before after =
   offerView (Earley.offer (earleyRules gs) (Earley.StartAt lang) (Earley.pieces before) (Earley.pieces after))
 
 offerView :: Earley.Offer -> OfferView
-offerView o = OfferView (map symbolView (Earley.offerOptions o)) (fmap (map symbolView) (Earley.offerCompletion o))
+offerView o =
+  OfferView
+    (map symbolView (Earley.offerOptions o))
+    (map symbolView (Earley.offerWanted o))
+    (fmap (map symbolView) (Earley.offerRest o))
 
 failureView :: Earley.ParseFailure -> FailureView
 failureView f = case f of
