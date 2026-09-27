@@ -1,33 +1,12 @@
 module Main (main) where
 
-import System.Environment (getArgs)
-import System.Exit (exitFailure)
-import System.IO (hPutStrLn, stderr)
+import Thena.Repl (repl)
 
-import Thena.Protocol.Socket (runSocketServer)
-import Thena.Repl (repl, startingSession)
-
--- | The terminal REPL, or the same session on a socket.
+-- | The terminal REPL.
 --
--- **Both are clients of the same server** (MS7 phase 113): the REPL speaks
--- messages in process and this speaks them over a WebSocket, and nothing below
--- the transport can tell which. @--socket@ is what a browser connects to, and
--- what the editor will be built against.
+-- **One binary, and the frontend calls the library directly** (MS7 phase 122).
+-- There was a @--socket@ here, serving the same session over a WebSocket to a
+-- browser; his ruling of 2026-09-27 removed the wire, so a frontend is linked
+-- rather than connected. See @discussion\/tight-integration.md@.
 main :: IO ()
-main = do
-  args <- getArgs
-  case args of
-    [] -> repl
-    ["--socket"] -> socket 9000
-    ["--socket", p] | [(n, "")] <- reads p -> socket n
-    _ -> do
-      hPutStrLn stderr "usage: thena [--socket [PORT]]"
-      exitFailure
-  where
-    socket port = do
-      -- The same starting session the REPL gets: the standard base, then the
-      -- prelude, in that order (@Thena.Repl.startingSession@).
-      (sess, problems) <- startingSession
-      mapM_ (hPutStrLn stderr) problems
-      hPutStrLn stderr ("thena listening on 127.0.0.1:" <> show port)
-      runSocketServer port sess
+main = repl

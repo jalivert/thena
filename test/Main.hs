@@ -12,19 +12,14 @@ import qualified Thena.Core.UnifyTests
 import qualified Thena.CursorTests
 import qualified Thena.Protocol.AddressTests
 import qualified Thena.Protocol.ChartTests
-import qualified Thena.Protocol.ConcreteTests
 import qualified Thena.Protocol.DevelopmentTests
 import qualified Thena.Protocol.DisplayTests
 import qualified Thena.Protocol.InstralTests
 import qualified Thena.Protocol.MachineTests
 import qualified Thena.Protocol.RulesTests
 import qualified Thena.Protocol.SurfaceTests
-import qualified Thena.Protocol.ProjectTests
 import qualified Thena.Protocol.ServerTests
-import qualified Thena.Protocol.SocketTests
-import qualified Thena.Protocol.WireTests
 import qualified Thena.Protocol.TextTests
-import qualified Thena.Protocol.JsonTests
 import qualified Thena.Protocol.MessageTests
 import qualified Thena.DependentIndexTests
 import qualified Thena.CanonicalTests
@@ -83,19 +78,14 @@ main =
       , Thena.Core.TermTests.tests
       , Thena.Core.TypingTests.tests
       , Thena.Core.UnifyTests.tests
-      , Thena.Protocol.JsonTests.tests
       , Thena.Protocol.ChartTests.tests
-      , Thena.Protocol.ConcreteTests.tests
       , Thena.Protocol.DevelopmentTests.tests
       , Thena.Protocol.DisplayTests.tests
       , Thena.Protocol.InstralTests.tests
       , Thena.Protocol.MachineTests.tests
       , Thena.Protocol.RulesTests.tests
       , Thena.Protocol.SurfaceTests.tests
-      , Thena.Protocol.ProjectTests.tests
       , Thena.Protocol.ServerTests.tests
-      , Thena.Protocol.SocketTests.tests
-      , Thena.Protocol.WireTests.tests
       , Thena.Protocol.TextTests.tests
       , Thena.Protocol.AddressTests.tests
       , Thena.Protocol.MessageTests.tests

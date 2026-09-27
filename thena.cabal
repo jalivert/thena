@@ -44,19 +44,13 @@ library
         Thena.Kernel
         Thena.Protocol.Address
         Thena.Protocol.Chart
-        Thena.Protocol.Codec
         Thena.Protocol.Development
         Thena.Protocol.Display
         Thena.Protocol.Instral
         Thena.Protocol.Machine
         Thena.Protocol.Rules
         Thena.Protocol.Surface
-        Thena.Protocol.Concrete
-        Thena.Protocol.Json
-        Thena.Protocol.Project
         Thena.Protocol.Server
-        Thena.Protocol.Socket
-        Thena.Protocol.Wire
         Thena.Protocol.Text
         Thena.Protocol.Message
         Thena.Language.Regex
@@ -93,11 +87,7 @@ library
         base       ^>=4.21.2.0,
         array      >=0.5 && <0.6,
         containers >=0.7 && <0.9,
-        haskeline  >=0.8.4 && <0.9,
-        bytestring >=0.12 && <0.13,
-        network    >=3.1  && <3.3,
-        websockets >=0.13 && <0.14,
-        text       >=2.1  && <2.2
+        haskeline  >=0.8.4 && <0.9
     build-tool-depends:
         alex:alex   >=3.5,
         happy:happy >=2.1
@@ -128,7 +118,6 @@ test-suite thena-test
         Thena.CursorTests
         Thena.Protocol.AddressTests
         Thena.Protocol.ChartTests
-        Thena.Protocol.ConcreteTests
         Thena.Protocol.DevelopmentTests
         Thena.Protocol.DisplayTests
         Thena.Protocol.InstralTests
@@ -136,12 +125,8 @@ test-suite thena-test
         Thena.Protocol.Redraw
         Thena.Protocol.RulesTests
         Thena.Protocol.SurfaceTests
-        Thena.Protocol.ProjectTests
         Thena.Protocol.ServerTests
-        Thena.Protocol.SocketTests
-        Thena.Protocol.WireTests
         Thena.Protocol.TextTests
-        Thena.Protocol.JsonTests
         Thena.Protocol.MessageTests
         Thena.DependentIndexTests
         Thena.CanonicalTests

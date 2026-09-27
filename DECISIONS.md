@@ -2665,36 +2665,56 @@ Every name position takes one: a λ or ∀ binder, a `let`, a claim, a guess, an
 **A level position needs no splice**: build the universe with `universe-at` and
 splice the term.
 
-## The editor interface
+## Building a frontend
 
-*Added 2026-09-24, MS7. None of this is an editor — it is the server side an
-editor is built against.*
+*Added 2026-09-24, MS7; rewritten 2026-09-27, when the decision below replaced a
+network protocol with a library boundary.*
 
-### Thena speaks a protocol, and the REPL is one of its clients
+### Thena is a library, and a frontend links it
 
 ```
-thena                  -- the terminal REPL
-thena --socket 9000    -- the same session, on a WebSocket
+thena                  -- the terminal REPL, one frontend among others
 ```
 
-The terminal REPL no longer reaches into the system directly: it sends messages
-and renders what comes back, exactly as a remote client does. Only the transport
-differs — in one case a function call, in the other a socket.
+A frontend advances a session with two functions on `Thena.Driver` and **never
+opens it**: `Session` is abstract, and everything a frontend can see comes from
+`Thena.View`, which describes a term, a development, a rule, the machine and the
+parser's offers in its own vocabulary.
 
-**Why you might care:** anything the REPL can do, a client can do, and the golden
-transcripts that pin the REPL's behaviour are therefore also the protocol's
-regression tests. The socket listens on loopback only.
+So a frontend never learns what a de Bruijn index is, when a Π is dependent, or
+what distinguishes a guess from a claim. It renders what it is handed. The
+enforcement is cabal's: a frontend depends on the `view` sublibrary, and an
+import of the engine does not compile.
 
-### A project is an ordered list of modules, and it is stored as written
+**There was a WebSocket and a JSON message protocol here**, so that a browser
+could be the frontend. It was removed: there is no remote client, the same
+boundary is stronger as types than as a schema, and everything the protocol
+carried is now a function call.
 
-A project can be stored as JSON or as text, and **both load to the same session**.
+### A project is text on disk, and there is no other format
+
+A project is the files and the order you load them in. There is no binary form,
+no JSON form and no manifest.
+
+```
+:load examples/01-untyped.thena     -- this is what storing a project means
+```
+
 The order is part of the project, not presentation: a module's globals are in
 scope for the next one loaded.
 
 **Stored as written, not resolved.** If a tactic that is a builtin today becomes
-an ordinary rule tomorrow and keeps its name, every stored project keeps working.
-Rename it and they break — which is what a text file would do, and is the point:
-JSON and text are two spellings of one artifact rather than two artifacts.
+an ordinary rule tomorrow and keeps its name, every stored file keeps working;
+rename it and they break, which is what a text file would do and is the point.
+
+A JSON spelling of the same trees was built and then removed. It would have been
+a second canonical form of every program, and two forms drift — so a Thena file
+is equally at home in this system's own interface, in your usual editor, and in
+anything built later over LSP.
+
+**A half-written term is still text.** The parser takes a placeholder inline, so
+a term you have not finished is an ordinary string and needs no special
+representation to be stored or sent anywhere.
 
 ### A printed value can be read back
 

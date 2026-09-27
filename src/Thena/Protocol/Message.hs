@@ -33,8 +33,6 @@ import Thena.Driver (Response, Session, oneLine)
 import Thena.Engine (Question)
 import Thena.Instral.Ops (Instr (..), Op (..))
 import Thena.Protocol.Address (Address (..), AddressError, Move (..))
-import Thena.Protocol.Codec (CodecError)
-import Thena.Protocol.Json (JsonError)
 
 -- | A running job, named by the server because nothing else can name it.
 --
@@ -110,11 +108,11 @@ data ProtocolError
   | VersionMismatch Int Int
     -- ^ what the client asked for, and what this server speaks.
   | NoSuchJob JobId
-  | Unreadable JsonError
-    -- ^ the frame was not JSON. Carries where it went wrong, because a client
-    -- that sent something unreadable needs to be told where.
-  | Malformed CodecError
-    -- ^ it was JSON, and not a message this protocol has.
+    -- **There were two more, and MS7 phase 122 removed them**: @Unreadable@
+    -- carried where a frame stopped being JSON and @Malformed@ carried a
+    -- message JSON could not be read as. There is no frame and no JSON — a
+    -- frontend is linked, not connected — so nothing can construct either
+    -- (@discussion\/tight-integration.md@ §0).
   | NotServedYet
     -- ^ this server does not answer that message yet. **Not a stub payload and
     -- not a lie about the request**: phases 117 and 118 add the keys and the
