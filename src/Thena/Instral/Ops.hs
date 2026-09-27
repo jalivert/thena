@@ -402,6 +402,25 @@ data Op
     -- **This is the REPL's spelling now**: a person types @goto-named "h"@,
     -- where they typed @goto "h"@ before, because a written name is a 'Name'
     -- and 'Goto' takes a 'Core'.
+  | GotoRoot
+    -- ^ **to the root of the development** (MS7 phase 121) — the third @goto@,
+    -- and the degenerate member of the family: 'Goto' and 'GotoNamed' both
+    -- search /from the root/, and this one stops there.
+    --
+    -- **It is the anchor an address presumes.** A
+    -- 'Thena.Protocol.Address.Address' is the moves that reach a position from
+    -- the root, so a client's click is @goto-root@ and then those moves —
+    -- which is what makes a click a program the user could have typed, rather
+    -- than a private route into the cursor. Until this phase the anchor was
+    -- only a sentence in 'Thena.Protocol.Message.focusing'\'s comment telling
+    -- its caller to arrange it, and the server did not
+    -- (@reports\/2026-09-27-the-address-anchor.md@).
+    --
+    -- **The one movement op that cannot fail.** @back@ refuses with
+    -- 'Thena.Errors.AtRoot' where there is nothing above; this one is already
+    -- where it is going. So the empty address is @goto-root@ rather than an
+    -- empty program, and clicking the root moves the cursor instead of
+    -- silently doing nothing.
   | Back                      -- ^ undo the last move
   | Reduce                    -- ^ commit a whnf at the core focus (§4.7, phase 7)
   | Unify Operand Operand     -- ^ two terms — solve holes, or park the equation (§6, phase 9)
@@ -1202,6 +1221,7 @@ resultOf o = case o of
   Down _       -> Nothing
   Goto _       -> Nothing   -- a move; it rewrites the cursor and yields nothing
   GotoNamed _  -> Nothing
+  GotoRoot     -> Nothing
   Back         -> Nothing
   Play _       -> Nothing
   Attack       -> Nothing
@@ -1378,6 +1398,7 @@ operandTypes o = case o of
   Down _       -> []
   Goto a       -> [(a, TCore)]
   GotoNamed a  -> [(a, TName)]
+  GotoRoot     -> []
   Back         -> []
   Reduce       -> []
   Attack       -> []
@@ -1692,6 +1713,7 @@ opKeyword o = case o of
   Down p       -> partWord p
   Goto _       -> "goto"
   GotoNamed _  -> "goto-named"
+  GotoRoot     -> "goto-root"
   Back         -> "back"
   Reduce       -> "reduce"
   Unify _ _    -> "unify"

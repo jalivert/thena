@@ -1930,6 +1930,7 @@ commandSummary =
   , (unwords bareParts,          "descend into a field of the focused term")
   , (unwords numberedParts,      "descend into a numbered field")
   , ("goto-named \"‹hole›\"",      "move to a hole by name")
+  , ("goto-root",                "move to the root of the development")
   , ("reduce",                   "reduce the focused term in place")
   , ("quantify \"‹x›\" ⌜‹S›⌝",     "add a ∀-binder above the focus")
   , ("data ‹D› … where { … }",   "declare an inductive family")

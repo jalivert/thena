@@ -1694,6 +1694,12 @@ perform instr rest m = case operation instr of
   GotoNamed v -> case operandText (env (exec m)) v of
     Left r  -> failure r m
     Right n -> moveTo (Cursor.gotoNamed (Ident n))
+
+  -- The third @goto@, and the only move with no way to refuse: @back@ has
+  -- 'AtRoot' to say, and this one is already there. 'moveTo' takes an
+  -- 'Either' like its siblings rather than gaining a total sibling of its own
+  -- — what is uniform here is that every move goes through one helper.
+  GotoRoot -> moveTo (Right . Cursor.toRoot)
   Down part  -> navigate (down part)
 
   -- Commit a whnf at the core focus (§4.7). Not 'navigate': a move never has

@@ -14,6 +14,7 @@ a bare word acts, a word with a colon looks.
   arg ‹n› param ‹n› method ‹n› index ‹n›
                                 descend into a numbered field
   goto-named "‹hole›"           move to a hole by name
+  goto-root                     move to the root of the development
   reduce                        reduce the focused term in place
   quantify "‹x›" ⌜‹S›⌝          add a ∀-binder above the focus
   data ‹D› … where { … }        declare an inductive family

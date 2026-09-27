@@ -364,6 +364,13 @@ thena spine> :show
 The inner hole is `id1`, not `id`: every component in a development has a name
 of its own, so that `goto-named "‹name›"` always means one place.
 
+There are three `goto`s and they differ in what they take. `goto-named "h"`
+searches for a hole by the name you can see; `goto` is the one a rule body uses,
+taking the variable it is holding rather than a name; and `goto-root` takes
+nothing and goes to the top of the development. `goto-root` is the only move
+that cannot fail — `back` refuses when there is nothing above it, and
+`goto-root` is already where it is going.
+
 Two λs have appeared, and the remaining hole now has type `A`. Move the cursor
 down to it — `into` enters the guess body, `along` steps past a binder — and ask
 where you are:
@@ -1059,6 +1066,7 @@ language and elaborated on load.
 | `try-core ⌜ term ⌝` | propose a term for the focused hole |
 | `apply-core ⌜ f ⌝` / `unify-refine-core ⌜ t ⌝` | apply a function / refine by unification |
 | `goto-named "‹name›"` | move to a hole by name |
+| `goto-root` | move to the root of the development |
 | `assume "‹x›" ⌜‹S›⌝` / `claim "‹x›" ⌜‹S›⌝` | add a hypothesis / a hole above the focus |
 | `assume ⌜‹S›⌝` / `claim ⌜‹S›⌝` | the same, asking for the name |
 | `unify ⌜‹t›⌝ ⌜‹u›⌝` | solve by unification |

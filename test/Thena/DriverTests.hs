@@ -120,7 +120,7 @@ everyBareCommand =
   [ "assume", "claim", "quantify", "data", "declare"
   , "along", "into", "back", "reduce", "unify"
   , "do", "yield"
-  , "retry", "goto-named", "cross", "certify", "qed"
+  , "retry", "goto-named", "goto-root", "cross", "certify", "qed"
   ] ++ partWords
 
 tests :: TestTree

@@ -1719,6 +1719,29 @@ name. `goto` there needs a `do` block with something bound in it.
 
 ---
 
+### `goto-root` goes to the top, and it is the one move that cannot fail
+
+*Decided 2026-09-27. Adds a word.*
+
+The third member of the family. `goto` and `goto-named` both search **from the
+root**; `goto-root` takes nothing and stops there.
+
+```
+goto-root             -- wherever you were, you are now at the top
+back                  -- refuses at the root: there is nothing above it
+```
+
+Every other move can say no — `into` wants a guess, `along` wants somewhere to
+go, `back` answers `AtRoot`. `goto-root` is already where it is going, so it
+always succeeds, including when you are at the root already.
+
+**It is also what a click is made of.** An editor names a position by the moves
+that reach it from the root, so a click compiles to `goto-root` and then those
+moves — an ordinary program you could have typed, snapshotted and undoable like
+any line. Clicking the top of a development is `goto-root` on its own.
+
+---
+
 ## The REPL and the session
 
 ### There are three kinds of file, and the extension says which

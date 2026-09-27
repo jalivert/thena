@@ -13,7 +13,7 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Thena.Development.Cursor (Cursor, Part (..), focus)
 import Thena.Driver (Session (..))
 import Thena.Engine (Machine (..), cursor, development, names)
-import Thena.Protocol.Address (Address (..), Move (..), follow)
+import Thena.Protocol.Address (Address (..), Move (..), addressOf, follow)
 import qualified Thena.Protocol.Message as Msg
 import Thena.Protocol.Server (Server (..), newServer, serve)
 
@@ -22,6 +22,8 @@ tests =
   testGroup
     "Thena.Protocol.Server"
     [ testCase "a click lands where the address says" focusTests
+    , testCase "and it does so wherever the cursor stood" focusFromOffRoot
+    , testCase "a click on the root goes to the root" focusRoot
     , testCase "and it can be taken back like any line" focusUndoes
     , testCase "a message this server does not serve says so" unserved
     ]
@@ -40,6 +42,28 @@ counterOf = names . sessionMachine . serverSession
 started :: Server
 started = after [":theorem t : ∀ (A : Type₀) -> A", "attack", "intro A"]
 
+-- | The same shape, with the cursor left standing **inside the guess, on the
+-- assumption** rather than at the root (MS7 phase 121).
+--
+-- **This is the fixture the phase turned on.** 'started' stands at the root, so
+-- an address run relatively and an address run absolutely agree there and the
+-- crossing below passed while 'Thena.Protocol.Message.focusing' was compiling
+-- addresses that only worked from the root. Here they disagree: the hole is at
+-- @[GoInto, GoAlong]@ and the cursor is at @[GoInto]@, so a relative run takes
+-- @into@ at the assumption and refuses with @NotAGuess@ — which is the error
+-- the editor experiment reported (@reports\/2026-09-27-the-address-anchor.md@).
+--
+-- **Prelude-free, like every other fixture here**, so the primitives are
+-- written out: @attack@ and @intro@ are rules and this server has no base.
+standingOffRoot :: Server
+standingOffRoot =
+  after
+    [ ":theorem t : ∀ (A : Type₀) -> A -> A"
+    , "prim-attack"
+    , "prim-lambda \"A\""
+    , "into"
+    ]
+
 -- | Every candidate address this development actually has.
 --
 -- **Which addresses exist is a fact about the fixture, not something to guess**
@@ -48,7 +72,17 @@ started = after [":theorem t : ∀ (A : Type₀) -> A", "attack", "intro A"]
 -- 'follow' and the surviving ones are what 'serve' is held to, with a floor so
 -- that a fixture which stopped having positions could not pass silently.
 focusTests :: IO ()
-focusTests = do
+focusTests = everyLiveAddress started
+
+-- | The same sweep from a cursor that is **not** at the root.
+--
+-- 'standingOffRoot' says why this is a separate case rather than more
+-- candidates: it is the one that fails when an address is run relatively.
+focusFromOffRoot :: IO ()
+focusFromOffRoot = everyLiveAddress standingOffRoot
+
+everyLiveAddress :: Server -> IO ()
+everyLiveAddress srv = do
   let candidates =
         [ Address ms
         | ms <-
@@ -57,12 +91,24 @@ focusTests = do
             , [GoInto, GoAlong], [GoInto, GoCrossType]
             ]
         ]
-      live = [a | a <- candidates, isRight (follow a (counterOf started) (cursorOf started))]
+      live = [a | a <- candidates, isRight (follow a (counterOf srv) (cursorOf srv))]
   if length live >= 3
-    then mapM_ landsWhere live
+    then mapM_ (landsWhere srv) live
     else assertFailure ("only " <> show (length live) <> " addresses were live in the fixture")
   where
     isRight = either (const False) (const True)
+
+-- | The empty address is the root, and clicking it **moves**.
+--
+-- It compiled to an empty program until phase 121, so a client that asked to go
+-- back to the root was answered @Completed@ and left where it was — a silent
+-- no-op rather than a refusal, which is the worse of the two.
+focusRoot :: IO ()
+focusRoot = do
+  let (moved, _) = serve standingOffRoot (Msg.Focus (Address []))
+  if focus (cursorOf standingOffRoot) == focus (cursorOf moved)
+    then assertFailure "the fixture already stood at the root, so this proves nothing"
+    else addressOf (cursorOf moved) @?= Address []
 
 -- | Serve a click, and compare where it landed with where the cursor walk says
 -- it should have.
@@ -72,13 +118,13 @@ focusTests = do
 -- run them. This is the address module's crossing again, now with the whole
 -- driver in the middle — so it also checks that a click is snapshotted, typed
 -- and dispatched like a line rather than by a private route.
-landsWhere :: Address -> IO ()
-landsWhere addr = case follow addr (counterOf started) (cursorOf started) of
+landsWhere :: Server -> Address -> IO ()
+landsWhere srv addr = case follow addr (counterOf srv) (cursorOf srv) of
   Left e -> assertFailure ("the walk refused " <> show addr <> ": " <> show e)
   Right (walked, _) ->
-    case serve started (Msg.Focus addr) of
-      (srv', [Msg.Turn _ Nothing])
-        | focus (cursorOf srv') == focus walked -> pure ()
+    case serve srv (Msg.Focus addr) of
+      (srv'', [Msg.Turn _ Nothing])
+        | focus (cursorOf srv'') == focus walked -> pure ()
         | otherwise -> assertFailure ("the click landed elsewhere for " <> show addr)
       (_, other) -> assertFailure ("the server said " <> take 160 (show other))
 

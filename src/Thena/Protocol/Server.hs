@@ -57,6 +57,10 @@ serve srv msg = case msg of
   -- ordinary movement instructions and they are run exactly as a typed line's
   -- are — snapshotted for @:undo@, rewound if they fail. A click that moved the
   -- cursor by a private route would be a second way into the machine.
+  --
+  -- 'focusing' anchors the program at the root itself (MS7 phase 121), so
+  -- nothing is owed here: a click is absolute wherever the cursor happens to
+  -- stand.
   Focus addr -> ran (oneProgram (serverSession srv) (focusing addr))
 
   -- **Refused because this server does not serve them yet**, not because of

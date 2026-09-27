@@ -134,11 +134,20 @@ turn s pending line = (s', Turn resp asking, asking)
 
 -- | Compile an address into the movement instructions that reach it.
 --
--- One instruction per move, in order, from wherever the cursor stands — so this
--- is only correct from the root, which is where 'Thena.Protocol.Address.follow'
--- also starts. The caller returns to the root first.
+-- **It anchors itself** (MS7 phase 121). An 'Address' names a position by the
+-- moves that reach it /from the root/, so the program has to start there —
+-- 'Thena.Protocol.Address.follow' does it with @enter . rebuild@, and the
+-- instructions say it with @goto-root@.
+--
+-- Until this phase the anchor was a sentence here telling the caller to arrange
+-- it, and the caller — 'Thena.Protocol.Server.serve' — did not: a click ran its
+-- moves from wherever the cursor already stood, which took the wrong branch
+-- whenever it was not at the root, and a click on the root itself compiled to
+-- an empty program and silently did nothing
+-- (@reports\/2026-09-27-the-address-anchor.md@). **A comment is not a
+-- contract**; the program carries it now.
 focusing :: Address -> [Instr]
-focusing (Address ms) = map (Do . opOf) ms
+focusing (Address ms) = Do GotoRoot : map (Do . opOf) ms
 
 -- | The op a move is.
 --

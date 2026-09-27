@@ -1406,6 +1406,7 @@ nullaryOps =
   , ("prim-solve", Solve), ("prim-abandon", Abandon), ("goal", Goal)
   , ("fresh-level", Op.FreshLevel)
   , ("here", Here)
+  , ("goto-root", Op.GotoRoot)
   , ("none", Op.None)
   , ("prim-prove", Prove)
   , ("pop-development", Op.PopDevelopment)
