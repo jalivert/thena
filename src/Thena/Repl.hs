@@ -115,6 +115,7 @@ import Thena.Driver
   , loadSource
   , loadProofSource
   , newSession
+  , oneLine
   )
 
 import Control.Exception (IOException, try)
@@ -153,8 +154,6 @@ import Thena.Language.Reader (ReadError (..))
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Regex (RegexError (..))
 import Thena.Global.NoConfusion (noConfusionNames)
-import qualified Thena.Protocol.Message as Msg
-import qualified Thena.Protocol.Server as Server
 import Thena.Syntax.Print
   ( Env
   , escapeChar
@@ -472,14 +471,9 @@ data Turn = Turn
   deriving (Eq, Show)
 
 turn :: Session -> String -> Turn
-turn s line = case Server.serve (Server.Server s) (Msg.Line line) of
-  (srv', [Msg.Turn resp _]) ->
-    let s' = Server.serverSession srv'
-     in Turn (renderResponse s' resp) s' (resp == Quit) resp
-  -- 'serve' answers a 'Msg.Line' with exactly one 'Msg.Turn'; anything else is
-  -- this module and that one disagreeing about the protocol, which is a bug
-  -- here rather than a case to handle.
-  (_, other) -> error ("the server answered a line with " ++ show other)
+turn s line = Turn (renderResponse s' resp) s' (resp == Quit) resp
+  where
+    (s', resp) = oneLine s line
 
 -- | Replay a script through 'turn' and render what a terminal would have shown,
 -- prompts included. The golden tests' whole harness (§9, "golden REPL

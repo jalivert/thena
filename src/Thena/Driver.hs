@@ -2428,7 +2428,7 @@ oneLine s line = settle (case sessionAsking s of
 --
 -- **The same tail as 'oneLine', and that is the whole point.** A client that
 -- points at a position sends an address, and
--- 'Thena.Protocol.Message.focusing' compiles it into the movement instructions
+-- 'Thena.Protocol.Address.focusing' compiles it into the movement instructions
 -- the user would have typed. Those instructions have to be run /as a line is
 -- run/ — snapshotted for @:undo@, rewound if they fail, and asked about if they
 -- ask — or a click would be a second way into the machine with different rules,

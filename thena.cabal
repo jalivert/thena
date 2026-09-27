@@ -50,9 +50,7 @@ library
         Thena.Protocol.Machine
         Thena.Protocol.Rules
         Thena.Protocol.Surface
-        Thena.Protocol.Server
         Thena.Protocol.Text
-        Thena.Protocol.Message
         Thena.Language.Regex
         Thena.Language.Reader
         Thena.Language.Grammar
@@ -125,9 +123,7 @@ test-suite thena-test
         Thena.Protocol.Redraw
         Thena.Protocol.RulesTests
         Thena.Protocol.SurfaceTests
-        Thena.Protocol.ServerTests
         Thena.Protocol.TextTests
-        Thena.Protocol.MessageTests
         Thena.DependentIndexTests
         Thena.CanonicalTests
         Thena.DeterminacyTests

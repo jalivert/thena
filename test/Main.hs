@@ -18,9 +18,7 @@ import qualified Thena.Protocol.InstralTests
 import qualified Thena.Protocol.MachineTests
 import qualified Thena.Protocol.RulesTests
 import qualified Thena.Protocol.SurfaceTests
-import qualified Thena.Protocol.ServerTests
 import qualified Thena.Protocol.TextTests
-import qualified Thena.Protocol.MessageTests
 import qualified Thena.DependentIndexTests
 import qualified Thena.CanonicalTests
 import qualified Thena.DeterminacyTests
@@ -85,10 +83,8 @@ main =
       , Thena.Protocol.MachineTests.tests
       , Thena.Protocol.RulesTests.tests
       , Thena.Protocol.SurfaceTests.tests
-      , Thena.Protocol.ServerTests.tests
       , Thena.Protocol.TextTests.tests
       , Thena.Protocol.AddressTests.tests
-      , Thena.Protocol.MessageTests.tests
       , Thena.CursorTests.tests
       , Thena.DependentIndexTests.tests
       , Thena.CanonicalTests.tests

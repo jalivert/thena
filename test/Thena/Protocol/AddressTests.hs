@@ -34,14 +34,27 @@ import Thena.Development.Cursor
   )
 import Thena.Development.Partial (Partial)
 import Thena.DevelopmentTests (genDevelopment)
-import Thena.Driver (parseDevelopment)
+import Thena.Driver (Session (..), newSession, oneLine, oneProgram, parseDevelopment)
 import Thena.Global.Env (emptyGlobals)
 import Thena.Fixtures (allFour, guessShadowing, richTypes, withConstraint)
+import Thena.Engine
+  ( Development (..)
+  , Exec (..)
+  , Machine (..)
+  , Outcome (..)
+  , cursor
+  , development
+  , load
+  , names
+  , step
+  )
+import Thena.Standard (expectedBase)
 import Thena.Protocol.Address
   ( Address (..)
   , AddressError (..)
   , Move (..)
   , addressOf
+  , focusing
   , follow
   )
 
@@ -52,6 +65,8 @@ tests =
     [ testGroup "every position round trips" roundTripTests
     , testGroup "the address, written out" exactTests
     , testGroup "a stale address is refused" refusalTests
+    , testGroup "a compiled click lands where the walk lands" clickTests
+    , testGroup "and it does through the driver, like a typed line" drivenTests
     ]
 
 -- | The name counter every walk in this file starts from.
@@ -147,8 +162,8 @@ exactTests =
       at guessShadowing [into] @?= Address [GoInto]
   ]
   where
-    at p fs = addressOf (foldl step (enter p) fs)
-    step c f = either (error . show) id (f c)
+    at p fs = addressOf (foldl move (enter p) fs)
+    move c f = either (error . show) id (f c)
 
 refusalTests :: [TestTree]
 refusalTests =
@@ -161,3 +176,164 @@ refusalTests =
         Left (NoSuchPosition 0 _) -> pure ()
         other -> assertFailure ("expected a refusal at 0, got " <> show other)
   ]
+
+-- --------------------------------------------------------------------------
+-- Clicking (MS7 phase 111 and 113, merged here at 124)
+--
+-- **These followed 'focusing' into this module.** They lived in
+-- @Thena.Protocol.MessageTests@ and @Thena.Protocol.ServerTests@, beside a
+-- request type and an envelope that phase 124 deleted; what they test is an
+-- 'Address', so they belong with the other two readings of one.
+-- --------------------------------------------------------------------------
+
+-- | The crossing the round trip above cannot do.
+--
+-- 'follow' walks the cursor API; 'focusing' compiles the same address into
+-- movement instructions and the /engine/ runs them. Two code paths, one
+-- position — so a move mapped to the wrong op is caught, which reading one
+-- table twice can never catch.
+--
+-- It is also the check that a click is not a side door: if the compiled
+-- instructions did not land where the walk lands, a frontend would be moving
+-- the cursor behind the machine's back.
+clickAgrees :: Partial -> Cursor -> Either String ()
+clickAgrees p c =
+  case follow addr startCounter c of
+    Left e -> Left ("the walk refused " <> show addr <> ": " <> show e)
+    Right (walked, _) ->
+      case runTo (load (focusing addr) (machineAt p)) of
+        Finished m
+          | focus (cursor (development m)) == focus walked -> Right ()
+          | otherwise -> Left ("the click landed elsewhere for " <> show addr)
+        other -> Left ("the click did not finish for " <> show addr <> ": " <> take 120 (show other))
+  where
+    addr = addressOf c
+
+runTo :: Machine -> Outcome
+runTo m = case step m of
+  Continue m' -> runTo m'
+  outcome     -> outcome
+
+-- | A machine at the root of @p@.
+machineAt :: Partial -> Machine
+machineAt p =
+  Machine (Exec [] [] []) (Development (enter p)) [] emptyGlobals expectedBase [] [] startCounter 0
+
+clickTests :: [TestTree]
+clickTests =
+  [ testCase (name <> ": every position") $
+      case [e | Left e <- map (clickAgrees p) (reachable 3 (enter p))] of
+        []    -> pure ()
+        e : _ -> assertFailure e
+  | (name, p) <-
+      [ ("allFour", allFour)
+      , ("richTypes", richTypes)
+      , ("guessShadowing", guessShadowing)
+      , ("withConstraint", withConstraint)
+      ]
+  ]
+
+-- | The same, with the whole driver in the middle.
+--
+-- A click is @oneProgram (focusing addr)@ and nothing else, so it is
+-- snapshotted for @:undo@ and rewound if it fails, exactly as a typed line is.
+drivenTests :: [TestTree]
+drivenTests =
+  [ testCase "from a cursor at the root" (everyLiveAddress started)
+  , testCase "and from one that is not" (everyLiveAddress standingOffRoot)
+  , testCase "a click on the root goes to the root" focusRoot
+  , testCase "and a click can be taken back like any line" focusUndoes
+  ]
+
+-- | Run lines through the driver, as a frontend would.
+after :: [String] -> Session
+after = foldl (\s l -> fst (oneLine s l)) newSession
+
+cursorOf :: Session -> Cursor
+cursorOf = cursor . development . sessionMachine
+
+counterOf :: Session -> Int
+counterOf = names . sessionMachine
+
+clickAt :: Session -> Address -> Session
+clickAt s addr = fst (oneProgram s (focusing addr))
+
+-- | A development with a binder and a body to walk into.
+started :: Session
+started = after [":theorem t : \8704 (A : Type\8320) -> A", "attack", "intro A"]
+
+-- | The same shape, with the cursor left standing **inside the guess, on the
+-- assumption** rather than at the root (MS7 phase 121).
+--
+-- **This is the fixture that phase turned on.** 'started' stands at the root,
+-- so an address run relatively and an address run absolutely agree there, and
+-- the crossing passed while 'focusing' was compiling addresses that only
+-- worked from the root. Here they disagree: the hole is at
+-- @[GoInto, GoAlong]@ and the cursor is at @[GoInto]@, so a relative run takes
+-- @into@ at the assumption and refuses with @NotAGuess@ — which is the error
+-- the editor experiment reported
+-- (@reports\/2026-09-27-the-address-anchor.md@).
+--
+-- **Prelude-free, like its sibling**, so the primitives are written out:
+-- @attack@ and @intro@ are rules and this session has no base.
+standingOffRoot :: Session
+standingOffRoot =
+  after
+    [ ":theorem t : \8704 (A : Type\8320) -> A -> A"
+    , "prim-attack"
+    , "prim-lambda \"A\""
+    , "into"
+    ]
+
+-- | Every candidate address this session actually has, crossed.
+--
+-- **Which addresses exist is a fact about the fixture, not something to
+-- guess** — the first draft asserted @[GoAlong, GoCrossType]@ and the walk
+-- refused it. So the candidates are filtered by 'follow' and the survivors are
+-- what the driver is held to, with a floor so a fixture that stopped having
+-- positions could not pass silently.
+everyLiveAddress :: Session -> IO ()
+everyLiveAddress s = do
+  let candidates =
+        [ Address ms
+        | ms <-
+            [ [], [GoAlong], [GoCrossType], [GoInto]
+            , [GoCrossType, GoDown Cod], [GoCrossType, GoDown Dom]
+            , [GoInto, GoAlong], [GoInto, GoCrossType]
+            ]
+        ]
+      live = [a | a <- candidates, isRight (follow a (counterOf s) (cursorOf s))]
+  if length live >= 3
+    then mapM_ (landsWhere s) live
+    else assertFailure ("only " <> show (length live) <> " addresses were live in the fixture")
+  where
+    isRight = either (const False) (const True)
+
+landsWhere :: Session -> Address -> IO ()
+landsWhere s addr = case follow addr (counterOf s) (cursorOf s) of
+  Left e -> assertFailure ("the walk refused " <> show addr <> ": " <> show e)
+  Right (walked, _)
+    | focus (cursorOf (clickAt s addr)) == focus walked -> pure ()
+    | otherwise -> assertFailure ("the click landed elsewhere for " <> show addr)
+
+-- | The empty address is the root, and clicking it **moves**.
+--
+-- It compiled to an empty program until phase 121, so a frontend asking to go
+-- back to the root was told the program completed and left where it was — a
+-- silent no-op rather than a refusal, which is the worse of the two.
+focusRoot :: IO ()
+focusRoot = do
+  let moved = clickAt standingOffRoot (Address [])
+  if focus (cursorOf standingOffRoot) == focus (cursorOf moved)
+    then assertFailure "the fixture already stood at the root, so this proves nothing"
+    else addressOf (cursorOf moved) @?= Address []
+
+-- | A click is a line, so taking it back is @:undo@ and nothing special.
+focusUndoes :: IO ()
+focusUndoes = do
+  let before = cursorOf started
+      moved  = clickAt started (Address [GoAlong])
+      back   = fst (oneLine moved ":undo")
+  if focus (cursorOf moved) == focus before
+    then assertFailure "the click did not move the cursor, so undoing it proves nothing"
+    else focus (cursorOf back) @?= focus before
