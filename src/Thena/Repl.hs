@@ -211,7 +211,7 @@ repl = do
   -- session before every prompt; nothing else writes it.
   current <- newIORef s
   let settings = setComplete (completion current) defaultSettings
-  runInputT settings (mapM_ outputStrLn problems >> loop current s Nothing)
+  runInputT settings (mapM_ outputStrLn problems >> loop current s)
 
 -- | In @:parse@'s mode, the parser's 'tabComplete'; anywhere else, file names,
 -- as haskeline did before.
@@ -224,26 +224,26 @@ completion current input = do
        in pure (kept, [ Completion r d False | (r, d) <- cs ])
     Nothing   -> completeFilename input
 
-loop :: IORef Session -> Session -> Maybe Question -> InputT IO ()
-loop current s pending = do
+loop :: IORef Session -> Session -> InputT IO ()
+loop current s = do
   liftIO (writeIORef current s)
-  input <- getInputLine (prompt s pending)
+  input <- getInputLine (prompt s)
   case input of
     Nothing   -> pure ()          -- end of input: Ctrl-D
     Just first -> gather first >>= \entry -> case entry of
-      Left problem -> outputStrLn problem >> loop current s pending
+      Left problem -> outputStrLn problem >> loop current s
       Right line   -> run line
   where
    run line = do
-      let t = turn s pending line
+      let t = turn s line
       mapM_ outputStrLn (turnOutput t)
       case following (turnSession t) (turnResponse t) of
         Just act | not (turnQuit t) -> do
           (s', out) <- liftIO act
           mapM_ outputStrLn out
-          loop current s' Nothing
+          loop current s'
         _ | turnQuit t -> pure ()
-          | otherwise  -> loop current (turnSession t) (turnPending t)
+          | otherwise  -> loop current (turnSession t)
 
    -- | **An entry, not a line** (MS5 phase 70, rewritten at phase 78).
    --
@@ -446,9 +446,9 @@ renderLoadError path e = case e of
 -- term is still the spine, so this is not a depth question and cannot be read
 -- off the nesting level. It is 'Focus'\'s own distinction and nothing else. A
 -- constraint focus reads as @spine@ too: it is a link in the chain.
-prompt :: Session -> Maybe Question -> String
-prompt _ (Just _) = "> "
-prompt s Nothing
+prompt :: Session -> String
+prompt s
+  | Just _ <- sessionAsking s = "> "
   | Just lang <- sessionParsing s = "parse " ++ lang ++ "> "   -- MS6 phase 102b
   | otherwise = "thena " ++ fragment ++ "> "
   where
@@ -457,10 +457,13 @@ prompt s Nothing
       _         -> "spine"
 
 -- | One line in, and everything that follows from it.
+--
+-- **@turnPending@ went at MS7 phase 123** — whether something is asking is
+-- 'Thena.Driver.sessionAsking' on @turnSession@, so a caller that wants it
+-- reads it there instead of being handed a copy to carry.
 data Turn = Turn
   { turnOutput   :: [String]
   , turnSession  :: Session
-  , turnPending  :: Maybe Question  -- ^ set when the next line is an answer
   , turnQuit     :: Bool
   , turnResponse :: Response
     -- ^ kept from phase 11, because @:load@ is a response the /caller/ has to
@@ -468,11 +471,11 @@ data Turn = Turn
   }
   deriving (Eq, Show)
 
-turn :: Session -> Maybe Question -> String -> Turn
-turn s pending line = case Server.serve (Server.Server s pending) (Msg.Line line) of
-  (srv', [Msg.Turn resp asking]) ->
+turn :: Session -> String -> Turn
+turn s line = case Server.serve (Server.Server s) (Msg.Line line) of
+  (srv', [Msg.Turn resp _]) ->
     let s' = Server.serverSession srv'
-     in Turn (renderResponse s' resp) s' asking (resp == Quit) resp
+     in Turn (renderResponse s' resp) s' (resp == Quit) resp
   -- 'serve' answers a 'Msg.Line' with exactly one 'Msg.Turn'; anything else is
   -- this module and that one disagreeing about the protocol, which is a bug
   -- here rather than a case to handle.
@@ -521,20 +524,20 @@ following s resp = case resp of
 -- Otherwise identical to 'transcriptFrom', through the same 'turn', so the two
 -- cannot come to disagree about what a terminal would have shown.
 transcriptIO :: Session -> [String] -> IO String
-transcriptIO s0 = fmap unlines . replay s0 Nothing
+transcriptIO s0 = fmap unlines . replay s0
   where
-    replay _ _ []           = pure []
-    replay s pending (l : ls) = do
-      let t    = turn s pending l
-          echo = prompt s pending ++ l
+    replay _ []           = pure []
+    replay s (l : ls) = do
+      let t    = turn s l
+          echo = prompt s ++ l
       case following (turnSession t) (turnResponse t) of
         Just act | not (turnQuit t) -> do
           (s', out) <- act
-          rest <- replay s' Nothing ls
+          rest <- replay s' ls
           pure ((echo : turnOutput t ++ out) ++ rest)
         _ | turnQuit t -> pure (echo : turnOutput t)
           | otherwise  -> do
-              rest <- replay (turnSession t) (turnPending t) ls
+              rest <- replay (turnSession t) ls
               pure ((echo : turnOutput t) ++ rest)
 
 -- | The same, from a session that has already had something loaded into it.
@@ -544,15 +547,15 @@ transcriptIO s0 = fmap unlines . replay s0 Nothing
 -- That makes the golden suite test the **shipped file** rather than a Haskell
 -- literal, which is strictly stronger than what it tested before.
 transcriptFrom :: Session -> [String] -> String
-transcriptFrom s0 = unlines . replay s0 Nothing
+transcriptFrom s0 = unlines . replay s0
   where
-    replay _ _ []           = []
-    replay s pending (l : ls) =
-      let t = turn s pending l
+    replay _ []           = []
+    replay s (l : ls) =
+      let t = turn s l
           rest
             | turnQuit t = []
-            | otherwise  = replay (turnSession t) (turnPending t) ls
-       in (prompt s pending ++ l) : turnOutput t ++ rest
+            | otherwise  = replay (turnSession t) ls
+       in (prompt s ++ l) : turnOutput t ++ rest
 
 renderResponse :: Session -> Response -> [String]
 renderResponse s resp = let gs = grammars (sessionMachine s) in case resp of

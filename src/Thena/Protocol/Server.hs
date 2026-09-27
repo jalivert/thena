@@ -19,19 +19,18 @@ module Thena.Protocol.Server
   , serve
   ) where
 
-import Thena.Driver (Session, newSession, oneLine, oneProgram)
-import Thena.Engine (Question)
+import Thena.Driver (Session (..), newSession, oneLine, oneProgram)
 import Thena.Protocol.Message (FromClient (..), FromServer (..), ProtocolError (..), focusing)
 
 -- | What the server holds between messages.
 --
--- The session, and whether a question is outstanding. **The pending question is
--- the server's, not the client's**: 'Thena.Driver.oneLine' routes a line to the
--- answer or to the command depending on it, so a client keeping its own copy
--- could disagree with the machine about what its next line means.
-data Server = Server
+-- **The session, and nothing else, since MS7 phase 123.** It used to hold the
+-- pending question beside it, which was the only state of its own it ever had;
+-- that lives on the 'Session' now, so this type is a wrapper waiting to be
+-- deleted at phase 124 along with the rest of the envelope
+-- (@discussion\/tight-integration.md@ §0b).
+newtype Server = Server
   { serverSession :: Session
-  , serverPending :: Maybe Question
   }
   deriving (Eq, Show)
 
@@ -42,7 +41,7 @@ newServer = serverOn newSession
 -- | A server on a session someone else prepared — the prelude and the standard
 -- base, for instance, which 'Thena.Repl.startingSession' builds.
 serverOn :: Session -> Server
-serverOn s = Server s Nothing
+serverOn = Server
 
 -- | One message in, and what the server says about it.
 --
@@ -51,7 +50,7 @@ serverOn s = Server s Nothing
 -- it.
 serve :: Server -> FromClient -> (Server, [FromServer])
 serve srv msg = case msg of
-  Line line -> ran (oneLine (serverSession srv) (serverPending srv) line)
+  Line line -> ran (oneLine (serverSession srv) line)
 
   -- **Through the machine, not around it.** The address compiles to the
   -- ordinary movement instructions and they are run exactly as a typed line's
@@ -72,5 +71,5 @@ serve srv msg = case msg of
   Terminate _ -> unserved
   Save        -> unserved
   where
-    ran (s', resp, pending) = (Server s' pending, [Turn resp pending])
+    ran (s', resp) = (Server s', [Turn resp (sessionAsking s')])
     unserved = (srv, [Refused NotServedYet])

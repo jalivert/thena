@@ -29,7 +29,7 @@ module Thena.Protocol.Message
   , opOf
   ) where
 
-import Thena.Driver (Response, Session, oneLine)
+import Thena.Driver (Response, Session (..), oneLine)
 import Thena.Engine (Question)
 import Thena.Instral.Ops (Instr (..), Op (..))
 import Thena.Protocol.Address (Address (..), AddressError, Move (..))
@@ -125,10 +125,10 @@ data ProtocolError
 -- The whole of the mapping, and it is this short on purpose: 'oneLine' already
 -- did the work, and everything this adds is the name of the shape it comes back
 -- in.
-turn :: Session -> Maybe Question -> String -> (Session, FromServer, Maybe Question)
-turn s pending line = (s', Turn resp asking, asking)
+turn :: Session -> String -> (Session, FromServer)
+turn s line = (s', Turn resp (sessionAsking s'))
   where
-    (s', resp, asking) = oneLine s pending line
+    (s', resp) = oneLine s line
 
 -- | Compile an address into the movement instructions that reach it.
 --

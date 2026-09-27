@@ -261,6 +261,23 @@ data Session = Session
     -- mode** (MS6 phase 102b, his request of 2026-09-19). Every line is parsed
     -- as a term of it until @:done@. On the session, as 'sessionStepping' is,
     -- so a transcript drives the mode exactly as the terminal does.
+  , sessionAsking    :: Maybe Question
+    -- ^ **what an op is waiting to be told**, and therefore whether the next
+    -- line is an answer or a command (MS7 phase 123).
+    --
+    -- **It was an argument and a result of 'oneLine' until here**, threaded by
+    -- every caller, and a caller that dropped or staled it sent a line to the
+    -- wrong half of the driver. His words, 2026-09-27: /"It feels weird having
+    -- things travel between the engine and the frontend\/TUI just freely
+    -- alongside the session."/ On the session, as 'sessionStepping' and
+    -- 'sessionParsing' are, and for the same reason.
+    --
+    -- **Deliberately not in a 'Snapshot'**, so @:undo@ does not step back into
+    -- a question — HIS, 2026-09-28: /"Feels like a question and answer is an
+    -- atomic unit."/ A restored question would also be a state with no way
+    -- out: a pending question routes the next line to 'answer', so @:undo@ at
+    -- a prompt is read as the answer (@ms7\/CLOSEOUT.md@ 16). One @:undo@
+    -- takes back the asking and the answering together.
   }
   deriving (Eq, Show)
 
@@ -375,6 +392,7 @@ newSession = Session
   , sessionHistory   = (Exec [] [] [], ps, []) :| []
   , sessionStepping  = False
   , sessionParsing   = Nothing
+  , sessionAsking    = Nothing
   }
   where
     (ps, n) = newDevelopment 0
@@ -2401,8 +2419,8 @@ answer s a
 -- Extracted at phase 11 because two callers need exactly this — "Thena.Repl"\'s
 -- terminal turn and 'loadSource' below — and the pending-question bookkeeping
 -- is the part a second copy would get subtly wrong.
-oneLine :: Session -> Maybe Question -> String -> (Session, Response, Maybe Question)
-oneLine s pending line = settle (case pending of
+oneLine :: Session -> String -> (Session, Response)
+oneLine s line = settle (case sessionAsking s of
   Just _  -> answer s line
   Nothing -> command s line)
 
@@ -2415,7 +2433,7 @@ oneLine s pending line = settle (case pending of
 -- run/ — snapshotted for @:undo@, rewound if they fail, and asked about if they
 -- ask — or a click would be a second way into the machine with different rules,
 -- which is the special case the first design principle refuses.
-oneProgram :: Session -> [Instr] -> (Session, Response, Maybe Question)
+oneProgram :: Session -> [Instr] -> (Session, Response)
 oneProgram s is =
   settle (progress (sessionStepping s) s { sessionMachine = load is (sessionMachine s) } [] [])
 
@@ -2424,8 +2442,8 @@ oneProgram s is =
 --
 -- Factored out of 'oneLine' at MS7 phase 113, when 'oneProgram' became its
 -- second caller. Nothing here depends on how @(s', resp)@ was produced.
-settle :: (Session, Response) -> (Session, Response, Maybe Question)
-settle (s', resp) = (record s', resp, asking)
+settle :: (Session, Response) -> (Session, Response)
+settle (s', resp) = (record s' { sessionAsking = asking }, resp)
   where
 
     asking = case resp of
@@ -2545,24 +2563,35 @@ data Loaded = Loaded
 -- theorems, which are @globals@ changes a 'Snapshot' deliberately does not carry
 -- (§7.7). Same argument as @qed@ clearing it, for the same reason.
 loadSource :: Session -> String -> Loaded
-loadSource s0 = go s0 Nothing 1 [] . lines
+loadSource s0 = go s0 1 [] . lines
   where
+    -- **The question is cleared as the load ends** (MS7 phase 123). It used to
+    -- be an argument the caller threaded, and the REPL passed 'Nothing' after
+    -- a load rather than whatever the file left behind; now that it lives on
+    -- the session it has to be dropped here or a file that ran out mid-@ask@
+    -- would leave the prompt waiting for an answer to a question nobody saw.
+    -- @err@ already reports that as 'UnansweredQuestion'.
     finished s acc err =
-      Loaded s { sessionHistory = NE.head (sessionHistory s) :| [] } (reverse acc) err
+      Loaded
+        s { sessionHistory = NE.head (sessionHistory s) :| []
+          , sessionAsking  = Nothing
+          }
+        (reverse acc)
+        err
 
-    go s pending _ acc [] = case pending of
+    go s _ acc [] = case sessionAsking s of
       -- The file ran out while an op was still asking. The line to name is the
       -- one that asked, which is the last one that ran.
       Just _  -> finished s acc (Just (UnansweredQuestion (length acc)))
       Nothing -> finished s acc Nothing
-    go s pending n acc (l : ls) =
-      let (s', resp, asking) = oneLine s pending l
-          acc'               = resp : acc
+    go s n acc (l : ls) =
+      let (s', resp) = oneLine s l
+          acc'       = resp : acc
        in case resp of
             LoadRequested _ -> finished s acc (Just (NestedLoad n))
             Quit            -> finished s' acc' Nothing
             _ | stopped resp -> finished s' acc' (Just (LoadStopped n))
-              | otherwise    -> go s' asking (n + 1) acc' ls
+              | otherwise    -> go s' (n + 1) acc' ls
 
 -- | Which responses cross a proof boundary — the five ways the development you
 -- are standing in is exchanged for another (§2.4).

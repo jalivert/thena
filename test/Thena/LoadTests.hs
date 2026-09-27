@@ -15,6 +15,7 @@
 -- 'preludeIsInTheWay'.
 module Thena.LoadTests (tests) where
 
+import Data.Maybe (isJust)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
@@ -34,8 +35,9 @@ import Thena.Driver
   , loadRuleBases
   , loadSource
   , newSession
+  , oneLine
   )
-import Thena.Engine (Machine (..))
+import Thena.Engine (Development, Machine (..), development)
 import Thena.Repl (rulesPath)
 import Thena.Core.Term (Core, substLevelsIn)
 import Thena.Global.Env
@@ -256,7 +258,38 @@ failureTests =
 
   , testCase "a file that ends while something is asking says so" $
       loadedError (sourceWithRules ["assume ⌜ Type₀ ⌝"]) @?= Just (UnansweredQuestion 1)
+
+    -- **And it does not leave the session waiting** (MS7 phase 123). The
+    -- pending question used to be an argument the caller threaded, and the
+    -- REPL passed 'Nothing' after a load rather than whatever the file left
+    -- behind. Now that it is 'sessionAsking' the load has to clear it, or the
+    -- next line typed at the prompt would be read as the answer to a question
+    -- nobody was shown.
+  , testCase "and the session it hands back is not still asking" $
+      sessionAsking (loadedSession (sourceWithRules ["assume ⌜ Type₀ ⌝"])) @?= Nothing
+
+    -- **The ruling this phase rests on, asserted** — HIS, 2026-09-28: /"Feels
+    -- like a question and answer is an atomic unit."/ So 'sessionAsking' is
+    -- not in a 'Snapshot' and @:undo@ does not step back into a question: one
+    -- @:undo@ takes back the asking and the answering together.
+    --
+    -- Driven through 'oneLine' rather than 'loadSource', because a load
+    -- clears the question as it finishes (the test above) and a mid-file
+    -- state is exactly what this needs to see.
+  , testCase "asking lives on the session, and one :undo takes back the pair" $ do
+      let (s1, _) = oneLine withRules "assume ⌜ Type₀ ⌝"
+          (s2, _) = oneLine s1 "x"
+          (s3, _) = oneLine s2 ":undo"
+      isJust (sessionAsking s1) @?= True   -- the line asked, and the session says so
+      sessionAsking s2 @?= Nothing         -- the answer settled it
+      sessionAsking s3 @?= Nothing         -- and undoing does not bring it back
+      assertBool "the pair really did build something" (devOf s2 /= devOf withRules)
+      devOf s3 @?= devOf withRules         -- and one :undo took the whole pair back
   ]
+
+-- | The development, for comparing one state against another.
+devOf :: Session -> Development
+devOf = development . sessionMachine
 
 -- --------------------------------------------------------------------------
 -- Helpers
