@@ -184,7 +184,7 @@ executable thena
 -- reach around the boundary.
 library tui
     import:             warnings
-    hs-source-dirs:     tui-src
+    hs-source-dirs:     tui
     default-language:   GHC2024
     exposed-modules:
         Tui.App
@@ -202,9 +202,9 @@ library tui
 
 executable thena-tui
     import:             warnings
-    hs-source-dirs:     tui-app
+    hs-source-dirs:     app
     default-language:   GHC2024
-    main-is:            Main.hs
+    main-is:            Tui.hs
     -- brick's backend needs the threaded runtime.
     ghc-options:        -threaded
     build-depends:
