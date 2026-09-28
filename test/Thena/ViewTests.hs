@@ -92,7 +92,7 @@ fixtures =
 -- ---------------------------------------------------------------------------
 
 -- | 'developmentView' takes every one of 'displayDevelopment's arguments off the
--- session; @:show@ hands 'Thena.Repl.renderCursor' its own. If the two draw the
+-- session; @:show@ hands 'Thena.Render.renderCursor' its own. If the two draw the
 -- same chain with the same link marked, the seam read the session the way the
 -- terminal does.
 chainCase :: (String, Session) -> TestTree
@@ -134,7 +134,7 @@ boundBy c = case c of
 --
 -- **The naming is the part that could go wrong.** @:where@ builds its display
 -- names by walking the prefix from the root and then into the term
--- ('Thena.Repl.walkSteps'\/@walkTerm@); the seam builds them by folding
+-- ('Thena.Render.walkSteps'\/@walkTerm@); the seam builds them by folding
 -- 'Thena.View.sessionContext'. Those are two derivations of Γ at the focus, and
 -- if they ever disagree the type prints with a different variable name on each
 -- side — which is exactly what this compares.
@@ -151,7 +151,7 @@ typeCase (name, s) = testCase name (drawn @?= typed)
 -- ---------------------------------------------------------------------------
 
 -- | 'matchesView' against @:matches@, which is 'Thena.Rules.matches' plus
--- 'Thena.Repl.renderMatches' and no part of this module — including the order,
+-- 'Thena.Render.renderMatches' and no part of this module — including the order,
 -- which is dispatch order and the reason the seam drains the iterator rather
 -- than sorting anything.
 matchCase :: (String, Session) -> TestTree

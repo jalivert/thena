@@ -38,7 +38,7 @@ data LinkView = LinkView
   { linkAt    :: Address
   , linkFocus :: Bool
     -- ^ does the cursor stand on this link — **chain-link precision, not
-    -- term precision** ('Thena.Repl.renderCursor's own words): a focus
+    -- term precision** ('Thena.Render.renderCursor's own words): a focus
     -- somewhere inside the type or value is a further
     -- 'Thena.View.Core.Display' address the editor already has.
   , linkShape :: LinkShape
@@ -93,15 +93,15 @@ data ConstraintView = ConstraintView
 --
 -- @route@ is the cursor's prefix read root-first — @toList (prefix cur)@,
 -- exactly what 'Thena.View.Address.addressOf' and
--- 'Thena.Repl.renderCursor' both walk — paired with its focus. 'Nothing'
+-- 'Thena.Render.renderCursor' both walk — paired with its focus. 'Nothing'
 -- draws the whole development unmarked.
 --
 -- Rendered from the root with no seed environment, for the reason
--- 'Thena.Repl.renderCursor' gives one: rendering from the root introduces
+-- 'Thena.Render.renderCursor' gives one: rendering from the root introduces
 -- every binder on the way down, and a later component's type or value may
 -- freely mention an earlier one.
 --
--- @n@ is the name supply's starting point, exactly 'Thena.Repl.renderPartial's
+-- @n@ is the name supply's starting point, exactly 'Thena.Render.renderPartial's
 -- own — high enough that a fresh name 'displayCore' mints while checking
 -- whether a Π is dependent cannot collide with a 'Var' the development
 -- already uses.
@@ -147,9 +147,9 @@ displayDevelopment gs budget n0 at0 route0 p0 = go [] [] n0 at0 route0 p0
 
     -- The name a component would like, and the environment/binders extended
     -- for what follows — **not** for the component's own type or value
-    -- (typed in the context before its own binder, same as 'Thena.Repl.link')
+    -- (typed in the context before its own binder, same as 'Thena.Render.link')
     -- and **not** for a guess's own body (@Γ_(?x ≐ P : S . p) = Γ_P@,
-    -- 'Thena.Repl.goP's comment on the same line): only 'rest' ever sees it.
+    -- 'Thena.Render.goP's comment on the same line): only 'rest' ever sees it.
     bind env bs at c =
       let (v, Ident hint) = case c of
             Assume   x i _   -> (x, i)
@@ -191,7 +191,7 @@ isHere (Just ([], _)) = True
 isHere _              = False
 
 -- | Each follows one kind of step and refuses the others, so a route can
--- never be handed to the wrong part of a link — 'Thena.Repl.onward'/'past'/
+-- never be handed to the wrong part of a link — 'Thena.Render.onward'/'past'/
 -- 'inward's own three, over a plain list rather than a 'Path'.
 onward, past, inward :: Maybe ([Step], Focus) -> Maybe ([Step], Focus)
 onward (Just (Along _ : ss, f))      = Just (ss, f)

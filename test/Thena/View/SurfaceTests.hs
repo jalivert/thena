@@ -5,7 +5,7 @@
 -- would be: it takes only a 'SurfaceShape' — no grammars, no environment,
 -- nothing session-shaped (see the module header on 'Thena.View.Surface'
 -- for why there is nothing else to take) — and produces text. If that text
--- is what 'Thena.Repl.renderSurface' produces for the same tree, the
+-- is what 'Thena.Render.renderSurface' produces for the same tree, the
 -- display carries what the printer needs.
 --
 -- **The corpus is 'Thena.SurfaceTests.genSurface'**, exported there for

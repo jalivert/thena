@@ -174,7 +174,7 @@ newtype Budget = Budget Int
 -- | Build the display of a term standing at an address.
 --
 -- @grammars@ is what is installed on the machine — the same list
--- 'Thena.Repl.renderCore' takes, and for the same reason: whether a term
+-- 'Thena.Render.renderCore' takes, and for the same reason: whether a term
 -- prints in its language's notation depends on what is loaded, not on the
 -- term.
 --
@@ -196,7 +196,7 @@ displayCore grammars budget env binders counter here term =
   where
     -- **Tried first, at every node, not only at the top of the call** — a
     -- term inside an ordinary application's argument is exactly as eligible
-    -- as the term `displayCore` was asked for. `Thena.Repl.go` makes the same
+    -- as the term `displayCore` was asked for. `Thena.Render.go` makes the same
     -- choice for the same reason (phase 110): the property is "can this node
     -- be written in a language's notation", and that never depends on where
     -- the node sits.

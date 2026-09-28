@@ -3,7 +3,7 @@
 -- **The test is the whole argument for the design.** 'Thena.View.Redraw'
 -- is what an editor would be: it takes only a 'Display' — no session, no
 -- context, no globals, no grammars — and produces text. If that text is what
--- 'Thena.Repl.renderCore' produces for the same term, then the display really
+-- 'Thena.Render.renderCore' produces for the same term, then the display really
 -- does carry everything the editor needs, and the seam in
 -- @discussion\/editor-display.md@ §1 falls where that document says it does.
 --
@@ -124,7 +124,7 @@ con name = foldl App (Global (GlobalName name) [])
 str :: String -> Core
 str = Primitive . LString
 
--- | 'redraw' against 'Thena.Repl.renderCore', for terms
+-- | 'redraw' against 'Thena.Render.renderCore', for terms
 -- `Thena.PrintTests` already established the printed form of: a bracketed
 -- production, a bare juxtaposition, a foreign splice, a foreign splice that
 -- is itself a region, an unreadable token spliced, both directions of

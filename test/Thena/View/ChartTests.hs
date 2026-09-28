@@ -2,8 +2,8 @@
 --
 -- **The crossing, once more.** 'redrawParse' and 'redrawOffer' draw only what
 -- 'Thena.View.Chart.displayParse' and 'Thena.View.Chart.displayOffer'
--- hand them; if that agrees with what 'Thena.Repl.renderTree'\/
--- 'Thena.Repl.parseFailureReason' and 'Thena.Repl.tabComplete' already do with
+-- hand them; if that agrees with what 'Thena.Render.renderTree'\/
+-- 'Thena.Render.parseFailureReason' and 'Thena.Repl.tabComplete' already do with
 -- the same chart, for the same text, the view carries what those two
 -- existing consumers needed.
 --
@@ -119,7 +119,7 @@ mismatchParse gs lang text
       Right t -> redrawTree t
 
 -- | What an editor is, for a parse tree: a function from a 'TreeView' to
--- text, and nothing else — mirrors 'Thena.Repl.renderTree', the seam under
+-- text, and nothing else — mirrors 'Thena.Render.renderTree', the seam under
 -- test.
 redrawTree :: TreeView -> String
 redrawTree t = case t of
@@ -129,7 +129,7 @@ redrawTree t = case t of
   APlaceholderAt _ -> [placeholderChar]
   ASpliceOf k  -> "${" ++ show k ++ "}"
 
--- | Mirrors 'Thena.Repl.parseFailureReason'.
+-- | Mirrors 'Thena.Render.parseFailureReason'.
 redrawFailure :: String -> FailureView -> String
 redrawFailure text f = case f of
   AnAmbiguity a b ->

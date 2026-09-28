@@ -23,7 +23,7 @@
 -- is how a scan recognises text, not something the editor renders or acts
 -- on; only the name it reports itself by ("a variable", "a digit") is
 -- what crosses, exactly what the terminal already shows in its own
--- expectation lists (@Thena.Repl.parseFailureReason@'s @symbolText@).
+-- expectation lists (@Thena.Render.parseFailureReason@'s @symbolText@).
 --
 -- **'displayOffer' takes a region the way the editor holds one — MS7 phase
 -- 125.** It used to take the text left and right of the cursor as two
@@ -152,7 +152,7 @@ data ProductionView = ProductionView
 -- | Is this region one term of this language, and if not, why. The whole-text
 -- question a finished line of object syntax is asked — the same one
 -- @:parse@'s mode and an @ObjectRegionUnparsed@ report already answer in
--- words (@Thena.Repl.renderUnparsed@).
+-- words (@Thena.Render.renderUnparsed@).
 --
 -- **No check on the names, unlike 'displayOffer', and that is not an
 -- inconsistency.** A region written in a language nothing declared reads as a

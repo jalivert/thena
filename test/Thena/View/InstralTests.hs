@@ -3,7 +3,7 @@
 --
 -- **The crossing**, 115a/b/c's own argument again: 'redrawBlock' draws only
 -- what 'Thena.View.Instral.displayBlock' hands it, and if that text is
--- what 'Thena.Repl.renderInstr' prints for the same instructions, the display
+-- what 'Thena.Render.renderInstr' prints for the same instructions, the display
 -- carries what the printer needed. The corpus is every instruction the
 -- shipped rule base's own rules are written with — real bodies, not
 -- hand-built ones, so the crossing is over what actually got written rather
@@ -69,7 +69,7 @@ mismatch instr
       vs  -> "wrong count: " <> show (length vs)
 
 -- | What an editor is, for one statement: a function from a 'StatementView'
--- to text, and nothing else — mirrors 'Thena.Repl.renderInstr'\/'renderOp'\/
+-- to text, and nothing else — mirrors 'Thena.Render.renderInstr'\/'renderOp'\/
 -- 'renderOperand'\/'renderValue' because that is the seam under test.
 redrawStatement :: StatementView -> String
 redrawStatement sv = bind <> word <> operandsText <> detailText
@@ -81,7 +81,7 @@ redrawStatement sv = bind <> word <> operandsText <> detailText
 
     word = statementWord sv
 
-    -- 'Thena.Repl.renderOp's own shapes: a call's target sits between the
+    -- 'Thena.Render.renderOp's own shapes: a call's target sits between the
     -- word and its arguments; a declaration's name has no arguments to sit
     -- before.
     operandsText = case statementDetail sv of
@@ -122,12 +122,12 @@ redrawValue v = case v of
   ValSome u -> "some " <> redrawValue u
   ValPair a b -> "(" <> redrawValue a <> ", " <> redrawValue b <> ")"
   ValLevel l -> l
-  -- 'Thena.Repl.renderValue's own corners for a term operand, matched
+  -- 'Thena.Render.renderValue's own corners for a term operand, matched
   -- exactly rather than approximated — the one place this crossing compares
   -- a term's own text byte for byte.
   ValTerm d -> "\8988" <> redraw d <> "\8989"
   -- 115h gave 'ValSurface' a real display; crossed the same way 'ValTerm'
-  -- already is, against 'Thena.Repl.renderValue's own corner for it.
+  -- already is, against 'Thena.Render.renderValue's own corner for it.
   ValSurface sh -> "\8249" <> redrawSurface sh <> "\8250"
   -- Never reached by this corpus: a closure and an unresolved core region
   -- are built by ops at run time ('Lambda', 'resolve-core'), never written

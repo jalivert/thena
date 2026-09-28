@@ -6,7 +6,7 @@
 -- reused verbatim here rather than re-proven, since the per-statement and
 -- per-value crossing is already 'Thena.View.InstralTests''s job — what
 -- is new here is only the three-pane wrapping ('pc'\/'env'\/'stack')
--- 'Thena.Repl.renderMachine' does around them.
+-- 'Thena.Render.renderMachine' does around them.
 --
 -- **Hand-built, not a corpus, and said so.** Nothing shipped runs the
 -- machine mid-call in a way a test can reach without stepping it there

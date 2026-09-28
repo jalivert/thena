@@ -2,7 +2,7 @@
 --
 -- **Text is the only stored form** — his ruling of 2026-09-27 — so saving needs a
 -- printer whose output the reader accepts, and this is where that is established
--- rather than assumed. 'Thena.Repl.renderSurface' was written to show a term at
+-- rather than assumed. 'Thena.Render.renderSurface' was written to show a term at
 -- the prompt, not to be read back; 'Thena.View.Source.printItem' is built on it.
 --
 -- **'printItem' and 'printSurfaceModule' had no reader until MS7 phase 125, and

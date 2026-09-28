@@ -70,7 +70,7 @@ module Thena.View
 import Data.Foldable (toList)
 
 import Thena.Core.Context (Context, Entry (..))
-import Thena.Core.Term (Ident (..), Var)
+import Thena.Core.Term (GlobalName (..), Ident (..), Var)
 import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, Focus, Step, expectedType, focus, prefix, rebuild)
 import Thena.Development.Partial (Partial (..))
@@ -85,7 +85,8 @@ import Thena.Driver
   )
 import Thena.Engine (Machine (..), cursor, development, focusContext)
 import Thena.Global.Env (GlobalEnv)
-import Thena.Instral.Ops (Instr, Rule)
+import Thena.Instral.Type (Signature)
+import Thena.Instral.Ops (ruleName, Instr, Rule)
 import Thena.Language.Grammar (Grammar)
 import Thena.Rules (RuleBase (..), RuleIter, matches, next)
 import Thena.Syntax.Print (Env, freshen)
@@ -234,18 +235,38 @@ focusTypeView budget s = fmap display (expectedType (sessionCursor s))
 --
 -- **The bases' own names, and nothing else about a base**: a frontend that wants
 -- a rule's clauses together groups them by 'Thena.View.Rules.ruleViewName' and
--- the length of its params, which is what a rule /is/. What is not here and was
--- wanted is a rule's declared signature — see @ms7\/CLOSEOUT.md@.
+-- the length of its params, which is what a rule /is/.
+--
+-- **A rule's declared type comes with it** (MS7 phase 131), from the base the
+-- rule is actually in — which is exact here, where 'matchesView' can only be
+-- best-available. 'Thena.View.Rules.ruleViewSignature' is the field.
 rulesView :: Budget -> Session -> [(String, [RuleView])]
 rulesView budget s =
-  [ (baseName b, map (ruleOf budget s) (baseRules b)) | b <- sessionRules s ]
+  [ ( baseName b
+    , [ ruleOf budget s (declaredIn b r) r | r <- baseRules b ]
+    )
+  | b <- sessionRules s
+  ]
+  where
+    declaredIn b r = lookup (globalString (ruleName r)) (baseSignatures b)
 
 -- | The rules whose heads hold at the focus — the match list, the same one
 -- @:matches@ prints.
+-- **A matched rule's signature is looked up across the bases in order**
+-- (MS7 phase 131), because 'matches' says which rule held and not which file it
+-- came from. Definition order is dispatch order (@PLAN-machine.md@ §8), so the
+-- first declaration of a name is the one a reader would mean.
 matchesView :: Budget -> Session -> [RuleView]
 matchesView budget s =
-  map (ruleOf budget s) (drain (matches (sessionRules s) (sessionGlobals s) (sessionCursor s)))
+  [ ruleOf budget s (declared r) r
+  | r <- drain (matches (sessionRules s) (sessionGlobals s) (sessionCursor s))
+  ]
   where
+    declared r =
+      case [ sig | b <- sessionRules s
+                 , Just sig <- [lookup (globalString (ruleName r)) (baseSignatures b)] ] of
+        sig : _ -> Just sig
+        []      -> Nothing
     drain :: RuleIter -> [Rule]
     drain it = case next it of
       Nothing        -> []
@@ -270,12 +291,16 @@ offerView s = displayOffer (sessionGrammars s)
 -- The plumbing itself
 
 -- | One rule, with the session's plumbing supplied.
-ruleOf :: Budget -> Session -> Rule -> RuleView
+ruleOf :: Budget -> Session -> Maybe Signature -> Rule -> RuleView
 ruleOf budget s =
   displayRule (sessionGrammars s) budget (envAt s) (binderAddresses s) (sessionNames s) (focusAddress s)
 
+-- | A global name as the string a signature table is keyed by.
+globalString :: GlobalName -> String
+globalString (GlobalName g) = g
+
 -- | Display names for the variables at the focus, freshened the way the chain
--- printer freshens a component's — 'Thena.Repl.envOf's own fold, here because
+-- printer freshens a component's — 'Thena.Render.envOf's own fold, here because
 -- a view must agree with it about what a variable is called.
 envAt :: Session -> Env
 envAt = foldl add [] . sessionContext

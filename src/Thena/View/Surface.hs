@@ -30,7 +30,7 @@
 -- ever be wanted here.
 --
 -- **Used beyond its own pane, immediately.** 'Thena.Instral.Ops.VSurface'
--- carries a live elaboration focus, and 'Thena.Repl.renderValue' already
+-- carries a live elaboration focus, and 'Thena.Render.renderValue' already
 -- shows its content — 'Thena.View.Instral.ValueView' had been showing
 -- only its shape, on the mistaken belief that no surface printer existed.
 -- 'Thena.View.Instral.displayValue' calls 'displaySurface' to fix that,

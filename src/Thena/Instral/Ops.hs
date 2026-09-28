@@ -1298,7 +1298,7 @@ refsIn o = case o of
 -- **Here rather than in "Thena.Rules", where it lived until phase 25c**, so
 -- that the total functions over 'Op' — this, 'resultOf' and 'opKeyword' — are
 -- one place and a new constructor answers all of them at once. It moved because
--- 'Thena.Repl.renderOp' needs it: that function kept a second spelling table
+-- 'Thena.Render.renderOp' needs it: that function kept a second spelling table
 -- beside 'opKeyword', the two drifted at phase 23b, and deleting the duplicate
 -- is what stops it happening again.
 --

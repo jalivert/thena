@@ -4,7 +4,7 @@
 -- **The crossing**, exactly 115a's and 115b's own argument: 'chainText'
 -- draws only what 'Thena.View.Development.displayDevelopment' hands it —
 -- no session, no cursor, no fixture — and if that text is what
--- 'Thena.Repl.renderPartial' prints for the same development, the display
+-- 'Thena.Render.renderPartial' prints for the same development, the display
 -- carries what the printer needed. 'Thena.Fixtures' already covers the
 -- interesting shapes (a guess, a constraint with a non-empty Ξ, one link of
 -- each kind, shadowing both ways, every core field, a binder at the end), so

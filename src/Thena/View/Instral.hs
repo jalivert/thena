@@ -2,7 +2,7 @@
 -- @discussion\/editor-display.md@ §7, first half).
 --
 -- **A statement carries its word and its operands, generically.** 'Op' has
--- more than sixty constructors and 'Thena.Repl.renderOp' already found the
+-- more than sixty constructors and 'Thena.Render.renderOp' already found the
 -- shape that does not need one case per constructor — the word from
 -- 'Thena.Instral.Ops.opKeyword', the operands from
 -- 'Thena.Instral.Ops.operandsOf' — and drifted the one time a second table of
@@ -76,7 +76,7 @@ data StatementView = StatementView
 
 -- | What 'Thena.Instral.Ops.operandsOf' does not carry, for the four ops
 -- that are not simply "the word, then its operands" —
--- 'Thena.Repl.renderOp's own list, minus 'Unify' (infix is presentation, not
+-- 'Thena.Render.renderOp's own list, minus 'Unify' (infix is presentation, not
 -- structure).
 data StatementDetail
   = AsksFor String
@@ -115,7 +115,7 @@ data OperandView
 --
 -- **Not 'Thena.View.Core.AnObjectTerm'.** That shape is a *term*,
 -- addressed and read against a grammar; this is the *skeleton* a rule body
--- builds one from, with no grammar and no address — 'Thena.Repl.renderSkeleton'
+-- builds one from, with no grammar and no address — 'Thena.Render.renderSkeleton'
 -- draws the same distinction in text, writing @app(var("f"), x)@ rather than
 -- notation because "the region's own notation needs the grammar and this
 -- printer has none".
@@ -128,14 +128,14 @@ data SkeletonView a
 -- | A runtime value, generically — 'Thena.Instral.Ops.Value's own shapes.
 --
 -- **A closure and an unresolved core region show their shape and not their
--- contents** — 'Thena.Repl.renderValue's own choice, for its own reason: a
+-- contents** — 'Thena.Render.renderValue's own choice, for its own reason: a
 -- closure's body and captured environment "would say more than a reader
 -- wants and less than they could use", and there is no printer for
 -- 'Thena.Syntax.Concrete.Raw', written syntax that has not become a term.
 -- 'ValOpaque' is that shape, named, until each has a display of its own.
 --
 -- **A surface focus is not one of them, and 115d's own comment here was
--- wrong to say so.** 'Thena.Repl.renderValue' already shows a 'VSurface'\'s
+-- wrong to say so.** 'Thena.Render.renderValue' already shows a 'VSurface'\'s
 -- content, not its shape — @"\8249" ++ renderSurface (Zipper.focus z) ++
 -- "\8250"@ — because 'Thena.Syntax.Print.renderSurface' has existed since
 -- phase 112c. 115h built the structured version of that printer
@@ -265,7 +265,7 @@ answerKindText k = case k of
   ARule -> ":rule"
 
 -- | A pattern, spelled as written. **Duplicated from
--- 'Thena.Repl.renderPattern' rather than shared**: that function's own module
+-- 'Thena.Render.renderPattern' rather than shared**: that function's own module
 -- keeps every display renderer, on the stated ground that their output "has
 -- no reader" and so is not the kind of thing 'Thena.Syntax.Print' collects —
 -- moving it would cross that line for the sake of one caller here. A pattern

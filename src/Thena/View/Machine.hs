@@ -3,7 +3,7 @@
 -- underneath" — and 115d's own "what is not here").
 --
 -- **At the fidelity the terminal already has, and no further.**
--- 'Thena.Repl.renderMachine' draws a frame from two fields shared by both
+-- 'Thena.Render.renderMachine' draws a frame from two fields shared by both
 -- 'Frame' constructors — how many instructions it resumes with, and
 -- whether it has already returned — never asking whether the frame is a
 -- plain 'Call' or a 'Choice' with a rule and untried alternatives of its
@@ -26,7 +26,7 @@ import Thena.View.Core (Budget)
 import Thena.View.Instral (StatementView, ValueView, displayBlock, displayValue)
 import Thena.Syntax.Print (Env)
 
--- | One frame of the call stack, at 'Thena.Repl.renderMachine's own
+-- | One frame of the call stack, at 'Thena.Render.renderMachine's own
 -- fidelity: how much of it is left to resume, and whether control has
 -- already passed back out.
 data FrameView = FrameView
@@ -38,7 +38,7 @@ data FrameView = FrameView
 displayFrame :: Frame -> FrameView
 displayFrame fr = FrameView (length (resume fr)) (returned fr)
 
--- | The three panes 'Thena.Repl.renderMachine' draws: the program still to
+-- | The three panes 'Thena.Render.renderMachine' draws: the program still to
 -- run, the bindings in scope, and the calls standing underneath it.
 data MachineView = MachineView
   { machinePc    :: [StatementView]

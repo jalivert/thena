@@ -160,7 +160,7 @@ occurs a (Display _ s) = case s of
       _               -> False
 
 -- ---------------------------------------------------------------------------
--- A surface term (115h), crossed against 'Thena.Repl.renderSurface'. Its own
+-- A surface term (115h), crossed against 'Thena.Render.renderSurface'. Its own
 -- 'SurfacePrec' is not imported from 'Thena.Syntax.Print' — an independent
 -- precedence scheme is the whole point of a crossing rather than a round
 -- trip.
@@ -233,14 +233,14 @@ redrawSurface = surf SLoose
 -- same layout rather than a second copy of it)
 
 -- | What an editor is, for a development: a function from '[LinkView]' to
--- text, and nothing else — mirrors 'Thena.Repl.goP's own layout (two spaces
+-- text, and nothing else — mirrors 'Thena.Render.goP's own layout (two spaces
 -- per guess, the closing @) in@ at the outer indent) because that is the seam
 -- under test.
 --
 -- **Each line comes back with whether its link is the focused one** (MS7 phase
 -- 125), because there are two printers on the other side of the crossing and
--- they differ in exactly that: 'Thena.Repl.renderPartial' draws the chain,
--- 'Thena.Repl.renderCursor' draws it with a gutter. One layout, two joins —
+-- they differ in exactly that: 'Thena.Render.renderPartial' draws the chain,
+-- 'Thena.Render.renderCursor' draws it with a gutter. One layout, two joins —
 -- 'chainText' and 'markedChainText' below.
 redrawChain :: [LinkView] -> [(Bool, String)]
 redrawChain = go 0
@@ -249,7 +249,7 @@ redrawChain = go 0
 
     -- **Only the link's own first line carries its mark.** A guess's body is
     -- links of its own, each with its own, which is why the recursive call's
-    -- pairs are passed through untouched: 'Thena.Repl.goP' marks the link the
+    -- pairs are passed through untouched: 'Thena.Render.goP' marks the link the
     -- focus is at, and a focus inside a guess is not at the guess.
     link' ind (LinkView _ marked shape) = case shape of
       AnAssumption name ty ->
@@ -270,7 +270,7 @@ redrawChain = go 0
               ++ "\8866 " ++ redraw lhs ++ " \8799 " ++ redraw rhs ++ " : " ++ redraw ty ++ " \9656"
           )
         ]
-      -- **A trailing term that is itself a binder is quoted** ('Thena.Repl.trailing'):
+      -- **A trailing term that is itself a binder is quoted** ('Thena.Render.trailing'):
       -- without the corners it would re-read as another chain link, so this
       -- is longest prefix's escape hatch and not something 'AResult' itself
       -- carries — it is purely how *text* draws a shape that is otherwise
@@ -283,11 +283,11 @@ redrawChain = go 0
     group (name, ty) = "(" ++ name ++ " : " ++ redraw ty ++ ") "
     pad n = replicate n ' '
 
--- | The chain as 'Thena.Repl.renderPartial' draws it: no gutter.
+-- | The chain as 'Thena.Render.renderPartial' draws it: no gutter.
 chainText :: [LinkView] -> String
 chainText = intercalate "\n" . map snd . redrawChain
 
--- | The chain as 'Thena.Repl.renderCursor' draws it: a \9654 on the focused
+-- | The chain as 'Thena.Render.renderCursor' draws it: a \9654 on the focused
 -- link's line, two spaces on every other.
 markedChainText :: [LinkView] -> String
 markedChainText = intercalate "\n" . map gutter . redrawChain
