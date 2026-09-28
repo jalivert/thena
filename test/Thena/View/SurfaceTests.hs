@@ -19,7 +19,7 @@ import Test.Tasty.QuickCheck (forAll, testProperty, withNumTests, (===))
 
 import Thena.View.Redraw (redrawSurface)
 import Thena.View.Surface (displaySurface)
-import Thena.Repl (renderSurface)
+import Thena.Render (renderSurface)
 import Thena.SurfaceTests (genSurface)
 
 tests :: TestTree

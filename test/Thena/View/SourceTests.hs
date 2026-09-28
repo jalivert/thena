@@ -27,7 +27,7 @@ import Thena.Driver
   , parseSurfaceTerm
   )
 import Thena.Instral.Ops (Value (..))
-import Thena.Repl (renderSurface, renderValue)
+import Thena.Render (renderSurface, renderValue)
 import Thena.Language.Reader
   ( Block (..)
   , Production (..)

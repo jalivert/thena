@@ -34,7 +34,8 @@ import Thena.View.Instral
   )
 import Thena.View.Redraw (redraw, redrawSurface)
 import Thena.View.Rules (RuleView (..), TestView (..), displayRule)
-import Thena.Repl (renderInstr, renderMatches, renderOperand, startingSession)
+import Thena.Files (startingSession)
+import Thena.Render (renderInstr, renderMatches, renderOperand)
 import Thena.Rules (allRules, testOperands, testWord)
 
 tests :: TestTree

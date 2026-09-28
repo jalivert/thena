@@ -43,7 +43,8 @@ import Thena.Global.Env
   , lookupDefinition
   , lookupInductive
   )
-import Thena.Repl (renderCore, renderResponse, startingSession)
+import Thena.Files (startingSession)
+import Thena.Render (renderCore, renderResponse)
 
 tests :: TestTree
 tests =

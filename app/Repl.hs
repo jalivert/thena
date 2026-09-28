@@ -3,15 +3,19 @@
 -- **The only module in the project that touches a terminal** (§2.1, §12
 -- invariant 4), and since MS7 phase 125 it is the only one that links
 -- @haskeline@ — it sits in the executable rather than the library, so that a
--- frontend which is not a terminal can reuse "Thena.Repl"'s rendering without
+-- frontend which is not a terminal can reuse the library's rendering without
 -- dragging a line editor in with it.
 --
--- Everything here except the reading and the writing is "Thena.Repl"'s:
--- 'Repl.turn' is the whole of a line, 'Repl.following' is the IO a response
+-- Everything here except the reading and the writing is the library's:
+-- 'Repl.turn' is the whole of a line, 'Files.following' is the IO a response
 -- asks for, 'Repl.prompt' is what to print, and 'Repl.opensEntry' /
 -- 'Repl.closesEntry' are the multi-line entry's brackets. The golden
 -- transcripts drive the same four, which is why a transcript cannot drift away
 -- from the loop.
+--
+-- **Since MS7 phase 130 the loading and the rendering are elsewhere** —
+-- "Thena.Files" and "Thena.Render" — because they outlive this program and
+-- "Thena.Repl" does not.
 module Repl (repl) where
 
 import Control.Monad.IO.Class (liftIO)
@@ -29,13 +33,13 @@ import System.Console.Haskeline
   )
 
 import Thena.Driver (Session)
+import Thena.Files (following, startingSession)
+import Thena.Render (renderResponse, renderTrouble)
 import Thena.Repl
   ( Turn (..)
   , closesEntry
-  , following
   , opensEntry
   , prompt
-  , startingSession
   , tabOffer
   , turn
   , unclosedEntry
@@ -50,7 +54,8 @@ import Thena.Repl
 -- §3.7 already struck, and a REPL that refuses to start would say less.
 repl :: IO ()
 repl = do
-  (s, problems) <- startingSession
+  (s, trouble) <- startingSession
+  let problems = concatMap (renderTrouble s) trouble
   -- **Tab reads the session through a reference** (MS6 phase 102b): haskeline
   -- fixes its completion function when the loop starts, and what Tab should do
   -- depends on the session at the moment it is pressed. The loop writes the
@@ -83,8 +88,9 @@ loop current s = do
       mapM_ outputStrLn (turnOutput t)
       case following (turnSession t) (turnResponse t) of
         Just act | not (turnQuit t) -> do
-          (s', out) <- liftIO act
-          mapM_ outputStrLn out
+          (s', responses, trouble) <- liftIO act
+          mapM_ outputStrLn (concatMap (renderResponse s') responses)
+          mapM_ outputStrLn (concatMap (renderTrouble s') trouble)
           loop current s'
         _ | turnQuit t -> pure ()
           | otherwise  -> loop current (turnSession t)

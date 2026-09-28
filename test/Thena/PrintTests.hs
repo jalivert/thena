@@ -31,7 +31,8 @@ import Thena.Errors (ObjectError (..), ResolveError (..), SyntaxError (..))
 import Thena.Global.Env (GlobalEnv)
 import Thena.Language.Build (printTerm)
 import Thena.Language.Grammar (Grammar)
-import Thena.Repl (renderCore, startingSession)
+import Thena.Files (startingSession)
+import Thena.Render (renderCore)
 
 tests :: TestTree
 tests =

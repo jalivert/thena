@@ -20,7 +20,8 @@ import Thena.Core.Term (GlobalName (..))
 import Thena.Driver (machineOf)
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
-import Thena.Repl (startingSession, loadProofFile, renderCore)
+import Thena.Files (loadProofFile, startingSession)
+import Thena.Render (renderCore, renderTrouble, renderResponse)
 
 target :: FilePath
 target = "examples/canonical.thena"
@@ -30,9 +31,10 @@ tests =
   testGroup
     "canonical forms — TAPL 8.3.1"
     [ goldenVsString "canonical" "test/golden/canonical.golden" $ do
-        (s, problems) <- startingSession
-        (_, out) <- loadProofFile s target
-        pure (toLazyByteString (stringUtf8 (unlines (problems ++ out))))
+        (s, trouble) <- startingSession
+        (s', out, _) <- loadProofFile s target
+        pure (toLazyByteString (stringUtf8 (unlines
+          (concatMap (renderTrouble s) trouble ++ concatMap (renderResponse s') out))))
 
       -- **The bool half.** A well-typed value of type @bool@ is @true@ or
       -- @false@ — which is what lets an @if@ take a step, and is why TAPL proves
@@ -61,6 +63,6 @@ tests =
   where
     statementOf n = do
       (s, _) <- startingSession
-      (s', _) <- loadProofFile s target
+      (s', _, _) <- loadProofFile s target
       pure ( renderCore [] (names (machineOf s')) [] . definitionType
                <$> lookupDefinition (GlobalName n) (globals (machineOf s')) )

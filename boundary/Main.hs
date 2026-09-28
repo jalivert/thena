@@ -18,7 +18,7 @@
 -- The second is why this is a suite and not a comment. A re-export list can be
 -- checked by reading it; that the views are *usable* through it can only be
 -- checked by using them, and the terminal frontend does not — it draws text, so
--- it needs 'Thena.Repl' and nothing structural at all.
+-- it needs 'Thena.Render' and nothing structural at all.
 --
 -- **The behaviour is not tested here.** Each view has its crossing against the
 -- terminal in the main suite, which sees the whole library; what is asserted
@@ -29,7 +29,8 @@ import Control.Monad (unless)
 import System.Exit (exitFailure)
 
 import Thena.Driver (Response (..), Session, Stop (..), fuelOf, oneLine, oneProgram)
-import Thena.Repl (renderResponse, startingSession, turn, turnSession)
+import Thena.Files (startingSession)
+import Thena.Render (renderResponse)
 import Thena.View
   ( Budget (..)
   , binderAddresses
@@ -50,12 +51,20 @@ import Thena.View.Rules (RuleView (..))
 
 main :: IO ()
 main = do
-  (s0, _) <- startingSession
+  -- **A frontend boots the shipped session from here, and from nothing else**
+  -- (MS7 phase 130). This is the regression for @..\/editor\/REPORT.md@'s
+  -- 2026-09-28 item: before that phase the only 'startingSession' was
+  -- 'Thena.Repl'\'s, so a frontend had to import the terminal REPL's own module
+  -- to get a session with the rule base and the prelude in it. The trouble list
+  -- is asserted empty because a frontend that silently boots an empty base is
+  -- exactly what that item was about.
+  (s0, trouble) <- startingSession
   let s = foldl step s0
         [ ":theorem t : \8704 (A : Type\8320) -> A -> A"
         , "attack"
         ]
-  failures <- pure (concatMap ($ s) checks)
+      booted = [ "FAILED: startingSession: " <> show t | t <- trouble ]
+  failures <- pure (booted <> concatMap ($ s) checks)
   mapM_ putStrLn failures
   unless (null failures) exitFailure
   putStrLn ("the boundary holds: " <> show (length checks) <> " views reached")
@@ -75,7 +84,6 @@ checks =
   , \s -> want "focusProgram" (not (null (focusProgram (focusAddress s))) || True)
   , \s -> want "oneProgram accepts a click" (isSession (fst (oneProgram s (focusProgram (focusAddress s)))))
   , \s -> want "renderResponse" (not (null (renderResponse s (snd (oneLine s ":show")))))
-  , \s -> want "turn" (isSession (turnSession (turn s ":show")))
   , \s -> want "binderAddresses" (not (null (binderAddresses s)))
   , \s -> want "fuel is readable" (fuelOf (fst (oneLine s ":step 3")) == Just 3)
   , \s -> want "a job runs in slices" (job s)

@@ -18,7 +18,8 @@ import Thena.Driver
   )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
-import Thena.Repl (startingSession, loadProofFile, renderCore)
+import Thena.Files (loadProofFile, startingSession)
+import Thena.Render (renderCore)
 
 tests :: TestTree
 tests =
@@ -52,9 +53,9 @@ tests =
     -- **Three modules, in order** — each reads what the ones before it declared.
     loaded = do
       (s, _)  <- startingSession
-      (s1, _) <- loadProofFile s  "examples/canonical.thena"
-      (s2, _) <- loadProofFile s1 "examples/progress.thena"
-      (s3, _) <- loadProofFile s2 "examples/preservation.thena"
+      (s1, _, _) <- loadProofFile s  "examples/canonical.thena"
+      (s2, _, _) <- loadProofFile s1 "examples/progress.thena"
+      (s3, _, _) <- loadProofFile s2 "examples/preservation.thena"
       pure s3
 
     statementOf n = do

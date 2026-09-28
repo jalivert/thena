@@ -38,7 +38,8 @@ import Thena.Global.Declare (DeclareError (..))
 import Thena.Language.Grammar
 import Thena.Language.Reader
 import Thena.Language.Regex (Regex, parseRegex)
-import Thena.Repl (renderResponse, startingSession)
+import Thena.Files (startingSession)
+import Thena.Render (renderTrouble, renderResponse)
 import Thena.Syntax.Lexer
   (BlockKind (..), Located (..), Token (..), isIdentifier, lexModule, lexTokens)
 
@@ -51,12 +52,12 @@ tests =
     , testGroup "the checker gives its meaning" meaning
     , testGroup "and refuses what §4.5 refuses" refusals
     , goldenVsString "grammars" "test/golden/grammars.golden" $ do
-        (s0, problems) <- startingSession
+        (s0, trouble) <- startingSession
         let run (title, src) =
               let (s1, r) = loadProofSource s0 src
                in ("-- " ++ title) : renderResponse s1 r
         pure (toLazyByteString (stringUtf8
-          (unlines (problems ++ concatMap run (("the spec's STLC", stlc) : map fst refused ++ unreadable)))))
+          (unlines (concatMap (renderTrouble s0) trouble ++ concatMap run (("the spec's STLC", stlc) : map fst refused ++ unreadable)))))
     ]
 
 -- ---------------------------------------------------------------------------

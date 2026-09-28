@@ -54,7 +54,10 @@ tests =
         cbl <- readFile "thena.cabal"
         src <- readFile "src/Thena/View.hs"
         ( "Thena.View" `elem` reexported cbl
-          , "Thena.Repl" `elem` reexported cbl
+          -- **'Thena.Files' since MS7 phase 130**, when 'Thena.Repl' left the
+          -- list. The anchor has to be a module a frontend cannot do without,
+          -- and starting a session is that.
+          , "Thena.Files" `elem` reexported cbl
           , "developmentView" `elem` exportsOf src
           , "Budget" `elem` exportsOf src
           , "Session" `elem` exportsOf src ) @?= (True, True, True, True, True)

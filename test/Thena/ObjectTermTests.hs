@@ -38,7 +38,7 @@ import Thena.Instral.Ops
   , operandIn
   )
 import Thena.Rules (RuleBase (..))
-import Thena.Repl (rulesPath, startingSession)
+import Thena.Files (rulesPath, startingSession)
 
 tests :: TestTree
 tests =

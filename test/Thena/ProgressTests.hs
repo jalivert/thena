@@ -24,7 +24,8 @@ import Thena.Driver
   )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
-import Thena.Repl (startingSession, loadProofFile, renderCore)
+import Thena.Files (loadProofFile, startingSession)
+import Thena.Render (renderCore)
 
 tests :: TestTree
 tests =
@@ -62,8 +63,8 @@ tests =
     -- **Two modules, in order** — the second reads the first's globals.
     loaded = do
       (s, _)  <- startingSession
-      (s1, _) <- loadProofFile s "examples/canonical.thena"
-      (s2, _) <- loadProofFile s1 "examples/progress.thena"
+      (s1, _, _) <- loadProofFile s "examples/canonical.thena"
+      (s2, _, _) <- loadProofFile s1 "examples/progress.thena"
       pure s2
 
     declarationsOf _ = ["loaded canonical.thena, then progress.thena"]

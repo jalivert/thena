@@ -25,7 +25,7 @@ import Thena.Driver
   )
 import Thena.Global.Declare (declare)
 import Thena.Global.Env (GlobalEnv, emptyGlobals)
-import Thena.Repl (renderCore)
+import Thena.Render (renderCore)
 import Thena.Syntax.Concrete (Raw (..), RawBinder (..), RawIdent (..))
 import Thena.Syntax.Resolve (resolve)
 

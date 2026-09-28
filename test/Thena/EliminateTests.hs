@@ -41,7 +41,8 @@ import Thena.Driver (parseCore)
 import Thena.Errors (ElimError (..))
 import Thena.Global.Env (GlobalEnv)
 import Thena.Driver (Response (..), command, loadProofSource)
-import Thena.Repl (renderCore, renderResponse, startingSession)
+import Thena.Files (startingSession)
+import Thena.Render (renderCore, renderResponse)
 import Thena.Tactics.Eliminate (Elimination (..), eliminate)
 
 tests :: TestTree

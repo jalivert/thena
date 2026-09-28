@@ -10,7 +10,7 @@ module Thena.LexerTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Repl (describe)
+import Thena.Render (describe)
 import Thena.Syntax.Lexer (Located (..), Token (..), lexTokens)
 
 tests :: TestTree

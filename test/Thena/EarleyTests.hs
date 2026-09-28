@@ -23,7 +23,9 @@ import Test.Tasty.QuickCheck (Gen, Property, choose, counterexample, elements, f
 import Thena.Driver (loadProofSource)
 import Thena.Language.Earley
 import Thena.Language.Regex (Regex, parseRegex)
-import Thena.Repl (startingSession, tabComplete, transcriptFrom)
+import Thena.Render (renderTrouble)
+import Thena.Files (startingSession)
+import Thena.Repl (tabComplete, transcriptFrom)
 
 tests :: TestTree
 tests =
@@ -36,9 +38,10 @@ tests =
     , testProperty "printed and parsed back, a tree is itself" roundTrip
     , testGroup "Tab at the cursor (phase 102b)" tabbing
     , goldenVsString "parsing" "test/golden/parsing.golden" $ do
-        (s0, problems) <- startingSession
+        (s0, trouble) <- startingSession
         let (s1, _) = loadProofSource s0 stlc
-        pure (toLazyByteString (stringUtf8 (unlines problems ++ transcriptFrom s1 prompt)))
+        pure (toLazyByteString (stringUtf8
+          (unlines (concatMap (renderTrouble s0) trouble) ++ transcriptFrom s1 prompt)))
     ]
 
 -- ---------------------------------------------------------------------------

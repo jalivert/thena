@@ -41,7 +41,8 @@ import Thena.Instral.Ops
   )
 import Thena.Instral.Ops (Value (VText))
 import qualified Thena.Instral.Ops as Op
-import Thena.Repl (loadStandardRules)
+import Thena.Render (renderTrouble)
+import Thena.Files (loadStandardRules)
 import Thena.Rules (RuleBase (..), allRules, ruleBase)
 
 -- | The shipped base, loaded exactly as @thena@ loads it.
@@ -52,10 +53,11 @@ import Thena.Rules (RuleBase (..), allRules, ruleBase)
 -- parses, resolves and validates.
 standardBases :: IO [RuleBase]
 standardBases = do
-  (s, problems) <- loadStandardRules newSession
-  case problems of
+  (s, trouble) <- loadStandardRules newSession
+  case trouble of
     [] -> pure (rules (machineOf s))
-    ps -> error ("the shipped rule base did not load:\n" ++ unlines ps)
+    ts -> error ("the shipped rule base did not load:\n"
+                  ++ unlines (concatMap (renderTrouble s) ts))
 
 -- | Its rules, flattened — what 'Thena.Rules.resolveRule' wants as the rules
 -- visible to a further rule being read.

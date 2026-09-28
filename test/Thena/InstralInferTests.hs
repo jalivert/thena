@@ -34,7 +34,8 @@ import Thena.Errors (SyntaxError (..))
 import Thena.Syntax.Parser (ParseError (..))
 import Thena.Rules (RuleBase (..), RuleError (..), writtenPositions)
 import Data.List (isInfixOf, sort)
-import Thena.Repl (renderCursor, renderRuleError, transcriptFrom)
+import Thena.Render (renderCursor, renderRuleError)
+import Thena.Repl (transcriptFrom)
 import Thena.Standard (expectedBase, expectedStandard, standardBases)
 
 tests :: TestTree

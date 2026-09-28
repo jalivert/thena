@@ -61,7 +61,7 @@ import Thena.Fixtures
   , trailingLam
   , withConstraint
   )
-import Thena.Repl (renderCursor, renderWhere)
+import Thena.Render (renderCursor, renderWhere)
 
 tests :: TestTree
 tests =

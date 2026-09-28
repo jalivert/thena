@@ -76,7 +76,8 @@ import Thena.Global.Env
   , lookupInductive
   , generalised
   )
-import Thena.Repl (renderEliminator, renderInductive, startingSession)
+import Thena.Files (startingSession)
+import Thena.Render (renderTrouble, renderEliminator, renderInductive)
 
 tests :: TestTree
 tests =
@@ -243,9 +244,9 @@ pastEverything = beyond . varsInEnv
 -- | The corpus, declared through the REPL, and whatever it complained about.
 corpus :: IO (GlobalEnv, [String])
 corpus = do
-  (s0, problems) <- startingSession
+  (s0, trouble) <- startingSession
   let (s, said) = foldl' one (s0, []) corpusLines
-  pure (globals (machineOf s), problems ++ said)
+  pure (globals (machineOf s), concatMap (renderTrouble s0) trouble ++ said)
   where
     one (s, acc) l = case command s l of
       (s', Ran out _ Completed) -> (s', acc ++ [ o | o <- out, not (expected o) ])

@@ -28,7 +28,9 @@ import Thena.Engine (Machine (..))
 import Thena.Global.Declare (DeclareError (..), TokenClassError (..))
 import Thena.Global.Env (definitionBody, lookupDefinition)
 import Thena.Language.Regex (RegexError (..))
-import Thena.Repl (renderResponse, startingSession, transcriptFrom)
+import Thena.Files (startingSession)
+import Thena.Render (renderTrouble, renderResponse)
+import Thena.Repl (transcriptFrom)
 import Thena.Syntax.Lexer (Located (..), Token (..), lexTokens)
 
 tests :: TestTree
@@ -39,12 +41,12 @@ tests =
     , testGroup "a class is elaborated like any definition" accepted
     , testGroup "and refused at declaration when it is not a class" refusals
     , goldenVsString "tokens" "test/golden/tokens.golden" $ do
-        (s0, problems) <- startingSession
+        (s0, trouble) <- startingSession
         let run (title, src) =
               let (s1, r) = loadProofSource s0 src
                in ("-- " ++ title) : renderResponse s1 r
         pure (toLazyByteString (stringUtf8
-          (unlines (problems ++ concatMap run (good : bad)) ++ transcriptFrom s0 prompt)))
+          (unlines (concatMap (renderTrouble s0) trouble ++ concatMap run (good : bad)) ++ transcriptFrom s0 prompt)))
     ]
 
 -- | The same checks reached from @qed@, which admits a definition by the other

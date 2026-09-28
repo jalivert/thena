@@ -46,7 +46,7 @@ import Thena.Global.Env
   , emptyGlobals
   , lookupConstant
   )
-import Thena.Repl (renderCore)
+import Thena.Render (renderCore)
 
 import Thena.Core.TermTests (genLiteral)
 import Thena.Declared (declared)

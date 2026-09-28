@@ -50,6 +50,8 @@ library
         Thena.Language.Substitution
         Thena.Language.Lookup
         Thena.Language.Judgment
+        Thena.Files
+        Thena.Render
         Thena.Repl
         Thena.Rules
         Thena.Surface.Concrete
@@ -130,10 +132,24 @@ library view
         Thena.View.Rules,
         Thena.View.Source,
         Thena.View.Surface,
-        -- The text door: rendering, session start, and the IO a response asks
-        -- for. One frontend among others lives here too (§125).
-        Thena.Repl
+        -- The file door: reading what a command named, and starting a session
+        -- with the shipped rule base and prelude in it (§130).
+        Thena.Files,
+        -- The text door: the system as lines, for a frontend that wants them.
+        -- A structured frontend takes the views above and never imports it.
+        Thena.Render
 
+-- | The terminal REPL, and **not a frontend** (MS7 phase 130).
+--
+-- It depended on `thena:view` from phase 126 until phase 130, when `Thena.Repl`
+-- left that list: the REPL's own line protocol is not something a frontend may
+-- import, so the program that /is/ the REPL cannot be built against the frontend
+-- boundary any more. It takes `thena` whole instead.
+--
+-- **What that costs**: the boundary is no longer exercised by the shipped
+-- executable, only by `thena-boundary`, which was always the thing that proved
+-- it (MS7 done-when 1) and uses every view rather than the handful a terminal
+-- wants.
 executable thena
     import:             warnings
     hs-source-dirs:     app
@@ -146,7 +162,7 @@ executable thena
     build-depends:
         base      ^>=4.21.2.0,
         haskeline >=0.8.4 && <0.9,
-        thena:view
+        thena
 
 test-suite thena-test
     import:             warnings

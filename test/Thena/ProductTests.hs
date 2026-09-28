@@ -15,7 +15,7 @@ module Thena.ProductTests (tests) where
 import Data.ByteString.Builder (stringUtf8, toLazyByteString)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (assertFailure, testCase, (@?=), assertBool)
 
 import Thena.Core.Term (GlobalName (..))
 import Thena.Driver
@@ -23,7 +23,8 @@ import Thena.Driver
   )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
-import Thena.Repl (startingSession, loadFile, renderCore)
+import Thena.Files (loadFile, startingSession)
+import Thena.Render (renderCore, renderTrouble, renderResponse)
 
 target :: FilePath
 target = "examples/products.thena.script"
@@ -33,14 +34,15 @@ tests =
   testGroup
     "the prelude's products (phase 20)"
     [ goldenVsString "products" "test/golden/products.golden" $ do
-        (s, problems) <- startingSession
-        (_, out, _) <- loadFile s target
-        pure (toLazyByteString (stringUtf8 (unlines (problems ++ out))))
+        (s, trouble) <- startingSession
+        (s', out, _) <- loadFile s target
+        pure (toLazyByteString (stringUtf8 (unlines
+          (concatMap (renderTrouble s) trouble ++ concatMap (renderResponse s') out))))
 
     , testCase "the file runs to the end" $ do
         (s, _) <- startingSession
         (_, _, stopped) <- loadFile s target
-        stopped @?= []
+        assertBool (unlines (map show stopped)) (null stopped)
 
       -- The whole point of a *dependent* pair, and the one thing that would
       -- still typecheck if @Sigma@ were the non-dependent @And@ under another

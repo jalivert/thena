@@ -43,7 +43,9 @@ import Thena.View.Chart
   , displayOffer
   , displayParse
   )
-import Thena.Repl (parseFailureReason, renderTree, startingSession, tabComplete)
+import Thena.Files (startingSession)
+import Thena.Render (parseFailureReason, renderTree)
+import Thena.Repl (tabComplete)
 import Thena.Syntax.Print (escapeChar)
 
 tests :: TestTree

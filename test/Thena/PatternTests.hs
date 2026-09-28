@@ -31,7 +31,7 @@ import Thena.Instral.Ops
   , patternBinds
   , patternIrrefutable
   )
-import Thena.Repl (renderPattern)
+import Thena.Render (renderPattern)
 import Thena.Rules (resolveRule, validate)
 import Thena.Syntax.Lexer (lexTokens)
 import Thena.Surface.Layout (layout)

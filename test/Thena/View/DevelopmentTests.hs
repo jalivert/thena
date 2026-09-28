@@ -40,7 +40,7 @@ import Thena.View.Development
   )
 import Thena.View.Core (Budget (..))
 import Thena.View.Redraw (chainText)
-import Thena.Repl (renderPartial)
+import Thena.Render (renderPartial)
 
 tests :: TestTree
 tests =

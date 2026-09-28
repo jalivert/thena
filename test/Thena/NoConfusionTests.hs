@@ -49,7 +49,7 @@ import Thena.Global.Declare (DeclareError (..), declare)
 import Thena.Global.Env (GlobalEnv, definitionBody, definitionType, lookupDefinition)
 import Thena.Errors (Skipped (..))
 import Thena.Kernel (certify)
-import Thena.Repl (renderCore)
+import Thena.Render (renderCore)
 
 tests :: TestTree
 tests =

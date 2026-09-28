@@ -39,7 +39,7 @@ import Thena.Instral.Concrete
   )
 import Thena.Syntax.Parser (parseRule)
 import Thena.Global.Env (emptyGlobals)
-import Thena.Repl (renderSurface)
+import Thena.Render (renderSurface)
 import Thena.Surface.Concrete
   ( ObjectPiece (..)
   , Plicity (..)

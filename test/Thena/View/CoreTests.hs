@@ -32,7 +32,8 @@ import Thena.Language.Grammar (Grammar)
 import Thena.View.Address (Address (..))
 import Thena.View.Core (Budget (..), displayCore)
 import Thena.View.Redraw (redraw)
-import Thena.Repl (renderCore, startingSession)
+import Thena.Files (startingSession)
+import Thena.Render (renderCore)
 
 tests :: TestTree
 tests =

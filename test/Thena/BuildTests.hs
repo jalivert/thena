@@ -42,7 +42,8 @@ import Thena.Language.Build (buildTerm, printRegion)
 import Thena.Language.Earley (parse, pieces)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Grammar (Grammar, earleyRules)
-import Thena.Repl (renderCore, startingSession)
+import Thena.Files (startingSession)
+import Thena.Render (renderCore)
 
 tests :: TestTree
 tests =

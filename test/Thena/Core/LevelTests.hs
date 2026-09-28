@@ -16,7 +16,7 @@ import Test.Tasty.QuickCheck
   ( Gen, counterexample, elements, forAll, oneof, property, testProperty
   , withNumTests, (===) )
 
-import Thena.Repl (renderLevel)
+import Thena.Render (renderLevel)
 
 import Thena.Core.Level
   ( Level (..)

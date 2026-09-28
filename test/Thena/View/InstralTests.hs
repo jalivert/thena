@@ -30,7 +30,8 @@ import Thena.View.Instral
   , displayBlock
   )
 import Thena.View.Redraw (redraw, redrawSurface)
-import Thena.Repl (renderInstr, startingSession)
+import Thena.Files (startingSession)
+import Thena.Render (renderInstr)
 import Thena.Rules (allRules)
 
 tests :: TestTree

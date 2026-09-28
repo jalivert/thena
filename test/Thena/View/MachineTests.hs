@@ -38,7 +38,8 @@ import Thena.View.Instral
   )
 import Thena.View.Machine (FrameView (..), MachineView (..), displayMachine)
 import Thena.View.Redraw (redraw, redrawSurface)
-import Thena.Repl (renderMachine, startingSession)
+import Thena.Files (startingSession)
+import Thena.Render (renderMachine)
 
 tests :: TestTree
 tests =

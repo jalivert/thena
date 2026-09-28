@@ -27,7 +27,8 @@ import Thena.Driver
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (ConstructorDefinition (..), InductiveDefinition (..), lookupInductive)
 import Thena.Language.Reader (Block (..), Production (..), RawRule (..), ReadError (..), readBlock)
-import Thena.Repl (renderResponse, startingSession)
+import Thena.Files (startingSession)
+import Thena.Render (renderResponse)
 import Thena.Syntax.Lexer (BlockKind (..))
 
 tests :: TestTree

@@ -40,7 +40,7 @@ import Thena.Driver
   , oneLine
   )
 import Thena.Engine (Development, Machine (..), development)
-import Thena.Repl (rulesPath)
+import Thena.Files (rulesPath)
 import Thena.Core.Term (Core, substLevelsIn)
 import Thena.Global.Env
   ( Definition (..)
@@ -51,7 +51,8 @@ import Thena.Global.Env
   , isDeclared
   , lookupInductive
   )
-import Thena.Repl (startingSession, loadProofFile, renderCore, renderEliminator)
+import Thena.Files (loadProofFile, startingSession)
+import Thena.Render (renderTrouble, renderResponse, renderCore, renderEliminator)
 import Thena.Core.Convert (convert)
 import Thena.Core.Context ()
 import Thena.Standard (withRules)
@@ -78,8 +79,8 @@ tests =
 preludeTests :: [TestTree]
 preludeTests =
   [ testCase "it is found where cabal put it, and loads clean" $ do
-      (_, problems) <- startingSession
-      problems @?= []
+      (s, trouble) <- startingSession
+      concatMap (renderTrouble s) trouble @?= []
 
   , testCase "and declares exactly Eq, refl, Unit, unit and Empty" $ do
       (s, _) <- startingSession
@@ -651,10 +652,12 @@ moduleTests =
 tierTests :: [TestTree]
 tierTests =
   [ goldenVsString "tier0" "test/golden/tier0.golden" $ do
-      (s, problems) <- startingSession
-      (s1, out) <- loadProofFile s "examples/tier0.thena"
+      (s, trouble) <- startingSession
+      (s1, out, _) <- loadProofFile s "examples/tier0.thena"
       let shown = concatMap (renderResponse' s1) ["one", "two", "plusZeroLeft"]
-      pure (toLazyByteString (stringUtf8 (unlines (problems ++ out ++ shown))))
+      pure (toLazyByteString (stringUtf8 (unlines
+        (concatMap (renderTrouble s) trouble
+          ++ concatMap (renderResponse s1) out ++ shown))))
 
   , -- **Implicit insertion is semantically transparent**, which is the property
     -- MS4\'s done-when asks for at phase 44 and not an approximation of it.

@@ -26,7 +26,7 @@ import Thena.Core.Level (Level (..), instantiateLevels, levelOfNat)
 import Thena.Core.Term (Core, GlobalName (..), substLevelsIn)
 import Thena.Declared (natFin, natFinCounter, natVec, natVecCounter)
 import Thena.Global.Env (GlobalEnv, InductiveDefinition, eliminatorType, inductiveLevels, lookupInductive)
-import Thena.Repl (renderEliminator)
+import Thena.Render (renderEliminator)
 
 tests :: TestTree
 tests =

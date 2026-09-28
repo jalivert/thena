@@ -14,7 +14,9 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
 
 import Thena.Driver (newSession)
-import Thena.Repl (loadStandardRules, transcriptFrom)
+import Thena.Render (renderTrouble)
+import Thena.Files (loadStandardRules)
+import Thena.Repl (transcriptFrom)
 
 tests :: TestTree
 tests =
@@ -1415,8 +1417,9 @@ tests =
         name
         ("test/golden/" ++ name ++ ".golden")
         ( do
-            (s, problems) <- loadStandardRules newSession
-            pure (toLazyByteString (stringUtf8 (unlines problems ++ transcriptFrom s ls)))
+            (s, trouble) <- loadStandardRules newSession
+            pure (toLazyByteString (stringUtf8
+              (unlines (concatMap (renderTrouble s) trouble) ++ transcriptFrom s ls)))
         )
 
 -- | The prelude declarations a transcript must make before no-confusion can be

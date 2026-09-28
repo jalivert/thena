@@ -24,7 +24,7 @@ import Thena.Fixtures
   , trailingLam
   , withConstraint
   )
-import Thena.Repl (renderPartial)
+import Thena.Render (renderPartial)
 
 tests :: TestTree
 tests =

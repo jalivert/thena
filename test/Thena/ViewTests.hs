@@ -32,7 +32,8 @@ import Thena.Driver
   , oneLine
   , withRuleBases
   )
-import Thena.Repl (Turn (..), renderCursor, turn)
+import Thena.Render (renderCursor)
+import Thena.Repl (Turn (..), turn)
 import Thena.Standard (expectedBase)
 import Thena.View
   ( Budget (..)
