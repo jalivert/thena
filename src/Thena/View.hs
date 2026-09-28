@@ -40,7 +40,7 @@ module Thena.View
     -- ** and the driver's own reads, so that one import serves a frontend
   , workingOn
   , parked
-  , isStepping
+  , fuelOf
   , parsingLanguage
   , pendingQuestion
   , machineOf
@@ -70,7 +70,7 @@ import Thena.Development.Cursor (Cursor, Focus, Step, expectedType, focus, prefi
 import Thena.Development.Partial (Partial (..))
 import Thena.Driver
   ( Session
-  , isStepping
+  , fuelOf
   , machineOf
   , parked
   , parsingLanguage

@@ -24,7 +24,7 @@ module Main (main) where
 import Control.Monad (unless)
 import System.Exit (exitFailure)
 
-import Thena.Driver (Session, oneLine, oneProgram)
+import Thena.Driver (Response (..), Session, Stop (..), fuelOf, oneLine, oneProgram)
 import Thena.Repl (renderResponse, startingSession, turn, turnSession)
 import Thena.View
   ( Budget (..)
@@ -71,6 +71,8 @@ checks =
   , \s -> want "oneProgram accepts a click" (isSession (fst (oneProgram s (focusProgram (focusAddress s)))))
   , \s -> want "renderResponse" (not (null (renderResponse s (snd (oneLine s ":show")))))
   , \s -> want "turn" (isSession (turnSession (turn s ":show")))
+  , \s -> want "fuel is readable" (fuelOf (fst (oneLine s ":step 3")) == Just 3)
+  , \s -> want "a job runs in slices" (job s)
   ]
   where
     budget = Budget 200
@@ -81,3 +83,22 @@ checks =
     -- what says the view was computed is that its three panes agree with a
     -- machine that has nothing left to run.
     machineReached mv = null (machinePc mv) == null (machineEnv mv)
+
+-- | **What a job is, in full** (phase 128): set a budget, advance a slice at a
+-- time, and stop by not asking for the next slice.
+--
+-- It is here because a job is /entirely a frontend's/ — there is no @Job@ type
+-- in the library to test — so the claim that a frontend can run one through the
+-- boundary is a claim about this suite's imports. The budget is one instruction,
+-- which is the smallest thing that pauses at all; how a larger one behaves is
+-- @Thena.DriverTests@\'s.
+--
+-- **It must actually have paused**, or the check passes on a line that finished
+-- inside its budget and says nothing about slices at all.
+job :: Session -> Bool
+job s = slice False (200 :: Int) (oneLine (fst (oneLine s ":step on")) claim)
+  where
+    claim = "claim \"h\" \8988 Type\8320 \8989"
+    slice _ n (s', Ran _ _ (Paused 1)) | n > 0 = slice True (n - 1) (oneLine s' ":step")
+    slice paused _ (_, Ran _ _ Completed) = paused
+    slice _ _ _ = False

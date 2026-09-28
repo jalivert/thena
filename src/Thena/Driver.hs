@@ -20,7 +20,7 @@ module Thena.Driver
   , machineOf
   , workingOn
   , parked
-  , isStepping
+  , fuelOf
   , parsingLanguage
   , pendingQuestion
   , newSession
@@ -226,10 +226,10 @@ import Thena.Syntax.Resolve (resolve, resolveData, resolvePartial)
 -- this module ("Thena.Repl", nine sites, all of them view work).
 --
 -- **The reads are functions, not the fields renamed.** A field selector that is
--- exported is also an update: GHC allows @s { sessionStepping = True }@ wherever
--- @sessionStepping@ is in scope, constructor or no constructor. So the fields
+-- exported is also an update: GHC allows @s { sessionFuel = Just 1 }@ wherever
+-- @sessionFuel@ is in scope, constructor or no constructor. So the fields
 -- keep their names and stay in, and the exported reads have their own — which
--- also let them say what they give ('isStepping', 'pendingQuestion') rather than
+-- also let them say what they give ('fuelOf', 'pendingQuestion') rather than
 -- which field they came from.
 --
 -- The name counter is not here: it is the machine's 'names' field (§7.2), and
@@ -238,7 +238,7 @@ import Thena.Syntax.Resolve (resolve, resolveData, resolvePartial)
 -- through them; until then a second copy here would be two homes for one
 -- number.
 --
--- Stepping is a session setting, so it does not backtrack and does not belong
+-- The fuel is a session setting, so it does not backtrack and does not belong
 -- to the machine (§7.4).
 data Session = Session
   { sessionMachine   :: Machine
@@ -276,11 +276,34 @@ data Session = Session
     -- @globals@, and @globals@ is deliberately not in a 'Snapshot' (§7.7: the
     -- environment only ever grows), so an @:undo@ that crossed it would rewind
     -- the development and leave the theorem admitted.
-  , sessionStepping  :: Bool
+  , sessionFuel      :: Maybe Int
+    -- ^ **how many instructions a run may do before handing control back**
+    -- (MS7 phase 128): @Nothing@ to run on, @Just n@ for at most @n@.
+    --
+    -- **It was @sessionStepping :: Bool@ until here, and this deletes the flag
+    -- rather than adding a parameter beside it** — single-stepping is the
+    -- degenerate budget, @Just 1@, and @:step off@ is @Nothing@. One notion,
+    -- so the engine has one way of being handed back and @:step on@ has
+    -- somewhere to live.
+    --
+    -- **This is what makes a job possible** (his ruling of 2026-09-28,
+    -- @discussion\/tight-integration.md@ §5): a frontend advances a session in
+    -- slices and interleaves a keystroke between them, and stopping is simply
+    -- not asking for the next slice. Fuel rather than an asynchronous
+    -- interrupt, in his words — /"interrupting a search would not have an
+    -- option of resuming it… This is a strong argument for the fuel argument!"/
+    -- — because 'progress' is a fold and an exception thrown into it loses
+    -- every step it accumulated unless something mutable holds the machine,
+    -- which would put IO under this module (§12 invariant 4).
+    --
+    -- **It does not make the kernel interruptible**, and he accepted that:
+    -- 'certify', 'declare', 'checkGrammar' and 'checkBlock' all run unbounded
+    -- work /between/ steps, so one unit of fuel can be a multi-minute kernel
+    -- call (@ms7\/CLOSEOUT.md@ 23).
   , sessionParsing   :: Maybe String
     -- ^ **the language whose terms the lines are, in @:parse@'s interactive
     -- mode** (MS6 phase 102b, his request of 2026-09-19). Every line is parsed
-    -- as a term of it until @:done@. On the session, as 'sessionStepping' is,
+    -- as a term of it until @:done@. On the session, as 'sessionFuel' is,
     -- so a transcript drives the mode exactly as the terminal does.
   , sessionAsking    :: Maybe Question
     -- ^ **what an op is waiting to be told**, and therefore whether the next
@@ -290,7 +313,7 @@ data Session = Session
     -- every caller, and a caller that dropped or staled it sent a line to the
     -- wrong half of the driver. His words, 2026-09-27: /"It feels weird having
     -- things travel between the engine and the frontend\/TUI just freely
-    -- alongside the session."/ On the session, as 'sessionStepping' and
+    -- alongside the session."/ On the session, as 'sessionFuel' and
     -- 'sessionParsing' are, and for the same reason.
     --
     -- **Deliberately not in a 'Snapshot'**, so @:undo@ does not step back into
@@ -320,9 +343,14 @@ workingOn = sessionWork
 parked :: Session -> [Parked]
 parked = sessionSuspended
 
--- | Whether the machine is stepping.
-isStepping :: Session -> Bool
-isStepping = sessionStepping
+-- | How many instructions a run may do before handing control back — @Nothing@
+-- to run on, @Just n@ for at most @n@ (phase 128).
+--
+-- **This is what a job pane reads.** A frontend that advances a session in
+-- slices sets it with @:step ‹n›@ and learns from 'Paused' that a slice ended
+-- with the budget spent rather than with the run over.
+fuelOf :: Session -> Maybe Int
+fuelOf = sessionFuel
 
 -- | In @:parse@'s interactive mode, the language every line is read as
 -- (MS6 phase 102b).
@@ -452,7 +480,7 @@ newSession = Session
   , sessionWork      = Scratch
   , sessionSuspended = []
   , sessionHistory   = (Exec [] [] [], ps, []) :| []
-  , sessionStepping  = False
+  , sessionFuel      = Nothing
   , sessionParsing   = Nothing
   , sessionAsking    = Nothing
   }
@@ -645,7 +673,16 @@ data Stop
   | Uncertified KernelError
     -- ^ the kernel would not accept what the development built (§5.3). Shaped
     -- like 'Refused': the command is abandoned, and there is nothing to retry
-  | Paused               -- ^ stepping mode: one instruction done
+  | Paused Int
+    -- ^ the fuel ran out: the machine can go on, and the number is how many
+    -- instructions this run spent (phase 128).
+    --
+    -- **A paused run has by definition spent its whole budget** — it is the
+    -- only way to reach here — so the number tells a caller that passed
+    -- @Just n@ nothing it did not know. It is carried because a job's pane
+    -- accumulates slices, and @total + spent@ is one addition against
+    -- re-reading a setting the frontend may since have changed. @Just 1@ is
+    -- single-stepping, so @Paused 1@ is what stepping mode has always said.
   deriving (Eq, Show)
 
 -- | Everything else a command line can get wrong (§7.8's @CommandError@).
@@ -1248,7 +1285,7 @@ loadProofItems s nm items =
         -- 'Thena.Instral.Ops.Play' does it for both kinds. Checking them here
         -- asked what their words meant before the declarations above them had
         -- run, which no dependency-ordered language does.
-     in case progress False s { sessionMachine = load is machine { names = n1 } } [] [] of
+     in case progress Nothing s { sessionMachine = load is machine { names = n1 } } [] [] of
           (s', Ran _ ws Completed) ->
             ( s'
             , ProofLoaded nm [ n | Just n <- map declaredName items ]
@@ -1448,8 +1485,12 @@ dispatch s name arg = case name of
   ":proofs"  -> noArgument (s, Proofs (currentAttempt s) (sessionSuspended s))
   ":undo"    -> noArgument undo
   ":convert" -> conversion
+  -- **The two halves of fuel** (phase 128): @:step@ sets what every line may
+  -- spend, @:run@ spends a budget once. Neither is a mode — @:step on@ is
+  -- @:step 1@, and @:run@ with no argument is the absence of a budget rather
+  -- than the presence of a large one.
   ":step"  -> stepping
-  ":run"   -> noArgument (progress False s [] [])
+  ":run"   -> running
   "data"   -> declaration
   -- **A surface declaration** (MS4 phase 42) — a bare word, because it acts
   -- (§2.4). It compiles to instructions rather than being run here, so
@@ -1501,7 +1542,7 @@ dispatch s name arg = case name of
         Right is  -> case checkBlock (grammars machine) (rules machine) bound (Rule (GlobalName "entry") [] [] is) of
           Just (BlockIll es)      -> (s, LineRefused es)
           Just (BlockMistyped es) -> (s, EntryMistyped es)
-          Nothing -> progress (sessionStepping s)
+          Nothing -> progress (sessionFuel s)
                               s { sessionMachine = load is machine } [] []
     Right _ -> (s, Rejected (UnexpectedArgument name))
 
@@ -1523,7 +1564,7 @@ dispatch s name arg = case name of
   -- after it. @retry@ is the precedent for a bare driver word that is not an op.
   "yield" -> noArgument $
     if Engine.isYielding machine
-      then progress (sessionStepping s)
+      then progress (sessionFuel s)
                     s { sessionMachine = Engine.resumeYield machine } [] []
       else (s, Rejected NotYielding)
   "retry"  -> case arg of
@@ -1706,7 +1747,7 @@ dispatch s name arg = case name of
     -- second home for something the development already says.
     closeProof = case sessionWork s of
       Scratch -> (s, Rejected NotProving)
-      Attempting att -> case progress False s { sessionMachine = ran } [] [] of
+      Attempting att -> case progress Nothing s { sessionMachine = ran } [] [] of
         (s', Ran msgs ws Completed) ->
           case extract (flatten (development (sessionMachine s'))) of
             Left why -> (s', Ran msgs ws (Halted (NotYetPure (whereImpure why))))
@@ -1817,7 +1858,7 @@ dispatch s name arg = case name of
                    , Do (Say (Lit (VText ("declared " ++ nameOf d))))
                    ]
            in progress
-                (sessionStepping s)
+                (sessionFuel s)
                 s { sessionMachine = load is machine { names = n1 } }
                 []
                 []
@@ -1871,7 +1912,7 @@ dispatch s name arg = case name of
           asking  = s { sessionMachine = load prog machine { names = n1 } }
           -- **Its blocks are checked where they run** (MS6 phase 104b), by
           -- 'Thena.Instral.Ops.Play', as a module's are.
-       in case progress False asking [] [] of
+       in case progress Nothing asking [] [] of
             (s', Ran _ _ Completed) ->
               let m'   = sessionMachine s'
                   back = s' { sessionMachine = restore before m' }
@@ -1900,11 +1941,32 @@ dispatch s name arg = case name of
         Right ((a, b), n1) -> case convert (globals machine) ctx n1 a b of
           (why, owed, n2) -> (bump n2, Converted a b why owed)
 
+    -- **The session's fuel, and one instruction on demand.** Bare @:step@ is
+    -- @Just 1@ whatever the setting is, which is what it has always been; the
+    -- arguments say what a line may spend from now on.
+    --
+    -- @on@ and @off@ are kept as the spellings the manual and the transcripts
+    -- use, and they are not a third thing: @on@ is @1@ and @off@ is the absence
+    -- of a budget.
     stepping = case arg of
-      ""    -> progress True s [] []
-      "on"  -> (s { sessionStepping = True }, Ran [] [] Completed)
-      "off" -> (s { sessionStepping = False }, Ran [] [] Completed)
-      _     -> (s, Rejected (UnexpectedArgument name))
+      ""    -> progress (Just 1) s [] []
+      "on"  -> (s { sessionFuel = Just 1 }, Ran [] [] Completed)
+      "off" -> (s { sessionFuel = Nothing }, Ran [] [] Completed)
+      _     -> budget (\f -> (s { sessionFuel = f }, Ran [] [] Completed))
+
+    -- **A budget once**, without changing what the next line may spend: the
+    -- slice a job advances by (@discussion\/tight-integration.md@ §5). Bare
+    -- @:run@ lets the machine run on, as it always has, and deliberately does
+    -- not consult 'sessionFuel' — @:step 500@ then @:run@ has to be the way to
+    -- say /finish this/, or nothing says it.
+    running = case arg of
+      "" -> progress Nothing s [] []
+      _  -> budget (\f -> progress f s [] [])
+
+    -- A positive number of instructions, or the argument is not one.
+    budget k = case reads arg of
+      [(n, "")] | n >= 1 -> k (Just n)
+      _                  -> (s, Rejected (UnexpectedArgument name))
 
     -- Unwind to a choice point and take its next alternative, then let the
     -- machine run as any other command does. 'Thena.Engine.retryFrom' is what
@@ -1915,7 +1977,7 @@ dispatch s name arg = case name of
       Left Engine.NoChoicePoint   -> (s, Rejected NothingToRetry)
       Left (Engine.UnknownChoice n) -> (s, Rejected (NoSuchChoice n))
       Right (m, note) ->
-        let (s', resp) = progress (sessionStepping s) s { sessionMachine = m } [] []
+        let (s', resp) = progress (sessionFuel s) s { sessionMachine = m } [] []
          in (s', withNote note resp)
 
     -- The note goes in front of whatever the alternative itself said, as a
@@ -1939,7 +2001,7 @@ dispatch s name arg = case name of
       Left e -> (s, Failed e)
       Right items ->
         let (is, n1) = surfaceProgram (names machine) items
-         in progress (sessionStepping s)
+         in progress (sessionFuel s)
               s { sessionMachine = load is machine { names = n1 } } [] []
 
     -- **One typed ENTRY, as the program it is** (MS5 phase 62b, widened from a
@@ -1952,7 +2014,7 @@ dispatch s name arg = case name of
       Left (LineIllFormed es) -> (s, LineRefused es)
       Left (LineMistyped es)  -> (s, EntryMistyped es)
       Right is ->
-        progress (sessionStepping s) s { sessionMachine = load is machine } [] []
+        progress (sessionFuel s) s { sessionMachine = load is machine } [] []
 
 -- | What @:help@ shows: one line per command the driver has, the spelling on
 -- the left and what it does on the right.
@@ -2033,7 +2095,8 @@ commandSummary =
   , (":choices",                 "the live choice points, nearest first")
   , (":bases / :rules",          "the loaded rule bases / the rules in them")
   , (":step on / :step / :step off", "single-step the machine")
-  , (":run",                     "let a stepping machine run on")
+  , (":step ‹n›",                "let every line do at most n instructions")
+  , (":run / :run ‹n›",          "let it run on / for n instructions")
   , (":theorem ‹x› : ‹T›",      "start a proof")
   , (":goal ‹T›",                "discard everything and start a scratch goal")
   , (":suspend / :resume ‹name›", "put a proof aside / take it up again")
@@ -2472,7 +2535,7 @@ view s rd f arg =
 answer :: Session -> String -> (Session, Response)
 answer s a
   | isAsking (sessionMachine s) =
-      progress (sessionStepping s) s { sessionMachine = resumeAt a (sessionMachine s) } [] []
+      progress (sessionFuel s) s { sessionMachine = resumeAt a (sessionMachine s) } [] []
   | otherwise = (s, Rejected NotAsking)
 
 -- | One line of input, whichever kind it is: an answer while something is
@@ -2497,7 +2560,7 @@ oneLine s line = settle (case sessionAsking s of
 -- which is the special case the first design principle refuses.
 oneProgram :: Session -> [Instr] -> (Session, Response)
 oneProgram s is =
-  settle (progress (sessionStepping s) s { sessionMachine = load is (sessionMachine s) } [] [])
+  settle (progress (sessionFuel s) s { sessionMachine = load is (sessionMachine s) } [] [])
 
 -- | What every line and every program does after it has run: notice a pending
 -- question, and keep the undo history straight.
@@ -2704,7 +2767,25 @@ stopped resp = case resp of
   Ran _ _ (Uncertified _) -> True
   _                     -> False
 
--- | Run until the machine needs the user, honouring stepping mode.
+-- | Run until the machine needs the user, spending at most this much fuel —
+-- 'Nothing' to run on, @Just n@ for at most @n@ instructions (phase 128).
+--
+-- A slice of a job is a call to this with a budget, and stopping a job is not
+-- making the next call: the machine that comes back is complete, so the state a
+-- run stops in is one an uninterrupted run passes through
+-- (@discussion\/tight-integration.md@ §5).
+--
+-- **Three callers pass 'Nothing' whatever the session's fuel says**, and they
+-- are the three that read the finished state rather than reporting it: a module
+-- load, @qed@\'s certify and @:infer@\'s elaboration all match @Ran _ _
+-- 'Completed'@ and treat everything else as a failure. A budget there would
+-- hand back a 'Paused' in place of their own answer, so they are unbounded by
+-- construction — see @ms7\/CLOSEOUT.md@ 24, since a long load is therefore
+-- still something a frontend waits out.
+progress :: Maybe Int -> Session -> [Message] -> [Warning] -> (Session, Response)
+progress fuel = spending fuel 0
+
+-- | 'progress' with the fuel it was given and what it has spent so far.
 --
 -- @Saying@ costs a round trip per message and buys the driver an ordered view
 -- of execution as a sequence of events (§7.5), which is why the messages come
@@ -2714,14 +2795,20 @@ stopped resp = case resp of
 -- 'Halted' for @retry@\'s sake, which phase 25d found was never reachable —
 -- see 'Halted'. The machine still comes back here; what changed is that
 -- 'oneLine' does not let a failed line's development survive into the session.
-progress :: Bool -> Session -> [Message] -> [Warning] -> (Session, Response)
-progress oneStep s msgs warns = case step (sessionMachine s) of
+--
+-- **The budget is tested after the instruction, not before**, which is what
+-- makes @Just 1@ exactly the stepping mode it replaced: the guard sits where
+-- @oneStep@'s did, in each branch that has a machine to go on with. A branch
+-- that stops for its own reason — a question, a yield, a refusal — never
+-- consults it, so fuel cannot turn a stop into a pause.
+spending :: Maybe Int -> Int -> Session -> [Message] -> [Warning] -> (Session, Response)
+spending fuel done s msgs warns = case step (sessionMachine s) of
   Engine.Continue m
-    | oneStep   -> stop m msgs warns Paused
-    | otherwise -> progress oneStep s { sessionMachine = m } msgs warns
+    | exhausted -> stop m msgs warns (Paused spent)
+    | otherwise -> spending fuel spent s { sessionMachine = m } msgs warns
   Engine.Saying msg m
-    | oneStep   -> stop m (msg : msgs) warns Paused
-    | otherwise -> progress oneStep s { sessionMachine = m } (msg : msgs) warns
+    | exhausted -> stop m (msg : msgs) warns (Paused spent)
+    | otherwise -> spending fuel spent s { sessionMachine = m } (msg : msgs) warns
   -- **A yield stops the run and keeps the machine** (MS4 phase 45b), exactly as
   -- a question does. Stepping it again would yield again — the instruction is
   -- not consumed — so the driver has to stop here or spin.
@@ -2733,8 +2820,8 @@ progress oneStep s msgs warns = case step (sessionMachine s) of
   Engine.Declaring d m -> case declare (globals m) (names m) d of
     Left e -> stop (load [] m) msgs warns (Refused e)
     Right (g, n1, skip)
-      | oneStep   -> stop installed msgs warns' Paused
-      | otherwise -> progress oneStep s { sessionMachine = installed } msgs warns'
+      | exhausted -> stop installed msgs warns' (Paused spent)
+      | otherwise -> spending fuel spent s { sessionMachine = installed } msgs warns'
       where
         installed = m { globals = g, names = n1 }
         -- **A warning and no longer a message** (MS6 phase 98). Raised here
@@ -2783,9 +2870,9 @@ progress oneStep s msgs warns = case step (sessionMachine s) of
                                        then signatures m
                                        else (nm, ps) : signatures m
                       }
-       in if oneStep
-            then stop m' msgs warns Paused
-            else progress oneStep s { sessionMachine = m' } msgs warns
+       in if exhausted
+            then stop m' msgs warns (Paused spent)
+            else spending fuel spent s { sessionMachine = m' } msgs warns
 
   -- **A primitive is installed only if the system can reduce it** (MS6 phase
   -- 97b). Two checks, and both are the reason @primitive@ is not a postulate:
@@ -2809,9 +2896,9 @@ progress oneStep s msgs warns = case step (sessionMachine s) of
         Right (sd, roles) ->
           let (is, n1) = datatypeProgram (names m) sd (Just roles)
               m' = (Engine.splicing is m) { grammars = g : grammars m, names = n1 }
-           in if oneStep
-                then stop m' msgs (reverse ws ++ warns) Paused
-                else progress oneStep s { sessionMachine = m' } msgs (reverse ws ++ warns)
+           in if exhausted
+                then stop m' msgs (reverse ws ++ warns) (Paused spent)
+                else spending fuel spent s { sessionMachine = m' } msgs (reverse ws ++ warns)
     Right (g, ws) ->
       -- **Its datatype is generated here and runs next** (MS6 phase 103): the
       -- block had to be checked before anything could be generated from it, and
@@ -2834,9 +2921,9 @@ progress oneStep s msgs warns = case step (sessionMachine s) of
             Nothing -> ([], n2)
           installed = maybe [g] (: [g]) (lookupGrammar g)
           m' = (Engine.splicing (is ++ fs ++ ls) m) { grammars = installed ++ grammars m, names = n3 }
-       in if oneStep
-            then stop m' msgs (reverse ws ++ warns) Paused
-            else progress oneStep s { sessionMachine = m' } msgs (reverse ws ++ warns)
+       in if exhausted
+            then stop m' msgs (reverse ws ++ warns) (Paused spent)
+            else spending fuel spent s { sessionMachine = m' } msgs (reverse ws ++ warns)
 
   -- **A block is validated and typed the moment it is about to run** (MS6
   -- phase 104b), against the rule bases and the globals as they are then —
@@ -2850,23 +2937,23 @@ progress oneStep s msgs warns = case step (sessionMachine s) of
     Just (BlockMistyped errs) -> stop (load [] m) msgs warns (BlockIllTyped errs)
     Nothing ->
       let m' = Engine.splicing is m
-       in if oneStep
-            then stop m' msgs warns Paused
-            else progress oneStep s { sessionMachine = m' } msgs warns
+       in if exhausted
+            then stop m' msgs warns (Paused spent)
+            else spending fuel spent s { sessionMachine = m' } msgs warns
 
   Engine.Primitively nm ty m -> case checkedPrimitive (globals m) nm ty of
     Left e   -> stop (load [] m) msgs warns (Refused e)
     Right () ->
       let m' = m { globals = addPrimitive nm ty (globals m) }
-       in if oneStep
-            then stop m' msgs warns Paused
-            else progress oneStep s { sessionMachine = m' } msgs warns
+       in if exhausted
+            then stop m' msgs warns (Paused spent)
+            else spending fuel spent s { sessionMachine = m' } msgs warns
 
   Engine.Certifying t ty m -> case certify (globals m) t ty of
     Left e -> stop (load [] m) msgs warns (Uncertified e)
     Right (sub, residue)
-      | oneStep   -> stop settled' (say : msgs) warns Paused
-      | otherwise -> progress oneStep s' (say : msgs) warns
+      | exhausted -> stop settled' (say : msgs) warns (Paused spent)
+      | otherwise -> spending fuel spent s' (say : msgs) warns
       where
         say = "certified"
         settled' = m { development = Engine.Development
@@ -2877,6 +2964,12 @@ progress oneStep s msgs warns = case step (sessionMachine s) of
   Engine.Stuck r m    -> stop m msgs warns (Halted r)
   where
     stop m out ws what = (s { sessionMachine = m }, Ran (reverse out) (reverse ws) what)
+    -- What this run has spent once the instruction below it is done, and
+    -- whether that is all the fuel it was given. @<=@ rather than @==@ so that
+    -- a budget of zero or less stops after one instruction instead of running
+    -- on: fuel says how much a run may do, and every run does something.
+    spent     = done + 1
+    exhausted = maybe False (<= spent) fuel
 
 -- | Is this a primitive the system knows, declared at the type its rule needs?
 --

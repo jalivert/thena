@@ -818,6 +818,50 @@ thena spine> :step off
 
 `:run` finishes the current run without stepping; `:step off` leaves the mode.
 
+Single-stepping is the smallest of a family. `:step ‹n›` lets every line do at
+most `n` instructions before handing control back, and `:run ‹n›` advances a
+paused run by that many without changing the setting — so `:step on` is `:step 1`
+and `:step off` is no budget at all. An editor uses this to stay responsive: it
+advances a long search a slice at a time, draws whatever it wants to draw
+between slices, and stops the search by simply not asking for the next one.
+
+*From a fresh session.*
+
+```
+thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
+declared Nat
+thena spine> :step 6
+thena spine> declare idn : Nat -> Nat ; idn = \ n -> n
+pc
+  0  u = universe-at l
+  1  return u
+env
+  l = Type (?ℓ965)
+stack
+  call, 14 instruction(s) to resume
+  call, 6 instruction(s) to resume
+  call, 43 instruction(s) to resume (returned)
+  call, 61 instruction(s) to resume (returned)
+thena spine> :run 6
+pc
+  0  u = universe-at l
+  1  return u
+env
+  l = Type (?ℓ967)
+stack
+  call, 11 instruction(s) to resume
+  call, 14 instruction(s) to resume (returned)
+  call, 6 instruction(s) to resume
+  call, 43 instruction(s) to resume (returned)
+  call, 61 instruction(s) to resume (returned)
+thena spine> :run
+solved: ?ℓ963
+solved: ?ℓ965
+solved: ?ℓ967
+already equal
+thena spine> :step off
+```
+
 ---
 
 ## 9. The kernel

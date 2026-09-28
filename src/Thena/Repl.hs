@@ -594,7 +594,10 @@ renderStop gs s stop = case stop of
   -- it is only reached later now (MS6 phase 104b).
   BlockRefused es        -> map whatRuleError es
   BlockIllTyped errs     -> map (dropEntry . renderInstralTypeError) errs
-  Paused                 -> renderMachine gs (counter s) (contextOf s) (machineOf s)
+  -- **The machine, and not a word about the spend** (phase 128). The number is
+  -- for a job's pane; here the printed machine /is/ the sign that the run is not
+  -- over, since every other outcome prints its own result instead.
+  Paused _               -> renderMachine gs (counter s) (contextOf s) (machineOf s)
 
 -- --------------------------------------------------------------------------
 -- Errors, made readable

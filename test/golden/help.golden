@@ -38,7 +38,8 @@ a bare word acts, a word with a colon looks.
   :choices                      the live choice points, nearest first
   :bases / :rules               the loaded rule bases / the rules in them
   :step on / :step / :step off  single-step the machine
-  :run                          let a stepping machine run on
+  :step ‹n›                     let every line do at most n instructions
+  :run / :run ‹n›               let it run on / for n instructions
   :theorem ‹x› : ‹T›            start a proof
   :goal ‹T›                     discard everything and start a scratch goal
   :suspend / :resume ‹name›     put a proof aside / take it up again

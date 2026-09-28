@@ -2903,3 +2903,35 @@ editor's display is generic for the same reason and reuses the same two
 functions that decide it, rather than keeping a second table that could
 drift from the first the way one already has.
 
+
+### A long run goes in slices, and stopping it is not asking for the next one
+
+There is no "interrupt". Instead the machine takes a fuel budget: how many
+instructions a run may do before it hands control back. `:step ‹n›` sets what
+every line may spend, `:run ‹n›` spends a budget once without changing that
+setting, and `:step on` is simply the budget `1` — single-stepping is the
+smallest case of one notion, not a mode of its own.
+
+```
+thena> :step 500
+thena> prove              -- runs 500 instructions, then pauses
+thena> :run 500           -- one more slice
+thena> :run               -- and let it finish
+```
+
+A paused run is an ordinary stopped machine, so everything that works after
+`:step` works here: `:choices` lists the live choice points and `retry ‹n›`
+takes a different route. That is the reason for fuel rather than an
+asynchronous interrupt — an interrupted fold cannot be resumed, and being able
+to look at a search that was going well and carry on is the point.
+
+A frontend builds a job out of this and nothing else: advance a slice, draw
+whatever it wants to draw, advance again; stopping is not calling again. One
+session advances one thing at a time, so an editor refuses a second submission
+while a run is live rather than queuing it.
+
+Two things fuel does not bound. A single instruction may be a kernel call —
+`certify`, a `data` declaration, a grammar check — and those run to completion,
+so one unit of fuel can take minutes. And three operations are unbounded by
+construction, because they read the finished state rather than reporting it:
+loading a file, `qed`, and `:infer`.

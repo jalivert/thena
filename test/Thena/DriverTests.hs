@@ -5,7 +5,7 @@ module Thena.DriverTests (tests) where
 import Data.List (nub)
 
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 
 import Thena.Core.Convert (convert)
 import Thena.Core.Level (levelOfNat)
@@ -18,7 +18,7 @@ import Thena.Driver
   , Response (..)
   , Session
   , machineOf
-  , isStepping
+  , fuelOf
   , Stop (..)
   , answer
   , command
@@ -26,10 +26,10 @@ import Thena.Driver
   , newSession
   )
 import Thena.Development.Cursor (rebuild)
-import Thena.Engine (Machine (..), Question (..), globals, development, flatten)
+import Thena.Engine (Development, Machine (..), Question (..), globals, development, flatten)
 import Thena.Errors (FailReason (..))
 import Thena.Global.Declare (DeclareError (..))
-import Thena.Global.Env (isDeclared)
+import Thena.Global.Env (GlobalEnv, isDeclared)
 import Thena.Repl (entriesOf, unclosedEntry)
 
 -- | The names in a 'Fitting' listing, for the tests below.
@@ -532,7 +532,7 @@ tests =
             let s' = fst (say [":step on", natCommand])
              in declaredIn s' "Nat" @?= True
         , testCase "and the message is still to come" $
-            snd (say [":step on", natCommand]) @?= Ran [] [] Paused
+            snd (say [":step on", natCommand]) @?= Ran [] [] (Paused 1)
         ]
     , testGroup
         "stepping"
@@ -545,11 +545,11 @@ tests =
           -- (phase 61b: /a reader should be able to see which one it got/).
           testCase ":step on makes a command stop after one instruction" $
             case snd (say [":step on", "assume \"A\" ⌜ Type₀ ⌝"]) of
-              Ran [] _ Paused -> pure ()
+              Ran [] _ (Paused 1) -> pure ()
               other         -> assertFailure ("expected Paused, got " ++ show other)
         , testCase "and :step takes the next one" $
             case snd (say [":step on", "assume \"A\" ⌜ Type₀ ⌝", ":step"]) of
-              Ran [] _ Paused -> pure ()
+              Ran [] _ (Paused 1) -> pure ()
               other -> assertFailure ("expected a second pause, got " ++ show other)
         , testCase "and the one after that finishes it" $
             case snd (say [":step on", "assume \"A\" ⌜ Type₀ ⌝", ":step", ":step"]) of
@@ -564,9 +564,112 @@ tests =
               Ran [] _ Completed -> pure ()
               other -> assertFailure ("expected Completed, got " ++ show other)
         , testCase "stepping is a session setting and does not touch the machine" $
-            isStepping (fst (say [":step on"])) @?= True
+            fuelOf (fst (say [":step on"])) @?= Just 1
+        ]
+    , testGroup
+        -- **Fuel is stepping, generalised** (MS7 phase 128): one notion — how
+        -- much a run may do before handing control back — of which @:step on@ is
+        -- the budget @1@. The group above is therefore also this group's test of
+        -- the degenerate case, and is left as it was written.
+        "fuel"
+        [ testCase ":step ‹n› is the session's budget" $
+            fuelOf (fst (say [":step 7"])) @?= Just 7
+        , testCase ":step off is the absence of one" $
+            fuelOf (fst (say [":step 7", ":step off"])) @?= Nothing
+        , testCase "and a line stops when it has spent it" $
+            case snd (say [":step 2", natCommand]) of
+              Ran _ _ (Paused 2) -> pure ()
+              other -> assertFailure ("expected Paused 2, got " ++ show other)
+        , testCase ":run ‹n› spends a budget without setting one" $
+            case say [":step off", "assume \"A\" ⌜ Type₀ ⌝", ":run 1"] of
+              (s', Ran _ _ Completed) -> fuelOf s' @?= Nothing
+              (_, other) -> assertFailure ("expected Completed, got " ++ show other)
+        , -- A slice of a job, and the reason @:run ‹n›@ exists: the program is
+          -- already on the machine, and this advances it without finishing it.
+          testCase "and continues a paused run without finishing it" $
+            case snd (say [natCommand, ":step 5", elaborating, ":run 5"]) of
+              Ran _ _ (Paused 5) -> pure ()
+              other -> assertFailure ("expected Paused 5, got " ++ show other)
+        , testCase "bare :run finishes whatever the budget says" $
+            case snd (say [":step 1", natCommand, ":run"]) of
+              Ran _ _ Completed -> pure ()
+              other -> assertFailure ("expected Completed, got " ++ show other)
+        , testCase "a budget is a positive number of instructions" $
+            snd (command withRules ":step 0")
+              @?= Rejected (UnexpectedArgument ":step")
+        , testCase "and :run wants one too" $
+            snd (command withRules ":run -3")
+              @?= Rejected (UnexpectedArgument ":run")
+        , -- **The invariant the phase owes an assertion of**: a run stopped and
+          -- resumed reaches the state an uninterrupted run reaches. Crossed
+          -- against a second reading rather than round-tripped — the machine the
+          -- slices arrive at is compared with the one a single unbounded run
+          -- arrives at, which is a different execution of the same program and
+          -- not the same one read back.
+          testCase "a sliced run reaches what an unbounded run reaches" $
+            crossed ":step 2" ":run 2" [natCommand]
+        , testCase "the same holds of an elaboration, which backtracks" $
+            crossed ":step 3" ":run 3" [natCommand, elaborating]
+        , -- **One instruction at a time, and over the long program**, because a
+          -- slice of one is the only size at which a pause that loses its own
+          -- step makes no progress at all — and the short fixture above never
+          -- pauses inside 'Engine.Continue', so it does not notice.
+          testCase "and so does one sliced one instruction at a time" $
+            crossed ":step on" ":step" [natCommand, elaborating]
         ]
     ]
+
+-- | A line whose program is long: @elaborate@ runs a rule base, and its
+-- application clause is two ordered clauses that backtrack (MS4 phase 49).
+elaborating :: String
+elaborating = "declare idn : Nat -> Nat ; idn = \\ n -> n"
+
+-- | **The invariant phase 128 owes an assertion of**: a run stopped and resumed
+-- reaches the state an uninterrupted run reaches.
+--
+-- **Both runs are checked to have finished, and that is where the teeth are.**
+-- Two earlier versions of this test had none. One padded the script with more
+-- slices than the program needed, so a pause that threw its own step away — the
+-- mutation, @stop (sessionMachine s)@ in place of @stop m@ — still arrived
+-- where the unbounded run did, only later. The other compared two runs of a
+-- fixture that was a syntax error, and they agreed because neither had run
+-- anything. Demanding 'Completed' from a bounded number of slices catches both:
+-- a slice that loses its work never gets there.
+crossed :: String -> String -> [String] -> Assertion
+crossed setting slice prog = do
+  finished "the unbounded run" unbounded
+  finished ("slicing with " ++ slice) slices
+  reached slices @?= reached unbounded
+  where
+    unbounded = say prog
+    slices    = sliced setting slice prog
+    finished what run = case snd run of
+      Ran _ _ Completed -> pure ()
+      other -> assertFailure (what ++ " did not finish: " ++ show other)
+
+-- | Type each line under @setting@ and take @slice@s until the run is over —
+-- what a job's loop does, and the whole of what a frontend needs to do it.
+--
+-- **Bounded at a thousand slices**, so that a slice which fails to advance ends
+-- the test rather than the suite.
+sliced :: String -> String -> [String] -> (Session, Response)
+sliced setting slice = foldl line (fst (command withRules setting), Blank)
+  where
+    line (s, _) l = continue (1000 :: Int) (command s l)
+    continue n run@(s, Ran _ _ (Paused _))
+      | n > 0     = continue (n - 1) (command s slice)
+      | otherwise = run
+    continue _ run = run
+
+-- | The development and the environment a session's machine ended up at.
+--
+-- **Not the whole machine**, because a machine also carries the floor a line's
+-- failures may not unwind past (MS5 phase 95), and a sliced run is many lines
+-- where an unbounded one is one line. The floor differing is the two runs having
+-- been /asked for/ differently; the development and the globals are what running
+-- the program produced.
+reached :: (Session, Response) -> (Development, GlobalEnv)
+reached (s, _) = (development (machineOf s), globals (machineOf s))
 
 -- | The names a @:accepts@ / @:produces@ listing came back with (MS5 phase 71).
 fittingNames :: Response -> [String]
