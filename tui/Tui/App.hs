@@ -25,8 +25,9 @@ import qualified Graphics.Vty as V
 import Graphics.Vty.Platform.Unix (mkVty)
 import Lens.Micro (Lens', lens)
 
-import Thena.Driver (Response, Session, oneLine)
-import Thena.Files (Trouble, startingSession)
+import Thena.Driver (Session, oneLine)
+import Thena.Files (startingSession)
+import Thena.Render (renderResponse, renderTrouble)
 
 data Name = Input
   deriving (Eq, Ord, Show)
@@ -47,19 +48,13 @@ runTui :: IO ()
 runTui = do
   (s0, trouble) <- startingSession
   let st0 = St
-        { stHistory = map showTrouble trouble
+        { stHistory = concatMap (renderTrouble s0) trouble
         , stInput   = emptyInput
         , stSession = s0
         }
   vty <- mkVty V.defaultConfig
   _ <- customMain vty (mkVty V.defaultConfig) Nothing app st0
   pure ()
-
--- | Placeholder rendering — real 'Trouble' display waits on the pane layout,
--- same as 'Response' below. Empty on an ordinary run, since the shipped
--- prelude and rule base load cleanly.
-showTrouble :: Trouble -> String
-showTrouble = show
 
 app :: App St e Name
 app = App
@@ -90,19 +85,17 @@ draw st =
       ]
   ]
 
--- | A line, run against the (now properly booted) session, and its raw
--- 'Response' dumped with 'show' — a placeholder for real rendering through
--- 'Thena.View', which wants a pane layout that hasn't been decided yet.
+-- | A line, run against the session, and its 'Response' rendered as lines
+-- via 'Thena.Render.renderResponse' — a status-line-shaped placeholder;
+-- real pane content waits on 'Thena.View', once the pane layout is decided.
 handleEvent :: BrickEvent Name e -> EventM Name St ()
 handleEvent (VtyEvent (V.EvKey V.KEnter [])) = do
   st <- get
-  let line          = concatMap Text.unpack (getEditContents (stInput st))
-      (s', resp)    = oneLine (stSession st) line
-      shown :: Response -> String
-      shown         = show
+  let line       = concatMap Text.unpack (getEditContents (stInput st))
+      (s', resp) = oneLine (stSession st) line
   put st
     { stInput   = emptyInput
-    , stHistory = shown resp : ("> " <> line) : stHistory st
+    , stHistory = reverse (renderResponse s' resp) <> [("> " <> line)] <> stHistory st
     , stSession = s'
     }
 handleEvent (VtyEvent (V.EvKey V.KEsc [])) = halt
