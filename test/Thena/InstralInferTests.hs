@@ -11,9 +11,17 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (GlobalName (..))
-import Thena.Driver (Response (..), RuleFileError (..), Session, Stop (..), command, loadRuleBases, newSession)
+import Thena.Driver
+  ( Response (..)
+  , RuleFileError (..)
+  , Stop (..)
+  , command
+  , loadRuleBases
+  , newSession
+  )
 import Thena.Engine (Machine (..))
-import Thena.Driver (Session (..))
+import Thena.Driver (Session
+  , machineOf)
 import Thena.Instral.Infer
   ( InstralTypeError (..)
   , Site (..)
@@ -925,7 +933,7 @@ spliceTemplates =
       let s1 = fst (command s0 ":theorem t : Type")
           s2 = fst (command s1 "go")
       case snd (command s2 ":show") of
-        Shown c -> pure (renderCursor [] (names (sessionMachine s2)) c)
+        Shown c -> pure (renderCursor [] (names (machineOf s2)) c)
         other   -> assertFailure ("the test rule built nothing: " ++ show other) >> pure ""
 
     loadRaw src = snd (loadRuleBases newSession [("s.thena.rules", src)])
@@ -1669,4 +1677,4 @@ shipped = [ r | b <- expectedBase, r <- baseRules b ++ baseFunctions b ]
 
 -- Keeps @-Wall@ quiet about the imports the helpers above do not reach.
 _unusedSessionShape :: Session -> [RuleBase]
-_unusedSessionShape = rules . sessionMachine
+_unusedSessionShape = rules . machineOf

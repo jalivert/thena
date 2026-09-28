@@ -18,7 +18,12 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
-import Thena.Driver (Response (..), Session (..), Stop (..), loadProofSource)
+import Thena.Driver
+  ( Response (..)
+  , machineOf
+  , Stop (..)
+  , loadProofSource
+  )
 import Thena.Engine (Machine (..))
 import Thena.Global.Declare (DeclareError (..), TokenClassError (..))
 import Thena.Global.Env (definitionBody, lookupDefinition)
@@ -124,7 +129,7 @@ accepted =
     testCase "T is the argument, and it came from the annotation" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 (snd good)
-          env = globals (sessionMachine s1)
+          env = globals (machineOf s1)
           value g = whnf env [] . definitionBody <$> lookupDefinition (GlobalName g) env
       map value ["ident", "digit", "numeral", "again"]
         @?= map Just

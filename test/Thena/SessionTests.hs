@@ -29,7 +29,8 @@ import Thena.Driver
   , Attempt (..)
   , currentAttempt
   , Response (..)
-  , Session (..)
+  , machineOf
+  , parked
   , Stop (..)
   , loadSource
   )
@@ -811,10 +812,10 @@ run :: [String] -> Loaded
 run = loadSource withRules . unlines
 
 globalsAfter :: Loaded -> GlobalEnv
-globalsAfter = globals . sessionMachine . loadedSession
+globalsAfter = globals . machineOf . loadedSession
 
 developmentAfter :: Loaded -> Development
-developmentAfter = development . sessionMachine . loadedSession
+developmentAfter = development . machineOf . loadedSession
 
 ok :: String -> [String] -> TestTree
 ok name ls = testCase name $ loadedError (run ls) @?= Nothing
@@ -874,7 +875,7 @@ namesIn = go . flatten
 countsAre :: [String] -> Maybe String -> Int -> Assertion
 countsAre ls current suspended = do
   fmap (nameOf . attemptName) (currentAttempt s) @?= current
-  length (sessionSuspended s) @?= suspended
+  length (parked s) @?= suspended
   where
     s = loadedSession (run ls)
     nameOf (GlobalName x) = x

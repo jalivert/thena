@@ -1,4 +1,4 @@
--- | A rule's name, head, params and body, at the protocol (MS7 phases 115g
+-- | A rule's name, head, params and body, as a view (MS7 phases 115g
 -- and 115i).
 --
 -- **The crossing, in three already-proven pieces.** The name and params
@@ -7,45 +7,47 @@
 -- 'redrawStatement'\/'redrawOperand'\/'redrawSkeleton'\/'redrawValue'.
 -- **The head (115i) crosses each test's word against 'Thena.Rules.testWord'
 -- directly** — there is no third table to disagree with it, since
--- 'Thena.Protocol.Rules.displayRule' calls the very function the resolver
+-- 'Thena.View.Rules.displayRule' calls the very function the resolver
 -- itself does — **and each test's operands against
 -- 'Thena.Repl.renderOperand'**, a real, independently-written printer
 -- ('Thena.Repl.renderOp's own generic case), over the shipped rule base's
 -- own rules, not a hand-built sample.
-module Thena.Protocol.RulesTests (tests) where
+module Thena.View.RulesTests (tests) where
 
 import Data.List (intercalate)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase)
 
-import Thena.Driver (Session (..))
+import Thena.Driver
+  ( machineOf
+  )
 import Thena.Engine (Machine (..))
 import Thena.Instral.Ops (Rule (ruleBody, ruleHead))
-import Thena.Protocol.Address (Address (..))
-import Thena.Protocol.Display (Budget (..))
-import Thena.Protocol.Instral
+import Thena.View.Address (Address (..))
+import Thena.View.Core (Budget (..))
+import Thena.View.Instral
   ( OperandView (..)
   , SkeletonView (..)
   , StatementDetail (..)
   , StatementView (..)
   , ValueView (..)
   )
-import Thena.Protocol.Redraw (redraw, redrawSurface)
-import Thena.Protocol.Rules (RuleView (..), TestView (..), displayRule)
+import Thena.View.Redraw (redraw, redrawSurface)
+import Thena.View.Rules (RuleView (..), TestView (..), displayRule)
 import Thena.Repl (renderInstr, renderMatches, renderOperand, startingSession)
 import Thena.Rules (allRules, testOperands, testWord)
 
 tests :: TestTree
 tests =
   testGroup
-    "Thena.Protocol.Rules"
+    "Thena.View.Rules"
     [ testCase "the display carries everything the printer needed" corpus
     , testCase "and the corpus really holds rules" notVacuous
     , testCase "and the corpus really holds head tests" headsNotVacuous
     ]
 
 corpusOf :: IO [Rule]
-corpusOf = allRules . rules . sessionMachine . fst <$> startingSession
+corpusOf = allRules . rules . machineOf . fst <$> startingSession
 
 corpus :: IO ()
 corpus = do
@@ -94,7 +96,7 @@ redrawTest tv = testViewWord tv <> concatMap ((" " <>) . redrawOperand) (testVie
 
 -- ---------------------------------------------------------------------------
 -- 115d's own redraw, copied rather than shared — see
--- 'Thena.Protocol.InstralTests' and 'Thena.Protocol.MachineTests' for the
+-- 'Thena.View.InstralTests' and 'Thena.View.MachineTests' for the
 -- same call made twice already.
 
 redrawStatement :: StatementView -> String

@@ -1,8 +1,8 @@
 -- | The development display representation (MS7 phase 115c;
 -- @discussion\/editor-display.md@ §5).
 --
--- **The crossing**, exactly 115a's and 115b's own argument: 'redrawChain'
--- draws only what 'Thena.Protocol.Development.displayDevelopment' hands it —
+-- **The crossing**, exactly 115a's and 115b's own argument: 'chainText'
+-- draws only what 'Thena.View.Development.displayDevelopment' hands it —
 -- no session, no cursor, no fixture — and if that text is what
 -- 'Thena.Repl.renderPartial' prints for the same development, the display
 -- carries what the printer needed. 'Thena.Fixtures' already covers the
@@ -12,10 +12,9 @@
 --
 -- **What text cannot check** — whether a guess is pure, whether a hole is
 -- blocked, and which link is focused — is checked directly instead.
-module Thena.Protocol.DevelopmentTests (tests) where
+module Thena.View.DevelopmentTests (tests) where
 
 import Data.Foldable (toList)
-import Data.List (intercalate)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
@@ -33,21 +32,20 @@ import Thena.Fixtures
   , trailingLam
   , withConstraint
   )
-import Thena.Protocol.Address (Address (..))
-import Thena.Protocol.Development
-  ( ConstraintView (..)
-  , LinkShape (..)
+import Thena.View.Address (Address (..))
+import Thena.View.Development
+  ( LinkShape (..)
   , LinkView (..)
   , displayDevelopment
   )
-import Thena.Protocol.Display (Budget (..), Display (..), Shape (..))
-import Thena.Protocol.Redraw (redraw)
+import Thena.View.Core (Budget (..))
+import Thena.View.Redraw (chainText)
 import Thena.Repl (renderPartial)
 
 tests :: TestTree
 tests =
   testGroup
-    "Thena.Protocol.Development"
+    "Thena.View.Development"
     [ testGroup "the display carries everything the printer needed" crossingCases
     , testGroup "pure and blocked, which no text shows" flagCases
     , testGroup "which link is the focus" focusCases
@@ -70,45 +68,8 @@ crossingCases =
   where
     agree name p =
       testCase name $
-        redrawChain (displayDevelopment [] (Budget 200) 500 (Address []) Nothing p)
+        chainText (displayDevelopment [] (Budget 200) 500 (Address []) Nothing p)
           @?= renderPartial [] 500 [] p
-
--- | What an editor is, for a development: a function from '[LinkView]' to
--- text, and nothing else — mirrors 'Thena.Repl.goP's own layout (two spaces
--- per guess, the closing @) in@ at the outer indent) because that is the seam
--- under test.
-redrawChain :: [LinkView] -> String
-redrawChain = intercalate "\n" . go 0
-  where
-    go ind = concatMap (line ind)
-
-    line ind (LinkView _ _ shape) = case shape of
-      AnAssumption name ty -> [pad ind ++ "\955 (" ++ name ++ " : " ++ redraw ty ++ ") ->"]
-      AQuantifier  name ty -> [pad ind ++ "\8704 (" ++ name ++ " : " ++ redraw ty ++ ") ->"]
-      ADefinition  name ty val ->
-        [pad ind ++ "let " ++ name ++ " = " ++ redraw val ++ " : " ++ redraw ty ++ " in"]
-      AClaimLink { claimName = name, claimType = ty } ->
-        [pad ind ++ "let ? " ++ name ++ " : " ++ redraw ty ++ " in"]
-      AGuessLink { guessName = name, guessType = ty, guessBody = body } ->
-        (pad ind ++ "let ? " ++ name ++ " : " ++ redraw ty ++ " \8784 (")
-          : go (ind + 2) body
-          ++ [pad ind ++ ") in"]
-      APending (ConstraintView xi lhs rhs ty) ->
-        [ pad ind ++ concatMap group xi
-            ++ "\8866 " ++ redraw lhs ++ " \8799 " ++ redraw rhs ++ " : " ++ redraw ty ++ " \9656"
-        ]
-      -- **A trailing term that is itself a binder is quoted** ('Thena.Repl.trailing'):
-      -- without the corners it would re-read as another chain link, so this
-      -- is longest prefix's escape hatch and not something 'AResult' itself
-      -- carries — it is purely how *text* draws a shape that is otherwise
-      -- unambiguous once structured.
-      AResult t -> case displayShape t of
-        AnAbstraction {} -> [pad ind ++ "\8988 " ++ redraw t ++ " \8989"]
-        ALet {}          -> [pad ind ++ "\8988 " ++ redraw t ++ " \8989"]
-        _                -> [pad ind ++ redraw t]
-
-    group (name, ty) = "(" ++ name ++ " : " ++ redraw ty ++ ") "
-    pad n = replicate n ' '
 
 -- ---------------------------------------------------------------------------
 -- Pure and blocked

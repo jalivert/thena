@@ -2686,10 +2686,53 @@ what distinguishes a guess from a claim. It renders what it is handed. The
 enforcement is cabal's: a frontend depends on the `view` sublibrary, and an
 import of the engine does not compile.
 
+**Nothing in the library touches a terminal.** The REPL's line editing lives in
+the `thena` executable, so a frontend that draws its own screen links no line
+editor; what it reuses from `Thena.Repl` is the rendering and the session start,
+which are not the terminal's.
+
 **There was a WebSocket and a JSON message protocol here**, so that a browser
 could be the frontend. It was removed: there is no remote client, the same
 boundary is stronger as types than as a schema, and everything the protocol
 carried is now a function call.
+
+### A view is asked for, not handed back
+
+A command returns what happened. It does not return a picture of the system.
+
+```haskell
+(session', response) = oneLine session ":theorem t : Type\8320"
+links                = developmentView (Budget 200) session'   -- ask, whenever you draw
+```
+
+Every view is a function of the session, so a frontend recomputes the ones it is
+showing after each command — or after a movement, or on a redraw — and a view
+that follows the cursor does so for free. Nothing has to be subscribed to and
+nothing can go stale.
+
+The session supplies everything a view needs: the grammars loaded, the names in
+scope at the focus, where each of them is bound, the name counter and the
+cursor's route. A frontend passes a depth budget, which is its own choice, and
+nothing else.
+
+### A region is written text and splices, and may name its production
+
+A region of object syntax is not a string. It is the runs the user typed with the
+splices between them, because a splice holds a host term the object grammar
+cannot read:
+
+```haskell
+displayParse gs "LC" Nothing [WrittenText "( ", WrittenSplice, WrittenText " x )"]
+```
+
+The splices of a region are numbered in order from zero, and the offer at a
+cursor splits the region without renumbering — so which splice is which never
+depends on where the cursor stands.
+
+`Nothing` reads the region as any term of the language; `Just "app"` reads it as
+that one production, which is what a region written with a production named on it
+means. Asking for a language or a production nothing declared is refused by name
+rather than answered with an empty offer.
 
 ### A project is text on disk, and there is no other format
 

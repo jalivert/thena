@@ -27,7 +27,9 @@ import Thena.Driver
   , Loaded (..)
   , LoadKind (..)
   , Response (..)
-  , Session (..)
+  , Session
+  , machineOf
+  , pendingQuestion
   , Stop (..)
   , command
   , kindOf
@@ -81,7 +83,7 @@ preludeTests =
 
   , testCase "and declares exactly Eq, refl, Unit, unit and Empty" $ do
       (s, _) <- startingSession
-      let env = globals (sessionMachine s)
+      let env = globals (machineOf s)
       sequence_
         [ assertBool (n ++ " is not declared") (isDeclared (GlobalName n) env)
         | n <- ["Eq", "refl", "Unit", "unit", "Empty"]
@@ -91,8 +93,8 @@ preludeTests =
     -- can be used". Pinned as a string, for 'Thena.EliminatorTests'' reason.
   , testCase "Eq's generated eliminator is J" $ do
       (s, _) <- startingSession
-      let env = globals (sessionMachine s)
-          n0  = names (sessionMachine s)
+      let env = globals (machineOf s)
+          n0  = names (machineOf s)
       case lookupInductive (GlobalName "Eq") env of
         Nothing -> assertFailure "Eq is not declared"
         Just d  ->
@@ -262,14 +264,14 @@ failureTests =
     -- **And it does not leave the session waiting** (MS7 phase 123). The
     -- pending question used to be an argument the caller threaded, and the
     -- REPL passed 'Nothing' after a load rather than whatever the file left
-    -- behind. Now that it is 'sessionAsking' the load has to clear it, or the
+    -- behind. Now that it is 'pendingQuestion' the load has to clear it, or the
     -- next line typed at the prompt would be read as the answer to a question
     -- nobody was shown.
   , testCase "and the session it hands back is not still asking" $
-      sessionAsking (loadedSession (sourceWithRules ["assume ⌜ Type₀ ⌝"])) @?= Nothing
+      pendingQuestion (loadedSession (sourceWithRules ["assume ⌜ Type₀ ⌝"])) @?= Nothing
 
     -- **The ruling this phase rests on, asserted** — HIS, 2026-09-28: /"Feels
-    -- like a question and answer is an atomic unit."/ So 'sessionAsking' is
+    -- like a question and answer is an atomic unit."/ So 'pendingQuestion' is
     -- not in a 'Snapshot' and @:undo@ does not step back into a question: one
     -- @:undo@ takes back the asking and the answering together.
     --
@@ -280,16 +282,16 @@ failureTests =
       let (s1, _) = oneLine withRules "assume ⌜ Type₀ ⌝"
           (s2, _) = oneLine s1 "x"
           (s3, _) = oneLine s2 ":undo"
-      isJust (sessionAsking s1) @?= True   -- the line asked, and the session says so
-      sessionAsking s2 @?= Nothing         -- the answer settled it
-      sessionAsking s3 @?= Nothing         -- and undoing does not bring it back
+      isJust (pendingQuestion s1) @?= True   -- the line asked, and the session says so
+      pendingQuestion s2 @?= Nothing         -- the answer settled it
+      pendingQuestion s3 @?= Nothing         -- and undoing does not bring it back
       assertBool "the pair really did build something" (devOf s2 /= devOf withRules)
       devOf s3 @?= devOf withRules         -- and one :undo took the whole pair back
   ]
 
 -- | The development, for comparing one state against another.
 devOf :: Session -> Development
-devOf = development . sessionMachine
+devOf = development . machineOf
 
 -- --------------------------------------------------------------------------
 -- Helpers
@@ -312,7 +314,7 @@ afterLines :: Session -> [String] -> (Loaded -> IO ()) -> IO ()
 afterLines s ls k = k (loadSource s (unlines ls))
 
 declared :: String -> Loaded -> Bool
-declared n l = isDeclared (GlobalName n) (globals (sessionMachine (loadedSession l)))
+declared n l = isDeclared (GlobalName n) (globals (machineOf (loadedSession l)))
 
 -- | The last line's rendered term, printed as the REPL would print it.
 --
@@ -322,7 +324,7 @@ declared n l = isDeclared (GlobalName n) (globals (sessionMachine (loadedSession
 -- claims is that J computes, and the printed answer is the honest witness.
 renderedLast :: Loaded -> Maybe String
 renderedLast l = case reverse (loadedResponses l) of
-  Rendered t : _ -> Just (renderCore [] (names (sessionMachine (loadedSession l))) [] t)
+  Rendered t : _ -> Just (renderCore [] (names (machineOf (loadedSession l))) [] t)
   _              -> Nothing
 
 -- | A datatype's own level parameters, all instantiated at zero.
@@ -429,7 +431,7 @@ moduleTests =
   , testCase "and what it warned about is installed anyway" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 dependentModule
-      isDeclared (GlobalName "Chain") (globals (sessionMachine s1)) @?= True
+      isDeclared (GlobalName "Chain") (globals (machineOf s1)) @?= True
 
   , testCase "a load with nothing to say warns about nothing" $ do
       (s0, _) <- startingSession
@@ -440,7 +442,7 @@ moduleTests =
   , testCase "and the globals are really there afterwards" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 natModule
-          g = globals (sessionMachine s1)
+          g = globals (machineOf s1)
       map (\n -> isDeclared (GlobalName n) g) ["Nat", "zero", "succ", "one"]
         @?= [True, True, True, True]
 
@@ -484,7 +486,7 @@ moduleTests =
   , testCase "and what it declared is really there" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 blockModule
-      isDeclared (GlobalName "one") (globals (sessionMachine s1)) @?= True
+      isDeclared (GlobalName "one") (globals (machineOf s1)) @?= True
 
   , -- **Resolution happens where the block runs** (MS6 phase 104b), so a block
     -- whose op is given the wrong operands stops the run rather than refusing
@@ -508,7 +510,7 @@ moduleTests =
       (s0, _) <- startingSession
       case loadProofSource s0 mistypedBlockModule of
         (s1, Ran _ _ (BlockIllTyped (_ : _))) ->
-          isDeclared (GlobalName "Nat") (globals (sessionMachine s1)) @?= True
+          isDeclared (GlobalName "Nat") (globals (machineOf s1)) @?= True
         (_, other) -> assertFailure (show other)
 
   , -- **Each top-level block is its own scope**, as a block is — and since
@@ -670,7 +672,7 @@ tierTests =
   , testCase "and they are convertible, not merely both admitted" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 bothSpellings
-          m = sessionMachine s1
+          m = machineOf s1
       case ( lookupDefinition (GlobalName "oneExplicit") (globals m)
            , lookupDefinition (GlobalName "oneImplicit") (globals m)
            ) of
@@ -681,7 +683,7 @@ tierTests =
         _ -> assertFailure "one of the two was not admitted"
   ]
   where
-    renderResponse' s g = case lookupDefinition (GlobalName g) (globals (sessionMachine s)) of
+    renderResponse' s g = case lookupDefinition (GlobalName g) (globals (machineOf s)) of
       Just d  -> [g ++ " = " ++ renderCore [] 0 [] (definitionBody d)]
       Nothing -> [g ++ " is missing"]
 

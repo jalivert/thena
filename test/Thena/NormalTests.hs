@@ -11,7 +11,9 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 
 import Thena.Core.Term (GlobalName (..))
-import Thena.Driver (Session (..))
+import Thena.Driver
+  ( machineOf
+  )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Repl (startingSession, loadProofFile, renderCore)
@@ -33,7 +35,7 @@ tests =
 
     , testCase "the three inversions underneath are there" $ do
         s <- loaded
-        map (isJust . flip lookupDefinition (globals (sessionMachine s)) . GlobalName)
+        map (isJust . flip lookupDefinition (globals (machineOf s)) . GlobalName)
             ["trueNoStep", "falseNoStep", "zeroNoStep"]
           @?= [True, True, True]
     ]
@@ -47,5 +49,5 @@ tests =
 
     statementOf n = do
       s <- loaded
-      pure ( renderCore [] (names (sessionMachine s)) [] . definitionType
-               <$> lookupDefinition (GlobalName n) (globals (sessionMachine s)) )
+      pure ( renderCore [] (names (machineOf s)) [] . definitionType
+               <$> lookupDefinition (GlobalName n) (globals (machineOf s)) )

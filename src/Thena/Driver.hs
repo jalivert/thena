@@ -16,8 +16,15 @@
 -- the cursor is 'Thena.Engine.Development' — exactly what backtracks — so a
 -- move is an op and is spelled as a bare word (§2.4, §4.3).
 module Thena.Driver
-  ( Session (..)
+  ( Session
+  , machineOf
+  , workingOn
+  , parked
+  , isStepping
+  , parsingLanguage
+  , pendingQuestion
   , newSession
+  , withRuleBases
   , Response (..)
   , Stop (..)
   , SyntaxError (..)
@@ -211,6 +218,20 @@ import Thena.Syntax.Resolve (resolve, resolveData, resolvePartial)
 
 -- | Everything the session holds.
 --
+-- **The constructor and the fields are not exported — MS7 phase 125.** A
+-- session is built by 'newSession' and advanced by 'oneLine' and 'oneProgram';
+-- what may be read off one is 'machineOf' and the five beside it, and the views
+-- computed from it are "Thena.View"'s. His ruling of 2026-09-27: the boundary is
+-- real when the type is opaque, and the fields had exactly one reader outside
+-- this module ("Thena.Repl", nine sites, all of them view work).
+--
+-- **The reads are functions, not the fields renamed.** A field selector that is
+-- exported is also an update: GHC allows @s { sessionStepping = True }@ wherever
+-- @sessionStepping@ is in scope, constructor or no constructor. So the fields
+-- keep their names and stay in, and the exported reads have their own — which
+-- also let them say what they give ('isStepping', 'pendingQuestion') rather than
+-- which field they came from.
+--
 -- The name counter is not here: it is the machine's 'names' field (§7.2), and
 -- while there is one machine that field /is/ §2.4's session-global counter.
 -- Phase 13 has several proofs and must decide how one counter is threaded
@@ -280,6 +301,47 @@ data Session = Session
     -- takes back the asking and the answering together.
   }
   deriving (Eq, Show)
+
+-- | The machine: the development, the globals, the rule bases, the grammars and
+-- the name counter (§7.2).
+--
+-- **A frontend that reaches for this is a frontend missing a view.** It is here
+-- because the suites step the machine directly and because "Thena.View" is built
+-- on it; what a frontend wants is 'Thena.View.machineView' and the reads beside
+-- it.
+machineOf :: Session -> Machine
+machineOf = sessionMachine
+
+-- | The theorem being attempted, or an unnamed development.
+workingOn :: Session -> Working
+workingOn = sessionWork
+
+-- | Attempts left and re-enterable, most recently suspended first (§2.4).
+parked :: Session -> [Parked]
+parked = sessionSuspended
+
+-- | Whether the machine is stepping.
+isStepping :: Session -> Bool
+isStepping = sessionStepping
+
+-- | In @:parse@'s interactive mode, the language every line is read as
+-- (MS6 phase 102b).
+parsingLanguage :: Session -> Maybe String
+parsingLanguage = sessionParsing
+
+-- | What an op is waiting to be told, and therefore whether the next line is an
+-- answer rather than a command (phase 123).
+pendingQuestion :: Session -> Maybe Question
+pendingQuestion = sessionAsking
+
+-- | A session with these rule bases installed, replacing whatever it had.
+--
+-- **The one write a caller outside this module makes**, and it was a record
+-- update until phase 125: the suites that must not do IO install a base built
+-- in Haskell rather than read from disk ("Thena.Standard"). A frontend that
+-- builds a base with 'ruleBaseOfDecls' wants the same door.
+withRuleBases :: [RuleBase] -> Session -> Session
+withRuleBases bs s = s { sessionMachine = (sessionMachine s) { rules = bs } }
 
 -- | What the session is working on.
 --
@@ -2428,7 +2490,7 @@ oneLine s line = settle (case sessionAsking s of
 --
 -- **The same tail as 'oneLine', and that is the whole point.** A client that
 -- points at a position sends an address, and
--- 'Thena.Protocol.Address.focusing' compiles it into the movement instructions
+-- 'Thena.View.Address.focusing' compiles it into the movement instructions
 -- the user would have typed. Those instructions have to be run /as a line is
 -- run/ — snapshotted for @:undo@, rewound if they fail, and asked about if they
 -- ask — or a click would be a second way into the machine with different rules,

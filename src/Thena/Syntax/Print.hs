@@ -15,7 +15,7 @@
 -- **What is here round-trips**, and that is the whole point of the module:
 -- 'Thena.Syntax.Parser' on this output gives the same tree. It is not a claim,
 -- it is checked over every file the project ships
--- ("Thena.Protocol.TextTests").
+-- ("Thena.View.SourceTests").
 module Thena.Syntax.Print
   ( renderSurface
     -- * The written pieces, for printers built on this one

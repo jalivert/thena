@@ -13,7 +13,9 @@ import Test.Tasty.HUnit (testCase, (@?=))
 
 import Data.Maybe (isJust)
 import Thena.Core.Term (GlobalName (..))
-import Thena.Driver (Session (..))
+import Thena.Driver
+  ( machineOf
+  )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Repl (startingSession, loadProofFile, renderCore)
@@ -39,7 +41,7 @@ tests =
       -- body carries the elaborator's @let@ scaffolding.
     , testCase "the nine inversion lemmas are all there" $ do
         s <- loaded
-        map (isJust . flip lookupDefinition (globals (sessionMachine s)) . GlobalName)
+        map (isJust . flip lookupDefinition (globals (machineOf s)) . GlobalName)
             [ "ifGuard", "ifThen", "ifElse"
             , "succArg", "predArg", "isZeroArg"
             , "succAtNat", "predAtNat", "isZeroAtBool"
@@ -57,5 +59,5 @@ tests =
 
     statementOf n = do
       s <- loaded
-      pure ( renderCore [] (names (sessionMachine s)) [] . definitionType
-               <$> lookupDefinition (GlobalName n) (globals (sessionMachine s)) )
+      pure ( renderCore [] (names (machineOf s)) [] . definitionType
+               <$> lookupDefinition (GlobalName n) (globals (machineOf s)) )

@@ -27,7 +27,11 @@ import Test.Tasty.QuickCheck
 import Thena.Core.Level (Level (..))
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
-import Thena.Driver (Response (..), Session (..), loadProofSource)
+import Thena.Driver
+  ( Response (..)
+  , machineOf
+  , loadProofSource
+  )
 import Thena.Engine (Machine (globals))
 import Thena.Global.Env
   ( ArgRole (..)
@@ -90,7 +94,7 @@ loaded :: IO GlobalEnv
 loaded = do
   (s0, _) <- startingSession
   case loadProofSource s0 source of
-    (s1, ProofLoaded {}) -> pure (globals (sessionMachine s1))
+    (s1, ProofLoaded {}) -> pure (globals (machineOf s1))
     (s1, other) -> assertFailure (unlines (renderResponse s1 other))
 
 -- ---------------------------------------------------------------------------

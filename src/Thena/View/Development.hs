@@ -11,7 +11,7 @@
 -- would take — 'Thena.Development.Partial.extract'\'s answer, not something
 -- to guess at), and, for a hole (a 'Claim' or an unsolved 'Guess'), whether
 -- anything later in the development still mentions its name.
-module Thena.Protocol.Development
+module Thena.View.Development
   ( LinkView (..)
   , LinkShape (..)
   , ConstraintView (..)
@@ -29,8 +29,8 @@ import Thena.Development.Partial
   , freeVarsPartial
   )
 import Thena.Language.Grammar (Grammar)
-import Thena.Protocol.Address (Address, Move (..), extend)
-import Thena.Protocol.Display (Budget, Display, displayCore)
+import Thena.View.Address (Address, Move (..), extend)
+import Thena.View.Core (Budget, Display, displayCore)
 import Thena.Syntax.Print (Env, freshen)
 
 -- | One link, addressed and marked.
@@ -40,7 +40,7 @@ data LinkView = LinkView
     -- ^ does the cursor stand on this link — **chain-link precision, not
     -- term precision** ('Thena.Repl.renderCursor's own words): a focus
     -- somewhere inside the type or value is a further
-    -- 'Thena.Protocol.Display.Display' address the editor already has.
+    -- 'Thena.View.Core.Display' address the editor already has.
   , linkShape :: LinkShape
   }
   deriving (Eq, Show)
@@ -92,7 +92,7 @@ data ConstraintView = ConstraintView
 -- cursor's position marked if one is given.
 --
 -- @route@ is the cursor's prefix read root-first — @toList (prefix cur)@,
--- exactly what 'Thena.Protocol.Address.addressOf' and
+-- exactly what 'Thena.View.Address.addressOf' and
 -- 'Thena.Repl.renderCursor' both walk — paired with its focus. 'Nothing'
 -- draws the whole development unmarked.
 --

@@ -31,12 +31,12 @@
 --
 -- **Used beyond its own pane, immediately.** 'Thena.Instral.Ops.VSurface'
 -- carries a live elaboration focus, and 'Thena.Repl.renderValue' already
--- shows its content — 'Thena.Protocol.Instral.ValueView' had been showing
+-- shows its content — 'Thena.View.Instral.ValueView' had been showing
 -- only its shape, on the mistaken belief that no surface printer existed.
--- 'Thena.Protocol.Instral.displayValue' calls 'displaySurface' to fix that,
+-- 'Thena.View.Instral.displayValue' calls 'displaySurface' to fix that,
 -- which is why this module has no dependency on @Instral@ at all: @Instral@
 -- depends on this one, not the other way round.
-module Thena.Protocol.Surface
+module Thena.View.Surface
   ( SurfaceShape (..)
   , SurfaceBinding (..)
   , SurfaceArgView (..)
@@ -58,7 +58,7 @@ import Thena.Surface.Concrete
 import Thena.Syntax.Print (escapeChar, escapeString, rawInstruction)
 
 -- | A surface node's shape — never what it looks like, the same restraint
--- 'Thena.Protocol.Display.Shape' keeps.
+-- 'Thena.View.Core.Shape' keeps.
 data SurfaceShape
   = ASurfaceName String
   | ASurfaceUniverse Int
@@ -123,9 +123,9 @@ displaySurface s = case s of
     arg (SurfaceArg pl t) = SurfaceArgView pl (displaySurface t)
     binding (SurfaceBinder pl x ty) = SurfaceBinding pl x (fmap displaySurface ty)
 
--- | Mirrors 'Thena.Protocol.Instral.literalText' exactly. Duplicated rather
+-- | Mirrors 'Thena.View.Instral.literalText' exactly. Duplicated rather
 -- than shared: sharing it would make this module depend on
--- @Thena.Protocol.Instral@, and @Instral@ is about to depend on this module
+-- @Thena.View.Instral@, and @Instral@ is about to depend on this module
 -- for 'Thena.Instral.Ops.VSurface' — a four-line mapping is cheap to
 -- duplicate and a module cycle is not.
 literalText :: Literal -> String

@@ -12,7 +12,7 @@
 -- against everywhere else was never "the terminal already shows it"; it was
 -- "the system already resolved it into a word and its operands, generically,
 -- rather than a case per constructor." A head test is exactly that.
-module Thena.Protocol.Rules
+module Thena.View.Rules
   ( RuleView (..)
   , TestView (..)
   , displayRule
@@ -22,9 +22,9 @@ import Thena.Core.Term (GlobalName (..), Var)
 import Thena.Instral.Ops (Rule (..), Test)
 import Thena.Instral.Pattern (Pattern (..))
 import Thena.Language.Grammar (Grammar)
-import Thena.Protocol.Address (Address)
-import Thena.Protocol.Display (Budget)
-import Thena.Protocol.Instral (OperandView, StatementView, displayBlock, displayOperand, patternText)
+import Thena.View.Address (Address)
+import Thena.View.Core (Budget)
+import Thena.View.Instral (OperandView, StatementView, displayBlock, displayOperand, patternText)
 import Thena.Rules (testOperands, testWord)
 import Thena.Syntax.Print (Env)
 
@@ -41,7 +41,7 @@ data RuleView = RuleView
 
 -- | One head test, generically — 'Thena.Instral.Ops.Test's own shape, the
 -- word from 'Thena.Rules.testWord', the operands from
--- 'Thena.Rules.testOperands', exactly as 'Thena.Protocol.Instral.StatementView'
+-- 'Thena.Rules.testOperands', exactly as 'Thena.View.Instral.StatementView'
 -- already does for an op.
 data TestView = TestView
   { testViewWord     :: String

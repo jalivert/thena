@@ -18,7 +18,9 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (GlobalName (..))
-import Thena.Driver (Session (..))
+import Thena.Driver
+  ( machineOf
+  )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Repl (startingSession, loadFile, renderCore)
@@ -39,9 +41,9 @@ tests =
     , testCase "and the theorem is a global with the statement it should have" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadFile s target
-        case lookupDefinition (GlobalName "belowRefl") (globals (sessionMachine s')) of
+        case lookupDefinition (GlobalName "belowRefl") (globals (machineOf s')) of
           Nothing -> assertFailure "belowRefl was not admitted"
           Just d  ->
-            renderCore [] (names (sessionMachine s')) [] (definitionType d)
+            renderCore [] (names (machineOf s')) [] (definitionType d)
               @?= "∀ (n : Nat) (i : Fin n) -> Below n i -> Eq {0} (Fin n) i i"
     ]

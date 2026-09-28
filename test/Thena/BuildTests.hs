@@ -21,7 +21,12 @@ import Thena.Core.Context (entryType)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
 import Thena.Core.Typing (infer)
-import Thena.Driver (Response (..), Session (..), Stop (..), loadProofSource)
+import Thena.Driver
+  ( Response (..)
+  , Stop (..)
+  , loadProofSource
+  , machineOf
+  )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env
   ( ArgRole (..)
@@ -81,7 +86,7 @@ loaded :: IO (GlobalEnv, [Grammar])
 loaded = do
   (s0, _) <- startingSession
   case loadProofSource s0 stlc of
-    (s1, ProofLoaded {}) -> pure (globals (sessionMachine s1), grammars (sessionMachine s1))
+    (s1, ProofLoaded {}) -> pure (globals (machineOf s1), grammars (machineOf s1))
     (_, other) -> assertFailure (show other)
 
 datatypeOf :: String -> IO InductiveDefinition
@@ -132,7 +137,7 @@ roles =
       (s0, _) <- startingSession
       case loadProofSource s0 "module W where\n\ndata Pair : Type\8320 where\n  mk : String -> String -> Pair\n" of
         (s1, ProofLoaded {}) ->
-          case lookupInductive (GlobalName "Pair") (globals (sessionMachine s1)) of
+          case lookupInductive (GlobalName "Pair") (globals (machineOf s1)) of
             Just d -> map constructorRoles (inductiveConstructors d) @?= [[Plain, Plain]]
             Nothing -> assertFailure "Pair was not declared"
         (_, other) -> assertFailure (show other)
@@ -195,7 +200,7 @@ elaborated decls = do
   (s0, _) <- startingSession
   case loadProofSource s0 (stlc ++ "\n" ++ decls ++ "\n") of
     (s1, ProofLoaded {}) ->
-      let env = globals (sessionMachine s1)
+      let env = globals (machineOf s1)
        in case lookupDefinition (GlobalName "t") env of
             Just d  -> pure (Right (whnf env [] (definitionBody d)))
             Nothing -> assertFailure "t was not declared"

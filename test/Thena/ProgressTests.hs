@@ -19,7 +19,9 @@ import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (testCase, (@?=))
 
 import Thena.Core.Term (GlobalName (..))
-import Thena.Driver (Session (..))
+import Thena.Driver
+  ( machineOf
+  )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Repl (startingSession, loadProofFile, renderCore)
@@ -52,7 +54,7 @@ tests =
       -- the elaborator's output shape, not the theorem.
     , testCase "and the three lemmas that produce a step are there" $ do
         s <- loaded
-        map (isJust . flip lookupDefinition (globals (sessionMachine s)) . GlobalName)
+        map (isJust . flip lookupDefinition (globals (machineOf s)) . GlobalName)
             ["ifSteps", "predSteps", "isZeroSteps"]
           @?= [True, True, True]
     ]
@@ -68,5 +70,5 @@ tests =
 
     statementOf n = do
       s <- loaded
-      pure ( renderCore [] (names (sessionMachine s)) [] . definitionType
-               <$> lookupDefinition (GlobalName n) (globals (sessionMachine s)) )
+      pure ( renderCore [] (names (machineOf s)) [] . definitionType
+               <$> lookupDefinition (GlobalName n) (globals (machineOf s)) )

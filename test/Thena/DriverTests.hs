@@ -16,7 +16,9 @@ import Thena.Standard (withRules)
 import Thena.Driver
   ( CommandError (..)
   , Response (..)
-  , Session (..)
+  , Session
+  , machineOf
+  , isStepping
   , Stop (..)
   , answer
   , command
@@ -47,7 +49,7 @@ say = foldl next (withRules, Blank)
     next (s, _) l = command s l
 
 devOf :: Session -> Partial
-devOf = flatten . development . sessionMachine
+devOf = flatten . development . machineOf
 
 -- | What is typed to declare the running example. The @data@ word is the
 -- command; everything after it is the grammar's (§2.4).
@@ -55,7 +57,7 @@ natCommand :: String
 natCommand = "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
 
 declaredIn :: Session -> String -> Bool
-declaredIn s g = isDeclared (GlobalName g) (globals (sessionMachine s))
+declaredIn s g = isDeclared (GlobalName g) (globals (machineOf s))
 
 -- | The words of every spelling @:help@ shows, and those of them that are
 -- colon words.
@@ -479,7 +481,7 @@ tests =
                  , snd (say [natCommand, ":infer ⌜ succ zero ⌝"])
                  ) of
               (InferredSurface _ a, Inferred _ b) ->
-                case convert (globals (sessionMachine (fst (say [natCommand])))) [] 0 a b of
+                case convert (globals (machineOf (fst (say [natCommand])))) [] 0 a b of
                   (Nothing, _, _)  -> pure ()
                   (Just why, _, _) -> assertFailure (show why)
               (x, y) -> assertFailure (show x ++ " / " ++ show y)
@@ -562,7 +564,7 @@ tests =
               Ran [] _ Completed -> pure ()
               other -> assertFailure ("expected Completed, got " ++ show other)
         , testCase "stepping is a session setting and does not touch the machine" $
-            sessionStepping (fst (say [":step on"])) @?= True
+            isStepping (fst (say [":step on"])) @?= True
         ]
     ]
 

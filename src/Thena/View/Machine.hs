@@ -11,7 +11,7 @@
 -- terminal today; exposing it here would be new design, not exposure of
 -- what exists, so 'FrameView' matches 'renderMachine' exactly and no more —
 -- see the phase's own plan for where that is recorded.
-module Thena.Protocol.Machine
+module Thena.View.Machine
   ( FrameView (..)
   , MachineView (..)
   , displayFrame
@@ -21,9 +21,9 @@ module Thena.Protocol.Machine
 import Thena.Core.Term (Var)
 import Thena.Engine (Exec (..), Frame (..), Machine (..))
 import Thena.Language.Grammar (Grammar)
-import Thena.Protocol.Address (Address)
-import Thena.Protocol.Display (Budget)
-import Thena.Protocol.Instral (StatementView, ValueView, displayBlock, displayValue)
+import Thena.View.Address (Address)
+import Thena.View.Core (Budget)
+import Thena.View.Instral (StatementView, ValueView, displayBlock, displayValue)
 import Thena.Syntax.Print (Env)
 
 -- | One frame of the call stack, at 'Thena.Repl.renderMachine's own

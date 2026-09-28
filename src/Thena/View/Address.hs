@@ -17,7 +17,7 @@
 -- stands — and 'follow', which walks one from the root. Phase 111's own test is
 -- that they agree: @follow (addressOf c)@ returns to @c@, for every position
 -- any sequence of moves can reach.
-module Thena.Protocol.Address
+module Thena.View.Address
   ( Address (..)
   , Move (..)
   , extend
@@ -60,7 +60,7 @@ newtype Address = Address [Move]
   deriving (Eq, Show)
 
 -- | One move deeper (MS7 phase 115c). The one place an 'Address' is built by
--- appending, so 'Thena.Protocol.Display' and 'Thena.Protocol.Development'
+-- appending, so 'Thena.View.Core' and 'Thena.View.Development'
 -- share it rather than each keeping its own @down@.
 extend :: Address -> Move -> Address
 extend (Address ms) m = Address (ms ++ [m])
@@ -169,7 +169,7 @@ follow (Address ms) n0 cur = go 0 (enter (rebuild cur)) n0 ms
 --
 -- **It anchors itself** (MS7 phase 121). An 'Address' names a position by the
 -- moves that reach it /from the root/, so the program has to start there —
--- 'Thena.Protocol.Address.follow' does it with @enter . rebuild@, and the
+-- 'Thena.View.Address.follow' does it with @enter . rebuild@, and the
 -- instructions say it with @goto-root@.
 --
 -- At phase 121 the anchor was a sentence telling the caller to arrange it, and
@@ -179,7 +179,7 @@ follow (Address ms) n0 cur = go 0 (enter (rebuild cur)) n0 ms
 -- nothing (@reports\/2026-09-27-the-address-anchor.md@). **A comment is not a
 -- contract**; the program carries it now.
 --
--- **It lived in @Thena.Protocol.Message@ until phase 124**, beside a request
+-- **It lived in @Thena.View.Message@ until phase 124**, beside a request
 -- type that is gone. It belongs here: an address has two compilations, one
 -- that walks a 'Cursor' ('follow') and one that builds a program, and they are
 -- the pair a test crosses against each other.

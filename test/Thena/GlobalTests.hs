@@ -39,7 +39,7 @@ import Thena.Core.Typing (check, infer)
 import Thena.Driver
   ( Response (..)
   , Stop (..)
-  , Session (..)
+  , machineOf
   , command
   , parseCore
   , parseDeclaration
@@ -141,7 +141,7 @@ computedLevels =
             , "data D : Type where { " ++ ctor ++ " }"
             ]
           (s, _) = foldl (\(sess, _) l -> command sess l) (s0, Blank) decls
-      pure (globals (sessionMachine s))
+      pure (globals (machineOf s))
 
 -- --------------------------------------------------------------------------
 -- Everything a declaration generates is well typed (2026-09-13)
@@ -245,7 +245,7 @@ corpus :: IO (GlobalEnv, [String])
 corpus = do
   (s0, problems) <- startingSession
   let (s, said) = foldl' one (s0, []) corpusLines
-  pure (globals (sessionMachine s), problems ++ said)
+  pure (globals (machineOf s), problems ++ said)
   where
     one (s, acc) l = case command s l of
       (s', Ran out _ Completed) -> (s', acc ++ [ o | o <- out, not (expected o) ])

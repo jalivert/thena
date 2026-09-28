@@ -17,7 +17,7 @@
 -- canonically cannot reproduce them. Nothing outside "Thena.Language.Reader"
 -- reads those numbers, so they never reach a session — but they are in the
 -- tree, so tree equality is not the claim to make for this direction.
-module Thena.Protocol.Text
+module Thena.View.Source
   ( printItem
   , printSurfaceModule
   ) where

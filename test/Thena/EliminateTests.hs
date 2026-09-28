@@ -20,7 +20,10 @@ import Data.List (isInfixOf)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Driver (Loaded (..), loadSource)
+import Thena.Driver
+  ( Loaded (..)
+  , loadSource
+  )
 import Thena.Standard (withRules)
 
 import Thena.Core.Context (Context, Entry (..))

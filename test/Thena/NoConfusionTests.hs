@@ -41,7 +41,10 @@ import Thena.Declared
   , preludeDecls
   , vecDecl
   )
-import Thena.Driver (parseCore, parseDeclaration)
+import Thena.Driver
+  ( parseCore
+  , parseDeclaration
+  )
 import Thena.Global.Declare (DeclareError (..), declare)
 import Thena.Global.Env (GlobalEnv, definitionBody, definitionType, lookupDefinition)
 import Thena.Errors (Skipped (..))

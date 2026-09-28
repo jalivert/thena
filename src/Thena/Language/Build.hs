@@ -410,7 +410,7 @@ production gs name =
 -- spellings"). 'Nothing' for anything else, including a constructor at level
 -- arguments (a grammar's production never carries one).
 --
--- **Shared with "Thena.Protocol.Display" (phase 115b)**, which needs the same
+-- **Shared with "Thena.View.Core" (phase 115b)**, which needs the same
 -- name and arguments to address them — move the two together.
 spineOf :: Core -> Maybe (GlobalName, [Core])
 spineOf t = case t of

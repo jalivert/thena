@@ -33,7 +33,10 @@ import Thena.Core.Term
   , fresh
   )
 import Thena.Core.Typing (check, infer)
-import Thena.Driver (checkedPrimitive, parseCore)
+import Thena.Driver
+  ( checkedPrimitive
+  , parseCore
+  )
 import Thena.Global.Env
   ( Constant (..)
   , Definition (..)

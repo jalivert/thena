@@ -1,17 +1,17 @@
 -- | The Core display representation (MS7 phase 115a).
 --
--- **The test is the whole argument for the design.** 'Thena.Protocol.Redraw'
+-- **The test is the whole argument for the design.** 'Thena.View.Redraw'
 -- is what an editor would be: it takes only a 'Display' — no session, no
 -- context, no globals, no grammars — and produces text. If that text is what
 -- 'Thena.Repl.renderCore' produces for the same term, then the display really
 -- does carry everything the editor needs, and the seam in
 -- @discussion\/editor-display.md@ §1 falls where that document says it does.
 --
--- **It is a crossing and not a round trip.** 'Thena.Protocol.Redraw.redraw'
+-- **It is a crossing and not a round trip.** 'Thena.View.Redraw.redraw'
 -- and `renderCore` are two independent walks over two different structures;
 -- nothing here reads the other one's table, so agreeing is evidence rather
 -- than tautology.
-module Thena.Protocol.DisplayTests (tests) where
+module Thena.View.CoreTests (tests) where
 
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
@@ -22,18 +22,22 @@ import Thena.Global.Env
   , Definition (..)
   , GlobalEnv (..)
   )
-import Thena.Driver (Response (..), Session (..), loadProofSource)
+import Thena.Driver
+  ( Response (..)
+  , machineOf
+  , loadProofSource
+  )
 import Thena.Engine (Machine (..))
 import Thena.Language.Grammar (Grammar)
-import Thena.Protocol.Address (Address (..))
-import Thena.Protocol.Display (Budget (..), displayCore)
-import Thena.Protocol.Redraw (redraw)
+import Thena.View.Address (Address (..))
+import Thena.View.Core (Budget (..), displayCore)
+import Thena.View.Redraw (redraw)
 import Thena.Repl (renderCore, startingSession)
 
 tests :: TestTree
 tests =
   testGroup
-    "Thena.Protocol.Display"
+    "Thena.View.Core"
     [ testCase "the display carries everything the printer needed" corpus
     , testCase "and the corpus really holds terms" notVacuous
     , testGroup "a modelled language's notation (phase 115b)" objectCases
@@ -48,7 +52,7 @@ termsOf gs =
 
 corpus :: IO ()
 corpus = do
-  ts <- termsOf . globals . sessionMachine . fst <$> startingSession
+  ts <- termsOf . globals . machineOf . fst <$> startingSession
   case [e | Just e <- map mismatch ts] of
     [] -> pure ()
     e : _ -> assertFailure e
@@ -64,7 +68,7 @@ mismatch t
 -- | A green test over an empty corpus would prove nothing.
 notVacuous :: IO ()
 notVacuous = do
-  n <- length . termsOf . globals . sessionMachine . fst <$> startingSession
+  n <- length . termsOf . globals . machineOf . fst <$> startingSession
   if n >= 50 then pure () else assertFailure ("only " <> show n <> " terms in the corpus")
 
 -- ---------------------------------------------------------------------------
@@ -110,7 +114,7 @@ loaded :: IO [Grammar]
 loaded = do
   (s0, _) <- startingSession
   case loadProofSource s0 source of
-    (s1, ProofLoaded {}) -> pure (grammars (sessionMachine s1))
+    (s1, ProofLoaded {}) -> pure (grammars (machineOf s1))
     (_, other) -> assertFailure (show other) >> pure []
 
 con :: String -> [Core] -> Core

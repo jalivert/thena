@@ -23,7 +23,15 @@ import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (GlobalName (..), Ident (..))
-import Thena.Driver (Response (..), RuleFileError (..), Session (..), Stop (..), loadProofSource, loadRuleBases, newSession)
+import Thena.Driver
+  ( Response (..)
+  , RuleFileError (..)
+  , machineOf
+  , Stop (..)
+  , loadProofSource
+  , loadRuleBases
+  , newSession
+  )
 import Thena.Engine (Machine (..))
 import Thena.Errors (Skipped (..), SyntaxError (..), Warning (..))
 import Thena.Global.Declare (DeclareError (..))
@@ -206,7 +214,7 @@ meaning =
     lang = OfLanguage . GlobalName
     installed src = do
       (s0, _) <- startingSession
-      pure (grammars (sessionMachine (fst (loadProofSource s0 src))))
+      pure (grammars (machineOf (fst (loadProofSource s0 src))))
 
 -- ---------------------------------------------------------------------------
 

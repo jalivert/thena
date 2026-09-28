@@ -19,7 +19,10 @@ import Thena.Core.Term
   , close
   , fresh
   )
-import Thena.Driver (parseCore, parseDeclaration)
+import Thena.Driver
+  ( parseCore
+  , parseDeclaration
+  )
 import Thena.Global.Declare (declare)
 import Thena.Global.Env (GlobalEnv, emptyGlobals)
 import Thena.Repl (renderCore)

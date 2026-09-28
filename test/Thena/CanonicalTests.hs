@@ -17,7 +17,7 @@ import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (testCase, (@?=))
 
 import Thena.Core.Term (GlobalName (..))
-import Thena.Driver (Session (..))
+import Thena.Driver (machineOf)
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Repl (startingSession, loadProofFile, renderCore)
@@ -62,5 +62,5 @@ tests =
     statementOf n = do
       (s, _) <- startingSession
       (s', _) <- loadProofFile s target
-      pure ( renderCore [] (names (sessionMachine s')) [] . definitionType
-               <$> lookupDefinition (GlobalName n) (globals (sessionMachine s')) )
+      pure ( renderCore [] (names (machineOf s')) [] . definitionType
+               <$> lookupDefinition (GlobalName n) (globals (machineOf s')) )

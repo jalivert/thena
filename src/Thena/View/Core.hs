@@ -25,7 +25,7 @@
 -- cross, is exactly two things: where a splice was needed for grouping
 -- (phase 110's fencing — a slot's 'Bool'), and, deferred here, which slot is a
 -- binder and which is an occurrence (see the Haddock on 'AnObjectTerm').
-module Thena.Protocol.Display
+module Thena.View.Core
   ( Display (..)
   , Shape (..)
   , Binding (..)
@@ -54,7 +54,7 @@ import Thena.Language.Grammar
   , Item (..)
   , Sort (..)
   )
-import Thena.Protocol.Address (Address, Move (..), extend)
+import Thena.View.Address (Address, Move (..), extend)
 import Thena.Syntax.Print
   ( Env
   , escapeChar

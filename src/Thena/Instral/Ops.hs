@@ -408,11 +408,11 @@ data Op
     -- search /from the root/, and this one stops there.
     --
     -- **It is the anchor an address presumes.** A
-    -- 'Thena.Protocol.Address.Address' is the moves that reach a position from
+    -- 'Thena.View.Address.Address' is the moves that reach a position from
     -- the root, so a client's click is @goto-root@ and then those moves —
     -- which is what makes a click a program the user could have typed, rather
     -- than a private route into the cursor. Until this phase the anchor was
-    -- only a sentence in 'Thena.Protocol.Address.focusing'\'s comment telling
+    -- only a sentence in 'Thena.View.Address.focusing'\'s comment telling
     -- its caller to arrange it, and the server did not
     -- (@reports\/2026-09-27-the-address-anchor.md@).
     --

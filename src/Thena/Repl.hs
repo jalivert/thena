@@ -1,21 +1,33 @@
--- | The terminal frontend, and rendering.
+-- | The REPL, minus the terminal: rendering, session start, and a line.
 --
--- The only module in the project that reads a key or writes to the screen
--- (§2.1, §12 invariant 4). Rendering lives here too, per §2.5 — 'Core',
--- 'Partial' and now the machine, back to something the user can read.
+-- Rendering lives here per §2.5 — 'Core', 'Partial' and the machine, back to
+-- something the user can read.
 --
--- 'turn' is the whole of the loop except the reading and the writing, and it is
--- deliberately pure: the interactive 'repl' and the golden 'transcript' both go
+-- 'turn' is the whole of a line except the reading and the writing, and it is
+-- deliberately pure: the interactive loop and the golden 'transcript' both go
 -- through it, so a transcript cannot drift away from the loop it is supposed to
 -- be testing.
+--
+-- **The terminal left at MS7 phase 125.** @repl@, its @loop@ and its @haskeline@
+-- completion are @app\/Repl.hs@ now, so that nothing in the library links a
+-- line editor: 'renderResponse' and 'startingSession' are what a second
+-- frontend wants from here, and neither is terminal-specific
+-- (@discussion\/tight-integration.md@ §0b's own finding). What is left doing IO
+-- is reading a file, which §12 invariant 4 puts on this side of the driver
+-- either way.
+--
+-- **This module is a frontend's /text/ door; "Thena.View" is its structured
+-- one.** A frontend that wants lines takes them from here; a frontend that
+-- wants to lay the system out itself takes views from there.
 module Thena.Repl
-  ( repl
-  , Turn (..)
+  ( Turn (..)
   , turn
   , transcript
   , transcriptFrom
   , transcriptIO
   , entriesOf
+  , prompt
+  , following
   , unclosedEntry
   , opensEntry
   , closesEntry
@@ -51,19 +63,7 @@ module Thena.Repl
   , renderOperand
   ) where
 
-import Control.Monad.IO.Class (liftIO)
 import Data.Char (isSpace)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import System.Console.Haskeline
-  ( Completion (..)
-  , InputT
-  , completeFilename
-  , defaultSettings
-  , getInputLine
-  , outputStrLn
-  , runInputT
-  , setComplete
-  )
 
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar, piOver)
 import Thena.Core.Level
@@ -107,8 +107,11 @@ import Thena.Driver
   , Loaded (..)
   , Response (..)
   , ChoicePoint (..)
-  , Session (..)
+  , Session
   , Stop (..)
+  , machineOf
+  , parsingLanguage
+  , pendingQuestion
   , SyntaxError (..)
   , Attempt (..)
   , Parked (..)
@@ -149,7 +152,7 @@ import Thena.Errors
   )
 import Thena.Global.Declare (DeclareError (..), TokenClassError (..))
 import Thena.Language.Build (printTerm)
-import Thena.Language.Grammar (Grammar, GrammarError (..), GrammarProblem (..), ProductionProblem (..), RulePart (..), RuleProblem (..), Sort (..), earleyRules)
+import Thena.Language.Grammar (Grammar, GrammarError (..), GrammarProblem (..), ProductionProblem (..), RulePart (..), RuleProblem (..), Sort (..))
 import Thena.Language.Reader (ReadError (..))
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Regex (RegexError (..))
@@ -195,83 +198,6 @@ import Data.Foldable (toList)
 import Data.List (stripPrefix, intercalate, partition)
 import Thena.Instral.Type (Signature, Ty, renderSignature, renderTy)
 import Thena.Instral.Infer (renderInstralTypeError)
---
--- The prelude is loaded first (§9, phase 11) and **silently on success** — it
--- is three @data@ lines and announcing them at every start is noise. A failure
--- is reported and the loop starts anyway, with whatever did load: @Eq@ missing
--- makes elimination fail later with a message naming @Eq@, which is the bargain
--- §3.7 already struck, and a REPL that refuses to start would say less.
-repl :: IO ()
-repl = do
-  (s, problems) <- startingSession
-  -- **Tab reads the session through a reference** (MS6 phase 102b): haskeline
-  -- fixes its completion function when the loop starts, and what Tab should do
-  -- depends on the session at the moment it is pressed. The loop writes the
-  -- session before every prompt; nothing else writes it.
-  current <- newIORef s
-  let settings = setComplete (completion current) defaultSettings
-  runInputT settings (mapM_ outputStrLn problems >> loop current s)
-
--- | In @:parse@'s mode, the parser's 'tabComplete'; anywhere else, file names,
--- as haskeline did before.
-completion :: IORef Session -> (String, String) -> IO (String, [Completion])
-completion current input = do
-  s <- readIORef current
-  case sessionParsing s of
-    Just lang ->
-      let (kept, cs) = tabComplete (earleyRules (grammars (sessionMachine s))) lang input
-       in pure (kept, [ Completion r d False | (r, d) <- cs ])
-    Nothing   -> completeFilename input
-
-loop :: IORef Session -> Session -> InputT IO ()
-loop current s = do
-  liftIO (writeIORef current s)
-  input <- getInputLine (prompt s)
-  case input of
-    Nothing   -> pure ()          -- end of input: Ctrl-D
-    Just first -> gather first >>= \entry -> case entry of
-      Left problem -> outputStrLn problem >> loop current s
-      Right line   -> run line
-  where
-   run line = do
-      let t = turn s line
-      mapM_ outputStrLn (turnOutput t)
-      case following (turnSession t) (turnResponse t) of
-        Just act | not (turnQuit t) -> do
-          (s', out) <- liftIO act
-          mapM_ outputStrLn out
-          loop current s'
-        _ | turnQuit t -> pure ()
-          | otherwise  -> loop current (turnSession t)
-
-   -- | **An entry, not a line** (MS5 phase 70, rewritten at phase 78).
-   --
-   -- A multi-line entry is opened by @:{@ and closed by @:}@, each alone on its
-   -- line — **his choice, 2026-09-13, and GHCi\'s spelling**: /"only there I
-   -- want any sort of weirdness"/.
-   --
-   -- **It replaces phase 70\'s heuristic** — keep reading while the entry
-   -- /cannot be finished/, and require every continuation to be indented — which
-   -- is @ms5\/CLOSEOUT.md@ 18, answered rather than left split. An explicit
-   -- bracket has no lag to trade against indentation, and it is one rule where
-   -- that was two.
-   --
-   -- The same predicates drive 'entriesOf', which is the testable form of this.
-   gather firstLine
-     | opensEntry firstLine = block []
-     | otherwise            = pure (Right firstLine)
-
-   block acc = do
-     more <- getInputLine continuationPrompt
-     case more of
-       Nothing -> pure (Left unclosedEntry)
-       Just l
-         | closesEntry l -> pure (Right (intercalate "\n" (reverse acc)))
-         | otherwise     -> block (l : acc)
-
--- | The prompt a line inside @:{ … :}@ is typed at.
-continuationPrompt :: String
-continuationPrompt = "         ... "
 
 -- | What is said when input ends inside a @:{@.
 unclosedEntry :: String
@@ -447,18 +373,18 @@ renderLoadError path e = case e of
 -- constraint focus reads as @spine@ too: it is a link in the chain.
 prompt :: Session -> String
 prompt s
-  | Just _ <- sessionAsking s = "> "
-  | Just lang <- sessionParsing s = "parse " ++ lang ++ "> "   -- MS6 phase 102b
+  | Just _ <- pendingQuestion s = "> "
+  | Just lang <- parsingLanguage s = "parse " ++ lang ++ "> "   -- MS6 phase 102b
   | otherwise = "thena " ++ fragment ++ "> "
   where
-    fragment = case focus (cursor (development (sessionMachine s))) of
+    fragment = case focus (cursor (development (machineOf s))) of
       OnTerm {} -> "core"
       _         -> "spine"
 
 -- | One line in, and everything that follows from it.
 --
 -- **@turnPending@ went at MS7 phase 123** — whether something is asking is
--- 'Thena.Driver.sessionAsking' on @turnSession@, so a caller that wants it
+-- 'Thena.Driver.pendingQuestion' on @turnSession@, so a caller that wants it
 -- reads it there instead of being handed a copy to carry.
 data Turn = Turn
   { turnOutput   :: [String]
@@ -552,7 +478,7 @@ transcriptFrom s0 = unlines . replay s0
        in (prompt s ++ l) : turnOutput t ++ rest
 
 renderResponse :: Session -> Response -> [String]
-renderResponse s resp = let gs = grammars (sessionMachine s) in case resp of
+renderResponse s resp = let gs = grammars (machineOf s) in case resp of
   Blank          -> []
   RenderedSurface t -> [renderSurface t]
   ParsedObject t -> [renderTree t]
@@ -598,7 +524,7 @@ renderResponse s resp = let gs = grammars (sessionMachine s) in case resp of
   Resumed g     -> ["resumed " ++ nameString g]
   Abandoned g   -> ["abandoned " ++ nameString g]
   -- Show where it landed: an undo with no output looks like nothing happened.
-  Undone        -> [renderCursor gs (counter s) (cursor (development (sessionMachine s)))]
+  Undone        -> [renderCursor gs (counter s) (cursor (development (machineOf s)))]
   Proofs cur ps -> renderProofs gs (counter s) cur ps
   -- Nothing to print: the caller reads the file and prints what that produced.
   ProofRequested _ -> []
@@ -642,13 +568,13 @@ renderResponse s resp = let gs = grammars (sessionMachine s) in case resp of
 -- printer given a counter below the term's highest 'Var' mints a colliding
 -- display name (phase 3's §7).
 counter :: Session -> Int
-counter = names . sessionMachine
+counter = names . machineOf
 
 -- | The context a command's argument was resolved in, so that a 'Var' standing
 -- for one of the development's binders prints as its name rather than as a
 -- number. @:show@ renders from the root and needs no seed.
 contextOf :: Session -> Context
-contextOf = focusContext . development . sessionMachine
+contextOf = focusContext . development . machineOf
 
 renderStop :: [Grammar] -> Session -> Stop -> [String]
 renderStop gs s stop = case stop of
@@ -666,7 +592,7 @@ renderStop gs s stop = case stop of
   -- it is only reached later now (MS6 phase 104b).
   BlockRefused es        -> map whatRuleError es
   BlockIllTyped errs     -> map (dropEntry . renderInstralTypeError) errs
-  Paused                 -> renderMachine gs (counter s) (contextOf s) (sessionMachine s)
+  Paused                 -> renderMachine gs (counter s) (contextOf s) (machineOf s)
 
 -- --------------------------------------------------------------------------
 -- Errors, made readable

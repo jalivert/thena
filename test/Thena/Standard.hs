@@ -24,7 +24,12 @@ module Thena.Standard
   ) where
 
 import Thena.Core.Term (GlobalName (..))
-import Thena.Driver (Session (..), newSession)
+import Thena.Driver
+  ( Session
+  , machineOf
+  , newSession
+  , withRuleBases
+  )
 import Thena.Engine (Machine (..))
 import Thena.Instral.Ops
   ( Instr (..)
@@ -49,7 +54,7 @@ standardBases :: IO [RuleBase]
 standardBases = do
   (s, problems) <- loadStandardRules newSession
   case problems of
-    [] -> pure (rules (sessionMachine s))
+    [] -> pure (rules (machineOf s))
     ps -> error ("the shipped rule base did not load:\n" ++ unlines ps)
 
 -- | Its rules, flattened — what 'Thena.Rules.resolveRule' wants as the rules
@@ -219,7 +224,7 @@ askingRule word what op = Rule (GlobalName word) [PVar "ty"] []
 -- session with no base cannot run the commands every REPL test types.
 withRules :: Session
 withRules =
-  newSession { sessionMachine = (sessionMachine newSession) { rules = expectedBase } }
+  withRuleBases expectedBase newSession
 
 -- | 'expectedStandard' as a base, for the suites that want one and do not want
 -- IO. They were testing against a Haskell literal before phase 22 and still

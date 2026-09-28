@@ -2,8 +2,8 @@
 -- editor is: a function from a display representation to text, and nothing
 -- else. No session, no context, no globals, no grammars.
 --
--- **Shared, not duplicated** (phase 115c): 'Thena.Protocol.DisplayTests' and
--- 'Thena.Protocol.DevelopmentTests' both need to turn a term's 'Display' into
+-- **Shared, not duplicated** (phase 115c): 'Thena.View.CoreTests' and
+-- 'Thena.View.DevelopmentTests' both need to turn a term's 'Display' into
 -- text to cross-check it against 'Thena.Repl''s printer, and a second copy of
 -- a printer drifts exactly as a second copy of a word table does.
 --
@@ -14,21 +14,31 @@
 -- object term, **the fence, not its contents** (§6). None of that crosses.
 --
 -- **'redrawSurface' joined it at 115h**, for the same reason and one more:
--- once 115h gave 'Thena.Protocol.Instral.ValueView' a real
--- 'Thena.Protocol.Surface.SurfaceShape' case, every module that already drew
+-- once 115h gave 'Thena.View.Instral.ValueView' a real
+-- 'Thena.View.Surface.SurfaceShape' case, every module that already drew
 -- a 'ValueView' (115d, 115f, 115g) needed a 'ValSurface' case too, and a
 -- fourth copy of a fifty-line printer is exactly the drift this module
 -- exists to stop.
-module Thena.Protocol.Redraw (redraw, occurs, redrawSurface) where
+module Thena.View.Redraw
+  ( redraw
+  , occurs
+  , redrawSurface
+  , redrawChain
+  , chainText
+  , markedChainText
+  ) where
 
-import Thena.Protocol.Address (Address)
-import Thena.Protocol.Display
+import Data.List (intercalate)
+
+import Thena.View.Address (Address)
+import Thena.View.Development (ConstraintView (..), LinkShape (..), LinkView (..))
+import Thena.View.Core
   ( Binding (..)
   , Display (..)
   , ObjectItem (..)
   , Shape (..)
   )
-import Thena.Protocol.Surface
+import Thena.View.Surface
   ( SurfaceArgView (..)
   , SurfaceBinding (..)
   , SurfacePieceView (..)
@@ -216,3 +226,70 @@ redrawSurface = surf SLoose
     subscriptOf n = map digit (show n)
       where
         digit c = "\8320\8321\8322\8323\8324\8325\8326\8327\8328\8329" !! (fromEnum c - fromEnum '0')
+
+-- ---------------------------------------------------------------------------
+-- The development chain (MS7 phase 125: moved here from
+-- 'Thena.View.DevelopmentTests', so that the seam's own crossing uses the
+-- same layout rather than a second copy of it)
+
+-- | What an editor is, for a development: a function from '[LinkView]' to
+-- text, and nothing else — mirrors 'Thena.Repl.goP's own layout (two spaces
+-- per guess, the closing @) in@ at the outer indent) because that is the seam
+-- under test.
+--
+-- **Each line comes back with whether its link is the focused one** (MS7 phase
+-- 125), because there are two printers on the other side of the crossing and
+-- they differ in exactly that: 'Thena.Repl.renderPartial' draws the chain,
+-- 'Thena.Repl.renderCursor' draws it with a gutter. One layout, two joins —
+-- 'chainText' and 'markedChainText' below.
+redrawChain :: [LinkView] -> [(Bool, String)]
+redrawChain = go 0
+  where
+    go ind = concatMap (link' ind)
+
+    -- **Only the link's own first line carries its mark.** A guess's body is
+    -- links of its own, each with its own, which is why the recursive call's
+    -- pairs are passed through untouched: 'Thena.Repl.goP' marks the link the
+    -- focus is at, and a focus inside a guess is not at the guess.
+    link' ind (LinkView _ marked shape) = case shape of
+      AnAssumption name ty ->
+        [(marked, pad ind ++ "\955 (" ++ name ++ " : " ++ redraw ty ++ ") ->")]
+      AQuantifier name ty ->
+        [(marked, pad ind ++ "\8704 (" ++ name ++ " : " ++ redraw ty ++ ") ->")]
+      ADefinition name ty val ->
+        [(marked, pad ind ++ "let " ++ name ++ " = " ++ redraw val ++ " : " ++ redraw ty ++ " in")]
+      AClaimLink { claimName = name, claimType = ty } ->
+        [(marked, pad ind ++ "let ? " ++ name ++ " : " ++ redraw ty ++ " in")]
+      AGuessLink { guessName = name, guessType = ty, guessBody = body } ->
+        (marked, pad ind ++ "let ? " ++ name ++ " : " ++ redraw ty ++ " \8784 (")
+          : go (ind + 2) body
+          ++ [(False, pad ind ++ ") in")]
+      APending (ConstraintView xi lhs rhs ty) ->
+        [ ( marked
+          , pad ind ++ concatMap group xi
+              ++ "\8866 " ++ redraw lhs ++ " \8799 " ++ redraw rhs ++ " : " ++ redraw ty ++ " \9656"
+          )
+        ]
+      -- **A trailing term that is itself a binder is quoted** ('Thena.Repl.trailing'):
+      -- without the corners it would re-read as another chain link, so this
+      -- is longest prefix's escape hatch and not something 'AResult' itself
+      -- carries — it is purely how *text* draws a shape that is otherwise
+      -- unambiguous once structured.
+      AResult t -> case displayShape t of
+        AnAbstraction {} -> [(marked, pad ind ++ "\8988 " ++ redraw t ++ " \8989")]
+        ALet {}          -> [(marked, pad ind ++ "\8988 " ++ redraw t ++ " \8989")]
+        _                -> [(marked, pad ind ++ redraw t)]
+
+    group (name, ty) = "(" ++ name ++ " : " ++ redraw ty ++ ") "
+    pad n = replicate n ' '
+
+-- | The chain as 'Thena.Repl.renderPartial' draws it: no gutter.
+chainText :: [LinkView] -> String
+chainText = intercalate "\n" . map snd . redrawChain
+
+-- | The chain as 'Thena.Repl.renderCursor' draws it: a \9654 on the focused
+-- link's line, two spaces on every other.
+markedChainText :: [LinkView] -> String
+markedChainText = intercalate "\n" . map gutter . redrawChain
+  where
+    gutter (marked, t) = (if marked then "\9654 " else "  ") ++ t

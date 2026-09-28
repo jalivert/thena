@@ -18,7 +18,9 @@ import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (GlobalName (..))
-import Thena.Driver (Session (..))
+import Thena.Driver
+  ( machineOf
+  )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Repl (startingSession, loadFile, renderCore)
@@ -58,12 +60,12 @@ tests =
   where
     statementOf g ty = testCase ("the prelude's " ++ g ++ " has its dependent type") $ do
       (s, _) <- startingSession
-      case lookupDefinition (GlobalName g) (globals (sessionMachine s)) of
+      case lookupDefinition (GlobalName g) (globals (machineOf s)) of
         Nothing -> assertFailure (g ++ " is not in the prelude")
-        Just d  -> renderCore [] (names (sessionMachine s)) [] (definitionType d) @?= ty
+        Just d  -> renderCore [] (names (machineOf s)) [] (definitionType d) @?= ty
 
     declares g want =
       testCase (g ++ (if want then " is generated" else " is not")) $ do
         (s, _) <- startingSession
-        let there = lookupDefinition (GlobalName g) (globals (sessionMachine s))
+        let there = lookupDefinition (GlobalName g) (globals (machineOf s))
         (there /= Nothing) @?= want

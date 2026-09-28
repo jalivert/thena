@@ -18,7 +18,12 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
 import Thena.Driver
-  (Response (..), Session (..), loadProofSource, loadRuleBases)
+  ( Response (..)
+  , Session
+  , machineOf
+  , loadProofSource
+  , loadRuleBases
+  )
 import Thena.Engine (Machine (..))
 import Thena.Instral.Ops
   ( Instr (..)
@@ -80,7 +85,7 @@ withRules io src = do
   (s, shipped) <- io
   pure $ case loadRuleBases s [("shipped", shipped), ("mine", src)] of
     (s', BasesLoaded _) ->
-      Right (concatMap baseRules (filter ((== "mine") . baseName) (rules (sessionMachine s'))))
+      Right (concatMap baseRules (filter ((== "mine") . baseName) (rules (machineOf s'))))
     (_, other) -> Left other
 
 -- | The one rule a base of one's own declared.
@@ -199,7 +204,7 @@ matching io =
       (s, _) <- io
       r <- oneRule io (base src)
       case ruleParams r of
-        p : _ -> pure (globals (sessionMachine s), p)
+        p : _ -> pure (globals (machineOf s), p)
         []    -> assertFailure "the rule has no parameter"
 
 -- ---------------------------------------------------------------------------

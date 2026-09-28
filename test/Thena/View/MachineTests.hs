@@ -1,10 +1,10 @@
--- | A running machine's protocol view (MS7 phase 115f).
+-- | A running machine, as a view (MS7 phase 115f).
 --
 -- **The crossing, at the fidelity that exists.** 'redrawMachine' draws only
--- what 'Thena.Protocol.Machine.displayMachine' hands it; 115d's own
+-- what 'Thena.View.Machine.displayMachine' hands it; 115d's own
 -- 'redrawStatement'/'redrawOperand'/'redrawSkeleton'/'redrawValue' are
 -- reused verbatim here rather than re-proven, since the per-statement and
--- per-value crossing is already 'Thena.Protocol.InstralTests''s job — what
+-- per-value crossing is already 'Thena.View.InstralTests''s job — what
 -- is new here is only the three-pane wrapping ('pc'\/'env'\/'stack')
 -- 'Thena.Repl.renderMachine' does around them.
 --
@@ -14,34 +14,36 @@
 -- shared by 'Thena.Engine.Call' and 'Thena.Engine.Choice' — so a
 -- hand-built 'Thena.Engine.Call' exercises everything the crossing needs
 -- without a live rule dispatch to produce one.
-module Thena.Protocol.MachineTests (tests) where
+module Thena.View.MachineTests (tests) where
 
 import Data.List (intercalate)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase)
 
-import Thena.Driver (Session (..))
+import Thena.Driver
+  ( machineOf
+  )
 import Thena.Engine (Exec (..), Frame (..), Machine (..))
 import Thena.Instral.Ops (Instr (..), Op (Assume), Operand (..), Value (..))
 import Thena.Instral.Pattern (Pattern (..))
 import Thena.Language.Grammar (Grammar)
-import Thena.Protocol.Address (Address (..))
-import Thena.Protocol.Display (Budget (..))
-import Thena.Protocol.Instral
+import Thena.View.Address (Address (..))
+import Thena.View.Core (Budget (..))
+import Thena.View.Instral
   ( OperandView (..)
   , SkeletonView (..)
   , StatementDetail (..)
   , StatementView (..)
   , ValueView (..)
   )
-import Thena.Protocol.Machine (FrameView (..), MachineView (..), displayMachine)
-import Thena.Protocol.Redraw (redraw, redrawSurface)
+import Thena.View.Machine (FrameView (..), MachineView (..), displayMachine)
+import Thena.View.Redraw (redraw, redrawSurface)
 import Thena.Repl (renderMachine, startingSession)
 
 tests :: TestTree
 tests =
   testGroup
-    "Thena.Protocol.Machine"
+    "Thena.View.Machine"
     [ testCase "an idle machine — everything empty" (mismatchMachine [] =<< idle)
     , testCase "a live pc, bindings, and a stack with a returned frame" (mismatchMachine [] =<< busy)
     ]
@@ -51,7 +53,7 @@ tests =
 -- 'Thena.Engine.Machine' needs to exist at all, and none of them are what
 -- this phase displays.
 base :: IO Machine
-base = sessionMachine . fst <$> startingSession
+base = machineOf . fst <$> startingSession
 
 idle :: IO Machine
 idle = do

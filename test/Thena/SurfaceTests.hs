@@ -21,7 +21,11 @@ import Test.Tasty.QuickCheck
   , resize, sized, testProperty, withNumTests, (===) )
 
 import Thena.Core.TermTests (genLiteral)
-import Thena.Driver (parseCore, parseSurfaceModule, parseSurfaceTerm)
+import Thena.Driver
+  ( parseCore
+  , parseSurfaceModule
+  , parseSurfaceTerm
+  )
 import Thena.Syntax.Concrete (Raw (..))
 import Thena.Syntax.Lexer (lexTokens)
 import Thena.Surface.Layout (layout)

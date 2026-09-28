@@ -2,24 +2,26 @@
 -- @discussion\/editor-display.md@ §7, first half).
 --
 -- **The crossing**, 115a/b/c's own argument again: 'redrawBlock' draws only
--- what 'Thena.Protocol.Instral.displayBlock' hands it, and if that text is
+-- what 'Thena.View.Instral.displayBlock' hands it, and if that text is
 -- what 'Thena.Repl.renderInstr' prints for the same instructions, the display
 -- carries what the printer needed. The corpus is every instruction the
 -- shipped rule base's own rules are written with — real bodies, not
 -- hand-built ones, so the crossing is over what actually got written rather
 -- than a curated sample of it.
-module Thena.Protocol.InstralTests (tests) where
+module Thena.View.InstralTests (tests) where
 
 import Data.List (intercalate)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase)
 
-import Thena.Driver (Session (..))
+import Thena.Driver
+  ( machineOf
+  )
 import Thena.Engine (Machine (..))
 import Thena.Instral.Ops (Instr, Rule (..))
-import Thena.Protocol.Address (Address (..))
-import Thena.Protocol.Display (Budget (..))
-import Thena.Protocol.Instral
+import Thena.View.Address (Address (..))
+import Thena.View.Core (Budget (..))
+import Thena.View.Instral
   ( OperandView (..)
   , SkeletonView (..)
   , StatementDetail (..)
@@ -27,21 +29,21 @@ import Thena.Protocol.Instral
   , ValueView (..)
   , displayBlock
   )
-import Thena.Protocol.Redraw (redraw, redrawSurface)
+import Thena.View.Redraw (redraw, redrawSurface)
 import Thena.Repl (renderInstr, startingSession)
 import Thena.Rules (allRules)
 
 tests :: TestTree
 tests =
   testGroup
-    "Thena.Protocol.Instral"
+    "Thena.View.Instral"
     [ testCase "the display carries everything the printer needed" corpus
     , testCase "and the corpus really holds statements" notVacuous
     ]
 
 -- | Every instruction in the shipped rule base's own rules.
 corpusOf :: IO [Instr]
-corpusOf = concatMap ruleBody . allRules . rules . sessionMachine . fst <$> startingSession
+corpusOf = concatMap ruleBody . allRules . rules . machineOf . fst <$> startingSession
 
 corpus :: IO ()
 corpus = do

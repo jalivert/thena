@@ -9,13 +9,13 @@
 -- the same thing was kept beside it (phase 23b, fixed 25c). This reuses that
 -- table rather than writing a third one.
 --
--- **Addressing does not reach here yet.** 'Thena.Protocol.Address.Move' is
+-- **Addressing does not reach here yet.** 'Thena.View.Address.Move' is
 -- exactly the development cursor's own descents, and there is no cursor over
--- an instral block to extend it with — 'Thena.Protocol.Address.follow' would
+-- an instral block to extend it with — 'Thena.View.Address.follow' would
 -- have nothing to call. A 'StatementView' carries its plain position in the
--- block it came from instead of a real 'Thena.Protocol.Address.Address'; see
+-- block it came from instead of a real 'Thena.View.Address.Address'; see
 -- the phase's own plan for the judgement call.
-module Thena.Protocol.Instral
+module Thena.View.Instral
   ( StatementView (..)
   , StatementDetail (..)
   , OperandView (..)
@@ -44,9 +44,9 @@ import Thena.Instral.Ops
 import Thena.Instral.Pattern (Pattern (..))
 import Thena.Instral.Type (renderTy)
 import Thena.Language.Grammar (Grammar)
-import Thena.Protocol.Address (Address)
-import Thena.Protocol.Display (Budget, Display, displayCore)
-import Thena.Protocol.Surface (SurfaceShape, displaySurface)
+import Thena.View.Address (Address)
+import Thena.View.Core (Budget, Display, displayCore)
+import Thena.View.Surface (SurfaceShape, displaySurface)
 import Thena.Surface.Zipper (focus)
 import Thena.Syntax.Print (Env, escapeChar, escapeString, renderLevel)
 import Thena.Core.Term (Var)
@@ -102,7 +102,7 @@ data StatementDetail
 data OperandView
   = OpndRef String
     -- ^ a bound name, as written. **Not resolved to its current value** —
-    -- Core's own 'Thena.Protocol.Display.AVariable' does not carry one either
+    -- Core's own 'Thena.View.Core.AVariable' does not carry one either
     -- until asked; this is the same restraint.
   | OpndLiteral ValueView
   | OpndList [OperandView]
@@ -113,7 +113,7 @@ data OperandView
 -- | An object term built inside a body (MS6 phase 104c) — a production and
 -- its slots, or a literal, or a hole still to be filled.
 --
--- **Not 'Thena.Protocol.Display.AnObjectTerm'.** That shape is a *term*,
+-- **Not 'Thena.View.Core.AnObjectTerm'.** That shape is a *term*,
 -- addressed and read against a grammar; this is the *skeleton* a rule body
 -- builds one from, with no grammar and no address — 'Thena.Repl.renderSkeleton'
 -- draws the same distinction in text, writing @app(var("f"), x)@ rather than
@@ -139,14 +139,14 @@ data SkeletonView a
 -- content, not its shape — @"\8249" ++ renderSurface (Zipper.focus z) ++
 -- "\8250"@ — because 'Thena.Syntax.Print.renderSurface' has existed since
 -- phase 112c. 115h built the structured version of that printer
--- ('Thena.Protocol.Surface'); 'ValSurface' uses it, so this stops being the
+-- ('Thena.View.Surface'); 'ValSurface' uses it, so this stops being the
 -- one place 'ValueView' quietly disagreed with what the terminal shows.
 data ValueView
   = ValText String
   | ValInt Int
   | ValChar String
     -- ^ escaped as the lexer reads it back, like 'ValText' — not a bare
-    -- 'Char', for the same reason 'Thena.Protocol.Display.ALiteral' stores
+    -- 'Char', for the same reason 'Thena.View.Core.ALiteral' stores
     -- its own literals escaped rather than raw.
   | ValBool Bool
   | ValList [ValueView]
@@ -214,7 +214,7 @@ displayBlock gs budget env bs n at next instrs =
       CrossValue   -> Just (Crosses "val")
       _            -> Nothing
 
--- | An operand, generically — shared with 'Thena.Protocol.Rules', whose head
+-- | An operand, generically — shared with 'Thena.View.Rules', whose head
 -- tests carry operands with no statement around them at all.
 displayOperand :: [Grammar] -> Budget -> Env -> [(Var, Address)] -> Int -> Address -> Operand -> OperandView
 displayOperand gs budget env bs n at o = case o of
@@ -230,7 +230,7 @@ displayOperand gs budget env bs n at o = case o of
       SLit l -> SkelLiteral (literalText l)
       SHole _ o' -> SkelHole (go o')
 
--- | A runtime value, generically — shared with 'Thena.Protocol.Machine',
+-- | A runtime value, generically — shared with 'Thena.View.Machine',
 -- whose @env@ pane is values with no operand around them at all.
 displayValue :: [Grammar] -> Budget -> Env -> [(Var, Address)] -> Int -> Address -> Value -> ValueView
 displayValue gs budget env bs n at v = case v of

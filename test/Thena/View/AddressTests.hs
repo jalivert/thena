@@ -14,7 +14,7 @@
 -- **And the exact assertions are the second crossing**: for hand-picked
 -- positions the address is written out move by move, so a systematic off-by-one
 -- in the positional parts cannot hide behind a self-consistent walk.
-module Thena.Protocol.AddressTests (tests) where
+module Thena.View.AddressTests (tests) where
 
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
@@ -34,7 +34,14 @@ import Thena.Development.Cursor
   )
 import Thena.Development.Partial (Partial)
 import Thena.DevelopmentTests (genDevelopment)
-import Thena.Driver (Session (..), newSession, oneLine, oneProgram, parseDevelopment)
+import Thena.Driver
+  ( Session
+  , machineOf
+  , newSession
+  , oneLine
+  , oneProgram
+  , parseDevelopment
+  )
 import Thena.Global.Env (emptyGlobals)
 import Thena.Fixtures (allFour, guessShadowing, richTypes, withConstraint)
 import Thena.Engine
@@ -49,7 +56,7 @@ import Thena.Engine
   , step
   )
 import Thena.Standard (expectedBase)
-import Thena.Protocol.Address
+import Thena.View.Address
   ( Address (..)
   , AddressError (..)
   , Move (..)
@@ -61,7 +68,7 @@ import Thena.Protocol.Address
 tests :: TestTree
 tests =
   testGroup
-    "Thena.Protocol.Address"
+    "Thena.View.Address"
     [ testGroup "every position round trips" roundTripTests
     , testGroup "the address, written out" exactTests
     , testGroup "a stale address is refused" refusalTests
@@ -181,7 +188,7 @@ refusalTests =
 -- Clicking (MS7 phase 111 and 113, merged here at 124)
 --
 -- **These followed 'focusing' into this module.** They lived in
--- @Thena.Protocol.MessageTests@ and @Thena.Protocol.ServerTests@, beside a
+-- @Thena.View.MessageTests@ and @Thena.View.ServerTests@, beside a
 -- request type and an envelope that phase 124 deleted; what they test is an
 -- 'Address', so they belong with the other two readings of one.
 -- --------------------------------------------------------------------------
@@ -250,10 +257,10 @@ after :: [String] -> Session
 after = foldl (\s l -> fst (oneLine s l)) newSession
 
 cursorOf :: Session -> Cursor
-cursorOf = cursor . development . sessionMachine
+cursorOf = cursor . development . machineOf
 
 counterOf :: Session -> Int
-counterOf = names . sessionMachine
+counterOf = names . machineOf
 
 clickAt :: Session -> Address -> Session
 clickAt s addr = fst (oneProgram s (focusing addr))

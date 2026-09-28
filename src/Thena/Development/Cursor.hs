@@ -335,7 +335,7 @@ goto x = searchFrom (\y _ -> y == x)
 -- anchor was written three times inside this module before it had a name of
 -- its own (MS7 phase 121).
 --
--- It is the move an 'Thena.Protocol.Address.Address' presumes: an address is
+-- It is the move an 'Thena.View.Address.Address' presumes: an address is
 -- the moves that reach a position /from the root/, so a client's click is
 -- @goto-root@ followed by those moves, and the empty address is @goto-root@
 -- alone rather than an empty program.

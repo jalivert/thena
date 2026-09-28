@@ -22,7 +22,13 @@ import System.Directory (listDirectory)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Driver (Response (..), Session, command, loadProofSource, loadRuleBases)
+import Thena.Driver
+  ( Response (..)
+  , Session
+  , command
+  , loadProofSource
+  , loadRuleBases
+  )
 import Thena.Repl (loadFile, renderResponse, rulesPath, startingSession)
 
 tests :: TestTree

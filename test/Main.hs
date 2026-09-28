@@ -10,15 +10,16 @@ import qualified Thena.Core.TermTests
 import qualified Thena.Core.TypingTests
 import qualified Thena.Core.UnifyTests
 import qualified Thena.CursorTests
-import qualified Thena.Protocol.AddressTests
-import qualified Thena.Protocol.ChartTests
-import qualified Thena.Protocol.DevelopmentTests
-import qualified Thena.Protocol.DisplayTests
-import qualified Thena.Protocol.InstralTests
-import qualified Thena.Protocol.MachineTests
-import qualified Thena.Protocol.RulesTests
-import qualified Thena.Protocol.SurfaceTests
-import qualified Thena.Protocol.TextTests
+import qualified Thena.ViewTests
+import qualified Thena.View.AddressTests
+import qualified Thena.View.ChartTests
+import qualified Thena.View.DevelopmentTests
+import qualified Thena.View.CoreTests
+import qualified Thena.View.InstralTests
+import qualified Thena.View.MachineTests
+import qualified Thena.View.RulesTests
+import qualified Thena.View.SurfaceTests
+import qualified Thena.View.SourceTests
 import qualified Thena.DependentIndexTests
 import qualified Thena.CanonicalTests
 import qualified Thena.DeterminacyTests
@@ -76,15 +77,16 @@ main =
       , Thena.Core.TermTests.tests
       , Thena.Core.TypingTests.tests
       , Thena.Core.UnifyTests.tests
-      , Thena.Protocol.ChartTests.tests
-      , Thena.Protocol.DevelopmentTests.tests
-      , Thena.Protocol.DisplayTests.tests
-      , Thena.Protocol.InstralTests.tests
-      , Thena.Protocol.MachineTests.tests
-      , Thena.Protocol.RulesTests.tests
-      , Thena.Protocol.SurfaceTests.tests
-      , Thena.Protocol.TextTests.tests
-      , Thena.Protocol.AddressTests.tests
+      , Thena.View.ChartTests.tests
+      , Thena.View.DevelopmentTests.tests
+      , Thena.View.CoreTests.tests
+      , Thena.View.InstralTests.tests
+      , Thena.View.MachineTests.tests
+      , Thena.View.RulesTests.tests
+      , Thena.View.SurfaceTests.tests
+      , Thena.View.SourceTests.tests
+      , Thena.ViewTests.tests
+      , Thena.View.AddressTests.tests
       , Thena.CursorTests.tests
       , Thena.DependentIndexTests.tests
       , Thena.CanonicalTests.tests

@@ -20,7 +20,12 @@ import Test.Tasty.QuickCheck
   (Gen, counterexample, elements, forAll, ioProperty, oneof, property, sized, testProperty, withNumTests, (===))
 
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
-import Thena.Driver (Response (..), Session (..), loadProofSource, parseCore)
+import Thena.Driver
+  ( Response (..)
+  , machineOf
+  , loadProofSource
+  , parseCore
+  )
 import Thena.Engine (Machine (..))
 import Thena.Errors (ObjectError (..), ResolveError (..), SyntaxError (..))
 import Thena.Global.Env (GlobalEnv)
@@ -88,7 +93,7 @@ loaded :: IO (GlobalEnv, [Grammar])
 loaded = do
   (s0, _) <- startingSession
   case loadProofSource s0 source of
-    (s1, ProofLoaded {}) -> pure (globals (sessionMachine s1), grammars (sessionMachine s1))
+    (s1, ProofLoaded {}) -> pure (globals (machineOf s1), grammars (machineOf s1))
     (_, other) -> assertFailure (show other)
 
 -- | A constructor applied, as the reader leaves it.
