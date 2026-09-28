@@ -4,19 +4,11 @@
 -- separated by a background tint rather than a border glyph (`MS7-CLI`'s
 -- parked experiment showed brick can do this cleanly; nothing of its
 -- architecture is reused here, only the visual finding). Drives the engine
--- through `Thena.Driver` alone — `oneLine`, `Session`, `Response` — never
--- `Thena.Repl`: that module is the terminal REPL's own rendering layer
--- (prompts, plain-text transcripts), not part of what a structured-view TUI
--- should depend on. See `REPORT.md`'s 2026-09-28 entry.
---
--- **Known temporary gap, blocked on Opus**: booting a session needs the
--- prelude and the standard rule base loaded, in that order, which needs IO —
--- and the only place that logic exists right now is `Thena.Repl.startingSession`,
--- which this module is not allowed to use. Until the bootstrap is split out
--- into its own module, this starts from `Thena.Driver.newSession` instead —
--- a session with neither loaded, so nothing that depends on the standard
--- rule base will elaborate. That is the whole reason this skeleton does not
--- render real views yet either: there is nothing meaningful to view.
+-- through `Thena.Driver` (`oneLine`, `Session`, `Response`) and
+-- `Thena.Files` (`startingSession`, the load-bearing IO bootstrap) — never
+-- `Thena.Repl`, which MS7 phase 130 took off `thena:view` entirely for
+-- exactly this reason: it's the terminal REPL's own line protocol, not a
+-- frontend's. See `REPORT.md`'s 2026-09-28 entries.
 module Tui.App (runTui) where
 
 import Brick
@@ -33,7 +25,8 @@ import qualified Graphics.Vty as V
 import Graphics.Vty.Platform.Unix (mkVty)
 import Lens.Micro (Lens', lens)
 
-import Thena.Driver (Response, Session, newSession, oneLine)
+import Thena.Driver (Response, Session, oneLine)
+import Thena.Files (Trouble, startingSession)
 
 data Name = Input
   deriving (Eq, Ord, Show)
@@ -52,17 +45,21 @@ emptyInput = E.editorText Input (Just 1) Text.empty
 
 runTui :: IO ()
 runTui = do
+  (s0, trouble) <- startingSession
   let st0 = St
-        { stHistory =
-            [ "temporary bootstrap: no prelude, no rule base loaded"
-            , "(blocked on splitting Thena.Repl.startingSession out — see REPORT.md)"
-            ]
+        { stHistory = map showTrouble trouble
         , stInput   = emptyInput
-        , stSession = newSession
+        , stSession = s0
         }
   vty <- mkVty V.defaultConfig
   _ <- customMain vty (mkVty V.defaultConfig) Nothing app st0
   pure ()
+
+-- | Placeholder rendering — real 'Trouble' display waits on the pane layout,
+-- same as 'Response' below. Empty on an ordinary run, since the shipped
+-- prelude and rule base load cleanly.
+showTrouble :: Trouble -> String
+showTrouble = show
 
 app :: App St e Name
 app = App
@@ -93,7 +90,7 @@ draw st =
       ]
   ]
 
--- | A line, run against the (currently prelude-less) session, and its raw
+-- | A line, run against the (now properly booted) session, and its raw
 -- 'Response' dumped with 'show' — a placeholder for real rendering through
 -- 'Thena.View', which wants a pane layout that hasn't been decided yet.
 handleEvent :: BrickEvent Name e -> EventM Name St ()
