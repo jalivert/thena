@@ -29,6 +29,7 @@ import Thena.Driver
   )
 import Thena.Engine (Machine (..))
 import qualified Thena.Language.Earley as Earley
+import Thena.Language.Earley (placeholderChar)
 import Thena.Language.Grammar (Grammar, earleyRules)
 import Thena.View.Chart
   ( FailureView (..)
@@ -120,7 +121,7 @@ redrawTree t = case t of
   ANode n []  -> n
   ANode n cs  -> n ++ "(" ++ intercalate ", " (map redrawTree cs) ++ ")"
   ATokenView x -> x
-  AHoleAt _    -> "?"
+  APlaceholderAt _ -> [placeholderChar]
   ASpliceOf k  -> "${" ++ show k ++ "}"
 
 -- | Mirrors 'Thena.Repl.parseFailureReason'.
@@ -196,7 +197,7 @@ mismatchOffer gs lang before after
 -- which is the REPL's own hole spelling and not this phase's concern),
 -- replayed over an 'OfferView' rather than a raw 'Earley.Offer'.
 redrawOffer :: String -> OfferView -> (String, [(String, String)])
-redrawOffer before (OfferView options wanted rest) =
+redrawOffer before (OfferView options wanted _ rest) =
   case (rest, options ++ wanted) of
     (Just pfx, _) -> single (unwords (map redrawWritten pfx))
     (_, [s]) | isLiteralView s -> single (redrawWritten s)
@@ -213,7 +214,7 @@ isLiteralView s = case s of
 redrawWritten :: SymbolView -> String
 redrawWritten s = case s of
   ALiteralSymbol t -> t
-  _ -> "?"
+  _ -> [placeholderChar]
 
 redrawSymbolText' :: SymbolView -> String
 redrawSymbolText' s = case s of
@@ -245,13 +246,37 @@ regionCases =
       whole <- optionsOf gs "LC" Nothing [] []
       assertBool "app offers no more than LC does" (all (`elem` whole) opts)
       assertBool "and LC offers something app does not" (opts /= whole)
-  , testCase "a splice stands where a term would" $ do
+  , testCase "a placeholder as a run and as its character are the same thing" $ do
       gs <- loaded
-      -- A splice fills a slot exactly as the placeholder does, so what may
-      -- follow it is what may follow a filled slot.
+      -- **The invariant phase 127 owes.** A frontend holding positions sends
+      -- 'WrittenPlaceholder'; one holding only text puts 'placeholderChar' in.
+      -- If those ever stopped agreeing, a region would read differently
+      -- depending on which kind of frontend sent it.
+      asRun <- optionsOf gs "LC" Nothing [WrittenText "( ", WrittenPlaceholder] []
+      asChar <- optionsOf gs "LC" Nothing [WrittenText ("( " <> [placeholderChar])] []
+      asRun @?= asChar
+  , testCase "standing in the box, the offer says it replaces it" $ do
+      gs <- loaded
+      -- The cursor is in the box when the box is the first thing to its right.
+      -- Phase 127: this is the case @tabComplete@ cannot express, because
+      -- haskeline can only rewrite to the left of the cursor.
+      inBox <- replacesAt gs [WrittenText "( "] [WrittenPlaceholder, WrittenText " )"]
+      beside <- replacesAt gs [WrittenText "( "] [WrittenText " )"]
+      (inBox, beside) @?= (True, False)
+  , testCase "and what it offers there is what may stand in the box" $ do
+      gs <- loaded
+      -- Computed as though the placeholder were not there, so the box does not
+      -- count as text already written.
+      inBox <- optionsOf gs "LC" Nothing [WrittenText "( "] [WrittenPlaceholder, WrittenText " )"]
+      without <- optionsOf gs "LC" Nothing [WrittenText "( "] [WrittenText " )"]
+      inBox @?= without
+  , testCase "and a splice stands where a placeholder does" $ do
+      gs <- loaded
+      -- A splice fills a slot exactly as a placeholder does, so what may follow
+      -- it is what may follow a filled slot.
       spliced <- optionsOf gs "LC" Nothing [WrittenText "( ", WrittenSplice] []
-      holed <- optionsOf gs "LC" Nothing [WrittenText "( ?"] []
-      spliced @?= holed
+      held <- optionsOf gs "LC" Nothing [WrittenText "( ", WrittenPlaceholder] []
+      spliced @?= held
   , testCase "the splices of a region are numbered in order, from zero" $ do
       gs <- loaded
       -- **The numbering is only visible in a tree**, which is why this case
@@ -271,6 +296,11 @@ regionCases =
       -- @T@ is @Ty@'s own nonterminal, so @\953@ reads there and not at @LC@.
       displayParse gs "Ty" (Just "base") [WrittenText "\953"] @?= Right (ANode "base" [])
   ]
+
+replacesAt :: [Grammar] -> [Written] -> [Written] -> IO Bool
+replacesAt gs before after = case displayOffer gs "LC" Nothing before after of
+  Left p  -> assertFailure ("displayOffer refused a fixture: " <> show p) >> pure False
+  Right o -> pure (offeredReplaces o)
 
 optionsOf :: [Grammar] -> String -> Maybe String -> [Written] -> [Written] -> IO [String]
 optionsOf gs lang prod before after = case displayOffer gs lang prod before after of

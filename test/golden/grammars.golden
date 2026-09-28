@@ -156,6 +156,32 @@ already equal
 solved: ?ℓ934
 solved: T
 refused: in the context C: a context needs one empty and one extension production
+-- a terminal that writes the placeholder
+chose 936: elaborate
+already equal
+solved: ?ℓ933
+solved: T
+chose 944: elaborate
+already equal
+solved: ?ℓ934
+solved: T
+refused: in the grammar of L, production f: the terminal `█` contains the reserved █, which is how a part of a term that is not written yet is shown
+-- a terminal that merely contains it
+chose 936: elaborate
+already equal
+solved: ?ℓ933
+solved: T
+chose 944: elaborate
+already equal
+solved: ?ℓ934
+solved: T
+refused: in the grammar of L, production f: the terminal `a█b` contains the reserved █, which is how a part of a term that is not written yet is shown
+-- a token class that would read it
+chose 935: elaborate
+already equal
+solved: ?ℓ933
+solved: T
+refused: in the grammar of L, production f: the token class any would read the reserved █, which is how a part of a term that is not written yet is shown
 -- a language named like the built-in tag surface
 chose 936: elaborate
 already equal

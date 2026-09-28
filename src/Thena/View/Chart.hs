@@ -61,7 +61,7 @@ data SymbolView
 data TreeView
   = ANode String [TreeView]
   | ATokenView String
-  | AHoleAt Int
+  | APlaceholderAt Int
   | ASpliceOf Int
   deriving (Eq, Show)
 
@@ -92,6 +92,26 @@ data OfferView = OfferView
     -- therefore does not carry — see 'Earley.offerWanted'. A frontend that
     -- wants to say so may mark these differently; the terminal, which cannot,
     -- lists them beside the rest.
+  , offeredReplaces :: Bool
+    -- ^ **the cursor is standing on a placeholder, and taking any of these
+    -- consumes it** (MS7 phase 127).
+    --
+    -- The editor says so by putting 'WrittenPlaceholder' first in the text to
+    -- the right of the cursor, which is what \"the cursor is in the box\" is;
+    -- the offer is then computed as though the placeholder were not there, so
+    -- what is offered is what may stand /in/ it rather than beside it.
+    --
+    -- **This is what @Thena.Repl.tabComplete@ could never express and why his
+    -- own TUI put the option in front of the placeholder instead of over it.**
+    -- haskeline's completion can only rewrite text to the /left/ of the cursor
+    -- (@CompletionFunc@ returns the surviving prefix of the left side), so the
+    -- terminal has to be standing just /after/ a placeholder to replace one at
+    -- all. A frontend that owns its buffer has no such constraint, and this
+    -- field is what tells it there is something to delete.
+    --
+    -- **Nothing is filtered on account of it.** A lone slot offered into a
+    -- placeholder would replace a box with a box, which is a no-op — and which
+    -- of the offers are worth showing is the editor's, not ours.
   , offeredRest :: Maybe [SymbolView]
     -- ^ the rest of the one production the cursor is inside, as much of it as
     -- the text after the cursor does not already supply — see
@@ -128,8 +148,17 @@ displayParse gs lang prod region =
 -- the host terms written beside the region. Nothing carries the index, so
 -- nothing can disagree about it.
 data Written
-  = WrittenText String  -- ^ written characters; a placeholder is one of them
-  | WrittenSplice       -- ^ one splice
+  = WrittenText String   -- ^ written characters
+  | WrittenSplice        -- ^ one splice
+  | WrittenPlaceholder
+    -- ^ **one part of the term not written yet** (MS7 phase 127).
+    --
+    -- **The same thing as 'Thena.Language.Earley.placeholderChar' inside a
+    -- 'WrittenText', said the other way.** A frontend that keeps its
+    -- placeholders as positions — which it must, if a box is to come back when
+    -- the cursor leaves it — hands them over as runs and never splices a glyph
+    -- into a string; a frontend that has only text puts the character in. Both
+    -- reach the reader as 'Thena.Language.Earley.Placeholder'.
   deriving (Eq, Show)
 
 -- | Why there is no offer to make: the region names something that is not
@@ -159,14 +188,18 @@ displayOffer gs lang prod before after
   | lang `notElem` languageNames gs = Left (NoSuchLanguage lang)
   | Just p <- prod, p `notElem` productionNames gs lang = Left (NoSuchProduction lang p)
   | otherwise =
-      Right (offerView (Earley.offer (earleyRules gs) (startOf lang prod) left right))
+      Right (offerView replacing (Earley.offer (earleyRules gs) (startOf lang prod) left right))
   where
+    -- The cursor is in the box when the box is the first thing to its right.
+    (replacing, after') = case after of
+      WrittenPlaceholder : rest -> (True, rest)
+      _                         -> (False, after)
     -- **The two sides are numbered as one region**, so the first splice to the
     -- right of the cursor continues the count rather than restarting it: a
     -- region has one list of host terms beside it, and which splice is which
     -- does not depend on where the cursor happens to stand.
     (left, k0) = piecesFrom 0 before
-    (right, _) = piecesFrom k0 after
+    (right, _) = piecesFrom k0 after'
 
 -- | A region reads as a term of its language, or of the one production it was
 -- written with — 'Earley.StartAt' and 'Earley.StartRule', which is the
@@ -181,14 +214,16 @@ piecesFrom :: Int -> [Written] -> ([Earley.Piece], Int)
 piecesFrom k0 = go k0
   where
     go k []                     = ([], k)
-    go k (WrittenText t : rest)  = let (ps, k') = go k rest in (Earley.pieces t ++ ps, k')
-    go k (WrittenSplice : rest)  = let (ps, k') = go (k + 1) rest in (Earley.Splice k : ps, k')
+    go k (WrittenText t : rest)      = let (ps, k') = go k rest in (Earley.pieces t ++ ps, k')
+    go k (WrittenSplice : rest)      = let (ps, k') = go (k + 1) rest in (Earley.Splice k : ps, k')
+    go k (WrittenPlaceholder : rest) = let (ps, k') = go k rest in (Earley.Placeholder : ps, k')
 
-offerView :: Earley.Offer -> OfferView
-offerView o =
+offerView :: Bool -> Earley.Offer -> OfferView
+offerView replacing o =
   OfferView
     (map symbolView (Earley.offerOptions o))
     (map symbolView (Earley.offerWanted o))
+    replacing
     (fmap (map symbolView) (Earley.offerRest o))
 
 failureView :: Earley.ParseFailure -> FailureView
@@ -208,5 +243,5 @@ treeView :: Earley.Tree -> TreeView
 treeView t = case t of
   Earley.Node n cs -> ANode n (map treeView cs)
   Earley.Token x -> ATokenView x
-  Earley.HoleAt p -> AHoleAt p
+  Earley.PlaceholderAt p -> APlaceholderAt p
   Earley.SpliceOf k -> ASpliceOf k

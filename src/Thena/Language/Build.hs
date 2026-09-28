@@ -40,7 +40,7 @@ import qualified Data.List.NonEmpty as NE
 
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
 import Thena.Errors (BuildError (..))
-import Thena.Language.Earley (Piece (..), Tree (..))
+import Thena.Language.Earley (Piece (..), Tree (..), placeholderChar)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Grammar
   ( Argument (..)
@@ -79,6 +79,11 @@ buildCore gs splices = build
     slot name (a, child) = case (argumentSort a, child) of
       (_, SpliceOf k)    -> supplied k
       (OfClass _ t _, _) -> Primitive <$> literal name (argumentName a) t child
+      -- **A placeholder is an incompleteness and not a malformed shape** (MS7
+      -- phase 127): it names the slot that is empty, as 'literal' already does
+      -- for a class slot, rather than falling to 'build's catch-all and
+      -- reporting the glyph as a reading the production does not take.
+      (OfLanguage _, PlaceholderAt _) -> Left (Incomplete (argumentName a))
       (OfLanguage _, _)  -> build child
 
     supplied k = case drop k splices of
@@ -114,6 +119,7 @@ buildSurface gs splices = build
     slot name (a, child) = case (argumentSort a, child) of
       (_, SpliceOf k) -> supplied k
       (OfClass _ t _, _) -> SurfaceLiteral <$> literal name (argumentName a) t child
+      (OfLanguage _, PlaceholderAt _) -> Left (Incomplete (argumentName a))
       (OfLanguage _, _) -> build child
 
     supplied k = case drop k splices of
@@ -147,6 +153,7 @@ skeletonOf gs holes = go
       (OfClass _ t _, SpliceOf k) -> hole (AtPrimitive t) k
       (OfLanguage _, SpliceOf k)  -> hole AtTerm k
       (OfClass _ t _, _) -> SLit <$> literal name (argumentName a) t child
+      (OfLanguage _, PlaceholderAt _) -> Left (Incomplete (argumentName a))
       (OfLanguage _, _)  -> go child
 
     hole what k = case drop k holes of
@@ -173,7 +180,7 @@ literal name x t child = case (child, t) of
   (Token s, GlobalName "String") -> Right (LString s)
   (Token [c], GlobalName "Char") -> Right (LChar c)
   (Token s, GlobalName "Int") | [(k, "")] <- reads s -> Right (LInt k)
-  (HoleAt _, _) -> Left (Incomplete x)
+  (PlaceholderAt _, _) -> Left (Incomplete x)
   _ -> Left (NotForSlot name x)
 
 -- | What a tree is, for a message about one that is not a term.
@@ -181,7 +188,7 @@ shapeOf :: Tree -> String
 shapeOf tree = case tree of
   Node n _   -> n
   Token t    -> t
-  HoleAt _   -> "?"
+  PlaceholderAt _ -> [placeholderChar]
   SpliceOf k -> "${" ++ show k ++ "}"
 
 -- | The tagged literal a term is written as — @LC`( λ x : ι . x )`@ — or
@@ -450,11 +457,24 @@ productionNames gs lang =
 -- **A splice is one column**, whatever it holds, because it completes one slot
 -- (@ms6\/SPEC.md@ §7.6). Its number is its position among the splices, which
 -- is how 'buildSurface' and 'buildCore' find it again.
+--
+-- **The text goes through 'Earley.pieces', so a placeholder in a written region
+-- is one — MS7 phase 127.** It was @map Char txt@, which made this the one
+-- reader of the three that could not see a placeholder at all: a @\9608@ in a
+-- tagged term literal in a @.thena@ file was an unexpected character, while the
+-- same region typed at the prompt read as a term with a part left unwritten.
+--
+-- **This is the reader the phase nearly missed.** Grepping for callers of
+-- 'Earley.pieces' does not find it, because it built its 'Char' pieces by hand;
+-- what found it was loading a file and reading the error. His ruling of
+-- 2026-09-28 is that the glyph means one thing everywhere — which is also what
+-- makes a placeholder in a /stored/ file possible, and the interactive
+-- term-filling mode and an LSP extension both need that.
 objectInput :: [Either String a] -> [Piece]
 objectInput = go 0
   where
     go _ [] = []
-    go k (Left txt : rest)  = map Char txt ++ go k rest
+    go k (Left txt : rest)  = Earley.pieces txt ++ go k rest
     go k (Right _ : rest)   = Splice k : go (k + 1) rest
 
 -- | What the region says, for a message. A splice stands for itself: the

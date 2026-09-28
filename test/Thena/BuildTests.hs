@@ -169,9 +169,9 @@ terms =
       (_, gs) <- loaded
       let t = con "twice" [con "var" [Primitive (LString "a")]]
       (readTerm gs "{ a a }", printRegion gs host t) @?= (Right t, Just "{ a a }")
-  , testCase "a hole is not a term" $ do
+  , testCase "a placeholder is not a term" $ do
       (_, gs) <- loaded
-      readTerm gs "( \955 ? : \953 . x )" @?= Left (Incomplete "x")
+      readTerm gs "( \955 \9608 : \953 . x )" @?= Left (Incomplete "x")
   , testCase "a name the class would not read back is spliced instead" $ do
       (_, gs) <- loaded
       printRegion gs host (con "var" [Primitive (LString "a b")])
@@ -225,6 +225,28 @@ literals =
       (_, gs) <- loaded
       r <- elaboratedTerm ("LC" ++ region "( \955 x : \953 . x )")
       fmap (printRegion gs host) r @?= Right (Just "( \955 x : \953 . x )")
+    -- **The reader the phase nearly missed — MS7 phase 127.** A tagged term
+    -- literal in a surface module reaches the parser through
+    -- 'Thena.Language.Build.objectInput', which built its pieces with
+    -- @map Char@ and so could not see a placeholder at all: the same region
+    -- read as a term at the prompt and as an unexpected character in a file.
+    -- Nothing here covered it, because every other placeholder test goes
+    -- through 'Earley.pieces' directly ('readTerm' above does).
+    --
+    -- **What it must report is incompleteness, not a bad character**, which is
+    -- the graceful outcome his ruling of 2026-09-28 asks for: the placeholder is
+    -- recognised, the term is known to be unfinished, and the author is told
+    -- which slot is empty.
+  , testCase "a placeholder in a stored literal is recognised, not a bad character" $ do
+      r <- elaboratedTerm ("LC" ++ region "( \9608 x )")
+      r @?= Left (ObjectFailed (ObjectNotATerm "LC" (Incomplete "M")))
+    -- A placeholder completes any slot, including a token class's, so a region
+    -- that is nothing but one reads as the shortest production that takes a
+    -- slot — @var@ — with its own slot empty. Still an incompleteness, and it
+    -- names the slot, which is what matters.
+  , testCase "and a region that is only a placeholder is incomplete too" $ do
+      r <- elaboratedTerm ("LC" ++ region "\9608")
+      r @?= Left (ObjectFailed (ObjectNotATerm "LC" (Incomplete "x")))
   , testCase "a splice supplies the slot it stands in" $ do
       r <- elaborated
              ("u : LC\nu = LC[var]" ++ region "q"

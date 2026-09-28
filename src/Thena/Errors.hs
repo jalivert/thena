@@ -105,7 +105,12 @@ data BuildError
   = NoSuchProduction String
     -- ^ a reading of a production no installed grammar has
   | Incomplete String
-    -- ^ a hole: a constructor cannot have a missing argument (§7.6)
+    -- ^ **a placeholder, and the slot it stands in**: a constructor cannot have
+    -- a missing argument (§7.6).
+    --
+    -- **Never \"a hole\" — HIS RULING, 2026-09-27**, and this comment said so
+    -- until MS7 phase 127. A DC hole is saved and solved; a placeholder is a
+    -- part of a term nobody has written yet.
   | NotForSlot String String
     -- ^ the production, and a slot whose reading is not what it takes
   deriving (Eq, Show)

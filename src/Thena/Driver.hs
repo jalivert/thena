@@ -1331,7 +1331,7 @@ dispatch s name arg = case name of
   ":done"  -> noArgument (s, Rejected NotParsing)
   -- | @:parse ‹Language› ‹text›@ — parse an object term with an installed
   -- grammar and print its reading (MS6 phase 102, his request, 2026-09-19).
-  -- A @?@ in the text is a missing slot. It changes no state.
+  -- A @█@ in the text is a part not written yet. It changes no state.
   -- With no text, **enter the interactive mode** (phase 102b): every line is
   -- a term of the language until @:done@, and Tab at the cursor asks the
   -- parser what fits there ("Thena.Repl").
@@ -2022,7 +2022,7 @@ commandSummary =
   , (":core ‹t› / :dev ‹p›",     "parse a term / a development and print it")
   , (":surface ‹t›",             "parse a surface term and print it")
   , (":infer / :infer ‹t›",      "the type of the focus / of a surface term")
-  , (":parse ‹L› ‹text›",         "parse an object term; ? is a missing slot")
+  , (":parse ‹L› ‹text›",         "parse an object term; █ is a part not written yet")
   , (":parse ‹L› … :done",         "parse every line as an L term; Tab at the cursor")
   , (":whnf / :whnf ‹t›",        "reduce the focus / a term, without committing")
   , (":convert ‹t› ≟ ‹u›",      "are two terms convertible")

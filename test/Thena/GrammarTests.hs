@@ -247,6 +247,18 @@ refused =
   , block "two productions of one name" "language L, M where\n  f -> a\n  f -> b" (ConstructorTaken "f")
   , contextBlock "a context without one empty and one extension production"
       "context C, G where\n  e -> \183\n  f -> G G" ContextShape
+    -- MS7 phase 127, his ruling of 2026-09-28: the placeholder's glyph is
+    -- reserved, and a grammar that could write it or read it is refused so that
+    -- one glyph never means two things in one buffer.
+  , inProduction "a terminal that writes the placeholder"
+      "language L, M where\n  f -> \9608 M" "f" (ReservedTerminal "\9608")
+  , inProduction "a terminal that merely contains it"
+      "language L, M where\n  f -> a\9608b M" "f" (ReservedTerminal "a\9608b")
+  , ( ( "a token class that would read it"
+      , "module M where\n\nany : Token String\nany = /./\n\nlanguage L, M where\n  f -> any M\n"
+      )
+    , GrammarError LanguageBlock "L" (InProduction "f" (ReservedClass "any"))
+    )
   ]
     -- **A built-in tag may not name a language** (moved here from MS5's
     -- grammars at phase 106). A rule base reads an installed grammar's tag

@@ -2750,6 +2750,52 @@ that one production, which is what a region written with a production named on i
 means. Asking for a language or a production nothing declared is refused by name
 rather than answered with an empty offer.
 
+### A part of a term you have not written yet is `█`, and `█` is reserved
+
+A region may have parts left unwritten, and one glyph says so:
+
+```
+LC`( █ x )`          -- the first argument has not been written yet
+```
+
+`█` (U+2588 FULL BLOCK) means exactly that, **everywhere a region is read** — at
+the prompt, in a frontend, and in a `.thena` file on disk. It is not a hole: a
+hole is written `?x`, is part of your program, and is solved by elaboration; a
+placeholder is a part of a term nobody has written yet, and a term that still has
+one does not elaborate. You are told which slot is empty:
+
+```
+in LC`( █ x )`: the M is missing
+```
+
+**No grammar may use `█`.** A production that writes it, or a token class that
+would read it, is refused when the block is declared:
+
+```
+language L, M where
+  f -> █ M
+  → the terminal `█` contains the reserved █, which is how a part of a term
+    that is not written yet is shown
+```
+
+That is the price of the feature, and it is paid deliberately: a glyph that meant
+a placeholder in one region and a terminal in another could be told apart only by
+looking closely, which fails anyone who cannot — and someone will type it to see
+what happens.
+
+**It was `?` until MS7, and `?` is now yours to use.** A grammar may write `?` as
+an ordinary terminal:
+
+```
+language Q where
+  opt -> ? Q
+```
+
+An editor need not put the character in its text at all: a placeholder can be
+handed over as its own run, beside the splices, so a frontend that tracks
+positions renders whatever it likes — an empty box, a highlight — and never
+splices a glyph into a string.
+
 ### A project is text on disk, and there is no other format
 
 A project is the files and the order you load them in. There is no binary form,

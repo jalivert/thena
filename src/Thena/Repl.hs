@@ -484,7 +484,8 @@ renderResponse s resp = let gs = grammars (machineOf s) in case resp of
   RenderedSurface t -> [renderSurface t]
   ParsedObject t -> [renderTree t]
   ParsingEntered lang ->
-    [ "each line is an " ++ lang ++ " term: Tab shows what fits at the cursor, ? is a missing slot, :done leaves" ]
+    [ "each line is an " ++ lang ++ " term: Tab shows what fits at the cursor, "
+        ++ [Earley.placeholderChar] ++ " is a part not written yet, :done leaves" ]
   ParsingLeft lang -> ["done parsing " ++ lang]
   ObjectUnparsed lang text why -> [renderUnparsed lang text why]
   Rendered t     -> [renderCore gs (counter s) (contextOf s) t]
@@ -1726,6 +1727,14 @@ renderDeclareError gs e = case e of
       OccurrenceNotAlone x -> "the occurrence " ++ x ++ " must be the production's only argument, because substitution replaces the whole of it"
       ScopeElsewhere x -> "a binder is free in " ++ x ++ ", which is not of this language, so substitution could not rename in it"
       NotationBinds x -> x ++ " is written as a binding form, and a judgment's notation binds nothing"
+      -- MS7 phase 127. The message names the glyph rather than describing it,
+      -- because the author has to find it in their own source.
+      ReservedTerminal w ->
+        "the terminal `" ++ w ++ "` contains the reserved " ++ [Earley.placeholderChar]
+          ++ ", which is how a part of a term that is not written yet is shown"
+      ReservedClass x ->
+        "the token class " ++ x ++ " would read the reserved " ++ [Earley.placeholderChar]
+          ++ ", which is how a part of a term that is not written yet is shown"
     -- MS6 phase 108, §6.2–6.4.
     InRule r why -> blockAt k g ++ ", rule " ++ r ++ ": " ++ case why of
       RuleUnparsed part what text failure ->
@@ -2217,7 +2226,7 @@ renderTree t = case t of
   Earley.Node n [] -> n
   Earley.Node n cs -> n ++ "(" ++ intercalate ", " (map renderTree cs) ++ ")"
   Earley.Token x -> x
-  Earley.HoleAt _ -> "?"
+  Earley.PlaceholderAt _ -> [Earley.placeholderChar]
   Earley.SpliceOf k -> "${" ++ show k ++ "}"
 
 -- | Why a tagged term literal is not one term of its language. Shared by the
@@ -2312,7 +2321,7 @@ tabOffer s input = case parsingLanguage s of
 tabComplete :: [Earley.Rule] -> String -> (String, String) -> (String, [(String, String)])
 tabComplete rules lang (leftReversed, right) =
   case leftReversed of
-    '?' : before -> answer (reverse before) True
+    c : before | c == Earley.placeholderChar -> answer (reverse before) True
     _ -> answer (reverse leftReversed) False
   where
     answer before replacing =
@@ -2327,7 +2336,7 @@ tabComplete rules lang (leftReversed, right) =
             (_, ss) -> (leftReversed, [ ("", shown s) | s <- ss ])
     written s = case s of
       Earley.Literal t -> t
-      _ -> "?"
+      _ -> [Earley.placeholderChar]
     isLiteral s = case s of
       Earley.Literal _ -> True
       _ -> False

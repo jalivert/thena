@@ -30,6 +30,8 @@ module Thena.Language.Earley
     -- * Input
   , Piece (..)
   , pieces
+  , placeholderChar
+  , regionPieces
     -- * The chart
   , Chart
   , Item (..)
@@ -93,14 +95,78 @@ data Start = StartAt String | StartRule String
 -- | One column's worth of input.
 data Piece
   = Char Char
-  | Hole       -- ^ a missing slot (§7.6): completes any expected slot, never a terminal
+  | Placeholder
+    -- ^ **a part of the term that has not been written yet** (§7.6): completes
+    -- any expected slot, never a terminal.
+    --
+    -- **It is a placeholder and never a hole — HIS, 2026-09-27.** /"The parsing
+    -- placeholder is very distinctly not the same thing and not to be confused
+    -- with DC holes."/ A DC hole is a 'Thena.Development.Component.Claim' or an
+    -- unsolved @Guess@ and belongs to a saved development; a surface hole
+    -- (@?x@, 'Thena.Surface.Concrete.SurfaceHole') is written in a program and
+    -- solved by elaboration. This is neither: it is a position in a term that
+    -- is still being written.
   | Splice Int -- ^ a slot's value supplied from outside, by index (§7.6, phase 104)
   deriving (Eq, Show)
 
--- | Text as pieces, with @?@ as a hole — the REPL's spelling (his ruling,
--- 2026-09-19), writable until the structural editor.
+-- | The one character a placeholder is written as, wherever text is read as a
+-- term of an object language — MS7 phase 127.
+--
+-- **It is reserved, and a grammar may not use it — HIS RULING, 2026-09-28.**
+-- 'Thena.Language.Grammar.checkGrammar' refuses a production that writes it or
+-- a token class that would scan it, so "reserved" is a fact rather than a
+-- convention. His reason for paying that price: a glyph that meant a
+-- placeholder in one region and a terminal in another would be told apart only
+-- by looking carefully, /"and there are visually impaired people"/ — and
+-- someone will type it to see what happens inside ten minutes and expect it to
+-- work.
+--
+-- **Why a character at all, and why the parser owns it — HIS, 2026-09-28.** It
+-- was @?@ until this phase, on an explicit stopgap: /"writable until the
+-- structural editor"/, which is now off the table. The replacement is not "no
+-- character": a placeholder has to be meaningful in a *stored* file for the
+-- interactive term-filling mode and an LSP extension to be possible at all, and
+-- neither can exist if a placeholder in a file is a parse error. So the reader
+-- owns the spelling, and one spelling serves the prompt, the editor and the
+-- file.
+--
+-- An editor need not put it in text: "Thena.View.Chart.Written" carries a
+-- placeholder as its own run, so a frontend holding positions renders whatever
+-- glyph it likes. The two are the same thing said twice, deliberately.
+placeholderChar :: Char
+placeholderChar = '\9608'   -- FULL BLOCK
+
+-- | Text as pieces.
+--
+-- 'placeholderChar' is the only character with a meaning of its own here; a
+-- splice cannot be written as text and arrives from 'regionPieces' or from a
+-- frontend's own runs.
 pieces :: String -> [Piece]
-pieces = map (\c -> if c == '?' then Hole else Char c)
+pieces = map (\c -> if c == placeholderChar then Placeholder else Char c)
+
+-- | A region's text as pieces, and the names its splices name, in order.
+--
+-- **The one reader of a region's written form — MS7 phase 127.** It was
+-- @Thena.Rules.regionPieces@, which knew @${name}@ and not the placeholder,
+-- beside 'pieces', which knew the placeholder and not @${name}@; so the same
+-- text meant different things depending on which path reached it, and a
+-- placeholder in a stored file was an unexpected character. One function, and
+-- both spellings, so the prompt and the file agree by construction.
+--
+-- The text keeps its @${x}@: a region is stored as written and read again by
+-- whoever resolves it.
+regionPieces :: String -> ([Piece], [String])
+regionPieces = go 0
+  where
+    go _ [] = ([], [])
+    go k cs = case cs of
+      '$' : '{' : rest
+        | (nm, '}' : more) <- break (== '}') rest ->
+            let (ps, ns) = go (k + 1) more in (Splice k : ps, nm : ns)
+      c : rest ->
+        let (ps, ns) = go k rest
+            p = if c == placeholderChar then Placeholder else Char c
+         in (p : ps, ns)
 
 -- ---------------------------------------------------------------------------
 -- The chart
@@ -242,7 +308,7 @@ charsFrom inp k = case Map.lookup k inp of
 data Tree
   = Node String [Tree]
   | Token String        -- ^ the text a token class matched
-  | HoleAt Int          -- ^ a missing slot, at its column
+  | PlaceholderAt Int   -- ^ a placeholder, at its column
   | SpliceOf Int
   deriving (Eq, Show)
 
@@ -343,7 +409,7 @@ readings c =
 
     slotTree p piece = case piece of
       Splice k -> SpliceOf k
-      _        -> HoleAt p
+      _        -> PlaceholderAt p
 
 -- | The first repeated name whose occurrences do not all agree, if any.
 unequal :: Rule -> [Tree] -> Maybe Reading
@@ -358,8 +424,8 @@ unequal rule kids =
 
 compatible :: Tree -> Tree -> Bool
 compatible a b = case (a, b) of
-  (HoleAt _, _) -> True
-  (_, HoleAt _) -> True
+  (PlaceholderAt _, _) -> True
+  (_, PlaceholderAt _) -> True
   (SpliceOf _, _) -> True
   (_, SpliceOf _) -> True
   (Token x, Token y) -> x == y
@@ -537,7 +603,7 @@ offer rs start left right = Offer options wanted rest
       chart rs start (left ++ concatMap (\x -> Char ' ' : written x) symbols ++ [Char ' '] ++ right)
     written s = case s of
       Literal t -> map Char t
-      _ -> [Hole]
+      _ -> [Placeholder]
 
     blank p = case p of
       Char ch -> isSpace ch

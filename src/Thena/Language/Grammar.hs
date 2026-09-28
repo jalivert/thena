@@ -44,7 +44,8 @@ import Data.Maybe (isJust)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), tokenName)
 import qualified Thena.Language.Earley as Earley
-import Thena.Language.Regex (Regex, parseRegex)
+import Thena.Language.Earley (placeholderChar)
+import Thena.Language.Regex (Regex, matches, parseRegex)
 import Thena.Errors (BuildError, SyntaxError, Warning (..))
 import Thena.Global.Env (ArgRole (..), GlobalEnv, definitionBody, definitionType, isDeclared, lookupDefinition)
 import Thena.Language.Reader (Block (..), Metadata (..), Production (..), RawItem (..), RawRule (..))
@@ -190,6 +191,13 @@ data ProductionProblem
   | NotationBinds String
     -- ^ a judgment's notation writes a binding form: its slots are indices,
     -- and nothing binds in an index (MS6 phase 108)
+  | ReservedTerminal String
+    -- ^ a terminal that writes 'Thena.Language.Earley.placeholderChar'
+    -- (MS7 phase 127)
+  | ReservedClass String
+    -- ^ a token class that would scan it (MS7 phase 127) — the same refusal one
+    -- step further back, because a class that reads the glyph makes it a term
+    -- exactly as a terminal does
   deriving (Eq, Show)
 
 -- | Validate a block against the grammars already installed and the global
@@ -288,8 +296,27 @@ checkGrammar installed env b = do
                     | Just xs <- [declared], x <- xs, x `notElem` bracketed ]
       Right (GProduction (GlobalName (productionName p)) items arguments, vacuous)
 
+    -- **The placeholder's glyph is reserved — HIS RULING, 2026-09-28, MS7 phase
+    -- 127.** A grammar that could write it or read it would make one glyph mean
+    -- two things in the same buffer, told apart only by looking closely; his
+    -- reason for refusing that outright is that it fails anyone who cannot, and
+    -- that a user will type it to see what happens within ten minutes. The
+    -- check is here so that \"reserved\" is a property of every installed
+    -- grammar rather than a convention nothing enforces.
+    reserved w
+      | placeholderChar `elem` w = Left (ReservedTerminal w)
+      | otherwise = Right ()
+
+    -- A class is refused when it would *accept* the glyph, which is what makes
+    -- it a term. @/./@ does; @/[a-z]+/@ does not.
+    reservedClass x srt = case srt of
+      OfClass _ _ re | any (> 0) (matches re [placeholderChar]) -> Left (ReservedClass x)
+      _ -> Right ()
+
     item i = case i of
-      Word w -> Right (maybe (Terminal w) (\srt -> Slot w srt []) (sortOf w))
+      Word w -> case sortOf w of
+        Nothing  -> reserved w >> Right (Terminal w)
+        Just srt -> reservedClass w srt >> Right (Slot w srt [])
       Binding hd _ | kind == JudgmentBlock -> Left (NotationBinds hd)
       Binding hd bs -> case sortOf hd of
         Just srt@(OfLanguage _) -> Right (Slot hd srt bs)
