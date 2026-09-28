@@ -2796,6 +2796,24 @@ handed over as its own run, beside the splices, so a frontend that tracks
 positions renders whatever it likes — an empty box, a highlight — and never
 splices a glyph into a string.
 
+### The offer lists the productions that fit, whole
+
+Ask what may be written at a position and you are told three things: the symbols
+that fit, what the position is waiting for, and **every production that may begin
+there, with its shape and its skeleton**.
+
+```
+app:   ( LC LC )          -- what to show in a list
+       ( █ █ )            -- what goes in the buffer when it is chosen
+```
+
+The skeleton arrives as runs, not as a string, so an editor that inserts it knows
+where the unwritten parts are without going looking for them — and you can step
+straight into the first one.
+
+Only productions that could still leave the line finishable are listed. Inside a
+parenthesis with one slot left, a production needing two does not appear.
+
 ### A project is text on disk, and there is no other format
 
 A project is the files and the order you load them in. There is no binary form,

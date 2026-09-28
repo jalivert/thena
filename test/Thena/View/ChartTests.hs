@@ -19,6 +19,7 @@ module Thena.View.ChartTests (tests) where
 
 import Data.Char (isSpace)
 import Data.List (intercalate)
+import Data.Maybe (listToMaybe)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
@@ -37,6 +38,7 @@ import Thena.View.Chart
   , OfferView (..)
   , SymbolView (..)
   , TreeView (..)
+  , ProductionView (..)
   , Written (..)
   , displayOffer
   , displayParse
@@ -51,6 +53,7 @@ tests =
     [ testGroup "is this text one term (Earley.parse)" parseCases
     , testGroup "what may stand at the cursor (Earley.offer)" offerCases
     , testGroup "a region, text and splices (phase 125)" regionCases
+    , testGroup "the productions offered whole (phase 127b)" productionCases
     ]
 
 -- | @Ty@ and @LC@, exactly `ms6\/SPEC.md`'s canonical shape, unbracketed
@@ -197,7 +200,7 @@ mismatchOffer gs lang before after
 -- which is the REPL's own hole spelling and not this phase's concern),
 -- replayed over an 'OfferView' rather than a raw 'Earley.Offer'.
 redrawOffer :: String -> OfferView -> (String, [(String, String)])
-redrawOffer before (OfferView options wanted _ rest) =
+redrawOffer before (OfferView options wanted _ rest _) =
   case (rest, options ++ wanted) of
     (Just pfx, _) -> single (unwords (map redrawWritten pfx))
     (_, [s]) | isLiteralView s -> single (redrawWritten s)
@@ -306,3 +309,96 @@ optionsOf :: [Grammar] -> String -> Maybe String -> [Written] -> [Written] -> IO
 optionsOf gs lang prod before after = case displayOffer gs lang prod before after of
   Left p  -> assertFailure ("displayOffer refused a fixture: " <> show p) >> pure []
   Right o -> pure (map redrawSymbolText (offeredOptions o ++ offeredWanted o))
+
+-- ---------------------------------------------------------------------------
+-- The productions offered whole
+--
+-- **His request of 2026-09-28**, and one of the features he named as mattering
+-- most: the dropdown should list the productions that may stand here, with their
+-- shapes, and inserting one should put its skeleton in the buffer with the parts
+-- you still have to write left as boxes.
+--
+-- **The chart had this all along.** What these cases pin down is that the view
+-- now carries it, that the label and the insertion are the same body rendered
+-- two ways, and that a production which could not leave the line finishable is
+-- not offered.
+
+productionCases :: [TestTree]
+productionCases =
+  [ testCase "at the start of an LC, every LC production is offered" $ do
+      gs <- loaded
+      -- Declaration order, which is the order the author reads their own file
+      -- in. This fixture's LC has exactly these three.
+      named gs [] [] >>= (@?= ["var", "abs", "app"])
+  , testCase "with their shapes, which is what a list shows" $ do
+      gs <- loaded
+      shapeOf gs [] [] "app" >>= (@?= Just ["(", "LC", "LC", ")"])
+  , -- **His own example, exactly.** @app: ( LC LC )@ in the list, @( █ █ )@ in
+    -- the buffer — and the boxes arrive as runs, so the editor knows where they
+    -- are without scanning the text it just inserted.
+    testCase "and inserting one writes its terminals and leaves boxes" $ do
+      gs <- loaded
+      insertOf gs [] [] "app"
+        >>= (@?= Just
+              [ WrittenText "( "
+              , WrittenPlaceholder
+              , WrittenText " "
+              , WrittenPlaceholder
+              , WrittenText " )"
+              ])
+  , testCase "a binding form's binder is a box too, being a slot" $ do
+      gs <- loaded
+      -- @abs@ is @( λ x : T . E[x] )@: three slots, one of them a token class.
+      insertOf gs [] [] "abs"
+        >>= (@?= Just
+              [ WrittenText "( λ "
+              , WrittenPlaceholder
+              , WrittenText " : "
+              , WrittenPlaceholder
+              , WrittenText " . "
+              , WrittenPlaceholder
+              , WrittenText " )"
+              ])
+  , -- **The filter earns its place, and this is the case that shows it.**
+    -- Inside a paren that is already closed, @var@ is dropped while @abs@ and
+    -- @app@ survive: this fixture's grammar has no parenthesis production, so
+    -- @( w )@ can never be finished, and the two that open with a @(@ of their
+    -- own can.
+    testCase "a production that could not be finished here is not offered" $ do
+      gs <- loaded
+      named gs [WrittenText "( "] [WrittenText " )"] >>= (@?= ["abs", "app"])
+  , -- **The crossing, and it is the assertion worth having here.** A production
+    -- may begin at the cursor only if its opening symbol may be written there,
+    -- so every offered production's first symbol has to be among the options the
+    -- same offer gives. The converse does not hold — an option may continue a
+    -- production already open rather than start one — and that is exactly why
+    -- this field is not derivable from 'offeredOptions'.
+    testCase "every offered production opens with something the offer allows" $ do
+      gs <- loaded
+      let opening p = case productionShape p of
+            s : _ -> redrawSymbolText s
+            []    -> ""
+          at (before, after) = do
+            ps <- offered gs before after
+            os <- optionsOf gs "LC" Nothing before after
+            pure [ (productionName p, opening p) | p <- ps, opening p `notElem` os ]
+      bad <- concat <$> mapM at
+        [ ([], [])
+        , ([WrittenText "( "], [WrittenText " )"])
+        , ([WrittenText "( λ x : "], [WrittenText " . x )"])
+        , ([WrittenText "( "], [])
+        ]
+      bad @?= []
+  , testCase "and inside a Ty slot it is Ty's productions, not LC's" $ do
+      gs <- loaded
+      named gs [WrittenText "( λ x : "] [WrittenText " . x )"] >>= (@?= ["base", "arrow"])
+  ]
+  where
+    offered gs before after = case displayOffer gs "LC" Nothing before after of
+      Left p  -> assertFailure ("displayOffer refused a fixture: " <> show p) >> pure []
+      Right o -> pure (offeredProductions o)
+    named gs before after = map productionName <$> offered gs before after
+    one gs before after n =
+      (\ps -> listToMaybe [ p | p <- ps, productionName p == n ]) <$> offered gs before after
+    shapeOf gs before after n = fmap (map redrawSymbolText . productionShape) <$> one gs before after n
+    insertOf gs before after n = fmap productionInsert <$> one gs before after n

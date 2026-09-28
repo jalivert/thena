@@ -39,10 +39,13 @@ module Thena.View.Chart
   , FailureView (..)
   , OfferView (..)
   , Written (..)
+  , ProductionView (..)
   , OfferProblem (..)
   , displayParse
   , displayOffer
   ) where
+
+import Data.List (intersperse)
 
 import Thena.Language.Build (languageNames, productionNames)
 import Thena.Language.Grammar (Grammar, earleyRules)
@@ -116,6 +119,33 @@ data OfferView = OfferView
     -- ^ the rest of the one production the cursor is inside, as much of it as
     -- the text after the cursor does not already supply — see
     -- 'Earley.offerRest'.
+  , offeredProductions :: [ProductionView]
+    -- ^ **every production that may begin at the cursor, to list and to insert**
+    -- (MS7 phase 127b) — see 'Earley.offerProductions'.
+  }
+  deriving (Eq, Show)
+
+-- | A production a frontend may offer whole: what to call it, what it looks
+-- like, and what to put in the buffer when it is chosen.
+--
+-- **His request of 2026-09-28**, and the reason it is three fields rather than
+-- one: /\"I want to see something like @app: ( LC LC )@ and when I select it, I
+-- get @( \9608 \9608 )@\"/. The label and the insertion are different renderings
+-- of the same body — a slot reads as @\8249LC\8250@ in a list and stands as a
+-- placeholder in a buffer — so the view carries both rather than making every
+-- frontend derive the second from the first.
+data ProductionView = ProductionView
+  { productionName :: String
+    -- ^ the constructor the production declares, which is what to call it in a
+    -- list.
+  , productionShape :: [SymbolView]
+    -- ^ its body, for the label. Slots are 'ANonterminalSymbol' and
+    -- 'AScanSymbol', so a frontend shows what /kind/ of thing goes where.
+  , productionInsert :: [Written]
+    -- ^ **the same body as a region to insert**: its terminals as text, its
+    -- slots as placeholders, one space between. A frontend puts this in its
+    -- buffer and already knows where the boxes are, because they are runs and
+    -- not characters it has to go looking for.
   }
   deriving (Eq, Show)
 
@@ -225,6 +255,25 @@ offerView replacing o =
     (map symbolView (Earley.offerWanted o))
     replacing
     (fmap (map symbolView) (Earley.offerRest o))
+    [ ProductionView n (map symbolView body) (insertion body)
+    | (n, body) <- Earley.offerProductions o
+    ]
+
+-- | A production's body as a region to insert: terminals as text, slots as
+-- placeholders, one space between.
+--
+-- **Adjacent text is merged**, so @( LC LC )@ inserts as three runs and not
+-- seven: the spaces belong to the text beside them, and a frontend stepping
+-- between the boxes should not have to skip empty runs to do it.
+insertion :: [Earley.Symbol] -> [Written]
+insertion = merge . intersperse (WrittenText " ") . map one
+  where
+    one s = case s of
+      Earley.Literal t -> WrittenText t
+      _                -> WrittenPlaceholder
+    merge (WrittenText a : WrittenText b : rest) = merge (WrittenText (a <> b) : rest)
+    merge (w : rest)                             = w : merge rest
+    merge []                                     = []
 
 failureView :: Earley.ParseFailure -> FailureView
 failureView f = case f of

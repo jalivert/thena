@@ -512,6 +512,24 @@ data Offer = Offer
     -- business: writing a hole in front of text the user has already written
     -- makes that text the hole's neighbour in some larger term, which is not
     -- what pressing Tab asked for.
+  , offerProductions :: [(String, [Symbol])]
+    -- ^ **every production that may begin at the cursor, whole** — its name and
+    -- its entire body, so that a frontend can list @app: ( LC LC )@ and insert
+    -- @( \9608 \9608 )@ when it is chosen (MS7 phase 127b, his request of
+    -- 2026-09-28: /\"I want in that list the applicable production rules… It
+    -- will be super, super useful.\"/).
+    --
+    -- **This is a prediction, which is what an item with its dot at zero is.**
+    -- The chart has had these all along and 'Offer' threw them away:
+    -- 'offerOptions' collapses each item to its /first/ symbol, and 'offerRest'
+    -- only speaks when exactly one production is open. So after @(@, where
+    -- @abs@ and @paren@ both predict, neither field could say what either of
+    -- them looks like.
+    --
+    -- **Filtered by the same viability as 'offerOptions'**: a production whose
+    -- body, written out with its slots left unwritten, could not leave the line
+    -- finishable is not offered. Ordered as the grammar declares them, because
+    -- that is the order a user reads their own file in.
   }
   deriving (Eq, Show)
 
@@ -527,7 +545,7 @@ data Offer = Offer
 -- position at the end of a line still gets the whole rest, the enclosing
 -- productions being someone else's business.
 offer :: [Rule] -> Start -> [Piece] -> [Piece] -> Offer
-offer rs start left right = Offer options wanted rest
+offer rs start left right = Offer options wanted rest predicted
   where
     c = chart rs start left
     k = settled c (length left)
@@ -535,6 +553,20 @@ offer rs start left right = Offer options wanted rest
     restOf i = drop (itemDot i) (ruleBody (chartRule c i))
 
     options = nub [ s | i <- here, symbols@(s : _) <- [restOf i], viable symbols ]
+
+    -- **A prediction is a production that may begin here**, which is an item
+    -- whose dot has not moved. Its body is its whole skeleton, and 'viable' is
+    -- the same test 'options' applies to a single symbol — written out, does the
+    -- line still reach its end.
+    predicted = nub
+      [ (ruleName rule, body)
+      | i <- here
+      , itemDot i == 0
+      , let rule = chartRule c i
+      , let body = ruleBody rule
+      , not (null body)
+      , viable body
+      ]
 
     wanted = nub
       [ s | i <- here, s : _ <- [restOf i]
