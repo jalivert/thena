@@ -1,5 +1,11 @@
 -- | The views, over a session (MS7 phase 125).
 --
+-- **@.jalivert\/FRONTEND.md@ is what a frontend reads instead of this module's
+-- source** (MS7 phase 129; his notes directory, not in this repository) — the modules it may import, the two ways it advances
+-- a session, and every view below with its type. @Thena.FrontendTests@ crosses
+-- that document against this export list, so a view added here and left out of
+-- it fails the suite.
+--
 -- **This is the seam.** "Thena.View.Core" and its eight siblings each turn one
 -- part of the system into something an editor can lay out; every one of them
 -- takes the same six-argument prefix first — the installed grammars, a depth
@@ -138,17 +144,27 @@ focusAddress = addressOf . sessionCursor
 -- binds it — the map 'Thena.View.Core.displayCore' wants so that an occurrence
 -- of something bound outside the term being displayed still points at it.
 --
--- **This is the seam's own plumbing, not a view.** It is exported because
--- "Thena.ViewTests" asserts its invariant, and a frontend cannot call it anyway:
--- it takes a 'Thena.Development.Partial.Partial', which a frontend has no way to
--- obtain or name. Every view that needs the map already has it.
+-- **It takes the session, and until phase 129 it took a
+-- 'Thena.Development.Partial.Partial'** — which a frontend has no way to obtain
+-- or name, since that module is not one the @view@ sublibrary re-exports. Its own
+-- comment said so and lived with it, because "Thena.ViewTests" asserts its
+-- invariant and nothing else called it. Writing @.jalivert\/FRONTEND.md@ made that
+-- the only entry here a reader could be told about and not shown, which is the
+-- fault phase 126 deleted three other exports for; the walk is 'go' below and
+-- the plumbing is unchanged.
+--
+-- **A frontend still rarely wants it**: every view that needs the map already
+-- has it, and an occurrence carries its binder's address
+-- ('Thena.View.Core.AVariable'). It is here for a pane that wants the map
+-- itself — every binder in the development, whether or not anything shown
+-- mentions it.
 --
 -- **The whole chain, not the prefix.** A variable that is not in scope where the
 -- term is simply never occurs in it, so nothing is gained by cutting the walk
 -- short, and a value sitting on the machine may mention any component the line
 -- that built it could see.
-binderAddresses :: Partial -> [(Var, Address)]
-binderAddresses = go (Address [])
+binderAddresses :: Session -> [(Var, Address)]
+binderAddresses = go (Address []) . rebuild . sessionCursor
   where
     go at p = case p of
       Trailing _   -> []
@@ -192,7 +208,7 @@ machineView budget s =
     (sessionGrammars s)
     budget
     (envAt s)
-    (bindersAt s)
+    (binderAddresses s)
     (sessionNames s)
     (focusAddress s)
     (machineOf s)
@@ -212,7 +228,7 @@ focusTypeView :: Budget -> Session -> Maybe Display
 focusTypeView budget s = fmap display (expectedType (sessionCursor s))
   where
     display =
-      displayCore (sessionGrammars s) budget (envAt s) (bindersAt s) (sessionNames s) (focusAddress s)
+      displayCore (sessionGrammars s) budget (envAt s) (binderAddresses s) (sessionNames s) (focusAddress s)
 
 -- | Every rule base, in order, each with its rules.
 --
@@ -256,7 +272,7 @@ offerView s = displayOffer (sessionGrammars s)
 -- | One rule, with the session's plumbing supplied.
 ruleOf :: Budget -> Session -> Rule -> RuleView
 ruleOf budget s =
-  displayRule (sessionGrammars s) budget (envAt s) (bindersAt s) (sessionNames s) (focusAddress s)
+  displayRule (sessionGrammars s) budget (envAt s) (binderAddresses s) (sessionNames s) (focusAddress s)
 
 -- | Display names for the variables at the focus, freshened the way the chain
 -- printer freshens a component's — 'Thena.Repl.envOf's own fold, here because
@@ -269,9 +285,6 @@ envAt = foldl add [] . sessionContext
             Hypothesis x (Ident h) _   -> (x, h)
             Definition x (Ident h) _ _ -> (x, h)
        in (v, freshen hint e) : e
-
-bindersAt :: Session -> [(Var, Address)]
-bindersAt = binderAddresses . rebuild . sessionCursor
 
 route :: Cursor -> ([Step], Focus)
 route cur = (toList (prefix cur), focus cur)

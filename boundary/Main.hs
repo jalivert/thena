@@ -1,6 +1,10 @@
 -- | **A frontend, compiled against the boundary and nothing else** (MS7 phase
 -- 126).
 --
+-- **@.jalivert\/FRONTEND.md@ is the prose**, and this module is its worked example —
+-- §10 there points back here. A name in that document that cannot be used this
+-- way is a document that is wrong.
+--
 -- This suite's @build-depends@ names @thena:view@ and not @thena@, so it sees
 -- exactly what a frontend sees. It is therefore two assertions, and the first
 -- is made by the compiler:
@@ -28,6 +32,7 @@ import Thena.Driver (Response (..), Session, Stop (..), fuelOf, oneLine, oneProg
 import Thena.Repl (renderResponse, startingSession, turn, turnSession)
 import Thena.View
   ( Budget (..)
+  , binderAddresses
   , developmentView
   , focusAddress
   , focusProgram
@@ -71,6 +76,7 @@ checks =
   , \s -> want "oneProgram accepts a click" (isSession (fst (oneProgram s (focusProgram (focusAddress s)))))
   , \s -> want "renderResponse" (not (null (renderResponse s (snd (oneLine s ":show")))))
   , \s -> want "turn" (isSession (turnSession (turn s ":show")))
+  , \s -> want "binderAddresses" (not (null (binderAddresses s)))
   , \s -> want "fuel is readable" (fuelOf (fst (oneLine s ":step 3")) == Just 3)
   , \s -> want "a job runs in slices" (job s)
   ]

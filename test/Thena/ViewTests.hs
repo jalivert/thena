@@ -25,7 +25,7 @@ import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (Var)
 import Thena.Development.Component (Component (..))
-import Thena.Development.Cursor (Focus (..), focus, rebuild)
+import Thena.Development.Cursor (Focus (..), focus)
 import Thena.Driver
   ( Session
   , newSession
@@ -106,7 +106,7 @@ chainCase (name, s) =
 
 binderCase :: (String, Session) -> TestTree
 binderCase (name, s) =
-  testCase name $ mapM_ one (binderAddresses (rebuild (sessionCursor s)))
+  testCase name $ mapM_ one (binderAddresses s)
   where
     one (v, at) = case follow at (sessionNames s) (sessionCursor s) of
       Left e -> assertFailure (show at <> " does not follow: " <> show e)
@@ -184,7 +184,7 @@ notVacuous =
       assertBool (show types) (Just True `elem` types && Just False `elem` types)
   ]
   where
-    counts = [ length (binderAddresses (rebuild (sessionCursor s))) | (_, s) <- fixtures ]
+    counts = [ length (binderAddresses s) | (_, s) <- fixtures ]
     matched = [ length (matchesView (Budget 200) s) | (_, s) <- fixtures ]
     marks = [ map fst (redrawChain (developmentView (Budget 200) s)) | (_, s) <- fixtures ]
     types = [ Just (maybe False (const True) (focusTypeView (Budget 200) s)) | (_, s) <- fixtures ]

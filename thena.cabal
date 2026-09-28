@@ -104,8 +104,11 @@ library
 -- abstract stops a frontend reaching into the session it is driving, and this
 -- stops it reaching past the views at all.
 --
--- **The list is mirrored in Haskell** (`Thena.BoundaryTests`), so a module added
--- here without a reason fails the suite.
+-- **The list is crossed against .jalivert/FRONTEND.md** (`Thena.FrontendTests`,
+-- phase 129) — his notes directory, shared with the editor worktree and not in
+-- this repository, so the crossing runs where the file is and is skipped where it
+-- is not. A module added here and left undocumented fails the suite. Until then
+-- this comment named a `Thena.BoundaryTests` that was never written.
 library view
     import:             warnings
     visibility:         public
@@ -151,6 +154,16 @@ test-suite thena-test
     default-language:   GHC2024
     type:               exitcode-stdio-1.0
     main-is:            Main.hs
+    -- **The suite runs its trees in parallel** (MS7 phase 129, at his
+    -- instruction). tasty already knows how; what it needs is an RTS with more
+    -- than one capability, and without `-threaded` it had exactly one — so two
+    -- thousand independent pure tests ran one after another, for 75 seconds
+    -- instead of 36.
+    --
+    -- `-O0` on this component was measured and is NOT here: it saved a second of
+    -- build and cost three of runtime, so the whole of the win is this flag and
+    -- `-j` in cabal.project.
+    ghc-options:        -threaded -rtsopts "-with-rtsopts=-N"
     other-modules:
         Thena.Core.ConvertTests
         Thena.Core.ReduceTests
@@ -200,6 +213,7 @@ test-suite thena-test
         Thena.CallTests
         Thena.ReadTests
         Thena.LoadTests
+        Thena.FrontendTests
         Thena.ManualTests
         Thena.DriverTests
         Thena.Declared
