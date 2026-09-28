@@ -29,7 +29,6 @@ import System.Console.Haskeline
   )
 
 import Thena.Driver (Session)
-import Thena.Language.Grammar (earleyRules)
 import Thena.Repl
   ( Turn (..)
   , closesEntry
@@ -37,11 +36,10 @@ import Thena.Repl
   , opensEntry
   , prompt
   , startingSession
-  , tabComplete
+  , tabOffer
   , turn
   , unclosedEntry
   )
-import Thena.View (parsingLanguage, sessionGrammars)
 
 -- | The interactive loop.
 --
@@ -66,11 +64,9 @@ repl = do
 completion :: IORef Session -> (String, String) -> IO (String, [Completion])
 completion current input = do
   s <- readIORef current
-  case parsingLanguage s of
-    Just lang ->
-      let (kept, cs) = tabComplete (earleyRules (sessionGrammars s)) lang input
-       in pure (kept, [ Completion r d False | (r, d) <- cs ])
-    Nothing   -> completeFilename input
+  case tabOffer s input of
+    Just (kept, cs) -> pure (kept, [ Completion r d False | (r, d) <- cs ])
+    Nothing         -> completeFilename input
 
 loop :: IORef Session -> Session -> InputT IO ()
 loop current s = do

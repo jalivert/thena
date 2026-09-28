@@ -1,4 +1,4 @@
-cabal-version:      3.0
+cabal-version:      3.4
 name:               thena
 version:            0.1.0.0
 synopsis:           An interactive proof assistant for language metatheory
@@ -90,6 +90,47 @@ library
         alex:alex   >=3.5,
         happy:happy >=2.1
 
+-- | **What a frontend may import, and nothing else — MS7 phase 126.**
+--
+-- This library has no modules of its own. It is a re-export list: a curated
+-- view of `thena` that names every module a frontend is allowed to see. A
+-- frontend's `build-depends` names `thena:view` and not `thena`, and Haskell
+-- imports only from DIRECT dependencies — so `import Thena.Engine` in a
+-- frontend does not compile, because `thena` is a transitive dependency and its
+-- modules are not in scope.
+--
+-- His ruling, 2026-09-27: /"The cabal separation on Cabal 3.4 sounds great. We
+-- should try that."/ Two layers that catch different mistakes — `Session` being
+-- abstract stops a frontend reaching into the session it is driving, and this
+-- stops it reaching past the views at all.
+--
+-- **The list is mirrored in Haskell** (`Thena.BoundaryTests`), so a module added
+-- here without a reason fails the suite.
+library view
+    import:             warnings
+    visibility:         public
+    default-language:   GHC2024
+    build-depends:
+        base  ^>=4.21.2.0,
+        thena
+    reexported-modules:
+        -- The session, advanced.
+        Thena.Driver,
+        -- The views over it, and the addressing that reaches into them.
+        Thena.View,
+        Thena.View.Address,
+        Thena.View.Chart,
+        Thena.View.Core,
+        Thena.View.Development,
+        Thena.View.Instral,
+        Thena.View.Machine,
+        Thena.View.Rules,
+        Thena.View.Source,
+        Thena.View.Surface,
+        -- The text door: rendering, session start, and the IO a response asks
+        -- for. One frontend among others lives here too (§125).
+        Thena.Repl
+
 executable thena
     import:             warnings
     hs-source-dirs:     app
@@ -102,7 +143,7 @@ executable thena
     build-depends:
         base      ^>=4.21.2.0,
         haskeline >=0.8.4 && <0.9,
-        thena
+        thena:view
 
 test-suite thena-test
     import:             warnings
@@ -185,6 +226,20 @@ test-suite thena-test
         tasty             >=1.5  && <1.6,
         tasty-golden      >=2.3  && <2.4,
         tasty-hunit       >=0.10 && <0.11,
-        tasty-quickcheck  >=0.11 && <0.12,
-        websockets,
-        text
+        tasty-quickcheck  >=0.11 && <0.12
+
+-- | The frontend's own boundary, compiled (MS7 phase 126).
+--
+-- **It depends on `thena:view` and NOT on `thena`**, which is the whole of the
+-- test: a module the re-export list does not name cannot be imported here, and
+-- a view that cannot be reached without one does not compile. See the header of
+-- `boundary/Main.hs`.
+test-suite thena-boundary
+    import:             warnings
+    hs-source-dirs:     boundary
+    default-language:   GHC2024
+    type:               exitcode-stdio-1.0
+    main-is:            Main.hs
+    build-depends:
+        base ^>=4.21.2.0,
+        thena:view

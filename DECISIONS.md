@@ -2682,9 +2682,22 @@ opens it**: `Session` is abstract, and everything a frontend can see comes from
 parser's offers in its own vocabulary.
 
 So a frontend never learns what a de Bruijn index is, when a Π is dependent, or
-what distinguishes a guess from a claim. It renders what it is handed. The
-enforcement is cabal's: a frontend depends on the `view` sublibrary, and an
-import of the engine does not compile.
+what distinguishes a guess from a claim. It renders what it is handed.
+
+**The enforcement is cabal's.** A frontend's `build-depends` names `thena:view`,
+which is a re-export list and has no modules of its own; `thena` is then a
+transitive dependency, and Haskell imports only from direct ones:
+
+```
+import Thena.Engine (Machine)
+  Could not load module 'Thena.Engine'.
+  It is a member of the hidden package 'thena-0.1.0.0'.
+```
+
+Twelve modules are named: `Thena.Driver`, `Thena.Repl`, `Thena.View` and the
+nine `Thena.View.*`. Nothing else is reachable, and a view that could not be
+used through the list did not survive writing it — `coreView` took a `Core`,
+which a frontend can neither obtain nor name, and became `focusTypeView`.
 
 **Nothing in the library touches a terminal.** The REPL's line editing lives in
 the `thena` executable, so a frontend that draws its own screen links no line
@@ -2714,6 +2727,9 @@ The session supplies everything a view needs: the grammars loaded, the names in
 scope at the focus, where each of them is bound, the name counter and the
 cursor's route. A frontend passes a depth budget, which is its own choice, and
 nothing else.
+
+Every view is reachable with nothing but `thena:view` on the `build-depends`
+line, and a test suite that depends on exactly that is what keeps it so.
 
 ### A region is written text and splices, and may name its production
 

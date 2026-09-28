@@ -57,6 +57,7 @@ module Thena.Repl
   , renderResponse
   , renderLoadError
   , tabComplete
+  , tabOffer
   , renderTree
   , parseFailureReason
   , renderMatches
@@ -152,7 +153,7 @@ import Thena.Errors
   )
 import Thena.Global.Declare (DeclareError (..), TokenClassError (..))
 import Thena.Language.Build (printTerm)
-import Thena.Language.Grammar (Grammar, GrammarError (..), GrammarProblem (..), ProductionProblem (..), RulePart (..), RuleProblem (..), Sort (..))
+import Thena.Language.Grammar (Grammar, GrammarError (..), GrammarProblem (..), ProductionProblem (..), RulePart (..), RuleProblem (..), Sort (..), earleyRules)
 import Thena.Language.Reader (ReadError (..))
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Regex (RegexError (..))
@@ -2266,6 +2267,21 @@ parseFailureReason text why = case why of
       w : rest -> intercalate ", " (reverse rest) ++ " or " ++ w
       [] -> ""
 
+-- | Tab, for a frontend: what the parser has to say about the text at the
+-- cursor, or 'Nothing' when the session is not reading object syntax at all.
+--
+-- **Added at MS7 phase 126, because the @view@ sublibrary refused to compile
+-- without it.** The terminal frontend was calling 'tabComplete' itself, which
+-- meant running 'earleyRules' over the session's grammars — and that needed
+-- "Thena.Language.Grammar", a module a frontend has no other business with.
+-- 'tabComplete' keeps its own signature, because "Thena.EarleyTests" tests it on
+-- hand-built rules with no grammar to wrap them in; what moved is the plumbing,
+-- not the question.
+tabOffer :: Session -> (String, String) -> Maybe (String, [(String, String)])
+tabOffer s input = case parsingLanguage s of
+  Nothing   -> Nothing
+  Just lang -> Just (tabComplete (earleyRules (grammars (machineOf s))) lang input)
+
 -- | **Tab in @:parse@'s mode** (MS6 phase 102b, his request of 2026-09-19;
 -- corrected in MS7 phase 120). Haskeline hands over the text left of the
 -- cursor, reversed, and the text right of it; this answers with what to keep
@@ -2291,7 +2307,8 @@ parseFailureReason text why = case why of
 --   replaces it.
 --
 -- Answered as @(replacement, display)@ pairs, so that it is a function of the
--- parser alone; 'completion' makes them haskeline's.
+-- parser alone; 'tabOffer' reads the session for it and a terminal makes them
+-- haskeline's.
 tabComplete :: [Earley.Rule] -> String -> (String, String) -> (String, [(String, String)])
 tabComplete rules lang (leftReversed, right) =
   case leftReversed of

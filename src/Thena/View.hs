@@ -49,10 +49,9 @@ module Thena.View
   , Budget (..)
   , developmentView
   , machineView
-  , coreView
+  , focusTypeView
   , rulesView
   , matchesView
-  , surfaceView
   , parseView
   , offerView
 
@@ -65,9 +64,9 @@ module Thena.View
 import Data.Foldable (toList)
 
 import Thena.Core.Context (Context, Entry (..))
-import Thena.Core.Term (Core, Ident (..), Var)
+import Thena.Core.Term (Ident (..), Var)
 import Thena.Development.Component (Component (..))
-import Thena.Development.Cursor (Cursor, Focus, Step, focus, prefix, rebuild)
+import Thena.Development.Cursor (Cursor, Focus, Step, expectedType, focus, prefix, rebuild)
 import Thena.Development.Partial (Partial (..))
 import Thena.Driver
   ( Session
@@ -83,7 +82,6 @@ import Thena.Global.Env (GlobalEnv)
 import Thena.Instral.Ops (Instr, Rule)
 import Thena.Language.Grammar (Grammar)
 import Thena.Rules (RuleBase (..), RuleIter, matches, next)
-import Thena.Surface.Concrete (Surface)
 import Thena.Syntax.Print (Env, freshen)
 import Thena.View.Address (Address (..), Move (..), addressOf, extend, focusing)
 import Thena.View.Chart
@@ -99,7 +97,6 @@ import Thena.View.Core (Budget (..), Display, displayCore)
 import Thena.View.Development (LinkView, displayDevelopment)
 import Thena.View.Machine (MachineView, displayMachine)
 import Thena.View.Rules (RuleView, displayRule)
-import Thena.View.Surface (SurfaceShape, displaySurface)
 
 -- ---------------------------------------------------------------------------
 -- The session
@@ -140,6 +137,11 @@ focusAddress = addressOf . sessionCursor
 -- | Every variable a component of the development binds, and the link that
 -- binds it — the map 'Thena.View.Core.displayCore' wants so that an occurrence
 -- of something bound outside the term being displayed still points at it.
+--
+-- **This is the seam's own plumbing, not a view.** It is exported because
+-- "Thena.ViewTests" asserts its invariant, and a frontend cannot call it anyway:
+-- it takes a 'Thena.Development.Partial.Partial', which a frontend has no way to
+-- obtain or name. Every view that needs the map already has it.
 --
 -- **The whole chain, not the prefix.** A variable that is not in scope where the
 -- term is simply never occurs in it, so nothing is gained by cutting the walk
@@ -195,10 +197,22 @@ machineView budget s =
     (focusAddress s)
     (machineOf s)
 
--- | A 'Core' term, in the context the focus is in.
-coreView :: Budget -> Session -> Core -> Display
-coreView budget s t =
-  displayCore (sessionGrammars s) budget (envAt s) (bindersAt s) (sessionNames s) (focusAddress s) t
+-- | The type the focus is expected to have, in the context it sits in — @:where@'s
+-- own \"type\" section, and a goal pane's whole content.
+--
+-- 'Nothing' when the structure carries no type, which is not a failure to look:
+-- deriving one for an arbitrary core subterm is @infer@'s job
+-- ('Thena.Development.Cursor.expectedType' says the same).
+--
+-- **It replaced a @coreView@ that took the term — MS7 phase 126.** That one
+-- could not be called by a frontend at all: a frontend has no 'Core' and cannot
+-- name one, which the @view@ sublibrary made plain. What a frontend wanted from
+-- it was always this.
+focusTypeView :: Budget -> Session -> Maybe Display
+focusTypeView budget s = fmap display (expectedType (sessionCursor s))
+  where
+    display =
+      displayCore (sessionGrammars s) budget (envAt s) (bindersAt s) (sessionNames s) (focusAddress s)
 
 -- | Every rule base, in order, each with its rules.
 --
@@ -220,11 +234,6 @@ matchesView budget s =
     drain it = case next it of
       Nothing        -> []
       Just (r, rest) -> r : drain rest
-
--- | A surface term. It needs nothing from the session — a surface tree carries
--- its own names (§3.5) — and is here so that one module is a frontend's door.
-surfaceView :: Surface -> SurfaceShape
-surfaceView = displaySurface
 
 -- | Is this region one term of this language, and if not, why.
 parseView :: Session -> String -> Maybe String -> [Written] -> Either FailureView TreeView

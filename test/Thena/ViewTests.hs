@@ -38,13 +38,14 @@ import Thena.View
   ( Budget (..)
   , binderAddresses
   , developmentView
+  , focusTypeView
   , matchesView
   , sessionCursor
   , sessionGrammars
   , sessionNames
   )
 import Thena.View.Address (follow)
-import Thena.View.Redraw (markedChainText, redrawChain)
+import Thena.View.Redraw (markedChainText, redraw, redrawChain)
 import Thena.View.Rules (RuleView (..))
 
 tests :: TestTree
@@ -53,6 +54,7 @@ tests =
     "Thena.View"
     [ testGroup "the chain, against :show" (map chainCase fixtures)
     , testGroup "every binder address lands on its own link" (map binderCase fixtures)
+    , testGroup "the focus's type, against :where" (map typeCase fixtures)
     , testGroup "the match list, against :matches" (map matchCase fixtures)
     , testGroup "and the fixtures really exercise it" notVacuous
     ]
@@ -124,6 +126,26 @@ boundBy c = case c of
   Quantify x _ _   -> x
 
 -- ---------------------------------------------------------------------------
+-- The focus's type
+-- ---------------------------------------------------------------------------
+
+-- | 'focusTypeView' against @:where@'s own \"type\" section (MS7 phase 126).
+--
+-- **The naming is the part that could go wrong.** @:where@ builds its display
+-- names by walking the prefix from the root and then into the term
+-- ('Thena.Repl.walkSteps'\/@walkTerm@); the seam builds them by folding
+-- 'Thena.View.sessionContext'. Those are two derivations of Γ at the focus, and
+-- if they ever disagree the type prints with a different variable name on each
+-- side — which is exactly what this compares.
+typeCase :: (String, Session) -> TestTree
+typeCase (name, s) = testCase name (drawn @?= typed)
+  where
+    drawn = fmap redraw (focusTypeView (Budget 200) s)
+    typed = case dropWhile (/= "type") (turnOutput (turn s ":where")) of
+      _ : line : _ -> Just (dropWhile (== ' ') line)
+      _            -> Nothing
+
+-- ---------------------------------------------------------------------------
 -- The match list
 -- ---------------------------------------------------------------------------
 
@@ -155,8 +177,14 @@ notVacuous =
       assertBool (show matched) (maximum matched >= 1)
   , testCase "some fixture has a marked link that is not the first" $
       assertBool (show marks) (any (\ms -> True `elem` drop 1 ms) marks)
+  , testCase "some fixture has a type at the focus, and some has none" $
+      -- Both sides of 'typeCase' answer 'Nothing' at a bare root, so the
+      -- crossing there is trivially green; what makes it a test is a fixture
+      -- that does have a type.
+      assertBool (show types) (Just True `elem` types && Just False `elem` types)
   ]
   where
     counts = [ length (binderAddresses (rebuild (sessionCursor s))) | (_, s) <- fixtures ]
     matched = [ length (matchesView (Budget 200) s) | (_, s) <- fixtures ]
     marks = [ map fst (redrawChain (developmentView (Budget 200) s)) | (_, s) <- fixtures ]
+    types = [ Just (maybe False (const True) (focusTypeView (Budget 200) s)) | (_, s) <- fixtures ]
