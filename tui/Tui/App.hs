@@ -351,17 +351,19 @@ draw st = dropdownLayer st <> offerDropdownLayer st <> [hBox [replColumn, gapH, 
               ]
           ]
 
--- | One turn, prompt (if any) then output — the most recent turn's output
--- gets a thin accent bar to its left, his request 2026-09-29 (thinner than a
--- pane's own '▎' edge, so '▏', one-eighth block, distinct glyph). The bar
--- column is always reserved, blank on every other turn, so a turn's text
--- doesn't visibly shift left/right as a newer one takes over the accent.
+-- | One turn, prompt (if any) then output, then a blank row — one empty
+-- line between turns, his call, so each turn visibly ends before the next
+-- begins. The most recent turn's output gets a thin accent bar to its left,
+-- his request 2026-09-29 (thinner than a pane's own '▎' edge, so '▏',
+-- one-eighth block, distinct glyph). The bar column is always reserved,
+-- blank on every other turn, so a turn's text doesn't visibly shift
+-- left/right as a newer one takes over the accent.
 renderTurns :: [Turn] -> [Widget n]
 renderTurns turns = zipWith renderTurn [1 :: Int ..] turns
   where
     lastIx = length turns
     renderTurn ix t =
-      vBox (promptLine <> map (outputLine (ix == lastIx)) (turnOutput t))
+      vBox (promptLine <> map (outputLine (ix == lastIx)) (turnOutput t) <> [str " "])
       where
         promptLine = case turnPrompt t of
           Nothing -> []
