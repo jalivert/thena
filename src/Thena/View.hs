@@ -92,8 +92,6 @@ import Thena.Language.Grammar (Grammar)
 import Thena.Rules (RuleBase (..), RuleIter, matches, next)
 import Thena.Syntax.Print (Env, freshen)
 import Thena.View.Address (Address (..), Move (..), addressOf, extend, focusing)
-import qualified Thena.Language.Earley as Earley
-import Thena.Language.Instral (instralRules, statementHead)
 import Thena.View.Chart
   ( FailureView
   , OfferProblem
@@ -101,12 +99,12 @@ import Thena.View.Chart
   , TreeView
   , Written
   , displayOffer
-  , offerAt
   , displayParse
   )
 import Thena.View.Core (Budget (..), Display, displayCore)
 import Thena.View.Development (LinkView, displayDevelopment)
 import Thena.View.Machine (MachineView, displayMachine)
+import Thena.View.Statement (statementOffer)
 import Thena.View.Rules (RuleView, displayRule)
 
 -- ---------------------------------------------------------------------------
@@ -309,8 +307,7 @@ offerView s = displayOffer (sessionGrammars s)
 -- **Total, where 'offerView' can refuse.** There is no language name to get
 -- wrong: @instral@ is always in scope.
 statementOfferView :: Session -> [Written] -> [Written] -> OfferView
-statementOfferView s =
-  offerAt (instralRules (sessionRules s)) (Earley.StartAt statementHead)
+statementOfferView s = statementOffer (sessionGrammars s) (sessionRules s)
 
 -- ---------------------------------------------------------------------------
 -- The plumbing itself

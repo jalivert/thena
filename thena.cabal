@@ -80,6 +80,7 @@ library
         Thena.View.Machine
         Thena.View.Rules
         Thena.View.Source
+        Thena.View.Statement
         Thena.View.Surface
         Thena.View.Tokens
         Thena.View.Type
@@ -137,6 +138,7 @@ library view
         Thena.View.Machine,
         Thena.View.Rules,
         Thena.View.Source,
+        Thena.View.Statement,
         Thena.View.Surface,
         Thena.View.Tokens,
         Thena.View.Type,

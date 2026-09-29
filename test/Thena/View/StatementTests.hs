@@ -16,14 +16,21 @@ module Thena.View.StatementTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Files (startingSession)
+import Thena.Driver (Session, oneLine)
+import Thena.Files (following, startingSession)
 import Thena.Instral.Ops (signatureOf)
 import Thena.Instral.Type (Signature (..), Ty (..))
 import Thena.Language.Instral (instralRules, operandHead, statementHead)
 import qualified Thena.Language.Earley as E
 import Thena.Rules (opWords)
 import Thena.View (sessionRules, statementOfferView)
-import Thena.View.Chart (OfferView (..), StuckView (..), SymbolView (..), Written (..))
+import Thena.View.Chart
+  ( OfferView (..)
+  , RecoveryView (..)
+  , StuckView (..)
+  , SymbolView (..)
+  , Written (..)
+  )
 
 tests :: TestTree
 tests =
@@ -35,7 +42,84 @@ tests =
     , testCase "a rule in the loaded base may be called" callable
     , testCase "and the arity comes from the signature" arity
     , testCase "a word that is no statement is stuck, not silent" stuck
+    , testCase "a half-typed word completes to the words it begins" prefix
+    , testGroup "recovery (phase 138)"
+        [ testCase "a tagged term literal alone on the line is helped" standalone
+        , testCase "and one in a slot that wants something else is helped too" wrongSlot
+        , testCase "deeper inside it, the object language answers" deeper
+        , testCase "a word after a finished literal is helped, context-free" afterLiteral
+        , testCase "and a line that parses is never marked recovered" notRecovered
+        ]
     ]
+
+-- | Loaded with the shipped STLC example, so @LC@ is a language that exists.
+withLC :: IO Session
+withLC = do
+  (s0, _) <- startingSession
+  let (s1, r) = oneLine s0 ":load examples/01-stlc-syntax.thena"
+  case following s1 r of
+    Just io -> do (s2, _, _) <- io; pure s2
+    Nothing -> pure s1
+
+offerIn :: Session -> String -> OfferView
+offerIn s before = statementOfferView s [WrittenText before] []
+
+-- | **The gap this found.** A statement word is a literal and the chart matches
+-- one all or nothing, so before phase 138 @att@ answered nothing at all while
+-- @attack@ answered — prefix completion, the most ordinary thing a prompt does,
+-- had never worked.
+prefix :: IO ()
+prefix = do
+  s <- fst <$> startingSession
+  let words' o = [ w | ALiteralSymbol w <- offeredOptions o ]
+  words' (offerIn s "att") @?= ["attack"]
+  if "goto" `elem` words' (offerIn s "go") then pure () else
+    assertFailure ("go did not offer goto: " <> show (words' (offerIn s "go")))
+
+-- | **His requirement, first half**: open the TUI, load the language, type
+-- @LC\`@ into an empty prompt, get help.
+standalone :: IO ()
+standalone = do
+  s <- withLC
+  let o = offerIn s "LC`"
+  case offeredRecovered o of
+    Just (RecoveryView _ _ (Just "LC")) -> pure ()
+    other -> assertFailure ("expected recovery inside LC, got " <> show other)
+  if null (offeredOptions o) then assertFailure "recovered, but offered nothing" else pure ()
+
+-- | **His requirement, second half**, and the one the type narrowing would
+-- otherwise refuse: @goto@ wants a @Core@ and this is not one, and the help
+-- arrives anyway — marked, so the frontend can say it will not run.
+wrongSlot :: IO ()
+wrongSlot = do
+  s <- withLC
+  let o = offerIn s "goto LC`"
+  case offeredRecovered o of
+    Just (RecoveryView _ _ (Just "LC")) -> pure ()
+    other -> assertFailure ("expected recovery inside LC, got " <> show other)
+  if null (offeredOptions o) then assertFailure "recovered, but offered nothing" else pure ()
+
+deeper :: IO ()
+deeper = do
+  s <- withLC
+  let o = offerIn s "fill LC`( "
+  -- The offers here are LC's own productions, not instral's.
+  if ALiteralSymbol "\955" `elem` offeredOptions o then pure ()
+    else assertFailure ("expected LC's own lambda among " <> show (offeredOptions o))
+
+afterLiteral :: IO ()
+afterLiteral = do
+  s <- withLC
+  let o = offerIn s "LC`x` atta"
+  case offeredRecovered o of
+    Just (RecoveryView _ "atta" Nothing) -> pure ()
+    other -> assertFailure ("expected a bare-word recovery of atta, got " <> show other)
+  [ w | ALiteralSymbol w <- offeredOptions o ] @?= ["attack"]
+
+notRecovered :: IO ()
+notRecovered = do
+  s <- fst <$> startingSession
+  offeredRecovered (offerIn s "quantify x ") @?= Nothing
 
 offerOf :: String -> IO OfferView
 offerOf before = do

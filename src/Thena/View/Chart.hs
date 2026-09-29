@@ -41,6 +41,7 @@ module Thena.View.Chart
   , Written (..)
   , ProductionView (..)
   , StuckView (..)
+  , RecoveryView (..)
   , OfferProblem (..)
   , displayParse
   , displayOffer
@@ -124,6 +125,16 @@ data OfferView = OfferView
   , offeredProductions :: [ProductionView]
     -- ^ **every production that may begin at the cursor, to list and to insert**
     -- (MS7 phase 127b) — see 'Earley.offerProductions'.
+  , offeredRecovered :: Maybe RecoveryView
+    -- ^ **this answer is about the unit under the cursor, not about the line**
+    -- (MS7 phase 138). 'Nothing' on the ordinary path, and on every region
+    -- offer. When it is 'Just' the whole-line parse had nothing to say and the
+    -- narrower question answered instead, so what comes back is context-free:
+    -- completing @ to @ says nothing about whether @ may
+    -- stand there. **Draw it differently** — his design: a different background,
+    -- and the line underlined to say it will not run as written.
+    --
+    -- Defined in "Thena.View.Statement", which is where recovery lives.
   , offeredStuck :: Maybe StuckView
     -- ^ **the text left of the cursor does not read, and this says where it
     -- gave out** (MS7 phase 134, @ms7\/CLOSEOUT.md@ 12) — see
@@ -138,6 +149,25 @@ data OfferView = OfferView
     -- The distinction it buys is /\"nothing may be written here\"/ against
     -- /\"I could not read what you already wrote\"/, which a user reads as a
     -- broken key when both are silence.
+  }
+  deriving (Eq, Show)
+
+-- | Where a recovered answer came from, so a frontend can say so.
+--
+-- Present only when the whole-line parse had nothing at the cursor and the
+-- narrower question answered instead. **A recovered offer is context-free**:
+-- completing @atta@ to @attack@ says nothing about whether @attack@ may stand
+-- there. That is the point, and it is why this must be drawn differently.
+data RecoveryView = RecoveryView
+  { recoveredColumn :: Int
+    -- ^ where the unit under the cursor starts, counting from 1 — so a frontend
+    -- knows which characters an accepted completion replaces.
+  , recoveredText :: String
+    -- ^ the unit as written, up to the cursor.
+  , recoveredLanguage :: Maybe String
+    -- ^ @Just \"LC\"@ when the cursor is inside a tagged term literal, and the
+    -- offer therefore came from that language's own grammar rather than from
+    -- @instral@'s. 'Nothing' when it is a bare word.
   }
   deriving (Eq, Show)
 
@@ -303,6 +333,9 @@ offerView replacing o =
     [ ProductionView n (map symbolView body) (insertion body)
     | (n, body) <- Earley.offerProductions o
     ]
+    -- Recovery is "Thena.View.Statement"'s, and it sets this afterwards: the
+    -- chart cannot know it was asked a narrower question than the caller had.
+    Nothing
     (fmap stuckView (Earley.offerStuck o))
 
 stuckView :: (Int, [Earley.Symbol]) -> StuckView
