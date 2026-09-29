@@ -51,7 +51,7 @@ import qualified Brick.Widgets.Edit as E
 import Control.Monad.IO.Class (liftIO)
 import Data.Char (isSpace)
 import Data.List (isPrefixOf, sort, sortOn)
-import Data.Maybe (isJust, listToMaybe)
+import Data.Maybe (isJust, isNothing, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Zipper as Zip
@@ -67,6 +67,7 @@ import Thena.Render (renderResponse, renderTrouble)
 import Thena.View (developmentView, focusAddress, machineView, statementOfferView)
 import Thena.View.Chart
   ( OfferView (..)
+  , ProductionView (..)
   , RecoveryView (..)
   , SymbolView (..)
   , Written (..)
@@ -132,11 +133,6 @@ data OfferDropdown = OfferDropdown
   , odSelected   :: Maybe Int
     -- ^ an index into 'odRows', but only ever one whose 'rowInsert' is
     -- 'Just' — see 'offerMoveDown'/'offerMoveUp'.
-  , odRecovered  :: Bool
-    -- ^ 'offeredRecovered' was 'Just' (or, degenerately, the line was
-    -- 'offeredStuck' with nothing recovered) — **draw this dropdown and the
-    -- input line distinctly**, his design: this line will not run as
-    -- written.
   , odWordStart  :: Int
     -- ^ the column an accepted row replaces from. The recovered unit's own
     -- start when recovered; the cursor's own column otherwise, since the
@@ -240,12 +236,6 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   , (attrName "accent.output",  ink (themeSoft th))
   , (attrName "dropdown",          surface (themePopup th) (themeInk th))
   , (attrName "dropdown.selected", surface (themePopup th) (themeRepl th))
-  -- A recovered (or stuck) offer draws on 'themeWrong' instead of
-  -- 'themePopup' — his design: a different background says *this will not
-  -- run as written* before a row is even read.
-  , (attrName "dropdown.wrong",          surface (themeWrong th) (themeInk th))
-  , (attrName "dropdown.wrong.selected", surface (themeWrong th) (themePanel th))
-  , (attrName "input.wrong", ink (themeWrong th))
   -- The input line's own editor: 'renderEditor' wraps its output in
   -- Brick's 'edit'/'editFocused' attributes, which fall back to the
   -- terminal default (black) unless named here. The input is the last line
@@ -293,24 +283,13 @@ draw st = dropdownLayer st <> offerDropdownLayer st <> [hBox [replColumn, gapH, 
     replColumn =
       withAttr (attrName "panel") $
         pane "repl" HistoryVP
-          (padAll 1 (vBox (renderTurns (stTurns st) <> [inputLine] <> wrongLine)))
+          (padAll 1 (vBox (renderTurns (stTurns st) <> [inputLine])))
 
     -- | 'Input' reported here, on the editor itself, not the "❯ " ahead of
     -- it — so 'stInputExtent's own upper-left is column 0 of the *text*,
     -- and every text offset ('pathStartOff', the cursor, anything later)
     -- adds onto a real screen column directly, no prompt width to remember.
     inputLine = str "❯ " <+> reportExtent Input (renderEditor (str . concatMap Text.unpack) True (stInput st))
-
-    -- | His design for a recovered (or stuck) offer: "a red underline under
-    -- the whole input line." A thin bar in 'themeWrong', the same lower-
-    -- eighth-block technique the latest-turn marker already uses for a
-    -- thin accent — not vty text-underline styling, which has no separate
-    -- color of its own to give it, and not drawn at all (rather than blank)
-    -- when nothing is wrong, so the pane doesn't carry a permanently
-    -- reserved blank line under every ordinary prompt.
-    wrongLine
-      | maybe False odRecovered (stOfferDropdown st) = [vLimit 1 (withAttr (attrName "input.wrong") (fill '▁'))]
-      | otherwise = []
 
     sideColumn =
       hLimitPercent 38 $
@@ -407,13 +386,11 @@ offerDropdownLayer st = case stOfferDropdown st of
   _ -> []
 
 renderOfferDropdown :: OfferDropdown -> Widget Name
-renderOfferDropdown (OfferDropdown rows selected recovered _ _ more) =
-  withAttr (attrName bgName) (vBox (zipWith renderRow [0 :: Int ..] rows <> moreLine))
+renderOfferDropdown (OfferDropdown rows selected _ _ more) =
+  withAttr (attrName "dropdown") (vBox (zipWith renderRow [0 :: Int ..] rows <> moreLine))
   where
-    bgName = if recovered then "dropdown.wrong" else "dropdown"
-    selBg = if recovered then "dropdown.wrong.selected" else "dropdown.selected"
     renderRow i (OfferRow label ins)
-      | Just i == selected = withAttr (attrName selBg) (str (dropdownSelected <> label))
+      | Just i == selected = withAttr (attrName "dropdown.selected") (str (dropdownSelected <> label))
       | Nothing <- ins      = withAttr (attrName "dim") (str (dropdownPlain <> label))
       | otherwise           = str (dropdownPlain <> label)
     moreLine = [withAttr (attrName "dim") (str (dropdownPlain <> "+" <> show more <> " more")) | more > 0]
@@ -532,7 +509,7 @@ handleEventInner (VtyEvent (V.EvKey V.KEsc [])) = do
     -- his spec exactly: clears the arrow-selection only, the candidate list
     -- stays up. With no selection to clear, Esc keeps its ordinary meaning.
     (Just ld@(LoadDropdown _ (Just _)), _) -> put st { stDropdown = Just ld { ldSelected = Nothing } }
-    (_, Just od@(OfferDropdown _ (Just _) _ _ _ _)) -> put st { stOfferDropdown = Just od { odSelected = Nothing } }
+    (_, Just od@(OfferDropdown _ (Just _) _ _ _)) -> put st { stOfferDropdown = Just od { odSelected = Nothing } }
     _ -> halt
 handleEventInner ev@(VtyEvent (V.EvKey V.KDown [])) = navigateCompletion moveDown offerMoveDown ev
 handleEventInner ev@(VtyEvent (V.EvKey V.KUp []))   = navigateCompletion moveUp offerMoveUp ev
@@ -669,45 +646,90 @@ refreshOfferDropdown = do
           ov = statementOfferView (stSession st) before after
       put st { stOfferDropdown = buildOfferDropdown col ov }
 
--- | 'offeredOptions', turned into rows and capped — sorted first so a
--- capped list is still the alphabetically-first candidates rather than
--- whatever order the op table happens to produce them in.
+-- | The row source depends on which question was actually answered.
 --
--- **Deliberately not drawing from 'offeredProductions'.** It would be the
--- right source for inserting a whole compound shape with its slots as
--- boxes (his 2026-09-28 request, "app: ( LC LC )" → "( █ █ )") — but
--- checked directly against the running engine, not assumed: under bare-word
--- recovery (see "Thena.View.Statement"'s own 'recover') it is copied
--- through unfiltered, still every production the empty line offers, not
--- narrowed by what has been typed. Using it here would show stale
--- candidates the moment a word is underway, which is worse than not
--- showing them. Revisit once the operand grammar itself is less thin
--- (TIER-A.md's own "what we are doing next") and a production is more than
--- a single literal or a single placeholder.
+-- **Bare-word recovery** (typing an ordinary partial word — 'att', mid-
+-- statement) draws from 'offeredOptions', prefix-filtered by
+-- "Thena.View.Statement"'s own 'recover'. 'offeredProductions' is *not*
+-- usable here — checked directly against the running engine, not assumed:
+-- under bare-word recovery it is copied through unfiltered, still every
+-- production the empty line offers, not narrowed by what has been typed.
+--
+-- **Everything else — an ordinary offer, or the cursor inside a tagged
+-- term literal — draws from 'offeredProductions' instead.** This is what
+-- was missing the first time: 'offeredOptions' only ever names a bare
+-- symbol ("λ"), never the rest of its production, so selecting it could
+-- only ever insert that one token — not his 2026-09-28 request ("app: ( LC
+-- LC )" → "( █ █ )"), and not what someone typing inside a literal expects
+-- to see. 'offeredProductions' is fresh at this cursor position (unlike
+-- the bare-word case above, nothing stale to filter), and its own
+-- 'productionInsert' already carries the placeholders to insert as boxes —
+-- see 'productionRow'.
 buildOfferDropdown :: Int -> OfferView -> Maybe OfferDropdown
 buildOfferDropdown col ov
-  | null allRows && not recovered = Nothing
-  | otherwise = Just (OfferDropdown shown Nothing recovered wordStart replaceLen moreCount)
+  | null shown = Nothing
+  | otherwise = Just (OfferDropdown shown Nothing wordStart replaceLen moreCount)
   where
-    recovered = isJust (offeredRecovered ov)
-    allRows = sortOn rowLabel (map offerRow (offeredOptions ov))
+    bareWord = case offeredRecovered ov of
+      Just r -> isNothing (recoveredLanguage r)
+      Nothing -> False
+    allRows
+      | bareWord  = sortOn rowLabel (map offerRow (offeredOptions ov))
+      | otherwise = sortOn rowLabel (map productionRow (offeredProductions ov))
     shown = take offerRowCap allRows
     moreCount = length allRows - length shown
+    -- | A bare word replaces the partial word itself ('recoveredColumn'/
+    -- 'recoveredText' name that span exactly). Every other case — an
+    -- ordinary offer, or inside a literal, where 'recoveredText' names the
+    -- *whole recovered unit since the literal opened*, not a word to
+    -- replace — is a plain insert at the cursor, same as 'offeredReplaces'
+    -- already decides for the ordinary path. Getting this wrong is exactly
+    -- what ate an already-typed '(' the first time: accepting a candidate
+    -- inside a literal deleted back to the literal's own start instead of
+    -- just inserting at the caret.
     (wordStart, replaceLen) = case offeredRecovered ov of
-      Just r  -> (recoveredColumn r - 1, length (recoveredText r))
-      Nothing -> (col, if offeredReplaces ov then 1 else 0)
+      Just r | isNothing (recoveredLanguage r) -> (recoveredColumn r - 1, length (recoveredText r))
+      _ -> (col, if offeredReplaces ov then 1 else 0)
 
 offerRowCap :: Int
 offerRowCap = 10
 
 -- | A literal is text to type; a scan class or a nonterminal names a *kind*
 -- of thing that may stand here and is shown, not offered — see 'OfferRow'.
--- The bracket convention for a scan class is TIER-A.md's own: "‹name›".
 offerRow :: SymbolView -> OfferRow
 offerRow sv = case sv of
-  ALiteralSymbol w      -> OfferRow w (Just w)
-  AScanSymbol n         -> OfferRow ("\8249" <> n <> "\8250") Nothing
-  ANonterminalSymbol n  -> OfferRow n Nothing
+  ALiteralSymbol w -> OfferRow w (Just w)
+  _                -> OfferRow (symbolText sv) Nothing
+
+-- | The bracket convention for a scan class is TIER-A.md's own: "‹name›".
+symbolText :: SymbolView -> String
+symbolText sv = case sv of
+  ALiteralSymbol w     -> w
+  AScanSymbol n        -> "\8249" <> n <> "\8250"
+  ANonterminalSymbol n -> n
+
+-- | A whole production as a row — his own spec, 2026-09-28: *"I want to see
+-- something like @app: ( LC LC )@ and when I select it, I get @( █ █ )@."*
+-- The label is the name and the shape exactly as he asked; the insert is
+-- 'productionInsert' read back through 'writtenInsertText', so a slot
+-- becomes a real box in the buffer, not just its own bare symbol.
+productionRow :: ProductionView -> OfferRow
+productionRow pv =
+  OfferRow
+    (productionName pv <> ": " <> unwords (map symbolText (productionShape pv)))
+    (Just (writtenInsertText (productionInsert pv)))
+
+-- | 'productionInsert' read back into buffer text — the same duality
+-- 'toWritten' reads the other way: a placeholder is the engine's own glyph
+-- in the text, a splice can't occur in a production's own insertion (its
+-- 'Thena.View.Chart.insertion' only ever emits text or placeholders).
+writtenInsertText :: [Written] -> String
+writtenInsertText = concatMap one
+  where
+    one w = case w of
+      WrittenText t      -> t
+      WrittenPlaceholder -> [placeholderGlyph]
+      WrittenSplice      -> ""
 
 -- | The line, split at the cursor into the '[Written]' shape
 -- 'Thena.View.statementOfferView' takes — the "buffer-tracking region
