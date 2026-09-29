@@ -85,15 +85,25 @@ app = App
 -- not the real `Theme` (a later slice); pick better values there, not here.
 attrs :: AttrMap
 attrs = attrMap V.defAttr
-  [ (attrName "history",   bg (tint 255 235 205))
-  , (attrName "input",     bg (tint 255 255 255))
-  , (attrName "proofterm", bg (tint 235 245 255))
-  , (attrName "goals",     bg (tint 235 255 235))
-  , (attrName "machine",   bg (tint 245 235 255))
+  [ (attrName "history",   surface 255 235 205)
+  , (attrName "input",     surface 255 255 255)
+  , (attrName "proofterm", surface 235 245 255)
+  , (attrName "goals",     surface 235 255 235)
+  , (attrName "machine",   surface 245 235 255)
   ]
   where
+    -- **True 24-bit color, and an explicit foreground.** 'V.rgbColor' is a
+    -- lossy synonym for 'V.color240' in vty 6 — it quantizes to a 256-color
+    -- palette at construction, which is exactly how close pale tints
+    -- collapsed into each other on screen. 'V.linearColor' passes the color
+    -- through on a truecolor terminal instead. And 'bg' alone leaves the
+    -- foreground at the terminal's own default, which is not guaranteed to
+    -- read against a pale background — every surface sets both.
+    surface :: Int -> Int -> Int -> V.Attr
+    surface r g b = V.withBackColor (V.withForeColor V.defAttr ink) (tint r g b)
+    ink = tint 46 40 32
     tint :: Int -> Int -> Int -> V.Color
-    tint = V.rgbColor
+    tint = V.linearColor
 
 draw :: St -> [Widget Name]
 draw st = [hBox [replColumn, sideColumn]]
