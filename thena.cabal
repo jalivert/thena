@@ -107,11 +107,14 @@ library
 -- abstract stops a frontend reaching into the session it is driving, and this
 -- stops it reaching past the views at all.
 --
--- **The list is crossed against .jalivert/FRONTEND.md** (`Thena.FrontendTests`,
--- phase 129) — his notes directory, shared with the editor worktree and not in
--- this repository, so the crossing runs where the file is and is skipped where it
--- is not. A module added here and left undocumented fails the suite. Until then
--- this comment named a `Thena.BoundaryTests` that was never written.
+-- **This stanza is the list, and nothing mirrors it** (MS7 phase 135,
+-- @ms7\/CLOSEOUT.md@ 29). From phase 129 it was crossed against
+-- @.jalivert/FRONTEND.md@ by a `Thena.FrontendTests` — but that file is his
+-- notes directory, not in this repository, so the crossing skipped itself in
+-- every phase worktree and twice let a new module onto the boundary
+-- undocumented. It was also guarding the half that cannot go silently wrong:
+-- this stanza is enforced by the compiler, and a frontend importing something
+-- not on it does not build. The prose it did not guard is the half that drifts.
 library view
     import:             warnings
     visibility:         public
@@ -232,7 +235,6 @@ test-suite thena-test
         Thena.CallTests
         Thena.ReadTests
         Thena.LoadTests
-        Thena.FrontendTests
         Thena.ManualTests
         Thena.DriverTests
         Thena.Declared

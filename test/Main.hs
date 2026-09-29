@@ -52,7 +52,6 @@ import qualified Thena.ExamplesTests
 import qualified Thena.ObjectTermTests
 import qualified Thena.TokenTests
 import qualified Thena.LoadTests
-import qualified Thena.FrontendTests
 import qualified Thena.ManualTests
 import qualified Thena.NoConfusionTests
 import qualified Thena.InstralInferTests
@@ -122,7 +121,6 @@ main =
       , Thena.ObjectTermTests.tests
       , Thena.TokenTests.tests
       , Thena.LoadTests.tests
-  , Thena.FrontendTests.tests
   , Thena.ManualTests.tests
       , Thena.NoConfusionTests.tests
       , Thena.InstralInferTests.tests

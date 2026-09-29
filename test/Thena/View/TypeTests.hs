@@ -48,6 +48,7 @@ tests =
     "Thena.View.Type"
     [ testCase "every op's signature redraws to the text the printer writes" ops
     , testCase "and every signature a shipped rule file declares does too" declared
+    , testCase "and the rule files really declared some" declaredNotVacuous
     , testCase "and the op table really holds a scheme variable and a nesting" notVacuous
     , testCase "every constructor, and every nesting that fences" battery
     , testCase "and the battery really builds the fences no real signature has" fencesBuilt
@@ -105,6 +106,18 @@ ops = crossSignatures opSignatures
 
 declared :: IO ()
 declared = declaredSignatures >>= crossSignatures
+
+-- | **'declared' passes on an empty list, and that is not hypothetical.**
+-- 'startingSession' reads the prelude and the standard rules through
+-- @Paths_thena@, whose data directory is only set when @cabal test@ sets
+-- @thena_datadir@ — run the built binary directly and the session boots with
+-- nothing in it, 'declaredSignatures' is @[]@, and the crossing is green over
+-- no data at all. Measured at MS7 phase 133: the shipped bases declare 21.
+declaredNotVacuous :: IO ()
+declaredNotVacuous = do
+  sgs <- declaredSignatures
+  if length sgs >= 10 then pure ()
+    else assertFailure ("only " <> show (length sgs) <> " declared signatures in the corpus")
 
 crossSignatures :: [Signature] -> IO ()
 crossSignatures sgs =
