@@ -3,9 +3,11 @@ module Thena.Syntax.Lexer
   ( Token (..)
   , Located (..)
   , Pos (..)
+  , Spanned (..)
   , LexError (..)
   , BlockKind (..)
   , lexTokens
+  , lexSpanned
   , lexModule
   , isIdentifier
   , rawEscapes
@@ -193,6 +195,29 @@ data Pos = Pos !Int !Int
 data Located a = Located Pos a
   deriving (Eq, Show)
 
+-- | A token, where it was written, and **the source text it was matched from**
+-- (MS7 phase 136, @ms7\/CLOSEOUT.md@ 18).
+--
+-- 'Located' says where a token starts and nothing about how far it runs, and
+-- the token cannot say either: @TForall@ is @forall@ or @∀@, six characters or
+-- one, and 'Thena.Syntax.Print' shows both spellings. A highlighter needs the
+-- extent, so it needs the text.
+--
+-- **Nothing was computed for this.** The scanning loop already had
+-- @take len str@ in hand at every point it emitted a token and threw it away;
+-- this keeps it. 'lexTokens' is now a projection.
+--
+-- **The text is the source, not the token's payload**, and for 'TRaw' those
+-- differ: a raw chunk's payload has its backslash escapes undone, so
+-- @\\\\\`@ is one character in the token and two in the line. The span has to
+-- be the line's.
+data Spanned = Spanned Pos Token String
+  deriving (Eq, Show)
+
+-- | The token of a 'Spanned', dropping where and how long.
+unspan :: Spanned -> Located Token
+unspan (Spanned p t _) = Located p t
+
 data Token
   = TLambda
   | TForall
@@ -334,7 +359,13 @@ levelOf = foldl (\acc c -> acc * 10 + digitOf c) 0 . drop 4
 data Mode = Raw !Char | Esc !Int
 
 lexTokens :: String -> Either LexError [Located Token]
-lexTokens str0 = loop False [] (alexStartPos, '\n', [], str0)
+lexTokens str0 = map unspan <$> lexSpanned str0
+
+-- | 'lexTokens', keeping each token's source text — what a highlighter needs
+-- (MS7 phase 136). 'Thena.View.Tokens' is the only caller and the view a
+-- frontend should use; this is here because the loop is.
+lexSpanned :: String -> Either LexError [Spanned]
+lexSpanned str0 = loop False [] (alexStartPos, '\n', [], str0)
 
 -- | The tokens of a **surface module**, where a @language@ or @context@ block
 -- at column 1 is taken whole, as raw text (MS6 phase 101, @ms6\/SPEC.md@
@@ -342,12 +373,12 @@ lexTokens str0 = loop False [] (alexStartPos, '\n', [], str0)
 -- with 'lexTokens', so MS5's rule-file @language@ declarations are untouched
 -- until phase 106 removes them.
 lexModule :: String -> Either LexError [Located Token]
-lexModule str0 = loop True [] (alexStartPos, '\n', [], str0)
+lexModule str0 = map unspan <$> loop True [] (alexStartPos, '\n', [], str0)
 
 -- | The @posn@ wrapper's own 'alexScanTokens' calls 'error' on a bad character.
 -- This loop is the same traversal with a structured failure instead, and with
 -- the region modes above threaded through it.
-loop :: Bool -> [Mode] -> AlexInput -> Either LexError [Located Token]
+loop :: Bool -> [Mode] -> AlexInput -> Either LexError [Spanned]
 loop blocks modes inp@(pos, _, _, str) = case modes of
   Raw fence : outer -> raw blocks fence outer pos str
   _ -> case alexScan inp 0 of
@@ -360,7 +391,9 @@ loop blocks modes inp@(pos, _, _, str) = case modes of
     AlexError (p, _, _, rest) -> Left (LexError (posOf p) (firstOf rest))
     AlexSkip inp' _           -> loop blocks modes inp'
     AlexToken inp' len act ->
-      let t@(Located lp tk) = act pos (take len str)
+      let matched         = take len str
+          Located lp tk   = act pos matched
+          t               = Spanned lp tk matched
        in case (modes, tk) of
             -- **An escape opened by the main lexer pushes the same mode the
             -- region scanner pushes** (MS5 phase 81), so its closing brace
@@ -377,17 +410,17 @@ loop blocks modes inp@(pos, _, _, str) = case modes of
             ([], _)
               | blocks, Pos _ 1 <- lp, Just k <- blockKindOf tk ->
                   let (body, inp'') = blockText inp'
-                   in (Located lp (TBlock k body) :) <$> loop blocks modes inp''
+                   in (Spanned lp (TBlock k body) body :) <$> loop blocks modes inp''
             (_, TEscapeOpen) -> (t :) <$> loop blocks (Esc 0 : modes) inp'
             -- The brace that closes the escape, rather than one its code wrote.
             (Esc 0 : outer, TRBrace) ->
-              (Located lp TEscapeClose :) <$> loop blocks outer inp'
+              (Spanned lp TEscapeClose matched :) <$> loop blocks outer inp'
             (Esc d : outer, TRBrace) -> (t :) <$> loop blocks (Esc (d - 1) : outer) inp'
             (Esc d : outer, TLBrace) -> (t :) <$> loop blocks (Esc (d + 1) : outer) inp'
             -- Which character closes the region depends on how it was opened:
             -- a tag's own backtick, or the ⟩ that closes the ⟨ alias.
             (_, TTagOpen _)
-              | take 1 (take len str) == "⟨" -> (t :) <$> loop blocks (Raw '⟩' : modes) inp'
+              | take 1 matched == "⟨" -> (t :) <$> loop blocks (Raw '⟩' : modes) inp'
               | otherwise                    -> (t :) <$> loop blocks (Raw '`' : modes) inp'
             (_, TTagOpenAt _ _)              -> (t :) <$> loop blocks (Raw '`' : modes) inp'
             _                        -> (t :) <$> loop blocks modes inp'
@@ -411,29 +444,35 @@ rawEscapes = ['`', '\\', '$', '⟩']
 escapeOpener :: String
 escapeOpener = ['$', toEnum 123]
 
-raw :: Bool -> Char -> [Mode] -> AlexPosn -> String -> Either LexError [Located Token]
-raw blocks fence outer p0 s0 = chunk p0 p0 s0 ""
+raw :: Bool -> Char -> [Mode] -> AlexPosn -> String -> Either LexError [Spanned]
+raw blocks fence outer p0 s0 = chunk p0 p0 s0 "" ""
   where
-    chunk began p cs acc = case cs of
+    -- **Two accumulators, and they are not the same string** (MS7 phase 136):
+    -- @acc@ is the chunk's payload, with backslash escapes undone, which is what
+    -- 'TRaw' has always carried and what an embedded parser reads; @src@ is the
+    -- characters as the line holds them, which is the span a highlighter colours.
+    -- A region containing @\\\`@ has one character in the first and two in the
+    -- second.
+    chunk began p cs acc src = case cs of
       [] -> Left (LexError (posOf p) Nothing)
       '\\' : c : rest
         | c `elem` rawEscapes ->
-            chunk began (alexMove (alexMove p '\\') c) rest (c : acc)
+            chunk began (alexMove (alexMove p '\\') c) rest (c : acc) (c : '\\' : src)
       c : rest
         | c == fence ->
-            ((flush began acc ++) . (Located (posOf p) TTagClose :))
+            ((flush began acc src ++) . (Spanned (posOf p) TTagClose [c] :))
               <$> loop blocks outer (alexMove p c, c, [], rest)
       _ | Just rest <- stripPrefix escapeOpener cs ->
             let p1 = foldl alexMove p escapeOpener
-             in ((flush began acc ++) . (Located (posOf p) TEscapeOpen :))
+             in ((flush began acc src ++) . (Spanned (posOf p) TEscapeOpen escapeOpener :))
                   <$> loop blocks (Esc 0 : Raw fence : outer) (p1, last escapeOpener, [], rest)
-      c : rest -> chunk began (alexMove p c) rest (c : acc)
+      c : rest -> chunk began (alexMove p c) rest (c : acc) (c : src)
 
     -- A chunk is reported at the position it began, not where it ended, so an
     -- embedded parser's own positions can be offset from something meaningful.
-    flush began acc
+    flush began acc src
       | null acc  = []
-      | otherwise = [Located (posOf began) (TRaw (reverse acc))]
+      | otherwise = [Spanned (posOf began) (TRaw (reverse acc)) (reverse src)]
 
 -- | Which object-language block a keyword opens (MS6 phase 101; @judgment@
 -- from phase 108).

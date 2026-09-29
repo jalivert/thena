@@ -48,6 +48,7 @@ import Thena.View.Chart (Written (..))
 import Thena.View.Development (LinkView (..))
 import Thena.View.Machine (MachineView (..))
 import Thena.View.Rules (RuleView (..))
+import Thena.View.Tokens (TokenView (..), tokensView)
 import Thena.View.Type (SignatureView (..))
 
 main :: IO ()
@@ -87,6 +88,14 @@ checks =
                             , r <- rs
                             , Just sg <- [ruleViewSignature r]
                             , not (null (signatureViewParams sg)) ]))
+    -- A line comes back as coloured spans, and they really are spans (MS7
+    -- phase 136). Needs no session, so unlike the two below it can assert the
+    -- answer rather than only that one arrives.
+  , \_ -> want "tokensView spans a line"
+            (case tokensView "let x = 3" of
+               Right ts -> concatMap tokenViewText ts == "letx=3"
+                             && map tokenViewColumn ts == [1, 5, 7, 9]
+               Left _   -> False)
   , \s -> want "parseView" (either (const True) (const True) (parseView s "LC" Nothing []))
   , \s -> want "offerView" (either (const True) (const True) (offerView s "LC" Nothing [] [WrittenText ""]))
   , \s -> want "focusProgram" (not (null (focusProgram (focusAddress s))) || True)

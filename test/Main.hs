@@ -20,6 +20,7 @@ import qualified Thena.View.MachineTests
 import qualified Thena.View.RulesTests
 import qualified Thena.View.SurfaceTests
 import qualified Thena.View.SourceTests
+import qualified Thena.View.TokensTests
 import qualified Thena.View.TypeTests
 import qualified Thena.DependentIndexTests
 import qualified Thena.CanonicalTests
@@ -86,6 +87,7 @@ main =
       , Thena.View.RulesTests.tests
       , Thena.View.SurfaceTests.tests
       , Thena.View.SourceTests.tests
+      , Thena.View.TokensTests.tests
       , Thena.View.TypeTests.tests
       , Thena.ViewTests.tests
       , Thena.View.AddressTests.tests
