@@ -45,6 +45,7 @@ library
         Thena.Language.Regex
         Thena.Language.Reader
         Thena.Language.Grammar
+        Thena.Language.Instral
         Thena.Language.Earley
         Thena.Language.Build
         Thena.Language.Substitution
@@ -207,6 +208,7 @@ test-suite thena-test
         Thena.View.RulesTests
         Thena.View.SurfaceTests
         Thena.View.SourceTests
+        Thena.View.StatementTests
         Thena.View.TokensTests
         Thena.View.TypeTests
         Thena.DependentIndexTests

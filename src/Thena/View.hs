@@ -60,6 +60,7 @@ module Thena.View
   , matchesView
   , parseView
   , offerView
+  , statementOfferView
 
     -- * Addressing
   , focusAddress
@@ -91,6 +92,8 @@ import Thena.Language.Grammar (Grammar)
 import Thena.Rules (RuleBase (..), RuleIter, matches, next)
 import Thena.Syntax.Print (Env, freshen)
 import Thena.View.Address (Address (..), Move (..), addressOf, extend, focusing)
+import qualified Thena.Language.Earley as Earley
+import Thena.Language.Instral (instralRules, statementHead)
 import Thena.View.Chart
   ( FailureView
   , OfferProblem
@@ -98,6 +101,7 @@ import Thena.View.Chart
   , TreeView
   , Written
   , displayOffer
+  , offerAt
   , displayParse
   )
 import Thena.View.Core (Budget (..), Display, displayCore)
@@ -286,6 +290,27 @@ offerView
   -> [Written]
   -> Either OfferProblem OfferView
 offerView s = displayOffer (sessionGrammars s)
+
+-- | **What may be written at the cursor of an @instral@ line** — the prompt
+-- itself, not a region inside one (MS7 phase 137; Tier A of
+-- @.jalivert\/LIVE-OFFERS.md@).
+--
+-- The same 'OfferView' the region question answers, from a grammar
+-- "Thena.Language.Instral" derives from the op table and the loaded bases. It
+-- is session-driven for the same reason 'offerView' is: the rules that may be
+-- called are the ones that are loaded now, and a base loaded mid-session
+-- changes the answer without anything being rebuilt.
+--
+-- **A slot's offer names the type it wants.** After @quantify @ the options are
+-- @Nonterminal \"Operand:Name\"@ and the names that fit it; after
+-- @quantify x @ they are @Operand:Core@ — argument two, narrowed, which is the
+-- whole of Tier A's ask. 'Thena.Language.Instral.operandHead' is the encoding.
+--
+-- **Total, where 'offerView' can refuse.** There is no language name to get
+-- wrong: @instral@ is always in scope.
+statementOfferView :: Session -> [Written] -> [Written] -> OfferView
+statementOfferView s =
+  offerAt (instralRules (sessionRules s)) (Earley.StartAt statementHead)
 
 -- ---------------------------------------------------------------------------
 -- The plumbing itself

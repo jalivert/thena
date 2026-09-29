@@ -44,6 +44,7 @@ module Thena.View.Chart
   , OfferProblem (..)
   , displayParse
   , displayOffer
+  , offerAt
   ) where
 
 import Data.List (intersperse)
@@ -250,8 +251,19 @@ displayOffer
 displayOffer gs lang prod before after
   | lang `notElem` languageNames gs = Left (NoSuchLanguage lang)
   | Just p <- prod, p `notElem` productionNames gs lang = Left (NoSuchProduction lang p)
-  | otherwise =
-      Right (offerView replacing (Earley.offer (earleyRules gs) (startOf lang prod) left right))
+  | otherwise = Right (offerAt (earleyRules gs) (startOf lang prod) before after)
+
+-- | The offer at a cursor, given the rules and where a parse starts — the half
+-- of 'displayOffer' that is not about an object language's name.
+--
+-- **Factored out at MS7 phase 137**, when @instral@ gained a grammar of its own
+-- ("Thena.Language.Instral"): a statement is not a region, has no language name
+-- to check and no production to be written at, but everything below this line
+-- is exactly the same question. Splitting it here is what keeps the two from
+-- being two implementations of one answer.
+offerAt :: [Earley.Rule] -> Earley.Start -> [Written] -> [Written] -> OfferView
+offerAt rs start before after =
+  offerView replacing (Earley.offer rs start left right)
   where
     -- The cursor is in the box when the box is the first thing to its right.
     (replacing, after') = case after of
