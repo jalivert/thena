@@ -38,7 +38,7 @@ import Lens.Micro (Lens', lens)
 import System.Directory (doesDirectoryExist, listDirectory)
 import System.FilePath (takeDirectory, takeFileName, (</>))
 
-import Thena.Driver (Session, oneLine)
+import Thena.Driver (Response (Quit), Session, oneLine)
 import Thena.Files (startingSession)
 import Thena.Render (renderResponse, renderTrouble)
 import Thena.View (developmentView, focusAddress, machineView)
@@ -162,16 +162,26 @@ draw st = [hBox [replColumn, sideColumn]]
     -- | The accent edge, a title strip, then the content — never a full
     -- fill, per his correction. 'clickable' so a scroll-wheel event over
     -- this pane resolves to its own 'Name', not the row under it.
+    --
+    -- **The edge bar sits outside the 'viewport', not inside it.** 'fill'
+    -- is infinite in both directions; a 'Vertical' viewport has to know
+    -- its content's real height to manage a scroll offset, and refuses at
+    -- runtime — "tried to embed an infinite-height widget in vertical
+    -- viewport" — if anything inside it reports infinite height, which
+    -- 'fill' always does regardless of 'hLimit' pinning its width. Only
+    -- the scrollable part (title + content) goes inside the viewport; the
+    -- edge is a plain sibling, sized by the outer box like any other
+    -- widget.
     pane key vp content =
       clickable vp $
-        viewport vp Vertical $
-          hBox
-            [ withAttr (attrName ("edge." <> key)) (hLimit 1 (fill ' '))
-            , vBox
+        hBox
+          [ withAttr (attrName ("edge." <> key)) (hLimit 1 (fill ' '))
+          , viewport vp Vertical $
+              vBox
                 [ withAttr (attrName ("title." <> key)) (padLeftRight 1 (str key))
                 , content
                 ]
-            ]
+          ]
 
 -- | A line, run against the session, and its 'Response' rendered as lines
 -- via 'Thena.Render.renderResponse' — a status-line-shaped placeholder for
@@ -198,6 +208,7 @@ handleEvent (VtyEvent (V.EvKey V.KEnter [])) = do
         , stHistory = reverse (renderResponse s' resp) <> [("> " <> line)] <> stHistory st
         , stSession = s'
         }
+      if resp == Quit then halt else pure ()
 handleEvent (VtyEvent (V.EvKey V.KEsc [])) = halt
 handleEvent (VtyEvent (V.EvKey (V.KChar '\t') [])) = completeLoadPath
 handleEvent (MouseDown n V.BScrollUp _ _) = vScrollBy (viewportScroll n) (-1)
