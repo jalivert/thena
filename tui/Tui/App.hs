@@ -296,10 +296,16 @@ dropdownLayer st = case (stDropdown st, stInputExtent st) of
       paneExt = case stPaneExtent st of
         Just p  -> p
         Nothing -> inputExt
-      -- | The editor's own left edge plus the cursor's column within it —
-      -- "follows my caret" means the *caret*, not just wherever the input
-      -- box happens to start, which only coincide while typing at the end.
-      col        = locationColumn (extentUpperLeft inputExt) + snd (getCursorPosition (stInput st))
+      -- | The caret's own screen column: the editor's left edge plus the
+      -- cursor's column within it — "follows my caret" means the *caret*,
+      -- not just wherever the input box happens to start, which only
+      -- coincide while typing at the end.
+      caretCol   = locationColumn (extentUpperLeft inputExt) + snd (getCursorPosition (stInput st))
+      -- | The widget sits one marker-width left of the caret, so the entry
+      -- *text* lands under it — the rows all lead with a two-column marker
+      -- (see 'dropdownSelected'/'dropdownPlain'), and anchoring the widget
+      -- edge itself would leave every name that width too far right.
+      col        = max 0 (caretCol - dropdownMarkerWidth)
       inputRow   = locationRow (extentUpperLeft inputExt)
       paneRow    = locationRow (extentUpperLeft paneExt)
       paneHeight = snd (extentSize paneExt)
@@ -314,8 +320,19 @@ renderDropdown (LoadDropdown entries selected) =
   withAttr (attrName "dropdown") (vBox (zipWith renderRow [0 :: Int ..] entries))
   where
     renderRow i name
-      | Just i == selected = withAttr (attrName "dropdown.selected") (str ("→ " <> name))
-      | otherwise           = str ("  " <> name)
+      | Just i == selected = withAttr (attrName "dropdown.selected") (str (dropdownSelected <> name))
+      | otherwise           = str (dropdownPlain <> name)
+
+-- | The lead every dropdown row carries — the arrow on the selected row,
+-- blank space everywhere else. **One glyph plus one space either way, so
+-- every row's text starts at the same column**; 'dropdownLayer' anchors on
+-- 'dropdownMarkerWidth' rather than a literal, so the two cannot drift apart.
+dropdownSelected, dropdownPlain :: String
+dropdownSelected = "→ "
+dropdownPlain    = "  "
+
+dropdownMarkerWidth :: Int
+dropdownMarkerWidth = length dropdownSelected
 
 -- | A line, run against the session, and its 'Response' rendered as lines
 -- via 'Thena.Render.renderResponse' — a status-line-shaped placeholder for
