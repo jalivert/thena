@@ -2935,3 +2935,30 @@ Two things fuel does not bound. A single instruction may be a kernel call —
 so one unit of fuel can take minutes. And three operations are unbounded by
 construction, because they read the finished state rather than reporting it:
 loading a file, `qed`, and `:infer`.
+
+### A tagged literal is notation, not a term — `Core` carries no tag
+
+``LC`( M N )` `` and `app M N` are **the same term**. The tag says which grammar to
+read the text with; once it is read, what is left is an ordinary application of that
+language's constructors. Nothing in `Core` records that you wrote the notation.
+
+So the notation is *reconstructed* when a term is shown. A term is written back as a
+literal when its head constructor is a production of some grammar — the lookup is by
+constructor name, so there is never a choice of notation to make — and the layout is
+then printed, re-parsed, and accepted only when the reading gives back the same tree.
+Where it does not, a subterm is fenced in a splice and the check runs again. That is
+why a term you wrote flat can come back with a fence in it: the fence is what makes
+the text read as the term.
+
+The alternative was a `Core` constructor holding the tag, and it does not survive one
+question: is a tagged term convertible with its own contents? It has to be — a
+theorem proved about ``typing`· ⊢ ${M} : ${T}` `` must apply to `typing ctxEmpty M T`,
+or the notation is a different language rather than a way of writing this one. A
+constructor that conversion must ignore is a constructor every part of the kernel must
+remember to strip, and one that quietly destroys unique normal forms, since a tag
+could then sit at any subterm any number of times.
+
+What this costs you is real and small: the system does not remember whether you typed
+a term as object text or in Core notation, and it does not remember your spacing. What
+it buys is that the two spellings are one term everywhere, with no rule about when
+they are interchangeable, because there is nothing to interchange.
