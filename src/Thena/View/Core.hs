@@ -115,6 +115,38 @@ data Shape
   | AnElision
     -- ^ the budget stopped here. **Visible, never silent** — a tree that quietly
     -- stopped would draw a term that is not the term.
+  | ARegion Display
+    -- ^ **a tagged literal begins here** (MS7 phase 132) — the node whose text
+    -- @Thena.Language.Build.printTerm@ would write as @lang\`…\`@, wrapping the
+    -- 'AnObjectTerm' that carries the language and the production.
+    --
+    -- **Core has no region constructor.** There is nothing in 'Thena.Core.Term'
+    -- that holds a tag: the notation is /reconstructed/ from a term's shape by
+    -- @Thena.Language.Build.draft@, and the same reconstruction stands behind
+    -- 'AnObjectTerm' below (they share @objectDraft@, so they agree by
+    -- construction). This case is where that reconstruction says a literal
+    -- starts.
+    --
+    -- **Why a wrapper and not a field**: the tag and the fences are drawn
+    -- exactly where you meet an 'ARegion' and nowhere else, so a frontend can
+    -- draw a 'Display' compositionally. Without it, a nested 'AnObjectTerm'
+    -- reached through an inline 'ObjectChild' is indistinguishable from one that
+    -- starts a literal, and the parent has to reach into its child to suppress
+    -- the tag — which is what 'Thena.View.Redraw' had to do before this phase.
+    -- Nothing is duplicated: the language and the production stay on the
+    -- 'AnObjectTerm' inside, and cannot come to disagree with a second copy.
+    --
+    -- **His ruling, 2026-09-29**, on what this is for: with the display enabled,
+    -- /"tags and their production rules qualifiers (if present) and backticks
+    -- disappear unless the cursor stands directly inside the literal or mouse
+    -- hover over it and it looks seamless as a single program and only a
+    -- different background and different type-face … show that it is special
+    -- (same for splices)"/. The seamless form is the items laid out with this
+    -- wrapper drawn as nothing; the expanded form is the same items with the tag
+    -- and the fences drawn. Both are the frontend's, from one tree.
+    --
+    -- The address is the same Core node's as the shape inside — a region is not
+    -- a node of its own, it is a statement about one.
   | AnObjectTerm String String [ObjectItem]
     -- ^ a term of a modelled language (§6, phase 115b): the language, the
     -- production, and its slots **in the order the grammar writes them** — a
@@ -155,6 +187,13 @@ data ObjectItem
     -- rediscover it without one: printing this slot inline here would read
     -- back as a different tree, or (when the notation does not reach at all)
     -- there is no notation to lay out inline in the first place.
+    --
+    -- **Said plainly: 'True' is a splice** — @${…}@ — and 'False' is more of the
+    -- same literal, laid out inline. Those are the only two things the flag ever
+    -- means, and a splice is the other half of what his 2026-09-29 ruling wants
+    -- styled (see 'ARegion'). A 'True' child whose shape is an 'ARegion' is a
+    -- splice holding a literal of its own; a 'True' child with any other shape
+    -- is a splice holding an ordinary Core term.
   deriving (Eq, Show)
 
 -- | A binder: what it binds, and the type it binds at.
@@ -202,7 +241,12 @@ displayCore grammars budget env binders counter here term =
     -- the node sits.
     go (Budget d) e bs n at t
       | d <= 0 = Display at AnElision
-      | Just shape <- objectShape (Budget (d - 1)) e bs n at t = Display at shape
+      -- **Wrapped, because reaching an object term from a Core position is
+      -- exactly what starts a literal** (phase 132). An inline slot goes
+      -- through 'fromDraft' below and is deliberately not wrapped: it is more
+      -- of the same literal, inside the same fences.
+      | Just shape <- objectShape (Budget (d - 1)) e bs n at t =
+          Display at (ARegion (Display at shape))
       | otherwise = Display at (shapeOf (Budget (d - 1)) e bs n at t)
 
     -- | 'Nothing' exactly when 'Thena.Language.Build.printTerm' would print
@@ -261,10 +305,12 @@ displayCore grammars budget env binders counter here term =
       (OfLanguage {}, DNode {}) -> do
         shape <- fromDraft b e bs n addr core d
         Just (ObjectChild False (Display addr shape))
+      -- A splice holding a literal of its own, so the literal inside it starts
+      -- at the splice's own term: 'ARegion' again, one level down (phase 132).
       (OfLanguage {}, DFenced _ _ inner) -> case settled grammars (const "") inner of
         Just settled' -> do
           shape <- fromDraft b e bs n addr core settled'
-          Just (ObjectChild True (Display addr shape))
+          Just (ObjectChild True (Display addr (ARegion (Display addr shape))))
         Nothing -> Just (ObjectChild True (go b e bs n addr core))
       (_, DForeign _) -> Just (ObjectChild True (go b e bs n addr core))
       _ -> Nothing -- a token slot that did not draft as a token, or the

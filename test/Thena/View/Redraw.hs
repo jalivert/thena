@@ -88,9 +88,19 @@ redraw = at Loose
             ]
       -- **A tagged region is atomic, at every precedence** (phase 110): the
       -- backticks already delimit it, so nothing here ever parenthesises one.
-      -- 'layout' is the bare interleaving *inside* the tag; it is also what an
-      -- inline (unfenced) nested term continues into, with no tag of its own.
-      AnObjectTerm lang _ items -> lang <> "`" <> layout items <> "`"
+      --
+      -- **The tag and the fences are drawn here and nowhere else** (phase 132).
+      -- 'ARegion' is the view's statement that a literal starts at this node, so
+      -- this is the whole of the rule; before it, this case drew a tag at every
+      -- 'AnObjectTerm' and the *parent* had to reach into an inline child to
+      -- suppress it. A frontend that wants the seamless form his 2026-09-29
+      -- ruling asks for draws this case as 'layout' alone.
+      ARegion d -> case displayShape d of
+        AnObjectTerm lang _ items -> lang <> "`" <> layout items <> "`"
+        _ -> at Atom d -- unreached: 'ARegion' wraps an 'AnObjectTerm' or nothing
+      -- **Reached inline, so no tag**: more of the literal the 'ARegion' above
+      -- opened, laid out in the same fences.
+      AnObjectTerm _ _ items -> layout items
       AToken txt -> txt
 
     layout :: [ObjectItem] -> String
@@ -99,9 +109,11 @@ redraw = at Loose
         item i = case i of
           ObjectText t -> t
           ObjectToken d -> at Atom d
-          ObjectChild False d -> case displayShape d of
-            AnObjectTerm _ _ innerItems -> layout innerItems
-            _ -> at Atom d -- unreached: an unfenced child always drafted inline
+          -- **Compositional since phase 132**: an inline child is drawn by the
+          -- same 'at' as anything else, because 'AnObjectTerm' no longer draws a
+          -- tag of its own. This case used to destructure the child to suppress
+          -- one.
+          ObjectChild False d -> at Atom d
           -- **The fence, not its contents, is what crosses** (§6): the editor
           -- still lays this out from the grammar — 'at' does, recursing into
           -- 'AnObjectTerm' for a term still in notation and into the ordinary
@@ -152,6 +164,7 @@ occurs a (Display _ s) = case s of
   AFormer _ _ as -> any (occurs a) as
   AnElimination _ _ ps m ms is t ->
     any (occurs a) (ps <> [m] <> ms <> is <> [t])
+  ARegion d -> occurs a d
   AnObjectTerm _ _ items -> any occursItem items
   _ -> False
   where

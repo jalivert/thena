@@ -30,7 +30,13 @@ import Thena.Driver
 import Thena.Engine (Machine (..))
 import Thena.Language.Grammar (Grammar)
 import Thena.View.Address (Address (..))
-import Thena.View.Core (Budget (..), displayCore)
+import Thena.View.Core
+  ( Budget (..)
+  , Display (..)
+  , ObjectItem (..)
+  , Shape (..)
+  , displayCore
+  )
 import Thena.View.Redraw (redraw)
 import Thena.Files (startingSession)
 import Thena.Render (renderCore)
@@ -42,6 +48,7 @@ tests =
     [ testCase "the display carries everything the printer needed" corpus
     , testCase "and the corpus really holds terms" notVacuous
     , testGroup "a modelled language's notation (phase 115b)" objectCases
+    , testGroup "where a tagged literal begins (phase 132)" regionCases
     ]
 
 -- | Every term the prelude and the standard base leave in the environment.
@@ -157,3 +164,86 @@ objectCases =
     agree name t = testCase name $ do
       gs <- loaded
       redraw (displayCore gs (Budget 200) [] [] 0 (Address []) t) @?= renderCore gs 0 [] t
+
+-- ---------------------------------------------------------------------------
+-- Where a literal begins — MS7 phase 132
+
+-- | **'ARegion' marks a literal's boundary, and only a boundary.**
+--
+-- His ask of 2026-09-29 is that a frontend draw the tag, the production
+-- qualifier and the backticks only when the cursor is inside the literal, and
+-- draw the same term seamlessly otherwise. That needs the view to say where a
+-- literal /starts/, which is what phase 132 added: reaching an object term from
+-- a Core position opens one, an inline slot continues the one already open, and
+-- a splice holding a literal of its own opens another.
+--
+-- 'Thena.View.Redraw' crossing green against 'Thena.Render.renderCore' already
+-- proves the wrapper sits exactly where @printTerm@ writes a tag — these say
+-- the shape is what a compositional frontend can use, which a crossing on the
+-- final string cannot.
+regionCases :: [TestTree]
+regionCases =
+  [ testCase "an object term reached from Core opens a literal" $ do
+      sh <- shapeOf (con "juxt" [con "ref" [str "f"], con "ref" [str "a"]])
+      case sh of
+        ARegion inner -> case displayShape inner of
+          AnObjectTerm lang prod _ -> (lang, prod) @?= ("Ex", "juxt")
+          other -> assertFailure ("ARegion wrapped " <> show other)
+        other -> assertFailure ("not a region: " <> show other)
+
+  , testCase "and an inline slot continues it rather than opening another" $ do
+      sh <- shapeOf (con "juxt" [con "ref" [str "f"], con "ref" [str "a"]])
+      case sh of
+        ARegion inner -> case displayShape inner of
+          AnObjectTerm _ _ items ->
+            [ () | ObjectChild False d <- items, ARegion {} <- [displayShape d] ] @?= []
+          other -> assertFailure ("ARegion wrapped " <> show other)
+        other -> assertFailure ("not a region: " <> show other)
+
+  , testCase "and a nested one really is inline, so the check is not vacuous" $ do
+      sh <- shapeOf (con "juxt" [con "ref" [str "f"], con "ref" [str "a"]])
+      case sh of
+        ARegion inner -> case displayShape inner of
+          AnObjectTerm _ _ items ->
+            length [ () | ObjectChild False d <- items
+                        , AnObjectTerm {} <- [displayShape d] ] @?= 2
+          other -> assertFailure ("ARegion wrapped " <> show other)
+        other -> assertFailure ("not a region: " <> show other)
+
+  , testCase "a splice holding a literal of its own opens a second one" $ do
+      -- 'Thena.PrintTests' established this term's printed form: the splice's
+      -- own argument is a region, so it is written @${LC`…`}@.
+      sh <- shapeOf (con "app" [con "var" [Global (GlobalName "nom") []], con "var" [str "y"]])
+      case sh of
+        ARegion inner -> case displayShape inner of
+          AnObjectTerm _ _ items ->
+            length [ () | ObjectChild True d <- items
+                        , ARegion {} <- [displayShape d] ] @?= 1
+          other -> assertFailure ("ARegion wrapped " <> show other)
+        other -> assertFailure ("not a region: " <> show other)
+
+  , testCase "a term with no notation opens none" $ do
+      sh <- shapeOf (Global (GlobalName "twice") [])
+      case sh of
+        ARegion {} -> assertFailure "a plain global was taken for a literal"
+        _          -> pure ()
+
+  , testCase "the seamless form is the expanded one without tag or fences" $ do
+      gs <- loaded
+      let t = con "juxt" [con "ref" [str "f"], con "ref" [str "a"]]
+          d = displayCore gs (Budget 200) [] [] 0 (Address []) t
+      expanded <- pure (redraw d)
+      case displayShape d of
+        ARegion inner -> case displayShape inner of
+          AnObjectTerm lang _ _ ->
+            -- What a frontend does to hide the tag: draw the wrapper as
+            -- nothing. The seamless text is the expanded text minus exactly the
+            -- tag and the two backticks, which is the whole of his ask.
+            expanded @?= lang <> "`" <> redraw inner <> "`"
+          other -> assertFailure ("ARegion wrapped " <> show other)
+        other -> assertFailure ("not a region: " <> show other)
+  ]
+  where
+    shapeOf t = do
+      gs <- loaded
+      pure (displayShape (displayCore gs (Budget 200) [] [] 0 (Address []) t))
