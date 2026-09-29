@@ -116,10 +116,10 @@ enableMouse = do
 attrs :: Theme -> AttrMap
 attrs th = attrMap (surface (themeStage th) (themeInk th))
   [ (attrName "panel",          surface (themePanel th) (themeInk th))
-  , (attrName "edge.repl",      surface (themeRepl th) (themeRepl th))
-  , (attrName "edge.proofterm", surface (themeProof th) (themeProof th))
-  , (attrName "edge.goals",     surface (themeGoals th) (themeGoals th))
-  , (attrName "edge.machine",   surface (themeMachine th) (themeMachine th))
+  , (attrName "edge.repl",      surface (themePanel th) (themeRepl th))
+  , (attrName "edge.proofterm", surface (themePanel th) (themeProof th))
+  , (attrName "edge.goals",     surface (themePanel th) (themeGoals th))
+  , (attrName "edge.machine",   surface (themePanel th) (themeMachine th))
   , (attrName "title.repl",     ink (themeRepl th))
   , (attrName "title.proofterm", ink (themeProof th))
   , (attrName "title.goals",    ink (themeGoals th))
@@ -133,13 +133,20 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
     ink fgC = V.withForeColor V.defAttr fgC
 
 draw :: St -> [Widget Name]
-draw st = [hBox [replColumn, sideColumn]]
+draw st = [hBox [replColumn, gapH, sideColumn]]
   where
     budget = Budget 200
     s = stSession st
     links = developmentView budget s
     machine = machineView budget s
     fold = if stFoldOn st then Fold (focusAddress s) else NoFold
+
+    -- | A one-cell stage-colored strip between panes, his correction,
+    -- 2026-09-29 — panes touched directly before this, `MS7-CLI`'s own
+    -- convention is a thin stage gap both ways. Left at the ambient (base)
+    -- attr rather than any pane's "panel" attr, same as the stage itself.
+    gapH = hLimit 1 (fill ' ')
+    gapV = vLimit 1 (fill ' ')
 
     replColumn =
       withAttr (attrName "panel") $
@@ -152,16 +159,23 @@ draw st = [hBox [replColumn, sideColumn]]
 
     sideColumn =
       hLimitPercent 38 $
-        withAttr (attrName "panel") $
-          vBox
-            [ pane "proofterm" ProofTermVP (padAll 1 (renderDevelopment fold links))
-            , pane "goals"     GoalsVP     (padAll 1 (renderGoals fold links))
-            , pane "machine"   MachineVP   (padAll 1 (vBox (map str (renderMachineView machine))))
-            ]
+        vBox
+          [ withAttr (attrName "panel") (pane "proofterm" ProofTermVP (padAll 1 (renderDevelopment fold links)))
+          , gapV
+          , withAttr (attrName "panel") (pane "goals"     GoalsVP     (padAll 1 (renderGoals fold links)))
+          , gapV
+          , withAttr (attrName "panel") (pane "machine"   MachineVP   (padAll 1 (vBox (map str (renderMachineView machine)))))
+          ]
 
     -- | The accent edge, a title strip, then the content — never a full
     -- fill, per his correction. 'clickable' so a scroll-wheel event over
     -- this pane resolves to its own 'Name', not the row under it.
+    --
+    -- **The edge is a glyph, not a solid cell** — his correction,
+    -- 2026-09-29: a full-cell fill read as too thick, and a cell can't be
+    -- fractional, so it's a left three-eighths block ('▎', same glyph
+    -- `MS7-CLI` used for this) in the accent color against the panel
+    -- background, still 'hLimit 1' wide.
     --
     -- **The edge bar sits outside the 'viewport', not inside it.** 'fill'
     -- is infinite in both directions; a 'Vertical' viewport has to know
@@ -175,7 +189,7 @@ draw st = [hBox [replColumn, sideColumn]]
     pane key vp content =
       clickable vp $
         hBox
-          [ withAttr (attrName ("edge." <> key)) (hLimit 1 (fill ' '))
+          [ withAttr (attrName ("edge." <> key)) (hLimit 1 (fill '▎'))
           , viewport vp Vertical $
               vBox
                 [ withAttr (attrName ("title." <> key)) (padLeftRight 1 (str key))

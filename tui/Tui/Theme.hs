@@ -40,11 +40,17 @@ rgb = V.linearColor
 -- | His pick, 2026-09-29, over the other two — *"Neon pink … the original
 -- one"* — and the default. Pure black stage; every accent is a shade of the
 -- one neon pink/magenta family, no blue, no yellow.
+--
+-- **`themePanel` lifted off near-neutral, 2026-09-29**: `(10, 10, 10)`
+-- against a `(0, 0, 0)` stage read as too close to separate as its own
+-- surface, his punch list. Warm and pink-tinted (R and B raised more than
+-- G) rather than a neutral gray lift, so the step reads as *this* theme's
+-- panel, not a generic dark-mode one.
 neonPinkDark :: Theme
 neonPinkDark = Theme
   { themeName    = "neon-pink-dark"
   , themeStage   = rgb 0 0 0
-  , themePanel   = rgb 10 10 10
+  , themePanel   = rgb 28 14 22
   , themeInk     = rgb 255 230 255
   , themeDim     = rgb 150 90 130
   , themeRepl    = rgb 255 45 190
