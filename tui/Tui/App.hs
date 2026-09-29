@@ -227,12 +227,19 @@ completeLoadPath = do
   case loadPathPrefix line of
     Nothing -> pure ()
     Just prefix -> do
-      matched <- liftIO (completePath prefix)
-      case matched of
-        Nothing -> pure ()
-        Just full ->
+      result <- liftIO (completePath prefix)
+      case result of
+        Extended full ->
           let line' = replacePathPrefix line full
            in put st { stInput = E.editorText Input (Just 1) (Text.pack line') }
+        -- Both failure cases used to leave Tab looking like it did nothing —
+        -- his punch list, 2026-09-29. Feedback goes through the same
+        -- stHistory line the pseudo-commands already use; a dropdown listing
+        -- candidates is still the deferred next slice, not built here.
+        Ambiguous matches ->
+          put st { stHistory = ("load: " <> show (length matches) <> " matches — " <> unwords matches) : stHistory st }
+        NoMatch ->
+          put st { stHistory = ("load: no match for " <> prefix) : stHistory st }
 
 loadPathPrefix :: String -> Maybe String
 loadPathPrefix line
@@ -245,27 +252,34 @@ lastWord = reverse . takeWhile (/= ' ') . reverse
 replacePathPrefix :: String -> String -> String
 replacePathPrefix line completed = take (length line - length (lastWord line)) line <> completed
 
+-- | The result of one completion attempt: extended as far as every match
+-- agrees (ordinary shell-style completion), or a reason it couldn't be —
+-- genuinely ambiguous prefixes are left alone rather than guessed at (a
+-- dropdown listing them is the next slice, same as the object-term
+-- offers'), but the caller still gets told which case it was.
+data Completion
+  = Extended String
+  | Ambiguous [String]
+  | NoMatch
+
 -- | The directory a prefix's last path segment sits in, listed and
--- filtered by what's typed so far; extended only as far as every match
--- agrees (ordinary shell-style completion) — genuinely ambiguous prefixes
--- are left alone rather than guessed at (a dropdown listing them is the
--- next slice, same as the object-term offers').
-completePath :: String -> IO (Maybe String)
+-- filtered by what's typed so far.
+completePath :: String -> IO Completion
 completePath prefix = do
   let dir  = takeDirectory prefix
       name = takeFileName prefix
   exists <- doesDirectoryExist dir
   if not exists
-    then pure Nothing
+    then pure NoMatch
     else do
       entries <- listDirectory dir
       let shown = if "." `isPrefixOf` name then entries else filter (not . isPrefixOf ".") entries
           matches = filter (name `isPrefixOf`) shown
       pure $ case matches of
-        [] -> Nothing
+        [] -> NoMatch
         _  ->
           let common = longestCommonPrefix matches
-           in if length common > length name then Just (joinDir dir common) else Nothing
+           in if length common > length name then Extended (joinDir dir common) else Ambiguous matches
 
 joinDir :: FilePath -> String -> String
 joinDir "." name = name
