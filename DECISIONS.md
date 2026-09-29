@@ -2962,3 +2962,44 @@ What this costs you is real and small: the system does not remember whether you 
 a term as object text or in Core notation, and it does not remember your spacing. What
 it buys is that the two spellings are one term everywhere, with no rule about when
 they are interchangeable, because there is nothing to interchange.
+
+### Completion is derived from the op table, so it can never disagree with dispatch
+
+Typing at the prompt offers you the statements that exist *now*: every op, and every
+rule in every base you have loaded. That list is not written down anywhere. It is
+computed, each time you ask, from the same tables the engine dispatches on — the op
+table for the words and their arities, each rule's declared signature for what its
+arguments are. Load a rule base mid-session and the completions change immediately,
+with nothing to regenerate.
+
+The alternative was a second grammar for `instral`, written beside the one Happy uses
+to actually run your line. Two grammars for one language drift, and the drift is
+silent: the parser that runs your program and the parser that advises you would slowly
+come to disagree about what the language is. Deriving both from one table is what
+makes that impossible rather than merely unlikely.
+
+Note what this does *not* change: your line is still run by Happy. The derived grammar
+only answers "what may I write here", never "what does this mean".
+
+### A slot's type narrows what is offered, and never prevents what you write
+
+`quantify` takes a `Name` and then a `Core`, so after `quantify ` you are offered names,
+and after `quantify x ` you are offered terms. The offer walks from argument to argument
+as you type.
+
+But writing something the slot does not want is not refused. Type a tagged term literal
+where a `Name` was expected — `goto LC\`` — and you still get the full completion for
+that literal, from the object language's own grammar, **marked as recovered** so the
+editor can show you that the line will not run as written.
+
+The mechanism is one rule rather than an exception list: when the whole line has no
+reading at your cursor, the system asks a narrower question about the unit you are
+standing in. Inside a tagged term literal, that language answers; in a half-typed word,
+the statement grammar answers, filtered by what you have typed.
+
+Two things were considered and rejected. Accepting everything everywhere would have
+made the offers useless, because nothing would distinguish what belongs here from what
+is merely tolerated. Teaching the parser to "forgive" a misplaced literal would have
+made it dishonest — it would report a reading that does not exist. Neither is needed:
+the grammar stays strict and truthful, and the help comes from asking a different,
+smaller question.
