@@ -412,6 +412,17 @@ handleEventInner ev@(VtyEvent (V.EvKey V.KUp []))   = navigateDropdown moveUp ev
 handleEventInner (VtyEvent (V.EvKey (V.KChar '\t') [])) = completeLoadPath
 handleEventInner (MouseDown n V.BScrollUp _ _) = vScrollBy (viewportScroll n) (-1)
 handleEventInner (MouseDown n V.BScrollDown _ _) = vScrollBy (viewportScroll n) 1
+-- | Press-and-release gestures end here, all of them. A wheel tick arrives
+-- as a press *and* a release (SGR 'M' then 'm'), and so does an ordinary
+-- click — neither half carries editing intent, so neither reaches the
+-- editor nor moves the viewport. Without these, the release half of every
+-- wheel tick falls into the catch-all below, whose 'followInput' yanks the
+-- pane back to the bottom: the pane fighting back on each scroll.
+-- (Click-to-navigate on a dev-link/goal will claim 'MouseDown' with the
+-- left button here once per-line extents land; until then clicks stay
+-- inert rather than quietly yanking.)
+handleEventInner (MouseUp _ _ _) = pure ()
+handleEventInner (MouseDown _ _ _ _) = pure ()
 handleEventInner ev = Brick.zoom stInputL (handleEditorEvent ev) >> followInput >> refreshDropdown
 
 -- | Arrow-key navigation only takes over the keypress while the dropdown is
