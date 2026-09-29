@@ -161,7 +161,7 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   , (attrName "title.goals",    ink (themeGoals th))
   , (attrName "title.machine",  ink (themeMachine th))
   , (attrName "dim",            ink (themeDim th))
-  , (attrName "accent.output",  ink (themeRepl th))
+  , (attrName "accent.output",  ink (themeSoft th))
   , (attrName "dropdown",          surface (themePopup th) (themeInk th))
   , (attrName "dropdown.selected", surface (themePopup th) (themeRepl th))
   -- The input line's own editor: 'renderEditor' wraps its output in

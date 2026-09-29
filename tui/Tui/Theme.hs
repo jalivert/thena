@@ -36,6 +36,11 @@ data Theme = Theme
                              -- step up from the panel, same hue family, so it
                              -- reads as a surface above the pane, not a hole
                              -- in it
+  , themeSoft    :: V.Color -- ^ the lightest accent, for the latest turn's
+                             -- thin marker — present, not prominent. A field
+                             -- of its own rather than reusing whichever pane
+                             -- accent happens to be lightest, so retuning a
+                             -- pane never moves the marker with it.
   }
 
 rgb :: Int -> Int -> Int -> V.Color
@@ -64,6 +69,7 @@ neonPinkDark = Theme
   , themeFold    = rgb 40 12 32
   , themeSplice  = rgb 30 20 14
   , themePopup   = rgb 56 26 42
+  , themeSoft    = rgb 255 140 240
   }
 
 -- | Ranked second. Accents confirmed from the real source
@@ -85,6 +91,7 @@ gruyere = Theme
   , themeFold    = rgb 44 36 74
   , themeSplice  = rgb 34 44 40
   , themePopup   = rgb 54 46 90
+  , themeSoft    = rgb 237 255 130
   }
 
 -- | Ranked third. `editor.background` confirmed from the shipped theme JSON
@@ -104,6 +111,7 @@ synthwave84 = Theme
   , themeFold    = rgb 52 41 79
   , themeSplice  = rgb 40 50 46
   , themePopup   = rgb 78 68 104
+  , themeSoft    = rgb 254 222 93
   }
 
 themes :: [Theme]
