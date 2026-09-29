@@ -50,7 +50,7 @@ import Brick.Widgets.Edit
 import qualified Brick.Widgets.Edit as E
 import Control.Monad.IO.Class (liftIO)
 import Data.Char (isSpace)
-import Data.List (isPrefixOf, sort, sortOn)
+import Data.List (isPrefixOf, isSuffixOf, sort, sortOn)
 import Data.Maybe (isJust, isNothing, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -541,7 +541,11 @@ handleEventInner (VtyEvent (V.EvKey V.KEnter [])) = do
     -- nothing selected, Enter still runs the line as typed.
     (Just (LoadDropdown entries (Just i)), _) | i < length entries -> do
       let line = concatMap Text.unpack (getEditContents (stInput st))
-          line' = replacePathPrefix line (entries !! i)
+      -- Accepted directories carry their slash, same rule as Tab's
+      -- 'completePath': the dropdown goes on inside them rather than
+      -- closing on the exact match.
+      full <- liftIO (slashDir (entries !! i))
+      let line' = replacePathPrefix line full
       put st { stInput = E.editorText Input (Just 1) (Text.pack line') }
       refreshDropdown
       followInput
@@ -970,13 +974,32 @@ matchingEntries prefix = do
 -- 'Nothing' if that's no further than what's already typed (no matches, or
 -- genuinely ambiguous with nothing more in common) — the live dropdown
 -- covers telling the user why, so this doesn't need to any more.
+--
+-- **A result naming a directory carries its trailing slash** (his
+-- `.jalivert/TUI.md` #1): Tab descends into it the way a terminal does, and
+-- the dropdown goes on to list its contents rather than closing on the
+-- exact match. Files pass through untouched.
 completePath :: String -> IO (Maybe String)
 completePath prefix = do
   matches <- matchingEntries prefix
   let dir  = takeDirectory prefix
       name = takeFileName prefix
       common = longestCommonPrefix matches
-  pure $ if length common > length name then Just (joinDir dir common) else Nothing
+  if length common > length name
+    then Just <$> slashDir (joinDir dir common)
+    else do
+      -- Nothing further in common — but what is typed may itself name a
+      -- directory, and then the slash is the completion.
+      let here = joinDir dir name
+      slashed <- slashDir here
+      pure (if slashed /= here then Just slashed else Nothing)
+
+-- | A completed directory carries its slash, so the next Tab — and the
+-- dropdown — continues inside it rather than stopping at its name.
+slashDir :: FilePath -> IO FilePath
+slashDir p = do
+  isDir <- doesDirectoryExist p
+  pure (if isDir && not ("/" `isSuffixOf` p) then p ++ "/" else p)
 
 -- | Every match, full-path, for the dropdown to list — '[]' both for "no
 -- directory"/"nothing matches" and for "one match, and it's already typed
