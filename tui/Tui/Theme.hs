@@ -32,6 +32,10 @@ data Theme = Theme
   , themeFold    :: V.Color -- ^ a folded literal's background tint
   , themeSplice  :: V.Color -- ^ a folded splice's background tint — distinct
                              -- from a literal's, his ruling, 2026-09-28
+  , themePopup   :: V.Color -- ^ a floating dropdown's background — a lighter
+                             -- step up from the panel, same hue family, so it
+                             -- reads as a surface above the pane, not a hole
+                             -- in it
   }
 
 rgb :: Int -> Int -> Int -> V.Color
@@ -59,6 +63,7 @@ neonPinkDark = Theme
   , themeMachine = rgb 255 94 196
   , themeFold    = rgb 40 12 32
   , themeSplice  = rgb 30 20 14
+  , themePopup   = rgb 56 26 42
   }
 
 -- | Ranked second. Accents confirmed from the real source
@@ -79,6 +84,7 @@ gruyere = Theme
   , themeMachine = rgb 20 249 213
   , themeFold    = rgb 44 36 74
   , themeSplice  = rgb 34 44 40
+  , themePopup   = rgb 54 46 90
   }
 
 -- | Ranked third. `editor.background` confirmed from the shipped theme JSON
@@ -97,6 +103,7 @@ synthwave84 = Theme
   , themeMachine = rgb 254 222 93
   , themeFold    = rgb 52 41 79
   , themeSplice  = rgb 40 50 46
+  , themePopup   = rgb 78 68 104
   }
 
 themes :: [Theme]
