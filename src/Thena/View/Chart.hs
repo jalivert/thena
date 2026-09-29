@@ -40,6 +40,7 @@ module Thena.View.Chart
   , OfferView (..)
   , Written (..)
   , ProductionView (..)
+  , StuckView (..)
   , OfferProblem (..)
   , displayParse
   , displayOffer
@@ -122,6 +123,38 @@ data OfferView = OfferView
   , offeredProductions :: [ProductionView]
     -- ^ **every production that may begin at the cursor, to list and to insert**
     -- (MS7 phase 127b) — see 'Earley.offerProductions'.
+  , offeredStuck :: Maybe StuckView
+    -- ^ **the text left of the cursor does not read, and this says where it
+    -- gave out** (MS7 phase 134, @ms7\/CLOSEOUT.md@ 12) — see
+    -- 'Earley.offerStuck'.
+    --
+    -- 'Nothing' in the ordinary case. When it is 'Just', **every other field
+    -- above is empty**, and a frontend should say what this one says instead
+    -- of showing an empty dropdown: the four answers are all drawn from the
+    -- items at the cursor's column, and a broken prefix leaves that column
+    -- with none.
+    --
+    -- The distinction it buys is /\"nothing may be written here\"/ against
+    -- /\"I could not read what you already wrote\"/, which a user reads as a
+    -- broken key when both are silence.
+  }
+  deriving (Eq, Show)
+
+-- | Where a reading of the text left of the cursor gave out.
+--
+-- **Not a 'FailureView'**, though 'AStuck' carries the same two things: a
+-- 'FailureView' answers /why this text is not one term/ and has four ways to
+-- do it, of which only one could ever apply here. A 'Maybe' of a type whose
+-- other three constructors cannot occur is the confusion the literal
+-- alternative costs nothing to avoid.
+data StuckView = StuckView
+  { stuckAt :: Int
+    -- ^ the column the reading reached — the last one any item did. Past it
+    -- nothing could be scanned.
+  , stuckExpected :: [SymbolView]
+    -- ^ what could have stood there, which is what would have let it go on.
+    -- **Not what may stand at the cursor** — the cursor is further right than
+    -- this column, which is the whole reason there is nothing to say there.
   }
   deriving (Eq, Show)
 
@@ -258,6 +291,10 @@ offerView replacing o =
     [ ProductionView n (map symbolView body) (insertion body)
     | (n, body) <- Earley.offerProductions o
     ]
+    (fmap stuckView (Earley.offerStuck o))
+
+stuckView :: (Int, [Earley.Symbol]) -> StuckView
+stuckView (at, expected) = StuckView at (map symbolView expected)
 
 -- | A production's body as a region to insert: terminals as text, slots as
 -- placeholders, one space between.

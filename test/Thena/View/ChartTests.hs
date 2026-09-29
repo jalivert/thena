@@ -39,6 +39,7 @@ import Thena.View.Chart
   , SymbolView (..)
   , TreeView (..)
   , ProductionView (..)
+  , StuckView (..)
   , Written (..)
   , displayOffer
   , displayParse
@@ -56,7 +57,64 @@ tests =
     , testGroup "what may stand at the cursor (Earley.offer)" offerCases
     , testGroup "a region, text and splices (phase 125)" regionCases
     , testGroup "the productions offered whole (phase 127b)" productionCases
+    , testGroup "a broken prefix says where it gave out (phase 134)" stuckCases
     ]
+
+-- | @ms7\/CLOSEOUT.md@ 12: the text /left/ of the cursor does not read, so the
+-- cursor's own column has no items and all four of the other answers are empty.
+--
+-- **The crossing is that the four really are empty and 'offeredStuck' really is
+-- 'Just'** — one without the other would be either a silence with no
+-- explanation (what this phase fixes) or an explanation beside an offer that
+-- contradicts it.
+stuckCases :: [TestTree]
+stuckCases =
+  [ testCase "the item's own example" $ do
+      gs <- loaded
+      -- @( λ x )@ — the binder wants @: ι .@ before the body, so the @)@ is
+      -- where the reading gives out.
+      stuckAtSomething gs "( \955 x )" ""
+  , testCase "and a closer with nothing open" $ do
+      gs <- loaded
+      stuckAtSomething gs ") " ""
+  , testCase "a prefix that does read is not stuck" $ do
+      gs <- loaded
+      o <- offerOf gs "( " ""
+      offeredStuck o @?= Nothing
+  , testCase "and neither is an empty region" $ do
+      gs <- loaded
+      o <- offerOf gs "" ""
+      offeredStuck o @?= Nothing
+  , testCase "the column is the furthest reached, not the cursor's" $ do
+      gs <- loaded
+      o <- offerOf gs "( \955 x )" ""
+      case offeredStuck o of
+        Nothing -> assertFailure "expected a stuck offer"
+        Just (StuckView at _) ->
+          -- The cursor sits at the end of seven characters; the reading gave
+          -- out earlier, which is the whole distinction the field draws.
+          if at < 7 then pure ()
+            else assertFailure ("stuck at " <> show at <> ", which is not short of the cursor")
+  ]
+
+offerOf :: [Grammar] -> String -> String -> IO OfferView
+offerOf gs before after =
+  case displayOffer gs "LC" Nothing [WrittenText before] [WrittenText after] of
+    Right o -> pure o
+    Left p  -> assertFailure ("displayOffer refused the fixture: " <> show p)
+
+-- | Stuck, and therefore silent on everything else.
+stuckAtSomething :: [Grammar] -> String -> String -> IO ()
+stuckAtSomething gs before after = do
+  o <- offerOf gs before after
+  case offeredStuck o of
+    Nothing -> assertFailure "expected a stuck offer, got none"
+    Just (StuckView _ expected) -> do
+      (offeredOptions o, offeredWanted o, offeredRest o, offeredProductions o)
+        @?= ([], [], Nothing, [])
+      if null expected
+        then assertFailure "stuck, but with nothing to say was expected there"
+        else pure ()
 
 -- | @Ty@ and @LC@, exactly `ms6\/SPEC.md`'s canonical shape, unbracketed
 -- application left out so nothing here is ambiguous — the point of these
@@ -202,14 +260,23 @@ mismatchOffer gs lang before after
 -- which is the REPL's own hole spelling and not this phase's concern),
 -- replayed over an 'OfferView' rather than a raw 'Earley.Offer'.
 redrawOffer :: String -> OfferView -> (String, [(String, String)])
-redrawOffer before (OfferView options wanted _ rest _) =
+redrawOffer before (OfferView options wanted _ rest _ stuck) =
   case (rest, options ++ wanted) of
     (Just pfx, _) -> single (unwords (map redrawWritten pfx))
     (_, [s]) | isLiteralView s -> single (redrawWritten s)
+    -- MS7 phase 134: the prefix did not read, so there is nothing at the cursor
+    -- and the terminal says where the reading gave out instead.
+    (_, []) | Just (StuckView at expected) <- stuck ->
+      (reverse before, [("", redrawStuck at expected)])
     (_, ss) -> (reverse before, [ ("", redrawSymbolText' s) | s <- ss ])
   where
     single t = (reverse before, [(spaced t, t)])
     spaced t = if null before || isSpace (last before) then t else ' ' : t
+
+redrawStuck :: Int -> [SymbolView] -> String
+redrawStuck at expected =
+  "stopped at " ++ show at
+    ++ (if null expected then "" else ", wanted " ++ unwords (map redrawSymbolText' expected))
 
 isLiteralView :: SymbolView -> Bool
 isLiteralView s = case s of

@@ -14,7 +14,7 @@
 module Thena.EarleyTests (tests) where
 
 import Data.ByteString.Builder (stringUtf8, toLazyByteString)
-import Data.List (sort)
+import Data.List (isPrefixOf, sort)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
@@ -328,6 +328,29 @@ tabbing =
     -- application.
     testCase "the rest stops where the text after the cursor takes over" $
       tab lc "LC" "( \955" "\9608 )" @?= (reverse "( \955", [(" \9608 : \9608 .", "\9608 : \9608 .")])
+    -- MS7 phase 134 (@ms7\/CLOSEOUT.md@ 12). Before it this was the empty list,
+    -- which haskeline shows as nothing at all — and the line below is exactly
+    -- the state a user is in when they most want help.
+  , testCase "a prefix that does not read says where it gave out" $ do
+      let (kept, cs) = tab lc "LC" "( \955 x )" ""
+      kept @?= reverse "( \955 x )"
+      map fst cs @?= [""]     -- display only: nothing is inserted at the cursor
+      case map snd cs of
+        [d] | "stopped at " `isPrefixOf` d -> pure ()
+        ds  -> assertFailure ("expected one 'stopped at' line, got " <> show ds)
+  , testCase "and a prefix that does read says nothing of the kind" $
+      [ d | (_, d) <- snd (tab lc "LC" "( " ""), "stopped at " `isPrefixOf` d ] @?= []
+  , -- The field the line is built from, at the parser rather than through the
+    -- terminal: 'Nothing' whenever the cursor's own column has items.
+    testCase "offerStuck is Nothing wherever there is anything to offer" $
+      [ before
+      | before <- ["", "( ", "( \955", "( \955 x ", "( \955 x : \953 . "]
+      , Just _ <- [offerStuck (offer lc (StartAt "LC") (pieces before) [])]
+      ] @?= []
+  , testCase "and Just, with a column short of the cursor, when there is not" $
+      case offerStuck (offer lc (StartAt "LC") (pieces "( \955 x )") []) of
+        Nothing -> assertFailure "expected a stuck offer"
+        Just (at, expected) -> (at < length "( \955 x )", null expected) @?= (True, False)
   , -- Nothing can be written here that leaves the line finishable — abs
     -- would need a second @.@ — but the position wants a Ty, and saying so
     -- beats saying nothing.

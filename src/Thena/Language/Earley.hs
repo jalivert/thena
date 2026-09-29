@@ -530,6 +530,27 @@ data Offer = Offer
     -- body, written out with its slots left unwritten, could not leave the line
     -- finishable is not offered. Ordered as the grammar declares them, because
     -- that is the order a user reads their own file in.
+  , offerStuck :: Maybe (Int, [Symbol])
+    -- ^ **the text /left/ of the cursor does not read, and this is where it
+    -- stopped** — the last column any item reached, and what was expected
+    -- there (MS7 phase 134, @ms7\/CLOSEOUT.md@ 12, his ruling of 2026-09-29).
+    --
+    -- 'Nothing' in the ordinary case, where the cursor's own column has items
+    -- and the four fields above speak for themselves.
+    --
+    -- **Every other field is empty exactly when this one is 'Just'**, and that
+    -- is the point rather than a coincidence: all four are drawn from
+    -- @itemsAt c (settled c (length left))@, so a broken prefix leaves the
+    -- column empty and every answer with it. Before this field a frontend
+    -- could not tell /"nothing may be written here"/ from /"I could not read
+    -- what you already wrote"/, and the second is the state a user is in when
+    -- they most want help:
+    --
+    -- > parse LC> ( λ x )‸        Tab →   nothing at all
+    --
+    -- **The column is the furthest one reached, not the cursor's.** Past it
+    -- nothing could be scanned, so it is where the reading gave out; the
+    -- symbols are what would have let it go on.
   }
   deriving (Eq, Show)
 
@@ -545,11 +566,19 @@ data Offer = Offer
 -- position at the end of a line still gets the whole rest, the enclosing
 -- productions being someone else's business.
 offer :: [Rule] -> Start -> [Piece] -> [Piece] -> Offer
-offer rs start left right = Offer options wanted rest predicted
+offer rs start left right = Offer options wanted rest predicted stuck
   where
     c = chart rs start left
     k = settled c (length left)
     here = itemsAt c k
+
+    -- **The one condition every other field is already at the mercy of.**
+    -- @here@ is what all four are drawn from, so when it is empty they are
+    -- empty too — and that is not "nothing may be written", it is "the text
+    -- you have written stopped reading". 'furthest' is where it stopped.
+    stuck
+      | null here = let f = furthest c in Just (f, expectedAt c f)
+      | otherwise = Nothing
     restOf i = drop (itemDot i) (ruleBody (chartRule c i))
 
     options = nub [ s | i <- here, symbols@(s : _) <- [restOf i], viable symbols ]

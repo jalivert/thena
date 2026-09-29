@@ -250,7 +250,18 @@ tabComplete rules lang (leftReversed, right) =
        in case (Earley.offerRest o, options) of
             (Just rest, _) | not replacing -> single (unwords (map written rest))
             (_, [s]) | isLiteral s -> single (written s)
+            -- **The prefix did not read, so there is nothing at the cursor to
+            -- offer and never was** (MS7 phase 134). Shown as one display-only
+            -- entry rather than as options, because what it lists was wanted at
+            -- an earlier column and inserting any of it at the cursor would be
+            -- wrong — the terminal cannot move the cursor there, and a frontend
+            -- that can is told the column by 'Thena.View.Chart.StuckView'.
+            (_, []) | Just (at, expected) <- Earley.offerStuck o ->
+              (leftReversed, [("", stuckLine at expected)])
             (_, ss) -> (leftReversed, [ ("", shown s) | s <- ss ])
+    stuckLine at expected =
+      "stopped at " ++ show at
+        ++ (if null expected then "" else ", wanted " ++ unwords (map shown expected))
     written s = case s of
       Earley.Literal t -> t
       _ -> [Earley.placeholderChar]
