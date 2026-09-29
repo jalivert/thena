@@ -188,6 +188,7 @@ library tui
     default-language:   GHC2024
     exposed-modules:
         Tui.App
+        Tui.Render
     build-depends:
         base           ^>=4.21.2.0,
         thena:view,
