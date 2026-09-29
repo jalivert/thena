@@ -389,14 +389,19 @@ renderTurns turns = zipWith renderTurn [1 :: Int ..] turns
 -- option that fit). 80% is a starting point he named, not measured; nothing
 -- here should read it as final.
 dropdownLayer :: St -> [Widget Name]
-dropdownLayer st = case stDropdown st of
-  Just ld -> popupAt st (pathStartOff line) (popupHeight (length (ldEntries ld)))
+dropdownLayer st = case (stDropdown st, loadPathPrefix line) of
+  (Just ld, Just prefix) ->
+    popupAt st (pathStartOff line + segOff prefix) (popupHeight (length (ldEntries ld)))
       (renderPopup LoadPopup (zipWith (loadRow (ldSelected ld)) [0 :: Int ..] (ldEntries ld)))
-    where line = concatMap Text.unpack (getEditContents (stInput st))
-  Nothing -> []
+  _ -> []
+  where line = concatMap Text.unpack (getEditContents (stInput st))
 
+-- | One directory entry as a row: the base name to look at, while the full
+-- path stays beside it in 'ldEntries' for Tab and Enter to act on — the
+-- typed directory is already on the input line, so repeating it in every
+-- row is noise (his `.jalivert/TUI.md` #2).
 loadRow :: Maybe Int -> Int -> String -> PopupRow
-loadRow selected i name = PopupRow name (Just i == selected) False
+loadRow selected i name = PopupRow (takeFileName name) (Just i == selected) False
 
 -- | The completion dropdown, positioned the same way — see 'popupAt'.
 offerDropdownLayer :: St -> [Widget Name]
@@ -938,6 +943,15 @@ lastWord = reverse . takeWhile (/= ' ') . reverse
 -- the dropdown layer never asks otherwise.
 pathStartOff :: String -> Int
 pathStartOff line = length line - length (lastWord line)
+
+-- | How far past the path's start the segment being typed begins: the typed
+-- directory and its slash ('examples/' in 'examples/01'), or zero when the
+-- path has no slash yet. The dropdown shows base names, so its text anchors
+-- here rather than at the whole path's start — and typing or deleting a
+-- slash moves the segment, recomputing the position exactly when a
+-- directory is entered or left (his `.jalivert/TUI.md` #2).
+segOff :: String -> Int
+segOff prefix = length prefix - length (takeFileName prefix)
 
 -- | A word backward from the cursor, as a zipper edit: the whitespace
 -- behind it first, then the word itself. Zero characters at the start of
