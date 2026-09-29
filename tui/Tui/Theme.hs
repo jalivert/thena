@@ -41,6 +41,17 @@ data Theme = Theme
                              -- of its own rather than reusing whichever pane
                              -- accent happens to be lightest, so retuning a
                              -- pane never moves the marker with it.
+  , themeWrong   :: V.Color -- ^ **the recovered/stuck completion state**
+                             -- (MS7 phases 137-138, TIER-A.md): the offer
+                             -- dropdown's background and the input line's
+                             -- underline when what's typed will not run as
+                             -- written. His design calls for "a different
+                             -- background, and a red underline" without
+                             -- naming a shade; none of the three themes'
+                             -- sourced palettes has a red at all, so unlike
+                             -- every other field here this one is picked for
+                             -- contrast, not confirmed against a source —
+                             -- first guess, not yet run past him.
   }
 
 rgb :: Int -> Int -> Int -> V.Color
@@ -70,6 +81,7 @@ neonPinkDark = Theme
   , themeSplice  = rgb 30 20 14
   , themePopup   = rgb 56 26 42
   , themeSoft    = rgb 255 140 240
+  , themeWrong   = rgb 214 40 40
   }
 
 -- | Ranked second. Accents confirmed from the real source
@@ -92,6 +104,7 @@ gruyere = Theme
   , themeSplice  = rgb 34 44 40
   , themePopup   = rgb 54 46 90
   , themeSoft    = rgb 237 255 130
+  , themeWrong   = rgb 214 60 60
   }
 
 -- | Ranked third. `editor.background` confirmed from the shipped theme JSON
@@ -112,6 +125,7 @@ synthwave84 = Theme
   , themeSplice  = rgb 40 50 46
   , themePopup   = rgb 78 68 104
   , themeSoft    = rgb 254 222 93
+  , themeWrong   = rgb 255 92 92
   }
 
 themes :: [Theme]
