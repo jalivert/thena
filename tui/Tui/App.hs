@@ -60,6 +60,7 @@ import Graphics.Vty.Platform.Unix (mkVty)
 import Lens.Micro (Lens', lens)
 import System.Directory (doesDirectoryExist, listDirectory)
 import System.FilePath (takeDirectory, takeFileName, (</>))
+import System.IO (hFlush, hPutStr, stdout)
 
 import Thena.Driver (Response (Quit), Session, oneLine)
 import Thena.Files (following, startingSession)
@@ -90,6 +91,8 @@ data Name
   | ProofTermVP
   | GoalsVP
   | MachineVP
+  | LoadPopup
+  | OfferPopup
   deriving (Eq, Ord, Show)
 
 -- | One completed round: the line that was run (absent for the startup
@@ -127,9 +130,10 @@ data OfferRow = OfferRow
 -- produces, same as the module header says.
 data OfferDropdown = OfferDropdown
   { odRows       :: [OfferRow]
-    -- ^ capped ('offerRowCap') and alphabetised — 'offeredOptions' can be
-    -- the whole ~90-word statement vocabulary on an empty line, and nothing
-    -- here builds a scrolling popup yet.
+    -- ^ every candidate, alphabetised within its own group (tokens before
+    -- productions — see 'buildOfferDropdown') — the popup scrolls
+    -- ('OfferPopup') rather than capping the list and stranding the rest
+    -- behind an unreachable "+N more".
   , odSelected   :: Maybe Int
     -- ^ an index into 'odRows', but only ever one whose 'rowInsert' is
     -- 'Just' — see 'offerMoveDown'/'offerMoveUp'.
@@ -142,9 +146,6 @@ data OfferDropdown = OfferDropdown
     -- ^ how many characters after 'odWordStart' an accept removes — the
     -- recovered text's own length when recovered; one placeholder character
     -- when the cursor sits on a box ('offeredReplaces'); zero otherwise.
-  , odMore       :: Int
-    -- ^ candidates past the cap, shown as a trailing count rather than
-    -- silently dropped.
   }
 
 data St = St
@@ -196,24 +197,41 @@ runTui = do
         }
   vty <- mkVty V.defaultConfig
   _ <- customMain vty (mkVty V.defaultConfig) Nothing app st0
-  pure ()
+  resetCursorStyle
 
 app :: App St e Name
 app = App
   { appDraw         = draw
   , appChooseCursor = showFirstCursor
   , appHandleEvent  = handleEvent
-  , appStartEvent   = enableMouse
+  , appStartEvent   = appStart
   , appAttrMap      = attrs . stTheme
   }
 
--- | Wheel-scroll works on whichever pane the pointer is over, "no matter
--- where the focus is" — his words, 2026-09-29 — which needs mouse mode on
--- at the terminal, not just clickable widgets.
-enableMouse :: EventM Name St ()
-enableMouse = do
+-- | Two terminal-mode requests made once, at startup: mouse reporting
+-- ("no matter where the focus is" — his words, 2026-09-29, which needs
+-- mouse mode on at the terminal, not just clickable widgets) and a
+-- blinking caret — his `.jalivert/TUI.md` item 9, "why is it still and
+-- solid?" Checked directly in vty's own source before writing anything:
+-- vty never emits a cursor-*style* request, only show/hide/position, so
+-- whatever style the caret has is purely inherited from the terminal's own
+-- last-set state — easy to end up "steady" if some other program left it
+-- that way and never reset it. Asking explicitly (DECSCUSR, @ESC[1 q@)
+-- makes this program's own preference the one that actually applies;
+-- 'resetCursorStyle' undoes it on the way out so thena-tui doesn't leave
+-- the terminal modified for whatever runs next. Not independently verified
+-- against a real terminal — worth confirming.
+appStart :: EventM Name St ()
+appStart = do
   vty <- getVtyHandle
   liftIO (V.setMode (V.outputIface vty) V.Mouse True)
+  liftIO requestBlinkingCursor
+
+requestBlinkingCursor :: IO ()
+requestBlinkingCursor = hPutStr stdout "\ESC[1 q" >> hFlush stdout
+
+resetCursorStyle :: IO ()
+resetCursorStyle = hPutStr stdout "\ESC[0 q" >> hFlush stdout
 
 -- | One dark panel fill, one neon accent per pane (edge and title text,
 -- never a fill), plus the fold/splice attrs the reading-flow feature uses.
@@ -233,6 +251,15 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   , (attrName "title.goals",    ink (themeGoals th))
   , (attrName "title.machine",  ink (themeMachine th))
   , (attrName "dim",            ink (themeDim th))
+  -- A placeholder box, in the input line, in a dimmer ink than ordinary
+  -- text — his `.jalivert/TUI.md`-adjacent report, 2026-09-29: the caret
+  -- itself went dark standing on one. Root cause: the glyph is a solid
+  -- FULL BLOCK, drawn at full 'themeInk' brightness by default, so the
+  -- terminal's own reverse-video caret — already an inverted full cell —
+  -- had nothing to invert *against*, reading as a dark cell instead of a
+  -- visible caret. A dimmer ink still marks the box as a box without
+  -- fighting the caret over the brightest color in the theme.
+  , (attrName "placeholder",    ink (themeDim th))
   , (attrName "accent.output",  ink (themeSoft th))
   , (attrName "dropdown",          surface (themePopup th) (themeInk th))
   , (attrName "dropdown.selected", surface (themePopup th) (themeRepl th))
@@ -289,7 +316,7 @@ draw st = dropdownLayer st <> offerDropdownLayer st <> [hBox [replColumn, gapH, 
     -- it — so 'stInputExtent's own upper-left is column 0 of the *text*,
     -- and every text offset ('pathStartOff', the cursor, anything later)
     -- adds onto a real screen column directly, no prompt width to remember.
-    inputLine = str "❯ " <+> reportExtent Input (renderEditor (str . concatMap Text.unpack) True (stInput st))
+    inputLine = str "❯ " <+> reportExtent Input (renderEditor renderInputContent True (stInput st))
 
     sideColumn =
       hLimitPercent 38 $
@@ -363,37 +390,81 @@ renderTurns turns = zipWith renderTurn [1 :: Int ..] turns
 -- here should read it as final.
 dropdownLayer :: St -> [Widget Name]
 dropdownLayer st = case stDropdown st of
-  Just ld -> popupAt st (pathStartOff line) (length (ldEntries ld)) (renderDropdown ld)
+  Just ld -> popupAt st (pathStartOff line) (popupHeight (length (ldEntries ld)))
+      (renderPopup LoadPopup (zipWith (loadRow (ldSelected ld)) [0 :: Int ..] (ldEntries ld)))
     where line = concatMap Text.unpack (getEditContents (stInput st))
   Nothing -> []
 
-renderDropdown :: LoadDropdown -> Widget Name
-renderDropdown (LoadDropdown entries selected) =
-  withAttr (attrName "dropdown") (vBox (zipWith renderRow [0 :: Int ..] entries))
-  where
-    renderRow i name
-      | Just i == selected = withAttr (attrName "dropdown.selected") (str (dropdownSelected <> name))
-      | otherwise           = str (dropdownPlain <> name)
+loadRow :: Maybe Int -> Int -> String -> PopupRow
+loadRow selected i name = PopupRow name (Just i == selected) False
 
 -- | The completion dropdown, positioned the same way — see 'popupAt'.
--- The trailing "+N more" line (when the candidate list was capped) counts
--- toward the popup's own height so the flip-above math still clears it.
 offerDropdownLayer :: St -> [Widget Name]
 offerDropdownLayer st = case stOfferDropdown st of
   Just od | not (null (odRows od)) ->
-    popupAt st (odWordStart od) (length (odRows od) + (if odMore od > 0 then 1 else 0))
-      (renderOfferDropdown od)
+    popupAt st (odWordStart od) (popupHeight (length (odRows od)))
+      (renderPopup OfferPopup (zipWith (offerRowToPopup (odSelected od)) [0 :: Int ..] (odRows od)))
   _ -> []
 
-renderOfferDropdown :: OfferDropdown -> Widget Name
-renderOfferDropdown (OfferDropdown rows selected _ _ more) =
-  withAttr (attrName "dropdown") (vBox (zipWith renderRow [0 :: Int ..] rows <> moreLine))
+offerRowToPopup :: Maybe Int -> Int -> OfferRow -> PopupRow
+offerRowToPopup selected i (OfferRow label ins) =
+  PopupRow label (Just i == selected) (isNothing ins)
+
+-- | One row of any dropdown, before it becomes a 'Widget' — shared by
+-- ':load''s directory listing and the completion dropdown so both scroll
+-- and pad exactly the same way, see 'renderPopup'.
+data PopupRow = PopupRow
+  { prText     :: String
+  , prSelected :: Bool
+  , prDim      :: Bool  -- ^ a hint row (a nonterminal or scan class): shown,
+                          -- never a landing spot, drawn muted.
+  }
+
+-- | **A dropdown, at last with room to breathe** — his `.jalivert/TUI.md`
+-- items 4 and 7: no padding to the right (a row used to end exactly at its
+-- own last letter), no minimum size (":load examples" against a short
+-- match looked "starved"), and the rule-name dropdown's own tail past ten
+-- entries was an unreachable "+79 more" instead of something you could
+-- arrow down into. All three were the same shape of problem — a box sized
+-- to its content instead of a real, scrollable popup — so one fix: every
+-- row pads out to the box's own width, the box is never narrower than
+-- 'popupMinWidth' or shorter than 'popupMinRows', and past 'popupMaxRows'
+-- it scrolls ('viewport' plus 'visible' on the selected row, the same
+-- mechanism Brick's own editor/list widgets use, so the selected row is
+-- always the one that scrolls into view — never lost off either edge).
+renderPopup :: Name -> [PopupRow] -> Widget Name
+renderPopup vp rows =
+  withAttr (attrName "dropdown") $
+    hLimit boxWidth $
+      vLimit visibleHeight $
+        viewport vp Vertical $
+          vBox (map renderRow rows <> fillerRows)
   where
-    renderRow i (OfferRow label ins)
-      | Just i == selected = withAttr (attrName "dropdown.selected") (str (dropdownSelected <> label))
-      | Nothing <- ins      = withAttr (attrName "dim") (str (dropdownPlain <> label))
-      | otherwise           = str (dropdownPlain <> label)
-    moreLine = [withAttr (attrName "dim") (str (dropdownPlain <> "+" <> show more <> " more")) | more > 0]
+    boxWidth = maximum (popupMinWidth : map (length . prText) rows)
+    visibleHeight = max popupMinRows (min (length rows) popupMaxRows)
+    fillerRows = replicate (max 0 (popupMinRows - length rows)) (str (replicate boxWidth ' '))
+    renderRow r = mark (styled (str (padTo boxWidth (dropdownMarker r <> prText r))))
+      where
+        styled
+          | prSelected r = withAttr (attrName "dropdown.selected")
+          | prDim r      = withAttr (attrName "dim")
+          | otherwise    = id
+        mark = if prSelected r then visible else id
+    dropdownMarker r = if prSelected r then dropdownSelected else dropdownPlain
+
+padTo :: Int -> String -> String
+padTo n s = s <> replicate (max 0 (n - length s)) ' '
+
+popupMinWidth, popupMinRows, popupMaxRows :: Int
+popupMinWidth = 24
+popupMinRows  = 3
+popupMaxRows  = 10
+
+-- | The bounded height 'popupAt' positions against — never the full row
+-- count once a list can run past 'popupMaxRows', or the popup would
+-- position itself as if it were taller than it actually renders.
+popupHeight :: Int -> Int
+popupHeight n = max popupMinRows (min n popupMaxRows)
 
 -- | Position a caret-anchored popup at a given column of the input's own
 -- text (column 0 is the text's own left edge, per 'stInputExtent's own
@@ -507,13 +578,41 @@ handleEventInner (VtyEvent (V.EvKey V.KEsc [])) = do
   case (stDropdown st, stOfferDropdown st) of
     -- | "Esc leaves the dropdown (arrow goes away) but leaves it open" —
     -- his spec exactly: clears the arrow-selection only, the candidate list
-    -- stays up. With no selection to clear, Esc keeps its ordinary meaning.
+    -- stays up. With nothing to clear, Esc is now simply a no-op — his
+    -- `.jalivert/TUI.md` item 3: it used to fall through to 'halt' and quit
+    -- the whole TUI, which is not "Esc's ordinary meaning" for a line
+    -- editor and was never asked for. Quitting is still `:quit`.
     (Just ld@(LoadDropdown _ (Just _)), _) -> put st { stDropdown = Just ld { ldSelected = Nothing } }
-    (_, Just od@(OfferDropdown _ (Just _) _ _ _)) -> put st { stOfferDropdown = Just od { odSelected = Nothing } }
-    _ -> halt
+    (_, Just od@(OfferDropdown _ (Just _) _ _)) -> put st { stOfferDropdown = Just od { odSelected = Nothing } }
+    _ -> pure ()
 handleEventInner ev@(VtyEvent (V.EvKey V.KDown [])) = navigateCompletion moveDown offerMoveDown ev
 handleEventInner ev@(VtyEvent (V.EvKey V.KUp []))   = navigateCompletion moveUp offerMoveUp ev
 handleEventInner (VtyEvent (V.EvKey (V.KChar '\t') [])) = completeLoadPath
+-- | "Walk into" a placeholder box and type to fill it — his own ask,
+-- `.jalivert/LIVE-OFFERS.md`/`.jalivert/TUI.md`: the caret standing right
+-- at a box, typing a character, used to just insert ahead of it — "it just
+-- moves the placeholder behind the parameter name I just wrote." A
+-- placeholder is one character in the buffer (see 'placeholderGlyph'), so
+-- "standing at it" is simply "the character under the caret is the
+-- glyph" — a local, buffer-only check, nothing to ask the engine.
+-- Consumes exactly the one glyph and inserts the typed character in its
+-- place, same edit 'acceptOfferEdit' already does for a dropdown accept
+-- landing on a box ('offeredReplaces'). Only the *first* character of a
+-- name types this way; once the glyph is gone, ordinary typing resumes
+-- through the catch-all below.
+handleEventInner (VtyEvent (V.EvKey (V.KChar c) [])) = do
+  st <- get
+  let (_, col) = getCursorPosition (stInput st)
+      line = concatMap Text.unpack (getEditContents (stInput st))
+  if col < length line && line !! col == placeholderGlyph
+    then do
+      put st { stInput = E.applyEdit (acceptOfferEdit col 1 [c]) (stInput st) }
+      followInput
+      refreshDropdown
+      refreshOfferDropdown
+    else
+      Brick.zoom stInputL (handleEditorEvent (VtyEvent (V.EvKey (V.KChar c) [])))
+        >> followInput >> refreshDropdown >> refreshOfferDropdown
 -- | Option+Backspace deletes a word backward. It arrives as 'KBS' with
 -- 'MMeta' — Ghostty sends ESC DEL, and a non-printable always comes through
 -- as Alt whether option-as-alt is set or not — which Brick's editor binds
@@ -649,35 +748,39 @@ refreshOfferDropdown = do
 -- | The row source depends on which question was actually answered.
 --
 -- **Bare-word recovery** (typing an ordinary partial word — 'att', mid-
--- statement) draws from 'offeredOptions', prefix-filtered by
+-- statement) draws from 'offeredOptions' alone, prefix-filtered by
 -- "Thena.View.Statement"'s own 'recover'. 'offeredProductions' is *not*
 -- usable here — checked directly against the running engine, not assumed:
 -- under bare-word recovery it is copied through unfiltered, still every
 -- production the empty line offers, not narrowed by what has been typed.
 --
 -- **Everything else — an ordinary offer, or the cursor inside a tagged
--- term literal — draws from 'offeredProductions' instead.** This is what
--- was missing the first time: 'offeredOptions' only ever names a bare
--- symbol ("λ"), never the rest of its production, so selecting it could
--- only ever insert that one token — not his 2026-09-28 request ("app: ( LC
--- LC )" → "( █ █ )"), and not what someone typing inside a literal expects
--- to see. 'offeredProductions' is fresh at this cursor position (unlike
--- the bare-word case above, nothing stale to filter), and its own
--- 'productionInsert' already carries the placeholders to insert as boxes —
--- see 'productionRow'.
+-- term literal — draws from both, tokens first, then productions**, his
+-- own correction: a bare symbol ("λ") is still worth listing on its own,
+-- but a production ("abs: ( λ ‹x› : Ty . LC )") is what actually inserts
+-- the rest of the shape, so both belong, not one or the other. Deduplicated
+-- by what an accept would actually insert — a trivial single-literal
+-- production (e.g. a statement keyword, always present in
+-- 'offeredProductions' too) would otherwise show up twice for no reason,
+-- once as a token and once as an identical production.
 buildOfferDropdown :: Int -> OfferView -> Maybe OfferDropdown
 buildOfferDropdown col ov
-  | null shown = Nothing
-  | otherwise = Just (OfferDropdown shown Nothing wordStart replaceLen moreCount)
+  | null allRows = Nothing
+  | otherwise = Just (OfferDropdown allRows Nothing wordStart replaceLen)
   where
     bareWord = case offeredRecovered ov of
       Just r -> isNothing (recoveredLanguage r)
       Nothing -> False
+    tokenRows = sortOn rowLabel (map offerRow (offeredOptions ov))
+    productionRows =
+      sortOn rowLabel
+        [ r
+        | r <- map productionRow (offeredProductions ov)
+        , rowInsert r `notElem` map rowInsert tokenRows
+        ]
     allRows
-      | bareWord  = sortOn rowLabel (map offerRow (offeredOptions ov))
-      | otherwise = sortOn rowLabel (map productionRow (offeredProductions ov))
-    shown = take offerRowCap allRows
-    moreCount = length allRows - length shown
+      | bareWord  = tokenRows
+      | otherwise = tokenRows <> productionRows
     -- | A bare word replaces the partial word itself ('recoveredColumn'/
     -- 'recoveredText' name that span exactly). Every other case — an
     -- ordinary offer, or inside a literal, where 'recoveredText' names the
@@ -690,9 +793,6 @@ buildOfferDropdown col ov
     (wordStart, replaceLen) = case offeredRecovered ov of
       Just r | isNothing (recoveredLanguage r) -> (recoveredColumn r - 1, length (recoveredText r))
       _ -> (col, if offeredReplaces ov then 1 else 0)
-
-offerRowCap :: Int
-offerRowCap = 10
 
 -- | A literal is text to type; a scan class or a nonterminal names a *kind*
 -- of thing that may stand here and is shown, not offered — see 'OfferRow'.
@@ -759,6 +859,25 @@ toWritten = merge . map one
     one c = if c == placeholderGlyph then WrittenPlaceholder else WrittenText [c]
     merge (WrittenText a : WrittenText b : rest) = merge (WrittenText (a <> b) : rest)
     merge (w : rest) = w : merge rest
+    merge [] = []
+
+-- | The input line's own content, a placeholder box drawn dimmer than
+-- ordinary text — see the "placeholder" attr's own haddock for why (the
+-- caret going dark standing on one). Splits into runs at the glyph the
+-- same way 'toWritten' does, since it's answering the same question one
+-- level down: not "is this a box" for the engine, but "is this a box" for
+-- the renderer.
+renderInputContent :: [Text] -> Widget Name
+renderInputContent ts = hBox (map renderRun (mergeRuns (concatMap Text.unpack ts)))
+  where
+    renderRun (True, s)  = withAttr (attrName "placeholder") (str s)
+    renderRun (False, s) = str s
+
+mergeRuns :: String -> [(Bool, String)]
+mergeRuns = merge . map (\c -> (c == placeholderGlyph, [c]))
+  where
+    merge ((a, x) : (b, y) : rest) | a == b = merge ((a, x <> y) : rest)
+    merge (r : rest) = r : merge rest
     merge [] = []
 
 -- | Replace 'len' characters starting at column 'start' with 'ins', cursor
