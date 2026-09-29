@@ -40,7 +40,7 @@ import System.Directory (doesDirectoryExist, listDirectory)
 import System.FilePath (takeDirectory, takeFileName, (</>))
 
 import Thena.Driver (Response (Quit), Session, oneLine)
-import Thena.Files (startingSession)
+import Thena.Files (following, startingSession)
 import Thena.Render (renderResponse, renderTrouble)
 import Thena.View (developmentView, focusAddress, machineView)
 import Thena.View.Core (Budget (..))
@@ -312,6 +312,13 @@ renderDropdown (LoadDropdown entries selected) =
 -- via 'Thena.Render.renderResponse' — a status-line-shaped placeholder for
 -- the REPL pane's own output; the side panes render through 'Thena.View'.
 --
+-- **A file-naming response is followed through 'Thena.Files.following'** —
+-- the IO half 'oneLine' cannot do itself (§12 invariant 4): the driver only
+-- names the file ('LoadRequested' and kin, which render as nothing), so this
+-- reads it, renders what the load said against the loaded session, and
+-- stores that session — the same two steps the terminal loop in
+-- 'app/Repl.hs' takes.
+--
 -- **Two TUI-local pseudo-commands, intercepted before 'oneLine' ever sees
 -- them**: `:theme <name>` and `:fold on|off`. Neither is instral syntax —
 -- same standing as `:load`'s path completion, his ruling 2026-09-28:
@@ -355,8 +362,17 @@ handleEventInner (VtyEvent (V.EvKey V.KEnter [])) = do
           appendTurn st { stFoldOn = mode == "on" } Nothing ["fold: " <> mode]
         _ -> do
           let (s', resp) = oneLine (stSession st) line
-          appendTurn st { stSession = s' } (Just line) (renderResponse s' resp)
-          if resp == Quit then halt else pure ()
+          case following s' resp of
+            Just act | resp /= Quit -> do
+              (sLoaded, responses, trouble) <- liftIO act
+              let out =
+                    renderResponse s' resp
+                      ++ concatMap (renderResponse sLoaded) responses
+                      ++ concatMap (renderTrouble sLoaded) trouble
+              appendTurn st { stSession = sLoaded } (Just line) out
+            _ -> do
+              appendTurn st { stSession = s' } (Just line) (renderResponse s' resp)
+              if resp == Quit then halt else pure ()
 handleEventInner (VtyEvent (V.EvKey V.KEsc [])) = do
   st <- get
   case stDropdown st of
