@@ -345,11 +345,10 @@ draw st = dropdownLayer st <> offerDropdownLayer st <> [hBox [replColumn, gapH, 
       clickable vp $
         hBox
           [ withAttr (attrName ("edge." <> key)) (hLimit 1 (fill '▎'))
-          , viewport vp Vertical $
-              vBox
-                [ withAttr (attrName ("title." <> key)) (padLeftRight 1 (str key))
-                , content
-                ]
+          , vBox
+              [ withAttr (attrName ("title." <> key)) (padLeftRight 1 (str key))
+              , viewport vp Vertical content
+              ]
           ]
 
 -- | One turn, prompt (if any) then output — the most recent turn's output
