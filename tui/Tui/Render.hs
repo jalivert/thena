@@ -1,21 +1,39 @@
--- | Turning 'Thena.View.*' values into plain text lines — a first pass.
+-- | Turning 'Thena.View.*' values into brick 'Widget's.
 --
--- **Always the expanded form.** The "reading flow" fold ('Thena.View.Core.ARegion'
--- drawn as nothing, a splice styled instead of fenced) is real and designed but
--- needs cursor/mouse-proximity tracking this module doesn't have yet — every
--- 'ARegion' here prints its tag and backticks. No parentheses or layout choice
--- is asked of the engine (`Thena.View.Core`'s own doc: "no text in here except
--- where the text /is/ the answer"), so the minimal bracketing below is this
--- module's own, not the view's.
+-- **Per-span attributes, not flat text.** A folded literal wants "a
+-- different background and typeface" (his words) applied to exactly its own
+-- span, not the whole line — a 'String' cannot carry that, so the
+-- development/proof-term rendering below builds 'Widget's directly and
+-- composes them with '<+>'/'vBox', the same way brick composes anything
+-- else. The machine pane stays plain text for this pass — it rarely holds
+-- literals worth folding, and doing it there too is more of the same
+-- pattern, not a new design question; noted, not a `CLOSEOUT.md` item.
 module Tui.Render
-  ( renderDisplay
-  , renderLinkViews
-  , goalLines
+  ( Fold (..)
+  , isUnderneath
+  , foldAttr
+  , spliceAttr
+  , renderDisplay
+  , renderDevelopment
+  , renderGoals
   , renderMachineView
   ) where
 
-import Data.List (intercalate)
+import Data.List (intercalate, isPrefixOf)
 
+import Brick
+  ( Widget
+  , hBox
+  , padLeft
+  , str
+  , vBox
+  , withAttr
+  , (<+>)
+  )
+import Brick.AttrMap (AttrName, attrName)
+import Brick.Widgets.Core (Padding (Pad))
+
+import Thena.View.Address (Address (..))
 import Thena.View.Core (Binding (..), Display (..), ObjectItem (..), Shape (..))
 import Thena.View.Development (ConstraintView (..), LinkShape (..), LinkView (..))
 import Thena.View.Instral
@@ -27,98 +45,151 @@ import Thena.View.Instral
   )
 import Thena.View.Machine (FrameView (..), MachineView (..))
 
-renderDisplay :: Display -> String
-renderDisplay (Display _ shape) = renderShape shape
+-- | Whether the reading-flow fold is on, and if so, where the cursor is —
+-- an 'ARegion' folds unless the cursor stands at or beneath its own
+-- address. 'NoFold' prints everything expanded, everywhere, unconditionally
+-- — the toggle's off state.
+data Fold = NoFold | Fold Address
 
-renderShape :: Shape -> String
-renderShape shape = case shape of
-  AVariable name _ -> name
-  AGlobal name _ -> name
-  AUniverse lvl -> lvl
-  ALiteral text -> text
-  AnApplication f a -> renderDisplay f <> " " <> atom a
-  AFunction b body -> "(" <> bindingName b <> " : " <> renderDisplay (bindingType b) <> ") -> " <> renderDisplay body
-  AnAbstraction b body -> "\\" <> bindingName b <> " : " <> renderDisplay (bindingType b) <> " . " <> renderDisplay body
-  ALet b val body -> bindingName b <> " = " <> renderDisplay val <> " : " <> renderDisplay (bindingType b) <> " . " <> renderDisplay body
-  AFormer name _ args -> unwords (name : map atom args)
+-- | TAGGED-LITERALS.md's own words: "a prefix test on displayAt against
+-- your focus address." Both are move-lists in the order the cursor
+-- descended, so a literal's address is a prefix of the focus exactly when
+-- the cursor stands inside it (or on it).
+isUnderneath :: Address -> Address -> Bool
+isUnderneath (Address at) (Address focus) = at `isPrefixOf` focus
+
+foldAttr, spliceAttr :: AttrName
+foldAttr = attrName "fold.literal"
+spliceAttr = attrName "fold.splice"
+
+expandedAt :: Fold -> Address -> Bool
+expandedAt NoFold _ = True
+expandedAt (Fold focus) at = at `isUnderneath` focus
+
+renderDisplay :: Fold -> Display -> Widget n
+renderDisplay fold (Display _at shape) = renderShape fold shape
+
+renderShape :: Fold -> Shape -> Widget n
+renderShape fold shape = case shape of
+  AVariable name _ -> str name
+  AGlobal name _ -> str name
+  AUniverse lvl -> str lvl
+  ALiteral text -> str text
+  AnApplication f a -> renderDisplay fold f <+> str " " <+> atomW fold a
+  AFunction b body ->
+    str ("(" <> bindingName b <> " : ") <+> renderDisplay fold (bindingType b)
+      <+> str ") -> " <+> renderDisplay fold body
+  AnAbstraction b body ->
+    str ("\\" <> bindingName b <> " : ") <+> renderDisplay fold (bindingType b)
+      <+> str " . " <+> renderDisplay fold body
+  ALet b val body ->
+    str (bindingName b <> " = ") <+> renderDisplay fold val
+      <+> str " : " <+> renderDisplay fold (bindingType b)
+      <+> str " . " <+> renderDisplay fold body
+  AFormer name _levels args -> hBox (str name : map (\a -> str " " <+> atomW fold a) args)
   AnElimination eliminator _levels params motive methods indices target ->
-    unwords (eliminator : map atom (params <> [motive] <> methods <> indices <> [target]))
-  ADangling n -> "#" <> show n
-  AnElision -> "…"
-  ARegion inner -> renderRegion inner
-  AnObjectTerm lang _prod items -> lang <> "`" <> concatMap renderObjectItem items <> "`"
-  AToken text -> text
-  where
-    atom d@(Display _ sh) = case sh of
-      AnApplication {}   -> "(" <> renderDisplay d <> ")"
-      AFunction {}       -> "(" <> renderDisplay d <> ")"
-      AnAbstraction {}   -> "(" <> renderDisplay d <> ")"
-      ALet {}            -> "(" <> renderDisplay d <> ")"
-      AnElimination {}   -> "(" <> renderDisplay d <> ")"
-      _                  -> renderDisplay d
+    hBox
+      (str eliminator
+        : map (\a -> str " " <+> atomW fold a) (params <> [motive] <> methods <> indices <> [target]))
+  ADangling n -> str ("#" <> show n)
+  AnElision -> str "…"
+  ARegion inner -> renderRegion fold inner
+  AnObjectTerm lang _prod items ->
+    str (lang <> "`") <+> hBox (map (renderObjectItem fold True) items) <+> str "`"
+  AToken text -> str text
 
--- | An 'ARegion' always wraps an 'AnObjectTerm' (`Thena.View.Core`'s own
--- invariant); the other-shape branch is unreachable in practice, kept only
--- so this stays total.
-renderRegion :: Display -> String
-renderRegion (Display _ shape) = case shape of
-  AnObjectTerm lang _prod items -> lang <> "`" <> concatMap renderObjectItem items <> "`"
-  other -> renderShape other
-
-renderObjectItem :: ObjectItem -> String
-renderObjectItem item = case item of
-  ObjectText t -> t
-  ObjectToken d -> renderDisplay d
-  ObjectChild True d -> "${" <> renderDisplay d <> "}"
-  ObjectChild False d -> renderInline d
+atomW :: Fold -> Display -> Widget n
+atomW fold d@(Display _ sh) = case sh of
+  AnApplication {} -> bracket
+  AFunction {}     -> bracket
+  AnAbstraction {} -> bracket
+  ALet {}          -> bracket
+  AnElimination {} -> bracket
+  _                -> renderDisplay fold d
   where
-    renderInline (Display _ (AnObjectTerm _ _ items)) = concatMap renderObjectItem items
-    renderInline d = renderDisplay d
+    bracket = str "(" <+> renderDisplay fold d <+> str ")"
+
+-- | 'ARegion' always wraps an 'AnObjectTerm' — the fold decision is made
+-- once, here, and handed down to every item inside as the `expanded` flag,
+-- so a nested inline child never re-derives it.
+renderRegion :: Fold -> Display -> Widget n
+renderRegion fold (Display at shape) = case shape of
+  AnObjectTerm lang _prod items
+    | expanded  -> str (lang <> "`") <+> body <+> str "`"
+    | otherwise -> withAttr foldAttr body
+    where body = hBox (map (renderObjectItem fold expanded) items)
+  other -> renderShape fold other
+  where
+    expanded = expandedAt fold at
+
+renderObjectItem :: Fold -> Bool -> ObjectItem -> Widget n
+renderObjectItem fold expanded item = case item of
+  ObjectText t -> str t
+  ObjectToken d -> renderDisplay fold d
+  ObjectChild True d
+    | expanded  -> str "${" <+> renderDisplay fold d <+> str "}"
+    | otherwise -> withAttr spliceAttr (renderDisplay fold d)
+  ObjectChild False d -> renderInline fold expanded d
+
+-- | More of the same literal, inline — no tag of its own (`ARegion` never
+-- wraps this case), so the enclosing region's `expanded` flag just carries
+-- through unchanged.
+renderInline :: Fold -> Bool -> Display -> Widget n
+renderInline fold expanded (Display _ (AnObjectTerm _ _ items)) =
+  hBox (map (renderObjectItem fold expanded) items)
+renderInline fold _ d = renderDisplay fold d
 
 -- | The development's chain, one line per link, a guess's own body indented
 -- beneath it. '>' marks the focused link — 'linkFocus', not a computed
 -- comparison.
-renderLinkViews :: [LinkView] -> [String]
-renderLinkViews = concatMap (renderLink 0)
+renderDevelopment :: Fold -> [LinkView] -> Widget n
+renderDevelopment fold = vBox . map (renderLink fold 0)
 
-renderLink :: Int -> LinkView -> [String]
-renderLink depth (LinkView _at focus shape) =
-  (marker <> indent <> renderLinkShape shape) : nested
+renderLink :: Fold -> Int -> LinkView -> Widget n
+renderLink fold depth (LinkView _at focus shape) =
+  case nested of
+    [] -> line
+    _  -> vBox (line : nested)
   where
     marker = if focus then "> " else "  "
-    indent = concat (replicate depth "  ")
+    line = padLeft (Pad (2 * depth)) (str marker <+> renderLinkShape fold shape)
     nested = case shape of
-      AGuessLink {guessBody = body} -> concatMap (renderLink (depth + 1)) body
+      AGuessLink {guessBody = body} -> map (renderLink fold (depth + 1)) body
       _ -> []
 
-renderLinkShape :: LinkShape -> String
-renderLinkShape shape = case shape of
-  AnAssumption name ty -> "assume " <> name <> " : " <> renderDisplay ty
-  ADefinition name ty val -> "let " <> name <> " : " <> renderDisplay ty <> " = " <> renderDisplay val
+renderLinkShape :: Fold -> LinkShape -> Widget n
+renderLinkShape fold shape = case shape of
+  AnAssumption name ty -> str ("assume " <> name <> " : ") <+> renderDisplay fold ty
+  ADefinition name ty val ->
+    str ("let " <> name <> " : ") <+> renderDisplay fold ty <+> str " = " <+> renderDisplay fold val
   AClaimLink name ty blocked ->
-    "? " <> name <> " : " <> renderDisplay ty <> blockedSuffix blocked
+    str ("? " <> name <> " : ") <+> renderDisplay fold ty <+> str (blockedSuffix blocked)
   AGuessLink name ty pure' blocked _body ->
-    "guess " <> name <> " : " <> renderDisplay ty <> impureSuffix pure' <> blockedSuffix blocked
-  AQuantifier name ty -> "forall " <> name <> " : " <> renderDisplay ty
-  APending c -> renderConstraint c
-  AResult d -> renderDisplay d
+    str ("guess " <> name <> " : ") <+> renderDisplay fold ty
+      <+> str (impureSuffix pure' <> blockedSuffix blocked)
+  AQuantifier name ty -> str ("forall " <> name <> " : ") <+> renderDisplay fold ty
+  APending c -> renderConstraint fold c
+  AResult d -> renderDisplay fold d
   where
     blockedSuffix b = if b then " (blocked)" else ""
     impureSuffix p = if p then "" else " (impure)"
 
-renderConstraint :: ConstraintView -> String
-renderConstraint (ConstraintView _xi lhs rhs ty) =
-  renderDisplay lhs <> " =?= " <> renderDisplay rhs <> " : " <> renderDisplay ty
+renderConstraint :: Fold -> ConstraintView -> Widget n
+renderConstraint fold (ConstraintView _xi lhs rhs ty) =
+  renderDisplay fold lhs <+> str " =?= " <+> renderDisplay fold rhs <+> str " : " <+> renderDisplay fold ty
 
 -- | "Goal" means an open claim in the development, nothing more — no kernel
 -- metas view exists to ask instead. Guesses branch, so this recurses into
--- their own bodies the same way 'renderLinkViews' does.
-goalLines :: [LinkView] -> [String]
-goalLines = concatMap goalsOf
+-- their own bodies the same way 'renderDevelopment' does.
+renderGoals :: Fold -> [LinkView] -> Widget n
+renderGoals fold links = case goalsOf links of
+  [] -> str " "
+  gs -> vBox gs
   where
-    goalsOf (LinkView _at _focus shape) = case shape of
-      AClaimLink name ty blocked -> [renderLinkShape (AClaimLink name ty blocked)]
-      AGuessLink {guessBody = body} -> goalLines body
+    goalsOf = concatMap goalOf
+    goalOf (LinkView _at _focus shape) = case shape of
+      AClaimLink {} -> [renderLinkShape fold shape]
+      AGuessLink {guessBody = body} -> goalsOf body
       _ -> []
 
 renderMachineView :: MachineView -> [String]
@@ -164,8 +235,8 @@ renderSkeleton skel = case skel of
   SkelHole op -> renderOperand op
 
 -- | 'ValSurface' is rendered as a placeholder for now — a real surface
--- printer ('Thena.View.Surface' has the structure) is its own piece of work,
--- not needed to get the machine pane on screen.
+-- printer ('Thena.View.Surface' has the structure) is its own piece of
+-- work, not needed to get panes on screen.
 renderValue :: ValueView -> String
 renderValue v = case v of
   ValText t -> show t
@@ -177,6 +248,31 @@ renderValue v = case v of
   ValSome x -> "some(" <> renderValue x <> ")"
   ValPair a b -> "(" <> renderValue a <> ", " <> renderValue b <> ")"
   ValLevel l -> l
-  ValTerm d -> renderDisplay d
+  ValTerm d -> renderPlain d
   ValSurface _ -> "<surface>"
   ValOpaque name -> "<" <> name <> ">"
+
+-- | A last resort for the one place a 'Display' still needs to become a
+-- 'String' — inside a machine value, which this pass keeps as plain text
+-- (see the module header). Always expanded; the machine pane doesn't fold.
+renderPlain :: Display -> String
+renderPlain (Display _ shape) = case shape of
+  AVariable name _ -> name
+  AGlobal name _ -> name
+  AUniverse lvl -> lvl
+  ALiteral text -> text
+  AnApplication f a -> renderPlain f <> " " <> renderPlain a
+  ARegion (Display _ (AnObjectTerm lang _ items)) ->
+    lang <> "`" <> concatMap plainItem items <> "`"
+  AnObjectTerm lang _ items -> lang <> "`" <> concatMap plainItem items <> "`"
+  AToken text -> text
+  AnElision -> "…"
+  ADangling n -> "#" <> show n
+  _ -> "…"
+  where
+    plainItem it = case it of
+      ObjectText t -> t
+      ObjectToken d -> renderPlain d
+      ObjectChild True d -> "${" <> renderPlain d <> "}"
+      ObjectChild False (Display _ (AnObjectTerm _ _ items)) -> concatMap plainItem items
+      ObjectChild False d -> renderPlain d
