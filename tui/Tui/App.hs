@@ -23,6 +23,8 @@ module Tui.App (runTui) where
 import Brick
 import Brick.Widgets.Edit
   ( Editor
+  , editAttr
+  , editFocusedAttr
   , getCursorPosition
   , getEditContents
   , handleEditorEvent
@@ -163,6 +165,13 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   , (attrName "accent.output",  ink (themeRepl th))
   , (attrName "dropdown",          surface (themePopup th) (themeInk th))
   , (attrName "dropdown.selected", surface (themePopup th) (themeRepl th))
+  -- The input line's own editor: 'renderEditor' wraps its output in
+  -- Brick's 'edit'/'editFocused' attributes, which fall back to the
+  -- terminal default (black) unless named here. The input is the last line
+  -- of the repl pane's own document, so it takes the pane's fill, not a
+  -- background of its own.
+  , (editAttr,        surface (themePanel th) (themeInk th))
+  , (editFocusedAttr, surface (themePanel th) (themeInk th))
   , (foldAttr,   V.withStyle (surface (themeFold th) (themeInk th)) V.italic)
   , (spliceAttr, V.withStyle (surface (themeSplice th) (themeInk th)) V.bold)
   ]
