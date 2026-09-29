@@ -25,7 +25,6 @@ import Brick.Widgets.Edit
   ( Editor
   , editAttr
   , editFocusedAttr
-  , getCursorPosition
   , getEditContents
   , handleEditorEvent
   , renderEditor
@@ -216,8 +215,8 @@ draw st = dropdownLayer st <> [hBox [replColumn, gapH, sideColumn]]
 
     -- | 'Input' reported here, on the editor itself, not the "❯ " ahead of
     -- it — so 'stInputExtent's own upper-left is column 0 of the *text*,
-    -- and adding the editor's own cursor column (from 'getCursorPosition')
-    -- gives the caret's real screen column directly, no offset to remember.
+    -- and every text offset ('pathStartOff', the cursor, anything later)
+    -- adds onto a real screen column directly, no prompt width to remember.
     inputLine = str "❯ " <+> reportExtent Input (renderEditor (str . concatMap Text.unpack) True (stInput st))
 
     sideColumn =
@@ -296,16 +295,15 @@ dropdownLayer st = case (stDropdown st, stInputExtent st) of
       paneExt = case stPaneExtent st of
         Just p  -> p
         Nothing -> inputExt
-      -- | The caret's own screen column: the editor's left edge plus the
-      -- cursor's column within it — "follows my caret" means the *caret*,
-      -- not just wherever the input box happens to start, which only
-      -- coincide while typing at the end.
-      caretCol   = locationColumn (extentUpperLeft inputExt) + snd (getCursorPosition (stInput st))
-      -- | The widget sits one marker-width left of the caret, so the entry
-      -- *text* lands under it — the rows all lead with a two-column marker
-      -- (see 'dropdownSelected'/'dropdownPlain'), and anchoring the widget
-      -- edge itself would leave every name that width too far right.
-      col        = max 0 (caretCol - dropdownMarkerWidth)
+      -- | The path's own start column: the editor's left edge plus the
+      -- offset where the path currently being typed begins — everything
+      -- before it is ':load' and spacing (see 'pathStartOff'). Extending
+      -- the path grows the line and the word by the same amount, so this
+      -- is constant while typing: positioned once, never following the
+      -- caret. Respacing or restarting the path moves the word, and the
+      -- anchor follows — alignment is with the path as written.
+      col = max 0 (locationColumn (extentUpperLeft inputExt) + pathStartOff line - dropdownMarkerWidth)
+      line = concatMap Text.unpack (getEditContents (stInput st))
       inputRow   = locationRow (extentUpperLeft inputExt)
       paneRow    = locationRow (extentUpperLeft paneExt)
       paneHeight = snd (extentSize paneExt)
@@ -511,6 +509,15 @@ loadPathPrefix line
 
 lastWord :: String -> String
 lastWord = reverse . takeWhile (/= ' ') . reverse
+
+-- | The offset where the path currently being typed starts: the line minus
+-- its last word. Constant while the word is extended a character at a time,
+-- moving only when spacing changes or the word is restarted — which is what
+-- makes it a position-once anchor for the dropdown ('dropdownLayer') rather
+-- than a caret follower. Only meaningful when 'loadPathPrefix' matched, and
+-- the dropdown layer never asks otherwise.
+pathStartOff :: String -> Int
+pathStartOff line = length line - length (lastWord line)
 
 replacePathPrefix :: String -> String -> String
 replacePathPrefix line completed = take (length line - length (lastWord line)) line <> completed
