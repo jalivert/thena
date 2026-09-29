@@ -26,7 +26,8 @@ import Thena.View.Address (Address)
 import Thena.View.Core (Budget)
 import Thena.View.Instral (OperandView, StatementView, displayBlock, displayOperand, patternText)
 import Thena.Rules (testOperands, testWord)
-import Thena.Instral.Type (Signature, renderSignature)
+import Thena.Instral.Type (Signature)
+import Thena.View.Type (SignatureView, displaySignature)
 import Thena.Syntax.Print (Env)
 
 -- | A rule's name, its head, its params as `:matches`' own placeholders, and
@@ -37,18 +38,20 @@ data RuleView = RuleView
   , ruleViewHead      :: [TestView]
   , ruleViewParams    :: [String]
   , ruleViewBody      :: [StatementView]
-  , ruleViewSignature :: Maybe String
+  , ruleViewSignature :: Maybe SignatureView
     -- ^ **the type its rule file declared for the name** (MS5 phase 67), as
-    -- 'Thena.Instral.Type.renderSignature' writes it — @Term -> Term@, with a
-    -- function-typed parameter or result parenthesised so the arity reads
-    -- right. 'Nothing' where the file declared none.
+    -- "Thena.View.Type" structures it — the parameters and the result, with a
+    -- function-typed one fenced so the arity reads right. 'Nothing' where the
+    -- file declared none.
     --
-    -- Added at MS7 phase 131 (@ms7\/CLOSEOUT.md@ 17): a base's signatures were
-    -- the one thing his own rule-base pane still had to reach past the seam
-    -- for, importing 'Thena.Rules' and 'Thena.Instral.Type' to get them. A
-    -- 'String' rather than a 'Thena.Instral.Type.Signature' because the type
-    -- itself is not on @thena:view@'s list and putting it there is a wider
-    -- decision than this field.
+    -- Added at MS7 phase 131 (@ms7\/CLOSEOUT.md@ 17) carrying
+    -- 'Thena.Instral.Type.renderSignature''s rendered 'String', knowingly and
+    -- as a stopgap, because "Thena.Instral.Type" is not on @thena:view@'s list.
+    -- **MS7 phase 133 replaced it rather than standing a second field beside
+    -- it** (@ms7\/CLOSEOUT.md@ 27, his ruling): two spellings of one thing is
+    -- the confusion the literal alternative costs nothing to avoid, and
+    -- "Thena.View.TypeTests" rebuilds the rendered form from this one byte for
+    -- byte, so nothing is lost by dropping it.
   }
   deriving (Eq, Show)
 
@@ -74,7 +77,7 @@ displayRule gs budget env bs n at sig r =
     (map test (ruleHead r))
     (map placeholder (ruleParams r))
     (displayBlock gs budget env bs n at Nothing (ruleBody r))
-    (fmap renderSignature sig)
+    (fmap displaySignature sig)
   where
     nameOf (GlobalName g) = g
     placeholder pt = case pt of

@@ -48,6 +48,7 @@ import Thena.View.Chart (Written (..))
 import Thena.View.Development (LinkView (..))
 import Thena.View.Machine (MachineView (..))
 import Thena.View.Rules (RuleView (..))
+import Thena.View.Type (SignatureView (..))
 
 main :: IO ()
 main = do
@@ -79,6 +80,13 @@ checks =
   , \s -> want "focusTypeView" (maybe True (const True) (focusTypeView budget s))
   , \s -> want "rulesView" (not (null [ r | (_, rs) <- rulesView budget s, r <- rs ]))
   , \s -> want "matchesView" (not (null (map ruleViewName (matchesView budget s))))
+    -- A rule's declared type arrives structured, not as a rendered line
+    -- (MS7 phase 133) — so "Thena.View.Type" really is past the seam.
+  , \s -> want "a signature view is structured"
+            (not (null [ () | (_, rs) <- rulesView budget s
+                            , r <- rs
+                            , Just sg <- [ruleViewSignature r]
+                            , not (null (signatureViewParams sg)) ]))
   , \s -> want "parseView" (either (const True) (const True) (parseView s "LC" Nothing []))
   , \s -> want "offerView" (either (const True) (const True) (offerView s "LC" Nothing [] [WrittenText ""]))
   , \s -> want "focusProgram" (not (null (focusProgram (focusAddress s))) || True)

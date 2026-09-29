@@ -24,7 +24,7 @@ import Thena.Driver
 import Thena.Engine (Machine (..))
 import Thena.Core.Term (GlobalName (..))
 import Thena.Instral.Ops (Rule (ruleBody, ruleHead), ruleName)
-import Thena.Instral.Type (renderSignature)
+import Thena.View.Type (displaySignature)
 import Thena.View (rulesView)
 import Thena.View.Address (Address (..))
 import Thena.View.Core (Budget (..))
@@ -72,7 +72,7 @@ declaredTypes = do
         | b  <- bs
         , (r, rv) <- zip (baseRules b) (concat [ vs | (n, vs) <- rulesView (Budget 200) s
                                                     , n == baseName b ])
-        , let want = fmap renderSignature (lookup (nameOf r) (baseSignatures b))
+        , let want = fmap displaySignature (lookup (nameOf r) (baseSignatures b))
         , ruleViewSignature rv /= want
         ]
   case wrong of

@@ -80,6 +80,7 @@ library
         Thena.View.Rules
         Thena.View.Source
         Thena.View.Surface
+        Thena.View.Type
     other-modules:
         Paths_thena
     autogen-modules:
@@ -132,6 +133,7 @@ library view
         Thena.View.Rules,
         Thena.View.Source,
         Thena.View.Surface,
+        Thena.View.Type,
         -- The file door: reading what a command named, and starting a session
         -- with the shipped rule base and prelude in it (§130).
         Thena.Files,
@@ -200,6 +202,7 @@ test-suite thena-test
         Thena.View.RulesTests
         Thena.View.SurfaceTests
         Thena.View.SourceTests
+        Thena.View.TypeTests
         Thena.DependentIndexTests
         Thena.CanonicalTests
         Thena.DeterminacyTests
