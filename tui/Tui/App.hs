@@ -23,13 +23,14 @@ module Tui.App (runTui) where
 import Brick
 import Brick.Widgets.Edit
   ( Editor
+  , getCursorPosition
   , getEditContents
   , handleEditorEvent
   , renderEditor
   )
 import qualified Brick.Widgets.Edit as E
 import Control.Monad.IO.Class (liftIO)
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, sort)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Graphics.Vty as V
@@ -62,12 +63,41 @@ data Name
   | MachineVP
   deriving (Eq, Ord, Show)
 
+-- | One completed round: the line that was run (absent for the startup
+-- trouble dump and the `:theme`/`:fold` pseudo-commands, which never echoed
+-- what was typed even before this) and the output lines it produced.
+data Turn = Turn
+  { turnPrompt :: Maybe String
+  , turnOutput :: [String]
+  }
+
+-- | The live `:load` completion dropdown — his request 2026-09-29: appears
+-- the moment the line matches `:load `, updates on every keystroke, an
+-- arrow key moves 'ldSelected' rather than the text cursor. 'Nothing' means
+-- no dropdown at all (wrong prefix, no directory, or nothing left to
+-- suggest), not an empty one — 'draw' never has to render a dropdown with
+-- zero rows.
+data LoadDropdown = LoadDropdown
+  { ldEntries  :: [String]
+  , ldSelected :: Maybe Int
+  }
+
 data St = St
-  { stHistory :: [String]
-  , stInput   :: Editor Text Name
-  , stSession :: Session
-  , stTheme   :: Theme
-  , stFoldOn  :: Bool
+  { stTurns       :: [Turn]  -- ^ forward chronological — oldest first, an
+                              -- append-only document, his correction 2026-09-29
+  , stInput       :: Editor Text Name
+  , stSession     :: Session
+  , stTheme       :: Theme
+  , stFoldOn      :: Bool
+  , stDropdown    :: Maybe LoadDropdown
+  , stInputExtent :: Maybe (Extent Name)  -- ^ looked up post-render, one
+                                            -- frame behind — 'Brick.Main'
+                                            -- has no way to ask for an
+                                            -- extent mid-'draw'
+  , stPaneExtent  :: Maybe (Extent Name)  -- ^ same lag, the repl pane's own
+                                            -- viewport bounds, needed to
+                                            -- decide whether the dropdown
+                                            -- has room below the caret
   }
 
 stInputL :: Lens' St (Editor Text Name)
@@ -80,11 +110,16 @@ runTui :: IO ()
 runTui = do
   (s0, trouble) <- startingSession
   let st0 = St
-        { stHistory = concatMap (renderTrouble s0) trouble
-        , stInput   = emptyInput
-        , stSession = s0
-        , stTheme   = neonPinkDark
-        , stFoldOn  = True
+        { stTurns       = case concatMap (renderTrouble s0) trouble of
+            []  -> []
+            out -> [Turn Nothing out]
+        , stInput       = emptyInput
+        , stSession     = s0
+        , stTheme       = neonPinkDark
+        , stFoldOn      = True
+        , stDropdown    = Nothing
+        , stInputExtent = Nothing
+        , stPaneExtent  = Nothing
         }
   vty <- mkVty V.defaultConfig
   _ <- customMain vty (mkVty V.defaultConfig) Nothing app st0
@@ -125,6 +160,9 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   , (attrName "title.goals",    ink (themeGoals th))
   , (attrName "title.machine",  ink (themeMachine th))
   , (attrName "dim",            ink (themeDim th))
+  , (attrName "accent.output",  ink (themeRepl th))
+  , (attrName "dropdown",          surface (themePanel th) (themeInk th))
+  , (attrName "dropdown.selected", surface (themePanel th) (themeRepl th))
   , (foldAttr,   V.withStyle (surface (themeFold th) (themeInk th)) V.italic)
   , (spliceAttr, V.withStyle (surface (themeSplice th) (themeInk th)) V.bold)
   ]
@@ -132,8 +170,14 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
     surface bgC fgC = V.withBackColor (V.withForeColor V.defAttr fgC) bgC
     ink fgC = V.withForeColor V.defAttr fgC
 
+-- | **The first layer in this list is the topmost one, confirmed
+-- empirically** — not documented anywhere obvious, and the opposite of
+-- what seemed like the safer guess. Got this backwards on the first attempt
+-- at the dropdown below: appending it after the base layer put it fully
+-- behind the panes, invisible, no error, just never on screen. Verified
+-- with a hardcoded marker widget before trusting the fix.
 draw :: St -> [Widget Name]
-draw st = [hBox [replColumn, gapH, sideColumn]]
+draw st = dropdownLayer st <> [hBox [replColumn, gapH, sideColumn]]
   where
     budget = Budget 200
     s = stSession st
@@ -148,14 +192,24 @@ draw st = [hBox [replColumn, gapH, sideColumn]]
     gapH = hLimit 1 (fill ' ')
     gapV = vLimit 1 (fill ' ')
 
+    -- | An append-only document, not a fixed-position input row — his
+    -- correction, 2026-09-29: the prompt used to be pinned to the pane's
+    -- bottom row regardless of how much history existed, "like a second-class
+    -- element." It's now the last line of the same scrollable content as
+    -- everything above it, and travels down with it. Starting with the
+    -- plain version, his own call: let it reach the pane's actual bottom and
+    -- scroll from there like a normal terminal, not a pre-built holding-point
+    -- short of that — add one later only if this doesn't feel right.
     replColumn =
       withAttr (attrName "panel") $
-        vBox
-          [ pane "repl" HistoryVP
-              (padAll 1 (vBox (map str (reverse (stHistory st)))))
-          , padLeftRight 1
-              (str "> " <+> renderEditor (str . concatMap Text.unpack) True (stInput st))
-          ]
+        pane "repl" HistoryVP
+          (padAll 1 (vBox (renderTurns (stTurns st) <> [inputLine])))
+
+    -- | 'Input' reported here, on the editor itself, not the "❯ " ahead of
+    -- it — so 'stInputExtent's own upper-left is column 0 of the *text*,
+    -- and adding the editor's own cursor column (from 'getCursorPosition')
+    -- gives the caret's real screen column directly, no offset to remember.
+    inputLine = str "❯ " <+> reportExtent Input (renderEditor (str . concatMap Text.unpack) True (stInput st))
 
     sideColumn =
       hLimitPercent 38 $
@@ -197,6 +251,63 @@ draw st = [hBox [replColumn, gapH, sideColumn]]
                 ]
           ]
 
+-- | One turn, prompt (if any) then output — the most recent turn's output
+-- gets a thin accent bar to its left, his request 2026-09-29 (thinner than a
+-- pane's own '▎' edge, so '▏', one-eighth block, distinct glyph). The bar
+-- column is always reserved, blank on every other turn, so a turn's text
+-- doesn't visibly shift left/right as a newer one takes over the accent.
+renderTurns :: [Turn] -> [Widget n]
+renderTurns turns = zipWith renderTurn [1 :: Int ..] turns
+  where
+    lastIx = length turns
+    renderTurn ix t =
+      vBox (promptLine <> map (outputLine (ix == lastIx)) (turnOutput t))
+      where
+        promptLine = case turnPrompt t of
+          Nothing -> []
+          Just line -> [str "❯ " <+> str line]
+    outputLine accented l = marker <+> str " " <+> str l
+      where
+        marker = if accented then withAttr (attrName "accent.output") (str "▏") else str " "
+
+-- | The `:load` dropdown, as its own layer positioned by the caret's actual
+-- screen coordinates from the *previous* render — 'Brick.Main.lookupExtent'
+-- only works post-render, so this is one frame behind by construction, the
+-- standard Brick technique for a caret-anchored popup.
+--
+-- **Flips above the caret past 80% of the pane's depth, below it otherwise**
+-- — his rule, 2026-09-29, since the prompt can now be anywhere in the pane
+-- (it used to always sit at the fixed bottom row, where "above" was the only
+-- option that fit). 80% is a starting point he named, not measured; nothing
+-- here should read it as final.
+dropdownLayer :: St -> [Widget Name]
+dropdownLayer st = case (stDropdown st, stInputExtent st) of
+  (Just ld, Just inputExt) -> [translateBy (Location (col, row)) (renderDropdown ld)]
+    where
+      paneExt = case stPaneExtent st of
+        Just p  -> p
+        Nothing -> inputExt
+      -- | The editor's own left edge plus the cursor's column within it —
+      -- "follows my caret" means the *caret*, not just wherever the input
+      -- box happens to start, which only coincide while typing at the end.
+      col        = locationColumn (extentUpperLeft inputExt) + snd (getCursorPosition (stInput st))
+      inputRow   = locationRow (extentUpperLeft inputExt)
+      paneRow    = locationRow (extentUpperLeft paneExt)
+      paneHeight = snd (extentSize paneExt)
+      depthFrac :: Double
+      depthFrac = if paneHeight <= 0 then 0 else fromIntegral (inputRow - paneRow) / fromIntegral paneHeight
+      dropdownHeight = length (ldEntries ld)
+      row = if depthFrac > 0.8 then inputRow - dropdownHeight else inputRow + 1
+  _ -> []
+
+renderDropdown :: LoadDropdown -> Widget Name
+renderDropdown (LoadDropdown entries selected) =
+  withAttr (attrName "dropdown") (vBox (zipWith renderRow [0 :: Int ..] entries))
+  where
+    renderRow i name
+      | Just i == selected = withAttr (attrName "dropdown.selected") (str ("→ " <> name))
+      | otherwise           = str ("  " <> name)
+
 -- | A line, run against the session, and its 'Response' rendered as lines
 -- via 'Thena.Render.renderResponse' — a status-line-shaped placeholder for
 -- the REPL pane's own output; the side panes render through 'Thena.View'.
@@ -206,34 +317,125 @@ draw st = [hBox [replColumn, gapH, sideColumn]]
 -- same standing as `:load`'s path completion, his ruling 2026-09-28:
 -- *"it is not instral. Therefore special casing it in our TUI's repl is
 -- ok."*
+--
+-- **Every branch, at the end, records where the input and the repl pane
+-- itself now sit on screen** — 'stInputExtent'/'stPaneExtent', read back via
+-- 'lookupExtent' after whatever the event did, for the *next* 'draw' to
+-- position the dropdown against (see 'dropdownLayer'). This is the outer
+-- wrapper every branch runs through, not a per-branch call, so nothing can
+-- forget it.
 handleEvent :: BrickEvent Name e -> EventM Name St ()
-handleEvent (VtyEvent (V.EvKey V.KEnter [])) = do
+handleEvent ev = do
+  handleEventInner ev
+  inputExt <- lookupExtent Input
+  paneExt <- lookupExtent HistoryVP
+  st <- get
+  put st { stInputExtent = inputExt, stPaneExtent = paneExt }
+
+handleEventInner :: BrickEvent Name e -> EventM Name St ()
+handleEventInner (VtyEvent (V.EvKey V.KEnter [])) = do
+  st <- get
+  case stDropdown st of
+    -- | Enter accepts the arrow-selected candidate into the input instead of
+    -- submitting — his spec: "Enter selects it." Only fires once an arrow
+    -- key has actually picked something; with the dropdown merely open and
+    -- nothing selected, Enter still runs the line as typed.
+    Just (LoadDropdown entries (Just i)) | i < length entries -> do
+      let line = concatMap Text.unpack (getEditContents (stInput st))
+          line' = replacePathPrefix line (entries !! i)
+      put st { stInput = E.editorText Input (Just 1) (Text.pack line') }
+      refreshDropdown
+      followInput
+    _ -> do
+      let line = concatMap Text.unpack (getEditContents (stInput st))
+      case words line of
+        [":theme", name] | Just th <- themeByName name ->
+          appendTurn st { stTheme = th } Nothing ["theme: " <> name]
+        [":fold", mode] | mode `elem` ["on", "off"] ->
+          appendTurn st { stFoldOn = mode == "on" } Nothing ["fold: " <> mode]
+        _ -> do
+          let (s', resp) = oneLine (stSession st) line
+          appendTurn st { stSession = s' } (Just line) (renderResponse s' resp)
+          if resp == Quit then halt else pure ()
+handleEventInner (VtyEvent (V.EvKey V.KEsc [])) = do
+  st <- get
+  case stDropdown st of
+    -- | "Esc leaves the dropdown (arrow goes away) but leaves it open" —
+    -- his spec exactly: clears the arrow-selection only, the candidate list
+    -- stays up. With no selection to clear, Esc keeps its ordinary meaning.
+    Just ld@(LoadDropdown _ (Just _)) -> put st { stDropdown = Just ld { ldSelected = Nothing } }
+    _ -> halt
+handleEventInner ev@(VtyEvent (V.EvKey V.KDown [])) = navigateDropdown moveDown ev
+handleEventInner ev@(VtyEvent (V.EvKey V.KUp []))   = navigateDropdown moveUp ev
+handleEventInner (VtyEvent (V.EvKey (V.KChar '\t') [])) = completeLoadPath
+handleEventInner (MouseDown n V.BScrollUp _ _) = vScrollBy (viewportScroll n) (-1)
+handleEventInner (MouseDown n V.BScrollDown _ _) = vScrollBy (viewportScroll n) 1
+handleEventInner ev = Brick.zoom stInputL (handleEditorEvent ev) >> followInput >> refreshDropdown
+
+-- | Arrow-key navigation only takes over the keypress while the dropdown is
+-- actually showing candidates — otherwise the original event falls through
+-- to the editor as normal (a no-op either way, on a single-line editor).
+navigateDropdown :: (Maybe Int -> Int -> Int) -> BrickEvent Name e -> EventM Name St ()
+navigateDropdown move ev = do
+  st <- get
+  case stDropdown st of
+    Just ld@(LoadDropdown entries sel) | not (null entries) ->
+      put st { stDropdown = Just ld { ldSelected = Just (move sel (length entries)) } }
+    _ -> Brick.zoom stInputL (handleEditorEvent ev) >> followInput
+
+moveDown :: Maybe Int -> Int -> Int
+moveDown Nothing  _ = 0
+moveDown (Just i) n = min (n - 1) (i + 1)
+
+moveUp :: Maybe Int -> Int -> Int
+moveUp Nothing  n = n - 1
+moveUp (Just i) _ = max 0 (i - 1)
+
+-- | Appends one completed turn and scrolls the repl viewport to show it —
+-- the document grows downward and the view always follows, same as any
+-- terminal. Nothing did this before this session; 'HistoryVP' just stayed
+-- wherever it started, which is exactly his bug report ("it doesn't scroll
+-- so the end of the output is at the bottom... no terminal behaves like
+-- that").
+appendTurn :: St -> Maybe String -> [String] -> EventM Name St ()
+appendTurn st prompt output = do
+  put st { stInput = emptyInput, stTurns = stTurns st <> [Turn prompt output], stDropdown = Nothing }
+  followInput
+
+-- | Keep the live prompt in view while typing, same reasoning as
+-- 'appendTurn' — the prompt is just the last line of the same scrollable
+-- document now, not a fixed row, so it can scroll out of view like anything
+-- else unless something puts it back.
+followInput :: EventM Name St ()
+followInput = vScrollToEnd (viewportScroll HistoryVP)
+
+-- | Recomputes the `:load` dropdown from the input's current text —
+-- called after anything that can change it (typing, Tab, an accepted
+-- dropdown selection). Not called from arrow-key navigation, which changes
+-- only 'ldSelected', never the text; recomputing there would immediately
+-- overwrite the very selection the arrow key just made.
+refreshDropdown :: EventM Name St ()
+refreshDropdown = do
   st <- get
   let line = concatMap Text.unpack (getEditContents (stInput st))
-  case words line of
-    [":theme", name] | Just th <- themeByName name ->
-      put st { stInput = emptyInput, stTheme = th, stHistory = ("theme: " <> name) : stHistory st }
-    [":fold", mode] | mode `elem` ["on", "off"] ->
-      put st { stInput = emptyInput, stFoldOn = mode == "on", stHistory = ("fold: " <> mode) : stHistory st }
-    _ -> do
-      let (s', resp) = oneLine (stSession st) line
-      put st
-        { stInput   = emptyInput
-        , stHistory = reverse (renderResponse s' resp) <> [("> " <> line)] <> stHistory st
-        , stSession = s'
-        }
-      if resp == Quit then halt else pure ()
-handleEvent (VtyEvent (V.EvKey V.KEsc [])) = halt
-handleEvent (VtyEvent (V.EvKey (V.KChar '\t') [])) = completeLoadPath
-handleEvent (MouseDown n V.BScrollUp _ _) = vScrollBy (viewportScroll n) (-1)
-handleEvent (MouseDown n V.BScrollDown _ _) = vScrollBy (viewportScroll n) 1
-handleEvent ev = Brick.zoom stInputL (handleEditorEvent ev)
+  case loadPathPrefix line of
+    Nothing -> put st { stDropdown = Nothing }
+    Just prefix -> do
+      entries <- liftIO (loadDropdownEntries prefix)
+      put st { stDropdown = if null entries then Nothing else Just (LoadDropdown entries Nothing) }
 
 -- | Tab-completion for `:load`'s path only — his ruling, 2026-09-29:
 -- *"it is not instral. Therefore special casing it in our TUI's repl is
 -- ok."* Scoped to a single trailing path (several comma/space-separated
 -- paths completing independently is the old experiment's finer-grained
 -- version of this and not built here yet — narrower, not a hack).
+--
+-- **Back to silent on an ambiguous or missing match, 2026-09-29** — his
+-- `.jalivert/TUI.md` feedback: once the live dropdown exists, printing
+-- "N matches" to the repl on Tab is redundant with what the dropdown
+-- already shows, and he asked for it to print nothing. This supersedes the
+-- previous session's `stHistory` message, which existed only because the
+-- dropdown didn't yet.
 completeLoadPath :: EventM Name St ()
 completeLoadPath = do
   st <- get
@@ -241,19 +443,13 @@ completeLoadPath = do
   case loadPathPrefix line of
     Nothing -> pure ()
     Just prefix -> do
-      result <- liftIO (completePath prefix)
-      case result of
-        Extended full ->
-          let line' = replacePathPrefix line full
-           in put st { stInput = E.editorText Input (Just 1) (Text.pack line') }
-        -- Both failure cases used to leave Tab looking like it did nothing —
-        -- his punch list, 2026-09-29. Feedback goes through the same
-        -- stHistory line the pseudo-commands already use; a dropdown listing
-        -- candidates is still the deferred next slice, not built here.
-        Ambiguous matches ->
-          put st { stHistory = ("load: " <> show (length matches) <> " matches — " <> unwords matches) : stHistory st }
-        NoMatch ->
-          put st { stHistory = ("load: no match for " <> prefix) : stHistory st }
+      matched <- liftIO (completePath prefix)
+      case matched of
+        Nothing -> pure ()
+        Just full -> do
+          put st { stInput = E.editorText Input (Just 1) (Text.pack (replacePathPrefix line full)) }
+          refreshDropdown
+  followInput
 
 loadPathPrefix :: String -> Maybe String
 loadPathPrefix line
@@ -266,34 +462,43 @@ lastWord = reverse . takeWhile (/= ' ') . reverse
 replacePathPrefix :: String -> String -> String
 replacePathPrefix line completed = take (length line - length (lastWord line)) line <> completed
 
--- | The result of one completion attempt: extended as far as every match
--- agrees (ordinary shell-style completion), or a reason it couldn't be —
--- genuinely ambiguous prefixes are left alone rather than guessed at (a
--- dropdown listing them is the next slice, same as the object-term
--- offers'), but the caller still gets told which case it was.
-data Completion
-  = Extended String
-  | Ambiguous [String]
-  | NoMatch
-
--- | The directory a prefix's last path segment sits in, listed and
--- filtered by what's typed so far.
-completePath :: String -> IO Completion
-completePath prefix = do
+-- | Every entry in a prefix's directory that starts with what's typed —
+-- shared by Tab's shell-style extension and the live dropdown's listing.
+matchingEntries :: String -> IO [String]
+matchingEntries prefix = do
   let dir  = takeDirectory prefix
       name = takeFileName prefix
   exists <- doesDirectoryExist dir
   if not exists
-    then pure NoMatch
+    then pure []
     else do
       entries <- listDirectory dir
       let shown = if "." `isPrefixOf` name then entries else filter (not . isPrefixOf ".") entries
-          matches = filter (name `isPrefixOf`) shown
-      pure $ case matches of
-        [] -> NoMatch
-        _  ->
-          let common = longestCommonPrefix matches
-           in if length common > length name then Extended (joinDir dir common) else Ambiguous matches
+      pure (sort (filter (name `isPrefixOf`) shown))
+
+-- | Shell-style completion: extended as far as every match agrees, or
+-- 'Nothing' if that's no further than what's already typed (no matches, or
+-- genuinely ambiguous with nothing more in common) — the live dropdown
+-- covers telling the user why, so this doesn't need to any more.
+completePath :: String -> IO (Maybe String)
+completePath prefix = do
+  matches <- matchingEntries prefix
+  let dir  = takeDirectory prefix
+      name = takeFileName prefix
+      common = longestCommonPrefix matches
+  pure $ if length common > length name then Just (joinDir dir common) else Nothing
+
+-- | Every match, full-path, for the dropdown to list — '[]' both for "no
+-- directory"/"nothing matches" and for "one match, and it's already typed
+-- in full," which the dropdown treats identically: nothing left to offer.
+loadDropdownEntries :: String -> IO [String]
+loadDropdownEntries prefix = do
+  matches <- matchingEntries prefix
+  let name = takeFileName prefix
+      dir  = takeDirectory prefix
+  pure $ case matches of
+    [m] | m == name -> []
+    ms -> map (joinDir dir) ms
 
 joinDir :: FilePath -> String -> String
 joinDir "." name = name
