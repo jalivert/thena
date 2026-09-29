@@ -20,6 +20,7 @@ import Thena.Driver (Session, oneLine)
 import Thena.Files (following, startingSession)
 import Thena.Instral.Ops (signatureOf)
 import Thena.Instral.Type (Signature (..), Ty (..))
+import Thena.Language.Earley (placeholderChar)
 import Thena.Language.Instral (instralRules, operandHead, statementHead)
 import qualified Thena.Language.Earley as E
 import Thena.Rules (opWords)
@@ -47,6 +48,7 @@ tests =
         [ testCase "a tagged term literal alone on the line is helped" standalone
         , testCase "and one in a slot that wants something else is helped too" wrongSlot
         , testCase "deeper inside it, the object language answers" deeper
+        , testCase "and standing on a box inside it, what may fill the box" inBoxInLiteral
         , testCase "a word after a finished literal is helped, context-free" afterLiteral
         , testCase "and a line that parses is never marked recovered" notRecovered
         ]
@@ -106,6 +108,32 @@ deeper = do
   -- The offers here are LC's own productions, not instral's.
   if ALiteralSymbol "\955" `elem` offeredOptions o then pure ()
     else assertFailure ("expected LC's own lambda among " <> show (offeredOptions o))
+
+-- | **The tui track's finding, 2026-09-30** (@.jalivert\/REPORT.md@): stand on a
+-- placeholder that is inside a tagged term literal and the dropdown was empty.
+--
+-- The cause was not in recovery. @recover@ has to flatten the line to a
+-- @String@ to get the offsets @tokensView@ works in, so the box reaches
+-- 'Thena.View.Chart.offerAt' as a character inside a 'WrittenText' — and
+-- 'Thena.View.Chart.offerAt' read the /run/ to decide the cursor was in the
+-- box. It therefore answered about what may stand beside a box, and @abs@ has
+-- no room beside its type slot, so the answer was nothing at all.
+--
+-- 'Thena.View.Chart.runs' normalises the two forms, which is where the fix
+-- belongs: the boundary already says they are one thing.
+inBoxInLiteral :: IO ()
+inBoxInLiteral = do
+  s <- withLC
+  let box = [placeholderChar]
+      o = statementOfferView s
+            [WrittenText (":infer LC`( \955 " <> box <> " : ")]
+            [WrittenText (box <> " . " <> box <> " )`")]
+  offeredReplaces o @?= True
+  if ANonterminalSymbol "Ty" `elem` (offeredOptions o <> offeredWanted o) then pure ()
+    else assertFailure ("expected Ty among " <> show (offeredOptions o, offeredWanted o))
+  if null (offeredProductions o)
+    then assertFailure "expected Ty's own productions to be offerable into the box"
+    else pure ()
 
 afterLiteral :: IO ()
 afterLiteral = do

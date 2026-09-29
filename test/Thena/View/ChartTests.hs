@@ -327,6 +327,22 @@ regionCases =
       asRun <- optionsOf gs "LC" Nothing [WrittenText "( ", WrittenPlaceholder] []
       asChar <- optionsOf gs "LC" Nothing [WrittenText ("( " <> [placeholderChar])] []
       asRun @?= asChar
+  , testCase "and that holds to the right of the cursor, where the flag is read" $ do
+      gs <- loaded
+      -- **The half the case above did not cover, and it was false.** The
+      -- equivalence held on the left because 'piecesFrom' reads the character
+      -- as a placeholder either way; on the right it did not, because
+      -- 'offerAt' asks about the first /run/ there. So a frontend handing its
+      -- line over as one 'WrittenText' was told the cursor was beside the box
+      -- rather than in it, and was then answered about what may stand beside a
+      -- box — nothing, wherever the production has no room for it.
+      let after = " . " <> [placeholderChar] <> " )"
+      asRun <- optionsOf gs "LC" Nothing [WrittenText "( \955 x : "] (WrittenPlaceholder : [WrittenText after])
+      asChar <- optionsOf gs "LC" Nothing [WrittenText "( \955 x : "] [WrittenText ([placeholderChar] <> after)]
+      asRun @?= asChar
+      asRunFlag <- replacesAt gs [WrittenText "( \955 x : "] (WrittenPlaceholder : [WrittenText after])
+      asCharFlag <- replacesAt gs [WrittenText "( \955 x : "] [WrittenText ([placeholderChar] <> after)]
+      (asRunFlag, asCharFlag) @?= (True, True)
   , testCase "standing in the box, the offer says it replaces it" $ do
       gs <- loaded
       -- The cursor is in the box when the box is the first thing to its right.

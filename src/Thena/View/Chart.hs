@@ -296,15 +296,43 @@ offerAt rs start before after =
   offerView replacing (Earley.offer rs start left right)
   where
     -- The cursor is in the box when the box is the first thing to its right.
-    (replacing, after') = case after of
+    (replacing, after') = case runs after of
       WrittenPlaceholder : rest -> (True, rest)
-      _                         -> (False, after)
+      rest                      -> (False, rest)
     -- **The two sides are numbered as one region**, so the first splice to the
     -- right of the cursor continues the count rather than restarting it: a
     -- region has one list of host terms beside it, and which splice is which
     -- does not depend on where the cursor happens to stand.
-    (left, k0) = piecesFrom 0 before
+    (left, k0) = piecesFrom 0 (runs before)
     (right, _) = piecesFrom k0 after'
+
+-- | A box written as a character becomes a box written as a run.
+--
+-- 'Written' already says the two are one thing — @a frontend that has only text
+-- puts the character in@ — but 'offerAt' asks about the /first run/ to the right
+-- of the cursor, so the two forms answered differently until this normalised
+-- them: a frontend handing its line over as one 'WrittenText' never got
+-- 'offeredReplaces', and worse, was answered about what may stand /beside/ the
+-- box rather than /in/ it, which is the empty list wherever the production has
+-- no room beside it.
+--
+-- **Nothing else can tell the difference.** 'Earley.pieces' already reads the
+-- character as 'Earley.Placeholder', so the piece stream is unchanged, and
+-- splices are untouched so their numbering is too. An empty run is dropped,
+-- which is the same normalisation one step further: an empty 'WrittenText' at
+-- the head of @after@ would otherwise hide the box behind it.
+runs :: [Written] -> [Written]
+runs = concatMap one
+  where
+    one w = case w of
+      WrittenText t -> split t
+      _             -> [w]
+
+    split t = case break (== Earley.placeholderChar) t of
+      ([],  [])         -> []
+      (pre, [])         -> [WrittenText pre]
+      ([],  _ : post)   -> WrittenPlaceholder : split post
+      (pre, _ : post)   -> WrittenText pre : WrittenPlaceholder : split post
 
 -- | A region reads as a term of its language, or of the one production it was
 -- written with — 'Earley.StartAt' and 'Earley.StartRule', which is the
