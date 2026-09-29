@@ -31,9 +31,11 @@ import Brick.Widgets.Edit
   )
 import qualified Brick.Widgets.Edit as E
 import Control.Monad.IO.Class (liftIO)
+import Data.Char (isSpace)
 import Data.List (isPrefixOf, sort)
 import Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.Text.Zipper as Zip
 import qualified Graphics.Vty as V
 import Graphics.Vty.Platform.Unix (mkVty)
 import Lens.Micro (Lens', lens)
@@ -408,6 +410,17 @@ handleEventInner (VtyEvent (V.EvKey V.KEsc [])) = do
 handleEventInner ev@(VtyEvent (V.EvKey V.KDown [])) = navigateDropdown moveDown ev
 handleEventInner ev@(VtyEvent (V.EvKey V.KUp []))   = navigateDropdown moveUp ev
 handleEventInner (VtyEvent (V.EvKey (V.KChar '\t') [])) = completeLoadPath
+-- | Option+Backspace deletes a word backward. It arrives as 'KBS' with
+-- 'MMeta' — Ghostty sends ESC DEL, and a non-printable always comes through
+-- as Alt whether option-as-alt is set or not — which Brick's editor binds
+-- nothing to ('C-w' falls through there too), so it is handled here, in the
+-- zipper, before the catch-all: whitespace back, then the word itself,
+-- readline's rubout.
+handleEventInner (VtyEvent (V.EvKey V.KBS [V.MMeta])) = do
+  st <- get
+  put st { stInput = E.applyEdit killWordBack (stInput st) }
+  followInput
+  refreshDropdown
 handleEventInner (MouseDown n V.BScrollUp _ _) = vScrollBy (viewportScroll n) (-1)
 handleEventInner (MouseDown n V.BScrollDown _ _) = vScrollBy (viewportScroll n) 1
 -- | Press-and-release gestures end here, all of them. A wheel tick arrives
@@ -518,6 +531,20 @@ lastWord = reverse . takeWhile (/= ' ') . reverse
 -- the dropdown layer never asks otherwise.
 pathStartOff :: String -> Int
 pathStartOff line = length line - length (lastWord line)
+
+-- | A word backward from the cursor, as a zipper edit: the whitespace
+-- behind it first, then the word itself. Zero characters at the start of
+-- the line, where there is nothing to remove.
+killWordBack :: Zip.TextZipper Text -> Zip.TextZipper Text
+killWordBack z =
+  foldr (.) id (replicate (wordBackLen before) Zip.deletePrevChar) z
+  where
+    (_, col) = Zip.cursorPosition z
+    before = reverse (Text.unpack (Text.take col (Zip.currentLine z)))
+    wordBackLen rev = length spaces + length word
+      where
+        spaces = takeWhile isSpace rev
+        word = takeWhile (not . isSpace) (drop (length spaces) rev)
 
 replacePathPrefix :: String -> String -> String
 replacePathPrefix line completed = take (length line - length (lastWord line)) line <> completed
