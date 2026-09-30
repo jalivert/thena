@@ -92,6 +92,7 @@ import Tui.Render
   , renderMachineView
   , spliceAttr
   )
+import Tui.Config (Config (..), loadConfig, saveConfig)
 import Tui.Theme (Theme (..), neonPinkDark, themeByName)
 
 data Name
@@ -213,24 +214,27 @@ emptyInput = E.editorText Input (Just 1) Text.empty
 runTui :: IO ()
 runTui = do
   (s0, trouble) <- startingSession
+  cfg <- loadConfig
+  let theme0 = maybe neonPinkDark id (themeByName (cfgTheme cfg))
+      autoSelect0 = cfgAutoSelect cfg
   let st0 = St
         { stTurns       = case concatMap (renderTrouble s0) trouble of
             []  -> []
             out -> [Turn Nothing out]
         , stInput       = emptyInput
         , stSession     = s0
-        , stTheme       = neonPinkDark
+        , stTheme       = theme0
         , stFoldOn      = True
         , stDropdown    = Nothing
         -- The input opens with its dropdown already up (his
         -- `.jalivert/TUI.md` #14): the empty line offers the full rule
         -- list, first row lit — the same state deleting back to empty
         -- reaches.
-        , stOfferDropdown = buildOfferDropdown True 0 (statementOfferView s0 [] [])
+        , stOfferDropdown = buildOfferDropdown autoSelect0 0 (statementOfferView s0 [] [])
         , stDismissed   = Nothing
         , stRecoveredSpan = Nothing
-        , stAutoSelect  = True
-        , stWhisperOn   = True
+        , stAutoSelect  = autoSelect0
+        , stWhisperOn   = cfgWhisperOn cfg
         , stInputExtent = Nothing
         , stPaneExtent  = Nothing
         }
@@ -780,8 +784,10 @@ handleEventInner (VtyEvent (V.EvKey V.KEnter [])) = do
     _ -> do
       let line = concatMap Text.unpack (getEditContents (stInput st))
       case words line of
-        [":theme", name] | Just th <- themeByName name ->
-          appendTurn st { stTheme = th } Nothing ["theme: " <> name]
+        [":theme", name] | Just th <- themeByName name -> do
+          let st' = st { stTheme = th }
+          liftIO (saveConfig (configOf st'))
+          appendTurn st' Nothing ["theme: " <> name]
         [":fold", mode] | mode `elem` ["on", "off"] ->
           appendTurn st { stFoldOn = mode == "on" } Nothing ["fold: " <> mode]
         -- | Two more TUI-local toggles, his `.jalivert/TUI.md` #23 — same
@@ -789,23 +795,26 @@ handleEventInner (VtyEvent (V.EvKey V.KEnter [])) = do
         -- here is his own ruling already covers this). Disabling either is
         -- not "Esc" — it's a standing preference until turned back on, which
         -- is exactly why it needed its own command rather than a keybinding.
-        [":preselect", mode] | mode `elem` ["on", "off"] ->
-          appendTurn st { stAutoSelect = mode == "on" } Nothing ["preselect: " <> mode]
-        [":whisper", mode] | mode `elem` ["on", "off"] ->
-          appendTurn st { stWhisperOn = mode == "on" } Nothing ["whisper: " <> mode]
-        _ -> do
-          let (s', resp) = oneLine (stSession st) line
-          case following s' resp of
-            Just act | resp /= Quit -> do
-              (sLoaded, responses, trouble) <- liftIO act
-              let out =
-                    renderResponse s' resp
-                      ++ concatMap (renderResponse sLoaded) responses
-                      ++ concatMap (renderTrouble sLoaded) trouble
-              appendTurn st { stSession = sLoaded } (Just line) out
-            _ -> do
-              appendTurn st { stSession = s' } (Just line) (renderResponse s' resp)
-              if resp == Quit then halt else pure ()
+        --
+        -- **These two, plus the theme, persist to 'Tui.Config''s dotfile**
+        -- (his ask, 2026-09-30) — `:fold` doesn't, scope as asked.
+        [":preselect", mode] | mode `elem` ["on", "off"] -> do
+          let st' = st { stAutoSelect = mode == "on" }
+          liftIO (saveConfig (configOf st'))
+          appendTurn st' Nothing ["preselect: " <> mode]
+        [":whisper", mode] | mode `elem` ["on", "off"] -> do
+          let st' = st { stWhisperOn = mode == "on" }
+          liftIO (saveConfig (configOf st'))
+          appendTurn st' Nothing ["whisper: " <> mode]
+        -- | `:help` runs through the engine as usual (below) — its table is
+        -- `Thena.Driver`'s, and stays that way, since it's the one command
+        -- the engine and every other frontend share. `:preselect`/`:whisper`
+        -- never reach `Thena.Driver` at all (intercepted above), so its own
+        -- `:help` can't know they exist; 'tuiHelpLines' is appended here
+        -- instead of touching the engine's table for two commands that are
+        -- only ever true from inside this frontend.
+        [":help"] -> runEngineLine st line tuiHelpLines
+        _ -> runEngineLine st line []
 handleEventInner (VtyEvent (V.EvKey V.KEsc [])) = do
   st <- get
   case (stDropdown st, stOfferDropdown st) of
@@ -1008,6 +1017,57 @@ selectableIxs rows = [i | (i, r) <- zip [0 :: Int ..] rows, isJust (rowInsert r)
 -- wherever it started, which is exactly his bug report ("it doesn't scroll
 -- so the end of the output is at the bottom... no terminal behaves like
 -- that").
+-- | The fallback path every line not caught by a TUI-local command takes:
+-- run it through the engine, follow a load if it names one, append 'extra'
+-- lines to whatever comes back. 'extra' is @[]@ for an ordinary line and
+-- 'tuiHelpLines' for `:help` — the one place this frontend's own commands
+-- get documented, since the engine's own `:help` table has no way to know
+-- about a command that never reaches it.
+runEngineLine :: St -> String -> [String] -> EventM Name St ()
+runEngineLine st line extra = do
+  let (s', resp) = oneLine (stSession st) line
+  case following s' resp of
+    Just act | resp /= Quit -> do
+      (sLoaded, responses, trouble) <- liftIO act
+      let out =
+            renderResponse s' resp
+              ++ concatMap (renderResponse sLoaded) responses
+              ++ concatMap (renderTrouble sLoaded) trouble
+      appendTurn st { stSession = sLoaded } (Just line) (out ++ extra)
+    _ -> do
+      appendTurn st { stSession = s' } (Just line) (renderResponse s' resp ++ extra)
+      if resp == Quit then halt else pure ()
+
+-- | `:preselect` and `:whisper`, in the same column layout
+-- 'Thena.Render.renderHelp' uses for its own rows (two-space indent, a
+-- 28-wide spelling column) so the appended block reads as part of the same
+-- list, not a bolted-on afterthought.
+tuiHelpLines :: [String]
+tuiHelpLines =
+  [ ""
+  , "tui-local — never reaches the engine, so :help above doesn't list them:"
+  , ""
+  ] ++ concatMap (uncurry helpRow)
+    [ (":preselect on|off", "highlight a fresh dropdown's first row on its own")
+    , (":whisper on|off",   "show the untyped remainder of the selected candidate")
+    ]
+  where
+    width = 28
+    helpRow spelling gloss
+      | length spelling <= width =
+          ["  " ++ spelling ++ replicate (width - length spelling) ' ' ++ "  " ++ gloss]
+      | otherwise =
+          ["  " ++ spelling, "  " ++ replicate width ' ' ++ "  " ++ gloss]
+
+-- | The slice of 'St' that 'Tui.Config' persists, read off whichever state
+-- a `:theme`/`:preselect`/`:whisper` command just produced.
+configOf :: St -> Config
+configOf st = Config
+  { cfgTheme      = themeName (stTheme st)
+  , cfgAutoSelect = stAutoSelect st
+  , cfgWhisperOn  = stWhisperOn st
+  }
+
 appendTurn :: St -> Maybe String -> [String] -> EventM Name St ()
 appendTurn st prompt output = do
   put st

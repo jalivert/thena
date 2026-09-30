@@ -188,6 +188,7 @@ library tui
     default-language:   GHC2024
     exposed-modules:
         Tui.App
+        Tui.Config
         Tui.Render
         Tui.Theme
     build-depends:
