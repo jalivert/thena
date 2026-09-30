@@ -190,6 +190,16 @@ data St = St
     -- run as written. Computed alongside 'stOfferDropdown' in
     -- 'refreshOfferDropdown', 'Nothing' wherever that is (a `:` line, or
     -- nothing offered) — see 'recoveredSpan'.
+  , stAutoSelect :: Bool
+    -- ^ `:preselect on|off` (his `.jalivert/TUI.md` #23) — whether a freshly
+    -- shown dropdown highlights its first candidate on its own. 'True' is
+    -- the standing behaviour (his `.jalivert/TUI.md` #9); this only lets him
+    -- turn it off and back on, not a change of default.
+  , stWhisperOn :: Bool
+    -- ^ `:whisper on|off` (his `.jalivert/TUI.md` #23) — whether
+    -- 'ghostAt' ever shows anything. 'True' is the standing behaviour
+    -- (`.jalivert/TUI.md` #17/#21); same as 'stAutoSelect', a toggle on top
+    -- of the default, not a new one.
   }
 
 stInputL :: Lens' St (Editor Text Name)
@@ -214,9 +224,11 @@ runTui = do
         -- `.jalivert/TUI.md` #14): the empty line offers the full rule
         -- list, first row lit — the same state deleting back to empty
         -- reaches.
-        , stOfferDropdown = buildOfferDropdown 0 (statementOfferView s0 [] [])
+        , stOfferDropdown = buildOfferDropdown True 0 (statementOfferView s0 [] [])
         , stDismissed   = Nothing
         , stRecoveredSpan = Nothing
+        , stAutoSelect  = True
+        , stWhisperOn   = True
         , stInputExtent = Nothing
         , stPaneExtent  = Nothing
         }
@@ -383,7 +395,11 @@ draw st = dropdownLayer st <> offerDropdownLayer st <> [padAll 1 (hBox [replColu
     -- happened; see 'ghostAt'/'offerGhost'.
     inputLine = str "❯ " <+> reportExtent Input (renderEditor (\ts -> renderInputContent ts col ghost skip (stRecoveredSpan st)) True (stInput st))
       where
-        (ghost, skip) = ghostAt line col (stDropdown st) (stOfferDropdown st)
+        -- | `:whisper off` (his `.jalivert/TUI.md` #23) silences this
+        -- outright rather than 'ghostAt' itself carrying the flag — the
+        -- accept-span math it returns alongside the text isn't wanted by
+        -- anything else, so there's nothing to lose by short-circuiting here.
+        (ghost, skip) = if stWhisperOn st then ghostAt line col (stDropdown st) (stOfferDropdown st) else ("", 0)
         line = concatMap Text.unpack (getEditContents (stInput st))
         (_, col) = getCursorPosition (stInput st)
 
@@ -747,6 +763,15 @@ handleEventInner (VtyEvent (V.EvKey V.KEnter [])) = do
           appendTurn st { stTheme = th } Nothing ["theme: " <> name]
         [":fold", mode] | mode `elem` ["on", "off"] ->
           appendTurn st { stFoldOn = mode == "on" } Nothing ["fold: " <> mode]
+        -- | Two more TUI-local toggles, his `.jalivert/TUI.md` #23 — same
+        -- standing as `:theme`/`:fold` (not instral, so special-casing them
+        -- here is his own ruling already covers this). Disabling either is
+        -- not "Esc" — it's a standing preference until turned back on, which
+        -- is exactly why it needed its own command rather than a keybinding.
+        [":preselect", mode] | mode `elem` ["on", "off"] ->
+          appendTurn st { stAutoSelect = mode == "on" } Nothing ["preselect: " <> mode]
+        [":whisper", mode] | mode `elem` ["on", "off"] ->
+          appendTurn st { stWhisperOn = mode == "on" } Nothing ["whisper: " <> mode]
         _ -> do
           let (s', resp) = oneLine (stSession st) line
           case following s' resp of
@@ -1001,8 +1026,11 @@ refreshDropdown = do
         -- #9): the first, so Enter on a fresh list accepts rather than
         -- submitting the partial line — Esc clears it first when submitting
         -- as typed is what is wanted. Above the line the reversal below puts
-        -- that same first row adjacent to the input.
-        let new = if null entries then Nothing else Just (LoadDropdown entries (Just 0))
+        -- that same first row adjacent to the input. **Unless `:preselect
+        -- off`** (`.jalivert/TUI.md` #23) — same toggle 'buildOfferDropdown'
+        -- reads, so the two dropdowns cannot disagree about it.
+        let initialSel = if stAutoSelect st then Just 0 else Nothing
+            new = if null entries then Nothing else Just (LoadDropdown entries initialSel)
             oldRows = maybe [] ldEntries (stDropdown st)
         put st { stDropdown = new, stDismissed = Nothing }
         -- A new row generation scrolls from the top: the viewport offset
@@ -1037,7 +1065,7 @@ refreshOfferDropdown = do
         let (_, col) = getCursorPosition (stInput st)
             (before, after) = splitWritten line col
             ov = statementOfferView (stSession st) before after
-            new = buildOfferDropdown col ov
+            new = buildOfferDropdown (stAutoSelect st) col ov
             oldRows = maybe [] odRows (stOfferDropdown st)
         put st { stOfferDropdown = new, stDismissed = Nothing, stRecoveredSpan = recoveredSpan ov }
         -- Same rule as 'refreshDropdown': new rows start at the top, same
@@ -1082,15 +1110,19 @@ recoveredSpan ov = case offeredRecovered ov of
 -- production (e.g. a statement keyword, always present in
 -- 'offeredProductions' too) would otherwise show up twice for no reason,
 -- once as a token and once as an identical production.
-buildOfferDropdown :: Int -> OfferView -> Maybe OfferDropdown
-buildOfferDropdown col ov
+buildOfferDropdown :: Bool -> Int -> OfferView -> Maybe OfferDropdown
+buildOfferDropdown autoSelect col ov
   | null allRows = Nothing
   -- A shown dropdown always highlights one row, the first selectable one
   -- (his `.jalivert/TUI.md` #9; hints never take an Enter) — in both
   -- placements, since above the line the reversal renders that same first
   -- row adjacent to the input. Clearing with Esc still submits as typed.
-  | otherwise = Just (OfferDropdown allRows (listToMaybe (selectableIxs allRows)) wordStart replaceLen)
+  -- **Unless `:preselect off`** (`.jalivert/TUI.md` #23) — then a fresh
+  -- dropdown opens with nothing highlighted, same as an exhausted list
+  -- always has, and an arrow key is what picks a row instead.
+  | otherwise = Just (OfferDropdown allRows initialSelection wordStart replaceLen)
   where
+    initialSelection = if autoSelect then listToMaybe (selectableIxs allRows) else Nothing
     bareWord = case offeredRecovered ov of
       Just r -> isNothing (recoveredLanguage r)
       Nothing -> False
