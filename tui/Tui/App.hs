@@ -179,6 +179,12 @@ data St = St
     -- `.jalivert/TUI.md` #14) — 'Nothing' while they show. Refresh keeps
     -- them hidden while the line is unchanged, and any edit brings them
     -- back.
+  , stRecoveredSpan :: Maybe (Int, Int)
+    -- ^ what 'renderInputContent' underlines — his `.jalivert/TUI.md` #7, a
+    -- visible cue that the line (or the literal under the cursor) will not
+    -- run as written. Computed alongside 'stOfferDropdown' in
+    -- 'refreshOfferDropdown', 'Nothing' wherever that is (a `:` line, or
+    -- nothing offered) — see 'recoveredSpan'.
   }
 
 stInputL :: Lens' St (Editor Text Name)
@@ -205,6 +211,7 @@ runTui = do
         -- reaches.
         , stOfferDropdown = buildOfferDropdown 0 (statementOfferView s0 [] [])
         , stDismissed   = Nothing
+        , stRecoveredSpan = Nothing
         , stInputExtent = Nothing
         , stPaneExtent  = Nothing
         }
@@ -286,6 +293,11 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   -- visible caret. A dimmer ink still marks the box as a box without
   -- fighting the caret over the brightest color in the theme.
   , (attrName "placeholder",    ink (themeDim th))
+  -- The recovered-span underline (his `.jalivert/TUI.md` #7) — style only,
+  -- 'V.currentAttr' keeps whatever color is already active, so this reads
+  -- correctly nested under "placeholder" (a box inside a broken literal)
+  -- as well as over ordinary ink.
+  , (attrName "recovered",      V.withStyle V.currentAttr V.underline)
   , (attrName "accent.output",  ink (themeSoft th))
   , (attrName "dropdown",          surface (themePopup th) (themeInk th))
   , (attrName "dropdown.selected", surface (themePopup th) (themeRepl th))
@@ -348,7 +360,7 @@ draw st = dropdownLayer st <> offerDropdownLayer st <> [hBox [replColumn, gapH, 
     -- of the editor's own content — never a sibling past it, which the
     -- editor widget's own fill would strand far from the text. Runs after
     -- the cursor cannot move it, so Brick's cursor mapping is undisturbed.
-    inputLine = str "❯ " <+> reportExtent Input (renderEditor (\ts -> renderInputContent ts ghost) True (stInput st))
+    inputLine = str "❯ " <+> reportExtent Input (renderEditor (\ts -> renderInputContent ts ghost (stRecoveredSpan st)) True (stInput st))
       where
         ghost = ghostSuffix line col (stDropdown st) (stOfferDropdown st)
         line = concatMap Text.unpack (getEditContents (stInput st))
@@ -963,19 +975,37 @@ refreshOfferDropdown = do
   if stDismissed st == Just line
     then put st { stOfferDropdown = Nothing }
     else if ":" `isPrefixOf` line
-      then put st { stOfferDropdown = Nothing, stDismissed = Nothing }
+      then put st { stOfferDropdown = Nothing, stDismissed = Nothing, stRecoveredSpan = Nothing }
       else do
         let (_, col) = getCursorPosition (stInput st)
             (before, after) = splitWritten line col
             ov = statementOfferView (stSession st) before after
             new = buildOfferDropdown col ov
             oldRows = maybe [] odRows (stOfferDropdown st)
-        put st { stOfferDropdown = new, stDismissed = Nothing }
+        put st { stOfferDropdown = new, stDismissed = Nothing, stRecoveredSpan = recoveredSpan ov }
         -- Same rule as 'refreshDropdown': new rows start at the top, same
         -- rows keep their scroll — above the line, at the bottom instead.
         if maybe [] odRows new /= oldRows
           then (if popupAbove st then vScrollToEnd else vScrollToBeginning) (viewportScroll OfferPopup)
           else pure ()
+
+-- | The offset range 'renderInputContent' underlines — his
+-- `.jalivert/TUI.md` #7, a visible cue that the line (or the literal under
+-- the cursor) will not run as written. Exactly 'RecoveryView's own span: the
+-- whole partial word for a bare word, or the tagged literal's typed content
+-- up to the cursor when inside one.
+--
+-- **Not the whole literal, fence to fence.** 'RecoveryView' reports "the
+-- unit as written, up to the cursor" (its own haddock) — nothing after the
+-- cursor, and not the tag or backtick either. Getting the true full span
+-- would need the engine to say where the literal's own fence closes;
+-- finding it here by rescanning the buffer would be exactly the
+-- grammar-knowledge-in-two-places problem `.jalivert/NOTES.md` named as the
+-- thing to get rid of, not add to. Starting simple, per his own words.
+recoveredSpan :: OfferView -> Maybe (Int, Int)
+recoveredSpan ov = case offeredRecovered ov of
+  Nothing -> Nothing
+  Just r  -> Just (recoveredColumn r - 1, length (recoveredText r))
 
 -- | The row source depends on which question was actually answered.
 --
@@ -1105,16 +1135,32 @@ toWritten = merge . map one
 -- the renderer. The ghost ('ghostSuffix') rides as the last run, dimmed:
 -- past the cursor, so it cannot move the caret, and exactly at it, which
 -- is where an accept would land it.
-renderInputContent :: [Text] -> String -> Widget Name
-renderInputContent ts ghost = hBox (map renderRun (mergeRuns (concatMap Text.unpack ts)) <> [ghostRun])
+-- | Recovered text ('recoveredSpan') rides as an outer wrap around whatever
+-- color a run already has — his `.jalivert/TUI.md` #7. The "recovered" attr
+-- ('Tui.Theme'-adjacent 'attrs') sets only the underline style bit and
+-- keeps the current color ('V.currentAttr'), so it composes over ordinary
+-- text and a placeholder box alike rather than needing one named attr per
+-- combination.
+renderInputContent :: [Text] -> String -> Maybe (Int, Int) -> Widget Name
+renderInputContent ts ghost recovered = hBox (map renderRun (mergeRuns (concatMap Text.unpack ts) recovered) <> [ghostRun])
   where
     ghostRun = withAttr (attrName "dim") (str ghost)
-    renderRun (True, s)  = withAttr (attrName "placeholder") (str s)
-    renderRun (False, s) = str s
+    renderRun ((isPlaceholder, isRecovered), s) = mark (colored (str s))
+      where
+        colored = if isPlaceholder then withAttr (attrName "placeholder") else id
+        mark    = if isRecovered   then withAttr (attrName "recovered")   else id
 
-mergeRuns :: String -> [(Bool, String)]
-mergeRuns = merge . map (\c -> (c == placeholderGlyph, [c]))
+-- | Per-character tags, merged into runs the same way the placeholder-only
+-- version did: is this a box, and does it fall in the recovered span (by
+-- character offset into the line — the same thing as a column here, since
+-- the input is always one row).
+mergeRuns :: String -> Maybe (Int, Int) -> [((Bool, Bool), String)]
+mergeRuns s recovered = merge (zipWith tag [0 ..] s)
   where
+    tag i c = ((c == placeholderGlyph, inSpan i), [c])
+    inSpan i = case recovered of
+      Just (from, len) -> i >= from && i < from + len
+      Nothing           -> False
     merge ((a, x) : (b, y) : rest) | a == b = merge ((a, x <> y) : rest)
     merge (r : rest) = r : merge rest
     merge [] = []
