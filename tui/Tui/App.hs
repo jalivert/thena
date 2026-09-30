@@ -300,7 +300,12 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   , (attrName "recovered",      V.withStyle V.currentAttr V.underline)
   , (attrName "accent.output",  ink (themeSoft th))
   , (attrName "dropdown",          surface (themePopup th) (themeInk th))
-  , (attrName "dropdown.selected", surface (themePopup th) (themeRepl th))
+  -- A real background swap for the selected row, not a foreground tint
+  -- beside an arrow — his `.jalivert/TUI.md` #20: the arrow was the only
+  -- thing marking a row selected, which read as weak. The repl accent as a
+  -- solid bar, panel-dark text on top of it, same "selected" contrast an
+  -- ordinary list widget uses.
+  , (attrName "dropdown.selected", surface (themeRepl th) (themePanel th))
   -- The input line's own editor: 'renderEditor' wraps its output in
   -- Brick's 'edit'/'editFocused' attributes, which fall back to the
   -- terminal default (black) unless named here. The input is the last line
@@ -355,14 +360,16 @@ draw st = dropdownLayer st <> offerDropdownLayer st <> [hBox [replColumn, gapH, 
     -- and every text offset ('pathStartOff', the cursor, anything later)
     -- adds onto a real screen column directly, no prompt width to remember.
     -- | The whisper of what the highlighted row would land (his
-    -- `.jalivert/TUI.md` #17): the accepted line's extension past what is
-    -- typed, dimmed, starting exactly at the caret. Drawn as the last run
-    -- of the editor's own content — never a sibling past it, which the
-    -- editor widget's own fill would strand far from the text. Runs after
-    -- the cursor cannot move it, so Brick's cursor mapping is undisturbed.
-    inputLine = str "❯ " <+> reportExtent Input (renderEditor (\ts -> renderInputContent ts ghost (stRecoveredSpan st)) True (stInput st))
+    -- `.jalivert/TUI.md` #17, at the caret rather than only the line's end
+    -- since #21): dimmed, inserted right where the caret stands, skipping
+    -- over whatever real characters past it the accept would consume (a
+    -- box, typically). Real text on either side of that point renders
+    -- unchanged, so Brick's own cursor placement — a column count into the
+    -- *unmodified* zipper — stays correct without knowing any of this
+    -- happened; see 'ghostAt'/'offerGhost'.
+    inputLine = str "❯ " <+> reportExtent Input (renderEditor (\ts -> renderInputContent ts col ghost skip (stRecoveredSpan st)) True (stInput st))
       where
-        ghost = ghostSuffix line col (stDropdown st) (stOfferDropdown st)
+        (ghost, skip) = ghostAt line col (stDropdown st) (stOfferDropdown st)
         line = concatMap Text.unpack (getEditContents (stInput st))
         (_, col) = getCursorPosition (stInput st)
 
@@ -511,14 +518,13 @@ renderPopup vp padSide rows =
     (topPad, bottomPad) = case padSide of
       PadTop    -> (farBlanks, [])
       PadBottom -> ([], farBlanks)
-    renderRow r = mark (styled (str (padTo boxWidth (dropdownMarker r <> prText r))))
+    renderRow r = mark (styled (str (padTo boxWidth (dropdownMargin <> prText r))))
       where
         styled
           | prSelected r = withAttr (attrName "dropdown.selected")
           | prDim r      = withAttr (attrName "dim")
           | otherwise    = id
         mark = if prSelected r then visible else id
-    dropdownMarker r = if prSelected r then dropdownSelected else dropdownPlain
 
 -- | Which side of the content the breathing row goes — always the far side
 -- from the input line, decided once in 'popupAt' from the same flip that
@@ -617,35 +623,65 @@ popupAbove st = case stInputExtent st of
         frac = if paneHeight <= 0 then 0 else fromIntegral (inputRow - paneRow) / fromIntegral paneHeight
      in frac > 0.8
 
--- | The lead every dropdown row carries — the arrow on the selected row,
--- blank space everywhere else. **One glyph plus one space either way, so
--- every row's text starts at the same column**; 'dropdownLayer' anchors on
--- 'dropdownMarkerWidth' rather than a literal, so the two cannot drift apart.
-dropdownSelected, dropdownPlain :: String
-dropdownSelected = "→ "
-dropdownPlain    = "  "
+-- | The left margin every dropdown row carries, selected or not — his
+-- `.jalivert/TUI.md` #20: the arrow used to be the only mark of selection,
+-- which read as weak next to a real background swap, so it's gone and
+-- 'renderRow's own "dropdown.selected" attr covers the whole row instead.
+-- Kept as blank space rather than deleted outright, so the reserved margin
+-- — 'dropdownMarkerWidth' — and everything positioned against it
+-- ('dropdownLayer's own column math) stays exactly as it was.
+dropdownMargin :: String
+dropdownMargin = "  "
 
 dropdownMarkerWidth :: Int
-dropdownMarkerWidth = length dropdownSelected
+dropdownMarkerWidth = length dropdownMargin
 
--- | What accepting the highlighted row would append at the caret (his
--- `.jalivert/TUI.md` #17) — dimmed, starting exactly where it would land.
--- Only a pure extension past the end of the line: the caret must stand at
--- the end, and the accepted line must keep everything before it, or a
--- rewrite behind the cursor would show as a fiction. Nothing highlighted,
--- or nothing beyond what is typed, shows nothing. Mirrors the two Enter
--- branches' own guards, so the whisper and the landing cannot disagree.
-ghostSuffix :: String -> Int -> Maybe LoadDropdown -> Maybe OfferDropdown -> String
-ghostSuffix line col ld od = case acceptLine of
-  Just new | col == length line, line `isPrefixOf` new, new /= line -> drop (length line) new
-  _ -> ""
-  where
-    acceptLine = case (ld, od) of
-      (Just (LoadDropdown entries (Just i)), _) | i < length entries ->
-        Just (replacePathPrefix line (entries !! i))
-      (_, Just o) | Just i <- odSelected o, Just ins <- rowInsert (odRows o !! i) ->
-        Just (take (odWordStart o) line <> ins <> drop (odWordStart o + odReplaceLen o) line)
-      _ -> Nothing
+-- | What accepting the highlighted row would write at the caret, dimmed,
+-- and how many real characters right after the caret it stands in for
+-- consuming — his `.jalivert/TUI.md` #17, generalized by #21: not only a
+-- pure suffix when the caret sits at the end of the line, but wherever the
+-- caret actually stands, since "walk into a box" (his own words) is exactly
+-- what leaves it somewhere else.
+--
+-- **`:load`'s own dropdown keeps the simple, end-only form** — a path is
+-- always typed forward, so the caret is always at the end while it shows,
+-- and 'acceptLine' being a pure extension past what's typed is the same
+-- check as before: the accepted line must keep everything already there,
+-- or a rewrite behind the cursor would show as a fiction.
+--
+-- **The completion dropdown uses 'offerGhost's general form.** Mirrors the
+-- two Enter/Tab branches' own math (`acceptOfferRow`), so the whisper and
+-- the landing cannot disagree.
+ghostAt :: String -> Int -> Maybe LoadDropdown -> Maybe OfferDropdown -> (String, Int)
+ghostAt line col ld od = case ld of
+  Just (LoadDropdown entries (Just i)) | i < length entries ->
+    let new = replacePathPrefix line (entries !! i)
+     in if col == length line && line `isPrefixOf` new && new /= line
+          then (drop (length line) new, 0)
+          else ("", 0)
+  _ -> maybe ("", 0) id (od >>= offerGhost col)
+
+-- | The general case 'ghostAt' needs: of the candidate's own insertion
+-- text, how much has the caret already walked past? Zero standing right on
+-- a box ('odWordStart' is the caret's own column then, 'offerAt's
+-- 'offeredReplaces' path) — so the whole insertion shows, which is what
+-- "insert at the caret" (his `.jalivert/TUI.md` #21) asks for exactly.
+-- Positive mid-completion of a bare word ('odWordStart' is the word's
+-- *start*, behind the caret) — so only the untyped remainder shows, the
+-- familiar "ack" of "attack". Either way, real text before the caret is
+-- untouched by this, which is the whole reason Brick's own cursor
+-- placement (a column count into the *unmodified* zipper, 'Edit.hs's own
+-- 'renderEditor') stays correct without knowing any of this happened —
+-- only what comes after the caret ('skip', how many real characters the
+-- accept consumes there) needs the render side to act on it at all.
+offerGhost :: Int -> OfferDropdown -> Maybe (String, Int)
+offerGhost col od = do
+  i <- odSelected od
+  ins <- rowInsert (odRows od !! i)
+  let typedLen = col - odWordStart od
+  if typedLen < 0 || typedLen > length ins
+    then Nothing
+    else Just (drop typedLen ins, max 0 (odReplaceLen od - typedLen))
 
 -- | A line, run against the session, and its 'Response' rendered as lines
 -- via 'Thena.Render.renderResponse' — a status-line-shaped placeholder for
@@ -853,9 +889,10 @@ acceptOfferRow st od ins = do
 
 -- | Arrow-key navigation only takes over the keypress while a dropdown is
 -- actually showing candidates — otherwise the original event falls through
--- to the editor as normal (a no-op either way, on a single-line editor).
--- ':load''s own dropdown takes priority (mutually exclusive with the offer
--- dropdown by construction, so this only ever matters in principle).
+-- to the editor as normal (a single-line editor's own binding for Up/Down:
+-- start or end of line). ':load''s own dropdown takes priority (mutually
+-- exclusive with the offer dropdown by construction, so this only ever
+-- matters in principle).
 navigateCompletion
   :: (Maybe Int -> Int -> Int)
   -> ([Int] -> Maybe Int -> Maybe Int)
@@ -871,7 +908,15 @@ navigateCompletion moveLoad moveOffer ev = do
     -- names a *kind* of thing, not text an accept could write.
     (_, Just od) | not (null (selectableIxs (odRows od))) ->
       put st { stOfferDropdown = Just od { odSelected = moveOffer (selectableIxs (odRows od)) (odSelected od) } }
-    _ -> Brick.zoom stInputL (handleEditorEvent ev) >> followInput
+    -- | This path's own bug (his `.jalivert/TUI.md` #19): an offer with
+    -- nothing selectable — a lone hint row, e.g. standing on a name's own
+    -- placeholder box — falls all the way through to moving the cursor,
+    -- same as no dropdown at all. Every *other* input-mutating path in this
+    -- file refreshes both dropdowns afterward; this was the one that
+    -- didn't, so a stale dropdown stood over wherever the cursor landed
+    -- until the next real edit. Same two calls the ordinary catch-all ends
+    -- with.
+    _ -> Brick.zoom stInputL (handleEditorEvent ev) >> followInput >> refreshDropdown >> refreshOfferDropdown
 
 moveDown :: Maybe Int -> Int -> Int
 moveDown Nothing  _ = 0
@@ -1142,31 +1187,43 @@ toWritten = merge . map one
 
 -- | The input line's own content, a placeholder box drawn dimmer than
 -- ordinary text — see the "placeholder" attr's own haddock for why (the
--- caret going dark standing on one). Splits into runs at the glyph the
--- same way 'toWritten' does, since it's answering the same question one
--- level down: not "is this a box" for the engine, but "is this a box" for
--- the renderer. The ghost ('ghostSuffix') rides as the last run, dimmed:
--- past the cursor, so it cannot move the caret, and exactly at it, which
--- is where an accept would land it.
--- | Recovered text ('recoveredSpan') rides as an outer wrap around whatever
--- color a run already has — his `.jalivert/TUI.md` #7. The "recovered" attr
--- ('Tui.Theme'-adjacent 'attrs') sets only the underline style bit and
--- keeps the current color ('V.currentAttr'), so it composes over ordinary
--- text and a placeholder box alike rather than needing one named attr per
--- combination.
-renderInputContent :: [Text] -> String -> Maybe (Int, Int) -> Widget Name
-renderInputContent ts ghost recovered = hBox (map renderRun (mergeRuns (concatMap Text.unpack ts) recovered) <> [ghostRun])
+-- caret going dark standing on one) — and a recovered span underlined
+-- ('recoveredSpan', his `.jalivert/TUI.md` #7). Real text splits into runs
+-- at the glyph the same way 'toWritten' does, since it's answering the
+-- same question one level down: not "is this a box" for the engine, but
+-- "is this a box" for the renderer.
+--
+-- **The ghost ('ghostAt') rides inline at the caret, not appended past
+-- everything** — his `.jalivert/TUI.md` #21: real text up to 'col' renders
+-- first, unchanged; then the dimmed ghost; then real text resumes from
+-- 'col + skip', skipping whatever the accept would consume there (a box,
+-- typically). Splitting the real text at 'col' rather than threading the
+-- ghost through 'mergeRuns' itself is what keeps Brick's own cursor
+-- placement correct — 'Edit.hs's own 'renderEditor' fixes the caret at a
+-- column count into the *unmodified* zipper, so everything rendered before
+-- that many real characters have gone by must still measure the same
+-- width, and only ever inserting the ghost at that exact boundary
+-- guarantees it does.
+renderInputContent :: [Text] -> Int -> String -> Int -> Maybe (Int, Int) -> Widget Name
+renderInputContent ts col ghost skip recovered =
+  hBox (map renderRun (mergeRuns before recovered)
+        <> [withAttr (attrName "dim") (str ghost)]
+        <> map renderRun (mergeRuns after (shift (col + skip) recovered)))
   where
-    ghostRun = withAttr (attrName "dim") (str ghost)
+    full   = concatMap Text.unpack ts
+    before = take col full
+    after  = drop (col + skip) full
+    shift n = fmap (\(from, len) -> (from - n, len))
     renderRun ((isPlaceholder, isRecovered), s) = mark (colored (str s))
       where
         colored = if isPlaceholder then withAttr (attrName "placeholder") else id
         mark    = if isRecovered   then withAttr (attrName "recovered")   else id
 
 -- | Per-character tags, merged into runs the same way the placeholder-only
--- version did: is this a box, and does it fall in the recovered span (by
--- character offset into the line — the same thing as a column here, since
--- the input is always one row).
+-- version did: is this a box, and does it fall in the recovered span, both
+-- by offset into whatever string is passed in (a local index, not
+-- necessarily the whole line's own column — see 'renderInputContent's own
+-- 'shift' for the "after the caret" half).
 mergeRuns :: String -> Maybe (Int, Int) -> [((Bool, Bool), String)]
 mergeRuns s recovered = merge (zipWith tag [0 ..] s)
   where
