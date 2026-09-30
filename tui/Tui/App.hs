@@ -529,23 +529,41 @@ popupTotalH n = popupVisibleH n + popupFarBlanks n
 -- box also sides its breathing row ('PadTop'/'PadBottom') and sizes
 -- against the whole rendered height ('popupTotalH') — one decider, never a
 -- pad here and a height there disagreeing.
+--
+-- **Above the line the rows run bottom-to-top** (his `.jalivert/TUI.md`
+-- #16): what was first sits closest to the input either way — direction
+-- and distance to the active line matter, so a flipped box is not the same
+-- list merely translated. Navigation swaps to match (see the arrow-key
+-- clauses): Down always travels visually down.
 popupAt :: St -> Int -> Int -> Name -> [PopupRow] -> [Widget Name]
 popupAt st col n vp rows = case stInputExtent st of
   Nothing -> []
   Just inputExt -> [translateBy (Location (popupCol, popupRow)) content]
     where
-      paneExt = case stPaneExtent st of
-        Just p  -> p
-        Nothing -> inputExt
-      above = depthFrac > 0.8
-      content = renderPopup vp (if above then PadTop else PadBottom) rows
+      above = popupAbove st
+      content = renderPopup vp (if above then PadTop else PadBottom) (if above then reverse rows else rows)
       popupCol   = max 0 (locationColumn (extentUpperLeft inputExt) + col - dropdownMarkerWidth)
       inputRow   = locationRow (extentUpperLeft inputExt)
-      paneRow    = locationRow (extentUpperLeft paneExt)
-      paneHeight = snd (extentSize paneExt)
-      depthFrac :: Double
-      depthFrac = if paneHeight <= 0 then 0 else fromIntegral (inputRow - paneRow) / fromIntegral paneHeight
       popupRow = if above then inputRow - popupTotalH n else inputRow + 1
+
+-- | Whether a popup at the input flips above it: past 80% of the pane's
+-- depth, below it otherwise — his rule, 2026-09-29. One helper, called by
+-- 'popupAt', the refresh paths and the arrow keys alike, so placement is
+-- decided once and never recomputed ad hoc. Extents lag a frame behind by
+-- construction, uniformly, like everything else positioned from them.
+popupAbove :: St -> Bool
+popupAbove st = case stInputExtent st of
+  Nothing -> False
+  Just inputExt ->
+    let pane = case stPaneExtent st of
+          Just p  -> p
+          Nothing -> inputExt
+        inputRow = locationRow (extentUpperLeft inputExt)
+        paneRow = locationRow (extentUpperLeft pane)
+        paneHeight = snd (extentSize pane)
+        frac :: Double
+        frac = if paneHeight <= 0 then 0 else fromIntegral (inputRow - paneRow) / fromIntegral paneHeight
+     in frac > 0.8
 
 -- | The lead every dropdown row carries — the arrow on the selected row,
 -- blank space everywhere else. **One glyph plus one space either way, so
@@ -647,8 +665,22 @@ handleEventInner (VtyEvent (V.EvKey V.KEsc [])) = do
     (Just ld@(LoadDropdown _ (Just _)), _) -> put st { stDropdown = Just ld { ldSelected = Nothing } }
     (_, Just od@(OfferDropdown _ (Just _) _ _)) -> put st { stOfferDropdown = Just od { odSelected = Nothing } }
     _ -> pure ()
-handleEventInner ev@(VtyEvent (V.EvKey V.KDown [])) = navigateCompletion moveDown offerMoveDown ev
-handleEventInner ev@(VtyEvent (V.EvKey V.KUp []))   = navigateCompletion moveUp offerMoveUp ev
+-- | Down travels visually down in both placements — toward the input below
+-- it, likewise toward the input above it, where the rows run reversed and
+-- rising indices climb away. So above the line the two move-function pairs
+-- swap: 'moveUp'/'offerMoveUp' step down-screen, 'moveDown'/'offerMoveDown'
+-- step up-screen. From a cleared selection the same swap lands the visual
+-- ends symmetrically (top on Down, bottom on Up) rather than list ends.
+handleEventInner ev@(VtyEvent (V.EvKey V.KDown [])) = do
+  st <- get
+  if popupAbove st
+    then navigateCompletion moveUp offerMoveUp ev
+    else navigateCompletion moveDown offerMoveDown ev
+handleEventInner ev@(VtyEvent (V.EvKey V.KUp [])) = do
+  st <- get
+  if popupAbove st
+    then navigateCompletion moveDown offerMoveDown ev
+    else navigateCompletion moveUp offerMoveUp ev
 handleEventInner (VtyEvent (V.EvKey (V.KChar '\t') [])) = completeLoadPath
 -- | "Walk into" a placeholder box and type to fill it — his own ask,
 -- `.jalivert/LIVE-OFFERS.md`/`.jalivert/TUI.md`: the caret standing right
@@ -794,9 +826,12 @@ refreshDropdown = do
       -- belongs to the rows it was showing, and a rebuilt-shorter list
       -- viewed from a deep offset is all blank (his empty-dropdown bug).
       -- Identical rows keep their offset — a cursor move or a no-op edit
-      -- must not yank a deliberately scrolled list.
+      -- must not yank a deliberately scrolled list. Above the line the
+      -- fresh end is the bottom, where the reversed rows start — for a
+      -- viewport that has rendered before; a never-opened one still opens
+      -- at offset 0, and the preselected row's 'visible' pulls it right.
       if maybe [] ldEntries new /= oldRows
-        then vScrollToBeginning (viewportScroll LoadPopup)
+        then (if popupAbove st then vScrollToEnd else vScrollToBeginning) (viewportScroll LoadPopup)
         else pure ()
 
 -- | Recomputes the completion dropdown from 'Thena.View.statementOfferView'
@@ -819,9 +854,9 @@ refreshOfferDropdown = do
           oldRows = maybe [] odRows (stOfferDropdown st)
       put st { stOfferDropdown = new }
       -- Same rule as 'refreshDropdown': new rows start at the top, same
-      -- rows keep their scroll.
+      -- rows keep their scroll — above the line, at the bottom instead.
       if maybe [] odRows new /= oldRows
-        then vScrollToBeginning (viewportScroll OfferPopup)
+        then (if popupAbove st then vScrollToEnd else vScrollToBeginning) (viewportScroll OfferPopup)
         else pure ()
 
 -- | The row source depends on which question was actually answered.
