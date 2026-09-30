@@ -38,12 +38,14 @@ import Thena.Core.Term (GlobalName (..))
 import qualified Thena.Instral.Ops as Ops
 import Thena.Instral.Type (Signature (..), Ty (..), renderTy)
 import qualified Thena.Language.Earley as E
+import Thena.Language.Build (languageNames, productionNames)
+import Thena.Language.Grammar (Grammar, earleyRules)
 import Thena.Language.Regex (Regex, parseRegex)
 import Thena.Rules (RuleBase (..), allCallable, opWords)
 
 -- | The nonterminal a whole statement parses at.
 statementHead :: String
-statementHead = "Statement"
+statementHead = "instral:Statement"
 
 -- | The nonterminal an operand of this type parses at.
 --
@@ -77,8 +79,17 @@ variableSlots = [ operandHead (TVar i) | i <- [0 .. 25] ]
 -- Session-driven the same way 'Thena.View.sessionGrammars' is: pass the
 -- session's bases and the rules that may be called are the ones that are
 -- actually there.
-instralRules :: [RuleBase] -> [E.Rule]
-instralRules bs = statements bs ++ operandProductions bs
+instralRules :: [Grammar] -> [RuleBase] -> [E.Rule]
+instralRules gs bs =
+  statements fs ++ operandProductions fs types ++ earleyRules gs
+    ++ literalProductions gs types
+  where
+    -- **The table and the types in play are worked out once.** Three of the four
+    -- producers below need them, and each computing its own was a second place
+    -- deciding /which types are in play/ — the kind of duplicate that agrees today
+    -- and drifts later.
+    fs    = forms bs
+    types = shapes (concatMap formParams fs)
 
 -- | One statement form: the word that opens it, the type of each slot, and the
 -- type it produces if it produces one.
@@ -146,11 +157,11 @@ ruleForms bs =
       _                                            -> Nothing
 
 -- | Every production whose head is 'statementHead'.
-statements :: [RuleBase] -> [E.Rule]
-statements bs =
+statements :: [Form] -> [E.Rule]
+statements fs =
   [ E.Rule (formWord f ++ "/" ++ show (length (formParams f))) statementHead
       (E.Literal (formWord f) : concatMap slot (formParams f)) []
-  | f <- forms bs
+  | f <- fs
   ]
 
 -- | The type an undeclared slot stands at. 'TVar' with an index no signature
@@ -182,11 +193,9 @@ elementsHead t = "Elements:" ++ renderTy t
 -- **Built only for the types in play**, so the grammar has no productions for a
 -- type nothing asks for — and, since 'shapes' walks into a list's or a pair's
 -- components, @List (Name, Core)@ brings @Name@ and @Core@ with it.
-operandProductions :: [RuleBase] -> [E.Rule]
-operandProductions bs = concatMap forType (shapes (concatMap formParams fs))
+operandProductions :: [Form] -> [Ty] -> [E.Rule]
+operandProductions fs types = concatMap forType types
   where
-    fs = forms bs
-
     forType t = written t ++ nested t ++ compound t
 
     -- **A literal where the type is ground, and a name everywhere.** The name
@@ -234,6 +243,63 @@ operandProductions bs = concatMap forType (shapes (concatMap formParams fs))
     lit t nm re = E.Rule (renderTy t ++ "/" ++ nm) (operandHead t) [E.Scan nm re] []
     word t w    = E.Rule (renderTy t ++ "/" ++ w) (operandHead t) [E.Literal w] []
     name t      = lit t "name" identRegex
+
+-- | **A tagged term literal is an operand** (MS7 phase 141), so one chart reads a
+-- whole line and the offer inside a literal is the same answer as the offer outside
+-- it.
+--
+-- The object grammars are concatenated into this rule set by 'instralRules' and a
+-- literal is three symbols: the opening tag, the language's own nonterminal, and
+-- the closing fence. Everything inside is then the object grammar answering for
+-- itself, which is what makes @fill LC\`( \955 x : @ offer @\953@ — @abs@'s type slot,
+-- read out of the grammar the user wrote.
+--
+-- **It stands where a @Core@ stands**, because that is what one resolves to:
+-- @Thena.Rules@ turns a region of a declared object language into a @VTerm@ or an
+-- @ObjectOf@, never a @Surface@. It is offered at a variable-typed slot too, since
+-- an undeclared rule's slot takes anything.
+--
+-- **@surface\`…\`@ and @core\`…\`@ are not here**, and that is deliberate — see the
+-- module header of "Thena.View.Statement" for what still answers for them.
+literalProductions :: [Grammar] -> [Ty] -> [E.Rule]
+literalProductions gs types =
+  [ rule t l | t <- coreish, l <- languageNames gs ]
+    ++ [ atRule t l p
+       | t <- coreish, l <- languageNames gs, p <- productionNames gs l ]
+  where
+    coreish = [ t | t <- types, t == TCore || isVariable t ]
+
+    isVariable t = case t of { TVar _ -> True; _ -> False }
+
+    -- @LC\`…\`@ — a term of the language.
+    rule t l =
+      E.Rule (renderTy t ++ "/`" ++ l) (operandHead t)
+        [E.Literal (l ++ "`"), E.Nonterminal l, E.Literal "`"] []
+
+    -- @LC[var]\`…\`@ — a term of one named production of it (MS6 phase 104c).
+    --
+    -- **The production's body is inlined, not reached through a nonterminal of its
+    -- own.** A wrapper was the first shape and it was wrong for a reason only the
+    -- offer shows: the chart names whatever nonterminal sits at the cursor, so
+    -- @fill LC[var]\`@ answered with @At:LC:var@ — a name this module invented,
+    -- handed to a frontend to draw. Inlined, the answer is the production's own
+    -- first symbols, which is what the user is being asked for.
+    atRule t l p =
+      E.Rule (renderTy t ++ "/`" ++ l ++ "[" ++ p ++ "]") (operandHead t)
+        ( E.Literal (l ++ "[" ++ p ++ "]`") : bodyOf p ++ [E.Literal "`"] ) []
+
+    -- **The search is across every loaded grammar, and that is safe because a
+    -- production name is unique across all of them.** Each production becomes a
+    -- datatype constructor, and a second language declaring one of the same name is
+    -- refused when it loads — @A's constructor same is already declared@. Checked
+    -- by loading such a pair, not assumed; @productionNamesAreUnique@ in
+    -- "Thena.View.StatementTests" pins it, because if that ever relaxed this
+    -- lookup would quietly hand one language another's production.
+    bodyOf p = case [ E.ruleBody r | r <- earleyRules gs, E.ruleName r == p ] of
+      b : _ -> b
+      -- **Cannot arise** — the production came from 'productionNames' of a grammar
+      -- in this very list. Answered rather than crashed, because this is a view.
+      []    -> []
 
 -- | Every type a slot may stand at, given the types the forms ask for directly:
 -- those, and the components of any list, pair or option among them.

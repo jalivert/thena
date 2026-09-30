@@ -13,6 +13,7 @@
 -- completable tomorrow with nothing edited here.
 module Thena.View.StatementTests (tests) where
 
+import Data.List (isInfixOf, isPrefixOf)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
@@ -24,8 +25,9 @@ import Thena.Language.Earley (placeholderChar)
 import Thena.Language.Instral (instralRules, operandHead, statementHead)
 import qualified Thena.Language.Earley as E
 import Thena.Core.Term (GlobalName (..))
+import Thena.Render (renderResponse)
 import Thena.Rules (RuleBase, baseSignatures, opWords, ruleBase)
-import Thena.View (sessionRules, statementOfferView)
+import Thena.View (sessionGrammars, sessionRules, statementOfferView)
 import Thena.View.Chart (offerAt)
 import Thena.View.Chart
   ( BoundView (..)
@@ -55,6 +57,16 @@ tests =
         , testCase "and standing on a box inside it, what may fill the box" inBoxInLiteral
         , testCase "a word after a finished literal is helped, context-free" afterLiteral
         , testCase "and a line that parses is never marked recovered" notRecovered
+        ]
+    , testGroup "a tagged literal is an operand (phase 141)"
+        [ testCase "a slot offers the tag, so a literal may be written there" tagOffered
+        , testCase "and inside it the object grammar answers, not recovery" insideIsDirect
+        , testCase "a finished term offers its closing fence and nothing else" fenceOffered
+        , testCase "the production-named form narrows to that production" namedProduction
+        , testCase "no nonterminal this module invented reaches the frontend" noSynthetic
+        , testCase "instral's own head cannot collide with a language's" headIsNamespaced
+        , testCase "recovery keeps the cases the grammar cannot reach" recoveryRemains
+        , testCase "a production name is unique across every loaded grammar" productionNamesAreUnique
         ]
     , testGroup "a multi-line entry (phase 140)"
         [ testCase "a binding on the line above puts its name in the offer" boundAbove
@@ -111,13 +123,19 @@ standalone = do
     other -> assertFailure ("expected recovery inside LC, got " <> show other)
   if null (offeredOptions o) then assertFailure "recovered, but offered nothing" else pure ()
 
--- | **His requirement, second half**, and the one the type narrowing would
--- otherwise refuse: @goto@ wants a @Core@ and this is not one, and the help
--- arrives anyway — marked, so the frontend can say it will not run.
+-- | **His requirement, second half**: a literal written where one may not stand is
+-- helped anyway — marked, so the frontend can say it will not run.
+--
+-- **The line changed at MS7 phase 141 and the premise with it.** It was
+-- @goto LC\`@, on the stated grounds that @goto@ wants a @Core@ and a literal is
+-- not one. A literal /is/ a @Core@ — @Thena.Rules@ resolves one to a @VTerm@ — so
+-- since 141 put literals in the grammar that line parses, is answered directly and
+-- reaches the machine. @say@ is the honest case: it wants a @String@, a literal
+-- cannot be one, and the offer has to fall back to recovery to say anything.
 wrongSlot :: IO ()
 wrongSlot = do
   s <- withLC
-  let o = offerIn s "goto LC`"
+  let o = offerIn s "say LC`"
   case offeredRecovered o of
     Just (RecoveryView _ _ (Just "LC")) -> pure ()
     other -> assertFailure ("expected recovery inside LC, got " <> show other)
@@ -197,7 +215,7 @@ narrows = do
 derived :: IO ()
 derived = do
   s <- fst <$> startingSession
-  let rs      = instralRules (sessionRules s)
+  let rs      = instralRules (sessionGrammars s) (sessionRules s)
       heads   = [ w | r <- rs, E.ruleHead r == statementHead
                     , E.Literal w : _ <- [E.ruleBody r] ]
       missing = [ w | (w, _) <- opWords, w `notElem` heads ]
@@ -316,7 +334,7 @@ fixture sigs names =
 askIn :: Session -> RuleBase -> String -> [SymbolView]
 askIn s b before =
   offeredOptions
-    (offerAt (instralRules (sessionRules s ++ [b])) (E.StartAt statementHead)
+    (offerAt (instralRules (sessionGrammars s) (sessionRules s ++ [b])) (E.StartAt statementHead)
        [WrittenText before] [])
 
 listSlot :: IO ()
@@ -414,8 +432,12 @@ continuation = do
 recoveryAfterNewline :: IO ()
 recoveryAfterNewline = do
   s <- withLC
-  let flat = offerIn s "fill LC`( "
-      over = offerIn s "fill\n  LC`( "
+  -- **A line that still goes through recovery**, which is what these offsets are
+  -- about. Since phase 141 a /well-formed/ statement with a literal in it is
+  -- answered by the chart directly, so @fill@ would no longer exercise this;
+  -- @fil@ is the broken word that sends it down the recovery path.
+  let flat = offerIn s "fil LC`( "
+      over = offerIn s "fil\n  LC`( "
   case (offeredRecovered flat, offeredRecovered over) of
     (Just a, Just b) -> recoveredText b @?= recoveredText a
     other -> assertFailure ("expected recovery either way, got " <> show other)
@@ -426,8 +448,101 @@ recoveryAfterNewline = do
 shiftedColumn :: IO ()
 shiftedColumn = do
   s <- withLC
-  case offeredRecovered (offerIn s "h = here\nfill LC`( ") of
-    -- @h = here\n@ is nine characters, and the literal's text opens at 9 in the
-    -- instruction alone, so 18 counting from 1 in the whole entry.
-    Just r  -> recoveredColumn r @?= 18
+  case offeredRecovered (offerIn s "h = here\nfil LC`( ") of
+    -- @h = here\n@ is nine characters, and the literal's text opens at 8 in the
+    -- instruction alone (@fil @ is four), so 17 counting from 1 in the whole entry.
+    Just r  -> recoveredColumn r @?= 17
     Nothing -> assertFailure "expected recovery inside the literal"
+
+-- | **The phase.** A @Core@ slot may be written as a tagged term literal, so the
+-- tag is offered where the slot is.
+tagOffered :: IO ()
+tagOffered = do
+  s <- withLC
+  let opts = offeredOptions (offerIn s "fill ")
+  if ALiteralSymbol "LC`" `elem` opts then pure ()
+    else assertFailure ("expected LC` at a Core slot: " <> show opts)
+
+-- | **And this is what makes it worth doing**: one chart reads the whole line, so
+-- the offer inside the literal is an ordinary answer and not a recovered one.
+-- @abs@'s second slot is a @Ty@, and @\953@ is the base type the loaded grammar
+-- declares — read out of the user's own grammar, through the statement around it.
+insideIsDirect :: IO ()
+insideIsDirect = do
+  s <- withLC
+  let o = offerIn s "fill LC`( \955 x : "
+  offeredRecovered o @?= Nothing
+  offeredStuck o @?= Nothing
+  if ALiteralSymbol "\953" `elem` offeredOptions o then pure ()
+    else assertFailure ("expected Ty's base type: " <> show (offeredOptions o))
+
+fenceOffered :: IO ()
+fenceOffered = do
+  s <- withLC
+  [ w | ALiteralSymbol w <- offeredOptions (offerIn s "fill LC`( \955 x : \953 . x ) ") ]
+    @?= ["`"]
+
+-- | @LC[abs]\`@ says which production the literal is, so only that production's
+-- own opening may follow — @abs@ begins with @(@ and then @\955@.
+namedProduction :: IO ()
+namedProduction = do
+  s <- withLC
+  [ w | ALiteralSymbol w <- offeredOptions (offerIn s "fill LC[abs]`( ") ] @?= ["\955"]
+
+-- | **The bug this phase made and caught.** Reaching a named production through a
+-- nonterminal of its own was the first shape, and the chart names whatever
+-- nonterminal sits at the cursor — so @fill LC[var]\`@ answered with @At:LC:var@, a
+-- name this module invented, handed to a frontend to draw. The body is inlined
+-- instead. Nothing a frontend sees may be a name we made up for our own plumbing.
+noSynthetic :: IO ()
+noSynthetic = do
+  s <- withLC
+  let names l = [ n | ANonterminalSymbol n <- offeredOptions (offerIn s l) ]
+      ours n = "At:" `isPrefixOf` n || "Elements:" `isPrefixOf` n
+  [ n | l <- ["fill ", "fill LC`", "fill LC[var]`", "fill LC[abs]`( "], n <- names l, ours n ]
+    @?= []
+
+-- | The object grammars are concatenated into one rule set with @instral@'s own
+-- productions, so their nonterminals share a namespace. A language name and a
+-- metavariable are identifiers and cannot contain a @:@; @instral@'s heads all do.
+-- **That is the whole of why a language called @Statement@ cannot capture a
+-- statement**, and it is an invariant rather than a coincidence.
+headIsNamespaced :: IO ()
+headIsNamespaced =
+  if ':' `elem` statementHead then pure ()
+    else assertFailure ("instral's head must be namespaced, got " <> show statementHead)
+
+-- | **Recovery is not dead, and its job is sharper.** Where the statement around a
+-- literal does not read, the chart has nothing to say about the literal either —
+-- so the narrower question is still the one that answers. @fil@ is @fill@
+-- mistyped.
+recoveryRemains :: IO ()
+recoveryRemains = do
+  s <- withLC
+  let o = offerIn s "fil LC`( \955 x : "
+  case offeredRecovered o of
+    Just (RecoveryView _ _ (Just "LC")) -> pure ()
+    other -> assertFailure ("expected recovery inside LC, got " <> show other)
+  if ALiteralSymbol "\953" `elem` offeredOptions o then pure ()
+    else assertFailure ("expected Ty's base type: " <> show (offeredOptions o))
+
+-- | **The invariant @literalProductions@ rests on, pinned here because it is not
+-- this module's to enforce.** A named production's body is found by searching every
+-- loaded grammar for a rule of that name, with no language filter — which is right
+-- only while a production name is unique across all of them. It is: each production
+-- becomes a datatype constructor, and a second language declaring one of the same
+-- name is refused as it loads.
+--
+-- If that ever relaxed, @LC[var]\`@ could be handed another language's @var@, and
+-- silently — so the fixture is a pair of languages that both declare @same@, and
+-- this asserts the load refuses it.
+productionNamesAreUnique :: IO ()
+productionNamesAreUnique = do
+  (s0, _) <- startingSession
+  let (s1, r) = oneLine s0 ":load test/fixtures/two-languages-one-production.thena"
+  said <- case following s1 r of
+    Just io -> do (s2, rs, _) <- io; pure (unwords (concatMap (renderResponse s2) rs))
+    Nothing -> pure (unwords (renderResponse s1 r))
+  if "already declared" `isInfixOf` said then pure ()
+    else assertFailure
+      ("two languages declaring one production must be refused, got " <> show said)

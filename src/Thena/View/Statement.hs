@@ -92,7 +92,7 @@ statementOffer gs bs before after = answer { offeredBound = bound }
 
     before' = dropWritten at before
 
-    whole = offerAt (instralRules bs) (E.StartAt statementHead) before' after
+    whole = offerAt (instralRules gs bs) (E.StartAt statementHead) before' after
 
     answer
       | Nothing <- offeredStuck whole = shift whole
@@ -170,7 +170,7 @@ recover gs bs before after = do
           -- which is why @attack@ completed and @att@ did not. Asking where the
           -- word begins gives every word that may stand there, and the prefix
           -- says which of them the user is already writing.
-          o = offerAt (instralRules bs) (E.StartAt statementHead) [] []
+          o = offerAt (instralRules gs bs) (E.StartAt statementHead) [] []
        in Just o
             { offeredOptions     = filter (startsWith word) (offeredOptions o)
             , offeredWanted      = filter (startsWith word) (offeredWanted o)
