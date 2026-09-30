@@ -324,8 +324,18 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   -- and only the ordinary text around it ever showed the underline. Fixed
   -- by naming the combination outright rather than trying to compose two
   -- unrelated attrs through nesting.
-  , (attrName "recovered",             V.withStyle (ink (themeInk th)) V.underline)
-  , (attrName "placeholder.recovered", V.withStyle (ink (themeDim th)) V.underline)
+  --
+  -- **In the repl's own accent, not plain ink** — his request, 2026-09-30:
+  -- vty's 'V.Attr' has no underline-color field separate from the text's
+  -- own foreground (checked directly, not assumed — 'attrStyle'/
+  -- 'attrForeColor'/'attrBackColor'/'attrURL' is the whole record), so a
+  -- distinct, noticeable underline means coloring the *text* underneath it
+  -- — the terminal draws the stroke in whatever color the character
+  -- already is. 'themeRepl' picked as the most saturated accent in the
+  -- palette, both combinations, so a box inside a recovered span reads as
+  -- unmistakably part of the same broken run as the text around it.
+  , (attrName "recovered",             V.withStyle (ink (themeRepl th)) V.underline)
+  , (attrName "placeholder.recovered", V.withStyle (ink (themeRepl th)) V.underline)
   , (attrName "accent.output",  ink (themeSoft th))
   , (attrName "dropdown",          surface (themePopup th) (themeInk th))
   -- A real background swap for the selected row, not a foreground tint
