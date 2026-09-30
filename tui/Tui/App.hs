@@ -670,26 +670,16 @@ handleEventInner :: BrickEvent Name e -> EventM Name St ()
 handleEventInner (VtyEvent (V.EvKey V.KEnter [])) = do
   st <- get
   case (stDropdown st, stOfferDropdown st) of
-    -- | Enter accepts the arrow-selected candidate into the input instead of
-    -- submitting — his spec: "Enter selects it." Only fires once an arrow
-    -- key has actually picked something; with the dropdown merely open and
-    -- nothing selected, Enter still runs the line as typed.
-    (Just (LoadDropdown entries (Just i)), _) | i < length entries -> do
-      let line = concatMap Text.unpack (getEditContents (stInput st))
-          -- The value lands as is — directories already trail their slash
-          -- from 'loadDropdownEntries'.
-          line' = replacePathPrefix line (entries !! i)
-      put st { stInput = E.editorText Input (Just 1) (Text.pack line') }
-      refreshDropdown
-      followInput
-    -- | Same spec, the offer dropdown's own candidate — 'acceptOfferEdit'
-    -- replaces exactly the recovered/replaced span, not the whole line, so
-    -- this is a zipper edit rather than a rebuilt editor (same shape as
-    -- 'killWordBack').
-    (_, Just od) | Just i <- odSelected od, Just ins <- rowInsert (odRows od !! i) -> do
-      put st { stInput = E.applyEdit (acceptOfferEdit (odWordStart od) (odReplaceLen od) ins) (stInput st) }
-      refreshOfferDropdown
-      followInput
+    -- | Enter accepts the highlighted candidate into the input instead of
+    -- submitting — his spec: "Enter selects it" — and Tab does the same
+    -- (his `.jalivert/TUI.md` #10, VS Code's rule). Only fires with a
+    -- highlight to act on; with the dropdown merely open and nothing
+    -- selected, Enter still runs the line as typed.
+    (Just (LoadDropdown entries (Just i)), _) | i < length entries ->
+      acceptLoadRow st entries i
+    -- | Same spec, the offer dropdown's own candidate.
+    (_, Just od) | Just i <- odSelected od, Just ins <- rowInsert (odRows od !! i) ->
+      acceptOfferRow st od ins
     _ -> do
       let line = concatMap Text.unpack (getEditContents (stInput st))
       case words line of
@@ -756,7 +746,19 @@ handleEventInner ev@(VtyEvent (V.EvKey V.KUp [])) = do
   if popupAbove st
     then navigateCompletion moveDown offerMoveDown ev
     else navigateCompletion moveUp offerMoveUp ev
-handleEventInner (VtyEvent (V.EvKey (V.KChar '\t') [])) = completeLoadPath
+-- | Tab takes what's lit, VS Code's rule (his `.jalivert/TUI.md` #10) —
+-- the same accepts Enter performs above, so the two keys cannot disagree.
+-- With nothing highlighted, Tab keeps its old job: shell-completion on a
+-- ':load' path (Esc-clear the highlight to get that back with the list
+-- open), silence everywhere else.
+handleEventInner (VtyEvent (V.EvKey (V.KChar '\t') [])) = do
+  st <- get
+  case (stDropdown st, stOfferDropdown st) of
+    (Just (LoadDropdown entries (Just i)), _) | i < length entries ->
+      acceptLoadRow st entries i
+    (_, Just od) | Just i <- odSelected od, Just ins <- rowInsert (odRows od !! i) ->
+      acceptOfferRow st od ins
+    _ -> completeLoadPath
 -- | "Walk into" a placeholder box and type to fill it — his own ask,
 -- `.jalivert/LIVE-OFFERS.md`/`.jalivert/TUI.md`: the caret standing right
 -- at a box, typing a character, used to just insert ahead of it — "it just
@@ -813,6 +815,29 @@ handleEventInner (MouseDown _ _ _ _) = pure ()
 handleEventInner (AppEvent _) = pure ()
 handleEventInner ev =
   Brick.zoom stInputL (handleEditorEvent ev) >> followInput >> refreshDropdown >> refreshOfferDropdown
+
+-- | What a highlighted ':load' row does on accept — shared by Enter and
+-- Tab, so the two keys cannot disagree (his `.jalivert/TUI.md` #10, VS
+-- Code's rule: Tab takes what's lit).
+acceptLoadRow :: St -> [String] -> Int -> EventM Name St ()
+acceptLoadRow st entries i = do
+  let line = concatMap Text.unpack (getEditContents (stInput st))
+      -- The value lands as is — directories already trail their slash
+      -- from 'loadDropdownEntries'.
+      line' = replacePathPrefix line (entries !! i)
+  put st { stInput = E.editorText Input (Just 1) (Text.pack line') }
+  refreshDropdown
+  followInput
+
+-- | What a highlighted offer row does on accept — shared the same way.
+-- 'acceptOfferEdit' replaces exactly the recovered/replaced span, not the
+-- whole line, so this is a zipper edit rather than a rebuilt editor (same
+-- shape as 'killWordBack').
+acceptOfferRow :: St -> OfferDropdown -> String -> EventM Name St ()
+acceptOfferRow st od ins = do
+  put st { stInput = E.applyEdit (acceptOfferEdit (odWordStart od) (odReplaceLen od) ins) (stInput st) }
+  refreshOfferDropdown
+  followInput
 
 -- | Arrow-key navigation only takes over the keypress while a dropdown is
 -- actually showing candidates — otherwise the original event falls through
