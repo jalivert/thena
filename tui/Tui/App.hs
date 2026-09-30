@@ -59,7 +59,7 @@ import Brick.BChan (newBChan, writeBChan)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad.IO.Class (liftIO)
 import Data.Char (isSpace)
-import Data.List (isPrefixOf, isSuffixOf, sort, sortOn)
+import Data.List (intercalate, isPrefixOf, isSuffixOf, sort, sortOn)
 import Data.Maybe (isJust, isNothing, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -93,7 +93,7 @@ import Tui.Render
   , spliceAttr
   )
 import Tui.Config (Config (..), loadConfig, saveConfig)
-import Tui.Theme (Theme (..), neonPinkDark, themeByName)
+import Tui.Theme (Theme (..), neonPinkDark, themeByName, themes)
 
 data Name
   = Input
@@ -1048,7 +1048,8 @@ tuiHelpLines =
   , "tui-local — never reaches the engine, so :help above doesn't list them:"
   , ""
   ] ++ concatMap (uncurry helpRow)
-    [ (":preselect on|off", "highlight a fresh dropdown's first row on its own")
+    [ (":theme ‹name›",     intercalate ", " (map themeName themes))
+    , (":preselect on|off", "highlight a fresh dropdown's first row on its own")
     , (":whisper on|off",   "show the untyped remainder of the selected candidate")
     ]
   where

@@ -37,9 +37,15 @@ defaultConfig = Config
   , cfgWhisperOn  = True
   }
 
+-- | @~\/.config\/thena@ — not @thena-tui@: the TUI is the only frontend
+-- today, but the directory name shouldn't say so, since more than these
+-- three fields is likely to live here eventually (his ask, 2026-09-30).
+configDir :: IO FilePath
+configDir = getXdgDirectory XdgConfig "thena"
+
 configPath :: IO FilePath
 configPath = do
-  dir <- getXdgDirectory XdgConfig "thena-tui"
+  dir <- configDir
   pure (dir </> "config")
 
 -- | Reads the dotfile if it's there and parses; 'defaultConfig' for
@@ -86,7 +92,7 @@ saveConfig cfg = do
 
 writeConfig :: FilePath -> Config -> IO ()
 writeConfig path cfg = do
-  dir <- getXdgDirectory XdgConfig "thena-tui"
+  dir <- configDir
   createDirectoryIfMissing True dir
   writeFile path $ unlines
     [ "theme=" <> cfgTheme cfg
