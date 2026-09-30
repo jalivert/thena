@@ -13,12 +13,15 @@
 -- completable tomorrow with nothing edited here.
 module Thena.View.StatementTests (tests) where
 
-import Data.List (isInfixOf, isPrefixOf)
+import Data.Char (isAlpha)
+import Data.List (isInfixOf, isPrefixOf, nub, sort)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Driver (Session, oneLine)
+import Thena.Driver (Session)
 import Thena.Files (following, startingSession)
+import Thena.Driver (commandSummary, oneLine)
+import Thena.Instral.Commands (Command (..), commands)
 import Thena.Instral.Ops (Pattern (..), Rule (..), signatureOf)
 import Thena.Instral.Type (Signature (..), Ty (..))
 import Thena.Language.Earley (placeholderChar)
@@ -57,6 +60,18 @@ tests =
         , testCase "and standing on a box inside it, what may fill the box" inBoxInLiteral
         , testCase "a word after a finished literal is helped, context-free" afterLiteral
         , testCase "and a line that parses is never marked recovered" notRecovered
+        ]
+    , testGroup ":-commands (phase 142)"
+        [ testCase "a bare colon offers every command" everyCommand
+        , testCase "a half-typed command word completes" commandPrefix
+        , testCase "a command that takes nothing offers nothing, and is not stuck" takesNothing
+        , testCase "an argument the chart cannot model is named, not stuck" opaqueArgument
+        , testCase ":step offers its words and a number, with no invented head" stepWords
+        , testCase "and a half-typed one of those completes too" stepPrefix
+        , testCase ":parse offers the languages that are loaded" parseLanguages
+        , testCase "every word in the table is a word the driver dispatches" tableDispatches
+        , testCase "and the table and :help's list name the same commands" tableMatchesHelp
+        , testCase "a statement line is untouched by any of it" statementUntouched
         ]
     , testGroup "a tagged literal is an operand (phase 141)"
         [ testCase "a slot offers the tag, so a literal may be written there" tagOffered
@@ -546,3 +561,115 @@ productionNamesAreUnique = do
   if "already declared" `isInfixOf` said then pure ()
     else assertFailure
       ("two languages declaring one production must be refused, got " <> show said)
+
+-- | Typing the colon alone already offers every command, because the unit is the
+-- colon and whatever follows it.
+everyCommand :: IO ()
+everyCommand = do
+  s <- withLC
+  let offered = [ w | ALiteralSymbol w <- offeredOptions (offerIn s ":") ]
+  map commandWord commands @?= offered
+
+-- | **The reason a command word needs a unit of its own.** @:inf@ lexes as two
+-- tokens, @:@ and @inf@ — so the bare-word unit asks about @inf@ and filters the
+-- command words by it, and not one of them starts with @inf@. @:where@ is worse:
+-- its second token is a keyword.
+commandPrefix :: IO ()
+commandPrefix = do
+  s <- withLC
+  [ w | ALiteralSymbol w <- offeredOptions (offerIn s ":inf") ] @?= [":infer"]
+  case offeredRecovered (offerIn s ":inf") of
+    Just (RecoveryView 1 ":inf" Nothing) -> pure ()
+    other -> assertFailure ("expected the colon in the unit, got " <> show other)
+  -- The keyword case, which an identifier-only rule would have missed.
+  if ALiteralSymbol ":where" `elem` offeredOptions (offerIn s ":whe") then pure ()
+    else assertFailure "a command word whose tail is a keyword must still complete"
+
+takesNothing :: IO ()
+takesNothing = do
+  s <- withLC
+  let o = offerIn s ":where "
+  offeredOptions o @?= []
+  -- **Not stuck**: the line reads, and there is genuinely nothing more to write.
+  offeredStuck o @?= Nothing
+
+-- | **The honest answer for an argument the chart has no grammar for**, and the
+-- shape the phase turns on: a nonterminal with no productions. The line is not
+-- stuck — a production is open and waiting — and the offer names what is wanted
+-- without pretending to enumerate it.
+opaqueArgument :: IO ()
+opaqueArgument = do
+  s <- withLC
+  let o = offerIn s ":infer "
+  offeredStuck o @?= Nothing
+  [ n | ANonterminalSymbol n <- offeredOptions o ] @?= ["instral:Argument"]
+
+-- | And where the argument /is/ enumerable the words come back as words. **No
+-- nonterminal this module invented may appear** — the first shape routed a choice
+-- through one and answered @instral:Choice:on.off.@, which is phase 141's
+-- @At:LC:var@ again.
+stepWords :: IO ()
+stepWords = do
+  s <- withLC
+  let o = offerIn s ":step "
+  [ w | ALiteralSymbol w <- offeredOptions o ] @?= ["on", "off"]
+  if AScanSymbol "int" `elem` offeredOptions o then pure ()
+    else assertFailure ("expected a numeral too: " <> show (offeredOptions o))
+  [ n | ANonterminalSymbol n <- offeredOptions o ] @?= []
+
+-- | Inside a command line the recovered offer is asked /with/ the text before the
+-- word, unlike a statement's — @:step @ reads, so there is context worth using, and
+-- @:step o@ offers @on@ and @off@ rather than nothing.
+stepPrefix :: IO ()
+stepPrefix = do
+  s <- withLC
+  let ws = [ w | ALiteralSymbol w <- offeredOptions (offerIn s ":step o") ]
+  if "on" `elem` ws && "off" `elem` ws then pure ()
+    else assertFailure ("expected on and off, got " <> show ws)
+
+parseLanguages :: IO ()
+parseLanguages = do
+  s <- withLC
+  let ws = [ w | ALiteralSymbol w <- offeredOptions (offerIn s ":parse ") ]
+  if "LC" `elem` ws && "Ty" `elem` ws then pure ()
+    else assertFailure ("expected the loaded languages, got " <> show ws)
+
+-- | **One direction of the cross-check.** Every word in the table must be a word
+-- @Thena.Driver.dispatch@ answers to — driven, not inspected: a word it does not
+-- know comes back as @no such command@.
+tableDispatches :: IO ()
+tableDispatches = do
+  (s, _) <- startingSession
+  let refused w =
+        let said = unwords (renderResponse s (snd (oneLine s w)))
+         in "no such command" `isInfixOf` said
+  filter refused (map commandWord commands) @?= []
+
+-- | **The other direction, as far as it can be had.** @:help@'s list is written
+-- separately (@.claude\/plans\/LONG-TERM.md@ 24), so the two hand-kept lists are
+-- crossed against each other: a command added to one and not the other shows up
+-- here. It does not reach @dispatch@'s own @case@, which is what that item holds
+-- open.
+tableMatchesHelp :: IO ()
+tableMatchesHelp =
+  sort (nub inHelp) @?= sort (nub (map commandWord commands))
+  where
+    -- A command word is a colon followed by a letter. **The test needs that and
+    -- not just a leading colon**, because @:theorem ‹x› : ‹T›@ writes an ascription
+    -- with one — found by the comparison failing on a lone @":"@, which is the
+    -- extractor being wrong rather than the lists disagreeing.
+    inHelp =
+      [ takeWhile (`notElem` " /\8249") w
+      | (usage, _) <- commandSummary
+      , w <- words usage
+      , (':' : c : _) <- [w]
+      , isAlpha c
+      ]
+
+statementUntouched :: IO ()
+statementUntouched = do
+  s <- withLC
+  let o = offerIn s "fill "
+  offeredStuck o @?= Nothing
+  if ALiteralSymbol "LC`" `elem` offeredOptions o then pure ()
+    else assertFailure "a statement line must be unaffected by the command grammar"

@@ -27,6 +27,8 @@
 -- nonterminal, and a frontend narrows by it without being told anything new.
 module Thena.Language.Instral
   ( instralRules
+  , commandRules
+  , commandHead
   , operandHead
   , standsAt
   , statementHead
@@ -38,6 +40,7 @@ import Thena.Core.Term (GlobalName (..))
 import qualified Thena.Instral.Ops as Ops
 import Thena.Instral.Type (Signature (..), Ty (..), renderTy)
 import qualified Thena.Language.Earley as E
+import Thena.Instral.Commands (Argument (..), Command (..), commands)
 import Thena.Language.Build (languageNames, productionNames)
 import Thena.Language.Grammar (Grammar, earleyRules)
 import Thena.Language.Regex (Regex, parseRegex)
@@ -46,6 +49,24 @@ import Thena.Rules (RuleBase (..), allCallable, opWords)
 -- | The nonterminal a whole statement parses at.
 statementHead :: String
 statementHead = "instral:Statement"
+
+-- | The nonterminal a whole @:@-command parses at.
+--
+-- **Its own head, and not another production of 'statementHead'** — the reason is
+-- in "Thena.Instral.Commands": a command is a whole line, so sharing would let the
+-- chart accept @x = :where@ and @attack ; :where@, which the system refuses. An
+-- advising grammar may be narrower than the running one and never wider.
+commandHead :: String
+commandHead = "instral:Command"
+
+-- | Where an argument the chart cannot enumerate stands.
+--
+-- **A nonterminal with no productions**, deliberately. Standing just after
+-- @:infer @ the offer names it and the line is not stuck, which says /something
+-- goes here and I cannot list it/; type into it and the line reads as stuck, which
+-- is what it does today. See 'Thena.Instral.Commands.Opaque'.
+opaqueHead :: String
+opaqueHead = "instral:Argument"
 
 -- | The nonterminal an operand of this type parses at.
 --
@@ -300,6 +321,54 @@ literalProductions gs types =
       -- **Cannot arise** — the production came from 'productionNames' of a grammar
       -- in this very list. Answered rather than crashed, because this is a view.
       []    -> []
+
+-- | **The @:@-command productions, as a rule set of their own** (MS7 phase 142).
+--
+-- **Not concatenated into 'instralRules'.** The two heads are disjoint — a command
+-- is a whole line and a statement is an instruction, so no line is ever both — and
+-- 'Thena.Language.Earley.offerOptions' tries every candidate symbol /in the rule
+-- set/ at the cursor to see which could still finish the line, so a statement offer
+-- would be trying thirty-one command literals at a position none of them can stand
+-- in. **Measured at about 5% of the offer at a statement slot**, back to back in one
+-- session: worth having and not dramatic. The reason to split is that the union is
+-- needless, not that it was slow.
+commandRules :: [Grammar] -> [E.Rule]
+commandRules = commandProductions
+
+-- | One production per shape of every @:@-command, derived from
+-- 'Thena.Instral.Commands.commands'.
+--
+-- **Nothing here lists a command**: the words, the arities and the argument shapes
+-- are that table's, and a command added to it is completable with nothing edited
+-- here. The one thing this function knows is how each 'Argument' becomes symbols.
+commandProductions :: [Grammar] -> [E.Rule]
+commandProductions gs =
+  [ E.Rule (commandWord c ++ "/" ++ show n ++ "/" ++ show k) commandHead
+      (E.Literal (commandWord c) : body) []
+  | c <- commands
+  , (n, shape) <- zip [0 :: Int ..] (commandShapes c)
+  , (k, body) <- zip [0 :: Int ..] (expand shape)
+  ]
+  where
+    -- **A choice is spelled out as separate productions, not reached through a
+    -- nonterminal of its own.** A nonterminal was the first shape and it leaked:
+    -- the chart names whatever sits at the cursor, so @:step @ answered with
+    -- @instral:Choice:on.off.@ — a name invented here, handed to a frontend to
+    -- draw. **The same mistake phase 141 made with @At:LC:var@ and caught**, which
+    -- is why the check for it is now a test over every nonterminal an offer can
+    -- report and not a check on one name.
+    expand []         = [[]]
+    expand (a : rest) = [ pre ++ post | pre <- waysOf a, post <- expand rest ]
+
+    waysOf a = case a of
+      OneOf ws  -> [ [E.Literal w] | w <- ws ]
+      ANumeral  -> [ [E.Scan "int" numberRegex] ]
+      -- **Whatever is loaded**, so @:parse @ names the languages that are actually
+      -- there and nothing has to be kept in step.
+      ALanguage -> [ [E.Literal l] | l <- languageNames gs ]
+      -- The one nonterminal an offer may report from this module, and the one a
+      -- frontend is meant to see: see 'opaqueHead'.
+      Opaque    -> [ [E.Nonterminal opaqueHead] ]
 
 -- | Every type a slot may stand at, given the types the forms ask for directly:
 -- those, and the components of any list, pair or option among them.

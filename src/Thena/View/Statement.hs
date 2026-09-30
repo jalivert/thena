@@ -49,7 +49,9 @@ import Data.List (find, isPrefixOf)
 import Thena.Language.Grammar (Grammar)
 import Thena.Driver (entryBindings)
 import Thena.Instral.Type (Ty)
-import Thena.Language.Instral (instralRules, standsAt, statementHead)
+import Thena.Instral.Commands (isCommandLine)
+import Thena.Language.Instral
+  (commandHead, commandRules, instralRules, standsAt, statementHead)
 import qualified Thena.Language.Earley as E
 import Thena.Rules (RuleBase)
 import Thena.View.Chart
@@ -86,17 +88,35 @@ statementOffer gs bs before after = answer { offeredBound = bound }
     -- above were taken off the front. 'splitEntry' finds the cut with the real
     -- layout pass; @(\"\", 0)@ is the single-instruction case every earlier phase
     -- saw, and the fallback when the text does not lay out.
-    (prefix, at) = case splitEntry text cursor of
-      Just (Split p o) -> (p, o)
-      Nothing          -> ("", 0)
+    (prefix, at)
+      | asCommand = ("", 0)
+      | otherwise = case splitEntry text cursor of
+          Just (Split p o) -> (p, o)
+          Nothing          -> ("", 0)
 
     before' = dropWritten at before
 
-    whole = offerAt (instralRules gs bs) (E.StartAt statementHead) before' after
+    -- **A @:@-line is asked about at its own head, and is never split** (MS7 phase
+    -- 142). A command is a whole line: @;@ is not a separator in one and a newline
+    -- ends it, so the entry machinery does not apply. The discriminator is the
+    -- driver's own, shared rather than copied.
+    asCommand = isCommandLine (textOf before)
+
+    head' | asCommand = commandHead
+          | otherwise = statementHead
+
+    -- **Each line is asked against the rules that could answer it, and no
+    -- others** — see 'commandRules' for the measurement that forced this.
+    rules | asCommand = commandRules gs
+          | otherwise = instralRules gs bs
+
+    whole
+      | asCommand = offerAt rules (E.StartAt commandHead) before after
+      | otherwise = offerAt rules (E.StartAt statementHead) before' after
 
     answer
       | Nothing <- offeredStuck whole = shift whole
-      | otherwise = maybe (shift whole) shift (recover gs bs before' after)
+      | otherwise = maybe (shift whole) shift (recover gs bs rules head' before' after)
 
     -- **Positions are reported against the whole entry**, not against the
     -- instruction the question was asked about: the frontend passed the entry and
@@ -148,8 +168,10 @@ dropWritten n ws
 -- lexing fails for a reason no fence can mend. The caller then keeps the
 -- unrecovered answer, which still carries 'offeredStuck' and so still says
 -- something.
-recover :: [Grammar] -> [RuleBase] -> [Written] -> [Written] -> Maybe OfferView
-recover gs bs before after = do
+recover
+  :: [Grammar] -> [RuleBase] -> [E.Rule] -> String -> [Written] -> [Written]
+  -> Maybe OfferView
+recover gs _bs rules head' before after = do
   ts <- either (const Nothing) Just (tokensView line)
   unit <- unitAt cursor (atOffsets line ts)
   case unit of
@@ -161,6 +183,20 @@ recover gs bs before after = do
             Right o -> Just o
               { offeredRecovered =
                   Just (RecoveryView (open + 1) innerLeft (Just lang)) }
+    -- **A @:@-command word, which a bare word cannot serve** (MS7 phase 142).
+    -- @:inf@ lexes as two tokens, @:@ and @inf@, so the bare-word unit would ask
+    -- about @inf@ and filter the command words by it — and none of them starts
+    -- with @inf@. @:where@ is worse: its second token is a /keyword/, not an
+    -- identifier. So the unit is the colon and whatever follows it, together.
+    CommandWord start ->
+      let typed = slice start cursor
+          o = offerAt rules (E.StartAt commandHead) [] []
+       in Just o
+            { offeredOptions     = filter (startsWith typed) (offeredOptions o)
+            , offeredWanted      = filter (startsWith typed) (offeredWanted o)
+            , offeredStuck       = Nothing
+            , offeredRecovered   = Just (RecoveryView (start + 1) typed Nothing)
+            }
     BareWord start ->
       let word = slice start cursor
           -- **Asked at the start of the unit, not at the cursor, and then
@@ -170,7 +206,15 @@ recover gs bs before after = do
           -- which is why @attack@ completed and @att@ did not. Asking where the
           -- word begins gives every word that may stand there, and the prefix
           -- says which of them the user is already writing.
-          o = offerAt (instralRules gs bs) (E.StartAt statementHead) [] []
+          -- **Context-free for a statement, and context-ful inside a
+          -- @:@-command.** Phase 138's reason for the empty context stands for a
+          -- statement: @LC\`x\` atta@ has no reading up to the word, so asking
+          -- with it answers nothing. A command line is different — @:step @ reads
+          -- perfectly — so there the text before the word is used, and @:step o@
+          -- offers @on@ and @off@ instead of nothing.
+          ctx | isCommandLine line = [WrittenText (take start line)]
+              | otherwise          = []
+          o = offerAt rules (E.StartAt head') ctx []
        in Just o
             { offeredOptions     = filter (startsWith word) (offeredOptions o)
             , offeredWanted      = filter (startsWith word) (offeredWanted o)
@@ -208,6 +252,10 @@ data Unit
     -- typed).
   | BareWord Int
     -- ^ the offset the word under the cursor starts at.
+  | CommandWord Int
+    -- ^ the offset the colon of a @:@-command word starts at. **The colon is part
+    -- of the unit**, because a command word is spelled with it and the offer's
+    -- literals carry it.
 
 -- | Which unit an offset falls in.
 --
@@ -215,12 +263,35 @@ data Unit
 -- reason the unit is lexical: the literal's own text contains spaces and would
 -- otherwise be several units.
 unitAt :: Int -> [(Int, TokenView)] -> Maybe Unit
-unitAt cursor ts = case find inside (literals ts) of
-  Just (lang, prod, open, close) -> Just (InsideLiteral lang prod open close)
-  Nothing -> BareWord . fst <$> find covers ts
+unitAt cursor ts
+  -- **A command word wins, and can only be at the front.** It is tried first
+  -- because its second token is an ordinary word that 'covers' would also match,
+  -- and answering @inf@ where the unit is @:inf@ is the whole bug.
+  | Just at <- commandWordAt cursor ts = Just (CommandWord at)
+  | otherwise = case find inside (literals ts) of
+      Just (lang, prod, open, close) -> Just (InsideLiteral lang prod open close)
+      Nothing -> BareWord . fst <$> find covers ts
   where
     inside (_, _, open, close) = cursor >= open && cursor <= close
     covers (at, t) = cursor > at && cursor <= at + length (tokenViewText t)
+
+-- | The offset of a @:@-command word the cursor is standing in, if it is.
+--
+-- The colon has to be the line's first token and the word has to sit against it
+-- with no space, which is the driver's own reading: it splits the first word off at
+-- a space and dispatches on it. A bare @:@ with the cursor after it counts, so
+-- typing the colon alone already offers every command.
+commandWordAt :: Int -> [(Int, TokenView)] -> Maybe Int
+commandWordAt cursor ts = case ts of
+  (at, t) : rest
+    | tokenViewText t == ":" -> case rest of
+        (at', t') : _
+          | at' == at + 1
+          , cursor > at
+          , cursor <= at' + length (tokenViewText t') -> Just at
+        _ | cursor == at + 1 -> Just at
+        _ -> Nothing
+  _ -> Nothing
 
 -- | Every tagged term literal in the line: its language, the production its tag
 -- named, where its text begins and where its closing fence is.
