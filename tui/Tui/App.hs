@@ -48,6 +48,8 @@ import Brick.Widgets.Edit
   , renderEditor
   )
 import qualified Brick.Widgets.Edit as E
+import Brick.BChan (newBChan, writeBChan)
+import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad.IO.Class (liftIO)
 import Data.Char (isSpace)
 import Data.List (isPrefixOf, isSuffixOf, sort, sortOn)
@@ -165,13 +167,18 @@ data St = St
                                               -- ':load''s), never enforced
                                               -- as an invariant beyond that
   , stInputExtent :: Maybe (Extent Name)  -- ^ looked up post-render, one
-                                            -- frame behind — 'Brick.Main'
-                                            -- has no way to ask for an
-                                            -- extent mid-'draw'
-  , stPaneExtent  :: Maybe (Extent Name)  -- ^ same lag, the repl pane's own
-                                            -- viewport bounds, needed to
-                                            -- decide whether the dropdown
-                                            -- has room below the caret
+                                             -- frame behind — 'Brick.Main'
+                                             -- has no way to ask for an
+                                             -- extent mid-'draw'
+  , stPaneExtent :: Maybe (Extent Name)  -- ^ same lag, the repl pane's own
+                                             -- viewport bounds, needed to
+                                             -- decide whether the dropdown
+                                             -- has room below the caret
+  , stDismissed :: Maybe String
+    -- ^ Esc hid the dropdowns while the input read this (his
+    -- `.jalivert/TUI.md` #14) — 'Nothing' while they show. Refresh keeps
+    -- them hidden while the line is unchanged, and any edit brings them
+    -- back.
   }
 
 stInputL :: Lens' St (Editor Text Name)
@@ -192,15 +199,33 @@ runTui = do
         , stTheme       = neonPinkDark
         , stFoldOn      = True
         , stDropdown    = Nothing
-        , stOfferDropdown = Nothing
+        -- The input opens with its dropdown already up (his
+        -- `.jalivert/TUI.md` #14): the empty line offers the full rule
+        -- list, first row lit — the same state deleting back to empty
+        -- reaches.
+        , stOfferDropdown = buildOfferDropdown 0 (statementOfferView s0 [] [])
+        , stDismissed   = Nothing
         , stInputExtent = Nothing
         , stPaneExtent  = Nothing
         }
+  -- One synthetic event after startup: extents only exist once something
+  -- has rendered, so the launch dropdown cannot position on the very first
+  -- frame — this tick runs the outer wrapper (which records them) without
+  -- touching anything, and the second frame lays out against real
+  -- measurements. A single delayed write, then the thread is done; if the
+  -- first draw somehow hasn't happened yet, the tick is a harmless no-op
+  -- and the dropdown arrives on the first keystroke as before.
+  chan <- newBChan 1
+  _ <- forkIO (threadDelay 200000 >> writeBChan chan Tick)
   vty <- mkVty V.defaultConfig
-  _ <- customMain vty (mkVty V.defaultConfig) Nothing app st0
+  _ <- customMain vty (mkVty V.defaultConfig) (Just chan) app st0
   resetCursorStyle
 
-app :: App St e Name
+-- | The synthetic post-startup tick above — handled by doing nothing: the
+-- outer wrapper around every event still records the fresh extents.
+data Tick = Tick
+
+app :: App St Tick Name
 app = App
   { appDraw         = draw
   , appChooseCursor = showFirstCursor
@@ -660,14 +685,20 @@ handleEventInner (VtyEvent (V.EvKey V.KEnter [])) = do
 handleEventInner (VtyEvent (V.EvKey V.KEsc [])) = do
   st <- get
   case (stDropdown st, stOfferDropdown st) of
-    -- | "Esc leaves the dropdown (arrow goes away) but leaves it open" —
-    -- his spec exactly: clears the arrow-selection only, the candidate list
-    -- stays up. With nothing to clear, Esc is now simply a no-op — his
-    -- `.jalivert/TUI.md` item 3: it used to fall through to 'halt' and quit
-    -- the whole TUI, which is not "Esc's ordinary meaning" for a line
-    -- editor and was never asked for. Quitting is still `:quit`.
+    -- | Esc walks an open dropdown back in two steps (his `.jalivert/TUI.md`
+    -- #14): first the highlight, then the list itself, which stays hidden
+    -- until an edit brings it back ('stDismissed'). With nothing open, Esc
+    -- is simply a no-op — it used to fall through to 'halt' and quit the
+    -- whole TUI, which is not "Esc's ordinary meaning" for a line editor
+    -- and was never asked for. Quitting is still `:quit`.
     (Just ld@(LoadDropdown _ (Just _)), _) -> put st { stDropdown = Just ld { ldSelected = Nothing } }
     (_, Just od@(OfferDropdown _ (Just _) _ _)) -> put st { stOfferDropdown = Just od { odSelected = Nothing } }
+    (Just _, _) -> do
+      let line = concatMap Text.unpack (getEditContents (stInput st))
+      put st { stDropdown = Nothing, stDismissed = Just line }
+    (_, Just _) -> do
+      let line = concatMap Text.unpack (getEditContents (stInput st))
+      put st { stOfferDropdown = Nothing, stDismissed = Just line }
     _ -> pure ()
 -- | Ctrl+D quits on an empty line, EOF the way a terminal means it
 -- (his `.jalivert/TUI.md` #12) — with text to delete it falls through to
@@ -748,6 +779,10 @@ handleEventInner (MouseDown n V.BScrollDown _ _) = vScrollBy (viewportScroll n) 
 -- inert rather than quietly yanking.)
 handleEventInner (MouseUp _ _ _) = pure ()
 handleEventInner (MouseDown _ _ _ _) = pure ()
+-- | The startup tick ('runTui', the only 'Tick' there is) does nothing
+-- itself — the outer wrapper has already recorded the fresh extents by
+-- the time this runs, which is the whole point of it.
+handleEventInner (AppEvent _) = pure ()
 handleEventInner ev =
   Brick.zoom stInputL (handleEditorEvent ev) >> followInput >> refreshDropdown >> refreshOfferDropdown
 
@@ -831,29 +866,34 @@ refreshDropdown :: EventM Name St ()
 refreshDropdown = do
   st <- get
   let line = concatMap Text.unpack (getEditContents (stInput st))
-  case loadPathPrefix line of
-    Nothing -> put st { stDropdown = Nothing }
-    Just prefix -> do
-      entries <- liftIO (loadDropdownEntries prefix)
-      -- A shown dropdown always highlights one row (his `.jalivert/TUI.md`
-      -- #9): the first, so Enter on a fresh list accepts rather than
-      -- submitting the partial line — Esc clears it first when submitting
-      -- as typed is what is wanted. Above the line the reversal below puts
-      -- that same first row adjacent to the input.
-      let new = if null entries then Nothing else Just (LoadDropdown entries (Just 0))
-          oldRows = maybe [] ldEntries (stDropdown st)
-      put st { stDropdown = new }
-      -- A new row generation scrolls from the top: the viewport offset
-      -- belongs to the rows it was showing, and a rebuilt-shorter list
-      -- viewed from a deep offset is all blank (his empty-dropdown bug).
-      -- Identical rows keep their offset — a cursor move or a no-op edit
-      -- must not yank a deliberately scrolled list. Above the line the
-      -- fresh end is the bottom, where the reversed rows start — for a
-      -- viewport that has rendered before; a never-opened one still opens
-      -- at offset 0, and the preselected row's 'visible' pulls it right.
-      if maybe [] ldEntries new /= oldRows
-        then (if popupAbove st then vScrollToEnd else vScrollToBeginning) (viewportScroll LoadPopup)
-        else pure ()
+  -- Dismissed by Esc ('stDismissed'): stay hidden while the line reads as
+  -- it did, come back on any edit. Every path below clears the flag —
+  -- reaching one means the line moved.
+  if stDismissed st == Just line
+    then put st { stDropdown = Nothing }
+    else case loadPathPrefix line of
+      Nothing -> put st { stDropdown = Nothing, stDismissed = Nothing }
+      Just prefix -> do
+        entries <- liftIO (loadDropdownEntries prefix)
+        -- A shown dropdown always highlights one row (his `.jalivert/TUI.md`
+        -- #9): the first, so Enter on a fresh list accepts rather than
+        -- submitting the partial line — Esc clears it first when submitting
+        -- as typed is what is wanted. Above the line the reversal below puts
+        -- that same first row adjacent to the input.
+        let new = if null entries then Nothing else Just (LoadDropdown entries (Just 0))
+            oldRows = maybe [] ldEntries (stDropdown st)
+        put st { stDropdown = new, stDismissed = Nothing }
+        -- A new row generation scrolls from the top: the viewport offset
+        -- belongs to the rows it was showing, and a rebuilt-shorter list
+        -- viewed from a deep offset is all blank (his empty-dropdown bug).
+        -- Identical rows keep their offset — a cursor move or a no-op edit
+        -- must not yank a deliberately scrolled list. Above the line the
+        -- fresh end is the bottom, where the reversed rows start — for a
+        -- viewport that has rendered before; a never-opened one still opens
+        -- at offset 0, and the preselected row's 'visible' pulls it right.
+        if maybe [] ldEntries new /= oldRows
+          then (if popupAbove st then vScrollToEnd else vScrollToBeginning) (viewportScroll LoadPopup)
+          else pure ()
 
 -- | Recomputes the completion dropdown from 'Thena.View.statementOfferView'
 -- — called from the same places 'refreshDropdown' is, same reasoning.
@@ -865,20 +905,24 @@ refreshOfferDropdown :: EventM Name St ()
 refreshOfferDropdown = do
   st <- get
   let line = concatMap Text.unpack (getEditContents (stInput st))
-  if ":" `isPrefixOf` line
+  -- Same dismissal as 'refreshDropdown': hidden while the line is as Esc
+  -- left it, back on any edit.
+  if stDismissed st == Just line
     then put st { stOfferDropdown = Nothing }
-    else do
-      let (_, col) = getCursorPosition (stInput st)
-          (before, after) = splitWritten line col
-          ov = statementOfferView (stSession st) before after
-          new = buildOfferDropdown col ov
-          oldRows = maybe [] odRows (stOfferDropdown st)
-      put st { stOfferDropdown = new }
-      -- Same rule as 'refreshDropdown': new rows start at the top, same
-      -- rows keep their scroll — above the line, at the bottom instead.
-      if maybe [] odRows new /= oldRows
-        then (if popupAbove st then vScrollToEnd else vScrollToBeginning) (viewportScroll OfferPopup)
-        else pure ()
+    else if ":" `isPrefixOf` line
+      then put st { stOfferDropdown = Nothing, stDismissed = Nothing }
+      else do
+        let (_, col) = getCursorPosition (stInput st)
+            (before, after) = splitWritten line col
+            ov = statementOfferView (stSession st) before after
+            new = buildOfferDropdown col ov
+            oldRows = maybe [] odRows (stOfferDropdown st)
+        put st { stOfferDropdown = new, stDismissed = Nothing }
+        -- Same rule as 'refreshDropdown': new rows start at the top, same
+        -- rows keep their scroll — above the line, at the bottom instead.
+        if maybe [] odRows new /= oldRows
+          then (if popupAbove st then vScrollToEnd else vScrollToBeginning) (viewportScroll OfferPopup)
+          else pure ()
 
 -- | The row source depends on which question was actually answered.
 --
