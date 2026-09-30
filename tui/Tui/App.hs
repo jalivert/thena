@@ -61,7 +61,7 @@ import qualified Graphics.Vty as V
 import Graphics.Vty.Platform.Unix (mkVty)
 import Lens.Micro (Lens', lens)
 import System.Directory (doesDirectoryExist, listDirectory)
-import System.FilePath (takeDirectory, takeFileName, (</>))
+import System.FilePath (dropTrailingPathSeparator, takeDirectory, takeFileName, (</>))
 import System.IO (hFlush, hPutStr, stdout)
 
 import Thena.Driver (Response (Quit), Session, oneLine)
@@ -342,7 +342,17 @@ draw st = dropdownLayer st <> offerDropdownLayer st <> [hBox [replColumn, gapH, 
     -- it — so 'stInputExtent's own upper-left is column 0 of the *text*,
     -- and every text offset ('pathStartOff', the cursor, anything later)
     -- adds onto a real screen column directly, no prompt width to remember.
-    inputLine = str "❯ " <+> reportExtent Input (renderEditor renderInputContent True (stInput st))
+    -- | The whisper of what the highlighted row would land (his
+    -- `.jalivert/TUI.md` #17): the accepted line's extension past what is
+    -- typed, dimmed, starting exactly at the caret. Drawn as the last run
+    -- of the editor's own content — never a sibling past it, which the
+    -- editor widget's own fill would strand far from the text. Runs after
+    -- the cursor cannot move it, so Brick's cursor mapping is undisturbed.
+    inputLine = str "❯ " <+> reportExtent Input (renderEditor (\ts -> renderInputContent ts ghost) True (stInput st))
+      where
+        ghost = ghostSuffix line col (stDropdown st) (stOfferDropdown st)
+        line = concatMap Text.unpack (getEditContents (stInput st))
+        (_, col) = getCursorPosition (stInput st)
 
     sideColumn =
       hLimitPercent 38 $
@@ -425,9 +435,10 @@ dropdownLayer st = case (stDropdown st, loadPathPrefix line) of
 -- | One directory entry as a row: the base name to look at, while the full
 -- path stays beside it in 'ldEntries' for Tab and Enter to act on — the
 -- typed directory is already on the input line, so repeating it in every
--- row is noise (his `.jalivert/TUI.md` #2).
+-- row is noise (his `.jalivert/TUI.md` #2). Values may trail a slash
+-- ('loadDropdownEntries'), which is not part of the name.
 loadRow :: Maybe Int -> Int -> String -> PopupRow
-loadRow selected i name = PopupRow (takeFileName name) (Just i == selected) False
+loadRow selected i name = PopupRow (takeFileName (dropTrailingPathSeparator name)) (Just i == selected) False
 
 -- | The completion dropdown, positioned the same way — see 'popupAt'.
 offerDropdownLayer :: St -> [Widget Name]
@@ -605,6 +616,25 @@ dropdownPlain    = "  "
 dropdownMarkerWidth :: Int
 dropdownMarkerWidth = length dropdownSelected
 
+-- | What accepting the highlighted row would append at the caret (his
+-- `.jalivert/TUI.md` #17) — dimmed, starting exactly where it would land.
+-- Only a pure extension past the end of the line: the caret must stand at
+-- the end, and the accepted line must keep everything before it, or a
+-- rewrite behind the cursor would show as a fiction. Nothing highlighted,
+-- or nothing beyond what is typed, shows nothing. Mirrors the two Enter
+-- branches' own guards, so the whisper and the landing cannot disagree.
+ghostSuffix :: String -> Int -> Maybe LoadDropdown -> Maybe OfferDropdown -> String
+ghostSuffix line col ld od = case acceptLine of
+  Just new | col == length line, line `isPrefixOf` new, new /= line -> drop (length line) new
+  _ -> ""
+  where
+    acceptLine = case (ld, od) of
+      (Just (LoadDropdown entries (Just i)), _) | i < length entries ->
+        Just (replacePathPrefix line (entries !! i))
+      (_, Just o) | Just i <- odSelected o, Just ins <- rowInsert (odRows o !! i) ->
+        Just (take (odWordStart o) line <> ins <> drop (odWordStart o + odReplaceLen o) line)
+      _ -> Nothing
+
 -- | A line, run against the session, and its 'Response' rendered as lines
 -- via 'Thena.Render.renderResponse' — a status-line-shaped placeholder for
 -- the REPL pane's own output; the side panes render through 'Thena.View'.
@@ -646,11 +676,9 @@ handleEventInner (VtyEvent (V.EvKey V.KEnter [])) = do
     -- nothing selected, Enter still runs the line as typed.
     (Just (LoadDropdown entries (Just i)), _) | i < length entries -> do
       let line = concatMap Text.unpack (getEditContents (stInput st))
-      -- Accepted directories carry their slash, same rule as Tab's
-      -- 'completePath': the dropdown goes on inside them rather than
-      -- closing on the exact match.
-      full <- liftIO (slashDir (entries !! i))
-      let line' = replacePathPrefix line full
+          -- The value lands as is — directories already trail their slash
+          -- from 'loadDropdownEntries'.
+          line' = replacePathPrefix line (entries !! i)
       put st { stInput = E.editorText Input (Just 1) (Text.pack line') }
       refreshDropdown
       followInput
@@ -1049,10 +1077,13 @@ toWritten = merge . map one
 -- caret going dark standing on one). Splits into runs at the glyph the
 -- same way 'toWritten' does, since it's answering the same question one
 -- level down: not "is this a box" for the engine, but "is this a box" for
--- the renderer.
-renderInputContent :: [Text] -> Widget Name
-renderInputContent ts = hBox (map renderRun (mergeRuns (concatMap Text.unpack ts)))
+-- the renderer. The ghost ('ghostSuffix') rides as the last run, dimmed:
+-- past the cursor, so it cannot move the caret, and exactly at it, which
+-- is where an accept would land it.
+renderInputContent :: [Text] -> String -> Widget Name
+renderInputContent ts ghost = hBox (map renderRun (mergeRuns (concatMap Text.unpack ts)) <> [ghostRun])
   where
+    ghostRun = withAttr (attrName "dim") (str ghost)
     renderRun (True, s)  = withAttr (attrName "placeholder") (str s)
     renderRun (False, s) = str s
 
@@ -1192,14 +1223,19 @@ slashDir p = do
 -- | Every match, full-path, for the dropdown to list — '[]' both for "no
 -- directory"/"nothing matches" and for "one match, and it's already typed
 -- in full," which the dropdown treats identically: nothing left to offer.
+--
+-- **Values already carry a directory's slash**: display strips it back
+-- off, Tab and Enter land the value as is, and the ghost preview
+-- ('inputGhost') reads exactly what an accept would write — one place
+-- decides, nowhere derives it twice.
 loadDropdownEntries :: String -> IO [String]
 loadDropdownEntries prefix = do
   matches <- matchingEntries prefix
   let name = takeFileName prefix
       dir  = takeDirectory prefix
-  pure $ case matches of
-    [m] | m == name -> []
-    ms -> map (joinDir dir) ms
+  case matches of
+    [m] | m == name -> pure []
+    ms -> mapM (slashDir . joinDir dir) ms
 
 joinDir :: FilePath -> String -> String
 joinDir "." name = name
