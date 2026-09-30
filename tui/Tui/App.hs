@@ -1088,30 +1088,35 @@ refreshOfferDropdown = do
             ov = statementOfferView (stSession st) before after
             new = buildOfferDropdown (stAutoSelect st) col ov
             oldRows = maybe [] odRows (stOfferDropdown st)
-        put st { stOfferDropdown = new, stDismissed = Nothing, stRecoveredSpan = recoveredSpan ov }
+        put st { stOfferDropdown = new, stDismissed = Nothing, stRecoveredSpan = underlineSpan ov }
         -- Same rule as 'refreshDropdown': new rows start at the top, same
         -- rows keep their scroll — above the line, at the bottom instead.
         if maybe [] odRows new /= oldRows
           then (if popupAbove st then vScrollToEnd else vScrollToBeginning) (viewportScroll OfferPopup)
           else pure ()
 
--- | The offset range 'renderInputContent' underlines — his
--- `.jalivert/TUI.md` #7, a visible cue that the line (or the literal under
--- the cursor) will not run as written. Exactly 'RecoveryView's own span: the
--- whole partial word for a bare word, or the tagged literal's typed content
--- up to the cursor when inside one.
+-- | The offset range 'renderInputContent' underlines — his `.jalivert/
+-- TUI.md` #7, a visible cue that the line (or the literal under the
+-- cursor) will not run as written. Reads 'RecoveryView's own
+-- @recoveredSpan@ field directly (MS7 phase 143, `9fbe469` — his ask filed
+-- in `.jalivert/REPORT.md`, "fence to fence" and past the cursor too, both
+-- landed) rather than deriving anything from 'recoveredColumn'/
+-- 'recoveredText', which stay exactly what they always were: what an
+-- accepted completion overwrites, a different question from what to
+-- underline — a literal's own recovered span covers the tag and both
+-- fences, but accepting a candidate for its content must never eat the
+-- tag along with it. This function is named apart from the field itself
+-- ('recoveredSpan' the field, 'underlineSpan' the function) since
+-- 'RecoveryView (..)' brings the field's own name into scope too.
 --
--- **Not the whole literal, fence to fence.** 'RecoveryView' reports "the
--- unit as written, up to the cursor" (its own haddock) — nothing after the
--- cursor, and not the tag or backtick either. Getting the true full span
--- would need the engine to say where the literal's own fence closes;
--- finding it here by rescanning the buffer would be exactly the
--- grammar-knowledge-in-two-places problem `.jalivert/NOTES.md` named as the
--- thing to get rid of, not add to. Starting simple, per his own words.
-recoveredSpan :: OfferView -> Maybe (Int, Int)
-recoveredSpan ov = case offeredRecovered ov of
+-- **One-indexed, inclusive-start/exclusive-end, converted once here**:
+-- the field is "the first character, counting from 1, and one past the
+-- last" (its own haddock) — @(s, e)@ becomes the zero-indexed
+-- @(from, length)@ 'mergeRuns' wants: @(s - 1, e - s)@.
+underlineSpan :: OfferView -> Maybe (Int, Int)
+underlineSpan ov = case offeredRecovered ov of
   Nothing -> Nothing
-  Just r  -> Just (recoveredColumn r - 1, length (recoveredText r))
+  Just r  -> let (s, e) = recoveredSpan r in Just (s - 1, e - s)
 
 -- | The row source depends on which question was actually answered.
 --
