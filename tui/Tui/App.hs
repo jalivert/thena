@@ -1,15 +1,18 @@
 -- | The TUI's entry point.
 --
--- **Four bordered panes** — a wide REPL on the left, proof-term/goals/
+-- **Four panes, no borders** — a wide REPL on the left, proof-term/goals/
 -- machine stacked narrower on the right (geometry from `MS7-CLI`, his
--- instruction: the layout only, never its code). Each pane is a real
--- four-sided border in its own neon accent, its title set into the top
--- border, never a full-pane fill — his correction, 2026-09-29, after the
--- first pass used pale tints across the whole pane. **Borders added
--- `.jalivert/TUI.md` #8**, replacing the left-edge-glyph-only scheme:
--- panes now close on all four sides, with a stage-colored one-cell gap
--- both between panes and around the whole layout, so the dark backdrop
--- reads as a frame at every level, not just between panes.
+-- instruction: the layout only, never its code). Separation is a dark
+-- panel fill plus one neon accent as a left edge, never a border glyph and
+-- never a full-pane fill — his correction, 2026-09-29, after the first
+-- pass used pale tints across the whole pane. **A real border was tried
+-- for `.jalivert/TUI.md` #8 and withdrawn the same session** — what he
+-- actually wanted was the panes not touching the screen's own edge, the
+-- backdrop visible around the outside, not a drawn box around each pane.
+-- That's a one-cell stage-colored margin around the whole layout (see
+-- `draw`'s own `padAll 1`), on top of the gap the panes already had
+-- between each other — the accent-edge-plus-title scheme itself is
+-- unchanged.
 --
 -- **Views are pulled, not pushed** — `developmentView`/`machineView` are
 -- recomputed from `stSession` on every draw, never stored.
@@ -52,7 +55,6 @@ import Brick.Widgets.Edit
   , renderEditor
   )
 import qualified Brick.Widgets.Edit as E
-import Brick.Widgets.Border (borderAttr, borderWithLabel)
 import Brick.BChan (newBChan, writeBChan)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad.IO.Class (liftIO)
@@ -413,32 +415,41 @@ draw st = dropdownLayer st <> offerDropdownLayer st <> [padAll 1 (hBox [replColu
           , withAttr (attrName "panel") (pane "machine"   MachineVP   (padAll 1 (vBox (map str (renderMachineView machine)))))
           ]
 
-    -- | A real four-sided border in the pane's own accent color, the label
-    -- set into the top border rather than a separate row above the content
-    -- — his `.jalivert/TUI.md` #8: a left-edge glyph and a title line on
-    -- their own "lacks certain clarity" without something closing the
-    -- other three sides. 'clickable' stays on the outermost widget so a
-    -- scroll-wheel event over the border itself still resolves to this
-    -- pane's 'Name', same as before.
+    -- | The accent edge, a title strip, then the content — never a full
+    -- fill, per his correction. 'clickable' so a scroll-wheel event over
+    -- this pane resolves to its own 'Name', not the row under it.
     --
-    -- **'overrideAttr' reuses the pane's existing 'edge.<key>' accent for
-    -- 'borderAttr'** rather than a second copy of the same four colors
-    -- under a new name — Brick's own mechanism for "this subtree's border
-    -- color," confirmed by reading 'Brick.Widgets.Border': every border
-    -- glyph it draws looks up the literal name @border@, so a plain
-    -- 'withAttr' around a per-pane color would never reach it; 'overrideAttr'
-    -- is what actually redirects that lookup, locally, per pane.
+    -- **A real border was tried here for `.jalivert/TUI.md` #8 and
+    -- withdrawn the same session** — his own correction: what he actually
+    -- wanted was the panes not touching the *screen's* edge, backdrop
+    -- visible around the outside, not a drawn box around each one. The
+    -- accent-edge-plus-title scheme stays exactly as it was; only 'draw's
+    -- own outer margin (see 'padAll 1' there) is new.
     --
-    -- **The label keeps its own attr and its own left/right space** —
-    -- 'padLeftRight 1' the same one character of breathing room the old
-    -- separate title row had, so "repl" doesn't sit flush against the
-    -- border glyphs either side of it.
+    -- **The edge is a glyph, not a solid cell** — his correction,
+    -- 2026-09-29: a full-cell fill read as too thick, and a cell can't be
+    -- fractional, so it's a left three-eighths block ('▎', same glyph
+    -- `MS7-CLI` used for this) in the accent color against the panel
+    -- background, still 'hLimit 1' wide.
+    --
+    -- **The edge bar sits outside the 'viewport', not inside it**, same
+    -- reasoning as the title below. **And so does the title, as of this
+    -- session** — `.jalivert/TUI.md`'s item 2: it used to be the first
+    -- line of the 'vBox' that went *inside* the viewport, so it scrolled
+    -- away with the content the moment the repl pane held enough turns to
+    -- scroll at all. Only 'content' is inside the viewport now; the title
+    -- is a fixed one-line header above it, sized by the outer 'vBox' like
+    -- any other widget, the same move already made once for the edge bar's
+    -- own infinite-height crash.
     pane key vp content =
       clickable vp $
-        overrideAttr borderAttr (attrName ("edge." <> key)) $
-          borderWithLabel
-            (withAttr (attrName ("title." <> key)) (padLeftRight 1 (str key)))
-            (viewport vp Vertical content)
+        hBox
+          [ withAttr (attrName ("edge." <> key)) (hLimit 1 (fill '▎'))
+          , vBox
+              [ withAttr (attrName ("title." <> key)) (padLeftRight 1 (str key))
+              , viewport vp Vertical content
+              ]
+          ]
 
 -- | One turn, prompt (if any) then output, then a blank row — one empty
 -- line between turns, his call, so each turn visibly ends before the next
