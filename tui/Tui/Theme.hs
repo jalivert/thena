@@ -73,7 +73,16 @@ neonPinkDark = Theme
   , themeMachine = rgb 255 94 196
   , themeFold    = rgb 40 12 32
   , themeSplice  = rgb 30 20 14
-  , themePopup   = rgb 56 26 42
+  -- **Darkened, 2026-09-30**: `.jalivert/TUI.md` #22, "way too purple...
+  -- like someone put a dim purple filter over my eyes." A dropdown covers a
+  -- real chunk of the screen while it's open, and at `(56, 26, 42)` that
+  -- chunk was a mid-tone purple wash competing with the panel and the
+  -- accents both. Same move as `themePanel`'s own 2026-09-30 darkening
+  -- (half the lift, roughly, over the surface below it) rather than a new
+  -- rule: still a real step up from `themePanel` so it reads as its own
+  -- surface, just nowhere near loud enough to be the thing the eye lands
+  -- on — the selected row's own accent bar and the text are.
+  , themePopup   = rgb 28 16 22
   , themeSoft    = rgb 255 140 240
   }
 
