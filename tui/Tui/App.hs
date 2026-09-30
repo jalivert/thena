@@ -535,6 +535,10 @@ popupTotalH n = popupVisibleH n + popupFarBlanks n
 -- and distance to the active line matter, so a flipped box is not the same
 -- list merely translated. Navigation swaps to match (see the arrow-key
 -- clauses): Down always travels visually down.
+--
+-- **One row of air from the input, his `.jalivert/TUI.md` #15** — below it
+-- the box opens a row lower, above it a row higher. Distance, not a drawn
+-- widget: below shows empty pane, above the document behind.
 popupAt :: St -> Int -> Int -> Name -> [PopupRow] -> [Widget Name]
 popupAt st col n vp rows = case stInputExtent st of
   Nothing -> []
@@ -544,7 +548,7 @@ popupAt st col n vp rows = case stInputExtent st of
       content = renderPopup vp (if above then PadTop else PadBottom) (if above then reverse rows else rows)
       popupCol   = max 0 (locationColumn (extentUpperLeft inputExt) + col - dropdownMarkerWidth)
       inputRow   = locationRow (extentUpperLeft inputExt)
-      popupRow = if above then inputRow - popupTotalH n else inputRow + 1
+      popupRow = if above then inputRow - popupTotalH n - 1 else inputRow + 2
 
 -- | Whether a popup at the input flips above it: past 80% of the pane's
 -- depth, below it otherwise — his rule, 2026-09-29. One helper, called by
