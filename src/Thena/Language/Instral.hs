@@ -62,45 +62,78 @@ operandHead t = "Operand:" ++ renderTy t
 instralRules :: [RuleBase] -> [E.Rule]
 instralRules bs = statements bs ++ operandProductions bs
 
--- | Every production whose head is 'statementHead'.
-statements :: [RuleBase] -> [E.Rule]
-statements bs = opProductions ++ callProductions bs
-
--- | One production per op: its keyword, then a slot per declared parameter.
+-- | One statement form: the word that opens it, the type of each slot, and the
+-- type it produces if it produces one.
 --
--- **Arity comes from the signature, not from a table here.** An op that gains a
--- parameter gains a slot, and nothing in this module is edited.
-opProductions :: [E.Rule]
-opProductions =
-  [ E.Rule (word ++ "/" ++ show (length ps)) statementHead
-      (E.Literal word : concatMap slot ps) []
+-- **Every production in this module comes from this one table** (MS7 phase 139).
+-- Before it there were two walks — one building the statement productions and a
+-- second recovering each slot's type by reading the nonterminal's /name/ back
+-- out of the rules the first had generated. That inverse could only ever work
+-- against a hardcoded list of ten types, which is why a @List Core@ slot had no
+-- productions: it could not be spelled back. The table carries the 'Ty' forward
+-- instead, and the inverse is gone.
+data Form = Form
+  { formWord   :: String
+  , formParams :: [Ty]
+  , formResult :: Maybe Ty
+    -- ^ 'Nothing' where the form leaves nothing to bind, **and where a rule did
+    -- not declare one**. An undeclared rule genuinely does not say what it
+    -- produces, so it is not offered inside a slot — the same asymmetry
+    -- 'formParams' has.
+  }
+  deriving (Eq)
+
+-- | Every form the loaded bases make writable.
+forms :: [RuleBase] -> [Form]
+forms bs = opForms ++ ruleForms bs
+
+-- | One form per op. **Arity comes from the signature, not from a table here.**
+-- An op that gains a parameter gains a slot, and nothing in this module is
+-- edited.
+opForms :: [Form]
+opForms =
+  [ Form word ps r
   | (word, op) <- opWords
-  , let Signature ps _ = Ops.signatureOf op
+  , let Signature ps r = Ops.signatureOf op
   ]
 
 -- | A rule in a loaded base may be called by name, with one slot per parameter.
 --
 -- **Its declared type narrows the slots when it has one**; where the file
--- declared none the slots are untyped, which is 'AnyOperand' below and offers
+-- declared none the slots are untyped, which is 'anyType' below and offers
 -- everything. That asymmetry is the truth: an undeclared rule genuinely does not
 -- say what it wants.
-callProductions :: [RuleBase] -> [E.Rule]
-callProductions bs =
+ruleForms :: [RuleBase] -> [Form]
+ruleForms bs =
   nub
-    [ E.Rule (nm ++ "/" ++ show (length params)) statementHead
-        (E.Literal nm : concatMap slot (typesFor nm (length params))) []
+    [ Form nm (paramsFor nm arity) (resultFor nm arity)
     | r <- allCallable bs
     , let GlobalName nm = Ops.ruleName r
-    , let params = Ops.ruleParams r
+    , let arity = length (Ops.ruleParams r)
     ]
   where
     declared = [ (nm, sg) | b <- bs, (nm, sg) <- baseSignatures b ]
-    typesFor nm arity = case lookup nm declared of
-      Just (Signature ps _) | length ps == arity -> ps
-      -- No declaration, or one whose arity disagrees with this clause: the
-      -- slots stand, untyped. **Not dropped** — the arity is what the clause
-      -- says, and a wrong signature must not silence the offer.
-      _ -> replicate arity anyType
+
+    -- No declaration, or one whose arity disagrees with this clause: the slots
+    -- stand, untyped. **Not dropped** — the arity is what the clause says, and a
+    -- wrong signature must not silence the offer.
+    paramsFor nm arity = case agreeing nm arity of
+      Just (Signature ps _) -> ps
+      Nothing               -> replicate arity anyType
+
+    resultFor nm arity = agreeing nm arity >>= \(Signature _ r) -> r
+
+    agreeing nm arity = case lookup nm declared of
+      Just sg@(Signature ps _) | length ps == arity -> Just sg
+      _                                            -> Nothing
+
+-- | Every production whose head is 'statementHead'.
+statements :: [RuleBase] -> [E.Rule]
+statements bs =
+  [ E.Rule (formWord f ++ "/" ++ show (length (formParams f))) statementHead
+      (E.Literal (formWord f) : concatMap slot (formParams f)) []
+  | f <- forms bs
+  ]
 
 -- | The type an undeclared slot stands at. 'TVar' with an index no signature
 -- mints, so it renders as a letter and cannot collide with a real scheme
@@ -116,44 +149,93 @@ anyType = TVar 25
 slot :: Ty -> [E.Symbol]
 slot t = [E.Nonterminal (operandHead t)]
 
--- | What may stand at a slot of each type that any production mentions.
+-- | The nonterminal a comma-separated run of this element type parses at.
+--
+-- Its own head rather than an inlined repetition, because the chart offers
+-- whatever an item is waiting for: standing after @[a@ the item is
+-- @Elements -> Operand . \",\" Elements@, so @,@ and @]@ are exactly what comes
+-- back. **Right-recursive** for that reason — a left-recursive run would have
+-- the comma waiting on the wrong side of the dot.
+elementsHead :: Ty -> String
+elementsHead t = "Elements:" ++ renderTy t
+
+-- | What may stand at a slot of each type any form mentions.
 --
 -- **Built only for the types in play**, so the grammar has no productions for a
--- type nothing asks for.
+-- type nothing asks for — and, since 'shapes' walks into a list's or a pair's
+-- components, @List (Name, Core)@ brings @Name@ and @Core@ with it.
 operandProductions :: [RuleBase] -> [E.Rule]
-operandProductions bs =
-  concat [ forType t | t <- nub (concatMap slotsOf (statements bs)) ]
+operandProductions bs = concatMap forType (shapes (concatMap formParams fs))
   where
-    forType t = case t of
+    fs = forms bs
+
+    forType t = written t ++ nested t ++ compound t
+
+    -- **A literal where the type is ground, and a name everywhere.** The name
+    -- case is not a fallback: a local bound earlier in the body stands at any
+    -- slot whatever its type, so @f xs@ is as writable as @f [a, b]@.
+    written t = name t : case t of
       TString -> [ lit t "string" stringRegex ]
-      TName   -> [ lit t "name" identRegex ]
       TInt    -> [ lit t "int" numberRegex ]
       TChar   -> [ lit t "char" charRegex ]
       TBool   -> [ word t "true", word t "false" ]
-      -- The four abstract types and everything else are written as a name bound
-      -- earlier in the body, or as a literal of the object language. A region is
-      -- another grammar's business and enters as its own nonterminal, which the
-      -- caller supplies; here it is the name case that matters, and it is the
-      -- one a completion has anything to say about.
-      _       -> [ lit t "name" identRegex ]
+      _       -> []
 
-    slotsOf r =
-      [ ty | E.Nonterminal n <- E.ruleBody r, Just ty <- [typeOfHead n] ]
+    -- **A nested call is the same table read at its result** (MS7 phase 139).
+    -- @( word … )@ is 'Thena.Instral.Concrete.RawNested', which resolution
+    -- hoists into @RhsOp (RawOp word …)@ — the very op-or-rule dispatch a
+    -- top-level statement goes through. So what may be called inside a slot is
+    -- every form whose result is that slot's type, with its own slots after it,
+    -- and there is nothing to write down twice.
+    nested t =
+      [ E.Rule (renderTy t ++ "/(" ++ formWord f ++ ")") (operandHead t)
+          ( E.Literal "(" : E.Literal (formWord f)
+              : concatMap slot (formParams f) ++ [E.Literal ")"] ) []
+      | f <- fs
+      , formResult f == Just t
+      ]
 
-    -- The inverse of 'operandHead'. **Kept beside it on purpose**: the two are
-    -- one encoding and a reader should meet them together.
-    typeOfHead n = case splitAt (length prefix) n of
-      (p, rest) | p == prefix -> lookup rest spelled
-      _                       -> Nothing
-      where prefix = "Operand:"
+    compound t = case t of
+      TList a ->
+        [ rule t "[]" [E.Literal "[", E.Literal "]"]
+        , rule t "[..]" [E.Literal "[", E.Nonterminal (elementsHead a), E.Literal "]"]
+        , E.Rule (renderTy a ++ "/one") (elementsHead a) (slot a) []
+        , E.Rule (renderTy a ++ "/more") (elementsHead a)
+            (slot a ++ [E.Literal ",", E.Nonterminal (elementsHead a)]) []
+        ]
+      TPair a b ->
+        [ rule t "pair"
+            ( E.Literal "(" : slot a ++ [E.Literal ","] ++ slot b ++ [E.Literal ")"] ) ]
+      -- **An @Option@ has no shape of its own**: @some x@ and @none@ are ops, so
+      -- they reach a slot as @( some x )@ and @( none )@ through 'nested' — which
+      -- is also the only spelling "Thena.Syntax.Parser" accepts, since a bare
+      -- word at an operand is a reference and not a call.
+      _ -> []
 
-    spelled = [ (renderTy t, t) | t <- candidates ]
-    candidates =
-      [ TString, TName, TInt, TChar, TBool, TSurface, TCore, TDevelopment
-      , TLevel, anyType ]
-
+    rule t nm body = E.Rule (renderTy t ++ "/" ++ nm) (operandHead t) body []
     lit t nm re = E.Rule (renderTy t ++ "/" ++ nm) (operandHead t) [E.Scan nm re] []
     word t w    = E.Rule (renderTy t ++ "/" ++ w) (operandHead t) [E.Literal w] []
+    name t      = lit t "name" identRegex
+
+-- | Every type a slot may stand at, given the types the forms ask for directly:
+-- those, and the components of any list, pair or option among them.
+--
+-- **A function type is not walked into.** Its argument types are not slots of
+-- anything — what stands at a higher-order slot is a name — so walking it would
+-- mint operand productions for types nothing can be written at.
+shapes :: [Ty] -> [Ty]
+shapes = go []
+  where
+    go done [] = reverse done
+    go done (t : rest)
+      | t `elem` done = go done rest
+      | otherwise     = go (t : done) (parts t ++ rest)
+
+    parts t = case t of
+      TList a   -> [a]
+      TOption a -> [a]
+      TPair a b -> [a, b]
+      _         -> []
 
 -- The token classes. Written here rather than taken from a grammar file because
 -- these are Thena's own lexemes and no object language declares them.

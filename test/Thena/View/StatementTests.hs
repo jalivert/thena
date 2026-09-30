@@ -18,13 +18,15 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Driver (Session, oneLine)
 import Thena.Files (following, startingSession)
-import Thena.Instral.Ops (signatureOf)
+import Thena.Instral.Ops (Pattern (..), Rule (..), signatureOf)
 import Thena.Instral.Type (Signature (..), Ty (..))
 import Thena.Language.Earley (placeholderChar)
 import Thena.Language.Instral (instralRules, operandHead, statementHead)
 import qualified Thena.Language.Earley as E
-import Thena.Rules (opWords)
+import Thena.Core.Term (GlobalName (..))
+import Thena.Rules (RuleBase, baseSignatures, opWords, ruleBase)
 import Thena.View (sessionRules, statementOfferView)
+import Thena.View.Chart (offerAt)
 import Thena.View.Chart
   ( OfferView (..)
   , RecoveryView (..)
@@ -51,6 +53,13 @@ tests =
         , testCase "and standing on a box inside it, what may fill the box" inBoxInLiteral
         , testCase "a word after a finished literal is helped, context-free" afterLiteral
         , testCase "and a line that parses is never marked recovered" notRecovered
+        ]
+    , testGroup "operand shapes (phase 139)"
+        [ testCase "a slot takes a nested call, and only what returns its type" nested
+        , testCase "the call's own slot narrows to its parameter" nestedNarrows
+        , testCase "a name stands at a ground slot, beside the literal" nameAnywhere
+        , testCase "a List slot is written as a list, and the run offers , or ]" listSlot
+        , testCase "a pair slot is written as a pair" pairSlot
         ]
     ]
 
@@ -223,3 +232,102 @@ stuck = do
       at @?= 0
       if null expected then assertFailure "stuck with nothing expected" else pure ()
       offeredOptions o @?= []
+
+-- | **The phase's own assertion.** @( word … )@ at a slot is
+-- 'Thena.Instral.Concrete.RawNested', which resolution hoists into
+-- @RhsOp (RawOp word …)@ — the same dispatch a top-level statement goes
+-- through. So what may be called inside a @Core@ slot is every form whose
+-- /result/ is @Core@, and nothing else.
+--
+-- @app-head@ is the control and it is the one that matters: it is an op, it is
+-- offered at the start of a line, and its result is @Surface@ — so it must not
+-- appear here. Checked against 'signatureOf' rather than against a list written
+-- out, so the assertion is maintained by different code from the code it checks.
+nested :: IO ()
+nested = do
+  s <- withLC
+  let opened = offerIn s "fill "
+  if ALiteralSymbol "(" `elem` offeredOptions opened then pure ()
+    else assertFailure ("expected a nested call to be offerable: " <> show (offeredOptions opened))
+  let inside = [ w | ALiteralSymbol w <- offeredOptions (offerIn s "fill ( ") ]
+      -- **Both tables, because a word may live in either.** @fresh-universe@ is
+      -- no op at all — it is a rule the standard base declares as returning a
+      -- @Core@ — and a first draft of this test failed on it while the grammar
+      -- was right. A statement word is whatever the op table or a loaded base
+      -- says it is, and so is a nested call's.
+      resultOf w =
+        [ r | (w', op) <- opWords, w' == w, let Signature _ r = signatureOf op ]
+          ++ [ r | b <- sessionRules s, (w', Signature _ r) <- baseSignatures b, w' == w ]
+  [ w | w <- inside, Just TCore `notElem` resultOf w ] @?= []
+  if "goal" `elem` inside && "typeof" `elem` inside then pure ()
+    else assertFailure ("expected goal and typeof among " <> show inside)
+  if "app-head" `elem` inside
+    then assertFailure "app-head returns Surface and must not be callable at a Core slot"
+    else pure ()
+
+-- | Inside the call, the slot is the /called/ form's parameter, not the outer
+-- one's — which is the same narrowing 'narrows' asserts one level up.
+nestedNarrows :: IO ()
+nestedNarrows = do
+  s <- withLC
+  -- @typeof : Core -> Core@, so its own slot wants a Core.
+  let o = offerIn s "fill ( typeof "
+  if ANonterminalSymbol "Operand:Core" `elem` offeredOptions o then pure ()
+    else assertFailure ("expected Operand:Core inside the call: " <> show (offeredOptions o))
+  -- And with the argument written, the call wants closing and nothing else.
+  [ w | ALiteralSymbol w <- offeredOptions (offerIn s "fill ( typeof x ") ] @?= [")"]
+
+-- | A local bound earlier in the body stands at any slot whatever its type, so
+-- the name class is not a fallback for the types with no literal — it belongs at
+-- every slot, beside whatever literal the type does have.
+nameAnywhere :: IO ()
+nameAnywhere = do
+  s <- withLC
+  let at b = offeredOptions (offerIn s b)
+  -- @say : String -> ()@: the string literal class *and* a name.
+  if AScanSymbol "name" `elem` at "say " then pure ()
+    else assertFailure ("expected a name at a String slot: " <> show (at "say "))
+  if AScanSymbol "string" `elem` at "say " then pure ()
+    else assertFailure ("expected the string class too: " <> show (at "say "))
+
+-- | A base that declares a @List Core@ parameter, which nothing shipped does —
+-- **the measurement this phase rests on**: no op in the table and no signature in
+-- @rules\/standard.thena.rules@ mentions a list, a pair or an option parameter, so
+-- the shapes have no shipped caller and a fixture is the only way to exercise
+-- them. Built for the principled implementation, per his MS6\/MS7 exception.
+fixture :: [(String, Signature)] -> [String] -> RuleBase
+fixture sigs names =
+  ruleBase "fixture" Nothing "" sigs []
+    [ Rule (GlobalName nm) [PWild] [] [] | nm <- names ]
+
+askIn :: Session -> RuleBase -> String -> [SymbolView]
+askIn s b before =
+  offeredOptions
+    (offerAt (instralRules (sessionRules s ++ [b])) (E.StartAt statementHead)
+       [WrittenText before] [])
+
+listSlot :: IO ()
+listSlot = do
+  s <- withLC
+  let b = fixture [("takes-list", Signature [TList TCore] Nothing)] ["takes-list"]
+      words' before = [ w | ALiteralSymbol w <- askIn s b before ]
+  -- The list opens, and a name still stands there because a local may hold one.
+  if ALiteralSymbol "[" `elem` askIn s b "takes-list " then pure ()
+    else assertFailure ("expected [ at a List slot: " <> show (askIn s b "takes-list "))
+  -- **Right-recursive on purpose**: standing after one element the item is
+  -- @Elements -> Operand . "," Elements@, so both the comma and the close come
+  -- back — which is what a frontend needs to draw after @[x@.
+  words' "takes-list [ x " @?= ["]", ","]
+  -- And the elements are the element type's operands, not the list's.
+  if ANonterminalSymbol "Operand:Core" `elem` askIn s b "takes-list [ " then pure ()
+    else assertFailure ("expected Operand:Core inside the list: " <> show (askIn s b "takes-list [ "))
+
+pairSlot :: IO ()
+pairSlot = do
+  s <- withLC
+  let b = fixture [("takes-pair", Signature [TPair TName TCore] Nothing)] ["takes-pair"]
+      words' before = [ w | ALiteralSymbol w <- askIn s b before ]
+  words' "takes-pair " @?= ["("]
+  words' "takes-pair ( x " @?= [","]
+  words' "takes-pair ( x , y " @?= [")"]
+
