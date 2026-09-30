@@ -203,6 +203,23 @@ data St = St
     -- 'ghostAt' ever shows anything. 'True' is the standing behaviour
     -- (`.jalivert/TUI.md` #17/#21); same as 'stAutoSelect', a toggle on top
     -- of the default, not a new one.
+  , stHistory :: [String]
+    -- ^ every line actually submitted, oldest first — 'recordHistory'
+    -- appends, blank lines and an immediate repeat of the last entry
+    -- excluded. In-memory only, this session's own; not the dotfile
+    -- 'Tui.Config' persists, and not asked for.
+  , stHistoryPos :: Maybe Int
+    -- ^ 'Nothing' while editing live; 'Just i' while Up/Down is browsing
+    -- 'stHistory', @i@ the index currently loaded into 'stInput'. His
+    -- ruling on the dropdown/history conflict, 2026-09-30: Up/Down still
+    -- browses an open dropdown first exactly as it always has
+    -- ('navigateCompletion'); history only takes the keys once nothing is
+    -- left to navigate there (Esc, or nothing offered).
+  , stHistoryDraft :: String
+    -- ^ the live line 'historyBack' interrupted, restored by
+    -- 'historyForward' on the way back past the newest entry — the same
+    -- "what you were typing before you went looking" a shell keeps.
+    -- Meaningless while 'stHistoryPos' is 'Nothing'.
   }
 
 stInputL :: Lens' St (Editor Text Name)
@@ -235,6 +252,9 @@ runTui = do
         , stRecoveredSpan = Nothing
         , stAutoSelect  = autoSelect0
         , stWhisperOn   = cfgWhisperOn cfg
+        , stHistory     = []
+        , stHistoryPos  = Nothing
+        , stHistoryDraft = ""
         , stInputExtent = Nothing
         , stPaneExtent  = Nothing
         }
@@ -783,13 +803,19 @@ handleEventInner (VtyEvent (V.EvKey V.KEnter [])) = do
       acceptOfferRow st od ins
     _ -> do
       let line = concatMap Text.unpack (getEditContents (stInput st))
+          -- | Folds this submission into 'stHistory' before dispatch, so
+          -- every branch below (TUI-local or engine-bound alike) starts
+          -- from a state that already has it — a submitted line is a
+          -- submitted line, `:theme` included, his ask: "commands/instral
+          -- programs I submitted."
+          st0 = recordHistory line st
       case words line of
         [":theme", name] | Just th <- themeByName name -> do
-          let st' = st { stTheme = th }
+          let st' = st0 { stTheme = th }
           liftIO (saveConfig (configOf st'))
           appendTurn st' Nothing ["theme: " <> name]
         [":fold", mode] | mode `elem` ["on", "off"] ->
-          appendTurn st { stFoldOn = mode == "on" } Nothing ["fold: " <> mode]
+          appendTurn st0 { stFoldOn = mode == "on" } Nothing ["fold: " <> mode]
         -- | Two more TUI-local toggles, his `.jalivert/TUI.md` #23 — same
         -- standing as `:theme`/`:fold` (not instral, so special-casing them
         -- here is his own ruling already covers this). Disabling either is
@@ -799,11 +825,11 @@ handleEventInner (VtyEvent (V.EvKey V.KEnter [])) = do
         -- **These two, plus the theme, persist to 'Tui.Config''s dotfile**
         -- (his ask, 2026-09-30) — `:fold` doesn't, scope as asked.
         [":preselect", mode] | mode `elem` ["on", "off"] -> do
-          let st' = st { stAutoSelect = mode == "on" }
+          let st' = st0 { stAutoSelect = mode == "on" }
           liftIO (saveConfig (configOf st'))
           appendTurn st' Nothing ["preselect: " <> mode]
         [":whisper", mode] | mode `elem` ["on", "off"] -> do
-          let st' = st { stWhisperOn = mode == "on" }
+          let st' = st0 { stWhisperOn = mode == "on" }
           liftIO (saveConfig (configOf st'))
           appendTurn st' Nothing ["whisper: " <> mode]
         -- | `:help` runs through the engine as usual (below) — its table is
@@ -813,8 +839,8 @@ handleEventInner (VtyEvent (V.EvKey V.KEnter [])) = do
         -- `:help` can't know they exist; 'tuiHelpLines' is appended here
         -- instead of touching the engine's table for two commands that are
         -- only ever true from inside this frontend.
-        [":help"] -> runEngineLine st line tuiHelpLines
-        _ -> runEngineLine st line []
+        [":help"] -> runEngineLine st0 line tuiHelpLines
+        _ -> runEngineLine st0 line []
 handleEventInner (VtyEvent (V.EvKey V.KEsc [])) = do
   st <- get
   case (stDropdown st, stOfferDropdown st) of
@@ -955,11 +981,13 @@ acceptOfferRow st od ins = do
   followInput
 
 -- | Arrow-key navigation only takes over the keypress while a dropdown is
--- actually showing candidates — otherwise the original event falls through
--- to the editor as normal (a single-line editor's own binding for Up/Down:
--- start or end of line). ':load''s own dropdown takes priority (mutually
--- exclusive with the offer dropdown by construction, so this only ever
--- matters in principle).
+-- actually showing candidates — otherwise Up/Down recall submission
+-- history instead (his ruling on the conflict, 2026-09-30: the dropdown
+-- keeps first claim on the keys exactly as it always has; history only
+-- gets them once nothing is left to navigate there — Esc, or nothing
+-- offered). ':load''s own dropdown takes priority (mutually exclusive
+-- with the offer dropdown by construction, so this only ever matters in
+-- principle).
 navigateCompletion
   :: (Maybe Int -> Int -> Int)
   -> ([Int] -> Maybe Int -> Maybe Int)
@@ -975,15 +1003,69 @@ navigateCompletion moveLoad moveOffer ev = do
     -- names a *kind* of thing, not text an accept could write.
     (_, Just od) | not (null (selectableIxs (odRows od))) ->
       put st { stOfferDropdown = Just od { odSelected = moveOffer (selectableIxs (odRows od)) (odSelected od) } }
-    -- | This path's own bug (his `.jalivert/TUI.md` #19): an offer with
-    -- nothing selectable — a lone hint row, e.g. standing on a name's own
-    -- placeholder box — falls all the way through to moving the cursor,
-    -- same as no dropdown at all. Every *other* input-mutating path in this
-    -- file refreshes both dropdowns afterward; this was the one that
-    -- didn't, so a stale dropdown stood over wherever the cursor landed
-    -- until the next real edit. Same two calls the ordinary catch-all ends
-    -- with.
-    _ -> Brick.zoom stInputL (handleEditorEvent ev) >> followInput >> refreshDropdown >> refreshOfferDropdown
+    -- | Nothing left to navigate — the dropdown's own bug fix (his
+    -- `.jalivert/TUI.md` #19, an offer with nothing selectable used to
+    -- fall through without refreshing either dropdown) plus the new case:
+    -- the real key identity, not 'moveLoad'/'moveOffer' (which are
+    -- pre-flipped for the popup's own screen direction, 'popupAbove' —
+    -- history's "older"/"newer" means the same thing regardless of where
+    -- the popup would have drawn). Anything that isn't literally Up or
+    -- Down here falls to the plain editor binding same as before — this
+    -- function is only ever called with one of the two, but the catch-all
+    -- keeps the fallback honest without assuming that from outside.
+    _ -> case ev of
+      VtyEvent (V.EvKey V.KUp [])   -> historyBack
+      VtyEvent (V.EvKey V.KDown []) -> historyForward
+      _ -> Brick.zoom stInputL (handleEditorEvent ev) >> followInput >> refreshDropdown >> refreshOfferDropdown
+
+-- | Recalls one entry further back in 'stHistory' — the first press saves
+-- the live buffer into 'stHistoryDraft' first, so 'historyForward' has
+-- something to return to. Stops at the oldest entry rather than wrapping,
+-- same as a shell.
+historyBack :: EventM Name St ()
+historyBack = do
+  st <- get
+  let hs = stHistory st
+      line = concatMap Text.unpack (getEditContents (stInput st))
+  case (hs, stHistoryPos st) of
+    ([], _)                 -> pure ()
+    (_, Nothing)             -> loadHistoryAt st (length hs - 1) line
+    (_, Just i) | i > 0      -> loadHistoryAt st (i - 1) (stHistoryDraft st)
+    _                        -> pure ()
+
+-- | The other direction — stepping past the newest entry restores
+-- whatever 'historyBack' interrupted and leaves browsing ('stHistoryPos')
+-- rather than looping back to the oldest.
+historyForward :: EventM Name St ()
+historyForward = do
+  st <- get
+  case stHistoryPos st of
+    Nothing -> pure ()
+    Just i
+      | i + 1 < length (stHistory st) -> loadHistoryAt st (i + 1) (stHistoryDraft st)
+      | otherwise -> do
+          put st
+            { stInput = E.editorText Input (Just 1) (Text.pack (stHistoryDraft st))
+            , stHistoryPos = Nothing
+            , stHistoryDraft = ""
+            }
+          followInput >> refreshDropdown >> refreshOfferDropdown
+
+-- | Loads @'stHistory' st !! i@ into the input and records 'draft' as
+-- what 'historyForward' restores once browsing runs back past the newest
+-- entry — shared by both directions so the draft is only ever captured
+-- once per browsing session, at the moment 'historyBack' first leaves
+-- live editing.
+loadHistoryAt :: St -> Int -> String -> EventM Name St ()
+loadHistoryAt st i draft = do
+  put st
+    { stInput = E.editorText Input (Just 1) (Text.pack (stHistory st !! i))
+    , stHistoryPos = Just i
+    , stHistoryDraft = draft
+    }
+  followInput
+  refreshDropdown
+  refreshOfferDropdown
 
 moveDown :: Maybe Int -> Int -> Int
 moveDown Nothing  _ = 0
@@ -1059,6 +1141,25 @@ tuiHelpLines =
           ["  " ++ spelling ++ replicate (width - length spelling) ' ' ++ "  " ++ gloss]
       | otherwise =
           ["  " ++ spelling, "  " ++ replicate width ' ' ++ "  " ++ gloss]
+
+-- | Folds a just-submitted line into 'stHistory' — shell-style: skipped
+-- when blank (holding Enter on nothing shouldn't pad history) or when
+-- it's an exact repeat of the immediately preceding entry (resubmitting
+-- the same line twice, e.g. re-running the last command, shouldn't
+-- either). Always resets browsing back to live, submission being exactly
+-- what a history session was for; the entry itself is what the *next*
+-- 'historyBack' will now reach.
+recordHistory :: String -> St -> St
+recordHistory line st
+  | all isSpace line = st { stHistoryPos = Nothing, stHistoryDraft = "" }
+  | otherwise = st
+      { stHistory = if lastOf (stHistory st) == Just line then stHistory st else stHistory st ++ [line]
+      , stHistoryPos = Nothing
+      , stHistoryDraft = ""
+      }
+  where
+    lastOf [] = Nothing
+    lastOf xs = Just (last xs)
 
 -- | The slice of 'St' that 'Tui.Config' persists, read off whichever state
 -- a `:theme`/`:preselect`/`:whisper` command just produced.
