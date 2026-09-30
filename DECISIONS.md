@@ -3003,3 +3003,47 @@ is merely tolerated. Teaching the parser to "forgive" a misplaced literal would 
 made it dishonest — it would report a reading that does not exist. Neither is needed:
 the grammar stays strict and truthful, and the help comes from asking a different,
 smaller question.
+
+### The prompt completes what you are writing, and says when it is guessing
+
+*Added 2026-09-30, MS7 phases 139–143.*
+
+Press Tab, or open a dropdown, and the system answers **what may be written here** —
+not from a list of keywords, but from the same tables it dispatches with. Ask at any
+point in a line and you get the words, the token classes and the productions that could
+stand there, narrowed to the type the position wants.
+
+```
+fill                 -- a Core goes here: a name, a call, or a tagged literal
+fill ( typeof        -- inside a call: its own argument, which is a Core
+fill LC`( λ x :      -- inside a literal: ι, from the grammar YOU declared
+h = here             -- a binding
+goto                 -- ...and h is offered here, with its type
+:inf                 -- completes to :infer
+:step                -- on, off, or a number
+```
+
+Four things follow from where the answers come from.
+
+**A slot says what it wants, because a slot is a nonterminal named after its type.**
+*"Argument 2 wants a `Core`"* is not a feature layered on the answer; it is the answer.
+
+**A nested call is offered wherever its result fits.** `fill ( goal )` is suggested
+because `goal` returns a `Core` and `fill` takes one — the same table that dispatches
+the call decides it, so a rule you write today is completable today.
+
+**Inside a tagged literal, your own grammar answers.** The object grammars are part of
+the same chart as the statement syntax, so one line is read once: the type slot of your
+`abs` production offers your `ι`, and nothing had to be told about either.
+
+**An answer that cannot be trusted says so.** When the line does not read, the system
+asks a narrower question about the unit under the cursor and marks the answer
+*recovered* — completing `atta` to `attack` says nothing about whether `attack` may
+stand there, and a frontend is expected to draw it differently. A standalone term at the
+prompt is answered this way on purpose: it is not a legal line, so the help arrives
+marked rather than pretending.
+
+**What it does not do**: a surface or core term — `:infer`'s argument, or
+`` surface`…` `` — gets no completion, because those are the only languages with no
+grammar in the chart. The system says *something goes here* and does not pretend to
+list it.
