@@ -819,7 +819,12 @@ refreshDropdown = do
     Nothing -> put st { stDropdown = Nothing }
     Just prefix -> do
       entries <- liftIO (loadDropdownEntries prefix)
-      let new = if null entries then Nothing else Just (LoadDropdown entries Nothing)
+      -- A shown dropdown always highlights one row (his `.jalivert/TUI.md`
+      -- #9): the first, so Enter on a fresh list accepts rather than
+      -- submitting the partial line — Esc clears it first when submitting
+      -- as typed is what is wanted. Above the line the reversal below puts
+      -- that same first row adjacent to the input.
+      let new = if null entries then Nothing else Just (LoadDropdown entries (Just 0))
           oldRows = maybe [] ldEntries (stDropdown st)
       put st { stDropdown = new }
       -- A new row generation scrolls from the top: the viewport offset
@@ -880,7 +885,11 @@ refreshOfferDropdown = do
 buildOfferDropdown :: Int -> OfferView -> Maybe OfferDropdown
 buildOfferDropdown col ov
   | null allRows = Nothing
-  | otherwise = Just (OfferDropdown allRows Nothing wordStart replaceLen)
+  -- A shown dropdown always highlights one row, the first selectable one
+  -- (his `.jalivert/TUI.md` #9; hints never take an Enter) — in both
+  -- placements, since above the line the reversal renders that same first
+  -- row adjacent to the input. Clearing with Esc still submits as typed.
+  | otherwise = Just (OfferDropdown allRows (listToMaybe (selectableIxs allRows)) wordStart replaceLen)
   where
     bareWord = case offeredRecovered ov of
       Just r -> isNothing (recoveredLanguage r)
