@@ -82,6 +82,10 @@ tests =
         , testCase "instral's own head cannot collide with a language's" headIsNamespaced
         , testCase "recovery keeps the cases the grammar cannot reach" recoveryRemains
         , testCase "a production name is unique across every loaded grammar" productionNamesAreUnique
+        , testCase "a recovered literal's span covers its tag and both fences" literalSpan
+        , testCase "including a production-named tag" namedTagSpan
+        , testCase "and the span counts from the start of the whole entry" spanShifts
+        , testCase "a bare word's span is the word" wordSpan
         ]
     , testGroup "a multi-line entry (phase 140)"
         [ testCase "a binding on the line above puts its name in the offer" boundAbove
@@ -134,7 +138,7 @@ standalone = do
   s <- withLC
   let o = offerIn s "LC`"
   case offeredRecovered o of
-    Just (RecoveryView _ _ (Just "LC")) -> pure ()
+    Just (RecoveryView _ _ (Just "LC") _) -> pure ()
     other -> assertFailure ("expected recovery inside LC, got " <> show other)
   if null (offeredOptions o) then assertFailure "recovered, but offered nothing" else pure ()
 
@@ -152,7 +156,7 @@ wrongSlot = do
   s <- withLC
   let o = offerIn s "say LC`"
   case offeredRecovered o of
-    Just (RecoveryView _ _ (Just "LC")) -> pure ()
+    Just (RecoveryView _ _ (Just "LC") _) -> pure ()
     other -> assertFailure ("expected recovery inside LC, got " <> show other)
   if null (offeredOptions o) then assertFailure "recovered, but offered nothing" else pure ()
 
@@ -195,7 +199,7 @@ afterLiteral = do
   s <- withLC
   let o = offerIn s "LC`x` atta"
   case offeredRecovered o of
-    Just (RecoveryView _ "atta" Nothing) -> pure ()
+    Just (RecoveryView _ "atta" Nothing _) -> pure ()
     other -> assertFailure ("expected a bare-word recovery of atta, got " <> show other)
   [ w | ALiteralSymbol w <- offeredOptions o ] @?= ["attack"]
 
@@ -536,7 +540,7 @@ recoveryRemains = do
   s <- withLC
   let o = offerIn s "fil LC`( \955 x : "
   case offeredRecovered o of
-    Just (RecoveryView _ _ (Just "LC")) -> pure ()
+    Just (RecoveryView _ _ (Just "LC") _) -> pure ()
     other -> assertFailure ("expected recovery inside LC, got " <> show other)
   if ALiteralSymbol "\953" `elem` offeredOptions o then pure ()
     else assertFailure ("expected Ty's base type: " <> show (offeredOptions o))
@@ -579,7 +583,7 @@ commandPrefix = do
   s <- withLC
   [ w | ALiteralSymbol w <- offeredOptions (offerIn s ":inf") ] @?= [":infer"]
   case offeredRecovered (offerIn s ":inf") of
-    Just (RecoveryView 1 ":inf" Nothing) -> pure ()
+    Just (RecoveryView 1 ":inf" Nothing _) -> pure ()
     other -> assertFailure ("expected the colon in the unit, got " <> show other)
   -- The keyword case, which an identifier-only rule would have missed.
   if ALiteralSymbol ":where" `elem` offeredOptions (offerIn s ":whe") then pure ()
@@ -673,3 +677,47 @@ statementUntouched = do
   offeredStuck o @?= Nothing
   if ALiteralSymbol "LC`" `elem` offeredOptions o then pure ()
     else assertFailure "a statement line must be unaffected by the command grammar"
+
+-- | **His ask, 2026-09-30**, relayed through @.jalivert\/REPORT.md@: the underline on
+-- a recovered tagged literal should cover the literal — @LC\`@ through the closing
+-- backtick — and not start one character past the opening fence.
+--
+-- **The tui track filed only the left half of it.** Their entry set aside anything
+-- past the cursor, and the closing fence is past the cursor whenever you are typing
+-- inside the literal. So the span reaches past the cursor, and it is the only part of
+-- an offer that does.
+literalSpan :: IO ()
+literalSpan = do
+  s <- withLC
+  -- Unclosed, which is every literal being typed: the span runs to the line's end.
+  spanOf s "fil LC`( \955 x : " @?= Just "LC`( \955 x : "
+  spanOf s "LC`( " @?= Just "LC`( "
+
+namedTagSpan :: IO ()
+namedTagSpan = do
+  s <- withLC
+  spanOf s "fil LC[abs]`( \955 " @?= Just "LC[abs]`( \955 "
+
+-- | The span is a position in the text the frontend passed, like every other
+-- position an offer reports. **It did not shift at first** and named the text of the
+-- instruction above instead — the kind of wrong a frontend draws rather than crashes
+-- on.
+spanShifts :: IO ()
+spanShifts = do
+  s <- withLC
+  spanOf s "h = here\nfil LC`( \955 x : " @?= Just "LC`( \955 x : "
+
+wordSpan :: IO ()
+wordSpan = do
+  s <- withLC
+  spanOf s "atta" @?= Just "atta"
+  spanOf s ":inf" @?= Just ":inf"
+  spanOf s "LC`x` atta" @?= Just "atta"
+
+-- | The characters a recovered offer's span names, so a test can say what it covers
+-- rather than quoting two numbers.
+spanOf :: Session -> String -> Maybe String
+spanOf s line = do
+  rv <- offeredRecovered (statementOfferView s [WrittenText line] [])
+  let (from, to) = recoveredSpan rv
+  pure (take (to - from) (drop (from - 1) line))

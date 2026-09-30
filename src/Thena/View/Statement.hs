@@ -125,7 +125,16 @@ statementOffer gs bs before after = answer { offeredBound = bound }
       | at == 0   = o
       | otherwise = o
           { offeredRecovered =
-              fmap (\r -> r { recoveredColumn = recoveredColumn r + at })
+              fmap
+                (\r -> r
+                   { recoveredColumn = recoveredColumn r + at
+                   -- **The span shifts with the column.** It did not, at first, and
+                   -- the slice it named on a two-instruction entry was the text of
+                   -- the instruction above — the kind of wrong a frontend draws
+                   -- rather than crashes on.
+                   , recoveredSpan =
+                       let (a, b) = recoveredSpan r in (a + at, b + at)
+                   })
                 (offeredRecovered o)
           , offeredStuck =
               fmap (\k -> k { stuckAt = stuckAt k + at }) (offeredStuck o)
@@ -175,29 +184,32 @@ recover gs _bs rules head' before after = do
   ts <- either (const Nothing) Just (tokensView line)
   unit <- unitAt cursor (atOffsets line ts)
   case unit of
-    InsideLiteral lang prod open close ->
-      let innerLeft  = slice open cursor
-          innerRight = slice cursor close
-       in case displayOffer gs lang prod [WrittenText innerLeft] [WrittenText innerRight] of
+    InsideLiteral l ->
+      let innerLeft  = slice (litOpen l) cursor
+          innerRight = slice cursor (litClose l)
+       in case displayOffer gs (litLang l) (litProd l)
+                 [WrittenText innerLeft] [WrittenText innerRight] of
             Left _  -> Nothing
             Right o -> Just o
               { offeredRecovered =
-                  Just (RecoveryView (open + 1) innerLeft (Just lang)) }
+                  Just (RecoveryView (litOpen l + 1) innerLeft (Just (litLang l))
+                          (litFrom l + 1, litTo l + 1)) }
     -- **A @:@-command word, which a bare word cannot serve** (MS7 phase 142).
     -- @:inf@ lexes as two tokens, @:@ and @inf@, so the bare-word unit would ask
     -- about @inf@ and filter the command words by it — and none of them starts
     -- with @inf@. @:where@ is worse: its second token is a /keyword/, not an
     -- identifier. So the unit is the colon and whatever follows it, together.
-    CommandWord start ->
+    CommandWord start stop ->
       let typed = slice start cursor
           o = offerAt rules (E.StartAt commandHead) [] []
        in Just o
             { offeredOptions     = filter (startsWith typed) (offeredOptions o)
             , offeredWanted      = filter (startsWith typed) (offeredWanted o)
             , offeredStuck       = Nothing
-            , offeredRecovered   = Just (RecoveryView (start + 1) typed Nothing)
+            , offeredRecovered =
+                Just (RecoveryView (start + 1) typed Nothing (start + 1, stop + 1))
             }
-    BareWord start ->
+    BareWord start stop ->
       let word = slice start cursor
           -- **Asked at the start of the unit, not at the cursor, and then
           -- filtered by what has been typed.** A statement word is a
@@ -220,7 +232,8 @@ recover gs _bs rules head' before after = do
             , offeredWanted      = filter (startsWith word) (offeredWanted o)
             , offeredProductions = offeredProductions o
             , offeredStuck       = Nothing
-            , offeredRecovered   = Just (RecoveryView (start + 1) word Nothing)
+            , offeredRecovered =
+                Just (RecoveryView (start + 1) word Nothing (start + 1, stop + 1))
             }
   where
     line   = textOf before ++ textOf after
@@ -245,17 +258,32 @@ atOffsets text ts =
 
 -- | What the cursor is standing in. Offsets are from zero, into 'line'.
 data Unit
-  = InsideLiteral String (Maybe String) Int Int
-    -- ^ the language, the production if the tag named one, the offset just after
-    -- the opening tag, and the offset of the closing fence (or the line's end
-    -- when it is not closed yet, which is the ordinary state of a line being
-    -- typed).
-  | BareWord Int
-    -- ^ the offset the word under the cursor starts at.
-  | CommandWord Int
-    -- ^ the offset the colon of a @:@-command word starts at. **The colon is part
-    -- of the unit**, because a command word is spelled with it and the offer's
-    -- literals carry it.
+  = InsideLiteral Literal
+  | BareWord Int Int
+    -- ^ the offsets the word under the cursor starts and ends at.
+  | CommandWord Int Int
+    -- ^ the offsets the colon of a @:@-command word starts and ends at. **The colon
+    -- is part of the unit**, because a command word is spelled with it and the
+    -- offer's literals carry it.
+
+-- | A tagged term literal the cursor is standing in.
+--
+-- **Two pairs of offsets, because two questions are being asked** (MS7 phase 143).
+-- 'litOpen' and 'litClose' bound the /content/, which is what the object grammar is
+-- asked about. 'litFrom' and 'litTo' bound the /literal/, tag and fences included,
+-- which is what a frontend underlines. Before this phase only the content pair
+-- existed and the tag's own offset was computed and dropped.
+data Literal = Literal
+  { litLang  :: String
+  , litProd  :: Maybe String
+    -- ^ the production the tag named, as in @LC[var]\`@.
+  , litOpen  :: Int   -- ^ just after the opening tag.
+  , litClose :: Int   -- ^ the closing fence, or the line's end when unclosed.
+  , litFrom  :: Int   -- ^ the tag's own first character.
+  , litTo    :: Int
+    -- ^ one past the literal's last character — past the closing fence when there is
+    -- one, and the line's end when there is not.
+  }
 
 -- | Which unit an offset falls in.
 --
@@ -267,12 +295,13 @@ unitAt cursor ts
   -- **A command word wins, and can only be at the front.** It is tried first
   -- because its second token is an ordinary word that 'covers' would also match,
   -- and answering @inf@ where the unit is @:inf@ is the whole bug.
-  | Just at <- commandWordAt cursor ts = Just (CommandWord at)
+  | Just (at, to) <- commandWordAt cursor ts = Just (CommandWord at to)
   | otherwise = case find inside (literals ts) of
-      Just (lang, prod, open, close) -> Just (InsideLiteral lang prod open close)
-      Nothing -> BareWord . fst <$> find covers ts
+      Just l  -> Just (InsideLiteral l)
+      Nothing -> (\(at, t) -> BareWord at (at + length (tokenViewText t)))
+                   <$> find covers ts
   where
-    inside (_, _, open, close) = cursor >= open && cursor <= close
+    inside l = cursor >= litOpen l && cursor <= litClose l
     covers (at, t) = cursor > at && cursor <= at + length (tokenViewText t)
 
 -- | The offset of a @:@-command word the cursor is standing in, if it is.
@@ -281,15 +310,16 @@ unitAt cursor ts
 -- with no space, which is the driver's own reading: it splits the first word off at
 -- a space and dispatches on it. A bare @:@ with the cursor after it counts, so
 -- typing the colon alone already offers every command.
-commandWordAt :: Int -> [(Int, TokenView)] -> Maybe Int
+commandWordAt :: Int -> [(Int, TokenView)] -> Maybe (Int, Int)
 commandWordAt cursor ts = case ts of
   (at, t) : rest
     | tokenViewText t == ":" -> case rest of
         (at', t') : _
           | at' == at + 1
           , cursor > at
-          , cursor <= at' + length (tokenViewText t') -> Just at
-        _ | cursor == at + 1 -> Just at
+          , cursor <= at' + length (tokenViewText t') ->
+              Just (at, at' + length (tokenViewText t'))
+        _ | cursor == at + 1 -> Just (at, at + 1)
         _ -> Nothing
   _ -> Nothing
 
@@ -299,7 +329,7 @@ commandWordAt cursor ts = case ts of
 -- An opening tag is an 'ATag' of more than one character — @LC\`@, @LC[var]\`@ —
 -- and a closing fence is an 'ATag' of exactly one. A literal left unclosed runs
 -- to the end of the line, which is what a line being typed looks like.
-literals :: [(Int, TokenView)] -> [(String, Maybe String, Int, Int)]
+literals :: [(Int, TokenView)] -> [Literal]
 literals ts = go ts
   where
     end = case reverse ts of
@@ -309,12 +339,17 @@ literals ts = go ts
     go [] = []
     go ((at, t) : rest)
       | tokenViewKind t == ATag, length (tokenViewText t) > 1 =
-          let open  = at + length (tokenViewText t)
-              close = case break closer rest of
-                (_, (c, _) : _) -> c
-                (_, [])         -> end
+          let open = at + length (tokenViewText t)
+              -- **The fence's own offset, and one past it.** An unclosed literal has
+              -- no fence, so both are the line's end — which is the ordinary state
+              -- of a literal being typed, and the span simply runs to where the text
+              -- stops.
+              (close, stop) = case break closer rest of
+                (_, (c, _) : _) -> (c, c + 1)
+                (_, [])         -> (end, end)
               (lang, prod) = tagParts (tokenViewText t)
-           in (lang, prod, open, close) : go (drop 1 (dropWhile (not . closer) rest))
+           in Literal lang prod open close at stop
+                : go (drop 1 (dropWhile (not . closer) rest))
       | otherwise = go rest
 
     closer (_, t) = tokenViewKind t == ATag && length (tokenViewText t) == 1

@@ -193,12 +193,31 @@ data RecoveryView = RecoveryView
   { recoveredColumn :: Int
     -- ^ where the unit under the cursor starts, counting from 1 — so a frontend
     -- knows which characters an accepted completion replaces.
+    --
+    -- **This is about replacing, not about drawing** — see 'recoveredSpan', which is
+    -- about drawing and is not the same pair of positions for a tagged literal.
   , recoveredText :: String
     -- ^ the unit as written, up to the cursor.
   , recoveredLanguage :: Maybe String
     -- ^ @Just \"LC\"@ when the cursor is inside a tagged term literal, and the
     -- offer therefore came from that language's own grammar rather than from
     -- @instral@'s. 'Nothing' when it is a bare word.
+  , recoveredSpan :: (Int, Int)
+    -- ^ **the whole unit, to draw it as provisional** (MS7 phase 143): the first
+    -- character, counting from 1, and one past the last.
+    --
+    -- **Why it is not 'recoveredColumn' and the cursor.** Those two say what an
+    -- accepted completion overwrites, which for a bare word is the word and for a
+    -- tagged literal is the content typed inside it — never the tag, or the fences,
+    -- or anything right of the cursor. The thing to /underline/ is the unit, and for
+    -- a literal the unit is the literal: @LC\`@ or @LC[var]\`@ through the closing
+    -- backtick. **His ask, 2026-09-30, relayed through @.jalivert\/REPORT.md@**, and
+    -- the tui track filed only the left half of it — the closing fence is past the
+    -- cursor, which their entry explicitly set aside.
+    --
+    -- **It reaches past the cursor, and only this field does.** An unclosed literal
+    -- — which is every literal being typed — ends at the line's end, because there
+    -- is no fence to end it.
   }
   deriving (Eq, Show)
 
