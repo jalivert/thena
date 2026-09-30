@@ -55,11 +55,16 @@ rgb = V.linearColor
 -- surface, his punch list. Warm and pink-tinted (R and B raised more than
 -- G) rather than a neutral gray lift, so the step reads as *this* theme's
 -- panel, not a generic dark-mode one.
+--
+-- **Darkened and desaturated, 2026-09-30**: `(28, 14, 22)` read distinctly
+-- purple and strained his eyes — same family, roughly half the lift and
+-- half the chroma, still hue-separated from the black stage rather than
+-- merely lighter.
 neonPinkDark :: Theme
 neonPinkDark = Theme
   { themeName    = "neon-pink-dark"
   , themeStage   = rgb 0 0 0
-  , themePanel   = rgb 28 14 22
+  , themePanel   = rgb 16 10 14
   , themeInk     = rgb 255 230 255
   , themeDim     = rgb 150 90 130
   , themeRepl    = rgb 255 45 190
