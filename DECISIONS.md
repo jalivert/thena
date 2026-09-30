@@ -468,9 +468,19 @@ production is one line, and a deeper line continues it.
 
 **`context` and `judgment` are reserved words**, like `language`. A name in a
 production is a metavariable, then a token class, then a terminal, and a
-metavariable may not be named like an existing one or a class. A block sees
-what is above it, as every declaration does. It is checked when the module
-loads, and a binder that binds in nothing is a warning, not an error.
+metavariable may not be named like an existing one or a class — uniqueness is
+across every grammar in scope, not per block. **A name is refused for not being a
+metavariable only where one is required**: a binding form's head, and the
+metadata. Anywhere else a plain word is simply a terminal, which is why a
+production may say `( λ x : T . E[x] )` without declaring `λ` or `.`.
+
+A block sees what is above it, as every declaration does. **So there are no
+mutually recursive languages**, and that is deliberate rather than a limit of the
+reader: Thena has no mutual inductives, so a pair of languages that referred to
+each other could not be given the datatypes they generate.
+
+It is checked when the module loads, and a binder that binds in nothing is a
+warning, not an error.
 
 
 ### An object term is parsed by its grammar, and `:parse` shows how
