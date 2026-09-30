@@ -491,9 +491,10 @@ popupMinRows  = 3
 popupMaxRows  = 10
 
 -- | The box never runs past this, marker and air included — his call, a
--- number to tune by eye rather than derive.
+-- number to tune by eye rather than derive. Retuned 60 → 40: at 60 an
+-- unfiltered list ballooned the box to triple its visible rows' width.
 popupMaxWidth :: Int
-popupMaxWidth = 60
+popupMaxWidth = 40
 
 -- | The text a row may hold before it ellides: the cap minus the marker on
 -- one side and its matching air on the other.
