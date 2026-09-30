@@ -1129,10 +1129,19 @@ refreshDropdown = do
 
 -- | Recomputes the completion dropdown from 'Thena.View.statementOfferView'
 -- — called from the same places 'refreshDropdown' is, same reasoning.
--- **A colon line gets none**: '":`'-command completion doesn't exist
--- engine-side yet (TIER-A.md), and ':load''s own path is a directory
--- listing, not a grammar question — asking the statement grammar about
--- ":load foo" would just be asking the wrong question.
+--
+-- **Only ':load''s own line gets none from here** — its path is a
+-- directory listing, not a grammar question, and 'refreshDropdown' already
+-- owns that answer ('stDropdown'); asking the statement grammar about
+-- ":load foo" too would just be asking the wrong question a second time.
+-- Every other colon line, including a bare ":" or one still being typed
+-- towards ":load" itself, goes to 'statementOfferView' exactly like a
+-- non-colon line now does. **This used to blank on any colon prefix
+-- at all** — right when written (2026-09-29), because `:`-command
+-- completion didn't exist engine-side yet. MS7 phase 142 (`9c9112a`,
+-- `.jalivert/NOTES.md` 2026-09-30) answers it now, through the same
+-- 'statementOfferView' call, no new one — the guard here just never
+-- caught up to ask.
 refreshOfferDropdown :: EventM Name St ()
 refreshOfferDropdown = do
   st <- get
@@ -1141,7 +1150,7 @@ refreshOfferDropdown = do
   -- left it, back on any edit.
   if stDismissed st == Just line
     then put st { stOfferDropdown = Nothing }
-    else if ":" `isPrefixOf` line
+    else if isJust (loadPathPrefix line)
       then put st { stOfferDropdown = Nothing, stDismissed = Nothing, stRecoveredSpan = Nothing }
       else do
         let (_, col) = getCursorPosition (stInput st)
