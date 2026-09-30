@@ -29,7 +29,8 @@ import Thena.Language.Earley (parse, pieces)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Grammar (earleyRules)
 import Thena.Files (startingSession)
-import Thena.Render (renderCore, renderResponse)
+import Thena.Render ( Rendering (..)
+  ,renderCore, renderResponse)
 
 tests :: TestTree
 tests =
@@ -116,7 +117,7 @@ notation =
   , testCase "and prints back as the text it was read from" $ do
       s <- loaded header
       let m = machineOf s
-      printRegion (grammars m) (renderCore [] 0 [])
+      printRegion (grammars m) (renderCore (Rendering [] 0) [])
           (apps "Ctx-in" [str "x", con "base", apps "extend" [con "empty", str "x", con "base"]])
         @?= Just "x : \953 \8712 \183 , x : \953"
   , testCase "a lookup literal is a type" $ do

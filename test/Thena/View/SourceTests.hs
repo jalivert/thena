@@ -27,7 +27,8 @@ import Thena.Driver
   , parseSurfaceTerm
   )
 import Thena.Instral.Ops (Value (..))
-import Thena.Render (renderSurface, renderValue)
+import Thena.Render ( Rendering (..)
+  ,renderSurface, renderValue)
 import Thena.Language.Reader
   ( Block (..)
   , Production (..)
@@ -73,7 +74,7 @@ notVacuous = do
 valueReReads :: IO ()
 valueReReads = mapM_ one ["a\tb", "\8704", "quote \" and \\ back", "\n", "ℓ≐⌜x⌝"]
   where
-    one txt = case parseSurfaceTerm (renderValue [] 0 [] (VText txt)) of
+    one txt = case parseSurfaceTerm (renderValue (Rendering [] 0) [] (VText txt)) of
       Right (SurfaceLiteral (LString back))
         | back == txt -> pure ()
         | otherwise   -> assertFailure ("came back as " <> show back <> " from " <> show txt)

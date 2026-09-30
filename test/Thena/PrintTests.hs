@@ -32,7 +32,8 @@ import Thena.Global.Env (GlobalEnv)
 import Thena.Language.Build (printTerm)
 import Thena.Language.Grammar (Grammar)
 import Thena.Files (startingSession)
-import Thena.Render (renderCore)
+import Thena.Render ( Rendering (..)
+  ,renderCore)
 
 tests :: TestTree
 tests =
@@ -106,7 +107,7 @@ str = Primitive . LString
 
 -- | The host's printer, for what a splice holds.
 host :: Core -> String
-host = renderCore [] 0 []
+host = renderCore (Rendering [] 0) []
 
 printed :: [Grammar] -> Core -> IO String
 printed gs t = maybe (assertFailure "it did not print") pure (printTerm gs host t)

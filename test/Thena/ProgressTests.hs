@@ -25,7 +25,8 @@ import Thena.Driver
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Files (loadProofFile, startingSession)
-import Thena.Render (renderCore)
+import Thena.Render ( Rendering (..)
+  ,renderCore)
 
 tests :: TestTree
 tests =
@@ -71,5 +72,5 @@ tests =
 
     statementOf n = do
       s <- loaded
-      pure ( renderCore [] (names (machineOf s)) [] . definitionType
+      pure ( renderCore (Rendering [] (names (machineOf s))) [] . definitionType
                <$> lookupDefinition (GlobalName n) (globals (machineOf s)) )

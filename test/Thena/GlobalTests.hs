@@ -77,7 +77,8 @@ import Thena.Global.Env
   , generalised
   )
 import Thena.Files (startingSession)
-import Thena.Render (renderTrouble, renderEliminator, renderInductive)
+import Thena.Render ( Rendering (..)
+  ,renderTrouble, renderEliminator, renderInductive)
 
 tests :: TestTree
 tests =
@@ -197,11 +198,11 @@ equipment =
         let printed =
               [ length l
               | (_, d) <- inductives env
-              , l <- renderInductive [] 0 d
+              , l <- renderInductive (Rendering [] 0) d
               ]
                 ++ [ length l
                    | (g, d) <- inductives env
-                   , l <- renderEliminator [] 0 g (fst (eliminatorType d LZero (pastEverything env)))
+                   , l <- renderEliminator (Rendering [] 0) g (fst (eliminatorType d LZero (pastEverything env)))
                    ]
         (sum printed >= 0) @?= True
     ]
@@ -570,7 +571,7 @@ roundTripTests :: [TestTree]
 roundTripTests =
   [ testCase name $ case lookupInductive (named name) natVec of
       Nothing -> assertFailure (name ++ " was not declared")
-      Just d  -> case reread (renderInductive [] natVecCounter d) of
+      Just d  -> case reread (renderInductive (Rendering [] natVecCounter) d) of
         Left e   -> assertFailure e
         Right d' -> do
           formerType d' @?= formerType d
