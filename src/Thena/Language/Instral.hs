@@ -28,6 +28,7 @@
 module Thena.Language.Instral
   ( instralRules
   , operandHead
+  , standsAt
   , statementHead
   ) where
 
@@ -53,6 +54,23 @@ statementHead = "Statement"
 -- frontend shows is what @:accepts@ would print.
 operandHead :: Ty -> String
 operandHead t = "Operand:" ++ renderTy t
+
+-- | May a value of this type stand at the slot this nonterminal names?
+--
+-- **Forward only.** A slot's name is built from a 'Ty' by 'operandHead' and is
+-- never read back — phase 139 deleted the inverse that could not spell
+-- @List Core@, and this must not reintroduce it. So the question is asked by
+-- building the name and comparing, which is the direction that cannot fail.
+--
+-- **A slot whose type is a scheme variable takes anything**, because an
+-- undeclared rule does not say what it wants. Those slots are found by building
+-- their names too, not by recognising a letter.
+standsAt :: Ty -> String -> Bool
+standsAt t n = n == operandHead t || n `elem` variableSlots
+
+-- | The names of the slots that accept any type at all.
+variableSlots :: [String]
+variableSlots = [ operandHead (TVar i) | i <- [0 .. 25] ]
 
 -- | Every production of the REPL's statement syntax, for the bases loaded now.
 --

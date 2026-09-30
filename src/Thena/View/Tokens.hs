@@ -27,6 +27,8 @@ module Thena.View.Tokens
   ( TokenKind (..)
   , TokenView (..)
   , tokensView
+  , mendedTokens
+  , offsetIn
   ) where
 
 import Thena.Syntax.Lexer
@@ -99,7 +101,39 @@ data TokenView = TokenView
 -- reason a fence cannot mend — a genuinely bad character. A frontend may colour
 -- up to there and leave the rest plain.
 tokensView :: String -> Either Pos [TokenView]
-tokensView line = case attempt line of
+tokensView line = map viewOf <$> mendedTokens line
+
+-- | Where a line and column falls in the text, **counting from zero**.
+--
+-- **A column restarts at 1 on every line, and an offset does not.** The two are
+-- the same number only for a single-line entry, which is why three places in this
+-- layer used one where they meant the other until MS7 phase 140: this module
+-- dropped the mended fence by column, "Thena.View.Statement" found the unit under
+-- the cursor by column, and neither was wrong until an entry was written over more
+-- than one line. **It is defined once here and imported**, so there is one
+-- conversion and nothing to keep in step.
+offsetIn :: String -> Pos -> Int
+offsetIn text (Pos l c) = lineStart + c - 1
+  where
+    starts = scanl (\acc ln -> acc + length ln + 1) 0 (lines text)
+    lineStart = case drop (l - 1) starts of
+      o : _ -> o
+      -- **Cannot arise** — a position comes from lexing this text. Answered
+      -- rather than crashed, because this is a view.
+      []    -> 0
+
+-- | **A line being typed, lexed** — the tokens of 'tokensView' before they become
+-- views, for a caller that needs the real 'Spanned' stream (phase 140: the entry
+-- split runs 'Thena.Surface.Layout.layoutFile' over it, and that takes tokens).
+--
+-- An unclosed region fails 'lexSpanned' outright, which is the ordinary state of a
+-- line the moment someone types @LC\`@, so a fence is appended and the lex
+-- retried; the tokens the fence itself produced are then dropped. **Dropped by
+-- offset, not by column** — see 'offsetIn'. **And not by count**: a fence closes a
+-- region and so produces a 'Thena.Syntax.Lexer.TTagClose' /and/ flushes the raw
+-- chunk before it, and that chunk is real.
+mendedTokens :: String -> Either Pos [Spanned]
+mendedTokens line = case attempt line of
   Right ts -> Right ts
   Left e   -> case tryFences ["`", "⟩"] of
     Just ts -> Right ts
@@ -107,20 +141,15 @@ tokensView line = case attempt line of
   where
     whereOf (LexError p _) = p
 
-    -- A fence that mends the line adds tokens of its own at the end; they were
-    -- never written, so they are dropped. **Dropped by position, not by count**
-    -- — a fence closes a region and so produces a 'TTagClose' /and/ flushes the
-    -- raw chunk before it, and that chunk is real.
     tryFences fs = case fs of
       []     -> Nothing
       f : rest -> case attempt (line ++ f) of
         Right ts -> Just (filter (within (length line)) ts)
         Left _   -> tryFences rest
 
-    within n t = tokenViewColumn t <= n
+    within n (Spanned p _ _) = offsetIn line p < n
 
-    attempt s = map viewOf <$> lexSpanned s
-
+    attempt = lexSpanned
 viewOf :: Spanned -> TokenView
 viewOf (Spanned (Pos l c) t src) = TokenView l c src (kindOf t)
 

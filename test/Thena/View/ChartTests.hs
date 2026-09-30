@@ -260,7 +260,7 @@ mismatchOffer gs lang before after
 -- which is the REPL's own hole spelling and not this phase's concern),
 -- replayed over an 'OfferView' rather than a raw 'Earley.Offer'.
 redrawOffer :: String -> OfferView -> (String, [(String, String)])
-redrawOffer before (OfferView options wanted _ rest _ _ stuck) =
+redrawOffer before (OfferView options wanted _ rest _ _ _ stuck) =
   case (rest, options ++ wanted) of
     (Just pfx, _) -> single (unwords (map redrawWritten pfx))
     (_, [s]) | isLiteralView s -> single (redrawWritten s)

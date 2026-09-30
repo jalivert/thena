@@ -76,6 +76,7 @@ library
         Thena.View.Chart
         Thena.View.Core
         Thena.View.Development
+        Thena.View.Entry
         Thena.View.Instral
         Thena.View.Machine
         Thena.View.Rules

@@ -41,6 +41,7 @@ module Thena.Driver
   , commandSummary
   , answer
   , oneLine
+  , entryBindings
   , oneProgram
   , loadSource
   , loadProofSource
@@ -158,7 +159,7 @@ import Thena.Instral.Ops
   , Value (..)
   )
 import Data.Either (partitionEithers)
-import Thena.Instral.Infer (InstralTypeError (..), inferBlock, inferProgram)
+import Thena.Instral.Infer (InstralTypeError (..), boundBy, inferBlock, inferProgram)
 import Thena.Instral.Type (Signature (..), Ty (..), fits)
 import Thena.Rules
   ( RuleBase (..)
@@ -886,6 +887,27 @@ instralEntry gs bases src = do
       RawBind n (RhsOp (RawOp w os)) ->
         let (bs, os') = resolving w os in bs ++ [RawBind n (RhsOp (RawOp w os'))]
       _ -> [i]
+
+-- | **What the instructions of an entry prefix leave in scope**, with the type
+-- each name ended up with (MS7 phase 140).
+--
+-- For the offer at a prompt entry: given the instructions above the cursor, this
+-- says which names a completion may list. The text handed in is always /complete/
+-- instructions — the caller cuts it at a separator "Thena.Surface.Layout"
+-- inserted — so 'instralEntry' reads it exactly as it would read the entry the
+-- user is about to run.
+--
+-- **A prefix that will not run contributes no names.** 'instralEntry' refuses a
+-- block that does not resolve or does not type, and this answers @[]@ rather than
+-- reporting names read out of code the system has already rejected. The offer then
+-- says what /kind/ of thing goes at the cursor and lists nothing, which is the
+-- honest answer while the lines above are broken.
+entryBindings :: [Grammar] -> [RuleBase] -> String -> [(Ops.Name, Ty)]
+entryBindings gs bases src = case instralEntry gs bases src of
+  Left _     -> []
+  Right prog ->
+    boundBy (allSignatures bases) (allCallable bases)
+      (Rule (GlobalName "entry") [] [] prog)
 
 -- | Hoist every written core term out of a line, resolving it first.
 --

@@ -42,6 +42,7 @@ module Thena.View.Chart
   , ProductionView (..)
   , StuckView (..)
   , RecoveryView (..)
+  , BoundView (..)
   , OfferProblem (..)
   , displayParse
   , displayOffer
@@ -52,6 +53,7 @@ import Data.List (intersperse)
 
 import Thena.Language.Build (languageNames, productionNames)
 import Thena.Language.Grammar (Grammar, earleyRules)
+import Thena.View.Type (TypeView)
 import qualified Thena.Language.Earley as Earley
 
 -- | A rule's right-hand-side symbol, display-safe.
@@ -135,6 +137,24 @@ data OfferView = OfferView
     -- and the line underlined to say it will not run as written.
     --
     -- Defined in "Thena.View.Statement", which is where recovery lives.
+  , offeredBound :: [BoundView]
+    -- ^ **the names the instructions above the cursor left in scope, that may
+    -- stand at it** (MS7 phase 140).
+    --
+    -- A prompt entry is a block: @h = here@ on one line and @goto h@ on the next
+    -- is one entry, and @h@ is in scope on the second line. The chart can say
+    -- /a name goes here/ and cannot say /which/ — a name three lines up is not a
+    -- grammatical fact — so this is the answer to the second question, and the
+    -- only field of an offer that depends on what the text above /means/ rather
+    -- than on how it is written.
+    --
+    -- **Already filtered to the cursor.** A name is here only when its type may
+    -- stand at the slot the cursor is in, which the engine decides
+    -- ('Thena.Language.Instral.standsAt'); a frontend does not need the typing
+    -- rule. Empty when the cursor is in the entry's first instruction, when the
+    -- lines above do not run, or when nothing they bound fits.
+    --
+    -- Set in "Thena.View.Statement", which is where the entry is cut up.
   , offeredStuck :: Maybe StuckView
     -- ^ **the text left of the cursor does not read, and this says where it
     -- gave out** (MS7 phase 134, @ms7\/CLOSEOUT.md@ 12) — see
@@ -149,6 +169,17 @@ data OfferView = OfferView
     -- The distinction it buys is /\"nothing may be written here\"/ against
     -- /\"I could not read what you already wrote\"/, which a user reads as a
     -- broken key when both are silence.
+  }
+  deriving (Eq, Show)
+
+-- | A name an entry bound above the cursor, and what it holds.
+--
+-- **The type is a view and not a rendered line** — his ruling, 2026-09-29:
+-- /"I want it to be principled and correct and that means instral types get
+-- views too"/, which @ms7\/CLOSEOUT.md@ 27 held open and phase 133 answered.
+data BoundView = BoundView
+  { boundName :: String
+  , boundType :: TypeView
   }
   deriving (Eq, Show)
 
@@ -364,6 +395,10 @@ offerView replacing o =
     -- Recovery is "Thena.View.Statement"'s, and it sets this afterwards: the
     -- chart cannot know it was asked a narrower question than the caller had.
     Nothing
+    -- The entry's bound names are "Thena.View.Statement"'s too, for the same
+    -- reason: the chart is handed one instruction and does not know there were
+    -- others above it.
+    []
     (fmap stuckView (Earley.offerStuck o))
 
 stuckView :: (Int, [Earley.Symbol]) -> StuckView

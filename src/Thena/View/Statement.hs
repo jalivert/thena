@@ -47,18 +47,26 @@ module Thena.View.Statement
 import Data.List (find, isPrefixOf)
 
 import Thena.Language.Grammar (Grammar)
-import Thena.Language.Instral (instralRules, statementHead)
+import Thena.Driver (entryBindings)
+import Thena.Instral.Type (Ty)
+import Thena.Language.Instral (instralRules, standsAt, statementHead)
 import qualified Thena.Language.Earley as E
 import Thena.Rules (RuleBase)
 import Thena.View.Chart
-  ( OfferView (..)
+  ( BoundView (..)
+  , OfferView (..)
   , RecoveryView (..)
   , SymbolView (..)
   , Written (..)
+  , StuckView (..)
   , displayOffer
   , offerAt
   )
-import Thena.View.Tokens (TokenKind (..), TokenView (..), tokensView)
+import Thena.View.Entry (Split (..), splitEntry)
+import Thena.View.Type (displayType)
+import Thena.Syntax.Lexer (Pos (..))
+import Thena.View.Tokens
+  (TokenKind (..), TokenView (..), offsetIn, tokensView)
 
 -- | The offer at the cursor of a REPL line.
 --
@@ -67,11 +75,72 @@ import Thena.View.Tokens (TokenKind (..), TokenView (..), tokensView)
 -- 'offeredStuck' — which is phase 134's field, and is exactly the condition
 -- \"the text left of the cursor did not read\".
 statementOffer :: [Grammar] -> [RuleBase] -> [Written] -> [Written] -> OfferView
-statementOffer gs bs before after
-  | Nothing <- offeredStuck whole = whole
-  | otherwise                     = maybe whole id (recover gs bs before after)
+statementOffer gs bs before after = answer { offeredBound = bound }
   where
-    whole = offerAt (instralRules bs) (E.StartAt statementHead) before after
+    text   = textOf before ++ textOf after
+    cursor = length (textOf before)
+
+    -- **The entry is cut at the cursor's own instruction** (MS7 phase 140). The
+    -- chart answers about one statement read from the start of what it is given,
+    -- so an entry of three instructions answered nothing at all until the two
+    -- above were taken off the front. 'splitEntry' finds the cut with the real
+    -- layout pass; @(\"\", 0)@ is the single-instruction case every earlier phase
+    -- saw, and the fallback when the text does not lay out.
+    (prefix, at) = case splitEntry text cursor of
+      Just (Split p o) -> (p, o)
+      Nothing          -> ("", 0)
+
+    before' = dropWritten at before
+
+    whole = offerAt (instralRules bs) (E.StartAt statementHead) before' after
+
+    answer
+      | Nothing <- offeredStuck whole = shift whole
+      | otherwise = maybe (shift whole) shift (recover gs bs before' after)
+
+    -- **Positions are reported against the whole entry**, not against the
+    -- instruction the question was asked about: the frontend passed the entry and
+    -- a completion replaces characters of it.
+    shift o
+      | at == 0   = o
+      | otherwise = o
+          { offeredRecovered =
+              fmap (\r -> r { recoveredColumn = recoveredColumn r + at })
+                (offeredRecovered o)
+          , offeredStuck =
+              fmap (\k -> k { stuckAt = stuckAt k + at }) (offeredStuck o)
+          }
+
+    -- **What the lines above bound, kept to what may stand here.** The types come
+    -- from the type checker over those lines ('Thena.Driver.entryBindings'); which
+    -- of them fit is 'standsAt', asked against the slots this offer named. A
+    -- frontend is handed the answer and never the rule.
+    bound =
+      [ BoundView n (displayType t)
+      | (n, t) <- if null prefix then [] else entryBindings gs bs prefix
+      , fits t
+      ]
+
+    slots = [ nm | ANonterminalSymbol nm <- offeredOptions answer ++ offeredWanted answer ]
+
+    fits :: Ty -> Bool
+    fits t = any (standsAt t) slots
+
+-- | Drop this many characters from the front of a run list.
+--
+-- **The runs are cut, not flattened.** A 'WrittenPlaceholder' is one character
+-- and a 'WrittenSplice' is none, which is what 'textOf' says, so the count and
+-- the list stay in step.
+dropWritten :: Int -> [Written] -> [Written]
+dropWritten n ws
+  | n <= 0 = ws
+  | otherwise = case ws of
+      [] -> []
+      WrittenText t : rest
+        | length t > n -> WrittenText (drop n t) : rest
+        | otherwise    -> dropWritten (n - length t) rest
+      WrittenPlaceholder : rest -> dropWritten (n - 1) rest
+      WrittenSplice : rest      -> dropWritten n rest
 
 -- | Ask about the unit the cursor is standing in.
 --
@@ -82,7 +151,7 @@ statementOffer gs bs before after
 recover :: [Grammar] -> [RuleBase] -> [Written] -> [Written] -> Maybe OfferView
 recover gs bs before after = do
   ts <- either (const Nothing) Just (tokensView line)
-  unit <- unitAt cursor ts
+  unit <- unitAt cursor (atOffsets line ts)
   case unit of
     InsideLiteral lang prod open close ->
       let innerLeft  = slice open cursor
@@ -114,6 +183,22 @@ recover gs bs before after = do
     cursor = length (textOf before)
     slice from to = take (to - from) (drop from line)
 
+-- | Each token with **its offset into the whole text**, which is not its column.
+--
+-- @tokensView@ reports a line and a column, and a column restarts at 1 on every
+-- line — so an entry written over several lines had every offset after the first
+-- newline short by as much as the lines above it ran. Before MS7 phase 140 this
+-- function did not exist and the column was used as the offset directly, which
+-- was right only for a single-line entry and silently wrong for the multi-line
+-- form the offside rule allows (@:\{ … :\}@ at the prompt, or a statement
+-- continued on an indented line).
+--
+-- **The line was always there to be read** — 'tokenViewLine' is as old as
+-- 'tokenViewColumn'; nothing needed to be reported that was not already.
+atOffsets :: String -> [TokenView] -> [(Int, TokenView)]
+atOffsets text ts =
+  [ (offsetIn text (Pos (tokenViewLine t) (tokenViewColumn t)), t) | t <- ts ]
+
 -- | What the cursor is standing in. Offsets are from zero, into 'line'.
 data Unit
   = InsideLiteral String (Maybe String) Int Int
@@ -129,14 +214,13 @@ data Unit
 -- **A tagged term literal wins over the tokens inside it**, which is the whole
 -- reason the unit is lexical: the literal's own text contains spaces and would
 -- otherwise be several units.
-unitAt :: Int -> [TokenView] -> Maybe Unit
+unitAt :: Int -> [(Int, TokenView)] -> Maybe Unit
 unitAt cursor ts = case find inside (literals ts) of
   Just (lang, prod, open, close) -> Just (InsideLiteral lang prod open close)
-  Nothing -> BareWord . startOf <$> find covers ts
+  Nothing -> BareWord . fst <$> find covers ts
   where
     inside (_, _, open, close) = cursor >= open && cursor <= close
-    covers t = cursor > startOf t && cursor <= startOf t + length (tokenViewText t)
-    startOf t = tokenViewColumn t - 1
+    covers (at, t) = cursor > at && cursor <= at + length (tokenViewText t)
 
 -- | Every tagged term literal in the line: its language, the production its tag
 -- named, where its text begins and where its closing fence is.
@@ -144,25 +228,25 @@ unitAt cursor ts = case find inside (literals ts) of
 -- An opening tag is an 'ATag' of more than one character — @LC\`@, @LC[var]\`@ —
 -- and a closing fence is an 'ATag' of exactly one. A literal left unclosed runs
 -- to the end of the line, which is what a line being typed looks like.
-literals :: [TokenView] -> [(String, Maybe String, Int, Int)]
+literals :: [(Int, TokenView)] -> [(String, Maybe String, Int, Int)]
 literals ts = go ts
   where
     end = case reverse ts of
-      []    -> 0
-      t : _ -> tokenViewColumn t - 1 + length (tokenViewText t)
+      []          -> 0
+      (at, t) : _ -> at + length (tokenViewText t)
 
     go [] = []
-    go (t : rest)
+    go ((at, t) : rest)
       | tokenViewKind t == ATag, length (tokenViewText t) > 1 =
-          let open  = tokenViewColumn t - 1 + length (tokenViewText t)
+          let open  = at + length (tokenViewText t)
               close = case break closer rest of
-                (_, c : _) -> tokenViewColumn c - 1
-                (_, [])    -> end
+                (_, (c, _) : _) -> c
+                (_, [])         -> end
               (lang, prod) = tagParts (tokenViewText t)
            in (lang, prod, open, close) : go (drop 1 (dropWhile (not . closer) rest))
       | otherwise = go rest
 
-    closer t = tokenViewKind t == ATag && length (tokenViewText t) == 1
+    closer (_, t) = tokenViewKind t == ATag && length (tokenViewText t) == 1
 
 -- | Does this offered symbol begin with what the user has typed?
 --

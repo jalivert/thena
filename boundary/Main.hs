@@ -41,10 +41,11 @@ import Thena.View
   , machineView
   , matchesView
   , offerView
+  , statementOfferView
   , parseView
   , rulesView
   )
-import Thena.View.Chart (Written (..))
+import Thena.View.Chart (BoundView (..), OfferView (..), Written (..))
 import Thena.View.Development (LinkView (..))
 import Thena.View.Machine (MachineView (..))
 import Thena.View.Rules (RuleView (..))
@@ -98,6 +99,11 @@ checks =
                Left _   -> False)
   , \s -> want "parseView" (either (const True) (const True) (parseView s "LC" Nothing []))
   , \s -> want "offerView" (either (const True) (const True) (offerView s "LC" Nothing [] [WrittenText ""]))
+    -- **The entry offer, and that its bound names cross** (MS7 phase 140): a
+    -- frontend sees the names the lines above the cursor left in scope, with their
+    -- types, without importing anything past this boundary.
+  , \s -> want "statementOfferView names what the entry bound"
+            (map boundName (offeredBound (statementOfferView s [WrittenText "h = here\ngoto "] [])) == ["h"])
   , \s -> want "focusProgram" (not (null (focusProgram (focusAddress s))) || True)
   , \s -> want "oneProgram accepts a click" (isSession (fst (oneProgram s (focusProgram (focusAddress s)))))
   , \s -> want "renderResponse" (not (null (renderResponse s (snd (oneLine s ":show")))))

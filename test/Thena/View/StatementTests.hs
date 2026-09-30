@@ -28,12 +28,14 @@ import Thena.Rules (RuleBase, baseSignatures, opWords, ruleBase)
 import Thena.View (sessionRules, statementOfferView)
 import Thena.View.Chart (offerAt)
 import Thena.View.Chart
-  ( OfferView (..)
+  ( BoundView (..)
+  , OfferView (..)
   , RecoveryView (..)
   , StuckView (..)
   , SymbolView (..)
   , Written (..)
   )
+import Thena.View.Type (TypeView (..))
 
 tests :: TestTree
 tests =
@@ -53,6 +55,17 @@ tests =
         , testCase "and standing on a box inside it, what may fill the box" inBoxInLiteral
         , testCase "a word after a finished literal is helped, context-free" afterLiteral
         , testCase "and a line that parses is never marked recovered" notRecovered
+        ]
+    , testGroup "a multi-line entry (phase 140)"
+        [ testCase "a binding on the line above puts its name in the offer" boundAbove
+        , testCase "and the ; form of the same entry answers identically" bothSeparators
+        , testCase "every binding above is there, in written order" severalBindings
+        , testCase "a name is offered only where its type may stand" typedToTheSlot
+        , testCase "a String binding is a String, not an unsolved variable" settled
+        , testCase "a prefix that will not run contributes no names" brokenPrefix
+        , testCase "an indented continuation is one instruction, not two" continuation
+        , testCase "recovery inside a literal survives a newline" recoveryAfterNewline
+        , testCase "and its column counts from the start of the entry" shiftedColumn
         ]
     , testGroup "operand shapes (phase 139)"
         [ testCase "a slot takes a nested call, and only what returns its type" nested
@@ -331,3 +344,90 @@ pairSlot = do
   words' "takes-pair ( x " @?= [","]
   words' "takes-pair ( x , y " @?= [")"]
 
+-- | **The case the phase exists for.** @h = here@ then @goto @ is one entry, @h@
+-- is in scope on the second line, and before this phase the offer came back stuck
+-- with nothing at all.
+boundAbove :: IO ()
+boundAbove = do
+  s <- withLC
+  let o = offerIn s "h = here\ngoto "
+  offeredStuck o @?= Nothing
+  offeredBound o @?= [BoundView "h" ACore]
+
+-- | The offside rule and a written @;@ separate instructions equally, so the two
+-- spellings of one entry must answer the same. **They did not**: an explicit @;@
+-- is a character of the text and the instruction begins after it, while the
+-- layout pass's inserted separator has none and sits where the next instruction
+-- starts. Caught here, not by reading the code.
+bothSeparators :: IO ()
+bothSeparators = do
+  s <- withLC
+  let a = offerIn s "h = here\ngoto "
+      b = offerIn s "h = here ; goto "
+  (offeredBound b, offeredStuck b) @?= (offeredBound a, Nothing)
+  offeredOptions b @?= offeredOptions a
+
+severalBindings :: IO ()
+severalBindings = do
+  s <- withLC
+  offeredBound (offerIn s "h = here\ng = goal\ngoto ")
+    @?= [BoundView "h" ACore, BoundView "g" ACore]
+
+-- | **Filtered by the engine, not by the frontend.** @m@ holds a @String@, so it
+-- is offered at @say@'s slot and not at @goto@'s, which wants a @Core@.
+typedToTheSlot :: IO ()
+typedToTheSlot = do
+  s <- withLC
+  offeredBound (offerIn s "m = \"hi\"\nsay ") @?= [BoundView "m" AString]
+  offeredBound (offerIn s "m = \"hi\"\ngoto ") @?= []
+
+-- | **The ordering constraint inside the type checker.** 'Thena.Instral.Infer'
+-- defers a text literal and pins its variable in @settleText@, at the very end —
+-- so a type read out before settling would say @a@ where the entry plainly wrote
+-- a @String@. This is the assertion that says the read happens after.
+settled :: IO ()
+settled = do
+  s <- withLC
+  [ boundType b | b <- offeredBound (offerIn s "m = \"hi\"\nsay ") ] @?= [AString]
+
+-- | A prefix the system would refuse contributes nothing, rather than names read
+-- out of code that will not run. @say 3@ is ill-typed — @say@ wants a @String@ —
+-- so the binding below it is not reported even though it reads.
+brokenPrefix :: IO ()
+brokenPrefix = do
+  s <- withLC
+  let o = offerIn s "say 3\nh = here\ngoto "
+  offeredBound o @?= []
+
+-- | **Not every newline starts an instruction.** A line indented past the entry
+-- continues the one above, so this is one statement and there is nothing bound.
+continuation :: IO ()
+continuation = do
+  s <- withLC
+  let o = offerIn s "say\n  "
+  offeredBound o @?= []
+  offeredOptions o @?= offeredOptions (offerIn s "say ")
+
+-- | **The column\/offset confusion, as a test.** @tokensView@ reports a column,
+-- which restarts at 1 on every line; @recover@ used it as an offset into the whole
+-- entry. Identical text one newline apart answered four options and nothing.
+recoveryAfterNewline :: IO ()
+recoveryAfterNewline = do
+  s <- withLC
+  let flat = offerIn s "fill LC`( "
+      over = offerIn s "fill\n  LC`( "
+  case (offeredRecovered flat, offeredRecovered over) of
+    (Just a, Just b) -> recoveredText b @?= recoveredText a
+    other -> assertFailure ("expected recovery either way, got " <> show other)
+  length (offeredOptions over) @?= length (offeredOptions flat)
+
+-- | And a recovered position is reported against the entry the frontend passed,
+-- so an accepted completion replaces the right characters.
+shiftedColumn :: IO ()
+shiftedColumn = do
+  s <- withLC
+  case offeredRecovered (offerIn s "h = here\nfill LC`( ") of
+    -- @h = here\n@ is nine characters, and the literal's text opens at 9 in the
+    -- instruction alone, so 18 counting from 1 in the whole entry.
+    Just r  -> recoveredColumn r @?= 18
+    Nothing -> assertFailure "expected recovery inside the literal"
