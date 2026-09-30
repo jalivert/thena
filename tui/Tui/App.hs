@@ -391,8 +391,8 @@ renderTurns turns = zipWith renderTurn [1 :: Int ..] turns
 dropdownLayer :: St -> [Widget Name]
 dropdownLayer st = case (stDropdown st, loadPathPrefix line) of
   (Just ld, Just prefix) ->
-    popupAt st (pathStartOff line + segOff prefix) (popupHeight (length (ldEntries ld)))
-      (renderPopup LoadPopup (zipWith (loadRow (ldSelected ld)) [0 :: Int ..] (ldEntries ld)))
+    popupAt st (pathStartOff line + segOff prefix) (length (ldEntries ld)) LoadPopup
+      (zipWith (loadRow (ldSelected ld)) [0 :: Int ..] (ldEntries ld))
   _ -> []
   where line = concatMap Text.unpack (getEditContents (stInput st))
 
@@ -407,8 +407,8 @@ loadRow selected i name = PopupRow (takeFileName name) (Just i == selected) Fals
 offerDropdownLayer :: St -> [Widget Name]
 offerDropdownLayer st = case stOfferDropdown st of
   Just od | not (null (odRows od)) ->
-    popupAt st (odWordStart od) (popupHeight (length (odRows od)))
-      (renderPopup OfferPopup (zipWith (offerRowToPopup (odSelected od)) [0 :: Int ..] (odRows od)))
+    popupAt st (odWordStart od) (length (odRows od)) OfferPopup
+      (zipWith (offerRowToPopup (odSelected od)) [0 :: Int ..] (odRows od))
   _ -> []
 
 offerRowToPopup :: Maybe Int -> Int -> OfferRow -> PopupRow
@@ -425,29 +425,43 @@ data PopupRow = PopupRow
                           -- never a landing spot, drawn muted.
   }
 
--- | **A dropdown, at last with room to breathe** — his `.jalivert/TUI.md`
--- items 4 and 7: no padding to the right (a row used to end exactly at its
--- own last letter), no minimum size (":load examples" against a short
--- match looked "starved"), and the rule-name dropdown's own tail past ten
--- entries was an unreachable "+79 more" instead of something you could
--- arrow down into. All three were the same shape of problem — a box sized
--- to its content instead of a real, scrollable popup — so one fix: every
--- row pads out to the box's own width, the box is never narrower than
--- 'popupMinWidth' or shorter than 'popupMinRows', and past 'popupMaxRows'
--- it scrolls ('viewport' plus 'visible' on the selected row, the same
--- mechanism Brick's own editor/list widgets use, so the selected row is
--- always the one that scrolls into view — never lost off either edge).
-renderPopup :: Name -> [PopupRow] -> Widget Name
-renderPopup vp rows =
+-- | **A dropdown with room to breathe, symmetric all round** — his
+-- `.jalivert/TUI.md` items 4 and 7, then #6: no padding to the right (a row
+-- used to end exactly at its own last letter), no minimum size (":load
+-- examples" against a short match looked "starved"), then the opposite —
+-- the 24-column floor that followed padded short rows far past their text
+-- on the right only. Both were the same defect (a box that won't sit
+-- symmetric round its content), so one shape: every row is the marker, the
+-- text, and as much air right as the marker takes left, and the box hugs
+-- the longest row — no floor, so nothing can stick out one side.
+-- Past 'popupMaxRows' the list scrolls ('viewport' plus 'visible' on the
+-- selected row, the same mechanism Brick's own editor/list widgets use, so
+-- the selected row is always the one that scrolls into view — never lost
+-- off either edge).
+--
+-- **Long rows ellide, values untouched.** Past 'popupTextCap' a row shows
+-- an ellipsis; Tab and Enter act on the full text by row index, so
+-- truncating display corrupts no accept.
+--
+-- **The breathing row lives on the far side only** ('padSide'): below the
+-- content when the popup hangs under the input, above it when it flips
+-- over — never the input side, or the content would drift from the line it
+-- belongs to. Minimum-height fillers are the same far-side blanks
+-- ('popupFarBlanks'), so a short list still stands 'popupMinRows' tall.
+renderPopup :: Name -> PadSide -> [PopupRow] -> Widget Name
+renderPopup vp padSide rows =
   withAttr (attrName "dropdown") $
     hLimit boxWidth $
-      vLimit visibleHeight $
-        viewport vp Vertical $
-          vBox (map renderRow rows <> fillerRows)
+      vBox (topPad <> [vLimit visibleH (viewport vp Vertical (vBox (map renderRow shown)))] <> bottomPad)
   where
-    boxWidth = maximum (popupMinWidth : map (length . prText) rows)
-    visibleHeight = max popupMinRows (min (length rows) popupMaxRows)
-    fillerRows = replicate (max 0 (popupMinRows - length rows)) (str (replicate boxWidth ' '))
+    shown = map (truncateRow popupTextCap) rows
+    maxText = maximum (0 : map (length . prText) shown)
+    boxWidth = maxText + 2 * dropdownMarkerWidth
+    visibleH = popupVisibleH (length rows)
+    farBlanks = replicate (popupFarBlanks (length rows)) (str (replicate boxWidth ' '))
+    (topPad, bottomPad) = case padSide of
+      PadTop    -> (farBlanks, [])
+      PadBottom -> ([], farBlanks)
     renderRow r = mark (styled (str (padTo boxWidth (dropdownMarker r <> prText r))))
       where
         styled
@@ -457,42 +471,79 @@ renderPopup vp rows =
         mark = if prSelected r then visible else id
     dropdownMarker r = if prSelected r then dropdownSelected else dropdownPlain
 
+-- | Which side of the content the breathing row goes — always the far side
+-- from the input line, decided once in 'popupAt' from the same flip that
+-- positions the box, so padding and placement cannot disagree.
+data PadSide = PadTop | PadBottom
+
 padTo :: Int -> String -> String
 padTo n s = s <> replicate (max 0 (n - length s)) ' '
 
-popupMinWidth, popupMinRows, popupMaxRows :: Int
-popupMinWidth = 24
+-- | A row over the cap shows an ellipsis rather than running past the
+-- pane — display only, the row's value keeps its full text.
+truncateRow :: Int -> PopupRow -> PopupRow
+truncateRow cap r
+  | length (prText r) > cap = r { prText = take (cap - 1) (prText r) <> "…" }
+  | otherwise = r
+
+popupMinRows, popupMaxRows :: Int
 popupMinRows  = 3
 popupMaxRows  = 10
 
--- | The bounded height 'popupAt' positions against — never the full row
--- count once a list can run past 'popupMaxRows', or the popup would
--- position itself as if it were taller than it actually renders.
-popupHeight :: Int -> Int
-popupHeight n = max popupMinRows (min n popupMaxRows)
+-- | The box never runs past this, marker and air included — his call, a
+-- number to tune by eye rather than derive.
+popupMaxWidth :: Int
+popupMaxWidth = 60
 
--- | Position a caret-anchored popup at a given column of the input's own
--- text (column 0 is the text's own left edge, per 'stInputExtent's own
--- doc) — the math 'dropdownLayer' always used, factored out so a second
--- popup positions itself identically rather than drifting from a second
--- copy. Flips above the caret past 80% of the pane's depth, below it
--- otherwise — his rule, 2026-09-29; see the historical note this carries
--- forward from 'dropdownLayer's original home.
-popupAt :: St -> Int -> Int -> Widget Name -> [Widget Name]
-popupAt st col rowCount content = case stInputExtent st of
+-- | The text a row may hold before it ellides: the cap minus the marker on
+-- one side and its matching air on the other.
+popupTextCap :: Int
+popupTextCap = popupMaxWidth - 2 * dropdownMarkerWidth
+
+-- | What the viewport shows of a list: the rows, up to the scroll cap.
+popupVisibleH :: Int -> Int
+popupVisibleH n = min (max n 0) popupMaxRows
+
+-- | Breathing blanks on the far side: at least the one pad row, more while
+-- the list is short of 'popupMinRows'.
+popupFarBlanks :: Int -> Int
+popupFarBlanks n = max 1 (popupMinRows - n)
+
+-- | The whole box, content plus far-side blanks — what 'popupAt'
+-- positions against above the line, so a flipped box lands its content
+-- against the input rather than a row short.
+popupTotalH :: Int -> Int
+popupTotalH n = popupVisibleH n + popupFarBlanks n
+
+-- | Position a popup at a given column of the input's own text (column 0
+-- is the text's own left edge, per 'stInputExtent's own doc) — the math
+-- 'dropdownLayer' always used, factored out so two popups position
+-- themselves identically rather than drifting from two copies. Flips above
+-- the input past 80% of the pane's depth, below it otherwise — his rule,
+-- 2026-09-29; see the historical note this carries forward from
+-- 'dropdownLayer's original home.
+--
+-- Builds the content itself from the rows, so the flip that positions the
+-- box also sides its breathing row ('PadTop'/'PadBottom') and sizes
+-- against the whole rendered height ('popupTotalH') — one decider, never a
+-- pad here and a height there disagreeing.
+popupAt :: St -> Int -> Int -> Name -> [PopupRow] -> [Widget Name]
+popupAt st col n vp rows = case stInputExtent st of
   Nothing -> []
   Just inputExt -> [translateBy (Location (popupCol, popupRow)) content]
     where
       paneExt = case stPaneExtent st of
         Just p  -> p
         Nothing -> inputExt
+      above = depthFrac > 0.8
+      content = renderPopup vp (if above then PadTop else PadBottom) rows
       popupCol   = max 0 (locationColumn (extentUpperLeft inputExt) + col - dropdownMarkerWidth)
       inputRow   = locationRow (extentUpperLeft inputExt)
       paneRow    = locationRow (extentUpperLeft paneExt)
       paneHeight = snd (extentSize paneExt)
       depthFrac :: Double
       depthFrac = if paneHeight <= 0 then 0 else fromIntegral (inputRow - paneRow) / fromIntegral paneHeight
-      popupRow = if depthFrac > 0.8 then inputRow - rowCount else inputRow + 1
+      popupRow = if above then inputRow - popupTotalH n else inputRow + 1
 
 -- | The lead every dropdown row carries — the arrow on the selected row,
 -- blank space everywhere else. **One glyph plus one space either way, so
