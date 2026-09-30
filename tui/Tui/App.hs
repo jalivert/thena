@@ -1,11 +1,15 @@
 -- | The TUI's entry point.
 --
--- **Four panes, no borders** — a wide REPL on the left, proof-term/goals/
+-- **Four bordered panes** — a wide REPL on the left, proof-term/goals/
 -- machine stacked narrower on the right (geometry from `MS7-CLI`, his
--- instruction: the layout only, never its code). Separation is a dark
--- panel fill plus one neon accent as a left edge, never a border glyph and
--- never a full-pane fill — his correction, 2026-09-29, after the first
--- pass used pale tints across the whole pane.
+-- instruction: the layout only, never its code). Each pane is a real
+-- four-sided border in its own neon accent, its title set into the top
+-- border, never a full-pane fill — his correction, 2026-09-29, after the
+-- first pass used pale tints across the whole pane. **Borders added
+-- `.jalivert/TUI.md` #8**, replacing the left-edge-glyph-only scheme:
+-- panes now close on all four sides, with a stage-colored one-cell gap
+-- both between panes and around the whole layout, so the dark backdrop
+-- reads as a frame at every level, not just between panes.
 --
 -- **Views are pulled, not pushed** — `developmentView`/`machineView` are
 -- recomputed from `stSession` on every draw, never stored.
@@ -48,6 +52,7 @@ import Brick.Widgets.Edit
   , renderEditor
   )
 import qualified Brick.Widgets.Edit as E
+import Brick.Widgets.Border (borderAttr, borderWithLabel)
 import Brick.BChan (newBChan, writeBChan)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad.IO.Class (liftIO)
@@ -293,11 +298,20 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   -- visible caret. A dimmer ink still marks the box as a box without
   -- fighting the caret over the brightest color in the theme.
   , (attrName "placeholder",    ink (themeDim th))
-  -- The recovered-span underline (his `.jalivert/TUI.md` #7) — style only,
-  -- 'V.currentAttr' keeps whatever color is already active, so this reads
-  -- correctly nested under "placeholder" (a box inside a broken literal)
-  -- as well as over ordinary ink.
-  , (attrName "recovered",      V.withStyle V.currentAttr V.underline)
+  -- The recovered-span underline (his `.jalivert/TUI.md` #7), and its own
+  -- combination with a placeholder box inside a broken literal. **Two
+  -- named attrs, not one nested inside the other** — nesting
+  -- 'withAttr "recovered"' around 'withAttr "placeholder"' was the first
+  -- attempt, and it looked right until a box landed inside a recovered
+  -- span: the inner call's 'ctxAttrName' *replaces* the outer's rather
+  -- than composing with it (confirmed by reading 'withAttr's own
+  -- definition — it is a plain field set, `ctxAttrNameL .~ an`, not a
+  -- stack), so the outer "recovered" was silently discarded on every box
+  -- and only the ordinary text around it ever showed the underline. Fixed
+  -- by naming the combination outright rather than trying to compose two
+  -- unrelated attrs through nesting.
+  , (attrName "recovered",             V.withStyle (ink (themeInk th)) V.underline)
+  , (attrName "placeholder.recovered", V.withStyle (ink (themeDim th)) V.underline)
   , (attrName "accent.output",  ink (themeSoft th))
   , (attrName "dropdown",          surface (themePopup th) (themeInk th))
   -- A real background swap for the selected row, not a foreground tint
@@ -327,7 +341,7 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
 -- behind the panes, invisible, no error, just never on screen. Verified
 -- with a hardcoded marker widget before trusting the fix.
 draw :: St -> [Widget Name]
-draw st = dropdownLayer st <> offerDropdownLayer st <> [hBox [replColumn, gapH, sideColumn]]
+draw st = dropdownLayer st <> offerDropdownLayer st <> [padAll 1 (hBox [replColumn, gapH, sideColumn])]
   where
     budget = Budget 200
     s = stSession st
@@ -383,34 +397,32 @@ draw st = dropdownLayer st <> offerDropdownLayer st <> [hBox [replColumn, gapH, 
           , withAttr (attrName "panel") (pane "machine"   MachineVP   (padAll 1 (vBox (map str (renderMachineView machine)))))
           ]
 
-    -- | The accent edge, a title strip, then the content — never a full
-    -- fill, per his correction. 'clickable' so a scroll-wheel event over
-    -- this pane resolves to its own 'Name', not the row under it.
+    -- | A real four-sided border in the pane's own accent color, the label
+    -- set into the top border rather than a separate row above the content
+    -- — his `.jalivert/TUI.md` #8: a left-edge glyph and a title line on
+    -- their own "lacks certain clarity" without something closing the
+    -- other three sides. 'clickable' stays on the outermost widget so a
+    -- scroll-wheel event over the border itself still resolves to this
+    -- pane's 'Name', same as before.
     --
-    -- **The edge is a glyph, not a solid cell** — his correction,
-    -- 2026-09-29: a full-cell fill read as too thick, and a cell can't be
-    -- fractional, so it's a left three-eighths block ('▎', same glyph
-    -- `MS7-CLI` used for this) in the accent color against the panel
-    -- background, still 'hLimit 1' wide.
+    -- **'overrideAttr' reuses the pane's existing 'edge.<key>' accent for
+    -- 'borderAttr'** rather than a second copy of the same four colors
+    -- under a new name — Brick's own mechanism for "this subtree's border
+    -- color," confirmed by reading 'Brick.Widgets.Border': every border
+    -- glyph it draws looks up the literal name @border@, so a plain
+    -- 'withAttr' around a per-pane color would never reach it; 'overrideAttr'
+    -- is what actually redirects that lookup, locally, per pane.
     --
-    -- **The edge bar sits outside the 'viewport', not inside it**, same
-    -- reasoning as the title below. **And so does the title, as of this
-    -- session** — `.jalivert/TUI.md`'s item 2: it used to be the first
-    -- line of the 'vBox' that went *inside* the viewport, so it scrolled
-    -- away with the content the moment the repl pane held enough turns to
-    -- scroll at all. Only 'content' is inside the viewport now; the title
-    -- is a fixed one-line header above it, sized by the outer 'vBox' like
-    -- any other widget, the same move already made once for the edge bar's
-    -- own infinite-height crash.
+    -- **The label keeps its own attr and its own left/right space** —
+    -- 'padLeftRight 1' the same one character of breathing room the old
+    -- separate title row had, so "repl" doesn't sit flush against the
+    -- border glyphs either side of it.
     pane key vp content =
       clickable vp $
-        hBox
-          [ withAttr (attrName ("edge." <> key)) (hLimit 1 (fill '▎'))
-          , vBox
-              [ withAttr (attrName ("title." <> key)) (padLeftRight 1 (str key))
-              , viewport vp Vertical content
-              ]
-          ]
+        overrideAttr borderAttr (attrName ("edge." <> key)) $
+          borderWithLabel
+            (withAttr (attrName ("title." <> key)) (padLeftRight 1 (str key)))
+            (viewport vp Vertical content)
 
 -- | One turn, prompt (if any) then output, then a blank row — one empty
 -- line between turns, his call, so each turn visibly ends before the next
@@ -1214,10 +1226,14 @@ renderInputContent ts col ghost skip recovered =
     before = take col full
     after  = drop (col + skip) full
     shift n = fmap (\(from, len) -> (from - n, len))
-    renderRun ((isPlaceholder, isRecovered), s) = mark (colored (str s))
-      where
-        colored = if isPlaceholder then withAttr (attrName "placeholder") else id
-        mark    = if isRecovered   then withAttr (attrName "recovered")   else id
+    -- | One named attr per combination, not two nested 'withAttr' calls —
+    -- see the "recovered"/"placeholder.recovered" attrs' own haddock for
+    -- why nesting silently drops one of the two.
+    renderRun ((isPlaceholder, isRecovered), s) = case (isPlaceholder, isRecovered) of
+      (True,  True ) -> withAttr (attrName "placeholder.recovered") (str s)
+      (True,  False) -> withAttr (attrName "placeholder")           (str s)
+      (False, True ) -> withAttr (attrName "recovered")             (str s)
+      (False, False) -> str s
 
 -- | Per-character tags, merged into runs the same way the placeholder-only
 -- version did: is this a box, and does it fall in the recovered span, both
