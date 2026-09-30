@@ -124,6 +124,7 @@ data OfferRow = OfferRow
   { rowLabel  :: String
   , rowInsert :: Maybe String
   }
+  deriving (Eq)
 
 -- | The live completion dropdown driven by 'Thena.View.statementOfferView'
 -- — recomputed on every keystroke a line that isn't a colon command
@@ -786,7 +787,17 @@ refreshDropdown = do
     Nothing -> put st { stDropdown = Nothing }
     Just prefix -> do
       entries <- liftIO (loadDropdownEntries prefix)
-      put st { stDropdown = if null entries then Nothing else Just (LoadDropdown entries Nothing) }
+      let new = if null entries then Nothing else Just (LoadDropdown entries Nothing)
+          oldRows = maybe [] ldEntries (stDropdown st)
+      put st { stDropdown = new }
+      -- A new row generation scrolls from the top: the viewport offset
+      -- belongs to the rows it was showing, and a rebuilt-shorter list
+      -- viewed from a deep offset is all blank (his empty-dropdown bug).
+      -- Identical rows keep their offset — a cursor move or a no-op edit
+      -- must not yank a deliberately scrolled list.
+      if maybe [] ldEntries new /= oldRows
+        then vScrollToBeginning (viewportScroll LoadPopup)
+        else pure ()
 
 -- | Recomputes the completion dropdown from 'Thena.View.statementOfferView'
 -- — called from the same places 'refreshDropdown' is, same reasoning.
@@ -804,7 +815,14 @@ refreshOfferDropdown = do
       let (_, col) = getCursorPosition (stInput st)
           (before, after) = splitWritten line col
           ov = statementOfferView (stSession st) before after
-      put st { stOfferDropdown = buildOfferDropdown col ov }
+          new = buildOfferDropdown col ov
+          oldRows = maybe [] odRows (stOfferDropdown st)
+      put st { stOfferDropdown = new }
+      -- Same rule as 'refreshDropdown': new rows start at the top, same
+      -- rows keep their scroll.
+      if maybe [] odRows new /= oldRows
+        then vScrollToBeginning (viewportScroll OfferPopup)
+        else pure ()
 
 -- | The row source depends on which question was actually answered.
 --
