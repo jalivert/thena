@@ -1044,9 +1044,22 @@ buildOfferDropdown col ov
         | r <- map productionRow (offeredProductions ov)
         , rowInsert r `notElem` map rowInsert tokenRows
         ]
+    -- | Hints (a bare nonterminal or scan class — 'rowInsert' is 'Nothing',
+    -- see 'OfferRow') sort after every real candidate, his `.jalivert/
+    -- TUI.md` #4: they're shown, never selectable, and mixed in
+    -- alphabetically they broke up the list you can actually act on.
+    -- 'sortOn' is stable, so this only ever moves hints down — the
+    -- token-then-production order above is undisturbed within each group.
+    -- **"After" already means "farthest from the input" in both
+    -- placements**, not just when the popup hangs below it: 'popupAt'
+    -- reverses the row list for an above-the-line popup, so a row later in
+    -- this list renders nearer the input when flipped and farther from it
+    -- when not — the same reversal that already made "what's first sits
+    -- closest to the input either way" (`c4bfe51`) true for the selected
+    -- row does the rest here for free.
     allRows
       | bareWord  = tokenRows
-      | otherwise = tokenRows <> productionRows
+      | otherwise = sortOn (isNothing . rowInsert) (tokenRows <> productionRows)
     -- | A bare word replaces the partial word itself ('recoveredColumn'/
     -- 'recoveredText' name that span exactly). Every other case — an
     -- ordinary offer, or inside a literal, where 'recoveredText' names the
