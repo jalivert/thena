@@ -507,11 +507,48 @@ moduleTests =
     -- run, because a module is a sequence and its blocks are no longer hoisted
     -- out of it. MS5 phase 90 checked every block before the module started,
     -- which is what made a @language@ block above a block unusable.
+    --
+    -- **The evidence for that moved into the response at phase 144** (MS6
+    -- closeout 15). It used to be @Nat@ still being declared afterwards, which
+    -- is the leak that phase closed — so the assertion below is the response's
+    -- own shape instead, and it says the same thing: @BlockIllTyped@ with a
+    -- reason means the block was resolved and typed, and resolution is exactly
+    -- what needs @Nat@ to have been declared. A block run before its module's
+    -- declarations gives 'BlockRefused' with an @UnboundInRule@ — the sibling
+    -- test below shows that shape — so the two cannot be confused.
     testCase "a top-level block that does not type check stops the run" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 mistypedBlockModule of
-        (s1, Ran _ _ (BlockIllTyped (_ : _))) ->
-          isDeclared (GlobalName "Nat") (globals (machineOf s1)) @?= True
+        (_, Ran _ _ (BlockIllTyped (_ : _))) -> pure ()
+        (_, other) -> assertFailure (show other)
+
+  , -- **A load that does not complete declares nothing** (MS6 closeout 15,
+    -- his ruling 2026-09-30). This is the invariant phase 144 establishes and
+    -- it is asserted on the one module in this file that fails after declaring
+    -- something: @Nat@ lands, then the block does not type check.
+    testCase "and the module it had already declared is rolled back" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 mistypedBlockModule
+      isDeclared (GlobalName "Nat") (globals (machineOf s1)) @?= False
+
+  , -- **Everything goes back except the fresh counter**, which must go forward
+    -- or a name the user has seen would be reissued (MS2 closeout 4f) — and a
+    -- failed load does show them, in its @solved: ?ℓn@ lines.
+    testCase "but the fresh counter goes forward across a failed load" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 mistypedBlockModule
+      assertBool "the counter did not advance"
+        (names (machineOf s1) > names (machineOf s0))
+
+  , -- **The point of the rollback, and the reason it is worth a phase**: the
+    -- session survives a typo. Before this, the names that had landed made the
+    -- corrected file unloadable — 'Thena.Global.Declare' refused the
+    -- re-declaration and blamed the constructor's target (@AGENDA.md@ 81).
+    testCase "so the corrected module loads in the same session" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 mistypedBlockModule
+      case loadProofSource s1 blockModule of
+        (_, ProofLoaded nm ds n _) -> (nm, ds, n) @?= ("M", ["Nat", "one"], 1)
         (_, other) -> assertFailure (show other)
 
   , -- **Each top-level block is its own scope**, as a block is — and since
