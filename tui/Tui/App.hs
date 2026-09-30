@@ -669,6 +669,18 @@ handleEventInner (VtyEvent (V.EvKey V.KEsc [])) = do
     (Just ld@(LoadDropdown _ (Just _)), _) -> put st { stDropdown = Just ld { ldSelected = Nothing } }
     (_, Just od@(OfferDropdown _ (Just _) _ _)) -> put st { stOfferDropdown = Just od { odSelected = Nothing } }
     _ -> pure ()
+-- | Ctrl+D quits on an empty line, EOF the way a terminal means it
+-- (his `.jalivert/TUI.md` #12) — with text to delete it falls through to
+-- the editor instead, which binds it as delete-char-forward, so no editing
+-- key is lost to the quit. Note the shape vty gives it: 'd' with 'MCtrl',
+-- not a bare 'EOT' character.
+handleEventInner (VtyEvent (V.EvKey (V.KChar 'd') [V.MCtrl])) = do
+  st <- get
+  let line = concatMap Text.unpack (getEditContents (stInput st))
+  if null line
+    then halt
+    else Brick.zoom stInputL (handleEditorEvent (VtyEvent (V.EvKey (V.KChar 'd') [V.MCtrl])))
+      >> followInput >> refreshDropdown >> refreshOfferDropdown
 -- | Down travels visually down in both placements — toward the input below
 -- it, likewise toward the input above it, where the rows run reversed and
 -- rising indices climb away. So above the line the two move-function pairs
