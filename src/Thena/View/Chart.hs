@@ -49,11 +49,12 @@ module Thena.View.Chart
   , offerAt
   ) where
 
-import Data.List (intersperse)
+import Data.List (intersperse, nub)
 
 import Thena.Language.Build (languageNames, productionNames)
 import Thena.Language.Grammar (Grammar, earleyRules)
 import Thena.View.Type (TypeView)
+import Thena.Language.Builtin (publicHead)
 import qualified Thena.Language.Earley as Earley
 
 -- | A rule's right-hand-side symbol, display-safe.
@@ -404,10 +405,12 @@ piecesFrom k0 = go k0
 offerView :: Bool -> Earley.Offer -> OfferView
 offerView replacing o =
   OfferView
-    (map symbolView (Earley.offerOptions o))
-    (map symbolView (Earley.offerWanted o))
+    (symbolViews (Earley.offerOptions o))
+    (symbolViews (Earley.offerWanted o))
     replacing
     (fmap (map symbolView) (Earley.offerRest o))
+    -- **Not deduplicated**, unlike an offer: a body is a /shape/, and @app@'s
+    -- @( LC LC )@ has two slots that must both be shown.
     [ ProductionView n (map symbolView body) (insertion body)
     | (n, body) <- Earley.offerProductions o
     ]
@@ -421,7 +424,7 @@ offerView replacing o =
     (fmap stuckView (Earley.offerStuck o))
 
 stuckView :: (Int, [Earley.Symbol]) -> StuckView
-stuckView (at, expected) = StuckView at (map symbolView expected)
+stuckView (at, expected) = StuckView at (symbolViews expected)
 
 -- | A production's body as a region to insert: terminals as text, slots as
 -- placeholders, one space between.
@@ -441,16 +444,40 @@ insertion = merge . intersperse (WrittenText " ") . map one
 
 failureView :: Earley.ParseFailure -> FailureView
 failureView f = case f of
-  Earley.Stuck p expected -> AStuck p (map symbolView expected)
+  Earley.Stuck p expected -> AStuck p (symbolViews expected)
   Earley.Ambiguous a b -> AnAmbiguity (treeView a) (treeView b)
   Earley.Unbounded h -> AnUnboundedRule h
   Earley.Disagrees r x a b -> ADisagreement r x (treeView a) (treeView b)
 
+-- | **The one funnel from a parser symbol to what a frontend sees**, and the
+-- place the stratum convention is enforced (MS7 phase 147).
+--
+-- A nonterminal is reported by its 'Thena.Language.Builtin.publicHead' — the
+-- part before a @\/@ — so @surface:Term\/arrowed@ arrives as @surface:Term@.
+-- Thena's own grammars mirror Happy's precedence strata because flattening them
+-- would accept terms the running parser refuses, and the strata are names this
+-- system invented that no user has met. **The invariant is phase 141's, one size
+-- up: nothing a frontend sees may be a nonterminal invented for plumbing.**
+--
+-- An object language's nonterminal, an @Operand:T@ and @instral:Argument@
+-- contain no @\/@ and pass through unchanged — a language or metavariable cannot
+-- contain one.
 symbolView :: Earley.Symbol -> SymbolView
 symbolView s = case s of
   Earley.Literal t -> ALiteralSymbol t
   Earley.Scan n _ -> AScanSymbol n
-  Earley.Nonterminal n -> ANonterminalSymbol n
+  Earley.Nonterminal n -> ANonterminalSymbol (publicHead n)
+
+-- | **An offer's** symbols as a frontend sees it, deduplicated after the
+-- mapping, because several strata of one head collapse onto it: the chart offers
+-- @surface:Term\/arrowed@ and @surface:Term\/app@ at one cursor and a frontend
+-- should be told /a surface term/ once.
+--
+-- **Only for a set of options**, never for a production's body — a body is a
+-- shape, and @app: ( LC LC )@ has two slots. 'Thena.View.ChartTests' caught that
+-- when this was applied to both.
+symbolViews :: [Earley.Symbol] -> [SymbolView]
+symbolViews = nub . map symbolView
 
 treeView :: Earley.Tree -> TreeView
 treeView t = case t of

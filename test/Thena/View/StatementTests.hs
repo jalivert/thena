@@ -98,6 +98,15 @@ tests =
         , testCase "recovery inside a literal survives a newline" recoveryAfterNewline
         , testCase "and its column counts from the start of the entry" shiftedColumn
         ]
+    , testGroup "surface and core are describable (phase 147)"
+        [ testCase "a Surface slot offers the surface tag" surfaceTagOffered
+        , testCase "and inside it the surface language answers" insideSurface
+        , testCase "a Core slot offers the core tag, and not the surface one" coreTagOffered
+        , testCase "an object literal is still writable inside a surface region" nestedLiteral
+        , testCase "a : command whose argument is a term offers one" commandTerms
+        , testCase ":parse names a language and then that language's own term" parseNarrows
+        , testCase "a path argument is still opaque, and says so" pathStaysOpaque
+        ]
     , testGroup "operand shapes (phase 139)"
         [ testCase "a slot takes a nested call, and only what returns its type" nested
         , testCase "the call's own slot narrows to its parameter" nestedNarrows
@@ -118,6 +127,95 @@ withLC = do
 
 offerIn :: Session -> String -> OfferView
 offerIn s before = statementOfferView s [WrittenText before] []
+
+-- | @elaborate@ wants a @Surface@, and before this phase the only things offered
+-- at that slot were an identifier and @(@ for a nested call — **no way to write a
+-- surface term at all**, which is where this phase started.
+surfaceTagOffered :: IO ()
+surfaceTagOffered = do
+  s <- withLC
+  let o = offeredOptions (offerIn s "elaborate ")
+  if ALiteralSymbol "surface`" `elem` o then pure () else
+    assertFailure ("elaborate did not offer surface`: " <> show o)
+  -- And not the other tag: a @core@ region is a @VRaw@, which is not a @Surface@.
+  ALiteralSymbol "core`" `elem` o @?= False
+
+-- | Inside the region the surface language answers for itself, slot by slot —
+-- the same thing phase 141 made true for an object language.
+insideSurface :: IO ()
+insideSurface = do
+  s <- withLC
+  let opts l = offeredOptions (offerIn s l)
+      has l x = if x `elem` opts l then pure () else
+        assertFailure (l <> " did not offer " <> show x <> ": " <> show (opts l))
+  -- Every way a surface term can open.
+  has "elaborate surface`" (ALiteralSymbol "λ")
+  has "elaborate surface`" (ALiteralSymbol "let")
+  has "elaborate surface`" (ANonterminalSymbol "surface:Term")
+  -- A λ wants a binder, then the arrow.
+  has "elaborate surface`\\ x " (ALiteralSymbol "->")
+  has "elaborate surface`\\ x " (ANonterminalSymbol "surface:Binder")
+  -- A finished term offers the closing fence, and the ways to go on.
+  has "elaborate surface`(f a) " (ALiteralSymbol "`")
+  has "elaborate surface`(f a) " (ALiteralSymbol ":")
+  -- Nothing is stuck anywhere along the way.
+  [ l | l <- [ "elaborate surface`", "elaborate surface`\\ x ", "elaborate surface`(f a) " ]
+      , Just _ <- [offeredStuck (offerIn s l)] ] @?= []
+
+-- | A @Core@ slot gains @core\`@ and keeps every object tag it had.
+coreTagOffered :: IO ()
+coreTagOffered = do
+  s <- withLC
+  let o = offeredOptions (offerIn s "fill ")
+  [ x | x <- [ALiteralSymbol "core`", ALiteralSymbol "LC`"], x `notElem` o ] @?= []
+  ALiteralSymbol "surface`" `elem` o @?= False
+  -- And the development calculus answers inside it, including the forms only it
+  -- has: a claim's @?@, and a binder that must carry its type.
+  let o' = offeredOptions (offerIn s "fill core`let ")
+  ALiteralSymbol "?" `elem` o' @?= True
+
+-- | **Three languages deep, through one chart**: a statement, a surface region
+-- inside its slot, an object literal inside that.
+nestedLiteral :: IO ()
+nestedLiteral = do
+  s <- withLC
+  offeredStuck (offerIn s "elaborate surface`LC`") @?= Nothing
+  let o = offeredOptions (offerIn s "elaborate surface`LC`")
+  ANonterminalSymbol "LC" `elem` o @?= True
+
+-- | The @:@-commands whose argument is a term now offer one. **Which language is
+-- the dispatch arm's**: @:core@ reads a development-calculus term, @:infer@ a
+-- surface one, or a cornered core one.
+commandTerms :: IO ()
+commandTerms = do
+  s <- withLC
+  let o l = offeredOptions (offerIn s l)
+  ANonterminalSymbol "core:Term" `elem` o ":core " @?= True
+  ANonterminalSymbol "surface:Term" `elem` o ":infer " @?= True
+  ANonterminalSymbol "core:Term" `elem` o ":convert " @?= True
+  -- **Corners are not offered anywhere** — his instruction, 2026-10-01. The
+  -- cornered @:infer@ still runs; it is not advertised, so nothing new points at
+  -- a notation that is going away (@AGENDA.md@ 98).
+  [ l | l <- [":infer ", ":core ", "fill ", "fill core`"]
+      , ALiteralSymbol "⌜" `elem` o l || ALiteralSymbol "[|" `elem` o l ] @?= []
+
+-- | @:parse@ takes a language and then a term of **that** language, which is one
+-- argument shape and not two: the second depends on the first.
+parseNarrows :: IO ()
+parseNarrows = do
+  s <- withLC
+  [ w | ALiteralSymbol w <- offeredOptions (offerIn s ":parse ") ] @?= ["LC", "Ty"]
+  ANonterminalSymbol "LC" `elem` offeredOptions (offerIn s ":parse LC ") @?= True
+  ANonterminalSymbol "Ty" `elem` offeredOptions (offerIn s ":parse LC ") @?= False
+
+-- | **What this phase did not make describable stays honest.** A path is still
+-- the opaque nonterminal — /something goes here and I cannot list it/ — and the
+-- line is not stuck.
+pathStaysOpaque :: IO ()
+pathStaysOpaque = do
+  s <- withLC
+  offeredOptions (offerIn s ":load ") @?= [ANonterminalSymbol "instral:Argument"]
+  offeredStuck (offerIn s ":load ") @?= Nothing
 
 -- | **The gap this found.** A statement word is a literal and the chart matches
 -- one all or nothing, so before phase 138 @att@ answered nothing at all while
@@ -517,9 +615,18 @@ noSynthetic :: IO ()
 noSynthetic = do
   s <- withLC
   let names l = [ n | ANonterminalSymbol n <- offeredOptions (offerIn s l) ]
-      ours n = "At:" `isPrefixOf` n || "Elements:" `isPrefixOf` n
-  [ n | l <- ["fill ", "fill LC`", "fill LC[var]`", "fill LC[abs]`( "], n <- names l, ours n ]
-    @?= []
+      -- @\/@ joined this check at phase 147: Thena's own grammars mirror Happy's
+      -- precedence strata, and a stratum is named @\‹public\>\/\‹stratum\>@ so
+      -- that "Thena.View.Chart" can report the public part. A @\/@ reaching here
+      -- means that mapping was skipped somewhere.
+      ours n = "At:" `isPrefixOf` n || "Elements:" `isPrefixOf` n || '/' `elem` n
+  [ n
+    | l <- [ "fill ", "fill LC`", "fill LC[var]`", "fill LC[abs]`( "
+           , "elaborate ", "elaborate surface`", "elaborate surface`\\ x "
+           , "fill core`", "fill core`let ? x : ", ":infer ", ":core ", ":parse LC "
+           ]
+    , n <- names l, ours n
+    ] @?= []
 
 -- | The object grammars are concatenated into one rule set with @instral@'s own
 -- productions, so their nonterminals share a namespace. A language name and a
@@ -601,10 +708,15 @@ takesNothing = do
 -- shape the phase turns on: a nonterminal with no productions. The line is not
 -- stuck — a production is open and waiting — and the offer names what is wanted
 -- without pretending to enumerate it.
+--
+-- **The command moved at phase 147 and the assertion did not.** It was @:infer@,
+-- whose argument is a term — and a term is describable now, so that line would be
+-- testing the opposite of what it says. @:load@ takes a path, which genuinely has
+-- no grammar, so it is what this is about.
 opaqueArgument :: IO ()
 opaqueArgument = do
   s <- withLC
-  let o = offerIn s ":infer "
+  let o = offerIn s ":load "
   offeredStuck o @?= Nothing
   [ n | ANonterminalSymbol n <- offeredOptions o ] @?= ["instral:Argument"]
 

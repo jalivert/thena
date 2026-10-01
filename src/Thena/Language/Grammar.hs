@@ -37,6 +37,7 @@ module Thena.Language.Grammar
   , variableClass
   , tokenClassOf
   , earleyRules
+  , productionBody
   ) where
 
 import Data.List (nub, (\\))
@@ -364,6 +365,27 @@ checkGrammar installed env b = do
 -- check guarded only MS5's own languages, which phase 106 deleted.
 builtInTags :: [String]
 builtInTags = ["surface", "core"]
+
+-- | The body of a named production, as Earley symbols (MS7 phase 147, moved out
+-- of "Thena.Language.Instral" where phase 141 wrote it).
+--
+-- **The search is across every loaded grammar with no language filter, and that
+-- is safe because a production name is unique across all of them.** Each
+-- production becomes a datatype constructor, and a second language declaring one
+-- of the same name is refused when it loads — @A's constructor same is already
+-- declared@. Verified by loading such a pair rather than reasoned about;
+-- @productionNamesAreUnique@ pins it with a fixture, because if constructor
+-- uniqueness ever relaxed this lookup would quietly hand one language another's
+-- production.
+--
+-- **Empty for a name no grammar has**, which cannot arise from either caller —
+-- both take the name from 'Thena.Language.Build.productionNames' of a grammar in
+-- the very list they pass. Answered rather than crashed, because both callers are
+-- views.
+productionBody :: [Grammar] -> String -> [Earley.Symbol]
+productionBody gs p = case [ Earley.ruleBody r | r <- earleyRules gs, Earley.ruleName r == p ] of
+  b : _ -> b
+  []    -> []
 
 -- | Can substitution be generated for this language (§4.7, MS6 phase 105)?
 --

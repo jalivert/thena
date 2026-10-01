@@ -35,9 +35,23 @@ data Argument
   | ALanguage
     -- ^ the name of a loaded object language — @:parse LC …@. Filled in from the
     -- session, so it is right for whatever is loaded.
+  | ASurfaceTerm
+    -- ^ a surface term written out — @:surface \ x -> x@, @:infer@'s bare form
+    -- (MS7 phase 147). Read by "Thena.Surface.Read"; described by
+    -- "Thena.Language.Builtin".
+  | ACoreTerm
+    -- ^ a term of the development calculus — @:core@, @:whnf \‹t\›@, @:goal@,
+    -- both sides of @:convert@, @:dev@ (MS7 phase 147). Read by
+    -- "Thena.Syntax.Parser"; described by "Thena.Language.Builtin".
+  | ALanguageTerm
+    -- ^ **a language's name and then a term of /that/ language** — @:parse LC …@
+    -- (MS7 phase 147). One 'Argument' and not two, because the two positions are
+    -- correlated: which nonterminal follows depends on which name was written,
+    -- and 'Thena.Language.Instral.commandProductions' expands a shape as an
+    -- independent product.
   | Opaque
-    -- ^ **real syntax the chart has no grammar for**: a surface or core term, a
-    -- file path, a global's name.
+    -- ^ **real syntax the chart has no grammar for**: a file path, a global's
+    -- name, a theorem's statement.
     --
     -- It becomes a nonterminal with **no productions**, which is the honest
     -- answer rather than a convenient one. Standing just after @:infer @ the offer
@@ -46,9 +60,10 @@ data Argument
     -- today. **Widening the grammar to accept anything there is what he
     -- rejected** (@.claude\/RULINGS.md@: it drowns the offer that matters).
     --
-    -- **The term cases close when @surface@ and @core@ become declared grammars**
-    -- — his intention, 2026-09-30 — because then they are object languages like
-    -- any other and their productions are in the chart already.
+    -- **The term cases are gone from this constructor since MS7 phase 147** —
+    -- they are 'ASurfaceTerm' and 'ACoreTerm' above, and they are described by
+    -- a grammar rather than closed by one. What is left here genuinely has no
+    -- grammar: a path, a name, a statement.
   deriving (Eq, Show)
 
 -- | One command: its word, and each shape its argument may take.
@@ -93,29 +108,37 @@ commands =
   , nothing ":abandon"
   , nothing ":proofs"
   , nothing ":undo"
-  -- One argument the chart cannot enumerate: a term, a path, a name.
-  , one ":core"
-  , one ":surface"
-  , one ":dev"
+  -- **A term, in one language or the other** (MS7 phase 147). Which one is the
+  -- dispatch arm's, not a guess: @:core@, @:dev@, @:goal@ and @:whnf@'s argument
+  -- all go to 'Thena.Driver.parseCore' or @parseDevelopment@, and @:surface@ to
+  -- @parseSurfaceTerm@.
+  , Command ":core"    [[ACoreTerm]]
+  , Command ":dev"     [[ACoreTerm]]
+  , Command ":goal"    [[ACoreTerm]]
+  , Command ":surface" [[ASurfaceTerm]]
+  -- One argument the chart cannot enumerate: a path, a name, a statement.
   , one ":elim"
   , one ":accepts"
   , one ":produces"
   , one ":load"
   , one ":theorem"
   , one ":resume"
-  , one ":goal"
   -- Optional: the focus, or a term written out.
   , optional ":show"
-  , optional ":infer"
-  , optional ":whnf"
+  -- **Only the bare, surface form.** @Thena.Driver.cornered@ also accepts
+  -- @:infer ⌜ t ⌝@ as a core term and that still runs — it is simply not
+  -- offered, on his instruction of 2026-10-01: corners are to be replaced by
+  -- @core\`t\`@ throughout (@AGENDA.md@ 98) and nothing new may point at them.
+  , Command ":infer" [[], [ASurfaceTerm]]
+  , Command ":whnf"  [[], [ACoreTerm]]
   -- @:convert ‹t› ≟ ‹u›@ — two opaque terms with a fence between them, which is
   -- the one shape where a literal sits *after* something unenumerable, so the
   -- fence is offered only once the first term reads.
-  , Command ":convert" [[Opaque, OneOf ["\8799"], Opaque]]
+  , Command ":convert" [[ACoreTerm, OneOf ["\8799"], ACoreTerm]]
   -- The enumerable ones, and the reason this table earns its keep.
   , Command ":step" [[], [OneOf ["on", "off"]], [ANumeral]]
   , Command ":run"  [[], [ANumeral]]
-  , Command ":parse" [[ALanguage], [ALanguage, Opaque]]
+  , Command ":parse" [[ALanguage], [ALanguageTerm]]
   ]
   where
     nothing w  = Command w [[]]
