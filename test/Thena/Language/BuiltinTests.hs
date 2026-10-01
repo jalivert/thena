@@ -37,7 +37,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Files (startingSession)
-import Thena.Language.Builtin (coreHead, coreRules, publicHead, surfaceHead, surfaceRules)
+import Thena.Language.Builtin (coreHead, coreRules, surfaceHead, surfaceRules)
 import Thena.Language.Instral (instralRules)
 import Thena.View (sessionGrammars, sessionRules)
 import qualified Thena.Language.Earley as E
@@ -55,10 +55,7 @@ tests = testGroup "the advising grammars for surface and core (phase 147)"
       [ testCase "every surface term in the golden transcripts reads" coversGoldenSurface
       , testCase "every core term in the golden transcripts reads" coversGoldenCore
       ]
-  , testGroup "the stratum convention"
-      [ testCase "a stratum is reported as the head it belongs to" strataAreHidden
-      , testCase "every head this module makes is public or a stratum of one" headsAreShaped
-      ]
+  , testCase "every head is a phrase a dropdown can show" headsAreSayable
   ]
 
 -- ---------------------------------------------------------------------------
@@ -364,36 +361,22 @@ unread what head' rs corpus = case [ s | s <- corpus, not (reads' s) ] of
       Left _ -> False
 
 -- ---------------------------------------------------------------------------
--- The stratum convention
+-- The heads
 
--- | 'publicHead' is what a frontend is shown, and it is the identity on
--- everything that is not ours.
-strataAreHidden :: IO ()
-strataAreHidden = do
-  publicHead "surface:Term/arrowed" @?= "surface:Term"
-  publicHead "surface:Binder/pi-binders" @?= "surface:Binder"
-  publicHead "core:Term/atom" @?= "core:Term"
-  -- Not ours, and unchanged: a language, a metavariable, a slot, the opaque one.
-  publicHead "LC" @?= "LC"
-  publicHead "Operand:List Core" @?= "Operand:List Core"
-  publicHead "instral:Argument" @?= "instral:Argument"
-
--- | **Every head either is a public one or is a stratum of a public one**, and
--- the check is on the shape rather than on a list of names — so a head added by
--- the next phase has to satisfy it too.
-headsAreShaped :: IO ()
-headsAreShaped =
+-- | **Every head is words with spaces between them, and that is the whole of
+-- the convention** (phase 148, his correction).
+--
+-- A language name and a metavariable are identifiers, so neither can contain a
+-- space: this collides with nothing, exactly as phase 147's @\/@ did not, and
+-- unlike it there is nothing to map in the view because every one of these is a
+-- phrase a dropdown can show. **No punctuation**, which is what he ruled —
+-- neither @:@ nor @\/@.
+headsAreSayable :: IO ()
+headsAreSayable =
   [ h
   | h <- nub (map E.ruleHead (surfaceRules [] ++ coreRules []))
-  , publicHead h `notElem` publics
+  , any (`elem` ":/|.,;") h || null (words h) || length (words h) < 2
   ] @?= []
-  where
-    publics =
-      [ surfaceHead, "surface:Binder", "surface:Binding", "surface:Name"
-      , coreHead, "core:Binder", "core:Name", "core:Level", "core:Constraint"
-      ]
-
--- ---------------------------------------------------------------------------
 
 -- | Iterate to a fixed point, computing each step once.
 fixpoint :: Eq a => (a -> a) -> a -> a

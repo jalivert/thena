@@ -1,84 +1,118 @@
 -- | The advising grammars for Thena's own two tags, @surface@ and @core@
--- (MS7 phase 147).
+-- (MS7 phases 147 and 148).
 --
 -- **These are secondary grammars and they never parse anything.** Happy runs
 -- the line — "Thena.Surface.Read" for a @surface@ region, "Thena.Syntax.Parser"
 -- for a @core@ one — and what is here answers only /what may I write next/.
--- **HIS RULING, 2026-10-01**, and his reason is the one that settles it: Happy's
--- parser is a **translating** parser, it builds the Haskell tree, so pointing
--- the chart at the real thing is not a grammar exercise. @.claude\/RULINGS.md@,
--- *Rulings of 2026-10-01*.
+-- **HIS RULING, 2026-10-01**: Happy's parser is a **translating** parser, it
+-- builds the Haskell tree, so pointing the chart at the real thing is not a
+-- grammar exercise. @.claude\/RULINGS.md@, *Rulings of 2026-10-01*.
 --
 -- **Hand-written, and that is the decision rather than an omission.** There is
--- no table to derive these from the way @Thena.Rules.opWords@ served phase 137:
--- the only description of the surface language is @Surface\/Parser.y@, which is
--- over /tokens/ with a layout pass in the middle where this is over
--- /characters/. Deriving would mean using Happy as a library, which is the
--- in-house generator itself — *"the same class of complexity"*
--- (@AGENDA.md@ 94). So these are kept in step by hand, and two tests make that
--- hold rather than hope: see "Thena.Language.BuiltinTests".
+-- no table to derive these from the way @Thena.Rules.opWords@ served phase 137,
+-- and deriving from @Surface\/Parser.y@ would mean using Happy as a library,
+-- which is the in-house generator itself (@AGENDA.md@ 94). So these are kept in
+-- step by hand, and two tests make that hold rather than hope: see
+-- "Thena.Language.BuiltinTests".
+--
+-- __Written for Earley, not copied from Happy — HIS CORRECTION, 2026-10-02.__
+-- Phase 147 mirrored all six rungs of @Surface\/Parser.y@'s term ladder —
+-- @Term@, @Arrowed@, @App@, @Args@, @Arg@, @Atom@. **Four of them exist only
+-- because LALR needs an unambiguous grammar**, and his objection was exactly
+-- that: /"You were supposed to leverage the power the Earley has — it should
+-- allow for a more natural way of defining the surface since the language we
+-- support is only a subset."/ The chart holds every reading and this grammar
+-- never parses, so ambiguity costs nothing but chart size, and precedence rungs
+-- buy nothing. **One recursive head per language**, and the only extra is
+-- 'surfaceAtomHead', for the two slots where Happy genuinely wants an atom.
+--
+-- __What flattening would get wrong, and does not.__ Two restrictions in the
+-- surface are about the /language/ and not about trees, checked by running the
+-- real parser rather than reading it:
+--
+-- > x : y          yes     elim d (a) m (b) (c) t       yes
+-- > x : y : z      NO      elim d (a) m x (b) (c) t     NO
+-- > (x : y) : z    yes     elim d (a) (m n) (b) (c) t   yes
+--
+-- **Ascription does not nest**, so it is not a production of the term: it is
+-- spelled out at the five places @Surface\/Parser.y@ writes @Term@ rather than
+-- @Arrowed@ — which keeps one head and still refuses @x : y : z@.
+-- **@elim@'s motive and target take one atom each**, which is what
+-- 'surfaceAtomHead' is for. Everything else in the ladder is tree shape: the flat grammar accepts
+-- exactly the same strings.
 --
 -- __The one invariant.__ **An advising grammar may accept less than the running
 -- one and never more.** Everything narrow here is narrow on purpose:
 --
 -- * **no layout** — the chart is scannerless over characters and the offside
 --   rule is a pass over tokens, so @let { x = y } in x@ is described and the
---   braceless @let x = y in x@, which runs, is not. **Solved at the generator,
---   not here** (@AGENDA.md@ 94);
--- * **no splices** — @surface\`${t}\`@ is a parse error today and 'Surface' has
---   no node for a spliced value, so offering @${@ would make this wider than
---   what runs. The real fix is @AGENDA.md@ 96; a @core@ region's splices do
---   exist and are described below;
+--   braceless @let x = y in x@, which runs, is not. Solved at the generator
+--   (@AGENDA.md@ 94);
+-- * **no splices** — @surface\`${t}\`@ is a parse error today, and a @core@
+--   splice lexes only inside a region, so one rule set cannot describe it
+--   honestly. @AGENDA.md@ 96;
+-- * **no corners and no @⟨…⟩@** — both are tagged term literals written another
+--   way and are being removed. **HIS instruction, 2026-10-01**: take the
+--   description out now rather than leave it for the removal to find.
+--   @AGENDA.md@ 98;
 -- * **narrower lexemes** — "Thena.Language.Lexemes" says why.
 --
--- __Why the strata are mirrored rather than flattened.__ The first cut wrote one
--- recursive nonterminal per language and let the grammar be ambiguous, on the
--- grounds that an ambiguous grammar costs nothing to a parser that only ever
--- queries the chart. **It is wider, and that is fatal.** @Term : Arrowed ':'
--- Arrowed@ is not recursive on the right, so Happy /rejects/ @a : b : c@ and a
--- flattened @Term -> Term ':' Term@ accepts it. The strata are the grammar, not
--- decoration.
---
--- __And why that is safe to show a frontend.__ A stratum is named
--- @\‹public\>\/\‹stratum\>@ — @surface:Term\/app@ — and
--- "Thena.View.Chart" reports the part before the @\/@. So an offer says
--- /a surface term goes here/ and never @surface:Term\/arrowed@, which is a name
--- this module invented and no user has met. The invariant is phase 141's, one
--- size up: **nothing a frontend sees may be a nonterminal invented for
--- plumbing.**
+-- __Every head is a phrase, and the separator is a space.__ A head is
+-- @surface term@, @core atom@, @surface binder@ — **words a dropdown can show**,
+-- because there is nothing left to hide. A language name and a metavariable are
+-- identifiers, so neither can contain a space: the separator collides with
+-- nothing and needs no mapping in the view. **Phase 147's @\/@ convention and
+-- the @publicHead@ that went with it are gone** — they existed only to hide
+-- rungs that should not have been written. The colons that remain elsewhere —
+-- @Operand:Core@ and friends — are phases 137–142's and are his, on
+-- @ms7\/CLOSEOUT.md@ 36.
 module Thena.Language.Builtin
   ( surfaceHead
+  , surfaceAtomHead
+  , surfaceContents
   , coreHead
   , surfaceRules
   , coreRules
-  , publicHead
   ) where
 
 import Thena.Language.Grammar (Grammar, productionBody)
-import Thena.Language.Regex (Regex)
 import Thena.Language.Build (languageNames, productionNames)
 import qualified Thena.Language.Earley as E
 import Thena.Language.Lexemes
   (charRegex, identRegex, numberRegex, regexRegex, stringRegex, universeRegex)
+import Thena.Language.Regex (Regex)
 
--- | The nonterminal a @surface@ region parses at, and the only surface head a
--- frontend is ever shown.
+-- | The nonterminal a @surface@ region parses at.
 surfaceHead :: String
-surfaceHead = "surface:Term"
+surfaceHead = "surface term"
+
+-- | **What the contents of a @surface@ region may be**: a term, or one with an
+-- ascription on it.
+--
+-- Exported because the rule for @surface\`…\`@ itself is built where the other
+-- tagged literals are ("Thena.Language.Instral"), and the fact that ascription
+-- is allowed at the top of a region and nowhere recursive belongs here with the
+-- rest of the grammar rather than there.
+surfaceContents :: [[E.Symbol]]
+surfaceContents = [ [E.Nonterminal surfaceHead] , ascribedAt surfaceHead ]
+
+ascribedAt :: String -> [E.Symbol]
+ascribedAt h = [E.Nonterminal h, E.Literal ":", E.Nonterminal h]
+
+-- | **What needs no parentheses in a surface term**, and the one rung of Happy's
+-- ladder worth keeping: @elim@'s motive and target take exactly one of these, so
+-- a flat term there would accept @elim d (a) m x (b) (c) t@, which Happy refuses.
+--
+-- Exported because "Thena.Language.Instral" contributes the @do@ block at this
+-- head — the block's productions are @instral@'s statement ones, and that module
+-- is where the statement head lives.
+surfaceAtomHead :: String
+surfaceAtomHead = "surface atom"
 
 -- | The nonterminal a @core@ region parses at — the development calculus's own
--- grammar, which is what @core\`…\`@, corners and @:core@ all read.
+-- grammar, which is what @core\`…\`@ and @:core@ read.
 coreHead :: String
-coreHead = "core:Term"
-
--- | The public head a stratum belongs to: everything before the @\/@.
---
--- **Total, and the identity on a head with no @\/@** — a language name, an
--- @Operand:T@, @instral:Argument@. A language or metavariable cannot contain
--- either @:@ or @\/@, so no user grammar's nonterminal is ever rewritten by
--- this.
-publicHead :: String -> String
-publicHead = takeWhile (/= '/')
+coreHead = "core term"
 
 -- ---------------------------------------------------------------------------
 -- The surface language
@@ -87,268 +121,221 @@ publicHead = takeWhile (/= '/')
 -- now.
 --
 -- **The tagged term literals are contributed here from what is installed**, not
--- named in a list — which is the whole of what lets this exist before any
--- object language does. A @language LC@ loaded mid-session is writable inside a
--- @surface@ region immediately, with nothing rebuilt, for the same reason
--- 'Thena.Language.Instral.literalProductions' already works that way.
+-- named in a list — which is the whole of what lets this exist before any object
+-- language does. A @language LC@ loaded mid-session is writable inside a
+-- @surface@ region immediately, with nothing rebuilt.
 surfaceRules :: [Grammar] -> [E.Rule]
 surfaceRules gs = concat
-  [ term, arrowed, app, args, arg, atom gs, terms, arguments
-  , binders, binder, piBinders, piBinder, names, bindings, binding
-  ]
+  [ term, atom, arguments, terms, binders, piBinders, names, bindings ]
   where
-    s = surfaceHead
-    arrowedH = s ++ "/arrowed"
-    appH     = s ++ "/app"
-    argsH    = s ++ "/args"
-    argH     = s ++ "/arg"
-    atomH    = s ++ "/atom"
-    termsH   = s ++ "/terms"
-    argumentsH = s ++ "/arguments"
-    binderH  = "surface:Binder"
-    bindersH = binderH ++ "/binders"
-    piBinderH  = binderH ++ "/pi"
-    piBindersH = binderH ++ "/pi-binders"
-    namesH   = "surface:Name" ++ "/names"
-    bindingH  = "surface:Binding"
-    bindingsH = bindingH ++ "/bindings"
+    t = surfaceHead
+    atomH = surfaceAtomHead
+    argumentsH = "surface arguments"
+    termsH = "surface terms"
+    bindersH = "surface binders"
+    piBindersH = "surface pi binders"
+    namesH = "surface names"
+    bindingsH = "surface bindings"
 
-    -- **Ascription binds loosest and does not nest**, which is the one place a
-    -- flattened grammar would have gone wider: @a : b : c@ is not a surface term.
+    -- | **A position where @Surface\/Parser.y@ writes @Term@ rather than
+    -- @Arrowed@**: a term, or one with an ascription on it. Spelled out at each
+    -- such position instead of being a production of the term, because
+    -- @Term : Arrowed ':' Arrowed@ **does not nest** — @x : y : z@ is not a
+    -- surface term — and a recursive @t -> t ':' t@ would offer a @:@ that
+    -- cannot run.
+    --
+    -- There are five such positions and they are marked with this, so the one
+    -- fact lives in one place: inside parentheses, inside an implicit argument,
+    -- a binder's type, a binding's value and its type, and the contents of a
+    -- region.
+    ascribed = [ [nt t], ascribedAt t ]
+
+    -- Both alternatives of every body that holds an ascribable position.
+    at h nm before after =
+      [ rule nm' h (before ++ body ++ after)
+      | (nm', body) <- zip [nm, nm ++ " ascribed"] ascribed
+      ]
+
+    -- **Flat and ambiguous on purpose.** Application, the arrow and the binder
+    -- forms are all productions of one head; the chart keeps every reading and
+    -- nothing here ever parses, so the readings cost nothing and the grammar
+    -- says what the language is rather than how an LALR table is built.
     term =
-      [ rule s "annot" [nt arrowedH, lit ":", nt arrowedH]
-      , rule s "arrowed" [nt arrowedH]
-      ]
-
-    -- **Both spellings of each binder word**, because the lexer has both:
-    -- @\\@ is @λ@ and @forall@ is @∀@ ("Thena.Syntax.Lexer").
-    arrowed =
-      [ rule arrowedH ("lam" ++ w) [lit l, nt bindersH, lit "->", nt arrowedH]
-      | (w, l) <- [("", "λ"), ("-ascii", "\\")]
+      [ rule "atom" t [nt atomH]
+      , rule "application" t [nt t, nt atomH]
+      , rule "arrow" t [nt t, lit "->", nt t]
       ] ++
-      [ rule arrowedH ("pi" ++ w) [lit l, nt piBindersH, lit "->", nt arrowedH]
-      | (w, l) <- [("", "∀"), ("-word", "forall")]
+      at t "implicit application" [nt t, lit "{"] [lit "}"] ++
+      [ rule ("lambda" ++ w) t [lit l, nt bindersH, lit "->", nt t]
+      | (w, l) <- [("", "λ"), (" ascii", "\\")]
       ] ++
-      [ rule arrowedH "let"
-          [lit "let", lit "{", nt bindingsH, lit "}", lit "in", nt arrowedH]
-      , rule arrowedH "arrow" [nt appH, lit "->", nt arrowedH]
-      , rule arrowedH "app" [nt appH]
-      ]
+      [ rule ("forall" ++ w) t [lit l, nt piBindersH, lit "->", nt t]
+      | (w, l) <- [("", "∀"), (" word", "forall")]
+      ] ++
+      [ rule "let" t [lit "let", lit "{", nt bindingsH, lit "}", lit "in", nt t] ]
 
-    app =
-      [ rule appH "atom" [nt atomH]
-      , rule appH "spine" [nt atomH, nt argsH]
-      ]
-
-    args =
-      [ rule argsH "one" [nt argH]
-      , rule argsH "more" [nt argsH, nt argH]
-      ]
-
-    arg =
-      [ rule argH "explicit" [nt atomH]
-      , rule argH "implicit" [lit "{", nt s, lit "}"]
-      ]
-
-    -- @Terms@ may be empty in @Surface\/Parser.y@ and the chart has no empty
-    -- rules, so the parenthesised group is spelled twice rather than the list
-    -- being made optional.
-    terms =
-      [ rule termsH "one" [nt atomH]
-      , rule termsH "more" [nt termsH, nt atomH]
-      ]
-
-    arguments =
-      [ rule argumentsH "none" [lit "(", lit ")"]
-      , rule argumentsH "some" [lit "(", nt termsH, lit ")"]
-      ]
-
-    binders =
-      [ rule bindersH "one" [nt binderH]
-      , rule bindersH "more" [nt bindersH, nt binderH]
-      ]
-
-    -- **A λ's binder need not be annotated and a ∀'s must be**, which is the
-    -- difference between @LamBinder@ and @PiBinder@ and the reason there are two.
-    binder =
-      [ rule binderH "name" [scan "name" identRegex]
-      , rule binderH "typed" [lit "(", nt namesH, lit ":", nt s, lit ")"]
-      , rule binderH "implicit" [lit "{", nt namesH, lit ":", nt s, lit "}"]
-      , rule binderH "implicit-bare" [lit "{", nt namesH, lit "}"]
-      ]
-
-    piBinders =
-      [ rule piBindersH "one" [nt piBinderH]
-      , rule piBindersH "more" [nt piBindersH, nt piBinderH]
-      ]
-
-    piBinder =
-      [ rule piBinderH "typed" [lit "(", nt namesH, lit ":", nt s, lit ")"]
-      , rule piBinderH "implicit" [lit "{", nt namesH, lit ":", nt s, lit "}"]
-      ]
-
-    names =
-      [ rule namesH "one" [scan "name" identRegex]
-      , rule namesH "more" [nt namesH, scan "name" identRegex]
-      ]
-
-    bindings =
-      [ rule bindingsH "one" [nt bindingH]
-      , rule bindingsH "more" [nt bindingsH, lit ";", nt bindingH]
-      ]
-
-    binding =
-      [ rule bindingH "bind" [scan "name" identRegex, lit "=", nt s]
-      , rule bindingH "typed" [scan "name" identRegex, lit ":", nt s, lit "=", nt s]
-      ]
-
-    atom gs' =
-      [ rule atomH "name" [scan "name" identRegex]
+    atom =
+      [ rule "name" atomH [scan "name" identRegex]
         -- **@?foo@ is two tokens and not one** — @?@ cannot start an identifier,
         -- so the lexer hands over @TQuery@ and then the name, and @? foo@ with a
-        -- space is a surface hole too. Writing it as one scan would be narrower
-        -- than what runs, which is allowed, and wrong about why.
-      , rule atomH "hole" [lit "?", scan "name" identRegex]
-      , rule atomH "universe" [scan "universe" universeRegex]
-      , rule atomH "universe-open" [lit "Type"]
-      , rule atomH "string" [scan "string" stringRegex]
-      , rule atomH "char" [scan "char" charRegex]
-      , rule atomH "int" [scan "int" numberRegex]
-      , rule atomH "regex" [scan "regex" regexRegex]
-      , rule atomH "parens" [lit "(", nt s, lit ")"]
-      , rule atomH "elim"
+        -- space is a surface hole too.
+      , rule "hole" atomH [lit "?", scan "name" identRegex]
+      , rule "universe" atomH [scan "universe" universeRegex]
+      , rule "open universe" atomH [lit "Type"]
+      , rule "string" atomH [scan "string" stringRegex]
+      , rule "char" atomH [scan "char" charRegex]
+      , rule "int" atomH [scan "int" numberRegex]
+      , rule "regex" atomH [scan "regex" regexRegex]
+      , rule "eliminator" atomH
           [ lit "elim", scan "name" identRegex, nt argumentsH, nt atomH
           , nt argumentsH, nt argumentsH, nt atomH
           ]
-      ] ++ literals atomH gs'
+      ] ++
+      at atomH "parenthesised" [lit "("] [lit ")"] ++
+      literals atomH gs
+
+    -- @Terms@ may be empty in @Surface\/Parser.y@ and the chart has no empty
+    -- rules, so the parenthesised group is spelled twice.
+    arguments =
+      [ rule "none" argumentsH [lit "(", lit ")"]
+      , rule "some" argumentsH [lit "(", nt termsH, lit ")"]
+      ]
+
+    terms =
+      [ rule "one" termsH [nt atomH]
+      , rule "more" termsH [nt termsH, nt atomH]
+      ]
+
+    -- **A λ's binder need not be annotated and a ∀'s must be**, which is the
+    -- difference between @LamBinder@ and @PiBinder@ and the reason there are two
+    -- runs.
+    --
+    -- **The run has no singular head beside it** — his instruction, 2026-10-02,
+    -- after seeing @[core binder]@ and @[core binders]@ offered side by side:
+    -- the singular and the plural of one word in a dropdown read as a bug.
+    -- 'runOf' spells each form twice instead, which costs rules and no names.
+    binders = runOf bindersH
+      ( [ [scan "name" identRegex]
+        , [lit "{", nt namesH, lit "}"]
+        ] ++ typedForms )
+
+    piBinders = runOf piBindersH typedForms
+
+    typedForms =
+      [ [lit "("] ++ body ++ [lit ":"] ++ asc ++ [lit ")"] | (body, asc) <- forms ] ++
+      [ [lit "{"] ++ body ++ [lit ":"] ++ asc ++ [lit "}"] | (body, asc) <- forms ]
+      where forms = [ ([nt namesH], a) | a <- ascribed ]
+
+    names =
+      [ rule "one" namesH [scan "name" identRegex]
+      , rule "more" namesH [nt namesH, scan "name" identRegex]
+      ]
+
+    bindings = runWith bindingsH (lit ";")
+      ( [ [scan "name" identRegex, lit "="] ++ a | a <- ascribed ] ++
+        [ [scan "name" identRegex, lit ":", nt t, lit "="] ++ a | a <- ascribed ] )
 
 -- ---------------------------------------------------------------------------
 -- The development calculus
 
--- | Every production of the development calculus's grammar — @core\`…\`@,
--- @⌜ t ⌝@ and every @:@-command that reads one.
+-- | Every production of the development calculus's grammar — @core\`…\`@ and
+-- every @:@-command that reads one.
 --
--- **Splices are described by neither grammar**, and for one reason rather than
--- two: they are writable only where the language is embedded. @Surface@ has no
--- node for one at all; @Raw@ has two, but @}$@ is a token the /region/ scanner
--- emits, so a splice lexes inside @core\`…\`@ and not in a @:core@ argument.
--- @AGENDA.md@ 96.
+-- **Flat, like the surface, and with no ascription to spell out**: the
+-- development calculus has none. The one extra head is the atom, for @elim@'s
+-- slots and for the parenthesised runs.
 coreRules :: [Grammar] -> [E.Rule]
 coreRules gs = concat
-  [ term, app, atom gs, atoms, arguments, binders, binder
-  , ident, levels, levelArgs, constraint
-  ]
+  [ term, atom, atoms, arguments, binders, name, levels, levelArgs, constraint ]
   where
     c = coreHead
-    appH   = c ++ "/app"
-    atomH  = c ++ "/atom"
-    atomsH = c ++ "/atoms"
-    argumentsH = c ++ "/arguments"
-    binderH  = "core:Binder"
-    bindersH = binderH ++ "/binders"
-    identH = "core:Name"
-    levelsH = "core:Level" ++ "/levels"
-    levelArgsH = "core:Level" ++ "/arguments"
-    constraintH = "core:Constraint"
+    atomH = "core atom"
+    atomsH = "core atoms"
+    argumentsH = "core arguments"
+    bindersH = "core binders"
+    nameH = "core name"
+    levelsH = "core levels"
+    levelArgsH = "core level arguments"
+    constraintH = "core constraint"
 
     term =
-      [ rule c "lam" [lit "λ", nt bindersH, lit "->", nt c]
-      , rule c "lam-ascii" [lit "\\", nt bindersH, lit "->", nt c]
-      , rule c "pi" [lit "∀", nt bindersH, lit "->", nt c]
-      , rule c "pi-word" [lit "forall", nt bindersH, lit "->", nt c]
-        -- **A @let@ in the development calculus always carries its type**, where
+      [ rule "atom" c [nt atomH]
+      , rule "application" c [nt c, nt atomH]
+      , rule "arrow" c [nt c, lit "->", nt c]
+      ] ++
+      [ rule ("lambda" ++ w) c [lit l, nt bindersH, lit "->", nt c]
+      | (w, l) <- [("", "λ"), (" ascii", "\\")]
+      ] ++
+      [ rule ("forall" ++ w) c [lit l, nt bindersH, lit "->", nt c]
+      | (w, l) <- [("", "∀"), (" word", "forall")]
+      ] ++
+      [ -- **A @let@ in the development calculus always carries its type**, where
         -- the surface's is optional: there is nothing here to infer it with.
-      , rule c "let"
-          [lit "let", nt identH, lit "=", nt c, lit ":", nt c, lit "in", nt c]
-      , rule c "claim"
-          [lit "let", lit "?", nt identH, lit ":", nt c, lit "in", nt c]
-      , rule c "guess"
-          [ lit "let", lit "?", nt identH, lit ":", nt c, lit "≐"
+        rule "let" c [lit "let", nt nameH, lit "=", nt c, lit ":", nt c, lit "in", nt c]
+      , rule "claim" c [lit "let", lit "?", nt nameH, lit ":", nt c, lit "in", nt c]
+      , rule "guess" c
+          [ lit "let", lit "?", nt nameH, lit ":", nt c, lit "≐"
           , lit "(", nt c, lit ")", lit "in", nt c
           ]
-      , rule c "pending" [nt constraintH, lit "▸", nt c]
-      , rule c "elim"
-          [ lit "elim", nt identH, nt argumentsH, nt atomH
+      , rule "pending" c [nt constraintH, lit "▸", nt c]
+      , rule "eliminator" c
+          [ lit "elim", nt nameH, nt argumentsH, nt atomH
           , nt argumentsH, nt argumentsH, nt atomH
           ]
-      , rule c "elim-at"
-          [ lit "elim", nt identH, nt levelArgsH, nt argumentsH, nt atomH
+      , rule "eliminator at" c
+          [ lit "elim", nt nameH, nt levelArgsH, nt argumentsH, nt atomH
           , nt argumentsH, nt argumentsH, nt atomH
           ]
-      , rule c "arrow" [nt appH, lit "->", nt c]
-      , rule c "app" [nt appH]
       ]
 
-    app =
-      [ rule appH "atom" [nt atomH]
-      , rule appH "spine" [nt appH, nt atomH]
-      ]
+    atom =
+      [ rule "name" atomH [scan "name" identRegex]
+      , rule "at level" atomH [scan "name" identRegex, nt levelArgsH]
+      , rule "universe" atomH [scan "universe" universeRegex]
+      , rule "open universe" atomH [lit "Type"]
+      , rule "string" atomH [scan "string" stringRegex]
+      , rule "char" atomH [scan "char" charRegex]
+      , rule "int" atomH [scan "int" numberRegex]
+      , rule "regex" atomH [scan "regex" regexRegex]
+      , rule "parenthesised" atomH [lit "(", nt c, lit ")"]
+      ] ++ literals atomH gs
 
-    -- @Atoms@ may be empty, as the surface's @Terms@ may; same two spellings.
     atoms =
-      [ rule atomsH "one" [nt atomH]
-      , rule atomsH "more" [nt atomsH, nt atomH]
+      [ rule "one" atomsH [nt atomH]
+      , rule "more" atomsH [nt atomsH, nt atomH]
       ]
 
     arguments =
-      [ rule argumentsH "none" [lit "(", lit ")"]
-      , rule argumentsH "some" [lit "(", nt atomsH, lit ")"]
+      [ rule "none" argumentsH [lit "(", lit ")"]
+      , rule "some" argumentsH [lit "(", nt atomsH, lit ")"]
       ]
 
     -- **Always annotated**: a binder with no type is a parse error here rather
-    -- than a hole (@PLAN-representation.md@ §2.6).
-    binders =
-      [ rule bindersH "one" [nt binderH]
-      , rule bindersH "more" [nt bindersH, nt binderH]
-      ]
+    -- than a hole (@PLAN-representation.md@ §2.6). One head, no singular beside
+    -- the plural — see 'runOf'.
+    binders = runOf bindersH [ [lit "(", nt nameH, lit ":", nt c, lit ")"] ]
 
-    binder = [ rule binderH "typed" [lit "(", nt identH, lit ":", nt c, lit ")"] ]
-
-    -- **No splice production, and the phase's own test is why.** @${x}@ is an
-    -- atom and a name in @Raw@ (MS5 phases 81 and 88), but @}$@ is emitted only
-    -- by the /region/ scanner — so a splice lexes inside @core\`…\`@ and not in a
-    -- bare @:core@ argument, and one rule set serves both. Describing it would
-    -- have been wider than what runs, which 'neverWiderCore' caught on
-    -- @let ${ x }$ = x : x in x@. **It is the same question his surface-splice
-    -- ruling asks** — a splice belongs where the language is embedded — so both
-    -- languages' splices are answered together in @AGENDA.md@ 96 rather than
-    -- half-answered here.
-    ident = [ rule identH "word" [scan "name" identRegex] ]
+    -- **No splice production**, and the phase's own test is why: @}$@ is emitted
+    -- by the /region/ scanner, so a splice lexes inside @core\`…\`@ and not in a
+    -- bare @:core@ argument, and one rule set serves both. @AGENDA.md@ 96.
+    name = [ rule "word" nameH [scan "name" identRegex] ]
 
     levels =
-      [ rule levelsH "one" [scan "int" numberRegex]
-      , rule levelsH "more" [nt levelsH, scan "int" numberRegex]
+      [ rule "one" levelsH [scan "int" numberRegex]
+      , rule "more" levelsH [nt levelsH, scan "int" numberRegex]
       ]
 
     levelArgs =
-      [ rule levelArgsH "none" [lit "{", lit "}"]
-      , rule levelArgsH "some" [lit "{", nt levelsH, lit "}"]
+      [ rule "none" levelArgsH [lit "{", lit "}"]
+      , rule "some" levelArgsH [lit "{", nt levelsH, lit "}"]
       ]
 
     constraint =
-      [ rule constraintH "in"
+      [ rule "in context" constraintH
           [ nt bindersH, lit "⊢", nt c, lit "≟", nt c, lit ":", nt c ]
-      , rule constraintH "closed"
+      , rule "closed" constraintH
           [ lit "⊢", nt c, lit "≟", nt c, lit ":", nt c ]
       ]
-
-    atom gs' =
-      [ rule atomH "name" [scan "name" identRegex]
-      , rule atomH "at" [scan "name" identRegex, nt levelArgsH]
-      , rule atomH "universe" [scan "universe" universeRegex]
-      , rule atomH "universe-open" [lit "Type"]
-      , rule atomH "string" [scan "string" stringRegex]
-      , rule atomH "char" [scan "char" charRegex]
-      , rule atomH "int" [scan "int" numberRegex]
-      , rule atomH "regex" [scan "regex" regexRegex]
-      , rule atomH "parens" [lit "(", nt c, lit ")"]
-        -- **Corners are not described, on his instruction of 2026-10-01.** They
-        -- are an atom in @Raw@ and the phase that wrote this described them; he
-        -- had them taken out again rather than left for the removal to find:
-        -- *"I don't want to risk it sticking around through the future
-        -- refactor."* @⌜ t ⌝@ is to be replaced by @core\`t\`@ throughout —
-        -- @AGENDA.md@ 98 — and nothing new points at it in the meantime.
-      ] ++ literals atomH gs'
 
 -- ---------------------------------------------------------------------------
 -- Shared
@@ -363,10 +350,10 @@ coreRules gs = concat
 -- refuses.
 literals :: String -> [Grammar] -> [E.Rule]
 literals head' gs = concat
-  [ [ E.Rule (head' ++ "/`" ++ l) head' [E.Literal (l ++ "`"), E.Nonterminal l, fence] []
-    , E.Rule (head' ++ "/``" ++ l) head' [E.Literal (l ++ "`"), fence] []
+  [ [ E.Rule (head' ++ " " ++ l) head' [E.Literal (l ++ "`"), E.Nonterminal l, fence] []
+    , E.Rule (head' ++ " empty " ++ l) head' [E.Literal (l ++ "`"), fence] []
     ] ++
-    [ E.Rule (head' ++ "/`" ++ l ++ "[" ++ p ++ "]") head'
+    [ E.Rule (head' ++ " " ++ l ++ " " ++ p) head'
         (E.Literal (l ++ "[" ++ p ++ "]`") : productionBody gs p ++ [fence]) []
     | p <- productionNames gs l
     ]
@@ -374,8 +361,35 @@ literals head' gs = concat
   ]
   where fence = E.Literal "`"
 
+-- | **A run of one or more of something, as one head.**
+--
+-- @h -> f@ and @h -> h f@ for each form @f@, so there is no singular head beside
+-- the plural — **his instruction, 2026-10-02**: @[core binder]@ and
+-- @[core binders]@ offered together are the singular and the plural of one word,
+-- which reads as a bug rather than as help. Each form is spelled twice, which
+-- costs rules and no names.
+runOf :: String -> [[E.Symbol]] -> [E.Rule]
+runOf h = run h []
+
+-- | 'runOf' with a separator between the elements — a @let@'s bindings.
+runWith :: String -> E.Symbol -> [[E.Symbol]] -> [E.Rule]
+runWith h sep = run h [sep]
+
+run :: String -> [E.Symbol] -> [[E.Symbol]] -> [E.Rule]
+run h sep forms = concat
+  [ [ rule (show k) h form
+    , rule (show k ++ " more") h (E.Nonterminal h : sep ++ form)
+    ]
+  | (k, form) <- zip [0 :: Int ..] forms
+  ]
+
+-- | A rule, named after what it is and headed by the thing it builds.
+--
+-- **The name carries the head**, so a tree node says @surface term arrow@ rather
+-- than @arrow@ — there are two @application@s and two @let@s across the two
+-- grammars and a name is what a 'Thena.Language.Earley.Tree' records.
 rule :: String -> String -> [E.Symbol] -> E.Rule
-rule h nm body = E.Rule (h ++ "/" ++ nm) h body []
+rule nm h body = E.Rule (h ++ " " ++ nm) h body []
 
 lit :: String -> E.Symbol
 lit = E.Literal

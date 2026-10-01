@@ -125,14 +125,16 @@ instralRules gs bs =
     -- "Thena.Language.Builtin" may not import this module, and the statement
     -- head is this module's.
     surfaceBlock =
-      [ E.Rule (Builtin.surfaceHead ++ "/atom/do") (Builtin.surfaceHead ++ "/atom")
+      [ E.Rule "surface atom do" Builtin.surfaceAtomHead
           [E.Literal "do", E.Literal "{", E.Nonterminal blockHead, E.Literal "}"] []
-      , E.Rule (blockHead ++ "/one") blockHead [E.Nonterminal statementHead] []
-      , E.Rule (blockHead ++ "/more") blockHead
+      , E.Rule "instral block one" blockHead [E.Nonterminal statementHead] []
+      , E.Rule "instral block more" blockHead
           [E.Nonterminal blockHead, E.Literal ";", E.Nonterminal statementHead] []
       ]
 
-    blockHead = statementHead ++ "/block"
+    -- **A phrase, like the heads "Thena.Language.Builtin" uses**, and not
+    -- @instral:Statement/block@: phase 148 dropped that convention.
+    blockHead = "instral block"
 
 -- | One statement form: the word that opens it, the type of each slot, and the
 -- type it produces if it produces one.
@@ -322,8 +324,13 @@ literalProductions gs types =
     -- @elaborate@'s slot say something true. **Corners are the other spelling of
     -- a @core@ region** (@AGENDA.md@ 56), so they stand wherever it does.
     builtIn =
-      [ tagRule t "surface" Builtin.surfaceHead
+      -- **Both alternatives of what a surface region holds** (MS7 phase 148):
+      -- ascription is allowed at the top of a region and is not a production of
+      -- the term, because it does not nest. 'Builtin.surfaceContents' is where
+      -- that fact lives.
+      [ fenced t ("`surface " ++ show k) "surface`" body "`"
       | t <- types, t == TSurface || isVariable t
+      , (k, body) <- zip [0 :: Int ..] Builtin.surfaceContents
       ] ++
       [ tagRule t "core" Builtin.coreHead | t <- coreish ]
 
@@ -335,11 +342,11 @@ literalProductions gs types =
     -- is the spelling both grammars accept and says the same thing, which is
     -- item 56's own conclusion, so nothing a user needs is lost by leaving the
     -- narrower spelling out.
-    tagRule t tag h = fenced t ("`" ++ tag) (tag ++ "`") h "`"
+    tagRule t tag h = fenced t ("`" ++ tag) (tag ++ "`") [E.Nonterminal h] "`"
 
-    fenced t nm open h close =
+    fenced t nm open body close =
       E.Rule (renderTy t ++ "/" ++ nm) (operandHead t)
-        [E.Literal open, E.Nonterminal h, E.Literal close] []
+        (E.Literal open : body ++ [E.Literal close]) []
 
     -- @LC\`…\`@ — a term of the language.
     rule t l =
@@ -416,7 +423,8 @@ commandProductions gs =
       -- **Thena's own two languages are describable now** (MS7 phase 147), so a
       -- term argument is a nonterminal with productions rather than the opaque
       -- one below.
-      ASurfaceTerm -> [ [E.Nonterminal Builtin.surfaceHead] ]
+      -- Both alternatives, for 'Builtin.surfaceContents'' reason.
+      ASurfaceTerm -> Builtin.surfaceContents
       ACoreTerm    -> [ [E.Nonterminal Builtin.coreHead] ]
       -- The one nonterminal an offer may report from this module, and the one a
       -- frontend is meant to see: see 'opaqueHead'.

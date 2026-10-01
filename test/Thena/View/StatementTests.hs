@@ -151,10 +151,16 @@ insideSurface = do
   -- Every way a surface term can open.
   has "elaborate surface`" (ALiteralSymbol "λ")
   has "elaborate surface`" (ALiteralSymbol "let")
-  has "elaborate surface`" (ANonterminalSymbol "surface:Term")
+  has "elaborate surface`" (ANonterminalSymbol "surface term")
   -- A λ wants a binder, then the arrow.
   has "elaborate surface`\\ x " (ALiteralSymbol "->")
-  has "elaborate surface`\\ x " (ANonterminalSymbol "surface:Binder")
+  -- **The binder forms themselves, not a nonterminal naming them** — phase 148
+  -- gave the run no singular head, so what comes back is what may be typed.
+  has "elaborate surface`\\ x " (AScanSymbol "name")
+  has "elaborate surface`\\ x " (ALiteralSymbol "(")
+  -- And ascription is offered where it is legal and nowhere it is not.
+  has "elaborate surface`x " (ALiteralSymbol ":")
+  ALiteralSymbol ":" `elem` opts "elaborate surface`x : y " @?= False
   -- A finished term offers the closing fence, and the ways to go on.
   has "elaborate surface`(f a) " (ALiteralSymbol "`")
   has "elaborate surface`(f a) " (ALiteralSymbol ":")
@@ -190,9 +196,9 @@ commandTerms :: IO ()
 commandTerms = do
   s <- withLC
   let o l = offeredOptions (offerIn s l)
-  ANonterminalSymbol "core:Term" `elem` o ":core " @?= True
-  ANonterminalSymbol "surface:Term" `elem` o ":infer " @?= True
-  ANonterminalSymbol "core:Term" `elem` o ":convert " @?= True
+  ANonterminalSymbol "core term" `elem` o ":core " @?= True
+  ANonterminalSymbol "surface term" `elem` o ":infer " @?= True
+  ANonterminalSymbol "core term" `elem` o ":convert " @?= True
   -- **Corners are not offered anywhere** — his instruction, 2026-10-01. The
   -- cornered @:infer@ still runs; it is not advertised, so nothing new points at
   -- a notation that is going away (@AGENDA.md@ 98).
@@ -615,10 +621,9 @@ noSynthetic :: IO ()
 noSynthetic = do
   s <- withLC
   let names l = [ n | ANonterminalSymbol n <- offeredOptions (offerIn s l) ]
-      -- @\/@ joined this check at phase 147: Thena's own grammars mirror Happy's
-      -- precedence strata, and a stratum is named @\‹public\>\/\‹stratum\>@ so
-      -- that "Thena.View.Chart" can report the public part. A @\/@ reaching here
-      -- means that mapping was skipped somewhere.
+      -- **A @\/@ would mean phase 147's stratum convention came back.** Phase 148
+      -- flattened the grammars and took it out: every head is a phrase with no
+      -- punctuation in it, so there is nothing for the view to map.
       ours n = "At:" `isPrefixOf` n || "Elements:" `isPrefixOf` n || '/' `elem` n
   [ n
     | l <- [ "fill ", "fill LC`", "fill LC[var]`", "fill LC[abs]`( "
