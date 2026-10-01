@@ -2538,6 +2538,54 @@ thena spine> elaborate ⟨ do { say 3 } ⟩
 do block 1, instruction 1: wanted String, got Int
 ```
 
+### A `:load` that fails declares nothing
+
+*Decided 2026-09-30.*
+
+```
+thena spine> :load mine.thena
+stuck: Beta and Alpha cannot be made equal
+thena spine> :show Alpha
+nothing named Alpha has been declared
+```
+
+A module is loaded **all or nothing**. If the run stops for any reason — a type error, a
+block that does not check, an unanswered question — the session is put back exactly as it
+was, and nothing the module had already declared survives.
+
+**Before this, the declarations above the failure stayed**, `:undo` could not take them
+back, and loading the corrected file then failed on the names that had landed. One typo
+cost you the session.
+
+**What a completed load leaves is unchanged.** A module that finishes is loaded whatever
+it left in the development, which is what the REPL is for; the rule is about a run that
+*stops*, not about an unfinished proof.
+
+**One thing does not go back: the fresh-name counter.** A failed load has already shown
+you names, and a name you have seen is never reissued.
+
+### A renamed binder is a name your language can write
+
+*Decided 2026-10-01.*
+
+```
+language L, M, N, E where
+  var : n as occurrence -> n      -- n = /[a-z]+/, no prime in the class
+  abs : n as binder     -> ( lam n . E[n] )
+```
+
+Substituting under a binder renames it to avoid capture, and the new name is **built from
+your identifier class**, so it is always a name the notation can print and read back:
+`/[a-z]+/` renames `y` to `ya`, while a class that admits `'` renames to `y'` as before.
+
+The character is decided on the class's own automaton — it must extend *every* string the
+class accepts — so this is by construction rather than by convention, and nothing in it
+knows about any particular character.
+
+**A class no single character extends** — `/[a-z][0-9]/`, where nothing may follow `a1` —
+is **not refused**. It loads with a warning saying that a renamed binder will not print in
+that notation. Substitution is unaffected; only printing the renamed name back is lost.
+
 ### A multi-line entry is bracketed by `:{` and `:}`
 
 *Decided 2026-09-13.*
@@ -2848,6 +2896,25 @@ anything built later over LSP.
 **A half-written term is still text.** The parser takes a placeholder inline, so
 a term you have not finished is an ordinary string and needs no special
 representation to be stored or sent anywhere.
+
+### The text printers take one rendering, not a grammar list and a counter
+
+*Decided 2026-09-30.*
+
+```haskell
+renderCore (renderingOf session) context term
+```
+
+Everything in `Thena.Render` below `renderResponse` takes a `Rendering` — what a render
+carries and does not change — rather than the installed grammars and a name counter as
+two arguments.
+
+**Build one with `renderingOf` and there is no counter to supply.** That matters because
+there was no value a caller could correctly supply: the counter seeds the fresh variables
+a printer mints to descend a term, `Var`'s constructor is hidden so no safe number can be
+picked by inspection, and a low one silently corrupts the output — rendered from zero,
+`A -> A` prints as `∀ (_ : A) -> _`, because the collision makes the dependency check
+answer wrongly.
 
 ### A printed value can be read back
 
