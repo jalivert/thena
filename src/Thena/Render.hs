@@ -1443,6 +1443,12 @@ signature ren@(Rendering _ n0) ps0 ty0 = braced n0 [] ps0 ty0
 renderWarning :: Warning -> String
 renderWarning w = "warning: " ++ case w of
   VacuousBinder k g p x -> blockAt k g ++ ", production " ++ p ++ ": " ++ x ++ " binds in nothing"
+  -- **What is lost is printing, and only printing** — so the line says that
+  -- rather than sounding like a refusal (MS6 closeout 23, phase 146).
+  UnprimeableClass k g cls ->
+    blockAt k g ++ ": no character may be appended to every name " ++ cls
+      ++ " accepts, so a binder renamed to avoid capture will not print in this"
+      ++ " notation. Substitution is unaffected"
   NoConfusionSkipped d why ->
     "no " ++ nameString (snd (noConfusionNames d)) ++ ": " ++ because
     where

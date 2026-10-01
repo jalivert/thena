@@ -38,6 +38,7 @@ module Thena.Language.Substitution
 
 import qualified Data.List.NonEmpty as NE
 
+import Data.Maybe (fromMaybe)
 import Thena.Core.Term (GlobalName (..), Literal (..))
 import Thena.Global.Env (ArgRole (..))
 import Thena.Language.Grammar
@@ -46,8 +47,10 @@ import Thena.Language.Grammar
   , Grammar (..)
   , Sort (..)
   , substitutionNames
+  , variableClass
   , variableProduction
   )
+import Thena.Language.Regex (primingChar)
 import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..))
 
 -- | The definitions, as name, type and body, in the order they are declared —
@@ -110,15 +113,29 @@ substitutionDefinitions g = case (variableProduction g, substitutionNames g) of
       elimOn "Comparison" [] (lamL ["q"] ty) [whenSame, whenDifferent] c
 
     -- ---------------------------------------------------------------------
-    -- L-fresh: the fuel is the list itself. Among x, x', …, x⁽ⁿ⁾ one is not
+    -- L-fresh: the fuel is the list itself. Among x, xc, …, xc⁽ⁿ⁾ one is not
     -- among n names, so n primings are enough and the recursion is on the list.
+    --
+    -- **The priming character comes from the identifier class, not from a
+    -- hardcoded @'@** (MS6 closeout 23, phase 146).
+    -- 'Thena.Language.Regex.primingChar' picks one the class is closed under, so
+    -- every name this mints is a name the language can write back **by
+    -- construction** — it tries @'@ first, so a class that accepts it keeps the
+    -- names it always produced.
+    --
+    -- **When the class admits no such character the generated code keeps @'@**,
+    -- and the name it mints then cannot be printed in the notation. That is not
+    -- prevented — his second principle — and 'Thena.Language.Grammar.checkGrammar'
+    -- warns at the block instead, so the author is told rather than refused.
+    primeChar = fromMaybe '\'' (variableClass g >>= primingChar)
+
     freshBody =
       lamL ["y", "avoid"]
         (app (elimOn "List" [string] (lamL ["l"] (arrows [string] string))
                 [ lamL ["c"] (v "c")
                 , lamL ["a", "rest", "r", "c"]
                     (decide string (member (v "c") (v "avoid"))
-                       (app (v "r") [app (name "appendString") [v "c", SurfaceLiteral (LString "'")]])
+                       (app (v "r") [app (name "appendString") [v "c", SurfaceLiteral (LString [primeChar])]])
                        (v "c"))
                 ]
                 (v "avoid"))
