@@ -106,6 +106,70 @@ Perl or POSIX would find out much later. Refusing them also means `\s`, `{n}`
 or POSIX classes can be added later without changing what any accepted
 expression means.
 
+### Corners and `⟨…⟩` are on their way out, in favour of tagged term literals
+
+*Decided 2026-10-01.*
+
+Two older notations say exactly what a tagged term literal says:
+
+```
+⌜ t ⌝   [| t |]        a core term, inside an instruction
+core`t`                the same thing, and the one that stays
+
+⟨ e ⟩                  a surface term — the lexer turns ⟨ into the tag `surface`
+surface`e`             the same thing, and the one that stays
+```
+
+**Both still work and neither is offered any more.** Completion will not suggest them,
+and nothing new in the system points at them. They are to be replaced one for one and
+removed.
+
+**Why, and it is not tidiness.** These are the last places where *which language this text
+is in* is decided by the punctuation you reached for rather than by a tag naming the
+language. Thena's whole embedding story is the tag: one notation, any language, including
+the ones you define yourself. A second spelling that works for only two of them has to be
+carried by every feature that comes after, and each one pays for it.
+
+The same decision covers the REPL commands that read an untagged term — `:core`, `:dev`,
+`:goal`, `:whnf`, `:convert` — which are debugging commands older than tagged literals.
+`core\`t\`` is a one-for-one replacement and is accepted everywhere a term is.
+
+---
+
+### Surface and Core will not become `language` definitions
+
+*Decided 2026-10-01.*
+
+Thena lets you define an object language as a grammar — `language LC, E where …` —
+and then write its terms in a fenced literal, `` LC`( λ x : ι . x )` ``. The obvious
+next thought is that Thena's own languages should be defined the same way: a prelude
+declaring `surface` and `core` as ordinary grammars, the system bootstrapped in itself.
+**They will not be.** Not now, and not when the tooling would make it easy.
+
+**What you can and cannot write.** `surface` and `core` are reserved tags, and a
+`language` block may not be named either of them:
+
+```
+language surface, Term where      refused — surface is one of Thena's own tags
+surface`\ x -> x`                 fine — always has been, and is unaffected
+```
+
+**Why.** The bootstrap is an attractive result and it is not the project's result. Thena
+exists to be a novel and useful proof assistant — applied theory, proving a concept — and
+making its own surface and core languages self-described would put the whole of that
+under pressure in service of an elegance. The honest version of the same claim arrives by
+another road: Thena's parser generator, when it replaces the current Alex and Happy, will
+take **one** grammar file per language, and that file both parses the language into its
+tree and produces the editor's completions. "The same grammar you can read is the grammar
+that runs" is as strong a statement of openness, and it costs the project nothing it
+needs.
+
+**What this means in practice.** The surface and core grammars exist twice: as the
+translating parser that runs your input, and as a secondary grammar that answers *what
+may I write here* for an editor. The second is narrower than the first by design — it
+will stay quiet where it does not know rather than guess — and it never parses anything.
+Nothing is foreclosed: the day a bootstrap is cheap, it is still available.
+
 ---
 
 ## Universes and levels
