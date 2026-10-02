@@ -10,8 +10,10 @@
 -- revisited when one arrives, and revisiting it means adding @check@ rules
 -- beside this @infer@, not rewriting it.
 --
--- **No cumulativity** (§5.2): a type is used at the universe it has, and
--- 'convert' is symmetric.
+-- **Cumulativity lives in 'check', as 'subsumes'** (MS3 phase 32, §5.2): a term
+-- whose type is @Type₀@ is usable where @Type₁@ is wanted. 'convert' itself has
+-- no direction and is symmetric — the two are separate relations, which is the
+-- design and not an omission.
 --
 -- **Every entry point also returns the level obligations it owes** (MS3 phase
 -- 33). They come from 'subsumes' — a subsumption between levels one of which is
@@ -137,8 +139,10 @@ infer env ctx n term = case term of
 
   Universe l -> (Right (Universe (levelSuc l)), [], n)
 
-  -- @max@, not a subsumption: without cumulativity a Π lives at the larger of
-  -- its two levels and nothing may be silently lifted into it (§5.2).
+  -- @max@, not a subsumption: a Π lives at the larger of its two levels, because
+  -- that is the Π formation rule (§5.2). **Cumulativity does not change this** —
+  -- it is 'subsumes', asked for where a type is *checked*, not something a
+  -- formation rule applies on its own, so nothing is silently lifted here.
   --
   -- **Phase 28: this is now the algebra's @max@, and it is not evaluated.**
   -- @levelMax@ builds an @LMax@ and leaves it standing, because under
