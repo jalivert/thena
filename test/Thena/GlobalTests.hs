@@ -39,7 +39,7 @@ import Thena.Core.Typing (check, infer)
 import Thena.Driver
   ( Response (..)
   , Stop (..)
-  , Session (..)
+  , machineOf
   , command
   , parseCore
   , parseDeclaration
@@ -76,7 +76,9 @@ import Thena.Global.Env
   , lookupInductive
   , generalised
   )
-import Thena.Repl (renderEliminator, renderInductive, startingSession)
+import Thena.Files (startingSession)
+import Thena.Render ( Rendering (..)
+  ,renderTrouble, renderEliminator, renderInductive)
 
 tests :: TestTree
 tests =
@@ -141,7 +143,7 @@ computedLevels =
             , "data D : Type where { " ++ ctor ++ " }"
             ]
           (s, _) = foldl (\(sess, _) l -> command sess l) (s0, Blank) decls
-      pure (globals (sessionMachine s))
+      pure (globals (machineOf s))
 
 -- --------------------------------------------------------------------------
 -- Everything a declaration generates is well typed (2026-09-13)
@@ -196,11 +198,11 @@ equipment =
         let printed =
               [ length l
               | (_, d) <- inductives env
-              , l <- renderInductive [] 0 d
+              , l <- renderInductive (Rendering [] 0) d
               ]
                 ++ [ length l
                    | (g, d) <- inductives env
-                   , l <- renderEliminator [] 0 g (fst (eliminatorType d LZero (pastEverything env)))
+                   , l <- renderEliminator (Rendering [] 0) g (fst (eliminatorType d LZero (pastEverything env)))
                    ]
         (sum printed >= 0) @?= True
     ]
@@ -243,9 +245,9 @@ pastEverything = beyond . varsInEnv
 -- | The corpus, declared through the REPL, and whatever it complained about.
 corpus :: IO (GlobalEnv, [String])
 corpus = do
-  (s0, problems) <- startingSession
+  (s0, trouble) <- startingSession
   let (s, said) = foldl' one (s0, []) corpusLines
-  pure (globals (sessionMachine s), problems ++ said)
+  pure (globals (machineOf s), concatMap (renderTrouble s0) trouble ++ said)
   where
     one (s, acc) l = case command s l of
       (s', Ran out _ Completed) -> (s', acc ++ [ o | o <- out, not (expected o) ])
@@ -569,7 +571,7 @@ roundTripTests :: [TestTree]
 roundTripTests =
   [ testCase name $ case lookupInductive (named name) natVec of
       Nothing -> assertFailure (name ++ " was not declared")
-      Just d  -> case reread (renderInductive [] natVecCounter d) of
+      Just d  -> case reread (renderInductive (Rendering [] natVecCounter) d) of
         Left e   -> assertFailure e
         Right d' -> do
           formerType d' @?= formerType d

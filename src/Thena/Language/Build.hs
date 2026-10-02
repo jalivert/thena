@@ -29,6 +29,10 @@ module Thena.Language.Build
   , objectText
   , atCharacters
   , arguments
+  , Draft (..)
+  , spineOf
+  , settled
+  , objectDraft
   ) where
 
 import Data.List (elemIndex, intercalate)
@@ -36,7 +40,7 @@ import qualified Data.List.NonEmpty as NE
 
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
 import Thena.Errors (BuildError (..))
-import Thena.Language.Earley (Piece (..), Tree (..))
+import Thena.Language.Earley (Piece (..), Tree (..), placeholderChar)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Grammar
   ( Argument (..)
@@ -75,6 +79,11 @@ buildCore gs splices = build
     slot name (a, child) = case (argumentSort a, child) of
       (_, SpliceOf k)    -> supplied k
       (OfClass _ t _, _) -> Primitive <$> literal name (argumentName a) t child
+      -- **A placeholder is an incompleteness and not a malformed shape** (MS7
+      -- phase 127): it names the slot that is empty, as 'literal' already does
+      -- for a class slot, rather than falling to 'build's catch-all and
+      -- reporting the glyph as a reading the production does not take.
+      (OfLanguage _, PlaceholderAt _) -> Left (Incomplete (argumentName a))
       (OfLanguage _, _)  -> build child
 
     supplied k = case drop k splices of
@@ -110,6 +119,7 @@ buildSurface gs splices = build
     slot name (a, child) = case (argumentSort a, child) of
       (_, SpliceOf k) -> supplied k
       (OfClass _ t _, _) -> SurfaceLiteral <$> literal name (argumentName a) t child
+      (OfLanguage _, PlaceholderAt _) -> Left (Incomplete (argumentName a))
       (OfLanguage _, _) -> build child
 
     supplied k = case drop k splices of
@@ -143,6 +153,7 @@ skeletonOf gs holes = go
       (OfClass _ t _, SpliceOf k) -> hole (AtPrimitive t) k
       (OfLanguage _, SpliceOf k)  -> hole AtTerm k
       (OfClass _ t _, _) -> SLit <$> literal name (argumentName a) t child
+      (OfLanguage _, PlaceholderAt _) -> Left (Incomplete (argumentName a))
       (OfLanguage _, _)  -> go child
 
     hole what k = case drop k holes of
@@ -169,7 +180,7 @@ literal name x t child = case (child, t) of
   (Token s, GlobalName "String") -> Right (LString s)
   (Token [c], GlobalName "Char") -> Right (LChar c)
   (Token s, GlobalName "Int") | [(k, "")] <- reads s -> Right (LInt k)
-  (HoleAt _, _) -> Left (Incomplete x)
+  (PlaceholderAt _, _) -> Left (Incomplete x)
   _ -> Left (NotForSlot name x)
 
 -- | What a tree is, for a message about one that is not a term.
@@ -177,7 +188,7 @@ shapeOf :: Tree -> String
 shapeOf tree = case tree of
   Node n _   -> n
   Token t    -> t
-  HoleAt _   -> "?"
+  PlaceholderAt _ -> [placeholderChar]
   SpliceOf k -> "${" ++ show k ++ "}"
 
 -- | The tagged literal a term is written as — @LC`( λ x : ι . x )`@ — or
@@ -229,7 +240,7 @@ draftLanguage d = case d of
 -- printer never writes a text the reader would take apart differently.
 draft :: [Grammar] -> Core -> Maybe Draft
 draft gs term = do
-  (name@(GlobalName n), args) <- spine term
+  (name@(GlobalName n), args) <- spineOf term
   p <- production gs n
   g <- grammarOf gs name
   let names = map argumentName (gproductionArguments p)
@@ -243,17 +254,6 @@ draft gs term = do
   children <- traverse slotOf [ (x, s) | Slot x s _ <- gproductionItems p ]
   pure (DNode p (grammarName g) children term)
   where
-    spine t = case t of
-      Canonical c ls as | null ls -> Just (c, as)
-      Global c ls       | null ls -> Just (c, [])
-      App {}                      -> case flatten t [] of
-        (Global c ls, as) | null ls -> Just (c, as)
-        _                           -> Nothing
-      _ -> Nothing
-    flatten t acc = case t of
-      App f a -> flatten f (a : acc)
-      _       -> (t, acc)
-
     token re a = case a of
       Primitive (LString s) | readsBack re s        -> DToken s
       Primitive (LChar c)   | readsBack re [c]      -> DToken [c]
@@ -291,17 +291,37 @@ grammarOf gs name =
 -- 'Nothing' when fencing everything still does not read back. The caller then
 -- prints the term in the host's syntax, which always reads.
 settle :: [Grammar] -> (Core -> String) -> Draft -> Maybe String
-settle gs render = go
+settle gs render d = do
+  d' <- settled gs render d
+  let (chunks, _, _) = laid gs render d'
+  pure (concatMap escaped chunks)
+
+-- | The fencing loop alone, stopping at the draft rather than its text (MS7
+-- phase 115b) — a caller that lays a draft out itself, rather than printing
+-- it, wants the placed fences and nothing more.
+settled :: [Grammar] -> (Core -> String) -> Draft -> Maybe Draft
+settled gs render = go
   where
     rules = earleyRules gs
     go d =
-      let (chunks, input, tree) = laid gs render d
-          GlobalName lang       = draftLanguage d
+      let (_, input, tree) = laid gs render d
+          GlobalName lang  = draftLanguage d
        in if Earley.parse rules (Earley.StartAt lang) input == Right tree
-            then Just (concatMap escaped chunks)
+            then Just d
             else case loose d of
               path : _ -> go (fenceAt path d)
               []       -> Nothing
+
+-- | A term's fenced layout, structure only — no text (MS7 phase 115b), for a
+-- caller that will lay it out itself rather than print it.
+--
+-- **A stub renderer is exact here, not an approximation.** The round trip
+-- 'settled' checks only asks the parser for the shape of the input, and every
+-- piece a foreign subterm could contribute is one opaque 'Earley.Splice' —
+-- its text never reaches the grammar, so no renderer's output could change
+-- which fences the check settles on.
+objectDraft :: [Grammar] -> Core -> Maybe Draft
+objectDraft gs t = draft gs t >>= settled gs (const "")
 
 -- | A piece of a region's text: object text, which is escaped as the lexer
 -- unescapes it, or a splice, which is the host's syntax and already written.
@@ -392,6 +412,26 @@ production gs name =
     p : _ -> Just p
     [] -> Nothing
 
+-- | A saturated constructor application, however it is spelled — a
+-- 'Canonical', or a bare 'Global' still standing as 'App's (phase 110's "both
+-- spellings"). 'Nothing' for anything else, including a constructor at level
+-- arguments (a grammar's production never carries one).
+--
+-- **Shared with "Thena.View.Core" (phase 115b)**, which needs the same
+-- name and arguments to address them — move the two together.
+spineOf :: Core -> Maybe (GlobalName, [Core])
+spineOf t = case t of
+  Canonical c ls as | null ls -> Just (c, as)
+  Global c ls       | null ls -> Just (c, [])
+  App {}                      -> case flatten t [] of
+    (Global c ls, as) | null ls -> Just (c, as)
+    _                           -> Nothing
+  _ -> Nothing
+  where
+    flatten u acc = case u of
+      App f a -> flatten f (a : acc)
+      _       -> (u, acc)
+
 -- ---------------------------------------------------------------------------
 -- Regions (MS6 phase 104, shared by both readers at phase 110)
 -- ---------------------------------------------------------------------------
@@ -417,11 +457,24 @@ productionNames gs lang =
 -- **A splice is one column**, whatever it holds, because it completes one slot
 -- (@ms6\/SPEC.md@ §7.6). Its number is its position among the splices, which
 -- is how 'buildSurface' and 'buildCore' find it again.
+--
+-- **The text goes through 'Earley.pieces', so a placeholder in a written region
+-- is one — MS7 phase 127.** It was @map Char txt@, which made this the one
+-- reader of the three that could not see a placeholder at all: a @\9608@ in a
+-- tagged term literal in a @.thena@ file was an unexpected character, while the
+-- same region typed at the prompt read as a term with a part left unwritten.
+--
+-- **This is the reader the phase nearly missed.** Grepping for callers of
+-- 'Earley.pieces' does not find it, because it built its 'Char' pieces by hand;
+-- what found it was loading a file and reading the error. His ruling of
+-- 2026-09-28 is that the glyph means one thing everywhere — which is also what
+-- makes a placeholder in a /stored/ file possible, and the interactive
+-- term-filling mode and an LSP extension both need that.
 objectInput :: [Either String a] -> [Piece]
 objectInput = go 0
   where
     go _ [] = []
-    go k (Left txt : rest)  = map Char txt ++ go k rest
+    go k (Left txt : rest)  = Earley.pieces txt ++ go k rest
     go k (Right _ : rest)   = Splice k : go (k + 1) rest
 
 -- | What the region says, for a message. A splice stands for itself: the

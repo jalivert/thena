@@ -23,14 +23,23 @@ import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (GlobalName (..), Ident (..))
-import Thena.Driver (Response (..), RuleFileError (..), Session (..), Stop (..), loadProofSource, loadRuleBases, newSession)
+import Thena.Driver
+  ( Response (..)
+  , RuleFileError (..)
+  , machineOf
+  , Stop (..)
+  , loadProofSource
+  , loadRuleBases
+  , newSession
+  )
 import Thena.Engine (Machine (..))
 import Thena.Errors (Skipped (..), SyntaxError (..), Warning (..))
 import Thena.Global.Declare (DeclareError (..))
 import Thena.Language.Grammar
 import Thena.Language.Reader
 import Thena.Language.Regex (Regex, parseRegex)
-import Thena.Repl (renderResponse, startingSession)
+import Thena.Files (startingSession)
+import Thena.Render (renderTrouble, renderResponse)
 import Thena.Syntax.Lexer
   (BlockKind (..), Located (..), Token (..), isIdentifier, lexModule, lexTokens)
 
@@ -43,12 +52,12 @@ tests =
     , testGroup "the checker gives its meaning" meaning
     , testGroup "and refuses what §4.5 refuses" refusals
     , goldenVsString "grammars" "test/golden/grammars.golden" $ do
-        (s0, problems) <- startingSession
+        (s0, trouble) <- startingSession
         let run (title, src) =
               let (s1, r) = loadProofSource s0 src
                in ("-- " ++ title) : renderResponse s1 r
         pure (toLazyByteString (stringUtf8
-          (unlines (problems ++ concatMap run (("the spec's STLC", stlc) : map fst refused ++ unreadable)))))
+          (unlines (concatMap (renderTrouble s0) trouble ++ concatMap run (("the spec's STLC", stlc) : map fst refused ++ unreadable)))))
     ]
 
 -- ---------------------------------------------------------------------------
@@ -206,7 +215,7 @@ meaning =
     lang = OfLanguage . GlobalName
     installed src = do
       (s0, _) <- startingSession
-      pure (grammars (sessionMachine (fst (loadProofSource s0 src))))
+      pure (grammars (machineOf (fst (loadProofSource s0 src))))
 
 -- ---------------------------------------------------------------------------
 
@@ -239,6 +248,18 @@ refused =
   , block "two productions of one name" "language L, M where\n  f -> a\n  f -> b" (ConstructorTaken "f")
   , contextBlock "a context without one empty and one extension production"
       "context C, G where\n  e -> \183\n  f -> G G" ContextShape
+    -- MS7 phase 127, his ruling of 2026-09-28: the placeholder's glyph is
+    -- reserved, and a grammar that could write it or read it is refused so that
+    -- one glyph never means two things in one buffer.
+  , inProduction "a terminal that writes the placeholder"
+      "language L, M where\n  f -> \9608 M" "f" (ReservedTerminal "\9608")
+  , inProduction "a terminal that merely contains it"
+      "language L, M where\n  f -> a\9608b M" "f" (ReservedTerminal "a\9608b")
+  , ( ( "a token class that would read it"
+      , "module M where\n\nany : Token String\nany = /./\n\nlanguage L, M where\n  f -> any M\n"
+      )
+    , GrammarError LanguageBlock "L" (InProduction "f" (ReservedClass "any"))
+    )
   ]
     -- **A built-in tag may not name a language** (moved here from MS5's
     -- grammars at phase 106). A rule base reads an installed grammar's tag

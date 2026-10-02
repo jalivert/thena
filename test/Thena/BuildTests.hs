@@ -21,7 +21,12 @@ import Thena.Core.Context (entryType)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
 import Thena.Core.Typing (infer)
-import Thena.Driver (Response (..), Session (..), Stop (..), loadProofSource)
+import Thena.Driver
+  ( Response (..)
+  , Stop (..)
+  , loadProofSource
+  , machineOf
+  )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env
   ( ArgRole (..)
@@ -37,7 +42,9 @@ import Thena.Language.Build (buildTerm, printRegion)
 import Thena.Language.Earley (parse, pieces)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Grammar (Grammar, earleyRules)
-import Thena.Repl (renderCore, startingSession)
+import Thena.Files (startingSession)
+import Thena.Render ( Rendering (..)
+  ,renderCore)
 
 tests :: TestTree
 tests =
@@ -81,7 +88,7 @@ loaded :: IO (GlobalEnv, [Grammar])
 loaded = do
   (s0, _) <- startingSession
   case loadProofSource s0 stlc of
-    (s1, ProofLoaded {}) -> pure (globals (sessionMachine s1), grammars (sessionMachine s1))
+    (s1, ProofLoaded {}) -> pure (globals (machineOf s1), grammars (machineOf s1))
     (_, other) -> assertFailure (show other)
 
 datatypeOf :: String -> IO InductiveDefinition
@@ -132,7 +139,7 @@ roles =
       (s0, _) <- startingSession
       case loadProofSource s0 "module W where\n\ndata Pair : Type\8320 where\n  mk : String -> String -> Pair\n" of
         (s1, ProofLoaded {}) ->
-          case lookupInductive (GlobalName "Pair") (globals (sessionMachine s1)) of
+          case lookupInductive (GlobalName "Pair") (globals (machineOf s1)) of
             Just d -> map constructorRoles (inductiveConstructors d) @?= [[Plain, Plain]]
             Nothing -> assertFailure "Pair was not declared"
         (_, other) -> assertFailure (show other)
@@ -164,9 +171,9 @@ terms =
       (_, gs) <- loaded
       let t = con "twice" [con "var" [Primitive (LString "a")]]
       (readTerm gs "{ a a }", printRegion gs host t) @?= (Right t, Just "{ a a }")
-  , testCase "a hole is not a term" $ do
+  , testCase "a placeholder is not a term" $ do
       (_, gs) <- loaded
-      readTerm gs "( \955 ? : \953 . x )" @?= Left (Incomplete "x")
+      readTerm gs "( \955 \9608 : \953 . x )" @?= Left (Incomplete "x")
   , testCase "a name the class would not read back is spliced instead" $ do
       (_, gs) <- loaded
       printRegion gs host (con "var" [Primitive (LString "a b")])
@@ -181,7 +188,7 @@ terms =
 -- | The host\'s printer, for what a splice holds. The real one, so that a
 -- spliced term is written the way a reader would take it back.
 host :: Core -> String
-host = renderCore [] 0 []
+host = renderCore (Rendering [] 0) []
 
 -- | What a definition written with a tagged term literal elaborated to, or why
 -- the load stopped (MS6 phase 104).
@@ -195,7 +202,7 @@ elaborated decls = do
   (s0, _) <- startingSession
   case loadProofSource s0 (stlc ++ "\n" ++ decls ++ "\n") of
     (s1, ProofLoaded {}) ->
-      let env = globals (sessionMachine s1)
+      let env = globals (machineOf s1)
        in case lookupDefinition (GlobalName "t") env of
             Just d  -> pure (Right (whnf env [] (definitionBody d)))
             Nothing -> assertFailure "t was not declared"
@@ -220,6 +227,28 @@ literals =
       (_, gs) <- loaded
       r <- elaboratedTerm ("LC" ++ region "( \955 x : \953 . x )")
       fmap (printRegion gs host) r @?= Right (Just "( \955 x : \953 . x )")
+    -- **The reader the phase nearly missed — MS7 phase 127.** A tagged term
+    -- literal in a surface module reaches the parser through
+    -- 'Thena.Language.Build.objectInput', which built its pieces with
+    -- @map Char@ and so could not see a placeholder at all: the same region
+    -- read as a term at the prompt and as an unexpected character in a file.
+    -- Nothing here covered it, because every other placeholder test goes
+    -- through 'Earley.pieces' directly ('readTerm' above does).
+    --
+    -- **What it must report is incompleteness, not a bad character**, which is
+    -- the graceful outcome his ruling of 2026-09-28 asks for: the placeholder is
+    -- recognised, the term is known to be unfinished, and the author is told
+    -- which slot is empty.
+  , testCase "a placeholder in a stored literal is recognised, not a bad character" $ do
+      r <- elaboratedTerm ("LC" ++ region "( \9608 x )")
+      r @?= Left (ObjectFailed (ObjectNotATerm "LC" (Incomplete "M")))
+    -- A placeholder completes any slot, including a token class's, so a region
+    -- that is nothing but one reads as the shortest production that takes a
+    -- slot — @var@ — with its own slot empty. Still an incompleteness, and it
+    -- names the slot, which is what matters.
+  , testCase "and a region that is only a placeholder is incomplete too" $ do
+      r <- elaboratedTerm ("LC" ++ region "\9608")
+      r @?= Left (ObjectFailed (ObjectNotATerm "LC" (Incomplete "x")))
   , testCase "a splice supplies the slot it stands in" $ do
       r <- elaborated
              ("u : LC\nu = LC[var]" ++ region "q"

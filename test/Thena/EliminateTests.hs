@@ -20,7 +20,10 @@ import Data.List (isInfixOf)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Driver (Loaded (..), loadSource)
+import Thena.Driver
+  ( Loaded (..)
+  , loadSource
+  )
 import Thena.Standard (withRules)
 
 import Thena.Core.Context (Context, Entry (..))
@@ -38,7 +41,9 @@ import Thena.Driver (parseCore)
 import Thena.Errors (ElimError (..))
 import Thena.Global.Env (GlobalEnv)
 import Thena.Driver (Response (..), command, loadProofSource)
-import Thena.Repl (renderCore, renderResponse, startingSession)
+import Thena.Files (startingSession)
+import Thena.Render ( Rendering (..)
+  ,renderCore, renderResponse)
 import Thena.Tactics.Eliminate (Elimination (..), eliminate)
 
 tests :: TestTree
@@ -543,7 +548,7 @@ withMethods ctx el =
 
 -- | One line, so that an exact-string case reads as one line.
 rendered :: Context -> Core -> String
-rendered ctx = unwords . words . renderCore [] 0 ctx
+rendered ctx = unwords . words . renderCore (Rendering [] 0) ctx
 
 
 -- --------------------------------------------------------------------------

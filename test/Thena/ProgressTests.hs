@@ -19,10 +19,14 @@ import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (testCase, (@?=))
 
 import Thena.Core.Term (GlobalName (..))
-import Thena.Driver (Session (..))
+import Thena.Driver
+  ( machineOf
+  )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
-import Thena.Repl (startingSession, loadProofFile, renderCore)
+import Thena.Files (loadProofFile, startingSession)
+import Thena.Render ( Rendering (..)
+  ,renderCore)
 
 tests :: TestTree
 tests =
@@ -52,7 +56,7 @@ tests =
       -- the elaborator's output shape, not the theorem.
     , testCase "and the three lemmas that produce a step are there" $ do
         s <- loaded
-        map (isJust . flip lookupDefinition (globals (sessionMachine s)) . GlobalName)
+        map (isJust . flip lookupDefinition (globals (machineOf s)) . GlobalName)
             ["ifSteps", "predSteps", "isZeroSteps"]
           @?= [True, True, True]
     ]
@@ -60,13 +64,13 @@ tests =
     -- **Two modules, in order** — the second reads the first's globals.
     loaded = do
       (s, _)  <- startingSession
-      (s1, _) <- loadProofFile s "examples/canonical.thena"
-      (s2, _) <- loadProofFile s1 "examples/progress.thena"
+      (s1, _, _) <- loadProofFile s "examples/canonical.thena"
+      (s2, _, _) <- loadProofFile s1 "examples/progress.thena"
       pure s2
 
     declarationsOf _ = ["loaded canonical.thena, then progress.thena"]
 
     statementOf n = do
       s <- loaded
-      pure ( renderCore [] (names (sessionMachine s)) [] . definitionType
-               <$> lookupDefinition (GlobalName n) (globals (sessionMachine s)) )
+      pure ( renderCore (Rendering [] (names (machineOf s))) [] . definitionType
+               <$> lookupDefinition (GlobalName n) (globals (machineOf s)) )

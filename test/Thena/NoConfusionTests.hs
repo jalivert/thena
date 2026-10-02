@@ -41,12 +41,16 @@ import Thena.Declared
   , preludeDecls
   , vecDecl
   )
-import Thena.Driver (parseCore, parseDeclaration)
+import Thena.Driver
+  ( parseCore
+  , parseDeclaration
+  )
 import Thena.Global.Declare (DeclareError (..), declare)
 import Thena.Global.Env (GlobalEnv, definitionBody, definitionType, lookupDefinition)
 import Thena.Errors (Skipped (..))
 import Thena.Kernel (certify)
-import Thena.Repl (renderCore)
+import Thena.Render ( Rendering (..)
+  ,renderCore)
 
 tests :: TestTree
 tests =
@@ -71,7 +75,7 @@ termIn env n ctx src = case parseCore [] env ctx n src of
 -- | Reduce a term of the family to weak head normal form and render it.
 reduces :: GlobalEnv -> Int -> String -> String -> Assertion
 reduces env n src expect =
-  renderCore [] n [] (whnf env [] (termIn env n [] src)) @?= expect
+  renderCore (Rendering [] n) [] (whnf env [] (termIn env n [] src)) @?= expect
 
 natReduces, taplReduces :: String -> String -> Assertion
 natReduces  = reduces eqNat eqNatCounter
@@ -123,7 +127,7 @@ caseTests =
 
 typeOfGlobal :: GlobalEnv -> Int -> String -> Maybe String
 typeOfGlobal env n g =
-  renderCore [] n [] . definitionType <$> lookupDefinition (GlobalName g) env
+  renderCore (Rendering [] n) [] . definitionType <$> lookupDefinition (GlobalName g) env
 
 -- --------------------------------------------------------------------------
 -- Using it

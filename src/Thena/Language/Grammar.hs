@@ -34,17 +34,20 @@ module Thena.Language.Grammar
   , extensionOf
   , isName
   , variableProduction
+  , variableClass
   , tokenClassOf
   , earleyRules
+  , productionBody
   ) where
 
 import Data.List (nub, (\\))
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, listToMaybe)
 
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), tokenName)
 import qualified Thena.Language.Earley as Earley
-import Thena.Language.Regex (Regex, parseRegex)
+import Thena.Language.Earley (placeholderChar)
+import Thena.Language.Regex (Regex, matches, parseRegex, primingChar)
 import Thena.Errors (BuildError, SyntaxError, Warning (..))
 import Thena.Global.Env (ArgRole (..), GlobalEnv, definitionBody, definitionType, isDeclared, lookupDefinition)
 import Thena.Language.Reader (Block (..), Metadata (..), Production (..), RawItem (..), RawRule (..))
@@ -190,6 +193,13 @@ data ProductionProblem
   | NotationBinds String
     -- ^ a judgment's notation writes a binding form: its slots are indices,
     -- and nothing binds in an index (MS6 phase 108)
+  | ReservedTerminal String
+    -- ^ a terminal that writes 'Thena.Language.Earley.placeholderChar'
+    -- (MS7 phase 127)
+  | ReservedClass String
+    -- ^ a token class that would scan it (MS7 phase 127) — the same refusal one
+    -- step further back, because a class that reads the glyph makes it a term
+    -- exactly as a terminal does
   deriving (Eq, Show)
 
 -- | Validate a block against the grammars already installed and the global
@@ -231,10 +241,26 @@ checkGrammar installed env b = do
   case [ f | f <- substitutionNames g, taken f || f `elem` prodNames ] of
     f : _ -> refuse (FunctionTaken f)
     [] -> Right ()
-  Right (g, concatMap snd prods)
+  Right (g, concatMap snd prods ++ unprimeable g)
   where
     kind = blockKind b
     name = blockName b
+
+    -- **A language whose identifier class no character extends** (MS6 closeout
+    -- 23, phase 146). 'Thena.Language.Regex.primingChar' decides it on the
+    -- automaton; when it answers 'Nothing' the generated @L-fresh@ falls back to
+    -- @'@ and a renamed binder is a name the notation cannot write. Said here
+    -- because this is where an author finds out, and said rather than refused
+    -- because nothing is actually broken but the printing.
+    unprimeable gr =
+      [ UnprimeableClass kind name (nameOf cls)
+      | Just p <- [variableProduction gr]
+      , a <- gproductionArguments p
+      , argumentRole a == Occurrence
+      , OfClass cls _ re <- [argumentSort a]
+      , primingChar re == Nothing
+      ]
+    nameOf (GlobalName x) = x
     -- **A judgment's name is not a metavariable**: its header has none, and
     -- its notation's are the languages' (§6.1).
     heads
@@ -288,8 +314,27 @@ checkGrammar installed env b = do
                     | Just xs <- [declared], x <- xs, x `notElem` bracketed ]
       Right (GProduction (GlobalName (productionName p)) items arguments, vacuous)
 
+    -- **The placeholder's glyph is reserved — HIS RULING, 2026-09-28, MS7 phase
+    -- 127.** A grammar that could write it or read it would make one glyph mean
+    -- two things in the same buffer, told apart only by looking closely; his
+    -- reason for refusing that outright is that it fails anyone who cannot, and
+    -- that a user will type it to see what happens within ten minutes. The
+    -- check is here so that \"reserved\" is a property of every installed
+    -- grammar rather than a convention nothing enforces.
+    reserved w
+      | placeholderChar `elem` w = Left (ReservedTerminal w)
+      | otherwise = Right ()
+
+    -- A class is refused when it would *accept* the glyph, which is what makes
+    -- it a term. @/./@ does; @/[a-z]+/@ does not.
+    reservedClass x srt = case srt of
+      OfClass _ _ re | any (> 0) (matches re [placeholderChar]) -> Left (ReservedClass x)
+      _ -> Right ()
+
     item i = case i of
-      Word w -> Right (maybe (Terminal w) (\srt -> Slot w srt []) (sortOf w))
+      Word w -> case sortOf w of
+        Nothing  -> reserved w >> Right (Terminal w)
+        Just srt -> reservedClass w srt >> Right (Slot w srt [])
       Binding hd _ | kind == JudgmentBlock -> Left (NotationBinds hd)
       Binding hd bs -> case sortOf hd of
         Just srt@(OfLanguage _) -> Right (Slot hd srt bs)
@@ -320,6 +365,27 @@ checkGrammar installed env b = do
 -- check guarded only MS5's own languages, which phase 106 deleted.
 builtInTags :: [String]
 builtInTags = ["surface", "core"]
+
+-- | The body of a named production, as Earley symbols (MS7 phase 147, moved out
+-- of "Thena.Language.Instral" where phase 141 wrote it).
+--
+-- **The search is across every loaded grammar with no language filter, and that
+-- is safe because a production name is unique across all of them.** Each
+-- production becomes a datatype constructor, and a second language declaring one
+-- of the same name is refused when it loads — @A's constructor same is already
+-- declared@. Verified by loading such a pair rather than reasoned about;
+-- @productionNamesAreUnique@ pins it with a fixture, because if constructor
+-- uniqueness ever relaxed this lookup would quietly hand one language another's
+-- production.
+--
+-- **Empty for a name no grammar has**, which cannot arise from either caller —
+-- both take the name from 'Thena.Language.Build.productionNames' of a grammar in
+-- the very list they pass. Answered rather than crashed, because both callers are
+-- views.
+productionBody :: [Grammar] -> String -> [Earley.Symbol]
+productionBody gs p = case [ Earley.ruleBody r | r <- earleyRules gs, Earley.ruleName r == p ] of
+  b : _ -> b
+  []    -> []
 
 -- | Can substitution be generated for this language (§4.7, MS6 phase 105)?
 --
@@ -372,6 +438,21 @@ variableProduction g
                          , any ((== Occurrence) . argumentRole) (gproductionArguments p) ] of
       p : _ -> Just p
       [] -> Nothing
+
+-- | **The regular expression of the language's identifier class** — the one its
+-- 'variableProduction' reads an occurrence at (§4.7 gives a language exactly
+-- one).
+--
+-- Added at phase 146 so that a generated @L-fresh@ can mint names the class
+-- accepts (MS6 closeout 23). 'Nothing' for a grammar with no variable
+-- production, or one whose occurrence is not at a class — neither generates
+-- substitution, so neither has an @L-fresh@ to name.
+variableClass :: Grammar -> Maybe Regex
+variableClass g = do
+  p <- variableProduction g
+  listToMaybe [ re | a <- gproductionArguments p
+                   , argumentRole a == Occurrence
+                   , OfClass _ _ re <- [argumentSort a] ]
 
 -- | A context's extension production — the one with a slot of the context's
 -- own sort (§5.1). 'Nothing' for anything that is not a context.

@@ -15,6 +15,7 @@
 -- 'preludeIsInTheWay'.
 module Thena.LoadTests (tests) where
 
+import Data.Maybe (isJust)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
@@ -26,7 +27,9 @@ import Thena.Driver
   , Loaded (..)
   , LoadKind (..)
   , Response (..)
-  , Session (..)
+  , Session
+  , machineOf
+  , pendingQuestion
   , Stop (..)
   , command
   , kindOf
@@ -34,9 +37,10 @@ import Thena.Driver
   , loadRuleBases
   , loadSource
   , newSession
+  , oneLine
   )
-import Thena.Engine (Machine (..))
-import Thena.Repl (rulesPath)
+import Thena.Engine (Development, Machine (..), development)
+import Thena.Files (rulesPath)
 import Thena.Core.Term (Core, substLevelsIn)
 import Thena.Global.Env
   ( Definition (..)
@@ -47,7 +51,9 @@ import Thena.Global.Env
   , isDeclared
   , lookupInductive
   )
-import Thena.Repl (startingSession, loadProofFile, renderCore, renderEliminator)
+import Thena.Files (loadProofFile, startingSession)
+import Thena.Render ( Rendering (..)
+  ,renderTrouble, renderResponse, renderCore, renderEliminator)
 import Thena.Core.Convert (convert)
 import Thena.Core.Context ()
 import Thena.Standard (withRules)
@@ -74,12 +80,12 @@ tests =
 preludeTests :: [TestTree]
 preludeTests =
   [ testCase "it is found where cabal put it, and loads clean" $ do
-      (_, problems) <- startingSession
-      problems @?= []
+      (s, trouble) <- startingSession
+      concatMap (renderTrouble s) trouble @?= []
 
   , testCase "and declares exactly Eq, refl, Unit, unit and Empty" $ do
       (s, _) <- startingSession
-      let env = globals (sessionMachine s)
+      let env = globals (machineOf s)
       sequence_
         [ assertBool (n ++ " is not declared") (isDeclared (GlobalName n) env)
         | n <- ["Eq", "refl", "Unit", "unit", "Empty"]
@@ -89,8 +95,8 @@ preludeTests =
     -- can be used". Pinned as a string, for 'Thena.EliminatorTests'' reason.
   , testCase "Eq's generated eliminator is J" $ do
       (s, _) <- startingSession
-      let env = globals (sessionMachine s)
-          n0  = names (sessionMachine s)
+      let env = globals (machineOf s)
+          n0  = names (machineOf s)
       case lookupInductive (GlobalName "Eq") env of
         Nothing -> assertFailure "Eq is not declared"
         Just d  ->
@@ -104,7 +110,7 @@ preludeTests =
           -- eliminator is a scheme now, and what a use site sees is the
           -- instantiation. Rendering it uninstantiated would pin @ℓ@'s number,
           -- which is a counter value and no business of this assertion.
-          renderEliminator [] n0 (GlobalName "Eq") (atZero d (fst (eliminatorType d LZero n0)))
+          renderEliminator (Rendering [] n0) (GlobalName "Eq") (atZero d (fst (eliminatorType d LZero n0)))
             @?= [ "elim Eq : ∀ (A : Type₀) (P : ∀ (_ : A) (_1 : A) -> Eq {0} A _ _1 -> Type₀) \
                   \-> (∀ (a : A) -> P a a (refl {0} A a)) \
                   \-> ∀ (_ : A) (_1 : A) (target : Eq {0} A _ _1) -> P _ _1 target"
@@ -256,7 +262,38 @@ failureTests =
 
   , testCase "a file that ends while something is asking says so" $
       loadedError (sourceWithRules ["assume ⌜ Type₀ ⌝"]) @?= Just (UnansweredQuestion 1)
+
+    -- **And it does not leave the session waiting** (MS7 phase 123). The
+    -- pending question used to be an argument the caller threaded, and the
+    -- REPL passed 'Nothing' after a load rather than whatever the file left
+    -- behind. Now that it is 'pendingQuestion' the load has to clear it, or the
+    -- next line typed at the prompt would be read as the answer to a question
+    -- nobody was shown.
+  , testCase "and the session it hands back is not still asking" $
+      pendingQuestion (loadedSession (sourceWithRules ["assume ⌜ Type₀ ⌝"])) @?= Nothing
+
+    -- **The ruling this phase rests on, asserted** — HIS, 2026-09-28: /"Feels
+    -- like a question and answer is an atomic unit."/ So 'pendingQuestion' is
+    -- not in a 'Snapshot' and @:undo@ does not step back into a question: one
+    -- @:undo@ takes back the asking and the answering together.
+    --
+    -- Driven through 'oneLine' rather than 'loadSource', because a load
+    -- clears the question as it finishes (the test above) and a mid-file
+    -- state is exactly what this needs to see.
+  , testCase "asking lives on the session, and one :undo takes back the pair" $ do
+      let (s1, _) = oneLine withRules "assume ⌜ Type₀ ⌝"
+          (s2, _) = oneLine s1 "x"
+          (s3, _) = oneLine s2 ":undo"
+      isJust (pendingQuestion s1) @?= True   -- the line asked, and the session says so
+      pendingQuestion s2 @?= Nothing         -- the answer settled it
+      pendingQuestion s3 @?= Nothing         -- and undoing does not bring it back
+      assertBool "the pair really did build something" (devOf s2 /= devOf withRules)
+      devOf s3 @?= devOf withRules         -- and one :undo took the whole pair back
   ]
+
+-- | The development, for comparing one state against another.
+devOf :: Session -> Development
+devOf = development . machineOf
 
 -- --------------------------------------------------------------------------
 -- Helpers
@@ -279,7 +316,7 @@ afterLines :: Session -> [String] -> (Loaded -> IO ()) -> IO ()
 afterLines s ls k = k (loadSource s (unlines ls))
 
 declared :: String -> Loaded -> Bool
-declared n l = isDeclared (GlobalName n) (globals (sessionMachine (loadedSession l)))
+declared n l = isDeclared (GlobalName n) (globals (machineOf (loadedSession l)))
 
 -- | The last line's rendered term, printed as the REPL would print it.
 --
@@ -289,7 +326,7 @@ declared n l = isDeclared (GlobalName n) (globals (sessionMachine (loadedSession
 -- claims is that J computes, and the printed answer is the honest witness.
 renderedLast :: Loaded -> Maybe String
 renderedLast l = case reverse (loadedResponses l) of
-  Rendered t : _ -> Just (renderCore [] (names (sessionMachine (loadedSession l))) [] t)
+  Rendered t : _ -> Just (renderCore (Rendering [] (names (machineOf (loadedSession l)))) [] t)
   _              -> Nothing
 
 -- | A datatype's own level parameters, all instantiated at zero.
@@ -396,7 +433,7 @@ moduleTests =
   , testCase "and what it warned about is installed anyway" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 dependentModule
-      isDeclared (GlobalName "Chain") (globals (sessionMachine s1)) @?= True
+      isDeclared (GlobalName "Chain") (globals (machineOf s1)) @?= True
 
   , testCase "a load with nothing to say warns about nothing" $ do
       (s0, _) <- startingSession
@@ -407,7 +444,7 @@ moduleTests =
   , testCase "and the globals are really there afterwards" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 natModule
-          g = globals (sessionMachine s1)
+          g = globals (machineOf s1)
       map (\n -> isDeclared (GlobalName n) g) ["Nat", "zero", "succ", "one"]
         @?= [True, True, True, True]
 
@@ -451,7 +488,7 @@ moduleTests =
   , testCase "and what it declared is really there" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 blockModule
-      isDeclared (GlobalName "one") (globals (sessionMachine s1)) @?= True
+      isDeclared (GlobalName "one") (globals (machineOf s1)) @?= True
 
   , -- **Resolution happens where the block runs** (MS6 phase 104b), so a block
     -- whose op is given the wrong operands stops the run rather than refusing
@@ -471,11 +508,48 @@ moduleTests =
     -- run, because a module is a sequence and its blocks are no longer hoisted
     -- out of it. MS5 phase 90 checked every block before the module started,
     -- which is what made a @language@ block above a block unusable.
+    --
+    -- **The evidence for that moved into the response at phase 144** (MS6
+    -- closeout 15). It used to be @Nat@ still being declared afterwards, which
+    -- is the leak that phase closed — so the assertion below is the response's
+    -- own shape instead, and it says the same thing: @BlockIllTyped@ with a
+    -- reason means the block was resolved and typed, and resolution is exactly
+    -- what needs @Nat@ to have been declared. A block run before its module's
+    -- declarations gives 'BlockRefused' with an @UnboundInRule@ — the sibling
+    -- test below shows that shape — so the two cannot be confused.
     testCase "a top-level block that does not type check stops the run" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 mistypedBlockModule of
-        (s1, Ran _ _ (BlockIllTyped (_ : _))) ->
-          isDeclared (GlobalName "Nat") (globals (sessionMachine s1)) @?= True
+        (_, Ran _ _ (BlockIllTyped (_ : _))) -> pure ()
+        (_, other) -> assertFailure (show other)
+
+  , -- **A load that does not complete declares nothing** (MS6 closeout 15,
+    -- his ruling 2026-09-30). This is the invariant phase 144 establishes and
+    -- it is asserted on the one module in this file that fails after declaring
+    -- something: @Nat@ lands, then the block does not type check.
+    testCase "and the module it had already declared is rolled back" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 mistypedBlockModule
+      isDeclared (GlobalName "Nat") (globals (machineOf s1)) @?= False
+
+  , -- **Everything goes back except the fresh counter**, which must go forward
+    -- or a name the user has seen would be reissued (MS2 closeout 4f) — and a
+    -- failed load does show them, in its @solved: ?ℓn@ lines.
+    testCase "but the fresh counter goes forward across a failed load" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 mistypedBlockModule
+      assertBool "the counter did not advance"
+        (names (machineOf s1) > names (machineOf s0))
+
+  , -- **The point of the rollback, and the reason it is worth a phase**: the
+    -- session survives a typo. Before this, the names that had landed made the
+    -- corrected file unloadable — 'Thena.Global.Declare' refused the
+    -- re-declaration and blamed the constructor's target (@AGENDA.md@ 81).
+    testCase "so the corrected module loads in the same session" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 mistypedBlockModule
+      case loadProofSource s1 blockModule of
+        (_, ProofLoaded nm ds n _) -> (nm, ds, n) @?= ("M", ["Nat", "one"], 1)
         (_, other) -> assertFailure (show other)
 
   , -- **Each top-level block is its own scope**, as a block is — and since
@@ -616,10 +690,12 @@ moduleTests =
 tierTests :: [TestTree]
 tierTests =
   [ goldenVsString "tier0" "test/golden/tier0.golden" $ do
-      (s, problems) <- startingSession
-      (s1, out) <- loadProofFile s "examples/tier0.thena"
+      (s, trouble) <- startingSession
+      (s1, out, _) <- loadProofFile s "examples/tier0.thena"
       let shown = concatMap (renderResponse' s1) ["one", "two", "plusZeroLeft"]
-      pure (toLazyByteString (stringUtf8 (unlines (problems ++ out ++ shown))))
+      pure (toLazyByteString (stringUtf8 (unlines
+        (concatMap (renderTrouble s) trouble
+          ++ concatMap (renderResponse s1) out ++ shown))))
 
   , -- **Implicit insertion is semantically transparent**, which is the property
     -- MS4\'s done-when asks for at phase 44 and not an approximation of it.
@@ -637,7 +713,7 @@ tierTests =
   , testCase "and they are convertible, not merely both admitted" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 bothSpellings
-          m = sessionMachine s1
+          m = machineOf s1
       case ( lookupDefinition (GlobalName "oneExplicit") (globals m)
            , lookupDefinition (GlobalName "oneImplicit") (globals m)
            ) of
@@ -648,8 +724,8 @@ tierTests =
         _ -> assertFailure "one of the two was not admitted"
   ]
   where
-    renderResponse' s g = case lookupDefinition (GlobalName g) (globals (sessionMachine s)) of
-      Just d  -> [g ++ " = " ++ renderCore [] 0 [] (definitionBody d)]
+    renderResponse' s g = case lookupDefinition (GlobalName g) (globals (machineOf s)) of
+      Just d  -> [g ++ " = " ++ renderCore (Rendering [] 0) [] (definitionBody d)]
       Nothing -> [g ++ " is missing"]
 
     bothSpellings =

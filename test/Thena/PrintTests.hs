@@ -20,13 +20,20 @@ import Test.Tasty.QuickCheck
   (Gen, counterexample, elements, forAll, ioProperty, oneof, property, sized, testProperty, withNumTests, (===))
 
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
-import Thena.Driver (Response (..), Session (..), loadProofSource, parseCore)
+import Thena.Driver
+  ( Response (..)
+  , machineOf
+  , loadProofSource
+  , parseCore
+  )
 import Thena.Engine (Machine (..))
 import Thena.Errors (ObjectError (..), ResolveError (..), SyntaxError (..))
 import Thena.Global.Env (GlobalEnv)
 import Thena.Language.Build (printTerm)
 import Thena.Language.Grammar (Grammar)
-import Thena.Repl (renderCore, startingSession)
+import Thena.Files (startingSession)
+import Thena.Render ( Rendering (..)
+  ,renderCore)
 
 tests :: TestTree
 tests =
@@ -88,7 +95,7 @@ loaded :: IO (GlobalEnv, [Grammar])
 loaded = do
   (s0, _) <- startingSession
   case loadProofSource s0 source of
-    (s1, ProofLoaded {}) -> pure (globals (sessionMachine s1), grammars (sessionMachine s1))
+    (s1, ProofLoaded {}) -> pure (globals (machineOf s1), grammars (machineOf s1))
     (_, other) -> assertFailure (show other)
 
 -- | A constructor applied, as the reader leaves it.
@@ -100,7 +107,7 @@ str = Primitive . LString
 
 -- | The host's printer, for what a splice holds.
 host :: Core -> String
-host = renderCore [] 0 []
+host = renderCore (Rendering [] 0) []
 
 printed :: [Grammar] -> Core -> IO String
 printed gs t = maybe (assertFailure "it did not print") pure (printTerm gs host t)

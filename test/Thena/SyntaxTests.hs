@@ -19,10 +19,14 @@ import Thena.Core.Term
   , close
   , fresh
   )
-import Thena.Driver (parseCore, parseDeclaration)
+import Thena.Driver
+  ( parseCore
+  , parseDeclaration
+  )
 import Thena.Global.Declare (declare)
 import Thena.Global.Env (GlobalEnv, emptyGlobals)
-import Thena.Repl (renderCore)
+import Thena.Render ( Rendering (..)
+  ,renderCore)
 import Thena.Syntax.Concrete (Raw (..), RawBinder (..), RawIdent (..))
 import Thena.Syntax.Resolve (resolve)
 
@@ -44,7 +48,7 @@ natEnv = case parseDeclaration [] emptyGlobals 0 decl of
 
 -- | Resolve, render, re-resolve. The property everything else supports.
 roundTrips :: Core -> Int -> Bool
-roundTrips t n = case parseCore [] natEnv [] n (renderCore [] n [] t) of
+roundTrips t n = case parseCore [] natEnv [] n (renderCore (Rendering [] n) [] t) of
   Right (t', _) -> t' == t
   Left _        -> False
 
@@ -196,9 +200,9 @@ errorTests =
 shadowTests :: [TestTree]
 shadowTests =
   [ testCase "the inner binder is renamed, so the body still reparses" $
-      assertBool (renderCore [] 500 [] shadowed) (roundTrips shadowed 500)
+      assertBool (renderCore (Rendering [] 500) [] shadowed) (roundTrips shadowed 500)
   , testCase "and the two binders really do print differently" $
-      renderCore [] 500 [] shadowed @?= "λ (x : Type₀) (x1 : Type₀) -> x"
+      renderCore (Rendering [] 500) [] shadowed @?= "λ (x : Type₀) (x1 : Type₀) -> x"
   ]
 
 shadowed :: Core
@@ -285,7 +289,7 @@ nestedLam which =
 
 render :: String -> String
 render src = case parseCore [] emptyGlobals [] 0 src of
-  Right (t, n) -> renderCore [] n [] t
+  Right (t, n) -> renderCore (Rendering [] n) [] t
   Left e       -> "ERROR: " ++ show e
 
 isLeft :: Either a b -> Bool

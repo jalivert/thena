@@ -14,7 +14,7 @@
 module Thena.EarleyTests (tests) where
 
 import Data.ByteString.Builder (stringUtf8, toLazyByteString)
-import Data.List (sort)
+import Data.List (isPrefixOf, sort)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
@@ -23,7 +23,9 @@ import Test.Tasty.QuickCheck (Gen, Property, choose, counterexample, elements, f
 import Thena.Driver (loadProofSource)
 import Thena.Language.Earley
 import Thena.Language.Regex (Regex, parseRegex)
-import Thena.Repl (startingSession, tabComplete, transcriptFrom)
+import Thena.Render (renderTrouble)
+import Thena.Files (startingSession)
+import Thena.Repl (tabComplete, transcriptFrom)
 
 tests :: TestTree
 tests =
@@ -36,9 +38,10 @@ tests =
     , testProperty "printed and parsed back, a tree is itself" roundTrip
     , testGroup "Tab at the cursor (phase 102b)" tabbing
     , goldenVsString "parsing" "test/golden/parsing.golden" $ do
-        (s0, problems) <- startingSession
+        (s0, trouble) <- startingSession
         let (s1, _) = loadProofSource s0 stlc
-        pure (toLazyByteString (stringUtf8 (unlines problems ++ transcriptFrom s1 prompt)))
+        pure (toLazyByteString (stringUtf8
+          (unlines (concatMap (renderTrouble s0) trouble) ++ transcriptFrom s1 prompt)))
     ]
 
 -- ---------------------------------------------------------------------------
@@ -63,6 +66,11 @@ run :: [Rule] -> String -> String -> Either ParseFailure Tree
 run rs start = parse rs (StartAt start) . pieces
 
 -- | The spec's STLC, as installed grammars would give it.
+-- | A grammar that writes @?@ as a terminal — impossible to parse before MS7
+-- phase 127, because @?@ was the placeholder.
+optional :: [Rule]
+optional = [rule "opt" "Q" [lit "?", nt "Q"], rule "end" "Q" [lit "!"]]
+
 lc :: [Rule]
 lc =
   [ rule "base" "Ty" [lit "ι"]
@@ -139,16 +147,16 @@ forest =
 holes :: [TestTree]
 holes =
   [ testCase "a hole completes a slot" $
-      run lc "LC" "( λ ? : ι . ? )" @?= Right (node "abs" [HoleAt 4, node "base" [], HoleAt 12])
+      run lc "LC" "( λ \9608 : ι . \9608 )" @?= Right (node "abs" [PlaceholderAt 4, node "base" [], PlaceholderAt 12])
   , -- His ruling, 2026-09-19: slots only.
     testCase "and never stands for a terminal" $
-      case run lc "LC" "( ? x : ι . x )" of
+      case run lc "LC" "( \9608 x : ι . x )" of
         Left (Stuck _ _) -> pure ()
         other -> assertFailure (show other)
   , testCase "a hole is compatible with anything a repeated name reads" $
       run [ rule "var" "E" [cls "x" "[a-z]+"], Rule "rep" "E" [lit "{", nt "E", nt "E", lit "}"] [("E", [0, 1])] ]
-          "E" "{ ? a }"
-        @?= Right (node "rep" [HoleAt 2, var "a"])
+          "E" "{ \9608 a }"
+        @?= Right (node "rep" [PlaceholderAt 2, var "a"])
   , testCase "a splice supplies a slot" $
       parse lc (StartAt "LC") ([Char '(', Char 'λ', Char ' ', Splice 0] ++ pieces " : ι . x )")
         @?= Right (node "abs" [SpliceOf 0, node "base" [], var "x"])
@@ -169,7 +177,7 @@ charting =
   , -- Slots only (his ruling): in the chart itself, not just the verdict, no
     -- abs item gets past its λ on a hole.
     testCase "a hole where λ goes moves no abs item past it" $ do
-      let c = chart lc (StartAt "LC") (pieces "( ?")
+      let c = chart lc (StartAt "LC") (pieces "( \9608")
       [ i | k <- [0 .. 3], i <- itemsAt c k, ruleName (chartRule c i) == "abs", itemDot i >= 2 ] @?= []
   , testCase "furthest is where scanning stopped" $
       furthest (chart lc (StartAt "LC") (pieces "( λ x ι )")) @?= 5
@@ -249,7 +257,7 @@ prompt :: [String]
 prompt =
   [ ":parse LC ( \955 x : \953 . x )"
   , ":parse LC (\955f:(\953->\953).(\955y:\953.f y))"
-  , ":parse LC ( \955 ? : \953 . ? )"
+  , ":parse LC ( \955 \9608 : \953 . \9608 )"
   , ":parse LC f a b"
   , ":parse LC { a a }"
   , ":parse LC { a b }"
@@ -275,37 +283,106 @@ tab rs lang left right = tabComplete rs lang (reverse left, right)
 
 tabbing :: [TestTree]
 tabbing =
-  [ testCase "after ( λ, the rest of abs is inserted, slots as ?" $
-      tab lc "LC" "( λ" "" @?= (reverse "( λ", [(" ? : ? . ? )", "? : ? . ? )")])
-  , testCase "after ( λ x : , too — the last terminal still belongs to abs alone" $
-      tab lc "LC" "( λ x : " "" @?= (reverse "( λ x : ", [("? . ? )", "? . ? )")])
+  [ testCase "after ( λ, the rest of abs is inserted, slots as \9608" $
+      tab lc "LC" "( λ" "" @?= (reverse "( λ", [(" \9608 : \9608 . \9608 )", "\9608 : \9608 . \9608 )")])
+  , testCase "after ( λ x : , too — abs is the one production open there" $
+      tab lc "LC" "( λ x : " "" @?= (reverse "( λ x : ", [("\9608 . \9608 )", "\9608 . \9608 )")])
+  , -- Phase 120: a dot moved by a token class is as decisive as one moved by
+    -- a literal — after the binder, abs is still the only production open —
+    -- so Tab writes the rest of it rather than only its next @:@.
+    testCase "and after the binder, where the previous symbol is a token class" $
+      tab lc "LC" "( λ x " "" @?= (reverse "( λ x ", [(": \9608 . \9608 )", ": \9608 . \9608 )")])
   , testCase "after ( alone, abs and paren both fit, so the options are listed" $ do
       let (kept, cs) = tab lc "LC" "( " ""
       kept @?= reverse "( "
       map fst cs @?= map (const "") cs   -- nothing inserted: haskeline lists
       sort [ d | (_, d) <- cs, d `elem` ["\955", "(", "\8249LC\8250"] ]
         @?= sort ["\955", "\8249LC\8250", "("]
-  , -- The completion rule is about a terminal: after f, which ends a var,
-    -- app has begun but nothing has been decided, so nothing is completed.
+  , -- The rest is about a production that has recognised something and not
+    -- finished: after f, which ends a var, app has begun but all it wants is
+    -- a slot, and a slot is listed rather than written.
     testCase "after a finished var, no production is completed" $
       map fst (snd (tab lc "LC" "f" "")) @?= map (const "") (snd (tab lc "LC" "f" ""))
   , -- The cursor inside the production being written: what follows it is the
     -- rest, so the slot must still be offered.
     testCase "a slot of the production under the cursor is offered" $ do
-      let (_, cs) = tab lc "LC" "( \955 ? : " " . ? )"
+      let (_, cs) = tab lc "LC" "( \955 \9608 : " " . \9608 )"
       [ d | (_, d) <- cs, d == "\8249Ty\8250" ] @?= ["\8249Ty\8250"]
   , testCase "the text after the cursor filters the options" $ do
       let (_, cs) = tab lc "LC" "( \955 x : \953 . x " ")"
       [ d | (_, d) <- cs, d == ")" ] @?= []
-  , -- With text after the cursor the rest of abs is not inserted; the one
-    -- thing that fits there — a hole for the bound name — is.
-    testCase "the rest of a production is never inserted into a line's middle" $
-      tab lc "LC" "( \955" " x" @?= (reverse "( \955", [(" ?", "?")])
-  , testCase "on a ?, a single answer replaces the hole" $
-      tab [rule "e" "E" [lit "<", nt "T", lit ">"], rule "base" "T" [lit "\953"]] "E" "< ?" " >"
+  , -- Phase 120's three faces. Before it, the rest of a production was
+    -- offered only at the end of a line, and mid-line Tab fell through to
+    -- inserting one option on its own — which for a slot is a @█@ written in
+    -- front of what the user had already typed.
+    testCase "the binder already written is listed, not overwritten with a hole" $
+      tab lc "LC" "( \955" " x" @?= (reverse "( \955", [("", "\8249x\8250")])
+  , testCase "a top-level abs is completed against its own closer" $
+      tab lc "LC" "( \955" " )" @?= (reverse "( \955", [(" \9608 : \9608 . \9608", "\9608 : \9608 . \9608")])
+  , testCase "a nested abs is completed against the outer term's closer" $
+      tab lc "LC" "( \955 fn : ( \953 -> \953 ) . ( \955" " )"
+        @?= (reverse "( \955 fn : ( \953 -> \953 ) . ( \955", [(" \9608 : \9608 . \9608 )", "\9608 : \9608 . \9608 )")])
+  , -- What the cursor already holds is not written twice: the body hole and
+    -- the closer on the right finish the production, so the rest stops at
+    -- the dot. Writing the body slot as well would read the two holes as an
+    -- application.
+    testCase "the rest stops where the text after the cursor takes over" $
+      tab lc "LC" "( \955" "\9608 )" @?= (reverse "( \955", [(" \9608 : \9608 .", "\9608 : \9608 .")])
+    -- MS7 phase 134 (@ms7\/CLOSEOUT.md@ 12). Before it this was the empty list,
+    -- which haskeline shows as nothing at all — and the line below is exactly
+    -- the state a user is in when they most want help.
+  , testCase "a prefix that does not read says where it gave out" $ do
+      let (kept, cs) = tab lc "LC" "( \955 x )" ""
+      kept @?= reverse "( \955 x )"
+      map fst cs @?= [""]     -- display only: nothing is inserted at the cursor
+      case map snd cs of
+        [d] | "stopped at " `isPrefixOf` d -> pure ()
+        ds  -> assertFailure ("expected one 'stopped at' line, got " <> show ds)
+  , testCase "and a prefix that does read says nothing of the kind" $
+      [ d | (_, d) <- snd (tab lc "LC" "( " ""), "stopped at " `isPrefixOf` d ] @?= []
+  , -- The field the line is built from, at the parser rather than through the
+    -- terminal: 'Nothing' whenever the cursor's own column has items.
+    testCase "offerStuck is Nothing wherever there is anything to offer" $
+      [ before
+      | before <- ["", "( ", "( \955", "( \955 x ", "( \955 x : \953 . "]
+      , Just _ <- [offerStuck (offer lc (StartAt "LC") (pieces before) [])]
+      ] @?= []
+  , testCase "and Just, with a column short of the cursor, when there is not" $
+      case offerStuck (offer lc (StartAt "LC") (pieces "( \955 x )") []) of
+        Nothing -> assertFailure "expected a stuck offer"
+        Just (at, expected) -> (at < length "( \955 x )", null expected) @?= (True, False)
+  , -- Nothing can be written here that leaves the line finishable — abs
+    -- would need a second @.@ — but the position wants a Ty, and saying so
+    -- beats saying nothing.
+    testCase "a contradicted type slot still names its nonterminal" $
+      tab lc "LC" "( \955 x : " "\9608 . \9608 )" @?= (reverse "( \955 x : ", [("", "\8249Ty\8250")])
+  , testCase "and that is offerWanted, with nothing fitting and no rest" $ do
+      let o = offer lc (StartAt "LC") (pieces "( \955 x : ") (pieces "\9608 . \9608 )")
+      (offerOptions o, offerWanted o, offerRest o) @?= ([], [nt "Ty"], Nothing)
+  , -- The two answers, side by side, and the line between them: at the open
+    -- paren of an abs already written, @(@ fits — a paren or an arrow type
+    -- could still be finished around it — while the LC that paren and app
+    -- are waiting for cannot be had at all. A /prediction/ waits for nothing,
+    -- having recognised nothing, so var's token class stays out even though
+    -- it too is unwritable here.
+    testCase "what is wanted is not what fits, and a prediction wants nothing" $ do
+      let o = offer lc (StartAt "LC") (pieces "(") (pieces " \955 x : \953 . x )")
+      (offerOptions o, offerWanted o) @?= ([lit "("], [nt "LC"])
+  , -- ---------------------------------------------------------------------
+    -- MS7 phase 127: what the glyph change is FOR.
+    testCase "a grammar may use ? as a terminal, and it is not a placeholder" $ do
+      -- **The point of the phase, asserted.** @?@ was the placeholder until
+      -- here, so a grammar writing it could not be parsed on any interactive
+      -- path at all. HIS, 2026-09-27: /"I am absolutely not squatting on ? and
+      -- preventing it from being used in user-defined languages."/
+      run optional "Q" "? ? !" @?= Right (node "opt" [node "opt" [node "end" []]])
+  , testCase "and the reserved glyph is still a placeholder in that grammar" $
+      run optional "Q" "? \9608" @?= Right (node "opt" [PlaceholderAt 2])
+  , testCase "on a \9608, a single answer replaces the placeholder" $
+      tab [rule "e" "E" [lit "<", nt "T", lit ">"], rule "base" "T" [lit "\953"]] "E" "< \9608" " >"
         @?= (reverse "< ", [("\953", "\953")])
   , testCase "and several leave it standing and are listed" $ do
-      let (kept, cs) = tab lc "LC" "( \955 ? : ?" " . ? )"
-      kept @?= reverse "( \955 ? : ?"
+      let (kept, cs) = tab lc "LC" "( \955 \9608 : \9608" " . \9608 )"
+      kept @?= reverse "( \955 \9608 : \9608"
       sort [ d | ("", d) <- cs, d `elem` ["\953", "("] ] @?= sort ["\953", "("]
   ]

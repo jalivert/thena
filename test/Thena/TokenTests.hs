@@ -18,12 +18,19 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
-import Thena.Driver (Response (..), Session (..), Stop (..), loadProofSource)
+import Thena.Driver
+  ( Response (..)
+  , machineOf
+  , Stop (..)
+  , loadProofSource
+  )
 import Thena.Engine (Machine (..))
 import Thena.Global.Declare (DeclareError (..), TokenClassError (..))
 import Thena.Global.Env (definitionBody, lookupDefinition)
 import Thena.Language.Regex (RegexError (..))
-import Thena.Repl (renderResponse, startingSession, transcriptFrom)
+import Thena.Files (startingSession)
+import Thena.Render (renderTrouble, renderResponse)
+import Thena.Repl (transcriptFrom)
 import Thena.Syntax.Lexer (Located (..), Token (..), lexTokens)
 
 tests :: TestTree
@@ -34,12 +41,12 @@ tests =
     , testGroup "a class is elaborated like any definition" accepted
     , testGroup "and refused at declaration when it is not a class" refusals
     , goldenVsString "tokens" "test/golden/tokens.golden" $ do
-        (s0, problems) <- startingSession
+        (s0, trouble) <- startingSession
         let run (title, src) =
               let (s1, r) = loadProofSource s0 src
                in ("-- " ++ title) : renderResponse s1 r
         pure (toLazyByteString (stringUtf8
-          (unlines (problems ++ concatMap run (good : bad)) ++ transcriptFrom s0 prompt)))
+          (unlines (concatMap (renderTrouble s0) trouble ++ concatMap run (good : bad)) ++ transcriptFrom s0 prompt)))
     ]
 
 -- | The same checks reached from @qed@, which admits a definition by the other
@@ -124,7 +131,7 @@ accepted =
     testCase "T is the argument, and it came from the annotation" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 (snd good)
-          env = globals (sessionMachine s1)
+          env = globals (machineOf s1)
           value g = whnf env [] . definitionBody <$> lookupDefinition (GlobalName g) env
       map value ["ident", "digit", "numeral", "again"]
         @?= map Just

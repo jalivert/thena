@@ -28,11 +28,13 @@ module Thena.Instral.Infer
   , Site (..)
   , inferProgram
   , inferBlock
+  , boundBy
   , renderInstralTypeError
   ) where
 
 import Data.Graph (flattenSCC, stronglyConnComp)
-import Data.List (elemIndex, intercalate, nub, sort, sortOn)
+import Data.Function (on)
+import Data.List (elemIndex, intercalate, nub, nubBy, sort, sortOn)
 import Data.Maybe (fromMaybe, listToMaybe)
 
 import Thena.Core.Term (GlobalName (..))
@@ -347,13 +349,54 @@ inferProgram sigs rs =
 -- checked against what @h@ actually is rather than refused as unbound.
 inferBlock
   :: [(String, Signature)] -> [Rule] -> [(Name, Value)] -> Rule -> [InstralTypeError]
-inferBlock sigs rs bound r =
+inferBlock sigs rs bound r = fst (blockResult sigs rs bound r)
+
+-- | **What a block binds, and the type each name ended up with** (MS7 phase 140).
+--
+-- For the offer at a prompt entry: the instructions above the cursor are a block,
+-- and this says which names they left in scope so a completion can list them. The
+-- block handed in is always /complete/ instructions — the caller cuts it at a
+-- separator "Thena.Surface.Layout" inserted — so this types a well-formed block
+-- and never a fragment.
+--
+-- **A type may still be a variable.** Nothing pins what @h = here@ leaves if
+-- nothing uses it, and an unsolved one renders as a letter, exactly as a
+-- polymorphic signature does. That is the honest answer and not a failure.
+--
+-- **A name bound twice appears once, as its last binding**, which is the one in
+-- scope at the end of the block.
+boundBy :: [(String, Signature)] -> [Rule] -> Rule -> [(Name, Ty)]
+boundBy sigs rs r = snd (blockResult sigs rs [] r)
+
+-- | Type one block and answer both halves: **what is wrong with it, and what it
+-- bound.** One walk, because two walks over the same instructions would be two
+-- answers that could disagree.
+blockResult
+  :: [(String, Signature)] -> [Rule] -> [(Name, Value)] -> Rule
+  -> ([InstralTypeError], [(Name, Ty)])
+blockResult sigs rs bound r =
   let (env, st0)  = foldl (inferGroup sigs rs) ([], St 0 [] [] []) (components rs)
       site        = InBody (ruleName r) 0
       (ctx, st1)  = foldr seed ([], st0) bound
       seed (n, v) (acc, st) = let (t, st') = valueType site v st in ((n, Mono t) : acc, st')
       (res, st2)  = fresh st1
-   in stErrors (settleText (body env r (Just res) ctx (writtenPositions (ruleBody r)) st2 (ruleBody r)))
+      (st3, ctx') = body env r (Just res) ctx (writtenPositions (ruleBody r)) st2 (ruleBody r)
+      -- **Settled before any type is read.** 'settleText' pins a deferred text
+      -- literal's variable at the very end, so a type read out before it would
+      -- say @a@ where the block plainly wrote a @String@.
+      st4         = settleText st3
+      -- 'ctx'' has the latest binding first, which is the one in scope; keeping
+      -- the first of each name and then reversing gives written order with the
+      -- live binding for each.
+      live        = reverse (nubBy ((==) `on` fst) ctx')
+   in (stErrors st4, [ (n, deep st4 (schemeOf l)) | (n, l) <- live ])
+
+-- | The type inside a local, whichever kind it is. A scheme's variables are
+-- reported as they stand: 'boundBy' says what was written, not one instance of it.
+schemeOf :: Local -> Ty
+schemeOf l = case l of
+  Mono t -> t
+  Poly t -> t
 
 -- | The statement a body site points at; anything else counts as the first.
 siteIndex :: Site -> Int
@@ -549,7 +592,7 @@ clause env st0 r = case fromMaybe (error "declareAll missed a rule")
     walk ps res st =
       let (ctx, st1)  = patternCtx (InPattern (ruleName r)) (ruleParams r) ps st
           st2         = foldl (headTest r ctx) st1 (zip [0 ..] (ruleHead r))
-       in body env r res ctx (writtenPositions (ruleBody r)) st2 (ruleBody r)
+       in fst (body env r res ctx (writtenPositions (ruleBody r)) st2 (ruleBody r))
 
     resultOfSig sg = maybe [] (: []) (sigResult sg)
 
@@ -674,8 +717,14 @@ useOf l st = case l of
 -- one walking a lambda's or a block's body passes the enclosing statement's
 -- position for every instruction — the lambda is what the reader sees on that
 -- line, which is the choice 'Thena.Rules.validate' already made.
-body :: SigEnv -> Rule -> Maybe Ty -> [(Name, Local)] -> [Int] -> St -> [Instr] -> St
-body _   _ _   _   _ st []             = st
+-- **It answers the scope it ends in as well as the state** (MS7 phase 140). The
+-- context was always built — @ctx'@ below, at every instruction — and was always
+-- discarded when the walk ran out of instructions. Nothing about checking
+-- changed to report it: no unification, no error and no order is different, and
+-- the one caller that wants it is an offer asking /what did the lines above the
+-- cursor bind/.
+body :: SigEnv -> Rule -> Maybe Ty -> [(Name, Local)] -> [Int] -> St -> [Instr] -> (St, [(Name, Local)])
+body _   _ _   ctx _ st []             = (st, ctx)
 body env r res ctx ps st (instr : rest) =
   let si = InBody (ruleName r) (case ps of { p : _ -> p ; [] -> 0 })
       o  = case instr of { Bind _ _ x -> x; Do x -> x }
@@ -744,7 +793,7 @@ operation env r res ctx si o st0 = case o of
     let (vs, st1)    = freshes (length ps) st0
         (rv, st2)    = fresh st1
         (bs, st3)    = patternCtx (InPattern (ruleName r)) ps vs st2
-        st4          = body env r (Just rv) (bs ++ ctx) (repeat (siteIndex si)) st3 b
+        st4          = fst (body env r (Just rv) (bs ++ ctx) (repeat (siteIndex si)) st3 b)
      in (Just (TFun vs rv), st4)
 
   -- **A local shadows a rule** — his ruling, 2026-09-12 — so a call whose name
@@ -809,7 +858,7 @@ operation env r res ctx si o st0 = case o of
   -- why 'res' is passed straight through.
   Block is ->
     let (v, st1) = fresh st0
-     in (Nothing, body env r (Just v) ctx (repeat (siteIndex si)) st1 is)
+     in (Nothing, fst (body env r (Just v) ctx (repeat (siteIndex si)) st1 is))
 
   -- Everything else is the table, instantiated once: the operand types and the
   -- result together, so a scheme variable shared between them stays shared.

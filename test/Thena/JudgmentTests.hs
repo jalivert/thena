@@ -17,11 +17,18 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Context (entryIdent)
 import Thena.Core.Term (GlobalName (..), Ident (..))
-import Thena.Driver (Response (..), Session (..), command, loadProofSource)
+import Thena.Driver
+  ( Response (..)
+  , Session
+  , machineOf
+  , command
+  , loadProofSource
+  )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (ConstructorDefinition (..), InductiveDefinition (..), lookupInductive)
 import Thena.Language.Reader (Block (..), Production (..), RawRule (..), ReadError (..), readBlock)
-import Thena.Repl (renderResponse, startingSession)
+import Thena.Files (startingSession)
+import Thena.Render (renderResponse)
 import Thena.Syntax.Lexer (BlockKind (..))
 
 tests :: TestTree
@@ -117,7 +124,7 @@ said s line = let (s', r) = command s line in renderResponse s' r
 -- argument nothing depends on as an arrow, so a premise's name is seen here.
 argumentNames :: Session -> String -> String -> [String]
 argumentNames s d c =
-  [ n | Just ind <- [lookupInductive (GlobalName d) (globals (sessionMachine s))]
+  [ n | Just ind <- [lookupInductive (GlobalName d) (globals (machineOf s))]
       , con <- inductiveConstructors ind, constructorName con == GlobalName c
       , Ident n <- map entryIdent (constructorArguments con) ]
 

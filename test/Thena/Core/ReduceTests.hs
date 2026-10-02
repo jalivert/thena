@@ -19,7 +19,10 @@ import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Var, fresh)
 import Thena.Declared (nat, natFin, natFinCounter, natVec, natVecCounter)
-import Thena.Driver (SyntaxError, parseCore)
+import Thena.Driver
+  ( SyntaxError
+  , parseCore
+  )
 import Thena.Global.Env (Definition (..), GlobalEnv, addDefinition, emptyGlobals)
 
 tests :: TestTree

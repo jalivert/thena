@@ -10,7 +10,7 @@ module Thena.LexerTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Repl (describe)
+import Thena.Render (describe)
 import Thena.Syntax.Lexer (Located (..), Token (..), lexTokens)
 
 tests :: TestTree
@@ -217,7 +217,7 @@ tests =
 
 -- | **A message that says /unexpected X/ must be able to mean it.**
 --
--- @Thena.Repl.describe@ turns a token into the text a syntax error names, and
+-- @Thena.Render.describe@ turns a token into the text a syntax error names, and
 -- it is what every @unexpected …@ line is built from. If it prints something
 -- that does not lex back to the same token, the message points at a character
 -- the user did not write — which this review has already met twice, once from

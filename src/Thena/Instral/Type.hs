@@ -19,6 +19,7 @@ module Thena.Instral.Type
   , Signature (..)
   , renderTy
   , renderSignature
+  , letterFor
   , typeVarsIn
   , fits
   ) where
@@ -188,6 +189,11 @@ renderTy = go False
     wrap p s = if p then "(" ++ s ++ ")" else s
 
 -- | @a@, @b@, … @z@, then @a1@ and on. Scheme variables are few.
+--
+-- **Injective**, which is what lets 'Thena.View.Type.ASchemeVar' carry the
+-- letter instead of the index: two slots share a letter exactly when they share
+-- a variable. Exported at MS7 phase 133 so the view has one copy of the naming
+-- rather than a second that drifts.
 letterFor :: Int -> String
 letterFor i
   | i < 26    = [toEnum (fromEnum 'a' + i)]

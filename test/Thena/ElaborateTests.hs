@@ -22,7 +22,10 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Test.Tasty.QuickCheck
   (Gen, counterexample, forAll, oneof, property, testProperty, withNumTests)
 
-import Thena.Driver (Loaded (..), loadSource)
+import Thena.Driver
+  ( Loaded (..)
+  , loadSource
+  )
 import Thena.Standard (withRules)
 
 import Thena.Core.Level (Level (..))

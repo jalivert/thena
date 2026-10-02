@@ -33,13 +33,17 @@ module Thena.DeterminacyTests (tests) where
 import Data.ByteString.Builder (stringUtf8, toLazyByteString)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
-import Test.Tasty.HUnit (testCase, (@?=))
+import Test.Tasty.HUnit (testCase, (@?=), assertBool)
 
 import Thena.Core.Term (GlobalName (..))
-import Thena.Driver (Session (..))
+import Thena.Driver
+  ( machineOf
+  )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
-import Thena.Repl (startingSession, loadFile, loadProofFile, renderCore)
+import Thena.Files (loadFile, loadProofFile, startingSession)
+import Thena.Render ( Rendering (..)
+  ,renderCore, renderTrouble, renderResponse)
 
 -- | Relative to the package root, which is where the suite runs — the same
 -- assumption @test\/golden@ already makes.
@@ -54,14 +58,15 @@ tests =
   testGroup
     "MS1's target — determinacy of evaluation (§9, phase 18)"
     [ goldenVsString "determinacy" "test/golden/determinacy.golden" $ do
-        (s, problems) <- startingSession
-        (_, out, _) <- loadFile s target
-        pure (toLazyByteString (stringUtf8 (unlines (problems ++ out))))
+        (s, trouble) <- startingSession
+        (s', out, _) <- loadFile s target
+        pure (toLazyByteString (stringUtf8 (unlines
+          (concatMap (renderTrouble s) trouble ++ concatMap (renderResponse s') out))))
 
     , testCase "the file runs to the end" $ do
         (s, _) <- startingSession
         (_, _, stopped) <- loadFile s target
-        stopped @?= []
+        assertBool (unlines (map show stopped)) (null stopped)
 
     , testCase "and TAPL 3.5.4 is a global with the statement it should have" $ do
         (s, _) <- startingSession
@@ -73,19 +78,20 @@ tests =
       -- goes through 'loadProofFile' — and its failure, if it had one, is in
       -- the response rather than in a stopped-line count.
     , goldenVsString "determinacy-surface" "test/golden/determinacy-surface.golden" $ do
-        (s, problems) <- startingSession
-        (_, out) <- loadProofFile s surfaceTarget
-        pure (toLazyByteString (stringUtf8 (unlines (problems ++ out))))
+        (s, trouble) <- startingSession
+        (s', out, _) <- loadProofFile s surfaceTarget
+        pure (toLazyByteString (stringUtf8 (unlines
+          (concatMap (renderTrouble s) trouble ++ concatMap (renderResponse s') out))))
 
     , testCase "and the surface version proves the same statement" $ do
         (s, _) <- startingSession
-        (s', _) <- loadProofFile s surfaceTarget
+        (s', _, _) <- loadProofFile s surfaceTarget
         statementOf s' @?= Just theorem
     ]
   where
     statementOf s' =
-      renderCore [] (names (sessionMachine s')) [] . definitionType
-        <$> lookupDefinition (GlobalName "determinacy") (globals (sessionMachine s'))
+      renderCore (Rendering [] (names (machineOf s'))) [] . definitionType
+        <$> lookupDefinition (GlobalName "determinacy") (globals (machineOf s'))
 
     theorem = "∀ (t : Term) (t1 : Term) -> Step t t1 \
               \-> ∀ (t2 : Term) -> Step t t2 -> Eq {0} Term t1 t2"

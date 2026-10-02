@@ -1,0 +1,11 @@
+-- Build settings, so that a phase is not spent waiting.
+--
+-- `-j` compiles a package's modules in parallel — this project is one package of
+-- ~60 library modules and a ~70-module test component, so package-level
+-- parallelism alone bought nothing. Added MS7 phase 129 at his instruction: a
+-- 35-second build and a 100-second suite were a real part of why a phase took
+-- hours.
+packages: .
+
+package thena
+    ghc-options: -j

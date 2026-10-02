@@ -34,7 +34,8 @@ import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (testCase, (@?=))
 
 import Thena.Driver (commandSummary)
-import Thena.Repl (startingSession, transcriptIO)
+import Thena.Files (startingSession)
+import Thena.Repl (transcriptIO)
 
 manual :: FilePath
 manual = "docs/MANUAL.md"

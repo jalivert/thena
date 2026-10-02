@@ -16,8 +16,15 @@
 -- the cursor is 'Thena.Engine.Development' — exactly what backtracks — so a
 -- move is an op and is spelled as a bare word (§2.4, §4.3).
 module Thena.Driver
-  ( Session (..)
+  ( Session
+  , machineOf
+  , workingOn
+  , parked
+  , fuelOf
+  , parsingLanguage
+  , pendingQuestion
   , newSession
+  , withRuleBases
   , Response (..)
   , Stop (..)
   , SyntaxError (..)
@@ -34,11 +41,16 @@ module Thena.Driver
   , commandSummary
   , answer
   , oneLine
+  , entryBindings
+  , oneProgram
   , loadSource
   , loadProofSource
+  , loadProofItems
   , RuleFileError (..)
   , InstralTypeError
   , loadRuleBases
+  , loadRuleDecls
+  , ruleBaseOfDecls
   , baseHead
   , parseCore
   , checkedPrimitive
@@ -46,6 +58,8 @@ module Thena.Driver
   , parseDeclaration
   , parseSurfaceTerm
   , parseSurfaceModule
+  , Item (..)
+  , rawRuleDecls
   , LoadKind (..)
   , kindOf
   ) where
@@ -145,7 +159,7 @@ import Thena.Instral.Ops
   , Value (..)
   )
 import Data.Either (partitionEithers)
-import Thena.Instral.Infer (InstralTypeError (..), inferBlock, inferProgram)
+import Thena.Instral.Infer (InstralTypeError (..), boundBy, inferBlock, inferProgram)
 import Thena.Instral.Type (Signature (..), Ty (..), fits)
 import Thena.Rules
   ( RuleBase (..)
@@ -205,13 +219,27 @@ import Thena.Syntax.Resolve (resolve, resolveData, resolvePartial)
 
 -- | Everything the session holds.
 --
+-- **The constructor and the fields are not exported — MS7 phase 125.** A
+-- session is built by 'newSession' and advanced by 'oneLine' and 'oneProgram';
+-- what may be read off one is 'machineOf' and the five beside it, and the views
+-- computed from it are "Thena.View"'s. His ruling of 2026-09-27: the boundary is
+-- real when the type is opaque, and the fields had exactly one reader outside
+-- this module ("Thena.Repl", nine sites, all of them view work).
+--
+-- **The reads are functions, not the fields renamed.** A field selector that is
+-- exported is also an update: GHC allows @s { sessionFuel = Just 1 }@ wherever
+-- @sessionFuel@ is in scope, constructor or no constructor. So the fields
+-- keep their names and stay in, and the exported reads have their own — which
+-- also let them say what they give ('fuelOf', 'pendingQuestion') rather than
+-- which field they came from.
+--
 -- The name counter is not here: it is the machine's 'names' field (§7.2), and
 -- while there is one machine that field /is/ §2.4's session-global counter.
 -- Phase 13 has several proofs and must decide how one counter is threaded
 -- through them; until then a second copy here would be two homes for one
 -- number.
 --
--- Stepping is a session setting, so it does not backtrack and does not belong
+-- The fuel is a session setting, so it does not backtrack and does not belong
 -- to the machine (§7.4).
 data Session = Session
   { sessionMachine   :: Machine
@@ -249,14 +277,100 @@ data Session = Session
     -- @globals@, and @globals@ is deliberately not in a 'Snapshot' (§7.7: the
     -- environment only ever grows), so an @:undo@ that crossed it would rewind
     -- the development and leave the theorem admitted.
-  , sessionStepping  :: Bool
+  , sessionFuel      :: Maybe Int
+    -- ^ **how many instructions a run may do before handing control back**
+    -- (MS7 phase 128): @Nothing@ to run on, @Just n@ for at most @n@.
+    --
+    -- **It was @sessionStepping :: Bool@ until here, and this deletes the flag
+    -- rather than adding a parameter beside it** — single-stepping is the
+    -- degenerate budget, @Just 1@, and @:step off@ is @Nothing@. One notion,
+    -- so the engine has one way of being handed back and @:step on@ has
+    -- somewhere to live.
+    --
+    -- **This is what makes a job possible** (his ruling of 2026-09-28,
+    -- @discussion\/tight-integration.md@ §5): a frontend advances a session in
+    -- slices and interleaves a keystroke between them, and stopping is simply
+    -- not asking for the next slice. Fuel rather than an asynchronous
+    -- interrupt, in his words — /"interrupting a search would not have an
+    -- option of resuming it… This is a strong argument for the fuel argument!"/
+    -- — because 'progress' is a fold and an exception thrown into it loses
+    -- every step it accumulated unless something mutable holds the machine,
+    -- which would put IO under this module (§12 invariant 4).
+    --
+    -- **It does not make the kernel interruptible**, and he accepted that:
+    -- 'certify', 'declare', 'checkGrammar' and 'checkBlock' all run unbounded
+    -- work /between/ steps, so one unit of fuel can be a multi-minute kernel
+    -- call (@ms7\/CLOSEOUT.md@ 23).
   , sessionParsing   :: Maybe String
     -- ^ **the language whose terms the lines are, in @:parse@'s interactive
     -- mode** (MS6 phase 102b, his request of 2026-09-19). Every line is parsed
-    -- as a term of it until @:done@. On the session, as 'sessionStepping' is,
+    -- as a term of it until @:done@. On the session, as 'sessionFuel' is,
     -- so a transcript drives the mode exactly as the terminal does.
+  , sessionAsking    :: Maybe Question
+    -- ^ **what an op is waiting to be told**, and therefore whether the next
+    -- line is an answer or a command (MS7 phase 123).
+    --
+    -- **It was an argument and a result of 'oneLine' until here**, threaded by
+    -- every caller, and a caller that dropped or staled it sent a line to the
+    -- wrong half of the driver. His words, 2026-09-27: /"It feels weird having
+    -- things travel between the engine and the frontend\/TUI just freely
+    -- alongside the session."/ On the session, as 'sessionFuel' and
+    -- 'sessionParsing' are, and for the same reason.
+    --
+    -- **Deliberately not in a 'Snapshot'**, so @:undo@ does not step back into
+    -- a question — HIS, 2026-09-28: /"Feels like a question and answer is an
+    -- atomic unit."/ A restored question would also be a state with no way
+    -- out: a pending question routes the next line to 'answer', so @:undo@ at
+    -- a prompt is read as the answer (@ms7\/CLOSEOUT.md@ 16). One @:undo@
+    -- takes back the asking and the answering together.
   }
   deriving (Eq, Show)
+
+-- | The machine: the development, the globals, the rule bases, the grammars and
+-- the name counter (§7.2).
+--
+-- **A frontend that reaches for this is a frontend missing a view.** It is here
+-- because the suites step the machine directly and because "Thena.View" is built
+-- on it; what a frontend wants is 'Thena.View.machineView' and the reads beside
+-- it.
+machineOf :: Session -> Machine
+machineOf = sessionMachine
+
+-- | The theorem being attempted, or an unnamed development.
+workingOn :: Session -> Working
+workingOn = sessionWork
+
+-- | Attempts left and re-enterable, most recently suspended first (§2.4).
+parked :: Session -> [Parked]
+parked = sessionSuspended
+
+-- | How many instructions a run may do before handing control back — @Nothing@
+-- to run on, @Just n@ for at most @n@ (phase 128).
+--
+-- **This is what a job pane reads.** A frontend that advances a session in
+-- slices sets it with @:step ‹n›@ and learns from 'Paused' that a slice ended
+-- with the budget spent rather than with the run over.
+fuelOf :: Session -> Maybe Int
+fuelOf = sessionFuel
+
+-- | In @:parse@'s interactive mode, the language every line is read as
+-- (MS6 phase 102b).
+parsingLanguage :: Session -> Maybe String
+parsingLanguage = sessionParsing
+
+-- | What an op is waiting to be told, and therefore whether the next line is an
+-- answer rather than a command (phase 123).
+pendingQuestion :: Session -> Maybe Question
+pendingQuestion = sessionAsking
+
+-- | A session with these rule bases installed, replacing whatever it had.
+--
+-- **The one write a caller outside this module makes**, and it was a record
+-- update until phase 125: the suites that must not do IO install a base built
+-- in Haskell rather than read from disk ("Thena.Standard"). A frontend that
+-- builds a base with 'ruleBaseOfDecls' wants the same door.
+withRuleBases :: [RuleBase] -> Session -> Session
+withRuleBases bs s = s { sessionMachine = (sessionMachine s) { rules = bs } }
 
 -- | What the session is working on.
 --
@@ -367,8 +481,9 @@ newSession = Session
   , sessionWork      = Scratch
   , sessionSuspended = []
   , sessionHistory   = (Exec [] [] [], ps, []) :| []
-  , sessionStepping  = False
+  , sessionFuel      = Nothing
   , sessionParsing   = Nothing
+  , sessionAsking    = Nothing
   }
   where
     (ps, n) = newDevelopment 0
@@ -559,7 +674,16 @@ data Stop
   | Uncertified KernelError
     -- ^ the kernel would not accept what the development built (§5.3). Shaped
     -- like 'Refused': the command is abandoned, and there is nothing to retry
-  | Paused               -- ^ stepping mode: one instruction done
+  | Paused Int
+    -- ^ the fuel ran out: the machine can go on, and the number is how many
+    -- instructions this run spent (phase 128).
+    --
+    -- **A paused run has by definition spent its whole budget** — it is the
+    -- only way to reach here — so the number tells a caller that passed
+    -- @Just n@ nothing it did not know. It is carried because a job's pane
+    -- accumulates slices, and @total + spent@ is one addition against
+    -- re-reading a setting the frontend may since have changed. @Just 1@ is
+    -- single-stepping, so @Paused 1@ is what stepping mode has always said.
   deriving (Eq, Show)
 
 -- | Everything else a command line can get wrong (§7.8's @CommandError@).
@@ -763,6 +887,27 @@ instralEntry gs bases src = do
       RawBind n (RhsOp (RawOp w os)) ->
         let (bs, os') = resolving w os in bs ++ [RawBind n (RhsOp (RawOp w os'))]
       _ -> [i]
+
+-- | **What the instructions of an entry prefix leave in scope**, with the type
+-- each name ended up with (MS7 phase 140).
+--
+-- For the offer at a prompt entry: given the instructions above the cursor, this
+-- says which names a completion may list. The text handed in is always /complete/
+-- instructions — the caller cuts it at a separator "Thena.Surface.Layout"
+-- inserted — so 'instralEntry' reads it exactly as it would read the entry the
+-- user is about to run.
+--
+-- **A prefix that will not run contributes no names.** 'instralEntry' refuses a
+-- block that does not resolve or does not type, and this answers @[]@ rather than
+-- reporting names read out of code the system has already rejected. The offer then
+-- says what /kind/ of thing goes at the cursor and lists nothing, which is the
+-- honest answer while the lines above are broken.
+entryBindings :: [Grammar] -> [RuleBase] -> String -> [(Ops.Name, Ty)]
+entryBindings gs bases src = case instralEntry gs bases src of
+  Left _     -> []
+  Right prog ->
+    boundBy (allSignatures bases) (allCallable bases)
+      (Rule (GlobalName "entry") [] [] prog)
 
 -- | Hoist every written core term out of a line, resolving it first.
 --
@@ -1034,8 +1179,18 @@ surfaceProgram n0 items = foldl item ([], n0) items
 -- @solved: ?ℓ229@ lines and a file of them buries its own output, which is the
 -- same bargain @loadPrelude@ has always made with a script.
 --
--- **Holes left over are not an error.** A module that does not finish leaves a
--- half-built development in the session, which is what the REPL is for.
+-- **Holes left over are not an error, and that is not the same as a module
+-- that fails** — the sentence here said /"a module that does not finish leaves
+-- a half-built development in the session"/ and conflated the two, which is
+-- what MS6 closeout 15 was about.
+--
+-- **The run's outcome decides everything, and it is the only thing that does.**
+-- A run that reaches @Completed@ is loaded whatever it left in the development,
+-- and the session keeps it — that is what the REPL is for, and it is the true
+-- half of the old sentence. A run that stops for any other reason **declares
+-- nothing at all**: 'loadProofItems' puts the session back as it was (his
+-- ruling, 2026-09-30, /"Atomic from now on"/).
+--
 -- **Brady's data rule** (@IDRIS.md@ §4.6): the datatype's own type is
 -- elaborated first /"so that the type is in scope when elaborating the
 -- constructor types"/, then each constructor the same way.
@@ -1138,10 +1293,22 @@ paramsAround ps t =
 
 
 loadProofSource :: Session -> String -> (Session, Response)
-loadProofSource s src =
-  case parseSurfaceModule src of
-  Left e -> (s, Failed e)
-  Right (nm, items) ->
+loadProofSource s src = case parseSurfaceModule src of
+  Left e            -> (s, Failed e)
+  Right (nm, items) -> loadProofItems s nm items
+
+-- | Load a module that has already been read.
+--
+-- **Split out of 'loadProofSource' at MS7 phase 112b, and it is the seam the
+-- whole storage design rests on.** A module reaches the session as a name and a
+-- list of items; whether those items came from a text file through
+-- 'parseSurfaceModule' or from a stored JSON tree is not something anything
+-- below this line can tell. That is what makes loading **one pipeline with two
+-- front doors** rather than two paths to keep in step
+-- (@discussion\/editor-protocol.md@ §4 A2, @ms7\/MS7.md@), and it is only true
+-- because the stored form is the tree as written.
+loadProofItems :: Session -> String -> [Item] -> (Session, Response)
+loadProofItems s nm items =
     let machine  = sessionMachine s
         (is, n1) = surfaceProgram (names machine) items
         -- **No block is checked before the module runs** (MS6 phase 104b).
@@ -1150,14 +1317,44 @@ loadProofSource s src =
         -- 'Thena.Instral.Ops.Play' does it for both kinds. Checking them here
         -- asked what their words meant before the declarations above them had
         -- run, which no dependency-ordered language does.
-     in case progress False s { sessionMachine = load is machine { names = n1 } } [] [] of
+     in case progress Nothing s { sessionMachine = load is machine { names = n1 } } [] [] of
           (s', Ran _ ws Completed) ->
             ( s'
             , ProofLoaded nm [ n | Just n <- map declaredName items ]
                              (length [ () | ItemBlock _ <- items ])
                              ws
             )
-          (s', other)           -> (s', other)
+          -- **A load that does not complete declares nothing** (MS6 closeout 15,
+          -- his ruling 2026-09-30: /"Atomic from now on."/). Before this, the
+          -- partial run's declarations stayed: a module whose third definition
+          -- failed left the first two in 'globals', @:undo@ could not take them
+          -- back (they are deliberately outside a 'Snapshot'), and loading the
+          -- corrected file then failed on the names that had landed — with
+          -- 'Thena.Global.Declare''s @ConstructorTargetWrong@ blaming the
+          -- constructor's target (@AGENDA.md@ 81). One typo cost the session.
+          --
+          -- **Everything goes back except the counter.** 'rolledBack' restores
+          -- the session as it stood and carries 'names' forward, which is the
+          -- same partition @:infer@'s unconditional rewind already uses: a
+          -- number the user has seen must never be reissued (MS2 closeout 4f),
+          -- and a failed load /does/ show them — it prints its @solved: ?ℓ933@
+          -- lines before it stops.
+          --
+          -- **This does not make 'globals' observably non-monotone**, which is
+          -- what §2.4's promise rests on — his question, and it is the reason
+          -- this is allowed. A load is one command and nothing observes the
+          -- machine partway through it, so @globals@ is the same before the
+          -- command and after it. No suspended proof spans a load that is still
+          -- running, so resuming is as safe as it ever was.
+          (s', other)           -> (rolledBack s s', other)
+
+-- | Put the session back as it was, carrying the fresh counter forward.
+--
+-- The counter is the one thing that must not go back — see 'loadProofItems'.
+rolledBack :: Session -> Session -> Session
+rolledBack before after =
+  before { sessionMachine = (sessionMachine before)
+                              { names = names (sessionMachine after) } }
 
 -- | What an item adds to the environment, for the summary line.
 declaredName :: Item -> Maybe String
@@ -1233,7 +1430,7 @@ dispatch s name arg = case name of
   ":done"  -> noArgument (s, Rejected NotParsing)
   -- | @:parse ‹Language› ‹text›@ — parse an object term with an installed
   -- grammar and print its reading (MS6 phase 102, his request, 2026-09-19).
-  -- A @?@ in the text is a missing slot. It changes no state.
+  -- A @█@ in the text is a part not written yet. It changes no state.
   -- With no text, **enter the interactive mode** (phase 102b): every line is
   -- a term of the language until @:done@, and Tab at the cursor asks the
   -- parser what fits there ("Thena.Repl").
@@ -1350,8 +1547,12 @@ dispatch s name arg = case name of
   ":proofs"  -> noArgument (s, Proofs (currentAttempt s) (sessionSuspended s))
   ":undo"    -> noArgument undo
   ":convert" -> conversion
+  -- **The two halves of fuel** (phase 128): @:step@ sets what every line may
+  -- spend, @:run@ spends a budget once. Neither is a mode — @:step on@ is
+  -- @:step 1@, and @:run@ with no argument is the absence of a budget rather
+  -- than the presence of a large one.
   ":step"  -> stepping
-  ":run"   -> noArgument (progress False s [] [])
+  ":run"   -> running
   "data"   -> declaration
   -- **A surface declaration** (MS4 phase 42) — a bare word, because it acts
   -- (§2.4). It compiles to instructions rather than being run here, so
@@ -1403,7 +1604,7 @@ dispatch s name arg = case name of
         Right is  -> case checkBlock (grammars machine) (rules machine) bound (Rule (GlobalName "entry") [] [] is) of
           Just (BlockIll es)      -> (s, LineRefused es)
           Just (BlockMistyped es) -> (s, EntryMistyped es)
-          Nothing -> progress (sessionStepping s)
+          Nothing -> progress (sessionFuel s)
                               s { sessionMachine = load is machine } [] []
     Right _ -> (s, Rejected (UnexpectedArgument name))
 
@@ -1425,7 +1626,7 @@ dispatch s name arg = case name of
   -- after it. @retry@ is the precedent for a bare driver word that is not an op.
   "yield" -> noArgument $
     if Engine.isYielding machine
-      then progress (sessionStepping s)
+      then progress (sessionFuel s)
                     s { sessionMachine = Engine.resumeYield machine } [] []
       else (s, Rejected NotYielding)
   "retry"  -> case arg of
@@ -1608,7 +1809,7 @@ dispatch s name arg = case name of
     -- second home for something the development already says.
     closeProof = case sessionWork s of
       Scratch -> (s, Rejected NotProving)
-      Attempting att -> case progress False s { sessionMachine = ran } [] [] of
+      Attempting att -> case progress Nothing s { sessionMachine = ran } [] [] of
         (s', Ran msgs ws Completed) ->
           case extract (flatten (development (sessionMachine s'))) of
             Left why -> (s', Ran msgs ws (Halted (NotYetPure (whereImpure why))))
@@ -1719,7 +1920,7 @@ dispatch s name arg = case name of
                    , Do (Say (Lit (VText ("declared " ++ nameOf d))))
                    ]
            in progress
-                (sessionStepping s)
+                (sessionFuel s)
                 s { sessionMachine = load is machine { names = n1 } }
                 []
                 []
@@ -1773,7 +1974,7 @@ dispatch s name arg = case name of
           asking  = s { sessionMachine = load prog machine { names = n1 } }
           -- **Its blocks are checked where they run** (MS6 phase 104b), by
           -- 'Thena.Instral.Ops.Play', as a module's are.
-       in case progress False asking [] [] of
+       in case progress Nothing asking [] [] of
             (s', Ran _ _ Completed) ->
               let m'   = sessionMachine s'
                   back = s' { sessionMachine = restore before m' }
@@ -1802,11 +2003,32 @@ dispatch s name arg = case name of
         Right ((a, b), n1) -> case convert (globals machine) ctx n1 a b of
           (why, owed, n2) -> (bump n2, Converted a b why owed)
 
+    -- **The session's fuel, and one instruction on demand.** Bare @:step@ is
+    -- @Just 1@ whatever the setting is, which is what it has always been; the
+    -- arguments say what a line may spend from now on.
+    --
+    -- @on@ and @off@ are kept as the spellings the manual and the transcripts
+    -- use, and they are not a third thing: @on@ is @1@ and @off@ is the absence
+    -- of a budget.
     stepping = case arg of
-      ""    -> progress True s [] []
-      "on"  -> (s { sessionStepping = True }, Ran [] [] Completed)
-      "off" -> (s { sessionStepping = False }, Ran [] [] Completed)
-      _     -> (s, Rejected (UnexpectedArgument name))
+      ""    -> progress (Just 1) s [] []
+      "on"  -> (s { sessionFuel = Just 1 }, Ran [] [] Completed)
+      "off" -> (s { sessionFuel = Nothing }, Ran [] [] Completed)
+      _     -> budget (\f -> (s { sessionFuel = f }, Ran [] [] Completed))
+
+    -- **A budget once**, without changing what the next line may spend: the
+    -- slice a job advances by (@discussion\/tight-integration.md@ §5). Bare
+    -- @:run@ lets the machine run on, as it always has, and deliberately does
+    -- not consult 'sessionFuel' — @:step 500@ then @:run@ has to be the way to
+    -- say /finish this/, or nothing says it.
+    running = case arg of
+      "" -> progress Nothing s [] []
+      _  -> budget (\f -> progress f s [] [])
+
+    -- A positive number of instructions, or the argument is not one.
+    budget k = case reads arg of
+      [(n, "")] | n >= 1 -> k (Just n)
+      _                  -> (s, Rejected (UnexpectedArgument name))
 
     -- Unwind to a choice point and take its next alternative, then let the
     -- machine run as any other command does. 'Thena.Engine.retryFrom' is what
@@ -1817,7 +2039,7 @@ dispatch s name arg = case name of
       Left Engine.NoChoicePoint   -> (s, Rejected NothingToRetry)
       Left (Engine.UnknownChoice n) -> (s, Rejected (NoSuchChoice n))
       Right (m, note) ->
-        let (s', resp) = progress (sessionStepping s) s { sessionMachine = m } [] []
+        let (s', resp) = progress (sessionFuel s) s { sessionMachine = m } [] []
          in (s', withNote note resp)
 
     -- The note goes in front of whatever the alternative itself said, as a
@@ -1841,7 +2063,7 @@ dispatch s name arg = case name of
       Left e -> (s, Failed e)
       Right items ->
         let (is, n1) = surfaceProgram (names machine) items
-         in progress (sessionStepping s)
+         in progress (sessionFuel s)
               s { sessionMachine = load is machine { names = n1 } } [] []
 
     -- **One typed ENTRY, as the program it is** (MS5 phase 62b, widened from a
@@ -1854,7 +2076,7 @@ dispatch s name arg = case name of
       Left (LineIllFormed es) -> (s, LineRefused es)
       Left (LineMistyped es)  -> (s, EntryMistyped es)
       Right is ->
-        progress (sessionStepping s) s { sessionMachine = load is machine } [] []
+        progress (sessionFuel s) s { sessionMachine = load is machine } [] []
 
 -- | What @:help@ shows: one line per command the driver has, the spelling on
 -- the left and what it does on the right.
@@ -1912,6 +2134,7 @@ commandSummary =
   , (unwords bareParts,          "descend into a field of the focused term")
   , (unwords numberedParts,      "descend into a numbered field")
   , ("goto-named \"‹hole›\"",      "move to a hole by name")
+  , ("goto-root",                "move to the root of the development")
   , ("reduce",                   "reduce the focused term in place")
   , ("quantify \"‹x›\" ⌜‹S›⌝",     "add a ∀-binder above the focus")
   , ("data ‹D› … where { … }",   "declare an inductive family")
@@ -1923,7 +2146,7 @@ commandSummary =
   , (":core ‹t› / :dev ‹p›",     "parse a term / a development and print it")
   , (":surface ‹t›",             "parse a surface term and print it")
   , (":infer / :infer ‹t›",      "the type of the focus / of a surface term")
-  , (":parse ‹L› ‹text›",         "parse an object term; ? is a missing slot")
+  , (":parse ‹L› ‹text›",         "parse an object term; █ is a part not written yet")
   , (":parse ‹L› … :done",         "parse every line as an L term; Tab at the cursor")
   , (":whnf / :whnf ‹t›",        "reduce the focus / a term, without committing")
   , (":convert ‹t› ≟ ‹u›",      "are two terms convertible")
@@ -1934,7 +2157,8 @@ commandSummary =
   , (":choices",                 "the live choice points, nearest first")
   , (":bases / :rules",          "the loaded rule bases / the rules in them")
   , (":step on / :step / :step off", "single-step the machine")
-  , (":run",                     "let a stepping machine run on")
+  , (":step ‹n›",                "let every line do at most n instructions")
+  , (":run / :run ‹n›",          "let it run on / for n instructions")
   , (":theorem ‹x› : ‹T›",      "start a proof")
   , (":goal ‹T›",                "discard everything and start a scratch goal")
   , (":suspend / :resume ‹name›", "put a proof aside / take it up again")
@@ -2123,7 +2347,30 @@ breakOn needle = go ""
 --
 -- Takes contents and not a path (§12 invariant 4).
 readRuleBase :: [Grammar] -> FilePath -> String -> Either RuleFileError RuleBase
-readRuleBase gs path src = case baseHead ls of
+readRuleBase gs path src = do
+  (nm, desc, raws) <- rawRuleDecls src
+  ruleBaseOfDecls gs path nm desc raws
+
+-- | Resolve a rule file's declarations into a base.
+--
+-- The second half of 'readRuleBase', split out at MS7 phase 112b so a stored
+-- project can reach it without going back through text.
+ruleBaseOfDecls
+  :: [Grammar] -> FilePath -> String -> Maybe String -> [RawDecl]
+  -> Either RuleFileError RuleBase
+ruleBaseOfDecls gs path nm desc raws = do
+  (sigs, fns, rs) <- resolveAll gs raws
+  Right (ruleBase nm desc path sigs fns rs)
+
+-- | A rule file's header and its declarations, parsed and /not/ resolved.
+--
+-- **Split out of 'readRuleBase' at MS7 phase 112a**, which needs exactly this
+-- half: the project's storage format is the tree as written (his decision of
+-- 2026-09-24), and resolution is what turns a written tree into something that
+-- depends on what is loaded. 'readRuleBase' is this plus 'resolveAll', so there
+-- is one parse and not two.
+rawRuleDecls :: String -> Either RuleFileError (String, Maybe String, [RawDecl])
+rawRuleDecls src = case baseHead ls of
   Nothing -> Left NoRuleHeader
   Just (nm, desc, used) -> do
       -- The head is blanked, not dropped: every position the lexer reports
@@ -2138,8 +2385,7 @@ readRuleBase gs path src = case baseHead ls of
       -- condition that the two spellings be one language.
       ts'  <- mapLeft (RuleSyntaxError . LayoutFailed) (layoutFile ts)
       raws <- mapLeft (RuleSyntaxError . ParseFailed) (parseRules ts')
-      (sigs, fns, rs) <- resolveAll gs raws
-      Right (ruleBase nm desc path sigs fns rs)
+      Right (nm, desc, raws)
   where
     ls = lines src
 
@@ -2257,7 +2503,32 @@ resolveAll gs raws =
 -- **All or nothing.** A file that will not load leaves the previous list in
 -- place, so a session never ends up searching half of what was asked for.
 loadRuleBases :: Session -> [(FilePath, String)] -> (Session, Response)
-loadRuleBases s = go []
+loadRuleBases s ps =
+  loadReadBases s [(path, readRuleBase gs path src) | (path, src) <- ps]
+  where
+    gs = grammars (sessionMachine s)
+
+-- | The same, for bases whose declarations were stored rather than written.
+--
+-- **Added at MS7 phase 112b**, and it is the rule-file half of the seam
+-- 'loadProofItems' is the surface half of: a stored project holds the tree as
+-- written, so it joins the pipeline after parsing and before resolution. Both
+-- go through 'loadReadBases', so all-or-nothing, inference and the block check
+-- happen once and identically whichever door a base came in by.
+loadRuleDecls :: Session -> [(FilePath, String, Maybe String, [RawDecl])] -> (Session, Response)
+loadRuleDecls s ps =
+  loadReadBases s [(path, ruleBaseOfDecls gs path nm desc ds) | (path, nm, desc, ds) <- ps]
+  where
+    gs = grammars (sessionMachine s)
+
+-- | Install bases that have already been built, or none of them.
+--
+-- **The grammars a base is read against are the session's and do not change as
+-- the list is walked**, which is what lets the reading happen before this rather
+-- than inside it — and is why there is one fold here and not one per kind of
+-- source.
+loadReadBases :: Session -> [(FilePath, Either RuleFileError RuleBase)] -> (Session, Response)
+loadReadBases s = go []
   where
     -- **Inference runs here and nowhere earlier** (MS5 phase 66c), for the
     -- reason in 'BasesIllTyped': a rule's signature is not decidable until every
@@ -2279,10 +2550,9 @@ loadRuleBases s = go []
             )
           errs -> (s, BasesIllTyped errs)
 
-    go acc ((path, src) : more) =
-      case readRuleBase (grammars (sessionMachine s)) path src of
-        Left e  -> (s, RuleFileRefused path e)
-        Right b -> go (acc ++ [b]) more
+    go acc ((path, built) : more) = case built of
+      Left e  -> (s, RuleFileRefused path e)
+      Right b -> go (acc ++ [b]) more
 
     -- **Resolved here and not in 'readRuleBase'**, because what it answers is
     -- not kept: the blocks are handed to 'inferProgram' as extra bodies and then
@@ -2327,7 +2597,7 @@ view s rd f arg =
 answer :: Session -> String -> (Session, Response)
 answer s a
   | isAsking (sessionMachine s) =
-      progress (sessionStepping s) s { sessionMachine = resumeAt a (sessionMachine s) } [] []
+      progress (sessionFuel s) s { sessionMachine = resumeAt a (sessionMachine s) } [] []
   | otherwise = (s, Rejected NotAsking)
 
 -- | One line of input, whichever kind it is: an answer while something is
@@ -2336,12 +2606,32 @@ answer s a
 -- Extracted at phase 11 because two callers need exactly this — "Thena.Repl"\'s
 -- terminal turn and 'loadSource' below — and the pending-question bookkeeping
 -- is the part a second copy would get subtly wrong.
-oneLine :: Session -> Maybe Question -> String -> (Session, Response, Maybe Question)
-oneLine s pending line = (record s', resp, asking)
+oneLine :: Session -> String -> (Session, Response)
+oneLine s line = settle (case sessionAsking s of
+  Just _  -> answer s line
+  Nothing -> command s line)
+
+-- | Run a program the way a typed line's program is run (MS7 phase 113).
+--
+-- **The same tail as 'oneLine', and that is the whole point.** A client that
+-- points at a position sends an address, and
+-- 'Thena.View.Address.focusing' compiles it into the movement instructions
+-- the user would have typed. Those instructions have to be run /as a line is
+-- run/ — snapshotted for @:undo@, rewound if they fail, and asked about if they
+-- ask — or a click would be a second way into the machine with different rules,
+-- which is the special case the first design principle refuses.
+oneProgram :: Session -> [Instr] -> (Session, Response)
+oneProgram s is =
+  settle (progress (sessionFuel s) s { sessionMachine = load is (sessionMachine s) } [] [])
+
+-- | What every line and every program does after it has run: notice a pending
+-- question, and keep the undo history straight.
+--
+-- Factored out of 'oneLine' at MS7 phase 113, when 'oneProgram' became its
+-- second caller. Nothing here depends on how @(s', resp)@ was produced.
+settle :: (Session, Response) -> (Session, Response)
+settle (s', resp) = (record s' { sessionAsking = asking }, resp)
   where
-    (s', resp) = case pending of
-      Just _  -> answer s line
-      Nothing -> command s line
 
     asking = case resp of
       Ran _ _ (Waiting q) -> Just q
@@ -2460,24 +2750,35 @@ data Loaded = Loaded
 -- theorems, which are @globals@ changes a 'Snapshot' deliberately does not carry
 -- (§7.7). Same argument as @qed@ clearing it, for the same reason.
 loadSource :: Session -> String -> Loaded
-loadSource s0 = go s0 Nothing 1 [] . lines
+loadSource s0 = go s0 1 [] . lines
   where
+    -- **The question is cleared as the load ends** (MS7 phase 123). It used to
+    -- be an argument the caller threaded, and the REPL passed 'Nothing' after
+    -- a load rather than whatever the file left behind; now that it lives on
+    -- the session it has to be dropped here or a file that ran out mid-@ask@
+    -- would leave the prompt waiting for an answer to a question nobody saw.
+    -- @err@ already reports that as 'UnansweredQuestion'.
     finished s acc err =
-      Loaded s { sessionHistory = NE.head (sessionHistory s) :| [] } (reverse acc) err
+      Loaded
+        s { sessionHistory = NE.head (sessionHistory s) :| []
+          , sessionAsking  = Nothing
+          }
+        (reverse acc)
+        err
 
-    go s pending _ acc [] = case pending of
+    go s _ acc [] = case sessionAsking s of
       -- The file ran out while an op was still asking. The line to name is the
       -- one that asked, which is the last one that ran.
       Just _  -> finished s acc (Just (UnansweredQuestion (length acc)))
       Nothing -> finished s acc Nothing
-    go s pending n acc (l : ls) =
-      let (s', resp, asking) = oneLine s pending l
-          acc'               = resp : acc
+    go s n acc (l : ls) =
+      let (s', resp) = oneLine s l
+          acc'       = resp : acc
        in case resp of
             LoadRequested _ -> finished s acc (Just (NestedLoad n))
             Quit            -> finished s' acc' Nothing
             _ | stopped resp -> finished s' acc' (Just (LoadStopped n))
-              | otherwise    -> go s' asking (n + 1) acc' ls
+              | otherwise    -> go s' (n + 1) acc' ls
 
 -- | Which responses cross a proof boundary — the five ways the development you
 -- are standing in is exchanged for another (§2.4).
@@ -2528,7 +2829,25 @@ stopped resp = case resp of
   Ran _ _ (Uncertified _) -> True
   _                     -> False
 
--- | Run until the machine needs the user, honouring stepping mode.
+-- | Run until the machine needs the user, spending at most this much fuel —
+-- 'Nothing' to run on, @Just n@ for at most @n@ instructions (phase 128).
+--
+-- A slice of a job is a call to this with a budget, and stopping a job is not
+-- making the next call: the machine that comes back is complete, so the state a
+-- run stops in is one an uninterrupted run passes through
+-- (@discussion\/tight-integration.md@ §5).
+--
+-- **Three callers pass 'Nothing' whatever the session's fuel says**, and they
+-- are the three that read the finished state rather than reporting it: a module
+-- load, @qed@\'s certify and @:infer@\'s elaboration all match @Ran _ _
+-- 'Completed'@ and treat everything else as a failure. A budget there would
+-- hand back a 'Paused' in place of their own answer, so they are unbounded by
+-- construction — see @ms7\/CLOSEOUT.md@ 24, since a long load is therefore
+-- still something a frontend waits out.
+progress :: Maybe Int -> Session -> [Message] -> [Warning] -> (Session, Response)
+progress fuel = spending fuel 0
+
+-- | 'progress' with the fuel it was given and what it has spent so far.
 --
 -- @Saying@ costs a round trip per message and buys the driver an ordered view
 -- of execution as a sequence of events (§7.5), which is why the messages come
@@ -2538,14 +2857,20 @@ stopped resp = case resp of
 -- 'Halted' for @retry@\'s sake, which phase 25d found was never reachable —
 -- see 'Halted'. The machine still comes back here; what changed is that
 -- 'oneLine' does not let a failed line's development survive into the session.
-progress :: Bool -> Session -> [Message] -> [Warning] -> (Session, Response)
-progress oneStep s msgs warns = case step (sessionMachine s) of
+--
+-- **The budget is tested after the instruction, not before**, which is what
+-- makes @Just 1@ exactly the stepping mode it replaced: the guard sits where
+-- @oneStep@'s did, in each branch that has a machine to go on with. A branch
+-- that stops for its own reason — a question, a yield, a refusal — never
+-- consults it, so fuel cannot turn a stop into a pause.
+spending :: Maybe Int -> Int -> Session -> [Message] -> [Warning] -> (Session, Response)
+spending fuel done s msgs warns = case step (sessionMachine s) of
   Engine.Continue m
-    | oneStep   -> stop m msgs warns Paused
-    | otherwise -> progress oneStep s { sessionMachine = m } msgs warns
+    | exhausted -> stop m msgs warns (Paused spent)
+    | otherwise -> spending fuel spent s { sessionMachine = m } msgs warns
   Engine.Saying msg m
-    | oneStep   -> stop m (msg : msgs) warns Paused
-    | otherwise -> progress oneStep s { sessionMachine = m } (msg : msgs) warns
+    | exhausted -> stop m (msg : msgs) warns (Paused spent)
+    | otherwise -> spending fuel spent s { sessionMachine = m } (msg : msgs) warns
   -- **A yield stops the run and keeps the machine** (MS4 phase 45b), exactly as
   -- a question does. Stepping it again would yield again — the instruction is
   -- not consumed — so the driver has to stop here or spin.
@@ -2557,8 +2882,8 @@ progress oneStep s msgs warns = case step (sessionMachine s) of
   Engine.Declaring d m -> case declare (globals m) (names m) d of
     Left e -> stop (load [] m) msgs warns (Refused e)
     Right (g, n1, skip)
-      | oneStep   -> stop installed msgs warns' Paused
-      | otherwise -> progress oneStep s { sessionMachine = installed } msgs warns'
+      | exhausted -> stop installed msgs warns' (Paused spent)
+      | otherwise -> spending fuel spent s { sessionMachine = installed } msgs warns'
       where
         installed = m { globals = g, names = n1 }
         -- **A warning and no longer a message** (MS6 phase 98). Raised here
@@ -2607,9 +2932,9 @@ progress oneStep s msgs warns = case step (sessionMachine s) of
                                        then signatures m
                                        else (nm, ps) : signatures m
                       }
-       in if oneStep
-            then stop m' msgs warns Paused
-            else progress oneStep s { sessionMachine = m' } msgs warns
+       in if exhausted
+            then stop m' msgs warns (Paused spent)
+            else spending fuel spent s { sessionMachine = m' } msgs warns
 
   -- **A primitive is installed only if the system can reduce it** (MS6 phase
   -- 97b). Two checks, and both are the reason @primitive@ is not a postulate:
@@ -2633,9 +2958,9 @@ progress oneStep s msgs warns = case step (sessionMachine s) of
         Right (sd, roles) ->
           let (is, n1) = datatypeProgram (names m) sd (Just roles)
               m' = (Engine.splicing is m) { grammars = g : grammars m, names = n1 }
-           in if oneStep
-                then stop m' msgs (reverse ws ++ warns) Paused
-                else progress oneStep s { sessionMachine = m' } msgs (reverse ws ++ warns)
+           in if exhausted
+                then stop m' msgs (reverse ws ++ warns) (Paused spent)
+                else spending fuel spent s { sessionMachine = m' } msgs (reverse ws ++ warns)
     Right (g, ws) ->
       -- **Its datatype is generated here and runs next** (MS6 phase 103): the
       -- block had to be checked before anything could be generated from it, and
@@ -2658,9 +2983,9 @@ progress oneStep s msgs warns = case step (sessionMachine s) of
             Nothing -> ([], n2)
           installed = maybe [g] (: [g]) (lookupGrammar g)
           m' = (Engine.splicing (is ++ fs ++ ls) m) { grammars = installed ++ grammars m, names = n3 }
-       in if oneStep
-            then stop m' msgs (reverse ws ++ warns) Paused
-            else progress oneStep s { sessionMachine = m' } msgs (reverse ws ++ warns)
+       in if exhausted
+            then stop m' msgs (reverse ws ++ warns) (Paused spent)
+            else spending fuel spent s { sessionMachine = m' } msgs (reverse ws ++ warns)
 
   -- **A block is validated and typed the moment it is about to run** (MS6
   -- phase 104b), against the rule bases and the globals as they are then —
@@ -2674,23 +2999,23 @@ progress oneStep s msgs warns = case step (sessionMachine s) of
     Just (BlockMistyped errs) -> stop (load [] m) msgs warns (BlockIllTyped errs)
     Nothing ->
       let m' = Engine.splicing is m
-       in if oneStep
-            then stop m' msgs warns Paused
-            else progress oneStep s { sessionMachine = m' } msgs warns
+       in if exhausted
+            then stop m' msgs warns (Paused spent)
+            else spending fuel spent s { sessionMachine = m' } msgs warns
 
   Engine.Primitively nm ty m -> case checkedPrimitive (globals m) nm ty of
     Left e   -> stop (load [] m) msgs warns (Refused e)
     Right () ->
       let m' = m { globals = addPrimitive nm ty (globals m) }
-       in if oneStep
-            then stop m' msgs warns Paused
-            else progress oneStep s { sessionMachine = m' } msgs warns
+       in if exhausted
+            then stop m' msgs warns (Paused spent)
+            else spending fuel spent s { sessionMachine = m' } msgs warns
 
   Engine.Certifying t ty m -> case certify (globals m) t ty of
     Left e -> stop (load [] m) msgs warns (Uncertified e)
     Right (sub, residue)
-      | oneStep   -> stop settled' (say : msgs) warns Paused
-      | otherwise -> progress oneStep s' (say : msgs) warns
+      | exhausted -> stop settled' (say : msgs) warns (Paused spent)
+      | otherwise -> spending fuel spent s' (say : msgs) warns
       where
         say = "certified"
         settled' = m { development = Engine.Development
@@ -2701,6 +3026,12 @@ progress oneStep s msgs warns = case step (sessionMachine s) of
   Engine.Stuck r m    -> stop m msgs warns (Halted r)
   where
     stop m out ws what = (s { sessionMachine = m }, Ran (reverse out) (reverse ws) what)
+    -- What this run has spent once the instruction below it is done, and
+    -- whether that is all the fuel it was given. @<=@ rather than @==@ so that
+    -- a budget of zero or less stops after one instruction instead of running
+    -- on: fuel says how much a run may do, and every run does something.
+    spent     = done + 1
+    exhausted = maybe False (<= spent) fuel
 
 -- | Is this a primitive the system knows, declared at the type its rule needs?
 --

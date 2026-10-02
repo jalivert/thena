@@ -16,13 +16,21 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..))
-import Thena.Driver (Response (..), Session (..), command, loadProofSource)
+import Thena.Driver
+  ( Response (..)
+  , Session
+  , machineOf
+  , command
+  , loadProofSource
+  )
 import Thena.Engine (Machine (..))
 import Thena.Language.Build (buildTerm, printRegion)
 import Thena.Language.Earley (parse, pieces)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Grammar (earleyRules)
-import Thena.Repl (renderCore, renderResponse, startingSession)
+import Thena.Files (startingSession)
+import Thena.Render ( Rendering (..)
+  ,renderCore, renderResponse)
 
 tests :: TestTree
 tests =
@@ -101,15 +109,15 @@ notation :: [TestTree]
 notation =
   [ testCase "the notation is read and built as the relation applied" $ do
       s <- loaded header
-      let gs = grammars (sessionMachine s)
+      let gs = grammars (machineOf s)
       case parse (earleyRules gs) (Earley.StartAt "Ctx-in") (pieces "x : \953 \8712 \183 , y : \953") of
         Left why -> assertFailure (show why)
         Right tree -> buildTerm gs tree @?= Right
           (apps "Ctx-in" [str "x", con "base", apps "extend" [con "empty", str "y", con "base"]])
   , testCase "and prints back as the text it was read from" $ do
       s <- loaded header
-      let m = sessionMachine s
-      printRegion (grammars m) (renderCore [] 0 [])
+      let m = machineOf s
+      printRegion (grammars m) (renderCore (Rendering [] 0) [])
           (apps "Ctx-in" [str "x", con "base", apps "extend" [con "empty", str "x", con "base"]])
         @?= Just "x : \953 \8712 \183 , x : \953"
   , testCase "a lookup literal is a type" $ do
@@ -123,7 +131,7 @@ notation =
         , "language Ty, T where", "  base -> \953", ""
         , "context D, \916 where", "  none -> \949", "  push -> x : T ; \916", "" ]
       said s ":show D-in" !! 0 @?= "data D-in : String -> Ty -> D -> Type\8320 where"
-      case parse (earleyRules (grammars (sessionMachine s))) (Earley.StartAt "D-in")
+      case parse (earleyRules (grammars (machineOf s))) (Earley.StartAt "D-in")
                  (pieces "x : \953 \8712 x : \953 ; \949") of
         Left why -> assertFailure (show why)
         Right _ -> pure ()

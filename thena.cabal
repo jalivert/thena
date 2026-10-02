@@ -1,4 +1,4 @@
-cabal-version:      3.0
+cabal-version:      3.4
 name:               thena
 version:            0.1.0.0
 synopsis:           An interactive proof assistant for language metatheory
@@ -43,13 +43,18 @@ library
         Thena.Global.NoConfusion
         Thena.Kernel
         Thena.Language.Regex
+        Thena.Language.Lexemes
+        Thena.Language.Builtin
         Thena.Language.Reader
         Thena.Language.Grammar
+        Thena.Language.Instral
         Thena.Language.Earley
         Thena.Language.Build
         Thena.Language.Substitution
         Thena.Language.Lookup
         Thena.Language.Judgment
+        Thena.Files
+        Thena.Render
         Thena.Repl
         Thena.Rules
         Thena.Surface.Concrete
@@ -61,12 +66,28 @@ library
         Thena.Instral.Concrete
         Thena.Instral.Pattern
         Thena.Instral.Type
+        Thena.Instral.Commands
         Thena.Instral.Infer
         Thena.Syntax.Concrete
         Thena.Syntax.Lexer
         Thena.Syntax.Parser
+        Thena.Syntax.Print
         Thena.Syntax.Resolve
         Thena.Tactics.Eliminate
+        Thena.View
+        Thena.View.Address
+        Thena.View.Chart
+        Thena.View.Core
+        Thena.View.Development
+        Thena.View.Entry
+        Thena.View.Instral
+        Thena.View.Machine
+        Thena.View.Rules
+        Thena.View.Source
+        Thena.View.Statement
+        Thena.View.Surface
+        Thena.View.Tokens
+        Thena.View.Type
     other-modules:
         Paths_thena
     autogen-modules:
@@ -74,19 +95,87 @@ library
     build-depends:
         base       ^>=4.21.2.0,
         array      >=0.5 && <0.6,
-        containers >=0.7 && <0.9,
-        haskeline  >=0.8.4 && <0.9
+        containers >=0.7 && <0.9
     build-tool-depends:
         alex:alex   >=3.5,
         happy:happy >=2.1
 
+-- | **What a frontend may import, and nothing else — MS7 phase 126.**
+--
+-- This library has no modules of its own. It is a re-export list: a curated
+-- view of `thena` that names every module a frontend is allowed to see. A
+-- frontend's `build-depends` names `thena:view` and not `thena`, and Haskell
+-- imports only from DIRECT dependencies — so `import Thena.Engine` in a
+-- frontend does not compile, because `thena` is a transitive dependency and its
+-- modules are not in scope.
+--
+-- His ruling, 2026-09-27: /"The cabal separation on Cabal 3.4 sounds great. We
+-- should try that."/ Two layers that catch different mistakes — `Session` being
+-- abstract stops a frontend reaching into the session it is driving, and this
+-- stops it reaching past the views at all.
+--
+-- **This stanza is the list, and nothing mirrors it** (MS7 phase 135,
+-- @ms7\/CLOSEOUT.md@ 29). From phase 129 it was crossed against
+-- @.jalivert/FRONTEND.md@ by a `Thena.FrontendTests` — but that file is his
+-- notes directory, not in this repository, so the crossing skipped itself in
+-- every phase worktree and twice let a new module onto the boundary
+-- undocumented. It was also guarding the half that cannot go silently wrong:
+-- this stanza is enforced by the compiler, and a frontend importing something
+-- not on it does not build. The prose it did not guard is the half that drifts.
+library view
+    import:             warnings
+    visibility:         public
+    default-language:   GHC2024
+    build-depends:
+        base  ^>=4.21.2.0,
+        thena
+    reexported-modules:
+        -- The session, advanced.
+        Thena.Driver,
+        -- The views over it, and the addressing that reaches into them.
+        Thena.View,
+        Thena.View.Address,
+        Thena.View.Chart,
+        Thena.View.Core,
+        Thena.View.Development,
+        Thena.View.Instral,
+        Thena.View.Machine,
+        Thena.View.Rules,
+        Thena.View.Source,
+        Thena.View.Statement,
+        Thena.View.Surface,
+        Thena.View.Tokens,
+        Thena.View.Type,
+        -- The file door: reading what a command named, and starting a session
+        -- with the shipped rule base and prelude in it (§130).
+        Thena.Files,
+        -- The text door: the system as lines, for a frontend that wants them.
+        -- A structured frontend takes the views above and never imports it.
+        Thena.Render
+
+-- | The terminal REPL, and **not a frontend** (MS7 phase 130).
+--
+-- It depended on `thena:view` from phase 126 until phase 130, when `Thena.Repl`
+-- left that list: the REPL's own line protocol is not something a frontend may
+-- import, so the program that /is/ the REPL cannot be built against the frontend
+-- boundary any more. It takes `thena` whole instead.
+--
+-- **What that costs**: the boundary is no longer exercised by the shipped
+-- executable, only by `thena-boundary`, which was always the thing that proved
+-- it (MS7 done-when 1) and uses every view rather than the handful a terminal
+-- wants.
 executable thena
     import:             warnings
     hs-source-dirs:     app
     default-language:   GHC2024
     main-is:            Main.hs
+    -- The terminal loop, and the only thing in the project that links a line
+    -- editor (MS7 phase 125).
+    other-modules:
+        Repl
     build-depends:
-        base  ^>=4.21.2.0,
+        base      ^>=4.21.2.0,
+        haskeline >=0.8.4 && <0.9,
         thena
 
 test-suite thena-test
@@ -95,6 +184,16 @@ test-suite thena-test
     default-language:   GHC2024
     type:               exitcode-stdio-1.0
     main-is:            Main.hs
+    -- **The suite runs its trees in parallel** (MS7 phase 129, at his
+    -- instruction). tasty already knows how; what it needs is an RTS with more
+    -- than one capability, and without `-threaded` it had exactly one — so two
+    -- thousand independent pure tests ran one after another, for 75 seconds
+    -- instead of 36.
+    --
+    -- `-O0` on this component was measured and is NOT here: it saved a second of
+    -- build and cost three of runtime, so the whole of the win is this flag and
+    -- `-j` in cabal.project.
+    ghc-options:        -threaded -rtsopts "-with-rtsopts=-N"
     other-modules:
         Thena.Core.ConvertTests
         Thena.Core.ReduceTests
@@ -104,6 +203,21 @@ test-suite thena-test
         Thena.Core.TypingTests
         Thena.Core.UnifyTests
         Thena.CursorTests
+        Thena.ViewTests
+        Thena.View.AddressTests
+        Thena.View.ChartTests
+        Thena.View.DevelopmentTests
+        Thena.View.CoreTests
+        Thena.Language.BuiltinTests
+        Thena.View.InstralTests
+        Thena.View.MachineTests
+        Thena.View.Redraw
+        Thena.View.RulesTests
+        Thena.View.SurfaceTests
+        Thena.View.SourceTests
+        Thena.View.StatementTests
+        Thena.View.TokensTests
+        Thena.View.TypeTests
         Thena.DependentIndexTests
         Thena.CanonicalTests
         Thena.DeterminacyTests
@@ -160,3 +274,19 @@ test-suite thena-test
         tasty-golden      >=2.3  && <2.4,
         tasty-hunit       >=0.10 && <0.11,
         tasty-quickcheck  >=0.11 && <0.12
+
+-- | The frontend's own boundary, compiled (MS7 phase 126).
+--
+-- **It depends on `thena:view` and NOT on `thena`**, which is the whole of the
+-- test: a module the re-export list does not name cannot be imported here, and
+-- a view that cannot be reached without one does not compile. See the header of
+-- `boundary/Main.hs`.
+test-suite thena-boundary
+    import:             warnings
+    hs-source-dirs:     boundary
+    default-language:   GHC2024
+    type:               exitcode-stdio-1.0
+    main-is:            Main.hs
+    build-depends:
+        base ^>=4.21.2.0,
+        thena:view

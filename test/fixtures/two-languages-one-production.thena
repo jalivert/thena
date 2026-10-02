@@ -1,0 +1,12 @@
+module Clash where
+
+x : Token String
+x = /[a-z][a-zA-Z0-9']*/
+
+language A, P where
+  lit  -> ( a )
+  same -> ( a a )
+
+language B, Q where
+  other -> ( b )
+  same  -> ( b b b )

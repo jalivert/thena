@@ -106,6 +106,70 @@ Perl or POSIX would find out much later. Refusing them also means `\s`, `{n}`
 or POSIX classes can be added later without changing what any accepted
 expression means.
 
+### Corners and `⟨…⟩` are on their way out, in favour of tagged term literals
+
+*Decided 2026-10-01.*
+
+Two older notations say exactly what a tagged term literal says:
+
+```
+⌜ t ⌝   [| t |]        a core term, inside an instruction
+core`t`                the same thing, and the one that stays
+
+⟨ e ⟩                  a surface term — the lexer turns ⟨ into the tag `surface`
+surface`e`             the same thing, and the one that stays
+```
+
+**Both still work and neither is offered any more.** Completion will not suggest them,
+and nothing new in the system points at them. They are to be replaced one for one and
+removed.
+
+**Why, and it is not tidiness.** These are the last places where *which language this text
+is in* is decided by the punctuation you reached for rather than by a tag naming the
+language. Thena's whole embedding story is the tag: one notation, any language, including
+the ones you define yourself. A second spelling that works for only two of them has to be
+carried by every feature that comes after, and each one pays for it.
+
+The same decision covers the REPL commands that read an untagged term — `:core`, `:dev`,
+`:goal`, `:whnf`, `:convert` — which are debugging commands older than tagged literals.
+`core\`t\`` is a one-for-one replacement and is accepted everywhere a term is.
+
+---
+
+### Surface and Core will not become `language` definitions
+
+*Decided 2026-10-01.*
+
+Thena lets you define an object language as a grammar — `language LC, E where …` —
+and then write its terms in a fenced literal, `` LC`( λ x : ι . x )` ``. The obvious
+next thought is that Thena's own languages should be defined the same way: a prelude
+declaring `surface` and `core` as ordinary grammars, the system bootstrapped in itself.
+**They will not be.** Not now, and not when the tooling would make it easy.
+
+**What you can and cannot write.** `surface` and `core` are reserved tags, and a
+`language` block may not be named either of them:
+
+```
+language surface, Term where      refused — surface is one of Thena's own tags
+surface`\ x -> x`                 fine — always has been, and is unaffected
+```
+
+**Why.** The bootstrap is an attractive result and it is not the project's result. Thena
+exists to be a novel and useful proof assistant — applied theory, proving a concept — and
+making its own surface and core languages self-described would put the whole of that
+under pressure in service of an elegance. The honest version of the same claim arrives by
+another road: Thena's parser generator, when it replaces the current Alex and Happy, will
+take **one** grammar file per language, and that file both parses the language into its
+tree and produces the editor's completions. "The same grammar you can read is the grammar
+that runs" is as strong a statement of openness, and it costs the project nothing it
+needs.
+
+**What this means in practice.** The surface and core grammars exist twice: as the
+translating parser that runs your input, and as a secondary grammar that answers *what
+may I write here* for an editor. The second is narrower than the first by design — it
+will stay quiet where it does not know rather than guess — and it never parses anything.
+Nothing is foreclosed: the day a bootstrap is cheap, it is still available.
+
 ---
 
 ## Universes and levels
@@ -468,9 +532,19 @@ production is one line, and a deeper line continues it.
 
 **`context` and `judgment` are reserved words**, like `language`. A name in a
 production is a metavariable, then a token class, then a terminal, and a
-metavariable may not be named like an existing one or a class. A block sees
-what is above it, as every declaration does. It is checked when the module
-loads, and a binder that binds in nothing is a warning, not an error.
+metavariable may not be named like an existing one or a class — uniqueness is
+across every grammar in scope, not per block. **A name is refused for not being a
+metavariable only where one is required**: a binding form's head, and the
+metadata. Anywhere else a plain word is simply a terminal, which is why a
+production may say `( λ x : T . E[x] )` without declaring `λ` or `.`.
+
+A block sees what is above it, as every declaration does. **So there are no
+mutually recursive languages**, and that is deliberate rather than a limit of the
+reader: Thena has no mutual inductives, so a pair of languages that referred to
+each other could not be given the datatypes they generate.
+
+It is checked when the module loads, and a binder that binds in nothing is a
+warning, not an error.
 
 
 ### An object term is parsed by its grammar, and `:parse` shows how
@@ -508,17 +582,24 @@ In it, **Tab asks the parser what fits at the cursor**:
 
 ```
 parse LC> ( λ‸              Tab →   ( λ ? : ? . ? )
+parse LC> ( λ‸ )            Tab →   ( λ ? : ? . ? )     (the closer was already there)
+parse LC> ( λ‸ x            Tab →   lists  ‹x›          (your binder is not written over)
 parse LC> ( ‸               Tab →   lists  λ  (  ‹LC›  ‹x›  {
+parse LC> ( λ x : ‸? . ? )  Tab →   lists  ‹Ty›         (nothing fits, but the slot wants one)
 parse LC> ( λ x : ?‸ . x )  Tab →   lists  ι  (      (what can replace the ?)
 ```
 
-When the terminal just before the cursor belongs to one production only, Tab
-inserts the rest of it, `?` for its slots. That happens only at the end of the
-line, never in the middle. Otherwise Tab lists what can go at the cursor such
-that the line can still be finished, counting what's already written after
-the cursor. On a `?`, Tab fills that hole, so it offers only notation. The
-options appear when you press Tab, not as you move; options that follow the
-cursor are the structural editor's job.
+When exactly one production is open at the cursor — one that has recognised
+something and has not finished — Tab writes the rest of it, `?` for its slots,
+and **only as much of it as the text after the cursor does not already
+supply**: a closer already written is not written twice, and a hole is never
+put in front of something you typed. Otherwise Tab lists what can go at the
+cursor such that the line can still be finished, counting what's already
+written after the cursor; and when nothing at all fits there, it lists what
+the open position is waiting for, so the parser's expectation is visible
+rather than silent. On a `?`, Tab fills that hole, so it offers only notation.
+The options appear when you press Tab, not as you move; options that follow
+the cursor are the structural editor's job.
 
 
 ### A language block declares a datatype, and its terms are ordinary terms
@@ -1712,6 +1793,29 @@ name. `goto` there needs a `do` block with something bound in it.
 
 ---
 
+### `goto-root` goes to the top, and it is the one move that cannot fail
+
+*Decided 2026-09-27. Adds a word.*
+
+The third member of the family. `goto` and `goto-named` both search **from the
+root**; `goto-root` takes nothing and stops there.
+
+```
+goto-root             -- wherever you were, you are now at the top
+back                  -- refuses at the root: there is nothing above it
+```
+
+Every other move can say no — `into` wants a guess, `along` wants somewhere to
+go, `back` answers `AtRoot`. `goto-root` is already where it is going, so it
+always succeeds, including when you are at the root already.
+
+**It is also what a click is made of.** An editor names a position by the moves
+that reach it from the root, so a click compiles to `goto-root` and then those
+moves — an ordinary program you could have typed, snapshotted and undoable like
+any line. Clicking the top of a development is `goto-root` on its own.
+
+---
+
 ## The REPL and the session
 
 ### There are three kinds of file, and the extension says which
@@ -2498,6 +2602,54 @@ thena spine> elaborate ⟨ do { say 3 } ⟩
 do block 1, instruction 1: wanted String, got Int
 ```
 
+### A `:load` that fails declares nothing
+
+*Decided 2026-09-30.*
+
+```
+thena spine> :load mine.thena
+stuck: Beta and Alpha cannot be made equal
+thena spine> :show Alpha
+nothing named Alpha has been declared
+```
+
+A module is loaded **all or nothing**. If the run stops for any reason — a type error, a
+block that does not check, an unanswered question — the session is put back exactly as it
+was, and nothing the module had already declared survives.
+
+**Before this, the declarations above the failure stayed**, `:undo` could not take them
+back, and loading the corrected file then failed on the names that had landed. One typo
+cost you the session.
+
+**What a completed load leaves is unchanged.** A module that finishes is loaded whatever
+it left in the development, which is what the REPL is for; the rule is about a run that
+*stops*, not about an unfinished proof.
+
+**One thing does not go back: the fresh-name counter.** A failed load has already shown
+you names, and a name you have seen is never reissued.
+
+### A renamed binder is a name your language can write
+
+*Decided 2026-10-01.*
+
+```
+language L, M, N, E where
+  var : n as occurrence -> n      -- n = /[a-z]+/, no prime in the class
+  abs : n as binder     -> ( lam n . E[n] )
+```
+
+Substituting under a binder renames it to avoid capture, and the new name is **built from
+your identifier class**, so it is always a name the notation can print and read back:
+`/[a-z]+/` renames `y` to `ya`, while a class that admits `'` renames to `y'` as before.
+
+The character is decided on the class's own automaton — it must extend *every* string the
+class accepts — so this is by construction rather than by convention, and nothing in it
+knows about any particular character.
+
+**A class no single character extends** — `/[a-z][0-9]/`, where nothing may follow `a1` —
+is **not refused**. It loads with a warning saying that a renamed binder will not print in
+that notation. Substitution is unaffected; only printing the renamed name back is lost.
+
 ### A multi-line entry is bracketed by `:{` and `:}`
 
 *Decided 2026-09-13.*
@@ -2634,3 +2786,406 @@ Every name position takes one: a λ or ∀ binder, a `let`, a claim, a guess, an
 
 **A level position needs no splice**: build the universe with `universe-at` and
 splice the term.
+
+## Building a frontend
+
+*Added 2026-09-24, MS7; rewritten 2026-09-27, when the decision below replaced a
+network protocol with a library boundary.*
+
+### Thena is a library, and a frontend links it
+
+```
+thena                  -- the terminal REPL, one frontend among others
+```
+
+A frontend advances a session with two functions on `Thena.Driver` and **never
+opens it**: `Session` is abstract, and everything a frontend can see comes from
+`Thena.View`, which describes a term, a development, a rule, the machine and the
+parser's offers in its own vocabulary.
+
+So a frontend never learns what a de Bruijn index is, when a Π is dependent, or
+what distinguishes a guess from a claim. It renders what it is handed.
+
+**The enforcement is cabal's.** A frontend's `build-depends` names `thena:view`,
+which is a re-export list and has no modules of its own; `thena` is then a
+transitive dependency, and Haskell imports only from direct ones:
+
+```
+import Thena.Engine (Machine)
+  Could not load module 'Thena.Engine'.
+  It is a member of the hidden package 'thena-0.1.0.0'.
+```
+
+Twelve modules are named: `Thena.Driver`, `Thena.Repl`, `Thena.View` and the
+nine `Thena.View.*`. Nothing else is reachable, and a view that could not be
+used through the list did not survive writing it — `coreView` took a `Core`,
+which a frontend can neither obtain nor name, and became `focusTypeView`.
+
+**Nothing in the library touches a terminal.** The REPL's line editing lives in
+the `thena` executable, so a frontend that draws its own screen links no line
+editor; what it reuses from `Thena.Repl` is the rendering and the session start,
+which are not the terminal's.
+
+**There was a WebSocket and a JSON message protocol here**, so that a browser
+could be the frontend. It was removed: there is no remote client, the same
+boundary is stronger as types than as a schema, and everything the protocol
+carried is now a function call.
+
+### A view is asked for, not handed back
+
+A command returns what happened. It does not return a picture of the system.
+
+```haskell
+(session', response) = oneLine session ":theorem t : Type\8320"
+links                = developmentView (Budget 200) session'   -- ask, whenever you draw
+```
+
+Every view is a function of the session, so a frontend recomputes the ones it is
+showing after each command — or after a movement, or on a redraw — and a view
+that follows the cursor does so for free. Nothing has to be subscribed to and
+nothing can go stale.
+
+The session supplies everything a view needs: the grammars loaded, the names in
+scope at the focus, where each of them is bound, the name counter and the
+cursor's route. A frontend passes a depth budget, which is its own choice, and
+nothing else.
+
+Every view is reachable with nothing but `thena:view` on the `build-depends`
+line, and a test suite that depends on exactly that is what keeps it so.
+
+### A region is written text and splices, and may name its production
+
+A region of object syntax is not a string. It is the runs the user typed with the
+splices between them, because a splice holds a host term the object grammar
+cannot read:
+
+```haskell
+displayParse gs "LC" Nothing [WrittenText "( ", WrittenSplice, WrittenText " x )"]
+```
+
+The splices of a region are numbered in order from zero, and the offer at a
+cursor splits the region without renumbering — so which splice is which never
+depends on where the cursor stands.
+
+`Nothing` reads the region as any term of the language; `Just "app"` reads it as
+that one production, which is what a region written with a production named on it
+means. Asking for a language or a production nothing declared is refused by name
+rather than answered with an empty offer.
+
+### A part of a term you have not written yet is `█`, and `█` is reserved
+
+A region may have parts left unwritten, and one glyph says so:
+
+```
+LC`( █ x )`          -- the first argument has not been written yet
+```
+
+`█` (U+2588 FULL BLOCK) means exactly that, **everywhere a region is read** — at
+the prompt, in a frontend, and in a `.thena` file on disk. It is not a hole: a
+hole is written `?x`, is part of your program, and is solved by elaboration; a
+placeholder is a part of a term nobody has written yet, and a term that still has
+one does not elaborate. You are told which slot is empty:
+
+```
+in LC`( █ x )`: the M is missing
+```
+
+**No grammar may use `█`.** A production that writes it, or a token class that
+would read it, is refused when the block is declared:
+
+```
+language L, M where
+  f -> █ M
+  → the terminal `█` contains the reserved █, which is how a part of a term
+    that is not written yet is shown
+```
+
+That is the price of the feature, and it is paid deliberately: a glyph that meant
+a placeholder in one region and a terminal in another could be told apart only by
+looking closely, which fails anyone who cannot — and someone will type it to see
+what happens.
+
+**It was `?` until MS7, and `?` is now yours to use.** A grammar may write `?` as
+an ordinary terminal:
+
+```
+language Q where
+  opt -> ? Q
+```
+
+An editor need not put the character in its text at all: a placeholder can be
+handed over as its own run, beside the splices, so a frontend that tracks
+positions renders whatever it likes — an empty box, a highlight — and never
+splices a glyph into a string.
+
+### The offer lists the productions that fit, whole
+
+Ask what may be written at a position and you are told three things: the symbols
+that fit, what the position is waiting for, and **every production that may begin
+there, with its shape and its skeleton**.
+
+```
+app:   ( LC LC )          -- what to show in a list
+       ( █ █ )            -- what goes in the buffer when it is chosen
+```
+
+The skeleton arrives as runs, not as a string, so an editor that inserts it knows
+where the unwritten parts are without going looking for them — and you can step
+straight into the first one.
+
+Only productions that could still leave the line finishable are listed. Inside a
+parenthesis with one slot left, a production needing two does not appear.
+
+### A project is text on disk, and there is no other format
+
+A project is the files and the order you load them in. There is no binary form,
+no JSON form and no manifest.
+
+```
+:load examples/01-untyped.thena     -- this is what storing a project means
+```
+
+The order is part of the project, not presentation: a module's globals are in
+scope for the next one loaded.
+
+**Stored as written, not resolved.** If a tactic that is a builtin today becomes
+an ordinary rule tomorrow and keeps its name, every stored file keeps working;
+rename it and they break, which is what a text file would do and is the point.
+
+A JSON spelling of the same trees was built and then removed. It would have been
+a second canonical form of every program, and two forms drift — so a Thena file
+is equally at home in this system's own interface, in your usual editor, and in
+anything built later over LSP.
+
+**A half-written term is still text.** The parser takes a placeholder inline, so
+a term you have not finished is an ordinary string and needs no special
+representation to be stored or sent anywhere.
+
+### The text printers take one rendering, not a grammar list and a counter
+
+*Decided 2026-09-30.*
+
+```haskell
+renderCore (renderingOf session) context term
+```
+
+Everything in `Thena.Render` below `renderResponse` takes a `Rendering` — what a render
+carries and does not change — rather than the installed grammars and a name counter as
+two arguments.
+
+**Build one with `renderingOf` and there is no counter to supply.** That matters because
+there was no value a caller could correctly supply: the counter seeds the fresh variables
+a printer mints to descend a term, `Var`'s constructor is hidden so no safe number can be
+picked by inspection, and a low one silently corrupts the output — rendered from zero,
+`A -> A` prints as `∀ (_ : A) -> _`, because the collision makes the dependency check
+answer wrongly.
+
+### A printed value can be read back
+
+`instral` values printed at the prompt used Haskell's escaping, which renders `∀`
+as `\8704` and a tab as `\t` — neither of which the lexer accepts. So a string
+holding a tab, or any non-ASCII character, printed in a form that could not be
+typed back.
+
+It now uses the escaping the reader actually implements. **If you print a value
+and paste it back, it is the same value.**
+
+### A Core term displays as a labelled tree, not text
+
+The editor cannot be handed the string the terminal prints — it needs to hover
+a binder, highlight its occurrences, fold a subterm, point at "the motive"
+rather than "argument four". None of that is answerable from text.
+
+So a Core term has a *display representation*: every node carries its address
+and what it is — never what it looks like. A variable carries the address of
+its binder, not a de Bruijn index; a universe carries its level already
+normalised; an eliminator's slots are labelled (parameters, motive, methods,
+indices, target) instead of one flat argument list. **No text, no
+parentheses, no layout crosses** — whether a Π prints as an arrow is only
+whether its bound variable occurs, which the editor can already see, so it is
+the editor's call and not the server's.
+
+### A modelled language's term is a production, not a shape
+
+A term written in an object language — `LC\`( \955 x : \953 . x )\`` — could
+have displayed as a generic constructor application, the way the terminal
+falls back to when it cannot print one in its own notation. It does not: the
+display says *this is `abs`, with these three slots*, in the grammar's own
+written order, and the editor lays it out from the grammar it holds. Nothing
+about notation crosses.
+
+Two things the grammar alone cannot say still have to: where a splice was
+needed for grouping, because a person cannot always write a term flat and
+have it read back what it means — that is the parser's answer, computed once
+and handed across rather than asked of the editor. And which slot is a
+binder versus an occurrence, so a variable in an object language highlights
+the way one in Core does — not yet built.
+
+### The development displays as its own chain
+
+The development — the components a proof is built from, with a focus in
+it — displays as the chain it is, one entry per assumption, definition,
+claim, guess or pending constraint, ending in the term at the end. A guess's
+own body is a chain of its own, nested inside its link, because a guess is
+the one place the chain branches.
+
+Three things only the server knows: whether a link is the focus (at
+chain-link precision — a focus somewhere inside a type is a separate,
+already-addressed question), whether a guess is pure enough for `solve` to
+take, and whether anything later in the development still depends on a
+given hole.
+
+### A statement's display reuses the printer's own generalisation
+
+`instral`'s instruction set has grown past sixty operations, and the
+terminal printer stopped needing one case per operation early on: a
+statement is *the word, then its operands*, for all but a handful. The
+editor's display is generic for the same reason and reuses the same two
+functions that decide it, rather than keeping a second table that could
+drift from the first the way one already has.
+
+
+### A long run goes in slices, and stopping it is not asking for the next one
+
+There is no "interrupt". Instead the machine takes a fuel budget: how many
+instructions a run may do before it hands control back. `:step ‹n›` sets what
+every line may spend, `:run ‹n›` spends a budget once without changing that
+setting, and `:step on` is simply the budget `1` — single-stepping is the
+smallest case of one notion, not a mode of its own.
+
+```
+thena> :step 500
+thena> prove              -- runs 500 instructions, then pauses
+thena> :run 500           -- one more slice
+thena> :run               -- and let it finish
+```
+
+A paused run is an ordinary stopped machine, so everything that works after
+`:step` works here: `:choices` lists the live choice points and `retry ‹n›`
+takes a different route. That is the reason for fuel rather than an
+asynchronous interrupt — an interrupted fold cannot be resumed, and being able
+to look at a search that was going well and carry on is the point.
+
+A frontend builds a job out of this and nothing else: advance a slice, draw
+whatever it wants to draw, advance again; stopping is not calling again. One
+session advances one thing at a time, so an editor refuses a second submission
+while a run is live rather than queuing it.
+
+Two things fuel does not bound. A single instruction may be a kernel call —
+`certify`, a `data` declaration, a grammar check — and those run to completion,
+so one unit of fuel can take minutes. And three operations are unbounded by
+construction, because they read the finished state rather than reporting it:
+loading a file, `qed`, and `:infer`. **That is intended and not a gap** — ruled
+2026-10-02 — so a frontend waits out a `:load` and a resumable one is not owed.
+
+### A tagged literal is notation, not a term — `Core` carries no tag
+
+``LC`( M N )` `` and `app M N` are **the same term**. The tag says which grammar to
+read the text with; once it is read, what is left is an ordinary application of that
+language's constructors. Nothing in `Core` records that you wrote the notation.
+
+So the notation is *reconstructed* when a term is shown. A term is written back as a
+literal when its head constructor is a production of some grammar — the lookup is by
+constructor name, so there is never a choice of notation to make — and the layout is
+then printed, re-parsed, and accepted only when the reading gives back the same tree.
+Where it does not, a subterm is fenced in a splice and the check runs again. That is
+why a term you wrote flat can come back with a fence in it: the fence is what makes
+the text read as the term.
+
+The alternative was a `Core` constructor holding the tag, and it does not survive one
+question: is a tagged term convertible with its own contents? It has to be — a
+theorem proved about ``typing`· ⊢ ${M} : ${T}` `` must apply to `typing ctxEmpty M T`,
+or the notation is a different language rather than a way of writing this one. A
+constructor that conversion must ignore is a constructor every part of the kernel must
+remember to strip, and one that quietly destroys unique normal forms, since a tag
+could then sit at any subterm any number of times.
+
+What this costs you is real and small: the system does not remember whether you typed
+a term as object text or in Core notation, and it does not remember your spacing. What
+it buys is that the two spellings are one term everywhere, with no rule about when
+they are interchangeable, because there is nothing to interchange.
+
+### Completion is derived from the op table, so it can never disagree with dispatch
+
+Typing at the prompt offers you the statements that exist *now*: every op, and every
+rule in every base you have loaded. That list is not written down anywhere. It is
+computed, each time you ask, from the same tables the engine dispatches on — the op
+table for the words and their arities, each rule's declared signature for what its
+arguments are. Load a rule base mid-session and the completions change immediately,
+with nothing to regenerate.
+
+The alternative was a second grammar for `instral`, written beside the one Happy uses
+to actually run your line. Two grammars for one language drift, and the drift is
+silent: the parser that runs your program and the parser that advises you would slowly
+come to disagree about what the language is. Deriving both from one table is what
+makes that impossible rather than merely unlikely.
+
+Note what this does *not* change: your line is still run by Happy. The derived grammar
+only answers "what may I write here", never "what does this mean".
+
+### A slot's type narrows what is offered, and never prevents what you write
+
+`quantify` takes a `Name` and then a `Core`, so after `quantify ` you are offered names,
+and after `quantify x ` you are offered terms. The offer walks from argument to argument
+as you type.
+
+But writing something the slot does not want is not refused. Type a tagged term literal
+where a `Name` was expected — `goto LC\`` — and you still get the full completion for
+that literal, from the object language's own grammar, **marked as recovered** so the
+editor can show you that the line will not run as written.
+
+The mechanism is one rule rather than an exception list: when the whole line has no
+reading at your cursor, the system asks a narrower question about the unit you are
+standing in. Inside a tagged term literal, that language answers; in a half-typed word,
+the statement grammar answers, filtered by what you have typed.
+
+Two things were considered and rejected. Accepting everything everywhere would have
+made the offers useless, because nothing would distinguish what belongs here from what
+is merely tolerated. Teaching the parser to "forgive" a misplaced literal would have
+made it dishonest — it would report a reading that does not exist. Neither is needed:
+the grammar stays strict and truthful, and the help comes from asking a different,
+smaller question.
+
+### The prompt completes what you are writing, and says when it is guessing
+
+*Added 2026-09-30, MS7 phases 139–143.*
+
+Press Tab, or open a dropdown, and the system answers **what may be written here** —
+not from a list of keywords, but from the same tables it dispatches with. Ask at any
+point in a line and you get the words, the token classes and the productions that could
+stand there, narrowed to the type the position wants.
+
+```
+fill                 -- a Core goes here: a name, a call, or a tagged literal
+fill ( typeof        -- inside a call: its own argument, which is a Core
+fill LC`( λ x :      -- inside a literal: ι, from the grammar YOU declared
+h = here             -- a binding
+goto                 -- ...and h is offered here, with its type
+:inf                 -- completes to :infer
+:step                -- on, off, or a number
+```
+
+Four things follow from where the answers come from.
+
+**A slot says what it wants, because a slot is a nonterminal named after its type.**
+*"Argument 2 wants a `Core`"* is not a feature layered on the answer; it is the answer.
+
+**A nested call is offered wherever its result fits.** `fill ( goal )` is suggested
+because `goal` returns a `Core` and `fill` takes one — the same table that dispatches
+the call decides it, so a rule you write today is completable today.
+
+**Inside a tagged literal, your own grammar answers.** The object grammars are part of
+the same chart as the statement syntax, so one line is read once: the type slot of your
+`abs` production offers your `ι`, and nothing had to be told about either.
+
+**An answer that cannot be trusted says so.** When the line does not read, the system
+asks a narrower question about the unit under the cursor and marks the answer
+*recovered* — completing `atta` to `attack` says nothing about whether `attack` may
+stand there, and a frontend is expected to draw it differently. A standalone term at the
+prompt is answered this way on purpose: it is not a legal line, so the help arrives
+marked rather than pretending.
+
+**What it does not do**: a surface or core term — `:infer`'s argument, or
+`` surface`…` `` — gets no completion, because those are the only languages with no
+grammar in the chart. The system says *something goes here* and does not pretend to
+list it.

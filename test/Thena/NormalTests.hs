@@ -11,10 +11,14 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 
 import Thena.Core.Term (GlobalName (..))
-import Thena.Driver (Session (..))
+import Thena.Driver
+  ( machineOf
+  )
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
-import Thena.Repl (startingSession, loadProofFile, renderCore)
+import Thena.Files (loadProofFile, startingSession)
+import Thena.Render ( Rendering (..)
+  ,renderCore)
 
 tests :: TestTree
 tests =
@@ -33,19 +37,19 @@ tests =
 
     , testCase "the three inversions underneath are there" $ do
         s <- loaded
-        map (isJust . flip lookupDefinition (globals (sessionMachine s)) . GlobalName)
+        map (isJust . flip lookupDefinition (globals (machineOf s)) . GlobalName)
             ["trueNoStep", "falseNoStep", "zeroNoStep"]
           @?= [True, True, True]
     ]
   where
     loaded = do
       (s, _)  <- startingSession
-      (s1, _) <- loadProofFile s  "examples/canonical.thena"
-      (s2, _) <- loadProofFile s1 "examples/progress.thena"
-      (s3, _) <- loadProofFile s2 "examples/normal.thena"
+      (s1, _, _) <- loadProofFile s  "examples/canonical.thena"
+      (s2, _, _) <- loadProofFile s1 "examples/progress.thena"
+      (s3, _, _) <- loadProofFile s2 "examples/normal.thena"
       pure s3
 
     statementOf n = do
       s <- loaded
-      pure ( renderCore [] (names (sessionMachine s)) [] . definitionType
-               <$> lookupDefinition (GlobalName n) (globals (sessionMachine s)) )
+      pure ( renderCore (Rendering [] (names (machineOf s))) [] . definitionType
+               <$> lookupDefinition (GlobalName n) (globals (machineOf s)) )

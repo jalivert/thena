@@ -35,6 +35,7 @@ module Thena.Development.Cursor
   , along
   , goto
   , gotoNamed
+  , toRoot
   , identsIn
   , freshIdent
   , into
@@ -325,6 +326,24 @@ along cur = case cur of
 -- 'freshIdent' means the name it /asked for/ is not always the name it got.
 goto :: Var -> Cursor -> Either MoveError Cursor
 goto x = searchFrom (\y _ -> y == x)
+
+-- | Back to the root of the development.
+--
+-- **The third @goto@, and the only move that cannot fail** — @back@ refuses
+-- with 'AtRoot' when there is nowhere to go, and this one is already there.
+-- 'goto' and 'gotoNamed' both rebuild from the root before searching, so the
+-- anchor was written three times inside this module before it had a name of
+-- its own (MS7 phase 121).
+--
+-- It is the move an 'Thena.View.Address.Address' presumes: an address is
+-- the moves that reach a position /from the root/, so a client's click is
+-- @goto-root@ followed by those moves, and the empty address is @goto-root@
+-- alone rather than an empty program.
+--
+-- **Not 'searchFrom'** — that one walks holes and guesses only, so a root that
+-- is an @assume@, a constraint or a trailing term is invisible to it.
+toRoot :: Cursor -> Cursor
+toRoot = enter . rebuild
 
 -- | The same, by the name the component carries (phase 24b).
 --

@@ -3,7 +3,7 @@
 -- **The load-bearing test is the round trip** — 'printsAndReadsBack' — and it
 -- is what crosses the printer with something that is not itself: the reader.
 -- A printer tested against a printer agrees with itself, which is the failure
--- @CLAUDE.md@ names; here 'Thena.Repl.renderCore' is checked against
+-- @CLAUDE.md@ names; here 'Thena.Render.renderCore' is checked against
 -- 'Thena.Driver.parseCore', which was written by a different phase and does
 -- not share a line of code with it.
 --
@@ -33,7 +33,10 @@ import Thena.Core.Term
   , fresh
   )
 import Thena.Core.Typing (check, infer)
-import Thena.Driver (checkedPrimitive, parseCore)
+import Thena.Driver
+  ( checkedPrimitive
+  , parseCore
+  )
 import Thena.Global.Env
   ( Constant (..)
   , Definition (..)
@@ -43,7 +46,8 @@ import Thena.Global.Env
   , emptyGlobals
   , lookupConstant
   )
-import Thena.Repl (renderCore)
+import Thena.Render ( Rendering (..)
+  ,renderCore)
 
 import Thena.Core.TermTests (genLiteral)
 import Thena.Declared (declared)
@@ -285,7 +289,7 @@ refusals =
 
 printsAndReadsBack :: Core -> Bool
 printsAndReadsBack t =
-  case parseCore [] env ctx 0 (renderCore [] 0 ctx t) of
+  case parseCore [] env ctx 0 (renderCore (Rendering [] 0) ctx t) of
     Right (t', _) -> t' == t
     Left _        -> False
 

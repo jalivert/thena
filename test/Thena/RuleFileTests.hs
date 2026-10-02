@@ -19,7 +19,8 @@ import Thena.Driver
   , Stop (..)
   , Response (..)
   , RuleFileError (..)
-  , Session (..)
+  , Session
+  , machineOf
   , command
   , loadRuleBases
   , newSession
@@ -113,7 +114,7 @@ load1 :: [(FilePath, String)] -> (Session, Response)
 load1 = loadRuleBases newSession
 
 basesOf :: Session -> [RuleBase]
-basesOf = rules . sessionMachine
+basesOf = rules . machineOf
 
 ruleNames :: RuleBase -> [String]
 ruleNames b = [ n | Rule (GlobalName n) _ _ _ <- baseRules b ]
@@ -430,7 +431,7 @@ primitives =
 
     bound n line =
       let s0 = fst (load1 [("prim.thena.rules", base)])
-       in lookup n (Engine.env (Engine.exec (sessionMachine (fst (command s0 line)))))
+       in lookup n (Engine.env (Engine.exec (machineOf (fst (command s0 line)))))
 
 -- --------------------------------------------------------------------------
 -- Walking a list with two clauses (MS5 phase 65)

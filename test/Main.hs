@@ -10,6 +10,20 @@ import qualified Thena.Core.TermTests
 import qualified Thena.Core.TypingTests
 import qualified Thena.Core.UnifyTests
 import qualified Thena.CursorTests
+import qualified Thena.ViewTests
+import qualified Thena.View.AddressTests
+import qualified Thena.View.ChartTests
+import qualified Thena.View.DevelopmentTests
+import qualified Thena.View.CoreTests
+import qualified Thena.Language.BuiltinTests
+import qualified Thena.View.InstralTests
+import qualified Thena.View.MachineTests
+import qualified Thena.View.RulesTests
+import qualified Thena.View.SurfaceTests
+import qualified Thena.View.SourceTests
+import qualified Thena.View.StatementTests
+import qualified Thena.View.TokensTests
+import qualified Thena.View.TypeTests
 import qualified Thena.DependentIndexTests
 import qualified Thena.CanonicalTests
 import qualified Thena.DeterminacyTests
@@ -67,6 +81,20 @@ main =
       , Thena.Core.TermTests.tests
       , Thena.Core.TypingTests.tests
       , Thena.Core.UnifyTests.tests
+      , Thena.View.ChartTests.tests
+      , Thena.View.DevelopmentTests.tests
+      , Thena.View.CoreTests.tests
+      , Thena.Language.BuiltinTests.tests
+      , Thena.View.InstralTests.tests
+      , Thena.View.MachineTests.tests
+      , Thena.View.RulesTests.tests
+      , Thena.View.SurfaceTests.tests
+      , Thena.View.SourceTests.tests
+      , Thena.View.StatementTests.tests
+      , Thena.View.TokensTests.tests
+      , Thena.View.TypeTests.tests
+      , Thena.ViewTests.tests
+      , Thena.View.AddressTests.tests
       , Thena.CursorTests.tests
       , Thena.DependentIndexTests.tests
       , Thena.CanonicalTests.tests

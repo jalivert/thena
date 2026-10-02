@@ -192,6 +192,7 @@ everyOp =
     -- mirror that lists neither cannot notice a split.
   , ("goto x",       Goto (Ref "x"))
   , ("goto-named x", Op.GotoNamed (Ref "x"))
+  , ("goto-root",   Op.GotoRoot)
   , ("along",        Along)
   , ("into",         Into)
   , ("cross type",   CrossType)

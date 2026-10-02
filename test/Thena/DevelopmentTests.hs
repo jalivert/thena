@@ -24,7 +24,8 @@ import Thena.Fixtures
   , trailingLam
   , withConstraint
   )
-import Thena.Repl (renderPartial)
+import Thena.Render ( Rendering (..)
+  ,renderPartial)
 
 tests :: TestTree
 tests =
@@ -75,10 +76,10 @@ generatedRoundTrip =
             -- that collides with one already there — §13e, and 'reprint' is
             -- safe from it only because its fixtures mint from zero.
             Right (p, n) ->
-              let once = renderPartial [] n [] p
+              let once = renderPartial (Rendering [] n) [] p
                   twice = case parseDevelopment [] emptyGlobals [] n once of
                     Left e            -> "PARSE FAILED: " ++ show e
-                    Right (p', n')    -> renderPartial [] n' [] p'
+                    Right (p', n')    -> renderPartial (Rendering [] n') [] p'
                in counterexample
                     (src ++ "\n  printed:\n" ++ once ++ "\n  reprinted:\n" ++ twice)
                     (property (twice == once))
@@ -197,8 +198,32 @@ forgetTests =
 
 renderTests :: [TestTree]
 renderTests =
-  [ testCase "the running example" $
-      renderPartial [] 500 [] idMidway
+  [ -- **Seeding the counter is not cosmetic** (MS6 closeout 36, phase 145).
+    -- Every fixture here seeds 500 because the development already holds low
+    -- 'Var's, and a render that starts at zero mints one that collides with a
+    -- 'Var' the term uses — 'HAZARDS.md' names this and 'renderPartial' cannot
+    -- defend against it, since 'Var'\'s constructor is hidden. This asserts
+    -- the difference is real, which is what makes the sixteen literal zeros
+    -- phase 145 removed from "Thena.Render" a fix rather than a tidy-up.
+    --
+    -- **What went wrong, on this very fixture**: at zero, @A -> A@ printed as
+    -- @∀ (_ : A) -> _@. The collision makes 'dependent' answer yes for a Π that
+    -- is not, because the 'Var' it mints to test occurrence is one the scope
+    -- already uses — so a non-dependent function type is shown as a dependent
+    -- one, with binders named @_@. Every error message that printed a term went
+    -- through a zero-seeded call.
+    --
+    -- **This symptom was already known here** — 'reprint'\'s haddock below records
+    -- the identical @A -> A@ becoming @\8704 (_ : A) -> _@ while this suite was
+    -- being written (§13e). What phase 145 found is not the symptom but where
+    -- else it was live: sixteen calls in "Thena.Render"\'s error printers, which
+    -- had no counter to pass and wrote @0@.
+    testCase "a render seeded at zero is not the same render" $
+      assertBool "seeding the counter made no difference"
+        (renderPartial (Rendering [] 0) [] idMidway
+           /= renderPartial (Rendering [] 500) [] idMidway)
+  , testCase "the running example" $
+      renderPartial (Rendering [] 500) [] idMidway
         @?= unlines'
           [ "λ (A : Type₀) ->"
           , "let ? id' : A -> A ≐ ("
@@ -209,7 +234,7 @@ renderTests =
           , "id'"
           ]
   , testCase "a constraint, with a non-empty Ξ" $
-      renderPartial [] 500 [] withConstraint
+      renderPartial (Rendering [] 500) [] withConstraint
         @?= unlines'
           [ "λ (A : Type₀) ->"
           , "λ (a : A) ->"
@@ -218,7 +243,7 @@ renderTests =
           , "h"
           ]
   , testCase "one link of each kind" $
-      renderPartial [] 500 [] allFour
+      renderPartial (Rendering [] 500) [] allFour
         @?= unlines'
           [ "λ (A : Type₀) ->"
           , "let d = A : Type₀ in"
@@ -229,10 +254,10 @@ renderTests =
           , "g"
           ]
   , testCase "a shadowed chain binder is freshened" $
-      renderPartial [] 500 [] shadowedBinders
+      renderPartial (Rendering [] 500) [] shadowedBinders
         @?= unlines' [ "λ (x : Type₀) ->", "λ (x1 : Type₀) ->", "x" ]
   , testCase "a guess body does not see the hole's name, so nothing is freshened" $
-      renderPartial [] 500 [] guessShadowing
+      renderPartial (Rendering [] 500) [] guessShadowing
         @?= unlines'
           [ "let ? x : Type₀ ≐ ("
           , "  λ (x : Type₀) ->"
@@ -241,7 +266,7 @@ renderTests =
           , "x"
           ]
   , testCase "a trailing binder is quoted, or it would re-read as a link" $
-      renderPartial [] 500 [] trailingLam @?= "⌜ λ (A : Type₀) -> A ⌝"
+      renderPartial (Rendering [] 500) [] trailingLam @?= "⌜ λ (A : Type₀) -> A ⌝"
   ]
 
 -- | 'unlines' appends a trailing newline; 'renderPartial' does not emit one.
@@ -329,7 +354,7 @@ scopeTests =
 roundTripTests :: [TestTree]
 roundTripTests =
   [ testCase (name ++ " survives print then read") $
-      reprint p @?= renderPartial [] 500 [] p
+      reprint p @?= renderPartial (Rendering [] 500) [] p
   | (name, p) <-
       [ ("the running example", idMidway)
       , ("a constraint", withConstraint)
@@ -352,8 +377,8 @@ roundTripTests =
 -- hypothetical: it silently turned @A -> A@ into @∀ (_ : A) -> _@ while this
 -- suite was being written (§13e).
 reprint :: Partial -> String
-reprint p = case parseDevelopment [] emptyGlobals [] 500 (renderPartial [] 500 [] p) of
-  Right (p', n) -> renderPartial [] n [] p'
+reprint p = case parseDevelopment [] emptyGlobals [] 500 (renderPartial (Rendering [] 500) [] p) of
+  Right (p', n) -> renderPartial (Rendering [] n) [] p'
   Left e        -> "PARSE FAILED: " ++ show e
 
 isLeft :: Either a b -> Bool

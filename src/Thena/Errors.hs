@@ -92,6 +92,13 @@ data Warning
     -- ^ the block, the production, and a binder declared @as binders@ that no
     -- @[…]@ mentions (@ms6\/SPEC.md@ §4.5, MS6 phase 101). A vacuous binder is
     -- allowed — that is why it can be declared — and worth saying.
+  | UnprimeableClass BlockKind String String
+    -- ^ the block, the language's name, and its identifier class's name — a class no
+    -- single character extends, so a generated @L-fresh@ cannot rename a
+    -- captured binder to a name the language can write back (MS6 closeout 23,
+    -- phase 146). **It is a warning and not a refusal**: the language works, its
+    -- substitution is correct, and only printing a renamed binder is lost — so
+    -- the author is told rather than prevented.
   deriving (Eq, Show)
 
 
@@ -105,7 +112,12 @@ data BuildError
   = NoSuchProduction String
     -- ^ a reading of a production no installed grammar has
   | Incomplete String
-    -- ^ a hole: a constructor cannot have a missing argument (§7.6)
+    -- ^ **a placeholder, and the slot it stands in**: a constructor cannot have
+    -- a missing argument (§7.6).
+    --
+    -- **Never \"a hole\" — HIS RULING, 2026-09-27**, and this comment said so
+    -- until MS7 phase 127. A DC hole is saved and solved; a placeholder is a
+    -- part of a term nobody has written yet.
   | NotForSlot String String
     -- ^ the production, and a slot whose reading is not what it takes
   deriving (Eq, Show)

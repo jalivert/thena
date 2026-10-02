@@ -22,8 +22,15 @@ import System.Directory (listDirectory)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Driver (Response (..), Session, command, loadProofSource, loadRuleBases)
-import Thena.Repl (loadFile, renderResponse, rulesPath, startingSession)
+import Thena.Driver
+  ( Response (..)
+  , Session
+  , command
+  , loadProofSource
+  , loadRuleBases
+  )
+import Thena.Files (loadFile, rulesPath, startingSession)
+import Thena.Render (renderResponse)
 
 tests :: TestTree
 tests =
@@ -61,7 +68,8 @@ tests =
                [ "examples/01-stlc-syntax.thena", "examples/02-contexts.thena"
                , "examples/03-typing-and-reduction.thena", "examples/07-preservation.thena" ]
         (s1, out, stopped) <- loadFile s "examples/08-preservation-by-tactics.thena.script"
-        if null stopped then pure () else assertFailure (unlines out)
+        if null stopped then pure ()
+          else assertFailure (unlines (concatMap (renderResponse s1) out))
         let (s', r) = command s1 ":infer preservation-tactics"
         renderResponse s' r @?=
           [ "preservation-tactics : ∀ (M : LC) (M1 : LC) (T : Ty) -> typing`· ⊢ ${M} : ${T}` -> step`${M} --> ${M1}` -> typing`· ⊢ ${M1} : ${T}`" ]
@@ -92,7 +100,9 @@ tests =
             then do
               (s', out, stopped) <- loadFile s path
               if null stopped then go s' bases more
-                else assertFailure (unlines ((path ++ " stopped:") : out))
+                else assertFailure
+                       (unlines ((path ++ " stopped:")
+                                  : concatMap (renderResponse s') out))
             else assertFailure (path ++ " is a numbered example of a kind this test does not load")
 
 refused :: FilePath -> Session -> Response -> IO a

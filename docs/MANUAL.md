@@ -364,6 +364,13 @@ thena spine> :show
 The inner hole is `id1`, not `id`: every component in a development has a name
 of its own, so that `goto-named "‹name›"` always means one place.
 
+There are three `goto`s and they differ in what they take. `goto-named "h"`
+searches for a hole by the name you can see; `goto` is the one a rule body uses,
+taking the variable it is holding rather than a name; and `goto-root` takes
+nothing and goes to the top of the development. `goto-root` is the only move
+that cannot fail — `back` refuses when there is nothing above it, and
+`goto-root` is already where it is going.
+
 Two λs have appeared, and the remaining hole now has type `A`. Move the cursor
 down to it — `into` enters the guess body, `along` steps past a binder — and ask
 where you are:
@@ -811,6 +818,50 @@ thena spine> :step off
 
 `:run` finishes the current run without stepping; `:step off` leaves the mode.
 
+Single-stepping is the smallest of a family. `:step ‹n›` lets every line do at
+most `n` instructions before handing control back, and `:run ‹n›` advances a
+paused run by that many without changing the setting — so `:step on` is `:step 1`
+and `:step off` is no budget at all. An editor uses this to stay responsive: it
+advances a long search a slice at a time, draws whatever it wants to draw
+between slices, and stops the search by simply not asking for the next one.
+
+*From a fresh session.*
+
+```
+thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
+declared Nat
+thena spine> :step 6
+thena spine> declare idn : Nat -> Nat ; idn = \ n -> n
+pc
+  0  u = universe-at l
+  1  return u
+env
+  l = Type (?ℓ965)
+stack
+  call, 14 instruction(s) to resume
+  call, 6 instruction(s) to resume
+  call, 43 instruction(s) to resume (returned)
+  call, 61 instruction(s) to resume (returned)
+thena spine> :run 6
+pc
+  0  u = universe-at l
+  1  return u
+env
+  l = Type (?ℓ967)
+stack
+  call, 11 instruction(s) to resume
+  call, 14 instruction(s) to resume (returned)
+  call, 6 instruction(s) to resume
+  call, 43 instruction(s) to resume (returned)
+  call, 61 instruction(s) to resume (returned)
+thena spine> :run
+solved: ?ℓ963
+solved: ?ℓ965
+solved: ?ℓ967
+already equal
+thena spine> :step off
+```
+
 ---
 
 ## 9. The kernel
@@ -1059,6 +1110,7 @@ language and elaborated on load.
 | `try-core ⌜ term ⌝` | propose a term for the focused hole |
 | `apply-core ⌜ f ⌝` / `unify-refine-core ⌜ t ⌝` | apply a function / refine by unification |
 | `goto-named "‹name›"` | move to a hole by name |
+| `goto-root` | move to the root of the development |
 | `assume "‹x›" ⌜‹S›⌝` / `claim "‹x›" ⌜‹S›⌝` | add a hypothesis / a hole above the focus |
 | `assume ⌜‹S›⌝` / `claim ⌜‹S›⌝` | the same, asking for the name |
 | `unify ⌜‹t›⌝ ⌜‹u›⌝` | solve by unification |
@@ -1086,7 +1138,7 @@ language and elaborated on load.
 | `:where` | focus, path, context, expected type |
 | `:core ‹t›` `:dev ‹p›` | parse and print |
 | `:surface ‹t›` | parse and print a surface term |
-| `:parse ‹L› ‹text›` | parse an object term with a language's grammar; `?` is a missing slot |
+| `:parse ‹L› ‹text›` | parse an object term with a language's grammar; `█` is a part not written yet |
 | `:parse ‹L›` … `:done` | every line is an L term; Tab at the cursor shows what fits, and completes a production |
 | `:infer ‹t›` `:whnf ‹t›` `:convert ‹t› ≟ ‹u›` | type, reduct, convertibility |
 | `:elim ‹D›` / `:elim ‹D› ‹universe›` | the elimination rule |

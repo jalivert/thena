@@ -1366,19 +1366,12 @@ startAt tag = maybe (Earley.StartAt tag) Earley.StartRule
 
 -- | A region's text as parser pieces, and the names its splices bind or read.
 --
--- **The text still has its @${x}@ in it**, because a region is kept as written
--- and read again by whoever resolves it — "Thena.Syntax.Parser" puts the
--- escape back for exactly that. A splice is one piece, whatever it names, so
--- that it completes one slot.
+-- **Moved to "Thena.Language.Earley" at MS7 phase 127**, beside the 'Piece' it
+-- builds and the placeholder spelling it now also reads, so that a region means
+-- the same thing at the prompt, in a frontend and in a stored file. This is the
+-- name the resolver has always called it by.
 regionPieces :: String -> ([Earley.Piece], [String])
-regionPieces = go 0
-  where
-    go _ [] = ([], [])
-    go k cs = case cs of
-      '$' : '{' : rest
-        | (nm, '}' : more) <- break (== '}') rest ->
-            let (ps, ns) = go (k + 1) more in (Earley.Splice k : ps, nm : ns)
-      c : rest -> let (ps, ns) = go k rest in (Earley.Char c : ps, ns)
+regionPieces = Earley.regionPieces
 
 -- | An op word and its written arguments, resolved.
 --
@@ -1406,6 +1399,7 @@ nullaryOps =
   , ("prim-solve", Solve), ("prim-abandon", Abandon), ("goal", Goal)
   , ("fresh-level", Op.FreshLevel)
   , ("here", Here)
+  , ("goto-root", Op.GotoRoot)
   , ("none", Op.None)
   , ("prim-prove", Prove)
   , ("pop-development", Op.PopDevelopment)
