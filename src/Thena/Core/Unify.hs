@@ -308,7 +308,7 @@ match dir env st ctx k@(Equate _ s t _) =
     -- because in the general higher-order setting @?X a⃗ ≟ ?Y b⃗@ has no most
     -- general unifier and is /always/ solvable, so branching on it would be
     -- guessing. That is a good default and §6.1 inherited it wholesale; the
-    -- spined case below keeps it. @PLAN-semantics.md@ §6's own standard is
+    -- spined case below keeps it. @.claude\/spec\/semantics.md@ §6's own standard is
     -- already *"correct Miller pattern unification"*, so this case is inside
     -- what the project committed to rather than beyond it.
     --

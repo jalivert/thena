@@ -183,7 +183,7 @@ etaTests =
     oneFun  = [("f", "Nat -> Nat")]
     twoFuns = [("f", "Nat -> Nat"), ("g", "Nat -> Nat")]
 
--- | **Phase 7's explicit proof obligation, discharged** (`PLAN-semantics.md`
+-- | **Phase 7's explicit proof obligation, discharged** (`.claude/spec/semantics.md`
 -- §5.1). δ waits for a former wrapper to saturate, so @cons A@ is a legal
 -- whnf that is not a λ; η is what must still make it meet the λ-form.
 --

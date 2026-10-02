@@ -12,7 +12,7 @@
 -- named for one language cannot hold the syntax of three without the next reader
 -- having to work out which is which.
 --
--- **It imports nothing, and must keep importing nothing** (@PLAN-interface.md@
+-- **It imports nothing, and must keep importing nothing** (@.claude\/spec\/interface.md@
 -- §2.5): "Thena.Syntax.Lexer" and "Thena.Syntax.Parser" sit beside @Core@ and
 -- between them import only the concrete-syntax modules, which is what keeps
 -- "Thena.Errors"' /nothing above Core/ rule true.

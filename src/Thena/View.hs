@@ -256,7 +256,7 @@ rulesView budget s =
 -- @:matches@ prints.
 -- **A matched rule's signature is looked up across the bases in order**
 -- (MS7 phase 131), because 'matches' says which rule held and not which file it
--- came from. Definition order is dispatch order (@PLAN-machine.md@ §8), so the
+-- came from. Definition order is dispatch order (@.claude\/spec\/machine.md@ §8), so the
 -- first declaration of a name is the one a reader would mean.
 matchesView :: Budget -> Session -> [RuleView]
 matchesView budget s =

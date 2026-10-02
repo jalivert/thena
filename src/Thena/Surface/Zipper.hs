@@ -203,7 +203,7 @@ rebuild s f = case f of
 -- **A move takes the pieces its caller has already destructured**, rather than
 -- re-matching the focus and handing back a 'Maybe' that nothing could ever
 -- see. Passing a piece that did not come from the focus is representable and
--- not well formed — @PLAN-representation.md@ §3.4's line — and the law in this
+-- not well formed — @.claude\/spec\/representation.md@ §3.4's line — and the law in this
 -- module's header is what checks it.
 intoFun :: SurfaceArg -> Surface -> SurfaceZipper -> SurfaceZipper
 intoFun a fun = push fun (InFun a)

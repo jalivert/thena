@@ -571,7 +571,7 @@ constructionTests =
       -- **They build; they do not check.** @Type₀@ applied to anything is not
       -- well formed and this still constructs it: a constructed term is checked
       -- where it is used, by @claim@'s side condition or @try@'s.
-      -- @PLAN-representation.md@ §3.4's line.
+      -- @.claude\/spec\/representation.md@ §3.4's line.
     , testCase "and neither checks what it builds" $
         built (Ops.ApplyTo (litTerm type0) (litTerm type0))
           @?= Just (App type0 type0)

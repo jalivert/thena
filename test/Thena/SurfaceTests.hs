@@ -348,7 +348,7 @@ holeTests =
 
     -- **Neither is a lexer rule**, and this is what that buys: a name may still
     -- contain both characters. @_@ alone is the placeholder and @_foo@ is a
-    -- name, exactly as @PLAN-interface.md@ §2.6 says a name may start with @_@.
+    -- name, exactly as @.claude\/spec\/interface.md@ §2.6 says a name may start with @_@.
   , parses "_foo" (SurfaceName "_foo")
   , parses "foo?" (SurfaceName "foo?")
 
