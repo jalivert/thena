@@ -178,6 +178,46 @@ executable thena
         haskeline >=0.8.4 && <0.9,
         thena
 
+-- | The TUI's own library, `tui` track, SP1's first skeleton.
+--
+-- Depends on `thena:view` only, same as `thena-boundary` — never `thena`
+-- itself. Nothing in `Tui.*` may import anything outside that surface; if it
+-- needs to, that is a `.jalivert/FRONTEND.md` gap to report, not a reason to
+-- reach around the boundary.
+library tui
+    import:             warnings
+    hs-source-dirs:     tui
+    default-language:   GHC2024
+    exposed-modules:
+        Tui.App
+        Tui.Config
+        Tui.Render
+        Tui.Theme
+    build-depends:
+        base           ^>=4.21.2.0,
+        thena:view,
+        brick          >=2.13 && <2.14,
+        directory      >=1.3  && <1.4,
+        filepath       >=1.5  && <1.6,
+        mtl            >=2.3  && <2.4,
+        microlens      >=0.5  && <0.6,
+        microlens-mtl  >=0.2.1 && <0.3,
+        text           >=2.1  && <2.2,
+        text-zipper    >=0.13 && <0.14,
+        vty            >=6.0  && <7,
+        vty-unix       >=0.4  && <0.5
+
+executable thena-tui
+    import:             warnings
+    hs-source-dirs:     app
+    default-language:   GHC2024
+    main-is:            Tui.hs
+    -- brick's backend needs the threaded runtime.
+    ghc-options:        -threaded
+    build-depends:
+        base ^>=4.21.2.0,
+        thena:tui
+
 test-suite thena-test
     import:             warnings
     hs-source-dirs:     test
