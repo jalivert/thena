@@ -842,7 +842,7 @@ data Op
     -- Named @apply-to@ and not @apply@ because @apply@ is a tactic.
     --
     -- **@App (Canonical …) x@ is constructible here and is not well formed.**
-    -- That is @PLAN-representation.md@ §3.4's line, deliberately: the checker
+    -- That is @.claude\/spec\/representation.md@ §3.4's line, deliberately: the checker
     -- refuses it, and no abstraction boundary is put in the way of building it.
   | ResolveCore Operand
     -- ^ **turn a @core@ region into a term, here** (MS5 phase 61b).

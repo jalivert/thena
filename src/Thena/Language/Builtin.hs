@@ -311,7 +311,7 @@ coreRules gs = concat
       ]
 
     -- **Always annotated**: a binder with no type is a parse error here rather
-    -- than a hole (@PLAN-representation.md@ §2.6). One head, no singular beside
+    -- than a hole (@.claude\/spec\/interface.md@ §2.6). One head, no singular beside
     -- the plural — see 'runOf'.
     binders = runOf bindersH [ [lit "(", nt nameH, lit ":", nt c, lit ")"] ]
 

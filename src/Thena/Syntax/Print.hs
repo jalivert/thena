@@ -1,7 +1,7 @@
 -- | The as-written trees, printed back as text (MS7 phase 112c).
 --
 -- **The inverse of "Thena.Syntax.Parser", and it sits beside it for that
--- reason.** `PLAN-interface.md` §2.5 said rendering *"lives in "Thena.Repl" for
+-- reason.** `.claude/spec/interface.md` §2.5 said rendering *"lives in "Thena.Repl" for
 -- now"*, and this is the half of it that stops being provisional: printing a
 -- tree the way it was written is not a frontend's concern, it is the other
 -- direction of reading one, and the storage format needs it as much as the

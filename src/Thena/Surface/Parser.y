@@ -3,7 +3,7 @@
 --
 -- **A second grammar, over the same lexer.** "Thena.Syntax.Lexer" is shared —
 -- the identifier rule, the reserved set and the unicode spellings are decided
--- once for the whole project (@PLAN-interface.md@ §2.6) and must not fork, and
+-- once for the whole project (@.claude\/spec\/interface.md@ §2.6) and must not fork, and
 -- phase 40's layout is a pass over that one token stream. The /grammars/ are
 -- separate because the two languages disagree about the same syntax: a
 -- development-calculus lambda must annotate its binder and a surface one need
@@ -332,7 +332,7 @@ Arg :: { SurfaceArg }
 Atom :: { Surface }
   : ident                                  { name $1 }
   -- **@?foo@ is two tokens, not one.** @?@ cannot start an identifier —
-  -- @PLAN-interface.md@ §2.6's @$idstart@ is a letter, @_@, or a character
+  -- @.claude\/spec\/interface.md@ §2.6's @$idstart@ is a letter, @_@, or a character
   -- above ASCII — so the lexer hands over @TQuery@ and then the name. Writing
   -- it as a grammar rule rather than a lexer one keeps @?@ available inside a
   -- name, where it already is.
@@ -442,7 +442,7 @@ parseError ts = Left $ case ts of
 -- | @_@ is a placeholder and @?foo@ is a named hole; everything else is a name.
 --
 -- **Neither is a lexer rule**, and that is deliberate. @_@ and @?@ are both
--- legal inside an identifier (@PLAN-interface.md@ §2.6 reserves neither), so
+-- legal inside an identifier (@.claude\/spec\/interface.md@ §2.6 reserves neither), so
 -- the lexer hands over @TIdent "_"@ and @TIdent "?foo"@ and the /surface/
 -- grammar decides they mean something here. Making them tokens would take
 -- @_@ and a leading @?@ away from names in the development calculus too, for
@@ -462,7 +462,7 @@ name x = case x of
 --
 -- **Documented, not enforced.** @SurfaceApp (SurfaceApp …) …@ is still a
 -- constructible value; nothing the parser produces is one, and no type stops a
--- hand-written test from building one (@PLAN-representation.md@ §3.4's line).
+-- hand-written test from building one (@.claude\/spec\/representation.md@ §3.4's line).
 -- | Flatten a spine as it is parsed, so that @f a b@ and @(f a) b@ are the same
 -- tree and a 'SurfaceApp' never has a 'SurfaceApp' for a head.
 --
