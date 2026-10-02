@@ -1,5 +1,9 @@
--- | Conversion (§5.2): whnf-driven, η for functions, no η for datatypes, no
--- cumulativity — and the structured reason when it says no.
+-- | Conversion (§5.2): whnf-driven, η for functions, no η for datatypes — and
+-- the structured reason when it says no.
+--
+-- **'Thena.Core.Convert.convert' has no cumulativity, and the system does**: it
+-- is 'Thena.Core.Convert.subsumes', the same module's second relation. Every
+-- refusal below is @convert@'s, so none of them says anything about the system.
 module Thena.Core.ConvertTests (tests) where
 
 import Data.Maybe (isNothing)
@@ -26,7 +30,7 @@ tests =
     [ testGroup "syntactic and computational" basicTests
     , testGroup "eta for functions" etaTests
     , testGroup "eta meets an under-applied former wrapper" wrapperEtaTests
-    , testGroup "no eta for datatypes, no cumulativity" refusalTests
+    , testGroup "no eta for datatypes, and convert is not cumulative" refusalTests
     , testGroup "the reason says where" siteTests
     , testGroup "the counter comes back, and only ever goes up" counterTests
     , testGroup "an undecided level is owed, not refused" obligationTests
@@ -216,9 +220,11 @@ refusalTests =
       -- Were there eta for a single-constructor type this would have to
       -- succeed. §5.2 says there is not, and this pins it.
       (convertIn [("v", "Vec Nat zero")] "v" "nil Nat" == Nothing) @?= False
-  , testCase "no cumulativity: Type0 does not meet Type1" $
+    -- **@convert@, not the system.** @subsumes@ accepts the first of these;
+    -- @convert@ is an equality and accepts neither, which is what is pinned.
+  , testCase "convert is not cumulative: Type0 does not meet Type1" $
       no [] "Type\8320" "Type\8321"
-  , testCase "no cumulativity: it does not hold in the other direction either" $
+  , testCase "convert is not cumulative: nor in the other direction" $
       no [] "Type\8321" "Type\8320"
   ]
 

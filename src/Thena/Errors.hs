@@ -259,7 +259,9 @@ data FailReason
     -- not a unifier\'s. @raise@ is one of table 2.8\'s ops and is deliberately
     -- not in MS1\'s vocabulary yet (§7.2)
   | UniverseMismatch Level Level
-    -- ^ two universes, and no cumulativity to relate them (§5.2)
+    -- ^ two universes that cumulativity does not relate (§5.2) — either they
+    -- were compared at 'Thena.Core.Convert.Same', where subsumption does not
+    -- apply at all, or at 'Thena.Core.Convert.Cumulative' the wrong way round
     -- The life of a hole (tables 2.7, 2.8), phase 13.
   | NotAHole
     -- ^ @attack@ or @try@ where the focus is not a @?x : S@

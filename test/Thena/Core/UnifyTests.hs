@@ -426,7 +426,9 @@ failureTests =
       failsWith [] "zero" "succ zero" "Nat" "Mismatch"
   , testCase "the occurs check fires on a cyclic solution" $
       failsWith [Hole "h" "Nat"] "h" "succ h" "Nat" "OccursCheck"
-  , testCase "two universes, with no cumulativity to relate them" $
+    -- @unify@ is @related Same@, so subsumption does not apply here at all;
+    -- @unifyInto@ accepts this pair in one direction.
+  , testCase "two universes, and unify is not where cumulativity applies" $
       failsWith [] "Type\8320" "Type\8321" "Type\8322" "UniverseMismatch"
   , testCase "a solution naming a RIGID variable bound after the hole fails" $
       -- Nothing will ever change @a@'s position, so this is a real

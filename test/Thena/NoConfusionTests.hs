@@ -90,10 +90,10 @@ taplReduces = reduces eqTapl eqTaplCounter
 -- no shape assertion would distinguish more clearly than the text does.
 --
 -- **This is §3.7's own table, verbatim** — @Unit@, @Empty@, the bare equation,
--- and a right-nested @And@ of them. Phase 14 could not have it: with no
--- cumulativity (§5.2) a @Type₀@ case cannot sit in a family whose
--- multi-argument case is @(C : Type₀) -> … -> C@, which is at @Type₁@, so every
--- case was CPS and the family was at @Type₁@. Phase 20 put the products in the
+-- and a right-nested @And@ of them. Phase 14 could not have it: **there was no
+-- cumulativity then** (it arrived at MS3 phase 32), so a @Type₀@ case could not
+-- sit in a family whose multi-argument case is @(C : Type₀) -> … -> C@, which is
+-- at @Type₁@ — every case was CPS and the family was at @Type₁@. Phase 20 put the products in the
 -- prelude and the level came down with them.
 caseTests :: [TestTree]
 caseTests =

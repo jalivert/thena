@@ -27,8 +27,9 @@
 -- @Type₀@ as its result. That cannot be typed. The multi-argument case is
 -- written CPS because MS1 has no product type, and @(C : Type₀) -> … -> C@
 -- lives in @Type₁@ — 'Thena.Core.Typing.infer' gives a Π the @max@ of its two
--- levels, and the domain @Type₀@ is at level 1. With no cumulativity (§5.2) a
--- @Type₀@ case cannot sit beside a @Type₁@ one in a single family.
+-- levels, and the domain @Type₀@ is at level 1. **At the time there was no
+-- cumulativity** — it arrived at MS3 phase 32 — so a @Type₀@ case could not sit
+-- beside a @Type₁@ one in a single family.
 --
 -- So **every case is CPS and the family lands in @Type₁@** — decided by the
 -- user 2026-08-22. Only the level in §3.7 was wrong; the decision to encode the
@@ -48,9 +49,9 @@
 -- A constructor with several arguments conjoins one equation per argument,
 -- right-nested: @both@'s @And (Eq A a a') (Eq B b b')@. **Phase 20 replaced a
 -- continuation-passing encoding of that conjunction**, which phase 14 had been
--- forced into because @(C : Type₀) -> …@ is at @Type₁@ and no cumulativity
--- lets a @Type₀@ case sit beside it. With the products in the prelude the
--- table above is the one §3.7 always displayed, at @Type₀@.
+-- forced into because @(C : Type₀) -> …@ is at @Type₁@ and there was then no
+-- cumulativity to let a @Type₀@ case sit beside it. With the products in the
+-- prelude the table above is the one §3.7 always displayed, at @Type₀@.
 --
 -- The prelude names this module needs are therefore @Eq@ and @refl@, and
 -- @And@, @both@, @Unit@, @unit@ and @Empty@.

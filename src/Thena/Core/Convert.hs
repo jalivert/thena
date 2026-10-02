@@ -1,10 +1,15 @@
 -- | Conversion: judgemental equality of core terms (§5.2).
 --
--- whnf-driven, with **η for functions and no η for datatypes**, and **no
--- cumulativity** — all three are stated deviations with reasons in §5.2, not
--- omissions to be tidied up later. Conversion is symmetric: there is no left
--- and no right, and 'convert' may be called with its arguments either way
--- round.
+-- whnf-driven, with **η for functions and no η for datatypes** — both stated
+-- deviations with reasons in §5.2, not omissions to be tidied up later.
+-- Conversion is symmetric: there is no left and no right, and 'convert' may be
+-- called with its arguments either way round.
+--
+-- **Cumulativity is in this module, as 'subsumes', and it is a second relation
+-- rather than a mode of 'convert'** (MS3 phase 32). 'convert' is an equality and
+-- has no direction; subsumption has one. So "no cumulativity" is true of
+-- 'convert' alone and false of the system — this header asserted the latter until
+-- 2026-10-02, and §5.2 agreed with it, which is why neither looked wrong.
 --
 -- Below "Thena.Core.Typing" and above "Thena.Core.Reduce" in the layering
 -- (§2.5). It knows nothing of the development, the cursor or constraints — a
