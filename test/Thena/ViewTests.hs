@@ -32,7 +32,8 @@ import Thena.Driver
   , oneLine
   , withRuleBases
   )
-import Thena.Render (renderCursor)
+import Thena.Render ( Rendering (..)
+  ,renderCursor)
 import Thena.Repl (Turn (..), turn)
 import Thena.Standard (expectedBase)
 import Thena.View
@@ -99,7 +100,7 @@ chainCase :: (String, Session) -> TestTree
 chainCase (name, s) =
   testCase name $
     markedChainText (developmentView (Budget 200) s)
-      @?= renderCursor (sessionGrammars s) (sessionNames s) (sessionCursor s)
+      @?= renderCursor (Rendering (sessionGrammars s) (sessionNames s)) (sessionCursor s)
 
 -- ---------------------------------------------------------------------------
 -- Binder addresses

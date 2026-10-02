@@ -42,8 +42,9 @@ import Thena.Instral.Type (Signature (..), Ty (..), renderTy)
 import qualified Thena.Language.Earley as E
 import Thena.Instral.Commands (Argument (..), Command (..), commands)
 import Thena.Language.Build (languageNames, productionNames)
-import Thena.Language.Grammar (Grammar, earleyRules)
-import Thena.Language.Regex (Regex, parseRegex)
+import qualified Thena.Language.Builtin as Builtin
+import Thena.Language.Grammar (Grammar, earleyRules, productionBody)
+import Thena.Language.Lexemes (charRegex, identRegex, numberRegex, stringRegex)
 import Thena.Rules (RuleBase (..), allCallable, opWords)
 
 -- | The nonterminal a whole statement parses at.
@@ -104,6 +105,11 @@ instralRules :: [Grammar] -> [RuleBase] -> [E.Rule]
 instralRules gs bs =
   statements fs ++ operandProductions fs types ++ earleyRules gs
     ++ literalProductions gs types
+    -- **Thena's own two languages, on the same footing as an object language**
+    -- (MS7 phase 147). They are here rather than beside the chart because this
+    -- is the rule set a REPL line is read with, and because the @do@ block below
+    -- needs a statement head to point at — which only this module has.
+    ++ Builtin.surfaceRules gs ++ Builtin.coreRules gs ++ surfaceBlock
   where
     -- **The table and the types in play are worked out once.** Three of the four
     -- producers below need them, and each computing its own was a second place
@@ -111,6 +117,24 @@ instralRules gs bs =
     -- and drifts later.
     fs    = forms bs
     types = shapes (concatMap formParams fs)
+
+    -- **A surface @do@ block is `instral` written in place**
+    -- (@discussion\/the-five-languages.md@ §0b, table F), so the block's own
+    -- productions are the statement ones and there is no second answer to /what
+    -- is a block/. Contributed from here for the dependency's sake:
+    -- "Thena.Language.Builtin" may not import this module, and the statement
+    -- head is this module's.
+    surfaceBlock =
+      [ E.Rule "surface atom do" Builtin.surfaceAtomHead
+          [E.Literal "do", E.Literal "{", E.Nonterminal blockHead, E.Literal "}"] []
+      , E.Rule "instral block one" blockHead [E.Nonterminal statementHead] []
+      , E.Rule "instral block more" blockHead
+          [E.Nonterminal blockHead, E.Literal ";", E.Nonterminal statementHead] []
+      ]
+
+    -- **A phrase, like the heads "Thena.Language.Builtin" uses**, and not
+    -- @instral:Statement/block@: phase 148 dropped that convention.
+    blockHead = "instral block"
 
 -- | One statement form: the word that opens it, the type of each slot, and the
 -- type it produces if it produces one.
@@ -287,10 +311,42 @@ literalProductions gs types =
   [ rule t l | t <- coreish, l <- languageNames gs ]
     ++ [ atRule t l p
        | t <- coreish, l <- languageNames gs, p <- productionNames gs l ]
+    ++ builtIn
   where
     coreish = [ t | t <- types, t == TCore || isVariable t ]
 
     isVariable t = case t of { TVar _ -> True; _ -> False }
+
+    -- **Thena's own two tags, at the slots they resolve to** (MS7 phase 147).
+    -- @Thena.Rules@ gives a @surface@ region a @VSurface@ and a @core@ one a
+    -- @VRaw@, so the first stands at a @Surface@ slot and the second at a @Core@
+    -- one — and neither at the other, which is the narrowing that makes
+    -- @elaborate@'s slot say something true. **Corners are the other spelling of
+    -- a @core@ region** (@AGENDA.md@ 56), so they stand wherever it does.
+    builtIn =
+      -- **Both alternatives of what a surface region holds** (MS7 phase 148):
+      -- ascription is allowed at the top of a region and is not a production of
+      -- the term, because it does not nest. 'Builtin.surfaceContents' is where
+      -- that fact lives.
+      [ fenced t ("`surface " ++ show k) "surface`" body "`"
+      | t <- types, t == TSurface || isVariable t
+      , (k, body) <- zip [0 :: Int ..] Builtin.surfaceContents
+      ] ++
+      [ tagRule t "core" Builtin.coreHead | t <- coreish ]
+
+    -- **Corners are not offered, and the phase's own test is why** (@AGENDA.md@
+    -- 56). @⌜ t ⌝@ is an operand in @Thena.Syntax.Parser@ and **is not one in
+    -- @Thena.Surface.Parser@** — the two instral grammars differ in exactly this
+    -- place — so offering them put @do { prim-try ⌜ x ⌝ }@ in reach of a surface
+    -- @do@ block, which Happy refuses. @neverWiderSurface@ caught it. @core\`t\`@
+    -- is the spelling both grammars accept and says the same thing, which is
+    -- item 56's own conclusion, so nothing a user needs is lost by leaving the
+    -- narrower spelling out.
+    tagRule t tag h = fenced t ("`" ++ tag) (tag ++ "`") [E.Nonterminal h] "`"
+
+    fenced t nm open body close =
+      E.Rule (renderTy t ++ "/" ++ nm) (operandHead t)
+        (E.Literal open : body ++ [E.Literal close]) []
 
     -- @LC\`…\`@ — a term of the language.
     rule t l =
@@ -307,20 +363,8 @@ literalProductions gs types =
     -- first symbols, which is what the user is being asked for.
     atRule t l p =
       E.Rule (renderTy t ++ "/`" ++ l ++ "[" ++ p ++ "]") (operandHead t)
-        ( E.Literal (l ++ "[" ++ p ++ "]`") : bodyOf p ++ [E.Literal "`"] ) []
+        ( E.Literal (l ++ "[" ++ p ++ "]`") : productionBody gs p ++ [E.Literal "`"] ) []
 
-    -- **The search is across every loaded grammar, and that is safe because a
-    -- production name is unique across all of them.** Each production becomes a
-    -- datatype constructor, and a second language declaring one of the same name is
-    -- refused when it loads — @A's constructor same is already declared@. Checked
-    -- by loading such a pair, not assumed; @productionNamesAreUnique@ in
-    -- "Thena.View.StatementTests" pins it, because if that ever relaxed this
-    -- lookup would quietly hand one language another's production.
-    bodyOf p = case [ E.ruleBody r | r <- earleyRules gs, E.ruleName r == p ] of
-      b : _ -> b
-      -- **Cannot arise** — the production came from 'productionNames' of a grammar
-      -- in this very list. Answered rather than crashed, because this is a view.
-      []    -> []
 
 -- | **The @:@-command productions, as a rule set of their own** (MS7 phase 142).
 --
@@ -333,7 +377,13 @@ literalProductions gs types =
 -- session: worth having and not dramatic. The reason to split is that the union is
 -- needless, not that it was slow.
 commandRules :: [Grammar] -> [E.Rule]
-commandRules = commandProductions
+commandRules gs =
+  commandProductions gs
+    -- **The grammars the command productions now point into** (MS7 phase 147).
+    -- Before it, every command argument was either a literal or the opaque
+    -- nonterminal, so this set needed no productions but its own; @:parse LC @,
+    -- @:core @ and @:infer @ reach a real grammar now.
+    ++ earleyRules gs ++ Builtin.surfaceRules gs ++ Builtin.coreRules gs
 
 -- | One production per shape of every @:@-command, derived from
 -- 'Thena.Instral.Commands.commands'.
@@ -366,6 +416,16 @@ commandProductions gs =
       -- **Whatever is loaded**, so @:parse @ names the languages that are actually
       -- there and nothing has to be kept in step.
       ALanguage -> [ [E.Literal l] | l <- languageNames gs ]
+      -- **The name and the term together**, because the second depends on the
+      -- first and 'expand' is a product over independent arguments (MS7 phase
+      -- 147). @:parse LC @ then offers @LC@'s own productions and nothing else's.
+      ALanguageTerm -> [ [E.Literal l, E.Nonterminal l] | l <- languageNames gs ]
+      -- **Thena's own two languages are describable now** (MS7 phase 147), so a
+      -- term argument is a nonterminal with productions rather than the opaque
+      -- one below.
+      -- Both alternatives, for 'Builtin.surfaceContents'' reason.
+      ASurfaceTerm -> Builtin.surfaceContents
+      ACoreTerm    -> [ [E.Nonterminal Builtin.coreHead] ]
       -- The one nonterminal an offer may report from this module, and the one a
       -- frontend is meant to see: see 'opaqueHead'.
       Opaque    -> [ [E.Nonterminal opaqueHead] ]
@@ -390,25 +450,3 @@ shapes = go []
       TPair a b -> [a, b]
       _         -> []
 
--- The token classes. Written here rather than taken from a grammar file because
--- these are Thena's own lexemes and no object language declares them.
-
-identRegex :: Regex
-identRegex = regex "[a-zA-Z_][a-zA-Z0-9_'-]*"
-
-numberRegex :: Regex
-numberRegex = regex "-?[0-9]+"
-
-stringRegex :: Regex
-stringRegex = regex "\"[^\"]*\""
-
-charRegex :: Regex
-charRegex = regex "'[^']'"
-
--- | **Total by construction**: the four expressions above are constants of this
--- module and are parsed at every call, so a typo fails every test rather than
--- waiting for a rare input.
-regex :: String -> Regex
-regex src = case parseRegex src of
-  Right r -> r
-  Left _  -> error ("Thena.Language.Instral: bad built-in regex " ++ show src)

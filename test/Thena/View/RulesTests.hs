@@ -38,7 +38,8 @@ import Thena.View.Instral
 import Thena.View.Redraw (redraw, redrawSurface)
 import Thena.View.Rules (RuleView (..), TestView (..), displayRule)
 import Thena.Files (startingSession)
-import Thena.Render (renderInstr, renderMatches, renderOperand)
+import Thena.Render ( Rendering (..)
+  ,renderInstr, renderMatches, renderOperand)
 import Thena.Rules (RuleBase (..), allRules, testOperands, testWord)
 
 tests :: TestTree
@@ -124,10 +125,10 @@ mismatch r
       [line] -> line
       other  -> "wrong count: " <> show (length other)
     drawnLine = unwords (ruleViewName rv : ruleViewParams rv)
-    shownBody = map (renderInstr [] 500 []) (ruleBody r)
+    shownBody = map (renderInstr (Rendering [] 500) []) (ruleBody r)
     drawnBody = map redrawStatement (ruleViewBody rv)
     shownHead =
-      [ testWord t <> concatMap ((" " <>) . renderOperand [] 500 []) (testOperands t)
+      [ testWord t <> concatMap ((" " <>) . renderOperand (Rendering [] 500) []) (testOperands t)
       | t <- ruleHead r
       ]
     drawnHead = map redrawTest (ruleViewHead rv)

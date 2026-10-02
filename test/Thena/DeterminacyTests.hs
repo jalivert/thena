@@ -42,7 +42,8 @@ import Thena.Driver
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Files (loadFile, loadProofFile, startingSession)
-import Thena.Render (renderCore, renderTrouble, renderResponse)
+import Thena.Render ( Rendering (..)
+  ,renderCore, renderTrouble, renderResponse)
 
 -- | Relative to the package root, which is where the suite runs — the same
 -- assumption @test\/golden@ already makes.
@@ -89,7 +90,7 @@ tests =
     ]
   where
     statementOf s' =
-      renderCore [] (names (machineOf s')) [] . definitionType
+      renderCore (Rendering [] (names (machineOf s'))) [] . definitionType
         <$> lookupDefinition (GlobalName "determinacy") (globals (machineOf s'))
 
     theorem = "∀ (t : Term) (t1 : Term) -> Step t t1 \

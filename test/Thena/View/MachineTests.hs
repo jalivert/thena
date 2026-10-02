@@ -39,7 +39,8 @@ import Thena.View.Instral
 import Thena.View.Machine (FrameView (..), MachineView (..), displayMachine)
 import Thena.View.Redraw (redraw, redrawSurface)
 import Thena.Files (startingSession)
-import Thena.Render (renderMachine)
+import Thena.Render ( Rendering (..)
+  ,renderMachine)
 
 tests :: TestTree
 tests =
@@ -84,7 +85,7 @@ mismatchMachine gs m
   | shown == drawn = pure ()
   | otherwise = assertFailure ("printed:\n" ++ unlines shown ++ "drawn:\n" ++ unlines drawn)
   where
-    shown = renderMachine gs 500 [] m
+    shown = renderMachine (Rendering gs 500) [] m
     drawn = redrawMachine (displayMachine gs (Budget 200) [] [] 500 (Address []) m)
 
 -- ---------------------------------------------------------------------------

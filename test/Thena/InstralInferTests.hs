@@ -34,7 +34,8 @@ import Thena.Errors (SyntaxError (..))
 import Thena.Syntax.Parser (ParseError (..))
 import Thena.Rules (RuleBase (..), RuleError (..), writtenPositions)
 import Data.List (isInfixOf, sort)
-import Thena.Render (renderCursor, renderRuleError)
+import Thena.Render ( Rendering (..)
+  ,renderCursor, renderRuleError)
 import Thena.Repl (transcriptFrom)
 import Thena.Standard (expectedBase, expectedStandard, standardBases)
 
@@ -934,7 +935,7 @@ spliceTemplates =
       let s1 = fst (command s0 ":theorem t : Type")
           s2 = fst (command s1 "go")
       case snd (command s2 ":show") of
-        Shown c -> pure (renderCursor [] (names (machineOf s2)) c)
+        Shown c -> pure (renderCursor (Rendering [] (names (machineOf s2))) c)
         other   -> assertFailure ("the test rule built nothing: " ++ show other) >> pure ""
 
     loadRaw src = snd (loadRuleBases newSession [("s.thena.rules", src)])

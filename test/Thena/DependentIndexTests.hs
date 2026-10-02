@@ -24,7 +24,8 @@ import Thena.Driver
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Files (loadFile, startingSession)
-import Thena.Render (renderCore)
+import Thena.Render ( Rendering (..)
+  ,renderCore)
 
 -- | Relative to the package root, which is where the suite runs.
 target :: FilePath
@@ -45,6 +46,6 @@ tests =
         case lookupDefinition (GlobalName "belowRefl") (globals (machineOf s')) of
           Nothing -> assertFailure "belowRefl was not admitted"
           Just d  ->
-            renderCore [] (names (machineOf s')) [] (definitionType d)
+            renderCore (Rendering [] (names (machineOf s'))) [] (definitionType d)
               @?= "∀ (n : Nat) (i : Fin n) -> Below n i -> Eq {0} (Fin n) i i"
     ]

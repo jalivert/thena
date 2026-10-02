@@ -42,7 +42,8 @@ import Thena.Errors (ElimError (..))
 import Thena.Global.Env (GlobalEnv)
 import Thena.Driver (Response (..), command, loadProofSource)
 import Thena.Files (startingSession)
-import Thena.Render (renderCore, renderResponse)
+import Thena.Render ( Rendering (..)
+  ,renderCore, renderResponse)
 import Thena.Tactics.Eliminate (Elimination (..), eliminate)
 
 tests :: TestTree
@@ -547,7 +548,7 @@ withMethods ctx el =
 
 -- | One line, so that an exact-string case reads as one line.
 rendered :: Context -> Core -> String
-rendered ctx = unwords . words . renderCore [] 0 ctx
+rendered ctx = unwords . words . renderCore (Rendering [] 0) ctx
 
 
 -- --------------------------------------------------------------------------

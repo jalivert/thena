@@ -15,6 +15,7 @@ import qualified Thena.View.AddressTests
 import qualified Thena.View.ChartTests
 import qualified Thena.View.DevelopmentTests
 import qualified Thena.View.CoreTests
+import qualified Thena.Language.BuiltinTests
 import qualified Thena.View.InstralTests
 import qualified Thena.View.MachineTests
 import qualified Thena.View.RulesTests
@@ -83,6 +84,7 @@ main =
       , Thena.View.ChartTests.tests
       , Thena.View.DevelopmentTests.tests
       , Thena.View.CoreTests.tests
+      , Thena.Language.BuiltinTests.tests
       , Thena.View.InstralTests.tests
       , Thena.View.MachineTests.tests
       , Thena.View.RulesTests.tests

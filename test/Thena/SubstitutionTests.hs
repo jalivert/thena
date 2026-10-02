@@ -32,6 +32,7 @@ import Thena.Driver
   , machineOf
   , loadProofSource
   )
+import Thena.Errors (Warning (..))
 import Thena.Engine (Machine (globals))
 import Thena.Global.Env
   ( ArgRole (..)
@@ -44,7 +45,8 @@ import Thena.Global.Env
   , lookupInductive
   )
 import Thena.Files (startingSession)
-import Thena.Render (renderCore, renderResponse)
+import Thena.Render ( Rendering (..)
+  ,renderCore, renderResponse)
 
 tests :: TestTree
 tests =
@@ -56,7 +58,79 @@ tests =
       , testGroup "against the nameless oracle" (crossing io)
       , testGroup "what can and cannot be generated" refused
       , testGroup "a proof can follow the decision (phase 109a)" followed
+      , testGroup "a class that refuses a prime (MS6 closeout 23)" primed
       ]
+
+-- ---------------------------------------------------------------------------
+-- The priming character (MS6 closeout 23, phase 146)
+
+-- | A language whose identifier class refuses @'@ — the case the closeout item
+-- is about. @L-fresh@ used to append @'@ unconditionally, so a binder renamed to
+-- avoid capture became a name the notation could not write: it printed inside a
+-- splice, and an object grammar has no splice production, so the printed term
+-- could not be read back at all.
+--
+-- **The two definitions at the end are the assertions, and the load is what runs
+-- them.** Conversion reduces @PL-fresh@ fully, so @mintsALetter@ type-checks only
+-- if the generated code appends a character @\/[a-z]+\/@ accepts; and
+-- @readsBack@ type-checks only if the notation can write that name, which is the
+-- half that was lost.
+primedSource :: String
+primedSource =
+  unlines
+    [ "module Primed where"
+    , ""
+    , "n : Token String"
+    , "n = /[a-z]+/"
+    , ""
+    , "language PL, M, N, E where"
+    , "  pvar : n as occurrence -> n"
+    , "  pabs : n as binder     -> ( lam n . E[n] )"
+    , "  papp                   -> ( M N )"
+    , ""
+    , "mintsALetter : Eq String (PL-fresh \"y\" (cons String \"y\" (nil String))) \"ya\""
+    , "mintsALetter = refl String \"ya\""
+    , ""
+    , "readsBack : Eq PL (pabs \"ya\" (pvar \"y\")) PL`( lam ya . y )`"
+    , "readsBack = refl PL PL`( lam ya . y )`"
+    ]
+
+-- | A class no single character extends: nothing may follow @a1@. The generated
+-- code keeps @'@ and says so, rather than refusing the language.
+unprimeableSource :: String
+unprimeableSource =
+  unlines
+    [ "module Unprimeable where"
+    , ""
+    , "f : Token String"
+    , "f = /[a-z][0-9]/"
+    , ""
+    , "language K, P, Q, R where"
+    , "  kvar : f as occurrence -> f"
+    , "  kabs : f as binder     -> ( lam f . R[f] )"
+    ]
+
+primed :: [TestTree]
+primed =
+  [ testCase "the generated fresh mints a name the class accepts, and it reads back" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 primedSource of
+        (_, ProofLoaded {}) -> pure ()
+        (s1, other) -> assertFailure (unlines (renderResponse s1 other))
+  , -- **A warning, not a refusal** — his second principle. The language works and
+    -- its substitution is correct; only printing a renamed binder is lost.
+    testCase "a class no character extends warns rather than being refused" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 unprimeableSource of
+        (_, ProofLoaded _ _ _ ws)
+          | any isUnprimeable ws -> pure ()
+          | otherwise -> assertFailure ("loaded, but did not warn: " ++ show ws)
+        (s1, other) -> assertFailure (unlines (renderResponse s1 other))
+  ]
+  where
+    isUnprimeable w = case w of
+      UnprimeableClass _ _ _ -> True
+      _ -> False
 
 -- ---------------------------------------------------------------------------
 -- The fixture
@@ -253,7 +327,7 @@ declared io =
       env <- io
       case lookupDefinition (GlobalName f) env of
         Nothing -> assertFailure (f ++ " was not declared")
-        Just d -> (unlevelled (renderCore [] 0 [] (definitionType d)), length (definitionLevels d))
+        Just d -> (unlevelled (renderCore (Rendering [] 0) [] (definitionType d)), length (definitionLevels d))
                     @?= (ty, levels)
   -- **A level parameter for every level nothing fixes**: List and And are
   -- polymorphic and a list of names is a list at any level, so the functions

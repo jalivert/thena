@@ -43,6 +43,8 @@ library
         Thena.Global.NoConfusion
         Thena.Kernel
         Thena.Language.Regex
+        Thena.Language.Lexemes
+        Thena.Language.Builtin
         Thena.Language.Reader
         Thena.Language.Grammar
         Thena.Language.Instral
@@ -246,6 +248,7 @@ test-suite thena-test
         Thena.View.ChartTests
         Thena.View.DevelopmentTests
         Thena.View.CoreTests
+        Thena.Language.BuiltinTests
         Thena.View.InstralTests
         Thena.View.MachineTests
         Thena.View.Redraw

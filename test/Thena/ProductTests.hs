@@ -24,7 +24,8 @@ import Thena.Driver
 import Thena.Engine (Machine (..))
 import Thena.Global.Env (Definition (..), lookupDefinition)
 import Thena.Files (loadFile, startingSession)
-import Thena.Render (renderCore, renderTrouble, renderResponse)
+import Thena.Render ( Rendering (..)
+  ,renderCore, renderTrouble, renderResponse)
 
 target :: FilePath
 target = "examples/products.thena.script"
@@ -64,7 +65,7 @@ tests =
       (s, _) <- startingSession
       case lookupDefinition (GlobalName g) (globals (machineOf s)) of
         Nothing -> assertFailure (g ++ " is not in the prelude")
-        Just d  -> renderCore [] (names (machineOf s)) [] (definitionType d) @?= ty
+        Just d  -> renderCore (Rendering [] (names (machineOf s))) [] (definitionType d) @?= ty
 
     declares g want =
       testCase (g ++ (if want then " is generated" else " is not")) $ do

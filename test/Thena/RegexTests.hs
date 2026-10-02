@@ -19,6 +19,7 @@
 module Thena.RegexTests (tests) where
 
 import Data.List (nub, sort, (\\))
+import Control.Monad (replicateM)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Test.Tasty.QuickCheck
@@ -47,7 +48,52 @@ tests =
     , testGroup "matching gives every length" matching
     , testGroup "the typing check of §3.2" typing
     , testGroup "crossed with a backtracking matcher" crossed
+    , testGroup "the priming character (phase 146)" priming
     ]
+
+-- ---------------------------------------------------------------------------
+-- The priming character
+
+-- | 'primingChar' must return a character that extends **every** string the
+-- class accepts — that is the property a generated @L-fresh@ relies on, and the
+-- reason MS6 closeout 23's renamed binders were unprintable was that @'@ was
+-- assumed to be one.
+priming :: [TestTree]
+priming =
+  [ testCase "a class of letters is closed under a letter, and not under a prime" $
+      fmap primingChar (parseRegex "[a-z]+") @?= Right (Just 'a')
+  , -- **STLC's class, and it keeps the prime it has always used** — because @'@
+    -- sorts below the letters and the least working candidate wins, not because
+    -- @'@ is asked about first. Nothing in 'primingChar' knows about primes.
+    testCase "a class that accepts a prime keeps the prime" $
+      fmap primingChar (parseRegex "[a-z][a-zA-Z0-9']*") @?= Right (Just '\'')
+  , -- **A fixed-length class admits none, and saying so is the point.** Nothing
+    -- can be appended to @a1@ and still match, so no priming scheme of this shape
+    -- exists; the generator keeps @'@ and 'Thena.Language.Grammar.checkGrammar'
+    -- warns.
+    testCase "a fixed-length class admits no priming character" $
+      fmap primingChar (parseRegex "[a-z][0-9]") @?= Right Nothing
+  , -- A class accepting exactly one string admits none for the same reason, and
+    -- it is the smallest case: nothing may follow @a@.
+    testCase "and a class of one fixed string admits none either" $
+      fmap primingChar (parseRegex "a") @?= Right Nothing
+  , -- **Crossed against the matcher rather than trusted.** For every expression
+    -- the generator produces, every string this finds accepted must still be
+    -- accepted with the character appended. The search is bounded and over a
+    -- fixed alphabet, so it is one-sided: it can miss an accepted string, and
+    -- anything it does find is a real check.
+    testProperty "the character it picks extends every accepted string it can find" $
+      withNumTests 2000 $ forAll genRegex $ \r -> case primingChar r of
+        Nothing -> True
+        Just c  -> all (\s -> accepted r (s ++ [c])) (filter (accepted r) shortStrings)
+  ]
+  where
+    accepted r s = length s `elem` matches r s
+    shortStrings = concat [ replicateM n sampled | n <- [0 .. 3 :: Int] ]
+    -- A fixed sample rather than the expression's own intervals, which is what
+    -- makes the property one-sided — see its comment.
+    sampled = "abz09'_-"
+
 
 -- ---------------------------------------------------------------------------
 -- Unit cases

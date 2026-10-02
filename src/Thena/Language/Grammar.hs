@@ -34,18 +34,20 @@ module Thena.Language.Grammar
   , extensionOf
   , isName
   , variableProduction
+  , variableClass
   , tokenClassOf
   , earleyRules
+  , productionBody
   ) where
 
 import Data.List (nub, (\\))
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, listToMaybe)
 
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), tokenName)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Earley (placeholderChar)
-import Thena.Language.Regex (Regex, matches, parseRegex)
+import Thena.Language.Regex (Regex, matches, parseRegex, primingChar)
 import Thena.Errors (BuildError, SyntaxError, Warning (..))
 import Thena.Global.Env (ArgRole (..), GlobalEnv, definitionBody, definitionType, isDeclared, lookupDefinition)
 import Thena.Language.Reader (Block (..), Metadata (..), Production (..), RawItem (..), RawRule (..))
@@ -239,10 +241,26 @@ checkGrammar installed env b = do
   case [ f | f <- substitutionNames g, taken f || f `elem` prodNames ] of
     f : _ -> refuse (FunctionTaken f)
     [] -> Right ()
-  Right (g, concatMap snd prods)
+  Right (g, concatMap snd prods ++ unprimeable g)
   where
     kind = blockKind b
     name = blockName b
+
+    -- **A language whose identifier class no character extends** (MS6 closeout
+    -- 23, phase 146). 'Thena.Language.Regex.primingChar' decides it on the
+    -- automaton; when it answers 'Nothing' the generated @L-fresh@ falls back to
+    -- @'@ and a renamed binder is a name the notation cannot write. Said here
+    -- because this is where an author finds out, and said rather than refused
+    -- because nothing is actually broken but the printing.
+    unprimeable gr =
+      [ UnprimeableClass kind name (nameOf cls)
+      | Just p <- [variableProduction gr]
+      , a <- gproductionArguments p
+      , argumentRole a == Occurrence
+      , OfClass cls _ re <- [argumentSort a]
+      , primingChar re == Nothing
+      ]
+    nameOf (GlobalName x) = x
     -- **A judgment's name is not a metavariable**: its header has none, and
     -- its notation's are the languages' (§6.1).
     heads
@@ -348,6 +366,27 @@ checkGrammar installed env b = do
 builtInTags :: [String]
 builtInTags = ["surface", "core"]
 
+-- | The body of a named production, as Earley symbols (MS7 phase 147, moved out
+-- of "Thena.Language.Instral" where phase 141 wrote it).
+--
+-- **The search is across every loaded grammar with no language filter, and that
+-- is safe because a production name is unique across all of them.** Each
+-- production becomes a datatype constructor, and a second language declaring one
+-- of the same name is refused when it loads — @A's constructor same is already
+-- declared@. Verified by loading such a pair rather than reasoned about;
+-- @productionNamesAreUnique@ pins it with a fixture, because if constructor
+-- uniqueness ever relaxed this lookup would quietly hand one language another's
+-- production.
+--
+-- **Empty for a name no grammar has**, which cannot arise from either caller —
+-- both take the name from 'Thena.Language.Build.productionNames' of a grammar in
+-- the very list they pass. Answered rather than crashed, because both callers are
+-- views.
+productionBody :: [Grammar] -> String -> [Earley.Symbol]
+productionBody gs p = case [ Earley.ruleBody r | r <- earleyRules gs, Earley.ruleName r == p ] of
+  b : _ -> b
+  []    -> []
+
 -- | Can substitution be generated for this language (§4.7, MS6 phase 105)?
 --
 -- A language with no binder and no occurrence has nothing to generate, and
@@ -399,6 +438,21 @@ variableProduction g
                          , any ((== Occurrence) . argumentRole) (gproductionArguments p) ] of
       p : _ -> Just p
       [] -> Nothing
+
+-- | **The regular expression of the language's identifier class** — the one its
+-- 'variableProduction' reads an occurrence at (§4.7 gives a language exactly
+-- one).
+--
+-- Added at phase 146 so that a generated @L-fresh@ can mint names the class
+-- accepts (MS6 closeout 23). 'Nothing' for a grammar with no variable
+-- production, or one whose occurrence is not at a class — neither generates
+-- substitution, so neither has an @L-fresh@ to name.
+variableClass :: Grammar -> Maybe Regex
+variableClass g = do
+  p <- variableProduction g
+  listToMaybe [ re | a <- gproductionArguments p
+                   , argumentRole a == Occurrence
+                   , OfClass _ _ re <- [argumentSort a] ]
 
 -- | A context's extension production — the one with a slot of the context's
 -- own sort (§5.1). 'Nothing' for anything that is not a context.

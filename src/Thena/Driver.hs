@@ -1179,8 +1179,18 @@ surfaceProgram n0 items = foldl item ([], n0) items
 -- @solved: ?ℓ229@ lines and a file of them buries its own output, which is the
 -- same bargain @loadPrelude@ has always made with a script.
 --
--- **Holes left over are not an error.** A module that does not finish leaves a
--- half-built development in the session, which is what the REPL is for.
+-- **Holes left over are not an error, and that is not the same as a module
+-- that fails** — the sentence here said /"a module that does not finish leaves
+-- a half-built development in the session"/ and conflated the two, which is
+-- what MS6 closeout 15 was about.
+--
+-- **The run's outcome decides everything, and it is the only thing that does.**
+-- A run that reaches @Completed@ is loaded whatever it left in the development,
+-- and the session keeps it — that is what the REPL is for, and it is the true
+-- half of the old sentence. A run that stops for any other reason **declares
+-- nothing at all**: 'loadProofItems' puts the session back as it was (his
+-- ruling, 2026-09-30, /"Atomic from now on"/).
+--
 -- **Brady's data rule** (@IDRIS.md@ §4.6): the datatype's own type is
 -- elaborated first /"so that the type is in scope when elaborating the
 -- constructor types"/, then each constructor the same way.
@@ -1314,7 +1324,37 @@ loadProofItems s nm items =
                              (length [ () | ItemBlock _ <- items ])
                              ws
             )
-          (s', other)           -> (s', other)
+          -- **A load that does not complete declares nothing** (MS6 closeout 15,
+          -- his ruling 2026-09-30: /"Atomic from now on."/). Before this, the
+          -- partial run's declarations stayed: a module whose third definition
+          -- failed left the first two in 'globals', @:undo@ could not take them
+          -- back (they are deliberately outside a 'Snapshot'), and loading the
+          -- corrected file then failed on the names that had landed — with
+          -- 'Thena.Global.Declare''s @ConstructorTargetWrong@ blaming the
+          -- constructor's target (@AGENDA.md@ 81). One typo cost the session.
+          --
+          -- **Everything goes back except the counter.** 'rolledBack' restores
+          -- the session as it stood and carries 'names' forward, which is the
+          -- same partition @:infer@'s unconditional rewind already uses: a
+          -- number the user has seen must never be reissued (MS2 closeout 4f),
+          -- and a failed load /does/ show them — it prints its @solved: ?ℓ933@
+          -- lines before it stops.
+          --
+          -- **This does not make 'globals' observably non-monotone**, which is
+          -- what §2.4's promise rests on — his question, and it is the reason
+          -- this is allowed. A load is one command and nothing observes the
+          -- machine partway through it, so @globals@ is the same before the
+          -- command and after it. No suspended proof spans a load that is still
+          -- running, so resuming is as safe as it ever was.
+          (s', other)           -> (rolledBack s s', other)
+
+-- | Put the session back as it was, carrying the fresh counter forward.
+--
+-- The counter is the one thing that must not go back — see 'loadProofItems'.
+rolledBack :: Session -> Session -> Session
+rolledBack before after =
+  before { sessionMachine = (sessionMachine before)
+                              { names = names (sessionMachine after) } }
 
 -- | What an item adds to the environment, for the summary line.
 declaredName :: Item -> Maybe String

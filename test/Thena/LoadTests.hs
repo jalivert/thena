@@ -52,7 +52,8 @@ import Thena.Global.Env
   , lookupInductive
   )
 import Thena.Files (loadProofFile, startingSession)
-import Thena.Render (renderTrouble, renderResponse, renderCore, renderEliminator)
+import Thena.Render ( Rendering (..)
+  ,renderTrouble, renderResponse, renderCore, renderEliminator)
 import Thena.Core.Convert (convert)
 import Thena.Core.Context ()
 import Thena.Standard (withRules)
@@ -109,7 +110,7 @@ preludeTests =
           -- eliminator is a scheme now, and what a use site sees is the
           -- instantiation. Rendering it uninstantiated would pin @ℓ@'s number,
           -- which is a counter value and no business of this assertion.
-          renderEliminator [] n0 (GlobalName "Eq") (atZero d (fst (eliminatorType d LZero n0)))
+          renderEliminator (Rendering [] n0) (GlobalName "Eq") (atZero d (fst (eliminatorType d LZero n0)))
             @?= [ "elim Eq : ∀ (A : Type₀) (P : ∀ (_ : A) (_1 : A) -> Eq {0} A _ _1 -> Type₀) \
                   \-> (∀ (a : A) -> P a a (refl {0} A a)) \
                   \-> ∀ (_ : A) (_1 : A) (target : Eq {0} A _ _1) -> P _ _1 target"
@@ -325,7 +326,7 @@ declared n l = isDeclared (GlobalName n) (globals (machineOf (loadedSession l)))
 -- claims is that J computes, and the printed answer is the honest witness.
 renderedLast :: Loaded -> Maybe String
 renderedLast l = case reverse (loadedResponses l) of
-  Rendered t : _ -> Just (renderCore [] (names (machineOf (loadedSession l))) [] t)
+  Rendered t : _ -> Just (renderCore (Rendering [] (names (machineOf (loadedSession l)))) [] t)
   _              -> Nothing
 
 -- | A datatype's own level parameters, all instantiated at zero.
@@ -507,11 +508,48 @@ moduleTests =
     -- run, because a module is a sequence and its blocks are no longer hoisted
     -- out of it. MS5 phase 90 checked every block before the module started,
     -- which is what made a @language@ block above a block unusable.
+    --
+    -- **The evidence for that moved into the response at phase 144** (MS6
+    -- closeout 15). It used to be @Nat@ still being declared afterwards, which
+    -- is the leak that phase closed — so the assertion below is the response's
+    -- own shape instead, and it says the same thing: @BlockIllTyped@ with a
+    -- reason means the block was resolved and typed, and resolution is exactly
+    -- what needs @Nat@ to have been declared. A block run before its module's
+    -- declarations gives 'BlockRefused' with an @UnboundInRule@ — the sibling
+    -- test below shows that shape — so the two cannot be confused.
     testCase "a top-level block that does not type check stops the run" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 mistypedBlockModule of
-        (s1, Ran _ _ (BlockIllTyped (_ : _))) ->
-          isDeclared (GlobalName "Nat") (globals (machineOf s1)) @?= True
+        (_, Ran _ _ (BlockIllTyped (_ : _))) -> pure ()
+        (_, other) -> assertFailure (show other)
+
+  , -- **A load that does not complete declares nothing** (MS6 closeout 15,
+    -- his ruling 2026-09-30). This is the invariant phase 144 establishes and
+    -- it is asserted on the one module in this file that fails after declaring
+    -- something: @Nat@ lands, then the block does not type check.
+    testCase "and the module it had already declared is rolled back" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 mistypedBlockModule
+      isDeclared (GlobalName "Nat") (globals (machineOf s1)) @?= False
+
+  , -- **Everything goes back except the fresh counter**, which must go forward
+    -- or a name the user has seen would be reissued (MS2 closeout 4f) — and a
+    -- failed load does show them, in its @solved: ?ℓn@ lines.
+    testCase "but the fresh counter goes forward across a failed load" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 mistypedBlockModule
+      assertBool "the counter did not advance"
+        (names (machineOf s1) > names (machineOf s0))
+
+  , -- **The point of the rollback, and the reason it is worth a phase**: the
+    -- session survives a typo. Before this, the names that had landed made the
+    -- corrected file unloadable — 'Thena.Global.Declare' refused the
+    -- re-declaration and blamed the constructor's target (@AGENDA.md@ 81).
+    testCase "so the corrected module loads in the same session" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 mistypedBlockModule
+      case loadProofSource s1 blockModule of
+        (_, ProofLoaded nm ds n _) -> (nm, ds, n) @?= ("M", ["Nat", "one"], 1)
         (_, other) -> assertFailure (show other)
 
   , -- **Each top-level block is its own scope**, as a block is — and since
@@ -687,7 +725,7 @@ tierTests =
   ]
   where
     renderResponse' s g = case lookupDefinition (GlobalName g) (globals (machineOf s)) of
-      Just d  -> [g ++ " = " ++ renderCore [] 0 [] (definitionBody d)]
+      Just d  -> [g ++ " = " ++ renderCore (Rendering [] 0) [] (definitionBody d)]
       Nothing -> [g ++ " is missing"]
 
     bothSpellings =

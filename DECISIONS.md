@@ -106,6 +106,70 @@ Perl or POSIX would find out much later. Refusing them also means `\s`, `{n}`
 or POSIX classes can be added later without changing what any accepted
 expression means.
 
+### Corners and `⟨…⟩` are on their way out, in favour of tagged term literals
+
+*Decided 2026-10-01.*
+
+Two older notations say exactly what a tagged term literal says:
+
+```
+⌜ t ⌝   [| t |]        a core term, inside an instruction
+core`t`                the same thing, and the one that stays
+
+⟨ e ⟩                  a surface term — the lexer turns ⟨ into the tag `surface`
+surface`e`             the same thing, and the one that stays
+```
+
+**Both still work and neither is offered any more.** Completion will not suggest them,
+and nothing new in the system points at them. They are to be replaced one for one and
+removed.
+
+**Why, and it is not tidiness.** These are the last places where *which language this text
+is in* is decided by the punctuation you reached for rather than by a tag naming the
+language. Thena's whole embedding story is the tag: one notation, any language, including
+the ones you define yourself. A second spelling that works for only two of them has to be
+carried by every feature that comes after, and each one pays for it.
+
+The same decision covers the REPL commands that read an untagged term — `:core`, `:dev`,
+`:goal`, `:whnf`, `:convert` — which are debugging commands older than tagged literals.
+`core\`t\`` is a one-for-one replacement and is accepted everywhere a term is.
+
+---
+
+### Surface and Core will not become `language` definitions
+
+*Decided 2026-10-01.*
+
+Thena lets you define an object language as a grammar — `language LC, E where …` —
+and then write its terms in a fenced literal, `` LC`( λ x : ι . x )` ``. The obvious
+next thought is that Thena's own languages should be defined the same way: a prelude
+declaring `surface` and `core` as ordinary grammars, the system bootstrapped in itself.
+**They will not be.** Not now, and not when the tooling would make it easy.
+
+**What you can and cannot write.** `surface` and `core` are reserved tags, and a
+`language` block may not be named either of them:
+
+```
+language surface, Term where      refused — surface is one of Thena's own tags
+surface`\ x -> x`                 fine — always has been, and is unaffected
+```
+
+**Why.** The bootstrap is an attractive result and it is not the project's result. Thena
+exists to be a novel and useful proof assistant — applied theory, proving a concept — and
+making its own surface and core languages self-described would put the whole of that
+under pressure in service of an elegance. The honest version of the same claim arrives by
+another road: Thena's parser generator, when it replaces the current Alex and Happy, will
+take **one** grammar file per language, and that file both parses the language into its
+tree and produces the editor's completions. "The same grammar you can read is the grammar
+that runs" is as strong a statement of openness, and it costs the project nothing it
+needs.
+
+**What this means in practice.** The surface and core grammars exist twice: as the
+translating parser that runs your input, and as a secondary grammar that answers *what
+may I write here* for an editor. The second is narrower than the first by design — it
+will stay quiet where it does not know rather than guess — and it never parses anything.
+Nothing is foreclosed: the day a bootstrap is cheap, it is still available.
+
 ---
 
 ## Universes and levels
@@ -468,9 +532,19 @@ production is one line, and a deeper line continues it.
 
 **`context` and `judgment` are reserved words**, like `language`. A name in a
 production is a metavariable, then a token class, then a terminal, and a
-metavariable may not be named like an existing one or a class. A block sees
-what is above it, as every declaration does. It is checked when the module
-loads, and a binder that binds in nothing is a warning, not an error.
+metavariable may not be named like an existing one or a class — uniqueness is
+across every grammar in scope, not per block. **A name is refused for not being a
+metavariable only where one is required**: a binding form's head, and the
+metadata. Anywhere else a plain word is simply a terminal, which is why a
+production may say `( λ x : T . E[x] )` without declaring `λ` or `.`.
+
+A block sees what is above it, as every declaration does. **So there are no
+mutually recursive languages**, and that is deliberate rather than a limit of the
+reader: Thena has no mutual inductives, so a pair of languages that referred to
+each other could not be given the datatypes they generate.
+
+It is checked when the module loads, and a binder that binds in nothing is a
+warning, not an error.
 
 
 ### An object term is parsed by its grammar, and `:parse` shows how
@@ -2528,6 +2602,54 @@ thena spine> elaborate ⟨ do { say 3 } ⟩
 do block 1, instruction 1: wanted String, got Int
 ```
 
+### A `:load` that fails declares nothing
+
+*Decided 2026-09-30.*
+
+```
+thena spine> :load mine.thena
+stuck: Beta and Alpha cannot be made equal
+thena spine> :show Alpha
+nothing named Alpha has been declared
+```
+
+A module is loaded **all or nothing**. If the run stops for any reason — a type error, a
+block that does not check, an unanswered question — the session is put back exactly as it
+was, and nothing the module had already declared survives.
+
+**Before this, the declarations above the failure stayed**, `:undo` could not take them
+back, and loading the corrected file then failed on the names that had landed. One typo
+cost you the session.
+
+**What a completed load leaves is unchanged.** A module that finishes is loaded whatever
+it left in the development, which is what the REPL is for; the rule is about a run that
+*stops*, not about an unfinished proof.
+
+**One thing does not go back: the fresh-name counter.** A failed load has already shown
+you names, and a name you have seen is never reissued.
+
+### A renamed binder is a name your language can write
+
+*Decided 2026-10-01.*
+
+```
+language L, M, N, E where
+  var : n as occurrence -> n      -- n = /[a-z]+/, no prime in the class
+  abs : n as binder     -> ( lam n . E[n] )
+```
+
+Substituting under a binder renames it to avoid capture, and the new name is **built from
+your identifier class**, so it is always a name the notation can print and read back:
+`/[a-z]+/` renames `y` to `ya`, while a class that admits `'` renames to `y'` as before.
+
+The character is decided on the class's own automaton — it must extend *every* string the
+class accepts — so this is by construction rather than by convention, and nothing in it
+knows about any particular character.
+
+**A class no single character extends** — `/[a-z][0-9]/`, where nothing may follow `a1` —
+is **not refused**. It loads with a warning saying that a renamed binder will not print in
+that notation. Substitution is unaffected; only printing the renamed name back is lost.
+
 ### A multi-line entry is bracketed by `:{` and `:}`
 
 *Decided 2026-09-13.*
@@ -2839,6 +2961,25 @@ anything built later over LSP.
 a term you have not finished is an ordinary string and needs no special
 representation to be stored or sent anywhere.
 
+### The text printers take one rendering, not a grammar list and a counter
+
+*Decided 2026-09-30.*
+
+```haskell
+renderCore (renderingOf session) context term
+```
+
+Everything in `Thena.Render` below `renderResponse` takes a `Rendering` — what a render
+carries and does not change — rather than the installed grammars and a name counter as
+two arguments.
+
+**Build one with `renderingOf` and there is no counter to supply.** That matters because
+there was no value a caller could correctly supply: the counter seeds the fresh variables
+a printer mints to descend a term, `Var`'s constructor is hidden so no safe number can be
+picked by inspection, and a low one silently corrupts the output — rendered from zero,
+`A -> A` prints as `∀ (_ : A) -> _`, because the collision makes the dependency check
+answer wrongly.
+
 ### A printed value can be read back
 
 `instral` values printed at the prompt used Haskell's escaping, which renders `∀`
@@ -2934,7 +3075,8 @@ Two things fuel does not bound. A single instruction may be a kernel call —
 `certify`, a `data` declaration, a grammar check — and those run to completion,
 so one unit of fuel can take minutes. And three operations are unbounded by
 construction, because they read the finished state rather than reporting it:
-loading a file, `qed`, and `:infer`.
+loading a file, `qed`, and `:infer`. **That is intended and not a gap** — ruled
+2026-10-02 — so a frontend waits out a `:load` and a resumable one is not owed.
 
 ### A tagged literal is notation, not a term — `Core` carries no tag
 

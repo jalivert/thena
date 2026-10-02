@@ -446,6 +446,14 @@ failureView f = case f of
   Earley.Unbounded h -> AnUnboundedRule h
   Earley.Disagrees r x a b -> ADisagreement r x (treeView a) (treeView b)
 
+-- | A parser symbol as a frontend sees it.
+--
+-- **Phase 147's @publicHead@ is gone — HIS CORRECTION, 2026-10-02.** It mapped
+-- a nonterminal to the part of its name before a @\/@, because Thena's own
+-- grammars had mirrored Happy's precedence rungs and those names were ours
+-- rather than anybody's. The grammars are flat now
+-- ("Thena.Language.Builtin") and every head they have is a phrase a dropdown can
+-- show, so there is nothing to map and nothing to hide.
 symbolView :: Earley.Symbol -> SymbolView
 symbolView s = case s of
   Earley.Literal t -> ALiteralSymbol t

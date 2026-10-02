@@ -54,6 +54,7 @@ module Thena.Language.Regex
   , nullable
   , derive
   , matches
+  , primingChar
     -- * The concrete syntax (§3.2)
   , RegexError (..)
   , parseRegex
@@ -70,7 +71,7 @@ import Data.Char (isAlphaNum)
 import Data.List (sort)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 import qualified Data.Set as Set
 
 -- ---------------------------------------------------------------------------
@@ -461,6 +462,42 @@ inclusion r s = search (Set.singleton (0, 0)) [((0, 0), [])]
            in if Set.member pq sn
                 then (sn, ns)
                 else (Set.insert pq sn, (pq, representative lo hi : path) : ns)
+
+-- | **A character that may be appended to any string this class accepts,
+-- without leaving it** (MS6 closeout 23, phase 146).
+--
+-- So if @c@ comes back, then @y@, @y ++ [c]@, @y ++ [c,c]@, … are all in the
+-- class whenever @y@ is — which is what a generated @L-fresh@ needs, since it
+-- renames a captured binder by extending it until the name is unused. Appending
+-- @'@ unconditionally is what it used to do, and a class such as @\/[a-z]+\/@
+-- does not accept it, so the renamed binder was a name the language could not
+-- write back.
+--
+-- **Decided on the automaton, not guessed.** @c@ works exactly when every
+-- /accepting/ state goes to an accepting state under @c@ — that is precisely
+-- \"appending @c@ preserves membership\", quantified over all accepted strings
+-- at once rather than sampled. The reachable states are 'dfa'\'s, and there are
+-- finitely many because 'normalise' makes derivatives converge.
+--
+-- **The candidates come from the expression and from nothing else**: one
+-- representative per character interval the expression cuts, in ascending order,
+-- and the least that works is the answer. There is no preferred character and no
+-- case for any particular one — a class that accepts @'@ gets @'@ because @'@
+-- sorts below the letters, not because @'@ was asked about first.
+--
+-- **'Nothing' means no single character extends every accepted string.** A
+-- fixed-length class like @\/[a-z][0-9]\/@ is the honest example: nothing can be
+-- appended to @a1@ and still match, so no priming scheme of this shape exists
+-- and the caller has to say so rather than produce a name that cannot be read.
+primingChar :: Regex -> Maybe Char
+primingChar r = listToMaybe [ c | c <- candidates, all (closedUnder c) acceptors ]
+  where
+    a = dfa r
+    los = intervals [normalise r]
+    spans = zip los (map pred (drop 1 los) ++ [maxBound])
+    candidates = map (uncurry representative) spans
+    acceptors = [ q | q <- Map.keys (states a), accepting a q ]
+    closedUnder c q = accepting a (step a q c)
 
 -- | A character from the inclusive interval, as readable as the interval
 -- allows.
