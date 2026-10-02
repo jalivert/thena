@@ -3075,7 +3075,8 @@ Two things fuel does not bound. A single instruction may be a kernel call —
 `certify`, a `data` declaration, a grammar check — and those run to completion,
 so one unit of fuel can take minutes. And three operations are unbounded by
 construction, because they read the finished state rather than reporting it:
-loading a file, `qed`, and `:infer`.
+loading a file, `qed`, and `:infer`. **That is intended and not a gap** — ruled
+2026-10-02 — so a frontend waits out a `:load` and a resumable one is not owed.
 
 ### A tagged literal is notation, not a term — `Core` carries no tag
 
