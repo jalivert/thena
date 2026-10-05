@@ -130,6 +130,14 @@ tokens :-
   "let"         { keyword TLet }
   "in"          { keyword TIn }
   "elim"        { keyword TElim }
+  -- **Reserved at MS8 phase 149's successor, phase 150.** The notation
+  -- @trusted T e@ is his, 2026-10-05, and a notation cannot exist without a
+  -- token: the alternative is an ordinary name that elaborates specially, which
+  -- is the special case the first design principle forbids. **The seventh word
+  -- to narrow identifiers project-wide**, after @data@, @module@, @do@,
+  -- @language@, @context@ and @judgment@; nothing in either repository used it
+  -- as a name.
+  "trusted"     { keyword TTrusted }
   "where"       { keyword TWhere }
   -- **Reserved at MS4 phase 42b**, so a surface module can say @data@ inside a
   -- declaration block. Agda and Haskell both reserve it. The DC's own @data@
@@ -239,6 +247,7 @@ data Token
   | TLet
   | TIn
   | TElim
+  | TTrusted
   | TWhere
   | TDashes
     -- ^ @--@ not followed by a space, which is therefore /not/ a comment

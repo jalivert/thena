@@ -86,6 +86,7 @@ is inferred.
 | a hole | `let ? x : S in t` |
 | a hole with a proposed body | `let ? x : S ≐ (g) in t` |
 | eliminator use | `elim D (params) motive (methods) (indices) target` |
+| a trusted term | `trusted T e` — see chapter 9 |
 
 **Every symbol has an ASCII spelling**, so nothing here requires a special
 keyboard:
@@ -910,6 +911,39 @@ stuck: not finished: the hole k is still open, so there is no term yet
 
 `qed` runs `certify` for you. These commands are for inspecting a proof
 mid-flight, or for convincing yourself the machine has not cheated.
+
+### Saying "take my word for it"
+
+Some things are true and you cannot prove them here. `trusted T e` is a term
+whose type is **asserted**: `e` is checked as usual, at whatever type it really
+has, and the term is then given `T` with nothing relating the two. Both of these
+are accepted, and the second one is a lie:
+
+```
+thena spine> declare honest : Eq Nat zero zero ; honest = trusted (Eq Nat zero zero) (refl Nat zero)
+…
+thena spine> declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)
+…
+thena spine> :whnf honest {0}
+refl {0} Nat zero
+thena spine> :whnf liar {0}
+trusted (Eq {0} Nat zero (succ zero)) (Eq {0} Nat zero zero) (refl {0} Nat zero)
+```
+
+**The kernel's check is then modulo the claims you made this way** — which is the
+trade every system makes somewhere, under one name or another.
+
+What makes it worth having rather than an axiom is that it **reduces when the
+claim comes true**, which is what the two reductions above show. The term carries
+both types, the one claimed and the one its body really has, and when they turn
+out to be the same type the whole thing contracts to the body: `honest`'s claim
+was met, so nothing is left of it. `liar`'s was not, and what prints shows you
+both halves. As the names inside them become known the two converge, so a term
+still printing as `trusted` is a term whose claim is still load-bearing.
+
+You can leave the type to be worked out, as anywhere else — `trusted _ e` is an
+ordinary placeholder in that position, and `claimed` and `actual` are the two
+field words for navigating into one (chapter 6).
 
 ---
 

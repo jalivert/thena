@@ -161,6 +161,7 @@ kindOf t = case t of
   TLet          -> AKeyword
   TIn           -> AKeyword
   TElim         -> AKeyword
+  TTrusted      -> AKeyword
   TWhere        -> AKeyword
   TData         -> AKeyword
   TModule       -> AKeyword

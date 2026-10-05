@@ -63,6 +63,7 @@ import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..))
   let     { Located _ TLet }
   in      { Located _ TIn }
   elim    { Located _ TElim }
+  trusted { Located _ TTrusted }
   where   { Located _ TWhere }
   data    { Located _ TData }
   module  { Located _ TModule }
@@ -360,6 +361,11 @@ Atom :: { Surface }
   | do '{' Block '}'                       { SurfaceDo (reverse $3) }
   | elim ident '(' Terms ')' Atom '(' Terms ')' '(' Terms ')' Atom
       { SurfaceElim $2 (reverse $4) $6 (reverse $8) (reverse $11) $13 }
+  -- **Two atoms, and an atom itself** (MS8 phase 150) — a keyword and a fixed
+  -- number of operands is self-delimiting, so it stands where a name stands.
+  -- The third field of the core node is not written here: it is derived, and
+  -- elaboration infers it.
+  | trusted Atom Atom                      { SurfaceTrusted $2 $3 }
 
 -- | The pieces of a tagged term literal, reversed.
 --

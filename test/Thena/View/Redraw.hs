@@ -215,6 +215,10 @@ redrawSurface = surf SLoose
            ++ " = " ++ surf SLoose v ++ " in " ++ surf SArrowed b)
     surf p (ASurfaceAnnotation e ty) =
       paren (p >= SArrowed) (surf SArrowed e ++ " : " ++ surf SArrowed ty)
+    -- Two operands, both tight, parenthesised in an argument run — the shape
+    -- 'Thena.Syntax.Print' gives it, and this has to agree with that printer.
+    surf p (ASurfaceTrusted ty e) =
+      paren (p >= STight) ("trusted " ++ surf STight ty ++ " " ++ surf STight e)
     surf p (ASurfaceElimination d ps mot ms is tgt) =
       paren (p >= STight)
         ("elim " ++ d ++ " " ++ list ps ++ " " ++ surf STight mot ++ " " ++ list ms

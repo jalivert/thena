@@ -66,6 +66,8 @@ module Thena.Surface.Zipper
   , intoLetBody
   , intoAnnotType
   , intoAnnotTerm
+  , intoTrustedType
+  , intoTrustedTerm
   , intoElimField
   ) where
 
@@ -122,6 +124,8 @@ data Frame
   | InLetBody String (Maybe Surface) Surface  -- ^ name, annotation, value
   | InAnnotType Surface                       -- ^ the ascribed term
   | InAnnotTerm Surface                       -- ^ the type ascribed
+  | InTrustedType Surface                     -- ^ the trusted term
+  | InTrustedTerm Surface                     -- ^ the type claimed
   | InElimField String [Surface] Surface [Surface] [Surface] Surface Int
     -- ^ the focus is one field of an @elim@, at flat position @k@ in the order
     -- the elaborator walks them: parameters, motive, methods, indices, target
@@ -181,6 +185,8 @@ rebuild s f = case f of
   InLetBody x ann v -> SurfaceLet x ann v s
   InAnnotType e -> SurfaceAnnot e s
   InAnnotTerm ty -> SurfaceAnnot s ty
+  InTrustedType e -> SurfaceTrusted s e
+  InTrustedTerm ty -> SurfaceTrusted ty s
   -- The flat order is the parameters, the motive, the methods, the indices and
   -- the target, so each group starts where the one before it ended — which is
   -- the arithmetic, and where an off-by-one in this frame would live.
@@ -291,6 +297,14 @@ intoAnnotType e ty = push ty (InAnnotType e)
 
 intoAnnotTerm :: Surface -> Surface -> SurfaceZipper -> SurfaceZipper
 intoAnnotTerm ty e = push e (InAnnotTerm ty)
+
+-- | Focus the claimed type of a @trusted T e@ (MS8 phase 150).
+intoTrustedType :: Surface -> Surface -> SurfaceZipper -> SurfaceZipper
+intoTrustedType e ty = push ty (InTrustedType e)
+
+-- | … and its body.
+intoTrustedTerm :: Surface -> Surface -> SurfaceZipper -> SurfaceZipper
+intoTrustedTerm ty e = push e (InTrustedTerm ty)
 
 -- | Focus one field of an @elim@, at flat position @k@ in the order the
 -- elaborator walks them: the parameters, the motive, the methods, the indices,

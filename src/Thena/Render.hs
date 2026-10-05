@@ -438,6 +438,7 @@ describe t = case t of
   TLet        -> "let"
   TIn         -> "in"
   TElim       -> "elim"
+  TTrusted    -> "trusted"
   TWhere      -> "where"
   TData       -> "data"
   TModule     -> "module"

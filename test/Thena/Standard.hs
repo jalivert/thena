@@ -432,6 +432,31 @@ elaborateClauses =
       , Bind (Op.PVar "e") Nothing (Op.AscriptionTerm (Ref "t"))
       , call "elaborate" [Ref "e"]
       ]
+    -- MS8 phase 150. The claim and the body are elaborated into claimed holes
+    -- and @actual@ is a hole nothing here touches — the body's own elaboration
+    -- is what solves it, which is the whole of what "derived" means.
+  , clause SurfaceIsTrusted
+      [ Bind (Op.PVar "h") Nothing Here
+      , Bind (Op.PVar "cn") Nothing (FreshName (Lit (VText "C")))
+      , Bind (Op.PVar "u1") Nothing (Op.Call "fresh-universe" [])
+      , Bind (Op.PVar "c") Nothing (Claim (Ref "cn") (Ref "u1"))
+      , Do (Goto (Ref "c"))
+      , Bind (Op.PVar "ty") Nothing (Op.TrustedClaim (Ref "t"))
+      , call "elaborate" [Ref "ty"]
+      , Do (Goto (Ref "h"))
+      , Bind (Op.PVar "an") Nothing (FreshName (Lit (VText "A")))
+      , Bind (Op.PVar "u2") Nothing (Op.Call "fresh-universe" [])
+      , Bind (Op.PVar "a") Nothing (Claim (Ref "an") (Ref "u2"))
+      , Bind (Op.PVar "bn") Nothing (FreshName (Lit (VText "B")))
+      , Bind (Op.PVar "b") Nothing (Claim (Ref "bn") (Ref "a"))
+      , Do (Goto (Ref "b"))
+      , Bind (Op.PVar "e") Nothing (Op.TrustedBody (Ref "t"))
+      , call "elaborate" [Ref "e"]
+      , Do (Goto (Ref "h"))
+      , Bind (Op.PVar "tr") Nothing (Op.MakeTrusted (Ref "c") (Ref "a") (Ref "b"))
+      , call "fill" [Ref "tr"]
+      , call "solve" []
+      ]
   , clause SurfaceIsElim
       [ Bind (Op.PVar "a") Nothing (Op.ElimSpine (Ref "t"))
       , call "elaborate" [Ref "a"]

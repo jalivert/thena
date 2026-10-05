@@ -667,6 +667,8 @@ data Op
   | ArrowCodomain Operand    -- ^ … its @B@
   | AscriptionType Operand   -- ^ the @T@ of a surface @e : T@
   | AscriptionTerm Operand   -- ^ … its @e@
+  | TrustedClaim Operand     -- ^ the @T@ of a surface @trusted T e@ (MS8 phase 150)
+  | TrustedBody Operand      -- ^ … its @e@
     -- ^ **Moves, not readers**: each answers with a 'VSurface' focused on that
     -- part, so the path the zipper carries is extended rather than thrown away
     -- (MS4 phase 46). A clause pairs each with the test that makes it total —
@@ -817,6 +819,19 @@ data Op
     -- definition and not a claim: a definition's type is determined by its
     -- value. That is also why it takes two operands where 'Assume' and 'Claim'
     -- take a name and a /type/.
+  | MakeTrusted Operand Operand Operand
+    -- ^ three terms → @trusted claimed actual body@ (MS8 phase 150), the second
+    -- term-building op after 'Arrow' and 'ApplyTo'.
+    --
+    -- **It takes @actual@ as an operand rather than working it out.** Reading
+    -- the body's type here would make this op infer, which is @claim@'s job and
+    -- not a builder's — the elaboration clause claims a hole for it and the
+    -- body's own elaboration solves it, which is what /derived/ means in a
+    -- system whose inference is unification.
+    --
+    -- **@Make@, because 'Thena.Core.Term.Trusted' is a different thing with the
+    -- same word**, and 'TrustedClaim' and 'TrustedBody' read a surface one. The
+    -- same reason 'SurfaceNameOf' carries its @Of@.
   | Arrow Operand Operand
     -- ^ two terms → the non-dependent @Π@ between them (MS4 phase 41d).
     --
@@ -1208,6 +1223,9 @@ resultOf o = case o of
   ArrowCodomain _ -> Just TSurface
   AscriptionType _ -> Just TSurface
   AscriptionTerm _ -> Just TSurface
+  TrustedClaim _ -> Just TSurface
+  TrustedBody _ -> Just TSurface
+  MakeTrusted {} -> Just TCore
   Goal         -> Just TCore
   Typing _     -> Just TCore
   Define _ _   -> Just TCore   -- the variable it bound, as 'Assume' and 'Claim' do
@@ -1370,6 +1388,9 @@ operandTypes o = case o of
   ArrowCodomain x -> [(x, TSurface)]
   AscriptionType x -> [(x, TSurface)]
   AscriptionTerm x -> [(x, TSurface)]
+  TrustedClaim x -> [(x, TSurface)]
+  TrustedBody x -> [(x, TSurface)]
+  MakeTrusted a b c -> [(a, TCore), (b, TCore), (c, TCore)]
   Goal         -> []
   Typing a     -> [(a, TCore)]
   Define a b   -> [(a, TName), (b, TCore)]
@@ -1619,6 +1640,7 @@ data Test
   | SurfaceIsArrow Operand         -- ^ @A -> B@
   | SurfaceIsLet Operand           -- ^ @let x = v in b@
   | SurfaceIsAscription Operand    -- ^ @e : T@
+  | SurfaceIsTrusted Operand       -- ^ @trusted T e@ (MS8 phase 150)
   | SurfaceIsElim Operand          -- ^ @elim D … t@
   | SurfaceIsDo Operand            -- ^ @do { … }@
   | AppArgsAreExplicit Operand
@@ -1759,6 +1781,9 @@ opKeyword o = case o of
   Play _ -> "play"
   ArrowCodomain _ -> "arrow-codomain"
   AscriptionType _ -> "ascription-type"
+  TrustedClaim _ -> "trusted-claim"
+  TrustedBody _ -> "trusted-body"
+  MakeTrusted {} -> "make-trusted"
   AscriptionTerm _ -> "ascription-term"
   Goal         -> "goal"
   Typing _     -> "typeof"

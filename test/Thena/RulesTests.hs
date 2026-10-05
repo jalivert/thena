@@ -808,7 +808,7 @@ everyHoleRule =
     -- runs none of them: they take a parameter.
   , "claim", "assume", "quantify"
   ]
-    ++ replicate 18 "elaborate" ++ ["run-block"] ++ replicate 2 "enter-binders"
+    ++ replicate 19 "elaborate" ++ ["run-block"] ++ replicate 2 "enter-binders"
     ++ replicate 2 "spine-arguments"
 
 -- | The λ case's two recursive helpers, which every listing at a guess shows.

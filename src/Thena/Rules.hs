@@ -368,6 +368,7 @@ holds env cur args t = case t of
   SurfaceIsArrow o        -> surfaceIs o isArrow
   SurfaceIsLet o          -> surfaceIs o isLet
   SurfaceIsAscription o   -> surfaceIs o isAscription
+  SurfaceIsTrusted o      -> surfaceIs o isTrusted
   SurfaceIsElim o         -> surfaceIs o isElim
   SurfaceIsDo o           -> surfaceIs o isDo
   AppArgsAreExplicit o    -> surfaceIs o argsExplicit
@@ -410,6 +411,7 @@ holds env cur args t = case t of
     isArrow        s = case s of SurfaceArrow _ _ -> True; _ -> False
     isLet          s = case s of SurfaceLet {} -> True; _ -> False
     isAscription   s = case s of SurfaceAnnot _ _ -> True; _ -> False
+    isTrusted      s = case s of SurfaceTrusted _ _ -> True; _ -> False
     isElim         s = case s of SurfaceElim {} -> True; _ -> False
     isDo           s = case s of SurfaceDo _ -> True; _ -> False
     headIsName     s = case s of SurfaceApp (SurfaceName _) _ -> True; _ -> False
@@ -1421,6 +1423,7 @@ unaryOps =
   , ("surface-name", Op.SurfaceNameOf)
   , ("surface-universe", Op.SurfaceUniverseOf)
   , ("arrow-domain", Op.ArrowDomain), ("arrow-codomain", Op.ArrowCodomain)
+  , ("trusted-claim", Op.TrustedClaim), ("trusted-body", Op.TrustedBody)
   , ("ascription-type", Op.AscriptionType)
   , ("ascription-term", Op.AscriptionTerm)
   , ("app-function", Op.AppFunction)
@@ -1444,6 +1447,15 @@ binaryOps =
   , ("concat", Concat), ("unify", Unify), ("unify-into", Op.UnifyInto)
   , ("arrow", Arrow), ("apply-to", ApplyTo), ("apply-next", Op.ApplyNext)
   , ("declare-primitive", Op.DeclarePrimitive)
+  ]
+
+-- | **The first op with three operands** (MS8 phase 150). A trusted term has
+-- three fields and the clause that builds one has all three in hand, so the
+-- alternative was an op that inferred one of them — which is @claim@'s job and
+-- not a builder's.
+ternaryOps :: [(String, Operand -> Operand -> Operand -> Op)]
+ternaryOps =
+  [ ("make-trusted", Op.MakeTrusted)
   ]
 
 -- | Does some op bear this word at /some/ arity?
@@ -1489,6 +1501,7 @@ opWords =
   nullaryOps
     ++ [ (w, f sample) | (w, f) <- unaryOps ]
     ++ [ (w, f sample sample) | (w, f) <- binaryOps ]
+    ++ [ (w, f sample sample sample) | (w, f) <- ternaryOps ]
   where
     sample = Lit (VText "x")
 
@@ -1536,6 +1549,8 @@ operation gs g i (RawOp w as)
         (Just o,  _, _, [])       -> Right o
         (_, Just f,  _, [a])      -> f <$> ref a
         (_, _, Just f,  [a, b])   -> f <$> ref a <*> ref b
+        _ | Just f <- lookup w ternaryOps
+          , [a, b, c] <- as       -> f <$> ref a <*> ref b <*> ref c
         -- **A word that names no op is a call to a rule of that name**
         -- (phase 25e), which is what a bare word has meant at the REPL since
         -- phase 23b. The user, 2026-08-26: *"Bare word was always, always, the
@@ -1641,6 +1656,7 @@ withOperands t os = case (t, os) of
   (SurfaceIsArrow _, [o])        -> Just (SurfaceIsArrow o)
   (SurfaceIsLet _, [o])          -> Just (SurfaceIsLet o)
   (SurfaceIsAscription _, [o])   -> Just (SurfaceIsAscription o)
+  (SurfaceIsTrusted _, [o])      -> Just (SurfaceIsTrusted o)
   (SurfaceIsElim _, [o])         -> Just (SurfaceIsElim o)
   (SurfaceIsDo _, [o])           -> Just (SurfaceIsDo o)
   (AppArgsAreExplicit _, [o])    -> Just (AppArgsAreExplicit o)
@@ -1687,6 +1703,7 @@ testTypes t = case t of
   SurfaceIsArrow o        -> [(o, Ty.TSurface)]
   SurfaceIsLet o          -> [(o, Ty.TSurface)]
   SurfaceIsAscription o   -> [(o, Ty.TSurface)]
+  SurfaceIsTrusted o      -> [(o, Ty.TSurface)]
   SurfaceIsElim o         -> [(o, Ty.TSurface)]
   SurfaceIsDo o           -> [(o, Ty.TSurface)]
   AppArgsAreExplicit o    -> [(o, Ty.TSurface)]
@@ -1729,6 +1746,7 @@ testWord t = case t of
   SurfaceIsArrow _        -> "surface-is-arrow"
   SurfaceIsLet _          -> "surface-is-let"
   SurfaceIsAscription _   -> "surface-is-ascription"
+  SurfaceIsTrusted _      -> "surface-is-trusted"
   SurfaceIsElim _         -> "surface-is-elim"
   SurfaceIsDo _           -> "surface-is-do"
   AppArgsAreExplicit _    -> "app-args-are-explicit"
@@ -1761,6 +1779,7 @@ everyTest =
   , SurfaceIsArrow (Lit (VText ""))
   , SurfaceIsLet (Lit (VText ""))
   , SurfaceIsAscription (Lit (VText ""))
+  , SurfaceIsTrusted (Lit (VText ""))
   , SurfaceIsElim (Lit (VText ""))
   , SurfaceIsDo (Lit (VText ""))
   , AppArgsAreExplicit (Lit (VText ""))

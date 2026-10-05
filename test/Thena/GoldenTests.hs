@@ -1400,6 +1400,45 @@ tests =
       -- whole thing is the point: a command added without a line here is a
       -- diff, which is the only pressure keeping 'commandSummary' honest that
       -- does not depend on someone remembering.
+    , -- **A trusted term, end to end** (MS8 phase 150) — the surface form, the
+      -- elaborated core term, and the contraction. The three definitions are the
+      -- three cases there are: a claim that is honestly true, one that is false,
+      -- and one left to the placeholder.
+      --
+      -- **What the @{0}@ in the reduction lines is for.** A declared type's level
+      -- is generalised into a prenex parameter, so @honest@'s claim is
+      -- @Eq {ℓ} Nat zero zero@ while its body's own type is @Eq {0} …@ — and a
+      -- reference's level arguments are part of what it is, so the two are
+      -- different types and the node correctly stays. At an instantiated use the
+      -- two converge and it contracts. That is the feature working, not a
+      -- limitation: @actual@ is what says whether the trust is still
+      -- load-bearing, and here it says the claim has not been met yet.
+      script
+        "trusted"
+        [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "data Eq (A : Type) : A -> A -> Type where { refl : \8704 (a : A) -> Eq A a a }"
+          -- Honestly true, so the claim is met and the node goes.
+        , "declare honest : Eq Nat zero zero ; honest = trusted (Eq Nat zero zero) (refl Nat zero)"
+        , ":whnf honest {0}"
+          -- False, and it type-checks anyway. **That is the deal**: the node is
+          -- where the unproved obligation is written down, and it stays there.
+        , "declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)"
+        , ":whnf liar {0}"
+          -- @trusted _ e@ is an ordinary placeholder in the type position — his
+          -- ruling, 2026-10-05, and it needed nothing: @fill@ solves it from the
+          -- goal exactly as it solves every other hole.
+        , "declare inferred : Eq Nat zero zero ; inferred = trusted _ (refl Nat zero)"
+        , ":whnf inferred {0}"
+          -- The claim discharged, asked as a conversion.
+        , ":convert honest {0} \8799 refl {0} Nat zero"
+          -- The development calculus writes all three fields, so what the
+          -- printer produces reads back.
+        , ":core trusted (Eq {0} Nat zero zero) (Eq {0} Nat zero zero) (refl {0} Nat zero)"
+          -- And the surface writes two.
+        , ":surface trusted (Eq Nat zero zero) (refl Nat zero)"
+        , ":infer trusted (Eq Nat zero (succ zero)) (refl Nat zero)"
+        , ":quit"
+        ]
     , script
         "help"
         [ ":help"

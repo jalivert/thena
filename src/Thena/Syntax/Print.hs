@@ -217,6 +217,11 @@ surf p (SurfaceLet x ty v b) =
 -- parentheses anywhere an @Arrowed@ is wanted.
 surf p (SurfaceAnnot e ty)  =
   paren (p >= Arrowed) (surf Arrowed e ++ " : " ++ surf Arrowed ty)
+-- **Two operands, both @Tight@, and parenthesised in an argument run** — the
+-- shape @elim@ has below, and for the same reason: the form is an @atom@ in the
+-- grammar, so the parentheses are legibility rather than necessity.
+surf p (SurfaceTrusted ty e) =
+  paren (p >= Tight) ("trusted " ++ surf Tight ty ++ " " ++ surf Tight e)
 surf p (SurfaceElim d ps mot ms is tgt) =
   paren (p >= Tight)
     ("elim " ++ d ++ " " ++ list ps ++ " " ++ surf Tight mot ++ " " ++ list ms

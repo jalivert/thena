@@ -1370,6 +1370,14 @@ perform instr rest m = case operation instr of
     Left r         -> failure r m
     Right (f', x') -> produce (VTerm (App f' x')) m
 
+  -- **@trusted claimed actual body@, built and not checked** (MS8 phase 150),
+  -- exactly as 'Arrow' and 'ApplyTo' are: whether the claim is plausible is not
+  -- a question anything asks, which is the feature, and whether @actual@
+  -- describes @body@ is @claim@'s side condition where the node is used.
+  Op.MakeTrusted c a b -> case (,,) <$> term c <*> term a <*> term b of
+    Left r              -> failure r m
+    Right (c', a', b')  -> produce (VTerm (Trusted c' a' b')) m
+
   -- **A universe at a fresh level meta** (MS4 phase 48) — the surface's bare
   -- @Type@, at an operand. Typical ambiguity (phase 33) is what makes this the
   -- right shape: nothing is known about the level yet, and unification decides
@@ -1493,6 +1501,15 @@ perform instr rest m = case operation instr of
   Op.AscriptionTerm x -> surfaceMove x "an ascription" $ \s -> case s of
     Concrete.SurfaceAnnot e ty -> Just (Zipper.intoAnnotTerm ty e)
     _                          -> Nothing
+  -- The two halves of a surface @trusted T e@ (MS8 phase 150). **There is no
+  -- third move**, because there is no third field to move into: @actual@ is the
+  -- core node's and the user never wrote one.
+  Op.TrustedClaim x -> surfaceMove x "a trusted term" $ \s -> case s of
+    Concrete.SurfaceTrusted ty e -> Just (Zipper.intoTrustedType e ty)
+    _                            -> Nothing
+  Op.TrustedBody x -> surfaceMove x "a trusted term" $ \s -> case s of
+    Concrete.SurfaceTrusted ty e -> Just (Zipper.intoTrustedTerm ty e)
+    _                            -> Nothing
 
   -- **A plain binder only** — no annotation and no braces. That is the whole of
   -- what the λ case cannot elaborate, and saying it here means the clause finds

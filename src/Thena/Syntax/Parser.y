@@ -92,6 +92,7 @@ import Thena.Syntax.Lexer (Located (..), Pos, Token (..))
   let     { Located _ TLet }
   in      { Located _ TIn }
   elim    { Located _ TElim }
+  trusted { Located _ TTrusted }
   where   { Located _ TWhere }
   rule    { Located _ TRule }
   do      { Located _ TDo }
@@ -512,6 +513,13 @@ Atom :: { Raw }
   | tagat ObjectBits tagclose              { taggedRaw $1 (reverse $2) }
   | tagat tagclose                         { taggedRaw $1 [] }
   | '(' Term ')'                           { $2 }
+  -- **An atom, and all three fields are written** (MS8 phase 150). It is a
+  -- keyword and a fixed number of atoms, so it is self-delimiting and needs no
+  -- precedence of its own — a name's reason. @elim@ is a @Term@ production here
+  -- for a historical reason and not a better one; nothing is lost by this being
+  -- the more permissive of the two, since every position that would have
+  -- accepted a @Term@ still reaches it through @Term -> App -> Atom@.
+  | trusted Atom Atom Atom                 { RawTrusted $2 $3 $4 }
 
 -- Accumulated in reverse, like every other run here.
 ObjectBits :: { [RawPiece] }

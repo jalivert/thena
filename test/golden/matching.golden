@@ -36,6 +36,7 @@ standard
   elaborate ‹t›
   elaborate ‹t›
   elaborate ‹t›
+  elaborate ‹t›
   run-block ‹t›
   intro-binders ‹t›
   intro-binders ‹t›
@@ -57,6 +58,7 @@ fit-core ‹f›
 claim ‹ty›
 assume ‹ty›
 quantify ‹ty›
+elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
@@ -136,6 +138,7 @@ elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
+elaborate ‹t›
 run-block ‹t›
 enter-binders ‹t›
 enter-binders ‹t›
@@ -183,6 +186,7 @@ fit-core ‹f›
 claim ‹ty›
 assume ‹ty›
 quantify ‹ty›
+elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›

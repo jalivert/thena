@@ -492,6 +492,15 @@ comparison comes back owing a constraint on universe levels — which happens on
 when a level is still unknown. The node simply stays, and a stuck well-typed term
 is a valid proof, so nothing is lost but an occasional reduction.
 
+**`trusted` is a reserved word, and the type may be left to inference.**
+`trusted _ e` puts an ordinary placeholder in the type position and the goal
+supplies it; nothing about that position is special. One consequence of a declared
+type being level-generalised is worth expecting: `honest : Eq Nat zero zero` has a
+claim at the *parameter* `ℓ` while its body's type is at `0`, and a reference's
+level arguments are part of what it is — so the term contracts at `honest {0}`
+rather than where it was declared. A term still printing as `trusted` is one whose
+claim has not been met yet, which is what the pair is there to tell you.
+
 ### A token class is an ordinary definition, and its regex takes its type as an argument
 
 *Decided 2026-09-19.*

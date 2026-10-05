@@ -389,6 +389,51 @@ rule elaborate t :- when focus-is-hole (surface-is-ascription t)
      ; unify-into x g
      ; e  = ascription-term t
      ; call elaborate e
+-- E⟦trusted T e⟧ — claim C : Type for the type claimed, elaborate T into it;
+-- claim A : Type for the type the body turns out to have and B : A for the body,
+-- and elaborate e into that; then build trusted C A B and fill the goal with it.
+--
+-- THE FILL IS LAST, AND IT IS THE ONE CLAUSE WHERE IT HAS TO BE. Everywhere else
+-- the fill comes first, because filling last leaves the argument holes already
+-- solved and the gotos find nothing (phases 41e and 44). Here the opposite
+-- happens: a trusted node's type IS C, so `fill` unifies C with the goal and
+-- SOLVES it — and `goto C` then fails with "that names no hole or guess". The
+-- arrow clause can fill first because an arrow's type is a universe and not
+-- either of its halves. Found by running the clause, not by reasoning about it.
+--
+-- `trusted _ e` needs nothing special all the same, and that is the ruling of
+-- 2026-10-05 holding: the placeholder elaborates by not elaborating, so C is
+-- still a hole when the fill arrives and the fill solves it from the goal,
+-- exactly as it solves any other hole.
+--
+-- A is what the user never writes. Nothing here determines it; the body's own
+-- elaboration does, by filling something whose type unification sets A to. If
+-- the body leaves it open, A stays a hole, and that is the ordinary outcome of
+-- elaborating something underdetermined rather than a failure of this clause.
+--
+-- The claim is elaborated before the body so that a claimed type mentioning
+-- names the body also mentions is already in place when the body is checked.
+rule elaborate t :- when focus-is-hole (surface-is-trusted t)
+  do h  = here
+     ; cn = fresh-name "C"
+     ; u1 = fresh-universe
+     ; c  = claim cn u1
+     ; goto c
+     ; ty = trusted-claim t
+     ; call elaborate ty
+     ; goto h
+     ; an = fresh-name "A"
+     ; u2 = fresh-universe
+     ; a  = claim an u2
+     ; bn = fresh-name "B"
+     ; b  = claim bn a
+     ; goto b
+     ; e  = trusted-body t
+     ; call elaborate e
+     ; goto h
+     ; tr = make-trusted c a b
+     ; fill tr
+     ; solve
 -- E⟦elim D ⃗p P ⃗m ⃗i t⟧ — an ordinary application of the eliminator's wrapper.
 --
 -- §3.7 generates a global for the eliminator the way it does for every former

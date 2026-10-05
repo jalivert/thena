@@ -101,6 +101,11 @@ genRaw = sized . go
           -- shape is fixed: () motive (mz ms) ().
           RawElim (RawWord "Nat") [] [] <$> half <*> ((\a b -> [a, b]) <$> half <*> half)
                               <*> pure [] <*> half
+          -- MS8 phase 150, and it is what makes the round trip a statement about
+          -- the trusted node rather than a comment: the printer parenthesises its
+          -- three operands as @atom@s, and only arbitrary terms in those
+          -- positions keep finding the case where that matters.
+        , RawTrusted <$> half <*> half <*> half
         ]
       where
         half = resize (n `div` 2) (genRaw scope)

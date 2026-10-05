@@ -620,7 +620,7 @@ baseTests =
               , "fit-core", "fit-core"
               , "claim", "assume", "quantify"
               ]
-              ++ replicate 18 "elaborate" ++ ["run-block"] ++ replicate 2 "enter-binders"
+              ++ replicate 19 "elaborate" ++ ["run-block"] ++ replicate 2 "enter-binders"
               ++ replicate 2 "spine-arguments"
 
     , testCase "prove is a rule over prim-prove" $
