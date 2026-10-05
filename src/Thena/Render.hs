@@ -618,6 +618,25 @@ go ren@(Rendering _ n) env prec term = case term of
       atoms = paren . unwords . map (go ren env AtAtom)
       paren s = "(" ++ s ++ ")"
 
+  -- @trusted claimed actual body@ (MS8 phase 149) — **all three, because that
+  -- is the Core notation he fixed on 2026-10-05**, and @actual@ is the half
+  -- that says whether the trust is still load-bearing. Printing only the claim
+  -- would hide exactly the thing a reader wants.
+  --
+  -- **It prints like an application and re-reads like one too far**: phase
+  -- 150's surface form takes two operands, so this is a second place where
+  -- @parse . print@ is not the identity on the nose — the same qualification
+  -- 'Canonical' carries above, for the same reason (the internal form has a
+  -- field the written form derives).
+  Trusted claimed actual body ->
+    parensIf (prec > AtApp) $
+      unwords
+        [ "trusted"
+        , go ren env AtAtom claimed
+        , go ren env AtAtom actual
+        , go ren env AtAtom body
+        ]
+
 -- | Does the scope's variable actually occur? This is the whole of the
 -- @S -> B@ versus @∀ (x : S) -> B@ decision (§2.6).
 dependent :: Int -> Scope Core -> Bool
@@ -841,6 +860,9 @@ partOf s = case s of
   IntoElimMethod _ _ _ _ before _ _ _ -> Method (length before + 1)
   IntoElimIndex _ _ _ _ _ before _ _  -> Index (length before + 1)
   IntoElimTarget {}             -> Target
+  IntoTrustedClaimed {}         -> Claimed
+  IntoTrustedActual {}          -> Actual
+  IntoTrustedBody {}            -> Body
 
 -- | A 'Part' as the user types it (§4.7, and "Thena.Driver"'s @partWords@).
 partWord :: Part -> String
@@ -854,6 +876,8 @@ partWord p = case p of
   Body       -> "body"
   Motive     -> "motive"
   Target     -> "target"
+  Claimed    -> "claimed"
+  Actual     -> "actual"
   Param k    -> "param " ++ show k
   Method k   -> "method " ++ show k
   Index k    -> "index " ++ show k
@@ -1680,6 +1704,9 @@ siteWord site = case site of
   TheMethod k        -> "in method " ++ show (k + 1)
   TheIndex k         -> "in index " ++ show (k + 1)
   TheTarget          -> "in the target"
+  TheClaimed         -> "in the claimed type"
+  TheActual          -> "in the body's own type"
+  TheTrusted         -> "in the trusted body"
 
 renderClash :: Rendering -> Clash -> String
 renderClash ren clash = case clash of

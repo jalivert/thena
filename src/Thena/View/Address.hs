@@ -143,6 +143,9 @@ partOf s = case s of
   IntoElimMethod _ _ _ _ bs _ _ _  -> Method (length bs + 1)
   IntoElimIndex  _ _ _ _ _ bs _ _  -> Index  (length bs + 1)
   IntoElimTarget _ _ _ _ _ _       -> Target
+  IntoTrustedClaimed _ _           -> Claimed
+  IntoTrustedActual  _ _           -> Actual
+  IntoTrustedBody    _ _           -> Body
 
 -- | Walk an address from the root of the development the cursor belongs to.
 --

@@ -636,6 +636,12 @@ rigidRigidLevels dir env st ctx k@(Equate xi s t ty) = case levelPairs of
         , length is == length is' ->
             sequential (zip ps ps' ++ [(m, m')] ++ zip ms ms' ++ zip is is' ++ [(tgt, tgt')])
 
+      -- **A stuck trusted node decomposes field-wise** (MS8 phase 149), the
+      -- congruence 'Thena.Core.Convert' states for the same node and for the
+      -- same reason. It carries no level arguments of its own, so 'levelPairs'
+      -- has nothing for it and this is the whole of the rule.
+      (Trusted c a b, Trusted c' a' b') -> sequential [(c, c'), (a, a'), (b, b')]
+
       _ -> Left (Mismatch ctx s t, stNames st)
 
     -- Sub-problems inherit the enclosing type. It is display-and-recheck

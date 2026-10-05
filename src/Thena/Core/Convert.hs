@@ -208,6 +208,25 @@ related dir env = go
                  [ (TheIndex k, x, y) | (k, x, y) <- zip3 [0 ..] is is' ]
               `andThen` \n4 -> at ctx n4 TheTarget tgt tgt'
 
+      -- **The congruence rule for a stuck trusted node** (MS8 phase 149), and
+      -- it is not the case his ruling of 2026-10-05 dropped. **What was dropped
+      -- was a second site deciding when a trusted term unwraps** — that
+      -- decision lives in 'Thena.Core.Reduce' and nowhere else, and this case
+      -- makes no part of it. It is the same field-wise comparison 'Canonical'
+      -- and 'Eliminate' get, for the same reason: without it a 'Trusted' would
+      -- be the one node in the language with no congruence, and two stuck nodes
+      -- differing only by a δ-step inside a field would be refused.
+      --
+      -- **All three fields, @actual@ included, and that is not redundant.**
+      -- 'Thena.Core.Typing' checks the body /against/ @actual@ with 'subsumes',
+      -- so a well-typed node's @actual@ may be any supertype of the body's own
+      -- type — @trusted T Type₁ b@ and @trusted T Type₀ b@ are both well typed
+      -- for @b : Type₀@, and they contract at different moments. Two terms that
+      -- reduce differently are not convertible, so refusing them is right.
+      (Trusted c a b, Trusted c' a' b') ->
+        at ctx n TheClaimed c c' `andThen` \n1 ->
+          at ctx n1 TheActual a a' `andThen` \n2 -> at ctx n2 TheTrusted b b'
+
       -- η, and the reason 'convert' recurses through 'go' rather than
       -- comparing here: the opened body and the applied spine must both be
       -- whnf'd again before they are compared. That is what discharges phase

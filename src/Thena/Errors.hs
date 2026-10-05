@@ -488,6 +488,9 @@ data Site
   | TheMethod Int
   | TheIndex Int
   | TheTarget
+  | TheClaimed                 -- ^ the type a @Trusted@ claims
+  | TheActual                  -- ^ the type its body was checked at
+  | TheTrusted                 -- ^ its body
   deriving (Eq, Show)
 
 -- | What actually differs, once the site is reached.

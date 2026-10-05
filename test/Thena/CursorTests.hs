@@ -177,7 +177,13 @@ walkedLaws =
 
     descents c =
       [ (part, c')
-      | part <- [Fun, Arg, Dom, Cod, Val, Type, Body, Motive, Target, Param 0, Method 0, Index 0, CanonArg 0]
+      -- **Every 'Part' there is.** @Claimed@ and @Actual@ (MS8 phase 149) cannot
+      -- be reached from this corpus yet — it is parsed, and there is no surface
+      -- syntax for a trusted term until phase 150 — but the list is the list,
+      -- and @Thena.Core.TrustedTests@ exercises those three descents directly.
+      | part <- [ Fun, Arg, Dom, Cod, Val, Type, Body, Motive, Target
+                , Claimed, Actual
+                , Param 0, Method 0, Index 0, CanonArg 0 ]
       , Right (c', _) <- [down part 0 c]
       ]
 

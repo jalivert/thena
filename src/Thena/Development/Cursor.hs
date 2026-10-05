@@ -148,8 +148,9 @@ data Crossing
 -- field, carrying every sibling field, with list fields split into before and
 -- after.
 --
--- 'Bound', 'Free', 'Global' and 'Universe' have no 'Core' fields and generate
--- no steps. 'Eliminate' has six fields and generates five. This type is
+-- 'Bound', 'Free', 'Global', 'Universe' and 'Primitive' have no 'Core' fields
+-- and generate no steps. 'Eliminate' has six fields and generates five;
+-- 'Trusted' has three and generates three. This type is
 -- /derived/ from 'Core': if 'Core' changes, this changes with it (§4.2).
 --
 -- **The three binder steps inline an 'Entry' rather than carrying one.**
@@ -179,6 +180,12 @@ data TermStep
   | IntoElimMethod GlobalName [Level] [Core] Core [Core] [Core] [Core] Core
   | IntoElimIndex  GlobalName [Level] [Core] Core [Core] [Core] [Core] Core
   | IntoElimTarget GlobalName [Level] [Core] Core [Core] [Core]
+  -- **No levels on these three** (MS8 phase 149): a 'Trusted' carries no level
+  -- arguments of its own, so there is nothing for the slot to remember on the
+  -- way out — the levels inside the two types are inside the terms.
+  | IntoTrustedClaimed Core Core   -- ^ @trusted □ actual body@
+  | IntoTrustedActual  Core Core   -- ^ @trusted claimed □ body@
+  | IntoTrustedBody    Core Core   -- ^ @trusted claimed actual □@
   deriving (Eq, Show)
 
 -- | Which core field a descent names — one per 'TermStep', so that no word
@@ -187,11 +194,14 @@ data TermStep
 -- 'Dom' serves Π and λ and 'Body' serves λ and @let@ because in each pair the
 -- field plays the same role; they are one word for one idea, not one word for
 -- two.
+-- **'Body' serves λ, @let@ and @trusted@** (MS8 phase 149) by the same rule:
+-- in all three the other fields describe the term and this one /is/ it.
 data Part
   = Fun | Arg
   | Dom | Cod
   | Val | Type | Body
   | Motive | Target
+  | Claimed | Actual
   | Param Int | Method Int | Index Int | CanonArg Int
   deriving (Eq, Show)
 
@@ -280,6 +290,9 @@ termStep s t = case s of
   IntoElimMethod d ls ps m bs as is tgt -> Eliminate d ls ps m (bs ++ t : as) is tgt
   IntoElimIndex  d ls ps m ms bs as tgt -> Eliminate d ls ps m ms (bs ++ t : as) tgt
   IntoElimTarget d ls ps m ms is        -> Eliminate d ls ps m ms is t
+  IntoTrustedClaimed a b  -> Trusted t a b
+  IntoTrustedActual  c b  -> Trusted c t b
+  IntoTrustedBody    c a  -> Trusted c a t
 
 -- | The prefix: everything above the focus, root first. Always meaningful,
 -- whichever fragment the focus is in — §4.0 A4's \"the prefix spans both
@@ -504,6 +517,10 @@ down part n cur = case cur of
       here n (IntoElimIndex d ls ps m ms bs as tgt) a
     (Target, Eliminate d ls ps m ms is tgt) ->
       here n (IntoElimTarget d ls ps m ms is) tgt
+
+    (Claimed, Trusted c a b) -> here n (IntoTrustedClaimed a b) c
+    (Actual,  Trusted c a b) -> here n (IntoTrustedActual  c b) a
+    (Body,    Trusted c a b) -> here n (IntoTrustedBody    c a) b
 
     _ -> Left NoSuchPart
     where
@@ -891,6 +908,9 @@ overLevels sub cur = case cur of
         IntoElimIndex d (levels ls) (map at ps) (at m) (map at ms) (map at bs) (map at as) (at tgt)
       IntoElimTarget d ls ps m ms is ->
         IntoElimTarget d (levels ls) (map at ps) (at m) (map at ms) (map at is)
+      IntoTrustedClaimed a b -> IntoTrustedClaimed (at a) (at b)
+      IntoTrustedActual  c b -> IntoTrustedActual  (at c) (at b)
+      IntoTrustedBody    c a -> IntoTrustedBody    (at c) (at a)
 
     levels = map (substLevel sub)
 

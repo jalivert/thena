@@ -120,6 +120,13 @@ genCore depth = sized go
             <*> resize (n `div` 4) (listOf half)
             <*> resize (n `div` 4) (listOf half)
             <*> half
+        -- A trusted node is generated for the reason a literal is (MS8 phase
+        -- 149): every property stated over 'genTerm' should see one. Two of
+        -- them earn their keep immediately — @Thena.Core.ReduceTests@' *"whnf
+        -- invents no free variable"* is the check that the contraction's
+        -- 'Thena.Core.Term.beyond' seed cannot leak a variable 'convert' minted
+        -- while deciding the side condition.
+        , Trusted <$> half <*> half <*> half
         ]
       where
         half   = resize (n `div` 2) (genCore depth)
@@ -173,6 +180,7 @@ wellScoped = go 1000
       Canonical _ _ as -> all (go c) as
       Eliminate _ _ ps m ms is tgt ->
         all (go c) ps && go c m && all (go c) ms && all (go c) is && go c tgt
+      Trusted cl ac bd -> go c cl && go c ac && go c bd
       where
         under n sc = let (v, n') = fresh n in go n' (open v sc)
 

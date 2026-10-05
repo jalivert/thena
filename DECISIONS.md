@@ -449,6 +449,49 @@ proof about `LC-subst` follow it at all. What is trusted is the same as for
 `eqString`: the verdict on two literals. The refutation it writes is built
 from `decString` itself and checked by the kernel.
 
+### Trust is a term, and it reduces away when it stops being needed
+
+*Decided 2026-10-04.* Every system has a way to say *"this is true, take my word
+for it"* — Coq's `Axiom`, Agda's `postulate`, Lean's `sorry`, Idris 2's
+`believe_me`. **Not one of them reduces during type checking**, which is the right
+call for an axiom and useless when the thing you are asserting has to compute.
+Thena has a term instead:
+
+```
+trusted T e
+```
+
+It is an ordinary core term. `e` is checked as usual, at whatever type it really
+has; the node is then given `T`, and **nothing relates the two** — that is the
+trust, and it is the whole of it. So `trusted Empty (refl Nat zero)` type-checks,
+and a development that rests on a claim like it is verified modulo that claim.
+
+**What makes it worth having rather than a postulate is that it is conditional,
+and it reduces.** `trusted T e` contracts to `e` the moment `T` and `e`'s own type
+turn out to be the same type, and stays frozen until then. Internally the node
+carries both — `trusted claimed actual body` — so the pair is the obligation with
+both halves visible, and you can see the two converge as the names in them
+instantiate. A node that never becomes checkable never reduces, and then it is
+behaving exactly as a postulate would, except that it is local to one term, its
+body was checked at *some* type, and it is listed when you ask what a theorem
+depends on. Agda's `primTrustMe` is the same idea and the only precedent for it.
+
+**Why a λ cannot do this**, since it is the first thing to try:
+`λ (a b : String) . refl String a` has type `∀ a b -> Eq String a a`, never
+`∀ a b -> Eq String a b`. A λ defers *evaluation*, not *checking* — its body is
+checked once, generically, with the variable arbitrary. Nothing in an ordinary term
+language keeps a **typing** judgement open, because a term's type is settled when
+it is checked. Making the obligation an argument,
+`λ (a b : String) (p : Eq String a b) . p`, is the honest trust-free version and
+works exactly when somebody can supply `p`; for a name the system does not know,
+nobody can.
+
+**The restriction worth knowing about.** The contraction asks the real conversion
+checker, not a syntactic approximation of it, but it declines to act when that
+comparison comes back owing a constraint on universe levels — which happens only
+when a level is still unknown. The node simply stays, and a stuck well-typed term
+is a valid proof, so nothing is lost but an occasional reduction.
+
 ### A token class is an ordinary definition, and its regex takes its type as an argument
 
 *Decided 2026-09-19.*

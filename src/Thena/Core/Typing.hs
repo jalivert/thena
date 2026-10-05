@@ -230,6 +230,32 @@ infer env ctx n term = case term of
            in spine env ctx n2 MayBind d (substLevelsIn sub ety)
                 (ps ++ [m] ++ ms ++ is ++ [tgt])
 
+  -- **The trusted node, and the rule is where the trust is** (MS8 phase 149).
+  -- Both types must be types and the body must check at @actual@; the node is
+  -- then given @claimed@, and **nothing relates the two.** That gap is the
+  -- feature: a term's type is settled when it is checked, and no λ can keep a
+  -- /typing/ judgement open (@RULINGS.md@, 2026-10-04 — @λ a b . refl String a@
+  -- has type @∀ a b -> Eq String a a@ and never @∀ a b -> Eq String a b@).
+  -- What relates them is 'Thena.Core.Reduce.whnf''s contraction, per instance,
+  -- once the names in them have instantiated far enough to be compared.
+  --
+  -- **@actual@ is checked against the body rather than inferred from it, and
+  -- that is what keeps it honest.** It is derived data — elaboration puts it
+  -- there — so if nothing held it to the body, substitution could leave a
+  -- recorded type that no longer describes the recorded term and the
+  -- contraction would fire on a lie (@spec/representation.md@ §3.6). Checking
+  -- it here means a node that survives @certify@ cannot be lying about it.
+  --
+  -- **What is /not/ checked is whether the claim is plausible**, and that is
+  -- the whole of the trust: @trusted Empty (Eq Nat zero zero) (refl Nat zero)@
+  -- is a well-typed proof of @Empty@. The verification is modulo the trusted
+  -- claims a development rests on, which is why phase 151 makes them visible
+  -- rather than trying to make them safe.
+  Trusted claimed actual body ->
+    sortOf env ctx n claimed `andThen` \_ n1 ->
+      sortOf env ctx n1 actual `andThen` \_ n2 ->
+        check env ctx n2 body actual `andThen` \() n3 -> (Right claimed, [], n3)
+
 -- | Does this term have this type? @infer@, then @convert@ (§5.2).
 check
   :: GlobalEnv -> Context -> Int -> Core -> Core

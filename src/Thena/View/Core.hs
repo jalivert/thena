@@ -109,6 +109,24 @@ data Shape
       }
     -- ^ **The slots are labelled**, so the editor can let you point at /the
     -- motive/ rather than at /argument four/.
+  | ATrusted
+      { trustedClaimed :: Display
+      , trustedActual  :: Display
+      , trustedBody    :: Display
+      }
+    -- ^ @trusted claimed actual body@ (MS8 phase 149): a type claimed, the type
+    -- the body was actually checked at, and the body.
+    --
+    -- **Both types cross, and the editor should draw both — his observation,
+    -- 2026-10-05.** The pair /is/ the obligation, written down with both halves
+    -- visible: as the names in them instantiate the two converge, the node
+    -- contracts away, and until it does @actual@ is what tells the reader
+    -- whether the trust is still load-bearing. A view that showed the claim
+    -- alone would hide exactly that.
+    --
+    -- **@actual@ is the system's answer and never the user's**, which is why it
+    -- is here rather than something the editor derives: it is on the term
+    -- because elaboration inferred it, and the editor has no way to compute it.
   | ADangling Int
     -- ^ a @Bound@ index nothing binds. Representable and not well formed (§3.4);
     -- the terminal printer shows it too rather than pretending.
@@ -355,6 +373,11 @@ displayCore grammars budget env binders counter here term =
               (go b e' bs' n1 (down at Body) (open v sc))
       Canonical (GlobalName g) ls as ->
         AFormer g (map renderLevelAtom ls) (slots b e bs n at CanonArg as)
+      Trusted cl ac bd ->
+        ATrusted
+          (go b e bs n (down at Claimed) cl)
+          (go b e bs n (down at Actual) ac)
+          (go b e bs n (down at Body) bd)
       Eliminate d' ls ps m ms is tgt ->
         AnElimination
           (let GlobalName g = d' in g)

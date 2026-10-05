@@ -1787,6 +1787,7 @@ partWords :: [String]
 partWords =
   [ "fun", "arg", "dom", "cod", "val", "type", "body"
   , "motive", "target", "param", "method", "index"
+  , "claimed", "actual"
   ]
 
 -- | A field word, and the position written after it if there was one.
@@ -1808,6 +1809,9 @@ partOf w k = case (w, k) of
   ("body",   Nothing) -> Just Body
   ("motive", Nothing) -> Just Motive
   ("target", Nothing) -> Just Target
+  -- @body@ already serves @trusted@'s third field: one word, one idea (§4.7).
+  ("claimed", Nothing) -> Just Claimed
+  ("actual",  Nothing) -> Just Actual
   ("arg",    Just i)  -> Just (CanonArg i)
   ("param",  Just i)  -> Just (Param i)
   ("method", Just i)  -> Just (Method i)
@@ -1826,6 +1830,8 @@ partWord p = case p of
   Body       -> "body"
   Motive     -> "motive"
   Target     -> "target"
+  Claimed    -> "claimed"
+  Actual     -> "actual"
   CanonArg _ -> "arg"
   Param _    -> "param"
   Method _   -> "method"

@@ -5,6 +5,12 @@
 -- @Global@ is split into @Env@ (data only) and @Declare@ (checking and
 -- generation), so that δ can unfold a global and ι can read an inductive
 -- definition without this module needing to know how either was checked.
+-- **It does import "Thena.Core.Convert", through its @.hs-boot@, and that is
+-- the one place the layering bends** (MS8 phase 149). The trusted contraction's
+-- side condition is full convertibility — his ruling of 2026-10-05, and not a
+-- syntactic approximation — so the lower module has to ask the higher one one
+-- question. See @Convert.hs-boot@ for why that is a fact about the module
+-- layout and not about the design.
 module Thena.Core.Reduce
   ( whnf
   , PrimitiveRule (..)
@@ -13,6 +19,7 @@ module Thena.Core.Reduce
 
 import Data.List (find)
 
+import {-# SOURCE #-} Thena.Core.Convert (convert)
 import Thena.Core.Level (Level (..), LevelVar, instantiateLevels)
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar)
 import Thena.Core.Term
@@ -21,7 +28,9 @@ import Thena.Core.Term
   , Literal (..)
   , Var
   , Ident (..)
+  , beyond
   , close
+  , freeVars
   , fresh
   , instantiate
   , primitiveType
@@ -40,7 +49,8 @@ import Thena.Global.Env
   , recursiveArgument
   )
 
--- | Reduce to weak head normal form (§5.1): β, δ (all three forms), ν, and ι.
+-- | Reduce to weak head normal form (§5.1): β, δ (all three forms), ν, ι, the
+-- primitives' rule, and the trusted contraction.
 --
 -- Never descends under a binder — a 'Pi' or 'Lam' is already whnf, whatever
 -- its domain or body contain, and nothing here opens either 'Scope'.
@@ -130,6 +140,67 @@ whnf env ctx = go 0
               Canonical cg _ cargs
                 | Just result <- iota env d ls ps m ms cg cargs -> go nargs result
               _ -> Eliminate d ls ps m ms is tgt'
+
+      -- **The trusted contraction** (MS8 phase 149): the claim is discharged
+      -- and the node disappears when the type it claims and the type its body
+      -- was checked at are convertible. Otherwise it stands as a value — the
+      -- node is where the unproved obligation is written down, so leaving it
+      -- there is the honest answer and not a failure to reduce.
+      --
+      -- **Trust is conditional — HIS, 2026-10-04**, and this is the whole of
+      -- the condition. The unconditional form, which unwraps whatever the two
+      -- types are, is not to be built: no mainstream system ships a typing
+      -- trust that reduces unconditionally, and the one reducing form anybody
+      -- does ship (Agda's @primTrustMe@) is conditional in exactly this way.
+      --
+      -- The node stays in the same application position, so @nargs@ passes
+      -- through — @trusted (A -> B) (A -> B') f x@ is an application of
+      -- whatever @f@ reduces to.
+      Trusted claimed actual body
+        | unwraps claimed actual -> go nargs body
+        | otherwise              -> t
+
+    -- | Is the claim discharged? **Full convertibility, decided by calling
+    -- 'convert' — HIS ruling, 2026-10-05**, and not a syntactic approximation
+    -- of it. α-equality is a fast path and nothing more, exactly as 'convert'
+    -- has one of its own.
+    --
+    -- **IT FIRES ONLY WHEN THE OBLIGATION LIST COMES BACK EMPTY, AND THE
+    -- REASON IS THE MISSING COLLECTOR.** 'convert' answers with a verdict,
+    -- level obligations and a counter; 'whnf' answers with a bare 'Core', so
+    -- it has nowhere to put an obligation. Every other obligation in the
+    -- system is produced where there is a collector — 'convert' is called from
+    -- "Thena.Core.Typing", which accumulates — and that is why the standing
+    -- practice of dropping them during a proof is safe: the pass that
+    -- re-checks the finished development is at a site with a pocket, so it
+    -- re-derives them. **This is the one site with no pocket**, so an
+    -- obligation arising here would be dropped by /every/ pass including the
+    -- re-check, leaving 'Thena.Kernel.certify''s level scheme short a
+    -- constraint its use sites should have owed. Declining to act on it costs
+    -- nothing: the node stays, the elimination above it stays stuck, and a
+    -- stuck well-typed term is a valid proof. See @HAZARDS.md@.
+    --
+    -- **The cost is close to zero** because an obligation arises only when a
+    -- level /meta/ is in the comparison, and a written type has concrete
+    -- levels. Lifting the restriction means threading obligations out of
+    -- reduction, which is @~hwgfx@'s territory and not this phase's.
+    --
+    -- **The counter is seeded with 'beyond' rather than threaded.** 'convert'
+    -- mints variables to open binders with, and 'whnf' has no counter to give
+    -- it; a variable minted below one already in play would make two distinct
+    -- binders compare equal. Seeding above everything the comparison can see —
+    -- the context and the two types — is what 'beyond' exists for, and it is
+    -- sound here for a reason that does not generalise: **nothing minted
+    -- escapes.** The verdict is a 'Bool' and the reduct is @body@, which this
+    -- comparison never touches, so no variable it invented can reach a term or
+    -- a message.
+    unwraps claimed actual
+      | claimed == actual = True
+      | otherwise = case convert env ctx seed claimed actual of
+          (Nothing, [], _) -> True
+          _                -> False
+      where
+        seed = beyond (map entryVar ctx ++ freeVars claimed ++ freeVars actual)
 
 -- --------------------------------------------------------------------------
 -- The primitives' rule (MS6 phase 97b)

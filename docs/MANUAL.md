@@ -532,11 +532,14 @@ Once you are inside a term, each field has its own word — so no word ever
 changes meaning depending on what is in focus:
 
 ```
-fun  arg  dom  cod  val  type  body  motive  target
+fun  arg  dom  cod  val  type  body  motive  target  claimed  actual
 param ‹n›   method ‹n›   index ‹n›   arg ‹n›
 ```
 
-The numbered ones count from one.
+The numbered ones count from one. `claimed` and `actual` descend into the two
+types a trusted term carries — the type it claims, and the type its body was
+actually checked at; `body` reaches the body itself, as it does under a `λ` and
+in a `let`.
 
 ```
 thena spine> :goal ∀ (n : Nat) -> Eq {0} Nat n n
@@ -1118,7 +1121,7 @@ language and elaborated on load.
 | `reduce` | reduce the focused term in place |
 | `along` `into` `back` | move on the chain |
 | `cross type` / `cross val` | move into a term |
-| `fun` `arg` `dom` `cod` `val` `type` `body` `motive` `target` | descend into a field |
+| `fun` `arg` `dom` `cod` `val` `type` `body` `motive` `target` `claimed` `actual` | descend into a field |
 | `param ‹n›` `method ‹n›` `index ‹n›` `arg ‹n›` | descend into a numbered field |
 | `prove` | let the rule engine choose and run a rule |
 | `retry` / `retry ‹n›` | backtrack to a choice point |

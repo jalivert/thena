@@ -86,6 +86,12 @@ redraw = at Loose
             , bracket is
             , at Atom t
             ]
+      -- **The claim, the body's own type and the body** (MS8 phase 149), in
+      -- that order and all three — the printer shows both halves of the pair
+      -- because the pair is the obligation, and this has to agree with it.
+      ATrusted claimed actual body ->
+        paren (prec > Spine) $
+          unwords ["trusted", at Atom claimed, at Atom actual, at Atom body]
       -- **A tagged region is atomic, at every precedence** (phase 110): the
       -- backticks already delimit it, so nothing here ever parenthesises one.
       --
