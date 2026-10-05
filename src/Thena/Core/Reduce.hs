@@ -183,7 +183,8 @@ whnf env ctx = go 0
     -- **The cost is close to zero** because an obligation arises only when a
     -- level /meta/ is in the comparison, and a written type has concrete
     -- levels. Lifting the restriction means threading obligations out of
-    -- reduction, which is @~hwgfx@'s territory and not this phase's.
+    -- reduction, so that this site has a pocket of its own — which is a change
+    -- to 'whnf''s signature and to every caller of it, and not this phase's.
     --
     -- **The counter is seeded with 'beyond' rather than threaded.** 'convert'
     -- mints variables to open binders with, and 'whnf' has no counter to give

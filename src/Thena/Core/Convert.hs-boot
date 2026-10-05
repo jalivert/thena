@@ -8,10 +8,9 @@
 -- no objection to them.**
 --
 -- **This file is a property of the module layout, not of the design.** A kernel
--- written from scratch would put reduction and conversion in one module and
--- need nothing here; that is item @~hwgfx@'s territory, and it is why this is a
--- boot file rather than a reshuffle of two modules the rest of the system
--- imports by name.
+-- written from scratch would put reduction and conversion in one module and need
+-- nothing here, which is why this is a boot file rather than a reshuffle of two
+-- modules the rest of the system imports by name.
 --
 -- Nothing else goes in here. A boot file is a second declaration of whatever it
 -- names, so every line added is a line that can come to disagree with
