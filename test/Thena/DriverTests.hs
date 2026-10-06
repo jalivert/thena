@@ -95,7 +95,7 @@ everyColonCommand =
   [ ":help", ":quit", ":core", ":surface", ":dev", ":show", ":elim", ":where", ":matches", ":accepts", ":produces"
   , ":choices", ":goal", ":whnf", ":infer", ":parse", ":done", ":load", ":bases", ":rules"
   , ":revalidate", ":extract", ":theorem", ":suspend", ":resume", ":abandon"
-  , ":proofs", ":undo", ":convert", ":step", ":run"
+  , ":proofs", ":undo", ":convert", ":step", ":run", ":trust"
   ]
 
 -- | **Hand-written, and it had the same gaps as the list it checks** (MS4

@@ -29,6 +29,7 @@ library
         Thena.Core.Reduce
         Thena.Core.Level
         Thena.Core.Term
+        Thena.Core.Trust
         Thena.Core.Typing
         Thena.Core.Unify
         Thena.Development.Component
@@ -87,6 +88,7 @@ library
         Thena.View.Statement
         Thena.View.Surface
         Thena.View.Tokens
+        Thena.View.Trust
         Thena.View.Type
     other-modules:
         Paths_thena
@@ -145,6 +147,7 @@ library view
         Thena.View.Statement,
         Thena.View.Surface,
         Thena.View.Tokens,
+        Thena.View.Trust,
         Thena.View.Type,
         -- The file door: reading what a command named, and starting a session
         -- with the shipped rule base and prelude in it (§130).
@@ -239,6 +242,7 @@ test-suite thena-test
         Thena.Core.ReduceTests
         Thena.Core.LevelTests
         Thena.Core.PrimitiveTests
+        Thena.Core.TrustTests
         Thena.Core.TrustedTests
         Thena.Core.TermTests
         Thena.Core.TypingTests

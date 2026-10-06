@@ -31,6 +31,9 @@ a bare word acts, a word with a colon looks.
   :parse ‹L› … :done            parse every line as an L term; Tab at the cursor
   :whnf / :whnf ‹t›             reduce the focus / a term, without committing
   :convert ‹t› ≟ ‹u›            are two terms convertible
+  :trust                        the trust level, and what this proof rests on
+  :trust none / no-undischargeable / any
+                                how much unproved typing to allow
   :elim ‹D› [‹universe›]        a datatype’s elimination rule
   :matches                      which rules apply here
   :accepts ‹type›               what takes a value of that type

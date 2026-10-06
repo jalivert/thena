@@ -63,6 +63,7 @@ import Thena.Core.Term
 -- Only for 'Core'\'s @Eliminate@, which "Thena.Instral.Ops" also has a constructor
 -- named: the op that builds one and the node it builds must be told apart.
 import Thena.Core.Reduce (whnf)
+import Thena.Core.Trust (TrustLevel)
 import Thena.Core.Typing (check, infer, sortOf)
 import Thena.Core.Unify (UnifyResult (..), blockers, unify, unifyInto)
 import qualified Thena.Development.Component as Component
@@ -241,6 +242,21 @@ data Machine = Machine
     -- **Nothing is prevented**, which is the second principle rather than a
     -- guard rail: 'retryFrom' does not consult this, so the alternative is one
     -- word away — what changes is that the word is the user's.
+  , trustLevel  :: TrustLevel
+    -- ^ **how much trusted-but-underived typing the session permits** (MS8
+    -- phase 151). NOT backtrackable, with 'globals' and 'names' above it.
+    --
+    -- **The engine owns it and the frontend switches it — HIS RULING,
+    -- 2026-10-06.** It is here rather than beside 'Thena.Driver.sessionFuel'
+    -- because a rule searching for a proof must be able to see what it may
+    -- reach for; a level the driver held privately would make replaying a
+    -- script under @:revalidate@ depend on a toggle nobody recorded.
+    --
+    -- **Nothing in this module reads it yet.** Classifying is
+    -- "Thena.Core.Trust" and enforcing is @qed@'s, which is the separation his
+    -- ruling asks for: policy belongs to the caller. It sits here so that there
+    -- is one answer to /what does this session permit/, and so that a rule that
+    -- comes to ask has somewhere to ask.
   }
   deriving (Eq, Show)
 

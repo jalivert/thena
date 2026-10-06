@@ -501,6 +501,47 @@ level arguments are part of what it is — so the term contracts at `honest {0}`
 rather than where it was declared. A term still printing as `trusted` is one whose
 claim has not been met yet, which is what the pair is there to tell you.
 
+### How much you trust is a setting, not a verdict the checker hands down
+
+*Decided 2026-10-06.* Given a term whose type is merely asserted, the obvious
+move is to refuse it somewhere. Thena classifies it instead and lets the user say
+how much to allow.
+
+Every claim a development rests on is **discharged** — the two types are
+convertible, so the claim is met and the trust is carrying nothing —
+**pending**, or **undischargeable**, which means it can never be met by any
+instance in any later session. The last is decided by comparing the two types
+position by position: `Eq Nat zero (succ zero)` against `Eq Nat zero zero` agrees
+at the head and clashes at the third argument, so a head-only test would miss it.
+Anything not positively a clash between closed formers counts as merely pending,
+because calling an honest claim impossible costs a refused proof while the
+converse costs only a less specific report.
+
+**A claim is read at the use where the use settles it, and at the definition
+otherwise, and the report says which.** That distinction is the point rather than
+a detail. A claim like `∀ (a b : Nat) -> Eq Nat a b` is perfectly open read
+inside its own body and is a lie at `… zero (succ zero)`, so the
+`Print Assumptions` shape — list what a theorem's definitions assume — reports a
+proof of `Empty` built that way as resting on one open claim. A use is only
+allowed to settle it when it actually does: a partial application, a bare
+reference that passes nothing, and a use reached through a further definition all
+fall back to the definition. Threading arguments through every hop instead would
+be full normalisation, which may diverge and has no business in `qed`'s path.
+
+**The session carries a trust level with three settings** — *no trust*, *no
+undischargeable trust*, *any trust* — and the user moves between them freely,
+including between theorems. `qed` asks about trust *after* the kernel has
+accepted the term, because this is policy and not the kernel's judgement, and it
+reports the classification whether or not it refuses. The expected pattern is to
+sit on the middle setting and drop to *any* for one strange thing.
+
+**Only *no trust* is a soundness guarantee, and the middle one is not sold as
+one.** It admits a discharged claim, which is sound — the two types are
+convertible, so the body already has the type the node claims. What it refuses is
+a claim that is provably false, and a claim can be discharged at every instance
+anybody has written down and still be nonsense: `Empty` is provable that way. The
+middle setting stops accidents, not adversaries.
+
 ### A token class is an ordinary definition, and its regex takes its type as an argument
 
 *Decided 2026-09-19.*

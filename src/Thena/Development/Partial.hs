@@ -3,6 +3,7 @@ module Thena.Development.Partial
   ( Partial (..)
   , Constraint (..)
   , freeVarsPartial
+  , termsIn
   , Impure (..)
   , extract
   ) where
@@ -11,7 +12,7 @@ import Data.List (nub)
 
 import Thena.Core.Context (Context, Entry (..))
 import Thena.Core.Term (Core (..), Ident, Var, close, freeVars)
-import Thena.Development.Component (Component (..))
+import Thena.Development.Component (Component (..), forget)
 
 -- | @p ::= t | c . p | κ . p@ — the grammar of §3.3 as a cons list with a
 -- typed end.
@@ -69,6 +70,45 @@ freeVarsPartial = nub . go
     goEntry e = case e of
       Hypothesis _ _ ty   -> freeVars ty
       Definition _ _ v ty -> freeVars v ++ freeVars ty
+
+-- | Every core term the development holds, each with the context it sits in
+-- (MS8 phase 151).
+--
+-- **Here for 'freeVarsPartial''s reason and no other**: the walk is the same
+-- one, and a second copy of it somewhere else would be a second thing to keep
+-- in step with the five components. What differs is only what comes back —
+-- whole terms rather than the variables in them.
+--
+-- **The context is accumulated down the chain with 'forget'**, which is what
+-- makes each term come back with what it may mention: a component's own type
+-- and value are read /before/ its binding is added, because that is where they
+-- stand. A 'Pending' constraint carries its own local prefix Ξ, which exists
+-- nowhere else in the development, so it is appended for that constraint's
+-- three terms and dropped again.
+--
+-- Outermost first, in the order the chain is written. What wants this is the
+-- trust accounting's mid-proof report — /what does this proof currently rest
+-- on/ is a question about the development, so it is asked of the development
+-- and not of a term nothing can extract yet.
+termsIn :: Partial -> [(Context, Core)]
+termsIn = go []
+  where
+    go ctx p = case p of
+      Trailing t     -> [(ctx, t)]
+      Pending k rest -> goConstraint ctx k ++ go ctx rest
+      Under c rest   -> goComponent ctx c ++ go (ctx ++ [forget c]) rest
+
+    goComponent ctx c = case c of
+      Assume _ _ ty    -> [(ctx, ty)]
+      Define _ _ v ty  -> [(ctx, v), (ctx, ty)]
+      Claim  _ _ ty    -> [(ctx, ty)]
+      -- A guess's body is a development of its own, standing under everything
+      -- above it — so it is walked with this context and not with a fresh one.
+      Guess  _ _ g ty  -> go ctx g ++ [(ctx, ty)]
+      Quantify _ _ ty  -> [(ctx, ty)]
+
+    goConstraint ctx (Equate xi s t ty) =
+      [ (ctx ++ xi, u) | u <- [s, t, ty] ]
 
 -- --------------------------------------------------------------------------
 -- Reading the term off a finished construction (§5.3, §7.5)

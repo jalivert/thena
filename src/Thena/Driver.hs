@@ -23,6 +23,7 @@ module Thena.Driver
   , fuelOf
   , parsingLanguage
   , pendingQuestion
+  , restsOn
   , newSession
   , withRuleBases
   , Response (..)
@@ -90,7 +91,7 @@ import Data.List (dropWhileEnd, isSuffixOf, nub, stripPrefix)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Thena.Development.Cursor (expectedType, Cursor, Focus (..), focus, overLevels)
-import Thena.Development.Partial (Partial (..), extract)
+import Thena.Development.Partial (Partial (..), extract, termsIn)
 import Thena.Engine
   ( ChoicePoint (..)
   , Exec (..)
@@ -146,6 +147,12 @@ import Thena.Global.Env
   , inductiveLevel
   )
 import Thena.Core.Convert (convert)
+import Thena.Core.Trust
+  ( TrustClaim (..)
+  , TrustLevel (..)
+  , trustIn
+  , unmet
+  )
 import Thena.Core.Typing (infer, sortOf)
 import qualified Thena.Instral.Ops as Ops
 import Thena.Instral.Ops
@@ -473,11 +480,69 @@ currentAttempt s = case sessionWork s of
   Scratch        -> Nothing
   Attempting att -> Just att
 
+-- ---------------------------------------------------------------------------
+-- Trust accounting, asked of a session (MS8 phase 151)
+-- ---------------------------------------------------------------------------
+
+-- | What a closed term rests on, and the session with its name counter advanced
+-- past what the report shows.
+--
+-- **The counter is written back, and that is not belt and braces.** A
+-- 'TrustClaim' carries the two types with every binder above them opened, so a
+-- variable the walk minted is printed to the user — and §7.4's rule for the
+-- counter is that a name already shown is never handed out again.
+-- 'Thena.Kernel.certify' may seed and discard because nothing it mints escapes
+-- its verdict; this escapes into a message.
+termTrust :: Session -> Core -> ([TrustClaim], Session)
+termTrust s t = advanced s (trustIn (globals m) [] (names m) t)
+  where
+    m = sessionMachine s
+
+-- | What the development a session is on currently rests on, for a view.
+--
+-- **Seeds the name counter and discards it, which is what every view does** —
+-- see 'Thena.View.sessionNames'. A command threads it back instead, because a
+-- command advances the session and a look may not; @:trust@ and @qed@ take the
+-- other door for that reason.
+restsOn :: Session -> [TrustClaim]
+restsOn = fst . developmentTrust
+
+-- | What the development a session is on currently rests on.
+--
+-- **A view on the development and not a hook in type checking — HIS RULING,
+-- 2026-10-06.** Checking runs on every fill and every conversion; /what does
+-- this proof currently rest on/ is a question about the chain, the same shape
+-- as @:where@, so it is answered when it is asked and nothing is recomputed in
+-- between. That is also what lets a frontend show it live.
+--
+-- **The whole chain and every term in it**, because a trusted node in a
+-- component nothing has reached yet is still something the finished proof will
+-- rest on — and mid-proof there is no extracted term to ask about instead.
+developmentTrust :: Session -> ([TrustClaim], Session)
+developmentTrust s =
+  advanced s (foldl one ([], names m) (termsIn (flatten (development m))))
+  where
+    m = sessionMachine s
+    one (acc, n) (ctx, t) =
+      let (cs, n1) = trustIn (globals m) ctx n t in (acc ++ cs, n1)
+
+-- | One claim per distinct verdict. The same node is reached once per term it
+-- stands in, and a chain repeats a type as often as it mentions it.
+advanced :: Session -> ([TrustClaim], Int) -> ([TrustClaim], Session)
+advanced s (claims, n) =
+  (nub claims, s { sessionMachine = (sessionMachine s) { names = n } })
+
 newSession :: Session
 newSession = Session
-  -- The trailing @0@ is 'Engine.lineFloor' (MS5 phase 95): an empty stack, so
-  -- the first line's failures have nothing below them to decline.
-  { sessionMachine   = Machine (Exec [] [] []) ps [] emptyGlobals [] [] [] n 0
+  -- The @0@ is 'Engine.lineFloor' (MS5 phase 95): an empty stack, so the first
+  -- line's failures have nothing below them to decline.
+  --
+  -- **A fresh session sits at 'NoUndischargeableTrust'** (MS8 phase 151), which
+  -- is the rung his ruling of 2026-10-06 expects a user to live on: a claim that
+  -- can never be met is refused and one merely unmet is not. It is deliberately
+  -- not 'NoTrust', which is the guarantee a user steps /up/ to, and deliberately
+  -- not 'AnyTrust', which reports and enforces nothing.
+  { sessionMachine   = Machine (Exec [] [] []) ps [] emptyGlobals [] [] [] n 0 NoUndischargeableTrust
   , sessionWork      = Scratch
   , sessionSuspended = []
   , sessionHistory   = (Exec [] [] [], ps, []) :| []
@@ -526,16 +591,37 @@ data Response
     -- thesis §2.3)
   | Extracted Core
   | Proving GlobalName Core   -- ^ @:theorem@ — a proof is now current
-  | Proved GlobalName [LevelVar] [Obligation] Core
+  | Proved GlobalName [LevelVar] [Obligation] Core [TrustClaim]
     -- ^ @qed@ — admitted, and the proof is closed. The levels are the scheme
     -- generalisation produced (MS3 phase 33b), not anything that was written,
     -- and the obligations are the scheme's own constraints.
+    --
+    -- **The trailing list is what the proof rests on** (MS8 phase 151): every
+    -- trusted claim the admitted term reaches, classified. It is here and not
+    -- only on the refusal because **@qed@ reports — his ruling, 2026-10-06**:
+    -- at 'Thena.Core.Trust.AnyTrust' nothing is enforced and the classification
+    -- /is/ the output, and at the stricter rungs a proof that went in resting on
+    -- something unmet-but-possible is exactly the thing a user wants told.
+    -- Empty for every proof that rests on nothing, which is almost all of them.
     --
     -- **The constraints travel with the parameters**, because half a scheme is
     -- worse than none: a scheme without its @(suc ℓ ≤ 2)@ reads as usable at
     -- every level and is not. @:show@ printed them from the moment 33b stored
     -- them; this line — the one the user reads at the moment the scheme comes
     -- into existence — did not.
+  | Trusting TrustLevel [TrustClaim]
+    -- ^ @:trust@ — the level the session is at, and what the development it is
+    -- on currently rests on (MS8 phase 151).
+    --
+    -- **One response for both the look and the set**, because a level named
+    -- without its consequences says nothing: switching to
+    -- 'Thena.Core.Trust.NoTrust' is only informative beside the list of what
+    -- that now refuses.
+    --
+    -- **The list is a view on the development** — his ruling, 2026-10-06 — and
+    -- not something type checking produces. Checking runs on every fill; /what
+    -- does this proof rest on/ is the same kind of question as @:where@, so it
+    -- is asked when it is asked and nothing is recomputed in between.
   | Suspended GlobalName      -- ^ @:suspend@
   | Resumed GlobalName        -- ^ @:resume@
   | Abandoned GlobalName      -- ^ @:abandon@
@@ -674,6 +760,18 @@ data Stop
   | Uncertified KernelError
     -- ^ the kernel would not accept what the development built (§5.3). Shaped
     -- like 'Refused': the command is abandoned, and there is nothing to retry
+  | Untrusted TrustLevel [TrustClaim]
+    -- ^ @qed@ — the kernel accepted it and **the session's trust level does
+    -- not** (MS8 phase 151). The level asked, and every claim the term rests
+    -- on, not only the offending ones: a user deciding whether to step down a
+    -- rung wants the whole picture.
+    --
+    -- **A second stop and not a 'Uncertified'**, because it is not the kernel's
+    -- answer. @certify@ says whether the term has the type; whether the trust in
+    -- it is acceptable is policy, and his ruling of 2026-10-06 keeps the two
+    -- apart — @qed@ asks two questions in sequence rather than one that grew.
+    -- The proof is left standing, as a refused generalisation leaves it, so the
+    -- development is still there to look at and the level is one word away.
   | Paused Int
     -- ^ the fuel ran out: the machine can go on, and the number is how many
     -- instructions this run spent (phase 128).
@@ -1547,6 +1645,10 @@ dispatch s name arg = case name of
   ":proofs"  -> noArgument (s, Proofs (currentAttempt s) (sessionSuspended s))
   ":undo"    -> noArgument undo
   ":convert" -> conversion
+  -- **The session's trust level, and what the development rests on** (MS8
+  -- phase 151). A colon, for ':step''s reason: it manages the session rather
+  -- than acting on the development.
+  ":trust"   -> trusting
   -- **The two halves of fuel** (phase 128): @:step@ sets what every line may
   -- spend, @:run@ spends a budget once. Neither is a mode — @:step on@ is
   -- @:step 1@, and @:run@ with no argument is the absence of a budget rather
@@ -1829,14 +1931,30 @@ dispatch s name arg = case name of
           -- least value there is nothing to default it to. The proof is left
           -- standing rather than admitted, so the development is still there to
           -- look at.
+          -- **@qed@ asks two questions in sequence, not one question that
+          -- grew — HIS RULING, 2026-10-06.** The kernel has already answered
+          -- the first: does the term have the type. The second is whether the
+          -- trust the term rests on is acceptable, which is **policy and does
+          -- not go in 'certify'** — the same separation that kept the level out
+          -- of @infer@. So it is asked here, after the run, on the extracted
+          -- term, and the answer travels either way: a refusal names what it
+          -- refused, and an admission carries the report regardless, because at
+          -- the most relaxed rung reporting is the whole of what happens.
           admit msgs ws att' s' t
             | Left e <- checkedTokenClass (globals (sessionMachine s'))
                                           (attemptName att') (attemptClaim att') t =
                 (s', Ran msgs ws (Refused e))
-            | otherwise = case admitted s' att' t of
-            Left u -> (s', Ran msgs ws (Uncertified (Levels u)))
+            | not (null (unmet rung claims)) =
+                (rested, Ran msgs ws (Untrusted rung claims))
+            | otherwise = case admitted rested att' t of
+            Left u -> (rested, Ran msgs ws (Uncertified (Levels u)))
             Right (s'', lvs, owed, scheme) ->
-              (s'', Proved (attemptName att') lvs owed scheme)
+              (s'', Proved (attemptName att') lvs owed scheme claims)
+            where
+              rung = trustLevel (sessionMachine s')
+              -- The extracted term is closed (§5.3), so the empty context is
+              -- not a simplification — it is what the term stands in.
+              (claims, rested) = termTrust s' t
 
     -- Admitting is the only thing that writes a theorem to globals (§3.3.1):
     -- a proved theorem is a global **definition**, type and body both.
@@ -2025,6 +2143,29 @@ dispatch s name arg = case name of
       "" -> progress Nothing s [] []
       _  -> budget (\f -> progress f s [] [])
 
+    -- **The trust level — read it, or set it. HIS DESIGN, 2026-10-06.** The
+    -- three words are his three settings said in one word each, and the
+    -- argumentless form is the look.
+    --
+    -- **Both forms report**, which is the whole of what this command is for: a
+    -- rung means nothing without the claims it does or does not admit, and
+    -- 'Trusting' carries them together for that reason.
+    trusting = case arg of
+      ""                   -> reporting (trustLevel machine) s
+      "none"               -> switch NoTrust
+      "no-undischargeable" -> switch NoUndischargeableTrust
+      "any"                -> switch AnyTrust
+      _                    -> (s, Rejected (UnexpectedArgument name))
+      where
+        -- **The level may be switched whenever the user likes, including in the
+        -- middle of a proof** — his ruling. Nothing is re-checked and nothing is
+        -- rewound: what changes is what @qed@ will accept, and the report says
+        -- straight away what that now means for the proof in hand.
+        switch lvl =
+          reporting lvl s { sessionMachine = machine { trustLevel = lvl } }
+        reporting lvl s' =
+          let (claims, s'') = developmentTrust s' in (s'', Trusting lvl claims)
+
     -- A positive number of instructions, or the argument is not one.
     budget k = case reads arg of
       [(n, "")] | n >= 1 -> k (Just n)
@@ -2150,6 +2291,8 @@ commandSummary =
   , (":parse ‹L› … :done",         "parse every line as an L term; Tab at the cursor")
   , (":whnf / :whnf ‹t›",        "reduce the focus / a term, without committing")
   , (":convert ‹t› ≟ ‹u›",      "are two terms convertible")
+  , (":trust",                   "the trust level, and what this proof rests on")
+  , (":trust none / no-undischargeable / any", "how much unproved typing to allow")
   , (":elim ‹D› [‹universe›]",  "a datatype’s elimination rule")
   , (":matches",                 "which rules apply here")
   , (":accepts ‹type›",          "what takes a value of that type")

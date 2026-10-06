@@ -43,6 +43,7 @@ module Thena.View
   , sessionCursor
   , sessionContext
   , sessionNames
+  , sessionTrust
     -- ** and the driver's own reads, so that one import serves a frontend
   , workingOn
   , parked
@@ -58,6 +59,7 @@ module Thena.View
   , focusTypeView
   , rulesView
   , matchesView
+  , trustView
   , parseView
   , offerView
   , statementOfferView
@@ -82,8 +84,10 @@ import Thena.Driver
   , parked
   , parsingLanguage
   , pendingQuestion
+  , restsOn
   , workingOn
   )
+import Thena.Core.Trust (TrustLevel)
 import Thena.Engine (Machine (..), cursor, development, focusContext)
 import Thena.Global.Env (GlobalEnv)
 import Thena.Instral.Type (Signature)
@@ -105,6 +109,7 @@ import Thena.View.Core (Budget (..), Display, displayCore)
 import Thena.View.Development (LinkView, displayDevelopment)
 import Thena.View.Machine (MachineView, displayMachine)
 import Thena.View.Statement (statementOffer)
+import Thena.View.Trust (TrustView, displayTrust)
 import Thena.View.Rules (RuleView, displayRule)
 
 -- ---------------------------------------------------------------------------
@@ -135,6 +140,14 @@ sessionContext = focusContext . development . machineOf
 -- which is exactly why no caller should have to know that.
 sessionNames :: Session -> Int
 sessionNames = names . machineOf
+
+-- | How much trusted-but-underived typing the session permits (MS8 phase 151).
+--
+-- **The engine owns it and the frontend switches it — his ruling, 2026-10-06**,
+-- through the @:trust@ command like any other change to a session. This is the
+-- read, so a pane can show the rung and a key can be bound to changing it.
+sessionTrust :: Session -> TrustLevel
+sessionTrust = trustLevel . machineOf
 
 -- ---------------------------------------------------------------------------
 -- Addressing
@@ -273,6 +286,25 @@ matchesView budget s =
     drain it = case next it of
       Nothing        -> []
       Just (r, rest) -> r : drain rest
+
+-- | What the development currently rests on that nothing derived, and the rung
+-- that decides whether @qed@ will accept it (MS8 phase 151).
+--
+-- **A view on the development and not a hook in type checking — his ruling,
+-- 2026-10-06** — so a pane showing it is live for free and nothing is
+-- recomputed between asks. 'Thena.View.Trust' carries what a frontend must get
+-- right about presenting it, and the one thing it must not do: the middle rung
+-- is not "safe".
+trustView :: Budget -> Session -> TrustView
+trustView budget s =
+  displayTrust
+    (sessionGrammars s)
+    budget
+    (binderAddresses s)
+    (sessionNames s)
+    (focusAddress s)
+    (sessionTrust s)
+    (restsOn s)
 
 -- | Is this region one term of this language, and if not, why.
 parseView :: Session -> String -> Maybe String -> [Written] -> Either FailureView TreeView

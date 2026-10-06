@@ -33,6 +33,7 @@ module Thena.Core.Term
   , instantiate
   , freeVars
   , globalsIn
+  , holdsTrusted
   , beyond
   , substLevelsIn
   , substLevelsInScope
@@ -328,6 +329,29 @@ freeVars = nub . go
 -- it — "does the datatype being declared occur in this constructor argument's
 -- domain?" is exactly this question, and asking it by opening every binder
 -- would mint display variables for no reason (§3.7).
+-- | Does this term hold a 'Trusted' node anywhere inside it? (MS8 phase 151.)
+--
+-- **Here for 'globalsIn'\'s reason**: it must see inside a 'Scope', and
+-- @MkScope@ is not exported. Asking it by opening every binder would mint a
+-- display variable for no reason (§3.7) — and in this case for a very definite
+-- reason not to, since what wants this is a walk whose whole cost is the
+-- variables it would otherwise mint.
+holdsTrusted :: Core -> Bool
+holdsTrusted t = case t of
+  Bound _                      -> False
+  Free _                       -> False
+  Global _ _                   -> False
+  Universe _                   -> False
+  Primitive _                  -> False
+  Trusted {}                   -> True
+  Pi _ s (MkScope b)           -> holdsTrusted s || holdsTrusted b
+  Lam _ s (MkScope b)          -> holdsTrusted s || holdsTrusted b
+  App f x                      -> holdsTrusted f || holdsTrusted x
+  Let _ v s (MkScope b)        -> any holdsTrusted [v, s, b]
+  Canonical _ _ as             -> any holdsTrusted as
+  Eliminate _ _ ps m ms is tgt ->
+    any holdsTrusted (ps ++ [m] ++ ms ++ is ++ [tgt])
+
 globalsIn :: Core -> [GlobalName]
 globalsIn = nub . go
   where

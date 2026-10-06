@@ -138,6 +138,11 @@ commands =
   -- The enumerable ones, and the reason this table earns its keep.
   , Command ":step" [[], [OneOf ["on", "off"]], [ANumeral]]
   , Command ":run"  [[], [ANumeral]]
+  -- **The trust level, and its three settings are enumerable** (MS8 phase 151),
+  -- so the offer names them rather than leaving the user to remember three
+  -- words. The bare form is the look.
+  , Command ":trust"
+      [[], [OneOf ["none", "no-undischargeable", "any"]]]
   , Command ":parse" [[ALanguage], [ALanguageTerm]]
   ]
   where

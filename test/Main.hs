@@ -6,6 +6,7 @@ import qualified Thena.Core.ConvertTests
 import qualified Thena.Core.LevelTests
 import qualified Thena.Core.ReduceTests
 import qualified Thena.Core.PrimitiveTests
+import qualified Thena.Core.TrustTests
 import qualified Thena.Core.TrustedTests
 import qualified Thena.Core.TermTests
 import qualified Thena.Core.TypingTests
@@ -79,6 +80,7 @@ main =
       , Thena.Core.LevelTests.tests
       , Thena.Core.ReduceTests.tests
       , Thena.Core.PrimitiveTests.tests
+      , Thena.Core.TrustTests.tests
       , Thena.Core.TrustedTests.tests
       , Thena.Core.TermTests.tests
       , Thena.Core.TypingTests.tests

@@ -1439,6 +1439,59 @@ tests =
         , ":infer trusted (Eq Nat zero (succ zero)) (refl Nat zero)"
         , ":quit"
         ]
+    , -- **The trust accounting, end to end** (MS8 phase 151). The three rungs
+      -- are a session setting and the report is a view on the development, so
+      -- this script is the one place both are driven rather than asserted.
+      --
+      -- **The two theorems are the measured pair.** @honest@'s claim is
+      -- @Eq {\8467} Nat zero zero@ and its body's own type is @Eq {0} \8230@, so
+      -- nothing is met at the declaration — and at the use @honest {0}@ the two
+      -- converge and the claim is **discharged**. @liar@'s never can: the whnfs
+      -- agree at the head @Eq@ and clash at argument 3, which is the deep
+      -- positional test and the reason a head-only one would miss it.
+      --
+      -- **It runs at @no trust@ throughout, which is the rung that shows the
+      -- design decision.** A discharged claim is admitted there — the two types
+      -- are convertible, so the body already has the type the node claims and
+      -- the trust is carrying nothing — while the undischargeable one is
+      -- refused, and @qed@ says so without the kernel being involved: the
+      -- kernel already said @certified@ on the line above.
+      script
+        "trust"
+        [ -- **A golden runs prelude-free**, so @Eq@ is declared here rather
+          -- than assumed (@HAZARDS.md@).
+          "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "data Eq (A : Type) : A -> A -> Type where { refl : \8704 (a : A) -> Eq A a a }"
+        , "declare honest : Eq Nat zero zero ; honest = trusted (Eq Nat zero zero) (refl Nat zero)"
+        , "declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)"
+          -- The strictest rung, and nothing is resting on it yet: a declared
+          -- global is not what the report is about. **The report is a view on
+          -- the development** — his ruling, 2026-10-06.
+        , ":trust none"
+        , ":theorem viaHonest : Eq {0} Nat zero zero"
+        , "attack"
+        , "into"
+        , "try-core \8988 honest {0} \8989"
+        , "solve"
+        , "back"
+        , "solve"
+        , ":trust"
+        , "qed"
+        , ":theorem viaLiar : Eq {0} Nat zero (succ zero)"
+        , "attack"
+        , "into"
+        , "try-core \8988 liar {0} \8989"
+        , "solve"
+        , "back"
+        , "solve"
+        , ":trust"
+          -- Refused, and the proof is left standing — so the rung is one word
+          -- away and the development is still there to look at.
+        , "qed"
+        , ":trust any"
+        , "qed"
+        , ":quit"
+        ]
     , script
         "help"
         [ ":help"

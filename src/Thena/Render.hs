@@ -54,6 +54,17 @@ import Thena.Core.Level
   , Unmet (..)
   , levelVarName
   )
+-- **'Thena.Core.Trust.Pending' and 'Thena.Development.Partial.Pending' are two
+-- different things with one name**, so the trust classes are read qualified
+-- here and nowhere else. The clash is a fact about this module, which prints
+-- both the chain and the trust report; neither name is worth bending.
+import Thena.Core.Trust
+  ( TrustClaim (..)
+  , TrustClass
+  , TrustLevel (..)
+  , TrustSite (..)
+  )
+import qualified Thena.Core.Trust as Trust
 import Thena.Core.Term
   ( Core (..)
   , Literal (..)
@@ -242,8 +253,13 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   Revalidated (Just e) -> renderKernelError ren e
   Extracted t          -> [renderCore ren [] t]
   Proving g ty  -> ["proving " ++ nameString g ++ " : " ++ renderCore ren [] ty]
-  Proved g lvs owed ty ->
-    [nameString g ++ scheme ren lvs owed [] ty ++ "   ∎"]
+  -- **The report comes after the ∎ and only when there is one** (MS8 phase
+  -- 151), so a proof that rests on nothing prints exactly the line it always
+  -- did. @qed@ reports rather than refusing at the most relaxed rung — his
+  -- ruling, 2026-10-06 — and this is where the reporting lands.
+  Proved g lvs owed ty claims ->
+    (nameString g ++ scheme ren lvs owed [] ty ++ "   ∎") : trustClaims ren claims
+  Trusting lvl claims -> renderTrust ren lvl claims
   Suspended g   -> ["suspended " ++ nameString g]
   Resumed g     -> ["resumed " ++ nameString g]
   Abandoned g   -> ["abandoned " ++ nameString g]
@@ -309,6 +325,10 @@ renderStop ren s stop = case stop of
   Halted r               -> ["stuck: " ++ renderFailReason ren r]
   Refused e              -> ["refused: " ++ renderDeclareError ren e]
   Uncertified e          -> "the kernel refused it" : renderKernelError ren e
+  -- **Not the kernel's answer, and it does not read like one** (MS8 phase 151).
+  -- The kernel accepted the term; what refused it is the session's own setting,
+  -- which is one word away from being changed.
+  Untrusted lvl claims   -> "the trust level refused it" : renderTrust ren lvl claims
   -- The same words the prompt gives for the same two mistakes ('LineRefused'
   -- and 'EntryMistyped'), because a block is checked by the same checker —
   -- it is only reached later now (MS6 phase 104b).
@@ -318,6 +338,61 @@ renderStop ren s stop = case stop of
   -- for a job's pane; here the printed machine /is/ the sign that the run is not
   -- over, since every other outcome prints its own result instead.
   Paused _               -> renderMachine ren (contextOf s) (machineOf s)
+
+-- --------------------------------------------------------------------------
+-- Trust (MS8 phase 151)
+-- --------------------------------------------------------------------------
+
+-- | The level a session is at, then what is resting on it.
+--
+-- **The level is always printed, including when nothing rests on it**, because
+-- a rung with an empty list under it is the answer a user is checking for.
+renderTrust :: Rendering -> TrustLevel -> [TrustClaim] -> [String]
+renderTrust ren lvl claims =
+  ("trust: " ++ trustWord lvl)
+    : if null claims then ["  resting on nothing"] else trustClaims ren claims
+
+-- | His three settings, said as he says them.
+--
+-- **"no undischargeable trust" and never "safe"** — his instruction,
+-- 2026-10-06: @Empty@ is provable using nothing but claims this rung admits, so
+-- a word that promised soundness here would be promising something measurably
+-- false. Only @no trust@ is a guarantee, and it says so by saying nothing more
+-- than what it refuses.
+trustWord :: TrustLevel -> String
+trustWord lvl = case lvl of
+  NoTrust                -> "no trust"
+  NoUndischargeableTrust -> "no undischargeable trust"
+  AnyTrust               -> "any trust"
+
+-- | One claim in three lines: the verdict and the site it came from, then both
+-- halves of the obligation.
+--
+-- **Both halves, and the site named.** The pair /is/ the obligation (his
+-- observation, 2026-10-05) and @actual@ is what says whether the trust is still
+-- load-bearing; and a verdict without its site misleads exactly where it
+-- matters, because the same node is honest in a definition and a lie at a use.
+trustClaims :: Rendering -> [TrustClaim] -> [String]
+trustClaims ren = concatMap one
+  where
+    one c =
+      [ "  " ++ verdict (claimClass c) ++ ", " ++ site c
+      , "    claims " ++ renderCore ren (claimContext c) (claimClaimed c)
+      , "    body   " ++ renderCore ren (claimContext c) (claimActual c)
+      ]
+
+    verdict :: TrustClass -> String
+    verdict k = case k of
+      Trust.Discharged      -> "discharged"
+      Trust.Pending         -> "pending"
+      Trust.Undischargeable -> "undischargeable"
+
+    site c = case (claimSite c, claimRoute c) of
+      (AtUse,        gs) -> "at the use of " ++ through gs
+      (AtDefinition, []) -> "written here"
+      (AtDefinition, gs) -> "in " ++ through gs
+
+    through = intercalate " · " . map nameString
 
 -- --------------------------------------------------------------------------
 -- Errors, made readable

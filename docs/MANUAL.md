@@ -966,6 +966,77 @@ You can leave the type to be worked out, as anywhere else — `trusted _ e` is a
 ordinary placeholder in that position, and `claimed` and `actual` are the two
 field words for navigating into one (chapter 6).
 
+### How much of that you want to allow
+
+`:trust` says what the proof in front of you rests on, and how much the session
+is willing to accept. Every claim is one of three things:
+
+| | |
+|---|---|
+| discharged | the two types are convertible, so the claim is met and the trust is carrying nothing |
+| pending | not met, and not impossible — some instance could still make the two agree |
+| undischargeable | it can never be met, by any instance, in any later session |
+
+The last one is decided by comparing the two types position by position: where
+they are built from different formers at some position, no substitution will ever
+bring them together. `Eq Nat zero (succ zero)` against `Eq Nat zero zero` agrees
+at the head and clashes at the third argument, which is why the test looks all
+the way down rather than at the head alone.
+
+A claim is read **at the use where the use settles it, and at the definition
+otherwise**, and the report says which — because the same node can be honest in
+a definition and a lie at a use of it. `liar`'s claim is undischargeable at
+`liar {0}` and tells you nothing at all read from a partial application.
+
+`:trust none`, `:trust no-undischargeable` and `:trust any` set how much is
+allowed. A session starts at `no-undischargeable`, and `qed` refuses a proof
+resting on something the setting does not permit — after the kernel has already
+accepted it, because this is your policy and not the kernel's judgement.
+
+```
+thena spine> :trust
+trust: no undischargeable trust
+  resting on nothing
+thena spine> :theorem reckless : Eq {0} Nat zero (succ zero)
+proving reckless : Eq {0} Nat zero (succ zero)
+thena spine> attack
+thena spine> into
+thena spine> try-core ⌜ liar {0} ⌝
+thena spine> solve
+thena spine> back
+thena spine> solve
+thena spine> :trust
+trust: no undischargeable trust
+  undischargeable, at the use of liar
+    claims Eq {0} Nat zero (succ zero)
+    body   Eq {0} Nat zero zero
+thena spine> qed
+certified
+the trust level refused it
+trust: no undischargeable trust
+  undischargeable, at the use of liar
+    claims Eq {0} Nat zero (succ zero)
+    body   Eq {0} Nat zero zero
+thena spine> :trust any
+trust: any trust
+  undischargeable, at the use of liar
+    claims Eq {0} Nat zero (succ zero)
+    body   Eq {0} Nat zero zero
+thena spine> qed
+reckless : Eq {0} Nat zero (succ zero)   ∎
+  undischargeable, at the use of liar
+    claims Eq {0} Nat zero (succ zero)
+    body   Eq {0} Nat zero zero
+```
+
+Nothing is prevented for long: the proof is left standing, and the setting is one
+word away. What changes is that the word is yours.
+
+**Only `none` is a guarantee.** `no-undischargeable` stops a claim that is
+provably false, and it does not stop a false one — a claim can be discharged at
+every instance anyone has written down and still be nonsense, and `Empty` is
+provable that way. Treat the middle setting as hygiene, not as safety.
+
 ---
 
 ## 10. Sessions
@@ -1208,6 +1279,8 @@ language and elaborated on load.
 | `:suspend` `:resume ‹name›` `:proofs` `:abandon` `:undo` | session management |
 | `:goal ‹T›` | discard everything and start a fresh scratch goal |
 | `:extract` `:revalidate` | read off the term / recheck the development |
+| `:trust` | the trust level, and what this proof rests on |
+| `:trust none` / `no-undischargeable` / `any` | how much unproved typing to allow |
 | `:load ‹path›` | a proof module, a script, or rule bases |
 | `:load proof` / `rules` / `script` | say which, rather than by extension |
 | `:bases` / `:rules` | the loaded rule bases / the rules in them |

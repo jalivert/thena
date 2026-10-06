@@ -35,6 +35,7 @@ import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, enter, focus)
 import qualified Thena.Development.Cursor as Cursor
 import Thena.Development.Partial (Partial (..))
+import Thena.Core.Trust (TrustLevel (..))
 import Thena.Engine
   ( Exec (..)
   , Machine (..)
@@ -263,7 +264,8 @@ elaboratingAt cur s =
 -- **With the standard base installed**, because elaboration lives in it.
 machineAt :: Cursor -> [Instr] -> Machine
 machineAt cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals expectedBase [] [] 1000 0)
+  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals expectedBase [] [] 1000 0
+                   NoUndischargeableTrust)
 
 -- | @? goal : ∀ (a : Type₀) (b : Type₀) -> Type₀@ — two binders, so a miscount
 -- would show.
