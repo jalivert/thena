@@ -278,10 +278,10 @@ premises =
 
 substitution :: [TestTree]
 substitution =
-  [ testCase "E[x->N] is LC-subst" $ do
+  [ testCase "E[x->N] is LC-subst-x" $ do
       s <- loaded (header ++ valueAndStep)
       said s ":show step" !! 1
-        @?= "  { E-beta : ∀ (N : LC) (x : String) (T : Ty) (E : LC) -> value`${N} value` -> step`( ( λ ${x} : ${T} . ${E} ) ${N} ) --> ${LC-subst E x N}`"
+        @?= "  { E-beta : ∀ (N : LC) (x : String) (T : Ty) (E : LC) -> value`${N} value` -> step`( ( λ ${x} : ${T} . ${E} ) ${N} ) --> ${LC-subst-x E x N}`"
   , testCase "a list is simultaneous, LC-subst-all, and chained brackets are sequential" $ do
       s <- loaded (header ++
         [ "judgment sub = M ~> N where", ""
@@ -289,7 +289,7 @@ substitution =
         , "      M ~> E[x->M, x'->N][x1->N']", "" ])
       said s ":show sub" @?=
         [ "data sub : LC -> LC -> Type₀ where"
-        , "  { S : ∀ (M : LC) (E : LC) (x : String) (x' : String) (N : LC) (x1 : String) (N' : LC) -> sub`${M} ~> ${LC-subst (LC-subst-all {0 0 0} E (cons {0} (And {0 0} String LC) (both {0 0} String LC x M) (cons {0} (And {0 0} String LC) (both {0 0} String LC x' N) (nil {0} (And {0 0} String LC))))) x1 N'}` }" ]
+        , "  { S : ∀ (M : LC) (E : LC) (x : String) (x' : String) (N : LC) (x1 : String) (N' : LC) -> sub`${M} ~> ${LC-subst-x (LC-subst-all {0 0 0} E (cons {0} (And {0 0} String LC) (both {0 0} String LC x M) (cons {0} (And {0 0} String LC) (both {0 0} String LC x' N) (nil {0} (And {0 0} String LC))))) x1 N'}` }" ]
     -- §6.3's CHECK: the left of -> is a binder-sorted name.
   , refusal "the left of -> is not a name"
       ["judgment sub = M ~> N where", "", "  S:  ---", "      M ~> E[M->N]", ""]

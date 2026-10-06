@@ -1,26 +1,46 @@
--- | Generated substitution (MS6 phase 105, @ms6\/SPEC.md@ §4.7).
+-- | Generated substitution (MS6 phase 105, @ms6\/SPEC.md@ §4.7; one family per
+-- occurrence class at MS8 phase 155).
 --
--- For a language with a variable production, four functions, written as
--- ordinary surface definitions and elaborated like any other — §1: nothing a
--- block generates is out of reach of a hand-written file.
+-- For a language that reaches a class some language owns, one function per class
+-- and one simultaneous substitution over all of them, written as ordinary surface
+-- definitions and elaborated like any other — §1: nothing a block generates is
+-- out of reach of a hand-written file.
 --
--- > L-fresh     : String -> List String -> String
--- > L-fv        : L -> List String
--- > L-subst-all : L -> List (And String L) -> L
--- > L-subst     : L -> String -> L -> L
+-- > L-fresh-‹k›  : String -> List String -> String      -- for each class L owns
+-- > L-fv-‹k›     : L -> List String                     -- for each class L reaches
+-- > L-subst-all  : L -> List (And String O₁) -> … -> L   -- one map per class
+-- > L-subst-‹k›  : L -> String -> O‹k› -> L              -- for each class L reaches
 --
--- **Simultaneous substitution is the primitive one**, because capture
--- avoidance is not structurally recursive otherwise: under a binder the body is
--- substituted with the map extended by the binder's renaming, which is the same
--- recursive call with a longer list, where renaming first and substituting
--- after would recurse on a term that is not a subterm.
+-- @O‹k›@ is the language that /owns/ class @k@ — the one whose variable
+-- production reads an occurrence at it. For a one-class language that owns its
+-- class, every @O‹k›@ is the language itself and these are MS6's four functions
+-- with the class in their names.
+--
+-- **Simultaneous substitution is the primitive one**, because capture avoidance
+-- is not structurally recursive otherwise: under a binder the body is substituted
+-- with the map extended by the binder's renaming, which is the same recursive call
+-- with a longer list, where renaming first and substituting after would recurse on
+-- a term that is not a subterm.
+--
+-- **And it is simultaneous across classes too, which is why there is one
+-- @L-subst-all@ and not one per class — his correction, 2026-10-04.**
+-- Substituting for one class renames binders of /every/ class, so the recursive
+-- call needs every map: substituting @λ y : X . y@, which has a free type
+-- variable, for @x@ in @Λ X <: Top . x@ captures that @X@ unless the type binder
+-- is renamed too. The names a class-@j@ binder avoids are therefore the free
+-- @j@-names of the images of /every/ map, which is what @avoid-‹j›@ is.
 --
 -- **A binder is renamed only when keeping it would capture** — his choice,
--- 2026-09-21. At a binder the names to avoid are the free variables of what
--- the map sends each free variable of the node to (Stoughton's definition, from
--- memory), and @L-fresh x avoid@ is the first of @x@, @x'@, @x''@, … not among
--- them — so @x@ itself whenever nothing would be captured, and capture stays
--- something a user can see happen and not happen.
+-- 2026-09-21 — and @L-fresh-‹k› x avoid@ is the first of @x@, @x'@, @x''@, … not
+-- among them, so @x@ itself whenever nothing would be captured. **A binder at a
+-- class no language owns is never renamed at all**, because nothing can occur at
+-- it; that falls out of the class not being in the set, with no branch of its own.
+--
+-- **A slot of another language is walked through that language's own
+-- substitution** (MS8 phase 155, @ms8\/CLOSEOUT.md@ 25): @L-subst-all@ calls
+-- @P-subst-all@ with the maps for the classes @P@ reaches, extended by any binder
+-- of @L@ that scopes over the slot. @P@ is declared before @L@, so this is not
+-- mutual recursion — which `~m5dvd` would need.
 --
 -- **Everything is done by @elim@**, and the only primitives are @decString@ and
 -- @appendString@: two names are compared by eliminating a @Dec@, and a fresh one
@@ -38,7 +58,8 @@ module Thena.Language.Substitution
 
 import qualified Data.List.NonEmpty as NE
 
-import Data.Maybe (fromMaybe)
+import Data.List (nub)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Thena.Core.Term (GlobalName (..), Literal (..))
 import Thena.Global.Env (ArgRole (..))
 import Thena.Language.Grammar
@@ -46,43 +67,70 @@ import Thena.Language.Grammar
   , GProduction (..)
   , Grammar (..)
   , Sort (..)
+  , classOwner
+  , classesSubstituted
   , substitutionNames
-  , variableClass
-  , variableProduction
+  , variableProductions
+  , variableRegex
   )
 import Thena.Language.Regex (primingChar)
 import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..))
 
 -- | The definitions, as name, type and body, in the order they are declared —
--- each uses only the ones before it. None for a language with no variable
--- production; 'Thena.Language.Grammar.checkGrammar' has already refused a
--- language this cannot be generated for.
-substitutionDefinitions :: Grammar -> [(String, Surface, Surface)]
-substitutionDefinitions g = case (variableProduction g, substitutionNames g) of
-  (Just vp, [freshN, fvN, allN, oneN]) ->
-    let var y = app (name (conName vp)) [y]
-     in [ (freshN, arrows [string, listOf string] string, freshBody)
-        , (fvN, arrows [self] (listOf string), fvBody)
-        , (allN, arrows [self, listOf pair] self, allBody fvN freshN var)
-        , (oneN, arrows [self, string, self] self, oneBody allN)
-        ]
-  _ -> []
+-- each uses only the ones before it, and the ones of a language declared
+-- earlier. None for a language that reaches no class with an owner.
+--
+-- @gs@ is the dependency graph: the grammars installed, including this one.
+substitutionDefinitions :: [Grammar] -> Grammar -> [(String, Surface, Surface)]
+substitutionDefinitions gs g =
+  [ (freshOf lang k, arrows [string, listOf string] string, freshBody k) | k <- owned ]
+    ++ [ (fvOf lang k, arrows [self] (listOf string), fvBody k) | k <- reached ]
+    ++ [ (allOf lang, arrows (self : map mapType reached) self, allBody) | not (null reached) ]
+    ++ [ (substOf lang k, arrows [self, string, ownerSelf k] self, oneBody k) | k <- reached ]
   where
     GlobalName lang = grammarName g
-    self = name lang
-    string = name "String"
-    pair = app (name "And") [string, self]
-    listOf t = app (name "List") [t]
+    reached = [ k | GlobalName k <- classesSubstituted gs g ]
+    owned = [ k | GlobalName k <- map fst (variableProductions g) ]
     prods = grammarProductions g
     conName p = let GlobalName n = gproductionName p in n
+
+    self = name lang
+    string = name "String"
+    listOf t = app (name "List") [t]
+    pairType k = app (name "And") [string, ownerSelf k]
+    mapType = listOf . pairType
+
+    -- ---------------------------------------------------------------------
+    -- Which language owns a class, and what it generated. 'reached' has
+    -- filtered out the classes with no owner, so these are total on it.
+    owner k = case classOwner gs g (GlobalName k) of
+      Just h -> h
+      Nothing -> g
+    ownerName k = let GlobalName n = grammarName (owner k) in n
+    ownerSelf = name . ownerName
+    -- The owning language's variable production for the class: what a renamed
+    -- binder of that class becomes.
+    ownerVar k y = app (name (varConOf (owner k) k)) [y]
+    varConOf h k = fromMaybe "" (listToMaybe
+      [ let GlobalName c = gproductionName p in c | (c', p) <- variableProductions h, c' == GlobalName k ])
+    -- The classes another language has substitution for — a subset of this
+    -- one's, because reaching it reaches everything it reaches.
+    reachedBy l = [ k | GlobalName k <- classesSubstituted gs (grammarNamed l) ]
+    grammarNamed l = case [ h | h <- gs, grammarName h == l ] of
+      h : _ -> h
+      [] -> g
 
     -- A bound name may not be one the generated code refers to, or a
     -- constructor called @s@ would be shadowed by the map. Primed until free,
     -- as 'Thena.Driver.grammarDatatype' primes a constructor's binders.
-    referenced = lang : map conName prods
-      ++ [ "String", "List", "And", "Comparison", "nil", "cons", "both", "same", "different"
-         , "Dec", "yes", "no", "Eq", "decString", "appendString" ]
-      ++ substitutionNames g
+    -- **Every grammar's**, not only this one's, since a foreign slot is walked
+    -- through its own language's functions.
+    referenced =
+      concat [ let GlobalName h = grammarName k
+                in h : map conName (grammarProductions k) ++ substitutionNames gs k
+             | k <- gs ]
+        ++ [ "String", "List", "And", "Comparison", "nil", "cons", "both", "same", "different"
+           , "Dec", "yes", "no", "Eq", "decString", "appendString" ]
     local x | x `elem` referenced = local (x ++ "'")
             | otherwise = x
     v = name . local
@@ -100,24 +148,36 @@ substitutionDefinitions g = case (variableProduction g, substitutionNames g) of
         ]
         xs
 
-    -- The first method when @y@ and @k@ are the same name, the second
+    -- The first method when @y@ and @key@ are the same name, the second
     -- otherwise, deciding with @decString@ — whose evidence each method is
     -- given and ignores.
-    compareNames ty y k whenSame whenDifferent =
-      elimOn "Dec" [app (name "Eq") [string, y, k]] (lamL ["d"] ty)
+    compareNames ty y key whenSame whenDifferent =
+      elimOn "Dec" [app (name "Eq") [string, y, key]] (lamL ["d"] ty)
         [lamL ["p"] whenSame, lamL ["n"] whenDifferent]
-        (app (name "decString") [y, k])
+        (app (name "decString") [y, key])
 
     -- The first constructor's method when @c@ is @same@, the second's otherwise.
     decide ty c whenSame whenDifferent =
       elimOn "Comparison" [] (lamL ["q"] ty) [whenSame, whenDifferent] c
 
+    -- Everything in @ys@ that is not in @bound@, onto @acc@. **Only a foreign
+    -- slot needs it**: this language's own subterms are given the bound names on
+    -- the way down, where a slot of another language answers with its own free
+    -- names and cannot be.
+    without ys bound acc =
+      elimOn "List" [string] (lamL ["l"] (listOf string))
+        [ acc
+        , lamL ["h", "hs", "rh"]
+            (decide (listOf string) (member (v "h") bound) (v "rh") (consOf string (v "h") (v "rh")))
+        ]
+        ys
+
     -- ---------------------------------------------------------------------
-    -- L-fresh: the fuel is the list itself. Among x, xc, …, xc⁽ⁿ⁾ one is not
+    -- L-fresh-‹k›: the fuel is the list itself. Among x, xc, …, xc⁽ⁿ⁾ one is not
     -- among n names, so n primings are enough and the recursion is on the list.
     --
-    -- **The priming character comes from the identifier class, not from a
-    -- hardcoded @'@** (MS6 closeout 23, phase 146).
+    -- **The priming character comes from the class, not from a hardcoded @'@**
+    -- (MS6 closeout 23, phase 146; per class at MS8 phase 155).
     -- 'Thena.Language.Regex.primingChar' picks one the class is closed under, so
     -- every name this mints is a name the language can write back **by
     -- construction** — it tries @'@ first, so a class that accepts it keeps the
@@ -127,108 +187,162 @@ substitutionDefinitions g = case (variableProduction g, substitutionNames g) of
     -- and the name it mints then cannot be printed in the notation. That is not
     -- prevented — his second principle — and 'Thena.Language.Grammar.checkGrammar'
     -- warns at the block instead, so the author is told rather than refused.
-    primeChar = fromMaybe '\'' (variableClass g >>= primingChar)
+    primeChar k = fromMaybe '\'' (variableRegex g (GlobalName k) >>= primingChar)
 
-    freshBody =
+    freshBody k =
       lamL ["y", "avoid"]
         (app (elimOn "List" [string] (lamL ["l"] (arrows [string] string))
                 [ lamL ["c"] (v "c")
                 , lamL ["a", "rest", "r", "c"]
                     (decide string (member (v "c") (v "avoid"))
-                       (app (v "r") [app (name "appendString") [v "c", SurfaceLiteral (LString [primeChar])]])
+                       (app (v "r") [app (name "appendString") [v "c", SurfaceLiteral (LString [primeChar k])]])
                        (v "c"))
                 ]
                 (v "avoid"))
              [v "y"])
 
     -- ---------------------------------------------------------------------
-    -- L-fv: an accumulator and the names bound on the way down, so that
-    -- neither an append nor a removal is needed. A name may be listed twice;
-    -- it is a list, not a set, and everything that reads it only asks
-    -- membership.
-    fvBody =
+    -- L-fv-‹k›: an accumulator and the names bound on the way down, so that
+    -- neither an append nor a removal is needed for this language's own
+    -- subterms. A name may be listed twice; it is a list, not a set, and
+    -- everything that reads it only asks membership.
+    --
+    -- **Only the binders at class k remove anything**: a binder of another class
+    -- does not bind a k-name, which is the whole of what the class on a role is
+    -- for.
+    fvBody k =
       lamL ["t"]
         (app (elimOn lang [] (lamL ["u"] (arrows [listOf string, listOf string] (listOf string)))
-                (map fvMethod prods) (v "t"))
+                (map (fvMethod k) prods) (v "t"))
              [nilOf string, nilOf string])
 
-    fvMethod p =
+    fvMethod k p =
       let args = gproductionArguments p
           as = argNames args
           rs = recNames args
-          step (a, arg) acc = case (argumentRole arg, recOf args rs a) of
-            (Occurrence _, _) ->
+          under bs = foldr (consOf string . v) (v "bound") [ as !! i | i <- bs, binderAt args i == Just k ]
+          step (a, arg) acc = case (argumentRole arg, recOf args rs a, argumentSort arg) of
+            (Occurrence c, _, _) | c == GlobalName k ->
               decide (listOf string) (member (v a) (v "bound")) acc (consOf string (v a) acc)
-            (Scope bs, Just r) ->
-              app (v r) [foldr (consOf string . v) (v "bound") [ as !! i | i <- bs ], acc]
-            (Plain, Just r) -> app (v r) [v "bound", acc]
+            (Scope bs, Just r, _) -> app (v r) [under bs, acc]
+            (Plain, Just r, _) -> app (v r) [v "bound", acc]
+            -- A slot of another language that can hold a free k-name: ask that
+            -- language, then take out the names bound on the way in.
+            (Scope bs, Nothing, OfLanguage l) | k `elem` reachedBy l ->
+              without (app (name (fvOf (nameOf l) k)) [v a]) (under bs) acc
+            (Plain, Nothing, OfLanguage l) | k `elem` reachedBy l ->
+              without (app (name (fvOf (nameOf l) k)) [v a]) (v "bound") acc
             _ -> acc
        in lamL (as ++ rs ++ ["bound", "acc"]) (foldr step (v "acc") (zip as args))
 
     -- ---------------------------------------------------------------------
     -- L-subst-all.
-    allBody fvN freshN var =
+    allBody =
       lamL ["t"]
-        (elimOn lang [] (lamL ["u"] (arrows [listOf pair] self))
-           (map (allMethod fvN freshN var) prods) (v "t"))
+        (elimOn lang [] (lamL ["u"] (arrows (map mapType reached) self))
+           (map allMethod prods) (v "t"))
 
-    -- What the map sends @y@ to: the first pair that names it, or @y@ itself.
-    lookupIn var y s =
-      elimOn "List" [pair] (lamL ["l"] self)
-        [ var y
+    mapVar k = "s-" ++ k
+
+    -- What the class-k map sends @y@ to: the first pair that names it, or @y@
+    -- itself as a term of the class's owning language.
+    lookupIn k y s =
+      elimOn "List" [pairType k] (lamL ["l"] (ownerSelf k))
+        [ ownerVar k y
         , lamL ["p", "ps", "rp"]
-            (elimOn "And" [string, self] (lamL ["q"] self)
-               [ lamL ["k", "w"] (compareNames self y (v "k") (v "w") (v "rp")) ]
+            (elimOn "And" [string, ownerSelf k] (lamL ["q"] (ownerSelf k))
+               [ lamL ["key", "w"] (compareNames (ownerSelf k) y (v "key") (v "w") (v "rp")) ]
                (v "p"))
         ]
         s
 
-    allMethod fvN freshN var p =
+    allMethod p =
       let args = gproductionArguments p
           as = argNames args
           rs = recNames args
-          binders = [ i | (i, arg) <- zip [0 :: Int ..] args, Binder _ <- [argumentRole arg] ]
+          -- A binder is renamed when its class has a map; one at a class no
+          -- language owns keeps its name, because nothing can occur at it.
+          binders = [ i | (i, arg) <- zip [0 :: Int ..] args
+                        , Binder (GlobalName c) <- [argumentRole arg], c `elem` reached ]
+          binderClasses = nub [ c | i <- binders, Just c <- [binderAt args i] ]
+          bindersAt c = [ i | i <- binders, binderAt args i == Just c ]
           renamed i = "z" ++ show i
-          -- A renaming for each binder, and each avoids the names already
-          -- chosen for the ones before it and the names of the ones after.
-          avoid j = foldr (consOf string) (v "avoid")
-            ([ v (renamed i) | i <- take j binders ] ++ [ v (as !! i) | i <- drop (j + 1) binders ])
-          -- The last binder at the head, so that of two binders with one name
-          -- the later is the one found, as the later shadows on paper.
-          extend bs s = foldl (\rest i -> consOf pair (app (name "both") [string, self, v (as !! i), var (v (renamed i))]) rest) s bs
+          avoidName c = "avoid-" ++ c
+          -- A renaming for each binder of the class, and each avoids the names
+          -- already chosen for the ones before it and the names of the ones
+          -- after — the ones of its own class only, since no other can capture.
+          avoidTerm i c =
+            let bs = bindersAt c
+                m = length (takeWhile (/= i) bs)
+             in foldr (consOf string) (v (avoidName c))
+                  ([ v (renamed i') | i' <- take m bs ] ++ [ v (as !! i') | i' <- drop (m + 1) bs ])
+          -- The maps to hand a subterm: each extended with the renamings of the
+          -- binders of its own class that scope over it. The last binder at the
+          -- head, so that of two binders with one name the later is the one
+          -- found, as the later shadows on paper.
+          mapsOf ks bs =
+            [ foldl (\rest i -> consOf (pairType c)
+                                  (app (name "both")
+                                     [string, ownerSelf c, v (as !! i), ownerVar c (v (renamed i))])
+                                  rest)
+                    (v (mapVar c))
+                    [ i | i <- bs, i `elem` binders, binderAt args i == Just c ]
+            | c <- ks ]
+          descend a arg bs = case (recOf args rs a, argumentSort arg) of
+            (Just r, _) -> app (v r) (mapsOf reached bs)
+            -- A slot of another language, walked through its own substitution.
+            -- Nothing to do when that language reaches no class: nothing in it
+            -- can mention a name.
+            (Nothing, OfLanguage l) | not (null (reachedBy l)) ->
+              app (name (allOf (nameOf l))) (v a : mapsOf (reachedBy l) bs)
+            _ -> v a
           rebuilt = app (name (conName p))
-            [ case (argumentRole arg, recOf args rs a) of
-                (Binder _, _) -> v (renamed i)
-                (Scope bs, Just r) -> app (v r) [extend bs (v "s")]
-                (Plain, Just r) -> app (v r) [v "s"]
+            [ case argumentRole arg of
+                Binder _ | i `elem` binders -> v (renamed i)
+                Scope bs -> descend a arg bs
+                Plain -> descend a arg []
                 _ -> v a
             | (i, (a, arg)) <- zip [0 :: Int ..] (zip as args) ]
-          images =
-            elimOn "List" [string] (lamL ["l"] (listOf string))
-              [ nilOf string
-              , lamL ["y", "ys", "ry"]
-                  (elimOn "List" [string] (lamL ["l"] (listOf string))
-                     [ v "ry", lamL ["h", "hs", "rh"] (consOf string (v "h") (v "rh")) ]
-                     (app (name fvN) [lookupIn var (v "y") (v "s")]))
-              ]
-              (app (name fvN) [app (name (conName p)) (map v as)])
+          -- The names a class-c binder must avoid: the free c-names of what
+          -- every map sends each free name of this node to. A map's images are
+          -- terms of the class's owning language, so it contributes only when
+          -- that language reaches c at all.
+          images c =
+            foldl (\acc k ->
+                     elimOn "List" [string] (lamL ["l"] (listOf string))
+                       [ acc
+                       , lamL ["y", "ys", "ry"]
+                           (elimOn "List" [string] (lamL ["l"] (listOf string))
+                              [ v "ry", lamL ["h", "hs", "rh"] (consOf string (v "h") (v "rh")) ]
+                              (app (name (fvOf (ownerName k) c)) [lookupIn k (v "y") (v (mapVar k))]))
+                       ]
+                       (app (name (fvOf lang k)) [app (name (conName p)) (map v as)]))
+                  (nilOf string)
+                  [ k | k <- reached, c `elem` reachedBy (grammarName (owner k)) ]
           withRenamings =
-            foldr (\(j, i) body ->
-                     SurfaceLet (local (renamed i)) (Just string)
-                       (app (name freshN) [v (as !! i), avoid j]) body)
-                  rebuilt (zip [0 ..] binders)
-       in lamL (as ++ rs ++ ["s"]) $ case (map argumentRole args, as, binders) of
-            -- The variable production: the whole node is what the map says.
-            ([Occurrence _], [y], _) -> lookupIn var (v y) (v "s")
-            (_, _, []) -> rebuilt
-            _ -> SurfaceLet (local "avoid") (Just (listOf string)) images withRenamings
+            foldr (\i body ->
+                     let c = fromMaybe "" (binderAt args i)
+                      in SurfaceLet (local (renamed i)) (Just string)
+                           (app (name (freshOf (ownerName c) c)) [v (as !! i), avoidTerm i c]) body)
+                  rebuilt binders
+       in lamL (as ++ rs ++ map mapVar reached) $ case (map argumentRole args, as) of
+            -- A variable production: the whole node is what its class's map says.
+            ([Occurrence (GlobalName c)], [y]) -> lookupIn c (v y) (v (mapVar c))
+            _ | null binders -> rebuilt
+              | otherwise ->
+                  foldr (\c body -> SurfaceLet (local (avoidName c)) (Just (listOf string)) (images c) body)
+                        withRenamings binderClasses
 
     -- ---------------------------------------------------------------------
-    oneBody allN =
+    oneBody k =
       lamL ["e", "y", "n"]
-        (app (name allN)
-           [ v "e"
-           , consOf pair (app (name "both") [string, self, v "y", v "n"]) (nilOf pair) ])
+        (app (name (allOf lang))
+           (v "e" : [ if c == k
+                        then consOf (pairType c)
+                               (app (name "both") [string, ownerSelf c, v "y", v "n"])
+                               (nilOf (pairType c))
+                        else nilOf (pairType c)
+                    | c <- reached ]))
 
     -- A method's parameters: every argument, then a result for each argument
     -- of this language, in order (thesis §4.1.4, as 'Thena.Core.Reduce.iota'
@@ -237,6 +351,25 @@ substitutionDefinitions g = case (variableProduction g, substitutionNames g) of
     recNames args = [ local ("r" ++ show i) | (i, arg) <- zip [0 :: Int ..] args, ownSort arg ]
     ownSort arg = argumentSort arg == OfLanguage (grammarName g)
     recOf args rs a = lookup a (zip [ x | (x, arg) <- zip (argNames args) args, ownSort arg ] rs)
+
+-- | The class a binder argument of this production binds at, by position — a
+-- 'Thena.Global.Env.Scope' names positions, and the class is on the role there
+-- rather than carried twice.
+binderAt :: [Argument] -> Int -> Maybe String
+binderAt args i = case drop i args of
+  a : _ | Binder (GlobalName c) <- argumentRole a -> Just c
+  _ -> Nothing
+
+nameOf :: GlobalName -> String
+nameOf (GlobalName n) = n
+
+freshOf, fvOf, substOf :: String -> String -> String
+freshOf l k = l ++ "-fresh-" ++ k
+fvOf l k = l ++ "-fv-" ++ k
+substOf l k = l ++ "-subst-" ++ k
+
+allOf :: String -> String
+allOf l = l ++ "-subst-all"
 
 -- ---------------------------------------------------------------------------
 -- Surface, written by hand

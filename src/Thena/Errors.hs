@@ -99,36 +99,6 @@ data Warning
     -- phase 146). **It is a warning and not a refusal**: the language works, its
     -- substitution is correct, and only printing a renamed binder is lost — so
     -- the author is told rather than prevented.
-  | BinderClassUnowned BlockKind String String String
-    -- ^ the block, the language's name, the production, and the class a binder
-    -- there binds at — a class the language has no occurrence production for,
-    -- so nothing it can parse ever occurs at that class (MS8 phase 153,
-    -- `~tmnrr` and `~5k3mg`).
-    --
-    -- **What is actually wrong is the generated substitution, and until the
-    -- generator is class-aware it is wrong silently** — which is why this is
-    -- said. @L-subst-all@ renames every 'Thena.Global.Env.Binder' with the one
-    -- map it carries and rebuilds the renamed name with the one variable
-    -- production's constructor, so a binder at a class the language does not
-    -- own is renamed as though it were the language's own variable. Declaring
-    -- the block is not refused: a grammar binding a class another grammar owns
-    -- is exactly what `~5k3mg` is for, and the second principle says allow it
-    -- and show what it causes.
-  | ScopeUnwalked BlockKind String String String
-    -- ^ the block, the language's name, the production, and an argument of
-    -- /another/ language that a binder of this one is free in (MS8 phase 154,
-    -- `~5k3mg`).
-    --
-    -- **Until phase 154 this was refused outright**
-    -- ('Thena.Language.Grammar.ScopeElsewhere'), and the refusal now narrows to
-    -- a slot whose language cannot reach the binder's class at all. What is
-    -- left wrong is again the generator, and again silently: a method of
-    -- @L-subst-all@ takes a recursive result only for an argument of its own
-    -- language, so a foreign argument is rebuilt as it was written while the
-    -- binder beside it /is/ renamed — the occurrences in the slot are left
-    -- pointing at a name that no longer binds them. Said and not refused for
-    -- the reason the narrowing happened at all: a binder scoping into another
-    -- language is `~5k3mg`'s target.
   deriving (Eq, Show)
 
 

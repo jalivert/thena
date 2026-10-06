@@ -1,7 +1,7 @@
 -- The simply typed λ-calculus: its syntax, written as a grammar.
 --
 -- Load it with   :load examples/01-stlc-syntax.thena
--- then try       :show LC      :show LC-subst      :parse LC ( λ x : ι . x )
+-- then try       :show LC      :show LC-subst-x      :parse LC ( λ x : ι . x )
 
 module StlcSyntax where
 
@@ -54,28 +54,28 @@ idType = Ty`( ι -> ι )`
 -- ---------------------------------------------------------------------------
 -- Substitution comes with the language. The block declared
 --
---   LC-subst     : LC -> String -> LC -> LC            E[x->N]
+--   LC-subst-x     : LC -> String -> LC -> LC            E[x->N]
 --   LC-subst-all : LC -> List (And String LC) -> LC    simultaneous
---   LC-fv        : LC -> List String
---   LC-fresh     : String -> List String -> String
+--   LC-fv-x        : LC -> List String
+--   LC-fresh-x     : String -> List String -> String
 --
 -- They compute, so each fact below is proved by `refl`: the kernel runs the
 -- substitution and compares.
 
 -- (λ y . x y)[x -> z]  =  λ y . z y
-replaces : Eq LC (LC-subst LC`( λ y : ι . ( x y ) )` "x" LC`z`)
+replaces : Eq LC (LC-subst-x LC`( λ y : ι . ( x y ) )` "x" LC`z`)
                  LC`( λ y : ι . ( z y ) )`
 replaces = refl LC LC`( λ y : ι . ( z y ) )`
 
 -- (λ y . x y)[x -> y]  =  λ y' . y y'
 -- The binder would capture the y coming in, so it is primed. It is renamed
 -- ONLY then: nothing is renamed behind your back.
-avoidsCapture : Eq LC (LC-subst LC`( λ y : ι . ( x y ) )` "x" LC`y`)
+avoidsCapture : Eq LC (LC-subst-x LC`( λ y : ι . ( x y ) )` "x" LC`y`)
                       LC`( λ y' : ι . ( y y' ) )`
 avoidsCapture = refl LC LC`( λ y' : ι . ( y y' ) )`
 
 -- (λ x . x)[x -> y]  =  λ x . x         a bound x is not free
-leavesBound : Eq LC (LC-subst identity "x" LC`y`) identity
+leavesBound : Eq LC (LC-subst-x identity "x" LC`y`) identity
 leavesBound = refl LC identity
 
 -- (x y)[x -> y, y -> x]  =  y x         a list substitutes all at once
@@ -86,5 +86,5 @@ swaps : Eq LC (LC-subst-all LC`( x y )`
 swaps = refl LC LC`( y x )`
 
 -- The free variables of λ y . x y are just x.
-freeOf : Eq (List String) (LC-fv LC`( λ y : ι . ( x y ) )`) (cons String "x" (nil String))
+freeOf : Eq (List String) (LC-fv-x LC`( λ y : ι . ( x y ) )`) (cons String "x" (nil String))
 freeOf = refl (List String) (cons String "x" (nil String))

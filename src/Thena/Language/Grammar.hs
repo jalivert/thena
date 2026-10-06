@@ -33,11 +33,13 @@ module Thena.Language.Grammar
   , lookupNames
   , extensionOf
   , isName
-  , variableProduction
   , variableProductions
-  , variableClass
+  , variableRegex
   , classesNamed
   , classesReached
+  , classesSubstituted
+  , classOwner
+  , grammarsReached
   , tokenClassOf
   , earleyRules
   , productionBody
@@ -127,12 +129,20 @@ data GrammarProblem
   | FunctionTaken String
     -- ^ a function generated substitution would declare (§4.7) is already
     -- declared, by anything or by a production of this block
-  | NoVariableProduction
-    -- ^ a language with binders and no production @‹x› as occurrence@, so a
-    -- renamed binder has no term to become (§4.7)
-  | VariableProductions [String]
-    -- ^ more than one production declares an occurrence; substitution would
-    -- not know which one a renamed binder becomes
+  | VariableProductions GlobalName [String]
+    -- ^ the class, and more than one production of this language declaring an
+    -- occurrence **at it**: substitution would not know which one a renamed
+    -- binder of that class becomes. **Narrowed to one class at MS8 phase 155**
+    -- — it used to be more than one occurrence production of any kind, which is
+    -- what gave a language exactly one notion of a variable
+  | ClassOwnedTwice GlobalName [GlobalName]
+    -- ^ a class this grammar reaches, and the languages it reaches that read an
+    -- occurrence at it (MS8 phase 155). **A class a grammar reaches belongs to
+    -- one of the languages it reaches**, because what a renamed name of that
+    -- class becomes is that language's variable production and the map
+    -- substituting for it is a map into that language's terms — reach two and
+    -- neither is determined. Two /unrelated/ languages reading one token class
+    -- is ordinary and not this
   | InProduction String ProductionProblem
   | InRule String RuleProblem
     -- ^ a judgment's rule (MS6 phase 108, §6)
@@ -243,10 +253,10 @@ checkGrammar installed env b = do
     f : _ -> refuse (LookupTaken f)
     [] -> Right ()
   if kind == LanguageBlock then either refuse Right (substitutable (installed ++ [g]) g) else Right ()
-  case [ f | f <- substitutionNames g, taken f || f `elem` prodNames ] of
+  case [ f | f <- substitutionNames (installed ++ [g]) g, taken f || f `elem` prodNames ] of
     f : _ -> refuse (FunctionTaken f)
     [] -> Right ()
-  Right (g, concatMap snd prods ++ unprimeable g ++ unownedBinders g ++ scopesUnwalked g)
+  Right (g, concatMap snd prods ++ unprimeable g)
   where
     kind = blockKind b
     name = blockName b
@@ -265,38 +275,6 @@ checkGrammar installed env b = do
       , cls' == cls
       , OfClass _ _ re <- [argumentSort a]
       , primingChar re == Nothing
-      ]
-    -- **A binder at a class the language has no occurrence for** (MS8 phase
-    -- 153). The classes a language /reads/ are 'variableProductions'; the
-    -- classes it /binds/ are on its 'Occurrence' and 'Binder' roles, which is
-    -- the whole reason the class is there. Where a binder's class is not one
-    -- of the read ones, generated substitution renames it with the single map
-    -- it carries and rebuilds it with the single variable production's
-    -- constructor — so the binder comes back as one of this language's own
-    -- variables. Said and not refused: `~5k3mg` is going to make this correct,
-    -- and until then an author who writes it should see what it causes.
-    unownedBinders gr =
-      [ BinderClassUnowned kind name (nameOf (gproductionName p)) (nameOf cls)
-      | kind == LanguageBlock
-      , p <- grammarProductions gr
-      , a <- gproductionArguments p
-      , Binder cls <- [argumentRole a]
-      , cls `notElem` map fst (variableProductions gr)
-      ]
-    -- **A binder free in an argument of another language** (MS8 phase 154).
-    -- 'substitutable' used to refuse this outright and now refuses only the
-    -- case the other language cannot reach the class at all; what is left is
-    -- the generator, which gives a method a recursive result only for an
-    -- argument of its own language, so the foreign argument is rebuilt as
-    -- written while the binder beside it is renamed. Said rather than refused
-    -- for the same reason the refusal narrowed: this is `~5k3mg`'s target.
-    scopesUnwalked gr =
-      [ ScopeUnwalked kind name (nameOf (gproductionName p)) (argumentName a)
-      | kind == LanguageBlock
-      , p <- grammarProductions gr
-      , a <- gproductionArguments p
-      , Scope _ <- [argumentRole a]
-      , argumentSort a /= OfLanguage (grammarName gr)
       ]
     nameOf (GlobalName x) = x
     -- **A judgment's name is not a metavariable**: its header has none, and
@@ -438,51 +416,64 @@ productionBody gs p = case [ Earley.ruleBody r | r <- earleyRules gs, Earley.rul
   b : _ -> b
   []    -> []
 
--- | Can substitution be generated for this language (§4.7, MS6 phase 105)?
+-- | Can substitution be generated for this language (§4.7, MS6 phase 105,
+-- generalised to @n@ classes at MS8 phase 155)?
 --
--- A language with no binder and no occurrence has nothing to generate, and
--- passes. One that has either needs **exactly one variable production** — the
--- one production that declares an occurrence, taking only that — because a
--- binder renamed to avoid capture must become a term, and that production is
--- the only way to make a name one. **That is what "one identifier class"
--- (§4.7) comes to**: every binder is already a @String@, and one variable
--- production means one sort of name. It cannot mean one class /name/, since
--- §4.4's own @let : { x, y } as binders@ needs two.
+-- **One variable production per class, not per language.** The production that
+-- declares an occurrence at a class is the only way to turn a name of that class
+-- into a term, so two of them at one class leave a renamed binder with no term
+-- to become; at two /different/ classes they are two notions of a variable,
+-- which is `~tmnrr`'s whole point. An occurrence production takes only its
+-- occurrence, because substitution replaces the whole node.
 --
--- **And a binder is free only in an argument of a language that reaches its
--- class** (MS8 phase 154, `~5k3mg`). Until then it had to be an argument of
--- /this/ language, the only one substitution over it walks into — which refused
--- the shape `~5k3mg` exists for, a binder of one grammar scoping over a slot of
--- another that reads that very class. **The own-language case is not special and
--- is not written down**: a binder's class is one this grammar names, so
--- 'classesReached' of this grammar contains it, and the rule below passes it
--- without knowing whose argument it is.
+-- **A class belongs to one language.** Its variable production builds what a
+-- renamed binder becomes, and the map that substitutes for it is a map into that
+-- language's terms, so a second language reading the same class leaves both
+-- undetermined — and a grammar reaching the class through two slots could not be
+-- given one map for it. 'classOwner' is that language and this is what makes it
+-- a function.
 --
--- The grammars are the dependency graph — the installed ones and the one being
--- checked — because reaching a class is a question about more than one grammar.
+-- **A binder is free only in an argument of a language that reaches its class.**
+-- Until MS8 phase 154 it had to be an argument of /this/ language; the own-language
+-- case is not written down, because a binder's class is one this grammar names
+-- and so 'classesReached' of this grammar contains it.
+--
+-- **There is no longer a check that a language with binders has a variable
+-- production** (deleted at MS8 phase 155). A renamed binder becomes a term of
+-- the class's /owning/ language, which may be another one — `~5k3mg`'s
+-- "bindable by any later language" — and a binder at a class no grammar owns is
+-- never renamed at all, because nothing can occur at it. Both are correct rather
+-- than refused, and the second is what @BinderClassUnowned@ used to warn about.
+--
+-- The grammars are the dependency graph: the installed ones and the one being
+-- checked.
 substitutable :: [Grammar] -> Grammar -> Either GrammarProblem ()
-substitutable gs g
-  | null named = Right ()
-  | otherwise = do
-      -- The metadata names at most one occurrence per production, so a
-      -- production appears here once for each it declares, which is once.
-      case [ (p, a) | (p, a) <- named, isOccurrence a ] of
-        [] -> Left NoVariableProduction
-        [(p, a)]
-          | length (gproductionArguments p) == 1 -> Right ()
-          | otherwise -> inProduction p (OccurrenceNotAlone (argumentName a))
-        pas -> Left (VariableProductions [ n | (p, _) <- pas, let GlobalName n = gproductionName p ])
-      case [ (p, a, l, cls)
-           | p <- grammarProductions g
-           , a <- gproductionArguments p
-           , Scope bs <- [argumentRole a]
-           , OfLanguage l <- [argumentSort a]
-           , cls <- [ c | i <- bs, Just c <- [binderClass p i] ]
-           , cls `notElem` reachedBy l
-           ] of
-        (p, a, l, cls) : _ -> inProduction p (ScopeElsewhere (argumentName a) l cls)
-        [] -> Right ()
+substitutable gs g = do
+  case [ (cls, ps) | (cls, ps) <- grouped, length ps > 1 ] of
+    (cls, ps) : _ -> Left (VariableProductions cls [ nameOf (gproductionName p) | p <- ps ])
+    [] -> Right ()
+  case [ (p, a) | (_, ps) <- grouped, p <- ps, a <- gproductionArguments p
+               , length (gproductionArguments p) /= 1 ] of
+    (p, a) : _ -> inProduction p (OccurrenceNotAlone (argumentName a))
+    [] -> Right ()
+  case [ (cls, hs) | cls <- classesReached gs g, let hs = owners cls, length hs > 1 ] of
+    (cls, hs) : _ -> Left (ClassOwnedTwice cls hs)
+    [] -> Right ()
+  case [ (p, a, l, cls)
+       | p <- grammarProductions g
+       , a <- gproductionArguments p
+       , Scope bs <- [argumentRole a]
+       , OfLanguage l <- [argumentSort a]
+       , cls <- [ c | i <- bs, Just c <- [binderClass p i] ]
+       , cls `notElem` reachedBy l
+       ] of
+    (p, a, l, cls) : _ -> inProduction p (ScopeElsewhere (argumentName a) l cls)
+    [] -> Right ()
   where
+    -- The occurrence productions by class: the metadata names at most one
+    -- occurrence per production, so a production appears under one class.
+    grouped = [ (cls, [ p | (c, p) <- variableProductions g, c == cls ])
+              | cls <- nub (map fst (variableProductions g)) ]
     -- A 'Scope' names binder argument positions (§4.7), and the class is on
     -- the role there — asked of the position rather than carried twice, which
     -- is the same reason 'Scope' has no class of its own.
@@ -490,23 +481,41 @@ substitutable gs g
       a : _ | Binder cls <- argumentRole a -> Just cls
       _ -> Nothing
     reachedBy l = concat [ classesReached gs h | h <- gs, grammarName h == l ]
-    named = [ (p, a) | p <- grammarProductions g, a <- gproductionArguments p, isNamed (argumentRole a) ]
-    isNamed r = case r of
-      Occurrence _ -> True
-      Binder _     -> True
-      _            -> False
-    isOccurrence a = case argumentRole a of
-      Occurrence _ -> True
-      _            -> False
+    owners cls = [ grammarName h | h <- grammarsReached gs g, cls `elem` map fst (variableProductions h) ]
+    nameOf (GlobalName x) = x
     inProduction p why = let GlobalName n = gproductionName p in Left (InProduction n why)
 
 -- | The functions generated substitution declares for a language (§4.7), in
--- the order they are declared; none for a language with no occurrence.
-substitutionNames :: Grammar -> [String]
-substitutionNames g = case variableProduction g of
-  Nothing -> []
-  Just _ -> [ n ++ suffix | suffix <- ["-fresh", "-fv", "-subst-all", "-subst"] ]
-  where GlobalName n = grammarName g
+-- the order they are declared; none for a language that reaches no class with
+-- an owner.
+--
+-- **One per class, and the class is in the name — MS8 phase 155.** The names
+-- used to come from the language alone (@LC-fv@, @LC-subst@), which two classes
+-- collide on, and keeping the unsuffixed name when there happens to be one class
+-- would be a special case in the naming rule. His ruling on the context's lookup
+-- relation, 2026-10-04, settled the same question the same way and accepted the
+-- migration.
+--
+-- * @L-fresh-‹k›@ for each class @L@ **owns**, because minting a name of a class
+--   belongs to the language whose notation can write one — so a grammar that
+--   reaches a class without owning it calls the owner's.
+-- * @L-fv-‹k›@ and @L-subst-‹k›@ for each class @L@ **reaches**, owning it or
+--   not: a class can occur free inside a slot of another language.
+-- * one @L-subst-all@, taking one map per class reached. Simultaneous
+--   substitution is the primitive one, and now across classes too — renaming a
+--   binder of one class to avoid capture needs the map of every class.
+substitutionNames :: [Grammar] -> Grammar -> [String]
+substitutionNames gs g
+  | null reached = []
+  | otherwise =
+      [ n ++ "-fresh-" ++ k | k <- owned ]
+        ++ [ n ++ "-fv-" ++ k | k <- reached ]
+        ++ [ n ++ "-subst-all" ]
+        ++ [ n ++ "-subst-" ++ k | k <- reached ]
+  where
+    GlobalName n = grammarName g
+    reached = [ k | GlobalName k <- classesSubstituted gs g ]
+    owned = [ k | GlobalName k <- map fst (variableProductions g) ]
 
 -- | **Every occurrence class the language reads, with the production that
 -- reads it** — one entry per class, in declaration order (MS8 phase 153).
@@ -514,14 +523,11 @@ substitutionNames g = case variableProduction g of
 -- This is the shape `~tmnrr` and `~5k3mg` need and the one everything about
 -- classes should be written against: a language may read more than one kind of
 -- name, and which classes it reads is a question about the whole grammar
--- rather than about one production. **'substitutable' still refuses a second
--- variable production**, so today this list is empty or a singleton — the list
--- is the design arriving ahead of the refusal being lifted, not a claim that
--- it already is.
+-- rather than about one production.
 --
 -- A production declares at most one occurrence (the metadata names one), so a
 -- production appears here once; two productions at the /same/ class would
--- appear twice and are what 'substitutable' is refusing.
+-- appear twice and are what 'substitutable' refuses.
 variableProductions :: Grammar -> [(GlobalName, GProduction)]
 variableProductions g
   | grammarKind g /= LanguageBlock = []
@@ -580,11 +586,22 @@ classesNamed g =
 -- cannot arise from 'checkGrammar' — every slot's language is this grammar or
 -- an installed one.
 classesReached :: [Grammar] -> Grammar -> [GlobalName]
-classesReached gs g = foldl addClass [] (concatMap classesNamed (walk [] [g]))
+classesReached gs g = foldl addClass [] (concatMap classesNamed (grammarsReached gs g))
   where
     addClass cs c
       | c `elem` cs = cs
       | otherwise = cs ++ [c]
+
+-- | **The grammars a grammar reaches**, itself first, then first-encounter order
+-- — the closure of \"holds a slot of\" (MS8 phase 154).
+--
+-- The loop adds a grammar once and queues what it holds, so a cycle ends the
+-- walk rather than not terminating; that is the least fixed point, and it is why
+-- `~m5dvd` costs nothing here. A slot naming a grammar not in @gs@ reaches
+-- nothing, which cannot arise from 'checkGrammar'.
+grammarsReached :: [Grammar] -> Grammar -> [Grammar]
+grammarsReached gs g = walk [] [g]
+  where
     walk done [] = done
     walk done (h : queue)
       | grammarName h `elem` map grammarName done = walk done queue
@@ -594,29 +611,47 @@ classesReached gs g = foldl addClass [] (concatMap classesNamed (walk [] [g]))
           , Slot _ (OfLanguage l) _ <- gproductionItems p
           , k <- gs, grammarName k == l ]
 
--- | A language's variable production, if it has one — the production that
--- declares an occurrence. 'substitutable' has checked there is at most one.
+-- | **The classes a grammar has substitution generated for**: those it reaches
+-- that some language owns, in 'classesReached' order (MS8 phase 155).
 --
--- **The single-class door, and it is the one phase 155 removes.** Everything
--- that has to work for @n@ classes reads 'variableProductions' instead.
-variableProduction :: Grammar -> Maybe GProduction
-variableProduction g = case variableProductions g of
-  (_, p) : _ -> Just p
-  []         -> Nothing
+-- Not every class reached is one of these. A class that is only ever /bound/ and
+-- read nowhere has no owning language, so nothing can occur at it, no map into
+-- any language's terms substitutes for it, and a binder at it is never renamed —
+-- it is correct and generates nothing, which is what @BinderClassUnowned@ warned
+-- about before the generator could say so.
+--
+-- **Only a language**, for now: the general rule gives a context a substitution
+-- for every class it reaches, and that is `~mnr39`, not this.
+classesSubstituted :: [Grammar] -> Grammar -> [GlobalName]
+classesSubstituted gs g
+  | grammarKind g /= LanguageBlock = []
+  | otherwise = [ cls | cls <- classesReached gs g, isJust (classOwner gs g cls) ]
 
--- | **The regular expression of the language's identifier class** — the one its
--- 'variableProduction' reads an occurrence at (§4.7 gives a language exactly
--- one).
+-- | **The language a grammar reaches a class through** — the one among the
+-- grammars it reaches whose variable production reads an occurrence at it
+-- (MS8 phase 155).
 --
--- Added at phase 146 so that a generated @L-fresh@ can mint names the class
--- accepts (MS6 closeout 23). 'Nothing' for a grammar with no variable
--- production, or one whose occurrence is not at a class — neither generates
--- substitution, so neither has an @L-fresh@ to name.
-variableClass :: Grammar -> Maybe Regex
-variableClass g = do
-  p <- variableProduction g
-  listToMaybe [ re | a <- gproductionArguments p
-                   , Occurrence _ <- [argumentRole a]
+-- **Relative to @g@, and that is the point.** Two unrelated languages may both
+-- read @x : Token String@ and each is the owner for itself; what 'substitutable'
+-- refuses is one grammar reaching /two/ of them, where the map for the class
+-- would have no single language to be into.
+classOwner :: [Grammar] -> Grammar -> GlobalName -> Maybe Grammar
+classOwner gs g cls = case
+  [ h | h <- grammarsReached gs g, cls `elem` map fst (variableProductions h) ] of
+    [h] -> Just h
+    _ -> Nothing
+
+-- | **The regular expression of one of a language's occurrence classes** — the
+-- class's own, so that a generated @L-fresh-‹k›@ mints names that class accepts
+-- (MS6 closeout 23, per class at MS8 phase 155).
+--
+-- 'Nothing' for a class this language reads no occurrence at, or one whose
+-- occurrence is not at a class — neither has an @L-fresh-‹k›@ to name.
+variableRegex :: Grammar -> GlobalName -> Maybe Regex
+variableRegex g cls =
+  listToMaybe [ re | (c, p) <- variableProductions g, c == cls
+                   , a <- gproductionArguments p
+                   , Occurrence c' <- [argumentRole a], c' == cls
                    , OfClass _ _ re <- [argumentSort a] ]
 
 -- | A context's extension production — the one with a slot of the context's

@@ -42,7 +42,7 @@ judgment value = M value where
   V-abs:  ------------------------
           ( λ x : T . E ) value
 
--- Call by value. `E[x->N]` is the generated substitution, LC-subst E x N, so
+-- Call by value. `E[x->N]` is the generated substitution, LC-subst-x E x N, so
 -- a step computes its own right-hand side. A premise may be named, as `v` and
 -- `s` are in E-app2.
 judgment step = M --> N where
@@ -89,7 +89,7 @@ constTyped =
 
 -- ---------------------------------------------------------------------------
 -- Reduction steps. The right-hand side is checked by the kernel running
--- LC-subst, so each of these is a small test of substitution too.
+-- LC-subst-x, so each of these is a small test of substitution too.
 
 -- ( λ x : ι -> ι . x ) ( λ y : ι . y )  -->  λ y : ι . y
 betaStep : step`( ( λ x : ( ι -> ι ) . x ) ( λ y : ι . y ) ) --> ( λ y : ι . y )`

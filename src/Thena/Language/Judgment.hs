@@ -49,8 +49,10 @@ import Thena.Language.Grammar
   , RuleProblem (..)
   , Sort (..)
   , earleyRules
+  , classOwner
+  , classesSubstituted
   , substitutionNames
-  , variableProduction
+  , variableProductions
   )
 import Thena.Errors (BuildError (..))
 import Thena.Global.Env (ArgRole (..))
@@ -165,7 +167,7 @@ constructor gs g r = do
     types = nub $
       [ n | h <- gs, let GlobalName n = grammarName h ]
         ++ [ sortType srt | h <- gs, p <- grammarProductions h, Slot _ srt _ <- gproductionItems p ]
-        ++ concatMap substitutionNames gs
+        ++ concatMap (substitutionNames gs) gs
         ++ ["And", "both", "cons", "nil"]
 
     telescope q = case parseSurfaceText (q ++ " -> Type\8320") of
@@ -200,8 +202,8 @@ mentions :: [Grammar] -> Tree -> Either BuildError [(String, String)]
 mentions gs t = case t of
   Node n [Token x] | [MetavariableOf l] <- special n -> Right [(x, l)]
   Node n [e, s] | [SubstituteIn _] <- special n -> (++) <$> mentions gs e <*> mentions gs s
-  Node n (Token x : rest) | [PairIn l] <- special n ->
-    ((x, classType gs l) :) . concat <$> traverse (mentions gs) rest
+  Node n (Token x : rest) | [PairIn _ cls] <- special n ->
+    ((x, classType gs cls) :) . concat <$> traverse (mentions gs) rest
   Node n children -> case production gs n of
     Nothing -> Left (NoSuchProduction n)
     Just p -> do
@@ -221,9 +223,13 @@ term gs rename t = case t of
     e' <- go e
     ps <- pairs s
     Right $ case ps of
-      -- §6.3: one pair is @L-subst@, a list @L-subst-all@ — simultaneous.
-      [(x, m)] -> app (SurfaceName (l ++ "-subst")) [e', x, m]
-      _ -> app (SurfaceName (l ++ "-subst-all")) [e', foldr (cons l) (nil l) ps]
+      -- §6.3: one pair is @L-subst-‹k›@, several @L-subst-all@ — simultaneous,
+      -- and across classes, so each class's map takes the pairs written at it
+      -- and the rest are empty (MS8 phase 155).
+      [(cls, x, m)] -> app (SurfaceName (l ++ "-subst-" ++ cls)) [e', x, m]
+      _ -> app (SurfaceName (l ++ "-subst-all"))
+             (e' : [ foldr (cons l c) (nil l c) [ (x, m) | (c', x, m) <- ps, c' == c ]
+                   | h <- grammarNamed gs l, c <- substitutedClasses gs h ])
   Node n children -> case production gs n of
     Nothing -> Left (NoSuchProduction n)
     Just p -> do
@@ -236,13 +242,18 @@ term gs rename t = case t of
       (OfClass {}, Token x) -> Right (SurfaceName (rename x))
       _ -> go child
     pairs s = case s of
-      Node _ [Token x, m] -> (\m' -> [(SurfaceName (rename x), m')]) <$> go m
-      Node _ [Token x, m, more] -> (\m' rest -> (SurfaceName (rename x), m') : rest) <$> go m <*> pairs more
+      Node n [Token x, m] | [PairIn _ cls] <- special n ->
+        (\m' -> [(cls, SurfaceName (rename x), m')]) <$> go m
+      Node n [Token x, m, more] | [PairIn _ cls] <- special n ->
+        (\m' rest -> (cls, SurfaceName (rename x), m') : rest) <$> go m <*> pairs more
       _ -> Left (NotForSlot "" (show s))
-    pairType l = app (SurfaceName "And") [SurfaceName (classType gs l), SurfaceName l]
-    cons l (x, m) rest =
-      app (SurfaceName "cons") [pairType l, app (SurfaceName "both") [SurfaceName (classType gs l), SurfaceName l, x, m], rest]
-    nil l = app (SurfaceName "nil") [pairType l]
+    pairType l c = app (SurfaceName "And") [SurfaceName (classType gs c), SurfaceName (ownerOf gs l c)]
+    cons l c (x, m) rest =
+      app (SurfaceName "cons")
+        [ pairType l c
+        , app (SurfaceName "both") [SurfaceName (classType gs c), SurfaceName (ownerOf gs l c), x, m]
+        , rest ]
+    nil l c = app (SurfaceName "nil") [pairType l c]
 
 app :: Surface -> [Surface] -> Surface
 app f [] = f
@@ -276,16 +287,26 @@ ruleGrammar gs =
       let GlobalName l = grammarName g
        in Earley.Rule ("metavariable " ++ l) l
             [Earley.Scan ("a metavariable of " ++ l) (metavariables (grammarMetavars g))] []
-            : case variableClass g of
-                Nothing -> []
-                Just x ->
-                  let pair = [Earley.Scan x (metavariables [x]), Earley.Literal "->", Earley.Nonterminal l]
-                   in [ Earley.Rule ("substitute " ++ l) l
-                          [Earley.Nonterminal l, Earley.Literal "[", Earley.Nonterminal (pairsNT l), Earley.Literal "]"] []
-                      , Earley.Rule ("pair " ++ l) (pairsNT l) pair []
-                      , Earley.Rule ("pair " ++ l) (pairsNT l)
-                          (pair ++ [Earley.Literal ",", Earley.Nonterminal (pairsNT l)]) []
-                      ]
+            : case substitutedClasses gs g of
+                [] -> []
+                cs ->
+                  -- **One pair rule per class — MS8 phase 155.** A pair's
+                  -- right-hand side is a term of the class's /owning/ language,
+                  -- not of the one being substituted into: a type substituted
+                  -- into a term is written @M[X -> P]@ with @P@ a type. One
+                  -- substitution may mix classes, so they share the nonterminal.
+                  Earley.Rule ("substitute " ++ l) l
+                    [Earley.Nonterminal l, Earley.Literal "[", Earley.Nonterminal (pairsNT l), Earley.Literal "]"] []
+                    : concat
+                        [ [ Earley.Rule ("pair " ++ l ++ " " ++ x) (pairsNT l) pair []
+                          , Earley.Rule ("pair " ++ l ++ " " ++ x) (pairsNT l)
+                              (pair ++ [Earley.Literal ",", Earley.Nonterminal (pairsNT l)]) []
+                          ]
+                        | x <- cs
+                        , let pair = [ Earley.Scan x (metavariables [x])
+                                     , Earley.Literal "->"
+                                     , Earley.Nonterminal (ownerOf gs l x) ]
+                        ]
 
     -- A premise name is anything up to a space, a colon or a bracket.
     premiseName = let c = oneOf (complement (fromRanges ([ (d, d) | d <- ":()[]{}," ] ++ spaces)))
@@ -303,27 +324,40 @@ pairsNT :: String -> String
 pairsNT l = "substitution in " ++ l
 
 -- | What a rule-only node of a reading is: its rule's name, read back.
-data Special = MetavariableOf String | SubstituteIn String | PairIn String
+data Special = MetavariableOf String | SubstituteIn String | PairIn String String
 
 special :: String -> [Special]
 special n = case words n of
   ["metavariable", l] -> [MetavariableOf l]
   ["substitute", l] -> [SubstituteIn l]
-  ["pair", l] -> [PairIn l]
+  -- The class is in the rule's name because that is what says which map the
+  -- pair belongs in (MS8 phase 155).
+  ["pair", l, x] -> [PairIn l x]
   _ -> []
 
--- | The token class of a language's variable production — the one a
--- substitution's left-hand side is a metavariable of (§6.3).
-variableClass :: Grammar -> Maybe String
-variableClass g = do
-  _ <- if null (substitutionNames g) then Nothing else Just ()
-  p <- variableProduction g
-  x : _ <- Just [ x | Slot x (OfClass {}) _ <- gproductionItems p ]
-  Just x
+-- | The classes a substitution written in a rule may be for — every class the
+-- language has a generated substitution for (§6.3, per class at MS8 phase 155).
+substitutedClasses :: [Grammar] -> Grammar -> [String]
+substitutedClasses gs g = [ x | GlobalName x <- classesSubstituted gs g ]
 
+-- | The grammar of that name, among those installed.
+grammarNamed :: [Grammar] -> String -> [Grammar]
+grammarNamed gs l = [ g | g <- gs, grammarName g == GlobalName l ]
+
+-- | The language that owns a class — what the right-hand side of one of its
+-- pairs is a term of, and what its map is a map into.
+ownerOf :: [Grammar] -> String -> String -> String
+ownerOf gs l x = case [ classOwner gs h (GlobalName x) | h <- grammarNamed gs l ] of
+  Just g : _ -> let GlobalName n = grammarName g in n
+  _ -> x
+
+-- | A class's @T@ — @String@ for every class a binder or an occurrence may be
+-- at (§4.5 refuses any other), asked rather than assumed so that `~tmnrr`'s
+-- @Int@ class has one place to change.
 classType :: [Grammar] -> String -> String
-classType gs l = case [ t | g <- gs, grammarName g == GlobalName l, Just x <- [variableClass g]
-                          , p <- grammarProductions g, Slot y (OfClass _ (GlobalName t) _) _ <- gproductionItems p, y == x ] of
+classType gs x = case [ t | g <- gs, (c, _) <- variableProductions g, c == GlobalName x
+                          , p <- grammarProductions g
+                          , Slot y (OfClass _ (GlobalName t) _) _ <- gproductionItems p, y == x ] of
   t : _ -> t
   [] -> "String"
 

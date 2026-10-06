@@ -1549,22 +1549,6 @@ renderWarning w = "warning: " ++ case w of
     blockAt k g ++ ": no character may be appended to every name " ++ cls
       ++ " accepts, so a binder renamed to avoid capture will not print in this"
       ++ " notation. Substitution is unaffected"
-  -- **The line says what is wrong with the generated function, not what is
-  -- wrong with the grammar** (MS8 phase 153): the block installs, and what an
-  -- author has to know is that substitution will treat that binder as its own
-  -- language's variable.
-  BinderClassUnowned k g p cls ->
-    blockAt k g ++ ", production " ++ p ++ ": " ++ cls
-      ++ " is bound here and nothing in this language occurs at " ++ cls
-      ++ ", so generated substitution renames it as one of this language's own"
-      ++ " variables. Bind a class this language reads, or substitute by hand"
-  -- **The same shape one step along** (MS8 phase 154): the block installs, and
-  -- what an author has to know is that the slot the binder scopes over is the
-  -- one part of the term generated substitution does not walk into.
-  ScopeUnwalked k g p x ->
-    blockAt k g ++ ", production " ++ p ++ ": a binder is free in " ++ x
-      ++ ", which is of another language, so generated substitution renames the"
-      ++ " binder and leaves " ++ x ++ " as it was written. Substitute in it by hand"
   NoConfusionSkipped d why ->
     "no " ++ nameString (snd (noConfusionNames d)) ++ ": " ++ because
     where
@@ -1595,10 +1579,17 @@ renderDeclareError ren e = case e of
     ContextKey xs -> blockAt k g ++ ": its extension needs exactly one name to look up, and it has "
       ++ (case xs of { [] -> "none"; _ -> intercalate ", " xs })
     LookupTaken f -> g ++ "'s lookup " ++ f ++ " is already declared"
-    NoVariableProduction ->
-      blockAt k g ++ ": it has binders, so it needs a production ‹x› as occurrence for a renamed binder to become"
-    VariableProductions ps ->
-      blockAt k g ++ ": " ++ intercalate ", " ps ++ " all declare an occurrence, and a language has one variable production"
+    -- **Per class since MS8 phase 155**: two occurrence productions are two
+    -- notions of a variable, which is allowed; two at one class leave a renamed
+    -- binder of that class with no term to become.
+    VariableProductions (GlobalName cls) ps ->
+      blockAt k g ++ ": " ++ intercalate ", " ps ++ " all declare an occurrence at " ++ cls
+        ++ ", and a language has one variable production per class"
+    ClassOwnedTwice (GlobalName cls) ls ->
+      blockAt k g ++ ": " ++ intercalate " and " [ l | GlobalName l <- ls ]
+        ++ " both read an occurrence at " ++ cls
+        ++ ", and this grammar reaches both, so a substitution for " ++ cls
+        ++ " has no one language to replace a name with"
     InProduction p why -> blockAt k g ++ ", production " ++ p ++ ": " ++ case why of
       NoItems -> "it has no items"
       NotAMetavariable x -> x ++ " is not a metavariable"

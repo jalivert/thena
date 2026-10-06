@@ -18,7 +18,7 @@
 --
 -- **It never renames here.** The map sends each name either to itself or to a
 -- closed term (`Good`), so what a binder must avoid is only names free in the
--- node, and the binder is not one of those (`notCaptured`). So `LC-fresh`
+-- node, and the binder is not one of those (`notCaptured`). So `LC-fresh-x`
 -- returns the binder itself (`freshKeeps`), and the binder of the result is
 -- the binder of the term.
 --
@@ -80,7 +80,7 @@ look = \ y s ->
 lookIsVar : forall (y : String) (s : List (And String LC)) -> Eq LC (LC-subst-all (var y) s) (look y s)
 lookIsVar = \ y s -> refl LC (look y s)
 
--- Free variables, with the names bound so far and an accumulator, as LC-fv is.
+-- Free variables, with the names bound so far and an accumulator, as LC-fv-x is.
 fvA : LC -> List String -> List String -> List String
 fvA = \ t ->
   elim LC () (\ u -> List String -> List String -> List String)
@@ -97,19 +97,19 @@ appendL = \ l r -> elim List (String) (\ k -> List String) ((r) (\ h hs rh -> co
 images : List (And String LC) -> List String -> List String
 images = \ s ys ->
   elim List (String) (\ l -> List String)
-    ((nil String) (\ y ys1 ry -> appendL (LC-fv (look y s)) ry))
+    ((nil String) (\ y ys1 ry -> appendL (LC-fv-x (look y s)) ry))
     () ys
 
-fvIs : forall (t : LC) -> Eq (List String) (LC-fv t) (fvA t (nil String) (nil String))
-fvIs = \ t -> refl (List String) (LC-fv t)
+fvIs : forall (t : LC) -> Eq (List String) (LC-fv-x t) (fvA t (nil String) (nil String))
+fvIs = \ t -> refl (List String) (LC-fv-x t)
 
--- Substitution under a binder renames it to LC-fresh x ‹what to avoid›, and
+-- Substitution under a binder renames it to LC-fresh-x x ‹what to avoid›, and
 -- sends x to that name on the way into the body.
 absIs : forall (x : String) (T : Ty) (E : LC) (s : List (And String LC))
           -> Eq LC (LC-subst-all (abs x T E) s)
-                   (abs (LC-fresh x (images s (LC-fv (abs x T E)))) T
+                   (abs (LC-fresh-x x (images s (LC-fv-x (abs x T E)))) T
                         (LC-subst-all E (cons (And String LC)
-                           (both String LC x (var (LC-fresh x (images s (LC-fv (abs x T E)))))) s)))
+                           (both String LC x (var (LC-fresh-x x (images s (LC-fv-x (abs x T E)))))) s)))
 absIs = \ x T E s -> refl LC (LC-subst-all (abs x T E) s)
 
 -- ---------------------------------------------------------------------------
@@ -166,15 +166,15 @@ pickDifferent = \ c X q e ->
   subst Comparison (\ q1 -> Eq String (elim Comparison () (\ q2 -> String) ((X) (c)) () q1) c)
     different q (sym Comparison q different e) (refl String c)
 
--- LC-fresh x avoid is x itself when x is not to be avoided.
-freshKeeps : forall (c : String) (avoid : List String) (ni : In c avoid -> Empty) -> Eq String (LC-fresh c avoid) c
+-- LC-fresh-x x avoid is x itself when x is not to be avoided.
+freshKeeps : forall (c : String) (avoid : List String) (ni : In c avoid -> Empty) -> Eq String (LC-fresh-x c avoid) c
 freshKeeps = \ c avoid ->
-  elim List (String) (\ l -> (In c l -> Empty) -> Eq String (LC-fresh c l) c)
+  elim List (String) (\ l -> (In c l -> Empty) -> Eq String (LC-fresh-x c l) c)
     ((\ ni -> refl String c)
      (\ a rest r ni ->
         elim Or ((And (Eq Comparison (member c (cons String a rest)) same) (In c (cons String a rest)))
                  (And (Eq Comparison (member c (cons String a rest)) different) (In c (cons String a rest) -> Empty)))
-          (\ o -> Eq String (LC-fresh c (cons String a rest)) c)
+          (\ o -> Eq String (LC-fresh-x c (cons String a rest)) c)
           ((\ h -> absurdly _ (ni (andRight _ _ h)))
            (\ h -> pickDifferent c _ (member c (cons String a rest)) (andLeft _ _ h)))
           () (memberSpec c (cons String a rest))))
@@ -351,29 +351,29 @@ appendIn = \ l r w ->
 
 -- A name to avoid is free in the image of some name of the node.
 FromImage : List (And String LC) -> List String -> String -> Type₀
-FromImage = \ s ys w -> Sigma String (\ y -> And (In y ys) (In w (LC-fv (look y s))))
+FromImage = \ s ys w -> Sigma String (\ y -> And (In y ys) (In w (LC-fv-x (look y s))))
 
 imagesIn : forall (s : List (And String LC)) (ys : List String) (w : String) (h : In w (images s ys)) -> FromImage s ys w
 imagesIn = \ s ys w ->
   elim List (String) (\ k -> In w (images s k) -> FromImage s k w)
     ((\ h -> absurdly (FromImage s (nil String) w) h)
      (\ y ys1 ry h ->
-        elim Or ((In w (LC-fv (look y s))) (In w (images s ys1))) (\ o -> FromImage s (cons String y ys1) w)
-          ((\ h1 -> pair String (\ y1 -> And (In y1 (cons String y ys1)) (In w (LC-fv (look y1 s)))) y
-                      (both (In y (cons String y ys1)) (In w (LC-fv (look y s)))
+        elim Or ((In w (LC-fv-x (look y s))) (In w (images s ys1))) (\ o -> FromImage s (cons String y ys1) w)
+          ((\ h1 -> pair String (\ y1 -> And (In y1 (cons String y ys1)) (In w (LC-fv-x (look y1 s)))) y
+                      (both (In y (cons String y ys1)) (In w (LC-fv-x (look y s)))
                          (orLeft (Eq String y y) (In y ys1) (refl String y)) h1))
-           (\ h2 -> elim Sigma (String (\ y1 -> And (In y1 ys1) (In w (LC-fv (look y1 s)))))
+           (\ h2 -> elim Sigma (String (\ y1 -> And (In y1 ys1) (In w (LC-fv-x (look y1 s)))))
                       (\ z -> FromImage s (cons String y ys1) w)
-                      ((\ y1 p -> pair String (\ y2 -> And (In y2 (cons String y ys1)) (In w (LC-fv (look y2 s)))) y1
-                                    (both (In y1 (cons String y ys1)) (In w (LC-fv (look y1 s)))
-                                       (orRight (Eq String y1 y) (In y1 ys1) (andLeft (In y1 ys1) (In w (LC-fv (look y1 s))) p))
-                                       (andRight (In y1 ys1) (In w (LC-fv (look y1 s))) p))))
+                      ((\ y1 p -> pair String (\ y2 -> And (In y2 (cons String y ys1)) (In w (LC-fv-x (look y2 s)))) y1
+                                    (both (In y1 (cons String y ys1)) (In w (LC-fv-x (look y1 s)))
+                                       (orRight (Eq String y1 y) (In y1 ys1) (andLeft (In y1 ys1) (In w (LC-fv-x (look y1 s))) p))
+                                       (andRight (In y1 ys1) (In w (LC-fv-x (look y1 s))) p))))
                       () (ry h2)))
-          () (appendIn (LC-fv (look y s)) (images s ys1) w h)))
+          () (appendIn (LC-fv-x (look y s)) (images s ys1) w h)))
     () ys
 
 -- A closed term has no free variable.
-closedNoFv : forall (N : LC) (S : Ty) (d : typing empty N S) (w : String) (h : In w (LC-fv N)) -> Empty
+closedNoFv : forall (N : LC) (S : Ty) (d : typing empty N S) (w : String) (h : In w (LC-fv-x N)) -> Empty
 closedNoFv = \ N S d w h ->
   elim Or ((In w (nil String)) (And (In w (nil String) -> Empty) (Dom empty w))) (\ o -> Empty)
     ((\ e -> e)
@@ -415,7 +415,7 @@ lookMiss = \ y x w s ne ->
 Entry : Ctx -> String -> Ty -> LC -> Type₀
 Entry = \ D y U m ->
   Or (And (Eq LC m (var y)) (Ctx-in y U D))
-     (And (typing empty m U) (Eq (List String) (LC-fv m) (nil String)))
+     (And (typing empty m U) (Eq (List String) (LC-fv-x m) (nil String)))
 
 Good : Ctx -> Ctx -> List (And String LC) -> Type₀
 Good = \ G D s -> forall (y : String) (U : Ty) (i : Ctx-in y U G) -> Entry D y U (look y s)
@@ -432,23 +432,23 @@ goodExtend = \ G D s x S g y U i ->
                   (sym Ty U S (andRight (Eq String y x) (Eq Ty U S) h))
                   (orLeft (And (Eq LC (look x (cons (And String LC) (both String LC x (var x)) s)) (var x)) (Ctx-in x S (extend D x S)))
                           (And (typing empty (look x (cons (And String LC) (both String LC x (var x)) s)) S)
-                               (Eq (List String) (LC-fv (look x (cons (And String LC) (both String LC x (var x)) s))) (nil String)))
+                               (Eq (List String) (LC-fv-x (look x (cons (And String LC) (both String LC x (var x)) s))) (nil String)))
                           (both (Eq LC (look x (cons (And String LC) (both String LC x (var x)) s)) (var x)) (Ctx-in x S (extend D x S))
                                 (lookHit x (var x) s) (Ctx-here D x S)))))
      (\ h -> subst LC (\ m -> Entry (extend D x S) y U m) (look y s) (look y (cons (And String LC) (both String LC x (var x)) s))
                (sym LC (look y (cons (And String LC) (both String LC x (var x)) s)) (look y s)
                   (lookMiss y x (var x) s (andLeft (Eq String y x -> Empty) (Ctx-in y U G) h)))
                (elim Or ((And (Eq LC (look y s) (var y)) (Ctx-in y U D))
-                         (And (typing empty (look y s) U) (Eq (List String) (LC-fv (look y s)) (nil String))))
+                         (And (typing empty (look y s) U) (Eq (List String) (LC-fv-x (look y s)) (nil String))))
                   (\ o1 -> Entry (extend D x S) y U (look y s))
                   ((\ e -> orLeft (And (Eq LC (look y s) (var y)) (Ctx-in y U (extend D x S)))
-                                  (And (typing empty (look y s) U) (Eq (List String) (LC-fv (look y s)) (nil String)))
+                                  (And (typing empty (look y s) U) (Eq (List String) (LC-fv-x (look y s)) (nil String)))
                                   (both (Eq LC (look y s) (var y)) (Ctx-in y U (extend D x S))
                                         (andLeft (Eq LC (look y s) (var y)) (Ctx-in y U D) e)
                                         (Ctx-there D y U x S (andLeft (Eq String y x -> Empty) (Ctx-in y U G) h)
                                            (andRight (Eq LC (look y s) (var y)) (Ctx-in y U D) e))))
                    (\ c -> orRight (And (Eq LC (look y s) (var y)) (Ctx-in y U (extend D x S)))
-                                   (And (typing empty (look y s) U) (Eq (List String) (LC-fv (look y s)) (nil String)))
+                                   (And (typing empty (look y s) U) (Eq (List String) (LC-fv-x (look y s)) (nil String)))
                                    c))
                   () (g y U (andRight (Eq String y x -> Empty) (Ctx-in y U G) h)))))
     () (ctxInvExtend G x S y U i)
@@ -460,9 +460,9 @@ goodExtend = \ G D s x S g y U i ->
 
 notCaptured : forall (G : Ctx) (D : Ctx) (s : List (And String LC)) (x : String) (S : Ty) (E : LC) (T : Ty)
                 (d : typing (extend G x S) E T) (g : Good G D s)
-                (h : In x (images s (LC-fv (abs x S E)))) -> Empty
+                (h : In x (images s (LC-fv-x (abs x S E)))) -> Empty
 notCaptured = \ G D s x S E T d g h ->
-  elim Sigma (String (\ y -> And (In y (LC-fv (abs x S E))) (In x (LC-fv (look y s))))) (\ z -> Empty)
+  elim Sigma (String (\ y -> And (In y (LC-fv-x (abs x S E))) (In x (LC-fv-x (look y s))))) (\ z -> Empty)
     ((\ y p ->
        elim Or ((In y (nil String)) (And (In y (cons String x (nil String)) -> Empty) (Dom (extend G x S) y)))
          (\ o -> Empty)
@@ -477,24 +477,24 @@ notCaptured = \ G D s x S E T d g h ->
                          -- y is another name: its image has no x in it.
                          (\ h2 ->
                             elim Or ((And (Eq LC (look y s) (var y)) (Ctx-in y U D))
-                                     (And (typing empty (look y s) U) (Eq (List String) (LC-fv (look y s)) (nil String))))
+                                     (And (typing empty (look y s) U) (Eq (List String) (LC-fv-x (look y s)) (nil String))))
                               (\ o -> Empty)
                               ((\ e -> elim Or ((Eq String x y) Empty) (\ o1 -> Empty)
                                          ((\ q -> andLeft (Eq String y x -> Empty) (Ctx-in y U G) h2 (sym String x y q))
                                           (\ e1 -> e1))
                                          ()
-                                         (subst LC (\ m -> In x (LC-fv m)) (look y s) (var y)
+                                         (subst LC (\ m -> In x (LC-fv-x m)) (look y s) (var y)
                                             (andLeft (Eq LC (look y s) (var y)) (Ctx-in y U D) e)
-                                            (andRight (In y (LC-fv (abs x S E))) (In x (LC-fv (look y s))) p)))
-                               (\ c -> subst (List String) (\ l -> In x l) (LC-fv (look y s)) (nil String)
-                                         (andRight (typing empty (look y s) U) (Eq (List String) (LC-fv (look y s)) (nil String)) c)
-                                         (andRight (In y (LC-fv (abs x S E))) (In x (LC-fv (look y s))) p)))
+                                            (andRight (In y (LC-fv-x (abs x S E))) (In x (LC-fv-x (look y s))) p)))
+                               (\ c -> subst (List String) (\ l -> In x l) (LC-fv-x (look y s)) (nil String)
+                                         (andRight (typing empty (look y s) U) (Eq (List String) (LC-fv-x (look y s)) (nil String)) c)
+                                         (andRight (In y (LC-fv-x (abs x S E))) (In x (LC-fv-x (look y s))) p)))
                               () (g y U (andRight (Eq String y x -> Empty) (Ctx-in y U G) h2))))
                         () (ctxInvExtend G x S y U i)))
                    () (andRight (In y (cons String x (nil String)) -> Empty) (Dom (extend G x S) y) r)))
          () (fvInCtx (extend G x S) E T d (cons String x (nil String)) (nil String) y
-               (andLeft (In y (LC-fv (abs x S E))) (In x (LC-fv (look y s))) p))))
-    () (imagesIn s (LC-fv (abs x S E)) x h)
+               (andLeft (In y (LC-fv-x (abs x S E))) (In x (LC-fv-x (look y s))) p))))
+    () (imagesIn s (LC-fv-x (abs x S E)) x h)
 
 -- ---------------------------------------------------------------------------
 -- The substitution lemma, over the whole map
@@ -507,21 +507,21 @@ substAll = \ G E T d ->
     -- A variable is sent to itself, found in Δ, or to a closed term of its type.
     ((\ x T0 G0 i D s g ->
         elim Or ((And (Eq LC (look x s) (var x)) (Ctx-in x T0 D))
-                 (And (typing empty (look x s) T0) (Eq (List String) (LC-fv (look x s)) (nil String))))
+                 (And (typing empty (look x s) T0) (Eq (List String) (LC-fv-x (look x s)) (nil String))))
           (\ o -> typing D (look x s) T0)
           ((\ e -> subst LC (\ m -> typing D m T0) (var x) (look x s)
                      (sym LC (look x s) (var x) (andLeft (Eq LC (look x s) (var x)) (Ctx-in x T0 D) e))
                      (T-var x T0 D (andRight (Eq LC (look x s) (var x)) (Ctx-in x T0 D) e)))
            (\ c -> weakenEmpty (look x s) T0
-                     (andLeft (typing empty (look x s) T0) (Eq (List String) (LC-fv (look x s)) (nil String)) c) D))
+                     (andLeft (typing empty (look x s) T0) (Eq (List String) (LC-fv-x (look x s)) (nil String)) c) D))
           () (g x T0 i))
-     -- Under a binder: the fresh name LC-fresh picks is the binder itself.
+     -- Under a binder: the fresh name LC-fresh-x picks is the binder itself.
      (\ G0 x S E0 T0 d0 ih D s g ->
         subst String
           (\ z -> typing D (abs z S (LC-subst-all E0 (cons (And String LC) (both String LC x (var z)) s))) (arrow S T0))
-          x (LC-fresh x (images s (LC-fv (abs x S E0))))
-          (sym String (LC-fresh x (images s (LC-fv (abs x S E0)))) x
-             (freshKeeps x (images s (LC-fv (abs x S E0))) (notCaptured G0 D s x S E0 T0 d0 g)))
+          x (LC-fresh-x x (images s (LC-fv-x (abs x S E0))))
+          (sym String (LC-fresh-x x (images s (LC-fv-x (abs x S E0)))) x
+             (freshKeeps x (images s (LC-fv-x (abs x S E0))) (notCaptured G0 D s x S E0 T0 d0 g)))
           (T-abs D x S (LC-subst-all E0 (cons (And String LC) (both String LC x (var x)) s)) T0
              (ih (extend D x S) (cons (And String LC) (both String LC x (var x)) s) (goodExtend G0 D s x S g))))
      (\ G0 M S T0 N d1 d2 ih1 ih2 D s g ->
@@ -530,7 +530,7 @@ substAll = \ G E T d ->
 
 -- E[x -> N] for a closed N of x's type.
 substLemma : forall (x : String) (S : Ty) (E : LC) (T : Ty) (N : LC)
-               (d : typing (extend empty x S) E T) (dn : typing empty N S) -> typing empty (LC-subst E x N) T
+               (d : typing (extend empty x S) E T) (dn : typing empty N S) -> typing empty (LC-subst-x E x N) T
 substLemma = \ x S E T N d dn ->
   substAll (extend empty x S) E T d empty (cons (And String LC) (both String LC x N) (nil (And String LC)))
     (\ y U i ->
@@ -543,9 +543,9 @@ substLemma = \ x S E T N d dn ->
                        (subst LC (\ m -> Entry empty x S m) N (look x (cons (And String LC) (both String LC x N) (nil (And String LC))))
                           (sym LC (look x (cons (And String LC) (both String LC x N) (nil (And String LC)))) N (lookHit x N (nil (And String LC))))
                           (orRight (And (Eq LC N (var x)) (Ctx-in x S empty))
-                                   (And (typing empty N S) (Eq (List String) (LC-fv N) (nil String)))
-                                   (both (typing empty N S) (Eq (List String) (LC-fv N) (nil String))
-                                         dn (listNil (LC-fv N) (closedNoFv N S dn)))))))
+                                   (And (typing empty N S) (Eq (List String) (LC-fv-x N) (nil String)))
+                                   (both (typing empty N S) (Eq (List String) (LC-fv-x N) (nil String))
+                                         dn (listNil (LC-fv-x N) (closedNoFv N S dn)))))))
           (\ h -> absurdly (Entry empty y U (look y (cons (And String LC) (both String LC x N) (nil (And String LC)))))
                     (ctxInvEmpty y U (andRight (Eq String y x -> Empty) (Ctx-in y U empty) h))))
          () (ctxInvExtend empty x S y U i))
@@ -612,10 +612,10 @@ preservation = \ M M1 T d s ->
     -- β: the function's body, typed under x : T, with the argument put for x.
     ((\ N x T1 E v T0 d0 ->
         elim Sigma (Ty (\ S -> And (typing empty (abs x T1 E) (arrow S T0)) (typing empty N S)))
-          (\ z -> typing empty (LC-subst E x N) T0)
+          (\ z -> typing empty (LC-subst-x E x N) T0)
           ((\ S p ->
               elim Sigma (Ty (\ U -> And (Eq Ty (arrow S T0) (arrow T1 U)) (typing (extend empty x T1) E U)))
-                (\ z -> typing empty (LC-subst E x N) T0)
+                (\ z -> typing empty (LC-subst-x E x N) T0)
                 ((\ U q ->
                     substLemma x T1 E T0 N
                       (subst Ty (\ V -> typing (extend empty x T1) E V) U T0

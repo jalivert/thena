@@ -3116,7 +3116,7 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
           -- definitions, elaborated by the same instructions a written one is,
           -- right after the datatype they are about.
           (fs, n2) = surfaceProgram n1
-                       [ ItemTheorem x ty body | (x, ty, body) <- substitutionDefinitions g ]
+                       [ ItemTheorem x ty body | (x, ty, body) <- substitutionDefinitions (g : grammars m) g ]
           -- **A context's lookup relation, and its notation** (MS6 phase 107,
           -- §5.3): a datatype like any other, and a grammar installed beside the
           -- context's, so that @x : T ∈ Γ@ is read, built and printed the way

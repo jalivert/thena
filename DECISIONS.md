@@ -1143,22 +1143,27 @@ and exchange are not generated.
 
 ### A language gets substitution for free, and a binder is renamed only when it would capture
 
-*Decided 2026-09-21.* A `language` block with a variable production
-(`var : x as occurrence -> x`) also declares four functions, right after its
-datatype:
+*Decided 2026-09-21; one family per kind of name 2026-10-07.* A `language` block
+with a variable production (`var : x as occurrence -> x`) also declares functions
+for every kind of name it can contain, right after its datatype — here the one
+kind, `x`:
 
 ```
-LC-fresh     : String -> List String -> String
-LC-fv        : LC -> List String
+LC-fresh-x   : String -> List String -> String
+LC-fv-x      : LC -> List String
 LC-subst-all : LC -> List (And String LC) -> LC     -- simultaneous
-LC-subst     : LC -> String -> LC -> LC             -- LC-subst E x N is E[x->N]
+LC-subst-x   : LC -> String -> LC -> LC             -- LC-subst-x E x N is E[x->N]
 ```
+
+**The kind is in the name even when there is only one**, because leaving it out
+in that case would be a special case in the naming rule, and a language may read
+more than one kind of name — see the next entry.
 
 They are ordinary definitions, written by `elim` and elaborated like anything
 you write. They compute, so a substitution's answer is provable by `refl`:
 
 ```
-captured : Eq LC (LC-subst (abs "y" base (var "x")) "x" (var "y")) (abs "y'" base (var "y"))
+captured : Eq LC (LC-subst-x (abs "y" base (var "x")) "x" (var "y")) (abs "y'" base (var "y"))
 captured = refl LC (abs "y'" base (var "y"))
 ```
 
@@ -1168,11 +1173,16 @@ capture is something you can see happen and see avoided. A list substitutes
 simultaneously (`[x->y, y->x]` swaps), and of two pairs for one name the first
 wins.
 
-What it needs of the language, each refused at the block with a message:
-exactly one variable production, taking only its occurrence; and a binder free
-only in an argument of a language that reads names of that binder's kind — see
-the next entry. A language with no occurrence (`Ty`) gets nothing. The four names are yours to keep free — declaring `LC-fv` first
+What it needs of the language, each refused at the block with a message: one
+variable production **per kind of name**, taking only its occurrence; and a
+binder free only in an argument of a language that reads names of that binder's
+kind — see the next entry. A language that can contain no name at all (`Ty` in
+the example above) gets nothing. The four names are yours to keep free — declaring `LC-fv` first
 is refused.
+
+A binder of one kind does not bind names of another: the kinds are separate
+namespaces, and a binder at a kind no language reads is never renamed at all,
+because nothing can ever occur at it.
 
 Two things arrived with it. **`List`, with `nil` and `cons`, is in the
 prelude**, so those names are taken from every object language until imports
@@ -1213,6 +1223,21 @@ order**, although no two languages may yet refer to each other, so the two would
 agree today. They will not when they can, and the cost of writing it the right
 way now is nothing.
 
+`Tm` therefore reaches two kinds of name while owning one, and gets a
+substitution for each:
+
+```
+Tm-subst-x   : Tm -> String -> Tm -> Tm     -- a term for a term variable
+Tm-subst-X   : Tm -> String -> Ty -> Tm     -- a TYPE for a type variable
+Tm-subst-all : Tm -> List (And String Tm) -> List (And String Ty) -> Tm
+```
+
+**A kind of name belongs to the language whose variable production reads it**, and
+that is what a substitution for it replaces a name *with* — so `Tm-subst-X` takes
+a type. Two unrelated languages may both read `x : Token String`, each the owner
+for itself; what is refused is one language reaching two that read the same kind,
+where the substitution would have no single language to replace a name with.
+
 It matters because System F's polymorphism is this shape: `Λ X <: T . t` binds a
 type variable in a *term* production while every occurrence of `X` is in a type.
 And it is why substituting for one kind of name has to be able to rename binders
@@ -1220,11 +1245,16 @@ of **every** kind the term can contain — substituting `λ y : X . y`, which ha
 free type variable, for `x` in `Λ X <: Top . x` captures that `X` unless the type
 binder is renamed too.
 
-**The generated substitution does not walk into the foreign slot yet, and the
-block says so when it loads.** `pack`'s binder is renamed while `S` is rebuilt
-exactly as written, which is wrong whenever the slot mentions the binder, so the
-grammar installs with a warning naming the production and the argument rather
-than being refused. Substitute in that slot by hand until the warning is gone.
+**A slot of another language is walked through that language's own
+substitution**, with the maps that language needs and any binder of this one that
+scopes over the slot added to them. So `pack`'s `S` is substituted rather than
+copied, and nothing about a foreign slot is opaque any more unless the language in
+it can contain no name at all.
+
+**Substituting for one kind of name renames binders of every kind.** Replacing
+`z` by `λ y : X . y` in `Λ X <: Top . z` gives `Λ X' <: Top . (λ y : X . y)`:
+the type binder is renamed because the term being substituted in has a free type
+variable, and renaming only the term binders would have captured it.
 
 ## The development calculus
 

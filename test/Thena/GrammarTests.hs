@@ -155,9 +155,10 @@ twoClasses =
     ]
 
 -- | **A binder of one language free in a slot of another** (MS8 phase 154).
--- @P@ reads an occurrence at @x@, so @P@ reaches the class @f@'s binder binds
--- at and the block installs — it is what `~5k3mg` exists for. Refused until
--- phase 154, and still refused when @P@ reaches no @x@.
+-- @P@ owns the class @X@, and @L@ binds an @X@ over a slot of @P@ — so @P@
+-- reaches the class @f@'s binder binds at and the block installs. It is what
+-- `~5k3mg` exists for, refused until phase 154, and still refused when the
+-- slot's language reaches no such class.
 foreignScope :: String
 foreignScope =
   unlines
@@ -166,12 +167,15 @@ foreignScope =
     , "x : Token String"
     , "x = /[a-z][a-zA-Z0-9']*/"
     , ""
+    , "X : Token String"
+    , "X = /[A-Z][a-zA-Z0-9']*/"
+    , ""
     , "language P, R where"
-    , "  pvar : x as occurrence -> x"
+    , "  pvar : X as occurrence -> X"
     , ""
     , "language L, M where"
     , "  var : x as occurrence -> x"
-    , "  f : x as binder       -> ( let x = M in R[x] )"
+    , "  f : X as binder       -> ( pack X = M in R[X] )"
     ]
 
 -- | **Three languages in a chain** (MS8 phase 154). @P@ reads an occurrence at
@@ -265,28 +269,29 @@ meaning =
                 , (GlobalName "big", [Binder (GlobalName "X"), Scope [0]])
                 ]
         other -> assertFailure (show (length other) ++ " grammars called L")
-    -- **It installs, and it warns** — the second principle: a grammar binding a
-    -- class it does not read is what `~5k3mg` is for, so it is not refused, but
-    -- until the generator is class-aware @L-subst-all@ renames that binder as
-    -- one of @L@'s own variables, and an author should see that said.
-  , testCase "and the block installs with a warning, because the generator is not class-aware yet" $ do
+    -- **It installs and says nothing** (MS8 phase 155). It used to warn: the
+    -- generator renamed every binder with the one map it carried, so @big@'s
+    -- @X@ came back as one of @L@'s own variables. Now @X@ is a class no
+    -- language owns, so nothing can occur at it, no map substitutes for it and
+    -- that binder is never renamed — the case is correct rather than said.
+  , testCase "and the block installs, with nothing to say about the second class" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 twoClasses of
         (_, ProofLoaded _ names _ ws) -> do
           names @?= ["x", "X", "L"]
-          ws @?= [BinderClassUnowned LanguageBlock "L" "big" "X"]
+          ws @?= []
         (_, other) -> assertFailure (show other)
-    -- **A binder scoping into another language installs now** (MS8 phase 154),
-    -- where the refusal was unconditional before, and warns for the same reason
-    -- the one above does: a method of @L-subst-all@ is given a recursive result
-    -- only for an argument of its own language, so @R@ is rebuilt as written
-    -- while the binder beside it is renamed.
-  , testCase "a binder free in another language's slot installs, and warns" $ do
+    -- **A binder scoping into another language installs and says nothing**
+    -- (MS8 phase 154 lifted the refusal; 155 made the generator walk the slot).
+    -- It warned in between, because a method of @L-subst-all@ was given a
+    -- recursive result only for an argument of its own language and rebuilt a
+    -- foreign one as written.
+  , testCase "a binder free in another language's slot installs, and nothing is owed" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 foreignScope of
         (_, ProofLoaded _ names _ ws) -> do
-          names @?= ["x", "P", "L"]
-          ws @?= [ScopeUnwalked LanguageBlock "L" "f" "R"]
+          names @?= ["x", "X", "P", "L"]
+          ws @?= []
         (_, other) -> assertFailure (show other)
   , testCase "a later module may use an earlier one's metavariables" $ do
       (s0, _) <- startingSession
