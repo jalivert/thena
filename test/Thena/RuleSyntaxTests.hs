@@ -281,6 +281,7 @@ everyOp =
   , ("trusted-claim t", Op.TrustedClaim (Ref "t"))
   , ("trusted-body t", Op.TrustedBody (Ref "t"))
   , ("make-trusted c a b", Op.MakeTrusted (Ref "c") (Ref "a") (Ref "b"))
+  , ("define-global x t v", Op.DefineGlobal [] (Ref "x") (Ref "t") (Ref "v"))
   , ("app-function t", Op.AppFunction (Ref "t"))
   , ("app-last-argument t", Op.AppLastArgument (Ref "t"))
   , ("lambda-name t", Op.LambdaName (Ref "t"))

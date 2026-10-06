@@ -76,8 +76,17 @@ redraw = at Loose
       AFormer g ls as -> spine (prec > Spine) (g <> levels ls) as
       -- **The slot groups are drawn as groups**, which the editor can do only
       -- because they arrive labelled rather than as one list of arguments.
+      --
+      -- **It parenthesises at 'Spine' and not only at 'Atom' — MS8 phase 152,
+      -- and the corpus is what found it.** An elimination's last slot is its
+      -- target, written bare, so an @elim@ standing in an application's
+      -- function position swallows the argument that follows it:
+      -- @(elim … tgt) arg@ drawn without the parentheses is @elim … tgt arg@,
+      -- which the core grammar refuses outright. 'Thena.Render' has always
+      -- parenthesised here; nothing in the prelude put an elimination in
+      -- function position until @decString@ became a definition.
       AnElimination d ls ps m ms is t ->
-        paren (prec > Spine) $
+        paren (prec > Loose) $
           unwords
             [ "elim " <> d <> levels ls
             , bracket ps

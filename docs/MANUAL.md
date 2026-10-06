@@ -47,11 +47,22 @@ You land at a prompt with a small prelude already loaded, and one empty goal.
 | lists | `List`, `nil`, `cons` |
 | the result of comparing | `Comparison`, `same`, `different` |
 | a decision, with its evidence | `Dec`, `yes`, `no` |
+| transport along an equality | `transport` proved |
+| deciding a literal equality | `decString`, `decChar`, `decInt` proved, each from two trusted laws |
 
 `String`, `Char`, `Int` and `Token` are in scope as well — those are built in
-rather than declared, so they are there in any environment — along with
-`eqString`, `eqChar`, `eqInt`, `decString`, `decChar`, `decInt` and
-`appendString`.
+rather than declared, so they are there in any environment — along with the
+four primitive functions, `eqString`, `eqChar`, `eqInt` and `appendString`.
+
+`decString a b` answers `yes` with a proof that `a` and `b` are equal, or `no`
+with a refutation, and on a name it does not know it is stuck — so a proof that
+eliminates it gets the equality in one branch and its refutation in the other.
+That is what `eqString` alone cannot give you, and it is the reason the prelude
+has both. `decString` is a *definition*, written in `prelude/prelude.thena`,
+and what it rests on is two `trusted` claims about `eqString`: that a `same`
+answer means the two really are equal (`eqStringEqual`), and that the
+comparison answers `same` of a literal and itself (`eqStringRefl`). Chapter 9
+is what those are; `isSame` is the helper that tells the two answers apart.
 
 **There is no `Nat`, and no arithmetic.** A module that wants numbers declares
 them, which every example here does; `Int` is a primitive with literals and
@@ -142,7 +153,7 @@ the level left to be worked out:
 thena spine> :infer Type₀
 Type₀ : Type₁
 thena spine> :infer Type
-Type : Type (suc ?ℓ943)
+Type : Type (suc ?ℓ1017)
 ```
 
 `?ℓ229` is an unknown level. It is not a default and it is not zero — it is
@@ -184,7 +195,7 @@ one unknown per parameter, and unification settles them.
 
 ```
 thena spine> :infer refl
-refl : ∀ (A : Type (?ℓ950)) (a : A) -> Eq {?ℓ950} A a a
+refl : ∀ (A : Type (?ℓ1024)) (a : A) -> Eq {?ℓ1024} A a a
 ```
 
 Written in the development calculus they are explicit, and **prenex** — a use
@@ -299,8 +310,8 @@ constructors' own levels, and becomes a level parameter if nothing pins it:
 thena spine> data Box (A : Type) : Type where { box : A -> Box A }
 declared Box
 thena spine> :show Box
-data Box {ℓ₉₉₉} (A : Type (ℓ₉₉₉)) : Type (ℓ₉₉₉) where
-  { box : A -> Box {ℓ₉₉₉} A }
+data Box {ℓ₁₀₇₃} (A : Type (ℓ₁₀₇₃)) : Type (ℓ₁₀₇₃) where
+  { box : A -> Box {ℓ₁₀₇₃} A }
 ```
 
 A written `Typeₙ` is still checked rather than believed:
@@ -441,11 +452,11 @@ unknown becomes a parameter:
 
 ```
 thena spine> :theorem idPoly : ∀ (A : Type) -> A -> A
-proving idPoly : ∀ (A : Type (?ℓ1034)) -> A -> A
+proving idPoly : ∀ (A : Type (?ℓ1108)) -> A -> A
 thena spine> try-core ⌜ \ (A : Type) (a : A) -> a ⌝
 thena spine> solve
 thena spine> qed
-idPoly {ℓ₁₀₄₆} : ∀ (A : Type (ℓ₁₀₄₆)) -> A -> A   ∎
+idPoly {ℓ₁₁₂₀} : ∀ (A : Type (ℓ₁₁₂₀)) -> A -> A   ∎
 ```
 
 Sometimes one level is not enough, and the proof leaves a *relation* between two
@@ -454,11 +465,11 @@ before a `⊢`:
 
 ```
 thena spine> :theorem lift : Type -> Type
-proving lift : Type (?ℓ1048) -> Type (?ℓ1049)
+proving lift : Type (?ℓ1122) -> Type (?ℓ1123)
 thena spine> try-core ⌜ \ (x : Type) -> x ⌝
 thena spine> solve
 thena spine> qed
-lift {ℓ₁₀₅₇ ℓ₁₀₅₈} : (ℓ₁₀₅₇ ≤ ℓ₁₀₅₈) ⊢ Type (ℓ₁₀₅₇) -> Type (ℓ₁₀₅₈)   ∎
+lift {ℓ₁₁₃₁ ℓ₁₁₃₂} : (ℓ₁₁₃₁ ≤ ℓ₁₁₃₂) ⊢ Type (ℓ₁₁₃₁) -> Type (ℓ₁₁₃₂)   ∎
 ```
 
 Read it as *given `ℓ₂₃₈ ≤ ℓ₂₃₉`, this type*. A constraint that held at every
@@ -729,7 +740,7 @@ enter-binders ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 thena spine> prove
-chose 1280: intro
+chose 1354: intro
 ```
 
 Three rules matched, so the engine reports which one it took and leaves a
@@ -737,7 +748,7 @@ Three rules matched, so the engine reports which one it took and leaves a
 
 ```
 thena spine> :choices
-1280  intro   untried: solve, regret, prove
+1354  intro   untried: solve, regret, prove
 ```
 
 `retry` backtracks to the nearest choice point and takes the next alternative.
@@ -746,13 +757,13 @@ undoes the whole thing:
 
 ```
 thena spine> retry
-retrying 1280: solve
-backtracking to 1280: regret
+retrying 1354: solve
+backtracking to 1354: regret
 thena spine> :show
 ▶ let ? id : ∀ (A : Type₀) -> A -> A in
   id
 thena spine> :choices
-1280  regret   untried: prove
+1354  regret   untried: prove
 ```
 
 Search is meant to be inspectable, not a black box: you can always see what was
@@ -773,11 +784,11 @@ line left is yours to reach with `retry`, and nothing reaches it for you:
 thena spine> :theorem t : ∀ (A : Type₀) -> A -> A
 proving t : ∀ (A : Type₀) -> A -> A
 thena spine> prove
-chose 938: attack
+chose 1012: attack
 thena spine> regret
 thena spine> back
 stuck: already at the root
-  undoing that would backtrack to 938, which was chosen before this line — retry 938 to take it
+  undoing that would backtrack to 1012, which was chosen before this line — retry 1012 to take it
 ```
 
 `regret` took the guess back off and `back` had nothing left to pop. Without the
@@ -861,7 +872,7 @@ pc
   0  u = universe-at l
   1  return u
 env
-  l = Type (?ℓ965)
+  l = Type (?ℓ1039)
 stack
   call, 14 instruction(s) to resume
   call, 6 instruction(s) to resume
@@ -872,7 +883,7 @@ pc
   0  u = universe-at l
   1  return u
 env
-  l = Type (?ℓ967)
+  l = Type (?ℓ1041)
 stack
   call, 11 instruction(s) to resume
   call, 14 instruction(s) to resume (returned)
@@ -880,9 +891,9 @@ stack
   call, 43 instruction(s) to resume (returned)
   call, 61 instruction(s) to resume (returned)
 thena spine> :run
-solved: ?ℓ963
-solved: ?ℓ965
-solved: ?ℓ967
+solved: ?ℓ1037
+solved: ?ℓ1039
+solved: ?ℓ1041
 already equal
 thena spine> :step off
 ```
@@ -1036,6 +1047,60 @@ word away. What changes is that the word is yours.
 provably false, and it does not stop a false one — a claim can be discharged at
 every instance anyone has written down and still be nonsense, and `Empty` is
 provable that way. Treat the middle setting as hygiene, not as safety.
+
+### What the prelude itself asks you to trust
+
+This is not only a facility for your own proofs: the prelude uses it. Deciding
+whether two strings are equal is the case, and it is the one that forced the
+feature. `eqString` computes — it answers `same` or `different` on two literals
+— but nothing in the type theory connects that answer to the equality type, and
+no term you can write closes the gap. So `decString` is a definition resting on
+two claims about `eqString`, and `:trust` names both:
+
+```
+thena spine> :trust no-undischargeable
+trust: no undischargeable trust
+  resting on nothing
+thena spine> :theorem decides : Dec {0 0} (Eq {0} String "x" "x")
+proving decides : Dec {0 0} (Eq {0} String "x" "x")
+thena spine> attack
+thena spine> into
+thena spine> try-core ⌜ decString "x" "x" ⌝
+thena spine> solve
+thena spine> back
+thena spine> solve
+thena spine> :trust
+trust: no undischargeable trust
+  pending, in decString · eqStringEqual
+    claims Eq {0} String a b
+    body   Eq {0} String a a
+  pending, in decString · eqStringRefl
+    claims Eq {0} Comparison (eqString a a) same
+    body   Eq {0} Comparison same same
+thena spine> qed
+decides : Dec {0 0} (Eq {0} String "x" "x")   ∎
+  pending, in decString · eqStringEqual
+    claims Eq {0} String a b
+    body   Eq {0} String a a
+  pending, in decString · eqStringRefl
+    claims Eq {0} Comparison (eqString a a) same
+    body   Eq {0} Comparison same same
+```
+
+`in decString · eqStringEqual` is the route: the claim is not in your proof, it
+is in a definition your proof reached through another one. Both read **pending**,
+and here is why that is worth understanding rather than working around. The
+claims are read at `eqStringEqual`'s own definition, where `a` and `b` are its
+binders and nothing is settled — and they are read there rather than at `"x"`
+and `"x"` because the walk takes one hop into a definition and stops. It is not
+a normaliser, deliberately: finding out which claims *survive* reduction means
+reducing, and `qed` may not be made to diverge.
+
+So `:trust none` will not close this proof, even though `decString "x" "x"`
+reduces to `refl {0} String "x"` with nothing trusted left in it. The strictest
+setting is a statement about what a proof *reaches*, not about what is left
+after it runs. If you want it, the two laws are four lines of
+`prelude/prelude.thena` and you can read exactly what you are taking on.
 
 ---
 

@@ -46,7 +46,7 @@ import Data.List (nub)
 
 import Thena.Core.Context (Context, Entry (..), entryVar)
 import Thena.Core.Convert (convert)
-import Thena.Core.Reduce (atLevels, whnf)
+import Thena.Core.Reduce (atLevels, primitiveNames, whnf)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName
@@ -279,14 +279,27 @@ hopeless env ctx claimed actual = fst (go ctx seed claimed actual)
     -- η relates one with a spine, and reimplementing that here to decide a
     -- clash is exactly the overreach the 'False'-by-default rule above exists
     -- to avoid.
+    --
+    -- **A primitive is the one 'Global' that is NOT rigid, and leaving it in
+    -- cost a false @Undischargeable@** (MS8 phase 152). A primitive's rule
+    -- reads its arguments' /shape/ rather than their number
+    -- ("Thena.Core.Reduce"'s @primitiveStep@ fires when both are literals), so
+    -- substituting a literal for a variable changes the head: @eqString a a@
+    -- stands with @eqString@ at the head and @eqString "x" "x"@ is the
+    -- constructor @same@. Calling the first rigid made the prelude's own
+    -- @eqString a a ≡ same@ claim impossible-by-position at its definition
+    -- site, which at 'NoUndischargeableTrust' refuses every proof that decides
+    -- a string equality. The rule above is answer 'False' unless certain, and
+    -- about a primitive this is never certain.
     key t = case t of
       Universe _       -> Just KUniverse
       Pi {}            -> Just KPi
       Primitive l      -> Just (KLiteral l)
       Canonical g _ as -> Just (KFormer g (length as))
       _ -> case spine t of
-        (Global g _, as) -> Just (KGlobal g (length as))
-        _                -> Nothing
+        (Global g _, as)
+          | g `notElem` map fst primitiveNames -> Just (KGlobal g (length as))
+        _                                      -> Nothing
 
 -- | What two rigid heads are compared by. Not exported: it is the positional
 -- test's own vocabulary and means nothing outside it.

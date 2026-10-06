@@ -549,6 +549,47 @@ proof at all*, which is a stricter promise and makes the setting unusable in a
 system whose own prelude asserts anything. **If that reading wins, this paragraph
 and the one above it are what has to change with it.**
 
+### A primitive that supplies a type is retired; a primitive that computes stays
+
+*Decided 2026-10-06.* An assistant for metatheory keeps meeting facts that are
+true and unprovable in its own theory — and the cheap answer is to add a built-in
+function for each one, which is an escape hatch with no structure and nothing a
+user can inspect. Thena's answer is to split the two jobs a built-in was doing.
+
+Deciding whether two strings are equal is the case that forced it. `eqString`
+*computes*: on two literals it answers `same` or `different`, and nothing in the
+core term language can do that, so it stays a reduction rule. What it cannot do
+is tie that answer to the equality type — `eqString y x` says nothing about
+`Eq String y x` for an unknown `y` — and that gap is a *typing* claim, so it is
+written as one:
+
+```
+eqStringEqual : ∀ (a b : String) -> Eq Comparison (eqString a b) same -> Eq String a b
+eqStringRefl  : ∀ (a : String) -> Eq Comparison (eqString a a) same
+```
+
+Both are definitions in the prelude whose bodies are `trusted` terms, and
+`decString`, which answers `yes` with a proof or `no` with a refutation, is an
+ordinary definition built on them — it eliminates the comparison with a motive
+that keeps the answer, so each branch is handed the evidence of which answer it
+is, and the refutation is *derived* rather than built by the implementation.
+`decString` itself trusts nothing.
+
+**What this buys is that the trust is listed rather than built in.** A user who
+asks what a proof rests on is told `in decString · eqStringEqual`, with both the
+claimed type and the type the body really had, and can read the four lines of
+prelude that say it. Before, the same trust was sixty lines of Haskell that
+constructed the answer term, and no command could name it at all.
+
+**It costs the strictest trust setting for these proofs, and that is stated
+rather than hidden.** The claims are read at their own definition's binders,
+where they are *pending* — so *no trust* will not close a proof that decides a
+literal equality, even though `decString "x" "x"` reduces to `refl String "x"`
+with nothing trusted left in it. Finding out which claims survive reduction means
+reducing, which may diverge and has no business in `qed`'s path, so the strictest
+setting is a statement about what a proof reaches and not about what is left when
+it runs.
+
 ### A token class is an ordinary definition, and its regex takes its type as an argument
 
 *Decided 2026-09-19.*

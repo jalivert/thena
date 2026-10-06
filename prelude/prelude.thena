@@ -57,16 +57,143 @@ data Dec (A : Type) : Type where
   yes : forall (p : A) -> Dec A
   no : forall (n : A -> Empty) -> Dec A
 
--- **Comparison with evidence** (his choice, `ms6/CLOSEOUT.md` 32). On two
--- literals `decString a b` is `yes (refl String a)` or `no ‹a refutation›`, and
--- on a name nobody knows it is stuck — so a proof that eliminates it gets
--- `Eq String y x` in one branch and `Eq String y x -> Empty` in the other.
--- `eqString` says only which, and that is why a proof about a name it does not
--- know could not use it. Generated substitution decides with `decString`, so
--- a proof about it follows the same decision.
-do declare-primitive "decString" (resolve-core core`∀ (a : String) (b : String) -> Dec {0 0} (Eq {0} String a b)`)
-   ; declare-primitive "decChar" (resolve-core core`∀ (a : Char) (b : Char) -> Dec {0 0} (Eq {0} Char a b)`)
-   ; declare-primitive "decInt" (resolve-core core`∀ (a : Int) (b : Int) -> Dec {0 0} (Eq {0} Int a b)`)
+-- **Comparison with evidence** (MS6 phase 109a, his choice on
+-- `ms6/CLOSEOUT.md` 32; a definition rather than a primitive since MS8 phase
+-- 152). On two literals `decString a b` is `yes (refl String a)` or
+-- `no ‹a refutation›`, and on a name nobody knows it is stuck — so a proof
+-- that eliminates it gets `Eq String y x` in one branch and
+-- `Eq String y x -> Empty` in the other. `eqString` says only which, and that
+-- is why a proof about a name it does not know could not use it. Generated
+-- substitution decides with `decString`, so a proof about it follows the same
+-- decision.
+--
+-- **This used to be a reduction rule in Haskell, and now it is three
+-- definitions in this file.** That is what `trusted` is for: the escape hatch
+-- is one core term whose claim is visible, instead of a primitive whose
+-- behaviour only the implementation knows. What each `decP` rests on is
+-- exactly two claims about its comparison primitive, and `:trust` names them.
+--
+-- **Why these are written in the development calculus and not at the surface.**
+-- A surface `trusted T e` claims a hole for the type the body was really
+-- checked at, and a hole whose type is a hole has no solution under a binder —
+-- so the surface form does not work inside a λ, and every claim here is under
+-- one. The development calculus writes all three fields, which needs no hole.
+-- `define-global` is the op that hands a finished definition out through the
+-- channel, the way `declare-primitive` hands out a constant.
+
+-- **Transport along an equality**: given `e : Eq A x y` and a family `P`,
+-- carry a `P x` to a `P y`. The one thing the decisions below need from `Eq`,
+-- and the reason they need no trust of their own beyond the two laws.
+do define-global "transport"
+     (resolve-core core`∀ (A : Type₀) (P : A -> Type₀) (x : A) (y : A) -> Eq {0} A x y -> P x -> P y`)
+     (resolve-core core`λ (A : Type₀) (P : A -> Type₀) (x : A) (y : A) (e : Eq {0} A x y) (px : P x) -> (elim Eq {0} (A) (λ (u : A) (v : A) (r : Eq {0} A u v) -> P u -> P v) ((λ (c : A) (z : P c) -> z)) (x y) e) px`)
+
+-- **Does this comparison say `same`?** `Unit` when it does and `Empty` when it
+-- does not, which is how the two constructors are told apart: `isSame` applied
+-- to `different` *is* `Empty`, so a proof that `same` and `different` are equal
+-- transports a `unit` into one.
+   ; define-global "isSame"
+     (resolve-core core`Comparison -> Type₀`)
+     (resolve-core core`λ (c : Comparison) -> elim Comparison () (λ (z : Comparison) -> Type₀) ((Unit {0}) (Empty {0})) () c`)
+
+-- **The two laws of `eqString`, and the whole of what `decString` trusts.** Neither
+-- is derivable: nothing in the type theory ties a comparison on an unknown
+-- name to the equality type, which is what made closed-term preservation the
+-- only way through before this existed.
+--
+-- `eqStringEqual` says a `same` answer means the two really are equal. Its body
+-- is `refl String a`, honestly of type `Eq String a a`, and the claim is that it has
+-- type `Eq String a b` — so on two equal literals the two types are convertible,
+-- the node contracts away, and the claim is **discharged**. On a name nobody
+-- knows it is **pending**, and on two literals that differ it is
+-- **undischargeable**, which is right: you would have had to forge the `same`.
+   ; define-global "eqStringEqual"
+     (resolve-core core`∀ (a : String) (b : String) -> Eq {0} Comparison (eqString a b) same -> Eq {0} String a b`)
+     (resolve-core core`λ (a : String) (b : String) (p : Eq {0} Comparison (eqString a b) same) -> trusted (Eq {0} String a b) (Eq {0} String a a) (refl {0} String a)`)
+
+-- `eqStringRefl` says the comparison answers `same` of a literal and itself.
+-- Discharged at every literal, pending on a name — and it is what lets the
+-- refutation below be honest.
+   ; define-global "eqStringRefl"
+     (resolve-core core`∀ (a : String) -> Eq {0} Comparison (eqString a a) same`)
+     (resolve-core core`λ (a : String) -> trusted (Eq {0} Comparison (eqString a a) same) (Eq {0} Comparison same same) (refl {0} Comparison same)`)
+
+-- **`decString` itself trusts nothing.** It eliminates the comparison with a
+-- motive that keeps the answer — `Eq Comparison (eqString a b) c` — so each branch
+-- is handed the evidence of which answer it is. The `same` branch passes that
+-- to `eqStringEqual`; the `different` branch carries `eqStringRefl a` along the
+-- supposed equality to get `eqString a b ≡ same`, rewrites the `different`
+-- evidence by it to get `same ≡ different`, and transports `unit` along
+-- *that* into `isSame different`, which **is** `Empty`.
+   ; define-global "decString"
+     (resolve-core core`∀ (a : String) (b : String) -> Dec {0 0} (Eq {0} String a b)`)
+     (resolve-core core`λ (a : String) (b : String) -> (elim Comparison () (λ (c : Comparison) -> Eq {0} Comparison (eqString a b) c -> Dec {0 0} (Eq {0} String a b)) ((λ (p : Eq {0} Comparison (eqString a b) same) -> yes {0 0} (Eq {0} String a b) (eqStringEqual a b p)) (λ (p : Eq {0} Comparison (eqString a b) different) -> no {0 0} (Eq {0} String a b) (λ (q : Eq {0} String a b) -> transport Comparison isSame same different (transport Comparison (λ (z : Comparison) -> Eq {0} Comparison z different) (eqString a b) same (transport String (λ (z : String) -> Eq {0} Comparison (eqString a z) same) a b q (eqStringRefl a)) p) (unit {0})))) () (eqString a b)) (refl {0} Comparison (eqString a b))`)
+
+-- **The two laws of `eqChar`, and the whole of what `decChar` trusts.** Neither
+-- is derivable: nothing in the type theory ties a comparison on an unknown
+-- name to the equality type, which is what made closed-term preservation the
+-- only way through before this existed.
+--
+-- `eqCharEqual` says a `same` answer means the two really are equal. Its body
+-- is `refl Char a`, honestly of type `Eq Char a a`, and the claim is that it has
+-- type `Eq Char a b` — so on two equal literals the two types are convertible,
+-- the node contracts away, and the claim is **discharged**. On a name nobody
+-- knows it is **pending**, and on two literals that differ it is
+-- **undischargeable**, which is right: you would have had to forge the `same`.
+   ; define-global "eqCharEqual"
+     (resolve-core core`∀ (a : Char) (b : Char) -> Eq {0} Comparison (eqChar a b) same -> Eq {0} Char a b`)
+     (resolve-core core`λ (a : Char) (b : Char) (p : Eq {0} Comparison (eqChar a b) same) -> trusted (Eq {0} Char a b) (Eq {0} Char a a) (refl {0} Char a)`)
+
+-- `eqCharRefl` says the comparison answers `same` of a literal and itself.
+-- Discharged at every literal, pending on a name — and it is what lets the
+-- refutation below be honest.
+   ; define-global "eqCharRefl"
+     (resolve-core core`∀ (a : Char) -> Eq {0} Comparison (eqChar a a) same`)
+     (resolve-core core`λ (a : Char) -> trusted (Eq {0} Comparison (eqChar a a) same) (Eq {0} Comparison same same) (refl {0} Comparison same)`)
+
+-- **`decChar` itself trusts nothing.** It eliminates the comparison with a
+-- motive that keeps the answer — `Eq Comparison (eqChar a b) c` — so each branch
+-- is handed the evidence of which answer it is. The `same` branch passes that
+-- to `eqCharEqual`; the `different` branch carries `eqCharRefl a` along the
+-- supposed equality to get `eqChar a b ≡ same`, rewrites the `different`
+-- evidence by it to get `same ≡ different`, and transports `unit` along
+-- *that* into `isSame different`, which **is** `Empty`.
+   ; define-global "decChar"
+     (resolve-core core`∀ (a : Char) (b : Char) -> Dec {0 0} (Eq {0} Char a b)`)
+     (resolve-core core`λ (a : Char) (b : Char) -> (elim Comparison () (λ (c : Comparison) -> Eq {0} Comparison (eqChar a b) c -> Dec {0 0} (Eq {0} Char a b)) ((λ (p : Eq {0} Comparison (eqChar a b) same) -> yes {0 0} (Eq {0} Char a b) (eqCharEqual a b p)) (λ (p : Eq {0} Comparison (eqChar a b) different) -> no {0 0} (Eq {0} Char a b) (λ (q : Eq {0} Char a b) -> transport Comparison isSame same different (transport Comparison (λ (z : Comparison) -> Eq {0} Comparison z different) (eqChar a b) same (transport Char (λ (z : Char) -> Eq {0} Comparison (eqChar a z) same) a b q (eqCharRefl a)) p) (unit {0})))) () (eqChar a b)) (refl {0} Comparison (eqChar a b))`)
+
+-- **The two laws of `eqInt`, and the whole of what `decInt` trusts.** Neither
+-- is derivable: nothing in the type theory ties a comparison on an unknown
+-- name to the equality type, which is what made closed-term preservation the
+-- only way through before this existed.
+--
+-- `eqIntEqual` says a `same` answer means the two really are equal. Its body
+-- is `refl Int a`, honestly of type `Eq Int a a`, and the claim is that it has
+-- type `Eq Int a b` — so on two equal literals the two types are convertible,
+-- the node contracts away, and the claim is **discharged**. On a name nobody
+-- knows it is **pending**, and on two literals that differ it is
+-- **undischargeable**, which is right: you would have had to forge the `same`.
+   ; define-global "eqIntEqual"
+     (resolve-core core`∀ (a : Int) (b : Int) -> Eq {0} Comparison (eqInt a b) same -> Eq {0} Int a b`)
+     (resolve-core core`λ (a : Int) (b : Int) (p : Eq {0} Comparison (eqInt a b) same) -> trusted (Eq {0} Int a b) (Eq {0} Int a a) (refl {0} Int a)`)
+
+-- `eqIntRefl` says the comparison answers `same` of a literal and itself.
+-- Discharged at every literal, pending on a name — and it is what lets the
+-- refutation below be honest.
+   ; define-global "eqIntRefl"
+     (resolve-core core`∀ (a : Int) -> Eq {0} Comparison (eqInt a a) same`)
+     (resolve-core core`λ (a : Int) -> trusted (Eq {0} Comparison (eqInt a a) same) (Eq {0} Comparison same same) (refl {0} Comparison same)`)
+
+-- **`decInt` itself trusts nothing.** It eliminates the comparison with a
+-- motive that keeps the answer — `Eq Comparison (eqInt a b) c` — so each branch
+-- is handed the evidence of which answer it is. The `same` branch passes that
+-- to `eqIntEqual`; the `different` branch carries `eqIntRefl a` along the
+-- supposed equality to get `eqInt a b ≡ same`, rewrites the `different`
+-- evidence by it to get `same ≡ different`, and transports `unit` along
+-- *that* into `isSame different`, which **is** `Empty`.
+   ; define-global "decInt"
+     (resolve-core core`∀ (a : Int) (b : Int) -> Dec {0 0} (Eq {0} Int a b)`)
+     (resolve-core core`λ (a : Int) (b : Int) -> (elim Comparison () (λ (c : Comparison) -> Eq {0} Comparison (eqInt a b) c -> Dec {0 0} (Eq {0} Int a b)) ((λ (p : Eq {0} Comparison (eqInt a b) same) -> yes {0 0} (Eq {0} Int a b) (eqIntEqual a b p)) (λ (p : Eq {0} Comparison (eqInt a b) different) -> no {0 0} (Eq {0} Int a b) (λ (q : Eq {0} Int a b) -> transport Comparison isSame same different (transport Comparison (λ (z : Comparison) -> Eq {0} Comparison z different) (eqInt a b) same (transport Int (λ (z : Int) -> Eq {0} Comparison (eqInt a z) same) a b q (eqIntRefl a)) p) (unit {0})))) () (eqInt a b)) (refl {0} Comparison (eqInt a b))`)
 
 data Sigma (A : Type₀) (B : A -> Type₀) : Type₀ where
   pair : forall (a : A) (b : B a) -> Sigma A B

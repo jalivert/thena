@@ -7,199 +7,199 @@ module STLC
 warning: in the grammar of LC, production vacuous: x binds in nothing
 warning: no noConfusionCtx-in: Ctx-there's argument 6 (ne) has a type that depends on an earlier argument, so its equation cannot be stated
 -- a binding form's head is not a metavariable
-chose 936: elaborate
+chose 1010: elaborate
 already equal
-solved: ?ℓ933
+solved: ?ℓ1007
 solved: T
-chose 944: elaborate
+chose 1018: elaborate
 already equal
-solved: ?ℓ934
+solved: ?ℓ1008
 solved: T
 refused: in the grammar of L, production bad: q is not a metavariable
 -- a binder that is not a String
-chose 936: elaborate
+chose 1010: elaborate
 already equal
-solved: ?ℓ933
+solved: ?ℓ1007
 solved: T
-chose 944: elaborate
+chose 1018: elaborate
 already equal
-solved: ?ℓ934
+solved: ?ℓ1008
 solved: T
 refused: in the grammar of L, production num: a binder must be a String, and n is an Int
 -- an occurrence that is not a String
-chose 936: elaborate
+chose 1010: elaborate
 already equal
-solved: ?ℓ933
+solved: ?ℓ1007
 solved: T
-chose 944: elaborate
+chose 1018: elaborate
 already equal
-solved: ?ℓ934
+solved: ?ℓ1008
 solved: T
 refused: in the grammar of L, production num: an occurrence must be a String, and n is an Int
 -- a bracket naming what is not an argument
-chose 936: elaborate
+chose 1010: elaborate
 already equal
-solved: ?ℓ933
+solved: ?ℓ1007
 solved: T
-chose 944: elaborate
+chose 1018: elaborate
 already equal
-solved: ?ℓ934
+solved: ?ℓ1008
 solved: T
 refused: in the grammar of L, production f: x is not an argument of f
 -- a bracket naming an occurrence
-chose 936: elaborate
+chose 1010: elaborate
 already equal
-solved: ?ℓ933
+solved: ?ℓ1007
 solved: T
-chose 944: elaborate
+chose 1018: elaborate
 already equal
-solved: ?ℓ934
+solved: ?ℓ1008
 solved: T
 refused: in the grammar of L, production f: x is an occurrence, so it binds nothing
 -- a bracket naming what the declared binders do not
-chose 936: elaborate
+chose 1010: elaborate
 already equal
-solved: ?ℓ933
+solved: ?ℓ1007
 solved: T
-chose 944: elaborate
+chose 1018: elaborate
 already equal
-solved: ?ℓ934
+solved: ?ℓ1008
 solved: T
 refused: in the grammar of L, production f: n is not one of the binders declared
 -- metadata naming what is not written
-chose 936: elaborate
+chose 1010: elaborate
 already equal
-solved: ?ℓ933
+solved: ?ℓ1007
 solved: T
-chose 944: elaborate
+chose 1018: elaborate
 already equal
-solved: ?ℓ934
+solved: ?ℓ1008
 solved: T
 refused: in the grammar of L, production f: x is not an argument of f
 -- one argument written with two scopes
-chose 936: elaborate
+chose 1010: elaborate
 already equal
-solved: ?ℓ933
+solved: ?ℓ1007
 solved: T
-chose 944: elaborate
+chose 1018: elaborate
 already equal
-solved: ?ℓ934
+solved: ?ℓ1008
 solved: T
 refused: in the grammar of L, production f: M is written with different binders free in it
 -- a production with no items
-chose 936: elaborate
+chose 1010: elaborate
 already equal
-solved: ?ℓ933
+solved: ?ℓ1007
 solved: T
-chose 944: elaborate
+chose 1018: elaborate
 already equal
-solved: ?ℓ934
+solved: ?ℓ1008
 solved: T
 refused: in the grammar of L, production f: it has no items
 -- a metavariable named twice
-chose 936: elaborate
+chose 1010: elaborate
 already equal
-solved: ?ℓ933
+solved: ?ℓ1007
 solved: T
-chose 944: elaborate
+chose 1018: elaborate
 already equal
-solved: ?ℓ934
+solved: ?ℓ1008
 solved: T
 refused: in the grammar of L: M is named twice
 -- a metavariable that is already a token class
-chose 936: elaborate
+chose 1010: elaborate
 already equal
-solved: ?ℓ933
+solved: ?ℓ1007
 solved: T
-chose 944: elaborate
+chose 1018: elaborate
 already equal
-solved: ?ℓ934
+solved: ?ℓ1008
 solved: T
 refused: in the grammar of L: x is already a metavariable or a token class
 -- a language named like something declared
-chose 936: elaborate
+chose 1010: elaborate
 already equal
-solved: ?ℓ933
+solved: ?ℓ1007
 solved: T
-chose 944: elaborate
+chose 1018: elaborate
 already equal
-solved: ?ℓ934
+solved: ?ℓ1008
 solved: T
 refused: x is already declared
 -- a constructor named like something declared
-chose 936: elaborate
+chose 1010: elaborate
 already equal
-solved: ?ℓ933
+solved: ?ℓ1007
 solved: T
-chose 944: elaborate
+chose 1018: elaborate
 already equal
-solved: ?ℓ934
+solved: ?ℓ1008
 solved: T
 refused: L's constructor x is already declared
 -- two productions of one name
-chose 936: elaborate
+chose 1010: elaborate
 already equal
-solved: ?ℓ933
+solved: ?ℓ1007
 solved: T
-chose 944: elaborate
+chose 1018: elaborate
 already equal
-solved: ?ℓ934
+solved: ?ℓ1008
 solved: T
 refused: L's constructor f is already declared
 -- a context without one empty and one extension production
-chose 936: elaborate
+chose 1010: elaborate
 already equal
-solved: ?ℓ933
+solved: ?ℓ1007
 solved: T
-chose 944: elaborate
+chose 1018: elaborate
 already equal
-solved: ?ℓ934
+solved: ?ℓ1008
 solved: T
 refused: in the context C: a context needs one empty and one extension production
 -- a terminal that writes the placeholder
-chose 936: elaborate
+chose 1010: elaborate
 already equal
-solved: ?ℓ933
+solved: ?ℓ1007
 solved: T
-chose 944: elaborate
+chose 1018: elaborate
 already equal
-solved: ?ℓ934
+solved: ?ℓ1008
 solved: T
 refused: in the grammar of L, production f: the terminal `█` contains the reserved █, which is how a part of a term that is not written yet is shown
 -- a terminal that merely contains it
-chose 936: elaborate
+chose 1010: elaborate
 already equal
-solved: ?ℓ933
+solved: ?ℓ1007
 solved: T
-chose 944: elaborate
+chose 1018: elaborate
 already equal
-solved: ?ℓ934
+solved: ?ℓ1008
 solved: T
 refused: in the grammar of L, production f: the terminal `a█b` contains the reserved █, which is how a part of a term that is not written yet is shown
 -- a token class that would read it
-chose 935: elaborate
+chose 1009: elaborate
 already equal
-solved: ?ℓ933
+solved: ?ℓ1007
 solved: T
 refused: in the grammar of L, production f: the token class any would read the reserved █, which is how a part of a term that is not written yet is shown
 -- a language named like the built-in tag surface
-chose 936: elaborate
+chose 1010: elaborate
 already equal
-solved: ?ℓ933
+solved: ?ℓ1007
 solved: T
-chose 944: elaborate
+chose 1018: elaborate
 already equal
-solved: ?ℓ934
+solved: ?ℓ1008
 solved: T
 refused: surface is one of Thena's own tags, so a language may not take its name
 -- a language named like the built-in tag core
-chose 936: elaborate
+chose 1010: elaborate
 already equal
-solved: ?ℓ933
+solved: ?ℓ1007
 solved: T
-chose 944: elaborate
+chose 1018: elaborate
 already equal
-solved: ?ℓ934
+solved: ?ℓ1008
 solved: T
 refused: core is one of Thena's own tags, so a language may not take its name
 -- no where

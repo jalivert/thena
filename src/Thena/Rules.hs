@@ -1453,9 +1453,16 @@ binaryOps =
 -- three fields and the clause that builds one has all three in hand, so the
 -- alternative was an op that inferred one of them — which is @claim@'s job and
 -- not a builder's.
+-- **@define-global@ carries no plicities, and that is the right answer rather
+-- than a missing one** (MS8 phase 152). 'Thena.Instral.Ops.DefineGlobal'\'s
+-- plicity list says where the /signature as written/ put a brace, and a
+-- definition written here has no surface signature to read — so it is empty,
+-- which 'Thena.Engine.plicitiesOf' already documents as what every DC-declared
+-- global gets: what was written and nothing more.
 ternaryOps :: [(String, Operand -> Operand -> Operand -> Op)]
 ternaryOps =
   [ ("make-trusted", Op.MakeTrusted)
+  , ("define-global", Op.DefineGlobal [])
   ]
 
 -- | Does some op bear this word at /some/ arity?
