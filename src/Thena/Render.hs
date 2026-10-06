@@ -1549,6 +1549,15 @@ renderWarning w = "warning: " ++ case w of
     blockAt k g ++ ": no character may be appended to every name " ++ cls
       ++ " accepts, so a binder renamed to avoid capture will not print in this"
       ++ " notation. Substitution is unaffected"
+  -- **The line says what is wrong with the generated function, not what is
+  -- wrong with the grammar** (MS8 phase 153): the block installs, and what an
+  -- author has to know is that substitution will treat that binder as its own
+  -- language's variable.
+  BinderClassUnowned k g p cls ->
+    blockAt k g ++ ", production " ++ p ++ ": " ++ cls
+      ++ " is bound here and nothing in this language occurs at " ++ cls
+      ++ ", so generated substitution renames it as one of this language's own"
+      ++ " variables. Bind a class this language reads, or substitute by hand"
   NoConfusionSkipped d why ->
     "no " ++ nameString (snd (noConfusionNames d)) ++ ": " ++ because
     where

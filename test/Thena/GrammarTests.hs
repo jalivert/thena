@@ -130,6 +130,29 @@ unreadable =
 -- ---------------------------------------------------------------------------
 
 -- | The spec's own grammars (§4.6, §5.2), with a vacuous binder added.
+-- | **One language, two name classes** (MS8 phase 153). @x@ is the class @L@
+-- reads an occurrence at; @X@ is bound by @big@ and occurs nowhere, which is
+-- F-sub's shape in miniature — there @Λ X <: T . t@ binds a type variable from
+-- a term production and every occurrence of it is in a type. The class @X@
+-- belonging to another grammar is `~5k3mg`; recording which class a binder
+-- binds at is what makes that expressible at all.
+twoClasses :: String
+twoClasses =
+  unlines
+    [ "module Two where"
+    , ""
+    , "x : Token String"
+    , "x = /[a-z][a-zA-Z0-9']*/"
+    , ""
+    , "X : Token String"
+    , "X = /[A-Z][a-zA-Z0-9']*/"
+    , ""
+    , "language L, M, N where"
+    , "  var : x as occurrence -> x"
+    , "  abs : x as binder     -> ( lam x . M[x] )"
+    , "  big : X as binder     -> ( all X . M[X] )"
+    ]
+
 stlc :: String
 stlc =
   unlines
@@ -173,18 +196,44 @@ meaning =
       case [ g | g <- gs, grammarName g == GlobalName "LC" ] of
         [g] ->
           map (\p -> (gproductionName p, gproductionArguments p)) (grammarProductions g)
-            @?= [ (GlobalName "var", [Argument "x" str Occurrence])
-                , (GlobalName "abs", [ Argument "x" str Binder
+            @?= [ (GlobalName "var", [Argument "x" str (Occurrence (GlobalName "x"))])
+                , (GlobalName "abs", [ Argument "x" str (Binder (GlobalName "x"))
                                      , Argument "T" (lang "Ty") Plain
                                      , Argument "E" (lang "LC") (Scope [0]) ])
                 , (GlobalName "app", [Argument "M" (lang "LC") Plain, Argument "N" (lang "LC") Plain])
                   -- §4.3: a name written twice is one argument.
                 , (GlobalName "repeat", [Argument "M" (lang "LC") Plain])
-                , (GlobalName "vacuous", [ Argument "x" str Binder
+                , (GlobalName "vacuous", [ Argument "x" str (Binder (GlobalName "x"))
                                          , Argument "M" (lang "LC") Plain
                                          , Argument "N" (lang "LC") Plain ])
                 ]
         other -> assertFailure (show (length other) ++ " grammars called LC")
+    -- **Two classes in one grammar** (MS8 phase 153, `~tmnrr` and `~5k3mg`).
+    -- The whole of what this phase adds is that the two binders are recorded at
+    -- the two different classes rather than both saying only "binder" — so a
+    -- generator can tell them apart, which phase 155 is what needs it.
+  , testCase "a binder at a second class is recorded at that class" $ do
+      gs <- installed twoClasses
+      case [ g | g <- gs, grammarName g == GlobalName "L" ] of
+        [g] ->
+          [ (gproductionName p, map argumentRole (gproductionArguments p))
+          | p <- grammarProductions g ]
+            @?= [ (GlobalName "var", [Occurrence (GlobalName "x")])
+                , (GlobalName "abs", [Binder (GlobalName "x"), Scope [0]])
+                , (GlobalName "big", [Binder (GlobalName "X"), Scope [0]])
+                ]
+        other -> assertFailure (show (length other) ++ " grammars called L")
+    -- **It installs, and it warns** — the second principle: a grammar binding a
+    -- class it does not read is what `~5k3mg` is for, so it is not refused, but
+    -- until the generator is class-aware @L-subst-all@ renames that binder as
+    -- one of @L@'s own variables, and an author should see that said.
+  , testCase "and the block installs with a warning, because the generator is not class-aware yet" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 twoClasses of
+        (_, ProofLoaded _ names _ ws) -> do
+          names @?= ["x", "X", "L"]
+          ws @?= [BinderClassUnowned LanguageBlock "L" "big" "X"]
+        (_, other) -> assertFailure (show other)
   , testCase "a later module may use an earlier one's metavariables" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 stlc

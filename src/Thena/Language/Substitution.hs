@@ -157,7 +157,7 @@ substitutionDefinitions g = case (variableProduction g, substitutionNames g) of
           as = argNames args
           rs = recNames args
           step (a, arg) acc = case (argumentRole arg, recOf args rs a) of
-            (Occurrence, _) ->
+            (Occurrence _, _) ->
               decide (listOf string) (member (v a) (v "bound")) acc (consOf string (v a) acc)
             (Scope bs, Just r) ->
               app (v r) [foldr (consOf string . v) (v "bound") [ as !! i | i <- bs ], acc]
@@ -187,7 +187,7 @@ substitutionDefinitions g = case (variableProduction g, substitutionNames g) of
       let args = gproductionArguments p
           as = argNames args
           rs = recNames args
-          binders = [ i | (i, arg) <- zip [0 :: Int ..] args, argumentRole arg == Binder ]
+          binders = [ i | (i, arg) <- zip [0 :: Int ..] args, Binder _ <- [argumentRole arg] ]
           renamed i = "z" ++ show i
           -- A renaming for each binder, and each avoids the names already
           -- chosen for the ones before it and the names of the ones after.
@@ -198,7 +198,7 @@ substitutionDefinitions g = case (variableProduction g, substitutionNames g) of
           extend bs s = foldl (\rest i -> consOf pair (app (name "both") [string, self, v (as !! i), var (v (renamed i))]) rest) s bs
           rebuilt = app (name (conName p))
             [ case (argumentRole arg, recOf args rs a) of
-                (Binder, _) -> v (renamed i)
+                (Binder _, _) -> v (renamed i)
                 (Scope bs, Just r) -> app (v r) [extend bs (v "s")]
                 (Plain, Just r) -> app (v r) [v "s"]
                 _ -> v a
@@ -219,7 +219,7 @@ substitutionDefinitions g = case (variableProduction g, substitutionNames g) of
                   rebuilt (zip [0 ..] binders)
        in lamL (as ++ rs ++ ["s"]) $ case (map argumentRole args, as, binders) of
             -- The variable production: the whole node is what the map says.
-            ([Occurrence], [y], _) -> lookupIn var (v y) (v "s")
+            ([Occurrence _], [y], _) -> lookupIn var (v y) (v "s")
             (_, _, []) -> rebuilt
             _ -> SurfaceLet (local "avoid") (Just (listOf string)) images withRenamings
 

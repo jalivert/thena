@@ -34,6 +34,7 @@ module Thena.Language.Grammar
   , extensionOf
   , isName
   , variableProduction
+  , variableProductions
   , variableClass
   , tokenClassOf
   , earleyRules
@@ -241,7 +242,7 @@ checkGrammar installed env b = do
   case [ f | f <- substitutionNames g, taken f || f `elem` prodNames ] of
     f : _ -> refuse (FunctionTaken f)
     [] -> Right ()
-  Right (g, concatMap snd prods ++ unprimeable g)
+  Right (g, concatMap snd prods ++ unprimeable g ++ unownedBinders g)
   where
     kind = blockKind b
     name = blockName b
@@ -254,11 +255,29 @@ checkGrammar installed env b = do
     -- because nothing is actually broken but the printing.
     unprimeable gr =
       [ UnprimeableClass kind name (nameOf cls)
-      | Just p <- [variableProduction gr]
+      | (cls, p) <- variableProductions gr
       , a <- gproductionArguments p
-      , argumentRole a == Occurrence
-      , OfClass cls _ re <- [argumentSort a]
+      , Occurrence cls' <- [argumentRole a]
+      , cls' == cls
+      , OfClass _ _ re <- [argumentSort a]
       , primingChar re == Nothing
+      ]
+    -- **A binder at a class the language has no occurrence for** (MS8 phase
+    -- 153). The classes a language /reads/ are 'variableProductions'; the
+    -- classes it /binds/ are on its 'Occurrence' and 'Binder' roles, which is
+    -- the whole reason the class is there. Where a binder's class is not one
+    -- of the read ones, generated substitution renames it with the single map
+    -- it carries and rebuilds it with the single variable production's
+    -- constructor — so the binder comes back as one of this language's own
+    -- variables. Said and not refused: `~5k3mg` is going to make this correct,
+    -- and until then an author who writes it should see what it causes.
+    unownedBinders gr =
+      [ BinderClassUnowned kind name (nameOf (gproductionName p)) (nameOf cls)
+      | kind == LanguageBlock
+      , p <- grammarProductions gr
+      , a <- gproductionArguments p
+      , Binder cls <- [argumentRole a]
+      , cls `notElem` map fst (variableProductions gr)
       ]
     nameOf (GlobalName x) = x
     -- **A judgment's name is not a metavariable**: its header has none, and
@@ -301,11 +320,17 @@ checkGrammar installed env b = do
         Just (AsBinders xs) -> mapM_ (named args) xs >> Right ([], Just xs)
       let binders = maybe bracketed id declared
       mapM_ (bound args occurrences declared) bracketed
-      mapM_ (stringClass OccurrenceNotString) occurrences
-      mapM_ (stringClass BinderNotString) binders
+      -- **The class a role carries comes from the check that validated it**
+      -- (MS8 phase 153). 'stringClass' has to look the sort up anyway to
+      -- refuse an occurrence or a binder that is not at a @Token String@
+      -- class, so it hands the class back rather than being asked twice —
+      -- which is also what leaves 'role' below with no unreachable branch to
+      -- fall through into.
+      occClasses <- traverse (withClass OccurrenceNotString) occurrences
+      bndClasses <- traverse (withClass BinderNotString) binders
       let role x
-            | x `elem` occurrences = Occurrence
-            | x `elem` binders = Binder
+            | Just cls <- lookup x occClasses = Occurrence cls
+            | Just cls <- lookup x bndClasses = Binder cls
             | (bs : _) <- scopeOf x, not (null bs) =
                 Scope [ i | (y, i) <- zip args [0 ..], y `elem` bs ]
             | otherwise = Plain
@@ -351,8 +376,15 @@ checkGrammar installed env b = do
       | Just xs <- declared, y `notElem` xs = Left (NotADeclaredBinder y)
       | otherwise = Right ()
 
+    -- **An occurrence and a binder are at a @Token String@ class, and this
+    -- answers which class** (MS8 phase 153). The sort it reads is 'sortOf' of
+    -- the name, which is the same function 'item' built the slot's sort from,
+    -- so the class recorded on the role and the class on the 'Argument' beside
+    -- it cannot disagree.
+    withClass wrong x = (,) x <$> stringClass wrong x
+
     stringClass wrong x = case sortOf x of
-      Just (OfClass _ (GlobalName "String") _) -> Right ()
+      Just (OfClass cls (GlobalName "String") _) -> Right cls
       Just s -> Left (wrong x s)
       Nothing -> Left (NotAMetavariable x)
 
@@ -417,8 +449,13 @@ substitutable g
         [] -> Right ()
   where
     named = [ (p, a) | p <- grammarProductions g, a <- gproductionArguments p, isNamed (argumentRole a) ]
-    isNamed r = r == Occurrence || r == Binder
-    isOccurrence a = argumentRole a == Occurrence
+    isNamed r = case r of
+      Occurrence _ -> True
+      Binder _     -> True
+      _            -> False
+    isOccurrence a = case argumentRole a of
+      Occurrence _ -> True
+      _            -> False
     inProduction p why = let GlobalName n = gproductionName p in Left (InProduction n why)
 
 -- | The functions generated substitution declares for a language (§4.7), in
@@ -429,15 +466,39 @@ substitutionNames g = case variableProduction g of
   Just _ -> [ n ++ suffix | suffix <- ["-fresh", "-fv", "-subst-all", "-subst"] ]
   where GlobalName n = grammarName g
 
+-- | **Every occurrence class the language reads, with the production that
+-- reads it** — one entry per class, in declaration order (MS8 phase 153).
+--
+-- This is the shape `~tmnrr` and `~5k3mg` need and the one everything about
+-- classes should be written against: a language may read more than one kind of
+-- name, and which classes it reads is a question about the whole grammar
+-- rather than about one production. **'substitutable' still refuses a second
+-- variable production**, so today this list is empty or a singleton — the list
+-- is the design arriving ahead of the refusal being lifted, not a claim that
+-- it already is.
+--
+-- A production declares at most one occurrence (the metadata names one), so a
+-- production appears here once; two productions at the /same/ class would
+-- appear twice and are what 'substitutable' is refusing.
+variableProductions :: Grammar -> [(GlobalName, GProduction)]
+variableProductions g
+  | grammarKind g /= LanguageBlock = []
+  | otherwise =
+      [ (cls, p)
+      | p <- grammarProductions g
+      , a <- gproductionArguments p
+      , Occurrence cls <- [argumentRole a]
+      ]
+
 -- | A language's variable production, if it has one — the production that
 -- declares an occurrence. 'substitutable' has checked there is at most one.
+--
+-- **The single-class door, and it is the one phase 155 removes.** Everything
+-- that has to work for @n@ classes reads 'variableProductions' instead.
 variableProduction :: Grammar -> Maybe GProduction
-variableProduction g
-  | grammarKind g /= LanguageBlock = Nothing
-  | otherwise = case [ p | p <- grammarProductions g
-                         , any ((== Occurrence) . argumentRole) (gproductionArguments p) ] of
-      p : _ -> Just p
-      [] -> Nothing
+variableProduction g = case variableProductions g of
+  (_, p) : _ -> Just p
+  []         -> Nothing
 
 -- | **The regular expression of the language's identifier class** — the one its
 -- 'variableProduction' reads an occurrence at (§4.7 gives a language exactly
@@ -451,7 +512,7 @@ variableClass :: Grammar -> Maybe Regex
 variableClass g = do
   p <- variableProduction g
   listToMaybe [ re | a <- gproductionArguments p
-                   , argumentRole a == Occurrence
+                   , Occurrence _ <- [argumentRole a]
                    , OfClass _ _ re <- [argumentSort a] ]
 
 -- | A context's extension production — the one with a slot of the context's

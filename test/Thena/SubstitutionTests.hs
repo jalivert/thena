@@ -251,7 +251,7 @@ freeVars :: [(String, [ArgRole])] -> Tm -> [String]
 freeVars roles (Tm c fs) = nub (concat (zipWith go (roleList roles c) fs))
   where
     go r f = case (r, f) of
-      (Occurrence, Name s) -> [s]
+      (Occurrence _, Name s) -> [s]
       (Plain, Sub t) -> freeVars roles t
       (Scope bs, Sub t) -> filter (`notElem` [ n | i <- bs, Name n <- [fs !! i] ]) (freeVars roles t)
       _ -> []
@@ -269,11 +269,11 @@ data DField = DBinder | DSub DB | DKept
 
 nameless :: [(String, [ArgRole])] -> [String] -> Tm -> DB
 nameless roles stack (Tm c fs) = case (roleList roles c, fs) of
-  ([Occurrence], [Name s]) -> maybe (DFree s) DVar (elemIndex s stack)
+  ([Occurrence _], [Name s]) -> maybe (DFree s) DVar (elemIndex s stack)
   (rs, _) -> DNode c (zipWith field rs fs)
   where
     field r f = case (r, f) of
-      (Binder, _) -> DBinder
+      (Binder _, _) -> DBinder
       (Scope bs, Sub t) -> DSub (nameless roles (reverse [ n | i <- bs, Name n <- [fs !! i] ] ++ stack) t)
       (_, Sub t) -> DSub (nameless roles stack t)
       _ -> DKept
