@@ -1174,25 +1174,6 @@ only in arguments of the language itself. A language with no occurrence (`Ty`)
 gets nothing. The four names are yours to keep free — declaring `LC-fv` first
 is refused.
 
-**A binder names the class it binds at, and binding a class your language does
-not read is a warning rather than a refusal.** A language may declare more than
-one `Token String` class and bind at a second one — which is what
-`Λ X <: T . t` needs, where a term production binds a type variable — and the
-block installs. What it cannot do yet is substitute correctly for it: the
-generated `LC-subst-all` carries one map and rebuilds a renamed binder with the
-one variable production's constructor, so a binder at a class nothing in the
-language occurs at comes back as one of that language's own variables. The block
-says so when you declare it:
-
-```
-warning: in the grammar of L, production big: X is bound here and nothing in
-this language occurs at X, so generated substitution renames it as one of this
-language's own variables. Bind a class this language reads, or substitute by hand
-```
-
-You are not prevented, because a grammar binding a class another grammar owns is
-where this is going; you are told what it will do.
-
 Two things arrived with it. **`List`, with `nil` and `cons`, is in the
 prelude**, so those names are taken from every object language until imports
 exist. **`appendString : String -> String -> String`** is the one way to build
