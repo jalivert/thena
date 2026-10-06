@@ -35,9 +35,30 @@ cabal run thena
 Use `cabal run` rather than the built binary directly — it is what tells the
 program where the prelude file is installed.
 
-You land at a prompt with a small prelude already loaded — `Eq` and `refl`,
-`Unit` and `unit`, `Empty`, `And` and `both`, `Sigma` and `pair`, with `fst`,
-`snd`, `andLeft` and `andRight` proved — and one empty goal:
+You land at a prompt with a small prelude already loaded, and one empty goal.
+**This is everything it gives you:**
+
+| | |
+|---|---|
+| equality | `Eq`, `refl` |
+| the unit and empty types | `Unit`, `unit`, `Empty` |
+| conjunction | `And`, `both`, with `andLeft` and `andRight` proved |
+| dependent pairs | `Sigma`, `pair`, with `fst` and `snd` proved |
+| lists | `List`, `nil`, `cons` |
+| the result of comparing | `Comparison`, `same`, `different` |
+| a decision, with its evidence | `Dec`, `yes`, `no` |
+
+`String`, `Char`, `Int` and `Token` are in scope as well — those are built in
+rather than declared, so they are there in any environment — along with
+`eqString`, `eqChar`, `eqInt`, `decString`, `decChar`, `decInt` and
+`appendString`.
+
+**There is no `Nat`, and no arithmetic.** A module that wants numbers declares
+them, which every example here does; `Int` is a primitive with literals and
+equality and nothing to do induction over. The prelude is deliberately the
+logical equipment and nothing else — it is `prelude/prelude.thena`, a readable
+file you can change.
+
 
 ```
 thena spine> :show
