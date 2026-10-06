@@ -50,6 +50,7 @@ tests =
     [ testGroup "the lexer takes a block whole, in a module" lexing
     , testGroup "the reader gives its shape" reading
     , testGroup "the checker gives its meaning" meaning
+    , testGroup "and says which classes a grammar reaches" reaching
     , testGroup "and refuses what §4.5 refuses" refusals
     , goldenVsString "grammars" "test/golden/grammars.golden" $ do
         (s0, trouble) <- startingSession
@@ -153,6 +154,47 @@ twoClasses =
     , "  big : X as binder     -> ( all X . M[X] )"
     ]
 
+-- | **A binder of one language free in a slot of another** (MS8 phase 154).
+-- @P@ reads an occurrence at @x@, so @P@ reaches the class @f@'s binder binds
+-- at and the block installs — it is what `~5k3mg` exists for. Refused until
+-- phase 154, and still refused when @P@ reaches no @x@.
+foreignScope :: String
+foreignScope =
+  unlines
+    [ "module Foreign where"
+    , ""
+    , "x : Token String"
+    , "x = /[a-z][a-zA-Z0-9']*/"
+    , ""
+    , "language P, R where"
+    , "  pvar : x as occurrence -> x"
+    , ""
+    , "language L, M where"
+    , "  var : x as occurrence -> x"
+    , "  f : x as binder       -> ( let x = M in R[x] )"
+    ]
+
+-- | **Three languages in a chain** (MS8 phase 154). @P@ reads an occurrence at
+-- @x@ and nothing else does; @Q@ holds an @R@, and @L@ holds an @S@ — so the
+-- class @L@ reaches it reaches through two slots and names nowhere itself.
+chained :: String
+chained =
+  unlines
+    [ "module Chain where"
+    , ""
+    , "x : Token String"
+    , "x = /[a-z][a-zA-Z0-9']*/"
+    , ""
+    , "language P, R where"
+    , "  pvar : x as occurrence -> x"
+    , ""
+    , "language Q, S where"
+    , "  pwrap -> ( R )"
+    , ""
+    , "language L, M where"
+    , "  lpair -> ( S M )"
+    ]
+
 stlc :: String
 stlc =
   unlines
@@ -234,6 +276,18 @@ meaning =
           names @?= ["x", "X", "L"]
           ws @?= [BinderClassUnowned LanguageBlock "L" "big" "X"]
         (_, other) -> assertFailure (show other)
+    -- **A binder scoping into another language installs now** (MS8 phase 154),
+    -- where the refusal was unconditional before, and warns for the same reason
+    -- the one above does: a method of @L-subst-all@ is given a recursive result
+    -- only for an argument of its own language, so @R@ is rebuilt as written
+    -- while the binder beside it is renamed.
+  , testCase "a binder free in another language's slot installs, and warns" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 foreignScope of
+        (_, ProofLoaded _ names _ ws) -> do
+          names @?= ["x", "P", "L"]
+          ws @?= [ScopeUnwalked LanguageBlock "L" "f" "R"]
+        (_, other) -> assertFailure (show other)
   , testCase "a later module may use an earlier one's metavariables" $ do
       (s0, _) <- startingSession
       let (s1, _) = loadProofSource s0 stlc
@@ -265,6 +319,67 @@ meaning =
     installed src = do
       (s0, _) <- startingSession
       pure (grammars (machineOf (fst (loadProofSource s0 src))))
+
+-- ---------------------------------------------------------------------------
+
+-- | **Which classes a grammar reaches** (MS8 phase 154, `~5k3mg`): the classes
+-- its own roles name, and everything the grammars in its slots reach. The
+-- generator of phase 155 indexes a substitution by this set, so what is pinned
+-- here is the set and its order — this grammar's own first, then first
+-- encountered.
+--
+-- **The cyclic case is the whole reason it is a fixpoint and not a walk in
+-- declaration order — his ruling, 2026-10-04.** No source can declare two
+-- mutually dependent grammars today (`~m5dvd`), so the graph is built here by
+-- hand: a walk that trusted the order, or one with no visited set, would not
+-- come back from it.
+reaching :: [TestTree]
+reaching =
+  [ testCase "a class a role of the grammar itself names" $ do
+      gs <- installedIn twoClasses
+      map (classesReached gs) [grammarCalled gs "L"]
+        @?= [[GlobalName "x", GlobalName "X"]]
+  , testCase "and nothing for a grammar whose roles name none" $ do
+      gs <- installedIn stlc
+      classesReached gs (grammarCalled gs "Ty") @?= []
+  , testCase "a class reached through two slots, named by neither grammar between" $ do
+      gs <- installedIn chained
+      map (map nameString . classesReached gs . grammarCalled gs) ["P", "Q", "L"]
+        @?= [["x"], ["x"], ["x"]]
+      map (map nameString . classesNamed . grammarCalled gs) ["P", "Q", "L"]
+        @?= [["x"], [], []]
+  , testCase "and two grammars that reach each other terminate at the union" $
+      map (map nameString . classesReached cyclic) cyclic
+        @?= [["u", "v"], ["v", "u"]]
+  ]
+  where
+    -- Loudly, because a module that did not load leaves no grammars at all and
+    -- every assertion below would then be about the empty list.
+    installedIn src = do
+      (s0, _) <- startingSession
+      case loadProofSource s0 src of
+        (s1, ProofLoaded {}) -> pure (grammars (machineOf s1))
+        (s1, other) -> do
+          _ <- assertFailure (unlines (renderResponse s1 other))
+          pure []
+    grammarCalled gs n = case [ g | g <- gs, grammarName g == GlobalName n ] of
+      g : _ -> g
+      [] -> error ("no grammar called " ++ n)
+    nameString (GlobalName n) = n
+
+-- | Two grammars, each with a slot of the other: @A@ reads @u@ and @B@ reads
+-- @v@, so each reaches both. Written out because no module can declare it.
+cyclic :: [Grammar]
+cyclic = [one "A" "u" "B", one "B" "v" "A"]
+  where
+    one l cls other =
+      Grammar LanguageBlock (GlobalName l) [l, l ++ "'"]
+        [ GProduction (GlobalName (l ++ "var")) [Slot cls (klass cls) []]
+            [Argument cls (klass cls) (Occurrence (GlobalName cls))]
+        , GProduction (GlobalName (l ++ "in")) [Slot other (OfLanguage (GlobalName other)) []]
+            [Argument other (OfLanguage (GlobalName other)) Plain]
+        ]
+    klass cls = OfClass (GlobalName cls) (GlobalName "String") (regex "[a-z]+")
 
 -- ---------------------------------------------------------------------------
 
@@ -304,6 +419,18 @@ refused =
       "language L, M where\n  f -> \9608 M" "f" (ReservedTerminal "\9608")
   , inProduction "a terminal that merely contains it"
       "language L, M where\n  f -> a\9608b M" "f" (ReservedTerminal "a\9608b")
+    -- **The narrowed refusal** (MS8 phase 154): @P@ has no occurrence at all, so
+    -- nothing inside an @R@ can ever be at the class @f@'s binder binds at, and
+    -- there is nothing there for substitution to do.
+  , ( ( "a binder free in a language that reaches no such class"
+      , "module M where\n\nx : Token String\nx = /[a-z]+/\n\n"
+          ++ "language P, R where\n  base -> o\n\n"
+          ++ "language L, M where\n  var : x as occurrence -> x\n"
+          ++ "  f : x as binder -> ( let x = M in R[x] )\n"
+      )
+    , GrammarError LanguageBlock "L"
+        (InProduction "f" (ScopeElsewhere "R" (GlobalName "P") (GlobalName "x")))
+    )
   , ( ( "a token class that would read it"
       , "module M where\n\nany : Token String\nany = /./\n\nlanguage L, M where\n  f -> any M\n"
       )

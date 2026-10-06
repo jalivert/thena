@@ -114,6 +114,21 @@ data Warning
     -- the block is not refused: a grammar binding a class another grammar owns
     -- is exactly what `~5k3mg` is for, and the second principle says allow it
     -- and show what it causes.
+  | ScopeUnwalked BlockKind String String String
+    -- ^ the block, the language's name, the production, and an argument of
+    -- /another/ language that a binder of this one is free in (MS8 phase 154,
+    -- `~5k3mg`).
+    --
+    -- **Until phase 154 this was refused outright**
+    -- ('Thena.Language.Grammar.ScopeElsewhere'), and the refusal now narrows to
+    -- a slot whose language cannot reach the binder's class at all. What is
+    -- left wrong is again the generator, and again silently: a method of
+    -- @L-subst-all@ takes a recursive result only for an argument of its own
+    -- language, so a foreign argument is rebuilt as it was written while the
+    -- binder beside it /is/ renamed — the occurrences in the slot are left
+    -- pointing at a name that no longer binds them. Said and not refused for
+    -- the reason the narrowing happened at all: a binder scoping into another
+    -- language is `~5k3mg`'s target.
   deriving (Eq, Show)
 
 

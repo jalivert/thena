@@ -1558,6 +1558,13 @@ renderWarning w = "warning: " ++ case w of
       ++ " is bound here and nothing in this language occurs at " ++ cls
       ++ ", so generated substitution renames it as one of this language's own"
       ++ " variables. Bind a class this language reads, or substitute by hand"
+  -- **The same shape one step along** (MS8 phase 154): the block installs, and
+  -- what an author has to know is that the slot the binder scopes over is the
+  -- one part of the term generated substitution does not walk into.
+  ScopeUnwalked k g p x ->
+    blockAt k g ++ ", production " ++ p ++ ": a binder is free in " ++ x
+      ++ ", which is of another language, so generated substitution renames the"
+      ++ " binder and leaves " ++ x ++ " as it was written. Substitute in it by hand"
   NoConfusionSkipped d why ->
     "no " ++ nameString (snd (noConfusionNames d)) ++ ": " ++ because
     where
@@ -1602,7 +1609,9 @@ renderDeclareError ren e = case e of
       OccurrenceNotString x s -> "an occurrence must be a String, and " ++ x ++ " is " ++ sortPhrase s
       ScopesDiffer x -> x ++ " is written with different binders free in it"
       OccurrenceNotAlone x -> "the occurrence " ++ x ++ " must be the production's only argument, because substitution replaces the whole of it"
-      ScopeElsewhere x -> "a binder is free in " ++ x ++ ", which is not of this language, so substitution could not rename in it"
+      ScopeElsewhere x (GlobalName l) (GlobalName cls) ->
+        "a binder is free in " ++ x ++ ", which is of " ++ l ++ ", and nothing "
+          ++ l ++ " reaches occurs at " ++ cls ++ ", so there is nothing there to rename"
       NotationBinds x -> x ++ " is written as a binding form, and a judgment's notation binds nothing"
       -- MS7 phase 127. The message names the glyph rather than describing it,
       -- because the author has to find it in their own source.

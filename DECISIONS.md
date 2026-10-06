@@ -1170,8 +1170,8 @@ wins.
 
 What it needs of the language, each refused at the block with a message:
 exactly one variable production, taking only its occurrence; and a binder free
-only in arguments of the language itself. A language with no occurrence (`Ty`)
-gets nothing. The four names are yours to keep free — declaring `LC-fv` first
+only in an argument of a language that reads names of that binder's kind — see
+the next entry. A language with no occurrence (`Ty`) gets nothing. The four names are yours to keep free — declaring `LC-fv` first
 is refused.
 
 Two things arrived with it. **`List`, with `nil` and `cons`, is in the
@@ -1180,6 +1180,51 @@ exist. **`appendString : String -> String -> String`** is the one way to build
 a `String`, and it computes only on two literals. The types that mention `List`
 carry a level parameter, `LC-fv {ℓ}`, because a list of names is a list at any
 level and nothing is defaulted.
+
+### A binder may scope into another language, if that language reads that kind of name
+
+*Decided 2026-10-04, built 2026-10-06.* A binding form's body may be a slot of a
+different language, so long as names of the binder's kind can actually occur in
+it:
+
+```
+language Ty, T, S where
+  tvar : X as occurrence -> X
+  arrow                  -> T -> S
+
+language Tm, M, N where
+  var  : x as occurrence -> x
+  abs  : x as binder     -> ( λ x : T . M[x] )
+  pack : X as binder     -> ( pack X = T in S[X] )
+```
+
+`pack` binds `X`, and `S` is a `Ty` — another language's term. Before, that was
+refused outright: a binder had to be free only in arguments of its own language,
+because substitution over that language is the only thing that walks into them.
+The refusal now asks a question instead, and it is a question about more than one
+grammar: **which kinds of name does a language reach?** Those its own occurrences
+and binders name, and everything the languages in its slots reach. `Ty` reads
+`X`, so `pack` is allowed. Had `Ty` read no names at all, nothing inside an `S`
+could ever be an `X` and the form is refused as before — with a message that says
+so.
+
+**This is computed as a reachability fixpoint and not as a walk in declaration
+order**, although no two languages may yet refer to each other, so the two would
+agree today. They will not when they can, and the cost of writing it the right
+way now is nothing.
+
+It matters because System F's polymorphism is this shape: `Λ X <: T . t` binds a
+type variable in a *term* production while every occurrence of `X` is in a type.
+And it is why substituting for one kind of name has to be able to rename binders
+of **every** kind the term can contain — substituting `λ y : X . y`, which has a
+free type variable, for `x` in `Λ X <: Top . x` captures that `X` unless the type
+binder is renamed too.
+
+**The generated substitution does not walk into the foreign slot yet, and the
+block says so when it loads.** `pack`'s binder is renamed while `S` is rebuilt
+exactly as written, which is wrong whenever the slot mentions the binder, so the
+grammar installs with a warning naming the production and the argument rather
+than being refused. Substitute in that slot by hand until the warning is gone.
 
 ## The development calculus
 

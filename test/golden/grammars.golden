@@ -176,6 +176,14 @@ already equal
 solved: ?ℓ1008
 solved: T
 refused: in the grammar of L, production f: the terminal `a█b` contains the reserved █, which is how a part of a term that is not written yet is shown
+-- a binder free in a language that reaches no such class
+chose 1009: elaborate
+already equal
+solved: ?ℓ1007
+solved: T
+solved: ?ℓ1016
+solved: ?ℓ1016
+refused: in the grammar of L, production f: a binder is free in R, which is of P, and nothing P reaches occurs at x, so there is nothing there to rename
 -- a token class that would read it
 chose 1009: elaborate
 already equal

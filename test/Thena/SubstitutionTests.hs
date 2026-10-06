@@ -480,10 +480,16 @@ refused =
   , refusal "an occurrence beside something else"
       ["language L, M where", "  v : x as occurrence -> x ^ M"]
       "refused: in the grammar of L, production v: the occurrence x must be the production's only argument, because substitution replaces the whole of it"
-  , refusal "a binder free in another language"
+    -- **Narrowed at MS8 phase 154** (`~5k3mg`): a binder free in another
+    -- language's argument is refused only where that language reaches no
+    -- occurrence at the binder's class, as @K@ does not here — so there is
+    -- nothing in an @A@ that could ever be at @x@. Where it does reach the
+    -- class the block installs and warns instead, which
+    -- "Thena.GrammarTests" pins.
+  , refusal "a binder free in a language that reaches no such class"
       [ "language K, A where", "  k -> k", ""
       , "language L, M where", "  v : x as occurrence -> x", "  bind : x as binder -> ( \955 x . A[x] )" ]
-      "refused: in the grammar of L, production bind: a binder is free in A, which is not of this language, so substitution could not rename in it"
+      "refused: in the grammar of L, production bind: a binder is free in A, which is of K, and nothing K reaches occurs at x, so there is nothing there to rename"
   , refusal "a generated name already declared"
       ["L-fv : String", "L-fv = \"taken\"", "", "language L, M where", "  v : x as occurrence -> x"]
       "refused: L's substitution function L-fv is already declared"

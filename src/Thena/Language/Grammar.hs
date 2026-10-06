@@ -36,6 +36,8 @@ module Thena.Language.Grammar
   , variableProduction
   , variableProductions
   , variableClass
+  , classesNamed
+  , classesReached
   , tokenClassOf
   , earleyRules
   , productionBody
@@ -188,9 +190,11 @@ data ProductionProblem
   | OccurrenceNotAlone String
     -- ^ the occurrence is not the production's only argument (MS6 phase 105):
     -- substitution replaces the whole node, so anything beside it would be lost
-  | ScopeElsewhere String
-    -- ^ a binder is free in an argument of another language, which
-    -- substitution over this one could not rename in (MS6 phase 105)
+  | ScopeElsewhere String GlobalName GlobalName
+    -- ^ a binder is free in an argument of another language, that language,
+    -- and the class the binder binds at — a class the other language does not
+    -- reach, so nothing in that argument can ever occur at it (MS6 phase 105,
+    -- narrowed to unreachable classes at MS8 phase 154)
   | NotationBinds String
     -- ^ a judgment's notation writes a binding form: its slots are indices,
     -- and nothing binds in an index (MS6 phase 108)
@@ -238,11 +242,11 @@ checkGrammar installed env b = do
   case [ f | f <- lookupNames g, taken f || f `elem` prodNames ] of
     f : _ -> refuse (LookupTaken f)
     [] -> Right ()
-  if kind == LanguageBlock then either refuse Right (substitutable g) else Right ()
+  if kind == LanguageBlock then either refuse Right (substitutable (installed ++ [g]) g) else Right ()
   case [ f | f <- substitutionNames g, taken f || f `elem` prodNames ] of
     f : _ -> refuse (FunctionTaken f)
     [] -> Right ()
-  Right (g, concatMap snd prods ++ unprimeable g ++ unownedBinders g)
+  Right (g, concatMap snd prods ++ unprimeable g ++ unownedBinders g ++ scopesUnwalked g)
   where
     kind = blockKind b
     name = blockName b
@@ -278,6 +282,21 @@ checkGrammar installed env b = do
       , a <- gproductionArguments p
       , Binder cls <- [argumentRole a]
       , cls `notElem` map fst (variableProductions gr)
+      ]
+    -- **A binder free in an argument of another language** (MS8 phase 154).
+    -- 'substitutable' used to refuse this outright and now refuses only the
+    -- case the other language cannot reach the class at all; what is left is
+    -- the generator, which gives a method a recursive result only for an
+    -- argument of its own language, so the foreign argument is rebuilt as
+    -- written while the binder beside it is renamed. Said rather than refused
+    -- for the same reason the refusal narrowed: this is `~5k3mg`'s target.
+    scopesUnwalked gr =
+      [ ScopeUnwalked kind name (nameOf (gproductionName p)) (argumentName a)
+      | kind == LanguageBlock
+      , p <- grammarProductions gr
+      , a <- gproductionArguments p
+      , Scope _ <- [argumentRole a]
+      , argumentSort a /= OfLanguage (grammarName gr)
       ]
     nameOf (GlobalName x) = x
     -- **A judgment's name is not a metavariable**: its header has none, and
@@ -428,11 +447,21 @@ productionBody gs p = case [ Earley.ruleBody r | r <- earleyRules gs, Earley.rul
 -- the only way to make a name one. **That is what "one identifier class"
 -- (§4.7) comes to**: every binder is already a @String@, and one variable
 -- production means one sort of name. It cannot mean one class /name/, since
--- §4.4's own @let : { x, y } as binders@ needs two. And a binder is free only
--- in arguments **of this language**, the only ones substitution over it walks
--- into.
-substitutable :: Grammar -> Either GrammarProblem ()
-substitutable g
+-- §4.4's own @let : { x, y } as binders@ needs two.
+--
+-- **And a binder is free only in an argument of a language that reaches its
+-- class** (MS8 phase 154, `~5k3mg`). Until then it had to be an argument of
+-- /this/ language, the only one substitution over it walks into — which refused
+-- the shape `~5k3mg` exists for, a binder of one grammar scoping over a slot of
+-- another that reads that very class. **The own-language case is not special and
+-- is not written down**: a binder's class is one this grammar names, so
+-- 'classesReached' of this grammar contains it, and the rule below passes it
+-- without knowing whose argument it is.
+--
+-- The grammars are the dependency graph — the installed ones and the one being
+-- checked — because reaching a class is a question about more than one grammar.
+substitutable :: [Grammar] -> Grammar -> Either GrammarProblem ()
+substitutable gs g
   | null named = Right ()
   | otherwise = do
       -- The metadata names at most one occurrence per production, so a
@@ -443,11 +472,24 @@ substitutable g
           | length (gproductionArguments p) == 1 -> Right ()
           | otherwise -> inProduction p (OccurrenceNotAlone (argumentName a))
         pas -> Left (VariableProductions [ n | (p, _) <- pas, let GlobalName n = gproductionName p ])
-      case [ (p, a) | p <- grammarProductions g, a@(Argument _ srt (Scope _)) <- gproductionArguments p
-                    , srt /= OfLanguage (grammarName g) ] of
-        (p, a) : _ -> inProduction p (ScopeElsewhere (argumentName a))
+      case [ (p, a, l, cls)
+           | p <- grammarProductions g
+           , a <- gproductionArguments p
+           , Scope bs <- [argumentRole a]
+           , OfLanguage l <- [argumentSort a]
+           , cls <- [ c | i <- bs, Just c <- [binderClass p i] ]
+           , cls `notElem` reachedBy l
+           ] of
+        (p, a, l, cls) : _ -> inProduction p (ScopeElsewhere (argumentName a) l cls)
         [] -> Right ()
   where
+    -- A 'Scope' names binder argument positions (§4.7), and the class is on
+    -- the role there — asked of the position rather than carried twice, which
+    -- is the same reason 'Scope' has no class of its own.
+    binderClass p i = case drop i (gproductionArguments p) of
+      a : _ | Binder cls <- argumentRole a -> Just cls
+      _ -> Nothing
+    reachedBy l = concat [ classesReached gs h | h <- gs, grammarName h == l ]
     named = [ (p, a) | p <- grammarProductions g, a <- gproductionArguments p, isNamed (argumentRole a) ]
     isNamed r = case r of
       Occurrence _ -> True
@@ -489,6 +531,68 @@ variableProductions g
       , a <- gproductionArguments p
       , Occurrence cls <- [argumentRole a]
       ]
+
+-- | **Every class a grammar's own roles name**, an occurrence's or a binder's,
+-- in order of first appearance (MS8 phase 154).
+--
+-- Both roles, because both are a reason the grammar's substitution has to know
+-- the class: an occurrence is what substitution replaces, and a binder is what
+-- it renames to avoid capture. A grammar that binds a class it reads no
+-- occurrence at still has to rename that binder, which is the whole of
+-- 'Thena.Errors.BinderClassUnowned'.
+--
+-- Not filtered by block kind: this says what the roles say, and a caller that
+-- only wants a language's asks a language.
+classesNamed :: Grammar -> [GlobalName]
+classesNamed g =
+  nub [ cls | p <- grammarProductions g, a <- gproductionArguments p, cls <- classOf (argumentRole a) ]
+  where
+    classOf r = case r of
+      Occurrence cls -> [cls]
+      Binder cls     -> [cls]
+      _              -> []
+
+-- | **Every class a grammar reaches**: the ones its own roles name, and
+-- everything the grammars in its slots reach. This grammar's own first, then
+-- first-encounter order (MS8 phase 154, `~5k3mg`).
+--
+-- **This is REACHABILITY, computed as a least fixed point — his ruling,
+-- 2026-10-04, and the topological shortcut is refused.** A grammar is reached
+-- through a slot of another, so the answer closes over the dependency graph:
+-- the loop below adds a grammar once and queues what it reaches, so a cycle
+-- ends the walk rather than not terminating. **The graph is acyclic today**
+-- because 'sortOf' resolves a metavariable against this grammar or one already
+-- installed, so a declaration-order walk would agree — and that is exactly the
+-- shortcut to refuse, because `~m5dvd` makes grammars mutually dependent and a
+-- fixpoint written now costs nothing then. **Declaration order is still what
+-- gives the generation order; it is not what this is written in terms of.**
+--
+-- Why a generator wants it, rather than 'classesNamed': substituting for one
+-- class has to rename binders of /every/ class the term can contain, including
+-- the ones that only appear inside a slot of another language — his correction
+-- of 2026-10-04, and it is already true in F-sub, where substituting a term
+-- with a free type variable into @Λ X <: Top . x@ captures that variable unless
+-- the type binder is renamed too. So a grammar gets one substitution taking one
+-- map per class it reaches, owning the class or not.
+--
+-- @gs@ is the dependency graph, and @g@ need not be in it: the walk starts
+-- there. A slot naming a grammar that is not in @gs@ reaches nothing, which
+-- cannot arise from 'checkGrammar' — every slot's language is this grammar or
+-- an installed one.
+classesReached :: [Grammar] -> Grammar -> [GlobalName]
+classesReached gs g = foldl addClass [] (concatMap classesNamed (walk [] [g]))
+  where
+    addClass cs c
+      | c `elem` cs = cs
+      | otherwise = cs ++ [c]
+    walk done [] = done
+    walk done (h : queue)
+      | grammarName h `elem` map grammarName done = walk done queue
+      | otherwise = walk (done ++ [h]) (queue ++ slotGrammars h)
+    slotGrammars h =
+      [ k | p <- grammarProductions h
+          , Slot _ (OfLanguage l) _ <- gproductionItems p
+          , k <- gs, grammarName k == l ]
 
 -- | A language's variable production, if it has one — the production that
 -- declares an occurrence. 'substitutable' has checked there is at most one.
