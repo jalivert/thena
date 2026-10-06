@@ -536,11 +536,18 @@ reports the classification whether or not it refuses. The expected pattern is to
 sit on the middle setting and drop to *any* for one strange thing.
 
 **Only *no trust* is a soundness guarantee, and the middle one is not sold as
-one.** It admits a discharged claim, which is sound — the two types are
-convertible, so the body already has the type the node claims. What it refuses is
-a claim that is provably false, and a claim can be discharged at every instance
-anybody has written down and still be nonsense: `Empty` is provable that way. The
-middle setting stops accidents, not adversaries.
+one.** What the middle setting refuses is a claim that is provably false, and a
+claim can be discharged at every instance anybody has written down and still be
+nonsense: `Empty` is provable that way. It stops accidents, not adversaries.
+
+**`no trust` still admits a *discharged* claim — item `~xhf2g`, and this is the
+one part of the above that is a choice rather than a consequence.** A claim whose
+two types are convertible is met, so the body already has the type the node
+asserts and the node reduces away; refusing it would refuse a term that is sound.
+The alternative reading is that the setting means *no asserted type reaches this
+proof at all*, which is a stricter promise and makes the setting unusable in a
+system whose own prelude asserts anything. **If that reading wins, this paragraph
+and the one above it are what has to change with it.**
 
 ### A token class is an ordinary definition, and its regex takes its type as an argument
 
