@@ -1,7 +1,7 @@
 -- | A context's lookup relation (MS6 phase 107; @ms6\/SPEC.md@ §5.3).
 --
 -- **The proofs are the load-bearing tests.** A lookup at the top of a context
--- is @Ctx-here@; one under a later binding of a different name is @Ctx-there@,
+-- is @extend-here@; one under a later binding of a different name is @extend-there-extend@,
 -- whose @ne@ is proved with no axiom from @eqString@ alone, which is what
 -- §2.1 promised and what phase 109's proofs will have to do. And a lookup
 -- that would skip a binding of the /same/ name is refused, because @ne@ has no
@@ -39,6 +39,7 @@ tests =
     [ testGroup "what is declared (§5.3)" declared
     , testGroup "the notation is a grammar" notation
     , testGroup "proofs of lookups" proofs
+    , testGroup "two kinds of binding (MS8 phase 156)" twoKinds
     , testGroup "what a context needs" refused
     ]
 
@@ -59,6 +60,76 @@ header =
   , "  empty  -> \183"
   , "  extend -> \915 , x : T"
   , ""
+  ]
+
+-- | **F-sub's Γ** (MS8 phase 156, `~23rg2`): two extension productions, one per
+-- kind of binding. Until this phase the block was refused outright — *"a context
+-- needs one empty and one extension production"* — so the context of POPLMark
+-- part 2A could not be written down at all, and nothing about it could be stated
+-- let alone proved.
+fsubHeader :: [String]
+fsubHeader =
+  [ "module Fsub where"
+  , ""
+  , "x : Token String"
+  , "x = /[a-z][a-zA-Z0-9']*/"
+  , ""
+  , "X : Token String"
+  , "X = /[A-Z][a-zA-Z0-9']*/"
+  , ""
+  , "language Ty, T, S where"
+  , "  tvar : X as occurrence -> X"
+  , "  top                    -> \8868"
+  , "  fun                    -> ( T -> S )"
+  , ""
+  , "context Ctx, \915 where"
+  , "  empty  -> \183"
+  , "  bindTm -> \915 , x : T"
+  , "  bindTy -> \915 , X <: T"
+  , ""
+  ]
+
+twoKinds :: [TestTree]
+twoKinds =
+  [ testCase "a context with two extensions gets a lookup relation for each" $ do
+      s <- loaded fsubHeader
+      map (take 1 . said s) [":show bindTm-in", ":show bindTy-in"] @?=
+        [ ["data bindTm-in : String -> Ty -> Ctx -> Type\8320 where"]
+        , ["data bindTy-in : String -> Ty -> Ctx -> Type\8320 where"]
+        ]
+    -- **Each notation is its own extension's**, by the recipe §5.3 already had:
+    -- the entry with the context slot and its separator taken out, then @\8712@.
+    -- So F-sub reads both of its lookups the way the paper writes them.
+  , testCase "and a notation each, read by the same parser as any object term" $ do
+      s <- loaded fsubHeader
+      said s ":infer bindTm-in`x : \8868 \8712 \183`" @?= ["bindTm-in`x : \8868 \8712 \183` : Type\8320"]
+      said s ":infer bindTy-in`X <: \8868 \8712 \183`" @?= ["bindTy-in`X <: \8868 \8712 \183` : Type\8320"]
+    -- **The `ne` premise is generated only where the stepped-over extension
+    -- reads names of the SAME class** — his settlement of 2026-10-04, and the
+    -- reason is that shadowing is within a namespace. So looking a term variable
+    -- up past a type binding takes no inequality at all, and the proof below is
+    -- the whole of it: no `ne` argument is written.
+  , testCase "a term lookup steps over a type binding with nothing to prove" $ do
+      _ <- loaded (fsubHeader ++
+        [ "pastType : bindTm-in`x : \8868 \8712 \183 , x : \8868 , X <: \8868`"
+        , "pastType = bindTm-there-bindTy (bindTm empty \"x\" top) \"x\" top \"X\" top"
+        , "             (bindTm-here empty \"x\" top)" ])
+      pure ()
+  , testCase "and a type lookup over a term binding the same way" $ do
+      _ <- loaded (fsubHeader ++
+        [ "pastTerm : bindTy-in`X <: \8868 \8712 \183 , X <: \8868 , x : \8868`"
+        , "pastTerm = bindTy-there-bindTm (bindTy empty \"X\" top) \"X\" top \"x\" top"
+        , "             (bindTy-here empty \"X\" top)" ])
+      pure ()
+    -- **Shadowing within one namespace is unchanged**: stepping a term lookup
+    -- over another term binding still needs the inequality, so a binding hidden
+    -- by a later one of the same name is still unreachable.
+  , testCase "stepping over a binding of its own kind still needs the inequality" $ do
+      r <- load (fsubHeader ++
+        [ "shadowed : bindTm-in`x : \8868 \8712 \183 , x : \8868 , x : \8868`"
+        , "shadowed = bindTm-there-bindTm (bindTm empty \"x\" top) \"x\" top \"x\" top"
+        , "             (bindTm-here empty \"x\" top)" ])
+      either (const (pure ())) (const (assertFailure "it was reached with no ne")) r
   ]
 
 -- | @x ≠ y@, from @eqString@ and nothing else: the motive sends a string to
@@ -96,12 +167,12 @@ declared :: [TestTree]
 declared =
   [ testCase ":show prints the relation and both constructors" $ do
       s <- loaded header
-      said s ":show Ctx-in" @?=
-        [ "data Ctx-in : String -> Ty -> Ctx -> Type₀ where"
-        , "  { Ctx-here : ∀ (Γ : Ctx) (x : String) (T : Ty) -> Ctx-in`${x} : ${T} ∈ ${Γ} , ${x} : ${T}`"
-        , "  ; Ctx-there : ∀ (Γ : Ctx) (x : String) (T : Ty) (x' : String) (T' : Ty)"
+      said s ":show extend-in" @?=
+        [ "data extend-in : String -> Ty -> Ctx -> Type₀ where"
+        , "  { extend-here : ∀ (Γ : Ctx) (x : String) (T : Ty) -> extend-in`${x} : ${T} ∈ ${Γ} , ${x} : ${T}`"
+        , "  ; extend-there-extend : ∀ (Γ : Ctx) (x : String) (T : Ty) (x' : String) (T' : Ty)"
             ++ " -> (Eq {0} String x x' -> Empty {0})"
-            ++ " -> Ctx-in`${x} : ${T} ∈ ${Γ}` -> Ctx-in`${x} : ${T} ∈ ${Γ} , ${x'} : ${T'}` }"
+            ++ " -> extend-in`${x} : ${T} ∈ ${Γ}` -> extend-in`${x} : ${T} ∈ ${Γ} , ${x'} : ${T'}` }"
         ]
   ]
 
@@ -110,19 +181,19 @@ notation =
   [ testCase "the notation is read and built as the relation applied" $ do
       s <- loaded header
       let gs = grammars (machineOf s)
-      case parse (earleyRules gs) (Earley.StartAt "Ctx-in") (pieces "x : \953 \8712 \183 , y : \953") of
+      case parse (earleyRules gs) (Earley.StartAt "extend-in") (pieces "x : \953 \8712 \183 , y : \953") of
         Left why -> assertFailure (show why)
         Right tree -> buildTerm gs tree @?= Right
-          (apps "Ctx-in" [str "x", con "base", apps "extend" [con "empty", str "y", con "base"]])
+          (apps "extend-in" [str "x", con "base", apps "extend" [con "empty", str "y", con "base"]])
   , testCase "and prints back as the text it was read from" $ do
       s <- loaded header
       let m = machineOf s
       printRegion (grammars m) (renderCore (Rendering [] 0) [])
-          (apps "Ctx-in" [str "x", con "base", apps "extend" [con "empty", str "x", con "base"]])
+          (apps "extend-in" [str "x", con "base", apps "extend" [con "empty", str "x", con "base"]])
         @?= Just "x : \953 \8712 \183 , x : \953"
   , testCase "a lookup literal is a type" $ do
       s <- loaded header
-      said s ":infer Ctx-in`x : \953 \8712 \183`" @?= ["Ctx-in`x : \953 \8712 \183` : Type\8320"]
+      said s ":infer extend-in`x : \953 \8712 \183`" @?= ["extend-in`x : \953 \8712 \183` : Type\8320"]
     -- **The separator is the terminals between the context slot and its
     -- neighbouring slot** — the next one, or the previous when it is last.
   , testCase "a context written with its slot last loses the separator before it" $ do
@@ -130,8 +201,8 @@ notation =
         [ "module Last where", "", "x : Token String", "x = /[a-z]+/", ""
         , "language Ty, T where", "  base -> \953", ""
         , "context D, \916 where", "  none -> \949", "  push -> x : T ; \916", "" ]
-      said s ":show D-in" !! 0 @?= "data D-in : String -> Ty -> D -> Type\8320 where"
-      case parse (earleyRules (grammars (machineOf s))) (Earley.StartAt "D-in")
+      said s ":show push-in" !! 0 @?= "data push-in : String -> Ty -> D -> Type\8320 where"
+      case parse (earleyRules (grammars (machineOf s))) (Earley.StartAt "push-in")
                  (pieces "x : \953 \8712 x : \953 ; \949") of
         Left why -> assertFailure (show why)
         Right _ -> pure ()
@@ -143,35 +214,35 @@ notation =
 
 proofs :: [TestTree]
 proofs =
-  [ testCase "a lookup at the top is Ctx-here" $ do
+  [ testCase "a lookup at the top is extend-here" $ do
       _ <- loaded (header ++
-        [ "found : Ctx-in`x : \953 \8712 \183, x : \953`"
-        , "found = Ctx-here empty \"x\" base" ])
+        [ "found : extend-in`x : \953 \8712 \183, x : \953`"
+        , "found = extend-here empty \"x\" base" ])
       pure ()
-  , testCase "one under a later binding of another name is Ctx-there, with ne proved" $ do
+  , testCase "one under a later binding of another name is extend-there-extend, with ne proved" $ do
       _ <- loaded (header ++ xNotY ++
-        [ "under : Ctx-in`x : \953 \8712 \183, x : \953, y : \953`"
-        , "under = Ctx-there (extend empty \"x\" base) \"x\" base \"y\" base xNotY (Ctx-here empty \"x\" base)" ])
+        [ "under : extend-in`x : \953 \8712 \183, x : \953, y : \953`"
+        , "under = extend-there-extend (extend empty \"x\" base) \"x\" base \"y\" base xNotY (extend-here empty \"x\" base)" ])
       pure ()
-  , testCase "Ctx-here does not reach under a later binding" $ do
+  , testCase "extend-here does not reach under a later binding" $ do
       r <- load (header ++
-        [ "wrong : Ctx-in`x : \953 \8712 \183, x : \953, y : \953`"
-        , "wrong = Ctx-here (extend empty \"x\" base) \"x\" base" ])
-      either (const (pure ())) (const (assertFailure "Ctx-here was accepted under y")) r
+        [ "wrong : extend-in`x : \953 \8712 \183, x : \953, y : \953`"
+        , "wrong = extend-here (extend empty \"x\" base) \"x\" base" ])
+      either (const (pure ())) (const (assertFailure "extend-here was accepted under y")) r
     -- The shadowing: to reach the earlier x past a later x, ne must prove
     -- x ≠ x, and xNotY is a proof of something else.
-  , testCase "and Ctx-there cannot skip a binding of the same name" $ do
+  , testCase "and extend-there-extend cannot skip a binding of the same name" $ do
       r <- load (header ++ xNotY ++
-        [ "shadowed : Ctx-in`x : \953 \8712 \183, x : \953, x : ( \953 -> \953 )`"
-        , "shadowed = Ctx-there (extend empty \"x\" base) \"x\" base \"x\" (arrow base base) xNotY (Ctx-here empty \"x\" base)" ])
+        [ "shadowed : extend-in`x : \953 \8712 \183, x : \953, x : ( \953 -> \953 )`"
+        , "shadowed = extend-there-extend (extend empty \"x\" base) \"x\" base \"x\" (arrow base base) xNotY (extend-here empty \"x\" base)" ])
       either (const (pure ())) (const (assertFailure "a shadowed binding was reached")) r
     -- And what it would take is exactly a refutation of refl: reaching the
     -- earlier x needs Eq String "x" "x" -> Empty, which applied to refl is
     -- Empty. So the shadowed binding cannot be reached by any term.
   , testCase "what it would take is a proof that x is not x" $ do
       _ <- loaded (header ++
-        [ "needs : (Eq String \"x\" \"x\" -> Empty) -> Ctx-in`x : \953 \8712 \183, x : \953, x : ( \953 -> \953 )`"
-        , "needs = \\ ne -> Ctx-there (extend empty \"x\" base) \"x\" base \"x\" (arrow base base) ne (Ctx-here empty \"x\" base)"
+        [ "needs : (Eq String \"x\" \"x\" -> Empty) -> extend-in`x : \953 \8712 \183, x : \953, x : ( \953 -> \953 )`"
+        , "needs = \\ ne -> extend-there-extend (extend empty \"x\" base) \"x\" base \"x\" (arrow base base) ne (extend-here empty \"x\" base)"
         , ""
         , "absurdly : (Eq String \"x\" \"x\" -> Empty) -> Empty"
         , "absurdly = \\ ne -> ne (refl String \"x\")" ])
@@ -182,13 +253,23 @@ refused :: [TestTree]
 refused =
   [ refusal "an extension with no name"
       ["context C, G where", "  e -> \183", "  f -> G , T"]
-      "refused: in the context C: its extension needs exactly one name to look up, and it has none"
+      "refused: in the context C: its extension f needs exactly one name to look up, and it has none"
   , refusal "an extension with two"
       ["y : Token String", "y = /[a-z]+/", "", "context C, G where", "  e -> \183", "  f -> G , x = y : T"]
-      "refused: in the context C: its extension needs exactly one name to look up, and it has x, y"
+      "refused: in the context C: its extension f needs exactly one name to look up, and it has x, y"
   , refusal "a lookup name already declared"
-      ["C-here : Ty", "C-here = base", "", "context C, G where", "  e -> \183", "  f -> G , x : T"]
-      "refused: C's lookup C-here is already declared"
+      ["f-here : Ty", "f-here = base", "", "context C, G where", "  e -> \183", "  f -> G , x : T"]
+      "refused: C's lookup f-here is already declared"
+    -- **A production with TWO of its own slots is still refused** (MS8 phase
+    -- 156): a lookup relation steps over one binding, and there is nothing for
+    -- it to read in a form that joins two contexts. More than one *extension* is
+    -- what stopped being refused.
+  , refusal "a production that joins two contexts"
+      ["context C, G where", "  e -> \183", "  f -> G , x : T", "  j -> G ; G"]
+      "refused: in the context C: a context needs one production with no context slot and at least one with exactly one"
+  , refusal "a context with no extension at all"
+      ["context C, G where", "  e -> \183", "  n -> \183 \183"]
+      "refused: in the context C: a context needs one production with no context slot and at least one with exactly one"
   ]
   where
     refusal what body want = testCase what $ do

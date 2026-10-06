@@ -234,8 +234,8 @@ meaning =
           -- @ne@ premise depends on earlier arguments, which the no-confusion
           -- generator states no equation for (@ms6\/CLOSEOUT.md@ 25).
           ws @?= [ VacuousBinder LanguageBlock "LC" "vacuous" "x"
-                 , NoConfusionSkipped (GlobalName "Ctx-in")
-                     (DependentArguments (GlobalName "Ctx-there") 6 (Ident "ne")) ]
+                 , NoConfusionSkipped (GlobalName "extend-in")
+                     (DependentArguments (GlobalName "extend-there-extend") 6 (Ident "ne")) ]
         (_, other) -> assertFailure (show other)
   , testCase "the arguments and roles of LC, production by production" $ do
       gs <- installed stlc

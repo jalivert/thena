@@ -183,9 +183,9 @@ freshKeeps = \ c avoid ->
 -- ---------------------------------------------------------------------------
 -- Looking a name up in a context, taken apart
 
-ctxInvEmpty : forall (y : String) (U : Ty) (i : Ctx-in y U empty) -> Empty
+ctxInvEmpty : forall (y : String) (U : Ty) (i : extend-in y U empty) -> Empty
 ctxInvEmpty = \ y U i ->
-  elim Ctx-in () (\ y1 U1 G1 i1 -> Eq Ctx G1 empty -> Empty)
+  elim extend-in () (\ y1 U1 G1 i1 -> Eq Ctx G1 empty -> Empty)
     ((\ G x T e -> noConfusionCtx (extend G x T) empty e)
      (\ G x T x1 T1 ne i1 ih e -> noConfusionCtx (extend G x1 T1) empty e))
     (y U empty) i (refl Ctx empty)
@@ -216,38 +216,38 @@ extendTy = \ G0 x T G a S e ->
 -- A name found in Γ, a : S is a, or it is not a and is found in Γ.
 CtxFound : Ctx -> String -> Ty -> String -> Ty -> Type₀
 CtxFound = \ G a S y U ->
-  Or (And (Eq String y a) (Eq Ty U S)) (And (Eq String y a -> Empty) (Ctx-in y U G))
+  Or (And (Eq String y a) (Eq Ty U S)) (And (Eq String y a -> Empty) (extend-in y U G))
 
-ctxInvExtend : forall (G : Ctx) (a : String) (S : Ty) (y : String) (U : Ty) (i : Ctx-in y U (extend G a S)) -> CtxFound G a S y U
+ctxInvExtend : forall (G : Ctx) (a : String) (S : Ty) (y : String) (U : Ty) (i : extend-in y U (extend G a S)) -> CtxFound G a S y U
 ctxInvExtend = \ G a S y U i ->
-  elim Ctx-in () (\ y1 U1 G1 i1 -> Eq Ctx G1 (extend G a S) -> CtxFound G a S y1 U1)
+  elim extend-in () (\ y1 U1 G1 i1 -> Eq Ctx G1 (extend G a S) -> CtxFound G a S y1 U1)
     ((\ G0 x T e ->
-        orLeft (And (Eq String x a) (Eq Ty T S)) (And (Eq String x a -> Empty) (Ctx-in x T G))
+        orLeft (And (Eq String x a) (Eq Ty T S)) (And (Eq String x a -> Empty) (extend-in x T G))
           (both (Eq String x a) (Eq Ty T S) (extendName G0 x T G a S e) (extendTy G0 x T G a S e)))
      (\ G0 x T x1 T1 ne i1 ih e ->
-        orRight (And (Eq String x a) (Eq Ty T S)) (And (Eq String x a -> Empty) (Ctx-in x T G))
-          (both (Eq String x a -> Empty) (Ctx-in x T G)
+        orRight (And (Eq String x a) (Eq Ty T S)) (And (Eq String x a -> Empty) (extend-in x T G))
+          (both (Eq String x a -> Empty) (extend-in x T G)
             (\ q -> ne (trans String x a x1 q (sym String x1 a (extendName G0 x1 T1 G a S e))))
-            (subst Ctx (\ g -> Ctx-in x T g) G0 G (extendCtx G0 x1 T1 G a S e) i1))))
+            (subst Ctx (\ g -> extend-in x T g) G0 G (extendCtx G0 x1 T1 G a S e) i1))))
     (y U (extend G a S)) i (refl Ctx (extend G a S))
 
 -- ---------------------------------------------------------------------------
 -- Weakening: a derivation survives into any context that finds at least as much
 
 Incl : Ctx -> Ctx -> Type₀
-Incl = \ G G1 -> forall (y : String) (U : Ty) (i : Ctx-in y U G) -> Ctx-in y U G1
+Incl = \ G G1 -> forall (y : String) (U : Ty) (i : extend-in y U G) -> extend-in y U G1
 
 inclExtend : forall (G : Ctx) (G1 : Ctx) (x : String) (S : Ty) (inc : Incl G G1) -> Incl (extend G x S) (extend G1 x S)
 inclExtend = \ G G1 x S inc y U i ->
-  elim Or ((And (Eq String y x) (Eq Ty U S)) (And (Eq String y x -> Empty) (Ctx-in y U G)))
-    (\ o -> Ctx-in y U (extend G1 x S))
-    ((\ h -> subst String (\ z -> Ctx-in z U (extend G1 x S)) x y
+  elim Or ((And (Eq String y x) (Eq Ty U S)) (And (Eq String y x -> Empty) (extend-in y U G)))
+    (\ o -> extend-in y U (extend G1 x S))
+    ((\ h -> subst String (\ z -> extend-in z U (extend G1 x S)) x y
                (sym String y x (andLeft (Eq String y x) (Eq Ty U S) h))
-               (subst Ty (\ V -> Ctx-in x V (extend G1 x S)) S U
+               (subst Ty (\ V -> extend-in x V (extend G1 x S)) S U
                   (sym Ty U S (andRight (Eq String y x) (Eq Ty U S) h))
-                  (Ctx-here G1 x S)))
-     (\ h -> Ctx-there G1 y U x S (andLeft (Eq String y x -> Empty) (Ctx-in y U G) h)
-               (inc y U (andRight (Eq String y x -> Empty) (Ctx-in y U G) h))))
+                  (extend-here G1 x S)))
+     (\ h -> extend-there-extend G1 y U x S (andLeft (Eq String y x -> Empty) (extend-in y U G) h)
+               (inc y U (andRight (Eq String y x -> Empty) (extend-in y U G) h))))
     () (ctxInvExtend G x S y U i)
 
 weaken : forall (G : Ctx) (t : LC) (T : Ty) (d : typing G t T) (G1 : Ctx) (inc : Incl G G1) -> typing G1 t T
@@ -260,13 +260,13 @@ weaken = \ G t T d ->
 
 -- A closed derivation holds in every context.
 weakenEmpty : forall (t : LC) (T : Ty) (d : typing empty t T) (D : Ctx) -> typing D t T
-weakenEmpty = \ t T d D -> weaken empty t T d D (\ y U i -> absurdly (Ctx-in y U D) (ctxInvEmpty y U i))
+weakenEmpty = \ t T d D -> weaken empty t T d D (\ y U i -> absurdly (extend-in y U D) (ctxInvEmpty y U i))
 
 -- ---------------------------------------------------------------------------
 -- The free variables of a typed term are in its context
 
 Dom : Ctx -> String -> Type₀
-Dom = \ G w -> Sigma Ty (\ U -> Ctx-in w U G)
+Dom = \ G w -> Sigma Ty (\ U -> extend-in w U G)
 
 -- What `fvA t bound acc` can contain: what was accumulated, or a name not bound
 -- on the way down and found in the context.
@@ -293,7 +293,7 @@ fvInCtx = \ G t T d ->
                                  (both (In w bound -> Empty) (Dom G0 w)
                                    (\ ib -> andRight (Eq Comparison (member x bound) different) (In x bound -> Empty) hs
                                               (subst String (\ z -> In z bound) w x q ib))
-                                   (pair Ty (\ U -> Ctx-in w U G0) T0 (subst String (\ z -> Ctx-in z T0 G0) x w (sym String w x q) i))))
+                                   (pair Ty (\ U -> extend-in w U G0) T0 (subst String (\ z -> extend-in z T0 G0) x w (sym String w x q) i))))
                        (\ ia -> orLeft (In w acc) (And (In w bound -> Empty) (Dom G0 w)) ia))
                       ()
                       (subst Comparison
@@ -306,9 +306,9 @@ fvInCtx = \ G t T d ->
         elim Or ((In w acc) (And (In w (cons String x bound) -> Empty) (Dom (extend G0 x S) w)))
           (\ o -> FvSpec G0 bound acc w)
           ((\ ia -> orLeft (In w acc) (And (In w bound -> Empty) (Dom G0 w)) ia)
-           (\ hb -> elim Sigma (Ty (\ U -> Ctx-in w U (extend G0 x S))) (\ z -> FvSpec G0 bound acc w)
+           (\ hb -> elim Sigma (Ty (\ U -> extend-in w U (extend G0 x S))) (\ z -> FvSpec G0 bound acc w)
                       ((\ U i ->
-                          elim Or ((And (Eq String w x) (Eq Ty U S)) (And (Eq String w x -> Empty) (Ctx-in w U G0)))
+                          elim Or ((And (Eq String w x) (Eq Ty U S)) (And (Eq String w x -> Empty) (extend-in w U G0)))
                             (\ o1 -> FvSpec G0 bound acc w)
                             -- w is x: but x was bound, so w cannot be free.
                             ((\ isX -> absurdly (FvSpec G0 bound acc w)
@@ -319,8 +319,8 @@ fvInCtx = \ G t T d ->
                                             (both (In w bound -> Empty) (Dom G0 w)
                                                (\ ib -> andLeft (In w (cons String x bound) -> Empty) (Dom (extend G0 x S) w) hb
                                                           (orRight (Eq String w x) (In w bound) ib))
-                                               (pair Ty (\ U1 -> Ctx-in w U1 G0) U
-                                                  (andRight (Eq String w x -> Empty) (Ctx-in w U G0) other)))))
+                                               (pair Ty (\ U1 -> extend-in w U1 G0) U
+                                                  (andRight (Eq String w x -> Empty) (extend-in w U G0) other)))))
                             () (ctxInvExtend G0 x S w U i)))
                       () (andRight (In w (cons String x bound) -> Empty) (Dom (extend G0 x S) w) hb)))
           () (ih (cons String x bound) acc w h))
@@ -377,7 +377,7 @@ closedNoFv : forall (N : LC) (S : Ty) (d : typing empty N S) (w : String) (h : I
 closedNoFv = \ N S d w h ->
   elim Or ((In w (nil String)) (And (In w (nil String) -> Empty) (Dom empty w))) (\ o -> Empty)
     ((\ e -> e)
-     (\ r -> elim Sigma (Ty (\ U -> Ctx-in w U empty)) (\ z -> Empty)
+     (\ r -> elim Sigma (Ty (\ U -> extend-in w U empty)) (\ z -> Empty)
                ((\ U i -> ctxInvEmpty w U i))
                () (andRight (In w (nil String) -> Empty) (Dom empty w) r)))
     () (fvInCtx empty N S d (nil String) (nil String) w h)
@@ -414,43 +414,43 @@ lookMiss = \ y x w s ne ->
 
 Entry : Ctx -> String -> Ty -> LC -> Type₀
 Entry = \ D y U m ->
-  Or (And (Eq LC m (var y)) (Ctx-in y U D))
+  Or (And (Eq LC m (var y)) (extend-in y U D))
      (And (typing empty m U) (Eq (List String) (LC-fv-x m) (nil String)))
 
 Good : Ctx -> Ctx -> List (And String LC) -> Type₀
-Good = \ G D s -> forall (y : String) (U : Ty) (i : Ctx-in y U G) -> Entry D y U (look y s)
+Good = \ G D s -> forall (y : String) (U : Ty) (i : extend-in y U G) -> Entry D y U (look y s)
 
 -- Under a binder x : S, x is sent to itself and every other name as before.
 goodExtend : forall (G : Ctx) (D : Ctx) (s : List (And String LC)) (x : String) (S : Ty) (g : Good G D s)
                -> Good (extend G x S) (extend D x S) (cons (And String LC) (both String LC x (var x)) s)
 goodExtend = \ G D s x S g y U i ->
-  elim Or ((And (Eq String y x) (Eq Ty U S)) (And (Eq String y x -> Empty) (Ctx-in y U G)))
+  elim Or ((And (Eq String y x) (Eq Ty U S)) (And (Eq String y x -> Empty) (extend-in y U G)))
     (\ o -> Entry (extend D x S) y U (look y (cons (And String LC) (both String LC x (var x)) s)))
     ((\ h -> subst String (\ z -> Entry (extend D x S) z U (look z (cons (And String LC) (both String LC x (var x)) s))) x y
                (sym String y x (andLeft (Eq String y x) (Eq Ty U S) h))
                (subst Ty (\ V -> Entry (extend D x S) x V (look x (cons (And String LC) (both String LC x (var x)) s))) S U
                   (sym Ty U S (andRight (Eq String y x) (Eq Ty U S) h))
-                  (orLeft (And (Eq LC (look x (cons (And String LC) (both String LC x (var x)) s)) (var x)) (Ctx-in x S (extend D x S)))
+                  (orLeft (And (Eq LC (look x (cons (And String LC) (both String LC x (var x)) s)) (var x)) (extend-in x S (extend D x S)))
                           (And (typing empty (look x (cons (And String LC) (both String LC x (var x)) s)) S)
                                (Eq (List String) (LC-fv-x (look x (cons (And String LC) (both String LC x (var x)) s))) (nil String)))
-                          (both (Eq LC (look x (cons (And String LC) (both String LC x (var x)) s)) (var x)) (Ctx-in x S (extend D x S))
-                                (lookHit x (var x) s) (Ctx-here D x S)))))
+                          (both (Eq LC (look x (cons (And String LC) (both String LC x (var x)) s)) (var x)) (extend-in x S (extend D x S))
+                                (lookHit x (var x) s) (extend-here D x S)))))
      (\ h -> subst LC (\ m -> Entry (extend D x S) y U m) (look y s) (look y (cons (And String LC) (both String LC x (var x)) s))
                (sym LC (look y (cons (And String LC) (both String LC x (var x)) s)) (look y s)
-                  (lookMiss y x (var x) s (andLeft (Eq String y x -> Empty) (Ctx-in y U G) h)))
-               (elim Or ((And (Eq LC (look y s) (var y)) (Ctx-in y U D))
+                  (lookMiss y x (var x) s (andLeft (Eq String y x -> Empty) (extend-in y U G) h)))
+               (elim Or ((And (Eq LC (look y s) (var y)) (extend-in y U D))
                          (And (typing empty (look y s) U) (Eq (List String) (LC-fv-x (look y s)) (nil String))))
                   (\ o1 -> Entry (extend D x S) y U (look y s))
-                  ((\ e -> orLeft (And (Eq LC (look y s) (var y)) (Ctx-in y U (extend D x S)))
+                  ((\ e -> orLeft (And (Eq LC (look y s) (var y)) (extend-in y U (extend D x S)))
                                   (And (typing empty (look y s) U) (Eq (List String) (LC-fv-x (look y s)) (nil String)))
-                                  (both (Eq LC (look y s) (var y)) (Ctx-in y U (extend D x S))
-                                        (andLeft (Eq LC (look y s) (var y)) (Ctx-in y U D) e)
-                                        (Ctx-there D y U x S (andLeft (Eq String y x -> Empty) (Ctx-in y U G) h)
-                                           (andRight (Eq LC (look y s) (var y)) (Ctx-in y U D) e))))
-                   (\ c -> orRight (And (Eq LC (look y s) (var y)) (Ctx-in y U (extend D x S)))
+                                  (both (Eq LC (look y s) (var y)) (extend-in y U (extend D x S))
+                                        (andLeft (Eq LC (look y s) (var y)) (extend-in y U D) e)
+                                        (extend-there-extend D y U x S (andLeft (Eq String y x -> Empty) (extend-in y U G) h)
+                                           (andRight (Eq LC (look y s) (var y)) (extend-in y U D) e))))
+                   (\ c -> orRight (And (Eq LC (look y s) (var y)) (extend-in y U (extend D x S)))
                                    (And (typing empty (look y s) U) (Eq (List String) (LC-fv-x (look y s)) (nil String)))
                                    c))
-                  () (g y U (andRight (Eq String y x -> Empty) (Ctx-in y U G) h)))))
+                  () (g y U (andRight (Eq String y x -> Empty) (extend-in y U G) h)))))
     () (ctxInvExtend G x S y U i)
 
 -- ---------------------------------------------------------------------------
@@ -467,29 +467,29 @@ notCaptured = \ G D s x S E T d g h ->
        elim Or ((In y (nil String)) (And (In y (cons String x (nil String)) -> Empty) (Dom (extend G x S) y)))
          (\ o -> Empty)
          ((\ e -> e)
-          (\ r -> elim Sigma (Ty (\ U -> Ctx-in y U (extend G x S))) (\ z -> Empty)
+          (\ r -> elim Sigma (Ty (\ U -> extend-in y U (extend G x S))) (\ z -> Empty)
                    ((\ U i ->
-                      elim Or ((And (Eq String y x) (Eq Ty U S)) (And (Eq String y x -> Empty) (Ctx-in y U G)))
+                      elim Or ((And (Eq String y x) (Eq Ty U S)) (And (Eq String y x -> Empty) (extend-in y U G)))
                         (\ o -> Empty)
                         -- y is the binder itself: it is not free in the node.
                         ((\ h1 -> andLeft (In y (cons String x (nil String)) -> Empty) (Dom (extend G x S) y) r
                                     (orLeft (Eq String y x) (In y (nil String)) (andLeft (Eq String y x) (Eq Ty U S) h1)))
                          -- y is another name: its image has no x in it.
                          (\ h2 ->
-                            elim Or ((And (Eq LC (look y s) (var y)) (Ctx-in y U D))
+                            elim Or ((And (Eq LC (look y s) (var y)) (extend-in y U D))
                                      (And (typing empty (look y s) U) (Eq (List String) (LC-fv-x (look y s)) (nil String))))
                               (\ o -> Empty)
                               ((\ e -> elim Or ((Eq String x y) Empty) (\ o1 -> Empty)
-                                         ((\ q -> andLeft (Eq String y x -> Empty) (Ctx-in y U G) h2 (sym String x y q))
+                                         ((\ q -> andLeft (Eq String y x -> Empty) (extend-in y U G) h2 (sym String x y q))
                                           (\ e1 -> e1))
                                          ()
                                          (subst LC (\ m -> In x (LC-fv-x m)) (look y s) (var y)
-                                            (andLeft (Eq LC (look y s) (var y)) (Ctx-in y U D) e)
+                                            (andLeft (Eq LC (look y s) (var y)) (extend-in y U D) e)
                                             (andRight (In y (LC-fv-x (abs x S E))) (In x (LC-fv-x (look y s))) p)))
                                (\ c -> subst (List String) (\ l -> In x l) (LC-fv-x (look y s)) (nil String)
                                          (andRight (typing empty (look y s) U) (Eq (List String) (LC-fv-x (look y s)) (nil String)) c)
                                          (andRight (In y (LC-fv-x (abs x S E))) (In x (LC-fv-x (look y s))) p)))
-                              () (g y U (andRight (Eq String y x -> Empty) (Ctx-in y U G) h2))))
+                              () (g y U (andRight (Eq String y x -> Empty) (extend-in y U G) h2))))
                         () (ctxInvExtend G x S y U i)))
                    () (andRight (In y (cons String x (nil String)) -> Empty) (Dom (extend G x S) y) r)))
          () (fvInCtx (extend G x S) E T d (cons String x (nil String)) (nil String) y
@@ -506,12 +506,12 @@ substAll = \ G E T d ->
     (\ G0 E0 T0 d0 -> forall (D : Ctx) (s : List (And String LC)) (g : Good G0 D s) -> typing D (LC-subst-all E0 s) T0)
     -- A variable is sent to itself, found in Δ, or to a closed term of its type.
     ((\ x T0 G0 i D s g ->
-        elim Or ((And (Eq LC (look x s) (var x)) (Ctx-in x T0 D))
+        elim Or ((And (Eq LC (look x s) (var x)) (extend-in x T0 D))
                  (And (typing empty (look x s) T0) (Eq (List String) (LC-fv-x (look x s)) (nil String))))
           (\ o -> typing D (look x s) T0)
           ((\ e -> subst LC (\ m -> typing D m T0) (var x) (look x s)
-                     (sym LC (look x s) (var x) (andLeft (Eq LC (look x s) (var x)) (Ctx-in x T0 D) e))
-                     (T-var x T0 D (andRight (Eq LC (look x s) (var x)) (Ctx-in x T0 D) e)))
+                     (sym LC (look x s) (var x) (andLeft (Eq LC (look x s) (var x)) (extend-in x T0 D) e))
+                     (T-var x T0 D (andRight (Eq LC (look x s) (var x)) (extend-in x T0 D) e)))
            (\ c -> weakenEmpty (look x s) T0
                      (andLeft (typing empty (look x s) T0) (Eq (List String) (LC-fv-x (look x s)) (nil String)) c) D))
           () (g x T0 i))
@@ -534,7 +534,7 @@ substLemma : forall (x : String) (S : Ty) (E : LC) (T : Ty) (N : LC)
 substLemma = \ x S E T N d dn ->
   substAll (extend empty x S) E T d empty (cons (And String LC) (both String LC x N) (nil (And String LC)))
     (\ y U i ->
-       elim Or ((And (Eq String y x) (Eq Ty U S)) (And (Eq String y x -> Empty) (Ctx-in y U empty)))
+       elim Or ((And (Eq String y x) (Eq Ty U S)) (And (Eq String y x -> Empty) (extend-in y U empty)))
          (\ o -> Entry empty y U (look y (cons (And String LC) (both String LC x N) (nil (And String LC)))))
          ((\ h -> subst String (\ z -> Entry empty z U (look z (cons (And String LC) (both String LC x N) (nil (And String LC))))) x y
                     (sym String y x (andLeft (Eq String y x) (Eq Ty U S) h))
@@ -542,12 +542,12 @@ substLemma = \ x S E T N d dn ->
                        (sym Ty U S (andRight (Eq String y x) (Eq Ty U S) h))
                        (subst LC (\ m -> Entry empty x S m) N (look x (cons (And String LC) (both String LC x N) (nil (And String LC))))
                           (sym LC (look x (cons (And String LC) (both String LC x N) (nil (And String LC)))) N (lookHit x N (nil (And String LC))))
-                          (orRight (And (Eq LC N (var x)) (Ctx-in x S empty))
+                          (orRight (And (Eq LC N (var x)) (extend-in x S empty))
                                    (And (typing empty N S) (Eq (List String) (LC-fv-x N) (nil String)))
                                    (both (typing empty N S) (Eq (List String) (LC-fv-x N) (nil String))
                                          dn (listNil (LC-fv-x N) (closedNoFv N S dn)))))))
           (\ h -> absurdly (Entry empty y U (look y (cons (And String LC) (both String LC x N) (nil (And String LC)))))
-                    (ctxInvEmpty y U (andRight (Eq String y x -> Empty) (Ctx-in y U empty) h))))
+                    (ctxInvEmpty y U (andRight (Eq String y x -> Empty) (extend-in y U empty) h))))
          () (ctxInvExtend empty x S y U i))
 
 -- ---------------------------------------------------------------------------
@@ -655,8 +655,8 @@ redexTyped : typing`· ⊢ ( ( λ x : ( ι -> ι ) . x ) ( λ y : ι . y ) ) : (
 redexTyped =
   T-app Ctx`·` LC`( λ x : ( ι -> ι ) . x )` Ty`( ι -> ι )` Ty`( ι -> ι )` LC`( λ y : ι . y )`
     (T-abs Ctx`·` "x" Ty`( ι -> ι )` LC`x` Ty`( ι -> ι )`
-       (T-var "x" Ty`( ι -> ι )` Ctx`·, x : ( ι -> ι )` (Ctx-here Ctx`·` "x" Ty`( ι -> ι )`)))
-    (T-abs Ctx`·` "y" base LC`y` base (T-var "y" base Ctx`·, y : ι` (Ctx-here Ctx`·` "y" base)))
+       (T-var "x" Ty`( ι -> ι )` Ctx`·, x : ( ι -> ι )` (extend-here Ctx`·` "x" Ty`( ι -> ι )`)))
+    (T-abs Ctx`·` "y" base LC`y` base (T-var "y" base Ctx`·, y : ι` (extend-here Ctx`·` "y" base)))
 
 -- 03's betaStep takes it to λ y : ι . y, and preservation types that.
 reductTyped : typing`· ⊢ ( λ y : ι . y ) : ( ι -> ι )`

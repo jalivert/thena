@@ -71,7 +71,7 @@ import Thena.Core.Context (Context)
 import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), fresh, open, substLevelsIn, tokenName)
 import Thena.Language.Judgment (judgmentDatatype)
-import Thena.Language.Lookup (lookupDatatype, lookupGrammar)
+import Thena.Language.Lookup (lookupDatatypes, lookupGrammars)
 import Thena.Language.Substitution (substitutionDefinitions)
 import Thena.Language.Regex
   ( Inclusion (..)
@@ -3121,10 +3121,14 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
           -- §5.3): a datatype like any other, and a grammar installed beside the
           -- context's, so that @x : T ∈ Γ@ is read, built and printed the way
           -- every object term is.
-          (ls, n3) = case lookupDatatype g of
-            Just (ld, lroles) -> datatypeProgram n2 ld (Just lroles)
-            Nothing -> ([], n2)
-          installed = maybe [g] (: [g]) (lookupGrammar g)
+          -- **One per extension production** (MS8 phase 156): a context with
+          -- two kinds of binding gets a lookup relation for each, and their
+          -- instructions run in declaration order.
+          (ls, n3) = foldl (\(is0, n) (ld, lroles) ->
+                              let (is1, n') = datatypeProgram n ld (Just lroles)
+                               in (is0 ++ is1, n'))
+                           ([], n2) (lookupDatatypes g)
+          installed = reverse (lookupGrammars g) ++ [g]
           m' = (Engine.splicing (is ++ fs ++ ls) m) { grammars = installed ++ grammars m, names = n3 }
        in if exhausted
             then stop m' msgs (reverse ws ++ warns) (Paused spent)

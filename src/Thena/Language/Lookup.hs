@@ -31,9 +31,22 @@
 -- **@ne@ is what makes a later binding shadow an earlier one** (§5.3): without
 -- it @Γ, x : T, x : S@ would derive both. It compares the extension's one name,
 -- which 'Thena.Language.Grammar.checkGrammar' has made sure there is.
+--
+-- **ONE RELATION PER EXTENSION PRODUCTION since MS8 phase 156** — `~23rg2`, and
+-- the reason the milestone has it: F-sub's Γ carries both @x : T@ and @X <: T@,
+-- so until now its context could not be declared at all. @n@ extensions give
+-- @n@ relations of @1 + n@ constructors, one @here@ and one @there@ for each
+-- extension a lookup may step over, and each relation is named after its own
+-- extension production rather than after the context (his ruling, 2026-10-04).
+--
+-- **The @ne@ premise is generated only where the stepped-over extension is at
+-- the SAME class.** Its job is making a later binding shadow an earlier one, and
+-- shadowing is within a namespace — so a term lookup stepping over @X <: T@
+-- carries no inequality, and nothing has to be proved about a name of another
+-- kind to look past it.
 module Thena.Language.Lookup
-  ( lookupGrammar
-  , lookupDatatype
+  ( lookupGrammars
+  , lookupDatatypes
   ) where
 
 import qualified Data.List.NonEmpty as NE
@@ -46,9 +59,9 @@ import Thena.Language.Grammar
   , Grammar (..)
   , Item (..)
   , Sort (..)
-  , extensionOf
+  , extensionsOf
   , isName
-  , lookupNames
+  , lookupNamesOf
   )
 import Thena.Surface.Concrete
   ( Plicity (..)
@@ -60,11 +73,15 @@ import Thena.Surface.Concrete
   )
 import Thena.Syntax.Lexer (BlockKind (..))
 
--- | The notation's grammar. 'Nothing' for anything that is not a context.
-lookupGrammar :: Grammar -> Maybe Grammar
-lookupGrammar g = do
-  e <- extensionOf g
-  inN : _ <- Just (lookupNames g)
+-- | One notation grammar per extension. Empty for anything that is not a
+-- context.
+lookupGrammars :: Grammar -> [Grammar]
+lookupGrammars g = [ lg | e <- extensionsOf g, Just lg <- [notationOf g e] ]
+
+-- | The notation's grammar for one extension.
+notationOf :: Grammar -> GProduction -> Maybe Grammar
+notationOf g e = do
+  inN : _ <- Just (lookupNamesOf g e)
   let (before, rest) = break own (gproductionItems e)
   (ctxSlot, after) <- case rest of
     s : more -> Just (s, more)
@@ -89,24 +106,25 @@ lookupGrammar g = do
       _ -> False
     distinct = foldr (\x acc -> x : filter (/= x) acc) []
 
--- | The relation's datatype and its two constructors, and the roles
+-- | One relation per extension: its datatype, its constructors, and the roles
 -- 'Thena.Instral.Ops.MakeData' carries — all 'Plain', since nothing here is
--- object syntax. 'Nothing' for anything that is not a context.
-lookupDatatype :: Grammar -> Maybe (SurfaceData, [[ArgRole]])
-lookupDatatype g = do
-  e <- extensionOf g
-  lg <- lookupGrammar g
-  [inN, hereN, thereN] <- Just (lookupNames g)
+-- object syntax. Empty for anything that is not a context.
+lookupDatatypes :: Grammar -> [(SurfaceData, [[ArgRole]])]
+lookupDatatypes g = [ d | e <- extensionsOf g, Just d <- [relationOf g e] ]
+
+-- | The relation for one extension production.
+relationOf :: Grammar -> GProduction -> Maybe (SurfaceData, [[ArgRole]])
+relationOf g e = do
+  lg <- notationOf g e
+  inN : hereN : thereNs <- Just (lookupNamesOf g e)
   p : _ <- Just (grammarProductions lg)
-  -- The context is the notation's last slot, because 'lookupGrammar' put it
+  -- The context is the notation's last slot, because 'notationOf' put it
   -- there; the entry is everything before it.
   ctxArg : reversedOthers <- Just (reverse (gproductionArguments p))
   let others = reverse reversedOthers
       indices = others ++ [ctxArg]
   key : _ <- Just [ a | a <- others, isName a ]
-  let extArgs = gproductionArguments e
-
-      -- Every binder is primed until it names no type the constructor
+  let -- Every binder is primed until it names no type the constructor
       -- mentions and nothing bound before it, as 'Thena.Driver.grammarDatatype'
       -- primes a constructor's.
       taken = [inN, "Eq", "Empty", nm (grammarName g)] ++ map (typeName . argumentSort) indices
@@ -116,39 +134,57 @@ lookupDatatype g = do
 
       gamma = fresh [] (argumentName ctxArg)
       (outer, used1) = names [gamma] (map argumentName others)
-      (inner, used2) = names used1 (map ((++ "'") . argumentName) others)
-      neN = fresh used2 "ne"
-      iN = fresh (neN : used2) "i"
 
       ref = SurfaceName
       binder x a = SurfaceBinder Explicit x (Just (typeOf a))
-      -- The extension applied, with the context and the entry's own names.
-      extend ctx entry = app (ref (nm (gproductionName e)))
+      -- An extension applied, with the context and the entry's own names.
+      extend k ctx entry = app (ref (nm (gproductionName k)))
         [ if argumentSort a == OfLanguage (grammarName g) then ref ctx
           else ref (lookupOr (argumentName a) entry)
-        | a <- extArgs ]
+        | a <- gproductionArguments k ]
       lookupOr x entry = case lookup x entry of
         Just y -> y
         Nothing -> x
       inRel entry ctx = app (ref inN) ([ ref y | (_, y) <- entry ] ++ [ctx])
       outerEntry = zip (map argumentName others) outer
-      innerEntry = zip (map argumentName others) inner
-      keyOf entry = ref (lookupOr (argumentName key) entry)
+      keyOf a entry = ref (lookupOr (argumentName a) entry)
 
       here = SurfaceConstructor hereN $
         SurfacePi (NE.fromList (binder gamma ctxArg : zipWith binder outer others))
-          (inRel outerEntry (extend gamma outerEntry))
-      there = SurfaceConstructor thereN $
-        SurfacePi (NE.fromList
-          ( binder gamma ctxArg : zipWith binder outer others ++ zipWith binder inner others
-            ++ [ SurfaceBinder Explicit neN (Just (SurfaceArrow
-                   (app (ref "Eq") [typeOf key, keyOf outerEntry, keyOf innerEntry]) (ref "Empty")))
-               , SurfaceBinder Explicit iN (Just (inRel outerEntry (ref gamma))) ]))
-          (inRel outerEntry (extend gamma innerEntry))
+          (inRel outerEntry (extend e gamma outerEntry))
+
+      -- **One @there@ per extension a lookup may step over** (MS8 phase 156).
+      -- The binders are this relation's own entry, then the stepped-over
+      -- extension's, primed; the @ne@ premise is there only when that extension
+      -- reads names of the same class, because shadowing is within a namespace.
+      stepping (thereN, k) =
+        let kOthers = entryOf k
+            kKeys = [ a | a <- kOthers, isName a ]
+            (inner, used2) = names used1 (map ((++ "'") . argumentName) kOthers)
+            innerEntry = zip (map argumentName kOthers) inner
+            neN = fresh used2 "ne"
+            shadows = [ a | a <- kKeys, classOf a == classOf key ]
+            premises =
+              [ SurfaceBinder Explicit neN (Just (SurfaceArrow
+                  (app (ref "Eq") [typeOf key, keyOf key outerEntry, keyOf a innerEntry]) (ref "Empty")))
+              | a <- take 1 shadows ]
+            iN = fresh (neN : used2) "i"
+         in ( SurfaceConstructor thereN $
+                SurfacePi (NE.fromList
+                  ( binder gamma ctxArg : zipWith binder outer others ++ zipWith binder inner kOthers
+                    ++ premises
+                    ++ [ SurfaceBinder Explicit iN (Just (inRel outerEntry (ref gamma))) ]))
+                  (inRel outerEntry (extend k gamma innerEntry))
+            , replicate (2 + length others + length kOthers + length premises) Plain )
+      theres = map stepping (zip thereNs (extensionsOf g))
       relType = foldr (SurfaceArrow . typeOf) (SurfaceUniverse 0) indices
-  Just ( SurfaceData inN [] relType [here, there]
-       , [ replicate (1 + length others) Plain, replicate (3 + 2 * length others) Plain ] )
+  Just ( SurfaceData inN [] relType (here : map fst theres)
+       , replicate (1 + length others) Plain : map snd theres )
   where
+    entryOf k = [ a | a <- gproductionArguments k, argumentSort a /= OfLanguage (grammarName g) ]
+    classOf a = case argumentSort a of
+      OfClass cls _ _ -> Just cls
+      _ -> Nothing
     nm (GlobalName n) = n
     typeName srt = case srt of
       OfLanguage l -> nm l

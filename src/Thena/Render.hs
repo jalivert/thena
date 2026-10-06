@@ -1572,11 +1572,12 @@ renderDeclareError ren e = case e of
     NameTaken -> g ++ " is already declared"
     BuiltInTag -> g ++ " is one of Thena's own tags, so a language may not take its name"
     ConstructorTaken p -> g ++ "'s constructor " ++ p ++ " is already declared"
-    ContextShape -> blockAt k g ++ ": a context needs one empty and one extension production"
+    ContextShape -> blockAt k g ++ ": a context needs one production with no context slot and at least one with exactly one"
     -- MS6 phase 105: what generated substitution needs of a language (§4.7).
     FunctionTaken f -> g ++ "'s substitution function " ++ f ++ " is already declared"
     -- MS6 phase 107: what the generated lookup needs of a context (§5.3).
-    ContextKey xs -> blockAt k g ++ ": its extension needs exactly one name to look up, and it has "
+    ContextKey p xs -> blockAt k g ++ ": its extension " ++ p
+      ++ " needs exactly one name to look up, and it has "
       ++ (case xs of { [] -> "none"; _ -> intercalate ", " xs })
     LookupTaken f -> g ++ "'s lookup " ++ f ++ " is already declared"
     -- **Per class since MS8 phase 155**: two occurrence productions are two

@@ -31,7 +31,8 @@ module Thena.Language.Grammar
   , builtInTags
   , substitutionNames
   , lookupNames
-  , extensionOf
+  , lookupNamesOf
+  , extensionsOf
   , isName
   , variableProductions
   , variableRegex
@@ -115,14 +116,19 @@ data GrammarProblem
     -- ^ a production's name is already declared, by anything or by another
     -- production. **No magic** (§4.5): the user disambiguates
   | ContextShape
-    -- ^ §5.1: a context needs one empty and one extension production
+    -- ^ §5.1: a context needs one production with no slot of its own sort and
+    -- at least one with exactly one. **More than one extension is allowed since
+    -- MS8 phase 156** — each gets its own lookup relation, which is what the
+    -- count ever existed for; a production with /two/ of its own slots is still
+    -- refused, because no lookup relation reads one
   | BuiltInTag
     -- ^ the language is named like one of Thena's own tags (MS6 phase 106):
     -- a rule base reads an installed grammar's tag before the built-ins
-  | ContextKey [String]
-    -- ^ the extension production's @String@ arguments, when there is not
+  | ContextKey String [String]
+    -- ^ an extension production, and its @String@ arguments when there is not
     -- exactly one: the generated lookup compares one name (§5.3's @ne@), and
-    -- which argument that is has to be unambiguous (MS6 phase 107)
+    -- which argument that is has to be unambiguous (MS6 phase 107; named per
+    -- extension at MS8 phase 156)
   | LookupTaken String
     -- ^ a name the context's lookup relation would declare — @Ctx-in@,
     -- @Ctx-here@, @Ctx-there@ — is already declared (MS6 phase 107)
@@ -244,11 +250,12 @@ checkGrammar installed env b = do
              (blockProductions b)
   let g = Grammar kind (GlobalName name) heads (map fst prods)
   if kind == ContextBlock && not (contextShaped heads g) then refuse ContextShape else Right ()
-  case (kind, extensionOf g) of
-    (ContextBlock, Just e) -> case [ argumentName a | a <- gproductionArguments e, isName a ] of
-      [_] -> Right ()
-      xs -> refuse (ContextKey xs)
-    _ -> Right ()
+  case [ (nameOf (gproductionName e), xs)
+       | kind == ContextBlock, e <- extensionsOf g
+       , let xs = [ argumentName a | a <- gproductionArguments e, isName a ]
+       , length xs /= 1 ] of
+    (p, xs) : _ -> refuse (ContextKey p xs)
+    [] -> Right ()
   case [ f | f <- lookupNames g, taken f || f `elem` prodNames ] of
     f : _ -> refuse (LookupTaken f)
     [] -> Right ()
@@ -654,15 +661,17 @@ variableRegex g cls =
                    , Occurrence c' <- [argumentRole a], c' == cls
                    , OfClass _ _ re <- [argumentSort a] ]
 
--- | A context's extension production — the one with a slot of the context's
--- own sort (§5.1). 'Nothing' for anything that is not a context.
-extensionOf :: Grammar -> Maybe GProduction
-extensionOf g
-  | grammarKind g /= ContextBlock = Nothing
-  | otherwise = case [ p | p <- grammarProductions g
-                         , any ((== OfLanguage (grammarName g)) . argumentSort) (gproductionArguments p) ] of
-      p : _ -> Just p
-      [] -> Nothing
+-- | A context's extension productions — those with a slot of the context's own
+-- sort (§5.1), in declaration order. Empty for anything that is not a context.
+--
+-- **Plural since MS8 phase 156**, which is the whole of `~23rg2`: F-sub's Γ
+-- carries both @x : T@ and @X <: T@, and one extension per kind of binding gets
+-- one lookup relation each.
+extensionsOf :: Grammar -> [GProduction]
+extensionsOf g
+  | grammarKind g /= ContextBlock = []
+  | otherwise = [ p | p <- grammarProductions g
+                    , any ((== OfLanguage (grammarName g)) . argumentSort) (gproductionArguments p) ]
 
 -- | An argument that is a name: a @Token String@ class's match.
 isName :: Argument -> Bool
@@ -670,22 +679,41 @@ isName a = case argumentSort a of
   OfClass _ (GlobalName "String") _ -> True
   _ -> False
 
--- | What a context's lookup relation declares (§5.3, MS6 phase 107), in order:
--- the relation, then its two constructors — prefixed with the context's name,
--- his answer of 2026-09-21, so that two contexts in one session cannot clash.
+-- | Everything a context's lookup relations declare (§5.3), in order — one
+-- relation per extension production (MS8 phase 156).
 lookupNames :: Grammar -> [String]
-lookupNames g
-  | grammarKind g /= ContextBlock = []
-  | otherwise = [ n ++ suffix | suffix <- ["-in", "-here", "-there"] ]
-  where GlobalName n = grammarName g
+lookupNames g = concatMap (lookupNamesOf g) (extensionsOf g)
 
--- | §5.1: exactly two productions, one with no slot of the context's own sort
--- and one with exactly one.
+-- | What one extension's lookup relation declares, in order: the relation, its
+-- @here@, then one @there@ for each extension it may step over.
+--
+-- **Named after the EXTENSION PRODUCTION, not after the context — his ruling,
+-- 2026-10-04, and the migration is his too.** The three names used to come from
+-- the context's name alone (@Ctx-in@, @Ctx-here@, @Ctx-there@), which two
+-- extensions collide on; keeping those for the one-extension case would be a
+-- special case in the naming rule, and he took the renaming instead when both
+-- were put to him. A production name is unique across every installed grammar
+-- (@ConstructorTaken@), so this cannot clash either.
+lookupNamesOf :: Grammar -> GProduction -> [String]
+lookupNamesOf g e =
+  [ n ++ "-in", n ++ "-here" ]
+    ++ [ n ++ "-there-" ++ named k | k <- extensionsOf g ]
+  where
+    n = named e
+    named p = let GlobalName x = gproductionName p in x
+
+-- | §5.1: **one** production with no slot of the context's own sort — the empty
+-- context — and **at least one** with exactly one, each an extension. A
+-- production with two or more of its own slots is refused, because a lookup
+-- relation steps over one binding and there is nothing for it to read in a form
+-- that joins two contexts.
 contextShaped :: [String] -> Grammar -> Bool
 contextShaped own g =
-  case map ownSlots (grammarProductions g) of
-    counts -> length counts == 2 && 0 `elem` counts && 1 `elem` counts
+  length [ () | c <- counts, c == 0 ] == 1
+    && not (null [ () | c <- counts, c == 1 ])
+    && all (<= 1) counts
   where
+    counts = map ownSlots (grammarProductions g)
     ownSlots p = length [ () | Slot x _ _ <- gproductionItems p, x `elem` own ]
 
 -- | The @T@ of a token class, and its expression: a definition whose type

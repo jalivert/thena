@@ -201,7 +201,7 @@ generated =
       s <- loaded (header ++ typing)
       said s ":show typing" @?=
         [ "data typing : Ctx -> LC -> Ty -> Type₀ where"
-        , "  { T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> Ctx-in`${x} : ${T} ∈ ${Γ}` -> typing`${Γ} ⊢ ${LC`${x}`} : ${T}`"
+        , "  { T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> extend-in`${x} : ${T} ∈ ${Γ}` -> typing`${Γ} ⊢ ${LC`${x}`} : ${T}`"
         , "  ; T-abs : ∀ (Γ : Ctx) (x : String) (S : Ty) (E : LC) (T : Ty) -> typing`${Γ} , ${x} : ${S} ⊢ ${E} : ${T}` -> typing`${Γ} ⊢ ( λ ${x} : ${S} . ${E} ) : ( ${S} -> ${T} )`"
         , "  ; T-app : ∀ (Γ : Ctx) (M : LC) (S : Ty) (T : Ty) (N : LC) -> typing`${Γ} ⊢ ${M} : ( ${S} -> ${T} )` -> typing`${Γ} ⊢ ${N} : ${S}` -> typing`${Γ} ⊢ ( ${M} ${N} ) : ${T}` }"
         ]
@@ -267,7 +267,7 @@ premises =
   , testCase "a lookup premise is not read as a premise named by its metavariable" $ do
       s <- loaded (header ++ typing)
       said s ":show typing" !! 1
-        @?= "  { T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> Ctx-in`${x} : ${T} ∈ ${Γ}` -> typing`${Γ} ⊢ ${LC`${x}`} : ${T}`"
+        @?= "  { T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> extend-in`${x} : ${T} ∈ ${Γ}` -> typing`${Γ} ⊢ ${LC`${x}`} : ${T}`"
   , refusal "a premise named like a metavariable"
       (typing ++ ["judgment bad = M bad where", "", "  B:  M' : · ⊢ M : ι", "      ---", "      M bad", ""])
       "refused: in the judgment bad, rule B: a premise may not be named M', which is a metavariable"
@@ -332,12 +332,12 @@ derivations =
   [ testCase "a typing derivation checks against its judgment literal" $ do
       _ <- loaded (header ++ typing ++
         [ "idTyped : typing`· ⊢ ( λ x : ι . x ) : ( ι -> ι )`"
-        , "idTyped = T-abs empty \"x\" base (var \"x\") base (T-var \"x\" base (extend empty \"x\" base) (Ctx-here empty \"x\" base))" ])
+        , "idTyped = T-abs empty \"x\" base (var \"x\") base (T-var \"x\" base (extend empty \"x\" base) (extend-here empty \"x\" base))" ])
       pure ()
   , testCase "one at the wrong type is refused" $ do
       r <- load (header ++ typing ++
         [ "wrong : typing`· ⊢ ( λ x : ι . x ) : ι`"
-        , "wrong = T-abs empty \"x\" base (var \"x\") base (T-var \"x\" base (extend empty \"x\" base) (Ctx-here empty \"x\" base))" ])
+        , "wrong = T-abs empty \"x\" base (var \"x\") base (T-var \"x\" base (extend empty \"x\" base) (extend-here empty \"x\" base))" ])
       either (const (pure ())) (const (assertFailure "a derivation at the wrong type loaded")) r
   , testCase "E-beta's right-hand side is computed by substitution" $ do
       _ <- loaded (header ++ valueAndStep ++

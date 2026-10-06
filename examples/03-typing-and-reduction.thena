@@ -31,7 +31,7 @@ judgment typing = Γ ⊢ M : T where
 
 -- Each rule is a constructor, and `:show typing` prints them:
 --
---   T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> Ctx-in x T Γ -> typing Γ (var x) T
+--   T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> extend-in x T Γ -> typing Γ (var x) T
 --   T-abs : ∀ (Γ : Ctx) (x : String) (S : Ty) (E : LC) (T : Ty)
 --             -> typing (extend Γ x S) E T -> typing Γ (abs x S E) (arrow S T)
 --   T-app : ∀ (Γ : Ctx) (M : LC) (S : Ty) (T : Ty) (N : LC)
@@ -67,7 +67,7 @@ judgment step = M --> N where
 identityTyped : typing`· ⊢ ( λ x : ι . x ) : ( ι -> ι )`
 identityTyped =
   T-abs Ctx`·` "x" base LC`x` base
-    (T-var "x" base Ctx`·, x : ι` (Ctx-here Ctx`·` "x" base))
+    (T-var "x" base Ctx`·, x : ι` (extend-here Ctx`·` "x" base))
 
 -- ⊢ λ x : ι . λ y : ι . x  :  ι -> ι -> ι
 -- The x in the body is found past y, so the lookup needs x ≠ y.
@@ -84,7 +84,7 @@ constTyped =
   T-abs Ctx`·` "x" base LC`( λ y : ι . x )` Ty`( ι -> ι )`
     (T-abs Ctx`·, x : ι` "y" base LC`x` base
       (T-var "x" base Ctx`·, x : ι, y : ι`
-        (Ctx-there Ctx`·, x : ι` "x" base "y" base xNotY (Ctx-here Ctx`·` "x" base))))
+        (extend-there-extend Ctx`·, x : ι` "x" base "y" base xNotY (extend-here Ctx`·` "x" base))))
 
 
 -- ---------------------------------------------------------------------------

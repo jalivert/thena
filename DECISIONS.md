@@ -1049,7 +1049,7 @@ prints it:
 
 ```
 data typing : Ctx -> LC -> Ty -> Type₀ where
-  T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> Ctx-in x T Γ -> typing Γ (var x) T
+  T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> extend-in x T Γ -> typing Γ (var x) T
   T-app : ∀ (Γ : Ctx) (M : LC) (S : Ty) (T : Ty) (N : LC)
             -> typing Γ M (arrow S T) -> typing Γ N S -> typing Γ (app M N) T
 ```
@@ -1094,10 +1094,11 @@ binds twice: the `∀` lists the rule's metavariables, it does not nest. **The n
 installed**, as a context's lookup is: `` typing`· ⊢ ( λ x : ι . x ) : ( ι -> ι )` ``
 is a type, and `:parse typing …` reads one.
 
-### A context gets a lookup relation, written `x : T ∈ Γ`
+### A context gets a lookup relation per kind of binding, written `x : T ∈ Γ`
 
-*Decided 2026-09-21.* A `context` block declares its datatype and, beside it,
-the relation that looks a name up:
+*Decided 2026-09-21; one relation per extension 2026-10-04.* A `context` block
+declares its datatype and, beside it, the relation that looks a name up — one for
+each form the context can be extended by:
 
 ```
 context Ctx, Γ where
@@ -1106,21 +1107,40 @@ context Ctx, Γ where
 ```
 
 ```
-data Ctx-in : String -> Ty -> Ctx -> Type₀ where
-  Ctx-here  : ∀ (Γ : Ctx) (x : String) (T : Ty) -> Ctx-in x T (extend Γ x T)
-  Ctx-there : ∀ (Γ : Ctx) (x : String) (T : Ty) (x' : String) (T' : Ty)
-                -> (Eq String x x' -> Empty) -> Ctx-in x T Γ -> Ctx-in x T (extend Γ x' T')
+data extend-in : String -> Ty -> Ctx -> Type₀ where
+  extend-here : ∀ (Γ : Ctx) (x : String) (T : Ty) -> extend-in x T (extend Γ x T)
+  extend-there-extend
+    : ∀ (Γ : Ctx) (x : String) (T : Ty) (x' : String) (T' : Ty)
+        -> (Eq String x x' -> Empty) -> extend-in x T Γ -> extend-in x T (extend Γ x' T')
 ```
 
-**Its notation is the extension with the context taken out, then `∈` and the
-context**, and it is a grammar like any other: `` Ctx-in`x : ι ∈ ·, x : ι` `` is
-the type `Ctx-in "x" base (extend empty "x" base)`, `:parse Ctx-in …` reads it,
-and it prints back. The separator goes with the context: `Γ , x : T` gives
-`x : T ∈ Γ`, and so does `x : T ; Γ`. **The indices are the notation's slots
-in order**, as a judgment's are, so the context comes last.
+**A context may be extended in more than one way**, and System F's cannot be
+written any other way — its Γ carries both a term's type and a type variable's
+bound:
 
-**A later binding shadows an earlier one of the same name.** `Ctx-there` asks
-for a proof that the two names differ. For two literals that proof needs no
+```
+context Ctx, Γ where
+  empty  -> ·
+  bindTm -> Γ , x : T
+  bindTy -> Γ , X <: T
+```
+
+That declares `bindTm-in` and `bindTy-in`, each reading its own notation —
+`x : T ∈ Γ` and `X <: T ∈ Γ` — and each with a constructor for stepping over
+every kind of binding: `bindTm-there-bindTm`, `bindTm-there-bindTy`, and the two
+for `bindTy-in`. **The names come from the extension production, not the
+context**, because three names taken from the context alone would collide the
+moment there are two extensions.
+
+**Its notation is the extension with the context taken out, then `∈` and the
+context**, and it is a grammar like any other: `` extend-in`x : ι ∈ ·, x : ι` ``
+is the type `extend-in "x" base (extend empty "x" base)`, `:parse extend-in …`
+reads it, and it prints back. The separator goes with the context: `Γ , x : T`
+gives `x : T ∈ Γ`, and so does `x : T ; Γ`. **The indices are the notation's
+slots in order**, as a judgment's are, so the context comes last.
+
+**A later binding shadows an earlier one of the same name.** `extend-there-extend`
+asks for a proof that the two names differ. For two literals that proof needs no
 axiom; `eqString` and `Eq`'s eliminator give it:
 
 ```
@@ -1136,10 +1156,13 @@ xNotY = \ q ->
 Reaching an `x` under a later `x` would need `Eq String "x" "x" -> Empty`, and
 nothing proves that.
 
-The constructors are named after the context, as `Ctx-in` is, so two contexts
-in one session do not clash. **The extension must have exactly one name** (a
-`Token String` argument), because that is what the lookup compares. Weakening
-and exchange are not generated.
+**Only a binding of the same kind of name needs that proof.** Shadowing happens
+within one namespace, so looking a term variable up past `X <: T` asks for
+nothing — `bindTm-there-bindTy` has no inequality premise at all.
+
+**Each extension must have exactly one name** (a `Token String` argument),
+because that is what the lookup compares, and a production that joins two
+contexts is refused. Weakening and exchange are not generated.
 
 ### A language gets substitution for free, and a binder is renamed only when it would capture
 
