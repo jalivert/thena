@@ -40,6 +40,7 @@ tests =
     , testGroup "the notation is a grammar" notation
     , testGroup "proofs of lookups" proofs
     , testGroup "two kinds of binding (MS8 phase 156)" twoKinds
+    , testGroup "substitution through a context (MS8 phase 157)" substituted
     , testGroup "what a context needs" refused
     ]
 
@@ -130,6 +131,55 @@ twoKinds =
         , "shadowed = bindTm-there-bindTm (bindTm empty \"x\" top) \"x\" top \"x\" top"
         , "             (bindTm-here empty \"x\" top)" ])
       either (const (pure ())) (const (assertFailure "it was reached with no ne")) r
+  ]
+
+substituted :: [TestTree]
+substituted =
+  [ -- **A context gets a substitution for every class it reaches** (MS8 phase
+    -- 157, `~mnr39`): F-sub's Γ holds @Ty@ slots and @Ty@ owns the type class,
+    -- so @Ctx-subst-X@ exists and is the @[X↦P]Δ@ of the type-substitution
+    -- lemma. **No @Ctx-fresh-X@**, because a context owns no class — minting a
+    -- name belongs to the language whose notation can write one.
+    testCase "a context reaching a class gets a substitution into its owner" $ do
+      s <- loaded fsubHeader
+      said s ":infer Ctx-subst-X" @?= ["Ctx-subst-X : Ctx -> String -> Ty -> Ctx"]
+      said s ":infer Ctx-fresh-X" @?= ["stuck: not in scope: Ctx-fresh-X"]
+    -- **The load is the assertion.** @through@ does not type-check unless the
+    -- fold recurses through the context and substitutes in each entry's type,
+    -- and @freeOf@ unless the free type variables of a context are its entries'.
+  , testCase "it folds through the context, and the context's own names are left alone" $ do
+      _ <- loaded (fsubHeader ++
+        [ "through : Eq Ctx (Ctx-subst-X (bindTm (bindTy empty \"X\" top) \"y\" (tvar \"X\")) \"X\" top)"
+        , "                 (bindTm (bindTy empty \"X\" top) \"y\" top)"
+        , "through = refl Ctx (bindTm (bindTy empty \"X\" top) \"y\" top)"
+        , ""
+        , "freeOf : Eq (List String) (Ctx-fv-X (bindTm empty \"y\" (tvar \"Z\")))"
+        , "            (cons String \"Z\" (nil String))"
+        , "freeOf = refl (List String) (cons String \"Z\" (nil String))" ])
+      pure ()
+    -- **And a rule may write it**, which is what `~mnr39` is for: F-sub's
+    -- type-substitution lemma is stated @Γ, [X↦P]Δ ⊢ …@, and §6.3's notation
+    -- now reaches a context because the generator's rule for one is the same as
+    -- for a language.
+  , testCase "a rule may substitute through a context in its own notation" $ do
+      s <- loaded (fsubHeader ++
+        [ "judgment sub = \915 \8866 T <: S where", ""
+        , "  S-refl: ------------"
+        , "          \915 \8866 T <: T", ""
+        , "  S-narrow: \915[X -> T] \8866 S <: S'"
+        , "            --------------------"
+        , "            \915 \8866 S <: S'" ])
+      said s ":infer S-narrow" @?=
+        [ "S-narrow : \8704 (\915 : Ctx) (X : String) (T : Ty) (S : Ty) (S' : Ty)"
+            ++ " -> sub`${Ctx-subst-X \915 X T} \8866 ${S} <: ${S'}` -> sub`${\915} \8866 ${S} <: ${S'}`" ]
+    -- **A context whose entries can hold no name gets nothing**, which is
+    -- STLC's: its @Ty@ has no variable production, so there is nothing in a Γ
+    -- to substitute for.
+  , testCase "and a context that reaches no class gets none" $ do
+      s <- loaded header
+      map (said s) [":infer Ctx-subst-all", ":infer Ctx-fv-x"] @?=
+        [ ["stuck: not in scope: Ctx-subst-all"]
+        , ["stuck: not in scope: Ctx-fv-x"] ]
   ]
 
 -- | @x ≠ y@, from @eqString@ and nothing else: the motive sends a string to

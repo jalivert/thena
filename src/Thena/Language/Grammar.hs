@@ -259,7 +259,11 @@ checkGrammar installed env b = do
   case [ f | f <- lookupNames g, taken f || f `elem` prodNames ] of
     f : _ -> refuse (LookupTaken f)
     [] -> Right ()
-  if kind == LanguageBlock then either refuse Right (substitutable (installed ++ [g]) g) else Right ()
+  -- **A context is checked too, since MS8 phase 157 generates substitution for
+  -- one**: what matters to it is that a class it reaches has one owner, so that
+  -- the map replacing a name has one language to be into. A judgment generates
+  -- no functions and is not checked.
+  if kind /= JudgmentBlock then either refuse Right (substitutable (installed ++ [g]) g) else Right ()
   case [ f | f <- substitutionNames (installed ++ [g]) g, taken f || f `elem` prodNames ] of
     f : _ -> refuse (FunctionTaken f)
     [] -> Right ()
@@ -627,11 +631,18 @@ grammarsReached gs g = walk [] [g]
 -- it is correct and generates nothing, which is what @BinderClassUnowned@ warned
 -- about before the generator could say so.
 --
--- **Only a language**, for now: the general rule gives a context a substitution
--- for every class it reaches, and that is `~mnr39`, not this.
+-- **A context as well as a language — MS8 phase 157, `~mnr39`.** It is the same
+-- question and the same answer: a context reaches the classes of the languages
+-- in its slots, so F-sub's Γ reaches the type class and gets @Ctx-subst-X@,
+-- which is the @[X↦P]Δ@ of the type-substitution lemma. Nothing special had to
+-- be written for it — a context simply /owns/ no class, so it generates no
+-- @fresh@, and its name slots are neither occurrences nor binders, so nothing in
+-- one is substituted or renamed.
+--
+-- **A judgment gets none**: it generates a datatype of rules and no functions.
 classesSubstituted :: [Grammar] -> Grammar -> [GlobalName]
 classesSubstituted gs g
-  | grammarKind g /= LanguageBlock = []
+  | grammarKind g == JudgmentBlock = []
   | otherwise = [ cls | cls <- classesReached gs g, isJust (classOwner gs g cls) ]
 
 -- | **The language a grammar reaches a class through** — the one among the

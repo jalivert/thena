@@ -1164,6 +1164,30 @@ nothing — `bindTm-there-bindTy` has no inequality premise at all.
 because that is what the lookup compares, and a production that joins two
 contexts is refused. Weakening and exchange are not generated.
 
+**A context also gets substitution, by the same rule a language does.** For every
+kind of name its entries can hold, it gets the free-variables function and the
+substitution — so F-sub's Γ, whose entries hold types, gets:
+
+```
+Ctx-fv-X     : Ctx -> List String
+Ctx-subst-X  : Ctx -> String -> Ty -> Ctx
+Ctx-subst-all : Ctx -> List (And String Ty) -> Ctx
+```
+
+`Ctx-subst-X` is the `[X↦P]Δ` that System F's type-substitution lemma is written
+with, and a rule may write it in notation: `Γ[X -> T]` elaborates to
+`Ctx-subst-X Γ X T`.
+
+It is a plain fold with **no capture avoidance and no renaming**, because a
+context's name slot is an ordinary name and not a binder: `Γ , x : T` has no body
+for `x` to scope over. So each entry's name is copied as written and each entry's
+types are substituted. **It does not stop at a binding of the kind it is
+substituting for** — applied to `· , X <: ⊤ , x : X` it replaces that `X` as
+well, since that `X` binds nothing — which is what the lemma needs, because it
+substitutes into the part of the context *after* the binding. A context gets no
+`fresh`, because minting a name belongs to the language that reads that kind of
+name. A context whose entries can hold no name at all gets nothing.
+
 ### A language gets substitution for free, and a binder is renamed only when it would capture
 
 *Decided 2026-09-21; one family per kind of name 2026-10-07.* A `language` block
