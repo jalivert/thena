@@ -484,10 +484,12 @@ describe t = case t of
   TLanguage   -> "language"
   TContext    -> "context"
   TJudgment   -> "judgment"
+  TNotation   -> "notation"
   TBlock k _  -> case k of
     LanguageBlock -> "a language block"
     ContextBlock  -> "a context block"
     JudgmentBlock -> "a judgment block"
+    NotationBlock -> "a notation block"
   -- Never lexed; "Thena.Driver" inserts it at a rule file's column 1.
   TChar c     -> show c
   TSpread     -> "..."
@@ -1572,6 +1574,13 @@ renderDeclareError ren e = case e of
     NameTaken -> g ++ " is already declared"
     BuiltInTag -> g ++ " is one of Thena's own tags, so a language may not take its name"
     ConstructorTaken p -> g ++ "'s constructor " ++ p ++ " is already declared"
+    -- MS8 phase 158, §4.8. A @notation@ block extends a grammar, so both of
+    -- these are about the header rather than about a production.
+    NoSuchGrammar -> g ++ " is not a language, a context or a judgment that is declared"
+    NotationMetavars ms ->
+      blockAt k g ++ ": it may not declare the metavariable"
+        ++ (case ms of { [_] -> " "; _ -> "s " }) ++ intercalate ", " ms
+        ++ ", because its productions are written in " ++ g ++ "'s own"
     ContextShape -> blockAt k g ++ ": a context needs one production with no context slot and at least one with exactly one"
     -- MS6 phase 105: what generated substitution needs of a language (§4.7).
     FunctionTaken f -> g ++ "'s substitution function " ++ f ++ " is already declared"
@@ -1613,6 +1622,18 @@ renderDeclareError ren e = case e of
       ReservedClass x ->
         "the token class " ++ x ++ " would read the reserved " ++ [Earley.placeholderChar]
           ++ ", which is how a part of a term that is not written yet is shown"
+      -- MS8 phase 158, §4.8: what a function production claims and a
+      -- constructor production does not.
+      NotADeclaredFunction -> p ++ " is not a declared function"
+      FunctionHasNotation -> p ++ " is already a production of a grammar"
+      FunctionArity takes slots ->
+        p ++ " takes " ++ plural takes "argument" ++ " and the notation has "
+          ++ plural slots "slot"
+      FunctionSlot x (GlobalName takes) (GlobalName is) ->
+        p ++ " takes a " ++ takes ++ " where " ++ x ++ " is a " ++ is
+      FunctionResult (GlobalName r) -> p ++ " returns a " ++ r ++ ", not a " ++ g
+      FunctionBinds x -> x ++ " is written as a binding form, and an application binds nothing"
+      FunctionMetadata -> p ++ " is a function, so there is no constructor for the metadata to be about"
     -- MS6 phase 108, §6.2–6.4.
     InRule r why -> blockAt k g ++ ", rule " ++ r ++ ": " ++ case why of
       RuleUnparsed part what text failure ->
@@ -2090,6 +2111,9 @@ blockAt k g = case k of
   LanguageBlock -> "in the grammar of " ++ g
   ContextBlock  -> "in the context " ++ g
   JudgmentBlock -> "in the judgment " ++ g
+  -- MS8 phase 158: the one block that names a grammar it did not declare, so
+  -- the phrase says the notation is /for/ it.
+  NotationBlock -> "in the notation for " ++ g
 
 -- | @an Int@, @a Ty@ — what an argument ranges over, with its article.
 sortPhrase :: Sort -> String

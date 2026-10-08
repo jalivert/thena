@@ -41,6 +41,7 @@ import Thena.Language.Earley (Piece (..), Start (..), Tree (..))
 import Thena.Language.Grammar
   ( Argument (..)
   , GProduction (..)
+  , constructorProductions
   , Grammar (..)
   , GrammarError (..)
   , GrammarProblem (..)
@@ -76,7 +77,10 @@ judgmentDatatype gs g rules = do
         , map snd ctors )
   where
     GlobalName name = grammarName g
-    indices = concatMap gproductionArguments (grammarProductions g)
+    -- **The judgment's own notation, which is its one constructor production**
+    -- — a @notation@ block may add a function production to a judgment's
+    -- grammar too, and that is notation and not an index (MS8 phase 158).
+    indices = concatMap gproductionArguments (constructorProductions g)
     typeOf = SurfaceName . sortType . argumentSort
 
 -- | One rule, as a constructor.

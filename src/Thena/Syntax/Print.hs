@@ -450,6 +450,7 @@ kindWord k = case k of
   LanguageBlock -> "language"
   ContextBlock  -> "context"
   JudgmentBlock -> "judgment"
+  NotationBlock -> "notation"
 
 
 -- --------------------------------------------------------------------------

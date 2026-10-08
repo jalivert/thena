@@ -190,6 +190,672 @@ already equal
 solved: ?ℓ1007
 solved: T
 refused: in the grammar of L, production f: the token class any would read the reserved █, which is how a part of a term that is not written yet is shown
+-- a block naming no installed grammar
+chose 1010: elaborate
+already equal
+solved: ?ℓ1007
+solved: T
+solved: ?ℓ1017
+solved: ?ℓ1017
+solved: ?ℓ1044
+solved: ?ℓ1044
+solved: ?ℓ1053
+solved: ?ℓ1060
+solved: ?ℓ1067
+solved: ?ℓ1072
+solved: ?ℓ1045
+solved: ?ℓ1115
+solved: ?ℓ1117
+solved: ?ℓ1123
+solved: ?ℓ1125
+solved: ?ℓ1131
+solved: ?ℓ1133
+solved: ?ℓ1148
+solved: ?ℓ1155
+solved: ?ℓ1162
+chose 1169: elaborate
+already equal
+already equal
+chose 1175: elaborate
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ1167
+solved: ?ℓ1192
+solved: ?ℓ1199
+solved: ?ℓ1206
+solved: ?ℓ1213
+solved: ?ℓ1220
+solved: ?ℓ1227
+chose 1240: elaborate
+solved: ?ℓ1241
+already equal
+already equal
+solved: ?ℓ1241
+solved: ?ℓ1249
+chose 1257: elaborate
+already equal
+already equal
+already equal
+solved: ?ℓ1251
+chose 1265: elaborate
+already equal
+already equal
+chose 1271: elaborate
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ1256
+solved: ?ℓ1008
+solved: ?ℓ1311
+solved: ?ℓ1313
+solved: ?ℓ1319
+solved: ?ℓ1321
+already equal
+warning: no noConfusionext-in: ext-there-ext's argument 6 (ne) has a type that depends on an earlier argument, so its equation cannot be stated
+refused: Nope is not a language, a context or a judgment that is declared
+-- a block declaring a metavariable of its own
+chose 1010: elaborate
+already equal
+solved: ?ℓ1007
+solved: T
+solved: ?ℓ1017
+solved: ?ℓ1017
+solved: ?ℓ1044
+solved: ?ℓ1044
+solved: ?ℓ1053
+solved: ?ℓ1060
+solved: ?ℓ1067
+solved: ?ℓ1072
+solved: ?ℓ1045
+solved: ?ℓ1115
+solved: ?ℓ1117
+solved: ?ℓ1123
+solved: ?ℓ1125
+solved: ?ℓ1131
+solved: ?ℓ1133
+solved: ?ℓ1148
+solved: ?ℓ1155
+solved: ?ℓ1162
+chose 1169: elaborate
+already equal
+already equal
+chose 1175: elaborate
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ1167
+solved: ?ℓ1192
+solved: ?ℓ1199
+solved: ?ℓ1206
+solved: ?ℓ1213
+solved: ?ℓ1220
+solved: ?ℓ1227
+chose 1240: elaborate
+solved: ?ℓ1241
+already equal
+already equal
+solved: ?ℓ1241
+solved: ?ℓ1249
+chose 1257: elaborate
+already equal
+already equal
+already equal
+solved: ?ℓ1251
+chose 1265: elaborate
+already equal
+already equal
+chose 1271: elaborate
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ1256
+solved: ?ℓ1008
+solved: ?ℓ1311
+solved: ?ℓ1313
+solved: ?ℓ1319
+solved: ?ℓ1321
+already equal
+warning: no noConfusionext-in: ext-there-ext's argument 6 (ne) has a type that depends on an earlier argument, so its equation cannot be stated
+refused: in the notation for C: it may not declare the metavariable Z, because its productions are written in C's own
+-- a production naming nothing declared
+chose 1010: elaborate
+already equal
+solved: ?ℓ1007
+solved: T
+solved: ?ℓ1017
+solved: ?ℓ1017
+solved: ?ℓ1044
+solved: ?ℓ1044
+solved: ?ℓ1053
+solved: ?ℓ1060
+solved: ?ℓ1067
+solved: ?ℓ1072
+solved: ?ℓ1045
+solved: ?ℓ1115
+solved: ?ℓ1117
+solved: ?ℓ1123
+solved: ?ℓ1125
+solved: ?ℓ1131
+solved: ?ℓ1133
+solved: ?ℓ1148
+solved: ?ℓ1155
+solved: ?ℓ1162
+chose 1169: elaborate
+already equal
+already equal
+chose 1175: elaborate
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ1167
+solved: ?ℓ1192
+solved: ?ℓ1199
+solved: ?ℓ1206
+solved: ?ℓ1213
+solved: ?ℓ1220
+solved: ?ℓ1227
+chose 1240: elaborate
+solved: ?ℓ1241
+already equal
+already equal
+solved: ?ℓ1241
+solved: ?ℓ1249
+chose 1257: elaborate
+already equal
+already equal
+already equal
+solved: ?ℓ1251
+chose 1265: elaborate
+already equal
+already equal
+chose 1271: elaborate
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ1256
+solved: ?ℓ1008
+solved: ?ℓ1311
+solved: ?ℓ1313
+solved: ?ℓ1319
+solved: ?ℓ1321
+already equal
+warning: no noConfusionext-in: ext-there-ext's argument 6 (ne) has a type that depends on an earlier argument, so its equation cannot be stated
+refused: in the notation for C, production nosuch: nosuch is not a declared function
+-- a production naming another grammar's constructor
+chose 1010: elaborate
+already equal
+solved: ?ℓ1007
+solved: T
+solved: ?ℓ1017
+solved: ?ℓ1017
+solved: ?ℓ1044
+solved: ?ℓ1044
+solved: ?ℓ1053
+solved: ?ℓ1060
+solved: ?ℓ1067
+solved: ?ℓ1072
+solved: ?ℓ1045
+solved: ?ℓ1115
+solved: ?ℓ1117
+solved: ?ℓ1123
+solved: ?ℓ1125
+solved: ?ℓ1131
+solved: ?ℓ1133
+solved: ?ℓ1148
+solved: ?ℓ1155
+solved: ?ℓ1162
+chose 1169: elaborate
+already equal
+already equal
+chose 1175: elaborate
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ1167
+solved: ?ℓ1192
+solved: ?ℓ1199
+solved: ?ℓ1206
+solved: ?ℓ1213
+solved: ?ℓ1220
+solved: ?ℓ1227
+chose 1240: elaborate
+solved: ?ℓ1241
+already equal
+already equal
+solved: ?ℓ1241
+solved: ?ℓ1249
+chose 1257: elaborate
+already equal
+already equal
+already equal
+solved: ?ℓ1251
+chose 1265: elaborate
+already equal
+already equal
+chose 1271: elaborate
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ1256
+solved: ?ℓ1008
+solved: ?ℓ1311
+solved: ?ℓ1313
+solved: ?ℓ1319
+solved: ?ℓ1321
+already equal
+warning: no noConfusionext-in: ext-there-ext's argument 6 (ne) has a type that depends on an earlier argument, so its equation cannot be stated
+refused: in the notation for C, production base: base is already a production of a grammar
+-- a production naming one the grammar already has
+chose 1010: elaborate
+already equal
+solved: ?ℓ1007
+solved: T
+solved: ?ℓ1017
+solved: ?ℓ1017
+solved: ?ℓ1044
+solved: ?ℓ1044
+solved: ?ℓ1053
+solved: ?ℓ1060
+solved: ?ℓ1067
+solved: ?ℓ1072
+solved: ?ℓ1045
+solved: ?ℓ1115
+solved: ?ℓ1117
+solved: ?ℓ1123
+solved: ?ℓ1125
+solved: ?ℓ1131
+solved: ?ℓ1133
+solved: ?ℓ1148
+solved: ?ℓ1155
+solved: ?ℓ1162
+chose 1169: elaborate
+already equal
+already equal
+chose 1175: elaborate
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ1167
+solved: ?ℓ1192
+solved: ?ℓ1199
+solved: ?ℓ1206
+solved: ?ℓ1213
+solved: ?ℓ1220
+solved: ?ℓ1227
+chose 1240: elaborate
+solved: ?ℓ1241
+already equal
+already equal
+solved: ?ℓ1241
+solved: ?ℓ1249
+chose 1257: elaborate
+already equal
+already equal
+already equal
+solved: ?ℓ1251
+chose 1265: elaborate
+already equal
+already equal
+chose 1271: elaborate
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ1256
+solved: ?ℓ1008
+solved: ?ℓ1311
+solved: ?ℓ1313
+solved: ?ℓ1319
+solved: ?ℓ1321
+already equal
+warning: no noConfusionext-in: ext-there-ext's argument 6 (ne) has a type that depends on an earlier argument, so its equation cannot be stated
+refused: in the notation for C, production ext: ext is already a production of a grammar
+-- more slots than the function takes
+chose 1010: elaborate
+already equal
+solved: ?ℓ1007
+solved: T
+solved: ?ℓ1017
+solved: ?ℓ1017
+solved: ?ℓ1044
+solved: ?ℓ1044
+solved: ?ℓ1053
+solved: ?ℓ1060
+solved: ?ℓ1067
+solved: ?ℓ1072
+solved: ?ℓ1045
+solved: ?ℓ1115
+solved: ?ℓ1117
+solved: ?ℓ1123
+solved: ?ℓ1125
+solved: ?ℓ1131
+solved: ?ℓ1133
+solved: ?ℓ1148
+solved: ?ℓ1155
+solved: ?ℓ1162
+chose 1169: elaborate
+already equal
+already equal
+chose 1175: elaborate
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ1167
+solved: ?ℓ1192
+solved: ?ℓ1199
+solved: ?ℓ1206
+solved: ?ℓ1213
+solved: ?ℓ1220
+solved: ?ℓ1227
+chose 1240: elaborate
+solved: ?ℓ1241
+already equal
+already equal
+solved: ?ℓ1241
+solved: ?ℓ1249
+chose 1257: elaborate
+already equal
+already equal
+already equal
+solved: ?ℓ1251
+chose 1265: elaborate
+already equal
+already equal
+chose 1271: elaborate
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ1256
+solved: ?ℓ1008
+solved: ?ℓ1311
+solved: ?ℓ1313
+solved: ?ℓ1319
+solved: ?ℓ1321
+already equal
+warning: no noConfusionext-in: ext-there-ext's argument 6 (ne) has a type that depends on an earlier argument, so its equation cannot be stated
+refused: in the notation for C, production join: join takes 2 arguments and the notation has 3 slots
+-- a slot at a sort the function does not take there
+chose 1010: elaborate
+already equal
+solved: ?ℓ1007
+solved: T
+solved: ?ℓ1017
+solved: ?ℓ1017
+solved: ?ℓ1044
+solved: ?ℓ1044
+solved: ?ℓ1053
+solved: ?ℓ1060
+solved: ?ℓ1067
+solved: ?ℓ1072
+solved: ?ℓ1045
+solved: ?ℓ1115
+solved: ?ℓ1117
+solved: ?ℓ1123
+solved: ?ℓ1125
+solved: ?ℓ1131
+solved: ?ℓ1133
+solved: ?ℓ1148
+solved: ?ℓ1155
+solved: ?ℓ1162
+chose 1169: elaborate
+already equal
+already equal
+chose 1175: elaborate
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ1167
+solved: ?ℓ1192
+solved: ?ℓ1199
+solved: ?ℓ1206
+solved: ?ℓ1213
+solved: ?ℓ1220
+solved: ?ℓ1227
+chose 1240: elaborate
+solved: ?ℓ1241
+already equal
+already equal
+solved: ?ℓ1241
+solved: ?ℓ1249
+chose 1257: elaborate
+already equal
+already equal
+already equal
+solved: ?ℓ1251
+chose 1265: elaborate
+already equal
+already equal
+chose 1271: elaborate
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ1256
+solved: ?ℓ1008
+solved: ?ℓ1311
+solved: ?ℓ1313
+solved: ?ℓ1319
+solved: ?ℓ1321
+already equal
+warning: no noConfusionext-in: ext-there-ext's argument 6 (ne) has a type that depends on an earlier argument, so its equation cannot be stated
+refused: in the notation for C, production join: join takes a C where T is a Ty
+-- a function that does not return the grammar's datatype
+chose 1011: elaborate
+already equal
+solved: ?ℓ1007
+solved: T
+solved: ?ℓ1018
+solved: ?ℓ1018
+solved: ?ℓ1045
+solved: ?ℓ1045
+solved: ?ℓ1054
+solved: ?ℓ1061
+solved: ?ℓ1068
+solved: ?ℓ1073
+solved: ?ℓ1046
+solved: ?ℓ1116
+solved: ?ℓ1118
+solved: ?ℓ1124
+solved: ?ℓ1126
+solved: ?ℓ1132
+solved: ?ℓ1134
+solved: ?ℓ1149
+solved: ?ℓ1156
+solved: ?ℓ1163
+chose 1170: elaborate
+already equal
+already equal
+chose 1176: elaborate
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ1168
+solved: ?ℓ1193
+solved: ?ℓ1200
+solved: ?ℓ1207
+solved: ?ℓ1214
+solved: ?ℓ1221
+solved: ?ℓ1228
+chose 1241: elaborate
+solved: ?ℓ1242
+already equal
+already equal
+solved: ?ℓ1242
+solved: ?ℓ1250
+chose 1258: elaborate
+already equal
+already equal
+already equal
+solved: ?ℓ1252
+chose 1266: elaborate
+already equal
+already equal
+chose 1272: elaborate
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ1257
+solved: ?ℓ1008
+solved: ?ℓ1312
+solved: ?ℓ1314
+solved: ?ℓ1320
+solved: ?ℓ1322
+already equal
+solved: ?ℓ1009
+solved: ?ℓ1341
+solved: ?ℓ1343
+solved: ?ℓ1349
+solved: ?ℓ1351
+already equal
+warning: no noConfusionext-in: ext-there-ext's argument 6 (ne) has a type that depends on an earlier argument, so its equation cannot be stated
+refused: in the notation for C, production dom: dom returns a Ty, not a C
+-- a production writing a binding form
+chose 1010: elaborate
+already equal
+solved: ?ℓ1007
+solved: T
+solved: ?ℓ1017
+solved: ?ℓ1017
+solved: ?ℓ1044
+solved: ?ℓ1044
+solved: ?ℓ1053
+solved: ?ℓ1060
+solved: ?ℓ1067
+solved: ?ℓ1072
+solved: ?ℓ1045
+solved: ?ℓ1115
+solved: ?ℓ1117
+solved: ?ℓ1123
+solved: ?ℓ1125
+solved: ?ℓ1131
+solved: ?ℓ1133
+solved: ?ℓ1148
+solved: ?ℓ1155
+solved: ?ℓ1162
+chose 1169: elaborate
+already equal
+already equal
+chose 1175: elaborate
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ1167
+solved: ?ℓ1192
+solved: ?ℓ1199
+solved: ?ℓ1206
+solved: ?ℓ1213
+solved: ?ℓ1220
+solved: ?ℓ1227
+chose 1240: elaborate
+solved: ?ℓ1241
+already equal
+already equal
+solved: ?ℓ1241
+solved: ?ℓ1249
+chose 1257: elaborate
+already equal
+already equal
+already equal
+solved: ?ℓ1251
+chose 1265: elaborate
+already equal
+already equal
+chose 1271: elaborate
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ1256
+solved: ?ℓ1008
+solved: ?ℓ1311
+solved: ?ℓ1313
+solved: ?ℓ1319
+solved: ?ℓ1321
+already equal
+warning: no noConfusionext-in: ext-there-ext's argument 6 (ne) has a type that depends on an earlier argument, so its equation cannot be stated
+refused: in the notation for C, production join: D is written as a binding form, and an application binds nothing
+-- a production with metadata
+chose 1010: elaborate
+already equal
+solved: ?ℓ1007
+solved: T
+solved: ?ℓ1017
+solved: ?ℓ1017
+solved: ?ℓ1044
+solved: ?ℓ1044
+solved: ?ℓ1053
+solved: ?ℓ1060
+solved: ?ℓ1067
+solved: ?ℓ1072
+solved: ?ℓ1045
+solved: ?ℓ1115
+solved: ?ℓ1117
+solved: ?ℓ1123
+solved: ?ℓ1125
+solved: ?ℓ1131
+solved: ?ℓ1133
+solved: ?ℓ1148
+solved: ?ℓ1155
+solved: ?ℓ1162
+chose 1169: elaborate
+already equal
+already equal
+chose 1175: elaborate
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ1167
+solved: ?ℓ1192
+solved: ?ℓ1199
+solved: ?ℓ1206
+solved: ?ℓ1213
+solved: ?ℓ1220
+solved: ?ℓ1227
+chose 1240: elaborate
+solved: ?ℓ1241
+already equal
+already equal
+solved: ?ℓ1241
+solved: ?ℓ1249
+chose 1257: elaborate
+already equal
+already equal
+already equal
+solved: ?ℓ1251
+chose 1265: elaborate
+already equal
+already equal
+chose 1271: elaborate
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ1256
+solved: ?ℓ1008
+solved: ?ℓ1311
+solved: ?ℓ1313
+solved: ?ℓ1319
+solved: ?ℓ1321
+already equal
+warning: no noConfusionext-in: ext-there-ext's argument 6 (ne) has a type that depends on an earlier argument, so its equation cannot be stated
+refused: in the notation for C, production join: join is a function, so there is no constructor for the metadata to be about
 -- a language named like the built-in tag surface
 chose 1010: elaborate
 already equal

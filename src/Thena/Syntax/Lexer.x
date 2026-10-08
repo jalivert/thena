@@ -176,6 +176,12 @@ tokens :-
   -- project-wide; nothing in the repository used either as a name.
   "context"     { keyword TContext }
   "judgment"    { keyword TJudgment }
+  -- **The fourth block word, MS8 phase 158** (@spec\/object-language.md@ §4.8,
+  -- `~hwxrx`). It gives a declared /function/ a spelling in a grammar already
+  -- installed, so it has to be a separate top-level block: the function's type
+  -- names the datatype the @language@ or @context@ block declares, and cannot
+  -- be written above it.
+  "notation"    { keyword TNotation }
   "when"        { keyword TWhen }
   ":-"          { keyword TNeck }
   $digit+       { \p s -> Located (posOf p) (TNumber (read s)) }
@@ -260,6 +266,7 @@ data Token
   | TLanguage
   | TContext
   | TJudgment
+  | TNotation
   | TBlock BlockKind String
     -- ^ a whole object-language block of a surface module, keyword excluded,
     -- as raw text (MS6 phase 101, @ms6\/SPEC.md@ §7.0). Only 'lexModule'
@@ -489,7 +496,10 @@ raw blocks fence outer p0 s0 = chunk p0 p0 s0 "" ""
 -- A context's generated lookup relation, @x : T ∈ Γ@, is installed as a
 -- 'JudgmentBlock' grammar too (phase 107) — the first judgment, and one no
 -- block is written for.
-data BlockKind = LanguageBlock | ContextBlock | JudgmentBlock
+-- **A @notation@ block declares no datatype** (MS8 phase 158, §4.8): it adds
+-- productions to a grammar already installed, and each of them names a declared
+-- function rather than a constructor.
+data BlockKind = LanguageBlock | ContextBlock | JudgmentBlock | NotationBlock
   deriving (Eq, Show)
 
 blockKindOf :: Token -> Maybe BlockKind
@@ -497,6 +507,7 @@ blockKindOf t = case t of
   TLanguage -> Just LanguageBlock
   TContext  -> Just ContextBlock
   TJudgment -> Just JudgmentBlock
+  TNotation -> Just NotationBlock
   _         -> Nothing
 
 -- | The rest of a block, from just after its keyword (@ms6\/SPEC.md@ §7.0):

@@ -211,7 +211,17 @@ import Thena.Instral.Concrete
   )
 import Thena.Syntax.Lexer (BlockKind (..), Located (..), Token (..), lexModule, lexTokens)
 import Thena.Language.Reader (Block (..), readBlock)
-import Thena.Language.Grammar (Argument (..), GProduction (..), Grammar (..), Sort (..), checkGrammar, earleyRules)
+import Thena.Language.Grammar
+  ( Argument (..)
+  , GProduction (..)
+  , Grammar (..)
+  , Sort (..)
+  , checkGrammar
+  , checkNotation
+  , constructorProductions
+  , earleyRules
+  , notationInto
+  )
 import qualified Thena.Language.Earley as Earley
 import Thena.Syntax.Parser
   ( parseData
@@ -1356,7 +1366,10 @@ grammarDatatype g =
   , map (map argumentRole . gproductionArguments) prods
   )
   where
-    prods = grammarProductions g
+    -- **Constructors only** (MS8 phase 158, §4.8): a @notation@ block's
+    -- production names a function that is already declared, so the datatype
+    -- this generates is the one it would have generated without it.
+    prods = constructorProductions g
     plainName (GlobalName n) = n
 
     constructor p = SurfaceConstructor (plainName (gproductionName p)) (typeOf p)
@@ -1465,7 +1478,12 @@ declaredName i = case i of
   ItemBlock _       -> Nothing
   -- The language's name. Until phase 103 generates its datatype, what it
   -- declares is the grammar alone — the metavariables and the notation.
-  ItemGrammar b     -> Just (blockName b)
+  -- **A @notation@ block declares nothing at all** (MS8 phase 158, §4.8): the
+  -- name in its header is a grammar that is already installed, and its
+  -- productions name functions that are already declared.
+  ItemGrammar b
+    | blockKind b == NotationBlock -> Nothing
+    | otherwise -> Just (blockName b)
 
 -- | Lex and parse a **surface** term (phase 39). No context, because nothing is
 -- resolved: what a name denotes is elaboration's answer, and elaboration is
@@ -3089,6 +3107,22 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
   -- and choose what @Bool@ is; they may not write @primitive myAxiom : Empty@.
   -- **A grammar is installed only if every check of §4.5 passes** (MS6 phase
   -- 101); its warnings join the load's, in source order.
+  -- **A @notation@ block declares nothing and generates nothing** (MS8 phase
+  -- 158, §4.8, `~hwxrx`): it adds productions to a grammar already installed,
+  -- each naming a declared function. So there is no datatype, no substitution
+  -- and no lookup relation to put in front of the program — the only effect is
+  -- on the grammars, and from there on what the parser accepts. **That is why
+  -- it is a separate block**: the function's type names the datatype the
+  -- @language@ or @context@ block declares, so it cannot be written above it.
+  Engine.DeclaringGrammar b m
+    | blockKind b == NotationBlock -> case checkNotation (grammars m) (globals m) b of
+        Left e -> stop (load [] m) msgs warns (Refused (GrammarRefused e))
+        Right delta ->
+          let m' = m { grammars = notationInto delta (grammars m) }
+           in if exhausted
+                then stop m' msgs warns (Paused spent)
+                else spending fuel spent s { sessionMachine = m' } msgs warns
+
   Engine.DeclaringGrammar b m -> case checkGrammar (grammars m) (globals m) b of
     Left e -> stop (load [] m) msgs warns (Refused (GrammarRefused e))
     -- **A judgment's datatype is its rules** (MS6 phase 108, §6.5), read with

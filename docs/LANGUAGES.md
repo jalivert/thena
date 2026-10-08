@@ -288,6 +288,45 @@ language LC, M, N, E where
 `language` in a rule file is a syntax error. MS5 declared languages there, with a
 type of their own and a coercion `surface-of`; both are gone.
 
+### `notation`: a spelling for a function
+
+A judgment rule writes its indices in object notation, so it can only say what
+the grammar's productions build — and those are constructors. A `notation` block
+gives a declared **function** a production too:
+
+```
+context Ctx, Γ, Δ where
+  empty  -> ·
+  bindTm -> Γ , x : T
+  bindTy -> Γ , X <: T
+
+append : Ctx -> Ctx -> Ctx
+append = …
+
+notation Ctx where
+  append -> Γ ∪ Δ
+```
+
+`Γ ∪ Δ` then parses wherever a `Ctx` is expected, a rule's index included, and
+elaborates to `append Γ Δ` — which is what lets a rule write the paper's
+`Γ, X<:Q, Δ ⊢ T <: S`.
+
+- **The datatype is untouched.** `Ctx` still has the three constructors its own
+  block declared, and the eliminator, the lookup relations and the generated
+  substitution all see what they saw before. A joining *constructor* would
+  instead make `Ctx` a tree, so a production with two slots of the context's own
+  sort stays refused.
+- **It is a separate block because of scoping**: `append`'s type mentions `Ctx`,
+  which the `context` block declares, so the function cannot be written above
+  that block.
+- **The function must be declared, must not already be a production, and its type
+  must take the slots in order and return the grammar's datatype.**
+- **Every term a rule mentions must be a named global with a declared notation.**
+  No inline lambda, no inline `elim`.
+- **A stuck application prints in the notation**, so `:show` of the rule above
+  prints ``sub`${Γ} ∪ ${Δ} ⊢ ${T} <: ${S}` ``; a closed context reduces to its
+  constructors and prints as a context.
+
 ## 7. Splices: holes in a written core term
 
 A written core term may have holes, filled from `instral` bindings when the

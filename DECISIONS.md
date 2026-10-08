@@ -671,7 +671,7 @@ because whitespace between object tokens is optional when it is parsed. A
 binding form is the exception: `E[x, y]` is one item, bracket adjacent. A
 production is one line, and a deeper line continues it.
 
-**`context` and `judgment` are reserved words**, like `language`. A name in a
+**`context`, `judgment` and `notation` are reserved words**, like `language`. A name in a
 production is a metavariable, then a token class, then a terminal, and a
 metavariable may not be named like an existing one or a class — uniqueness is
 across every grammar in scope, not per block. **A name is refused for not being a
@@ -686,6 +686,72 @@ each other could not be given the datatypes they generate.
 
 It is checked when the module loads, and a binder that binds in nothing is a
 warning, not an error.
+
+
+### A `notation` block gives a function a spelling, so a rule can say what a paper says
+
+*Decided 2026-10-07, built 2026-10-08.*
+
+A judgment rule writes its indices in object notation, and object notation can
+only spell what the grammar's productions build. Those are constructors — so
+F-sub's type-substitution lemma, which the paper writes `Γ, X<:Q, Δ ⊢ t : T`, was
+unwritable. That comma means *append* between two contexts, and no constructor
+spells append:
+
+```
+S-split: Γ , X <: T , Δ ⊢ T <: S
+refused: … its premises do not parse: unexpected 'Δ' at character 14
+```
+
+A `notation` block gives a declared **function** a spelling in a grammar:
+
+```
+append : Ctx -> Ctx -> Ctx
+append = …
+
+notation Ctx where
+  append -> Γ ∪ Δ
+```
+
+`Γ ∪ Δ` now parses wherever a `Ctx` is expected — a rule's index position
+included — and elaborates to `append Γ Δ`. So the paper's rule is writable:
+
+```
+S-split : ∀ (Γ : Ctx) (Δ : Ctx) (T : Ty) (S : Ty)
+            -> sub`${Γ} ∪ ${Δ} ⊢ ${T} <: ${S}` -> sub`${Γ} ⊢ ${T} <: ${S}`
+```
+
+**The datatype is untouched: `Ctx` stays a list.** That is why this is not a
+joining *constructor*, which was considered and refused — a
+`join : Ctx -> Ctx -> Ctx` constructor makes `Ctx` a tree, in which
+`join (join a b) c`, `join a (join b c)`, `join empty a` and `a` are four
+distinct terms denoting one context, conversion is structural, and nothing
+identifies them. **A function reduces; a constructor does not.** A production
+with two slots of the context's own sort therefore stays refused.
+
+**It is a separate top-level block rather than part of the `language` or
+`context` block, and the reason is scoping**: the function's type mentions the
+datatype that block declares, so it cannot be written above it.
+
+**The function form is written, never inferred.** "There is a function of that
+name in scope" is already the check that catches a clash
+(`Ctx's constructor nil is already declared`), so inferring from it would consume
+that diagnostic, and deleting a definition above the block would silently turn a
+function production back into a constructor — changing the datatype and
+everything generated from it.
+
+The block declares nothing and generates nothing: the datatype, the lookup
+relations and the substitution are the ones the grammar's own block made. The
+checks are that the name is a declared function, that it is not already some
+grammar's production, and that its type takes the slots in arity and sort and
+returns the grammar's datatype.
+
+**What it costs**: every term a rule mentions must be a named global with a
+declared notation — no inline lambda, no inline `elim`. That is loud at the
+declaration rather than at every use, and it is the payment for not escaping the
+modelling framework. Precedence is not part of it: `Γ , X <: Q ∪ Δ` parses
+uniquely because the competing reading needs `Q ∪ Δ` to be a type, while
+`Γ ∪ Δ ∪ Γ'` is ambiguous and is reported when the term is parsed.
 
 
 ### An object term is parsed by its grammar, and `:parse` shows how

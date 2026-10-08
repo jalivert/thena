@@ -65,6 +65,7 @@ import Thena.Global.Env (ArgRole (..))
 import Thena.Language.Grammar
   ( Argument (..)
   , GProduction (..)
+  , constructorProductions
   , Grammar (..)
   , Sort (..)
   , classOwner
@@ -91,7 +92,10 @@ substitutionDefinitions gs g =
     GlobalName lang = grammarName g
     reached = [ k | GlobalName k <- classesSubstituted gs g ]
     owned = [ k | GlobalName k <- map fst (variableProductions g) ]
-    prods = grammarProductions g
+    -- **Constructors only** (MS8 phase 158): these become the eliminator's
+    -- methods, one per constructor of the datatype, and a @notation@ block's
+    -- function production is not one of them.
+    prods = constructorProductions g
     conName p = let GlobalName n = gproductionName p in n
 
     self = name lang

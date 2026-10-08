@@ -170,6 +170,8 @@ kindOf t = case t of
   TLanguage     -> AKeyword
   TContext      -> AKeyword
   TJudgment     -> AKeyword
+  -- MS8 phase 158: the fourth block word (§4.8).
+  TNotation     -> AKeyword
   TWhen         -> AKeyword
 
   TQuery        -> AHole

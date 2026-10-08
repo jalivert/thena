@@ -18,6 +18,7 @@
 module Thena.Language.Grammar
   ( Grammar (..)
   , GProduction (..)
+  , ProductionKind (..)
   , Item (..)
   , Argument (..)
   , Sort (..)
@@ -28,6 +29,9 @@ module Thena.Language.Grammar
   , RulePart (..)
   , RuleProblem (..)
   , checkGrammar
+  , checkNotation
+  , notationInto
+  , constructorProductions
   , builtInTags
   , substitutionNames
   , lookupNames
@@ -50,7 +54,7 @@ import Data.List (nub, (\\))
 import Data.Maybe (isJust, listToMaybe)
 
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), tokenName)
+import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), instantiate, tokenName)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Earley (placeholderChar)
 import Thena.Language.Regex (Regex, matches, parseRegex, primingChar)
@@ -69,12 +73,40 @@ data Grammar = Grammar
   deriving (Eq, Show)
 
 data GProduction = GProduction
-  { gproductionName      :: GlobalName    -- ^ the constructor
+  { gproductionName      :: GlobalName    -- ^ the constructor, or the function
   , gproductionItems     :: [Item]
   , gproductionArguments :: [Argument]
     -- ^ **the distinct names, in order of first appearance** (§4.6). A name
     -- written twice is one argument (§4.3, non-linear).
+  , gproductionKind      :: ProductionKind
   }
+  deriving (Eq, Show)
+
+-- | What a production's name denotes (MS8 phase 158, §4.8, `~hwxrx`).
+--
+-- **A production either builds the datatype or applies a function to it**, and
+-- everything that is about the /datatype/ reads 'constructorProductions' while
+-- everything that is about the /notation/ reads them all. The parser and the
+-- builder cannot tell the two apart, and that is the point: a reading is a
+-- 'Thena.Language.Earley.Node' either way and
+-- 'Thena.Language.Build.buildCore' writes the head applied to its arguments,
+-- which is a constructor application or a function call by what the head is.
+--
+-- **Why a function production exists at all**: a rule may only write what the
+-- grammar parses, and the paper's @Γ, X\<:Q, Δ ⊢ t : T@ joins two contexts.
+-- The joining /constructor/ is refused on purpose — it would make @Ctx@ a tree
+-- in which @join (join a b) c@, @join a (join b c)@ and @join empty a@ are
+-- distinct terms for one context, with conversion structural and nothing to
+-- identify them. **A function reduces; a constructor does not.** So @append@ is
+-- an ordinary definition by @elim Ctx@, and the notation is what was missing.
+data ProductionKind
+  = Constructor
+    -- ^ a production of the @language@, @context@ or @judgment@ block itself
+  | Function
+    -- ^ a production of a @notation@ block: its name is a declared function and
+    -- the reading elaborates to that function applied. **It contributes nothing
+    -- to what the block generates** — not a constructor, not a class, not an
+    -- extension — and the datatype is the one it was before
   deriving (Eq, Show)
 
 -- | An item, resolved.
@@ -149,6 +181,14 @@ data GrammarProblem
     -- substituting for it is a map into that language's terms — reach two and
     -- neither is determined. Two /unrelated/ languages reading one token class
     -- is ordinary and not this
+  | NoSuchGrammar
+    -- ^ §4.8: a @notation@ block naming no installed grammar. **The one block
+    -- that does not declare its own name** — it adds productions to a grammar
+    -- that is already there, so the name has to be found rather than be free
+  | NotationMetavars [String]
+    -- ^ §4.8: a @notation@ block whose header names more than the grammar. Its
+    -- productions are written in the grammar's own metavariables, and declaring
+    -- a new one would change what every other block's productions may say
   | InProduction String ProductionProblem
   | InRule String RuleProblem
     -- ^ a judgment's rule (MS6 phase 108, §6)
@@ -221,6 +261,35 @@ data ProductionProblem
     -- ^ a token class that would scan it (MS7 phase 127) — the same refusal one
     -- step further back, because a class that reads the glyph makes it a term
     -- exactly as a terminal does
+  -- §4.8's checks on a @notation@ production (MS8 phase 158). All five are
+  -- about the one thing a function production claims that a constructor does
+  -- not: that a definition of that name exists and takes exactly what the
+  -- notation's slots will hand it.
+  | NotADeclaredFunction
+    -- ^ the production's name is not a declared function. **Inference from
+    -- this condition was refused** (his ruling, 2026-10-07): \"a function of
+    -- that name is in scope\" is already the clash check a @language@ block
+    -- makes, so reading the two forms off it would consume that diagnostic and
+    -- let a typo colliding with a prelude name become a function production
+  | FunctionHasNotation
+    -- ^ the name is already a production of an installed grammar. A production
+    -- name is unique across every grammar ('productionBody' relies on it), and
+    -- a second spelling for one function would break that
+  | FunctionArity Int Int
+    -- ^ what the function takes, and how many slots the production has
+  | FunctionSlot String GlobalName GlobalName
+    -- ^ a slot, the type the function takes there, and the type the slot is
+  | FunctionResult GlobalName
+    -- ^ what the function returns, when it is not the grammar's datatype — the
+    -- production stands where a term of the grammar stands, so nothing else
+    -- could be built from it
+  | FunctionBinds String
+    -- ^ a @notation@ production writing a binding form. A function's argument
+    -- is a term it is handed, and nothing about an application binds
+  | FunctionMetadata
+    -- ^ a @notation@ production with @as occurrence@ or @as binder@ metadata.
+    -- A role is read off the /constructor/ it is on (§4.7) and a function
+    -- production generates none
   deriving (Eq, Show)
 
 -- | Validate a block against the grammars already installed and the global
@@ -306,11 +375,10 @@ checkGrammar installed env b = do
         || GlobalName x `elem` concat
              [ grammarName g : map gproductionName (grammarProductions g) | g <- installed ]
 
-    sortOf x
-      | x `elem` heads = Just (OfLanguage (GlobalName name))
-      | Just g <- lookup x metavarsElsewhere = Just (OfLanguage g)
-      | Just (t, re) <- tokenClassOf env x = Just (OfClass (GlobalName x) t re)
-      | otherwise = Nothing
+    -- **This block's metavariables first, then every other grammar's**, which
+    -- is only an order because @MetavariableTaken@ has already refused a name
+    -- that is both.
+    sortOf = sortIn env ([ (m, GlobalName name) | m <- heads ] ++ metavarsElsewhere)
 
     production p = do
       items <- traverse item (productionItems p)
@@ -345,29 +413,12 @@ checkGrammar installed env b = do
           arguments = [ Argument x srt (role x) | x <- args, srt <- take 1 [ t | Slot y t _ <- items, y == x ] ]
           vacuous = [ VacuousBinder kind name (productionName p) x
                     | Just xs <- [declared], x <- xs, x `notElem` bracketed ]
-      Right (GProduction (GlobalName (productionName p)) items arguments, vacuous)
-
-    -- **The placeholder's glyph is reserved — HIS RULING, 2026-09-28, MS7 phase
-    -- 127.** A grammar that could write it or read it would make one glyph mean
-    -- two things in the same buffer, told apart only by looking closely; his
-    -- reason for refusing that outright is that it fails anyone who cannot, and
-    -- that a user will type it to see what happens within ten minutes. The
-    -- check is here so that \"reserved\" is a property of every installed
-    -- grammar rather than a convention nothing enforces.
-    reserved w
-      | placeholderChar `elem` w = Left (ReservedTerminal w)
-      | otherwise = Right ()
-
-    -- A class is refused when it would *accept* the glyph, which is what makes
-    -- it a term. @/./@ does; @/[a-z]+/@ does not.
-    reservedClass x srt = case srt of
-      OfClass _ _ re | any (> 0) (matches re [placeholderChar]) -> Left (ReservedClass x)
-      _ -> Right ()
+      Right (GProduction (GlobalName (productionName p)) items arguments Constructor, vacuous)
 
     item i = case i of
       Word w -> case sortOf w of
-        Nothing  -> reserved w >> Right (Terminal w)
-        Just srt -> reservedClass w srt >> Right (Slot w srt [])
+        Nothing  -> reservedTerminal w >> Right (Terminal w)
+        Just srt -> reservedScan w srt >> Right (Slot w srt [])
       Binding hd _ | kind == JudgmentBlock -> Left (NotationBinds hd)
       Binding hd bs -> case sortOf hd of
         Just srt@(OfLanguage _) -> Right (Slot hd srt bs)
@@ -395,6 +446,193 @@ checkGrammar installed env b = do
       Just (OfClass cls (GlobalName "String") _) -> Right cls
       Just s -> Left (wrong x s)
       Nothing -> Left (NotAMetavariable x)
+
+-- | What a name in a production means: a metavariable of one of these
+-- grammars, or a token class (§4.2). 'Nothing' makes it a terminal.
+--
+-- Lifted out of 'checkGrammar' at MS8 phase 158 so that 'checkNotation' asks
+-- the same question — a @notation@ block's slots are the grammar's own
+-- metavariables and nothing about resolving one differs there.
+sortIn :: GlobalEnv -> [(String, GlobalName)] -> String -> Maybe Sort
+sortIn env metavars x
+  | Just g <- lookup x metavars = Just (OfLanguage g)
+  | Just (t, re) <- tokenClassOf env x = Just (OfClass (GlobalName x) t re)
+  | otherwise = Nothing
+
+-- | **The placeholder's glyph is reserved — HIS RULING, 2026-09-28, MS7 phase
+-- 127.** A grammar that could write it or read it would make one glyph mean two
+-- things in the same buffer, told apart only by looking closely; his reason for
+-- refusing that outright is that it fails anyone who cannot, and that a user
+-- will type it to see what happens within ten minutes. The check is here so
+-- that \"reserved\" is a property of every installed grammar rather than a
+-- convention nothing enforces.
+reservedTerminal :: String -> Either ProductionProblem ()
+reservedTerminal w
+  | placeholderChar `elem` w = Left (ReservedTerminal w)
+  | otherwise = Right ()
+
+-- | A class is refused when it would *accept* the glyph, which is what makes it
+-- a term. @\/.\/@ does; @\/[a-z]+\/@ does not.
+reservedScan :: String -> Sort -> Either ProductionProblem ()
+reservedScan x srt = case srt of
+  OfClass _ _ re | any (> 0) (matches re [placeholderChar]) -> Left (ReservedClass x)
+  _ -> Right ()
+
+-- | Validate a @notation@ block (MS8 phase 158, §4.8, `~hwxrx`): the
+-- productions to add to the grammar it names, which 'notationInto' puts there.
+--
+-- **It declares nothing and generates nothing.** The grammar's datatype, its
+-- lookup relations and its substitution were all generated when its own block
+-- loaded, and none of them changes: a function production is not a constructor,
+-- so 'constructorProductions' does not have it and every consumer written
+-- against that sees what it saw before. What the block adds is one Earley rule
+-- per production, which is why @Γ ∪ Δ@ then parses wherever a @Ctx@ is
+-- expected — a judgment rule's index included, which is the whole point.
+--
+-- **The checks are the ones a constructor production does not need**: the name
+-- is a declared function, it is not already a production of some grammar, and
+-- its type takes exactly the slots in order and returns the grammar's datatype.
+-- The ones about a production's /shape/ are §4.2's and are shared with
+-- 'checkGrammar' through 'sortIn', 'reservedTerminal' and 'reservedScan'.
+--
+-- **A binding form and @as@ metadata are refused.** Both say something about a
+-- constructor's arguments (§4.7) and a function has no constructor to say it
+-- of; an application binds nothing.
+checkNotation :: [Grammar] -> GlobalEnv -> Block -> Either GrammarError Grammar
+checkNotation installed env b = do
+  g <- maybe (refuse NoSuchGrammar) Right named
+  case blockMetavars b of
+    [] -> Right ()
+    ms -> refuse (NotationMetavars ms)
+  prods <- traverse (\p -> either (refuse . InProduction (productionName p)) Right (production g p))
+             (blockProductions b)
+  Right (Grammar NotationBlock (grammarName g) (grammarMetavars g) prods)
+  where
+    name = blockName b
+    named = case [ g | g <- installed, grammarName g == GlobalName name ] of
+      g : _ -> Just g
+      []    -> Nothing
+
+    refuse :: GrammarProblem -> Either GrammarError a
+    refuse = Left . GrammarError NotationBlock name
+
+    -- Every installed grammar's metavariables, the named one's included — it is
+    -- in @installed@, so this is the same list 'checkGrammar' resolves against
+    -- with nothing of its own to add.
+    sortOf = sortIn env [ (m, grammarName g) | g <- installed, m <- grammarMetavars g ]
+
+    taken f = f `elem` concat [ map gproductionName (grammarProductions g) | g <- installed ]
+
+    production g p = do
+      items <- traverse item (productionItems p)
+      if null items then Left NoItems else Right ()
+      case productionMetadata p of
+        Nothing -> Right ()
+        Just _  -> Left FunctionMetadata
+      -- **The distinct names in order of first appearance**, as §4.3 has it for
+      -- a constructor: a name written twice is one argument, and the parser's
+      -- non-linear filter is what makes the two readings agree. Every argument
+      -- is 'Plain' — a role is metadata on a constructor and there is none here.
+      let slots = [ (x, srt) | Slot x srt _ <- items ]
+          args = [ Argument x srt Plain
+                 | x <- nub (map fst slots), srt <- take 1 [ t | (y, t) <- slots, y == x ] ]
+          f = GlobalName (productionName p)
+      if taken f then Left FunctionHasNotation else Right ()
+      (domains, result) <- maybe (Left NotADeclaredFunction) Right (functionShape env f)
+      if length domains == length args
+        then Right ()
+        else Left (FunctionArity (length domains) (length args))
+      sequence_ [ slotIs a dom | (a, dom) <- zip args domains ]
+      if typeNamed env result == grammarName g
+        then Right ()
+        else Left (FunctionResult (typeNamed env result))
+      Right (GProduction f items args Function)
+
+    -- **The parameter has to be the slot's own type, named.** A function whose
+    -- argument is anything else could not be handed what the notation reads
+    -- there, and one whose argument is a /dependent/ type is refused the same
+    -- way: the slots of a production are independent, so there is nothing for
+    -- a later type to depend on.
+    slotIs a dom
+      | typeNamed env dom == wanted = Right ()
+      | otherwise = Left (FunctionSlot (argumentName a) (typeNamed env dom) wanted)
+      where
+        wanted = case argumentSort a of
+          OfLanguage l  -> l
+          OfClass _ t _ -> t
+
+    item i = case i of
+      Word w -> case sortOf w of
+        Nothing  -> reservedTerminal w >> Right (Terminal w)
+        Just srt -> reservedScan w srt >> Right (Slot w srt [])
+      Binding hd _ -> Left (FunctionBinds hd)
+
+-- | **The datatype a type is**, reduced — and @\<anonymous\>@ for anything that
+-- is not one, which is as much as a refusal needs to say: that the type is not
+-- the one the notation's slot wants.
+--
+-- A datatype whose wrapper is saturated reduces to a 'Canonical', a postulated
+-- one stays a 'Global', and a slot's sort is always one of those applied to
+-- nothing — a language, a context or a class's @T@. So a parameterised type, a
+-- universe, a function type and a type that depends on an earlier argument all
+-- answer the same way and are all refused.
+typeNamed :: GlobalEnv -> Core -> GlobalName
+typeNamed env t = case whnf env [] t of
+  Global g []      -> g
+  Canonical g _ [] -> g
+  _                -> GlobalName "<anonymous>"
+
+-- | What a declared function takes, in order, and what it returns — 'Nothing'
+-- for a name that is not an ordinary definition at all (MS8 phase 158, §4.8).
+--
+-- **A constructor's wrapper is a definition and answers like any other**, so
+-- this does not tell a function from a constructor and @NotADeclaredFunction@
+-- is for a name that is declared nowhere. Naming a constructor is refused one
+-- check earlier, by @FunctionHasNotation@ when it is a grammar's production, and
+-- otherwise by its result type: a constructor of @X@ returns an @X@, and the
+-- grammar whose notation this is would have to be @X@ — whose productions are
+-- that same constructor.
+--
+-- The scope under each @Π@ is instantiated with a name no module can write, so
+-- a type that actually depends on an earlier argument fails the slot check
+-- rather than being read as though it did not. Reduced at every step, so a
+-- function whose type is written through an abbreviation is peeled the same.
+functionShape :: GlobalEnv -> GlobalName -> Maybe ([Core], Core)
+functionShape env f = peel . definitionType <$> lookupDefinition f env
+  where
+    peel t = case whnf env [] t of
+      Pi _ dom body -> let (ds, r) = peel (instantiate opaque body) in (dom : ds, r)
+      r             -> ([], r)
+    opaque = Global (GlobalName "") []
+
+-- | **A @notation@ block's productions, in the grammar they are for** (MS8
+-- phase 158): the installed grammars with that one replaced.
+--
+-- Appended, so declaration order is the order they were written in and every
+-- constructor still comes first — which is what keeps 'constructorProductions'
+-- answering exactly what it answered before the block loaded.
+notationInto :: Grammar -> [Grammar] -> [Grammar]
+notationInto delta = map add
+  where
+    add g
+      | grammarName g == grammarName delta =
+          g { grammarProductions = grammarProductions g ++ grammarProductions delta }
+      | otherwise = g
+
+-- | **The productions that are constructors of the grammar's datatype** — every
+-- production of a @language@, @context@ or @judgment@ block, and none of a
+-- @notation@ block's (MS8 phase 158, §4.8).
+--
+-- **This is what everything about the datatype is written against**: the
+-- constructors it generates ('Thena.Driver.grammarDatatype'), the classes its
+-- roles name ('classesNamed'), the extensions a context has ('extensionsOf',
+-- and so its lookup relations), the methods generated substitution writes
+-- ('Thena.Language.Substitution.substitutionDefinitions'), and §5.1's shape.
+-- 'grammarProductions' itself is for the parser and the printer, which is
+-- everything that is about /notation/.
+constructorProductions :: Grammar -> [GProduction]
+constructorProductions g =
+  [ p | p <- grammarProductions g, gproductionKind p == Constructor ]
 
 -- | The tags that name Thena's own parsers: @surface`…`@ and @core`…`@.
 --
@@ -471,7 +709,7 @@ substitutable gs g = do
     (cls, hs) : _ -> Left (ClassOwnedTwice cls hs)
     [] -> Right ()
   case [ (p, a, l, cls)
-       | p <- grammarProductions g
+       | p <- constructorProductions g
        , a <- gproductionArguments p
        , Scope bs <- [argumentRole a]
        , OfLanguage l <- [argumentSort a]
@@ -544,7 +782,7 @@ variableProductions g
   | grammarKind g /= LanguageBlock = []
   | otherwise =
       [ (cls, p)
-      | p <- grammarProductions g
+      | p <- constructorProductions g
       , a <- gproductionArguments p
       , Occurrence cls <- [argumentRole a]
       ]
@@ -562,7 +800,7 @@ variableProductions g
 -- only wants a language's asks a language.
 classesNamed :: Grammar -> [GlobalName]
 classesNamed g =
-  nub [ cls | p <- grammarProductions g, a <- gproductionArguments p, cls <- classOf (argumentRole a) ]
+  nub [ cls | p <- constructorProductions g, a <- gproductionArguments p, cls <- classOf (argumentRole a) ]
   where
     classOf r = case r of
       Occurrence cls -> [cls]
@@ -618,7 +856,7 @@ grammarsReached gs g = walk [] [g]
       | grammarName h `elem` map grammarName done = walk done queue
       | otherwise = walk (done ++ [h]) (queue ++ slotGrammars h)
     slotGrammars h =
-      [ k | p <- grammarProductions h
+      [ k | p <- constructorProductions h
           , Slot _ (OfLanguage l) _ <- gproductionItems p
           , k <- gs, grammarName k == l ]
 
@@ -681,7 +919,7 @@ variableRegex g cls =
 extensionsOf :: Grammar -> [GProduction]
 extensionsOf g
   | grammarKind g /= ContextBlock = []
-  | otherwise = [ p | p <- grammarProductions g
+  | otherwise = [ p | p <- constructorProductions g
                     , any ((== OfLanguage (grammarName g)) . argumentSort) (gproductionArguments p) ]
 
 -- | An argument that is a name: a @Token String@ class's match.
@@ -724,7 +962,7 @@ contextShaped own g =
     && not (null [ () | c <- counts, c == 1 ])
     && all (<= 1) counts
   where
-    counts = map ownSlots (grammarProductions g)
+    counts = map ownSlots (constructorProductions g)
     ownSlots p = length [ () | Slot x _ _ <- gproductionItems p, x `elem` own ]
 
 -- | The @T@ of a token class, and its expression: a definition whose type

@@ -56,6 +56,7 @@ import Thena.Global.Env (ArgRole (..))
 import Thena.Language.Grammar
   ( Argument (..)
   , GProduction (..)
+  , ProductionKind (..)
   , Grammar (..)
   , Item (..)
   , Sort (..)
@@ -96,7 +97,7 @@ notationOf g e = do
       items = kept ++ [Terminal "\8712", ctxSlot]
       args = [ Argument x srt Plain | x <- distinct [ y | Slot y _ _ <- items ]
                                     , srt <- take 1 [ t | Slot y t _ <- items, y == x ] ]
-  Just (Grammar JudgmentBlock (GlobalName inN) [inN] [GProduction (GlobalName inN) items args])
+  Just (Grammar JudgmentBlock (GlobalName inN) [inN] [GProduction (GlobalName inN) items args Constructor])
   where
     own i = case i of
       Slot _ srt _ -> srt == OfLanguage (grammarName g)

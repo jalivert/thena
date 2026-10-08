@@ -51,6 +51,7 @@ tests =
     , testGroup "the reader gives its shape" reading
     , testGroup "the checker gives its meaning" meaning
     , testGroup "and says which classes a grammar reaches" reaching
+    , testGroup "and a notation block gives a function a spelling" notating
     , testGroup "and refuses what §4.5 refuses" refusals
     , goldenVsString "grammars" "test/golden/grammars.golden" $ do
         (s0, trouble) <- startingSession
@@ -75,13 +76,19 @@ lexing =
   , testCase "characters Thena reserves are just text inside it" $
       tokens lexModule "language L where\n  f -> [ λ ⌜ ] /\n"
         @?= Right [TBlock LanguageBlock " L where\n  f -> [ λ ⌜ ] /\n"]
+    -- MS8 phase 158: the fourth block word.
+  , testCase "a notation block is taken whole too" $
+      tokens lexModule "notation C where\n  join -> G \8746 D\n"
+        @?= Right [TBlock NotationBlock " C where\n  join -> G \8746 D\n"]
   , testCase "outside a module the keyword is a keyword and nothing more" $
       tokens lexTokens "language L" @?= Right [TLanguage, TIdent "L"]
   , testCase "and not at column 1 it is not a block either" $
       tokens lexModule "  context C" @?= Right [TContext, TIdent "C"]
   , -- His ruling, 2026-09-19: both words are reserved, as language is.
-    testCase "context and judgment are no longer names" $
-      map isIdentifier ["context", "judgment", "contexts"] @?= [False, False, True]
+    -- @notation@ joined them at MS8 phase 158.
+    testCase "context, judgment and notation are no longer names" $
+      map isIdentifier ["context", "judgment", "notation", "contexts", "notations"]
+        @?= [False, False, False, True, True]
   ]
   where
     tokens lexer src = map (\(Located _ t) -> t) <$> lexer src
@@ -327,6 +334,122 @@ meaning =
 
 -- ---------------------------------------------------------------------------
 
+-- | A context, and a function over it to give a spelling to (MS8 phase 158,
+-- §4.8, `~hwxrx`).
+--
+-- **@join@ is written as a projection rather than by @elim C@** — the checks
+-- are about its /type/, and nothing here reduces it. @examples/@ is where the
+-- real @append@ is written.
+joining :: String
+joining =
+  unlines
+    [ "module Joining where"
+    , ""
+    , "x : Token String"
+    , "x = /[a-z][a-zA-Z0-9']*/"
+    , ""
+    , "language Ty, T, S where"
+    , "  base -> o"
+    , ""
+    , "context C, G, D where"
+    , "  e   -> \183"
+    , "  ext -> G , x : T"
+    , ""
+    , "join : C -> C -> C"
+    , "join = \\ a b -> a"
+    ]
+
+-- | 'joining' with a @notation@ block after it.
+joiningWith :: String -> String
+joiningWith block = joining ++ "\n" ++ block ++ "\n"
+
+-- | **The spelling a declared function gets, and what it does not change**
+-- (MS8 phase 158, §4.8, `~hwxrx`).
+--
+-- The point of the phase is the last case: an index position of a judgment rule
+-- is filled by parsing object notation, so a rule could only ever write what
+-- the grammar's /constructors/ spell — and the paper's comma between two
+-- contexts means @append@, which no constructor may be. The three before it are
+-- what has to stay true for that to be worth having: the datatype the context
+-- generated is untouched, its lookup relation is untouched, and the production
+-- is marked 'Function' so that everything written against
+-- 'constructorProductions' does not see it.
+notating :: [TestTree]
+notating =
+  [ testCase "the block installs, declares nothing, and adds one production" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 (joiningWith "notation C where\n  join -> G \8746 D") of
+        (s1, ProofLoaded _ names _ _) -> do
+          -- @join@ is the definition's own name; the block declares nothing.
+          names @?= ["x", "Ty", "C", "join"]
+          let gs = grammars (machineOf s1)
+          c <- case [ g | g <- gs, grammarName g == GlobalName "C" ] of
+                 [g] -> pure g
+                 other -> assertFailure (show (length other) ++ " grammars called C")
+          map gproductionName (grammarProductions c)
+            @?= map GlobalName ["e", "ext", "join"]
+          map gproductionKind (grammarProductions c)
+            @?= [Constructor, Constructor, Function]
+          -- **The datatype is the one it was**, which is the whole reason this
+          -- is not the refused joining constructor: @C@ stays a list.
+          map gproductionName (constructorProductions c) @?= map GlobalName ["e", "ext"]
+          -- Plain arguments, in order of first appearance, at the slots' sorts.
+          map gproductionArguments [ p | p <- grammarProductions c
+                                       , gproductionName p == GlobalName "join" ]
+            @?= [[ Argument "G" (OfLanguage (GlobalName "C")) Plain
+                 , Argument "D" (OfLanguage (GlobalName "C")) Plain ]]
+        (s1, other) -> assertFailure (unlines (renderResponse s1 other))
+  , testCase "and a term is written in it, and reduces to the constructors" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 (joiningWith "notation C where\n  join -> G \8746 D")
+      -- @join a b = a@, so the right-hand context is dropped: the notation
+      -- elaborated to the function and the function ran.
+      case loadProofSource s1
+             ("module Joined where\n\nj : Eq C C`\183 , x : o \8746 \183` (ext e \"x\" base)\n"
+                ++ "j = refl C (ext e \"x\" base)\n") of
+        (_, ProofLoaded {}) -> pure ()
+        (s2, other) -> assertFailure (unlines (renderResponse s2 other))
+    -- **Nothing the context generated moves** (MS8 phase 158): the datatype and
+    -- the lookup relation were generated when the @context@ block loaded, and a
+    -- function production is not a constructor, so neither could change. Pinned
+    -- by loading the same module with and without the block and comparing the
+    -- names declared.
+  , testCase "the names a module declares are the same with the block and without" $ do
+      (s0, _) <- startingSession
+      let declared src = case loadProofSource s0 src of
+            (_, ProofLoaded _ ns _ _) -> Right ns
+            (s1, other) -> Left (unlines (renderResponse s1 other))
+      without <- pure (declared joining)
+      with <- pure (declared (joiningWith "notation C where\n  join -> G \8746 D"))
+      with @?= without
+    -- **The done-when of the phase.** @S-split@ is F-sub's type-substitution
+    -- lemma in miniature: its premise's index is two contexts joined, which is
+    -- what the paper writes and what no grammar could spell until now. The
+    -- refusal it replaces was measured on 2026-10-07:
+    -- @its premises `Γ , X <: T , Δ ⊢ T <: S` do not parse: unexpected 'Δ'@.
+  , testCase "a judgment rule writes it in an index position" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 (joiningWith "notation C where\n  join -> G \8746 D")
+      case loadProofSource s1
+             (unlines
+                [ "module Split where"
+                , ""
+                , "judgment sub = G \8866 T <: S where"
+                , "  S-refl:"
+                , "    ----------"
+                , "    G \8866 T <: T"
+                , ""
+                , "  S-split:"
+                , "    G \8746 D \8866 T <: S"
+                , "    -----------------"
+                , "    G \8866 T <: S"
+                ]) of
+        (_, ProofLoaded _ names _ _) -> names @?= ["sub"]
+        (s2, other) -> assertFailure (unlines (renderResponse s2 other))
+  ]
+
+-- ---------------------------------------------------------------------------
+
 -- | **Which classes a grammar reaches** (MS8 phase 154, `~5k3mg`): the classes
 -- its own roles name, and everything the grammars in its slots reach. The
 -- generator of phase 155 indexes a substitution by this set, so what is pinned
@@ -380,9 +503,9 @@ cyclic = [one "A" "u" "B", one "B" "v" "A"]
     one l cls other =
       Grammar LanguageBlock (GlobalName l) [l, l ++ "'"]
         [ GProduction (GlobalName (l ++ "var")) [Slot cls (klass cls) []]
-            [Argument cls (klass cls) (Occurrence (GlobalName cls))]
+            [Argument cls (klass cls) (Occurrence (GlobalName cls))] Constructor
         , GProduction (GlobalName (l ++ "in")) [Slot other (OfLanguage (GlobalName other)) []]
-            [Argument other (OfLanguage (GlobalName other)) Plain]
+            [Argument other (OfLanguage (GlobalName other)) Plain] Constructor
         ]
     klass cls = OfClass (GlobalName cls) (GlobalName "String") (regex "[a-z]+")
 
@@ -442,6 +565,35 @@ refused =
     , GrammarError LanguageBlock "L" (InProduction "f" (ReservedClass "any"))
     )
   ]
+    -- §4.8's own refusals (MS8 phase 158, `~hwxrx`). All but the first two are
+    -- about one production, and they are the checks a function production needs
+    -- that a constructor production does not: a definition of that name exists
+    -- and takes exactly what the notation's slots hand it.
+    ++ [ notationBlock "a block naming no installed grammar"
+           "Nope" "notation Nope where\n  join -> G \8746 D" NoSuchGrammar
+       , notationBlock "a block declaring a metavariable of its own"
+           "C" "notation C, Z where\n  join -> G \8746 D" (NotationMetavars ["Z"])
+       , inNotation "a production naming nothing declared"
+           "notation C where\n  nosuch -> G \8746 D" "nosuch" NotADeclaredFunction
+         -- The check spans every installed grammar, not this one: a production
+         -- name is unique across all of them, which 'productionBody' relies on.
+       , inNotation "a production naming another grammar's constructor"
+           "notation C where\n  base -> G \8746 D" "base" FunctionHasNotation
+       , inNotation "a production naming one the grammar already has"
+           "notation C where\n  ext -> G \8746 D" "ext" FunctionHasNotation
+       , inNotation "more slots than the function takes"
+           "notation C where\n  join -> G \8746 D \8746 C" "join" (FunctionArity 2 3)
+       , inNotation "a slot at a sort the function does not take there"
+           "notation C where\n  join -> G \8746 T" "join"
+           (FunctionSlot "T" (GlobalName "C") (GlobalName "Ty"))
+       , inNotation "a function that does not return the grammar's datatype"
+           "dom : C -> C -> Ty\ndom = \\ a b -> base\n\nnotation C where\n  dom -> G \8746 D"
+           "dom" (FunctionResult (GlobalName "Ty"))
+       , inNotation "a production writing a binding form"
+           "notation C where\n  join -> G \8746 D[x]" "join" (FunctionBinds "D")
+       , inNotation "a production with metadata"
+           "notation C where\n  join : x as occurrence -> G \8746 D" "join" FunctionMetadata
+       ]
     -- **A built-in tag may not name a language** (moved here from MS5's
     -- grammars at phase 106). A rule base reads an installed grammar's tag
     -- first, so @language core@ took every later @core`…`@ for its own. It walks
@@ -457,6 +609,12 @@ refused =
     block title body problem = ((title, wrap body), GrammarError LanguageBlock (nameOf body) problem)
     contextBlock title body problem = ((title, wrap body), GrammarError ContextBlock "C" problem)
     nameOf body = takeWhile (`notElem` ", ") (drop (length "language ") body)
+    -- MS8 phase 158. The block goes after 'joining', which declares the context
+    -- @C@ and the function @join@ over it; a case that needs another definition
+    -- writes it in @body@ above its own block.
+    notationBlock title g body problem =
+      ((title, joiningWith body), GrammarError NotationBlock g problem)
+    inNotation title body p why = notationBlock title "C" body (InProduction p why)
 
 refusals :: [TestTree]
 refusals =
