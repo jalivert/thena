@@ -278,10 +278,16 @@ premises =
 
 substitution :: [TestTree]
 substitution =
-  [ testCase "E[x->N] is LC-subst-x" $ do
+  [ -- **The elaborated constructor is unchanged by MS8 phase 159 and the
+    -- PRINTING is not.** @E[x->N]@ still elaborates to @LC-subst-x E x N@, with
+    -- the same implicit quantification in the same order; what moved is that the
+    -- bracket form is now a generated @notation@ production of @LC@ (§4.8), so
+    -- the printer spells the stuck application instead of splicing it. Before
+    -- 159 the tail of this line read @${LC-subst-x E x N}@.
+    testCase "E[x->N] is LC-subst-x" $ do
       s <- loaded (header ++ valueAndStep)
       said s ":show step" !! 1
-        @?= "  { E-beta : ∀ (N : LC) (x : String) (T : Ty) (E : LC) -> value`${N} value` -> step`( ( λ ${x} : ${T} . ${E} ) ${N} ) --> ${LC-subst-x E x N}`"
+        @?= "  { E-beta : ∀ (N : LC) (x : String) (T : Ty) (E : LC) -> value`${N} value` -> step`( ( λ ${x} : ${T} . ${E} ) ${N} ) --> ${E} [ ${x} -> ${N} ]`"
   , testCase "a list is simultaneous, LC-subst-all, and chained brackets are sequential" $ do
       s <- loaded (header ++
         [ "judgment sub = M ~> N where", ""
@@ -289,7 +295,10 @@ substitution =
         , "      M ~> E[x->M, x'->N][x1->N']", "" ])
       said s ":show sub" @?=
         [ "data sub : LC -> LC -> Type₀ where"
-        , "  { S : ∀ (M : LC) (E : LC) (x : String) (x' : String) (N : LC) (x1 : String) (N' : LC) -> sub`${M} ~> ${LC-subst-x (LC-subst-all {0 0 0} E (cons {0} (And {0 0} String LC) (both {0 0} String LC x M) (cons {0} (And {0 0} String LC) (both {0 0} String LC x' N) (nil {0} (And {0 0} String LC))))) x1 N'}` }" ]
+          -- The outer bracket prints in the notation; the inner @L-subst-all@
+          -- is spliced, because a comma list stays rule-level sugar (§6.3) and
+          -- has no production to print back as.
+        , "  { S : ∀ (M : LC) (E : LC) (x : String) (x' : String) (N : LC) (x1 : String) (N' : LC) -> sub`${M} ~> ${LC-subst-all {0 0 0} E (cons {0} (And {0 0} String LC) (both {0 0} String LC x M) (cons {0} (And {0 0} String LC) (both {0 0} String LC x' N) (nil {0} (And {0 0} String LC))))} [ ${x1} -> ${N'} ]` }" ]
     -- §6.3's CHECK: the left of -> is a binder-sorted name.
   , refusal "the left of -> is not a name"
       ["judgment sub = M ~> N where", "", "  S:  ---", "      M ~> E[M->N]", ""]
@@ -358,7 +367,9 @@ refused =
       "refused: in the judgment bad, rule B: p is not a metavariable"
   , refusal "a conclusion of another judgment"
       (valueAndStep ++ ["judgment bad = M bad where", "", "  B:  ---", "      M value", ""])
-      "refused: in the judgment bad, rule B: its conclusion `M value` is not a bad judgment: unexpected 'v' at character 3, expecting bad or ["
+      -- The order of the two is the order of the rules in the grammar, and MS8
+      -- phase 159 moved the bracket into the @LC@ grammar's own productions.
+      "refused: in the judgment bad, rule B: its conclusion `M value` is not a bad judgment: unexpected 'v' at character 3, expecting [ or bad"
     -- M is a metavariable, so it is not reported as one that is not: the
     -- conclusion simply does not start the way a typing judgment does.
   , refusal "a conclusion that starts with a metavariable in the wrong place"

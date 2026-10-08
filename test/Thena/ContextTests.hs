@@ -161,6 +161,12 @@ substituted =
     -- type-substitution lemma is stated @Γ, [X↦P]Δ ⊢ …@, and §6.3's notation
     -- now reaches a context because the generator's rule for one is the same as
     -- for a language.
+    --
+    -- **It PRINTS back in the notation since MS8 phase 159**, which is the
+    -- visible half of the demotion: the bracket form is a production of the
+    -- @Ctx@ grammar now, so the printer uses it exactly as it uses @Γ , x : T@.
+    -- Before 159 this line read @${Ctx-subst-X Γ X T}@ — the function applied,
+    -- spliced, because nothing could spell it.
   , testCase "a rule may substitute through a context in its own notation" $ do
       s <- loaded (fsubHeader ++
         [ "judgment sub = \915 \8866 T <: S where", ""
@@ -171,7 +177,8 @@ substituted =
         , "            \915 \8866 S <: S'" ])
       said s ":infer S-narrow" @?=
         [ "S-narrow : \8704 (\915 : Ctx) (X : String) (T : Ty) (S : Ty) (S' : Ty)"
-            ++ " -> sub`${Ctx-subst-X \915 X T} \8866 ${S} <: ${S'}` -> sub`${\915} \8866 ${S} <: ${S'}`" ]
+            ++ " -> sub`${\915} [ ${X} -> ${T} ] \8866 ${S} <: ${S'}`"
+            ++ " -> sub`${\915} \8866 ${S} <: ${S'}`" ]
     -- **A context whose entries can hold no name gets nothing**, which is
     -- STLC's: its @Ty@ has no variable production, so there is nothing in a Γ
     -- to substitute for.

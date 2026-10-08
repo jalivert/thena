@@ -248,7 +248,10 @@ meaning =
       gs <- installed stlc
       case [ g | g <- gs, grammarName g == GlobalName "LC" ] of
         [g] ->
-          map (\p -> (gproductionName p, gproductionArguments p)) (grammarProductions g)
+          -- **The datatype's constructors, so `constructorProductions`** — since
+          -- MS8 phase 159 the grammar also carries the generated @E[x -> N]@
+          -- notation, which is a function production and asserted below.
+          map (\p -> (gproductionName p, gproductionArguments p)) (constructorProductions g)
             @?= [ (GlobalName "var", [Argument "x" str (Occurrence (GlobalName "x"))])
                 , (GlobalName "abs", [ Argument "x" str (Binder (GlobalName "x"))
                                      , Argument "T" (lang "Ty") Plain
@@ -261,6 +264,34 @@ meaning =
                                          , Argument "N" (lang "LC") Plain ])
                 ]
         other -> assertFailure (show (length other) ++ " grammars called LC")
+    -- **The notation generated substitution declares** (MS8 phase 159, §6.3,
+    -- `~hwxrx`): the bracket form is no longer a privilege of the rule parser
+    -- but a function production of the grammar, written as @E[x -> N]@ would be
+    -- written by hand. **The slot names are metavariables in scope**, the
+    -- grammar's own for the term and the class's owner's for the replacement,
+    -- and they are distinct because two slots of one name are one non-linear
+    -- argument. @LC@ owns its own class, so the replacement takes @LC@'s next
+    -- metavariable rather than repeating @M@.
+  , testCase "generated substitution declares its own notation" $ do
+      gs <- installed stlc
+      case [ g | g <- gs, grammarName g == GlobalName "LC" ] of
+        [g] -> do
+          [ (gproductionName p, gproductionItems p)
+            | p <- grammarProductions g, gproductionKind p == Function ]
+            @?= [ ( GlobalName "LC-subst-x"
+                  , [ Slot "M" (lang "LC") []
+                    , Terminal "["
+                    , Slot "x" str []
+                    , Terminal "->"
+                    , Slot "N" (lang "LC") []
+                    , Terminal "]" ] ) ]
+          -- Nothing of it reaches the datatype: §4.8's whole mechanism.
+          map gproductionName (constructorProductions g)
+            @?= map GlobalName ["var", "abs", "app", "repeat", "vacuous"]
+        other -> assertFailure (show (length other) ++ " grammars called LC")
+    -- **A context gets one too**, and `ContextTests` is where it is asserted:
+    -- it needs a context that /reaches/ a class, which this fixture's @Ctx@ does
+    -- not — its @Ty@ reads no occurrence, so nothing in it is ever substituted.
     -- **Two classes in one grammar** (MS8 phase 153, `~tmnrr` and `~5k3mg`).
     -- The whole of what this phase adds is that the two binders are recorded at
     -- the two different classes rather than both saying only "binder" — so a
@@ -270,7 +301,7 @@ meaning =
       case [ g | g <- gs, grammarName g == GlobalName "L" ] of
         [g] ->
           [ (gproductionName p, map argumentRole (gproductionArguments p))
-          | p <- grammarProductions g ]
+          | p <- constructorProductions g ]
             @?= [ (GlobalName "var", [Occurrence (GlobalName "x")])
                 , (GlobalName "abs", [Binder (GlobalName "x"), Scope [0]])
                 , (GlobalName "big", [Binder (GlobalName "X"), Scope [0]])

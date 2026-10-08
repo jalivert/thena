@@ -327,6 +327,19 @@ elaborates to `append Γ Δ` — which is what lets a rule write the paper's
   prints ``sub`${Γ} ∪ ${Δ} ⊢ ${T} <: ${S}` ``; a closed context reduces to its
   constructors and prints as a context.
 
+**The substitution notation is one of these.** `E[x -> M]` is a `notation` block
+the generator writes for you, beside the substitution functions themselves:
+
+```
+notation LC where
+  LC-subst-x -> M [ x -> N ]
+```
+
+So it is an ordinary production — it works in a term literal, not only in a rule,
+and a stuck substitution prints in it. **The comma list `E[x -> M, y -> N]` is
+not**: simultaneous substitution takes a list per class, which no grammar spells,
+so that form stays sugar inside a rule.
+
 ## 7. Splices: holes in a written core term
 
 A written core term may have holes, filled from `instral` bindings when the

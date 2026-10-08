@@ -54,6 +54,7 @@
 -- which branch, so no proof over an open name could get past it.
 module Thena.Language.Substitution
   ( substitutionDefinitions
+  , substitutionNotations
   ) where
 
 import qualified Data.List.NonEmpty as NE
@@ -74,7 +75,9 @@ import Thena.Language.Grammar
   , variableProductions
   , variableRegex
   )
+import Thena.Language.Reader (Block (..), Production (..), RawItem (..))
 import Thena.Language.Regex (primingChar)
+import Thena.Syntax.Lexer (BlockKind (..))
 import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..))
 
 -- | The definitions, as name, type and body, in the order they are declared —
@@ -366,6 +369,70 @@ binderAt args i = case drop i args of
 
 nameOf :: GlobalName -> String
 nameOf (GlobalName n) = n
+
+-- | The @notation@ block generated substitution declares — @E[x -> M]@, one
+-- production per class the grammar has substitution for (§6.3, §4.8; MS8 phase
+-- 159, `~hwxrx`). Empty for a grammar that has none.
+--
+-- **This is the demotion of the one privileged notation to an instance of the
+-- ordinary one.** Until phase 159 the bracket form was Earley rules that
+-- "Thena.Language.Judgment" added to a /rule's/ grammar and a special case in
+-- the elaborator that recognised them by node name. Now it is what any
+-- user-declared spelling is: a production of the grammar whose name is a
+-- declared function, so the parser, the builder and the printer need to know
+-- nothing about it. **His ruling, 2026-10-07**: `Γ[X -> T]` is proof the
+-- mechanism exists and is granted to exactly one function as a privilege, and
+-- `~hwxrx` demotes it.
+--
+-- **The user declares nothing and no spelling changes.** The block is generated
+-- as a surface item, like the definitions above, and runs through the same
+-- 'Thena.Language.Grammar.checkNotation' a written one does — which is also what
+-- checks that each function's type really takes what its slots hold. **So it is
+-- spliced AFTER the definitions**: the check needs the function declared.
+--
+-- **The names of the slots are metavariables already in scope** — the grammar's
+-- own for the term being substituted into, the class's for the name, and the
+-- /owning/ language's for what replaces it, since the right of @->@ is a term of
+-- the class's owner (§6.3). They must be distinct, because two slots of one name
+-- are one non-linear argument (§4.3) and the two readings would have to be equal;
+-- a language that owns its own class takes its next metavariable rather than
+-- repeating one.
+--
+-- **Only the one-pair form.** @E[x -> M, y -> N]@ is simultaneous substitution and
+-- builds a /list/ per class, which no object grammar spells, so it stays what it
+-- was: sugar in a rule's own grammar, elaborating to @L-subst-all@. The split is
+-- principled rather than arbitrary — the one-pair form /is/ a function applied to
+-- what its slots hold, which is exactly what a notation production is, and the
+-- list form constructs an argument instead.
+substitutionNotations :: [Grammar] -> Grammar -> [Block]
+substitutionNotations gs g
+  | null prods = []
+  | otherwise  = [Block NotationBlock lang [] prods []]
+  where
+    GlobalName lang = grammarName g
+    prods =
+      [ Production 0 (substOf lang k) Nothing
+          (map Word [target k, "[", k, "->", replacement k, "]"])
+      | GlobalName k <- classesSubstituted gs g
+      ]
+
+    -- A metavariable of the grammar, its own name last: a block's head is its
+    -- name and then its metavariables, and the name is a metavariable too.
+    metavarsOf h = drop 1 (grammarMetavars h) ++ [ n | let GlobalName n = grammarName h ]
+    owner k = fromMaybe g (classOwner gs g (GlobalName k))
+
+    -- The class's name cannot collide with a metavariable — @MetavariableTaken@
+    -- refuses a metavariable that is a token class — so only the two language
+    -- slots can, and they do whenever a language owns the class it reads.
+    target k = unused [k] (metavarsOf g)
+    replacement k = unused [k, target k] (metavarsOf (owner k))
+    unused used cands = case [ c | c <- cands, c `notElem` used ] of
+      c : _ -> c
+      -- Unreachable: @metavarsOf@ always ends with the grammar's own name, and
+      -- priming it is what a collision would take.
+      []    -> primed used (fromMaybe "M" (listToMaybe cands))
+    primed used x | x `elem` used = primed used (x ++ "'")
+                  | otherwise = x
 
 freshOf, fvOf, substOf :: String -> String -> String
 freshOf l k = l ++ "-fresh-" ++ k

@@ -206,8 +206,9 @@ mentions :: [Grammar] -> Tree -> Either BuildError [(String, String)]
 mentions gs t = case t of
   Node n [Token x] | [MetavariableOf l] <- special n -> Right [(x, l)]
   Node n [e, s] | [SubstituteIn _] <- special n -> (++) <$> mentions gs e <*> mentions gs s
-  Node n (Token x : rest) | [PairIn _ cls] <- special n ->
-    ((x, classType gs cls) :) . concat <$> traverse (mentions gs) rest
+  Node n [a, b] | [PairsIn _] <- special n -> (++) <$> mentions gs a <*> mentions gs b
+  Node n [Token x, m] | [PairIn _ cls] <- special n ->
+    ((x, classType gs cls) :) <$> mentions gs m
   Node n children -> case production gs n of
     Nothing -> Left (NoSuchProduction n)
     Just p -> do
@@ -223,17 +224,17 @@ mentions gs t = case t of
 term :: [Grammar] -> (String -> String) -> Tree -> Either BuildError Surface
 term gs rename t = case t of
   Node n [Token x] | [MetavariableOf _] <- special n -> Right (SurfaceName (rename x))
+  -- §6.3: a comma list is @L-subst-all@ — simultaneous, and across classes, so
+  -- each class's map takes the pairs written at it and the rest are empty (MS8
+  -- phase 155). **A single pair never reaches here since MS8 phase 159**: it is
+  -- a generated @notation@ production, so it is an ordinary 'Node' and the
+  -- clause below builds @L-subst-‹k›@ applied without knowing anything about it.
   Node n [e, s] | [SubstituteIn l] <- special n -> do
     e' <- go e
     ps <- pairs s
-    Right $ case ps of
-      -- §6.3: one pair is @L-subst-‹k›@, several @L-subst-all@ — simultaneous,
-      -- and across classes, so each class's map takes the pairs written at it
-      -- and the rest are empty (MS8 phase 155).
-      [(cls, x, m)] -> app (SurfaceName (l ++ "-subst-" ++ cls)) [e', x, m]
-      _ -> app (SurfaceName (l ++ "-subst-all"))
+    Right (app (SurfaceName (l ++ "-subst-all"))
              (e' : [ foldr (cons l c) (nil l c) [ (x, m) | (c', x, m) <- ps, c' == c ]
-                   | h <- grammarNamed gs l, c <- substitutedClasses gs h ])
+                   | h <- grammarNamed gs l, c <- substitutedClasses gs h ]))
   Node n children -> case production gs n of
     Nothing -> Left (NoSuchProduction n)
     Just p -> do
@@ -246,10 +247,9 @@ term gs rename t = case t of
       (OfClass {}, Token x) -> Right (SurfaceName (rename x))
       _ -> go child
     pairs s = case s of
+      Node n [a, b] | [PairsIn _] <- special n -> (++) <$> pairs a <*> pairs b
       Node n [Token x, m] | [PairIn _ cls] <- special n ->
         (\m' -> [(cls, SurfaceName (rename x), m')]) <$> go m
-      Node n [Token x, m, more] | [PairIn _ cls] <- special n ->
-        (\m' rest -> (cls, SurfaceName (rename x), m') : rest) <$> go m <*> pairs more
       _ -> Left (NotForSlot "" (show s))
     pairType l c = app (SurfaceName "And") [SurfaceName (classType gs c), SurfaceName (ownerOf gs l c)]
     cons l c (x, m) rest =
@@ -294,6 +294,17 @@ ruleGrammar gs =
             : case substitutedClasses gs g of
                 [] -> []
                 cs ->
+                  -- **TWO OR MORE PAIRS, and that is the whole of what MS8 phase
+                  -- 159 left here.** The one-pair form @E[x -> M]@ is now a
+                  -- generated @notation@ production of the grammar itself
+                  -- ('Thena.Language.Substitution.substitutionNotations'), so it
+                  -- arrives through 'earleyRules' like any other production — and
+                  -- a rule for it here as well would make @E[x -> M]@ parse two
+                  -- ways, which is how this was found. What a notation production
+                  -- cannot be is **variadic**: a comma list is simultaneous
+                  -- substitution and builds a /list/ per class, which no object
+                  -- grammar spells.
+                  --
                   -- **One pair rule per class — MS8 phase 155.** A pair's
                   -- right-hand side is a term of the class's /owning/ language,
                   -- not of the one being substituted into: a type substituted
@@ -301,16 +312,18 @@ ruleGrammar gs =
                   -- substitution may mix classes, so they share the nonterminal.
                   Earley.Rule ("substitute " ++ l) l
                     [Earley.Nonterminal l, Earley.Literal "[", Earley.Nonterminal (pairsNT l), Earley.Literal "]"] []
-                    : concat
-                        [ [ Earley.Rule ("pair " ++ l ++ " " ++ x) (pairsNT l) pair []
-                          , Earley.Rule ("pair " ++ l ++ " " ++ x) (pairsNT l)
-                              (pair ++ [Earley.Literal ",", Earley.Nonterminal (pairsNT l)]) []
-                          ]
-                        | x <- cs
-                        , let pair = [ Earley.Scan x (metavariables [x])
-                                     , Earley.Literal "->"
-                                     , Earley.Nonterminal (ownerOf gs l x) ]
-                        ]
+                    -- Exactly two, then three or more: @pairsNT@ is never one
+                    -- pair, which is what keeps the two forms apart.
+                    : Earley.Rule ("pairs " ++ l) (pairsNT l)
+                        [Earley.Nonterminal (pairNT l), Earley.Literal ",", Earley.Nonterminal (pairNT l)] []
+                    : Earley.Rule ("pairs " ++ l) (pairsNT l)
+                        [Earley.Nonterminal (pairNT l), Earley.Literal ",", Earley.Nonterminal (pairsNT l)] []
+                    : [ Earley.Rule ("pair " ++ l ++ " " ++ x) (pairNT l)
+                          [ Earley.Scan x (metavariables [x])
+                          , Earley.Literal "->"
+                          , Earley.Nonterminal (ownerOf gs l x) ] []
+                      | x <- cs
+                      ]
 
     -- A premise name is anything up to a space, a colon or a bracket.
     premiseName = let c = oneOf (complement (fromRanges ([ (d, d) | d <- ":()[]{}," ] ++ spaces)))
@@ -324,16 +337,26 @@ judgmentNT = "a judgment"
 premiseNT = "a premise"
 premisesNT = "the premises"
 
-pairsNT :: String -> String
+-- | The comma list of pairs, two or more of them, and one pair (MS8 phase 159).
+-- Each has a space in its name, which no language, context or judgment can.
+pairsNT, pairNT :: String -> String
 pairsNT l = "substitution in " ++ l
+pairNT l = "a substitution in " ++ l
 
 -- | What a rule-only node of a reading is: its rule's name, read back.
-data Special = MetavariableOf String | SubstituteIn String | PairIn String String
+data Special
+  = MetavariableOf String
+  | SubstituteIn String
+  | PairsIn String
+  | PairIn String String
 
 special :: String -> [Special]
 special n = case words n of
   ["metavariable", l] -> [MetavariableOf l]
   ["substitute", l] -> [SubstituteIn l]
+  -- The node a comma list builds (MS8 phase 159), which always holds two
+  -- children: a pair, then a pair or another list.
+  ["pairs", l] -> [PairsIn l]
   -- The class is in the rule's name because that is what says which map the
   -- pair belongs in (MS8 phase 155).
   ["pair", l, x] -> [PairIn l x]

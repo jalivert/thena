@@ -72,7 +72,7 @@ import Thena.Core.Reduce (PrimitiveRule (..), primitiveNames, whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), fresh, open, substLevelsIn, tokenName)
 import Thena.Language.Judgment (judgmentDatatype)
 import Thena.Language.Lookup (lookupDatatypes, lookupGrammars)
-import Thena.Language.Substitution (substitutionDefinitions)
+import Thena.Language.Substitution (substitutionDefinitions, substitutionNotations)
 import Thena.Language.Regex
   ( Inclusion (..)
   , Regex (..)
@@ -3149,8 +3149,16 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
           -- **Then its substitution** (MS6 phase 105, §4.7): four ordinary
           -- definitions, elaborated by the same instructions a written one is,
           -- right after the datatype they are about.
+          -- **Then its notation** (MS8 phase 159, §6.3, `~hwxrx`): a @notation@
+          -- block for @E[x -> M]@, one production per class, **spliced after the
+          -- definitions because the check needs the function declared**. It is
+          -- generated as a surface item and runs through the same
+          -- 'Thena.Language.Grammar.checkNotation' a written block does, so the
+          -- one notation the system used to privilege is now an instance of the
+          -- one a user declares.
           (fs, n2) = surfaceProgram n1
-                       [ ItemTheorem x ty body | (x, ty, body) <- substitutionDefinitions (g : grammars m) g ]
+                       ([ ItemTheorem x ty body | (x, ty, body) <- substitutionDefinitions (g : grammars m) g ]
+                          ++ map ItemGrammar (substitutionNotations (g : grammars m) g))
           -- **A context's lookup relation, and its notation** (MS6 phase 107,
           -- §5.3): a datatype like any other, and a grammar installed beside the
           -- context's, so that @x : T ∈ Γ@ is read, built and printed the way

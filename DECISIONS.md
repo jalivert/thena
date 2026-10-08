@@ -753,6 +753,27 @@ modelling framework. Precedence is not part of it: `Γ , X <: Q ∪ Δ` parses
 uniquely because the competing reading needs `Q ∪ Δ` to be a type, while
 `Γ ∪ Δ ∪ Γ'` is ambiguous and is reported when the term is parsed.
 
+**And the substitution notation is now one of these rather than a privilege.**
+`E[x -> M]` was the one spelling the system hard-wired: rules the rule parser
+added for itself, and a special case in the elaborator that recognised them.
+Generated substitution now writes the block a user would have written —
+
+```
+notation LC where
+  LC-subst-x -> M [ x -> N ]
+```
+
+— as a surface item, checked the same way. Two things follow and both are gains.
+It **parses outside a rule**, so `` LC`x[x -> y]` `` is an ordinary term literal
+where it used to be a parse error; and it **prints back**, so a rule whose index
+substitutes reads ``sub`${Γ} [ ${X} -> ${T} ] ⊢ …` `` instead of splicing
+`${Ctx-subst-X Γ X T}`.
+
+**The comma list stays sugar**, because `E[x -> M, y -> N]` builds a *list* per
+class and no object grammar spells a list. So the one-pair form is a production
+and the list form is not — which means the list form is still a rule's privilege
+and does not parse in a term literal.
+
 
 ### An object term is parsed by its grammar, and `:parse` shows how
 
