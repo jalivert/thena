@@ -688,6 +688,49 @@ It is checked when the module loads, and a binder that binds in nothing is a
 warning, not an error.
 
 
+### In a slot stands a nonterminal, and a slot is one word
+
+*Decided 2026-10-11.*
+
+A grammar in Thena looks like a notation for an inductive definition, and reading it
+that way is nearly right. It is right that a production corresponds to a
+constructor, that a slot corresponds to an argument, and that a reading elaborates
+to the head applied to what the slots hold. It is wrong about what a slot *is*, and
+that is where days go.
+
+```
+the datatype says      app : LC -> LC -> LC      arguments have TYPES
+the production says    app -> ( M N )            slots hold NONTERMINALS
+a use site says        ( y z )                   slots are filled with TERMS
+```
+
+**A slot is one word naming a nonterminal, and slots are filled with terms rather
+than types.** The one case where a term written at a slot is a type is the case where
+the nonterminal is a universe — an instance of the rule, not an exception to it.
+
+The consequence that matters in practice. Give a spelling to a function whose last
+argument is a derivation:
+
+```
+collapse : ∀ (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Ctx
+
+notation collapse -> ⟨ Γ , M , T by typing ⟩
+```
+
+The fourth slot is the single word `typing`. Writing the derivation's *type* there —
+`⟨ Γ , M , T by Γ ⊢ M : T ⟩` — is not merely hard to read, it is a different
+production: `Γ ⊢ M : T` is a reading, three slots and two pieces of text, so that
+spelling has three slots each written twice and no slot at all for the derivation.
+Agda's `syntax` declarations name one argument per slot and would write `by d`;
+Thena keeps one kind of word in a production instead, so the word is the one that
+names the nonterminal.
+
+So a grammar is **not** an inductive definition. It is a projection of one, and since
+the `notation` block it projects several declarations at once — a datatype's
+constructors, functions over that datatype, and type formers. The nonterminal of a
+`language` or a `context` is named after a type; a judgment's is named after a type
+*former*, and what it parses is a derivation.
+
 ### A `notation` block gives a function a spelling, so a rule can say what a paper says
 
 *Decided 2026-10-07, built 2026-10-08.*
