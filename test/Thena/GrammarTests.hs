@@ -26,6 +26,8 @@ import Thena.Core.Term (Core (..), GlobalName (..), Ident (..))
 import Thena.Driver
   ( Response (..)
   , RuleFileError (..)
+  , Session
+  , command
   , machineOf
   , Stop (..)
   , loadProofSource
@@ -92,6 +94,40 @@ lexing =
   ]
   where
     tokens lexer src = map (\(Located _ t) -> t) <$> lexer src
+
+-- | A judgment indexed by a judgment, declared by hand and then spelled — the
+-- shape `~wkv37` said a @judgment@ block cannot generate (MS8 phase 160).
+validSource :: String
+validSource =
+  unlines
+    [ "module V where", ""
+    , "x : Token String"
+    , "x = /[a-z]+/", ""
+    , "language Ty, T, S where"
+    , "  base  -> ι"
+    , "  arrow -> ( T -> S )", ""
+    , "language LC, M, N, E where"
+    , "  var : x as occurrence -> x"
+    , "  app                   -> ( M N )", ""
+    , "context Ctx, Γ where"
+    , "  empty  -> ·"
+    , "  extend -> Γ , x : T", ""
+    , "judgment typing = Γ ⊢ M : T where", ""
+    , "  T-var:  x : T ∈ Γ"
+    , "          -----------"
+    , "          Γ ⊢ x : T", ""
+    , "data Valid : ∀ (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Type₀ where"
+    , "  { validAny : ∀ (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Valid G M T d }", ""
+    , "notation Valid -> ⊢ Γ , M , T by typing valid where", ""
+    ]
+
+loadProofSession :: Session -> Either String Session
+loadProofSession s0 = case loadProofSource s0 validSource of
+  (s1, ProofLoaded {}) -> Right s1
+  (s1, other) -> Left (unlines (renderResponse s1 other))
+
+said :: Session -> String -> [String]
+said s line = let (s', r) = command s line in renderResponse s' r
 
 -- ---------------------------------------------------------------------------
 
@@ -407,7 +443,37 @@ joiningWith block = joining ++ "\n" ++ block ++ "\n"
 -- 'constructorProductions' does not see it.
 notating :: [TestTree]
 notating =
-  [ -- **A SUFFIXED WORD RESOLVES TO THE METAVARIABLE IT IS A SUFFIX OF** (MS8
+  [ -- **THE HEADER FORM GIVES A DECLARED NAME ITS OWN SPELLING, AND THE NAME
+    -- NEED NOT BE A GRAMMAR** (MS8 phase 160, `~hwxrx`, and it closes `~wkv37`).
+    -- This is the write-up's §4 Example 2, hand-written: a datatype declared in
+    -- Surface, then a @notation@ block whose header is its statement's spelling.
+    -- **The block installs a grammar where there was none**, and the type's own
+    -- name is its metavariable, which is what gives its slots their words.
+    --
+    -- **The fourth slot is the word @typing@ — a hole at @typing G M T@**, whose
+    -- indices come from the declaration by position, not from the spelling. A
+    -- judgment declares no metavariables, correctly, so this word resolves in a
+    -- @notation@ block and nowhere else; in a @language@ block it would have no
+    -- indices to be given and is `~8pk9r`.
+    testCase "the header spells a hand-written type former, indexed by a judgment" $ do
+      (s0, _) <- startingSession
+      case loadProofSession s0 of
+        Left e -> assertFailure e
+        Right s1 -> do
+          let gs = grammars (machineOf s1)
+          v <- case [ g | g <- gs, grammarName g == GlobalName "Valid" ] of
+                 [g] -> pure g
+                 other -> assertFailure (show (length other) ++ " grammars called Valid")
+          -- One production, the type former's own spelling, named after it.
+          map (\p -> (gproductionName p, gproductionKind p)) (grammarProductions v)
+            @?= [(GlobalName "Valid", TypeFormer)]
+          map argumentSort (concatMap gproductionArguments (grammarProductions v))
+            @?= map (OfLanguage . GlobalName) ["Ctx", "LC", "Ty", "typing"]
+          -- And the constructor's target prints in it: a judgment over a
+          -- judgment, spelled.
+          said s1 ":show Valid" !! 1
+            @?= "  { validAny : ∀ (G : Ctx) (M : LC) (T : Ty) (d : typing`${G} ⊢ ${M} : ${T}`) -> Valid`⊢ ${G} , ${M} , ${T} by ${d} valid` }"
+  , -- **A SUFFIXED WORD RESOLVES TO THE METAVARIABLE IT IS A SUFFIX OF** (MS8
     -- phase 160, HIS ruling of 2026-10-10). A type declared outside a block has
     -- no metavariables to alias, so its slots are its own name with subscripts
     -- — *"subscripts are enough"* — and the rule already existed for a rule's

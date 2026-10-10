@@ -123,6 +123,20 @@ readBlock kind line txt = case lines' of
         items <- readItems l0 notation
         rules <- traverse readRule =<< groupedLines rest
         Right (Block kind n [] [Production l0 n Nothing items] rules)
+    -- **A @notation@ block's header may carry the name's OWN spelling** (MS8
+    -- phase 160): @notation bound -> v ◂ A ◂ Δ where@. It is read exactly as a
+    -- judgment's header is, with @->@ in place of @=@, and becomes the
+    -- production named after the block — which is how 'Thena.Language.Grammar'
+    -- tells the type former's spelling from its constructors' and functions'.
+    -- **The split is layout and not semantics** (HIS request): a type's own
+    -- spelling does not belong in the list of its constructors.
+    --
+    -- The @->@ is the first word after the name, so a notation that contains
+    -- one of its own — @( T -> S )@ — reads as it should.
+    | kind == NotationBlock, Just (n, notation) <- headerNotation header -> do
+        items <- readItems l0 notation
+        prods <- traverse readProduction =<< grouped rest
+        Right (Block kind n [] (Production l0 n Nothing items : prods) [])
     | otherwise -> do
         names <- readHeader l0 header
         prods <- traverse readProduction =<< grouped rest
@@ -162,6 +176,17 @@ groupedLines ls = case [ (k, l) | (k, l) <- ls, not (all isSpace l) ] of
       | indent l > col, (k0, g) : acc' <- acc = go col ((k0, (k, l) : g) : acc') rest
       | otherwise = Left (IndentedLess k)
     indent = length . takeWhile isSpace
+
+-- | @bound -> v ◂ A ◂ Δ where@: the name and its own notation's words, or
+-- 'Nothing' when the header is the plain @notation ‹Grammar› where@ (MS8 phase
+-- 160). A header with @->@ and nothing after it is 'Nothing' too, so it is
+-- refused by the ordinary path as a malformed name rather than read as a
+-- spelling with no items.
+headerNotation :: String -> Maybe (String, [String])
+headerNotation txt = case words txt of
+  n : "->" : rest
+    | "where" : notation@(_ : _) <- reverse rest -> Just (n, reverse notation)
+  _ -> Nothing
 
 -- | @typing = Γ ⊢ M : T where@: the judgment's name and its notation's words.
 readJudgmentHeader :: Int -> String -> Either ReadError (String, [String])

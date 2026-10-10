@@ -61,7 +61,17 @@ import qualified Thena.Language.Earley as Earley
 import Thena.Language.Earley (placeholderChar)
 import Thena.Language.Regex (Regex, matches, parseRegex, primingChar)
 import Thena.Errors (BuildError, SyntaxError, Warning (..))
-import Thena.Global.Env (ArgRole (..), GlobalEnv, definitionBody, definitionType, isDeclared, lookupDefinition)
+import Thena.Core.Context (entryType)
+import Thena.Global.Env
+  ( ArgRole (..)
+  , GlobalEnv
+  , InductiveDefinition (..)
+  , definitionBody
+  , definitionType
+  , isDeclared
+  , lookupDefinition
+  , lookupInductive
+  )
 import Thena.Language.Reader (Block (..), Metadata (..), Production (..), RawItem (..), RawRule (..))
 import Thena.Syntax.Lexer (BlockKind (..))
 
@@ -562,19 +572,49 @@ checkNotation installed env b = do
   Right (Grammar NotationBlock (grammarName g) (grammarMetavars g) prods)
   where
     name = blockName b
+    -- **The header may name a grammar, or a datatype that has none** (MS8 phase
+    -- 160). A grammar is edited: the productions are a delta that
+    -- 'notationInto' appends. A datatype with no grammar gets one, and **its own
+    -- name is its metavariable** — which is what gives its slots their words,
+    -- @Lam@ and @Lam₁@, since a type declared outside a block has none to
+    -- declare (HIS ruling: subscripts are enough).
     named = case [ g | g <- installed, grammarName g == GlobalName name ] of
       g : _ -> Just g
-      []    -> Nothing
+      []    -> fresh
+    fresh = case lookupInductive (GlobalName name) env of
+      Just _  -> Just (Grammar NotationBlock (GlobalName name) [name] [])
+      Nothing -> Nothing
 
     refuse :: GrammarProblem -> Either GrammarError a
     refuse = Left . GrammarError NotationBlock name
 
-    -- Every installed grammar's metavariables, the named one's included — it is
-    -- in @installed@, so this is the same list 'checkGrammar' resolves against
-    -- with nothing of its own to add.
-    sortOf = sortIn env [ (m, grammarName g) | g <- installed, m <- grammarMetavars g ]
+    -- Every installed grammar's metavariables, the named one's included. When
+    -- the header names a datatype that has no grammar yet (MS8 phase 160) that
+    -- one is not in @installed@, so its own name is put in front — otherwise a
+    -- slot could not be written in the very block that is giving the type its
+    -- spelling.
+    -- **A GRAMMAR'S OWN NAME RESOLVES AS A SLOT WORD HERE, AND NOWHERE ELSE**
+    -- (MS8 phase 160). A judgment declares no metavariables and that is right —
+    -- *"a metavariable stands for an arbitrary value of one type, and an
+    -- arbitrary derivation has no one type"* — but in a @notation@ block the
+    -- slot's type comes from the /declaration being described/, which supplies
+    -- the indices positionally. So @typing@ names a hole at
+    -- @typing G M T@ here, while in a @language@ block the same word would have
+    -- no indices to be given and is `~8pk9r`.
+    sortOf = sortIn env
+      ( ownMetavars
+          ++ [ (m, grammarName g) | g <- installed, m <- grammarMetavars g ]
+          ++ [ (n, grammarName g) | g <- installed, let GlobalName n = grammarName g ] )
+    ownMetavars = case named of
+      Just g  -> [ (m, grammarName g) | m <- grammarMetavars g ]
+      Nothing -> []
 
     taken f = f `elem` concat [ map gproductionName (grammarProductions g) | g <- installed ]
+
+    -- **The production named after the block is the name's OWN spelling**, so it
+    -- is a 'TypeFormer' and what it has to match is the datatype's telescope
+    -- (MS8 phase 160). Everything else names a function, as §4.8 had it.
+    isHeader p = productionName p == name
 
     production g p = do
       items <- traverse item (productionItems p)
@@ -590,24 +630,40 @@ checkNotation installed env b = do
           args = [ Argument x srt Plain
                  | x <- nub (map fst slots), srt <- take 1 [ t | (y, t) <- slots, y == x ] ]
           f = GlobalName (productionName p)
-      if taken f then Left FunctionHasNotation else Right ()
-      (domains, result) <- maybe (Left NotADeclaredFunction) Right (functionShape env f)
+      -- **A type former's arity is its telescope**, parameters then indices, and
+      -- its result is a universe by construction — so there is nothing for the
+      -- §4.8 result check to say about it. A function's arity and result are
+      -- read off its type as before.
+      (domains, kind') <-
+        if isHeader p
+          then case lookupInductive f env of
+                 Just d  -> Right (map entryType (inductiveParameters d ++ inductiveIndices d), TypeFormer)
+                 Nothing -> Left NotADeclaredFunction
+          else do
+            if taken f then Left FunctionHasNotation else Right ()
+            (ds, result) <- maybe (Left NotADeclaredFunction) Right (functionShape env f)
+            if typeNamed env result == Just (grammarName g)
+              then Right ()
+              else Left (FunctionResult (whnf env [] result))
+            Right (ds, Function)
       if length domains == length args
         then Right ()
         else Left (FunctionArity (length domains) (length args))
       sequence_ [ slotIs a dom | (a, dom) <- zip args domains ]
-      if typeNamed env result == Just (grammarName g)
-        then Right ()
-        else Left (FunctionResult (whnf env [] result))
-      Right (GProduction f items args Function)
+      Right (GProduction f items args kind')
 
-    -- **The parameter has to be the slot's own type, named.** A function whose
+    -- **The parameter has to be at the slot's own type.** A function whose
     -- argument is anything else could not be handed what the notation reads
-    -- there, and one whose argument is a /dependent/ type is refused the same
-    -- way: the slots of a production are independent, so there is nothing for
-    -- a later type to depend on.
+    -- there.
+    --
+    -- **It is the HEAD that is compared since MS8 phase 160**, so an argument at
+    -- an /indexed/ type is accepted: @collapse@'s @d : typing G M T@ is a hole
+    -- at the @typing@ nonterminal, and which typing judgment it is comes from
+    -- the declaration rather than from the spelling. The indices are the type
+    -- checker's to verify, which is the trade §4.8's result check already makes.
+    -- A universe still answers 'Nothing' and is still refused.
     slotIs a dom
-      | typeNamed env dom == Just wanted = Right ()
+      | typeHead env dom == Just wanted = Right ()
       | otherwise = Left (FunctionSlot (argumentName a) (whnf env [] dom) wanted)
       where
         wanted = case argumentSort a of
@@ -635,6 +691,21 @@ typeNamed env t = case whnf env [] t of
   Global g []      -> Just g
   Canonical g _ [] -> Just g
   _                -> Nothing
+
+-- | **The datatype a type is built from, applied to anything or to nothing**
+-- (MS8 phase 160) — 'typeNamed' widened to the indexed case, and 'Nothing' for
+-- a universe, a function type or a variable.
+--
+-- A slot reads a nonterminal, and a nonterminal is named after a datatype rather
+-- than after one instance of it, so this is the question a slot's check asks: a
+-- hole at @typing G M T@ reads the @typing@ nonterminal, and whether the
+-- indices agree is for the type checker, which sees every use site. 'typeNamed'
+-- stays for the places that really do want the bare datatype.
+typeHead :: GlobalEnv -> Core -> Maybe GlobalName
+typeHead env t = case whnf env [] t of
+  Global g _      -> Just g
+  Canonical g _ _ -> Just g
+  _               -> Nothing
 
 -- | What a declared function takes, in order, and what it returns — 'Nothing'
 -- for a name that is not an ordinary definition at all (MS8 phase 158, §4.8).
@@ -666,7 +737,12 @@ functionShape env f = peel . definitionType <$> lookupDefinition f env
 -- constructor still comes first — which is what keeps 'constructorProductions'
 -- answering exactly what it answered before the block loaded.
 notationInto :: Grammar -> [Grammar] -> [Grammar]
-notationInto delta = map add
+notationInto delta gs
+  -- **A header naming a datatype that has no grammar installs one** (MS8 phase
+  -- 160): there is nothing to append to, so the delta /is/ the grammar. In front,
+  -- as a @language@ block's own is, so the most recent declaration is found first.
+  | grammarName delta `notElem` map grammarName gs = delta : gs
+  | otherwise = map add gs
   where
     add g
       | grammarName g == grammarName delta =
