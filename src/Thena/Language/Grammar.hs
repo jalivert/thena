@@ -277,12 +277,16 @@ data ProductionProblem
     -- a second spelling for one function would break that
   | FunctionArity Int Int
     -- ^ what the function takes, and how many slots the production has
-  | FunctionSlot String GlobalName GlobalName
-    -- ^ a slot, the type the function takes there, and the type the slot is
-  | FunctionResult GlobalName
+  | FunctionSlot String Core GlobalName
+    -- ^ a slot, the type the function takes there **as written**, and the type
+    -- the slot is. The first is a 'Core' and not a name because the whole point
+    -- of the refusal is that it may not be a datatype at all — a universe, a
+    -- function type, @List Ty@ — and a message has to show the author what their
+    -- own signature says
+  | FunctionResult Core
     -- ^ what the function returns, when it is not the grammar's datatype — the
     -- production stands where a term of the grammar stands, so nothing else
-    -- could be built from it
+    -- could be built from it. A 'Core' for the same reason as 'FunctionSlot' 
   | FunctionBinds String
     -- ^ a @notation@ production writing a binding form. A function's argument
     -- is a term it is handed, and nothing about an application binds
@@ -543,9 +547,9 @@ checkNotation installed env b = do
         then Right ()
         else Left (FunctionArity (length domains) (length args))
       sequence_ [ slotIs a dom | (a, dom) <- zip args domains ]
-      if typeNamed env result == grammarName g
+      if typeNamed env result == Just (grammarName g)
         then Right ()
-        else Left (FunctionResult (typeNamed env result))
+        else Left (FunctionResult (whnf env [] result))
       Right (GProduction f items args Function)
 
     -- **The parameter has to be the slot's own type, named.** A function whose
@@ -554,8 +558,8 @@ checkNotation installed env b = do
     -- way: the slots of a production are independent, so there is nothing for
     -- a later type to depend on.
     slotIs a dom
-      | typeNamed env dom == wanted = Right ()
-      | otherwise = Left (FunctionSlot (argumentName a) (typeNamed env dom) wanted)
+      | typeNamed env dom == Just wanted = Right ()
+      | otherwise = Left (FunctionSlot (argumentName a) (whnf env [] dom) wanted)
       where
         wanted = case argumentSort a of
           OfLanguage l  -> l
@@ -567,20 +571,21 @@ checkNotation installed env b = do
         Just srt -> reservedScan w srt >> Right (Slot w srt [])
       Binding hd _ -> Left (FunctionBinds hd)
 
--- | **The datatype a type is**, reduced — and @\<anonymous\>@ for anything that
--- is not one, which is as much as a refusal needs to say: that the type is not
--- the one the notation's slot wants.
+-- | **The datatype a type is**, reduced — and 'Nothing' for anything that is not
+-- one. The refusal shows the type itself rather than a stand-in name, so the
+-- caller keeps the 'Core' for its message.
 --
 -- A datatype whose wrapper is saturated reduces to a 'Canonical', a postulated
 -- one stays a 'Global', and a slot's sort is always one of those applied to
--- nothing — a language, a context or a class's @T@. So a parameterised type, a
+-- nothing — a language, a context or a class's @T@, every one of which is
+-- declared with no parameters and no indices. So a parameterised type, a
 -- universe, a function type and a type that depends on an earlier argument all
--- answer the same way and are all refused.
-typeNamed :: GlobalEnv -> Core -> GlobalName
+-- answer 'Nothing' and are all refused.
+typeNamed :: GlobalEnv -> Core -> Maybe GlobalName
 typeNamed env t = case whnf env [] t of
-  Global g []      -> g
-  Canonical g _ [] -> g
-  _                -> GlobalName "<anonymous>"
+  Global g []      -> Just g
+  Canonical g _ [] -> Just g
+  _                -> Nothing
 
 -- | What a declared function takes, in order, and what it returns — 'Nothing'
 -- for a name that is not an ordinary definition at all (MS8 phase 158, §4.8).

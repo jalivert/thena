@@ -651,7 +651,7 @@ solved: ?ℓ1319
 solved: ?ℓ1321
 already equal
 warning: no noConfusionext-in: ext-there-ext's argument 6 (ne) has a type that depends on an earlier argument, so its equation cannot be stated
-refused: in the notation for C, production join: join takes a C where T is a Ty
+refused: in the notation for C, production join: join takes C where T is a Ty
 -- a function that does not return the grammar's datatype
 chose 1011: elaborate
 already equal
@@ -723,7 +723,7 @@ solved: ?ℓ1349
 solved: ?ℓ1351
 already equal
 warning: no noConfusionext-in: ext-there-ext's argument 6 (ne) has a type that depends on an earlier argument, so its equation cannot be stated
-refused: in the notation for C, production dom: dom returns a Ty, not a C
+refused: in the notation for C, production dom: dom returns Ty, not a C
 -- a production writing a binding form
 chose 1010: elaborate
 already equal

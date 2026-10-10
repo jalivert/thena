@@ -1629,9 +1629,13 @@ renderDeclareError ren e = case e of
       FunctionArity takes slots ->
         p ++ " takes " ++ plural takes "argument" ++ " and the notation has "
           ++ plural slots "slot"
-      FunctionSlot x (GlobalName takes) (GlobalName is) ->
-        p ++ " takes a " ++ takes ++ " where " ++ x ++ " is a " ++ is
-      FunctionResult (GlobalName r) -> p ++ " returns a " ++ r ++ ", not a " ++ g
+      -- **The type as the author wrote it, reduced** (MS8 phase 160): it may not
+      -- be a datatype at all, and a stand-in name told them nothing they could
+      -- act on. @NotIn returns Type₀, not a Ctx@ says which of the two kinds of
+      -- thing they named.
+      FunctionSlot x takes (GlobalName is) ->
+        p ++ " takes " ++ renderCore ren [] takes ++ " where " ++ x ++ " is a " ++ is
+      FunctionResult r -> p ++ " returns " ++ renderCore ren [] r ++ ", not a " ++ g
       FunctionBinds x -> x ++ " is written as a binding form, and an application binds nothing"
       FunctionMetadata -> p ++ " is a function, so there is no constructor for the metadata to be about"
     -- MS6 phase 108, §6.2–6.4.

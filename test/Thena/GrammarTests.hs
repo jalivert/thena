@@ -22,7 +22,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Term (GlobalName (..), Ident (..))
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..))
 import Thena.Driver
   ( Response (..)
   , RuleFileError (..)
@@ -616,10 +616,10 @@ refused =
            "notation C where\n  join -> G \8746 D \8746 C" "join" (FunctionArity 2 3)
        , inNotation "a slot at a sort the function does not take there"
            "notation C where\n  join -> G \8746 T" "join"
-           (FunctionSlot "T" (GlobalName "C") (GlobalName "Ty"))
+           (FunctionSlot "T" (datatype "C") (GlobalName "Ty"))
        , inNotation "a function that does not return the grammar's datatype"
            "dom : C -> C -> Ty\ndom = \\ a b -> base\n\nnotation C where\n  dom -> G \8746 D"
-           "dom" (FunctionResult (GlobalName "Ty"))
+           "dom" (FunctionResult (datatype "Ty"))
        , inNotation "a production writing a binding form"
            "notation C where\n  join -> G \8746 D[x]" "join" (FunctionBinds "D")
        , inNotation "a production with metadata"
@@ -671,6 +671,12 @@ refusals =
         , IndentedLess 5
         ]
   ]
+
+-- | A generated datatype as a type: what a saturated former reduces to, which
+-- is what a §4.8 refusal carries so that its message can show the author the
+-- type their own signature says (MS8 phase 160).
+datatype :: String -> Core
+datatype n = Canonical (GlobalName n) [] []
 
 regex :: String -> Regex
 regex = either (error . show) id . parseRegex
