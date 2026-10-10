@@ -32,6 +32,8 @@ module Thena.Language.Grammar
   , checkNotation
   , notationInto
   , constructorProductions
+  , typeFormerProductions
+  , nameBases
   , builtInTags
   , substitutionNames
   , lookupNames
@@ -101,12 +103,23 @@ data GProduction = GProduction
 -- an ordinary definition by @elim Ctx@, and the notation is what was missing.
 data ProductionKind
   = Constructor
-    -- ^ a production of the @language@, @context@ or @judgment@ block itself
+    -- ^ its name is a constructor of the grammar's datatype, so a reading of it
+    -- is a /term/ of that datatype
+  | TypeFormer
+    -- ^ its name is the datatype itself, so a reading of it is a **type** — the
+    -- statement a judgment makes, @Γ ⊢ M : T@ (MS8 phase 160, `~8b8gz`).
+    -- **A reading at a universe is what may stand above a rule's bar**, and
+    -- 'Thena.Language.Judgment.typeNT' is the nonterminal that collects these;
+    -- nothing asks which kind of block declared the grammar.
+    --
+    -- A @judgment@ block's header production is one, and so is the statement of
+    -- a generated lookup relation ('Thena.Language.Lookup.notationOf'). **It is
+    -- not a constructor**, so 'constructorProductions' does not have it.
   | Function
-    -- ^ a production of a @notation@ block: its name is a declared function and
-    -- the reading elaborates to that function applied. **It contributes nothing
-    -- to what the block generates** — not a constructor, not a class, not an
-    -- extension — and the datatype is the one it was before
+    -- ^ its name is a declared function and the reading elaborates to that
+    -- function applied. **It contributes nothing to what the block generates** —
+    -- not a constructor, not a class, not an extension — and the datatype is the
+    -- one it was before
   deriving (Eq, Show)
 
 -- | An item, resolved.
@@ -417,7 +430,14 @@ checkGrammar installed env b = do
           arguments = [ Argument x srt (role x) | x <- args, srt <- take 1 [ t | Slot y t _ <- items, y == x ] ]
           vacuous = [ VacuousBinder kind name (productionName p) x
                     | Just xs <- [declared], x <- xs, x `notElem` bracketed ]
-      Right (GProduction (GlobalName (productionName p)) items arguments Constructor, vacuous)
+      -- **A judgment block's one production is its statement's spelling, and
+      -- that names the datatype rather than a constructor of it** (MS8 phase
+      -- 160) — its constructors are the rules. This is the /declaring/ site, so
+      -- asking the block what it is declaring is the question it exists to
+      -- answer; no position downstream asks it again.
+      let pkind | kind == JudgmentBlock = TypeFormer
+                | otherwise = Constructor
+      Right (GProduction (GlobalName (productionName p)) items arguments pkind, vacuous)
 
     item i = case i of
       Word w -> case sortOf w of
@@ -458,10 +478,39 @@ checkGrammar installed env b = do
 -- the same question — a @notation@ block's slots are the grammar's own
 -- metavariables and nothing about resolving one differs there.
 sortIn :: GlobalEnv -> [(String, GlobalName)] -> String -> Maybe Sort
-sortIn env metavars x
-  | Just g <- lookup x metavars = Just (OfLanguage g)
-  | Just (t, re) <- tokenClassOf env x = Just (OfClass (GlobalName x) t re)
-  | otherwise = Nothing
+sortIn env metavars x = case [ srt | b <- nameBases x, Just srt <- [exact b] ] of
+  srt : _ -> Just srt
+  []      -> Nothing
+  where
+    exact b
+      | Just g <- lookup b metavars = Just (OfLanguage g)
+      | Just (t, re) <- tokenClassOf env b = Just (OfClass (GlobalName b) t re)
+      | otherwise = Nothing
+
+-- | A word, then the same word with its suffixes taken off, longest first
+-- (MS8 phase 160).
+--
+-- **@LC₁@ resolves to @LC@, and that is what gives a hand-written type's
+-- repeated slots their words** — HIS ruling of 2026-10-10: a type declared
+-- outside a block has no metavariables to alias, so its slots are its own name
+-- with subscripts, and *"subscripts are enough"*. The suffix rule already
+-- existed for a /rule's/ text ('Thena.Language.Judgment.isMetavariable') and
+-- this is the same rule one layer down, so the two cannot disagree.
+--
+-- Every way of taking suffixes off is tried, so a metavariable whose own name
+-- ends in one is still found first: the exact word is always the first answer.
+-- **Measured before this was switched on**: across @examples\/@, @test\/@,
+-- @rules\/@, @prelude\/@ and the documents, no production item anywhere is a
+-- suffixed word, so nothing that was a terminal becomes a slot.
+nameBases :: String -> [String]
+nameBases x = x : case reverse x of
+  c : rest | suffix c -> nameBases (reverse rest)
+  _ -> case break (== '_') (reverse x) of
+    (after@(_ : _), '_' : before) | all alnum after -> nameBases (reverse before)
+    _ -> []
+  where
+    suffix c = c == '\'' || (c >= '0' && c <= '9') || (c >= '\8320' && c <= '\8329')
+    alnum c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 
 -- | **The placeholder's glyph is reserved — HIS RULING, 2026-09-28, MS7 phase
 -- 127.** A grammar that could write it or read it would make one glyph mean two
@@ -635,6 +684,18 @@ notationInto delta = map add
 -- ('Thena.Language.Substitution.substitutionDefinitions'), and §5.1's shape.
 -- 'grammarProductions' itself is for the parser and the printer, which is
 -- everything that is about /notation/.
+-- | **The productions whose name is the grammar's datatype itself** (MS8 phase
+-- 160, `~8b8gz`), so a reading of one is a /type/ rather than a term of one: a
+-- judgment's statement @Γ ⊢ M : T@, a generated lookup's @x : T ∈ Γ@.
+--
+-- **This is what may stand above a rule's bar**, because a premise is an
+-- argument's type. 'Thena.Language.Judgment.ruleGrammar' collects these into one
+-- nonterminal and the premise position reads it, which is what replaced asking
+-- which kind of block declared a grammar.
+typeFormerProductions :: Grammar -> [GProduction]
+typeFormerProductions g =
+  [ p | p <- grammarProductions g, gproductionKind p == TypeFormer ]
+
 constructorProductions :: Grammar -> [GProduction]
 constructorProductions g =
   [ p | p <- grammarProductions g, gproductionKind p == Constructor ]
@@ -860,8 +921,13 @@ grammarsReached gs g = walk [] [g]
     walk done (h : queue)
       | grammarName h `elem` map grammarName done = walk done queue
       | otherwise = walk (done ++ [h]) (queue ++ slotGrammars h)
+    -- **A type former's slots are reached too** (MS8 phase 160): a judgment's
+    -- statement @Γ ⊢ M : T@ is how that judgment reaches @Ctx@, @LC@ and @Ty@,
+    -- and its spelling is a 'TypeFormer' production rather than a constructor.
+    -- A 'Function' production's slots are deliberately not walked — phase 158's
+    -- decision, since a function is not part of what the grammar builds.
     slotGrammars h =
-      [ k | p <- constructorProductions h
+      [ k | p <- grammarProductions h, gproductionKind p /= Function
           , Slot _ (OfLanguage l) _ <- gproductionItems p
           , k <- gs, grammarName k == l ]
 

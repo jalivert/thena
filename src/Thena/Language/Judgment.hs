@@ -41,7 +41,8 @@ import Thena.Language.Earley (Piece (..), Start (..), Tree (..))
 import Thena.Language.Grammar
   ( Argument (..)
   , GProduction (..)
-  , constructorProductions
+  , typeFormerProductions
+  , nameBases
   , Grammar (..)
   , GrammarError (..)
   , GrammarProblem (..)
@@ -77,10 +78,12 @@ judgmentDatatype gs g rules = do
         , map snd ctors )
   where
     GlobalName name = grammarName g
-    -- **The judgment's own notation, which is its one constructor production**
-    -- — a @notation@ block may add a function production to a judgment's
-    -- grammar too, and that is notation and not an index (MS8 phase 158).
-    indices = concatMap gproductionArguments (constructorProductions g)
+    -- **The judgment's own notation, which is its one type-former production**
+    -- (MS8 phase 160) — the spelling of the statement this family makes, so its
+    -- slots are the family's indices. A @notation@ block may add a function
+    -- production to a judgment's grammar too, and that is notation and not an
+    -- index (MS8 phase 158); the rules are the constructors.
+    indices = concatMap gproductionArguments (typeFormerProductions g)
     typeOf = SurfaceName . sortType . argumentSort
 
 -- | One rule, as a constructor.
@@ -186,9 +189,13 @@ premisesOf t = case t of
   Node _ [p, rest] -> premise p : premisesOf rest
   _ -> []
   where
+    -- **The reading at @typeNT@ is kept, not unwrapped** (MS8 phase 160): it may
+    -- be a grammar's nonterminal, a grammar's own name read as a type, or a
+    -- universe, and only the first of those has a child to unwrap. 'term' and
+    -- 'mentions' take the three apart.
     premise p = case p of
-      Node _ [Token n, Node _ [j]] -> (Just n, j)
-      Node _ [Node _ [j]] -> (Nothing, j)
+      Node _ [Token n, j] -> (Just n, j)
+      Node _ [j] -> (Nothing, j)
       _ -> (Nothing, p)
 
 -- | The text of what looks like a name at a position — letters, digits,
@@ -205,6 +212,12 @@ terminals gs = [ t | g <- gs, p <- grammarProductions g, Terminal t <- gproducti
 mentions :: [Grammar] -> Tree -> Either BuildError [(String, String)]
 mentions gs t = case t of
   Node n [Token x] | [MetavariableOf l] <- special n -> Right [(x, l)]
+  -- **A type is not a metavariable** (phase 160): @LC@ or @𝕌₀@ written as a
+  -- premise is a type the rule's argument is at, so there is nothing to
+  -- quantify over and nothing to rename.
+  Node n [child] | [TypeWrapper] <- special n -> mentions gs child
+  Node n _ | [TypeNamed _] <- special n -> Right []
+           | [UniverseRead] <- special n -> Right []
   Node n [e, s] | [SubstituteIn _] <- special n -> (++) <$> mentions gs e <*> mentions gs s
   Node n [a, b] | [PairsIn _] <- special n -> (++) <$> mentions gs a <*> mentions gs b
   Node n [Token x, m] | [PairIn _ cls] <- special n ->
@@ -224,6 +237,12 @@ mentions gs t = case t of
 term :: [Grammar] -> (String -> String) -> Tree -> Either BuildError Surface
 term gs rename t = case t of
   Node n [Token x] | [MetavariableOf _] <- special n -> Right (SurfaceName (rename x))
+  -- **A reading at a universe** (phase 160). A grammar's own name is the type
+  -- that grammar's datatype is; @𝕌₀@ is @Type₀@. Neither is renamed — a type
+  -- is not a metavariable.
+  Node n [child] | [TypeWrapper] <- special n -> term gs rename child
+  Node n _ | [TypeNamed l] <- special n -> Right (SurfaceName l)
+  Node n [Token u] | [UniverseRead] <- special n -> Right (SurfaceUniverse (universeLevel u))
   -- §6.3: a comma list is @L-subst-all@ — simultaneous, and across classes, so
   -- each class's map takes the pairs written at it and the rest are empty (MS8
   -- phase 155). **A single pair never reaches here since MS8 phase 159**: it is
@@ -272,12 +291,31 @@ app f (a : as) = SurfaceApp f (NE.map (SurfaceArg Explicit) (a NE.:| as))
 ruleGrammar :: [Grammar] -> [Earley.Rule]
 ruleGrammar gs =
   map narrowed (earleyRules gs)
-    ++ concatMap own [ g | g <- gs, grammarKind g /= JudgmentBlock ]
-    ++ [ Earley.Rule "a judgment" judgmentNT [Earley.Nonterminal j] []
-       | g <- gs, grammarKind g == JudgmentBlock, let GlobalName j = grammarName g ]
-    ++ [ Earley.Rule "a premise" premiseNT [Earley.Nonterminal judgmentNT] []
+    ++ concatMap own [ g | g <- gs, not (null (grammarMetavars g)) ]
+    -- **A PREMISE IS AN ARGUMENT'S TYPE, SO THE PREMISE POSITION IS A SLOT AT A
+    -- UNIVERSE** (MS8 phase 160, `~8b8gz`, `~z8n28`). @typeNT@ is where every
+    -- reading at a universe is collected, and it has three kinds of rule:
+    --
+    --   * a grammar that has a 'TypeFormer' production — its statement, @Γ ⊢ M : T@
+    --     or a generated @x : T ∈ Γ@;
+    --   * **every installed grammar's own name**, which is the nullary case —
+    --     HIS, *"@LC@ is its own notation"* — so a rule may take a term of @LC@
+    --     as a premise, since a rule is a constructor and an argument may be at
+    --     any type;
+    --   * **a universe**, @𝕌₀@, @𝕌₁@, …, which is `Type₀` and so on spelled.
+    --
+    -- **What this replaced was a test on the kind of block that declared the
+    -- grammar**, which is the one question the design forbids: measured by
+    -- relabelling the generated lookup relation, after which @x : T ∈ Γ@ stopped
+    -- parsing above a bar although nothing about its type had changed.
+    ++ [ Earley.Rule "a type" typeNT [Earley.Nonterminal l] []
+       | g <- gs, not (null (typeFormerProductions g)), let GlobalName l = grammarName g ]
+    ++ [ Earley.Rule ("the type " ++ l) typeNT [Earley.Literal l] []
+       | g <- gs, let GlobalName l = grammarName g ]
+    ++ [ Earley.Rule "a universe" typeNT [Earley.Scan "a universe" universeRegex] []
+       , Earley.Rule "a premise" premiseNT [Earley.Nonterminal typeNT] []
        , Earley.Rule "a named premise" premiseNT
-           [Earley.Scan "a premise name" premiseName, Earley.Literal ":", Earley.Nonterminal judgmentNT] []
+           [Earley.Scan "a premise name" premiseName, Earley.Literal ":", Earley.Nonterminal typeNT] []
        , Earley.Rule "a premise" premisesNT [Earley.Nonterminal premiseNT] []
        , Earley.Rule "premises" premisesNT [Earley.Nonterminal premiseNT, Earley.Nonterminal premisesNT] []
        ]
@@ -332,10 +370,29 @@ ruleGrammar gs =
 
 -- | The nonterminals only a rule has. Each has a space in its name, which no
 -- language, context or judgment can.
-judgmentNT, premiseNT, premisesNT :: String
-judgmentNT = "a judgment"
+--
+-- @typeNT@ is **readings at a universe** (MS8 phase 160) and replaced
+-- @"a judgment"@, which was the set of grammars declared by a @judgment@ block.
+typeNT, premiseNT, premisesNT :: String
+typeNT = "a type"
 premiseNT = "a premise"
 premisesNT = "the premises"
+
+-- | @𝕌₀@, @𝕌₁@, … — the universes spelled (MS8 phase 160, HIS ruling of
+-- 2026-10-11). Zero-based, so @𝕌₀@ is @Type₀@.
+--
+-- **Without a word for a universe a slot at one cannot be written at all**, and
+-- the failure is silent: a word that means nothing is literal text, so the
+-- spelling loses a slot and the refusal is an arity mismatch (@HAZARDS.md@).
+universeRegex :: Regex
+universeRegex = andThen (oneOf (singleChar '𝕌')) (andThen digit (star digit))
+  where digit = oneOf (fromRanges [('\8320', '\8329')])
+
+-- | The level a universe's spelling names — @𝕌₁₀@ is 10, so the subscripts are
+-- read as decimal digits rather than one being assumed.
+universeLevel :: String -> Int
+universeLevel = foldl place 0 . filter (/= '𝕌')
+  where place n c = n * 10 + (fromEnum c - 0x2080)
 
 -- | The comma list of pairs, two or more of them, and one pair (MS8 phase 159).
 -- Each has a space in its name, which no language, context or judgment can.
@@ -349,11 +406,22 @@ data Special
   | SubstituteIn String
   | PairsIn String
   | PairIn String String
+  | TypeWrapper
+    -- ^ @typeNT@ over a grammar's nonterminal: one child, the reading (phase 160)
+  | TypeNamed String
+    -- ^ a grammar's own name read as a type — the nullary case, @LC@ (phase 160)
+  | UniverseRead
+    -- ^ @𝕌₀@, @𝕌₁@, … (phase 160)
 
 special :: String -> [Special]
 special n = case words n of
   ["metavariable", l] -> [MetavariableOf l]
   ["substitute", l] -> [SubstituteIn l]
+  -- Phase 160's two readings at a universe. Neither mentions a metavariable, so
+  -- neither adds anything to a rule's implicit quantification.
+  ["a", "type"] -> [TypeWrapper]
+  ["the", "type", l] -> [TypeNamed l]
+  ["a", "universe"] -> [UniverseRead]
   -- The node a comma list builds (MS8 phase 159), which always holds two
   -- children: a pair, then a pair or another list.
   ["pairs", l] -> [PairsIn l]
@@ -405,17 +473,16 @@ metavariables ns =
 --
 -- Every way of taking suffixes off is tried, so a metavariable whose own name
 -- has an underscore in it is still found.
+-- **'Thena.Language.Grammar.nameBases' is the same rule one layer down** (MS8
+-- phase 160), where it resolves a suffixed word in a /production/ to the
+-- metavariable it is a suffix of. Shared so the two cannot disagree.
 isMetavariable :: [Grammar] -> String -> Bool
-isMetavariable gs n = any (`elem` names) (bases n)
+isMetavariable gs n = any (`elem` names) (nameBases n)
   where
-    bases m = m : case reverse m of
-      c : rest | suffix c -> bases (reverse rest)
-      _ -> case break (== '_') (reverse m) of
-        (after@(_ : _), '_' : before) | all alnum after -> bases (reverse before)
-        _ -> []
-    suffix c = c == '\'' || (c >= '0' && c <= '9') || (c >= '\8320' && c <= '\8329')
-    alnum c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
-    names = [ m | g <- gs, grammarKind g /= JudgmentBlock, m <- grammarMetavars g ]
+    -- A judgment declares none, so there is nothing to exclude by block kind
+    -- (MS8 phase 160): its header has no metavariables and its notation's are
+    -- the languages' (§6.1).
+    names = [ m | g <- gs, m <- grammarMetavars g ]
          ++ [ x | g <- gs, p <- grammarProductions g, Slot x (OfClass {}) _ <- gproductionItems p ]
 
 sortType :: Sort -> String

@@ -268,6 +268,38 @@ premises =
       s <- loaded (header ++ typing)
       said s ":show typing" !! 1
         @?= "  { T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> extend-in`${x} : ${T} ∈ ${Γ}` -> typing`${Γ} ⊢ ${LC`${x}`} : ${T}`"
+    -- **A PREMISE IS AN ARGUMENT'S TYPE, SO ANY TYPE MAY STAND ABOVE THE BAR**
+    -- (MS8 phase 160, `~8b8gz`, `~z8n28`). A rule is a constructor, an argument
+    -- may be at any type, and @LC@ is its own notation — so a rule may take a
+    -- term of @LC@ as a premise. **Before this the premise position admitted a
+    -- grammar by the kind of block that declared it**, which is the one question
+    -- the design forbids, and nothing but a judgment could stand here.
+  , testCase "a premise may be a plain type, which is the nullary notation" $ do
+      s <- loaded (header ++ typing ++
+        [ "judgment odd = Γ ⊩ M : T where", ""
+        , "  O-term:  LC    Γ ⊢ M : T"
+        , "           -------------------"
+        , "           Γ ⊩ M : T", "" ])
+      said s ":show odd" @?=
+        [ "data odd : Ctx -> LC -> Ty -> Type₀ where"
+        , "  { O-term : ∀ (Γ : Ctx) (M : LC) (T : Ty) -> LC -> typing`${Γ} ⊢ ${M} : ${T}` -> odd`${Γ} ⊩ ${M} : ${T}` }" ]
+      -- The type mentions no metavariable, so it adds nothing to the implicit
+      -- ∀ and the argument it binds is an unnamed premise like any other.
+      argumentNames s "odd" "O-term" @?= ["Γ", "M", "T", "d1", "d2"]
+    -- **A universe is spelled too — HIS ruling, 2026-10-11, zero-based** — and
+    -- a premise at one is refused for a reason that is not about notation at
+    -- all: a generated judgment's family is fixed at @Type₀@ and an argument
+    -- quantifying over @Type₀@ lives in @Type₁@. **So the restriction on the
+    -- generated path falls out of the signature rather than being imposed at a
+    -- position**, which is what makes the premise position need no rule of its
+    -- own.
+  , refusal "a universe may be written above the bar, and a generated judgment cannot hold one"
+      (typing ++
+        [ "judgment big = Γ ⊫ M : T where", ""
+        , "  B-any:  𝕌₀    Γ ⊢ M : T"
+        , "          -------------------"
+        , "          Γ ⊫ M : T", "" ])
+      "refused: the argument d1 of B-any lives in Type₁, which the datatype's own Type₀ does not contain"
   , refusal "a premise named like a metavariable"
       (typing ++ ["judgment bad = M bad where", "", "  B:  M' : · ⊢ M : ι", "      ---", "      M bad", ""])
       "refused: in the judgment bad, rule B: a premise may not be named M', which is a metavariable"

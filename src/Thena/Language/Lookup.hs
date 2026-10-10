@@ -97,7 +97,11 @@ notationOf g e = do
       items = kept ++ [Terminal "\8712", ctxSlot]
       args = [ Argument x srt Plain | x <- distinct [ y | Slot y _ _ <- items ]
                                     , srt <- take 1 [ t | Slot y t _ <- items, y == x ] ]
-  Just (Grammar JudgmentBlock (GlobalName inN) [inN] [GProduction (GlobalName inN) items args Constructor])
+  -- **'TypeFormer', not 'Constructor'** (MS8 phase 160): the name this
+  -- production carries is the relation's datatype, so @x : T ∈ Γ@ is a /type/.
+  -- That kind is what admits it above a rule's bar, replacing the label this
+  -- record used to be admitted by.
+  Just (Grammar JudgmentBlock (GlobalName inN) [inN] [GProduction (GlobalName inN) items args TypeFormer])
   where
     own i = case i of
       Slot _ srt _ -> srt == OfLanguage (grammarName g)

@@ -407,7 +407,30 @@ joiningWith block = joining ++ "\n" ++ block ++ "\n"
 -- 'constructorProductions' does not see it.
 notating :: [TestTree]
 notating =
-  [ testCase "the block installs, declares nothing, and adds one production" $ do
+  [ -- **A SUFFIXED WORD RESOLVES TO THE METAVARIABLE IT IS A SUFFIX OF** (MS8
+    -- phase 160, HIS ruling of 2026-10-10). A type declared outside a block has
+    -- no metavariables to alias, so its slots are its own name with subscripts
+    -- — *"subscripts are enough"* — and the rule already existed for a rule's
+    -- /text/, so this is the same rule one layer down.
+    --
+    -- **Before this both words were terminals**, so the production had no slots
+    -- at all and @twin@ would have been @twin : C@.
+    testCase "a slot may be a metavariable's name with a suffix" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 (joiningWith "notation C where\n  join -> ⟦ C₁ , C₂ ⟧") of
+        (s1, ProofLoaded {}) -> do
+          let gs = grammars (machineOf s1)
+          c <- case [ g | g <- gs, grammarName g == GlobalName "C" ] of
+                 [g] -> pure g
+                 other -> assertFailure (show (length other) ++ " grammars called C")
+          -- Two distinct slots, both at @C@, so the arity check is satisfied by
+          -- a function of two contexts.
+          map gproductionArguments [ p | p <- grammarProductions c
+                                       , gproductionName p == GlobalName "join" ]
+            @?= [[ Argument "C₁" (OfLanguage (GlobalName "C")) Plain
+                 , Argument "C₂" (OfLanguage (GlobalName "C")) Plain ]]
+        (s1, other) -> assertFailure (unlines (renderResponse s1 other))
+  , testCase "the block installs, declares nothing, and adds one production" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 (joiningWith "notation C where\n  join -> G \8746 D") of
         (s1, ProofLoaded _ names _ _) -> do
