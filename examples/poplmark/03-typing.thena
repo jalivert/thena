@@ -1,0 +1,70 @@
+-- F-sub's typing relation Γ ⊢ t : T, with subsumption.
+--
+-- LOAD AFTER 01-syntax.thena AND 02-subtyping.thena.
+--
+-- Then try   :show typing
+--            :parse typing · ⊢ ( Λ X <: ⊤ . ( λ y : X . y ) ) : ( ∀ X <: ⊤ . ( X -> X ) )
+
+module FsubTyping where
+
+-- The six rules of part 2's typing relation. T-Sub is the one that makes this
+-- a subtyping calculus rather than F: a term of a subtype is a term of the
+-- supertype, and the derivation says where that was used.
+--
+-- T-TApp's conclusion computes its own type. `T12[X -> T2]` is the generated
+-- Ty-subst-X, so the kernel works the result out rather than being told it.
+judgment typing = Γ ⊢ t : T where
+
+  T-Var:   x : T ∈ Γ
+           -------------
+           Γ ⊢ x : T
+
+  T-Abs:   Γ , x : T1 ⊢ t : T2
+           --------------------------------------------
+           Γ ⊢ ( λ x : T1 . t ) : ( T1 -> T2 )
+
+  T-App:   Γ ⊢ t : ( T11 -> T12 )      Γ ⊢ s : T11
+           ------------------------------------------
+           Γ ⊢ ( t s ) : T12
+
+  T-TAbs:  Γ , X <: T1 ⊢ t : T2
+           ------------------------------------------------------
+           Γ ⊢ ( Λ X <: T1 . t ) : ( ∀ X <: T1 . T2 )
+
+  T-TApp:  Γ ⊢ t : ( ∀ X <: T11 . T12 )      Γ ⊢ T2 <: T11
+           ---------------------------------------------------
+           Γ ⊢ ( t [ T2 ] ) : T12[X -> T2]
+
+  T-Sub:   Γ ⊢ t : S      Γ ⊢ S <: T
+           ----------------------------
+           Γ ⊢ t : T
+
+
+-- ---------------------------------------------------------------------------
+-- Derivations.
+
+-- The polymorphic identity, at the type 01 wrote down for it.
+polyIdTyped : typing`· ⊢ ( Λ X <: ⊤ . ( λ y : X . y ) ) : ( ∀ X <: ⊤ . ( X -> X ) )`
+polyIdTyped =
+  T-TAbs Ctx`·` "X" Ty`⊤` Tm`( λ y : X . y )` Ty`( X -> X )`
+    (T-Abs Ctx`· , X <: ⊤` "y" Ty`X` Tm`y` Ty`X`
+      (T-Var "y" Ty`X` Ctx`· , X <: ⊤ , y : X`
+        (bindTm-here Ctx`· , X <: ⊤` "y" Ty`X`)))
+
+-- Subsumption: y is declared at X, and X is below ⊤, so y is a ⊤.
+subsumed : typing`· , X <: ⊤ , y : X ⊢ y : ⊤`
+subsumed =
+  T-Sub Ctx`· , X <: ⊤ , y : X` Tm`y` Ty`X` Ty`⊤`
+    (T-Var "y" Ty`X` Ctx`· , X <: ⊤ , y : X`
+      (bindTm-here Ctx`· , X <: ⊤` "y" Ty`X`))
+    (SA-Top Ctx`· , X <: ⊤ , y : X` Ty`X`)
+
+-- Instantiating the identity at ⊤. THE TYPE IS NOT WRITTEN TWICE: the rule's
+-- conclusion is T12[X -> T2], so the kernel computes ( ⊤ -> ⊤ ) from
+-- ( X -> X ) by the substitution the language generated, and conversion is
+-- what accepts the statement below.
+polyIdAtTopTyped : typing`· ⊢ ( ( Λ X <: ⊤ . ( λ y : X . y ) ) [ ⊤ ] ) : ( ⊤ -> ⊤ )`
+polyIdAtTopTyped =
+  T-TApp Ctx`·` Tm`( Λ X <: ⊤ . ( λ y : X . y ) )` "X" Ty`⊤` Ty`( X -> X )` Ty`⊤`
+    polyIdTyped
+    (SA-Top Ctx`·` Ty`⊤`)

@@ -1,0 +1,250 @@
+-- POPLMark problem 1A: transitivity of subtyping, with narrowing.
+--
+-- LOAD AFTER 01-syntax.thena, 02-subtyping.thena AND 03-typing.thena.
+--
+-- The challenge's crux. Transitivity is not a rule of the system, it is a
+-- lemma, and its proof needs narrowing simultaneously: in the SA-All case the
+-- two subderivations bind the same type variable at DIFFERENT bounds, so one
+-- of them has to be narrowed before transitivity applies to the bodies. The
+-- induction is on the structure of the middle type, with an inner induction
+-- on derivations.
+
+module FsubTransitivity where
+
+-- ---------------------------------------------------------------------------
+-- The usual four, as 07 defines them: equality is an ordinary datatype here.
+
+absurdly : forall (C : Type₀) (e : Empty) -> C
+absurdly = \ C e -> elim Empty () (\ t -> C) () () e
+
+substEq : forall (A : Type₀) (P : A -> Type₀) (a : A) (b : A) (e : Eq A a b) (p : P a) -> P b
+substEq = \ A P a b e p -> elim Eq (A) (\ x y q -> P x -> P y) ((\ c -> \ z -> z)) (a b) e p
+
+symEq : forall (A : Type₀) (a : A) (b : A) (e : Eq A a b) -> Eq A b a
+symEq = \ A a b e -> substEq A (\ z -> Eq A z a) a b e (refl A a)
+
+transEq : forall (A : Type₀) (a : A) (b : A) (c : A) (e1 : Eq A a b) (e2 : Eq A b c) -> Eq A a c
+transEq = \ A a b c e1 e2 -> substEq A (\ z -> Eq A a z) b c e2 e1
+
+-- A disjunction, as 07 declares it: And is in the prelude and Or is not.
+data Or (A : Type₀) (B : Type₀) : Type₀ where
+  orLeft  : forall (a : A) -> Or A B
+  orRight : forall (b : B) -> Or A B
+
+
+-- ---------------------------------------------------------------------------
+-- Reflexivity. An induction on the TYPE, and the variable case is a rule, so
+-- this one needs nothing about contexts at all.
+
+subRefl : forall (T : Ty) (G : Ctx) -> sub G T T
+subRefl = \ T ->
+  elim Ty () (\ T0 -> forall (G : Ctx) -> sub G T0 T0)
+    ((\ Z G -> SA-Refl-TVar G Z)
+     (\ G -> SA-Top G Ty`⊤`)
+     (\ A B ihA ihB G -> SA-Arrow G A A B B (ihA G) (ihB G))
+     (\ Z A B ihA ihB G -> SA-All G A A Z B B (ihA G) (ihB (bindTy G Z A))))
+    () T
+
+
+-- ---------------------------------------------------------------------------
+-- Inversion of subtyping on the SHAPE OF THE LOWER TYPE.
+--
+-- `sub` gets no no-confusion lemma — SA-Trans-TVar's second premise has a
+-- type that mentions an earlier argument, so its equation cannot be stated —
+-- so inversion is done the way 07 does it: eliminate the derivation with a
+-- motive that takes an equation pinning the index, then hand it `refl`.
+
+-- Nothing is above ⊤ but ⊤.
+topSuper : forall (G : Ctx) (T : Ty) (d : sub G Ty`⊤` T) -> Eq Ty T Ty`⊤`
+topSuper = \ G T d ->
+  elim sub () (\ G0 S0 T0 d0 -> Eq Ty S0 Ty`⊤` -> Eq Ty T0 Ty`⊤`)
+    ((\ G0 S0 e -> refl Ty Ty`⊤`)
+     (\ G0 Z e -> absurdly (Eq Ty Ty`${Z}` Ty`⊤`) (noConfusionTy Ty`${Z}` Ty`⊤` e))
+     (\ Z U G0 T0 lk p1 ih1 e -> absurdly (Eq Ty T0 Ty`⊤`) (noConfusionTy Ty`${Z}` Ty`⊤` e))
+     (\ G0 T1 S1 S2 T2 p1 p2 ih1 ih2 e ->
+        absurdly (Eq Ty Ty`( ${T1} -> ${T2} )` Ty`⊤`)
+          (noConfusionTy Ty`( ${S1} -> ${S2} )` Ty`⊤` e))
+     (\ G0 T1 S1 Z S2 T2 p1 p2 ih1 ih2 e ->
+        absurdly (Eq Ty Ty`( ∀ ${Z} <: ${T1} . ${T2} )` Ty`⊤`)
+          (noConfusionTy Ty`( ∀ ${Z} <: ${S1} . ${S2} )` Ty`⊤` e)))
+    (G Ty`⊤` T) d (refl Ty Ty`⊤`)
+
+-- Above an arrow there is ⊤, or an arrow, and then the two parts are related
+-- the way SA-Arrow relates them.
+data ArrowSuper (G : Ctx) (A : Ty) (B : Ty) : Ty -> Type₀ where
+  AS-Top   : ArrowSuper G A B Ty`⊤`
+  AS-Arrow : forall (C : Ty) (D : Ty) (d1 : sub G C A) (d2 : sub G B D)
+               -> ArrowSuper G A B Ty`( ${C} -> ${D} )`
+
+arrowSuper : forall (G : Ctx) (A : Ty) (B : Ty) (T : Ty) (d : sub G Ty`( ${A} -> ${B} )` T)
+               -> ArrowSuper G A B T
+arrowSuper = \ G A B T d ->
+  elim sub () (\ G0 S0 T0 d0 -> Eq Ty S0 Ty`( ${A} -> ${B} )` -> ArrowSuper G0 A B T0)
+    ((\ G0 S0 e -> AS-Top G0 A B)
+     (\ G0 Z e ->
+        absurdly (ArrowSuper G0 A B Ty`${Z}`)
+          (noConfusionTy Ty`${Z}` Ty`( ${A} -> ${B} )` e))
+     (\ Z U G0 T0 lk p1 ih1 e ->
+        absurdly (ArrowSuper G0 A B T0)
+          (noConfusionTy Ty`${Z}` Ty`( ${A} -> ${B} )` e))
+     (\ G0 T1 S1 S2 T2 p1 p2 ih1 ih2 e ->
+        AS-Arrow G0 A B T1 T2
+          (substEq Ty (\ z -> sub G0 T1 z) S1 A
+            (andLeft (Eq Ty S1 A) (Eq Ty S2 B) (noConfusionTy Ty`( ${S1} -> ${S2} )` Ty`( ${A} -> ${B} )` e)) p1)
+          (substEq Ty (\ z -> sub G0 z T2) S2 B
+            (andRight (Eq Ty S1 A) (Eq Ty S2 B) (noConfusionTy Ty`( ${S1} -> ${S2} )` Ty`( ${A} -> ${B} )` e)) p2))
+     (\ G0 T1 S1 Z S2 T2 p1 p2 ih1 ih2 e ->
+        absurdly (ArrowSuper G0 A B Ty`( ∀ ${Z} <: ${T1} . ${T2} )`)
+          (noConfusionTy Ty`( ∀ ${Z} <: ${S1} . ${S2} )` Ty`( ${A} -> ${B} )` e)))
+    (G Ty`( ${A} -> ${B} )` T) d (refl Ty Ty`( ${A} -> ${B} )`)
+
+-- Above a quantifier there is ⊤, or a quantifier BINDING THE SAME NAME —
+-- which is why no α-equivalence is needed anywhere in this proof: SA-All
+-- shares one X between the two types it compares, so inverting a derivation
+-- whose lower type is fixed hands back the same bound name.
+data AllSuper (G : Ctx) (Z : String) (A : Ty) (B : Ty) : Ty -> Type₀ where
+  ALS-Top : AllSuper G Z A B Ty`⊤`
+  ALS-All : forall (C : Ty) (D : Ty) (d1 : sub G C A) (d2 : sub (bindTy G Z C) B D)
+              -> AllSuper G Z A B Ty`( ∀ ${Z} <: ${C} . ${D} )`
+
+allSuper : forall (G : Ctx) (Z : String) (A : Ty) (B : Ty) (T : Ty)
+             (d : sub G Ty`( ∀ ${Z} <: ${A} . ${B} )` T) -> AllSuper G Z A B T
+allSuper = \ G Z A B T d ->
+  elim sub () (\ G0 S0 T0 d0 -> Eq Ty S0 Ty`( ∀ ${Z} <: ${A} . ${B} )` -> AllSuper G0 Z A B T0)
+    ((\ G0 S0 e -> ALS-Top G0 Z A B)
+     (\ G0 W e ->
+        absurdly (AllSuper G0 Z A B Ty`${W}`)
+          (noConfusionTy Ty`${W}` Ty`( ∀ ${Z} <: ${A} . ${B} )` e))
+     (\ W U G0 T0 lk p1 ih1 e ->
+        absurdly (AllSuper G0 Z A B T0)
+          (noConfusionTy Ty`${W}` Ty`( ∀ ${Z} <: ${A} . ${B} )` e))
+     (\ G0 T1 S1 S2 T2 p1 p2 ih1 ih2 e ->
+        absurdly (AllSuper G0 Z A B Ty`( ${T1} -> ${T2} )`)
+          (noConfusionTy Ty`( ${S1} -> ${S2} )` Ty`( ∀ ${Z} <: ${A} . ${B} )` e))
+     (\ G0 T1 S1 W S2 T2 p1 p2 ih1 ih2 e ->
+        substEq String (\ z -> AllSuper G0 Z A B Ty`( ∀ ${z} <: ${T1} . ${T2} )`) Z W
+          (symEq String W Z
+            (andLeft (Eq String W Z) (And (Eq Ty S1 A) (Eq Ty S2 B))
+              (noConfusionTy Ty`( ∀ ${W} <: ${S1} . ${S2} )` Ty`( ∀ ${Z} <: ${A} . ${B} )` e)))
+          (ALS-All G0 Z A B T1 T2
+            (substEq Ty (\ z -> sub G0 T1 z) S1 A
+              (andLeft (Eq Ty S1 A) (Eq Ty S2 B)
+                (andRight (Eq String W Z) (And (Eq Ty S1 A) (Eq Ty S2 B))
+                  (noConfusionTy Ty`( ∀ ${W} <: ${S1} . ${S2} )` Ty`( ∀ ${Z} <: ${A} . ${B} )` e)))
+              p1)
+            (substEq Ty (\ z -> sub (bindTy G0 Z T1) z T2) S2 B
+              (andRight (Eq Ty S1 A) (Eq Ty S2 B)
+                (andRight (Eq String W Z) (And (Eq Ty S1 A) (Eq Ty S2 B))
+                  (noConfusionTy Ty`( ∀ ${W} <: ${S1} . ${S2} )` Ty`( ∀ ${Z} <: ${A} . ${B} )` e)))
+              (substEq String (\ z -> sub (bindTy G0 z T1) S2 T2) W Z
+                (andLeft (Eq String W Z) (And (Eq Ty S1 A) (Eq Ty S2 B))
+                  (noConfusionTy Ty`( ∀ ${W} <: ${S1} . ${S2} )` Ty`( ∀ ${Z} <: ${A} . ${B} )` e))
+                p2)))))
+    (G Ty`( ∀ ${Z} <: ${A} . ${B} )` T) d (refl Ty Ty`( ∀ ${Z} <: ${A} . ${B} )`)
+
+
+-- ---------------------------------------------------------------------------
+-- Inversion of the type lookup, one shape of context at a time.
+
+-- Nothing is declared in the empty context.
+bindTyInEmpty : forall (Y : String) (U : Ty) (i : bindTy-in Y U Ctx`·`) -> Empty
+bindTyInEmpty = \ Y U i ->
+  elim bindTy-in () (\ Y1 U1 C1 i1 -> Eq Ctx C1 Ctx`·` -> Empty)
+    ((\ G W S e -> noConfusionCtx (bindTy G W S) Ctx`·` e)
+     (\ G W S w S' p ih e -> noConfusionCtx (bindTm G w S') Ctx`·` e)
+     (\ G W S W' S' ne p ih e -> noConfusionCtx (bindTy G W' S') Ctx`·` e))
+    (Y U Ctx`·`) i (refl Ctx Ctx`·`)
+
+-- A type lookup past a TERM binding is a lookup in what is underneath: the
+-- generated relation has no inequality to discharge here, because shadowing
+-- is within a namespace.
+bindTyInBindTm : forall (G : Ctx) (w : String) (S : Ty) (Y : String) (U : Ty)
+                   (i : bindTy-in Y U (bindTm G w S)) -> bindTy-in Y U G
+bindTyInBindTm = \ G w S Y U i ->
+  elim bindTy-in () (\ Y1 U1 C1 i1 -> Eq Ctx C1 (bindTm G w S) -> bindTy-in Y1 U1 G)
+    ((\ G0 W S0 e ->
+        absurdly (bindTy-in W S0 G) (noConfusionCtx (bindTy G0 W S0) (bindTm G w S) e))
+     (\ G0 W S0 w' S' p ih e ->
+        substEq Ctx (\ c -> bindTy-in W S0 c) G0 G
+          (andLeft (Eq Ctx G0 G) (And (Eq String w' w) (Eq Ty S' S))
+            (noConfusionCtx (bindTm G0 w' S') (bindTm G w S) e)) p)
+     (\ G0 W S0 W' S' ne p ih e ->
+        absurdly (bindTy-in W S0 G) (noConfusionCtx (bindTy G0 W' S') (bindTm G w S) e)))
+    (Y U (bindTm G w S)) i (refl Ctx (bindTm G w S))
+
+-- A type lookup past a TYPE binding is either that binding, or a lookup
+-- underneath it at a different name.
+FoundTy : Ctx -> String -> Ty -> String -> Ty -> Type₀
+FoundTy = \ G W S Y U ->
+  Or (And (Eq String Y W) (Eq Ty U S))
+     (And (Eq String Y W -> Empty) (bindTy-in Y U G))
+
+bindTyInBindTy : forall (G : Ctx) (W : String) (S : Ty) (Y : String) (U : Ty)
+                   (i : bindTy-in Y U (bindTy G W S)) -> FoundTy G W S Y U
+bindTyInBindTy = \ G W S Y U i ->
+  elim bindTy-in () (\ Y1 U1 C1 i1 -> Eq Ctx C1 (bindTy G W S) -> FoundTy G W S Y1 U1)
+    ((\ G0 W0 S0 e ->
+        orLeft (And (Eq String W0 W) (Eq Ty S0 S)) (And (Eq String W0 W -> Empty) (bindTy-in W0 S0 G))
+          (both (Eq String W0 W) (Eq Ty S0 S)
+            (andLeft (Eq String W0 W) (Eq Ty S0 S)
+              (andRight (Eq Ctx G0 G) (And (Eq String W0 W) (Eq Ty S0 S))
+                (noConfusionCtx (bindTy G0 W0 S0) (bindTy G W S) e)))
+            (andRight (Eq String W0 W) (Eq Ty S0 S)
+              (andRight (Eq Ctx G0 G) (And (Eq String W0 W) (Eq Ty S0 S))
+                (noConfusionCtx (bindTy G0 W0 S0) (bindTy G W S) e)))))
+     (\ G0 W0 S0 w' S' p ih e ->
+        absurdly (FoundTy G W S W0 S0) (noConfusionCtx (bindTm G0 w' S') (bindTy G W S) e))
+     (\ G0 W0 S0 W' S' ne p ih e ->
+        orRight (And (Eq String W0 W) (Eq Ty S0 S)) (And (Eq String W0 W -> Empty) (bindTy-in W0 S0 G))
+          (both (Eq String W0 W -> Empty) (bindTy-in W0 S0 G)
+            (\ q -> ne (transEq String W0 W W' q
+                          (symEq String W' W
+                            (andLeft (Eq String W' W) (Eq Ty S' S)
+                              (andRight (Eq Ctx G0 G) (And (Eq String W' W) (Eq Ty S' S))
+                                (noConfusionCtx (bindTy G0 W' S') (bindTy G W S) e))))))
+            (substEq Ctx (\ c -> bindTy-in W0 S0 c) G0 G
+              (andLeft (Eq Ctx G0 G) (And (Eq String W' W) (Eq Ty S' S))
+                (noConfusionCtx (bindTy G0 W' S') (bindTy G W S) e)) p))))
+    (Y U (bindTy G W S)) i (refl Ctx (bindTy G W S))
+
+
+-- ---------------------------------------------------------------------------
+-- Weakening, RELATIVE TO A WITNESS. Nothing here needs a name to be fresh:
+-- the witness is the hypothesis that every type binding Γ finds is found in
+-- Γ₁ as well, and SA-All is the one case that has to extend it.
+
+InclTy : Ctx -> Ctx -> Type₀
+InclTy = \ G G1 -> forall (Y : String) (U : Ty) (i : bindTy-in Y U G) -> bindTy-in Y U G1
+
+inclBindTy : forall (G : Ctx) (G1 : Ctx) (W : String) (S : Ty) (inc : InclTy G G1)
+               -> InclTy (bindTy G W S) (bindTy G1 W S)
+inclBindTy = \ G G1 W S inc Y U i ->
+  elim Or ((And (Eq String Y W) (Eq Ty U S)) (And (Eq String Y W -> Empty) (bindTy-in Y U G)))
+    (\ o -> bindTy-in Y U (bindTy G1 W S))
+    ((\ h -> substEq String (\ z -> bindTy-in z U (bindTy G1 W S)) W Y
+               (symEq String Y W (andLeft (Eq String Y W) (Eq Ty U S) h))
+               (substEq Ty (\ V -> bindTy-in W V (bindTy G1 W S)) S U
+                  (symEq Ty U S (andRight (Eq String Y W) (Eq Ty U S) h))
+                  (bindTy-here G1 W S)))
+     (\ h -> bindTy-there-bindTy G1 Y U W S
+               (andLeft (Eq String Y W -> Empty) (bindTy-in Y U G) h)
+               (inc Y U (andRight (Eq String Y W -> Empty) (bindTy-in Y U G) h))))
+    () (bindTyInBindTy G W S Y U i)
+
+inclBindTm : forall (G : Ctx) (G1 : Ctx) (w : String) (S : Ty) (inc : InclTy G G1)
+               -> InclTy (bindTm G w S) (bindTm G1 w S)
+inclBindTm = \ G G1 w S inc Y U i ->
+  bindTy-there-bindTm G1 Y U w S (inc Y U (bindTyInBindTm G w S Y U i))
+
+subWeaken : forall (G : Ctx) (S : Ty) (T : Ty) (d : sub G S T) (G1 : Ctx) (inc : InclTy G G1)
+              -> sub G1 S T
+subWeaken = \ G S T d ->
+  elim sub () (\ G0 S0 T0 d0 -> forall (G1 : Ctx) (inc : InclTy G0 G1) -> sub G1 S0 T0)
+    ((\ G0 S0 G1 inc -> SA-Top G1 S0)
+     (\ G0 Z G1 inc -> SA-Refl-TVar G1 Z)
+     (\ Z U G0 T0 lk p1 ih1 G1 inc -> SA-Trans-TVar Z U G1 T0 (inc Z U lk) (ih1 G1 inc))
+     (\ G0 T1 S1 S2 T2 p1 p2 ih1 ih2 G1 inc -> SA-Arrow G1 T1 S1 S2 T2 (ih1 G1 inc) (ih2 G1 inc))
+     (\ G0 T1 S1 Z S2 T2 p1 p2 ih1 ih2 G1 inc ->
+        SA-All G1 T1 S1 Z S2 T2 (ih1 G1 inc)
+          (ih2 (bindTy G1 Z T1) (inclBindTy G0 G1 Z T1 inc))))
+    (G S T) d
