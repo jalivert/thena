@@ -95,6 +95,29 @@ lexing =
   where
     tokens lexer src = map (\(Located _ t) -> t) <$> lexer src
 
+-- | A slot at a universe, both as a type former's own spelling and as a
+-- function's (MS8 phase 160). @same@ is `refl`, so the load asserts that the
+-- universe slot was filled with the type @Ty@ and @k@ ran.
+universeSlots :: String
+universeSlots =
+  unlines
+    [ "module U where", ""
+    , "language Ty, T, S where"
+    , "  base  -> ι"
+    , "  arrow -> ( T -> S )", ""
+    , "data Imp : Type₀ -> Type₀ -> Type₁ where"
+    , "  { impIntro : ∀ (A : Type₀) (B : Type₀) -> (A -> B) -> Imp A B }", ""
+    , "notation Imp -> 𝕌₀ ⊃ 𝕌₀' where", ""
+    , "k : Type₀ -> Ty -> Ty"
+    , "k = \\ A -> \\ t -> t", ""
+    , "notation Ty where"
+    , "  k -> ⟪ 𝕌₀ ⟫ T", ""
+    , "u : Ty"
+    , "u = Ty`⟪ Ty ⟫ ι`", ""
+    , "same : Eq Ty u base"
+    , "same = refl Ty base", ""
+    ]
+
 -- | The write-up's §4 Example 1, both ways (MS8 phase 160). @same@ is `refl`, so
 -- the load asserts that the notation builds the hand-written term.
 lamByHand :: String
@@ -488,7 +511,39 @@ joiningWith block = joining ++ "\n" ++ block ++ "\n"
 -- 'constructorProductions' does not see it.
 notating :: [TestTree]
 notating =
-  [ -- **`data` PLUS `notation` IS A `language` BLOCK, EQUIPMENT INCLUDED** (MS8
+  [ -- **A SLOT MAY BE AT A UNIVERSE, AND THAT IS THE THIRD MISSING WORD** (MS8
+    -- phase 160, HIS ruling of 2026-10-11: the universes get notation, `ሁ40茠`,
+    -- `ሁ40茡`, …, zero-based). Without it @k : Type₀ -> Ty -> Ty@ cannot be
+    -- spelled at all — the word would mean nothing, become literal text, and the
+    -- production would be refused for having one slot too few.
+    --
+    -- **Two slots at one universe need the prime**, as two slots at one language
+    -- need the subscript: a name written twice is one argument (§4.3).
+    testCase "a slot may be at a universe, and is filled by a type" $ do
+      (s0, _) <- startingSession
+      s1 <- either assertFailure pure (loadOrSay s0 universeSlots)
+      -- @same@ in the fixture is `refl` over @k Ty base@, so the load asserts
+      -- that the universe slot was filled with the type @Ty@ and the function
+      -- ran. Here the sorts are what the checker recorded.
+      let gs = grammars (machineOf s1)
+      map argumentSort (concat [ gproductionArguments p
+                               | g <- gs, grammarName g == GlobalName "Imp"
+                               , p <- grammarProductions g ])
+        @?= [OfUniverse 0, OfUniverse 0]
+    -- **A universe slot is refused where the argument types are generated FROM
+    -- the slots**, which is your describing-versus-generating line: an argument
+    -- quantifying over @Type₀@ would raise the datatype's own universe.
+  , testCase "a slot at a universe is refused in a language block" $ do
+      (s0, _) <- startingSession
+      loadOrSay s0 (unlines
+        [ "module U where", ""
+        , "language Ty, T, S where"
+        , "  base   -> ι"
+        , "  tagged -> ⟪ 𝕌₀ ⟫", "" ])
+        @?= Left ("refused: in the grammar of Ty, production tagged: 𝕌₀ is a slot at Type₀, "
+                    ++ "and this block generates its arguments' types from its slots — so declare "
+                    ++ "the datatype and give it notation instead")
+  , -- **`data` PLUS `notation` IS A `language` BLOCK, EQUIPMENT INCLUDED** (MS8
     -- phase 160, HIS ruling of 2026-10-10: *"generating nothing and declaring
     -- nothing was never a goal, just a way to talk about it"*). This is the
     -- write-up's §4 Example 1 hand-written, and the two routes are compared on

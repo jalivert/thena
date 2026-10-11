@@ -43,6 +43,9 @@ import Thena.Language.Grammar
   , GProduction (..)
   , typeFormerProductions
   , nameBases
+  , typeNT
+  , universeWord
+  , universeSpelling
   , Grammar (..)
   , GrammarError (..)
   , GrammarProblem (..)
@@ -242,7 +245,7 @@ term gs rename t = case t of
   -- is not a metavariable.
   Node n [child] | [TypeWrapper] <- special n -> term gs rename child
   Node n _ | [TypeNamed l] <- special n -> Right (SurfaceName l)
-  Node n [Token u] | [UniverseRead] <- special n -> Right (SurfaceUniverse (universeLevel u))
+  Node n [Token u] | [UniverseRead] <- special n -> Right (SurfaceUniverse (maybe 0 id (universeWord u)))
   -- §6.3: a comma list is @L-subst-all@ — simultaneous, and across classes, so
   -- each class's map takes the pairs written at it and the rest are empty (MS8
   -- phase 155). **A single pair never reaches here since MS8 phase 159**: it is
@@ -308,12 +311,7 @@ ruleGrammar gs =
     -- grammar**, which is the one question the design forbids: measured by
     -- relabelling the generated lookup relation, after which @x : T ∈ Γ@ stopped
     -- parsing above a bar although nothing about its type had changed.
-    ++ [ Earley.Rule "a type" typeNT [Earley.Nonterminal l] []
-       | g <- gs, not (null (typeFormerProductions g)), let GlobalName l = grammarName g ]
-    ++ [ Earley.Rule ("the type " ++ l) typeNT [Earley.Literal l] []
-       | g <- gs, let GlobalName l = grammarName g ]
-    ++ [ Earley.Rule "a universe" typeNT [Earley.Scan "a universe" universeRegex] []
-       , Earley.Rule "a premise" premiseNT [Earley.Nonterminal typeNT] []
+    ++ [ Earley.Rule "a premise" premiseNT [Earley.Nonterminal typeNT] []
        , Earley.Rule "a named premise" premiseNT
            [Earley.Scan "a premise name" premiseName, Earley.Literal ":", Earley.Nonterminal typeNT] []
        , Earley.Rule "a premise" premisesNT [Earley.Nonterminal premiseNT] []
@@ -321,8 +319,14 @@ ruleGrammar gs =
        ]
   where
     narrowed r = r { Earley.ruleBody = map narrow (Earley.ruleBody r) }
+    -- **A class slot in a rule's text reads a metavariable and nothing else.**
+    -- A scan whose name has a space in it is not a class slot but one of the
+    -- nonterminals this module and 'Thena.Language.Grammar.typeRules' own —
+    -- @a universe@ — and narrowing that to the metavariables named @\120588\8320@ would
+    -- make a universe unwritable in a rule (MS8 phase 160). No class can have a
+    -- space in its name, which is the same convention the nonterminals use.
     narrow s = case s of
-      Earley.Scan x _ -> Earley.Scan x (metavariables [x])
+      Earley.Scan x _ | ' ' `notElem` x -> Earley.Scan x (metavariables [x])
       _ -> s
 
     own g =
@@ -373,26 +377,10 @@ ruleGrammar gs =
 --
 -- @typeNT@ is **readings at a universe** (MS8 phase 160) and replaced
 -- @"a judgment"@, which was the set of grammars declared by a @judgment@ block.
-typeNT, premiseNT, premisesNT :: String
-typeNT = "a type"
+premiseNT, premisesNT :: String
 premiseNT = "a premise"
 premisesNT = "the premises"
 
--- | @𝕌₀@, @𝕌₁@, … — the universes spelled (MS8 phase 160, HIS ruling of
--- 2026-10-11). Zero-based, so @𝕌₀@ is @Type₀@.
---
--- **Without a word for a universe a slot at one cannot be written at all**, and
--- the failure is silent: a word that means nothing is literal text, so the
--- spelling loses a slot and the refusal is an arity mismatch (@HAZARDS.md@).
-universeRegex :: Regex
-universeRegex = andThen (oneOf (singleChar '𝕌')) (andThen digit (star digit))
-  where digit = oneOf (fromRanges [('\8320', '\8329')])
-
--- | The level a universe's spelling names — @𝕌₁₀@ is 10, so the subscripts are
--- read as decimal digits rather than one being assumed.
-universeLevel :: String -> Int
-universeLevel = foldl place 0 . filter (/= '𝕌')
-  where place n c = n * 10 + (fromEnum c - 0x2080)
 
 -- | The comma list of pairs, two or more of them, and one pair (MS8 phase 159).
 -- Each has a space in its name, which no language, context or judgment can.
@@ -489,6 +477,10 @@ sortType :: Sort -> String
 sortType srt = case srt of
   OfLanguage l -> nameOf l
   OfClass _ t _ -> nameOf t
+  -- A rule's metavariables come from the grammars, and a universe slot can only
+  -- be written in a @notation@ block — a @judgment@ block's production carrying
+  -- one is refused by @UniverseSlot@ (MS8 phase 160).
+  OfUniverse n -> universeSpelling n
 
 nameOf :: GlobalName -> String
 nameOf (GlobalName n) = n

@@ -194,6 +194,10 @@ sample :: String -> String
 sample n = case n of
   "name" -> "x"
   "universe" -> "Type₀"
+  -- The object-language universe (MS8 phase 160), which every parse carries
+  -- because a slot may be at one — 'Thena.Language.Grammar.typeRules'. Its name
+  -- has a space in it, as this module's own nonterminals do.
+  "a universe" -> "𝕌₀"
   "string" -> "\"s\""
   "char" -> "'c'"
   "int" -> "1"

@@ -731,6 +731,57 @@ constructors, functions over that datatype, and type formers. The nonterminal of
 `language` or a `context` is named after a type; a judgment's is named after a type
 *former*, and what it parses is a derivation.
 
+### Notation is assignable to anything declared, and a universe is spelled `𝕌₀`
+
+*Decided 2026-10-09/11, built 2026-10-11.*
+
+A `notation` block gives a spelling to any declared name — a function, a
+constructor, or a type former of any arity — under one rule: a spelling whose
+slots are one per argument of that name's type, elaborating to that name applied
+to what the slots hold. The header carries the name's own spelling:
+
+```
+data bound : String -> Tp -> Env -> Type₀ where { bHere : … ; bThere : … }
+
+notation bound -> v ◂ A ◂ Δ where
+```
+
+A premise is an argument's type, so anything with a type spelling may stand above
+a rule's bar — including a plain `LC`, since a rule is a constructor and an
+argument may be at any type. And because a slot is one word naming a nonterminal,
+the universes needed spellings of their own, `𝕌₀`, `𝕌₁`, …, zero-based: without
+one, `k : Type₀ -> Ty -> Ty` could not be given a spelling at all.
+
+```
+collapse : ∀ (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Ctx
+notation Ctx where
+  collapse -> ⟨ Γ , M , T by typing ⟩
+```
+
+The fourth slot is the single word `typing`: a hole at a derivation, whose
+indices come from the declaration by position. That word means this only in a
+`notation` block, which describes a declaration that already exists. In a
+`language` block the argument types are generated *from* the slots, so there
+would be no indices to supply — and for the same reason a slot at a universe is
+refused there.
+
+**That line runs through the whole feature.** A hand-written datatype with an
+assigned notation gets the full freedom of Surface: any universe, an index
+telescope that depends on earlier indices, a judgment indexed by another
+judgment. A `language`, `context` or `judgment` block stays simpler, and its
+family is fixed at `Type₀` with independent indices. Where the two meet, the
+hand-written route is the escape:
+
+```
+data Valid : ∀ (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Type₀ where …
+notation Valid -> ⊢ Γ , M , T by typing valid where
+```
+
+A block that installs a grammar for a hand-written datatype also generates its
+substitution family from the roles its productions carry, so `data` plus
+`notation` is a `language` block with extra freedom rather than a weaker version
+of one.
+
 ### A `notation` block gives a function a spelling, so a rule can say what a paper says
 
 *Decided 2026-10-07, built 2026-10-08.*

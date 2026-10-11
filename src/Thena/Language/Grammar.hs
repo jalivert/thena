@@ -34,6 +34,13 @@ module Thena.Language.Grammar
   , constructorProductions
   , typeFormerProductions
   , nameBases
+  , universeWord
+  , universeSpelling
+  , universeRegex
+  , typeNT
+  , typeRules
+  , TypeReading (..)
+  , typeReading
   , builtInTags
   , substitutionNames
   , lookupNames
@@ -55,11 +62,12 @@ module Thena.Language.Grammar
 import Data.List (nub, (\\))
 import Data.Maybe (isJust, listToMaybe)
 
+import Thena.Core.Level (Normal (..), normalise)
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), instantiate, tokenName)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Earley (placeholderChar)
-import Thena.Language.Regex (Regex, matches, parseRegex, primingChar)
+import Thena.Language.Regex (Regex, andThen, fromRanges, matches, oneOf, parseRegex, primingChar, singleChar, star)
 import Thena.Errors (BuildError, SyntaxError, Warning (..))
 import Thena.Core.Context (entryType)
 import Thena.Global.Env
@@ -153,6 +161,18 @@ data Sort
   | OfClass GlobalName GlobalName Regex
     -- ^ a token class, its @T@, and its expression — read once, when the
     -- grammar is checked, so that parsing never looks the class up again
+  | OfUniverse Int
+    -- ^ **a universe, spelled @\120140\8320@, @\120140\8321@, …** (MS8 phase 160, HIS ruling of
+    -- 2026-10-11, zero-based). A slot at one reads any type spelling, which is
+    -- the one case where what fills a slot is itself a type — and it is an
+    -- instance of the rule rather than an exception to it, since a term of a
+    -- universe is a type.
+    --
+    -- **Only a @notation@ block may have one.** There the slot's type comes from
+    -- the declaration being described; in a @language@ block the argument types
+    -- are generated /from/ the slots, and a universe argument would raise the
+    -- datatype's own universe — which is the measured refusal
+    -- @the argument A of impIntro2 lives in Type\8321@.
   deriving (Eq, Show)
 
 -- | Why a block was refused. The kind and name say which block, and the
@@ -320,6 +340,13 @@ data ProductionProblem
     -- ^ what the function returns, when it is not the grammar's datatype — the
     -- production stands where a term of the grammar stands, so nothing else
     -- could be built from it. A 'Core' for the same reason as 'FunctionSlot' 
+  | UniverseSlot String Int
+    -- ^ a slot at a universe in a @language@, @context@ or @judgment@ block (MS8
+    -- phase 160). The argument types there are generated **from** the slots, so
+    -- an argument quantifying over @Type\8320@ would raise the datatype's own
+    -- universe — measured: @the argument A of impIntro2 lives in Type\8321, which
+    -- the datatype's own Type\8320 does not contain@. **A @notation@ block may have
+    -- one**, because there the type comes from the declaration being described.
   | FunctionBinds String
     -- ^ a @notation@ production writing a binding form. A function's argument
     -- is a term it is handed, and nothing about an application binds
@@ -432,7 +459,7 @@ checkGrammar installed env b = do
     -- binding form is refused in a judgment, and the vacuous binder's warning
     -- names this block.
     production p = do
-      (items, arguments, vacuousNames) <- constructorShape sortOf (kind /= JudgmentBlock) p
+      (items, arguments, vacuousNames) <- constructorShape sortOf (kind /= JudgmentBlock) False p
       let pkind | kind == JudgmentBlock = TypeFormer
                 | otherwise = Constructor
           vacuous = [ VacuousBinder kind name (productionName p) x | x <- vacuousNames ]
@@ -445,15 +472,17 @@ checkGrammar installed env b = do
 --
 -- @binds@ says whether a binding form @E[x]@ may appear: it may wherever there
 -- is a constructor whose argument it is about, and a judgment's notation has
--- none.
+-- none. @universes@ says whether a slot may be at a universe: it may where the
+-- argument types are read off a declaration, and not where they are generated
+-- from the slots (MS8 phase 160).
 --
 -- The third answer is the names declared @as binder@ that no slot brackets —
 -- §4.5's vacuous binder, which is a warning rather than a refusal, and whose
 -- message names the block it was written in.
 constructorShape
-  :: (String -> Maybe Sort) -> Bool -> Production
+  :: (String -> Maybe Sort) -> Bool -> Bool -> Production
   -> Either ProductionProblem ([Item], [Argument], [String])
-constructorShape sortOf binds p = do
+constructorShape sortOf binds universes p = do
     items <- traverse item (productionItems p)
     if null items then Left NoItems else Right ()
     let slots = [ (x, bs) | Slot x _ bs <- items ]
@@ -490,6 +519,7 @@ constructorShape sortOf binds p = do
     item i = case i of
       Word w -> case sortOf w of
         Nothing  -> reservedTerminal w >> Right (Terminal w)
+        Just (OfUniverse n) | not universes -> Left (UniverseSlot w n)
         Just srt -> reservedScan w srt >> Right (Slot w srt [])
       Binding hd _ | not binds -> Left (NotationBinds hd)
       Binding hd bs -> case sortOf hd of
@@ -531,9 +561,79 @@ sortIn env metavars x = case [ srt | b <- nameBases x, Just srt <- [exact b] ] o
   []      -> Nothing
   where
     exact b
+      | Just n <- universeWord b = Just (OfUniverse n)
       | Just g <- lookup b metavars = Just (OfLanguage g)
       | Just (t, re) <- tokenClassOf env b = Just (OfClass (GlobalName b) t re)
       | otherwise = Nothing
+
+-- | A level as subscript digits, for a refusal that names the universe a slot
+-- was written at (MS8 phase 160).
+universeSpelling :: Int -> String
+universeSpelling n = "Type" ++ subscripts n
+
+subscripts :: Int -> String
+subscripts n
+  | n < 10 = [digit n]
+  | otherwise = subscripts (n `div` 10) ++ [digit (n `mod` 10)]
+  where digit d = toEnum (0x2080 + d)
+
+-- | **The level a universe's spelling names** — @\120140\8320@ is @Type\8320@, @\120140\8321\8320@ is
+-- @Type\8321\8320@ — and 'Nothing' for anything else (MS8 phase 160).
+--
+-- Zero-based, HIS ruling of 2026-10-11. The subscripts are read as decimal
+-- digits rather than one being assumed, so there is no ceiling to run into.
+universeWord :: String -> Maybe Int
+universeWord w = case w of
+  '\120140' : ds@(_ : _) | all subscript ds -> Just (foldl place 0 ds)
+  _ -> Nothing
+  where
+    subscript c = c >= '\8320' && c <= '\8329'
+    place n c = n * 10 + (fromEnum c - 0x2080)
+
+-- | @\120140\8320@, @\120140\8321@, … as an expression the parser can scan (MS8 phase 160).
+universeRegex :: Regex
+universeRegex = andThen (oneOf (singleChar '\120140')) (andThen digit (star digit))
+  where digit = oneOf (fromRanges [('\8320', '\8329')])
+
+-- | **The nonterminal of readings at a universe** (MS8 phase 160, `~8b8gz`):
+-- every type former's spelling, every grammar's own name as the nullary case,
+-- and a universe itself.
+--
+-- **This is what a premise reads, and what a slot at @\120140\8320@ reads** — one
+-- nonterminal for both, because a premise /is/ an argument's type. Its name has
+-- a space in it, which no language, context or judgment can have, so it cannot
+-- collide with a grammar's.
+typeNT :: String
+typeNT = "a type"
+
+-- | **What a reading at 'typeNT' says** (MS8 phase 160): a datatype named, a
+-- universe, or a wrapper around a reading of some grammar's nonterminal.
+--
+-- One decoder, shared by everything that turns such a reading into a term —
+-- 'Thena.Language.Build' for @Core@, for @Surface@ and for a skeleton, and
+-- 'Thena.Language.Judgment' for a rule's premise — so the three cannot drift
+-- apart. The node names are 'typeRules'' own.
+data TypeReading
+  = TypeCalled String      -- ^ @LC@, the nullary case
+  | AtUniverse Int         -- ^ @\120140\8320@
+  | TypeInside Earley.Tree  -- ^ a reading of a type former's spelling
+  deriving (Show)
+
+typeReading :: String -> [Earley.Tree] -> Maybe TypeReading
+typeReading n children = case (words n, children) of
+  (["a", "type"], [child]) -> Just (TypeInside child)
+  (["the", "type", l], _) -> Just (TypeCalled l)
+  (["a", "universe"], [Earley.Token u]) -> AtUniverse <$> universeWord u
+  _ -> Nothing
+
+-- | The rules of 'typeNT', which every parse has (MS8 phase 160).
+typeRules :: [Grammar] -> [Earley.Rule]
+typeRules gs =
+  [ Earley.Rule "a type" typeNT [Earley.Nonterminal l] []
+  | g <- gs, not (null (typeFormerProductions g)), let GlobalName l = grammarName g ]
+    ++ [ Earley.Rule ("the type " ++ l) typeNT [Earley.Literal l] []
+       | g <- gs, let GlobalName l = grammarName g ]
+    ++ [ Earley.Rule "a universe" typeNT [Earley.Scan "a universe" universeRegex] [] ]
 
 -- | A word, then the same word with its suffixes taken off, longest first
 -- (MS8 phase 160).
@@ -691,7 +791,7 @@ checkNotation installed env b = do
       case (productionMetadata p, editing) of
         (Just _, True) -> Left (RolesAfterTheGrammar (grammarName g))
         _ -> Right ()
-      (items, args, _) <- constructorShape sortOf True p
+      (items, args, _) <- constructorShape sortOf True True p
       let f = GlobalName (productionName p)
       if isHeader p then Right () else if taken f then Left FunctionHasNotation else Right ()
       (domains, kind') <-
@@ -746,13 +846,21 @@ checkNotation installed env b = do
     -- the declaration rather than from the spelling. The indices are the type
     -- checker's to verify, which is the trade §4.8's result check already makes.
     -- A universe still answers 'Nothing' and is still refused.
-    slotIs a dom
-      | typeHead env dom == Just wanted = Right ()
-      | otherwise = Left (FunctionSlot (argumentName a) (whnf env [] dom) wanted)
+    slotIs a dom = case argumentSort a of
+      -- **A slot at @\120140\8320@ wants an argument at exactly that universe.** The
+      -- parser cannot tell `Type\8320` from `Type\8321` in the text — @LC@ and
+      -- @Imp A B@ are both just type spellings — so the level is held here and
+      -- at every use site by the type checker.
+      OfUniverse n
+        | Universe lvl <- whnf env [] dom, Normal l [] <- normalise lvl, l == n -> Right ()
+        | otherwise -> Left (FunctionSlot (argumentName a) (whnf env [] dom)
+                               (GlobalName (universeSpelling n)))
+      OfLanguage l  -> atType l
+      OfClass _ t _ -> atType t
       where
-        wanted = case argumentSort a of
-          OfLanguage l  -> l
-          OfClass _ t _ -> t
+        atType wanted
+          | typeHead env dom == Just wanted = Right ()
+          | otherwise = Left (FunctionSlot (argumentName a) (whnf env [] dom) wanted)
 
     item i = case i of
       Word w -> case sortOf w of
@@ -1228,7 +1336,7 @@ tokenClassOf env x = do
 -- nonterminal. The non-linear groups are the slot positions of each name
 -- written more than once.
 earleyRules :: [Grammar] -> [Earley.Rule]
-earleyRules gs =
+earleyRules gs = typeRules gs ++
   [ Earley.Rule (nameOf (gproductionName p)) (nameOf (grammarName g)) (map symbol items) same
   | g <- reverse gs
   , p <- grammarProductions g
@@ -1242,3 +1350,8 @@ earleyRules gs =
       Terminal t -> Earley.Literal t
       Slot x (OfClass _ _ re) _ -> Earley.Scan x re
       Slot _ (OfLanguage h) _ -> Earley.Nonterminal (nameOf h)
+      -- **Every universe reads the one nonterminal**, because which level a type
+      -- spelling is at is not a syntactic question — @LC@ is at @Type\8320@ and
+      -- @Imp A B@ at @Type\8321@, and nothing in the text says so. The level on the
+      -- slot is what the type checker holds it to.
+      Slot _ (OfUniverse _) _ -> Earley.Nonterminal typeNT

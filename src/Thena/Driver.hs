@@ -219,6 +219,7 @@ import Thena.Language.Grammar
   , checkGrammar
   , checkNotation
   , constructorProductions
+  , universeSpelling
   , earleyRules
   , notationInto
   )
@@ -1382,6 +1383,10 @@ grammarDatatype g =
     typeName srt = case srt of
       OfLanguage l -> plainName l
       OfClass _ t _ -> plainName t
+      -- Only a @notation@ block may have a universe slot, and it generates no
+      -- datatype; a @language@ block's production carrying one is refused by
+      -- @UniverseSlot@ (MS8 phase 160).
+      OfUniverse n -> universeSpelling n
 
     -- Primed until it shadows nothing the types name.
     renamed args = go [] args

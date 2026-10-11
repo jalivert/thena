@@ -60,6 +60,7 @@ import Thena.Language.Grammar
   , Grammar (..)
   , Item (..)
   , Sort (..)
+  , universeSpelling
   , extensionsOf
   , isName
   , lookupNamesOf
@@ -194,6 +195,10 @@ relationOf g e = do
     typeName srt = case srt of
       OfLanguage l -> nm l
       OfClass _ t _ -> nm t
+      -- A universe slot exists only in a @notation@ block, where no datatype is
+      -- generated; a @context@ production carrying one is refused by
+      -- @UniverseSlot@ (MS8 phase 160). The spelling is what it would be named.
+      OfUniverse n -> universeSpelling n
     typeOf = SurfaceName . typeName . argumentSort
     app f [] = f
     app f xs = SurfaceApp f (NE.fromList (map (SurfaceArg Explicit) xs))

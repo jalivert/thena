@@ -135,7 +135,7 @@ import Thena.Errors
   )
 import Thena.Global.Declare (DeclareError (..), TokenClassError (..))
 import Thena.Language.Build (printTerm)
-import Thena.Language.Grammar (Grammar, GrammarError (..), GrammarProblem (..), ProductionProblem (..), RulePart (..), RuleProblem (..), Sort (..))
+import Thena.Language.Grammar (Grammar, GrammarError (..), GrammarProblem (..), ProductionProblem (..), RulePart (..), RuleProblem (..), Sort (..), universeSpelling)
 import Thena.Language.Reader (ReadError (..))
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Regex (RegexError (..))
@@ -1643,6 +1643,10 @@ renderDeclareError ren e = case e of
       FunctionResult r -> p ++ " returns " ++ renderCore ren [] r ++ ", not a " ++ g
       FunctionBinds x -> x ++ " is written as a binding form, and an application binds nothing"
       FunctionMetadata -> p ++ " is a function, so there is no constructor for the metadata to be about"
+      UniverseSlot x lvl ->
+        x ++ " is a slot at " ++ universeSpelling lvl
+          ++ ", and this block generates its arguments' types from its slots \8212 so declare the "
+          ++ "datatype and give it notation instead"
       RolesAfterTheGrammar gr ->
         "a role belongs to the block that installs the grammar, and " ++ nameString gr
           ++ "'s is installed already, with its substitution generated from the roles it had then"
@@ -2134,6 +2138,7 @@ sortPhrase s = article (nameString n)
     n = case s of
       OfLanguage g -> g
       OfClass _ t _ -> t
+      OfUniverse k -> GlobalName (universeSpelling k)
     article w = (if take 1 w `elem` map (: []) "AEIOU" then "an " else "a ") ++ w
 
 -- | A reading, as the production names applied to their slots (MS6 phase
