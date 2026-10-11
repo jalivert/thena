@@ -1,0 +1,88 @@
+-- Algorithmic subtyping, Γ ⊢ S <: T.
+--
+-- LOAD AFTER 01-syntax.thena, 02-contexts.thena AND 03-wellformed.thena.
+--
+-- Then try   :show sub
+--            :parse sub · , X <: ⊤ ⊢ X <: ⊤
+
+module FsubSubtyping where
+
+-- ---------------------------------------------------------------------------
+-- Algorithmic subtyping: the five rules of the challenge paper, with ONE
+-- premise added, on SA-All.
+--
+-- `⊢ Γ , X <: T1 ok` says the context this rule extends to is well formed.
+-- The paper does not write it because it cannot: its contexts are finite
+-- functions, so `Γ, X<:T1` is notation that only means something when X is
+-- new. Thena's comma is a constructor, so the condition has to be said out
+-- loud — and SA-All is the only rule that extends a context, so this is the
+-- only place it has to be said.
+--
+-- It is not decoration. 06 proves transitivity by inverting a derivation and
+-- reading this premise off it; without it the proof is not merely hard, the
+-- lemma it needs is false, and 06 shows that too.
+
+judgment sub = Γ ⊢ S <: T where
+
+  SA-Top:        ------------------
+                 Γ ⊢ S <: ⊤
+
+  SA-Refl-TVar:  ------------------
+                 Γ ⊢ X <: X
+
+  SA-Trans-TVar: X <: U ∈ Γ      Γ ⊢ U <: T
+                 ---------------------------
+                 Γ ⊢ X <: T
+
+  SA-Arrow:      Γ ⊢ T1 <: S1      Γ ⊢ S2 <: T2
+                 -----------------------------------------
+                 Γ ⊢ ( S1 -> S2 ) <: ( T1 -> T2 )
+
+  SA-All:        Γ ⊢ T1 <: S1      ⊢ Γ , X <: T1 ok      Γ , X <: T1 ⊢ S2 <: T2
+                 ------------------------------------------------------------------
+                 Γ ⊢ ( ∀ X <: S1 . S2 ) <: ( ∀ X <: T1 . T2 )
+
+
+-- ---------------------------------------------------------------------------
+-- Derivations. A judgment literal is a type, and a proof of it is the tree.
+
+-- ⊤ is above everything, itself included.
+topAboveTop : sub`· ⊢ ⊤ <: ⊤`
+topAboveTop = SA-Top Ctx`·` Ty`⊤`
+
+-- A type variable is a subtype of itself with no premise at all.
+tvarRefl : sub`· , X <: ⊤ ⊢ X <: X`
+tvarRefl = SA-Refl-TVar Ctx`· , X <: ⊤` "X"
+
+-- And of its own bound, by looking it up and going on from there.
+tvarBelowBound : sub`· , X <: ⊤ ⊢ X <: ⊤`
+tvarBelowBound =
+  SA-Trans-TVar "X" Ty`⊤` Ctx`· , X <: ⊤` Ty`⊤`
+    (bindTy-here Ctx`·` "X" Ty`⊤`)
+    (SA-Top Ctx`· , X <: ⊤` Ty`⊤`)
+
+-- A type lookup steps over a TERM binding with nothing to prove: shadowing is
+-- within a namespace, so there is no inequality to discharge here.
+lookupPastTerm : bindTy-in`X <: ⊤ ∈ · , X <: ⊤ , y : X`
+lookupPastTerm =
+  bindTy-there-bindTm Ctx`· , X <: ⊤` "X" Ty`⊤` "y" Ty`X`
+    (bindTy-here Ctx`·` "X" Ty`⊤`)
+
+-- The arrow is contravariant on the left and covariant on the right.
+arrowVariance : sub`· , X <: ⊤ ⊢ ( ⊤ -> X ) <: ( X -> ⊤ )`
+arrowVariance =
+  SA-Arrow Ctx`· , X <: ⊤` Ty`X` Ty`⊤` Ty`X` Ty`⊤`
+    (SA-Top Ctx`· , X <: ⊤` Ty`X`)
+    (SA-Top Ctx`· , X <: ⊤` Ty`X`)
+
+-- And the quantifier compares bodies under the bound it binds.
+allBody : sub`· ⊢ ( ∀ X <: ⊤ . X ) <: ( ∀ X <: ⊤ . ⊤ )`
+allBody =
+  SA-All Ctx`·` Ty`⊤` Ty`⊤` "X" Ty`X` Ty`⊤`
+    (SA-Top Ctx`·` Ty`⊤`)
+    oneTypeVar
+    (SA-Top Ctx`· , X <: ⊤` Ty`X`)
+
+-- A derivation whose context is written the paper's way, with a split.
+inSplitContext : sub`· , X <: ⊤ , ${suffix} ⊢ X <: ⊤`
+inSplitContext = SA-Top Ctx`· , X <: ⊤ , ${suffix}` Ty`X`

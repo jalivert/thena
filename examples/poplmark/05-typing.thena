@@ -1,6 +1,6 @@
 -- F-sub's typing relation Γ ⊢ t : T, with subsumption.
 --
--- LOAD AFTER 01-syntax.thena AND 02-subtyping.thena.
+-- LOAD AFTER 01-syntax, 02-contexts, 03-wellformed AND 04-subtyping.
 --
 -- Then try   :show typing
 --            :parse typing · ⊢ ( Λ X <: ⊤ . ( λ y : X . y ) ) : ( ∀ X <: ⊤ . ( X -> X ) )

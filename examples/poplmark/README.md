@@ -12,55 +12,71 @@ its own `Ty`, and two languages of one name cannot be installed at once.
 ```
 cabal run thena
 :load examples/poplmark/01-syntax.thena
-:load examples/poplmark/02-subtyping.thena
-:load examples/poplmark/03-typing.thena
-:load examples/poplmark/04-transitivity.thena
+:load examples/poplmark/02-contexts.thena
+:load examples/poplmark/03-wellformed.thena
+:load examples/poplmark/04-subtyping.thena
+:load examples/poplmark/05-typing.thena
+:load examples/poplmark/06-transitivity.thena
 ```
 
 | file | what it shows |
 |---|---|
-| `01-syntax.thena` | Part 2's whole language. Two token classes, so types read `X` and terms read `x`; `Ty` with `⊤`, the arrow and the quantifier; `Tm` **binding at both levels in one grammar** — `λ x : T . t` binds a term variable and `Λ X <: T . t` a type variable. The generated substitutions, `Tm-subst-X` among them: type substitution into a term |
-| `02-subtyping.thena` | `Γ` with **two extension forms**, `x : T` and `X <: T`, and the two lookup relations that come with them; `append` given the paper's comma by a `notation` block, so `Γ , X <: Q , Δ` parses as a rule's index; `Ctx-subst-X` for `Γ[X -> T]`; the five algorithmic subtyping rules, and derivations |
-| `03-typing.thena` | The six typing rules with subsumption. `T-TApp`'s conclusion is `T12[X -> T2]`, so the kernel computes the type of an instantiation rather than being told it |
-| `04-transitivity.thena` | **Problem 1A.** Reflexivity; inversion of subtyping on the shape of the lower type; weakening; narrowing's lookup lemma; and transitivity-with-narrowing, all four cases of the induction on the middle type — **under one hypothesis, which is then refuted** |
+| `01-syntax` | Part 2's whole language. Two token classes, so types read `X` and terms read `x`; `Ty` with `⊤`, the arrow and the quantifier; `Tm` **binding at both levels in one grammar** — `λ x : T . t` binds a term variable and `Λ X <: T . t` a type variable. The generated substitutions, `Tm-subst-X` among them: type substitution into a term |
+| `02-contexts` | `Γ` with **two extension forms**, `x : T` and `X <: T`, and the two lookup relations that come with them; `append` given **the paper's comma** by a `notation` block, so `Γ , X <: Q , Δ` parses as a rule's index; `Ctx-subst-X` for `Γ[X -> T]` |
+| `03-wellformed` | `X # Γ` and `Γ ⊢ T ty` and `⊢ Γ ok`: the laws the paper gets from its notation and we have to say out loud. `#` is a hand-written family given paper notation, because its last rule needs a side condition. Then the lemmas that make them work: inversion, and **rebinding** — nothing that only cares which names are declared can tell `Γ , X <: Q , Δ` from `Γ , X <: P , Δ` |
+| `04-subtyping` | The five algorithmic subtyping rules, with **one premise added** to `SA-All`: `⊢ Γ , X <: T1 ok`. Derivations |
+| `05-typing` | The six typing rules with subsumption. `T-TApp`'s conclusion is `T12[X -> T2]`, so the kernel computes the type of an instantiation rather than being told it |
+| `06-transitivity` | **Problem 1A.** Reflexivity; inversion of subtyping on the shape of the lower type; narrowing in full; transitivity, all four cases of the induction on the middle type — **under one hypothesis, which is then refuted** |
+
+## Why the rules are not quite the paper's
+
+The paper's contexts are finite **functions**, so `Γ, X<:T` is notation that
+only means something when `X` is new, and a context can never repeat a name.
+Thena's context is a datatype and its comma is a constructor, so
+`· , Y <: ⊤ , Y <: ⊤` is a value, and a lookup takes the newest entry. That is
+a deliberate decision of this project — shadowing allowed, newest wins.
+
+So the law has to be written down. `03` writes it, and `04` requires it at the
+one rule that extends a context. Everything else is the paper's, unchanged.
 
 ## What is proved, and what stops it
 
-Everything in `04` is kernel-checked. The outer induction on the middle type
-is complete: `transTop`, `transTVar`, `transArrow` and `transAll`, with
-`narrowFrom` giving narrowing from transitivity at the same type.
-`transitivity` and `narrowing` are assembled from them.
+Everything here is kernel-checked. The outer induction on the middle type is
+complete — `transTop`, `transTVar`, `transArrow`, `transAll` — with
+`narrowFrom` giving narrowing from transitivity at the same type, and
+`transitivity` and `narrowing` assembled from them. `SA-All`'s new premise is
+load-bearing: `narrowFrom` rebuilds the rule in the narrowed context and gets
+the premise it needs by `okRebind`.
 
-They take one hypothesis, `Wk Q`:
+What is left is **plain weakening between well-formed contexts**:
 
 ```
-Wk = \ Q -> forall (G : Ctx) (Xn : String) (D : Ctx) (P : Ty) (dp : sub G P Q)
+Wk = \ Q -> forall (G : Ctx) (Xn : String) (D : Ctx) (P : Ty)
+              (o : ok (append (bindTy G Xn P) D)) (dp : sub G P Q)
               -> sub (append (bindTy G Xn P) D) P Q
 ```
 
-which is the paper's silent step: *a derivation in Γ still holds in Γ , X <: P , Δ.*
-It is used in exactly one place — narrowing's `SA-Trans-TVar` case, where the
-variable looked up is the one being narrowed.
+used in exactly one place — narrowing's `SA-Trans-TVar` case, where the variable
+looked up is the one being narrowed.
 
-**`wkIsFalse` refutes it.** The paper's step rests on the Barendregt
-convention, that bound names are fresh for the context. Thena's names are
-nominal and there is no such convention, so a context may shadow:
+**`wkIsFalse` refutes it, and not because of context hygiene.** Both contexts
+below are well formed. What goes wrong is in the **derivation**: its own
+quantifier binds `Z`, and the weakening declares `Z`.
 
 ```
-· , B <: ⊤ , Y <: B           ⊢ Y <: B      -- yBelowB, derivable
-· , B <: ⊤ , Y <: B , Y <: Y  ⊢ Y <: B      -- noYBelowB, refuted
+· , B <: ⊤                           ⊢ ( ∀ Z <: ⊤ . Z ) <: ( ∀ Z <: ⊤ . ⊤ )   bindsZ
+· , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z )   ⊢ ( ∀ Z <: ⊤ . Z ) <: ( ∀ Z <: ⊤ . ⊤ )   noBindsZ
 ```
 
-In the second, `Y`'s binding is `Y <: Y`, so the only rule that could conclude
-it is `SA-Trans-TVar`, and its lookup can only find `Y <: Y`, which leaves the
-same goal.
+The first holds: `SA-All`'s premise asks that `· , B <: ⊤ , Z <: ⊤` be well
+formed, and it is. The second cannot: `SA-All` would ask that
+`· , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z ) , Z <: ⊤` be well formed, and `Z` is
+declared twice. No other rule can conclude it.
 
-So **1A needs a well-formedness discipline that the paper's rules as written do
-not supply**, and supplying it is a decision about what F-sub is here, not an
-implementation detail: narrowing has to be restricted to contexts with distinct
-names, and `SA-All` has to require its bound variable fresh for the context so
-that transitivity can meet that restriction. Neither is in the challenge's
-statement of the rules.
+**This is the step α-equivalence exists to take** — rename the bound variable
+and the obstruction is gone. Thena is nominal by design: a bound name is a
+`String` field and changing it changes the type. So 1A's last step is not a
+missing lemma about contexts; it is the renaming the system does not have.
 
 ## Not here
 

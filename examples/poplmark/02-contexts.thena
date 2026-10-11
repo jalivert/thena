@@ -1,11 +1,10 @@
--- F-sub's typing context, and the subtyping relation Γ ⊢ S <: T.
+-- F-sub's typing context.
 --
 -- LOAD AFTER 01-syntax.thena.
 --
--- Then try   :show bindTy-in      :show sub
---            :parse Ctx · , X <: ⊤ , y : X
+-- Then try   :show bindTy-in      :parse Ctx · , X <: ⊤ , y : X
 
-module FsubSubtyping where
+module FsubContexts where
 
 -- The context.      Γ ::= · | Γ, x:T | Γ, X<:T
 --
@@ -81,71 +80,3 @@ substThroughCtx = refl Ctx Ctx`· , X <: ⊤ , y : ⊤`
 -- A rule may write it, through the substitution notation.
 substNotation : Eq Ctx Ctx`${suffix} [ X -> ⊤ ]` Ctx`· , y : ⊤`
 substNotation = refl Ctx Ctx`· , y : ⊤`
-
-
--- ---------------------------------------------------------------------------
--- Algorithmic subtyping, exactly the five rules of the challenge paper.
-
-judgment sub = Γ ⊢ S <: T where
-
-  SA-Top:        ------------------
-                 Γ ⊢ S <: ⊤
-
-  SA-Refl-TVar:  ------------------
-                 Γ ⊢ X <: X
-
-  SA-Trans-TVar: X <: U ∈ Γ      Γ ⊢ U <: T
-                 ---------------------------
-                 Γ ⊢ X <: T
-
-  SA-Arrow:      Γ ⊢ T1 <: S1      Γ ⊢ S2 <: T2
-                 -----------------------------------------
-                 Γ ⊢ ( S1 -> S2 ) <: ( T1 -> T2 )
-
-  SA-All:        Γ ⊢ T1 <: S1      Γ , X <: T1 ⊢ S2 <: T2
-                 ---------------------------------------------------------
-                 Γ ⊢ ( ∀ X <: S1 . S2 ) <: ( ∀ X <: T1 . T2 )
-
-
--- ---------------------------------------------------------------------------
--- Derivations. A judgment literal is a type, and a proof of it is the tree.
-
--- ⊤ is above everything, itself included.
-topAboveTop : sub`· ⊢ ⊤ <: ⊤`
-topAboveTop = SA-Top Ctx`·` Ty`⊤`
-
--- A type variable is a subtype of itself with no premise at all.
-tvarRefl : sub`· , X <: ⊤ ⊢ X <: X`
-tvarRefl = SA-Refl-TVar Ctx`· , X <: ⊤` "X"
-
--- And of its own bound, by looking it up and going on from there.
-tvarBelowBound : sub`· , X <: ⊤ ⊢ X <: ⊤`
-tvarBelowBound =
-  SA-Trans-TVar "X" Ty`⊤` Ctx`· , X <: ⊤` Ty`⊤`
-    (bindTy-here Ctx`·` "X" Ty`⊤`)
-    (SA-Top Ctx`· , X <: ⊤` Ty`⊤`)
-
--- A type lookup steps over a TERM binding with nothing to prove: shadowing is
--- within a namespace, so there is no inequality to discharge here.
-lookupPastTerm : bindTy-in`X <: ⊤ ∈ · , X <: ⊤ , y : X`
-lookupPastTerm =
-  bindTy-there-bindTm Ctx`· , X <: ⊤` "X" Ty`⊤` "y" Ty`X`
-    (bindTy-here Ctx`·` "X" Ty`⊤`)
-
--- The arrow is contravariant on the left and covariant on the right.
-arrowVariance : sub`· , X <: ⊤ ⊢ ( ⊤ -> X ) <: ( X -> ⊤ )`
-arrowVariance =
-  SA-Arrow Ctx`· , X <: ⊤` Ty`X` Ty`⊤` Ty`X` Ty`⊤`
-    (SA-Top Ctx`· , X <: ⊤` Ty`X`)
-    (SA-Top Ctx`· , X <: ⊤` Ty`X`)
-
--- And the quantifier compares bodies under the bound it binds.
-allBody : sub`· ⊢ ( ∀ X <: ⊤ . X ) <: ( ∀ X <: ⊤ . ⊤ )`
-allBody =
-  SA-All Ctx`·` Ty`⊤` Ty`⊤` "X" Ty`X` Ty`⊤`
-    (SA-Top Ctx`·` Ty`⊤`)
-    (SA-Top Ctx`· , X <: ⊤` Ty`X`)
-
--- A derivation whose context is written the paper's way, with a split.
-inSplitContext : sub`· , X <: ⊤ , ${suffix} ⊢ X <: ⊤`
-inSplitContext = SA-Top Ctx`· , X <: ⊤ , ${suffix}` Ty`X`
