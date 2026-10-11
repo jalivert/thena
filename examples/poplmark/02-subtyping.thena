@@ -1,0 +1,151 @@
+-- F-sub's typing context, and the subtyping relation Γ ⊢ S <: T.
+--
+-- LOAD AFTER 01-syntax.thena.
+--
+-- Then try   :show bindTy-in      :show sub
+--            :parse Ctx · , X <: ⊤ , y : X
+
+module FsubSubtyping where
+
+-- The context.      Γ ::= · | Γ, x:T | Γ, X<:T
+--
+-- TWO EXTENSION FORMS, because F-sub's Γ carries both a term binding and a
+-- type binding. Each extension gets its own lookup relation:
+--
+--   bindTm-in : String -> Ty -> Ctx -> Type₀        x : T ∈ Γ
+--   bindTy-in : String -> Ty -> Ctx -> Type₀        X <: T ∈ Γ
+--
+-- and each has one `here` and one `there` per extension it may step over. The
+-- inequality that makes a later binding shadow an earlier one is generated
+-- only where the step is over a binding of the same class, so stepping a type
+-- lookup over `x : T` has nothing to prove.
+context Ctx, Γ, Δ where
+  empty  -> ·
+  bindTm -> Γ , x : T
+  bindTy -> Γ , X <: T
+
+-- A context is written in its own notation.
+twoKinds : Ctx
+twoKinds = Ctx`· , X <: ⊤ , y : X`
+
+
+-- ---------------------------------------------------------------------------
+-- The paper writes `Γ, X<:Q, Δ`, and that comma means APPEND.
+--
+-- A context block's productions are constructors, and a joining production
+-- would make Ctx a tree rather than a list — so append is an ordinary
+-- function, and a `notation` block gives it a spelling in the Ctx grammar.
+-- It must be a separate top-level block: append's type mentions Ctx, so it
+-- cannot be written above the block that declares it.
+
+append : Ctx -> Ctx -> Ctx
+append = \ G D ->
+  elim Ctx () (\ c -> Ctx)
+    ((G)
+     (\ c y T r -> bindTm r y T)
+     (\ c Y T r -> bindTy r Y T)) () D
+
+notation Ctx where
+  append -> Γ , Δ
+
+-- The production joins the grammar, so the paper's comma now parses wherever
+-- a Ctx is expected — a judgment rule's index included, which is the point.
+-- It elaborates to `append Γ Δ`, and a function reduces:
+appendEmpty : Eq Ctx Ctx`· , X <: ⊤ , ·` Ctx`· , X <: ⊤`
+appendEmpty = refl Ctx Ctx`· , X <: ⊤`
+
+-- A Ctx argument of the comma is grouped with a splice, because a context
+-- grammar has no parentheses of its own.
+suffix : Ctx
+suffix = Ctx`· , y : X`
+
+appendOne : Eq Ctx Ctx`· , X <: ⊤ , ${suffix}` Ctx`· , X <: ⊤ , y : X`
+appendOne = refl Ctx Ctx`· , X <: ⊤ , y : X`
+
+
+-- ---------------------------------------------------------------------------
+-- Substitution through a whole context, which the type-substitution lemma of
+-- part 1A is written with.
+--
+--   Ctx-subst-X : Ctx -> String -> Ty -> Ctx        Γ[X -> T]
+--
+-- It is a plain structural fold: a context's name slot is an ordinary name
+-- and neither an occurrence nor a binder, so nothing in a context is renamed
+-- and no key is ever touched. It does NOT stop at a declaration of X, and
+-- that is correct — the lemma's substitution is the one that DISCHARGES the
+-- binding X<:Q, exactly as β does, and every occurrence of X in the suffix
+-- must go.
+substThroughCtx : Eq Ctx (Ctx-subst-X Ctx`· , X <: ⊤ , y : X` "X" Ty`⊤`) Ctx`· , X <: ⊤ , y : ⊤`
+substThroughCtx = refl Ctx Ctx`· , X <: ⊤ , y : ⊤`
+
+-- A rule may write it, through the substitution notation.
+substNotation : Eq Ctx Ctx`${suffix} [ X -> ⊤ ]` Ctx`· , y : ⊤`
+substNotation = refl Ctx Ctx`· , y : ⊤`
+
+
+-- ---------------------------------------------------------------------------
+-- Algorithmic subtyping, exactly the five rules of the challenge paper.
+
+judgment sub = Γ ⊢ S <: T where
+
+  SA-Top:        ------------------
+                 Γ ⊢ S <: ⊤
+
+  SA-Refl-TVar:  ------------------
+                 Γ ⊢ X <: X
+
+  SA-Trans-TVar: X <: U ∈ Γ      Γ ⊢ U <: T
+                 ---------------------------
+                 Γ ⊢ X <: T
+
+  SA-Arrow:      Γ ⊢ T1 <: S1      Γ ⊢ S2 <: T2
+                 -----------------------------------------
+                 Γ ⊢ ( S1 -> S2 ) <: ( T1 -> T2 )
+
+  SA-All:        Γ ⊢ T1 <: S1      Γ , X <: T1 ⊢ S2 <: T2
+                 ---------------------------------------------------------
+                 Γ ⊢ ( ∀ X <: S1 . S2 ) <: ( ∀ X <: T1 . T2 )
+
+
+-- ---------------------------------------------------------------------------
+-- Derivations. A judgment literal is a type, and a proof of it is the tree.
+
+-- ⊤ is above everything, itself included.
+topAboveTop : sub`· ⊢ ⊤ <: ⊤`
+topAboveTop = SA-Top Ctx`·` Ty`⊤`
+
+-- A type variable is a subtype of itself with no premise at all.
+tvarRefl : sub`· , X <: ⊤ ⊢ X <: X`
+tvarRefl = SA-Refl-TVar Ctx`· , X <: ⊤` "X"
+
+-- And of its own bound, by looking it up and going on from there.
+tvarBelowBound : sub`· , X <: ⊤ ⊢ X <: ⊤`
+tvarBelowBound =
+  SA-Trans-TVar "X" Ty`⊤` Ctx`· , X <: ⊤` Ty`⊤`
+    (bindTy-here Ctx`·` "X" Ty`⊤`)
+    (SA-Top Ctx`· , X <: ⊤` Ty`⊤`)
+
+-- A type lookup steps over a TERM binding with nothing to prove: shadowing is
+-- within a namespace, so there is no inequality to discharge here.
+lookupPastTerm : bindTy-in`X <: ⊤ ∈ · , X <: ⊤ , y : X`
+lookupPastTerm =
+  bindTy-there-bindTm Ctx`· , X <: ⊤` "X" Ty`⊤` "y" Ty`X`
+    (bindTy-here Ctx`·` "X" Ty`⊤`)
+
+-- The arrow is contravariant on the left and covariant on the right.
+arrowVariance : sub`· , X <: ⊤ ⊢ ( ⊤ -> X ) <: ( X -> ⊤ )`
+arrowVariance =
+  SA-Arrow Ctx`· , X <: ⊤` Ty`X` Ty`⊤` Ty`X` Ty`⊤`
+    (SA-Top Ctx`· , X <: ⊤` Ty`X`)
+    (SA-Top Ctx`· , X <: ⊤` Ty`X`)
+
+-- And the quantifier compares bodies under the bound it binds.
+allBody : sub`· ⊢ ( ∀ X <: ⊤ . X ) <: ( ∀ X <: ⊤ . ⊤ )`
+allBody =
+  SA-All Ctx`·` Ty`⊤` Ty`⊤` "X" Ty`X` Ty`⊤`
+    (SA-Top Ctx`·` Ty`⊤`)
+    (SA-Top Ctx`· , X <: ⊤` Ty`X`)
+
+-- A derivation whose context is written the paper's way, with a split.
+inSplitContext : sub`· , X <: ⊤ , ${suffix} ⊢ X <: ⊤`
+inSplitContext = SA-Top Ctx`· , X <: ⊤ , ${suffix}` Ty`X`
