@@ -64,6 +64,7 @@ import Thena.Errors (BuildError, SyntaxError, Warning (..))
 import Thena.Core.Context (entryType)
 import Thena.Global.Env
   ( ArgRole (..)
+  , ConstructorDefinition (..)
   , GlobalEnv
   , InductiveDefinition (..)
   , definitionBody
@@ -208,6 +209,15 @@ data GrammarProblem
     -- ^ §4.8: a @notation@ block naming no installed grammar. **The one block
     -- that does not declare its own name** — it adds productions to a grammar
     -- that is already there, so the name has to be found rather than be free
+  | ConstructorsUnspelled [String]
+    -- ^ a @notation@ block that **installs** a grammar for a hand-written
+    -- datatype, declares a role, and does not spell every constructor of it
+    -- (MS8 phase 160). The substitution family is generated **from the
+    -- grammar**, so a constructor with no production gets no method and the
+    -- generated @elim@ is short of one — @D has 2 constructor(s), so this elim
+    -- needs 2 method(s), not 1@, which is the generator failing three layers
+    -- from the cause. In a @language@ block this cannot arise: there the
+    -- productions /are/ the constructors.
   | NotationMetavars [String]
     -- ^ §4.8: a @notation@ block whose header names more than the grammar. Its
     -- productions are written in the grammar's own metavariables, and declaring
@@ -317,6 +327,14 @@ data ProductionProblem
     -- ^ a @notation@ production with @as occurrence@ or @as binder@ metadata.
     -- A role is read off the /constructor/ it is on (§4.7) and a function
     -- production generates none
+  | RolesAfterTheGrammar GlobalName
+    -- ^ @as occurrence@ or @as binder@ in a @notation@ block that is **editing**
+    -- a grammar rather than installing one (MS8 phase 160). The roles are what
+    -- generated substitution is written from, and that grammar's family is
+    -- already declared — a second one cannot be declared over it. **So roles
+    -- belong to the block that installs the grammar** (HIS ruling, 2026-10-11),
+    -- which for a hand-written datatype is its own @notation@ block and for a
+    -- modelled language is the @language@ block
   deriving (Eq, Show)
 
 -- | Validate a block against the grammars already installed and the global
@@ -407,53 +425,73 @@ checkGrammar installed env b = do
     -- that is both.
     sortOf = sortIn env ([ (m, GlobalName name) | m <- heads ] ++ metavarsElsewhere)
 
+    -- **The shape is shared with 'checkNotation' since MS8 phase 160**, where a
+    -- production may name a constructor of a hand-written datatype and carries
+    -- the same roles. What stays here is what the /block/ decides: a judgment's
+    -- one production spells the datatype rather than a constructor of it, a
+    -- binding form is refused in a judgment, and the vacuous binder's warning
+    -- names this block.
     production p = do
-      items <- traverse item (productionItems p)
-      if null items then Left NoItems else Right ()
-      let slots = [ (x, bs) | Slot x _ bs <- items ]
-          args = nub (map fst slots)
-          scopeOf x = nub [ bs | (y, bs) <- slots, y == x ]
-          bracketed = nub (concatMap snd slots)
-      case [ x | x <- args, length (scopeOf x) > 1 ] of
-        x : _ -> Left (ScopesDiffer x)
-        [] -> Right ()
-      (occurrences, declared) <- case productionMetadata p of
-        Nothing -> Right ([], Nothing)
-        Just (AsOccurrence x) -> named args x >> Right ([x], Nothing)
-        Just (AsBinders xs) -> mapM_ (named args) xs >> Right ([], Just xs)
-      let binders = maybe bracketed id declared
-      mapM_ (bound args occurrences declared) bracketed
-      -- **The class a role carries comes from the check that validated it**
-      -- (MS8 phase 153). 'stringClass' has to look the sort up anyway to
-      -- refuse an occurrence or a binder that is not at a @Token String@
-      -- class, so it hands the class back rather than being asked twice —
-      -- which is also what leaves 'role' below with no unreachable branch to
-      -- fall through into.
-      occClasses <- traverse (withClass OccurrenceNotString) occurrences
-      bndClasses <- traverse (withClass BinderNotString) binders
-      let role x
-            | Just cls <- lookup x occClasses = Occurrence cls
-            | Just cls <- lookup x bndClasses = Binder cls
-            | (bs : _) <- scopeOf x, not (null bs) =
-                Scope [ i | (y, i) <- zip args [0 ..], y `elem` bs ]
-            | otherwise = Plain
-          arguments = [ Argument x srt (role x) | x <- args, srt <- take 1 [ t | Slot y t _ <- items, y == x ] ]
-          vacuous = [ VacuousBinder kind name (productionName p) x
-                    | Just xs <- [declared], x <- xs, x `notElem` bracketed ]
-      -- **A judgment block's one production is its statement's spelling, and
-      -- that names the datatype rather than a constructor of it** (MS8 phase
-      -- 160) — its constructors are the rules. This is the /declaring/ site, so
-      -- asking the block what it is declaring is the question it exists to
-      -- answer; no position downstream asks it again.
+      (items, arguments, vacuousNames) <- constructorShape sortOf (kind /= JudgmentBlock) p
       let pkind | kind == JudgmentBlock = TypeFormer
                 | otherwise = Constructor
+          vacuous = [ VacuousBinder kind name (productionName p) x | x <- vacuousNames ]
       Right (GProduction (GlobalName (productionName p)) items arguments pkind, vacuous)
 
+-- | **A production's items, its arguments and their roles** (§4.2, §4.3, §4.7) —
+-- everything about a production's /shape/, which is the same question whether a
+-- @language@ block is declaring a constructor or a @notation@ block is giving a
+-- hand-written one its spelling (MS8 phase 160).
+--
+-- @binds@ says whether a binding form @E[x]@ may appear: it may wherever there
+-- is a constructor whose argument it is about, and a judgment's notation has
+-- none.
+--
+-- The third answer is the names declared @as binder@ that no slot brackets —
+-- §4.5's vacuous binder, which is a warning rather than a refusal, and whose
+-- message names the block it was written in.
+constructorShape
+  :: (String -> Maybe Sort) -> Bool -> Production
+  -> Either ProductionProblem ([Item], [Argument], [String])
+constructorShape sortOf binds p = do
+    items <- traverse item (productionItems p)
+    if null items then Left NoItems else Right ()
+    let slots = [ (x, bs) | Slot x _ bs <- items ]
+        args = nub (map fst slots)
+        scopeOf x = nub [ bs | (y, bs) <- slots, y == x ]
+        bracketed = nub (concatMap snd slots)
+    case [ x | x <- args, length (scopeOf x) > 1 ] of
+      x : _ -> Left (ScopesDiffer x)
+      [] -> Right ()
+    (occurrences, declared) <- case productionMetadata p of
+      Nothing -> Right ([], Nothing)
+      Just (AsOccurrence x) -> named args x >> Right ([x], Nothing)
+      Just (AsBinders xs) -> mapM_ (named args) xs >> Right ([], Just xs)
+    let binders = maybe bracketed id declared
+    mapM_ (bound args occurrences declared) bracketed
+    -- **The class a role carries comes from the check that validated it**
+    -- (MS8 phase 153). 'stringClass' has to look the sort up anyway to
+    -- refuse an occurrence or a binder that is not at a @Token String@
+    -- class, so it hands the class back rather than being asked twice —
+    -- which is also what leaves 'role' below with no unreachable branch to
+    -- fall through into.
+    occClasses <- traverse (withClass OccurrenceNotString) occurrences
+    bndClasses <- traverse (withClass BinderNotString) binders
+    let role x
+          | Just cls <- lookup x occClasses = Occurrence cls
+          | Just cls <- lookup x bndClasses = Binder cls
+          | (bs : _) <- scopeOf x, not (null bs) =
+              Scope [ i | (y, i) <- zip args [0 ..], y `elem` bs ]
+          | otherwise = Plain
+        arguments = [ Argument x srt (role x) | x <- args, srt <- take 1 [ t | Slot y t _ <- items, y == x ] ]
+        vacuousNames = [ x | Just xs <- [declared], x <- xs, x `notElem` bracketed ]
+    Right (items, arguments, vacuousNames)
+  where
     item i = case i of
       Word w -> case sortOf w of
         Nothing  -> reservedTerminal w >> Right (Terminal w)
         Just srt -> reservedScan w srt >> Right (Slot w srt [])
-      Binding hd _ | kind == JudgmentBlock -> Left (NotationBinds hd)
+      Binding hd _ | not binds -> Left (NotationBinds hd)
       Binding hd bs -> case sortOf hd of
         Just srt@(OfLanguage _) -> Right (Slot hd srt bs)
         _ -> Left (NotAMetavariable hd)
@@ -569,6 +607,15 @@ checkNotation installed env b = do
     ms -> refuse (NotationMetavars ms)
   prods <- traverse (\p -> either (refuse . InProduction (productionName p)) Right (production g p))
              (blockProductions b)
+  -- **A block that installs a grammar and declares a role describes the whole
+  -- datatype** (MS8 phase 160), because that is what the substitution family is
+  -- generated from. Said here, where the author can act on it.
+  case [ c | not editing
+           , any (isJust . productionMetadata) (blockProductions b)
+           , GlobalName c <- constructorsOf g
+           , GlobalName c `notElem` map gproductionName prods ] of
+    [] -> Right ()
+    cs -> refuse (ConstructorsUnspelled cs)
   Right (Grammar NotationBlock (grammarName g) (grammarMetavars g) prods)
   where
     name = blockName b
@@ -584,6 +631,7 @@ checkNotation installed env b = do
     fresh = case lookupInductive (GlobalName name) env of
       Just _  -> Just (Grammar NotationBlock (GlobalName name) [name] [])
       Nothing -> Nothing
+    editing = any ((== GlobalName name) . grammarName) installed
 
     refuse :: GrammarProblem -> Either GrammarError a
     refuse = Left . GrammarError NotationBlock name
@@ -616,7 +664,54 @@ checkNotation installed env b = do
     -- (MS8 phase 160). Everything else names a function, as §4.8 had it.
     isHeader p = productionName p == name
 
-    production g p = do
+    -- **A production names a type former, a constructor of the datatype, or a
+    -- function into it, and the name's declaration says which** (MS8 phase 160).
+    -- This is the /describing/ side of the line: the question is what the name
+    -- already is, not what this block is declaring, so nothing is inferred from
+    -- scope — §4.8's refused inference was about choosing the production's /form/
+    -- when the name might be a clash, and here the name must already be declared
+    -- for the block to mean anything at all.
+    constructorsOf gr = case lookupInductive (grammarName gr) env of
+      Just d  -> map constructorName (inductiveConstructors d)
+      Nothing -> []
+
+    production g p
+      | isHeader p || GlobalName (productionName p) `elem` constructorsOf g = declaring g p
+      | otherwise = applying g p
+
+    -- **A type former's or a constructor's spelling**: its shape is a
+    -- @language@ block's — roles, binding forms and all, since there is a real
+    -- constructor for the metadata to be about — and what it is checked against
+    -- is the declaration it describes.
+    declaring g p = do
+      -- **Roles belong to the block that installs the grammar** — HIS ruling,
+      -- 2026-10-11. A block editing a grammar whose substitution family is
+      -- already declared cannot add to it, so saying so here is better than
+      -- generating a second family that collides with the first.
+      case (productionMetadata p, editing) of
+        (Just _, True) -> Left (RolesAfterTheGrammar (grammarName g))
+        _ -> Right ()
+      (items, args, _) <- constructorShape sortOf True p
+      let f = GlobalName (productionName p)
+      if isHeader p then Right () else if taken f then Left FunctionHasNotation else Right ()
+      (domains, kind') <-
+        if isHeader p
+          then case lookupInductive f env of
+                 Just d  -> Right (map entryType (inductiveParameters d ++ inductiveIndices d), TypeFormer)
+                 Nothing -> Left NotADeclaredFunction
+          else do
+            (ds, result) <- maybe (Left NotADeclaredFunction) Right (functionShape env f)
+            if typeHead env result == Just (grammarName g)
+              then Right ()
+              else Left (FunctionResult (whnf env [] result))
+            Right (ds, Constructor)
+      if length domains == length args
+        then Right ()
+        else Left (FunctionArity (length domains) (length args))
+      sequence_ [ slotIs a dom | (a, dom) <- zip args domains ]
+      Right (GProduction f items args kind')
+
+    applying g p = do
       items <- traverse item (productionItems p)
       if null items then Left NoItems else Right ()
       case productionMetadata p of
@@ -630,27 +725,16 @@ checkNotation installed env b = do
           args = [ Argument x srt Plain
                  | x <- nub (map fst slots), srt <- take 1 [ t | (y, t) <- slots, y == x ] ]
           f = GlobalName (productionName p)
-      -- **A type former's arity is its telescope**, parameters then indices, and
-      -- its result is a universe by construction — so there is nothing for the
-      -- §4.8 result check to say about it. A function's arity and result are
-      -- read off its type as before.
-      (domains, kind') <-
-        if isHeader p
-          then case lookupInductive f env of
-                 Just d  -> Right (map entryType (inductiveParameters d ++ inductiveIndices d), TypeFormer)
-                 Nothing -> Left NotADeclaredFunction
-          else do
-            if taken f then Left FunctionHasNotation else Right ()
-            (ds, result) <- maybe (Left NotADeclaredFunction) Right (functionShape env f)
-            if typeNamed env result == Just (grammarName g)
-              then Right ()
-              else Left (FunctionResult (whnf env [] result))
-            Right (ds, Function)
+      if taken f then Left FunctionHasNotation else Right ()
+      (domains, result) <- maybe (Left NotADeclaredFunction) Right (functionShape env f)
+      if typeNamed env result == Just (grammarName g)
+        then Right ()
+        else Left (FunctionResult (whnf env [] result))
       if length domains == length args
         then Right ()
         else Left (FunctionArity (length domains) (length args))
       sequence_ [ slotIs a dom | (a, dom) <- zip args domains ]
-      Right (GProduction f items args kind')
+      Right (GProduction f items args Function)
 
     -- **The parameter has to be at the slot's own type.** A function whose
     -- argument is anything else could not be handed what the notation reads
@@ -921,7 +1005,11 @@ substitutionNames gs g
 -- appear twice and are what 'substitutable' refuses.
 variableProductions :: Grammar -> [(GlobalName, GProduction)]
 variableProductions g
-  | grammarKind g /= LanguageBlock = []
+  -- **The roles decide, not the kind of block** (MS8 phase 160). A @context@'s
+  -- and a @judgment@'s productions carry no occurrence role, so the test that
+  -- used to stand here was true of them by what the roles say rather than by
+  -- the label — and a @notation@ block that installs a grammar for a
+  -- hand-written datatype declares roles exactly as a @language@ block does.
   | otherwise =
       [ (cls, p)
       | p <- constructorProductions g
@@ -1027,7 +1115,13 @@ grammarsReached gs g = walk [] [g]
 -- **A judgment gets none**: it generates a datatype of rules and no functions.
 classesSubstituted :: [Grammar] -> Grammar -> [GlobalName]
 classesSubstituted gs g
-  | grammarKind g == JudgmentBlock = []
+  -- **A grammar with no constructor production has nothing to substitute into**
+  -- (MS8 phase 160), which is the test that replaced asking whether a
+  -- @judgment@ block declared it. A judgment's productions are its statement's
+  -- spelling and whatever notation was added to it; its /constructors/ are its
+  -- rules, which are not productions at all. Same answer, and it is now true of
+  -- a @notation@ block that spells a hand-written type former too.
+  | null (constructorProductions g) = []
   | otherwise = [ cls | cls <- classesReached gs g, isJust (classOwner gs g cls) ]
 
 -- | **The language a grammar reaches a class through** — the one among the

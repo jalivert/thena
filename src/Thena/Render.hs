@@ -1577,6 +1577,11 @@ renderDeclareError ren e = case e of
     -- MS8 phase 158, §4.8. A @notation@ block extends a grammar, so both of
     -- these are about the header rather than about a production.
     NoSuchGrammar -> g ++ " is not a language, a context or a judgment that is declared"
+    ConstructorsUnspelled cs ->
+      blockAt k g ++ ": it declares a role, so it generates " ++ g
+        ++ "'s substitution from these productions \8212 and "
+        ++ intercalate ", " cs ++ (case cs of { [_] -> " is"; _ -> " are" })
+        ++ " a constructor of " ++ g ++ " that no production spells"
     NotationMetavars ms ->
       blockAt k g ++ ": it may not declare the metavariable"
         ++ (case ms of { [_] -> " "; _ -> "s " }) ++ intercalate ", " ms
@@ -1638,6 +1643,9 @@ renderDeclareError ren e = case e of
       FunctionResult r -> p ++ " returns " ++ renderCore ren [] r ++ ", not a " ++ g
       FunctionBinds x -> x ++ " is written as a binding form, and an application binds nothing"
       FunctionMetadata -> p ++ " is a function, so there is no constructor for the metadata to be about"
+      RolesAfterTheGrammar gr ->
+        "a role belongs to the block that installs the grammar, and " ++ nameString gr
+          ++ "'s is installed already, with its substitution generated from the roles it had then"
     -- MS6 phase 108, §6.2–6.4.
     InRule r why -> blockAt k g ++ ", rule " ++ r ++ ": " ++ case why of
       RuleUnparsed part what text failure ->

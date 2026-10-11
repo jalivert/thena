@@ -3118,7 +3118,28 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
     | blockKind b == NotationBlock -> case checkNotation (grammars m) (globals m) b of
         Left e -> stop (load [] m) msgs warns (Refused (GrammarRefused e))
         Right delta ->
-          let m' = m { grammars = notationInto delta (grammars m) }
+          -- **A @notation@ block that INSTALLS a grammar generates its
+          -- substitution family** (MS8 phase 160, HIS ruling of 2026-10-10:
+          -- *"generating nothing and declaring nothing was never a goal, just a
+          -- way to talk about it"*). So @data@ plus @notation@ is the same thing
+          -- as a @language@ block, equipment included, which is what makes the
+          -- block forms sugar rather than a claim that they are.
+          --
+          -- **A block that only EDITS a grammar still generates nothing**: that
+          -- grammar's family was declared when it was installed and a second
+          -- cannot be declared over it, which is why roles are refused there
+          -- (@RolesAfterTheGrammar@).
+          let installs = grammarName delta `notElem` map grammarName (grammars m)
+              gs' = notationInto delta (grammars m)
+              g' = case [ g | g <- gs', grammarName g == grammarName delta ] of
+                     g : _ -> g
+                     []    -> delta
+              (fs, n1)
+                | installs = surfaceProgram (names m)
+                    ([ ItemTheorem x ty body | (x, ty, body) <- substitutionDefinitions gs' g' ]
+                       ++ map ItemGrammar (substitutionNotations gs' g'))
+                | otherwise = ([], names m)
+              m' = (Engine.splicing fs m) { grammars = gs', names = n1 }
            in if exhausted
                 then stop m' msgs warns (Paused spent)
                 else spending fuel spent s { sessionMachine = m' } msgs warns

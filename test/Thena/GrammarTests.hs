@@ -95,6 +95,51 @@ lexing =
   where
     tokens lexer src = map (\(Located _ t) -> t) <$> lexer src
 
+-- | The write-up's §4 Example 1, both ways (MS8 phase 160). @same@ is `refl`, so
+-- the load asserts that the notation builds the hand-written term.
+lamByHand :: String
+lamByHand =
+  unlines
+    [ "module Lam where", ""
+    , "w : Token String"
+    , "w = /[a-z]+/", ""
+    , "language Tw, P, Q where"
+    , "  twBase  -> ο"
+    , "  twArrow -> ( P ⇒ Q )", ""
+    , "data Lam : Type₀ where"
+    , "  { lmVar : String -> Lam"
+    , "  ; lmAbs : String -> Tw -> Lam -> Lam"
+    , "  ; lmApp : Lam -> Lam -> Lam }", ""
+    , "notation Lam where"
+    , "  lmVar : w as occurrence -> w"
+    , "  lmAbs : w as binder     -> ( ƛ w : P . Lam[w] )"
+    , "  lmApp                   -> ( Lam₁ Lam₂ )", ""
+    , "e : Lam"
+    , "e = Lam`( ƛ a : ο . a )`", ""
+    , "same : Eq Lam e (lmAbs \"a\" twBase (lmVar \"a\"))"
+    , "same = refl Lam (lmAbs \"a\" twBase (lmVar \"a\"))", ""
+    ]
+
+lamByBlock :: String
+lamByBlock =
+  unlines
+    [ "module Lam where", ""
+    , "w : Token String"
+    , "w = /[a-z]+/", ""
+    , "language Tw, P, Q where"
+    , "  twBase  -> ο"
+    , "  twArrow -> ( P ⇒ Q )", ""
+    , "language Lam, M, N, E where"
+    , "  lmVar : w as occurrence -> w"
+    , "  lmAbs : w as binder     -> ( ƛ w : P . E[w] )"
+    , "  lmApp                   -> ( M N )", ""
+    ]
+
+loadOrSay :: Session -> String -> Either String Session
+loadOrSay s0 src = case loadProofSource s0 src of
+  (s1, ProofLoaded {}) -> Right s1
+  (s1, other) -> Left (last (renderResponse s1 other))
+
 -- | A judgment indexed by a judgment, declared by hand and then spelled — the
 -- shape `~wkv37` said a @judgment@ block cannot generate (MS8 phase 160).
 validSource :: String
@@ -443,7 +488,71 @@ joiningWith block = joining ++ "\n" ++ block ++ "\n"
 -- 'constructorProductions' does not see it.
 notating :: [TestTree]
 notating =
-  [ -- **THE HEADER FORM GIVES A DECLARED NAME ITS OWN SPELLING, AND THE NAME
+  [ -- **`data` PLUS `notation` IS A `language` BLOCK, EQUIPMENT INCLUDED** (MS8
+    -- phase 160, HIS ruling of 2026-10-10: *"generating nothing and declaring
+    -- nothing was never a goal, just a way to talk about it"*). This is the
+    -- write-up's §4 Example 1 hand-written, and the two routes are compared on
+    -- the three things that could differ: the datatype, the generated family,
+    -- and what a reading of the notation builds.
+    testCase "a block that installs a grammar generates the substitution family" $ do
+      (s0, _) <- startingSession
+      byHand <- either assertFailure pure (loadOrSay s0 lamByHand)
+      byBlock <- either assertFailure pure (loadOrSay s0 lamByBlock)
+      -- The datatype, constructor for constructor.
+      said byHand ":show Lam" @?= said byBlock ":show Lam"
+      -- The family, which the hand-written route generated from the roles its
+      -- @notation@ block declared.
+      said byHand ":infer Lam-subst-w" @?= ["Lam-subst-w : Lam -> String -> Lam -> Lam"]
+      said byHand ":infer Lam-subst-w" @?= said byBlock ":infer Lam-subst-w"
+      -- And @same@ in the fixture is `refl`, so the load itself asserts that
+      -- the notation builds exactly the hand-written constructor application.
+      map gproductionKind (concat [ grammarProductions g | g <- grammars (machineOf byHand)
+                                                         , grammarName g == GlobalName "Lam" ])
+        -- Three constructors, and the 'Function' is the generated substitution's
+        -- own notation block (phase 159) — so the equipment arrived with its
+        -- spelling, exactly as a @language@ block's does.
+        @?= [Constructor, Constructor, Constructor, Function]
+    -- **A role belongs to the block that installs the grammar** — HIS ruling,
+    -- 2026-10-11. The family is generated once, from the roles the grammar was
+    -- installed with, and a block that edits a grammar cannot add to a family
+    -- that is already declared.
+  , testCase "a role in a block that edits a grammar is refused, and says where it belongs" $ do
+      (s0, _) <- startingSession
+      loadOrSay s0 (unlines
+        [ "module E where", ""
+        , "x : Token String"
+        , "x = /[a-z]+/", ""
+        , "language Ty, T, S where"
+        , "  base  -> ι"
+        , "  arrow -> ( T -> S )", ""
+        , "context Ctx, Γ where"
+        , "  empty  -> ·"
+        , "  extend -> Γ , x : T", ""
+        , "notation Ctx where"
+        , "  extend : x as occurrence -> ⟪ Γ , x , T ⟫", "" ])
+        @?= Left ("refused: in the notation for Ctx, production extend: a role belongs to the "
+                    ++ "block that installs the grammar, and Ctx's is installed already, with "
+                    ++ "its substitution generated from the roles it had then")
+    -- **The family is generated FROM THE GRAMMAR**, so a constructor with no
+    -- production would get no method and the generated @elim@ would be one
+    -- short — @D has 2 constructor(s), so this elim needs 2 method(s), not 1@,
+    -- three layers from the cause. In a @language@ block this cannot arise,
+    -- because there the productions are the constructors.
+  , testCase "a block that installs a grammar and declares a role must spell every constructor" $ do
+      (s0, _) <- startingSession
+      loadOrSay s0 (unlines
+        [ "module D where", ""
+        , "x : Token String"
+        , "x = /[a-z]+/", ""
+        , "data D : Type₀ where"
+        , "  { dOne : String -> D"
+        , "  ; dTwo : String -> D }", ""
+        , "notation D where"
+        , "  dOne : x as occurrence -> ⟨ x ⟩", "" ])
+        @?= Left ("refused: in the notation for D: it declares a role, so it generates D's "
+                    ++ "substitution from these productions — and dTwo is a constructor of D "
+                    ++ "that no production spells")
+  , -- **THE HEADER FORM GIVES A DECLARED NAME ITS OWN SPELLING, AND THE NAME
     -- NEED NOT BE A GRAMMAR** (MS8 phase 160, `~hwxrx`, and it closes `~wkv37`).
     -- This is the write-up's §4 Example 2, hand-written: a datatype declared in
     -- Surface, then a @notation@ block whose header is its statement's spelling.
