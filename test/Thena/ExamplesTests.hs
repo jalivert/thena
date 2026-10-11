@@ -73,6 +73,29 @@ tests =
         let (s', r) = command s1 ":infer preservation-tactics"
         renderResponse s' r @?=
           [ "preservation-tactics : ∀ (M : LC) (M1 : LC) (T : Ty) -> typing`· ⊢ ${M} : ${T}` -> step`${M} --> ${M1}` -> typing`· ⊢ ${M1} : ${T}`" ]
+    -- **MS8's done-when** (phase 161): POPLMark problem 1A over F-sub.
+    -- @examples/poplmark/@ is its OWN set and is deliberately unnumbered: the
+    -- numbered series above loads into one session and declares its own @Ty@,
+    -- which F-sub's would clash with (@refused: Ty is already declared@).
+    --
+    -- Transitivity is proved under one hypothesis, the paper's silent
+    -- weakening step, and that hypothesis is refuted in the same file — so
+    -- both statements are pinned here: the theorem must keep its hypothesis,
+    -- and the refutation must keep refuting it.
+    , testCase "POPLMark 1A is proved for F-sub, at its statement" $ do
+        (s0, _) <- startingSession
+        s <- foldl (\ms p -> ms >>= \s1 -> readFile p >>= \src -> case loadProofSource s1 src of
+                               (s2, ProofLoaded {}) -> pure s2
+                               (s2, other) -> refused p s2 other)
+               (pure s0)
+               [ "examples/poplmark/01-syntax.thena", "examples/poplmark/02-subtyping.thena"
+               , "examples/poplmark/03-typing.thena", "examples/poplmark/04-transitivity.thena" ]
+        let (s', r) = command s ":infer transitivity"
+        renderResponse s' r @?=
+          [ "transitivity : (∀ (Q : Ty) (G : Ctx) (Xn : String) (D : Ctx) (P : Ty) -> sub`${G} ⊢ ${P} <: ${Q}` -> sub`${G} , ${Xn} <: ${P} , ${D} ⊢ ${P} <: ${Q}`) -> ∀ (G : Ctx) (S : Ty) (Q : Ty) (T : Ty) -> sub`${G} ⊢ ${S} <: ${Q}` -> sub`${G} ⊢ ${Q} <: ${T}` -> sub`${G} ⊢ ${S} <: ${T}`" ]
+        let (s'', r') = command s ":infer wkIsFalse"
+        renderResponse s'' r' @?=
+          [ "wkIsFalse : (∀ (G : Ctx) (Xn : String) (D : Ctx) (P : Ty) -> sub`${G} ⊢ ${P} <: B` -> sub`${G} , ${Xn} <: ${P} , ${D} ⊢ ${P} <: B`) -> Empty {0}" ]
     ]
   where
     numbered f = case f of
