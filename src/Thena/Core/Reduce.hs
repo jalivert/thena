@@ -165,6 +165,15 @@ whnf env ctx = go 0
     -- of it. α-equality is a fast path and nothing more, exactly as 'convert'
     -- has one of its own.
     --
+    -- **THIS IS THE ONLY SITE THAT DECIDES WHETHER A TRUSTED NODE UNWRAPS, AND
+    -- KEEPING IT THE ONLY ONE IS HIS RULING OF 2026-10-05** — /two places
+    -- deciding when a trusted term unwraps is the two-sources-of-truth shape
+    -- this project has been bitten by./ Two other modules touch the node and
+    -- neither is a second opinion: "Thena.Core.Convert" compares two /stuck/
+    -- nodes field by field and never asks whether either contracts, and
+    -- 'Thena.Core.Trust.classify' reads this same condition in order to report
+    -- on it.
+    --
     -- **IT FIRES ONLY WHEN THE OBLIGATION LIST COMES BACK EMPTY, AND THE
     -- REASON IS THE MISSING COLLECTOR.** 'convert' answers with a verdict,
     -- level obligations and a counter; 'whnf' answers with a bare 'Core', so

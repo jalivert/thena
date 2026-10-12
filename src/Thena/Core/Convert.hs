@@ -217,6 +217,21 @@ related dir env = go
       -- be the one node in the language with no congruence, and two stuck nodes
       -- differing only by a δ-step inside a field would be refused.
       --
+      -- **The δ example, because the cost of not having this case is only
+      -- visible in one.** With @Nope : Type₀ ; Nope = Empty@ in scope, these two
+      -- are the same term after one δ-step, and both are stuck because neither
+      -- claim is met:
+      --
+      -- @
+      -- trusted Nope  (Eq Nat zero zero) p
+      -- trusted Empty (Eq Nat zero zero) p
+      -- @
+      --
+      -- Before this case 'convert' answered /no/ on that pair — two stuck nodes
+      -- were convertible only when syntactically identical — so a proof whose
+      -- two sides differed by that unfolding was refused, with nothing in the
+      -- message pointing at @Nope@.
+      --
       -- **All three fields, @actual@ included, and that is not redundant.**
       -- 'Thena.Core.Typing' checks the body /against/ @actual@ with 'subsumes',
       -- so a well-typed node's @actual@ may be any supertype of the body's own
