@@ -46,6 +46,7 @@ import Data.List (nub)
 
 import Thena.Core.Context (Context, Entry (..), entryVar)
 import Thena.Core.Convert (convert)
+import Thena.Core.Level (Level, Normal (..), normalise)
 import Thena.Core.Reduce (atLevels, primitiveNames, whnf)
 import Thena.Core.Term
   ( Core (..)
@@ -209,8 +210,14 @@ classify env ctx n claimed actual = case convert env ctx n claimed actual of
 -- proof that is fine; a wrong 'False' only means a claim is reported as
 -- 'Pending' when it could have been named as hopeless. So every shape this does
 -- not positively recognise as a rigid clash — η between a λ and a spine, a
--- stuck elimination, a nested trusted node, a difference that is only in level
--- arguments — answers 'False'.
+-- stuck elimination, a nested trusted node — answers 'False'.
+--
+-- **A difference that is only in a level IS recognised, since MS8 phase 166,
+-- and only when every level in it is closed** — see 'closedClash'. Three of the
+-- four places a level sits are compared: a 'Universe', and the level arguments
+-- of a 'Canonical' and of a 'Global' head. An 'Eliminate' is left out because
+-- 'key' answers 'Nothing' for one, so a stuck elimination is never called
+-- hopeless at all, level arguments or not.
 --
 -- **A variable is flexible here, which is the opposite of what unification
 -- means by it.** "Thena.Core.Unify"\'s @headOf@ calls an assumption rigid
@@ -247,15 +254,22 @@ hopeless env ctx claimed actual = fst (go ctx seed claimed actual)
     -- if there is one, is at an argument.
     positions c n s t = case (s, t) of
       (Pi i dom sc, Pi _ dom' sc') -> binder c n i dom sc dom' sc'
-      (Canonical _ _ as, Canonical _ _ bs) -> list c n as bs
-      -- A 'Universe' has no term positions, and a difference in its level is
-      -- not a clash: a level parameter is instantiated at a use exactly as a
-      -- term binder is.
-      (Universe _, Universe _)   -> (False, n)
+      (Canonical _ ls as, Canonical _ ls' bs)
+        | closedClashes ls ls' -> (True, n)
+        | otherwise            -> list c n as bs
+      -- A 'Universe' has no term positions, so its level is the whole of what
+      -- there is to compare.
+      (Universe k, Universe l)   -> (closedClash k l, n)
       -- Equal keys means the same literal.
       (Primitive _, Primitive _) -> (False, n)
-      -- A rigid spine: equal keys gave the same head and the same arity.
-      _ -> list c n (snd (spine s)) (snd (spine t))
+      -- A rigid spine: equal keys gave the same head and the same arity, and
+      -- equal keys say nothing about the head's level arguments, because 'key'
+      -- does not carry them.
+      _ -> case (spine s, spine t) of
+        ((Global _ ls, as), (Global _ ls', bs))
+          | closedClashes ls ls' -> (True, n)
+          | otherwise            -> list c n as bs
+        ((_, as), (_, bs))       -> list c n as bs
 
     binder c n i dom sc dom' sc' =
       let (x, n1) = fresh n
@@ -310,6 +324,41 @@ data Key
   | KFormer GlobalName Int
   | KGlobal GlobalName Int
   deriving (Eq)
+
+-- | Are these two levels both /known/, and different?
+--
+-- **The only level reasoning in this module, and it is 'Eq' rather than
+-- algebra — MS8 phase 166, his ruling of 2026-10-12.** A
+-- 'Thena.Core.Level.Normal' is a constant plus @(variable, offset)@ pairs, so
+-- an empty pair list means no meta and no parameter: nothing in any later
+-- session can change such a level, which is the certainty 'hopeless' demands
+-- before it may answer 'True'. One variable on either side and the answer is
+-- 'False', unchanged — a level parameter is instantiated at a use exactly as a
+-- term binder is.
+--
+-- **Equality and not 'Thena.Core.Level.levelLeq', because discharge is
+-- equality.** 'classify' asks 'Thena.Core.Convert.convert', which compares
+-- universes at 'Thena.Core.Convert.Same'; cumulativity lives in @subsumes@ and
+-- is what the /typing/ rule uses, not what the contraction does. So a closed
+-- @Type₀@ against a closed @Type₁@ can never discharge however the hierarchy
+-- is ordered.
+--
+-- @
+-- closedClash (levelOfNat 0) (levelOfNat 1)   -- True
+-- closedClash (levelOfNat 0) (LVar (LRigid 7)) -- False, the rigid may become 0
+-- @
+closedClash :: Level -> Level -> Bool
+closedClash k l = case (normalise k, normalise l) of
+  (Normal a [], Normal b []) -> a /= b
+  _                          -> False
+
+-- | 'closedClash' at any position of two heads' level arguments.
+--
+-- **Mismatched lengths answer 'False'**: equal 'Key's gave the same name, so
+-- that cannot arise from a well-formed term, and inventing a clash out of a
+-- malformed one is the wrong side to err on.
+closedClashes :: [Level] -> [Level] -> Bool
+closedClashes ks ls = or (zipWith closedClash ks ls)
 
 -- ---------------------------------------------------------------------------
 -- The walk

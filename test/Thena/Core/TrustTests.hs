@@ -156,6 +156,21 @@ pairs =
     , Undischargeable )
   , ( "two different formers"
     , term "Empty {0}", term "Eq {0} Nat zero zero", Undischargeable )
+    -- **The two level clashes phase 166 added**, in this list rather than
+    -- beside it so the crossing below asks the reducer about them too: a
+    -- verdict of 'Undischargeable' is worthless if the node contracts anyway.
+  , ( "a clash in the former's level argument"
+    , term "Eq {1} Nat zero zero", term "Eq {0} Nat zero zero"
+    , Undischargeable )
+  , ( "two closed universe levels that differ"
+    , term "Type\8320", term "Type\8321", Undischargeable )
+    -- **A 'Canonical' carries a level argument too, and it is a second branch
+    -- of the same test** — @Eq {1} Nat zero zero@ above is a 'Global' spine,
+    -- because a datatype former applied to its arguments is one; a saturated
+    -- /constructor/ is the 'Canonical' case.
+  , ( "a clash in a constructor's level argument"
+    , term "refl {1} Nat zero", term "refl {0} Nat zero"
+    , Undischargeable )
   ]
 
 classes :: [TestTree]
@@ -193,14 +208,43 @@ classes =
   , testCase "a \955 against something else declines rather than guessing" $
       classed (term "\955 (A : Type\8320) -> A") (term "Nat") @?= Pending
 
-    -- **A deliberate conservatism**, and it is stated as a test so that nobody
-    -- reads it as an oversight: the positional test is about term structure,
-    -- and a level is instantiated at a use exactly as a binder is.
-  , testCase "a difference only in a universe level is pending" $
-      classed (term "Type\8320") (term "Type\8321") @?= Pending
+    -- **WHERE THE LEVEL TEST STOPS, AND IT IS THE WHOLE OF WHY IT IS SAFE**
+    -- (MS8 phase 166). A closed level cannot change, so two closed levels that
+    -- differ are a permanent clash — that is the pair in 'pairs'. A level that
+    -- is still a parameter is instantiated at a use exactly as a term binder
+    -- is, so the same two universes answer 'Pending' the moment one of them
+    -- carries a variable. The two tests below are the same shape as that pair
+    -- with one level opened, and they are what stops a wrong /impossible/ from
+    -- refusing a sound proof.
+  , testCase "a universe level that is still a parameter is pending" $
+      classed (Universe (LVar (LRigid 900))) (term "Type\8321") @?= Pending
+  , testCase "a parameter in the former's level argument is pending too" $
+      classed (atLevel (LVar (LRigid 900)) (term "Eq {1} Nat zero zero"))
+              (term "Eq {0} Nat zero zero")
+        @?= Pending
+  , testCase "and a parameter in a constructor's level argument as well" $
+      classed (atLevel (LVar (LRigid 900)) (term "refl {1} Nat zero"))
+              (term "refl {0} Nat zero")
+        @?= Pending
   ]
   where
     metaLevel k = Universe (LVar (LMeta k))
+
+-- | The same head at a different level argument, reaching through an
+-- application spine to find it.
+--
+-- **Two constructors carry a level argument and both are reached from here** —
+-- a 'Canonical', which is a saturated constructor, and a 'Global', which is
+-- what a datatype former applied to its arguments has at its head. A fixture
+-- with neither is a bug in the fixture, so it stops the suite.
+atLevel :: Level -> Core -> Core
+atLevel l = go
+  where
+    go t = case t of
+      Canonical g _ as -> Canonical g [l] as
+      Global g _       -> Global g [l]
+      App f x          -> App (go f) x
+      _ -> error "fixture has no level argument to move"
 
 -- | Does the reducer contract this node away?
 contracts :: Core -> Core -> Bool

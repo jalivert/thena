@@ -539,9 +539,10 @@ convertible, so the claim is met and the trust is carrying nothing —
 instance in any later session. The last is decided by comparing the two types
 position by position: `Eq Nat zero (succ zero)` against `Eq Nat zero zero` agrees
 at the head and clashes at the third argument, so a head-only test would miss it.
-Anything not positively a clash between closed formers counts as merely pending,
-because calling an honest claim impossible costs a refused proof while the
-converse costs only a less specific report.
+A clash in a closed universe level counts too — see *A universe level decides
+impossible when it is known* below. Anything not positively a clash counts as
+merely pending, because calling an honest claim impossible costs a refused proof
+while the converse costs only a less specific report.
 
 **A claim is read at the use where the use settles it, and at the definition
 otherwise, and the report says which.** That distinction is the point rather than
@@ -574,6 +575,92 @@ The alternative reading is that the setting means *no asserted type reaches this
 proof at all*, which is a stricter promise and makes the setting unusable in a
 system whose own prelude asserts anything. **If that reading wins, this paragraph
 and the one above it are what has to change with it.**
+
+### A universe level decides *impossible* when it is known, and only then
+
+*Decided 2026-10-12.* Classifying an asserted type as **undischargeable** — it can
+never be met, by any instance, in any later session — is a comparison of two types
+position by position, and until this decision it ignored universe levels
+altogether. The reason it did is real: a level written in a declaration is not
+always a number. It is generalised into a parameter and instantiated at each use,
+exactly as a term binder is, so *"these two levels differ"* is not on its own a
+reason to call anything impossible.
+
+Take a definition whose claim sits at its own level parameter while its body's type
+sits one above:
+
+```
+declare g : Type ; g = trusted Type Type₀
+```
+
+Its two types agree at exactly one instance, and the report follows the use rather
+than the declaration:
+
+```
+thena spine> :whnf g {1}
+Type₀
+thena spine> :trust
+  discharged, at the use of g
+    claims Type₁
+    body   Type₁
+```
+
+At any other instance the claim is false, and it was being reported as *pending* —
+*not yet* — about something that is never:
+
+```
+thena spine> :whnf g {0}
+trusted Type₀ Type₁ Type₀
+thena spine> :trust
+  undischargeable, at the use of g      <- said "pending" before this decision
+    claims Type₀
+    body   Type₁
+```
+
+**The line is whether every level in the comparison is closed.** A level's normal
+form is a constant plus a set of variables with offsets; an empty variable set
+means no metavariable and no parameter, so nothing in any later session can move
+it, and two such levels that differ are a permanent clash. One variable anywhere
+and the answer goes back to *pending* — reach the same `g` through a further
+definition, where its parameter is still standing, and that is what you get:
+
+```
+thena spine> :trust
+  pending, in h · g
+    claims Type (ℓ₁₀₂₁)
+    body   Type₁
+```
+
+That line is right, and `g {1}` above is the instance that discharges it.
+
+**It is equality, not the subtyping order.** A node contracts when its two types
+are *convertible*, and conversion asks for levels to be equal; cumulativity lives
+in the typing rule, which is a different question. So a closed `Type₀` against a
+closed `Type₁` can never discharge, however the hierarchy is ordered, and no
+reasoning about `max` or about constraints is involved — the comparison is
+equality of normal forms, which the implementation already had.
+
+**A level sits in more places than a universe, and the commoner one is a former's
+level argument.** `Type₀` against `Type₁` is the rare shape; a datatype used at two
+levels is the ordinary one, and it hides behind heads that agree:
+
+```
+thena spine> :trust
+  undischargeable, written here
+    claims Eq {1} Nat zero zero
+    body   Eq {0} Nat zero zero
+```
+
+Same datatype, same three arguments, and the whole of the clash is in the level.
+Both a saturated constructor's level arguments and an applied former's are compared
+this way.
+
+**Where it deliberately stops.** An eliminator carries level arguments too and they
+are not compared, because a stuck elimination is never called impossible at all —
+it may still compute. The governing rule is unchanged and is what makes the whole
+test safe to have: it answers *impossible* only where it is certain, and *pending*
+everywhere else, because calling an honest claim impossible refuses a sound proof
+while the converse costs only a less specific report.
 
 ### A primitive that supplies a type is retired; a primitive that computes stays
 
