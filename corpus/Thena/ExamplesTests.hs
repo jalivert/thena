@@ -42,44 +42,28 @@ tests =
         (s0, _) <- startingSession
         standard <- rulesPath >>= \p -> (,) p <$> readFile p
         sEnd <- go s0 [standard] files
-        -- **The any-context preservation statement is pinned HERE and not in a
-        -- session of its own** (MS8 phase 162): the walk has already loaded
-        -- @10@, and reloading it to check one statement cost 37 s. `07`'s and
-        -- `08`'s own pins predate the walk returning its session.
-        let (sInf, rInf) = command sEnd ":infer preservationAny"
-        renderResponse sInf rInf @?=
-          [ "preservationAny : ∀ (G : Ctx) (M : LC) (M1 : LC) (T : Ty) -> typing`${G} ⊢ ${M} : ${T}` -> step`${M} --> ${M1}` -> typing`${G} ⊢ ${M1} : ${T}`" ]
-    -- **MS6's done-when** (phase 109b): preservation for STLC, proved in the
-    -- surface language over the language 01–03 declare, and stated as it is
-    -- here — for closed terms (his choice, ms6/CLOSEOUT.md 32).
-    , testCase "preservation for STLC is proved, at its statement" $ do
-        (s0, _) <- startingSession
-        s <- foldl (\ms p -> ms >>= \s1 -> readFile p >>= \src -> case loadProofSource s1 src of
-                               (s2, ProofLoaded {}) -> pure s2
-                               (s2, other) -> refused p s2 other)
-               (pure s0)
-               [ "examples/01-stlc-syntax.thena", "examples/02-contexts.thena"
-               , "examples/03-typing-and-reduction.thena", "examples/07-preservation.thena" ]
-        let (s', r) = command s ":infer preservation"
-        renderResponse s' r @?=
+        -- **THE HEADLINE STATEMENTS ARE PINNED IN THE WALK'S OWN SESSION, not
+        -- in sessions of their own** (MS8 phase 163, at his instruction). Each
+        -- used to reload the prefix it needed from scratch, and the walk had
+        -- already loaded all of it: measured 7.4 s for `07`'s pin, 13.5 s for
+        -- `08`'s and 37 s for `10`'s, against 25.8 s for the walk itself.
+        -- Pinning them here costs nothing, and @go@ returning its session is
+        -- the whole of what it took.
+        let pin cmd expected =
+              let (s', r) = command sEnd cmd in renderResponse s' r @?= expected
+        -- **MS6's done-when** (phase 109b): preservation for STLC, in the
+        -- surface language, for closed terms (his choice, ms6/CLOSEOUT.md 32).
+        pin ":infer preservation"
           [ "preservation : ∀ (M : LC) (M1 : LC) (T : Ty) -> typing`· ⊢ ${M} : ${T}` -> step`${M} --> ${M1}` -> typing`· ⊢ ${M1} : ${T}`" ]
-    -- **And by tactics** (his ruling, 2026-09-21: both ways). 08 proves every
-    -- lemma again with attack, intro, eliminate-core and elaborate, and ends
-    -- at the same statement.
-    , testCase "and again by tactics, at the same statement" $ do
-        (s0, _) <- startingSession
-        s <- foldl (\ms p -> ms >>= \s1 -> readFile p >>= \src -> case loadProofSource s1 src of
-                               (s2, ProofLoaded {}) -> pure s2
-                               (s2, other) -> refused p s2 other)
-               (pure s0)
-               [ "examples/01-stlc-syntax.thena", "examples/02-contexts.thena"
-               , "examples/03-typing-and-reduction.thena", "examples/07-preservation.thena" ]
-        (s1, out, stopped) <- loadFile s "examples/08-preservation-by-tactics.thena.script"
-        if null stopped then pure ()
-          else assertFailure (unlines (concatMap (renderResponse s1) out))
-        let (s', r) = command s1 ":infer preservation-tactics"
-        renderResponse s' r @?=
+        -- **And by tactics** (his ruling, 2026-09-21: both ways). `08` proves
+        -- every lemma again with attack, intro, eliminate-core and elaborate
+        -- and ends at the same statement; the walk runs that script, so this
+        -- only has to check where it ended.
+        pin ":infer preservation-tactics"
           [ "preservation-tactics : ∀ (M : LC) (M1 : LC) (T : Ty) -> typing`· ⊢ ${M} : ${T}` -> step`${M} --> ${M1}` -> typing`· ⊢ ${M1} : ${T}`" ]
+        -- **MS8 phase 162**: the same theorem for ANY context, on one trusted law.
+        pin ":infer preservationAny"
+          [ "preservationAny : ∀ (G : Ctx) (M : LC) (M1 : LC) (T : Ty) -> typing`${G} ⊢ ${M} : ${T}` -> step`${M} --> ${M1}` -> typing`${G} ⊢ ${M1} : ${T}`" ]
     -- **MS8's done-when** (phase 161): POPLMark problem 1A over F-sub.
     -- @examples/poplmark/@ is its OWN set and is deliberately unnumbered: the
     -- numbered series above loads into one session and declares its own @Ty@,

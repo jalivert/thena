@@ -16,6 +16,23 @@ extra-doc-files:    CHANGELOG.md
 data-files:         prelude/prelude.thena
                     rules/standard.thena.rules
 
+-- **The example corpus is behind a manual flag, OFF by default** — his
+-- instruction, 2026-10-12: the slow corpus tests *"run only when explicitly
+-- executed."*
+--
+-- > cabal test thena-examples --flags=examples
+--
+-- **A second test-suite is NOT opt-in by itself, which was measured the wrong
+-- way round first.** `thena-boundary` is skipped by `cabal test` because it
+-- depends on `thena:view` and not on `thena`, so it is a different component in
+-- the plan — not because it is a second suite. Declaring `thena-examples` as an
+-- ordinary second suite made `cabal test` run both. Hence the flag, which makes
+-- the suite unbuildable unless it is asked for, so it can never silently pass.
+flag examples
+    description:        Build the slow example-corpus test suite.
+    default:            False
+    manual:             True
+
 common warnings
     ghc-options: -Wall
 
@@ -306,7 +323,6 @@ test-suite thena-test
         Thena.SubstitutionTests
         Thena.ContextTests
         Thena.JudgmentTests
-        Thena.ExamplesTests
         Thena.ObjectTermTests
         Thena.TokenTests
         Thena.SyntaxTests
@@ -322,6 +338,34 @@ test-suite thena-test
 
 -- | The frontend's own boundary, compiled (MS7 phase 126).
 --
+-- **The example corpus, and `cabal test` does NOT run it** — his instruction,
+-- 2026-10-12. Of the 30 s the corpus cost the main suite, 29 s was this group:
+-- loading the whole numbered series in one session and proving its headline
+-- theorems. The TAPL proofs he named are under a second each and stayed in
+-- `thena-test`, because moving them would cost coverage and buy nothing.
+--
+-- > cabal test thena-examples
+--
+-- A second test-suite is opt-in by cabal's own behaviour, the same way
+-- `thena-boundary` is. See `corpus/Main.hs`.
+test-suite thena-examples
+    import:             warnings
+    if !flag(examples)
+        buildable:      False
+    hs-source-dirs:     corpus
+    default-language:   GHC2024
+    type:               exitcode-stdio-1.0
+    main-is:            Main.hs
+    ghc-options:        -threaded -rtsopts "-with-rtsopts=-N"
+    other-modules:
+        Thena.ExamplesTests
+    build-depends:
+        base ^>=4.21.2.0,
+        directory,
+        tasty,
+        tasty-hunit,
+        thena
+
 -- **It depends on `thena:view` and NOT on `thena`**, which is the whole of the
 -- test: a module the re-export list does not name cannot be imported here, and
 -- a view that cannot be reached without one does not compile. See the header of
