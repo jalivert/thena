@@ -22,6 +22,15 @@ to the file.
 | `08-preservation-by-tactics.thena.script` | **The same proof again, by tactics**, as a script of command lines: each lemma a `:theorem`, its inductions and case splits done with `eliminate-core`, the cases filled with `elaborate ⟨ … ⟩`, the β case taken apart by two nested eliminations. Reuses 07's definitions, not its lemmas |
 | `09-printing.thena` | **Terms shown in their own notation** — the other direction from 01. A judgment's statement printed as it reads on paper; a name kept rather than unfolded into what it stands for, in a splice; the splices the printer writes where a grammar groups by splicing, as 05 writes them by hand; a variable spelled like one of the grammar's own terminals, which is fenced where the same position otherwise is not; reading it all back with `:core` |
 
+## System F-sub — `poplmark/`, its own set
+
+**`examples/poplmark/` is loaded in a FRESH session**, not with the series above: it
+declares its own `Ty`, and two languages of one name cannot be installed at once. Six
+files, read in order, answering the POPLMark challenge's problem 1A — transitivity of
+subtyping for System F-sub. `examples/poplmark/README.md` is the account: what is proved,
+the one premise added to the paper's rules and why, and the one step that is left over
+with its refutation.
+
 ## The earlier proofs — TAPL's arithmetic language, by hand
 
 Written in MS4 and MS5, before object languages existed. The language is a
