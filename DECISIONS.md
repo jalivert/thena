@@ -614,10 +614,41 @@ be full normalisation, which may diverge and has no business in `qed`'s path.
 
 **The session carries a trust level with three settings** — *no trust*, *no
 undischargeable trust*, *any trust* — and the user moves between them freely,
-including between theorems. `qed` asks about trust *after* the kernel has
-accepted the term, because this is policy and not the kernel's judgement, and it
-reports the classification whether or not it refuses. The expected pattern is to
+including between theorems. The setting is asked *after* the kernel has accepted
+the term, because this is policy and not the kernel's judgement, and the
+classification is reported whether or not it refuses. The expected pattern is to
 sit on the middle setting and drop to *any* for one strange thing.
+
+**It is asked at both of the ways a definition reaches the environment, and
+getting that wrong was a real hole.** A definition arrives either by closing a
+proof or by being written down whole, and for a while only the first asked — so
+a definition resting on a claim that can never be met could be *declared* at the
+strictest setting, and the setting bit only when some later proof used it. The
+strictest setting is the one soundness guarantee, and it has to mean *nothing
+unsound gets in* rather than *nothing unsound is concluded*: a declared
+definition is a first-class inhabitant of the environment, it is listed, the
+prompt completes against it, a later declaration may mention it in a type, and it
+outlives the setting in a script. Both doors now refuse the same way:
+
+```
+thena spine> :trust none
+thena spine> declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)
+the trust level refused it
+trust: no trust
+  undischargeable, written here
+    claims Eq {ℓ₁} Nat zero (succ zero)
+    body   Eq {0} Nat zero zero
+thena spine> :trust any
+thena spine> declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)
+```
+
+Writing something knowingly false therefore means saying so first, which is the
+setting doing its job rather than the system preventing anything.
+
+**What the setting still says nothing about is what is already in the
+environment.** The report is a view on the proof in front of you, so immediately
+after a definition is admitted it is not what the report is about — and that is
+a separate question from admission, deliberately left open.
 
 **Only *no trust* is a soundness guarantee, and the middle one is not sold as
 one.** What the middle setting refuses is a claim that is provably false, and a

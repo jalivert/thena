@@ -20,6 +20,9 @@ solved: A
 solved: ?ℓ54
 thena spine> :whnf honest {0}
 refl {0} Nat zero
+thena spine> :trust any
+trust: any trust
+  resting on nothing
 thena spine> declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)
 chose 79: elaborate
 solved: ?ℓ80

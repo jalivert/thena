@@ -537,6 +537,20 @@ developmentTrust s =
     one (acc, n) (ctx, t) =
       let (cs, n1) = trustIn (globals m) ctx n t in (acc ++ cs, n1)
 
+-- | Every claim this list of closed terms rests on, with the name counter
+-- threaded through all of them and left on the machine.
+--
+-- **The machine-level twin of 'termTrust', and it exists because the second
+-- trust door has no 'Session' in hand** (MS8 phase 167): the @declare@ check
+-- runs inside 'spending', where what there is is a 'Machine'. Same fold, same
+-- 'nub', same reason for returning the counter — §7.4, and @HAZARDS.md@ on the
+-- renumbering that dropping it causes.
+termsTrust :: Machine -> [Core] -> ([TrustClaim], Machine)
+termsTrust m ts = (nub claims, m { names = n })
+  where
+    (claims, n) = foldl one ([], names m) ts
+    one (acc, k) t = let (cs, k1) = trustIn (globals m) [] k t in (acc ++ cs, k1)
+
 -- | One claim per distinct verdict. The same node is reached once per term it
 -- stands in, and a chain repeats a type as often as it mentions it.
 advanced :: Session -> ([TrustClaim], Int) -> ([TrustClaim], Session)
@@ -772,10 +786,14 @@ data Stop
     -- ^ the kernel would not accept what the development built (§5.3). Shaped
     -- like 'Refused': the command is abandoned, and there is nothing to retry
   | Untrusted TrustLevel [TrustClaim]
-    -- ^ @qed@ — the kernel accepted it and **the session's trust level does
-    -- not** (MS8 phase 151). The level asked, and every claim the term rests
-    -- on, not only the offending ones: a user deciding whether to step down a
-    -- rung wants the whole picture.
+    -- ^ the kernel accepted it and **the session's trust level does not** (MS8
+    -- phase 151). The level asked, and every claim the term rests on, not only
+    -- the offending ones: a user deciding whether to step down a rung wants the
+    -- whole picture.
+    --
+    -- **Both doors into the environment answer this** — @qed@ since phase 151
+    -- and @declare@ since phase 167. One response for one question, because
+    -- there is nothing a user needs to do differently about the two.
     --
     -- **A second stop and not a 'Uncertified'**, because it is not the kernel's
     -- answer. @certify@ says whether the term has the type; whether the trust in
@@ -3085,22 +3103,69 @@ spending fuel done s msgs warns = case step (sessionMachine s) of
     -- any type is, and 'checkedTokenClass' says whether it is a class.
     Right _ | Left e <- checkedTokenClass (globals m) nm ty t ->
       stop (load [] m) msgs warns (Refused e)
+    -- **THE SESSION'S TRUST LEVEL IS ASKED HERE TOO, AND THIS IS THE SECOND OF
+    -- THE TWO DOORS INTO THE ENVIRONMENT** (MS8 phase 167, on his ruling of
+    -- 2026-10-12). A definition arrives either by closing a proof or by being
+    -- written down whole, and until this phase only @qed@ asked — so a false
+    -- definition could be *declared* at every rung, the strictest included, and
+    -- the rung bit only when a later proof used it. The strictest rung is the
+    -- system's one soundness guarantee, and it has to mean /nothing unsound
+    -- gets into the environment/ rather than /nothing unsound is concluded/: a
+    -- declared definition appears in @:show@, the prompt completes against it,
+    -- a later declaration may mention it in a type, and it outlives the rung
+    -- setting in a script.
+    --
+    -- **Both halves are walked, the declared type as well as the body.** A type
+    -- is a term and may carry a claim of its own; 'trustIn''s pre-pass makes
+    -- the second walk free for everything that rests on nothing, which is
+    -- almost every definition.
+    --
+    -- **The shape is 'admit''s, deliberately** — same question, same answer,
+    -- same 'Untrusted' stop, at the other door. The counter the walks spend is
+    -- carried forward whether the check refuses or passes, which is what
+    -- 'termsTrust' returns the machine for.
     Right (sub, residue) -> case generalised (names m) residue (substLevelsIn sub ty) t of
       Left u -> stop (load [] m) msgs warns (Uncertified (Levels u))
       Right (d, n1) ->
         let
+          -- **Asked of the finished definition, which is one step later than
+          -- @qed@ asks** and deliberately so: after 'generalised' the levels
+          -- are the prenex parameters the definition will carry, so a refusal
+          -- prints @Eq {ℓ₁} Nat zero (succ zero)@ — the spelling @:show@ would
+          -- have printed — where asking before it prints @Eq {?ℓ1082}@ and names
+          -- a metavariable the user never wrote. The verdicts do not move:
+          -- generalisation only turns an unsolved meta into a parameter, and
+          -- 'Thena.Core.Trust.hopeless' treats both as flexible.
+          (claims, mw) =
+            termsTrust m { names = n1 } [definitionType d, definitionBody d]
+          -- **THE WALK'S COUNTER IS KEPT ONLY WHEN THE CHECK REFUSES, AND THAT
+          -- IS NOT A SHORTCUT — it is 'Thena.Core.Trust.hopeless''s own
+          -- argument one level up.** @trustIn@ opens every binder it descends
+          -- under, so a /look/ spends names; §7.4 says a number shown to the
+          -- user must never be handed out again. On a refusal the claims are
+          -- shown, so 'mw' is what stops. On success they are discarded here
+          -- and **nothing minted escapes** — the opened copies never enter the
+          -- context, the development or the stored definition — so the
+          -- generalisation's own counter is what goes on.
+          --
+          -- **Measured, 2026-10-12: keeping it on the success path too cost
+          -- every session 39 names at startup** and moved five goldens that
+          -- trust nothing, because the prelude's declarations reach its claims
+          -- and get walked. @HAZARDS.md@ has the phase-151 version of this.
           -- **The plicities are installed beside the definition** (MS4 phase
           -- 44b) and only when there are any, so a global whose signature said
           -- nothing implicit adds no entry at all.
-          m'      = m { globals    = addDefinition nm d (globals m)
-                      , names      = n1
-                      , signatures = if Explicit `elem` ps && Implicit `notElem` ps
-                                       then signatures m
-                                       else (nm, ps) : signatures m
-                      }
-       in if exhausted
-            then stop m' msgs warns (Paused spent)
-            else spending fuel spent s { sessionMachine = m' } msgs warns
+          m' = m { globals    = addDefinition nm d (globals m)
+                 , names      = n1
+                 , signatures = if Explicit `elem` ps && Implicit `notElem` ps
+                                  then signatures m
+                                  else (nm, ps) : signatures m
+                 }
+         in if not (null (unmet (trustLevel m) claims))
+              then stop (load [] mw) msgs warns (Untrusted (trustLevel m) claims)
+              else if exhausted
+                then stop m' msgs warns (Paused spent)
+                else spending fuel spent s { sessionMachine = m' } msgs warns
 
   -- **A primitive is installed only if the system can reduce it** (MS6 phase
   -- 97b). Two checks, and both are the reason @primitive@ is not a postulate:

@@ -18,6 +18,9 @@ solved: ?ℓ69
 already equal
 solved: A
 solved: ?ℓ54
+thena spine> :trust none
+trust: no trust
+  resting on nothing
 thena spine> declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)
 chose 79: elaborate
 solved: ?ℓ80
@@ -38,6 +41,34 @@ solved: ?ℓ110
 already equal
 solved: A
 solved: ?ℓ92
+the trust level refused it
+trust: no trust
+  undischargeable, written here
+    claims Eq {ℓ₁₁₇} Nat zero (succ zero)
+    body   Eq {0} Nat zero zero
+thena spine> :trust any
+trust: any trust
+  resting on nothing
+thena spine> declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)
+chose 120: elaborate
+solved: ?ℓ121
+already equal
+chose 127: elaborate
+already equal
+already equal
+solved: ?ℓ121
+chose 135: elaborate
+solved: ?ℓ136
+already equal
+chose 142: elaborate
+already equal
+already equal
+solved: ?ℓ136
+chose 150: elaborate
+solved: ?ℓ151
+already equal
+solved: A
+solved: ?ℓ133
 thena spine> :trust none
 trust: no trust
   resting on nothing

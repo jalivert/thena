@@ -1422,6 +1422,12 @@ tests =
         , ":whnf honest {0}"
           -- False, and it type-checks anyway. **That is the deal**: the node is
           -- where the unproved obligation is written down, and it stays there.
+          --
+          -- **It has to be asked for since MS8 phase 167**: a definition whose
+          -- claim the rung does not permit is refused at @declare@, and this
+          -- one is undischargeable, so the default rung turns it away. Dropping
+          -- to @any@ is the user saying they mean it.
+        , ":trust any"
         , "declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)"
         , ":whnf liar {0}"
           -- @trusted _ e@ is an ordinary placeholder in the type position — his
@@ -1463,10 +1469,19 @@ tests =
           "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
         , "data Eq (A : Type) : A -> A -> Type where { refl : \8704 (a : A) -> Eq A a a }"
         , "declare honest : Eq Nat zero zero ; honest = trusted (Eq Nat zero zero) (refl Nat zero)"
+          -- **THE DECLARE DOOR** (MS8 phase 167, his ruling on MS8 closeout
+          -- 13). The same line is refused at the strictest rung and accepted at
+          -- @any@, which is the whole of the phase: a false definition cannot
+          -- be written into the environment without the rung permitting it.
+          -- Before 167 the first of these three lines succeeded.
+        , ":trust none"
         , "declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)"
-          -- The strictest rung, and nothing is resting on it yet: a declared
-          -- global is not what the report is about. **The report is a view on
-          -- the development** — his ruling, 2026-10-06.
+        , ":trust any"
+        , "declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)"
+          -- Back to the strictest rung, and nothing is resting on it yet: a
+          -- declared global is not what the *report* is about, which is
+          -- unchanged — **the report is a view on the development**, his ruling
+          -- of 2026-10-06. What 167 changed is admission, not reporting.
         , ":trust none"
         , ":theorem viaHonest : Eq {0} Nat zero zero"
         , "attack"

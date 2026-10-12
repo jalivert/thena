@@ -38,6 +38,7 @@ import Data.List (isPrefixOf)
 import Thena.Core.Typing (check, infer)
 import Thena.Driver
   ( Response (..)
+  , Session
   , Stop (..)
   , machineOf
   , command
@@ -45,6 +46,7 @@ import Thena.Driver
   , parseDeclaration
   )
 import Thena.Engine (Machine (..))
+import Thena.Standard (withRules)
 import Thena.Errors (TypeError (..))
 import Thena.Global.Declare (DeclareError (..), declare)
 import Thena.Global.Env
@@ -92,6 +94,7 @@ tests =
     , testGroup "names" nameTests
     , testGroup "printed and read back" roundTripTests
     , testGroup "generalisation turns a proof into a scheme" generaliseTests
+    , testGroup "the trust level guards the declare door" declareDoorTests
     , equipment
     , computedLevels
     ]
@@ -707,3 +710,88 @@ generaliseTests =
     -- A non-dependent function type between two universes, built by hand: the
     -- concrete syntax cannot write a meta down.
     arrow a b = Pi (Ident "_") (Universe a) (close (fst (fresh 990)) (Universe b))
+
+-- --------------------------------------------------------------------------
+-- The second door into the environment (MS8 phase 167)
+-- --------------------------------------------------------------------------
+
+-- | A definition arrives either by closing a proof or by being written down
+-- whole, and **the session's trust level is asked at both**.
+--
+-- Until phase 167 only @qed@ asked, so a definition resting on a claim that can
+-- never be met could be /declared/ at the strictest rung and the rung bit only
+-- when a later proof used it. These tests are the unit-level pin; the
+-- end-to-end one is @test\/golden\/trust.golden@, which drives the same three
+-- lines and shows what the refusal prints.
+--
+-- **The fixture is @liar@, whose claim is undischargeable**: it asserts
+-- @Eq Nat zero (succ zero)@ over a body whose type is @Eq Nat zero zero@, and
+-- those clash at argument 3 under any instance.
+declareDoorTests :: [TestTree]
+declareDoorTests =
+  [ testCase "a definition that can never be met is refused at no trust" $
+      case drive [":trust none", liarLine] of
+        Ran _ _ (Untrusted _ claims)
+          | not (null claims) -> pure ()
+        r -> assertFailure ("expected Untrusted, got " ++ show r)
+
+    -- **A refusal must leave nothing behind**, which is the whole point: the
+    -- hole was that the name went in and only a later proof found out.
+  , testCase "and nothing of it reaches the environment" $
+      let (s, _) = driveTo [":trust none", liarLine]
+       in isDeclared (GlobalName "liar") (globals (machineOf s)) @?= False
+
+    -- The rung is the user's own setting, so saying so lets it in.
+  , testCase "the same line is admitted at any trust" $
+      case drive [":trust any", liarLine] of
+        Ran _ _ Completed -> pure ()
+        r -> assertFailure ("expected Completed, got " ++ show r)
+  , testCase "and then it is there" $
+      let (s, _) = driveTo [":trust any", liarLine]
+       in isDeclared (GlobalName "liar") (globals (machineOf s)) @?= True
+
+    -- **The check must not refuse what it has no business refusing.**
+    -- @honest@'s claim is pending at its declaration — the declared type's
+    -- level is a prenex parameter and the body's is @0@ — and pending is what
+    -- the default rung permits, so an ordinary session is untouched.
+  , testCase "an honest definition still declares at the default rung" $
+      case drive [honestLine] of
+        Ran _ _ Completed -> pure ()
+        r -> assertFailure ("expected Completed, got " ++ show r)
+
+    -- And the strictest rung does refuse it, because pending is not
+    -- discharged — the same answer @qed@ has always given.
+  , testCase "but no trust refuses even an honest pending claim" $
+      case drive [":trust none", honestLine] of
+        Ran _ _ (Untrusted _ _) -> pure ()
+        r -> assertFailure ("expected Untrusted, got " ++ show r)
+  ]
+  where
+    drive = snd . driveTo
+
+-- | Drive lines through a fresh session over @Nat@ and @Eq@, answering with the
+-- session and the last response. A setup line that does not complete is a bug
+-- in the fixture, so it stops the suite.
+driveTo :: [String] -> (Session, Response)
+driveTo ls = foldl one (setUp, Blank) ls
+  where
+    one (s, _) l = command s l
+    -- **The rule base comes from "Thena.Standard", not from IO.** @declare@
+    -- runs the @elaborate@ rule, so a bare 'newSession' halts with
+    -- @NoClauseMatched@ before it ever reaches the trust check.
+    setUp = foldl step withRules [natLine, eqLine]
+    step s l = case command s l of
+      (s', Ran _ _ Completed) -> s'
+      (_, r) -> error ("fixture line failed: " ++ l ++ " => " ++ show r)
+
+natLine, eqLine, honestLine, liarLine :: String
+natLine = "data " ++ natDecl
+eqLine =
+  "data Eq (A : Type) : A -> A -> Type \
+  \where { refl : \8704 (a : A) -> Eq A a a }"
+honestLine =
+  "declare honest : Eq Nat zero zero ; \
+  \honest = trusted (Eq Nat zero zero) (refl Nat zero)"
+liarLine =
+  "declare liar : Eq Nat zero (succ zero) ; \
+  \liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)"

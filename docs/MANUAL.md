@@ -948,13 +948,22 @@ mid-flight, or for convincing yourself the machine has not cheated.
 
 Some things are true and you cannot prove them here. `trusted T e` is a term
 whose type is **asserted**: `e` is checked as usual, at whatever type it really
-has, and the term is then given `T` with nothing relating the two. Both of these
-are accepted, and the second one is a lie:
+has, and the term is then given `T` with nothing relating the two.
+
+`honest` below asserts something that is already true, so it goes in without
+comment. `liar` asserts something false, and a definition does not reach the
+environment unless the session's trust setting allows what it rests on — so it
+has to be asked for. The next section is what that setting is; `:trust any`
+allows everything, and we put the setting back straight afterwards:
 
 ```
 thena spine> declare honest : Eq Nat zero zero ; honest = trusted (Eq Nat zero zero) (refl Nat zero)
 …
+thena spine> :trust any
+…
 thena spine> declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)
+…
+thena spine> :trust no-undischargeable
 …
 thena spine> :whnf honest {0}
 refl {0} Nat zero
@@ -1000,9 +1009,12 @@ a definition and a lie at a use of it. `liar`'s claim is undischargeable at
 `liar {0}` and tells you nothing at all read from a partial application.
 
 `:trust none`, `:trust no-undischargeable` and `:trust any` set how much is
-allowed. A session starts at `no-undischargeable`, and `qed` refuses a proof
-resting on something the setting does not permit — after the kernel has already
-accepted it, because this is your policy and not the kernel's judgement.
+allowed. A session starts at `no-undischargeable`, and the setting is asked at
+**both** of the ways a definition reaches the environment — `qed` refuses a proof
+resting on something it does not permit, and `declare` refuses a definition the
+same way, which is why `liar` above had to be asked for. Both ask after the
+kernel has already accepted the term, because this is your policy and not the
+kernel's judgement.
 
 ```
 thena spine> :trust
