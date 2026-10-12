@@ -659,10 +659,67 @@ nonsense: `Empty` is provable that way. It stops accidents, not adversaries.
 one part of the above that is a choice rather than a consequence.** A claim whose
 two types are convertible is met, so the body already has the type the node
 asserts and the node reduces away; refusing it would refuse a term that is sound.
-The alternative reading is that the setting means *no asserted type reaches this
-proof at all*, which is a stricter promise and makes the setting unusable in a
-system whose own prelude asserts anything. **If that reading wins, this paragraph
-and the one above it are what has to change with it.**
+*Settled 2026-10-12: this reading stands.*
+
+**What *discharged* means operationally, because the strictest setting is exactly
+as strong as this answer.** It is: **convertible now, by computation, with
+nothing left open.**
+
+- **Computation counts.** The question is put to the real conversion checker, so
+  reduction, unfolding a definition and η all count — it is not syntactic
+  identity. With `N = Nat` and `one = succ zero`, a claim of `Eq N zero zero` over
+  a body of type `Eq Nat zero zero` is discharged, and so is `Eq Nat one (succ
+  zero)` over `Eq Nat (succ zero) (succ zero)`. Neither pair is equal as written.
+- **Nothing may be left owing.** A *yes* that owes a constraint on universe
+  levels does not count as discharged, which is the same condition the
+  contraction itself declines on. This keeps the report and the reducer saying
+  the same thing rather than nearly the same thing.
+- **It is asked, never recorded.** The classification is recomputed every time it
+  is wanted, so a claim is pending while something is open and discharged the
+  instant that thing is supplied — the same node, the same definition, a
+  different answer at a different instance.
+
+So the strictest setting admits exactly what the reducer would contract away, and
+nothing else: at that setting every asserted type in a proof is one the system
+could have erased.
+
+**The alternative reading, kept as `~xhf2g`, is that the setting should mean *no
+asserted type reaches this proof at all*.** That is a stricter promise and a
+one-line change. **What it would cost is smaller than it first appears, and the
+earlier claim here was wrong**: it is not that the prelude becomes unusable
+because its own claims are discharged — the prelude's claims are *pending*, so
+they already fail the strictest setting today. What the literal reading would cost
+is only a proof that reaches a claim which genuinely is discharged. **If that
+reading ever wins, this subsection is what changes with it.**
+
+### What a proof rests on is a view, asked for, and never pushed at you
+
+*Decided 2026-10-06, and the consequence accepted 2026-10-12.* The accounting of
+what a development rests on — every asserted type it reaches, classified, and
+where each one came from — is a **view**: it walks the proof when you ask it and
+nothing anywhere recomputes it when the proof changes. It is deliberately not a
+hook in type checking. Checking runs on every refinement; *what does this proof
+currently rest on* is a question about the chain, the same shape as asking where
+you are, so it is answered when it is asked.
+
+**The cost is that the answer can go stale and nothing says so.** At a prompt
+that is harmless: you ask, you discharge a claim, the old text is still on your
+screen and you know it. **In a tool that draws it, it is harmless in only one
+direction.** A panel that draws the report and caches it will show *fewer*
+outstanding claims than there really are, and look authoritative doing it. Fewer
+is the direction that matters, because this report is what a reader checks before
+believing a proof.
+
+**So the rule is that a frontend re-asks rather than caches**, which is the rule
+it already follows for every other view, and this is deliberately not made the
+first exception to it. What makes re-asking cheap is a pre-pass: before walking
+anything, the accounting asks whether the term reaches an asserted type at all
+and stops immediately if it does not, which is the answer for almost every term
+in the system.
+
+**There is no notification, and that is the decision rather than an omission.**
+Telling a frontend *your report has changed* would be the first thing of its kind
+in the system, and it is not needed by a frontend that redraws.
 
 ### A universe level decides *impossible* when it is known, and only then
 
