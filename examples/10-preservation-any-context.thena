@@ -1,0 +1,451 @@
+-- Preservation for the simply typed λ-calculus, FOR ANY CONTEXT:
+--
+--     Γ ⊢ M : T   and   M --> M'   give   Γ ⊢ M' : T
+--
+-- LOAD AFTER 01, 02, 03 AND 07. It reuses 07's definitions and lemmas.
+-- Then try   :infer preservationAny      :trust
+--
+-- == What 07 could not do, and what makes this possible
+--
+-- `07` proves the same theorem for CLOSED terms. The obstruction with an open
+-- one is that the argument of a β-redex may have free names, so substituting it
+-- under a binder can capture — and then the generated substitution RENAMES the
+-- binder, to `LC-fresh-x x ‹names to avoid›`. Proving the proof then needs to
+-- know that the minted name really is fresh, and that is a fact about
+-- `appendString`, which computes only on literals. Nothing in the type theory
+-- ties it to anything on a name nobody knows.
+--
+-- **So this file trusts exactly one thing, and it is that fact.** `~wdcf3`'s
+-- promise, now kept: a trusted core term is the principled escape hatch, so the
+-- unprovable leaf is written down as a claim the kernel checks the body of, and
+-- everything above it is proved.
+--
+-- `:trust` reports it, and `:trust none` refuses this file's theorem — which is
+-- the point: a reader is told what the proof rests on.
+
+module StlcPreservationAny where
+
+-- ---------------------------------------------------------------------------
+-- THE ONE TRUSTED LAW: the chooser's specification.
+--
+-- `LC-fresh-x y avoid` is the first of y, y', y'', … that is not in `avoid`,
+-- and the generated code uses `avoid` itself as the recursion's fuel — among
+-- n+1 candidates one must escape a list of n names. That argument is a
+-- pigeonhole over strings that are pairwise distinct because each is one `'`
+-- longer than the last, and the length equation for `appendString` is what the
+-- type theory cannot state. It is TRUE and it is not derivable here.
+--
+-- Written in the development calculus, because the surface cannot put a
+-- trusted term under a λ (`~tg5x5`), and the claim is about all y and avoid.
+--
+-- The body is honestly `Empty -> Empty`. So the claim is DISCHARGED whenever
+-- `avoid` is empty — there `In c (nil String)` IS `Empty` — and pending
+-- otherwise, which is exactly when the trust is load-bearing.
+do define-global "freshIsFresh"
+     (resolve-core core`∀ (y : String) (avoid : List {0} String) -> In {0} (LC-fresh-x {0} y avoid) avoid -> Empty {0}`)
+     (resolve-core core`λ (y : String) (avoid : List {0} String) -> trusted (In {0} (LC-fresh-x {0} y avoid) avoid -> Empty {0}) (Empty {0} -> Empty {0}) (λ (e : Empty {0}) -> e)`)
+
+
+-- ---------------------------------------------------------------------------
+-- Free variables: four facts about `fvA`, 07's spelled-out `LC-fv-x`.
+--
+-- `fvA t bound acc` walks t, carrying the names bound on the way down and an
+-- accumulator, and `LC-fv-x t` is `fvA t · ·` — proved by `refl` in 07 as
+-- `fvIs`. Nothing below is about trust; it is the bookkeeping the renaming case
+-- of the substitution lemma needs, and 07 never needed it because it never
+-- renamed.
+
+-- A name already accumulated stays accumulated.
+fvAKeeps : forall (t : LC) (bound : List String) (acc : List String) (z : String)
+             (h : In z acc) -> In z (fvA t bound acc)
+fvAKeeps = \ t ->
+  elim LC () (\ u -> forall (bound : List String) (acc : List String) (z : String)
+                       (h : In z acc) -> In z (fvA u bound acc))
+    ((\ x bound acc z h ->
+        elim Or ((And (Eq Comparison (member x bound) same) (In x bound))
+                 (And (Eq Comparison (member x bound) different) (In x bound -> Empty)))
+          (\ o -> In z (fvA (var x) bound acc))
+          ((\ hs -> subst Comparison
+                      (\ q -> In z (elim Comparison () (\ q1 -> List String) ((acc) (cons String x acc)) () q))
+                      same (member x bound)
+                      (sym Comparison (member x bound) same
+                        (andLeft (Eq Comparison (member x bound) same) (In x bound) hs))
+                      h)
+           (\ hs -> subst Comparison
+                      (\ q -> In z (elim Comparison () (\ q1 -> List String) ((acc) (cons String x acc)) () q))
+                      different (member x bound)
+                      (sym Comparison (member x bound) different
+                        (andLeft (Eq Comparison (member x bound) different) (In x bound -> Empty) hs))
+                      (orRight (Eq String z x) (In z acc) h)))
+          () (memberSpec x bound))
+     (\ x T E r bound acc z h -> r (cons String x bound) acc z h)
+     (\ M N rM rN bound acc z h -> rM bound (fvA N bound acc) z (rN bound acc z h)))
+    () t
+
+-- Growing the accumulator grows the answer.
+fvAMono : forall (t : LC) (bound : List String) (acc : List String) (acc1 : List String)
+            (sub : forall (w : String) (hw : In w acc) -> In w acc1)
+            (z : String) (h : In z (fvA t bound acc)) -> In z (fvA t bound acc1)
+fvAMono = \ t ->
+  elim LC () (\ u -> forall (bound : List String) (acc : List String) (acc1 : List String)
+                       (sub : forall (w : String) (hw : In w acc) -> In w acc1)
+                       (z : String) (h : In z (fvA u bound acc)) -> In z (fvA u bound acc1))
+    ((\ x bound acc acc1 sub z h ->
+        elim Or ((And (Eq Comparison (member x bound) same) (In x bound))
+                 (And (Eq Comparison (member x bound) different) (In x bound -> Empty)))
+          (\ o -> In z (fvA (var x) bound acc1))
+          ((\ hs -> subst Comparison
+                      (\ q -> In z (elim Comparison () (\ q1 -> List String) ((acc1) (cons String x acc1)) () q))
+                      same (member x bound)
+                      (sym Comparison (member x bound) same
+                        (andLeft (Eq Comparison (member x bound) same) (In x bound) hs))
+                      (sub z (subst Comparison
+                                (\ q -> In z (elim Comparison () (\ q1 -> List String) ((acc) (cons String x acc)) () q))
+                                (member x bound) same
+                                (andLeft (Eq Comparison (member x bound) same) (In x bound) hs)
+                                h)))
+           (\ hs -> subst Comparison
+                      (\ q -> In z (elim Comparison () (\ q1 -> List String) ((acc1) (cons String x acc1)) () q))
+                      different (member x bound)
+                      (sym Comparison (member x bound) different
+                        (andLeft (Eq Comparison (member x bound) different) (In x bound -> Empty) hs))
+                      (elim Or ((Eq String z x) (In z acc))
+                        (\ o1 -> Or (Eq String z x) (In z acc1))
+                        ((\ q -> orLeft (Eq String z x) (In z acc1) q)
+                         (\ ia -> orRight (Eq String z x) (In z acc1) (sub z ia)))
+                        ()
+                        (subst Comparison
+                           (\ q -> In z (elim Comparison () (\ q1 -> List String) ((acc) (cons String x acc)) () q))
+                           (member x bound) different
+                           (andLeft (Eq Comparison (member x bound) different) (In x bound -> Empty) hs)
+                           h))))
+          () (memberSpec x bound))
+     (\ x T E r bound acc acc1 sub z h -> r (cons String x bound) acc acc1 sub z h)
+     (\ M N rM rN bound acc acc1 sub z h ->
+        rM bound (fvA N bound acc) (fvA N bound acc1)
+          (\ w hw -> rN bound acc acc1 sub w hw) z h))
+    () t
+
+-- A name in the answer either came from the term or was already accumulated.
+fvASplit : forall (t : LC) (bound : List String) (acc : List String) (z : String)
+             (h : In z (fvA t bound acc))
+             -> Or (In z (fvA t bound (nil String))) (In z acc)
+fvASplit = \ t ->
+  elim LC () (\ u -> forall (bound : List String) (acc : List String) (z : String)
+                       (h : In z (fvA u bound acc))
+                       -> Or (In z (fvA u bound (nil String))) (In z acc))
+    ((\ x bound acc z h ->
+        elim Or ((And (Eq Comparison (member x bound) same) (In x bound))
+                 (And (Eq Comparison (member x bound) different) (In x bound -> Empty)))
+          (\ o -> Or (In z (fvA (var x) bound (nil String))) (In z acc))
+          ((\ hs -> orRight (In z (fvA (var x) bound (nil String))) (In z acc)
+                      (subst Comparison
+                         (\ q -> In z (elim Comparison () (\ q1 -> List String) ((acc) (cons String x acc)) () q))
+                         (member x bound) same
+                         (andLeft (Eq Comparison (member x bound) same) (In x bound) hs) h))
+           (\ hs ->
+              elim Or ((Eq String z x) (In z acc))
+                (\ o1 -> Or (In z (fvA (var x) bound (nil String))) (In z acc))
+                ((\ q -> orLeft (In z (fvA (var x) bound (nil String))) (In z acc)
+                           (subst Comparison
+                              (\ qq -> In z (elim Comparison () (\ q1 -> List String) ((nil String) (cons String x (nil String))) () qq))
+                              different (member x bound)
+                              (sym Comparison (member x bound) different
+                                (andLeft (Eq Comparison (member x bound) different) (In x bound -> Empty) hs))
+                              (orLeft (Eq String z x) (In z (nil String)) q)))
+                 (\ ia -> orRight (In z (fvA (var x) bound (nil String))) (In z acc) ia))
+                ()
+                (subst Comparison
+                   (\ q -> In z (elim Comparison () (\ q1 -> List String) ((acc) (cons String x acc)) () q))
+                   (member x bound) different
+                   (andLeft (Eq Comparison (member x bound) different) (In x bound -> Empty) hs)
+                   h)))
+          () (memberSpec x bound))
+     (\ x T E r bound acc z h -> r (cons String x bound) acc z h)
+     (\ M N rM rN bound acc z h ->
+        elim Or ((In z (fvA M bound (nil String))) (In z (fvA N bound acc)))
+          (\ o -> Or (In z (fvA M bound (fvA N bound (nil String)))) (In z acc))
+          ((\ hm -> orLeft (In z (fvA M bound (fvA N bound (nil String)))) (In z acc)
+                      (fvAMono M bound (nil String) (fvA N bound (nil String))
+                        (\ w hw -> absurdly (In w (fvA N bound (nil String))) hw) z hm))
+           (\ hn -> elim Or ((In z (fvA N bound (nil String))) (In z acc))
+                      (\ o1 -> Or (In z (fvA M bound (fvA N bound (nil String)))) (In z acc))
+                      ((\ hn1 -> orLeft (In z (fvA M bound (fvA N bound (nil String)))) (In z acc)
+                                   (fvAKeeps M bound (fvA N bound (nil String)) z hn1))
+                       (\ ia -> orRight (In z (fvA M bound (fvA N bound (nil String)))) (In z acc) ia))
+                      () (rN bound acc z hn)))
+          () (rM bound (fvA N bound acc) z h)))
+    () t
+
+-- Only which names are bound matters, not the order they were bound in.
+fvABoundResp : forall (t : LC) (b1 : List String) (b2 : List String)
+                 (f : forall (w : String) (hw : In w b1) -> In w b2)
+                 (g : forall (w : String) (hw : In w b2) -> In w b1)
+                 (acc : List String) (z : String)
+                 (h : In z (fvA t b1 acc)) -> In z (fvA t b2 acc)
+fvABoundResp = \ t ->
+  elim LC () (\ u -> forall (b1 : List String) (b2 : List String)
+                       (f : forall (w : String) (hw : In w b1) -> In w b2)
+                       (g : forall (w : String) (hw : In w b2) -> In w b1)
+                       (acc : List String) (z : String)
+                       (h : In z (fvA u b1 acc)) -> In z (fvA u b2 acc))
+    ((\ x b1 b2 f g acc z h ->
+        elim Or ((And (Eq Comparison (member x b1) same) (In x b1))
+                 (And (Eq Comparison (member x b1) different) (In x b1 -> Empty)))
+          (\ o -> In z (fvA (var x) b2 acc))
+          ((\ hs ->
+              elim Or ((And (Eq Comparison (member x b2) same) (In x b2))
+                       (And (Eq Comparison (member x b2) different) (In x b2 -> Empty)))
+                (\ o1 -> In z (fvA (var x) b2 acc))
+                ((\ hs2 -> subst Comparison
+                             (\ q -> In z (elim Comparison () (\ q1 -> List String) ((acc) (cons String x acc)) () q))
+                             same (member x b2)
+                             (sym Comparison (member x b2) same
+                               (andLeft (Eq Comparison (member x b2) same) (In x b2) hs2))
+                             (subst Comparison
+                                (\ q -> In z (elim Comparison () (\ q1 -> List String) ((acc) (cons String x acc)) () q))
+                                (member x b1) same
+                                (andLeft (Eq Comparison (member x b1) same) (In x b1) hs) h))
+                 (\ hd2 -> absurdly (In z (fvA (var x) b2 acc))
+                             (andRight (Eq Comparison (member x b2) different) (In x b2 -> Empty) hd2
+                               (f x (andRight (Eq Comparison (member x b1) same) (In x b1) hs)))))
+                () (memberSpec x b2))
+           (\ hd ->
+              elim Or ((And (Eq Comparison (member x b2) same) (In x b2))
+                       (And (Eq Comparison (member x b2) different) (In x b2 -> Empty)))
+                (\ o1 -> In z (fvA (var x) b2 acc))
+                ((\ hs2 -> absurdly (In z (fvA (var x) b2 acc))
+                             (andRight (Eq Comparison (member x b1) different) (In x b1 -> Empty) hd
+                               (g x (andRight (Eq Comparison (member x b2) same) (In x b2) hs2))))
+                 (\ hd2 -> subst Comparison
+                             (\ q -> In z (elim Comparison () (\ q1 -> List String) ((acc) (cons String x acc)) () q))
+                             different (member x b2)
+                             (sym Comparison (member x b2) different
+                               (andLeft (Eq Comparison (member x b2) different) (In x b2 -> Empty) hd2))
+                             (subst Comparison
+                                (\ q -> In z (elim Comparison () (\ q1 -> List String) ((acc) (cons String x acc)) () q))
+                                (member x b1) different
+                                (andLeft (Eq Comparison (member x b1) different) (In x b1 -> Empty) hd) h)))
+                () (memberSpec x b2)))
+          () (memberSpec x b1))
+     (\ x T E r b1 b2 f g acc z h ->
+        r (cons String x b1) (cons String x b2)
+          (\ w hw -> elim Or ((Eq String w x) (In w b1)) (\ o -> Or (Eq String w x) (In w b2))
+                       ((\ q -> orLeft (Eq String w x) (In w b2) q)
+                        (\ i -> orRight (Eq String w x) (In w b2) (f w i))) () hw)
+          (\ w hw -> elim Or ((Eq String w x) (In w b2)) (\ o -> Or (Eq String w x) (In w b1))
+                       ((\ q -> orLeft (Eq String w x) (In w b1) q)
+                        (\ i -> orRight (Eq String w x) (In w b1) (g w i))) () hw)
+          acc z h)
+     (\ M N rM rN b1 b2 f g acc z h ->
+        rM b1 b2 f g (fvA N b2 acc) z
+          (fvAMono M b1 (fvA N b1 acc) (fvA N b2 acc)
+            (\ w hw -> rN b1 b2 f g acc w hw) z h)))
+    () t
+
+-- Binding one more name hides only that name: anything else free stays free.
+fvAAdd : forall (t : LC) (b : List String) (x : String) (acc : List String) (z : String)
+           (ne : Eq String z x -> Empty) (h : In z (fvA t b acc))
+           -> In z (fvA t (cons String x b) acc)
+fvAAdd = \ t ->
+  elim LC () (\ u -> forall (b : List String) (x : String) (acc : List String) (z : String)
+                       (ne : Eq String z x -> Empty) (h : In z (fvA u b acc))
+                       -> In z (fvA u (cons String x b) acc))
+    ((\ w b x acc z ne h ->
+        elim Or ((And (Eq Comparison (member w b) same) (In w b))
+                 (And (Eq Comparison (member w b) different) (In w b -> Empty)))
+          (\ o -> In z (fvA (var w) (cons String x b) acc))
+          ((\ hs ->
+              elim Or ((And (Eq Comparison (member w (cons String x b)) same) (In w (cons String x b)))
+                       (And (Eq Comparison (member w (cons String x b)) different) (In w (cons String x b) -> Empty)))
+                (\ o1 -> In z (fvA (var w) (cons String x b) acc))
+                ((\ hs2 -> subst Comparison
+                             (\ q -> In z (elim Comparison () (\ q1 -> List String) ((acc) (cons String w acc)) () q))
+                             same (member w (cons String x b))
+                             (sym Comparison (member w (cons String x b)) same
+                               (andLeft (Eq Comparison (member w (cons String x b)) same) (In w (cons String x b)) hs2))
+                             (subst Comparison
+                                (\ q -> In z (elim Comparison () (\ q1 -> List String) ((acc) (cons String w acc)) () q))
+                                (member w b) same
+                                (andLeft (Eq Comparison (member w b) same) (In w b) hs) h))
+                 (\ hd2 -> absurdly (In z (fvA (var w) (cons String x b) acc))
+                             (andRight (Eq Comparison (member w (cons String x b)) different) (In w (cons String x b) -> Empty) hd2
+                               (orRight (Eq String w x) (In w b)
+                                 (andRight (Eq Comparison (member w b) same) (In w b) hs)))))
+                () (memberSpec w (cons String x b)))
+           (\ hd ->
+              elim Or ((And (Eq Comparison (member w (cons String x b)) same) (In w (cons String x b)))
+                       (And (Eq Comparison (member w (cons String x b)) different) (In w (cons String x b) -> Empty)))
+                (\ o1 -> In z (fvA (var w) (cons String x b) acc))
+                ((\ hs2 ->
+                    elim Or ((Eq String w x) (In w b)) (\ o2 -> In z (fvA (var w) (cons String x b) acc))
+                      ((\ qwx ->
+                          subst Comparison
+                            (\ q -> In z (elim Comparison () (\ q1 -> List String) ((acc) (cons String w acc)) () q))
+                            same (member w (cons String x b))
+                            (sym Comparison (member w (cons String x b)) same
+                              (andLeft (Eq Comparison (member w (cons String x b)) same) (In w (cons String x b)) hs2))
+                            (elim Or ((Eq String z w) (In z acc)) (\ o3 -> In z acc)
+                               ((\ qzw -> absurdly (In z acc) (ne (trans String z w x qzw qwx)))
+                                (\ ia -> ia))
+                               ()
+                               (subst Comparison
+                                  (\ q -> In z (elim Comparison () (\ q1 -> List String) ((acc) (cons String w acc)) () q))
+                                  (member w b) different
+                                  (andLeft (Eq Comparison (member w b) different) (In w b -> Empty) hd) h)))
+                       (\ iwb -> absurdly (In z (fvA (var w) (cons String x b) acc))
+                                   (andRight (Eq Comparison (member w b) different) (In w b -> Empty) hd iwb)))
+                      () (andRight (Eq Comparison (member w (cons String x b)) same) (In w (cons String x b)) hs2))
+                 (\ hd2 -> subst Comparison
+                             (\ q -> In z (elim Comparison () (\ q1 -> List String) ((acc) (cons String w acc)) () q))
+                             different (member w (cons String x b))
+                             (sym Comparison (member w (cons String x b)) different
+                               (andLeft (Eq Comparison (member w (cons String x b)) different) (In w (cons String x b) -> Empty) hd2))
+                             (subst Comparison
+                                (\ q -> In z (elim Comparison () (\ q1 -> List String) ((acc) (cons String w acc)) () q))
+                                (member w b) different
+                                (andLeft (Eq Comparison (member w b) different) (In w b -> Empty) hd) h)))
+                () (memberSpec w (cons String x b))))
+          () (memberSpec w b))
+     (\ w T E r b x acc z ne h ->
+        fvABoundResp E (cons String x (cons String w b)) (cons String w (cons String x b))
+          (\ v hv -> elim Or ((Eq String v x) (In v (cons String w b)))
+                       (\ o -> Or (Eq String v w) (Or (Eq String v x) (In v b)))
+                       ((\ q -> orRight (Eq String v w) (Or (Eq String v x) (In v b))
+                                  (orLeft (Eq String v x) (In v b) q))
+                        (\ i -> elim Or ((Eq String v w) (In v b))
+                                  (\ o1 -> Or (Eq String v w) (Or (Eq String v x) (In v b)))
+                                  ((\ q -> orLeft (Eq String v w) (Or (Eq String v x) (In v b)) q)
+                                   (\ i1 -> orRight (Eq String v w) (Or (Eq String v x) (In v b))
+                                              (orRight (Eq String v x) (In v b) i1)))
+                                  () i))
+                       () hv)
+          (\ v hv -> elim Or ((Eq String v w) (In v (cons String x b)))
+                       (\ o -> Or (Eq String v x) (Or (Eq String v w) (In v b)))
+                       ((\ q -> orRight (Eq String v x) (Or (Eq String v w) (In v b))
+                                  (orLeft (Eq String v w) (In v b) q))
+                        (\ i -> elim Or ((Eq String v x) (In v b))
+                                  (\ o1 -> Or (Eq String v x) (Or (Eq String v w) (In v b)))
+                                  ((\ q -> orLeft (Eq String v x) (Or (Eq String v w) (In v b)) q)
+                                   (\ i1 -> orRight (Eq String v x) (Or (Eq String v w) (In v b))
+                                              (orRight (Eq String v w) (In v b) i1)))
+                                  () i))
+                       () hv)
+          acc z (r (cons String w b) x acc z ne h))
+     (\ M N rM rN b x acc z ne h ->
+        elim Or ((In z (fvA M b (nil String))) (In z (fvA N b acc)))
+          (\ o -> In z (fvA M (cons String x b) (fvA N (cons String x b) acc)))
+          ((\ hm -> fvAMono M (cons String x b) (nil String) (fvA N (cons String x b) acc)
+                      (\ v hv -> absurdly (In v (fvA N (cons String x b) acc)) hv) z
+                      (rM b x (nil String) z ne hm))
+           (\ hn -> elim Or ((In z (fvA N b (nil String))) (In z acc))
+                      (\ o1 -> In z (fvA M (cons String x b) (fvA N (cons String x b) acc)))
+                      ((\ hn1 -> fvAKeeps M (cons String x b) (fvA N (cons String x b) acc) z
+                                   (fvAMono N (cons String x b) (nil String) acc
+                                     (\ v hv -> absurdly (In v acc) hv) z
+                                     (rN b x (nil String) z ne hn1)))
+                       (\ ia -> fvAKeeps M (cons String x b) (fvA N (cons String x b) acc) z
+                                  (fvAKeeps N (cons String x b) acc z ia)))
+                      () (fvASplit N b acc z hn)))
+          () (fvASplit M b (fvA N b acc) z h)))
+    () t
+
+
+-- ---------------------------------------------------------------------------
+-- Two context moves. 07 has `weaken`, which takes any `Incl` witness; these
+-- are the two witnesses the renaming case needs, and the exchange that follows.
+
+-- Swapping the top two entries, when their names differ.
+inclSwap : forall (D : Ctx) (x : String) (S : Ty) (y : String) (U : Ty)
+             (ne : Eq String x y -> Empty)
+             -> Incl (extend (extend D x S) y U) (extend (extend D y U) x S)
+inclSwap = \ D x S y U ne z V i ->
+  elim Or ((And (Eq String z y) (Eq Ty V U)) (And (Eq String z y -> Empty) (extend-in z V (extend D x S))))
+    (\ o -> extend-in z V (extend (extend D y U) x S))
+    ((\ h -> subst String (\ w -> extend-in w V (extend (extend D y U) x S)) y z
+               (sym String z y (andLeft (Eq String z y) (Eq Ty V U) h))
+               (subst Ty (\ W -> extend-in y W (extend (extend D y U) x S)) U V
+                  (sym Ty V U (andRight (Eq String z y) (Eq Ty V U) h))
+                  (extend-there-extend (extend D y U) y U x S
+                    (\ q -> ne (sym String y x q)) (extend-here D y U))))
+     (\ h ->
+        elim Or ((And (Eq String z x) (Eq Ty V S)) (And (Eq String z x -> Empty) (extend-in z V D)))
+          (\ o1 -> extend-in z V (extend (extend D y U) x S))
+          ((\ h1 -> subst String (\ w -> extend-in w V (extend (extend D y U) x S)) x z
+                      (sym String z x (andLeft (Eq String z x) (Eq Ty V S) h1))
+                      (subst Ty (\ W -> extend-in x W (extend (extend D y U) x S)) S V
+                         (sym Ty V S (andRight (Eq String z x) (Eq Ty V S) h1))
+                         (extend-here (extend D y U) x S)))
+           (\ h1 -> extend-there-extend (extend D y U) z V x S
+                      (andLeft (Eq String z x -> Empty) (extend-in z V D) h1)
+                      (extend-there-extend D z V y U
+                        (andLeft (Eq String z y -> Empty) (extend-in z V (extend D x S)) h)
+                        (andRight (Eq String z x -> Empty) (extend-in z V D) h1))))
+          () (ctxInvExtend D x S z V (andRight (Eq String z y -> Empty) (extend-in z V (extend D x S)) h))))
+    () (ctxInvExtend (extend D x S) y U z V i)
+
+-- Inserting an entry that the one above it shadows. No condition at all: the
+-- inserted name is unreachable, so every lookup survives.
+inclShadow : forall (D : Ctx) (y : String) (U : Ty) (S : Ty)
+               -> Incl (extend D y S) (extend (extend D y U) y S)
+inclShadow = \ D y U S z V i ->
+  elim Or ((And (Eq String z y) (Eq Ty V S)) (And (Eq String z y -> Empty) (extend-in z V D)))
+    (\ o -> extend-in z V (extend (extend D y U) y S))
+    ((\ h -> subst String (\ w -> extend-in w V (extend (extend D y U) y S)) y z
+               (sym String z y (andLeft (Eq String z y) (Eq Ty V S) h))
+               (subst Ty (\ W -> extend-in y W (extend (extend D y U) y S)) S V
+                  (sym Ty V S (andRight (Eq String z y) (Eq Ty V S) h))
+                  (extend-here (extend D y U) y S)))
+     (\ h -> extend-there-extend (extend D y U) z V y S
+               (andLeft (Eq String z y -> Empty) (extend-in z V D) h)
+               (extend-there-extend D z V y U
+                 (andLeft (Eq String z y -> Empty) (extend-in z V D) h)
+                 (andRight (Eq String z y -> Empty) (extend-in z V D) h))))
+    () (ctxInvExtend D y S z V i)
+
+exchange : forall (D : Ctx) (x : String) (S : Ty) (y : String) (U : Ty) (e : LC) (V : Ty)
+             (ne : Eq String x y -> Empty) (d : typing (extend (extend D x S) y U) e V)
+             -> typing (extend (extend D y U) x S) e V
+exchange = \ D x S y U e V ne d ->
+  weaken (extend (extend D x S) y U) e V d (extend (extend D y U) x S) (inclSwap D x S y U ne)
+
+
+-- ---------------------------------------------------------------------------
+-- WEAKENING BY A NAME THE TERM DOES NOT USE.
+--
+-- 07's `weaken` needs every lookup of Γ to survive, which fails the moment the
+-- new name shadows one. This is the version the renaming case can actually
+-- supply a witness for: the new name is not free in the term, so no lookup the
+-- derivation performs is the one being shadowed. The λ case splits on whether
+-- the binder IS the new name — if it is, the binder shadows it and `weaken`
+-- does the work with no hypothesis at all.
+
+weakenFv : forall (D : Ctx) (e : LC) (V : Ty) (d : typing D e V) (y1 : String) (U : Ty)
+             (nf : In y1 (fvA e (nil String) (nil String)) -> Empty)
+             -> typing (extend D y1 U) e V
+weakenFv = \ D e V d ->
+  elim typing ()
+    (\ D0 e0 V0 d0 -> forall (y1 : String) (U : Ty)
+                        (nf : In y1 (fvA e0 (nil String) (nil String)) -> Empty)
+                        -> typing (extend D0 y1 U) e0 V0)
+    ((\ x V0 D0 i y1 U nf ->
+        T-var x V0 (extend D0 y1 U)
+          (extend-there-extend D0 x V0 y1 U
+            (\ q -> nf (orLeft (Eq String y1 x) (In y1 (nil String)) (sym String x y1 q))) i))
+     (\ D0 x S E T0 d1 ih y1 U nf ->
+        T-abs (extend D0 y1 U) x S E T0
+          (elim Dec ((Eq String x y1))
+            (\ dd -> typing (extend (extend D0 y1 U) x S) E T0)
+            ((\ q -> subst String (\ w -> typing (extend (extend D0 w U) x S) E T0) x y1 q
+                       (weaken (extend D0 x S) E T0 d1 (extend (extend D0 x U) x S)
+                         (inclShadow D0 x U S)))
+             (\ n -> exchange D0 x S y1 U E T0 n
+                       (ih y1 U (\ hz -> nf (fvAAdd E (nil String) x (nil String) y1
+                                              (\ q -> n (sym String y1 x q)) hz)))))
+            () (decString x y1)))
+     (\ D0 M S T0 N d1 d2 ih1 ih2 y1 U nf ->
+        T-app (extend D0 y1 U) M S T0 N
+          (ih1 y1 U (\ hz -> nf (fvAMono M (nil String) (nil String) (fvA N (nil String) (nil String))
+                                   (\ w hw -> absurdly (In w (fvA N (nil String) (nil String))) hw) y1 hz)))
+          (ih2 y1 U (\ hz -> nf (fvAKeeps M (nil String) (fvA N (nil String) (nil String)) y1 hz)))))
+    (D e V) d
