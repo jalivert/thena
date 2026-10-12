@@ -412,11 +412,37 @@ proves every lemma again by tactics — `:theorem`, `attack`, `intro`,
 `eliminate-core` for each induction and case split, `elaborate ⟨ … ⟩` for each
 case — and reaches the same statement as `preservation-tactics`.
 
-**It is stated for closed terms**, as Software Foundations states it. The
+**`07` is stated for closed terms**, as Software Foundations states it. The
 argument substituted in a β-step is then closed, so no binder is ever renamed.
-For any context the argument may have free names, a binder may be renamed, and
-proving the renamed binder fresh needs facts about strings that Thena cannot
-state yet.
+
+### And for any context, resting on one trusted claim
+
+*Decided 2026-10-12.* `examples/10-preservation-any-context.thena` proves the
+same theorem with no restriction on the context:
+
+```
+preservationAny : ∀ (G : Ctx) (M : LC) (M1 : LC) (T : Ty)
+                -> typing G M T -> step M M1 -> typing G M1 T
+```
+
+With an open argument a β-step **can** capture, so the generated substitution
+renames the binder — `( λ y : ι . x )[x -> ( λ w : ι . y )]` is
+`( λ y' : ι . ( λ w : ι . y ) )`, which the file proves by `refl`. The proof then
+has to know the minted name really is fresh, and that is a fact about
+`appendString`, which computes only on literals.
+
+**So one claim is written down as a trusted core term and everything above it is
+proved.** The claim is the name chooser's specification — `L-fresh-‹k› y avoid` is
+not in `avoid` — with an honest body of type `Empty -> Empty`; the kernel checks
+the body and trusts the claim. **Nothing is added to the theorem's statement**:
+`preservationAny` has no extra hypothesis. `:trust` names the claim and the chain
+of definitions that reaches it, so a reader is told what the proof rests on.
+
+**It is not derivable today for one reason.** The chooser tries `y`, `y'`, `y''`,
+… using the avoid-list as its fuel, so one of `n+1` candidates must escape a list
+of `n` — but that argument needs the candidates to be pairwise distinct, which
+needs their lengths, and the primitives are `eqString`, `eqChar`, `eqInt` and
+`appendString`. **There is no `lengthString` and no arithmetic.**
 
 ### `decString` compares two strings and hands you the proof
 
