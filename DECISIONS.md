@@ -527,6 +527,63 @@ level arguments are part of what it is — so the term contracts at `honest {0}`
 rather than where it was declared. A term still printing as `trusted` is one whose
 claim has not been met yet, which is what the pair is there to tell you.
 
+### The asserted type is stored, not re-derived, and the development calculus writes it
+
+*Decided 2026-10-05.* A trusted node has to remember two types — the one it asserts
+and the one its body really has — because the node contracts exactly when those two
+turn out to be the same, and that moment arrives as names instantiate. The choice is
+whether to **store** the body's type or **re-infer** it each time the question is
+asked. Thena stores it. Internally the node is three fields:
+
+```
+trusted ‹claimed› ‹actual› ‹body›
+```
+
+Re-inferring would mean running the type checker inside reduction, which is the
+wrong direction in the layering and would make every reduction step's cost depend on
+the size of a term's type.
+
+**The surface language writes two fields and derives the third; the development
+calculus writes all three.** Elaborating `trusted T e` infers `e`'s type and fills
+`actual` in, so a user of the surface cannot get it wrong. The development calculus
+is the printed, re-readable form of a term — what is printed can be typed back — so
+it writes what is there, which means a user typing a term at the prompt, or into a
+rule or a tactic, can write an `actual` of their own choosing.
+
+**What happens when they write a wrong one is that it does not type-check.** The
+typing rule checks the body *against* the stored type rather than inferring and
+comparing, which is what keeps the stored field honest:
+
+```
+thena spine> :infer ⌜ trusted (Eq {0} Nat zero zero) (Eq {0} Nat zero (succ zero)) (refl {0} Nat zero) ⌝
+refl {0} Nat zero has type Eq {0} Nat zero zero
+  but Eq {0} Nat zero (succ zero) was expected
+  in argument 3 of Eq, succ and zero are different names
+```
+
+So a node that survives certification cannot be lying about its body's type, and the
+stored field cannot drift out of step with the term under substitution.
+
+**One gap, and it is cumulativity rather than trust.** That check is subsumption, not
+conversion — a term usable at `Type₀` is usable at `Type₁` — so a stored type strictly
+*above* the body's own is accepted:
+
+```
+thena spine> :infer ⌜ trusted Type₀ Type₂ Type₀ ⌝
+trusted Type₀ Type₂ Type₀ : Type₀
+```
+
+`Type₀` really has type `Type₁`. Nothing becomes unsound: the stored type is what the
+claim is compared against, so inflating it can only stop a node contracting that
+would otherwise have contracted, which moves the claim from *discharged* to *pending*
+and leaves it in the report. It cannot go the other way, because a stored type
+*below* the body's own is refused outright.
+
+**Whether storing it is worth this is open.** The alternative is to re-derive the
+body's type at every comparison and let the written form carry two fields everywhere,
+which costs type inference inside reduction and buys the impossibility of writing the
+field at all.
+
 ### How much you trust is a setting, not a verdict the checker hands down
 
 *Decided 2026-10-06.* Given a term whose type is merely asserted, the obvious
