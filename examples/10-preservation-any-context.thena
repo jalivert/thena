@@ -20,8 +20,22 @@
 -- unprovable leaf is written down as a claim the kernel checks the body of, and
 -- everything above it is proved.
 --
--- `:trust` reports it, and `:trust none` refuses this file's theorem — which is
--- the point: a reader is told what the proof rests on.
+-- **And `:trust` names it, with the whole chain.** Prove anything over
+-- `preservationAny` and the report says:
+--
+--     pending, in openReductTyped · preservationAny · substOne · substAll
+--                                 · chosenNotInImage · freshIsFresh
+--       claims In (LC-fresh-x y avoid) avoid -> Empty
+--       body   Empty -> Empty
+--
+-- so a reader is told what the proof rests on and where it enters. At
+-- `:trust none` closing such a proof is refused — **but the declarations in
+-- this file still load there**, because `declare` does not consult the level.
+-- That is a known hole and not this phase's: `CLOSEOUT.md` 13.
+--
+-- The two older claims in the same report, `eqStringEqual` and `eqStringRefl`,
+-- are `decString`'s and were already there: substitution decides names, so any
+-- proof about it reaches them. This file adds exactly one.
 
 module StlcPreservationAny where
 
@@ -449,3 +463,353 @@ weakenFv = \ D e V d ->
                                    (\ w hw -> absurdly (In w (fvA N (nil String) (nil String))) hw) y1 hz)))
           (ih2 y1 U (\ hz -> nf (fvAKeeps M (nil String) (fvA N (nil String) (nil String)) y1 hz)))))
     (D e V) d
+
+
+-- ---------------------------------------------------------------------------
+-- What the chosen binder avoids. `imagesIn` in 07 goes one way — a name to
+-- avoid is free in some image; these go the other, which is the direction the
+-- renaming case needs.
+
+appendLeft : forall (l : List String) (r : List String) (w : String) (h : In w l)
+               -> In w (appendL l r)
+appendLeft = \ l r w ->
+  elim List (String) (\ k -> In w k -> In w (appendL k r))
+    ((\ h -> absurdly (In w (appendL (nil String) r)) h)
+     (\ a as ra h ->
+        elim Or ((Eq String w a) (In w as)) (\ o -> Or (Eq String w a) (In w (appendL as r)))
+          ((\ q -> orLeft (Eq String w a) (In w (appendL as r)) q)
+           (\ i -> orRight (Eq String w a) (In w (appendL as r)) (ra i)))
+          () h))
+    () l
+
+appendRight : forall (l : List String) (r : List String) (w : String) (h : In w r)
+                -> In w (appendL l r)
+appendRight = \ l r w ->
+  elim List (String) (\ k -> In w r -> In w (appendL k r))
+    ((\ h -> h)
+     (\ a as ra h -> orRight (Eq String w a) (In w (appendL as r)) (ra h)))
+    () l
+
+-- Every free name of the image of a listed name is a name to avoid.
+imagesCovers : forall (s : List (And String LC)) (ys : List String) (y : String) (w : String)
+                 (hy : In y ys) (hw : In w (LC-fv-x (look y s)))
+                 -> In w (images s ys)
+imagesCovers = \ s ys y w ->
+  elim List (String) (\ k -> In y k -> In w (LC-fv-x (look y s)) -> In w (images s k))
+    ((\ hy hw -> absurdly (In w (images s (nil String))) hy)
+     (\ a as ra hy hw ->
+        elim Or ((Eq String y a) (In y as))
+          (\ o -> In w (appendL (LC-fv-x (look a s)) (images s as)))
+          ((\ q -> appendLeft (LC-fv-x (look a s)) (images s as) w
+                     (subst String (\ z -> In w (LC-fv-x (look z s))) y a q hw))
+           (\ i -> appendRight (LC-fv-x (look a s)) (images s as) w (ra i hw)))
+          () hy))
+    () ys
+
+-- The binder substitution chooses, and the one trusted fact about it.
+chosen : String -> Ty -> LC -> List (And String LC) -> String
+chosen = \ x T E s -> LC-fresh-x x (images s (LC-fv-x (abs x T E)))
+
+absIsC : forall (x : String) (T : Ty) (E : LC) (s : List (And String LC))
+           -> Eq LC (LC-subst-all (abs x T E) s)
+                    (abs (chosen x T E s) T
+                         (LC-subst-all E (cons (And String LC)
+                            (both String LC x (var (chosen x T E s))) s)))
+absIsC = \ x T E s -> refl LC (LC-subst-all (abs x T E) s)
+
+appIsC : forall (M : LC) (N : LC) (s : List (And String LC))
+           -> Eq LC (LC-subst-all (app M N) s)
+                    (app (LC-subst-all M s) (LC-subst-all N s))
+appIsC = \ M N s -> refl LC (LC-subst-all (app M N) s)
+
+-- The chosen name is free in no image of a free name of the node. THIS IS THE
+-- ONLY PLACE `freshIsFresh` IS USED, and it is what 07 could not have.
+chosenNotInImage : forall (x : String) (T : Ty) (E : LC) (s : List (And String LC))
+                     (y : String) (hy : In y (LC-fv-x (abs x T E)))
+                     (h : In (chosen x T E s) (LC-fv-x (look y s))) -> Empty
+chosenNotInImage = \ x T E s y hy h ->
+  freshIsFresh x (images s (LC-fv-x (abs x T E)))
+    (imagesCovers s (LC-fv-x (abs x T E)) y (chosen x T E s) hy h)
+
+
+-- ---------------------------------------------------------------------------
+-- THE SUBSTITUTION LEMMA, FOR ANY CONTEXT AND ANY MAP.
+--
+-- 07's invariant (`Good`) says every image is the name itself or a CLOSED term,
+-- which is what makes the binder never need renaming. This one says only what
+-- is true: every image is typed in the target context at the type its name has
+-- in the source. Nothing is closed, so a binder may be renamed, and the λ case
+-- below is where that happens.
+--
+-- It is relativised to the FREE NAMES of the term, and that is not tidiness —
+-- it is what makes the λ case work. The chosen binder avoids the images of the
+-- node's free names and nothing else, so an image of a name that is NOT free
+-- could well contain it. Quantifying over all of Γ would ask for weakening we
+-- cannot have.
+
+GoodOn : Ctx -> Ctx -> List (And String LC) -> LC -> Type₀
+GoodOn = \ G D s t ->
+  forall (y : String) (U : Ty) (i : extend-in y U G) (hf : In y (LC-fv-x t))
+    -> typing D (look y s) U
+
+substAll : forall (G : Ctx) (t : LC) (T : Ty) (d : typing G t T)
+             (D : Ctx) (s : List (And String LC)) (g : GoodOn G D s t)
+             -> typing D (LC-subst-all t s) T
+substAll = \ G t T d ->
+  elim typing ()
+    (\ G0 t0 T0 d0 -> forall (D : Ctx) (s : List (And String LC)) (g : GoodOn G0 D s t0)
+                        -> typing D (LC-subst-all t0 s) T0)
+    (-- A variable: the map's image for it, which the invariant types.
+     (\ x T0 G0 i D s g ->
+        subst LC (\ m -> typing D m T0) (look x s) (LC-subst-all (var x) s)
+          (sym LC (LC-subst-all (var x) s) (look x s) (lookIsVar x s))
+          (g x T0 i (orLeft (Eq String x x) (In x (nil String)) (refl String x))))
+     -- A λ: the binder is renamed to `chosen`, and the body is substituted with
+     -- the map extended by that renaming.
+     (\ G0 x S E T0 d1 ih D s g ->
+        subst LC (\ m -> typing D m (arrow S T0))
+          (abs (chosen x S E s) S
+               (LC-subst-all E (cons (And String LC)
+                  (both String LC x (var (chosen x S E s))) s)))
+          (LC-subst-all (abs x S E) s)
+          (sym LC (LC-subst-all (abs x S E) s)
+                  (abs (chosen x S E s) S
+                       (LC-subst-all E (cons (And String LC)
+                          (both String LC x (var (chosen x S E s))) s)))
+                  (absIsC x S E s))
+          (T-abs D (chosen x S E s) S
+             (LC-subst-all E (cons (And String LC) (both String LC x (var (chosen x S E s))) s)) T0
+             (ih (extend D (chosen x S E s) S)
+                 (cons (And String LC) (both String LC x (var (chosen x S E s))) s)
+                 (\ y U i hf ->
+                    elim Or ((And (Eq String y x) (Eq Ty U S))
+                             (And (Eq String y x -> Empty) (extend-in y U G0)))
+                      (\ o -> typing (extend D (chosen x S E s) S)
+                                (look y (cons (And String LC)
+                                   (both String LC x (var (chosen x S E s))) s)) U)
+                      ((\ h -> subst String
+                                 (\ w -> typing (extend D (chosen x S E s) S)
+                                           (look w (cons (And String LC)
+                                              (both String LC x (var (chosen x S E s))) s)) U) x y
+                                 (sym String y x (andLeft (Eq String y x) (Eq Ty U S) h))
+                                 (subst Ty
+                                    (\ W -> typing (extend D (chosen x S E s) S)
+                                              (look x (cons (And String LC)
+                                                 (both String LC x (var (chosen x S E s))) s)) W) S U
+                                    (sym Ty U S (andRight (Eq String y x) (Eq Ty U S) h))
+                                    (subst LC
+                                       (\ m -> typing (extend D (chosen x S E s) S) m S)
+                                       (var (chosen x S E s))
+                                       (look x (cons (And String LC)
+                                          (both String LC x (var (chosen x S E s))) s))
+                                       (sym LC
+                                          (look x (cons (And String LC)
+                                             (both String LC x (var (chosen x S E s))) s))
+                                          (var (chosen x S E s))
+                                          (lookHit x (var (chosen x S E s)) s))
+                                       (T-var (chosen x S E s) S (extend D (chosen x S E s) S)
+                                          (extend-here D (chosen x S E s) S)))))
+                       (\ h -> subst LC
+                                 (\ m -> typing (extend D (chosen x S E s) S) m U)
+                                 (look y s)
+                                 (look y (cons (And String LC)
+                                    (both String LC x (var (chosen x S E s))) s))
+                                 (sym LC
+                                    (look y (cons (And String LC)
+                                       (both String LC x (var (chosen x S E s))) s))
+                                    (look y s)
+                                    (lookMiss y x (var (chosen x S E s)) s
+                                      (andLeft (Eq String y x -> Empty) (extend-in y U G0) h)))
+                                 (weakenFv D (look y s) U
+                                    (g y U (andRight (Eq String y x -> Empty) (extend-in y U G0) h)
+                                       (fvAAdd E (nil String) x (nil String) y
+                                         (\ q -> andLeft (Eq String y x -> Empty) (extend-in y U G0) h q)
+                                         hf))
+                                    (chosen x S E s) S
+                                    (\ hz -> chosenNotInImage x S E s y
+                                               (fvAAdd E (nil String) x (nil String) y
+                                                 (\ q -> andLeft (Eq String y x -> Empty) (extend-in y U G0) h q)
+                                                 hf)
+                                               hz))))
+                      () (ctxInvExtend G0 x S y U i)))))
+     -- An application: both halves, each with the invariant narrowed to its own
+     -- free names.
+     (\ G0 M S T0 N d1 d2 ih1 ih2 D s g ->
+        subst LC (\ m -> typing D m T0)
+          (app (LC-subst-all M s) (LC-subst-all N s)) (LC-subst-all (app M N) s)
+          (sym LC (LC-subst-all (app M N) s)
+                  (app (LC-subst-all M s) (LC-subst-all N s)) (appIsC M N s))
+          (T-app D (LC-subst-all M s) S T0 (LC-subst-all N s)
+             (ih1 D s (\ y U i hf ->
+                g y U i (fvAMono M (nil String) (nil String) (fvA N (nil String) (nil String))
+                           (\ w hw -> absurdly (In w (fvA N (nil String) (nil String))) hw) y hf)))
+             (ih2 D s (\ y U i hf ->
+                g y U i (fvAKeeps M (nil String) (fvA N (nil String) (nil String)) y hf))))))
+    (G t T) d
+
+
+-- ---------------------------------------------------------------------------
+-- The single substitution, which is what a β step performs.
+
+substXIs : forall (E : LC) (x : String) (N : LC)
+             -> Eq LC (LC-subst-x E x N)
+                      (LC-subst-all E (cons (And String LC) (both String LC x N) (nil (And String LC))))
+substXIs = \ E x N -> refl LC (LC-subst-x E x N)
+
+lookNil : forall (y : String) -> Eq LC (look y (nil (And String LC))) (var y)
+lookNil = \ y -> sym LC (var y) (look y (nil (And String LC))) (lookIsVar y (nil (And String LC)))
+
+substOne : forall (G : Ctx) (x : String) (S : Ty) (E : LC) (T : Ty) (N : LC)
+             (d : typing (extend G x S) E T) (dn : typing G N S)
+             -> typing G (LC-subst-x E x N) T
+substOne = \ G x S E T N d dn ->
+  subst LC (\ m -> typing G m T)
+    (LC-subst-all E (cons (And String LC) (both String LC x N) (nil (And String LC))))
+    (LC-subst-x E x N)
+    (sym LC (LC-subst-x E x N)
+            (LC-subst-all E (cons (And String LC) (both String LC x N) (nil (And String LC))))
+            (substXIs E x N))
+    (substAll (extend G x S) E T d G
+       (cons (And String LC) (both String LC x N) (nil (And String LC)))
+       (\ y U i hf ->
+          elim Or ((And (Eq String y x) (Eq Ty U S))
+                   (And (Eq String y x -> Empty) (extend-in y U G)))
+            (\ o -> typing G (look y (cons (And String LC) (both String LC x N)
+                                        (nil (And String LC)))) U)
+            ((\ h -> subst String
+                       (\ w -> typing G (look w (cons (And String LC) (both String LC x N)
+                                                   (nil (And String LC)))) U) x y
+                       (sym String y x (andLeft (Eq String y x) (Eq Ty U S) h))
+                       (subst Ty
+                          (\ W -> typing G (look x (cons (And String LC) (both String LC x N)
+                                                      (nil (And String LC)))) W) S U
+                          (sym Ty U S (andRight (Eq String y x) (Eq Ty U S) h))
+                          (subst LC (\ m -> typing G m S) N
+                             (look x (cons (And String LC) (both String LC x N)
+                                        (nil (And String LC))))
+                             (sym LC (look x (cons (And String LC) (both String LC x N)
+                                                (nil (And String LC)))) N
+                                (lookHit x N (nil (And String LC))))
+                             dn)))
+             (\ h -> subst LC
+                       (\ m -> typing G m U) (look y (nil (And String LC)))
+                       (look y (cons (And String LC) (both String LC x N)
+                                  (nil (And String LC))))
+                       (sym LC (look y (cons (And String LC) (both String LC x N)
+                                          (nil (And String LC))))
+                               (look y (nil (And String LC)))
+                               (lookMiss y x N (nil (And String LC))
+                                 (andLeft (Eq String y x -> Empty) (extend-in y U G) h)))
+                       (subst LC (\ m -> typing G m U) (var y) (look y (nil (And String LC)))
+                          (sym LC (look y (nil (And String LC))) (var y) (lookNil y))
+                          (T-var y U G
+                            (andRight (Eq String y x -> Empty) (extend-in y U G) h)))))
+            () (ctxInvExtend G x S y U i)))
+
+
+-- ---------------------------------------------------------------------------
+-- PRESERVATION, FOR ANY CONTEXT. The same three cases as 07; only the β case
+-- differs, and only in calling the substitution lemma above.
+
+preservationAny : forall (G : Ctx) (M : LC) (M1 : LC) (T : Ty)
+                    (d : typing G M T) (s : step M M1) -> typing G M1 T
+preservationAny = \ G M M1 T d s ->
+  elim step () (\ A B s0 -> forall (G0 : Ctx) (T0 : Ty) (d0 : typing G0 A T0) -> typing G0 B T0)
+    ((\ N x T1 E v G0 T0 d0 ->
+        elim Sigma (Ty (\ S -> And (typing G0 (abs x T1 E) (arrow S T0)) (typing G0 N S)))
+          (\ z -> typing G0 (LC-subst-x E x N) T0)
+          ((\ S p ->
+              elim Sigma (Ty (\ U -> And (Eq Ty (arrow S T0) (arrow T1 U))
+                                         (typing (extend G0 x T1) E U)))
+                (\ z -> typing G0 (LC-subst-x E x N) T0)
+                ((\ U q ->
+                    substOne G0 x T1 E T0 N
+                      (subst Ty (\ V -> typing (extend G0 x T1) E V) U T0
+                         (sym Ty T0 U (andRight (Eq Ty S T1) (Eq Ty T0 U)
+                            (arrowInj S T0 T1 U (andLeft (Eq Ty (arrow S T0) (arrow T1 U))
+                               (typing (extend G0 x T1) E U) q))))
+                         (andRight (Eq Ty (arrow S T0) (arrow T1 U))
+                            (typing (extend G0 x T1) E U) q))
+                      (subst Ty (\ V -> typing G0 N V) S T1
+                         (andLeft (Eq Ty S T1) (Eq Ty T0 U)
+                            (arrowInj S T0 T1 U (andLeft (Eq Ty (arrow S T0) (arrow T1 U))
+                               (typing (extend G0 x T1) E U) q)))
+                         (andRight (typing G0 (abs x T1 E) (arrow S T0)) (typing G0 N S) p))))
+                () (invAbs G0 x T1 E (arrow S T0)
+                     (andLeft (typing G0 (abs x T1 E) (arrow S T0)) (typing G0 N S) p))))
+          () (invApp G0 (abs x T1 E) N T0 d0))
+     (\ A A1 N s0 ih G0 T0 d0 ->
+        elim Sigma (Ty (\ S -> And (typing G0 A (arrow S T0)) (typing G0 N S)))
+          (\ z -> typing G0 (app A1 N) T0)
+          ((\ S p -> T-app G0 A1 S T0 N
+                       (ih G0 (arrow S T0)
+                         (andLeft (typing G0 A (arrow S T0)) (typing G0 N S) p))
+                       (andRight (typing G0 A (arrow S T0)) (typing G0 N S) p)))
+          () (invApp G0 A N T0 d0))
+     (\ A N N1 v s0 ih G0 T0 d0 ->
+        elim Sigma (Ty (\ S -> And (typing G0 A (arrow S T0)) (typing G0 N S)))
+          (\ z -> typing G0 (app A N1) T0)
+          ((\ S p -> T-app G0 A S T0 N1
+                       (andLeft (typing G0 A (arrow S T0)) (typing G0 N S) p)
+                       (ih G0 S (andRight (typing G0 A (arrow S T0)) (typing G0 N S) p))))
+          () (invApp G0 A N T0 d0)))
+    (M M1) s G T d
+
+
+-- ---------------------------------------------------------------------------
+-- Using it on the case 07 cannot reach: a β step whose argument has a free
+-- name that the function's own binder shadows, so the binder IS renamed.
+--
+--     · , y : ι  ⊢  ( λ x : ι -> ι . ( λ y : ι . x ) ) ( λ w : ι . y )
+--
+-- Substituting ( λ w : ι . y ) for x under the binder y would capture that y,
+-- so the generated substitution renames the binder to y'. 07's invariant made
+-- this unreachable; here it is the point.
+
+xNotY : Eq String "x" "y" -> Empty
+xNotY = \ q ->
+  elim Eq (String)
+    (\ a b r -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "x" a)
+                -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "x" b))
+    ((\ a d -> d))
+    ("x" "y") q unit
+
+yNotW : Eq String "y" "w" -> Empty
+yNotW = \ q ->
+  elim Eq (String)
+    (\ a b r -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "y" a)
+                -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "y" b))
+    ((\ a d -> d))
+    ("y" "w") q unit
+
+-- The substitution really does rename, and this `refl` is the proof.
+renamesTheBinder : Eq LC (LC-subst-x LC`( λ y : ι . x )` "x" LC`( λ w : ι . y )`)
+                         LC`( λ y' : ι . ( λ w : ι . y ) )`
+renamesTheBinder = refl LC LC`( λ y' : ι . ( λ w : ι . y ) )`
+
+openRedexTyped : typing`· , y : ι ⊢ ( ( λ x : ( ι -> ι ) . ( λ y : ι . x ) ) ( λ w : ι . y ) ) : ( ι -> ( ι -> ι ) )`
+openRedexTyped =
+  T-app Ctx`· , y : ι` LC`( λ x : ( ι -> ι ) . ( λ y : ι . x ) )` Ty`( ι -> ι )`
+        Ty`( ι -> ( ι -> ι ) )` LC`( λ w : ι . y )`
+    (T-abs Ctx`· , y : ι` "x" Ty`( ι -> ι )` LC`( λ y : ι . x )` Ty`( ι -> ( ι -> ι ) )`
+       (T-abs Ctx`· , y : ι , x : ( ι -> ι )` "y" base LC`x` Ty`( ι -> ι )`
+          (T-var "x" Ty`( ι -> ι )` Ctx`· , y : ι , x : ( ι -> ι ) , y : ι`
+             (extend-there-extend Ctx`· , y : ι , x : ( ι -> ι )` "x" Ty`( ι -> ι )` "y" base
+                xNotY (extend-here Ctx`· , y : ι` "x" Ty`( ι -> ι )`)))))
+    (T-abs Ctx`· , y : ι` "w" base LC`y` base
+       (T-var "y" base Ctx`· , y : ι , w : ι`
+          (extend-there-extend Ctx`· , y : ι` "y" base "w" base
+             yNotW (extend-here Ctx`·` "y" base))))
+
+openStep : step`( ( λ x : ( ι -> ι ) . ( λ y : ι . x ) ) ( λ w : ι . y ) ) --> ( λ y' : ι . ( λ w : ι . y ) )`
+openStep =
+  E-beta LC`( λ w : ι . y )` "x" Ty`( ι -> ι )` LC`( λ y : ι . x )`
+    (V-abs "w" base LC`y`)
+
+-- And the reduct's type, without typing the reduct.
+openReductTyped : typing`· , y : ι ⊢ ( λ y' : ι . ( λ w : ι . y ) ) : ( ι -> ( ι -> ι ) )`
+openReductTyped =
+  preservationAny Ctx`· , y : ι`
+    LC`( ( λ x : ( ι -> ι ) . ( λ y : ι . x ) ) ( λ w : ι . y ) )`
+    LC`( λ y' : ι . ( λ w : ι . y ) )` Ty`( ι -> ( ι -> ι ) )`
+    openRedexTyped openStep

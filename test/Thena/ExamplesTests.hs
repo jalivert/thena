@@ -41,7 +41,14 @@ tests =
         if null files then assertFailure "no numbered examples were found" else pure ()
         (s0, _) <- startingSession
         standard <- rulesPath >>= \p -> (,) p <$> readFile p
-        go s0 [standard] files
+        sEnd <- go s0 [standard] files
+        -- **The any-context preservation statement is pinned HERE and not in a
+        -- session of its own** (MS8 phase 162): the walk has already loaded
+        -- @10@, and reloading it to check one statement cost 37 s. `07`'s and
+        -- `08`'s own pins predate the walk returning its session.
+        let (sInf, rInf) = command sEnd ":infer preservationAny"
+        renderResponse sInf rInf @?=
+          [ "preservationAny : ∀ (G : Ctx) (M : LC) (M1 : LC) (T : Ty) -> typing`${G} ⊢ ${M} : ${T}` -> step`${M} --> ${M1}` -> typing`${G} ⊢ ${M1} : ${T}`" ]
     -- **MS6's done-when** (phase 109b): preservation for STLC, proved in the
     -- surface language over the language 01–03 declare, and stated as it is
     -- here — for closed terms (his choice, ms6/CLOSEOUT.md 32).
@@ -104,8 +111,8 @@ tests =
       a : b : '-' : _ -> isDigit a && isDigit b
       _ -> False
 
-    go :: Session -> [(FilePath, String)] -> [FilePath] -> IO ()
-    go _ _ [] = pure ()
+    go :: Session -> [(FilePath, String)] -> [FilePath] -> IO Session
+    go s _ [] = pure s
     go s bases (f : more) = do
       let path = "examples/" ++ f
       src <- readFile path
