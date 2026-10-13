@@ -650,6 +650,14 @@ environment.** The report is a view on the proof in front of you, so immediately
 after a definition is admitted it is not what the report is about — and that is
 a separate question from admission, deliberately left open.
 
+**His ruling: the report stays on the current proof, and a `:trust env` command
+does the wide check.** `:trust` tells you what *this* proof rests on — following
+uses into the global declarations it reaches, each classified where the use
+settles it — and what the environment already holds is a separate question for a
+separate command. `:trust env` walks the environment when asked rather than every
+frame, which keeps the frontend's redraw rule intact: a frontend asks for it the
+way the user does.
+
 **Only *no trust* is a soundness guarantee, and the middle one is not sold as
 one.** What the middle setting refuses is a claim that is provably false, and a
 claim can be discharged at every instance anybody has written down and still be
@@ -847,6 +855,12 @@ with nothing trusted left in it. Finding out which claims survive reduction mean
 reducing, which may diverge and has no business in `qed`'s path, so the strictest
 setting is a statement about what a proof reaches and not about what is left when
 it runs.
+
+**Revisit note, on his ruling: this conservatism is accepted for now.** A future
+`qed` could normalize first and classify what survives reduction rather than what
+the proof reaches — which would close proofs deciding literal equalities at the
+strictest setting. That puts reduction that may diverge in `qed`'s path, the thing
+currently ruled out, so it is recorded here rather than built.
 
 ### A token class is an ordinary definition, and its regex takes its type as an argument
 
