@@ -170,6 +170,35 @@ may I write here* for an editor. The second is narrower than the first by design
 will stay quiet where it does not know rather than guess — and it never parses anything.
 Nothing is foreclosed: the day a bootstrap is cheap, it is still available.
 
+### A type written on a λ binder is a check, not a declaration
+
+`\ (a : String) -> a` and `\ a -> a` give you the same proof term. The binder's type always
+comes from the goal; a type you write on the binder is elaborated and compared with it, and
+the comparison is conversion — not subsumption, so a *narrower* written type is refused
+rather than accepted. If you want the narrower one, change the goal.
+
+**Why a check and not a declaration.** The other reading — introduce the binder at the type
+you wrote and let the goal be checked against the result — makes the same program elaborate
+to two different terms depending on whether you annotated it, and makes the binder's type a
+thing you wrote rather than the thing the goal says it is. A check leaves no trace at all:
+nothing downstream can tell an annotated binder from a bare one.
+
+**The type is elaborated where the binders before it are in scope**, so it may name them:
+
+```
+polyId : ∀ (A : Type₀) -> A -> A
+polyId = \ A (a : A) -> a
+```
+
+and binders in one group may be written or bare in any mix — `\ (a : S) b (c : T) -> e`.
+Where the goal's domain is not yet known, the written type *solves* it rather than being
+compared with it, because the comparison is unification.
+
+**A brace on a λ binder is refused.** A brace in a signature says callers may leave that
+argument out; the λ binds its arguments in order whether a caller wrote them or not, so
+there is nothing for a brace to mean there. `\ A x -> x` is the spelling for a signature
+written `∀ {A : Type₀} -> A -> A`.
+
 ---
 
 ## Universes and levels
