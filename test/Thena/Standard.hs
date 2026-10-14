@@ -363,9 +363,11 @@ elaborateClauses =
   , clause SurfaceIsLambda
       [ Bind (Op.PVar "h") Nothing Here
       , Do Attack
-      , call "intro-binders" [Ref "t"]
       , Do Into
-      , call "enter-binders" [Ref "t"]
+      , Bind (Op.PVar "k") Nothing Here
+      , Do Back
+      , Bind (Op.PVar "body") Nothing (Call "intro-binders" [Ref "t", Ref "k"])
+      , Do (Goto (Ref "body"))
       , Bind (Op.PVar "b") Nothing (Op.LambdaBody (Ref "t"))
       , call "elaborate" [Ref "b"]
       , Do (Goto (Ref "h")), call "solve" []
@@ -531,26 +533,55 @@ spineWalkers =
 
 binderWalkers :: [Rule]
 binderWalkers =
-  [ Rule (GlobalName "intro-binders") [PVar "t"]
-      [FocusIsGuess, LambdaBindsMore (Ref "t")]
+  [ Rule (GlobalName "intro-binders") [PVar "t", PVar "k"]
+      [FocusIsGuess, LambdaBindsMore (Ref "t"), LambdaIsBare (Ref "t")]
       [ Bind (Op.PVar "x") Nothing (Op.LambdaName (Ref "t"))
-      , Do (IntroPi (Just (Ref "x")))
+      , Bind (Op.PVar "k2") Nothing (IntroPi (Just (Ref "x")))
       , Bind (Op.PVar "tl") Nothing (Op.LambdaTail (Ref "t"))
-      , Do (Call "intro-binders" [Ref "tl"])
+      , Bind (Op.PVar "body") Nothing (Call "intro-binders" [Ref "tl", Ref "k2"])
+      , Do (Op.Return (Ref "body"))
       ]
-  , Rule (GlobalName "intro-binders") [PVar "t"]
-      [FocusIsGuess, LambdaBindsOne (Ref "t")]
+  , Rule (GlobalName "intro-binders") [PVar "t", PVar "k"]
+      [FocusIsGuess, LambdaBindsOne (Ref "t"), LambdaIsBare (Ref "t")]
       [ Bind (Op.PVar "x") Nothing (Op.LambdaName (Ref "t"))
-      , Do (IntroPi (Just (Ref "x")))
+      , Bind (Op.PVar "k2") Nothing (IntroPi (Just (Ref "x")))
+      , Do (Op.Return (Ref "k2"))
       ]
-    -- The binders are the count and nothing else about them is read.
-  , Rule (GlobalName "enter-binders") [PVar "t"]
-      [FocusIsComponent, LambdaBindsMore (Ref "t")]
-      [ Do Along
-      , Bind (Op.PVar "tl") Nothing (Op.LambdaTail (Ref "t"))
-      , Do (Call "enter-binders" [Ref "tl"])
-      ]
-  , Rule (GlobalName "enter-binders") [PVar "t"]
-      [FocusIsComponent, LambdaBindsOne (Ref "t")]
-      [Do Along]
+    -- **A written type is a check, not a declaration** (MS8): the binder's type
+    -- is still the goal's, and what was written is elaborated into a hole
+    -- claimed /inside/ the binders already introduced — the only place an
+    -- earlier binder of the same group is in scope — and then unified with it.
+  , Rule (GlobalName "intro-binders") [PVar "t", PVar "k"]
+      [FocusIsGuess, LambdaBindsMore (Ref "t"), LambdaIsAnnotated (Ref "t")]
+      (annotatedBinder
+         ++ [ Bind (Op.PVar "tl") Nothing (Op.LambdaTail (Ref "t"))
+            , Bind (Op.PVar "body") Nothing (Call "intro-binders" [Ref "tl", Ref "k2"])
+            , Do (Op.Return (Ref "body"))
+            ])
+  , Rule (GlobalName "intro-binders") [PVar "t", PVar "k"]
+      [FocusIsGuess, LambdaBindsOne (Ref "t"), LambdaIsAnnotated (Ref "t")]
+      (annotatedBinder ++ [Do (Op.Return (Ref "k2"))])
+  ]
+
+-- | The run both annotated clauses share: elaborate the written type where the
+-- binders already introduced are in scope, introduce the binder from the goal,
+-- and unify the two inside the binder, where both are nameable.
+annotatedBinder :: [Instr]
+annotatedBinder =
+  [ Bind (Op.PVar "g") Nothing Here
+  , Bind (Op.PVar "x") Nothing (Op.LambdaName (Ref "t"))
+  , Bind (Op.PVar "ty") Nothing (Op.LambdaAnnotType (Ref "t"))
+  , Bind (Op.PVar "dn") Nothing (FreshName (Lit (VText "A")))
+  , Bind (Op.PVar "u") Nothing (Call "fresh-universe" [])
+  , Do (Goto (Ref "k"))
+  , Bind (Op.PVar "d") Nothing (Claim (Ref "dn") (Ref "u"))
+  , Do (Goto (Ref "d"))
+  , Do (Call "elaborate" [Ref "ty"])
+  , Do (Goto (Ref "g"))
+  , Bind (Op.PVar "k2") Nothing (IntroPi (Just (Ref "x")))
+  , Do (Goto (Ref "k2"))
+  , Bind (Op.PVar "v") Nothing (Op.ResolveName (Ref "x"))
+  , Bind (Op.PVar "s") Nothing (Typing (Ref "v"))
+  , Do (Unify (Ref "d") (Ref "s"))
+  , Do (Goto (Ref "g"))
   ]

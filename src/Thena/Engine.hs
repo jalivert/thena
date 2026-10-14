@@ -1603,9 +1603,22 @@ perform instr rest m = case operation instr of
   Op.LambdaName x -> case surfaceAt x of
     Left r  -> failure r m
     Right (Concrete.SurfaceLam bs _)
-      | Concrete.SurfaceBinder Concrete.Explicit w Nothing <- NE.head bs ->
+      -- **The written type is not read here and does not disqualify a binder**
+      -- (MS8): @lambda-annot-type@ reads it, and the plicity refusal below stays
+      -- the one place a λ shape the elaborator cannot take is named.
+      | Concrete.SurfaceBinder Concrete.Explicit w _ <- NE.head bs ->
           produce (VText w) m
-    Right _ -> failure (ExpectedSurfaceShape "a λ whose first binder is plain") m
+    Right _ -> failure (ExpectedSurfaceShape "a λ whose first binder is explicit") m
+  -- **Answered only where a type was written**, so the bare clause and the
+  -- annotated one cannot both apply: a λ with no written type on its first
+  -- binder is refused here by name.
+  Op.LambdaAnnotType x -> surfaceMove x "a λ whose first binder has a written type" $ \s ->
+    case s of
+      Concrete.SurfaceLam bs body -> case NE.uncons bs of
+        (Concrete.SurfaceBinder p w (Just ty), more) ->
+          Just (Zipper.intoLamAnnot p w (maybe [] NE.toList more) body ty)
+        _ -> Nothing
+      _ -> Nothing
   Op.LambdaTail x -> surfaceMove x "a λ" $ \s -> case s of
     Concrete.SurfaceLam bs body -> case NE.uncons bs of
       (b, more) ->
@@ -1937,14 +1950,29 @@ perform instr rest m = case operation instr of
           Right cur -> Continue (advance m { development = Development cur, names = n1 })
       _ -> failure (CannotMove NotOnTheSpine) m
 
+    -- 'onHole' for an op that also answers with something. Written beside it
+    -- rather than in terms of it because the value has to be produced /after/
+    -- the component is replaced, and 'produce' is what ends the instruction.
+    onHoleProducing f = case focus (cursor (development m)) of
+      OnComponent c -> case f c of
+        Left r            -> failure r m
+        Right (c', v, n1) -> case replaceComponent c' (cursor (development m)) of
+          Left e    -> failure (CannotMove e) m
+          Right cur ->
+            produce (VTerm v) m { development = Development cur, names = n1 }
+      _ -> failure (CannotMove NotOnTheSpine) m
+
     -- 'Op.IntroPi' and 'Op.IntroLet' differ in exactly one thing — which of
     -- table 2.8's introduction rules is on offer (MS4 phase 58) — so the op is
     -- written once and takes it.
+    -- **The hole it opened is its answer** (MS8), so a clause can @goto@ it and
+    -- work in the scope the binder just created. 'onHoleProducing' is 'onHole'
+    -- with that one difference.
     introOp rule mn = case traverse (operandIdent (env (exec m))) mn of
       Left r   -> failure r m
-      Right nm -> onHole $ \c -> case c of
+      Right nm -> onHoleProducing $ \c -> case c of
         Component.Guess x i g ty ->
-          (\(g', n1) -> (Component.Guess x i g' ty, n1))
+          (\(g', h, n1) -> (Component.Guess x i g' ty, Free h, n1))
             <$> rule (globals m) contextAt (names m) nm g
         _ -> Left NotReadyToIntroduce
 
@@ -2195,7 +2223,7 @@ whereImpure i = case i of
 -- binder on it.
 introduceLambda
   :: GlobalEnv -> Context -> Int -> Maybe Ident -> Partial
-  -> Either FailReason (Partial, Int)
+  -> Either FailReason (Partial, Var, Int)
 introduceLambda = introducing FunctionOnly
 
 -- | Table 2.8's @intro-let@ — Brady's @LET@, and it reads the type **as
@@ -2211,7 +2239,7 @@ introduceLambda = introducing FunctionOnly
 -- an unreadable goal. This rule is how a proof keeps the author's name.
 introduceLet
   :: GlobalEnv -> Context -> Int -> Maybe Ident -> Partial
-  -> Either FailReason (Partial, Int)
+  -> Either FailReason (Partial, Var, Int)
 introduceLet = introducing LetOnly
 
 -- | Which of table 2.8's two introduction rules this is.
@@ -2228,9 +2256,16 @@ data IntroRule
   = FunctionOnly  -- ^ @prim-lambda@
   | LetOnly       -- ^ @prim-let@
 
+-- **It answers with the hole it opened** as well as the rewritten chain. The
+-- binder's own variable is not interesting to a caller — the name is what a
+-- clause wrote and @resolve-name@ finds it — but the hole for what is left of
+-- the goal cannot be reached any other way: it is not the focus, @goto@ takes a
+-- variable, and counting @along@s from the guess does not scale past one
+-- binder. It is what lets the annotated λ binder be checked /inside/ the binder
+-- it belongs to.
 introducing
   :: IntroRule -> GlobalEnv -> Context -> Int -> Maybe Ident -> Partial
-  -> Either FailReason (Partial, Int)
+  -> Either FailReason (Partial, Var, Int)
 introducing rule env ctx n nm p = case p of
   Under (Component.Claim v i s) (Trailing (Free v'))
     | v == v' -> case s of
@@ -2250,13 +2285,14 @@ introducing rule env ctx n nm p = case p of
         (h, n2) = fresh n1
         opened binder rest =
           ( Under binder (Under (Component.Claim h i rest) (Trailing (Free h)))
+          , h
           , n2
           )
   -- **The rule is threaded, not dropped.** Reverting to a both-rules reading
   -- here would apply to every binder after the first, which is where a @let@
   -- one binder down actually bites.
   Under c rest ->
-    (\(rest', n1) -> (Under c rest', n1))
+    (\(rest', h, n1) -> (Under c rest', h, n1))
       <$> introducing rule env (ctx ++ [Component.forget c]) n nm rest
   _ -> Left NotReadyToIntroduce
 

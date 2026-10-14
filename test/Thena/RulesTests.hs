@@ -809,18 +809,20 @@ everyHoleRule =
     -- runs none of them: they take a parameter.
   , "claim", "assume", "quantify"
   ]
-    ++ replicate 19 "elaborate" ++ ["run-block"] ++ replicate 2 "enter-binders"
+    ++ replicate 19 "elaborate" ++ ["run-block"]
     ++ replicate 2 "spine-arguments"
 
--- | The λ case's two recursive helpers, which every listing at a guess shows.
+-- | The recursive helpers every listing at a guess shows.
 --
 -- **A test about an argument nobody supplied does not exclude a clause** (phase
 -- 47), so a rule whose head only asks about its argument is offered wherever
--- its state test passes — and @intro-binders@ really does apply at a guess.
+-- its state test passes — and @intro-binders@ really does apply at a guess, in
+-- all four of its clauses: a group or a single binder, each with a written type
+-- or without.
 walkers :: [String]
 walkers =
   [ "claim", "assume", "quantify", "run-block"
-  , "intro-binders", "intro-binders", "enter-binders", "enter-binders"
+  , "intro-binders", "intro-binders", "intro-binders", "intro-binders"
   , "spine-arguments", "spine-arguments"
   ]
 

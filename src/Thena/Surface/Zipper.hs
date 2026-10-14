@@ -57,6 +57,7 @@ module Thena.Surface.Zipper
   , intoAppTail
   , intoLamBody
   , intoLamTail
+  , intoLamAnnot
   , intoPiDomain
   , intoPiTail
   , intoArrowDomain
@@ -111,6 +112,11 @@ data Frame
   | InLamTail SurfaceBinder
     -- ^ the focus is what the λ abstracts once its first binder is peeled off
     -- — 'InPiTail' for a λ, and merged on the way out for the same reason
+  | InLamAnnot Plicity String [SurfaceBinder] Surface
+    -- ^ the focus is a λ binder's written type: its plicity and name, the rest
+    -- of the group, and the body. **'InPiDomain' for a λ**, and it exists
+    -- because an annotated λ binder elaborates — the written type has to be
+    -- reachable to be elaborated at all
   | InPiDomain Plicity String [SurfaceBinder] Surface
     -- ^ the focus is the first binder's annotation: its plicity and name, the
     -- rest of the group, and the body
@@ -167,6 +173,8 @@ rebuild s f = case f of
   InLamBody bs -> SurfaceLam bs s
   InPiDomain p x rest body ->
     SurfacePi (SurfaceBinder p x (Just s) :| rest) body
+  InLamAnnot p x rest body ->
+    SurfaceLam (SurfaceBinder p x (Just s) :| rest) body
   -- **Merged, for 'InFun'\'s reason**, and it is the one place the law in the
   -- header is up to spelling: @∀ (A : S) (a : A) -> B@ comes back exactly, and
   -- @∀ (A : S) -> ∀ (a : A) -> B@ comes back as the first — the same term,
@@ -247,6 +255,16 @@ intoPiDomain
   :: Plicity -> String -> [SurfaceBinder] -> Surface -> Surface -> SurfaceZipper
   -> SurfaceZipper
 intoPiDomain p x rest body ty = push ty (InPiDomain p x rest body)
+
+-- | Focus the type written on a λ's first binder.
+--
+-- 'intoPiDomain' for a λ, and the group is carried the same way: the move holds
+-- the binders it did not descend into, so the way back is the only place that
+-- has to know the group was ever split.
+intoLamAnnot
+  :: Plicity -> String -> [SurfaceBinder] -> Surface -> Surface -> SurfaceZipper
+  -> SurfaceZipper
+intoLamAnnot p x rest body ty = push ty (InLamAnnot p x rest body)
 
 -- | Focus what a Π quantifies over once its first binder is peeled off.
 --

@@ -1064,8 +1064,13 @@ renderInstr ren ctx instr = case instr of
 renderOp :: Rendering -> Context -> Op -> String
 renderOp ren ctx op = case op of
   Ops.Ask    p k  -> word ++ " " ++ operand p ++ " " ++ answerKind k
-  -- The one infix operand shape.
-  Ops.Unify  l r  -> word ++ " " ++ operand l ++ " \8799 " ++ operand r
+  -- **@unify@ has no infix spelling and never had one** (MS8). It printed
+  -- @unify a ≟ b@, which the rule parser refuses — @≟@ is reserved and the
+  -- instruction grammar is the word and its operands like every other. Nothing
+  -- in the shipped base used @unify@ in a body until the annotated λ binder
+  -- checked a written type with it, so neither the golden transcripts nor the
+  -- boundary corpus had ever read this back. The glyph stays where it belongs:
+  -- a constraint and @:convert@'s answer.
   -- Neither takes an operand: the declaration is a field, and the two crossings
   -- share a keyword and are told apart by the word after it.
   Ops.DefineData d -> word ++ " " ++ nameString (inductiveName d)

@@ -50,8 +50,6 @@ elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 run-block ‹t›
-enter-binders ‹t›
-enter-binders ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 thena spine> elaborate ⟨ a ⟩

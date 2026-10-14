@@ -309,6 +309,15 @@ tests =
         , ":show z"
         , "declare z2 : Nat ; z2 = idty {Nat} zero"
         , ":show z2"
+          -- **A written binder type, through the whole pipeline** (MS8): the
+          -- grammar has always taken one and only elaboration refused it, so a
+          -- test built on a hand-made 'Surface' value is not evidence that the
+          -- spelling works. The λ it elaborates to is the one the bare spelling
+          -- gives — the written type is checked and then has no further trace.
+        , "declare wri : Nat -> Nat ; wri = \\ (n : Nat) -> n"
+        , ":show wri"
+          -- And one that disagrees with the goal fails where it was written.
+        , "declare wrong : Nat -> Nat ; wrong = \\ (n : Bool) -> n"
           -- @push-development@ and @pop-development@ are **ops, not commands**,
           -- so they are exercised from "Thena.ReadTests" rather than here — a
           -- bare word at the REPL is a command or a rule call, and they are

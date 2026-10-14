@@ -81,7 +81,7 @@ import Thena.Instral.Ops
   , produces
   )
 import Thena.Surface.Concrete
-  (Plicity (..), Surface (..), SurfaceArg (..), blocksIn)
+  (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..), blocksIn)
 import qualified Thena.Surface.Zipper as Zipper
 import Thena.Errors (BuildError (..), SyntaxError (..))
 import Thena.Surface.Read (parseSurfaceText)
@@ -104,6 +104,7 @@ import Thena.Instral.Concrete
   , RawTest (..)
   )
 import Data.Either (partitionEithers)
+import qualified Data.List.NonEmpty as NE
 
 -- --------------------------------------------------------------------------
 -- The rule base
@@ -376,6 +377,8 @@ holds env cur args t = case t of
   AppHeadIsElim o         -> surfaceIs o headIsElim
   LambdaBindsMore o       -> surfaceIs o bindsMore
   LambdaBindsOne o        -> surfaceIs o bindsOne
+  LambdaIsAnnotated o     -> surfaceIs o isAnnotatedLambda
+  LambdaIsBare o          -> surfaceIs o isBareLambda
   LetIsAnnotated o        -> surfaceIs o isAnnotatedLet
   LetIsBare o             -> surfaceIs o isBareLet
   -- @instral@'s own data (MS5 phase 65). They read the operand and nothing
@@ -421,6 +424,20 @@ holds env cur args t = case t of
       _               -> False
     bindsMore      s = case s of SurfaceLam bs _ -> length bs > 1; _ -> False
     bindsOne       s = case s of SurfaceLam bs _ -> length bs == 1; _ -> False
+    -- **On the written type, not on the plicity** — an implicit binder is
+    -- annotated or bare like an explicit one, so both still reach
+    -- @lambda-name@, which is where a plicity the elaborator cannot take is
+    -- refused by name.
+    isAnnotatedLambda s = case s of
+      SurfaceLam bs _ -> case NE.head bs of
+        SurfaceBinder _ _ (Just _) -> True
+        _                          -> False
+      _ -> False
+    isBareLambda s = case s of
+      SurfaceLam bs _ -> case NE.head bs of
+        SurfaceBinder _ _ Nothing -> True
+        _                         -> False
+      _ -> False
     isAnnotatedLet s = case s of SurfaceLet _ (Just _) _ _ -> True; _ -> False
     isBareLet      s = case s of SurfaceLet _ Nothing _ _  -> True; _ -> False
 
@@ -1433,7 +1450,7 @@ unaryOps =
   , ("app-tail", Op.AppTail)
   , ("expand-implicits", Op.ExpandImplicits)
   , ("lambda-name", Op.LambdaName), ("lambda-tail", Op.LambdaTail)
-  , ("lambda-body", Op.LambdaBody)
+  , ("lambda-body", Op.LambdaBody), ("lambda-annot-type", Op.LambdaAnnotType)
   , ("let-name", Op.LetName), ("let-type", Op.LetType)
   , ("let-value", Op.LetValue), ("let-body", Op.LetBody)
   , ("forall-name", Op.ForallName), ("forall-domain", Op.ForallDomain)
@@ -1671,6 +1688,8 @@ withOperands t os = case (t, os) of
   (AppHeadIsElim _, [o])         -> Just (AppHeadIsElim o)
   (LambdaBindsMore _, [o])       -> Just (LambdaBindsMore o)
   (LambdaBindsOne _, [o])        -> Just (LambdaBindsOne o)
+  (LambdaIsAnnotated _, [o])     -> Just (LambdaIsAnnotated o)
+  (LambdaIsBare _, [o])          -> Just (LambdaIsBare o)
   (LetIsAnnotated _, [o])        -> Just (LetIsAnnotated o)
   (LetIsBare _, [o])             -> Just (LetIsBare o)
   _                      -> Nothing
@@ -1718,6 +1737,8 @@ testTypes t = case t of
   AppHeadIsElim o         -> [(o, Ty.TSurface)]
   LambdaBindsMore o       -> [(o, Ty.TSurface)]
   LambdaBindsOne o        -> [(o, Ty.TSurface)]
+  LambdaIsAnnotated o     -> [(o, Ty.TSurface)]
+  LambdaIsBare o          -> [(o, Ty.TSurface)]
   LetIsAnnotated o        -> [(o, Ty.TSurface)]
   LetIsBare o             -> [(o, Ty.TSurface)]
   -- The four data questions (MS5 phase 65), and the only tests that ask about
@@ -1761,6 +1782,8 @@ testWord t = case t of
   AppHeadIsElim _         -> "app-head-is-elim"
   LambdaBindsMore _       -> "lambda-binds-more"
   LambdaBindsOne _        -> "lambda-binds-one"
+  LambdaIsAnnotated _     -> "lambda-is-annotated"
+  LambdaIsBare _          -> "lambda-is-bare"
   LetIsAnnotated _        -> "let-is-annotated"
   LetIsBare _             -> "let-is-bare"
 
@@ -1794,6 +1817,8 @@ everyTest =
   , AppHeadIsElim (Lit (VText ""))
   , LambdaBindsMore (Lit (VText ""))
   , LambdaBindsOne (Lit (VText ""))
+  , LambdaIsAnnotated (Lit (VText ""))
+  , LambdaIsBare (Lit (VText ""))
   , LetIsAnnotated (Lit (VText ""))
   , LetIsBare (Lit (VText ""))
   ]

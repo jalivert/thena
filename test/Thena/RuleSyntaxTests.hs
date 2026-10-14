@@ -285,6 +285,7 @@ everyOp =
   , ("app-function t", Op.AppFunction (Ref "t"))
   , ("app-last-argument t", Op.AppLastArgument (Ref "t"))
   , ("lambda-name t", Op.LambdaName (Ref "t"))
+  , ("lambda-annot-type t", Op.LambdaAnnotType (Ref "t"))
   , ("lambda-tail t", Op.LambdaTail (Ref "t"))
   , ("lambda-body t", Op.LambdaBody (Ref "t"))
   , ("let-name t", Op.LetName (Ref "t"))

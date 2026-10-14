@@ -409,8 +409,10 @@ signatureTests =
       -- **A variadic op is not a special shape**, because the table takes the
       -- 'Op' and not a tag: an @intro@ with a name and one without are two
       -- values, so they simply have two signatures.
-    , sig "prim-lambda, named"   (IntroPi (Just r))     "Name -> ()"
-    , sig "prim-lambda, unnamed" (IntroPi Nothing)      "()"
+      -- **It answers with the hole it opened** (MS8), which is what lets a clause
+      -- work inside the binder it just made.
+    , sig "prim-lambda, named"   (IntroPi (Just r))     "Name -> Core"
+    , sig "prim-lambda, unnamed" (IntroPi Nothing)      "Core"
     ]
   where
     r = Lit (VText "x")

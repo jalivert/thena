@@ -722,8 +722,15 @@ data Op
     -- — takes its arguments as written, so the term comes back unchanged.
   | LambdaName Operand
     -- ^ the first binder's name in a surface λ, as text (MS4 phase 49c).
-    -- **It refuses an annotated or implicit binder**, which is the whole of
-    -- what the λ case still cannot elaborate.
+    -- **It refuses an implicit binder and nothing else.** An annotated binder is
+    -- answered exactly as a plain one is — the type written on it is
+    -- @lambda-annot-type@\'s to read — and the plicity refusal stays here, so
+    -- every λ shape reaches the one place that names it.
+  | LambdaAnnotType Operand
+    -- ^ the type written on a surface λ's first binder — what @intro-binders@
+    -- elaborates before the binder is introduced. **Answered only where one was
+    -- written**: a bare binder is refused here rather than answered with a hole,
+    -- so the clause that reads it cannot also be the clause that does not.
   | LambdaTail Operand
     -- ^ … what the λ abstracts once that binder is peeled off: the rest of the
     -- group if there was one, otherwise the body
@@ -1211,6 +1218,7 @@ resultOf o = case o of
   AppFunction _ -> Just TSurface
   AppLastArgument _ -> Just TSurface
   LambdaName _ -> Just TName
+  LambdaAnnotType _ -> Just TSurface
   LambdaTail _ -> Just TSurface
   LambdaBody _ -> Just TSurface
   LetName _ -> Just TName
@@ -1243,8 +1251,16 @@ resultOf o = case o of
   Back         -> Nothing
   Play _       -> Nothing
   Attack       -> Nothing
-  IntroPi _    -> Nothing
-  IntroLet _   -> Nothing
+  -- **The hole they open, handed back.** Both introduce a binder and claim a
+  -- hole for what is left of the goal, and a clause that wants to work /inside/
+  -- the binder it just made has no other way to reach that hole: it is not the
+  -- focus, @goto@ takes a variable, and counting @along@s from the guess is the
+  -- shape that stops scaling the moment a clause introduces several. @claim@,
+  -- @assume@ and @define@ all answer with the variable they bound; these two
+  -- minted one and threw it away, which is what made the annotated λ binder
+  -- need an op of its own in an earlier attempt.
+  IntroPi _    -> Just TCore
+  IntroLet _   -> Just TCore
   Try _        -> Nothing
   Regret       -> Nothing
   Solve        -> Nothing
@@ -1375,6 +1391,7 @@ operandTypes o = case o of
   AppFunction x -> [(x, TSurface)]
   AppLastArgument x -> [(x, TSurface)]
   LambdaName x -> [(x, TSurface)]
+  LambdaAnnotType x -> [(x, TSurface)]
   LambdaTail x -> [(x, TSurface)]
   LambdaBody x -> [(x, TSurface)]
   LetName x -> [(x, TSurface)]
@@ -1669,6 +1686,12 @@ data Test
     -- ^ **Two positive tests, as @let@'s are**: they are how a clause that
     -- peels one binder knows whether to recurse, and the head language has no
     -- negation.
+  | LambdaIsAnnotated Operand      -- ^ a λ whose first binder has a written type
+  | LambdaIsBare Operand           -- ^ … and one whose first binder has none
+    -- ^ **Two positive tests, as @let@\'s are**, and **on the written type and
+    -- not on the plicity**: an implicit binder is bare or annotated like an
+    -- explicit one, so both shapes still reach @lambda-name@\'s refusal rather
+    -- than falling through to no clause at all.
   | LetIsAnnotated Operand         -- ^ a @let@ whose type was written (49b)
   | LetIsBare Operand              -- ^ … and one whose type was not
     -- **The questions @instral@ asks about its own data** (MS5 phase 65). They
@@ -1769,6 +1792,7 @@ opKeyword o = case o of
   AppFunction _ -> "app-function"
   AppLastArgument _ -> "app-last-argument"
   LambdaName _ -> "lambda-name"
+  LambdaAnnotType _ -> "lambda-annot-type"
   LambdaTail _ -> "lambda-tail"
   LambdaBody _ -> "lambda-body"
   LetName _ -> "let-name"

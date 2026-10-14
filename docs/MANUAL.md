@@ -733,10 +733,10 @@ claim ‹ty›
 assume ‹ty›
 quantify ‹ty›
 run-block ‹t›
-intro-binders ‹t›
-intro-binders ‹t›
-enter-binders ‹t›
-enter-binders ‹t›
+intro-binders ‹t› ‹k›
+intro-binders ‹t› ‹k›
+intro-binders ‹t› ‹k›
+intro-binders ‹t› ‹k›
 spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 thena spine> prove
@@ -1277,9 +1277,14 @@ language and elaborated on load.
 
 **It cannot yet:**
 
-- **A λ binder must be plain.** `\ x -> e`, never `\ (x : Nat) -> e` and never
-  `\ {A} -> e`; the type comes from the goal. It says
-  *"expected a surface term that is a λ whose first binder is plain"*.
+- **A λ binder may carry its type, but not braces.** `\ x -> e` takes the
+  binder's type from the goal, and `\ (x : Nat) -> e` writes it out — the written
+  type is *checked* against the goal's, so the λ you get is the same either way
+  and a type that disagrees is refused where you wrote it. You may annotate some
+  binders of a group and not others. **`\ {A} -> e` is refused**: a brace in a
+  signature says callers may leave that argument out, and a λ binds its
+  arguments in order whether or not a caller wrote them. It says
+  *"expected a surface term that is a λ whose first binder is explicit"*.
 - **A `let` must be annotated when its type is dependent** — when the value's
   type mentions the value's own arguments and one of those is a local variable:
 

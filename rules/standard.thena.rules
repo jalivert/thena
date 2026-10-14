@@ -280,9 +280,11 @@ rule elaborate t :- when focus-is-hole (surface-is-app t) (app-args-are-explicit
 rule elaborate t :- when focus-is-hole (surface-is-lambda t)
   do h = here
      ; prim-attack
-     ; call intro-binders t
      ; into
-     ; call enter-binders t
+     ; k = here
+     ; back
+     ; body = call intro-binders t k
+     ; goto body
      ; b = lambda-body t
      ; call elaborate b
      ; goto h
@@ -462,26 +464,74 @@ rule run-block t :- do play t
 
 -- One prim-lambda per binder, each given the SURFACE name: without it the binder
 -- keeps the identifier written in the type.
-intro-binders : Surface -> ()
-rule intro-binders t :- when focus-is-guess (lambda-binds-more t)
+--
+-- **The hole for what is left of the goal is carried along.** A binder with a
+-- written type has that type elaborated inside the binders already introduced —
+-- the only place an earlier binder of the same group is in scope — and this hole
+-- is how the clause gets there. @prim-lambda@ answers with the next one.
+-- **It answers with the hole the body goes in**, which is the last binder's own
+-- answer. Counting one @along@ per binder from the top of the guess was how the
+-- λ case used to get there, and that is only right while the binders are the
+-- only components in the chain — which stopped being true the moment a written
+-- type needed a hole of its own inside them.
+intro-binders : Surface -> Core -> Core
+rule intro-binders t k :- when focus-is-guess (lambda-binds-more t) (lambda-is-bare t)
   do x  = lambda-name t
-     ; prim-lambda x
+     ; k2 = prim-lambda x
      ; tl = lambda-tail t
-     ; call intro-binders tl
+     ; body = call intro-binders tl k2
+     ; return body
 
-rule intro-binders t :- when focus-is-guess (lambda-binds-one t)
+rule intro-binders t k :- when focus-is-guess (lambda-binds-one t) (lambda-is-bare t)
   do x = lambda-name t
-     ; prim-lambda x
+     ; k2 = prim-lambda x
+     ; return k2
 
--- One along per binder, to stand where the body was written. The λ's binders
--- are the count and nothing else about them is read.
-enter-binders : Surface -> ()
-rule enter-binders t :- when focus-is-component (lambda-binds-more t)
-  do along
+-- A written type on a binder is a CHECK, not a declaration. The binder's type is
+-- still the one the goal supplies, so an annotated binder gives the same term as
+-- a bare one; what was written is elaborated into a hole claimed inside the
+-- binders already introduced, and then unified with the type the binder actually
+-- got. So `\ A (a : A) -> a` works, a wrong annotation fails at the binder it was
+-- written on, and where the goal's domain is still open the annotation solves it.
+rule intro-binders t k :- when focus-is-guess (lambda-binds-more t) (lambda-is-annotated t)
+  do g  = here
+     ; x  = lambda-name t
+     ; ty = lambda-annot-type t
+     ; dn = fresh-name "A"
+     ; u  = fresh-universe
+     ; goto k
+     ; d  = claim dn u
+     ; goto d
+     ; call elaborate ty
+     ; goto g
+     ; k2 = prim-lambda x
+     ; goto k2
+     ; v  = resolve-name x
+     ; s  = typeof v
+     ; unify d s
+     ; goto g
      ; tl = lambda-tail t
-     ; call enter-binders tl
+     ; body = call intro-binders tl k2
+     ; return body
 
-rule enter-binders t :- when focus-is-component (lambda-binds-one t) do along
+rule intro-binders t k :- when focus-is-guess (lambda-binds-one t) (lambda-is-annotated t)
+  do g  = here
+     ; x  = lambda-name t
+     ; ty = lambda-annot-type t
+     ; dn = fresh-name "A"
+     ; u  = fresh-universe
+     ; goto k
+     ; d  = claim dn u
+     ; goto d
+     ; call elaborate ty
+     ; goto g
+     ; k2 = prim-lambda x
+     ; goto k2
+     ; v  = resolve-name x
+     ; s  = typeof v
+     ; unify d s
+     ; goto g
+     ; return k2
 
 -- The walk itself, and it is a recursion over the surface spine: take the first
 -- argument, claim a hole for it, elaborate into that hole, and call on what is

@@ -10,10 +10,10 @@ claim ‹ty›
 assume ‹ty›
 quantify ‹ty›
 run-block ‹t›
-intro-binders ‹t›
-intro-binders ‹t›
-enter-binders ‹t›
-enter-binders ‹t›
+intro-binders ‹t› ‹k›
+intro-binders ‹t› ‹k›
+intro-binders ‹t› ‹k›
+intro-binders ‹t› ‹k›
 spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 thena spine> prove

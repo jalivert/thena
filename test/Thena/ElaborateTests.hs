@@ -196,9 +196,10 @@ genSurfaceOf scope ty n = oneof (variables ++ introduction ++ eliminations)
 type0 :: Core
 type0 = Universe LZero
 
-goalVar, hypVar :: Var
+goalVar, hypVar, hyp2Var :: Var
 goalVar = fst (fresh 0)
 hypVar  = fst (fresh 1)
+hyp2Var = fst (fresh 2)
 
 -- | @λ a : Type₀ . ? goal : Type₀ . goal@, focused on the hole — so there is
 -- something in scope at the focus for a surface name to denote (§4.5).
@@ -275,6 +276,15 @@ piGoal2 = enter (Under (Claim goalVar (Ident "goal") ty) (Trailing (Free goalVar
     inner = Pi (Ident "b") type0 (Thena.Core.Term.close hypVar type0)
     ty    = Pi (Ident "a") type0 (Thena.Core.Term.close hypVar inner)
 
+-- | @? goal : ∀ (A : Type₀) (x : A) -> A@ — the goal whose second binder's type
+-- is the first binder, which is the case a written type can only be checked in
+-- if it is elaborated where the earlier binders are in scope.
+piGoalDep :: Cursor
+piGoalDep = enter (Under (Claim goalVar (Ident "goal") ty) (Trailing (Free goalVar)))
+  where
+    inner = Pi (Ident "x") (Free hypVar) (Thena.Core.Term.close hyp2Var (Free hypVar))
+    ty    = Pi (Ident "A") type0 (Thena.Core.Term.close hypVar inner)
+
 -- | @? goal : ∀ (a : Type₀) -> Type₀@ — a hole a lambda can be elaborated into.
 --
 -- **The Π's binder is @a@ and the surface will say @y@**, which is the whole
@@ -299,6 +309,10 @@ identsBound m = chain (Cursor.rebuild (cursor (development m)))
     chain _                          = []
 
     lams (Lam (Ident i) _ b) = i : lams (Thena.Core.Term.instantiate (Universe LZero) b)
+    -- **Past the bindings an elaboration leaves in front of the λ.** A binder
+    -- with a written type has that type elaborated into a hole of its own, and
+    -- the solved hole is a @let@ sitting between the guess and the λ.
+    lams (Let _ v _ b)       = lams v ++ lams (Thena.Core.Term.instantiate (Universe LZero) b)
     lams _                   = []
 
 -- | The variable of the component the focus is on.
@@ -489,19 +503,52 @@ lambdaTests =
           Left r  -> assertFailure ("did not elaborate: " ++ show r)
           Right m -> focusedVar m @?= Just goalVar
 
-      -- An annotation is **refused rather than ignored**: checking it against
-      -- the goal\'s domain needs the ascription machinery, which is a later
-      -- phase, and accepting it silently would be a check that is not happening.
-    , refusedShape "a λ whose first binder is plain"
-        (SurfaceLam [SurfaceBinder Explicit "x" (Just (SurfaceUniverse 0))]
-           (SurfaceName "x"))
-    , refusedShape "a λ whose first binder is plain"
+      -- **A written type is a check, and the binder is still the goal's** (MS8).
+      -- The surface name survives exactly as it does without one.
+    , testCase "a written binder type is checked, and the binder is unchanged" $
+        case elaboratingAt piGoal (SurfaceLam [SurfaceBinder Explicit "y" (Just (SurfaceUniverse 0))]
+                                     (SurfaceName "y")) of
+          Left r  -> assertFailure ("did not elaborate: " ++ show r)
+          Right m -> (identsBound m, focusedVar m) @?= (["y"], Just goalVar)
+
+      -- **The case the written type exists for**: its own type is an earlier
+      -- binder of the same group, so it can only be elaborated inside them.
+    , testCase "and it may name an earlier binder of the same group" $
+        case elaboratingAt piGoalDep (SurfaceLam [ SurfaceBinder Explicit "A" Nothing
+                                                 , SurfaceBinder Explicit "x" (Just (SurfaceName "A")) ]
+                                        (SurfaceName "x")) of
+          Left r  -> assertFailure ("did not elaborate: " ++ show r)
+          Right m -> identsBound m @?= ["A", "x"]
+
+      -- A group mixes freely, because the clause peels one binder at a time and
+      -- asks about that one.
+    , testCase "and a group mixes written and bare binders" $
+        case elaboratingAt piGoal2 (SurfaceLam [ SurfaceBinder Explicit "y" (Just (SurfaceUniverse 0))
+                                               , SurfaceBinder Explicit "z" Nothing ]
+                                      (SurfaceName "z")) of
+          Left r  -> assertFailure ("did not elaborate: " ++ show r)
+          Right m -> (identsBound m, focusedVar m) @?= (["y", "z"], Just goalVar)
+
+      -- **A wrong one fails at the binder it was written on**, not at @qed@.
+    , testCase "and a written type that is not the goal's domain is refused" $
+        case elaboratingAt piGoal (SurfaceLam [SurfaceBinder Explicit "y" (Just (SurfaceName "String"))]
+                                     (SurfaceName "y")) of
+          Left _  -> pure ()
+          Right m -> assertFailure ("elaborated: " ++ show (identsBound m))
+
+      -- **Only the plicity is still refused**, and @lambda-name@ is where: an
+      -- implicit binder is bare or written like any other, so both shapes reach
+      -- the one refusal that names it.
+    , refusedShape "a λ whose first binder is explicit"
         (SurfaceLam [SurfaceBinder Implicit "x" Nothing] (SurfaceName "x"))
+    , refusedShape "a λ whose first binder is explicit"
+        (SurfaceLam [SurfaceBinder Implicit "x" (Just (SurfaceUniverse 0))] (SurfaceName "x"))
     ]
   where
-    -- **The λ case is a clause now** (MS4 phase 49c), so its refusal comes from
-    -- @lambda-name@, which will not read an annotated or implicit binder — and
-    -- it is asked before anything is introduced.
+    -- **The λ case is clauses now** (MS4 phase 49c, MS8): a plain binder reads
+    -- its type off the goal, a written one is elaborated and checked against
+    -- it, and @lambda-name@ refuses an implicit binder before anything is
+    -- introduced.
     refusedShape what s = testCase what $
       case elaboratingAt piGoal s of
         Left (ExpectedSurfaceShape w) -> w @?= what
@@ -622,7 +669,7 @@ baseTests =
               , "fit-core", "fit-core"
               , "claim", "assume", "quantify"
               ]
-              ++ replicate 19 "elaborate" ++ ["run-block"] ++ replicate 2 "enter-binders"
+              ++ replicate 19 "elaborate" ++ ["run-block"]
               ++ replicate 2 "spine-arguments"
 
     , testCase "prove is a rule over prim-prove" $
