@@ -2110,6 +2110,38 @@ andLeft {ℓ₀ ℓ₁} : ∀ (A : Type ℓ₀) (B : Type ℓ₁) -> And {ℓ₀
 `Sigma` is deliberately written at `Type₀` and stays monomorphic, so `fst` and
 `snd` have no level parameters at all.
 
+**The trust-bearing definitions are surface definitions too, since 2026-10-14.**
+`transport`, `isSame` and the six laws the three `dec` functions rest on were
+written in the development calculus for eight days, because a surface
+`trusted T e` leaves the type its body really has to a hole and that hole could
+not be solved under a λ — which is where every one of those claims sits. That was
+a defect in unification, not a limit of the surface language, and with it fixed
+the file a reader opens to see what the system takes on trust is written in the
+language they write their own proofs in.
+
+**Their types are ascribed, and that is a real limit showing through.** The
+surface language has no spelling for a level argument — `Eq {0} String a b` is
+refused, because a brace is an implicit *value* argument and `Eq` has no implicit
+value position. So a signature naming `Eq` or `Dec` generalises over its level,
+and these laws, which are about `String`, `Char` and `Int` literals and so live
+in `Type₀`, would offer a caller a choice that cannot matter. Ascribing the type
+pins it:
+
+```
+eqStringEqual : ∀ (a : String) (b : String)
+  -> (Eq Comparison (eqString a b) same : Type₀) -> (Eq String a b : Type₀)
+```
+
+and the stored type is exactly what the development calculus wrote,
+`-> Eq {0} Comparison (eqString a b) same -> Eq {0} String a b`, with no
+ascription left in it. **A body needs no such thing**: a level argument in a term
+is inserted at the use.
+
+**`define-global`, the op that hands a finished definition out from a rule base,
+stays** — his ruling the same day. It is `declare-primitive`'s sibling and is
+what `examples/10-preservation-any-context.thena` uses; it is simply no longer
+the only way to write a definition that rests on trust.
+
 ---
 
 ### A `let` whose type is dependent must be annotated

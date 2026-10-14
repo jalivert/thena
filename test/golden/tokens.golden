@@ -7,54 +7,54 @@ module Good
   declared Name
   declared var
 -- T is not one of the three
-solved: ?ℓ1007
-solved: ?ℓ1007
-solved: ?ℓ1007
-chose 1040: elaborate
+solved: ?ℓ2611
+solved: ?ℓ2611
+solved: ?ℓ2611
+chose 2644: elaborate
 already equal
-solved: ?ℓ1008
+solved: ?ℓ2612
 solved: T
 refused: in the token class t: Bool is not String, Char or Int
 -- the regex does not parse: a stray metacharacter
-chose 1009: elaborate
+chose 2613: elaborate
 already equal
-solved: ?ℓ1007
+solved: ?ℓ2611
 solved: T
 refused: in the token class f: unexpected '{' in the regular expression
 -- the regex does not parse: it ends too soon
-chose 1009: elaborate
+chose 2613: elaborate
 already equal
-solved: ?ℓ1007
+solved: ?ℓ2611
 solved: T
 refused: in the token class g: the regular expression ends too soon
 -- the regex does not parse: an escape other dialects have
-chose 1009: elaborate
+chose 2613: elaborate
 already equal
-solved: ?ℓ1007
+solved: ?ℓ2611
 solved: T
 refused: in the token class c: \S is not supported in a regular expression
 -- the regex does not parse: a reversed range
-chose 1009: elaborate
+chose 2613: elaborate
 already equal
-solved: ?ℓ1007
+solved: ?ℓ2611
 solved: T
 refused: in the token class d: the range z-a is empty, because z comes after a
 -- it matches the empty string
-chose 1009: elaborate
+chose 2613: elaborate
 already equal
-solved: ?ℓ1007
+solved: ?ℓ2611
 solved: T
 refused: in the token class b: the regular expression matches the empty string
 -- it accepts something that is not a Char
-chose 1009: elaborate
+chose 2613: elaborate
 already equal
-solved: ?ℓ1007
+solved: ?ℓ2611
 solved: T
 refused: in the token class e: /ab|c/ accepts "ab", which is not a Char
 -- it accepts something that is not an Int, and says the shortest
-chose 1009: elaborate
+chose 2613: elaborate
 already equal
-solved: ?ℓ1007
+solved: ?ℓ2611
 solved: T
 refused: in the token class n: /[a-z]+/ accepts "a", which is not an Int
 thena spine> :theorem d : Token Char
