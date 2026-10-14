@@ -49,8 +49,9 @@ module StlcPreservationAny where
 -- longer than the last, and the length equation for `appendString` is what the
 -- type theory cannot state. It is TRUE and it is not derivable here.
 --
--- Written in the development calculus, because the surface cannot put a
--- trusted term under a λ (`~tg5x5`), and the claim is about all y and avoid.
+-- Written in the development calculus, which spells all three fields of the
+-- trusted node out and so needs no hole for the type the body turns out to
+-- have. The surface form, which claims that type, also works here.
 --
 -- The body is honestly `Empty -> Empty`. So the claim is DISCHARGED whenever
 -- `avoid` is empty — there `In c (nil String)` IS `Empty` — and pending

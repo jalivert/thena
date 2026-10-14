@@ -73,13 +73,12 @@ data Dec (A : Type) : Type where
 -- behaviour only the implementation knows. What each `decP` rests on is
 -- exactly two claims about its comparison primitive, and `:trust` names them.
 --
--- **Why these are written in the development calculus and not at the surface.**
--- A surface `trusted T e` claims a hole for the type the body was really
--- checked at, and a hole whose type is a hole has no solution under a binder —
--- so the surface form does not work inside a λ, and every claim here is under
--- one. The development calculus writes all three fields, which needs no hole.
--- `define-global` is the op that hands a finished definition out through the
--- channel, the way `declare-primitive` hands out a constant.
+-- **Why these are written in the development calculus.** It spells all three
+-- fields of the trusted node out — the claimed type, the type the body really
+-- has, and the body — so it needs no hole for the one a surface `trusted T e`
+-- leaves to elaboration. The surface form works here too, and writes the same
+-- node. `define-global` is the op that hands a finished definition out through
+-- the channel, the way `declare-primitive` hands out a constant.
 
 -- **Transport along an equality**: given `e : Eq A x y` and a family `P`,
 -- carry a `P x` to a `P y`. The one thing the decisions below need from `Eq`,

@@ -759,6 +759,22 @@ declareDoorTests =
         Ran _ _ Completed -> pure ()
         r -> assertFailure ("expected Completed, got " ++ show r)
 
+    -- **The rung bites under a \955 too** (MS8, 2026-10-14). A surface @trusted@
+    -- inside a \955 could not elaborate at all until @demote@ was given the
+    -- focus's own chain to read, so this position is newly reachable — and every
+    -- trusted law in the prelude has exactly this shape. Both sides are pinned:
+    -- the rung still refuses what it can see through, and still admits what it
+    -- cannot.
+  , testCase "an undischargeable claim under a \955 is refused as well" $
+      case drive [liarUnderLambdaLine] of
+        Ran _ _ (Untrusted _ claims)
+          | not (null claims) -> pure ()
+        r -> assertFailure ("expected Untrusted, got " ++ show r)
+  , testCase "and an honest one under a \955 declares" $
+      case drive [lawUnderLambdaLine] of
+        Ran _ _ Completed -> pure ()
+        r -> assertFailure ("expected Completed, got " ++ show r)
+
     -- And the strictest rung does refuse it, because pending is not
     -- discharged — the same answer @qed@ has always given.
   , testCase "but no trust refuses even an honest pending claim" $
@@ -785,6 +801,13 @@ driveTo ls = foldl one (setUp, Blank) ls
       (_, r) -> error ("fixture line failed: " ++ l ++ " => " ++ show r)
 
 natLine, eqLine, honestLine, liarLine :: String
+liarUnderLambdaLine, lawUnderLambdaLine :: String
+liarUnderLambdaLine =
+  "declare lie : \8704 (a : Nat) -> Eq Nat zero (succ zero) ; \
+  \lie = \\ a -> trusted (Eq Nat zero (succ zero)) (refl Nat zero)"
+lawUnderLambdaLine =
+  "declare law : \8704 (a : Nat) -> Eq Nat a a ; \
+  \law = \\ a -> trusted (Eq Nat a a) (refl Nat a)"
 natLine = "data " ++ natDecl
 eqLine =
   "data Eq (A : Type) : A -> A -> Type \
