@@ -660,6 +660,21 @@ notating =
             @?= [[ Argument "C₁" (OfLanguage (GlobalName "C")) Plain
                  , Argument "C₂" (OfLanguage (GlobalName "C")) Plain ]]
         (s1, other) -> assertFailure (unlines (renderResponse s1 other))
+  , -- **A refusal that quotes a type may not print a nameless argument.** The
+    -- stand-in 'functionShape' peels a telescope with used to be a global with
+    -- an empty name, so a result type mentioning an earlier argument printed
+    -- nothing where that argument was: @nil@'s @List {\8467} A@ reached the refusal
+    -- as @nil returns List {\8467} , not a Ctx@. The prelude's @nil@ is the only
+    -- shipped function whose result mentions its own argument, which is why the
+    -- case went unseen until a notation block named it.
+    testCase "a result that mentions an argument names it" $ do
+      (s0, _) <- startingSession
+      case loadProofSource s0 (joiningWith "notation C where\n  nil -> G \8746 D") of
+        (_, Ran _ _ (Refused (GrammarRefused
+             (GrammarError _ _ (InProduction "nil" (FunctionResult r)))))) -> case r of
+          Canonical _ _ [a] -> a @?= Global (GlobalName "\8249A\8250") []
+          other             -> assertFailure (show other)
+        (s1, other) -> assertFailure (unlines (renderResponse s1 other))
   , testCase "the block installs, declares nothing, and adds one production" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 (joiningWith "notation C where\n  join -> G \8746 D") of

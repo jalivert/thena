@@ -64,7 +64,7 @@ import Data.Maybe (isJust, listToMaybe)
 
 import Thena.Core.Level (Normal (..), normalise)
 import Thena.Core.Reduce (whnf)
-import Thena.Core.Term (Core (..), GlobalName (..), Literal (..), instantiate, tokenName)
+import Thena.Core.Term (Core (..), GlobalName (..), Ident (..), Literal (..), instantiate, tokenName)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Earley (placeholderChar)
 import Thena.Language.Regex (Regex, andThen, fromRanges, matches, oneOf, parseRegex, primingChar, singleChar, star)
@@ -918,9 +918,14 @@ functionShape :: GlobalEnv -> GlobalName -> Maybe ([Core], Core)
 functionShape env f = peel . definitionType <$> lookupDefinition f env
   where
     peel t = case whnf env [] t of
-      Pi _ dom body -> let (ds, r) = peel (instantiate opaque body) in (dom : ds, r)
-      r             -> ([], r)
-    opaque = Global (GlobalName "") []
+      Pi (Ident x) dom body -> let (ds, r) = peel (instantiate (opaque x) body) in (dom : ds, r)
+      r                     -> ([], r)
+    -- **The stand-in prints as the argument it stands for.** Its name used to be
+    -- empty, so a result type that mentions an earlier argument printed nothing
+    -- at all where that argument was: @nil@'s @List {\8467} A@ reached a refusal as
+    -- @nil returns List {\8467} , not a Ctx@, trailing space and all. The brackets
+    -- keep it unwritable, which is the whole point of the opacity.
+    opaque x = Global (GlobalName ("\8249" ++ x ++ "\8250")) []
 
 -- | **A @notation@ block's productions, in the grammar they are for** (MS8
 -- phase 158): the installed grammars with that one replaced.
