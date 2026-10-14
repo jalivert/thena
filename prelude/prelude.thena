@@ -81,13 +81,17 @@ data Dec (A : Type) : Type where
 -- and it is fixed, so the file a reader opens to see what the system trusts is
 -- written in the language they write their own proofs in.
 --
--- **Why each type is ascribed `: Type₀`.** The surface has no spelling for a
--- level argument, so a signature mentioning `Eq` or `Dec` would otherwise
--- generalise over its level and these laws — all about primitive literals,
--- which live in `Type₀` — would offer a caller a choice that cannot matter.
--- The ascription pins it, and the stored type is exactly the `Eq {0}` the
--- development calculus wrote. **Level arguments in a body need no spelling**:
--- they are inserted at a use.
+-- **Why each type is ascribed `: Type₀`.** A surface type cannot say which level
+-- a datatype application sits at — `Eq {0} String a b` is refused, a brace there
+-- meaning an implicit *value* argument — so the level is inferred, and whatever a
+-- declaration leaves undecided becomes a level parameter of the name. Elsewhere
+-- in this file `A : Type` decides it, by tying every `Eq A …` to `A`'s own level;
+-- these laws have no such parameter, being about `String`, `Char` and `Int` at a
+-- fixed `Type₀`, and cumulativity then asks only that the level be at least 0. So
+-- each `Eq` here would get a parameter of its own, offering a caller a choice that
+-- cannot matter. The ascription decides it, and the stored type is exactly the
+-- `Eq {0}` the development calculus wrote. **A body needs no ascription**: a level
+-- in a term is inferred at the use.
 
 -- **Transport along an equality**: given `e : Eq A x y` and a family `P`,
 -- carry a `P x` to a `P y`. The one thing the decisions below need from `Eq`,

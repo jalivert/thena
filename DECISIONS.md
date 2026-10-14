@@ -2119,12 +2119,19 @@ a defect in unification, not a limit of the surface language, and with it fixed
 the file a reader opens to see what the system takes on trust is written in the
 language they write their own proofs in.
 
-**Their types are ascribed, and that is a real limit showing through.** The
-surface language has no spelling for a level argument — `Eq {0} String a b` is
-refused, because a brace is an implicit *value* argument and `Eq` has no implicit
-value position. So a signature naming `Eq` or `Dec` generalises over its level,
-and these laws, which are about `String`, `Char` and `Int` literals and so live
-in `Type₀`, would offer a caller a choice that cannot matter. Ascribing the type
+**Their types are ascribed, and here is why.** A surface type cannot say which level a datatype
+application sits at, and it does not need to except when nothing else decides it.
+A brace in a surface term means an implicit *value* argument, and elaboration
+places it against the head's recorded argument positions (`plicitiesOf`,
+`Engine.hs`); a datatype's level is not an argument position — it lives in
+`Global`'s own level list — so `Eq {0} String a b` is refused with *"an implicit
+argument this head has no position for"*. The level is inferred instead, and what a
+declaration leaves undecided becomes a level **parameter** of the declared name.
+**Here it is undecided**: `String`, `Char` and `Int` sit at a fixed `Type₀`, and
+cumulativity then asks only that `Eq`'s level be at least 0, so each occurrence
+would get a parameter of its own. Writing `A : Type` instead would have tied them
+together — but these laws are about primitive literals, not a parameter. Ascribing
+the whole type decides it. Ascribing the type
 pins it:
 
 ```
