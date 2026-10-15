@@ -155,9 +155,12 @@ rule quantify ty :-
 -- Elaboration, one clause per surface node (MS4 step 2)
 --
 -- Every clause names the node it is for, so at most one head matches any term
--- and a call to elaborate has nothing to choose between — the two application
--- clauses are the exception, and they are ordered rather than exclusive because
--- a head whose arguments do not line up must fall through to the binary rule.
+-- and a call to elaborate has nothing to choose between. **The three
+-- application clauses were the exception until MS8 phase 170** — the binary one
+-- asked only that the arguments be explicit, so it matched a name-headed spine
+-- too and was tried whenever the name-headed clause failed. It is now the
+-- clause for a head that is neither a name nor an elim, and there is no
+-- exception left: elaboration does not backtrack.
 --
 -- **Elaboration is entirely here as of MS4 phase 49f.** There is no
 -- prim-elaborate any more and there is no Haskell elaborator behind it; what
@@ -231,10 +234,16 @@ rule elaborate t :- when focus-is-hole (surface-is-app t) (app-head-is-elim t)
 -- position the user left out, so from here on every argument is written and the
 -- walk is the same for all of them.
 --
--- **It may fail and fall through to the clause below**, which is what the
--- Haskell did with a case: a head whose arguments do not line up — a partial
--- application of a head with recorded plicities — is an ordinary binary
--- application.
+-- **Its failure is now the answer, and before phase 170 it was thrown away.**
+-- The clause used to be allowed to fall through to the binary one, on the
+-- reasoning that a head whose arguments do not line up is an ordinary binary
+-- application. It is not: this clause's walk takes a partial application of a
+-- head with recorded plicities perfectly well, and the fall-through only ever
+-- served to replace a real error with the binary clause's own. The binary
+-- clause claims f : A -> B, so against a dependent head it fails on that claim
+-- before it re-reaches the argument that was wrong — which is why
+-- `refl String "y"` against `Eq String "x" "x"` said `A2 is not bound before A`
+-- instead of naming the mismatch.
 rule elaborate t :- when focus-is-hole (surface-is-app t) (app-head-is-name t)
   do h  = here
      ; e  = expand-implicits t
@@ -246,7 +255,7 @@ rule elaborate t :- when focus-is-hole (surface-is-app t) (app-head-is-name t)
 -- E⟦e a⟧ — the binary rule, a spine folded right to left. CLAIM (A : Type);
 -- CLAIM (B : Type); CLAIM (f : A -> B); CLAIM (s : A); FILL (f s); FOCUS f;
 -- E⟦e⟧; FOCUS s; E⟦a⟧; SOLVE.
-rule elaborate t :- when focus-is-hole (surface-is-app t) (app-args-are-explicit t)
+rule elaborate t :- when focus-is-hole (surface-is-app t) (app-head-is-term t) (app-args-are-explicit t)
   do h  = here
      ; dn = fresh-name "A"
      ; u1 = fresh-universe

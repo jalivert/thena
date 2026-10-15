@@ -375,6 +375,7 @@ holds env cur args t = case t of
   AppArgsAreExplicit o    -> surfaceIs o argsExplicit
   AppHeadIsName o         -> surfaceIs o headIsName
   AppHeadIsElim o         -> surfaceIs o headIsElim
+  AppHeadIsTerm o         -> surfaceIs o headIsTerm
   LambdaBindsMore o       -> surfaceIs o bindsMore
   LambdaBindsOne o        -> surfaceIs o bindsOne
   LambdaIsAnnotated o     -> surfaceIs o isAnnotatedLambda
@@ -419,6 +420,14 @@ holds env cur args t = case t of
     isDo           s = case s of SurfaceDo _ -> True; _ -> False
     headIsName     s = case s of SurfaceApp (SurfaceName _) _ -> True; _ -> False
     headIsElim     s = case s of SurfaceApp (SurfaceElim {}) _ -> True; _ -> False
+    -- The third positive test, @let@'s two being the precedent: the head
+    -- language has no negation, so "neither a name nor an elim" is written out.
+    headIsTerm     s = case s of
+      SurfaceApp f _ -> case f of
+        SurfaceName _  -> False
+        SurfaceElim {} -> False
+        _              -> True
+      _ -> False
     argsExplicit   s = case s of
       SurfaceApp _ as -> all (\(SurfaceArg p _) -> p == Explicit) as
       _               -> False
@@ -1686,6 +1695,7 @@ withOperands t os = case (t, os) of
   (AppArgsAreExplicit _, [o])    -> Just (AppArgsAreExplicit o)
   (AppHeadIsName _, [o])         -> Just (AppHeadIsName o)
   (AppHeadIsElim _, [o])         -> Just (AppHeadIsElim o)
+  (AppHeadIsTerm _, [o])         -> Just (AppHeadIsTerm o)
   (LambdaBindsMore _, [o])       -> Just (LambdaBindsMore o)
   (LambdaBindsOne _, [o])        -> Just (LambdaBindsOne o)
   (LambdaIsAnnotated _, [o])     -> Just (LambdaIsAnnotated o)
@@ -1735,6 +1745,7 @@ testTypes t = case t of
   AppArgsAreExplicit o    -> [(o, Ty.TSurface)]
   AppHeadIsName o         -> [(o, Ty.TSurface)]
   AppHeadIsElim o         -> [(o, Ty.TSurface)]
+  AppHeadIsTerm o         -> [(o, Ty.TSurface)]
   LambdaBindsMore o       -> [(o, Ty.TSurface)]
   LambdaBindsOne o        -> [(o, Ty.TSurface)]
   LambdaIsAnnotated o     -> [(o, Ty.TSurface)]
@@ -1780,6 +1791,7 @@ testWord t = case t of
   AppArgsAreExplicit _    -> "app-args-are-explicit"
   AppHeadIsName _         -> "app-head-is-name"
   AppHeadIsElim _         -> "app-head-is-elim"
+  AppHeadIsTerm _         -> "app-head-is-term"
   LambdaBindsMore _       -> "lambda-binds-more"
   LambdaBindsOne _        -> "lambda-binds-one"
   LambdaIsAnnotated _     -> "lambda-is-annotated"
@@ -1815,6 +1827,7 @@ everyTest =
   , AppArgsAreExplicit (Lit (VText ""))
   , AppHeadIsName (Lit (VText ""))
   , AppHeadIsElim (Lit (VText ""))
+  , AppHeadIsTerm (Lit (VText ""))
   , LambdaBindsMore (Lit (VText ""))
   , LambdaBindsOne (Lit (VText ""))
   , LambdaIsAnnotated (Lit (VText ""))

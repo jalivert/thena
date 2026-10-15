@@ -52,7 +52,6 @@ proving lt : Nat
 thena spine> elaborate ⟨ let y : Nat = zero in succ y ⟩
 solved: ?ℓ39
 already equal
-chose 45: elaborate
 already equal
 already equal
 thena spine> :show
@@ -71,7 +70,7 @@ lt : Nat   ∎
 thena spine> :theorem asc : Nat
 proving asc : Nat
 thena spine> elaborate ⟨ zero : Nat ⟩
-solved: ?ℓ51
+solved: ?ℓ50
 already equal
 already equal
 thena spine> qed

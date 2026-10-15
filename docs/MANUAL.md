@@ -153,7 +153,7 @@ the level left to be worked out:
 thena spine> :infer Type₀
 Type₀ : Type₁
 thena spine> :infer Type
-Type : Type (suc ?ℓ2621)
+Type : Type (suc ?ℓ2465)
 ```
 
 `?ℓ229` is an unknown level. It is not a default and it is not zero — it is
@@ -185,8 +185,8 @@ of it writes that level in braces:
 
 ```
 thena spine> :show Eq
-data Eq {ℓ₈₉} (A : Type (ℓ₈₉)) : A -> A -> Type (ℓ₈₉) where
-  { refl : ∀ (a : A) -> Eq {ℓ₈₉} A a a }
+data Eq {ℓ₈₈} (A : Type (ℓ₈₈)) : A -> A -> Type (ℓ₈₈) where
+  { refl : ∀ (a : A) -> Eq {ℓ₈₈} A a a }
 ```
 
 So `Eq` on its own is not a term — `Eq {0} Nat x y` is. **Written on the
@@ -195,7 +195,7 @@ one unknown per parameter, and unification settles them.
 
 ```
 thena spine> :infer refl
-refl : ∀ (A : Type (?ℓ2628)) (a : A) -> Eq {?ℓ2628} A a a
+refl : ∀ (A : Type (?ℓ2472)) (a : A) -> Eq {?ℓ2472} A a a
 ```
 
 Written in the development calculus they are explicit, and **prenex** — a use
@@ -214,8 +214,8 @@ join:
 
 ```
 thena spine> :show And
-data And {ℓ₂₃₉ ℓ₂₄₀} (A : Type (ℓ₂₃₉)) (B : Type (ℓ₂₄₀)) : Type (ℓ₂₃₉ ⊔ ℓ₂₄₀) where
-  { both : A -> B -> And {ℓ₂₃₉ ℓ₂₄₀} A B }
+data And {ℓ₂₃₇ ℓ₂₃₈} (A : Type (ℓ₂₃₇)) (B : Type (ℓ₂₃₈)) : Type (ℓ₂₃₇ ⊔ ℓ₂₃₈) where
+  { both : A -> B -> And {ℓ₂₃₇ ℓ₂₃₈} A B }
 ```
 
 `⊔` is the one symbol that is printed and never written: the join is computed
@@ -310,8 +310,8 @@ constructors' own levels, and becomes a level parameter if nothing pins it:
 thena spine> data Box (A : Type) : Type where { box : A -> Box A }
 declared Box
 thena spine> :show Box
-data Box {ℓ₂₆₇₇} (A : Type (ℓ₂₆₇₇)) : Type (ℓ₂₆₇₇) where
-  { box : A -> Box {ℓ₂₆₇₇} A }
+data Box {ℓ₂₅₁₉} (A : Type (ℓ₂₅₁₉)) : Type (ℓ₂₅₁₉) where
+  { box : A -> Box {ℓ₂₅₁₉} A }
 ```
 
 A written `Typeₙ` is still checked rather than believed:
@@ -452,11 +452,11 @@ unknown becomes a parameter:
 
 ```
 thena spine> :theorem idPoly : ∀ (A : Type) -> A -> A
-proving idPoly : ∀ (A : Type (?ℓ2712)) -> A -> A
+proving idPoly : ∀ (A : Type (?ℓ2554)) -> A -> A
 thena spine> try-core ⌜ \ (A : Type) (a : A) -> a ⌝
 thena spine> solve
 thena spine> qed
-idPoly {ℓ₂₇₂₄} : ∀ (A : Type (ℓ₂₇₂₄)) -> A -> A   ∎
+idPoly {ℓ₂₅₆₆} : ∀ (A : Type (ℓ₂₅₆₆)) -> A -> A   ∎
 ```
 
 Sometimes one level is not enough, and the proof leaves a *relation* between two
@@ -465,11 +465,11 @@ before a `⊢`:
 
 ```
 thena spine> :theorem lift : Type -> Type
-proving lift : Type (?ℓ2726) -> Type (?ℓ2727)
+proving lift : Type (?ℓ2568) -> Type (?ℓ2569)
 thena spine> try-core ⌜ \ (x : Type) -> x ⌝
 thena spine> solve
 thena spine> qed
-lift {ℓ₂₇₃₅ ℓ₂₇₃₆} : (ℓ₂₇₃₅ ≤ ℓ₂₇₃₆) ⊢ Type (ℓ₂₇₃₅) -> Type (ℓ₂₇₃₆)   ∎
+lift {ℓ₂₅₇₇ ℓ₂₅₇₈} : (ℓ₂₅₇₇ ≤ ℓ₂₅₇₈) ⊢ Type (ℓ₂₅₇₇) -> Type (ℓ₂₅₇₈)   ∎
 ```
 
 Read it as *given `ℓ₂₃₈ ≤ ℓ₂₃₉`, this type*. A constraint that held at every
@@ -740,7 +740,7 @@ intro-binders ‹t› ‹k›
 spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 thena spine> prove
-chose 2958: intro
+chose 2784: intro
 ```
 
 Three rules matched, so the engine reports which one it took and leaves a
@@ -748,7 +748,7 @@ Three rules matched, so the engine reports which one it took and leaves a
 
 ```
 thena spine> :choices
-2958  intro   untried: solve, regret, prove
+2784  intro   untried: solve, regret, prove
 ```
 
 `retry` backtracks to the nearest choice point and takes the next alternative.
@@ -757,13 +757,13 @@ undoes the whole thing:
 
 ```
 thena spine> retry
-retrying 2958: solve
-backtracking to 2958: regret
+retrying 2784: solve
+backtracking to 2784: regret
 thena spine> :show
 ▶ let ? id : ∀ (A : Type₀) -> A -> A in
   id
 thena spine> :choices
-2958  regret   untried: prove
+2784  regret   untried: prove
 ```
 
 Search is meant to be inspectable, not a black box: you can always see what was
@@ -784,11 +784,11 @@ line left is yours to reach with `retry`, and nothing reaches it for you:
 thena spine> :theorem t : ∀ (A : Type₀) -> A -> A
 proving t : ∀ (A : Type₀) -> A -> A
 thena spine> prove
-chose 2616: attack
+chose 2460: attack
 thena spine> regret
 thena spine> back
 stuck: already at the root
-  undoing that would backtrack to 2616, which was chosen before this line — retry 2616 to take it
+  undoing that would backtrack to 2460, which was chosen before this line — retry 2460 to take it
 ```
 
 `regret` took the guess back off and `back` had nothing left to pop. Without the
@@ -872,7 +872,7 @@ pc
   0  u = universe-at l
   1  return u
 env
-  l = Type (?ℓ2643)
+  l = Type (?ℓ2487)
 stack
   call, 14 instruction(s) to resume
   call, 6 instruction(s) to resume
@@ -882,16 +882,16 @@ pc
   0  u = universe-at l
   1  return u
 env
-  l = Type (?ℓ2645)
+  l = Type (?ℓ2489)
 stack
   call, 11 instruction(s) to resume
   call, 14 instruction(s) to resume (returned)
   call, 6 instruction(s) to resume
   call, 148 instruction(s) to resume (returned)
 thena spine> :run
-solved: ?ℓ2641
-solved: ?ℓ2643
-solved: ?ℓ2645
+solved: ?ℓ2485
+solved: ?ℓ2487
+solved: ?ℓ2489
 already equal
 thena spine> :step off
 ```

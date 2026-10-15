@@ -24,6 +24,7 @@ import Test.Tasty.QuickCheck
 
 import Thena.Driver
   ( Loaded (..)
+  , loadProofSource
   , loadSource
   )
 import Thena.Standard (withRules)
@@ -59,6 +60,8 @@ import Thena.Rules
   , matches
   , next
   )
+import Thena.Files (startingSession)
+import Thena.Render (renderResponse)
 import Thena.Standard (expectedBase)
 import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..))
 import Thena.Surface.Zipper (rootedAt)
@@ -75,7 +78,91 @@ tests =
     , unsupportedTests
     , baseTests
     , endToEnd
+    , honestRefusals
     ]
+
+-- --------------------------------------------------------------------------
+-- The message a wrong argument gets (MS8 phase 170)
+-- --------------------------------------------------------------------------
+
+-- | **A wrong argument to a name-headed application reports the real error.**
+--
+-- The three application clauses of @elaborate@ used to overlap: the binary one
+-- asked only that the arguments be explicit, so it matched a name-headed spine
+-- too and was tried whenever the name-headed clause failed. It claims
+-- @f : A -> B@, which a dependent head does not fit, so against @Eq@ or @refl@
+-- it failed on its own claim /before/ re-reaching the argument that was wrong,
+-- and that spurious failure was what the user saw — @A2 is not bound before A@,
+-- naming development components and nothing they wrote. The real error was
+-- computed and thrown away.
+--
+-- **Two different errors were lost the same way**, which is why both are pinned
+-- here: a type mismatch, and a parse error inside an object term literal whose
+-- message already named the bracket exactly.
+--
+-- **A non-dependent head always reported honestly**, because the binary clause
+-- re-elaborated the argument and met the same error again — so a test over
+-- @Nat -> Nat@ would have passed throughout and is no evidence. The head has to
+-- be dependent.
+honestRefusals :: TestTree
+honestRefusals =
+  testGroup
+    "a wrong argument to a dependent head reports the real error"
+    [ testCase "a false equation names the two sides" $
+        failureOf
+          [ "a : Eq String \"x\" \"x\""
+          , "a = refl String \"y\""
+          ]
+          >>= (@?= "stuck: \"y\" and \"x\" cannot be made equal")
+
+    , testCase "and so does one over Int" $
+        failureOf
+          [ "a : Eq Int 1 1"
+          , "a = refl Int 2"
+          ]
+          >>= (@?= "stuck: 2 and 1 cannot be made equal")
+
+    , testCase "a wrong argument further in names the types" $
+        failureOf
+          [ "a : List String"
+          , "a = cons String \"x\" (nil Int)"
+          ]
+          >>= (@?= "stuck: Int and String cannot be made equal")
+
+      -- **The object-term half, and the message was always right** — it is
+      -- reached now instead of being discarded. @Eq@ is the dependent head; the
+      -- same literal under a non-dependent one reported this all along.
+    , testCase "an unparseable literal under Eq names the bracket" $
+        failureOf
+          [ "y : Token String"
+          , "y = /[a-z]+/"
+          , ""
+          , "language LC, M, N where"
+          , "  var : y as occurrence -> y"
+          , "  app                   -> ( M N )"
+          , ""
+          , "a : Eq LC LC`( f` LC`( f g )`"
+          , "a = refl LC LC`( f g )`"
+          ]
+          >>= (@?= "stuck: in LC`( f`: the term ends too soon, expecting y, ( or [")
+    ]
+  where
+    -- **The session the REPL starts in**, prelude and shipped base loaded, so
+    -- @Eq@, @List@ and @refl@ are the ones a user has, and a @language@ block
+    -- gets the module layout it needs.
+    --
+    -- **The last line, and the rest of the response is the level solver's
+    -- running commentary** — a page of @solved:@ lines, which is what the
+    -- manual warns a declaration at the prompt prints. Whitespace is
+    -- normalised because a refusal may wrap: the message is what is pinned,
+    -- not its line breaks.
+    failureOf ls = do
+      (s0, _) <- startingSession
+      let src = unlines (["module Wrong where", ""] ++ ls)
+          (s1, resp) = loadProofSource s0 src
+      pure $ case filter (not . null) (renderResponse s1 resp) of
+        [] -> "it loaded, and should not have"
+        rs -> unwords (words (last rs))
 
 -- --------------------------------------------------------------------------
 -- The whole stack, over generated programs (2026-09-13)

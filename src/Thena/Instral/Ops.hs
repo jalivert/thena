@@ -1680,6 +1680,25 @@ data Test
     -- @elim@ node, not a name, so the binary clause took it: it claims
     -- @f : A -> B@, an /arrow/, and an eliminator\'s type is a telescope, so
     -- @A@ was left unsolved and the declaration silently produced nothing.
+  | AppHeadIsTerm Operand
+    -- ^ **a spine whose head is neither a name nor an @elim@** — Brady's @e a@,
+    -- the head being a term that has to be elaborated in its own right
+    -- (MS8 phase 170).
+    --
+    -- **The third positive test of the three, and it is what stops elaboration
+    -- backtracking.** Until phase 170 the binary clause asked only
+    -- 'AppArgsAreExplicit', so it matched every name-headed spine too and was
+    -- tried whenever 'AppHeadIsName'\'s clause failed. The binary clause claims
+    -- @f : A -> B@, so against a dependent head it fails on its own claim
+    -- /before/ re-reaching the argument that was actually wrong, and that
+    -- spurious failure was what the user got: @refl String "y"@ against
+    -- @Eq String "x" "x"@ answered @A2 is not bound before A@, and an object
+    -- term with a bracket missing answered @A3 is not bound before A1@ while the
+    -- parse error that named the bracket was computed and thrown away.
+    --
+    -- With this test the three application clauses are mutually exclusive, so
+    -- every clause of @elaborate@ names the node it is for and a call to
+    -- @elaborate@ has nothing to choose between.
   | LambdaBindsMore Operand        -- ^ a λ whose group has a binder after the
                                    --   first (MS4 phase 49c)
   | LambdaBindsOne Operand         -- ^ … and one whose group has just the one

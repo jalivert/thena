@@ -403,9 +403,10 @@ tests =
         , "along"
         , "along"
         , "elaborate ⟨ b ⟩"
-          -- A hint that is not an identifier does not match at all: no rule
-          -- with a hint head passes, and there is nothing else in the hinted
-          -- half of the base.
+          -- **Applying a non-function says so**, since MS8 phase 170. The
+          -- name-headed clause's refusal used to be discarded by the
+          -- fall-through to the binary clause, which answered with its own
+          -- @A and A1 -> B cannot be made equal@ about components nobody wrote.
         , "elaborate ⟨ a a ⟩"
         , ":abandon"
           -- The instruction language, seen: stepping shows the driver's own

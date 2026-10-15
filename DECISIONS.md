@@ -1967,6 +1967,40 @@ choice to make and never leaves a choice point. That is what the head predicates
 are for — there is one `surface-is-…` per node kind, and a clause that names its
 node cannot collide with another.
 
+**The three application clauses were an exception to that until 2026-10-15, and
+the exception was the whole cause of two bad error messages.** An application is
+split by its head — a name, an `elim`, or a term to elaborate in its own right —
+and the third clause used to ask only that the arguments be explicit. So it
+matched a name-headed application too, and was tried whenever the name-headed
+clause failed. It claims `f : A -> B`, an arrow, which a dependent head does not
+fit, so against `Eq` or `refl` it failed on its own claim *before* re-reaching the
+argument that was actually wrong — and that spurious failure was what you were
+shown:
+
+```
+a : Eq String "x" "x"    a = refl String "y"    stuck: A2 is not bound before A
+```
+
+`A` and `A2` are development components, nothing the user wrote. The real error
+was computed and thrown away. The same discard hid a parse error inside an object
+term literal: a missing bracket under `Eq` reported `A3 is not bound before A1`,
+while the message naming the bracket existed and was discarded.
+
+**The third clause now names its head, `app-head-is-term`, so the three are
+mutually exclusive and the paragraph above is true without exception.** Both
+messages are now the real one:
+
+```
+a : Eq String "x" "x"    a = refl String "y"    stuck: "y" and "x" cannot be made equal
+```
+
+**A head predicate is how this was fixed, and no failure ranking or clause
+priority was added.** The head language has no negation, so "neither a name nor
+an `elim`" is a third positive test, the way `let`'s annotated and bare clauses
+are two. **It also removed a choice point from every name-headed application** —
+elaborating `succ y` used to record one, because a second clause matched and
+could be offered.
+
 **A rule body may be empty**, which it could not before. `E⟦_⟧` is *do nothing*:
 the hole is already there and unification is expected to find it. A clause that
 does nothing and a clause that does not match are different answers, so the
@@ -1990,12 +2024,14 @@ rule intro-binders t :- when focus-is-guess (lambda-binds-one t)
 per binder nests the λs and wraps each in its own `let` — a different proof
 term. The run has to be emitted, and recursion is what emits it.
 
-**Eleven of the fourteen clauses are real** (49b added `∀`, `->`, `let` — two clauses, since the
-annotation is optional and a head cannot say *not* — the ascription and `do`;
-49c added the λ). Two still run `prim-elaborate`: an application, which matches
-its arguments against the head's plicities and then claims a hole per slot, and
-an `elim`, which claims one per field. Both hand a **list of names** to a single
-op, which recursion cannot build.
+**Every clause is written in the rule base** (49b added `∀`, `->`, `let` — two clauses, since
+the annotation is optional and a head cannot say *not* — the ascription and `do`;
+49c added the λ). The two that still ran a `prim-elaborate` were an application,
+which matches its arguments against the head's plicities, and an `elim`, which
+claims a hole per field: both hand a **list of names** to a single op, which
+recursion cannot build. **Since 49f there is no `prim-elaborate` and no Haskell
+elaborator behind any of it** — `rules/standard.thena.rules` is the whole of
+E⟦·⟧, in nineteen clauses.
 
 A clause takes its surface term apart with **moves**, which answer with a
 surface term focused on the part rather than a detached one:

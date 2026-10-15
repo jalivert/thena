@@ -3,56 +3,46 @@ declared Nat
 thena spine> data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }
 declared Eq
 thena spine> declare honest : Eq Nat zero zero ; honest = trusted (Eq Nat zero zero) (refl Nat zero)
-chose 44: elaborate
-solved: ?ℓ45
+solved: ?ℓ44
 already equal
 already equal
-solved: ?ℓ45
-chose 56: elaborate
-solved: ?ℓ57
+solved: ?ℓ44
+solved: ?ℓ55
 already equal
 already equal
-solved: ?ℓ57
-chose 68: elaborate
-solved: ?ℓ69
+solved: ?ℓ55
+solved: ?ℓ66
 already equal
 solved: A
-solved: ?ℓ54
+solved: ?ℓ53
 thena spine> :whnf honest {0}
 refl {0} Nat zero
 thena spine> :trust any
 trust: any trust
   resting on nothing
 thena spine> declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)
-chose 79: elaborate
-solved: ?ℓ80
-already equal
-chose 86: elaborate
+solved: ?ℓ76
 already equal
 already equal
-solved: ?ℓ80
-chose 94: elaborate
-solved: ?ℓ95
 already equal
-chose 101: elaborate
+solved: ?ℓ76
+solved: ?ℓ89
 already equal
 already equal
-solved: ?ℓ95
-chose 109: elaborate
-solved: ?ℓ110
+already equal
+solved: ?ℓ89
+solved: ?ℓ102
 already equal
 solved: A
-solved: ?ℓ92
+solved: ?ℓ87
 thena spine> :whnf liar {0}
 trusted (Eq {0} Nat zero (succ zero)) (Eq {0} Nat zero zero) (refl {0} Nat zero)
 thena spine> declare inferred : Eq Nat zero zero ; inferred = trusted _ (refl Nat zero)
-chose 120: elaborate
-solved: ?ℓ121
+solved: ?ℓ112
 already equal
 already equal
-solved: ?ℓ121
-chose 135: elaborate
-solved: ?ℓ136
+solved: ?ℓ112
+solved: ?ℓ126
 already equal
 solved: A
 solved: C
@@ -65,5 +55,5 @@ trusted (Eq {0} Nat zero zero) (Eq {0} Nat zero zero) (refl {0} Nat zero)
 thena spine> :surface trusted (Eq Nat zero zero) (refl Nat zero)
 trusted (Eq Nat zero zero) (refl Nat zero)
 thena spine> :infer trusted (Eq Nat zero (succ zero)) (refl Nat zero)
-trusted (Eq Nat zero (succ zero)) (refl Nat zero) : Eq {?ℓ147} Nat zero (succ zero)
+trusted (Eq Nat zero (succ zero)) (refl Nat zero) : Eq {?ℓ137} Nat zero (succ zero)
 thena spine> :quit

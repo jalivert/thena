@@ -332,7 +332,7 @@ elaborateClauses =
       , Do (Call "spine-arguments" [Ref "h", Ref "f", Ref "e"])
       ]
   , Rule (GlobalName "elaborate") [PVar "t"]
-      [FocusIsHole, SurfaceIsApp (Ref "t"), AppArgsAreExplicit (Ref "t")]
+      [FocusIsHole, SurfaceIsApp (Ref "t"), AppHeadIsTerm (Ref "t"), AppArgsAreExplicit (Ref "t")]
       [ Bind (Op.PVar "h") Nothing Here
       , Bind (Op.PVar "dn") Nothing (FreshName (Lit (VText "A")))
       , Bind (Op.PVar "u1") Nothing (Op.Call "fresh-universe" [])
