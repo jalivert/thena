@@ -44,6 +44,8 @@ import Thena.Language.Grammar
   , typeFormerProductions
   , nameBases
   , typeNT
+  , TypeReading (..)
+  , typeReading
   , universeWord
   , universeSpelling
   , Grammar (..)
@@ -94,9 +96,20 @@ constructor :: [Grammar] -> Grammar -> RawRule -> Either RuleProblem (SurfaceCon
 constructor gs g r = do
   -- **Each premise line is parsed on its own**: a line break ends a premise,
   -- and only premises sharing a line are told apart by parsing.
-  premises <- concat <$> traverse (fmap premisesOf . parseIn Premises "premises" (StartAt premisesNT))
-                                  (rulePremises r)
-  conclusion <- parseIn Conclusion judgment (StartRule judgment) (ruleConclusion r)
+  --
+  -- **A NAMED PREMISE IS IN SCOPE FROM THE NEXT LINE ON** (MS8 phase 172, HIS
+  -- ruling of 2026-10-16). The lines are parsed left to right and each named one
+  -- extends the grammar the rest are read with, so a later premise and the
+  -- conclusion may write the name wherever a term of that premise's type goes —
+  -- which is what lets a rule say @p2 : \8866 \915 , M , T by p1 valid@. Before this
+  -- the name was refused as @p1 is not a metavariable@: premise text was parsed
+  -- against a grammar fixed before any name was bound.
+  --
+  -- **Within one line it is not in scope**, because the line is one parse and
+  -- the names in it are not known until that parse is done. Premises are written
+  -- one per line in every paper and every example here.
+  (premises, bound') <- premiseLines [] [] (rulePremises r)
+  conclusion <- parseWith bound' Conclusion judgment (StartRule judgment) (ruleConclusion r)
   mentioned <- either (Left . RuleUnbuilt) (Right . nub . concat)
                  (traverse (mentions gs) (map snd premises ++ [conclusion]))
   -- A premise's name is the user's, and must not be taken for anything else.
@@ -161,12 +174,57 @@ constructor gs g r = do
     GlobalName judgment = grammarName g
     rules = ruleGrammar gs
 
-    parseIn part what start txt = case Earley.parse rules start (map Char txt) of
-      Right t -> Right t
-      Left (Earley.Stuck p expected)
-        | any isScan expected, w@(_ : _) <- wordAt p txt, w `notElem` terminals gs, not (isMetavariable gs w) ->
-            Left (RuleNotAMetavariable w)
-      Left why -> Left (RuleUnparsed part what txt why)
+    -- **Left to right, each named premise extending what the rest may write.**
+    -- The accumulator is the extra grammar rules, which is also what the
+    -- conclusion is parsed with.
+    premiseLines extra acc [] = Right (reverse acc, extra)
+    premiseLines extra acc (txt : rest) = do
+      line <- premisesOf <$> parseWith extra Premises "premises" (StartAt premisesNT) txt
+      extra' <- (extra ++) . concat <$> traverse inScope line
+      premiseLines extra' (reverse line ++ acc) rest
+
+    -- **What a premise name may be written as: a term of that premise's own
+    -- type.** A premise at a judgment's statement names a derivation, so the
+    -- name reads at that judgment's nonterminal — exactly where a slot at it
+    -- reads. A premise written as a bare type (@LC@) names a term of it, and
+    -- reads at the same place a term of @LC@ does.
+    --
+    -- Nothing is added for an unnamed premise, and nothing for one at a
+    -- universe: @P140\8320@ says the argument is a type, and a type is not written at
+    -- a grammar's nonterminal.
+    inScope (Nothing, _) = Right []
+    inScope (Just n, t) = case nonterminalOf t of
+      Nothing -> Right []
+      Just l  -> Right [ Earley.Rule ("the premise " ++ n) l
+                           [Earley.Scan ("the premise " ++ n) (exactly n)] [] ]
+
+    -- The grammar whose nonterminal a premise's reading sits at. A reading at
+    -- 'typeNT' is a named type, a universe, or a wrapper round a type former's
+    -- spelling, and it is the last of those that has a grammar to find.
+    nonterminalOf t = case t of
+      Node n children -> case typeReading n children of
+        Just (TypeCalled l) -> Just l
+        Just (AtUniverse _) -> Nothing
+        Just (TypeInside (Node p' _)) ->
+          case [ l | h <- gs, q <- grammarProductions h
+                   , gproductionName q == GlobalName p'
+                   , let GlobalName l = grammarName h ] of
+            l : _ -> Just l
+            []    -> Nothing
+        _ -> Nothing
+      _ -> Nothing
+
+    -- A regex for one word and nothing else. 'metavariables' would also admit
+    -- the suffixed forms, and a suffix of a premise name is bound to nothing.
+    exactly = foldr (andThen . oneOf . singleChar) EmptyString
+
+    parseWith extra part what start txt =
+      case Earley.parse (rules ++ extra) start (map Char txt) of
+        Right t -> Right t
+        Left (Earley.Stuck p expected)
+          | any isScan expected, w@(_ : _) <- wordAt p txt, w `notElem` terminals gs, not (isMetavariable gs w) ->
+              Left (RuleNotAMetavariable w)
+        Left why -> Left (RuleUnparsed part what txt why)
 
     isScan s = case s of
       Earley.Scan {} -> True
@@ -221,6 +279,9 @@ mentions gs t = case t of
   Node n [child] | [TypeWrapper] <- special n -> mentions gs child
   Node n _ | [TypeNamed _] <- special n -> Right []
            | [UniverseRead] <- special n -> Right []
+           -- A premise name is bound by this constructor, so there is nothing
+           -- to quantify over and nothing to rename (MS8 phase 172).
+           | [PremiseRef _] <- special n -> Right []
   Node n [e, s] | [SubstituteIn _] <- special n -> (++) <$> mentions gs e <*> mentions gs s
   Node n [a, b] | [PairsIn _] <- special n -> (++) <$> mentions gs a <*> mentions gs b
   Node n [Token x, m] | [PairIn _ cls] <- special n ->
@@ -246,6 +307,9 @@ term gs rename t = case t of
   Node n [child] | [TypeWrapper] <- special n -> term gs rename child
   Node n _ | [TypeNamed l] <- special n -> Right (SurfaceName l)
   Node n [Token u] | [UniverseRead] <- special n -> Right (SurfaceUniverse (maybe 0 id (universeWord u)))
+  -- **Not renamed** (MS8 phase 172): the premise binder carries the user's own
+  -- name, so this is the name of the thing it reaches.
+  Node n _ | [PremiseRef x] <- special n -> Right (SurfaceName x)
   -- §6.3: a comma list is @L-subst-all@ — simultaneous, and across classes, so
   -- each class's map takes the pairs written at it and the rest are empty (MS8
   -- phase 155). **A single pair never reaches here since MS8 phase 159**: it is
@@ -400,6 +464,10 @@ data Special
     -- ^ a grammar's own name read as a type — the nullary case, @LC@ (phase 160)
   | UniverseRead
     -- ^ @𝕌₀@, @𝕌₁@, … (phase 160)
+  | PremiseRef String
+    -- ^ **an earlier premise of this rule, written by its name** (MS8 phase
+    -- 172). It is a binder this very constructor introduces, not a
+    -- metavariable, so it quantifies nothing and is never renamed.
 
 special :: String -> [Special]
 special n = case words n of
@@ -410,6 +478,7 @@ special n = case words n of
   ["a", "type"] -> [TypeWrapper]
   ["the", "type", l] -> [TypeNamed l]
   ["a", "universe"] -> [UniverseRead]
+  ["the", "premise", x] -> [PremiseRef x]
   -- The node a comma list builds (MS8 phase 159), which always holds two
   -- children: a pair, then a pair or another list.
   ["pairs", l] -> [PairsIn l]

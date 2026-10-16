@@ -69,6 +69,18 @@ header =
   , ""
   ]
 
+-- | A judgment over a derivation, which only a hand-written declaration can
+-- state (MS8 phase 171's notation, `~wkv37`): @Valid@'s fourth argument is a
+-- @typing@ derivation, so a rule wanting one has to name a premise to reach it.
+valid :: [String]
+valid =
+  [ "data Valid : \8704 (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Type\8320 where"
+  , "  { validAny : \8704 (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Valid G M T d }"
+  , ""
+  , "notation Valid G M T d -> \8866 G , M , T by d valid where"
+  , ""
+  ]
+
 typing :: [String]
 typing =
   [ "judgment typing = Γ ⊢ M : T where"
@@ -263,6 +275,50 @@ premises =
         [ "data twice : Ctx -> LC -> Ty -> Type₀ where"
         , "  { B : ∀ (Γ : Ctx) (M : LC) (T : Ty) -> typing`${Γ} ⊢ ${M} : ${T}` -> typing`${Γ} ⊢ ${M} : ${T}` -> twice`${Γ} ⊢ ${M} :: ${T}` }" ]
       argumentNames s "twice" "B" @?= ["Γ", "M", "T", "left", "d2"]
+    -- **A NAMED PREMISE IS IN SCOPE FROM THE NEXT LINE ON** (MS8 phase 172, HIS
+    -- ruling of 2026-10-16). Until then a premise name was writable nowhere: the
+    -- grammar every premise was parsed against was fixed before any name was
+    -- bound, so @by p1@ was refused as @p1 is not a metavariable@. **This is
+    -- what lets a rule state a dependence between its own premises**, which is
+    -- what a hand-written judgment over a derivation needs — and the paper's
+    -- @D :: J@ and \"by IH\" are the same move.
+  , testCase "a later premise may be written over an earlier premise's name" $ do
+      s <- loaded (header ++ typing ++ valid ++
+        [ "judgment check = Γ ⊢ M ⇐ T where", ""
+        , "  CheckRule:  p1 : Γ ⊢ M : T"
+        , "              p2 : ⊢ Γ , M , T by p1 valid"
+        , "              --------------------------"
+        , "              Γ ⊢ M ⇐ T", "" ])
+      -- **The second premise's type mentions the first premise**, which is the
+      -- whole of the phase: the fourth argument is the derivation @p1@, and the
+      -- fifth is a @Valid@ about that very derivation.
+      said s ":show check" !! 1
+        @?= "  { CheckRule : ∀ (Γ : Ctx) (M : LC) (T : Ty) (p1 : typing`${Γ} ⊢ ${M} : ${T}`) -> Valid`⊢ ${Γ} , ${M} , ${T} by ${p1} valid` -> check`${Γ} ⊢ ${M} ⇐ ${T}` }"
+      argumentNames s "check" "CheckRule" @?= ["Γ", "M", "T", "p1", "p2"]
+    -- **The conclusion is parsed with every name in scope too**, and a premise
+    -- at a bare type is where that is reachable: a judgment's own statement has
+    -- slots at grammars, so a derivation name has nowhere to go in one.
+  , testCase "the conclusion may be written over a premise's name" $ do
+      s <- loaded (header ++
+        [ "judgment fits = Γ ⊩ M : T where", ""
+        , "  F-any:  m : LC"
+        , "          ------------"
+        , "          Γ ⊩ m : T", "" ])
+      said s ":show fits" !! 1
+        @?= "  { F-any : ∀ (Γ : Ctx) (T : Ty) (m : LC) -> fits`${Γ} ⊩ ${m} : ${T}` }"
+      -- @M@ is not quantified: the conclusion's term slot is the named premise,
+      -- so there is no metavariable there to collect.
+      argumentNames s "fits" "F-any" @?= ["Γ", "T", "m"]
+    -- **Within one line it is not in scope**, because the line is one parse and
+    -- its names are not known until that parse is done. Premises are written one
+    -- per line in every paper and every example here.
+  , refusal "a premise name is not in scope on its own line"
+      (typing ++ valid ++
+        [ "judgment oneline = Γ ⊢ M ⇚ T where", ""
+        , "  S:  p1 : Γ ⊢ M : T    p2 : ⊢ Γ , M , T by p1 valid"
+        , "      --------------------------"
+        , "      Γ ⊢ M ⇚ T", "" ])
+      "refused: in the judgment oneline, rule S: p1 is not a metavariable"
     -- x is a metavariable, so `x : T ∈ Γ` is never a premise named x.
   , testCase "a lookup premise is not read as a premise named by its metavariable" $ do
       s <- loaded (header ++ typing)

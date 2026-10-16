@@ -288,6 +288,38 @@ language LC, M, N, E where
 `language` in a rule file is a syntax error. MS5 declared languages there, with a
 type of their own and a coercion `surface-of`; both are gone.
 
+### Naming a premise, and writing it in a later one
+
+A rule's premise may be given a name, and the name is what the argument it binds
+is called:
+
+```
+judgment check = Γ ⊢ M ⇐ T where
+
+  CheckRule:  p1 : Γ ⊢ M : T
+              p2 : ⊢ Γ , M , T by p1 valid
+              --------------------------
+              Γ ⊢ M ⇐ T
+```
+
+**A name is in scope from the next line on**, wherever a term of that premise's
+own type can be written — in a later premise, and in the conclusion. So
+`CheckRule`'s second premise is a statement *about the derivation the first one
+names*, which is the dependence a rule needs and could not state before:
+
+```
+CheckRule : ∀ (Γ : Ctx) (M : LC) (T : Ty) (p1 : typing`${Γ} ⊢ ${M} : ${T}`)
+              -> Valid`⊢ ${Γ} , ${M} , ${T} by ${p1} valid`
+              -> check`${Γ} ⊢ ${M} ⇐ ${T}`
+```
+
+- **Within one line it is not in scope.** A line is one parse, and its names are
+  not known until that parse is finished. Write one premise per line.
+- **An unnamed premise is still `d1`, `d2`, …** by its position.
+- **A name may not be a metavariable of any grammar**, nor a type the rule
+  mentions, nor another premise's name — so a name in a premise means exactly
+  one thing.
+
 ### `notation`: a spelling for a function
 
 A judgment rule writes its indices in object notation, so it can only say what
