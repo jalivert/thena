@@ -1351,6 +1351,7 @@ language and elaborated on load.
 | `:parse ‹L›` … `:done` | every line is an L term; Tab at the cursor shows what fits, and completes a production |
 | `:infer ‹t›` `:whnf ‹t›` `:convert ‹t› ≟ ‹u›` | type, reduct, convertibility |
 | `:elim ‹D›` / `:elim ‹D› ‹universe›` | the elimination rule |
+| `:judgment ‹J›` | its rules above the bar, as a paper writes them |
 | `:matches` | which rules apply here — it takes no argument |
 | `:accepts ‹type›` / `:produces ‹type›` | what takes a value of that type / gives one |
 | `:choices` | open choice points |

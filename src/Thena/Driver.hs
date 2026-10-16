@@ -588,6 +588,12 @@ data Response
   | RenderedDev Partial       -- ^ @:dev@ (§2.7)
   | Shown Cursor              -- ^ @:show@, and the new state after @:goal@
   | ShownData InductiveDefinition
+  | ShownRules InductiveDefinition
+    -- ^ @:rules ‹judgment›@ — its constructors in the paper's form (MS8 phase
+    -- 174). **A second command rather than a change to @:show@**: @:show@ gives
+    -- the declaration, which is what round-trips and what every test checks,
+    -- and the two answer different questions — what it /is/ against what it
+    -- /looks like/.
     -- ^ @:show ‹name›@ on a datatype: the declaration, printed back
   | ShownEliminator GlobalName Core
     -- ^ @:elim ‹datatype› [‹universe›]@ — the datatype, and its elimination
@@ -1588,6 +1594,10 @@ dispatch s name arg = case name of
   -- (§3.7, reversed by the user 2026-08-22). Its own word, and its own second
   -- argument: the level comes from the motive at every use site, so there is
   -- no one rule to print and the command has to be told which one is wanted.
+  -- Only a datatype has rules, so this is not reachable through @:show@ and
+  -- takes its own word, as @:elim@ does. **Not @:rules@**: that is the engine's
+  -- rule base, and an instral rule is not an inference rule.
+  ":judgment" -> withArgument (showRules arg)
   ":elim"  -> withArgument (eliminator arg)
   ":where" -> noArgument (s, Where (cursor (development machine)))
   -- Autocomplete, and it is a read-only query on the iterator (§7.6): the
@@ -1868,6 +1878,10 @@ dispatch s name arg = case name of
     withArgument k
       | null arg  = (s, Rejected (MissingArgument name))
       | otherwise = k
+
+    showRules what = case lookupInductive (GlobalName what) (globals machine) of
+      Just d  -> (s, ShownRules d)
+      Nothing -> (s, Rejected (NoSuchGlobal what))
 
     showGlobal what = case lookupInductive g (globals machine) of
       Just d  -> (s, ShownData d)
@@ -2335,6 +2349,7 @@ commandSummary =
   , (":trust",                   "the trust level, and what this proof rests on")
   , (":trust none / no-undischargeable / any", "how much unproved typing to allow")
   , (":elim ‹D› [‹universe›]",  "a datatype’s elimination rule")
+  , (":judgment ‹J›",           "its rules, above the bar, as a paper writes them")
   , (":matches",                 "which rules apply here")
   , (":accepts ‹type›",          "what takes a value of that type")
   , (":produces ‹type›",         "what gives one back")

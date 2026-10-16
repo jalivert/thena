@@ -34,6 +34,7 @@ module Thena.Render
   , renderSyntaxError
   , renderRuleError
   , renderInductive
+  , renderRules
   , renderEliminator
   , renderResponse
   , renderLoadError
@@ -134,8 +135,10 @@ import Thena.Errors
   , TypeError (..)
   )
 import Thena.Global.Declare (DeclareError (..), TokenClassError (..))
+import Data.Maybe (fromMaybe)
 import Thena.Language.Build (printTerm)
-import Thena.Language.Grammar (Grammar, GrammarError (..), GrammarProblem (..), ProductionProblem (..), RulePart (..), RuleProblem (..), Sort (..), universeSpelling)
+import qualified Thena.Language.Build as Build
+import Thena.Language.Grammar (grammarName, typeFormerProductions, Grammar, GrammarError (..), GrammarProblem (..), ProductionProblem (..), RulePart (..), RuleProblem (..), Sort (..), universeSpelling)
 import Thena.Language.Reader (ReadError (..))
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Regex (RegexError (..))
@@ -225,6 +228,7 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   RenderedDev p  -> [renderPartial ren (contextOf s) p]
   Shown c        -> [renderCursor ren c]
   ShownData d    -> renderInductive ren d
+  ShownRules d   -> renderRules ren d
   ShownEliminator g ty  -> renderEliminator ren g ty
   ShownGlobal g lvs cs ps ty body -> renderGlobal ren g lvs cs ps ty body
   Where c        -> renderWhere ren c
@@ -1446,6 +1450,65 @@ renderInductive ren d = case inductiveConstructors d of
         ++ renderCore ren ps (piOver (constructorArguments c) (constructorTarget d c))
 
     closed ls = init ls ++ [last ls ++ " }"]
+
+-- | @:rules ‹judgment›@ — **every constructor shown as the rule it is**
+-- (MS8 phase 174, HIS instruction of 2026-10-16).
+--
+-- A judgment's rules are written above a bar in a @judgment@ block and nothing
+-- ever showed them back: @:show@ gives the constructor's telescope, which is
+-- what the declaration /means/ and not what it /looked like/. This is the
+-- paper's form, derived from the declared type, so it works for a hand-written
+-- datatype with notation exactly as it does for a generated judgment.
+--
+-- **An argument at a judgment's statement is a premise; every other argument is
+-- a metavariable and is left out**, which is what a paper does — the bar's job
+-- is to separate what must hold from what follows, and @∀ (Γ : Ctx)@ is
+-- neither. A premise is shown with its own name, so phase 172's names are what
+-- make a dependent premise readable here.
+--
+-- **Nothing about this is writable.** It is a display: the premises stand as
+-- /types/, and a derivation needs terms in those positions, so this form could
+-- not be read back as a term even in principle.
+renderRules :: Rendering -> InductiveDefinition -> [String]
+renderRules ren d = case inductiveConstructors d of
+  []  -> [nameString (inductiveName d) ++ " has no rules"]
+  cs  -> intercalate [""] (map rule cs)
+  where
+    ps = inductiveParameters d
+
+    rule c =
+      let args  = constructorArguments c
+          at i  = ps ++ take i args
+          named i e = nameOf (entryVar e) (envOf (at (i + 1)))
+          above =
+            [ named i e ++ " : " ++ paper (at i) (entryType e)
+            | (i, e) <- zip [0 :: Int ..] args
+            , isStatement (entryType e) ]
+          below = paper (ps ++ args) (constructorTarget d c)
+          width = maximum (map length (below : above))
+       in map ("  " ++) above
+            ++ ["  " ++ replicate width '-' ++ " " ++ nameString (constructorName c)]
+            ++ ["  " ++ below]
+
+    -- **A premise is an argument whose type is some judgment's statement**, and
+    -- a judgment is a grammar with a type-forming production. Nothing asks which
+    -- kind of block declared it, which is the one question the design forbids.
+    -- **The statement as a paper writes it**, falling back to the ordinary term
+    -- spelling for anything no grammar spells.
+    paper ctx t =
+      fromMaybe (renderCore ren ctx t)
+        (Build.printBare (renderingGrammars ren) (renderCore ren ctx) t)
+
+    -- **'spineOf' and not a match on 'Canonical'**: a saturated former may
+    -- still be standing as @App@s, which is phase 110's "both spellings", and
+    -- matching only the reduced one found @T-var@'s premise and missed
+    -- @T-abs@'s.
+    isStatement t = case Build.spineOf t of
+      Just (g, _) ->
+        or [ not (null (typeFormerProductions h))
+           | h <- renderingGrammars ren, grammarName h == g ]
+      Nothing -> False
+
 
 -- | @:elim ‹datatype› [‹universe›]@ — the elimination rule (§3.7).
 --

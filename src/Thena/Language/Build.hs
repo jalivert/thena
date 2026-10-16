@@ -22,6 +22,7 @@ module Thena.Language.Build
   , skeletonOf
   , printTerm
   , printRegion
+  , printBare
   , production
   , languageNames
   , productionNames
@@ -237,6 +238,36 @@ printTerm gs render t = do
 -- | What stands inside the region, without the tag and the backticks.
 printRegion :: [Grammar] -> (Core -> String) -> Core -> Maybe String
 printRegion gs render t = settle gs render =<< draft gs t
+
+-- | **The paper's form: no tag, no backticks, and no @${\8230}@ round a splice**
+-- (MS8 phase 174).
+--
+-- @typing`${\915} \8866 ${M} : ${T}`@ is the /term/ spelling and it round-trips,
+-- which is why it is what 'printTerm' gives. A rule written above a bar in a
+-- paper has none of that punctuation, and nothing read it back, so this walks
+-- the same 'Draft' and writes only the text: terminals as themselves, a slot's
+-- child in place.
+--
+-- **It is deliberately not inverse to parsing**, so nothing may read it: a
+-- metavariable and a term spliced into the same position come out alike. That
+-- is exactly what a paper does, and it is why this is separate from
+-- 'printTerm' rather than a flag on it \8212 'laid' and 'settled' write the text
+-- the round-trip check depends on, and must keep writing it.
+printBare :: [Grammar] -> (Core -> String) -> Core -> Maybe String
+printBare gs render t = bare <$> draft gs t
+  where
+    bare d = case d of
+      DToken w   -> w
+      DForeign c -> render c
+      DFenced _ c inner -> maybe (render c) bare (Just inner)
+      DNode p _ children _ ->
+        unwords (snd (foldl step (children, []) (gproductionItems p)))
+        where
+          step (rest, out) i = case i of
+            Terminal w -> (rest, out ++ [w])
+            Slot {} -> case rest of
+              c : more -> (more, out ++ [bare c])
+              []       -> (rest, out)
 
 -- | A term laid out for printing, before it is known where the fences go.
 data Draft

@@ -324,6 +324,40 @@ premises =
       said s ":show oneline" !! 1
         @?= "  { S : ∀ (Γ : Ctx) (M : LC) (T : Ty) (p1 : typing`${Γ} ⊢ ${M} : ${T}`) -> Valid`⊢ ${Γ} , ${M} , ${T} by ${p1} valid` -> oneline`${Γ} ⊢ ${M} ⇚ ${T}` }"
       argumentNames s "oneline" "S" @?= ["Γ", "M", "T", "p1", "p2"]
+    -- **@:judgment@ shows a rule back in the form it was written in** (MS8
+    -- phase 174). A @judgment@ block's rules go in above a bar and nothing ever
+    -- showed them again: @:show@ gives the constructor's telescope, which is
+    -- what the declaration means and not what it looked like.
+    --
+    -- **An argument at a judgment's statement is a premise; every other
+    -- argument is a metavariable and is left out**, which is what a paper does.
+    -- A premise carries its own name, so phase 172's names are what make a
+    -- dependent premise readable here.
+  , testCase "a judgment shows its rules above the bar" $ do
+      s <- loaded (header ++ typing)
+      said s ":judgment typing" @?=
+        [ "  d1 : x : T ∈ Γ"
+        , "  -------------- T-var"
+        , "  Γ ⊢ x : T"
+        , ""
+        , "  d1 : Γ , x : S ⊢ E : T"
+        , "  -------------------------------- T-abs"
+        , "  Γ ⊢ ( λ x : S . E ) : ( S -> T )"
+        , ""
+        , "  d1 : Γ ⊢ M : ( S -> T )"
+        , "  d2 : Γ ⊢ N : S"
+        , "  ----------------------- T-app"
+        , "  Γ ⊢ ( M N ) : T" ]
+    -- **The statement is written as a paper writes it, not as a term.**
+    -- @typing`${Γ} ⊢ ${M} : ${T}`@ is the term spelling and it round-trips,
+    -- which is why @:show@ keeps it; above a bar none of that punctuation
+    -- belongs, and nothing reads this form back.
+  , testCase "and a hand-written judgment's rules the same way" $ do
+      s <- loaded (header ++ typing ++ valid)
+      said s ":judgment Valid" @?=
+        [ "  d : G ⊢ M : T"
+        , "  ---------------------- validAny"
+        , "  ⊢ G , M , T by d valid" ]
     -- x is a metavariable, so `x : T ∈ Γ` is never a premise named x.
   , testCase "a lookup premise is not read as a premise named by its metavariable" $ do
       s <- loaded (header ++ typing)

@@ -35,6 +35,7 @@ a bare word acts, a word with a colon looks.
   :trust none / no-undischargeable / any
                                 how much unproved typing to allow
   :elim ‹D› [‹universe›]        a datatype’s elimination rule
+  :judgment ‹J›                 its rules, above the bar, as a paper writes them
   :matches                      which rules apply here
   :accepts ‹type›               what takes a value of that type
   :produces ‹type›              what gives one back
