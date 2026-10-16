@@ -119,8 +119,8 @@ commands =
   -- One argument the chart cannot enumerate: a path, a name, a statement.
   , one ":elim"
   -- MS8 phase 174. **Not @:rules@**, which is the engine's rule base: an
-  -- instral rule and an inference rule are two things and one word for both is
-  -- what the nomenclature forbids.
+  -- @instral@ rule and an inference rule are two different things, and one word
+  -- for both would be the kind of collision the naming is careful about.
   , one ":judgment"
   , one ":accepts"
   , one ":produces"
