@@ -184,8 +184,8 @@ base that matches object terms in their own notation.
   — **preservation for any context**:
   `preservationAny : forall (G : Ctx) (M : LC) (M1 : LC) (T : Ty) (d : typing G M T) (s : step M M1) -> typing G M1 T`.
   An open argument can capture, so the generated substitution renames the
-  binder; one trusted core term says the fresh name is fresh, and everything
-  above it is proved.
+  binder, and the file **proves** that the name it mints is fresh — from three
+  trusted laws about `appendString`, with no arithmetic anywhere in it.
 - [`09-printing.thena`](examples/09-printing.thena) — terms shown in their own
   notation, the printer writing the splices `05` writes by hand.
 
