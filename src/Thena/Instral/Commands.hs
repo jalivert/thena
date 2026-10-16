@@ -118,6 +118,10 @@ commands =
   , Command ":surface" [[ASurfaceTerm]]
   -- One argument the chart cannot enumerate: a path, a name, a statement.
   , one ":elim"
+  -- MS8 phase 174. **Not @:rules@**, which is the engine's rule base: an
+  -- @instral@ rule and an inference rule are two different things, and one word
+  -- for both would be the kind of collision the naming is careful about.
+  , one ":judgment"
   , one ":accepts"
   , one ":produces"
   , one ":load"
@@ -138,6 +142,11 @@ commands =
   -- The enumerable ones, and the reason this table earns its keep.
   , Command ":step" [[], [OneOf ["on", "off"]], [ANumeral]]
   , Command ":run"  [[], [ANumeral]]
+  -- **The trust level, and its three settings are enumerable** (MS8 phase 151),
+  -- so the offer names them rather than leaving the user to remember three
+  -- words. The bare form is the look.
+  , Command ":trust"
+      [[], [OneOf ["none", "no-undischargeable", "any"]]]
   , Command ":parse" [[ALanguage], [ALanguageTerm]]
   ]
   where

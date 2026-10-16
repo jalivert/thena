@@ -134,7 +134,30 @@ roles =
   [ testCase "abs binds its name in its body, var's name is an occurrence" $ do
       d <- datatypeOf "LC"
       map constructorRoles (inductiveConstructors d)
-        @?= [[Occurrence], [Binder, Plain, Scope [0]], [Plain, Plain], [Plain], [Plain]]
+        @?= [[occ], [bnd, Plain, Scope [0]], [Plain, Plain], [Plain], [Plain]]
+    -- **The class rides on the role** (MS8 phase 153), and this is what a
+    -- second kind of variable would differ in: both of these are at @x@, the
+    -- one @Token String@ class this module declares. Checked by constructor so
+    -- that a class landing on the wrong role would show as a wrong pair rather
+    -- than as a count.
+  , testCase "and each names the class it reads, which is x" $ do
+      d <- datatypeOf "LC"
+      [ (n, r) | c <- inductiveConstructors d
+               , let GlobalName n = constructorName c
+               , r <- constructorRoles c
+               , case r of Occurrence _ -> True; Binder _ -> True; _ -> False ]
+        @?= [ ("var", Occurrence (GlobalName "x"))
+            , ("abs", Binder (GlobalName "x")) ]
+    -- **One role per argument, which nothing checked** (MS8 phase 153).
+    -- `~5k3mg` makes 'constructorRoles' the table a class lives on, so anything
+    -- reading it by position has to be reading the right positions.
+  , testCase "every constructor has exactly one role per argument" $ do
+      d <- datatypeOf "LC"
+      [ (n, length (constructorArguments c), length (constructorRoles c))
+        | c <- inductiveConstructors d
+        , let GlobalName n = constructorName c ]
+        @?= [ ("var", 1, 1), ("abs", 3, 3), ("app", 2, 2)
+            , ("paren", 1, 1), ("twice", 1, 1) ]
   , testCase "a datatype written by hand has none of it" $ do
       (s0, _) <- startingSession
       case loadProofSource s0 "module W where\n\ndata Pair : Type\8320 where\n  mk : String -> String -> Pair\n" of
@@ -144,6 +167,9 @@ roles =
             Nothing -> assertFailure "Pair was not declared"
         (_, other) -> assertFailure (show other)
   ]
+  where
+    occ = Occurrence (GlobalName "x")
+    bnd = Binder (GlobalName "x")
 
 -- ---------------------------------------------------------------------------
 

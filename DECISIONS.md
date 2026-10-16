@@ -39,7 +39,7 @@ in your own notation — `≼`, `Γ⊢`, `x'`, `2-cell`, `∂f/∂x` are all one
 | brackets and separators | `(` `)` `{` `}` `[` `]` `;` `,` `"` |
 | operator characters | `λ` `∀` `⊢` `≟` `≐` `≈` `▸` `⌜` `⌝` |
 | whitespace | |
-| keywords | `let` `in` `elim` `forall` `where` `rule` `when` `then` |
+| keywords | `let` `in` `elim` `forall` `where` `do` `rule` `when` |
 
 A name starts with an ASCII letter, `_`, or any non-reserved character above
 ASCII.
@@ -73,7 +73,7 @@ reserved:
 ∀ (x : Type₀)-> x     fine
 ```
 
-**`rule`, `when` and `then` are keywords** and cannot be used as names. Op words
+**`rule`, `when` and `do` are keywords** and cannot be used as names. Op words
 are not: `solve`, `type`, `goal` and the rest stay perfectly good identifiers,
 which is why a rule is written `rule ‹name› :- when … do …` and not with the
 op words reserved.
@@ -169,6 +169,35 @@ translating parser that runs your input, and as a secondary grammar that answers
 may I write here* for an editor. The second is narrower than the first by design — it
 will stay quiet where it does not know rather than guess — and it never parses anything.
 Nothing is foreclosed: the day a bootstrap is cheap, it is still available.
+
+### A type written on a λ binder is a check, not a declaration
+
+`\ (a : String) -> a` and `\ a -> a` give you the same proof term. The binder's type always
+comes from the goal; a type you write on the binder is elaborated and compared with it, and
+the comparison is conversion — not subsumption, so a *narrower* written type is refused
+rather than accepted. If you want the narrower one, change the goal.
+
+**Why a check and not a declaration.** The other reading — introduce the binder at the type
+you wrote and let the goal be checked against the result — makes the same program elaborate
+to two different terms depending on whether you annotated it, and makes the binder's type a
+thing you wrote rather than the thing the goal says it is. A check leaves no trace at all:
+nothing downstream can tell an annotated binder from a bare one.
+
+**The type is elaborated where the binders before it are in scope**, so it may name them:
+
+```
+polyId : ∀ (A : Type₀) -> A -> A
+polyId = \ A (a : A) -> a
+```
+
+and binders in one group may be written or bare in any mix — `\ (a : S) b (c : T) -> e`.
+Where the goal's domain is not yet known, the written type *solves* it rather than being
+compared with it, because the comparison is unification.
+
+**A brace on a λ binder is refused.** A brace in a signature says callers may leave that
+argument out; the λ binds its arguments in order whether a caller wrote them or not, so
+there is nothing for a brace to mean there. `\ A x -> x` is the spelling for a signature
+written `∀ {A : Type₀} -> A -> A`.
 
 ---
 
@@ -412,11 +441,56 @@ proves every lemma again by tactics — `:theorem`, `attack`, `intro`,
 `eliminate-core` for each induction and case split, `elaborate ⟨ … ⟩` for each
 case — and reaches the same statement as `preservation-tactics`.
 
-**It is stated for closed terms**, as Software Foundations states it. The
+**`07` is stated for closed terms**, as Software Foundations states it. The
 argument substituted in a β-step is then closed, so no binder is ever renamed.
-For any context the argument may have free names, a binder may be renamed, and
-proving the renamed binder fresh needs facts about strings that Thena cannot
-state yet.
+
+### And for any context, resting on three laws about `appendString`
+
+*Decided 2026-10-12; the trust narrowed to the three laws on 2026-10-16.*
+`examples/10-preservation-any-context.thena` proves the same theorem with no
+restriction on the context:
+
+```
+preservationAny : ∀ (G : Ctx) (M : LC) (M1 : LC) (T : Ty)
+                -> typing G M T -> step M M1 -> typing G M1 T
+```
+
+With an open argument a β-step **can** capture, so the generated substitution
+renames the binder — `( λ y : ι . x )[x -> ( λ w : ι . y )]` is
+`( λ y' : ι . ( λ w : ι . y ) )`, which the file proves by `refl`. The proof then
+has to know the minted name really is fresh.
+
+**Three laws about `appendString` are trusted and everything else is proved**:
+
+```
+appendAssoc      (a ++ b) ++ c  =  a ++ (b ++ c)
+primeDiffers     eqString a (a ++ "'")           is  different
+primeMoreDiffers eqString a ((a ++ "'") ++ b)    is  different
+```
+
+Each is a fact about a primitive that computes only on two literals and goes
+neutral on anything else, which is the same position the prelude's
+`eqStringEqual` is in. On literals each one **discharges**: both sides reduce,
+claimed and actual become convertible, and the node contracts — `:whnf
+appendAssoc "a" "b" "c"` is its own body. They are pending exactly where they
+carry weight.
+
+**The name chooser's specification is a theorem.** `L-fresh-‹k› y avoid` is not
+in `avoid` — that used to be the trusted claim, and it is now derived from the
+three laws by the argument the generated code is built on: the candidates `y`,
+`y'`, `y''`, … are pairwise distinct, each rejection spends one name of the
+list, and the fuel, which is `avoid` itself, runs out only once the list is
+exhausted. **Nothing is added to the theorem's statement**: `preservationAny`
+has no extra hypothesis.
+
+**There is no counting in it and no arithmetic.** *Longer* is `|xs| > |ys|`
+computed from the two lists, so *longer than something, being empty* reduces to
+`Empty` and the base case closes by reduction rather than by a pigeonhole over
+numbers. **A length as an `Int` would not have helped.** `String`, `Char` and
+`Int` are primitive *types* — no constructors, no eliminator — so there is no
+induction over a length, and `length (a ++ b) = length a + length b` is a claim
+about open arguments like any other: adding `lengthString` and arithmetic would
+have traded one trusted law for two and widened the kernel permanently.
 
 ### `decString` compares two strings and hands you the proof
 
@@ -448,6 +522,393 @@ varMiss : forall (y : String) (x : String) (N : LC) (ne : Eq String y x -> Empty
 proof about `LC-subst` follow it at all. What is trusted is the same as for
 `eqString`: the verdict on two literals. The refutation it writes is built
 from `decString` itself and checked by the kernel.
+
+### Trust is a term, and it reduces away when it stops being needed
+
+*Decided 2026-10-04.* Every system has a way to say *"this is true, take my word
+for it"* — Coq's `Axiom`, Agda's `postulate`, Lean's `sorry`, Idris 2's
+`believe_me`. **Not one of them reduces during type checking**, which is the right
+call for an axiom and useless when the thing you are asserting has to compute.
+Thena has a term instead:
+
+```
+trusted T e
+```
+
+It is an ordinary core term. `e` is checked as usual, at whatever type it really
+has; the node is then given `T`, and **nothing relates the two** — that is the
+trust, and it is the whole of it. So `trusted Empty (refl Nat zero)` type-checks,
+and a development that rests on a claim like it is verified modulo that claim.
+
+**What makes it worth having rather than a postulate is that it is conditional,
+and it reduces.** `trusted T e` contracts to `e` the moment `T` and `e`'s own type
+turn out to be the same type, and stays frozen until then. Internally the node
+carries both — `trusted claimed actual body` — so the pair is the obligation with
+both halves visible, and you can see the two converge as the names in them
+instantiate. A node that never becomes checkable never reduces, and then it is
+behaving exactly as a postulate would, except that it is local to one term, its
+body was checked at *some* type, and it is listed when you ask what a theorem
+depends on. Agda's `primTrustMe` is the same idea and the only precedent for it.
+
+**Why a λ cannot do this**, since it is the first thing to try:
+`λ (a b : String) . refl String a` has type `∀ a b -> Eq String a a`, never
+`∀ a b -> Eq String a b`. A λ defers *evaluation*, not *checking* — its body is
+checked once, generically, with the variable arbitrary. Nothing in an ordinary term
+language keeps a **typing** judgement open, because a term's type is settled when
+it is checked. Making the obligation an argument,
+`λ (a b : String) (p : Eq String a b) . p`, is the honest trust-free version and
+works exactly when somebody can supply `p`; for a name the system does not know,
+nobody can.
+
+**The restriction worth knowing about.** The contraction asks the real conversion
+checker, not a syntactic approximation of it, but it declines to act when that
+comparison comes back owing a constraint on universe levels — which happens only
+when a level is still unknown. The node simply stays, and a stuck well-typed term
+is a valid proof, so nothing is lost but an occasional reduction.
+
+**`trusted` is a reserved word, and the type may be left to inference.**
+`trusted _ e` puts an ordinary placeholder in the type position and the goal
+supplies it; nothing about that position is special. One consequence of a declared
+type being level-generalised is worth expecting: `honest : Eq Nat zero zero` has a
+claim at the *parameter* `ℓ` while its body's type is at `0`, and a reference's
+level arguments are part of what it is — so the term contracts at `honest {0}`
+rather than where it was declared. A term still printing as `trusted` is one whose
+claim has not been met yet, which is what the pair is there to tell you.
+
+### The asserted type is stored, not re-derived, and the development calculus writes it
+
+*Decided 2026-10-05.* A trusted node has to remember two types — the one it asserts
+and the one its body really has — because the node contracts exactly when those two
+turn out to be the same, and that moment arrives as names instantiate. The choice is
+whether to **store** the body's type or **re-infer** it each time the question is
+asked. Thena stores it. Internally the node is three fields:
+
+```
+trusted ‹claimed› ‹actual› ‹body›
+```
+
+Re-inferring would mean running the type checker inside reduction, which is the
+wrong direction in the layering and would make every reduction step's cost depend on
+the size of a term's type.
+
+**The surface language writes two fields and derives the third; the development
+calculus writes all three.** Elaborating `trusted T e` infers `e`'s type and fills
+`actual` in, so a user of the surface cannot get it wrong. The development calculus
+is the printed, re-readable form of a term — what is printed can be typed back — so
+it writes what is there, which means a user typing a term at the prompt, or into a
+rule or a tactic, can write an `actual` of their own choosing.
+
+**What happens when they write a wrong one is that it does not type-check.** The
+typing rule checks the body *against* the stored type rather than inferring and
+comparing, which is what keeps the stored field honest:
+
+```
+thena spine> :infer ⌜ trusted (Eq {0} Nat zero zero) (Eq {0} Nat zero (succ zero)) (refl {0} Nat zero) ⌝
+refl {0} Nat zero has type Eq {0} Nat zero zero
+  but Eq {0} Nat zero (succ zero) was expected
+  in argument 3 of Eq, succ and zero are different names
+```
+
+So a node that survives certification cannot be lying about its body's type, and the
+stored field cannot drift out of step with the term under substitution.
+
+**One gap, and it is cumulativity rather than trust.** That check is subsumption, not
+conversion — a term usable at `Type₀` is usable at `Type₁` — so a stored type strictly
+*above* the body's own is accepted:
+
+```
+thena spine> :infer ⌜ trusted Type₀ Type₂ Type₀ ⌝
+trusted Type₀ Type₂ Type₀ : Type₀
+```
+
+`Type₀` really has type `Type₁`. Nothing becomes unsound: the stored type is what the
+claim is compared against, so inflating it can only stop a node contracting that
+would otherwise have contracted, which moves the claim from *discharged* to *pending*
+and leaves it in the report. It cannot go the other way, because a stored type
+*below* the body's own is refused outright.
+
+**Whether storing it is worth this is open.** The alternative is to re-derive the
+body's type at every comparison and let the written form carry two fields everywhere,
+which costs type inference inside reduction and buys the impossibility of writing the
+field at all.
+
+### How much you trust is a setting, not a verdict the checker hands down
+
+*Decided 2026-10-06.* Given a term whose type is merely asserted, the obvious
+move is to refuse it somewhere. Thena classifies it instead and lets the user say
+how much to allow.
+
+Every claim a development rests on is **discharged** — the two types are
+convertible, so the claim is met and the trust is carrying nothing —
+**pending**, or **undischargeable**, which means it can never be met by any
+instance in any later session. The last is decided by comparing the two types
+position by position: `Eq Nat zero (succ zero)` against `Eq Nat zero zero` agrees
+at the head and clashes at the third argument, so a head-only test would miss it.
+A clash in a closed universe level counts too — see *A universe level decides
+impossible when it is known* below. Anything not positively a clash counts as
+merely pending, because calling an honest claim impossible costs a refused proof
+while the converse costs only a less specific report.
+
+**A claim is read at the use where the use settles it, and at the definition
+otherwise, and the report says which.** That distinction is the point rather than
+a detail. A claim like `∀ (a b : Nat) -> Eq Nat a b` is perfectly open read
+inside its own body and is a lie at `… zero (succ zero)`, so the
+`Print Assumptions` shape — list what a theorem's definitions assume — reports a
+proof of `Empty` built that way as resting on one open claim. A use is only
+allowed to settle it when it actually does: a partial application, a bare
+reference that passes nothing, and a use reached through a further definition all
+fall back to the definition. Threading arguments through every hop instead would
+be full normalisation, which may diverge and has no business in `qed`'s path.
+
+**The session carries a trust level with three settings** — *no trust*, *no
+undischargeable trust*, *any trust* — and the user moves between them freely,
+including between theorems. The setting is asked *after* the kernel has accepted
+the term, because this is policy and not the kernel's judgement, and the
+classification is reported whether or not it refuses. The expected pattern is to
+sit on the middle setting and drop to *any* for one strange thing.
+
+**It is asked at both of the ways a definition reaches the environment, and
+getting that wrong was a real hole.** A definition arrives either by closing a
+proof or by being written down whole, and for a while only the first asked — so
+a definition resting on a claim that can never be met could be *declared* at the
+strictest setting, and the setting bit only when some later proof used it. The
+strictest setting is the one soundness guarantee, and it has to mean *nothing
+unsound gets in* rather than *nothing unsound is concluded*: a declared
+definition is a first-class inhabitant of the environment, it is listed, the
+prompt completes against it, a later declaration may mention it in a type, and it
+outlives the setting in a script. Both doors now refuse the same way:
+
+```
+thena spine> :trust none
+thena spine> declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)
+the trust level refused it
+trust: no trust
+  undischargeable, written here
+    claims Eq {ℓ₁} Nat zero (succ zero)
+    body   Eq {0} Nat zero zero
+thena spine> :trust any
+thena spine> declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)
+```
+
+Writing something knowingly false therefore means saying so first, which is the
+setting doing its job rather than the system preventing anything.
+
+**What the setting still says nothing about is what is already in the
+environment.** The report is a view on the proof in front of you, so immediately
+after a definition is admitted it is not what the report is about — and that is
+a separate question from admission, deliberately left open.
+
+**His ruling: the report stays on the current proof, and a `:trust env` command
+does the wide check.** `:trust` tells you what *this* proof rests on — following
+uses into the global declarations it reaches, each classified where the use
+settles it — and what the environment already holds is a separate question for a
+separate command. `:trust env` walks the environment when asked rather than every
+frame, which keeps the frontend's redraw rule intact: a frontend asks for it the
+way the user does.
+
+**Only *no trust* is a soundness guarantee, and the middle one is not sold as
+one.** What the middle setting refuses is a claim that is provably false, and a
+claim can be discharged at every instance anybody has written down and still be
+nonsense: `Empty` is provable that way. It stops accidents, not adversaries.
+
+**`no trust` still admits a *discharged* claim — item `~xhf2g`, and this is the
+one part of the above that is a choice rather than a consequence.** A claim whose
+two types are convertible is met, so the body already has the type the node
+asserts and the node reduces away; refusing it would refuse a term that is sound.
+*Settled 2026-10-12: this reading stands.*
+
+**What *discharged* means operationally, because the strictest setting is exactly
+as strong as this answer.** It is: **convertible now, by computation, with
+nothing left open.**
+
+- **Computation counts.** The question is put to the real conversion checker, so
+  reduction, unfolding a definition and η all count — it is not syntactic
+  identity. With `N = Nat` and `one = succ zero`, a claim of `Eq N zero zero` over
+  a body of type `Eq Nat zero zero` is discharged, and so is `Eq Nat one (succ
+  zero)` over `Eq Nat (succ zero) (succ zero)`. Neither pair is equal as written.
+- **Nothing may be left owing.** A *yes* that owes a constraint on universe
+  levels does not count as discharged, which is the same condition the
+  contraction itself declines on. This keeps the report and the reducer saying
+  the same thing rather than nearly the same thing.
+- **It is asked, never recorded.** The classification is recomputed every time it
+  is wanted, so a claim is pending while something is open and discharged the
+  instant that thing is supplied — the same node, the same definition, a
+  different answer at a different instance.
+
+So the strictest setting admits exactly what the reducer would contract away, and
+nothing else: at that setting every asserted type in a proof is one the system
+could have erased.
+
+**The alternative reading, kept as `~xhf2g`, is that the setting should mean *no
+asserted type reaches this proof at all*.** That is a stricter promise and a
+one-line change. **What it would cost is smaller than it first appears, and the
+earlier claim here was wrong**: it is not that the prelude becomes unusable
+because its own claims are discharged — the prelude's claims are *pending*, so
+they already fail the strictest setting today. What the literal reading would cost
+is only a proof that reaches a claim which genuinely is discharged. **If that
+reading ever wins, this subsection is what changes with it.**
+
+### What a proof rests on is a view, asked for, and never pushed at you
+
+*Decided 2026-10-06, and the consequence accepted 2026-10-12.* The accounting of
+what a development rests on — every asserted type it reaches, classified, and
+where each one came from — is a **view**: it walks the proof when you ask it and
+nothing anywhere recomputes it when the proof changes. It is deliberately not a
+hook in type checking. Checking runs on every refinement; *what does this proof
+currently rest on* is a question about the chain, the same shape as asking where
+you are, so it is answered when it is asked.
+
+**The cost is that the answer can go stale and nothing says so.** At a prompt
+that is harmless: you ask, you discharge a claim, the old text is still on your
+screen and you know it. **In a tool that draws it, it is harmless in only one
+direction.** A panel that draws the report and caches it will show *fewer*
+outstanding claims than there really are, and look authoritative doing it. Fewer
+is the direction that matters, because this report is what a reader checks before
+believing a proof.
+
+**So the rule is that a frontend re-asks rather than caches**, which is the rule
+it already follows for every other view, and this is deliberately not made the
+first exception to it. What makes re-asking cheap is a pre-pass: before walking
+anything, the accounting asks whether the term reaches an asserted type at all
+and stops immediately if it does not, which is the answer for almost every term
+in the system.
+
+**There is no notification, and that is the decision rather than an omission.**
+Telling a frontend *your report has changed* would be the first thing of its kind
+in the system, and it is not needed by a frontend that redraws.
+
+### A universe level decides *impossible* when it is known, and only then
+
+*Decided 2026-10-12.* Classifying an asserted type as **undischargeable** — it can
+never be met, by any instance, in any later session — is a comparison of two types
+position by position, and until this decision it ignored universe levels
+altogether. The reason it did is real: a level written in a declaration is not
+always a number. It is generalised into a parameter and instantiated at each use,
+exactly as a term binder is, so *"these two levels differ"* is not on its own a
+reason to call anything impossible.
+
+Take a definition whose claim sits at its own level parameter while its body's type
+sits one above:
+
+```
+declare g : Type ; g = trusted Type Type₀
+```
+
+Its two types agree at exactly one instance, and the report follows the use rather
+than the declaration:
+
+```
+thena spine> :whnf g {1}
+Type₀
+thena spine> :trust
+  discharged, at the use of g
+    claims Type₁
+    body   Type₁
+```
+
+At any other instance the claim is false, and it was being reported as *pending* —
+*not yet* — about something that is never:
+
+```
+thena spine> :whnf g {0}
+trusted Type₀ Type₁ Type₀
+thena spine> :trust
+  undischargeable, at the use of g      <- said "pending" before this decision
+    claims Type₀
+    body   Type₁
+```
+
+**The line is whether every level in the comparison is closed.** A level's normal
+form is a constant plus a set of variables with offsets; an empty variable set
+means no metavariable and no parameter, so nothing in any later session can move
+it, and two such levels that differ are a permanent clash. One variable anywhere
+and the answer goes back to *pending* — reach the same `g` through a further
+definition, where its parameter is still standing, and that is what you get:
+
+```
+thena spine> :trust
+  pending, in h · g
+    claims Type (ℓ₁₀₂₁)
+    body   Type₁
+```
+
+That line is right, and `g {1}` above is the instance that discharges it.
+
+**It is equality, not the subtyping order.** A node contracts when its two types
+are *convertible*, and conversion asks for levels to be equal; cumulativity lives
+in the typing rule, which is a different question. So a closed `Type₀` against a
+closed `Type₁` can never discharge, however the hierarchy is ordered, and no
+reasoning about `max` or about constraints is involved — the comparison is
+equality of normal forms, which the implementation already had.
+
+**A level sits in more places than a universe, and the commoner one is a former's
+level argument.** `Type₀` against `Type₁` is the rare shape; a datatype used at two
+levels is the ordinary one, and it hides behind heads that agree:
+
+```
+thena spine> :trust
+  undischargeable, written here
+    claims Eq {1} Nat zero zero
+    body   Eq {0} Nat zero zero
+```
+
+Same datatype, same three arguments, and the whole of the clash is in the level.
+Both a saturated constructor's level arguments and an applied former's are compared
+this way.
+
+**Where it deliberately stops.** An eliminator carries level arguments too and they
+are not compared, because a stuck elimination is never called impossible at all —
+it may still compute. The governing rule is unchanged and is what makes the whole
+test safe to have: it answers *impossible* only where it is certain, and *pending*
+everywhere else, because calling an honest claim impossible refuses a sound proof
+while the converse costs only a less specific report.
+
+### A primitive that supplies a type is retired; a primitive that computes stays
+
+*Decided 2026-10-06.* An assistant for metatheory keeps meeting facts that are
+true and unprovable in its own theory — and the cheap answer is to add a built-in
+function for each one, which is an escape hatch with no structure and nothing a
+user can inspect. Thena's answer is to split the two jobs a built-in was doing.
+
+Deciding whether two strings are equal is the case that forced it. `eqString`
+*computes*: on two literals it answers `same` or `different`, and nothing in the
+core term language can do that, so it stays a reduction rule. What it cannot do
+is tie that answer to the equality type — `eqString y x` says nothing about
+`Eq String y x` for an unknown `y` — and that gap is a *typing* claim, so it is
+written as one:
+
+```
+eqStringEqual : ∀ (a b : String) -> Eq Comparison (eqString a b) same -> Eq String a b
+eqStringRefl  : ∀ (a : String) -> Eq Comparison (eqString a a) same
+```
+
+Both are definitions in the prelude whose bodies are `trusted` terms, and
+`decString`, which answers `yes` with a proof or `no` with a refutation, is an
+ordinary definition built on them — it eliminates the comparison with a motive
+that keeps the answer, so each branch is handed the evidence of which answer it
+is, and the refutation is *derived* rather than built by the implementation.
+`decString` itself trusts nothing.
+
+**What this buys is that the trust is listed rather than built in.** A user who
+asks what a proof rests on is told `in decString · eqStringEqual`, with both the
+claimed type and the type the body really had, and can read the four lines of
+prelude that say it. Before, the same trust was sixty lines of Haskell that
+constructed the answer term, and no command could name it at all.
+
+**It costs the strictest trust setting for these proofs, and that is stated
+rather than hidden.** The claims are read at their own definition's binders,
+where they are *pending* — so *no trust* will not close a proof that decides a
+literal equality, even though `decString "x" "x"` reduces to `refl String "x"`
+with nothing trusted left in it. Finding out which claims survive reduction means
+reducing, which may diverge and has no business in `qed`'s path, so the strictest
+setting is a statement about what a proof reaches and not about what is left when
+it runs.
+
+**Revisit note, on his ruling: this conservatism is accepted for now.** A future
+`qed` could normalize first and classify what survives reduction rather than what
+the proof reaches — which would close proofs deciding literal equalities at the
+strictest setting. That puts reduction that may diverge in `qed`'s path, the thing
+currently ruled out, so it is recorded here rather than built.
 
 ### A token class is an ordinary definition, and its regex takes its type as an argument
 
@@ -530,7 +991,7 @@ because whitespace between object tokens is optional when it is parsed. A
 binding form is the exception: `E[x, y]` is one item, bracket adjacent. A
 production is one line, and a deeper line continues it.
 
-**`context` and `judgment` are reserved words**, like `language`. A name in a
+**`context`, `judgment` and `notation` are reserved words**, like `language`. A name in a
 production is a metavariable, then a token class, then a terminal, and a
 metavariable may not be named like an existing one or a class — uniqueness is
 across every grammar in scope, not per block. **A name is refused for not being a
@@ -546,6 +1007,366 @@ each other could not be given the datatypes they generate.
 It is checked when the module loads, and a binder that binds in nothing is a
 warning, not an error.
 
+
+### In a slot stands a nonterminal, and a slot is one word
+
+*Decided 2026-10-11.*
+
+A grammar in Thena looks like a notation for an inductive definition, and reading it
+that way is nearly right. It is right that a production corresponds to a
+constructor, that a slot corresponds to an argument, and that a reading elaborates
+to the head applied to what the slots hold. It is wrong about what a slot *is*, and
+that is where days go.
+
+```
+the datatype says      app : LC -> LC -> LC      arguments have TYPES
+the production says    app -> ( M N )            slots hold NONTERMINALS
+a use site says        ( y z )                   slots are filled with TERMS
+```
+
+**A slot is filled with a term rather than a type.** The one case where a term
+written at a slot is a type is the case where the slot is at a universe — an
+instance of the rule, not an exception to it.
+
+The consequence that matters in practice. Give a spelling to a function whose last
+argument is a derivation:
+
+```
+collapse : ∀ (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Ctx
+
+notation collapse G M T d -> ⟨ G , M , T by d ⟩
+```
+
+The fourth slot is the parameter `d`. Writing the derivation's *type* there —
+`⟨ Γ , M , T by Γ ⊢ M : T ⟩` — is not merely hard to read, it is a different
+production: `Γ ⊢ M : T` is a reading, three slots and two pieces of text, so that
+spelling has three slots each written twice and no slot at all for the derivation.
+
+**Until 2026-10-16 that fourth slot was the single word `typing`, the grammar's own
+name**, because a judgment declares no word for its derivations — which said
+nothing about *which* argument was meant. Naming the parameters replaced it.
+Agda's `syntax` declarations name one argument per slot and would write `by d`;
+Thena keeps one kind of word in a production instead, so the word is the one that
+names the nonterminal.
+
+So a grammar is **not** an inductive definition. It is a projection of one, and since
+the `notation` block it projects several declarations at once — a datatype's
+constructors, functions over that datatype, and type formers. The nonterminal of a
+`language` or a `context` is named after a type; a judgment's is named after a type
+*former*, and what it parses is a derivation.
+
+### Notation is assignable to anything declared, and a universe is spelled `𝕌₀`
+
+*Decided 2026-10-09/11, built 2026-10-11.*
+
+A `notation` block gives a spelling to any declared name — a function, a
+constructor, or a type former of any arity — under one rule: a spelling whose
+slots are one per argument of that name's type, elaborating to that name applied
+to what the slots hold. The header carries the name's own spelling:
+
+```
+data bound : String -> Tp -> Env -> Type₀ where { bHere : … ; bThere : … }
+
+notation bound (v : x) A Δ -> v ◂ A ◂ Δ where
+```
+
+A premise is an argument's type, so anything with a type spelling may stand above
+a rule's bar — including a plain `LC`, since a rule is a constructor and an
+argument may be at any type. And the universes have spellings of their own,
+`𝕌₀`, `𝕌₁`, …, zero-based, so that a universe can be written where a type is
+wanted — without them `k : Type₀ -> Ty -> Ty` had no spelling at all, since a
+slot then had to be a word naming a nonterminal.
+
+**Since 2026-10-16 a notation names its own arguments** rather than borrowing
+words from the grammars, which is the section *A notation names its own arguments*
+below; the examples here are in that form.
+
+```
+collapse : ∀ (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Ctx
+notation Ctx where
+  collapse G M T d -> ⟨ G , M , T by d ⟩
+```
+
+The fourth slot is `d`: a hole at a derivation, whose type and indices come from
+the declaration. **A `notation` block can do this because it describes a
+declaration that already exists.** In a `language` block the argument types are
+generated *from* the slots, so there is nothing to read a type off — and for the
+same reason a slot at a universe is refused there.
+
+**That line runs through the whole feature.** A hand-written datatype with an
+assigned notation gets the full freedom of Surface: any universe, an index
+telescope that depends on earlier indices, a judgment indexed by another
+judgment. A `language`, `context` or `judgment` block stays simpler, and its
+family is fixed at `Type₀` with independent indices. Where the two meet, the
+hand-written route is the escape:
+
+```
+data Valid : ∀ (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Type₀ where …
+notation Valid G M T d -> ⊢ G , M , T by d valid where
+```
+
+A block that installs a grammar for a hand-written datatype also generates its
+substitution family from the roles its productions carry, so `data` plus
+`notation` is a `language` block with extra freedom rather than a weaker version
+of one.
+
+### A `notation` block gives a function a spelling, so a rule can say what a paper says
+
+*Decided 2026-10-07, built 2026-10-08.*
+
+A judgment rule writes its indices in object notation, and object notation can
+only spell what the grammar's productions build. Those are constructors — so
+F-sub's type-substitution lemma, which the paper writes `Γ, X<:Q, Δ ⊢ t : T`, was
+unwritable. That comma means *append* between two contexts, and no constructor
+spells append:
+
+```
+S-split: Γ , X <: T , Δ ⊢ T <: S
+refused: … its premises do not parse: unexpected 'Δ' at character 14
+```
+
+A `notation` block gives a declared **function** a spelling in a grammar:
+
+```
+append : Ctx -> Ctx -> Ctx
+append = …
+
+notation Ctx where
+  append a b -> a ∪ b
+```
+
+`a ∪ b` now parses wherever a `Ctx` is expected — a rule's index position
+included — and elaborates to `append` applied to what the two slots read. So the
+paper's rule is writable:
+
+```
+S-split : ∀ (Γ : Ctx) (Δ : Ctx) (T : Ty) (S : Ty)
+            -> sub`${Γ} ∪ ${Δ} ⊢ ${T} <: ${S}` -> sub`${Γ} ⊢ ${T} <: ${S}`
+```
+
+**The datatype is untouched: `Ctx` stays a list.** That is why this is not a
+joining *constructor*, which was considered and refused — a
+`join : Ctx -> Ctx -> Ctx` constructor makes `Ctx` a tree, in which
+`join (join a b) c`, `join a (join b c)`, `join empty a` and `a` are four
+distinct terms denoting one context, conversion is structural, and nothing
+identifies them. **A function reduces; a constructor does not.** A production
+with two slots of the context's own sort therefore stays refused.
+
+**It is a separate top-level block rather than part of the `language` or
+`context` block, and the reason is scoping**: the function's type mentions the
+datatype that block declares, so it cannot be written above it.
+
+**The function form is written, never inferred.** "There is a function of that
+name in scope" is already the check that catches a clash
+(`Ctx's constructor nil is already declared`), so inferring from it would consume
+that diagnostic, and deleting a definition above the block would silently turn a
+function production back into a constructor — changing the datatype and
+everything generated from it.
+
+The block declares nothing and generates nothing: the datatype, the lookup
+relations and the substitution are the ones the grammar's own block made. The
+checks are that the name is a declared function, that it is not already some
+grammar's production, and that its type takes the slots in arity and sort and
+returns the grammar's datatype.
+
+**What it costs**: every term a rule mentions must be a named global with a
+declared notation — no inline lambda, no inline `elim`. That is loud at the
+declaration rather than at every use, and it is the payment for not escaping the
+modelling framework. Precedence is not part of it: `Γ , X <: Q ∪ Δ` parses
+uniquely because the competing reading needs `Q ∪ Δ` to be a type, while
+`Γ ∪ Δ ∪ Γ'` is ambiguous and is reported when the term is parsed.
+
+**And the substitution notation is now one of these rather than a privilege.**
+`E[x -> M]` was the one spelling the system hard-wired: rules the rule parser
+added for itself, and a special case in the elaborator that recognised them.
+Generated substitution now writes the block a user would have written —
+
+```
+notation LC where
+  LC-subst-x -> M [ x -> N ]
+```
+
+— as a surface item, checked the same way. Two things follow and both are gains.
+It **parses outside a rule**, so `` LC`x[x -> y]` `` is an ordinary term literal
+where it used to be a parse error; and it **prints back**, so a rule whose index
+substitutes reads ``sub`${Γ} [ ${X} -> ${T} ] ⊢ …` `` instead of splicing
+`${Ctx-subst-X Γ X T}`.
+
+**The comma list stays sugar**, because `E[x -> M, y -> N]` builds a *list* per
+class and no object grammar spells a list. So the one-pair form is a production
+and the list form is not — which means the list form is still a rule's privilege
+and does not parse in a term literal.
+
+
+### A notation names its own arguments, and anything declared may have one
+
+*Decided 2026-10-16, built the same day.*
+
+A `notation` production says which argument each place in the spelling is for, by
+naming them and taking them in order:
+
+```
+data Valid : ∀ (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Type₀ where
+  { validAny : ∀ (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Valid G M T d }
+
+notation Valid G M T d -> ⊢ G , M , T by d valid where
+```
+
+**The names are local.** The first is the first parameter or index of the thing
+being spelled, and nothing requires it to be spelled the way the declaration
+spells its own binders — `notation Valid a b c p -> ⊢ a , b , c by p valid` means
+the same. A word of the spelling is a slot exactly when it is one of those names;
+every other word is literal text. The rules are what you would expect: as many
+names as arguments, no name twice, and every name written somewhere — an argument
+with nowhere to be written could not be given.
+
+**A slot's type is read off the declaration rather than checked against the
+spelling**, so the two cannot disagree. The one thing a declaration cannot say is
+which token class a `String` argument reads, which is the entry below.
+
+**Before this a slot was a word that happened to be a metavariable of some
+grammar in scope, and that could not say which argument it meant.** Where a
+derivation goes there was no word at all — a judgment declares none, since an
+arbitrary derivation has no one type — so the *grammar's own name* stood in:
+`notation Valid -> ⊢ Γ , M , T by typing valid`. That read like a claim about the
+fourth argument's type while claiming nothing, and the identical line was accepted
+for a declaration whose fourth argument is `typing G M base`, third index nailed to
+`ι`. It also forced a grammar to carry words it did not need: two identical words
+collapse to one slot, so `append -> Γ ∪ Γ` is refused and `Ctx` had to declare a
+second word, `Δ`, purely so a two-argument function could be spelled.
+
+**Anything declared may have notation, including a judgment's rules and a
+datatype's constructors — the condition is that it not be ambiguous.** A rule
+given a spelling is a derivation you can write:
+
+```
+notation plain where
+  T-any -> ⟪ Γ ! M ! T ⟫
+```
+```
+thena spine> :infer plain`⟪ · ! x ! ι ⟫`
+plain`⟪ · ! x ! ι ⟫` : plain`· ⊢ x : ι`
+```
+
+Spell a rule like its own statement and the statement stops being readable, which
+is the one thing you may not do — and you are told, with the colliding rule named:
+
+```
+thena spine> :infer plain`· ⊢ x : ι`
+stuck: in plain`· ⊢ x : ι`: this term parses two ways,
+       as plain(empty, var(x), base) and as T-any(empty, var(x), base)
+```
+
+**That check is at parse time, so a colliding notation loads clean** and the
+breakage appears when somebody writes an affected term. A declaration-time check
+is intended and is not here yet.
+
+### A `String` argument says which token class it reads
+
+*Decided 2026-10-16, built the same day.*
+
+A slot's type comes from the declaration, and for every type but one that settles
+what may be written there: `Ctx` is a grammar, so a `Ctx` argument reads a
+context. `String` is not a grammar. What makes a string readable inside a term is
+a token class, and a language may declare as many of them over `String` as it
+likes — F-sub reads two kinds of name, capitalised for type variables and not for
+term variables:
+
+```
+X : Token String       X = /[A-Z][a-zA-Z0-9']*/
+x : Token String       x = /[a-z][a-zA-Z0-9']*/
+```
+
+Both are `Token String`, so the declaration `notIn : String -> Ctx -> Type₀`
+cannot say which kind of name its first argument is. **A `String` parameter is
+therefore ascribed with the class it reads, and only a `String` parameter may
+be:**
+
+```
+notation notIn (v : X) G -> v # G where
+```
+
+The ascription names the **class** and not the parameter, because that name is
+the word a rule writes where the slot is — F-sub's rules write `X # Γ`, as the
+paper does.
+
+**What it buys is a refusal.** `#` is *this type variable is not declared in Γ*,
+and with the class in place a term variable cannot be written there:
+
+```
+thena spine> :parse notIn X # ·
+notIn(X, empty)
+thena spine> :parse notIn y # ·
+in notIn`y # ·`: unexpected 'y' at character 1, expecting X
+```
+
+There is no third option where the slot reads any string at all, because a term
+is a sequence of tokens and every token belongs to a class. So a `String`
+parameter that names none is refused, and the refusal says what is missing:
+
+```
+refused: in the notation for P, production P: s names an argument of String, which
+no notation reads by itself — if it is a String, say which token class, as
+( s : ‹class› )
+```
+
+### A rule's premise may be named, and later premises may write the name
+
+*Decided 2026-10-16, built the same day.*
+
+```
+judgment check = Γ ⊢ M ⇐ T where
+
+  CheckRule:  p1 : Γ ⊢ M : T
+              p2 : ⊢ Γ , M , T by p1 valid
+              --------------------------
+              Γ ⊢ M ⇐ T
+```
+
+A name is in scope for every premise after it, on the same line or a later one,
+wherever a term of that premise's own type can be written — and in the conclusion.
+So `CheckRule`'s second premise is a statement *about the derivation the first one
+names*:
+
+```
+CheckRule : ∀ (Γ : Ctx) (M : LC) (T : Ty) (p1 : typing`${Γ} ⊢ ${M} : ${T}`)
+              -> Valid`⊢ ${Γ} , ${M} , ${T} by ${p1} valid`
+              -> check`${Γ} ⊢ ${M} ⇐ ${T}`
+```
+
+Papers do this as `D :: J` and “by IH”. An unnamed premise is still `d1`, `d2`, …
+by its position, and a name may not be a metavariable of any grammar, nor a type
+the rule mentions, nor another premise's name — so a name in a premise means
+exactly one thing.
+
+### `:judgment` shows a judgment's rules the way a paper writes them
+
+*Decided 2026-10-16, built the same day.*
+
+```
+thena spine> :judgment typing
+  d1 : x : T ∈ Γ
+  -------------- T-var
+  Γ ⊢ x : T
+
+  d1 : Γ ⊢ M : ( S -> T )
+  d2 : Γ ⊢ N : S
+  ----------------------- T-app
+  Γ ⊢ ( M N ) : T
+```
+
+An argument at a judgment's statement is a premise; every other argument is a
+metavariable and is left out, which is what a paper does. A premise carries its own
+name, so a named premise reads here as it was written. It is derived from the
+declared types, so a hand-written datatype with notation shows the same way a
+generated judgment does.
+
+**It is a display and nothing reads it back.** The statements above the bar stand
+as *types*, and a derivation needs terms in those positions — so this form could
+not be a way of writing one even in principle. `:show` still gives the
+declaration, which is the thing that round-trips; the two answer different
+questions. And it is `:judgment` rather than `:rules` because `:rules` is the
+engine's rule base: an `instral` rule and an inference rule are different things.
 
 ### An object term is parsed by its grammar, and `:parse` shows how
 
@@ -908,7 +1729,7 @@ prints it:
 
 ```
 data typing : Ctx -> LC -> Ty -> Type₀ where
-  T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> Ctx-in x T Γ -> typing Γ (var x) T
+  T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> extend-in x T Γ -> typing Γ (var x) T
   T-app : ∀ (Γ : Ctx) (M : LC) (S : Ty) (T : Ty) (N : LC)
             -> typing Γ M (arrow S T) -> typing Γ N S -> typing Γ (app M N) T
 ```
@@ -953,10 +1774,11 @@ binds twice: the `∀` lists the rule's metavariables, it does not nest. **The n
 installed**, as a context's lookup is: `` typing`· ⊢ ( λ x : ι . x ) : ( ι -> ι )` ``
 is a type, and `:parse typing …` reads one.
 
-### A context gets a lookup relation, written `x : T ∈ Γ`
+### A context gets a lookup relation per kind of binding, written `x : T ∈ Γ`
 
-*Decided 2026-09-21.* A `context` block declares its datatype and, beside it,
-the relation that looks a name up:
+*Decided 2026-09-21; one relation per extension 2026-10-04.* A `context` block
+declares its datatype and, beside it, the relation that looks a name up — one for
+each form the context can be extended by:
 
 ```
 context Ctx, Γ where
@@ -965,21 +1787,40 @@ context Ctx, Γ where
 ```
 
 ```
-data Ctx-in : String -> Ty -> Ctx -> Type₀ where
-  Ctx-here  : ∀ (Γ : Ctx) (x : String) (T : Ty) -> Ctx-in x T (extend Γ x T)
-  Ctx-there : ∀ (Γ : Ctx) (x : String) (T : Ty) (x' : String) (T' : Ty)
-                -> (Eq String x x' -> Empty) -> Ctx-in x T Γ -> Ctx-in x T (extend Γ x' T')
+data extend-in : String -> Ty -> Ctx -> Type₀ where
+  extend-here : ∀ (Γ : Ctx) (x : String) (T : Ty) -> extend-in x T (extend Γ x T)
+  extend-there-extend
+    : ∀ (Γ : Ctx) (x : String) (T : Ty) (x' : String) (T' : Ty)
+        -> (Eq String x x' -> Empty) -> extend-in x T Γ -> extend-in x T (extend Γ x' T')
 ```
 
-**Its notation is the extension with the context taken out, then `∈` and the
-context**, and it is a grammar like any other: `` Ctx-in`x : ι ∈ ·, x : ι` `` is
-the type `Ctx-in "x" base (extend empty "x" base)`, `:parse Ctx-in …` reads it,
-and it prints back. The separator goes with the context: `Γ , x : T` gives
-`x : T ∈ Γ`, and so does `x : T ; Γ`. **The indices are the notation's slots
-in order**, as a judgment's are, so the context comes last.
+**A context may be extended in more than one way**, and System F's cannot be
+written any other way — its Γ carries both a term's type and a type variable's
+bound:
 
-**A later binding shadows an earlier one of the same name.** `Ctx-there` asks
-for a proof that the two names differ. For two literals that proof needs no
+```
+context Ctx, Γ where
+  empty  -> ·
+  bindTm -> Γ , x : T
+  bindTy -> Γ , X <: T
+```
+
+That declares `bindTm-in` and `bindTy-in`, each reading its own notation —
+`x : T ∈ Γ` and `X <: T ∈ Γ` — and each with a constructor for stepping over
+every kind of binding: `bindTm-there-bindTm`, `bindTm-there-bindTy`, and the two
+for `bindTy-in`. **The names come from the extension production, not the
+context**, because three names taken from the context alone would collide the
+moment there are two extensions.
+
+**Its notation is the extension with the context taken out, then `∈` and the
+context**, and it is a grammar like any other: `` extend-in`x : ι ∈ ·, x : ι` ``
+is the type `extend-in "x" base (extend empty "x" base)`, `:parse extend-in …`
+reads it, and it prints back. The separator goes with the context: `Γ , x : T`
+gives `x : T ∈ Γ`, and so does `x : T ; Γ`. **The indices are the notation's
+slots in order**, as a judgment's are, so the context comes last.
+
+**A later binding shadows an earlier one of the same name.** `extend-there-extend`
+asks for a proof that the two names differ. For two literals that proof needs no
 axiom; `eqString` and `Eq`'s eliminator give it:
 
 ```
@@ -995,29 +1836,61 @@ xNotY = \ q ->
 Reaching an `x` under a later `x` would need `Eq String "x" "x" -> Empty`, and
 nothing proves that.
 
-The constructors are named after the context, as `Ctx-in` is, so two contexts
-in one session do not clash. **The extension must have exactly one name** (a
-`Token String` argument), because that is what the lookup compares. Weakening
-and exchange are not generated.
+**Only a binding of the same kind of name needs that proof.** Shadowing happens
+within one namespace, so looking a term variable up past `X <: T` asks for
+nothing — `bindTm-there-bindTy` has no inequality premise at all.
+
+**Each extension must have exactly one name** (a `Token String` argument),
+because that is what the lookup compares, and a production that joins two
+contexts is refused. Weakening and exchange are not generated.
+
+**A context also gets substitution, by the same rule a language does.** For every
+kind of name its entries can hold, it gets the free-variables function and the
+substitution — so F-sub's Γ, whose entries hold types, gets:
+
+```
+Ctx-fv-X     : Ctx -> List String
+Ctx-subst-X  : Ctx -> String -> Ty -> Ctx
+Ctx-subst-all : Ctx -> List (And String Ty) -> Ctx
+```
+
+`Ctx-subst-X` is the `[X↦P]Δ` that System F's type-substitution lemma is written
+with, and a rule may write it in notation: `Γ[X -> T]` elaborates to
+`Ctx-subst-X Γ X T`.
+
+It is a plain fold with **no capture avoidance and no renaming**, because a
+context's name slot is an ordinary name and not a binder: `Γ , x : T` has no body
+for `x` to scope over. So each entry's name is copied as written and each entry's
+types are substituted. **It does not stop at a binding of the kind it is
+substituting for** — applied to `· , X <: ⊤ , x : X` it replaces that `X` as
+well, since that `X` binds nothing — which is what the lemma needs, because it
+substitutes into the part of the context *after* the binding. A context gets no
+`fresh`, because minting a name belongs to the language that reads that kind of
+name. A context whose entries can hold no name at all gets nothing.
 
 ### A language gets substitution for free, and a binder is renamed only when it would capture
 
-*Decided 2026-09-21.* A `language` block with a variable production
-(`var : x as occurrence -> x`) also declares four functions, right after its
-datatype:
+*Decided 2026-09-21; one family per kind of name 2026-10-07.* A `language` block
+with a variable production (`var : x as occurrence -> x`) also declares functions
+for every kind of name it can contain, right after its datatype — here the one
+kind, `x`:
 
 ```
-LC-fresh     : String -> List String -> String
-LC-fv        : LC -> List String
+LC-fresh-x   : String -> List String -> String
+LC-fv-x      : LC -> List String
 LC-subst-all : LC -> List (And String LC) -> LC     -- simultaneous
-LC-subst     : LC -> String -> LC -> LC             -- LC-subst E x N is E[x->N]
+LC-subst-x   : LC -> String -> LC -> LC             -- LC-subst-x E x N is E[x->N]
 ```
+
+**The kind is in the name even when there is only one**, because leaving it out
+in that case would be a special case in the naming rule, and a language may read
+more than one kind of name — see the next entry.
 
 They are ordinary definitions, written by `elim` and elaborated like anything
 you write. They compute, so a substitution's answer is provable by `refl`:
 
 ```
-captured : Eq LC (LC-subst (abs "y" base (var "x")) "x" (var "y")) (abs "y'" base (var "y"))
+captured : Eq LC (LC-subst-x (abs "y" base (var "x")) "x" (var "y")) (abs "y'" base (var "y"))
 captured = refl LC (abs "y'" base (var "y"))
 ```
 
@@ -1027,11 +1900,16 @@ capture is something you can see happen and see avoided. A list substitutes
 simultaneously (`[x->y, y->x]` swaps), and of two pairs for one name the first
 wins.
 
-What it needs of the language, each refused at the block with a message:
-exactly one variable production, taking only its occurrence; and a binder free
-only in arguments of the language itself. A language with no occurrence (`Ty`)
-gets nothing. The four names are yours to keep free — declaring `LC-fv` first
+What it needs of the language, each refused at the block with a message: one
+variable production **per kind of name**, taking only its occurrence; and a
+binder free only in an argument of a language that reads names of that binder's
+kind — see the next entry. A language that can contain no name at all (`Ty` in
+the example above) gets nothing. The four names are yours to keep free — declaring `LC-fv` first
 is refused.
+
+A binder of one kind does not bind names of another: the kinds are separate
+namespaces, and a binder at a kind no language reads is never renamed at all,
+because nothing can ever occur at it.
 
 Two things arrived with it. **`List`, with `nil` and `cons`, is in the
 prelude**, so those names are taken from every object language until imports
@@ -1039,6 +1917,71 @@ exist. **`appendString : String -> String -> String`** is the one way to build
 a `String`, and it computes only on two literals. The types that mention `List`
 carry a level parameter, `LC-fv {ℓ}`, because a list of names is a list at any
 level and nothing is defaulted.
+
+### A binder may scope into another language, if that language reads that kind of name
+
+*Decided 2026-10-04, built 2026-10-06.* A binding form's body may be a slot of a
+different language, so long as names of the binder's kind can actually occur in
+it:
+
+```
+language Ty, T, S where
+  tvar : X as occurrence -> X
+  arrow                  -> T -> S
+
+language Tm, M, N where
+  var  : x as occurrence -> x
+  abs  : x as binder     -> ( λ x : T . M[x] )
+  pack : X as binder     -> ( pack X = T in S[X] )
+```
+
+`pack` binds `X`, and `S` is a `Ty` — another language's term. Before, that was
+refused outright: a binder had to be free only in arguments of its own language,
+because substitution over that language is the only thing that walks into them.
+The refusal now asks a question instead, and it is a question about more than one
+grammar: **which kinds of name does a language reach?** Those its own occurrences
+and binders name, and everything the languages in its slots reach. `Ty` reads
+`X`, so `pack` is allowed. Had `Ty` read no names at all, nothing inside an `S`
+could ever be an `X` and the form is refused as before — with a message that says
+so.
+
+**This is computed as a reachability fixpoint and not as a walk in declaration
+order**, although no two languages may yet refer to each other, so the two would
+agree today. They will not when they can, and the cost of writing it the right
+way now is nothing.
+
+`Tm` therefore reaches two kinds of name while owning one, and gets a
+substitution for each:
+
+```
+Tm-subst-x   : Tm -> String -> Tm -> Tm     -- a term for a term variable
+Tm-subst-X   : Tm -> String -> Ty -> Tm     -- a TYPE for a type variable
+Tm-subst-all : Tm -> List (And String Tm) -> List (And String Ty) -> Tm
+```
+
+**A kind of name belongs to the language whose variable production reads it**, and
+that is what a substitution for it replaces a name *with* — so `Tm-subst-X` takes
+a type. Two unrelated languages may both read `x : Token String`, each the owner
+for itself; what is refused is one language reaching two that read the same kind,
+where the substitution would have no single language to replace a name with.
+
+It matters because System F's polymorphism is this shape: `Λ X <: T . t` binds a
+type variable in a *term* production while every occurrence of `X` is in a type.
+And it is why substituting for one kind of name has to be able to rename binders
+of **every** kind the term can contain — substituting `λ y : X . y`, which has a
+free type variable, for `x` in `Λ X <: Top . x` captures that `X` unless the type
+binder is renamed too.
+
+**A slot of another language is walked through that language's own
+substitution**, with the maps that language needs and any binder of this one that
+scopes over the slot added to them. So `pack`'s `S` is substituted rather than
+copied, and nothing about a foreign slot is opaque any more unless the language in
+it can contain no name at all.
+
+**Substituting for one kind of name renames binders of every kind.** Replacing
+`z` by `λ y : X . y` in `Λ X <: Top . z` gives `Λ X' <: Top . (λ y : X . y)`:
+the type binder is renamed because the term being substituted in has a free type
+variable, and renaming only the term binders would have captured it.
 
 ## The development calculus
 
@@ -1158,7 +2101,7 @@ McBride's tactic is now written as the two halves it always had:
 
 ```
 rule fill t :- when focus-is-hole
-  then n = fresh-name "refined" ; x = define n t
+  do n = fresh-name "refined" ; x = define n t
      ; s = typeof x ; g = goal ; unify-into s g ; prim-try x
 
 rule unify-refine-core t :- when focus-is-hole do fill t ; solve
@@ -1201,7 +2144,7 @@ through.
 
 ```
 rule elaborate t :- when focus-is-hole (surface-is-name t)
-  then w = surface-name t ; x = resolve-name w ; fill t ; solve
+  do w = surface-name t ; x = resolve-name w ; fill t ; solve
 
 rule elaborate t :- when focus-is-hole (surface-is-placeholder t) do
 ```
@@ -1222,42 +2165,91 @@ choice to make and never leaves a choice point. That is what the head predicates
 are for — there is one `surface-is-…` per node kind, and a clause that names its
 node cannot collide with another.
 
+**The three application clauses were an exception to that until 2026-10-15, and
+the exception was the whole cause of two bad error messages.** An application is
+split by its head — a name, an `elim`, or a term to elaborate in its own right —
+and the third clause used to ask only that the arguments be explicit. So it
+matched a name-headed application too, and was tried whenever the name-headed
+clause failed. It claims `f : A -> B`, an arrow, which a dependent head does not
+fit, so against `Eq` or `refl` it failed on its own claim *before* re-reaching the
+argument that was actually wrong — and that spurious failure was what you were
+shown:
+
+```
+a : Eq String "x" "x"    a = refl String "y"    stuck: A2 is not bound before A
+```
+
+`A` and `A2` are development components, nothing the user wrote. The real error
+was computed and thrown away. The same discard hid a parse error inside an object
+term literal: a missing bracket under `Eq` reported `A3 is not bound before A1`,
+while the message naming the bracket existed and was discarded.
+
+**The third clause now names its head, `app-head-is-term`, so the three are
+mutually exclusive and the paragraph above is true without exception.** Both
+messages are now the real one:
+
+```
+a : Eq String "x" "x"    a = refl String "y"    stuck: "y" and "x" cannot be made equal
+```
+
+**A head predicate is how this was fixed, and no failure ranking or clause
+priority was added.** The head language has no negation, so "neither a name nor
+an `elim`" is a third positive test, the way `let`'s annotated and bare clauses
+are two. **It also removed a choice point from every name-headed application** —
+elaborating `succ y` used to record one, because a second clause matched and
+could be offered.
+
 **A rule body may be empty**, which it could not before. `E⟦_⟧` is *do nothing*:
 the hole is already there and unification is expected to find it. A clause that
 does nothing and a clause that does not match are different answers, so the
-empty body is saying something. `then` is still required.
+empty body is saying something. `do` is still required.
 
 **A rule loops by recursing over the surface term.** The λ case needs one
-`prim-intro` per binder of a group, and a rule body is a straight run of
+`prim-lambda` per binder of a group, and a rule body is a straight run of
 instructions with no iteration — so a helper peels one binder and calls itself
 on the tail, and the term is its own counter:
 
 ```
-rule intro-binders t :- when focus-is-guess (lambda-binds-more t)
-  then x = lambda-name t ; prim-intro x
-     ; tl = lambda-tail t ; call intro-binders tl
+rule intro-binders t k :- when focus-is-guess (lambda-binds-more t) (lambda-is-bare t)
+  do x  = lambda-name t
+     ; k2 = prim-lambda x
+     ; tl = lambda-tail t
+     ; body = call intro-binders tl k2
+     ; return body
 
-rule intro-binders t :- when focus-is-guess (lambda-binds-one t)
-  then x = lambda-name t ; prim-intro x
+rule intro-binders t k :- when focus-is-guess (lambda-binds-one t) (lambda-is-bare t)
+  do x = lambda-name t
+     ; k2 = prim-lambda x
+     ; return k2
 ```
+
+**It returns the hole it ended at, and the caller `goto`es that** rather than
+counting its way back down — `prim-lambda` and `prim-let` produce the hole they
+claim for what is left of the goal. Counting moves was what the deleted
+`enter-binders` did, and it is only right while the binders are the sole
+components in the chain: a λ whose binder carries a written type claims a hole
+*inside* them, and the count is then off by one per annotation. That is why
+there are two further clauses for an annotated binder.
 
 **Peeling in the elaborate clause itself would not do**, because attacking once
 per binder nests the λs and wraps each in its own `let` — a different proof
 term. The run has to be emitted, and recursion is what emits it.
 
-**Eleven of the fourteen clauses are real** (49b added `∀`, `->`, `let` — two clauses, since the
-annotation is optional and a head cannot say *not* — the ascription and `do`;
-49c added the λ). Two still run `prim-elaborate`: an application, which matches
-its arguments against the head's plicities and then claims a hole per slot, and
-an `elim`, which claims one per field. Both hand a **list of names** to a single
-op, which recursion cannot build.
+**Every clause is written in the rule base** (49b added `∀`, `->`, `let` — two clauses, since
+the annotation is optional and a head cannot say *not* — the ascription and `do`;
+49c added the λ). The two that still ran a `prim-elaborate` were an application,
+which matches its arguments against the head's plicities, and an `elim`, which
+claims a hole per field: both hand a **list of names** to a single op, which
+recursion cannot build. **Since 49f there is no `prim-elaborate` and no Haskell
+elaborator behind any of it** — `rules/standard.thena.rules` is the whole of
+E⟦·⟧, in nineteen clauses.
 
 A clause takes its surface term apart with **moves**, which answer with a
 surface term focused on the part rather than a detached one:
 
 ```
 rule elaborate t :- when focus-is-hole (surface-is-arrow t)
-  then … ; a = arrow-domain t ; call elaborate a
+  do … ; a = arrow-domain t ; call elaborate a
         ; … ; b = arrow-codomain t ; call elaborate b
 ```
 
@@ -1322,7 +2314,7 @@ base of your own:
 ```
 -- E⟦x⟧ = FILL x ; SOLVE — Brady's variable case.
 rule elaborate t :- when focus-is-hole (surface-is-name t)
-  then w = surface-name t
+  do w = surface-name t
      ; x = resolve-name w
      ; fill x
      ; solve
@@ -1364,6 +2356,45 @@ andLeft {ℓ₀ ℓ₁} : ∀ (A : Type ℓ₀) (B : Type ℓ₁) -> And {ℓ₀
 — one level parameter for each component, matching `And {ℓ₀ ℓ₁} : Type (ℓ₀ ⊔ ℓ₁)`.
 `Sigma` is deliberately written at `Type₀` and stays monomorphic, so `fst` and
 `snd` have no level parameters at all.
+
+**The trust-bearing definitions are surface definitions too, since 2026-10-14.**
+`transport`, `isSame` and the six laws the three `dec` functions rest on were
+written in the development calculus for eight days, because a surface
+`trusted T e` leaves the type its body really has to a hole and that hole could
+not be solved under a λ — which is where every one of those claims sits. That was
+a defect in unification, not a limit of the surface language, and with it fixed
+the file a reader opens to see what the system takes on trust is written in the
+language they write their own proofs in.
+
+**Their types are ascribed, and here is why.** A surface type cannot say which level a datatype
+application sits at, and it does not need to except when nothing else decides it.
+A brace in a surface term means an implicit *value* argument, and elaboration
+places it against the head's recorded argument positions (`plicitiesOf`,
+`Engine.hs`); a datatype's level is not an argument position — it lives in
+`Global`'s own level list — so `Eq {0} String a b` is refused with *"an implicit
+argument this head has no position for"*. The level is inferred instead, and what a
+declaration leaves undecided becomes a level **parameter** of the declared name.
+**Here it is undecided**: `String`, `Char` and `Int` sit at a fixed `Type₀`, and
+cumulativity then asks only that `Eq`'s level be at least 0, so each occurrence
+would get a parameter of its own. Writing `A : Type` instead would have tied them
+together — but these laws are about primitive literals, not a parameter. Ascribing
+the whole type decides it. Ascribing the type
+pins it:
+
+```
+eqStringEqual : ∀ (a : String) (b : String)
+  -> (Eq Comparison (eqString a b) same : Type₀) -> (Eq String a b : Type₀)
+```
+
+and the stored type is exactly what the development calculus wrote,
+`-> Eq {0} Comparison (eqString a b) same -> Eq {0} String a b`, with no
+ascription left in it. **A body needs no such thing**: a level argument in a term
+is inserted at the use.
+
+**`define-global`, the op that hands a finished definition out from a rule base,
+stays** — his ruling the same day. It is `declare-primitive`'s sibling and is
+what `examples/10-preservation-any-context.thena` uses; it is simply no longer
+the only way to write a definition that rests on trust.
 
 ---
 
@@ -2280,7 +3311,7 @@ it failed only when it ran*).
 
 *Decided 2026-09-13.*
 
-A rule file is one layout block and a rule body is a block that `then` opens, so
+A rule file is one layout block and a rule body is a block that `do` opens, so
 a body can be written as indented lines with no separators at all:
 
 ```
@@ -2294,7 +3325,7 @@ leading-`;` style the shipped base is written in:
 
 ```
 rule fill t :- when focus-is-hole
-  then n = fresh-name "refined"
+  do n = fresh-name "refined"
      ; x = define n t
 ```
 

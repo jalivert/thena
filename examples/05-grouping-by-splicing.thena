@@ -84,7 +84,7 @@ throughAName : Eq Ex Ex`${fa} b` leftNested
 throughAName = refl Ex leftNested
 
 -- A substitution, spliced: ([a -> g b] (f a)) c, which is ((f (g b)) c).
-throughSubstitution : Eq Ex Ex`${Ex-subst fa "a" Ex`g b`} c`
+throughSubstitution : Eq Ex Ex`${Ex-subst-x fa "a" Ex`g b`} c`
                             (juxt (juxt (ref "f") (juxt (ref "g") (ref "b"))) (ref "c"))
 throughSubstitution = refl Ex (juxt (juxt (ref "f") (juxt (ref "g") (ref "b"))) (ref "c"))
 

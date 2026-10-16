@@ -18,6 +18,7 @@ import qualified Thena.Development.Component as Component
 import Thena.Development.Cursor
   (Cursor, Focus (..), along, context, enter, focus, identsIn, rebuild)
 import Thena.Development.Partial (Partial (..))
+import Thena.Core.Trust (TrustLevel (..))
 import Thena.Engine
   ( Exec (..)
   , Machine (..)
@@ -56,7 +57,8 @@ machine = machineIn emptyGlobals
 
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env' cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] env' [] [] [] 1000 0)
+  load is (Machine (Exec [] [] []) (Development cur) [] env' [] [] [] 1000 0
+                   NoUndischargeableTrust)
 
 -- | Run to a stop, and hand back the environment or the reason.
 run :: Cursor -> [Instr] -> Either FailReason Machine

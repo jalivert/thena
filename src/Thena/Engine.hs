@@ -63,6 +63,7 @@ import Thena.Core.Term
 -- Only for 'Core'\'s @Eliminate@, which "Thena.Instral.Ops" also has a constructor
 -- named: the op that builds one and the node it builds must be told apart.
 import Thena.Core.Reduce (whnf)
+import Thena.Core.Trust (TrustLevel)
 import Thena.Core.Typing (check, infer, sortOf)
 import Thena.Core.Unify (UnifyResult (..), blockers, unify, unifyInto)
 import qualified Thena.Development.Component as Component
@@ -241,6 +242,21 @@ data Machine = Machine
     -- **Nothing is prevented**, which is the second principle rather than a
     -- guard rail: 'retryFrom' does not consult this, so the alternative is one
     -- word away — what changes is that the word is the user's.
+  , trustLevel  :: TrustLevel
+    -- ^ **how much trusted-but-underived typing the session permits** (MS8
+    -- phase 151). NOT backtrackable, with 'globals' and 'names' above it.
+    --
+    -- **The engine owns it and the frontend switches it — HIS RULING,
+    -- 2026-10-06.** It is here rather than beside 'Thena.Driver.sessionFuel'
+    -- because a rule searching for a proof must be able to see what it may
+    -- reach for; a level the driver held privately would make replaying a
+    -- script under @:revalidate@ depend on a toggle nobody recorded.
+    --
+    -- **Nothing in this module reads it yet.** Classifying is
+    -- "Thena.Core.Trust" and enforcing is @qed@'s, which is the separation his
+    -- ruling asks for: policy belongs to the caller. It sits here so that there
+    -- is one answer to /what does this session permit/, and so that a rule that
+    -- comes to ask has somewhere to ask.
   }
   deriving (Eq, Show)
 
@@ -1370,6 +1386,14 @@ perform instr rest m = case operation instr of
     Left r         -> failure r m
     Right (f', x') -> produce (VTerm (App f' x')) m
 
+  -- **@trusted claimed actual body@, built and not checked** (MS8 phase 150),
+  -- exactly as 'Arrow' and 'ApplyTo' are: whether the claim is plausible is not
+  -- a question anything asks, which is the feature, and whether @actual@
+  -- describes @body@ is @claim@'s side condition where the node is used.
+  Op.MakeTrusted c a b -> case (,,) <$> term c <*> term a <*> term b of
+    Left r              -> failure r m
+    Right (c', a', b')  -> produce (VTerm (Trusted c' a' b')) m
+
   -- **A universe at a fresh level meta** (MS4 phase 48) — the surface's bare
   -- @Type@, at an operand. Typical ambiguity (phase 33) is what makes this the
   -- right shape: nothing is known about the level yet, and unification decides
@@ -1493,6 +1517,15 @@ perform instr rest m = case operation instr of
   Op.AscriptionTerm x -> surfaceMove x "an ascription" $ \s -> case s of
     Concrete.SurfaceAnnot e ty -> Just (Zipper.intoAnnotTerm ty e)
     _                          -> Nothing
+  -- The two halves of a surface @trusted T e@ (MS8 phase 150). **There is no
+  -- third move**, because there is no third field to move into: @actual@ is the
+  -- core node's and the user never wrote one.
+  Op.TrustedClaim x -> surfaceMove x "a trusted term" $ \s -> case s of
+    Concrete.SurfaceTrusted ty e -> Just (Zipper.intoTrustedType e ty)
+    _                            -> Nothing
+  Op.TrustedBody x -> surfaceMove x "a trusted term" $ \s -> case s of
+    Concrete.SurfaceTrusted ty e -> Just (Zipper.intoTrustedTerm ty e)
+    _                            -> Nothing
 
   -- **A plain binder only** — no annotation and no braces. That is the whole of
   -- what the λ case cannot elaborate, and saying it here means the clause finds
@@ -1570,9 +1603,22 @@ perform instr rest m = case operation instr of
   Op.LambdaName x -> case surfaceAt x of
     Left r  -> failure r m
     Right (Concrete.SurfaceLam bs _)
-      | Concrete.SurfaceBinder Concrete.Explicit w Nothing <- NE.head bs ->
+      -- **The written type is not read here and does not disqualify a binder**
+      -- (MS8): @lambda-annot-type@ reads it, and the plicity refusal below stays
+      -- the one place a λ shape the elaborator cannot take is named.
+      | Concrete.SurfaceBinder Concrete.Explicit w _ <- NE.head bs ->
           produce (VText w) m
-    Right _ -> failure (ExpectedSurfaceShape "a λ whose first binder is plain") m
+    Right _ -> failure (ExpectedSurfaceShape "a λ whose first binder is explicit") m
+  -- **Answered only where a type was written**, so the bare clause and the
+  -- annotated one cannot both apply: a λ with no written type on its first
+  -- binder is refused here by name.
+  Op.LambdaAnnotType x -> surfaceMove x "a λ whose first binder has a written type" $ \s ->
+    case s of
+      Concrete.SurfaceLam bs body -> case NE.uncons bs of
+        (Concrete.SurfaceBinder p w (Just ty), more) ->
+          Just (Zipper.intoLamAnnot p w (maybe [] NE.toList more) body ty)
+        _ -> Nothing
+      _ -> Nothing
   Op.LambdaTail x -> surfaceMove x "a λ" $ \s -> case s of
     Concrete.SurfaceLam bs body -> case NE.uncons bs of
       (b, more) ->
@@ -1904,14 +1950,29 @@ perform instr rest m = case operation instr of
           Right cur -> Continue (advance m { development = Development cur, names = n1 })
       _ -> failure (CannotMove NotOnTheSpine) m
 
+    -- 'onHole' for an op that also answers with something. Written beside it
+    -- rather than in terms of it because the value has to be produced /after/
+    -- the component is replaced, and 'produce' is what ends the instruction.
+    onHoleProducing f = case focus (cursor (development m)) of
+      OnComponent c -> case f c of
+        Left r            -> failure r m
+        Right (c', v, n1) -> case replaceComponent c' (cursor (development m)) of
+          Left e    -> failure (CannotMove e) m
+          Right cur ->
+            produce (VTerm v) m { development = Development cur, names = n1 }
+      _ -> failure (CannotMove NotOnTheSpine) m
+
     -- 'Op.IntroPi' and 'Op.IntroLet' differ in exactly one thing — which of
     -- table 2.8's introduction rules is on offer (MS4 phase 58) — so the op is
     -- written once and takes it.
+    -- **The hole it opened is its answer** (MS8), so a clause can @goto@ it and
+    -- work in the scope the binder just created. 'onHoleProducing' is 'onHole'
+    -- with that one difference.
     introOp rule mn = case traverse (operandIdent (env (exec m))) mn of
       Left r   -> failure r m
-      Right nm -> onHole $ \c -> case c of
+      Right nm -> onHoleProducing $ \c -> case c of
         Component.Guess x i g ty ->
-          (\(g', n1) -> (Component.Guess x i g' ty, n1))
+          (\(g', h, n1) -> (Component.Guess x i g' ty, Free h, n1))
             <$> rule (globals m) contextAt (names m) nm g
         _ -> Left NotReadyToIntroduce
 
@@ -2162,7 +2223,7 @@ whereImpure i = case i of
 -- binder on it.
 introduceLambda
   :: GlobalEnv -> Context -> Int -> Maybe Ident -> Partial
-  -> Either FailReason (Partial, Int)
+  -> Either FailReason (Partial, Var, Int)
 introduceLambda = introducing FunctionOnly
 
 -- | Table 2.8's @intro-let@ — Brady's @LET@, and it reads the type **as
@@ -2178,7 +2239,7 @@ introduceLambda = introducing FunctionOnly
 -- an unreadable goal. This rule is how a proof keeps the author's name.
 introduceLet
   :: GlobalEnv -> Context -> Int -> Maybe Ident -> Partial
-  -> Either FailReason (Partial, Int)
+  -> Either FailReason (Partial, Var, Int)
 introduceLet = introducing LetOnly
 
 -- | Which of table 2.8's two introduction rules this is.
@@ -2195,9 +2256,16 @@ data IntroRule
   = FunctionOnly  -- ^ @prim-lambda@
   | LetOnly       -- ^ @prim-let@
 
+-- **It answers with the hole it opened** as well as the rewritten chain. The
+-- binder's own variable is not interesting to a caller — the name is what a
+-- clause wrote and @resolve-name@ finds it — but the hole for what is left of
+-- the goal cannot be reached any other way: it is not the focus, @goto@ takes a
+-- variable, and counting @along@s from the guess does not scale past one
+-- binder. It is what lets the annotated λ binder be checked /inside/ the binder
+-- it belongs to.
 introducing
   :: IntroRule -> GlobalEnv -> Context -> Int -> Maybe Ident -> Partial
-  -> Either FailReason (Partial, Int)
+  -> Either FailReason (Partial, Var, Int)
 introducing rule env ctx n nm p = case p of
   Under (Component.Claim v i s) (Trailing (Free v'))
     | v == v' -> case s of
@@ -2217,13 +2285,14 @@ introducing rule env ctx n nm p = case p of
         (h, n2) = fresh n1
         opened binder rest =
           ( Under binder (Under (Component.Claim h i rest) (Trailing (Free h)))
+          , h
           , n2
           )
   -- **The rule is threaded, not dropped.** Reverting to a both-rules reading
   -- here would apply to every binder after the first, which is where a @let@
   -- one binder down actually bites.
   Under c rest ->
-    (\(rest', n1) -> (Under c rest', n1))
+    (\(rest', h, n1) -> (Under c rest', h, n1))
       <$> introducing rule env (ctx ++ [Component.forget c]) n nm rest
   _ -> Left NotReadyToIntroduce
 

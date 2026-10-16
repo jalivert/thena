@@ -34,6 +34,7 @@ module Thena.Render
   , renderSyntaxError
   , renderRuleError
   , renderInductive
+  , renderRules
   , renderEliminator
   , renderResponse
   , renderLoadError
@@ -54,6 +55,17 @@ import Thena.Core.Level
   , Unmet (..)
   , levelVarName
   )
+-- **'Thena.Core.Trust.Pending' and 'Thena.Development.Partial.Pending' are two
+-- different things with one name**, so the trust classes are read qualified
+-- here and nowhere else. The clash is a fact about this module, which prints
+-- both the chain and the trust report; neither name is worth bending.
+import Thena.Core.Trust
+  ( TrustClaim (..)
+  , TrustClass
+  , TrustLevel (..)
+  , TrustSite (..)
+  )
+import qualified Thena.Core.Trust as Trust
 import Thena.Core.Term
   ( Core (..)
   , Literal (..)
@@ -123,8 +135,10 @@ import Thena.Errors
   , TypeError (..)
   )
 import Thena.Global.Declare (DeclareError (..), TokenClassError (..))
+import Data.Maybe (fromMaybe)
 import Thena.Language.Build (printTerm)
-import Thena.Language.Grammar (Grammar, GrammarError (..), GrammarProblem (..), ProductionProblem (..), RulePart (..), RuleProblem (..), Sort (..))
+import qualified Thena.Language.Build as Build
+import Thena.Language.Grammar (grammarName, typeFormerProductions, Grammar, GrammarError (..), GrammarProblem (..), ProductionProblem (..), RulePart (..), RuleProblem (..), Sort (..), universeSpelling)
 import Thena.Language.Reader (ReadError (..))
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Regex (RegexError (..))
@@ -214,6 +228,7 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   RenderedDev p  -> [renderPartial ren (contextOf s) p]
   Shown c        -> [renderCursor ren c]
   ShownData d    -> renderInductive ren d
+  ShownRules d   -> renderRules ren d
   ShownEliminator g ty  -> renderEliminator ren g ty
   ShownGlobal g lvs cs ps ty body -> renderGlobal ren g lvs cs ps ty body
   Where c        -> renderWhere ren c
@@ -242,8 +257,13 @@ renderResponse s resp = let ren = renderingOf s in case resp of
   Revalidated (Just e) -> renderKernelError ren e
   Extracted t          -> [renderCore ren [] t]
   Proving g ty  -> ["proving " ++ nameString g ++ " : " ++ renderCore ren [] ty]
-  Proved g lvs owed ty ->
-    [nameString g ++ scheme ren lvs owed [] ty ++ "   ∎"]
+  -- **The report comes after the ∎ and only when there is one** (MS8 phase
+  -- 151), so a proof that rests on nothing prints exactly the line it always
+  -- did. @qed@ reports rather than refusing at the most relaxed rung — his
+  -- ruling, 2026-10-06 — and this is where the reporting lands.
+  Proved g lvs owed ty claims ->
+    (nameString g ++ scheme ren lvs owed [] ty ++ "   ∎") : trustClaims ren claims
+  Trusting lvl claims -> renderTrust ren lvl claims
   Suspended g   -> ["suspended " ++ nameString g]
   Resumed g     -> ["resumed " ++ nameString g]
   Abandoned g   -> ["abandoned " ++ nameString g]
@@ -309,6 +329,10 @@ renderStop ren s stop = case stop of
   Halted r               -> ["stuck: " ++ renderFailReason ren r]
   Refused e              -> ["refused: " ++ renderDeclareError ren e]
   Uncertified e          -> "the kernel refused it" : renderKernelError ren e
+  -- **Not the kernel's answer, and it does not read like one** (MS8 phase 151).
+  -- The kernel accepted the term; what refused it is the session's own setting,
+  -- which is one word away from being changed.
+  Untrusted lvl claims   -> "the trust level refused it" : renderTrust ren lvl claims
   -- The same words the prompt gives for the same two mistakes ('LineRefused'
   -- and 'EntryMistyped'), because a block is checked by the same checker —
   -- it is only reached later now (MS6 phase 104b).
@@ -318,6 +342,61 @@ renderStop ren s stop = case stop of
   -- for a job's pane; here the printed machine /is/ the sign that the run is not
   -- over, since every other outcome prints its own result instead.
   Paused _               -> renderMachine ren (contextOf s) (machineOf s)
+
+-- --------------------------------------------------------------------------
+-- Trust (MS8 phase 151)
+-- --------------------------------------------------------------------------
+
+-- | The level a session is at, then what is resting on it.
+--
+-- **The level is always printed, including when nothing rests on it**, because
+-- a rung with an empty list under it is the answer a user is checking for.
+renderTrust :: Rendering -> TrustLevel -> [TrustClaim] -> [String]
+renderTrust ren lvl claims =
+  ("trust: " ++ trustWord lvl)
+    : if null claims then ["  resting on nothing"] else trustClaims ren claims
+
+-- | His three settings, said as he says them.
+--
+-- **"no undischargeable trust" and never "safe"** — his instruction,
+-- 2026-10-06: @Empty@ is provable using nothing but claims this rung admits, so
+-- a word that promised soundness here would be promising something measurably
+-- false. Only @no trust@ is a guarantee, and it says so by saying nothing more
+-- than what it refuses.
+trustWord :: TrustLevel -> String
+trustWord lvl = case lvl of
+  NoTrust                -> "no trust"
+  NoUndischargeableTrust -> "no undischargeable trust"
+  AnyTrust               -> "any trust"
+
+-- | One claim in three lines: the verdict and the site it came from, then both
+-- halves of the obligation.
+--
+-- **Both halves, and the site named.** The pair /is/ the obligation (his
+-- observation, 2026-10-05) and @actual@ is what says whether the trust is still
+-- load-bearing; and a verdict without its site misleads exactly where it
+-- matters, because the same node is honest in a definition and a lie at a use.
+trustClaims :: Rendering -> [TrustClaim] -> [String]
+trustClaims ren = concatMap one
+  where
+    one c =
+      [ "  " ++ verdict (claimClass c) ++ ", " ++ site c
+      , "    claims " ++ renderCore ren (claimContext c) (claimClaimed c)
+      , "    body   " ++ renderCore ren (claimContext c) (claimActual c)
+      ]
+
+    verdict :: TrustClass -> String
+    verdict k = case k of
+      Trust.Discharged      -> "discharged"
+      Trust.Pending         -> "pending"
+      Trust.Undischargeable -> "undischargeable"
+
+    site c = case (claimSite c, claimRoute c) of
+      (AtUse,        gs) -> "at the use of " ++ through gs
+      (AtDefinition, []) -> "written here"
+      (AtDefinition, gs) -> "in " ++ through gs
+
+    through = intercalate " · " . map nameString
 
 -- --------------------------------------------------------------------------
 -- Errors, made readable
@@ -330,6 +409,9 @@ renderSyntaxError e = case e of
     HeaderWithoutWhere l -> line l ++ "a block's first line names it and ends in where"
     HeaderMalformed l -> line l ++ "a block's first line is its name and metavariables, separated by commas"
     ProductionWithoutArrow l -> line l ++ "a production is ‹name› -> ‹items›, or ‹name› : ‹metadata› -> ‹items›"
+    -- MS8 phase 171: a @notation@ production names its own arguments.
+    ParamMalformed l w ->
+      line l ++ w ++ " is not a name or an ascribed one, ( ‹x› : ‹class› )"
     MetadataMalformed l t ->
       line l ++ t ++ " is not ‹x› as occurrence, ‹x› as binder or { ‹x›, … } as binders"
     BindingMalformed l w
@@ -409,10 +491,12 @@ describe t = case t of
   TLanguage   -> "language"
   TContext    -> "context"
   TJudgment   -> "judgment"
+  TNotation   -> "notation"
   TBlock k _  -> case k of
     LanguageBlock -> "a language block"
     ContextBlock  -> "a context block"
     JudgmentBlock -> "a judgment block"
+    NotationBlock -> "a notation block"
   -- Never lexed; "Thena.Driver" inserts it at a rule file's column 1.
   TChar c     -> show c
   TSpread     -> "..."
@@ -438,6 +522,7 @@ describe t = case t of
   TLet        -> "let"
   TIn         -> "in"
   TElim       -> "elim"
+  TTrusted    -> "trusted"
   TWhere      -> "where"
   TData       -> "data"
   TModule     -> "module"
@@ -617,6 +702,25 @@ go ren@(Rendering _ n) env prec term = case term of
     where
       atoms = paren . unwords . map (go ren env AtAtom)
       paren s = "(" ++ s ++ ")"
+
+  -- @trusted claimed actual body@ (MS8 phase 149) — **all three, because that
+  -- is the Core notation he fixed on 2026-10-05**, and @actual@ is the half
+  -- that says whether the trust is still load-bearing. Printing only the claim
+  -- would hide exactly the thing a reader wants.
+  --
+  -- **It prints like an application and re-reads like one too far**: phase
+  -- 150's surface form takes two operands, so this is a second place where
+  -- @parse . print@ is not the identity on the nose — the same qualification
+  -- 'Canonical' carries above, for the same reason (the internal form has a
+  -- field the written form derives).
+  Trusted claimed actual body ->
+    parensIf (prec > AtApp) $
+      unwords
+        [ "trusted"
+        , go ren env AtAtom claimed
+        , go ren env AtAtom actual
+        , go ren env AtAtom body
+        ]
 
 -- | Does the scope's variable actually occur? This is the whole of the
 -- @S -> B@ versus @∀ (x : S) -> B@ decision (§2.6).
@@ -841,6 +945,9 @@ partOf s = case s of
   IntoElimMethod _ _ _ _ before _ _ _ -> Method (length before + 1)
   IntoElimIndex _ _ _ _ _ before _ _  -> Index (length before + 1)
   IntoElimTarget {}             -> Target
+  IntoTrustedClaimed {}         -> Claimed
+  IntoTrustedActual {}          -> Actual
+  IntoTrustedBody {}            -> Body
 
 -- | A 'Part' as the user types it (§4.7, and "Thena.Driver"'s @partWords@).
 partWord :: Part -> String
@@ -854,6 +961,8 @@ partWord p = case p of
   Body       -> "body"
   Motive     -> "motive"
   Target     -> "target"
+  Claimed    -> "claimed"
+  Actual     -> "actual"
   Param k    -> "param " ++ show k
   Method k   -> "method " ++ show k
   Index k    -> "index " ++ show k
@@ -962,8 +1071,13 @@ renderInstr ren ctx instr = case instr of
 renderOp :: Rendering -> Context -> Op -> String
 renderOp ren ctx op = case op of
   Ops.Ask    p k  -> word ++ " " ++ operand p ++ " " ++ answerKind k
-  -- The one infix operand shape.
-  Ops.Unify  l r  -> word ++ " " ++ operand l ++ " \8799 " ++ operand r
+  -- **@unify@ has no infix spelling and never had one** (MS8). It printed
+  -- @unify a ≟ b@, which the rule parser refuses — @≟@ is reserved and the
+  -- instruction grammar is the word and its operands like every other. Nothing
+  -- in the shipped base used @unify@ in a body until the annotated λ binder
+  -- checked a written type with it, so neither the golden transcripts nor the
+  -- boundary corpus had ever read this back. The glyph stays where it belongs:
+  -- a constraint and @:convert@'s answer.
   -- Neither takes an operand: the declaration is a field, and the two crossings
   -- share a keyword and are told apart by the word after it.
   Ops.DefineData d -> word ++ " " ++ nameString (inductiveName d)
@@ -1337,6 +1451,65 @@ renderInductive ren d = case inductiveConstructors d of
 
     closed ls = init ls ++ [last ls ++ " }"]
 
+-- | @:rules ‹judgment›@ — **every constructor shown as the rule it is**
+-- (MS8 phase 174, HIS instruction of 2026-10-16).
+--
+-- A judgment's rules are written above a bar in a @judgment@ block and nothing
+-- ever showed them back: @:show@ gives the constructor's telescope, which is
+-- what the declaration /means/ and not what it /looked like/. This is the
+-- paper's form, derived from the declared type, so it works for a hand-written
+-- datatype with notation exactly as it does for a generated judgment.
+--
+-- **An argument at a judgment's statement is a premise; every other argument is
+-- a metavariable and is left out**, which is what a paper does — the bar's job
+-- is to separate what must hold from what follows, and @∀ (Γ : Ctx)@ is
+-- neither. A premise is shown with its own name, so phase 172's names are what
+-- make a dependent premise readable here.
+--
+-- **Nothing about this is writable.** It is a display: the premises stand as
+-- /types/, and a derivation needs terms in those positions, so this form could
+-- not be read back as a term even in principle.
+renderRules :: Rendering -> InductiveDefinition -> [String]
+renderRules ren d = case inductiveConstructors d of
+  []  -> [nameString (inductiveName d) ++ " has no rules"]
+  cs  -> intercalate [""] (map rule cs)
+  where
+    ps = inductiveParameters d
+
+    rule c =
+      let args  = constructorArguments c
+          at i  = ps ++ take i args
+          named i e = nameOf (entryVar e) (envOf (at (i + 1)))
+          above =
+            [ named i e ++ " : " ++ paper (at i) (entryType e)
+            | (i, e) <- zip [0 :: Int ..] args
+            , isStatement (entryType e) ]
+          below = paper (ps ++ args) (constructorTarget d c)
+          width = maximum (map length (below : above))
+       in map ("  " ++) above
+            ++ ["  " ++ replicate width '-' ++ " " ++ nameString (constructorName c)]
+            ++ ["  " ++ below]
+
+    -- **A premise is an argument whose type is some judgment's statement**, and
+    -- a judgment is a grammar with a type-forming production. Nothing asks which
+    -- kind of block declared it, which is the one question the design forbids.
+    -- **The statement as a paper writes it**, falling back to the ordinary term
+    -- spelling for anything no grammar spells.
+    paper ctx t =
+      fromMaybe (renderCore ren ctx t)
+        (Build.printBare (renderingGrammars ren) (renderCore ren ctx) t)
+
+    -- **'spineOf' and not a match on 'Canonical'**: a saturated former may
+    -- still be standing as @App@s, which is phase 110's "both spellings", and
+    -- matching only the reduced one found @T-var@'s premise and missed
+    -- @T-abs@'s.
+    isStatement t = case Build.spineOf t of
+      Just (g, _) ->
+        or [ not (null (typeFormerProductions h))
+           | h <- renderingGrammars ren, grammarName h == g ]
+      Nothing -> False
+
+
 -- | @:elim ‹datatype› [‹universe›]@ — the elimination rule (§3.7).
 --
 -- Headed @elim ‹datatype› :@ rather than @‹datatype›Elim :@, because there is
@@ -1472,19 +1645,48 @@ renderDeclareError ren e = case e of
     NameTaken -> g ++ " is already declared"
     BuiltInTag -> g ++ " is one of Thena's own tags, so a language may not take its name"
     ConstructorTaken p -> g ++ "'s constructor " ++ p ++ " is already declared"
-    ContextShape -> blockAt k g ++ ": a context needs one empty and one extension production"
+    -- MS8 phase 158, §4.8. A @notation@ block extends a grammar, so both of
+    -- these are about the header rather than about a production.
+    NoSuchGrammar -> g ++ " is not a language, a context or a judgment that is declared"
+    ConstructorsUnspelled cs ->
+      blockAt k g ++ ": it declares a role, so it generates " ++ g
+        ++ "'s substitution from these productions \8212 and "
+        ++ intercalate ", " cs ++ (case cs of { [_] -> " is"; _ -> " are" })
+        ++ " a constructor of " ++ g ++ " that no production spells"
+    NotationMetavars ms ->
+      blockAt k g ++ ": it may not declare the metavariable"
+        ++ (case ms of { [_] -> " "; _ -> "s " }) ++ intercalate ", " ms
+        ++ ", because its productions are written in " ++ g ++ "'s own"
+    ContextShape -> blockAt k g ++ ": a context needs one production with no context slot and at least one with exactly one"
     -- MS6 phase 105: what generated substitution needs of a language (§4.7).
     FunctionTaken f -> g ++ "'s substitution function " ++ f ++ " is already declared"
     -- MS6 phase 107: what the generated lookup needs of a context (§5.3).
-    ContextKey xs -> blockAt k g ++ ": its extension needs exactly one name to look up, and it has "
+    ContextKey p xs -> blockAt k g ++ ": its extension " ++ p
+      ++ " needs exactly one name to look up, and it has "
       ++ (case xs of { [] -> "none"; _ -> intercalate ", " xs })
     LookupTaken f -> g ++ "'s lookup " ++ f ++ " is already declared"
-    NoVariableProduction ->
-      blockAt k g ++ ": it has binders, so it needs a production ‹x› as occurrence for a renamed binder to become"
-    VariableProductions ps ->
-      blockAt k g ++ ": " ++ intercalate ", " ps ++ " all declare an occurrence, and a language has one variable production"
+    -- **Per class since MS8 phase 155**: two occurrence productions are two
+    -- notions of a variable, which is allowed; two at one class leave a renamed
+    -- binder of that class with no term to become.
+    VariableProductions (GlobalName cls) ps ->
+      blockAt k g ++ ": " ++ intercalate ", " ps ++ " all declare an occurrence at " ++ cls
+        ++ ", and a language has one variable production per class"
+    ClassOwnedTwice (GlobalName cls) ls ->
+      blockAt k g ++ ": " ++ intercalate " and " [ l | GlobalName l <- ls ]
+        ++ " both read an occurrence at " ++ cls
+        ++ ", and this grammar reaches both, so a substitution for " ++ cls
+        ++ " has no one language to replace a name with"
     InProduction p why -> blockAt k g ++ ", production " ++ p ++ ": " ++ case why of
       NoItems -> "it has no items"
+      -- MS8 phase 171: a notation names its own arguments.
+      ParamRepeated x -> x ++ " names two of its arguments, and a name stands for one"
+      ParamUnspelled x ->
+        x ++ " is not written in the notation, so that argument could not be given"
+      ParamNotReadable x t ->
+        x ++ " names an argument of " ++ renderCore ren [] t
+          ++ ", which no notation reads by itself \8212 if it is a String, say which"
+          ++ " token class, as ( " ++ x ++ " : \8249class\8250 )"
+      NoSuchTokenClass x -> x ++ " is not a declared token class"
       NotAMetavariable x -> x ++ " is not a metavariable"
       NotAnArgument x -> x ++ " is not an argument of " ++ p
       OccurrenceBinds x -> x ++ " is an occurrence, so it binds nothing"
@@ -1493,7 +1695,9 @@ renderDeclareError ren e = case e of
       OccurrenceNotString x s -> "an occurrence must be a String, and " ++ x ++ " is " ++ sortPhrase s
       ScopesDiffer x -> x ++ " is written with different binders free in it"
       OccurrenceNotAlone x -> "the occurrence " ++ x ++ " must be the production's only argument, because substitution replaces the whole of it"
-      ScopeElsewhere x -> "a binder is free in " ++ x ++ ", which is not of this language, so substitution could not rename in it"
+      ScopeElsewhere x (GlobalName l) (GlobalName cls) ->
+        "a binder is free in " ++ x ++ ", which is of " ++ l ++ ", and nothing "
+          ++ l ++ " reaches occurs at " ++ cls ++ ", so there is nothing there to rename"
       NotationBinds x -> x ++ " is written as a binding form, and a judgment's notation binds nothing"
       -- MS7 phase 127. The message names the glyph rather than describing it,
       -- because the author has to find it in their own source.
@@ -1503,6 +1707,29 @@ renderDeclareError ren e = case e of
       ReservedClass x ->
         "the token class " ++ x ++ " would read the reserved " ++ [Earley.placeholderChar]
           ++ ", which is how a part of a term that is not written yet is shown"
+      -- MS8 phase 158, §4.8: what a function production claims and a
+      -- constructor production does not.
+      NotADeclaredFunction -> p ++ " is not a declared function"
+      FunctionHasNotation -> p ++ " is already a production of a grammar"
+      FunctionArity takes slots ->
+        p ++ " takes " ++ plural takes "argument" ++ " and the notation has "
+          ++ plural slots "slot"
+      -- **The type as the author wrote it, reduced** (MS8 phase 160): it may not
+      -- be a datatype at all, and a stand-in name told them nothing they could
+      -- act on. @NotIn returns Type₀, not a Ctx@ says which of the two kinds of
+      -- thing they named.
+      FunctionSlot x takes (GlobalName is) ->
+        p ++ " takes " ++ renderCore ren [] takes ++ " where " ++ x ++ " is a " ++ is
+      FunctionResult r -> p ++ " returns " ++ renderCore ren [] r ++ ", not a " ++ g
+      FunctionBinds x -> x ++ " is written as a binding form, and an application binds nothing"
+      FunctionMetadata -> p ++ " is a function, so there is no constructor for the metadata to be about"
+      UniverseSlot x lvl ->
+        x ++ " is a slot at " ++ universeSpelling lvl
+          ++ ", and this block generates its arguments' types from its slots \8212 so declare the "
+          ++ "datatype and give it notation instead"
+      RolesAfterTheGrammar gr ->
+        "a role belongs to the block that installs the grammar, and " ++ nameString gr
+          ++ "'s is installed already, with its substitution generated from the roles it had then"
     -- MS6 phase 108, §6.2–6.4.
     InRule r why -> blockAt k g ++ ", rule " ++ r ++ ": " ++ case why of
       RuleUnparsed part what text failure ->
@@ -1680,6 +1907,9 @@ siteWord site = case site of
   TheMethod k        -> "in method " ++ show (k + 1)
   TheIndex k         -> "in index " ++ show (k + 1)
   TheTarget          -> "in the target"
+  TheClaimed         -> "in the claimed type"
+  TheActual          -> "in the body's own type"
+  TheTrusted         -> "in the trusted body"
 
 renderClash :: Rendering -> Clash -> String
 renderClash ren clash = case clash of
@@ -1977,6 +2207,9 @@ blockAt k g = case k of
   LanguageBlock -> "in the grammar of " ++ g
   ContextBlock  -> "in the context " ++ g
   JudgmentBlock -> "in the judgment " ++ g
+  -- MS8 phase 158: the one block that names a grammar it did not declare, so
+  -- the phrase says the notation is /for/ it.
+  NotationBlock -> "in the notation for " ++ g
 
 -- | @an Int@, @a Ty@ — what an argument ranges over, with its article.
 sortPhrase :: Sort -> String
@@ -1985,6 +2218,7 @@ sortPhrase s = article (nameString n)
     n = case s of
       OfLanguage g -> g
       OfClass _ t _ -> t
+      OfUniverse k -> GlobalName (universeSpelling k)
     article w = (if take 1 w `elem` map (: []) "AEIOU" then "an " else "a ") ++ w
 
 -- | A reading, as the production names applied to their slots (MS6 phase

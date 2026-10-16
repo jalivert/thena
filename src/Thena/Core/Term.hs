@@ -33,6 +33,7 @@ module Thena.Core.Term
   , instantiate
   , freeVars
   , globalsIn
+  , holdsTrusted
   , beyond
   , substLevelsIn
   , substLevelsInScope
@@ -169,6 +170,20 @@ data Core
       , indices    :: [Core]
       , target     :: Core
       }
+  | Trusted Core Core Core
+    -- ^ @trusted claimed actual body@ (MS8 phase 149): a term whose type is
+    -- /asserted/ to be @claimed@ while @body@ was checked at @actual@. The
+    -- second exception to the closed core term language, after 'Primitive'.
+    --
+    -- **@actual@ is derived and the user never writes it**, the way 'Lam'
+    -- always carries its domain while a surface lambda's annotation is
+    -- optional: elaboration infers the body's type, because nothing can type
+    -- this node without it.
+    --
+    -- **The pair @(claimed, actual)@ is the obligation, written down with both
+    -- halves visible** — his observation, 2026-10-05. As the names in them
+    -- instantiate the two converge and the node contracts away, so @actual@ is
+    -- what says whether the trust is still load-bearing.
   deriving (Show)
 
 -- | Alpha-equivalence (§3.5).
@@ -215,6 +230,7 @@ instance Eq Core where
   Canonical f ks as == Canonical g ls bs = f == g && ks == ls && as == bs
   Eliminate d ks ps m ms is t == Eliminate d' ls ps' m' ms' is' t' =
     d == d' && ks == ls && ps == ps' && m == m' && ms == ms' && is == is' && t == t'
+  Trusted c a b  == Trusted c' a' b'  = c == c' && a == a' && b == b'
   _ == _ = False
 
 -- | Abstract a free variable: every @'Free' x@ becomes the index of the binder
@@ -237,6 +253,7 @@ close x = MkScope . go 0
       Eliminate dn ls ps m ms is tgt ->
         Eliminate dn ls (map (go d) ps) (go d m) (map (go d) ms)
                   (map (go d) is) (go d tgt)
+      Trusted c a b  -> Trusted (go d c) (go d a) (go d b)
 
     under :: Int -> Scope Core -> Scope Core
     under d (MkScope b) = MkScope (go (d + 1) b)
@@ -268,6 +285,7 @@ instantiate v (MkScope body) = go 0 body
       Eliminate dn ls ps m ms is tgt ->
         Eliminate dn ls (map (go d) ps) (go d m) (map (go d) ms)
                   (map (go d) is) (go d tgt)
+      Trusted c a b  -> Trusted (go d c) (go d a) (go d b)
 
     under :: Int -> Scope Core -> Scope Core
     under d (MkScope b) = MkScope (go (d + 1) b)
@@ -301,6 +319,7 @@ freeVars = nub . go
       Canonical _ _ as              -> concatMap go as
       Eliminate _ _ ps m ms is tgt  ->
         concatMap go ps ++ go m ++ concatMap go ms ++ concatMap go is ++ go tgt
+      Trusted c a b                 -> go c ++ go a ++ go b
 
 -- | The global names a term mentions, in order of first occurrence, without
 -- repeats.
@@ -310,6 +329,29 @@ freeVars = nub . go
 -- it — "does the datatype being declared occur in this constructor argument's
 -- domain?" is exactly this question, and asking it by opening every binder
 -- would mint display variables for no reason (§3.7).
+-- | Does this term hold a 'Trusted' node anywhere inside it? (MS8 phase 151.)
+--
+-- **Here for 'globalsIn'\'s reason**: it must see inside a 'Scope', and
+-- @MkScope@ is not exported. Asking it by opening every binder would mint a
+-- display variable for no reason (§3.7) — and in this case for a very definite
+-- reason not to, since what wants this is a walk whose whole cost is the
+-- variables it would otherwise mint.
+holdsTrusted :: Core -> Bool
+holdsTrusted t = case t of
+  Bound _                      -> False
+  Free _                       -> False
+  Global _ _                   -> False
+  Universe _                   -> False
+  Primitive _                  -> False
+  Trusted {}                   -> True
+  Pi _ s (MkScope b)           -> holdsTrusted s || holdsTrusted b
+  Lam _ s (MkScope b)          -> holdsTrusted s || holdsTrusted b
+  App f x                      -> holdsTrusted f || holdsTrusted x
+  Let _ v s (MkScope b)        -> any holdsTrusted [v, s, b]
+  Canonical _ _ as             -> any holdsTrusted as
+  Eliminate _ _ ps m ms is tgt ->
+    any holdsTrusted (ps ++ [m] ++ ms ++ is ++ [tgt])
+
 globalsIn :: Core -> [GlobalName]
 globalsIn = nub . go
   where
@@ -327,6 +369,7 @@ globalsIn = nub . go
       Canonical g _ as              -> g : concatMap go as
       Eliminate d _ ps m ms is tgt  ->
         d : (concatMap go ps ++ go m ++ concatMap go ms ++ concatMap go is ++ go tgt)
+      Trusted c a b                 -> go c ++ go a ++ go b
 
 -- | Apply a level substitution everywhere in a term (MS3 phase 30).
 --
@@ -359,6 +402,7 @@ substLevelsIn sub = go
       Eliminate dn ls ps m ms is tgt ->
         Eliminate dn (map at ls) (map go ps) (go m) (map go ms)
                   (map go is) (go tgt)
+      Trusted c a b  -> Trusted (go c) (go a) (go b)
 
 -- | Give every reference to @g@ that carries no level arguments these ones
 -- (MS3, review of the milestone).
@@ -393,6 +437,7 @@ referencesAt g ls = go
       Canonical f ks as   -> Canonical f ks (map go as)
       Eliminate d ks ps m ms is tgt ->
         Eliminate d ks (map go ps) (go m) (map go ms) (map go is) (go tgt)
+      Trusted c a b       -> Trusted (go c) (go a) (go b)
 
 -- | The same, under a binder.
 --
@@ -427,6 +472,7 @@ levelMetasIn = nub . concatMap metasIn . go
       Eliminate _ ls ps m ms is tgt ->
         ls ++ concatMap go ps ++ go m ++ concatMap go ms
            ++ concatMap go is ++ go tgt
+      Trusted c a b                 -> go c ++ go a ++ go b
 
 -- | A counter value greater than every variable given.
 --

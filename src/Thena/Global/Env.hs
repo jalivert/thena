@@ -244,11 +244,34 @@ data ConstructorDefinition = ConstructorDefinition
   deriving (Eq, Show)
 
 -- | What an argument of a constructor is to the object language it models
--- (@ms6\/SPEC.md@ §4.7).
+-- (@spec\/object-language.md@ §4.7).
+--
+-- **'Occurrence' and 'Binder' name their class, and nothing else here does —
+-- MS8 phase 153, `~5k3mg`'s design.** A language may read more than one kind
+-- of name, so "this argument is an occurrence" is not enough to say which
+-- names it is an occurrence of: F-sub's @Λ X <: T . t@ binds a type variable
+-- from a term production, and @λ x : T . t@ binds a term variable in the same
+-- grammar. The class is the name of the @Token String@ class the slot reads —
+-- @x@, @X@ — so two occurrence productions at two classes are two different
+-- kinds of variable and generated substitution can tell them apart.
+--
+-- **'Scope' is deliberately untouched.** It points at binder argument
+-- positions, and those now carry their own classes, so putting a class here
+-- too would be a second encoding of what the binders already say — and two
+-- encodings can disagree (§3.7's rule, the same one that keeps recursive
+-- arguments unstored).
+--
+-- **'Thena.Core.Term.Core' is untouched as well, and that is the whole point
+-- of the design.** A class erases to 'String': every name is still a @String@
+-- field of a @Canonical@, the class lives only here on the declaration, and
+-- the kernel never sees one. Leaving the erasure in place is his ruling —
+-- `~cg49p` carries the investigation.
 data ArgRole
   = Plain
-  | Occurrence        -- ^ an occurrence of an object identifier
-  | Binder            -- ^ binds in the arguments that list it
+  | Occurrence GlobalName
+    -- ^ an occurrence of an object identifier of this class
+  | Binder GlobalName
+    -- ^ binds, at this class, in the arguments that list it
   | Scope [Int]       -- ^ the binder arguments free in this one, by position
   deriving (Eq, Show)
 

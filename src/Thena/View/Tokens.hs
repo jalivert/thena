@@ -161,6 +161,7 @@ kindOf t = case t of
   TLet          -> AKeyword
   TIn           -> AKeyword
   TElim         -> AKeyword
+  TTrusted      -> AKeyword
   TWhere        -> AKeyword
   TData         -> AKeyword
   TModule       -> AKeyword
@@ -169,6 +170,8 @@ kindOf t = case t of
   TLanguage     -> AKeyword
   TContext      -> AKeyword
   TJudgment     -> AKeyword
+  -- MS8 phase 158: the fourth block word (§4.8).
+  TNotation     -> AKeyword
   TWhen         -> AKeyword
 
   TQuery        -> AHole

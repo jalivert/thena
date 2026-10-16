@@ -69,6 +69,18 @@ header =
   , ""
   ]
 
+-- | A judgment over a derivation, which only a hand-written declaration can
+-- state (MS8 phase 171's notation, `~wkv37`): @Valid@'s fourth argument is a
+-- @typing@ derivation, so a rule wanting one has to name a premise to reach it.
+valid :: [String]
+valid =
+  [ "data Valid : \8704 (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Type\8320 where"
+  , "  { validAny : \8704 (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Valid G M T d }"
+  , ""
+  , "notation Valid G M T d -> \8866 G , M , T by d valid where"
+  , ""
+  ]
+
 typing :: [String]
 typing =
   [ "judgment typing = Γ ⊢ M : T where"
@@ -201,7 +213,7 @@ generated =
       s <- loaded (header ++ typing)
       said s ":show typing" @?=
         [ "data typing : Ctx -> LC -> Ty -> Type₀ where"
-        , "  { T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> Ctx-in`${x} : ${T} ∈ ${Γ}` -> typing`${Γ} ⊢ ${LC`${x}`} : ${T}`"
+        , "  { T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> extend-in`${x} : ${T} ∈ ${Γ}` -> typing`${Γ} ⊢ ${LC`${x}`} : ${T}`"
         , "  ; T-abs : ∀ (Γ : Ctx) (x : String) (S : Ty) (E : LC) (T : Ty) -> typing`${Γ} , ${x} : ${S} ⊢ ${E} : ${T}` -> typing`${Γ} ⊢ ( λ ${x} : ${S} . ${E} ) : ( ${S} -> ${T} )`"
         , "  ; T-app : ∀ (Γ : Ctx) (M : LC) (S : Ty) (T : Ty) (N : LC) -> typing`${Γ} ⊢ ${M} : ( ${S} -> ${T} )` -> typing`${Γ} ⊢ ${N} : ${S}` -> typing`${Γ} ⊢ ( ${M} ${N} ) : ${T}` }"
         ]
@@ -263,11 +275,126 @@ premises =
         [ "data twice : Ctx -> LC -> Ty -> Type₀ where"
         , "  { B : ∀ (Γ : Ctx) (M : LC) (T : Ty) -> typing`${Γ} ⊢ ${M} : ${T}` -> typing`${Γ} ⊢ ${M} : ${T}` -> twice`${Γ} ⊢ ${M} :: ${T}` }" ]
       argumentNames s "twice" "B" @?= ["Γ", "M", "T", "left", "d2"]
+    -- **A NAMED PREMISE IS IN SCOPE FOR EVERY PREMISE AFTER IT** (MS8 phase 172,
+    -- across lines; phase 173 within one. HIS
+    -- ruling of 2026-10-16). Until then a premise name was writable nowhere: the
+    -- grammar every premise was parsed against was fixed before any name was
+    -- bound, so @by p1@ was refused as @p1 is not a metavariable@. **This is
+    -- what lets a rule state a dependence between its own premises**, which is
+    -- what a hand-written judgment over a derivation needs — and the paper's
+    -- @D :: J@ and \"by IH\" are the same move.
+  , testCase "a later premise may be written over an earlier premise's name" $ do
+      s <- loaded (header ++ typing ++ valid ++
+        [ "judgment check = Γ ⊢ M ⇐ T where", ""
+        , "  CheckRule:  p1 : Γ ⊢ M : T"
+        , "              p2 : ⊢ Γ , M , T by p1 valid"
+        , "              --------------------------"
+        , "              Γ ⊢ M ⇐ T", "" ])
+      -- **The second premise's type mentions the first premise**, which is the
+      -- whole of the phase: the fourth argument is the derivation @p1@, and the
+      -- fifth is a @Valid@ about that very derivation.
+      said s ":show check" !! 1
+        @?= "  { CheckRule : ∀ (Γ : Ctx) (M : LC) (T : Ty) (p1 : typing`${Γ} ⊢ ${M} : ${T}`) -> Valid`⊢ ${Γ} , ${M} , ${T} by ${p1} valid` -> check`${Γ} ⊢ ${M} ⇐ ${T}` }"
+      argumentNames s "check" "CheckRule" @?= ["Γ", "M", "T", "p1", "p2"]
+    -- **The conclusion is parsed with every name in scope too**, and a premise
+    -- at a bare type is where that is reachable: a judgment's own statement has
+    -- slots at grammars, so a derivation name has nowhere to go in one.
+  , testCase "the conclusion may be written over a premise's name" $ do
+      s <- loaded (header ++
+        [ "judgment fits = Γ ⊩ M : T where", ""
+        , "  F-any:  m : LC"
+        , "          ------------"
+        , "          Γ ⊩ m : T", "" ])
+      said s ":show fits" !! 1
+        @?= "  { F-any : ∀ (Γ : Ctx) (T : Ty) (m : LC) -> fits`${Γ} ⊩ ${m} : ${T}` }"
+      -- @M@ is not quantified: the conclusion's term slot is the named premise,
+      -- so there is no metavariable there to collect.
+      argumentNames s "fits" "F-any" @?= ["Γ", "T", "m"]
+    -- **The same line works too, and it is the same parse** (MS8 phase 173, HIS
+    -- instruction: making it work between lines and not within one is
+    -- unprincipled). A line is a list of premises told apart only by parsing, so
+    -- the split is taken from the chart — every prefix that completes a premise
+    -- is tried, longest first, with that premise's name in scope for the rest.
+  , testCase "and on the same line, which is one parse" $ do
+      s <- loaded (header ++ typing ++ valid ++
+        [ "judgment oneline = Γ ⊢ M ⇚ T where", ""
+        , "  S:  p1 : Γ ⊢ M : T    p2 : ⊢ Γ , M , T by p1 valid"
+        , "      --------------------------"
+        , "      Γ ⊢ M ⇚ T", "" ])
+      said s ":show oneline" !! 1
+        @?= "  { S : ∀ (Γ : Ctx) (M : LC) (T : Ty) (p1 : typing`${Γ} ⊢ ${M} : ${T}`) -> Valid`⊢ ${Γ} , ${M} , ${T} by ${p1} valid` -> oneline`${Γ} ⊢ ${M} ⇚ ${T}` }"
+      argumentNames s "oneline" "S" @?= ["Γ", "M", "T", "p1", "p2"]
+    -- **@:judgment@ shows a rule back in the form it was written in** (MS8
+    -- phase 174). A @judgment@ block's rules go in above a bar and nothing ever
+    -- showed them again: @:show@ gives the constructor's telescope, which is
+    -- what the declaration means and not what it looked like.
+    --
+    -- **An argument at a judgment's statement is a premise; every other
+    -- argument is a metavariable and is left out**, which is what a paper does.
+    -- A premise carries its own name, so phase 172's names are what make a
+    -- dependent premise readable here.
+  , testCase "a judgment shows its rules above the bar" $ do
+      s <- loaded (header ++ typing)
+      said s ":judgment typing" @?=
+        [ "  d1 : x : T ∈ Γ"
+        , "  -------------- T-var"
+        , "  Γ ⊢ x : T"
+        , ""
+        , "  d1 : Γ , x : S ⊢ E : T"
+        , "  -------------------------------- T-abs"
+        , "  Γ ⊢ ( λ x : S . E ) : ( S -> T )"
+        , ""
+        , "  d1 : Γ ⊢ M : ( S -> T )"
+        , "  d2 : Γ ⊢ N : S"
+        , "  ----------------------- T-app"
+        , "  Γ ⊢ ( M N ) : T" ]
+    -- **The statement is written as a paper writes it, not as a term.**
+    -- @typing`${Γ} ⊢ ${M} : ${T}`@ is the term spelling and it round-trips,
+    -- which is why @:show@ keeps it; above a bar none of that punctuation
+    -- belongs, and nothing reads this form back.
+  , testCase "and a hand-written judgment's rules the same way" $ do
+      s <- loaded (header ++ typing ++ valid)
+      said s ":judgment Valid" @?=
+        [ "  d : G ⊢ M : T"
+        , "  ---------------------- validAny"
+        , "  ⊢ G , M , T by d valid" ]
     -- x is a metavariable, so `x : T ∈ Γ` is never a premise named x.
   , testCase "a lookup premise is not read as a premise named by its metavariable" $ do
       s <- loaded (header ++ typing)
       said s ":show typing" !! 1
-        @?= "  { T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> Ctx-in`${x} : ${T} ∈ ${Γ}` -> typing`${Γ} ⊢ ${LC`${x}`} : ${T}`"
+        @?= "  { T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> extend-in`${x} : ${T} ∈ ${Γ}` -> typing`${Γ} ⊢ ${LC`${x}`} : ${T}`"
+    -- **A PREMISE IS AN ARGUMENT'S TYPE, SO ANY TYPE MAY STAND ABOVE THE BAR**
+    -- (MS8 phase 160, `~8b8gz`, `~z8n28`). A rule is a constructor, an argument
+    -- may be at any type, and @LC@ is its own notation — so a rule may take a
+    -- term of @LC@ as a premise. **Before this the premise position admitted a
+    -- grammar by the kind of block that declared it**, which is the one question
+    -- the design forbids, and nothing but a judgment could stand here.
+  , testCase "a premise may be a plain type, which is the nullary notation" $ do
+      s <- loaded (header ++ typing ++
+        [ "judgment odd = Γ ⊩ M : T where", ""
+        , "  O-term:  LC    Γ ⊢ M : T"
+        , "           -------------------"
+        , "           Γ ⊩ M : T", "" ])
+      said s ":show odd" @?=
+        [ "data odd : Ctx -> LC -> Ty -> Type₀ where"
+        , "  { O-term : ∀ (Γ : Ctx) (M : LC) (T : Ty) -> LC -> typing`${Γ} ⊢ ${M} : ${T}` -> odd`${Γ} ⊩ ${M} : ${T}` }" ]
+      -- The type mentions no metavariable, so it adds nothing to the implicit
+      -- ∀ and the argument it binds is an unnamed premise like any other.
+      argumentNames s "odd" "O-term" @?= ["Γ", "M", "T", "d1", "d2"]
+    -- **A universe is spelled too — HIS ruling, 2026-10-11, zero-based** — and
+    -- a premise at one is refused for a reason that is not about notation at
+    -- all: a generated judgment's family is fixed at @Type₀@ and an argument
+    -- quantifying over @Type₀@ lives in @Type₁@. **So the restriction on the
+    -- generated path falls out of the signature rather than being imposed at a
+    -- position**, which is what makes the premise position need no rule of its
+    -- own.
+  , refusal "a universe may be written above the bar, and a generated judgment cannot hold one"
+      (typing ++
+        [ "judgment big = Γ ⊫ M : T where", ""
+        , "  B-any:  𝕌₀    Γ ⊢ M : T"
+        , "          -------------------"
+        , "          Γ ⊫ M : T", "" ])
+      "refused: the argument d1 of B-any lives in Type₁, which the datatype's own Type₀ does not contain"
   , refusal "a premise named like a metavariable"
       (typing ++ ["judgment bad = M bad where", "", "  B:  M' : · ⊢ M : ι", "      ---", "      M bad", ""])
       "refused: in the judgment bad, rule B: a premise may not be named M', which is a metavariable"
@@ -278,10 +405,16 @@ premises =
 
 substitution :: [TestTree]
 substitution =
-  [ testCase "E[x->N] is LC-subst" $ do
+  [ -- **The elaborated constructor is unchanged by MS8 phase 159 and the
+    -- PRINTING is not.** @E[x->N]@ still elaborates to @LC-subst-x E x N@, with
+    -- the same implicit quantification in the same order; what moved is that the
+    -- bracket form is now a generated @notation@ production of @LC@ (§4.8), so
+    -- the printer spells the stuck application instead of splicing it. Before
+    -- 159 the tail of this line read @${LC-subst-x E x N}@.
+    testCase "E[x->N] is LC-subst-x" $ do
       s <- loaded (header ++ valueAndStep)
       said s ":show step" !! 1
-        @?= "  { E-beta : ∀ (N : LC) (x : String) (T : Ty) (E : LC) -> value`${N} value` -> step`( ( λ ${x} : ${T} . ${E} ) ${N} ) --> ${LC-subst E x N}`"
+        @?= "  { E-beta : ∀ (N : LC) (x : String) (T : Ty) (E : LC) -> value`${N} value` -> step`( ( λ ${x} : ${T} . ${E} ) ${N} ) --> ${E} [ ${x} -> ${N} ]`"
   , testCase "a list is simultaneous, LC-subst-all, and chained brackets are sequential" $ do
       s <- loaded (header ++
         [ "judgment sub = M ~> N where", ""
@@ -289,7 +422,10 @@ substitution =
         , "      M ~> E[x->M, x'->N][x1->N']", "" ])
       said s ":show sub" @?=
         [ "data sub : LC -> LC -> Type₀ where"
-        , "  { S : ∀ (M : LC) (E : LC) (x : String) (x' : String) (N : LC) (x1 : String) (N' : LC) -> sub`${M} ~> ${LC-subst (LC-subst-all {0 0 0} E (cons {0} (And {0 0} String LC) (both {0 0} String LC x M) (cons {0} (And {0 0} String LC) (both {0 0} String LC x' N) (nil {0} (And {0 0} String LC))))) x1 N'}` }" ]
+          -- The outer bracket prints in the notation; the inner @L-subst-all@
+          -- is spliced, because a comma list stays rule-level sugar (§6.3) and
+          -- has no production to print back as.
+        , "  { S : ∀ (M : LC) (E : LC) (x : String) (x' : String) (N : LC) (x1 : String) (N' : LC) -> sub`${M} ~> ${LC-subst-all {0 0 0} E (cons {0} (And {0 0} String LC) (both {0 0} String LC x M) (cons {0} (And {0 0} String LC) (both {0 0} String LC x' N) (nil {0} (And {0 0} String LC))))} [ ${x1} -> ${N'} ]` }" ]
     -- §6.3's CHECK: the left of -> is a binder-sorted name.
   , refusal "the left of -> is not a name"
       ["judgment sub = M ~> N where", "", "  S:  ---", "      M ~> E[M->N]", ""]
@@ -332,12 +468,12 @@ derivations =
   [ testCase "a typing derivation checks against its judgment literal" $ do
       _ <- loaded (header ++ typing ++
         [ "idTyped : typing`· ⊢ ( λ x : ι . x ) : ( ι -> ι )`"
-        , "idTyped = T-abs empty \"x\" base (var \"x\") base (T-var \"x\" base (extend empty \"x\" base) (Ctx-here empty \"x\" base))" ])
+        , "idTyped = T-abs empty \"x\" base (var \"x\") base (T-var \"x\" base (extend empty \"x\" base) (extend-here empty \"x\" base))" ])
       pure ()
   , testCase "one at the wrong type is refused" $ do
       r <- load (header ++ typing ++
         [ "wrong : typing`· ⊢ ( λ x : ι . x ) : ι`"
-        , "wrong = T-abs empty \"x\" base (var \"x\") base (T-var \"x\" base (extend empty \"x\" base) (Ctx-here empty \"x\" base))" ])
+        , "wrong = T-abs empty \"x\" base (var \"x\") base (T-var \"x\" base (extend empty \"x\" base) (extend-here empty \"x\" base))" ])
       either (const (pure ())) (const (assertFailure "a derivation at the wrong type loaded")) r
   , testCase "E-beta's right-hand side is computed by substitution" $ do
       _ <- loaded (header ++ valueAndStep ++
@@ -358,7 +494,9 @@ refused =
       "refused: in the judgment bad, rule B: p is not a metavariable"
   , refusal "a conclusion of another judgment"
       (valueAndStep ++ ["judgment bad = M bad where", "", "  B:  ---", "      M value", ""])
-      "refused: in the judgment bad, rule B: its conclusion `M value` is not a bad judgment: unexpected 'v' at character 3, expecting bad or ["
+      -- The order of the two is the order of the rules in the grammar, and MS8
+      -- phase 159 moved the bracket into the @LC@ grammar's own productions.
+      "refused: in the judgment bad, rule B: its conclusion `M value` is not a bad judgment: unexpected 'v' at character 3, expecting [ or bad"
     -- M is a metavariable, so it is not reported as one that is not: the
     -- conclusion simply does not start the way a typing judgment does.
   , refusal "a conclusion that starts with a metavariable in the wrong place"

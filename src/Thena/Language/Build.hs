@@ -22,6 +22,7 @@ module Thena.Language.Build
   , skeletonOf
   , printTerm
   , printRegion
+  , printBare
   , production
   , languageNames
   , productionNames
@@ -44,12 +45,15 @@ import Thena.Language.Earley (Piece (..), Tree (..), placeholderChar)
 import qualified Thena.Language.Earley as Earley
 import Thena.Language.Grammar
   ( Argument (..)
+  , TypeReading (..)
+  , typeReading
   , GProduction (..)
   , Grammar (..)
   , Item (..)
   , Sort (..)
   , earleyRules
   )
+import Thena.Core.Level (levelOfNat)
 import Thena.Syntax.Lexer (rawEscapes)
 import Thena.Instral.Pattern (Skeleton (..), Slot (..))
 import Thena.Language.Regex (matches)
@@ -85,6 +89,16 @@ buildCore gs splices = build
       -- reporting the glyph as a reading the production does not take.
       (OfLanguage _, PlaceholderAt _) -> Left (Incomplete (argumentName a))
       (OfLanguage _, _)  -> build child
+      -- **A slot at a universe is filled by a type** (MS8 phase 160), which is
+      -- the one place a slot's content is a type rather than a term of one —
+      -- and a term of a universe /is/ a type, so this is the rule rather than
+      -- an exception to it.
+      (OfUniverse _, PlaceholderAt _) -> Left (Incomplete (argumentName a))
+      (OfUniverse _, Node n kids) | Just r <- typeReading n kids -> case r of
+        TypeCalled l  -> Right (Global (GlobalName l) [])
+        AtUniverse k  -> Right (Universe (levelOfNat k))
+        TypeInside t  -> build t
+      (OfUniverse _, _) -> Left (NotForSlot (argumentName a) (shapeOf child))
 
     supplied k = case drop k splices of
       e : _ -> Right e
@@ -121,6 +135,12 @@ buildSurface gs splices = build
       (OfClass _ t _, _) -> SurfaceLiteral <$> literal name (argumentName a) t child
       (OfLanguage _, PlaceholderAt _) -> Left (Incomplete (argumentName a))
       (OfLanguage _, _) -> build child
+      (OfUniverse _, PlaceholderAt _) -> Left (Incomplete (argumentName a))
+      (OfUniverse _, Node n kids) | Just r <- typeReading n kids -> case r of
+        TypeCalled l  -> Right (SurfaceName l)
+        AtUniverse k  -> Right (SurfaceUniverse k)
+        TypeInside t  -> build t
+      (OfUniverse _, _) -> Left (NotForSlot (argumentName a) (shapeOf child))
 
     supplied k = case drop k splices of
       e : _ -> Right e
@@ -155,6 +175,11 @@ skeletonOf gs holes = go
       (OfClass _ t _, _) -> SLit <$> literal name (argumentName a) t child
       (OfLanguage _, PlaceholderAt _) -> Left (Incomplete (argumentName a))
       (OfLanguage _, _)  -> go child
+      -- **A skeleton is grammar-free and has nowhere to put a type** (MS8 phase
+      -- 160): 'Skeleton' holds nodes, literals and holes, and a slot at a
+      -- universe is filled by neither. Refused here rather than crashed, and it
+      -- is the matcher's path, not elaboration's.
+      (OfUniverse _, _) -> Left (NotForSlot (argumentName a) (shapeOf child))
 
     hole what k = case drop k holes of
       h : _ -> Right (SHole what h)
@@ -214,6 +239,36 @@ printTerm gs render t = do
 printRegion :: [Grammar] -> (Core -> String) -> Core -> Maybe String
 printRegion gs render t = settle gs render =<< draft gs t
 
+-- | **The paper's form: no tag, no backticks, and no @${\8230}@ round a splice**
+-- (MS8 phase 174).
+--
+-- @typing`${\915} \8866 ${M} : ${T}`@ is the /term/ spelling and it round-trips,
+-- which is why it is what 'printTerm' gives. A rule written above a bar in a
+-- paper has none of that punctuation, and nothing read it back, so this walks
+-- the same 'Draft' and writes only the text: terminals as themselves, a slot's
+-- child in place.
+--
+-- **It is deliberately not inverse to parsing**, so nothing may read it: a
+-- metavariable and a term spliced into the same position come out alike. That
+-- is exactly what a paper does, and it is why this is separate from
+-- 'printTerm' rather than a flag on it \8212 'laid' and 'settled' write the text
+-- the round-trip check depends on, and must keep writing it.
+printBare :: [Grammar] -> (Core -> String) -> Core -> Maybe String
+printBare gs render t = bare <$> draft gs t
+  where
+    bare d = case d of
+      DToken w   -> w
+      DForeign c -> render c
+      DFenced _ c inner -> maybe (render c) bare (Just inner)
+      DNode p _ children _ ->
+        unwords (snd (foldl step (children, []) (gproductionItems p)))
+        where
+          step (rest, out) i = case i of
+            Terminal w -> (rest, out ++ [w])
+            Slot {} -> case rest of
+              c : more -> (more, out ++ [bare c])
+              []       -> (rest, out)
+
 -- | A term laid out for printing, before it is known where the fences go.
 data Draft
   = DNode GProduction GlobalName [Draft] Core
@@ -250,6 +305,11 @@ draft gs term = do
         pure $ case sort of
           OfClass _ _ re -> token re a
           OfLanguage _   -> maybe (DForeign a) id (draft gs a)
+          -- **A type drafted in a universe slot is foreign to every grammar**
+          -- (MS8 phase 160): it is a type rather than a reading of some
+          -- language, so there is no production to draw it from and the printer
+          -- falls back to the term as it stands.
+          OfUniverse _   -> DForeign a
   if length args == length names then Just () else Nothing
   children <- traverse slotOf [ (x, s) | Slot x s _ <- gproductionItems p ]
   pure (DNode p (grammarName g) children term)

@@ -159,6 +159,20 @@ data Surface
     --
     -- **No level arguments.** A use writes them in the development calculus and
     -- phase 44 decides how, or whether, they are written here.
+  | SurfaceTrusted Surface Surface
+    -- ^ @trusted T e@ (MS8 phase 150) — **two operands, where
+    -- 'Thena.Core.Term.Trusted' has three.** The third is the type @e@ was
+    -- actually checked at, and **the user neither knows nor writes it**: it is
+    -- derived, so elaboration claims a hole for it and the body's own
+    -- elaboration solves it. His ruling, 2026-10-05, and the house pattern — a
+    -- surface lambda's annotation is optional where @Core@'s 'Lam' always
+    -- carries its domain.
+    --
+    -- **@trusted _ e@ needs nothing special.** The type position takes an
+    -- ordinary 'SurfacePlaceholder', and elaboration solves it from the goal or
+    -- leaves the hole standing, exactly as everywhere else — **treating that
+    -- position as special would be the special case**, and he settled it by not
+    -- treating it as a question.
   deriving (Eq, Show)
 
 -- | A piece of a tagged term literal (MS6 phase 104).
@@ -277,6 +291,7 @@ blocksIn t = case t of
   SurfaceArrow a b    -> blocksIn a ++ blocksIn b
   SurfaceLet _ mt v b -> maybe [] blocksIn mt ++ blocksIn v ++ blocksIn b
   SurfaceAnnot e ty   -> blocksIn e ++ blocksIn ty
+  SurfaceTrusted ty e -> blocksIn ty ++ blocksIn e
   SurfaceElim _ ls m is ms tg ->
     concatMap blocksIn ls ++ blocksIn m ++ concatMap blocksIn is
       ++ concatMap blocksIn ms ++ blocksIn tg

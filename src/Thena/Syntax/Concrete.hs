@@ -94,6 +94,16 @@ data Raw
     -- ^ @elim d (params) motive (methods) (indices) target@ (§2.6, phase 7) —
     -- positional, and in exactly 'Thena.Core.Term.Core''s own field order for
     -- 'Thena.Core.Term.Eliminate', so where a field goes needs no name.
+  | RawTrusted Raw Raw Raw
+    -- ^ @trusted claimed actual body@ (MS8 phase 150) — the development
+    -- calculus's spelling of 'Thena.Core.Term.Trusted', with all three fields
+    -- written.
+    --
+    -- **Three, where the surface writes two**, and that is the point of there
+    -- being two grammars: @actual@ is derived, so a /surface/ term leaves it to
+    -- elaboration ('Thena.Surface.Concrete.SurfaceTrusted'), and the development
+    -- calculus is the level at which every field of a core term is written down.
+    -- Without this production the printer's output could not be read back.
   deriving (Eq, Show)
 
 -- | A piece of a tagged term literal: text, or a term spliced into a slot.
@@ -184,6 +194,7 @@ splices t = case t of
   RawElim d _ ps m ms is tg ->
     named d ++ concatMap splices ps ++ splices m ++ concatMap splices ms
       ++ concatMap splices is ++ splices tg
+  RawTrusted c a b   -> splices c ++ splices a ++ splices b
   -- **A region's splices are the terms it holds** (MS6 phase 110), in the
   -- order they were written, which is the order they fill the reading's slots.
   RawObject _ _ ps   -> concat [ splices e | RawSpliced e <- ps ]

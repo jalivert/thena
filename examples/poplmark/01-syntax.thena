@@ -1,0 +1,114 @@
+-- System F-sub: its syntax, written as a grammar.
+--
+-- This is the POPLMark challenge's object of study (Aydemir et al.,
+-- "Mechanized Metatheory for the Masses", TPHOLs 2005). The types and terms
+-- of part 2's full language are declared here; 02 adds the context and
+-- subtyping, 03 typing, and 04 proves the challenge's problem 1A.
+--
+-- Load it with   :load examples/poplmark/01-syntax.thena
+-- then try       :show Ty      :show Tm-subst-X
+--                :parse Tm ( Λ X <: ⊤ . ( λ y : X . y ) )
+--
+-- LOAD IN A FRESH SESSION. The numbered series in examples/ declares its own
+-- Ty, and two languages of one name cannot be installed at once.
+
+module FsubSyntax where
+
+-- Two token classes, because F-sub reads two kinds of name: type variables
+-- are capitalised and term variables are not. A language may read as many
+-- classes as it likes, and each slot says which one it is at.
+X : Token String
+X = /[A-Z][a-zA-Z0-9']*/
+
+x : Token String
+x = /[a-z][a-zA-Z0-9']*/
+
+-- Types.      T ::= X | ⊤ | T -> T | ∀X<:T. T
+--
+-- `all` binds a type variable, and `S[X]` says the body is where it is bound.
+-- The top type is written ⊤ rather than spelled `Top`: a terminal that the
+-- occurrence class would also read makes a term parse two ways, and `Top`
+-- matches /[A-Z][a-zA-Z0-9']*/.
+language Ty, T, S, U, Q where
+  tvar  : X as occurrence -> X
+  top                     -> ⊤
+  arrow                   -> ( T -> S )
+  all   : X as binder     -> ( ∀ X <: T . S[X] )
+
+-- Terms.      t ::= x | λx:T. t | t t | ΛX<:T. t | t [T]
+--
+-- BINDING AT BOTH LEVELS, in one grammar: `abs` binds a term variable and
+-- `tabs` binds a type variable, which is the thing the challenge is built to
+-- make hurt. The class on each binder is what keeps the two apart.
+language Tm, t, s where
+  var   : x as occurrence -> x
+  abs   : x as binder     -> ( λ x : T . t[x] )
+  app                     -> ( t s )
+  tabs  : X as binder     -> ( Λ X <: T . t[X] )
+  tapp                    -> ( t [ T ] )
+
+
+-- ---------------------------------------------------------------------------
+-- Terms are written in their own notation.
+
+-- The polymorphic identity, and its type.
+polyId : Tm
+polyId = Tm`( Λ X <: ⊤ . ( λ y : X . y ) )`
+
+polyIdType : Ty
+polyIdType = Ty`( ∀ X <: ⊤ . ( X -> X ) )`
+
+-- A literal IS the constructor application.
+polyIdIsTabs : Eq Tm polyId (tabs "X" top (abs "y" (tvar "X") (var "y")))
+polyIdIsTabs = refl Tm (tabs "X" top (abs "y" (tvar "X") (var "y")))
+
+-- Instantiating it at ⊤ is a type application, in the paper's own brackets.
+polyIdAtTop : Tm
+polyIdAtTop = Tm`( ${polyId} [ ⊤ ] )`
+
+
+-- ---------------------------------------------------------------------------
+-- Substitution comes with the languages, one family per class.
+--
+-- `Ty` owns X, so it gets all four:
+--
+--   Ty-subst-X   : Ty -> String -> Ty -> Ty          S[X -> T]
+--   Ty-subst-all : Ty -> List (And String Ty) -> Ty
+--   Ty-fv-X      : Ty -> List String
+--   Ty-fresh-X   : String -> List String -> String
+--
+-- `Tm` owns x and REACHES X, through the types in its own slots, so it gets
+--
+--   Tm-subst-x   : Tm -> String -> Tm -> Tm          t[x -> s]
+--   Tm-subst-X   : Tm -> String -> Ty -> Tm          t[X -> T]
+--   Tm-subst-all : Tm -> List (And String Tm) -> List (And String Ty) -> Tm
+--   Tm-fv-x      : Tm -> List String
+--   Tm-fv-X      : Tm -> List String
+--   Tm-fresh-x   : String -> List String -> String
+--
+-- and no Tm-fresh-X: minting a type variable belongs to the language whose
+-- notation can write one.
+
+-- Type substitution into a type.
+substIntoArrow : Eq Ty (Ty-subst-X Ty`( X -> ⊤ )` "X" Ty`⊤`) Ty`( ⊤ -> ⊤ )`
+substIntoArrow = refl Ty Ty`( ⊤ -> ⊤ )`
+
+-- It stops at a binding of the same name: the inner X is a different variable.
+substStopsAtBinder : Eq Ty (Ty-subst-X Ty`( ∀ X <: ⊤ . X )` "X" Ty`⊤`) Ty`( ∀ X <: ⊤ . X )`
+substStopsAtBinder = refl Ty Ty`( ∀ X <: ⊤ . X )`
+
+-- TYPE substitution into a TERM — the function part 2A's substitution lemmas
+-- are written with. It replaces X in every type a term carries.
+substIntoTerm : Eq Tm (Tm-subst-X Tm`( λ y : X . y )` "X" Ty`⊤`) Tm`( λ y : ⊤ . y )`
+substIntoTerm = refl Tm Tm`( λ y : ⊤ . y )`
+
+-- And TERM substitution into a term, which leaves the types alone.
+substTermIntoTerm : Eq Tm (Tm-subst-x Tm`( y z )` "z" Tm`( λ w : ⊤ . w )`) Tm`( y ( λ w : ⊤ . w ) )`
+substTermIntoTerm = refl Tm Tm`( y ( λ w : ⊤ . w ) )`
+
+-- The two classes of free variable are asked for separately.
+freeTypeVars : Eq (List String) (Tm-fv-X Tm`( λ y : X . y )`) (cons String "X" (nil String))
+freeTypeVars = refl (List String) (cons String "X" (nil String))
+
+freeTermVars : Eq (List String) (Tm-fv-x Tm`( λ y : X . y )`) (nil String)
+freeTermVars = refl (List String) (nil String)

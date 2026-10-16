@@ -92,10 +92,10 @@ unknown w = case snd (command withRules w) of
 -- because a mirror in the same module as the thing it mirrors checks nothing.
 everyColonCommand :: [String]
 everyColonCommand =
-  [ ":help", ":quit", ":core", ":surface", ":dev", ":show", ":elim", ":where", ":matches", ":accepts", ":produces"
+  [ ":help", ":quit", ":core", ":surface", ":dev", ":show", ":elim", ":judgment", ":where", ":matches", ":accepts", ":produces"
   , ":choices", ":goal", ":whnf", ":infer", ":parse", ":done", ":load", ":bases", ":rules"
   , ":revalidate", ":extract", ":theorem", ":suspend", ":resume", ":abandon"
-  , ":proofs", ":undo", ":convert", ":step", ":run"
+  , ":proofs", ":undo", ":convert", ":step", ":run", ":trust"
   ]
 
 -- | **Hand-written, and it had the same gaps as the list it checks** (MS4
@@ -345,16 +345,16 @@ tests =
         -- not the development — different relation, different consumer. No pair.
         [ testCase ":accepts finds a rule by its parameter" $
             fittingNames (snd (command withRules ":accepts Surface"))
-              @?= ["elaborate", "run-block", "intro-binders", "enter-binders", "spine-arguments"]
+              @?= ["elaborate", "run-block", "intro-binders", "spine-arguments"]
           -- **One thing in the shipped base returns a @Core@ since MS5 phase
           -- 89** — @fresh-universe@, which stopped being an op and became a
           -- function over @fresh-level@ and @universe-at@. Before that nothing
           -- did, and this case asserted an empty listing.
-        , testCase ":produces finds the one callable that gives a Core" $
+        , testCase ":produces finds the callables that give a Core" $
             case snd (command withRules ":produces Core") of
               Fitting v _ rows -> do
                 v @?= "gives"
-                [ n | (GlobalName n, _, _, _) <- rows ] @?= ["fresh-universe"]
+                [ n | (GlobalName n, _, _, _) <- rows ] @?= ["intro-binders", "fresh-universe"]
               other -> assertFailure ("expected a listing, got " ++ show other)
           -- **It lists rules and functions both** (his ruling), and the two are
           -- told apart in the row rather than in two commands.

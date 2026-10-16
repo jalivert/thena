@@ -6,6 +6,8 @@ import qualified Thena.Core.ConvertTests
 import qualified Thena.Core.LevelTests
 import qualified Thena.Core.ReduceTests
 import qualified Thena.Core.PrimitiveTests
+import qualified Thena.Core.TrustTests
+import qualified Thena.Core.TrustedTests
 import qualified Thena.Core.TermTests
 import qualified Thena.Core.TypingTests
 import qualified Thena.Core.UnifyTests
@@ -51,7 +53,6 @@ import qualified Thena.BuildTests
 import qualified Thena.SubstitutionTests
 import qualified Thena.ContextTests
 import qualified Thena.JudgmentTests
-import qualified Thena.ExamplesTests
 import qualified Thena.ObjectTermTests
 import qualified Thena.TokenTests
 import qualified Thena.LoadTests
@@ -78,6 +79,8 @@ main =
       , Thena.Core.LevelTests.tests
       , Thena.Core.ReduceTests.tests
       , Thena.Core.PrimitiveTests.tests
+      , Thena.Core.TrustTests.tests
+      , Thena.Core.TrustedTests.tests
       , Thena.Core.TermTests.tests
       , Thena.Core.TypingTests.tests
       , Thena.Core.UnifyTests.tests
@@ -123,7 +126,6 @@ main =
       , Thena.SubstitutionTests.tests
       , Thena.ContextTests.tests
       , Thena.JudgmentTests.tests
-      , Thena.ExamplesTests.tests
       , Thena.ObjectTermTests.tests
       , Thena.TokenTests.tests
       , Thena.LoadTests.tests

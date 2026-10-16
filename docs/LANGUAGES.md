@@ -288,6 +288,111 @@ language LC, M, N, E where
 `language` in a rule file is a syntax error. MS5 declared languages there, with a
 type of their own and a coercion `surface-of`; both are gone.
 
+### Naming a premise, and writing it in a later one
+
+A rule's premise may be given a name, and the name is what the argument it binds
+is called:
+
+```
+judgment check = Γ ⊢ M ⇐ T where
+
+  CheckRule:  p1 : Γ ⊢ M : T
+              p2 : ⊢ Γ , M , T by p1 valid
+              --------------------------
+              Γ ⊢ M ⇐ T
+```
+
+**A name is in scope for every premise after it**, on the same line or a later
+one, wherever a term of that premise's own type can be written — and in the
+conclusion. So
+`CheckRule`'s second premise is a statement *about the derivation the first one
+names*, which is the dependence a rule needs and could not state before:
+
+```
+CheckRule : ∀ (Γ : Ctx) (M : LC) (T : Ty) (p1 : typing`${Γ} ⊢ ${M} : ${T}`)
+              -> Valid`⊢ ${Γ} , ${M} , ${T} by ${p1} valid`
+              -> check`${Γ} ⊢ ${M} ⇐ ${T}`
+```
+
+- **An unnamed premise is still `d1`, `d2`, …** by its position.
+- **A name may not be a metavariable of any grammar**, nor a type the rule
+  mentions, nor another premise's name — so a name in a premise means exactly
+  one thing.
+
+### `notation`: a spelling for a function
+
+A judgment rule writes its indices in object notation, so it can only say what
+the grammar's productions build — and those are constructors. A `notation` block
+gives a declared **function** a production too.
+
+**A `notation` production names its own arguments, and position is what
+identifies them.** The first name is the first argument of the thing being
+spelled, and the names are local — nothing requires them to match how the
+declaration spells its own binders. A word of the spelling is a slot exactly
+when it is one of those names, and every other word is literal text.
+
+```
+context Ctx, Γ, Δ where
+  empty  -> ·
+  bindTm -> Γ , x : T
+  bindTy -> Γ , X <: T
+
+append : Ctx -> Ctx -> Ctx
+append = …
+
+notation Ctx where
+  append a b -> a ∪ b
+```
+
+`a ∪ b` then parses wherever a `Ctx` is expected, a rule's index included, and
+elaborates to `append` applied to what the two slots read — which is what lets a
+rule write the paper's `Γ, X<:Q, Δ ⊢ T <: S`.
+
+**The names need not be metavariables of any grammar, and that is the point.**
+They used to have to be: a slot was a word that happened to be some grammar's
+metavariable, so `Ctx` had to declare a second one, `Δ`, for a two-argument
+function to be spellable at all. A grammar now declares the words the *language*
+needs and nothing more.
+
+- **The datatype is untouched.** `Ctx` still has the three constructors its own
+  block declared, and the eliminator, the lookup relations and the generated
+  substitution all see what they saw before. A joining *constructor* would
+  instead make `Ctx` a tree, so a production with two slots of the context's own
+  sort stays refused.
+- **It is a separate block because of scoping**: `append`'s type mentions `Ctx`,
+  which the `context` block declares, so the function cannot be written above
+  that block.
+- **The function must be declared, must not already be a production, and must
+  return the grammar's datatype.** Its arguments are matched to the parameter
+  list by position, so there must be exactly as many names as arguments, no name
+  twice, and every name written somewhere in the spelling — an argument with
+  nowhere to be written could not be given.
+- **A slot's type is read off the declaration, not checked against the
+  spelling**, so the two cannot disagree. The one thing a declaration cannot say
+  is which token class a `String` argument reads, since several classes may share
+  `String`; that parameter is ascribed, `( v : X )`, and nothing else may be.
+- **Every term a rule mentions must be a named global with a declared notation.**
+  No inline lambda, no inline `elim`.
+- **A stuck application prints in the notation**, so `:show` of the rule above
+  prints ``sub`${Γ} ∪ ${Δ} ⊢ ${T} <: ${S}` ``; a closed context reduces to its
+  constructors and prints as a context.
+
+**The substitution notation is one of these.** `E[x -> M]` is a `notation` block
+the generator writes for you, beside the substitution functions themselves:
+
+```
+notation LC where
+  LC-subst-x e (x : x) n -> e [ x -> n ]
+```
+
+The middle parameter is the one that is ascribed: it reads a *name* of the class
+`x`, and `LC-subst-x`'s declaration says only `String` there.
+
+So it is an ordinary production — it works in a term literal, not only in a rule,
+and a stuck substitution prints in it. **The comma list `E[x -> M, y -> N]` is
+not**: simultaneous substitution takes a list per class, which no grammar spells,
+so that form stays sugar inside a rule.
+
 ## 7. Splices: holes in a written core term
 
 A written core term may have holes, filled from `instral` bindings when the

@@ -218,10 +218,16 @@ kinds = map (\(_, x, k) -> (x, k)) . chain
 -- and §6.3 already makes the guess itself a blocked neutral, so a constraint
 -- mentioning something inside one defers on the guess's own variable. Stated as
 -- a limit rather than left to be discovered.
+-- | A path's steps, root first. Shared by 'chain' and 'chainValues', which
+-- have to walk the same spine in the same order.
+stepsOf :: Path Step -> [Step]
+stepsOf Here     = []
+stepsOf (p :> s) = stepsOf p ++ [s]
+
 chain :: Cursor -> [(Int, Var, Kind)]
 chain cur = index 0 (above ++ here ++ under)
   where
-    above = map ofStep (toList' (prefix cur))
+    above = map ofStep (stepsOf (prefix cur))
     here  = case focus cur of
       OnComponent c  -> [Just (kindOf c)]
       OnConstraint _ -> [Nothing]
@@ -241,9 +247,6 @@ chain cur = index 0 (above ++ here ++ under)
     index _ []             = []
     index i (Nothing : es) = index (i + 1) es
     index i (Just (x, k) : es) = (i, x, k) : index (i + 1) es
-
-    toList' Here     = []
-    toList' (p :> s) = toList' p ++ [s]
 
 kindOf :: Component -> (Var, Kind)
 kindOf c = case c of
@@ -432,7 +435,7 @@ demote :: St -> Int -> Core -> Core
 demote st i = go (100 :: Int)
   where
     table = chain (stCur st)
-    values = definitionsOf (rebuild (stCur st))
+    values = chainValues (stCur st)
 
     go 0 t = t
     go fuel t =
@@ -443,13 +446,40 @@ demote st i = go (100 :: Int)
             [] -> t
             xs -> go (fuel - 1) (foldl (\u (x, v) -> substFree x v u) t xs)
 
--- | Every definition in the chain, with its value.
-definitionsOf :: Partial -> [(Var, Core)]
-definitionsOf p = case p of
-  Trailing _              -> []
-  Pending _ rest          -> definitionsOf rest
-  Under (Define x _ v _) rest -> (x, v) : definitionsOf rest
-  Under _ rest            -> definitionsOf rest
+-- | Every definition on the focus's own chain, with its value.
+--
+-- **Drawn from the chain, and not from @rebuild@.** 'rebuild' hands back the
+-- development's root, and a walk of that stops at the 'Guess' wrapper, so with
+-- the focus inside a guess it reports the enclosing definitions and none of the
+-- ones the focus actually sits among. 'chain' reports exactly those, and
+-- 'demote' and 'scopeCheck' have to read the same table or 'demote' is a no-op
+-- in the one position that needs it: a hole claimed above the argument
+-- definitions of a dependent head, inside the guess a lambda's elaboration opens.
+-- With the two disagreeing, @scopeCheck@ saw those definitions as rigid and out
+-- of position and refused a solution that unfolds to a closed term.
+chainValues :: Cursor -> [(Var, Core)]
+chainValues cur = above ++ hereV ++ under
+  where
+    above = concatMap ofStep (stepsOf (prefix cur))
+    hereV = case focus cur of
+      OnComponent c -> valueOf c
+      OnConstraint _ -> []
+      OnTerm {}      -> []
+    under = maybe [] links (below cur)
+
+    ofStep s = case s of
+      Along c           -> valueOf c
+      Past _            -> []
+      IntoGuess {}      -> []
+
+    links p = case p of
+      Trailing _     -> []
+      Under c rest   -> valueOf c ++ links rest
+      Pending _ rest -> links rest
+
+    valueOf c = case c of
+      Define x _ v _ -> [(x, v)]
+      _              -> []
 
 -- | Substitute a free variable throughout a term: 'close' then 'instantiate',
 -- the same composition "Thena.Core.Reduce" makes rather than a new primitive.
@@ -635,6 +665,12 @@ rigidRigidLevels dir env st ctx k@(Equate xi s t ty) = case levelPairs of
         , length ms == length ms'
         , length is == length is' ->
             sequential (zip ps ps' ++ [(m, m')] ++ zip ms ms' ++ zip is is' ++ [(tgt, tgt')])
+
+      -- **A stuck trusted node decomposes field-wise** (MS8 phase 149), the
+      -- congruence 'Thena.Core.Convert' states for the same node and for the
+      -- same reason. It carries no level arguments of its own, so 'levelPairs'
+      -- has nothing for it and this is the whole of the rule.
+      (Trusted c a b, Trusted c' a' b') -> sequential [(c, c'), (a, a'), (b, b')]
 
       _ -> Left (Mismatch ctx s t, stNames st)
 

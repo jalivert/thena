@@ -35,9 +35,41 @@ cabal run thena
 Use `cabal run` rather than the built binary directly — it is what tells the
 program where the prelude file is installed.
 
-You land at a prompt with a small prelude already loaded — `Eq` and `refl`,
-`Unit` and `unit`, `Empty`, `And` and `both`, `Sigma` and `pair`, with `fst`,
-`snd`, `andLeft` and `andRight` proved — and one empty goal:
+You land at a prompt with a small prelude already loaded, and one empty goal.
+**This is everything it gives you:**
+
+| | |
+|---|---|
+| equality | `Eq`, `refl` |
+| the unit and empty types | `Unit`, `unit`, `Empty` |
+| conjunction | `And`, `both`, with `andLeft` and `andRight` proved |
+| dependent pairs | `Sigma`, `pair`, with `fst` and `snd` proved |
+| lists | `List`, `nil`, `cons` |
+| the result of comparing | `Comparison`, `same`, `different` |
+| a decision, with its evidence | `Dec`, `yes`, `no` |
+| transport along an equality | `transport` proved |
+| deciding a literal equality | `decString`, `decChar`, `decInt` proved, each from two trusted laws |
+
+`String`, `Char`, `Int` and `Token` are in scope as well — those are built in
+rather than declared, so they are there in any environment — along with the
+four primitive functions, `eqString`, `eqChar`, `eqInt` and `appendString`.
+
+`decString a b` answers `yes` with a proof that `a` and `b` are equal, or `no`
+with a refutation, and on a name it does not know it is stuck — so a proof that
+eliminates it gets the equality in one branch and its refutation in the other.
+That is what `eqString` alone cannot give you, and it is the reason the prelude
+has both. `decString` is a *definition*, written in `prelude/prelude.thena`,
+and what it rests on is two `trusted` claims about `eqString`: that a `same`
+answer means the two really are equal (`eqStringEqual`), and that the
+comparison answers `same` of a literal and itself (`eqStringRefl`). Chapter 9
+is what those are; `isSame` is the helper that tells the two answers apart.
+
+**There is no `Nat`, and no arithmetic.** A module that wants numbers declares
+them, which every example here does; `Int` is a primitive with literals and
+equality and nothing to do induction over. The prelude is deliberately the
+logical equipment and nothing else — it is `prelude/prelude.thena`, a readable
+file you can change.
+
 
 ```
 thena spine> :show
@@ -86,6 +118,7 @@ is inferred.
 | a hole | `let ? x : S in t` |
 | a hole with a proposed body | `let ? x : S ≐ (g) in t` |
 | eliminator use | `elim D (params) motive (methods) (indices) target` |
+| a trusted term | `trusted T e` — see chapter 9 |
 
 **Every symbol has an ASCII spelling**, so nothing here requires a special
 keyboard:
@@ -120,7 +153,7 @@ the level left to be worked out:
 thena spine> :infer Type₀
 Type₀ : Type₁
 thena spine> :infer Type
-Type : Type (suc ?ℓ943)
+Type : Type (suc ?ℓ2465)
 ```
 
 `?ℓ229` is an unknown level. It is not a default and it is not zero — it is
@@ -152,8 +185,8 @@ of it writes that level in braces:
 
 ```
 thena spine> :show Eq
-data Eq {ℓ₇₈} (A : Type (ℓ₇₈)) : A -> A -> Type (ℓ₇₈) where
-  { refl : ∀ (a : A) -> Eq {ℓ₇₈} A a a }
+data Eq {ℓ₈₈} (A : Type (ℓ₈₈)) : A -> A -> Type (ℓ₈₈) where
+  { refl : ∀ (a : A) -> Eq {ℓ₈₈} A a a }
 ```
 
 So `Eq` on its own is not a term — `Eq {0} Nat x y` is. **Written on the
@@ -162,7 +195,7 @@ one unknown per parameter, and unification settles them.
 
 ```
 thena spine> :infer refl
-refl : ∀ (A : Type (?ℓ950)) (a : A) -> Eq {?ℓ950} A a a
+refl : ∀ (A : Type (?ℓ2472)) (a : A) -> Eq {?ℓ2472} A a a
 ```
 
 Written in the development calculus they are explicit, and **prenex** — a use
@@ -181,8 +214,8 @@ join:
 
 ```
 thena spine> :show And
-data And {ℓ₂₂₈ ℓ₂₂₉} (A : Type (ℓ₂₂₈)) (B : Type (ℓ₂₂₉)) : Type (ℓ₂₂₈ ⊔ ℓ₂₂₉) where
-  { both : A -> B -> And {ℓ₂₂₈ ℓ₂₂₉} A B }
+data And {ℓ₂₃₇ ℓ₂₃₈} (A : Type (ℓ₂₃₇)) (B : Type (ℓ₂₃₈)) : Type (ℓ₂₃₇ ⊔ ℓ₂₃₈) where
+  { both : A -> B -> And {ℓ₂₃₇ ℓ₂₃₈} A B }
 ```
 
 `⊔` is the one symbol that is printed and never written: the join is computed
@@ -277,8 +310,8 @@ constructors' own levels, and becomes a level parameter if nothing pins it:
 thena spine> data Box (A : Type) : Type where { box : A -> Box A }
 declared Box
 thena spine> :show Box
-data Box {ℓ₉₉₉} (A : Type (ℓ₉₉₉)) : Type (ℓ₉₉₉) where
-  { box : A -> Box {ℓ₉₉₉} A }
+data Box {ℓ₂₅₁₉} (A : Type (ℓ₂₅₁₉)) : Type (ℓ₂₅₁₉) where
+  { box : A -> Box {ℓ₂₅₁₉} A }
 ```
 
 A written `Typeₙ` is still checked rather than believed:
@@ -419,11 +452,11 @@ unknown becomes a parameter:
 
 ```
 thena spine> :theorem idPoly : ∀ (A : Type) -> A -> A
-proving idPoly : ∀ (A : Type (?ℓ1034)) -> A -> A
+proving idPoly : ∀ (A : Type (?ℓ2554)) -> A -> A
 thena spine> try-core ⌜ \ (A : Type) (a : A) -> a ⌝
 thena spine> solve
 thena spine> qed
-idPoly {ℓ₁₀₄₆} : ∀ (A : Type (ℓ₁₀₄₆)) -> A -> A   ∎
+idPoly {ℓ₂₅₆₆} : ∀ (A : Type (ℓ₂₅₆₆)) -> A -> A   ∎
 ```
 
 Sometimes one level is not enough, and the proof leaves a *relation* between two
@@ -432,11 +465,11 @@ before a `⊢`:
 
 ```
 thena spine> :theorem lift : Type -> Type
-proving lift : Type (?ℓ1048) -> Type (?ℓ1049)
+proving lift : Type (?ℓ2568) -> Type (?ℓ2569)
 thena spine> try-core ⌜ \ (x : Type) -> x ⌝
 thena spine> solve
 thena spine> qed
-lift {ℓ₁₀₅₇ ℓ₁₀₅₈} : (ℓ₁₀₅₇ ≤ ℓ₁₀₅₈) ⊢ Type (ℓ₁₀₅₇) -> Type (ℓ₁₀₅₈)   ∎
+lift {ℓ₂₅₇₇ ℓ₂₅₇₈} : (ℓ₂₅₇₇ ≤ ℓ₂₅₇₈) ⊢ Type (ℓ₂₅₇₇) -> Type (ℓ₂₅₇₈)   ∎
 ```
 
 Read it as *given `ℓ₂₃₈ ≤ ℓ₂₃₉`, this type*. A constraint that held at every
@@ -532,11 +565,14 @@ Once you are inside a term, each field has its own word — so no word ever
 changes meaning depending on what is in focus:
 
 ```
-fun  arg  dom  cod  val  type  body  motive  target
+fun  arg  dom  cod  val  type  body  motive  target  claimed  actual
 param ‹n›   method ‹n›   index ‹n›   arg ‹n›
 ```
 
-The numbered ones count from one.
+The numbered ones count from one. `claimed` and `actual` descend into the two
+types a trusted term carries — the type it claims, and the type its body was
+actually checked at; `body` reaches the body itself, as it does under a `λ` and
+in a `let`.
 
 ```
 thena spine> :goal ∀ (n : Nat) -> Eq {0} Nat n n
@@ -697,14 +733,14 @@ claim ‹ty›
 assume ‹ty›
 quantify ‹ty›
 run-block ‹t›
-intro-binders ‹t›
-intro-binders ‹t›
-enter-binders ‹t›
-enter-binders ‹t›
+intro-binders ‹t› ‹k›
+intro-binders ‹t› ‹k›
+intro-binders ‹t› ‹k›
+intro-binders ‹t› ‹k›
 spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 thena spine> prove
-chose 1280: intro
+chose 2784: intro
 ```
 
 Three rules matched, so the engine reports which one it took and leaves a
@@ -712,7 +748,7 @@ Three rules matched, so the engine reports which one it took and leaves a
 
 ```
 thena spine> :choices
-1280  intro   untried: solve, regret, prove
+2784  intro   untried: solve, regret, prove
 ```
 
 `retry` backtracks to the nearest choice point and takes the next alternative.
@@ -721,13 +757,13 @@ undoes the whole thing:
 
 ```
 thena spine> retry
-retrying 1280: solve
-backtracking to 1280: regret
+retrying 2784: solve
+backtracking to 2784: regret
 thena spine> :show
 ▶ let ? id : ∀ (A : Type₀) -> A -> A in
   id
 thena spine> :choices
-1280  regret   untried: prove
+2784  regret   untried: prove
 ```
 
 Search is meant to be inspectable, not a black box: you can always see what was
@@ -748,11 +784,11 @@ line left is yours to reach with `retry`, and nothing reaches it for you:
 thena spine> :theorem t : ∀ (A : Type₀) -> A -> A
 proving t : ∀ (A : Type₀) -> A -> A
 thena spine> prove
-chose 938: attack
+chose 2460: attack
 thena spine> regret
 thena spine> back
 stuck: already at the root
-  undoing that would backtrack to 938, which was chosen before this line — retry 938 to take it
+  undoing that would backtrack to 2460, which was chosen before this line — retry 2460 to take it
 ```
 
 `regret` took the guess back off and `back` had nothing left to pop. Without the
@@ -836,28 +872,26 @@ pc
   0  u = universe-at l
   1  return u
 env
-  l = Type (?ℓ965)
+  l = Type (?ℓ2487)
 stack
   call, 14 instruction(s) to resume
   call, 6 instruction(s) to resume
-  call, 43 instruction(s) to resume (returned)
-  call, 61 instruction(s) to resume (returned)
+  call, 148 instruction(s) to resume (returned)
 thena spine> :run 6
 pc
   0  u = universe-at l
   1  return u
 env
-  l = Type (?ℓ967)
+  l = Type (?ℓ2489)
 stack
   call, 11 instruction(s) to resume
   call, 14 instruction(s) to resume (returned)
   call, 6 instruction(s) to resume
-  call, 43 instruction(s) to resume (returned)
-  call, 61 instruction(s) to resume (returned)
+  call, 148 instruction(s) to resume (returned)
 thena spine> :run
-solved: ?ℓ963
-solved: ?ℓ965
-solved: ?ℓ967
+solved: ?ℓ2485
+solved: ?ℓ2487
+solved: ?ℓ2489
 already equal
 thena spine> :step off
 ```
@@ -907,6 +941,176 @@ stuck: not finished: the hole k is still open, so there is no term yet
 
 `qed` runs `certify` for you. These commands are for inspecting a proof
 mid-flight, or for convincing yourself the machine has not cheated.
+
+### Saying "take my word for it"
+
+Some things are true and you cannot prove them here. `trusted T e` is a term
+whose type is **asserted**: `e` is checked as usual, at whatever type it really
+has, and the term is then given `T` with nothing relating the two.
+
+`honest` below asserts something that is already true, so it goes in without
+comment. `liar` asserts something false, and a definition does not reach the
+environment unless the session's trust setting allows what it rests on — so it
+has to be asked for. The next section is what that setting is; `:trust any`
+allows everything, and we put the setting back straight afterwards:
+
+```
+thena spine> declare honest : Eq Nat zero zero ; honest = trusted (Eq Nat zero zero) (refl Nat zero)
+…
+thena spine> :trust any
+…
+thena spine> declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)
+…
+thena spine> :trust no-undischargeable
+…
+thena spine> :whnf honest {0}
+refl {0} Nat zero
+thena spine> :whnf liar {0}
+trusted (Eq {0} Nat zero (succ zero)) (Eq {0} Nat zero zero) (refl {0} Nat zero)
+```
+
+**The kernel's check is then modulo the claims you made this way** — which is the
+trade every system makes somewhere, under one name or another.
+
+What makes it worth having rather than an axiom is that it **reduces when the
+claim comes true**, which is what the two reductions above show. The term carries
+both types, the one claimed and the one its body really has, and when they turn
+out to be the same type the whole thing contracts to the body: `honest`'s claim
+was met, so nothing is left of it. `liar`'s was not, and what prints shows you
+both halves. As the names inside them become known the two converge, so a term
+still printing as `trusted` is a term whose claim is still load-bearing.
+
+You can leave the type to be worked out, as anywhere else — `trusted _ e` is an
+ordinary placeholder in that position, and `claimed` and `actual` are the two
+field words for navigating into one (chapter 6).
+
+### How much of that you want to allow
+
+`:trust` says what the proof in front of you rests on, and how much the session
+is willing to accept. Every claim is one of three things:
+
+| | |
+|---|---|
+| discharged | the two types are convertible, so the claim is met and the trust is carrying nothing |
+| pending | not met, and not impossible — some instance could still make the two agree |
+| undischargeable | it can never be met, by any instance, in any later session |
+
+The last one is decided by comparing the two types position by position: where
+they are built from different formers at some position, no substitution will ever
+bring them together. `Eq Nat zero (succ zero)` against `Eq Nat zero zero` agrees
+at the head and clashes at the third argument, which is why the test looks all
+the way down rather than at the head alone.
+
+A claim is read **at the use where the use settles it, and at the definition
+otherwise**, and the report says which — because the same node can be honest in
+a definition and a lie at a use of it. `liar`'s claim is undischargeable at
+`liar {0}` and tells you nothing at all read from a partial application.
+
+`:trust none`, `:trust no-undischargeable` and `:trust any` set how much is
+allowed. A session starts at `no-undischargeable`, and the setting is asked at
+**both** of the ways a definition reaches the environment — `qed` refuses a proof
+resting on something it does not permit, and `declare` refuses a definition the
+same way, which is why `liar` above had to be asked for. Both ask after the
+kernel has already accepted the term, because this is your policy and not the
+kernel's judgement.
+
+```
+thena spine> :trust
+trust: no undischargeable trust
+  resting on nothing
+thena spine> :theorem reckless : Eq {0} Nat zero (succ zero)
+proving reckless : Eq {0} Nat zero (succ zero)
+thena spine> attack
+thena spine> into
+thena spine> try-core ⌜ liar {0} ⌝
+thena spine> solve
+thena spine> back
+thena spine> solve
+thena spine> :trust
+trust: no undischargeable trust
+  undischargeable, at the use of liar
+    claims Eq {0} Nat zero (succ zero)
+    body   Eq {0} Nat zero zero
+thena spine> qed
+certified
+the trust level refused it
+trust: no undischargeable trust
+  undischargeable, at the use of liar
+    claims Eq {0} Nat zero (succ zero)
+    body   Eq {0} Nat zero zero
+thena spine> :trust any
+trust: any trust
+  undischargeable, at the use of liar
+    claims Eq {0} Nat zero (succ zero)
+    body   Eq {0} Nat zero zero
+thena spine> qed
+reckless : Eq {0} Nat zero (succ zero)   ∎
+  undischargeable, at the use of liar
+    claims Eq {0} Nat zero (succ zero)
+    body   Eq {0} Nat zero zero
+```
+
+Nothing is prevented for long: the proof is left standing, and the setting is one
+word away. What changes is that the word is yours.
+
+**Only `none` is a guarantee.** `no-undischargeable` stops a claim that is
+provably false, and it does not stop a false one — a claim can be discharged at
+every instance anyone has written down and still be nonsense, and `Empty` is
+provable that way. Treat the middle setting as hygiene, not as safety.
+
+### What the prelude itself asks you to trust
+
+This is not only a facility for your own proofs: the prelude uses it. Deciding
+whether two strings are equal is the case, and it is the one that forced the
+feature. `eqString` computes — it answers `same` or `different` on two literals
+— but nothing in the type theory connects that answer to the equality type, and
+no term you can write closes the gap. So `decString` is a definition resting on
+two claims about `eqString`, and `:trust` names both:
+
+```
+thena spine> :trust no-undischargeable
+trust: no undischargeable trust
+  resting on nothing
+thena spine> :theorem decides : Dec {0 0} (Eq {0} String "x" "x")
+proving decides : Dec {0 0} (Eq {0} String "x" "x")
+thena spine> attack
+thena spine> into
+thena spine> try-core ⌜ decString "x" "x" ⌝
+thena spine> solve
+thena spine> back
+thena spine> solve
+thena spine> :trust
+trust: no undischargeable trust
+  pending, in decString · eqStringEqual
+    claims Eq {0} String a b
+    body   Eq {0} String a a
+  pending, in decString · eqStringRefl
+    claims Eq {0} Comparison (eqString a a) same
+    body   Eq {0} Comparison same same
+thena spine> qed
+decides : Dec {0 0} (Eq {0} String "x" "x")   ∎
+  pending, in decString · eqStringEqual
+    claims Eq {0} String a b
+    body   Eq {0} String a a
+  pending, in decString · eqStringRefl
+    claims Eq {0} Comparison (eqString a a) same
+    body   Eq {0} Comparison same same
+```
+
+`in decString · eqStringEqual` is the route: the claim is not in your proof, it
+is in a definition your proof reached through another one. Both read **pending**,
+and here is why that is worth understanding rather than working around. The
+claims are read at `eqStringEqual`'s own definition, where `a` and `b` are its
+binders and nothing is settled — and they are read there rather than at `"x"`
+and `"x"` because the walk takes one hop into a definition and stops. It is not
+a normaliser, deliberately: finding out which claims *survive* reduction means
+reducing, and `qed` may not be made to diverge.
+
+So `:trust none` will not close this proof, even though `decString "x" "x"`
+reduces to `refl {0} String "x"` with nothing trusted left in it. The strictest
+setting is a statement about what a proof *reaches*, not about what is left
+after it runs. If you want it, the two laws are four lines of
+`prelude/prelude.thena` and you can read exactly what you are taking on.
 
 ---
 
@@ -1071,9 +1275,14 @@ language and elaborated on load.
 
 **It cannot yet:**
 
-- **A λ binder must be plain.** `\ x -> e`, never `\ (x : Nat) -> e` and never
-  `\ {A} -> e`; the type comes from the goal. It says
-  *"expected a surface term that is a λ whose first binder is plain"*.
+- **A λ binder may carry its type, but not braces.** `\ x -> e` takes the
+  binder's type from the goal, and `\ (x : Nat) -> e` writes it out — the written
+  type is *checked* against the goal's, so the λ you get is the same either way
+  and a type that disagrees is refused where you wrote it. You may annotate some
+  binders of a group and not others. **`\ {A} -> e` is refused**: a brace in a
+  signature says callers may leave that argument out, and a λ binds its
+  arguments in order whether or not a caller wrote them. It says
+  *"expected a surface term that is a λ whose first binder is explicit"*.
 - **A `let` must be annotated when its type is dependent** — when the value's
   type mentions the value's own arguments and one of those is a local variable:
 
@@ -1118,7 +1327,7 @@ language and elaborated on load.
 | `reduce` | reduce the focused term in place |
 | `along` `into` `back` | move on the chain |
 | `cross type` / `cross val` | move into a term |
-| `fun` `arg` `dom` `cod` `val` `type` `body` `motive` `target` | descend into a field |
+| `fun` `arg` `dom` `cod` `val` `type` `body` `motive` `target` `claimed` `actual` | descend into a field |
 | `param ‹n›` `method ‹n›` `index ‹n›` `arg ‹n›` | descend into a numbered field |
 | `prove` | let the rule engine choose and run a rule |
 | `retry` / `retry ‹n›` | backtrack to a choice point |
@@ -1142,6 +1351,7 @@ language and elaborated on load.
 | `:parse ‹L›` … `:done` | every line is an L term; Tab at the cursor shows what fits, and completes a production |
 | `:infer ‹t›` `:whnf ‹t›` `:convert ‹t› ≟ ‹u›` | type, reduct, convertibility |
 | `:elim ‹D›` / `:elim ‹D› ‹universe›` | the elimination rule |
+| `:judgment ‹J›` | its rules above the bar, as a paper writes them |
 | `:matches` | which rules apply here — it takes no argument |
 | `:accepts ‹type›` / `:produces ‹type›` | what takes a value of that type / gives one |
 | `:choices` | open choice points |
@@ -1150,6 +1360,8 @@ language and elaborated on load.
 | `:suspend` `:resume ‹name›` `:proofs` `:abandon` `:undo` | session management |
 | `:goal ‹T›` | discard everything and start a fresh scratch goal |
 | `:extract` `:revalidate` | read off the term / recheck the development |
+| `:trust` | the trust level, and what this proof rests on |
+| `:trust none` / `no-undischargeable` / `any` | how much unproved typing to allow |
 | `:load ‹path›` | a proof module, a script, or rule bases |
 | `:load proof` / `rules` / `script` | say which, rather than by extension |
 | `:bases` / `:rules` | the loaded rule bases / the rules in them |

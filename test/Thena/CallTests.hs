@@ -21,6 +21,7 @@ import qualified Thena.Development.Component as Component
 import qualified Thena.Development.Cursor as Cursor
 import Thena.Development.Cursor (Cursor, enter, focus)
 import Thena.Development.Partial (Partial (..))
+import Thena.Core.Trust (TrustLevel (..))
 import Thena.Engine
   ( ChoicePoint (..)
   , Exec (..)
@@ -70,7 +71,8 @@ bases rs = [ruleBase "test" Nothing "" [] [] rs]
 
 machine :: [RuleBase] -> [Instr] -> Machine
 machine base is =
-  load is (Machine (Exec [] [] []) (Development hole) [] emptyGlobals base [] [] 1000 0)
+  load is (Machine (Exec [] [] []) (Development hole) [] emptyGlobals base [] [] 1000 0
+                   NoUndischargeableTrust)
 
 runOut :: Machine -> ([String], Either FailReason Machine)
 runOut m = case step m of

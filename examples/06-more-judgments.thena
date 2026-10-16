@@ -114,7 +114,7 @@ judgment keepsType = Γ ⊢ M ⇒ N : T where
 
 -- A value runs to itself and keeps its type.
 doneTyped : typing`· ⊢ ${done} : ( ι -> ι )`
-doneTyped = T-abs Ctx`·` "z" base LC`z` base (T-var "z" base Ctx`·, z : ι` (Ctx-here Ctx`·` "z" base))
+doneTyped = T-abs Ctx`·` "z" base LC`z` base (T-var "z" base Ctx`·, z : ι` (extend-here Ctx`·` "z" base))
 
 doneKeeps : keepsType`· ⊢ ${done} ⇒ ${done} : ( ι -> ι )`
 doneKeeps = K-run Ctx`·` done Ty`( ι -> ι )` done doneTyped (S-refl done) doneTyped

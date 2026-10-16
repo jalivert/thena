@@ -1,0 +1,110 @@
+thena spine> data Nat : Type₀ where { zero : Nat ; succ : Nat -> Nat }
+declared Nat
+thena spine> data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }
+declared Eq
+thena spine> declare honest : Eq Nat zero zero ; honest = trusted (Eq Nat zero zero) (refl Nat zero)
+solved: ?ℓ44
+already equal
+already equal
+solved: ?ℓ44
+solved: ?ℓ55
+already equal
+already equal
+solved: ?ℓ55
+solved: ?ℓ66
+already equal
+solved: A
+solved: ?ℓ53
+thena spine> :trust none
+trust: no trust
+  resting on nothing
+thena spine> declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)
+solved: ?ℓ76
+already equal
+already equal
+already equal
+solved: ?ℓ76
+solved: ?ℓ89
+already equal
+already equal
+already equal
+solved: ?ℓ89
+solved: ?ℓ102
+already equal
+solved: A
+solved: ?ℓ87
+the trust level refused it
+trust: no trust
+  undischargeable, written here
+    claims Eq {ℓ₁₀₉} Nat zero (succ zero)
+    body   Eq {0} Nat zero zero
+thena spine> :trust any
+trust: any trust
+  resting on nothing
+thena spine> declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)
+solved: ?ℓ112
+already equal
+already equal
+already equal
+solved: ?ℓ112
+solved: ?ℓ125
+already equal
+already equal
+already equal
+solved: ?ℓ125
+solved: ?ℓ138
+already equal
+solved: A
+solved: ?ℓ123
+thena spine> :trust none
+trust: no trust
+  resting on nothing
+thena spine> :theorem viaHonest : Eq {0} Nat zero zero
+proving viaHonest : Eq {0} Nat zero zero
+thena spine> attack
+thena spine> into
+thena spine> try-core ⌜ honest {0} ⌝
+thena spine> solve
+thena spine> back
+thena spine> solve
+thena spine> :trust
+trust: no trust
+  discharged, at the use of honest
+    claims Eq {0} Nat zero zero
+    body   Eq {0} Nat zero zero
+thena spine> qed
+viaHonest : Eq {0} Nat zero zero   ∎
+  discharged, at the use of honest
+    claims Eq {0} Nat zero zero
+    body   Eq {0} Nat zero zero
+thena spine> :theorem viaLiar : Eq {0} Nat zero (succ zero)
+proving viaLiar : Eq {0} Nat zero (succ zero)
+thena spine> attack
+thena spine> into
+thena spine> try-core ⌜ liar {0} ⌝
+thena spine> solve
+thena spine> back
+thena spine> solve
+thena spine> :trust
+trust: no trust
+  undischargeable, at the use of liar
+    claims Eq {0} Nat zero (succ zero)
+    body   Eq {0} Nat zero zero
+thena spine> qed
+certified
+the trust level refused it
+trust: no trust
+  undischargeable, at the use of liar
+    claims Eq {0} Nat zero (succ zero)
+    body   Eq {0} Nat zero zero
+thena spine> :trust any
+trust: any trust
+  undischargeable, at the use of liar
+    claims Eq {0} Nat zero (succ zero)
+    body   Eq {0} Nat zero zero
+thena spine> qed
+viaLiar : Eq {0} Nat zero (succ zero)   ∎
+  undischargeable, at the use of liar
+    claims Eq {0} Nat zero (succ zero)
+    body   Eq {0} Nat zero zero
+thena spine> :quit

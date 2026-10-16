@@ -36,11 +36,12 @@ standard
   elaborate ‹t›
   elaborate ‹t›
   elaborate ‹t›
+  elaborate ‹t›
   run-block ‹t›
-  intro-binders ‹t›
-  intro-binders ‹t›
-  enter-binders ‹t›
-  enter-binders ‹t›
+  intro-binders ‹t› ‹k›
+  intro-binders ‹t› ‹k›
+  intro-binders ‹t› ‹k›
+  intro-binders ‹t› ‹k›
   spine-arguments ‹h› ‹f› ‹t›
   spine-arguments ‹h› ‹f› ‹t›
 thena spine> :matches
@@ -75,9 +76,8 @@ elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
+elaborate ‹t›
 run-block ‹t›
-enter-binders ‹t›
-enter-binders ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 thena spine> attack
@@ -89,10 +89,10 @@ claim ‹ty›
 assume ‹ty›
 quantify ‹ty›
 run-block ‹t›
-intro-binders ‹t›
-intro-binders ‹t›
-enter-binders ‹t›
-enter-binders ‹t›
+intro-binders ‹t› ‹k›
+intro-binders ‹t› ‹k›
+intro-binders ‹t› ‹k›
+intro-binders ‹t› ‹k›
 spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 thena spine> cross type
@@ -136,9 +136,8 @@ elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
+elaborate ‹t›
 run-block ‹t›
-enter-binders ‹t›
-enter-binders ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 thena spine> attack
@@ -151,10 +150,10 @@ claim ‹ty›
 assume ‹ty›
 quantify ‹ty›
 run-block ‹t›
-intro-binders ‹t›
-intro-binders ‹t›
-enter-binders ‹t›
-enter-binders ‹t›
+intro-binders ‹t› ‹k›
+intro-binders ‹t› ‹k›
+intro-binders ‹t› ‹k›
+intro-binders ‹t› ‹k›
 spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 thena spine> intro
@@ -201,9 +200,8 @@ elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
+elaborate ‹t›
 run-block ‹t›
-enter-binders ‹t›
-enter-binders ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 thena spine> :abandon
@@ -221,10 +219,10 @@ claim ‹ty›
 assume ‹ty›
 quantify ‹ty›
 run-block ‹t›
-intro-binders ‹t›
-intro-binders ‹t›
-enter-binders ‹t›
-enter-binders ‹t›
+intro-binders ‹t› ‹k›
+intro-binders ‹t› ‹k›
+intro-binders ‹t› ‹k›
+intro-binders ‹t› ‹k›
 spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 thena spine> intro
@@ -243,10 +241,10 @@ claim ‹ty›
 assume ‹ty›
 quantify ‹ty›
 run-block ‹t›
-intro-binders ‹t›
-intro-binders ‹t›
-enter-binders ‹t›
-enter-binders ‹t›
+intro-binders ‹t› ‹k›
+intro-binders ‹t› ‹k›
+intro-binders ‹t› ‹k›
+intro-binders ‹t› ‹k›
 spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 thena spine> intro

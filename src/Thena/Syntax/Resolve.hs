@@ -304,6 +304,16 @@ core gr env gs sp ctx local n raw = case raw of
           then Left (WrongNumberOfEliminationIndices d wantI (length is'))
           else Right (Eliminate dn dls ps' m' ms' is' t', n5)
 
+  -- @trusted claimed actual body@ (MS8 phase 150). Nothing to look up and
+  -- nothing to count: three terms, resolved left to right in the same context.
+  -- **Whether the claim is plausible is not a question for resolution** — it is
+  -- not a question for the checker either, which is the feature.
+  RawTrusted c a b -> do
+    (c', n1) <- core gr env gs sp ctx local n  c
+    (a', n2) <- core gr env gs sp ctx local n1 a
+    (b', n3) <- core gr env gs sp ctx local n2 b
+    Right (Trusted c' a' b', n3)
+
   RawClaim {}   -> Left (NotACoreTerm AHole)
   RawGuess {}   -> Left (NotACoreTerm AGuess)
   RawPending {} -> Left (NotACoreTerm AConstraint)

@@ -76,6 +76,13 @@ data SurfaceShape
   | ASurfaceLet String (Maybe SurfaceShape) SurfaceShape SurfaceShape
     -- ^ the bound name, its annotation if written, its value, its body.
   | ASurfaceAnnotation SurfaceShape SurfaceShape
+  | ASurfaceTrusted SurfaceShape SurfaceShape
+    -- ^ @trusted T e@ (MS8 phase 150): the claimed type and the body.
+    --
+    -- **Two, where 'Thena.View.Core.ATrusted' has three.** This is what the
+    -- user wrote; the third type is derived, so it exists on the elaborated core
+    -- term and not here. A frontend wanting both halves of the pair is looking
+    -- at the core view, not at this one.
   | ASurfaceElimination String [SurfaceShape] SurfaceShape [SurfaceShape] [SurfaceShape] SurfaceShape
     -- ^ the datatype named, the parameters, the motive, the methods, the
     -- indices, the target — 'Thena.Surface.Concrete.Surface'\'s own order.
@@ -112,6 +119,7 @@ displaySurface s = case s of
   SurfaceArrow a b -> ASurfaceArrow (displaySurface a) (displaySurface b)
   SurfaceLet x ty v b -> ASurfaceLet x (fmap displaySurface ty) (displaySurface v) (displaySurface b)
   SurfaceAnnot e ty -> ASurfaceAnnotation (displaySurface e) (displaySurface ty)
+  SurfaceTrusted ty e -> ASurfaceTrusted (displaySurface ty) (displaySurface e)
   SurfaceElim d ps mot ms is tgt ->
     ASurfaceElimination d (map displaySurface ps) (displaySurface mot)
       (map displaySurface ms) (map displaySurface is) (displaySurface tgt)

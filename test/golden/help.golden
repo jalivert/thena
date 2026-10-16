@@ -9,7 +9,7 @@ a bare word acts, a word with a colon looks.
   retry / retry ‹n›             backtrack to a choice point
   along  into  back             move on the chain
   cross type / cross val        move into a term
-  fun arg dom cod val type body motive target
+  fun arg dom cod val type body motive target claimed actual
                                 descend into a field of the focused term
   arg ‹n› param ‹n› method ‹n› index ‹n›
                                 descend into a numbered field
@@ -31,7 +31,11 @@ a bare word acts, a word with a colon looks.
   :parse ‹L› … :done            parse every line as an L term; Tab at the cursor
   :whnf / :whnf ‹t›             reduce the focus / a term, without committing
   :convert ‹t› ≟ ‹u›            are two terms convertible
+  :trust                        the trust level, and what this proof rests on
+  :trust none / no-undischargeable / any
+                                how much unproved typing to allow
   :elim ‹D› [‹universe›]        a datatype’s elimination rule
+  :judgment ‹J›                 its rules, above the bar, as a paper writes them
   :matches                      which rules apply here
   :accepts ‹type›               what takes a value of that type
   :produces ‹type›              what gives one back

@@ -309,6 +309,15 @@ tests =
         , ":show z"
         , "declare z2 : Nat ; z2 = idty {Nat} zero"
         , ":show z2"
+          -- **A written binder type, through the whole pipeline** (MS8): the
+          -- grammar has always taken one and only elaboration refused it, so a
+          -- test built on a hand-made 'Surface' value is not evidence that the
+          -- spelling works. The λ it elaborates to is the one the bare spelling
+          -- gives — the written type is checked and then has no further trace.
+        , "declare wri : Nat -> Nat ; wri = \\ (n : Nat) -> n"
+        , ":show wri"
+          -- And one that disagrees with the goal fails where it was written.
+        , "declare wrong : Nat -> Nat ; wrong = \\ (n : Bool) -> n"
           -- @push-development@ and @pop-development@ are **ops, not commands**,
           -- so they are exercised from "Thena.ReadTests" rather than here — a
           -- bare word at the REPL is a command or a rule call, and they are
@@ -394,9 +403,10 @@ tests =
         , "along"
         , "along"
         , "elaborate ⟨ b ⟩"
-          -- A hint that is not an identifier does not match at all: no rule
-          -- with a hint head passes, and there is nothing else in the hinted
-          -- half of the base.
+          -- **Applying a non-function says so**, since MS8 phase 170. The
+          -- name-headed clause's refusal used to be discarded by the
+          -- fall-through to the binary clause, which answered with its own
+          -- @A and A1 -> B cannot be made equal@ about components nobody wrote.
         , "elaborate ⟨ a a ⟩"
         , ":abandon"
           -- The instruction language, seen: stepping shows the driver's own
@@ -1400,6 +1410,113 @@ tests =
       -- whole thing is the point: a command added without a line here is a
       -- diff, which is the only pressure keeping 'commandSummary' honest that
       -- does not depend on someone remembering.
+    , -- **A trusted term, end to end** (MS8 phase 150) — the surface form, the
+      -- elaborated core term, and the contraction. The three definitions are the
+      -- three cases there are: a claim that is honestly true, one that is false,
+      -- and one left to the placeholder.
+      --
+      -- **What the @{0}@ in the reduction lines is for.** A declared type's level
+      -- is generalised into a prenex parameter, so @honest@'s claim is
+      -- @Eq {ℓ} Nat zero zero@ while its body's own type is @Eq {0} …@ — and a
+      -- reference's level arguments are part of what it is, so the two are
+      -- different types and the node correctly stays. At an instantiated use the
+      -- two converge and it contracts. That is the feature working, not a
+      -- limitation: @actual@ is what says whether the trust is still
+      -- load-bearing, and here it says the claim has not been met yet.
+      script
+        "trusted"
+        [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "data Eq (A : Type) : A -> A -> Type where { refl : \8704 (a : A) -> Eq A a a }"
+          -- Honestly true, so the claim is met and the node goes.
+        , "declare honest : Eq Nat zero zero ; honest = trusted (Eq Nat zero zero) (refl Nat zero)"
+        , ":whnf honest {0}"
+          -- False, and it type-checks anyway. **That is the deal**: the node is
+          -- where the unproved obligation is written down, and it stays there.
+          --
+          -- **It has to be asked for since MS8 phase 167**: a definition whose
+          -- claim the rung does not permit is refused at @declare@, and this
+          -- one is undischargeable, so the default rung turns it away. Dropping
+          -- to @any@ is the user saying they mean it.
+        , ":trust any"
+        , "declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)"
+        , ":whnf liar {0}"
+          -- @trusted _ e@ is an ordinary placeholder in the type position — his
+          -- ruling, 2026-10-05, and it needed nothing: @fill@ solves it from the
+          -- goal exactly as it solves every other hole.
+        , "declare inferred : Eq Nat zero zero ; inferred = trusted _ (refl Nat zero)"
+        , ":whnf inferred {0}"
+          -- The claim discharged, asked as a conversion.
+        , ":convert honest {0} \8799 refl {0} Nat zero"
+          -- The development calculus writes all three fields, so what the
+          -- printer produces reads back.
+        , ":core trusted (Eq {0} Nat zero zero) (Eq {0} Nat zero zero) (refl {0} Nat zero)"
+          -- And the surface writes two.
+        , ":surface trusted (Eq Nat zero zero) (refl Nat zero)"
+        , ":infer trusted (Eq Nat zero (succ zero)) (refl Nat zero)"
+        , ":quit"
+        ]
+    , -- **The trust accounting, end to end** (MS8 phase 151). The three rungs
+      -- are a session setting and the report is a view on the development, so
+      -- this script is the one place both are driven rather than asserted.
+      --
+      -- **The two theorems are the measured pair.** @honest@'s claim is
+      -- @Eq {\8467} Nat zero zero@ and its body's own type is @Eq {0} \8230@, so
+      -- nothing is met at the declaration — and at the use @honest {0}@ the two
+      -- converge and the claim is **discharged**. @liar@'s never can: the whnfs
+      -- agree at the head @Eq@ and clash at argument 3, which is the deep
+      -- positional test and the reason a head-only one would miss it.
+      --
+      -- **It runs at @no trust@ throughout, which is the rung that shows the
+      -- design decision.** A discharged claim is admitted there — the two types
+      -- are convertible, so the body already has the type the node claims and
+      -- the trust is carrying nothing — while the undischargeable one is
+      -- refused, and @qed@ says so without the kernel being involved: the
+      -- kernel already said @certified@ on the line above.
+      script
+        "trust"
+        [ -- **A golden runs prelude-free**, so @Eq@ is declared here rather
+          -- than assumed (@HAZARDS.md@).
+          "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+        , "data Eq (A : Type) : A -> A -> Type where { refl : \8704 (a : A) -> Eq A a a }"
+        , "declare honest : Eq Nat zero zero ; honest = trusted (Eq Nat zero zero) (refl Nat zero)"
+          -- **THE DECLARE DOOR** (MS8 phase 167, his ruling on MS8 closeout
+          -- 13). The same line is refused at the strictest rung and accepted at
+          -- @any@, which is the whole of the phase: a false definition cannot
+          -- be written into the environment without the rung permitting it.
+          -- Before 167 the first of these three lines succeeded.
+        , ":trust none"
+        , "declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)"
+        , ":trust any"
+        , "declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)"
+          -- Back to the strictest rung, and nothing is resting on it yet: a
+          -- declared global is not what the *report* is about, which is
+          -- unchanged — **the report is a view on the development**, his ruling
+          -- of 2026-10-06. What 167 changed is admission, not reporting.
+        , ":trust none"
+        , ":theorem viaHonest : Eq {0} Nat zero zero"
+        , "attack"
+        , "into"
+        , "try-core \8988 honest {0} \8989"
+        , "solve"
+        , "back"
+        , "solve"
+        , ":trust"
+        , "qed"
+        , ":theorem viaLiar : Eq {0} Nat zero (succ zero)"
+        , "attack"
+        , "into"
+        , "try-core \8988 liar {0} \8989"
+        , "solve"
+        , "back"
+        , "solve"
+        , ":trust"
+          -- Refused, and the proof is left standing — so the rung is one word
+          -- away and the development is still there to look at.
+        , "qed"
+        , ":trust any"
+        , "qed"
+        , ":quit"
+        ]
     , script
         "help"
         [ ":help"

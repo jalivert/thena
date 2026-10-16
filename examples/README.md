@@ -13,14 +13,24 @@ to the file.
 | file | what it shows |
 |---|---|
 | `01-stlc-syntax.thena` | A token class; `Ty` and `LC` declared as grammars; terms written in their own notation; `${…}` splices; `LC[var]`; generated substitution, with capture avoidance, simultaneity and free variables proved by `refl` |
-| `02-contexts.thena` | A `context` block; its lookup relation `x : T ∈ Γ`; lookups proved with `Ctx-here` and `Ctx-there`; a disequality `x ≠ f` proved with no axiom; why a shadowed binding cannot be reached |
+| `02-contexts.thena` | A `context` block; its lookup relation `x : T ∈ Γ`; lookups proved with `extend-here` and `extend-there-extend`; a disequality `x ≠ f` proved with no axiom; why a shadowed binding cannot be reached |
 | `03-typing-and-reduction.thena` | Typing, values and call-by-value reduction as `judgment` blocks in paper notation; a named premise; `E[x->N]` in a rule; typing derivations stated as judgment literals; reduction steps whose right-hand side the kernel computes by substitution, one of them capture-avoiding |
 | `04-taking-terms-apart.thena.rules` | A rule base that matches `LC` terms in their own notation (`LC[app]`( ${f} ${a} )``) and builds them (`LC`( ${t} ${t} )``) |
 | `05-grouping-by-splicing.thena` | A language with no parentheses, where `f a b` reads two ways; a splice as a group (`` Ex`${Ex`f a`} b` ``), to any depth; a name or a computation spliced in as a group; the splices `09` shows the printer writing for itself |
 | `06-more-judgments.thena` | Many steps as a judgment built on `step`, with a two-step run; the annotated tier (`rule … where ∀ … ->`) ranging over a derivation; a swap by simultaneous substitution with Redex-style subscripts (`x_1`, `x_2`) beside the sequential version that gets it wrong; a premise continued onto a second line |
 | `07-preservation.thena` | **Preservation for STLC, for closed terms** — the milestone's goal. A proof about the substitution Thena generated in 01, following its `decString` decisions: weakening, free variables, why no binder is renamed, the substitution lemma over a whole map, inversion, preservation. Ends by typing a reduct through `preservation` |
 | `08-preservation-by-tactics.thena.script` | **The same proof again, by tactics**, as a script of command lines: each lemma a `:theorem`, its inductions and case splits done with `eliminate-core`, the cases filled with `elaborate ⟨ … ⟩`, the β case taken apart by two nested eliminations. Reuses 07's definitions, not its lemmas |
+| `10-preservation-any-context.thena` | **Preservation for ANY context** — what `07` could not do. An open argument can capture, so the generated substitution renames the binder, and the file **proves** that the minted name is fresh. **Three trusted laws about `appendString` and everything else derived**: associativity, and that a string differs from itself with a `'` appended, with and without more after it. No lengths and no arithmetic — the counting is a `Longer` computed from two lists |
 | `09-printing.thena` | **Terms shown in their own notation** — the other direction from 01. A judgment's statement printed as it reads on paper; a name kept rather than unfolded into what it stands for, in a splice; the splices the printer writes where a grammar groups by splicing, as 05 writes them by hand; a variable spelled like one of the grammar's own terminals, which is fenced where the same position otherwise is not; reading it all back with `:core` |
+
+## System F-sub — `poplmark/`, its own set
+
+**`examples/poplmark/` is loaded in a FRESH session**, not with the series above: it
+declares its own `Ty`, and two languages of one name cannot be installed at once. Six
+files, read in order, answering the POPLMark challenge's problem 1A — transitivity of
+subtyping for System F-sub. `examples/poplmark/README.md` is the account: what is proved,
+the one premise added to the paper's rules and why, and the one step that is left over
+with its refutation.
 
 ## The earlier proofs — TAPL's arithmetic language, by hand
 
@@ -77,10 +87,10 @@ abs(x, base, app(var(x), var(x)))
 thena spine> :parse LC ( f x y )
 in LC`( f x y )`: unexpected 'y' at character 7, expecting )
 
-thena spine> :show Ctx-in
-data Ctx-in : String -> Ty -> Ctx -> Type₀ where
-  { Ctx-here : ∀ (Γ : Ctx) (x : String) (T : Ty) -> Ctx-in`${x} : ${T} ∈ ${Γ} , ${x} : ${T}`
-  ; Ctx-there : ∀ (Γ : Ctx) (x : String) (T : Ty) (x' : String) (T' : Ty) -> (Eq {0} String x x' -> Empty {0}) -> Ctx-in`${x} : ${T} ∈ ${Γ}` -> Ctx-in`${x} : ${T} ∈ ${Γ} , ${x'} : ${T'}` }
+thena spine> :show extend-in
+data extend-in : String -> Ty -> Ctx -> Type₀ where
+  { extend-here : ∀ (Γ : Ctx) (x : String) (T : Ty) -> extend-in`${x} : ${T} ∈ ${Γ} , ${x} : ${T}`
+  ; extend-there-extend : ∀ (Γ : Ctx) (x : String) (T : Ty) (x' : String) (T' : Ty) -> (Eq {0} String x x' -> Empty {0}) -> extend-in`${x} : ${T} ∈ ${Γ}` -> extend-in`${x} : ${T} ∈ ${Γ} , ${x'} : ${T'}` }
 
 thena spine> :parse typing · ⊢ ( λ x : ι . x ) : ( ι -> ι )
 typing(empty, abs(x, base, var(x)), arrow(base, base))
@@ -108,10 +118,7 @@ what can come next. Leave it with `:done`.
 
 ## What these do not show yet, and why
 
-- **Preservation for any context.** `07` proves it for closed terms. With
-  open ones a binder can be renamed, and proving the new name fresh needs facts
-  about strings Thena cannot state yet.
-- **Loading `02` prints one warning**, that `Ctx-in` gets no no-confusion
+- **Loading `02` prints one warning**, that `extend-in` gets no no-confusion
   lemma, **`03` prints two**, for `typing` and `step`, and **`06` three**: a
   constructor whose premise's type mentions an earlier argument gets none, and
   every rule with a premise is such a constructor. They are accurate and harmless here.

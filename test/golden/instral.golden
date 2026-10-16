@@ -13,12 +13,12 @@ instruction 1: wanted Core, got Int
 thena spine> say 42
 instruction 1: wanted String, got Int
 thena spine> :produces Core
+  intro-binders/2 : Surface -> Core -> Core   (rule)
   fresh-universe/0 : Core
 thena spine> :accepts Surface
   elaborate/1 : Surface -> ()   (rule)
   run-block/1 : Surface -> ()   (rule)
-  intro-binders/1 : Surface -> ()   (rule)
-  enter-binders/1 : Surface -> ()   (rule)
+  intro-binders/2 : Surface -> Core -> Core   (rule)
   spine-arguments/3 : Core -> Core -> Surface -> ()   (rule)
 thena spine> do { attack }
 thena spine> :show

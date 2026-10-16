@@ -255,7 +255,7 @@ theTheorem = testCase "a theorem proved by hand, start to ∎" $ do
   let l = run identityProof
   loadedError l @?= Nothing
   case reverse (loadedResponses l) of
-    Proved g _ _ _ : _ -> g @?= GlobalName "id"
+    Proved g _ _ _ _ : _ -> g @?= GlobalName "id"
     other -> assertFailure ("did not end in qed: " ++ show (take 1 other))
 
 theoremIsAGlobal :: TestTree
@@ -712,6 +712,21 @@ sessionTests =
       , ":theorem e : Box {0} Nat"
       , "elaborate ⟨ box Nat zero ⟩"
       , "qed"
+      ]
+    -- **A trusted claim under a \955.** The surface form claims @A@ for the type
+    -- the body turns out to have, and the body's own elaboration then writes its
+    -- argument definitions between @A@ and the hole it fills — so solving @A@
+    -- mentions names bound after it. @demote@ exists to unfold exactly those,
+    -- and it read its table from @rebuild@, whose walk stops at the @Guess@ a
+    -- \955's elaboration opens: inside one it unfolded nothing, and the solution
+    -- was refused as out of scope. Every trusted law in the prelude has this
+    -- shape, which is why they were written in the development calculus.
+  , ok "a trusted claim elaborates under a \955"
+      [ "data " ++ natDecl
+      , "data Eq (A : Type) : A -> A -> Type \
+        \where { refl : \8704 (a : A) -> Eq A a a }"
+      , "declare law : \8704 (a : Nat) -> Eq Nat a a \
+        \; law = \\ a -> trusted (Eq Nat a a) (refl Nat a)"
       ]
     -- **A declaration may use an earlier one**, which is what a proof module
     -- is for and what this phase was ordered before 43 to make possible.

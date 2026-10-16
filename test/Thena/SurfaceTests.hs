@@ -233,6 +233,12 @@ genSurface = sized go
             , (1, SurfaceArrow <$> smaller <*> smaller)
             , (1, SurfaceLet <$> name <*> annotation <*> smaller <*> smaller)
             , (1, SurfaceAnnot <$> smaller <*> smaller)
+              -- A trusted term (MS8 phase 150). It is generated because this is
+              -- where the parenthesisation lives and its two operands are
+              -- grammar @atom@s, which is the same thing the @elim@ fixture pins
+              -- one case of: an operand that is a λ or an arrow has to come back
+              -- parenthesised or the second operand is swallowed.
+            , (1, SurfaceTrusted <$> smaller <*> smaller)
               -- A tagged term literal (MS6 phase 104), in the shared generator
               -- for 'SurfaceLiteral'\'s reason: the printer has to escape a
               -- region's text the way the region scanner reads it back, and a

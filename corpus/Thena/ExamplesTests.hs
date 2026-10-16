@@ -41,46 +41,62 @@ tests =
         if null files then assertFailure "no numbered examples were found" else pure ()
         (s0, _) <- startingSession
         standard <- rulesPath >>= \p -> (,) p <$> readFile p
-        go s0 [standard] files
-    -- **MS6's done-when** (phase 109b): preservation for STLC, proved in the
-    -- surface language over the language 01–03 declare, and stated as it is
-    -- here — for closed terms (his choice, ms6/CLOSEOUT.md 32).
-    , testCase "preservation for STLC is proved, at its statement" $ do
-        (s0, _) <- startingSession
-        s <- foldl (\ms p -> ms >>= \s1 -> readFile p >>= \src -> case loadProofSource s1 src of
-                               (s2, ProofLoaded {}) -> pure s2
-                               (s2, other) -> refused p s2 other)
-               (pure s0)
-               [ "examples/01-stlc-syntax.thena", "examples/02-contexts.thena"
-               , "examples/03-typing-and-reduction.thena", "examples/07-preservation.thena" ]
-        let (s', r) = command s ":infer preservation"
-        renderResponse s' r @?=
+        sEnd <- go s0 [standard] files
+        -- **THE HEADLINE STATEMENTS ARE PINNED IN THE WALK'S OWN SESSION, not
+        -- in sessions of their own** (MS8 phase 163, at his instruction). Each
+        -- used to reload the prefix it needed from scratch, and the walk had
+        -- already loaded all of it: measured 7.4 s for `07`'s pin, 13.5 s for
+        -- `08`'s and 37 s for `10`'s, against 25.8 s for the walk itself.
+        -- Pinning them here costs nothing, and @go@ returning its session is
+        -- the whole of what it took.
+        let pin cmd expected =
+              let (s', r) = command sEnd cmd in renderResponse s' r @?= expected
+        -- **MS6's done-when** (phase 109b): preservation for STLC, in the
+        -- surface language, for closed terms (his choice, ms6/CLOSEOUT.md 32).
+        pin ":infer preservation"
           [ "preservation : ∀ (M : LC) (M1 : LC) (T : Ty) -> typing`· ⊢ ${M} : ${T}` -> step`${M} --> ${M1}` -> typing`· ⊢ ${M1} : ${T}`" ]
-    -- **And by tactics** (his ruling, 2026-09-21: both ways). 08 proves every
-    -- lemma again with attack, intro, eliminate-core and elaborate, and ends
-    -- at the same statement.
-    , testCase "and again by tactics, at the same statement" $ do
+        -- **And by tactics** (his ruling, 2026-09-21: both ways). `08` proves
+        -- every lemma again with attack, intro, eliminate-core and elaborate
+        -- and ends at the same statement; the walk runs that script, so this
+        -- only has to check where it ended.
+        pin ":infer preservation-tactics"
+          [ "preservation-tactics : ∀ (M : LC) (M1 : LC) (T : Ty) -> typing`· ⊢ ${M} : ${T}` -> step`${M} --> ${M1}` -> typing`· ⊢ ${M1} : ${T}`" ]
+        -- **MS8 phase 162**: the same theorem for ANY context, on one trusted law.
+        pin ":infer preservationAny"
+          [ "preservationAny : ∀ (G : Ctx) (M : LC) (M1 : LC) (T : Ty) -> typing`${G} ⊢ ${M} : ${T}` -> step`${M} --> ${M1}` -> typing`${G} ⊢ ${M1} : ${T}`" ]
+    -- **MS8's done-when** (phase 161): POPLMark problem 1A over F-sub.
+    -- @examples/poplmark/@ is its OWN set and is deliberately unnumbered: the
+    -- numbered series above loads into one session and declares its own @Ty@,
+    -- which F-sub's would clash with (@refused: Ty is already declared@).
+    --
+    -- Transitivity is proved under one hypothesis — plain weakening between
+    -- well-formed contexts — and that hypothesis is refuted in the same file,
+    -- because a derivation's own quantifier may bind a name the larger context
+    -- declares. Both statements are pinned here: the theorem must keep its
+    -- hypothesis, and the refutation must keep refuting it.
+    , testCase "POPLMark 1A is proved for F-sub, at its statement" $ do
         (s0, _) <- startingSession
         s <- foldl (\ms p -> ms >>= \s1 -> readFile p >>= \src -> case loadProofSource s1 src of
                                (s2, ProofLoaded {}) -> pure s2
                                (s2, other) -> refused p s2 other)
                (pure s0)
-               [ "examples/01-stlc-syntax.thena", "examples/02-contexts.thena"
-               , "examples/03-typing-and-reduction.thena", "examples/07-preservation.thena" ]
-        (s1, out, stopped) <- loadFile s "examples/08-preservation-by-tactics.thena.script"
-        if null stopped then pure ()
-          else assertFailure (unlines (concatMap (renderResponse s1) out))
-        let (s', r) = command s1 ":infer preservation-tactics"
+               [ "examples/poplmark/01-syntax.thena", "examples/poplmark/02-contexts.thena"
+               , "examples/poplmark/03-wellformed.thena", "examples/poplmark/04-subtyping.thena"
+               , "examples/poplmark/05-typing.thena", "examples/poplmark/06-transitivity.thena" ]
+        let (s', r) = command s ":infer transitivity"
         renderResponse s' r @?=
-          [ "preservation-tactics : ∀ (M : LC) (M1 : LC) (T : Ty) -> typing`· ⊢ ${M} : ${T}` -> step`${M} --> ${M1}` -> typing`· ⊢ ${M1} : ${T}`" ]
+          [ "transitivity : (∀ (Q : Ty) (G : Ctx) (Xn : String) (D : Ctx) (P : Ty) -> ok`⊢ ${G} , ${Xn} <: ${P} , ${D} ok` -> sub`${G} ⊢ ${P} <: ${Q}` -> sub`${G} , ${Xn} <: ${P} , ${D} ⊢ ${P} <: ${Q}`) -> ∀ (G : Ctx) (S : Ty) (Q : Ty) (T : Ty) -> sub`${G} ⊢ ${S} <: ${Q}` -> sub`${G} ⊢ ${Q} <: ${T}` -> sub`${G} ⊢ ${S} <: ${T}`" ]
+        let (s'', r') = command s ":infer wkIsFalse"
+        renderResponse s'' r' @?=
+          [ "wkIsFalse : (∀ (G : Ctx) (Xn : String) (D : Ctx) (P : Ty) -> ok`⊢ ${G} , ${Xn} <: ${P} , ${D} ok` -> sub`${G} ⊢ ${P} <: ( ∀ Z <: ⊤ . ⊤ )` -> sub`${G} , ${Xn} <: ${P} , ${D} ⊢ ${P} <: ( ∀ Z <: ⊤ . ⊤ )`) -> Empty {0}" ]
     ]
   where
     numbered f = case f of
       a : b : '-' : _ -> isDigit a && isDigit b
       _ -> False
 
-    go :: Session -> [(FilePath, String)] -> [FilePath] -> IO ()
-    go _ _ [] = pure ()
+    go :: Session -> [(FilePath, String)] -> [FilePath] -> IO Session
+    go s _ [] = pure s
     go s bases (f : more) = do
       let path = "examples/" ++ f
       src <- readFile path

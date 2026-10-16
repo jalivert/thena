@@ -49,6 +49,10 @@ import Thena.Global.Env
 import Thena.Render ( Rendering (..)
   ,renderCore)
 
+import Thena.Engine (Machine (..))
+import Thena.Driver (machineOf)
+import Thena.Files (startingSession)
+
 import Thena.Core.TermTests (genLiteral)
 import Thena.Declared (declared)
 
@@ -70,7 +74,7 @@ tests =
     , testGroup "printing and reading are inverse" roundTrip
     , testGroup "a declared primitive computes on literals" computing
     , testGroup "a primitive declaration the system cannot keep is refused" refusals
-    , testGroup "a deciding primitive answers with its evidence (phase 109a)" deciding
+    , testGroup "deciding is a prelude definition now (MS8 phase 152)" deciding
     ]
 
 -- --------------------------------------------------------------------------
@@ -294,88 +298,94 @@ printsAndReadsBack t =
     Left _        -> False
 
 -- --------------------------------------------------------------------------
--- Deciding, with evidence (MS6 phase 109a, ms6/CLOSEOUT.md 32)
+-- Deciding, retired into the prelude (MS8 phase 152)
 -- --------------------------------------------------------------------------
 
--- | @decString@, @decInt@ and @decChar@ declared over an equality and a
--- decision type **that are not the prelude's**: @Same@ and @Verdict@, with
--- @Void@ for what a refutation reaches. The rule reads every one of those names
--- off the declared type; if it ever writes @Eq@, @Dec@, @yes@ or @Empty@
--- itself, these are what notice.
-decidingEnv :: GlobalEnv
-decidingEnv = foldr declareOne base ["String", "Int", "Char"]
-  where
-    base = fst (declared
-      [ "Same (A : Type) : A -> A -> Type where { itself : \8704 (a : A) -> Same A a a }"
-      , "Void : Type where { }"
-      , "Verdict (A : Type) : Type where { proved : \8704 (p : A) -> Verdict A ; refuted : \8704 (n : A -> Void {0}) -> Verdict A }" ])
-    declareOne p = addPrimitive (GlobalName ("dec" ++ p)) (decType p)
-
--- | @(a b : P) -> Verdict {0} (Same {0} P a b)@.
-decType :: String -> Core
-decType p =
-  Pi (Ident "a") (prim p) $ close va $
-  Pi (Ident "b") (prim p) $ close vb $
-  App (Global (GlobalName "Verdict") [LZero]) (same p (Free va) (Free vb))
-  where
-    va = fst (fresh 700)
-    vb = fst (fresh 701)
-
-prim :: String -> Core
-prim p = Global (GlobalName p) []
-
-same :: String -> Core -> Core -> Core
-same p x y = App (App (App (Global (GlobalName "Same") [LZero]) (prim p)) x) y
-
+-- | @decString@, @decChar@ and @decInt@ used to be reduction rules in Haskell:
+-- a 'Thena.Core.Reduce.PrimitiveRule' that read the declared type back and
+-- /wrote/ a @yes@ carrying a @refl@, or a @no@ carrying a refutation it built
+-- itself. **They are definitions in @prelude\/prelude.thena@ now**, each
+-- eliminating its comparison primitive with a motive that keeps the answer, and
+-- each resting on exactly two @trusted@ claims about that primitive — so the
+-- escape hatch is a core term whose claim @:trust@ can name, instead of sixty
+-- lines of term-building nobody outside the implementation could see.
+--
+-- **These tests run against the real prelude**, because that is now where the
+-- behaviour lives. What they check is what the rule used to guarantee: two
+-- literals that agree decide @yes@ with the equality's own constructor, two
+-- that differ decide @no@ with a refutation the kernel accepts, and a name
+-- nobody knows decides nothing.
+--
+-- **Convertibility, not reduction on the nose.** 'Thena.Core.Reduce.whnf' is
+-- weak-head, so the evidence inside the answer is still a spine of prelude
+-- definitions once the head is @yes@; the old rule handed back a finished
+-- @refl@ because it had built one. What survived the change is that the answer
+-- /is/ that finished one, and 'Thena.Core.Convert.convert' is the question.
 deciding :: [TestTree]
 deciding =
-  [ testCase "two literals that agree are proved, by the equality's own constructor" $
-      reduced (decide "String" [str "a", str "a"])
-        @?= Canonical (GlobalName "proved") [LZero]
-              [same "String" (str "a") (str "a"), Canonical (GlobalName "itself") [LZero] [prim "String", str "a"]]
-  , testCase "two that differ are refuted" $
-      case reduced (decide "String" [str "a", str "b"]) of
-        Canonical (GlobalName "refuted") _ [_, _] -> pure ()
+  [ testCase "two literals that agree decide yes, by the equality's own constructor" $ do
+      gs <- preludeGlobals
+      convertibleIn gs
+        (decide "String" [str "a", str "a"])
+        (Canonical (GlobalName "yes") [LZero, LZero]
+          [ eqOf "String" (str "a") (str "a")
+          , Canonical (GlobalName "refl") [LZero] [prim "String", str "a"] ])
+  , testCase "two that differ decide no" $ do
+      gs <- preludeGlobals
+      case whnf gs ctx (decide "String" [str "a", str "b"]) of
+        Canonical (GlobalName "no") _ [_, _] -> pure ()
         other -> assertFailure (show other)
-    -- **The load-bearing one.** The refutation is a term the reducer wrote;
-    -- the kernel checks it, at exactly the type the constructor wants.
-  , testCase "and the refutation the reducer writes is a proof the kernel accepts" $
-      case reduced (decide "String" [str "a", str "b"]) of
+    -- **The load-bearing one.** The refutation is no longer written by the
+    -- reducer; it is derived in the prelude from @eqStringRefl@ and
+    -- @transport@, and the kernel still has to accept it at exactly the type
+    -- the constructor wants.
+  , testCase "and the derived refutation is a proof the kernel accepts" $ do
+      gs <- preludeGlobals
+      case whnf gs ctx (decide "String" [str "a", str "b"]) of
         Canonical _ _ [_, refutation] ->
-          fst3 (check decidingEnv ctx 0 refutation
-                  (Pi (Ident "_") (same "String" (str "a") (str "b"))
-                      (close (fst (fresh 702)) (Global (GlobalName "Void") [LZero]))))
+          fst3 (check gs ctx 0 refutation
+                  (Pi (Ident "_") (eqOf "String" (str "a") (str "b"))
+                      (close (fst (fresh 702)) (Global (GlobalName "Empty") [LZero]))))
             @?= Right ()
         other -> assertFailure (show other)
-  , testCase "so is the whole answer, at the primitive's own result type" $
+  , testCase "so is the whole answer, at the definition's own result type" $ do
+      gs <- preludeGlobals
       mapM_ (\(p, a, b) ->
-               fst3 (check decidingEnv ctx 0 (reduced (decide p [a, b]))
-                       (App (Global (GlobalName "Verdict") [LZero]) (same p a b)))
+               fst3 (check gs ctx 0 (whnf gs ctx (decide p [a, b])) (decOf p a b))
                  @?= Right ())
         [ ("String", str "a", str "a"), ("String", str "a", str "b")
-        , ("Int", Primitive (LInt 1), Primitive (LInt 2)), ("Char", Primitive (LChar 'x'), Primitive (LChar 'x')) ]
-  , testCase "a variable is not decided" $
-      reduced (decide "String" [Free v, str "a"]) @?= decide "String" [Free v, str "a"]
-  , testCase "the declaration the prelude makes is accepted" $
-      isRight (checkedPrimitive decidingEnv (GlobalName "decString") (decType "String")) @?= True
-  , testCase "a comparison's type is not a decision's" $
-      isRight (checkedPrimitive answering (GlobalName "decString")
-                 (arrow (prim "String") (arrow (prim "String") (prim "Answer")))) @?= False
-  , testCase "nor is a decision over the wrong primitive type" $
-      isRight (checkedPrimitive decidingEnv (GlobalName "decString") (decType "Int")) @?= False
-  , testCase "nor one whose answer has the wrong number of constructors" $
-      isRight (checkedPrimitive threeWay (GlobalName "decString") (decType "String")) @?= False
+        , ("Int", Primitive (LInt 1), Primitive (LInt 2))
+        , ("Char", Primitive (LChar 'x'), Primitive (LChar 'x')) ]
+  , testCase "a name nobody knows is not decided" $ do
+      gs <- preludeGlobals
+      case whnf gs ctx (decide "String" [Free v, str "a"]) of
+        Canonical (GlobalName g) _ _ ->
+          assertFailure ("decided " ++ g ++ " about a variable")
+        _ -> pure ()
+    -- **The retirement is complete, and this is what says so.** @primitive@
+    -- accepts only the names 'Thena.Core.Reduce.primitiveNames' has a rule
+    -- for, so with the rule gone the declaration the prelude used to make is
+    -- refused outright at every type — nobody can put @decString@ back as a
+    -- constant with no body.
+  , testCase "declare-primitive no longer knows the name at all" $
+      mapM_ (\p -> isRight' (checkedPrimitive emptyGlobals (GlobalName ("dec" ++ p))
+                               (Universe LZero)) @?= False)
+        ["String", "Char", "Int"]
   ]
   where
     v = fst (fresh 703)
     str s = Primitive (LString s)
     decide p = foldl App (Global (GlobalName ("dec" ++ p)) [])
-    reduced = whnf decidingEnv ctx
     fst3 (a, _, _) = a
-    arrow a b = Pi (Ident "_") a (close (fst (fresh 900)) b)
-    isRight = either (const False) (const True)
-    threeWay = fst (declared
-      [ "Same (A : Type) : A -> A -> Type where { itself : \8704 (a : A) -> Same A a a }"
-      , "Void : Type where { }"
-      , "Verdict (A : Type) : Type where { proved : \8704 (p : A) -> Verdict A ; refuted : \8704 (n : A -> Void {0}) -> Verdict A ; unsure : \8704 (p : A) -> Verdict A }" ])
+    isRight' = either (const False) (const True)
+    prim p = Global (GlobalName p) []
+    eqOf p x y = App (App (App (Global (GlobalName "Eq") [LZero]) (prim p)) x) y
+    decOf p x y = App (Global (GlobalName "Dec") [LZero, LZero]) (eqOf p x y)
+    convertibleIn gs a b = case convert gs ctx 0 a b of
+      (Nothing, [], _) -> pure ()
+      (why, obs, _)    -> assertFailure (show (why, length obs))
 
+-- | The environment a fresh session starts in — the rule base and the shipped
+-- prelude, which is where @decString@ lives now.
+preludeGlobals :: IO GlobalEnv
+preludeGlobals = globals . machineOf . fst <$> startingSession

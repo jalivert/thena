@@ -91,6 +91,13 @@ renderShape fold shape = case shape of
     hBox
       (str eliminator
         : map (\a -> str " " <+> atomW fold a) (params <> [motive] <> methods <> indices <> [target]))
+  -- MS8 phase 149 added the node; **this is a placeholder the engine track
+  -- wrote to keep the tree compiling, and how a trusted term should look is
+  -- yours** — see `.jalivert/NOTES.md`. The two types are both here on purpose:
+  -- the pair is the obligation, and `actual` is what says whether the trust is
+  -- still load-bearing.
+  ATrusted claimed actual body ->
+    hBox (str "trusted" : map (\a -> str " " <+> atomW fold a) [claimed, actual, body])
   ADangling n -> str ("#" <> show n)
   AnElision -> str "…"
   ARegion inner -> renderRegion fold inner
@@ -105,6 +112,7 @@ atomW fold d@(Display _ sh) = case sh of
   AnAbstraction {} -> bracket
   ALet {}          -> bracket
   AnElimination {} -> bracket
+  ATrusted {}      -> bracket
   _                -> renderDisplay fold d
   where
     bracket = str "(" <+> renderDisplay fold d <+> str ")"

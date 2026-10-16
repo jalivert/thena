@@ -16,7 +16,6 @@ thena spine> :show
 ▶ let ? t : Nat in
   t
 thena spine> :infer succ zero
-chose 14: elaborate
 already equal
 solved: Tinfer
 look at this
@@ -37,7 +36,7 @@ look at this
 thena spine> do { say h }
 instruction 1: wanted String, got Core
 thena spine> yield
-chose 18: attack
+chose 17: attack
 thena spine> yield
 nothing has yielded
 thena spine> :quit

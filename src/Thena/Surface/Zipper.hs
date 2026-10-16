@@ -57,6 +57,7 @@ module Thena.Surface.Zipper
   , intoAppTail
   , intoLamBody
   , intoLamTail
+  , intoLamAnnot
   , intoPiDomain
   , intoPiTail
   , intoArrowDomain
@@ -66,6 +67,8 @@ module Thena.Surface.Zipper
   , intoLetBody
   , intoAnnotType
   , intoAnnotTerm
+  , intoTrustedType
+  , intoTrustedTerm
   , intoElimField
   ) where
 
@@ -109,6 +112,11 @@ data Frame
   | InLamTail SurfaceBinder
     -- ^ the focus is what the λ abstracts once its first binder is peeled off
     -- — 'InPiTail' for a λ, and merged on the way out for the same reason
+  | InLamAnnot Plicity String [SurfaceBinder] Surface
+    -- ^ the focus is a λ binder's written type: its plicity and name, the rest
+    -- of the group, and the body. **'InPiDomain' for a λ**, and it exists
+    -- because an annotated λ binder elaborates — the written type has to be
+    -- reachable to be elaborated at all
   | InPiDomain Plicity String [SurfaceBinder] Surface
     -- ^ the focus is the first binder's annotation: its plicity and name, the
     -- rest of the group, and the body
@@ -122,6 +130,8 @@ data Frame
   | InLetBody String (Maybe Surface) Surface  -- ^ name, annotation, value
   | InAnnotType Surface                       -- ^ the ascribed term
   | InAnnotTerm Surface                       -- ^ the type ascribed
+  | InTrustedType Surface                     -- ^ the trusted term
+  | InTrustedTerm Surface                     -- ^ the type claimed
   | InElimField String [Surface] Surface [Surface] [Surface] Surface Int
     -- ^ the focus is one field of an @elim@, at flat position @k@ in the order
     -- the elaborator walks them: parameters, motive, methods, indices, target
@@ -163,6 +173,8 @@ rebuild s f = case f of
   InLamBody bs -> SurfaceLam bs s
   InPiDomain p x rest body ->
     SurfacePi (SurfaceBinder p x (Just s) :| rest) body
+  InLamAnnot p x rest body ->
+    SurfaceLam (SurfaceBinder p x (Just s) :| rest) body
   -- **Merged, for 'InFun'\'s reason**, and it is the one place the law in the
   -- header is up to spelling: @∀ (A : S) (a : A) -> B@ comes back exactly, and
   -- @∀ (A : S) -> ∀ (a : A) -> B@ comes back as the first — the same term,
@@ -181,6 +193,8 @@ rebuild s f = case f of
   InLetBody x ann v -> SurfaceLet x ann v s
   InAnnotType e -> SurfaceAnnot e s
   InAnnotTerm ty -> SurfaceAnnot s ty
+  InTrustedType e -> SurfaceTrusted s e
+  InTrustedTerm ty -> SurfaceTrusted ty s
   -- The flat order is the parameters, the motive, the methods, the indices and
   -- the target, so each group starts where the one before it ended — which is
   -- the arithmetic, and where an off-by-one in this frame would live.
@@ -242,6 +256,16 @@ intoPiDomain
   -> SurfaceZipper
 intoPiDomain p x rest body ty = push ty (InPiDomain p x rest body)
 
+-- | Focus the type written on a λ's first binder.
+--
+-- 'intoPiDomain' for a λ, and the group is carried the same way: the move holds
+-- the binders it did not descend into, so the way back is the only place that
+-- has to know the group was ever split.
+intoLamAnnot
+  :: Plicity -> String -> [SurfaceBinder] -> Surface -> Surface -> SurfaceZipper
+  -> SurfaceZipper
+intoLamAnnot p x rest body ty = push ty (InLamAnnot p x rest body)
+
 -- | Focus what a Π quantifies over once its first binder is peeled off.
 --
 -- **The group is peeled by the move and not in the tree**, which is what phase
@@ -291,6 +315,14 @@ intoAnnotType e ty = push ty (InAnnotType e)
 
 intoAnnotTerm :: Surface -> Surface -> SurfaceZipper -> SurfaceZipper
 intoAnnotTerm ty e = push e (InAnnotTerm ty)
+
+-- | Focus the claimed type of a @trusted T e@ (MS8 phase 150).
+intoTrustedType :: Surface -> Surface -> SurfaceZipper -> SurfaceZipper
+intoTrustedType e ty = push ty (InTrustedType e)
+
+-- | … and its body.
+intoTrustedTerm :: Surface -> Surface -> SurfaceZipper -> SurfaceZipper
+intoTrustedTerm ty e = push e (InTrustedTerm ty)
 
 -- | Focus one field of an @elim@, at flat position @k@ in the order the
 -- elaborator walks them: the parameters, the motive, the methods, the indices,

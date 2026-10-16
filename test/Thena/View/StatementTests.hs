@@ -76,7 +76,7 @@ tests =
     , testGroup "a tagged literal is an operand (phase 141)"
         [ testCase "a slot offers the tag, so a literal may be written there" tagOffered
         , testCase "and inside it the object grammar answers, not recovery" insideIsDirect
-        , testCase "a finished term offers its closing fence and nothing else" fenceOffered
+        , testCase "a finished term offers its closing fence, and a substitution" fenceOffered
         , testCase "the production-named form narrows to that production" namedProduction
         , testCase "no nonterminal this module invented reaches the frontend" noSynthetic
         , testCase "instral's own head cannot collide with a language's" headIsNamespaced
@@ -599,11 +599,16 @@ insideIsDirect = do
   if ALiteralSymbol "\953" `elem` offeredOptions o then pure ()
     else assertFailure ("expected Ty's base type: " <> show (offeredOptions o))
 
+-- | **@[@ joined the list at MS8 phase 159** and the test's old name ("and
+-- nothing else") stopped being true: a complete @LC@ may be continued by the
+-- generated @E[x -> N]@ notation, which is a production of the grammar now
+-- rather than a privilege of a rule's parser (§4.8). So after a finished term
+-- the two continuations are the closing fence and a substitution.
 fenceOffered :: IO ()
 fenceOffered = do
   s <- withLC
   [ w | ALiteralSymbol w <- offeredOptions (offerIn s "fill LC`( \955 x : \953 . x ) ") ]
-    @?= ["`"]
+    @?= ["[", "`"]
 
 -- | @LC[abs]\`@ says which production the literal is, so only that production's
 -- own opening may follow — @abs@ begins with @(@ and then @\955@.

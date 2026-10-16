@@ -31,7 +31,7 @@ judgment typing = Γ ⊢ M : T where
 
 -- Each rule is a constructor, and `:show typing` prints them:
 --
---   T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> Ctx-in x T Γ -> typing Γ (var x) T
+--   T-var : ∀ (x : String) (T : Ty) (Γ : Ctx) -> extend-in x T Γ -> typing Γ (var x) T
 --   T-abs : ∀ (Γ : Ctx) (x : String) (S : Ty) (E : LC) (T : Ty)
 --             -> typing (extend Γ x S) E T -> typing Γ (abs x S E) (arrow S T)
 --   T-app : ∀ (Γ : Ctx) (M : LC) (S : Ty) (T : Ty) (N : LC)
@@ -42,7 +42,7 @@ judgment value = M value where
   V-abs:  ------------------------
           ( λ x : T . E ) value
 
--- Call by value. `E[x->N]` is the generated substitution, LC-subst E x N, so
+-- Call by value. `E[x->N]` is the generated substitution, LC-subst-x E x N, so
 -- a step computes its own right-hand side. A premise may be named, as `v` and
 -- `s` are in E-app2.
 judgment step = M --> N where
@@ -67,7 +67,7 @@ judgment step = M --> N where
 identityTyped : typing`· ⊢ ( λ x : ι . x ) : ( ι -> ι )`
 identityTyped =
   T-abs Ctx`·` "x" base LC`x` base
-    (T-var "x" base Ctx`·, x : ι` (Ctx-here Ctx`·` "x" base))
+    (T-var "x" base Ctx`·, x : ι` (extend-here Ctx`·` "x" base))
 
 -- ⊢ λ x : ι . λ y : ι . x  :  ι -> ι -> ι
 -- The x in the body is found past y, so the lookup needs x ≠ y.
@@ -84,12 +84,12 @@ constTyped =
   T-abs Ctx`·` "x" base LC`( λ y : ι . x )` Ty`( ι -> ι )`
     (T-abs Ctx`·, x : ι` "y" base LC`x` base
       (T-var "x" base Ctx`·, x : ι, y : ι`
-        (Ctx-there Ctx`·, x : ι` "x" base "y" base xNotY (Ctx-here Ctx`·` "x" base))))
+        (extend-there-extend Ctx`·, x : ι` "x" base "y" base xNotY (extend-here Ctx`·` "x" base))))
 
 
 -- ---------------------------------------------------------------------------
 -- Reduction steps. The right-hand side is checked by the kernel running
--- LC-subst, so each of these is a small test of substitution too.
+-- LC-subst-x, so each of these is a small test of substitution too.
 
 -- ( λ x : ι -> ι . x ) ( λ y : ι . y )  -->  λ y : ι . y
 betaStep : step`( ( λ x : ( ι -> ι ) . x ) ( λ y : ι . y ) ) --> ( λ y : ι . y )`

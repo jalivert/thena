@@ -44,6 +44,7 @@ import Thena.Driver
   )
 import Thena.Global.Env (emptyGlobals)
 import Thena.Fixtures (allFour, guessShadowing, richTypes, withConstraint)
+import Thena.Core.Trust (TrustLevel (..))
 import Thena.Engine
   ( Development (..)
   , Exec (..)
@@ -225,6 +226,7 @@ runTo m = case step m of
 machineAt :: Partial -> Machine
 machineAt p =
   Machine (Exec [] [] []) (Development (enter p)) [] emptyGlobals expectedBase [] [] startCounter 0
+          NoUndischargeableTrust
 
 clickTests :: [TestTree]
 clickTests =

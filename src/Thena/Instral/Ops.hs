@@ -667,6 +667,8 @@ data Op
   | ArrowCodomain Operand    -- ^ … its @B@
   | AscriptionType Operand   -- ^ the @T@ of a surface @e : T@
   | AscriptionTerm Operand   -- ^ … its @e@
+  | TrustedClaim Operand     -- ^ the @T@ of a surface @trusted T e@ (MS8 phase 150)
+  | TrustedBody Operand      -- ^ … its @e@
     -- ^ **Moves, not readers**: each answers with a 'VSurface' focused on that
     -- part, so the path the zipper carries is extended rather than thrown away
     -- (MS4 phase 46). A clause pairs each with the test that makes it total —
@@ -720,8 +722,15 @@ data Op
     -- — takes its arguments as written, so the term comes back unchanged.
   | LambdaName Operand
     -- ^ the first binder's name in a surface λ, as text (MS4 phase 49c).
-    -- **It refuses an annotated or implicit binder**, which is the whole of
-    -- what the λ case still cannot elaborate.
+    -- **It refuses an implicit binder and nothing else.** An annotated binder is
+    -- answered exactly as a plain one is — the type written on it is
+    -- @lambda-annot-type@\'s to read — and the plicity refusal stays here, so
+    -- every λ shape reaches the one place that names it.
+  | LambdaAnnotType Operand
+    -- ^ the type written on a surface λ's first binder — what @intro-binders@
+    -- elaborates before the binder is introduced. **Answered only where one was
+    -- written**: a bare binder is refused here rather than answered with a hole,
+    -- so the clause that reads it cannot also be the clause that does not.
   | LambdaTail Operand
     -- ^ … what the λ abstracts once that binder is peeled off: the rest of the
     -- group if there was one, otherwise the body
@@ -817,6 +826,19 @@ data Op
     -- definition and not a claim: a definition's type is determined by its
     -- value. That is also why it takes two operands where 'Assume' and 'Claim'
     -- take a name and a /type/.
+  | MakeTrusted Operand Operand Operand
+    -- ^ three terms → @trusted claimed actual body@ (MS8 phase 150), the second
+    -- term-building op after 'Arrow' and 'ApplyTo'.
+    --
+    -- **It takes @actual@ as an operand rather than working it out.** Reading
+    -- the body's type here would make this op infer, which is @claim@'s job and
+    -- not a builder's — the elaboration clause claims a hole for it and the
+    -- body's own elaboration solves it, which is what /derived/ means in a
+    -- system whose inference is unification.
+    --
+    -- **@Make@, because 'Thena.Core.Term.Trusted' is a different thing with the
+    -- same word**, and 'TrustedClaim' and 'TrustedBody' read a surface one. The
+    -- same reason 'SurfaceNameOf' carries its @Of@.
   | Arrow Operand Operand
     -- ^ two terms → the non-dependent @Π@ between them (MS4 phase 41d).
     --
@@ -1196,6 +1218,7 @@ resultOf o = case o of
   AppFunction _ -> Just TSurface
   AppLastArgument _ -> Just TSurface
   LambdaName _ -> Just TName
+  LambdaAnnotType _ -> Just TSurface
   LambdaTail _ -> Just TSurface
   LambdaBody _ -> Just TSurface
   LetName _ -> Just TName
@@ -1208,6 +1231,9 @@ resultOf o = case o of
   ArrowCodomain _ -> Just TSurface
   AscriptionType _ -> Just TSurface
   AscriptionTerm _ -> Just TSurface
+  TrustedClaim _ -> Just TSurface
+  TrustedBody _ -> Just TSurface
+  MakeTrusted {} -> Just TCore
   Goal         -> Just TCore
   Typing _     -> Just TCore
   Define _ _   -> Just TCore   -- the variable it bound, as 'Assume' and 'Claim' do
@@ -1225,8 +1251,16 @@ resultOf o = case o of
   Back         -> Nothing
   Play _       -> Nothing
   Attack       -> Nothing
-  IntroPi _    -> Nothing
-  IntroLet _   -> Nothing
+  -- **The hole they open, handed back.** Both introduce a binder and claim a
+  -- hole for what is left of the goal, and a clause that wants to work /inside/
+  -- the binder it just made has no other way to reach that hole: it is not the
+  -- focus, @goto@ takes a variable, and counting @along@s from the guess is the
+  -- shape that stops scaling the moment a clause introduces several. @claim@,
+  -- @assume@ and @define@ all answer with the variable they bound; these two
+  -- minted one and threw it away, which is what made the annotated λ binder
+  -- need an op of its own in an earlier attempt.
+  IntroPi _    -> Just TCore
+  IntroLet _   -> Just TCore
   Try _        -> Nothing
   Regret       -> Nothing
   Solve        -> Nothing
@@ -1357,6 +1391,7 @@ operandTypes o = case o of
   AppFunction x -> [(x, TSurface)]
   AppLastArgument x -> [(x, TSurface)]
   LambdaName x -> [(x, TSurface)]
+  LambdaAnnotType x -> [(x, TSurface)]
   LambdaTail x -> [(x, TSurface)]
   LambdaBody x -> [(x, TSurface)]
   LetName x -> [(x, TSurface)]
@@ -1370,6 +1405,9 @@ operandTypes o = case o of
   ArrowCodomain x -> [(x, TSurface)]
   AscriptionType x -> [(x, TSurface)]
   AscriptionTerm x -> [(x, TSurface)]
+  TrustedClaim x -> [(x, TSurface)]
+  TrustedBody x -> [(x, TSurface)]
+  MakeTrusted a b c -> [(a, TCore), (b, TCore), (c, TCore)]
   Goal         -> []
   Typing a     -> [(a, TCore)]
   Define a b   -> [(a, TName), (b, TCore)]
@@ -1619,6 +1657,7 @@ data Test
   | SurfaceIsArrow Operand         -- ^ @A -> B@
   | SurfaceIsLet Operand           -- ^ @let x = v in b@
   | SurfaceIsAscription Operand    -- ^ @e : T@
+  | SurfaceIsTrusted Operand       -- ^ @trusted T e@ (MS8 phase 150)
   | SurfaceIsElim Operand          -- ^ @elim D … t@
   | SurfaceIsDo Operand            -- ^ @do { … }@
   | AppArgsAreExplicit Operand
@@ -1641,12 +1680,37 @@ data Test
     -- @elim@ node, not a name, so the binary clause took it: it claims
     -- @f : A -> B@, an /arrow/, and an eliminator\'s type is a telescope, so
     -- @A@ was left unsolved and the declaration silently produced nothing.
+  | AppHeadIsTerm Operand
+    -- ^ **a spine whose head is neither a name nor an @elim@** — Brady's @e a@,
+    -- the head being a term that has to be elaborated in its own right
+    -- (MS8 phase 170).
+    --
+    -- **The third positive test of the three, and it is what stops elaboration
+    -- backtracking.** Until phase 170 the binary clause asked only
+    -- 'AppArgsAreExplicit', so it matched every name-headed spine too and was
+    -- tried whenever 'AppHeadIsName'\'s clause failed. The binary clause claims
+    -- @f : A -> B@, so against a dependent head it fails on its own claim
+    -- /before/ re-reaching the argument that was actually wrong, and that
+    -- spurious failure was what the user got: @refl String "y"@ against
+    -- @Eq String "x" "x"@ answered @A2 is not bound before A@, and an object
+    -- term with a bracket missing answered @A3 is not bound before A1@ while the
+    -- parse error that named the bracket was computed and thrown away.
+    --
+    -- With this test the three application clauses are mutually exclusive, so
+    -- every clause of @elaborate@ names the node it is for and a call to
+    -- @elaborate@ has nothing to choose between.
   | LambdaBindsMore Operand        -- ^ a λ whose group has a binder after the
                                    --   first (MS4 phase 49c)
   | LambdaBindsOne Operand         -- ^ … and one whose group has just the one
     -- ^ **Two positive tests, as @let@'s are**: they are how a clause that
     -- peels one binder knows whether to recurse, and the head language has no
     -- negation.
+  | LambdaIsAnnotated Operand      -- ^ a λ whose first binder has a written type
+  | LambdaIsBare Operand           -- ^ … and one whose first binder has none
+    -- ^ **Two positive tests, as @let@\'s are**, and **on the written type and
+    -- not on the plicity**: an implicit binder is bare or annotated like an
+    -- explicit one, so both shapes still reach @lambda-name@\'s refusal rather
+    -- than falling through to no clause at all.
   | LetIsAnnotated Operand         -- ^ a @let@ whose type was written (49b)
   | LetIsBare Operand              -- ^ … and one whose type was not
     -- **The questions @instral@ asks about its own data** (MS5 phase 65). They
@@ -1747,6 +1811,7 @@ opKeyword o = case o of
   AppFunction _ -> "app-function"
   AppLastArgument _ -> "app-last-argument"
   LambdaName _ -> "lambda-name"
+  LambdaAnnotType _ -> "lambda-annot-type"
   LambdaTail _ -> "lambda-tail"
   LambdaBody _ -> "lambda-body"
   LetName _ -> "let-name"
@@ -1759,6 +1824,9 @@ opKeyword o = case o of
   Play _ -> "play"
   ArrowCodomain _ -> "arrow-codomain"
   AscriptionType _ -> "ascription-type"
+  TrustedClaim _ -> "trusted-claim"
+  TrustedBody _ -> "trusted-body"
+  MakeTrusted {} -> "make-trusted"
   AscriptionTerm _ -> "ascription-term"
   Goal         -> "goal"
   Typing _     -> "typeof"
@@ -1787,6 +1855,7 @@ partWords :: [String]
 partWords =
   [ "fun", "arg", "dom", "cod", "val", "type", "body"
   , "motive", "target", "param", "method", "index"
+  , "claimed", "actual"
   ]
 
 -- | A field word, and the position written after it if there was one.
@@ -1808,6 +1877,9 @@ partOf w k = case (w, k) of
   ("body",   Nothing) -> Just Body
   ("motive", Nothing) -> Just Motive
   ("target", Nothing) -> Just Target
+  -- @body@ already serves @trusted@'s third field: one word, one idea (§4.7).
+  ("claimed", Nothing) -> Just Claimed
+  ("actual",  Nothing) -> Just Actual
   ("arg",    Just i)  -> Just (CanonArg i)
   ("param",  Just i)  -> Just (Param i)
   ("method", Just i)  -> Just (Method i)
@@ -1826,6 +1898,8 @@ partWord p = case p of
   Body       -> "body"
   Motive     -> "motive"
   Target     -> "target"
+  Claimed    -> "claimed"
+  Actual     -> "actual"
   CanonArg _ -> "arg"
   Param _    -> "param"
   Method _   -> "method"

@@ -24,6 +24,7 @@ import Thena.Development.Partial (Partial (..))
 import Thena.Declared (nat, natDecl)
 import Thena.Standard (expectedBase)
 import Thena.Driver (parseDeclaration)
+import Thena.Core.Trust (TrustLevel (..))
 import Thena.Engine
   ( Exec (..)
   , Machine (..)
@@ -722,7 +723,7 @@ text = Lit . VText
 machineIn :: GlobalEnv -> Cursor -> [Instr] -> Machine
 machineIn env cur is =
   load is (Machine (Exec [] [] []) (Development cur) [] env
-                   (expectedBase ++ [returning]) [] [] 1000 0)
+                   (expectedBase ++ [returning]) [] [] 1000 0 NoUndischargeableTrust)
 
 -- | A base with one rule in it that returns something (MS5 phase 63).
 --
@@ -808,18 +809,20 @@ everyHoleRule =
     -- runs none of them: they take a parameter.
   , "claim", "assume", "quantify"
   ]
-    ++ replicate 18 "elaborate" ++ ["run-block"] ++ replicate 2 "enter-binders"
+    ++ replicate 19 "elaborate" ++ ["run-block"]
     ++ replicate 2 "spine-arguments"
 
--- | The λ case's two recursive helpers, which every listing at a guess shows.
+-- | The recursive helpers every listing at a guess shows.
 --
 -- **A test about an argument nobody supplied does not exclude a clause** (phase
 -- 47), so a rule whose head only asks about its argument is offered wherever
--- its state test passes — and @intro-binders@ really does apply at a guess.
+-- its state test passes — and @intro-binders@ really does apply at a guess, in
+-- all four of its clauses: a group or a single binder, each with a written type
+-- or without.
 walkers :: [String]
 walkers =
   [ "claim", "assume", "quantify", "run-block"
-  , "intro-binders", "intro-binders", "enter-binders", "enter-binders"
+  , "intro-binders", "intro-binders", "intro-binders", "intro-binders"
   , "spine-arguments", "spine-arguments"
   ]
 

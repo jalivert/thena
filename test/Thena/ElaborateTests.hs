@@ -24,6 +24,7 @@ import Test.Tasty.QuickCheck
 
 import Thena.Driver
   ( Loaded (..)
+  , loadProofSource
   , loadSource
   )
 import Thena.Standard (withRules)
@@ -35,6 +36,7 @@ import Thena.Development.Component (Component (..))
 import Thena.Development.Cursor (Cursor, enter, focus)
 import qualified Thena.Development.Cursor as Cursor
 import Thena.Development.Partial (Partial (..))
+import Thena.Core.Trust (TrustLevel (..))
 import Thena.Engine
   ( Exec (..)
   , Machine (..)
@@ -58,6 +60,8 @@ import Thena.Rules
   , matches
   , next
   )
+import Thena.Files (startingSession)
+import Thena.Render (renderResponse)
 import Thena.Standard (expectedBase)
 import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..))
 import Thena.Surface.Zipper (rootedAt)
@@ -74,7 +78,91 @@ tests =
     , unsupportedTests
     , baseTests
     , endToEnd
+    , honestRefusals
     ]
+
+-- --------------------------------------------------------------------------
+-- The message a wrong argument gets (MS8 phase 170)
+-- --------------------------------------------------------------------------
+
+-- | **A wrong argument to a name-headed application reports the real error.**
+--
+-- The three application clauses of @elaborate@ used to overlap: the binary one
+-- asked only that the arguments be explicit, so it matched a name-headed spine
+-- too and was tried whenever the name-headed clause failed. It claims
+-- @f : A -> B@, which a dependent head does not fit, so against @Eq@ or @refl@
+-- it failed on its own claim /before/ re-reaching the argument that was wrong,
+-- and that spurious failure was what the user saw — @A2 is not bound before A@,
+-- naming development components and nothing they wrote. The real error was
+-- computed and thrown away.
+--
+-- **Two different errors were lost the same way**, which is why both are pinned
+-- here: a type mismatch, and a parse error inside an object term literal whose
+-- message already named the bracket exactly.
+--
+-- **A non-dependent head always reported honestly**, because the binary clause
+-- re-elaborated the argument and met the same error again — so a test over
+-- @Nat -> Nat@ would have passed throughout and is no evidence. The head has to
+-- be dependent.
+honestRefusals :: TestTree
+honestRefusals =
+  testGroup
+    "a wrong argument to a dependent head reports the real error"
+    [ testCase "a false equation names the two sides" $
+        failureOf
+          [ "a : Eq String \"x\" \"x\""
+          , "a = refl String \"y\""
+          ]
+          >>= (@?= "stuck: \"y\" and \"x\" cannot be made equal")
+
+    , testCase "and so does one over Int" $
+        failureOf
+          [ "a : Eq Int 1 1"
+          , "a = refl Int 2"
+          ]
+          >>= (@?= "stuck: 2 and 1 cannot be made equal")
+
+    , testCase "a wrong argument further in names the types" $
+        failureOf
+          [ "a : List String"
+          , "a = cons String \"x\" (nil Int)"
+          ]
+          >>= (@?= "stuck: Int and String cannot be made equal")
+
+      -- **The object-term half, and the message was always right** — it is
+      -- reached now instead of being discarded. @Eq@ is the dependent head; the
+      -- same literal under a non-dependent one reported this all along.
+    , testCase "an unparseable literal under Eq names the bracket" $
+        failureOf
+          [ "y : Token String"
+          , "y = /[a-z]+/"
+          , ""
+          , "language LC, M, N where"
+          , "  var : y as occurrence -> y"
+          , "  app                   -> ( M N )"
+          , ""
+          , "a : Eq LC LC`( f` LC`( f g )`"
+          , "a = refl LC LC`( f g )`"
+          ]
+          >>= (@?= "stuck: in LC`( f`: the term ends too soon, expecting y, ( or [")
+    ]
+  where
+    -- **The session the REPL starts in**, prelude and shipped base loaded, so
+    -- @Eq@, @List@ and @refl@ are the ones a user has, and a @language@ block
+    -- gets the module layout it needs.
+    --
+    -- **The last line, and the rest of the response is the level solver's
+    -- running commentary** — a page of @solved:@ lines, which is what the
+    -- manual warns a declaration at the prompt prints. Whitespace is
+    -- normalised because a refusal may wrap: the message is what is pinned,
+    -- not its line breaks.
+    failureOf ls = do
+      (s0, _) <- startingSession
+      let src = unlines (["module Wrong where", ""] ++ ls)
+          (s1, resp) = loadProofSource s0 src
+      pure $ case filter (not . null) (renderResponse s1 resp) of
+        [] -> "it loaded, and should not have"
+        rs -> unwords (words (last rs))
 
 -- --------------------------------------------------------------------------
 -- The whole stack, over generated programs (2026-09-13)
@@ -195,9 +283,10 @@ genSurfaceOf scope ty n = oneof (variables ++ introduction ++ eliminations)
 type0 :: Core
 type0 = Universe LZero
 
-goalVar, hypVar :: Var
+goalVar, hypVar, hyp2Var :: Var
 goalVar = fst (fresh 0)
 hypVar  = fst (fresh 1)
+hyp2Var = fst (fresh 2)
 
 -- | @λ a : Type₀ . ? goal : Type₀ . goal@, focused on the hole — so there is
 -- something in scope at the focus for a surface name to denote (§4.5).
@@ -263,7 +352,8 @@ elaboratingAt cur s =
 -- **With the standard base installed**, because elaboration lives in it.
 machineAt :: Cursor -> [Instr] -> Machine
 machineAt cur is =
-  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals expectedBase [] [] 1000 0)
+  load is (Machine (Exec [] [] []) (Development cur) [] emptyGlobals expectedBase [] [] 1000 0
+                   NoUndischargeableTrust)
 
 -- | @? goal : ∀ (a : Type₀) (b : Type₀) -> Type₀@ — two binders, so a miscount
 -- would show.
@@ -272,6 +362,15 @@ piGoal2 = enter (Under (Claim goalVar (Ident "goal") ty) (Trailing (Free goalVar
   where
     inner = Pi (Ident "b") type0 (Thena.Core.Term.close hypVar type0)
     ty    = Pi (Ident "a") type0 (Thena.Core.Term.close hypVar inner)
+
+-- | @? goal : ∀ (A : Type₀) (x : A) -> A@ — the goal whose second binder's type
+-- is the first binder, which is the case a written type can only be checked in
+-- if it is elaborated where the earlier binders are in scope.
+piGoalDep :: Cursor
+piGoalDep = enter (Under (Claim goalVar (Ident "goal") ty) (Trailing (Free goalVar)))
+  where
+    inner = Pi (Ident "x") (Free hypVar) (Thena.Core.Term.close hyp2Var (Free hypVar))
+    ty    = Pi (Ident "A") type0 (Thena.Core.Term.close hypVar inner)
 
 -- | @? goal : ∀ (a : Type₀) -> Type₀@ — a hole a lambda can be elaborated into.
 --
@@ -297,6 +396,10 @@ identsBound m = chain (Cursor.rebuild (cursor (development m)))
     chain _                          = []
 
     lams (Lam (Ident i) _ b) = i : lams (Thena.Core.Term.instantiate (Universe LZero) b)
+    -- **Past the bindings an elaboration leaves in front of the λ.** A binder
+    -- with a written type has that type elaborated into a hole of its own, and
+    -- the solved hole is a @let@ sitting between the guess and the λ.
+    lams (Let _ v _ b)       = lams v ++ lams (Thena.Core.Term.instantiate (Universe LZero) b)
     lams _                   = []
 
 -- | The variable of the component the focus is on.
@@ -487,19 +590,52 @@ lambdaTests =
           Left r  -> assertFailure ("did not elaborate: " ++ show r)
           Right m -> focusedVar m @?= Just goalVar
 
-      -- An annotation is **refused rather than ignored**: checking it against
-      -- the goal\'s domain needs the ascription machinery, which is a later
-      -- phase, and accepting it silently would be a check that is not happening.
-    , refusedShape "a λ whose first binder is plain"
-        (SurfaceLam [SurfaceBinder Explicit "x" (Just (SurfaceUniverse 0))]
-           (SurfaceName "x"))
-    , refusedShape "a λ whose first binder is plain"
+      -- **A written type is a check, and the binder is still the goal's** (MS8).
+      -- The surface name survives exactly as it does without one.
+    , testCase "a written binder type is checked, and the binder is unchanged" $
+        case elaboratingAt piGoal (SurfaceLam [SurfaceBinder Explicit "y" (Just (SurfaceUniverse 0))]
+                                     (SurfaceName "y")) of
+          Left r  -> assertFailure ("did not elaborate: " ++ show r)
+          Right m -> (identsBound m, focusedVar m) @?= (["y"], Just goalVar)
+
+      -- **The case the written type exists for**: its own type is an earlier
+      -- binder of the same group, so it can only be elaborated inside them.
+    , testCase "and it may name an earlier binder of the same group" $
+        case elaboratingAt piGoalDep (SurfaceLam [ SurfaceBinder Explicit "A" Nothing
+                                                 , SurfaceBinder Explicit "x" (Just (SurfaceName "A")) ]
+                                        (SurfaceName "x")) of
+          Left r  -> assertFailure ("did not elaborate: " ++ show r)
+          Right m -> identsBound m @?= ["A", "x"]
+
+      -- A group mixes freely, because the clause peels one binder at a time and
+      -- asks about that one.
+    , testCase "and a group mixes written and bare binders" $
+        case elaboratingAt piGoal2 (SurfaceLam [ SurfaceBinder Explicit "y" (Just (SurfaceUniverse 0))
+                                               , SurfaceBinder Explicit "z" Nothing ]
+                                      (SurfaceName "z")) of
+          Left r  -> assertFailure ("did not elaborate: " ++ show r)
+          Right m -> (identsBound m, focusedVar m) @?= (["y", "z"], Just goalVar)
+
+      -- **A wrong one fails at the binder it was written on**, not at @qed@.
+    , testCase "and a written type that is not the goal's domain is refused" $
+        case elaboratingAt piGoal (SurfaceLam [SurfaceBinder Explicit "y" (Just (SurfaceName "String"))]
+                                     (SurfaceName "y")) of
+          Left _  -> pure ()
+          Right m -> assertFailure ("elaborated: " ++ show (identsBound m))
+
+      -- **Only the plicity is still refused**, and @lambda-name@ is where: an
+      -- implicit binder is bare or written like any other, so both shapes reach
+      -- the one refusal that names it.
+    , refusedShape "a λ whose first binder is explicit"
         (SurfaceLam [SurfaceBinder Implicit "x" Nothing] (SurfaceName "x"))
+    , refusedShape "a λ whose first binder is explicit"
+        (SurfaceLam [SurfaceBinder Implicit "x" (Just (SurfaceUniverse 0))] (SurfaceName "x"))
     ]
   where
-    -- **The λ case is a clause now** (MS4 phase 49c), so its refusal comes from
-    -- @lambda-name@, which will not read an annotated or implicit binder — and
-    -- it is asked before anything is introduced.
+    -- **The λ case is clauses now** (MS4 phase 49c, MS8): a plain binder reads
+    -- its type off the goal, a written one is elaborated and checked against
+    -- it, and @lambda-name@ refuses an implicit binder before anything is
+    -- introduced.
     refusedShape what s = testCase what $
       case elaboratingAt piGoal s of
         Left (ExpectedSurfaceShape w) -> w @?= what
@@ -620,7 +756,7 @@ baseTests =
               , "fit-core", "fit-core"
               , "claim", "assume", "quantify"
               ]
-              ++ replicate 18 "elaborate" ++ ["run-block"] ++ replicate 2 "enter-binders"
+              ++ replicate 19 "elaborate" ++ ["run-block"]
               ++ replicate 2 "spine-arguments"
 
     , testCase "prove is a rule over prim-prove" $

@@ -44,12 +44,15 @@ import Thena.View
   , statementOfferView
   , parseView
   , rulesView
+  , sessionTrust
+  , trustView
   )
 import Thena.View.Chart (BoundView (..), OfferView (..), Written (..))
 import Thena.View.Development (LinkView (..))
 import Thena.View.Machine (MachineView (..))
 import Thena.View.Rules (RuleView (..))
 import Thena.View.Tokens (TokenView (..), tokensView)
+import Thena.View.Trust (TrustLevel (..), TrustView (..))
 import Thena.View.Type (SignatureView (..))
 
 main :: IO ()
@@ -109,6 +112,17 @@ checks =
   , \s -> want "renderResponse" (not (null (renderResponse s (snd (oneLine s ":show")))))
   , \s -> want "binderAddresses" (not (null (binderAddresses s)))
   , \s -> want "fuel is readable" (fuelOf (fst (oneLine s ":step 3")) == Just 3)
+    -- **The trust level and the report both cross** (MS8 phase 151). The level
+    -- is read so a pane can show it; the view is reached so the claims can be
+    -- drawn; and the rung is switched through the ordinary command door, which
+    -- is the whole of what a frontend has to do to own that affordance.
+  , \s -> want "the trust level is readable" (sessionTrust s == NoUndischargeableTrust)
+  , \s -> want "trustView" (trustViewLevel (trustView budget s) == sessionTrust s)
+  , \s -> want "a frontend may switch the rung"
+            (sessionTrust (fst (oneLine s ":trust none")) == NoTrust)
+    -- A development that rests on nothing says so, which is the answer a pane
+    -- draws for almost every proof.
+  , \s -> want "nothing is resting on it yet" (null (trustViewClaims (trustView budget s)))
   , \s -> want "a job runs in slices" (job s)
   ]
   where
