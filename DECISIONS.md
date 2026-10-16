@@ -1005,9 +1005,9 @@ the production says    app -> ( M N )            slots hold NONTERMINALS
 a use site says        ( y z )                   slots are filled with TERMS
 ```
 
-**A slot is one word naming a nonterminal, and slots are filled with terms rather
-than types.** The one case where a term written at a slot is a type is the case where
-the nonterminal is a universe — an instance of the rule, not an exception to it.
+**A slot is filled with a term rather than a type.** The one case where a term
+written at a slot is a type is the case where the slot is at a universe — an
+instance of the rule, not an exception to it.
 
 The consequence that matters in practice. Give a spelling to a function whose last
 argument is a derivation:
@@ -1015,13 +1015,17 @@ argument is a derivation:
 ```
 collapse : ∀ (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Ctx
 
-notation collapse -> ⟨ Γ , M , T by typing ⟩
+notation collapse G M T d -> ⟨ G , M , T by d ⟩
 ```
 
-The fourth slot is the single word `typing`. Writing the derivation's *type* there —
+The fourth slot is the parameter `d`. Writing the derivation's *type* there —
 `⟨ Γ , M , T by Γ ⊢ M : T ⟩` — is not merely hard to read, it is a different
 production: `Γ ⊢ M : T` is a reading, three slots and two pieces of text, so that
 spelling has three slots each written twice and no slot at all for the derivation.
+
+**Until 2026-10-16 that fourth slot was the single word `typing`, the grammar's own
+name**, because a judgment declares no word for its derivations — which said
+nothing about *which* argument was meant. Naming the parameters replaced it.
 Agda's `syntax` declarations name one argument per slot and would write `by d`;
 Thena keeps one kind of word in a production instead, so the word is the one that
 names the nonterminal.
@@ -1044,27 +1048,31 @@ to what the slots hold. The header carries the name's own spelling:
 ```
 data bound : String -> Tp -> Env -> Type₀ where { bHere : … ; bThere : … }
 
-notation bound -> v ◂ A ◂ Δ where
+notation bound (v : x) A Δ -> v ◂ A ◂ Δ where
 ```
 
 A premise is an argument's type, so anything with a type spelling may stand above
 a rule's bar — including a plain `LC`, since a rule is a constructor and an
-argument may be at any type. And because a slot is one word naming a nonterminal,
-the universes needed spellings of their own, `𝕌₀`, `𝕌₁`, …, zero-based: without
-one, `k : Type₀ -> Ty -> Ty` could not be given a spelling at all.
+argument may be at any type. And the universes have spellings of their own,
+`𝕌₀`, `𝕌₁`, …, zero-based, so that a universe can be written where a type is
+wanted — without them `k : Type₀ -> Ty -> Ty` had no spelling at all, since a
+slot then had to be a word naming a nonterminal.
+
+**Since 2026-10-16 a notation names its own arguments** rather than borrowing
+words from the grammars, which is the section *A notation names its own arguments*
+below; the examples here are in that form.
 
 ```
 collapse : ∀ (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Ctx
 notation Ctx where
-  collapse -> ⟨ Γ , M , T by typing ⟩
+  collapse G M T d -> ⟨ G , M , T by d ⟩
 ```
 
-The fourth slot is the single word `typing`: a hole at a derivation, whose
-indices come from the declaration by position. That word means this only in a
-`notation` block, which describes a declaration that already exists. In a
-`language` block the argument types are generated *from* the slots, so there
-would be no indices to supply — and for the same reason a slot at a universe is
-refused there.
+The fourth slot is `d`: a hole at a derivation, whose type and indices come from
+the declaration. **A `notation` block can do this because it describes a
+declaration that already exists.** In a `language` block the argument types are
+generated *from* the slots, so there is nothing to read a type off — and for the
+same reason a slot at a universe is refused there.
 
 **That line runs through the whole feature.** A hand-written datatype with an
 assigned notation gets the full freedom of Surface: any universe, an index
@@ -1075,7 +1083,7 @@ hand-written route is the escape:
 
 ```
 data Valid : ∀ (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Type₀ where …
-notation Valid -> ⊢ Γ , M , T by typing valid where
+notation Valid G M T d -> ⊢ G , M , T by d valid where
 ```
 
 A block that installs a grammar for a hand-written datatype also generates its
@@ -1105,11 +1113,12 @@ append : Ctx -> Ctx -> Ctx
 append = …
 
 notation Ctx where
-  append -> Γ ∪ Δ
+  append a b -> a ∪ b
 ```
 
-`Γ ∪ Δ` now parses wherever a `Ctx` is expected — a rule's index position
-included — and elaborates to `append Γ Δ`. So the paper's rule is writable:
+`a ∪ b` now parses wherever a `Ctx` is expected — a rule's index position
+included — and elaborates to `append` applied to what the two slots read. So the
+paper's rule is writable:
 
 ```
 S-split : ∀ (Γ : Ctx) (Δ : Ctx) (T : Ty) (S : Ty)
@@ -1169,6 +1178,132 @@ class and no object grammar spells a list. So the one-pair form is a production
 and the list form is not — which means the list form is still a rule's privilege
 and does not parse in a term literal.
 
+
+### A notation names its own arguments, and anything declared may have one
+
+*Decided 2026-10-16, built the same day.*
+
+A `notation` production says which argument each place in the spelling is for, by
+naming them and taking them in order:
+
+```
+data Valid : ∀ (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Type₀ where
+  { validAny : ∀ (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Valid G M T d }
+
+notation Valid G M T d -> ⊢ G , M , T by d valid where
+```
+
+**The names are local.** The first is the first parameter or index of the thing
+being spelled, and nothing requires it to be spelled the way the declaration
+spells its own binders — `notation Valid a b c p -> ⊢ a , b , c by p valid` means
+the same. A word of the spelling is a slot exactly when it is one of those names;
+every other word is literal text. The rules are what you would expect: as many
+names as arguments, no name twice, and every name written somewhere — an argument
+with nowhere to be written could not be given.
+
+**A slot's type is read off the declaration rather than checked against the
+spelling**, so the two cannot disagree. The one thing a declaration cannot say is
+which token class a `String` argument reads, because several classes may share
+`String`; that parameter is ascribed, and nothing else may be:
+
+```
+notation notIn (v : X) G -> v # G where
+```
+
+**Before this a slot was a word that happened to be a metavariable of some
+grammar in scope, and that could not say which argument it meant.** Where a
+derivation goes there was no word at all — a judgment declares none, since an
+arbitrary derivation has no one type — so the *grammar's own name* stood in:
+`notation Valid -> ⊢ Γ , M , T by typing valid`. That read like a claim about the
+fourth argument's type while claiming nothing, and the identical line was accepted
+for a declaration whose fourth argument is `typing G M base`, third index nailed to
+`ι`. It also forced a grammar to carry words it did not need: two identical words
+collapse to one slot, so `append -> Γ ∪ Γ` is refused and `Ctx` had to declare a
+second word, `Δ`, purely so a two-argument function could be spelled.
+
+**Anything declared may have notation, including a judgment's rules and a
+datatype's constructors — the condition is that it not be ambiguous.** A rule
+given a spelling is a derivation you can write:
+
+```
+notation plain where
+  T-any -> ⟪ Γ ! M ! T ⟫
+```
+```
+thena spine> :infer plain`⟪ · ! x ! ι ⟫`
+plain`⟪ · ! x ! ι ⟫` : plain`· ⊢ x : ι`
+```
+
+Spell a rule like its own statement and the statement stops being readable, which
+is the one thing you may not do — and you are told, with the colliding rule named:
+
+```
+thena spine> :infer plain`· ⊢ x : ι`
+stuck: in plain`· ⊢ x : ι`: this term parses two ways,
+       as plain(empty, var(x), base) and as T-any(empty, var(x), base)
+```
+
+**That check is at parse time, so a colliding notation loads clean** and the
+breakage appears when somebody writes an affected term. A declaration-time check
+is intended and is not here yet.
+
+### A rule's premise may be named, and later premises may write the name
+
+*Decided 2026-10-16, built the same day.*
+
+```
+judgment check = Γ ⊢ M ⇐ T where
+
+  CheckRule:  p1 : Γ ⊢ M : T
+              p2 : ⊢ Γ , M , T by p1 valid
+              --------------------------
+              Γ ⊢ M ⇐ T
+```
+
+A name is in scope for every premise after it, on the same line or a later one,
+wherever a term of that premise's own type can be written — and in the conclusion.
+So `CheckRule`'s second premise is a statement *about the derivation the first one
+names*:
+
+```
+CheckRule : ∀ (Γ : Ctx) (M : LC) (T : Ty) (p1 : typing`${Γ} ⊢ ${M} : ${T}`)
+              -> Valid`⊢ ${Γ} , ${M} , ${T} by ${p1} valid`
+              -> check`${Γ} ⊢ ${M} ⇐ ${T}`
+```
+
+Papers do this as `D :: J` and “by IH”. An unnamed premise is still `d1`, `d2`, …
+by its position, and a name may not be a metavariable of any grammar, nor a type
+the rule mentions, nor another premise's name — so a name in a premise means
+exactly one thing.
+
+### `:judgment` shows a judgment's rules the way a paper writes them
+
+*Decided 2026-10-16, built the same day.*
+
+```
+thena spine> :judgment typing
+  d1 : x : T ∈ Γ
+  -------------- T-var
+  Γ ⊢ x : T
+
+  d1 : Γ ⊢ M : ( S -> T )
+  d2 : Γ ⊢ N : S
+  ----------------------- T-app
+  Γ ⊢ ( M N ) : T
+```
+
+An argument at a judgment's statement is a premise; every other argument is a
+metavariable and is left out, which is what a paper does. A premise carries its own
+name, so a named premise reads here as it was written. It is derived from the
+declared types, so a hand-written datatype with notation shows the same way a
+generated judgment does.
+
+**It is a display and nothing reads it back.** The statements above the bar stand
+as *types*, and a derivation needs terms in those positions — so this form could
+not be a way of writing one even in principle. `:show` still gives the
+declaration, which is the thing that round-trips; the two answer different
+questions. And it is `:judgment` rather than `:rules` because `:rules` is the
+engine's rule base: an `instral` rule and an inference rule are different things.
 
 ### An object term is parsed by its grammar, and `:parse` shows how
 
