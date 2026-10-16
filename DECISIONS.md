@@ -39,7 +39,7 @@ in your own notation — `≼`, `Γ⊢`, `x'`, `2-cell`, `∂f/∂x` are all one
 | brackets and separators | `(` `)` `{` `}` `[` `]` `;` `,` `"` |
 | operator characters | `λ` `∀` `⊢` `≟` `≐` `≈` `▸` `⌜` `⌝` |
 | whitespace | |
-| keywords | `let` `in` `elim` `forall` `where` `rule` `when` `then` |
+| keywords | `let` `in` `elim` `forall` `where` `do` `rule` `when` |
 
 A name starts with an ASCII letter, `_`, or any non-reserved character above
 ASCII.
@@ -73,7 +73,7 @@ reserved:
 ∀ (x : Type₀)-> x     fine
 ```
 
-**`rule`, `when` and `then` are keywords** and cannot be used as names. Op words
+**`rule`, `when` and `do` are keywords** and cannot be used as names. Op words
 are not: `solve`, `type`, `goal` and the rest stay perfectly good identifiers,
 which is why a rule is written `rule ‹name› :- when … do …` and not with the
 op words reserved.
@@ -2082,7 +2082,7 @@ McBride's tactic is now written as the two halves it always had:
 
 ```
 rule fill t :- when focus-is-hole
-  then n = fresh-name "refined" ; x = define n t
+  do n = fresh-name "refined" ; x = define n t
      ; s = typeof x ; g = goal ; unify-into s g ; prim-try x
 
 rule unify-refine-core t :- when focus-is-hole do fill t ; solve
@@ -2125,7 +2125,7 @@ through.
 
 ```
 rule elaborate t :- when focus-is-hole (surface-is-name t)
-  then w = surface-name t ; x = resolve-name w ; fill t ; solve
+  do w = surface-name t ; x = resolve-name w ; fill t ; solve
 
 rule elaborate t :- when focus-is-hole (surface-is-placeholder t) do
 ```
@@ -2183,21 +2183,34 @@ could be offered.
 **A rule body may be empty**, which it could not before. `E⟦_⟧` is *do nothing*:
 the hole is already there and unification is expected to find it. A clause that
 does nothing and a clause that does not match are different answers, so the
-empty body is saying something. `then` is still required.
+empty body is saying something. `do` is still required.
 
 **A rule loops by recursing over the surface term.** The λ case needs one
-`prim-intro` per binder of a group, and a rule body is a straight run of
+`prim-lambda` per binder of a group, and a rule body is a straight run of
 instructions with no iteration — so a helper peels one binder and calls itself
 on the tail, and the term is its own counter:
 
 ```
-rule intro-binders t :- when focus-is-guess (lambda-binds-more t)
-  then x = lambda-name t ; prim-intro x
-     ; tl = lambda-tail t ; call intro-binders tl
+rule intro-binders t k :- when focus-is-guess (lambda-binds-more t) (lambda-is-bare t)
+  do x  = lambda-name t
+     ; k2 = prim-lambda x
+     ; tl = lambda-tail t
+     ; body = call intro-binders tl k2
+     ; return body
 
-rule intro-binders t :- when focus-is-guess (lambda-binds-one t)
-  then x = lambda-name t ; prim-intro x
+rule intro-binders t k :- when focus-is-guess (lambda-binds-one t) (lambda-is-bare t)
+  do x = lambda-name t
+     ; k2 = prim-lambda x
+     ; return k2
 ```
+
+**It returns the hole it ended at, and the caller `goto`es that** rather than
+counting its way back down — `prim-lambda` and `prim-let` produce the hole they
+claim for what is left of the goal. Counting moves was what the deleted
+`enter-binders` did, and it is only right while the binders are the sole
+components in the chain: a λ whose binder carries a written type claims a hole
+*inside* them, and the count is then off by one per annotation. That is why
+there are two further clauses for an annotated binder.
 
 **Peeling in the elaborate clause itself would not do**, because attacking once
 per binder nests the λs and wraps each in its own `let` — a different proof
@@ -2217,7 +2230,7 @@ surface term focused on the part rather than a detached one:
 
 ```
 rule elaborate t :- when focus-is-hole (surface-is-arrow t)
-  then … ; a = arrow-domain t ; call elaborate a
+  do … ; a = arrow-domain t ; call elaborate a
         ; … ; b = arrow-codomain t ; call elaborate b
 ```
 
@@ -2282,7 +2295,7 @@ base of your own:
 ```
 -- E⟦x⟧ = FILL x ; SOLVE — Brady's variable case.
 rule elaborate t :- when focus-is-hole (surface-is-name t)
-  then w = surface-name t
+  do w = surface-name t
      ; x = resolve-name w
      ; fill x
      ; solve
@@ -3279,7 +3292,7 @@ it failed only when it ran*).
 
 *Decided 2026-09-13.*
 
-A rule file is one layout block and a rule body is a block that `then` opens, so
+A rule file is one layout block and a rule body is a block that `do` opens, so
 a body can be written as indented lines with no separators at all:
 
 ```
@@ -3293,7 +3306,7 @@ leading-`;` style the shipped base is written in:
 
 ```
 rule fill t :- when focus-is-hole
-  then n = fresh-name "refined"
+  do n = fresh-name "refined"
      ; x = define n t
 ```
 
