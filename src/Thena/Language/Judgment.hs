@@ -31,8 +31,9 @@ module Thena.Language.Judgment
   , isMetavariable
   ) where
 
-import Data.Char (isAlphaNum)
+import Data.Char (isAlphaNum, isSpace)
 import Data.List (nub)
+import Data.Maybe (listToMaybe)
 import qualified Data.List.NonEmpty as NE
 
 import Thena.Core.Term (GlobalName (..))
@@ -179,9 +180,58 @@ constructor gs g r = do
     -- conclusion is parsed with.
     premiseLines extra acc [] = Right (reverse acc, extra)
     premiseLines extra acc (txt : rest) = do
-      line <- premisesOf <$> parseWith extra Premises "premises" (StartAt premisesNT) txt
-      extra' <- (extra ++) . concat <$> traverse inScope line
+      (line, extra') <- premisesInLine extra txt
       premiseLines extra' (reverse line ++ acc) rest
+
+    -- **One premise at a time, inside the line as well as across lines** (MS8
+    -- phase 173, HIS instruction of 2026-10-16: making it work between lines and
+    -- not within one is unprincipled).
+    --
+    -- **Where one premise ends is the parser's answer, not a guess.** A line is
+    -- a list of premises told apart only by parsing, so the split cannot be
+    -- found lexically — but the chart holds it: every prefix that completes
+    -- @premiseNT@ from the start is a possible first premise. Each is tried,
+    -- longest first, and the rest of the line is read with that premise's name
+    -- in scope; the first split whose remainder also reads is the parse. **Any
+    -- split the list grammar would have found is among these**, so a line that
+    -- parsed before parses the same way now.
+    --
+    -- The whole-line parse is still what reports a failure, so a line that
+    -- cannot be read says what it always said.
+    premisesInLine extra txt = case go extra txt of
+      Just done -> Right done
+      Nothing -> do
+        -- **No split works, so read the line as one list** — which is what every
+        -- line did before this phase, and which is also what reports the
+        -- failure when the line cannot be read at all.
+        line <- premisesOf <$> parseWith extra Premises "premises" (StartAt premisesNT) txt
+        added <- concat <$> traverse inScope line
+        Right (line, extra ++ added)
+      where
+        go ex s
+          | all isSpace s = Just ([], ex)
+          | otherwise = listToMaybe
+              [ (p' : more, ex'')
+              | j <- splitsOf ex s
+              , Right t <- [parseWith ex Premises "premises" (StartAt premiseNT) (take j s)]
+              , let p' = premiseOf t
+              , Right added <- [inScope p']
+              , let ex' = ex ++ added
+              , Just (more, ex'') <- [go ex' (drop j s)]
+              ]
+
+        -- The prefix lengths at which a complete premise ends, longest first.
+        splitsOf ex s =
+          let c = Earley.chart (rules ++ ex) (StartAt premiseNT) (map Char s)
+           in reverse (nub
+                [ j
+                | j <- [1 .. Earley.inputLength c]
+                , it <- Earley.itemsAt c j
+                , Earley.itemOrigin it == 0
+                , let r' = Earley.chartRule c it
+                , Earley.ruleHead r' == premiseNT
+                , Earley.itemDot it == length (Earley.ruleBody r')
+                ])
 
     -- **What a premise name may be written as: a term of that premise's own
     -- type.** A premise at a judgment's statement names a derivation, so the
@@ -242,6 +292,14 @@ constructor gs g r = do
       Left e -> Left (QuantifierUnreadable e)
       Right (SurfacePi bs _) -> Right (NE.toList bs)
       Right _ -> Right []
+
+-- | **One parse of @premiseNT@, with its name** (MS8 phase 173) — what
+-- 'premisesOf' does to each element of a list, for a premise read on its own.
+premiseOf :: Tree -> (Maybe String, Tree)
+premiseOf p = case p of
+  Node _ [Token n, j] -> (Just n, j)
+  Node _ [j] -> (Nothing, j)
+  _ -> (Nothing, p)
 
 -- | The premises of a parse of @the premises@, in order, with their names.
 premisesOf :: Tree -> [(Maybe String, Tree)]

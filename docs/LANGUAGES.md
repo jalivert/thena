@@ -302,8 +302,9 @@ judgment check = Γ ⊢ M ⇐ T where
               Γ ⊢ M ⇐ T
 ```
 
-**A name is in scope from the next line on**, wherever a term of that premise's
-own type can be written — in a later premise, and in the conclusion. So
+**A name is in scope for every premise after it**, on the same line or a later
+one, wherever a term of that premise's own type can be written — and in the
+conclusion. So
 `CheckRule`'s second premise is a statement *about the derivation the first one
 names*, which is the dependence a rule needs and could not state before:
 
@@ -313,8 +314,6 @@ CheckRule : ∀ (Γ : Ctx) (M : LC) (T : Ty) (p1 : typing`${Γ} ⊢ ${M} : ${T}`
               -> check`${Γ} ⊢ ${M} ⇐ ${T}`
 ```
 
-- **Within one line it is not in scope.** A line is one parse, and its names are
-  not known until that parse is finished. Write one premise per line.
 - **An unnamed premise is still `d1`, `d2`, …** by its position.
 - **A name may not be a metavariable of any grammar**, nor a type the rule
   mentions, nor another premise's name — so a name in a premise means exactly

@@ -275,7 +275,8 @@ premises =
         [ "data twice : Ctx -> LC -> Ty -> Type₀ where"
         , "  { B : ∀ (Γ : Ctx) (M : LC) (T : Ty) -> typing`${Γ} ⊢ ${M} : ${T}` -> typing`${Γ} ⊢ ${M} : ${T}` -> twice`${Γ} ⊢ ${M} :: ${T}` }" ]
       argumentNames s "twice" "B" @?= ["Γ", "M", "T", "left", "d2"]
-    -- **A NAMED PREMISE IS IN SCOPE FROM THE NEXT LINE ON** (MS8 phase 172, HIS
+    -- **A NAMED PREMISE IS IN SCOPE FOR EVERY PREMISE AFTER IT** (MS8 phase 172,
+    -- across lines; phase 173 within one. HIS
     -- ruling of 2026-10-16). Until then a premise name was writable nowhere: the
     -- grammar every premise was parsed against was fixed before any name was
     -- bound, so @by p1@ was refused as @p1 is not a metavariable@. **This is
@@ -309,16 +310,20 @@ premises =
       -- @M@ is not quantified: the conclusion's term slot is the named premise,
       -- so there is no metavariable there to collect.
       argumentNames s "fits" "F-any" @?= ["Γ", "T", "m"]
-    -- **Within one line it is not in scope**, because the line is one parse and
-    -- its names are not known until that parse is done. Premises are written one
-    -- per line in every paper and every example here.
-  , refusal "a premise name is not in scope on its own line"
-      (typing ++ valid ++
+    -- **The same line works too, and it is the same parse** (MS8 phase 173, HIS
+    -- instruction: making it work between lines and not within one is
+    -- unprincipled). A line is a list of premises told apart only by parsing, so
+    -- the split is taken from the chart — every prefix that completes a premise
+    -- is tried, longest first, with that premise's name in scope for the rest.
+  , testCase "and on the same line, which is one parse" $ do
+      s <- loaded (header ++ typing ++ valid ++
         [ "judgment oneline = Γ ⊢ M ⇚ T where", ""
         , "  S:  p1 : Γ ⊢ M : T    p2 : ⊢ Γ , M , T by p1 valid"
         , "      --------------------------"
         , "      Γ ⊢ M ⇚ T", "" ])
-      "refused: in the judgment oneline, rule S: p1 is not a metavariable"
+      said s ":show oneline" !! 1
+        @?= "  { S : ∀ (Γ : Ctx) (M : LC) (T : Ty) (p1 : typing`${Γ} ⊢ ${M} : ${T}`) -> Valid`⊢ ${Γ} , ${M} , ${T} by ${p1} valid` -> oneline`${Γ} ⊢ ${M} ⇚ ${T}` }"
+      argumentNames s "oneline" "S" @?= ["Γ", "M", "T", "p1", "p2"]
     -- x is a metavariable, so `x : T ∈ Γ` is never a premise named x.
   , testCase "a lookup premise is not read as a premise named by its metavariable" $ do
       s <- loaded (header ++ typing)
