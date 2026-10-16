@@ -75,7 +75,7 @@ import Thena.Language.Grammar
   , variableProductions
   , variableRegex
   )
-import Thena.Language.Reader (Block (..), Production (..), RawItem (..))
+import Thena.Language.Reader (Param (..), Block (..), Production (..), RawItem (..))
 import Thena.Language.Regex (primingChar)
 import Thena.Syntax.Lexer (BlockKind (..))
 import Thena.Surface.Concrete (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..))
@@ -410,29 +410,32 @@ substitutionNotations gs g
   | otherwise  = [Block NotationBlock lang [] prods []]
   where
     GlobalName lang = grammarName g
+    -- **The three names are the production's own, since MS8 phase 171.** They
+    -- used to be metavariables hunted out of the grammars — the target from this
+    -- one, the replacement from whichever language owns the class — and the hunt
+    -- existed only because a slot's word had to be a metavariable somewhere. A
+    -- @notation@ production names its arguments now, so the generator says what
+    -- it means and no grammar has to carry a word for it.
     prods =
-      [ Production 0 (substOf lang k) Nothing
+      [ Production 0 (substOf lang k)
+          [ Param (target k) Nothing, Param k (Just k), Param (replacement k) Nothing ]
+          Nothing
           (map Word [target k, "[", k, "->", replacement k, "]"])
       | GlobalName k <- classesSubstituted gs g
       ]
 
-    -- A metavariable of the grammar, its own name last: a block's head is its
-    -- name and then its metavariables, and the name is a metavariable too.
-    metavarsOf h = drop 1 (grammarMetavars h) ++ [ n | let GlobalName n = grammarName h ]
-    owner k = fromMaybe g (classOwner gs g (GlobalName k))
-
-    -- The class's name cannot collide with a metavariable — @MetavariableTaken@
-    -- refuses a metavariable that is a token class — so only the two language
-    -- slots can, and they do whenever a language owns the class it reads.
-    target k = unused [k] (metavarsOf g)
-    replacement k = unused [k, target k] (metavarsOf (owner k))
-    unused used cands = case [ c | c <- cands, c `notElem` used ] of
-      c : _ -> c
-      -- Unreachable: @metavarsOf@ always ends with the grammar's own name, and
-      -- priming it is what a collision would take.
-      []    -> primed used (fromMaybe "M" (listToMaybe cands))
-    primed used x | x `elem` used = primed used (x ++ "'")
-                  | otherwise = x
+    -- **Three parameters: the term, the name replaced, and what replaces it.**
+    -- The middle one reads a name of the class, so it is the one that carries an
+    -- ascription — @String@ is all its declared argument says, and this grammar
+    -- may read several classes over @String@.
+    --
+    -- The two language slots only have to avoid the class's own name, which is
+    -- the middle parameter's. They used to be metavariables hunted out of the
+    -- grammars, and the hunt existed only because a slot's word had to be a
+    -- metavariable somewhere; a parameter list says what it means.
+    target k = pick "e" [ c | c <- ["e", "e1"], c /= k ]
+    replacement k = pick "n" [ c | c <- ["n", "n1"], c /= k, c /= target k ]
+    pick dflt cs = fromMaybe dflt (listToMaybe cs)
 
 freshOf, fvOf, substOf :: String -> String -> String
 freshOf l k = l ++ "-fresh-" ++ k

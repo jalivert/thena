@@ -81,7 +81,7 @@ import Thena.Global.Env
   , lookupDefinition
   , lookupInductive
   )
-import Thena.Language.Reader (Block (..), Metadata (..), Production (..), RawItem (..), RawRule (..))
+import Thena.Language.Reader (Param (..), Block (..), Metadata (..), Production (..), RawItem (..), RawRule (..))
 import Thena.Syntax.Lexer (BlockKind (..))
 
 -- | A validated grammar.
@@ -278,6 +278,21 @@ data RuleProblem
 
 data ProductionProblem
   = NoItems
+  -- **The three refusals a named-parameter notation adds** (MS8 phase 171).
+  | ParamRepeated String
+    -- ^ the same name twice in a @notation@ production's parameter list. Two
+    -- identical words used to collapse to one slot — which is why
+    -- @append -> \915 \8746 \915@ was refused as one slot for two arguments — and a
+    -- parameter list is not a layout, so here it can only be a mistake.
+  | ParamUnspelled String
+    -- ^ a parameter the layout never mentions, so the argument it names has
+    -- nowhere to be written and the term could not be built.
+  | ParamNotReadable String Core
+    -- ^ the declared argument this parameter names is at a type no slot can
+    -- read. **A @String@ argument is the case that matters**: several token
+    -- classes may share @String@, so the declaration cannot say which one the
+    -- slot reads and the parameter has to be ascribed — @( v : X )@.
+  | NoSuchTokenClass String
   | NotAMetavariable String
     -- ^ a binding form's head, or a name in the metadata, that is neither a
     -- metavariable nor a class. A plain word is a terminal (§4.2), so this is
@@ -736,26 +751,16 @@ checkNotation installed env b = do
     refuse :: GrammarProblem -> Either GrammarError a
     refuse = Left . GrammarError NotationBlock name
 
-    -- Every installed grammar's metavariables, the named one's included. When
-    -- the header names a datatype that has no grammar yet (MS8 phase 160) that
-    -- one is not in @installed@, so its own name is put in front — otherwise a
-    -- slot could not be written in the very block that is giving the type its
-    -- spelling.
-    -- **A GRAMMAR'S OWN NAME RESOLVES AS A SLOT WORD HERE, AND NOWHERE ELSE**
-    -- (MS8 phase 160). A judgment declares no metavariables and that is right —
-    -- *"a metavariable stands for an arbitrary value of one type, and an
-    -- arbitrary derivation has no one type"* — but in a @notation@ block the
-    -- slot's type comes from the /declaration being described/, which supplies
-    -- the indices positionally. So @typing@ names a hole at
-    -- @typing G M T@ here, while in a @language@ block the same word would have
-    -- no indices to be given and is `~8pk9r`.
-    sortOf = sortIn env
-      ( ownMetavars
-          ++ [ (m, grammarName g) | g <- installed, m <- grammarMetavars g ]
-          ++ [ (n, grammarName g) | g <- installed, let GlobalName n = grammarName g ] )
-    ownMetavars = case named of
-      Just g  -> [ (m, grammarName g) | m <- grammarMetavars g ]
-      Nothing -> []
+    -- **A NOTATION'S SLOT WORDS WERE RESOLVED AGAINST EVERY GRAMMAR IN SCOPE
+    -- UNTIL MS8 PHASE 171, AND THAT WHOLE APPARATUS IS GONE.** A slot was a word
+    -- that happened to be some grammar's metavariable, or — the part that was
+    -- the real defect — a grammar's own /name/, which is what let
+    -- @\8866 \915 , M , T by typing valid@ put the word @typing@ where a derivation
+    -- goes. A judgment declares no metavariable for its derivations, so naming
+    -- the grammar was the only thing available, and it read as a claim about the
+    -- argument's type while claiming nothing. Parameters say which argument is
+    -- meant and the declaration says its type, so neither the table nor the
+    -- grammar's-own-name case has anything left to do.
 
     taken f = f `elem` concat [ map gproductionName (grammarProductions g) | g <- installed ]
 
@@ -783,6 +788,66 @@ checkNotation installed env b = do
     -- @language@ block's — roles, binding forms and all, since there is a real
     -- constructor for the metadata to be about — and what it is checked against
     -- is the declaration it describes.
+    -- **A notation's slots are its own parameters, since MS8 phase 171** (HIS
+    -- ruling, 2026-10-16). The order of the arguments is the order of the
+    -- parameter list and not the order they happen to appear in the layout, so
+    -- @notation f a b -> b \8853 a@ is the flip and says so; and a slot's sort is
+    -- read /from/ the declaration rather than checked against it, which is why
+    -- 'slotIs' is gone from both paths below. A sort taken from the declaration
+    -- cannot disagree with it.
+    withParams g p domains kind' f = do
+      let ps = productionParams p
+      case [ x | (x, n) <- counted (map paramName ps), n > (1 :: Int) ] of
+        x : _ -> Left (ParamRepeated x)
+        []    -> Right ()
+      if length domains == length ps
+        then Right ()
+        else Left (FunctionArity (length domains) (length ps))
+      -- **A function's spelling binds nothing, and says so in its own words.**
+      -- 'constructorShape' would refuse the binding form too, but as a
+      -- judgment's notation rather than an application's, and the two are
+      -- different mistakes.
+      case [ hd | kind' == Function, Binding hd _ <- productionItems p ] of
+        hd : _ -> Left (FunctionBinds hd)
+        []     -> Right ()
+      sorts <- sequence [ paramSort g q dom | (q, dom) <- zip ps domains ]
+      let named' = zip (map paramName ps) sorts
+          slotOf w = lookup w named'
+      (items, args, _) <- constructorShape slotOf (kind' /= Function) True p
+      case [ x | x <- map paramName ps, x `notElem` map argumentName args ] of
+        x : _ -> Left (ParamUnspelled x)
+        []    -> Right ()
+      -- Back into the parameter list's order, which is the declaration's.
+      let ordered = [ a | x <- map paramName ps, a <- take 1 [ q | q <- args, argumentName q == x ] ]
+      Right (GProduction f items ordered kind')
+
+    -- **What a parameter's slot reads, from the argument it names.** An
+    -- ascription is consulted first and is the only way to reach a token class,
+    -- because several classes may share one @T@ — POPLMark's @X@ and @x@ are
+    -- both @Token String@ — so a @String@ argument does not say which it is.
+    --
+    -- **It is the HEAD of the declared type that decides the slot** (MS8 phase
+    -- 160, kept here at 171), so an argument at an /indexed/ type is a slot:
+    -- @d : typing G M T@ is a hole at @typing@, and which typing judgment it is
+    -- comes from the declaration. The indices are the type checker's to verify.
+    paramSort g q dom = case paramClass q of
+      Just cls -> case tokenClassOf env cls of
+        Just (t, re)
+          | typeNamed env dom == Just t -> Right (OfClass (GlobalName cls) t re)
+          | otherwise -> Left (ParamNotReadable (paramName q) (whnf env [] dom))
+        Nothing -> Left (NoSuchTokenClass cls)
+      Nothing
+        | Universe lvl <- whnf env [] dom, Normal l [] <- normalise lvl -> Right (OfUniverse l)
+        -- **The grammar being described counts as installed here**, as it does
+        -- for the slot words 'checkNotation' used to resolve: a block giving a
+        -- datatype its first spelling is not in @installed@ yet, and @lmAbs@'s
+        -- own @Lam@ argument has to be a slot in the very block that spells it.
+        | Just h <- typeHead env dom
+        , h `elem` (grammarName g : map grammarName installed) -> Right (OfLanguage h)
+        | otherwise -> Left (ParamNotReadable (paramName q) (whnf env [] dom))
+
+    counted xs = [ (x, length [ () | y <- xs, y == x ]) | x <- nub xs ]
+
     declaring g p = do
       -- **Roles belong to the block that installs the grammar** — HIS ruling,
       -- 2026-10-11. A block editing a grammar whose substitution family is
@@ -791,7 +856,6 @@ checkNotation installed env b = do
       case (productionMetadata p, editing) of
         (Just _, True) -> Left (RolesAfterTheGrammar (grammarName g))
         _ -> Right ()
-      (items, args, _) <- constructorShape sortOf True True p
       let f = GlobalName (productionName p)
       if isHeader p then Right () else if taken f then Left FunctionHasNotation else Right ()
       (domains, kind') <-
@@ -805,68 +869,19 @@ checkNotation installed env b = do
               then Right ()
               else Left (FunctionResult (whnf env [] result))
             Right (ds, Constructor)
-      if length domains == length args
-        then Right ()
-        else Left (FunctionArity (length domains) (length args))
-      sequence_ [ slotIs a dom | (a, dom) <- zip args domains ]
-      Right (GProduction f items args kind')
+      withParams g p domains kind' f
 
     applying g p = do
-      items <- traverse item (productionItems p)
-      if null items then Left NoItems else Right ()
       case productionMetadata p of
         Nothing -> Right ()
         Just _  -> Left FunctionMetadata
-      -- **The distinct names in order of first appearance**, as §4.3 has it for
-      -- a constructor: a name written twice is one argument, and the parser's
-      -- non-linear filter is what makes the two readings agree. Every argument
-      -- is 'Plain' — a role is metadata on a constructor and there is none here.
-      let slots = [ (x, srt) | Slot x srt _ <- items ]
-          args = [ Argument x srt Plain
-                 | x <- nub (map fst slots), srt <- take 1 [ t | (y, t) <- slots, y == x ] ]
-          f = GlobalName (productionName p)
+      let f = GlobalName (productionName p)
       if taken f then Left FunctionHasNotation else Right ()
       (domains, result) <- maybe (Left NotADeclaredFunction) Right (functionShape env f)
       if typeNamed env result == Just (grammarName g)
         then Right ()
         else Left (FunctionResult (whnf env [] result))
-      if length domains == length args
-        then Right ()
-        else Left (FunctionArity (length domains) (length args))
-      sequence_ [ slotIs a dom | (a, dom) <- zip args domains ]
-      Right (GProduction f items args Function)
-
-    -- **The parameter has to be at the slot's own type.** A function whose
-    -- argument is anything else could not be handed what the notation reads
-    -- there.
-    --
-    -- **It is the HEAD that is compared since MS8 phase 160**, so an argument at
-    -- an /indexed/ type is accepted: @collapse@'s @d : typing G M T@ is a hole
-    -- at the @typing@ nonterminal, and which typing judgment it is comes from
-    -- the declaration rather than from the spelling. The indices are the type
-    -- checker's to verify, which is the trade §4.8's result check already makes.
-    -- A universe still answers 'Nothing' and is still refused.
-    slotIs a dom = case argumentSort a of
-      -- **A slot at @\120140\8320@ wants an argument at exactly that universe.** The
-      -- parser cannot tell `Type\8320` from `Type\8321` in the text — @LC@ and
-      -- @Imp A B@ are both just type spellings — so the level is held here and
-      -- at every use site by the type checker.
-      OfUniverse n
-        | Universe lvl <- whnf env [] dom, Normal l [] <- normalise lvl, l == n -> Right ()
-        | otherwise -> Left (FunctionSlot (argumentName a) (whnf env [] dom)
-                               (GlobalName (universeSpelling n)))
-      OfLanguage l  -> atType l
-      OfClass _ t _ -> atType t
-      where
-        atType wanted
-          | typeHead env dom == Just wanted = Right ()
-          | otherwise = Left (FunctionSlot (argumentName a) (whnf env [] dom) wanted)
-
-    item i = case i of
-      Word w -> case sortOf w of
-        Nothing  -> reservedTerminal w >> Right (Terminal w)
-        Just srt -> reservedScan w srt >> Right (Slot w srt [])
-      Binding hd _ -> Left (FunctionBinds hd)
+      withParams g p domains Function f
 
 -- | **The datatype a type is**, reduced — and 'Nothing' for anything that is not
 -- one. The refusal shows the type itself rather than a stand-in name, so the
@@ -1353,7 +1368,14 @@ earleyRules gs = typeRules gs ++
     nameOf (GlobalName n) = n
     symbol i = case i of
       Terminal t -> Earley.Literal t
-      Slot x (OfClass _ _ re) _ -> Earley.Scan x re
+      -- **A class slot is labelled with its CLASS, not with the word that wrote
+      -- it** (MS8 phase 171). In a @language@ block the two coincide — the slot
+      -- word /is/ the class — but a @notation@ production names its arguments
+      -- now, and 'Thena.Language.Judgment.ruleGrammar' narrows a class slot in
+      -- rule text to the metavariables named after this label. Labelling it @v@
+      -- would make POPLMark's rules write @v # \915@ where they write @X # \915@,
+      -- which is the class's own name standing as its metavariable.
+      Slot _ (OfClass cls _ re) _ -> Earley.Scan (nameOf cls) re
       Slot _ (OfLanguage h) _ -> Earley.Nonterminal (nameOf h)
       -- **Every universe reads the one nonterminal**, because which level a type
       -- spelling is at is not a syntactic question — @LC@ is at @Type\8320@ and

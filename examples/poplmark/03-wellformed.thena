@@ -54,7 +54,7 @@ data notIn : String -> Ctx -> Type₀ where
                 (ne : Eq String X Y -> Empty) (p : notIn X G)
                 -> notIn X (bindTy G Y T)
 
-notation notIn -> X # Γ where
+notation notIn (v : X) G -> v # G where
 
 -- A well-formed type: every variable in it is declared, and a quantifier binds
 -- a variable that is NOT already declared. That second clause is the whole

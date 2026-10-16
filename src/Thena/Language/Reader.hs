@@ -23,6 +23,7 @@ module Thena.Language.Reader
   ( Block (..)
   , RawRule (..)
   , Production (..)
+  , Param (..)
   , Metadata (..)
   , RawItem (..)
   , ReadError (..)
@@ -64,8 +65,49 @@ data RawRule = RawRule
 data Production = Production
   { productionLine     :: Int
   , productionName     :: String
+  , productionParams  :: [Param]
+    -- ^ **The names a @notation@ production gives its own arguments** — the
+    -- @G M T d@ of @notation Valid G M T d -> ⊢ G , M , T by d valid@ (MS8
+    -- phase 171, his ruling of 2026-10-16).
+    --
+    -- **They are local, and position is what identifies the argument**: the
+    -- first name is the first parameter or index of the declaration being
+    -- spelled, and nothing requires it to be spelled the way the declaration
+    -- spells it. A word of the layout is a slot exactly when it is one of these,
+    -- and every other word is literal text.
+    --
+    -- **This replaces reading a slot's word out of a grammar's metavariables**,
+    -- which could not say which argument it meant. @notation Valid -> ⊢ Γ , M ,
+    -- T by typing valid@ named the /grammar/ @typing@ where a derivation goes,
+    -- because a judgment declares no word for its derivations — and that read
+    -- as a claim about the fourth argument's type while claiming nothing, so the
+    -- identical line was accepted for a declaration whose fourth argument is
+    -- @typing G M base@. A name claims nothing, so nothing can disagree with it;
+    -- the dependence stays in the declaration, where it is already checked.
+    --
+    -- **A binder is ascribed with a token class, and only when it has to be.**
+    -- The declaration says a slot's type, so position settles it — except for a
+    -- @String@ argument, where it cannot. POPLMark declares two classes over one
+    -- @String@, @X@ for capitalised type variables and @x@ for term variables,
+    -- so @notIn : String -> Ctx -> Type\8320@ does not say which its first argument
+    -- reads as, and a @String@ slot that names no class cannot be read at all.
+    -- Hence @notation notIn (v : X) G -> v # G@: the ascription says the one
+    -- thing the declaration is silent about, and nothing else may carry one.
+    --
+    -- **Empty for every other kind of block.** A @language@, @context@ or
+    -- @judgment@ production takes its slots from the grammar's metavariables as
+    -- it always has, which is why those are unchanged by this.
   , productionMetadata :: Maybe Metadata
   , productionItems    :: [RawItem]
+  }
+  deriving (Eq, Show)
+
+-- | **One name a @notation@ production gives an argument of its own** (MS8
+-- phase 171) — @d@, or @(v : X)@ where the argument is a @String@ and the class
+-- it reads has to be said. See 'productionParams'.
+data Param = Param
+  { paramName  :: String
+  , paramClass :: Maybe String
   }
   deriving (Eq, Show)
 
@@ -99,6 +141,9 @@ data ReadError
     -- with more written after the @]@ in the same word
   | IndentedLess Int
     -- ^ a line indented less than the first production, but not at the margin
+  | ParamMalformed Int String
+    -- ^ a word in a @notation@ production's binder list that is neither a name
+    -- nor a bracketed ascription (MS8 phase 171)
   | JudgmentHeaderMalformed Int
     -- ^ a judgment's first line is not @‹name› = ‹notation› where@
   | RuleUnnamed Int
@@ -122,7 +167,7 @@ readBlock kind line txt = case lines' of
         (n, notation) <- readJudgmentHeader l0 header
         items <- readItems l0 notation
         rules <- traverse readRule =<< groupedLines rest
-        Right (Block kind n [] [Production l0 n Nothing items] rules)
+        Right (Block kind n [] [Production l0 n [] Nothing items] rules)
     -- **A @notation@ block's header may carry the name's OWN spelling** (MS8
     -- phase 160): @notation bound -> v ◂ A ◂ Δ where@. It is read exactly as a
     -- judgment's header is, with @->@ in place of @=@, and becomes the
@@ -133,10 +178,11 @@ readBlock kind line txt = case lines' of
     --
     -- The @->@ is the first word after the name, so a notation that contains
     -- one of its own — @( T -> S )@ — reads as it should.
-    | kind == NotationBlock, Just (n, notation) <- headerNotation header -> do
+    | kind == NotationBlock, Just (n, bs, notation) <- headerNotation header -> do
         items <- readItems l0 notation
+        bs' <- readParams l0 bs
         prods <- traverse readProduction =<< grouped rest
-        Right (Block kind n [] (Production l0 n Nothing items : prods) [])
+        Right (Block kind n [] (Production l0 n bs' Nothing items : prods) [])
     | otherwise -> do
         names <- readHeader l0 header
         prods <- traverse readProduction =<< grouped rest
@@ -177,15 +223,16 @@ groupedLines ls = case [ (k, l) | (k, l) <- ls, not (all isSpace l) ] of
       | otherwise = Left (IndentedLess k)
     indent = length . takeWhile isSpace
 
--- | @bound -> v ◂ A ◂ Δ where@: the name and its own notation's words, or
--- 'Nothing' when the header is the plain @notation ‹Grammar› where@ (MS8 phase
--- 160). A header with @->@ and nothing after it is 'Nothing' too, so it is
--- refused by the ordinary path as a malformed name rather than read as a
--- spelling with no items.
-headerNotation :: String -> Maybe (String, [String])
-headerNotation txt = case words txt of
-  n : "->" : rest
-    | "where" : notation@(_ : _) <- reverse rest -> Just (n, reverse notation)
+-- | @bound v A Δ -> v ◂ A ◂ Δ where@: the name, **the names it gives its own
+-- arguments** (MS8 phase 171) and its own notation's words — or 'Nothing' when
+-- the header is the plain @notation ‹Grammar› where@ (MS8 phase 160). A header
+-- with @->@ and nothing after it is 'Nothing' too, so it is refused by the
+-- ordinary path as a malformed name rather than read as a spelling with no
+-- items.
+headerNotation :: String -> Maybe (String, [String], [String])
+headerNotation txt = case break (== "->") (words txt) of
+  (n : bs, "->" : rest)
+    | "where" : notation@(_ : _) <- reverse rest -> Just (n, bs, reverse notation)
   _ -> Nothing
 
 -- | @typing = Γ ⊢ M : T where@: the judgment's name and its notation's words.
@@ -277,17 +324,54 @@ readQuantifier firstWords laterLines = case firstWords of
 data Scanned = Continue Int [String] | Ends String | Malformed
 
 -- | @name -> items@ or @name : metadata -> items@.
+-- **The words before the @:@ or the @->@ are the name and then its binders**
+-- (MS8 phase 171). A production with no binders reads exactly as it did, which
+-- is every @language@, @context@ and @judgment@ production; a @notation@ one
+-- names its arguments. 'Thena.Language.Grammar.checkNotation' is where a binder
+-- is refused on a block that has no use for one.
 readProduction :: (Int, String) -> Either ReadError Production
-readProduction (l, txt) = case words txt of
-  name : "->" : rest -> Production l name Nothing <$> items rest
-  name : ":" : rest -> case break (== "->") rest of
+readProduction (l, txt) = case splitHead (words txt) of
+  (name : bs, "->" : rest) -> do
+    bs' <- readParams l bs
+    Production l name bs' Nothing <$> items rest
+  (name : bs, ":" : rest) -> case break (== "->") rest of
     (meta, "->" : rest') -> do
+      bs' <- readParams l bs
       m <- readMetadata l (unwords meta)
-      Production l name (Just m) <$> items rest'
+      Production l name bs' (Just m) <$> items rest'
     _ -> Left (ProductionWithoutArrow l)
   _ -> Left (ProductionWithoutArrow l)
   where
     items = readItems l
+
+    -- **The @:@ that introduces metadata is the one outside the brackets.** A
+    -- parameter may be ascribed — @( v : w )@ — and that @:@ belongs to the
+    -- parameter list, so the split walks the words keeping the bracket depth
+    -- (MS8 phase 171).
+    splitHead = go (0 :: Int) []
+      where
+        go _ acc [] = (reverse acc, [])
+        go d acc (w : ws)
+          | d == 0, w `elem` [":", "->"] = (reverse acc, w : ws)
+          | otherwise = go (d + opens w) (w : acc) ws
+        opens w = length (filter (== '(') w) - length (filter (== ')') w)
+
+-- | @d@, or @( v : X )@ — a plain name, or one ascribed with the token class it
+-- reads (MS8 phase 171). Brackets are required for an ascription so that a
+-- binder list needs no lookahead and a @:@ inside it cannot be taken for the
+-- @:@ that introduces a production's metadata.
+readParams :: Int -> [String] -> Either ReadError [Param]
+readParams l = go . concatMap spaced
+  where
+    -- @(v : X)@ and @( v : X )@ read alike, as 'readMetadata' already has it
+    -- for @{ x, y }@: a bracket is its own word however it was typed.
+    spaced w = words (concatMap (\c -> if c `elem` "()" then [' ', c, ' '] else [c]) w)
+
+    go [] = Right []
+    go ("(" : x : ":" : cls : ")" : rest) = (Param x (Just cls) :) <$> go rest
+    go (w : rest)
+      | w `notElem` ["(", ")", ":"] = (Param w Nothing :) <$> go rest
+      | otherwise = Left (ParamMalformed l w)
 
 readMetadata :: Int -> String -> Either ReadError Metadata
 readMetadata l txt = case words (spaced txt) of

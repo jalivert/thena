@@ -80,8 +80,8 @@ lexing =
         @?= Right [TBlock LanguageBlock " L where\n  f -> [ λ ⌜ ] /\n"]
     -- MS8 phase 158: the fourth block word.
   , testCase "a notation block is taken whole too" $
-      tokens lexModule "notation C where\n  join -> G \8746 D\n"
-        @?= Right [TBlock NotationBlock " C where\n  join -> G \8746 D\n"]
+      tokens lexModule "notation C where\n  join a b -> a \8746 b\n"
+        @?= Right [TBlock NotationBlock " C where\n  join a b -> a \8746 b\n"]
   , testCase "outside a module the keyword is a keyword and nothing more" $
       tokens lexTokens "language L" @?= Right [TLanguage, TIdent "L"]
   , testCase "and not at column 1 it is not a block either" $
@@ -107,11 +107,11 @@ universeSlots =
     , "  arrow -> ( T -> S )", ""
     , "data Imp : Type₀ -> Type₀ -> Type₁ where"
     , "  { impIntro : ∀ (A : Type₀) (B : Type₀) -> (A -> B) -> Imp A B }", ""
-    , "notation Imp -> 𝕌₀ ⊃ 𝕌₀' where", ""
+    , "notation Imp A B -> A ⊃ B where", ""
     , "k : Type₀ -> Ty -> Ty"
     , "k = \\ A -> \\ t -> t", ""
     , "notation Ty where"
-    , "  k -> ⟪ 𝕌₀ ⟫ T", ""
+    , "  k A t -> ⟪ A ⟫ t", ""
     , "u : Ty"
     , "u = Ty`⟪ Ty ⟫ ι`", ""
     , "same : Eq Ty u base"
@@ -134,9 +134,9 @@ lamByHand =
     , "  ; lmAbs : String -> Tw -> Lam -> Lam"
     , "  ; lmApp : Lam -> Lam -> Lam }", ""
     , "notation Lam where"
-    , "  lmVar : w as occurrence -> w"
-    , "  lmAbs : w as binder     -> ( ƛ w : P . Lam[w] )"
-    , "  lmApp                   -> ( Lam₁ Lam₂ )", ""
+    , "  lmVar (v : w) : v as occurrence -> v"
+    , "  lmAbs (v : w) p b : v as binder -> ( ƛ v : p . b[v] )"
+    , "  lmApp a b                       -> ( a b )", ""
     , "e : Lam"
     , "e = Lam`( ƛ a : ο . a )`", ""
     , "same : Eq Lam e (lmAbs \"a\" twBase (lmVar \"a\"))"
@@ -186,7 +186,7 @@ validSource =
     , "          Γ ⊢ x : T", ""
     , "data Valid : ∀ (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Type₀ where"
     , "  { validAny : ∀ (G : Ctx) (M : LC) (T : Ty) (d : typing G M T) -> Valid G M T d }", ""
-    , "notation Valid -> ⊢ Γ , M , T by typing valid where", ""
+    , "notation Valid G M T d -> ⊢ G , M , T by d valid where", ""
     ]
 
 loadProofSession :: Session -> Either String Session
@@ -206,8 +206,8 @@ reading =
         " LC, M, N where\n  var : x as occurrence -> x\n  app -> ( M N )\n"
         @?= Right
           (Block LanguageBlock "LC" ["M", "N"]
-             [ Production 2 "var" (Just (AsOccurrence "x")) [Word "x"]
-             , Production 3 "app" Nothing (map Word ["(", "M", "N", ")"])
+             [ Production 2 "var" [] (Just (AsOccurrence "x")) [Word "x"]
+             , Production 3 "app" [] Nothing (map Word ["(", "M", "N", ")"])
              ] [])
   , testCase "the three metadata forms" $
       map (fmap (map productionMetadata . blockProductions) . readBlock LanguageBlock 1)
@@ -371,11 +371,16 @@ meaning =
     -- **The notation generated substitution declares** (MS8 phase 159, §6.3,
     -- `~hwxrx`): the bracket form is no longer a privilege of the rule parser
     -- but a function production of the grammar, written as @E[x -> N]@ would be
-    -- written by hand. **The slot names are metavariables in scope**, the
-    -- grammar's own for the term and the class's owner's for the replacement,
-    -- and they are distinct because two slots of one name are one non-linear
-    -- argument. @LC@ owns its own class, so the replacement takes @LC@'s next
-    -- metavariable rather than repeating @M@.
+    -- written by hand.
+    --
+    -- **The slot names are the production's own parameters since MS8 phase
+    -- 171**, @e@ and @n@. They used to be metavariables in scope — the
+    -- grammar's own for the term, the class's owner's for the replacement —
+    -- hunted for so that no two slots shared a word, and the hunt existed only
+    -- because a slot's word had to resolve to a metavariable somewhere. **Only
+    -- the middle slot keeps a word that means something elsewhere**: it reads a
+    -- name of the class, and a class slot is labelled with its class, which is
+    -- what lets a rule write @x@ there.
   , testCase "generated substitution declares its own notation" $ do
       gs <- installed stlc
       case [ g | g <- gs, grammarName g == GlobalName "LC" ] of
@@ -383,11 +388,11 @@ meaning =
           [ (gproductionName p, gproductionItems p)
             | p <- grammarProductions g, gproductionKind p == Function ]
             @?= [ ( GlobalName "LC-subst-x"
-                  , [ Slot "M" (lang "LC") []
+                  , [ Slot "e" (lang "LC") []
                     , Terminal "["
                     , Slot "x" str []
                     , Terminal "->"
-                    , Slot "N" (lang "LC") []
+                    , Slot "n" (lang "LC") []
                     , Terminal "]" ] ) ]
           -- Nothing of it reaches the datatype: §4.8's whole mechanism.
           map gproductionName (constructorProductions g)
@@ -603,7 +608,7 @@ notating =
         , "  { dOne : String -> D"
         , "  ; dTwo : String -> D }", ""
         , "notation D where"
-        , "  dOne : x as occurrence -> ⟨ x ⟩", "" ])
+        , "  dOne (v : x) : v as occurrence -> ⟨ v ⟩", "" ])
         @?= Left ("refused: in the notation for D: it declares a role, so it generates D's "
                     ++ "substitution from these productions — and dTwo is a constructor of D "
                     ++ "that no production spells")
@@ -647,18 +652,17 @@ notating =
     -- at all and @twin@ would have been @twin : C@.
     testCase "a slot may be a metavariable's name with a suffix" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 (joiningWith "notation C where\n  join -> ⟦ C₁ , C₂ ⟧") of
+      case loadProofSource s0 (joiningWith "notation C where\n  join a b -> ⟦ a , b ⟧") of
         (s1, ProofLoaded {}) -> do
           let gs = grammars (machineOf s1)
           c <- case [ g | g <- gs, grammarName g == GlobalName "C" ] of
                  [g] -> pure g
                  other -> assertFailure (show (length other) ++ " grammars called C")
-          -- Two distinct slots, both at @C@, so the arity check is satisfied by
-          -- a function of two contexts.
+          -- Two parameters, both at @C@ because that is what @join@ takes.
           map gproductionArguments [ p | p <- grammarProductions c
                                        , gproductionName p == GlobalName "join" ]
-            @?= [[ Argument "C₁" (OfLanguage (GlobalName "C")) Plain
-                 , Argument "C₂" (OfLanguage (GlobalName "C")) Plain ]]
+            @?= [[ Argument "a" (OfLanguage (GlobalName "C")) Plain
+                 , Argument "b" (OfLanguage (GlobalName "C")) Plain ]]
         (s1, other) -> assertFailure (unlines (renderResponse s1 other))
   , -- **A refusal that quotes a type may not print a nameless argument.** The
     -- stand-in 'functionShape' peels a telescope with used to be a global with
@@ -669,7 +673,7 @@ notating =
     -- case went unseen until a notation block named it.
     testCase "a result that mentions an argument names it" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 (joiningWith "notation C where\n  nil -> G \8746 D") of
+      case loadProofSource s0 (joiningWith "notation C where\n  nil a b -> a \8746 b") of
         (_, Ran _ _ (Refused (GrammarRefused
              (GrammarError _ _ (InProduction "nil" (FunctionResult r)))))) -> case r of
           Canonical _ _ [a] -> a @?= Global (GlobalName "\8249A\8250") []
@@ -677,7 +681,7 @@ notating =
         (s1, other) -> assertFailure (unlines (renderResponse s1 other))
   , testCase "the block installs, declares nothing, and adds one production" $ do
       (s0, _) <- startingSession
-      case loadProofSource s0 (joiningWith "notation C where\n  join -> G \8746 D") of
+      case loadProofSource s0 (joiningWith "notation C where\n  join a b -> a \8746 b") of
         (s1, ProofLoaded _ names _ _) -> do
           -- @join@ is the definition's own name; the block declares nothing.
           names @?= ["x", "Ty", "C", "join"]
@@ -692,15 +696,16 @@ notating =
           -- **The datatype is the one it was**, which is the whole reason this
           -- is not the refused joining constructor: @C@ stays a list.
           map gproductionName (constructorProductions c) @?= map GlobalName ["e", "ext"]
-          -- Plain arguments, in order of first appearance, at the slots' sorts.
+          -- Plain arguments, in the parameter list's order, at the types the
+          -- declaration gives them (MS8 phase 171).
           map gproductionArguments [ p | p <- grammarProductions c
                                        , gproductionName p == GlobalName "join" ]
-            @?= [[ Argument "G" (OfLanguage (GlobalName "C")) Plain
-                 , Argument "D" (OfLanguage (GlobalName "C")) Plain ]]
+            @?= [[ Argument "a" (OfLanguage (GlobalName "C")) Plain
+                 , Argument "b" (OfLanguage (GlobalName "C")) Plain ]]
         (s1, other) -> assertFailure (unlines (renderResponse s1 other))
   , testCase "and a term is written in it, and reduces to the constructors" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 (joiningWith "notation C where\n  join -> G \8746 D")
+      let (s1, _) = loadProofSource s0 (joiningWith "notation C where\n  join a b -> a \8746 b")
       -- @join a b = a@, so the right-hand context is dropped: the notation
       -- elaborated to the function and the function ran.
       case loadProofSource s1
@@ -719,7 +724,7 @@ notating =
             (_, ProofLoaded _ ns _ _) -> Right ns
             (s1, other) -> Left (unlines (renderResponse s1 other))
       without <- pure (declared joining)
-      with <- pure (declared (joiningWith "notation C where\n  join -> G \8746 D"))
+      with <- pure (declared (joiningWith "notation C where\n  join a b -> a \8746 b"))
       with @?= without
     -- **The done-when of the phase.** @S-split@ is F-sub's type-substitution
     -- lemma in miniature: its premise's index is two contexts joined, which is
@@ -728,7 +733,7 @@ notating =
     -- @its premises `Γ , X <: T , Δ ⊢ T <: S` do not parse: unexpected 'Δ'@.
   , testCase "a judgment rule writes it in an index position" $ do
       (s0, _) <- startingSession
-      let (s1, _) = loadProofSource s0 (joiningWith "notation C where\n  join -> G \8746 D")
+      let (s1, _) = loadProofSource s0 (joiningWith "notation C where\n  join a b -> a \8746 b")
       case loadProofSource s1
              (unlines
                 [ "module Split where"
@@ -869,29 +874,38 @@ refused =
     -- that a constructor production does not: a definition of that name exists
     -- and takes exactly what the notation's slots hand it.
     ++ [ notationBlock "a block naming no installed grammar"
-           "Nope" "notation Nope where\n  join -> G \8746 D" NoSuchGrammar
+           "Nope" "notation Nope where\n  join a b -> a \8746 b" NoSuchGrammar
        , notationBlock "a block declaring a metavariable of its own"
-           "C" "notation C, Z where\n  join -> G \8746 D" (NotationMetavars ["Z"])
+           "C" "notation C, Z where\n  join a b -> a \8746 b" (NotationMetavars ["Z"])
        , inNotation "a production naming nothing declared"
-           "notation C where\n  nosuch -> G \8746 D" "nosuch" NotADeclaredFunction
+           "notation C where\n  nosuch a b -> a \8746 b" "nosuch" NotADeclaredFunction
          -- The check spans every installed grammar, not this one: a production
          -- name is unique across all of them, which 'productionBody' relies on.
        , inNotation "a production naming another grammar's constructor"
-           "notation C where\n  base -> G \8746 D" "base" FunctionHasNotation
+           "notation C where\n  base a b -> a \8746 b" "base" FunctionHasNotation
        , inNotation "a production naming one the grammar already has"
-           "notation C where\n  ext -> G \8746 D" "ext" FunctionHasNotation
+           "notation C where\n  ext a b -> a \8746 b" "ext" FunctionHasNotation
        , inNotation "more slots than the function takes"
-           "notation C where\n  join -> G \8746 D \8746 C" "join" (FunctionArity 2 3)
-       , inNotation "a slot at a sort the function does not take there"
-           "notation C where\n  join -> G \8746 T" "join"
-           (FunctionSlot "T" (datatype "C") (GlobalName "Ty"))
+           "notation C where\n  join a b c -> a \8746 b \8746 c" "join" (FunctionArity 2 3)
+         -- **The three MS8 phase 171 adds**, and the one it retires. A slot's
+         -- sort is read off the declaration now rather than checked against it,
+         -- so @FunctionSlot@ — a slot at a sort the function does not take
+         -- there — cannot arise: there is nothing left for the two to disagree
+         -- about. What can go wrong is the parameter list itself.
+       , inNotation "the same name for two of the arguments"
+           "notation C where\n  join a a -> a \8746 a" "join" (ParamRepeated "a")
+       , inNotation "a parameter the notation never writes"
+           "notation C where\n  join a b -> a \8746 a" "join" (ParamUnspelled "b")
+       , inNotation "a parameter naming an argument no notation reads"
+           "lift : C -> String -> C\nlift = \\ a s -> a\n\nnotation C where\n  lift a s -> a \8853 s"
+           "lift" (ParamNotReadable "s" (Global (GlobalName "String") []))
        , inNotation "a function that does not return the grammar's datatype"
-           "dom : C -> C -> Ty\ndom = \\ a b -> base\n\nnotation C where\n  dom -> G \8746 D"
+           "dom : C -> C -> Ty\ndom = \\ a b -> base\n\nnotation C where\n  dom p q -> p \8746 q"
            "dom" (FunctionResult (datatype "Ty"))
        , inNotation "a production writing a binding form"
-           "notation C where\n  join -> G \8746 D[x]" "join" (FunctionBinds "D")
+           "notation C where\n  join a b -> a \8746 b[x]" "join" (FunctionBinds "b")
        , inNotation "a production with metadata"
-           "notation C where\n  join : x as occurrence -> G \8746 D" "join" FunctionMetadata
+           "notation C where\n  join a b : x as occurrence -> a \8746 b" "join" FunctionMetadata
        ]
     -- **A built-in tag may not name a language** (moved here from MS5's
     -- grammars at phase 106). A rule base reads an installed grammar's tag

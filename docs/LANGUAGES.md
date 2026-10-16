@@ -292,7 +292,13 @@ type of their own and a coercion `surface-of`; both are gone.
 
 A judgment rule writes its indices in object notation, so it can only say what
 the grammar's productions build — and those are constructors. A `notation` block
-gives a declared **function** a production too:
+gives a declared **function** a production too.
+
+**A `notation` production names its own arguments, and position is what
+identifies them.** The first name is the first argument of the thing being
+spelled, and the names are local — nothing requires them to match how the
+declaration spells its own binders. A word of the spelling is a slot exactly
+when it is one of those names, and every other word is literal text.
 
 ```
 context Ctx, Γ, Δ where
@@ -304,12 +310,18 @@ append : Ctx -> Ctx -> Ctx
 append = …
 
 notation Ctx where
-  append -> Γ ∪ Δ
+  append a b -> a ∪ b
 ```
 
-`Γ ∪ Δ` then parses wherever a `Ctx` is expected, a rule's index included, and
-elaborates to `append Γ Δ` — which is what lets a rule write the paper's
-`Γ, X<:Q, Δ ⊢ T <: S`.
+`a ∪ b` then parses wherever a `Ctx` is expected, a rule's index included, and
+elaborates to `append` applied to what the two slots read — which is what lets a
+rule write the paper's `Γ, X<:Q, Δ ⊢ T <: S`.
+
+**The names need not be metavariables of any grammar, and that is the point.**
+They used to have to be: a slot was a word that happened to be some grammar's
+metavariable, so `Ctx` had to declare a second one, `Δ`, for a two-argument
+function to be spellable at all. A grammar now declares the words the *language*
+needs and nothing more.
 
 - **The datatype is untouched.** `Ctx` still has the three constructors its own
   block declared, and the eliminator, the lookup relations and the generated
@@ -319,8 +331,15 @@ elaborates to `append Γ Δ` — which is what lets a rule write the paper's
 - **It is a separate block because of scoping**: `append`'s type mentions `Ctx`,
   which the `context` block declares, so the function cannot be written above
   that block.
-- **The function must be declared, must not already be a production, and its type
-  must take the slots in order and return the grammar's datatype.**
+- **The function must be declared, must not already be a production, and must
+  return the grammar's datatype.** Its arguments are matched to the parameter
+  list by position, so there must be exactly as many names as arguments, no name
+  twice, and every name written somewhere in the spelling — an argument with
+  nowhere to be written could not be given.
+- **A slot's type is read off the declaration, not checked against the
+  spelling**, so the two cannot disagree. The one thing a declaration cannot say
+  is which token class a `String` argument reads, since several classes may share
+  `String`; that parameter is ascribed, `( v : X )`, and nothing else may be.
 - **Every term a rule mentions must be a named global with a declared notation.**
   No inline lambda, no inline `elim`.
 - **A stuck application prints in the notation**, so `:show` of the rule above
@@ -332,8 +351,11 @@ the generator writes for you, beside the substitution functions themselves:
 
 ```
 notation LC where
-  LC-subst-x -> M [ x -> N ]
+  LC-subst-x e (x : x) n -> e [ x -> n ]
 ```
+
+The middle parameter is the one that is ascribed: it reads a *name* of the class
+`x`, and `LC-subst-x`'s declaration says only `String` there.
 
 So it is an ordinary production — it works in a term literal, not only in a rule,
 and a stuck substitution prints in it. **The comma list `E[x -> M, y -> N]` is

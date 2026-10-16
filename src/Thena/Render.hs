@@ -405,6 +405,9 @@ renderSyntaxError e = case e of
     HeaderWithoutWhere l -> line l ++ "a block's first line names it and ends in where"
     HeaderMalformed l -> line l ++ "a block's first line is its name and metavariables, separated by commas"
     ProductionWithoutArrow l -> line l ++ "a production is ‹name› -> ‹items›, or ‹name› : ‹metadata› -> ‹items›"
+    -- MS8 phase 171: a @notation@ production names its own arguments.
+    ParamMalformed l w ->
+      line l ++ w ++ " is not a name or an ascribed one, ( ‹x› : ‹class› )"
     MetadataMalformed l t ->
       line l ++ t ++ " is not ‹x› as occurrence, ‹x› as binder or { ‹x›, … } as binders"
     BindingMalformed l w
@@ -1612,6 +1615,15 @@ renderDeclareError ren e = case e of
         ++ " has no one language to replace a name with"
     InProduction p why -> blockAt k g ++ ", production " ++ p ++ ": " ++ case why of
       NoItems -> "it has no items"
+      -- MS8 phase 171: a notation names its own arguments.
+      ParamRepeated x -> x ++ " names two of its arguments, and a name stands for one"
+      ParamUnspelled x ->
+        x ++ " is not written in the notation, so that argument could not be given"
+      ParamNotReadable x t ->
+        x ++ " names an argument of " ++ renderCore ren [] t
+          ++ ", which no notation reads by itself \8212 if it is a String, say which"
+          ++ " token class, as ( " ++ x ++ " : \8249class\8250 )"
+      NoSuchTokenClass x -> x ++ " is not a declared token class"
       NotAMetavariable x -> x ++ " is not a metavariable"
       NotAnArgument x -> x ++ " is not an argument of " ++ p
       OccurrenceBinds x -> x ++ " is an occurrence, so it binds nothing"

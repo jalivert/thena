@@ -508,7 +508,7 @@ solved: ?ℓ2762
 already equal
 warning: no noConfusionext-in: ext-there-ext's argument 6 (ne) has a type that depends on an earlier argument, so its equation cannot be stated
 refused: in the notation for C, production join: join takes 2 arguments and the notation has 3 slots
--- a slot at a sort the function does not take there
+-- the same name for two of the arguments
 already equal
 solved: ?ℓ2455
 solved: T
@@ -566,7 +566,131 @@ solved: ?ℓ2760
 solved: ?ℓ2762
 already equal
 warning: no noConfusionext-in: ext-there-ext's argument 6 (ne) has a type that depends on an earlier argument, so its equation cannot be stated
-refused: in the notation for C, production join: join takes C where T is a Ty
+refused: in the notation for C, production join: a names two of its arguments, and a name stands for one
+-- a parameter the notation never writes
+already equal
+solved: ?ℓ2455
+solved: T
+solved: ?ℓ2464
+solved: ?ℓ2464
+solved: ?ℓ2491
+solved: ?ℓ2491
+solved: ?ℓ2500
+solved: ?ℓ2507
+solved: ?ℓ2514
+solved: ?ℓ2519
+solved: ?ℓ2492
+solved: ?ℓ2562
+solved: ?ℓ2564
+solved: ?ℓ2570
+solved: ?ℓ2572
+solved: ?ℓ2578
+solved: ?ℓ2580
+solved: ?ℓ2595
+solved: ?ℓ2602
+solved: ?ℓ2609
+already equal
+already equal
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ2614
+solved: ?ℓ2637
+solved: ?ℓ2644
+solved: ?ℓ2651
+solved: ?ℓ2658
+solved: ?ℓ2665
+solved: ?ℓ2672
+solved: ?ℓ2685
+already equal
+already equal
+solved: ?ℓ2685
+solved: ?ℓ2693
+already equal
+already equal
+already equal
+solved: ?ℓ2695
+already equal
+already equal
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ2700
+solved: ?ℓ2456
+solved: ?ℓ2752
+solved: ?ℓ2754
+solved: ?ℓ2760
+solved: ?ℓ2762
+already equal
+warning: no noConfusionext-in: ext-there-ext's argument 6 (ne) has a type that depends on an earlier argument, so its equation cannot be stated
+refused: in the notation for C, production join: b is not written in the notation, so that argument could not be given
+-- a parameter naming an argument no notation reads
+already equal
+solved: ?ℓ2455
+solved: T
+solved: ?ℓ2465
+solved: ?ℓ2465
+solved: ?ℓ2492
+solved: ?ℓ2492
+solved: ?ℓ2501
+solved: ?ℓ2508
+solved: ?ℓ2515
+solved: ?ℓ2520
+solved: ?ℓ2493
+solved: ?ℓ2563
+solved: ?ℓ2565
+solved: ?ℓ2571
+solved: ?ℓ2573
+solved: ?ℓ2579
+solved: ?ℓ2581
+solved: ?ℓ2596
+solved: ?ℓ2603
+solved: ?ℓ2610
+already equal
+already equal
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ2615
+solved: ?ℓ2638
+solved: ?ℓ2645
+solved: ?ℓ2652
+solved: ?ℓ2659
+solved: ?ℓ2666
+solved: ?ℓ2673
+solved: ?ℓ2686
+already equal
+already equal
+solved: ?ℓ2686
+solved: ?ℓ2694
+already equal
+already equal
+already equal
+solved: ?ℓ2696
+already equal
+already equal
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ2701
+solved: ?ℓ2456
+solved: ?ℓ2753
+solved: ?ℓ2755
+solved: ?ℓ2761
+solved: ?ℓ2763
+already equal
+solved: ?ℓ2457
+solved: ?ℓ2782
+solved: ?ℓ2784
+solved: ?ℓ2790
+solved: ?ℓ2792
+already equal
+warning: no noConfusionext-in: ext-there-ext's argument 6 (ne) has a type that depends on an earlier argument, so its equation cannot be stated
+refused: in the notation for C, production lift: s names an argument of String, which no notation reads by itself — if it is a String, say which token class, as ( s : ‹class› )
 -- a function that does not return the grammar's datatype
 already equal
 solved: ?ℓ2455
@@ -690,7 +814,7 @@ solved: ?ℓ2760
 solved: ?ℓ2762
 already equal
 warning: no noConfusionext-in: ext-there-ext's argument 6 (ne) has a type that depends on an earlier argument, so its equation cannot be stated
-refused: in the notation for C, production join: D is written as a binding form, and an application binds nothing
+refused: in the notation for C, production join: b is written as a binding form, and an application binds nothing
 -- a production with metadata
 already equal
 solved: ?ℓ2455

@@ -45,7 +45,7 @@ append = \ G D ->
      (\ c Y T r -> bindTy r Y T)) () D
 
 notation Ctx where
-  append -> Γ , Δ
+  append a b -> a , b
 
 -- The production joins the grammar, so the paper's comma now parses wherever
 -- a Ctx is expected — a judgment rule's index included, which is the point.
