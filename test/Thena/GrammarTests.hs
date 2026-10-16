@@ -906,6 +906,14 @@ refused =
            "notation C where\n  join a b -> a \8746 b[x]" "join" (FunctionBinds "b")
        , inNotation "a production with metadata"
            "notation C where\n  join a b : x as occurrence -> a \8746 b" "join" FunctionMetadata
+         -- **A role belongs to the block that installs the grammar** (HIS
+         -- ruling, 2026-10-11; phase 160). @C@ is installed by the @context@
+         -- block above, so a later block may add spellings and not roles —
+         -- the substitution family is already declared and a second one
+         -- cannot be declared over it.
+       , inNotation "a role in a block that only adds spellings"
+           "notation C where\n  ext a b : a as occurrence -> a \8746 b" "ext"
+           (RolesAfterTheGrammar (GlobalName "C"))
        ]
     -- **A built-in tag may not name a language** (moved here from MS5's
     -- grammars at phase 106). A rule base reads an installed grammar's tag

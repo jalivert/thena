@@ -874,6 +874,65 @@ solved: ?ℓ2762
 already equal
 warning: no noConfusionext-in: ext-there-ext's argument 6 (ne) has a type that depends on an earlier argument, so its equation cannot be stated
 refused: in the notation for C, production join: join is a function, so there is no constructor for the metadata to be about
+-- a role in a block that only adds spellings
+already equal
+solved: ?ℓ2455
+solved: T
+solved: ?ℓ2464
+solved: ?ℓ2464
+solved: ?ℓ2491
+solved: ?ℓ2491
+solved: ?ℓ2500
+solved: ?ℓ2507
+solved: ?ℓ2514
+solved: ?ℓ2519
+solved: ?ℓ2492
+solved: ?ℓ2562
+solved: ?ℓ2564
+solved: ?ℓ2570
+solved: ?ℓ2572
+solved: ?ℓ2578
+solved: ?ℓ2580
+solved: ?ℓ2595
+solved: ?ℓ2602
+solved: ?ℓ2609
+already equal
+already equal
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ2614
+solved: ?ℓ2637
+solved: ?ℓ2644
+solved: ?ℓ2651
+solved: ?ℓ2658
+solved: ?ℓ2665
+solved: ?ℓ2672
+solved: ?ℓ2685
+already equal
+already equal
+solved: ?ℓ2685
+solved: ?ℓ2693
+already equal
+already equal
+already equal
+solved: ?ℓ2695
+already equal
+already equal
+already equal
+already equal
+already equal
+already equal
+solved: ?ℓ2700
+solved: ?ℓ2456
+solved: ?ℓ2752
+solved: ?ℓ2754
+solved: ?ℓ2760
+solved: ?ℓ2762
+already equal
+warning: no noConfusionext-in: ext-there-ext's argument 6 (ne) has a type that depends on an earlier argument, so its equation cannot be stated
+refused: in the notation for C, production ext: a role belongs to the block that installs the grammar, and C's is installed already, with its substitution generated from the roles it had then
 -- a language named like the built-in tag surface
 already equal
 solved: ?ℓ2455

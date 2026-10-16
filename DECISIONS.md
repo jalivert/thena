@@ -1203,12 +1203,7 @@ with nowhere to be written could not be given.
 
 **A slot's type is read off the declaration rather than checked against the
 spelling**, so the two cannot disagree. The one thing a declaration cannot say is
-which token class a `String` argument reads, because several classes may share
-`String`; that parameter is ascribed, and nothing else may be:
-
-```
-notation notIn (v : X) G -> v # G where
-```
+which token class a `String` argument reads, which is the entry below.
 
 **Before this a slot was a word that happened to be a metavariable of some
 grammar in scope, and that could not say which argument it meant.** Where a
@@ -1246,6 +1241,55 @@ stuck: in plain`· ⊢ x : ι`: this term parses two ways,
 **That check is at parse time, so a colliding notation loads clean** and the
 breakage appears when somebody writes an affected term. A declaration-time check
 is intended and is not here yet.
+
+### A `String` argument says which token class it reads
+
+*Decided 2026-10-16, built the same day.*
+
+A slot's type comes from the declaration, and for every type but one that settles
+what may be written there: `Ctx` is a grammar, so a `Ctx` argument reads a
+context. `String` is not a grammar. What makes a string readable inside a term is
+a token class, and a language may declare as many of them over `String` as it
+likes — F-sub reads two kinds of name, capitalised for type variables and not for
+term variables:
+
+```
+X : Token String       X = /[A-Z][a-zA-Z0-9']*/
+x : Token String       x = /[a-z][a-zA-Z0-9']*/
+```
+
+Both are `Token String`, so the declaration `notIn : String -> Ctx -> Type₀`
+cannot say which kind of name its first argument is. **A `String` parameter is
+therefore ascribed with the class it reads, and only a `String` parameter may
+be:**
+
+```
+notation notIn (v : X) G -> v # G where
+```
+
+The ascription names the **class** and not the parameter, because that name is
+the word a rule writes where the slot is — F-sub's rules write `X # Γ`, as the
+paper does.
+
+**What it buys is a refusal.** `#` is *this type variable is not declared in Γ*,
+and with the class in place a term variable cannot be written there:
+
+```
+thena spine> :parse notIn X # ·
+notIn(X, empty)
+thena spine> :parse notIn y # ·
+in notIn`y # ·`: unexpected 'y' at character 1, expecting X
+```
+
+There is no third option where the slot reads any string at all, because a term
+is a sequence of tokens and every token belongs to a class. So a `String`
+parameter that names none is refused, and the refusal says what is missing:
+
+```
+refused: in the notation for P, production P: s names an argument of String, which
+no notation reads by itself — if it is a String, say which token class, as
+( s : ‹class› )
+```
 
 ### A rule's premise may be named, and later premises may write the name
 
