@@ -11,55 +11,346 @@
 -- one is that the argument of a β-redex may have free names, so substituting it
 -- under a binder can capture — and then the generated substitution RENAMES the
 -- binder, to `LC-fresh-x x ‹names to avoid›`. Proving the proof then needs to
--- know that the minted name really is fresh, and that is a fact about
--- `appendString`, which computes only on literals. Nothing in the type theory
--- ties it to anything on a name nobody knows.
+-- know that the minted name really is fresh.
 --
--- **So this file trusts exactly one thing, and it is that fact.** `~wdcf3`'s
--- promise, now kept: a trusted core term is the principled escape hatch, so the
--- unprovable leaf is written down as a claim the kernel checks the body of, and
--- everything above it is proved.
+-- == What this file trusts, and what it proves
 --
--- **And `:trust` names it, with the whole chain.** Prove anything over
--- `preservationAny` and the report says:
+-- **It trusts three laws about `appendString` and derives the rest.** The three
+-- are `appendAssoc`, `primeDiffers` and `primeMoreDiffers` below: appending is
+-- associative, and a string differs from itself with a `'` appended, with or
+-- without more after it. Each is a one-line fact about a primitive that
+-- computes only on literals, and each is the same shape as the prelude's
+-- `eqStringEqual` — a verdict about open arguments that the type theory cannot
+-- reach but the reducer honours.
 --
---     pending, in openReductTyped · preservationAny · substOne · substAll
---                                 · chosenNotInImage · freshIsFresh
---       claims In (LC-fresh-x y avoid) avoid -> Empty
---       body   Empty -> Empty
+-- **The chooser's specification is a THEOREM here, not a claim.** `freshIsFresh`
+-- used to be a trusted core term asserting that `LC-fresh-x y avoid` is absent
+-- from `avoid`. It is now proved, from those three laws, by the argument the
+-- generated code is built on: the candidates `y`, `y'`, `y''`, … are pairwise
+-- distinct, each rejection spends one name of the list, and the fuel — which is
+-- `avoid` itself — runs out only once the list is exhausted.
 --
--- so a reader is told what the proof rests on and where it enters. At
--- `:trust none` closing such a proof is refused — **but the declarations in
--- this file still load there**, because `declare` does not consult the level.
--- That is a known hole and not this phase's: `CLOSEOUT.md` 13.
+-- **There is no counting and no arithmetic.** `Longer` below is `|xs| > |ys|`
+-- computed from the two lists, so `Longer nil ys` IS `Empty` and the base case
+-- closes by reduction. A length as an `Int` would not have helped: `Int` is a
+-- primitive type with no constructors and no eliminator, so there is no
+-- induction over it and every arithmetic step would have been one more trusted
+-- law.
 --
--- The two older claims in the same report, `eqStringEqual` and `eqStringRefl`,
--- are `decString`'s and were already there: substitution decides names, so any
--- proof about it reaches them. This file adds exactly one.
+-- **What is left is visible with `:show`.** `:show appendAssoc` prints a
+-- `trusted` node; `:show freshIsFresh` prints the derivation, with none. On
+-- literals each law DISCHARGES, because both sides reduce and the node
+-- contracts — `:whnf appendAssoc "a" "b" "c"` is the body, `refl String
+-- (appendString "a" (appendString "b" "c"))`. They are pending exactly on
+-- arguments nobody knows, which is where they are load-bearing.
+--
+-- `:trust` reports on the proof in front of you and not on the environment, so
+-- at the prompt after a load it says *resting on nothing*; that is a known hole
+-- and not this phase's. At `:trust none` closing a proof over these is refused
+-- — **but the declarations in this file still load there**, because `declare`
+-- does not consult the level.
+--
+-- `eqStringEqual` and `eqStringRefl` are in the same report and are not this
+-- file's: they are `decString`'s, and substitution decides names, so any proof
+-- about it reaches them.
 
 module StlcPreservationAny where
 
 -- ---------------------------------------------------------------------------
--- THE ONE TRUSTED LAW: the chooser's specification.
---
--- `LC-fresh-x y avoid` is the first of y, y', y'', … that is not in `avoid`,
--- and the generated code uses `avoid` itself as the recursion's fuel — among
--- n+1 candidates one must escape a list of n names. That argument is a
--- pigeonhole over strings that are pairwise distinct because each is one `'`
--- longer than the last, and the length equation for `appendString` is what the
--- type theory cannot state. It is TRUE and it is not derivable here.
---
--- Written in the development calculus, which spells all three fields of the
--- trusted node out and so needs no hole for the type the body turns out to
--- have. The surface form, which claims that type, also works here.
---
--- The body is honestly `Empty -> Empty`. So the claim is DISCHARGED whenever
--- `avoid` is empty — there `In c (nil String)` IS `Empty` — and pending
--- otherwise, which is exactly when the trust is load-bearing.
-do define-global "freshIsFresh"
-     (resolve-core core`∀ (y : String) (avoid : List {0} String) -> In {0} (LC-fresh-x {0} y avoid) avoid -> Empty {0}`)
-     (resolve-core core`λ (y : String) (avoid : List {0} String) -> trusted (In {0} (LC-fresh-x {0} y avoid) avoid -> Empty {0}) (Empty {0} -> Empty {0}) (λ (e : Empty {0}) -> e)`)
+-- THE THREE TRUSTED LAWS. All three are about `appendString` and `eqString` on
+-- arguments nobody knows, which is exactly where a primitive goes neutral.
 
+appendAssoc : forall (a : String) (b : String) (c : String)
+           -> (Eq String (appendString (appendString a b) c) (appendString a (appendString b c)) : Type₀)
+appendAssoc = \ a b c ->
+  trusted (Eq String (appendString (appendString a b) c) (appendString a (appendString b c)))
+          (refl String (appendString a (appendString b c)))
+
+primeDiffers : forall (a : String)
+            -> (Eq Comparison (eqString a (appendString a "'")) different : Type₀)
+primeDiffers = \ a ->
+  trusted (Eq Comparison (eqString a (appendString a "'")) different) (refl Comparison different)
+
+primeMoreDiffers : forall (a : String) (b : String)
+                -> (Eq Comparison (eqString a (appendString (appendString a "'") b)) different : Type₀)
+primeMoreDiffers = \ a b ->
+  trusted (Eq Comparison (eqString a (appendString (appendString a "'") b)) different)
+          (refl Comparison different)
+
+-- ---------------------------------------------------------------------------
+-- From a `different` verdict to a refutation, for names nobody knows
+
+symEq : forall (A : Type₀) (x : A) (y : A) -> (Eq A x y : Type₀) -> (Eq A y x : Type₀)
+symEq = \ A x y e -> elim Eq (A) (\ u v r -> Eq A v u) ((\ c -> refl A c)) (x y) e
+
+-- `eqString a a` does not reduce on an open `a`, so the `refl` comes from
+-- `eqStringRefl` and the contradiction is transported along it.
+neqFromDifferent : forall (a : String) (c : String)
+                -> (Eq Comparison (eqString a c) different : Type₀)
+                -> (Eq String a c : Type₀) -> (Empty : Type₀)
+neqFromDifferent = \ a c dq q ->
+  transport Comparison isSame (eqString a c) different dq
+    (elim Eq (String) (\ u v r -> isSame (eqString a u) -> isSame (eqString a v))
+       ((\ u d -> d)) (a c) q
+       (transport Comparison isSame same (eqString a a)
+          (symEq Comparison (eqString a a) same (eqStringRefl a)) unit))
+
+-- ---------------------------------------------------------------------------
+-- The chain of candidates, and that it is pairwise distinct
+
+-- `chain n c` is c, c', c'', … with one more element than `n` has.
+chain : List String -> String -> List String
+chain = \ n c ->
+  elim List (String) (\ l -> String -> List String)
+    ((\ d -> cons String d (nil String))
+     (\ h hs r -> \ d -> cons String d (r (appendString d "'"))))
+    () n c
+
+Tail : String -> String -> Type₀
+Tail = \ c d -> Sigma String (\ b -> Eq String d (appendString c b))
+
+Shape : String -> String -> Type₀
+Shape = \ c d -> Or (Eq String d (appendString c "'")) (Tail (appendString c "'") d)
+
+-- Everything in a chain that starts one prime up is `c'` or `c'` with more
+-- after it. The ONE use of associativity is here, in the step.
+chainShape : forall (n : List String) (c : String) (d : String)
+          -> (In d (chain n (appendString c "'")) : Type₀) -> (Shape c d : Type₀)
+chainShape = \ n ->
+  elim List (String)
+    (\ l -> forall (c : String) (d : String) -> In d (chain l (appendString c "'")) -> Shape c d)
+    ((\ c d i ->
+        elim Or ((Eq String d (appendString c "'")) (Empty)) (\ o -> Shape c d)
+          ((\ e -> orLeft (Eq String d (appendString c "'")) (Tail (appendString c "'") d) e)
+           (\ z -> absurdly (Shape c d) z))
+          () i)
+     (\ h hs rh c d i ->
+        elim Or ((Eq String d (appendString c "'")) (In d (chain hs (appendString (appendString c "'") "'"))))
+          (\ o -> Shape c d)
+          ((\ e -> orLeft (Eq String d (appendString c "'")) (Tail (appendString c "'") d) e)
+           (\ j ->
+              elim Or ((Eq String d (appendString (appendString c "'") "'"))
+                       (Tail (appendString (appendString c "'") "'") d))
+                (\ o -> Shape c d)
+                ((\ e -> orRight (Eq String d (appendString c "'")) (Tail (appendString c "'") d)
+                           (pair String (\ b -> Eq String d (appendString (appendString c "'") b)) "'" e))
+                 (\ s ->
+                    elim Sigma (String (\ b -> Eq String d (appendString (appendString (appendString c "'") "'") b)))
+                      (\ z -> Shape c d)
+                      ((\ b e -> orRight (Eq String d (appendString c "'")) (Tail (appendString c "'") d)
+                                   (pair String (\ b1 -> Eq String d (appendString (appendString c "'") b1))
+                                         (appendString "'" b)
+                                         (transport String (\ z -> Eq String d z)
+                                            (appendString (appendString (appendString c "'") "'") b)
+                                            (appendString (appendString c "'") (appendString "'" b))
+                                            (appendAssoc (appendString c "'") "'" b)
+                                            e))))
+                      () s))
+                () (rh (appendString c "'") d j)))
+          () i))
+    () n
+
+Distinct : List String -> Type₀
+Distinct = \ xs -> elim List (String) (\ l -> Type₀) ((Unit) (\ h hs r -> And (In h hs -> Empty) r)) () xs
+
+headNotInTail : forall (n : List String) (c : String)
+             -> (In c (chain n (appendString c "'")) : Type₀) -> (Empty : Type₀)
+headNotInTail = \ n c i ->
+  elim Or ((Eq String c (appendString c "'")) (Tail (appendString c "'") c)) (\ o -> Empty)
+    ((\ e -> neqFromDifferent c (appendString c "'") (primeDiffers c) e)
+     (\ s -> elim Sigma (String (\ b -> Eq String c (appendString (appendString c "'") b)))
+               (\ z -> Empty)
+               ((\ b e -> neqFromDifferent c (appendString (appendString c "'") b)
+                            (primeMoreDiffers c b) e))
+               () s))
+    () (chainShape n c c i)
+
+chainDistinct : forall (n : List String) (c : String) -> (Distinct (chain n c) : Type₀)
+chainDistinct = \ n ->
+  elim List (String) (\ l -> forall (c : String) -> Distinct (chain l c))
+    ((\ c -> both (In c (nil String) -> Empty) Unit (\ z -> z) unit)
+     (\ h hs rh c -> both (In c (chain hs (appendString c "'")) -> Empty)
+                          (Distinct (chain hs (appendString c "'")))
+                          (\ i -> headNotInTail hs c i)
+                          (rh (appendString c "'"))))
+    () n
+
+-- ---------------------------------------------------------------------------
+-- Longer, and removing one name: the counting, with no numbers in it
+
+-- `Longer xs ys` is |xs| > |ys|, COMPUTED from the two lists — so
+-- `Longer nil ys` is `Empty` by reduction and the base case needs no inversion.
+Longer : List String -> List String -> Type₀
+Longer = \ xs ->
+  elim List (String) (\ l -> List String -> Type₀)
+    ((\ ys -> Empty)
+     (\ h hs r -> \ ys -> elim List (String) (\ m -> Type₀) ((Unit) (\ k ks rk -> r ks)) () ys))
+    () xs
+
+chainLonger : forall (n : List String) (c : String) -> (Longer (chain n c) n : Type₀)
+chainLonger = \ n ->
+  elim List (String) (\ l -> forall (c : String) -> Longer (chain l c) l)
+    ((\ c -> unit) (\ h hs rh c -> rh (appendString c "'")))
+    () n
+
+-- The first occurrence only, so the length drops by exactly one.
+remove : String -> List String -> List String
+remove = \ c xs ->
+  elim List (String) (\ l -> List String)
+    ((nil String)
+     (\ h hs rh -> elim Comparison () (\ q -> List String) ((hs) (cons String h rh)) () (eqString c h)))
+    () xs
+
+inRemove : forall (d : String) (c : String) (xs : List String)
+        -> (In d xs : Type₀) -> ((Eq String d c -> Empty) : Type₀) -> (In d (remove c xs) : Type₀)
+inRemove = \ d c xs ->
+  elim List (String) (\ l -> In d l -> (Eq String d c -> Empty) -> In d (remove c l))
+    ((\ i nq -> absurdly (In d (remove c (nil String))) i)
+     (\ h hs rh i nq ->
+        elim Comparison ()
+          (\ q -> Eq Comparison (eqString c h) q
+               -> In d (elim Comparison () (\ q1 -> List String) ((hs) (cons String h (remove c hs))) () q))
+          ((\ eq -> elim Or ((Eq String d h) (In d hs)) (\ o -> In d hs)
+                      ((\ e -> absurdly (In d hs)
+                                 (nq (transport String (\ z -> Eq String d z) h c
+                                        (symEq String c h (eqStringEqual c h eq)) e)))
+                       (\ j -> j))
+                      () i)
+           (\ eq -> elim Or ((Eq String d h) (In d hs)) (\ o -> In d (cons String h (remove c hs)))
+                      ((\ e -> orLeft (Eq String d h) (In d (remove c hs)) e)
+                       (\ j -> orRight (Eq String d h) (In d (remove c hs)) (rh j nq)))
+                      () i))
+          () (eqString c h) (refl Comparison (eqString c h))))
+    () xs
+
+removeLonger : forall (c : String) (ys : List String) (xs : List String) (x : String)
+            -> (In c ys : Type₀) -> (Longer (cons String x xs) ys : Type₀)
+            -> (Longer xs (remove c ys) : Type₀)
+removeLonger = \ c ys ->
+  elim List (String)
+    (\ m -> forall (xs : List String) (x : String)
+         -> In c m -> Longer (cons String x xs) m -> Longer xs (remove c m))
+    ((\ xs x i hl -> absurdly (Longer xs (remove c (nil String))) i)
+     (\ a as ra xs x i hl ->
+        elim Comparison ()
+          (\ q -> Eq Comparison (eqString c a) q
+               -> Longer xs (elim Comparison () (\ q1 -> List String)
+                               ((as) (cons String a (remove c as))) () q))
+          ((\ eq -> hl)
+           (\ eq ->
+              elim List (String)
+                (\ l -> Longer l as -> Longer l (cons String a (remove c as)))
+                ((\ hn -> absurdly (Longer (nil String) (cons String a (remove c as))) hn)
+                 (\ x1 xs1 rx hc ->
+                    ra xs1 x1
+                      (elim Or ((Eq String c a) (In c as)) (\ o -> In c as)
+                         ((\ e -> absurdly (In c as) (neqFromDifferent c a eq e)) (\ j -> j))
+                         () i)
+                      hc))
+                () xs hl))
+          () (eqString c a) (refl Comparison (eqString c a))))
+    () ys
+
+-- ---------------------------------------------------------------------------
+-- The two directions of 07's `member`, from its own spec
+
+inIsSame : forall (c : String) (xs : List String)
+        -> (In c xs : Type₀) -> (Eq Comparison (member c xs) same : Type₀)
+inIsSame = \ c xs i ->
+  elim Or ((And (Eq Comparison (member c xs) same) (In c xs))
+           (And (Eq Comparison (member c xs) different) (In c xs -> Empty)))
+    (\ o -> Eq Comparison (member c xs) same)
+    ((\ h -> andLeft (Eq Comparison (member c xs) same) (In c xs) h)
+     (\ h -> absurdly (Eq Comparison (member c xs) same)
+               (andRight (Eq Comparison (member c xs) different) (In c xs -> Empty) h i)))
+    () (memberSpec c xs)
+
+sameIsIn : forall (c : String) (xs : List String)
+        -> (Eq Comparison (member c xs) same : Type₀) -> (In c xs : Type₀)
+sameIsIn = \ c xs eq ->
+  elim Or ((And (Eq Comparison (member c xs) same) (In c xs))
+           (And (Eq Comparison (member c xs) different) (In c xs -> Empty)))
+    (\ o -> In c xs)
+    ((\ h -> andRight (Eq Comparison (member c xs) same) (In c xs) h)
+     (\ h -> absurdly (In c xs)
+               (transport Comparison isSame same different
+                  (transport Comparison (\ z -> Eq Comparison z different) (member c xs) same eq
+                     (andLeft (Eq Comparison (member c xs) different) (In c xs -> Empty) h))
+                  unit)))
+    () (memberSpec c xs)
+
+-- ---------------------------------------------------------------------------
+-- The chooser's specification, PROVED
+
+-- The generated chooser written out, and the `refl` that says so.
+freshFrom : List String -> List String -> String -> String
+freshFrom = \ avoid fuel c ->
+  (elim List (String) (\ l -> String -> String)
+     ((\ d -> d)
+      (\ h hs r -> \ d -> elim Comparison () (\ q -> String)
+                            ((r (appendString d "'")) (d)) () (member d avoid)))
+     () fuel) c
+
+freshIs : forall (y : String) (avoid : List String)
+       -> Eq String (LC-fresh-x y avoid) (freshFrom avoid avoid y)
+freshIs = \ y avoid -> refl String (freshFrom avoid avoid y)
+
+-- Every candidate that is in `avoid` is still in the working copy.
+Covers : List String -> List String -> List String -> Type₀
+Covers = \ ch avoid av -> forall (d : String) -> In d ch -> In d avoid -> In d av
+
+-- THE INDUCTION, on the fuel. A rejection spends one name of the working copy,
+-- and the copy is empty exactly when the fuel is — so the last candidate,
+-- which the generated code returns unchecked, has nothing left to collide with.
+walk : forall (avoid : List String) (fuel : List String) (c : String) (av : List String)
+    -> (Distinct (chain fuel c) : Type₀)
+    -> (Longer (chain fuel c) av : Type₀)
+    -> (Covers (chain fuel c) avoid av : Type₀)
+    -> (In (freshFrom avoid fuel c) avoid : Type₀) -> (Empty : Type₀)
+walk = \ avoid fuel ->
+  elim List (String)
+    (\ l -> forall (c : String) (av : List String)
+         -> Distinct (chain l c) -> Longer (chain l c) av -> Covers (chain l c) avoid av
+         -> In (freshFrom avoid l c) avoid -> Empty)
+    ((\ c av dd lg cv i ->
+        elim List (String)
+          (\ m -> Longer (cons String c (nil String)) m -> In c m -> Empty)
+          ((\ hl hi -> hi) (\ a as ra hl hi -> hl))
+          () av lg (cv c (orLeft (Eq String c c) (Empty) (refl String c)) i))
+     (\ h t rt c av dd lg cv i ->
+        elim Comparison ()
+          (\ q -> Eq Comparison (member c avoid) q
+               -> In (elim Comparison () (\ q1 -> String)
+                        ((freshFrom avoid t (appendString c "'")) (c)) () q) avoid
+               -> Empty)
+          ((\ eq ii ->
+              rt (appendString c "'") (remove c av)
+                 (andRight (In c (chain t (appendString c "'")) -> Empty)
+                           (Distinct (chain t (appendString c "'"))) dd)
+                 (removeLonger c av (chain t (appendString c "'")) c
+                    (cv c (orLeft (Eq String c c) (In c (chain t (appendString c "'"))) (refl String c))
+                        (sameIsIn c avoid eq))
+                    lg)
+                 (\ d jd ja ->
+                    inRemove d c av
+                      (cv d (orRight (Eq String d c) (In d (chain t (appendString c "'"))) jd) ja)
+                      (\ e -> andLeft (In c (chain t (appendString c "'")) -> Empty)
+                                      (Distinct (chain t (appendString c "'"))) dd
+                                (transport String (\ z -> In z (chain t (appendString c "'"))) d c e jd)))
+                 ii)
+           (\ eq ii ->
+              transport Comparison isSame same different
+                (transport Comparison (\ z -> Eq Comparison z different) (member c avoid) same
+                   (inIsSame c avoid ii) eq)
+                unit))
+          () (member c avoid) (refl Comparison (member c avoid)) i))
+    () fuel
+
+-- What used to be the trusted claim. Same name, same type, and now a theorem.
+freshIsFresh : forall (y : String) (avoid : List String)
+            -> (In (LC-fresh-x y avoid) avoid : Type₀) -> (Empty : Type₀)
+freshIsFresh = \ y avoid ->
+  walk avoid avoid y avoid (chainDistinct avoid y) (chainLonger avoid y) (\ d jd ja -> ja)
 
 -- ---------------------------------------------------------------------------
 -- Free variables: four facts about `fvA`, 07's spelled-out `LC-fv-x`.

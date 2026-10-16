@@ -444,10 +444,11 @@ case — and reaches the same statement as `preservation-tactics`.
 **`07` is stated for closed terms**, as Software Foundations states it. The
 argument substituted in a β-step is then closed, so no binder is ever renamed.
 
-### And for any context, resting on one trusted claim
+### And for any context, resting on three laws about `appendString`
 
-*Decided 2026-10-12.* `examples/10-preservation-any-context.thena` proves the
-same theorem with no restriction on the context:
+*Decided 2026-10-12; the trust narrowed to the three laws on 2026-10-16.*
+`examples/10-preservation-any-context.thena` proves the same theorem with no
+restriction on the context:
 
 ```
 preservationAny : ∀ (G : Ctx) (M : LC) (M1 : LC) (T : Ty)
@@ -457,21 +458,39 @@ preservationAny : ∀ (G : Ctx) (M : LC) (M1 : LC) (T : Ty)
 With an open argument a β-step **can** capture, so the generated substitution
 renames the binder — `( λ y : ι . x )[x -> ( λ w : ι . y )]` is
 `( λ y' : ι . ( λ w : ι . y ) )`, which the file proves by `refl`. The proof then
-has to know the minted name really is fresh, and that is a fact about
-`appendString`, which computes only on literals.
+has to know the minted name really is fresh.
 
-**So one claim is written down as a trusted core term and everything above it is
-proved.** The claim is the name chooser's specification — `L-fresh-‹k› y avoid` is
-not in `avoid` — with an honest body of type `Empty -> Empty`; the kernel checks
-the body and trusts the claim. **Nothing is added to the theorem's statement**:
-`preservationAny` has no extra hypothesis. `:trust` names the claim and the chain
-of definitions that reaches it, so a reader is told what the proof rests on.
+**Three laws about `appendString` are trusted and everything else is proved**:
 
-**It is not derivable today for one reason.** The chooser tries `y`, `y'`, `y''`,
-… using the avoid-list as its fuel, so one of `n+1` candidates must escape a list
-of `n` — but that argument needs the candidates to be pairwise distinct, which
-needs their lengths, and the primitives are `eqString`, `eqChar`, `eqInt` and
-`appendString`. **There is no `lengthString` and no arithmetic.**
+```
+appendAssoc      (a ++ b) ++ c  =  a ++ (b ++ c)
+primeDiffers     eqString a (a ++ "'")           is  different
+primeMoreDiffers eqString a ((a ++ "'") ++ b)    is  different
+```
+
+Each is a fact about a primitive that computes only on two literals and goes
+neutral on anything else, which is the same position the prelude's
+`eqStringEqual` is in. On literals each one **discharges**: both sides reduce,
+claimed and actual become convertible, and the node contracts — `:whnf
+appendAssoc "a" "b" "c"` is its own body. They are pending exactly where they
+carry weight.
+
+**The name chooser's specification is a theorem.** `L-fresh-‹k› y avoid` is not
+in `avoid` — that used to be the trusted claim, and it is now derived from the
+three laws by the argument the generated code is built on: the candidates `y`,
+`y'`, `y''`, … are pairwise distinct, each rejection spends one name of the
+list, and the fuel, which is `avoid` itself, runs out only once the list is
+exhausted. **Nothing is added to the theorem's statement**: `preservationAny`
+has no extra hypothesis.
+
+**There is no counting in it and no arithmetic.** *Longer* is `|xs| > |ys|`
+computed from the two lists, so *longer than something, being empty* reduces to
+`Empty` and the base case closes by reduction rather than by a pigeonhole over
+numbers. **A length as an `Int` would not have helped.** `String`, `Char` and
+`Int` are primitive *types* — no constructors, no eliminator — so there is no
+induction over a length, and `length (a ++ b) = length a + length b` is a claim
+about open arguments like any other: adding `lengthString` and arithmetic would
+have traded one trusted law for two and widened the kernel permanently.
 
 ### `decString` compares two strings and hands you the proof
 
