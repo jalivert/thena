@@ -126,6 +126,7 @@ import Thena.Errors
   , ConversionFailure (..)
   , DevForm (..)
   , ElimError (..)
+  , SpecialiseError (..)
   , FailReason (..)
   , KernelError (..)
   , MoveError (..)
@@ -1261,6 +1262,7 @@ renderFailReason ren r = case r of
       ++ show i
       ++ " to take it"
   CannotEliminate e -> renderElimError ren e
+  CannotSpecialise e -> renderSpecialiseError ren e
   UnboundInBody x   -> "nothing named " ++ x ++ " in this body"
   NotAnIdentifier s -> show s ++ " is not a name"
   ExpectedText      -> "expected text"
@@ -1861,6 +1863,20 @@ renderElimError ren e = case e of
       ++ concatMap ("\n  " ++) (renderTypeError ren te)
   SchemeIllTyped te ->
     "the elimination does not prove this goal"
+      ++ concatMap ("\n  " ++) (renderTypeError ren te)
+
+-- | Why specialisation by unification could not run (MS9 phase 177).
+renderSpecialiseError :: Rendering -> SpecialiseError -> String
+renderSpecialiseError ren e = case e of
+  NotThatConstructor g -> nameString g ++ " is not a constructor"
+  MethodNotShaped want eqs _ ->
+    "that is not a method of this constructor: it needs "
+      ++ count want "binder" ++ " and " ++ count eqs "equation"
+  NotAnEquation tys ->
+    "the equation block has " ++ count (length tys) "binder"
+      ++ " and one of them is not an equation"
+  SpecialisedIllTyped te ->
+    "the specialised method does not prove this one"
       ++ concatMap ("\n  " ++) (renderTypeError ren te)
 
 renderTypeError :: Rendering -> TypeError -> [String]

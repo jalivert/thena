@@ -2845,6 +2845,58 @@ that reach it from the root, so a click compiles to `goto-root` and then those
 moves — an ordinary program you could have typed, snapshotted and undoable like
 any line. Clicking the top of a development is `goto-root` on its own.
 
+### `specialise` discharges the equations an elimination hands you, and keeps the ones it cannot
+
+*Decided 2026-10-18.*
+
+Eliminating a family at specific indices gives you one method per constructor
+with the equations that recover those indices attached. Splitting `v : Vec A (succ n)`
+to prove `Vec A n` hands over
+
+```
+nilMethod  : Eq {0} Nat zero (succ n) -> Vec A n
+consMethod : ∀ (n1 : Nat) -> A -> Vec A n1
+           -> (Eq {0} Nat n1 (succ n) -> Vec A n)
+           -> Eq {0} Nat (succ n1) (succ n) -> Vec A n
+```
+
+and until now you discharged each one by hand, with a generated `noConfusion`
+and an `Empty` elimination for the branches that cannot occur and a transport
+for the ones that can. `specialise ‹constructor› ‹equations›` does it instead.
+At `nilMethod` it leaves **no subgoal at all** — `zero` against `succ n` cannot
+hold — and at `consMethod` it leaves
+
+```
+A -> Vec A n -> (Eq {0} Nat n (succ n) -> Vec A n) -> Vec A n
+```
+
+The binder `n1` is gone, because the equation determined it, and the vector is
+at `n` rather than at `n1` — which is exactly the coercion you were writing.
+
+**It is one instruction and not four**, for the same reason `prim-eliminate` is
+one: everything it does is term construction over a declaration, and a granular
+version would need a term-building sub-vocabulary that nothing else has asked
+for. What is *not* inside it is the choice of what to split, which is an
+ordinary rule — a wrong choice is a failed elaboration, while a wrong proof term
+would be a lie, and the second is the one the kernel has to be the judge of. So
+everything `specialise` builds is checked against the method it claims to prove
+before you are given it.
+
+**An equation it cannot simplify is kept, not refused.** There are four
+transitions — an equation of a term with itself goes, two different constructors
+close the method, the same constructor splits into its arguments, and a binder
+the equation determines is substituted away — and no fifth one for a *cyclic*
+equation like `Eq Nat m (succ m)`, which is refutable and is not refuted. When
+none applies, the equation stays a hypothesis of the simplified method. That is
+what you were handed before, so the worst case is the behaviour this replaces.
+
+**`prim-eliminate` now answers with a number**: how many equations each of its
+methods carries. A method type is Π binders all the way down and does not say
+which of them are the equations, so `specialise` has to be told — and the
+elimination that stated them is the only thing that knows.
+
+---
+
 ---
 
 ## The REPL and the session

@@ -304,6 +304,8 @@ everyOp =
   , ("constructors-of d", Op.ConstructorsOf (Ref "d"))
   , ("constructor-datatype c", Op.ConstructorDatatype (Ref "c"))
   , ("constructor-arguments c", Op.ConstructorArguments (Ref "c"))
+    -- Specialisation by unification (MS9 phase 177).
+  , ("specialise c k", Op.Specialise (Ref "c") (Ref "k"))
   ]
 
 vocabulary :: TestTree

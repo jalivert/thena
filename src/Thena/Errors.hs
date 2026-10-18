@@ -50,6 +50,7 @@ module Thena.Errors
 
     -- * The elimination tactic (§3.7)
   , ElimError (..)
+  , SpecialiseError (..)
 
     -- * Reading a term (§2.5, §2.6) — moved here at phase 17b
   , SyntaxError (..)
@@ -352,6 +353,10 @@ data FailReason
   | CannotEliminate ElimError
     -- ^ the elimination tactic could not build a scheme for the target it was
     -- given (§3.7, phase 17)
+  | CannotSpecialise SpecialiseError
+    -- ^ specialisation by unification could not run on the method it was given
+    -- (MS9 phase 177). Not raised when a transition simply does not apply —
+    -- 'SpecialiseError' says why
 
     -- Elaboration and @Call@ (§7.2, §8), added at phase 17b.
   | NoElaborationRule String
@@ -672,6 +677,31 @@ data ElimError
   | SchemeIllTyped TypeError
     -- ^ the assembled elimination does not have the goal's type. Unreachable if
     -- the motive typechecked and the generated eliminator type is right
+  deriving (Eq, Show)
+
+-- | What specialisation by unification refused (MS9 phase 177).
+--
+-- **There is no "no transition applies" case, and that is deliberate.**
+-- @eliminating.pdf@ Definition 19 makes that a failure; "Thena.Tactics.Specialise"
+-- keeps the equation as a hypothesis instead, which is what the user is handed
+-- today, so the specialiser can only refuse for a reason that is about its
+-- /caller/ rather than about the problem.
+data SpecialiseError
+  = NotThatConstructor GlobalName
+    -- ^ the name a method was to be specialised for is not a constructor. A
+    -- method type says nothing about which constructor it belongs to, so the
+    -- caller names it; this is that name being wrong
+  | MethodNotShaped Int Int Core
+    -- ^ the type has fewer Π binders than the constructor's telescope and the
+    -- stated equation count together — so it is not that constructor's method,
+    -- or not an elimination's method at all. Carries both counts and the type
+  | NotAnEquation [Core]
+    -- ^ a binder in the equation block is not an application of @Eq@. Carries
+    -- every domain in that block, because which one is wrong is the question
+  | SpecialisedIllTyped TypeError
+    -- ^ the term built does not inhabit the method type it was built for. A
+    -- **generator bug**, like 'Thena.Global.NoConfusion.Rejected': the whole of
+    -- §7.2's bargain for a coarse op is that this is caught here
   deriving (Eq, Show)
 
 -- --------------------------------------------------------------------------

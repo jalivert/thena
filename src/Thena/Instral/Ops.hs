@@ -1094,6 +1094,23 @@ data Op
     -- same courtesy 'Eliminate' already does for its method holes. Their
     -- /number/ is this list's length, which is a constructor pattern's arity,
     -- so no separate arity op: one question, one answer.
+
+    -- **Specialisation by unification** (MS9 phase 177): the four transitions
+    -- over the equations an elimination's method carries, in one coarse op —
+    -- __his ruling, 2026-10-18__, with the argument that decided it: the
+    -- splitting tree is rules, because a wrong tree is a failed elaboration
+    -- while a wrong proof term is caught by @check@.
+    --
+    -- The goal is the focus, as with 'Eliminate' and the other hole ops, and
+    -- the two operands are the facts a method type does not carry: __which
+    -- constructor's method this is__, which gives the length of its telescope,
+    -- and __how many equations follow it__, which is what 'Eliminate' now
+    -- answers with. See "Thena.Tactics.Specialise".
+    --
+    -- **It claims zero or one hole**, and zero is the impossible case
+    -- vanishing: a conflicting equation closes the method outright, so there is
+    -- nothing left to prove and nothing to go to.
+  | Specialise Operand Operand
   deriving (Eq, Show)
 
 -- @Reduce@ is a move, not a value-producing op, for the same reason 'Along'
@@ -1342,7 +1359,13 @@ resultOf o = case o of
   -- chose to answer with 'None' rather than to fail. The table said @a@ until
   -- MS5 phase 73, which the engine cross-check could not catch: a bare variable
   -- is inhabited by every value, so the row asserted nothing.
-  Eliminate _  -> Nothing
+  -- **The number of equations each method carries** (MS9 phase 177). It used
+  -- to answer nothing; @specialise@ needs the count and nothing else in the
+  -- language can work it out, so the op that states the equations is what says
+  -- how many it stated. A body that does not want it discards it, as every
+  -- rule shipped before this phase does.
+  Eliminate _  -> Just TInt
+  Specialise _ _ -> Nothing
   -- The six declaration readers (MS9 phase 176). @constructors-of@ is the
   -- first row in this table to answer with a list.
   DatatypeOf _ -> Just TName
@@ -1478,6 +1501,7 @@ operandTypes o = case o of
   Typing a     -> [(a, TCore)]
   Define a b   -> [(a, TName), (b, TCore)]
   Eliminate a  -> [(a, TCore)]
+  Specialise c k -> [(c, TName), (k, TInt)]
   -- @datatype-of@ reads a type; the other five read a declared name.
   DatatypeOf a -> [(a, TCore)]
   DatatypeParameters a -> [(a, TName)]
@@ -1914,6 +1938,7 @@ opKeyword o = case o of
   PushDevelopment _ -> "push-development"
   PopDevelopment -> "pop-development"
   Eliminate _  -> "prim-eliminate"
+  Specialise _ _ -> "specialise"
   DatatypeOf _ -> "datatype-of"
   DatatypeParameters _ -> "datatype-parameters"
   DatatypeIndices _ -> "datatype-indices"

@@ -28,6 +28,8 @@ module Thena.Declared
   , natFin
   , natFinCounter
   , eqNat
+  , eqNatVec
+  , eqNatVecCounter
   , eqNatCounter
   , eqTapl
   , eqTaplCounter
@@ -163,6 +165,15 @@ eqNat = fst (declared (preludeDecls ++ [natDecl]))
 
 eqNatCounter :: Int
 eqNatCounter = snd (declared (preludeDecls ++ [natDecl]))
+
+-- | The prelude, @Nat@ and @Vec@ — @noConfusionNat@ beside an indexed family
+-- whose index is a @Nat@, which is what specialisation by unification is worked
+-- on (MS9 phase 177).
+eqNatVec :: GlobalEnv
+eqNatVec = fst (declared (preludeDecls ++ [natDecl, vecDecl]))
+
+eqNatVecCounter :: Int
+eqNatVecCounter = snd (declared (preludeDecls ++ [natDecl, vecDecl]))
 
 -- | The prelude and then MS1's target language.
 eqTapl :: GlobalEnv

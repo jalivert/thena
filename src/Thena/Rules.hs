@@ -1480,6 +1480,9 @@ binaryOps =
   , ("concat", Concat), ("unify", Unify), ("unify-into", Op.UnifyInto)
   , ("arrow", Arrow), ("apply-to", ApplyTo), ("apply-next", Op.ApplyNext)
   , ("declare-primitive", Op.DeclarePrimitive)
+    -- Specialisation by unification (MS9 phase 177): the constructor whose
+    -- method this is, and how many equations follow its telescope.
+  , ("specialise", Op.Specialise)
   ]
 
 -- | **The first op with three operands** (MS8 phase 150). A trusted term has

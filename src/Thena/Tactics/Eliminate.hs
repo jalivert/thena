@@ -73,8 +73,18 @@ import Thena.Global.Env
 -- 'elimTerm' mentions those holes as @'Free' v@, so it is well typed only in a
 -- context extended by them. 'eliminate' has already checked it there.
 data Elimination = Elimination
-  { elimMethods :: [(Var, Ident, Core)]
-  , elimTerm    :: Core
+  { elimMethods   :: [(Var, Ident, Core)]
+  , elimTerm      :: Core
+  , elimEquations :: Int
+    -- ^ how many equations __each__ method carries — the number of /tied/
+    -- indices, and the same for every method of one elimination (MS9 phase
+    -- 177).
+    --
+    -- __It is here because nothing else can work it out.__ A method type is Π
+    -- binders all the way down and does not say which of them are the
+    -- equations; the count is what 'friendlyAt' decided, and
+    -- "Thena.Tactics.Specialise" is the caller that needs it. So the op that
+    -- /states/ the equations is what answers with how many it stated.
   }
   deriving (Eq, Show)
 
@@ -335,7 +345,8 @@ eliminate env ctx n0 goal tgt =
             [ Canonical reflexivity [lv] [ity, a] | (lv, (ity, _, a)) <- tied ]
        in case check env (ctx ++ methodEntries) n10 proof goal of
             (Left e, _, n11)   -> (Left (SchemeIllTyped e), n11)
-            (Right (), _, n11) -> (Right (Elimination holes proof), n11)
+            (Right (), _, n11) ->
+              (Right (Elimination holes proof (length tied)), n11)
 
     -- Peel @k@ Π domains off a type, instantiating each binder with itself is
     -- not possible — nothing refers to a method — so a method type is read

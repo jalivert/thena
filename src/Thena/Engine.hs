@@ -142,6 +142,7 @@ import Thena.Global.Env
   )
 import qualified Thena.Instral.Ops as Op
 import Thena.Tactics.Eliminate (Elimination (..), eliminate, spineOf)
+import Thena.Tactics.Specialise (Specialisation (..), specialise)
 import Thena.Rules
   (RuleBase, RuleError (..), RuleIter, arities, clauses, dispatch, hasNext, next, resolveBlock)
 import Thena.Syntax.Lexer (isIdentifier)
@@ -1229,10 +1230,48 @@ perform instr rest m = case operation instr of
              in case replaceComponent guess holes of
                   Left e    -> failure (CannotMove e) m
                   Right cur ->
-                    Saying (subgoalMessage (elimMethods el))
+                    -- **It answers with the number of equations each method
+                    -- carries** (MS9 phase 177), because nothing else can work
+                    -- it out: a method type does not say which of its binders
+                    -- are the equations, and @specialise@ has to be told. A
+                    -- body that does not want it discards it.
+                    producing (Saying (subgoalMessage (elimMethods el)))
+                              (VInt (elimEquations el))
+                              m { development = Development cur, names = n1 }
+      OnComponent _ -> failure NotAHole m
+      _             -> failure (CannotMove NotOnTheSpine) m
+
+  -- **Specialisation by unification** (MS9 phase 177) — the four transitions
+  -- over the equations the elimination above stated, in one coarse op by his
+  -- ruling of 2026-10-18. "Thena.Tactics.Specialise" has the argument that
+  -- decided it.
+  --
+  -- The same shape as 'Op.Eliminate' and deliberately: the goal is the focus,
+  -- the subgoal goes in above it so that it can be seen, and the goal itself
+  -- becomes the guess that uses it. The one difference is that there may be
+  -- **no** subgoal at all — a conflicting equation closes the method, which is
+  -- the impossible case vanishing — and then nothing is claimed and the guess
+  -- mentions nothing.
+  Op.Specialise c k -> case (,) <$> text c <*> operandValue (env (exec m)) k of
+    Left e -> failure e m
+    Right (w, VInt eqs) -> case focus (cursor (development m)) of
+      OnComponent (Component.Claim x i s) ->
+        case specialise (globals m) contextAt (names m) (GlobalName w) eqs s of
+          (Left e,  n1) -> failure (CannotSpecialise e) m { names = n1 }
+          (Right sp, n1) ->
+            let holes = foldl claimAbove (cursor (development m)) (specialisedGoal sp)
+                claimAbove cur (v', hi, hty) =
+                  insertAbove
+                    (Component.Claim v' (Cursor.freshIdent (Cursor.identsIn cur) hi) hty) cur
+                guess = Component.Guess x i (Trailing (specialisedTerm sp)) s
+             in case replaceComponent guess holes of
+                  Left e    -> failure (CannotMove e) m
+                  Right cur ->
+                    Saying (subgoalMessage (specialisedGoal sp))
                            (advance m { development = Development cur, names = n1 })
       OnComponent _ -> failure NotAHole m
       _             -> failure (CannotMove NotOnTheSpine) m
+    Right _ -> failure ExpectedInt m
 
   -- Thesis §2.7's @naive-refine@ with the search taken out (phase 25): the
   -- head's type is inferred here, and 'saturate' does the walking.
@@ -1890,11 +1929,16 @@ perform instr rest m = case operation instr of
     -- to be zipped onto a name. A refutable pattern that does not fit is a
     -- failure — his ruling — so this is the one place an op that /succeeded/
     -- can still fail the instruction.
-    produce v m' = case instr of
-      Do _ -> Continue (advance m')
+    produce = producing Continue
+
+    -- **'produce' with the outcome left open** (MS9 phase 177), for the one op
+    -- that both says something and answers with a value: @prim-eliminate@
+    -- reports its subgoals /and/ hands back how many equations they carry.
+    producing k v m' = case instr of
+      Do _ -> k (advance m')
       Bind p _ _ -> case Op.matchPattern (globals m) p v of
         Nothing -> failure (BindingDidNotMatch p) m'
-        Just bs -> Continue (advance m' { exec = (exec m') { env = bs ++ env (exec m') } })
+        Just bs -> k (advance m' { exec = (exec m') { env = bs ++ env (exec m') } })
 
     -- 'Assume' and 'Claim' differ only in which component they build, and both
     -- produce the variable they bound: §7.3's sketch reads @?x <- claim S@.

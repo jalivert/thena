@@ -92,6 +92,7 @@ library
         Thena.Syntax.Print
         Thena.Syntax.Resolve
         Thena.Tactics.Eliminate
+        Thena.Tactics.Specialise
         Thena.View
         Thena.View.Address
         Thena.View.Chart
@@ -290,6 +291,7 @@ test-suite thena-test
         Thena.ProductTests
         Thena.DevelopmentTests
         Thena.DeclarationReadersTests
+        Thena.SpecialiseTests
         Thena.EliminateTests
         Thena.EliminatorTests
         Thena.EngineTests
