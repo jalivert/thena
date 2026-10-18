@@ -289,6 +289,7 @@ test-suite thena-test
         Thena.ProgressTests
         Thena.ProductTests
         Thena.DevelopmentTests
+        Thena.DeclarationReadersTests
         Thena.EliminateTests
         Thena.EliminatorTests
         Thena.EngineTests

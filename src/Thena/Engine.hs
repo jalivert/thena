@@ -131,13 +131,17 @@ import Thena.Global.Env
   , isDeclared
   , lookupDefinition
   , eliminatorName
+  , constructorArguments
+  , constructorName
   , inductiveConstructors
   , inductiveIndices
+  , inductiveName
   , inductiveParameters
+  , lookupConstructor
   , lookupInductive
   )
 import qualified Thena.Instral.Ops as Op
-import Thena.Tactics.Eliminate (Elimination (..), eliminate)
+import Thena.Tactics.Eliminate (Elimination (..), eliminate, spineOf)
 import Thena.Rules
   (RuleBase, RuleError (..), RuleIter, arities, clauses, dispatch, hasNext, next, resolveBlock)
 import Thena.Syntax.Lexer (isIdentifier)
@@ -1418,6 +1422,54 @@ perform instr rest m = case operation instr of
     Right (VLevel l) -> produce (VTerm (Universe l)) m
     Right _          -> failure ExpectedLevel m
 
+  -- **The six declaration readers** (MS9 phase 176). Until this phase
+  -- @make-data@ could declare a datatype and nothing could read one back, so a
+  -- rule could not ask how many constructors a family has — which is the
+  -- question a splitting tree asks at every node.
+  --
+  -- **Each answers names or counts and never a telescope.** A constructor's
+  -- argument types and index expressions are terms in the declaration's own
+  -- scope, and a rule has nothing to instantiate them with; see
+  -- 'Thena.Instral.Ops.DatatypeOf' for why that is a decision rather than a
+  -- gap.
+  --
+  -- **The datatype a type is an application of**, found by the same @spineOf@
+  -- "Thena.Tactics.Eliminate" uses. It is shared rather than copied because of
+  -- what that function's own comment records: a saturated family application is
+  -- a 'Canonical' while a written @Vec A n@ is @App@s over a 'Global' until δ
+  -- unfolds the wrapper, and reading only one form is a bug that prints as
+  -- /"Nat is not a datatype"/. **So the type is reduced first.**
+  Op.DatatypeOf a -> case term a of
+    Left e  -> failure e m
+    Right t -> case spineOf (whnf (globals m) contextAt t) of
+      Just (GlobalName w, _, _)
+        | isDatatype w -> produce (VText w) m
+        | otherwise    -> failure (NotDeclaredAs w "a datatype") m
+      Nothing -> failure (NotDeclaredAs "that type" "a datatype") m
+
+  Op.DatatypeParameters a -> datatypeCount a inductiveParameters
+  Op.DatatypeIndices a    -> datatypeCount a inductiveIndices
+
+  -- **In declaration order, and that order is load-bearing**: it is the order
+  -- the eliminator's methods are in, so a rule walking methods and a rule
+  -- walking constructors agree without either being told.
+  Op.ConstructorsOf a -> withDatatype a $ \d ->
+    produce (VList [ VText c
+                   | GlobalName c <- map constructorName (inductiveConstructors d) ]) m
+
+  -- **Failing here IS the answer "that name is not a constructor"**, which is
+  -- how a splitting rule tells a constructor pattern from a variable one
+  -- without a test of its own.
+  Op.ConstructorDatatype a -> withConstructor a $ \d _ ->
+    case inductiveName d of GlobalName dn -> produce (VText dn) m
+
+  -- Names, so a split can name its pattern variables after them — the courtesy
+  -- 'Op.Eliminate' already does for its method holes. Their count is this
+  -- list's length, which is the pattern's arity.
+  Op.ConstructorArguments a -> withConstructor a $ \_ k ->
+    produce (VList [ VText i
+                   | Ident i <- map entryIdent (constructorArguments k) ]) m
+
   -- **What a name denotes, Γ first and then the globals, with a definition's
   -- level arguments inserted** (MS4 phase 48).
   --
@@ -1797,6 +1849,29 @@ perform instr rest m = case operation instr of
 
     text    = operandText (env (exec m))
     term    = operandTerm (env (exec m))
+
+    -- **The three readers' shared plumbing** (MS9 phase 176). Each takes the
+    -- operand that names a declaration and hands the declaration to its
+    -- caller, so the six cases above say what they read and nothing about how
+    -- the name was got or how the failure is shaped.
+    isDatatype w = case lookupInductive (GlobalName w) (globals m) of
+      Just _  -> True
+      Nothing -> False
+
+    withDatatype a k = case text a of
+      Left e  -> failure e m
+      Right w -> case lookupInductive (GlobalName w) (globals m) of
+        Just d  -> k d
+        Nothing -> failure (NotDeclaredAs w "a datatype") m
+
+    withConstructor a k = case text a of
+      Left e  -> failure e m
+      Right w -> case lookupConstructor (GlobalName w) (globals m) of
+        Just (d, c) -> k d c
+        Nothing     -> failure (NotDeclaredAs w "a constructor") m
+
+    -- A count off a telescope, which is what both of the counting readers are.
+    datatypeCount a f = withDatatype a (\d -> produce (VInt (length (f d))) m)
 
     advance m' = m' { exec = (exec m') { pc = rest } }
 

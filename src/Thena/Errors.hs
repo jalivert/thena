@@ -387,6 +387,19 @@ data FailReason
     -- **Each reader is paired with the test that makes it total in the clause
     -- using it** — @when (surface-is-name s) then w = surface-name s@ — so this
     -- is what a body reaching one any other way gets, rather than a guess.
+  | NotDeclaredAs String String
+    -- ^ a declaration reader was given a name that is not the kind of thing it
+    -- reads (MS9 phase 176): the name, then what the op wanted it to be — @"a
+    -- datatype"@ or @"a constructor"@.
+    --
+    -- **'ExpectedSurfaceShape'\'s shape, for its reason**: one case carrying
+    -- the thing it wanted, rather than a constructor per op. Six readers share
+    -- it and a seventh needs no new case.
+    --
+    -- **It is how a rule tells a constructor pattern from a variable one.**
+    -- @constructor-datatype@ failing /is/ the answer "that name is not a
+    -- constructor", so a splitting rule asks and lets the clause fail rather
+    -- than needing a separate test.
   | NoClauseMatched String Int [Int]
     -- ^ @call ‹name› ‹args›@ found nothing to run: the name, the number of
     -- arguments it was given, and the arities of the rules that do bear that

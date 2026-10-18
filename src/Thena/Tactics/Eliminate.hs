@@ -34,6 +34,7 @@
 module Thena.Tactics.Eliminate
   ( Elimination (..)
   , eliminate
+  , spineOf
   ) where
 
 import Thena.Core.Level (Level, instantiateLevels)

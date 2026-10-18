@@ -1036,6 +1036,64 @@ data Op
     -- It takes an operand where the other hole ops take none, for 'Try'\'s
     -- reason: the goal is the focus, but the target has nowhere else to come
     -- from.
+
+    -- **Asking a declaration what it says** (MS9 phase 176). Six readers over
+    -- 'Thena.Global.Env.InductiveDefinition', and until this phase there were
+    -- none: @make-data@ /declares/ a datatype and nothing could /read/ one, so
+    -- a rule could not find out how many constructors a family has, let alone
+    -- which. A splitting tree is exactly that question asked repeatedly, which
+    -- is why `~kq4kc` starts here.
+    --
+    -- **They answer with names and counts, never with a telescope — and that is
+    -- a decision, not an omission.** A constructor's argument /types/ and its
+    -- index /expressions/ are terms in the declaration's own scope, so handing
+    -- one to a rule hands it free variables the rule has nothing to instantiate
+    -- with. @instral@ owns no telescope type and inventing one is a design
+    -- question nobody has asked yet (§12 invariant 5). The terms stay inside
+    -- the specialiser, which is where they are used correctly.
+    --
+    -- **All six are read-only**: none touches the development, none mints a
+    -- name, none can fail in a way that moves anything.
+  | DatatypeOf Operand
+    -- ^ the datatype a /type/ is an application of — @datatype-of ty@.
+    --
+    -- **It reduces first**, because a saturated family application is a
+    -- 'Thena.Core.Term.Canonical' and a written @Vec A n@ is nested
+    -- 'Thena.Core.Term.App's over a 'Thena.Core.Term.Global' until δ unfolds
+    -- the former wrapper — §12 invariant 6, and reading only one of the two
+    -- forms is a bug that surfaces as /"Nat is not a datatype"/. It shares
+    -- "Thena.Tactics.Eliminate"'s @spineOf@ rather than carrying a second copy
+    -- of that lesson.
+  | DatatypeParameters Operand
+    -- ^ how many parameters a datatype takes — @datatype-parameters d@.
+  | DatatypeIndices Operand
+    -- ^ … and how many indices. **Two ops and not one pair**, because a rule
+    -- that wants one does not want to destructure to get it, and §3.7's split
+    -- between the two is the whole reason the question is asked.
+  | ConstructorsOf Operand
+    -- ^ a datatype's constructors, **in declaration order** — @constructors-of d@.
+    --
+    -- The order is load-bearing: it is the order the eliminator's methods are
+    -- in, so a rule walking methods and a rule walking constructors agree
+    -- without either being told.
+    --
+    -- **The first op in the language to answer with a list.** 'VList' and
+    -- 'Thena.Instral.Type.TList' have existed since MS5 phase 65 with nothing
+    -- producing one; a rule destructures this with @[c, ...rest]@.
+  | ConstructorDatatype Operand
+    -- ^ the datatype a /constructor/ belongs to — @constructor-datatype c@.
+    --
+    -- **What a pattern is checked against.** A clause writes @vcons n a v@ and
+    -- something has to say whether @vcons@ is a constructor of the family being
+    -- split; this is that, and it fails for a name that is not a constructor at
+    -- all, which is how a rule tells a constructor pattern from a variable one.
+  | ConstructorArguments Operand
+    -- ^ a constructor's argument names, in order — @constructor-arguments c@.
+    --
+    -- **Names, so a split can name its pattern variables after them** — the
+    -- same courtesy 'Eliminate' already does for its method holes. Their
+    -- /number/ is this list's length, which is a constructor pattern's arity,
+    -- so no separate arity op: one question, one answer.
   deriving (Eq, Show)
 
 -- @Reduce@ is a move, not a value-producing op, for the same reason 'Along'
@@ -1285,6 +1343,14 @@ resultOf o = case o of
   -- MS5 phase 73, which the engine cross-check could not catch: a bare variable
   -- is inhabited by every value, so the row asserted nothing.
   Eliminate _  -> Nothing
+  -- The six declaration readers (MS9 phase 176). @constructors-of@ is the
+  -- first row in this table to answer with a list.
+  DatatypeOf _ -> Just TName
+  DatatypeParameters _ -> Just TInt
+  DatatypeIndices _ -> Just TInt
+  ConstructorsOf _ -> Just (TList TName)
+  ConstructorDatatype _ -> Just TName
+  ConstructorArguments _ -> Just (TList TName)
   ApplyNext _ _ -> Just TCore  -- the spine, one argument longer
   ExpandImplicits _ -> Just TSurface
   AppHead _ -> Just TSurface
@@ -1412,6 +1478,13 @@ operandTypes o = case o of
   Typing a     -> [(a, TCore)]
   Define a b   -> [(a, TName), (b, TCore)]
   Eliminate a  -> [(a, TCore)]
+  -- @datatype-of@ reads a type; the other five read a declared name.
+  DatatypeOf a -> [(a, TCore)]
+  DatatypeParameters a -> [(a, TName)]
+  DatatypeIndices a -> [(a, TName)]
+  ConstructorsOf a -> [(a, TName)]
+  ConstructorDatatype a -> [(a, TName)]
+  ConstructorArguments a -> [(a, TName)]
   -- The spine, and the name to claim the next domain hole under.
   ApplyNext f x -> [(f, TCore), (x, TName)]
   ExpandImplicits a -> [(a, TSurface)]
@@ -1841,6 +1914,12 @@ opKeyword o = case o of
   PushDevelopment _ -> "push-development"
   PopDevelopment -> "pop-development"
   Eliminate _  -> "prim-eliminate"
+  DatatypeOf _ -> "datatype-of"
+  DatatypeParameters _ -> "datatype-parameters"
+  DatatypeIndices _ -> "datatype-indices"
+  ConstructorsOf _ -> "constructors-of"
+  ConstructorDatatype _ -> "constructor-datatype"
+  ConstructorArguments _ -> "constructor-arguments"
   ApplyNext _ _ -> "apply-next"
   ExpandImplicits _ -> "expand-implicits"
   AppHead _ -> "app-head"

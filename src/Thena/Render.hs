@@ -1294,6 +1294,10 @@ renderFailReason ren r = case r of
   -- that it *"is misleading and ambiguous"*.
   ExpectedSurface   -> "expected a surface term"
   ExpectedSurfaceShape what -> "expected a surface term that is " ++ what
+  -- **It names the thing and what was wanted of it** (MS9 phase 176), because
+  -- a reader refusing is routinely the answer rather than a mistake: asking
+  -- whether a pattern's head is a constructor is how a split finds out.
+  NotDeclaredAs what wanted -> what ++ " is not " ++ wanted
   -- **The four ways a tagged term literal does not become a term** (MS6 phase
   -- 104). One renderer, because both readers raise the same 'ObjectError'
   -- (phase 110); the third is the message @:parse@ gives, from the same

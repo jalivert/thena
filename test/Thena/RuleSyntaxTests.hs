@@ -297,6 +297,13 @@ everyOp =
   , ("forall-tail t", Op.ForallTail (Ref "t"))
   , ("quantify x y", Op.Quantify (Ref "x") (Ref "y"))
   , ("unify-into x y", Op.UnifyInto (Ref "x") (Ref "y"))
+    -- The six declaration readers (MS9 phase 176).
+  , ("datatype-of t", Op.DatatypeOf (Ref "t"))
+  , ("datatype-parameters d", Op.DatatypeParameters (Ref "d"))
+  , ("datatype-indices d", Op.DatatypeIndices (Ref "d"))
+  , ("constructors-of d", Op.ConstructorsOf (Ref "d"))
+  , ("constructor-datatype c", Op.ConstructorDatatype (Ref "c"))
+  , ("constructor-arguments c", Op.ConstructorArguments (Ref "c"))
   ]
 
 vocabulary :: TestTree

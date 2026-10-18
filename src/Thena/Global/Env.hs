@@ -26,6 +26,7 @@ module Thena.Global.Env
   , lookupConstant
   , lookupDefinition
   , lookupInductive
+  , lookupConstructor
   , isDeclared
   , declaredNames
   , addConstant
@@ -385,6 +386,28 @@ lookupDefinition g = lookup g . definitions
 lookupInductive :: GlobalName -> GlobalEnv -> Maybe InductiveDefinition
 lookupInductive g = lookup g . inductives
 
+-- | The declaration a /constructor/ belongs to, and the constructor itself
+-- (MS9 phase 176).
+--
+-- **A scan, because 'inductives' is keyed by the datatype.** The table is an
+-- association list of at most a few dozen entries and this is asked once per
+-- splitting node, so an index keyed by constructor would be a second table to
+-- keep in step with the first — the denormalisation 'Constant' already warns
+-- about, for no measured gain.
+--
+-- **It answers for a constructor and for nothing else.** A datatype's own name
+-- is not a constructor of anything, so @lookupConstructor \"Vec\"@ is
+-- 'Nothing' — which is what lets a caller tell the two apart without asking
+-- twice.
+lookupConstructor
+  :: GlobalName -> GlobalEnv -> Maybe (InductiveDefinition, ConstructorDefinition)
+lookupConstructor c env =
+  case [ (d, k) | (_, d) <- inductives env
+                , k <- inductiveConstructors d
+                , constructorName k == c ] of
+    hit : _ -> Just hit
+    []      -> Nothing
+
 -- | Is the name taken, in any table?
 --
 -- One namespace, shared with generated names (§3.6): @noConfusionTerm@ is a
@@ -478,20 +501,16 @@ constructorTarget d c =
 -- counts the parameters (shared, and abstracted by every constructor) and its
 -- own arguments. Nullary formers give @Just 0@, which is saturated
 -- immediately — @Nat@ still unfolds to @Canonical "Nat" []@ on its own.
+-- **The constructor half is 'lookupConstructor'** since MS9 phase 176, which
+-- needed the same scan for @instral@'s declaration readers. It was written
+-- twice for one phase and the second copy is gone.
 formerArity :: GlobalName -> GlobalEnv -> Maybe Int
 formerArity g e = case lookup g (inductives e) of
   Just d  -> Just (length (inductiveParameters d) + length (inductiveIndices d))
-  Nothing -> lookupConstructor
-  where
-    lookupConstructor =
-      case [ (d, c)
-           | (_, d) <- inductives e
-           , c      <- inductiveConstructors d
-           , constructorName c == g
-           ] of
-        (d, c) : _ ->
-          Just (length (inductiveParameters d) + length (constructorArguments c))
-        [] -> Nothing
+  Nothing -> case lookupConstructor g e of
+    Just (d, c) ->
+      Just (length (inductiveParameters d) + length (constructorArguments c))
+    Nothing -> Nothing
 
 -- | Is this constructor argument recursive, and if so at which indices?
 --

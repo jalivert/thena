@@ -1442,6 +1442,13 @@ unaryOps =
   , ("level", Op.LevelOf), ("universe-at", Op.UniverseAt)
   , ("push-development", Op.PushDevelopment)
   , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
+    -- The six declaration readers (MS9 phase 176).
+  , ("datatype-of", Op.DatatypeOf)
+  , ("datatype-parameters", Op.DatatypeParameters)
+  , ("datatype-indices", Op.DatatypeIndices)
+  , ("constructors-of", Op.ConstructorsOf)
+  , ("constructor-datatype", Op.ConstructorDatatype)
+  , ("constructor-arguments", Op.ConstructorArguments)
   , ("surface-literal", Op.SurfaceLiteralOf)
   , ("object-term", Op.ObjectTerm)
   , ("typeof", Typing), ("expose", Op.Expose), ("resolve-core", Op.ResolveCore), ("fresh-name", FreshName), ("prim-apply", Op.Apply)
