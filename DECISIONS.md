@@ -2845,6 +2845,40 @@ that reach it from the root, so a click compiles to `goto-root` and then those
 moves — an ordinary program you could have typed, snapshotted and undoable like
 any line. Clicking the top of a development is `goto-root` on its own.
 
+### Every datatype generates `caseD` as well as `elimD`
+
+*Decided 2026-10-18.*
+
+`elimD` is induction: every method is handed one inductive hypothesis per
+recursive argument, whether it wants one or not. Analysing the cases of a term
+and *not* recursing on it is the other thing you do with a datatype, and through
+`elimD` you cannot ask for it — you bind the hypothesis and ignore it at every
+method. So a second definition is generated, the same scheme with those binders
+dropped:
+
+```
+thena spine> :elim Nat
+elim Nat : ∀ (P : Nat -> Type₀) -> P zero -> (∀ (x : Nat) -> P x -> P (succ x)) -> ∀ (target : Nat) -> P target
+thena spine> :show caseNat
+caseNat {ℓ} : ∀ (P : Nat -> Type ℓ) -> P zero -> (∀ (x : Nat) -> P (succ x)) -> ∀ (target : Nat) -> P target
+caseNat = λ P method method1 target -> elim Nat () P (method (λ x ih -> method1 x)) () target
+```
+
+So `pred` is `caseNat (λ t -> Nat) zero (λ m -> m)`, and the method for `succ`
+takes the predecessor and nothing else.
+
+**It is a definition and not a new kind of term.** Its body is an `elim D` whose
+methods are its own under a λ per hypothesis, so `caseD` δ-unfolds to an
+ordinary elimination, reduces like one and is checked like one. Nothing in the
+kernel can tell a case analysis from an induction, and `caseNat` and `elimNat`
+with the hypotheses ignored are the same term.
+
+**Its name is one more the declaration takes.** Generated names share your
+namespace, so declaring `Nat` when something called `caseNat` already exists is
+refused, exactly as it is for `elimNat` and for `noConfusionNat`.
+
+---
+
 ### `specialise` discharges the equations an elimination hands you, and keeps the ones it cannot
 
 *Decided 2026-10-18.*

@@ -24,9 +24,9 @@ abandoned probe
 thena spine> data N : Type where { z : N ; s : N -> N }
 declared N
 thena spine> :show N
-data N {ℓ₁₈₆} : Type (ℓ₁₈₆) where
-  { z : N {ℓ₁₈₆}
-  ; s : N {ℓ₁₈₆} -> N {ℓ₁₈₆} }
+data N {ℓ₂₁₇} : Type (ℓ₂₁₇) where
+  { z : N {ℓ₂₁₇}
+  ; s : N {ℓ₂₁₇} -> N {ℓ₂₁₇} }
 thena spine> :infer ⌜ s {0} ⌝
 s {0} : N {0} -> N {0}
 thena spine> :infer ⌜ s {1} (z {1}) ⌝

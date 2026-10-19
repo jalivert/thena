@@ -46,6 +46,8 @@ module Thena.Global.Env
   , eliminatorType
   , eliminatorWrapper
   , eliminatorName
+  , caseName
+  , caseWrapper
   , varsInEnv
   ) where
 
@@ -582,7 +584,28 @@ recursiveArgument dn np ty = case spine ty of
 -- constructor, paid here rather than by a second way to make a variable.
 eliminatorType :: InductiveDefinition -> Level -> Int -> (Core, Int)
 eliminatorType d l n0 = (piOver tel goal, n1)
-  where (tel, goal, _, n1) = eliminatorParts d l n0
+  where (tel, goal, _, n1) = eliminatorParts Inductive d l n0
+
+-- | Which scheme 'eliminatorParts' is building (MS9 phase 178).
+--
+-- __The two differ in one thing and it has two consequences.__ A method of the
+-- eliminator takes one inductive hypothesis per recursive argument; a method of
+-- @caseD@ takes none. So for 'CaseAnalysis' the method /types/ lose those
+-- binders, and the terms the node applies gain a λ that discards them — one
+-- decision, read in two places, which is why it is a parameter here rather than
+-- a second copy of this function.
+--
+-- __It is not a mode anything observes.__ Both build an ordinary
+-- 'Thena.Core.Term.Eliminate', so no 'Core' node and nothing in the kernel can
+-- tell a case analysis from an induction; @caseD@ is a definition like any
+-- other and δ-unfolds to an elimination.
+data Scheme
+  = Inductive
+    -- ^ the eliminator: every method carries its inductive hypotheses
+  | CaseAnalysis
+    -- ^ @caseD@: it carries none, and the elimination underneath throws them
+    -- away
+  deriving (Eq, Show)
 
 -- | The name the generated eliminator wrapper is bound to: @elimNat@,
 -- @elimVec@ (MS4 phase 49e).
@@ -625,7 +648,45 @@ eliminatorName (GlobalName d) = GlobalName ("elim" ++ d)
 -- datatype could not be eliminated through it.
 eliminatorWrapper :: InductiveDefinition -> Level -> Int -> (Core, Core, Int)
 eliminatorWrapper d l n0 = (piOver tel goal, lamOver tel node, n1)
-  where (tel, goal, node, n1) = eliminatorParts d l n0
+  where (tel, goal, node, n1) = eliminatorParts Inductive d l n0
+
+-- | The name of the generated case-analysis definition: @caseNat@, @caseVec@
+-- (MS9 phase 178).
+--
+-- 'eliminatorName'\'s shape, and @case@ being a word the surface will spell
+-- @case … of@ with costs nothing: a keyword is a whole token, so @caseNat@ lexes
+-- as one name and there is nothing to reserve. The same sentence
+-- 'eliminatorName' carries about @elim@.
+caseName :: GlobalName -> GlobalName
+caseName (GlobalName d) = GlobalName ("case" ++ d)
+
+-- | __Case analysis: the eliminator minus its inductive hypotheses__ (MS9 phase
+-- 178), as an ordinary global definition — its type and its body.
+--
+-- @
+-- caseD : ∀ params
+--           (P : ∀ indices (t : D params indices) -> Type l)
+--           (m₁ : ∀ Δ₁ -> P ī₁ ‹c₁ params Δ₁›)
+--           …
+--           indices (t : D params indices)
+--         -> P indices t
+-- @
+--
+-- __Why it has to exist separately.__ Thena's generated eliminator hands every
+-- method one hypothesis per recursive argument, which is what makes it
+-- induction. Analysing a case of a term and /not/ recursing on it is the other
+-- thing a user wants — @case … of@ as against @induction … of@ — and through
+-- @elimD@ it cannot be asked for: the hypothesis arrives whether it is wanted or
+-- not, and in a proof it has to be bound and ignored at every single method.
+--
+-- __Nothing in the kernel changes, and that is the point.__ The body is an
+-- @elim D@ whose methods are this definition's own under a λ per hypothesis, so
+-- @caseD@ δ-unfolds to an elimination and is checked as one. A user who writes
+-- @caseD@ and a user who writes @elimD@ with the hypotheses ignored have written
+-- the same term.
+caseWrapper :: InductiveDefinition -> Level -> Int -> (Core, Core, Int)
+caseWrapper d l n0 = (piOver tel goal, lamOver tel node, n1)
+  where (tel, goal, node, n1) = eliminatorParts CaseAnalysis d l n0
 
 -- | The telescope, the conclusion under it, and the saturated node its own
 -- binders form.
@@ -637,8 +698,8 @@ eliminatorWrapper d l n0 = (piOver tel goal, lamOver tel node, n1)
 -- its pieces are in scope instead of being recovered by splitting a list of
 -- variables peeled back off the type.
 eliminatorParts
-  :: InductiveDefinition -> Level -> Int -> (Context, Core, Core, Int)
-eliminatorParts d l n0 = (telescope, motiveAt indexVars (Free ctv), node, nEnd)
+  :: Scheme -> InductiveDefinition -> Level -> Int -> (Context, Core, Core, Int)
+eliminatorParts scheme d l n0 = (telescope, motiveAt indexVars (Free ctv), node, nEnd)
   where
     dn      = inductiveName d
     params  = inductiveParameters d
@@ -663,9 +724,12 @@ eliminatorParts d l n0 = (telescope, motiveAt indexVars (Free ctv), node, nEnd)
         ++ indices
         ++ [Hypothesis ctv (Ident "target") (familyAt indexVars)]
 
+    -- **The node is an 'Eliminate' for both schemes**, and that is the whole of
+    -- why @caseD@ needs no new 'Core' node: case analysis is the eliminator
+    -- with each method wrapped in a λ that throws the inductive hypotheses
+    -- away. The kernel is not told that anything is different.
     node =
-      Eliminate dn levels paramVars (Free pv)
-        (map (Free . entryVar) methodEntries) indexVars (Free ctv)
+      Eliminate dn levels paramVars (Free pv) methodTerms indexVars (Free ctv)
 
     -- @D params is@
     familyAt is = foldl App (Global dn levels) (paramVars ++ is)
@@ -677,35 +741,66 @@ eliminatorParts d l n0 = (telescope, motiveAt indexVars (Free ctv), node, nEnd)
     motiveType =
       piOver indices (Pi (Ident "target") (familyAt indexVars) (close mtv (Universe l)))
 
-    (methodEntries, nEnd) = methods (inductiveConstructors d) n3
+    -- **Each method's binder and the term the node applies, built together**,
+    -- because for 'CaseAnalysis' the second mentions the first and both need
+    -- the counter. They were one list until MS9 phase 178.
+    (methodParts, nEnd) = methods (inductiveConstructors d) n3
+    methodEntries = map fst methodParts
+    methodTerms   = map snd methodParts
 
     methods []       n = ([], n)
     methods (c : cs) n =
       let (mty, na)    = methodType c n
           (mv,  nb)    = fresh na
-          (below, nc)  = methods cs nb
-       in (Hypothesis mv (Ident "method") mty : below, nc)
+          (tm,  nc)    = methodTerm c mv nb
+          (below, nd)  = methods cs nc
+       in ((Hypothesis mv (Ident "method") mty, tm) : below, nd)
 
-    -- @forall D -> IH1 -> ... -> IHn -> P is (c params D)@
-    methodType c n =
-      let args = constructorArguments c
-          goal = motiveAt (constructorIndices c)
-                          (Canonical (constructorName c) levels
-                                     (paramVars ++ map (Free . entryVar) args))
-          (body, na) = hypotheses args n goal
-       in (piOver args body, na)
+    -- @forall D -> IH1 -> ... -> IHn -> P is (c params D)@ — and **without the
+    -- hypotheses for 'CaseAnalysis'**, which is the whole of the difference
+    -- between the two schemes.
+    methodType c n = case scheme of
+      Inductive    -> let (body, na) = hypotheses Pi args n (goalOf c) in (piOver args body, na)
+      CaseAnalysis -> (piOver args (goalOf c), n)
+      where args = constructorArguments c
+
+    -- @P is (c params D)@, the conclusion of a method.
+    goalOf c =
+      motiveAt (constructorIndices c)
+               (Canonical (constructorName c) levels
+                          (paramVars ++ map (Free . entryVar) (constructorArguments c)))
+
+    -- What the node applies. For the eliminator it is the method itself; for
+    -- case analysis it is the method under a λ per inductive hypothesis, which
+    -- is where the hypotheses go: they are bound and not used.
+    --
+    -- **So @caseD@ really is the eliminator with the hypotheses discarded**, and
+    -- the kernel checks that rather than taking it on trust — the adapter has to
+    -- have the eliminator's own method type or the definition is refused.
+    methodTerm c mv n = case scheme of
+      Inductive -> (Free mv, n)
+      CaseAnalysis ->
+        let args       = constructorArguments c
+            applied    = foldl App (Free mv) (map (Free . entryVar) args)
+            (body, na) = hypotheses Lam args n applied
+         in (lamOver args body, na)
 
     -- One inductive hypothesis per recursive argument, in argument order. The
     -- binder is non-dependent -- nothing may refer to an induction hypothesis --
     -- but a 'Thena.Core.Term.Scope' still needs a variable to close over, so
     -- each takes one from the counter rather than reusing a sentinel.
-    hypotheses []       n acc = (acc, n)
-    hypotheses (e : es) n acc = case recursiveArgument dn np (entryType e) of
-      Nothing -> hypotheses es n acc
+    --
+    -- **It takes its binder** since MS9 phase 178: the Π that /states/ a
+    -- hypothesis and the λ that /discards/ one are the same walk over the same
+    -- arguments, and 'recursiveArgument' is read once for both (the argument
+    -- its own header makes).
+    hypotheses _   []       n acc = (acc, n)
+    hypotheses con (e : es) n acc = case recursiveArgument dn np (entryType e) of
+      Nothing -> hypotheses con es n acc
       Just is ->
         let (hv, na)   = fresh n
-            (below, nb) = hypotheses es na acc
-         in (Pi (Ident "ih") (motiveAt is (Free (entryVar e))) (close hv below), nb)
+            (below, nb) = hypotheses con es na acc
+         in (con (Ident "ih") (motiveAt is (Free (entryVar e))) (close hv below), nb)
 
 -- | Every 'Var' the environment holds.
 --
