@@ -89,6 +89,7 @@ tests =
     , honestRefusals
     , testGroup "taking a split apart (MS9 phase 181)" splitParts
     , testGroup "a split with no arms elaborates (MS9 phase 182)" emptySplit
+    , testGroup "the splitting tree (MS9 phase 184)" splittingTree
     ]
 
 -- --------------------------------------------------------------------------
@@ -766,7 +767,17 @@ baseTests =
               , "fit-core", "fit-core"
               , "claim", "assume", "quantify"
               ]
-              ++ replicate 20 "elaborate" ++ ["run-block"]
+              ++ replicate 8 "elaborate"
+              ++ [ "no-nesting"
+                 , "intro-pattern", "intro-pattern", "intro-pattern"
+                 , "intro-ihs", "intro-ihs"
+                 , "same-length", "same-length"
+                 , "arm-for", "pick", "pick", "elaborate-arm"
+                 , "one-case", "one-case"
+                 , "split-cases", "split-cases", "split-over"
+                 ]
+              ++ replicate 13 "elaborate"
+              ++ ["run-block"]
               ++ replicate 2 "spine-arguments"
 
     , testCase "prove is a rule over prim-prove" $
@@ -962,3 +973,85 @@ emptySplit =
       pure (unwords (renderResponse' s1 ":show fromEmpty"))
 
     renderResponse' sn l = let (sn', r) = command sn l in renderResponse sn' r
+
+
+-- --------------------------------------------------------------------------
+-- The splitting tree (MS9 phase 184)
+-- --------------------------------------------------------------------------
+
+-- | @induction t of { p -> e ; … }@ with arms, end to end and through the
+-- kernel.
+--
+-- __The first case is the milestone's point__: a function defined by pattern
+-- matching, which declares — so @qed@ certified it — and then /computes/.
+-- @pred (succ (succ zero))@ reducing to @succ zero@ is the whole claim, and it
+-- is checked by reduction rather than by reading the term, because the term is
+-- an @elim@ either way and only reduction says the methods went to the right
+-- constructors.
+--
+-- __The refusals are each a different cause and each says so__, which is the
+-- part that took work. The obvious shape for the arm search — one rule that
+-- matches the constructor's name and elaborates the body — makes both clauses a
+-- choice point, so a body that fails to elaborate backtracks into the search,
+-- walks on through the arms and reports /the search/. Every one of these four
+-- then said @no clause of arm-for applies here@. MS8 phase 170 found the same
+-- thing in the application clauses; the fix is the same, a pair of
+-- complementary tests so no choice point is recorded at all.
+splittingTree :: [TestTree]
+splittingTree =
+  [ testCase "a function defined by pattern matching declares and computes" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (natModule ++ predDef))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      let (s2, q) = command s1 ":whnf pred (succ (succ zero))"
+      unwords (renderResponse s2 q) @?= "succ zero"
+
+    -- __A recursive call is phase 6's LOOKUP and not a defect here__: the name
+    -- being defined is not in scope in its own body, so the arm's own failure
+    -- is the honest answer.
+  , refuses "a recursive call says the name is not in scope"
+      [ "double : Nat -> Nat"
+      , "double = \\ n -> induction n of { zero -> zero ; succ m -> succ (double m) }"
+      ]
+      "stuck: not in scope: double"
+    -- The arm names fewer variables than the constructor takes arguments.
+  , refuses "a pattern of the wrong arity is caught by same-length"
+      [ "bad : Nat -> Nat"
+      , "bad = \\ n -> induction n of { zero -> zero ; succ -> zero }"
+      ]
+      "stuck: no clause of same-length applies here"
+    -- Coverage: the walk runs out of arms.
+  , refuses "a missing arm runs the search out"
+      [ "partial : Nat -> Nat"
+      , "partial = \\ n -> induction n of { zero -> zero }"
+      ]
+      "stuck: no clause of arm-for applies here"
+    -- A nested pattern argument is a second split, which is a later phase.
+  , refuses "a nested pattern argument is declined by name"
+      [ "nested : Nat -> Nat"
+      , "nested = \\ n -> induction n of { zero -> zero ; succ (succ m) -> m }"
+      ]
+      "stuck: no clause of no-nesting applies here"
+  ]
+  where
+    natModule =
+      [ "module M where", ""
+      , "data Nat : Type\8320 where"
+      , "  zero : Nat"
+      , "  succ : Nat -> Nat"
+      , ""
+      ]
+    predDef =
+      [ "pred : Nat -> Nat"
+      , "pred = \\ n -> induction n of { zero -> zero ; succ m -> m }"
+      ]
+
+    refuses what ls want = testCase what $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (natModule ++ ls))
+          said = filter (not . null) (renderResponse s1 r)
+      case said of
+        [] -> assertFailure "it loaded, and should not have"
+        rs -> unwords (words (last rs)) @?= want

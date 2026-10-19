@@ -732,6 +732,23 @@ prove
 claim ‹ty›
 assume ‹ty›
 quantify ‹ty›
+no-nesting []
+intro-pattern [] ‹k›
+intro-pattern [p, ...ps] ‹k›
+intro-pattern [p, ...ps] ‹k›
+intro-ihs [] ‹k›
+intro-ihs [n, ...ns] ‹k›
+same-length [] []
+same-length [p, ...ps] [n, ...ns]
+arm-for ‹t› ‹c›
+pick ‹w› ‹c› ‹p› ‹b› ‹r›
+pick ‹w› ‹c› ‹p› ‹b› ‹r›
+elaborate-arm ‹c› ‹sub› (p, b)
+one-case ‹t› ‹c› none
+one-case ‹t› ‹c› (some sub)
+split-cases ‹t› [] [] ‹k›
+split-cases ‹t› [c, ...cs] [mh, ...ms] ‹k›
+split-over ‹t› ‹cs› (hs, k)
 run-block ‹t›
 intro-binders ‹t› ‹k›
 intro-binders ‹t› ‹k›

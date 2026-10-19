@@ -327,6 +327,33 @@ elaborateClauses =
       , Do (Op.Eliminate (Ref "x"))
       , call "solve" []
       ]
+  ]
+    -- **The splitting tree sits here, between two @elaborate@ clauses**,
+    -- because that is where the base declares it: its helpers are written
+    -- beside the clause that calls them, and @allRules@ is the file's order.
+    ++ splitClauses
+    ++ [ Rule (GlobalName "elaborate") [PVar "t"]
+           [ FocusIsHole, SurfaceIsSplit (Ref "t"), SplitHasArms (Ref "t")
+           , SplitIsInduction (Ref "t")
+           ]
+           [ Bind (Op.PVar "h") Nothing Here
+           , Bind (Op.PVar "u") Nothing (Op.Call "fresh-universe" [])
+           , Bind (Op.PVar "ty") Nothing (Op.Claim (Lit (VText "Tsplit")) (Ref "u"))
+           , Bind (Op.PVar "x") Nothing (Op.Claim (Lit (VText "xsplit")) (Ref "ty"))
+           , Do (Op.Goto (Ref "x"))
+           , Bind (Op.PVar "g") Nothing (Op.SplitTarget (Ref "t"))
+           , call "elaborate" [Ref "g"]
+           , Do (Op.Goto (Ref "h"))
+           , Bind (Op.PVar "r") Nothing (Op.Eliminate (Ref "x"))
+           , Bind (Op.PVar "tt") Nothing (Op.Typing (Ref "x"))
+           , Bind (Op.PVar "d") Nothing (Op.DatatypeOf (Ref "tt"))
+           , Bind (Op.PVar "cs") Nothing (Op.ConstructorsOf (Ref "d"))
+           , call "split-over" [Ref "t", Ref "cs", Ref "r"]
+           , Do (Op.Goto (Ref "h"))
+           , call "solve" []
+           ]
+       ]
+    ++ [
     -- **Brady's split, as two clauses** (MS4 phase 49d). The first is
     -- @E⟦x ⃗a⟧@, which begins with @EXPAND@ — @expand-implicits@ (phase 49f),
     -- writing a @_@ in at every implicit position the user left out — and then
@@ -334,7 +361,7 @@ elaborateClauses =
     -- to the second, which is what the Haskell @case@ did: a partial
     -- application of a head with recorded plicities is an ordinary binary
     -- application.
-  , Rule (GlobalName "elaborate") [PVar "t"]
+    Rule (GlobalName "elaborate") [PVar "t"]
       [FocusIsHole, SurfaceIsApp (Ref "t"), AppHeadIsElim (Ref "t")]
       [ Bind (Op.PVar "a") Nothing (Op.ElimSpine (Ref "t"))
       , call "elaborate" [Ref "a"]
@@ -602,3 +629,116 @@ annotatedBinder =
   , Do (Unify (Ref "d") (Ref "s"))
   , Do (Goto (Ref "g"))
   ]
+
+-- | The splitting tree (MS9) — @induction t of { p -> e ; … }@ with arms.
+--
+-- **Hand-written, as everything here is**, and that is the point: this file is a
+-- second reading of @rules\/standard.thena.rules@, so a change to the base has
+-- to be restated here before the suite goes green again.
+--
+-- Two shapes are worth noticing because they are decisions rather than style.
+-- **@pick@'s two clauses are mutually exclusive** — @SameName@ against
+-- @DifferentName@ — so the arm search records no choice point and a failure
+-- while elaborating an arm is reported as itself rather than as the search
+-- running out; MS8 phase 170 found the same thing in the application clauses.
+-- And **@same-length@ and @no-nesting@ have only the clauses that pass**: a
+-- mismatch reaches no clause at all, which is the refusal.
+splitClauses :: [Rule]
+splitClauses =
+  [ Rule (GlobalName "no-nesting") [PList [] Nothing] [] []
+  , Rule (GlobalName "intro-pattern") [PList [] Nothing, PVar "k"] []
+      [Do (Op.Return (Ref "k"))]
+  , Rule (GlobalName "intro-pattern")
+      [PList [PVar "p"] (Just (PVar "ps")), PVar "k"]
+      [PatternIsWildcard (Ref "p")]
+      [ Bind (Op.PVar "w") Nothing (Op.FreshName (Lit (VText "u")))
+      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "w")))
+      , Bind (Op.PVar "r") Nothing (Op.Call "intro-pattern" [Ref "ps", Ref "k2"])
+      , Do (Op.Return (Ref "r"))
+      ]
+  , Rule (GlobalName "intro-pattern")
+      [PList [PVar "p"] (Just (PVar "ps")), PVar "k"]
+      [PatternIsName (Ref "p")]
+      [ Bind (Op.PVar "sub") Nothing (Op.PatternArguments (Ref "p"))
+      , call "no-nesting" [Ref "sub"]
+      , Bind (Op.PVar "w") Nothing (Op.PatternHead (Ref "p"))
+      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "w")))
+      , Bind (Op.PVar "r") Nothing (Op.Call "intro-pattern" [Ref "ps", Ref "k2"])
+      , Do (Op.Return (Ref "r"))
+      ]
+  , Rule (GlobalName "intro-ihs") [PList [] Nothing, PVar "k"] []
+      [Do (Op.Return (Ref "k"))]
+  , Rule (GlobalName "intro-ihs")
+      [PList [PVar "n"] (Just (PVar "ns")), PVar "k"] []
+      [ Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "n")))
+      , Bind (Op.PVar "r") Nothing (Op.Call "intro-ihs" [Ref "ns", Ref "k2"])
+      , Do (Op.Return (Ref "r"))
+      ]
+  , Rule (GlobalName "same-length") [PList [] Nothing, PList [] Nothing] [] []
+  , Rule (GlobalName "same-length")
+      [PList [PVar "p"] (Just (PVar "ps")), PList [PVar "n"] (Just (PVar "ns"))] []
+      [call "same-length" [Ref "ps", Ref "ns"]]
+  , Rule (GlobalName "arm-for") [PVar "t", PVar "c"]
+      [SurfaceIsSplit (Ref "t"), SplitHasArms (Ref "t")]
+      [ Bind (Op.PVar "p") Nothing (Op.SplitArmPattern (Ref "t"))
+      , Bind (Op.PVar "w") Nothing (Op.PatternHead (Ref "p"))
+      , Bind (Op.PVar "b") Nothing (Op.SplitArmBody (Ref "t"))
+      , Bind (Op.PVar "r") Nothing (Op.SplitTail (Ref "t"))
+      , Bind (Op.PVar "a") Nothing
+          (Op.Call "pick" [Ref "w", Ref "c", Ref "p", Ref "b", Ref "r"])
+      , Do (Op.Return (Ref "a"))
+      ]
+  , Rule (GlobalName "pick")
+      [PVar "w", PVar "c", PVar "p", PVar "b", PVar "r"]
+      [SameName (Ref "w") (Ref "c")]
+      [Do (Op.Return (Op.PairOf (Ref "p") (Ref "b")))]
+  , Rule (GlobalName "pick")
+      [PVar "w", PVar "c", PVar "p", PVar "b", PVar "r"]
+      [DifferentName (Ref "w") (Ref "c")]
+      [ Bind (Op.PVar "a") Nothing (Op.Call "arm-for" [Ref "r", Ref "c"])
+      , Do (Op.Return (Ref "a"))
+      ]
+  , Rule (GlobalName "elaborate-arm")
+      [PVar "c", PVar "sub", PPair (PVar "p") (PVar "b")] []
+      [ Bind (Op.PVar "as") Nothing (Op.PatternArguments (Ref "p"))
+      , Bind (Op.PVar "args") Nothing (Op.ConstructorArguments (Ref "c"))
+      , call "same-length" [Ref "as", Ref "args"]
+      , Do (Goto (Ref "sub"))
+      , Do Attack
+      , Do Into
+      , Bind (Op.PVar "k0") Nothing Here
+      , Do Back
+      , Bind (Op.PVar "k1") Nothing (Op.Call "intro-pattern" [Ref "as", Ref "k0"])
+      , Bind (Op.PVar "ihs") Nothing (Op.ConstructorRecursiveArguments (Ref "c"))
+      , Bind (Op.PVar "k2") Nothing (Op.Call "intro-ihs" [Ref "ihs", Ref "k1"])
+      , Do (Goto (Ref "k2"))
+      , call "elaborate" [Ref "b"]
+      , Do (Goto (Ref "sub"))
+      , call "solve" []
+      ]
+  , Rule (GlobalName "one-case") [PVar "t", PVar "c", PNone] []
+      [Do (Say (Lit (VText "a case vanished: its arm is unreachable")))]
+  , Rule (GlobalName "one-case")
+      [PVar "t", PVar "c", PSome (PVar "sub")] []
+      [ Bind (Op.PVar "a") Nothing (Op.Call "arm-for" [Ref "t", Ref "c"])
+      , call "elaborate-arm" [Ref "c", Ref "sub", Ref "a"]
+      ]
+  , Rule (GlobalName "split-cases")
+      [PVar "t", PList [] Nothing, PList [] Nothing, PVar "k"] [] []
+  , Rule (GlobalName "split-cases")
+      [ PVar "t", PList [PVar "c"] (Just (PVar "cs"))
+      , PList [PVar "mh"] (Just (PVar "ms")), PVar "k"
+      ] []
+      [ Do (Goto (Ref "mh"))
+      , Bind (Op.PVar "sub") Nothing (Op.Specialise (Ref "c") (Ref "k"))
+      , call "one-case" [Ref "t", Ref "c", Ref "sub"]
+      , Do (Goto (Ref "mh"))
+      , call "solve" []
+      , call "split-cases" [Ref "t", Ref "cs", Ref "ms", Ref "k"]
+      ]
+  , Rule (GlobalName "split-over")
+      [PVar "t", PVar "cs", PPair (PVar "hs") (PVar "k")] []
+      [call "split-cases" [Ref "t", Ref "cs", Ref "hs", Ref "k"]]
+  ]
+  where
+    call nm as = Do (Call nm as)

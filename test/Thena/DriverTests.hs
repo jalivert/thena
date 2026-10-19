@@ -345,7 +345,12 @@ tests =
         -- not the development — different relation, different consumer. No pair.
         [ testCase ":accepts finds a rule by its parameter" $
             fittingNames (snd (command withRules ":accepts Surface"))
-              @?= ["elaborate", "run-block", "intro-binders", "spine-arguments"]
+              -- The splitting tree's rules that take a Surface (MS9) sit
+              -- where the base declares them, between elaborate and run-block.
+              @?= [ "elaborate"
+                  , "arm-for", "pick", "one-case", "split-cases", "split-over"
+                  , "run-block", "intro-binders", "spine-arguments"
+                  ]
           -- **One thing in the shipped base returns a @Core@ since MS5 phase
           -- 89** — @fresh-universe@, which stopped being an op and became a
           -- function over @fresh-level@ and @universe-at@. Before that nothing
@@ -354,7 +359,12 @@ tests =
             case snd (command withRules ":produces Core") of
               Fitting v _ rows -> do
                 v @?= "gives"
-                [ n | (GlobalName n, _, _, _) <- rows ] @?= ["intro-binders", "fresh-universe"]
+                -- @intro-pattern@ and @intro-ihs@ are the splitting tree's
+                -- binder walks (MS9), and each answers the hole it left.
+                [ n | (GlobalName n, _, _, _) <- rows ]
+                  @?= [ "intro-pattern", "intro-ihs"
+                      , "intro-binders", "fresh-universe"
+                      ]
               other -> assertFailure ("expected a listing, got " ++ show other)
           -- **It lists rules and functions both** (his ruling), and the two are
           -- told apart in the row rather than in two commands.

@@ -50,7 +50,7 @@ import Data.Maybe (fromMaybe)
 import qualified Data.List.NonEmpty as NE
 
 import Thena.Core.Level (Level (..), freshLevelMeta, levelOfNat, levelVarName)
-import Thena.Core.Context (Context, Entry (..), entryIdent, entryVar)
+import Thena.Core.Context (Context, Entry (..), entryIdent, entryType, entryVar)
 import Thena.Core.Term
   ( Core (..)
   , close
@@ -127,6 +127,7 @@ import Thena.Global.Env
   ( GlobalEnv
   , InductiveDefinition
   , declaredNames
+  , recursiveArgument
   , definitionLevels
   , isDeclared
   , lookupDefinition
@@ -1263,8 +1264,22 @@ perform instr rest m = case operation instr of
              in case replaceComponent guess holes of
                   Left e    -> failure (CannotMove e) m
                   Right cur ->
-                    Saying (subgoalMessage (map snd named))
-                           (advance m { development = Development cur, names = n1 })
+                    -- **The subgoal it claimed, or none** (MS9 phase 184), by
+                    -- the rule his 2026-10-19 ruling set for 'Op.Eliminate': an
+                    -- op that makes a hole hands back the handle that reaches
+                    -- it. There are only ever one or none — a conflicting
+                    -- equation closes the method outright — so it is an option
+                    -- and not a list.
+                    --
+                    -- **A rule cannot tell the two apart any other way.** The
+                    -- @no subgoals@ message is text, and the hole's display name
+                    -- is freshened, so @goto-named@ is the trap `~w23j5`
+                    -- measured.
+                    producing (Saying (subgoalMessage (map snd named)))
+                              (VOption (case named of
+                                          (v, _) : _ -> Just (VTerm (Free v))
+                                          []         -> Nothing))
+                              m { development = Development cur, names = n1 }
       OnComponent _ -> failure NotAHole m
       _             -> failure (CannotMove NotOnTheSpine) m
     Right _ -> failure ExpectedInt m
@@ -1504,6 +1519,20 @@ perform instr rest m = case operation instr of
   Op.ConstructorArguments a -> withConstructor a $ \_ k ->
     produce (VList [ VText i
                    | Ident i <- map entryIdent (constructorArguments k) ]) m
+
+  -- **The recursive ones, which is one induction hypothesis each** (MS9 phase
+  -- 184). 'Thena.Global.Env.recursiveArgument' is the same test
+  -- 'Thena.Global.Env' uses to build the methods, read here rather than copied,
+  -- so a clause counting hypotheses and the generator making them cannot
+  -- disagree.
+  Op.ConstructorRecursiveArguments a -> withConstructor a $ \d k ->
+    produce (VList [ VText i
+                   | e <- constructorArguments k
+                   , let Ident i = entryIdent e
+                   , Just _ <- [ recursiveArgument (inductiveName d)
+                                   (length (inductiveParameters d))
+                                   (entryType e) ]
+                   ]) m
 
   -- **What a name denotes, Γ first and then the globals, with a definition's
   -- level arguments inserted** (MS4 phase 48).

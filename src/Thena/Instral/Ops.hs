@@ -1131,6 +1131,22 @@ data Op
     -- something has to say whether @vcons@ is a constructor of the family being
     -- split; this is that, and it fails for a name that is not a constructor at
     -- all, which is how a rule tells a constructor pattern from a variable one.
+  | ConstructorRecursiveArguments Operand
+    -- ^ the subset of a constructor's arguments whose type is the datatype
+    -- being declared — @constructor-recursive-arguments c@ (MS9 phase 184).
+    --
+    -- **It is the induction hypothesis count, which is what a splitting tree
+    -- needs and cannot otherwise get.** An @induction@ method binds the
+    -- constructor's arguments and then one hypothesis per recursive argument,
+    -- so a clause introducing the arm's pattern variables has to know how many
+    -- binders are left before the goal. **Counting Π binders instead does not
+    -- work**: a method's goal may itself be a function type, so the binders
+    -- after the hypotheses are indistinguishable from them — the same reason
+    -- 'Eliminate' has to answer with the equation count.
+    --
+    -- **Names, as its five siblings answer with names**, and a @case@ split
+    -- wants the list empty rather than a different op: @caseD@ is the
+    -- eliminator minus exactly these.
   | ConstructorArguments Operand
     -- ^ a constructor's argument names, in order — @constructor-arguments c@.
     --
@@ -1432,7 +1448,10 @@ resultOf o = case o of
   -- A body that wants neither half discards the pair, as every rule shipped
   -- before phase 177 does.
   Eliminate _  -> Just (TPair (TList TCore) TInt)
-  Specialise _ _ -> Nothing
+  -- **The subgoal it claimed, or none** (MS9 phase 184). A conflicting
+  -- equation closes the method outright and claims nothing, which is the
+  -- impossible case vanishing, so there is never more than one.
+  Specialise _ _ -> Just (TOption TCore)
   -- The six declaration readers (MS9 phase 176). @constructors-of@ is the
   -- first row in this table to answer with a list.
   DatatypeOf _ -> Just TName
@@ -1441,6 +1460,7 @@ resultOf o = case o of
   ConstructorsOf _ -> Just (TList TName)
   ConstructorDatatype _ -> Just TName
   ConstructorArguments _ -> Just (TList TName)
+  ConstructorRecursiveArguments _ -> Just (TList TName)
   ApplyNext _ _ -> Just TCore  -- the spine, one argument longer
   ExpandImplicits _ -> Just TSurface
   AppHead _ -> Just TSurface
@@ -1582,6 +1602,7 @@ operandTypes o = case o of
   ConstructorsOf a -> [(a, TName)]
   ConstructorDatatype a -> [(a, TName)]
   ConstructorArguments a -> [(a, TName)]
+  ConstructorRecursiveArguments a -> [(a, TName)]
   -- The spine, and the name to claim the next domain hole under.
   ApplyNext f x -> [(f, TCore), (x, TName)]
   ExpandImplicits a -> [(a, TSurface)]
@@ -1874,6 +1895,16 @@ data Test
     --
     -- A pattern that is written out compares already — a literal matches a
     -- 'VText' only when equal — so what is new is comparing two /read/ values.
+  | DifferentName Operand Operand
+    -- ^ … and its complement — @different-name a b@ (MS9 phase 184).
+    --
+    -- **A pair of complementary tests and not a negation**, which is what
+    -- @let-is-annotated@ / @let-is-bare@ and @lambda-binds-more@ /
+    -- @lambda-binds-one@ already are. **It exists so that the arm search has no
+    -- choice point**: with one test and an ordering, both clauses match when
+    -- the names agree, and a failure anywhere /after/ the search backtracks
+    -- into it, walks on through the arms and reports the search instead of the
+    -- real error. MS8 phase 170 found exactly that in the application clauses.
   | SplitHasNoArms Operand
     -- ^ … or it has none, which __is a legal split__ and is the whole of a
     -- case analysis on a datatype with no constructors. It is also what the
@@ -2072,6 +2103,7 @@ opKeyword o = case o of
   ConstructorsOf _ -> "constructors-of"
   ConstructorDatatype _ -> "constructor-datatype"
   ConstructorArguments _ -> "constructor-arguments"
+  ConstructorRecursiveArguments _ -> "constructor-recursive-arguments"
   ApplyNext _ _ -> "apply-next"
   ExpandImplicits _ -> "expand-implicits"
   AppHead _ -> "app-head"

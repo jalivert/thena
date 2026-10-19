@@ -385,6 +385,7 @@ holds env cur args t = case t of
   -- shape at all (MS9 phase 183). A splitting tree pairs an arm with a
   -- constructor, and both names are read rather than written.
   SameName a b            -> sameName a b
+  DifferentName a b       -> differentName a b
   AppArgsAreExplicit o    -> surfaceIs o argsExplicit
   AppHeadIsName o         -> surfaceIs o headIsName
   AppHeadIsElim o         -> surfaceIs o headIsElim
@@ -426,6 +427,12 @@ holds env cur args t = case t of
     -- are both bound are compared as written, which is what a 'Name' is.
     sameName a b = case (Op.operandIn args a, Op.operandIn args b) of
       (Right (VText x), Right (VText y)) -> x == y
+      (Left _, _)                        -> True
+      (_, Left _)                        -> True
+      _                                  -> False
+
+    differentName a b = case (Op.operandIn args a, Op.operandIn args b) of
+      (Right (VText x), Right (VText y)) -> x /= y
       (Left _, _)                        -> True
       (_, Left _)                        -> True
       _                                  -> False
@@ -1486,6 +1493,7 @@ unaryOps =
   , ("constructors-of", Op.ConstructorsOf)
   , ("constructor-datatype", Op.ConstructorDatatype)
   , ("constructor-arguments", Op.ConstructorArguments)
+  , ("constructor-recursive-arguments", Op.ConstructorRecursiveArguments)
   , ("surface-literal", Op.SurfaceLiteralOf)
   , ("object-term", Op.ObjectTerm)
   , ("typeof", Typing), ("expose", Op.Expose), ("resolve-core", Op.ResolveCore), ("fresh-name", FreshName), ("prim-apply", Op.Apply)
@@ -1755,6 +1763,7 @@ withOperands t os = case (t, os) of
   (PatternIsName _, [o])         -> Just (PatternIsName o)
   (PatternIsWildcard _, [o])     -> Just (PatternIsWildcard o)
   (SameName _ _, [a, b])         -> Just (SameName a b)
+  (DifferentName _ _, [a, b])    -> Just (DifferentName a b)
   (AppArgsAreExplicit _, [o])    -> Just (AppArgsAreExplicit o)
   (AppHeadIsName _, [o])         -> Just (AppHeadIsName o)
   (AppHeadIsElim _, [o])         -> Just (AppHeadIsElim o)
@@ -1797,6 +1806,7 @@ testTypes t = case t of
   PatternIsName o         -> [(o, Ty.TPattern)]
   PatternIsWildcard o     -> [(o, Ty.TPattern)]
   SameName a b            -> [(a, Ty.TName), (b, Ty.TName)]
+  DifferentName a b       -> [(a, Ty.TName), (b, Ty.TName)]
   SurfaceIsName o         -> [(o, Ty.TSurface)]
   SurfaceIsLiteral o      -> [(o, Ty.TSurface)]
   SurfaceIsObject o       -> [(o, Ty.TSurface)]
@@ -1851,6 +1861,7 @@ testWord t = case t of
   PatternIsName _         -> "pattern-is-name"
   PatternIsWildcard _     -> "pattern-is-wildcard"
   SameName _ _            -> "same-name"
+  DifferentName _ _       -> "different-name"
   SurfaceIsName _         -> "surface-is-name"
   SurfaceIsLiteral _      -> "surface-is-literal"
   SurfaceIsObject _       -> "surface-is-object"
@@ -1911,6 +1922,7 @@ everyTest =
   , PatternIsName (Lit (VText ""))
   , PatternIsWildcard (Lit (VText ""))
   , SameName (Lit (VText "")) (Lit (VText ""))
+  , DifferentName (Lit (VText "")) (Lit (VText ""))
   , AppArgsAreExplicit (Lit (VText ""))
   , AppHeadIsName (Lit (VText ""))
   , AppHeadIsElim (Lit (VText ""))

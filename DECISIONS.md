@@ -2204,6 +2204,32 @@ are two. **It also removed a choice point from every name-headed application** �
 elaborating `succ y` used to record one, because a second clause matched and
 could be offered.
 
+### The same lesson, one level on: a search must not be a choice point over the work
+
+`induction t of { … }` elaborates by walking a datatype's constructors against
+the method holes an elimination claimed, and for each one finding the arm the
+user wrote for it. The obvious shape is one rule that matches the constructor's
+name *and* elaborates that arm's body.
+
+**That shape loses every error the body produces.** With one name test and an
+ordering, both clauses of the search match whenever the names agree, so the
+engine keeps the other as an alternative; a body that then fails to elaborate
+backtracks into the search, which walks on through the remaining arms, runs out,
+and reports *itself*. A recursive call with nothing to resolve to, a pattern of
+the wrong arity and a missing arm all came back as the same sentence about the
+search.
+
+**So the search answers with the arm and does nothing else, and its two clauses
+are made mutually exclusive by a pair of complementary tests** — `same-name` and
+`different-name`, the way `let`'s annotated and bare clauses are two positive
+tests rather than a negation. The caller elaborates, and the caller's failure is
+its own. Each of those three now says what actually happened.
+
+**This is why the head language still has no negation and does not need one.**
+Every exclusive pair so far has been writable as two positive tests, and each
+time that has also removed a choice point the user would otherwise have been
+offered.
+
 **A rule body may be empty**, which it could not before. `E⟦_⟧` is *do nothing*:
 the hole is already there and unification is expected to find it. A clause that
 does nothing and a clause that does not match are different answers, so the

@@ -207,7 +207,9 @@ matchTests =
     , testCase "only the headless rules match in the core fragment" $
         case crossType (holeAt type0) of
           Left e    -> assertFailure ("could not cross: " ++ show e)
-          Right cur -> matching emptyGlobals cur @?= ["claim", "assume", "quantify", "run-block"]
+          Right cur -> matching emptyGlobals cur
+                         @?= ["claim", "assume", "quantify"]
+                               ++ splitHelpers ++ ["run-block"]
 
       -- Definition order is dispatch order (§8), so the match list is always a
       -- subsequence of the base and never a reordering of it.
@@ -809,7 +811,13 @@ everyHoleRule =
     -- runs none of them: they take a parameter.
   , "claim", "assume", "quantify"
   ]
-    ++ replicate 20 "elaborate" ++ ["run-block"]
+    ++ replicate 8 "elaborate"
+    -- **The splitting tree's helpers sit BETWEEN two runs of @elaborate@**,
+    -- because that is where the base declares them: written beside the clause
+    -- that calls them.
+    ++ splitHelpers
+    ++ replicate 13 "elaborate"
+    ++ ["run-block"]
     ++ replicate 2 "spine-arguments"
 
 -- | The recursive helpers every listing at a guess shows.
@@ -821,9 +829,30 @@ everyHoleRule =
 -- or without.
 walkers :: [String]
 walkers =
-  [ "claim", "assume", "quantify", "run-block"
-  , "intro-binders", "intro-binders", "intro-binders", "intro-binders"
-  , "spine-arguments", "spine-arguments"
+  ["claim", "assume", "quantify"]
+    -- **Before @run-block@, because the base declares them there** — beside the
+    -- @elaborate@ clause that calls them rather than with the other helpers.
+    ++ splitHelpers
+    ++ [ "run-block"
+       , "intro-binders", "intro-binders", "intro-binders", "intro-binders"
+       , "spine-arguments", "spine-arguments"
+       ]
+
+-- | The splitting tree's helpers (MS9), in the order the base declares them.
+--
+-- **Headless, or asking only about an argument**, so every one of them is
+-- offered wherever a state test passes — @walkers@' own reason, one phase on.
+-- They are a list of their own because both listings above show them and a
+-- second copy would be a second thing to remember.
+splitHelpers :: [String]
+splitHelpers =
+  [ "no-nesting"
+  , "intro-pattern", "intro-pattern", "intro-pattern"
+  , "intro-ihs", "intro-ihs"
+  , "same-length", "same-length"
+  , "arm-for", "pick", "pick", "elaborate-arm"
+  , "one-case", "one-case"
+  , "split-cases", "split-cases", "split-over"
   ]
 
 -- | @Nat@, as a core term, for the row above.
