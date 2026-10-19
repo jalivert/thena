@@ -2204,6 +2204,56 @@ are two. **It also removed a choice point from every name-headed application** �
 elaborating `succ y` used to record one, because a second clause matched and
 could be offered.
 
+### Dot patterns are optional here, because we run the eliminator and not the clause
+
+When a split determines one of a constructor's arguments, that argument has no
+binder left in the case it produces. Splitting `v : Vec A (succ n)` makes `vcons`'s
+own length equal to `n`, so
+
+```
+vcons : ∀ (k : Nat) (a : A) (as : Vec A k) -> Vec A (succ k)
+```
+
+yields a case binding two arguments, not three. A reader who knows Agda will expect
+to have to write `.n` there, and to be *required* to.
+
+**Thena lets you write a name instead, and binds it as a definition.** Both spellings
+will exist; the dot will be a way to say more, never an obligation.
+
+**The reason is that the requirement protects something Thena does not have.**
+Inaccessible terms — Agda's dot patterns — were introduced to keep a *left-hand side*
+matchable: a matcher needs its pattern linear in the variables it binds, and
+specialisation naturally wants one variable in two positions. Marking the position
+inaccessible makes it bind nothing, and linearity survives. In the literature those
+marks are inserted *by the translation*; requiring the programmer to write them is a
+separate choice.
+
+Thena has no left-hand side to keep linear. `induction t of { … }` elaborates to an
+application of the datatype's eliminator, and the definition computes by that
+eliminator's reduction rule:
+
+```
+pred = \ n -> induction n of { zero -> zero ; succ m -> m }
+  elaborates to   elim Nat () (λ target -> Nat) (zeroMethod succMethod) () n
+  and  pred (succ (succ zero))  reduces to  succ zero
+```
+
+There is no matcher in that term, so nothing needs to be linear and nothing has to be
+marked.
+
+**Nor does the determined fact have to be carried.** The transition that forces the
+argument eliminates it by substitution, so the case is handed types already written in
+the outer names — the sub-derivations of an inverted typing judgment have type
+`Has m …`, not `Has m1 …`. And where you do name the position, the name is a
+definition, so the equality is *definitional*: `m1` and `m` are convertible, and `refl`
+proves `m1 = m` with no transport.
+
+**What is given up is a check, not an ability.** With dots required, the mark is an
+assertion the system verifies. Without them, the same text means a binder or a
+definition depending on an inference you cannot see, and changing a lemma's statement
+can silently change which. The answer to that is the system showing you which positions
+it determined, rather than making you write them out.
+
 ### The same lesson, one level on: a search must not be a choice point over the work
 
 `induction t of { … }` elaborates by walking a datatype's constructors against
