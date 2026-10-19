@@ -13,7 +13,7 @@ instruction 1: wanted Core, got Int
 thena spine> say 42
 instruction 1: wanted String, got Int
 thena spine> :produces Core
-  intro-pattern/2 : List Pattern -> Core -> Core   (rule)
+  intro-pattern/3 : List Pattern -> List (Option Core) -> Core -> Core   (rule)
   intro-ihs/2 : List Name -> Core -> Core   (rule)
   intro-binders/2 : Surface -> Core -> Core   (rule)
   fresh-universe/0 : Core
@@ -21,7 +21,7 @@ thena spine> :accepts Surface
   elaborate/1 : Surface -> ()   (rule)
   arm-for/2 : Surface -> Name -> (Pattern, Surface)   (rule)
   pick/5 : Name -> Name -> Pattern -> Surface -> Surface -> (Pattern, Surface)   (rule)
-  one-case/3 : Surface -> Name -> Option Core -> ()   (rule)
+  one-case/4 : Surface -> Name -> Option Core -> List (Option Core) -> ()   (rule)
   split-cases/4 : Surface -> List Name -> List Core -> Int -> ()   (rule)
   split-over/3 : Surface -> List Name -> (List Core, Int) -> ()   (rule)
   run-block/1 : Surface -> ()   (rule)

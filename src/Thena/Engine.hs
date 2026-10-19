@@ -1275,10 +1275,21 @@ perform instr rest m = case operation instr of
                     -- @no subgoals@ message is text, and the hole's display name
                     -- is freshened, so @goto-named@ is the trap `~w23j5`
                     -- measured.
+                    --
+                    -- **And which arguments it forced, beside the handle**
+                    -- (MS9 phase 185). One entry per constructor argument, so a
+                    -- clause walks the arm's patterns against it and binds a
+                    -- survivor with @prim-lambda@ and a forced position with
+                    -- @define@ — his ruling of 2026-10-19. The list is answered
+                    -- even where nothing was claimed; a vanished case has no arm
+                    -- to introduce binders for, so nothing reads it there.
                     producing (Saying (subgoalMessage (map snd named)))
-                              (VOption (case named of
-                                          (v, _) : _ -> Just (VTerm (Free v))
-                                          []         -> Nothing))
+                              (VPair
+                                 (VOption (case named of
+                                             (v, _) : _ -> Just (VTerm (Free v))
+                                             []         -> Nothing))
+                                 (VList [ VOption (fmap VTerm f)
+                                        | f <- specialisedForced sp ]))
                               m { development = Development cur, names = n1 }
       OnComponent _ -> failure NotAHole m
       _             -> failure (CannotMove NotOnTheSpine) m

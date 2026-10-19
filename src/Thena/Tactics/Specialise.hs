@@ -99,9 +99,29 @@ import Thena.Tactics.Eliminate (spineOf)
 --
 -- 'specialisedTerm' mentions that hole as @'Free' v@, so it is well typed only
 -- in a context extended by it. 'specialise' has already checked it there.
+--
+-- 'specialisedForced' is __one entry per constructor argument__, in declaration
+-- order: 'Nothing' where the argument survived as a binder of the subgoal, and
+-- @'Just' t@ where an equation determined it to be @t@ and the binder went.
+-- __Only the solution transition removes a binder__, so only it writes an entry
+-- here (MS9 phase 185).
+--
+-- __This is the only thing that knows.__ The subgoal is a type with fewer
+-- binders than the constructor has arguments and nothing in it says which ones
+-- are missing, so a clause introducing an arm's pattern variables cannot work it
+-- out — which is why phase 184's clause failed on @vtail@.
+--
+-- __A forced term is written in the ambient context__ and mentions no binder of
+-- the method, forced or surviving. The solving side of an equation is always the
+-- /target/'s index, which lives where the elimination was written; injectivity
+-- decomposes both sides in step and so preserves that split, and a solution
+-- substitutes into the equations that follow, never into the target. So the
+-- entries here are in scope wherever the subgoal is, which is what lets the
+-- caller bind one with @define@ above the hole.
 data Specialisation = Specialisation
-  { specialisedGoal :: [(Var, Ident, Core)]
-  , specialisedTerm :: Core
+  { specialisedGoal   :: [(Var, Ident, Core)]
+  , specialisedTerm   :: Core
+  , specialisedForced :: [Maybe Core]
   }
   deriving (Eq, Show)
 
@@ -132,8 +152,9 @@ specialise env ctx n0 cn k mty = case lookupConstructor cn env of
                 Just es ->
                   let (hv, n2) = fresh n1
                    in case solve hv delta es body n2 of
-                        (Left e, n3)           -> (Left e, n3)
-                        (Right (want, tm), n3) -> verify hv want tm n3
+                        (Left e, n3) -> (Left e, n3)
+                        (Right (want, tm, sol), n3) ->
+                          verify hv want tm (forced c delta sol) n3
   where
     -- One binder per constructor argument and one per /recursive/ constructor
     -- argument, which is 'Thena.Global.Env.eliminatorType'\'s @methodType@ read
@@ -146,16 +167,27 @@ specialise env ctx n0 cn k mty = case lookupConstructor cn env of
         recursive = recursiveArgument (inductiveName d)
                       (length (inductiveParameters d)) . entryType
 
+    -- One entry per constructor argument, which is the __first__ stretch of the
+    -- telescope: 'Thena.Global.Env.eliminatorType' states the arguments and then
+    -- the induction hypotheses, so the arguments are a prefix of @delta@ and no
+    -- count has to be carried alongside. A hypothesis is never solved — an
+    -- equation is over the datatype's indices and a hypothesis is a proof of the
+    -- motive — and if one ever were, it would simply not be reported here.
+    forced c telescope sol =
+      [ lookup (entryVar e) sol
+      | e <- take (length (constructorArguments c)) telescope
+      ]
+
     -- The hole and the term that uses it, checked in the context that will hold
     -- both. Checking here is the whole of §7.2's bargain for a coarse op: a
     -- wrong proof term is caught, so only the caller's /choice/ of what to
     -- specialise is unguarded.
-    verify hv want tm n =
+    verify hv want tm fs n =
       let hole = [ (hv, Ident (nameOf cn ++ "Case"), w) | Just w <- [want] ]
           with = ctx ++ [ Hypothesis v i t | (v, i, t) <- hole ]
        in case check env with n tm mty of
             (Left e, _, n1)   -> (Left (SpecialisedIllTyped e), n1)
-            (Right (), _, n1) -> (Right (Specialisation hole tm), n1)
+            (Right (), _, n1) -> (Right (Specialisation hole tm fs), n1)
 
     nameOf (GlobalName w) = w
 
@@ -194,11 +226,17 @@ specialise env ctx n0 cn k mty = case lookupConstructor cn env of
     -- must be given. 'Nothing' there means the term does not mention the hole —
     -- a conflict closed the method.
     --
+    -- __And it answers with what the solution transitions removed__, as
+    -- @(binder, the term it was solved to)@ — 'specialisedForced' read off
+    -- @delta@. Every term in that list is already resolved, because a solution
+    -- applies the sub-problem's own pairs to its term before recording it, so
+    -- nothing in the list mentions a binder the list removes.
+    --
     -- Equations are tried left to right; one no transition applies to is moved
     -- into the accumulator and stays a binder.
     solve hv delta eqs t = go [] eqs
       where
-        go bfr [] n = (Right (Just (problem (reverse bfr) t), Free hv), n)
+        go bfr [] n = (Right (Just (problem (reverse bfr) t), Free hv, []), n)
 
         go bfr (e : after) n = case transition delta e of
           NoTransition -> go (e : bfr) after n
@@ -241,7 +279,7 @@ specialise env ctx n0 cn k mty = case lookupConstructor cn env of
                   , indices    = []
                   , target     = absurd
                   }
-             in (Right (Nothing, lamOver (prefix before e) node), n1)
+             in (Right (Nothing, lamOver (prefix before e) node, []), n1)
 
         -- __injectivity.__ One equation per constructor argument, each proved by
         -- a projection out of the @And@ chain the lemma answers with, and the
@@ -272,18 +310,24 @@ specialise env ctx n0 cn k mty = case lookupConstructor cn env of
                             (map (substEqn x other) (before ++ after))
                             (substituting x other t) n of
                 (Left err, n1) -> (Left err, n1)
-                (Right (want, g), n1) ->
+                (Right (want, g, sol), n1) ->
                   let (co, n2) = coerce e onLeft residueAt n1
                    in ( Right ( want
                               , lamOver (prefix before e)
                                   (applyTo (App co (applyTo g (varsOf d1)))
-                                           (varsOf d2' ++ eqnVars before)) )
+                                           (varsOf d2' ++ eqnVars before))
+                              -- __Resolved before it is recorded.__ A deeper
+                              -- solution may have removed a binder that @other@
+                              -- mentions, so the pairs it answered with are
+                              -- applied here; the invariant above is what makes
+                              -- one pass enough.
+                              , (x, substituteAll sol other) : sol )
                       , n2 )
 
         -- Solve the sub-problem, then shape this one's term out of its.
         continue es body n f = case solve hv delta es body n of
-          (Left err, n1)        -> (Left err, n1)
-          (Right (want, g), n1) -> (Right (want, f g), n1)
+          (Left err, n1)             -> (Left err, n1)
+          (Right (want, g, sol), n1) -> (Right (want, f g, sol), n1)
 
     -- ------------------------------------------------------------------
     -- Which transition applies

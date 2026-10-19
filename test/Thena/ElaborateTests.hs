@@ -770,6 +770,7 @@ baseTests =
               ++ replicate 8 "elaborate"
               ++ [ "no-nesting"
                  , "intro-pattern", "intro-pattern", "intro-pattern"
+                 , "intro-pattern", "intro-pattern"
                  , "intro-ihs", "intro-ihs"
                  , "same-length", "same-length"
                  , "arm-for", "pick", "pick", "elaborate-arm"
@@ -1034,6 +1035,91 @@ splittingTree =
       , "nested = \\ n -> induction n of { zero -> zero ; succ (succ m) -> m }"
       ]
       "stuck: no clause of no-nesting applies here"
+
+    -- ----------------------------------------------------------------
+    -- A FORCED POSITION (MS9 phase 185)
+    -- ----------------------------------------------------------------
+
+    -- __@vtail@, which is the milestone's own case and the one phase 184 could
+    -- not do.__ Splitting @v : Vec A (succ n)@ solves @vcons@'s own @k@ against
+    -- the outer @n@, so the subgoal binds two of the constructor's three
+    -- arguments and the pattern names three. The name in the forced position
+    -- becomes a /definition/ equal to what it was forced to — his ruling of
+    -- 2026-10-19 — so the arm's text means what it reads like either way.
+    --
+    -- __And no @vnil@ arm is written__, because that case vanished: the
+    -- conflicting equation closed the method outright, so there is nothing to
+    -- elaborate into and nothing for coverage to want.
+  , testCase "a split over an indexed family declares, with a forced position" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (vecModule ++ vtailDef))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      -- Saturated, because @:whnf@ reads a CORE term and nothing is inserted
+      -- there: @vcons@'s parameter is an argument like any other, and an
+      -- under-applied former is not a 'Canonical' for ι to fire on.
+      let (s2, q) = command s1 ":whnf vtail Nat zero (vcons Nat zero zero (vnil Nat))"
+      unwords (renderResponse s2 q) @?= "vnil Nat"
+
+    -- __The forced position is a definition, and @refl@ proves it.__ The goal
+    -- is @Eq Nat n n@ and the arm answers with @refl Nat k@, whose type is
+    -- @Eq Nat k k@. The two are convertible only because @k@ /is/ @n@ — a
+    -- definition, not a propositional equation — so this is the design's claim
+    -- that no @Eq@ hypothesis and no transport is needed, run rather than
+    -- argued.
+  , testCase "and the name it binds is definitionally what it was forced to" $ do
+      (s0, _) <- startingSession
+      let src = vecModule ++
+            [ "tailLen : \8704 (A : Type\8320) (n : Nat) -> Vec A (succ n) -> Eq Nat n n"
+            , "tailLen = \\ A n v -> induction v of { vcons k a as -> refl Nat k }"
+            ]
+          (s1, r) = loadProofSource s0 (unlines src)
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- A wildcard in a forced position binds nothing at all, there being no
+    -- binder to take and no name asked for.
+  , testCase "a wildcard in a forced position binds nothing" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (vecModule ++
+            [ "vtailW : \8704 (A : Type\8320) (n : Nat) -> Vec A (succ n) -> Vec A n"
+            , "vtailW = \\ A n v -> induction v of { vcons _ a as -> as }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __TWO forced positions, which is the shape the corpus is made of__: an
+    -- inversion lemma over an indexed family whose index is pinned to a
+    -- two-argument constructor form. @okNode@ takes four arguments and the
+    -- equation @Eq Tr (node a b) (node p q)@ decomposes by injectivity into two
+    -- that are then solved, so @a@ and @b@ are both definitions and only the two
+    -- sub-derivations are binders. It computes, which is what says the methods
+    -- went to the right constructors.
+  , testCase "an inversion lemma forces two positions and still computes" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (okModule ++
+            [ "left : \8704 (p q : Tr) -> Ok (node p q) -> Ok p"
+            , "left = \\ p q d -> induction d of { okNode a b da db -> da }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      let (s2, q) = command s1
+            ":whnf left leaf leaf (okNode leaf leaf okLeaf okLeaf)"
+      unwords (renderResponse s2 q) @?= "okLeaf"
+
+    -- __A forced position cannot be destructured__, and that is a limitation of
+    -- the feature rather than of this phase: an inaccessible position binds
+    -- nothing, so there is nothing for a sub-pattern to match on. @no-nesting@
+    -- is the refusal, exactly as it is in a surviving position.
+  , refusesIn vecModule "a nested pattern in a forced position is declined"
+      [ "vtailN : \8704 (A : Type\8320) (n : Nat) -> Vec A (succ n) -> Vec A n"
+      , "vtailN = \\ A n v -> induction v of { vcons (succ j) a as -> as }"
+      ]
+      "stuck: no clause of no-nesting applies here"
   ]
   where
     natModule =
@@ -1043,14 +1129,38 @@ splittingTree =
       , "  succ : Nat -> Nat"
       , ""
       ]
+    vecModule =
+      natModule ++
+      [ "data Vec (A : Type\8320) : Nat -> Type\8320 where"
+      , "  vnil : Vec A zero"
+      , "  vcons : \8704 (k : Nat) (a : A) (as : Vec A k) -> Vec A (succ k)"
+      , ""
+      ]
+    okModule =
+      [ "module M where", ""
+      , "data Tr : Type\8320 where"
+      , "  leaf : Tr"
+      , "  node : Tr -> Tr -> Tr"
+      , ""
+      , "data Ok : Tr -> Type\8320 where"
+      , "  okLeaf : Ok leaf"
+      , "  okNode : \8704 (a b : Tr) -> Ok a -> Ok b -> Ok (node a b)"
+      , ""
+      ]
+    vtailDef =
+      [ "vtail : \8704 (A : Type\8320) (n : Nat) -> Vec A (succ n) -> Vec A n"
+      , "vtail = \\ A n v -> induction v of { vcons k a as -> as }"
+      ]
     predDef =
       [ "pred : Nat -> Nat"
       , "pred = \\ n -> induction n of { zero -> zero ; succ m -> m }"
       ]
 
-    refuses what ls want = testCase what $ do
+    refuses = refusesIn natModule
+
+    refusesIn prefix what ls want = testCase what $ do
       (s0, _) <- startingSession
-      let (s1, r) = loadProofSource s0 (unlines (natModule ++ ls))
+      let (s1, r) = loadProofSource s0 (unlines (prefix ++ ls))
           said = filter (not . null) (renderResponse s1 r)
       case said of
         [] -> assertFailure "it loaded, and should not have"

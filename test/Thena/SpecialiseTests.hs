@@ -31,8 +31,8 @@ import Data.List (isInfixOf)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Context (Context, Entry (..))
-import Thena.Core.Term (Core, GlobalName (..), Ident (..), fresh)
+import Thena.Core.Context (Context, Entry (..), entryIdent, entryVar)
+import Thena.Core.Term (Core, GlobalName (..), Ident (..), fresh, freeVars)
 import Thena.Declared (eqNat, eqNatCounter, eqNatVec, eqNatVecCounter)
 import Thena.Driver
   ( Loaded (..)
@@ -112,6 +112,26 @@ vtailTests =
         @?= Just ( "consCase"
                  , "A -> Vec A n -> \
                    \(Eq {0} Nat n (succ n) -> Vec A n) -> Vec A n" )
+
+    -- __Which argument went, and what it went to__ (MS9 phase 185). @cons@
+    -- takes three and the subgoal binds two, and this is the only thing that
+    -- says which two: @n1@ is the first and it was solved to @n@.
+  , testCase "cons's method, after: the first argument is forced to n" $
+      vecForced "cons" (methodOf 1) @?= [Just "n", Nothing, Nothing]
+
+    -- __And it is written in the AMBIENT context__, which is the one thing the
+    -- design left unmeasured: @n@ is a variable of the context the elimination
+    -- was written in, so it is in scope where the subgoal is claimed and the
+    -- caller may bind it with @define@ there. A term mentioning a binder of the
+    -- method would not be.
+  , testCase "and the term it was forced to is ambient, not a method binder" $
+      forcedVarsIn vecContext "cons" (methodOf 1) @?= [["n"]]
+
+    -- A method that vanished still answers. Nothing claims a subgoal, so
+    -- nothing reads this, but a conflict after a solution has one and the shape
+    -- does not depend on which case it is.
+  , testCase "nil's method, after: nothing was forced before the conflict" $
+      vecForced "nil" (methodOf 0) @?= []
   ]
   where
     methodOf k = case drop k (elimMethods vtail) of
@@ -120,6 +140,20 @@ vtailTests =
 
     vecGoal c mty =
       goalIn vecContext (run' eqNatVec vecContext vecCounter c 1 mty)
+
+    vecForced c mty =
+      map (fmap (shown vecContext))
+          (specialisedForced (run' eqNatVec vecContext vecCounter c 1 mty))
+
+    forcedVarsIn ctx c mty =
+      [ map identOf (freeVars t)
+      | Just t <- specialisedForced (run' eqNatVec ctx vecCounter c 1 mty)
+      ]
+      where
+        identOf v = case [ i | e <- ctx, entryVar e == v, Ident i <- [entryIdent e] ] of
+          i : _ -> i
+          []    -> "NOT-IN-THE-AMBIENT-CONTEXT"
+
 
 -- --------------------------------------------------------------------------
 -- One transition at a time

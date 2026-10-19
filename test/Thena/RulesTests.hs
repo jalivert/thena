@@ -848,6 +848,7 @@ splitHelpers :: [String]
 splitHelpers =
   [ "no-nesting"
   , "intro-pattern", "intro-pattern", "intro-pattern"
+  , "intro-pattern", "intro-pattern"
   , "intro-ihs", "intro-ihs"
   , "same-length", "same-length"
   , "arm-for", "pick", "pick", "elaborate-arm"

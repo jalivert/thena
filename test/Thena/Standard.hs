@@ -643,34 +643,70 @@ annotatedBinder =
 -- running out; MS8 phase 170 found the same thing in the application clauses.
 -- And **@same-length@ and @no-nesting@ have only the clauses that pass**: a
 -- mismatch reaches no clause at all, which is the refusal.
+--
+-- **@intro-pattern@ has four clauses because it walks two lists** (MS9 phase
+-- 185) — the arm's patterns against what @specialise@ reports it forced — and
+-- a pattern is a name or a wildcard in either case. A @none@ takes the binder
+-- the subgoal still has; a @some@ binds the name as a @define@ and leaves the
+-- hole alone, because a forced position has no binder to take.
 splitClauses :: [Rule]
 splitClauses =
   [ Rule (GlobalName "no-nesting") [PList [] Nothing] [] []
-  , Rule (GlobalName "intro-pattern") [PList [] Nothing, PVar "k"] []
+  , Rule (GlobalName "intro-pattern")
+      [PList [] Nothing, PList [] Nothing, PVar "k"] []
       [Do (Op.Return (Ref "k"))]
   , Rule (GlobalName "intro-pattern")
-      [PList [PVar "p"] (Just (PVar "ps")), PVar "k"]
+      [ PList [PVar "p"] (Just (PVar "ps"))
+      , PList [PNone] (Just (PVar "fs")), PVar "k"
+      ]
       [PatternIsWildcard (Ref "p")]
       [ Bind (Op.PVar "w") Nothing (Op.FreshName (Lit (VText "u")))
       , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "w")))
-      , Bind (Op.PVar "r") Nothing (Op.Call "intro-pattern" [Ref "ps", Ref "k2"])
+      , Bind (Op.PVar "r") Nothing
+          (Op.Call "intro-pattern" [Ref "ps", Ref "fs", Ref "k2"])
       , Do (Op.Return (Ref "r"))
       ]
   , Rule (GlobalName "intro-pattern")
-      [PList [PVar "p"] (Just (PVar "ps")), PVar "k"]
+      [ PList [PVar "p"] (Just (PVar "ps"))
+      , PList [PNone] (Just (PVar "fs")), PVar "k"
+      ]
       [PatternIsName (Ref "p")]
       [ Bind (Op.PVar "sub") Nothing (Op.PatternArguments (Ref "p"))
       , call "no-nesting" [Ref "sub"]
       , Bind (Op.PVar "w") Nothing (Op.PatternHead (Ref "p"))
       , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "w")))
-      , Bind (Op.PVar "r") Nothing (Op.Call "intro-pattern" [Ref "ps", Ref "k2"])
+      , Bind (Op.PVar "r") Nothing
+          (Op.Call "intro-pattern" [Ref "ps", Ref "fs", Ref "k2"])
+      , Do (Op.Return (Ref "r"))
+      ]
+  , Rule (GlobalName "intro-pattern")
+      [ PList [PVar "p"] (Just (PVar "ps"))
+      , PList [PSome (PVar "v")] (Just (PVar "fs")), PVar "k"
+      ]
+      [PatternIsWildcard (Ref "p")]
+      [ Bind (Op.PVar "r") Nothing
+          (Op.Call "intro-pattern" [Ref "ps", Ref "fs", Ref "k"])
+      , Do (Op.Return (Ref "r"))
+      ]
+  , Rule (GlobalName "intro-pattern")
+      [ PList [PVar "p"] (Just (PVar "ps"))
+      , PList [PSome (PVar "v")] (Just (PVar "fs")), PVar "k"
+      ]
+      [PatternIsName (Ref "p")]
+      [ Bind (Op.PVar "sub") Nothing (Op.PatternArguments (Ref "p"))
+      , call "no-nesting" [Ref "sub"]
+      , Bind (Op.PVar "w") Nothing (Op.PatternHead (Ref "p"))
+      , Do (Op.Define (Ref "w") (Ref "v"))
+      , Bind (Op.PVar "r") Nothing
+          (Op.Call "intro-pattern" [Ref "ps", Ref "fs", Ref "k"])
       , Do (Op.Return (Ref "r"))
       ]
   , Rule (GlobalName "intro-ihs") [PList [] Nothing, PVar "k"] []
       [Do (Op.Return (Ref "k"))]
   , Rule (GlobalName "intro-ihs")
       [PList [PVar "n"] (Just (PVar "ns")), PVar "k"] []
-      [ Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "n")))
+      [ Bind (Op.PVar "h") Nothing (Op.FreshName (Ref "n"))
+      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "h")))
       , Bind (Op.PVar "r") Nothing (Op.Call "intro-ihs" [Ref "ns", Ref "k2"])
       , Do (Op.Return (Ref "r"))
       ]
@@ -699,7 +735,9 @@ splitClauses =
       , Do (Op.Return (Ref "a"))
       ]
   , Rule (GlobalName "elaborate-arm")
-      [PVar "c", PVar "sub", PPair (PVar "p") (PVar "b")] []
+      [ PVar "c", PVar "sub", PVar "forced"
+      , PPair (PVar "p") (PVar "b")
+      ] []
       [ Bind (Op.PVar "as") Nothing (Op.PatternArguments (Ref "p"))
       , Bind (Op.PVar "args") Nothing (Op.ConstructorArguments (Ref "c"))
       , call "same-length" [Ref "as", Ref "args"]
@@ -708,7 +746,8 @@ splitClauses =
       , Do Into
       , Bind (Op.PVar "k0") Nothing Here
       , Do Back
-      , Bind (Op.PVar "k1") Nothing (Op.Call "intro-pattern" [Ref "as", Ref "k0"])
+      , Bind (Op.PVar "k1") Nothing
+          (Op.Call "intro-pattern" [Ref "as", Ref "forced", Ref "k0"])
       , Bind (Op.PVar "ihs") Nothing (Op.ConstructorRecursiveArguments (Ref "c"))
       , Bind (Op.PVar "k2") Nothing (Op.Call "intro-ihs" [Ref "ihs", Ref "k1"])
       , Do (Goto (Ref "k2"))
@@ -716,12 +755,13 @@ splitClauses =
       , Do (Goto (Ref "sub"))
       , call "solve" []
       ]
-  , Rule (GlobalName "one-case") [PVar "t", PVar "c", PNone] []
+  , Rule (GlobalName "one-case")
+      [PVar "t", PVar "c", PNone, PVar "forced"] []
       [Do (Say (Lit (VText "a case vanished: its arm is unreachable")))]
   , Rule (GlobalName "one-case")
-      [PVar "t", PVar "c", PSome (PVar "sub")] []
+      [PVar "t", PVar "c", PSome (PVar "sub"), PVar "forced"] []
       [ Bind (Op.PVar "a") Nothing (Op.Call "arm-for" [Ref "t", Ref "c"])
-      , call "elaborate-arm" [Ref "c", Ref "sub", Ref "a"]
+      , call "elaborate-arm" [Ref "c", Ref "sub", Ref "forced", Ref "a"]
       ]
   , Rule (GlobalName "split-cases")
       [PVar "t", PList [] Nothing, PList [] Nothing, PVar "k"] [] []
@@ -730,8 +770,9 @@ splitClauses =
       , PList [PVar "mh"] (Just (PVar "ms")), PVar "k"
       ] []
       [ Do (Goto (Ref "mh"))
-      , Bind (Op.PVar "sub") Nothing (Op.Specialise (Ref "c") (Ref "k"))
-      , call "one-case" [Ref "t", Ref "c", Ref "sub"]
+      , Bind (PPair (Op.PVar "sub") (Op.PVar "forced")) Nothing
+          (Op.Specialise (Ref "c") (Ref "k"))
+      , call "one-case" [Ref "t", Ref "c", Ref "sub", Ref "forced"]
       , Do (Goto (Ref "mh"))
       , call "solve" []
       , call "split-cases" [Ref "t", Ref "cs", Ref "ms", Ref "k"]

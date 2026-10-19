@@ -1170,6 +1170,17 @@ data Op
     -- **It claims zero or one hole**, and zero is the impossible case
     -- vanishing: a conflicting equation closes the method outright, so there is
     -- nothing left to prove and nothing to go to.
+    --
+    -- **And it says which of the constructor's arguments it FORCED, and to
+    -- what** (MS9 phase 185) — one @Option Core@ per argument in declaration
+    -- order, @none@ for one that survived as a binder of the subgoal and
+    -- @some t@ for one an equation determined. **It is the only thing that
+    -- knows**: the subgoal has fewer binders than the constructor has arguments
+    -- and nothing in it says which are missing, so a clause naming an arm's
+    -- pattern variables cannot work it out — which is why phase 184's clause
+    -- failed on @vtail@. His ruling of 2026-10-19 is what the caller does with
+    -- it: a survivor is bound with @prim-lambda@ and a forced position with
+    -- @define@, the name being a definition equal to the term it was forced to.
   | Specialise Operand Operand
   deriving (Eq, Show)
 
@@ -1451,7 +1462,10 @@ resultOf o = case o of
   -- **The subgoal it claimed, or none** (MS9 phase 184). A conflicting
   -- equation closes the method outright and claims nothing, which is the
   -- impossible case vanishing, so there is never more than one.
-  Specialise _ _ -> Just (TOption TCore)
+    -- **The handle and the forced report, as a pair**, which is 'Eliminate'\'s
+    -- own shape and for its reason: one op answers everything only it knows, and
+    -- a rule takes the pair apart in a head.
+  Specialise _ _ -> Just (TPair (TOption TCore) (TList (TOption TCore)))
   -- The six declaration readers (MS9 phase 176). @constructors-of@ is the
   -- first row in this table to answer with a list.
   DatatypeOf _ -> Just TName
