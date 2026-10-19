@@ -1111,6 +1111,54 @@ splittingTree =
             ":whnf left leaf leaf (okNode leaf leaf okLeaf okLeaf)"
       unwords (renderResponse s2 q) @?= "okLeaf"
 
+    -- __A SPLIT AT A VARIABLE INDEX TIES NOTHING__ (MS9 phase 186, `~7pn6x`),
+    -- and this is the case the whole corpus is: every lemma in
+    -- @examples\/progress.thena@ splits a derivation whose indices are the
+    -- lemma's own variables. Until the fix each arm was handed
+    -- @Eq Tr leaf t -> …@, an equation over an ambient variable, which is rigid
+    -- and which no specialiser transition can touch.
+    --
+    -- __It is the tactic's own scaffolding that caused it.__ @induction … of@
+    -- cannot know the target's type before elaborating it, so it claims a hole
+    -- for the type and a hole for the target; the user's own hypothesis and the
+    -- type hole then both mention the index, and the friendliness test counted
+    -- them as fixed premises. The regression this guards is therefore invisible
+    -- to any test that calls the tactic directly — it needs the surface.
+  , testCase "a split at a variable index states no equation" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (okModule ++
+            [ "idOk : \8704 (t : Tr) -> Ok t -> Ok t"
+            , "idOk = \\ t d -> induction d of"
+            , "  { okLeaf -> okLeaf ; okNode a b da db -> okNode a b da db }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      let (s2, q) = command s1 ":whnf idOk leaf okLeaf"
+      unwords (renderResponse s2 q) @?= "okLeaf"
+
+    -- __And two indices, which is `progress`'s own shape__: a derivation
+    -- indexed by both the term and its type, with the target bound as a λ
+    -- parameter beside them.
+  , testCase "and a family with two variable indices" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (okModule ++
+            [ "data Ty : Type\8320 where"
+            , "  base : Ty"
+            , ""
+            , "data Has : Tr -> Ty -> Type\8320 where"
+            , "  hLeaf : Has leaf base"
+            , "  hNode : \8704 (a b : Tr) -> Has a base -> Has b base"
+            , "    -> Has (node a b) base"
+            , ""
+            , "fine : \8704 (t : Tr) (T : Ty) -> Has t T -> Ty"
+            , "fine = \\ t T d -> induction d of"
+            , "  { hLeaf -> base ; hNode a b da db -> base }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
     -- __A forced position cannot be destructured__, and that is a limitation of
     -- the feature rather than of this phase: an inaccessible position binds
     -- nothing, so there is nothing for a sub-pattern to match on. @no-nesting@

@@ -201,7 +201,7 @@ eliminate env ctx n0 goal tgt =
         isHypothesisOf v = or [ True | Hypothesis w _ _ <- ctx, w == v ]
         unmentioned v e =
           entryVar e == v
-            || Just (entryVar e) == targetVar
+            || entryVar e `elem` targetVars
             || v `notElem` entryUses e
 
         -- Which indices keep an equation, and which are simply abstracted.
@@ -395,12 +395,50 @@ eliminate env ctx n0 goal tgt =
     -- at @Type₀@: §2 item 1, and why @Box1@ could not be eliminated.
     equationOf lv ity l r = foldl App (Global equality [lv]) [ity, l, r]
 
-    -- The entry the target /is/, when it is a variable. It is the one entry
+    -- The entries the target /is/, when it is a variable. They are the entries
     -- allowed to mention a friendly index — the whole point is that the target
     -- follows the index into the motive.
-    targetVar = case tgt of
-      Free w -> Just w
-      _      -> Nothing
+    --
+    -- __It is a chain and not one entry__ (MS9 phase 186). @induction … of@
+    -- cannot know the target's type before elaborating it, so its clause claims
+    -- a hole of its own, elaborates the written target into it and eliminates
+    -- /that/: the hole is a 'Definition' whose value is the user's own
+    -- hypothesis, and both entries mention the index. Counting the second as a
+    -- fixed premise tied every index of every split, so
+    -- @\ t T d -> induction d of …@ handed each arm an equation over an ambient
+    -- variable, which is rigid and which no specialiser transition can touch.
+    --
+    -- __The exception is "the entry the target denotes", not "the entry whose
+    -- variable the target is"__, and the two were the same thing until a caller
+    -- elaborated its target into a hole. That the wider reading is right is not
+    -- a judgement call: @examples\/progress.thena@ writes the same elimination by
+    -- hand, over a context holding @d : HasType t T@, with no equations — and
+    -- the kernel accepts it.
+    --
+    -- A value that is not a variable stops the walk, and then only the hole is
+    -- excepted: a compound target really does leave the user's hypothesis as a
+    -- separate premise constraining the index.
+    targetVars = case tgt of
+      Free w -> walk [] [w]
+      _      -> []
+      where
+        walk seen []       = seen
+        walk seen (w : ws)
+          | w `elem` seen = walk seen ws
+          | otherwise     = walk (w : seen) (ws ++ concatMap (standsFor w) ctx)
+
+        -- One step: the variable an entry's value is, and the variable its type
+        -- is. Only a bare variable continues the walk — a compound value or a
+        -- written-out type is the end of the chain, and then the entries beyond
+        -- it really are separate premises.
+        standsFor w e
+          | entryVar e /= w = []
+          | otherwise = bare (entryType e) ++ case e of
+              Definition _ _ val _ -> bare val
+              Hypothesis {}        -> []
+
+        bare (Free y) = [y]
+        bare _        = []
 
     entryUses e = case e of
       Hypothesis _ _ t   -> freeVars t
