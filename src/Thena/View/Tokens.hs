@@ -162,6 +162,9 @@ kindOf t = case t of
   TIn           -> AKeyword
   TElim         -> AKeyword
   TTrusted      -> AKeyword
+  TInduction    -> AKeyword
+  TCase         -> AKeyword
+  TOf           -> AKeyword
   TWhere        -> AKeyword
   TData         -> AKeyword
   TModule       -> AKeyword

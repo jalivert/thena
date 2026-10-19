@@ -26,7 +26,8 @@ one paragraph, not three; the full argument lives in the design notes.
 
 ### An identifier may contain almost anything
 
-*Decided 2026-08-25; consequences accepted 2026-08-29.*
+*Decided 2026-08-25; consequences accepted 2026-08-29. The keyword list is
+reviewed whenever a word is reserved — most recently 2026-10-19.*
 
 Most languages reserve a generous set of punctuation and give you the rest.
 Thena does the opposite: it reserves as little as it can, so you can name things
@@ -39,10 +40,14 @@ in your own notation — `≼`, `Γ⊢`, `x'`, `2-cell`, `∂f/∂x` are all one
 | brackets and separators | `(` `)` `{` `}` `[` `]` `;` `,` `"` |
 | operator characters | `λ` `∀` `⊢` `≟` `≐` `≈` `▸` `⌜` `⌝` |
 | whitespace | |
-| keywords | `let` `in` `elim` `forall` `where` `do` `rule` `when` |
+| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `rule` `language` `context` `judgment` `notation` `when` |
 
 A name starts with an ASCII letter, `_`, or any non-reserved character above
 ASCII.
+
+**A keyword is a whole token, so a word that merely *contains* one is a name.**
+`caseNat` and `datatype-of` are each one identifier; the lexer takes the longest
+match, so a keyword rule can only win on the whole word.
 
 **What follows, and it is the part that will catch you out.** `:` and `=` are
 *not* reserved, so they can sit inside a name. The lexer takes the longest

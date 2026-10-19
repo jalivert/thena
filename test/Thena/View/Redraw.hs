@@ -40,11 +40,12 @@ import Thena.View.Core
   )
 import Thena.View.Surface
   ( SurfaceArgView (..)
+  , SurfaceArmView (..)
   , SurfaceBinding (..)
   , SurfacePieceView (..)
   , SurfaceShape (..)
   )
-import Thena.Surface.Concrete (Plicity (..))
+import Thena.Surface.Concrete (Analysis (..), Plicity (..), SurfacePattern (..))
 import Thena.Syntax.Print (tick)
 
 -- | What an editor is: a function from a 'Display' to text, and nothing else.
@@ -233,6 +234,23 @@ redrawSurface = surf SLoose
         ("elim " ++ d ++ " " ++ list ps ++ " " ++ surf STight mot ++ " " ++ list ms
            ++ " " ++ list is ++ " " ++ surf STight tgt)
     surf _ (ASurfaceDo t) = "do { " ++ t ++ " }"
+    -- Explicit braces and semicolons, which is the spelling
+    -- 'Thena.Syntax.Print' gives it and the one that is unambiguous on a line.
+    surf p (ASurfaceSplit a tgt as) =
+      paren (p >= STight)
+        (word a ++ " " ++ surf STight tgt ++ " of { "
+           ++ intercalate " ; " (map arm as) ++ " }")
+      where
+        word ByInduction = "induction"
+        word ByCases     = "case"
+        arm (SurfaceArmView pat b) = pattern' pat ++ " -> " ++ surf SLoose b
+
+    pattern' = goPat False
+      where
+        goPat _ PatternWildcard = "_"
+        goPat _ (PatternName x []) = x
+        goPat nested (PatternName x ps) =
+          paren nested (unwords (x : map (goPat True) ps))
 
     arg (SurfaceArgView Explicit t) = " " ++ surf STight t
     arg (SurfaceArgView Implicit t) = " {" ++ surf SLoose t ++ "}"

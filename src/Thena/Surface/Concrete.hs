@@ -25,6 +25,9 @@ module Thena.Surface.Concrete
   , PairingError (..)
   , SurfaceArg (..)
   , SurfaceBinder (..)
+  , SurfacePattern (..)
+  , SurfaceArm (..)
+  , Analysis (..)
   , Plicity (..)
   , blocksIn
   ) where
@@ -159,6 +162,26 @@ data Surface
     --
     -- **No level arguments.** A use writes them in the development calculus and
     -- phase 44 decides how, or whether, they are written here.
+  | SurfaceSplit Analysis Surface [SurfaceArm]
+    -- ^ @induction t of { p -> e ; … }@ and @case t of { p -> e ; … }@ (MS9
+    -- phase 179) — __the target, and one arm per written pattern__.
+    --
+    -- __One node for both words, and the 'Analysis' says which was written.__
+    -- They differ in one thing only: whether an arm is handed the induction
+    -- hypotheses of the constructor it matched. Everything else — the target,
+    -- the patterns, how an arm is printed, where the zipper may go — is the
+    -- same, so two constructors would be two identical cases in every consumer
+    -- that is not elaboration. **And @by ‹eliminator›@ is a third value of that
+    -- field** rather than a third node, which is what settles it: the field is
+    -- /which scheme analyses the target/, and the node is the analysis.
+    --
+    -- __It is self-delimiting, so it is an atom__ — @of@ opens a block, which
+    -- the offside rule closes, exactly as @do@ and @where@ already do. So it
+    -- stands where a name stands and needs no parentheses to be an argument.
+    --
+    -- __No arms is legal and useful__: @case t of { }@ is the whole of a case
+    -- analysis on @Empty@. The same reason 'SurfaceData' admits a datatype with
+    -- no constructors.
   | SurfaceTrusted Surface Surface
     -- ^ @trusted T e@ (MS8 phase 150) — **two operands, where
     -- 'Thena.Core.Term.Trusted' has three.** The third is the type @e@ was
@@ -189,6 +212,57 @@ data ObjectPiece
 
 -- | One argument of a spine, and whether it was written in braces.
 data SurfaceArg = SurfaceArg Plicity Surface
+  deriving (Eq, Show)
+
+-- | Which scheme a 'SurfaceSplit' analyses its target with (MS9 phase 179).
+--
+-- __It is the word the user wrote and nothing more.__ What each one means is
+-- elaboration's: @induction@ reaches for the generated eliminator, whose methods
+-- carry an inductive hypothesis per recursive argument, and @case@ reaches for
+-- the generated @caseD@, whose methods carry none.
+--
+-- __@by ‹eliminator›@ belongs here when it arrives__, as a third case carrying
+-- the term that is to do the eliminating — a non-default induction principle,
+-- which is what POPLMark 1A's nested induction needs and cannot say today. That
+-- it fits as a case of this type rather than as a node of its own is why
+-- 'SurfaceSplit' is one constructor.
+data Analysis
+  = ByInduction   -- ^ @induction t of …@
+  | ByCases       -- ^ @case t of …@
+  deriving (Eq, Show)
+
+-- | One arm of a 'SurfaceSplit': the pattern, and what to do when it matches.
+--
+-- __@->@ and not @=@ — his ruling, 2026-10-18__: /"obviously @->@ for case and
+-- induction syntax"/. @=@ stays for a clause, which is a declaration and not an
+-- arm.
+data SurfaceArm = SurfaceArm SurfacePattern Surface
+  deriving (Eq, Show)
+
+-- | A written pattern (MS9 phase 179).
+--
+-- __A bare name does not say whether it is a variable or a nullary
+-- constructor, and the tree must not pretend otherwise.__ @nil@ and @n@ are the
+-- same shape written down; which one is which is a question about the globals,
+-- so elaboration answers it with @constructor-datatype@ and the tree carries
+-- the name. **This is the opposite of 'Thena.Instral.Pattern'**, whose decision
+-- 1 is that a bare identifier /is/ a variable and a named constructor cannot be
+-- matched — that is a pattern over @instral@'s own values, and it is not this.
+--
+-- __Nested patterns are parenthesised__, so an argument of a pattern is itself
+-- one and @cons n a (cons m b nil)@ is three of these deep.
+--
+-- __What is deliberately not here yet__: an inaccessible pattern, which is a
+-- notation and a check over positions the specialiser already knows are forced,
+-- and a literal pattern. Both are additive — a case of this type — and neither
+-- is foreclosed.
+data SurfacePattern
+  = PatternName String [SurfacePattern]
+    -- ^ @c p₁ … pₙ@, and with no arguments a bare name
+  | PatternWildcard
+    -- ^ @_@ — a variable the user did not care to name. **Not
+    -- 'SurfacePlaceholder'**, which is a term that elaborates by not
+    -- elaborating; a pattern binds, and there is nothing here to solve.
   deriving (Eq, Show)
 
 -- | One bound name, its plicity, and its type if it was written.
@@ -285,6 +359,7 @@ data PairingError
 blocksIn :: Surface -> [[RawInstr]]
 blocksIn t = case t of
   SurfaceDo is        -> [is]
+  SurfaceSplit _ tg as -> blocksIn tg ++ concatMap (\(SurfaceArm _ b) -> blocksIn b) as
   SurfaceApp f as     -> blocksIn f ++ concatMap (\(SurfaceArg _ a) -> blocksIn a) (toList as)
   SurfaceLam bs b     -> concatMap binder (toList bs) ++ blocksIn b
   SurfacePi bs b      -> concatMap binder (toList bs) ++ blocksIn b

@@ -22,7 +22,8 @@ import Test.Tasty.QuickCheck
 
 import Thena.Core.TermTests (genLiteral)
 import Thena.Driver
-  ( parseCore
+  ( Item (..)
+  , parseCore
   , parseSurfaceModule
   , parseSurfaceTerm
   )
@@ -41,11 +42,14 @@ import Thena.Syntax.Parser (parseRule)
 import Thena.Global.Env (emptyGlobals)
 import Thena.Render (renderSurface)
 import Thena.Surface.Concrete
-  ( ObjectPiece (..)
+  ( Analysis (..)
+  , ObjectPiece (..)
   , Plicity (..)
   , Surface (..)
   , SurfaceArg (..)
+  , SurfaceArm (..)
   , SurfaceBinder (..)
+  , SurfacePattern (..)
   )
 
 tests :: TestTree
@@ -61,6 +65,7 @@ tests =
     , testGroup "proof modules (phase 43)" moduleTests
     , testGroup "comments (phase 43)" commentTests
     , testGroup "do blocks (phase 45)" blockTests
+    , testGroup "induction and case (MS9 phase 179)" splitTests
     , printerAndParser
     , layoutAgainstBraces
     ]
@@ -244,6 +249,14 @@ genSurface = sized go
               -- region's text the way the region scanner reads it back, and a
               -- splice holds a whole term, so the two printers meet here.
             , (1, genObject smaller)
+              -- A split (MS9 phase 179), generated for 'SurfaceTrusted'\'s
+              -- reason: it is a grammar @atom@ whose pieces are a @Term@ and an
+              -- @App@, so an arm's body that is a λ or an arrow has to come
+              -- back inside the braces and the target has to come back
+              -- parenthesised, or the form re-reads as something else. **The
+              -- arms may be empty**, which is the datatype-with-no-constructors
+              -- case and a list the printer must not separate.
+            , (1, SurfaceSplit <$> analysis <*> smaller <*> arms)
             ]
       where
         smaller    = resize (n `div` 2) genSurface
@@ -257,6 +270,7 @@ genSurface = sized go
                        (listOf1 (SurfaceBinder <$> plicity <*> name <*> annotation))
         typedBinders = neOr (SurfaceBinder Explicit "x" (Just SurfaceUniverseOpen))
                          (listOf1 (SurfaceBinder <$> plicity <*> name <*> (Just <$> smaller)))
+        arms       = listOf (SurfaceArm <$> resize (n `div` 2) genPattern <*> smaller)
 
     leaf =
       oneof
@@ -272,12 +286,32 @@ genSurface = sized go
         , SurfaceLiteral <$> genLiteral
         ]
 
-    name    = elements ["x", "y", "f", "A"]
-    plicity = elements [Explicit, Implicit]
+    name     = elements ["x", "y", "f", "A"]
+    plicity  = elements [Explicit, Implicit]
+    analysis = elements [ByInduction, ByCases]
 
     -- @listOf1@ can still hand back an empty list under a tiny size, and a
     -- spine is never empty.
     neOr d g = maybe (d :| []) id . nonEmpty <$> g
+
+-- | A written pattern.
+--
+-- **Nested, because that is where the parentheses are**: an argument of a
+-- pattern is a grammar atom, so a pattern with arguments standing in an
+-- argument position has to come back parenthesised or @cons n a (cons m b)@
+-- re-reads as a five-argument @cons@.
+genPattern :: Gen SurfacePattern
+genPattern = sized go
+  where
+    go n
+      | n <= 1    = leaf
+      | otherwise =
+          frequency
+            [ (2, leaf)
+            , (1, PatternName <$> patName <*> listOf1 (resize (n `div` 2) genPattern))
+            ]
+    leaf = oneof [pure PatternWildcard, flip PatternName [] <$> patName]
+    patName = elements ["n", "zero", "succ", "cons"]
 
 -- | A tagged term literal, with pieces that could have been written.
 --
@@ -569,6 +603,118 @@ tree :: String -> IO Surface
 tree src = case parseSurfaceTerm src of
   Left e  -> assertFailure (src ++ ": " ++ show e)
   Right t -> pure t
+
+-- | @induction t of …@ and @case t of …@ (MS9 phase 179) — the tree, the
+-- layout, and what a pattern may be.
+--
+-- __No elaboration exists for these yet__, by design: this phase puts the form
+-- in the lexer, the layout pass, the grammar and the tree, and the splitting
+-- tree that reads it is the next one. So everything here is about the shape
+-- that reaches the elaborator, and nothing runs.
+splitTests :: [TestTree]
+splitTests =
+  [ parses "case n of { zero -> a ; succ m -> b }"
+      (SurfaceSplit ByCases (SurfaceName "n")
+        [ SurfaceArm (PatternName "zero" []) (SurfaceName "a")
+        , SurfaceArm (PatternName "succ" [PatternName "m" []]) (SurfaceName "b")
+        ])
+
+    -- **The two words differ in the tree by one field and nothing else.**
+  , parses "induction n of { zero -> a }"
+      (SurfaceSplit ByInduction (SurfaceName "n")
+        [SurfaceArm (PatternName "zero" []) (SurfaceName "a")])
+
+    -- **The target is an application, not just its head.**
+  , parses "case f x of { c -> a }"
+      (SurfaceSplit ByCases
+        (SurfaceApp (SurfaceName "f") [SurfaceArg Explicit (SurfaceName "x")])
+        [SurfaceArm (PatternName "c" []) (SurfaceName "a")])
+
+    -- **A bare name is not resolved here**, and the tree must not pretend to
+    -- know: @zero@ above and @m@ here are the same shape written down, and
+    -- which is a constructor is a question about the globals.
+  , parses "case n of { m -> m }"
+      (SurfaceSplit ByCases (SurfaceName "n")
+        [SurfaceArm (PatternName "m" []) (SurfaceName "m")])
+
+    -- An argument of a pattern is an atom, so a nested pattern is written in
+    -- parentheses — and the same text without them means something else.
+  , parses "case v of { cons n a (cons m b nil) -> a }"
+      (SurfaceSplit ByCases (SurfaceName "v")
+        [ SurfaceArm
+            (PatternName "cons"
+              [ PatternName "n" []
+              , PatternName "a" []
+              , PatternName "cons" [PatternName "m" [], PatternName "b" [], PatternName "nil" []]
+              ])
+            (SurfaceName "a")
+        ])
+
+    -- @_@ reaches the parser as an ordinary identifier and this language says
+    -- what it means, exactly as it does for a term's placeholder.
+  , parses "case n of { succ _ -> a }"
+      (SurfaceSplit ByCases (SurfaceName "n")
+        [SurfaceArm (PatternName "succ" [PatternWildcard]) (SurfaceName "a")])
+
+    -- **No arms at all**, which is a case analysis on a datatype with no
+    -- constructors and the only thing to write for one.
+  , parses "case e of { }"
+      (SurfaceSplit ByCases (SurfaceName "e") [])
+
+    -- **HIS CONDITION**: /"if implicit works, explicit has to work too."/
+  , testCase "the offside rule and explicit braces agree" $
+      same "case n of { zero -> a ; succ m -> b }"
+           "case n of\n  zero -> a\n  succ m -> b"
+
+  , testCase "an arm wrapped onto a second line is still one arm" $
+      same "case n of { zero -> f a b }"
+           "case n of\n  zero -> f a\n            b"
+
+    -- A split is an atom, so it stands as an argument without parentheses —
+    -- and the closing brace the offside rule inserts is what ends it.
+  , testCase "a split is an argument without parentheses" $
+      same "f (case n of { zero -> a })"
+           "f (case n of zero -> a)"
+
+    -- **Nested, and the inner block closes before the outer arm separator.**
+  , testCase "splits nest" $
+      same "case n of { zero -> case m of { zero -> a } ; succ k -> b }"
+           "case n of\n  zero -> case m of\n            zero -> a\n  succ k -> b"
+
+    -- An arm's body is a @Term@, so an ascription inside one needs no
+    -- parentheses.
+  , parses "case n of { zero -> a : A }"
+      (SurfaceSplit ByCases (SurfaceName "n")
+        [SurfaceArm (PatternName "zero" [])
+          (SurfaceAnnot (SurfaceName "a") (SurfaceName "A"))])
+
+  , refuses "case n of { zero = a }"
+  , refuses "case n of { -> a }"
+  , refuses "case of { zero -> a }"
+
+    -- **A whole module, through the real front door**, because that is the
+    -- path a user takes and the only one that runs the lexer, the layout pass
+    -- and the parser in order.
+  , testCase "a module whose equation is a split parses" $
+      case parseSurfaceModule (unlines
+             [ "module Split where"
+             , ""
+             , "flip2 : Two -> Two"
+             , "flip2 = \\ t -> case t of"
+             , "  aa -> bb"
+             , "  bb -> aa"
+             ]) of
+        Right (_, items) -> items @?=
+          [ ItemTheorem "flip2"
+              (SurfaceArrow (SurfaceName "Two") (SurfaceName "Two"))
+              (SurfaceLam [SurfaceBinder Explicit "t" Nothing]
+                (SurfaceSplit ByCases (SurfaceName "t")
+                  [ SurfaceArm (PatternName "aa" []) (SurfaceName "bb")
+                  , SurfaceArm (PatternName "bb" []) (SurfaceName "aa")
+                  ]))
+          ]
+        Left e -> assertFailure (show e)
+  ]
 
 parses :: String -> Surface -> TestTree
 parses src expected = testCase src (tree src >>= (@?= expected))
