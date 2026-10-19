@@ -56,6 +56,7 @@ tests =
     , testGroup "what it refuses" refusalTests
     , testGroup "a DEPENDENT motive, over the adversarial corpus" dependentMotives
     , testGroup "a goal that is an unfolded definition (MS6 phase 109c)" unfoldedGoal
+    , testGroup "a NESTED split: what it says it claimed, it claimed" nestedNames
     ]
 
 -- --------------------------------------------------------------------------
@@ -587,3 +588,52 @@ unfoldedGoal =
       if "subgoals: sameMethod, differentMethod" `elem` said && any ("valid" `isInfixOf`) said
         then pure ()
         else assertFailure (unlines said)
+
+-- --------------------------------------------------------------------------
+-- A nested split, and the name the message gives
+-- --------------------------------------------------------------------------
+
+-- | @subgoals:@ names the holes that now exist, not the hints they were asked
+-- for (MS9, 2026-10-19).
+--
+-- A method's hint is the constructor's name with @Method@ after it, and the
+-- hole it ends up with is that hint put through
+-- 'Thena.Development.Cursor.freshIdent'. **The two differ exactly when a split
+-- nests**: eliminating again /inside/ @succMethod@ asks for @zeroMethod@ and
+-- @succMethod@ a second time, and the second of those is the very guess the
+-- new holes are going in above — so they are claimed as @zeroMethod1@ and
+-- @succMethod1@.
+--
+-- The message was built from the hints, so it named two holes that do not
+-- exist, and it did so in the one situation where a reader most needs it:
+-- @goto-named "succMethod"@ at that point is accepted and focuses the
+-- /enclosing/ method, because that name is real and the one the message
+-- offered is not. Nothing was wrong with the development — @:revalidate@ is
+-- happy either way, which is why no suite caught this.
+--
+-- **Teeth**: build 'Thena.Engine.subgoalMessage' from the hints again and the
+-- second assertion below fails.
+nestedNames :: [TestTree]
+nestedNames =
+  [ testCase "the inner elimination's methods are named as they were claimed" $
+      let said = map show (loadedResponses (loadSource withRules (unlines script)))
+          says w = any ((("subgoals: " ++ w) `isInfixOf`)) said
+       in if says "zeroMethod, succMethod"
+             && says "zeroMethod1, succMethod1"
+             && any ("valid" `isInfixOf`) said
+            then pure ()
+            else assertFailure (unlines script ++ "\n  said: " ++ unlines said)
+  ]
+  where
+    -- Prelude-free, like every script in the suite (phase 11).
+    script =
+      [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , ":theorem twice : \8704 (m : Nat) (n : Nat) -> Nat"
+      , "attack", "intro", "intro", "into", "along", "along"
+        -- The outer split, whose methods take the hints unchanged.
+      , "eliminate-core core`m`"
+        -- Into the one whose name the inner split will ask for again.
+      , "goto-named \"succMethod\""
+      , "eliminate-core core`n`"
+      , ":revalidate"
+      ]

@@ -1220,12 +1220,7 @@ perform instr rest m = case operation instr of
             -- them. Both halves are one op because a half-applied elimination
             -- — holes claimed, nothing attached — is not a state any rule
             -- should be able to observe.
-            let holes = foldl claimAbove (cursor (development m)) (elimMethods el)
-                -- Freshened one at a time, against the development as it grows,
-                -- so two methods never share a name either (phase 24b).
-                claimAbove c (v, hi, hty) =
-                  insertAbove
-                    (Component.Claim v (Cursor.freshIdent (Cursor.identsIn c) hi) hty) c
+            let (holes, named) = claimSubgoals (cursor (development m)) (elimMethods el)
                 guess = Component.Guess x i (Trailing (elimTerm el)) s
              in case replaceComponent guess holes of
                   Left e    -> failure (CannotMove e) m
@@ -1235,7 +1230,7 @@ perform instr rest m = case operation instr of
                     -- it out: a method type does not say which of its binders
                     -- are the equations, and @specialise@ has to be told. A
                     -- body that does not want it discards it.
-                    producing (Saying (subgoalMessage (elimMethods el)))
+                    producing (Saying (subgoalMessage named))
                               (VInt (elimEquations el))
                               m { development = Development cur, names = n1 }
       OnComponent _ -> failure NotAHole m
@@ -1259,15 +1254,12 @@ perform instr rest m = case operation instr of
         case specialise (globals m) contextAt (names m) (GlobalName w) eqs s of
           (Left e,  n1) -> failure (CannotSpecialise e) m { names = n1 }
           (Right sp, n1) ->
-            let holes = foldl claimAbove (cursor (development m)) (specialisedGoal sp)
-                claimAbove cur (v', hi, hty) =
-                  insertAbove
-                    (Component.Claim v' (Cursor.freshIdent (Cursor.identsIn cur) hi) hty) cur
+            let (holes, named) = claimSubgoals (cursor (development m)) (specialisedGoal sp)
                 guess = Component.Guess x i (Trailing (specialisedTerm sp)) s
              in case replaceComponent guess holes of
                   Left e    -> failure (CannotMove e) m
                   Right cur ->
-                    Saying (subgoalMessage (specialisedGoal sp))
+                    Saying (subgoalMessage named)
                            (advance m { development = Development cur, names = n1 })
       OnComponent _ -> failure NotAHole m
       _             -> failure (CannotMove NotOnTheSpine) m
@@ -2143,10 +2135,34 @@ perform instr rest m = case operation instr of
 -- changes the development in a way the user cannot see at the focus has to say
 -- so. After an elimination the focus is still the goal, now a guess, while the
 -- new holes are above it and off screen.
-subgoalMessage :: [(Var, Ident, Core)] -> String
+subgoalMessage :: [Ident] -> String
 subgoalMessage [] = "no subgoals"
 subgoalMessage hs =
-  "subgoals: " ++ intercalate ", " [ n | (_, Ident n, _) <- hs ]
+  "subgoals: " ++ intercalate ", " [ n | Ident n <- hs ]
+
+-- | Claim each subgoal above the focus, innermost first, and answer with the
+-- idents they were actually given.
+--
+-- The holes go in above the goal so that the goal can see them; the caller
+-- then turns the goal itself into the guess that uses them. Freshened one at a
+-- time, against the development as it grows, so two of them never share a name
+-- either (phase 24b).
+--
+-- **It answers with the freshened idents, and that is the whole reason it
+-- exists as a function.** 'Thena.Development.Cursor.freshIdent' renames a hint
+-- that is already taken, and a hint /is/ taken whenever a split nests: an
+-- @elim@ inside @succMethod@ hands both its own methods the hints
+-- @zeroMethod@ and @succMethod@, and the second of those is the guess it is
+-- being claimed under. So the names that come back are @zeroMethod1@ and
+-- @succMethod1@, and 'subgoalMessage' built from the hints instead named two
+-- holes that do not exist — while @goto-named "succMethod"@ went to the
+-- enclosing method, silently, because that one does.
+claimSubgoals :: Cursor -> [(Var, Ident, Core)] -> (Cursor, [Ident])
+claimSubgoals cur0 = foldl claimAbove (cur0, [])
+  where
+    claimAbove (c, named) (v, hi, hty) =
+      let i = Cursor.freshIdent (Cursor.identsIn c) hi
+       in (insertAbove (Component.Claim v i hty) c, named ++ [i])
 
 -- | What 'Reduce' says when it orphans one or more holes (§4.7). Plain text:
 -- these are the identifiers the user themselves wrote for a 'Claim' or a
