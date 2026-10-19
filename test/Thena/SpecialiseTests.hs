@@ -252,32 +252,36 @@ refusalTests =
 -- @rules\/standard.thena.rules@ would be offered to a user at every hole.
 engineTests :: [TestTree]
 engineTests =
-  [ testCase "the cons method is specialised and the development stays valid" $
-      splits ["cons", "consMethod"] "subgoals: consCase"
+  [ -- __Both methods, found by the rule and not named by the caller__ (MS9
+    -- phase 180). @nil@'s closes outright and @cons@'s leaves one subgoal, so
+    -- one run says both things — and the walk reached each hole by the
+    -- /variable/ @prim-eliminate@ handed back.
+    testCase "the rule walks the constructors and specialises every method" $
+      splits "split-all core`v` \"Vec\"" ["no subgoals", "subgoals: consCase"]
 
-    -- __The impossible case vanishes, through the engine too.__ Nothing is
-    -- claimed, so the op says so — and the method hole is still filled, which
-    -- is what @:revalidate@ is checking.
-  , testCase "the nil method is closed outright, and claims nothing" $
-      splits ["nil", "nilMethod"] "no subgoals"
+    -- __Pins the ORDER__, which the walk above cannot: the shape phase
+    -- 177 had. Kept because it is the one case that pins the /order/: the
+    -- second method's hole is the second element of the list.
+  , testCase "and the second hole in the list is the second constructor's" $
+      splits "split-second core`v` \"cons\"" ["subgoals: consCase"]
   ]
   where
-    splits [c, h] want = case loadedError loaded of
+    splits call wants = case loadedError loaded of
       Just e  -> assertFailure (show e)
       Nothing ->
         let said = map show (loadedResponses loaded)
-         in if any (want `isInfixOf`) said && any ("valid" `isInfixOf`) said
+         in if all (\w -> any (w `isInfixOf`) said) wants
+               && any ("valid" `isInfixOf`) said
               then pure ()
               else assertFailure (unlines said)
       where
-        loaded = loadSource splitSession (unlines (script c h))
-    splits _ _ = assertFailure "two names"
+        loaded = loadSource splitSession (unlines (script call))
 
-    script c h =
+    script call =
       declarations
         ++ [ ":theorem vtail : \8704 (A : Type\8320) (n : Nat) (v : Vec A (succ n)) -> Vec A n"
            , "attack", "intro", "intro", "intro", "into", "along", "along", "along"
-           , "split-one core`v` " ++ show c ++ " " ++ show h
+           , call
            , ":revalidate"
            ]
 
@@ -295,24 +299,52 @@ declarations =
   , "data Vec (A : Type\8320) : Nat -> Type\8320 where { nil : Vec A zero ; cons : \8704 (n : Nat) (a : A) (as : Vec A n) -> Vec A (succ n) }"
   ]
 
--- | One elimination and one specialisation, as a rule.
+-- | An elimination and a specialisation of /every/ method, as a rule.
 --
--- __The equation count comes out of @prim-eliminate@__, which is the whole
--- reason it answers with one (MS9 phase 177): nothing else in the language can
--- work out how many of a method's binders are equations.
+-- __This is the shape `~w23j5` was blocked on__, and his ruling of 2026-10-19
+-- unblocked it: @prim-eliminate@ answers with the method holes it claimed and
+-- the equation count, as a pair, so @split-all@ below walks the constructors
+-- and the holes in step and nothing has to be told a hole's name.
 --
--- The hole's own name is passed in rather than built from the constructor's,
--- and that is a gap rather than a choice: @concat@ answers with a @String@ and
--- @goto-named@ wants a @Name@, and a /variable/ does not cross between the two
--- — his ruling of 2026-09-12, which @name-text@ goes one way across and nothing
--- goes the other. A splitting tree will need that and it is not this phase's.
+-- Two things make the walk work and both are decisions, not accidents.
+-- @constructors-of@ answers __in declaration order__, which is the order the
+-- methods are claimed in, so the two lists correspond without either side
+-- being told. And a hole is reached by @goto@, which takes the __variable__ —
+-- the only handle that survives 'Thena.Development.Cursor.freshIdent'
+-- renaming a method's display name, as a nested split makes it do.
+--
+-- __The count is one number for the whole elimination__, so it is passed down
+-- the recursion unchanged rather than paired with each hole.
+--
+-- @split-second@ exists for one assertion the walk cannot make on its own:
+-- that the /second/ hole belongs to the /second/ constructor. It takes the
+-- list apart positionally, there being no indexing op — a rule destructures a
+-- list and that is all it can do with one.
 splitBase :: String
 splitBase = unlines
   [ "rule base splitting where"
-  , "split-one : Core -> Name -> Name -> ()"
-  , "rule split-one t c h :- when focus-is-hole"
-  , "  do k = prim-eliminate t"
-  , "     ; goto-named h"
+  , "split-all : Core -> Name -> ()"
+  , "rule split-all t d :- when focus-is-hole"
+  , "  do (hs, k) = prim-eliminate t"
+  , "     ; cs = constructors-of d"
+  , "     ; split-each cs hs k"
+  , ""
+  , "split-each : List Name -> List Core -> Int -> ()"
+    -- Nothing left to split, and a bare `do` is the empty body — the same
+    -- spelling E⟦_⟧ uses in the shipped base.
+  , "rule split-each [] [] k :- do"
+  , "rule split-each [c, ...cs] [h, ...hs] k :-"
+    -- `goto h` is exact, and it still is after the method before this one was
+    -- turned into a guess: the variable names the hole wherever it has moved to
+    -- on the spine.
+  , "  do goto h"
+  , "     ; specialise c k"
+  , "     ; split-each cs hs k"
+  , ""
+  , "split-second : Core -> Name -> ()"
+  , "rule split-second t c :- when focus-is-hole"
+  , "  do ([_, h], k) = prim-eliminate t"
+  , "     ; goto h"
   , "     ; specialise c k"
   ]
 

@@ -1225,13 +1225,17 @@ perform instr rest m = case operation instr of
              in case replaceComponent guess holes of
                   Left e    -> failure (CannotMove e) m
                   Right cur ->
-                    -- **It answers with the number of equations each method
-                    -- carries** (MS9 phase 177), because nothing else can work
-                    -- it out: a method type does not say which of its binders
-                    -- are the equations, and @specialise@ has to be told. A
-                    -- body that does not want it discards it.
-                    producing (Saying (subgoalMessage named))
-                              (VInt (elimEquations el))
+                    -- **The holes it claimed, and the equation count, as a
+                    -- pair** — his ruling of 2026-10-19.
+                    -- 'Thena.Instral.Ops.resultOf' carries the argument. The
+                    -- holes are variables because 'Thena.Instral.Ops.Goto' is
+                    -- the only move a rule can aim at a hole it /found/, and
+                    -- the count is one number for the whole elimination
+                    -- because that is what @specialise@ needs and nothing else
+                    -- can work out.
+                    producing (Saying (subgoalMessage (map snd named)))
+                              (VPair (VList [ VTerm (Free v) | (v, _) <- named ])
+                                     (VInt (elimEquations el)))
                               m { development = Development cur, names = n1 }
       OnComponent _ -> failure NotAHole m
       _             -> failure (CannotMove NotOnTheSpine) m
@@ -1259,7 +1263,7 @@ perform instr rest m = case operation instr of
              in case replaceComponent guess holes of
                   Left e    -> failure (CannotMove e) m
                   Right cur ->
-                    Saying (subgoalMessage named)
+                    Saying (subgoalMessage (map snd named))
                            (advance m { development = Development cur, names = n1 })
       OnComponent _ -> failure NotAHole m
       _             -> failure (CannotMove NotOnTheSpine) m
@@ -2157,12 +2161,15 @@ subgoalMessage hs =
 -- @succMethod1@, and 'subgoalMessage' built from the hints instead named two
 -- holes that do not exist — while @goto-named "succMethod"@ went to the
 -- enclosing method, silently, because that one does.
-claimSubgoals :: Cursor -> [(Var, Ident, Core)] -> (Cursor, [Ident])
+-- **The variable comes back beside the ident** so that the two never drift:
+-- what a caller hands a rule to @goto@ and what it says it claimed are read
+-- off one list.
+claimSubgoals :: Cursor -> [(Var, Ident, Core)] -> (Cursor, [(Var, Ident)])
 claimSubgoals cur0 = foldl claimAbove (cur0, [])
   where
     claimAbove (c, named) (v, hi, hty) =
       let i = Cursor.freshIdent (Cursor.identsIn c) hi
-       in (insertAbove (Component.Claim v i hty) c, named ++ [i])
+       in (insertAbove (Component.Claim v i hty) c, named ++ [(v, i)])
 
 -- | What 'Reduce' says when it orphans one or more holes (§4.7). Plain text:
 -- these are the identifiers the user themselves wrote for a 'Claim' or a

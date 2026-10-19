@@ -1036,6 +1036,12 @@ data Op
     -- It takes an operand where the other hole ops take none, for 'Try'\'s
     -- reason: the goal is the focus, but the target has nowhere else to come
     -- from.
+    --
+    -- **It answers with the holes it claimed and the equation count, as a
+    -- pair** — his ruling of 2026-10-19. 'resultOf' carries why; the short of
+    -- it is that a rule which /found/ a case rather than writing it down can
+    -- reach that case's hole only through 'Goto', and 'Goto' takes the
+    -- variable. Written @do (hs, k) = prim-eliminate t@.
 
     -- **Asking a declaration what it says** (MS9 phase 176). Six readers over
     -- 'Thena.Global.Env.InductiveDefinition', and until this phase there were
@@ -1359,12 +1365,29 @@ resultOf o = case o of
   -- chose to answer with 'None' rather than to fail. The table said @a@ until
   -- MS5 phase 73, which the engine cross-check could not catch: a bare variable
   -- is inhabited by every value, so the row asserted nothing.
-  -- **The number of equations each method carries** (MS9 phase 177). It used
-  -- to answer nothing; @specialise@ needs the count and nothing else in the
-  -- language can work it out, so the op that states the equations is what says
-  -- how many it stated. A body that does not want it discards it, as every
-  -- rule shipped before this phase does.
-  Eliminate _  -> Just TInt
+  -- **The method holes it claimed, and how many equations each of them
+  -- carries** — his ruling of 2026-10-19, MS9 phase 180.
+  --
+  -- The holes come back as variables, in declaration order, which is
+  -- @constructors-of@'s order too — so a rule walks the two in step without
+  -- either being told. **That is what makes a splitting tree possible**: a
+  -- hole a rule /found/ rather than wrote can only be reached by 'Goto', which
+  -- takes the variable, and this is the only op that has them. Every other
+  -- op that extends the development with a hole or a binding already answers
+  -- this way — 'Claim', 'Assume', 'Quantify', 'Define' — and this one
+  -- answering with a bare count was the odd row in that set.
+  --
+  -- **The count is one number for the whole elimination**, not one per method:
+  -- it is how many indices were tied, so it is the same for every method, and
+  -- a list of pairs would repeat it. @specialise@ needs it and nothing else in
+  -- the language can work it out — a method type is Π binders all the way
+  -- down, and the binders after the equations belong to the /goal/, so
+  -- counting them is wrong wherever the goal is itself a function type. So the
+  -- op that states the equations is what says how many it stated.
+  --
+  -- A body that wants neither half discards the pair, as every rule shipped
+  -- before phase 177 does.
+  Eliminate _  -> Just (TPair (TList TCore) TInt)
   Specialise _ _ -> Nothing
   -- The six declaration readers (MS9 phase 176). @constructors-of@ is the
   -- first row in this table to answer with a list.
