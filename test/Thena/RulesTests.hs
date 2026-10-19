@@ -809,7 +809,7 @@ everyHoleRule =
     -- runs none of them: they take a parameter.
   , "claim", "assume", "quantify"
   ]
-    ++ replicate 19 "elaborate" ++ ["run-block"]
+    ++ replicate 20 "elaborate" ++ ["run-block"]
     ++ replicate 2 "spine-arguments"
 
 -- | The recursive helpers every listing at a guess shows.

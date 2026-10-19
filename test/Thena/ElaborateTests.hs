@@ -18,7 +18,9 @@
 module Thena.ElaborateTests (tests) where
 
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
+
+import Data.List (isInfixOf)
 import Test.Tasty.QuickCheck
   (Gen, counterexample, forAll, oneof, property, testProperty, withNumTests)
 
@@ -26,6 +28,7 @@ import Thena.Driver
   ( Loaded (..)
   , Response (..)
   , Session
+  , command
   , loadProofSource
   , loadRuleBases
   , loadSource
@@ -85,6 +88,7 @@ tests =
     , endToEnd
     , honestRefusals
     , testGroup "taking a split apart (MS9 phase 181)" splitParts
+    , testGroup "a split with no arms elaborates (MS9 phase 182)" emptySplit
     ]
 
 -- --------------------------------------------------------------------------
@@ -762,7 +766,7 @@ baseTests =
               , "fit-core", "fit-core"
               , "claim", "assume", "quantify"
               ]
-              ++ replicate 19 "elaborate" ++ ["run-block"]
+              ++ replicate 20 "elaborate" ++ ["run-block"]
               ++ replicate 2 "spine-arguments"
 
     , testCase "prove is a rule over prim-prove" $
@@ -840,3 +844,62 @@ walkSession :: Session
 walkSession = case loadRuleBases newSession [("walk.thena.rules", walkBase)] of
   (s, BasesLoaded bs) -> withRuleBases (expectedBase ++ bs) s
   (_, other)          -> error ("the fixture's base did not load: " ++ show other)
+
+
+-- --------------------------------------------------------------------------
+-- A split with no arms (MS9 phase 182)
+-- --------------------------------------------------------------------------
+
+-- | @case e of { }@ — case analysis on a datatype with no constructors.
+--
+-- __The whole stack, and the kernel is the judge__: a declaration ends in
+-- @qed@ and @qed@ certifies, so a load that reports no error means layout, the
+-- parser, the clause, the elimination tactic and @certify@ all agreed.
+--
+-- __One clause serves both words.__ A datatype with no constructors has no
+-- methods, so there is nothing for an inductive hypothesis to attach to and
+-- @induction@ and @case@ cannot differ here — which is why the clause tests
+-- @split-has-no-arms@ and not the analysis.
+--
+-- __The target's type is not known before the target is elaborated__, so the
+-- clause claims a hole for it and unification solves that hole on the way
+-- past. The @Tsplit@ in the extracted term below is that hole, and it is
+-- solved — @Empty {ℓ}@ — rather than left open, which is the thing worth
+-- pinning: a clause that failed to solve it would still load and still
+-- certify, with a level parameter nobody wrote.
+emptySplit :: [TestTree]
+emptySplit =
+  [ testCase "case: it declares, so the kernel accepted it" $
+      declares "case" >>= (@?= Nothing)
+  , testCase "and induction, on the same clause" $
+      declares "induction" >>= (@?= Nothing)
+    -- The eliminator is applied to no methods at all — @()@ — which is the
+    -- observable difference between this and every other elimination.
+  , testCase "the term is an elimination with no methods, at a solved type" $ do
+      shown <- extracted "case"
+      assertBool shown ("elim Empty" `isInfixOf` shown)
+      assertBool shown ("Tsplit = Empty" `isInfixOf` shown)
+  ]
+  where
+    source word = unlines
+      [ "module Vacuous where"
+      , ""
+      , "fromEmpty : Empty -> Unit"
+      , "fromEmpty = \\ e -> " ++ word ++ " e of { }"
+      ]
+
+    loaded word = do
+      (s0, _) <- startingSession
+      pure (loadProofSource s0 (source word))
+
+    declares word = do
+      (s1, resp) <- loaded word
+      pure $ case resp of
+        ProofLoaded {} -> Nothing
+        other          -> Just (unwords (renderResponse s1 other))
+
+    extracted word = do
+      (s1, _) <- loaded word
+      pure (unwords (renderResponse' s1 ":show fromEmpty"))
+
+    renderResponse' sn l = let (sn', r) = command sn l in renderResponse sn' r

@@ -310,6 +310,23 @@ elaborateClauses =
     -- answer from a clause that does not match.
   , clause SurfaceIsPlaceholder []
   , clause SurfaceIsHole []
+    -- **A split with no arms** (MS9), which is case analysis on a datatype with
+    -- no constructors. The two claims are @:infer@'s manoeuvre: the target's
+    -- type is unknown until the target is elaborated, so a hole stands for it
+    -- and unification solves that hole on the way past.
+  , Rule (GlobalName "elaborate") [PVar "t"]
+      [FocusIsHole, SurfaceIsSplit (Ref "t"), SplitHasNoArms (Ref "t")]
+      [ Bind (Op.PVar "h") Nothing Here
+      , Bind (Op.PVar "u") Nothing (Op.Call "fresh-universe" [])
+      , Bind (Op.PVar "ty") Nothing (Op.Claim (Lit (VText "Tsplit")) (Ref "u"))
+      , Bind (Op.PVar "x") Nothing (Op.Claim (Lit (VText "xsplit")) (Ref "ty"))
+      , Do (Op.Goto (Ref "x"))
+      , Bind (Op.PVar "g") Nothing (Op.SplitTarget (Ref "t"))
+      , call "elaborate" [Ref "g"]
+      , Do (Op.Goto (Ref "h"))
+      , Do (Op.Eliminate (Ref "x"))
+      , call "solve" []
+      ]
     -- **Brady's split, as two clauses** (MS4 phase 49d). The first is
     -- @E⟦x ⃗a⟧@, which begins with @EXPAND@ — @expand-implicits@ (phase 49f),
     -- writing a @_@ in at every implicit position the user left out — and then

@@ -214,6 +214,32 @@ rule elaborate t :- when focus-is-hole (surface-is-placeholder t) do
 -- E⟦?foo⟧ — a named placeholder is a real hole, which the focus already is.
 rule elaborate t :- when focus-is-hole (surface-is-hole t) do
 
+-- E⟦case t of { }⟧ and E⟦induction t of { }⟧ — a split with NO arms, which is
+-- the whole of a case analysis on a datatype with no constructors (MS9).
+--
+-- One clause for both words, and not because it is convenient: a datatype with
+-- no constructors has no methods, so there is nothing for an inductive
+-- hypothesis to be attached to and `induction` and `case` cannot differ here.
+-- A split WITH arms is a different clause and is not written yet.
+--
+-- The target's type is not known before the target is elaborated, so this is
+-- :infer's manoeuvre written as a rule: claim a hole Tsplit at a fresh
+-- universe, claim xsplit at Tsplit, elaborate the target into xsplit —
+-- unification solves Tsplit while that happens — and come back. `here` is
+-- taken first because `goto` is the only exact way back to a hole, and after
+-- the two claims the focus has moved.
+rule elaborate t :- when focus-is-hole (surface-is-split t) (split-has-no-arms t)
+  do h = here
+     ; u = fresh-universe
+     ; ty = claim "Tsplit" u
+     ; x = claim "xsplit" ty
+     ; goto x
+     ; g = split-target t
+     ; call elaborate g
+     ; goto h
+     ; prim-eliminate x
+     ; solve
+
 -- E⟦(elim D … t) ⃗a⟧ — an elimination applied to something more, which is how a
 -- proof discharges the equation an unfriendly index carries:
 -- `elim Step () P (…) (true u) s (refl Term true)`. The head is the elim node
