@@ -18,6 +18,7 @@
 -- ("Thena.View.SourceTests").
 module Thena.Syntax.Print
   ( renderSurface
+  , surfacePattern
     -- * The written pieces, for printers built on this one
   , rawInstruction
   , rawOperation

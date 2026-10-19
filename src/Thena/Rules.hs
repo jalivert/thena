@@ -82,7 +82,7 @@ import Thena.Instral.Ops
   )
 import Thena.Surface.Concrete
   ( Analysis (..), Plicity (..), Surface (..), SurfaceArg (..)
-  , SurfaceBinder (..), blocksIn
+  , SurfaceBinder (..), SurfacePattern (..), blocksIn
   )
 import qualified Thena.Surface.Zipper as Zipper
 import Thena.Errors (BuildError (..), SyntaxError (..))
@@ -379,6 +379,12 @@ holds env cur args t = case t of
   SplitIsCases o          -> surfaceIs o isCases
   SplitHasArms o          -> surfaceIs o hasArms
   SplitHasNoArms o        -> surfaceIs o hasNoArms
+  PatternIsName o         -> patternIs o isPatName
+  PatternIsWildcard o     -> patternIs o isPatWild
+  -- **The one test that reads TWO operands**, and the one that is not about a
+  -- shape at all (MS9 phase 183). A splitting tree pairs an arm with a
+  -- constructor, and both names are read rather than written.
+  SameName a b            -> sameName a b
   AppArgsAreExplicit o    -> surfaceIs o argsExplicit
   AppHeadIsName o         -> surfaceIs o headIsName
   AppHeadIsElim o         -> surfaceIs o headIsElim
@@ -408,6 +414,24 @@ holds env cur args t = case t of
       Left _             -> True
       Right (VSurface z) -> p (Zipper.focus z)
       Right _            -> False
+
+    -- 'surfaceIs' one category over, and an unbound operand is permissive for
+    -- the same reason.
+    patternIs o p = case Op.operandIn args o of
+      Left _              -> True
+      Right (VPattern pt) -> p pt
+      Right _             -> False
+
+    -- **An unbound operand passes, as everywhere else here**; two names that
+    -- are both bound are compared as written, which is what a 'Name' is.
+    sameName a b = case (Op.operandIn args a, Op.operandIn args b) of
+      (Right (VText x), Right (VText y)) -> x == y
+      (Left _, _)                        -> True
+      (_, Left _)                        -> True
+      _                                  -> False
+
+    isPatName     pt = case pt of PatternName _ _ -> True; _ -> False
+    isPatWild     pt = case pt of PatternWildcard -> True; _ -> False
 
     isName         s = case s of SurfaceName _ -> True; _ -> False
     isLiteral      s = case s of SurfaceLiteral _ -> True; _ -> False
@@ -809,6 +833,7 @@ resolveTyIn owner vs0 t0 = go vs0 t0
       ("Surface", [])     -> Right TSurface
       ("Core", [])        -> Right TCore
       ("Development", []) -> Right TDevelopment
+      ("Pattern", [])     -> Right TPattern
       ("Level", [])       -> Right TLevel
       ("List", [a])       -> Right (TList a)
       ("Option", [a])     -> Right (TOption a)
@@ -981,7 +1006,7 @@ headOperand o = case o of
 builtInTypes :: [String]
 builtInTypes =
   [ "String", "Name", "Int", "Char", "Bool", "Surface", "Core", "Development"
-  , "Level"
+  , "Level", "Pattern"
   , "List", "Option"
   ]
 
@@ -1473,6 +1498,10 @@ unaryOps =
   , ("split-target", Op.SplitTarget)
   , ("split-arm-body", Op.SplitArmBody)
   , ("split-tail", Op.SplitTail)
+    -- The pattern readers (MS9 phase 183).
+  , ("split-arm-pattern", Op.SplitArmPattern)
+  , ("pattern-head", Op.PatternHead)
+  , ("pattern-arguments", Op.PatternArguments)
   , ("ascription-type", Op.AscriptionType)
   , ("ascription-term", Op.AscriptionTerm)
   , ("app-function", Op.AppFunction)
@@ -1723,6 +1752,9 @@ withOperands t os = case (t, os) of
   (SplitIsCases _, [o])          -> Just (SplitIsCases o)
   (SplitHasArms _, [o])          -> Just (SplitHasArms o)
   (SplitHasNoArms _, [o])        -> Just (SplitHasNoArms o)
+  (PatternIsName _, [o])         -> Just (PatternIsName o)
+  (PatternIsWildcard _, [o])     -> Just (PatternIsWildcard o)
+  (SameName _ _, [a, b])         -> Just (SameName a b)
   (AppArgsAreExplicit _, [o])    -> Just (AppArgsAreExplicit o)
   (AppHeadIsName _, [o])         -> Just (AppHeadIsName o)
   (AppHeadIsElim _, [o])         -> Just (AppHeadIsElim o)
@@ -1762,6 +1794,9 @@ testTypes t = case t of
   SplitIsCases o          -> [(o, Ty.TSurface)]
   SplitHasArms o          -> [(o, Ty.TSurface)]
   SplitHasNoArms o        -> [(o, Ty.TSurface)]
+  PatternIsName o         -> [(o, Ty.TPattern)]
+  PatternIsWildcard o     -> [(o, Ty.TPattern)]
+  SameName a b            -> [(a, Ty.TName), (b, Ty.TName)]
   SurfaceIsName o         -> [(o, Ty.TSurface)]
   SurfaceIsLiteral o      -> [(o, Ty.TSurface)]
   SurfaceIsObject o       -> [(o, Ty.TSurface)]
@@ -1813,6 +1848,9 @@ testWord t = case t of
   SplitIsCases _          -> "split-is-cases"
   SplitHasArms _          -> "split-has-arms"
   SplitHasNoArms _        -> "split-has-no-arms"
+  PatternIsName _         -> "pattern-is-name"
+  PatternIsWildcard _     -> "pattern-is-wildcard"
+  SameName _ _            -> "same-name"
   SurfaceIsName _         -> "surface-is-name"
   SurfaceIsLiteral _      -> "surface-is-literal"
   SurfaceIsObject _       -> "surface-is-object"
@@ -1870,6 +1908,9 @@ everyTest =
   , SplitIsCases (Lit (VText ""))
   , SplitHasArms (Lit (VText ""))
   , SplitHasNoArms (Lit (VText ""))
+  , PatternIsName (Lit (VText ""))
+  , PatternIsWildcard (Lit (VText ""))
+  , SameName (Lit (VText "")) (Lit (VText ""))
   , AppArgsAreExplicit (Lit (VText ""))
   , AppHeadIsName (Lit (VText ""))
   , AppHeadIsElim (Lit (VText ""))

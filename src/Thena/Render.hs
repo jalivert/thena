@@ -22,6 +22,7 @@ module Thena.Render
   , renderingIn
   , renderCore
   , renderSurface
+  , surfacePattern
   , renderLevel
   , renderPartial
   , renderPattern
@@ -155,6 +156,7 @@ import Thena.Syntax.Print
   , renderLevelAtom
   , renderSurface
   , subscript
+  , surfacePattern
   , tick
   )
 import Thena.Surface.Concrete (PairingError (..), Plicity (..))
@@ -1158,6 +1160,10 @@ renderValue ren ctx v = case v of
   -- they do everywhere else.
   VLevel l           -> renderLevel l
   VTerm t            -> "⌜" ++ renderCore ren ctx t ++ "⌝"
+  -- **A pattern prints as it was written** (MS9 phase 183), which is what
+  -- 'Thena.Syntax.Print.surfacePattern' is for — and the printer is the parser's
+  -- inverse here, so what a user sees is what they typed.
+  VPattern pt        -> surfacePattern pt
   -- **An unresolved core term prints as its shape, not its contents** (MS5
   -- phase 61b). Printing a 'Thena.Syntax.Concrete.Raw' back would need a
   -- printer for the written syntax, and there has never been one: every other

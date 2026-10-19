@@ -284,6 +284,10 @@ everyOp =
   , ("split-target t", Op.SplitTarget (Ref "t"))
   , ("split-arm-body t", Op.SplitArmBody (Ref "t"))
   , ("split-tail t", Op.SplitTail (Ref "t"))
+    -- The pattern readers (MS9 phase 183).
+  , ("split-arm-pattern t", Op.SplitArmPattern (Ref "t"))
+  , ("pattern-head t", Op.PatternHead (Ref "t"))
+  , ("pattern-arguments t", Op.PatternArguments (Ref "t"))
   , ("make-trusted c a b", Op.MakeTrusted (Ref "c") (Ref "a") (Ref "b"))
   , ("define-global x t v", Op.DefineGlobal [] (Ref "x") (Ref "t") (Ref "v"))
   , ("app-function t", Op.AppFunction (Ref "t"))

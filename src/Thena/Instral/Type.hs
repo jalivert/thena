@@ -68,6 +68,22 @@ data Ty
     -- this constructor out; he decided the language's vocabulary is fixed here
     -- even where the signature table never mentions it. MS5's doctrine is
     -- completeness over minimality and this is an instance of it.
+  | TPattern
+    -- ^ **a pattern an arm of a surface split was written with** (MS9 phase
+    -- 183) — @Thena.Surface.Concrete.SurfacePattern@.
+    --
+    -- **Its own type and not 'TSurface'**, although every pattern has a surface
+    -- term that looks like it. A pattern's @_@ /binds/, where a term's @_@ is a
+    -- hole for elaboration to solve, and 'SurfacePattern' draws that
+    -- distinction on purpose; a projection into 'TSurface' would collapse it.
+    -- The category is also documented to grow — an inaccessible pattern and a
+    -- literal pattern are both a further case of it — and neither has a term
+    -- that looks like it.
+    --
+    -- **Narrow by intention.** @`~6z6nx`@'s stage b would subsume the ops over
+    -- this by letting a rule head match the shape directly; this is what MS9
+    -- needs in the meantime, and his instruction is that accessors outlive the
+    -- pattern syntax that replaces them anyway.
   | TList Ty             -- ^ @[a, b, c]@
   | TPair Ty Ty          -- ^ @(a, b)@
   | TOption Ty           -- ^ @some x@ and @none@
@@ -180,6 +196,7 @@ renderTy = go False
       TSurface     -> "Surface"
       TCore        -> "Core"
       TDevelopment -> "Development"
+      TPattern     -> "Pattern"
       TFun as r    -> wrap p (intercalate " -> " (map (go True) as ++ [go True r]))
       TList a      -> wrap p ("List " ++ go True a)
       TOption a    -> wrap p ("Option " ++ go True a)

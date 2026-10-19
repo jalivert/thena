@@ -57,7 +57,7 @@ import Thena.Development.Cursor (Part (..))
 import Thena.Core.Reduce (whnf)
 import Thena.Global.Env (ArgRole, GlobalEnv, InductiveDefinition)
 import Thena.Language.Reader (Block)
-import Thena.Surface.Concrete (Plicity)
+import Thena.Surface.Concrete (Plicity, SurfacePattern)
 import Thena.Syntax.Concrete (Raw, splicesIn)
 import Thena.Surface.Zipper (SurfaceZipper)
 
@@ -154,6 +154,9 @@ data Value
     -- the lexer would take two constructor names away from every object
     -- language. They are read where an operand is read, before a local is
     -- looked up, which is what @cross type@ and @ask \"?\" name@ already do.
+  | VPattern SurfacePattern
+    -- ^ **a pattern an arm of a surface split was written with** (MS9 phase
+    -- 183). 'Thena.Instral.Type.TPattern' carries why it is not a 'VSurface'.
   | VList    [Value]
     -- ^ @[a, b, c]@ (MS5 phase 65) — **homogeneous by intention and not by
     -- construction**: nothing checks that the elements agree until phase 66's
@@ -677,6 +680,27 @@ data Op
     --
     -- **The first and not the @k@th**, because 'SplitTail' peels an arm and the
     -- clause recurses — the shape @E\u27e6x \u20d7a\u27e7@ already uses for a spine.
+  | SplitArmPattern Operand
+    -- ^ the __first__ arm's pattern — @split-arm-pattern t@ (MS9 phase 183).
+    --
+    -- 'SplitArmBody'\'s twin: the two halves of an arm, and a clause walks the
+    -- arms with 'SplitTail' as it does a spine.
+  | PatternHead Operand
+    -- ^ a pattern's head — @pattern-head p@.
+    --
+    -- **It is a 'Thena.Instral.Type.TName' and that is what makes the splitting
+    -- tree possible**: it composes with @constructor-datatype@ and
+    -- @constructors-of@, which take names, so a rule can ask whether the word an
+    -- arm was written with is a constructor of the family being split. A bare
+    -- pattern variable is a head with no arguments, so this is also how an arm
+    -- names the variables it binds.
+  | PatternArguments Operand
+    -- ^ a pattern's arguments, in order — @pattern-arguments p@.
+    --
+    -- **Patterns and not names, because a pattern nests**:
+    -- @cons n a (cons m b nil)@ parses today. A rule recurses on these, and a
+    -- reader that flattened them to names would be wrong on syntax the parser
+    -- already accepts.
   | SplitTail Operand
     -- ^ the split that is left once its first arm is taken.
     --
@@ -1331,6 +1355,9 @@ resultOf o = case o of
   SplitTarget _ -> Just TSurface
   SplitArmBody _ -> Just TSurface
   SplitTail _ -> Just TSurface
+  SplitArmPattern _ -> Just TPattern
+  PatternHead _ -> Just TName
+  PatternArguments _ -> Just (TList TPattern)
   MakeTrusted {} -> Just TCore
   Goal         -> Just TCore
   Typing _     -> Just TCore
@@ -1539,6 +1566,9 @@ operandTypes o = case o of
   SplitTarget x -> [(x, TSurface)]
   SplitArmBody x -> [(x, TSurface)]
   SplitTail x -> [(x, TSurface)]
+  SplitArmPattern x -> [(x, TSurface)]
+  PatternHead x -> [(x, TPattern)]
+  PatternArguments x -> [(x, TPattern)]
   MakeTrusted a b c -> [(a, TCore), (b, TCore), (c, TCore)]
   Goal         -> []
   Typing a     -> [(a, TCore)]
@@ -1820,6 +1850,30 @@ data Test
   | SplitHasArms Operand
     -- ^ … and it has at least one arm, so @split-arm-body@ and @split-tail@
     -- both apply
+  | PatternIsName Operand
+    -- ^ a pattern written as a word, with or without arguments (MS9 phase 183)
+  | PatternIsWildcard Operand
+    -- ^ … or written @_@.
+    --
+    -- **Two tests over a two-case type**, which is @let-is-annotated@ /
+    -- @let-is-bare@'s arrangement, and the category is documented to grow — an
+    -- inaccessible pattern and a literal pattern are each a further case — so a
+    -- clause that matches on @pattern-is-name@ keeps declining what it was never
+    -- written for.
+  | SameName Operand Operand
+    -- ^ two names are the same word — @same-name a b@ (MS9 phase 183).
+    --
+    -- **THE FIRST TEST IN THE LANGUAGE THAT IS NOT A SHAPE QUESTION ABOUT ONE
+    -- OPERAND**, and it is here because a splitting tree cannot be written
+    -- without it. Constructors arrive from @constructors-of@ and arms from the
+    -- surface, in whatever order the user wrote them, so pairing an arm with a
+    -- constructor is a comparison of two names read at run time. **Nothing
+    -- catches a mispairing otherwise**: @specialise@ accepts a constructor that
+    -- is not the one its hole is for, names the subgoal after it, and the kernel
+    -- still calls the development valid.
+    --
+    -- A pattern that is written out compares already — a literal matches a
+    -- 'VText' only when equal — so what is new is comparing two /read/ values.
   | SplitHasNoArms Operand
     -- ^ … or it has none, which __is a legal split__ and is the whole of a
     -- case analysis on a datatype with no constructors. It is also what the
@@ -1993,6 +2047,9 @@ opKeyword o = case o of
   SplitTarget _ -> "split-target"
   SplitArmBody _ -> "split-arm-body"
   SplitTail _ -> "split-tail"
+  SplitArmPattern _ -> "split-arm-pattern"
+  PatternHead _ -> "pattern-head"
+  PatternArguments _ -> "pattern-arguments"
   MakeTrusted {} -> "make-trusted"
   AscriptionTerm _ -> "ascription-term"
   Goal         -> "goal"

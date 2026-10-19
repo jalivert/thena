@@ -806,6 +806,35 @@ splitParts =
     -- constructors.
   , testCase "case with no arms: the word, the target, and straight to the end" $
       walks "describe surface`case other of { }`" ["case", "other", "end"]
+
+    -- __A NESTED pattern, read to depth two__ (MS9 phase 183), which is the
+    -- measurement the design rests on: @cons n x (cons m y nil)@ parses today,
+    -- so a reader answering a flat list of names would be wrong on syntax the
+    -- parser already accepts. @pattern-arguments@ answers with /patterns/ and
+    -- @show-pat@ recurses, so the whole tree comes out in order.
+  , testCase "a pattern is read to its leaves, nesting and all" $
+      walks ("patterns surface`induction v of "
+             ++ "{ nil -> a ; cons n x (cons m y nil) -> b ; _ -> c }`")
+        [ "nil", "|"
+        , "cons", "n", "x", "cons", "m", "y", "nil", "|"
+        -- __A wildcard is not a name__, and 'SurfacePattern' draws that
+        -- distinction on purpose: a pattern's @_@ binds where a term's @_@ is a
+        -- hole to solve.
+        , "_", "|"
+        , "end"
+        ]
+
+    -- __The one test that is not a shape question__, and the one without which
+    -- no splitting tree can pair an arm with a constructor.
+    -- __@chose 1@ is the ordering being a real choice point__, not noise: with
+    -- the names equal BOTH clauses' heads pass — the second has no head — so
+    -- the engine records an alternative and would run @different@ if the first
+    -- clause's body failed. With the names unequal the first head excludes
+    -- itself, one candidate is left, and nothing is recorded.
+  , testCase "two names read at run time can be compared" $
+      walks "cmp \"cons\" \"cons\"" ["chose 1: cmp", "same"]
+  , testCase "and told apart, with no alternative left to record" $
+      walks "cmp \"cons\" \"nil\"" ["different"]
   ]
   where
     walks call want = case loadedError loaded of
@@ -835,6 +864,36 @@ walkBase = unlines
   , "  do say \"induction\" ; g = split-target t ; name-of g ; walk-arms t"
   , "rule describe t :- when (surface-is-split t) (split-is-cases t)"
   , "  do say \"case\" ; g = split-target t ; name-of g ; walk-arms t"
+    -- The pattern readers (MS9 phase 183). @show-pat@ is recursive through
+    -- @pattern-arguments@, which is what reads a NESTED pattern.
+  , ""
+  , "show-pats : List Pattern -> ()"
+  , "rule show-pats [] :- do"
+  , "rule show-pats [p, ...ps] :- do show-pat p ; show-pats ps"
+  , ""
+  , "show-pat : Pattern -> ()"
+  , "rule show-pat p :- when (pattern-is-wildcard p) do say \"_\""
+  , "rule show-pat p :- when (pattern-is-name p)"
+  , "  do w = pattern-head p"
+  , "     ; x = name-text w"
+  , "     ; say x"
+  , "     ; as = pattern-arguments p"
+  , "     ; show-pats as"
+  , ""
+  , "patterns : Surface -> ()"
+  , "rule patterns t :- when (surface-is-split t) (split-has-no-arms t) do say \"end\""
+  , "rule patterns t :- when (surface-is-split t) (split-has-arms t)"
+  , "  do p = split-arm-pattern t"
+  , "     ; show-pat p"
+  , "     ; say \"|\""
+  , "     ; r = split-tail t"
+  , "     ; patterns r"
+    -- Two clauses and an ordering, there being no negation: the first is
+    -- excluded when the names differ, so the second is what runs.
+  , ""
+  , "cmp : Name -> Name -> ()"
+  , "rule cmp a b :- when (same-name a b) do say \"same\""
+  , "rule cmp a b :- do say \"different\""
   ]
 
 -- | The walk beside the shipped base, as 'Thena.SpecialiseTests' does it: a

@@ -44,6 +44,7 @@ data TypeView
   | ACore                -- ^ @Core@
   | ADevelopment         -- ^ @Development@
   | ALevel               -- ^ @Level@ — the algebra, not a number
+  | APattern             -- ^ @Pattern@ — a surface split arm's pattern (MS9)
   | AList TypeView       -- ^ @List a@
   | AnOption TypeView    -- ^ @Option a@
   | APair TypeView TypeView
@@ -115,6 +116,7 @@ at nested ty = case ty of
   TCore        -> ACore
   TDevelopment -> ADevelopment
   TLevel       -> ALevel
+  TPattern     -> APattern
   TFun as r    -> fence (AFunction (map (at True) as) (at True r))
   TList a      -> fence (AList (at True a))
   TOption a    -> fence (AnOption (at True a))

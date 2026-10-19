@@ -1630,6 +1630,27 @@ perform instr rest m = case operation instr of
       Just (Zipper.intoSplitTail an tgt first later)
     _ -> Nothing
 
+  -- **The pattern readers** (MS9 phase 183). A pattern is not a term, so these
+  -- answer with a 'VPattern' rather than a focused surface zipper — there is no
+  -- path to carry, because nothing elaborates a pattern: a clause reads it to
+  -- decide which constructor an arm is for.
+  Op.SplitArmPattern x -> case surfaceAt x of
+    Left r -> failure r m
+    Right (Concrete.SurfaceSplit _ _ (Concrete.SurfaceArm pat _ : _)) ->
+      produce (VPattern pat) m
+    Right _ -> failure (ExpectedSurfaceShape "a split with at least one arm") m
+  Op.PatternHead x -> case patternAt x of
+    Left r -> failure r m
+    Right (Concrete.PatternName w _) -> produce (VText w) m
+    Right _ -> failure (ExpectedSurfaceShape "a pattern written as a word") m
+  Op.PatternArguments x -> case patternAt x of
+    Left r -> failure r m
+    Right (Concrete.PatternName _ ps) -> produce (VList (map VPattern ps)) m
+    -- **A wildcard takes no arguments and is not an error**: it is a pattern
+    -- with none, exactly as a bare name is, so a walk over the arguments of
+    -- either stops immediately.
+    Right Concrete.PatternWildcard -> produce (VList []) m
+
   -- **A plain binder only** — no annotation and no braces. That is the whole of
   -- what the λ case cannot elaborate, and saying it here means the clause finds
   -- out before it has introduced anything.
@@ -1977,6 +1998,9 @@ perform instr rest m = case operation instr of
     -- The surface term an operand names, focus and all (MS4 phase 49).
     surfaceAt x = Zipper.focus <$> operandSurface (env (exec m)) x
 
+    -- The written pattern an operand names (MS9 phase 183).
+    patternAt x = operandPattern (env (exec m)) x
+
     -- **One shape for every surface move** (MS4 phase 49b): read the zipper,
     -- ask the node for the move it admits, and produce the zipper that move
     -- gives. A focus of the wrong shape is what the paired head test rules out,
@@ -2319,6 +2343,16 @@ operandSurface :: Env -> Operand -> Either FailReason SurfaceZipper
 operandSurface e o = operandValue e o >>= \v -> case v of
   VSurface z -> Right z
   _          -> Left ExpectedSurface
+
+-- | A written pattern an operand names (MS9 phase 183).
+--
+-- 'operandSurface' one category over, and there is no zipper: a pattern is read
+-- to decide which constructor an arm is for, and nothing elaborates one, so
+-- there is no path worth carrying.
+operandPattern :: Env -> Operand -> Either FailReason Concrete.SurfacePattern
+operandPattern e o = operandValue e o >>= \v -> case v of
+  VPattern pt -> Right pt
+  _           -> Left ExpectedSurface
 
 -- ---------------------------------------------------------------------------
 -- Tagged term literals (MS6 phase 104)
