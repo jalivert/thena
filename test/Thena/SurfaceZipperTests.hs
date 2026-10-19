@@ -25,7 +25,9 @@ import Test.Tasty.QuickCheck
 import Thena.SurfaceTests (genSurface)
 
 import Thena.Surface.Concrete
-  (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..))
+  ( Analysis (..), Plicity (..), Surface (..), SurfaceArg (..), SurfaceArm (..)
+  , SurfaceBinder (..), SurfacePattern (..)
+  )
 import Thena.Surface.Zipper
 
 tests :: TestTree
@@ -81,6 +83,14 @@ annotTerm = SurfaceAnnot (nm "e") (nm "ty")
 elimTerm :: Surface
 elimTerm = SurfaceElim "D" [nm "p"] (nm "mot") [nm "m1", nm "m2"] [nm "i"] (nm "tgt")
 
+-- | @induction tgt of { nil -> b1 ; cons n -> b2 }@ (MS9 phase 181)
+splitTerm :: Surface
+splitTerm = SurfaceSplit ByInduction (nm "tgt") [armOne, armTwo]
+
+armOne, armTwo :: SurfaceArm
+armOne = SurfaceArm (PatternName "nil" []) (nm "b1")
+armTwo = SurfaceArm (PatternName "cons" [PatternName "n" []]) (nm "b2")
+
 -- --------------------------------------------------------------------------
 -- The descent table
 --
@@ -121,6 +131,15 @@ descents =
       (intoAnnotType (nm "e") (nm "ty") (rootedAt annotTerm))
   , d "into an ascription's term" annotTerm (nm "e")
       (intoAnnotTerm (nm "ty") (nm "e") (rootedAt annotTerm))
+    -- A split's three moves. The tail is the only one whose child is not a
+    -- leaf: it is the same split with one fewer arm.
+  , d "into a split's target" splitTerm (nm "tgt")
+      (intoSplitTarget ByInduction [armOne, armTwo] (nm "tgt") (rootedAt splitTerm))
+  , d "into a split's first arm" splitTerm (nm "b1")
+      (intoSplitArmBody ByInduction (nm "tgt") (PatternName "nil" []) [armTwo]
+         (nm "b1") (rootedAt splitTerm))
+  , d "into a split's tail" splitTerm (SurfaceSplit ByInduction (nm "tgt") [armTwo])
+      (intoSplitTail ByInduction (nm "tgt") armOne [armTwo] (rootedAt splitTerm))
   ]
     -- **Every field of an @elim@, in the flat order the elaborator walks
     -- them.** The motive and the target sit either side of the two variable
@@ -161,6 +180,21 @@ markers =
         )
       | k <- [0, 1]
       ]
+      ++ [ -- **A split's target and its first arm's body**, with a focus that is
+           -- not the child, which is what catches a frame writing into the
+           -- wrong slot. The tail has no marker row: its child is a whole node
+           -- rather than a position, so 'Descent' above already pins it.
+           ( "a split's target"
+           , SurfaceSplit ByInduction marker [armOne, armTwo]
+           , intoSplitTarget ByInduction [armOne, armTwo] marker (rootedAt splitTerm)
+           )
+         , ( "a split's first arm's body"
+           , SurfaceSplit ByInduction (nm "tgt")
+               [SurfaceArm (PatternName "nil" []) marker, armTwo]
+           , intoSplitArmBody ByInduction (nm "tgt") (PatternName "nil" []) [armTwo]
+               marker (rootedAt splitTerm)
+           )
+         ]
       ++ [ ( "an elim's field " ++ show k
            , elimWith k
            , intoElimField "D" [nm "p"] (nm "mot") [nm "m1", nm "m2"] [nm "i"]

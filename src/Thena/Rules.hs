@@ -81,7 +81,9 @@ import Thena.Instral.Ops
   , produces
   )
 import Thena.Surface.Concrete
-  (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..), blocksIn)
+  ( Analysis (..), Plicity (..), Surface (..), SurfaceArg (..)
+  , SurfaceBinder (..), blocksIn
+  )
 import qualified Thena.Surface.Zipper as Zipper
 import Thena.Errors (BuildError (..), SyntaxError (..))
 import Thena.Surface.Read (parseSurfaceText)
@@ -372,6 +374,11 @@ holds env cur args t = case t of
   SurfaceIsTrusted o      -> surfaceIs o isTrusted
   SurfaceIsElim o         -> surfaceIs o isElim
   SurfaceIsDo o           -> surfaceIs o isDo
+  SurfaceIsSplit o        -> surfaceIs o isSplit
+  SplitIsInduction o      -> surfaceIs o isInduction
+  SplitIsCases o          -> surfaceIs o isCases
+  SplitHasArms o          -> surfaceIs o hasArms
+  SplitHasNoArms o        -> surfaceIs o hasNoArms
   AppArgsAreExplicit o    -> surfaceIs o argsExplicit
   AppHeadIsName o         -> surfaceIs o headIsName
   AppHeadIsElim o         -> surfaceIs o headIsElim
@@ -418,6 +425,11 @@ holds env cur args t = case t of
     isTrusted      s = case s of SurfaceTrusted _ _ -> True; _ -> False
     isElim         s = case s of SurfaceElim {} -> True; _ -> False
     isDo           s = case s of SurfaceDo _ -> True; _ -> False
+    isSplit        s = case s of SurfaceSplit {} -> True; _ -> False
+    isInduction    s = case s of SurfaceSplit ByInduction _ _ -> True; _ -> False
+    isCases        s = case s of SurfaceSplit ByCases _ _ -> True; _ -> False
+    hasArms        s = case s of SurfaceSplit _ _ as -> not (null as); _ -> False
+    hasNoArms      s = case s of SurfaceSplit _ _ as -> null as; _ -> False
     headIsName     s = case s of SurfaceApp (SurfaceName _) _ -> True; _ -> False
     headIsElim     s = case s of SurfaceApp (SurfaceElim {}) _ -> True; _ -> False
     -- The third positive test, @let@'s two being the precedent: the head
@@ -1457,6 +1469,10 @@ unaryOps =
   , ("surface-universe", Op.SurfaceUniverseOf)
   , ("arrow-domain", Op.ArrowDomain), ("arrow-codomain", Op.ArrowCodomain)
   , ("trusted-claim", Op.TrustedClaim), ("trusted-body", Op.TrustedBody)
+    -- The three moves into a split (MS9 phase 181).
+  , ("split-target", Op.SplitTarget)
+  , ("split-arm-body", Op.SplitArmBody)
+  , ("split-tail", Op.SplitTail)
   , ("ascription-type", Op.AscriptionType)
   , ("ascription-term", Op.AscriptionTerm)
   , ("app-function", Op.AppFunction)
@@ -1702,6 +1718,11 @@ withOperands t os = case (t, os) of
   (SurfaceIsTrusted _, [o])      -> Just (SurfaceIsTrusted o)
   (SurfaceIsElim _, [o])         -> Just (SurfaceIsElim o)
   (SurfaceIsDo _, [o])           -> Just (SurfaceIsDo o)
+  (SurfaceIsSplit _, [o])        -> Just (SurfaceIsSplit o)
+  (SplitIsInduction _, [o])      -> Just (SplitIsInduction o)
+  (SplitIsCases _, [o])          -> Just (SplitIsCases o)
+  (SplitHasArms _, [o])          -> Just (SplitHasArms o)
+  (SplitHasNoArms _, [o])        -> Just (SplitHasNoArms o)
   (AppArgsAreExplicit _, [o])    -> Just (AppArgsAreExplicit o)
   (AppHeadIsName _, [o])         -> Just (AppHeadIsName o)
   (AppHeadIsElim _, [o])         -> Just (AppHeadIsElim o)
@@ -1736,6 +1757,11 @@ testTypes t = case t of
   FocusIsComponent -> []
   GoalTypeIsPi    -> []
   GoalTypeIsLet   -> []
+  SurfaceIsSplit o        -> [(o, Ty.TSurface)]
+  SplitIsInduction o      -> [(o, Ty.TSurface)]
+  SplitIsCases o          -> [(o, Ty.TSurface)]
+  SplitHasArms o          -> [(o, Ty.TSurface)]
+  SplitHasNoArms o        -> [(o, Ty.TSurface)]
   SurfaceIsName o         -> [(o, Ty.TSurface)]
   SurfaceIsLiteral o      -> [(o, Ty.TSurface)]
   SurfaceIsObject o       -> [(o, Ty.TSurface)]
@@ -1782,6 +1808,11 @@ testWord t = case t of
   FocusIsComponent -> "focus-is-component"
   GoalTypeIsPi    -> "goal-type-is-pi"
   GoalTypeIsLet   -> "goal-type-is-let"
+  SurfaceIsSplit _        -> "surface-is-split"
+  SplitIsInduction _      -> "split-is-induction"
+  SplitIsCases _          -> "split-is-cases"
+  SplitHasArms _          -> "split-has-arms"
+  SplitHasNoArms _        -> "split-has-no-arms"
   SurfaceIsName _         -> "surface-is-name"
   SurfaceIsLiteral _      -> "surface-is-literal"
   SurfaceIsObject _       -> "surface-is-object"
@@ -1834,6 +1865,11 @@ everyTest =
   , SurfaceIsTrusted (Lit (VText ""))
   , SurfaceIsElim (Lit (VText ""))
   , SurfaceIsDo (Lit (VText ""))
+  , SurfaceIsSplit (Lit (VText ""))
+  , SplitIsInduction (Lit (VText ""))
+  , SplitIsCases (Lit (VText ""))
+  , SplitHasArms (Lit (VText ""))
+  , SplitHasNoArms (Lit (VText ""))
   , AppArgsAreExplicit (Lit (VText ""))
   , AppHeadIsName (Lit (VText ""))
   , AppHeadIsElim (Lit (VText ""))

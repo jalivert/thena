@@ -1614,6 +1614,22 @@ perform instr rest m = case operation instr of
     Concrete.SurfaceTrusted ty e -> Just (Zipper.intoTrustedTerm ty e)
     _                            -> Nothing
 
+  -- **The three moves into a split** (MS9 phase 181). @split-arm-body@ and
+  -- @split-tail@ both speak about the /first/ arm, so each is refused by name
+  -- on a split with none — @split-has-no-arms@ is the test a clause stops on,
+  -- and it stops before either is reached.
+  Op.SplitTarget x -> surfaceMove x "a split" $ \s -> case s of
+    Concrete.SurfaceSplit an tgt arms -> Just (Zipper.intoSplitTarget an arms tgt)
+    _                                -> Nothing
+  Op.SplitArmBody x -> surfaceMove x "a split with at least one arm" $ \s -> case s of
+    Concrete.SurfaceSplit an tgt (Concrete.SurfaceArm pat rhs : later) ->
+      Just (Zipper.intoSplitArmBody an tgt pat later rhs)
+    _ -> Nothing
+  Op.SplitTail x -> surfaceMove x "a split with at least one arm" $ \s -> case s of
+    Concrete.SurfaceSplit an tgt (first : later) ->
+      Just (Zipper.intoSplitTail an tgt first later)
+    _ -> Nothing
+
   -- **A plain binder only** — no annotation and no braces. That is the whole of
   -- what the λ case cannot elaborate, and saying it here means the clause finds
   -- out before it has introduced anything.

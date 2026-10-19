@@ -280,6 +280,10 @@ everyOp =
   , ("ascription-term t", Op.AscriptionTerm (Ref "t"))
   , ("trusted-claim t", Op.TrustedClaim (Ref "t"))
   , ("trusted-body t", Op.TrustedBody (Ref "t"))
+    -- The three moves into a split (MS9 phase 181).
+  , ("split-target t", Op.SplitTarget (Ref "t"))
+  , ("split-arm-body t", Op.SplitArmBody (Ref "t"))
+  , ("split-tail t", Op.SplitTail (Ref "t"))
   , ("make-trusted c a b", Op.MakeTrusted (Ref "c") (Ref "a") (Ref "b"))
   , ("define-global x t v", Op.DefineGlobal [] (Ref "x") (Ref "t") (Ref "v"))
   , ("app-function t", Op.AppFunction (Ref "t"))

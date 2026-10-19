@@ -669,6 +669,20 @@ data Op
   | AscriptionTerm Operand   -- ^ … its @e@
   | TrustedClaim Operand     -- ^ the @T@ of a surface @trusted T e@ (MS8 phase 150)
   | TrustedBody Operand      -- ^ … its @e@
+  | SplitTarget Operand
+    -- ^ the term a surface @induction t of …@ or @case t of …@ analyses (MS9
+    -- phase 181)
+  | SplitArmBody Operand
+    -- ^ the __first__ arm's right-hand side.
+    --
+    -- **The first and not the @k@th**, because 'SplitTail' peels an arm and the
+    -- clause recurses — the shape @E\u27e6x \u20d7a\u27e7@ already uses for a spine.
+  | SplitTail Operand
+    -- ^ the split that is left once its first arm is taken.
+    --
+    -- **A split with no arms is a legal node**, so this recursion needs no
+    -- base case of its own: @split-has-no-arms@ is the test that stops it, and
+    -- what it stops at is an ordinary term.
     -- ^ **Moves, not readers**: each answers with a 'VSurface' focused on that
     -- part, so the path the zipper carries is extended rather than thrown away
     -- (MS4 phase 46). A clause pairs each with the test that makes it total —
@@ -1314,6 +1328,9 @@ resultOf o = case o of
   AscriptionTerm _ -> Just TSurface
   TrustedClaim _ -> Just TSurface
   TrustedBody _ -> Just TSurface
+  SplitTarget _ -> Just TSurface
+  SplitArmBody _ -> Just TSurface
+  SplitTail _ -> Just TSurface
   MakeTrusted {} -> Just TCore
   Goal         -> Just TCore
   Typing _     -> Just TCore
@@ -1519,6 +1536,9 @@ operandTypes o = case o of
   AscriptionTerm x -> [(x, TSurface)]
   TrustedClaim x -> [(x, TSurface)]
   TrustedBody x -> [(x, TSurface)]
+  SplitTarget x -> [(x, TSurface)]
+  SplitArmBody x -> [(x, TSurface)]
+  SplitTail x -> [(x, TSurface)]
   MakeTrusted a b c -> [(a, TCore), (b, TCore), (c, TCore)]
   Goal         -> []
   Typing a     -> [(a, TCore)]
@@ -1780,6 +1800,30 @@ data Test
   | SurfaceIsTrusted Operand       -- ^ @trusted T e@ (MS8 phase 150)
   | SurfaceIsElim Operand          -- ^ @elim D … t@
   | SurfaceIsDo Operand            -- ^ @do { … }@
+  | SurfaceIsSplit Operand
+    -- ^ @induction t of { … }@ or @case t of { … }@ (MS9 phase 181).
+    --
+    -- **One test for both words**, because they are one node; which was
+    -- written is 'SplitIsInduction' / 'SplitIsCases' below. That split is
+    -- 'LetIsAnnotated' / 'LetIsBare'\'s arrangement — a node's own test, and
+    -- then a pair over the field two clauses have to tell apart.
+  | SplitIsInduction Operand
+    -- ^ … and the word was @induction@, so each method carries the inductive
+    -- hypotheses of the constructor it matched
+  | SplitIsCases Operand
+    -- ^ … or it was @case@, so no method carries any.
+    --
+    -- **A third value of the field is coming** — @by ‹eliminator›@ — so these
+    -- are two tests and not one boolean: a clause matching on @split-is-cases@
+    -- keeps declining a @by@ it was never written for, where @not induction@
+    -- would silently take it.
+  | SplitHasArms Operand
+    -- ^ … and it has at least one arm, so @split-arm-body@ and @split-tail@
+    -- both apply
+  | SplitHasNoArms Operand
+    -- ^ … or it has none, which __is a legal split__ and is the whole of a
+    -- case analysis on a datatype with no constructors. It is also what the
+    -- recursion over arms stops at.
   | AppArgsAreExplicit Operand
     -- ^ a spine with no argument written in braces (MS4 phase 49d).
     --
@@ -1946,6 +1990,9 @@ opKeyword o = case o of
   AscriptionType _ -> "ascription-type"
   TrustedClaim _ -> "trusted-claim"
   TrustedBody _ -> "trusted-body"
+  SplitTarget _ -> "split-target"
+  SplitArmBody _ -> "split-arm-body"
+  SplitTail _ -> "split-tail"
   MakeTrusted {} -> "make-trusted"
   AscriptionTerm _ -> "ascription-term"
   Goal         -> "goal"

@@ -24,8 +24,13 @@ import Test.Tasty.QuickCheck
 
 import Thena.Driver
   ( Loaded (..)
+  , Response (..)
+  , Session
   , loadProofSource
+  , loadRuleBases
   , loadSource
+  , newSession
+  , withRuleBases
   )
 import Thena.Standard (withRules)
 
@@ -79,6 +84,7 @@ tests =
     , baseTests
     , endToEnd
     , honestRefusals
+    , testGroup "taking a split apart (MS9 phase 181)" splitParts
     ]
 
 -- --------------------------------------------------------------------------
@@ -764,3 +770,73 @@ baseTests =
           [Rule _ ps _ b] -> (ps, b) @?= ([], [Do Ops.Prove])
           other           -> assertFailure ("expected one clause: " ++ show other)
     ]
+
+
+-- --------------------------------------------------------------------------
+-- Taking a split apart (MS9 phase 181)
+-- --------------------------------------------------------------------------
+
+-- | The five head tests and the three moves over @induction … of@ and
+-- @case … of@, through a rule base and at run time.
+--
+-- __Nothing elaborates a split yet__, so the clause these exist for is not
+-- written: this walks one and /says/ what it reached, which is the only way to
+-- observe a move whose answer is a focused surface term. The suite's own word
+-- tables already check that each op parses, reads back and has a keyword; what
+-- they cannot check is that a frame reaches the child it names, and
+-- "Thena.SurfaceZipperTests" checks that against @rebuild@ rather than against
+-- a running rule.
+--
+-- __The second arm is reached through @split-tail@__, so a tail that dropped
+-- the later arms, or kept the first, would print the wrong name here.
+--
+-- @name-text@ is in the walk because @surface-name@ answers a @Name@ and @say@
+-- takes text — the one-way crossing, used in the direction that exists.
+splitParts :: [TestTree]
+splitParts =
+  [ testCase "induction: the word, the target, each arm's body, then the end" $
+      walks "describe surface`induction tgt of { zero -> zzz ; succ m -> sss }`"
+        ["induction", "tgt", "zzz", "sss", "end"]
+    -- __No arms is a legal split__, and it is what the recursion stops at —
+    -- @case t of { }@ is the whole of a case analysis on a datatype with no
+    -- constructors.
+  , testCase "case with no arms: the word, the target, and straight to the end" $
+      walks "describe surface`case other of { }`" ["case", "other", "end"]
+  ]
+  where
+    walks call want = case loadedError loaded of
+      Just e  -> assertFailure (show e)
+      Nothing -> [ w | Ran ws _ _ <- loadedResponses loaded, w <- ws ] @?= want
+      where loaded = loadSource walkSession call
+
+-- | A base that walks a split and says the name at each place it lands.
+walkBase :: String
+walkBase = unlines
+  [ "rule base splitwalk where"
+  , "name-of : Surface -> ()"
+  , "rule name-of g :- when (surface-is-name g)"
+  , "  do w = surface-name g ; x = name-text w ; say x"
+  , ""
+  , "walk-arms : Surface -> ()"
+  , "rule walk-arms t :- when (surface-is-split t) (split-has-no-arms t)"
+  , "  do say \"end\""
+  , "rule walk-arms t :- when (surface-is-split t) (split-has-arms t)"
+  , "  do b = split-arm-body t"
+  , "     ; name-of b"
+  , "     ; r = split-tail t"
+  , "     ; walk-arms r"
+  , ""
+  , "describe : Surface -> ()"
+  , "rule describe t :- when (surface-is-split t) (split-is-induction t)"
+  , "  do say \"induction\" ; g = split-target t ; name-of g ; walk-arms t"
+  , "rule describe t :- when (surface-is-split t) (split-is-cases t)"
+  , "  do say \"case\" ; g = split-target t ; name-of g ; walk-arms t"
+  ]
+
+-- | The walk beside the shipped base, as 'Thena.SpecialiseTests' does it: a
+-- load __replaces__ the bases a session searches, so the standard rules go
+-- back in alongside.
+walkSession :: Session
+walkSession = case loadRuleBases newSession [("walk.thena.rules", walkBase)] of
+  (s, BasesLoaded bs) -> withRuleBases (expectedBase ++ bs) s
+  (_, other)          -> error ("the fixture's base did not load: " ++ show other)
