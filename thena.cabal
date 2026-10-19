@@ -93,6 +93,7 @@ library
         Thena.Syntax.Resolve
         Thena.Tactics.Eliminate
         Thena.Tactics.Specialise
+        Thena.Tactics.Recurse
         Thena.View
         Thena.View.Address
         Thena.View.Chart

@@ -153,7 +153,7 @@ the level left to be worked out:
 thena spine> :infer Type₀
 Type₀ : Type₁
 thena spine> :infer Type
-Type : Type (suc ?ℓ2508)
+Type : Type (suc ?ℓ3604)
 ```
 
 `?ℓ229` is an unknown level. It is not a default and it is not zero — it is
@@ -195,7 +195,7 @@ one unknown per parameter, and unification settles them.
 
 ```
 thena spine> :infer refl
-refl : ∀ (A : Type (?ℓ2515)) (a : A) -> Eq {?ℓ2515} A a a
+refl : ∀ (A : Type (?ℓ3611)) (a : A) -> Eq {?ℓ3611} A a a
 ```
 
 Written in the development calculus they are explicit, and **prenex** — a use
@@ -310,8 +310,8 @@ constructors' own levels, and becomes a level parameter if nothing pins it:
 thena spine> data Box (A : Type) : Type where { box : A -> Box A }
 declared Box
 thena spine> :show Box
-data Box {ℓ₂₅₆₉} (A : Type (ℓ₂₅₆₉)) : Type (ℓ₂₅₆₉) where
-  { box : A -> Box {ℓ₂₅₆₉} A }
+data Box {ℓ₃₆₆₅} (A : Type (ℓ₃₆₆₅)) : Type (ℓ₃₆₆₅) where
+  { box : A -> Box {ℓ₃₆₆₅} A }
 ```
 
 A written `Typeₙ` is still checked rather than believed:
@@ -452,11 +452,11 @@ unknown becomes a parameter:
 
 ```
 thena spine> :theorem idPoly : ∀ (A : Type) -> A -> A
-proving idPoly : ∀ (A : Type (?ℓ2609)) -> A -> A
+proving idPoly : ∀ (A : Type (?ℓ3705)) -> A -> A
 thena spine> try-core ⌜ \ (A : Type) (a : A) -> a ⌝
 thena spine> solve
 thena spine> qed
-idPoly {ℓ₂₆₂₁} : ∀ (A : Type (ℓ₂₆₂₁)) -> A -> A   ∎
+idPoly {ℓ₃₇₁₇} : ∀ (A : Type (ℓ₃₇₁₇)) -> A -> A   ∎
 ```
 
 Sometimes one level is not enough, and the proof leaves a *relation* between two
@@ -465,11 +465,11 @@ before a `⊢`:
 
 ```
 thena spine> :theorem lift : Type -> Type
-proving lift : Type (?ℓ2623) -> Type (?ℓ2624)
+proving lift : Type (?ℓ3719) -> Type (?ℓ3720)
 thena spine> try-core ⌜ \ (x : Type) -> x ⌝
 thena spine> solve
 thena spine> qed
-lift {ℓ₂₆₃₂ ℓ₂₆₃₃} : (ℓ₂₆₃₂ ≤ ℓ₂₆₃₃) ⊢ Type (ℓ₂₆₃₂) -> Type (ℓ₂₆₃₃)   ∎
+lift {ℓ₃₇₂₈ ℓ₃₇₂₉} : (ℓ₃₇₂₈ ≤ ℓ₃₇₂₉) ⊢ Type (ℓ₃₇₂₈) -> Type (ℓ₃₇₂₉)   ∎
 ```
 
 Read it as *given `ℓ₂₃₈ ≤ ℓ₂₃₉`, this type*. A constraint that held at every
@@ -759,7 +759,7 @@ intro-binders ‹t› ‹k›
 spine-arguments ‹h› ‹f› ‹t›
 spine-arguments ‹h› ‹f› ‹t›
 thena spine> prove
-chose 2834: intro
+chose 4052: intro
 ```
 
 Three rules matched, so the engine reports which one it took and leaves a
@@ -767,7 +767,7 @@ Three rules matched, so the engine reports which one it took and leaves a
 
 ```
 thena spine> :choices
-2834  intro   untried: solve, regret, prove
+4052  intro   untried: solve, regret, prove
 ```
 
 `retry` backtracks to the nearest choice point and takes the next alternative.
@@ -776,13 +776,13 @@ undoes the whole thing:
 
 ```
 thena spine> retry
-retrying 2834: solve
-backtracking to 2834: regret
+retrying 4052: solve
+backtracking to 4052: regret
 thena spine> :show
 ▶ let ? id : ∀ (A : Type₀) -> A -> A in
   id
 thena spine> :choices
-2834  regret   untried: prove
+4052  regret   untried: prove
 ```
 
 Search is meant to be inspectable, not a black box: you can always see what was
@@ -803,11 +803,11 @@ line left is yours to reach with `retry`, and nothing reaches it for you:
 thena spine> :theorem t : ∀ (A : Type₀) -> A -> A
 proving t : ∀ (A : Type₀) -> A -> A
 thena spine> prove
-chose 2503: attack
+chose 3599: attack
 thena spine> regret
 thena spine> back
 stuck: already at the root
-  undoing that would backtrack to 2503, which was chosen before this line — retry 2503 to take it
+  undoing that would backtrack to 3599, which was chosen before this line — retry 3599 to take it
 ```
 
 `regret` took the guess back off and `back` had nothing left to pop. Without the
@@ -891,26 +891,26 @@ pc
   0  u = universe-at l
   1  return u
 env
-  l = Type (?ℓ2537)
+  l = Type (?ℓ3633)
 stack
   call, 14 instruction(s) to resume
-  call, 6 instruction(s) to resume
-  call, 148 instruction(s) to resume (returned)
+  call, 8 instruction(s) to resume
+  call, 178 instruction(s) to resume (returned)
 thena spine> :run 6
 pc
   0  u = universe-at l
   1  return u
 env
-  l = Type (?ℓ2539)
+  l = Type (?ℓ3635)
 stack
   call, 11 instruction(s) to resume
   call, 14 instruction(s) to resume (returned)
-  call, 6 instruction(s) to resume
-  call, 148 instruction(s) to resume (returned)
+  call, 8 instruction(s) to resume
+  call, 178 instruction(s) to resume (returned)
 thena spine> :run
-solved: ?ℓ2535
-solved: ?ℓ2537
-solved: ?ℓ2539
+solved: ?ℓ3631
+solved: ?ℓ3633
+solved: ?ℓ3635
 already equal
 thena spine> :step off
 ```

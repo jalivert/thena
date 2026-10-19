@@ -128,6 +128,7 @@ import Thena.Errors
   , DevForm (..)
   , ElimError (..)
   , SpecialiseError (..)
+  , RecursionError (..)
   , FailReason (..)
   , KernelError (..)
   , MoveError (..)
@@ -1272,6 +1273,7 @@ renderFailReason ren r = case r of
       ++ " to take it"
   CannotEliminate e -> renderElimError ren e
   CannotSpecialise e -> renderSpecialiseError ren e
+  CannotTieRecursion e -> renderRecursionError ren e
   UnboundInBody x   -> "nothing named " ++ x ++ " in this body"
   NotAnIdentifier s -> show s ++ " is not a name"
   ExpectedText      -> "expected text"
@@ -1875,6 +1877,23 @@ renderElimError ren e = case e of
       ++ concatMap ("\n  " ++) (renderTypeError ren te)
 
 -- | Why specialisation by unification could not run (MS9 phase 177).
+-- | Why a recursive call could not be tied to an induction hypothesis (MS9
+-- phase 186).
+renderRecursionError :: Rendering -> RecursionError -> String
+renderRecursionError ren e = case e of
+  RecursionNotAbstracted ->
+    "the body was not elaborated under the name being defined"
+  RecursiveNameNotApplied ->
+    "the name being defined is used as a value, and only a call to it can be \
+    \an induction hypothesis"
+  CallMatchesNoHypothesis ctx t ->
+    "no induction hypothesis is about this call, so it is not structurally \
+    \smaller: " ++ renderCore ren ctx t
+  CallMatchesSeveral ctx t k ->
+    "this call names " ++ show k ++ " arguments that have an induction \
+    \hypothesis, so which one it recurses on is not written down: "
+      ++ renderCore ren ctx t
+
 renderSpecialiseError :: Rendering -> SpecialiseError -> String
 renderSpecialiseError ren e = case e of
   NotThatConstructor g -> nameString g ++ " is not a constructor"

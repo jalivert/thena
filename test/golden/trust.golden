@@ -7,55 +7,55 @@ solved: ?ℓ56
 already equal
 already equal
 solved: ?ℓ56
-solved: ?ℓ67
+solved: ?ℓ68
 already equal
 already equal
-solved: ?ℓ67
-solved: ?ℓ78
+solved: ?ℓ68
+solved: ?ℓ79
 already equal
 solved: A
-solved: ?ℓ65
+solved: ?ℓ66
 thena spine> :trust none
 trust: no trust
   resting on nothing
 thena spine> declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)
-solved: ?ℓ88
+solved: ?ℓ107
 already equal
 already equal
 already equal
-solved: ?ℓ88
-solved: ?ℓ101
+solved: ?ℓ107
+solved: ?ℓ121
 already equal
 already equal
 already equal
-solved: ?ℓ101
-solved: ?ℓ114
+solved: ?ℓ121
+solved: ?ℓ134
 already equal
 solved: A
-solved: ?ℓ99
+solved: ?ℓ119
 the trust level refused it
 trust: no trust
   undischargeable, written here
-    claims Eq {ℓ₁₂₁} Nat zero (succ zero)
+    claims Eq {ℓ₁₆₁} Nat zero (succ zero)
     body   Eq {0} Nat zero zero
 thena spine> :trust any
 trust: any trust
   resting on nothing
 thena spine> declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)
-solved: ?ℓ124
+solved: ?ℓ164
 already equal
 already equal
 already equal
-solved: ?ℓ124
-solved: ?ℓ137
+solved: ?ℓ164
+solved: ?ℓ178
 already equal
 already equal
 already equal
-solved: ?ℓ137
-solved: ?ℓ150
+solved: ?ℓ178
+solved: ?ℓ191
 already equal
 solved: A
-solved: ?ℓ135
+solved: ?ℓ176
 thena spine> :trust none
 trust: no trust
   resting on nothing

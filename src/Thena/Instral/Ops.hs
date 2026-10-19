@@ -1182,6 +1182,18 @@ data Op
     -- it: a survivor is bound with @prim-lambda@ and a forced position with
     -- @define@, the name being a definition equal to the term it was forced to.
   | Specialise Operand Operand
+
+    -- **Tying a recursive call to the induction hypothesis it is** (MS9 phase
+    -- 186) — __his ruling of 2026-10-19__: the arm writes an ordinary call,
+    -- the name being defined is assumed while the body elaborates, and this
+    -- rewrites each application of that assumption into the hypothesis it
+    -- denotes. See "Thena.Tactics.Recurse" for why it is a pass over the term
+    -- rather than a lookup at the call site.
+    --
+    -- **It takes the whole body, not a hole, and answers a term**, so it is
+    -- the one coarse operation here that touches no development at all: the
+    -- driver runs it between @pop-development@ and @define-global@.
+  | TieRecursion Operand
   deriving (Eq, Show)
 
 -- @Reduce@ is a move, not a value-producing op, for the same reason 'Along'
@@ -1466,6 +1478,7 @@ resultOf o = case o of
     -- own shape and for its reason: one op answers everything only it knows, and
     -- a rule takes the pair apart in a head.
   Specialise _ _ -> Just (TPair (TOption TCore) (TList (TOption TCore)))
+  TieRecursion _ -> Just TCore
   -- The six declaration readers (MS9 phase 176). @constructors-of@ is the
   -- first row in this table to answer with a list.
   DatatypeOf _ -> Just TName
@@ -1609,6 +1622,7 @@ operandTypes o = case o of
   Define a b   -> [(a, TName), (b, TCore)]
   Eliminate a  -> [(a, TCore)]
   Specialise c k -> [(c, TName), (k, TInt)]
+  TieRecursion t -> [(t, TCore)]
   -- @datatype-of@ reads a type; the other five read a declared name.
   DatatypeOf a -> [(a, TCore)]
   DatatypeParameters a -> [(a, TName)]
@@ -2111,6 +2125,7 @@ opKeyword o = case o of
   PopDevelopment -> "pop-development"
   Eliminate _  -> "prim-eliminate"
   Specialise _ _ -> "specialise"
+  TieRecursion _ -> "tie-recursion"
   DatatypeOf _ -> "datatype-of"
   DatatypeParameters _ -> "datatype-parameters"
   DatatypeIndices _ -> "datatype-indices"

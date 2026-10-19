@@ -143,6 +143,7 @@ import Thena.Global.Env
   )
 import qualified Thena.Instral.Ops as Op
 import Thena.Tactics.Eliminate (Elimination (..), eliminate, spineOf)
+import Thena.Tactics.Recurse (resolveRecursion)
 import Thena.Tactics.Specialise (Specialisation (..), specialise)
 import Thena.Rules
   (RuleBase, RuleError (..), RuleIter, arities, clauses, dispatch, hasNext, next, resolveBlock)
@@ -1240,6 +1241,20 @@ perform instr rest m = case operation instr of
                               m { development = Development cur, names = n1 }
       OnComponent _ -> failure NotAHole m
       _             -> failure (CannotMove NotOnTheSpine) m
+
+  -- **Tying a recursive call to the induction hypothesis it is** (MS9 phase
+  -- 186) — his ruling of 2026-10-19. The driver assumes the name being defined
+  -- while the body elaborates, so this is handed @λ f -> body@ and answers the
+  -- body with every application of @f@ replaced.
+  --
+  -- **It touches no development**, which is why it takes a term and not a
+  -- focus: by the time it runs the development has been extracted and put
+  -- away. "Thena.Tactics.Recurse" has the walk and why it is a pass.
+  Op.TieRecursion t -> case term t of
+    Left r   -> failure r m
+    Right t' -> case resolveRecursion (globals m) (names m) t' of
+      (Left e,   n1) -> failure (CannotTieRecursion e) m { names = n1 }
+      (Right t'', n1) -> produce (VTerm t'') m { names = n1 }
 
   -- **Specialisation by unification** (MS9 phase 177) — the four transitions
   -- over the equations the elimination above stated, in one coarse op by his

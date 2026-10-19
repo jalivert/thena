@@ -315,6 +315,8 @@ everyOp =
   , ("constructor-recursive-arguments c", Op.ConstructorRecursiveArguments (Ref "c"))
     -- Specialisation by unification (MS9 phase 177).
   , ("specialise c k", Op.Specialise (Ref "c") (Ref "k"))
+    -- Tying a recursive call to its induction hypothesis (MS9 phase 186).
+  , ("tie-recursion t", Op.TieRecursion (Ref "t"))
   ]
 
 vocabulary :: TestTree

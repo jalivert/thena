@@ -2204,6 +2204,52 @@ are two. **It also removed a choice point from every name-headed application** �
 elaborating `succ y` used to record one, because a second clause matched and
 could be offered.
 
+### A recursive call *is* the induction hypothesis, and that is the whole termination story
+
+Write a function by splitting, and call it recursively:
+
+```
+double : Nat -> Nat
+double = \ n -> induction n of { zero -> zero ; succ m -> succ (succ (double m)) }
+```
+
+`double (succ (succ zero))` is four. There is no `fix`, no case tree and no
+termination checker — `double m` in the `succ` arm *is* the induction hypothesis
+the eliminator already supplies, and elaboration replaces it with that
+hypothesis.
+
+**So the guard is not a check, it is what can be said.** An eliminator makes the
+hypothesis available only at the smaller index, so there is nothing to verify:
+
+```
+loop = \ n -> induction n of { zero -> zero ; succ m -> loop zero }
+  no induction hypothesis is about this call, so it is not structurally
+  smaller: loop zero
+```
+
+`loop zero` names nothing that the `succ` method received a hypothesis about, so
+it does not elaborate. Coq checks a guard condition in the kernel; Thena has
+nothing to check, because an unguarded recursion cannot be written down.
+
+**How the call finds its hypothesis is worth knowing, because the obvious way
+does not work.** The name being defined is in scope in its own body as an
+ordinary assumption, and a pass over the elaborated term replaces each
+application of it. Which binder of a method is a hypothesis is read off the
+datatype — a method takes the constructor's arguments and then one hypothesis per
+*recursive* argument, in order — and a call resolves to the hypothesis about the
+argument it **names**. Types cannot decide it: in `double`'s `succ` arm both the
+pattern variable `m` and the hypothesis about it have type `Nat`, so a search by
+type would pick either and still typecheck.
+
+Two consequences a user meets:
+
+- **A call naming two recursive arguments is refused**, because which one it
+  recurses on is not written down. `g l r` in a `node l r` arm is that case.
+- **Where a split pins an index, the arm's hypotheses are guarded by an equation
+  and no call resolves there.** That is not a restriction being imposed: an
+  inversion lemma's hypotheses are genuinely unusable, which is why the ones
+  written by hand are bound and ignored.
+
 ### Dot patterns are optional here, because we run the eliminator and not the clause
 
 When a split determines one of a constructor's arguments, that argument has no

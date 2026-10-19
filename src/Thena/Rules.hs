@@ -1525,6 +1525,9 @@ unaryOps =
   , ("forall-name", Op.ForallName), ("forall-domain", Op.ForallDomain)
   , ("forall-tail", Op.ForallTail), ("play", Op.Play)
   , ("elim-spine", Op.ElimSpine)
+    -- Tying a recursive call to its induction hypothesis (MS9 phase 186): the
+    -- driver's, between pop-development and define-global.
+  , ("tie-recursion", Op.TieRecursion)
   ]
 binaryOps :: [(String, Operand -> Operand -> Op)]
 binaryOps =

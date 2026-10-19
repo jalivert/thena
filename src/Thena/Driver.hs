@@ -1287,8 +1287,22 @@ surfaceProgram n0 items = foldl item ([], n0) items
             , Bind (Ops.PVar ("raw" ++ show n)) Nothing PopDevelopment
             , Bind (Ops.PVar ("ty" ++ show n)) Nothing (Expose (Ref ("raw" ++ show n)))
             , Do (PushDevelopment (Ref ("ty" ++ show n)))
+              -- **The name being defined is in scope in its own body** (MS9
+              -- phase 186, his ruling of 2026-10-19). It is an ordinary
+              -- assumption, so a recursive call elaborates like any other
+              -- application and no rule has to know that it is one;
+              -- @tie-recursion@ below replaces each one by the induction
+              -- hypothesis it denotes, and refuses if it cannot.
+              --
+              -- **Every declaration, not only a recursive one.** A body that
+              -- never mentions the name passes through untouched, so this is
+              -- uniform rather than a mode — and @extract@ turns the
+              -- assumption into the λ @tie-recursion@ expects either way.
+            , Do (Assume (Lit (VText x)) (Ref ("ty" ++ show n)))
             , Do (Call "elaborate" [Lit (VSurface (rootedAt body))])
-            , Bind (Ops.PVar ("tm" ++ show n)) Nothing PopDevelopment
+            , Bind (Ops.PVar ("abs" ++ show n)) Nothing PopDevelopment
+            , Bind (Ops.PVar ("tm" ++ show n)) Nothing
+                (Ops.TieRecursion (Ref ("abs" ++ show n)))
               -- **The plicities come from the signature as written** (MS4
               -- phase 44b): a leading run of @∀@ binder groups, each in
               -- braces or not. That is the whole of the surface signature

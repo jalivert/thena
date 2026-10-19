@@ -1009,14 +1009,51 @@ splittingTree =
       let (s2, q) = command s1 ":whnf pred (succ (succ zero))"
       unwords (renderResponse s2 q) @?= "succ zero"
 
-    -- __A recursive call is phase 6's LOOKUP and not a defect here__: the name
-    -- being defined is not in scope in its own body, so the arm's own failure
-    -- is the honest answer.
-  , refuses "a recursive call says the name is not in scope"
-      [ "double : Nat -> Nat"
-      , "double = \\ n -> induction n of { zero -> zero ; succ m -> succ (double m) }"
+    -- __A RECURSIVE CALL IS THE INDUCTION HYPOTHESIS__ (MS9 phase 186, his
+    -- ruling of 2026-10-19). The name being defined is assumed while the body
+    -- elaborates and @tie-recursion@ replaces each application of it, so the
+    -- arm writes an ordinary call and no rule knows that it is one.
+    --
+    -- __Checked by reduction and not by reading the term__, for the reason the
+    -- case above gives: only reduction says the hypothesis went to the right
+    -- place. @double (succ (succ zero))@ is four, and it is four because the
+    -- call became the hypothesis about @m@ and not anything else of type
+    -- @Nat@ in scope.
+  , testCase "a recursive call becomes the induction hypothesis, and computes" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (natModule ++
+            [ "double : Nat -> Nat"
+            , "double = \\ n -> induction n of"
+            , "  { zero -> zero ; succ m -> succ (succ (double m)) }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      let (s2, q) = command s1
+            ":convert double (succ (succ zero)) \8799 succ (succ (succ (succ zero)))"
+      unwords (words (unwords (renderResponse s2 q))) @?=
+        "double (succ (succ zero)) \8799 succ (succ (succ (succ zero))) yes"
+
+    -- __The structural guard, and it is the whole of it.__ An eliminator makes
+    -- the hypothesis available only at the smaller index, so a call on
+    -- anything else names no hypothesis and is refused. This stands in for a
+    -- termination checker: there is nothing to check, because there is nothing
+    -- to express.
+  , refuses "a recursive call that is not structurally smaller is refused"
+      [ "loop : Nat -> Nat"
+      , "loop = \\ n -> induction n of { zero -> zero ; succ m -> loop zero }"
       ]
-      "stuck: not in scope: double"
+      "stuck: no induction hypothesis is about this call, so it is not \
+      \structurally smaller: loop zero"
+
+    -- The name used as a value rather than called. There is no hypothesis for
+    -- that, and leaving it would make the body open.
+  , refuses "the name being defined cannot be used as a value"
+      [ "self : Nat -> Nat"
+      , "self = self"
+      ]
+      "stuck: the name being defined is used as a value, and only a call to \
+      \it can be an induction hypothesis"
     -- The arm names fewer variables than the constructor takes arguments.
   , refuses "a pattern of the wrong arity is caught by same-length"
       [ "bad : Nat -> Nat"
@@ -1111,6 +1148,38 @@ splittingTree =
             ":whnf left leaf leaf (okNode leaf leaf okLeaf okLeaf)"
       unwords (renderResponse s2 q) @?= "okLeaf"
 
+    -- __TWO HYPOTHESES, AND THE CALL SAYS WHICH__ (MS9 phase 186). @okNode@
+    -- has two recursive arguments, so the arm has a hypothesis about each; the
+    -- call names @da@, so it is that one, and nothing had to be told. This is
+    -- the case where selection by /type/ would have had two candidates.
+  , testCase "a call picks its hypothesis out of two by the argument it names" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (okModule ++
+            [ "count : \8704 (t : Tr) -> Ok t -> Nat"
+            , "count = \\ t d -> induction d of"
+            , "  { okLeaf -> zero ; okNode a b da db -> succ (count a da) }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      -- @:convert@ and not @:whnf@: weak head normal form stops at the
+      -- @succ@, so only conversion says the hypothesis reduced to @zero@.
+      let (s2, q) = command s1
+            ":convert count (node leaf leaf) (okNode leaf leaf okLeaf okLeaf) \
+            \\8799 succ zero"
+      unwords (words (unwords (renderResponse s2 q))) @?=
+        "count (node leaf leaf) (okNode leaf leaf okLeaf okLeaf) \8799 succ zero yes"
+
+    -- __And a call naming both is refused rather than guessed at.__ Which
+    -- argument it recurses on is simply not written down, and there is no
+    -- ordering to fall back on that would not be arbitrary.
+  , refusesIn okModule "a call naming two hypotheses is refused as ambiguous"
+      [ "g : Tr -> Tr -> Tr"
+      , "g = \\ x y -> induction x of { leaf -> leaf ; node l r -> g l r }"
+      ]
+      "stuck: this call names 2 arguments that have an induction hypothesis, \
+      \so which one it recurses on is not written down: g l r"
+
     -- __A SPLIT AT A VARIABLE INDEX TIES NOTHING__ (MS9 phase 186, `~7pn6x`),
     -- and this is the case the whole corpus is: every lemma in
     -- @examples\/progress.thena@ splits a derivation whose indices are the
@@ -1185,8 +1254,8 @@ splittingTree =
       , ""
       ]
     okModule =
-      [ "module M where", ""
-      , "data Tr : Type\8320 where"
+      natModule ++
+      [ "data Tr : Type\8320 where"
       , "  leaf : Tr"
       , "  node : Tr -> Tr -> Tr"
       , ""

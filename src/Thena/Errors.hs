@@ -51,6 +51,7 @@ module Thena.Errors
     -- * The elimination tactic (§3.7)
   , ElimError (..)
   , SpecialiseError (..)
+  , RecursionError (..)
 
     -- * Reading a term (§2.5, §2.6) — moved here at phase 17b
   , SyntaxError (..)
@@ -354,6 +355,9 @@ data FailReason
     -- ^ the elimination tactic could not build a scheme for the target it was
     -- given (§3.7, phase 17)
   | CannotSpecialise SpecialiseError
+  | CannotTieRecursion RecursionError
+    -- ^ a recursive call could not be tied to an induction hypothesis (MS9
+    -- phase 186). 'RecursionError' says why
     -- ^ specialisation by unification could not run on the method it was given
     -- (MS9 phase 177). Not raised when a transition simply does not apply —
     -- 'SpecialiseError' says why
@@ -702,6 +706,31 @@ data SpecialiseError
     -- ^ the term built does not inhabit the method type it was built for. A
     -- **generator bug**, like 'Thena.Global.NoConfusion.Rejected': the whole of
     -- §7.2's bargain for a coarse op is that this is caught here
+  deriving (Eq, Show)
+
+-- | What tying a recursive call to its induction hypothesis refused (MS9
+-- phase 186).
+--
+-- **Every case is about one call, or about the shape the driver handed over.**
+-- There is no case for "this definition is not recursive": a body that never
+-- mentions the name it is defining passes through untouched, which is what
+-- makes assuming the name on every declaration uniform rather than a mode.
+data RecursionError
+  = RecursionNotAbstracted
+    -- ^ the term is not a λ, so it is not a body elaborated under an assumed
+    -- name. A **driver bug**, not a user error
+  | RecursiveNameNotApplied
+    -- ^ the name being defined occurs somewhere that is not the head of an
+    -- application — passed as a value, say. There is no induction hypothesis
+    -- for that, and leaving it would make the body open
+  | CallMatchesNoHypothesis Context Core
+    -- ^ a recursive call none of the hypotheses in scope is about. Carries the
+    -- call. **This is structural recursion refusing**, and it is the whole of
+    -- the guard: @double zero@ inside the @succ@ arm names no smaller thing
+  | CallMatchesSeveral Context Core Int
+    -- ^ a recursive call naming more than one of the arguments that have a
+    -- hypothesis, so which one it recurses on is not written down. Carries the
+    -- call and how many matched
   deriving (Eq, Show)
 
 -- --------------------------------------------------------------------------
