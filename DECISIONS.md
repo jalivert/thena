@@ -2300,6 +2300,35 @@ definition depending on an inference you cannot see, and changing a lemma's stat
 can silently change which. The answer to that is the system showing you which positions
 it determined, rather than making you write them out.
 
+### A case that cannot happen is an arm with no body, and there is no `impossible`
+
+Splitting a `Vec A (succ n)` leaves no `vnil` case: `succ n = zero` is a conflict, so
+that method is discharged by the conflict and there is nothing to prove. Agda has you
+write an absurd pattern; Idris has you write `impossible`. **Thena has you write the arm
+and stop at the arrow.**
+
+```
+vtail : forall (A : Type₀) (n : Nat) -> Vec A (succ n) -> Vec A n
+vtail = \ A n v -> induction v of { vnil -> ; vcons k a as -> as }
+```
+
+The whole split may also be written with no arms at all — `induction d of { }` — which
+is how the inversion lemmas in `examples/canonical.thena` are written, and **an empty
+arm is that same notion for one case rather than for all of them.** A keyword would have
+been a second spelling for something the syntax could already say.
+
+**Writing a body there is a refusal, not a redundancy.** The case being gone is
+something the system has a proof of, so a term written in that arm is a claim that the
+case can arise, against that proof. The converse is a refusal too: an empty arm for a
+case that *did* survive hands you back the method you still have to prove, which is how
+you find out that the system could not discharge a case you believed was impossible.
+
+**Underneath it is one law — every arm you wrote was asked for.** Elaboration walks the
+datatype's constructors asking for an arm for each, and the law is the other direction.
+It is what refuses an arm for a case that vanished, an arm headed by a constructor of
+some other datatype, and a second arm for a constructor that already has one — three
+mistakes, one rule, and nothing in the system has to tell them apart.
+
 ### `case` says the arm does not recurse, and the type is what says it
 
 ```

@@ -373,9 +373,14 @@ rule case-must-vanish none :- do
 
 -- A method with no subgoal is the impossible case vanishing: the specialiser
 -- filled it from a conflicting equation and claimed nothing, so there is
--- nothing to elaborate into and the arm's body is unreachable. `impossible` is
--- the spelling a user will want and it is a later phase; saying so is what this
--- does in the meantime.
+-- nothing to elaborate into and the arm has no body to elaborate.
+--
+-- AN ARM FOR A VANISHED CASE IS WRITTEN WITH NO BODY — `‹pattern› ->` and
+-- nothing after it, his ruling of 2026-10-20 — and the `say` below is what
+-- stands in until the phase that builds it. A body written here is the user
+-- claiming the case is reachable against a proof that it is not, which is a
+-- refusal; and `induction d of { }` already says the same thing one level out,
+-- which is why no keyword was reserved for it.
 --
 -- TWO QUESTIONS, ASKED SEPARATELY: did the method vanish, and did the user
 -- write arms. The arm-less clause is first and its test is complementary to the
