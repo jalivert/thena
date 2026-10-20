@@ -1053,21 +1053,7 @@ handleBarEvent st bar ev = case ev of
 handleScriptEvent :: BrickEvent Name e -> EventM Name St ()
 handleScriptEvent (VtyEvent (V.EvKey V.KEnter [])) = do
   st <- get
-  let line = concatMap Text.unpack (getEditContents (stInput st))
   case (stDropdown st, stOfferDropdown st) of
-    -- | **A cleared committed line submits, whatever the dropdown is
-    -- showing.** Emptying a line means deleting it, and the delete has to
-    -- survive the fact that a blank line offers the whole rule chart with a
-    -- row preselected: measured, backspacing `bbb` away and pressing Enter
-    -- inserted `abandon` instead, because the accept outranks the submit.
-    -- Accepting a suggestion the user never moved to, in answer to the key
-    -- they pressed to commit, writes a line they did not type.
-    --
-    -- **This is a special case and is noted as one** — `~n4dnd` in
-    -- `.claude/CLOSEOUT.md`, which asks the general question underneath it:
-    -- whether an auto-preselected row should be Enter-acceptable at all, or
-    -- only one the user arrowed to. If he rules that way this clause goes.
-    _ | isJust (stScriptPos st), all isSpace line -> scriptSubmit
     (Just (LoadDropdown entries (Just i)), _) | i < length entries ->
       acceptLoadRow st entries i
     (_, Just od) | Just i <- odSelected od, Just ins <- rowInsert (odRows od !! i) ->
