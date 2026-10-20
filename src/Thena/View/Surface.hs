@@ -104,8 +104,14 @@ data SurfaceShape
     -- ^ the block's own written text — see the module header.
   deriving (Eq, Show)
 
--- | One arm of a split: the pattern as written, and what it stands for.
-data SurfaceArmView = SurfaceArmView SurfacePattern SurfaceShape
+-- | One arm of a split: the pattern as written, and what it stands for — or
+-- __nothing__, for an arm written with no body at all.
+--
+-- **An empty arm is how a case that cannot arise is written** (MS9 phase 189,
+-- his ruling of 2026-10-20), so the body is optional here exactly as a binder's
+-- type is optional in 'SurfaceBinding'. A frontend drawing one has an arrow with
+-- nothing to its right, and that is the whole of it.
+data SurfaceArmView = SurfaceArmView SurfacePattern (Maybe SurfaceShape)
   deriving (Eq, Show)
 
 -- | One bound name: its plicity, its name, and its type if it was written.
@@ -143,7 +149,7 @@ displaySurface s = case s of
       (map displaySurface ms) (map displaySurface is) (displaySurface tgt)
   SurfaceSplit a tgt as ->
     ASurfaceSplit a (displaySurface tgt)
-      [ SurfaceArmView pat (displaySurface b) | SurfaceArm pat b <- as ]
+      [ SurfaceArmView pat (fmap displaySurface b) | SurfaceArm pat b <- as ]
   SurfaceDo is -> ASurfaceDo (intercalate " ; " (map rawInstruction is))
   where
     piece p = case p of

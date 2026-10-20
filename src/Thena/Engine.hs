@@ -1667,10 +1667,15 @@ perform instr rest m = case operation instr of
   Op.SplitTarget x -> surfaceMove x "a split" $ \s -> case s of
     Concrete.SurfaceSplit an tgt arms -> Just (Zipper.intoSplitTarget an arms tgt)
     _                                -> Nothing
-  Op.SplitArmBody x -> surfaceMove x "a split with at least one arm" $ \s -> case s of
-    Concrete.SurfaceSplit an tgt (Concrete.SurfaceArm pat rhs : later) ->
-      Just (Zipper.intoSplitArmBody an tgt pat later rhs)
-    _ -> Nothing
+  -- **@none@ for an arm with no body** (MS9 phase 189): an empty arm is how a
+  -- case that cannot arise is written, so there is no handle to hand back and
+  -- that is not a refusal. The refusals it keeps are the shape ones.
+  Op.SplitArmBody x -> case operandSurface (env (exec m)) x of
+    Left r  -> failure r m
+    Right z -> case Zipper.focus z of
+      Concrete.SurfaceSplit an tgt (Concrete.SurfaceArm pat rhs : later) ->
+        produce (VOption (fmap (\b -> VSurface (Zipper.intoSplitArmBody an tgt pat later b z)) rhs)) m
+      _ -> failure (ExpectedSurfaceShape "a split with at least one arm") m
   Op.SplitTail x -> surfaceMove x "a split with at least one arm" $ \s -> case s of
     Concrete.SurfaceSplit an tgt (first : later) ->
       Just (Zipper.intoSplitTail an tgt first later)

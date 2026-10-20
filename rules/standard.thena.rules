@@ -325,7 +325,7 @@ rule same-length [p, ...ps] [n, ...ns] :- do same-length ps ns
 -- itself. MS8 phase 170 found the same thing in the application clauses and the
 -- lesson is in DECISIONS.md. So `pick` answers with the arm and can fail for
 -- one reason only, and the caller's elaboration failure is the caller's.
-arm-for : Surface -> Name -> (Pattern, Surface)
+arm-for : Surface -> Name -> (Pattern, Option Surface)
 rule arm-for t c :- when (surface-is-split t) (split-has-arms t)
   do p = split-arm-pattern t
      ; w = pattern-head p
@@ -340,13 +340,33 @@ rule arm-for t c :- when (surface-is-split t) (split-has-arms t)
 -- backtracks into it, walks on through the arms and reports the search rather
 -- than the real error — phase 170's finding, one level over. Running out of
 -- arms is coverage failing, and there is no clause for it.
-pick : Name -> Name -> Pattern -> Surface -> Surface -> (Pattern, Surface)
+pick : Name -> Name -> Pattern -> Option Surface -> Surface -> (Pattern, Option Surface)
 rule pick w c p b r :- when (same-name w c) do return (p, b)
 rule pick w c p b r :- when (different-name w c) do a = arm-for r c ; return a
 
+-- AN ARM FOR A CASE THAT SURVIVED NEEDS A BODY. An empty arm — `‹pattern› ->`
+-- and nothing after it — is how a user says the case cannot arise, and this case
+-- did not: the method is here, so there is something to prove and the arm is what
+-- proves it. One clause for `some` and none for `none`, which is
+-- `case-must-vanish`'s idiom mirrored, so the refusal names the user's complaint
+-- rather than a rule that went looking.
+--
+-- IT ELABORATES THE BODY ITSELF rather than handing it back, and that is what
+-- keeps the type `Option Surface -> ()`: a rule that only unwrapped the option
+-- would be inferred `Option a -> a`, since nothing in it says what the body is,
+-- and a polymorphic result makes it an answer to `:produces Core`. One clause,
+-- so there is no choice point to backtrack into — the hazard `pick`'s comment
+-- describes needs two.
+--
+-- SO A MISSING BODY IS REFUSED WHERE A BAD BODY IS, after the arm's binders are
+-- introduced and at the point the body was wanted, which the engine unwinds the
+-- same way.
+arm-needs-body : Option Surface -> ()
+rule arm-needs-body (some b) :- do call elaborate b
+
 -- The arm, under the bindings its pattern names.
-elaborate-arm : Surface -> Name -> Core -> List (Option Core) -> (Pattern, Surface) -> ()
-rule elaborate-arm t c sub forced (p, b) :-
+elaborate-arm : Surface -> Name -> Core -> List (Option Core) -> (Pattern, Option Surface) -> ()
+rule elaborate-arm t c sub forced (p, ob) :-
   do as = pattern-arguments p
      ; args = constructor-arguments c
      ; same-length as args
@@ -359,7 +379,7 @@ rule elaborate-arm t c sub forced (p, b) :-
      ; ihs = ihs-for t c
      ; k2 = intro-ihs ihs k1
      ; goto k2
-     ; call elaborate b
+     ; arm-needs-body ob
      ; goto sub
      ; solve
 

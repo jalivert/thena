@@ -88,8 +88,8 @@ splitTerm :: Surface
 splitTerm = SurfaceSplit ByInduction (nm "tgt") [armOne, armTwo]
 
 armOne, armTwo :: SurfaceArm
-armOne = SurfaceArm (PatternName "nil" []) (nm "b1")
-armTwo = SurfaceArm (PatternName "cons" [PatternName "n" []]) (nm "b2")
+armOne = SurfaceArm (PatternName "nil" []) (Just (nm "b1"))
+armTwo = SurfaceArm (PatternName "cons" [PatternName "n" []]) (Just (nm "b2"))
 
 -- --------------------------------------------------------------------------
 -- The descent table
@@ -190,7 +190,7 @@ markers =
            )
          , ( "a split's first arm's body"
            , SurfaceSplit ByInduction (nm "tgt")
-               [SurfaceArm (PatternName "nil" []) marker, armTwo]
+               [SurfaceArm (PatternName "nil" []) (Just marker), armTwo]
            , intoSplitArmBody ByInduction (nm "tgt") (PatternName "nil" []) [armTwo]
                marker (rootedAt splitTerm)
            )

@@ -766,9 +766,15 @@ splitClauses =
       [ Bind (Op.PVar "a") Nothing (Op.Call "arm-for" [Ref "r", Ref "c"])
       , Do (Op.Return (Ref "a"))
       ]
+    -- **An arm for a case that survived needs a body** (MS9 phase 189): a
+    -- clause for @some@ and none for @none@, which is @case-must-vanish@'s
+    -- idiom mirrored, because an empty arm is how a user says the case cannot
+    -- arise and this one did not.
+  , Rule (GlobalName "arm-needs-body") [PSome (PVar "b")] []
+      [call "elaborate" [Ref "b"]]
   , Rule (GlobalName "elaborate-arm")
       [ PVar "t", PVar "c", PVar "sub", PVar "forced"
-      , PPair (PVar "p") (PVar "b")
+      , PPair (PVar "p") (PVar "ob")
       ] []
       [ Bind (Op.PVar "as") Nothing (Op.PatternArguments (Ref "p"))
       , Bind (Op.PVar "args") Nothing (Op.ConstructorArguments (Ref "c"))
@@ -783,7 +789,7 @@ splitClauses =
       , Bind (Op.PVar "ihs") Nothing (Op.Call "ihs-for" [Ref "t", Ref "c"])
       , Bind (Op.PVar "k2") Nothing (Op.Call "intro-ihs" [Ref "ihs", Ref "k1"])
       , Do (Goto (Ref "k2"))
-      , call "elaborate" [Ref "b"]
+      , call "arm-needs-body" [Ref "ob"]
       , Do (Goto (Ref "sub"))
       , call "solve" []
       ]

@@ -243,7 +243,8 @@ redrawSurface = surf SLoose
       where
         word ByInduction = "induction"
         word ByCases     = "case"
-        arm (SurfaceArmView pat b) = pattern' pat ++ " -> " ++ surf SLoose b
+        arm (SurfaceArmView pat Nothing)  = pattern' pat ++ " ->"
+        arm (SurfaceArmView pat (Just b)) = pattern' pat ++ " -> " ++ surf SLoose b
 
     pattern' = goPat False
       where

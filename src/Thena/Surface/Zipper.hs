@@ -210,7 +210,9 @@ rebuild s f = case f of
   InLetValue x ann body -> SurfaceLet x ann s body
   InLetBody x ann v -> SurfaceLet x ann v s
   InSplitTarget a arms -> SurfaceSplit a s arms
-  InSplitArmBody a tgt p rest -> SurfaceSplit a tgt (SurfaceArm p s : rest)
+  -- **@Just@ and not a 'Maybe' in the frame**: you can only be inside a body
+  -- that was written, so an arm rebuilt from here always has one.
+  InSplitArmBody a tgt p rest -> SurfaceSplit a tgt (SurfaceArm p (Just s) : rest)
   -- **Merged, for 'InAppTail'\'s reason**: the arm goes back on the front of
   -- whatever arms the focus has. The analysis and the target come from the
   -- frame, which holds them as they were.

@@ -774,7 +774,7 @@ baseTests =
                  , "ihs-for", "ihs-for"
                  , "intro-ihs", "intro-ihs"
                  , "same-length", "same-length"
-                 , "arm-for", "pick", "pick", "elaborate-arm"
+                 , "arm-for", "pick", "pick", "arm-needs-body", "elaborate-arm"
                  , "case-must-vanish", "one-case", "one-case", "one-case"
                  , "split-cases", "split-cases", "split-over"
                  , "split-claim", "split-claim", "split-elaborate"
@@ -821,6 +821,15 @@ splitParts =
   , testCase "case with no arms: the word, the target, and straight to the end" $
       walks "describe surface`case other of { }`" ["case", "other", "end"]
 
+    -- __AN ARM WITH NO BODY ANSWERS @none@__ (MS9 phase 189), and this is the
+    -- test that the walk reaches the /next/ arm afterwards: an empty arm is a
+    -- legal arm, so @split-tail@ still has to peel it. @name-of-body@ is the
+    -- fixture's own reader, one clause per shape, which is how a rule is meant
+    -- to take @split-arm-body@'s answer apart.
+  , testCase "an arm with no body: the walk says so and goes on to the next" $
+      walks "describe surface`induction tgt of { vnil -> ; vcons k a as -> sss }`"
+        ["induction", "tgt", "empty", "sss", "end"]
+
     -- __A NESTED pattern, read to depth two__ (MS9 phase 183), which is the
     -- measurement the design rests on: @cons n x (cons m y nil)@ parses today,
     -- so a reader answering a flat list of names would be wrong on syntax the
@@ -864,12 +873,16 @@ walkBase = unlines
   , "rule name-of g :- when (surface-is-name g)"
   , "  do w = surface-name g ; x = name-text w ; say x"
   , ""
+  , "name-of-body : Option Surface -> ()"
+  , "rule name-of-body (some b) :- do name-of b"
+  , "rule name-of-body none :- do say \"empty\""
+  , ""
   , "walk-arms : Surface -> ()"
   , "rule walk-arms t :- when (surface-is-split t) (split-has-no-arms t)"
   , "  do say \"end\""
   , "rule walk-arms t :- when (surface-is-split t) (split-has-arms t)"
   , "  do b = split-arm-body t"
-  , "     ; name-of b"
+  , "     ; name-of-body b"
   , "     ; r = split-tail t"
   , "     ; walk-arms r"
   , ""
@@ -1111,6 +1124,35 @@ splittingTree =
       -- under-applied former is not a 'Canonical' for ι to fire on.
       let (s2, q) = command s1 ":whnf vtail Nat zero (vcons Nat zero zero (vnil Nat))"
       unwords (renderResponse s2 q) @?= "vnil Nat"
+
+    -- __AN EMPTY ARM IS HOW THE VANISHED CASE IS WRITTEN__ (MS9 phase 189, his
+    -- ruling of 2026-10-20). @vnil@'s method is closed by a conflicting
+    -- equation — @succ n = zero@ — so there is nothing to prove and the arm
+    -- carries no term. The same proof as above, with the case named rather than
+    -- left out, and it declares and computes identically.
+  , testCase "an arm with no body is accepted where the case vanished" $ do
+      (s0, _) <- startingSession
+      let src = vecModule ++
+            [ "vtail : \8704 (A : Type\8320) (n : Nat) -> Vec A (succ n) -> Vec A n"
+            , "vtail = \\ A n v -> induction v of { vnil -> ; vcons k a as -> as }"
+            ]
+          (s1, r) = loadProofSource s0 (unlines src)
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      let (s2, q) = command s1 ":whnf vtail Nat zero (vcons Nat zero zero (vnil Nat))"
+      unwords (renderResponse s2 q) @?= "vnil Nat"
+
+    -- __AND REFUSED WHERE THE CASE SURVIVED__, which is the other half of the
+    -- same ruling: @zero@'s method is right there, so there is something to
+    -- prove and the arm is what proves it. **The refusal names the user's
+    -- mistake and not the search** — @arm-for@ found the arm; what is missing is
+    -- its body.
+  , refuses "an arm with no body is refused where the case survived"
+      [ "pred : Nat -> Nat"
+      , "pred = \\ n -> induction n of { zero -> ; succ m -> m }"
+      ]
+      "stuck: no clause of arm-needs-body applies here"
 
     -- __The forced position is a definition, and @refl@ proves it.__ The goal
     -- is @Eq Nat n n@ and the arm answers with @refl Nat k@, whose type is

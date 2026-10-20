@@ -270,7 +270,10 @@ genSurface = sized go
                        (listOf1 (SurfaceBinder <$> plicity <*> name <*> annotation))
         typedBinders = neOr (SurfaceBinder Explicit "x" (Just SurfaceUniverseOpen))
                          (listOf1 (SurfaceBinder <$> plicity <*> name <*> (Just <$> smaller)))
-        arms       = listOf (SurfaceArm <$> resize (n `div` 2) genPattern <*> smaller)
+        -- **An arm with no body is generated too** (MS9 phase 189), so the
+        -- round trip covers the empty arm without a case of its own.
+        body       = frequency [(4, Just <$> smaller), (1, pure Nothing)]
+        arms       = listOf (SurfaceArm <$> resize (n `div` 2) genPattern <*> body)
 
     leaf =
       oneof
@@ -615,27 +618,27 @@ splitTests :: [TestTree]
 splitTests =
   [ parses "case n of { zero -> a ; succ m -> b }"
       (SurfaceSplit ByCases (SurfaceName "n")
-        [ SurfaceArm (PatternName "zero" []) (SurfaceName "a")
-        , SurfaceArm (PatternName "succ" [PatternName "m" []]) (SurfaceName "b")
+        [ SurfaceArm (PatternName "zero" []) (Just (SurfaceName "a"))
+        , SurfaceArm (PatternName "succ" [PatternName "m" []]) (Just (SurfaceName "b"))
         ])
 
     -- **The two words differ in the tree by one field and nothing else.**
   , parses "induction n of { zero -> a }"
       (SurfaceSplit ByInduction (SurfaceName "n")
-        [SurfaceArm (PatternName "zero" []) (SurfaceName "a")])
+        [SurfaceArm (PatternName "zero" []) (Just (SurfaceName "a"))])
 
     -- **The target is an application, not just its head.**
   , parses "case f x of { c -> a }"
       (SurfaceSplit ByCases
         (SurfaceApp (SurfaceName "f") [SurfaceArg Explicit (SurfaceName "x")])
-        [SurfaceArm (PatternName "c" []) (SurfaceName "a")])
+        [SurfaceArm (PatternName "c" []) (Just (SurfaceName "a"))])
 
     -- **A bare name is not resolved here**, and the tree must not pretend to
     -- know: @zero@ above and @m@ here are the same shape written down, and
     -- which is a constructor is a question about the globals.
   , parses "case n of { m -> m }"
       (SurfaceSplit ByCases (SurfaceName "n")
-        [SurfaceArm (PatternName "m" []) (SurfaceName "m")])
+        [SurfaceArm (PatternName "m" []) (Just (SurfaceName "m"))])
 
     -- An argument of a pattern is an atom, so a nested pattern is written in
     -- parentheses — and the same text without them means something else.
@@ -647,14 +650,14 @@ splitTests =
               , PatternName "a" []
               , PatternName "cons" [PatternName "m" [], PatternName "b" [], PatternName "nil" []]
               ])
-            (SurfaceName "a")
+            (Just (SurfaceName "a"))
         ])
 
     -- @_@ reaches the parser as an ordinary identifier and this language says
     -- what it means, exactly as it does for a term's placeholder.
   , parses "case n of { succ _ -> a }"
       (SurfaceSplit ByCases (SurfaceName "n")
-        [SurfaceArm (PatternName "succ" [PatternWildcard]) (SurfaceName "a")])
+        [SurfaceArm (PatternName "succ" [PatternWildcard]) (Just (SurfaceName "a"))])
 
     -- **No arms at all**, which is a case analysis on a datatype with no
     -- constructors and the only thing to write for one.
@@ -686,7 +689,7 @@ splitTests =
   , parses "case n of { zero -> a : A }"
       (SurfaceSplit ByCases (SurfaceName "n")
         [SurfaceArm (PatternName "zero" [])
-          (SurfaceAnnot (SurfaceName "a") (SurfaceName "A"))])
+          (Just (SurfaceAnnot (SurfaceName "a") (SurfaceName "A")))])
 
   , refuses "case n of { zero = a }"
   , refuses "case n of { -> a }"
@@ -709,8 +712,8 @@ splitTests =
               (SurfaceArrow (SurfaceName "Two") (SurfaceName "Two"))
               (SurfaceLam [SurfaceBinder Explicit "t" Nothing]
                 (SurfaceSplit ByCases (SurfaceName "t")
-                  [ SurfaceArm (PatternName "aa" []) (SurfaceName "bb")
-                  , SurfaceArm (PatternName "bb" []) (SurfaceName "aa")
+                  [ SurfaceArm (PatternName "aa" []) (Just (SurfaceName "bb"))
+                  , SurfaceArm (PatternName "bb" []) (Just (SurfaceName "aa"))
                   ]))
           ]
         Left e -> assertFailure (show e)

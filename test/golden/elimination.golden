@@ -73,7 +73,8 @@ same-length [p, ...ps] [n, ...ns]
 arm-for ‹t› ‹c›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
-elaborate-arm ‹t› ‹c› ‹sub› ‹forced› (p, b)
+arm-needs-body (some b)
+elaborate-arm ‹t› ‹c› ‹sub› ‹forced› (p, ob)
 case-must-vanish none
 one-case ‹t› ‹c› ‹sub› ‹forced›
 one-case ‹t› ‹c› none ‹forced›

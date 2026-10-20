@@ -397,8 +397,14 @@ SomeArms :: { [SurfaceArm] }
   | SomeArms ';' Arm                       { $3 : $1 }
 
 -- | One arm. **@->@ and not @=@ — his ruling, 2026-10-18.**
+--
+-- **AN ARM MAY STOP AT THE ARROW — his ruling, 2026-10-20**, and that is how a
+-- case which cannot arise is written: @vnil ->@ with nothing after it. There is
+-- no ambiguity to resolve, because an arm is followed only by @;@ or @}@ and a
+-- 'Term' can begin with neither.
 Arm :: { SurfaceArm }
-  : Pattern '->' Term                      { SurfaceArm $1 $3 }
+  : Pattern '->' Term                      { SurfaceArm $1 (Just $3) }
+  | Pattern '->'                           { SurfaceArm $1 Nothing }
 
 -- | A written pattern.
 --

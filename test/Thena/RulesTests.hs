@@ -854,7 +854,7 @@ splitHelpers =
   , "ihs-for", "ihs-for"
   , "intro-ihs", "intro-ihs"
   , "same-length", "same-length"
-  , "arm-for", "pick", "pick", "elaborate-arm"
+  , "arm-for", "pick", "pick", "arm-needs-body", "elaborate-arm"
   , "case-must-vanish", "one-case", "one-case", "one-case"
   , "split-cases", "split-cases", "split-over"
   , "split-claim", "split-claim", "split-elaborate"

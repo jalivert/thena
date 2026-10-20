@@ -231,12 +231,21 @@ data Analysis
   | ByCases       -- ^ @case t of …@
   deriving (Eq, Show)
 
--- | One arm of a 'SurfaceSplit': the pattern, and what to do when it matches.
+-- | One arm of a 'SurfaceSplit': the pattern, and what to do when it matches —
+-- or __nothing at all__, which is how a case that cannot arise is written.
 --
 -- __@->@ and not @=@ — his ruling, 2026-10-18__: /"obviously @->@ for case and
 -- induction syntax"/. @=@ stays for a clause, which is a declaration and not an
 -- arm.
-data SurfaceArm = SurfaceArm SurfacePattern Surface
+--
+-- __AN EMPTY BODY IS THE VANISHED CASE — his ruling, 2026-10-20__, and it is why
+-- there is no @impossible@ keyword. Splitting a @Vec A (succ n)@ leaves no @vnil@
+-- case, @succ n = zero@ being a conflict, so there is no method and nothing to
+-- prove: the user writes @vnil ->@ and stops. The whole split may be written with
+-- no arms at all — @induction d of { }@ — and an empty arm is that same notion for
+-- one case rather than for all of them, which is why no word was reserved for it.
+-- @DECISIONS.md@ carries the decision and the reason.
+data SurfaceArm = SurfaceArm SurfacePattern (Maybe Surface)
   deriving (Eq, Show)
 
 -- | A written pattern (MS9 phase 179).
@@ -359,7 +368,7 @@ data PairingError
 blocksIn :: Surface -> [[RawInstr]]
 blocksIn t = case t of
   SurfaceDo is        -> [is]
-  SurfaceSplit _ tg as -> blocksIn tg ++ concatMap (\(SurfaceArm _ b) -> blocksIn b) as
+  SurfaceSplit _ tg as -> blocksIn tg ++ concatMap (\(SurfaceArm _ b) -> foldMap blocksIn b) as
   SurfaceApp f as     -> blocksIn f ++ concatMap (\(SurfaceArg _ a) -> blocksIn a) (toList as)
   SurfaceLam bs b     -> concatMap binder (toList bs) ++ blocksIn b
   SurfacePi bs b      -> concatMap binder (toList bs) ++ blocksIn b

@@ -676,10 +676,17 @@ data Op
     -- ^ the term a surface @induction t of …@ or @case t of …@ analyses (MS9
     -- phase 181)
   | SplitArmBody Operand
-    -- ^ the __first__ arm's right-hand side.
+    -- ^ the __first__ arm's right-hand side, __or @none@ where the arm was
+    -- written with no body at all__ (MS9 phase 189).
     --
     -- **The first and not the @k@th**, because 'SplitTail' peels an arm and the
     -- clause recurses — the shape @E\u27e6x \u20d7a\u27e7@ already uses for a spine.
+    --
+    -- **An option and not a refusal**, by the rule his 2026-10-19 ruling set for
+    -- 'Eliminate' and 'Specialise': an arm with no body is a legal arm, so the
+    -- answer is @none@ and the caller decides what that means. A focus that is
+    -- not a split, or a split with no arms, is still a refusal — that is the
+    -- shape the paired head test rules out.
   | SplitArmPattern Operand
     -- ^ the __first__ arm's pattern — @split-arm-pattern t@ (MS9 phase 183).
     --
@@ -1405,7 +1412,7 @@ resultOf o = case o of
   TrustedClaim _ -> Just TSurface
   TrustedBody _ -> Just TSurface
   SplitTarget _ -> Just TSurface
-  SplitArmBody _ -> Just TSurface
+  SplitArmBody _ -> Just (TOption TSurface)
   SplitTail _ -> Just TSurface
   SplitArmPattern _ -> Just TPattern
   PatternHead _ -> Just TName

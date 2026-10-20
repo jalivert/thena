@@ -237,7 +237,10 @@ surf p (SurfaceSplit a tgt as) =
   where
     word ByInduction = "induction"
     word ByCases     = "case"
-    arm (SurfaceArm pat b) = surfacePattern pat ++ " -> " ++ surf Loose b
+    -- **An empty arm stops at the arrow and prints no trailing space**, so
+    -- what this prints reads back as the same tree (MS9 phase 189).
+    arm (SurfaceArm pat Nothing)  = surfacePattern pat ++ " ->"
+    arm (SurfaceArm pat (Just b)) = surfacePattern pat ++ " -> " ++ surf Loose b
 surf p (SurfaceElim d ps mot ms is tgt) =
   paren (p >= Tight)
     ("elim " ++ d ++ " " ++ list ps ++ " " ++ surf Tight mot ++ " " ++ list ms
