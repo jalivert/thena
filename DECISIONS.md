@@ -2326,14 +2326,49 @@ word no rule can be called.
 **Writing a body there is a refusal, not a redundancy.** The case being gone is
 something the system has a proof of, so a term written in that arm is a claim that the
 case can arise, against that proof. The converse is a refusal too: an empty arm for a
-case that *did* survive hands you back the method you still have to prove, which is how
-you find out that the system could not discharge a case you believed was impossible.
+case that *did* survive is refused, so believing a case impossible when the system
+could not discharge it is something you find out at the split. **What the refusal says
+today is only that the arm needs a body**; it does not hand you the method, and
+improving that is open work.
 
 **Underneath it is one law — every arm you wrote was asked for.** Elaboration walks the
 datatype's constructors asking for an arm for each, and the law is the other direction.
 It is what refuses an arm for a case that vanished, an arm headed by a constructor of
 some other datatype, and a second arm for a constructor that already has one — three
 mistakes, one rule, and nothing in the system has to tell them apart.
+
+### A split cannot solve a variable bound before the thing you split, and says so badly
+
+This is the sharpest limitation of splitting as it stands, and you will meet it the
+first time you split two derivations about the same subject.
+
+A split refines exactly what its motive mentions, and a motive abstracts the *indices*
+of the family. So splitting `e : Ev (s m)` abstracts `s m` — not `m`. If the goal
+mentions `m` rather than `s m`, there is nothing for the motive to abstract, and the
+case for each constructor is handed an equation instead:
+
+```
+refined : forall (m : N) (e : Ev (s m)) -> IsSucc m
+refined = \ m e -> case e of { evs n en -> isucc n }
+   stuck: IsSucc (s a) and Eq {0} N (s n) m -> IsSucc m cannot be made equal
+```
+
+`evs n en` forces `m` to be `s n`, and the specialiser cannot act on that, because
+**it can only solve variables the split itself bound** — `m` was bound earlier. So the
+equation stays as an extra argument of the case, which is what the message is reporting:
+the arm's body is being checked against a function type.
+
+**Agda and Idris refine `m` here**, because a clause's whole left-hand side is one
+unification problem rather than one scrutinee with everything to its left fixed. Thena
+will do the same once the elaborator generalises the motive over the variables a split
+needs to solve; until then, these cases are written with `elim` and a motive you supply,
+which is what `examples/determinacy-patterns.thena` does for three of its ten cases and
+says so in its header.
+
+**The arm can be written to take the equation** — `evs n en -> \ q -> …` — and then
+transported by hand. It type-checks, and it is deliberately not how the example is
+written: an arm whose right-hand side is a function of an equation you had no way to
+predict is elaboration showing through the surface, not a way to write proofs.
 
 ### `case` says the arm does not recurse, and the type is what says it
 
