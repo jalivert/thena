@@ -33,6 +33,11 @@ flag examples
     default:            False
     manual:             True
 
+flag tui
+    description:        Build the TUI's own test suite.
+    default:            False
+    manual:             True
+
 common warnings
     ghc-options: -Wall
 
@@ -335,6 +340,47 @@ test-suite thena-test
         tasty-golden      >=2.3  && <2.4,
         tasty-hunit       >=0.10 && <0.11,
         tasty-quickcheck  >=0.11 && <0.12
+
+-- | The TUI's own drawing, checked rather than eyeballed (`~6crg8`).
+--
+-- **His ruling, 2026-10-20** — /"Yes, tui gets a test suite. That won't hurt
+-- anything."/ **Narrowed to the pure drawing**: the pty stays the authority on
+-- layout, keymaps and panes, and this covers the one part of `Tui.*` that is a
+-- function from a 'Thena.View.Core.Shape' to a widget.
+--
+-- **Behind a manual flag, OFF by default** — his instruction, 2026-10-20: the
+-- engine track should not pay for this suite when it runs its own.
+--
+-- > cabal test thena-tui-test --flags=tui
+--
+-- **`cabal test all` does not run it either, and that half of the ask could not
+-- be built.** `all` selects every /package/, and this project is one package, so
+-- `cabal test` and `cabal test all` are the same command here — measured
+-- 2026-10-20. Off-for-one-and-on-for-the-other needs the suite in a package of
+-- its own, which needs `visibility: public` on `library tui`; **he declined
+-- that, and rightly** — a private sublibrary is part of nothing reaching around
+-- the boundary. So the flag is the whole mechanism: this suite runs when it is
+-- asked for and not otherwise.
+test-suite thena-tui-test
+    import:             warnings
+    if !flag(tui)
+        buildable:      False
+    hs-source-dirs:     tui-test
+    default-language:   GHC2024
+    type:               exitcode-stdio-1.0
+    main-is:            Main.hs
+    other-modules:
+        DrawingTests
+    build-depends:
+        base         ^>=4.21.2.0,
+        thena:tui,
+        thena:view,
+        brick        >=2.13 && <2.14,
+        text         >=2.1  && <2.2,
+        vector       >=0.13 && <0.14,
+        vty          >=6.0  && <7,
+        tasty        >=1.5  && <1.6,
+        tasty-hunit  >=0.10 && <0.11
 
 -- | The frontend's own boundary, compiled (MS7 phase 126).
 --

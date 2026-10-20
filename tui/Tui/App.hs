@@ -550,8 +550,16 @@ offerRowToPopup selected i (OfferRow label ins) =
 data PopupRow = PopupRow
   { prText     :: String
   , prSelected :: Bool
-  , prDim      :: Bool  -- ^ a hint row (a nonterminal or scan class): shown,
-                          -- never a landing spot, drawn muted.
+  , prDim      :: Bool  -- ^ drawn muted rather than as a landing spot.
+                          --
+                          -- **Unreachable since `~bkzw9`, and kept on
+                          -- purpose.** It was how a hint row (a nonterminal
+                          -- or a token class) was shown; those rows are no
+                          -- longer built, so nothing sets this 'True' today.
+                          -- The mechanism stays because `~5f3k6` — where
+                          -- that information goes instead — is open, and a
+                          -- muted row is one of the answers still on the
+                          -- table.
   }
 
 -- | **A dropdown with room to breathe, symmetric all round** — his
@@ -864,12 +872,12 @@ handleEventInner (VtyEvent (V.EvKey V.KEsc [])) = do
 -- the editor instead, which binds it as delete-char-forward, so no editing
 -- key is lost to the quit. Note the shape vty gives it: 'd' with 'MCtrl',
 -- not a bare 'EOT' character.
-handleEventInner (VtyEvent (V.EvKey (V.KChar 'd') [V.MCtrl])) = do
+handleEventInner ev@(VtyEvent (V.EvKey (V.KChar 'd') [V.MCtrl])) = do
   st <- get
   let line = concatMap Text.unpack (getEditContents (stInput st))
   if null line
     then halt
-    else Brick.zoom stInputL (handleEditorEvent (VtyEvent (V.EvKey (V.KChar 'd') [V.MCtrl])))
+    else Brick.zoom stInputL (handleEditorEvent ev)
       >> followInput >> refreshDropdown >> refreshOfferDropdown
 -- | Down travels visually down in both placements — toward the input below
 -- it, likewise toward the input above it, where the rows run reversed and
@@ -1323,7 +1331,25 @@ buildOfferDropdown autoSelect col ov
     bareWord = case offeredRecovered ov of
       Just r -> isNothing (recoveredLanguage r)
       Nothing -> False
-    tokenRows = sortOn rowLabel (map offerRow (offeredOptions ov))
+    -- | **A row an accept could not write is not a row — his instruction,
+    -- 2026-10-20, `~bkzw9`**: /"I think that we shouldn't show the
+    -- unselectable in the dropdown at all. They should be shown but not like
+    -- this, they don't make sense in the dropdown."/ A nonterminal ('LC') and
+    -- a token class (@‹x›@) both arrive as 'offeredOptions' entries whose
+    -- 'rowInsert' is 'Nothing', and both are dropped here.
+    --
+    -- **He assented to a narrower rule — drop a nonterminal only when its own
+    -- productions are listed beside it — and it is not expressible at the
+    -- boundary.** 'ProductionView' carries 'productionName',
+    -- 'productionShape' and 'productionInsert' and nothing that says which
+    -- nonterminal a production /produces/, so this frontend cannot tell that
+    -- @abs@, @app@ and @var@ are LC's rather than some other category's.
+    -- Dropping both unconditionally is his primary instruction; the gap and
+    -- what it would take to honour the narrower rule are recorded on
+    -- `~5f3k6`, which is also where the question of where this information
+    -- goes instead now lives.
+    tokenRows =
+      sortOn rowLabel (filter (isJust . rowInsert) (map offerRow (offeredOptions ov)))
     productionRows =
       sortOn rowLabel
         [ r
@@ -1343,9 +1369,12 @@ buildOfferDropdown autoSelect col ov
     -- when not — the same reversal that already made "what's first sits
     -- closest to the input either way" (`c4bfe51`) true for the selected
     -- row does the rest here for free.
+    -- **Nothing left to sort hints to the bottom of**, since `~bkzw9`
+    -- removed them: every surviving row has something to insert, so the
+    -- token-then-production order is the whole order.
     allRows
       | bareWord  = tokenRows
-      | otherwise = sortOn (isNothing . rowInsert) (tokenRows <> productionRows)
+      | otherwise = tokenRows <> productionRows
     -- | A bare word replaces the partial word itself ('recoveredColumn'/
     -- 'recoveredText' name that span exactly). Every other case — an
     -- ordinary offer, or inside a literal, where 'recoveredText' names the

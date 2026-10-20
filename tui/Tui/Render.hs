@@ -19,7 +19,7 @@ module Tui.Render
   , renderMachineView
   ) where
 
-import Data.List (intercalate, isPrefixOf)
+import Data.List (intercalate, intersperse, isPrefixOf)
 
 import Brick
   ( Widget
@@ -66,38 +66,92 @@ expandedAt :: Fold -> Address -> Bool
 expandedAt NoFold _ = True
 expandedAt (Fold focus) at = at `isUnderneath` focus
 
-renderDisplay :: Fold -> Display -> Widget n
-renderDisplay fold (Display _at shape) = renderShape fold shape
+-- | Where a 'Display' is being drawn, which decides whether it needs
+-- parentheses. **The three rungs are 'Thena.Render'\'s own @Prec@ and the
+-- ladder is deliberately the same one** — @Shape@ carries no brackets, so
+-- every drawer supplies its own, and two drawers that disagree about where
+-- mean the same term reads as two different terms depending on the pane it
+-- is in. `~kq45n`: the engine's printer is the reference.
+data Prec
+  = AtTop   -- ^ a λ, a ∀, an arrow and a let are all fine unparenthesised here
+  | AtApp   -- ^ the function side of an application
+  | AtAtom  -- ^ the argument side of an application
+  deriving (Eq, Ord)
 
-renderShape :: Fold -> Shape -> Widget n
-renderShape fold shape = case shape of
+renderDisplay :: Fold -> Display -> Widget n
+renderDisplay fold = renderAt fold AtTop
+
+renderAt :: Fold -> Prec -> Display -> Widget n
+renderAt fold prec (Display _at shape) = renderShape fold prec shape
+
+renderShape :: Fold -> Prec -> Shape -> Widget n
+renderShape fold prec shape = case shape of
   AVariable name _ -> str name
-  AGlobal name _ -> str name
+  AGlobal name levels -> str (name <> levelArgs levels)
   AUniverse lvl -> str lvl
   ALiteral text -> str text
-  AnApplication f a -> renderDisplay fold f <+> str " " <+> atomW fold a
+  -- Application is left associative, so the function side needs no brackets
+  -- for another application -- but it does for everything that extends to
+  -- the right, which is what `~r3fp9` was: an 'AnElimination' standing here
+  -- drew as @elim … tgt arg@ and the core grammar refuses that outright.
+  AnApplication f a ->
+    parensIf (prec > AtApp) (renderAt fold AtApp f <+> str " " <+> renderAt fold AtAtom a)
   AFunction b body ->
-    str ("(" <> bindingName b <> " : ") <+> renderDisplay fold (bindingType b)
-      <+> str ") -> " <+> renderDisplay fold body
+    parensIf (prec > AtTop) $
+      str ("(" <> bindingName b <> " : ") <+> renderAt fold AtTop (bindingType b)
+        <+> str ") -> " <+> renderAt fold AtTop body
   AnAbstraction b body ->
-    str ("\\" <> bindingName b <> " : ") <+> renderDisplay fold (bindingType b)
-      <+> str " . " <+> renderDisplay fold body
+    parensIf (prec > AtTop) $
+      str ("\\" <> bindingName b <> " : ") <+> renderAt fold AtTop (bindingType b)
+        <+> str " . " <+> renderAt fold AtTop body
   ALet b val body ->
-    str (bindingName b <> " = ") <+> renderDisplay fold val
-      <+> str " : " <+> renderDisplay fold (bindingType b)
-      <+> str " . " <+> renderDisplay fold body
-  AFormer name _levels args -> hBox (str name : map (\a -> str " " <+> atomW fold a) args)
-  AnElimination eliminator _levels params motive methods indices target ->
-    hBox
-      (str eliminator
-        : map (\a -> str " " <+> atomW fold a) (params <> [motive] <> methods <> indices <> [target]))
+    parensIf (prec > AtTop) $
+      str (bindingName b <> " = ") <+> renderAt fold AtTop val
+        <+> str " : " <+> renderAt fold AtTop (bindingType b)
+        <+> str " . " <+> renderAt fold AtTop body
+  -- A saturated former is a spine and brackets like one: bare on a function
+  -- side, bracketed as an argument. An unsaturated one is a bare name.
+  AFormer name levels args
+    | null args -> str (name <> levelArgs levels)
+    | otherwise ->
+        parensIf (prec > AtApp)
+          (hBox
+            (str (name <> levelArgs levels)
+              : map (\a -> str " " <+> renderAt fold AtAtom a) args))
+  -- **The keyword, the levels and a parenthesis per group — his ruling,
+  -- 2026-10-20 (`~23wfh`, `~9wcpr`):** /"We print exactly what engine gives
+  -- us… TUI literally follows what engine gives and doesn't invent lies in
+  -- the frontend layer."/ So the groups are drawn group by group **including
+  -- the empty ones**, which is what keeps the slots positional — a reader
+  -- cannot otherwise tell the methods from the indices. That the empty ones
+  -- read as @()@ is the engine's question and he has taken it (`~2jjqc`).
+  AnElimination eliminator levels params motive methods indices target ->
+    parensIf (prec > AtTop) $
+      hBox
+        [ str ("elim " <> eliminator <> levelArgs levels)
+        , str " " <+> group params
+        , str " " <+> renderAt fold AtAtom motive
+        , str " " <+> group methods
+        , str " " <+> group indices
+        , str " " <+> renderAt fold AtAtom target
+        ]
+    where
+      -- A group is always parenthesised and never elided, so a slot's position
+      -- is readable off the text. 'Thena.Render'\'s @atoms@, exactly.
+      group ds =
+        str "("
+          <+> hBox (intersperse (str " ") (map (renderAt fold AtAtom) ds))
+          <+> str ")"
   -- MS8 phase 149 added the node; **this is a placeholder the engine track
   -- wrote to keep the tree compiling, and how a trusted term should look is
-  -- yours** — see `.jalivert/NOTES.md`. The two types are both here on purpose:
+  -- yours** -- see `.jalivert/NOTES.md`. The two types are both here on purpose:
   -- the pair is the obligation, and `actual` is what says whether the trust is
   -- still load-bearing.
   ATrusted claimed actual body ->
-    hBox (str "trusted" : map (\a -> str " " <+> atomW fold a) [claimed, actual, body])
+    parensIf (prec > AtApp) $
+      hBox
+        (str "trusted"
+          : map (\a -> str " " <+> renderAt fold AtAtom a) [claimed, actual, body])
   ADangling n -> str ("#" <> show n)
   AnElision -> str "…"
   ARegion inner -> renderRegion fold inner
@@ -105,17 +159,20 @@ renderShape fold shape = case shape of
     str (lang <> "`") <+> hBox (map (renderObjectItem fold True) items) <+> str "`"
   AToken text -> str text
 
-atomW :: Fold -> Display -> Widget n
-atomW fold d@(Display _ sh) = case sh of
-  AnApplication {} -> bracket
-  AFunction {}     -> bracket
-  AnAbstraction {} -> bracket
-  ALet {}          -> bracket
-  AnElimination {} -> bracket
-  ATrusted {}      -> bracket
-  _                -> renderDisplay fold d
-  where
-    bracket = str "(" <+> renderDisplay fold d <+> str ")"
+parensIf :: Bool -> Widget n -> Widget n
+parensIf False w = w
+parensIf True w = str "(" <+> w <+> str ")"
+
+-- | A name's level arguments, written the way 'Thena.Syntax.Print.levelArgs'
+-- writes them.
+--
+-- **The atoms are already rendered** — 'Thena.View.Core' normalises them,
+-- because level normalisation is system work and a frontend must never do it.
+-- All that is left is the punctuation. **Empty means nothing is written**, so
+-- everything monomorphic looks exactly as it did.
+levelArgs :: [String] -> String
+levelArgs [] = ""
+levelArgs ls = " {" <> unwords ls <> "}"
 
 -- | 'ARegion' always wraps an 'AnObjectTerm' — the fold decision is made
 -- once, here, and handed down to every item inside as the `expanded` flag,
@@ -126,7 +183,7 @@ renderRegion fold (Display at shape) = case shape of
     | expanded  -> str (lang <> "`") <+> body <+> str "`"
     | otherwise -> withAttr foldAttr body
     where body = hBox (map (renderObjectItem fold expanded) items)
-  other -> renderShape fold other
+  other -> renderShape fold AtTop other
   where
     expanded = expandedAt fold at
 
