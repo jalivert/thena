@@ -23,6 +23,36 @@
 -- is free to depend; the motive's own telescope carries the dependency, which
 -- is what 'scheme' substitutes the earlier fresh index variables to build.
 --
+-- **A SPLIT ALSO GENERALISES THE AMBIENT ENTRIES ITS INDICES MENTION — MS9
+-- phase 191.** A motive abstracts the target's /indices/, so a variable bound
+-- before the target was never refined by a split and the equation about it was
+-- handed to the user: @case e of { evs n en -> … }@ on @e : Ev (s m)@ got
+-- @Eq N (s n) m@ instead of a goal with @m := s n@ in it, because @m@ is rigid
+-- and no transition of "Thena.Tactics.Specialise" may move a rigid variable.
+--
+-- **The construction is to prove the more general thing and apply it to the
+-- variable in hand.** The motive quantifies a /fresh copy/ of each such entry,
+-- __placed after the target__, and states its equations about the copy; the use
+-- site passes the real entry and @refl@. The copy is then one of the method's
+-- own binders, which is the one place @solution@ can reach, so the four
+-- existing transitions do the whole of the refinement and nothing in the kernel
+-- or the development calculus changes.
+--
+-- **It is thesis §2.8, @Discharge@ and the permutations** — /"components may be
+-- permuted in any way preserving dependencies; where dependency exists, reorder
+-- anyway and account for it by introducing functional behaviour"/. The reorder
+-- is the entry moving past the target, and the functional behaviour that
+-- accounts for the dependency is the equation, discharged by @refl@ at the use
+-- site. It is __not__ @raise@, which moves a binding the other way and hands
+-- back the statement one started with.
+--
+-- **The cheap case is subsumed rather than special-cased.** Where nothing the
+-- arm needs mentions the entry the equation is pure noise — the thesis's
+-- @delete-unused@ — and generalising gets that for free: the copy is
+-- quantified, @solution@ fires, the binder is dropped and the goal never
+-- mentioned it. One mechanism with a cheap case, not two that have to agree on
+-- which applies.
+--
 -- **It computes; it does not touch the development.** What comes back is a list
 -- of holes to claim and a term to attach, and "Thena.Engine" does both. That is
 -- §7.4's rule about which operations take a 'Context' and which take the
@@ -37,8 +67,18 @@ module Thena.Tactics.Eliminate
   , spineOf
   ) where
 
+import Data.List (nub)
+
 import Thena.Core.Level (Level, instantiateLevels)
-import Thena.Core.Context (Context, Entry (..), entryIdent, entryType, entryVar, lamOver)
+import Thena.Core.Context
+  ( Context
+  , Entry (..)
+  , entryIdent
+  , entryType
+  , entryVar
+  , lamOver
+  , piOver
+  )
 import Thena.Core.Reduce (whnf)
 import Thena.Core.Term
   ( Core (..)
@@ -79,6 +119,15 @@ import Thena.Global.Env
 data Elimination = Elimination
   { elimMethods   :: [(Var, Ident, Core)]
   , elimTerm      :: Core
+  , elimGeneralised :: [Ident]
+    -- ^ the ambient entries this elimination __generalised__, in context order
+    -- and under the names they already had (MS9 phase 191).
+    --
+    -- __Each is a further binder of every method__, standing before the
+    -- equations, and the names are here because the caller binds them: an arm
+    -- shadows the ambient entry with its own refined copy, which is how the
+    -- body comes to be written against the refinement rather than against the
+    -- equation. See the note on 'generalised' below.
   , elimEquations :: Int
     -- ^ how many equations __each__ method carries — the number of /tied/
     -- indices, and the same for every method of one elimination (MS9 phase
@@ -163,7 +212,7 @@ eliminate env ctx sch n0 goal tgt =
       -- are in no context at all.
       | otherwise = case tiedLevels n1 of
           (Left e,    n) -> (Left (IndexTypeIllTyped e), n)
-          (Right lvls, n) -> scheme d ls ps as tiedIx lvls n
+          (Right lvls, n) -> scheme d ls ps as tiedIx generalised lvls n
       where
         tiedLevels k0 = go tiedIx k0
           where
@@ -221,6 +270,82 @@ eliminate env ctx sch n0 goal tgt =
         -- Which indices keep an equation, and which are simply abstracted.
         tiedIx = [ k | (k, a) <- zip [(0 :: Int) ..] as, not (friendlyAt k a) ]
 
+        -- **Which ambient entries this split generalises** (MS9 phase 191,
+        -- `~6dpg5`) — the entries whose fresh copies the motive quantifies, in
+        -- context order, which is the order their types depend on each other
+        -- in. The module header has the construction and why it is §2.8.
+        --
+        -- __The seeds are the ambient variables a TIED index mentions__, and
+        -- only a tied one: a friendly index is a variable abstracted outright
+        -- and there is nothing left to refine. Then the __forward closure__,
+        -- which is the thesis's own dependency-preservation condition read as a
+        -- rule: an entry whose type mentions a generalised variable is itself
+        -- generalised, or its copy would be about a variable that no longer
+        -- means what it meant. @usesHyp@ is the case — generalising @m@ without
+        -- @h : Ev m@ leaves the arm a hypothesis it cannot use.
+        --
+        -- __IT IS UNCONDITIONAL, AND THAT HAS A MEASURED COST — this phase's
+        -- measurement, which `~6dpg5` asked for.__ A copy is made for every seed,
+        -- including one whose refinement nothing but the equation reads: making
+        -- it is what turns a stuck equation into a solved one, so there is no
+        -- seed it is free to skip. What is not free is the other caller. In a
+        -- split "Thena.Tactics.Specialise" solves the copy and drops the binder,
+        -- so the arm never sees it; under @eliminate-core@ the methods are
+        -- written __by hand__ and every copy is a binder the author has to take.
+        -- @examples\/dependent-index.thena.script@ and
+        -- @examples\/determinacy-tactics.thena.script@ both had to be rewritten
+        -- for that, and the item's claim that generalising \"always gets that case
+        -- for free\" holds only on the specialised side.
+        --
+        -- __And it is all or nothing.__ Three conditions make the copies
+        -- expressible at all, and each is a way the motive would otherwise not
+        -- typecheck rather than a preference: every generalised entry must be a
+        -- 'Hypothesis', since a 'Definition' has a value the copy would lose;
+        -- none may occur in the family's /parameters/, which the scheme fixes;
+        -- and none may occur in the /type/ of a tied index, or the equation
+        -- @Eq Iₖ iₖ aₖ@ would have its two sides at two different types, which
+        -- is the same limit 'dependentTied' states one step over. Where one
+        -- fails, nothing is generalised and the split behaves exactly as it did
+        -- before this phase — the equation is stated and kept.
+        generalised = if viable then closed else []
+          where
+            -- A friendly index's variable is abstracted outright, so it is
+            -- neither a seed nor a reader nor part of the closure.
+            friendlies = [ v | (k, a) <- zip [(0 :: Int) ..] as
+                             , friendlyAt k a
+                             , Free v <- [a] ]
+
+            fixed e = entryVar e `notElem` targetVars
+                        && entryVar e `notElem` friendlies
+
+            seeds = nub [ v | k <- tiedIx
+                            , v <- freeVars (as !! k)
+                            , v `notElem` targetVars
+                            , v `notElem` friendlies ]
+
+            -- In context order, whatever order the closure found them in.
+            closed = [ entryVar e | e <- ctx, entryVar e `elem` grow seeds ]
+
+            grow vs =
+              let vs' = nub (vs ++ [ entryVar e
+                                   | e <- ctx
+                                   , fixed e
+                                   , any (`elem` entryUses e) vs
+                                   ])
+               in if length vs' == length vs then vs else grow vs'
+
+            viable =
+              not (null closed)
+                && all isHypothesisOf closed
+                && not (any (`elem` concatMap freeVars ps) closed)
+                && not (any (`elem` concatMap freeVars tiedIndexTypes) closed)
+
+            tiedIndexTypes =
+              [ substVars (zip (map entryVar (inductiveParameters d)) ps)
+                          (entryType (inductiveIndices d !! k))
+              | k <- tiedIx
+              ]
+
         -- §3.7's limit, and it binds a *tied* index only. @Eq Iₖ iₖ aₖ@ is
         -- homogeneous, and @iₖ@ is the generalised index while @aₖ@ is the
         -- actual one, so @Iₖ@ may not mention an earlier index: instantiated
@@ -242,12 +367,33 @@ eliminate env ctx sch n0 goal tgt =
           x : _ -> Just x
           []    -> Nothing
 
-    scheme d ls ps as tiedIx tiedLvs n1 =
+    scheme d ls ps as tiedIx gen tiedLvs n1 =
       let ni = length as
 
           -- One fresh variable per index, plus the motive's own target binder.
           (ivs, n2) = freshen ni n1
           (xv,  n3) = fresh n2
+
+          -- One fresh copy per generalised ambient entry (MS9 phase 191).
+          (gvs, n3') = freshen (length gen) n3
+
+          -- What the motive says about an ambient entry, it says about the
+          -- copy: the goal, and the index expressions the equations are stated
+          -- at. The use site undoes it by passing the entry itself.
+          genSubst = [ (v, Free gv) | (v, gv) <- zip gen gvs ]
+
+          -- The copies as a telescope, each one's type carrying the __earlier__
+          -- copies, which is what makes a chain like
+          -- @(p' : Term) (s' : Step p' q)@ expressible — the same reason
+          -- 'indexTys' substitutes the earlier index binders below.
+          --
+          -- __Under the entry's own 'Ident'__, because the caller binds an arm's
+          -- copy by that name and so shadows the entry it came from.
+          genEntries =
+            [ Hypothesis gv (entryIdent e) (substVars (take j genSubst) (entryType e))
+            | (j, (v, gv)) <- zip [(0 :: Int) ..] (zip gen gvs)
+            , e            <- [ x | x <- ctx, entryVar x == v ]
+            ]
 
           -- The type each index is generalised at: the family's parameters
           -- replaced by the target's, and each /earlier/ index binder by this
@@ -269,9 +415,16 @@ eliminate env ctx sch n0 goal tgt =
           familyAt is = foldl App (Global (inductiveName d) ls) (ps ++ is)
 
           -- The generalised goal. Target first; see the note above.
-          (goalX,  n4) = replaceTerm tgt xv n3 goal
+          --
+          -- **The indices are abstracted before the copies are substituted**,
+          -- and that order generalises more: an occurrence of @aₖ@ in the goal
+          -- becomes the index binder outright, where substituting first would
+          -- have left it as @aₖ@ about a copy. The two agree on the arm's goal
+          -- either way, because the equation ties the binder to the copy.
+          (goalX,  n4) = replaceTerm tgt xv n3' goal
           (goalIx, n5) = foldl abstractIndex (goalX, n4) (zip ivs as)
           abstractIndex (g, n) (iv, a) = replaceTerm a iv n g
+          goalGen = substVars genSubst goalIx
 
           -- Which indices keep an equation. Decided by 'build'; see the note
           -- on 'friendlyAt' there.
@@ -287,12 +440,20 @@ eliminate env ctx sch n0 goal tgt =
           -- needs a variable to close over even when nothing refers to it,
           -- exactly as 'Thena.Global.Env.eliminatorType' mints one per
           -- induction hypothesis.
-          (equations, n6) = constrain tied n5 goalIx
+          --
+          -- **Stated about the copy** (MS9 phase 191): @aₖ@ with the
+          -- generalised entries replaced, so that the equation constrains the
+          -- method's own binder and @solution@ can reach it. @tied@ keeps the
+          -- original @aₖ@, which is what the use site's @refl@ is at.
+          (equations, n6) = constrain tied n5 goalGen
           constrain []                  n b = (b, n)
           constrain ((lv, (ity, iv, a)) : cs) n b =
             let (body, na) = constrain cs n b
                 (qv,   nb) = fresh na
-             in (Pi (Ident "q") (equationOf lv ity (Free iv) a) (close qv body), nb)
+             in ( Pi (Ident "q")
+                     (equationOf lv ity (Free iv) (substVars genSubst a))
+                     (close qv body)
+                , nb )
 
           -- The context the motive's body lives in, which is also where its
           -- universe is read.
@@ -303,16 +464,21 @@ eliminate env ctx sch n0 goal tgt =
           bodyCtx =
             ctx ++ indexEntries ++ [Hypothesis xv (Ident "target") (familyAt (map Free ivs))]
 
+          -- @∀ y⃗' -> eqs -> G'@. **The copies stand outside the equations**
+          -- because the equations are stated about them, and after the target
+          -- because that is the one side of it @solution@ can reach.
+          motiveBody = piOver genEntries equations
+
           motiveTerm =
             lamOver indexEntries
-              (Lam (Ident "target") (familyAt (map Free ivs)) (close xv equations))
+              (Lam (Ident "target") (familyAt (map Free ivs)) (close xv motiveBody))
        in
           -- Reading the universe **is** the check that the abstraction was
           -- type-preserving; the level is needed anyway, so it costs nothing
           -- extra (thesis §3.5.3, and see this module's header).
-          case sortOf env bodyCtx n6 equations of
+          case sortOf env bodyCtx n6 motiveBody of
             (Left e, _, n7)  -> (Left (MotiveIllTyped e), n7)
-            (Right l, _, n7) -> assemble d ls ps as tied motiveTerm l n7
+            (Right l, _, n7) -> assemble d ls ps as gen genEntries tied motiveTerm l n7
 
     -- **Which scheme's type the methods are read off, and at which levels.**
     -- One of exactly two places the scheme is read.
@@ -362,7 +528,7 @@ eliminate env ctx sch n0 goal tgt =
         foldl App (Global (caseName (inductiveName d)) elargs)
           (ps ++ [motiveTerm] ++ map Free mvs ++ as ++ [tgt])
 
-    assemble d ls ps as tied motiveTerm l n7 =
+    assemble d ls ps as gen genEntries tied motiveTerm l n7 =
       let (ety0, elvs, n8) = schemeType d l n7
           -- **Instantiated at the target's level arguments** (phase 31d).
           -- 'Thena.Core.Typing' does the same for a written @elim@; the tactic
@@ -396,12 +562,20 @@ eliminate env ctx sch n0 goal tgt =
           -- The equations are reflexive at the use site, which is the whole
           -- point of the scheme (§3.7, thesis §3.5). Only the tied indices have
           -- one; a friendly index was abstracted outright and carries none.
+          --
+          -- **And each generalised entry is passed as itself** (MS9 phase 191),
+          -- before the equations, in the order the motive quantified the copies.
+          -- That application is what §2.8 calls discharging the dependency: the
+          -- copy becomes the entry again, @aₖ@ becomes @aₖ@, and the @refl@
+          -- below is at the index the target really has.
           proof = foldl App node
-            [ Canonical reflexivity [lv] [ity, a] | (lv, (ity, _, a)) <- tied ]
+            ([ Free v | v <- gen ]
+             ++ [ Canonical reflexivity [lv] [ity, a] | (lv, (ity, _, a)) <- tied ])
        in case check env (ctx ++ methodEntries) n10 proof goal of
             (Left e, _, n11)   -> (Left (SchemeIllTyped e), n11)
             (Right (), _, n11) ->
-              (Right (Elimination holes proof (length tied)), n11)
+              ( Right (Elimination holes proof (map entryIdent genEntries) (length tied))
+              , n11 )
 
     -- Peel @k@ Π domains off a type, instantiating each binder with itself is
     -- not possible — nothing refers to a method — so a method type is read

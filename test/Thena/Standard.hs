@@ -744,6 +744,33 @@ splitClauses =
       , Bind (Op.PVar "r") Nothing (Op.Call "intro-ihs" [Ref "ns", Ref "k2"])
       , Do (Op.Return (Ref "r"))
       ]
+    -- **The ambient entries the split generalised, bound under the names they
+    -- already had** (MS9 phase 191) — @intro-pattern@ without the pattern, and
+    -- the shadowing is the point: the copy carries the refined type and the
+    -- name reaches it, which is the opposite of @intro-ihs@'s freshening. A
+    -- copy an equation /solved/ has no binder and is bound to nothing: the
+    -- refinement is already in the goal, and naming an outer position is what a
+    -- dot pattern would ask for.
+  , Rule (GlobalName "intro-refined")
+      [PList [] Nothing, PList [] Nothing, PVar "k"] []
+      [Do (Op.Return (Ref "k"))]
+  , Rule (GlobalName "intro-refined")
+      [ PList [PVar "n"] (Just (PVar "ns"))
+      , PList [PNone] (Just (PVar "fs")), PVar "k"
+      ] []
+      [ Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "n")))
+      , Bind (Op.PVar "r") Nothing
+          (Op.Call "intro-refined" [Ref "ns", Ref "fs", Ref "k2"])
+      , Do (Op.Return (Ref "r"))
+      ]
+  , Rule (GlobalName "intro-refined")
+      [ PList [PVar "n"] (Just (PVar "ns"))
+      , PList [PSome (PVar "v")] (Just (PVar "fs")), PVar "k"
+      ] []
+      [ Bind (Op.PVar "r") Nothing
+          (Op.Call "intro-refined" [Ref "ns", Ref "fs", Ref "k"])
+      , Do (Op.Return (Ref "r"))
+      ]
   , Rule (GlobalName "same-length") [PList [] Nothing, PList [] Nothing] [] []
   , Rule (GlobalName "same-length")
       [PList [PVar "p"] (Just (PVar "ps")), PList [PVar "n"] (Just (PVar "ns"))] []
@@ -783,6 +810,7 @@ splitClauses =
       [call "elaborate" [Ref "b"]]
   , Rule (GlobalName "elaborate-arm")
       [ PVar "t", PVar "c", PVar "sub", PVar "forced"
+      , PPair (PVar "gens") (PVar "k"), PVar "refined"
       , PPair (PVar "p") (PVar "ob")
       ] []
       [ Bind (Op.PVar "as") Nothing (Op.PatternArguments (Ref "p"))
@@ -797,7 +825,11 @@ splitClauses =
           (Op.Call "intro-pattern" [Ref "as", Ref "forced", Ref "k0"])
       , Bind (Op.PVar "ihs") Nothing (Op.Call "ihs-for" [Ref "t", Ref "c"])
       , Bind (Op.PVar "k2") Nothing (Op.Call "intro-ihs" [Ref "ihs", Ref "k1"])
-      , Do (Goto (Ref "k2"))
+        -- **The copies last**, because that is where the method binds them and
+        -- because a solved copy's @define@ may mention the pattern's binders.
+      , Bind (Op.PVar "k3") Nothing
+          (Op.Call "intro-refined" [Ref "gens", Ref "refined", Ref "k2"])
+      , Do (Goto (Ref "k3"))
       , call "arm-needs-body" [Ref "ob"]
       , Do (Goto (Ref "sub"))
       , call "solve" []
@@ -806,8 +838,12 @@ splitClauses =
     -- by a rule with a clause for @some@ and none for @none@, so the refusal
     -- names the missing arm and not the search that went looking for it.
   , Rule (GlobalName "case-needs-an-arm")
-      [ PVar "t", PVar "c", PVar "sub", PVar "forced", PSome (PVar "a") ] []
-      [call "elaborate-arm" [Ref "t", Ref "c", Ref "sub", Ref "forced", Ref "a"]]
+      [ PVar "t", PVar "c", PVar "sub", PVar "forced", PVar "m", PVar "refined"
+      , PSome (PVar "a")
+      ] []
+      [ call "elaborate-arm"
+          [Ref "t", Ref "c", Ref "sub", Ref "forced", Ref "m", Ref "refined", Ref "a"]
+      ]
     -- **And a case that vanished takes no body** — between them the two clauses
     -- are every legal shape: no arm at all, or an arm that stops at the arrow.
   , Rule (GlobalName "vanished-case-takes-no-body") [PNone] [] []
@@ -822,20 +858,23 @@ splitClauses =
     -- user write arms. The arm-less clause's test is complementary to the other
     -- two, so this search records no choice point — @pick@'s shape.
   , Rule (GlobalName "one-case")
-      [PVar "t", PVar "c", PVar "sub", PVar "forced"]
+      [PVar "t", PVar "c", PVar "sub", PVar "forced", PVar "m", PVar "refined"]
       [SplitHasNoArms (Ref "t")]
       [call "case-must-vanish" [Ref "sub"]]
   , Rule (GlobalName "one-case")
-      [PVar "t", PVar "c", PNone, PVar "forced"]
+      [PVar "t", PVar "c", PNone, PVar "forced", PVar "m", PVar "refined"]
       [SplitHasArms (Ref "t")]
       [ Bind (Op.PVar "oa") Nothing (Op.Call "arm-for" [Ref "t", Ref "c"])
       , call "vanished-case-takes-no-body" [Ref "oa"]
       ]
   , Rule (GlobalName "one-case")
-      [PVar "t", PVar "c", PSome (PVar "sub"), PVar "forced"]
+      [ PVar "t", PVar "c", PSome (PVar "sub"), PVar "forced", PVar "m"
+      , PVar "refined"
+      ]
       [SplitHasArms (Ref "t")]
       [ Bind (Op.PVar "oa") Nothing (Op.Call "arm-for" [Ref "t", Ref "c"])
-      , call "case-needs-an-arm" [Ref "t", Ref "c", Ref "sub", Ref "forced", Ref "oa"]
+      , call "case-needs-an-arm"
+          [Ref "t", Ref "c", Ref "sub", Ref "forced", Ref "m", Ref "refined", Ref "oa"]
       ]
     -- **Every arm the user wrote was asked for** (MS9 phase 190, his ruling of
     -- 2026-10-20). Elaboration asks the datatype's constructors for arms; these
@@ -877,27 +916,30 @@ splitClauses =
       , call "arms-are-distinct" [Ref "r"]
       ]
   , Rule (GlobalName "split-cases")
-      [PVar "t", PList [] Nothing, PList [] Nothing, PVar "k"] [] []
+      [PVar "t", PList [] Nothing, PList [] Nothing, PVar "m"] [] []
   , Rule (GlobalName "split-cases")
       [ PVar "t", PList [PVar "c"] (Just (PVar "cs"))
-      , PList [PVar "mh"] (Just (PVar "ms")), PVar "k"
+      , PList [PVar "mh"] (Just (PVar "ms")), PVar "m"
       ] []
       [ Do (Goto (Ref "mh"))
         -- **@specialise@ is TOLD which hypotheses the method carries** (MS9
         -- phase 188) rather than counting them off the constructor, which
         -- silently assumed the inductive scheme and made @case … of@ refuse
-        -- its own methods as misshapen.
+        -- its own methods as misshapen. **And what the motive added to every
+        -- method** (MS9 phase 191), threaded whole.
       , Bind (Op.PVar "ihs") Nothing (Op.Call "ihs-for" [Ref "t", Ref "c"])
-      , Bind (PPair (Op.PVar "sub") (Op.PVar "forced")) Nothing
-          (Op.Specialise (Ref "c") (Ref "ihs") (Ref "k"))
-      , call "one-case" [Ref "t", Ref "c", Ref "sub", Ref "forced"]
+      , Bind (PPair (Op.PVar "sub")
+                    (PPair (Op.PVar "forced") (Op.PVar "refined"))) Nothing
+          (Op.Specialise (Ref "c") (Ref "ihs") (Ref "m"))
+      , call "one-case"
+          [Ref "t", Ref "c", Ref "sub", Ref "forced", Ref "m", Ref "refined"]
       , Do (Goto (Ref "mh"))
       , call "solve" []
-      , call "split-cases" [Ref "t", Ref "cs", Ref "ms", Ref "k"]
+      , call "split-cases" [Ref "t", Ref "cs", Ref "ms", Ref "m"]
       ]
   , Rule (GlobalName "split-over")
-      [PVar "t", PVar "cs", PPair (PVar "hs") (PVar "k")] []
-      [call "split-cases" [Ref "t", Ref "cs", Ref "hs", Ref "k"]]
+      [PVar "t", PVar "cs", PPair (PVar "hs") (PVar "m")] []
+      [call "split-cases" [Ref "t", Ref "cs", Ref "hs", Ref "m"]]
   ]
   where
     call nm as = Do (Call nm as)

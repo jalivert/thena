@@ -1249,10 +1249,10 @@ perform instr rest m = case operation instr of
   -- **no** subgoal at all — a conflicting equation closes the method, which is
   -- the impossible case vanishing — and then nothing is claimed and the guess
   -- mentions nothing.
-  Op.Specialise c hyps k ->
+  Op.Specialise c hyps gk ->
     case (,,) <$> text c
               <*> operandValue (env (exec m)) hyps
-              <*> operandValue (env (exec m)) k of
+              <*> operandValue (env (exec m)) gk of
     Left e -> failure e m
     -- **The hypotheses this method carries, as the list the arm will bind**
     -- (MS9 phase 188). Only the count is used here, and the list is what the
@@ -1260,9 +1260,17 @@ perform instr rest m = case operation instr of
     -- answers it, and @intro-ihs@ consumes the same value. Reading the count
     -- off the declaration instead assumed the inductive scheme, and @caseD@'s
     -- methods carry none.
-    Right (w, VList hs, VInt eqs) -> case focus (cursor (development m)) of
+    --
+    -- **And what the motive added to every method, as the pair the elimination
+    -- answered with** (MS9 phase 191): the ambient entries it generalised, and
+    -- how many equations it stated. The same argument as above — it is the value
+    -- the caller already holds, and it is threaded rather than taken apart
+    -- because nothing between the two ops has any business in it.
+    Right (w, VList hs, VPair (VList gns) (VInt eqs)) ->
+      case focus (cursor (development m)) of
       OnComponent (Component.Claim x i s) ->
-        case specialise (globals m) contextAt (names m) (GlobalName w) (length hs) eqs s of
+        case specialise (globals m) contextAt (names m) (GlobalName w)
+                        (length hs) (length gns) eqs s of
           (Left e,  n1) -> failure (CannotSpecialise e) m { names = n1 }
           (Right sp, n1) ->
             let (holes, named) = claimSubgoals (cursor (development m)) (specialisedGoal sp)
@@ -1294,8 +1302,11 @@ perform instr rest m = case operation instr of
                                  (VOption (case named of
                                              (v, _) : _ -> Just (VTerm (Free v))
                                              []         -> Nothing))
-                                 (VList [ VOption (fmap VTerm f)
-                                        | f <- specialisedForced sp ]))
+                                 (VPair
+                                    (VList [ VOption (fmap VTerm f)
+                                           | f <- specialisedForced sp ])
+                                    (VList [ VOption (fmap VTerm f)
+                                           | f <- specialisedRefined sp ])))
                               m { development = Development cur, names = n1 }
       OnComponent _ -> failure NotAHole m
       _             -> failure (CannotMove NotOnTheSpine) m
@@ -1970,17 +1981,21 @@ perform instr rest m = case operation instr of
                in case replaceComponent guess holes of
                     Left e    -> failure (CannotMove e) m
                     Right cur ->
-                      -- **The holes it claimed, and the equation count, as a
-                      -- pair** — his ruling of 2026-10-19.
+                      -- **The holes it claimed, and what the motive added to
+                      -- every method, as a pair** — his ruling of 2026-10-19,
+                      -- the second half grown in MS9 phase 191.
                       -- 'Thena.Instral.Ops.resultOf' carries the argument. The
                       -- holes are variables because 'Thena.Instral.Ops.Goto' is
-                      -- the only move a rule can aim at a hole it /found/, and
-                      -- the count is one number for the whole elimination
-                      -- because that is what @specialise@ needs and nothing
-                      -- else can work out.
+                      -- the only move a rule can aim at a hole it /found/; the
+                      -- generalised names and the equation count are one fact
+                      -- about every method's shape, which is what @specialise@
+                      -- needs and nothing else can work out.
                       producing (Saying (subgoalMessage (map snd named)))
                                 (VPair (VList [ VTerm (Free v) | (v, _) <- named ])
-                                       (VInt (elimEquations el)))
+                                       (VPair
+                                          (VList [ VText w
+                                                 | Ident w <- elimGeneralised el ])
+                                          (VInt (elimEquations el))))
                                 m { development = Development cur, names = n1 }
         OnComponent _ -> failure NotAHole m
         _             -> failure (CannotMove NotOnTheSpine) m

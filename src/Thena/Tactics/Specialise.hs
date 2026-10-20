@@ -5,8 +5,14 @@
 -- an elimination at specific indices reads
 --
 -- @
--- ∀ Δc -> IHs -> Eq I₁ u₁ v₁ -> … -> Eq Iₖ uₖ vₖ -> T
+-- ∀ Δc -> IHs -> y⃗' -> Eq I₁ u₁ v₁ -> … -> Eq Iₖ uₖ vₖ -> T
 -- @
+--
+-- where @y⃗'@ are the fresh copies the motive generalised the ambient entries
+-- its indices mention to (MS9 phase 191). **They are pattern variables here and
+-- that is the whole of why they exist**: @solution@ may move a binder of the
+-- method and may not move a rigid ambient variable, so a copy is the one thing
+-- an equation about an outer variable can be solved against.
 --
 -- and the user discharges every equation by hand. Across @examples\/@ that is
 -- 519 uses of a generated @noConfusion@, 79 eliminations of @Empty@ and 29
@@ -105,6 +111,23 @@ import Thena.Tactics.Eliminate (spineOf)
 -- __Only the solution transition removes a binder__, so only it writes an entry
 -- here (MS9 phase 185).
 --
+-- 'specialisedRefined' is __the same report for the generalised copies__, in the
+-- order the motive quantified them (MS9 phase 191). @'Just' t@ is a copy an
+-- equation solved, which is how an index position bound outside the split comes
+-- to be refined; 'Nothing' is one that survived as a binder, which is how a
+-- /hypothesis/ about such a position reaches the arm with its type refined.
+-- __The caller binds both under the ambient entry's own name__, so the arm's
+-- body is written against the refinement — a @define@ for the first and a
+-- @prim-lambda@ for the second, which is 'specialisedForced'\'s own treatment
+-- and deliberately the same mechanism.
+--
+-- __And unlike a forced constructor argument, a solved copy MAY mention the
+-- method's own binders.__ The solving side of an equation about a copy is the
+-- /constructor's/ index, so @a'@ comes out as @c1@ rather than as a term of the
+-- ambient context. Those binders are @Δc@ and the hypotheses, which stand
+-- before the copies, so the @define@ is well scoped exactly where the caller
+-- puts it — after the pattern's binders and after the hypotheses, never before.
+--
 -- __This is the only thing that knows.__ The subgoal is a type with fewer
 -- binders than the constructor has arguments and nothing in it says which ones
 -- are missing, so a clause introducing an arm's pattern variables cannot work it
@@ -118,9 +141,10 @@ import Thena.Tactics.Eliminate (spineOf)
 -- entries here are in scope wherever the subgoal is, which is what lets the
 -- caller bind one with @define@ above the hole.
 data Specialisation = Specialisation
-  { specialisedGoal   :: [(Var, Ident, Core)]
-  , specialisedTerm   :: Core
-  , specialisedForced :: [Maybe Core]
+  { specialisedGoal    :: [(Var, Ident, Core)]
+  , specialisedTerm    :: Core
+  , specialisedForced  :: [Maybe Core]
+  , specialisedRefined :: [Maybe Core]
   }
   deriving (Eq, Show)
 
@@ -141,17 +165,23 @@ data Specialisation = Specialisation
 -- the caller was eliminating. @caseD@'s methods carry none, so the assumption
 -- made @case … of@ refuse its own methods as misshapen. The caller knows which
 -- scheme it asked for; this does not, and no longer guesses.
+--
+-- __@g@ is how many copies the motive generalised__ (MS9 phase 191), and the
+-- same argument applies to it: nothing in the type marks where the copies end
+-- and the equations begin, and the caller is the one that knows. They join
+-- @Δc@ and the hypotheses as __pattern variables__, which is the only change
+-- the four transitions need.
 specialise
-  :: GlobalEnv -> Context -> Int -> GlobalName -> Int -> Int -> Core
+  :: GlobalEnv -> Context -> Int -> GlobalName -> Int -> Int -> Int -> Core
   -> (Either SpecialiseError Specialisation, Int)
-specialise env ctx n0 cn h k mty = case lookupConstructor cn env of
+specialise env ctx n0 cn h g k mty = case lookupConstructor cn env of
   Nothing -> (Left (NotThatConstructor cn), n0)
   Just (d, c)
-    | k < 0 -> (Left (MethodNotShaped (arity d c) k mty), n0)
-    | otherwise -> case peel (arity d c + k) mty n0 of
+    | k < 0 || g < 0 -> (Left (MethodNotShaped (arity d c) k mty), n0)
+    | otherwise -> case peel (arity d c + g + k) mty n0 of
         Nothing -> (Left (MethodNotShaped (arity d c) k mty), n0)
         Just (tel, body, n1) ->
-          let (delta, raw) = splitAt (arity d c) tel
+          let (delta, raw) = splitAt (arity d c + g) tel
            in case mapM equationOf raw of
                 Nothing -> (Left (NotAnEquation (map entryType raw)), n1)
                 Just es ->
@@ -159,7 +189,8 @@ specialise env ctx n0 cn h k mty = case lookupConstructor cn env of
                    in case solve hv delta es body n2 of
                         (Left e, n3) -> (Left e, n3)
                         (Right (want, tm, sol), n3) ->
-                          verify hv want tm (forced c delta sol) n3
+                          verify hv want tm (forced c delta sol)
+                                 (refined d c delta sol) n3
   where
     -- One binder per constructor argument, plus the hypotheses the caller says
     -- this method carries. 'Thena.Global.Env.eliminatorType'\'s @methodType@
@@ -178,16 +209,24 @@ specialise env ctx n0 cn h k mty = case lookupConstructor cn env of
       | e <- take (length (constructorArguments c)) telescope
       ]
 
+    -- The same report for the generalised copies, which are the __last__ @g@
+    -- entries of the telescope: 'Thena.Tactics.Eliminate' quantifies them after
+    -- the target, so the motive puts them after the constructor's arguments and
+    -- after the hypotheses. Nothing has to be carried to find them — @arity@ is
+    -- where they begin.
+    refined d c telescope sol =
+      [ lookup (entryVar e) sol | e <- drop (arity d c) telescope ]
+
     -- The hole and the term that uses it, checked in the context that will hold
     -- both. Checking here is the whole of §7.2's bargain for a coarse op: a
     -- wrong proof term is caught, so only the caller's /choice/ of what to
     -- specialise is unguarded.
-    verify hv want tm fs n =
+    verify hv want tm fs gs n =
       let hole = [ (hv, Ident (nameOf cn ++ "Case"), w) | Just w <- [want] ]
           with = ctx ++ [ Hypothesis v i t | (v, i, t) <- hole ]
        in case check env with n tm mty of
             (Left e, _, n1)   -> (Left (SpecialisedIllTyped e), n1)
-            (Right (), _, n1) -> (Right (Specialisation hole tm fs), n1)
+            (Right (), _, n1) -> (Right (Specialisation hole tm fs gs), n1)
 
     nameOf (GlobalName w) = w
 

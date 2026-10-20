@@ -344,8 +344,9 @@ declarations =
 --
 -- __This is the shape `~w23j5` was blocked on__, and his ruling of 2026-10-19
 -- unblocked it: @prim-eliminate@ answers with the method holes it claimed and
--- the equation count, as a pair, so @split-all@ below walks the constructors
--- and the holes in step and nothing has to be told a hole's name.
+-- what the motive added to each method, as a pair, so @split-all@ below walks
+-- the constructors and the holes in step and nothing has to be told a hole's
+-- name.
 --
 -- Two things make the walk work and both are decisions, not accidents.
 -- @constructors-of@ answers __in declaration order__, which is the order the
@@ -354,7 +355,8 @@ declarations =
 -- the only handle that survives 'Thena.Development.Cursor.freshIdent'
 -- renaming a method's display name, as a nested split makes it do.
 --
--- __The count is one number for the whole elimination__, so it is passed down
+-- __What the motive added is one fact about the whole elimination__ — the
+-- ambient entries it generalised and the equation count — so it is passed down
 -- the recursion unchanged rather than paired with each hole.
 --
 -- @split-second@ exists for one assertion the walk cannot make on its own:
@@ -370,7 +372,7 @@ splitBase = unlines
   , "     ; cs = constructors-of d"
   , "     ; split-each cs hs k"
   , ""
-  , "split-each : List Name -> List Core -> Int -> ()"
+  , "split-each : List Name -> List Core -> (List Name, Int) -> ()"
     -- Nothing left to split, and a bare `do` is the empty body — the same
     -- spelling E⟦_⟧ uses in the shipped base.
   , "rule split-each [] [] k :- do"
@@ -421,7 +423,7 @@ specialises what c k src want = testCase what $
 refused :: String -> Int -> String -> Maybe SpecialiseError
 refused c k src =
   case fst (specialise eqNat natContext natCounter (GlobalName c)
-              (hypsOf eqNat c) k
+              (hypsOf eqNat c) 0 k
               (term eqNat natContext natCounter src)) of
     Left e  -> Just e
     Right _ -> Nothing
@@ -430,7 +432,7 @@ refused c k src =
 -- fixture, not a test result.
 run' :: GlobalEnv -> Context -> Int -> String -> Int -> Core -> Specialisation
 run' env ctx n c k mty =
-  case fst (specialise env ctx n (GlobalName c) (hypsOf env c) k mty) of
+  case fst (specialise env ctx n (GlobalName c) (hypsOf env c) 0 k mty) of
   Right s -> s
   Left e  -> error (c ++ ": " ++ show e)
 

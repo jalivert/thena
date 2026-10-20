@@ -310,6 +310,45 @@ rule intro-ihs [n, ...ns] k :-
      ; r = intro-ihs ns k2
      ; return r
 
+-- THE AMBIENT ENTRIES THE SPLIT GENERALISED, BOUND UNDER THE NAMES THEY ALREADY
+-- HAD — MS9 phase 191, `~6dpg5`. A motive abstracts the target's indices, so a
+-- variable bound before the target was never refined; the motive now quantifies
+-- a fresh copy of each such entry after the target, and these are the copies.
+--
+-- THE SHADOWING IS THE WHOLE POINT, and it is the exact opposite of
+-- `intro-ihs`'s freshening one rule up. The ambient entry is still in scope and
+-- still has its old type; the copy has the refined one. Binding the copy under
+-- the ambient name is what makes the arm's body read `s0` and get the refined
+-- `s0` — which is what Agda and Idris do by refining the context in place, and
+-- what the equation handed to the user was standing in for.
+--
+-- IT IS `intro-pattern` WITHOUT THE PATTERN, and it walks the same two lists:
+-- `none` is a copy the subgoal still binds, so `prim-lambda` takes it under the
+-- ambient name, and that is the refinement — `s0 : Step p p'` reaching the arm
+-- as `s0 : Step true p'`.
+--
+-- A SOLVED COPY IS BOUND TO NOTHING, AND THE NAME KEEPS ITS AMBIENT MEANING.
+-- The copy is an index position the split has forced — `p` becoming `true` — and
+-- the goal and every surviving copy's type already carry it, because the
+-- specialiser substituted it before handing the subgoal over. What is missing is
+-- only a NAME for it inside the arm, and there is nowhere in today's surface for
+-- the user to have asked for one: an outer position is not in an arm's pattern.
+-- Binding `p` to `true` here would be the elaborator redefining a name the user
+-- bound outside the split, unasked. A dot pattern is the syntax that asks —
+-- `~hzcgd`'s option A — and the term the define would use is reported for it.
+--
+-- IT RUNS AFTER THE PATTERN AND AFTER THE HYPOTHESES, and that is not a
+-- preference: the copies stand after both in the method.
+intro-refined : List Name -> List (Option Core) -> Core -> Core
+rule intro-refined [] [] k :- do return k
+rule intro-refined [n, ...ns] [none, ...fs] k :-
+  do k2 = prim-lambda n
+     ; r = intro-refined ns fs k2
+     ; return r
+rule intro-refined [n, ...ns] [(some v), ...fs] k :-
+  do r = intro-refined ns fs k
+     ; return r
+
 -- The arm's pattern must name as many variables as the constructor takes
 -- arguments. Two lists and no arithmetic: they are walked together, so a
 -- mismatch is a list that runs out first and there is no clause for it.
@@ -374,9 +413,11 @@ rule pick w c p b r :- when (different-name w c) do a = arm-for r c ; return a
 arm-needs-body : Option Surface -> ()
 rule arm-needs-body (some b) :- do call elaborate b
 
--- The arm, under the bindings its pattern names.
-elaborate-arm : Surface -> Name -> Core -> List (Option Core) -> (Pattern, Option Surface) -> ()
-rule elaborate-arm t c sub forced (p, ob) :-
+-- The arm, under the bindings its pattern names and the copies the split
+-- refined. The three groups are introduced in the order the method binds them:
+-- the constructor's arguments, then the hypotheses, then the generalised copies.
+elaborate-arm : Surface -> Name -> Core -> List (Option Core) -> (List Name, Int) -> List (Option Core) -> (Pattern, Option Surface) -> ()
+rule elaborate-arm t c sub forced (gens, k) refined (p, ob) :-
   do as = pattern-arguments p
      ; args = constructor-arguments c
      ; same-length as args
@@ -388,7 +429,8 @@ rule elaborate-arm t c sub forced (p, ob) :-
      ; k1 = intro-pattern as forced k0
      ; ihs = ihs-for t c
      ; k2 = intro-ihs ihs k1
-     ; goto k2
+     ; k3 = intro-refined gens refined k2
+     ; goto k3
      ; arm-needs-body ob
      ; goto sub
      ; solve
@@ -396,8 +438,9 @@ rule elaborate-arm t c sub forced (p, ob) :-
 -- A CASE THAT SURVIVED NEEDS AN ARM — coverage, and this is where it is said.
 -- One clause for `some` and none for `none`, so the refusal names the user's
 -- complaint: there is a method left and no arm was written for it.
-case-needs-an-arm : Surface -> Name -> Core -> List (Option Core) -> Option (Pattern, Option Surface) -> ()
-rule case-needs-an-arm t c sub forced (some a) :- do elaborate-arm t c sub forced a
+case-needs-an-arm : Surface -> Name -> Core -> List (Option Core) -> (List Name, Int) -> List (Option Core) -> Option (Pattern, Option Surface) -> ()
+rule case-needs-an-arm t c sub forced m refined (some a) :-
+  do elaborate-arm t c sub forced m refined a
 
 -- AND A CASE THAT VANISHED TAKES NO BODY — the other half of his ruling of
 -- 2026-10-20. Two clauses, and between them they are every legal shape: no arm
@@ -439,15 +482,15 @@ rule case-must-vanish none :- do
 -- write arms. The arm-less clause is first and its test is complementary to the
 -- other two, so this search records no choice point — `pick`'s shape, for
 -- `pick`'s reason.
-one-case : Surface -> Name -> Option Core -> List (Option Core) -> ()
-rule one-case t c sub forced :- when (split-has-no-arms t)
+one-case : Surface -> Name -> Option Core -> List (Option Core) -> (List Name, Int) -> List (Option Core) -> ()
+rule one-case t c sub forced m refined :- when (split-has-no-arms t)
   do case-must-vanish sub
-rule one-case t c none forced :- when (split-has-arms t)
+rule one-case t c none forced m refined :- when (split-has-arms t)
   do oa = arm-for t c
      ; vanished-case-takes-no-body oa
-rule one-case t c (some sub) forced :- when (split-has-arms t)
+rule one-case t c (some sub) forced m refined :- when (split-has-arms t)
   do oa = arm-for t c
-     ; case-needs-an-arm t c sub forced oa
+     ; case-needs-an-arm t c sub forced m refined oa
 
 -- EVERY ARM THE USER WROTE WAS ASKED FOR — HIS RULING, 2026-10-20, and the two
 -- walks below are the half of it that nothing else can see. Elaboration asks the
@@ -519,32 +562,35 @@ rule arms-are-distinct t :- when (surface-is-split t) (split-has-arms t)
 -- them off the declaration, because the declaration cannot say which scheme was
 -- asked for — `caseD`'s methods carry none, and counting them from the
 -- constructor made `case … of` refuse its own methods.
-split-cases : Surface -> List Name -> List Core -> Int -> ()
-rule split-cases t [] [] k :- do
-rule split-cases t [c, ...cs] [mh, ...ms] k :-
+split-cases : Surface -> List Name -> List Core -> (List Name, Int) -> ()
+rule split-cases t [] [] m :- do
+rule split-cases t [c, ...cs] [mh, ...ms] m :-
   do goto mh
      ; ihs = ihs-for t c
-     ; (sub, forced) = specialise c ihs k
-     ; one-case t c sub forced
+     ; (sub, (forced, refined)) = specialise c ihs m
+     ; one-case t c sub forced m refined
      ; goto mh
      ; solve
-     ; split-cases t cs ms k
+     ; split-cases t cs ms m
 
--- The pair prim-eliminate answers, taken apart.
-split-over : Surface -> List Name -> (List Core, Int) -> ()
-rule split-over t cs (hs, k) :- do split-cases t cs hs k
+-- The pair prim-eliminate answers, taken apart. `m` is what the motive added to
+-- every method — the ambient entries it generalised and the equation count —
+-- and it is threaded whole, because only `specialise` and `intro-refined` have
+-- any business in it.
+split-over : Surface -> List Name -> (List Core, (List Name, Int)) -> ()
+rule split-over t cs (hs, m) :- do split-cases t cs hs m
 
 -- WHICH ELIMINATOR THE WRITTEN WORD ASKS FOR, and the only place the two
 -- differ before a method is in hand. `prim-eliminate` builds an Eliminate node
 -- whose methods carry their inductive hypotheses; `prim-case` applies the
 -- generated caseD, whose methods are the same ones without them. Both answer
--- the same pair — the method holes and the equation count — so everything
+-- the same pair — the method holes, and what the motive added to each — so all
 -- downstream is shared.
 --
 -- An arm-less split goes through here too, so `case e of { }` really applies
 -- caseD and `induction e of { }` really eliminates. Nothing downstream can
 -- tell, and neither can the kernel: caseD δ-unfolds to an elimination.
-split-claim : Surface -> Core -> (List Core, Int)
+split-claim : Surface -> Core -> (List Core, (List Name, Int))
 rule split-claim t x :- when (split-is-induction t)
   do r = prim-eliminate x
      ; return r

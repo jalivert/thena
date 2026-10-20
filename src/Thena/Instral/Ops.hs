@@ -1082,11 +1082,22 @@ data Op
     -- reason: the goal is the focus, but the target has nowhere else to come
     -- from.
     --
-    -- **It answers with the holes it claimed and the equation count, as a
-    -- pair** — his ruling of 2026-10-19. 'resultOf' carries why; the short of
-    -- it is that a rule which /found/ a case rather than writing it down can
-    -- reach that case's hole only through 'Goto', and 'Goto' takes the
-    -- variable. Written @do (hs, k) = prim-eliminate t@.
+    -- **It answers with the holes it claimed and what the motive added to every
+    -- method** — his ruling of 2026-10-19, and the second half grew a component
+    -- in MS9 phase 191. 'resultOf' carries why the holes come back at all; the
+    -- short of it is that a rule which /found/ a case rather than writing it
+    -- down can reach that case's hole only through 'Goto', and 'Goto' takes the
+    -- variable. Written @do (hs, m) = prim-eliminate t@, where
+    -- @m = (gens, k)@ is the __ambient entries the motive generalised__, under
+    -- the names they already had, and the __equation count__.
+    --
+    -- **Those two travel together because they are one fact about every
+    -- method's shape**, and @specialise@ is the only thing that reads either:
+    -- the copies and the equations are consecutive runs of binders standing
+    -- between the constructor's telescope and the method's body, and nothing in
+    -- the type marks where one ends. The names are in it because the /caller/
+    -- binds the copies, under the ambient names, which is what refines an arm's
+    -- view of its own context — see "Thena.Tactics.Eliminate"'s header.
 
     -- **Asking a declaration what it says** (MS9 phase 176). Six readers over
     -- 'Thena.Global.Env.InductiveDefinition', and until this phase there were
@@ -1490,15 +1501,17 @@ resultOf o = case o of
   --
   -- A body that wants neither half discards the pair, as every rule shipped
   -- before phase 177 does.
-  Eliminate _  -> Just (TPair (TList TCore) TInt)
-  CaseAnalyse _ -> Just (TPair (TList TCore) TInt)
+  Eliminate _  -> Just (TPair (TList TCore) (TPair (TList TName) TInt))
+  CaseAnalyse _ -> Just (TPair (TList TCore) (TPair (TList TName) TInt))
   -- **The subgoal it claimed, or none** (MS9 phase 184). A conflicting
   -- equation closes the method outright and claims nothing, which is the
   -- impossible case vanishing, so there is never more than one.
     -- **The handle and the forced report, as a pair**, which is 'Eliminate'\'s
     -- own shape and for its reason: one op answers everything only it knows, and
     -- a rule takes the pair apart in a head.
-  Specialise _ _ _ -> Just (TPair (TOption TCore) (TList (TOption TCore)))
+  Specialise _ _ _ ->
+    Just (TPair (TOption TCore)
+                (TPair (TList (TOption TCore)) (TList (TOption TCore))))
   TieRecursion _ -> Just TCore
   -- The six declaration readers (MS9 phase 176). @constructors-of@ is the
   -- first row in this table to answer with a list.
@@ -1643,7 +1656,8 @@ operandTypes o = case o of
   Define a b   -> [(a, TName), (b, TCore)]
   Eliminate a  -> [(a, TCore)]
   CaseAnalyse a -> [(a, TCore)]
-  Specialise c h k -> [(c, TName), (h, TList TName), (k, TInt)]
+  Specialise c h gk ->
+    [(c, TName), (h, TList TName), (gk, TPair (TList TName) TInt)]
   TieRecursion t -> [(t, TCore)]
   -- @datatype-of@ reads a type; the other five read a declared name.
   DatatypeOf a -> [(a, TCore)]

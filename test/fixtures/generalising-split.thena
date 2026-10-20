@@ -1,0 +1,27 @@
+module Ev where
+
+data N : Type₀ where
+  z : N
+  s : N -> N
+
+data Ev : N -> Type₀ where
+  evz : Ev z
+  evs : forall (n : N) (e : Ev n) -> Ev (s (s n))
+
+data IsSucc : N -> Type₀ where
+  isucc : forall (n : N) -> IsSucc (s n)
+
+refined : forall (m : N) (e : Ev (s m)) -> IsSucc m
+refined = \ m e -> case e of { evs n en -> isucc n }
+
+usesHyp : forall (m : N) (h : Ev m) (e : Ev (s m)) -> IsSucc m
+usesHyp = \ m h e -> case e of { evs n en -> isucc n }
+
+mentionsIndex : forall (m : N) (e : Ev (s m)) -> IsSucc (s m)
+mentionsIndex = \ m e -> case e of { evs n en -> isucc (s n) }
+
+check1 : Eq (IsSucc (s z)) (refined (s z) (evs z evz)) (isucc z)
+check1 = refl (IsSucc (s z)) (isucc z)
+
+check3 : Eq (IsSucc (s (s z))) (mentionsIndex (s z) (evs z evz)) (isucc (s z))
+check3 = refl (IsSucc (s (s z))) (isucc (s z))

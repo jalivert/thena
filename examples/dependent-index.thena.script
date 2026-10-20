@@ -13,10 +13,10 @@ along
 eliminate-core ⌜ b ⌝
 back
 back
-try-core ⌜ \ (m : Nat) (q : Eq {0} Nat (succ m) n) -> refl {0} (Fin (succ m)) (fz m) ⌝
+try-core ⌜ \ (m : Nat) (n1 : Nat) (q : Eq {0} Nat (succ m) n1) -> refl {0} (Fin (succ m)) (fz m) ⌝
 solve
 along
-try-core ⌜ \ (m : Nat) (j : Fin m) (c : Below m j) (ih : Eq {0} Nat m n -> Eq {0} (Fin m) j j) (q : Eq {0} Nat (succ m) n) -> refl {0} (Fin (succ m)) (fs m j) ⌝
+try-core ⌜ \ (m : Nat) (j : Fin m) (c : Below m j) (ih : ∀ (n1 : Nat) -> Eq {0} Nat m n1 -> Eq {0} (Fin m) j j) (n1 : Nat) (q : Eq {0} Nat (succ m) n1) -> refl {0} (Fin (succ m)) (fs m j) ⌝
 solve
 along
 solve
