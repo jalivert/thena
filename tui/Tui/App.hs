@@ -1053,7 +1053,21 @@ handleBarEvent st bar ev = case ev of
 handleScriptEvent :: BrickEvent Name e -> EventM Name St ()
 handleScriptEvent (VtyEvent (V.EvKey V.KEnter [])) = do
   st <- get
+  let line = concatMap Text.unpack (getEditContents (stInput st))
   case (stDropdown st, stOfferDropdown st) of
+    -- | **A cleared committed line submits, whatever the dropdown is
+    -- showing.** Emptying a line means deleting it, and the delete has to
+    -- survive the fact that a blank line offers the whole rule chart with a
+    -- row preselected: measured, backspacing `bbb` away and pressing Enter
+    -- inserted `abandon` instead, because the accept outranks the submit.
+    -- Accepting a suggestion the user never moved to, in answer to the key
+    -- they pressed to commit, writes a line they did not type.
+    --
+    -- **This is a special case and is noted as one** — `~n4dnd` in
+    -- `.claude/CLOSEOUT.md`, which asks the general question underneath it:
+    -- whether an auto-preselected row should be Enter-acceptable at all, or
+    -- only one the user arrowed to. If he rules that way this clause goes.
+    _ | isJust (stScriptPos st), all isSpace line -> scriptSubmit
     (Just (LoadDropdown entries (Just i)), _) | i < length entries ->
       acceptLoadRow st entries i
     (_, Just od) | Just i <- odSelected od, Just ins <- rowInsert (odRows od !! i) ->
@@ -1289,12 +1303,27 @@ navigateCompletion moveLoad moveOffer ev = do
     -- bottom — so the caret never moved and the list had scrolled instead.
     _ | stArrowsReleased st -> documentOrHistory ev
     (Just ld@(LoadDropdown entries sel), _) | not (null entries) ->
-      put st { stDropdown = Just ld { ldSelected = Just (moveLoad sel (length entries)) } }
+      let next = moveLoad sel (length entries)
+       in if Just next == sel
+            then documentOrHistory ev
+            else put st { stDropdown = Just ld { ldSelected = Just next } }
     -- | Only a row with something to insert ('selectableIxs') is ever a
     -- landing spot — a hint row (a nonterminal or scan class) is shown but
     -- names a *kind* of thing, not text an accept could write.
+    -- | **At the end of the list the key is passed on, not swallowed** —
+    -- his report, 2026-10-20: *"when the top-most is highlighted, it is
+    -- just stuck there… why isn't arrow up in the dropdown when it can't be
+    -- non-captured and used by the next UI that would use it?"* The movers
+    -- answer with the selection unchanged when there is nowhere to go, and
+    -- that used to be written back as a no-op. Now it releases: Up off the
+    -- top row walks the document (or recalls history), Down off the last
+    -- row the same way. The dropdown keeps first claim only while it has
+    -- somewhere left to move.
     (_, Just od) | not (null (selectableIxs (odRows od))) ->
-      put st { stOfferDropdown = Just od { odSelected = moveOffer (selectableIxs (odRows od)) (odSelected od) } }
+      let next = moveOffer (selectableIxs (odRows od)) (odSelected od)
+       in if next == odSelected od
+            then documentOrHistory ev
+            else put st { stOfferDropdown = Just od { odSelected = next } }
     -- | Nothing left to navigate — the dropdown's own bug fix (his
     -- `.jalivert/TUI.md` #19, an offer with nothing selectable used to
     -- fall through without refreshing either dropdown) plus the new case:
@@ -1625,6 +1654,25 @@ scriptSubmit = do
         sl <- liftIO (runScriptLine s line)
         put st { stScript = stScript st ++ [sl], stInput = emptyInput, stScriptNote = Nothing }
         afterScriptEdit
+    -- | **Clearing a committed line and pressing Enter deletes it** — his
+    -- report, 2026-10-20: *"it literally leaves an empty line there."* It
+    -- did: the blank went through 'foldRun' as a line of its own, so the
+    -- document kept a row that runs nothing and saves to the file as a
+    -- stray newline. Emptying a line in a document means removing it, so
+    -- the tail is spliced up and re-run from the session the line *before*
+    -- it left behind — the same rebuild an edit does, one line shorter.
+    Just i | all isSpace line -> case scriptSessionBefore st i of
+      Nothing -> pure ()
+      Just s -> do
+        rebuilt <- liftIO (foldRun s (map slText (drop (i + 1) (stScript st))))
+        put st
+          { stScript = take i (stScript st) ++ rebuilt
+          , stScriptPos = Nothing
+          , stInput = E.editorText Input (Just 1) (Text.pack (stScriptDraft st))
+          , stScriptDraft = ""
+          , stScriptNote = Nothing
+          }
+        afterScriptEdit
     Just i -> case scriptSessionBefore st i of
       Nothing -> pure ()
       Just s -> do
@@ -1647,8 +1695,34 @@ foldRun s (l : ls) = do
   rest <- foldRun (slSession sl) ls
   pure (sl : rest)
 
+-- | **How every script-mode event that is not typing ends: the dropdown
+-- closes.** Committing a line, walking the caret, dropping a line, inserting
+-- one from the bar — none of them is someone writing a line, so none of them
+-- should leave a completion box open. Typing does not come through here; it
+-- goes to the editor branch of 'documentOrHistory' and refreshes as it always
+-- has.
+--
+-- **This one definition is three of his reports, 2026-10-20, and they were
+-- one bug.**
+--
+--   * *"why does it move the dropdown down a bit?"* — 'popupAt' positions
+--     against 'stInputExtent', which lags a frame. A commit adds a line and
+--     its output, so the box drew two rows above where the caret had just
+--     moved to and snapped down on the next keypress. Measured: rows 11-20,
+--     then 13-22. It cannot be mispositioned if it is not open, and by the
+--     time typing opens it the input has not moved since the last frame.
+--   * *"when I hit enter, that obviously needs to drop the lines below it…
+--     I think you broke it"* then *"it's the weird combination… of by
+--     default selected option in the dropdown and the option being just what
+--     I typed on the line."* Exactly that: walking to a committed line
+--     reopened the dropdown with a row preselected, so Enter **accepted the
+--     completion** instead of reaching 'scriptSubmit' — and because the row
+--     read the same as the line, the accept was invisible and the re-run
+--     never happened. Enter was never broken; it was being eaten.
+--   * And the dropdown standing open over a line nobody is writing to, which
+--     is what he said about the command bar and is the same principle.
 afterScriptEdit :: EventM Name St ()
-afterScriptEdit = refreshOfferDropdown >> followInput
+afterScriptEdit = closeDropdowns >> followInput
 
 -- | **Discard the line under the caret and everything after it**, no
 -- replacement run. Reached by @:script drop@ in the command bar; a no-op
