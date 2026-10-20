@@ -336,6 +336,37 @@ test-suite thena-test
         tasty-hunit       >=0.10 && <0.11,
         tasty-quickcheck  >=0.11 && <0.12
 
+-- | The TUI's own drawing, checked rather than eyeballed (`~6crg8`).
+--
+-- **His ruling, 2026-10-20** — /"Yes, tui gets a test suite. That won't hurt
+-- anything."/ **Narrowed to the pure drawing**: the pty stays the authority on
+-- layout, keymaps and panes, and this covers the one part of `Tui.*` that is a
+-- function from a 'Thena.View.Core.Shape' to a widget.
+--
+-- > cabal test thena-tui-test
+--
+-- **`cabal test` does NOT sweep it, for the same structural reason it skips
+-- `thena-boundary`** — it depends on `thena:tui` and not on `thena`, so it is a
+-- different component in the plan. See the note at the top of this file.
+test-suite thena-tui-test
+    import:             warnings
+    hs-source-dirs:     tui-test
+    default-language:   GHC2024
+    type:               exitcode-stdio-1.0
+    main-is:            Main.hs
+    other-modules:
+        DrawingTests
+    build-depends:
+        base         ^>=4.21.2.0,
+        thena:tui,
+        thena:view,
+        brick        >=2.13 && <2.14,
+        text         >=2.1  && <2.2,
+        vector       >=0.13 && <0.14,
+        vty          >=6.0  && <7,
+        tasty        >=1.5  && <1.6,
+        tasty-hunit  >=0.10 && <0.11
+
 -- | The frontend's own boundary, compiled (MS7 phase 126).
 --
 -- **The example corpus, and `cabal test` does NOT run it** — his instruction,
