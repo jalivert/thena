@@ -811,12 +811,14 @@ everyHoleRule =
     -- runs none of them: they take a parameter.
   , "claim", "assume", "quantify"
   ]
-    ++ replicate 8 "elaborate"
+    ++ replicate 7 "elaborate"
     -- **The splitting tree's helpers sit BETWEEN two runs of @elaborate@**,
     -- because that is where the base declares them: written beside the clause
-    -- that calls them.
+    -- that calls them. **Both clauses of a split are in the second run**, the
+    -- arm-less one included: it stopped being a clause of its own when the
+    -- specialiser arrived, and now calls @split-elaborate@ like the other.
     ++ splitHelpers
-    ++ replicate 13 "elaborate"
+    ++ replicate 14 "elaborate"
     ++ ["run-block"]
     ++ replicate 2 "spine-arguments"
 
@@ -852,8 +854,9 @@ splitHelpers =
   , "intro-ihs", "intro-ihs"
   , "same-length", "same-length"
   , "arm-for", "pick", "pick", "elaborate-arm"
-  , "one-case", "one-case"
+  , "case-must-vanish", "one-case", "one-case", "one-case"
   , "split-cases", "split-cases", "split-over"
+  , "split-elaborate"
   ]
 
 -- | @Nat@, as a core term, for the row above.

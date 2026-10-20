@@ -2300,6 +2300,42 @@ definition depending on an inference you cannot see, and changing a lemma's stat
 can silently change which. The answer to that is the system showing you which positions
 it determined, rather than making you write them out.
 
+### Writing no arms is the claim that every case is impossible
+
+```
+trueNotNat : forall (d : HasType true nat) -> Empty
+trueNotNat = \ d -> induction d of { }
+```
+
+`HasType` has seven constructors, and none of them can have built this derivation:
+every one disagrees with `true` or with `nat`. So the split has nothing to answer,
+and writing no arms is how you say that. Each method is closed by its own
+conflicting equation and the proof is complete.
+
+**It is not a second form of split.** The same walk runs over the same methods,
+and the only thing the empty brace changes is that *every* method is now required
+to vanish. A datatype with no constructors — `case e of { }` at `e : Empty` —
+satisfies that by having no methods at all, which is how the two cases turned out
+to be one. A method that survives is refused by name:
+
+```
+oops = \ t n -> induction n of { }
+  no clause of case-must-vanish applies here      -- nvZero did not vanish
+```
+
+**`induction` and `case` mean the same thing here, and that is a consequence
+rather than a convenience.** The two words differ by whether a method carries
+inductive hypotheses; with no method surviving there is nothing for a hypothesis
+to be attached to, so there is nothing left for them to differ about.
+
+**One wart, and it is about universes rather than splitting.** `Empty` is
+level-polymorphic, so a bare `Empty` in a statement stands for `Empty` at a level
+the system has yet to work out. A proof that never mentions `Empty` cannot work it
+out, and an arm-less split never mentions anything — so the lemma above is stored
+with that level still unknown. Until the surface can write the level, the proofs in
+`examples/canonical.thena` route through a one-argument `absurd` whose argument is
+declared at `Type₀`, purely to fix it.
+
 ### The same lesson, one level on: a search must not be a choice point over the work
 
 `induction t of { … }` elaborates by walking a datatype's constructors against

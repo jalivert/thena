@@ -767,17 +767,18 @@ baseTests =
               , "fit-core", "fit-core"
               , "claim", "assume", "quantify"
               ]
-              ++ replicate 8 "elaborate"
+              ++ replicate 7 "elaborate"
               ++ [ "no-nesting"
                  , "intro-pattern", "intro-pattern", "intro-pattern"
                  , "intro-pattern", "intro-pattern"
                  , "intro-ihs", "intro-ihs"
                  , "same-length", "same-length"
                  , "arm-for", "pick", "pick", "elaborate-arm"
-                 , "one-case", "one-case"
+                 , "case-must-vanish", "one-case", "one-case", "one-case"
                  , "split-cases", "split-cases", "split-over"
+                 , "split-elaborate"
                  ]
-              ++ replicate 13 "elaborate"
+              ++ replicate 14 "elaborate"
               ++ ["run-block"]
               ++ replicate 2 "spine-arguments"
 

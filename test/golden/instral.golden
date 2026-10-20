@@ -24,6 +24,7 @@ thena spine> :accepts Surface
   one-case/4 : Surface -> Name -> Option Core -> List (Option Core) -> ()   (rule)
   split-cases/4 : Surface -> List Name -> List Core -> Int -> ()   (rule)
   split-over/3 : Surface -> List Name -> (List Core, Int) -> ()   (rule)
+  split-elaborate/1 : Surface -> ()   (rule)
   run-block/1 : Surface -> ()   (rule)
   intro-binders/2 : Surface -> Core -> Core   (rule)
   spine-arguments/3 : Core -> Core -> Surface -> ()   (rule)

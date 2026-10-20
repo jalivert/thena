@@ -25,7 +25,6 @@ elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
-elaborate ‹t›
 no-nesting []
 intro-pattern [] [] ‹k›
 intro-pattern [p, ...ps] [none, ...fs] ‹k›
@@ -40,11 +39,15 @@ arm-for ‹t› ‹c›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 elaborate-arm ‹c› ‹sub› ‹forced› (p, b)
+case-must-vanish none
+one-case ‹t› ‹c› ‹sub› ‹forced›
 one-case ‹t› ‹c› none ‹forced›
 one-case ‹t› ‹c› (some sub) ‹forced›
 split-cases ‹t› [] [] ‹k›
 split-cases ‹t› [c, ...cs] [mh, ...ms] ‹k›
 split-over ‹t› ‹cs› (hs, k)
+split-elaborate ‹t›
+elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›

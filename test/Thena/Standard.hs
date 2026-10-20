@@ -310,32 +310,19 @@ elaborateClauses =
     -- answer from a clause that does not match.
   , clause SurfaceIsPlaceholder []
   , clause SurfaceIsHole []
-    -- **A split with no arms** (MS9), which is case analysis on a datatype with
-    -- no constructors. The two claims are @:infer@'s manoeuvre: the target's
-    -- type is unknown until the target is elaborated, so a hole stands for it
-    -- and unification solves that hole on the way past.
-  , Rule (GlobalName "elaborate") [PVar "t"]
-      [FocusIsHole, SurfaceIsSplit (Ref "t"), SplitHasNoArms (Ref "t")]
-      [ Bind (Op.PVar "h") Nothing Here
-      , Bind (Op.PVar "u") Nothing (Op.Call "fresh-universe" [])
-      , Bind (Op.PVar "ty") Nothing (Op.Claim (Lit (VText "Tsplit")) (Ref "u"))
-      , Bind (Op.PVar "x") Nothing (Op.Claim (Lit (VText "xsplit")) (Ref "ty"))
-      , Do (Op.Goto (Ref "x"))
-      , Bind (Op.PVar "g") Nothing (Op.SplitTarget (Ref "t"))
-      , call "elaborate" [Ref "g"]
-      , Do (Op.Goto (Ref "h"))
-      , Do (Op.Eliminate (Ref "x"))
-      , call "solve" []
-      ]
   ]
     -- **The splitting tree sits here, between two @elaborate@ clauses**,
     -- because that is where the base declares it: its helpers are written
     -- beside the clause that calls them, and @allRules@ is the file's order.
     ++ splitClauses
-    ++ [ Rule (GlobalName "elaborate") [PVar "t"]
-           [ FocusIsHole, SurfaceIsSplit (Ref "t"), SplitHasArms (Ref "t")
-           , SplitIsInduction (Ref "t")
-           ]
+      -- **The walk is one rule and the two words share it.** A split with no
+      -- arms stopped being a second mechanism when the specialiser arrived: it
+      -- is the same walk with every method required to vanish, which a
+      -- datatype with no constructors satisfies trivially and one whose every
+      -- method a conflicting equation closes satisfies too. So the clauses
+      -- below differ only in their guard, and @case@ is admitted exactly where
+      -- no method survives to carry an inductive hypothesis.
+    ++ [ Rule (GlobalName "split-elaborate") [PVar "t"] []
            [ Bind (Op.PVar "h") Nothing Here
            , Bind (Op.PVar "u") Nothing (Op.Call "fresh-universe" [])
            , Bind (Op.PVar "ty") Nothing (Op.Claim (Lit (VText "Tsplit")) (Ref "u"))
@@ -352,6 +339,14 @@ elaborateClauses =
            , Do (Op.Goto (Ref "h"))
            , call "solve" []
            ]
+       , Rule (GlobalName "elaborate") [PVar "t"]
+           [ FocusIsHole, SurfaceIsSplit (Ref "t"), SplitHasArms (Ref "t")
+           , SplitIsInduction (Ref "t")
+           ]
+           [call "split-elaborate" [Ref "t"]]
+       , Rule (GlobalName "elaborate") [PVar "t"]
+           [FocusIsHole, SurfaceIsSplit (Ref "t"), SplitHasNoArms (Ref "t")]
+           [call "split-elaborate" [Ref "t"]]
        ]
     ++ [
     -- **Brady's split, as two clauses** (MS4 phase 49d). The first is
@@ -755,11 +750,25 @@ splitClauses =
       , Do (Goto (Ref "sub"))
       , call "solve" []
       ]
+    -- **Writing no arms is the claim that every case vanishes**, so a method
+    -- that survived one is refused here, by a rule with a clause for @none@
+    -- and none for @some@ — @no-nesting@'s idiom, naming the user's complaint
+    -- instead of the search for an arm there is no syntax for.
+  , Rule (GlobalName "case-must-vanish") [PNone] [] []
+    -- **Two questions, asked separately**: did the method vanish, and did the
+    -- user write arms. The arm-less clause's test is complementary to the other
+    -- two, so this search records no choice point — @pick@'s shape.
   , Rule (GlobalName "one-case")
-      [PVar "t", PVar "c", PNone, PVar "forced"] []
+      [PVar "t", PVar "c", PVar "sub", PVar "forced"]
+      [SplitHasNoArms (Ref "t")]
+      [call "case-must-vanish" [Ref "sub"]]
+  , Rule (GlobalName "one-case")
+      [PVar "t", PVar "c", PNone, PVar "forced"]
+      [SplitHasArms (Ref "t")]
       [Do (Say (Lit (VText "a case vanished: its arm is unreachable")))]
   , Rule (GlobalName "one-case")
-      [PVar "t", PVar "c", PSome (PVar "sub"), PVar "forced"] []
+      [PVar "t", PVar "c", PSome (PVar "sub"), PVar "forced"]
+      [SplitHasArms (Ref "t")]
       [ Bind (Op.PVar "a") Nothing (Op.Call "arm-for" [Ref "t", Ref "c"])
       , call "elaborate-arm" [Ref "c", Ref "sub", Ref "forced", Ref "a"]
       ]

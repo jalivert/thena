@@ -349,6 +349,7 @@ tests =
               -- where the base declares them, between elaborate and run-block.
               @?= [ "elaborate"
                   , "arm-for", "pick", "one-case", "split-cases", "split-over"
+                  , "split-elaborate"
                   , "run-block", "intro-binders", "spine-arguments"
                   ]
           -- **One thing in the shipped base returns a @Core@ since MS5 phase

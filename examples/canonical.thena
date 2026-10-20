@@ -7,9 +7,20 @@
 -- a well-typed value must look like.
 --
 -- WRITTEN BY HAND, unlike the determinacy example, which is generated. It is
--- about a third the size, and the shape of every proof is the same: eliminate a
--- derivation under a motive that states an equation about its indices, and kill
--- the impossible constructors with no-confusion.
+-- about a third the size, and the shape of every proof is the same: split a
+-- derivation and answer the cases that survive.
+--
+-- THE FOUR INVERSION LEMMAS HAVE NO CASES AT ALL. `induction d of { }` on a
+-- `HasType true nat` says every constructor of `HasType` disagrees with those
+-- indices, and elaboration closes all seven methods itself — where this file
+-- used to write out seven methods and seven appeals to no-confusion apiece.
+--
+-- THE `absurd Empty` WRAPPER IS THERE TO PIN A UNIVERSE LEVEL, and nothing
+-- else. `Empty` is level-polymorphic, so a bare one in a statement mints a
+-- level meta, and a proof that never mentions `Empty` cannot solve it — the
+-- statement would be stored with an unsolved meta in it. The old proofs named
+-- `Empty` in their own terms and solved it by accident. `absurd`'s first
+-- argument is declared at `Type₀`, so applying it fixes the level at 0.
 --
 -- The two theorems are what a progress proof needs as its lemmas, which is what
 -- canonical forms is FOR in TAPL: knowing that a well-typed value of type bool
@@ -56,72 +67,36 @@ absurd : forall (C : Type₀) (e : Empty) -> C
 absurd = \ C e -> elim Empty () (\ t -> C) () () e
 
 trueNotNat : forall (d : HasType true nat) -> Empty
-trueNotNat = \ d ->
-  elim HasType () (\ x U r -> Eq Term x true -> Eq Ty U nat -> Empty)
-    ((\ q p -> absurd (Empty) (noConfusionTy bool nat p))
-     (\ q p -> absurd (Empty) (noConfusionTerm false true q))
-     (\ c1 c2 c3 U d1 d2 d3 i1 i2 i3 q p -> absurd (Empty) (noConfusionTerm (ifthen c1 c2 c3) true q))
-     (\ q p -> absurd (Empty) (noConfusionTerm zero true q))
-     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTerm (succ c1) true q))
-     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTerm (pred c1) true q))
-     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTerm (iszero c1) true q)))
-    (true nat) d (refl Term true) (refl Ty nat)
+trueNotNat = \ d -> absurd Empty (induction d of { })
 
 falseNotNat : forall (d : HasType false nat) -> Empty
-falseNotNat = \ d ->
-  elim HasType () (\ x U r -> Eq Term x false -> Eq Ty U nat -> Empty)
-    ((\ q p -> absurd (Empty) (noConfusionTerm true false q))
-     (\ q p -> absurd (Empty) (noConfusionTy bool nat p))
-     (\ c1 c2 c3 U d1 d2 d3 i1 i2 i3 q p -> absurd (Empty) (noConfusionTerm (ifthen c1 c2 c3) false q))
-     (\ q p -> absurd (Empty) (noConfusionTerm zero false q))
-     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTerm (succ c1) false q))
-     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTerm (pred c1) false q))
-     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTerm (iszero c1) false q)))
-    (false nat) d (refl Term false) (refl Ty nat)
+falseNotNat = \ d -> absurd Empty (induction d of { })
 
 zeroNotBool : forall (d : HasType zero bool) -> Empty
-zeroNotBool = \ d ->
-  elim HasType () (\ x U r -> Eq Term x zero -> Eq Ty U bool -> Empty)
-    ((\ q p -> absurd (Empty) (noConfusionTerm true zero q))
-     (\ q p -> absurd (Empty) (noConfusionTerm false zero q))
-     (\ c1 c2 c3 U d1 d2 d3 i1 i2 i3 q p -> absurd (Empty) (noConfusionTerm (ifthen c1 c2 c3) zero q))
-     (\ q p -> absurd (Empty) (noConfusionTy nat bool p))
-     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTerm (succ c1) zero q))
-     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTerm (pred c1) zero q))
-     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTerm (iszero c1) zero q)))
-    (zero bool) d (refl Term zero) (refl Ty bool)
+zeroNotBool = \ d -> absurd Empty (induction d of { })
 
+-- The one that forces a constructor argument: `tSucc`'s own subterm is
+-- determined to be `t` by injectivity of `succ`, and then `nat` against `bool`
+-- closes that method like all the others.
 succNotBool : forall (t : Term) (d : HasType (succ t) bool) -> Empty
-succNotBool = \ t d ->
-  elim HasType () (\ x U r -> Eq Term x (succ t) -> Eq Ty U bool -> Empty)
-    ((\ q p -> absurd (Empty) (noConfusionTerm true (succ t) q))
-     (\ q p -> absurd (Empty) (noConfusionTerm false (succ t) q))
-     (\ c1 c2 c3 U d1 d2 d3 i1 i2 i3 q p -> absurd (Empty) (noConfusionTerm (ifthen c1 c2 c3) (succ t) q))
-     (\ q p -> absurd (Empty) (noConfusionTerm zero (succ t) q))
-     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTy nat bool p))
-     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTerm (pred c1) (succ t) q))
-     (\ c1 dd ih q p -> absurd (Empty) (noConfusionTerm (iszero c1) (succ t) q)))
-    ((succ t) bool) d (refl Term (succ t)) (refl Ty bool)
+succNotBool = \ t d -> absurd Empty (induction d of { })
 
+-- `d` is deliberately NOT introduced: the split is on `n`, whose index `t` is
+-- a context variable, and an index no other premise mentions is abstracted
+-- with no equation. Introducing `d` first would mention it and tie it.
 nvNotBool : forall (t : Term) (n : NV t) (d : HasType t bool) -> Empty
-nvNotBool = \ t n ->
-  elim NV () (\ x r -> HasType x bool -> Empty)
-    ((\ dd -> zeroNotBool dd)
-     (\ c1 nn ih dd -> succNotBool c1 dd))
-    (t) n
+nvNotBool = \ t n -> induction n of
+  { nvZero -> \ dd -> zeroNotBool dd
+  ; nvSucc c1 nn -> \ dd -> succNotBool c1 dd }
 
 canonicalBool : forall (v : Term) (p : Value v) (d : HasType v bool) -> Or (Eq Term v true) (Eq Term v false)
-canonicalBool = \ v p ->
-  elim Value () (\ x r -> HasType x bool -> Or (Eq Term x true) (Eq Term x false))
-    ((\ dd -> inl (Eq Term true true) (Eq Term true false) (refl Term true))
-     (\ dd -> inr (Eq Term false true) (Eq Term false false) (refl Term false))
-     (\ c1 nn dd -> absurd (Or (Eq Term c1 true) (Eq Term c1 false)) (nvNotBool c1 nn dd)))
-    (v) p
+canonicalBool = \ v p -> induction p of
+  { vTrue -> \ dd -> inl (Eq Term true true) (Eq Term true false) (refl Term true)
+  ; vFalse -> \ dd -> inr (Eq Term false true) (Eq Term false false) (refl Term false)
+  ; vNat c1 nn -> \ dd -> absurd (Or (Eq Term c1 true) (Eq Term c1 false)) (nvNotBool c1 nn dd) }
 
 canonicalNat : forall (v : Term) (p : Value v) (d : HasType v nat) -> NV v
-canonicalNat = \ v p ->
-  elim Value () (\ x r -> HasType x nat -> NV x)
-    ((\ dd -> absurd (NV true) (trueNotNat dd))
-     (\ dd -> absurd (NV false) (falseNotNat dd))
-     (\ c1 nn dd -> nn))
-    (v) p
+canonicalNat = \ v p -> induction p of
+  { vTrue -> \ dd -> absurd (NV true) (trueNotNat dd)
+  ; vFalse -> \ dd -> absurd (NV false) (falseNotNat dd)
+  ; vNat c1 nn -> \ dd -> nn }
