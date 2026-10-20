@@ -1,6 +1,6 @@
 -- Determinacy of a small-step semantics for the untyped arithmetic terms of
 -- TAPL chapter 3 — the same theorem as examples/determinacy-surface.thena, and
--- the point of the file is that EVERY ONE of its eleven lemmas is dependent
+-- the point of the file is that EVERY ONE of its eight lemmas is dependent
 -- pattern matching. Not one line of it appeals to `elim`, and not one arm
 -- appeals to no-confusion.
 --
@@ -17,22 +17,26 @@
 -- than a line of `absurd (…) (noConfusionTerm … q)`. Where a rule's own index
 -- cannot be made to fit the scrutinee's by moving one of the RULE'S variables,
 -- the split generalises the ambient entry instead, quantifying a fresh copy of
--- it: `invIf`'s arm forces `p` to `true`, so `s0` arrives as `Step true p'`
--- under its own name with nothing transported. That is what makes `invIf`,
--- `invPred` and `invIsZero` one arm per possible case instead of ten methods.
+-- it: in `determinacy`'s `eIf` arm the inner `eIfTrue` case forces `p` to
+-- `true`, so `sr` arrives as `Step true p'` under its own name with nothing
+-- transported. That is what makes each inner split one arm per possible case
+-- instead of ten methods.
 --
--- WHY `invIf`, `invPred` AND `invIsZero` ARE LEMMAS AND NOT ARMS. A split that
+-- A RECURSION CROSSES SUCH A SPLIT BY NAMING THE ARM'S OWN BINDER. A split that
 -- generalises makes each case prove something MORE GENERAL than the goal it came
--- from — the case is about a fresh copy of the subject — and the enclosing arm's
--- induction hypothesis is about the subject itself, so it does not reach the
--- copy. What does reach it is a hypothesis the split generalised. So each of the
--- three takes the hypothesis as a PARAMETER, `ih0`, and `determinacy` passes
--- the recursive call from outside the split, where it still names the subject.
+-- from — the case is about a fresh copy of the subject — so the induction
+-- hypothesis that reaches the copy is the one the split generalised, and the
+-- call has to be about the copy too. In the `eIf` arm the inner `eIf` case
+-- solves the copy of `p` to its own `c1`, so the call is
+-- `determinacy c1 p' sr c1' sr2`: `c1` is the subject that case is about, and
+-- `sr` is the copy of the step out of it.
 --
--- THE OTHER SEVEN ARMS OF `determinacy` NEED NONE OF THAT, and that is the
--- boundary this file draws. `eSucc`'s own index is `succ c1` against the
--- scrutinee's `succ p`, so the split moves `c1` and generalises nothing — which
--- is why that arm recurses inline, and why `nvNoStep` can too.
+-- WHERE THE SPLIT GENERALISES NOTHING THE AMBIENT NAME IS STILL THE SUBJECT,
+-- and that is the boundary this file draws. A copy is demanded only where a
+-- rule's own index cannot be made to fit the scrutinee's by moving one of the
+-- RULE'S variables. `eSucc`'s own index is `succ c1` against the scrutinee's
+-- `succ p`, so the split moves `c1` and generalises nothing — which is why that
+-- arm recurses as `determinacy p p' sr c1' sr2`, and why `nvNoStep` can too.
 
 module Determinacy where
 
@@ -104,32 +108,6 @@ nvNoStep = \ v nv -> induction nv of
   ; nvSucc t n -> \ u s -> case s of
       { eSucc c1 c1' sr -> nvNoStep t n c1' sr } }
 
--- ---------------------------------------------------------------------------
--- The three congruence inversions whose split generalises, and therefore the
--- three that take their induction hypothesis as a parameter. Each is one arm
--- per case the source admits: the cases where the subject is a value and the
--- step out of it is absurd, and the case where it steps, where `ih0` gives the
--- two results equal.
--- ---------------------------------------------------------------------------
-
-invIf : forall (p : Term) (p' : Term) (a : Term) (b : Term) (s0 : Step p p') (ih0 : forall (w : Term) (sw : Step p w) -> Eq Term p' w) (u : Term) (s : Step (ifthen p a b) u) -> Eq Term (ifthen p' a b) u
-invIf = \ p p' a b s0 ih0 u s -> case s of
-  { eIfTrue c d -> absurd (Eq Term (ifthen p' c d) c) (trueNoStep p' s0)
-  ; eIfFalse c d -> absurd (Eq Term (ifthen p' c d) d) (falseNoStep p' s0)
-  ; eIf c1 c1' c2 c3 sr -> cong Term Term (\ x -> ifthen x c2 c3) p' c1' (ih0 c1' sr) }
-
-invPred : forall (p : Term) (p' : Term) (s0 : Step p p') (ih0 : forall (w : Term) (sw : Step p w) -> Eq Term p' w) (u : Term) (s : Step (pred p) u) -> Eq Term (pred p') u
-invPred = \ p p' s0 ih0 u s -> case s of
-  { ePredZero -> absurd (Eq Term (pred p') zero) (zeroNoStep p' s0)
-  ; ePredSucc c1 nv1 -> absurd (Eq Term (pred p') c1) (nvNoStep (succ c1) (nvSucc c1 nv1) p' s0)
-  ; ePred c1 c1' sr -> cong Term Term (\ x -> pred x) p' c1' (ih0 c1' sr) }
-
-invIsZero : forall (p : Term) (p' : Term) (s0 : Step p p') (ih0 : forall (w : Term) (sw : Step p w) -> Eq Term p' w) (u : Term) (s : Step (iszero p) u) -> Eq Term (iszero p') u
-invIsZero = \ p p' s0 ih0 u s -> case s of
-  { eIsZeroZero -> absurd (Eq Term (iszero p') true) (zeroNoStep p' s0)
-  ; eIsZeroSucc c1 nv1 -> absurd (Eq Term (iszero p') false) (nvNoStep (succ c1) (nvSucc c1 nv1) p' s0)
-  ; eIsZero c1 c1' sr -> cong Term Term (\ x -> iszero x) p' c1' (ih0 c1' sr) }
-
 -- Determinacy. The generated proof's thirteen inversion lemmas are the ten arms
 -- of the outer split and the inner split under each. The outer split is an
 -- `induction`, because the congruence rules recurse and `determinacy p p' sr`
@@ -143,7 +121,10 @@ determinacy = \ t t1 s1 -> induction s1 of
   ; eIfFalse a b -> \ u s -> case s of
       { eIfFalse c d -> refl Term d
       ; eIf c1 c1' c2 c3 sr -> absurd (Eq Term c3 (ifthen c1' c2 c3)) (falseNoStep c1' sr) }
-  ; eIf p p' a b sr -> invIf p p' a b sr (determinacy p p' sr)
+  ; eIf p p' a b sr -> \ u s -> case s of
+      { eIfTrue c d -> absurd (Eq Term (ifthen p' c d) c) (trueNoStep p' sr)
+      ; eIfFalse c d -> absurd (Eq Term (ifthen p' c d) d) (falseNoStep p' sr)
+      ; eIf c1 c1' c2 c3 sr2 -> cong Term Term (\ x -> ifthen x c2 c3) p' c1' (determinacy c1 p' sr c1' sr2) }
   ; eSucc p p' sr -> \ u s -> case s of
       { eSucc c1 c1' sr2 -> cong Term Term (\ x -> succ x) p' c1' (determinacy p p' sr c1' sr2) }
   ; ePredZero -> \ u s -> case s of
@@ -152,11 +133,17 @@ determinacy = \ t t1 s1 -> induction s1 of
   ; ePredSucc v nv -> \ u s -> case s of
       { ePredSucc c1 nv1 -> refl Term c1
       ; ePred c1 c1' sr -> absurd (Eq Term v (pred c1')) (nvNoStep (succ v) (nvSucc v nv) c1' sr) }
-  ; ePred p p' sr -> invPred p p' sr (determinacy p p' sr)
+  ; ePred p p' sr -> \ u s -> case s of
+      { ePredZero -> absurd (Eq Term (pred p') zero) (zeroNoStep p' sr)
+      ; ePredSucc c1 nv1 -> absurd (Eq Term (pred p') c1) (nvNoStep (succ c1) (nvSucc c1 nv1) p' sr)
+      ; ePred c1 c1' sr2 -> cong Term Term (\ x -> pred x) p' c1' (determinacy c1 p' sr c1' sr2) }
   ; eIsZeroZero -> \ u s -> case s of
       { eIsZeroZero -> refl Term true
       ; eIsZero c1 c1' sr -> absurd (Eq Term true (iszero c1')) (zeroNoStep c1' sr) }
   ; eIsZeroSucc v nv -> \ u s -> case s of
       { eIsZeroSucc c1 nv1 -> refl Term false
       ; eIsZero c1 c1' sr -> absurd (Eq Term false (iszero c1')) (nvNoStep (succ v) (nvSucc v nv) c1' sr) }
-  ; eIsZero p p' sr -> invIsZero p p' sr (determinacy p p' sr) }
+  ; eIsZero p p' sr -> \ u s -> case s of
+      { eIsZeroZero -> absurd (Eq Term (iszero p') true) (zeroNoStep p' sr)
+      ; eIsZeroSucc c1 nv1 -> absurd (Eq Term (iszero p') false) (nvNoStep (succ c1) (nvSucc c1 nv1) p' sr)
+      ; eIsZero c1 c1' sr2 -> cong Term Term (\ x -> iszero x) p' c1' (determinacy c1 p' sr c1' sr2) } }

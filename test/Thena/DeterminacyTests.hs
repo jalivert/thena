@@ -28,21 +28,22 @@
 -- **@examples\/determinacy-patterns.thena@ is the same theorem by dependent
 -- pattern matching** (MS9), written by hand — and it exists to be read beside
 -- the generated one, which is why it is in the suite rather than in a report.
--- **Every one of its eleven lemmas is a split**: no @elim@ anywhere, and the
+-- **Every one of its eight lemmas is a split**: no @elim@ anywhere, and the
 -- generated proof's 148 appeals to @noConfusionTerm@ become none.
 --
--- **A RECURSION MAY NOT CROSS A SPLIT THAT GENERALISES**, which is why
--- @invIf@, @invPred@ and @invIsZero@ are lemmas rather than arms of
--- @determinacy@: such a split makes each case prove something more general
--- than the goal it came from, and the enclosing arm's induction hypothesis is
--- about the subject rather than the copy. Each takes the hypothesis as a
--- parameter and the caller passes the recursive call from outside the split.
+-- **EVERY ARM OF @determinacy@ IS INLINE AND NOTHING TAKES AN INDUCTION
+-- HYPOTHESIS AS A PARAMETER.** A split that generalises makes each case prove
+-- something more general than the goal it came from, so the hypothesis that
+-- reaches the copy is the one the split generalised — and a recursive call
+-- inside such an arm is about the copy, which it reaches by naming the arm's own
+-- binder: @determinacy c1 p' sr c1' sr2@ where the case solved the copy of @p@
+-- to its own @c1@. Three of the ten arms are of that kind.
 --
--- **AND THE OTHER SEVEN ARMS NEED NONE OF THAT**, which is the other half of the
--- boundary: a copy is demanded only where a rule's own index cannot be made to
--- fit the scrutinee's by moving one of the /rule's/ binders. @eSucc@'s
--- @succ c1@ fits @succ p@ by moving @c1@, so that arm recurses inline, and so
--- does @nvNoStep@.
+-- **AND WHERE THE SPLIT GENERALISES NOTHING THE AMBIENT NAME IS STILL THE
+-- SUBJECT**, which is the other half of the boundary: a copy is demanded only
+-- where a rule's own index cannot be made to fit the scrutinee's by moving one
+-- of the /rule's/ binders. @eSucc@'s @succ c1@ fits @succ p@ by moving @c1@, so
+-- that arm recurses as @determinacy p p' sr c1' sr2@, and so does @nvNoStep@.
 --
 -- **The assertion that ties all three together is the statement**: each is
 -- checked against the /same/ rendered type for @determinacy@, so a version that
@@ -50,7 +51,7 @@
 module Thena.DeterminacyTests (tests) where
 
 import Data.Char (isAlpha)
-import Data.List (isPrefixOf, isSuffixOf)
+import Data.List (isPrefixOf)
 import Data.ByteString.Builder (stringUtf8, toLazyByteString)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
@@ -76,17 +77,6 @@ surfaceTarget = "examples/determinacy-surface.thena"
 
 patternTarget :: FilePath
 patternTarget = "examples/determinacy-patterns.thena"
-
--- | The same file with @determinacy@'s @eIf@ arm written INLINE, recursing from
--- inside the inner split instead of delegating to @invIf@ — which is the one
--- thing a split that generalises cannot do today, @`~bq3rn`@.
---
--- **It is the goal, not a curiosity.** His instruction of 2026-10-20: the
--- parameter form is a leak and the work continues until a recursion crosses such
--- a split in every situation. When that lands, this file loads and the case below
--- fails — which is how the suite tells you.
-inlineTarget :: FilePath
-inlineTarget = "test/fixtures/recursion-across-generalising-split.thena"
 
 tests :: TestTree
 tests =
@@ -154,33 +144,6 @@ tests =
         src <- readFile patternTarget
         [ n | (n, body) <- definitions src, any ("elim " `isPrefixOf`) (tails' body) ]
           @?= []
-
-      -- **`~bq3rn` — the one arm that cannot be written, pinned so it is
-      -- reproducible in one command.** The fixture is this example with
-      -- @determinacy@'s @eIf@ arm inlined; the inner split generalises the
-      -- ambient @p@, so @p@ in the arm still means the unrefined entry and the
-      -- recursive call is at the wrong subject.
-      --
-      -- **THE MESSAGE IS NOT ASSERTED WORD FOR WORD** and that is deliberate: it
-      -- names a freshened pattern variable (@c11@), whose number is the session
-      -- counter's, and `HAZARDS.md` has what pinning such a name costs. What is
-      -- asserted is that the load is refused and that the refusal is a failed
-      -- unification.
-      --
-      -- **WHEN `~bq3rn` IS FIXED THIS CASE FAILS.** That is its job. Delete it
-      -- along with the fixture, and take @ih0@ out of @invIf@, @invPred@ and
-      -- @invIsZero@ in the same change.
-    , testCase "a recursion inside a generalising split is refused — ~bq3rn" $ do
-        (s, _) <- startingSession
-        (s', out, _) <- loadProofFile s inlineTarget
-        case filter (not . null) (concatMap (renderResponse s') out) of
-          [] -> assertBool "it said nothing at all" False
-          rs -> do
-            let said = unwords (words (last rs))
-            assertBool ("it loaded, and should not have: " ++ said)
-                       ("stuck:" `isPrefixOf` said)
-            assertBool ("refused for another reason: " ++ said)
-                       ("cannot be made equal" `isSuffixOf` said)
     ]
   where
     -- The file's top-level equations, as (name, text). An equation begins at a
