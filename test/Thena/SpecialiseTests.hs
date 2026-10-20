@@ -97,58 +97,52 @@ vtailTests =
     -- The methods as the user is handed them, so that what the two cases below
     -- change is visible here rather than taken on trust.
   , testCase "nil's method, before: an equation that cannot hold" $
-      shown vecContext (methodOf 0)
-        @?= "\8704 (n1 : Nat) -> Eq {0} Nat zero (succ n1) -> Vec A n1"
+      shown vecContext (methodOf 0) @?= "Eq {0} Nat zero (succ n) -> Vec A n"
 
   , testCase "cons's, before: a binder, a vector at it, and an equation" $
       shown vecContext (methodOf 1)
         @?= "\8704 (n1 : Nat) -> A -> Vec A n1 -> \
-            \(\8704 (n2 : Nat) -> Eq {0} Nat n1 (succ n2) -> Vec A n2) \
-            \-> \8704 (n2 : Nat) -> Eq {0} Nat (succ n1) (succ n2) -> Vec A n2"
+            \(Eq {0} Nat n1 (succ n) -> Vec A n) \
+            \-> Eq {0} Nat (succ n1) (succ n) -> Vec A n"
+
+    -- **AND IT GENERALISES NOTHING, WHICH IS WHY THE TWO ABOVE READ AS THEY
+    -- DID BEFORE MS9 PHASE 191.** A copy is demanded only where a rule's own
+    -- index cannot be made to fit the target's by moving one of the __rule's__
+    -- binders — and @cons@'s @succ n1@ fits @succ n@ by moving @n1@, which is
+    -- the solution below. Generalising @n@ here would put its copy /after/
+    -- @n1@ and solve the copy instead, leaving @n1@ bound for real; it is
+    -- @Fin@ and @Below@ in 'friendlyTests' that demand one.
+  , testCase "and vtail demands no copy at all" $
+      elimGeneralised vtail @?= []
 
     -- __The impossible case vanishes.__ @zero@ against @succ n@ is a conflict,
     -- so there is no subgoal at all and nothing is left for the user to close.
   , testCase "nil's method, after: no subgoal at all" $
       vecGoal "nil" (methodOf 0) @?= Nothing
 
-    -- __THE COPY GOES, AND THE CONSTRUCTOR'S OWN BINDER STAYS__ — and which way
-    -- round that is changed at MS9 phase 191. @succ n1 ≃ succ n2@ is injectivity
-    -- and then solution, and both sides are pattern variables now, so the one
-    -- that is eliminable is the copy: @n2@ is later in the telescope, and
-    -- solving @n1@ to a term mentioning it is not a telescope move. Before the
-    -- copies existed the equation read @succ n1 ≃ succ n@ with @n@ ambient and
-    -- @n1@ was the one that went. So the arm binds @n1@ for real, and @as@ is a
-    -- @Vec A n1@ at the goal @Vec A n1@ — no transport anywhere.
-  , testCase "cons's method, after: the copy is solved and n1 survives" $
+    -- __And the determined binder goes.__ @succ n1 ≃ succ n@ is injectivity and
+    -- then solution, so @n1@ is gone, @as@ is a @Vec A n@ rather than a
+    -- @Vec A n1@ — which is exactly the transport the user writes today — and
+    -- the induction hypothesis follows it.
+  , testCase "cons's method, after: n1 is solved and the vector is at n" $
       vecGoal "cons" (methodOf 1)
         @?= Just ( "consCase"
-                 , "\8704 (n1 : Nat) -> A -> Vec A n1 -> \
-                   \(\8704 (n2 : Nat) -> Eq {0} Nat n1 (succ n2) -> Vec A n2) \
-                   \-> Vec A n1" )
+                 , "A -> Vec A n -> \
+                   \(Eq {0} Nat n (succ n) -> Vec A n) -> Vec A n" )
 
-    -- __Which argument went, and what it went to__ (MS9 phase 185). @cons@ takes
-    -- three and the subgoal binds three: __nothing is forced any more__, which
-    -- is the same change read off the other report.
-  , testCase "cons's method, after: no constructor argument is forced" $
-      vecForced "cons" (methodOf 1) @?= [Nothing, Nothing, Nothing]
+    -- __Which argument went, and what it went to__ (MS9 phase 185). @cons@
+    -- takes three and the subgoal binds two, and this is the only thing that
+    -- says which two: @n1@ is the first and it was solved to @n@.
+  , testCase "cons's method, after: the first argument is forced to n" $
+      vecForced "cons" (methodOf 1) @?= [Just "n", Nothing, Nothing]
 
-    -- __And the copy is the thing that was solved__ (MS9 phase 191): one entry
-    -- per generalised entry, and it is a @Just@. __What it was solved to is not
-    -- asserted as a string here__, because it is a binder of the method and so
-    -- renders as a bare variable in the ambient context — which is the next
-    -- test's whole point.
-  , testCase "cons's method, after: the one copy was solved" $
-      map (fmap (const ())) (vecRefined "cons" (methodOf 1)) @?= [Just ()]
-
-    -- __AND IT IS NOT WRITTEN IN THE AMBIENT CONTEXT__, which is the asymmetry
-    -- with a forced constructor argument and the reason an arm cannot @define@
-    -- the ambient name to it (@~tzwjk@). A forced argument is solved from the
-    -- /target's/ index, which lives in the context the elimination was written
-    -- in; a copy is solved from the /constructor's/, so its term names a binder
-    -- of the method and is out of scope where the subgoal is claimed.
-  , testCase "and the term the copy went to is a method binder, not ambient" $
-      refinedVarsIn vecContext "cons" (methodOf 1)
-        @?= [["NOT-IN-THE-AMBIENT-CONTEXT"]]
+    -- __And it is written in the AMBIENT context__, which is the one thing the
+    -- design left unmeasured: @n@ is a variable of the context the elimination
+    -- was written in, so it is in scope where the subgoal is claimed and the
+    -- caller may bind it with @define@ there. A term mentioning a binder of the
+    -- method would not be.
+  , testCase "and the term it was forced to is ambient, not a method binder" $
+      forcedVarsIn vecContext "cons" (methodOf 1) @?= [["n"]]
 
     -- A method that vanished still answers. Nothing claims a subgoal, so
     -- nothing reads this, but a conflict after a solution has one and the shape
@@ -175,14 +169,10 @@ vtailTests =
       map (fmap (shown vecContext))
           (specialisedForced (run' eqNatVec vecContext vecCounter c vecCopies 1 mty))
 
-    vecRefined c mty =
-      specialisedRefined (run' eqNatVec vecContext vecCounter c vecCopies 1 mty)
-
-    refinedVarsIn ctx c mty = varsIn ctx
-      [ t | Just t <- specialisedRefined (run' eqNatVec ctx vecCounter c vecCopies 1 mty) ]
-
-    varsIn ctx ts =
-      [ map identOf (freeVars t) | t <- ts ]
+    forcedVarsIn ctx c mty =
+      [ map identOf (freeVars t)
+      | Just t <- specialisedForced (run' eqNatVec ctx vecCounter c vecCopies 1 mty)
+      ]
       where
         identOf v = case [ i | e <- ctx, entryVar e == v, Ident i <- [entryIdent e] ] of
           i : _ -> i

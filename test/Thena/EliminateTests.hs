@@ -190,14 +190,12 @@ dependentMotives =
 workedTests :: [TestTree]
 workedTests =
   [ method "eIfTrue — §3.7's own displayed method" 0
-      "∀ (t21 : Term) (t31 : Term) (t22 : Term) (t32 : Term) \
-      \-> Eq {0} Term (ifthen true t21 t31) (ifthen true t22 t32) \
-      \-> Eq {0} Term t22 t21"
+      "∀ (t21 : Term) (t31 : Term) -> Eq {0} Term (ifthen true t21 t31) (ifthen true t2 t3) \
+      \-> Eq {0} Term t2 t21"
 
   , method "eIfFalse — the branch ruled out by conflict on true/false" 1
-      "∀ (t21 : Term) (t31 : Term) (t22 : Term) (t32 : Term) \
-      \-> Eq {0} Term (ifthen false t21 t31) (ifthen true t22 t32) \
-      \-> Eq {0} Term t22 t31"
+      "∀ (t21 : Term) (t31 : Term) -> Eq {0} Term (ifthen false t21 t31) (ifthen true t2 t3) \
+      \-> Eq {0} Term t2 t31"
 
     -- The inductive hypothesis is the motive at the recursive argument's own
     -- indices, so it carries its own copy of whatever the motive constrains.
@@ -207,11 +205,9 @@ workedTests =
     -- one is harmless; 'friendlyTests' is where it would not have been.
   , method "eIf — and its induction hypothesis is constrained too" 2
       "∀ (t1 : Term) (t1' : Term) (t21 : Term) (t31 : Term) -> Step t1 t1' \
-      \-> (∀ (t22 : Term) (t32 : Term) \
-      \-> Eq {0} Term t1 (ifthen true t22 t32) -> Eq {0} Term t22 t1') \
-      \-> ∀ (t22 : Term) (t32 : Term) \
-      \-> Eq {0} Term (ifthen t1 t21 t31) (ifthen true t22 t32) \
-      \-> Eq {0} Term t22 (ifthen t1' t21 t31)"
+      \-> (Eq {0} Term t1 (ifthen true t2 t3) -> Eq {0} Term t2 t1') \
+      \-> Eq {0} Term (ifthen t1 t21 t31) (ifthen true t2 t3) \
+      \-> Eq {0} Term t2 (ifthen t1' t21 t31)"
 
   , testCase "one subgoal per constructor, in declaration order" $
       names worked
@@ -225,10 +221,9 @@ workedTests =
   , testCase "the equations are discharged with refl {0} at the use site" $
       rendered (withMethods stepContext worked) (elimTerm worked)
         @?= "(elim Step () (λ (x : Term) (x1 : Term) (target : Step x x1) \
-            \-> ∀ (t21 : Term) (t31 : Term) \
-            \-> Eq {0} Term x (ifthen true t21 t31) -> Eq {0} Term t21 x1) \
+            \-> Eq {0} Term x (ifthen true t2 t3) -> Eq {0} Term t2 x1) \
             \(eIfTrueMethod eIfFalseMethod eIfMethod) ((ifthen true t2 t3) u) d) \
-            \t2 t3 (refl {0} Term (ifthen true t2 t3))"
+            \(refl {0} Term (ifthen true t2 t3))"
   ]
   where
     method label k want = testCase label $
@@ -336,8 +331,7 @@ friendlyTests =
       let (env, n0) = declared [eqDecl', natDecl]
           (ctx, n1) = contextOf env n0 [("a", "Nat"), ("e", "Eq {0} Nat a a")]
        in map (rendered ctx . thirdOf') (elimMethods (run "repeated" env ctx n1 "Eq {0} Nat a a" "e"))
-            @?= [ "∀ (a1 : Nat) (a2 : Nat) \
-                  \-> Eq {0} Nat a1 a2 -> Eq {0} Nat a1 a2 -> Eq {0} Nat a1 a1" ]
+            @?= [ "∀ (a1 : Nat) -> Eq {0} Nat a1 a -> Eq {0} Nat a1 a -> Eq {0} Nat a1 a1" ]
 
     -- Every premise of the goal stays fixed (§3.7), so a premise that still
     -- mentions the index is precisely the specificity the equation exists to

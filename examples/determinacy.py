@@ -641,21 +641,50 @@ def telescope(ty):
         i = j + 1
     return out
 
+def demanded(ic, it, argv, names):
+    """Does this position of a rule's index need the target's entry COPIED?
+
+    One position of a constructor's own index against the target's, and the
+    three cases are the three the specialiser's transitions can reach:
+
+      * the rule's side is one of the RULE'S OWN variables — `ePred c1` against
+        `pred (succ v)` — so `solution` removes that binder and no copy is
+        involved. Nothing is demanded.
+      * the target's side is a bare ambient variable facing anything else —
+        `true` against `p` — and a copy is the only thing a solution can reach.
+        That position demands it.
+      * both are constructed: the same former recurses, different formers is a
+        conflict and demands nothing.
+    """
+    if ic[0] == 'v' and ic[1] in argv:
+        return []
+    if it[0] == 'v':
+        return [it[1]] if it[1] in names else []
+    if ic[0] == 'c' and it[0] == 'c' and ic[1] == it[1]:
+        return [v for a, b in zip(ic[2], it[2])
+                  for v in demanded(a, b, argv, names)]
+    return []
+
 def generalised(lem):
     """Which ambient entries this lemma's elimination generalises.
 
-    A mirror of 'Thena.Tactics.Eliminate''s own closure, and it had better
-    stay one: the seeds are the ambient variables a TIED index mentions, and
-    then an entry whose type mentions a seed is itself generalised, until
-    nothing more is added. @Step@'s left index is tied — the statement pins the
-    target at a constructed term — and its right index @u@ is a plain variable
-    and therefore friendly, so @u@ is neither a seed nor in the closure, and
-    neither is the target.
+    A mirror of 'Thena.Tactics.Eliminate''s own rule, and it had better stay
+    one: the seeds are the entries SOME RULE cannot be solved without — see
+    'demanded' — and then an entry whose type mentions a seed is itself
+    generalised, until nothing more is added. @Step@'s left index is tied, the
+    statement pinning the target at a constructed term, and its right index @u@
+    is a plain variable and therefore friendly, so @u@ is neither a seed nor in
+    the closure, and neither is the target.
     """
     tel   = [(n, t) for n, t in telescope(lem['ty']) if n in lem['intros']]
     fixed = [(n, t) for n, t in tel if n not in (lem['tgt'], "u")]
     names = [n for n, _ in fixed]
-    seeds = [w for w in IDENT.findall(arg(lem['L'])) if w in names]
+    seeds = []
+    for ct in STEP:
+        argv = [n for n, _ in ct['tel']]
+        for v in demanded(ct['lhs'], lem['L'], argv, names):
+            if v not in seeds:
+                seeds.append(v)
     while True:
         more = [n for n, t in fixed
                   if n not in seeds and any(w in seeds for w in IDENT.findall(t))]

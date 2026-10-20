@@ -103,6 +103,7 @@ import Thena.Global.Env
   , caseName
   , eliminatorType
   , isDeclared
+  , lookupConstructor
   , lookupDefinition
   , lookupInductive
   )
@@ -318,10 +319,61 @@ eliminate env ctx sch n0 goal tgt =
             fixed e = entryVar e `notElem` targetVars
                         && entryVar e `notElem` friendlies
 
+            -- __THE SEEDS ARE THE ENTRIES SOME METHOD CANNOT DO WITHOUT, not
+            -- every ambient variable a tied index mentions.__ His question,
+            -- 2026-10-20: only prove the stronger thing where it has to be
+            -- proved. Position by position, the constructor's own index against
+            -- the target's:
+            --
+            --   * the constructor's side is one of ITS OWN argument variables —
+            --     @ePred c1@ against @pred (succ v)@ — and @solution@ removes
+            --     that binder with no copy in sight. __Nothing is demanded__,
+            --     and demanding it is what cost two arms of
+            --     @examples\/determinacy-patterns.thena@: the copy is bound
+            --     after @c1@, so @c1 := succ v9@ points backwards.
+            --   * the target's side is a bare ambient variable facing anything
+            --     else — @true@ against @p@ — and __the copy is the only thing
+            --     a solution can reach__, which is the whole reason copies
+            --     exist. That position demands it.
+            --   * both are constructor applications: the same former recurses,
+            --     different formers is a conflict and demands nothing.
+            --
+            -- __Erring narrow is the safe direction.__ Generalising something no
+            -- method needed is what broke working proofs; failing to generalise
+            -- something a method did need leaves the equation standing, which is
+            -- exactly the behaviour that preceded this phase.
             seeds = nub [ v | k <- tiedIx
-                            , v <- freeVars (as !! k)
+                            , c <- inductiveConstructors d
+                            , v <- demandedAt c k
                             , v `notElem` targetVars
                             , v `notElem` friendlies ]
+
+            demandedAt c k = walk (conIndex c k) (as !! k)
+              where
+                argv = map entryVar (constructorArguments c)
+                walk ic it
+                  | Free w <- whnf env ctx ic, w `elem` argv = []
+                  | Free v <- whnf env ctx it                = [v]
+                  | Just (gc, acs) <- constructed ic
+                  , Just (gt, ats) <- constructed it
+                  , gc == gt = concat (zipWith walk acs ats)
+                  | otherwise = []
+
+            -- The constructor's own index expression for position @k@, with the
+            -- family's parameters replaced by the target's — the same
+            -- substitution 'tiedIndexTypes' makes.
+            conIndex c k =
+              substVars (zip (map entryVar (inductiveParameters d)) ps)
+                        (constructorIndices c !! k)
+
+            -- A saturated constructor application, __parameters dropped__,
+            -- because they are the same on both sides and comparing them would
+            -- demand a copy for nothing.
+            constructed t = case spineOf (whnf env ctx t) of
+              Just (g, _, args) -> case lookupConstructor g env of
+                Just (dd, _) -> Just (g, drop (length (inductiveParameters dd)) args)
+                Nothing      -> Nothing
+              Nothing -> Nothing
 
             -- In context order, whatever order the closure found them in.
             closed = [ entryVar e | e <- ctx, entryVar e `elem` grow seeds ]

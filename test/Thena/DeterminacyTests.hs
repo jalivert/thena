@@ -28,27 +28,21 @@
 -- **@examples\/determinacy-patterns.thena@ is the same theorem by dependent
 -- pattern matching** (MS9), written by hand — and it exists to be read beside
 -- the generated one, which is why it is in the suite rather than in a report.
--- Eleven of its thirteen lemmas are splits, and the generated proof's 148
--- appeals to @noConfusionTerm@ become 27.
+-- **Every one of its eleven lemmas is a split**: no @elim@ anywhere, and the
+-- generated proof's 148 appeals to @noConfusionTerm@ become none.
 --
--- **THE OTHER TWO ARE THE GENERATED PROOF'S OWN LEMMAS, PASTED UNCHANGED**, and
--- the file says why: @invPredSucc@ and @invIsZeroSucc@ eliminate at
--- @pred (succ v)@, which nests a constructor around the generalised variable,
--- so injectivity against @ePred@'s @pred c1@ leaves @Eq Term c1 (succ v9)@ —
--- and the copy @v9@ is quantified after the method's own binder @c1@, so
--- solving @c1@ to a term mentioning it is not a telescope move the specialiser
--- has. The arm can be written to take the leftover equation instead; **his
--- ruling of 2026-10-20 is that a proof which does that is not correctly
--- proved**, because an arm whose right-hand side is a function of an
--- unpredictable equation is the elaboration leaking into the surface. **So this
--- file shrinking further is the measure of that being fixed.**
+-- **A RECURSION MAY NOT CROSS A SPLIT THAT GENERALISES**, which is why
+-- @invIf@, @invPred@ and @invIsZero@ are lemmas rather than arms of
+-- @determinacy@: such a split makes each case prove something more general
+-- than the goal it came from, and the enclosing arm's induction hypothesis is
+-- about the subject rather than the copy. Each takes the hypothesis as a
+-- parameter and the caller passes the recursive call from outside the split.
 --
--- **AND A RECURSION MAY NOT CROSS A GENERALISING SPLIT**, which is why the four
--- congruence inversions are lemmas rather than arms of @determinacy@: a
--- recursive call is tied to an induction hypothesis by the argument it names,
--- and inside such a split that name means the entry's refined copy rather than
--- the entry. Each takes the hypothesis as a parameter and the caller passes the
--- recursive call from outside the split.
+-- **AND THE OTHER SEVEN ARMS NEED NONE OF THAT**, which is the other half of the
+-- boundary: a copy is demanded only where a rule's own index cannot be made to
+-- fit the scrutinee's by moving one of the /rule's/ binders. @eSucc@'s
+-- @succ c1@ fits @succ p@ by moving @c1@, so that arm recurses inline, and so
+-- does @nvNoStep@.
 --
 -- **The assertion that ties all three together is the statement**: each is
 -- checked against the /same/ rendered type for @determinacy@, so a version that
@@ -141,13 +135,14 @@ tests =
       -- except the ones named here, which a split cannot reach and which are
       -- @determinacy.py@'s own.
       --
-      -- **It fails when the boundary moves, which is the point**: a phase that
-      -- makes one of these two writable, or that pastes a third one back in,
-      -- changes this line and the header together.
-    , testCase "and every lemma is a split but the two the header names" $ do
+      -- **The list is EMPTY, and that is the claim**: not one lemma in the file
+      -- appeals to @elim@. It fails when the boundary moves, which is the
+      -- point — a phase that has to paste a generated lemma back in changes
+      -- this line and the header together.
+    , testCase "and every lemma in it is a split" $ do
         src <- readFile patternTarget
         [ n | (n, body) <- definitions src, any ("elim " `isPrefixOf`) (tails' body) ]
-          @?= ["invPredSucc", "invIsZeroSucc"]
+          @?= []
     ]
   where
     -- The file's top-level equations, as (name, text). An equation begins at a
