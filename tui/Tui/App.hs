@@ -647,7 +647,26 @@ scriptFoot st = case stScriptBar st of
     ]
   Nothing -> case stScriptNote st of
     Just note -> [withAttr (attrName "script.refused") (str (" " <> note))]
-    Nothing -> []
+    -- | **What the line under the caret said, and this is not decoration.**
+    -- Found by pty: a query is invisible otherwise. `:show belowRefl` worked
+    -- and printed nothing, because the document deliberately shows no output
+    -- for a line that succeeded — right for a tactic, whose effect the three
+    -- panes already draw, and wrong for `:show`/`:where`/`:matches`, whose
+    -- whole result *is* text. Showing it for whichever line you are standing
+    -- on needs no taxonomy of which commands are queries, which would be the
+    -- frontend keeping its own copy of the engine's command table.
+    Nothing -> case stScriptPos st >>= \i -> nthOf i (stScript st) of
+      Just sl | slOk sl, not (null (slOutput sl)) ->
+        [ withAttr (attrName "script.refused") (str (" " <> l))
+        | l <- take scriptFootCap (slOutput sl)
+        ]
+          <> [ withAttr (attrName "script.refused") (str " …") | length (slOutput sl) > scriptFootCap ]
+      _ -> []
+
+-- | How much of a line's output the pane's foot will show. `:show` on a
+-- proved theorem is one enormous line; the foot is a glance, not a pane.
+scriptFootCap :: Int
+scriptFootCap = 4
 
 -- | The `:load` dropdown, as its own layer positioned by the caret's actual
 -- screen coordinates from the *previous* render — 'Brick.Main.lookupExtent'
