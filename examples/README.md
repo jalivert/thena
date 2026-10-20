@@ -50,7 +50,7 @@ today, and nothing checks that they keep doing so.
 | `normal.thena` | A value is a normal form. After `canonical` and `progress` |
 | `determinacy-surface.thena` | Determinacy, TAPL 3.5.4, in the surface language. **Generated** by `determinacy.py`: regenerate it, never patch it |
 | `determinacy-tactics.thena.script` | The same proof driven by tactics. **Generated** too |
-| `determinacy-patterns.thena` | The same theorem by dependent pattern matching, **written by hand** — 130 lines against the generated 278, and no appeal to `noConfusionTerm` at all. Read it beside `determinacy-surface.thena` |
+| `determinacy-patterns.thena` | The same theorem, with seven of its ten cases by dependent pattern matching and three that **cannot be** — those three are the generated lemmas pasted unchanged, and the file's header says why. Read it beside `determinacy-surface.thena` |
 | `tier0.thena` | MS4's first checkpoint: a datatype, a function by elimination, a theorem |
 | `dependent-index.thena.script`, `products.thena.script` | REPL scripts: elimination over an indexed family, and no-confusion |
 | `choice-points.thena.rules` | What a choice point resumes into |

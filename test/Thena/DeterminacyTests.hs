@@ -26,11 +26,20 @@
 -- itself is stated once.
 --
 -- **@examples\/determinacy-patterns.thena@ is the same theorem by dependent
--- pattern matching** (MS9), written by hand in 130 lines — and it exists to be
--- read beside the generated one, which is why it is in the suite rather than in
--- a report. The generated proof appeals to @noConfusionTerm@ 148 times; the
--- pattern version does not mention it, because a method whose equations
--- conflict is closed by the splitter and the user writes no arm for it.
+-- pattern matching** (MS9), written by hand — and it exists to be read beside
+-- the generated one, which is why it is in the suite rather than in a report.
+-- Seven of the ten cases are splits, and the generated proof's 148 appeals to
+-- @noConfusionTerm@ become 30.
+--
+-- **THE OTHER THREE ARE THE GENERATED PROOF'S OWN LEMMAS, PASTED UNCHANGED**,
+-- and the file says why: a congruence rule's arm binds its subject as a
+-- variable, so splitting the second derivation needs that variable solved, and
+-- the specialiser can only solve variables the split itself bound (@~2d9xj@).
+-- The arm can be written to take the leftover equation instead; **his ruling of
+-- 2026-10-20 is that a proof which does that is not correctly proved**, because
+-- an arm whose right-hand side is a function of an unpredictable equation is
+-- the elaboration leaking into the surface. **So this file shrinking is the
+-- measure of that item being resolved.**
 --
 -- **The assertion that ties all three together is the statement**: each is
 -- checked against the /same/ rendered type for @determinacy@, so a version that
