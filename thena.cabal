@@ -33,6 +33,11 @@ flag examples
     default:            False
     manual:             True
 
+flag tui
+    description:        Build the TUI's own test suite.
+    default:            False
+    manual:             True
+
 common warnings
     ghc-options: -Wall
 
@@ -343,14 +348,23 @@ test-suite thena-test
 -- layout, keymaps and panes, and this covers the one part of `Tui.*` that is a
 -- function from a 'Thena.View.Core.Shape' to a widget.
 --
--- > cabal test thena-tui-test
+-- **Behind a manual flag, OFF by default** — his instruction, 2026-10-20: the
+-- engine track should not pay for this suite when it runs its own.
 --
--- **`cabal test` DOES sweep it, and sweeps `thena-boundary` too** — measured
--- 2026-10-20, `~kn79b`. The note at the top of this file says a suite depending
--- on `thena:view` rather than `thena` is skipped; that stopped being true when
--- this third suite was added, and the cause is not established. Check what ran.
+-- > cabal test thena-tui-test --flags=tui
+--
+-- **`cabal test all` does not run it either, and that half of the ask could not
+-- be built.** `all` selects every /package/, and this project is one package, so
+-- `cabal test` and `cabal test all` are the same command here — measured
+-- 2026-10-20. Off-for-one-and-on-for-the-other needs the suite in a package of
+-- its own, which needs `visibility: public` on `library tui`; **he declined
+-- that, and rightly** — a private sublibrary is part of nothing reaching around
+-- the boundary. So the flag is the whole mechanism: this suite runs when it is
+-- asked for and not otherwise.
 test-suite thena-tui-test
     import:             warnings
+    if !flag(tui)
+        buildable:      False
     hs-source-dirs:     tui-test
     default-language:   GHC2024
     type:               exitcode-stdio-1.0
