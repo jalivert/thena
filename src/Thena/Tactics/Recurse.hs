@@ -42,17 +42,15 @@
 -- propagates the shape one more step, which is exactly what elaboration's
 -- @okNodeCase@/@okNodeMethod@ pair needs.
 --
--- __A method the specialiser rewrote yields nothing, AND THAT IS NO LONGER
--- CORRECT — measured 2026-10-20.__ Where an index is pinned the method comes
--- back as a coercion around a subgoal, so the arm's binders belong to the
--- subgoal rather than to the method and a call in it matches nothing this
--- collected. It is refused by name. The claim that stood here was that nothing
--- was lost, because a pinned index guards every hypothesis of such a method
--- with an equation — @vtail@'s is @Eq Nat n (succ n)@. **Generalisation
--- invalidated it.** The motive quantifies a copy of every ambient entry a rule
--- demands, the induction hypothesis of the enclosing arm is such an entry
--- whenever its type mentions one, and its copy arrives UNGUARDED and refined to
--- the arm's own subject:
+-- __A method the specialiser rewrote hands its binders to a subgoal, and the
+-- report follows them there__ (MS9 phase 193). Where an equation fires, the
+-- method comes back as a coercion around a hole, so the arm's binders are the
+-- /hole's/ and a call written against them matches nothing a walk over the
+-- method itself collected. That is what refused a recursion inside an arm whose
+-- split generalised: the motive quantifies a copy of every ambient entry a rule
+-- demands, the enclosing arm's induction hypothesis is such an entry whenever
+-- its type mentions one, and its copy arrives UNGUARDED and about the arm's own
+-- subject —
 --
 -- @
 -- usMethod : ∀ (a1 : N) (b : N) -> Up a1 b -> (…)
@@ -60,11 +58,26 @@
 --   -> Eq {0} N (s a1) (s a2) -> Eq {0} N (s a') (s b)
 -- @
 --
--- The second-to-last binder is the hypothesis a recursion in that arm wants,
--- and after the equation solves @a2 := a1@ it is about the arm's own variable.
--- **So there IS a usable recursion in such an arm, and it is lost.** That is
--- @~bq3rn@, and what it waits on is the specialiser saying which binder of the
--- subgoal is which — see that item.
+-- — so the recursion in such an arm is real and was simply unreachable.
+--
+-- __Two things make it reachable, and neither is a name or a type.__
+--
+-- * __The use site says which ambient entry each copy copies.__
+--   "Thena.Tactics.Eliminate" applies the scheme to each generalised entry /as
+--   itself/, in the order the motive quantified the copies, before the
+--   reflexive proofs — so 'generalisedIn' reads them straight off the spine, and
+--   a pair this walk already holds becomes a pair of copy /positions/.
+-- * __And the method says which of its binders the hole kept.__ A specialised
+--   method is a λ over its whole telescope whose body hands the hole the
+--   binders that survived, in order, through one coercion per solved binder;
+--   'handedTo' follows that and answers the list, which turns a position in the
+--   telescope into a position in the arm.
+--
+-- __So nothing here matches by name or by type__, and the reason is the one
+-- 'resolveRecursion' is a pass at all: where the motive does not depend on the
+-- target, a pattern variable and the hypothesis about it have the same type, so
+-- a search by type picks the wrong one and still typechecks (his ruling of
+-- 2026-10-19, @.claude\/RULINGS.md@).
 --
 -- Where it sits in §2.5: beside "Thena.Tactics.Eliminate" and
 -- "Thena.Tactics.Specialise" — above "Thena.Core.Term" and
@@ -73,15 +86,17 @@ module Thena.Tactics.Recurse
   ( resolveRecursion
   ) where
 
-import Data.List (nub)
+import Data.List (elemIndex, nub, stripPrefix)
 
 import Thena.Core.Context (Context, Entry (..), entryType)
 import Thena.Core.Term
   ( Core (..)
+  , GlobalName (..)
   , Var
   , close
   , fresh
   , freeVars
+  , instantiate
   , open
   )
 import Thena.Errors (RecursionError (..))
@@ -93,13 +108,18 @@ import Thena.Global.Env
   , recursiveArgument
   )
 
--- | A method's telescope, as the declaration states it: how many constructor
--- arguments come first, and which of them each following hypothesis is about.
+-- | Where an arm's hypotheses sit in the λ-chain that binds it: how many
+-- binders to descend, and which pairs of them are a recursive argument and the
+-- hypothesis about it.
 --
--- Both numbers are positions in the λ-chain, so nothing here is a guess about
--- the term — 'Thena.Global.Env.eliminatorType' built the type these positions
--- belong to from the same reading.
-data Shape = Shape Int [Int]
+-- __Pairs of positions rather than two counts__ (MS9 phase 193). The
+-- declaration states a method's telescope as the constructor's arguments and
+-- then one hypothesis per recursive argument, so the pairs for a method written
+-- as its own λ-chain are @(recursive argument, arguments + i)@ — but a
+-- generalised copy's pair is nowhere near that shape, and an arm the specialiser
+-- rewrote keeps only the binders the equations left. Both are positions in one
+-- list, so one list of pairs says all three.
+data Shape = Shape Int [(Int, Int)]
   deriving (Eq, Show)
 
 -- | What the walk carries down: the assumed name it is tying, the local
@@ -140,8 +160,13 @@ resolveRecursion env n0 tm = case tm of
   _ -> (Left RecursionNotAbstracted, n0)
   where
     -- The methods' telescopes for a datatype, in constructor order.
-    shapesOf def =
-      [ Shape (length args) (recursive args) | c <- inductiveConstructors def
+    --
+    -- __@withHyps@ is the one thing @induction@ and @case@ differ by__, and it
+    -- is the same parameter 'Thena.Global.Env.Scheme' is: @caseD@'s methods are
+    -- the eliminator's minus their hypotheses, so a method of one has pairs to
+    -- state and a method of the other has none.
+    shapesOf withHyps def =
+      [ shape (length args) (recursive args) | c <- inductiveConstructors def
       , let args = constructorArguments c ]
       where
         dn = inductiveName def
@@ -149,6 +174,60 @@ resolveRecursion env n0 tm = case tm of
         recursive args =
           [ k | (k, e) <- zip [0 ..] args
               , Just _ <- [recursiveArgument dn np (entryType e)] ]
+        shape nargs recs
+          | withHyps  = Shape (nargs + length recs)
+                              [ (r, nargs + i) | (i, r) <- zip [0 ..] recs ]
+          | otherwise = Shape nargs []
+
+    -- | Which ambient entries a split generalised, read off its use site.
+    --
+    -- The scheme is applied to each of them __as itself__, in the order the
+    -- motive quantified the copies, and then to one reflexive proof per tied
+    -- index — "Thena.Tactics.Eliminate", MS9 phase 191, whose note calls that
+    -- application discharging the dependency. An entry is therefore always a
+    -- bare variable and a proof never is, which is the whole of telling the two
+    -- runs apart.
+    generalisedIn as = [ v | Free v <- takeWhile isVar as ]
+      where
+        isVar (Free _) = True
+        isVar _        = False
+
+    -- The copies are further binders of every method, standing after the
+    -- hypotheses, and __a copy inherits the pairing of the entry it copies__:
+    -- if this walk already holds @(x, h)@ and the split generalised both, then
+    -- the copy of @x@ is a recursive argument of this arm and the copy of @h@ is
+    -- the hypothesis about it. That is the pair a recursion inside a
+    -- generalising arm needs, and it is about the arm's own subject rather than
+    -- the enclosing one.
+    withCopies hyps gen (Shape count pairs) =
+      Shape (count + length gen)
+            (pairs ++ [ (count + i, count + j)
+                      | (x, h) <- hyps
+                      , Just i <- [elemIndex x gen]
+                      , Just j <- [elemIndex h gen]
+                      ])
+
+    -- One shape per constructor, in declaration order, as an infinite list so a
+    -- method of an undeclared datatype is simply not reported.
+    methodShapes w withHyps d gen = case lookupInductive d env of
+      Just def -> map (Just . withCopies (hypotheses w) gen)
+                      (shapesOf withHyps def)
+                    ++ repeat Nothing
+      Nothing  -> repeat Nothing
+
+    -- @caseD@ is the split tactic's other use site: @case … of@ elaborates to an
+    -- application of the generated definition rather than to an 'Eliminate'
+    -- node, so this is the same report read off the other spelling and not a
+    -- second mechanism. The name is generated for every datatype, so it is not
+    -- one a user can have bound to something else.
+    analysedBy (GlobalName w) = do
+      rest <- stripPrefix "case" w
+      lookupInductive (GlobalName rest) env
+
+    -- An item of a list, by position.
+    at i xs = case drop i xs of
+      x : _ -> Just x
+      []    -> Nothing
 
     -- ------------------------------------------------------------------
     -- The walk
@@ -213,14 +292,19 @@ resolveRecursion env n0 tm = case tm of
                         (Left e, u, n4) -> (Left e, other ++ usedV ++ u, n4)
                         (Right ty', usedT, n4) ->
                           -- An alias carries the shape one step further out,
-                          -- which is what elaboration's method/case pair needs.
-                          let viaName = case (mine, v) of
-                                (Just sh, Free z) -> [(z, sh)]
-                                _                 -> []
+                          -- which is what elaboration's method/case pair needs
+                          -- — and a method the specialiser rewrote carries it
+                          -- further in, to the hole its arm is written under
+                          -- (MS9 phase 193).
+                          let (viaName, n5) = case mine of
+                                Nothing -> ([], n4)
+                                Just sh -> case v of
+                                  Free z -> ([(z, sh)], n4)
+                                  _      -> subgoalShape w sh v n4
                            in ( Right (Let i v' ty' (close x b))
-                              , other ++ usedV ++ usedT ++ viaName, n4 )
+                              , other ++ usedV ++ usedT ++ viaName, n5 )
 
-      Eliminate {} -> elimination w t n
+      Eliminate {} -> elimination w t [] n
       _            -> done t n
 
     under w i build ty sc n =
@@ -236,6 +320,11 @@ resolveRecursion env n0 tm = case tm of
       Free v | v == subject w -> case tie w as n of
         (Left e, n1)  -> (Left e, [], n1)
         (Right r, n1) -> done r n1
+      -- **The head is taken with the arguments it is applied to**, because a
+      -- split's use site is the node applied to the entries it generalised and
+      -- the walk has to read them (MS9 phase 193).
+      Eliminate {} -> elimination w t as n
+      Global gn ls | Just def <- analysedBy gn -> caseSplit w def gn ls as n
       _ ->
         go w t n `andThen` \h n1 ->
         walkList w as n1 `andThen` \as' -> done (foldl App h as')
@@ -282,19 +371,38 @@ resolveRecursion env n0 tm = case tm of
       go w a n `andThen` \a' n1 ->
       walkList w rest n1 `andThen` \as' -> done (a' : as')
 
-    elimination w t n = case t of
+    elimination w t as n = case t of
       Eliminate d ls ps mot ms is tgt ->
-        let shapes = case lookupInductive d env of
-              Just def -> map Just (shapesOf def) ++ repeat Nothing
-              Nothing  -> repeat Nothing
+        let shapes = methodShapes w True d (generalisedIn as)
             used = [ (v, sh) | (Free v, Just sh) <- zip ms shapes ]
          in methods w (zip ms shapes) n `andThen` \ms' n1 ->
             go w mot n1      `andThen` \mot' n2 ->
             walkList w ps n2 `andThen` \ps' n3 ->
             walkList w is n3 `andThen` \is' n4 ->
             go w tgt n4      `andThen` \tgt' n5 ->
-              ( Right (Eliminate d ls ps' mot' ms' is' tgt'), used, n5 )
+            walkList w as n5 `andThen` \as' n6 ->
+              ( Right (foldl App (Eliminate d ls ps' mot' ms' is' tgt') as')
+              , used, n6 )
       _ -> done t n
+
+    -- The same report off @caseD@'s spine, whose binder order is
+    -- 'Thena.Global.Env.eliminatorParts'\' own: the parameters, the motive, one
+    -- method per constructor, the indices, the target, and then what the motive
+    -- generalised.
+    caseSplit w def gn ls as n =
+      let np = length (inductiveParameters def)
+          ni = length (inductiveIndices def)
+          nc = length (inductiveConstructors def)
+          ms = take nc (drop (np + 1) as)
+          shapes = methodShapes w False (inductiveName def)
+                     (generalisedIn (drop (np + 1 + nc + ni + 1) as))
+          used = [ (v, sh) | (Free v, Just sh) <- zip ms shapes ]
+          shapeAt k
+            | k >= np + 1, k < np + 1 + nc = shapes !! (k - (np + 1))
+            | otherwise                    = Nothing
+          tagged = [ (a, shapeAt k) | (k, a) <- zip [(0 :: Int) ..] as ]
+       in methods w tagged n `andThen` \as' n1 ->
+            ( Right (foldl App (Global gn ls) as'), used, n1 )
 
     methods _ []                n = done [] n
     methods w ((mt, sh) : rest) n =
@@ -306,10 +414,10 @@ resolveRecursion env n0 tm = case tm of
     -- A term that is not the chain the declaration describes is walked as an
     -- ordinary term with the hypotheses already in scope. That is the
     -- specialised case, and refusing a call inside it is the point.
-    peel w (Shape nargs recs) = chain []
+    peel w (Shape count pairs) = chain []
       where
         chain args u j
-          | length args >= nargs + length recs =
+          | length args >= count =
               go w { hypotheses = bound args ++ hypotheses w
                    , binders    = binders w ++ map snd args } u j
           | otherwise = case u of
@@ -319,15 +427,79 @@ resolveRecursion env n0 tm = case tm of
                       `andThen` \b -> done (Lam i ty (close v b))
               _ -> go w u j
 
-        -- The hypotheses, once the whole chain is bound: the λ at position
-        -- @nargs + i@ is about the argument at position @recs !! i@.
+        -- The hypotheses, once the whole chain is bound, as the shape names
+        -- them: a pair of positions in it.
         bound args =
           [ (y, h)
-          | (i, a) <- zip [(0 :: Int) ..] recs
-          , Just (y, _) <- [at a args]
-          , Just (h, _) <- [at (nargs + i) args]
+          | (i, j) <- pairs
+          , Just (y, _) <- [at i args]
+          , Just (h, _) <- [at j args]
           ]
 
-        at i xs = case drop i xs of
-          x : _ -> Just x
-          []    -> Nothing
+    -- __Where a specialised method's arm actually is, and the shape it has
+    -- there__ (MS9 phase 193).
+    --
+    -- A method the specialiser rewrote is a λ over its whole telescope whose
+    -- body hands a /hole/ the binders the equations left, so the arm is written
+    -- under the hole's λ-chain and this shape belongs to the hole's @let@ and
+    -- not to the method's. The hole is one of the @let@s already descended
+    -- under — 'Thena.Engine' claims the subgoal above the method it came from —
+    -- so it is found by asking which of them this term hands anything to, and
+    -- there is exactly one.
+    --
+    -- __The positions are translated, not assumed.__ A solved binder is gone
+    -- from the hole's chain, so the telescope's position @i@ is at whatever
+    -- place the term passes that binder, and a pair whose either half was solved
+    -- is dropped rather than guessed at.
+    subgoalShape w (Shape count pairs) v n =
+      let (vs, body, n1) = openAll v n
+          found =
+            [ (z, args)
+            | (z, _) <- aliases w
+            , z `elem` freeVars body
+            , Just args <- [handedTo z body []]
+            ]
+       in if length vs < count then ([], n1) else case found of
+            [(z, args)] ->
+              ( [ (z, Shape (length args)
+                      [ (i', j')
+                      | (i, j) <- pairs
+                      , Just i' <- [place vs args i]
+                      , Just j' <- [place vs args j]
+                      ]) ]
+              , n1 )
+            _ -> ([], n1)
+      where
+        place vs args i = at i vs >>= \y -> elemIndex (Free y) args
+
+    -- Every leading λ, opened at a throwaway variable, and the body under them.
+    openAll t n = case t of
+      Lam _ _ sc ->
+        let (v, n1)      = fresh n
+            (vs, b, n2)  = openAll (open v sc) n1
+         in (v : vs, b, n2)
+      _ -> ([], t, n)
+
+    -- __The arguments a specialised method hands @z@, in order.__
+    --
+    -- "Thena.Tactics.Specialise" builds the term by composition: each
+    -- transition λ-binds the problem as it stands and applies the sub-problem's
+    -- term to the binders that survive it, so the hole is reached through a nest
+    -- of such applications. A /solution/ puts a @J@-elimination between two of
+    -- them — it coerces the sub-problem from the term the equation solved the
+    -- binder to, back to the binder — and the arguments after that point are
+    -- applied to the coercion rather than to the sub-problem. A coercion of a
+    -- function is transparent to application, so they are carried through it.
+    --
+    -- @extra@ is what the result of @t@ is applied to, which is why this is not
+    -- a spine walk: an argument may be written outside the coercion that wraps
+    -- the binder it fills.
+    handedTo z t extra = case t of
+      Free y | y == z -> Just extra
+      Lam _ _ sc -> case extra of
+        a : rest -> handedTo z (instantiate a sc) rest
+        []       -> Nothing
+      App f a
+        | z `elem` freeVars f -> handedTo z f (a : extra)
+        | z `elem` freeVars a -> handedTo z a extra
+      _ -> Nothing
