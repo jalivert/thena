@@ -217,6 +217,7 @@ library tui
         Tui.App
         Tui.Config
         Tui.Render
+        Tui.Replay
         Tui.Theme
     build-depends:
         base           ^>=4.21.2.0,
@@ -239,6 +240,18 @@ executable thena-tui
     main-is:            Tui.hs
     -- brick's backend needs the threaded runtime.
     ghc-options:        -threaded
+    build-depends:
+        base ^>=4.21.2.0,
+        thena:tui
+
+-- | A script replayed non-interactively, through the frontend boundary alone
+-- (`~5w5gx`). `Tui.Replay` is the logic; linked against `thena:tui` and
+-- nothing else, same as `thena-tui` itself.
+executable thena-replay
+    import:             warnings
+    hs-source-dirs:     app
+    default-language:   GHC2024
+    main-is:            Replay.hs
     build-depends:
         base ^>=4.21.2.0,
         thena:tui
