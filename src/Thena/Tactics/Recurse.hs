@@ -42,13 +42,29 @@
 -- propagates the shape one more step, which is exactly what elaboration's
 -- @okNodeCase@/@okNodeMethod@ pair needs.
 --
--- __A method the specialiser rewrote yields nothing, and that is correct.__
--- Where an index is pinned the method comes back as a coercion around a
--- subgoal, so the arm's binders belong to the subgoal rather than to the
--- method and a call in it matches nothing this collected. It is refused by
--- name. A pinned index guards every hypothesis of that method with an equation
--- — @vtail@'s is @Eq Nat n (succ n)@ — so there is no usable recursion in such
--- an arm to lose.
+-- __A method the specialiser rewrote yields nothing, AND THAT IS NO LONGER
+-- CORRECT — measured 2026-10-20.__ Where an index is pinned the method comes
+-- back as a coercion around a subgoal, so the arm's binders belong to the
+-- subgoal rather than to the method and a call in it matches nothing this
+-- collected. It is refused by name. The claim that stood here was that nothing
+-- was lost, because a pinned index guards every hypothesis of such a method
+-- with an equation — @vtail@'s is @Eq Nat n (succ n)@. **Generalisation
+-- invalidated it.** The motive quantifies a copy of every ambient entry a rule
+-- demands, the induction hypothesis of the enclosing arm is such an entry
+-- whenever its type mentions one, and its copy arrives UNGUARDED and refined to
+-- the arm's own subject:
+--
+-- @
+-- usMethod : ∀ (a1 : N) (b : N) -> Up a1 b -> (…)
+--   -> ∀ (a2 : N) -> Up a2 a' -> (∀ (q : N) -> Up a2 q -> Eq {0} N a' q)
+--   -> Eq {0} N (s a1) (s a2) -> Eq {0} N (s a') (s b)
+-- @
+--
+-- The second-to-last binder is the hypothesis a recursion in that arm wants,
+-- and after the equation solves @a2 := a1@ it is about the arm's own variable.
+-- **So there IS a usable recursion in such an arm, and it is lost.** That is
+-- @~bq3rn@, and what it waits on is the specialiser saying which binder of the
+-- subgoal is which — see that item.
 --
 -- Where it sits in §2.5: beside "Thena.Tactics.Eliminate" and
 -- "Thena.Tactics.Specialise" — above "Thena.Core.Term" and
