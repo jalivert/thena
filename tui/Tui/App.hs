@@ -664,7 +664,17 @@ scriptFoot st = case stScriptBar st of
     [ vLimit 1 $
         withAttr (attrName "script.bar") $
           hBox
-            [ withAttr (attrName "script.bar.mark") (str " : ")
+            -- **'❯', not ':'** — his report, 2026-10-20: the bar opened with
+            -- a ':' in front of it and he read it as a colon already typed
+            -- for him, so `:theorem foo : T` went in as `theorem foo : T`
+            -- and came back *1:12: unexpected :*. The glyph has to be the
+            -- ordinary prompt, because **the bar is not a colon-command
+            -- slot**: its fallback is 'insertScriptLine', so most of what
+            -- is typed here is a plain script line (`intro`, `succ zero`,
+            -- a rule's name) with no colon at all. Pre-inserting a real ':'
+            -- — the other way to make the old glyph honest — would mean
+            -- deleting it for every one of those.
+            [ withAttr (attrName "script.bar.mark") (str " ❯ ")
             -- The editor paints 'editFocusedAttr', which is the *panel*
             -- fill — so without this override the bar's surface stopped at
             -- its marker and the rest of the row read as document again.
