@@ -872,12 +872,12 @@ handleEventInner (VtyEvent (V.EvKey V.KEsc [])) = do
 -- the editor instead, which binds it as delete-char-forward, so no editing
 -- key is lost to the quit. Note the shape vty gives it: 'd' with 'MCtrl',
 -- not a bare 'EOT' character.
-handleEventInner (VtyEvent (V.EvKey (V.KChar 'd') [V.MCtrl])) = do
+handleEventInner ev@(VtyEvent (V.EvKey (V.KChar 'd') [V.MCtrl])) = do
   st <- get
   let line = concatMap Text.unpack (getEditContents (stInput st))
   if null line
     then halt
-    else Brick.zoom stInputL (handleEditorEvent (VtyEvent (V.EvKey (V.KChar 'd') [V.MCtrl])))
+    else Brick.zoom stInputL (handleEditorEvent ev)
       >> followInput >> refreshDropdown >> refreshOfferDropdown
 -- | Down travels visually down in both placements — toward the input below
 -- it, likewise toward the input above it, where the rows run reversed and
