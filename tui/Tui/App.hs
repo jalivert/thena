@@ -1085,6 +1085,28 @@ handleScriptEvent (VtyEvent (V.EvKey V.KEnter [])) = do
 -- `:script rerun` in the command bar does the same thing with no modifier
 -- at all**, so no terminal can strand the feature — the same belt-and-
 -- braces F2 and Ctrl+X already have.
+-- | **Backspace with nothing to its left wraps to the end of the line
+-- above** — his feature, 2026-10-20. In a document the caret should not
+-- stop dead at column 0 when there is a line above it to back into, and
+-- the keypress is otherwise wasted: there is nothing there to delete.
+--
+-- **It moves the caret and does not join the lines.** Backspace at the
+-- start of a line joins in an ordinary editor, but a script's lines are
+-- each a submitted REPL instruction with a 'Session' of its own, so
+-- gluing two of them together would mean running something neither line
+-- says. Removing a line is @:script drop@ or clearing it and pressing
+-- Enter; this is navigation.
+--
+-- 'scriptUp' is exactly the operation already: it steps the caret back one
+-- line and 'loadScriptAt' seats it at the end of the text it loads, which
+-- is where backing into a line should leave you. At line 0 it is a no-op,
+-- the same stop-rather-than-wrap the whole mode uses. **Option+Backspace
+-- keeps its word-delete** — that arrives with 'V.MMeta' and never matches
+-- this clause.
+handleScriptEvent ev@(VtyEvent (V.EvKey V.KBS [])) = do
+  st <- get
+  let (_, col) = getCursorPosition (stInput st)
+  if col == 0 then scriptUp else handleReplEvent ev
 handleScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MShift])) = scriptCutAndRun
 handleScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MMeta]))  = scriptCutAndRun
 handleScriptEvent (VtyEvent (V.EvKey (V.KFun 2) [])) = openScriptBar
