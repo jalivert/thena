@@ -325,7 +325,17 @@ rule same-length [p, ...ps] [n, ...ns] :- do same-length ps ns
 -- itself. MS8 phase 170 found the same thing in the application clauses and the
 -- lesson is in DECISIONS.md. So `pick` answers with the arm and can fail for
 -- one reason only, and the caller's elaboration failure is the caller's.
-arm-for : Surface -> Name -> (Pattern, Option Surface)
+-- IT ANSWERS WITH AN OPTION, and running out of arms is `none` rather than no
+-- clause at all. Two reasons, both from his ruling of 2026-10-20. A case the
+-- specialiser closed may legitimately have no arm, so the caller has to be able
+-- to ask without failing. And where a case did survive, running out of arms is
+-- COVERAGE failing, which `case-needs-an-arm` now says in its own name — until
+-- this phase it was reported as `no clause of arm-for applies here`, which named
+-- a rule in the shipped base instead of the missing arm.
+arm-for : Surface -> Name -> Option (Pattern, Option Surface)
+rule arm-for t c :- when (surface-is-split t) (split-has-no-arms t)
+  do z = none
+     ; return z
 rule arm-for t c :- when (surface-is-split t) (split-has-arms t)
   do p = split-arm-pattern t
      ; w = pattern-head p
@@ -340,8 +350,8 @@ rule arm-for t c :- when (surface-is-split t) (split-has-arms t)
 -- backtracks into it, walks on through the arms and reports the search rather
 -- than the real error — phase 170's finding, one level over. Running out of
 -- arms is coverage failing, and there is no clause for it.
-pick : Name -> Name -> Pattern -> Option Surface -> Surface -> (Pattern, Option Surface)
-rule pick w c p b r :- when (same-name w c) do return (p, b)
+pick : Name -> Name -> Pattern -> Option Surface -> Surface -> Option (Pattern, Option Surface)
+rule pick w c p b r :- when (same-name w c) do a = some (p, b) ; return a
 rule pick w c p b r :- when (different-name w c) do a = arm-for r c ; return a
 
 -- AN ARM FOR A CASE THAT SURVIVED NEEDS A BODY. An empty arm — `‹pattern› ->`
@@ -383,6 +393,25 @@ rule elaborate-arm t c sub forced (p, ob) :-
      ; goto sub
      ; solve
 
+-- A CASE THAT SURVIVED NEEDS AN ARM — coverage, and this is where it is said.
+-- One clause for `some` and none for `none`, so the refusal names the user's
+-- complaint: there is a method left and no arm was written for it.
+case-needs-an-arm : Surface -> Name -> Core -> List (Option Core) -> Option (Pattern, Option Surface) -> ()
+rule case-needs-an-arm t c sub forced (some a) :- do elaborate-arm t c sub forced a
+
+-- AND A CASE THAT VANISHED TAKES NO BODY — the other half of his ruling of
+-- 2026-10-20. Two clauses, and between them they are every legal shape: no arm
+-- at all, or an arm that stops at the arrow. An arm with a body is the user
+-- claiming the case is reachable against a proof that it is not, and there is no
+-- clause for it.
+-- **`Option (a, Option b) -> ()`** is what inference works out and therefore what
+-- is written: neither clause looks at the pattern or at what a body would be, so
+-- nothing here says what an arm is made of. `case-must-vanish` is written the same
+-- way for the same reason.
+vanished-case-takes-no-body : Option (a, Option b) -> ()
+rule vanished-case-takes-no-body none :- do
+rule vanished-case-takes-no-body (some (p, none)) :- do
+
 -- WRITING NO ARMS IS THE CLAIM THAT EVERY CASE VANISHES, so a method that
 -- survives one is refused here. `case-must-vanish` has a clause for `none` and
 -- none for `some`, which is the `no-nesting` idiom: the refusal names itself,
@@ -396,11 +425,15 @@ rule case-must-vanish none :- do
 -- nothing to elaborate into and the arm has no body to elaborate.
 --
 -- AN ARM FOR A VANISHED CASE IS WRITTEN WITH NO BODY — `‹pattern› ->` and
--- nothing after it, his ruling of 2026-10-20 — and the `say` below is what
--- stands in until the phase that builds it. A body written here is the user
--- claiming the case is reachable against a proof that it is not, which is a
--- refusal; and `induction d of { }` already says the same thing one level out,
--- which is why no keyword was reserved for it.
+-- nothing after it, his ruling of 2026-10-20. A body written here is the user
+-- claiming the case is reachable against a proof that it is not, and it is
+-- refused by `vanished-case-takes-no-body`; `induction d of { }` already says the
+-- same thing one level out, which is why no keyword was reserved for it.
+--
+-- NOTHING IS SAID ON THE WAY PAST. This clause said *a case vanished: its arm is
+-- unreachable* until phase 190, and a completed load discarded it — nothing is
+-- reported on a successful path anywhere in the system, and a mistake means the
+-- load is not successful. His ruling, 2026-10-20.
 --
 -- TWO QUESTIONS, ASKED SEPARATELY: did the method vanish, and did the user
 -- write arms. The arm-less clause is first and its test is complementary to the
@@ -410,10 +443,73 @@ one-case : Surface -> Name -> Option Core -> List (Option Core) -> ()
 rule one-case t c sub forced :- when (split-has-no-arms t)
   do case-must-vanish sub
 rule one-case t c none forced :- when (split-has-arms t)
-  do say "a case vanished: its arm is unreachable"
+  do oa = arm-for t c
+     ; vanished-case-takes-no-body oa
 rule one-case t c (some sub) forced :- when (split-has-arms t)
-  do a = arm-for t c
-     ; elaborate-arm t c sub forced a
+  do oa = arm-for t c
+     ; case-needs-an-arm t c sub forced oa
+
+-- EVERY ARM THE USER WROTE WAS ASKED FOR — HIS RULING, 2026-10-20, and the two
+-- walks below are the half of it that nothing else can see. Elaboration asks the
+-- datatype's constructors for arms, one at a time; these ask the other
+-- direction, because an arm nobody asks for is never looked at and the user is
+-- told nothing. The three ways that happens are a head that is not a constructor
+-- of this datatype, a second arm for a constructor that already has one, and an
+-- arm for a case the specialiser closed — the third is
+-- `vanished-case-takes-no-body`, below, because only the walk over constructors
+-- knows which cases vanished.
+--
+-- NEITHER WALK KNOWS WHICH MISTAKE IT IS CATCHING, which is the point: each is
+-- one test over the arms the user wrote, and the refusal is whichever test did
+-- not hold.
+
+-- An arm's head names a constructor of the family being split. `pattern-head`
+-- answers a `Name`, `constructor-datatype` takes one, so the two compose — and a
+-- head that is no constructor at all stops in `constructor-datatype`, naming the
+-- word the user wrote.
+arm-must-be-for-this-datatype : Name -> Name -> ()
+rule arm-must-be-for-this-datatype a b :- when (same-name a b) do
+
+arms-are-for-this-datatype : Surface -> Name -> ()
+rule arms-are-for-this-datatype t d :- when (surface-is-split t) (split-has-no-arms t)
+  do
+rule arms-are-for-this-datatype t d :- when (surface-is-split t) (split-has-arms t)
+  do p = split-arm-pattern t
+     ; w = pattern-head p
+     ; d2 = constructor-datatype w
+     ; arm-must-be-for-this-datatype d2 d
+     ; r = split-tail t
+     ; arms-are-for-this-datatype r d
+
+-- One arm per constructor. `pick` answers with the first match, so a second arm
+-- for the same constructor is never reached — an unfinished edit, and silent
+-- until this walk.
+one-arm-per-constructor : Name -> Name -> ()
+rule one-arm-per-constructor a b :- when (different-name a b) do
+
+arm-not-repeated : Name -> Surface -> ()
+rule arm-not-repeated w t :- when (surface-is-split t) (split-has-no-arms t)
+  do
+rule arm-not-repeated w t :- when (surface-is-split t) (split-has-arms t)
+  do p = split-arm-pattern t
+     ; w2 = pattern-head p
+     ; one-arm-per-constructor w w2
+     ; r = split-tail t
+     ; arm-not-repeated w r
+
+-- EACH HEAD AGAINST THE TAIL, not against a set: the arms are a list and
+-- `split-tail` peels one, so looking forward costs nothing to carry. Two walks
+-- rather than one accumulator, which is `same-length`'s shape for the same
+-- reason — there is no arithmetic and no state.
+arms-are-distinct : Surface -> ()
+rule arms-are-distinct t :- when (surface-is-split t) (split-has-no-arms t)
+  do
+rule arms-are-distinct t :- when (surface-is-split t) (split-has-arms t)
+  do p = split-arm-pattern t
+     ; w = pattern-head p
+     ; r = split-tail t
+     ; arm-not-repeated w r
+     ; arms-are-distinct r
 
 -- The constructors and their method holes, walked in step. constructors-of and
 -- prim-eliminate both answer in declaration order, so the two lists correspond
@@ -475,6 +571,8 @@ rule split-elaborate t :-
      ; tt = typeof x
      ; d = datatype-of tt
      ; cs = constructors-of d
+     ; arms-are-for-this-datatype t d
+     ; arms-are-distinct t
      ; split-over t cs r
      ; goto h
      ; solve

@@ -348,7 +348,10 @@ tests =
               -- The splitting tree's rules that take a Surface (MS9) sit
               -- where the base declares them, between elaborate and run-block.
               @?= [ "elaborate"
-                  , "ihs-for", "arm-for", "pick", "elaborate-arm", "one-case"
+                  , "ihs-for", "arm-for", "pick", "elaborate-arm"
+                  , "case-needs-an-arm", "one-case"
+                  , "arms-are-for-this-datatype", "arm-not-repeated"
+                  , "arms-are-distinct"
                   , "split-cases", "split-over", "split-claim", "split-elaborate"
                   , "run-block", "intro-binders", "spine-arguments"
                   ]

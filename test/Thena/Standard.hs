@@ -353,6 +353,8 @@ elaborateClauses =
            , Bind (Op.PVar "tt") Nothing (Op.Typing (Ref "x"))
            , Bind (Op.PVar "d") Nothing (Op.DatatypeOf (Ref "tt"))
            , Bind (Op.PVar "cs") Nothing (Op.ConstructorsOf (Ref "d"))
+           , call "arms-are-for-this-datatype" [Ref "t", Ref "d"]
+           , call "arms-are-distinct" [Ref "t"]
            , call "split-over" [Ref "t", Ref "cs", Ref "r"]
            , Do (Op.Goto (Ref "h"))
            , call "solve" []
@@ -747,6 +749,11 @@ splitClauses =
       [PList [PVar "p"] (Just (PVar "ps")), PList [PVar "n"] (Just (PVar "ns"))] []
       [call "same-length" [Ref "ps", Ref "ns"]]
   , Rule (GlobalName "arm-for") [PVar "t", PVar "c"]
+      [SurfaceIsSplit (Ref "t"), SplitHasNoArms (Ref "t")]
+      [ Bind (Op.PVar "z") Nothing Op.None
+      , Do (Op.Return (Ref "z"))
+      ]
+  , Rule (GlobalName "arm-for") [PVar "t", PVar "c"]
       [SurfaceIsSplit (Ref "t"), SplitHasArms (Ref "t")]
       [ Bind (Op.PVar "p") Nothing (Op.SplitArmPattern (Ref "t"))
       , Bind (Op.PVar "w") Nothing (Op.PatternHead (Ref "p"))
@@ -759,7 +766,9 @@ splitClauses =
   , Rule (GlobalName "pick")
       [PVar "w", PVar "c", PVar "p", PVar "b", PVar "r"]
       [SameName (Ref "w") (Ref "c")]
-      [Do (Op.Return (Op.PairOf (Ref "p") (Ref "b")))]
+      [ Bind (Op.PVar "a") Nothing (Op.Some (Op.PairOf (Ref "p") (Ref "b")))
+      , Do (Op.Return (Ref "a"))
+      ]
   , Rule (GlobalName "pick")
       [PVar "w", PVar "c", PVar "p", PVar "b", PVar "r"]
       [DifferentName (Ref "w") (Ref "c")]
@@ -793,6 +802,17 @@ splitClauses =
       , Do (Goto (Ref "sub"))
       , call "solve" []
       ]
+    -- **A case that survived needs an arm** (MS9 phase 190) — coverage, said
+    -- by a rule with a clause for @some@ and none for @none@, so the refusal
+    -- names the missing arm and not the search that went looking for it.
+  , Rule (GlobalName "case-needs-an-arm")
+      [ PVar "t", PVar "c", PVar "sub", PVar "forced", PSome (PVar "a") ] []
+      [call "elaborate-arm" [Ref "t", Ref "c", Ref "sub", Ref "forced", Ref "a"]]
+    -- **And a case that vanished takes no body** — between them the two clauses
+    -- are every legal shape: no arm at all, or an arm that stops at the arrow.
+  , Rule (GlobalName "vanished-case-takes-no-body") [PNone] [] []
+  , Rule (GlobalName "vanished-case-takes-no-body")
+      [PSome (PPair (PVar "p") PNone)] [] []
     -- **Writing no arms is the claim that every case vanishes**, so a method
     -- that survived one is refused here, by a rule with a clause for @none@
     -- and none for @some@ — @no-nesting@'s idiom, naming the user's complaint
@@ -808,12 +828,53 @@ splitClauses =
   , Rule (GlobalName "one-case")
       [PVar "t", PVar "c", PNone, PVar "forced"]
       [SplitHasArms (Ref "t")]
-      [Do (Say (Lit (VText "a case vanished: its arm is unreachable")))]
+      [ Bind (Op.PVar "oa") Nothing (Op.Call "arm-for" [Ref "t", Ref "c"])
+      , call "vanished-case-takes-no-body" [Ref "oa"]
+      ]
   , Rule (GlobalName "one-case")
       [PVar "t", PVar "c", PSome (PVar "sub"), PVar "forced"]
       [SplitHasArms (Ref "t")]
-      [ Bind (Op.PVar "a") Nothing (Op.Call "arm-for" [Ref "t", Ref "c"])
-      , call "elaborate-arm" [Ref "t", Ref "c", Ref "sub", Ref "forced", Ref "a"]
+      [ Bind (Op.PVar "oa") Nothing (Op.Call "arm-for" [Ref "t", Ref "c"])
+      , call "case-needs-an-arm" [Ref "t", Ref "c", Ref "sub", Ref "forced", Ref "oa"]
+      ]
+    -- **Every arm the user wrote was asked for** (MS9 phase 190, his ruling of
+    -- 2026-10-20). Elaboration asks the datatype's constructors for arms; these
+    -- two walks ask the other direction, and neither knows which mistake it is
+    -- catching.
+  , Rule (GlobalName "arm-must-be-for-this-datatype") [PVar "a", PVar "b"]
+      [SameName (Ref "a") (Ref "b")] []
+  , Rule (GlobalName "arms-are-for-this-datatype") [PVar "t", PVar "d"]
+      [SurfaceIsSplit (Ref "t"), SplitHasNoArms (Ref "t")] []
+  , Rule (GlobalName "arms-are-for-this-datatype") [PVar "t", PVar "d"]
+      [SurfaceIsSplit (Ref "t"), SplitHasArms (Ref "t")]
+      [ Bind (Op.PVar "p") Nothing (Op.SplitArmPattern (Ref "t"))
+      , Bind (Op.PVar "w") Nothing (Op.PatternHead (Ref "p"))
+      , Bind (Op.PVar "d2") Nothing (Op.ConstructorDatatype (Ref "w"))
+      , call "arm-must-be-for-this-datatype" [Ref "d2", Ref "d"]
+      , Bind (Op.PVar "r") Nothing (Op.SplitTail (Ref "t"))
+      , call "arms-are-for-this-datatype" [Ref "r", Ref "d"]
+      ]
+  , Rule (GlobalName "one-arm-per-constructor") [PVar "a", PVar "b"]
+      [DifferentName (Ref "a") (Ref "b")] []
+  , Rule (GlobalName "arm-not-repeated") [PVar "w", PVar "t"]
+      [SurfaceIsSplit (Ref "t"), SplitHasNoArms (Ref "t")] []
+  , Rule (GlobalName "arm-not-repeated") [PVar "w", PVar "t"]
+      [SurfaceIsSplit (Ref "t"), SplitHasArms (Ref "t")]
+      [ Bind (Op.PVar "p") Nothing (Op.SplitArmPattern (Ref "t"))
+      , Bind (Op.PVar "w2") Nothing (Op.PatternHead (Ref "p"))
+      , call "one-arm-per-constructor" [Ref "w", Ref "w2"]
+      , Bind (Op.PVar "r") Nothing (Op.SplitTail (Ref "t"))
+      , call "arm-not-repeated" [Ref "w", Ref "r"]
+      ]
+  , Rule (GlobalName "arms-are-distinct") [PVar "t"]
+      [SurfaceIsSplit (Ref "t"), SplitHasNoArms (Ref "t")] []
+  , Rule (GlobalName "arms-are-distinct") [PVar "t"]
+      [SurfaceIsSplit (Ref "t"), SplitHasArms (Ref "t")]
+      [ Bind (Op.PVar "p") Nothing (Op.SplitArmPattern (Ref "t"))
+      , Bind (Op.PVar "w") Nothing (Op.PatternHead (Ref "p"))
+      , Bind (Op.PVar "r") Nothing (Op.SplitTail (Ref "t"))
+      , call "arm-not-repeated" [Ref "w", Ref "r"]
+      , call "arms-are-distinct" [Ref "r"]
       ]
   , Rule (GlobalName "split-cases")
       [PVar "t", PList [] Nothing, PList [] Nothing, PVar "k"] [] []

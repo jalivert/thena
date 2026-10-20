@@ -774,8 +774,15 @@ baseTests =
                  , "ihs-for", "ihs-for"
                  , "intro-ihs", "intro-ihs"
                  , "same-length", "same-length"
-                 , "arm-for", "pick", "pick", "arm-needs-body", "elaborate-arm"
+                 , "arm-for", "arm-for", "pick", "pick", "arm-needs-body"
+                 , "elaborate-arm", "case-needs-an-arm"
+                 , "vanished-case-takes-no-body", "vanished-case-takes-no-body"
                  , "case-must-vanish", "one-case", "one-case", "one-case"
+                 , "arm-must-be-for-this-datatype"
+                 , "arms-are-for-this-datatype", "arms-are-for-this-datatype"
+                 , "one-arm-per-constructor"
+                 , "arm-not-repeated", "arm-not-repeated"
+                 , "arms-are-distinct", "arms-are-distinct"
                  , "split-cases", "split-cases", "split-over"
                  , "split-claim", "split-claim", "split-elaborate"
                  ]
@@ -1086,12 +1093,45 @@ splittingTree =
       , "bad = \\ n -> induction n of { zero -> zero ; succ -> zero }"
       ]
       "stuck: no clause of same-length applies here"
-    -- Coverage: the walk runs out of arms.
-  , refuses "a missing arm runs the search out"
+    -- Coverage: a method survived and no arm was written for it. **The refusal
+    -- names the complaint and not the search** (MS9 phase 190) — until the law
+    -- landed, @arm-for@ ran out of arms and reported itself, which named a rule
+    -- in the shipped base instead of the missing arm.
+  , refuses "a case that survived with no arm is refused by name"
       [ "partial : Nat -> Nat"
       , "partial = \\ n -> induction n of { zero -> zero }"
       ]
-      "stuck: no clause of arm-for applies here"
+      "stuck: no clause of case-needs-an-arm applies here"
+
+    -- __EVERY ARM THE USER WROTE WAS ASKED FOR__ — his ruling of 2026-10-20,
+    -- built in MS9 phase 190. The three below are the three ways an arm went
+    -- unlooked-at before it, each of which loaded and declared in silence, and
+    -- __each refusal names what the user did and not the rule that went
+    -- looking__. The fourth, a body written for a case the specialiser closed,
+    -- needs an indexed family and is with the @Vec@ tests.
+  , refuses "a second arm for a constructor that already has one is refused"
+      [ "dup : Nat -> Nat"
+      , "dup = \\ n -> induction n of { zero -> zero ; zero -> zero ; succ m -> m }"
+      ]
+      "stuck: no clause of one-arm-per-constructor applies here"
+    -- __A head that is a constructor of SOME datatype, just not this one.__
+    -- @constructor-datatype@ answers, and the names do not agree. The separate
+    -- case below is the head that is no constructor at all, which stops one op
+    -- earlier and names the word instead.
+  , refusesIn vecModule "an arm headed by another datatype's constructor is refused"
+      [ "foreign : Nat -> Nat"
+      , "foreign = \\ n -> induction n of { zero -> zero ; vnil -> zero ; succ m -> m }"
+      ]
+      "stuck: no clause of arm-must-be-for-this-datatype applies here"
+    -- __A misspelled constructor was ALREADY refused before the law__, and the
+    -- only thing wrong with it was the words: it ran the arm search out and
+    -- reported @no clause of arm-for applies here@. It now stops in
+    -- @constructor-datatype@, which names the word the user typed.
+  , refuses "an arm headed by a word that is no constructor names the word"
+      [ "typo : Nat -> Nat"
+      , "typo = \\ n -> induction n of { zero -> zero ; succc m -> m }"
+      ]
+      "stuck: succc is not a constructor"
     -- A nested pattern argument is a second split, which is a later phase.
   , refuses "a nested pattern argument is declined by name"
       [ "nested : Nat -> Nat"
@@ -1142,6 +1182,17 @@ splittingTree =
         other -> assertFailure (unwords (renderResponse s1 other))
       let (s2, q) = command s1 ":whnf vtail Nat zero (vcons Nat zero zero (vnil Nat))"
       unwords (renderResponse s2 q) @?= "vnil Nat"
+
+    -- __A BODY WHERE THE CASE VANISHED IS THE REFUSAL THE LAW ADDS__ (MS9 phase
+    -- 190). @vnil@'s method is closed by a conflicting equation, so a term
+    -- written in that arm is the user claiming the case is reachable against a
+    -- proof that it is not. Before the law it loaded, declared and computed,
+    -- with @nonsense@, @zzz@ and @qqq@ in no scope and no word said.
+  , refusesIn vecModule "a body for a case that vanished is refused"
+      [ "vtailB : \8704 (A : Type\8320) (n : Nat) -> Vec A (succ n) -> Vec A n"
+      , "vtailB = \\ A n v -> induction v of { vnil -> nonsense zzz qqq ; vcons k a as -> as }"
+      ]
+      "stuck: no clause of vanished-case-takes-no-body applies here"
 
     -- __AND REFUSED WHERE THE CASE SURVIVED__, which is the other half of the
     -- same ruling: @zero@'s method is right there, so there is something to
@@ -1358,12 +1409,12 @@ splittingTree =
       let (s2, q) = command s1 ":whnf vtailC Nat zero (vcons Nat zero zero (vnil Nat))"
       unwords (renderResponse s2 q) @?= "vnil Nat"
 
-    -- Coverage fails the same way: the walk runs out of arms.
-  , refuses "a missing arm runs the search out under case too"
+    -- Coverage fails the same way under @case@, and says the same thing.
+  , refuses "a case that survived with no arm is refused under case too"
       [ "partialC : Nat -> Nat"
       , "partialC = \\ n -> case n of { zero -> zero }"
       ]
-      "stuck: no clause of arm-for applies here"
+      "stuck: no clause of case-needs-an-arm applies here"
   ]
   where
     natModule =

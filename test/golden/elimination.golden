@@ -71,14 +71,26 @@ intro-ihs [n, ...ns] ‹k›
 same-length [] []
 same-length [p, ...ps] [n, ...ns]
 arm-for ‹t› ‹c›
+arm-for ‹t› ‹c›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 arm-needs-body (some b)
 elaborate-arm ‹t› ‹c› ‹sub› ‹forced› (p, ob)
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹forced› (some a)
+vanished-case-takes-no-body none
+vanished-case-takes-no-body (some (p, none))
 case-must-vanish none
 one-case ‹t› ‹c› ‹sub› ‹forced›
 one-case ‹t› ‹c› none ‹forced›
 one-case ‹t› ‹c› (some sub) ‹forced›
+arm-must-be-for-this-datatype ‹a› ‹b›
+arms-are-for-this-datatype ‹t› ‹d›
+arms-are-for-this-datatype ‹t› ‹d›
+one-arm-per-constructor ‹a› ‹b›
+arm-not-repeated ‹w› ‹t›
+arm-not-repeated ‹w› ‹t›
+arms-are-distinct ‹t›
+arms-are-distinct ‹t›
 split-cases ‹t› [] [] ‹k›
 split-cases ‹t› [c, ...cs] [mh, ...ms] ‹k›
 split-over ‹t› ‹cs› (hs, k)
