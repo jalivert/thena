@@ -214,6 +214,17 @@ data St = St
                                              -- viewport bounds, needed to
                                              -- decide whether the dropdown
                                              -- has room below the caret
+  , stArrowsReleased :: Bool
+    -- ^ **Esc's first step gave Up/Down back to the document.** 'stDismissed'
+    -- cannot carry this: the two-step Esc (his `.jalivert/TUI.md` #14) clears
+    -- the *highlight* first and only hides the *list* on the second press, so
+    -- between the two the dropdown is open with nothing selected — which is
+    -- also exactly the state a fresh dropdown is in under `:preselect off`.
+    -- Without a flag the two are indistinguishable, and 'navigateCompletion'
+    -- has to choose one behaviour for both: either Up re-grabs the keys after
+    -- an Esc (his report, 2026-10-20) or `:preselect off` can never reach a
+    -- row by keyboard at all. Cleared by any edit, same lifetime as
+    -- 'stDismissed'.
   , stDismissed :: Maybe String
     -- ^ Esc hid the dropdowns while the input read this (his
     -- `.jalivert/TUI.md` #14) — 'Nothing' while they show. Refresh keeps
@@ -328,6 +339,7 @@ runTui = do
         , stScriptNote  = Nothing
         , stInputExtent = Nothing
         , stPaneExtent  = Nothing
+        , stArrowsReleased = False
         }
   -- One synthetic event after startup: extents only exist once something
   -- has rendered, so the launch dropdown cannot position on the very first
@@ -1119,8 +1131,10 @@ handleReplEvent (VtyEvent (V.EvKey V.KEsc [])) = do
     -- is simply a no-op — it used to fall through to 'halt' and quit the
     -- whole TUI, which is not "Esc's ordinary meaning" for a line editor
     -- and was never asked for. Quitting is still `:quit`.
-    (Just ld@(LoadDropdown _ (Just _)), _) -> put st { stDropdown = Just ld { ldSelected = Nothing } }
-    (_, Just od@(OfferDropdown _ (Just _) _ _)) -> put st { stOfferDropdown = Just od { odSelected = Nothing } }
+    (Just ld@(LoadDropdown _ (Just _)), _) ->
+      put st { stDropdown = Just ld { ldSelected = Nothing }, stArrowsReleased = True }
+    (_, Just od@(OfferDropdown _ (Just _) _ _)) ->
+      put st { stOfferDropdown = Just od { odSelected = Nothing }, stArrowsReleased = True }
     (Just _, _) -> do
       let line = concatMap Text.unpack (getEditContents (stInput st))
       put st { stDropdown = Nothing, stDismissed = Just line }
@@ -1265,6 +1279,15 @@ navigateCompletion
 navigateCompletion moveLoad moveOffer ev = do
   st <- get
   case (stDropdown st, stOfferDropdown st) of
+    -- | **Esc already handed these keys over, so do not take them back.**
+    -- The comment above has always said history gets them "once nothing is
+    -- left to navigate there — Esc, or nothing offered"; the Esc half was
+    -- never implemented, because clearing the highlight leaves the rows in
+    -- place and 'selectableIxs' still answers non-empty. His report,
+    -- 2026-10-20: Esc to unselect, press Up, and the highlight reappeared on
+    -- the *last* row — 'offerMoveUp' with no selection enters from the
+    -- bottom — so the caret never moved and the list had scrolled instead.
+    _ | stArrowsReleased st -> documentOrHistory ev
     (Just ld@(LoadDropdown entries sel), _) | not (null entries) ->
       put st { stDropdown = Just ld { ldSelected = Just (moveLoad sel (length entries)) } }
     -- | Only a row with something to insert ('selectableIxs') is ever a
@@ -1285,12 +1308,25 @@ navigateCompletion moveLoad moveOffer ev = do
     -- | In script mode the same two keys walk the *document* instead of
     -- recalling text — a different mechanism wearing the same UI shape, so it
     -- branches here rather than inside 'historyBack'.
-    _ -> case ev of
-      VtyEvent (V.EvKey V.KUp [])   | stScriptMode st -> scriptUp
-      VtyEvent (V.EvKey V.KDown []) | stScriptMode st -> scriptDown
-      VtyEvent (V.EvKey V.KUp [])   -> historyBack
-      VtyEvent (V.EvKey V.KDown []) -> historyForward
-      _ -> Brick.zoom stInputL (handleEditorEvent ev) >> followInput >> refreshDropdown >> refreshOfferDropdown
+    _ -> documentOrHistory ev
+
+-- | Where Up and Down go once no dropdown is claiming them: the script
+-- document in live-script mode, shell history in the ordinary REPL, and the
+-- plain editor binding for anything that is neither key.
+--
+-- **The key's own identity decides, not the pre-flipped movers** that
+-- 'navigateCompletion' is handed — those are flipped for the popup's screen
+-- direction ('popupAbove'), and "older"/"newer" means the same thing
+-- wherever the popup would have been drawn.
+documentOrHistory :: BrickEvent Name e -> EventM Name St ()
+documentOrHistory ev = do
+  st <- get
+  case ev of
+    VtyEvent (V.EvKey V.KUp [])   | stScriptMode st -> scriptUp
+    VtyEvent (V.EvKey V.KDown []) | stScriptMode st -> scriptDown
+    VtyEvent (V.EvKey V.KUp [])   -> historyBack
+    VtyEvent (V.EvKey V.KDown []) -> historyForward
+    _ -> Brick.zoom stInputL (handleEditorEvent ev) >> followInput >> refreshDropdown >> refreshOfferDropdown
 
 -- | Recalls one entry further back in 'stHistory' — the first press saves
 -- the live buffer into 'stHistoryDraft' first, so 'historyForward' has
@@ -1564,6 +1600,7 @@ closeDropdowns = do
     , stOfferDropdown = Nothing
     , stRecoveredSpan = Nothing
     , stDismissed = Nothing
+    , stArrowsReleased = False
     }
 
 -- | Enter in the document. Composing past the end appends; standing on line
@@ -1877,14 +1914,14 @@ refreshOfferDropdown = do
   if stDismissed st == Just line
     then put st { stOfferDropdown = Nothing }
     else if isJust (loadPathPrefix line)
-      then put st { stOfferDropdown = Nothing, stDismissed = Nothing, stRecoveredSpan = Nothing }
+      then put st { stOfferDropdown = Nothing, stDismissed = Nothing, stRecoveredSpan = Nothing, stArrowsReleased = False }
       else do
         let (_, col) = getCursorPosition (stInput st)
             (before, after) = splitWritten line col
             ov = statementOfferView (activeSession st) before after
             new = buildOfferDropdown (stAutoSelect st) col ov
             oldRows = maybe [] odRows (stOfferDropdown st)
-        put st { stOfferDropdown = new, stDismissed = Nothing, stRecoveredSpan = underlineSpan ov }
+        put st { stOfferDropdown = new, stDismissed = Nothing, stRecoveredSpan = underlineSpan ov, stArrowsReleased = False }
         -- Same rule as 'refreshDropdown': new rows start at the top, same
         -- rows keep their scroll — above the line, at the bottom instead.
         if maybe [] odRows new /= oldRows
