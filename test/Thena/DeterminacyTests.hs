@@ -28,24 +28,35 @@
 -- **@examples\/determinacy-patterns.thena@ is the same theorem by dependent
 -- pattern matching** (MS9), written by hand — and it exists to be read beside
 -- the generated one, which is why it is in the suite rather than in a report.
--- Seven of the ten cases are splits, and the generated proof's 148 appeals to
--- @noConfusionTerm@ become 30.
+-- Eleven of its thirteen lemmas are splits, and the generated proof's 148
+-- appeals to @noConfusionTerm@ become 27.
 --
--- **THE OTHER THREE ARE THE GENERATED PROOF'S OWN LEMMAS, PASTED UNCHANGED**,
--- and the file says why: a congruence rule's arm binds its subject as a
--- variable, so splitting the second derivation needs that variable solved, and
--- the specialiser can only solve variables the split itself bound (@~2d9xj@).
--- The arm can be written to take the leftover equation instead; **his ruling of
--- 2026-10-20 is that a proof which does that is not correctly proved**, because
--- an arm whose right-hand side is a function of an unpredictable equation is
--- the elaboration leaking into the surface. **So this file shrinking is the
--- measure of that item being resolved.**
+-- **THE OTHER TWO ARE THE GENERATED PROOF'S OWN LEMMAS, PASTED UNCHANGED**, and
+-- the file says why: @invPredSucc@ and @invIsZeroSucc@ eliminate at
+-- @pred (succ v)@, which nests a constructor around the generalised variable,
+-- so injectivity against @ePred@'s @pred c1@ leaves @Eq Term c1 (succ v9)@ —
+-- and the copy @v9@ is quantified after the method's own binder @c1@, so
+-- solving @c1@ to a term mentioning it is not a telescope move the specialiser
+-- has. The arm can be written to take the leftover equation instead; **his
+-- ruling of 2026-10-20 is that a proof which does that is not correctly
+-- proved**, because an arm whose right-hand side is a function of an
+-- unpredictable equation is the elaboration leaking into the surface. **So this
+-- file shrinking further is the measure of that being fixed.**
+--
+-- **AND A RECURSION MAY NOT CROSS A GENERALISING SPLIT**, which is why the four
+-- congruence inversions are lemmas rather than arms of @determinacy@: a
+-- recursive call is tied to an induction hypothesis by the argument it names,
+-- and inside such a split that name means the entry's refined copy rather than
+-- the entry. Each takes the hypothesis as a parameter and the caller passes the
+-- recursive call from outside the split.
 --
 -- **The assertion that ties all three together is the statement**: each is
 -- checked against the /same/ rendered type for @determinacy@, so a version that
 -- proved something weaker would fail here rather than pass quietly.
 module Thena.DeterminacyTests (tests) where
 
+import Data.Char (isAlpha)
+import Data.List (isPrefixOf)
 import Data.ByteString.Builder (stringUtf8, toLazyByteString)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
@@ -120,8 +131,54 @@ tests =
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s patternTarget
         statementOf s' @?= Just theorem
+
+      -- **The style, not the theorem** — and it is here because 'HAZARDS.md'
+      -- asked for it after a green suite said nothing while six of this file's
+      -- arms were written in the one style the project had just ruled out. A
+      -- suite that checks the statement and the trust level cannot see how a
+      -- proof is written, and this file exists to demonstrate how it is
+      -- written. So the header's claim is an assertion: every lemma is a split
+      -- except the ones named here, which a split cannot reach and which are
+      -- @determinacy.py@'s own.
+      --
+      -- **It fails when the boundary moves, which is the point**: a phase that
+      -- makes one of these two writable, or that pastes a third one back in,
+      -- changes this line and the header together.
+    , testCase "and every lemma is a split but the two the header names" $ do
+        src <- readFile patternTarget
+        [ n | (n, body) <- definitions src, any ("elim " `isPrefixOf`) (tails' body) ]
+          @?= ["invPredSucc", "invIsZeroSucc"]
     ]
   where
+    -- The file's top-level equations, as (name, text). An equation begins at a
+    -- line @‹name› = @ in the first column and runs to the next such line or to
+    -- the next signature; everything before the first one is the preamble.
+    -- **Comment lines are dropped**, or the prose between two lemmas — which
+    -- says the words @elim Step@ — would be read as part of the lemma above it.
+    definitions src =
+      [ (n, unlines [ l | l <- ls, not (comment l) ])
+      | (n, ls) <- chunks (lines src)
+      ]
+      where
+        comment = isPrefixOf "--" . dropWhile (== ' ')
+        chunks [] = []
+        chunks (l : rest) = case equationName l of
+          Nothing -> chunks rest
+          Just n  ->
+            let (mine, more) = break (\x -> headed x && not (indented x)) rest
+             in (n, l : mine) : chunks more
+        headed x = case x of
+          c : _ -> isAlpha c
+          []    -> False
+        indented x = " " `isPrefixOf` x
+        equationName l = case span (\c -> isAlpha c || c `elem` "'0123456789") l of
+          (n@(_ : _), rest) | " = " `isPrefixOf` rest -> Just n
+          _                                           -> Nothing
+
+    tails' xs = case xs of
+      []       -> [[]]
+      _ : rest -> xs : tails' rest
+
     statementOf s' =
       renderCore (Rendering [] (names (machineOf s'))) [] . definitionType
         <$> lookupDefinition (GlobalName "determinacy") (globals (machineOf s'))
