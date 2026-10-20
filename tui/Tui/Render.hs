@@ -19,7 +19,7 @@ module Tui.Render
   , renderMachineView
   ) where
 
-import Data.List (intercalate, isPrefixOf)
+import Data.List (intercalate, intersperse, isPrefixOf)
 
 import Brick
   ( Widget
@@ -87,7 +87,7 @@ renderAt fold prec (Display _at shape) = renderShape fold prec shape
 renderShape :: Fold -> Prec -> Shape -> Widget n
 renderShape fold prec shape = case shape of
   AVariable name _ -> str name
-  AGlobal name _ -> str name
+  AGlobal name levels -> str (name <> levelArgs levels)
   AUniverse lvl -> str lvl
   ALiteral text -> str text
   -- Application is left associative, so the function side needs no brackets
@@ -111,17 +111,37 @@ renderShape fold prec shape = case shape of
         <+> str " . " <+> renderAt fold AtTop body
   -- A saturated former is a spine and brackets like one: bare on a function
   -- side, bracketed as an argument. An unsaturated one is a bare name.
-  AFormer name _levels args
-    | null args -> str name
+  AFormer name levels args
+    | null args -> str (name <> levelArgs levels)
     | otherwise ->
         parensIf (prec > AtApp)
-          (hBox (str name : map (\a -> str " " <+> renderAt fold AtAtom a) args))
-  AnElimination eliminator _levels params motive methods indices target ->
+          (hBox
+            (str (name <> levelArgs levels)
+              : map (\a -> str " " <+> renderAt fold AtAtom a) args))
+  -- **The keyword, the levels and a parenthesis per group — his ruling,
+  -- 2026-10-20 (`~23wfh`, `~9wcpr`):** /"We print exactly what engine gives
+  -- us… TUI literally follows what engine gives and doesn't invent lies in
+  -- the frontend layer."/ So the groups are drawn group by group **including
+  -- the empty ones**, which is what keeps the slots positional — a reader
+  -- cannot otherwise tell the methods from the indices. That the empty ones
+  -- read as @()@ is the engine's question and he has taken it (`~2jjqc`).
+  AnElimination eliminator levels params motive methods indices target ->
     parensIf (prec > AtTop) $
       hBox
-        (str eliminator
-          : map (\a -> str " " <+> renderAt fold AtAtom a)
-              (params <> [motive] <> methods <> indices <> [target]))
+        [ str ("elim " <> eliminator <> levelArgs levels)
+        , str " " <+> group params
+        , str " " <+> renderAt fold AtAtom motive
+        , str " " <+> group methods
+        , str " " <+> group indices
+        , str " " <+> renderAt fold AtAtom target
+        ]
+    where
+      -- A group is always parenthesised and never elided, so a slot's position
+      -- is readable off the text. 'Thena.Render'\'s @atoms@, exactly.
+      group ds =
+        str "("
+          <+> hBox (intersperse (str " ") (map (renderAt fold AtAtom) ds))
+          <+> str ")"
   -- MS8 phase 149 added the node; **this is a placeholder the engine track
   -- wrote to keep the tree compiling, and how a trusted term should look is
   -- yours** -- see `.jalivert/NOTES.md`. The two types are both here on purpose:
@@ -142,6 +162,17 @@ renderShape fold prec shape = case shape of
 parensIf :: Bool -> Widget n -> Widget n
 parensIf False w = w
 parensIf True w = str "(" <+> w <+> str ")"
+
+-- | A name's level arguments, written the way 'Thena.Syntax.Print.levelArgs'
+-- writes them.
+--
+-- **The atoms are already rendered** — 'Thena.View.Core' normalises them,
+-- because level normalisation is system work and a frontend must never do it.
+-- All that is left is the punctuation. **Empty means nothing is written**, so
+-- everything monomorphic looks exactly as it did.
+levelArgs :: [String] -> String
+levelArgs [] = ""
+levelArgs ls = " {" <> unwords ls <> "}"
 
 -- | 'ARegion' always wraps an 'AnObjectTerm' — the fold decision is made
 -- once, here, and handed down to every item inside as the `expanded` flag,

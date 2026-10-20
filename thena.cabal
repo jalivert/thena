@@ -345,9 +345,10 @@ test-suite thena-test
 --
 -- > cabal test thena-tui-test
 --
--- **`cabal test` does NOT sweep it, for the same structural reason it skips
--- `thena-boundary`** — it depends on `thena:tui` and not on `thena`, so it is a
--- different component in the plan. See the note at the top of this file.
+-- **`cabal test` DOES sweep it, and sweeps `thena-boundary` too** — measured
+-- 2026-10-20, `~kn79b`. The note at the top of this file says a suite depending
+-- on `thena:view` rather than `thena` is skipped; that stopped being true when
+-- this third suite was added, and the cause is not established. Check what ran.
 test-suite thena-tui-test
     import:             warnings
     hs-source-dirs:     tui-test

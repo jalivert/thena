@@ -97,12 +97,17 @@ lett = at (ALet (Binding "z" (global "A")) (global "v") (var "z"))
 former :: Display
 former = at (AFormer "cons" [] [var "n", var "a", var "as"])
 
--- | @elim Nat (motive) (step) tgt@, one method and no parameters or indices.
+-- | @elim Nat () P (step) () tgt@.
+--
+-- **'eliminatorName' is the datatype alone** — 'Thena.View.Core' builds it from
+-- the bare 'Thena.Core.Term.GlobalName', so the word @elim@ is the drawer's to
+-- write. An earlier version of this fixture spelled the name @"elim Nat"@ and
+-- so proved the brackets while hiding the missing head (`~9wcpr`).
 elimination :: Display
 elimination =
   at
     AnElimination
-      { eliminatorName = "elim Nat"
+      { eliminatorName = "Nat"
       , eliminatorLevels = []
       , eliminatorParameters = []
       , eliminatorMotive = global "P"
@@ -128,6 +133,7 @@ drawingTests =
     [ testGroup "an argument is bracketed when it extends to the right" argumentCases
     , testGroup "so is a function position, which is `~r3fp9`" functionCases
     , testGroup "and a spine head is not" spineCases
+    , testGroup "the engine's own lines, drawn" engineCases
     ]
 
 -- | The argument side is the rung every drawer gets right, so these are the
@@ -138,7 +144,7 @@ argumentCases =
   , eq "a function type" "f ((y : A) -> B)" (app (global "f") pity)
   , eq "a let" "f (z = v : A . z)" (app (global "f") lett)
   , eq "a saturated former" "f (cons n a as)" (app (global "f") former)
-  , eq "an elimination" "f (elim Nat P step tgt)" (app (global "f") elimination)
+  , eq "an elimination" "f (elim Nat () P (step) () tgt)" (app (global "f") elimination)
   , eq "a trusted term" "f (trusted T U e)" (app (global "f") trusted)
   ]
 
@@ -151,7 +157,7 @@ argumentCases =
 -- extends to the right and so eats what follows it.
 functionCases :: [TestTree]
 functionCases =
-  [ eq "an elimination" "(elim Nat P step tgt) a" (app elimination (var "a"))
+  [ eq "an elimination" "(elim Nat () P (step) () tgt) a" (app elimination (var "a"))
   , eq "a lambda" "(\\x : A . x) a" (app lam (var "a"))
   , eq "a function type" "((y : A) -> B) a" (app pity (var "a"))
   , eq "a let" "(z = v : A . z) a" (app lett (var "a"))
@@ -168,6 +174,85 @@ spineCases =
   , eq "a trusted term" "trusted T U e a" (app trusted (var "a"))
   , eq "an unsaturated former" "nil" (AFormer "nil" [] [])
   ]
+
+-- | **Two drawers, one reading — his ruling, 2026-10-20:** /"We print exactly
+-- what engine gives us… TUI literally follows what engine gives and doesn't
+-- invent lies in the frontend layer."/
+--
+-- **Each expected string below is a real line of engine output**, lifted from
+-- `test\/golden` and not composed here, with only the two differences the
+-- drawers are allowed: a λ is drawn @\\x : A . b@ rather than
+-- @λ (x : A) -> b@, and a level atom that the terminal writes @ℓ₁@ arrives
+-- pre-rendered. **A group is parenthesised even when it is empty** — that is
+-- what keeps the slots positional, and whether @()@ is the right thing for the
+-- engine to say is `~2jjqc`, which is his.
+engineCases :: [TestTree]
+engineCases =
+  [ -- plusZero's body. Engine:
+    --   elim Nat () (λ (target : Nat) -> Eq {0} Nat (plus target zero) target)
+    --     (zeroMethod succMethod) () n
+    eq
+      "an elimination with two methods and no parameters or indices"
+      "elim Nat () (\\target : Nat . Eq {0} Nat (plus target zero) target) \
+      \(zeroMethod succMethod) () n"
+      (displayShape plusZeroBody)
+  , -- A level argument on a global is written, because without it the text
+    -- does not re-read: `Eq A a b` is an arity error (`~mtnxt`).
+    eq "a global's level arguments" "Eq {0} Nat zero zero" (displayShape eqNatZeroZero)
+  , -- And on a saturated former.
+    eq "a former's level arguments" "f (refl {0} Nat zero)"
+      (app (global "f") (at (AFormer "refl" ["0"] [global "Nat", global "zero"])))
+  , -- An elimination over a parameterised datatype carries both: a non-empty
+    -- parameter group and a level. Engine: elim Id {0} (A) (λ …) ((λ …)) (a b) q
+    eq
+      "an elimination with levels, a parameter group and an index group"
+      "elim Id {0} (A) (\\x : A . P) ((rfl {0} A c)) (a b) q"
+      (displayShape idElimination)
+  ]
+
+-- | @elim Nat () (\\target : Nat . Eq {0} Nat (plus target zero) target)
+-- (zeroMethod succMethod) () n@
+plusZeroBody :: Display
+plusZeroBody =
+  at
+    AnElimination
+      { eliminatorName = "Nat"
+      , eliminatorLevels = []
+      , eliminatorParameters = []
+      , eliminatorMotive =
+          at
+            (AnAbstraction
+              (Binding "target" (global "Nat"))
+              (at (app (at (app eqNatTy plusTargetZero)) (var "target"))))
+      , eliminatorMethods = [global "zeroMethod", global "succMethod"]
+      , eliminatorIndices = []
+      , eliminatorTarget = var "n"
+      }
+  where
+    -- @Eq {0} Nat@, the head the two arguments above are applied to.
+    eqNatTy = at (app (at (AGlobal "Eq" ["0"])) (global "Nat"))
+
+    -- @plus target zero@ — an application, so it brackets as an argument.
+    plusTargetZero = at (app (at (app (global "plus") (var "target"))) (global "zero"))
+
+-- | @Eq {0} Nat zero zero@
+eqNatZeroZero :: Display
+eqNatZeroZero =
+  at (app (at (app (at (app (at (AGlobal "Eq" ["0"])) (global "Nat"))) (global "zero"))) (global "zero"))
+
+-- | @elim Id {0} (A) (\\x : A . P) ((rfl {0} A c)) (a b) q@
+idElimination :: Display
+idElimination =
+  at
+    AnElimination
+      { eliminatorName = "Id"
+      , eliminatorLevels = ["0"]
+      , eliminatorParameters = [global "A"]
+      , eliminatorMotive = at (AnAbstraction (Binding "x" (global "A")) (global "P"))
+      , eliminatorMethods = [at (AFormer "rfl" ["0"] [global "A", global "c"])]
+      , eliminatorIndices = [var "a", var "b"]
+      , eliminatorTarget = var "q"
+      }
 
 eq :: String -> String -> Shape -> TestTree
 eq name expected shape =
