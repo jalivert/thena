@@ -339,7 +339,12 @@ rule intro-ihs [n, ...ns] k :-
 --
 -- IT RUNS AFTER THE PATTERN AND AFTER THE HYPOTHESES, and that is not a
 -- preference: the copies stand after both in the method.
-intro-refined : List Name -> List (Option Core) -> Core -> Core
+--
+-- THE SECOND PARAMETER IS `List (Option a)`, NOT `List (Option Core)`: no clause
+-- looks inside the `some`, so inference generalises it and a narrower written
+-- signature is refused. `intro-pattern` writes `Option Core` because its own
+-- clauses `define` the term.
+intro-refined : List Name -> List (Option a) -> Core -> Core
 rule intro-refined [] [] k :- do return k
 rule intro-refined [n, ...ns] [none, ...fs] k :-
   do k2 = prim-lambda n

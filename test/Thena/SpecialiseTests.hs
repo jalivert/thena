@@ -97,42 +97,58 @@ vtailTests =
     -- The methods as the user is handed them, so that what the two cases below
     -- change is visible here rather than taken on trust.
   , testCase "nil's method, before: an equation that cannot hold" $
-      shown vecContext (methodOf 0) @?= "Eq {0} Nat zero (succ n) -> Vec A n"
+      shown vecContext (methodOf 0)
+        @?= "\8704 (n1 : Nat) -> Eq {0} Nat zero (succ n1) -> Vec A n1"
 
   , testCase "cons's, before: a binder, a vector at it, and an equation" $
       shown vecContext (methodOf 1)
         @?= "\8704 (n1 : Nat) -> A -> Vec A n1 -> \
-            \(Eq {0} Nat n1 (succ n) -> Vec A n) \
-            \-> Eq {0} Nat (succ n1) (succ n) -> Vec A n"
+            \(\8704 (n2 : Nat) -> Eq {0} Nat n1 (succ n2) -> Vec A n2) \
+            \-> \8704 (n2 : Nat) -> Eq {0} Nat (succ n1) (succ n2) -> Vec A n2"
 
     -- __The impossible case vanishes.__ @zero@ against @succ n@ is a conflict,
     -- so there is no subgoal at all and nothing is left for the user to close.
   , testCase "nil's method, after: no subgoal at all" $
       vecGoal "nil" (methodOf 0) @?= Nothing
 
-    -- __And the determined binder goes.__ @succ n1 ≃ succ n@ is injectivity and
-    -- then solution, so @n1@ is gone, @as@ is a @Vec A n@ rather than a
-    -- @Vec A n1@ — which is exactly the transport the user writes today — and
-    -- the induction hypothesis follows it.
-  , testCase "cons's method, after: n1 is solved and the vector is at n" $
+    -- __THE COPY GOES, AND THE CONSTRUCTOR'S OWN BINDER STAYS__ — and which way
+    -- round that is changed at MS9 phase 191. @succ n1 ≃ succ n2@ is injectivity
+    -- and then solution, and both sides are pattern variables now, so the one
+    -- that is eliminable is the copy: @n2@ is later in the telescope, and
+    -- solving @n1@ to a term mentioning it is not a telescope move. Before the
+    -- copies existed the equation read @succ n1 ≃ succ n@ with @n@ ambient and
+    -- @n1@ was the one that went. So the arm binds @n1@ for real, and @as@ is a
+    -- @Vec A n1@ at the goal @Vec A n1@ — no transport anywhere.
+  , testCase "cons's method, after: the copy is solved and n1 survives" $
       vecGoal "cons" (methodOf 1)
         @?= Just ( "consCase"
-                 , "A -> Vec A n -> \
-                   \(Eq {0} Nat n (succ n) -> Vec A n) -> Vec A n" )
+                 , "\8704 (n1 : Nat) -> A -> Vec A n1 -> \
+                   \(\8704 (n2 : Nat) -> Eq {0} Nat n1 (succ n2) -> Vec A n2) \
+                   \-> Vec A n1" )
 
-    -- __Which argument went, and what it went to__ (MS9 phase 185). @cons@
-    -- takes three and the subgoal binds two, and this is the only thing that
-    -- says which two: @n1@ is the first and it was solved to @n@.
-  , testCase "cons's method, after: the first argument is forced to n" $
-      vecForced "cons" (methodOf 1) @?= [Just "n", Nothing, Nothing]
+    -- __Which argument went, and what it went to__ (MS9 phase 185). @cons@ takes
+    -- three and the subgoal binds three: __nothing is forced any more__, which
+    -- is the same change read off the other report.
+  , testCase "cons's method, after: no constructor argument is forced" $
+      vecForced "cons" (methodOf 1) @?= [Nothing, Nothing, Nothing]
 
-    -- __And it is written in the AMBIENT context__, which is the one thing the
-    -- design left unmeasured: @n@ is a variable of the context the elimination
-    -- was written in, so it is in scope where the subgoal is claimed and the
-    -- caller may bind it with @define@ there. A term mentioning a binder of the
-    -- method would not be.
-  , testCase "and the term it was forced to is ambient, not a method binder" $
-      forcedVarsIn vecContext "cons" (methodOf 1) @?= [["n"]]
+    -- __And the copy is the thing that was solved__ (MS9 phase 191): one entry
+    -- per generalised entry, and it is a @Just@. __What it was solved to is not
+    -- asserted as a string here__, because it is a binder of the method and so
+    -- renders as a bare variable in the ambient context — which is the next
+    -- test's whole point.
+  , testCase "cons's method, after: the one copy was solved" $
+      map (fmap (const ())) (vecRefined "cons" (methodOf 1)) @?= [Just ()]
+
+    -- __AND IT IS NOT WRITTEN IN THE AMBIENT CONTEXT__, which is the asymmetry
+    -- with a forced constructor argument and the reason an arm cannot @define@
+    -- the ambient name to it (@~tzwjk@). A forced argument is solved from the
+    -- /target's/ index, which lives in the context the elimination was written
+    -- in; a copy is solved from the /constructor's/, so its term names a binder
+    -- of the method and is out of scope where the subgoal is claimed.
+  , testCase "and the term the copy went to is a method binder, not ambient" $
+      refinedVarsIn vecContext "cons" (methodOf 1)
+        @?= [["NOT-IN-THE-AMBIENT-CONTEXT"]]
 
     -- A method that vanished still answers. Nothing claims a subgoal, so
     -- nothing reads this, but a conflict after a solution has one and the shape
@@ -145,17 +161,28 @@ vtailTests =
       (_, _, ty) : _ -> ty
       []             -> error ("no method " ++ show k)
 
+    -- **Read off the elimination, not written down** (MS9 phase 191). The
+    -- motive quantifies one copy per generalised ambient entry and nothing in
+    -- a method's type marks where those end and the equations begin, so a
+    -- hard-coded count here would say the equation is a copy the moment the
+    -- generaliser's rule moves.
+    vecCopies = length (elimGeneralised vtail)
+
     vecGoal c mty =
-      goalIn vecContext (run' eqNatVec vecContext vecCounter c 1 mty)
+      goalIn vecContext (run' eqNatVec vecContext vecCounter c vecCopies 1 mty)
 
     vecForced c mty =
       map (fmap (shown vecContext))
-          (specialisedForced (run' eqNatVec vecContext vecCounter c 1 mty))
+          (specialisedForced (run' eqNatVec vecContext vecCounter c vecCopies 1 mty))
 
-    forcedVarsIn ctx c mty =
-      [ map identOf (freeVars t)
-      | Just t <- specialisedForced (run' eqNatVec ctx vecCounter c 1 mty)
-      ]
+    vecRefined c mty =
+      specialisedRefined (run' eqNatVec vecContext vecCounter c vecCopies 1 mty)
+
+    refinedVarsIn ctx c mty = varsIn ctx
+      [ t | Just t <- specialisedRefined (run' eqNatVec ctx vecCounter c vecCopies 1 mty) ]
+
+    varsIn ctx ts =
+      [ map identOf (freeVars t) | t <- ts ]
       where
         identOf v = case [ i | e <- ctx, entryVar e == v, Ident i <- [entryIdent e] ] of
           i : _ -> i
@@ -416,7 +443,7 @@ natCounter :: Int
 -- | Specialise a written method of @c@ and assert the goal that comes back.
 specialises :: String -> String -> Int -> String -> Maybe String -> TestTree
 specialises what c k src want = testCase what $
-  fmap snd (goalIn natContext (run' eqNat natContext natCounter c k mty)) @?= want
+  fmap snd (goalIn natContext (run' eqNat natContext natCounter c 0 k mty)) @?= want
   where mty = term eqNat natContext natCounter src
 
 -- | The refusal, for a fixture that is meant to be refused.
@@ -430,9 +457,9 @@ refused c k src =
 
 -- | Run it and insist it worked; a refusal in these fixtures is a bug in the
 -- fixture, not a test result.
-run' :: GlobalEnv -> Context -> Int -> String -> Int -> Core -> Specialisation
-run' env ctx n c k mty =
-  case fst (specialise env ctx n (GlobalName c) (hypsOf env c) 0 k mty) of
+run' :: GlobalEnv -> Context -> Int -> String -> Int -> Int -> Core -> Specialisation
+run' env ctx n c g k mty =
+  case fst (specialise env ctx n (GlobalName c) (hypsOf env c) g k mty) of
   Right s -> s
   Left e  -> error (c ++ ": " ++ show e)
 

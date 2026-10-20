@@ -773,6 +773,7 @@ baseTests =
                  , "intro-pattern", "intro-pattern"
                  , "ihs-for", "ihs-for"
                  , "intro-ihs", "intro-ihs"
+                 , "intro-refined", "intro-refined", "intro-refined"
                  , "same-length", "same-length"
                  , "arm-for", "arm-for", "pick", "pick", "arm-needs-body"
                  , "elaborate-arm", "case-needs-an-arm"

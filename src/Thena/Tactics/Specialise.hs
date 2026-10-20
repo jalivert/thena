@@ -166,7 +166,7 @@ data Specialisation = Specialisation
 -- made @case … of@ refuse its own methods as misshapen. The caller knows which
 -- scheme it asked for; this does not, and no longer guesses.
 --
--- __@g@ is how many copies the motive generalised__ (MS9 phase 191), and the
+-- __@gc@ is how many copies the motive generalised__ (MS9 phase 191), and the
 -- same argument applies to it: nothing in the type marks where the copies end
 -- and the equations begin, and the caller is the one that knows. They join
 -- @Δc@ and the hypotheses as __pattern variables__, which is the only change
@@ -174,14 +174,14 @@ data Specialisation = Specialisation
 specialise
   :: GlobalEnv -> Context -> Int -> GlobalName -> Int -> Int -> Int -> Core
   -> (Either SpecialiseError Specialisation, Int)
-specialise env ctx n0 cn h g k mty = case lookupConstructor cn env of
+specialise env ctx n0 cn h gc k mty = case lookupConstructor cn env of
   Nothing -> (Left (NotThatConstructor cn), n0)
   Just (d, c)
-    | k < 0 || g < 0 -> (Left (MethodNotShaped (arity d c) k mty), n0)
-    | otherwise -> case peel (arity d c + g + k) mty n0 of
+    | k < 0 || gc < 0 -> (Left (MethodNotShaped (arity d c) k mty), n0)
+    | otherwise -> case peel (arity d c + gc + k) mty n0 of
         Nothing -> (Left (MethodNotShaped (arity d c) k mty), n0)
         Just (tel, body, n1) ->
-          let (delta, raw) = splitAt (arity d c + g) tel
+          let (delta, raw) = splitAt (arity d c + gc) tel
            in case mapM equationOf raw of
                 Nothing -> (Left (NotAnEquation (map entryType raw)), n1)
                 Just es ->
@@ -209,7 +209,7 @@ specialise env ctx n0 cn h g k mty = case lookupConstructor cn env of
       | e <- take (length (constructorArguments c)) telescope
       ]
 
-    -- The same report for the generalised copies, which are the __last__ @g@
+    -- The same report for the generalised copies, which are the __last__ @gc@
     -- entries of the telescope: 'Thena.Tactics.Eliminate' quantifies them after
     -- the target, so the motive puts them after the constructor's arguments and
     -- after the hypotheses. Nothing has to be carried to find them — @arity@ is

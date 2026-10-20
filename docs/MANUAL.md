@@ -742,6 +742,9 @@ ihs-for ‹t› ‹c›
 ihs-for ‹t› ‹c›
 intro-ihs [] ‹k›
 intro-ihs [n, ...ns] ‹k›
+intro-refined [] [] ‹k›
+intro-refined [n, ...ns] [none, ...fs] ‹k›
+intro-refined [n, ...ns] [(some v), ...fs] ‹k›
 same-length [] []
 same-length [p, ...ps] [n, ...ns]
 arm-for ‹t› ‹c›
@@ -749,14 +752,14 @@ arm-for ‹t› ‹c›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 arm-needs-body (some b)
-elaborate-arm ‹t› ‹c› ‹sub› ‹forced› (p, ob)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹forced› (some a)
+elaborate-arm ‹t› ‹c› ‹sub› ‹forced› (gens, k) ‹refined› (p, ob)
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹forced› ‹m› ‹refined› (some a)
 vanished-case-takes-no-body none
 vanished-case-takes-no-body (some (p, none))
 case-must-vanish none
-one-case ‹t› ‹c› ‹sub› ‹forced›
-one-case ‹t› ‹c› none ‹forced›
-one-case ‹t› ‹c› (some sub) ‹forced›
+one-case ‹t› ‹c› ‹sub› ‹forced› ‹m› ‹refined›
+one-case ‹t› ‹c› none ‹forced› ‹m› ‹refined›
+one-case ‹t› ‹c› (some sub) ‹forced› ‹m› ‹refined›
 arm-must-be-for-this-datatype ‹a› ‹b›
 arms-are-for-this-datatype ‹t› ‹d›
 arms-are-for-this-datatype ‹t› ‹d›
@@ -765,9 +768,9 @@ arm-not-repeated ‹w› ‹t›
 arm-not-repeated ‹w› ‹t›
 arms-are-distinct ‹t›
 arms-are-distinct ‹t›
-split-cases ‹t› [] [] ‹k›
-split-cases ‹t› [c, ...cs] [mh, ...ms] ‹k›
-split-over ‹t› ‹cs› (hs, k)
+split-cases ‹t› [] [] ‹m›
+split-cases ‹t› [c, ...cs] [mh, ...ms] ‹m›
+split-over ‹t› ‹cs› (hs, m)
 split-claim ‹t› ‹x›
 split-claim ‹t› ‹x›
 split-elaborate ‹t›

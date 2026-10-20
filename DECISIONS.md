@@ -2337,38 +2337,66 @@ It is what refuses an arm for a case that vanished, an arm headed by a construct
 some other datatype, and a second arm for a constructor that already has one — three
 mistakes, one rule, and nothing in the system has to tell them apart.
 
-### A split cannot solve a variable bound before the thing you split, and says so badly
+### A split refines variables bound before it, and the limit is what it cannot reorder
 
-This is the sharpest limitation of splitting as it stands, and you will meet it the
-first time you split two derivations about the same subject.
-
-A split refines exactly what its motive mentions, and a motive abstracts the *indices*
-of the family. So splitting `e : Ev (s m)` abstracts `s m` — not `m`. If the goal
-mentions `m` rather than `s m`, there is nothing for the motive to abstract, and the
-case for each constructor is handed an equation instead:
+A split's motive abstracts the *indices* of the family, so splitting `e : Ev (s m)`
+abstracts `s m` — not `m`. On its own that leaves `m` fixed, and a goal about `m` rather
+than about `s m` has nothing for the motive to abstract. **So the motive also quantifies a
+fresh copy of every ambient entry the indices mention**, states the equations about the
+copy, and the use site passes the entry itself and `refl`. The copy is a binder the
+elaborator introduced, so the specialiser can solve it; the entry stays where it was. This
+is all that is needed:
 
 ```
 refined : forall (m : N) (e : Ev (s m)) -> IsSucc m
 refined = \ m e -> case e of { evs n en -> isucc n }
-   stuck: IsSucc (s a) and Eq {0} N (s n) m -> IsSucc m cannot be made equal
 ```
 
-`evs n en` forces `m` to be `s n`, and the specialiser cannot act on that, because
-**it can only solve variables the split itself bound** — `m` was bound earlier. So the
-equation stays as an extra argument of the case, which is what the message is reporting:
-the arm's body is being checked against a function type.
+`evs n en` forces `m`'s copy to be `s n`, the goal arrives as `IsSucc (s n)`, and
+`isucc n` is the arm. It computes, too: `refined (s z) (evs z evz)` is `isucc z` by `refl`.
 
-**Agda and Idris refine `m` here**, because a clause's whole left-hand side is one
-unification problem rather than one scrutinee with everything to its left fixed. Thena
-will do the same once the elaborator generalises the motive over the variables a split
-needs to solve; until then, these cases are written with `elim` and a motive you supply,
-which is what `examples/determinacy-patterns.thena` does for three of its ten cases and
-says so in its header.
+**A hypothesis about a refined variable comes with it**, because an entry whose type
+mentions a generalised variable is generalised too — otherwise the arm would hold a
+hypothesis about something that no longer means what it meant. Inside the arm it arrives
+under its own name, refined:
 
-**The arm can be written to take the equation** — `evs n en -> \ q -> …` — and then
-transported by hand. It type-checks, and it is deliberately not how the example is
+```
+usesHyp : forall (m : N) (h : Ev m) (e : Ev (s m)) -> IsSucc m
+usesHyp = \ m h e -> case e of { evs n en -> isucc n }
+```
+
+**Two limits, and both are about ORDER rather than about what can be refined.**
+
+The copies are quantified after the target, so in each case they stand after the
+constructor's own arguments. Where an index nests a constructor around a refined variable
+— `Step (pred (succ v))` met by `ePred : Step (pred t1) (pred t1')` — what is left to
+solve is the constructor's argument `t1`, and it would have to be solved to a term
+mentioning the copy, which is bound later. Nothing can reorder them, so the equation
+stays as an extra argument of the case and the message is the arm's body being checked
+against a function type:
+
+```
+probe : forall (v : N) (d : W (s (s v))) -> N
+probe = \ v d -> case d of { w1 k -> k }
+   stuck: N and Eq {0} N k (s v1) -> N cannot be made equal
+```
+
+And **a recursive call may not be written inside a split that refines what it recurses
+on**. A recursive call is tied to its induction hypothesis by the argument it names, the
+hypothesis is about the entry, and inside the arm that name means the refined copy — so
+the call matches nothing and is refused as not structurally smaller. The way round it is
+to take the hypothesis as a parameter and pass the recursive call from outside the split,
+which is what the four congruence inversions in `examples/determinacy-patterns.thena` do.
+
+**Agda and Idris have neither limit**, because a clause's whole left-hand side is one
+unification problem rather than one scrutinee with everything to its left fixed.
+
+**The arm can be written to take a leftover equation** — `w1 k -> \ q -> …` — and then
+transported by hand. It type-checks, and it is deliberately not how the examples are
 written: an arm whose right-hand side is a function of an equation you had no way to
-predict is elaboration showing through the surface, not a way to write proofs.
+predict is elaboration showing through the surface, not a way to write proofs. Where that
+is the only route, `examples/determinacy-patterns.thena` uses `elim` and a motive it
+supplies instead, for two of its thirteen lemmas, and says so in its header.
 
 ### `case` says the arm does not recurse, and the type is what says it
 
