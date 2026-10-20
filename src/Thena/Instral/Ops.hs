@@ -58,6 +58,7 @@ import Thena.Core.Reduce (whnf)
 import Thena.Global.Env (ArgRole, GlobalEnv, InductiveDefinition)
 import Thena.Language.Reader (Block)
 import Thena.Surface.Concrete (Plicity, SurfacePattern)
+import Thena.Tactics.Specialise (Binder)
 import Thena.Syntax.Concrete (Raw, splicesIn)
 import Thena.Surface.Zipper (SurfaceZipper)
 
@@ -157,6 +158,14 @@ data Value
   | VPattern SurfacePattern
     -- ^ **a pattern an arm of a surface split was written with** (MS9 phase
     -- 183). 'Thena.Instral.Type.TPattern' carries why it is not a 'VSurface'.
+  | VBinder Binder
+    -- ^ **one binder of a specialised method** (MS9 phase 192) — which of the
+    -- three groups it is in, and the name it is bound under.
+    --
+    -- 'Thena.Instral.Type.TBinder' carries why it is a type of its own, and
+    -- "Thena.Tactics.Specialise" is the only thing that makes one: a method's
+    -- binders are what the four transitions rewrote, and nothing else can say
+    -- which of them survived.
   | VList    [Value]
     -- ^ @[a, b, c]@ (MS5 phase 65) — **homogeneous by intention and not by
     -- construction**: nothing checks that the elements agree until phase 66's
@@ -701,6 +710,16 @@ data Op
     -- arm was written with is a constructor of the family being split. A bare
     -- pattern variable is a head with no arguments, so this is also how an arm
     -- names the variables it binds.
+  | BinderName Operand
+    -- ^ the name a binder of a specialised method is bound under —
+    -- @binder-name b@ (MS9 phase 192).
+    --
+    -- **A 'Thena.Instral.Type.TName', so it composes with @prim-lambda@,
+    -- @define@ and @fresh-name@**, which is the whole of what a walk over the
+    -- report does with it. Total over the three roles, and each takes its name
+    -- from a different place: an argument's is the method type's own binder, a
+    -- hypothesis's is the recursive argument it is about, a copy's is the
+    -- ambient entry it copies.
   | PatternArguments Operand
     -- ^ a pattern's arguments, in order — @pattern-arguments p@.
     --
@@ -1202,16 +1221,24 @@ data Op
     -- vanishing: a conflicting equation closes the method outright, so there is
     -- nothing left to prove and nothing to go to.
     --
-    -- **And it says which of the constructor's arguments it FORCED, and to
-    -- what** (MS9 phase 185) — one @Option Core@ per argument in declaration
-    -- order, @none@ for one that survived as a binder of the subgoal and
-    -- @some t@ for one an equation determined. **It is the only thing that
-    -- knows**: the subgoal has fewer binders than the constructor has arguments
-    -- and nothing in it says which are missing, so a clause naming an arm's
-    -- pattern variables cannot work it out — which is why phase 184's clause
-    -- failed on @vtail@. His ruling of 2026-10-19 is what the caller does with
-    -- it: a survivor is bound with @prim-lambda@ and a forced position with
-    -- @define@, the name being a definition equal to the term it was forced to.
+    -- **And it REPORTS WHAT EACH BINDER OF THE METHOD IS** (MS9 phase 192) —
+    -- one @(Binder, Option Core)@ per binder, in the order the method binds
+    -- them: which of the three groups it is in and under what name, then
+    -- @none@ for one that survived as a binder of the subgoal and @some t@ for
+    -- one an equation determined.
+    --
+    -- **It is the only thing that knows**: the subgoal has fewer binders than
+    -- the method's telescope has and nothing in it says which are missing, so a
+    -- clause naming an arm's variables cannot work it out — which is why phase
+    -- 184's clause failed on @vtail@.
+    --
+    -- **It was two positional slices and a count until phase 192**, and three
+    -- rules then introduced one group each in an order none of them stated.
+    -- His ruling of 2026-10-20, fourth session: a convention against an
+    -- explicit mechanism is not a decision. @binder-is-argument@,
+    -- @binder-is-hypothesis@ and @binder-is-copy@ are how a clause reads a
+    -- group, and the three differ in where the name comes from and in what a
+    -- @some t@ means there.
   | Specialise Operand Operand Operand
 
     -- **Tying a recursive call to the induction hypothesis it is** (MS9 phase
@@ -1428,6 +1455,7 @@ resultOf o = case o of
   SplitArmPattern _ -> Just TPattern
   PatternHead _ -> Just TName
   PatternArguments _ -> Just (TList TPattern)
+  BinderName _ -> Just TName
   MakeTrusted {} -> Just TCore
   Goal         -> Just TCore
   Typing _     -> Just TCore
@@ -1506,12 +1534,11 @@ resultOf o = case o of
   -- **The subgoal it claimed, or none** (MS9 phase 184). A conflicting
   -- equation closes the method outright and claims nothing, which is the
   -- impossible case vanishing, so there is never more than one.
-    -- **The handle and the forced report, as a pair**, which is 'Eliminate'\'s
+    -- **The handle and the binder report, as a pair**, which is 'Eliminate'\'s
     -- own shape and for its reason: one op answers everything only it knows, and
     -- a rule takes the pair apart in a head.
   Specialise _ _ _ ->
-    Just (TPair (TOption TCore)
-                (TPair (TList (TOption TCore)) (TList (TOption TCore))))
+    Just (TPair (TOption TCore) (TList (TPair TBinder (TOption TCore))))
   TieRecursion _ -> Just TCore
   -- The six declaration readers (MS9 phase 176). @constructors-of@ is the
   -- first row in this table to answer with a list.
@@ -1650,6 +1677,7 @@ operandTypes o = case o of
   SplitArmPattern x -> [(x, TSurface)]
   PatternHead x -> [(x, TPattern)]
   PatternArguments x -> [(x, TPattern)]
+  BinderName x -> [(x, TBinder)]
   MakeTrusted a b c -> [(a, TCore), (b, TCore), (c, TCore)]
   Goal         -> []
   Typing a     -> [(a, TCore)]
@@ -1945,6 +1973,24 @@ data Test
     -- inaccessible pattern and a literal pattern are each a further case — so a
     -- clause that matches on @pattern-is-name@ keeps declining what it was never
     -- written for.
+  | BinderIsArgument Operand
+    -- ^ a binder of a specialised method that is an argument of the constructor
+    -- (MS9 phase 192), so the arm's __pattern__ names it
+  | BinderIsHypothesis Operand
+    -- ^ … or an induction hypothesis the method carries, so it is bound under a
+    -- __freshened__ name: the argument it is about is already in the
+    -- development, and shadowing it would build the proof out of the wrong
+    -- variable with nothing failing
+  | BinderIsCopy Operand
+    -- ^ … or a copy of an ambient entry the motive generalised, so it is bound
+    -- under __the ambient name itself__, shadowing the entry — which is what
+    -- makes the arm's body read the refined type (MS9 phase 191).
+    --
+    -- **Three tests over a three-case type**, which is @pattern-is-name@ /
+    -- @pattern-is-wildcard@'s arrangement one category over, and for the same
+    -- reason: a clause that matches on one keeps declining a group it was never
+    -- written for. The three really are three — each is bound under a name from
+    -- a different place.
   | SameName Operand Operand
     -- ^ two names are the same word — @same-name a b@ (MS9 phase 183).
     --
@@ -2145,6 +2191,7 @@ opKeyword o = case o of
   SplitArmPattern _ -> "split-arm-pattern"
   PatternHead _ -> "pattern-head"
   PatternArguments _ -> "pattern-arguments"
+  BinderName _ -> "binder-name"
   MakeTrusted {} -> "make-trusted"
   AscriptionTerm _ -> "ascription-term"
   Goal         -> "goal"

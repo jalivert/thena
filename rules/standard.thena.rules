@@ -222,19 +222,19 @@ rule elaborate t :- when focus-is-hole (surface-is-hole t) do
 -- own backtracking: find-arm walks the arms and try-arm's two clauses are a
 -- choice point, so an arm that does not fit is followed by the next one.
 --
+-- THE SPLIT REPORTS WHAT EACH BINDER OF THE ARM IS, AND ONE WALK CONSUMES IT.
+-- specialise answers one entry per binder of the method, in the order the
+-- method binds them, saying which of the three groups it is in — the
+-- constructor's arguments, the hypotheses, the copies the motive generalised —
+-- and whether an equation determined it. intro-arm-binders is that walk, and
+-- its comment is where the three groups are explained.
+--
 -- A FORCED ARGUMENT HAS NO BINDER, AND ITS NAME BECOMES A DEFINITION. An
 -- equation can determine one of the constructor's own arguments — splitting
--- v : Vec A (succ n) solves vcons's own n against the outer one — and then
--- the subgoal has one binder fewer than the pattern has names. specialise says
--- which positions went and to what, so intro-pattern walks the pattern against
--- that report: a survivor is a prim-lambda, and a forced position is a `define`
--- equal to the term it was forced to. HIS RULING, 2026-10-19: a forced position
--- may be named, nothing is prevented, and the dot notation stays optional.
---
--- Forcing is the normal case rather than a corner — it is what every
--- inversion lemma does. The term a position is forced to is always written in
--- the context the split was written in and never in the method's own binders,
--- which is what makes `define` above the hole well scoped.
+-- v : Vec A (succ n) solves vcons's own n against the outer one — and then the
+-- subgoal has one binder fewer than the pattern has names. HIS RULING,
+-- 2026-10-19: a forced position may be named, nothing is prevented, and the dot
+-- notation stays optional.
 -- --------------------------------------------------------------------------
 
 -- A pattern argument is a name or a wildcard. A NESTED one is a second split
@@ -243,50 +243,14 @@ rule elaborate t :- when focus-is-hole (surface-is-hole t) do
 no-nesting : List a -> ()
 rule no-nesting [] :- do
 
--- One binding per pattern argument, under the name the user wrote, answering
--- the hole that is left. The shape intro-binders uses for a λ group, and for
--- the same reason: counting moves from the top of a guess is only right while
--- the binders are the only components in the chain.
---
--- THE PATTERN AND THE FORCED REPORT ARE WALKED IN STEP, which is also what
--- checks that they agree: specialise answers one entry per constructor
--- argument, so two lists running out together is the only shape with a clause.
---
--- `none` is a binder the subgoal still has, so prim-lambda takes it and answers
--- the hole underneath. `some v` is a position an equation determined, so there
--- is no binder to take and the name is bound as a definition equal to v —
--- which leaves the hole where it was, `define` extending the context above it
--- rather than consuming it. A wildcard in a forced position asks for no name,
--- so nothing is bound at all.
-intro-pattern : List Pattern -> List (Option Core) -> Core -> Core
-rule intro-pattern [] [] k :- do return k
-rule intro-pattern [p, ...ps] [none, ...fs] k :- when (pattern-is-wildcard p)
-  do w = fresh-name "u"
-     ; k2 = prim-lambda w
-     ; r = intro-pattern ps fs k2
-     ; return r
-rule intro-pattern [p, ...ps] [none, ...fs] k :- when (pattern-is-name p)
-  do sub = pattern-arguments p
-     ; no-nesting sub
-     ; w = pattern-head p
-     ; k2 = prim-lambda w
-     ; r = intro-pattern ps fs k2
-     ; return r
-rule intro-pattern [p, ...ps] [(some v), ...fs] k :- when (pattern-is-wildcard p)
-  do r = intro-pattern ps fs k
-     ; return r
-rule intro-pattern [p, ...ps] [(some v), ...fs] k :- when (pattern-is-name p)
-  do sub = pattern-arguments p
-     ; no-nesting sub
-     ; w = pattern-head p
-     ; define w v
-     ; r = intro-pattern ps fs k
-     ; return r
-
--- WHICH HYPOTHESES AN ARM IS HANDED, and the one place the two words differ
+-- WHICH HYPOTHESES A METHOD CARRIES, and the one place the two words differ
 -- once a method is in hand: `induction` hands one per recursive argument, and
 -- `case` hands none, because caseD's methods are the eliminator's minus exactly
 -- these. Two clauses with complementary tests, so no choice point.
+--
+-- It is passed to `specialise`, which puts these names into its report: a
+-- hypothesis's binder is `ih` in every method of every datatype, so the name the
+-- arm freshens — the recursive argument's own — is nowhere in the method type.
 ihs-for : Surface -> Name -> List Name
 rule ihs-for t c :- when (split-is-induction t)
   do r = constructor-recursive-arguments c
@@ -294,64 +258,104 @@ rule ihs-for t c :- when (split-is-induction t)
 rule ihs-for t c :- when (split-is-cases t)
   do return []
 
--- One induction hypothesis per recursive argument, named AFTER a fresh-name of
--- the argument it is about. `ihs-for` is what decides the list.
+-- ONE BINDING PER BINDER OF THE ARM, WALKED AGAINST THE REPORT THE SPLIT MADE
+-- — MS9 phase 192, his ruling of 2026-10-20, fourth session. `specialise`
+-- answers one entry per binder of the method, in the order the method binds
+-- them, and each says which of the three groups it is in and under what name.
+-- There was a walk per group until this phase, each rebuilding its own slice by
+-- a fixed order that none of them stated; that is what made the binder order
+-- load-bearing when the generalised copies arrived.
 --
--- THE FRESHENING IS LOAD-BEARING, NOT TIDINESS. The argument's own binder is
--- already in the development by the time this runs, so using its name here
--- SHADOWS it and the arm's body resolves to the hypothesis instead. Where the
--- motive does not depend on the target the two have the same type, so nothing
--- fails and the proof is simply built out of the wrong variable.
-intro-ihs : List Name -> Core -> Core
-rule intro-ihs [] k :- do return k
-rule intro-ihs [n, ...ns] k :-
-  do h = fresh-name n
+-- SO THERE IS NO ARITHMETIC AND NOTHING COUNTS. A clause reads the entry's
+-- group with a head test and does the one thing that group wants. The three
+-- really are three, and the differences are not cosmetic:
+--
+--   * an ARGUMENT is named by the arm's pattern, so this is the only group that
+--     consumes one — which is also what checks that the pattern and the report
+--     agree, two lists running out together being the only shape with a clause.
+--   * a HYPOTHESIS is bound under a FRESHENED name, and the freshening is
+--     load-bearing. The argument it is about is already in the development by
+--     the time this runs, so using its name here SHADOWS it and the arm's body
+--     resolves to the hypothesis instead. Where the motive does not depend on
+--     the target the two have the same type, so nothing fails and the proof is
+--     simply built out of the wrong variable.
+--   * a COPY is bound under the ambient name ITSELF, and the shadowing is the
+--     whole point — the exact opposite of the line above. The ambient entry is
+--     still in scope with its old type; the copy has the refined one, so the
+--     arm's body reads `s0` and gets `s0 : Step true p'`. That is what Agda and
+--     Idris do by refining the context in place, and what the equation handed to
+--     the user was standing in for.
+--
+-- AND `none` AGAINST `some v` IS WHETHER AN EQUATION DETERMINED IT. `none` is a
+-- binder the subgoal still has, so prim-lambda takes it and answers the hole
+-- underneath. `some v` is a position an equation solved, and what that means
+-- differs by group again:
+--
+--   * a FORCED ARGUMENT has no binder, so the name is bound as a definition
+--     equal to v — which leaves the hole where it was, `define` extending the
+--     context above it rather than consuming it. HIS RULING, 2026-10-19: a
+--     forced position may be named, nothing is prevented, and the dot notation
+--     stays optional. Forcing is the normal case rather than a corner — it is
+--     what every inversion lemma does — and the term is always written in the
+--     context the split was written in, which is what makes the `define` well
+--     scoped. A wildcard asks for no name, so nothing is bound at all.
+--   * a SOLVED COPY IS BOUND TO NOTHING, AND THE NAME KEEPS ITS AMBIENT
+--     MEANING. The copy is an index position the split has forced — `p` becoming
+--     `true` — and the goal and every surviving copy's type already carry it,
+--     because the specialiser substituted it before handing the subgoal over.
+--     What is missing is only a NAME for it inside the arm, and there is nowhere
+--     in today's surface for the user to have asked for one: an outer position
+--     is not in an arm's pattern, so binding `p` to `true` here would be the
+--     elaborator redefining a name the user bound outside the split, unasked. A
+--     dot pattern is the syntax that asks — `~hzcgd`'s option A — and the term
+--     the define would use is reported for it. And it CANNOT be bound anyway:
+--     a copy is solved from the CONSTRUCTOR's side, so its term names the
+--     method's own binders and a `define` of it is out of scope — `~tzwjk` has
+--     the measurement.
+--   * A HYPOTHESIS IS NEVER SOLVED, so there is no clause for one: an equation
+--     is over the datatype's indices and a hypothesis is a proof of the motive.
+--     If one ever were, the refusal names this rule.
+intro-arm-binders : List Pattern -> List (Binder, Option Core) -> Core -> Core
+rule intro-arm-binders [] [] k :- do return k
+rule intro-arm-binders [p, ...ps] [(b, none), ...bs] k :-
+     when (binder-is-argument b) (pattern-is-wildcard p)
+  do w = fresh-name "u"
+     ; k2 = prim-lambda w
+     ; r = intro-arm-binders ps bs k2
+     ; return r
+rule intro-arm-binders [p, ...ps] [(b, none), ...bs] k :-
+     when (binder-is-argument b) (pattern-is-name p)
+  do sub = pattern-arguments p
+     ; no-nesting sub
+     ; w = pattern-head p
+     ; k2 = prim-lambda w
+     ; r = intro-arm-binders ps bs k2
+     ; return r
+rule intro-arm-binders [p, ...ps] [(b, (some v)), ...bs] k :-
+     when (binder-is-argument b) (pattern-is-wildcard p)
+  do r = intro-arm-binders ps bs k
+     ; return r
+rule intro-arm-binders [p, ...ps] [(b, (some v)), ...bs] k :-
+     when (binder-is-argument b) (pattern-is-name p)
+  do sub = pattern-arguments p
+     ; no-nesting sub
+     ; w = pattern-head p
+     ; define w v
+     ; r = intro-arm-binders ps bs k
+     ; return r
+rule intro-arm-binders ps [(b, none), ...bs] k :- when (binder-is-hypothesis b)
+  do n = binder-name b
+     ; h = fresh-name n
      ; k2 = prim-lambda h
-     ; r = intro-ihs ns k2
+     ; r = intro-arm-binders ps bs k2
      ; return r
-
--- THE AMBIENT ENTRIES THE SPLIT GENERALISED, BOUND UNDER THE NAMES THEY ALREADY
--- HAD — MS9 phase 191, `~6dpg5`. A motive abstracts the target's indices, so a
--- variable bound before the target was never refined; the motive now quantifies
--- a fresh copy of each such entry after the target, and these are the copies.
---
--- THE SHADOWING IS THE WHOLE POINT, and it is the exact opposite of
--- `intro-ihs`'s freshening one rule up. The ambient entry is still in scope and
--- still has its old type; the copy has the refined one. Binding the copy under
--- the ambient name is what makes the arm's body read `s0` and get the refined
--- `s0` — which is what Agda and Idris do by refining the context in place, and
--- what the equation handed to the user was standing in for.
---
--- IT IS `intro-pattern` WITHOUT THE PATTERN, and it walks the same two lists:
--- `none` is a copy the subgoal still binds, so `prim-lambda` takes it under the
--- ambient name, and that is the refinement — `s0 : Step p p'` reaching the arm
--- as `s0 : Step true p'`.
---
--- A SOLVED COPY IS BOUND TO NOTHING, AND THE NAME KEEPS ITS AMBIENT MEANING.
--- The copy is an index position the split has forced — `p` becoming `true` — and
--- the goal and every surviving copy's type already carry it, because the
--- specialiser substituted it before handing the subgoal over. What is missing is
--- only a NAME for it inside the arm, and there is nowhere in today's surface for
--- the user to have asked for one: an outer position is not in an arm's pattern.
--- Binding `p` to `true` here would be the elaborator redefining a name the user
--- bound outside the split, unasked. A dot pattern is the syntax that asks —
--- `~hzcgd`'s option A — and the term the define would use is reported for it.
---
--- IT RUNS AFTER THE PATTERN AND AFTER THE HYPOTHESES, and that is not a
--- preference: the copies stand after both in the method.
---
--- THE SECOND PARAMETER IS `List (Option a)`, NOT `List (Option Core)`: no clause
--- looks inside the `some`, so inference generalises it and a narrower written
--- signature is refused. `intro-pattern` writes `Option Core` because its own
--- clauses `define` the term.
-intro-refined : List Name -> List (Option a) -> Core -> Core
-rule intro-refined [] [] k :- do return k
-rule intro-refined [n, ...ns] [none, ...fs] k :-
-  do k2 = prim-lambda n
-     ; r = intro-refined ns fs k2
+rule intro-arm-binders ps [(b, none), ...bs] k :- when (binder-is-copy b)
+  do n = binder-name b
+     ; k2 = prim-lambda n
+     ; r = intro-arm-binders ps bs k2
      ; return r
-rule intro-refined [n, ...ns] [(some v), ...fs] k :-
-  do r = intro-refined ns fs k
+rule intro-arm-binders ps [(b, (some v)), ...bs] k :- when (binder-is-copy b)
+  do r = intro-arm-binders ps bs k
      ; return r
 
 -- The arm's pattern must name as many variables as the constructor takes
@@ -418,11 +422,11 @@ rule pick w c p b r :- when (different-name w c) do a = arm-for r c ; return a
 arm-needs-body : Option Surface -> ()
 rule arm-needs-body (some b) :- do call elaborate b
 
--- The arm, under the bindings its pattern names and the copies the split
--- refined. The three groups are introduced in the order the method binds them:
--- the constructor's arguments, then the hypotheses, then the generalised copies.
-elaborate-arm : Surface -> Name -> Core -> List (Option Core) -> (List Name, Int) -> List (Option Core) -> (Pattern, Option Surface) -> ()
-rule elaborate-arm t c sub forced (gens, k) refined (p, ob) :-
+-- The arm, under every binder the split reported. ONE WALK AND ONE REPORT: the
+-- order the three groups are introduced in is the order the report is in, which
+-- is the order the method binds them, and no rule here knows what that order is.
+elaborate-arm : Surface -> Name -> Core -> List (Binder, Option Core) -> (Pattern, Option Surface) -> ()
+rule elaborate-arm t c sub bs (p, ob) :-
   do as = pattern-arguments p
      ; args = constructor-arguments c
      ; same-length as args
@@ -431,11 +435,8 @@ rule elaborate-arm t c sub forced (gens, k) refined (p, ob) :-
      ; into
      ; k0 = here
      ; back
-     ; k1 = intro-pattern as forced k0
-     ; ihs = ihs-for t c
-     ; k2 = intro-ihs ihs k1
-     ; k3 = intro-refined gens refined k2
-     ; goto k3
+     ; k1 = intro-arm-binders as bs k0
+     ; goto k1
      ; arm-needs-body ob
      ; goto sub
      ; solve
@@ -443,9 +444,9 @@ rule elaborate-arm t c sub forced (gens, k) refined (p, ob) :-
 -- A CASE THAT SURVIVED NEEDS AN ARM — coverage, and this is where it is said.
 -- One clause for `some` and none for `none`, so the refusal names the user's
 -- complaint: there is a method left and no arm was written for it.
-case-needs-an-arm : Surface -> Name -> Core -> List (Option Core) -> (List Name, Int) -> List (Option Core) -> Option (Pattern, Option Surface) -> ()
-rule case-needs-an-arm t c sub forced m refined (some a) :-
-  do elaborate-arm t c sub forced m refined a
+case-needs-an-arm : Surface -> Name -> Core -> List (Binder, Option Core) -> Option (Pattern, Option Surface) -> ()
+rule case-needs-an-arm t c sub bs (some a) :-
+  do elaborate-arm t c sub bs a
 
 -- AND A CASE THAT VANISHED TAKES NO BODY — the other half of his ruling of
 -- 2026-10-20. Two clauses, and between them they are every legal shape: no arm
@@ -487,15 +488,15 @@ rule case-must-vanish none :- do
 -- write arms. The arm-less clause is first and its test is complementary to the
 -- other two, so this search records no choice point — `pick`'s shape, for
 -- `pick`'s reason.
-one-case : Surface -> Name -> Option Core -> List (Option Core) -> (List Name, Int) -> List (Option Core) -> ()
-rule one-case t c sub forced m refined :- when (split-has-no-arms t)
+one-case : Surface -> Name -> Option Core -> List (Binder, Option Core) -> ()
+rule one-case t c sub bs :- when (split-has-no-arms t)
   do case-must-vanish sub
-rule one-case t c none forced m refined :- when (split-has-arms t)
+rule one-case t c none bs :- when (split-has-arms t)
   do oa = arm-for t c
      ; vanished-case-takes-no-body oa
-rule one-case t c (some sub) forced m refined :- when (split-has-arms t)
+rule one-case t c (some sub) bs :- when (split-has-arms t)
   do oa = arm-for t c
-     ; case-needs-an-arm t c sub forced m refined oa
+     ; case-needs-an-arm t c sub bs oa
 
 -- EVERY ARM THE USER WROTE WAS ASKED FOR — HIS RULING, 2026-10-20, and the two
 -- walks below are the half of it that nothing else can see. Elaboration asks the
@@ -572,16 +573,17 @@ rule split-cases t [] [] m :- do
 rule split-cases t [c, ...cs] [mh, ...ms] m :-
   do goto mh
      ; ihs = ihs-for t c
-     ; (sub, (forced, refined)) = specialise c ihs m
-     ; one-case t c sub forced m refined
+     ; (sub, bs) = specialise c ihs m
+     ; one-case t c sub bs
      ; goto mh
      ; solve
      ; split-cases t cs ms m
 
 -- The pair prim-eliminate answers, taken apart. `m` is what the motive added to
 -- every method — the ambient entries it generalised and the equation count —
--- and it is threaded whole, because only `specialise` and `intro-refined` have
--- any business in it.
+-- and it is threaded whole, because `specialise` is the only thing with any
+-- business in it: it puts those names into the report, and nothing else reads
+-- them.
 split-over : Surface -> List Name -> (List Core, (List Name, Int)) -> ()
 rule split-over t cs (hs, m) :- do split-cases t cs hs m
 

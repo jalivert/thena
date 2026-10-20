@@ -55,7 +55,8 @@ import Thena.Global.Env
   )
 import Thena.Render (Rendering (..), renderCore)
 import Thena.Tactics.Eliminate (Elimination (..), eliminate)
-import Thena.Tactics.Specialise (Specialisation (..), specialise)
+import Thena.Tactics.Specialise
+  (Binder (..), Role (..), Specialisation (..), binderWord, specialise)
 import Thena.Standard (expectedBase)
 
 tests :: TestTree
@@ -149,6 +150,29 @@ vtailTests =
     -- does not depend on which case it is.
   , testCase "nil's method, after: nothing was forced before the conflict" $
       vecForced "nil" (methodOf 0) @?= []
+
+    -- __AND THIS IS THE WHOLE REPORT__ (MS9 phase 192), which is what the three
+    -- lists above are three views of. One entry per binder of the method, in
+    -- the order the method binds them, each saying which group it is in and
+    -- under what name — so a walk over an arm binds all three groups without
+    -- knowing where one ends and the next begins.
+    --
+    -- __The hypothesis is named after the recursive argument it is about__, and
+    -- that name is the CALLER's: every method type in the system spells the
+    -- binder @ih@, so the name the arm freshens does not exist in the type.
+    --
+    -- An argument's name is the __declaration's__, which is what the method
+    -- type carries — @n@, where the printer shows @n1@ because @n@ is taken in
+    -- the ambient context. Nothing binds an argument by it: the arm's pattern
+    -- does that, and this is here so that @binder-name@ is total.
+  , testCase "cons's method: the report says what each binder is" $
+      reportOf vecContext (run' eqNatVec vecContext vecCounter
+                                "cons" vecCopies 1 (methodOf 1))
+        @?= [ ("argument n", Just "n")
+            , ("argument a",  Nothing)
+            , ("argument as", Nothing)
+            , ("hypothesis as", Nothing)
+            ]
   ]
   where
     methodOf k = case drop k (elimMethods vtail) of
@@ -160,18 +184,18 @@ vtailTests =
     -- a method's type marks where those end and the equations begin, so a
     -- hard-coded count here would say the equation is a copy the moment the
     -- generaliser's rule moves.
-    vecCopies = length (elimGeneralised vtail)
+    vecCopies = elimGeneralised vtail
 
     vecGoal c mty =
       goalIn vecContext (run' eqNatVec vecContext vecCounter c vecCopies 1 mty)
 
     vecForced c mty =
       map (fmap (shown vecContext))
-          (specialisedForced (run' eqNatVec vecContext vecCounter c vecCopies 1 mty))
+          (forcedIn (run' eqNatVec vecContext vecCounter c vecCopies 1 mty))
 
     forcedVarsIn ctx c mty =
       [ map identOf (freeVars t)
-      | Just t <- specialisedForced (run' eqNatVec ctx vecCounter c vecCopies 1 mty)
+      | Just t <- forcedIn (run' eqNatVec ctx vecCounter c vecCopies 1 mty)
       ]
       where
         identOf v = case [ i | e <- ctx, entryVar e == v, Ident i <- [entryIdent e] ] of
@@ -433,21 +457,21 @@ natCounter :: Int
 -- | Specialise a written method of @c@ and assert the goal that comes back.
 specialises :: String -> String -> Int -> String -> Maybe String -> TestTree
 specialises what c k src want = testCase what $
-  fmap snd (goalIn natContext (run' eqNat natContext natCounter c 0 k mty)) @?= want
+  fmap snd (goalIn natContext (run' eqNat natContext natCounter c [] k mty)) @?= want
   where mty = term eqNat natContext natCounter src
 
 -- | The refusal, for a fixture that is meant to be refused.
 refused :: String -> Int -> String -> Maybe SpecialiseError
 refused c k src =
   case fst (specialise eqNat natContext natCounter (GlobalName c)
-              (hypsOf eqNat c) 0 k
+              (hypsOf eqNat c) [] k
               (term eqNat natContext natCounter src)) of
     Left e  -> Just e
     Right _ -> Nothing
 
 -- | Run it and insist it worked; a refusal in these fixtures is a bug in the
 -- fixture, not a test result.
-run' :: GlobalEnv -> Context -> Int -> String -> Int -> Int -> Core -> Specialisation
+run' :: GlobalEnv -> Context -> Int -> String -> [Ident] -> Int -> Core -> Specialisation
 run' env ctx n c g k mty =
   case fst (specialise env ctx n (GlobalName c) (hypsOf env c) g k mty) of
   Right s -> s
@@ -460,13 +484,31 @@ run' env ctx n c g k mty =
 -- "Thena.Tactics.Specialise" used to read off the declaration is read off it
 -- here instead. It stopped doing that at phase 188 because it was assuming the
 -- caller's scheme, and @caseD@'s methods carry none.
-hypsOf :: GlobalEnv -> String -> Int
+hypsOf :: GlobalEnv -> String -> [Ident]
 hypsOf env c = case lookupConstructor (GlobalName c) env of
-  Nothing     -> 0
+  Nothing     -> []
   Just (d, k) ->
-    length [ () | e <- constructorArguments k
-                , Just _ <- [recursiveArgument (inductiveName d)
-                               (length (inductiveParameters d)) (entryType e)] ]
+    [ entryIdent e
+    | e <- constructorArguments k
+    , Just _ <- [recursiveArgument (inductiveName d)
+                   (length (inductiveParameters d)) (entryType e)] ]
+
+-- | What the report says about the constructor's own arguments, in declaration
+-- order — @Nothing@ for one that survived as a binder, @Just t@ for one an
+-- equation determined.
+--
+-- __Read out of the one report rather than off a slice of its own__ (MS9 phase
+-- 192): the specialiser answers one entry per binder saying which group it is
+-- in, so selecting a group is a filter here and not an index.
+forcedIn :: Specialisation -> [Maybe Core]
+forcedIn s =
+  [ f | (Binder r _, f) <- specialisedBinders s, r == AnArgument ]
+
+-- | The whole report, in words — @argument n@, @hypothesis m@, @copy s0@, each
+-- with what an equation made of it.
+reportOf :: Context -> Specialisation -> [(String, Maybe String)]
+reportOf ctx s =
+  [ (binderWord b, fmap (shown ctx) f) | (b, f) <- specialisedBinders s ]
 
 -- | The subgoal's name and type, rendered — or 'Nothing' where the method was
 -- closed outright.

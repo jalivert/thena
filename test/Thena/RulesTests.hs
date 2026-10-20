@@ -849,12 +849,11 @@ walkers =
 splitHelpers :: [String]
 splitHelpers =
   [ "no-nesting"
-  , "intro-pattern", "intro-pattern", "intro-pattern"
-  , "intro-pattern", "intro-pattern"
   , "ihs-for", "ihs-for"
-  , "intro-ihs", "intro-ihs"
-  , "intro-refined", "intro-refined", "intro-refined"
-  , "same-length", "same-length"
+  ]
+  ++ replicate 8 "intro-arm-binders"
+  ++
+  [ "same-length", "same-length"
   , "arm-for", "arm-for", "pick", "pick", "arm-needs-body", "elaborate-arm"
   , "case-needs-an-arm"
   , "vanished-case-takes-no-body", "vanished-case-takes-no-body"

@@ -666,64 +666,17 @@ annotatedBinder =
 -- And **@same-length@ and @no-nesting@ have only the clauses that pass**: a
 -- mismatch reaches no clause at all, which is the refusal.
 --
--- **@intro-pattern@ has four clauses because it walks two lists** (MS9 phase
--- 185) — the arm's patterns against what @specialise@ reports it forced — and
--- a pattern is a name or a wildcard in either case. A @none@ takes the binder
--- the subgoal still has; a @some@ binds the name as a @define@ and leaves the
--- hole alone, because a forced position has no binder to take.
+-- **@intro-arm-binders@ walks ONE report against the arm's patterns** (MS9
+-- phase 192). @specialise@ answers one entry per binder of the method, saying
+-- which of the three groups it is in and under what name, so the three walks
+-- that each rebuilt a group by position are one walk. A @none@ takes the binder
+-- the subgoal still has; a @some@ on an argument binds the name as a @define@
+-- and leaves the hole alone, because a forced position has no binder to take,
+-- and a @some@ on a copy binds nothing at all.
 splitClauses :: [Rule]
 splitClauses =
   [ Rule (GlobalName "no-nesting") [PList [] Nothing] [] []
-  , Rule (GlobalName "intro-pattern")
-      [PList [] Nothing, PList [] Nothing, PVar "k"] []
-      [Do (Op.Return (Ref "k"))]
-  , Rule (GlobalName "intro-pattern")
-      [ PList [PVar "p"] (Just (PVar "ps"))
-      , PList [PNone] (Just (PVar "fs")), PVar "k"
-      ]
-      [PatternIsWildcard (Ref "p")]
-      [ Bind (Op.PVar "w") Nothing (Op.FreshName (Lit (VText "u")))
-      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "w")))
-      , Bind (Op.PVar "r") Nothing
-          (Op.Call "intro-pattern" [Ref "ps", Ref "fs", Ref "k2"])
-      , Do (Op.Return (Ref "r"))
-      ]
-  , Rule (GlobalName "intro-pattern")
-      [ PList [PVar "p"] (Just (PVar "ps"))
-      , PList [PNone] (Just (PVar "fs")), PVar "k"
-      ]
-      [PatternIsName (Ref "p")]
-      [ Bind (Op.PVar "sub") Nothing (Op.PatternArguments (Ref "p"))
-      , call "no-nesting" [Ref "sub"]
-      , Bind (Op.PVar "w") Nothing (Op.PatternHead (Ref "p"))
-      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "w")))
-      , Bind (Op.PVar "r") Nothing
-          (Op.Call "intro-pattern" [Ref "ps", Ref "fs", Ref "k2"])
-      , Do (Op.Return (Ref "r"))
-      ]
-  , Rule (GlobalName "intro-pattern")
-      [ PList [PVar "p"] (Just (PVar "ps"))
-      , PList [PSome (PVar "v")] (Just (PVar "fs")), PVar "k"
-      ]
-      [PatternIsWildcard (Ref "p")]
-      [ Bind (Op.PVar "r") Nothing
-          (Op.Call "intro-pattern" [Ref "ps", Ref "fs", Ref "k"])
-      , Do (Op.Return (Ref "r"))
-      ]
-  , Rule (GlobalName "intro-pattern")
-      [ PList [PVar "p"] (Just (PVar "ps"))
-      , PList [PSome (PVar "v")] (Just (PVar "fs")), PVar "k"
-      ]
-      [PatternIsName (Ref "p")]
-      [ Bind (Op.PVar "sub") Nothing (Op.PatternArguments (Ref "p"))
-      , call "no-nesting" [Ref "sub"]
-      , Bind (Op.PVar "w") Nothing (Op.PatternHead (Ref "p"))
-      , Do (Op.Define (Ref "w") (Ref "v"))
-      , Bind (Op.PVar "r") Nothing
-          (Op.Call "intro-pattern" [Ref "ps", Ref "fs", Ref "k"])
-      , Do (Op.Return (Ref "r"))
-      ]
-    -- **Which hypotheses an arm is handed** (MS9 phase 188), and the one place
+    -- **Which hypotheses a method carries** (MS9 phase 188), and the one place
     -- the written word means anything once a method is in hand: @induction@ one
     -- per recursive argument, @case@ none, @caseD@'s methods being the
     -- eliminator's minus exactly these. Complementary tests, so no choice point.
@@ -735,40 +688,99 @@ splitClauses =
   , Rule (GlobalName "ihs-for") [PVar "t", PVar "c"]
       [SplitIsCases (Ref "t")]
       [Do (Op.Return (Op.ListOf []))]
-  , Rule (GlobalName "intro-ihs") [PList [] Nothing, PVar "k"] []
-      [Do (Op.Return (Ref "k"))]
-  , Rule (GlobalName "intro-ihs")
-      [PList [PVar "n"] (Just (PVar "ns")), PVar "k"] []
-      [ Bind (Op.PVar "h") Nothing (Op.FreshName (Ref "n"))
-      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "h")))
-      , Bind (Op.PVar "r") Nothing (Op.Call "intro-ihs" [Ref "ns", Ref "k2"])
-      , Do (Op.Return (Ref "r"))
-      ]
-    -- **The ambient entries the split generalised, bound under the names they
-    -- already had** (MS9 phase 191) — @intro-pattern@ without the pattern, and
-    -- the shadowing is the point: the copy carries the refined type and the
-    -- name reaches it, which is the opposite of @intro-ihs@'s freshening. A
-    -- copy an equation /solved/ has no binder and is bound to nothing: the
-    -- refinement is already in the goal, and naming an outer position is what a
-    -- dot pattern would ask for.
-  , Rule (GlobalName "intro-refined")
+  , Rule (GlobalName "intro-arm-binders")
       [PList [] Nothing, PList [] Nothing, PVar "k"] []
       [Do (Op.Return (Ref "k"))]
-  , Rule (GlobalName "intro-refined")
-      [ PList [PVar "n"] (Just (PVar "ns"))
-      , PList [PNone] (Just (PVar "fs")), PVar "k"
-      ] []
-      [ Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "n")))
+    -- An argument the subgoal still binds, named by the arm's pattern — a
+    -- wildcard asks for no name, so one is minted.
+  , Rule (GlobalName "intro-arm-binders")
+      [ PList [PVar "p"] (Just (PVar "ps"))
+      , PList [PPair (PVar "b") PNone] (Just (PVar "bs")), PVar "k"
+      ]
+      [BinderIsArgument (Ref "b"), PatternIsWildcard (Ref "p")]
+      [ Bind (Op.PVar "w") Nothing (Op.FreshName (Lit (VText "u")))
+      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "w")))
       , Bind (Op.PVar "r") Nothing
-          (Op.Call "intro-refined" [Ref "ns", Ref "fs", Ref "k2"])
+          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "k2"])
       , Do (Op.Return (Ref "r"))
       ]
-  , Rule (GlobalName "intro-refined")
-      [ PList [PVar "n"] (Just (PVar "ns"))
-      , PList [PSome (PVar "v")] (Just (PVar "fs")), PVar "k"
-      ] []
+  , Rule (GlobalName "intro-arm-binders")
+      [ PList [PVar "p"] (Just (PVar "ps"))
+      , PList [PPair (PVar "b") PNone] (Just (PVar "bs")), PVar "k"
+      ]
+      [BinderIsArgument (Ref "b"), PatternIsName (Ref "p")]
+      [ Bind (Op.PVar "sub") Nothing (Op.PatternArguments (Ref "p"))
+      , call "no-nesting" [Ref "sub"]
+      , Bind (Op.PVar "w") Nothing (Op.PatternHead (Ref "p"))
+      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "w")))
+      , Bind (Op.PVar "r") Nothing
+          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "k2"])
+      , Do (Op.Return (Ref "r"))
+      ]
+    -- A FORCED argument, which has no binder: the name becomes a definition
+    -- equal to the term the equation determined, and the hole stays where it
+    -- was. His ruling of 2026-10-19.
+  , Rule (GlobalName "intro-arm-binders")
+      [ PList [PVar "p"] (Just (PVar "ps"))
+      , PList [PPair (PVar "b") (PSome (PVar "v"))] (Just (PVar "bs")), PVar "k"
+      ]
+      [BinderIsArgument (Ref "b"), PatternIsWildcard (Ref "p")]
       [ Bind (Op.PVar "r") Nothing
-          (Op.Call "intro-refined" [Ref "ns", Ref "fs", Ref "k"])
+          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "k"])
+      , Do (Op.Return (Ref "r"))
+      ]
+  , Rule (GlobalName "intro-arm-binders")
+      [ PList [PVar "p"] (Just (PVar "ps"))
+      , PList [PPair (PVar "b") (PSome (PVar "v"))] (Just (PVar "bs")), PVar "k"
+      ]
+      [BinderIsArgument (Ref "b"), PatternIsName (Ref "p")]
+      [ Bind (Op.PVar "sub") Nothing (Op.PatternArguments (Ref "p"))
+      , call "no-nesting" [Ref "sub"]
+      , Bind (Op.PVar "w") Nothing (Op.PatternHead (Ref "p"))
+      , Do (Op.Define (Ref "w") (Ref "v"))
+      , Bind (Op.PVar "r") Nothing
+          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "k"])
+      , Do (Op.Return (Ref "r"))
+      ]
+    -- **An induction hypothesis, under a FRESHENED name**: the argument it is
+    -- about is already in the development, and shadowing it would resolve the
+    -- arm's body to the hypothesis with nothing failing. It consumes no
+    -- pattern — an outer position is not in an arm's pattern.
+  , Rule (GlobalName "intro-arm-binders")
+      [ PVar "ps"
+      , PList [PPair (PVar "b") PNone] (Just (PVar "bs")), PVar "k"
+      ]
+      [BinderIsHypothesis (Ref "b")]
+      [ Bind (Op.PVar "n") Nothing (Op.BinderName (Ref "b"))
+      , Bind (Op.PVar "h") Nothing (Op.FreshName (Ref "n"))
+      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "h")))
+      , Bind (Op.PVar "r") Nothing
+          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "k2"])
+      , Do (Op.Return (Ref "r"))
+      ]
+    -- **A copy of a generalised ambient entry, under the ambient name ITSELF**
+    -- (MS9 phase 191), and the shadowing is the point — the exact opposite of
+    -- the clause above. A copy an equation /solved/ has no binder and is bound
+    -- to nothing: the refinement is already in the goal, and naming an outer
+    -- position is what a dot pattern would ask for.
+  , Rule (GlobalName "intro-arm-binders")
+      [ PVar "ps"
+      , PList [PPair (PVar "b") PNone] (Just (PVar "bs")), PVar "k"
+      ]
+      [BinderIsCopy (Ref "b")]
+      [ Bind (Op.PVar "n") Nothing (Op.BinderName (Ref "b"))
+      , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "n")))
+      , Bind (Op.PVar "r") Nothing
+          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "k2"])
+      , Do (Op.Return (Ref "r"))
+      ]
+  , Rule (GlobalName "intro-arm-binders")
+      [ PVar "ps"
+      , PList [PPair (PVar "b") (PSome (PVar "v"))] (Just (PVar "bs")), PVar "k"
+      ]
+      [BinderIsCopy (Ref "b")]
+      [ Bind (Op.PVar "r") Nothing
+          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "k"])
       , Do (Op.Return (Ref "r"))
       ]
   , Rule (GlobalName "same-length") [PList [] Nothing, PList [] Nothing] [] []
@@ -809,8 +821,7 @@ splitClauses =
   , Rule (GlobalName "arm-needs-body") [PSome (PVar "b")] []
       [call "elaborate" [Ref "b"]]
   , Rule (GlobalName "elaborate-arm")
-      [ PVar "t", PVar "c", PVar "sub", PVar "forced"
-      , PPair (PVar "gens") (PVar "k"), PVar "refined"
+      [ PVar "t", PVar "c", PVar "sub", PVar "bs"
       , PPair (PVar "p") (PVar "ob")
       ] []
       [ Bind (Op.PVar "as") Nothing (Op.PatternArguments (Ref "p"))
@@ -821,15 +832,11 @@ splitClauses =
       , Do Into
       , Bind (Op.PVar "k0") Nothing Here
       , Do Back
+        -- **One walk over the report**, whose order is the order the method
+        -- binds them in: no rule here knows what that order is.
       , Bind (Op.PVar "k1") Nothing
-          (Op.Call "intro-pattern" [Ref "as", Ref "forced", Ref "k0"])
-      , Bind (Op.PVar "ihs") Nothing (Op.Call "ihs-for" [Ref "t", Ref "c"])
-      , Bind (Op.PVar "k2") Nothing (Op.Call "intro-ihs" [Ref "ihs", Ref "k1"])
-        -- **The copies last**, because that is where the method binds them and
-        -- because a solved copy's @define@ may mention the pattern's binders.
-      , Bind (Op.PVar "k3") Nothing
-          (Op.Call "intro-refined" [Ref "gens", Ref "refined", Ref "k2"])
-      , Do (Goto (Ref "k3"))
+          (Op.Call "intro-arm-binders" [Ref "as", Ref "bs", Ref "k0"])
+      , Do (Goto (Ref "k1"))
       , call "arm-needs-body" [Ref "ob"]
       , Do (Goto (Ref "sub"))
       , call "solve" []
@@ -838,12 +845,8 @@ splitClauses =
     -- by a rule with a clause for @some@ and none for @none@, so the refusal
     -- names the missing arm and not the search that went looking for it.
   , Rule (GlobalName "case-needs-an-arm")
-      [ PVar "t", PVar "c", PVar "sub", PVar "forced", PVar "m", PVar "refined"
-      , PSome (PVar "a")
-      ] []
-      [ call "elaborate-arm"
-          [Ref "t", Ref "c", Ref "sub", Ref "forced", Ref "m", Ref "refined", Ref "a"]
-      ]
+      [ PVar "t", PVar "c", PVar "sub", PVar "bs", PSome (PVar "a") ] []
+      [ call "elaborate-arm" [Ref "t", Ref "c", Ref "sub", Ref "bs", Ref "a"] ]
     -- **And a case that vanished takes no body** — between them the two clauses
     -- are every legal shape: no arm at all, or an arm that stops at the arrow.
   , Rule (GlobalName "vanished-case-takes-no-body") [PNone] [] []
@@ -858,23 +861,21 @@ splitClauses =
     -- user write arms. The arm-less clause's test is complementary to the other
     -- two, so this search records no choice point — @pick@'s shape.
   , Rule (GlobalName "one-case")
-      [PVar "t", PVar "c", PVar "sub", PVar "forced", PVar "m", PVar "refined"]
+      [PVar "t", PVar "c", PVar "sub", PVar "bs"]
       [SplitHasNoArms (Ref "t")]
       [call "case-must-vanish" [Ref "sub"]]
   , Rule (GlobalName "one-case")
-      [PVar "t", PVar "c", PNone, PVar "forced", PVar "m", PVar "refined"]
+      [PVar "t", PVar "c", PNone, PVar "bs"]
       [SplitHasArms (Ref "t")]
       [ Bind (Op.PVar "oa") Nothing (Op.Call "arm-for" [Ref "t", Ref "c"])
       , call "vanished-case-takes-no-body" [Ref "oa"]
       ]
   , Rule (GlobalName "one-case")
-      [ PVar "t", PVar "c", PSome (PVar "sub"), PVar "forced", PVar "m"
-      , PVar "refined"
-      ]
+      [PVar "t", PVar "c", PSome (PVar "sub"), PVar "bs"]
       [SplitHasArms (Ref "t")]
       [ Bind (Op.PVar "oa") Nothing (Op.Call "arm-for" [Ref "t", Ref "c"])
       , call "case-needs-an-arm"
-          [Ref "t", Ref "c", Ref "sub", Ref "forced", Ref "m", Ref "refined", Ref "oa"]
+          [Ref "t", Ref "c", Ref "sub", Ref "bs", Ref "oa"]
       ]
     -- **Every arm the user wrote was asked for** (MS9 phase 190, his ruling of
     -- 2026-10-20). Elaboration asks the datatype's constructors for arms; these
@@ -928,11 +929,9 @@ splitClauses =
         -- its own methods as misshapen. **And what the motive added to every
         -- method** (MS9 phase 191), threaded whole.
       , Bind (Op.PVar "ihs") Nothing (Op.Call "ihs-for" [Ref "t", Ref "c"])
-      , Bind (PPair (Op.PVar "sub")
-                    (PPair (Op.PVar "forced") (Op.PVar "refined"))) Nothing
+      , Bind (PPair (Op.PVar "sub") (Op.PVar "bs")) Nothing
           (Op.Specialise (Ref "c") (Ref "ihs") (Ref "m"))
-      , call "one-case"
-          [Ref "t", Ref "c", Ref "sub", Ref "forced", Ref "m", Ref "refined"]
+      , call "one-case" [Ref "t", Ref "c", Ref "sub", Ref "bs"]
       , Do (Goto (Ref "mh"))
       , call "solve" []
       , call "split-cases" [Ref "t", Ref "cs", Ref "ms", Ref "m"]

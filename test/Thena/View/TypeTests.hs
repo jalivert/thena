@@ -77,6 +77,7 @@ redrawType v = case v of
   ADevelopment   -> "Development"
   ALevel         -> "Level"
   APattern       -> "Pattern"
+  ABinder        -> "Binder"
   AList a        -> "List " ++ redrawType a
   AnOption a     -> "Option " ++ redrawType a
   APair a b      -> "(" ++ redrawType a ++ ", " ++ redrawType b ++ ")"

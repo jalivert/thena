@@ -41,6 +41,7 @@ import Thena.Instral.Ops
   , opKeyword
   , operandsOf
   )
+import Thena.Tactics.Specialise (binderWord)
 import Thena.Instral.Pattern (Pattern (..))
 import Thena.Instral.Type (renderTy)
 import Thena.Language.Grammar (Grammar)
@@ -245,6 +246,11 @@ displayValue gs budget env bs n at v = case v of
   -- view is owed when something asks — `~6z6nx`'s stage b is when a pattern
   -- stops being a value a rule carries at all.
   VPattern pt -> ValOpaque (surfacePattern pt)
+  -- **And a binder of a specialised method rides out the same way** (MS9 phase
+  -- 192), for the same reason: nothing on a frontend displays the report, and a
+  -- case of its own would break every total match over 'ValueView' for no
+  -- present gain.
+  VBinder b -> ValOpaque (binderWord b)
   VList vs -> ValList (map go vs)
   VOption Nothing -> ValNone
   VOption (Just v') -> ValSome (go v')

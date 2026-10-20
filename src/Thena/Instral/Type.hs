@@ -84,6 +84,23 @@ data Ty
     -- this by letting a rule head match the shape directly; this is what MS9
     -- needs in the meantime, and his instruction is that accessors outlive the
     -- pattern syntax that replaces them anyway.
+  | TBinder
+    -- ^ **one binder of a specialised method** (MS9 phase 192) —
+    -- @Thena.Tactics.Specialise.Binder@.
+    --
+    -- **It is what a split reports instead of a convention.** A method's
+    -- binders are the constructor's arguments, then its induction hypotheses,
+    -- then the copies the motive generalised, and until phase 192 three rules
+    -- each rebuilt one of those groups by position, in an order each of them
+    -- had to know and none of them stated. A value of this type says which
+    -- group a binder is in and under what name, so one walk binds all three —
+    -- his ruling of 2026-10-20, fourth session.
+    --
+    -- **Its own type for 'TPattern'\'s reason.** The three roles are three
+    -- things a rule does differently, so a 'TName' tagged by text would make
+    -- every clause a string comparison and the group a spelling. The idiom is
+    -- the one 'TPattern' set: three head tests over a three-case type, which
+    -- the category is free to grow past.
   | TList Ty             -- ^ @[a, b, c]@
   | TPair Ty Ty          -- ^ @(a, b)@
   | TOption Ty           -- ^ @some x@ and @none@
@@ -197,6 +214,7 @@ renderTy = go False
       TCore        -> "Core"
       TDevelopment -> "Development"
       TPattern     -> "Pattern"
+      TBinder      -> "Binder"
       TFun as r    -> wrap p (intercalate " -> " (map (go True) as ++ [go True r]))
       TList a      -> wrap p ("List " ++ go True a)
       TOption a    -> wrap p ("Option " ++ go True a)

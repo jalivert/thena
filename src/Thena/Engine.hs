@@ -145,7 +145,7 @@ import Thena.Global.Env
 import qualified Thena.Instral.Ops as Op
 import Thena.Tactics.Eliminate (Elimination (..), eliminate, spineOf)
 import Thena.Tactics.Recurse (resolveRecursion)
-import Thena.Tactics.Specialise (Specialisation (..), specialise)
+import Thena.Tactics.Specialise (Binder (..), Specialisation (..), specialise)
 import Thena.Rules
   (RuleBase, RuleError (..), RuleIter, arities, clauses, dispatch, hasNext, next, resolveBlock)
 import Thena.Syntax.Lexer (isIdentifier)
@@ -1255,11 +1255,13 @@ perform instr rest m = case operation instr of
               <*> operandValue (env (exec m)) gk of
     Left e -> failure e m
     -- **The hypotheses this method carries, as the list the arm will bind**
-    -- (MS9 phase 188). Only the count is used here, and the list is what the
-    -- operand is because it is the one the caller already has — @ihs-for@
-    -- answers it, and @intro-ihs@ consumes the same value. Reading the count
-    -- off the declaration instead assumed the inductive scheme, and @caseD@'s
-    -- methods carry none.
+    -- (MS9 phase 188). Reading the count off the declaration instead assumed the
+    -- inductive scheme, and @caseD@'s methods carry none, so the caller — which
+    -- knows which word was written — answers it with @ihs-for@.
+    --
+    -- **The NAMES are used and not only the count** (MS9 phase 192): they go
+    -- into the binder report, because a method type spells every hypothesis
+    -- binder @ih@ and the name an arm freshens is nowhere in the type.
     --
     -- **And what the motive added to every method, as the pair the elimination
     -- answered with** (MS9 phase 191): the ambient entries it generalised, and
@@ -1270,7 +1272,8 @@ perform instr rest m = case operation instr of
       case focus (cursor (development m)) of
       OnComponent (Component.Claim x i s) ->
         case specialise (globals m) contextAt (names m) (GlobalName w)
-                        (length hs) (length gns) eqs s of
+                        [ Ident n | VText n <- hs ]
+                        [ Ident n | VText n <- gns ] eqs s of
           (Left e,  n1) -> failure (CannotSpecialise e) m { names = n1 }
           (Right sp, n1) ->
             let (holes, named) = claimSubgoals (cursor (development m)) (specialisedGoal sp)
@@ -1302,11 +1305,8 @@ perform instr rest m = case operation instr of
                                  (VOption (case named of
                                              (v, _) : _ -> Just (VTerm (Free v))
                                              []         -> Nothing))
-                                 (VPair
-                                    (VList [ VOption (fmap VTerm f)
-                                           | f <- specialisedForced sp ])
-                                    (VList [ VOption (fmap VTerm f)
-                                           | f <- specialisedRefined sp ])))
+                                 (VList [ VPair (VBinder b) (VOption (fmap VTerm f))
+                                        | (b, f) <- specialisedBinders sp ]))
                               m { development = Development cur, names = n1 }
       OnComponent _ -> failure NotAHole m
       _             -> failure (CannotMove NotOnTheSpine) m
@@ -1712,6 +1712,15 @@ perform instr rest m = case operation instr of
     -- with none, exactly as a bare name is, so a walk over the arguments of
     -- either stops immediately.
     Right Concrete.PatternWildcard -> produce (VList []) m
+
+  -- **The binder report's accessor** (MS9 phase 192). A role is read by a head
+  -- test, so the only thing a body asks of a binder is the name to bind it
+  -- under — and that composes with @prim-lambda@, @define@ and @fresh-name@,
+  -- which is the whole of what the walk over the report does.
+  Op.BinderName x -> case operandValue (env (exec m)) x of
+    Left e -> failure e m
+    Right (VBinder (Binder _ (Ident w))) -> produce (VText w) m
+    Right _ -> failure ExpectedText m
 
   -- **A plain binder only** — no annotation and no braces. That is the whole of
   -- what the λ case cannot elaborate, and saying it here means the clause finds

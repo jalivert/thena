@@ -363,14 +363,11 @@ tests =
             case snd (command withRules ":produces Core") of
               Fitting v _ rows -> do
                 v @?= "gives"
-                -- @intro-pattern@, @intro-ihs@ and @intro-refined@ are the
-                -- splitting tree's binder walks (MS9) — the constructor's own
-                -- arguments, the induction hypotheses, and the generalised
-                -- copies that survived — and each answers the hole it left.
+                -- @intro-arm-binders@ is the splitting tree's one walk over
+                -- the report the split made (MS9 phase 192), and it answers
+                -- the hole it left; @intro-binders@ is the λ group's.
                 [ n | (GlobalName n, _, _, _) <- rows ]
-                  @?= [ "intro-pattern", "intro-ihs", "intro-refined"
-                      , "intro-binders", "fresh-universe"
-                      ]
+                  @?= [ "intro-arm-binders", "intro-binders", "fresh-universe" ]
               other -> assertFailure ("expected a listing, got " ++ show other)
           -- **It lists rules and functions both** (his ruling), and the two are
           -- told apart in the row rather than in two commands.

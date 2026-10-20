@@ -733,18 +733,16 @@ claim ‹ty›
 assume ‹ty›
 quantify ‹ty›
 no-nesting []
-intro-pattern [] [] ‹k›
-intro-pattern [p, ...ps] [none, ...fs] ‹k›
-intro-pattern [p, ...ps] [none, ...fs] ‹k›
-intro-pattern [p, ...ps] [(some v), ...fs] ‹k›
-intro-pattern [p, ...ps] [(some v), ...fs] ‹k›
 ihs-for ‹t› ‹c›
 ihs-for ‹t› ‹c›
-intro-ihs [] ‹k›
-intro-ihs [n, ...ns] ‹k›
-intro-refined [] [] ‹k›
-intro-refined [n, ...ns] [none, ...fs] ‹k›
-intro-refined [n, ...ns] [(some v), ...fs] ‹k›
+intro-arm-binders [] [] ‹k›
+intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹k›
+intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹k›
+intro-arm-binders [p, ...ps] [(b, (some v)), ...bs] ‹k›
+intro-arm-binders [p, ...ps] [(b, (some v)), ...bs] ‹k›
+intro-arm-binders ‹ps› [(b, none), ...bs] ‹k›
+intro-arm-binders ‹ps› [(b, none), ...bs] ‹k›
+intro-arm-binders ‹ps› [(b, (some v)), ...bs] ‹k›
 same-length [] []
 same-length [p, ...ps] [n, ...ns]
 arm-for ‹t› ‹c›
@@ -752,14 +750,14 @@ arm-for ‹t› ‹c›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 arm-needs-body (some b)
-elaborate-arm ‹t› ‹c› ‹sub› ‹forced› (gens, k) ‹refined› (p, ob)
-case-needs-an-arm ‹t› ‹c› ‹sub› ‹forced› ‹m› ‹refined› (some a)
+elaborate-arm ‹t› ‹c› ‹sub› ‹bs› (p, ob)
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› (some a)
 vanished-case-takes-no-body none
 vanished-case-takes-no-body (some (p, none))
 case-must-vanish none
-one-case ‹t› ‹c› ‹sub› ‹forced› ‹m› ‹refined›
-one-case ‹t› ‹c› none ‹forced› ‹m› ‹refined›
-one-case ‹t› ‹c› (some sub) ‹forced› ‹m› ‹refined›
+one-case ‹t› ‹c› ‹sub› ‹bs›
+one-case ‹t› ‹c› none ‹bs›
+one-case ‹t› ‹c› (some sub) ‹bs›
 arm-must-be-for-this-datatype ‹a› ‹b›
 arms-are-for-this-datatype ‹t› ‹d›
 arms-are-for-this-datatype ‹t› ‹d›

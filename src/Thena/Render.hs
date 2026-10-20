@@ -176,6 +176,7 @@ import Thena.Instral.Ops
   , Value (..)
   , operandsOf
   )
+import Thena.Tactics.Specialise (binderWord)
 import Thena.Rules (RuleBase (..), RuleError (..))
 import qualified Thena.Instral.Ops as Ops
 import Thena.Syntax.Lexer (BlockKind (..), LexError (..), Pos (..), Token (..))
@@ -1165,6 +1166,10 @@ renderValue ren ctx v = case v of
   -- 'Thena.Syntax.Print.surfacePattern' is for — and the printer is the parser's
   -- inverse here, so what a user sees is what they typed.
   VPattern pt        -> surfacePattern pt
+  -- **A binder of a specialised method prints as what it is** (MS9 phase 192):
+  -- there is no written form for one, so the group and the name it is bound
+  -- under are what there is to say.
+  VBinder b          -> "‹" ++ binderWord b ++ "›"
   -- **An unresolved core term prints as its shape, not its contents** (MS5
   -- phase 61b). Printing a 'Thena.Syntax.Concrete.Raw' back would need a
   -- printer for the written syntax, and there has never been one: every other

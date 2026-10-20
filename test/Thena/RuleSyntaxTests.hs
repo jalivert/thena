@@ -319,6 +319,8 @@ everyOp =
   , ("prim-case x", Op.CaseAnalyse (Ref "x"))
     -- Tying a recursive call to its induction hypothesis (MS9 phase 186).
   , ("tie-recursion t", Op.TieRecursion (Ref "t"))
+    -- The binder report's accessor (MS9 phase 192).
+  , ("binder-name b", Op.BinderName (Ref "b"))
   ]
 
 vocabulary :: TestTree

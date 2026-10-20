@@ -64,6 +64,9 @@
 -- "Thena.Core.Typing" and "Thena.Global.Env", below "Thena.Engine".
 module Thena.Tactics.Specialise
   ( Specialisation (..)
+  , Binder (..)
+  , Role (..)
+  , binderWord
   , specialise
   ) where
 
@@ -95,7 +98,8 @@ import Thena.Global.Env
 import Thena.Global.NoConfusion (noConfusionNames)
 import Thena.Tactics.Eliminate (spineOf)
 
--- | What specialisation worked out: the subgoal, and the refinement.
+-- | What specialisation worked out: the subgoal, and __one ordered report of
+-- what each binder of the method is__.
 --
 -- 'specialisedGoal' is __zero or one__ hole, and a list rather than a 'Maybe'
 -- so that it is exactly 'Thena.Tactics.Eliminate.Elimination'\'s shape —
@@ -105,33 +109,42 @@ import Thena.Tactics.Eliminate (spineOf)
 -- 'specialisedTerm' mentions that hole as @'Free' v@, so it is well typed only
 -- in a context extended by it. 'specialise' has already checked it there.
 --
--- 'specialisedForced' is __one entry per constructor argument__, in declaration
--- order: 'Nothing' where the argument survived as a binder of the subgoal, and
--- @'Just' t@ where an equation determined it to be @t@ and the binder went.
--- __Only the solution transition removes a binder__, so only it writes an entry
--- here (MS9 phase 185).
+-- 'specialisedBinders' is __one entry per binder of the method's telescope, in
+-- the order the method binds them__ — the constructor's arguments, then the
+-- hypotheses this method carries, then the copies the motive generalised. Each
+-- says what the binder /is/ and whether an equation determined it:
+-- @'Nothing'@ for one that survived as a binder of the subgoal, and @'Just' t@
+-- for one a solution removed, @t@ being what it was solved to. __Only the
+-- solution transition removes a binder__, so only it writes a @'Just'@ here.
 --
--- 'specialisedRefined' is __the same report for the generalised copies__, in the
--- order the motive quantified them (MS9 phase 191). @'Just' t@ is a copy an
--- equation solved, which is how an index position bound outside the split comes
--- to be refined; 'Nothing' is one that survived as a binder, which is how a
--- /hypothesis/ about such a position reaches the arm with its type refined.
--- __The caller binds both under the ambient entry's own name__, so the arm's
--- body is written against the refinement — a @define@ for the first and a
--- @prim-lambda@ for the second, which is 'specialisedForced'\'s own treatment
--- and deliberately the same mechanism.
+-- __IT REPLACED THREE WALKS THAT AGREED BY CONVENTION — his ruling of
+-- 2026-10-20, fourth session.__ Until MS9 phase 192 this was two positional
+-- slices, @specialisedForced@ over the arguments and @specialisedRefined@ over
+-- the copies, and the caller rebuilt the third group — the hypotheses — from
+-- the declaration. Three rules then introduced one group each, in an order each
+-- of them had to know and none of them stated. That convention is what made the
+-- binder order load-bearing when the copies arrived (@~bq3rn@, @~2d9xj@), and
+-- the case for keeping it was only that fewer goldens move, which is a cost and
+-- not a side. __So there is one list and one place that consumes it.__
+--
+-- __What the caller does with an entry is decided by its 'Role', and the three
+-- are genuinely three.__ An argument is named by the arm's /pattern/, so the
+-- walk consumes one there and nowhere else; a hypothesis is bound under a
+-- __freshened__ name, because the argument it is about is already in the
+-- development and shadowing it would silently build the proof out of the wrong
+-- variable; a copy is bound under the ambient name it already had, because
+-- shadowing the entry is the whole of the refinement.
 --
 -- __And unlike a forced constructor argument, a solved copy MAY mention the
 -- method's own binders.__ The solving side of an equation about a copy is the
--- /constructor's/ index, so @a'@ comes out as @c1@ rather than as a term of the
--- ambient context. Those binders are @Δc@ and the hypotheses, which stand
--- before the copies, so the @define@ is well scoped exactly where the caller
--- puts it — after the pattern's binders and after the hypotheses, never before.
+-- /constructor's/ index, so @a\'@ comes out as @c1@ rather than as a term of the
+-- ambient context. That is why a solved copy binds nothing where a solved
+-- argument is a @define@ — @~tzwjk@ has the measured failure.
 --
 -- __This is the only thing that knows.__ The subgoal is a type with fewer
--- binders than the constructor has arguments and nothing in it says which ones
--- are missing, so a clause introducing an arm's pattern variables cannot work it
--- out — which is why phase 184's clause failed on @vtail@.
+-- binders than the method's telescope has and nothing in it says which ones are
+-- missing, so a clause introducing an arm's binders cannot work it out — which
+-- is why phase 184's clause failed on @vtail@.
 --
 -- __A forced term is written in the ambient context__ and mentions no binder of
 -- the method, forced or surviving. The solving side of an equation is always the
@@ -143,41 +156,88 @@ import Thena.Tactics.Eliminate (spineOf)
 data Specialisation = Specialisation
   { specialisedGoal    :: [(Var, Ident, Core)]
   , specialisedTerm    :: Core
-  , specialisedForced  :: [Maybe Core]
-  , specialisedRefined :: [Maybe Core]
+  , specialisedBinders :: [(Binder, Maybe Core)]
   }
   deriving (Eq, Show)
+
+-- | One binder of a specialised method: what it is, and the name it is bound
+-- under (MS9 phase 192).
+--
+-- __The name is here because the three roles take it from three different
+-- places__ and only the caller of 'specialise' knows two of them: an argument's
+-- is the method type's own binder, a hypothesis's is the recursive argument it
+-- is about, and a copy's is the ambient entry it copies. The first is read off
+-- the telescope; the other two are told to 'specialise', which is also how it
+-- learns how many there are.
+data Binder = Binder Role Ident
+  deriving (Eq, Show)
+
+-- | Which of a method's three groups a binder belongs to (MS9 phase 192).
+--
+-- __Three and not two__: the hypotheses were never in the specialiser's report
+-- at all, and that is precisely why a caller had to count. A method of @caseD@
+-- carries none, so the group can be empty — it is not a case that stops
+-- existing.
+data Role
+  = AnArgument
+    -- ^ an argument of the constructor, named by the arm's pattern
+  | AnHypothesis
+    -- ^ an induction hypothesis this method carries, one per recursive
+    -- argument and __none under @case … of@__
+  | ACopy
+    -- ^ a fresh copy of an ambient entry the motive generalised (MS9 phase
+    -- 191), standing after the target
+  deriving (Eq, Show)
+
+-- | What a binder is, in words — @argument n@, @hypothesis m@, @copy s0@ (MS9
+-- phase 192).
+--
+-- __Here and not in a printer__, because there is nothing to print /back/: a
+-- role is this module's own vocabulary and has no written form, so a printer
+-- that spelled it itself would be a second authority on what the three groups
+-- are called. "Thena.Render" and "Thena.View.Instral" both read this one.
+binderWord :: Binder -> String
+binderWord (Binder r (Ident w)) = word r ++ " " ++ w
+  where
+    word AnArgument   = "argument"
+    word AnHypothesis = "hypothesis"
+    word ACopy        = "copy"
 
 -- | Specialise the method of @c@ whose last @k@ binders before the body are the
 -- equations the elimination stated.
 --
--- __All three of those are facts the caller has and the type does not.__ A
--- method type is Π binders all the way down, and nothing in it marks where the
+-- __All of those are facts the caller has and the type does not.__ A method
+-- type is Π binders all the way down, and nothing in it marks where the
 -- constructor's own telescope ends and the equations begin — a constructor may
 -- itself take a proof of an equation, and the body after the equations may be a
 -- Π of its own, so counting binders settles nothing. So @c@ gives the
--- constructor's own arguments, @h@ is how many induction hypotheses this
--- method carries, and @k@ is how many indices were tied.
+-- constructor's own arguments, @hyps@ names the induction hypotheses this
+-- method carries, @gens@ names the copies the motive generalised, and @k@ is
+-- how many indices were tied.
 --
--- __@h@ IS AN ARGUMENT AND NOT READ OFF THE DECLARATION — MS9 phase 188.__ It
--- used to be counted here, as one per recursive constructor argument, which is
--- 'Thena.Global.Env.eliminatorType'\'s method shape — and that silently assumed
--- the caller was eliminating. @caseD@'s methods carry none, so the assumption
--- made @case … of@ refuse its own methods as misshapen. The caller knows which
--- scheme it asked for; this does not, and no longer guesses.
+-- __THE HYPOTHESES ARE NAMED AND NOT COUNTED — MS9 phase 192__, and the
+-- generalised copies with them. Their count used to be all that came in, and
+-- that is what forced the caller to rebuild each group by position:
+-- 'specialisedBinders' carries the names, and a name a method type does not have
+-- has to be told. A hypothesis's binder is @ih@ in
+-- 'Thena.Global.Env.eliminatorType' for every recursive argument of every
+-- constructor, so the recursive argument's own name — which is the name the arm
+-- freshens — exists nowhere in the type at all.
 --
--- __@gc@ is how many copies the motive generalised__ (MS9 phase 191), and the
--- same argument applies to it: nothing in the type marks where the copies end
--- and the equations begin, and the caller is the one that knows. They join
--- @Δc@ and the hypotheses as __pattern variables__, which is the only change
--- the four transitions need.
+-- __And the count still may not be read off the declaration — MS9 phase 188.__
+-- It used to be, as one per recursive constructor argument, and that silently
+-- assumed the caller was eliminating: @caseD@'s methods carry none, so the
+-- assumption made @case … of@ refuse its own methods as misshapen. The caller
+-- knows which scheme it asked for; this does not, and no longer guesses. The
+-- copies join @Δc@ and the hypotheses as __pattern variables__, which is the
+-- only change the four transitions need.
 specialise
-  :: GlobalEnv -> Context -> Int -> GlobalName -> Int -> Int -> Int -> Core
+  :: GlobalEnv -> Context -> Int -> GlobalName -> [Ident] -> [Ident] -> Int -> Core
   -> (Either SpecialiseError Specialisation, Int)
-specialise env ctx n0 cn h gc k mty = case lookupConstructor cn env of
+specialise env ctx n0 cn hyps gens k mty = case lookupConstructor cn env of
   Nothing -> (Left (NotThatConstructor cn), n0)
   Just (d, c)
-    | k < 0 || gc < 0 -> (Left (MethodNotShaped (arity d c) k mty), n0)
+    | k < 0 -> (Left (MethodNotShaped (arity d c) k mty), n0)
     | otherwise -> case peel (arity d c + gc + k) mty n0 of
         Nothing -> (Left (MethodNotShaped (arity d c) k mty), n0)
         Just (tel, body, n1) ->
@@ -189,44 +249,54 @@ specialise env ctx n0 cn h gc k mty = case lookupConstructor cn env of
                    in case solve hv delta es body n2 of
                         (Left e, n3) -> (Left e, n3)
                         (Right (want, tm, sol), n3) ->
-                          verify hv want tm (forced c delta sol)
-                                 (refined d c delta sol) n3
+                          verify hv want tm (report c delta sol) n3
   where
+    h  = length hyps
+    gc = length gens
+
     -- One binder per constructor argument, plus the hypotheses the caller says
     -- this method carries. 'Thena.Global.Env.eliminatorType'\'s @methodType@
     -- read backwards for 'Thena.Global.Env.Inductive', and @caseD@'s for
     -- 'Thena.Global.Env.CaseAnalysis', where @h@ is zero.
     arity _ c = length (constructorArguments c) + h
 
-    -- One entry per constructor argument, which is the __first__ stretch of the
-    -- telescope: 'Thena.Global.Env.eliminatorType' states the arguments and then
-    -- the induction hypotheses, so the arguments are a prefix of @delta@ and no
-    -- count has to be carried alongside. A hypothesis is never solved — an
-    -- equation is over the datatype's indices and a hypothesis is a proof of the
-    -- motive — and if one ever were, it would simply not be reported here.
-    forced c telescope sol =
-      [ lookup (entryVar e) sol
-      | e <- take (length (constructorArguments c)) telescope
+    -- __THE REPORT: one entry per binder, in the order the method binds them.__
+    -- 'Thena.Global.Env.eliminatorType' states the constructor's arguments and
+    -- then its hypotheses, and 'Thena.Tactics.Eliminate' quantifies the copies
+    -- after the target, so the three groups are the three stretches of @delta@
+    -- in that order and @zip3@ is the whole of finding them. Nothing downstream
+    -- counts anything: an entry says which group it is in.
+    --
+    -- __An argument's name is the method type's own binder__, kept by @peel@,
+    -- which is what makes the subgoal read like the method it came from. A
+    -- hypothesis's and a copy's are the caller's, for the reason the header
+    -- above gives.
+    --
+    -- __A hypothesis is never solved__ — an equation is over the datatype's
+    -- indices and a hypothesis is a proof of the motive — so its entry is
+    -- always 'Nothing'. It is looked up anyway rather than asserted, because an
+    -- assertion here would be a claim about the transitions that nothing checks.
+    report c telescope sol =
+      [ (Binder role i, lookup (entryVar e) sol)
+      | (role, i, e) <- zip3 roles idents telescope
       ]
-
-    -- The same report for the generalised copies, which are the __last__ @gc@
-    -- entries of the telescope: 'Thena.Tactics.Eliminate' quantifies them after
-    -- the target, so the motive puts them after the constructor's arguments and
-    -- after the hypotheses. Nothing has to be carried to find them — @arity@ is
-    -- where they begin.
-    refined d c telescope sol =
-      [ lookup (entryVar e) sol | e <- drop (arity d c) telescope ]
+      where
+        nargs  = length (constructorArguments c)
+        roles  = replicate nargs AnArgument
+                   ++ replicate h AnHypothesis
+                   ++ replicate gc ACopy
+        idents = map entryIdent (take nargs telescope) ++ hyps ++ gens
 
     -- The hole and the term that uses it, checked in the context that will hold
     -- both. Checking here is the whole of §7.2's bargain for a coarse op: a
     -- wrong proof term is caught, so only the caller's /choice/ of what to
     -- specialise is unguarded.
-    verify hv want tm fs gs n =
+    verify hv want tm bs n =
       let hole = [ (hv, Ident (nameOf cn ++ "Case"), w) | Just w <- [want] ]
           with = ctx ++ [ Hypothesis v i t | (v, i, t) <- hole ]
        in case check env with n tm mty of
             (Left e, _, n1)   -> (Left (SpecialisedIllTyped e), n1)
-            (Right (), _, n1) -> (Right (Specialisation hole tm fs gs), n1)
+            (Right (), _, n1) -> (Right (Specialisation hole tm bs), n1)
 
     nameOf (GlobalName w) = w
 
@@ -266,10 +336,10 @@ specialise env ctx n0 cn h gc k mty = case lookupConstructor cn env of
     -- a conflict closed the method.
     --
     -- __And it answers with what the solution transitions removed__, as
-    -- @(binder, the term it was solved to)@ — 'specialisedForced' read off
-    -- @delta@. Every term in that list is already resolved, because a solution
-    -- applies the sub-problem's own pairs to its term before recording it, so
-    -- nothing in the list mentions a binder the list removes.
+    -- @(binder, the term it was solved to)@, which is what 'specialisedBinders'
+    -- is read off @delta@ with. Every term in it is already resolved, because a
+    -- solution applies the sub-problem's own pairs to its term before recording
+    -- it, so nothing there mentions a binder the list removes.
     --
     -- Equations are tried left to right; one no transition applies to is moved
     -- into the accumulator and stays a binder.

@@ -92,6 +92,7 @@ import Thena.Syntax.Lexer (isIdentifier, lexTokens)
 import Thena.Syntax.Parser (parseTerm)
 import qualified Thena.Instral.Type as Ty
 import Thena.Instral.Type (Signature (..), Ty (..))
+import qualified Thena.Tactics.Specialise as Spec
 import Thena.Instral.Concrete
   ( RawSignature (..)
   , RawFunction (..)
@@ -381,6 +382,11 @@ holds env cur args t = case t of
   SplitHasNoArms o        -> surfaceIs o hasNoArms
   PatternIsName o         -> patternIs o isPatName
   PatternIsWildcard o     -> patternIs o isPatWild
+  -- **The binder report's three** (MS9 phase 192), the same shape one category
+  -- over: which group of a specialised method's telescope a binder is in.
+  BinderIsArgument o      -> binderIs o isArgument
+  BinderIsHypothesis o    -> binderIs o isHypothesis
+  BinderIsCopy o          -> binderIs o isCopy
   -- **The one test that reads TWO operands**, and the one that is not about a
   -- shape at all (MS9 phase 183). A splitting tree pairs an arm with a
   -- constructor, and both names are read rather than written.
@@ -423,6 +429,12 @@ holds env cur args t = case t of
       Right (VPattern pt) -> p pt
       Right _             -> False
 
+    -- And one category further over (MS9 phase 192).
+    binderIs o p = case Op.operandIn args o of
+      Left _             -> True
+      Right (VBinder b)  -> p b
+      Right _            -> False
+
     -- **An unbound operand passes, as everywhere else here**; two names that
     -- are both bound are compared as written, which is what a 'Name' is.
     sameName a b = case (Op.operandIn args a, Op.operandIn args b) of
@@ -439,6 +451,10 @@ holds env cur args t = case t of
 
     isPatName     pt = case pt of PatternName _ _ -> True; _ -> False
     isPatWild     pt = case pt of PatternWildcard -> True; _ -> False
+
+    isArgument   (Spec.Binder r _) = r == Spec.AnArgument
+    isHypothesis (Spec.Binder r _) = r == Spec.AnHypothesis
+    isCopy       (Spec.Binder r _) = r == Spec.ACopy
 
     isName         s = case s of SurfaceName _ -> True; _ -> False
     isLiteral      s = case s of SurfaceLiteral _ -> True; _ -> False
@@ -841,6 +857,7 @@ resolveTyIn owner vs0 t0 = go vs0 t0
       ("Core", [])        -> Right TCore
       ("Development", []) -> Right TDevelopment
       ("Pattern", [])     -> Right TPattern
+      ("Binder", [])      -> Right TBinder
       ("Level", [])       -> Right TLevel
       ("List", [a])       -> Right (TList a)
       ("Option", [a])     -> Right (TOption a)
@@ -1013,7 +1030,7 @@ headOperand o = case o of
 builtInTypes :: [String]
 builtInTypes =
   [ "String", "Name", "Int", "Char", "Bool", "Surface", "Core", "Development"
-  , "Level", "Pattern"
+  , "Level", "Pattern", "Binder"
   , "List", "Option"
   ]
 
@@ -1511,6 +1528,8 @@ unaryOps =
   , ("split-arm-pattern", Op.SplitArmPattern)
   , ("pattern-head", Op.PatternHead)
   , ("pattern-arguments", Op.PatternArguments)
+    -- The binder report's accessor (MS9 phase 192).
+  , ("binder-name", Op.BinderName)
   , ("ascription-type", Op.AscriptionType)
   , ("ascription-term", Op.AscriptionTerm)
   , ("app-function", Op.AppFunction)
@@ -1766,6 +1785,9 @@ withOperands t os = case (t, os) of
   (SplitHasNoArms _, [o])        -> Just (SplitHasNoArms o)
   (PatternIsName _, [o])         -> Just (PatternIsName o)
   (PatternIsWildcard _, [o])     -> Just (PatternIsWildcard o)
+  (BinderIsArgument _, [o])      -> Just (BinderIsArgument o)
+  (BinderIsHypothesis _, [o])    -> Just (BinderIsHypothesis o)
+  (BinderIsCopy _, [o])          -> Just (BinderIsCopy o)
   (SameName _ _, [a, b])         -> Just (SameName a b)
   (DifferentName _ _, [a, b])    -> Just (DifferentName a b)
   (AppArgsAreExplicit _, [o])    -> Just (AppArgsAreExplicit o)
@@ -1809,6 +1831,9 @@ testTypes t = case t of
   SplitHasNoArms o        -> [(o, Ty.TSurface)]
   PatternIsName o         -> [(o, Ty.TPattern)]
   PatternIsWildcard o     -> [(o, Ty.TPattern)]
+  BinderIsArgument o      -> [(o, Ty.TBinder)]
+  BinderIsHypothesis o    -> [(o, Ty.TBinder)]
+  BinderIsCopy o          -> [(o, Ty.TBinder)]
   SameName a b            -> [(a, Ty.TName), (b, Ty.TName)]
   DifferentName a b       -> [(a, Ty.TName), (b, Ty.TName)]
   SurfaceIsName o         -> [(o, Ty.TSurface)]
@@ -1864,6 +1889,9 @@ testWord t = case t of
   SplitHasNoArms _        -> "split-has-no-arms"
   PatternIsName _         -> "pattern-is-name"
   PatternIsWildcard _     -> "pattern-is-wildcard"
+  BinderIsArgument _      -> "binder-is-argument"
+  BinderIsHypothesis _    -> "binder-is-hypothesis"
+  BinderIsCopy _          -> "binder-is-copy"
   SameName _ _            -> "same-name"
   DifferentName _ _       -> "different-name"
   SurfaceIsName _         -> "surface-is-name"
@@ -1925,6 +1953,9 @@ everyTest =
   , SplitHasNoArms (Lit (VText ""))
   , PatternIsName (Lit (VText ""))
   , PatternIsWildcard (Lit (VText ""))
+  , BinderIsArgument (Lit (VText ""))
+  , BinderIsHypothesis (Lit (VText ""))
+  , BinderIsCopy (Lit (VText ""))
   , SameName (Lit (VText "")) (Lit (VText ""))
   , DifferentName (Lit (VText "")) (Lit (VText ""))
   , AppArgsAreExplicit (Lit (VText ""))
