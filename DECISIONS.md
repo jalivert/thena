@@ -2317,6 +2317,12 @@ is how the inversion lemmas in `examples/canonical.thena` are written, and **an 
 arm is that same notion for one case rather than for all of them.** A keyword would have
 been a second spelling for something the syntax could already say.
 
+**And it would have spent the name.** A tactic called `impossible` — one that takes a
+case you believe cannot arise and finds the contradiction for you — is wanted, and a
+tactic in Thena is an ordinary rule whose name is an ordinary identifier. One lexer
+serves the surface and the rule language, so a word reserved for `induction … of` is a
+word no rule can be called.
+
 **Writing a body there is a refusal, not a redundancy.** The case being gone is
 something the system has a proof of, so a term written in that arm is a claim that the
 case can arise, against that proof. The converse is a refusal too: an empty arm for a
