@@ -2378,27 +2378,35 @@ have been solved to a term mentioning the copy cannot be, since that points back
 the equation is kept instead. Making a copy only where nothing else will do is what keeps
 both kinds of case working at once.
 
-**ONE LIMIT REMAINS, AND IT IS ABOUT RECURSION.** A split that generalises makes each case
-prove something *more general* than the goal it came from — the case is about a fresh copy
-of the subject. A recursive call is tied to its induction hypothesis by the argument it
-names, and that hypothesis is about the subject, not the copy. So **a recursive call may
-not be written inside a split that generalises**, and the way round it is to take the
-hypothesis as a parameter and pass the recursive call from outside, where the names still
-mean what they meant:
+**A RECURSIVE CALL MAY BE WRITTEN INSIDE A SPLIT THAT GENERALISES.** A split that
+generalises makes each case prove something *more general* than the goal it came from — the
+case is about a fresh copy of the subject — so the hypothesis the case has to use is the
+copy of the enclosing arm's, which the split quantified along with everything else whose
+type mentions the subject. The recursion check follows that: a call inside such an arm is
+tied to the copy, and the copy is an unguarded premise of the method, so no termination
+argument is spent.
+
+**WHAT REMAINS IS A NAME, AND IT IS A DEFECT RATHER THAN A RULE.** Where the case *solves*
+the copy of an outside variable — `eIf`'s own `c1` becomes the copy of `p` — nothing is
+bound under the outside name, so writing `p` in the arm still reaches the unrefined
+variable and the call is at the wrong subject. The arm must name the binder the case
+introduced:
 
 ```
-invIf = \ p p' a b s0 ih0 u s -> case s of
-  { eIfTrue c d -> absurd (Eq Term (ifthen p' c d) c) (trueNoStep p' s0)
-  ; …
-  ; eIf c1 c1' c2 c3 sr -> cong Term Term (\ x -> ifthen x c2 c3) p' c1' (ih0 c1' sr) }
+; eIf p p' a b sr -> \ u s -> case s of
+    { …
+    ; eIf c1 c1' c2 c3 sr2 -> cong Term Term (\ x -> ifthen x c2 c3) p' c1' (determinacy c1 p' sr c1' sr2) }
 ```
 
-Inside the arm `ih0` is itself refined, so `sr` fits it with nothing transported — which is
-the refinement doing the work the parameter was passed for. A split that generalises
-*nothing* has no such limit, so `determinacy`'s `eSucc` arm recurses inline.
+`sr` there is the copy, refined to `Step c1 p'`, which is what makes the call typecheck with
+nothing transported. A split that generalises *nothing* leaves the outside name meaning the
+subject, so `determinacy`'s `eSucc` arm writes `determinacy p p' sr c1' sr2`.
 
-**Agda and Idris have neither limit**, because a clause's whole left-hand side is one
-unification problem rather than one scrutinee with everything to its left fixed.
+**That asymmetry is scheduled to go.** Which positions a split generalised, and which
+copies it solved, is elaboration's business: a person should not have to write a proof
+differently because of it. **Agda and Idris show none of it**, because a clause's whole
+left-hand side is one unification problem rather than one scrutinee with everything to its
+left fixed.
 
 **An arm can be written to take a leftover equation** — `evs n en -> \ q -> …` — and then
 transport by hand. It type-checks, and it is deliberately not how the examples are written:
