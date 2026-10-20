@@ -1,0 +1,15 @@
+module Determinacy
+  declared Term
+  declared NV
+  declared Step
+  declared absurd
+  declared sym
+  declared subst
+  declared cong
+  declared trueNoStep
+  declared falseNoStep
+  declared zeroNoStep
+  declared nvNoStep
+  declared determinacy
+warning: no noConfusionNV: nvSucc's argument 2 (n) has a type that depends on an earlier argument, so its equation cannot be stated
+warning: no noConfusionStep: eIf's argument 5 (s) has a type that depends on an earlier argument, so its equation cannot be stated

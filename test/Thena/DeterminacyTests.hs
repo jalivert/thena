@@ -16,7 +16,7 @@
 -- the end rather than stopping, and that @determinacy@ is a global with the
 -- statement it is supposed to have.
 --
--- == Two versions, and they must prove the same theorem
+-- == Three versions, and they must prove the same theorem
 --
 -- **@examples\/determinacy-surface.thena@ is the same proof in the surface
 -- language** (MS4 tier 3): a proof module of 278 lines where the script is
@@ -25,9 +25,16 @@
 -- from @examples\/determinacy.py@ — one generator, two targets — so the proof
 -- itself is stated once.
 --
--- **The assertion that ties them together is the statement**: each is checked
--- against the /same/ rendered type for @determinacy@, so a version that proved
--- something weaker would fail here rather than pass quietly.
+-- **@examples\/determinacy-patterns.thena@ is the same theorem by dependent
+-- pattern matching** (MS9), written by hand in 130 lines — and it exists to be
+-- read beside the generated one, which is why it is in the suite rather than in
+-- a report. The generated proof appeals to @noConfusionTerm@ 148 times; the
+-- pattern version does not mention it, because a method whose equations
+-- conflict is closed by the splitter and the user writes no arm for it.
+--
+-- **The assertion that ties all three together is the statement**: each is
+-- checked against the /same/ rendered type for @determinacy@, so a version that
+-- proved something weaker would fail here rather than pass quietly.
 module Thena.DeterminacyTests (tests) where
 
 import Data.ByteString.Builder (stringUtf8, toLazyByteString)
@@ -52,6 +59,9 @@ target = "examples/determinacy-tactics.thena.script"
 
 surfaceTarget :: FilePath
 surfaceTarget = "examples/determinacy-surface.thena"
+
+patternTarget :: FilePath
+patternTarget = "examples/determinacy-patterns.thena"
 
 tests :: TestTree
 tests =
@@ -86,6 +96,20 @@ tests =
     , testCase "and the surface version proves the same statement" $ do
         (s, _) <- startingSession
         (s', _, _) <- loadProofFile s surfaceTarget
+        statementOf s' @?= Just theorem
+
+      -- **The same theorem by pattern matching** (MS9). A proof module like the
+      -- one above, so the same path loads it; the golden is what the splitter
+      -- let the user get away with not writing.
+    , goldenVsString "determinacy-patterns" "test/golden/determinacy-patterns.golden" $ do
+        (s, trouble) <- startingSession
+        (s', out, _) <- loadProofFile s patternTarget
+        pure (toLazyByteString (stringUtf8 (unlines
+          (concatMap (renderTrouble s) trouble ++ concatMap (renderResponse s') out))))
+
+    , testCase "and the pattern version proves the same statement" $ do
+        (s, _) <- startingSession
+        (s', _, _) <- loadProofFile s patternTarget
         statementOf s' @?= Just theorem
     ]
   where

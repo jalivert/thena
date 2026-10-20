@@ -35,9 +35,12 @@ with its refutation.
 ## The earlier proofs — TAPL's arithmetic language, by hand
 
 Written in MS4 and MS5, before object languages existed. The language is a
-hand-written `data Term`, and the proofs use `elim` throughout. All but the last
-two rows are also test fixtures, loaded by path from their own tests; those two
-load today, and nothing checks that they keep doing so.
+hand-written `data Term`. **The generated pair still appeals to `elim`
+throughout; the hand-written ones were rewritten as splits in MS9**, so the two
+styles sit side by side here and `determinacy-surface.thena` against
+`determinacy-patterns.thena` is the same theorem in both. All but the last two
+rows are also test fixtures, loaded by path from their own tests; those two load
+today, and nothing checks that they keep doing so.
 
 | file | what it is |
 |---|---|
@@ -47,6 +50,7 @@ load today, and nothing checks that they keep doing so.
 | `normal.thena` | A value is a normal form. After `canonical` and `progress` |
 | `determinacy-surface.thena` | Determinacy, TAPL 3.5.4, in the surface language. **Generated** by `determinacy.py`: regenerate it, never patch it |
 | `determinacy-tactics.thena.script` | The same proof driven by tactics. **Generated** too |
+| `determinacy-patterns.thena` | The same theorem by dependent pattern matching, **written by hand** — 130 lines against the generated 278, and no appeal to `noConfusionTerm` at all. Read it beside `determinacy-surface.thena` |
 | `tier0.thena` | MS4's first checkpoint: a datatype, a function by elimination, a theorem |
 | `dependent-index.thena.script`, `products.thena.script` | REPL scripts: elimination over an indexed family, and no-confusion |
 | `choice-points.thena.rules` | What a choice point resumes into |
