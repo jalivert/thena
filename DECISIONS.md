@@ -2328,13 +2328,15 @@ rather than a convenience.** The two words differ by whether a method carries
 inductive hypotheses; with no method surviving there is nothing for a hypothesis
 to be attached to, so there is nothing left for them to differ about.
 
-**One wart, and it is about universes rather than splitting.** `Empty` is
-level-polymorphic, so a bare `Empty` in a statement stands for `Empty` at a level
-the system has yet to work out. A proof that never mentions `Empty` cannot work it
-out, and an arm-less split never mentions anything — so the lemma above is stored
-with that level still unknown. Until the surface can write the level, the proofs in
-`examples/canonical.thena` route through a one-argument `absurd` whose argument is
-declared at `Type₀`, purely to fix it.
+**One consequence worth knowing, and it is about universes rather than splitting.**
+`Empty` is a family with a universe level, and a declared type's level is
+generalised into a parameter when nothing pins it. The old proofs pinned it by
+accident — they named `Empty` in their own terms — and an arm-less split names
+nothing, so the lemma above is the *more general*
+`trueNotNat {ℓ} : HasType true nat -> Empty {ℓ}`. That is usually what you want.
+Where you want it fixed at one level you have to say so with a term, because the
+surface has no syntax for a level argument yet; `examples/canonical.thena` routes
+through a one-argument `absurd` whose argument is declared at `Type₀`.
 
 ### The same lesson, one level on: a search must not be a choice point over the work
 
