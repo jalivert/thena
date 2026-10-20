@@ -10,7 +10,13 @@
 -- about a third the size, and the shape of every proof is the same: split a
 -- derivation and answer the cases that survive.
 --
--- THE FOUR INVERSION LEMMAS HAVE NO CASES AT ALL. `induction d of { }` on a
+-- EVERY SPLIT HERE IS A `case` AND NOT AN `induction`, and that is a claim the
+-- types carry rather than a convention: `case` elaborates to the generated
+-- `caseD`, whose methods have no inductive hypothesis, so none of these proofs
+-- can recurse even by accident. Canonical forms is inversion, and inversion
+-- never recurses.
+--
+-- AND FOUR OF THEM HAVE NO CASES AT ALL. `case d of { }` on a
 -- `HasType true nat` says every constructor of `HasType` disagrees with those
 -- indices, and elaboration closes all seven methods itself — where this file
 -- used to write out seven methods and seven appeals to no-confusion apiece.
@@ -66,36 +72,36 @@ absurd : forall (C : Type₀) (e : Empty) -> C
 absurd = \ C e -> elim Empty () (\ t -> C) () () e
 
 trueNotNat : forall (d : HasType true nat) -> Empty
-trueNotNat = \ d -> induction d of { }
+trueNotNat = \ d -> case d of { }
 
 falseNotNat : forall (d : HasType false nat) -> Empty
-falseNotNat = \ d -> induction d of { }
+falseNotNat = \ d -> case d of { }
 
 zeroNotBool : forall (d : HasType zero bool) -> Empty
-zeroNotBool = \ d -> induction d of { }
+zeroNotBool = \ d -> case d of { }
 
 -- The one that forces a constructor argument: `tSucc`'s own subterm is
 -- determined to be `t` by injectivity of `succ`, and then `nat` against `bool`
 -- closes that method like all the others.
 succNotBool : forall (t : Term) (d : HasType (succ t) bool) -> Empty
-succNotBool = \ t d -> induction d of { }
+succNotBool = \ t d -> case d of { }
 
 -- `d` is deliberately NOT introduced: the split is on `n`, whose index `t` is
 -- a context variable, and an index no other premise mentions is abstracted
 -- with no equation. Introducing `d` first would mention it and tie it.
 nvNotBool : forall (t : Term) (n : NV t) (d : HasType t bool) -> Empty
-nvNotBool = \ t n -> induction n of
+nvNotBool = \ t n -> case n of
   { nvZero -> \ dd -> zeroNotBool dd
   ; nvSucc c1 nn -> \ dd -> succNotBool c1 dd }
 
 canonicalBool : forall (v : Term) (p : Value v) (d : HasType v bool) -> Or (Eq Term v true) (Eq Term v false)
-canonicalBool = \ v p -> induction p of
+canonicalBool = \ v p -> case p of
   { vTrue -> \ dd -> inl (Eq Term true true) (Eq Term true false) (refl Term true)
   ; vFalse -> \ dd -> inr (Eq Term false true) (Eq Term false false) (refl Term false)
   ; vNat c1 nn -> \ dd -> absurd (Or (Eq Term c1 true) (Eq Term c1 false)) (nvNotBool c1 nn dd) }
 
 canonicalNat : forall (v : Term) (p : Value v) (d : HasType v nat) -> NV v
-canonicalNat = \ v p -> induction p of
+canonicalNat = \ v p -> case p of
   { vTrue -> \ dd -> absurd (NV true) (trueNotNat dd)
   ; vFalse -> \ dd -> absurd (NV false) (falseNotNat dd)
   ; vNat c1 nn -> \ dd -> nn }

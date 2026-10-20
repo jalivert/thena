@@ -311,14 +311,15 @@ dispatchableTests =
                ++ [ "no-nesting"
                   , "intro-pattern", "intro-pattern", "intro-pattern"
                   , "intro-pattern", "intro-pattern"
+                  , "ihs-for", "ihs-for"
                   , "intro-ihs", "intro-ihs"
                   , "same-length", "same-length"
                   , "arm-for", "pick", "pick", "elaborate-arm"
                   , "case-must-vanish", "one-case", "one-case", "one-case"
                   , "split-cases", "split-cases", "split-over"
-                  , "split-elaborate"
+                  , "split-claim", "split-claim", "split-elaborate"
                   ]
-               ++ replicate 14 "elaborate"
+               ++ replicate 15 "elaborate"
                ++ ["run-block"]
                ++ replicate 2 "spine-arguments"
         names' (dispatch std emptyGlobals hole)

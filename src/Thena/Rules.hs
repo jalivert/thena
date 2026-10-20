@@ -1486,6 +1486,7 @@ unaryOps =
   , ("level", Op.LevelOf), ("universe-at", Op.UniverseAt)
   , ("push-development", Op.PushDevelopment)
   , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
+  , ("prim-case", Op.CaseAnalyse)
     -- The six declaration readers (MS9 phase 176).
   , ("datatype-of", Op.DatatypeOf)
   , ("datatype-parameters", Op.DatatypeParameters)
@@ -1538,7 +1539,6 @@ binaryOps =
   , ("declare-primitive", Op.DeclarePrimitive)
     -- Specialisation by unification (MS9 phase 177): the constructor whose
     -- method this is, and how many equations follow its telescope.
-  , ("specialise", Op.Specialise)
   ]
 
 -- | **The first op with three operands** (MS8 phase 150). A trusted term has
@@ -1554,6 +1554,7 @@ binaryOps =
 ternaryOps :: [(String, Operand -> Operand -> Operand -> Op)]
 ternaryOps =
   [ ("make-trusted", Op.MakeTrusted)
+  , ("specialise", Op.Specialise)
   , ("define-global", Op.DefineGlobal [])
   ]
 

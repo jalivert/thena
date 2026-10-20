@@ -39,7 +39,7 @@ import Thena.Declared
   )
 import Thena.Driver (parseCore)
 import Thena.Errors (ElimError (..))
-import Thena.Global.Env (GlobalEnv)
+import Thena.Global.Env (GlobalEnv, Scheme (..))
 import Thena.Driver (Response (..), command, loadProofSource)
 import Thena.Files (startingSession)
 import Thena.Render ( Rendering (..)
@@ -538,7 +538,7 @@ attempt env ctx n goal tgt = case parseCore [] env ctx n goal of
   Left e -> error ("fixture does not parse: " ++ show e)
   Right (g, n1) -> case parseCore [] env ctx n1 tgt of
     Left e        -> error ("fixture does not parse: " ++ show e)
-    Right (t, n2) -> eliminate env ctx n2 g t
+    Right (t, n2) -> eliminate env ctx Inductive n2 g t
 
 -- | The context the refinement is well typed in: the goal's, plus the holes
 -- the tactic asked for. 'Thena.Engine' puts them there with @insertAbove@; a

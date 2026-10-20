@@ -1098,6 +1098,19 @@ data Op
     --
     -- **All six are read-only**: none touches the development, none mints a
     -- name, none can fail in a way that moves anything.
+  | CaseAnalyse Operand
+    -- ^ @prim-case ‹t›@ — 'Eliminate' with the methods' inductive hypotheses
+    -- gone (MS9 phase 188): the surface's @case … of@.
+    --
+    -- __Two ops and not one taking a tag.__ instral has no enum to pass, and a
+    -- user asks for these by two different words, so the word they wrote picks
+    -- the op. The tactic underneath is one function with a
+    -- 'Thena.Global.Env.Scheme' parameter — nothing in the kernel can tell the
+    -- results apart, because @caseD@ is an ordinary definition that δ-unfolds
+    -- to an elimination.
+    --
+    -- __It answers exactly what 'Eliminate' answers__, the method holes and the
+    -- equation count, so @split-over@ and everything under it is shared.
   | DatatypeOf Operand
     -- ^ the datatype a /type/ is an application of — @datatype-of ty@.
     --
@@ -1181,7 +1194,7 @@ data Op
     -- failed on @vtail@. His ruling of 2026-10-19 is what the caller does with
     -- it: a survivor is bound with @prim-lambda@ and a forced position with
     -- @define@, the name being a definition equal to the term it was forced to.
-  | Specialise Operand Operand
+  | Specialise Operand Operand Operand
 
     -- **Tying a recursive call to the induction hypothesis it is** (MS9 phase
     -- 186) — __his ruling of 2026-10-19__: the arm writes an ordinary call,
@@ -1471,13 +1484,14 @@ resultOf o = case o of
   -- A body that wants neither half discards the pair, as every rule shipped
   -- before phase 177 does.
   Eliminate _  -> Just (TPair (TList TCore) TInt)
+  CaseAnalyse _ -> Just (TPair (TList TCore) TInt)
   -- **The subgoal it claimed, or none** (MS9 phase 184). A conflicting
   -- equation closes the method outright and claims nothing, which is the
   -- impossible case vanishing, so there is never more than one.
     -- **The handle and the forced report, as a pair**, which is 'Eliminate'\'s
     -- own shape and for its reason: one op answers everything only it knows, and
     -- a rule takes the pair apart in a head.
-  Specialise _ _ -> Just (TPair (TOption TCore) (TList (TOption TCore)))
+  Specialise _ _ _ -> Just (TPair (TOption TCore) (TList (TOption TCore)))
   TieRecursion _ -> Just TCore
   -- The six declaration readers (MS9 phase 176). @constructors-of@ is the
   -- first row in this table to answer with a list.
@@ -1621,7 +1635,8 @@ operandTypes o = case o of
   Typing a     -> [(a, TCore)]
   Define a b   -> [(a, TName), (b, TCore)]
   Eliminate a  -> [(a, TCore)]
-  Specialise c k -> [(c, TName), (k, TInt)]
+  CaseAnalyse a -> [(a, TCore)]
+  Specialise c h k -> [(c, TName), (h, TList TName), (k, TInt)]
   TieRecursion t -> [(t, TCore)]
   -- @datatype-of@ reads a type; the other five read a declared name.
   DatatypeOf a -> [(a, TCore)]
@@ -2124,7 +2139,8 @@ opKeyword o = case o of
   PushDevelopment _ -> "push-development"
   PopDevelopment -> "pop-development"
   Eliminate _  -> "prim-eliminate"
-  Specialise _ _ -> "specialise"
+  CaseAnalyse _ -> "prim-case"
+  Specialise _ _ _ -> "specialise"
   TieRecursion _ -> "tie-recursion"
   DatatypeOf _ -> "datatype-of"
   DatatypeParameters _ -> "datatype-parameters"

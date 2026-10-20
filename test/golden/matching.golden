@@ -31,6 +31,8 @@ standard
   intro-pattern [p, ...ps] [none, ...fs] ‹k›
   intro-pattern [p, ...ps] [(some v), ...fs] ‹k›
   intro-pattern [p, ...ps] [(some v), ...fs] ‹k›
+  ihs-for ‹t› ‹c›
+  ihs-for ‹t› ‹c›
   intro-ihs [] ‹k›
   intro-ihs [n, ...ns] ‹k›
   same-length [] []
@@ -38,7 +40,7 @@ standard
   arm-for ‹t› ‹c›
   pick ‹w› ‹c› ‹p› ‹b› ‹r›
   pick ‹w› ‹c› ‹p› ‹b› ‹r›
-  elaborate-arm ‹c› ‹sub› ‹forced› (p, b)
+  elaborate-arm ‹t› ‹c› ‹sub› ‹forced› (p, b)
   case-must-vanish none
   one-case ‹t› ‹c› ‹sub› ‹forced›
   one-case ‹t› ‹c› none ‹forced›
@@ -46,7 +48,10 @@ standard
   split-cases ‹t› [] [] ‹k›
   split-cases ‹t› [c, ...cs] [mh, ...ms] ‹k›
   split-over ‹t› ‹cs› (hs, k)
+  split-claim ‹t› ‹x›
+  split-claim ‹t› ‹x›
   split-elaborate ‹t›
+  elaborate ‹t›
   elaborate ‹t›
   elaborate ‹t›
   elaborate ‹t›
@@ -95,6 +100,8 @@ intro-pattern [p, ...ps] [none, ...fs] ‹k›
 intro-pattern [p, ...ps] [none, ...fs] ‹k›
 intro-pattern [p, ...ps] [(some v), ...fs] ‹k›
 intro-pattern [p, ...ps] [(some v), ...fs] ‹k›
+ihs-for ‹t› ‹c›
+ihs-for ‹t› ‹c›
 intro-ihs [] ‹k›
 intro-ihs [n, ...ns] ‹k›
 same-length [] []
@@ -102,7 +109,7 @@ same-length [p, ...ps] [n, ...ns]
 arm-for ‹t› ‹c›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
-elaborate-arm ‹c› ‹sub› ‹forced› (p, b)
+elaborate-arm ‹t› ‹c› ‹sub› ‹forced› (p, b)
 case-must-vanish none
 one-case ‹t› ‹c› ‹sub› ‹forced›
 one-case ‹t› ‹c› none ‹forced›
@@ -110,7 +117,10 @@ one-case ‹t› ‹c› (some sub) ‹forced›
 split-cases ‹t› [] [] ‹k›
 split-cases ‹t› [c, ...cs] [mh, ...ms] ‹k›
 split-over ‹t› ‹cs› (hs, k)
+split-claim ‹t› ‹x›
+split-claim ‹t› ‹x›
 split-elaborate ‹t›
+elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
@@ -142,6 +152,8 @@ intro-pattern [p, ...ps] [none, ...fs] ‹k›
 intro-pattern [p, ...ps] [none, ...fs] ‹k›
 intro-pattern [p, ...ps] [(some v), ...fs] ‹k›
 intro-pattern [p, ...ps] [(some v), ...fs] ‹k›
+ihs-for ‹t› ‹c›
+ihs-for ‹t› ‹c›
 intro-ihs [] ‹k›
 intro-ihs [n, ...ns] ‹k›
 same-length [] []
@@ -149,7 +161,7 @@ same-length [p, ...ps] [n, ...ns]
 arm-for ‹t› ‹c›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
-elaborate-arm ‹c› ‹sub› ‹forced› (p, b)
+elaborate-arm ‹t› ‹c› ‹sub› ‹forced› (p, b)
 case-must-vanish none
 one-case ‹t› ‹c› ‹sub› ‹forced›
 one-case ‹t› ‹c› none ‹forced›
@@ -157,6 +169,8 @@ one-case ‹t› ‹c› (some sub) ‹forced›
 split-cases ‹t› [] [] ‹k›
 split-cases ‹t› [c, ...cs] [mh, ...ms] ‹k›
 split-over ‹t› ‹cs› (hs, k)
+split-claim ‹t› ‹x›
+split-claim ‹t› ‹x›
 split-elaborate ‹t›
 run-block ‹t›
 intro-binders ‹t› ‹k›
@@ -176,6 +190,8 @@ intro-pattern [p, ...ps] [none, ...fs] ‹k›
 intro-pattern [p, ...ps] [none, ...fs] ‹k›
 intro-pattern [p, ...ps] [(some v), ...fs] ‹k›
 intro-pattern [p, ...ps] [(some v), ...fs] ‹k›
+ihs-for ‹t› ‹c›
+ihs-for ‹t› ‹c›
 intro-ihs [] ‹k›
 intro-ihs [n, ...ns] ‹k›
 same-length [] []
@@ -183,7 +199,7 @@ same-length [p, ...ps] [n, ...ns]
 arm-for ‹t› ‹c›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
-elaborate-arm ‹c› ‹sub› ‹forced› (p, b)
+elaborate-arm ‹t› ‹c› ‹sub› ‹forced› (p, b)
 case-must-vanish none
 one-case ‹t› ‹c› ‹sub› ‹forced›
 one-case ‹t› ‹c› none ‹forced›
@@ -191,6 +207,8 @@ one-case ‹t› ‹c› (some sub) ‹forced›
 split-cases ‹t› [] [] ‹k›
 split-cases ‹t› [c, ...cs] [mh, ...ms] ‹k›
 split-over ‹t› ‹cs› (hs, k)
+split-claim ‹t› ‹x›
+split-claim ‹t› ‹x›
 split-elaborate ‹t›
 run-block ‹t›
 thena core> back
@@ -223,6 +241,8 @@ intro-pattern [p, ...ps] [none, ...fs] ‹k›
 intro-pattern [p, ...ps] [none, ...fs] ‹k›
 intro-pattern [p, ...ps] [(some v), ...fs] ‹k›
 intro-pattern [p, ...ps] [(some v), ...fs] ‹k›
+ihs-for ‹t› ‹c›
+ihs-for ‹t› ‹c›
 intro-ihs [] ‹k›
 intro-ihs [n, ...ns] ‹k›
 same-length [] []
@@ -230,7 +250,7 @@ same-length [p, ...ps] [n, ...ns]
 arm-for ‹t› ‹c›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
-elaborate-arm ‹c› ‹sub› ‹forced› (p, b)
+elaborate-arm ‹t› ‹c› ‹sub› ‹forced› (p, b)
 case-must-vanish none
 one-case ‹t› ‹c› ‹sub› ‹forced›
 one-case ‹t› ‹c› none ‹forced›
@@ -238,7 +258,10 @@ one-case ‹t› ‹c› (some sub) ‹forced›
 split-cases ‹t› [] [] ‹k›
 split-cases ‹t› [c, ...cs] [mh, ...ms] ‹k›
 split-over ‹t› ‹cs› (hs, k)
+split-claim ‹t› ‹x›
+split-claim ‹t› ‹x›
 split-elaborate ‹t›
+elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
@@ -271,6 +294,8 @@ intro-pattern [p, ...ps] [none, ...fs] ‹k›
 intro-pattern [p, ...ps] [none, ...fs] ‹k›
 intro-pattern [p, ...ps] [(some v), ...fs] ‹k›
 intro-pattern [p, ...ps] [(some v), ...fs] ‹k›
+ihs-for ‹t› ‹c›
+ihs-for ‹t› ‹c›
 intro-ihs [] ‹k›
 intro-ihs [n, ...ns] ‹k›
 same-length [] []
@@ -278,7 +303,7 @@ same-length [p, ...ps] [n, ...ns]
 arm-for ‹t› ‹c›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
-elaborate-arm ‹c› ‹sub› ‹forced› (p, b)
+elaborate-arm ‹t› ‹c› ‹sub› ‹forced› (p, b)
 case-must-vanish none
 one-case ‹t› ‹c› ‹sub› ‹forced›
 one-case ‹t› ‹c› none ‹forced›
@@ -286,6 +311,8 @@ one-case ‹t› ‹c› (some sub) ‹forced›
 split-cases ‹t› [] [] ‹k›
 split-cases ‹t› [c, ...cs] [mh, ...ms] ‹k›
 split-over ‹t› ‹cs› (hs, k)
+split-claim ‹t› ‹x›
+split-claim ‹t› ‹x›
 split-elaborate ‹t›
 run-block ‹t›
 intro-binders ‹t› ‹k›
@@ -333,6 +360,8 @@ intro-pattern [p, ...ps] [none, ...fs] ‹k›
 intro-pattern [p, ...ps] [none, ...fs] ‹k›
 intro-pattern [p, ...ps] [(some v), ...fs] ‹k›
 intro-pattern [p, ...ps] [(some v), ...fs] ‹k›
+ihs-for ‹t› ‹c›
+ihs-for ‹t› ‹c›
 intro-ihs [] ‹k›
 intro-ihs [n, ...ns] ‹k›
 same-length [] []
@@ -340,7 +369,7 @@ same-length [p, ...ps] [n, ...ns]
 arm-for ‹t› ‹c›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
-elaborate-arm ‹c› ‹sub› ‹forced› (p, b)
+elaborate-arm ‹t› ‹c› ‹sub› ‹forced› (p, b)
 case-must-vanish none
 one-case ‹t› ‹c› ‹sub› ‹forced›
 one-case ‹t› ‹c› none ‹forced›
@@ -348,7 +377,10 @@ one-case ‹t› ‹c› (some sub) ‹forced›
 split-cases ‹t› [] [] ‹k›
 split-cases ‹t› [c, ...cs] [mh, ...ms] ‹k›
 split-over ‹t› ‹cs› (hs, k)
+split-claim ‹t› ‹x›
+split-claim ‹t› ‹x›
 split-elaborate ‹t›
+elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
@@ -386,6 +418,8 @@ intro-pattern [p, ...ps] [none, ...fs] ‹k›
 intro-pattern [p, ...ps] [none, ...fs] ‹k›
 intro-pattern [p, ...ps] [(some v), ...fs] ‹k›
 intro-pattern [p, ...ps] [(some v), ...fs] ‹k›
+ihs-for ‹t› ‹c›
+ihs-for ‹t› ‹c›
 intro-ihs [] ‹k›
 intro-ihs [n, ...ns] ‹k›
 same-length [] []
@@ -393,7 +427,7 @@ same-length [p, ...ps] [n, ...ns]
 arm-for ‹t› ‹c›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
-elaborate-arm ‹c› ‹sub› ‹forced› (p, b)
+elaborate-arm ‹t› ‹c› ‹sub› ‹forced› (p, b)
 case-must-vanish none
 one-case ‹t› ‹c› ‹sub› ‹forced›
 one-case ‹t› ‹c› none ‹forced›
@@ -401,6 +435,8 @@ one-case ‹t› ‹c› (some sub) ‹forced›
 split-cases ‹t› [] [] ‹k›
 split-cases ‹t› [c, ...cs] [mh, ...ms] ‹k›
 split-over ‹t› ‹cs› (hs, k)
+split-claim ‹t› ‹x›
+split-claim ‹t› ‹x›
 split-elaborate ‹t›
 run-block ‹t›
 intro-binders ‹t› ‹k›
@@ -430,6 +466,8 @@ intro-pattern [p, ...ps] [none, ...fs] ‹k›
 intro-pattern [p, ...ps] [none, ...fs] ‹k›
 intro-pattern [p, ...ps] [(some v), ...fs] ‹k›
 intro-pattern [p, ...ps] [(some v), ...fs] ‹k›
+ihs-for ‹t› ‹c›
+ihs-for ‹t› ‹c›
 intro-ihs [] ‹k›
 intro-ihs [n, ...ns] ‹k›
 same-length [] []
@@ -437,7 +475,7 @@ same-length [p, ...ps] [n, ...ns]
 arm-for ‹t› ‹c›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
 pick ‹w› ‹c› ‹p› ‹b› ‹r›
-elaborate-arm ‹c› ‹sub› ‹forced› (p, b)
+elaborate-arm ‹t› ‹c› ‹sub› ‹forced› (p, b)
 case-must-vanish none
 one-case ‹t› ‹c› ‹sub› ‹forced›
 one-case ‹t› ‹c› none ‹forced›
@@ -445,6 +483,8 @@ one-case ‹t› ‹c› (some sub) ‹forced›
 split-cases ‹t› [] [] ‹k›
 split-cases ‹t› [c, ...cs] [mh, ...ms] ‹k›
 split-over ‹t› ‹cs› (hs, k)
+split-claim ‹t› ‹x›
+split-claim ‹t› ‹x›
 split-elaborate ‹t›
 run-block ‹t›
 intro-binders ‹t› ‹k›

@@ -818,7 +818,7 @@ everyHoleRule =
     -- arm-less one included: it stopped being a clause of its own when the
     -- specialiser arrived, and now calls @split-elaborate@ like the other.
     ++ splitHelpers
-    ++ replicate 14 "elaborate"
+    ++ replicate 15 "elaborate"
     ++ ["run-block"]
     ++ replicate 2 "spine-arguments"
 
@@ -851,12 +851,13 @@ splitHelpers =
   [ "no-nesting"
   , "intro-pattern", "intro-pattern", "intro-pattern"
   , "intro-pattern", "intro-pattern"
+  , "ihs-for", "ihs-for"
   , "intro-ihs", "intro-ihs"
   , "same-length", "same-length"
   , "arm-for", "pick", "pick", "elaborate-arm"
   , "case-must-vanish", "one-case", "one-case", "one-case"
   , "split-cases", "split-cases", "split-over"
-  , "split-elaborate"
+  , "split-claim", "split-claim", "split-elaborate"
   ]
 
 -- | @Nat@, as a core term, for the row above.

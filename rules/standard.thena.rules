@@ -283,9 +283,19 @@ rule intro-pattern [p, ...ps] [(some v), ...fs] k :- when (pattern-is-name p)
      ; r = intro-pattern ps fs k
      ; return r
 
+-- WHICH HYPOTHESES AN ARM IS HANDED, and the one place the two words differ
+-- once a method is in hand: `induction` hands one per recursive argument, and
+-- `case` hands none, because caseD's methods are the eliminator's minus exactly
+-- these. Two clauses with complementary tests, so no choice point.
+ihs-for : Surface -> Name -> List Name
+rule ihs-for t c :- when (split-is-induction t)
+  do r = constructor-recursive-arguments c
+     ; return r
+rule ihs-for t c :- when (split-is-cases t)
+  do return []
+
 -- One induction hypothesis per recursive argument, named AFTER a fresh-name of
--- the argument it is about. `case` would pass an empty list here, the generated
--- caseD being the eliminator minus exactly these.
+-- the argument it is about. `ihs-for` is what decides the list.
 --
 -- THE FRESHENING IS LOAD-BEARING, NOT TIDINESS. The argument's own binder is
 -- already in the development by the time this runs, so using its name here
@@ -335,8 +345,8 @@ rule pick w c p b r :- when (same-name w c) do return (p, b)
 rule pick w c p b r :- when (different-name w c) do a = arm-for r c ; return a
 
 -- The arm, under the bindings its pattern names.
-elaborate-arm : Name -> Core -> List (Option Core) -> (Pattern, Surface) -> ()
-rule elaborate-arm c sub forced (p, b) :-
+elaborate-arm : Surface -> Name -> Core -> List (Option Core) -> (Pattern, Surface) -> ()
+rule elaborate-arm t c sub forced (p, b) :-
   do as = pattern-arguments p
      ; args = constructor-arguments c
      ; same-length as args
@@ -346,7 +356,7 @@ rule elaborate-arm c sub forced (p, b) :-
      ; k0 = here
      ; back
      ; k1 = intro-pattern as forced k0
-     ; ihs = constructor-recursive-arguments c
+     ; ihs = ihs-for t c
      ; k2 = intro-ihs ihs k1
      ; goto k2
      ; call elaborate b
@@ -378,16 +388,22 @@ rule one-case t c none forced :- when (split-has-arms t)
   do say "a case vanished: its arm is unreachable"
 rule one-case t c (some sub) forced :- when (split-has-arms t)
   do a = arm-for t c
-     ; elaborate-arm c sub forced a
+     ; elaborate-arm t c sub forced a
 
 -- The constructors and their method holes, walked in step. constructors-of and
 -- prim-eliminate both answer in declaration order, so the two lists correspond
 -- without either being told.
+--
+-- `specialise` IS TOLD WHICH HYPOTHESES THE METHOD CARRIES rather than reading
+-- them off the declaration, because the declaration cannot say which scheme was
+-- asked for — `caseD`'s methods carry none, and counting them from the
+-- constructor made `case … of` refuse its own methods.
 split-cases : Surface -> List Name -> List Core -> Int -> ()
 rule split-cases t [] [] k :- do
 rule split-cases t [c, ...cs] [mh, ...ms] k :-
   do goto mh
-     ; (sub, forced) = specialise c k
+     ; ihs = ihs-for t c
+     ; (sub, forced) = specialise c ihs k
      ; one-case t c sub forced
      ; goto mh
      ; solve
@@ -396,6 +412,24 @@ rule split-cases t [c, ...cs] [mh, ...ms] k :-
 -- The pair prim-eliminate answers, taken apart.
 split-over : Surface -> List Name -> (List Core, Int) -> ()
 rule split-over t cs (hs, k) :- do split-cases t cs hs k
+
+-- WHICH ELIMINATOR THE WRITTEN WORD ASKS FOR, and the only place the two
+-- differ before a method is in hand. `prim-eliminate` builds an Eliminate node
+-- whose methods carry their inductive hypotheses; `prim-case` applies the
+-- generated caseD, whose methods are the same ones without them. Both answer
+-- the same pair — the method holes and the equation count — so everything
+-- downstream is shared.
+--
+-- An arm-less split goes through here too, so `case e of { }` really applies
+-- caseD and `induction e of { }` really eliminates. Nothing downstream can
+-- tell, and neither can the kernel: caseD δ-unfolds to an elimination.
+split-claim : Surface -> Core -> (List Core, Int)
+rule split-claim t x :- when (split-is-induction t)
+  do r = prim-eliminate x
+     ; return r
+rule split-claim t x :- when (split-is-cases t)
+  do r = prim-case x
+     ; return r
 
 -- The whole of a split, arms or none. The target's type is not known before the
 -- target is elaborated, so Tsplit stands for it and unification solves it on
@@ -412,7 +446,7 @@ rule split-elaborate t :-
      ; g = split-target t
      ; call elaborate g
      ; goto h
-     ; r = prim-eliminate x
+     ; r = split-claim t x
      ; tt = typeof x
      ; d = datatype-of tt
      ; cs = constructors-of d
@@ -420,8 +454,14 @@ rule split-elaborate t :-
      ; goto h
      ; solve
 
--- E⟦induction t of { p -> e ; … }⟧ — the clause.
+-- E⟦induction t of { p -> e ; … }⟧ and E⟦case t of { p -> e ; … }⟧ — the two
+-- clauses, and they are two only because the head language has no disjunction.
+-- The word is read inside, by `split-claim` and by `ihs-for`, which is where it
+-- means something.
 rule elaborate t :- when focus-is-hole (surface-is-split t) (split-has-arms t) (split-is-induction t)
+  do split-elaborate t
+
+rule elaborate t :- when focus-is-hole (surface-is-split t) (split-has-arms t) (split-is-cases t)
   do split-elaborate t
 
 -- E⟦case t of { }⟧ and E⟦induction t of { }⟧ — A SPLIT WITH NO ARMS IS NOT A

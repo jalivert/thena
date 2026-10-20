@@ -85,7 +85,6 @@ import Thena.Global.Env
   , isDeclared
   , lookupConstructor
   , lookupInductive
-  , recursiveArgument
   )
 import Thena.Global.NoConfusion (noConfusionNames)
 import Thena.Tactics.Eliminate (spineOf)
@@ -128,18 +127,24 @@ data Specialisation = Specialisation
 -- | Specialise the method of @c@ whose last @k@ binders before the body are the
 -- equations the elimination stated.
 --
--- __Both of those arguments are facts the caller has and the type does not.__ A
+-- __All three of those are facts the caller has and the type does not.__ A
 -- method type is Π binders all the way down, and nothing in it marks where the
 -- constructor's own telescope ends and the equations begin — a constructor may
--- itself take a proof of an equation. So @c@ is what the telescope's length is
--- read from (its arguments, and one induction hypothesis per recursive
--- argument, which is 'Thena.Global.Env.eliminatorType'\'s own method shape), and
--- @k@ is what 'Thena.Tactics.Eliminate' answers with, being the only thing that
--- knows how many indices were tied.
+-- itself take a proof of an equation, and the body after the equations may be a
+-- Π of its own, so counting binders settles nothing. So @c@ gives the
+-- constructor's own arguments, @h@ is how many induction hypotheses this
+-- method carries, and @k@ is how many indices were tied.
+--
+-- __@h@ IS AN ARGUMENT AND NOT READ OFF THE DECLARATION — MS9 phase 188.__ It
+-- used to be counted here, as one per recursive constructor argument, which is
+-- 'Thena.Global.Env.eliminatorType'\'s method shape — and that silently assumed
+-- the caller was eliminating. @caseD@'s methods carry none, so the assumption
+-- made @case … of@ refuse its own methods as misshapen. The caller knows which
+-- scheme it asked for; this does not, and no longer guesses.
 specialise
-  :: GlobalEnv -> Context -> Int -> GlobalName -> Int -> Core
+  :: GlobalEnv -> Context -> Int -> GlobalName -> Int -> Int -> Core
   -> (Either SpecialiseError Specialisation, Int)
-specialise env ctx n0 cn k mty = case lookupConstructor cn env of
+specialise env ctx n0 cn h k mty = case lookupConstructor cn env of
   Nothing -> (Left (NotThatConstructor cn), n0)
   Just (d, c)
     | k < 0 -> (Left (MethodNotShaped (arity d c) k mty), n0)
@@ -156,16 +161,11 @@ specialise env ctx n0 cn k mty = case lookupConstructor cn env of
                         (Right (want, tm, sol), n3) ->
                           verify hv want tm (forced c delta sol) n3
   where
-    -- One binder per constructor argument and one per /recursive/ constructor
-    -- argument, which is 'Thena.Global.Env.eliminatorType'\'s @methodType@ read
-    -- backwards. Taken off the declaration rather than from a second operand,
-    -- because a rule walking @constructors-of@ holds the name and has nothing
-    -- to count with.
-    arity d c = length args + length [ () | e <- args, Just _ <- [recursive e] ]
-      where
-        args      = constructorArguments c
-        recursive = recursiveArgument (inductiveName d)
-                      (length (inductiveParameters d)) . entryType
+    -- One binder per constructor argument, plus the hypotheses the caller says
+    -- this method carries. 'Thena.Global.Env.eliminatorType'\'s @methodType@
+    -- read backwards for 'Thena.Global.Env.Inductive', and @caseD@'s for
+    -- 'Thena.Global.Env.CaseAnalysis', where @h@ is zero.
+    arity _ c = length (constructorArguments c) + h
 
     -- One entry per constructor argument, which is the __first__ stretch of the
     -- telescope: 'Thena.Global.Env.eliminatorType' states the arguments and then

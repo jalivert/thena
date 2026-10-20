@@ -771,14 +771,15 @@ baseTests =
               ++ [ "no-nesting"
                  , "intro-pattern", "intro-pattern", "intro-pattern"
                  , "intro-pattern", "intro-pattern"
+                 , "ihs-for", "ihs-for"
                  , "intro-ihs", "intro-ihs"
                  , "same-length", "same-length"
                  , "arm-for", "pick", "pick", "elaborate-arm"
                  , "case-must-vanish", "one-case", "one-case", "one-case"
                  , "split-cases", "split-cases", "split-over"
-                 , "split-elaborate"
+                 , "split-claim", "split-claim", "split-elaborate"
                  ]
-              ++ replicate 14 "elaborate"
+              ++ replicate 15 "elaborate"
               ++ ["run-block"]
               ++ replicate 2 "spine-arguments"
 
@@ -945,10 +946,21 @@ emptySplit =
       declares "case" >>= (@?= Nothing)
   , testCase "and induction, on the same clause" $
       declares "induction" >>= (@?= Nothing)
-    -- The eliminator is applied to no methods at all — @()@ — which is the
-    -- observable difference between this and every other elimination.
-  , testCase "the term is an elimination with no methods, at a solved type" $ do
+    -- No methods at all, which is the observable difference between this and
+    -- every other elimination.
+    --
+    -- **AND THE WORD IS WHAT DECIDES THE HEAD** (MS9 phase 188). @case@ applies
+    -- the generated @caseEmpty@, @induction@ builds an @elim Empty@ node. The
+    -- two are convertible — @caseD@ δ-unfolds to exactly that elimination — so
+    -- nothing downstream and nothing in the kernel can tell them apart; what
+    -- changed is that the term now says which word was written.
+  , testCase "case: the term applies caseEmpty, at a solved type" $ do
       shown <- extracted "case"
+      assertBool shown ("caseEmpty" `isInfixOf` shown)
+      assertBool shown ("Tsplit = Empty" `isInfixOf` shown)
+
+  , testCase "induction: the term is an elim node with no methods" $ do
+      shown <- extracted "induction"
       assertBool shown ("elim Empty" `isInfixOf` shown)
       assertBool shown ("Tsplit = Empty" `isInfixOf` shown)
   ]
@@ -1238,6 +1250,78 @@ splittingTree =
       , "vtailN = \\ A n v -> induction v of { vcons (succ j) a as -> as }"
       ]
       "stuck: no clause of no-nesting applies here"
+
+    -- ----------------------------------------------------------------
+    -- @case … of@ WITH ARMS (MS9 phase 188)
+    -- ----------------------------------------------------------------
+
+    -- __The same split, through @caseD@ instead of the eliminator.__ The term
+    -- is an application of the generated @caseNat@ global rather than an
+    -- @Eliminate@ node, so every method is the eliminator's minus its inductive
+    -- hypotheses — and @pred@ wants none, which is why this is the honest
+    -- spelling of it.
+    --
+    -- __Checked by reduction__, for the reason @induction@'s own case gives:
+    -- only reduction says the methods went to the right constructors, and here
+    -- it also says @caseNat@ δ-unfolds to the elimination underneath.
+  , testCase "case: a function defined by case analysis declares and computes" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (natModule ++
+            [ "predC : Nat -> Nat"
+            , "predC = \\ n -> case n of { zero -> zero ; succ m -> m }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      let (s2, q) = command s1 ":whnf predC (succ (succ zero))"
+      unwords (renderResponse s2 q) @?= "succ zero"
+
+    -- __And the term says which word was written.__ @caseNat@ applied, with a
+    -- method per constructor and no hypothesis in either.
+  , testCase "and the term applies caseNat, not an elim node" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 (unlines (natModule ++
+            [ "predC : Nat -> Nat"
+            , "predC = \\ n -> case n of { zero -> zero ; succ m -> m }"
+            ]))
+          (s2, q) = command s1 ":show predC"
+          shown   = unwords (renderResponse s2 q)
+      assertBool shown ("caseNat" `isInfixOf` shown)
+
+    -- __A RECURSIVE CALL IN A @case@ ARM IS REFUSED, AND BY ITSELF.__ Nothing
+    -- checks for it: @caseD@'s methods carry no hypothesis, so there is none
+    -- for @tie-recursion@ to tie the call to, and the refusal is the same one a
+    -- call on the wrong index gets under @induction@. That is the whole of why
+    -- @case@ against @induction@ is a /type/ here and not a convention.
+  , refuses "a recursive call in a case arm has no hypothesis to tie to"
+      [ "dblC : Nat -> Nat"
+      , "dblC = \\ n -> case n of { zero -> zero ; succ m -> succ (succ (dblC m)) }"
+      ]
+      "stuck: no induction hypothesis is about this call, so it is not \
+      \structurally smaller: dblC m"
+
+    -- __The equations and the forced positions are shared__, which is the
+    -- claim that the two words differ by hypotheses and nothing else. @vnil@
+    -- vanishes on a conflicting equation with no arm written, @vcons@'s own
+    -- @k@ is forced to the outer @n@, and the arm binds two of three.
+  , testCase "case over an indexed family forces a position the same way" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (vecModule ++
+            [ "vtailC : \8704 (A : Type\8320) (n : Nat) -> Vec A (succ n) -> Vec A n"
+            , "vtailC = \\ A n v -> case v of { vcons k a as -> as }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      let (s2, q) = command s1 ":whnf vtailC Nat zero (vcons Nat zero zero (vnil Nat))"
+      unwords (renderResponse s2 q) @?= "vnil Nat"
+
+    -- Coverage fails the same way: the walk runs out of arms.
+  , refuses "a missing arm runs the search out under case too"
+      [ "partialC : Nat -> Nat"
+      , "partialC = \\ n -> case n of { zero -> zero }"
+      ]
+      "stuck: no clause of arm-for applies here"
   ]
   where
     natModule =

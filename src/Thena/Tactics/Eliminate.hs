@@ -57,9 +57,13 @@ import Thena.Errors (ElimError (..))
 import Thena.Global.Env
   ( GlobalEnv
   , ConstructorDefinition (..)
+  , Definition (..)
   , InductiveDefinition (..)
+  , Scheme (..)
+  , caseName
   , eliminatorType
   , isDeclared
+  , lookupDefinition
   , lookupInductive
   )
 
@@ -104,15 +108,25 @@ data Elimination = Elimination
 -- only generalisation there is. Without it the motive is constant and each
 -- method's induction hypothesis says nothing.
 --
+-- **A 'Scheme' says which eliminator, and that is the ONLY thing the two words
+-- differ by** (MS9 phase 188). @induction … of@ builds an 'Eliminate' node;
+-- @case … of@ applies the generated @caseD@ global, whose methods are the same
+-- ones minus their inductive hypotheses. Everything above — the motive, the
+-- equations, which indices are tied, the reflexivity at the use site — is
+-- shared, because none of it has anything to do with hypotheses. So this is a
+-- parameter rather than a second tactic, for the reason
+-- 'Thena.Global.Env.Scheme' is a parameter rather than a second
+-- @eliminatorParts@.
+--
 -- **The target is abstracted before the indices**, which is a real choice and
 -- not an accident of order. If an occurrence of the target contains an index
 -- expression, abstracting indices first rewrites inside it, and the occurrence
 -- then no longer matches the target. Both orders are sound — the use site
 -- substitutes everything back — but this one generalises more.
 eliminate
-  :: GlobalEnv -> Context -> Int -> Core -> Core
+  :: GlobalEnv -> Context -> Scheme -> Int -> Core -> Core
   -> (Either ElimError Elimination, Int)
-eliminate env ctx n0 goal tgt =
+eliminate env ctx sch n0 goal tgt =
   -- **Level obligations are dropped here**, as everywhere outside the checking
   -- pass: "Thena.Core.Typing"'s header says why once, and @qed@ re-collects.
   case infer env ctx n0 tgt of
@@ -300,13 +314,62 @@ eliminate env ctx n0 goal tgt =
             (Left e, _, n7)  -> (Left (MotiveIllTyped e), n7)
             (Right l, _, n7) -> assemble d ls ps as tied motiveTerm l n7
 
+    -- **Which scheme's type the methods are read off, and at which levels.**
+    -- One of exactly two places the scheme is read.
+    --
+    -- For 'Inductive' the type is computed, as it has been since phase 8. For
+    -- 'CaseAnalysis' it is the type @declare@ installed for @caseD@, looked up
+    -- rather than rebuilt: @caseD@ is an ordinary definition, and recomputing
+    -- its type here would be the second encoding §3.7 refuses for the ι-rules.
+    -- Its level parameters are the datatype's plus its own motive level, in
+    -- that order (phase 178), which is why the two answer with their own list.
+    --
+    -- The @Nothing@ case is unreachable — @declare@ installs @caseD@ with the
+    -- datatype, and 'build' has already found the datatype. It falls back to the
+    -- eliminator's type, which has a hypothesis per recursive argument that
+    -- @caseD@'s head does not take, so the scheme is refused by 'check' rather
+    -- than quietly handing an arm an extra binder.
+    schemeType d l n = case sch of
+      Inductive    -> inductive
+      CaseAnalysis -> case lookupDefinition (caseName (inductiveName d)) env of
+        Just cd -> (definitionType cd, definitionLevels cd, n)
+        Nothing -> inductive
+      where inductive = let (t, n') = eliminatorType d l n
+                         in (t, inductiveLevels d, n')
+
+    -- The level arguments that scheme's head is taken at. @caseD@ takes the
+    -- motive's level as a further argument; an @Eliminate@ node carries the
+    -- motive itself and needs none.
+    schemeLevels ls l = case sch of
+      Inductive    -> ls
+      CaseAnalysis -> ls ++ [l]
+
+    -- **The head the methods are attached to** — the other place the scheme is
+    -- read. An 'Eliminate' node for induction; an application of the @caseD@
+    -- global for case analysis, which δ-unfolds to an elimination whose methods
+    -- discard the hypotheses, so the kernel sees one kind of thing either way.
+    schemeHead d ls ps motiveTerm mvs as elargs = case sch of
+      Inductive -> Eliminate
+        { eliminated = inductiveName d
+        , levels     = ls
+        , parameters = ps
+        , motive     = motiveTerm
+        , methods    = map Free mvs
+        , indices    = as
+        , target     = tgt
+        }
+      CaseAnalysis ->
+        foldl App (Global (caseName (inductiveName d)) elargs)
+          (ps ++ [motiveTerm] ++ map Free mvs ++ as ++ [tgt])
+
     assemble d ls ps as tied motiveTerm l n7 =
-      let (ety0, n8) = eliminatorType d l n7
+      let (ety0, elvs, n8) = schemeType d l n7
           -- **Instantiated at the target's level arguments** (phase 31d).
           -- 'Thena.Core.Typing' does the same for a written @elim@; the tactic
           -- builds its own scheme and has to do it too, or the eliminator's
           -- type keeps the datatype's rigid parameters and nothing matches.
-          ety = case instantiateLevels (inductiveLevels d) ls of
+          elargs = schemeLevels ls l
+          ety = case instantiateLevels elvs elargs of
             Just sub -> substLevelsIn sub ety0
             Nothing  -> ety0
           -- Walk the eliminator's type past the parameters and the motive, then
@@ -329,15 +392,7 @@ eliminate env ctx n0 goal tgt =
             ]
           methodEntries = [ Hypothesis mv i mty | (mv, i, mty) <- holes ]
 
-          node = Eliminate
-            { eliminated = inductiveName d
-            , levels     = ls
-            , parameters = ps
-            , motive     = motiveTerm
-            , methods    = map Free mvs
-            , indices    = as
-            , target     = tgt
-            }
+          node = schemeHead d ls ps motiveTerm mvs as elargs
           -- The equations are reflexive at the use site, which is the whole
           -- point of the scheme (§3.7, thesis §3.5). Only the tied indices have
           -- one; a friendly index was abstracted outright and carries none.

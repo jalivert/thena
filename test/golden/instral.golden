@@ -19,11 +19,14 @@ thena spine> :produces Core
   fresh-universe/0 : Core
 thena spine> :accepts Surface
   elaborate/1 : Surface -> ()   (rule)
+  ihs-for/2 : Surface -> Name -> List Name   (rule)
   arm-for/2 : Surface -> Name -> (Pattern, Surface)   (rule)
   pick/5 : Name -> Name -> Pattern -> Surface -> Surface -> (Pattern, Surface)   (rule)
+  elaborate-arm/5 : Surface -> Name -> Core -> List (Option Core) -> (Pattern, Surface) -> ()   (rule)
   one-case/4 : Surface -> Name -> Option Core -> List (Option Core) -> ()   (rule)
   split-cases/4 : Surface -> List Name -> List Core -> Int -> ()   (rule)
   split-over/3 : Surface -> List Name -> (List Core, Int) -> ()   (rule)
+  split-claim/2 : Surface -> Core -> (List Core, Int)   (rule)
   split-elaborate/1 : Surface -> ()   (rule)
   run-block/1 : Surface -> ()   (rule)
   intro-binders/2 : Surface -> Core -> Core   (rule)

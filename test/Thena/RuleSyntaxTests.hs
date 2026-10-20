@@ -314,7 +314,9 @@ everyOp =
   , ("constructor-arguments c", Op.ConstructorArguments (Ref "c"))
   , ("constructor-recursive-arguments c", Op.ConstructorRecursiveArguments (Ref "c"))
     -- Specialisation by unification (MS9 phase 177).
-  , ("specialise c k", Op.Specialise (Ref "c") (Ref "k"))
+  , ("specialise c ihs k", Op.Specialise (Ref "c") (Ref "ihs") (Ref "k"))
+    -- @case … of@'s own claim (MS9 phase 188).
+  , ("prim-case x", Op.CaseAnalyse (Ref "x"))
     -- Tying a recursive call to its induction hypothesis (MS9 phase 186).
   , ("tie-recursion t", Op.TieRecursion (Ref "t"))
   ]

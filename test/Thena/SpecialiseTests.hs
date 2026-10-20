@@ -31,7 +31,7 @@ import Data.List (isInfixOf)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import Thena.Core.Context (Context, Entry (..), entryIdent, entryVar)
+import Thena.Core.Context (Context, Entry (..), entryIdent, entryType, entryVar)
 import Thena.Core.Term (Core, GlobalName (..), Ident (..), fresh, freeVars)
 import Thena.Declared (eqNat, eqNatCounter, eqNatVec, eqNatVecCounter)
 import Thena.Driver
@@ -45,7 +45,14 @@ import Thena.Driver
   , withRuleBases
   )
 import Thena.Errors (SpecialiseError (..))
-import Thena.Global.Env (GlobalEnv)
+import Thena.Global.Env
+  ( ConstructorDefinition (..)
+  , GlobalEnv
+  , InductiveDefinition (..)
+  , Scheme (..)
+  , lookupConstructor
+  , recursiveArgument
+  )
 import Thena.Render (Rendering (..), renderCore)
 import Thena.Tactics.Eliminate (Elimination (..), eliminate)
 import Thena.Tactics.Specialise (Specialisation (..), specialise)
@@ -372,14 +379,16 @@ splitBase = unlines
     -- turned into a guess: the variable names the hole wherever it has moved to
     -- on the spine.
   , "  do goto h"
-  , "     ; specialise c k"
+  , "     ; ihs = constructor-recursive-arguments c"
+  , "     ; specialise c ihs k"
   , "     ; split-each cs hs k"
   , ""
   , "split-second : Core -> Name -> ()"
   , "rule split-second t c :- when focus-is-hole"
   , "  do ([_, h], k) = prim-eliminate t"
   , "     ; goto h"
-  , "     ; specialise c k"
+  , "     ; ihs = constructor-recursive-arguments c"
+  , "     ; specialise c ihs k"
   ]
 
 -- | The shipped base and this one, which is a list and not an addition: a load
@@ -411,7 +420,8 @@ specialises what c k src want = testCase what $
 -- | The refusal, for a fixture that is meant to be refused.
 refused :: String -> Int -> String -> Maybe SpecialiseError
 refused c k src =
-  case fst (specialise eqNat natContext natCounter (GlobalName c) k
+  case fst (specialise eqNat natContext natCounter (GlobalName c)
+              (hypsOf eqNat c) k
               (term eqNat natContext natCounter src)) of
     Left e  -> Just e
     Right _ -> Nothing
@@ -419,9 +429,25 @@ refused c k src =
 -- | Run it and insist it worked; a refusal in these fixtures is a bug in the
 -- fixture, not a test result.
 run' :: GlobalEnv -> Context -> Int -> String -> Int -> Core -> Specialisation
-run' env ctx n c k mty = case fst (specialise env ctx n (GlobalName c) k mty) of
+run' env ctx n c k mty =
+  case fst (specialise env ctx n (GlobalName c) (hypsOf env c) k mty) of
   Right s -> s
   Left e  -> error (c ++ ": " ++ show e)
+
+-- | How many inductive hypotheses this constructor's method carries: one per
+-- recursive argument.
+--
+-- **Every fixture here is an INDUCTIVE method**, so the count that
+-- "Thena.Tactics.Specialise" used to read off the declaration is read off it
+-- here instead. It stopped doing that at phase 188 because it was assuming the
+-- caller's scheme, and @caseD@'s methods carry none.
+hypsOf :: GlobalEnv -> String -> Int
+hypsOf env c = case lookupConstructor (GlobalName c) env of
+  Nothing     -> 0
+  Just (d, k) ->
+    length [ () | e <- constructorArguments k
+                , Just _ <- [recursiveArgument (inductiveName d)
+                               (length (inductiveParameters d)) (entryType e)] ]
 
 -- | The subgoal's name and type, rendered — or 'Nothing' where the method was
 -- closed outright.
@@ -456,6 +482,6 @@ run label env ctx n goal tgt = case parseCore [] env ctx n goal of
   Left e -> error ("fixture does not parse: " ++ show e)
   Right (g, n1) -> case parseCore [] env ctx n1 tgt of
     Left e -> error ("fixture does not parse: " ++ show e)
-    Right (t, n2) -> case fst (eliminate env ctx n2 g t) of
+    Right (t, n2) -> case fst (eliminate env ctx Inductive n2 g t) of
       Right el -> el
       Left e   -> error (label ++ ": " ++ show e)

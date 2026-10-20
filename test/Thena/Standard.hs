@@ -322,7 +322,24 @@ elaborateClauses =
       -- method a conflicting equation closes satisfies too. So the clauses
       -- below differ only in their guard, and @case@ is admitted exactly where
       -- no method survives to carry an inductive hypothesis.
-    ++ [ Rule (GlobalName "split-elaborate") [PVar "t"] []
+      -- **Which eliminator the written word asks for** (MS9 phase 188), and
+      -- the only place it is read before a method is in hand. @prim-eliminate@
+      -- builds an 'Thena.Core.Term.Eliminate' whose methods carry their
+      -- inductive hypotheses; @prim-case@ applies the generated @caseD@, whose
+      -- methods are the same ones without them. Both answer the same pair, so
+      -- everything downstream is shared — an arm-less split included, which is
+      -- why @case e of { }@ really applies @caseD@.
+    ++ [ Rule (GlobalName "split-claim") [PVar "t", PVar "x"]
+           [SplitIsInduction (Ref "t")]
+           [ Bind (Op.PVar "r") Nothing (Op.Eliminate (Ref "x"))
+           , Do (Op.Return (Ref "r"))
+           ]
+       , Rule (GlobalName "split-claim") [PVar "t", PVar "x"]
+           [SplitIsCases (Ref "t")]
+           [ Bind (Op.PVar "r") Nothing (Op.CaseAnalyse (Ref "x"))
+           , Do (Op.Return (Ref "r"))
+           ]
+       , Rule (GlobalName "split-elaborate") [PVar "t"] []
            [ Bind (Op.PVar "h") Nothing Here
            , Bind (Op.PVar "u") Nothing (Op.Call "fresh-universe" [])
            , Bind (Op.PVar "ty") Nothing (Op.Claim (Lit (VText "Tsplit")) (Ref "u"))
@@ -331,7 +348,8 @@ elaborateClauses =
            , Bind (Op.PVar "g") Nothing (Op.SplitTarget (Ref "t"))
            , call "elaborate" [Ref "g"]
            , Do (Op.Goto (Ref "h"))
-           , Bind (Op.PVar "r") Nothing (Op.Eliminate (Ref "x"))
+           , Bind (Op.PVar "r") Nothing
+               (Op.Call "split-claim" [Ref "t", Ref "x"])
            , Bind (Op.PVar "tt") Nothing (Op.Typing (Ref "x"))
            , Bind (Op.PVar "d") Nothing (Op.DatatypeOf (Ref "tt"))
            , Bind (Op.PVar "cs") Nothing (Op.ConstructorsOf (Ref "d"))
@@ -342,6 +360,13 @@ elaborateClauses =
        , Rule (GlobalName "elaborate") [PVar "t"]
            [ FocusIsHole, SurfaceIsSplit (Ref "t"), SplitHasArms (Ref "t")
            , SplitIsInduction (Ref "t")
+           ]
+           [call "split-elaborate" [Ref "t"]]
+         -- **Two clauses only because the head language has no disjunction.**
+         -- The word means something inside, at @split-claim@ and @ihs-for@.
+       , Rule (GlobalName "elaborate") [PVar "t"]
+           [ FocusIsHole, SurfaceIsSplit (Ref "t"), SplitHasArms (Ref "t")
+           , SplitIsCases (Ref "t")
            ]
            [call "split-elaborate" [Ref "t"]]
        , Rule (GlobalName "elaborate") [PVar "t"]
@@ -696,6 +721,18 @@ splitClauses =
           (Op.Call "intro-pattern" [Ref "ps", Ref "fs", Ref "k"])
       , Do (Op.Return (Ref "r"))
       ]
+    -- **Which hypotheses an arm is handed** (MS9 phase 188), and the one place
+    -- the written word means anything once a method is in hand: @induction@ one
+    -- per recursive argument, @case@ none, @caseD@'s methods being the
+    -- eliminator's minus exactly these. Complementary tests, so no choice point.
+  , Rule (GlobalName "ihs-for") [PVar "t", PVar "c"]
+      [SplitIsInduction (Ref "t")]
+      [ Bind (Op.PVar "r") Nothing (Op.ConstructorRecursiveArguments (Ref "c"))
+      , Do (Op.Return (Ref "r"))
+      ]
+  , Rule (GlobalName "ihs-for") [PVar "t", PVar "c"]
+      [SplitIsCases (Ref "t")]
+      [Do (Op.Return (Op.ListOf []))]
   , Rule (GlobalName "intro-ihs") [PList [] Nothing, PVar "k"] []
       [Do (Op.Return (Ref "k"))]
   , Rule (GlobalName "intro-ihs")
@@ -730,7 +767,7 @@ splitClauses =
       , Do (Op.Return (Ref "a"))
       ]
   , Rule (GlobalName "elaborate-arm")
-      [ PVar "c", PVar "sub", PVar "forced"
+      [ PVar "t", PVar "c", PVar "sub", PVar "forced"
       , PPair (PVar "p") (PVar "b")
       ] []
       [ Bind (Op.PVar "as") Nothing (Op.PatternArguments (Ref "p"))
@@ -743,7 +780,7 @@ splitClauses =
       , Do Back
       , Bind (Op.PVar "k1") Nothing
           (Op.Call "intro-pattern" [Ref "as", Ref "forced", Ref "k0"])
-      , Bind (Op.PVar "ihs") Nothing (Op.ConstructorRecursiveArguments (Ref "c"))
+      , Bind (Op.PVar "ihs") Nothing (Op.Call "ihs-for" [Ref "t", Ref "c"])
       , Bind (Op.PVar "k2") Nothing (Op.Call "intro-ihs" [Ref "ihs", Ref "k1"])
       , Do (Goto (Ref "k2"))
       , call "elaborate" [Ref "b"]
@@ -770,7 +807,7 @@ splitClauses =
       [PVar "t", PVar "c", PSome (PVar "sub"), PVar "forced"]
       [SplitHasArms (Ref "t")]
       [ Bind (Op.PVar "a") Nothing (Op.Call "arm-for" [Ref "t", Ref "c"])
-      , call "elaborate-arm" [Ref "c", Ref "sub", Ref "forced", Ref "a"]
+      , call "elaborate-arm" [Ref "t", Ref "c", Ref "sub", Ref "forced", Ref "a"]
       ]
   , Rule (GlobalName "split-cases")
       [PVar "t", PList [] Nothing, PList [] Nothing, PVar "k"] [] []
@@ -779,8 +816,13 @@ splitClauses =
       , PList [PVar "mh"] (Just (PVar "ms")), PVar "k"
       ] []
       [ Do (Goto (Ref "mh"))
+        -- **@specialise@ is TOLD which hypotheses the method carries** (MS9
+        -- phase 188) rather than counting them off the constructor, which
+        -- silently assumed the inductive scheme and made @case … of@ refuse
+        -- its own methods as misshapen.
+      , Bind (Op.PVar "ihs") Nothing (Op.Call "ihs-for" [Ref "t", Ref "c"])
       , Bind (PPair (Op.PVar "sub") (Op.PVar "forced")) Nothing
-          (Op.Specialise (Ref "c") (Ref "k"))
+          (Op.Specialise (Ref "c") (Ref "ihs") (Ref "k"))
       , call "one-case" [Ref "t", Ref "c", Ref "sub", Ref "forced"]
       , Do (Goto (Ref "mh"))
       , call "solve" []

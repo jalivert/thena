@@ -348,8 +348,8 @@ tests =
               -- The splitting tree's rules that take a Surface (MS9) sit
               -- where the base declares them, between elaborate and run-block.
               @?= [ "elaborate"
-                  , "arm-for", "pick", "one-case", "split-cases", "split-over"
-                  , "split-elaborate"
+                  , "ihs-for", "arm-for", "pick", "elaborate-arm", "one-case"
+                  , "split-cases", "split-over", "split-claim", "split-elaborate"
                   , "run-block", "intro-binders", "spine-arguments"
                   ]
           -- **One thing in the shipped base returns a @Core@ since MS5 phase

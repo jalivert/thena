@@ -126,6 +126,7 @@ import Thena.Global.Declare (buildInductive)
 import Thena.Global.Env
   ( GlobalEnv
   , InductiveDefinition
+  , Scheme (..)
   , declaredNames
   , recursiveArgument
   , definitionLevels
@@ -1210,39 +1211,20 @@ perform instr rest m = case operation instr of
   -- Qualified because "Thena.Core.Term" has an 'Eliminate' too. The two are
   -- exactly one apart: this op /decides/ to eliminate, that node /is/ the
   -- elimination it builds. The same shape as @Component.Claim@ beside 'Claim'.
-  Op.Eliminate tgt -> case term tgt of
-    Left r  -> failure r m
-    Right t -> case focus (cursor (development m)) of
-      OnComponent (Component.Claim x i s) ->
-        case eliminate (globals m) contextAt (names m) s t of
-          (Left e,   n1) -> failure (CannotEliminate e) m { names = n1 }
-          (Right el, n1) ->
-            -- The methods go in above the goal, innermost first, so the goal
-            -- can see them; then the goal itself becomes the guess that uses
-            -- them. Both halves are one op because a half-applied elimination
-            -- — holes claimed, nothing attached — is not a state any rule
-            -- should be able to observe.
-            let (holes, named) = claimSubgoals (cursor (development m)) (elimMethods el)
-                guess = Component.Guess x i (Trailing (elimTerm el)) s
-             in case replaceComponent guess holes of
-                  Left e    -> failure (CannotMove e) m
-                  Right cur ->
-                    -- **The holes it claimed, and the equation count, as a
-                    -- pair** — his ruling of 2026-10-19.
-                    -- 'Thena.Instral.Ops.resultOf' carries the argument. The
-                    -- holes are variables because 'Thena.Instral.Ops.Goto' is
-                    -- the only move a rule can aim at a hole it /found/, and
-                    -- the count is one number for the whole elimination
-                    -- because that is what @specialise@ needs and nothing else
-                    -- can work out.
-                    producing (Saying (subgoalMessage (map snd named)))
-                              (VPair (VList [ VTerm (Free v) | (v, _) <- named ])
-                                     (VInt (elimEquations el)))
-                              m { development = Development cur, names = n1 }
-      OnComponent _ -> failure NotAHole m
-      _             -> failure (CannotMove NotOnTheSpine) m
+  Op.Eliminate tgt -> eliminating Inductive tgt
 
-  -- **Tying a recursive call to the induction hypothesis it is** (MS9 phase
+  -- **@case … of@'s half, and it differs by one argument** (MS9 phase 188). The
+  -- methods come off @caseD@'s type instead of the eliminator's, so each is the
+  -- same method minus its inductive hypotheses, and the term is an application
+  -- of that global rather than an 'Eliminate' node.
+  --
+  -- **Two ops rather than one taking a tag**, because instral has no enum to
+  -- pass and because a user asks for these by two different words. The tactic
+  -- is one and the 'Scheme' is its parameter — "Thena.Tactics.Eliminate"'s
+  -- header has the argument.
+  Op.CaseAnalyse tgt -> eliminating CaseAnalysis tgt
+
+    -- **Tying a recursive call to the induction hypothesis it is** (MS9 phase
   -- 186) — his ruling of 2026-10-19. The driver assumes the name being defined
   -- while the body elaborates, so this is handed @λ f -> body@ and answers the
   -- body with every application of @f@ replaced.
@@ -1267,11 +1249,20 @@ perform instr rest m = case operation instr of
   -- **no** subgoal at all — a conflicting equation closes the method, which is
   -- the impossible case vanishing — and then nothing is claimed and the guess
   -- mentions nothing.
-  Op.Specialise c k -> case (,) <$> text c <*> operandValue (env (exec m)) k of
+  Op.Specialise c hyps k ->
+    case (,,) <$> text c
+              <*> operandValue (env (exec m)) hyps
+              <*> operandValue (env (exec m)) k of
     Left e -> failure e m
-    Right (w, VInt eqs) -> case focus (cursor (development m)) of
+    -- **The hypotheses this method carries, as the list the arm will bind**
+    -- (MS9 phase 188). Only the count is used here, and the list is what the
+    -- operand is because it is the one the caller already has — @ihs-for@
+    -- answers it, and @intro-ihs@ consumes the same value. Reading the count
+    -- off the declaration instead assumed the inductive scheme, and @caseD@'s
+    -- methods carry none.
+    Right (w, VList hs, VInt eqs) -> case focus (cursor (development m)) of
       OnComponent (Component.Claim x i s) ->
-        case specialise (globals m) contextAt (names m) (GlobalName w) eqs s of
+        case specialise (globals m) contextAt (names m) (GlobalName w) (length hs) eqs s of
           (Left e,  n1) -> failure (CannotSpecialise e) m { names = n1 }
           (Right sp, n1) ->
             let (holes, named) = claimSubgoals (cursor (development m)) (specialisedGoal sp)
@@ -1954,6 +1945,41 @@ perform instr rest m = case operation instr of
   -- there. Elaboration's @FILL@ is what wanted it; see 'Thena.Instral.Ops.UnifyInto'.
   UnifyInto l r -> unifying unifyInto l r
   where
+    -- The whole of both elimination ops: the goal is the focus, the methods go
+    -- in above it, and the goal becomes the guess that uses them. 'Scheme' is
+    -- the only thing the two pass differently.
+    eliminating sch tgt = case term tgt of
+      Left r  -> failure r m
+      Right t -> case focus (cursor (development m)) of
+        OnComponent (Component.Claim x i s) ->
+          case eliminate (globals m) contextAt sch (names m) s t of
+            (Left e,   n1) -> failure (CannotEliminate e) m { names = n1 }
+            (Right el, n1) ->
+              -- The methods go in above the goal, innermost first, so the goal
+              -- can see them; then the goal itself becomes the guess that uses
+              -- them. Both halves are one op because a half-applied
+              -- elimination — holes claimed, nothing attached — is not a state
+              -- any rule should be able to observe.
+              let (holes, named) = claimSubgoals (cursor (development m)) (elimMethods el)
+                  guess = Component.Guess x i (Trailing (elimTerm el)) s
+               in case replaceComponent guess holes of
+                    Left e    -> failure (CannotMove e) m
+                    Right cur ->
+                      -- **The holes it claimed, and the equation count, as a
+                      -- pair** — his ruling of 2026-10-19.
+                      -- 'Thena.Instral.Ops.resultOf' carries the argument. The
+                      -- holes are variables because 'Thena.Instral.Ops.Goto' is
+                      -- the only move a rule can aim at a hole it /found/, and
+                      -- the count is one number for the whole elimination
+                      -- because that is what @specialise@ needs and nothing
+                      -- else can work out.
+                      producing (Saying (subgoalMessage (map snd named)))
+                                (VPair (VList [ VTerm (Free v) | (v, _) <- named ])
+                                       (VInt (elimEquations el)))
+                                m { development = Development cur, names = n1 }
+        OnComponent _ -> failure NotAHole m
+        _             -> failure (CannotMove NotOnTheSpine) m
+
     -- The two unification ops differ in one argument and share everything
     -- else, including the type being inferred from the LEFT side. That is not
     -- arbitrary now that there is a direction: @unify-into s t@ asks whether

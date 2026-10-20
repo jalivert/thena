@@ -46,6 +46,7 @@ module Thena.Global.Env
   , eliminatorType
   , eliminatorWrapper
   , eliminatorName
+  , Scheme (..)
   , caseName
   , caseWrapper
   , varsInEnv

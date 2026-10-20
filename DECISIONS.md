@@ -2300,6 +2300,50 @@ definition depending on an inference you cannot see, and changing a lemma's stat
 can silently change which. The answer to that is the system showing you which positions
 it determined, rather than making you write them out.
 
+### `case` says the arm does not recurse, and the type is what says it
+
+```
+predC : Nat -> Nat
+predC = \ n -> case n of { zero -> zero ; succ m -> m }
+
+double : Nat -> Nat
+double = \ n -> induction n of { zero -> zero ; succ m -> succ (succ (double m)) }
+```
+
+Two words, one mechanism. `induction t of { … }` elaborates to the datatype's
+eliminator, whose every method is handed one inductive hypothesis per recursive
+argument. `case t of { … }` elaborates to the generated `caseNat` — the same
+eliminator with those hypotheses dropped — so a `case` arm has nothing to recurse
+with:
+
+```
+dblC = \ n -> case n of { zero -> zero ; succ m -> succ (succ (dblC m)) }
+  no induction hypothesis is about this call, so it is not structurally smaller: dblC m
+```
+
+**Nothing checks for that.** There is no rule anywhere that says a `case` arm may
+not recurse. The hypothesis is simply not in scope, so the call has nothing to tie
+to and is refused by the same mechanism that refuses a call at the wrong index
+under `induction`. Writing `case` is therefore a claim the type carries, not a
+comment: `examples/canonical.thena` is all `case`, because inversion never
+recurses, and `examples/progress.thena` has exactly one `induction` in it.
+
+**Everything else about the two is identical.** The same motive generalising the
+indices, the same equations recovering their specificity, the same forced
+positions, the same vanished cases. `case` over an indexed family forces a
+constructor argument exactly as `induction` does:
+
+```
+vtailC : ∀ (A : Type₀) (n : Nat) -> Vec A (succ n) -> Vec A n
+vtailC = \ A n v -> case v of { vcons k a as -> as }
+```
+
+**And the kernel cannot tell them apart**, which is the point of doing it this
+way. `caseNat` is an ordinary definition whose body is an `elim Nat` with a λ
+discarding each hypothesis, so it δ-unfolds to the elimination and is checked as
+one. Nothing was added to the core language, and a proof written either way is the
+same term up to unfolding.
+
 ### Writing no arms is the claim that every case is impossible
 
 ```
