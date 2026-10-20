@@ -67,11 +67,12 @@ import qualified Data.Text.Zipper as Zip
 import qualified Graphics.Vty as V
 import Graphics.Vty.Platform.Unix (mkVty)
 import Lens.Micro (Lens', lens)
-import System.Directory (doesDirectoryExist, listDirectory)
+import System.CPUTime (getCPUTime)
+import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
 import System.FilePath (dropTrailingPathSeparator, takeDirectory, takeFileName, (</>))
 import System.IO (hFlush, hPutStr, stdout)
 
-import Thena.Driver (Response (Quit), Session, oneLine)
+import Thena.Driver (Response (..), Session, oneLine)
 import Thena.Files (following, startingSession)
 import Thena.Render (renderResponse, renderTrouble)
 import Thena.View (developmentView, focusAddress, machineView, statementOfferView)
@@ -97,6 +98,7 @@ import Tui.Theme (Theme (..), neonPinkDark, themeByName, themes)
 
 data Name
   = Input
+  | ScriptBar
   | HistoryVP
   | ProofTermVP
   | GoalsVP
@@ -104,6 +106,36 @@ data Name
   | LoadPopup
   | OfferPopup
   deriving (Eq, Ord, Show)
+
+-- | One committed line of a live script, and **the whole session it
+-- produced** — not a delta, not an undo count.
+--
+-- **`:undo` is deliberately not used to rewind a script, and this was
+-- measured rather than assumed** (his spec's Priority 0: *"simply doing
+-- `:undo` might be enough (make sure of that)"*). It is not enough.
+-- `Snapshot` excludes `globals` on purpose — §7.7, the environment only ever
+-- grows — so an `:undo` past a @data@ or a @qed@ rewinds the development and
+-- leaves the declaration standing. Checked directly through 'oneLine':
+-- declare @Nat@, declare @Foo@, `:undo`, and @:show Foo@ still prints @Foo@.
+-- A document rewound that way would be describing a session that does not
+-- exist.
+--
+-- A 'Session' is an immutable value and 'oneLine' is pure, so holding one per
+-- line costs only what actually differs between them, and rewinding is
+-- indexing rather than replaying. The same check from the stored session
+-- reports @nothing named Foo has been declared@, which is the truth the
+-- document needs. **It also means a script is editable along its whole
+-- length** — the `qed` wall that bounds `:undo` is simply not in this path.
+data ScriptLine = ScriptLine
+  { slText    :: String
+    -- ^ exactly what will be written to the @.thena.script@.
+  , slSession :: Session
+    -- ^ the session after this line ran; **unchanged from the line before
+    -- when the engine refused it**, which is what lets a refused line stay
+    -- in the document without lying about the state beneath it.
+  , slOutput  :: [String]
+  , slOk      :: Bool
+  }
 
 -- | One completed round: the line that was run (absent for the startup
 -- trouble dump and the `:theme`/`:fold` pseudo-commands, which never echoed
@@ -215,6 +247,38 @@ data St = St
     -- browses an open dropdown first exactly as it always has
     -- ('navigateCompletion'); history only takes the keys once nothing is
     -- left to navigate there (Esc, or nothing offered).
+  , stScriptMode :: Bool
+    -- ^ live-script mode (`~5vtt3`), entered with `:script`. The repl pane
+    -- stops being an append-only transcript and becomes the script itself:
+    -- what you type *is* the document, and the caret moves into it.
+  , stScript :: [ScriptLine]
+    -- ^ the committed script, oldest first. Survives toggling the mode off
+    -- and back on — discarding someone's script on a stray keypress is a bad
+    -- failure mode, so leaving the mode only hides it.
+  , stScriptBase :: Maybe Session
+    -- ^ **the session live-script mode started from, and it is a fresh one**
+    -- — his ruling: entering the mode does not inherit the ordinary REPL's
+    -- session. 'Nothing' until the mode is first entered, since booting one
+    -- is IO. Rewinding to line 0 means rewinding to this.
+  , stScriptPos :: Maybe Int
+    -- ^ 'Nothing' while composing a new line past the end; @'Just' i@ while
+    -- the caret stands *on* committed line @i@, whose text is loaded into
+    -- 'stInput' for editing in place. **Not 'stHistoryPos' wearing a
+    -- different name**: history recalls text and never touches the entry it
+    -- came from, where this edits the document and rewinds the session with
+    -- it.
+  , stScriptDraft :: String
+    -- ^ the new-line text Up interrupted, same job as 'stHistoryDraft'.
+  , stScriptBar :: Maybe (Editor Text Name)
+    -- ^ the command bar, his own design call: **nothing typed in the
+    -- document is ever a command**, so a command needs somewhere else to be
+    -- typed. Summoned (Esc, or F2), one line, closes on Enter or Esc.
+    -- 'Nothing' when it is not showing — a permanent input row at the pane's
+    -- foot reads as a second REPL, which is exactly the confusion it exists
+    -- to prevent.
+  , stScriptNote :: Maybe String
+    -- ^ what the bar last had to say — a refusal, or a saved path. Shown at
+    -- the pane's foot until the next thing happens.
   , stHistoryDraft :: String
     -- ^ the live line 'historyBack' interrupted, restored by
     -- 'historyForward' on the way back past the newest entry — the same
@@ -255,6 +319,13 @@ runTui = do
         , stHistory     = []
         , stHistoryPos  = Nothing
         , stHistoryDraft = ""
+        , stScriptMode  = False
+        , stScript      = []
+        , stScriptBase  = Nothing
+        , stScriptPos   = Nothing
+        , stScriptDraft = ""
+        , stScriptBar   = Nothing
+        , stScriptNote  = Nothing
         , stInputExtent = Nothing
         , stPaneExtent  = Nothing
         }
@@ -319,6 +390,18 @@ attrs :: Theme -> AttrMap
 attrs th = attrMap (surface (themeStage th) (themeInk th))
   [ (attrName "panel",          surface (themePanel th) (themeInk th))
   , (attrName "edge.repl",      surface (themePanel th) (themeRepl th))
+  -- Live-script mode's pane wears the repl's own accent — it *is* the repl
+  -- pane in another mode, not a fifth pane, so a second colour would say
+  -- something untrue about the layout.
+  , (attrName "edge.script",    surface (themePanel th) (themeRepl th))
+  , (attrName "title.script",   ink (themeRepl th))
+  -- The caret's own row marker, his suggested '⟩'. The accent, because it
+  -- answers "where am I in the document" and nothing else on screen does.
+  , (attrName "script.marker",  ink (themeRepl th))
+  -- A line the engine refused, and its complaint. Dim rather than loud:
+  -- the line is still in the document and still yours to fix, which is not
+  -- an alarm.
+  , (attrName "script.refused", ink (themeDim th))
   , (attrName "edge.proofterm", surface (themePanel th) (themeProof th))
   , (attrName "edge.goals",     surface (themePanel th) (themeGoals th))
   , (attrName "edge.machine",   surface (themePanel th) (themeMachine th))
@@ -392,7 +475,7 @@ draw :: St -> [Widget Name]
 draw st = dropdownLayer st <> offerDropdownLayer st <> [padAll 1 (hBox [replColumn, gapH, sideColumn])]
   where
     budget = Budget 200
-    s = stSession st
+    s = activeSession st
     links = developmentView budget s
     machine = machineView budget s
     fold = if stFoldOn st then Fold (focusAddress s) else NoFold
@@ -412,10 +495,16 @@ draw st = dropdownLayer st <> offerDropdownLayer st <> [padAll 1 (hBox [replColu
     -- plain version, his own call: let it reach the pane's actual bottom and
     -- scroll from there like a normal terminal, not a pre-built holding-point
     -- short of that — add one later only if this doesn't feel right.
-    replColumn =
-      withAttr (attrName "panel") $
-        pane "repl" HistoryVP
-          (padAll 1 (vBox (renderTurns (stTurns st) <> [inputLine])))
+    replColumn
+      | stScriptMode st =
+          withAttr (attrName "panel") $
+            paneWith "script" HistoryVP
+              (padAll 1 (vBox (renderScript st editorWidget)))
+              (scriptFoot st)
+      | otherwise =
+          withAttr (attrName "panel") $
+            pane "repl" HistoryVP
+              (padAll 1 (vBox (renderTurns (stTurns st) <> [inputLine])))
 
     -- | 'Input' reported here, on the editor itself, not the "❯ " ahead of
     -- it — so 'stInputExtent's own upper-left is column 0 of the *text*,
@@ -429,7 +518,12 @@ draw st = dropdownLayer st <> offerDropdownLayer st <> [padAll 1 (hBox [replColu
     -- unchanged, so Brick's own cursor placement — a column count into the
     -- *unmodified* zipper — stays correct without knowing any of this
     -- happened; see 'ghostAt'/'offerGhost'.
-    inputLine = str "❯ " <+> reportExtent Input (renderEditor (\ts -> renderInputContent ts col ghost skip (stRecoveredSpan st)) True (stInput st))
+    inputLine = str "❯ " <+> editorWidget
+    -- | The same editor without the prompt glyph. **Script mode has no
+    -- prompt**: the caret is standing in a document, and a '❯' in front of
+    -- the line you are editing would be a prompt drawn into the text it is
+    -- not part of — and would land in no saved file, which is the tell.
+    editorWidget = reportExtent Input (renderEditor (\ts -> renderInputContent ts col ghost skip (stRecoveredSpan st)) True (stInput st))
       where
         -- | `:whisper off` (his `.jalivert/TUI.md` #23) silences this
         -- outright rather than 'ghostAt' itself carrying the flag — the
@@ -475,14 +569,22 @@ draw st = dropdownLayer st <> offerDropdownLayer st <> [padAll 1 (hBox [replColu
     -- is a fixed one-line header above it, sized by the outer 'vBox' like
     -- any other widget, the same move already made once for the edge bar's
     -- own infinite-height crash.
-    pane key vp content =
+    pane key vp content = paneWith key vp content []
+
+    -- | The same pane, plus fixed rows pinned below the viewport — the
+    -- command bar and its note. **Below the viewport, not inside it**, for
+    -- the reason the title is: anything inside scrolls away with the content,
+    -- and a bar you are typing into must not.
+    paneWith key vp content foot =
       clickable vp $
         hBox
           [ withAttr (attrName ("edge." <> key)) (hLimit 1 (fill '▎'))
           , vBox
-              [ withAttr (attrName ("title." <> key)) (padLeftRight 1 (str key))
-              , viewport vp Vertical content
-              ]
+              ( [ withAttr (attrName ("title." <> key)) (padLeftRight 1 (str key))
+                , viewport vp Vertical content
+                ]
+                  <> foot
+              )
           ]
 
 -- | One turn, prompt (if any) then output, then a blank row — one empty
@@ -505,6 +607,47 @@ renderTurns turns = zipWith renderTurn [1 :: Int ..] turns
     outputLine accented l = marker <+> str " " <+> str l
       where
         marker = if accented then withAttr (attrName "accent.output") (str "▏") else str " "
+
+-- | The script as a document: every committed line, with the live editor
+-- standing wherever the caret is rather than pinned anywhere.
+--
+-- **The output of a line that worked is not shown.** The three panes to the
+-- right already say what the session looks like at the caret, continuously,
+-- and a document that interleaved responses would be a transcript again —
+-- which is the thing this mode exists not to be. **A line the engine refused
+-- does show its complaint**, dimmed beneath it, because that is the one case
+-- the panes cannot express: the line is in the document, it changed nothing,
+-- and it is yours to fix.
+renderScript :: St -> Widget Name -> [Widget Name]
+renderScript st inputLine =
+  concat (zipWith row [0 ..] (stScript st)) <> tail'
+  where
+    row i sl
+      | stScriptPos st == Just i = [marker <+> inputLine] <> refusal sl
+      | otherwise = [marker <+> str (slText sl)] <> refusal sl
+      where
+        marker
+          | stScriptPos st == Just i = withAttr (attrName "script.marker") (str "⟩ ")
+          | otherwise = str "  "
+    refusal sl
+      | slOk sl = []
+      | otherwise =
+          [ withAttr (attrName "script.refused") (str ("  " <> l)) | l <- slOutput sl ]
+    -- | The composing line sits past the end, which is where a document's
+    -- cursor is when you have not walked back into it.
+    tail' = if isNothing (stScriptPos st) then [str "  " <+> inputLine] else []
+
+-- | What is pinned below the script pane's viewport: the command bar while it
+-- is open, otherwise whatever it last had to say, otherwise nothing.
+scriptFoot :: St -> [Widget Name]
+scriptFoot st = case stScriptBar st of
+  Just bar ->
+    [ withAttr (attrName "script.marker") (str " : ")
+        <+> renderEditor (vBox . map (str . Text.unpack)) True bar
+    ]
+  Nothing -> case stScriptNote st of
+    Just note -> [withAttr (attrName "script.refused") (str (" " <> note))]
+    Nothing -> []
 
 -- | The `:load` dropdown, as its own layer positioned by the caret's actual
 -- screen coordinates from the *previous* render — 'Brick.Main.lookupExtent'
@@ -795,8 +938,69 @@ handleEvent ev = do
   st <- get
   put st { stInputExtent = inputExt, stPaneExtent = paneExt }
 
+-- | Three keyboards in one app, and which one an event reaches is decided
+-- here rather than guarded at twenty branches: the command bar while it is
+-- open, live-script mode's own keys while the mode is on, and otherwise the
+-- ordinary REPL exactly as it always was.
 handleEventInner :: BrickEvent Name e -> EventM Name St ()
-handleEventInner (VtyEvent (V.EvKey V.KEnter [])) = do
+handleEventInner ev = do
+  st <- get
+  case stScriptBar st of
+    Just bar -> handleBarEvent st bar ev
+    Nothing
+      | stScriptMode st -> handleScriptEvent ev
+      | otherwise -> handleReplEvent ev
+
+-- | The command bar owns every key while it is open. Enter submits it, Esc
+-- closes it unused, everything else edits its one line — no completion, no
+-- history, nothing shared with the document's own editor.
+handleBarEvent :: St -> Editor Text Name -> BrickEvent Name e -> EventM Name St ()
+handleBarEvent st bar ev = case ev of
+  VtyEvent (V.EvKey V.KEnter []) ->
+    scriptBarSubmit st (concatMap Text.unpack (getEditContents bar))
+  VtyEvent (V.EvKey V.KEsc []) -> closeScriptBar
+  _ -> do
+    bar' <- nestEventM' bar (handleEditorEvent ev)
+    put st { stScriptBar = Just bar' }
+
+-- | Live-script mode's own keys. **Enter, Up, Down and forward-delete mean
+-- something different here**; everything else — ordinary typing, Tab, the
+-- completion dropdown, Option+Backspace — falls through to the REPL's own
+-- handler, because editing the text of a line is editing text either way.
+--
+-- **F2 or Ctrl+X summons the command bar, and Esc deliberately does not.**
+-- Esc was tried first, on the reasoning that it is the one key every terminal
+-- delivers identically — and it was wrong, measured under a pty: Esc already
+-- means "dismiss", in two steps (his `.jalivert/TUI.md` #14), and how many
+-- steps are pending depends on what the dropdown is showing. One Esc too many
+-- silently opened the bar, which then ate the next Enter, so a line looked
+-- submitted and was not. **Esc keeps exactly its old meaning here**; the bar
+-- gets keys that mean nothing else.
+--
+-- F2 arrives as @ESC O Q@ (SS3 Q) and decodes to 'V.KFun' 2 — checked through
+-- the pty, not assumed. Ctrl+X is the second way in, because a terminal that
+-- rewrites function keys should not be able to strand someone in a mode whose
+-- only exit is the bar.
+handleScriptEvent :: BrickEvent Name e -> EventM Name St ()
+handleScriptEvent (VtyEvent (V.EvKey V.KEnter [])) = do
+  st <- get
+  case (stDropdown st, stOfferDropdown st) of
+    (Just (LoadDropdown entries (Just i)), _) | i < length entries ->
+      acceptLoadRow st entries i
+    (_, Just od) | Just i <- odSelected od, Just ins <- rowInsert (odRows od !! i) ->
+      acceptOfferRow st od ins
+    _ -> scriptSubmit
+handleScriptEvent (VtyEvent (V.EvKey (V.KFun 2) [])) = openScriptBar
+handleScriptEvent (VtyEvent (V.EvKey (V.KChar 'x') [V.MCtrl])) = openScriptBar
+handleScriptEvent (VtyEvent (V.EvKey V.KDel [])) = do
+  st <- get
+  if isJust (stScriptPos st)
+    then scriptTruncate
+    else handleReplEvent (VtyEvent (V.EvKey V.KDel []))
+handleScriptEvent ev = handleReplEvent ev
+
+handleReplEvent :: BrickEvent Name e -> EventM Name St ()
+handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
   st <- get
   case (stDropdown st, stOfferDropdown st) of
     -- | Enter accepts the highlighted candidate into the input instead of
@@ -824,6 +1028,11 @@ handleEventInner (VtyEvent (V.EvKey V.KEnter [])) = do
           appendTurn st' Nothing ["theme: " <> name]
         [":fold", mode] | mode `elem` ["on", "off"] ->
           appendTurn st0 { stFoldOn = mode == "on" } Nothing ["fold: " <> mode]
+        -- | `:script` enters live-script mode (`~5vtt3`). TUI-local like the
+        -- rest of this block, and the only way *in* — leaving again is the
+        -- command bar's `:script`, because once the mode is on, what you type
+        -- is the document and never a command.
+        [":script"] -> enterScriptMode st0
         -- | Two more TUI-local toggles, his `.jalivert/TUI.md` #23 — same
         -- standing as `:theme`/`:fold` (not instral, so special-casing them
         -- here is his own ruling already covers this). Disabling either is
@@ -849,7 +1058,7 @@ handleEventInner (VtyEvent (V.EvKey V.KEnter [])) = do
         -- only ever true from inside this frontend.
         [":help"] -> runEngineLine st0 line tuiHelpLines
         _ -> runEngineLine st0 line []
-handleEventInner (VtyEvent (V.EvKey V.KEsc [])) = do
+handleReplEvent (VtyEvent (V.EvKey V.KEsc [])) = do
   st <- get
   case (stDropdown st, stOfferDropdown st) of
     -- | Esc walks an open dropdown back in two steps (his `.jalivert/TUI.md`
@@ -872,7 +1081,7 @@ handleEventInner (VtyEvent (V.EvKey V.KEsc [])) = do
 -- the editor instead, which binds it as delete-char-forward, so no editing
 -- key is lost to the quit. Note the shape vty gives it: 'd' with 'MCtrl',
 -- not a bare 'EOT' character.
-handleEventInner ev@(VtyEvent (V.EvKey (V.KChar 'd') [V.MCtrl])) = do
+handleReplEvent ev@(VtyEvent (V.EvKey (V.KChar 'd') [V.MCtrl])) = do
   st <- get
   let line = concatMap Text.unpack (getEditContents (stInput st))
   if null line
@@ -885,12 +1094,12 @@ handleEventInner ev@(VtyEvent (V.EvKey (V.KChar 'd') [V.MCtrl])) = do
 -- swap: 'moveUp'/'offerMoveUp' step down-screen, 'moveDown'/'offerMoveDown'
 -- step up-screen. From a cleared selection the same swap lands the visual
 -- ends symmetrically (top on Down, bottom on Up) rather than list ends.
-handleEventInner ev@(VtyEvent (V.EvKey V.KDown [])) = do
+handleReplEvent ev@(VtyEvent (V.EvKey V.KDown [])) = do
   st <- get
   if popupAbove st
     then navigateCompletion moveUp offerMoveUp ev
     else navigateCompletion moveDown offerMoveDown ev
-handleEventInner ev@(VtyEvent (V.EvKey V.KUp [])) = do
+handleReplEvent ev@(VtyEvent (V.EvKey V.KUp [])) = do
   st <- get
   if popupAbove st
     then navigateCompletion moveDown offerMoveDown ev
@@ -900,7 +1109,7 @@ handleEventInner ev@(VtyEvent (V.EvKey V.KUp [])) = do
 -- With nothing highlighted, Tab keeps its old job: shell-completion on a
 -- ':load' path (Esc-clear the highlight to get that back with the list
 -- open), silence everywhere else.
-handleEventInner (VtyEvent (V.EvKey (V.KChar '\t') [])) = do
+handleReplEvent (VtyEvent (V.EvKey (V.KChar '\t') [])) = do
   st <- get
   case (stDropdown st, stOfferDropdown st) of
     (Just (LoadDropdown entries (Just i)), _) | i < length entries ->
@@ -920,7 +1129,7 @@ handleEventInner (VtyEvent (V.EvKey (V.KChar '\t') [])) = do
 -- landing on a box ('offeredReplaces'). Only the *first* character of a
 -- name types this way; once the glyph is gone, ordinary typing resumes
 -- through the catch-all below.
-handleEventInner (VtyEvent (V.EvKey (V.KChar c) [])) = do
+handleReplEvent (VtyEvent (V.EvKey (V.KChar c) [])) = do
   st <- get
   let (_, col) = getCursorPosition (stInput st)
       line = concatMap Text.unpack (getEditContents (stInput st))
@@ -939,14 +1148,14 @@ handleEventInner (VtyEvent (V.EvKey (V.KChar c) [])) = do
 -- nothing to ('C-w' falls through there too), so it is handled here, in the
 -- zipper, before the catch-all: whitespace back, then the word itself,
 -- readline's rubout.
-handleEventInner (VtyEvent (V.EvKey V.KBS [V.MMeta])) = do
+handleReplEvent (VtyEvent (V.EvKey V.KBS [V.MMeta])) = do
   st <- get
   put st { stInput = E.applyEdit killWordBack (stInput st) }
   followInput
   refreshDropdown
   refreshOfferDropdown
-handleEventInner (MouseDown n V.BScrollUp _ _) = vScrollBy (viewportScroll n) (-1)
-handleEventInner (MouseDown n V.BScrollDown _ _) = vScrollBy (viewportScroll n) 1
+handleReplEvent (MouseDown n V.BScrollUp _ _) = vScrollBy (viewportScroll n) (-1)
+handleReplEvent (MouseDown n V.BScrollDown _ _) = vScrollBy (viewportScroll n) 1
 -- | Press-and-release gestures end here, all of them. A wheel tick arrives
 -- as a press *and* a release (SGR 'M' then 'm'), and so does an ordinary
 -- click — neither half carries editing intent, so neither reaches the
@@ -956,13 +1165,13 @@ handleEventInner (MouseDown n V.BScrollDown _ _) = vScrollBy (viewportScroll n) 
 -- (Click-to-navigate on a dev-link/goal will claim 'MouseDown' with the
 -- left button here once per-line extents land; until then clicks stay
 -- inert rather than quietly yanking.)
-handleEventInner (MouseUp _ _ _) = pure ()
-handleEventInner (MouseDown _ _ _ _) = pure ()
+handleReplEvent (MouseUp _ _ _) = pure ()
+handleReplEvent (MouseDown _ _ _ _) = pure ()
 -- | The startup tick ('runTui', the only 'Tick' there is) does nothing
 -- itself — the outer wrapper has already recorded the fresh extents by
 -- the time this runs, which is the whole point of it.
-handleEventInner (AppEvent _) = pure ()
-handleEventInner ev =
+handleReplEvent (AppEvent _) = pure ()
+handleReplEvent ev =
   Brick.zoom stInputL (handleEditorEvent ev) >> followInput >> refreshDropdown >> refreshOfferDropdown
 
 -- | What a highlighted ':load' row does on accept — shared by Enter and
@@ -1021,7 +1230,12 @@ navigateCompletion moveLoad moveOffer ev = do
     -- Down here falls to the plain editor binding same as before — this
     -- function is only ever called with one of the two, but the catch-all
     -- keeps the fallback honest without assuming that from outside.
+    -- | In script mode the same two keys walk the *document* instead of
+    -- recalling text — a different mechanism wearing the same UI shape, so it
+    -- branches here rather than inside 'historyBack'.
     _ -> case ev of
+      VtyEvent (V.EvKey V.KUp [])   | stScriptMode st -> scriptUp
+      VtyEvent (V.EvKey V.KDown []) | stScriptMode st -> scriptDown
       VtyEvent (V.EvKey V.KUp [])   -> historyBack
       VtyEvent (V.EvKey V.KDown []) -> historyForward
       _ -> Brick.zoom stInputL (handleEditorEvent ev) >> followInput >> refreshDropdown >> refreshOfferDropdown
@@ -1141,6 +1355,10 @@ tuiHelpLines =
     [ (":theme ‹name›",     intercalate ", " (map themeName themes))
     , (":preselect on|off", "highlight a fresh dropdown's first row on its own")
     , (":whisper on|off",   "show the untyped remainder of the selected candidate")
+    , (":script",           "live-script mode: the pane becomes an editable document")
+    , ("",                  "  in it: Up/Down walk the document, Enter re-runs a line,")
+    , ("",                  "  forward-delete discards from it down, Esc or F2 opens the")
+    , ("",                  "  command bar — :script leaves, :script save [name] writes")
     ]
   where
     width = 28
@@ -1168,6 +1386,306 @@ recordHistory line st
   where
     lastOf [] = Nothing
     lastOf xs = Just (last xs)
+
+-- * Live-script mode — `~5vtt3`
+
+-- | **The session every pane draws against.** In the ordinary REPL that is
+-- just 'stSession'; in script mode it is the session at the caret, so walking
+-- up the document walks the proof-term, goals and machine panes back with it.
+-- Standing on line @i@ shows the state /after/ @i@ ran — where you are in the
+-- document, not what the line was about to see.
+activeSession :: St -> Session
+activeSession st
+  | not (stScriptMode st) = stSession st
+  | otherwise = case stScriptPos st of
+      Just i | Just sl <- nthOf i (stScript st) -> slSession sl
+      _ -> maybe (stSession st) id (scriptTip st)
+
+nthOf :: Int -> [a] -> Maybe a
+nthOf i xs
+  | i < 0 = Nothing
+  | otherwise = listToMaybe (drop i xs)
+
+-- | The session a new line past the end of the script runs against.
+scriptTip :: St -> Maybe Session
+scriptTip st = case stScript st of
+  [] -> stScriptBase st
+  ls -> Just (slSession (last ls))
+
+-- | The session line @i@ runs against — line 0's is the base the mode was
+-- entered on. **This is the whole of the rewind**: no `:undo`, no replay, no
+-- arithmetic over how many snapshots a line happened to push.
+scriptSessionBefore :: St -> Int -> Maybe Session
+scriptSessionBefore st i
+  | i <= 0 = stScriptBase st
+  | otherwise = slSession <$> nthOf (i - 1) (stScript st)
+
+-- | Run one line and keep everything it produced. The IO is 'following''s,
+-- the same half 'runEngineLine' takes for the ordinary REPL — a `:load` names
+-- a file and somebody has to read it.
+runScriptLine :: Session -> String -> IO ScriptLine
+runScriptLine s line = do
+  let (s', resp) = oneLine s line
+  case following s' resp of
+    Just act | resp /= Quit -> do
+      (sLoaded, responses, trouble) <- act
+      let out =
+            renderResponse s' resp
+              ++ concatMap (renderResponse sLoaded) responses
+              ++ concatMap (renderTrouble sLoaded) trouble
+      pure (ScriptLine line sLoaded out (responseTook resp))
+    _ -> pure (ScriptLine line s' (renderResponse s' resp) (responseTook resp))
+
+-- | Whether a response means the line actually advanced the session.
+--
+-- **Display only** — the stored 'slSession' is correct either way, because a
+-- refused line simply hands back the session it was given. This decides a
+-- marker, nothing more, so an unlisted refusal shows its text without a
+-- marker rather than corrupting anything. `IllTyped` is deliberately absent:
+-- @:infer@ answering "this term has no type" is the command working.
+responseTook :: Response -> Bool
+responseTook resp = case resp of
+  Rejected {}        -> False
+  LineRefused {}     -> False
+  Failed {}          -> False
+  RuleFileRefused {} -> False
+  EntryMistyped {}   -> False
+  BasesIllTyped {}   -> False
+  _                  -> True
+
+-- | `:script` from the ordinary REPL. **A fresh session, his ruling** — the
+-- mode does not inherit what the REPL has been doing, because the REPL
+-- echoes refused lines too and a script must not contain any.
+enterScriptMode :: St -> EventM Name St ()
+enterScriptMode st = do
+  base <- case stScriptBase st of
+    Just s -> pure (Just s)
+    Nothing -> do
+      (s, _) <- liftIO startingSession
+      pure (Just s)
+  put st
+    { stScriptMode = True
+    , stScriptBase = base
+    , stScriptPos = Nothing
+    , stScriptBar = Nothing
+    , stScriptNote = Nothing
+    , stInput = emptyInput
+    }
+  refreshOfferDropdown
+  followInput
+
+-- | Back to the ordinary REPL, whose 'stSession'/'stTurns' were never touched.
+-- The script itself stays in memory, so toggling out to check something and
+-- back in loses nothing.
+leaveScriptMode :: EventM Name St ()
+leaveScriptMode = do
+  st <- get
+  put st
+    { stScriptMode = False
+    , stScriptBar = Nothing
+    , stScriptPos = Nothing
+    , stInput = emptyInput
+    }
+  refreshOfferDropdown
+  followInput
+
+-- | Enter in the document. Composing past the end appends; standing on line
+-- @i@ **replaces** it — rewind to @i@, run what is written there now, then
+-- re-run the stored tail.
+--
+-- **The tail is re-run rather than discarded**, which his own command-bar
+-- design forced: the bar inserts a line at the caret, and an insert that
+-- threw away everything below it would be useless. Each tail line is run
+-- exactly as if retyped, so one that no longer works keeps its place and its
+-- complaint and the rest carry on from whatever session it handed back — the
+-- same thing that would happen at a prompt.
+scriptSubmit :: EventM Name St ()
+scriptSubmit = do
+  st <- get
+  let line = concatMap Text.unpack (getEditContents (stInput st))
+  case stScriptPos st of
+    _ | all isSpace line, isNothing (stScriptPos st) -> pure ()
+    Nothing -> case scriptTip st of
+      Nothing -> pure ()
+      Just s -> do
+        sl <- liftIO (runScriptLine s line)
+        put st { stScript = stScript st ++ [sl], stInput = emptyInput, stScriptNote = Nothing }
+        afterScriptEdit
+    Just i -> case scriptSessionBefore st i of
+      Nothing -> pure ()
+      Just s -> do
+        rebuilt <- liftIO (foldRun s (line : map slText (drop (i + 1) (stScript st))))
+        put st
+          { stScript = take i (stScript st) ++ rebuilt
+          , stScriptPos = Nothing
+          , stInput = E.editorText Input (Just 1) (Text.pack (stScriptDraft st))
+          , stScriptDraft = ""
+          , stScriptNote = Nothing
+          }
+        afterScriptEdit
+
+-- | Run a list of lines in order from one session, keeping each line's own
+-- result — the rebuild every edit and every insert goes through.
+foldRun :: Session -> [String] -> IO [ScriptLine]
+foldRun _ [] = pure []
+foldRun s (l : ls) = do
+  sl <- runScriptLine s l
+  rest <- foldRun (slSession sl) ls
+  pure (sl : rest)
+
+afterScriptEdit :: EventM Name St ()
+afterScriptEdit = refreshOfferDropdown >> followInput
+
+-- | Forward-delete on a committed line: **discard it and everything after
+-- it**, no replacement run. Past the end it is an ordinary editor keypress,
+-- handled by the caller.
+scriptTruncate :: EventM Name St ()
+scriptTruncate = do
+  st <- get
+  case stScriptPos st of
+    Nothing -> pure ()
+    Just i -> do
+      put st
+        { stScript = take i (stScript st)
+        , stScriptPos = Nothing
+        , stInput = E.editorText Input (Just 1) (Text.pack (stScriptDraft st))
+        , stScriptDraft = ""
+        , stScriptNote = Nothing
+        }
+      afterScriptEdit
+
+-- | Up/Down walk the caret through the document. Up from the composing line
+-- saves it into 'stScriptDraft' first; Down past the newest line restores it.
+-- Stops at line 0, no wraparound, same as the history feature.
+scriptUp :: EventM Name St ()
+scriptUp = do
+  st <- get
+  let n = length (stScript st)
+      live = concatMap Text.unpack (getEditContents (stInput st))
+  case stScriptPos st of
+    _ | n == 0 -> pure ()
+    Nothing -> loadScriptAt st (n - 1) live
+    Just i | i > 0 -> loadScriptAt st (i - 1) (stScriptDraft st)
+    _ -> pure ()
+
+scriptDown :: EventM Name St ()
+scriptDown = do
+  st <- get
+  case stScriptPos st of
+    Nothing -> pure ()
+    Just i
+      | i + 1 < length (stScript st) -> loadScriptAt st (i + 1) (stScriptDraft st)
+      | otherwise -> do
+          put st
+            { stScriptPos = Nothing
+            , stInput = E.editorText Input (Just 1) (Text.pack (stScriptDraft st))
+            , stScriptDraft = ""
+            }
+          afterScriptEdit
+
+-- | Puts line @i@'s own text under the caret for editing in place.
+loadScriptAt :: St -> Int -> String -> EventM Name St ()
+loadScriptAt st i draft = case nthOf i (stScript st) of
+  Nothing -> pure ()
+  Just sl -> do
+    put st
+      { stScriptPos = Just i
+      , stInput = E.editorText Input (Just 1) (Text.pack (slText sl))
+      , stScriptDraft = draft
+      , stScriptNote = Nothing
+      }
+    afterScriptEdit
+
+-- | The command bar, summoned. One line, its own editor, and the only place
+-- in script mode where a command can be typed.
+openScriptBar :: EventM Name St ()
+openScriptBar = do
+  st <- get
+  put st { stScriptBar = Just (E.editorText ScriptBar (Just 1) Text.empty), stScriptNote = Nothing }
+
+closeScriptBar :: EventM Name St ()
+closeScriptBar = do
+  st <- get
+  put st { stScriptBar = Nothing }
+
+-- | Enter in the bar. A TUI-local command does its job and vanishes;
+-- **anything else is a script line and is inserted at the caret** — his own
+-- call, and the reason the bar is not merely a command line: with in-place
+-- editing alone a line can be replaced or truncated but never added in the
+-- middle.
+scriptBarSubmit :: St -> String -> EventM Name St ()
+scriptBarSubmit st text = case words text of
+  [] -> closeScriptBar
+  [":script"] -> leaveScriptMode
+  (":script" : "save" : rest) -> scriptSave st (listToMaybe rest)
+  [":theme", name] | Just th <- themeByName name -> do
+    let st' = st { stTheme = th, stScriptBar = Nothing, stScriptNote = Just ("theme: " <> name) }
+    liftIO (saveConfig (configOf st'))
+    put st'
+  [":fold", mode] | mode `elem` ["on", "off"] ->
+    put st { stFoldOn = mode == "on", stScriptBar = Nothing, stScriptNote = Just ("fold: " <> mode) }
+  [":preselect", mode] | mode `elem` ["on", "off"] -> do
+    let st' = st { stAutoSelect = mode == "on", stScriptBar = Nothing, stScriptNote = Just ("preselect: " <> mode) }
+    liftIO (saveConfig (configOf st'))
+    put st'
+  [":whisper", mode] | mode `elem` ["on", "off"] -> do
+    let st' = st { stWhisperOn = mode == "on", stScriptBar = Nothing, stScriptNote = Just ("whisper: " <> mode) }
+    liftIO (saveConfig (configOf st'))
+    put st'
+  _ -> insertScriptLine st text
+
+-- | A line typed in the bar goes into the document below the caret, and the
+-- tail re-runs behind it — the same rebuild an edit takes, so the two cannot
+-- drift apart.
+insertScriptLine :: St -> String -> EventM Name St ()
+insertScriptLine st text = do
+  let at = maybe (length (stScript st)) (+ 1) (stScriptPos st)
+  case scriptSessionBefore st at of
+    Nothing -> put st { stScriptBar = Nothing }
+    Just s -> do
+      rebuilt <- liftIO (foldRun s (text : map slText (drop at (stScript st))))
+      put st
+        { stScript = take at (stScript st) ++ rebuilt
+        , stScriptPos = Nothing
+        , stScriptBar = Nothing
+        , stScriptNote = Nothing
+        , stInput = E.editorText Input (Just 1) (Text.pack (stScriptDraft st))
+        , stScriptDraft = ""
+        }
+      afterScriptEdit
+
+-- | `:script save [name]` — writes the committed lines and nothing else.
+-- **No modal.** His spec wanted one because there was nowhere to type a
+-- filename; the command bar is that place, so the modal is a widget the
+-- design no longer needs.
+--
+-- **An existing file is refused rather than overwritten.** The pre-filled
+-- name is five letters off the clock, and is explicitly a placeholder — his
+-- words, *"later I would like something better."*
+scriptSave :: St -> Maybe String -> EventM Name St ()
+scriptSave st given = do
+  name <- case given of
+    Just n -> pure n
+    Nothing -> liftIO randomStem
+  let path = if ".thena.script" `isSuffixOf` name then name else name <> ".thena.script"
+  exists <- liftIO (doesFileExist path)
+  if exists
+    then put st { stScriptBar = Nothing, stScriptNote = Just ("refusing to overwrite " <> path) }
+    else if null (stScript st)
+      then put st { stScriptBar = Nothing, stScriptNote = Just "nothing to save" }
+      else do
+        liftIO (writeFile path (unlines (map slText (stScript st))))
+        put st { stScriptBar = Nothing, stScriptNote = Just ("saved " <> path) }
+
+-- | Five lowercase letters off the CPU clock. A placeholder name, and no new
+-- dependency for one — @random@ is not in this library's build-depends and a
+-- throwaway stem is not a reason to add it.
+randomStem :: IO String
+randomStem = do
+  t <- getCPUTime
+  let go 0 _ = []
+      go k n = toEnum (fromEnum 'a' + fromIntegral (n `mod` 26)) : go (k - 1 :: Int) (n `div` 26)
+  pure (go 5 (t `div` 1000))
 
 -- | The slice of 'St' that 'Tui.Config' persists, read off whichever state
 -- a `:theme`/`:preselect`/`:whisper` command just produced.
@@ -1264,7 +1782,7 @@ refreshOfferDropdown = do
       else do
         let (_, col) = getCursorPosition (stInput st)
             (before, after) = splitWritten line col
-            ov = statementOfferView (stSession st) before after
+            ov = statementOfferView (activeSession st) before after
             new = buildOfferDropdown (stAutoSelect st) col ov
             oldRows = maybe [] odRows (stOfferDropdown st)
         put st { stOfferDropdown = new, stDismissed = Nothing, stRecoveredSpan = underlineSpan ov }
