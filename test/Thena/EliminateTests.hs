@@ -67,10 +67,9 @@ tests =
 --
 -- That is what let a real bug survive a behaviour-preserved check — the goal
 -- did not mention the target, so generalising it was a no-op and nothing about
--- the motive was exercised. `BUGHUNT.md` H says the same thing about the
--- type-check sweep in @GlobalTests@: it asks whether the generated equipment is
--- well formed, not whether it is the right shape, and only a proof that /uses/
--- it notices the difference.
+-- the motive was exercised. The type-check sweep in @GlobalTests@ asks
+-- whether the generated equipment is well formed, not whether it is the right
+-- shape, and only a proof that /uses/ it notices the difference.
 --
 -- So: each datatype below is eliminated at a goal that mentions the target, and
 -- the kernel is asked afterwards. @Eq {0} D x x@ is the smallest goal that is
