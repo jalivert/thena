@@ -2386,27 +2386,28 @@ type mentions the subject. The recursion check follows that: a call inside such 
 tied to the copy, and the copy is an unguarded premise of the method, so no termination
 argument is spent.
 
-**WHAT REMAINS IS A NAME, AND IT IS A DEFECT RATHER THAN A RULE.** Where the case *solves*
-the copy of an outside variable — `eIf`'s own `c1` becomes the copy of `p` — nothing is
-bound under the outside name, so writing `p` in the arm still reaches the unrefined
-variable and the call is at the wrong subject. The arm must name the binder the case
-introduced:
+**AND NOTHING IN THE ARM SAYS A SPLIT GENERALISED.** A name the split refined means the
+refined thing, whether the refinement came from a surviving copy or from one an equation
+solved outright. Where the case solves the copy of an outside variable — `eIf`'s own `c1`
+becomes the copy of `p` — the outside name is bound in the arm as a definition equal to
+that term, so the arm is written exactly as it would be if nothing had been copied:
 
 ```
 ; eIf p p' a b sr -> \ u s -> case s of
     { …
-    ; eIf c1 c1' c2 c3 sr2 -> cong Term Term (\ x -> ifthen x c2 c3) p' c1' (determinacy c1 p' sr c1' sr2) }
+    ; eIf c1 c1' c2 c3 sr2 -> cong Term Term (\ x -> ifthen x c2 c3) p' c1' (determinacy p p' sr c1' sr2) }
 ```
 
-`sr` there is the copy, refined to `Step c1 p'`, which is what makes the call typecheck with
-nothing transported. A split that generalises *nothing* leaves the outside name meaning the
-subject, so `determinacy`'s `eSucc` arm writes `determinacy p p' sr c1' sr2`.
+`p` there is the inner case's own subject and `sr` is the copy, refined to `Step p p'`,
+which is what makes the call typecheck with nothing transported. The `eSucc` arm, whose
+split generalises nothing, is written the same way — and that is the point, because an
+author has no way of knowing which of the two they are in.
 
-**That asymmetry is scheduled to go.** Which positions a split generalised, and which
-copies it solved, is elaboration's business: a person should not have to write a proof
-differently because of it. **Agda and Idris show none of it**, because a clause's whole
-left-hand side is one unification problem rather than one scrutinee with everything to its
-left fixed.
+**Which positions a split copied, and which copies it solved, is elaboration's business.**
+Elaboration is compilation: nobody should write a proof differently because of how it is
+compiled. **Agda and Idris show none of it either**, because a clause's whole left-hand
+side is one unification problem rather than one scrutinee with everything to its left
+fixed.
 
 **An arm can be written to take a leftover equation** — `evs n en -> \ q -> …` — and then
 transport by hand. It type-checks, and it is deliberately not how the examples are written:

@@ -366,8 +366,13 @@ tests =
                 -- @intro-arm-binders@ is the splitting tree's one walk over
                 -- the report the split made (MS9 phase 192), and it answers
                 -- the hole it left; @intro-binders@ is the λ group's.
+                -- @apply-all@ is the fold over @apply-to@ that applies a solved
+                -- binder's term to the binders it is a function of (MS9 phase
+                -- 195).
                 [ n | (GlobalName n, _, _, _) <- rows ]
-                  @?= [ "intro-arm-binders", "intro-binders", "fresh-universe" ]
+                  @?= [ "apply-all", "instantiate-with", "intro-arm-binders"
+                      , "intro-binders", "fresh-universe"
+                      ]
               other -> assertFailure ("expected a listing, got " ++ show other)
           -- **It lists rules and functions both** (his ruling), and the two are
           -- told apart in the row rather than in two commands.

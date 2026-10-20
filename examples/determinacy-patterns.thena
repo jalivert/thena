@@ -22,21 +22,22 @@
 -- transported. That is what makes each inner split one arm per possible case
 -- instead of ten methods.
 --
--- A RECURSION CROSSES SUCH A SPLIT BY NAMING THE ARM'S OWN BINDER. A split that
+-- A RECURSION CROSSES SUCH A SPLIT, AND NOTHING IN THE ARM SAYS SO. A split that
 -- generalises makes each case prove something MORE GENERAL than the goal it came
 -- from — the case is about a fresh copy of the subject — so the induction
 -- hypothesis that reaches the copy is the one the split generalised, and the
--- call has to be about the copy too. In the `eIf` arm the inner `eIf` case
--- solves the copy of `p` to its own `c1`, so the call is
--- `determinacy c1 p' sr c1' sr2`: `c1` is the subject that case is about, and
--- `sr` is the copy of the step out of it.
+-- call is tied to that. None of which is visible here: every arm of
+-- `determinacy` recurses as `determinacy p p' sr c1' sr2`, the arms whose split
+-- generalised `p` and the arms whose split did not, and `p` and `sr` mean the
+-- refined thing wherever the case refined them. That is the whole of what the
+-- names are for — which positions were copied, and which copies were solved, is
+-- elaboration's business and not the author's.
 --
--- WHERE THE SPLIT GENERALISES NOTHING THE AMBIENT NAME IS STILL THE SUBJECT,
--- and that is the boundary this file draws. A copy is demanded only where a
--- rule's own index cannot be made to fit the scrutinee's by moving one of the
--- RULE'S variables. `eSucc`'s own index is `succ c1` against the scrutinee's
--- `succ p`, so the split moves `c1` and generalises nothing — which is why that
--- arm recurses as `determinacy p p' sr c1' sr2`, and why `nvNoStep` can too.
+-- SO THE FILE DRAWS NO BOUNDARY ANY MORE, and the measure of the work is that it
+-- cannot. A copy is demanded only where a rule's own index cannot be made to fit
+-- the scrutinee's by moving one of the RULE'S variables — `eSucc`'s `succ c1`
+-- fits `succ p` by moving `c1`, `eIfTrue`'s `true` facing `p` has nothing to
+-- move — and the two kinds of arm are written identically.
 
 module Determinacy where
 
@@ -124,7 +125,7 @@ determinacy = \ t t1 s1 -> induction s1 of
   ; eIf p p' a b sr -> \ u s -> case s of
       { eIfTrue c d -> absurd (Eq Term (ifthen p' c d) c) (trueNoStep p' sr)
       ; eIfFalse c d -> absurd (Eq Term (ifthen p' c d) d) (falseNoStep p' sr)
-      ; eIf c1 c1' c2 c3 sr2 -> cong Term Term (\ x -> ifthen x c2 c3) p' c1' (determinacy c1 p' sr c1' sr2) }
+      ; eIf c1 c1' c2 c3 sr2 -> cong Term Term (\ x -> ifthen x c2 c3) p' c1' (determinacy p p' sr c1' sr2) }
   ; eSucc p p' sr -> \ u s -> case s of
       { eSucc c1 c1' sr2 -> cong Term Term (\ x -> succ x) p' c1' (determinacy p p' sr c1' sr2) }
   ; ePredZero -> \ u s -> case s of
@@ -136,7 +137,7 @@ determinacy = \ t t1 s1 -> induction s1 of
   ; ePred p p' sr -> \ u s -> case s of
       { ePredZero -> absurd (Eq Term (pred p') zero) (zeroNoStep p' sr)
       ; ePredSucc c1 nv1 -> absurd (Eq Term (pred p') c1) (nvNoStep (succ c1) (nvSucc c1 nv1) p' sr)
-      ; ePred c1 c1' sr2 -> cong Term Term (\ x -> pred x) p' c1' (determinacy c1 p' sr c1' sr2) }
+      ; ePred c1 c1' sr2 -> cong Term Term (\ x -> pred x) p' c1' (determinacy p p' sr c1' sr2) }
   ; eIsZeroZero -> \ u s -> case s of
       { eIsZeroZero -> refl Term true
       ; eIsZero c1 c1' sr -> absurd (Eq Term true (iszero c1')) (zeroNoStep c1' sr) }
@@ -146,4 +147,4 @@ determinacy = \ t t1 s1 -> induction s1 of
   ; eIsZero p p' sr -> \ u s -> case s of
       { eIsZeroZero -> absurd (Eq Term (iszero p') true) (zeroNoStep p' sr)
       ; eIsZeroSucc c1 nv1 -> absurd (Eq Term (iszero p') false) (nvNoStep (succ c1) (nvSucc c1 nv1) p' sr)
-      ; eIsZero c1 c1' sr2 -> cong Term Term (\ x -> iszero x) p' c1' (determinacy c1 p' sr c1' sr2) } }
+      ; eIsZero c1 c1' sr2 -> cong Term Term (\ x -> iszero x) p' c1' (determinacy p p' sr c1' sr2) } }

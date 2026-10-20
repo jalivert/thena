@@ -539,6 +539,24 @@ data Op
     -- ^ @some x@ — an 'VOption' that is there (MS5 phase 65).
   | None
     -- ^ @none@ — one that is not.
+  | Prepend Operand Operand
+    -- ^ @prepend x xs@ — a list with one more element at the front (MS9 phase
+    -- 195).
+    --
+    -- __A RULE COULD TAKE A LIST APART AND COULD NOT BUILD ONE.__ @[x, ...xs]@
+    -- is a /pattern/ and has been since MS5 phase 65; the operand form
+    -- 'ListOf' is a fixed run of elements, so a rule that walks a list and
+    -- accumulates had nothing to accumulate /into/ and every list a rule held
+    -- came from an op. That is what @~tzwjk@ ran into — a walk over a split's
+    -- binder report has to carry one term per binder it has introduced — and
+    -- the gap is the rule language's, not that item's.
+    --
+    -- __The one operation, and not a library.__ Cons is what the pattern form
+    -- already matches, so this is the operand side of a shape the language
+    -- has; @reverse-onto@ and @apply-all@ in @rules\/standard.thena.rules@ are
+    -- written with it as ordinary rules, which is where list code belongs. The
+    -- sugar @[x, ...xs]@ in operand position is deliberately __not__ added: it
+    -- is a second spelling for this, and nothing yet asks for it.
   | Return Operand
     -- ^ **what this rule hands back to whoever called it** (MS5 phase 63) —
     -- @return ‹operand›@.
@@ -1503,6 +1521,7 @@ resultOf o = case o of
   Return _     -> Nothing   -- it ends a body; there is nothing after it to bind
   Some _       -> Just (TOption (TVar 0))
   None         -> Just (TOption (TVar 0))
+  Prepend _ _  -> Just (TList (TVar 0))
   -- **An 'Option', not the element** — an empty list has no head, and phase 65
   -- chose to answer with 'None' rather than to fail. The table said @a@ until
   -- MS5 phase 73, which the engine cross-check could not catch: a bare variable
@@ -1710,6 +1729,7 @@ operandTypes o = case o of
   Return a     -> [(a, TVar 0)]
   Some a       -> [(a, TVar 0)]
   None         -> []
+  Prepend a b  -> [(a, TVar 0), (b, TList (TVar 0))]
   Prove        -> []
   DefineData _ -> []
   Along        -> []
@@ -2153,6 +2173,7 @@ opKeyword o = case o of
   Call _ _     -> "call"
   Return _     -> "return"
   Some _       -> "some"
+  Prepend _ _  -> "prepend"
   None         -> "none"
   FreshName _  -> "fresh-name"
   Here         -> "here"

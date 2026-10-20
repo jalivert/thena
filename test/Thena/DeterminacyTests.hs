@@ -31,19 +31,20 @@
 -- **Every one of its eight lemmas is a split**: no @elim@ anywhere, and the
 -- generated proof's 148 appeals to @noConfusionTerm@ become none.
 --
--- **EVERY ARM OF @determinacy@ IS INLINE AND NOTHING TAKES AN INDUCTION
--- HYPOTHESIS AS A PARAMETER.** A split that generalises makes each case prove
--- something more general than the goal it came from, so the hypothesis that
--- reaches the copy is the one the split generalised — and a recursive call
--- inside such an arm is about the copy, which it reaches by naming the arm's own
--- binder: @determinacy c1 p' sr c1' sr2@ where the case solved the copy of @p@
--- to its own @c1@. Three of the ten arms are of that kind.
+-- **EVERY ARM OF @determinacy@ IS INLINE, NOTHING TAKES AN INDUCTION HYPOTHESIS
+-- AS A PARAMETER, AND ALL TEN ARMS RECURSE THE SAME WAY.** A split that
+-- generalises makes each case prove something more general than the goal it came
+-- from, so the hypothesis that reaches the copy is the one the split generalised
+-- and a call inside such an arm is tied to that — and the author writes
+-- @determinacy p p' sr c1' sr2@ either way, because the ambient name means
+-- whatever the case refined it to. **That is the assertion worth making about
+-- this file now**: three of its arms are the generalising kind and nothing in
+-- them says so. Which positions a split copied, and which copies it solved, is
+-- elaboration's business (his ruling, 2026-10-20).
 --
--- **AND WHERE THE SPLIT GENERALISES NOTHING THE AMBIENT NAME IS STILL THE
--- SUBJECT**, which is the other half of the boundary: a copy is demanded only
--- where a rule's own index cannot be made to fit the scrutinee's by moving one
--- of the /rule's/ binders. @eSucc@'s @succ c1@ fits @succ p@ by moving @c1@, so
--- that arm recurses as @determinacy p p' sr c1' sr2@, and so does @nvNoStep@.
+-- A copy is demanded only where a rule's own index cannot be made to fit the
+-- scrutinee's by moving one of the /rule's/ binders — @eSucc@'s @succ c1@ fits
+-- @succ p@ by moving @c1@, @eIfTrue@'s @true@ facing @p@ has nothing to move.
 --
 -- **The assertion that ties all three together is the statement**: each is
 -- checked against the /same/ rendered type for @determinacy@, so a version that

@@ -61,14 +61,21 @@ elaborate ‹t›
 no-nesting []
 ihs-for ‹t› ‹c›
 ihs-for ‹t› ‹c›
-intro-arm-binders [] [] ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹k›
-intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹k›
-intro-arm-binders [p, ...ps] [(b, (some v)), ...bs] ‹k›
-intro-arm-binders [p, ...ps] [(b, (some v)), ...bs] ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹k›
-intro-arm-binders ‹ps› [(b, none), ...bs] ‹k›
-intro-arm-binders ‹ps› [(b, (some v)), ...bs] ‹k›
+reverse-onto [] ‹acc›
+reverse-onto [x, ...xs] ‹acc›
+apply-all ‹f› []
+apply-all ‹f› [x, ...xs]
+instantiate-with ‹f› ‹vs›
+intro-arm-binders [] [] ‹vs› ‹ds› ‹k›
+intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹k›
+intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹k›
+intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹k›
+intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹k›
+intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹k›
+intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹k›
+intro-arm-binders ‹ps› [(b, (some f)), ...bs] ‹vs› ‹ds› ‹k›
+bind-solved [] ‹k›
+bind-solved [(n, v), ...ds] ‹k›
 same-length [] []
 same-length [p, ...ps] [n, ...ns]
 arm-for ‹t› ‹c›

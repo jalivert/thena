@@ -114,8 +114,9 @@ import Thena.Tactics.Eliminate (spineOf)
 -- hypotheses this method carries, then the copies the motive generalised. Each
 -- says what the binder /is/ and whether an equation determined it:
 -- @'Nothing'@ for one that survived as a binder of the subgoal, and @'Just' t@
--- for one a solution removed, @t@ being what it was solved to. __Only the
--- solution transition removes a binder__, so only it writes a @'Just'@ here.
+-- for one a solution removed, @t@ being a function from the binders that
+-- survived before it to what it was solved to. __Only the solution transition
+-- removes a binder__, so only it writes a @'Just'@ here.
 --
 -- __IT REPLACED THREE WALKS THAT AGREED BY CONVENTION — his ruling of
 -- 2026-10-20, fourth session.__ Until MS9 phase 192 this was two positional
@@ -135,24 +136,27 @@ import Thena.Tactics.Eliminate (spineOf)
 -- variable; a copy is bound under the ambient name it already had, because
 -- shadowing the entry is the whole of the refinement.
 --
--- __And unlike a forced constructor argument, a solved copy MAY mention the
--- method's own binders.__ The solving side of an equation about a copy is the
--- /constructor's/ index, so @a\'@ comes out as @c1@ rather than as a term of the
--- ambient context. That is why a solved copy binds nothing where a solved
--- argument is a @define@ — @~tzwjk@ has the measured failure.
+-- __A SOLVED BINDER'S TERM IS ABSTRACTED OVER THE BINDERS THAT SURVIVED BEFORE
+-- IT — MS9 phase 195__, so @'Just' t@ is @λ ‹those› -> ‹the term›@ and the
+-- caller applies it to what it bound for them, in order. @report@'s comment has
+-- why, and the short of it is that the term is written in variables @peel@
+-- minted here: the caller's binders are its own, so a raw term is out of scope
+-- wherever the caller could use it.
 --
 -- __This is the only thing that knows.__ The subgoal is a type with fewer
 -- binders than the method's telescope has and nothing in it says which ones are
 -- missing, so a clause introducing an arm's binders cannot work it out — which
 -- is why phase 184's clause failed on @vtail@.
 --
--- __A forced term is written in the ambient context__ and mentions no binder of
--- the method, forced or surviving. The solving side of an equation is always the
--- /target/'s index, which lives where the elimination was written; injectivity
--- decomposes both sides in step and so preserves that split, and a solution
--- substitutes into the equations that follow, never into the target. So the
--- entries here are in scope wherever the subgoal is, which is what lets the
--- caller bind one with @define@ above the hole.
+-- __A SOLVED COPY'S TERM IS NOT AMBIENT, AND THAT IS WHY EVERY SOLVED TERM IS
+-- ABSTRACTED.__ A forced constructor /argument/ is solved from the target's
+-- index, which lives where the elimination was written, so its term mentions no
+-- binder of the method; a /copy/ is solved from the __constructor's__ index, so
+-- @p'@ comes out as @c1@ — a binder of this very method. Reporting the first
+-- raw worked only because of a property the second does not have, and relying
+-- on it is what @~tzwjk@ measured. Abstracted, both are in scope wherever the
+-- caller has bound the surviving binders, which is what lets it bind either one
+-- with @define@ above the hole.
 data Specialisation = Specialisation
   { specialisedGoal    :: [(Var, Ident, Core)]
   , specialisedTerm    :: Core
@@ -277,7 +281,7 @@ specialise env ctx n0 cn hyps gens k mty = case lookupConstructor cn env of
     -- always 'Nothing'. It is looked up anyway rather than asserted, because an
     -- assertion here would be a claim about the transitions that nothing checks.
     report c telescope sol =
-      [ (Binder role i, lookup (entryVar e) sol)
+      [ (Binder role i, abstractOver (entryVar e) <$> lookup (entryVar e) sol)
       | (role, i, e) <- zip3 roles idents telescope
       ]
       where
@@ -286,6 +290,38 @@ specialise env ctx n0 cn hyps gens k mty = case lookupConstructor cn env of
                    ++ replicate h AnHypothesis
                    ++ replicate gc ACopy
         idents = map entryIdent (take nargs telescope) ++ hyps ++ gens
+
+        -- __A SOLVED BINDER'S TERM IS ANSWERED ABSTRACTED OVER THE BINDERS THAT
+        -- SURVIVED BEFORE IT — MS9 phase 195.__ It is written in /this module's/
+        -- variables, which @peel@ minted and which exist nowhere else: the
+        -- caller binds the surviving binders itself, so the two sets of
+        -- variables are different and a term handed over raw is out of scope
+        -- wherever the caller could use it. @‹Var 3853› is not in scope@ was the
+        -- measured failure (@~tzwjk@).
+        --
+        -- __A λ is the translation, and applying it performs it.__ The surviving
+        -- entries in order are exactly the subgoal's own binders, which is what
+        -- the caller introduces and in that order, so the function this answers
+        -- is total on what it needs: 'solvable' refuses a solution whose term
+        -- mentions a binder __at or after__ the one being solved, so nothing
+        -- here can be abstracted over a binder the caller has not bound yet.
+        --
+        -- __The same shape for all three roles__, and that is the point. Until
+        -- this phase a forced /argument/ was reported raw, on the strength of
+        -- its term being ambient, and a solved /copy/ could not be reported
+        -- usefully at all — one group's report being well scoped by a property
+        -- of that group is the special case that cost @~tzwjk@. An argument's
+        -- abstraction is usually empty, which costs nothing.
+        --
+        -- The types are substituted because @telescope@ is the problem as it
+        -- __arrived__: a surviving entry's type may mention a binder a later
+        -- solution removed, and the subgoal's own binders carry the substituted
+        -- types.
+        abstractOver v = lamOver
+          [ Hypothesis (entryVar e) (entryIdent e) (substituteAll sol (entryType e))
+          | e <- takeWhile ((/= v) . entryVar) telescope
+          , entryVar e `notElem` map fst sol
+          ]
 
     -- The hole and the term that uses it, checked in the context that will hold
     -- both. Checking here is the whole of §7.2's bargain for a coarse op: a

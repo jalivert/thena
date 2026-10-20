@@ -292,71 +292,165 @@ rule ihs-for t c :- when (split-is-cases t)
 -- differs by group again:
 --
 --   * a FORCED ARGUMENT has no binder, so the name is bound as a definition
---     equal to v — which leaves the hole where it was, `define` extending the
---     context above it rather than consuming it. HIS RULING, 2026-10-19: a
---     forced position may be named, nothing is prevented, and the dot notation
---     stays optional. Forcing is the normal case rather than a corner — it is
---     what every inversion lemma does — and the term is always written in the
---     context the split was written in, which is what makes the `define` well
---     scoped. A wildcard asks for no name, so nothing is bound at all.
---   * a SOLVED COPY IS BOUND TO NOTHING, AND THE NAME KEEPS ITS AMBIENT
---     MEANING. The copy is an index position the split has forced — `p` becoming
---     `true` — and the goal and every surviving copy's type already carry it,
---     because the specialiser substituted it before handing the subgoal over.
---     What is missing is only a NAME for it inside the arm, and there is nowhere
---     in today's surface for the user to have asked for one: an outer position
---     is not in an arm's pattern, so binding `p` to `true` here would be the
---     elaborator redefining a name the user bound outside the split, unasked. A
---     dot pattern is the syntax that asks — `~hzcgd`'s option A — and the term
---     the define would use is reported for it. And it CANNOT be bound anyway:
---     a copy is solved from the CONSTRUCTOR's side, so its term names the
---     method's own binders and a `define` of it is out of scope — `~tzwjk` has
---     the measurement.
+--     equal to what the equation determined — which leaves the hole where it
+--     was, `define` extending the context above it rather than consuming it.
+--     HIS RULING, 2026-10-19: a forced position may be named, nothing is
+--     prevented, and the dot notation stays optional. Forcing is the normal case
+--     rather than a corner — it is what every inversion lemma does. A wildcard
+--     asks for no name, so nothing is bound at all.
+--   * a SOLVED COPY IS BOUND UNDER THE AMBIENT NAME AS A DEFINITION EQUAL TO
+--     WHAT THE SPLIT FORCED — `p` becoming `true`, or becoming the inner case's
+--     own `c1`. HIS RULING, 2026-10-20: elaboration is compilation and the user
+--     must not be able to tell, so an arm means the refined thing by the name
+--     they already wrote and they do not have to know that a copy was made, let
+--     alone which ones were solved. It is what Agda and Idris do by refining the
+--     context in place. The ambient entry is still in scope underneath, exactly
+--     as it is under a SURVIVING copy's binder; shadowing is the refinement in
+--     both cases and the only difference is λ against `define`.
+--
+--     ITS TERM IS A FUNCTION, AND THAT IS WHAT `vs` IS FOR. Unlike a forced
+--     argument's, a solved copy's term is solved from the CONSTRUCTOR's side, so
+--     it names the method's own binders; `specialise` therefore reports every
+--     solved term abstracted over the binders that survived before it, and this
+--     walk applies it to what it bound for them. The two groups are reported
+--     the same way for that reason: one of them being well scoped by a property
+--     of its own group is what made the other unbindable.
 --   * A HYPOTHESIS IS NEVER SOLVED, so there is no clause for one: an equation
 --     is over the datatype's indices and a hypothesis is a proof of the motive.
 --     If one ever were, the refusal names this rule.
-intro-arm-binders : List Pattern -> List (Binder, Option Core) -> Core -> Core
-rule intro-arm-binders [] [] k :- do return k
-rule intro-arm-binders [p, ...ps] [(b, none), ...bs] k :-
+-- A list reversed onto another. The walk below CONSES the term of each binder
+-- it introduces, so they come out innermost-first, and an abstraction wants them
+-- in the order the telescope binds them.
+reverse-onto : List a -> List a -> List a
+rule reverse-onto [] acc :- do return acc
+rule reverse-onto [x, ...xs] acc :-
+  do acc2 = prepend x acc
+     ; r = reverse-onto xs acc2
+     ; return r
+
+-- A term applied to each of a list of terms, left to right — which is what a
+-- function of a telescope is used by. `apply-to` is the one application; this is
+-- the fold, and it is a rule rather than an op because nothing else is needed.
+apply-all : Core -> List Core -> Core
+rule apply-all f [] :- do return f
+rule apply-all f [x, ...xs] :-
+  do g = apply-to f x
+     ; r = apply-all g xs
+     ; return r
+
+-- A FUNCTION OF A TELESCOPE, AT THE TERMS OF THAT TELESCOPE. The list arrives
+-- innermost-first, because the walk below conses it, so it is turned round and
+-- then applied.
+--
+-- `expose` IS WHAT KEEPS THE REDEX OUT OF THE PROOF. Applying a λ-chain to its
+-- arguments leaves one β-redex per binder, and nothing afterwards reduces one:
+-- the term is definitionally right either way, but it is written into a
+-- definition the user can `:show` and `:whnf`, so `isucc ((λ n e -> s n) z evz)`
+-- is what they would see where `isucc (s z)` is what they wrote. A redex
+-- elaboration made is elaboration's own bookkeeping, which is the op's purpose.
+-- It reduces the HEAD, so it can also unfold a global the solved term happens to
+-- be headed by — definitionally the same term, printed differently.
+instantiate-with : Core -> List Core -> Core
+rule instantiate-with f vs :-
+  do args = reverse-onto vs []
+     ; g = apply-all f args
+     ; r = expose g
+     ; return r
+
+-- WHAT A SOLVED BINDER IS BOUND TO, AND THE ONE THING THE WALK HAS TO CARRY.
+-- `specialise` answers a solved binder's term as a FUNCTION of the binders that
+-- survived before it, because the term is written in the specialiser's own
+-- variables and the development's binders are the ones this walk mints. So the
+-- walk carries `vs`, the term of each surviving binder it has introduced, and a
+-- solved binder is bound to that function applied to them. There is no
+-- arithmetic in it: a surviving binder conses one, a solved binder conses none,
+-- and the orders agree because both are the order the method binds them.
+intro-arm-binders : List Pattern -> List (Binder, Option Core) -> List Core -> List (Name, Core) -> Core -> Core
+rule intro-arm-binders [] [] vs ds k :-
+  do bind-solved ds k
+     ; return k
+rule intro-arm-binders [p, ...ps] [(b, none), ...bs] vs ds k :-
      when (binder-is-argument b) (pattern-is-wildcard p)
   do w = fresh-name "u"
+     ; g = here
      ; k2 = prim-lambda w
-     ; r = intro-arm-binders ps bs k2
+     ; goto k2
+     ; v = resolve-name w
+     ; goto g
+     ; vs2 = prepend v vs
+     ; r = intro-arm-binders ps bs vs2 ds k2
      ; return r
-rule intro-arm-binders [p, ...ps] [(b, none), ...bs] k :-
+rule intro-arm-binders [p, ...ps] [(b, none), ...bs] vs ds k :-
      when (binder-is-argument b) (pattern-is-name p)
   do sub = pattern-arguments p
      ; no-nesting sub
      ; w = pattern-head p
+     ; g = here
      ; k2 = prim-lambda w
-     ; r = intro-arm-binders ps bs k2
+     ; goto k2
+     ; v = resolve-name w
+     ; goto g
+     ; vs2 = prepend v vs
+     ; r = intro-arm-binders ps bs vs2 ds k2
      ; return r
-rule intro-arm-binders [p, ...ps] [(b, (some v)), ...bs] k :-
+rule intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] vs ds k :-
      when (binder-is-argument b) (pattern-is-wildcard p)
-  do r = intro-arm-binders ps bs k
+  do r = intro-arm-binders ps bs vs ds k
      ; return r
-rule intro-arm-binders [p, ...ps] [(b, (some v)), ...bs] k :-
+rule intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] vs ds k :-
      when (binder-is-argument b) (pattern-is-name p)
   do sub = pattern-arguments p
      ; no-nesting sub
      ; w = pattern-head p
-     ; define w v
-     ; r = intro-arm-binders ps bs k
+     ; v = instantiate-with f vs
+     ; ds2 = prepend (w, v) ds
+     ; r = intro-arm-binders ps bs vs ds2 k
      ; return r
-rule intro-arm-binders ps [(b, none), ...bs] k :- when (binder-is-hypothesis b)
+rule intro-arm-binders ps [(b, none), ...bs] vs ds k :- when (binder-is-hypothesis b)
   do n = binder-name b
      ; h = fresh-name n
+     ; g = here
      ; k2 = prim-lambda h
-     ; r = intro-arm-binders ps bs k2
+     ; goto k2
+     ; v = resolve-name h
+     ; goto g
+     ; vs2 = prepend v vs
+     ; r = intro-arm-binders ps bs vs2 ds k2
      ; return r
-rule intro-arm-binders ps [(b, none), ...bs] k :- when (binder-is-copy b)
+rule intro-arm-binders ps [(b, none), ...bs] vs ds k :- when (binder-is-copy b)
   do n = binder-name b
+     ; g = here
      ; k2 = prim-lambda n
-     ; r = intro-arm-binders ps bs k2
+     ; goto k2
+     ; v = resolve-name n
+     ; goto g
+     ; vs2 = prepend v vs
+     ; r = intro-arm-binders ps bs vs2 ds k2
      ; return r
-rule intro-arm-binders ps [(b, (some v)), ...bs] k :- when (binder-is-copy b)
-  do r = intro-arm-binders ps bs k
+rule intro-arm-binders ps [(b, (some f)), ...bs] vs ds k :- when (binder-is-copy b)
+  do n = binder-name b
+     ; v = instantiate-with f vs
+     ; ds2 = prepend (n, v) ds
+     ; r = intro-arm-binders ps bs vs ds2 k
      ; return r
+
+-- EVERY SOLVED BINDER IS BOUND AFTER THE LAST λ, AND THE ORDER IS WHY. A
+-- definition inserted while binders are still being introduced lands BETWEEN
+-- two of them — `λ a -> let w = … in λ b -> …` — and the arm is then no longer
+-- the λ-chain its method's telescope describes. `Thena.Tactics.Recurse` descends
+-- that chain to find which of its binders are a recursive argument and the
+-- hypothesis about it, and a `let` in the middle stops the descent, so the
+-- recursion inside the arm loses its induction hypothesis. The term of each
+-- solved binder is built where the walk reaches it, because it is a function of
+-- the binders bound BEFORE it and nothing else; only the binding waits.
+bind-solved : List (Name, Core) -> Core -> ()
+rule bind-solved [] k :- do
+rule bind-solved [(n, v), ...ds] k :-
+  do g = here
+     ; goto k
+     ; define n v
+     ; goto g
+     ; bind-solved ds k
 
 -- The arm's pattern must name as many variables as the constructor takes
 -- arguments. Two lists and no arithmetic: they are walked together, so a
@@ -435,7 +529,7 @@ rule elaborate-arm t c sub bs (p, ob) :-
      ; into
      ; k0 = here
      ; back
-     ; k1 = intro-arm-binders as bs k0
+     ; k1 = intro-arm-binders as bs [] [] k0
      ; goto k1
      ; arm-needs-body ob
      ; goto sub

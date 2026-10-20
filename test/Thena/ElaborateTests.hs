@@ -768,9 +768,12 @@ baseTests =
               , "claim", "assume", "quantify"
               ]
               ++ replicate 7 "elaborate"
-              ++ [ "no-nesting", "ihs-for", "ihs-for" ]
+              ++ [ "no-nesting", "ihs-for", "ihs-for"
+                 , "reverse-onto", "reverse-onto", "apply-all", "apply-all"
+                 , "instantiate-with" ]
               ++ replicate 8 "intro-arm-binders"
-              ++ [ "same-length", "same-length"
+              ++ [ "bind-solved", "bind-solved"
+                 , "same-length", "same-length"
                  , "arm-for", "arm-for", "pick", "pick", "arm-needs-body"
                  , "elaborate-arm", "case-needs-an-arm"
                  , "vanished-case-takes-no-body", "vanished-case-takes-no-body"
@@ -1137,6 +1140,63 @@ splittingTree =
       "stuck: no clause of no-nesting applies here"
 
     -- ----------------------------------------------------------------
+    -- A SPLIT THAT REFINES A POSITION BOUND OUTSIDE IT (MS9 phases 191, 195)
+    -- ----------------------------------------------------------------
+
+    -- __THE AMBIENT NAME MEANS THE REFINED THING, AND THAT IS THE WHOLE OF
+    -- WHAT THIS ASSERTS__ (MS9 phase 195, his ruling of 2026-10-20:
+    -- /"elaboration is 'compilation' — they should not change how they write
+    -- their proof because of how we compile it"/).
+    --
+    -- Splitting @e : Ev (s m)@ against @evs@'s own @Ev (s (s n))@ leaves @s n@
+    -- facing @m@, and @m@ is bound /outside/ the split, so nothing on the rule's
+    -- side can move to fit it: the split generalises @m@ and the arm solves the
+    -- copy to @s n@. **So @m@ in the arm is @s n@**, the goal @IsSucc (s m)@ is
+    -- @IsSucc (s (s n))@, and @isucc m@ inhabits it. Before this phase the copy
+    -- bound nothing, @m@ reached back out to the unrefined entry, and the arm
+    -- was refused — which is the state @~tzwjk@ recorded.
+    --
+    -- **It computes, which is the part a declaration alone would not say**: the
+    -- definition the arm binds @m@ to is the term the split forced, reduced, so
+    -- @namesOuter (s z) (evs z evz)@ is @isucc (s z)@ and not @isucc@ of a
+    -- β-redex.
+  , testCase "a name bound outside a split means what the split refined it to" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (evModule ++
+            [ "namesOuter : \8704 (m : N) (e : Ev (s m)) -> IsSucc (s m)"
+            , "namesOuter = \\ m e -> case e of { evs n en -> isucc m }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      let (s2, q) = command s1 ":whnf namesOuter (s z) (evs z evz)"
+      unwords (renderResponse s2 q) @?= "isucc (s z)"
+
+    -- __AND THE THREE SHAPES PHASE 191 WAS BUILT FOR__, which had been a
+    -- fixture nothing loaded: the copy that is refined and read under its own
+    -- name (@usesHyp@'s @h@), the copy that is solved (@refined@), and an index
+    -- the arm mentions (@mentionsIndex@). Each declares, and the two that can
+    -- compute are asserted by @refl@ inside the module, so a wrong refinement
+    -- fails here rather than passing quietly.
+  , testCase "a generalising split: refined, used and mentioned all declare" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (evModule ++
+            [ "refined : \8704 (m : N) (e : Ev (s m)) -> IsSucc m"
+            , "refined = \\ m e -> case e of { evs n en -> isucc n }"
+            , "usesHyp : \8704 (m : N) (h : Ev m) (e : Ev (s m)) -> IsSucc m"
+            , "usesHyp = \\ m h e -> case e of { evs n en -> isucc n }"
+            , "mentionsIndex : \8704 (m : N) (e : Ev (s m)) -> IsSucc (s m)"
+            , "mentionsIndex = \\ m e -> case e of { evs n en -> isucc (s n) }"
+            , "check1 : Eq (IsSucc (s z)) (refined (s z) (evs z evz)) (isucc z)"
+            , "check1 = refl (IsSucc (s z)) (isucc z)"
+            , "check3 : Eq (IsSucc (s (s z))) (mentionsIndex (s z) (evs z evz)) (isucc (s z))"
+            , "check3 = refl (IsSucc (s (s z))) (isucc (s z))"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- ----------------------------------------------------------------
     -- A FORCED POSITION (MS9 phase 185)
     -- ----------------------------------------------------------------
 
@@ -1419,6 +1479,24 @@ splittingTree =
       , "data Nat : Type\8320 where"
       , "  zero : Nat"
       , "  succ : Nat -> Nat"
+      , ""
+      ]
+    -- Phase 191's own shapes: a family whose constructor's index wraps the
+    -- recursive one twice, so a split against @Ev (s m)@ leaves @s n@ facing an
+    -- @m@ bound outside it and the split has to generalise.
+    evModule =
+      [ "module Ev where"
+      , ""
+      , "data N : Type\8320 where"
+      , "  z : N"
+      , "  s : N -> N"
+      , ""
+      , "data Ev : N -> Type\8320 where"
+      , "  evz : Ev z"
+      , "  evs : \8704 (n : N) (e : Ev n) -> Ev (s (s n))"
+      , ""
+      , "data IsSucc : N -> Type\8320 where"
+      , "  isucc : \8704 (n : N) -> IsSucc (s n)"
       , ""
       ]
     vecModule =

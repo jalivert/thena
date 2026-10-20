@@ -688,58 +688,110 @@ splitClauses =
   , Rule (GlobalName "ihs-for") [PVar "t", PVar "c"]
       [SplitIsCases (Ref "t")]
       [Do (Op.Return (Op.ListOf []))]
+    -- **A list reversed onto another, and a term applied to a list of terms**
+    -- (MS9 phase 195). The walk below conses the term of each binder it
+    -- introduces, so @prepend@ builds its accumulator and these two consume it;
+    -- list code is rules rather than ops, and @prepend@ is the one operation
+    -- the operand language was missing.
+  , Rule (GlobalName "reverse-onto") [PList [] Nothing, PVar "acc"] []
+      [Do (Op.Return (Ref "acc"))]
+  , Rule (GlobalName "reverse-onto")
+      [PList [PVar "x"] (Just (PVar "xs")), PVar "acc"] []
+      [ Bind (Op.PVar "acc2") Nothing (Op.Prepend (Ref "x") (Ref "acc"))
+      , Bind (Op.PVar "r") Nothing (Op.Call "reverse-onto" [Ref "xs", Ref "acc2"])
+      , Do (Op.Return (Ref "r"))
+      ]
+  , Rule (GlobalName "apply-all") [PVar "f", PList [] Nothing] []
+      [Do (Op.Return (Ref "f"))]
+  , Rule (GlobalName "apply-all")
+      [PVar "f", PList [PVar "x"] (Just (PVar "xs"))] []
+      [ Bind (Op.PVar "g") Nothing (Op.ApplyTo (Ref "f") (Ref "x"))
+      , Bind (Op.PVar "r") Nothing (Op.Call "apply-all" [Ref "g", Ref "xs"])
+      , Do (Op.Return (Ref "r"))
+      ]
+    -- **A function of a telescope, at the terms of that telescope**, with
+    -- @expose@ reducing the β-redexes the application leaves — a redex
+    -- elaboration made is elaboration's own bookkeeping, and this term is
+    -- written into a definition the user can @:show@.
+  , Rule (GlobalName "instantiate-with") [PVar "f", PVar "vs"] []
+      [ Bind (Op.PVar "args") Nothing (Op.Call "reverse-onto" [Ref "vs", Op.ListOf []])
+      , Bind (Op.PVar "g") Nothing (Op.Call "apply-all" [Ref "f", Ref "args"])
+      , Bind (Op.PVar "r") Nothing (Op.Expose (Ref "g"))
+      , Do (Op.Return (Ref "r"))
+      ]
   , Rule (GlobalName "intro-arm-binders")
-      [PList [] Nothing, PList [] Nothing, PVar "k"] []
-      [Do (Op.Return (Ref "k"))]
+      [PList [] Nothing, PList [] Nothing, PVar "vs", PVar "ds", PVar "k"] []
+      [ call "bind-solved" [Ref "ds", Ref "k"]
+      , Do (Op.Return (Ref "k"))
+      ]
     -- An argument the subgoal still binds, named by the arm's pattern — a
-    -- wildcard asks for no name, so one is minted.
+    -- wildcard asks for no name, so one is minted. **Its term is kept**, which
+    -- is what a solved binder's function is applied to.
   , Rule (GlobalName "intro-arm-binders")
       [ PList [PVar "p"] (Just (PVar "ps"))
-      , PList [PPair (PVar "b") PNone] (Just (PVar "bs")), PVar "k"
+      , PList [PPair (PVar "b") PNone] (Just (PVar "bs"))
+      , PVar "vs", PVar "ds", PVar "k"
       ]
       [BinderIsArgument (Ref "b"), PatternIsWildcard (Ref "p")]
       [ Bind (Op.PVar "w") Nothing (Op.FreshName (Lit (VText "u")))
+      , Bind (Op.PVar "g") Nothing Here
       , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "w")))
+      , Do (Goto (Ref "k2"))
+      , Bind (Op.PVar "v") Nothing (Op.ResolveName (Ref "w"))
+      , Do (Goto (Ref "g"))
+      , Bind (Op.PVar "vs2") Nothing (Op.Prepend (Ref "v") (Ref "vs"))
       , Bind (Op.PVar "r") Nothing
-          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "k2"])
+          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs2", Ref "ds", Ref "k2"])
       , Do (Op.Return (Ref "r"))
       ]
   , Rule (GlobalName "intro-arm-binders")
       [ PList [PVar "p"] (Just (PVar "ps"))
-      , PList [PPair (PVar "b") PNone] (Just (PVar "bs")), PVar "k"
+      , PList [PPair (PVar "b") PNone] (Just (PVar "bs"))
+      , PVar "vs", PVar "ds", PVar "k"
       ]
       [BinderIsArgument (Ref "b"), PatternIsName (Ref "p")]
       [ Bind (Op.PVar "sub") Nothing (Op.PatternArguments (Ref "p"))
       , call "no-nesting" [Ref "sub"]
       , Bind (Op.PVar "w") Nothing (Op.PatternHead (Ref "p"))
+      , Bind (Op.PVar "g") Nothing Here
       , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "w")))
+      , Do (Goto (Ref "k2"))
+      , Bind (Op.PVar "v") Nothing (Op.ResolveName (Ref "w"))
+      , Do (Goto (Ref "g"))
+      , Bind (Op.PVar "vs2") Nothing (Op.Prepend (Ref "v") (Ref "vs"))
       , Bind (Op.PVar "r") Nothing
-          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "k2"])
+          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs2", Ref "ds", Ref "k2"])
       , Do (Op.Return (Ref "r"))
       ]
     -- A FORCED argument, which has no binder: the name becomes a definition
-    -- equal to the term the equation determined, and the hole stays where it
-    -- was. His ruling of 2026-10-19.
+    -- equal to the term the equation determined. His ruling of 2026-10-19.
+    -- **The term is a function of the binders bound before it** (MS9 phase
+    -- 195), so it is applied to them here and the binding itself waits for the
+    -- last λ.
   , Rule (GlobalName "intro-arm-binders")
       [ PList [PVar "p"] (Just (PVar "ps"))
-      , PList [PPair (PVar "b") (PSome (PVar "v"))] (Just (PVar "bs")), PVar "k"
+      , PList [PPair (PVar "b") (PSome (PVar "f"))] (Just (PVar "bs"))
+      , PVar "vs", PVar "ds", PVar "k"
       ]
       [BinderIsArgument (Ref "b"), PatternIsWildcard (Ref "p")]
       [ Bind (Op.PVar "r") Nothing
-          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "k"])
+          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs", Ref "ds", Ref "k"])
       , Do (Op.Return (Ref "r"))
       ]
   , Rule (GlobalName "intro-arm-binders")
       [ PList [PVar "p"] (Just (PVar "ps"))
-      , PList [PPair (PVar "b") (PSome (PVar "v"))] (Just (PVar "bs")), PVar "k"
+      , PList [PPair (PVar "b") (PSome (PVar "f"))] (Just (PVar "bs"))
+      , PVar "vs", PVar "ds", PVar "k"
       ]
       [BinderIsArgument (Ref "b"), PatternIsName (Ref "p")]
       [ Bind (Op.PVar "sub") Nothing (Op.PatternArguments (Ref "p"))
       , call "no-nesting" [Ref "sub"]
       , Bind (Op.PVar "w") Nothing (Op.PatternHead (Ref "p"))
-      , Do (Op.Define (Ref "w") (Ref "v"))
+      , Bind (Op.PVar "v") Nothing (Op.Call "instantiate-with" [Ref "f", Ref "vs"])
+      , Bind (Op.PVar "ds2") Nothing
+          (Op.Prepend (PairOf (Ref "w") (Ref "v")) (Ref "ds"))
       , Bind (Op.PVar "r") Nothing
-          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "k"])
+          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs", Ref "ds2", Ref "k"])
       , Do (Op.Return (Ref "r"))
       ]
     -- **An induction hypothesis, under a FRESHENED name**: the argument it is
@@ -748,40 +800,72 @@ splitClauses =
     -- pattern — an outer position is not in an arm's pattern.
   , Rule (GlobalName "intro-arm-binders")
       [ PVar "ps"
-      , PList [PPair (PVar "b") PNone] (Just (PVar "bs")), PVar "k"
+      , PList [PPair (PVar "b") PNone] (Just (PVar "bs"))
+      , PVar "vs", PVar "ds", PVar "k"
       ]
       [BinderIsHypothesis (Ref "b")]
       [ Bind (Op.PVar "n") Nothing (Op.BinderName (Ref "b"))
       , Bind (Op.PVar "h") Nothing (Op.FreshName (Ref "n"))
+      , Bind (Op.PVar "g") Nothing Here
       , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "h")))
+      , Do (Goto (Ref "k2"))
+      , Bind (Op.PVar "v") Nothing (Op.ResolveName (Ref "h"))
+      , Do (Goto (Ref "g"))
+      , Bind (Op.PVar "vs2") Nothing (Op.Prepend (Ref "v") (Ref "vs"))
       , Bind (Op.PVar "r") Nothing
-          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "k2"])
+          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs2", Ref "ds", Ref "k2"])
       , Do (Op.Return (Ref "r"))
       ]
     -- **A copy of a generalised ambient entry, under the ambient name ITSELF**
     -- (MS9 phase 191), and the shadowing is the point — the exact opposite of
-    -- the clause above. A copy an equation /solved/ has no binder and is bound
-    -- to nothing: the refinement is already in the goal, and naming an outer
-    -- position is what a dot pattern would ask for.
+    -- the clause above. **A copy an equation /solved/ is bound under the same
+    -- name as a definition** (MS9 phase 195, his ruling of 2026-10-20): the
+    -- user must not be able to tell that a copy was made, let alone which ones
+    -- were solved, so the ambient name means the refined thing either way.
   , Rule (GlobalName "intro-arm-binders")
       [ PVar "ps"
-      , PList [PPair (PVar "b") PNone] (Just (PVar "bs")), PVar "k"
+      , PList [PPair (PVar "b") PNone] (Just (PVar "bs"))
+      , PVar "vs", PVar "ds", PVar "k"
       ]
       [BinderIsCopy (Ref "b")]
       [ Bind (Op.PVar "n") Nothing (Op.BinderName (Ref "b"))
+      , Bind (Op.PVar "g") Nothing Here
       , Bind (Op.PVar "k2") Nothing (Op.IntroPi (Just (Ref "n")))
+      , Do (Goto (Ref "k2"))
+      , Bind (Op.PVar "v") Nothing (Op.ResolveName (Ref "n"))
+      , Do (Goto (Ref "g"))
+      , Bind (Op.PVar "vs2") Nothing (Op.Prepend (Ref "v") (Ref "vs"))
       , Bind (Op.PVar "r") Nothing
-          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "k2"])
+          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs2", Ref "ds", Ref "k2"])
       , Do (Op.Return (Ref "r"))
       ]
   , Rule (GlobalName "intro-arm-binders")
       [ PVar "ps"
-      , PList [PPair (PVar "b") (PSome (PVar "v"))] (Just (PVar "bs")), PVar "k"
+      , PList [PPair (PVar "b") (PSome (PVar "f"))] (Just (PVar "bs"))
+      , PVar "vs", PVar "ds", PVar "k"
       ]
       [BinderIsCopy (Ref "b")]
-      [ Bind (Op.PVar "r") Nothing
-          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "k"])
+      [ Bind (Op.PVar "n") Nothing (Op.BinderName (Ref "b"))
+      , Bind (Op.PVar "v") Nothing (Op.Call "instantiate-with" [Ref "f", Ref "vs"])
+      , Bind (Op.PVar "ds2") Nothing
+          (Op.Prepend (PairOf (Ref "n") (Ref "v")) (Ref "ds"))
+      , Bind (Op.PVar "r") Nothing
+          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs", Ref "ds2", Ref "k"])
       , Do (Op.Return (Ref "r"))
+      ]
+    -- **Every solved binder is bound after the last λ** (MS9 phase 195). A
+    -- definition inserted while binders are still being introduced lands
+    -- between two of them, and the arm is then not the λ-chain its method's
+    -- telescope describes — which is what "Thena.Tactics.Recurse" descends to
+    -- find the hypothesis a recursive call inside the arm is about.
+  , Rule (GlobalName "bind-solved") [PList [] Nothing, PVar "k"] [] []
+  , Rule (GlobalName "bind-solved")
+      [PList [PPair (PVar "n") (PVar "v")] (Just (PVar "ds")), PVar "k"] []
+      [ Bind (Op.PVar "g") Nothing Here
+      , Do (Goto (Ref "k"))
+      , Do (Op.Define (Ref "n") (Ref "v"))
+      , Do (Goto (Ref "g"))
+      , call "bind-solved" [Ref "ds", Ref "k"]
       ]
   , Rule (GlobalName "same-length") [PList [] Nothing, PList [] Nothing] [] []
   , Rule (GlobalName "same-length")
@@ -835,7 +919,8 @@ splitClauses =
         -- **One walk over the report**, whose order is the order the method
         -- binds them in: no rule here knows what that order is.
       , Bind (Op.PVar "k1") Nothing
-          (Op.Call "intro-arm-binders" [Ref "as", Ref "bs", Ref "k0"])
+          (Op.Call "intro-arm-binders"
+                   [Ref "as", Ref "bs", Op.ListOf [], Op.ListOf [], Ref "k0"])
       , Do (Goto (Ref "k1"))
       , call "arm-needs-body" [Ref "ob"]
       , Do (Goto (Ref "sub"))

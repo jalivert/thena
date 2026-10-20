@@ -838,6 +838,17 @@ perform instr rest m = case operation instr of
     Right v -> produce (VOption (Just v)) m
   Op.None -> produce (VOption Nothing) m
 
+  -- **A list with one more element at the front** — 'Op.Prepend'. The pattern
+  -- form @[x, ...xs]@ has taken a list apart since MS5 phase 65 and nothing put
+  -- one together, so a rule that accumulates had to be given its list whole by
+  -- an op; the walk over a split's binder report is the one that needed it
+  -- (MS9 phase 195).
+  Op.Prepend a b -> case (,) <$> operandValue (env (exec m)) a
+                             <*> operandValue (env (exec m)) b of
+    Left e -> failure e m
+    Right (v, VList vs) -> produce (VList (v : vs)) m
+    Right (_, _)        -> failure ExpectedList m
+
   -- **What this body hands back** (MS5 phase 63) — 'Op.Return'.
   --
   -- It ends the body: the rest of @pc@ is dropped and control goes to the

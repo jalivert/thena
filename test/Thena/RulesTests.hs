@@ -850,10 +850,13 @@ splitHelpers :: [String]
 splitHelpers =
   [ "no-nesting"
   , "ihs-for", "ihs-for"
+  , "reverse-onto", "reverse-onto", "apply-all", "apply-all"
+  , "instantiate-with"
   ]
   ++ replicate 8 "intro-arm-binders"
   ++
-  [ "same-length", "same-length"
+  [ "bind-solved", "bind-solved"
+  , "same-length", "same-length"
   , "arm-for", "arm-for", "pick", "pick", "arm-needs-body", "elaborate-arm"
   , "case-needs-an-arm"
   , "vanished-case-takes-no-body", "vanished-case-takes-no-body"

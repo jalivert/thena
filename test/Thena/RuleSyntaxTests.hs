@@ -251,6 +251,7 @@ everyOp =
   , ("here",          Here)
   , ("arrow x y",     Arrow (Ref "x") (Ref "y"))
   , ("apply-to x y",  ApplyTo (Ref "x") (Ref "y"))
+  , ("prepend x y",   Op.Prepend (Ref "x") (Ref "y"))
   , ("declare-primitive x y", Op.DeclarePrimitive (Ref "x") (Ref "y"))
   , ("surface-literal t", Op.SurfaceLiteralOf (Ref "t"))
   , ("object-term t", Op.ObjectTerm (Ref "t"))
