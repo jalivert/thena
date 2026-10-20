@@ -15,12 +15,11 @@
 -- indices, and elaboration closes all seven methods itself — where this file
 -- used to write out seven methods and seven appeals to no-confusion apiece.
 --
--- THE `absurd Empty` WRAPPER IS THERE TO PIN A UNIVERSE LEVEL, and nothing
--- else. `Empty` is level-polymorphic, so a bare one in a statement mints a
--- level meta, and a proof that never mentions `Empty` cannot solve it — the
--- statement would be stored with an unsolved meta in it. The old proofs named
--- `Empty` in their own terms and solved it by accident. `absurd`'s first
--- argument is declared at `Type₀`, so applying it fixes the level at 0.
+-- AND THEY ARE LEVEL-POLYMORPHIC NOW, where they used to be at level 0. A
+-- declared type's level is generalised when nothing pins it, and the old proofs
+-- pinned it by passing `Empty` to `absurd`, whose first argument is declared at
+-- `Type₀`. These name nothing, so what you get is `trueNotNat {ℓ}`, and
+-- `trueNotNat {0}` is the lemma this file used to have.
 --
 -- The two theorems are what a progress proof needs as its lemmas, which is what
 -- canonical forms is FOR in TAPL: knowing that a well-typed value of type bool
@@ -67,19 +66,19 @@ absurd : forall (C : Type₀) (e : Empty) -> C
 absurd = \ C e -> elim Empty () (\ t -> C) () () e
 
 trueNotNat : forall (d : HasType true nat) -> Empty
-trueNotNat = \ d -> absurd Empty (induction d of { })
+trueNotNat = \ d -> induction d of { }
 
 falseNotNat : forall (d : HasType false nat) -> Empty
-falseNotNat = \ d -> absurd Empty (induction d of { })
+falseNotNat = \ d -> induction d of { }
 
 zeroNotBool : forall (d : HasType zero bool) -> Empty
-zeroNotBool = \ d -> absurd Empty (induction d of { })
+zeroNotBool = \ d -> induction d of { }
 
 -- The one that forces a constructor argument: `tSucc`'s own subterm is
 -- determined to be `t` by injectivity of `succ`, and then `nat` against `bool`
 -- closes that method like all the others.
 succNotBool : forall (t : Term) (d : HasType (succ t) bool) -> Empty
-succNotBool = \ t d -> absurd Empty (induction d of { })
+succNotBool = \ t d -> induction d of { }
 
 -- `d` is deliberately NOT introduced: the split is on `n`, whose index `t` is
 -- a context variable, and an index no other premise mentions is abstracted

@@ -2329,14 +2329,18 @@ inductive hypotheses; with no method surviving there is nothing for a hypothesis
 to be attached to, so there is nothing left for them to differ about.
 
 **One consequence worth knowing, and it is about universes rather than splitting.**
-`Empty` is a family with a universe level, and a declared type's level is
-generalised into a parameter when nothing pins it. The old proofs pinned it by
-accident — they named `Empty` in their own terms — and an arm-less split names
-nothing, so the lemma above is the *more general*
-`trueNotNat {ℓ} : HasType true nat -> Empty {ℓ}`. That is usually what you want.
-Where you want it fixed at one level you have to say so with a term, because the
-surface has no syntax for a level argument yet; `examples/canonical.thena` routes
-through a one-argument `absurd` whose argument is declared at `Type₀`.
+A declaration's statement is level-polymorphic in any level it does not pin, and
+`Empty` is a family with a level. The seven-method proof pinned level 0 along the
+way, because it passed `Empty` to `absurd`, whose argument is declared at `Type₀`.
+The arm-less proof names nothing, so the lemma you get is the more general one:
+
+```
+trueNotNat {ℓ} : HasType true nat -> Empty {ℓ}
+```
+
+Both readings are lemmas you can use, and `trueNotNat {0}` is the old one. **Writing
+a shorter proof of the same signature can therefore give you a more general global**
+— worth knowing, and not a thing to work around.
 
 ### The same lesson, one level on: a search must not be a choice point over the work
 
