@@ -402,6 +402,16 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   -- the line is still in the document and still yours to fix, which is not
   -- an alarm.
   , (attrName "script.refused", ink (themeDim th))
+  -- **The command bar is a surface, not a line of text** — his report,
+  -- 2026-10-20: *"it is just almost invisible."* Measured under a pty, the
+  -- whole of it on screen was a single @:@ in the pane's last row: the bar
+  -- drew its marker and an empty editor, and an empty editor on the panel
+  -- fill in the panel's own ink is nothing at all. It takes the dropdown's
+  -- background for the same reason a dropdown has one — it floats over the
+  -- document rather than belonging to it — and it is filled to the pane's
+  -- width so the surface is what you see, not the three characters in it.
+  , (attrName "script.bar",     surface (themePopup th) (themeInk th))
+  , (attrName "script.bar.mark", surface (themePopup th) (themeRepl th))
   , (attrName "edge.proofterm", surface (themePanel th) (themeProof th))
   , (attrName "edge.goals",     surface (themePanel th) (themeGoals th))
   , (attrName "edge.machine",   surface (themePanel th) (themeMachine th))
@@ -523,7 +533,13 @@ draw st = dropdownLayer st <> offerDropdownLayer st <> [padAll 1 (hBox [replColu
     -- prompt**: the caret is standing in a document, and a '❯' in front of
     -- the line you are editing would be a prompt drawn into the text it is
     -- not part of — and would land in no saved file, which is the tell.
-    editorWidget = reportExtent Input (renderEditor (\ts -> renderInputContent ts col ghost skip (stRecoveredSpan st)) True (stInput st))
+    -- | **Focused only while the command bar is closed.** 'showFirstCursor'
+    -- takes the first cursor any widget reports in draw order, and the
+    -- document is drawn before the pane's foot — so with both editors
+    -- rendered focused, the caret stayed in the document while every key
+    -- went to the bar. Measured under a pty, his report of 2026-10-20: the
+    -- bar opened, the cursor did not move, and the mode read as a dead key.
+    editorWidget = reportExtent Input (renderEditor (\ts -> renderInputContent ts col ghost skip (stRecoveredSpan st)) (isNothing (stScriptBar st)) (stInput st))
       where
         -- | `:whisper off` (his `.jalivert/TUI.md` #23) silences this
         -- outright rather than 'ghostAt' itself carrying the flag — the
@@ -642,8 +658,20 @@ renderScript st inputLine =
 scriptFoot :: St -> [Widget Name]
 scriptFoot st = case stScriptBar st of
   Just bar ->
-    [ withAttr (attrName "script.marker") (str " : ")
-        <+> renderEditor (vBox . map (str . Text.unpack)) True bar
+    -- 'vLimit 1' is load-bearing: 'fill' fills both axes, so without it the
+    -- bar grew to the pane's whole remaining height and took the caret to
+    -- the top of that block — row 21 of 39, measured. One row, filled right.
+    [ vLimit 1 $
+        withAttr (attrName "script.bar") $
+          hBox
+            [ withAttr (attrName "script.bar.mark") (str " : ")
+            -- The editor paints 'editFocusedAttr', which is the *panel*
+            -- fill — so without this override the bar's surface stopped at
+            -- its marker and the rest of the row read as document again.
+            , overrideAttr editFocusedAttr (attrName "script.bar")
+                (renderEditor (vBox . map (str . Text.unpack)) True bar)
+            , fill ' '
+            ]
     ]
   Nothing -> case stScriptNote st of
     Just note -> [withAttr (attrName "script.refused") (str (" " <> note))]
@@ -1011,11 +1039,6 @@ handleScriptEvent (VtyEvent (V.EvKey V.KEnter [])) = do
     _ -> scriptSubmit
 handleScriptEvent (VtyEvent (V.EvKey (V.KFun 2) [])) = openScriptBar
 handleScriptEvent (VtyEvent (V.EvKey (V.KChar 'x') [V.MCtrl])) = openScriptBar
-handleScriptEvent (VtyEvent (V.EvKey V.KDel [])) = do
-  st <- get
-  if isJust (stScriptPos st)
-    then scriptTruncate
-    else handleReplEvent (VtyEvent (V.EvKey V.KDel []))
 handleScriptEvent ev = handleReplEvent ev
 
 handleReplEvent :: BrickEvent Name e -> EventM Name St ()
@@ -1376,8 +1399,9 @@ tuiHelpLines =
     , (":whisper on|off",   "show the untyped remainder of the selected candidate")
     , (":script",           "live-script mode: the pane becomes an editable document")
     , ("",                  "  in it: Up/Down walk the document, Enter re-runs a line,")
-    , ("",                  "  forward-delete discards from it down, Esc or F2 opens the")
-    , ("",                  "  command bar — :script leaves, :script save [name] writes")
+    , ("",                  "  every other key edits text. F2 or Ctrl+X opens the command")
+    , ("",                  "  bar — :script leaves, :script drop discards from the caret")
+    , ("",                  "  down, :script save [name] writes the file")
     ]
   where
     width = 28
@@ -1490,7 +1514,7 @@ enterScriptMode st = do
     , stScriptNote = Nothing
     , stInput = emptyInput
     }
-  refreshOfferDropdown
+  closeDropdowns
   followInput
 
 -- | Back to the ordinary REPL, whose 'stSession'/'stTurns' were never touched.
@@ -1505,8 +1529,32 @@ leaveScriptMode = do
     , stScriptPos = Nothing
     , stInput = emptyInput
     }
-  refreshOfferDropdown
+  closeDropdowns
   followInput
+
+-- | Shut both dropdowns and the recovery underline that is computed beside
+-- them. **A dropdown belongs to a line someone is writing**, so crossing a
+-- mode boundary closes it rather than rebuilding it for an empty line —
+-- his report, 2026-10-20, and it was two visible defects at once.
+--
+-- Measured under a pty before the fix: @:script@ on a session with three
+-- lines of transcript left the full rule chart on screen at rows 26-35, the
+-- bottom of the pane, while the document's own caret stood at row 3. The
+-- box was not merely unwanted, it was in the wrong place — 'popupAt' reads
+-- 'stInputExtent', which lags one frame by construction, so the frame drawn
+-- on the mode switch positions the box against the *repl* input line it has
+-- just stopped drawing. Nothing redraws until the next keypress, so it sits
+-- there, detached, until you touch something. Refreshing it here could only
+-- ever re-open it at the stale coordinates; closing it is the fix.
+closeDropdowns :: EventM Name St ()
+closeDropdowns = do
+  st <- get
+  put st
+    { stDropdown = Nothing
+    , stOfferDropdown = Nothing
+    , stRecoveredSpan = Nothing
+    , stDismissed = Nothing
+    }
 
 -- | Enter in the document. Composing past the end appends; standing on line
 -- @i@ **replaces** it — rewind to @i@, run what is written there now, then
@@ -1555,9 +1603,23 @@ foldRun s (l : ls) = do
 afterScriptEdit :: EventM Name St ()
 afterScriptEdit = refreshOfferDropdown >> followInput
 
--- | Forward-delete on a committed line: **discard it and everything after
--- it**, no replacement run. Past the end it is an ordinary editor keypress,
--- handled by the caller.
+-- | **Discard the line under the caret and everything after it**, no
+-- replacement run. Reached by @:script drop@ in the command bar; a no-op
+-- with the caret on the composing line, where there is nothing committed
+-- to drop.
+--
+-- **This was forward-delete until 2026-10-20 and that was wrong** — his
+-- report: *"I put the cursor at the beginning and I do delete, it deletes
+-- the entire line. That's not right."* It was worse than it looked: the
+-- key discarded the caret's line *and the whole tail of the script*, with
+-- no confirmation and nothing to undo it, on a keystroke whose meaning
+-- everywhere else is "remove one character". Del is an ordinary editor key
+-- here again, like every other text key in the mode.
+--
+-- **Whether dropping a line should truncate or splice is his to rule**, and
+-- is in `.claude/CLOSEOUT.md` as `~c9rj9`; this keeps the semantics the
+-- gesture already had and only moves it somewhere it cannot be hit by
+-- accident.
 scriptTruncate :: EventM Name St ()
 scriptTruncate = do
   st <- get
@@ -1617,8 +1679,15 @@ loadScriptAt st i draft = case nthOf i (stScript st) of
 
 -- | The command bar, summoned. One line, its own editor, and the only place
 -- in script mode where a command can be typed.
+-- | **The bar takes the keyboard, so it takes the dropdown's reason to be
+-- open with it** — his report, 2026-10-20: *"doesn't make sense to have a
+-- dropdown somewhere where it is not actively being written to."* Once the
+-- bar is up, 'handleBarEvent' owns every key and the document's line cannot
+-- change, so a completion box hanging off it is offering to complete a line
+-- nothing can type into.
 openScriptBar :: EventM Name St ()
 openScriptBar = do
+  closeDropdowns
   st <- get
   put st { stScriptBar = Just (E.editorText ScriptBar (Just 1) Text.empty), stScriptNote = Nothing }
 
@@ -1636,6 +1705,7 @@ scriptBarSubmit :: St -> String -> EventM Name St ()
 scriptBarSubmit st text = case words text of
   [] -> closeScriptBar
   [":script"] -> leaveScriptMode
+  [":script", "drop"] -> closeScriptBar >> scriptTruncate
   (":script" : "save" : rest) -> scriptSave st (listToMaybe rest)
   [":theme", name] | Just th <- themeByName name -> do
     let st' = st { stTheme = th, stScriptBar = Nothing, stScriptNote = Just ("theme: " <> name) }
