@@ -1059,6 +1059,34 @@ handleScriptEvent (VtyEvent (V.EvKey V.KEnter [])) = do
     (_, Just od) | Just i <- odSelected od, Just ins <- rowInsert (odRows od !! i) ->
       acceptOfferRow st od ins
     _ -> scriptSubmit
+-- | **Shift+Enter: discard everything below the caret's line and run just
+-- that line** — his feature, 2026-10-20, beside plain Enter rather than
+-- replacing it. Enter rewinds and *re-runs* the tail, which is what the
+-- spec asked for and is what you want when an edit near the top should
+-- carry through a long script. This is the other intent: the tail is wrong
+-- now, cut it.
+--
+-- **Cmd+Enter was the other candidate and it cannot be built.** macOS
+-- terminals do not transmit Cmd to the program — it is a terminal-level
+-- modifier — so vty never receives it and no binding could fire.
+--
+-- **Shift+Enter does not reach this vty either, and that is measured, not
+-- assumed.** Both standard encodings were fed through the pty and neither
+-- decodes: kitty's @ESC [ 13;2u@ and xterm @modifyOtherKeys@' @ESC [
+-- 27;2;13~@ both arrive as *literal text* and get typed into the line —
+-- the caret's line read @bbb[13;2u@ afterwards. So the 'V.MShift' clause
+-- below is unreachable on this vty today; it is kept because it costs
+-- nothing and is already correct if vty gains the kitty protocol, and
+-- because a binding that silently types punctuation into a proof script is
+-- worth a comment either way.
+--
+-- **Option+Enter is the one that works** — it arrives as @ESC CR@ and
+-- decodes to 'V.KEnter' with 'V.MMeta', verified under the pty. **And
+-- `:script rerun` in the command bar does the same thing with no modifier
+-- at all**, so no terminal can strand the feature — the same belt-and-
+-- braces F2 and Ctrl+X already have.
+handleScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MShift])) = scriptCutAndRun
+handleScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MMeta]))  = scriptCutAndRun
 handleScriptEvent (VtyEvent (V.EvKey (V.KFun 2) [])) = openScriptBar
 handleScriptEvent (VtyEvent (V.EvKey (V.KChar 'x') [V.MCtrl])) = openScriptBar
 handleScriptEvent ev = handleReplEvent ev
@@ -1462,7 +1490,9 @@ tuiHelpLines =
     , ("",                  "  in it: Up/Down walk the document, Enter re-runs a line,")
     , ("",                  "  every other key edits text. F2 or Ctrl+X opens the command")
     , ("",                  "  bar — :script leaves, :script drop discards from the caret")
-    , ("",                  "  down, :script save [name] writes the file")
+    , ("",                  "  down, :script save [name] writes the file. Option+Enter, or")
+    , ("",                  "  :script rerun, runs the caret's line and discards everything")
+    , ("",                  "  below it; plain Enter re-runs the lines below instead")
     ]
   where
     width = 28
@@ -1672,6 +1702,31 @@ scriptSubmit = do
           }
         afterScriptEdit
 
+-- | Shift+Enter's operation: **the caret's line is run and everything after
+-- it is discarded.** On the composing line there is no tail, so it is an
+-- ordinary submit; on a blank committed line there is nothing to run, so it
+-- is 'scriptTruncate' — the same rule as everywhere else in the mode, that
+-- an empty line is not a line.
+scriptCutAndRun :: EventM Name St ()
+scriptCutAndRun = do
+  st <- get
+  let line = concatMap Text.unpack (getEditContents (stInput st))
+  case stScriptPos st of
+    Nothing -> scriptSubmit
+    Just _ | all isSpace line -> scriptTruncate
+    Just i -> case scriptSessionBefore st i of
+      Nothing -> pure ()
+      Just s -> do
+        rebuilt <- liftIO (foldRun s [line])
+        put st
+          { stScript = take i (stScript st) ++ rebuilt
+          , stScriptPos = Nothing
+          , stInput = E.editorText Input (Just 1) (Text.pack (stScriptDraft st))
+          , stScriptDraft = ""
+          , stScriptNote = Nothing
+          }
+        afterScriptEdit
+
 -- | Run a list of lines in order from one session, keeping each line's own
 -- result — the rebuild every edit and every insert goes through.
 foldRun :: Session -> [String] -> IO [ScriptLine]
@@ -1813,6 +1868,7 @@ scriptBarSubmit st text = case words text of
   [] -> closeScriptBar
   [":script"] -> leaveScriptMode
   [":script", "drop"] -> closeScriptBar >> scriptTruncate
+  [":script", "rerun"] -> closeScriptBar >> scriptCutAndRun
   (":script" : "save" : rest) -> scriptSave st (listToMaybe rest)
   [":theme", name] | Just th <- themeByName name -> do
     let st' = st { stTheme = th, stScriptBar = Nothing, stScriptNote = Just ("theme: " <> name) }
