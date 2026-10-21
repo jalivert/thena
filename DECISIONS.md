@@ -2378,6 +2378,25 @@ have been solved to a term mentioning the copy cannot be, since that points back
 the equation is kept instead. Making a copy only where nothing else will do is what keeps
 both kinds of case working at once.
 
+**AND THE SCRUTINEE ITSELF IS ONE OF THE NAMES THAT MEANS THE REFINED THING.** Inside an
+arm the thing being split *is* the constructor applied to that arm's own variables, so the
+name you gave it means that:
+
+```
+p19 : forall (U : Ty) (d : D U) -> D U
+p19 = \ U d -> case d of { mk V -> d }
+```
+
+`d` in the arm is `mk V`, and the proof computes. Writing `mk V` there instead is the same
+proof, which is the point: which positions a split refined, and under which names, is
+elaboration's business and not something the author should have to spell differently.
+
+**A recursion across such a split is written as an ordinary recursive call, whatever the
+split had to generalise** — one index tied or several, a premise introduced before the
+subject or after it, a premise the recursion varies or one it does not. The induction
+hypothesis is reached by calling the function being defined; nothing in an arm binds one
+or names one.
+
 **A RECURSIVE CALL MAY BE WRITTEN INSIDE A SPLIT THAT GENERALISES.** A split that
 generalises makes each case prove something *more general* than the goal it came from — the
 case is about a fresh copy of the subject — so the hypothesis the case has to use is the
