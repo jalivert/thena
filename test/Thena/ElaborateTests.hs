@@ -1351,6 +1351,43 @@ splittingTree =
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
 
+    -- __AND A SPLIT MAY TIE MORE THAN ONE INDEX__ (MS9 phase 201, @~zv8kf@).
+    -- Every shape above ties exactly one, and the difference is not the number
+    -- of copies: the specialiser solves the first equation outside the arm's
+    -- own \955-chain and every further one at a binder /of/ it, so the chain is
+    -- one binder longer than the arguments handed to it per coercion inside.
+    -- 'Thena.Tactics.Recurse' read that chain to turn a position in the
+    -- method's telescope into a position in the arm, ran out of arguments and
+    -- found no hole at all — so the arm was walked with no hypothesis in scope
+    -- and the call was refused for matching none.
+    --
+    -- @P@ ties both its indices: @pr@\'s @s a@ and @s b@ face the ambient @x@
+    -- and @y@, and @hx@ and @hy@ are what makes each tied rather than friendly.
+    -- **It computes two layers deep**, so a recursion tied to the wrong copy
+    -- fails here rather than declaring quietly.
+  , testCase "a recursion crosses a split that tied two indices" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (tiedModule ++
+            [ "twoTied : \8704 (x : N) (y : N) (hx : Q x) (hy : Q y) (p : P x y) -> N"
+            , "twoTied = \\ x y hx hy p -> induction p of \
+              \{ pz c -> z ; pr a b r -> s (twoTied a b (qq a) (qq b) r) }"
+            , "check : Eq N (twoTied (s (s z)) (s (s (s z))) (qq (s (s z))) \
+              \(qq (s (s (s z)))) (pr (s z) (s (s z)) (pr z (s z) (pz (s z))))) (s (s z))"
+            , "check = refl N (s (s z))"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+    -- __And the pair of indices the call claims is still checked__: swapping
+    -- them is a recursion at indices the split did not reach, and the kernel
+    -- says so at the call.
+  , refusesIn tiedModule "a recursion at the wrong pair of tied indices is refused"
+      [ "swapped : \8704 (x : N) (y : N) (hx : Q x) (hy : Q y) (p : P x y) -> N"
+      , "swapped = \\ x y hx hy p -> induction p of \
+        \{ pz c -> z ; pr a b r -> s (swapped b a (qq b) (qq a) r) }"
+      ]
+      "stuck: a and b cannot be made equal"
+
     -- ----------------------------------------------------------------
     -- A FORCED POSITION (MS9 phase 185)
     -- ----------------------------------------------------------------
@@ -1674,6 +1711,25 @@ splittingTree =
       , "data A : N -> Type\8320 where"
       , "  az : A z"
       , "  as : \8704 (k : N) (p : A k) -> A (s k)"
+      , ""
+      ]
+    -- Phase 201's shape (@~zv8kf@): a family whose constructor wraps /both/ its
+    -- indices, so a split against @P x y@ with @x@ and @y@ both tied states two
+    -- equations. @Q@ is inhabited at every index, so a recursion can supply the
+    -- copies the motive quantified.
+    tiedModule =
+      [ "module Tied where"
+      , ""
+      , "data N : Type\8320 where"
+      , "  z : N"
+      , "  s : N -> N"
+      , ""
+      , "data P : N -> N -> Type\8320 where"
+      , "  pz : \8704 (c : N) -> P z c"
+      , "  pr : \8704 (a : N) (b : N) (r : P a b) -> P (s a) (s b)"
+      , ""
+      , "data Q : N -> Type\8320 where"
+      , "  qq : \8704 (n : N) -> Q n"
       , ""
       ]
     vecModule =

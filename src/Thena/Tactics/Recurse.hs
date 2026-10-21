@@ -89,6 +89,7 @@ module Thena.Tactics.Recurse
 import Data.List (elemIndex, nub, stripPrefix)
 
 import Thena.Core.Context (Context, Entry (..), entryType, entryVar)
+import Thena.Core.Level (Level (..))
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
@@ -463,6 +464,10 @@ resolveRecursion env n0 tm = case tm of
       (Just (g, ls, [ity, _]), Just (_, _, [_, l, _])) -> Canonical g ls [ity, l]
       _ -> q
 
+    -- A binder nothing is handed for, standing in the walk above. It is a term
+    -- no argument can be, so a position looked up in the answer cannot find it.
+    notHanded = Universe LZero
+
     -- An argument read through the local definitions, because elaborating a
     -- name binds a copy of it rather than handing the variable over.
     through w = look (0 :: Int)
@@ -660,7 +665,14 @@ resolveRecursion env n0 tm = case tm of
       Free y | y == z -> Just extra
       Lam _ _ sc -> case extra of
         a : rest -> handedTo z (instantiate a sc) rest
-        []       -> Nothing
+        -- __A binder a coercion discharges is handed nothing__ (MS9 phase 201).
+        -- One equation is solved outside the chain and every further one at a
+        -- binder of it, so a split that tied several indices leaves the chain
+        -- one binder longer than the arguments for each coercion inside it.
+        -- The binder is not a position the hole can be handed, so the walk
+        -- steps past it rather than refusing: what it is after is the
+        -- arguments, and this one is not among them.
+        []       -> handedTo z (instantiate notHanded sc) []
       App f a
         | z `elem` freeVars f -> handedTo z f (a : extra)
         | z `elem` freeVars a -> handedTo z a extra
