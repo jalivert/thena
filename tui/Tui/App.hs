@@ -1050,8 +1050,65 @@ handleBarEvent st bar ev = case ev of
 -- the pty, not assumed. Ctrl+X is the second way in, because a terminal that
 -- rewrites function keys should not be able to strand someone in a mode whose
 -- only exit is the bar.
+-- | **Editing a committed line drops every line below it, the instant it is
+-- edited** — his ruling, 2026-10-21 (@~sv5v8@). The lines after line @i@ were
+-- produced by running against the session line @i@ left behind; change line
+-- @i@ at all and they describe a session nothing is going to produce, so
+-- leaving them on screen is the document telling a lie until Enter. His own
+-- argument, and the symmetry he drew with it: it has to hold for inserting a
+-- character as much as for deleting one, because both make the tail stale.
+--
+-- **This is the whole of it, and it needs no list of which keys are edits.**
+-- An edit is "the text under the caret changed while the caret stayed on the
+-- same committed line", which is observable after the fact, so the rule is a
+-- before/after comparison around the ordinary dispatch rather than a clause
+-- per key. Enter, Up, Down and Backspace-at-column-0 all change the text too
+-- and all move 'stScriptPos' off @i@ while doing it, which is exactly what
+-- distinguishes them: they are commits and navigation, not edits. Accepting a
+-- completion into a parked line is not distinguished, and should not be — it
+-- rewrites the line like any other keystroke.
 handleScriptEvent :: BrickEvent Name e -> EventM Name St ()
-handleScriptEvent (VtyEvent (V.EvKey V.KEnter [])) = do
+handleScriptEvent ev = do
+  before <- get
+  dispatchScriptEvent ev
+  after <- get
+  case (stScriptPos before, stScriptPos after) of
+    (Just i, Just j)
+      | i == j, textOf before /= textOf after -> severBelow i
+    _ -> pure ()
+  where
+    textOf st = concatMap Text.unpack (getEditContents (stInput st))
+
+-- | Cuts the document off above line @i@ and leaves what the editor now holds
+-- as the composing line. The panes follow for free: 'activeSession' reads
+-- 'stScript' and 'stScriptPos', so a truncation /is/ the rewind, the same way
+-- every other rewind in this mode is indexing rather than undo.
+--
+-- **The dropdown is deliberately left alone.** 'afterScriptEdit' closes it
+-- because its callers are commits and navigation, where nobody is typing into
+-- the line any more; here somebody is, mid-keystroke, and closing it would
+-- make the completion box flicker shut on every edit of an older line.
+--
+-- **Nothing here can bring the cut lines back, and that is `~ns58j`** in
+-- `.claude/CLOSEOUT.md` — his to rule on, not assumed either way.
+severBelow :: Int -> EventM Name St ()
+severBelow i = do
+  st <- get
+  let cut = length (stScript st) - (i + 1)
+  put st
+    { stScript = take i (stScript st)
+    , stScriptPos = Nothing
+    , stScriptDraft = ""
+    -- Editing the newest line drops nothing after it, so it says nothing.
+    , stScriptNote =
+        if cut <= 0
+          then Nothing
+          else Just (show cut <> (if cut == 1 then " line" else " lines") <> " dropped below the edit")
+    }
+  followInput
+
+dispatchScriptEvent :: BrickEvent Name e -> EventM Name St ()
+dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [])) = do
   st <- get
   case (stDropdown st, stOfferDropdown st) of
     (Just (LoadDropdown entries (Just i)), _) | i < length entries ->
@@ -1103,15 +1160,15 @@ handleScriptEvent (VtyEvent (V.EvKey V.KEnter [])) = do
 -- the same stop-rather-than-wrap the whole mode uses. **Option+Backspace
 -- keeps its word-delete** — that arrives with 'V.MMeta' and never matches
 -- this clause.
-handleScriptEvent ev@(VtyEvent (V.EvKey V.KBS [])) = do
+dispatchScriptEvent ev@(VtyEvent (V.EvKey V.KBS [])) = do
   st <- get
   let (_, col) = getCursorPosition (stInput st)
   if col == 0 then scriptUp else handleReplEvent ev
-handleScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MShift])) = scriptCutAndRun
-handleScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MMeta]))  = scriptCutAndRun
-handleScriptEvent (VtyEvent (V.EvKey (V.KFun 2) [])) = openScriptBar
-handleScriptEvent (VtyEvent (V.EvKey (V.KChar 'x') [V.MCtrl])) = openScriptBar
-handleScriptEvent ev = handleReplEvent ev
+dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MShift])) = scriptCutAndRun
+dispatchScriptEvent (VtyEvent (V.EvKey V.KEnter [V.MMeta]))  = scriptCutAndRun
+dispatchScriptEvent (VtyEvent (V.EvKey (V.KFun 2) [])) = openScriptBar
+dispatchScriptEvent (VtyEvent (V.EvKey (V.KChar 'x') [V.MCtrl])) = openScriptBar
+dispatchScriptEvent ev = handleReplEvent ev
 
 handleReplEvent :: BrickEvent Name e -> EventM Name St ()
 handleReplEvent (VtyEvent (V.EvKey V.KEnter [])) = do
@@ -1699,6 +1756,14 @@ scriptSubmit = do
     -- stray newline. Emptying a line in a document means removing it, so
     -- the tail is spliced up and re-run from the session the line *before*
     -- it left behind — the same rebuild an edit does, one line shorter.
+    --
+    -- **@~sv5v8@ has made this unreachable and it is left standing on
+    -- purpose.** Clearing a committed line is now an edit like any other,
+    -- so the first Backspace severs the tail and un-parks the caret, and
+    -- this branch can no longer be entered with 'stScriptPos' set. It is
+    -- also the only splice left in the mode, which is half of @~c9rj9@ —
+    -- his open question of whether dropping a line truncates or splices.
+    -- Deleting it would answer that question by attrition, so it waits.
     Just i | all isSpace line -> case scriptSessionBefore st i of
       Nothing -> pure ()
       Just s -> do
