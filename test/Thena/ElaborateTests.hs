@@ -1321,6 +1321,36 @@ splittingTree =
       ]
       "stuck: s k and k cannot be made equal"
 
+    -- __AND A RECURSION MAY VARY A PREMISE THE SPLIT DID NOT SPLIT ON__ (MS9
+    -- phase 198, @~754m3@), which is the last of the four and the one the two
+    -- TAPL rewrites were waiting on.
+    --
+    -- @u@ is the case. The tied index seeds @n@, and the forward closure takes
+    -- @f : F n u@ because its type mentions @n@ — but it used to leave @u@
+    -- behind, so the induction hypothesis read @∀ n' (f' : F n' u) -> …@ about
+    -- the **ambient** @u@. The inner split then refines that @u@ to @s m@ while
+    -- the recursion needs the hypothesis at @m@, so **the hypothesis the proof
+    -- needs did not exist in the arm at all** and nothing at the call could have
+    -- found it. The closure now closes backward as well — an entry a generalised
+    -- entry's type mentions is generalised too — and the copies are a telescope
+    -- that mentions nothing it did not take.
+    --
+    -- **It computes**, so a hypothesis generalised at the wrong index fails here
+    -- rather than declaring: three @fs@ layers deep, the answer counts them.
+  , testCase "a recursion varies a premise the split did not split on" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (reachModule ++
+            [ "varies : \8704 (n : N) (x : A n) (u : N) (f : F n u) -> N"
+            , "varies = \\ n x u f -> induction x of \
+              \{ az -> z ; as k p -> case f of { fs j m r -> s (varies k p m r) } }"
+            , "check : Eq N (varies (s (s z)) (as (s z) (as z az)) (s (s z)) \
+              \(fs (s z) (s z) (fs z z fz))) (s (s z))"
+            , "check = refl N (s (s z))"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
     -- ----------------------------------------------------------------
     -- A FORCED POSITION (MS9 phase 185)
     -- ----------------------------------------------------------------

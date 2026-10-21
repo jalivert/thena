@@ -465,6 +465,40 @@ eliminate env ctx sch n0 goal tgt =
                      , entryVar e `elem` grow seeds
                      ]
 
+
+            -- __AND IT CLOSES BOTH WAYS — MS9 phase 198, `~754m3`.__ Forward
+            -- is the thesis's dependency-preservation condition: an entry whose
+            -- type mentions a generalised variable is generalised too, or its
+            -- copy would be a hypothesis about a subject that no longer means
+            -- what it meant. __Backward is the same condition read from the
+            -- other end__, and leaving it out is what made a recursion
+            -- impossible to write: a copy whose type mentions an ambient entry
+            -- that was /not/ copied is pinned to that entry, so the induction is
+            -- over something less general than the entries describe.
+            --
+            -- @p12@ is the case, and it is measured:
+            --
+            -- > p12 = \ n x u f -> induction x of
+            -- >   { az -> case f of { }
+            -- >   ; as k p -> case f of { fs j m r -> p12 k p m r } }
+            --
+            -- The tied index seeds @n@; forward from @n@ takes @f : F n u@; and
+            -- @u@ is left behind, so the hypothesis is @∀ n' (f' : F n' u) -> …@
+            -- about the ambient @u@ — which the inner split has refined to
+            -- @s m@, while the recursion needs the hypothesis at @m@. **The
+            -- hypothesis the proof needs does not exist in the arm**, and no
+            -- amount of work at the call could have found it. With @u@ copied it
+            -- does, and @nvNoStep@ with its four premises written at the top is
+            -- the same shape in @examples\/determinacy-patterns.thena@.
+            --
+            -- __What makes it the right rule rather than a wider one__: the
+            -- copies are a sub-telescope the motive moves (§2.8), and a
+            -- telescope that mentions what it did not take is not a telescope
+            -- you can instantiate on its own. Generalising /everything/
+            -- generalisable is the wider rule, and @~cq5mt@ measured what it
+            -- costs. The closure is the smallest set that is closed under
+            -- dependency, which is what @~6dpg5@ asked for in the first place.
+            --
             -- __THE CLOSURE TESTS AN ENTRY'S TYPE AND NOT ITS VALUE — MS9
             -- phase 196.__ The condition it stands for is about types: an
             -- entry whose /type/ mentions a generalised variable would be a
@@ -484,12 +518,23 @@ eliminate env ctx sch n0 goal tgt =
             -- definition whose own TYPE mentions a seed, and 'generalisable' is
             -- where that one stops cancelling.
             grow vs =
-              let vs' = nub (vs ++ [ entryVar e
-                                   | e <- ctx
-                                   , generalisable e
-                                   , any (`elem` freeVars (entryType e)) vs
-                                   ])
+              let vs' = nub (vs ++ reads' ++ read')
                in if length vs' == length vs then vs else grow vs'
+              where
+                -- An entry whose type mentions one of these.
+                reads' = [ entryVar e
+                         | e <- ctx
+                         , generalisable e
+                         , any (`elem` freeVars (entryType e)) vs
+                         ]
+                -- An entry one of these mentions in its type.
+                read' = [ entryVar e
+                        | e <- ctx
+                        , generalisable e
+                        , f <- ctx
+                        , entryVar f `elem` vs
+                        , entryVar e `elem` freeVars (entryType f)
+                        ]
 
             -- __WHETHER THE SCHEME CAN STATE THE COPIES, and nothing about
             -- which entries they are__ — that is 'generalisable''s, and the two

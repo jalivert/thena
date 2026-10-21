@@ -96,13 +96,11 @@ falseNoStep = \ u s -> case s of { }
 zeroNoStep : forall (u : Term) (s : Step zero u) -> Empty
 zeroNoStep = \ u s -> case s of { }
 
--- `u` and `s` are deliberately NOT introduced before the split on `nv`: the
--- index `t` is a context variable, and an index no introduced premise mentions
--- is abstracted with no equation. The generated proof needs a separate
--- `succNoStep` that takes its own induction hypothesis as an argument; here the
--- hypothesis IS the recursive call, and it may be written inside the inner split
--- because that split generalises nothing — `eSucc`'s own `succ c1` fits `succ t`
--- by moving `c1`.
+-- `u` and `s` are introduced inside the arms, and since MS9 phase 198 that is a
+-- preference and not a requirement: `\ v nv u s ->` across the top is the same
+-- proof and loads too. The generated proof needs a separate `succNoStep` that
+-- takes its own induction hypothesis as an argument; here the hypothesis IS the
+-- recursive call.
 nvNoStep : forall (v : Term) (nv : NV v) (u : Term) (s : Step v u) -> Empty
 nvNoStep = \ v nv -> induction nv of
   { nvZero -> \ u s -> zeroNoStep u s

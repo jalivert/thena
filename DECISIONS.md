@@ -2425,6 +2425,19 @@ compiled. **Agda and Idris show none of it either**, because a clause's whole le
 side is one unification problem rather than one scrutinee with everything to its left
 fixed.
 
+**A RECURSION MAY ALSO VARY A PREMISE THE SPLIT DID NOT SPLIT ON.** A proof by induction
+on one premise may recurse at a different value of another, and nothing has to be said:
+
+```
+varies : forall (n : N) (x : A n) (u : N) (f : F n u) -> N
+varies = \ n x u f -> induction x of
+  { az -> z ; as k p -> case f of { fs j m r -> s (varies k p m r) } }
+```
+
+The induction is on `x`, and the call recurses at `m` rather than at `u`. What makes it
+work is that the split generalises `u` along with `f`, because `f`'s type mentions it — a
+copy is only useful if it is a copy of everything it is about.
+
 **A RECURSION MAY SUPPLY A PREMISE THE SPLIT HAD TO GENERALISE.** Where the statement's own
 premises include one the split generalises, the recursive call says what it is at the
 smaller subject and nothing else changes:
