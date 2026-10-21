@@ -422,7 +422,7 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   -- background for the same reason a dropdown has one — it floats over the
   -- document rather than belonging to it — and it is filled to the pane's
   -- width so the surface is what you see, not the three characters in it.
-  , (attrName "script.bar",     surface (themePopup th) (themeInk th))
+  , (attrName "script.bar",     surface (themePopup th) (themePopupInk th))
   , (attrName "script.bar.mark", surface (themePopup th) (themeRepl th))
   , (attrName "edge.proofterm", surface (themePanel th) (themeProof th))
   , (attrName "edge.goals",     surface (themePanel th) (themeGoals th))
@@ -466,7 +466,7 @@ attrs th = attrMap (surface (themeStage th) (themeInk th))
   , (attrName "recovered",             V.withStyle (ink (themeRepl th)) V.underline)
   , (attrName "placeholder.recovered", V.withStyle (ink (themeRepl th)) V.underline)
   , (attrName "accent.output",  ink (themeSoft th))
-  , (attrName "dropdown",          surface (themePopup th) (themeInk th))
+  , (attrName "dropdown",          surface (themePopup th) (themePopupInk th))
   -- A real background swap for the selected row, not a foreground tint
   -- beside an arrow — his `.jalivert/TUI.md` #20: the arrow was the only
   -- thing marking a row selected, which read as weak. The repl accent as a

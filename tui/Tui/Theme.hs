@@ -32,10 +32,29 @@ data Theme = Theme
   , themeFold    :: V.Color -- ^ a folded literal's background tint
   , themeSplice  :: V.Color -- ^ a folded splice's background tint — distinct
                              -- from a literal's, his ruling, 2026-09-28
-  , themePopup   :: V.Color -- ^ a floating dropdown's background — a lighter
-                             -- step up from the panel, same hue family, so it
-                             -- reads as a surface above the pane, not a hole
-                             -- in it
+  , themePopup   :: V.Color -- ^ a floating dropdown's background. **Set by
+                             -- chroma, not by lightness** — @~bmgr7@, his
+                             -- report, 2026-10-21: *"its background color is almost
+                             -- the same as the editor … I can't see whether
+                             -- that's a dropdown showing 3 things or my
+                             -- editor has three lines."* It was true and
+                             -- measurable: against 'themePanel' the default
+                             -- theme's popup stood at a 1.06 contrast ratio,
+                             -- which is no edge at all. The earlier attempt
+                             -- to fix that by lifting it — `(56, 26, 42)`,
+                             -- `.jalivert/TUI.md` #22, *"like someone put a
+                             -- dim purple filter over my eyes"* — failed
+                             -- because it was a **desaturated** lift: a
+                             -- gray-purple wash over a large area. So this
+                             -- is saturated and still dark, deep in the
+                             -- theme's own accent family, which separates it
+                             -- from the panel without becoming the brightest
+                             -- thing on the screen
+  , themePopupInk :: V.Color -- ^ body text on 'themePopup', paired with it
+                             -- here rather than borrowing 'themeInk' — the
+                             -- two halves of one surface, so a theme cannot
+                             -- retune the background and leave the text
+                             -- behind on it
   , themeSoft    :: V.Color -- ^ the lightest accent, for the latest turn's
                              -- thin marker — present, not prominent. A field
                              -- of its own rather than reusing whichever pane
@@ -73,16 +92,17 @@ neonPinkDark = Theme
   , themeMachine = rgb 255 94 196
   , themeFold    = rgb 40 12 32
   , themeSplice  = rgb 30 20 14
-  -- **Darkened, 2026-09-30**: `.jalivert/TUI.md` #22, "way too purple...
-  -- like someone put a dim purple filter over my eyes." A dropdown covers a
-  -- real chunk of the screen while it's open, and at `(56, 26, 42)` that
-  -- chunk was a mid-tone purple wash competing with the panel and the
-  -- accents both. Same move as `themePanel`'s own 2026-09-30 darkening
-  -- (half the lift, roughly, over the surface below it) rather than a new
-  -- rule: still a real step up from `themePanel` so it reads as its own
-  -- surface, just nowhere near loud enough to be the thing the eye lands
-  -- on — the selected row's own accent bar and the text are.
-  , themePopup   = rgb 28 16 22
+  -- **Deep magenta, 2026-10-21 (@~bmgr7@)**, replacing the `(28, 16, 22)` this was
+  -- darkened to on 2026-09-30. That darkening answered #22's purple wash
+  -- and overshot: at a 1.06 contrast ratio against the panel the popup had
+  -- no visible edge, so three rows of it read as three lines of the editor.
+  -- `(112, 8, 64)` is 1.68 against the panel at 0.93 saturation, where the
+  -- rejected `(56, 26, 42)` was 1.26 at 0.43 — more separation *and* less
+  -- of the gray cast that made the old one a filter rather than a surface.
+  -- Green is the channel held down, since green carries most of perceived
+  -- luminance: this is chromatic, not bright.
+  , themePopup   = rgb 112 8 64
+  , themePopupInk = rgb 255 232 248
   , themeSoft    = rgb 255 140 240
   }
 
@@ -104,7 +124,8 @@ gruyere = Theme
   , themeMachine = rgb 20 249 213
   , themeFold    = rgb 44 36 74
   , themeSplice  = rgb 34 44 40
-  , themePopup   = rgb 54 46 90
+  , themePopup   = rgb 86 34 136
+  , themePopupInk = rgb 248 238 255
   , themeSoft    = rgb 237 255 130
   }
 
@@ -124,7 +145,8 @@ synthwave84 = Theme
   , themeMachine = rgb 254 222 93
   , themeFold    = rgb 52 41 79
   , themeSplice  = rgb 40 50 46
-  , themePopup   = rgb 78 68 104
+  , themePopup   = rgb 112 50 152
+  , themePopupInk = rgb 255 244 255
   , themeSoft    = rgb 254 222 93
   }
 
