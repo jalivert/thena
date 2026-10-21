@@ -69,7 +69,7 @@ data Or (A : Type₀) (B : Type₀) : Type₀ where
   inr : forall (b : B) -> Or A B
 
 absurd : forall (C : Type₀) (e : Empty) -> C
-absurd = \ C e -> elim Empty () (\ t -> C) () () e
+absurd = \ C e -> case e of { }
 
 trueNotNat : forall (d : HasType true nat) -> Empty
 trueNotNat = \ d -> case d of { }

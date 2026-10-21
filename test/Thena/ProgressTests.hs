@@ -13,6 +13,7 @@
 module Thena.ProgressTests (tests) where
 
 import Data.ByteString.Builder (stringUtf8, toLazyByteString)
+import Data.List (isInfixOf, isPrefixOf)
 import Data.Maybe (isJust)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
@@ -59,8 +60,20 @@ tests =
         map (isJust . flip lookupDefinition (globals (machineOf s)) . GlobalName)
             ["ifSteps", "predSteps", "isZeroSteps"]
           @?= [True, True, True]
+
+      -- **Every proof in the file is a split**, asserted of the source rather
+      -- than left to the header's word — the same claim @CanonicalTests@,
+      -- @PreservationTests@ and @NormalTests@ make about the other three files
+      -- of the chain.
+    , testCase "and every proof in it is a split" $ do
+        src <- code <$> readFile "examples/progress.thena"
+        (any ("elim" `isInfixOf`) src, any ("noConfusion" `isInfixOf`) src)
+          @?= (False, False)
     ]
   where
+    -- The file without its prose, which names what the splits replaced.
+    code = filter (not . isPrefixOf "--" . dropWhile (== ' ')) . lines
+
     -- **Two modules, in order** — the second reads the first's globals.
     loaded = do
       (s, _)  <- startingSession

@@ -12,6 +12,7 @@
 module Thena.CanonicalTests (tests) where
 
 import Data.ByteString.Builder (stringUtf8, toLazyByteString)
+import Data.List (isInfixOf, isPrefixOf)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit (testCase, (@?=))
@@ -73,8 +74,21 @@ tests =
     , testCase "and a numeric value is not a boolean, at any level" $ do
         st <- statementOf "nvNotBool"
         st @?= Just (1, "∀ (t : Term) -> NV t -> HasType t bool -> Empty {0}")
+
+      -- **Nothing in the file appeals to @elim@ any more.** @absurd@'s own body
+      -- was the last one, kept while @normal.thena@ and @preservation.thena@
+      -- still used it; MS9 rewrote both of those as splits and @case e of { }@
+      -- says what @elim Empty@ said. The whole TAPL chain is now dependent
+      -- pattern matching, which @README.md@ claims and this asserts.
+    , testCase "and every proof in it is a split" $ do
+        src <- code <$> readFile target
+        (any ("elim" `isInfixOf`) src, any ("noConfusion" `isInfixOf`) src)
+          @?= (False, False)
     ]
   where
+    -- The file without its prose, which names what the splits replaced.
+    code = filter (not . isPrefixOf "--" . dropWhile (== ' ')) . lines
+
     statementOf n = do
       (s, _) <- startingSession
       (s', _, _) <- loadProofFile s target
