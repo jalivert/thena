@@ -166,24 +166,21 @@ data Specialisation = Specialisation
     -- else of** — each with a function from the binders that survived to what
     -- it now means (MS9 phase 196, @~8v3pg@).
     --
-    -- __One of them today__: an ambient entry a /friendly/ index abstracted
-    -- outright.
+    -- __Two kinds__: an ambient entry a /friendly/ index abstracted outright,
+    -- and __the target itself__ (MS9 phase 202, @~hc4ps@) — every ambient name
+    -- it is known by, bound to this constructor applied to this method's
+    -- arguments, which is what the method's conclusion already says its subject
+    -- is.
     --
-    -- __The TARGET is the other thing a split refines that is not a binder of
-    -- the method, and it is not here — measured, not overlooked.__ Inside a
-    -- method the target is the constructor applied to that method's arguments,
-    -- and the entry the author named it by goes on being its old self, so
-    -- writing it in the arm is refused at the arm's own goal. Binding it is
-    -- what cannot be done yet: a rebinding is a
+    -- __The target waited for phase 197.__ A rebinding is a
     -- 'Thena.Core.Context.Definition', and the target's one has a /type/ that
     -- mentions what the split refined — @s1 := eIf p p' a b sr@ is a
-    -- @Step (ifthen p a b) (ifthen p' a b)@. A split nested in that arm then
-    -- meets it in the forward closure of its own seeds, where
-    -- @Thena.Tactics.Eliminate@'s @viable@ may not carry a definition, so it
-    -- cancels the generalisation and the arm loses the refinement it had:
-    -- @examples\/determinacy-patterns.thena@ measures it, @p@ stopping being
-    -- refined to @true@. An index's rebinding has a type that mentions nothing,
-    -- which is why that half is here and this one is not.
+    -- @Step (ifthen p a b) (ifthen p' a b)@. While one definition anywhere in a
+    -- nested split's forward closure cancelled every copy, binding it broke
+    -- @examples\/determinacy-patterns.thena@ outright, @p@ stopping being
+    -- refined to @true@. @Thena.Tactics.Eliminate@'s @generalisable@ skips a
+    -- definition instead, so the entry stays exactly what it was and nothing is
+    -- cancelled.
     --
     -- __It is not in 'specialisedBinders' because it is not a binder of the
     -- method__, and that list says one entry per binder in the order the method
