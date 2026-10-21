@@ -35,12 +35,12 @@
 -- **Every proof that takes a DERIVATION apart is dependent pattern matching
 -- now.** `preservation` is an induction on the step with the typing derivation
 -- split inside the arm that needs it; `invApp`, `invAbs`, `ctxInvExtend`,
--- `ctxInvEmpty`, `weaken` and `fvInCtx` are splits; `appInj`, `absInj`,
+-- `ctxInvEmpty`, `weaken`, `fvInCtx` and `substAll` are splits; `appInj`, `absInj`,
 -- `extendInj` and its three projections are **deleted**, a split doing the
--- injectivity where it stands. 497 lines became 400 and 66 `elim`s became 42.
+-- injectivity where it stands. 497 lines became 422 and 66 `elim`s became 41.
 --
 -- **WHAT IS LEFT IS NOT RESIDUE, AND EACH KIND SAYS WHY AT THE LEMMA.** There
--- are four, and they are the measure of where the feature stops:
+-- are three, and they are the measure of where the feature stops:
 --
 --   * a lemma that decides on a COMPUTED value — `memberSpec`, `freshKeeps`,
 --     `lookHit`, `lookMiss` — eliminates `decString` or `member` and must
@@ -50,8 +50,6 @@
 --     `appendIn`, `listNil` — is not refined by splitting it (`~pmpqg`).
 --   * `arrowInj`, whose equation has a compound term built from AMBIENT
 --     variables on both sides (`~2d9xj`).
---   * `substAll`, which is a split everywhere except that it costs 290 seconds
---     (`~2jmpj`).
 --
 -- **And `weaken` introduces two of its premises inside the arms** rather than
 -- at the top, which is `~wk9qh` and is the one place a reader can still tell
@@ -516,37 +514,31 @@ notCaptured = \ G D s x S E T d g h ->
 
 substAll : forall (G : Ctx) (E : LC) (T : Ty) (d : typing G E T)
              (D : Ctx) (s : List (And String LC)) (g : Good G D s) -> typing D (LC-subst-all E s) T
--- **THIS ONE STAYS AN `elim`, AND THE REASON IS A MEASUREMENT.** As
--- `induction d of` with the three arms written as splits it declares and
--- proves the same theorem — and the file then takes **290 seconds longer** to
--- load, against about 24 for the whole of it before. Every other proof here
--- was rewritten for free or faster. That is `~2jmpj`.
-substAll = \ G E T d ->
-  elim typing ()
-    (\ G0 E0 T0 d0 -> forall (D : Ctx) (s : List (And String LC)) (g : Good G0 D s) -> typing D (LC-subst-all E0 s) T0)
-    -- A variable is sent to itself, found in Δ, or to a closed term of its type.
-    ((\ x T0 G0 i D s g ->
-        elim Or ((And (Eq LC (look x s) (var x)) (extend-in x T0 D))
-                 (And (typing empty (look x s) T0) (Eq (List String) (LC-fv-x (look x s)) (nil String))))
-          (\ o -> typing D (look x s) T0)
-          ((\ e -> subst LC (\ m -> typing D m T0) (var x) (look x s)
-                     (sym LC (look x s) (var x) (andLeft (Eq LC (look x s) (var x)) (extend-in x T0 D) e))
-                     (T-var x T0 D (andRight (Eq LC (look x s) (var x)) (extend-in x T0 D) e)))
-           (\ c -> weakenEmpty (look x s) T0
-                     (andLeft (typing empty (look x s) T0) (Eq (List String) (LC-fv-x (look x s)) (nil String)) c) D))
-          () (g x T0 i))
-     -- Under a binder: the fresh name LC-fresh-x picks is the binder itself.
-     (\ G0 x S E0 T0 d0 ih D s g ->
-        subst String
-          (\ z -> typing D (abs z S (LC-subst-all E0 (cons (And String LC) (both String LC x (var z)) s))) (arrow S T0))
-          x (LC-fresh-x x (images s (LC-fv-x (abs x S E0))))
-          (sym String (LC-fresh-x x (images s (LC-fv-x (abs x S E0)))) x
-             (freshKeeps x (images s (LC-fv-x (abs x S E0))) (notCaptured G0 D s x S E0 T0 d0 g)))
-          (T-abs D x S (LC-subst-all E0 (cons (And String LC) (both String LC x (var x)) s)) T0
-             (ih (extend D x S) (cons (And String LC) (both String LC x (var x)) s) (goodExtend G0 D s x S g))))
-     (\ G0 M S T0 N d1 d2 ih1 ih2 D s g ->
-        T-app D (LC-subst-all M s) S T0 (LC-subst-all N s) (ih1 D s g) (ih2 D s g)))
-    (G E T) d
+substAll = \ G E T d -> induction d of
+  -- A variable is sent to itself, found in Δ, or to a closed term of its type.
+  { T-var x T0 G0 i -> \ D s g ->
+      elim Or ((And (Eq LC (look x s) (var x)) (extend-in x T0 D))
+               (And (typing empty (look x s) T0) (Eq (List String) (LC-fv-x (look x s)) (nil String))))
+        (\ o -> typing D (look x s) T0)
+        ((\ e -> subst LC (\ m -> typing D m T0) (var x) (look x s)
+                   (sym LC (look x s) (var x) (andLeft (Eq LC (look x s) (var x)) (extend-in x T0 D) e))
+                   (T-var x T0 D (andRight (Eq LC (look x s) (var x)) (extend-in x T0 D) e)))
+         (\ c -> weakenEmpty (look x s) T0
+                   (andLeft (typing empty (look x s) T0) (Eq (List String) (LC-fv-x (look x s)) (nil String)) c) D))
+        () (g x T0 i)
+  -- Under a binder: the fresh name LC-fresh-x picks is the binder itself.
+  ; T-abs G0 x S E0 T0 d0 -> \ D s g ->
+      subst String
+        (\ z -> typing D (abs z S (LC-subst-all E0 (cons (And String LC) (both String LC x (var z)) s))) (arrow S T0))
+        x (LC-fresh-x x (images s (LC-fv-x (abs x S E0))))
+        (sym String (LC-fresh-x x (images s (LC-fv-x (abs x S E0)))) x
+           (freshKeeps x (images s (LC-fv-x (abs x S E0))) (notCaptured G0 D s x S E0 T0 d0 g)))
+        (T-abs D x S (LC-subst-all E0 (cons (And String LC) (both String LC x (var x)) s)) T0
+           (substAll (extend G0 x S) E0 T0 d0 (extend D x S)
+              (cons (And String LC) (both String LC x (var x)) s) (goodExtend G0 D s x S g)))
+  ; T-app G0 M S T0 N d1 d2 -> \ D s g ->
+      T-app D (LC-subst-all M s) S T0 (LC-subst-all N s)
+        (substAll G0 M (arrow S T0) d1 D s g) (substAll G0 N S d2 D s g) }
 
 -- E[x -> N] for a closed N of x's type.
 substLemma : forall (x : String) (S : Ty) (E : LC) (T : Ty) (N : LC)
