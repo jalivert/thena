@@ -1274,6 +1274,53 @@ splittingTree =
       unwords (renderResponse s2 q) @?= "s z"
       unwords (renderResponse s3 q') @?= "s z"
 
+    -- __AND A RECURSION MAY SUPPLY A GENERALISED PREMISE__ (MS9 phase 198,
+    -- @~krvdx@). Where the statement's own premises include one the split has to
+    -- generalise, the induction hypothesis stops being "the declaration's
+    -- telescope minus the target": the motive quantifies a copy of each
+    -- generalised entry and states one equation per tied index, so the
+    -- hypothesis takes those first.
+    --
+    -- @e@ is the case, and it is generalised because its type mentions @n@, the
+    -- index of the target. The hypothesis in the @as@ arm is
+    -- @∀ (n : N) (e : Eq N n n) -> Eq N k n -> N@, and the call supplies the
+    -- first two: @k@ is what the recursion says @n@ is at the smaller subject
+    -- and @refl N k@ is what it says @e@ is. **The equation is then reflexive,
+    -- and that is why the call's own arguments decide it** rather than anything
+    -- the arm carries.
+    --
+    -- Before this phase the call was the hypothesis applied to the arguments
+    -- after the one it recurses on, so @refl N k@ landed in the slot wanting an
+    -- @N@ and the kernel refused it with @N and Eq are different names@.
+    --
+    -- **@p38@ is the other spelling and stays refused**, which is the machinery
+    -- working: it passes the arm's own @e@, which the split refined to the copy
+    -- at @s k@, where a hypothesis about @k@ wants @Eq N k k@.
+  , testCase "a recursion supplies the premise a split generalised" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (reachModule ++
+            [ "takesPremise : \8704 (n : N) (x : A n) (e : Eq N n n) -> N"
+            , "takesPremise = \\ n x e -> induction x of \
+              \{ az -> z ; as k p -> s (takesPremise k p (refl N k)) }"
+            , "noPremise : \8704 (n : N) (x : A n) -> N"
+            , "noPremise = \\ n x -> induction x of \
+              \{ az -> z ; as k p -> s (noPremise k p) }"
+              -- Asserted by @refl@ inside the module rather than with
+              -- @:whnf@, which stops at the @s@ the answer is headed by and so
+              -- would say nothing about the recursion under it.
+            , "check : Eq N (takesPremise (s z) (as z az) (refl N (s z))) (s z)"
+            , "check = refl N (s z)"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+  , refusesIn reachModule "a recursion passing the arm's own refined premise is refused"
+      [ "wrongPremise : \8704 (n : N) (x : A n) (e : Eq N n n) -> N"
+      , "wrongPremise = \\ n x e -> induction x of \
+        \{ az -> z ; as k p -> s (wrongPremise k p e) }"
+      ]
+      "stuck: s k and k cannot be made equal"
+
     -- ----------------------------------------------------------------
     -- A FORCED POSITION (MS9 phase 185)
     -- ----------------------------------------------------------------

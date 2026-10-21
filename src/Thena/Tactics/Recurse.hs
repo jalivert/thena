@@ -88,7 +88,7 @@ module Thena.Tactics.Recurse
 
 import Data.List (elemIndex, nub, stripPrefix)
 
-import Thena.Core.Context (Context, Entry (..), entryType)
+import Thena.Core.Context (Context, Entry (..), entryType, entryVar)
 import Thena.Core.Term
   ( Core (..)
   , GlobalName (..)
@@ -107,6 +107,7 @@ import Thena.Global.Env
   , lookupInductive
   , recursiveArgument
   )
+import Thena.Tactics.Eliminate (spineOf)
 
 -- | Where an arm's hypotheses sit in the λ-chain that binds it: how many
 -- binders to descend, and which pairs of them are a recursive argument and the
@@ -119,7 +120,32 @@ import Thena.Global.Env
 -- generalised copy's pair is nowhere near that shape, and an arm the specialiser
 -- rewrote keeps only the binders the equations left. Both are positions in one
 -- list, so one list of pairs says all three.
-data Shape = Shape Int [(Int, Int)]
+data Shape = Shape Int [(Int, Int, Prefix)]
+  deriving (Eq, Show)
+
+-- | What an induction hypothesis asks for before the recursive call's own
+-- arguments (MS9 phase 198, @~krvdx@).
+--
+-- Until a split generalised, a hypothesis's telescope was the declaration's own
+-- with the target's premise removed, so a call was the hypothesis applied to the
+-- arguments /after/ the one it recurses on. A generalising split breaks both
+-- halves of that: the motive quantifies a copy of each ambient entry it
+-- generalised and states one equation per tied index, so the hypothesis takes
+-- those first — and a generalised entry may have been introduced before the
+-- target, where the call's argument for it would otherwise be dropped.
+--
+-- 'NoPrefix' is every hypothesis that is not one of those, and it is still the
+-- common case: a split that generalises nothing, and a /copy/ of an enclosing
+-- arm's hypothesis, which the specialiser has already discharged.
+data Prefix
+  = NoPrefix
+  | Prefix [Int] Int [Core]
+    -- ^ which of the declaration's premises supplies each copy, in the order the
+    -- motive quantified them; how many premises the body had introduced where
+    -- the split stands, so that the arguments past them are the goal's own; and
+    -- __the split's own reflexive proofs__, which the hypothesis's equations are
+    -- re-stated from rather than built again — §3.7 names @refl@ in one place
+    -- and this is not a second one
   deriving (Eq, Show)
 
 -- | What the walk carries down: the assumed name it is tying, the local
@@ -128,11 +154,22 @@ data Shape = Shape Int [(Int, Int)]
 data Walking = Walking
   { subject    :: Var
   , aliases    :: [(Var, Core)]
-  , hypotheses :: [(Var, Var)]
+  , hypotheses :: [(Var, Var, Prefix)]
   , binders    :: Context
     -- ^ every binder descended under, so a refusal can name what the user
     -- wrote instead of a variable number. The same courtesy
     -- 'Thena.Errors.UnknownVariable' already does
+  , premises   :: [Var]
+    -- ^ the declaration's own premises, in telescope order, as far as the body
+    -- has introduced them. 'telescope' collects them and a 'Prefix' is the only
+    -- thing that reads them
+  , arity      :: Int
+    -- ^ how many premises the declaration's type has, which is where the
+    -- counting stops
+  , inBody     :: Bool
+    -- ^ whether the walk is still in a body's own leading position, where a λ is
+    -- one of the declaration's premises. A @let@ keeps it — elaboration puts the
+    -- λ-chain under a nest of them — and everything else drops it
   }
 
 -- | Take @λ f -> body@, tie every call of @f@ to the hypothesis it is, and
@@ -151,7 +188,7 @@ resolveRecursion env n0 tm = case tm of
     let (f, n1) = fresh n0
         -- The assumed name itself is a binder, so a refusal names the function
         -- rather than a variable number.
-        start = Walking f [] [] [Hypothesis f i ty]
+        start = Walking f [] [] [Hypothesis f i ty] [] (arityOf f ty) True
      in case go start (open f sc) n1 of
           (Left e, _, n2)   -> (Left e, n2)
           (Right b, _, n2)
@@ -176,7 +213,7 @@ resolveRecursion env n0 tm = case tm of
               , Just _ <- [recursiveArgument dn np (entryType e)] ]
         shape nargs recs
           | withHyps  = Shape (nargs + length recs)
-                              [ (r, nargs + i) | (i, r) <- zip [0 ..] recs ]
+                              [ (r, nargs + i, NoPrefix) | (i, r) <- zip [0 ..] recs ]
           | otherwise = Shape nargs []
 
     -- | Which ambient entries a split generalised, read off its use site.
@@ -199,21 +236,41 @@ resolveRecursion env n0 tm = case tm of
     -- the hypothesis about it. That is the pair a recursion inside a
     -- generalising arm needs, and it is about the arm's own subject rather than
     -- the enclosing one.
-    withCopies hyps gen (Shape count pairs) =
+    withCopies hyps gen pre (Shape count pairs) =
       Shape (count + length gen)
-            (pairs ++ [ (count + i, count + j)
-                      | (x, h) <- hyps
-                      , Just i <- [elemIndex x gen]
-                      , Just j <- [elemIndex h gen]
-                      ])
+            ([ (i, j, pre) | (i, j, _) <- pairs ]
+               ++ [ (count + i, count + j, NoPrefix)
+                  | (x, h, _) <- hyps
+                  , Just i <- [elemIndex x gen]
+                  , Just j <- [elemIndex h gen]
+                  ])
 
     -- One shape per constructor, in declaration order, as an infinite list so a
     -- method of an undeclared datatype is simply not reported.
-    methodShapes w withHyps d gen = case lookupInductive d env of
-      Just def -> map (Just . withCopies (hypotheses w) gen)
+    methodShapes w withHyps d gen pre = case lookupInductive d env of
+      Just def -> map (Just . withCopies (hypotheses w) gen pre)
                       (shapesOf withHyps def)
                     ++ repeat Nothing
       Nothing  -> repeat Nothing
+
+    -- | __What this split's own induction hypotheses ask for first__ (MS9 phase
+    -- 198, @~krvdx@), or 'NoPrefix' where they ask for nothing.
+    --
+    -- A copy stands for an ambient entry, and the recursive call's argument for
+    -- that entry is wherever the declaration's telescope put it — so the entry
+    -- is looked up in 'premises', which is the one positional convention the
+    -- /declaration/ fixes, as 'shapesOf' is the one the datatype fixes.
+    --
+    -- __An entry that is not one of the declaration's premises gives
+    -- 'NoPrefix'__, and the call is then tied the way it was before this phase.
+    -- A split inside an arm may generalise that arm's own pattern variables, and
+    -- a recursive call has no argument standing for one of those: there is
+    -- nothing to pass, so there is nothing this can say.
+    prefixFor w gen refls
+      | null gen, null refls = NoPrefix
+      | Just poss <- mapM (`elemIndex` premises w) gen =
+          Prefix poss (length (premises w)) refls
+      | otherwise = NoPrefix
 
     -- @caseD@ is the split tactic's other use site: @case … of@ elaborates to an
     -- application of the generated definition rather than to an 'Eliminate'
@@ -261,15 +318,19 @@ resolveRecursion env n0 tm = case tm of
       Nothing    -> go w t n
 
     go w t n = case t of
-      App {}            -> spine w t [] n
+      App {}            -> spine (stop w) t [] n
       Free v | v == subject w -> (Left RecursiveNameNotApplied, [], n)
-      Lam i ty sc       -> under w i (Lam i) ty sc n
-      Pi  i ty sc       -> under w i (Pi  i) ty sc n
-      Canonical g ls as -> walkList w as n `andThen` \as' -> done (Canonical g ls as')
+      Lam i ty sc
+        | inBody w, length (premises w) < arity w -> premise w i ty sc n
+        | otherwise -> under (stop w) i (Lam i) ty sc n
+      Pi  i ty sc       -> under (stop w) i (Pi  i) ty sc n
+      Canonical g ls as ->
+        walkList (stop w) as n `andThen` \as' -> done (Canonical g ls as')
       Trusted a b c ->
-        go w a n  `andThen` \a' n1 ->
-        go w b n1 `andThen` \b' n2 ->
-        go w c n2 `andThen` \c' -> done (Trusted a' b' c')
+        go w' a n  `andThen` \a' n1 ->
+        go w' b n1 `andThen` \b' n2 ->
+        go w' c n2 `andThen` \c' -> done (Trusted a' b' c')
+        where w' = stop w
 
       -- Written out rather than threaded, because this is the one case that
       -- /reads/ what the walk reported: the shape a method was used at comes
@@ -277,18 +338,31 @@ resolveRecursion env n0 tm = case tm of
       --
       -- The body is walked with the definition in scope, which is what lets a
       -- call written over a copy be read.
+      -- __A development's own component keeps the leading chain__ (MS9 phase
+      -- 198). What 'Thena.Development.Partial.extract' hands over is
+      -- @let goal = λ δ⃗ -> … in goal@, so the declaration's premises are the
+      -- leading λs of a @let@'s /value/ and not of its body. The test is the
+      -- shape itself — a @let@ whose body is the variable it binds — and nothing
+      -- else keeps the flag, so a λ in an ordinary value cannot be counted as a
+      -- premise.
       Let i v ty sc ->
         let (x, n1) = fresh n
             inner   = w { aliases = (x, v) : aliases w
                         , binders = binders w ++ [Definition x i v ty] }
+            component = case open x sc of
+              Free y -> y == x
+              _      -> False
+            intoValue
+              | inBody w, component = w
+              | otherwise           = stop w
          in case go inner (open x sc) n1 of
               (Left e, u, n2) -> (Left e, u, n2)
               (Right b, usedB, n2) ->
                 let mine  = lookup x usedB
                     other = [ q | q@(y, _) <- usedB, y /= x ]
-                 in case walkIn w mine v n2 of
+                 in case walkIn intoValue mine v n2 of
                       (Left e, u, n3) -> (Left e, other ++ u, n3)
-                      (Right v', usedV, n3) -> case go w ty n3 of
+                      (Right v', usedV, n3) -> case go (stop w) ty n3 of
                         (Left e, u, n4) -> (Left e, other ++ usedV ++ u, n4)
                         (Right ty', usedT, n4) ->
                           -- An alias carries the shape one step further out,
@@ -304,7 +378,7 @@ resolveRecursion env n0 tm = case tm of
                            in ( Right (Let i v' ty' (close x b))
                               , other ++ usedV ++ usedT ++ viaName, n5 )
 
-      Eliminate {} -> elimination w t [] n
+      Eliminate {} -> elimination (stop w) t [] n
       _            -> done t n
 
     under w i build ty sc n =
@@ -334,10 +408,12 @@ resolveRecursion env n0 tm = case tm of
     -- hypothesis has becomes an application of the hypothesis: @f m y@ with
     -- the hypothesis about @m@ is @ih y@.
     tie w as n =
-      case nub [ (k, h) | (k, a) <- zip [(0 :: Int) ..] as
-                        , Just y <- [through w a]
-                        , (y', h) <- hypotheses w, y' == y ] of
-        [(k, h)] -> (Right (foldl App (Free h) (drop (k + 1) as)), n)
+      case nub [ (k, h, pre) | (k, a) <- zip [(0 :: Int) ..] as
+                             , Just y <- [through w a]
+                             , (y', h, pre) <- hypotheses w, y' == y ] of
+        [(k, h, NoPrefix)] -> (Right (foldl App (Free h) (drop (k + 1) as)), n)
+        [(_, h, Prefix poss amb refls)] ->
+          (Right (foldl App (Free h) (prefixed w as h poss amb refls)), n)
         []       -> (Left (CallMatchesNoHypothesis (binders w) (call as)), n)
         several  -> (Left (CallMatchesSeveral (binders w) (call as)
                                               (length several)), n)
@@ -345,6 +421,47 @@ resolveRecursion env n0 tm = case tm of
         -- __Shown with the copies unfolded__, because elaborating a name binds
         -- one: without this, @loop zero@ is reported as @loop ‹Var 3727›@.
         call = foldl App (Free (subject w)) . map (expand w)
+
+    -- __The call, read against the telescope a generalising split's hypothesis
+    -- actually has__ (MS9 phase 198, @~krvdx@): one copy per generalised entry,
+    -- then one proof per equation, then the arguments for the premises the body
+    -- had not introduced where the split stands.
+    --
+    -- The copies come from the call, because a copy stands for an ambient entry
+    -- and the call is where the recursion says what that entry is at the smaller
+    -- subject. __The equations are the split's own reflexive proofs re-stated at
+    -- the hypothesis's index__, which the equation's own type gives once the
+    -- copies are in: it reads @Eq I i a@, and @i@ is the index this hypothesis is
+    -- about. Where the two sides do not meet, the kernel says so at the call,
+    -- which is the right place for it — the recursion is then not at the index
+    -- the author thinks.
+    prefixed w as h poss amb refls =
+      let copies = [ a | Just a <- map (`at` as) poss ]
+          hTy    = [ entryType e | e <- binders w, entryVar e == h ]
+       in copies ++ equations hTy copies refls ++ drop amb as
+
+    -- Past one binder of the hypothesis per copy, then one per equation.
+    equations tys copies refls = case tys of
+      ty : _ -> walk (pastCopies copies ty) refls
+      []     -> refls
+      where
+        walk ty qs = case (qs, ty) of
+          ([], _) -> []
+          (q : rest, Pi _ dom sc) ->
+            let q' = atIndex q dom
+             in q' : walk (instantiate q' sc) rest
+          (_, _) -> qs
+
+    pastCopies args ty = case (args, ty) of
+      (a : rest, Pi _ _ sc) -> pastCopies rest (instantiate a sc)
+      _                     -> ty
+
+    -- A reflexive proof re-stated at the index its equation relates. §3.7 names
+    -- @refl@ in one place and this is not a second one: the term comes from the
+    -- split's own use site and only its last argument moves.
+    atIndex q dom = case (spineOf q, spineOf dom) of
+      (Just (g, ls, [ity, _]), Just (_, _, [_, l, _])) -> Canonical g ls [ity, l]
+      _ -> q
 
     -- An argument read through the local definitions, because elaborating a
     -- name binds a copy of it rather than handing the variable over.
@@ -373,7 +490,9 @@ resolveRecursion env n0 tm = case tm of
 
     elimination w t as n = case t of
       Eliminate d ls ps mot ms is tgt ->
-        let shapes = methodShapes w True d (generalisedIn as)
+        let gen    = generalisedIn as
+            shapes = methodShapes w True d gen
+                       (prefixFor w gen (drop (length gen) as))
             used = [ (v, sh) | (Free v, Just sh) <- zip ms shapes ]
          in methods w (zip ms shapes) n `andThen` \ms' n1 ->
             go w mot n1      `andThen` \mot' n2 ->
@@ -394,8 +513,10 @@ resolveRecursion env n0 tm = case tm of
           ni = length (inductiveIndices def)
           nc = length (inductiveConstructors def)
           ms = take nc (drop (np + 1) as)
+          -- @caseD@'s methods carry no hypotheses, so there is no prefix to
+          -- state: a 'Shape' with no pairs has nowhere to put one.
           shapes = methodShapes w False (inductiveName def)
-                     (generalisedIn (drop (np + 1 + nc + ni + 1) as))
+                     (generalisedIn (drop (np + 1 + nc + ni + 1) as)) NoPrefix
           used = [ (v, sh) | (Free v, Just sh) <- zip ms shapes ]
           shapeAt k
             | k >= np + 1, k < np + 1 + nc = shapes !! (k - (np + 1))
@@ -418,8 +539,12 @@ resolveRecursion env n0 tm = case tm of
       where
         chain args u j
           | length args >= count =
+              -- __An arm's trailing λs are the declaration's next premises__,
+              -- so the chain continues here and not with 'go'. A method's own
+              -- binders are not premises and are the reason this is two walks.
               go w { hypotheses = bound args ++ hypotheses w
-                   , binders    = binders w ++ map snd args } u j
+                   , binders    = binders w ++ map snd args
+                   , inBody     = True } u j
           | otherwise = case u of
               Lam i ty sc ->
                 let (v, j1) = fresh j
@@ -430,8 +555,8 @@ resolveRecursion env n0 tm = case tm of
         -- The hypotheses, once the whole chain is bound, as the shape names
         -- them: a pair of positions in it.
         bound args =
-          [ (y, h)
-          | (i, j) <- pairs
+          [ (y, h, pre)
+          | (i, j, pre) <- pairs
           , Just (y, _) <- [at i args]
           , Just (h, _) <- [at j args]
           ]
@@ -462,8 +587,8 @@ resolveRecursion env n0 tm = case tm of
        in if length vs < count then ([], n1) else case found of
             [(z, args)] ->
               ( [ (z, Shape (length args)
-                      [ (i', j')
-                      | (i, j) <- pairs
+                      [ (i', j', pre)
+                      | (i, j, pre) <- pairs
                       , Just i' <- [place vs args i]
                       , Just j' <- [place vs args j]
                       ]) ]
@@ -471,6 +596,43 @@ resolveRecursion env n0 tm = case tm of
             _ -> ([], n1)
       where
         place vs args i = at i vs >>= \y -> elemIndex (Free y) args
+
+    -- | __One of the declaration's own premises, as the body introduces it__
+    -- (MS9 phase 198, @~krvdx@).
+    --
+    -- The leading λ-chain of a body is the declaration's telescope and nothing
+    -- else is. Two things make that less obvious than it sounds, and 'inBody' is
+    -- what carries both: __elaboration puts the chain under a nest of @let@s__,
+    -- so the chain is not at the top of the term and a @let@ has to keep the
+    -- flag; and __an arm's trailing λs continue the same telescope__, so 'peel'
+    -- turns it back on once a method's own binders are taken — those are
+    -- positions in the method and never premises.
+    --
+    -- __It stops at the declaration's arity__, so that an arm written to take a
+    -- leftover equation — legal, and @DECISIONS.md@ says why it is not how the
+    -- examples are written — cannot push the count past what the telescope has.
+    premise w i ty sc n =
+      go (stop w) ty n `andThen` \ty' n1 ->
+        let (v, n2) = fresh n1
+            inner   = w { premises = premises w ++ [v]
+                        , binders  = binders w ++ [Hypothesis v i ty]
+                        }
+         in go inner (open v sc) n2 `andThen` \b -> done (Lam i ty' (close v b))
+
+    -- Out of the leading chain, which is everywhere but a @let@'s body and the
+    -- body of a premise's own λ.
+    stop w = w { inBody = False }
+
+    -- How many premises the declaration's type has, read as a telescope.
+    --
+    -- __Instantiated at the assumed name rather than a fresh variable__: minting
+    -- one would move every generated name after it, and `HAZARDS.md` carries
+    -- what that costs. Nothing is read but each head, and @'Free' f@ is not a Π,
+    -- so a telescope cannot be lengthened or shortened by standing in for its
+    -- own binder.
+    arityOf f t = case t of
+      Pi _ _ sc -> 1 + arityOf f (instantiate (Free f) sc)
+      _         -> 0 :: Int
 
     -- Every leading λ, opened at a throwaway variable, and the body under them.
     openAll t n = case t of

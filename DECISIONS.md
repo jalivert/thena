@@ -2425,6 +2425,21 @@ compiled. **Agda and Idris show none of it either**, because a clause's whole le
 side is one unification problem rather than one scrutinee with everything to its left
 fixed.
 
+**A RECURSION MAY SUPPLY A PREMISE THE SPLIT HAD TO GENERALISE.** Where the statement's own
+premises include one the split generalises, the recursive call says what it is at the
+smaller subject and nothing else changes:
+
+```
+takesPremise : forall (n : N) (x : A n) (e : Eq N n n) -> N
+takesPremise = \ n x e -> induction x of
+  { az -> z ; as k p -> s (takesPremise k p (refl N k)) }
+```
+
+`e` is generalised because its type mentions `n`, the target's index. The recursion is at
+`k`, so the premise it needs is `refl N k` and that is what is written. **Passing the arm's
+own `e` instead is refused**, and it should be: the split refined `e` to the copy at
+`s k`, which is not a premise about `k`.
+
 **AND WHERE YOU INTRODUCE A PREMISE IS NOT PART OF THE PROOF EITHER.** A statement says
 what the premises are, not the order a proof takes them in, so `\ n x u f ->` across the top
 and a `\ u f ->` inside each arm are the same proof and both load:
