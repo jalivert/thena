@@ -292,7 +292,7 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
                           verify hv want tm (report c delta sol)
                                  (reboundTerms d c delta sol) n3
   where
-    MethodShape gens k friendly pars = shape
+    MethodShape gens k friendly pars tgtNames lvls = shape
 
     h  = length hyps
     gc = length gens
@@ -382,7 +382,7 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
     -- abstracted over the ones before it: an index expression may mention any
     -- of the constructor's arguments, so there is no prefix to stop at. The
     -- caller applies it once the telescope is bound.
-    reboundTerms d c delta sol = map (fmap (lamOver survivors)) indices
+    reboundTerms d c delta sol = map (fmap (lamOver survivors)) (indices ++ scrutinee)
       where
         -- An ambient entry a friendly index abstracted now means this
         -- constructor's own index expression at that position.
@@ -390,6 +390,20 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
           [ (i, substituteAll sol (substituteAll argSub (substituteAll paramSub ix)))
           | (i, pos) <- friendly
           , ix <- take 1 (drop pos (constructorIndices c))
+          ]
+
+        -- __And the target means this constructor applied to this method's own
+        -- arguments__ (MS9 phase 202, @~hc4ps@) — @mk V@ where the author wrote
+        -- @d@, which is what the method's conclusion already says its subject
+        -- is. It is the same rebinding as a friendly index's and it is written
+        -- here for the same reason: the arguments are binders of this method.
+        -- The solutions go through it because a forced argument has no binder
+        -- left to name.
+        scrutinee =
+          [ (i, substituteAll sol
+                  (Canonical cn lvls
+                     (pars ++ map (Free . entryVar) conArgs)))
+          | i <- tgtNames
           ]
 
         conArgs  = take (length (constructorArguments c)) delta

@@ -186,10 +186,33 @@ data MethodShape = MethodShape
   , shapeParameters :: [Core]
     -- ^ the family's parameters as the target supplied them (MS9 phase 196).
     --
-    -- __Here for 'shapeFriendly' and nothing else__: a constructor's index
-    -- expression is stated in the declaration's parameter variables, so writing
-    -- one out at a method needs the substitution the scheme already made, and a
-    -- method type does not carry it.
+    -- __Here for 'shapeFriendly' and the target's own rebinding__: a
+    -- constructor's index expression is stated in the declaration's parameter
+    -- variables, so writing one out at a method needs the substitution the
+    -- scheme already made, and a method type does not carry it; and a
+    -- saturated constructor application takes the parameters first.
+  , shapeTargetNames :: [Ident]
+    -- ^ every ambient name the __target__ is known by (MS9 phase 202,
+    -- @~hc4ps@).
+    --
+    -- __The target is the other thing a split refines that is not a binder of
+    -- the method.__ Inside a method it is the constructor applied to that
+    -- method's arguments, so the entry the author named it by goes on being its
+    -- old self at the old index and writing it in the arm was refused at the
+    -- arm's own goal. The arm binds this name exactly as it binds a solved copy
+    -- or a friendly index, and "Thena.Tactics.Specialise" writes the term,
+    -- being the only thing that has this method's binders.
+    --
+    -- __It is a list because the split writes its own name for the target__ —
+    -- @xsplit := d@ — and the author's @d@ is one step further out, so one
+    -- name is never enough. It is 'targetVars', which is already the chain the
+    -- scheme treats as the target, and it is empty where the target is not a
+    -- bare variable: a compound target names no ambient entry.
+  , shapeLevels :: [Level]
+    -- ^ the family's level arguments as the target supplied them (MS9 phase
+    -- 202). __Here for 'shapeTarget' and nothing else__: a saturated
+    -- constructor application states them and a method type does not carry
+    -- them.
   }
   deriving (Eq, Show)
 
@@ -801,7 +824,7 @@ eliminate env ctx sch n0 goal tgt =
             (Right (), _, n11) ->
               ( Right (Elimination holes proof
                          (MethodShape (map entryIdent genEntries) (length tied)
-                                      friendlyEntries ps))
+                                      friendlyEntries ps targetIdents ls))
               , n11 )
 
     -- Peel @k@ Π domains off a type, instantiating each binder with itself is
@@ -874,6 +897,31 @@ eliminate env ctx sch n0 goal tgt =
     -- A value that is not a variable stops the walk, and then only the hole is
     -- excepted: a compound target really does leave the user's hypothesis as a
     -- separate premise constraining the index.
+    -- | __Every ambient name the target is known by__ (MS9 phase 202,
+    -- @~hc4ps@), which the arm rebinds to the constructor applied to that
+    -- method's arguments. The split defines @xsplit := d@ and eliminates
+    -- @xsplit@, so the author's own name is one step out and both mean the same
+    -- thing in the arm — one name is never enough.
+    --
+    -- __It follows a definition's VALUE and nothing else__, which is where it
+    -- differs from 'targetVars': that walk also follows a bare /type/, because
+    -- an entry whose type is the abstracted variable is a premise about the
+    -- target and has to be fixed with it. Such a name is not a name for the
+    -- target, and rebinding it would put a term where a type stood.
+    targetIdents = [ entryIdent e | e <- ctx, entryVar e `elem` named ]
+      where
+        named = case tgt of
+          Free w -> walk [] [w]
+          _      -> []
+        walk seen []       = seen
+        walk seen (w : ws)
+          | w `elem` seen = walk seen ws
+          | otherwise     = walk (w : seen) (ws ++ concatMap (valueOf w) ctx)
+        valueOf w e
+          | entryVar e /= w              = []
+          | Definition _ _ (Free y) _ <- e = [y]
+          | otherwise                    = []
+
     targetVars = case tgt of
       Free w -> walk [] [w]
       _      -> []

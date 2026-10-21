@@ -478,11 +478,11 @@ run' env ctx n c shape mty =
   Left e  -> error (c ++ ": " ++ show e)
 
 -- | The shape for a method type __written by hand__ rather than produced by an
--- elimination: @k@ equations, nothing generalised and no index abstracted
--- outright — so 'specialisedRebound' is empty, which is what these fixtures
--- want.
+-- elimination: @k@ equations, nothing generalised, no index abstracted
+-- outright and no ambient name for the target — so 'specialisedRebound' is
+-- empty, which is what these fixtures want.
 plainShape :: Int -> MethodShape
-plainShape k = MethodShape [] k [] []
+plainShape k = MethodShape [] k [] [] [] []
 
 -- | How many inductive hypotheses this constructor's method carries: one per
 -- recursive argument.

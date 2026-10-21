@@ -1233,6 +1233,45 @@ splittingTree =
       let (s2, q) = command s1 ":whnf sameIndex (s z) (mk (s z))"
       unwords (renderResponse s2 q) @?= "mk (s z)"
 
+    -- __AND SO DOES THE SCRUTINEE ITSELF__ (MS9 phase 202, @~hc4ps@), which is
+    -- the last name a split refines that is not a binder of the method. Inside
+    -- a method the target is the constructor applied to that method's
+    -- arguments, so the entry the author named it by went on being its old self
+    -- at the old index: @case d of { mk V -> d }@ was refused with @U and V
+    -- cannot be made equal@, naming the refinement it would not apply, while
+    -- @mk V@ in the same arm declared.
+    --
+    -- __The split writes its own name for the target__ — @xsplit := d@, and
+    -- eliminates that — so the author's name is one step out and the arm binds
+    -- every name in the chain.
+    --
+    -- All three paths are here: @onFriendly@\'s index is abstracted outright,
+    -- @onTied@\'s is generalised and solved, and @underInduction@ is a method
+    -- that also carries a hypothesis. **All three compute**, asserted by
+    -- @refl@ inside the module.
+  , testCase "the scrutinee written in its own arm means the refined thing" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (evModule ++
+            [ "data D : N -> Type\8320 where"
+            , "  mk : \8704 (k : N) -> D k"
+            , ""
+            , "onFriendly : \8704 (U : N) (d : D U) -> D U"
+            , "onFriendly = \\ U d -> case d of { mk V -> d }"
+            , "onTied : \8704 (m : N) (e : Ev (s m)) -> Ev (s m)"
+            , "onTied = \\ m e -> case e of { evs n en -> e }"
+            , "underInduction : \8704 (m : N) (e : Ev m) -> Ev m"
+            , "underInduction = \\ m e -> induction e of { evz -> e ; evs n en -> e }"
+            , "check1 : Eq (D (s z)) (onFriendly (s z) (mk (s z))) (mk (s z))"
+            , "check1 = refl (D (s z)) (mk (s z))"
+            , "check2 : Eq (Ev (s (s z))) (onTied (s z) (evs z evz)) (evs z evz)"
+            , "check2 = refl (Ev (s (s z))) (evs z evz)"
+            , "check3 : Eq (Ev (s (s z))) (underInduction (s (s z)) (evs z evz)) (evs z evz)"
+            , "check3 = refl (Ev (s (s z))) (evs z evz)"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
     -- __AND WHERE THE PREMISE IS INTRODUCED MAKES NO DIFFERENCE__ (MS9 phase
     -- 197, @~k54hh@), which is the same ruling again: the statement
     -- @\8704 (n : N) (x : A n) (u : N) (f : F n u) -> N@ says nothing about the
