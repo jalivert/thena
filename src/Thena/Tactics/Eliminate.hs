@@ -466,7 +466,7 @@ eliminate env ctx sch n0 goal tgt =
                      ]
 
 
-            -- __AND IT CLOSES BOTH WAYS — MS9 phase 198, `~754m3`.__ Forward
+            -- __AND IT CLOSES BOTH WAYS — MS9 phase 199, `~754m3`.__ Forward
             -- is the thesis's dependency-preservation condition: an entry whose
             -- type mentions a generalised variable is generalised too, or its
             -- copy would be a hypothesis about a subject that no longer means

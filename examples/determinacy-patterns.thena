@@ -96,7 +96,7 @@ falseNoStep = \ u s -> case s of { }
 zeroNoStep : forall (u : Term) (s : Step zero u) -> Empty
 zeroNoStep = \ u s -> case s of { }
 
--- `u` and `s` are introduced inside the arms, and since MS9 phase 198 that is a
+-- `u` and `s` are introduced inside the arms, and since MS9 phase 199 that is a
 -- preference and not a requirement: `\ v nv u s ->` across the top is the same
 -- proof and loads too. The generated proof needs a separate `succNoStep` that
 -- takes its own induction hypothesis as an argument; here the hypothesis IS the

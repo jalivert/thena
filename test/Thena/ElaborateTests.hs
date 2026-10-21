@@ -1322,7 +1322,7 @@ splittingTree =
       "stuck: s k and k cannot be made equal"
 
     -- __AND A RECURSION MAY VARY A PREMISE THE SPLIT DID NOT SPLIT ON__ (MS9
-    -- phase 198, @~754m3@), which is the last of the four and the one the two
+    -- phase 199, @~754m3@), which is the last of the four and the one the two
     -- TAPL rewrites were waiting on.
     --
     -- @u@ is the case. The tied index seeds @n@, and the forward closure takes
