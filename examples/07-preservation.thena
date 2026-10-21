@@ -29,6 +29,33 @@
 -- **For closed terms only**, as Software Foundations states it. For any Γ the
 -- argument can have free names, a binder may be renamed, and proving the new
 -- name fresh needs facts about strings Thena cannot yet state — AGENDA 68.
+--
+-- == What is a split and what is not (MS9)
+--
+-- **Every proof that takes a DERIVATION apart is dependent pattern matching
+-- now.** `preservation` is an induction on the step with the typing derivation
+-- split inside the arm that needs it; `invApp`, `invAbs`, `ctxInvExtend`,
+-- `ctxInvEmpty`, `weaken` and `fvInCtx` are splits; `appInj`, `absInj`,
+-- `extendInj` and its three projections are **deleted**, a split doing the
+-- injectivity where it stands. 497 lines became 400 and 66 `elim`s became 42.
+--
+-- **WHAT IS LEFT IS NOT RESIDUE, AND EACH KIND SAYS WHY AT THE LEMMA.** There
+-- are four, and they are the measure of where the feature stops:
+--
+--   * a lemma that decides on a COMPUTED value — `memberSpec`, `freshKeeps`,
+--     `lookHit`, `lookMiss` — eliminates `decString` or `member` and must
+--     rewrite the goal's own occurrences of it. That is what `with` is for,
+--     and `with` is not built.
+--   * a lemma whose PREMISE mentions the target through a function —
+--     `appendIn`, `listNil` — is not refined by splitting it (`~pmpqg`).
+--   * `arrowInj`, whose equation has a compound term built from AMBIENT
+--     variables on both sides (`~2d9xj`).
+--   * `substAll`, which is a split everywhere except that it costs 290 seconds
+--     (`~2jmpj`).
+--
+-- **And `weaken` introduces two of its premises inside the arms** rather than
+-- at the top, which is `~wk9qh` and is the one place a reader can still tell
+-- how the proof was compiled.
 
 module StlcPreservation where
 
@@ -36,16 +63,16 @@ module StlcPreservation where
 -- Logic
 
 absurdly : forall (C : Type₀) (e : Empty) -> C
-absurdly = \ C e -> elim Empty () (\ t -> C) () () e
+absurdly = \ C e -> case e of { }
 
 subst : forall (A : Type₀) (P : A -> Type₀) (a : A) (b : A) (e : Eq A a b) (p : P a) -> P b
-subst = \ A P a b e p -> elim Eq (A) (\ x y q -> P x -> P y) ((\ c -> \ z -> z)) (a b) e p
+subst = \ A P a b e -> case e of { refl c -> \ z -> z }
 
 sym : forall (A : Type₀) (a : A) (b : A) (e : Eq A a b) -> Eq A b a
-sym = \ A a b e -> subst A (\ z -> Eq A z a) a b e (refl A a)
+sym = \ A a b e -> case e of { refl c -> refl A c }
 
 trans : forall (A : Type₀) (a : A) (b : A) (c : A) (e1 : Eq A a b) (e2 : Eq A b c) -> Eq A a c
-trans = \ A a b c e1 e2 -> subst A (\ z -> Eq A a z) b c e2 e1
+trans = \ A a b c e1 e2 -> case e1 of { refl k -> e2 }
 
 data Or (A : Type₀) (B : Type₀) : Type₀ where
   orLeft : forall (a : A) -> Or A B
@@ -184,13 +211,13 @@ freshKeeps = \ c avoid ->
 -- Looking a name up in a context, taken apart
 
 ctxInvEmpty : forall (y : String) (U : Ty) (i : extend-in y U empty) -> Empty
-ctxInvEmpty = \ y U i ->
-  elim extend-in () (\ y1 U1 G1 i1 -> Eq Ctx G1 empty -> Empty)
-    ((\ G x T e -> noConfusionCtx (extend G x T) empty e)
-     (\ G x T x1 T1 ne i1 ih e -> noConfusionCtx (extend G x1 T1) empty e))
-    (y U empty) i (refl Ctx empty)
+ctxInvEmpty = \ y U i -> case i of { }
 
--- Two extensions that are equal have equal parts.
+-- **Six lemmas no proof in this file needs any more, kept because
+-- `08-preservation-by-tactics.thena.script` replays this development by hand
+-- and still calls them.** `extendInj` and `appInj`/`absInj` are no-confusion
+-- for the reason `arrowInj` is: both sides of the equation are compound terms
+-- over AMBIENT variables, so a split cannot solve either (`~2d9xj`).
 extendInj : forall (G0 : Ctx) (x : String) (T : Ty) (G : Ctx) (a : String) (S : Ty)
               (e : Eq Ctx (extend G0 x T) (extend G a S))
               -> And (Eq Ctx G0 G) (And (Eq String x a) (Eq Ty T S))
@@ -218,18 +245,17 @@ CtxFound : Ctx -> String -> Ty -> String -> Ty -> Type₀
 CtxFound = \ G a S y U ->
   Or (And (Eq String y a) (Eq Ty U S)) (And (Eq String y a -> Empty) (extend-in y U G))
 
+-- The split does the injectivity: `extend-here`'s own index is
+-- `Γ , x : T`, and unifying it with `Γ , a : S` IS what `extendInj` and its
+-- three projections were for. They are gone.
 ctxInvExtend : forall (G : Ctx) (a : String) (S : Ty) (y : String) (U : Ty) (i : extend-in y U (extend G a S)) -> CtxFound G a S y U
-ctxInvExtend = \ G a S y U i ->
-  elim extend-in () (\ y1 U1 G1 i1 -> Eq Ctx G1 (extend G a S) -> CtxFound G a S y1 U1)
-    ((\ G0 x T e ->
-        orLeft (And (Eq String x a) (Eq Ty T S)) (And (Eq String x a -> Empty) (extend-in x T G))
-          (both (Eq String x a) (Eq Ty T S) (extendName G0 x T G a S e) (extendTy G0 x T G a S e)))
-     (\ G0 x T x1 T1 ne i1 ih e ->
-        orRight (And (Eq String x a) (Eq Ty T S)) (And (Eq String x a -> Empty) (extend-in x T G))
-          (both (Eq String x a -> Empty) (extend-in x T G)
-            (\ q -> ne (trans String x a x1 q (sym String x1 a (extendName G0 x1 T1 G a S e))))
-            (subst Ctx (\ g -> extend-in x T g) G0 G (extendCtx G0 x1 T1 G a S e) i1))))
-    (y U (extend G a S)) i (refl Ctx (extend G a S))
+ctxInvExtend = \ G a S y U i -> case i of
+  { extend-here G0 x T ->
+      orLeft (And (Eq String y a) (Eq Ty U S)) (And (Eq String y a -> Empty) (extend-in y U G))
+        (both (Eq String y a) (Eq Ty U S) (refl String y) (refl Ty U))
+  ; extend-there-extend G0 x T x1 T1 ne i1 ->
+      orRight (And (Eq String y a) (Eq Ty U S)) (And (Eq String y a -> Empty) (extend-in y U G))
+        (both (Eq String y a -> Empty) (extend-in y U G) ne i1) }
 
 -- ---------------------------------------------------------------------------
 -- Weakening: a derivation survives into any context that finds at least as much
@@ -238,29 +264,34 @@ Incl : Ctx -> Ctx -> Type₀
 Incl = \ G G1 -> forall (y : String) (U : Ty) (i : extend-in y U G) -> extend-in y U G1
 
 inclExtend : forall (G : Ctx) (G1 : Ctx) (x : String) (S : Ty) (inc : Incl G G1) -> Incl (extend G x S) (extend G1 x S)
-inclExtend = \ G G1 x S inc y U i ->
-  elim Or ((And (Eq String y x) (Eq Ty U S)) (And (Eq String y x -> Empty) (extend-in y U G)))
-    (\ o -> extend-in y U (extend G1 x S))
-    ((\ h -> subst String (\ z -> extend-in z U (extend G1 x S)) x y
-               (sym String y x (andLeft (Eq String y x) (Eq Ty U S) h))
-               (subst Ty (\ V -> extend-in x V (extend G1 x S)) S U
-                  (sym Ty U S (andRight (Eq String y x) (Eq Ty U S) h))
-                  (extend-here G1 x S)))
-     (\ h -> extend-there-extend G1 y U x S (andLeft (Eq String y x -> Empty) (extend-in y U G) h)
-               (inc y U (andRight (Eq String y x -> Empty) (extend-in y U G) h))))
-    () (ctxInvExtend G x S y U i)
+inclExtend = \ G G1 x S inc y U i -> case (ctxInvExtend G x S y U i) of
+  { orLeft h -> case h of
+      { both ey eU ->
+          subst String (\ z -> extend-in z U (extend G1 x S)) x y (sym String y x ey)
+            (subst Ty (\ V -> extend-in x V (extend G1 x S)) S U (sym Ty U S eU)
+               (extend-here G1 x S)) }
+  ; orRight h -> case h of
+      { both ne i2 -> extend-there-extend G1 y U x S ne (inc y U i2) } }
 
 weaken : forall (G : Ctx) (t : LC) (T : Ty) (d : typing G t T) (G1 : Ctx) (inc : Incl G G1) -> typing G1 t T
-weaken = \ G t T d ->
-  elim typing () (\ G0 t0 T0 d0 -> forall (G1 : Ctx) (inc : Incl G0 G1) -> typing G1 t0 T0)
-    ((\ x T0 G0 i G1 inc -> T-var x T0 G1 (inc x T0 i))
-     (\ G0 x S E T0 d0 ih G1 inc -> T-abs G1 x S E T0 (ih (extend G1 x S) (inclExtend G0 G1 x S inc)))
-     (\ G0 M S T0 N d1 d2 ih1 ih2 G1 inc -> T-app G1 M S T0 N (ih1 G1 inc) (ih2 G1 inc)))
-    (G t T) d
+-- **`G1` and `inc` are introduced INSIDE the arms, and that is not a
+-- preference.** Writing `\ G t T d G1 inc ->` across the top — what a student
+-- writes, and what every other proof in this file now does — is refused by the
+-- kernel at the `T-abs` arm's recursive call, because the induction hypothesis
+-- there is pinned to the ambient `G` while the recursion is at `G , x : S`.
+-- The decision behind it is his and is `~wk9qh` in
+-- `.jalivert/agenda/UNALLOCATED.md`.
+weaken = \ G t T d -> induction d of
+  { T-var x T0 G0 i -> \ G1 inc -> T-var x T0 G1 (inc x T0 i)
+  ; T-abs G0 x S E T0 d0 -> \ G1 inc ->
+      T-abs G1 x S E T0
+        (weaken (extend G0 x S) E T0 d0 (extend G1 x S) (inclExtend G0 G1 x S inc))
+  ; T-app G0 M S T0 N d1 d2 -> \ G1 inc ->
+      T-app G1 M S T0 N (weaken G0 M (arrow S T0) d1 G1 inc) (weaken G0 N S d2 G1 inc) }
 
 -- A closed derivation holds in every context.
 weakenEmpty : forall (t : LC) (T : Ty) (d : typing empty t T) (D : Ctx) -> typing D t T
-weakenEmpty = \ t T d D -> weaken empty t T d D (\ y U i -> absurdly (extend-in y U D) (ctxInvEmpty y U i))
+weakenEmpty = \ t T d D -> weaken empty t T d D (\ y U i -> case i of { })
 
 -- ---------------------------------------------------------------------------
 -- The free variables of a typed term are in its context
@@ -276,77 +307,63 @@ FvSpec = \ G bound acc w -> Or (In w acc) (And (In w bound -> Empty) (Dom G w))
 fvInCtx : forall (G : Ctx) (t : LC) (T : Ty) (d : typing G t T)
             (bound : List String) (acc : List String) (w : String) (h : In w (fvA t bound acc))
             -> FvSpec G bound acc w
-fvInCtx = \ G t T d ->
-  elim typing ()
-    (\ G0 t0 T0 d0 -> forall (bound : List String) (acc : List String) (w : String) (h : In w (fvA t0 bound acc)) -> FvSpec G0 bound acc w)
-    ((\ x T0 G0 i bound acc w h ->
-        elim Or ((And (Eq Comparison (member x bound) same) (In x bound))
-                 (And (Eq Comparison (member x bound) different) (In x bound -> Empty)))
-          (\ o -> FvSpec G0 bound acc w)
-          ((\ hs -> orLeft (In w acc) (And (In w bound -> Empty) (Dom G0 w))
-                      (subst Comparison
-                         (\ q -> In w (elim Comparison () (\ q1 -> List String) ((acc) (cons String x acc)) () q))
-                         (member x bound) same
-                         (andLeft (Eq Comparison (member x bound) same) (In x bound) hs) h))
-           (\ hs -> elim Or ((Eq String w x) (In w acc)) (\ o1 -> FvSpec G0 bound acc w)
-                      ((\ q -> orRight (In w acc) (And (In w bound -> Empty) (Dom G0 w))
-                                 (both (In w bound -> Empty) (Dom G0 w)
-                                   (\ ib -> andRight (Eq Comparison (member x bound) different) (In x bound -> Empty) hs
-                                              (subst String (\ z -> In z bound) w x q ib))
-                                   (pair Ty (\ U -> extend-in w U G0) T0 (subst String (\ z -> extend-in z T0 G0) x w (sym String w x q) i))))
-                       (\ ia -> orLeft (In w acc) (And (In w bound -> Empty) (Dom G0 w)) ia))
-                      ()
-                      (subst Comparison
-                         (\ q -> In w (elim Comparison () (\ q1 -> List String) ((acc) (cons String x acc)) () q))
-                         (member x bound) different
-                         (andLeft (Eq Comparison (member x bound) different) (In x bound -> Empty) hs) h)))
-          () (memberSpec x bound))
-     -- Under a binder x the body's free names are the node's, and x is bound.
-     (\ G0 x S E T0 d0 ih bound acc w h ->
-        elim Or ((In w acc) (And (In w (cons String x bound) -> Empty) (Dom (extend G0 x S) w)))
-          (\ o -> FvSpec G0 bound acc w)
-          ((\ ia -> orLeft (In w acc) (And (In w bound -> Empty) (Dom G0 w)) ia)
-           (\ hb -> elim Sigma (Ty (\ U -> extend-in w U (extend G0 x S))) (\ z -> FvSpec G0 bound acc w)
-                      ((\ U i ->
-                          elim Or ((And (Eq String w x) (Eq Ty U S)) (And (Eq String w x -> Empty) (extend-in w U G0)))
-                            (\ o1 -> FvSpec G0 bound acc w)
-                            -- w is x: but x was bound, so w cannot be free.
-                            ((\ isX -> absurdly (FvSpec G0 bound acc w)
-                                          (andLeft (In w (cons String x bound) -> Empty) (Dom (extend G0 x S) w) hb
-                                             (orLeft (Eq String w x) (In w bound) (andLeft (Eq String w x) (Eq Ty U S) isX))))
-                             -- w is another name, found further down.
-                             (\ other -> orRight (In w acc) (And (In w bound -> Empty) (Dom G0 w))
-                                            (both (In w bound -> Empty) (Dom G0 w)
-                                               (\ ib -> andLeft (In w (cons String x bound) -> Empty) (Dom (extend G0 x S) w) hb
-                                                          (orRight (Eq String w x) (In w bound) ib))
-                                               (pair Ty (\ U1 -> extend-in w U1 G0) U
-                                                  (andRight (Eq String w x -> Empty) (extend-in w U G0) other)))))
-                            () (ctxInvExtend G0 x S w U i)))
-                      () (andRight (In w (cons String x bound) -> Empty) (Dom (extend G0 x S) w) hb)))
-          () (ih (cons String x bound) acc w h))
-     (\ G0 M S T0 N d1 d2 ih1 ih2 bound acc w h ->
-        elim Or ((In w (fvA N bound acc)) (And (In w bound -> Empty) (Dom G0 w)))
-          (\ o -> FvSpec G0 bound acc w)
-          ((\ h2 -> ih2 bound acc w h2)
-           (\ r -> orRight (In w acc) (And (In w bound -> Empty) (Dom G0 w)) r))
-          () (ih1 bound (fvA N bound acc) w h)))
-    (G t T) d
+fvInCtx = \ G t T d -> induction d of
+  { T-var x T0 G0 i -> \ bound acc w h -> case (memberSpec x bound) of
+      { orLeft hs -> case hs of
+          { both em ib -> orLeft (In w acc) (And (In w bound -> Empty) (Dom G0 w))
+              (subst Comparison
+                 (\ q -> In w (elim Comparison () (\ q1 -> List String) ((acc) (cons String x acc)) () q))
+                 (member x bound) same em h) }
+      ; orRight hs -> case hs of
+          { both em nb -> case (subst Comparison
+                                  (\ q -> In w (elim Comparison () (\ q1 -> List String) ((acc) (cons String x acc)) () q))
+                                  (member x bound) different em h) of
+              { orLeft q -> orRight (In w acc) (And (In w bound -> Empty) (Dom G0 w))
+                  (both (In w bound -> Empty) (Dom G0 w)
+                     (\ ib -> nb (subst String (\ z -> In z bound) w x q ib))
+                     (pair Ty (\ U -> extend-in w U G0) T0
+                        (subst String (\ z -> extend-in z T0 G0) x w (sym String w x q) i)))
+              ; orRight ia -> orLeft (In w acc) (And (In w bound -> Empty) (Dom G0 w)) ia } } }
+  -- Under a binder x the body's free names are the node's, and x is bound.
+  ; T-abs G0 x S E T0 d0 -> \ bound acc w h ->
+      case (fvInCtx (extend G0 x S) E T0 d0 (cons String x bound) acc w h) of
+        { orLeft ia -> orLeft (In w acc) (And (In w bound -> Empty) (Dom G0 w)) ia
+        ; orRight hb -> case hb of
+            { both nb dm -> case dm of
+                { pair U i -> case (ctxInvExtend G0 x S w U i) of
+                    -- w is x: but x was bound, so w cannot be free.
+                    { orLeft isX -> case isX of
+                        { both ex eU -> absurdly (FvSpec G0 bound acc w)
+                            (nb (orLeft (Eq String w x) (In w bound) ex)) }
+                    -- w is another name, found further down.
+                    ; orRight other -> case other of
+                        { both nx iw -> orRight (In w acc) (And (In w bound -> Empty) (Dom G0 w))
+                            (both (In w bound -> Empty) (Dom G0 w)
+                               (\ ib -> nb (orRight (Eq String w x) (In w bound) ib))
+                               (pair Ty (\ U1 -> extend-in w U1 G0) U iw)) } } } } }
+  ; T-app G0 M S T0 N d1 d2 -> \ bound acc w h ->
+      case (fvInCtx G0 M (arrow S T0) d1 bound (fvA N bound acc) w h) of
+        { orLeft h2 -> fvInCtx G0 N S d2 bound acc w h2
+        ; orRight r -> orRight (In w acc) (And (In w bound -> Empty) (Dom G0 w)) r } }
 
 -- ---------------------------------------------------------------------------
 -- What the avoided names come from, and what a closed term has free
 
 appendIn : forall (l : List String) (r : List String) (w : String) (h : In w (appendL l r)) -> Or (In w l) (In w r)
+-- **This one stays an `elim`, and the reason is worth the line.** Splitting `l`
+-- refines the goal, but `h : In w (appendL l r)` is a premise whose type
+-- mentions the target through a FUNCTION — `appendL l r` — and nothing rewrites
+-- it: the arm is then asked to match `In w (appendL l r)` against `In w r` and
+-- says *l and r cannot be made equal*. That is `~pmpqg`.
 appendIn = \ l r w ->
   elim List (String) (\ k -> In w (appendL k r) -> Or (In w k) (In w r))
     ((\ h -> orRight Empty (In w r) h)
      (\ a as ra h ->
-        elim Or ((Eq String w a) (In w (appendL as r))) (\ o -> Or (Or (Eq String w a) (In w as)) (In w r))
-          ((\ q -> orLeft (Or (Eq String w a) (In w as)) (In w r) (orLeft (Eq String w a) (In w as) q))
-           (\ h1 -> elim Or ((In w as) (In w r)) (\ o1 -> Or (Or (Eq String w a) (In w as)) (In w r))
-                      ((\ i -> orLeft (Or (Eq String w a) (In w as)) (In w r) (orRight (Eq String w a) (In w as) i))
-                       (\ i -> orRight (Or (Eq String w a) (In w as)) (In w r) i))
-                      () (ra h1)))
-          () h))
+        case h of
+          { orLeft q -> orLeft (Or (Eq String w a) (In w as)) (In w r) (orLeft (Eq String w a) (In w as) q)
+          ; orRight h1 -> case (ra h1) of
+              { orLeft i -> orLeft (Or (Eq String w a) (In w as)) (In w r) (orRight (Eq String w a) (In w as) i)
+              ; orRight i -> orRight (Or (Eq String w a) (In w as)) (In w r) i } }))
     () l
 
 -- A name to avoid is free in the image of some name of the node.
@@ -374,15 +391,13 @@ imagesIn = \ s ys w ->
 
 -- A closed term has no free variable.
 closedNoFv : forall (N : LC) (S : Ty) (d : typing empty N S) (w : String) (h : In w (LC-fv-x N)) -> Empty
-closedNoFv = \ N S d w h ->
-  elim Or ((In w (nil String)) (And (In w (nil String) -> Empty) (Dom empty w))) (\ o -> Empty)
-    ((\ e -> e)
-     (\ r -> elim Sigma (Ty (\ U -> extend-in w U empty)) (\ z -> Empty)
-               ((\ U i -> ctxInvEmpty w U i))
-               () (andRight (In w (nil String) -> Empty) (Dom empty w) r)))
-    () (fvInCtx empty N S d (nil String) (nil String) w h)
+closedNoFv = \ N S d w h -> case (fvInCtx empty N S d (nil String) (nil String) w h) of
+  { orLeft e -> e
+  ; orRight r -> case r of { both nb dm -> case dm of { pair U i -> case i of { } } } }
 
 listNil : forall (l : List String) (f : forall (w : String) -> In w l -> Empty) -> Eq (List String) l (nil String)
+-- `~pmpqg` again: `f`'s type mentions the target, so the split cannot refine
+-- it and the nil arm is asked to prove `Eq (List String) l (nil String)`.
 listNil = \ l ->
   elim List (String) (\ k -> (forall (w : String) -> In w k -> Empty) -> Eq (List String) k (nil String))
     ((\ f -> refl (List String) (nil String))
@@ -501,6 +516,11 @@ notCaptured = \ G D s x S E T d g h ->
 
 substAll : forall (G : Ctx) (E : LC) (T : Ty) (d : typing G E T)
              (D : Ctx) (s : List (And String LC)) (g : Good G D s) -> typing D (LC-subst-all E s) T
+-- **THIS ONE STAYS AN `elim`, AND THE REASON IS A MEASUREMENT.** As
+-- `induction d of` with the three arms written as splits it declares and
+-- proves the same theorem — and the file then takes **290 seconds longer** to
+-- load, against about 24 for the whole of it before. Every other proof here
+-- was rewritten for free or faster. That is `~2jmpj`.
 substAll = \ G E T d ->
   elim typing ()
     (\ G0 E0 T0 d0 -> forall (D : Ctx) (s : List (And String LC)) (g : Good G0 D s) -> typing D (LC-subst-all E0 s) T0)
@@ -553,6 +573,14 @@ substLemma = \ x S E T N d dn ->
 -- ---------------------------------------------------------------------------
 -- Taking a typing derivation apart at its term's shape
 
+-- **`arrowInj` CANNOT be a split and stays no-confusion**: both sides of
+-- its equation are compound terms built from AMBIENT variables, and a split can
+-- solve only a binder of the method it is in — `case e of { refl k -> … }` is
+-- refused with *A and C cannot be made equal*. That is `~2d9xj`, and it is the
+-- one place in this file where the style does not reach.
+arrowInj : forall (A : Ty) (B : Ty) (C : Ty) (D : Ty) (e : Eq Ty (arrow A B) (arrow C D)) -> And (Eq Ty A C) (Eq Ty B D)
+arrowInj = \ A B C D e -> noConfusionTy (arrow A B) (arrow C D) e
+
 appInj : forall (M0 : LC) (N0 : LC) (M : LC) (N : LC) (e : Eq LC (app M0 N0) (app M N)) -> And (Eq LC M0 M) (Eq LC N0 N)
 appInj = \ M0 N0 M N e -> noConfusionLC (app M0 N0) (app M N) e
 
@@ -560,91 +588,73 @@ absInj : forall (x0 : String) (S0 : Ty) (E0 : LC) (x : String) (S : Ty) (E : LC)
            -> And (Eq String x0 x) (And (Eq Ty S0 S) (Eq LC E0 E))
 absInj = \ x0 S0 E0 x S E e -> noConfusionLC (abs x0 S0 E0) (abs x S E) e
 
-arrowInj : forall (A : Ty) (B : Ty) (C : Ty) (D : Ty) (e : Eq Ty (arrow A B) (arrow C D)) -> And (Eq Ty A C) (Eq Ty B D)
-arrowInj = \ A B C D e -> noConfusionTy (arrow A B) (arrow C D) e
-
 AppInv : Ctx -> LC -> LC -> Ty -> Type₀
 AppInv = \ G M N T -> Sigma Ty (\ S -> And (typing G M (arrow S T)) (typing G N S))
 
+-- Two of `typing`'s three rules put a `var` or an `abs` at the term, and both
+-- conflict with `app M N`, so the split closes them and one arm is the whole
+-- lemma. The generated proof writes three methods and two appeals to
+-- no-confusion.
 invApp : forall (G : Ctx) (M : LC) (N : LC) (T : Ty) (d : typing G (app M N) T) -> AppInv G M N T
-invApp = \ G M N T d ->
-  elim typing () (\ G0 t0 T0 d0 -> Eq LC t0 (app M N) -> AppInv G0 M N T0)
-    ((\ x T0 G0 i e -> absurdly (AppInv G0 M N T0) (noConfusionLC (var x) (app M N) e))
-     (\ G0 x S E T0 d0 ih e -> absurdly (AppInv G0 M N (arrow S T0)) (noConfusionLC (abs x S E) (app M N) e))
-     (\ G0 M0 S T0 N0 d1 d2 ih1 ih2 e ->
-        pair Ty (\ S1 -> And (typing G0 M (arrow S1 T0)) (typing G0 N S1)) S
-          (both (typing G0 M (arrow S T0)) (typing G0 N S)
-             (subst LC (\ m -> typing G0 m (arrow S T0)) M0 M
-                (andLeft (Eq LC M0 M) (Eq LC N0 N) (appInj M0 N0 M N e)) d1)
-             (subst LC (\ n -> typing G0 n S) N0 N
-                (andRight (Eq LC M0 M) (Eq LC N0 N) (appInj M0 N0 M N e)) d2))))
-    (G (app M N) T) d (refl LC (app M N))
+invApp = \ G M N T d -> case d of
+  { T-app G0 M0 S T0 N0 d1 d2 ->
+      pair Ty (\ S1 -> And (typing G M (arrow S1 T)) (typing G N S1)) S
+        (both (typing G M (arrow S T)) (typing G N S) d1 d2) }
 
 AbsInv : Ctx -> String -> Ty -> LC -> Ty -> Type₀
 AbsInv = \ G x S E T -> Sigma Ty (\ U -> And (Eq Ty T (arrow S U)) (typing (extend G x S) E U))
 
+-- And here the split refines the TYPE as well: `T-abs` concludes at
+-- `arrow S U`, so the ambient `T` means that inside the arm and `refl Ty T`
+-- is the equation the statement asks for.
 invAbs : forall (G : Ctx) (x : String) (S : Ty) (E : LC) (T : Ty) (d : typing G (abs x S E) T) -> AbsInv G x S E T
-invAbs = \ G x S E T d ->
-  elim typing () (\ G0 t0 T0 d0 -> Eq LC t0 (abs x S E) -> AbsInv G0 x S E T0)
-    ((\ y T0 G0 i e -> absurdly (AbsInv G0 x S E T0) (noConfusionLC (var y) (abs x S E) e))
-     (\ G0 x0 S0 E0 T0 d0 ih e ->
-        pair Ty (\ U -> And (Eq Ty (arrow S0 T0) (arrow S U)) (typing (extend G0 x S) E U)) T0
-          (both (Eq Ty (arrow S0 T0) (arrow S T0)) (typing (extend G0 x S) E T0)
-             (subst Ty (\ V -> Eq Ty (arrow S0 T0) (arrow V T0)) S0 S
-                (andLeft (Eq Ty S0 S) (Eq LC E0 E) (andRight (Eq String x0 x) (And (Eq Ty S0 S) (Eq LC E0 E)) (absInj x0 S0 E0 x S E e)))
-                (refl Ty (arrow S0 T0)))
-             (subst String (\ z -> typing (extend G0 z S) E T0) x0 x
-                (andLeft (Eq String x0 x) (And (Eq Ty S0 S) (Eq LC E0 E)) (absInj x0 S0 E0 x S E e))
-                (subst Ty (\ V -> typing (extend G0 x0 V) E T0) S0 S
-                   (andLeft (Eq Ty S0 S) (Eq LC E0 E) (andRight (Eq String x0 x) (And (Eq Ty S0 S) (Eq LC E0 E)) (absInj x0 S0 E0 x S E e)))
-                   (subst LC (\ m -> typing (extend G0 x0 S0) m T0) E0 E
-                      (andRight (Eq Ty S0 S) (Eq LC E0 E) (andRight (Eq String x0 x) (And (Eq Ty S0 S) (Eq LC E0 E)) (absInj x0 S0 E0 x S E e)))
-                      d0)))))
-     (\ G0 M S0 T0 N d1 d2 ih1 ih2 e -> absurdly (AbsInv G0 x S E T0) (noConfusionLC (app M N) (abs x S E) e)))
-    (G (abs x S E) T) d (refl LC (abs x S E))
+invAbs = \ G x S E T d -> case d of
+  { T-abs G0 x0 S0 E0 U d0 ->
+      pair Ty (\ V -> And (Eq Ty T (arrow S V)) (typing (extend G x S) E V)) U
+        (both (Eq Ty T (arrow S U)) (typing (extend G x S) E U) (refl Ty T) d0) }
 
 -- ---------------------------------------------------------------------------
 -- Preservation: a closed term's type survives a step
 
+-- **Induction on the step, and the typing derivation taken apart inside the
+-- arm that needs it.** Each rule knows the shape of the term it acts on, so
+-- `case d of { T-app … }` is the inversion — `invApp` and `invAbs` are not
+-- called here at all, and in the β arm the inner split of the function's own
+-- derivation is a second `case` one line further in.
+--
+-- **The whole statement is introduced at the top**, `\ M M1 T d s ->`. The
+-- split on `s` refines `M` and `M1`, and `d`, whose type mentions `M`, is
+-- generalised with it — so `d` in the β arm is a derivation about
+-- `( λ x : T1 . E ) N` and not about the `M` outside. The recursive calls in
+-- the two congruence arms ARE the induction hypothesis.
 preservation : forall (M : LC) (M1 : LC) (T : Ty) (d : typing empty M T) (s : step M M1) -> typing empty M1 T
-preservation = \ M M1 T d s ->
-  elim step () (\ A B s0 -> forall (T0 : Ty) (d0 : typing empty A T0) -> typing empty B T0)
-    -- β: the function's body, typed under x : T, with the argument put for x.
-    ((\ N x T1 E v T0 d0 ->
-        elim Sigma (Ty (\ S -> And (typing empty (abs x T1 E) (arrow S T0)) (typing empty N S)))
-          (\ z -> typing empty (LC-subst-x E x N) T0)
-          ((\ S p ->
-              elim Sigma (Ty (\ U -> And (Eq Ty (arrow S T0) (arrow T1 U)) (typing (extend empty x T1) E U)))
-                (\ z -> typing empty (LC-subst-x E x N) T0)
-                ((\ U q ->
-                    substLemma x T1 E T0 N
-                      (subst Ty (\ V -> typing (extend empty x T1) E V) U T0
-                         (sym Ty T0 U (andRight (Eq Ty S T1) (Eq Ty T0 U)
-                            (arrowInj S T0 T1 U (andLeft (Eq Ty (arrow S T0) (arrow T1 U)) (typing (extend empty x T1) E U) q))))
-                         (andRight (Eq Ty (arrow S T0) (arrow T1 U)) (typing (extend empty x T1) E U) q))
-                      (subst Ty (\ V -> typing empty N V) S T1
-                         (andLeft (Eq Ty S T1) (Eq Ty T0 U)
-                            (arrowInj S T0 T1 U (andLeft (Eq Ty (arrow S T0) (arrow T1 U)) (typing (extend empty x T1) E U) q)))
-                         (andRight (typing empty (abs x T1 E) (arrow S T0)) (typing empty N S) p))))
-                () (invAbs empty x T1 E (arrow S T0) (andLeft (typing empty (abs x T1 E) (arrow S T0)) (typing empty N S) p))))
-          () (invApp empty (abs x T1 E) N T0 d0))
-     -- A step in the function position.
-     (\ A A1 N s0 ih T0 d0 ->
-        elim Sigma (Ty (\ S -> And (typing empty A (arrow S T0)) (typing empty N S)))
-          (\ z -> typing empty (app A1 N) T0)
-          ((\ S p -> T-app empty A1 S T0 N
-                       (ih (arrow S T0) (andLeft (typing empty A (arrow S T0)) (typing empty N S) p))
-                       (andRight (typing empty A (arrow S T0)) (typing empty N S) p)))
-          () (invApp empty A N T0 d0))
-     -- A step in the argument, once the function is a value.
-     (\ A N N1 v s0 ih T0 d0 ->
-        elim Sigma (Ty (\ S -> And (typing empty A (arrow S T0)) (typing empty N S)))
-          (\ z -> typing empty (app A N1) T0)
-          ((\ S p -> T-app empty A S T0 N1
-                       (andLeft (typing empty A (arrow S T0)) (typing empty N S) p)
-                       (ih S (andRight (typing empty A (arrow S T0)) (typing empty N S) p))))
-          () (invApp empty A N T0 d0)))
-    (M M1) s T d
+preservation = \ M M1 T d s -> induction s of
+  -- β: the function's body, typed under x : T1, with the argument put for x.
+  --
+  -- **The β arm is where the style stops, and `~2d9xj` is why.** Splitting the
+  -- function's own derivation directly — `case d1 of { T-abs … }` on a
+  -- `typing empty ( λ x : T1 . E ) ( S -> T )` — would have to identify the
+  -- `S` the application arm bound with the `T1` the step rule bound, and both
+  -- are ambient: *S and T1 cannot be made equal*. So this arm goes through
+  -- `invAbs` and `arrowInj` and transports, exactly as it did before; what is
+  -- new is only that taking the `Sigma` and the `And` apart is a `case`.
+  { E-beta N x T1 E v -> case (invApp empty (abs x T1 E) N T d) of
+      { pair S p -> case p of
+          { both d1 d2 -> case (invAbs empty x T1 E (arrow S T) d1) of
+              { pair U q -> case q of
+                  { both eq d0 -> case (arrowInj S T T1 U eq) of
+                      { both e1 e2 ->
+                          substLemma x T1 E T N
+                            (subst Ty (\ V -> typing (extend empty x T1) E V) U T (sym Ty T U e2) d0)
+                            (subst Ty (\ V -> typing empty N V) S T1 e1 d2) } } } } }
+  -- A step in the function position.
+  ; E-app1 A A1 N sr -> case d of
+      { T-app G0 M0 S T0 N0 d1 d2 ->
+          T-app empty A1 S T N (preservation A A1 (arrow S T) d1 sr) d2 }
+  -- A step in the argument, once the function is a value.
+  ; E-app2 A N N1 v sr -> case d of
+      { T-app G0 M0 S T0 N0 d1 d2 ->
+          T-app empty A S T N1 d1 (preservation N N1 S d2 sr) } }
 
 
 -- ---------------------------------------------------------------------------

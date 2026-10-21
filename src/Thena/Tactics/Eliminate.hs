@@ -654,6 +654,11 @@ eliminate env ctx sch n0 goal tgt =
           -- becomes the index binder outright, where substituting first would
           -- have left it as @aₖ@ about a copy. The two agree on the arm's goal
           -- either way, because the equation ties the binder to the copy.
+          -- **Only the target term handed here is abstracted, and a goal
+          -- written in the author's own name for it keeps that name** —
+          -- @~pmpqg@, which is his: abstracting the whole chain alone trades
+          -- the failure for another, because a premise ABOUT the target is not
+          -- refined either and the two used to agree by both being unrefined.
           (goalX,  n4) = replaceTerm tgt xv n3' goal
           (goalIx, n5) = foldl abstractIndex (goalX, n4) (zip ivs as)
           abstractIndex (g, n) (iv, a) = replaceTerm a iv n g
@@ -908,19 +913,23 @@ eliminate env ctx sch n0 goal tgt =
     -- an entry whose type is the abstracted variable is a premise about the
     -- target and has to be fixed with it. Such a name is not a name for the
     -- target, and rebinding it would put a term where a type stood.
-    targetIdents = [ entryIdent e | e <- ctx, entryVar e `elem` named ]
+    targetIdents = [ entryIdent e | e <- ctx, entryVar e `elem` targetChain ]
+
+    -- | __Every variable the target IS__, following a definition's value and
+    -- nothing else (MS9 phase 202). 'targetIdents' names them in the arm.
+    -- __'scheme' does NOT abstract them in the goal__, and @~pmpqg@ is that.
+    targetChain = case tgt of
+      Free w -> walk [] [w]
+      _      -> []
       where
-        named = case tgt of
-          Free w -> walk [] [w]
-          _      -> []
         walk seen []       = seen
         walk seen (w : ws)
           | w `elem` seen = walk seen ws
           | otherwise     = walk (w : seen) (ws ++ concatMap (valueOf w) ctx)
         valueOf w e
-          | entryVar e /= w              = []
+          | entryVar e /= w                = []
           | Definition _ _ (Free y) _ <- e = [y]
-          | otherwise                    = []
+          | otherwise                      = []
 
     targetVars = case tgt of
       Free w -> walk [] [w]
