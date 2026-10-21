@@ -349,16 +349,14 @@ eliminate env ctx sch n0 goal tgt =
         -- for that, and the item's claim that generalising \"always gets that case
         -- for free\" holds only on the specialised side.
         --
-        -- __And it is all or nothing.__ Three conditions make the copies
-        -- expressible at all, and each is a way the motive would otherwise not
-        -- typecheck rather than a preference: every generalised entry must be a
-        -- 'Hypothesis', since a 'Definition' has a value the copy would lose;
-        -- none may occur in the family's /parameters/, which the scheme fixes;
-        -- and none may occur in the /type/ of a tied index, or the equation
-        -- @Eq Iₖ iₖ aₖ@ would have its two sides at two different types, which
-        -- is the same limit 'dependentTied' states one step over. Where one
-        -- fails, nothing is generalised and the split behaves exactly as it did
-        -- before this phase — the equation is stated and kept.
+        -- __TWO QUESTIONS, AND THEY ARE ASKED IN TWO PLACES — MS9 phase 197,
+        -- `~k54hh`.__ /Which/ ambient entries may be copied is 'generalisable',
+        -- which skips the ones that may not; /whether the scheme can state the
+        -- copies it found/ is 'viable', and a failure there cancels the lot,
+        -- leaving the split behaving exactly as it did before phase 191 — the
+        -- equation stated and kept. They were one all-or-nothing test until
+        -- phase 197, and that is what shut `~k54hh`: a definition the split did
+        -- not put in the context cancelled every copy.
         generalised = if viable then closed else []
           where
             -- A friendly index's variable is abstracted outright, so it is
@@ -367,8 +365,42 @@ eliminate env ctx sch n0 goal tgt =
                              , friendlyAt k a
                              , Free v <- [a] ]
 
-            fixed e = entryVar e `notElem` targetVars
-                        && entryVar e `notElem` friendlies
+            -- __WHAT THIS SPLIT MAY GENERALISE AT ALL, and it is the ONE
+            -- place that decides it — MS9 phase 197, `~k54hh`.__ The target and
+            -- a friendly index's variable are already abstracted, so a copy of
+            -- either would be a second abstraction of the same occurrences; and
+            -- only a 'Hypothesis' can be copied, since a 'Definition' has a
+            -- value its copy would lose.
+            --
+            -- __A 'Definition' is SKIPPED here and does not cancel the
+            -- generalisation, which is the whole of `~k54hh`.__ The condition
+            -- used to be tested after the fact, in @viable@, so one definition
+            -- anywhere in the forward closure cancelled every copy. The
+            -- context is full of definitions this split did not put there —
+            -- the arm's rebinding of an ambient name (@~8v3pg@), the target's
+            -- own @xsplit@, and __the solved components of the ARM BEFORE this
+            -- one__ — and the measurement is that the last of those is what
+            -- shut `~k54hh`: at the inner split of
+            --
+            -- > p8 = \ n x u -> induction x of
+            -- >   { az -> \ f -> case f of { }
+            -- >   ; as k p -> \ f -> case f of { fs j m r -> m } }
+            --
+            -- the ambient @u@ /is/ a hypothesis, /is/ a seed and /is/ in the
+            -- closure. What failed was @azMethod@ and @azCase@, the @az@ arm's
+            -- own solved definitions, whose types mention @u@ because the
+            -- statement's @f : F n u@ is in them. Nothing a later arm proves is
+            -- a premise of this one, and skipping a definition leaves it exactly
+            -- as it was — the pre-phase-191 behaviour for that entry, and no
+            -- worse for anything else.
+            generalisable e =
+              isHypothesis e
+                && entryVar e `notElem` targetVars
+                && entryVar e `notElem` friendlies
+
+            isHypothesis e = case e of
+              Hypothesis {} -> True
+              Definition {} -> False
 
             -- __THE SEEDS ARE THE ENTRIES SOME METHOD CANNOT DO WITHOUT, not
             -- every ambient variable a tied index mentions.__ His question,
@@ -427,7 +459,11 @@ eliminate env ctx sch n0 goal tgt =
               Nothing -> Nothing
 
             -- In context order, whatever order the closure found them in.
-            closed = [ entryVar e | e <- ctx, entryVar e `elem` grow seeds ]
+            closed = [ entryVar e
+                     | e <- ctx
+                     , generalisable e
+                     , entryVar e `elem` grow seeds
+                     ]
 
             -- __THE CLOSURE TESTS AN ENTRY'S TYPE AND NOT ITS VALUE — MS9
             -- phase 196.__ The condition it stands for is about types: an
@@ -440,21 +476,32 @@ eliminate env ctx sch n0 goal tgt =
             -- __And testing the value made a split undo the one around it.__
             -- An arm binds the ambient names a split refined (@~8v3pg@), which
             -- puts definitions in the context; the first of those to mention a
-            -- seed pulled itself into the closure, failed @viable@'s
-            -- 'Hypothesis' test, and so cancelled the generalisation outright.
+            -- seed pulled itself into the closure, failed the 'Hypothesis' test
+            -- and so cancelled the generalisation outright.
             -- @examples\/determinacy-patterns.thena@ measured it: @p@ stopped
             -- being refined to @true@ the moment the outer split bound @t@.
+            -- Testing the type instead fixed /that/ shape; what was left is the
+            -- definition whose own TYPE mentions a seed, and 'generalisable' is
+            -- where that one stops cancelling.
             grow vs =
               let vs' = nub (vs ++ [ entryVar e
                                    | e <- ctx
-                                   , fixed e
+                                   , generalisable e
                                    , any (`elem` freeVars (entryType e)) vs
                                    ])
                in if length vs' == length vs then vs else grow vs'
 
+            -- __WHETHER THE SCHEME CAN STATE THE COPIES, and nothing about
+            -- which entries they are__ — that is 'generalisable''s, and the two
+            -- were one test until MS9 phase 197. Both of these are ways the
+            -- motive would not typecheck rather than preferences: a generalised
+            -- variable may not occur in the family's /parameters/, which the
+            -- scheme fixes, nor in the /type/ of a tied index, or @Eq Iₖ iₖ aₖ@
+            -- would have its two sides at two different types — the same limit
+            -- 'dependentTied' states one step over. Where one fails, nothing is
+            -- generalised and the split behaves as it did before phase 191.
             viable =
               not (null closed)
-                && all isHypothesisOf closed
                 && not (any (`elem` concatMap freeVars ps) closed)
                 && not (any (`elem` concatMap freeVars tiedIndexTypes) closed)
 

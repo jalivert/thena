@@ -2425,6 +2425,23 @@ compiled. **Agda and Idris show none of it either**, because a clause's whole le
 side is one unification problem rather than one scrutinee with everything to its left
 fixed.
 
+**AND WHERE YOU INTRODUCE A PREMISE IS NOT PART OF THE PROOF EITHER.** A statement says
+what the premises are, not the order a proof takes them in, so `\ n x u f ->` across the top
+and a `\ u f ->` inside each arm are the same proof and both load:
+
+```
+inside  = \ n x -> induction x of
+  { az -> \ u f -> z ; as k p -> \ u f -> case f of { fs j m r -> m } }
+outside = \ n x u -> induction x of
+  { az -> \ f -> z ; as k p -> \ f -> case f of { fs j m r -> m } }
+```
+
+Both are `forall (n : N) (x : A n) (u : N) (f : F n u) -> N`, and in both the inner split
+has to generalise the ambient `u` — `fs`'s own `s m` faces it and there is nothing on the
+rule's side to move. The second spelling was refused until MS9: the generalisation a nested
+split needed was cancelled by what the elaborator had left in scope for the arms before it,
+which is nothing a proof can see or plan around.
+
 **An arm can be written to take a leftover equation** — `evs n en -> \ q -> …` — and then
 transport by hand. It type-checks, and it is deliberately not how the examples are written:
 an arm whose right-hand side is a function of an equation you had no way to predict is

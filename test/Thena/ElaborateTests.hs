@@ -1233,6 +1233,47 @@ splittingTree =
       let (s2, q) = command s1 ":whnf sameIndex (s z) (mk (s z))"
       unwords (renderResponse s2 q) @?= "mk (s z)"
 
+    -- __AND WHERE THE PREMISE IS INTRODUCED MAKES NO DIFFERENCE__ (MS9 phase
+    -- 197, @~k54hh@), which is the same ruling again: the statement
+    -- @\8704 (n : N) (x : A n) (u : N) (f : F n u) -> N@ says nothing about the
+    -- order a proof introduces its own premises in, and @\ n x u ->@ across the
+    -- top is what a student writes.
+    --
+    -- Both proofs here are the same text with @u@ and @f@ bound in two places,
+    -- and the inner @case f of@ has to generalise the ambient @u@ either way —
+    -- @fs@'s own @s m@ faces @u@ and there is nothing on the rule's side to
+    -- move. @inside@ always worked. __@outside@ was refused with @N and
+    -- Eq {0} N (s m) u -> N cannot be made equal@__ — the equation stated and
+    -- kept, because the generalisation was cancelled rather than made.
+    --
+    -- __What cancelled it was the @az@ arm.__ The split's own closure found @u@
+    -- and the induction hypothesis and wanted both; the context it looked at
+    -- also held @azMethod@ and @azCase@, the /previous arm's/ solved
+    -- definitions, whose types mention @u@ because the statement's @f@ is in
+    -- them — and one definition anywhere in the closure used to cancel every
+    -- copy. They are now skipped, and nothing else about the split moved.
+    --
+    -- **Both compute, to the same answer**, so a generalisation that lands on
+    -- the wrong copy fails here rather than declaring quietly.
+  , testCase "where a premise is introduced does not decide whether it loads" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (reachModule ++
+            [ "inside : \8704 (n : N) (x : A n) (u : N) (f : F n u) -> N"
+            , "inside = \\ n x -> induction x of \
+              \{ az -> \\ u f -> z ; as k p -> \\ u f -> case f of { fs j m r -> m } }"
+            , "outside : \8704 (n : N) (x : A n) (u : N) (f : F n u) -> N"
+            , "outside = \\ n x u -> induction x of \
+              \{ az -> \\ f -> z ; as k p -> \\ f -> case f of { fs j m r -> m } }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      let two = "(s (s z)) (as (s z) (as z az)) (s (s z)) (fs (s z) (s z) (fs z z fz))"
+          (s2, q) = command s1 (":whnf inside " ++ two)
+          (s3, q') = command s2 (":whnf outside " ++ two)
+      unwords (renderResponse s2 q) @?= "s z"
+      unwords (renderResponse s3 q') @?= "s z"
+
     -- ----------------------------------------------------------------
     -- A FORCED POSITION (MS9 phase 185)
     -- ----------------------------------------------------------------
@@ -1534,6 +1575,28 @@ splittingTree =
       , ""
       , "data IsSucc : N -> Type\8320 where"
       , "  isucc : \8704 (n : N) -> IsSucc (s n)"
+      , ""
+      ]
+    -- Phase 197's shape (@~k54hh@): a two-index family whose constructor's
+    -- second index wraps its own argument, so a split against @F (s k) u@
+    -- leaves @s m@ facing an ambient @u@ and has to generalise it — under an
+    -- @induction@ on a /second/ family, which is what puts the previous arm's
+    -- solved definitions in the context the split looks at. @fz@ is here only
+    -- so that a closed inhabitant exists and the proofs can be computed.
+    reachModule =
+      [ "module Reach where"
+      , ""
+      , "data N : Type\8320 where"
+      , "  z : N"
+      , "  s : N -> N"
+      , ""
+      , "data F : N -> N -> Type\8320 where"
+      , "  fz : F z z"
+      , "  fs : \8704 (k : N) (m : N) (r : F k m) -> F (s k) (s m)"
+      , ""
+      , "data A : N -> Type\8320 where"
+      , "  az : A z"
+      , "  as : \8704 (k : N) (p : A k) -> A (s k)"
       , ""
       ]
     vecModule =
