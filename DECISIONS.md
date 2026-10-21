@@ -2403,6 +2403,22 @@ which is what makes the call typecheck with nothing transported. The `eSucc` arm
 split generalises nothing, is written the same way — and that is the point, because an
 author has no way of knowing which of the two they are in.
 
+**AND THAT HOLDS WHERE NOTHING WAS COPIED AT ALL.** An index the scrutinee supplies as a
+plain variable that no other premise mentions needs no equation: the motive abstracts it
+outright, which already generalises everything that mentions it. Nothing is copied and
+nothing is solved there — and the author's name for it still means what the case made of
+it:
+
+```
+indexIsRefined : forall (m : N) (e : Ev m) -> Eq N m m
+indexIsRefined = \ m e -> case e of { evz -> refl N m ; evs n en -> refl N m }
+```
+
+`m` is `Ev m`'s index, and one `refl N m` answers both arms because in the first it is `z`
+and in the second it is `s (s n)`. The same holds when the index is the constructor's own
+argument: splitting a `d : D m` on `mk k` leaves `m` meaning `k`, and `mk m` is the same
+term as `mk k`.
+
 **Which positions a split copied, and which copies it solved, is elaboration's business.**
 Elaboration is compilation: nobody should write a proof differently because of how it is
 compiled. **Agda and Idris show none of it either**, because a clause's whole left-hand

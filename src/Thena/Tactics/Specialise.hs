@@ -96,7 +96,7 @@ import Thena.Global.Env
   , lookupInductive
   )
 import Thena.Global.NoConfusion (noConfusionNames)
-import Thena.Tactics.Eliminate (spineOf)
+import Thena.Tactics.Eliminate (MethodShape (..), spineOf)
 
 -- | What specialisation worked out: the subgoal, and __one ordered report of
 -- what each binder of the method is__.
@@ -161,6 +161,42 @@ data Specialisation = Specialisation
   { specialisedGoal    :: [(Var, Ident, Core)]
   , specialisedTerm    :: Core
   , specialisedBinders :: [(Binder, Maybe Core)]
+  , specialisedRebound :: [(Ident, Core)]
+    -- ^ **the names bound OUTSIDE the split that this method makes something
+    -- else of** — each with a function from the binders that survived to what
+    -- it now means (MS9 phase 196, @~8v3pg@).
+    --
+    -- __One of them today__: an ambient entry a /friendly/ index abstracted
+    -- outright.
+    --
+    -- __The TARGET is the other thing a split refines that is not a binder of
+    -- the method, and it is not here — measured, not overlooked.__ Inside a
+    -- method the target is the constructor applied to that method's arguments,
+    -- and the entry the author named it by goes on being its old self, so
+    -- writing it in the arm is refused at the arm's own goal. Binding it is
+    -- what cannot be done yet: a rebinding is a
+    -- 'Thena.Core.Context.Definition', and the target's one has a /type/ that
+    -- mentions what the split refined — @s1 := eIf p p' a b sr@ is a
+    -- @Step (ifthen p a b) (ifthen p' a b)@. A split nested in that arm then
+    -- meets it in the forward closure of its own seeds, where
+    -- @Thena.Tactics.Eliminate@'s @viable@ may not carry a definition, so it
+    -- cancels the generalisation and the arm loses the refinement it had:
+    -- @examples\/determinacy-patterns.thena@ measures it, @p@ stopping being
+    -- refined to @true@. An index's rebinding has a type that mentions nothing,
+    -- which is why that half is here and this one is not.
+    --
+    -- __It is not in 'specialisedBinders' because it is not a binder of the
+    -- method__, and that list says one entry per binder in the order the method
+    -- binds them. A friendly index states no equation and quantifies no copy,
+    -- so it has nowhere in that list to go — which is why the arm used to bind
+    -- nothing for it and the name went on meaning the unrefined thing.
+    --
+    -- __Abstracted over /every/ surviving binder, where a solved binder's term
+    -- is abstracted over the ones before it.__ Nothing orders a friendly index
+    -- against the constructor's arguments — @fs@'s second index is @s m@ and
+    -- @m@ is its last argument — so the caller applies these once the whole
+    -- telescope is bound, which is also where they have to be /bound/, for the
+    -- λ-chain reason @bind-solved@ carries.
   }
   deriving (Eq, Show)
 
@@ -236,9 +272,9 @@ binderWord (Binder r (Ident w)) = word r ++ " " ++ w
 -- copies join @Δc@ and the hypotheses as __pattern variables__, which is the
 -- only change the four transitions need.
 specialise
-  :: GlobalEnv -> Context -> Int -> GlobalName -> [Ident] -> [Ident] -> Int -> Core
+  :: GlobalEnv -> Context -> Int -> GlobalName -> [Ident] -> MethodShape -> Core
   -> (Either SpecialiseError Specialisation, Int)
-specialise env ctx n0 cn hyps gens k mty = case lookupConstructor cn env of
+specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
   Nothing -> (Left (NotThatConstructor cn), n0)
   Just (d, c)
     | k < 0 -> (Left (MethodNotShaped (arity d c) k mty), n0)
@@ -253,8 +289,11 @@ specialise env ctx n0 cn hyps gens k mty = case lookupConstructor cn env of
                    in case solve hv delta es body n2 of
                         (Left e, n3) -> (Left e, n3)
                         (Right (want, tm, sol), n3) ->
-                          verify hv want tm (report c delta sol) n3
+                          verify hv want tm (report c delta sol)
+                                 (reboundTerms d c delta sol) n3
   where
+    MethodShape gens k friendly pars = shape
+
     h  = length hyps
     gc = length gens
 
@@ -323,16 +362,55 @@ specialise env ctx n0 cn hyps gens k mty = case lookupConstructor cn env of
           , entryVar e `notElem` map fst sol
           ]
 
+    -- __WHAT THIS METHOD MAKES OF EACH FRIENDLY INDEX'S AMBIENT NAME — MS9
+    -- phase 196, @~8v3pg@.__ The motive abstracted the index outright, so the
+    -- arm's goal is about the abstracted variable while the entry is still in
+    -- the context under its own name meaning the unrefined thing. What the name
+    -- now denotes is this constructor's own index expression at that position,
+    -- and it is written here because nowhere else has both the expression and
+    -- this method's binders.
+    --
+    -- __Two substitutions, and each is the same one the scheme made.__ The
+    -- declaration states an index in the family's /parameter/ variables, so
+    -- those become the target's — 'Thena.Tactics.Eliminate' hands them over for
+    -- this — and in the constructor's own /argument/ variables, so those become
+    -- @delta@'s, positionally, which is the correspondence @report@ already
+    -- relies on for the names. Then the solutions, because a forced argument
+    -- the expression mentions no longer has a binder.
+    --
+    -- __Abstracted over every surviving binder__, where a solved binder is
+    -- abstracted over the ones before it: an index expression may mention any
+    -- of the constructor's arguments, so there is no prefix to stop at. The
+    -- caller applies it once the telescope is bound.
+    reboundTerms d c delta sol = map (fmap (lamOver survivors)) indices
+      where
+        -- An ambient entry a friendly index abstracted now means this
+        -- constructor's own index expression at that position.
+        indices =
+          [ (i, substituteAll sol (substituteAll argSub (substituteAll paramSub ix)))
+          | (i, pos) <- friendly
+          , ix <- take 1 (drop pos (constructorIndices c))
+          ]
+
+        conArgs  = take (length (constructorArguments c)) delta
+        paramSub = zip (map entryVar (inductiveParameters d)) pars
+        argSub   = zip (map entryVar (constructorArguments c)) (map (Free . entryVar) conArgs)
+        survivors =
+          [ Hypothesis (entryVar e) (entryIdent e) (substituteAll sol (entryType e))
+          | e <- delta
+          , entryVar e `notElem` map fst sol
+          ]
+
     -- The hole and the term that uses it, checked in the context that will hold
     -- both. Checking here is the whole of §7.2's bargain for a coarse op: a
     -- wrong proof term is caught, so only the caller's /choice/ of what to
     -- specialise is unguarded.
-    verify hv want tm bs n =
+    verify hv want tm bs fs n =
       let hole = [ (hv, Ident (nameOf cn ++ "Case"), w) | Just w <- [want] ]
           with = ctx ++ [ Hypothesis v i t | (v, i, t) <- hole ]
        in case check env with n tm mty of
             (Left e, _, n1)   -> (Left (SpecialisedIllTyped e), n1)
-            (Right (), _, n1) -> (Right (Specialisation hole tm bs), n1)
+            (Right (), _, n1) -> (Right (Specialisation hole tm bs fs), n1)
 
     nameOf (GlobalName w) = w
 

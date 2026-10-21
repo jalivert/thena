@@ -720,8 +720,15 @@ splitClauses =
       , Do (Op.Return (Ref "r"))
       ]
   , Rule (GlobalName "intro-arm-binders")
-      [PList [] Nothing, PList [] Nothing, PVar "vs", PVar "ds", PVar "k"] []
-      [ call "bind-solved" [Ref "ds", Ref "k"]
+      [ PList [] Nothing, PList [] Nothing, PVar "vs", PVar "ds", PVar "fs"
+      , PVar "k"
+      ] []
+        -- **A friendly index's ambient name is bound here and not on the way**
+        -- (MS9 phase 196): its term may mention any of the surviving binders,
+        -- so there is no prefix to instantiate it at.
+      [ Bind (Op.PVar "ds2") Nothing
+          (Op.Call "bind-friendlies" [Ref "fs", Ref "vs", Ref "ds"])
+      , call "bind-solved" [Ref "ds2", Ref "k"]
       , Do (Op.Return (Ref "k"))
       ]
     -- An argument the subgoal still binds, named by the arm's pattern — a
@@ -730,7 +737,7 @@ splitClauses =
   , Rule (GlobalName "intro-arm-binders")
       [ PList [PVar "p"] (Just (PVar "ps"))
       , PList [PPair (PVar "b") PNone] (Just (PVar "bs"))
-      , PVar "vs", PVar "ds", PVar "k"
+      , PVar "vs", PVar "ds", PVar "fs", PVar "k"
       ]
       [BinderIsArgument (Ref "b"), PatternIsWildcard (Ref "p")]
       [ Bind (Op.PVar "w") Nothing (Op.FreshName (Lit (VText "u")))
@@ -741,13 +748,13 @@ splitClauses =
       , Do (Goto (Ref "g"))
       , Bind (Op.PVar "vs2") Nothing (Op.Prepend (Ref "v") (Ref "vs"))
       , Bind (Op.PVar "r") Nothing
-          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs2", Ref "ds", Ref "k2"])
+          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs2", Ref "ds", Ref "fs", Ref "k2"])
       , Do (Op.Return (Ref "r"))
       ]
   , Rule (GlobalName "intro-arm-binders")
       [ PList [PVar "p"] (Just (PVar "ps"))
       , PList [PPair (PVar "b") PNone] (Just (PVar "bs"))
-      , PVar "vs", PVar "ds", PVar "k"
+      , PVar "vs", PVar "ds", PVar "fs", PVar "k"
       ]
       [BinderIsArgument (Ref "b"), PatternIsName (Ref "p")]
       [ Bind (Op.PVar "sub") Nothing (Op.PatternArguments (Ref "p"))
@@ -760,7 +767,7 @@ splitClauses =
       , Do (Goto (Ref "g"))
       , Bind (Op.PVar "vs2") Nothing (Op.Prepend (Ref "v") (Ref "vs"))
       , Bind (Op.PVar "r") Nothing
-          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs2", Ref "ds", Ref "k2"])
+          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs2", Ref "ds", Ref "fs", Ref "k2"])
       , Do (Op.Return (Ref "r"))
       ]
     -- A FORCED argument, which has no binder: the name becomes a definition
@@ -771,17 +778,17 @@ splitClauses =
   , Rule (GlobalName "intro-arm-binders")
       [ PList [PVar "p"] (Just (PVar "ps"))
       , PList [PPair (PVar "b") (PSome (PVar "f"))] (Just (PVar "bs"))
-      , PVar "vs", PVar "ds", PVar "k"
+      , PVar "vs", PVar "ds", PVar "fs", PVar "k"
       ]
       [BinderIsArgument (Ref "b"), PatternIsWildcard (Ref "p")]
       [ Bind (Op.PVar "r") Nothing
-          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs", Ref "ds", Ref "k"])
+          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs", Ref "ds", Ref "fs", Ref "k"])
       , Do (Op.Return (Ref "r"))
       ]
   , Rule (GlobalName "intro-arm-binders")
       [ PList [PVar "p"] (Just (PVar "ps"))
       , PList [PPair (PVar "b") (PSome (PVar "f"))] (Just (PVar "bs"))
-      , PVar "vs", PVar "ds", PVar "k"
+      , PVar "vs", PVar "ds", PVar "fs", PVar "k"
       ]
       [BinderIsArgument (Ref "b"), PatternIsName (Ref "p")]
       [ Bind (Op.PVar "sub") Nothing (Op.PatternArguments (Ref "p"))
@@ -791,7 +798,7 @@ splitClauses =
       , Bind (Op.PVar "ds2") Nothing
           (Op.Prepend (PairOf (Ref "w") (Ref "v")) (Ref "ds"))
       , Bind (Op.PVar "r") Nothing
-          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs", Ref "ds2", Ref "k"])
+          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs", Ref "ds2", Ref "fs", Ref "k"])
       , Do (Op.Return (Ref "r"))
       ]
     -- **An induction hypothesis, under a FRESHENED name**: the argument it is
@@ -801,7 +808,7 @@ splitClauses =
   , Rule (GlobalName "intro-arm-binders")
       [ PVar "ps"
       , PList [PPair (PVar "b") PNone] (Just (PVar "bs"))
-      , PVar "vs", PVar "ds", PVar "k"
+      , PVar "vs", PVar "ds", PVar "fs", PVar "k"
       ]
       [BinderIsHypothesis (Ref "b")]
       [ Bind (Op.PVar "n") Nothing (Op.BinderName (Ref "b"))
@@ -813,7 +820,7 @@ splitClauses =
       , Do (Goto (Ref "g"))
       , Bind (Op.PVar "vs2") Nothing (Op.Prepend (Ref "v") (Ref "vs"))
       , Bind (Op.PVar "r") Nothing
-          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs2", Ref "ds", Ref "k2"])
+          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs2", Ref "ds", Ref "fs", Ref "k2"])
       , Do (Op.Return (Ref "r"))
       ]
     -- **A copy of a generalised ambient entry, under the ambient name ITSELF**
@@ -825,7 +832,7 @@ splitClauses =
   , Rule (GlobalName "intro-arm-binders")
       [ PVar "ps"
       , PList [PPair (PVar "b") PNone] (Just (PVar "bs"))
-      , PVar "vs", PVar "ds", PVar "k"
+      , PVar "vs", PVar "ds", PVar "fs", PVar "k"
       ]
       [BinderIsCopy (Ref "b")]
       [ Bind (Op.PVar "n") Nothing (Op.BinderName (Ref "b"))
@@ -836,13 +843,13 @@ splitClauses =
       , Do (Goto (Ref "g"))
       , Bind (Op.PVar "vs2") Nothing (Op.Prepend (Ref "v") (Ref "vs"))
       , Bind (Op.PVar "r") Nothing
-          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs2", Ref "ds", Ref "k2"])
+          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs2", Ref "ds", Ref "fs", Ref "k2"])
       , Do (Op.Return (Ref "r"))
       ]
   , Rule (GlobalName "intro-arm-binders")
       [ PVar "ps"
       , PList [PPair (PVar "b") (PSome (PVar "f"))] (Just (PVar "bs"))
-      , PVar "vs", PVar "ds", PVar "k"
+      , PVar "vs", PVar "ds", PVar "fs", PVar "k"
       ]
       [BinderIsCopy (Ref "b")]
       [ Bind (Op.PVar "n") Nothing (Op.BinderName (Ref "b"))
@@ -850,7 +857,7 @@ splitClauses =
       , Bind (Op.PVar "ds2") Nothing
           (Op.Prepend (PairOf (Ref "n") (Ref "v")) (Ref "ds"))
       , Bind (Op.PVar "r") Nothing
-          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs", Ref "ds2", Ref "k"])
+          (Op.Call "intro-arm-binders" [Ref "ps", Ref "bs", Ref "vs", Ref "ds2", Ref "fs", Ref "k"])
       , Do (Op.Return (Ref "r"))
       ]
     -- **Every solved binder is bound after the last λ** (MS9 phase 195). A
@@ -858,6 +865,25 @@ splitClauses =
     -- between two of them, and the arm is then not the λ-chain its method's
     -- telescope describes — which is what "Thena.Tactics.Recurse" descends to
     -- find the hypothesis a recursive call inside the arm is about.
+    -- **What a friendly index's ambient name means inside the arm** (MS9 phase
+    -- 196, @~8v3pg@). A split abstracts an index the target supplies as a plain
+    -- variable outright, with no equation and no copy, so the two copy clauses
+    -- above have nothing to bind that name from and it went on meaning the
+    -- entry outside — the thing the split refined away.
+  , Rule (GlobalName "bind-friendlies")
+      [PList [] Nothing, PVar "vs", PVar "ds"] []
+      [Do (Op.Return (Ref "ds"))]
+  , Rule (GlobalName "bind-friendlies")
+      [ PList [PPair (PVar "n") (PVar "f")] (Just (PVar "fs"))
+      , PVar "vs", PVar "ds"
+      ] []
+      [ Bind (Op.PVar "v") Nothing
+          (Op.Call "instantiate-with" [Ref "f", Ref "vs"])
+      , Bind (Op.PVar "ds2") Nothing (Op.Prepend (PairOf (Ref "n") (Ref "v")) (Ref "ds"))
+      , Bind (Op.PVar "r") Nothing
+          (Op.Call "bind-friendlies" [Ref "fs", Ref "vs", Ref "ds2"])
+      , Do (Op.Return (Ref "r"))
+      ]
   , Rule (GlobalName "bind-solved") [PList [] Nothing, PVar "k"] [] []
   , Rule (GlobalName "bind-solved")
       [PList [PPair (PVar "n") (PVar "v")] (Just (PVar "ds")), PVar "k"] []
@@ -905,7 +931,7 @@ splitClauses =
   , Rule (GlobalName "arm-needs-body") [PSome (PVar "b")] []
       [call "elaborate" [Ref "b"]]
   , Rule (GlobalName "elaborate-arm")
-      [ PVar "t", PVar "c", PVar "sub", PVar "bs"
+      [ PVar "t", PVar "c", PVar "sub", PVar "bs", PVar "fs"
       , PPair (PVar "p") (PVar "ob")
       ] []
       [ Bind (Op.PVar "as") Nothing (Op.PatternArguments (Ref "p"))
@@ -920,7 +946,9 @@ splitClauses =
         -- binds them in: no rule here knows what that order is.
       , Bind (Op.PVar "k1") Nothing
           (Op.Call "intro-arm-binders"
-                   [Ref "as", Ref "bs", Op.ListOf [], Op.ListOf [], Ref "k0"])
+                   [ Ref "as", Ref "bs", Op.ListOf [], Op.ListOf [], Ref "fs"
+                   , Ref "k0"
+                   ])
       , Do (Goto (Ref "k1"))
       , call "arm-needs-body" [Ref "ob"]
       , Do (Goto (Ref "sub"))
@@ -930,8 +958,11 @@ splitClauses =
     -- by a rule with a clause for @some@ and none for @none@, so the refusal
     -- names the missing arm and not the search that went looking for it.
   , Rule (GlobalName "case-needs-an-arm")
-      [ PVar "t", PVar "c", PVar "sub", PVar "bs", PSome (PVar "a") ] []
-      [ call "elaborate-arm" [Ref "t", Ref "c", Ref "sub", Ref "bs", Ref "a"] ]
+      [ PVar "t", PVar "c", PVar "sub", PVar "bs", PVar "fs", PSome (PVar "a")
+      ] []
+      [ call "elaborate-arm"
+          [Ref "t", Ref "c", Ref "sub", Ref "bs", Ref "fs", Ref "a"]
+      ]
     -- **And a case that vanished takes no body** — between them the two clauses
     -- are every legal shape: no arm at all, or an arm that stops at the arrow.
   , Rule (GlobalName "vanished-case-takes-no-body") [PNone] [] []
@@ -946,21 +977,21 @@ splitClauses =
     -- user write arms. The arm-less clause's test is complementary to the other
     -- two, so this search records no choice point — @pick@'s shape.
   , Rule (GlobalName "one-case")
-      [PVar "t", PVar "c", PVar "sub", PVar "bs"]
+      [PVar "t", PVar "c", PVar "sub", PVar "bs", PVar "fs"]
       [SplitHasNoArms (Ref "t")]
       [call "case-must-vanish" [Ref "sub"]]
   , Rule (GlobalName "one-case")
-      [PVar "t", PVar "c", PNone, PVar "bs"]
+      [PVar "t", PVar "c", PNone, PVar "bs", PVar "fs"]
       [SplitHasArms (Ref "t")]
       [ Bind (Op.PVar "oa") Nothing (Op.Call "arm-for" [Ref "t", Ref "c"])
       , call "vanished-case-takes-no-body" [Ref "oa"]
       ]
   , Rule (GlobalName "one-case")
-      [PVar "t", PVar "c", PSome (PVar "sub"), PVar "bs"]
+      [PVar "t", PVar "c", PSome (PVar "sub"), PVar "bs", PVar "fs"]
       [SplitHasArms (Ref "t")]
       [ Bind (Op.PVar "oa") Nothing (Op.Call "arm-for" [Ref "t", Ref "c"])
       , call "case-needs-an-arm"
-          [Ref "t", Ref "c", Ref "sub", Ref "bs", Ref "oa"]
+          [Ref "t", Ref "c", Ref "sub", Ref "bs", Ref "fs", Ref "oa"]
       ]
     -- **Every arm the user wrote was asked for** (MS9 phase 190, his ruling of
     -- 2026-10-20). Elaboration asks the datatype's constructors for arms; these
@@ -1014,9 +1045,9 @@ splitClauses =
         -- its own methods as misshapen. **And what the motive added to every
         -- method** (MS9 phase 191), threaded whole.
       , Bind (Op.PVar "ihs") Nothing (Op.Call "ihs-for" [Ref "t", Ref "c"])
-      , Bind (PPair (Op.PVar "sub") (Op.PVar "bs")) Nothing
+      , Bind (PPair (Op.PVar "sub") (PPair (Op.PVar "bs") (Op.PVar "fs"))) Nothing
           (Op.Specialise (Ref "c") (Ref "ihs") (Ref "m"))
-      , call "one-case" [Ref "t", Ref "c", Ref "sub", Ref "bs"]
+      , call "one-case" [Ref "t", Ref "c", Ref "sub", Ref "bs", Ref "fs"]
       , Do (Goto (Ref "mh"))
       , call "solve" []
       , call "split-cases" [Ref "t", Ref "cs", Ref "ms", Ref "m"]

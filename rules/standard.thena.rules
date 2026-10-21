@@ -365,11 +365,15 @@ rule instantiate-with f vs :-
 -- solved binder is bound to that function applied to them. There is no
 -- arithmetic in it: a surviving binder conses one, a solved binder conses none,
 -- and the orders agree because both are the order the method binds them.
-intro-arm-binders : List Pattern -> List (Binder, Option Core) -> List Core -> List (Name, Core) -> Core -> Core
-rule intro-arm-binders [] [] vs ds k :-
-  do bind-solved ds k
+--
+-- `fs` is carried untouched and spent in the base case: the names a FRIENDLY
+-- index abstracted, which `bind-friendlies` below explains.
+intro-arm-binders : List Pattern -> List (Binder, Option Core) -> List Core -> List (Name, Core) -> List (Name, Core) -> Core -> Core
+rule intro-arm-binders [] [] vs ds fs k :-
+  do ds2 = bind-friendlies fs vs ds
+     ; bind-solved ds2 k
      ; return k
-rule intro-arm-binders [p, ...ps] [(b, none), ...bs] vs ds k :-
+rule intro-arm-binders [p, ...ps] [(b, none), ...bs] vs ds fs k :-
      when (binder-is-argument b) (pattern-is-wildcard p)
   do w = fresh-name "u"
      ; g = here
@@ -378,9 +382,9 @@ rule intro-arm-binders [p, ...ps] [(b, none), ...bs] vs ds k :-
      ; v = resolve-name w
      ; goto g
      ; vs2 = prepend v vs
-     ; r = intro-arm-binders ps bs vs2 ds k2
+     ; r = intro-arm-binders ps bs vs2 ds fs k2
      ; return r
-rule intro-arm-binders [p, ...ps] [(b, none), ...bs] vs ds k :-
+rule intro-arm-binders [p, ...ps] [(b, none), ...bs] vs ds fs k :-
      when (binder-is-argument b) (pattern-is-name p)
   do sub = pattern-arguments p
      ; no-nesting sub
@@ -391,22 +395,22 @@ rule intro-arm-binders [p, ...ps] [(b, none), ...bs] vs ds k :-
      ; v = resolve-name w
      ; goto g
      ; vs2 = prepend v vs
-     ; r = intro-arm-binders ps bs vs2 ds k2
+     ; r = intro-arm-binders ps bs vs2 ds fs k2
      ; return r
-rule intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] vs ds k :-
+rule intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] vs ds fs k :-
      when (binder-is-argument b) (pattern-is-wildcard p)
-  do r = intro-arm-binders ps bs vs ds k
+  do r = intro-arm-binders ps bs vs ds fs k
      ; return r
-rule intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] vs ds k :-
+rule intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] vs ds fs k :-
      when (binder-is-argument b) (pattern-is-name p)
   do sub = pattern-arguments p
      ; no-nesting sub
      ; w = pattern-head p
      ; v = instantiate-with f vs
      ; ds2 = prepend (w, v) ds
-     ; r = intro-arm-binders ps bs vs ds2 k
+     ; r = intro-arm-binders ps bs vs ds2 fs k
      ; return r
-rule intro-arm-binders ps [(b, none), ...bs] vs ds k :- when (binder-is-hypothesis b)
+rule intro-arm-binders ps [(b, none), ...bs] vs ds fs k :- when (binder-is-hypothesis b)
   do n = binder-name b
      ; h = fresh-name n
      ; g = here
@@ -415,9 +419,9 @@ rule intro-arm-binders ps [(b, none), ...bs] vs ds k :- when (binder-is-hypothes
      ; v = resolve-name h
      ; goto g
      ; vs2 = prepend v vs
-     ; r = intro-arm-binders ps bs vs2 ds k2
+     ; r = intro-arm-binders ps bs vs2 ds fs k2
      ; return r
-rule intro-arm-binders ps [(b, none), ...bs] vs ds k :- when (binder-is-copy b)
+rule intro-arm-binders ps [(b, none), ...bs] vs ds fs k :- when (binder-is-copy b)
   do n = binder-name b
      ; g = here
      ; k2 = prim-lambda n
@@ -425,13 +429,40 @@ rule intro-arm-binders ps [(b, none), ...bs] vs ds k :- when (binder-is-copy b)
      ; v = resolve-name n
      ; goto g
      ; vs2 = prepend v vs
-     ; r = intro-arm-binders ps bs vs2 ds k2
+     ; r = intro-arm-binders ps bs vs2 ds fs k2
      ; return r
-rule intro-arm-binders ps [(b, (some f)), ...bs] vs ds k :- when (binder-is-copy b)
+rule intro-arm-binders ps [(b, (some f)), ...bs] vs ds fs k :- when (binder-is-copy b)
   do n = binder-name b
      ; v = instantiate-with f vs
      ; ds2 = prepend (n, v) ds
-     ; r = intro-arm-binders ps bs vs ds2 k
+     ; r = intro-arm-binders ps bs vs ds2 fs k
+     ; return r
+
+-- WHAT A FRIENDLY INDEX'S AMBIENT NAME MEANS INSIDE THE ARM — `~8v3pg`. A split
+-- abstracts an index the target supplies as a plain variable OUTRIGHT, with no
+-- equation about it, because abstracting it already generalises everything that
+-- mentions it. So no copy is quantified, and the two clauses above have nothing
+-- to bind the ambient name from: the arm's goal is about the abstracted
+-- variable while the name still reaches the entry outside, meaning the thing
+-- the split refined away. `case f of { fs k m r -> refl N u }` on an
+-- `f : F (s z) u` was refused with *u and s m cannot be made equal* — the error
+-- naming the refinement it would not apply.
+--
+-- A NAME BOUND OUTSIDE A SPLIT MEANS WHAT THE SPLIT REFINED IT TO — his ruling
+-- of 2026-10-20, which phase 195 built for a solved copy. This is the same rule
+-- on the path that makes no copy, and `specialise` answers each one the same
+-- way: a function of the binders that survived.
+--
+-- AND AT THE END, WITH THE WHOLE OF `vs`, where a solved binder is instantiated
+-- where the walk reaches it. An index expression may mention any of the
+-- constructor's arguments — `fs`'s second index is `s m` and `m` is its last —
+-- so there is no prefix to stop at and nothing to gain by stopping early.
+bind-friendlies : List (a, Core) -> List Core -> List (a, Core) -> List (a, Core)
+rule bind-friendlies [] vs ds :- do return ds
+rule bind-friendlies [(n, f), ...fs] vs ds :-
+  do v = instantiate-with f vs
+     ; ds2 = prepend (n, v) ds
+     ; r = bind-friendlies fs vs ds2
      ; return r
 
 -- EVERY SOLVED BINDER IS BOUND AFTER THE LAST λ, AND THE ORDER IS WHY. A
@@ -519,8 +550,8 @@ rule arm-needs-body (some b) :- do call elaborate b
 -- The arm, under every binder the split reported. ONE WALK AND ONE REPORT: the
 -- order the three groups are introduced in is the order the report is in, which
 -- is the order the method binds them, and no rule here knows what that order is.
-elaborate-arm : Surface -> Name -> Core -> List (Binder, Option Core) -> (Pattern, Option Surface) -> ()
-rule elaborate-arm t c sub bs (p, ob) :-
+elaborate-arm : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> (Pattern, Option Surface) -> ()
+rule elaborate-arm t c sub bs fs (p, ob) :-
   do as = pattern-arguments p
      ; args = constructor-arguments c
      ; same-length as args
@@ -529,7 +560,7 @@ rule elaborate-arm t c sub bs (p, ob) :-
      ; into
      ; k0 = here
      ; back
-     ; k1 = intro-arm-binders as bs [] [] k0
+     ; k1 = intro-arm-binders as bs [] [] fs k0
      ; goto k1
      ; arm-needs-body ob
      ; goto sub
@@ -538,9 +569,9 @@ rule elaborate-arm t c sub bs (p, ob) :-
 -- A CASE THAT SURVIVED NEEDS AN ARM — coverage, and this is where it is said.
 -- One clause for `some` and none for `none`, so the refusal names the user's
 -- complaint: there is a method left and no arm was written for it.
-case-needs-an-arm : Surface -> Name -> Core -> List (Binder, Option Core) -> Option (Pattern, Option Surface) -> ()
-rule case-needs-an-arm t c sub bs (some a) :-
-  do elaborate-arm t c sub bs a
+case-needs-an-arm : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> Option (Pattern, Option Surface) -> ()
+rule case-needs-an-arm t c sub bs fs (some a) :-
+  do elaborate-arm t c sub bs fs a
 
 -- AND A CASE THAT VANISHED TAKES NO BODY — the other half of his ruling of
 -- 2026-10-20. Two clauses, and between them they are every legal shape: no arm
@@ -582,15 +613,15 @@ rule case-must-vanish none :- do
 -- write arms. The arm-less clause is first and its test is complementary to the
 -- other two, so this search records no choice point — `pick`'s shape, for
 -- `pick`'s reason.
-one-case : Surface -> Name -> Option Core -> List (Binder, Option Core) -> ()
-rule one-case t c sub bs :- when (split-has-no-arms t)
+one-case : Surface -> Name -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()
+rule one-case t c sub bs fs :- when (split-has-no-arms t)
   do case-must-vanish sub
-rule one-case t c none bs :- when (split-has-arms t)
+rule one-case t c none bs fs :- when (split-has-arms t)
   do oa = arm-for t c
      ; vanished-case-takes-no-body oa
-rule one-case t c (some sub) bs :- when (split-has-arms t)
+rule one-case t c (some sub) bs fs :- when (split-has-arms t)
   do oa = arm-for t c
-     ; case-needs-an-arm t c sub bs oa
+     ; case-needs-an-arm t c sub bs fs oa
 
 -- EVERY ARM THE USER WROTE WAS ASKED FOR — HIS RULING, 2026-10-20, and the two
 -- walks below are the half of it that nothing else can see. Elaboration asks the
@@ -662,13 +693,13 @@ rule arms-are-distinct t :- when (surface-is-split t) (split-has-arms t)
 -- them off the declaration, because the declaration cannot say which scheme was
 -- asked for — `caseD`'s methods carry none, and counting them from the
 -- constructor made `case … of` refuse its own methods.
-split-cases : Surface -> List Name -> List Core -> (List Name, Int) -> ()
+split-cases : Surface -> List Name -> List Core -> MethodShape -> ()
 rule split-cases t [] [] m :- do
 rule split-cases t [c, ...cs] [mh, ...ms] m :-
   do goto mh
      ; ihs = ihs-for t c
-     ; (sub, bs) = specialise c ihs m
-     ; one-case t c sub bs
+     ; (sub, (bs, fs)) = specialise c ihs m
+     ; one-case t c sub bs fs
      ; goto mh
      ; solve
      ; split-cases t cs ms m
@@ -678,7 +709,7 @@ rule split-cases t [c, ...cs] [mh, ...ms] m :-
 -- and it is threaded whole, because `specialise` is the only thing with any
 -- business in it: it puts those names into the report, and nothing else reads
 -- them.
-split-over : Surface -> List Name -> (List Core, (List Name, Int)) -> ()
+split-over : Surface -> List Name -> (List Core, MethodShape) -> ()
 rule split-over t cs (hs, m) :- do split-cases t cs hs m
 
 -- WHICH ELIMINATOR THE WRITTEN WORD ASKS FOR, and the only place the two
@@ -691,7 +722,7 @@ rule split-over t cs (hs, m) :- do split-cases t cs hs m
 -- An arm-less split goes through here too, so `case e of { }` really applies
 -- caseD and `induction e of { }` really eliminates. Nothing downstream can
 -- tell, and neither can the kernel: caseD δ-unfolds to an elimination.
-split-claim : Surface -> Core -> (List Core, (List Name, Int))
+split-claim : Surface -> Core -> (List Core, MethodShape)
 rule split-claim t x :- when (split-is-induction t)
   do r = prim-eliminate x
      ; return r

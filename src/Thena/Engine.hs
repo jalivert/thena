@@ -1274,17 +1274,17 @@ perform instr rest m = case operation instr of
     -- into the binder report, because a method type spells every hypothesis
     -- binder @ih@ and the name an arm freshens is nowhere in the type.
     --
-    -- **And what the motive added to every method, as the pair the elimination
-    -- answered with** (MS9 phase 191): the ambient entries it generalised, and
-    -- how many equations it stated. The same argument as above — it is the value
-    -- the caller already holds, and it is threaded rather than taken apart
-    -- because nothing between the two ops has any business in it.
-    Right (w, VList hs, VPair (VList gns) (VInt eqs)) ->
+    -- **And what the motive added to every method, as the elimination answered
+    -- it** (MS9 phase 191, a type of its own since phase 196): the copies, the
+    -- equation count, the indices abstracted outright, the parameters, the
+    -- target. It is threaded rather than taken apart because nothing between
+    -- the two ops has any business in it — see
+    -- 'Thena.Tactics.Eliminate.MethodShape'.
+    Right (w, VList hs, VMethodShape shape) ->
       case focus (cursor (development m)) of
       OnComponent (Component.Claim x i s) ->
         case specialise (globals m) contextAt (names m) (GlobalName w)
-                        [ Ident n | VText n <- hs ]
-                        [ Ident n | VText n <- gns ] eqs s of
+                        [ Ident n | VText n <- hs ] shape s of
           (Left e,  n1) -> failure (CannotSpecialise e) m { names = n1 }
           (Right sp, n1) ->
             let (holes, named) = claimSubgoals (cursor (development m)) (specialisedGoal sp)
@@ -1316,8 +1316,18 @@ perform instr rest m = case operation instr of
                                  (VOption (case named of
                                              (v, _) : _ -> Just (VTerm (Free v))
                                              []         -> Nothing))
-                                 (VList [ VPair (VBinder b) (VOption (fmap VTerm f))
-                                        | (b, f) <- specialisedBinders sp ]))
+                                 (VPair
+                                    (VList [ VPair (VBinder b) (VOption (fmap VTerm f))
+                                           | (b, f) <- specialisedBinders sp ])
+                                    -- **And what this method makes of each
+                                    -- name bound outside the split** (MS9 phase
+                                    -- 196): the name, and a function of the
+                                    -- binders that survived. The arm binds each
+                                    -- with @define@ once its telescope is
+                                    -- bound, which is what makes the name mean
+                                    -- the refined thing (@~8v3pg@).
+                                    (VList [ VPair (VText nm) (VTerm t)
+                                           | (Ident nm, t) <- specialisedRebound sp ])))
                               m { development = Development cur, names = n1 }
       OnComponent _ -> failure NotAHole m
       _             -> failure (CannotMove NotOnTheSpine) m
@@ -2007,15 +2017,11 @@ perform instr rest m = case operation instr of
                       -- 'Thena.Instral.Ops.resultOf' carries the argument. The
                       -- holes are variables because 'Thena.Instral.Ops.Goto' is
                       -- the only move a rule can aim at a hole it /found/; the
-                      -- generalised names and the equation count are one fact
-                      -- about every method's shape, which is what @specialise@
-                      -- needs and nothing else can work out.
+                      -- shape is one fact about every method, which is what
+                      -- @specialise@ needs and nothing else can work out.
                       producing (Saying (subgoalMessage (map snd named)))
                                 (VPair (VList [ VTerm (Free v) | (v, _) <- named ])
-                                       (VPair
-                                          (VList [ VText w
-                                                 | Ident w <- elimGeneralised el ])
-                                          (VInt (elimEquations el))))
+                                       (VMethodShape (elimShape el)))
                                 m { development = Development cur, names = n1 }
         OnComponent _ -> failure NotAHole m
         _             -> failure (CannotMove NotOnTheSpine) m

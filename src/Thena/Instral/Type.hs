@@ -84,6 +84,18 @@ data Ty
     -- this by letting a rule head match the shape directly; this is what MS9
     -- needs in the meantime, and his instruction is that accessors outlive the
     -- pattern syntax that replaces them anyway.
+  | TMethodShape
+    -- ^ **what the motive added to every method of one elimination, and what
+    -- the target was** (MS9 phase 196) —
+    -- @Thena.Tactics.Eliminate.MethodShape@.
+    --
+    -- **Opaque on purpose: no rule reads it.** @prim-eliminate@ answers it and
+    -- @specialise@ takes it, and everything in it is something a method type
+    -- cannot say — which binders are the copies, how many equations there are,
+    -- which indices were abstracted outright, the family's parameters, the
+    -- target. It was five components of a nested pair until this phase, spelled
+    -- out in three rule signatures that could not be read and in a signature
+    -- table that repeated them.
   | TBinder
     -- ^ **one binder of a specialised method** (MS9 phase 192) —
     -- @Thena.Tactics.Specialise.Binder@.
@@ -215,6 +227,7 @@ renderTy = go False
       TDevelopment -> "Development"
       TPattern     -> "Pattern"
       TBinder      -> "Binder"
+      TMethodShape -> "MethodShape"
       TFun as r    -> wrap p (intercalate " -> " (map (go True) as ++ [go True r]))
       TList a      -> wrap p ("List " ++ go True a)
       TOption a    -> wrap p ("Option " ++ go True a)

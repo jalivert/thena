@@ -58,6 +58,7 @@ import Thena.Core.Reduce (whnf)
 import Thena.Global.Env (ArgRole, GlobalEnv, InductiveDefinition)
 import Thena.Language.Reader (Block)
 import Thena.Surface.Concrete (Plicity, SurfacePattern)
+import Thena.Tactics.Eliminate (MethodShape)
 import Thena.Tactics.Specialise (Binder)
 import Thena.Syntax.Concrete (Raw, splicesIn)
 import Thena.Surface.Zipper (SurfaceZipper)
@@ -158,6 +159,12 @@ data Value
   | VPattern SurfacePattern
     -- ^ **a pattern an arm of a surface split was written with** (MS9 phase
     -- 183). 'Thena.Instral.Type.TPattern' carries why it is not a 'VSurface'.
+  | VMethodShape MethodShape
+    -- ^ **what the motive added to every method of one elimination** (MS9 phase
+    -- 196) — 'Thena.Instral.Type.TMethodShape' carries why it is a type of its
+    -- own, and the short of it is that no rule reads one: it goes from
+    -- @prim-eliminate@ to @specialise@ and nothing in between has any business
+    -- in it.
   | VBinder Binder
     -- ^ **one binder of a specialised method** (MS9 phase 192) — which of the
     -- three groups it is in, and the name it is bound under.
@@ -1548,8 +1555,8 @@ resultOf o = case o of
   --
   -- A body that wants neither half discards the pair, as every rule shipped
   -- before phase 177 does.
-  Eliminate _  -> Just (TPair (TList TCore) (TPair (TList TName) TInt))
-  CaseAnalyse _ -> Just (TPair (TList TCore) (TPair (TList TName) TInt))
+  Eliminate _  -> Just (TPair (TList TCore) TMethodShape)
+  CaseAnalyse _ -> Just (TPair (TList TCore) TMethodShape)
   -- **The subgoal it claimed, or none** (MS9 phase 184). A conflicting
   -- equation closes the method outright and claims nothing, which is the
   -- impossible case vanishing, so there is never more than one.
@@ -1557,7 +1564,9 @@ resultOf o = case o of
     -- own shape and for its reason: one op answers everything only it knows, and
     -- a rule takes the pair apart in a head.
   Specialise _ _ _ ->
-    Just (TPair (TOption TCore) (TList (TPair TBinder (TOption TCore))))
+    Just (TPair (TOption TCore)
+                (TPair (TList (TPair TBinder (TOption TCore)))
+                       (TList (TPair TName TCore))))
   TieRecursion _ -> Just TCore
   -- The six declaration readers (MS9 phase 176). @constructors-of@ is the
   -- first row in this table to answer with a list.
@@ -1704,7 +1713,7 @@ operandTypes o = case o of
   Eliminate a  -> [(a, TCore)]
   CaseAnalyse a -> [(a, TCore)]
   Specialise c h gk ->
-    [(c, TName), (h, TList TName), (gk, TPair (TList TName) TInt)]
+    [(c, TName), (h, TList TName), (gk, TMethodShape)]
   TieRecursion t -> [(t, TCore)]
   -- @datatype-of@ reads a type; the other five read a declared name.
   DatatypeOf a -> [(a, TCore)]

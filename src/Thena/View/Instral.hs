@@ -251,6 +251,7 @@ displayValue gs budget env bs n at v = case v of
   -- case of its own would break every total match over 'ValueView' for no
   -- present gain.
   VBinder b -> ValOpaque (binderWord b)
+  VMethodShape _ -> ValOpaque "method shape"
   VList vs -> ValList (map go vs)
   VOption Nothing -> ValNone
   VOption (Just v') -> ValSome (go v')

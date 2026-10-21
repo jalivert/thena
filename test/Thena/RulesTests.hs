@@ -855,7 +855,8 @@ splitHelpers =
   ]
   ++ replicate 8 "intro-arm-binders"
   ++
-  [ "bind-solved", "bind-solved"
+  [ "bind-friendlies", "bind-friendlies"
+      , "bind-solved", "bind-solved"
   , "same-length", "same-length"
   , "arm-for", "arm-for", "pick", "pick", "arm-needs-body", "elaborate-arm"
   , "case-needs-an-arm"

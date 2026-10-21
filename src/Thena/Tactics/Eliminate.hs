@@ -63,6 +63,7 @@
 -- also a generator that has to typecheck what it builds. §2.5 gains the line.
 module Thena.Tactics.Eliminate
   ( Elimination (..)
+  , MethodShape (..)
   , eliminate
   , spineOf
   ) where
@@ -120,7 +121,27 @@ import Thena.Global.Env
 data Elimination = Elimination
   { elimMethods   :: [(Var, Ident, Core)]
   , elimTerm      :: Core
-  , elimGeneralised :: [Ident]
+  , elimShape     :: MethodShape
+    -- ^ what the motive added to every method of this elimination, and what the
+    -- target was — see 'MethodShape'.
+  }
+  deriving (Eq, Show)
+
+-- | **What the motive added to every method, and what the target was** — one
+-- fact about every method of one elimination (MS9 phases 191, 192, 196).
+--
+-- __It is a type and not a tuple because nothing between the two ops reads
+-- it.__ "Thena.Tactics.Specialise" is the only consumer; a rule takes
+-- 'Elimination'\'s pair apart and threads this half whole. Five components
+-- spelled out at every row of the signature table, and in three rule
+-- signatures, said nothing a reader could use.
+--
+-- __Every component is something a method type cannot say.__ A method type is Π
+-- binders all the way down: nothing in it marks where the constructor's own
+-- telescope ends, which binders are the copies, which indices were abstracted
+-- outright, or what the family's parameters were.
+data MethodShape = MethodShape
+  { shapeGeneralised :: [Ident]
     -- ^ the ambient entries this elimination __generalised__, in context order
     -- and under the names they already had (MS9 phase 191).
     --
@@ -129,7 +150,7 @@ data Elimination = Elimination
     -- shadows the ambient entry with its own refined copy, which is how the
     -- body comes to be written against the refinement rather than against the
     -- equation. See the note on 'generalised' below.
-  , elimEquations :: Int
+  , shapeEquations :: Int
     -- ^ how many equations __each__ method carries — the number of /tied/
     -- indices, and the same for every method of one elimination (MS9 phase
     -- 177).
@@ -139,6 +160,36 @@ data Elimination = Elimination
     -- equations; the count is what 'friendlyAt' decided, and
     -- "Thena.Tactics.Specialise" is the caller that needs it. So the op that
     -- /states/ the equations is what answers with how many it stated.
+  , shapeFriendly :: [(Ident, Int)]
+    -- ^ the ambient entries a /friendly/ index abstracted outright, each with
+    -- the index position that abstracted it (MS9 phase 196).
+    --
+    -- __An arm has to bind these under the ambient names, exactly as it binds a
+    -- solved copy__ (@~8v3pg@). A friendly index needs no equation because
+    -- abstracting it already generalises everything that mentions it — but the
+    -- entry it abstracted is still in the context under its own name, and the
+    -- arm's goal is about the abstracted variable, so the name means the
+    -- unrefined thing unless something binds it. There is no /copy/ on this
+    -- path, so phase 195's two clauses have nothing to work from and this is
+    -- what tells them.
+    --
+    -- __The position and not the term__: the term is the constructor's own
+    -- index expression and differs per method, so only
+    -- "Thena.Tactics.Specialise" — which has that method's binders — can write
+    -- it down.
+    --
+    -- __And it may not be recomputed from the context later.__ 'friendlyAt'
+    -- asks whether any /other/ entry mentions the variable, and by the time a
+    -- method is being specialised the method holes are entries of that context
+    -- and their types mention it through the motive. So the answer is recorded
+    -- here, where it was decided.
+  , shapeParameters :: [Core]
+    -- ^ the family's parameters as the target supplied them (MS9 phase 196).
+    --
+    -- __Here for 'shapeFriendly' and nothing else__: a constructor's index
+    -- expression is stated in the declaration's parameter variables, so writing
+    -- one out at a method needs the substitution the scheme already made, and a
+    -- method type does not carry it.
   }
   deriving (Eq, Show)
 
@@ -378,11 +429,26 @@ eliminate env ctx sch n0 goal tgt =
             -- In context order, whatever order the closure found them in.
             closed = [ entryVar e | e <- ctx, entryVar e `elem` grow seeds ]
 
+            -- __THE CLOSURE TESTS AN ENTRY'S TYPE AND NOT ITS VALUE — MS9
+            -- phase 196.__ The condition it stands for is about types: an
+            -- entry whose /type/ mentions a generalised variable would be a
+            -- hypothesis about a subject that no longer means what it meant. A
+            -- 'Definition' whose /value/ mentions one is a different thing —
+            -- its type does not move, so the motive has nothing to preserve
+            -- about it, and it stays itself.
+            --
+            -- __And testing the value made a split undo the one around it.__
+            -- An arm binds the ambient names a split refined (@~8v3pg@), which
+            -- puts definitions in the context; the first of those to mention a
+            -- seed pulled itself into the closure, failed @viable@'s
+            -- 'Hypothesis' test, and so cancelled the generalisation outright.
+            -- @examples\/determinacy-patterns.thena@ measured it: @p@ stopped
+            -- being refined to @true@ the moment the outer split bound @t@.
             grow vs =
               let vs' = nub (vs ++ [ entryVar e
                                    | e <- ctx
                                    , fixed e
-                                   , any (`elem` entryUses e) vs
+                                   , any (`elem` freeVars (entryType e)) vs
                                    ])
                in if length vs' == length vs then vs else grow vs'
 
@@ -488,6 +554,21 @@ eliminate env ctx sch n0 goal tgt =
                      , k `elem` tiedIx
                      ]
 
+          -- __Which ambient entry each FRIENDLY index abstracted, by
+          -- position__ (MS9 phase 196, @~8v3pg@). A position is friendly
+          -- exactly when it is not tied, and 'friendlyAt' admitted only a
+          -- @'Free' v@ that is a 'Hypothesis' of the context, so there is
+          -- always a name to find. 'elimFriendly' says what the arm does with
+          -- it.
+          friendlyEntries =
+            [ (i, k)
+            | (k, a) <- zip [(0 :: Int) ..] as
+            , k `notElem` tiedIx
+            , Free v <- [a]
+            , Hypothesis w i _ <- ctx
+            , w == v
+            ]
+
           -- @Eq Iₖ iₖ aₖ → …@, one non-dependent Π per *tied* index. A Π still
           -- needs a variable to close over even when nothing refers to it,
           -- exactly as 'Thena.Global.Env.eliminatorType' mints one per
@@ -530,7 +611,7 @@ eliminate env ctx sch n0 goal tgt =
           -- extra (thesis §3.5.3, and see this module's header).
           case sortOf env bodyCtx n6 motiveBody of
             (Left e, _, n7)  -> (Left (MotiveIllTyped e), n7)
-            (Right l, _, n7) -> assemble d ls ps as gen genEntries tied motiveTerm l n7
+            (Right l, _, n7) -> assemble d ls ps as gen genEntries tied friendlyEntries motiveTerm l n7
 
     -- **Which scheme's type the methods are read off, and at which levels.**
     -- One of exactly two places the scheme is read.
@@ -580,7 +661,7 @@ eliminate env ctx sch n0 goal tgt =
         foldl App (Global (caseName (inductiveName d)) elargs)
           (ps ++ [motiveTerm] ++ map Free mvs ++ as ++ [tgt])
 
-    assemble d ls ps as gen genEntries tied motiveTerm l n7 =
+    assemble d ls ps as gen genEntries tied friendlyEntries motiveTerm l n7 =
       let (ety0, elvs, n8) = schemeType d l n7
           -- **Instantiated at the target's level arguments** (phase 31d).
           -- 'Thena.Core.Typing' does the same for a written @elim@; the tactic
@@ -626,7 +707,9 @@ eliminate env ctx sch n0 goal tgt =
        in case check env (ctx ++ methodEntries) n10 proof goal of
             (Left e, _, n11)   -> (Left (SchemeIllTyped e), n11)
             (Right (), _, n11) ->
-              ( Right (Elimination holes proof (map entryIdent genEntries) (length tied))
+              ( Right (Elimination holes proof
+                         (MethodShape (map entryIdent genEntries) (length tied)
+                                      friendlyEntries ps))
               , n11 )
 
     -- Peel @k@ Π domains off a type, instantiating each binder with itself is

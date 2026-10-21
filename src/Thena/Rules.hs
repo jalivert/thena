@@ -858,6 +858,7 @@ resolveTyIn owner vs0 t0 = go vs0 t0
       ("Development", []) -> Right TDevelopment
       ("Pattern", [])     -> Right TPattern
       ("Binder", [])      -> Right TBinder
+      ("MethodShape", []) -> Right TMethodShape
       ("Level", [])       -> Right TLevel
       ("List", [a])       -> Right (TList a)
       ("Option", [a])     -> Right (TOption a)

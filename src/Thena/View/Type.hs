@@ -48,6 +48,10 @@ data TypeView
   | ABinder
     -- ^ @Binder@ — one binder of a specialised method, and which of the three
     -- groups it is in (MS9 phase 192)
+  | AMethodShape
+    -- ^ @MethodShape@ — what the motive added to every method of one
+    -- elimination, and what the target was (MS9 phase 196). Opaque: it goes
+    -- from @prim-eliminate@ to @specialise@ and no rule reads one
   | AList TypeView       -- ^ @List a@
   | AnOption TypeView    -- ^ @Option a@
   | APair TypeView TypeView
@@ -121,6 +125,7 @@ at nested ty = case ty of
   TLevel       -> ALevel
   TPattern     -> APattern
   TBinder      -> ABinder
+  TMethodShape -> AMethodShape
   TFun as r    -> fence (AFunction (map (at True) as) (at True r))
   TList a      -> fence (AList (at True a))
   TOption a    -> fence (AnOption (at True a))

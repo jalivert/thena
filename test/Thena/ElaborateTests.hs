@@ -772,7 +772,7 @@ baseTests =
                  , "reverse-onto", "reverse-onto", "apply-all", "apply-all"
                  , "instantiate-with" ]
               ++ replicate 8 "intro-arm-binders"
-              ++ [ "bind-solved", "bind-solved"
+              ++ [ "bind-friendlies", "bind-friendlies", "bind-solved", "bind-solved"
                  , "same-length", "same-length"
                  , "arm-for", "arm-for", "pick", "pick", "arm-needs-body"
                  , "elaborate-arm", "case-needs-an-arm"
@@ -1195,6 +1195,43 @@ splittingTree =
       case r of
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __AND SO DOES A NAME A FRIENDLY INDEX ABSTRACTED__ (MS9 phase 196,
+    -- @~8v3pg@), which is the same ruling on the path that makes no copy. An
+    -- index the target supplies as a plain variable that no other entry mentions
+    -- needs no equation: the motive abstracts it outright. So nothing is
+    -- generalised and nothing is solved, and until this phase nothing bound the
+    -- ambient name either — the arm's goal was about the abstracted variable
+    -- while the name still reached the entry outside.
+    --
+    -- @indexIsRefined@ is the shape, and @m@ is the author's own name for
+    -- @Ev m@'s index: in the @evz@ arm it means @z@ and in the @evs@ arm it
+    -- means @s (s n)@, so one @refl N m@ answers both. @sameIndex@ is the same
+    -- thing where the index is the constructor's OWN argument — @mk@'s @k@ —
+    -- and writing @mk m@ there was refused with @m and k cannot be made equal@.
+    --
+    -- **Both compute**: @check@ asserts the first by @refl@ inside the module,
+    -- and the @:whnf@ below is the second, so a name bound to the wrong term
+    -- fails here rather than passing quietly.
+  , testCase "a friendly index's ambient name means the refined thing too" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (evModule ++
+            [ "data D : N -> Type\8320 where"
+            , "  mk : \8704 (k : N) -> D k"
+            , ""
+            , "indexIsRefined : \8704 (m : N) (e : Ev m) -> Eq N m m"
+            , "indexIsRefined = \\ m e -> case e of \
+              \{ evz -> refl N m ; evs n en -> refl N m }"
+            , "sameIndex : \8704 (m : N) (d : D m) -> D m"
+            , "sameIndex = \\ m d -> case d of { mk k -> mk m }"
+            , "check : Eq (Eq N z z) (indexIsRefined z evz) (refl N z)"
+            , "check = refl (Eq N z z) (refl N z)"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      let (s2, q) = command s1 ":whnf sameIndex (s z) (mk (s z))"
+      unwords (renderResponse s2 q) @?= "mk (s z)"
 
     -- ----------------------------------------------------------------
     -- A FORCED POSITION (MS9 phase 185)

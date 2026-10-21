@@ -1170,6 +1170,7 @@ renderValue ren ctx v = case v of
   -- there is no written form for one, so the group and the name it is bound
   -- under are what there is to say.
   VBinder b          -> "‹" ++ binderWord b ++ "›"
+  VMethodShape _     -> "‹method shape›"
   -- **An unresolved core term prints as its shape, not its contents** (MS5
   -- phase 61b). Printing a 'Thena.Syntax.Concrete.Raw' back would need a
   -- printer for the written syntax, and there has never been one: every other

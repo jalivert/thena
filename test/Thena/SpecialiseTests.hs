@@ -54,7 +54,7 @@ import Thena.Global.Env
   , recursiveArgument
   )
 import Thena.Render (Rendering (..), renderCore)
-import Thena.Tactics.Eliminate (Elimination (..), eliminate)
+import Thena.Tactics.Eliminate (Elimination (..), MethodShape (..), eliminate)
 import Thena.Tactics.Specialise
   (Binder (..), Role (..), Specialisation (..), binderWord, specialise)
 import Thena.Standard (expectedBase)
@@ -93,7 +93,7 @@ vtail = run "vtail" eqNatVec vecContext vecCounter "Vec A n" "v"
 vtailTests :: [TestTree]
 vtailTests =
   [ testCase "the elimination states one equation per method" $
-      elimEquations vtail @?= 1
+      shapeEquations (elimShape vtail) @?= 1
 
     -- The methods as the user is handed them, so that what the two cases below
     -- change is visible here rather than taken on trust.
@@ -114,7 +114,7 @@ vtailTests =
     -- @n1@ and solve the copy instead, leaving @n1@ bound for real; it is
     -- @Fin@ and @Below@ in 'friendlyTests' that demand one.
   , testCase "and vtail demands no copy at all" $
-      elimGeneralised vtail @?= []
+      shapeGeneralised (elimShape vtail) @?= []
 
     -- __The impossible case vanishes.__ @zero@ against @succ n@ is a conflict,
     -- so there is no subgoal at all and nothing is left for the user to close.
@@ -167,7 +167,7 @@ vtailTests =
     -- does that, and this is here so that @binder-name@ is total.
   , testCase "cons's method: the report says what each binder is" $
       reportOf vecContext (run' eqNatVec vecContext vecCounter
-                                "cons" vecCopies 1 (methodOf 1))
+                                "cons" vecShape (methodOf 1))
         @?= [ ("argument n", Just "n")
             , ("argument a",  Nothing)
             , ("argument as", Nothing)
@@ -184,18 +184,18 @@ vtailTests =
     -- a method's type marks where those end and the equations begin, so a
     -- hard-coded count here would say the equation is a copy the moment the
     -- generaliser's rule moves.
-    vecCopies = elimGeneralised vtail
+    vecShape = elimShape vtail
 
     vecGoal c mty =
-      goalIn vecContext (run' eqNatVec vecContext vecCounter c vecCopies 1 mty)
+      goalIn vecContext (run' eqNatVec vecContext vecCounter c vecShape mty)
 
     vecForced c mty =
       map (fmap (shown vecContext))
-          (forcedIn (run' eqNatVec vecContext vecCounter c vecCopies 1 mty))
+          (forcedIn (run' eqNatVec vecContext vecCounter c vecShape mty))
 
     forcedVarsIn ctx c mty =
       [ map identOf (freeVars t)
-      | Just t <- forcedIn (run' eqNatVec ctx vecCounter c vecCopies 1 mty)
+      | Just t <- forcedIn (run' eqNatVec ctx vecCounter c vecShape mty)
       ]
       where
         identOf v = case [ i | e <- ctx, entryVar e == v, Ident i <- [entryIdent e] ] of
@@ -413,7 +413,7 @@ splitBase = unlines
   , "     ; cs = constructors-of d"
   , "     ; split-each cs hs k"
   , ""
-  , "split-each : List Name -> List Core -> (List Name, Int) -> ()"
+  , "split-each : List Name -> List Core -> MethodShape -> ()"
     -- Nothing left to split, and a bare `do` is the empty body — the same
     -- spelling E⟦_⟧ uses in the shipped base.
   , "rule split-each [] [] k :- do"
@@ -457,25 +457,32 @@ natCounter :: Int
 -- | Specialise a written method of @c@ and assert the goal that comes back.
 specialises :: String -> String -> Int -> String -> Maybe String -> TestTree
 specialises what c k src want = testCase what $
-  fmap snd (goalIn natContext (run' eqNat natContext natCounter c [] k mty)) @?= want
+  fmap snd (goalIn natContext (run' eqNat natContext natCounter c (plainShape k) mty)) @?= want
   where mty = term eqNat natContext natCounter src
 
 -- | The refusal, for a fixture that is meant to be refused.
 refused :: String -> Int -> String -> Maybe SpecialiseError
 refused c k src =
   case fst (specialise eqNat natContext natCounter (GlobalName c)
-              (hypsOf eqNat c) [] k
+              (hypsOf eqNat c) (plainShape k)
               (term eqNat natContext natCounter src)) of
     Left e  -> Just e
     Right _ -> Nothing
 
 -- | Run it and insist it worked; a refusal in these fixtures is a bug in the
 -- fixture, not a test result.
-run' :: GlobalEnv -> Context -> Int -> String -> [Ident] -> Int -> Core -> Specialisation
-run' env ctx n c g k mty =
-  case fst (specialise env ctx n (GlobalName c) (hypsOf env c) g k mty) of
+run' :: GlobalEnv -> Context -> Int -> String -> MethodShape -> Core -> Specialisation
+run' env ctx n c shape mty =
+  case fst (specialise env ctx n (GlobalName c) (hypsOf env c) shape mty) of
   Right s -> s
   Left e  -> error (c ++ ": " ++ show e)
+
+-- | The shape for a method type __written by hand__ rather than produced by an
+-- elimination: @k@ equations, nothing generalised and no index abstracted
+-- outright — so 'specialisedRebound' is empty, which is what these fixtures
+-- want.
+plainShape :: Int -> MethodShape
+plainShape k = MethodShape [] k [] []
 
 -- | How many inductive hypotheses this constructor's method carries: one per
 -- recursive argument.
