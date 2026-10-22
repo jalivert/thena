@@ -74,6 +74,8 @@ import Thena.Core.Term
   , Ident (..)
   , close
   , fresh
+  , globalsIn
+  , holdsTrusted
   , levelMetasIn
   , substLevelsIn
   , tokenName
@@ -343,6 +345,31 @@ data GlobalEnv = GlobalEnv
     -- resolver asks a question with one answer.
   , definitions :: [(GlobalName, Definition)]           -- ^ a type and a body
   , inductives  :: [(GlobalName, InductiveDefinition)]  -- ^ what the checker and ι consult
+  , restingOnTrust :: [GlobalName]
+    -- ^ __which definitions rest on a trusted claim__ (MS9 phase 207,
+    -- @~2dqc3@, his ruling of 2026-10-22). Transitively: a definition is here
+    -- when its own body holds a 'Thena.Core.Term.Trusted' node, or when it
+    -- mentions a definition that is here.
+    --
+    -- **It is stored because it cannot change, and it was costing half of every
+    -- load.** @Thena.Core.Trust.reaches@ answered the same question by walking
+    -- out from a term through every definition it mentions and reading each body
+    -- in full, on /every/ @certify@ — 4.4 s of an 8.5 s load of
+    -- @examples\/07-preservation.thena@, and the largest single cost in it. The
+    -- answer is a property of a definition alone and is fixed the moment the
+    -- definition is in the table, so 'addDefinition' works it out once.
+    --
+    -- **A list of the trusting ones and not a flag on each definition**, because
+    -- it is almost always EMPTY: nothing in the prelude or in any example here
+    -- rests on a trusted claim, so the question becomes @holdsTrusted t@ and one
+    -- walk of @t@'s own globals against an empty list. A 'Bool' per 'Definition'
+    -- would answer the same question and would have to be supplied at every
+    -- construction site.
+    --
+    -- **It is sound because a name cannot be re-declared** — 'isDeclared', and
+    -- the driver answers @AlreadyDeclaredHere@ — so no entry's meaning changes
+    -- under an entry classified before it, and a body can only mention names
+    -- already in the table.
   }
   deriving (Eq, Show)
 
@@ -356,7 +383,7 @@ data GlobalEnv = GlobalEnv
 -- everywhere, so @data String …@ is refused by the check that already exists
 -- rather than by one written for the purpose.
 emptyGlobals :: GlobalEnv
-emptyGlobals = GlobalEnv [] primitiveTypes [] []
+emptyGlobals = GlobalEnv [] primitiveTypes [] [] []
 
 -- | The three primitive types, each at @Type₀@, and @Token : Type₀ -> Type₀@
 -- (MS6 phase 100) — the type of a token class, whose values are regex literals.
@@ -438,8 +465,26 @@ declaredNames e =
 addConstant :: GlobalName -> [LevelVar] -> Core -> GlobalEnv -> GlobalEnv
 addConstant g ls t e = e { constants = (g, MkConstant ls t) : constants e }
 
+-- | Install a definition, and record once whether it rests on a trusted claim.
+--
+-- **The only writer of 'definitions', which is what makes 'restingOnTrust'
+-- authoritative.** A caller cannot forget to maintain the field and cannot get
+-- it wrong: it is derived here from the body being handed in and from the
+-- entries already present, never supplied.
+--
+-- **Transitivity needs no fixpoint.** A body can only mention names already in
+-- the table, so every definition this one rests on has already been classified;
+-- @g@ itself is not yet in 'restingOnTrust', which is right, since a recursive
+-- call to @g@ adds no trust that @g@'s own body does not already hold.
 addDefinition :: GlobalName -> Definition -> GlobalEnv -> GlobalEnv
-addDefinition g d e = e { definitions = (g, d) : definitions e }
+addDefinition g d e =
+  e { definitions    = (g, d) : definitions e
+    , restingOnTrust = if rests then g : restingOnTrust e else restingOnTrust e
+    }
+  where
+    rests =
+      holdsTrusted (definitionBody d)
+        || any (`elem` restingOnTrust e) (globalsIn (definitionBody d))
 
 addInductive :: GlobalName -> InductiveDefinition -> GlobalEnv -> GlobalEnv
 addInductive g d e = e { inductives = (g, d) : inductives e }
