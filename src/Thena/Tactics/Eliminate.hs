@@ -448,11 +448,53 @@ eliminate env ctx sch n0 goal tgt =
             -- method needed is what broke working proofs; failing to generalise
             -- something a method did need leaves the equation standing, which is
             -- exactly the behaviour that preceded this phase.
-            seeds = nub [ v | k <- tiedIx
-                            , c <- inductiveConstructors d
-                            , v <- demandedAt c k ++ recursionDemandsAt c k
-                            , v `notElem` targetVars
-                            , v `notElem` friendlies ]
+            -- __AND THE TARGET IS ALWAYS A SEED — MS9 phase 206, @~pmpqg@,
+            -- his ruling of 2026-10-22.__ A premise whose type mentions the
+            -- target has to be refined with it, exactly as a premise mentioning
+            -- an index is, or the arm holds a fact about a subject it can no
+            -- longer even name — the arm rebinds the author's name for the
+            -- target to the constructor (@~hc4ps@). It is what matching a
+            -- pattern means: @l := ln@ reaches the goal and every premise after
+            -- it.
+            --
+            -- __It is UNCONDITIONAL where an index's is demand-tested, and the
+            -- asymmetry is not an oversight.__ The demand test exists because a
+            -- copy for an index carries an @Eq@ the specialiser may be unable to
+            -- reach, and a copy made for nothing is bound after the constructor's
+            -- own arguments where a solution would point backwards. The target
+            -- carries no equation at all: it is the eliminator's own final
+            -- argument, abstracted outright, and each method simply /is/ the
+            -- constructor. So there is nothing to state an equation about and
+            -- nothing for a copy about it to point backwards at.
+            --
+            -- __The chain and not 'targetVars'__, for 'tgtSubst''s reason: a
+            -- copy is what carries a premise whose bare type is the target.
+            -- 'generalisable' still refuses a copy of the target's own entries,
+            -- which are abstracted outright and would otherwise be abstracted
+            -- twice.
+            --
+            -- __AND IT IS THE PREMISES THAT ARE SEEDED, NOT THE TARGET
+            -- ITSELF — measured, and seeding the target broke 16 assertions.__
+            -- 'grow' closes backward as well as forward (@~754m3@), and
+            -- backward from the target is wrong for the reason the target is
+            -- not copied at all: @d : Step (ifthen true t2 t3) u@ would drag
+            -- @t2@, @t3@ and @u@ into the closure because the TARGET's type
+            -- mentions them, which is §3.7's own worked example and generalises
+            -- what no method asked for. A copy's backward closure exists so a
+            -- copy is not pinned to an entry that stayed behind; the target
+            -- stays behind on purpose.
+            aboutTarget = [ entryVar e
+                          | e <- ctx
+                          , generalisable e
+                          , any (`elem` freeVars (entryType e)) targetChain
+                          ]
+
+            seeds = nub (aboutTarget
+                      ++ [ v | k <- tiedIx
+                             , c <- inductiveConstructors d
+                             , v <- demandedAt c k ++ recursionDemandsAt c k
+                             , v `notElem` targetVars
+                             , v `notElem` friendlies ])
 
             -- __AND THE RECURSION DEMANDS WHAT NO ARM DOES — MS9 phase 205,
             -- `~wk9qh`.__ 'demandedAt' above asks what a /method/ cannot do
@@ -678,10 +720,26 @@ eliminate env ctx sch n0 goal tgt =
           -- __Under the entry's own 'Ident'__, because the caller binds an arm's
           -- copy by that name and so shadows the entry it came from.
           genEntries =
-            [ Hypothesis gv (entryIdent e) (substVars (take j genSubst) (entryType e))
+            [ Hypothesis gv (entryIdent e)
+                           (substVars (tgtSubst ++ take j genSubst) (entryType e))
             | (j, (v, gv)) <- zip [(0 :: Int) ..] (zip gen gvs)
             , e            <- [ x | x <- ctx, entryVar x == v ]
             ]
+
+          -- __Every ambient name the target is known by becomes the motive's
+          -- own target binder — MS9 phase 206, @~pmpqg@, his ruling of
+          -- 2026-10-22.__ 'replaceTerm' below abstracts the /term/ this was
+          -- handed, and that term is the hole @induction … of@ elaborated the
+          -- written target into, so a goal or a premise written in the author's
+          -- own name for the target held no occurrence of it and was left
+          -- unrefined. It is @~hc4ps@'s lesson — one name is never enough —
+          -- for the scheme instead of the arm.
+          --
+          -- __It is 'targetChain' and not 'targetVars'__: only a variable the
+          -- target /is/ may become @xv@, where an entry whose bare /type/ is
+          -- the target is a premise ABOUT it and is carried by a copy instead.
+          -- Substituting there would put a term where a type stood.
+          tgtSubst = [ (v, Free xv) | v <- targetChain ]
 
           -- The type each index is generalised at: the family's parameters
           -- replaced by the target's, and each /earlier/ index binder by this
@@ -709,12 +767,13 @@ eliminate env ctx sch n0 goal tgt =
           -- becomes the index binder outright, where substituting first would
           -- have left it as @aₖ@ about a copy. The two agree on the arm's goal
           -- either way, because the equation ties the binder to the copy.
-          -- **Only the target term handed here is abstracted, and a goal
-          -- written in the author's own name for it keeps that name** —
-          -- @~pmpqg@, which is his: abstracting the whole chain alone trades
-          -- the failure for another, because a premise ABOUT the target is not
-          -- refined either and the two used to agree by both being unrefined.
-          (goalX,  n4) = replaceTerm tgt xv n3' goal
+          -- **Every name the target is known by is abstracted, not only the
+          -- term handed here** — 'tgtSubst' above, @~pmpqg@. Abstracting the
+          -- goal alone would trade one failure for another, a premise ABOUT the
+          -- target being left unrefined beside a refined goal; the seeds carry
+          -- that half.
+          (goalT,  n4) = replaceTerm tgt xv n3' goal
+          goalX        = substVars tgtSubst goalT
           (goalIx, n5) = foldl abstractIndex (goalX, n4) (zip ivs as)
           abstractIndex (g, n) (iv, a) = replaceTerm a iv n g
           goalGen = substVars genSubst goalIx

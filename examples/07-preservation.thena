@@ -35,25 +35,21 @@
 -- **Every proof that takes a DERIVATION apart is dependent pattern matching
 -- now.** `preservation` is an induction on the step with the typing derivation
 -- split inside the arm that needs it; `invApp`, `invAbs`, `ctxInvExtend`,
--- `ctxInvEmpty`, `weaken`, `fvInCtx` and `substAll` are splits; `appInj`, `absInj`,
--- `extendInj` and its three projections are **deleted**, a split doing the
--- injectivity where it stands. 497 lines became 422 and 66 `elim`s became 41.
+-- `ctxInvEmpty`, `weaken`, `fvInCtx`, `substAll`, `appendIn` and `listNil` are
+-- splits; `appInj`, `absInj`, `extendInj` and its three projections are
+-- **deleted**, a split doing the injectivity where it stands. 66 `elim`s became
+-- 39, and **every proof here now writes all of its premises across the top**,
+-- the way a student writes one.
 --
 -- **WHAT IS LEFT IS NOT RESIDUE, AND EACH KIND SAYS WHY AT THE LEMMA.** There
--- are three, and they are the measure of where the feature stops:
+-- are two, and they are the measure of where the feature stops:
 --
 --   * a lemma that decides on a COMPUTED value — `memberSpec`, `freshKeeps`,
 --     `lookHit`, `lookMiss` — eliminates `decString` or `member` and must
 --     rewrite the goal's own occurrences of it. That is what `with` is for,
 --     and `with` is not built.
---   * a lemma whose PREMISE mentions the target through a function —
---     `appendIn`, `listNil` — is not refined by splitting it (`~pmpqg`).
 --   * `arrowInj`, whose equation has a compound term built from AMBIENT
 --     variables on both sides (`~2d9xj`).
---
--- **And `weaken` introduces two of its premises inside the arms** rather than
--- at the top, which is `~wk9qh` and is the one place a reader can still tell
--- how the proof was compiled.
 
 module StlcPreservation where
 
@@ -279,12 +275,12 @@ weaken : forall (G : Ctx) (t : LC) (T : Ty) (d : typing G t T) (G1 : Ctx) (inc :
 -- there is pinned to the ambient `G` while the recursion is at `G , x : S`.
 -- The decision behind it is his and is `~wk9qh` in
 -- `.jalivert/agenda/UNALLOCATED.md`.
-weaken = \ G t T d -> induction d of
-  { T-var x T0 G0 i -> \ G1 inc -> T-var x T0 G1 (inc x T0 i)
-  ; T-abs G0 x S E T0 d0 -> \ G1 inc ->
+weaken = \ G t T d G1 inc -> induction d of
+  { T-var x T0 G0 i -> T-var x T0 G1 (inc x T0 i)
+  ; T-abs G0 x S E T0 d0 ->
       T-abs G1 x S E T0
         (weaken (extend G0 x S) E T0 d0 (extend G1 x S) (inclExtend G0 G1 x S inc))
-  ; T-app G0 M S T0 N d1 d2 -> \ G1 inc ->
+  ; T-app G0 M S T0 N d1 d2 ->
       T-app G1 M S T0 N (weaken G0 M (arrow S T0) d1 G1 inc) (weaken G0 N S d2 G1 inc) }
 
 -- A closed derivation holds in every context.
@@ -348,21 +344,17 @@ fvInCtx = \ G t T d -> induction d of
 -- What the avoided names come from, and what a closed term has free
 
 appendIn : forall (l : List String) (r : List String) (w : String) (h : In w (appendL l r)) -> Or (In w l) (In w r)
--- **This one stays an `elim`, and the reason is worth the line.** Splitting `l`
--- refines the goal, but `h : In w (appendL l r)` is a premise whose type
--- mentions the target through a FUNCTION — `appendL l r` — and nothing rewrites
--- it: the arm is then asked to match `In w (appendL l r)` against `In w r` and
--- says *l and r cannot be made equal*. That is `~pmpqg`.
-appendIn = \ l r w ->
-  elim List (String) (\ k -> In w (appendL k r) -> Or (In w k) (In w r))
-    ((\ h -> orRight Empty (In w r) h)
-     (\ a as ra h ->
-        case h of
-          { orLeft q -> orLeft (Or (Eq String w a) (In w as)) (In w r) (orLeft (Eq String w a) (In w as) q)
-          ; orRight h1 -> case (ra h1) of
-              { orLeft i -> orLeft (Or (Eq String w a) (In w as)) (In w r) (orRight (Eq String w a) (In w as) i)
-              ; orRight i -> orRight (Or (Eq String w a) (In w as)) (In w r) i } }))
-    () l
+-- `h`'s type mentions the target through a FUNCTION — `appendL l r` — and the
+-- split refines it along with the goal, so `h` in each arm is already about
+-- that arm's list.
+appendIn = \ l r w h -> induction l of
+  { nil -> orRight Empty (In w r) h
+  ; cons a as ->
+      case h of
+        { orLeft q -> orLeft (Or (Eq String w a) (In w as)) (In w r) (orLeft (Eq String w a) (In w as) q)
+        ; orRight h1 -> case (appendIn as r w h1) of
+            { orLeft i -> orLeft (Or (Eq String w a) (In w as)) (In w r) (orRight (Eq String w a) (In w as) i)
+            ; orRight i -> orRight (Or (Eq String w a) (In w as)) (In w r) i } } }
 
 -- A name to avoid is free in the image of some name of the node.
 FromImage : List (And String LC) -> List String -> String -> Type₀
@@ -394,13 +386,12 @@ closedNoFv = \ N S d w h -> case (fvInCtx empty N S d (nil String) (nil String) 
   ; orRight r -> case r of { both nb dm -> case dm of { pair U i -> case i of { } } } }
 
 listNil : forall (l : List String) (f : forall (w : String) -> In w l -> Empty) -> Eq (List String) l (nil String)
--- `~pmpqg` again: `f`'s type mentions the target, so the split cannot refine
--- it and the nil arm is asked to prove `Eq (List String) l (nil String)`.
-listNil = \ l ->
-  elim List (String) (\ k -> (forall (w : String) -> In w k -> Empty) -> Eq (List String) k (nil String))
-    ((\ f -> refl (List String) (nil String))
-     (\ a as ra f -> absurdly (Eq (List String) (cons String a as) (nil String)) (f a (orLeft (Eq String a a) (In a as) (refl String a)))))
-    () l
+-- `f`'s type mentions the target, and the split refines it: in the `cons` arm
+-- `f` already asks for a member of `cons a as`.
+listNil = \ l f -> case l of
+  { nil -> refl (List String) (nil String)
+  ; cons a as -> absurdly (Eq (List String) (cons String a as) (nil String))
+                   (f a (orLeft (Eq String a a) (In a as) (refl String a))) }
 
 -- ---------------------------------------------------------------------------
 -- Looking up in a substitution — following decString

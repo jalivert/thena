@@ -2378,6 +2378,26 @@ have been solved to a term mentioning the copy cannot be, since that points back
 the equation is kept instead. Making a copy only where nothing else will do is what keeps
 both kinds of case working at once.
 
+**A STATEMENT ABOUT THE THING YOU SPLIT IS REFINED, GOAL AND PREMISES TOGETHER.** The
+ordinary dependent statement — *here is a thing, here is a fact about the thing* — splits:
+
+```
+data L : Type₀ where { ln : L ; lc : N -> L -> L }
+data P : L -> Type₀ where { mkP : forall (l : L) -> P l }
+
+bothWays : forall (l : L) (q : P l) -> P l
+bothWays = \ l q -> case l of { ln -> mkP ln ; lc a as -> q }
+```
+
+The `ln` arm is asked for `P ln`, not for `P l`, and `q` there is a `P ln`. Both halves
+have to move at once: refining the goal alone would leave the arm holding a fact about
+`l`, which inside the arm means `ln` and so can no longer be named.
+
+**Unlike an index, the thing you split on is refined everywhere it appears and never
+leaves an equation behind** — it is the subject of the elimination, so in each arm it
+simply *is* that arm's constructor. The looking-position-by-position rule above is about
+indices only; a premise mentioning the subject is always carried.
+
 **AND THE SCRUTINEE ITSELF IS ONE OF THE NAMES THAT MEANS THE REFINED THING.** Inside an
 arm the thing being split *is* the constructor applied to that arm's own variables, so the
 name you gave it means that:

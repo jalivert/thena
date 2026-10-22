@@ -1457,6 +1457,60 @@ splittingTree =
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
 
+    -- __A STATEMENT ABOUT THE THING YOU SPLIT, which is @~pmpqg@ and his
+    -- ruling of 2026-10-22 (MS9 phase 206).__ @L@ has no indices, so nothing is
+    -- tied and the only refinement available is the motive abstracting the
+    -- target. The split hands the eliminator a hole it elaborated @l@ into, so a
+    -- goal written in the author's own @l@ held no occurrence to abstract and
+    -- the @ln@ arm was asked for @P l@: *ln and l cannot be made equal*.
+  , testCase "a goal written in the author's own name for the target is refined" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (listModule ++
+            [ "goalMentions : \8704 (l : L) -> P l"
+            , "goalMentions = \\ l -> case l of { ln -> mkP ln ; lc a as -> mkP (lc a as) }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __And the premise half, which is why the two had to move together.__ With
+    -- the goal refined and the premise left alone the arm would hold a fact
+    -- about a subject it cannot even name, the arm having rebound @l@ to @ln@
+    -- (@~hc4ps@). So a premise whose type mentions the target seeds the
+    -- generalisation and the arm gets it refined. **@q@ answering was not enough
+    -- of a test**: it declared before this phase too, because the motive was
+    -- constant and the arm's goal was the unrefined @P l@ that @q@ already had.
+    -- Answering one arm with the refined term is what pins it.
+  , testCase "a premise whose type mentions the target is refined with it" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (listModule ++
+            [ "bothWays : \8704 (l : L) (q : P l) -> P l"
+            , "bothWays = \\ l q -> case l of { ln -> mkP ln ; lc a as -> q }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __And the target's own type does NOT drag its mentions into the
+    -- closure__, which is the narrowing the first build of this got wrong.
+    -- 'grow' closes backward as well as forward, so seeding the target itself
+    -- generalised everything its type mentioned — §3.7's own worked example
+    -- among them. It is the premises ABOUT the target that are seeded. Here
+    -- @d : Q n@ is the target and @e : Eq N n n@ mentions @n@ through the
+    -- target's type only, so it must stay fixed.
+  , testCase "a split does not generalise what the target's own type mentions" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (atTopModule ++
+            [ "data Q : N -> Type\8320 where"
+            , "  qq : \8704 (n : N) -> Q n"
+            , ""
+            , "fixed : \8704 (n : N) (d : Q n) (e : Eq N n n) -> N"
+            , "fixed = \\ n d e -> case d of { qq n0 -> n0 }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
     -- ----------------------------------------------------------------
     -- A FORCED POSITION (MS9 phase 185)
     -- ----------------------------------------------------------------
@@ -1818,6 +1872,24 @@ splittingTree =
       , "data T : N -> Type\8320 where"
       , "  tv : \8704 (g : N) -> T g"
       , "  tl : \8704 (g : N) (p : T (s g)) -> T g"
+      , ""
+      ]
+    -- Phase 206's shape (@~pmpqg@): a family with NO indices, and a second
+    -- family indexed by it, so that a statement can be /about/ the thing a
+    -- split takes apart.
+    listModule =
+      [ "module ListL where"
+      , ""
+      , "data N : Type\8320 where"
+      , "  z : N"
+      , "  s : N -> N"
+      , ""
+      , "data L : Type\8320 where"
+      , "  ln : L"
+      , "  lc : N -> L -> L"
+      , ""
+      , "data P : L -> Type\8320 where"
+      , "  mkP : \8704 (l : L) -> P l"
       , ""
       ]
     vecModule =
