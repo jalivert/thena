@@ -2241,7 +2241,7 @@ argument it **names**. Types cannot decide it: in `double`'s `succ` arm both the
 pattern variable `m` and the hypothesis about it have type `Nat`, so a search by
 type would pick either and still typecheck.
 
-Two consequences a user meets:
+Three consequences a user meets:
 
 - **A call naming two recursive arguments is refused**, because which one it
   recurses on is not written down. `g l r` in a `node l r` arm is that case.
@@ -2249,6 +2249,41 @@ Two consequences a user meets:
   and no call resolves there.** That is not a restriction being imposed: an
   inversion lemma's hypotheses are genuinely unusable, which is why the ones
   written by hand are bound and ignored.
+- **A premise bound before the split is fixed, and the recursion may pass it but
+  not vary it.** The motive quantifies what the split generalises and what it
+  refines, and nothing else — so a premise already introduced stays at the one
+  value it had, and the hypothesis is the statement at that value. Passing it is
+  free, and the argument is simply dropped:
+
+  ```
+  size : ∀ (t : Tr) -> Ok t -> Tr -> Nat
+  size = \ t d u -> induction d of
+    { okLeaf -> zero ; okNode a b da db -> succ (size a da u) }
+  ```
+
+  Varying it is not the hypothesis, and says so:
+
+  ```
+  size2 = \ t d u -> induction d of
+    { okLeaf -> zero ; okNode a b da db -> succ (size2 a da (node u u)) }
+    the split fixed u and this call passes node u u, so it is not the
+    induction hypothesis — a premise the induction varies is bound inside
+    the arm and not before the split: size2 a da (node u u)
+  ```
+
+  **Bind it inside the arm and it varies freely**, because the motive then
+  quantifies it and the hypothesis takes it:
+
+  ```
+  size3 = \ t d -> induction d of
+    { okLeaf -> \ u -> zero
+    ; okNode a b da db -> \ u -> succ (size3 a da (node u u)) }
+  ```
+
+  This is the one thing about an `induction` that the *shape* of the proof
+  decides rather than its statement, and it is why a lemma that strengthens its
+  own hypothesis — `chain n c`'s distinctness, where the recursion is at `c` with
+  one more prime — writes that premise to the right of the split.
 
 ### Dot patterns are optional here, because we run the eliminator and not the clause
 

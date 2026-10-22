@@ -731,6 +731,16 @@ data RecursionError
     -- ^ a recursive call naming more than one of the arguments that have a
     -- hypothesis, so which one it recurses on is not written down. Carries the
     -- call and how many matched
+  | CallVariesAFixedPremise Context Core Core Core
+    -- ^ a recursive call that passes something other than the premise the split
+    -- fixed (MS9 phase 208). Carries the call, the premise as the split holds
+    -- it, and what the call passes instead.
+    --
+    -- **A premise the induction varies is bound inside the arm.** Bound before
+    -- the split it is not quantified by the motive, so the hypothesis is the
+    -- statement at that one value and a call at another value is not it. The
+    -- argument would otherwise be dropped in silence and the call would read as
+    -- a statement it is not
   deriving (Eq, Show)
 
 -- --------------------------------------------------------------------------

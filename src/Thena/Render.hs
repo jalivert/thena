@@ -1899,6 +1899,11 @@ renderRecursionError ren e = case e of
     "this call names " ++ show k ++ " arguments that have an induction \
     \hypothesis, so which one it recurses on is not written down: "
       ++ renderCore ren ctx t
+  CallVariesAFixedPremise ctx t p a ->
+    "the split fixed " ++ renderCore ren ctx p ++ " and this call passes "
+      ++ renderCore ren ctx a ++ ", so it is not the induction hypothesis — a \
+      \premise the induction varies is bound inside the arm and not before the \
+      \split: " ++ renderCore ren ctx t
 
 renderSpecialiseError :: Rendering -> SpecialiseError -> String
 renderSpecialiseError ren e = case e of

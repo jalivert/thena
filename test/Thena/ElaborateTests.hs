@@ -1658,6 +1658,53 @@ splittingTree =
       "stuck: this call names 2 arguments that have an induction hypothesis, \
       \so which one it recurses on is not written down: g l r"
 
+    -- __A PREMISE BOUND BEFORE THE SPLIT IS FIXED, AND THE CALL MAY SAY SO__
+    -- (MS9 phase 208, @~5kcb4@). @u@ is introduced across the top, after the
+    -- target, and the recursive call passes it: the hypothesis does not take it
+    -- — the motive quantifies nothing the body had already introduced — so the
+    -- argument is dropped. Until this phase it was applied to the hypothesis,
+    -- which is not a function, and the kernel refused the proof naming a binder
+    -- the author never wrote. **It refused every proof written with all of its
+    -- premises across the top**, which is how the examples are written.
+  , testCase "a call may pass a premise the split fixed" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (okModule ++
+            [ "size : \8704 (t : Tr) -> Ok t -> Tr -> Nat"
+            , "size = \\ t d u -> induction d of"
+            , "  { okLeaf -> zero ; okNode a b da db -> succ (size a da u) }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __AND IT MAY NOT VARY ONE.__ The hypothesis is the statement at @u@ and
+    -- at nothing else, so a call at @node u u@ is not it. Dropping the argument
+    -- in silence would make the call read as a statement it is not, and the
+    -- message says where the premise belongs instead.
+  , refusesIn okModule "a call may not vary a premise the split fixed"
+      [ "size2 : \8704 (t : Tr) -> Ok t -> Tr -> Nat"
+      , "size2 = \\ t d u -> induction d of"
+      , "  { okLeaf -> zero ; okNode a b da db -> succ (size2 a da (node u u)) }"
+      ]
+      "stuck: the split fixed u and this call passes node u u, so it is not \
+      \the induction hypothesis \8212 a premise the induction varies is bound \
+      \inside the arm and not before the split: size2 a da (node u u)"
+
+    -- __AND BOUND INSIDE THE ARM IT VARIES FREELY__, which is the whole of the
+    -- remedy: the motive then quantifies it and the hypothesis takes it. Same
+    -- statement, same proof, and the only difference is where the λ is.
+  , testCase "a premise bound inside the arm may vary across the recursion" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (okModule ++
+            [ "size3 : \8704 (t : Tr) -> Ok t -> Tr -> Nat"
+            , "size3 = \\ t d -> induction d of"
+            , "  { okLeaf -> \\ u -> zero"
+            , "  ; okNode a b da db -> \\ u -> succ (size3 a da (node u u)) }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
     -- __A SPLIT AT A VARIABLE INDEX TIES NOTHING__ (MS9 phase 186, `~7pn6x`),
     -- and this is the case the whole corpus is: every lemma in
     -- @examples\/progress.thena@ splits a derivation whose indices are the

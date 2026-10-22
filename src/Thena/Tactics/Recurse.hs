@@ -140,13 +140,15 @@ data Shape = Shape Int [(Int, Int, Prefix)]
 -- arm's hypothesis, which the specialiser has already discharged.
 data Prefix
   = NoPrefix
-  | Prefix [Int] Int [Core]
+  | Prefix [Int] Int [Core] [Var]
     -- ^ which of the declaration's premises supplies each copy, in the order the
     -- motive quantified them; how many premises the body had introduced where
-    -- the split stands, so that the arguments past them are the goal's own; and
+    -- the split stands, so that the arguments past them are the goal's own;
     -- __the split's own reflexive proofs__, which the hypothesis's equations are
     -- re-stated from rather than built again — §3.7 names @refl@ in one place
-    -- and this is not a second one
+    -- and this is not a second one; and __the ambient variables the split
+    -- refines rather than fixes__ (MS9 phase 208), which is what tells a call
+    -- that says so from one that varies a premise the motive left alone
   deriving (Eq, Show)
 
 -- | What the walk carries down: the assumed name it is tying, the local
@@ -267,11 +269,26 @@ resolveRecursion env n0 tm = case tm of
     -- A split inside an arm may generalise that arm's own pattern variables, and
     -- a recursive call has no argument standing for one of those: there is
     -- nothing to pass, so there is nothing this can say.
-    prefixFor w gen refls
-      | null gen, null refls = NoPrefix
+    --
+    -- __A split that generalises nothing is still a 'Prefix', with no copies__
+    -- (MS9 phase 208, @~5kcb4@). What a hypothesis asks for is not only the
+    -- copies: it is also what the split /fixed/, and a premise the body had
+    -- introduced where the split stands is fixed whether anything was
+    -- generalised or not. The motive does not quantify it, so the hypothesis
+    -- does not take it, and @drop (k + 1)@ — which assumes the target is the
+    -- last premise introduced — applied it to a hypothesis that is not a
+    -- function. That is what refused every proof written with all of its
+    -- premises across the top.
+    prefixFor w gen is refls
       | Just poss <- mapM (`elemIndex` premises w) gen =
-          Prefix poss (length (premises w)) refls
+          Prefix poss (length (premises w)) refls (refined w (is ++ refls))
       | otherwise = NoPrefix
+
+    -- The ambient variables a split __refines__: the ones its indices stand for,
+    -- and the ones its equations are about. Read through the copies, because an
+    -- index is elaborated to the name bound for it and not to the entry itself.
+    refined w ts =
+      nub [ q | t <- ts, u <- freeVars t, Just q <- [through w (Free u)] ]
 
     -- @caseD@ is the split tactic's other use site: @case … of@ elaborates to an
     -- application of the generated definition rather than to an 'Eliminate'
@@ -413,8 +430,11 @@ resolveRecursion env n0 tm = case tm of
                              , Just y <- [through w a]
                              , (y', h, pre) <- hypotheses w, y' == y ] of
         [(k, h, NoPrefix)] -> (Right (foldl App (Free h) (drop (k + 1) as)), n)
-        [(_, h, Prefix poss amb refls)] ->
-          (Right (foldl App (Free h) (prefixed w as h poss amb refls)), n)
+        [(k, h, Prefix poss amb refls ref)]
+          | Just (p, a) <- varies w k poss amb ref as ->
+              (Left (CallVariesAFixedPremise (binders w) (call as) (Free p) a), n)
+          | otherwise ->
+              (Right (foldl App (Free h) (prefixed w as h poss amb refls)), n)
         []       -> (Left (CallMatchesNoHypothesis (binders w) (call as)), n)
         several  -> (Left (CallMatchesSeveral (binders w) (call as)
                                               (length several)), n)
@@ -436,6 +456,35 @@ resolveRecursion env n0 tm = case tm of
     -- about. Where the two sides do not meet, the kernel says so at the call,
     -- which is the right place for it — the recursion is then not at the index
     -- the author thinks.
+    -- | __A premise the split fixed, which this call passes something else
+    -- for__ (MS9 phase 208, @~5kcb4@).
+    --
+    -- 'prefixed' drops the arguments the hypothesis does not take, and dropping
+    -- one in silence would let a call read as a statement it is not: a premise
+    -- the body had introduced where the split stands is fixed at that very
+    -- variable, so the hypothesis is the statement at it and at nothing else.
+    --
+    -- __Three kinds of premise are not fixed and are passed over here.__ The
+    -- recursive argument is the one that has to differ. A generalised premise
+    -- has a copy of its own, and the call's argument for it is what 'prefixed'
+    -- passes. And __an index the split refines is not fixed either__: the arm
+    -- holds it at the constructor's own index, so a call that says so passes
+    -- something else by construction — @nvNoStep t n c1' sr@ inside the
+    -- @nvSucc@ arm of a split on @nv : NV v@ passes @t@ where @v@ stood. Those
+    -- are the variables 'Prefix' carries, and they are the split's indices
+    -- whether or not an equation was stated for them: §3.7's forced position
+    -- states none.
+    varies w k poss amb ref as =
+      case [ (p, a)
+           | (j, a) <- zip [(0 :: Int) ..] (take amb as)
+           , j /= k, j `notElem` poss
+           , Just p <- [at j (premises w)]
+           , p `notElem` ref
+           , through w a /= Just p
+           ] of
+        (p, a) : _ -> Just (p, expand w a)
+        []         -> Nothing
+
     prefixed w as h poss amb refls =
       let copies = [ a | Just a <- map (`at` as) poss ]
           hTy    = [ entryType e | e <- binders w, entryVar e == h ]
@@ -481,12 +530,21 @@ resolveRecursion env n0 tm = case tm of
           _ -> Nothing
 
     -- The same walk, kept as a term: what a copy is defined as, for a message.
+    --
+    -- __Through the whole term and not only its head__ (MS9 phase 208): an
+    -- argument that is itself built out of copies — @appendString c "'"@ comes
+    -- back as @appendString a2 a3@ — would otherwise be reported in generated
+    -- names nobody wrote. @close@ then @instantiate@ because those are the only
+    -- way in and out of a 'Thena.Core.Term.Scope' (§3.4).
     expand w = look (0 :: Int)
       where
-        look depth t = case t of
-          Free v
-            | depth <= 64, Just t' <- lookup v (aliases w) -> look (depth + 1) t'
-          _ -> t
+        look depth t
+          | depth > 64 = t
+          | otherwise  =
+              case [ (v, d) | v <- freeVars t, Just d <- [lookup v (aliases w)] ] of
+                [] -> t
+                vs -> look (depth + 1)
+                        (foldl (\acc (v, d) -> instantiate d (close v acc)) t vs)
 
     walkList _ []         n = done [] n
     walkList w (a : rest) n =
@@ -497,7 +555,7 @@ resolveRecursion env n0 tm = case tm of
       Eliminate d ls ps mot ms is tgt ->
         let gen    = generalisedIn as
             shapes = methodShapes w True d gen
-                       (prefixFor w gen (drop (length gen) as))
+                       (prefixFor w gen is (drop (length gen) as))
             used = [ (v, sh) | (Free v, Just sh) <- zip ms shapes ]
          in methods w (zip ms shapes) n `andThen` \ms' n1 ->
             go w mot n1      `andThen` \mot' n2 ->

@@ -81,7 +81,7 @@ primeMoreDiffers = \ a b ->
 -- From a `different` verdict to a refutation, for names nobody knows
 
 symEq : forall (A : Type₀) (x : A) (y : A) -> (Eq A x y : Type₀) -> (Eq A y x : Type₀)
-symEq = \ A x y e -> elim Eq (A) (\ u v r -> Eq A v u) ((\ c -> refl A c)) (x y) e
+symEq = \ A x y e -> case e of { refl c -> refl A c }
 
 -- `eqString a a` does not reduce on an open `a`, so the `refl` comes from
 -- `eqStringRefl` and the contradiction is transported along it.
@@ -155,25 +155,19 @@ Distinct = \ xs -> elim List (String) (\ l -> Type₀) ((Unit) (\ h hs r -> And 
 
 headNotInTail : forall (n : List String) (c : String)
              -> (In c (chain n (appendString c "'")) : Type₀) -> (Empty : Type₀)
-headNotInTail = \ n c i ->
-  elim Or ((Eq String c (appendString c "'")) (Tail (appendString c "'") c)) (\ o -> Empty)
-    ((\ e -> neqFromDifferent c (appendString c "'") (primeDiffers c) e)
-     (\ s -> elim Sigma (String (\ b -> Eq String c (appendString (appendString c "'") b)))
-               (\ z -> Empty)
-               ((\ b e -> neqFromDifferent c (appendString (appendString c "'") b)
-                            (primeMoreDiffers c b) e))
-               () s))
-    () (chainShape n c c i)
+headNotInTail = \ n c i -> case (chainShape n c c i) of
+  { orLeft e -> neqFromDifferent c (appendString c "'") (primeDiffers c) e
+  ; orRight s -> case s of
+      { pair b e -> neqFromDifferent c (appendString (appendString c "'") b)
+                      (primeMoreDiffers c b) e } }
 
 chainDistinct : forall (n : List String) (c : String) -> (Distinct (chain n c) : Type₀)
-chainDistinct = \ n ->
-  elim List (String) (\ l -> forall (c : String) -> Distinct (chain l c))
-    ((\ c -> both (In c (nil String) -> Empty) Unit (\ z -> z) unit)
-     (\ h hs rh c -> both (In c (chain hs (appendString c "'")) -> Empty)
-                          (Distinct (chain hs (appendString c "'")))
-                          (\ i -> headNotInTail hs c i)
-                          (rh (appendString c "'"))))
-    () n
+chainDistinct = \ n -> induction n of
+  { nil -> \ c -> both (In c (nil String) -> Empty) Unit (\ z -> z) unit
+  ; cons h hs -> \ c -> both (In c (chain hs (appendString c "'")) -> Empty)
+                             (Distinct (chain hs (appendString c "'")))
+                             (\ i -> headNotInTail hs c i)
+                             (chainDistinct hs (appendString c "'")) }
 
 -- ---------------------------------------------------------------------------
 -- Longer, and removing one name: the counting, with no numbers in it
@@ -188,10 +182,9 @@ Longer = \ xs ->
     () xs
 
 chainLonger : forall (n : List String) (c : String) -> (Longer (chain n c) n : Type₀)
-chainLonger = \ n ->
-  elim List (String) (\ l -> forall (c : String) -> Longer (chain l c) l)
-    ((\ c -> unit) (\ h hs rh c -> rh (appendString c "'")))
-    () n
+chainLonger = \ n -> induction n of
+  { nil -> \ c -> unit
+  ; cons h hs -> \ c -> chainLonger hs (appendString c "'") }
 
 -- The first occurrence only, so the length drops by exactly one.
 remove : String -> List String -> List String
@@ -256,28 +249,20 @@ removeLonger = \ c ys ->
 
 inIsSame : forall (c : String) (xs : List String)
         -> (In c xs : Type₀) -> (Eq Comparison (member c xs) same : Type₀)
-inIsSame = \ c xs i ->
-  elim Or ((And (Eq Comparison (member c xs) same) (In c xs))
-           (And (Eq Comparison (member c xs) different) (In c xs -> Empty)))
-    (\ o -> Eq Comparison (member c xs) same)
-    ((\ h -> andLeft (Eq Comparison (member c xs) same) (In c xs) h)
-     (\ h -> absurdly (Eq Comparison (member c xs) same)
-               (andRight (Eq Comparison (member c xs) different) (In c xs -> Empty) h i)))
-    () (memberSpec c xs)
+inIsSame = \ c xs i -> case (memberSpec c xs) of
+  { orLeft h -> andLeft (Eq Comparison (member c xs) same) (In c xs) h
+  ; orRight h -> absurdly (Eq Comparison (member c xs) same)
+                   (andRight (Eq Comparison (member c xs) different) (In c xs -> Empty) h i) }
 
 sameIsIn : forall (c : String) (xs : List String)
         -> (Eq Comparison (member c xs) same : Type₀) -> (In c xs : Type₀)
-sameIsIn = \ c xs eq ->
-  elim Or ((And (Eq Comparison (member c xs) same) (In c xs))
-           (And (Eq Comparison (member c xs) different) (In c xs -> Empty)))
-    (\ o -> In c xs)
-    ((\ h -> andRight (Eq Comparison (member c xs) same) (In c xs) h)
-     (\ h -> absurdly (In c xs)
-               (transport Comparison isSame same different
-                  (transport Comparison (\ z -> Eq Comparison z different) (member c xs) same eq
-                     (andLeft (Eq Comparison (member c xs) different) (In c xs -> Empty) h))
-                  unit)))
-    () (memberSpec c xs)
+sameIsIn = \ c xs eq -> case (memberSpec c xs) of
+  { orLeft h -> andRight (Eq Comparison (member c xs) same) (In c xs) h
+  ; orRight h -> absurdly (In c xs)
+                   (transport Comparison isSame same different
+                      (transport Comparison (\ z -> Eq Comparison z different) (member c xs) same eq
+                         (andLeft (Eq Comparison (member c xs) different) (In c xs -> Empty) h))
+                      unit) }
 
 -- ---------------------------------------------------------------------------
 -- The chooser's specification, PROVED
