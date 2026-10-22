@@ -58,6 +58,58 @@ elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
+no-nesting []
+ihs-for ‹t› ‹c›
+ihs-for ‹t› ‹c›
+reverse-onto [] ‹acc›
+reverse-onto [x, ...xs] ‹acc›
+apply-all ‹f› []
+apply-all ‹f› [x, ...xs]
+instantiate-with ‹f› ‹vs›
+intro-arm-binders [] [] ‹vs› ‹ds› ‹fs› ‹k›
+intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+intro-arm-binders [p, ...ps] [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+intro-arm-binders [p, ...ps] [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+intro-arm-binders ‹ps› [(b, none), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+intro-arm-binders ‹ps› [(b, (some f)), ...bs] ‹vs› ‹ds› ‹fs› ‹k›
+bind-friendlies [] ‹vs› ‹ds›
+bind-friendlies [(n, f), ...fs] ‹vs› ‹ds›
+bind-solved [] ‹k›
+bind-solved [(n, v), ...ds] ‹k›
+same-length [] []
+same-length [p, ...ps] [n, ...ns]
+arm-for ‹t› ‹c›
+arm-for ‹t› ‹c›
+pick ‹w› ‹c› ‹p› ‹b› ‹r›
+pick ‹w› ‹c› ‹p› ‹b› ‹r›
+arm-needs-body (some b)
+elaborate-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (p, ob)
+case-needs-an-arm ‹t› ‹c› ‹sub› ‹bs› ‹fs› (some a)
+vanished-case-takes-no-body none
+vanished-case-takes-no-body (some (p, none))
+case-must-vanish none
+one-case ‹t› ‹c› ‹sub› ‹bs› ‹fs›
+one-case ‹t› ‹c› none ‹bs› ‹fs›
+one-case ‹t› ‹c› (some sub) ‹bs› ‹fs›
+arm-must-be-for-this-datatype ‹a› ‹b›
+arms-are-for-this-datatype ‹t› ‹d›
+arms-are-for-this-datatype ‹t› ‹d›
+one-arm-per-constructor ‹a› ‹b›
+arm-not-repeated ‹w› ‹t›
+arm-not-repeated ‹w› ‹t›
+arms-are-distinct ‹t›
+arms-are-distinct ‹t›
+split-cases ‹t› [] [] ‹m›
+split-cases ‹t› [c, ...cs] [mh, ...ms] ‹m›
+split-over ‹t› ‹cs› (hs, m)
+split-claim ‹t› ‹x›
+split-claim ‹t› ‹x›
+split-elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
+elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
 elaborate ‹t›
@@ -88,8 +140,8 @@ context
   n : Nat
   i : Fin n
   b : Below n i
-  bzMethod : ∀ (m : Nat) -> Eq {0} Nat (succ m) n -> Nat
-  bsMethod : ∀ (m : Nat) (j : Fin m) -> Below m j -> (Eq {0} Nat m n -> Nat) -> Eq {0} Nat (succ m) n -> Nat
+  bzMethod : ∀ (m : Nat) (n1 : Nat) -> Eq {0} Nat (succ m) n1 -> Nat
+  bsMethod : ∀ (m : Nat) (j : Fin m) -> Below m j -> (∀ (n1 : Nat) -> Eq {0} Nat m n1 -> Nat) -> ∀ (n1 : Nat) -> Eq {0} Nat (succ m) n1 -> Nat
 type
   Nat
 thena spine> attack

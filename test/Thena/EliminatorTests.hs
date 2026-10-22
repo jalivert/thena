@@ -25,9 +25,16 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Thena.Core.Level (Level (..), instantiateLevels, levelOfNat)
 import Thena.Core.Term (Core, GlobalName (..), substLevelsIn)
 import Thena.Declared (natFin, natFinCounter, natVec, natVecCounter)
-import Thena.Global.Env (GlobalEnv, InductiveDefinition, eliminatorType, inductiveLevels, lookupInductive)
+import Thena.Global.Env
+  ( GlobalEnv
+  , InductiveDefinition
+  , caseWrapper
+  , eliminatorType
+  , inductiveLevels
+  , lookupInductive
+  )
 import Thena.Render ( Rendering (..)
-  ,renderEliminator)
+  ,renderCore, renderEliminator)
 
 tests :: TestTree
 tests =
@@ -35,6 +42,7 @@ tests =
     "the elimination rule (§3.7, thesis §4.1)"
     [ testGroup "the generated rule, against the thesis" ruleTests
     , testGroup "the level comes from the motive" levelTests
+    , testGroup "case analysis is the same rule minus the hypotheses" caseTests
     ]
 
 -- | Each case is thesis §4.1's own displayed rule, in §2.6's concrete syntax.
@@ -98,6 +106,63 @@ levelTests =
       \-> (∀ (n : Nat) (a : A) (as : Vec A n) -> P n as -> P (succ n) (cons A n a as)) \
       \-> ∀ (x : Nat) (target : Vec A x) -> P x target"
   ]
+
+-- | @caseD@, against the eliminator printed above it (MS9 phase 178).
+--
+-- __Each case here is the one above it with exactly the inductive hypotheses
+-- removed__, so the two groups read as a pair: whatever else differs between a
+-- method and its case method is this generator inventing something.
+--
+-- Nothing here checks that the body works. It is a definition, so
+-- @GlobalTests@' /every definition checks against its own type/ already types it
+-- over the adversarial corpus — and @test\/golden\/eliminators.golden@ computes
+-- with it, which a type cannot show.
+caseTests :: [TestTree]
+caseTests =
+  [ -- @succ@'s method loses @P x ->@ and keeps its conclusion.
+    analysis "Nat: the succ method takes no hypothesis" natVec natVecCounter "Nat" LZero
+      "\8704 (P : Nat -> Type\8320) -> P zero \
+      \-> (\8704 (x : Nat) -> P (succ x)) \
+      \-> \8704 (target : Nat) -> P target"
+
+    -- The parameter is still bound first and the motive still mentions it.
+  , analysis "Vec: the parameter and the indices are untouched" natVec natVecCounter "Vec" LZero
+      "\8704 (A : Type\8320) (P : \8704 (x : Nat) -> Vec A x -> Type\8320) \
+      \-> P zero (nil A) \
+      \-> (\8704 (n : Nat) (a : A) (as : Vec A n) -> P (succ n) (cons A n a as)) \
+      \-> \8704 (x : Nat) (target : Vec A x) -> P x target"
+
+    -- **The case @Nat@ cannot catch, again.** @fs@'s hypothesis is at the
+    -- recursive argument's own index and its conclusion is at @succ n@, so a
+    -- generator that dropped the wrong binder — or dropped the conclusion's
+    -- indices with it — would still pass every @Nat@ case above.
+  , analysis "Fin: the hypothesis goes and the conclusion's indices stay" natFin natFinCounter "Fin" LZero
+      "\8704 (P : \8704 (x : Nat) -> Fin x -> Type\8320) \
+      \-> (\8704 (n : Nat) -> P (succ n) (fz n)) \
+      \-> (\8704 (n : Nat) (i : Fin n) -> P (succ n) (fs n i)) \
+      \-> \8704 (x : Nat) (target : Fin x) -> P x target"
+
+    -- No constructors, so there was nothing to drop: @caseEmpty@ and
+    -- @elim Empty@ are the same rule.
+  , analysis "Empty: nothing to drop" natFin natFinCounter "Empty" LZero
+      "\8704 (P : Empty {0} -> Type\8320) (target : Empty {0}) -> P target"
+  ]
+
+-- | Build @caseD@'s type and render it as an ordinary type, which is what
+-- @:show@ prints.
+analysis :: String -> GlobalEnv -> Int -> String -> Level -> String -> TestTree
+analysis name env n0 d l expect = testCase name $
+  case lookupInductive g env of
+    Nothing  -> assertFailure (d ++ " is not declared")
+    Just def ->
+      let (ty, _, _) = caseWrapper def l n0
+       in oneLine (renderCore (Rendering [] n0) [] (atZero def ty)) @?= expect
+  where
+    g = GlobalName d
+
+-- | One line, so that an exact-string case reads as one line.
+oneLine :: String -> String
+oneLine = unwords . words
 
 -- | Build the rule and render it exactly as @:elim@ does.
 rule :: String -> GlobalEnv -> Int -> String -> Level -> String -> TestTree

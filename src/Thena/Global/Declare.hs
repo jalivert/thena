@@ -69,6 +69,8 @@ import Thena.Global.Env
   , addDefinition
   , addInductive
   , constructorType
+  , caseName
+  , caseWrapper
   , eliminatorName
   , eliminatorWrapper
   , formerType
@@ -447,15 +449,16 @@ ownReferences d =
 -- | Every name a declaration introduces must be free, and distinct from the
 -- others it introduces.
 --
--- **The eliminator\'s wrapper is one of them** (MS4 phase 49e). It is generated
--- like a former\'s, so it can clash like one, and this is where a clash is
--- caught — 'Thena.Global.NoConfusion.generateNoConfusion' answers @Clash@ for
+-- **The eliminator\'s wrapper is one of them** (MS4 phase 49e), and @caseD@ is
+-- another (MS9 phase 178). Each is generated like a former\'s, so each can clash
+-- like one, and this is where a clash is caught — 'Thena.Global.NoConfusion.generateNoConfusion' answers @Clash@ for
 -- its own two names for the same reason.
 checkNames :: GlobalEnv -> InductiveDefinition -> Either DeclareError ()
 checkNames env d =
   go []
     ( inductiveName d
     : eliminatorName (inductiveName d)
+    : caseName (inductiveName d)
     : map constructorName (inductiveConstructors d)
     )
   where
@@ -547,7 +550,9 @@ positive dn cn i = peel False
 -- under-applied 'Canonical' (§12 invariant 6).
 generate :: InductiveDefinition -> Int -> GlobalEnv -> (GlobalEnv, Int)
 generate d n0 env =
-  (addInductive dn d (eliminator (foldl former env (typeFormer : map value cs))), n2)
+  ( addInductive dn d
+      (analysis (eliminator (foldl former env (typeFormer : map value cs))))
+  , n4 )
   where
     dn = inductiveName d
     ps = inductiveParameters d
@@ -573,6 +578,24 @@ generate d n0 env =
     eliminator e =
       addDefinition (eliminatorName dn) (MkDefinition elvs [] ety ebody)
         (addConstant (eliminatorName dn) elvs ety e)
+
+    -- **Case analysis, beside the eliminator** (MS9 phase 178): the same scheme
+    -- with every method's inductive hypotheses dropped, which is what
+    -- @case … of@ means as against @induction … of@. Its body is an
+    -- @elim D@ that binds those hypotheses and does not use them, so it is an
+    -- ordinary definition and the kernel checks it as one.
+    --
+    -- **Its own motive level**, minted here rather than shared with the
+    -- eliminator's: two definitions with one rigid level parameter between them
+    -- would instantiate independently anyway, and reading the same variable in
+    -- two signatures invites the reader to think otherwise.
+    (clv, n3)        = freshLevelRigid n2
+    (cty, cbody, n4) = caseWrapper d (LVar clv) n3
+    clvs             = inductiveLevels d ++ [clv]
+
+    analysis e =
+      addDefinition (caseName dn) (MkDefinition clvs [] cty cbody)
+        (addConstant (caseName dn) clvs cty e)
 
     -- **The wrapper inherits the datatype's level parameters** (phase 31b),
     -- and its body instantiates the 'Canonical' at exactly those parameters —

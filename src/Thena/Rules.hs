@@ -81,7 +81,9 @@ import Thena.Instral.Ops
   , produces
   )
 import Thena.Surface.Concrete
-  (Plicity (..), Surface (..), SurfaceArg (..), SurfaceBinder (..), blocksIn)
+  ( Analysis (..), Plicity (..), Surface (..), SurfaceArg (..)
+  , SurfaceBinder (..), SurfacePattern (..), blocksIn
+  )
 import qualified Thena.Surface.Zipper as Zipper
 import Thena.Errors (BuildError (..), SyntaxError (..))
 import Thena.Surface.Read (parseSurfaceText)
@@ -90,6 +92,7 @@ import Thena.Syntax.Lexer (isIdentifier, lexTokens)
 import Thena.Syntax.Parser (parseTerm)
 import qualified Thena.Instral.Type as Ty
 import Thena.Instral.Type (Signature (..), Ty (..))
+import qualified Thena.Tactics.Specialise as Spec
 import Thena.Instral.Concrete
   ( RawSignature (..)
   , RawFunction (..)
@@ -372,6 +375,23 @@ holds env cur args t = case t of
   SurfaceIsTrusted o      -> surfaceIs o isTrusted
   SurfaceIsElim o         -> surfaceIs o isElim
   SurfaceIsDo o           -> surfaceIs o isDo
+  SurfaceIsSplit o        -> surfaceIs o isSplit
+  SplitIsInduction o      -> surfaceIs o isInduction
+  SplitIsCases o          -> surfaceIs o isCases
+  SplitHasArms o          -> surfaceIs o hasArms
+  SplitHasNoArms o        -> surfaceIs o hasNoArms
+  PatternIsName o         -> patternIs o isPatName
+  PatternIsWildcard o     -> patternIs o isPatWild
+  -- **The binder report's three** (MS9 phase 192), the same shape one category
+  -- over: which group of a specialised method's telescope a binder is in.
+  BinderIsArgument o      -> binderIs o isArgument
+  BinderIsHypothesis o    -> binderIs o isHypothesis
+  BinderIsCopy o          -> binderIs o isCopy
+  -- **The one test that reads TWO operands**, and the one that is not about a
+  -- shape at all (MS9 phase 183). A splitting tree pairs an arm with a
+  -- constructor, and both names are read rather than written.
+  SameName a b            -> sameName a b
+  DifferentName a b       -> differentName a b
   AppArgsAreExplicit o    -> surfaceIs o argsExplicit
   AppHeadIsName o         -> surfaceIs o headIsName
   AppHeadIsElim o         -> surfaceIs o headIsElim
@@ -402,6 +422,40 @@ holds env cur args t = case t of
       Right (VSurface z) -> p (Zipper.focus z)
       Right _            -> False
 
+    -- 'surfaceIs' one category over, and an unbound operand is permissive for
+    -- the same reason.
+    patternIs o p = case Op.operandIn args o of
+      Left _              -> True
+      Right (VPattern pt) -> p pt
+      Right _             -> False
+
+    -- And one category further over (MS9 phase 192).
+    binderIs o p = case Op.operandIn args o of
+      Left _             -> True
+      Right (VBinder b)  -> p b
+      Right _            -> False
+
+    -- **An unbound operand passes, as everywhere else here**; two names that
+    -- are both bound are compared as written, which is what a 'Name' is.
+    sameName a b = case (Op.operandIn args a, Op.operandIn args b) of
+      (Right (VText x), Right (VText y)) -> x == y
+      (Left _, _)                        -> True
+      (_, Left _)                        -> True
+      _                                  -> False
+
+    differentName a b = case (Op.operandIn args a, Op.operandIn args b) of
+      (Right (VText x), Right (VText y)) -> x /= y
+      (Left _, _)                        -> True
+      (_, Left _)                        -> True
+      _                                  -> False
+
+    isPatName     pt = case pt of PatternName _ _ -> True; _ -> False
+    isPatWild     pt = case pt of PatternWildcard -> True; _ -> False
+
+    isArgument   (Spec.Binder r _) = r == Spec.AnArgument
+    isHypothesis (Spec.Binder r _) = r == Spec.AnHypothesis
+    isCopy       (Spec.Binder r _) = r == Spec.ACopy
+
     isName         s = case s of SurfaceName _ -> True; _ -> False
     isLiteral      s = case s of SurfaceLiteral _ -> True; _ -> False
     isObject       s = case s of SurfaceObject {} -> True; _ -> False
@@ -418,6 +472,11 @@ holds env cur args t = case t of
     isTrusted      s = case s of SurfaceTrusted _ _ -> True; _ -> False
     isElim         s = case s of SurfaceElim {} -> True; _ -> False
     isDo           s = case s of SurfaceDo _ -> True; _ -> False
+    isSplit        s = case s of SurfaceSplit {} -> True; _ -> False
+    isInduction    s = case s of SurfaceSplit ByInduction _ _ -> True; _ -> False
+    isCases        s = case s of SurfaceSplit ByCases _ _ -> True; _ -> False
+    hasArms        s = case s of SurfaceSplit _ _ as -> not (null as); _ -> False
+    hasNoArms      s = case s of SurfaceSplit _ _ as -> null as; _ -> False
     headIsName     s = case s of SurfaceApp (SurfaceName _) _ -> True; _ -> False
     headIsElim     s = case s of SurfaceApp (SurfaceElim {}) _ -> True; _ -> False
     -- The third positive test, @let@'s two being the precedent: the head
@@ -797,6 +856,9 @@ resolveTyIn owner vs0 t0 = go vs0 t0
       ("Surface", [])     -> Right TSurface
       ("Core", [])        -> Right TCore
       ("Development", []) -> Right TDevelopment
+      ("Pattern", [])     -> Right TPattern
+      ("Binder", [])      -> Right TBinder
+      ("MethodShape", []) -> Right TMethodShape
       ("Level", [])       -> Right TLevel
       ("List", [a])       -> Right (TList a)
       ("Option", [a])     -> Right (TOption a)
@@ -969,7 +1031,7 @@ headOperand o = case o of
 builtInTypes :: [String]
 builtInTypes =
   [ "String", "Name", "Int", "Char", "Bool", "Surface", "Core", "Development"
-  , "Level"
+  , "Level", "Pattern", "Binder"
   , "List", "Option"
   ]
 
@@ -1442,6 +1504,15 @@ unaryOps =
   , ("level", Op.LevelOf), ("universe-at", Op.UniverseAt)
   , ("push-development", Op.PushDevelopment)
   , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
+  , ("prim-case", Op.CaseAnalyse)
+    -- The six declaration readers (MS9 phase 176).
+  , ("datatype-of", Op.DatatypeOf)
+  , ("datatype-parameters", Op.DatatypeParameters)
+  , ("datatype-indices", Op.DatatypeIndices)
+  , ("constructors-of", Op.ConstructorsOf)
+  , ("constructor-datatype", Op.ConstructorDatatype)
+  , ("constructor-arguments", Op.ConstructorArguments)
+  , ("constructor-recursive-arguments", Op.ConstructorRecursiveArguments)
   , ("surface-literal", Op.SurfaceLiteralOf)
   , ("object-term", Op.ObjectTerm)
   , ("typeof", Typing), ("expose", Op.Expose), ("resolve-core", Op.ResolveCore), ("fresh-name", FreshName), ("prim-apply", Op.Apply)
@@ -1450,6 +1521,16 @@ unaryOps =
   , ("surface-universe", Op.SurfaceUniverseOf)
   , ("arrow-domain", Op.ArrowDomain), ("arrow-codomain", Op.ArrowCodomain)
   , ("trusted-claim", Op.TrustedClaim), ("trusted-body", Op.TrustedBody)
+    -- The three moves into a split (MS9 phase 181).
+  , ("split-target", Op.SplitTarget)
+  , ("split-arm-body", Op.SplitArmBody)
+  , ("split-tail", Op.SplitTail)
+    -- The pattern readers (MS9 phase 183).
+  , ("split-arm-pattern", Op.SplitArmPattern)
+  , ("pattern-head", Op.PatternHead)
+  , ("pattern-arguments", Op.PatternArguments)
+    -- The binder report's accessor (MS9 phase 192).
+  , ("binder-name", Op.BinderName)
   , ("ascription-type", Op.AscriptionType)
   , ("ascription-term", Op.AscriptionTerm)
   , ("app-function", Op.AppFunction)
@@ -1465,6 +1546,9 @@ unaryOps =
   , ("forall-name", Op.ForallName), ("forall-domain", Op.ForallDomain)
   , ("forall-tail", Op.ForallTail), ("play", Op.Play)
   , ("elim-spine", Op.ElimSpine)
+    -- Tying a recursive call to its induction hypothesis (MS9 phase 186): the
+    -- driver's, between pop-development and define-global.
+  , ("tie-recursion", Op.TieRecursion)
   ]
 binaryOps :: [(String, Operand -> Operand -> Op)]
 binaryOps =
@@ -1472,7 +1556,10 @@ binaryOps =
   , ("quantify", Op.Quantify)
   , ("concat", Concat), ("unify", Unify), ("unify-into", Op.UnifyInto)
   , ("arrow", Arrow), ("apply-to", ApplyTo), ("apply-next", Op.ApplyNext)
+  , ("prepend", Op.Prepend)
   , ("declare-primitive", Op.DeclarePrimitive)
+    -- Specialisation by unification (MS9 phase 177): the constructor whose
+    -- method this is, and how many equations follow its telescope.
   ]
 
 -- | **The first op with three operands** (MS8 phase 150). A trusted term has
@@ -1488,6 +1575,7 @@ binaryOps =
 ternaryOps :: [(String, Operand -> Operand -> Operand -> Op)]
 ternaryOps =
   [ ("make-trusted", Op.MakeTrusted)
+  , ("specialise", Op.Specialise)
   , ("define-global", Op.DefineGlobal [])
   ]
 
@@ -1692,6 +1780,18 @@ withOperands t os = case (t, os) of
   (SurfaceIsTrusted _, [o])      -> Just (SurfaceIsTrusted o)
   (SurfaceIsElim _, [o])         -> Just (SurfaceIsElim o)
   (SurfaceIsDo _, [o])           -> Just (SurfaceIsDo o)
+  (SurfaceIsSplit _, [o])        -> Just (SurfaceIsSplit o)
+  (SplitIsInduction _, [o])      -> Just (SplitIsInduction o)
+  (SplitIsCases _, [o])          -> Just (SplitIsCases o)
+  (SplitHasArms _, [o])          -> Just (SplitHasArms o)
+  (SplitHasNoArms _, [o])        -> Just (SplitHasNoArms o)
+  (PatternIsName _, [o])         -> Just (PatternIsName o)
+  (PatternIsWildcard _, [o])     -> Just (PatternIsWildcard o)
+  (BinderIsArgument _, [o])      -> Just (BinderIsArgument o)
+  (BinderIsHypothesis _, [o])    -> Just (BinderIsHypothesis o)
+  (BinderIsCopy _, [o])          -> Just (BinderIsCopy o)
+  (SameName _ _, [a, b])         -> Just (SameName a b)
+  (DifferentName _ _, [a, b])    -> Just (DifferentName a b)
   (AppArgsAreExplicit _, [o])    -> Just (AppArgsAreExplicit o)
   (AppHeadIsName _, [o])         -> Just (AppHeadIsName o)
   (AppHeadIsElim _, [o])         -> Just (AppHeadIsElim o)
@@ -1726,6 +1826,18 @@ testTypes t = case t of
   FocusIsComponent -> []
   GoalTypeIsPi    -> []
   GoalTypeIsLet   -> []
+  SurfaceIsSplit o        -> [(o, Ty.TSurface)]
+  SplitIsInduction o      -> [(o, Ty.TSurface)]
+  SplitIsCases o          -> [(o, Ty.TSurface)]
+  SplitHasArms o          -> [(o, Ty.TSurface)]
+  SplitHasNoArms o        -> [(o, Ty.TSurface)]
+  PatternIsName o         -> [(o, Ty.TPattern)]
+  PatternIsWildcard o     -> [(o, Ty.TPattern)]
+  BinderIsArgument o      -> [(o, Ty.TBinder)]
+  BinderIsHypothesis o    -> [(o, Ty.TBinder)]
+  BinderIsCopy o          -> [(o, Ty.TBinder)]
+  SameName a b            -> [(a, Ty.TName), (b, Ty.TName)]
+  DifferentName a b       -> [(a, Ty.TName), (b, Ty.TName)]
   SurfaceIsName o         -> [(o, Ty.TSurface)]
   SurfaceIsLiteral o      -> [(o, Ty.TSurface)]
   SurfaceIsObject o       -> [(o, Ty.TSurface)]
@@ -1772,6 +1884,18 @@ testWord t = case t of
   FocusIsComponent -> "focus-is-component"
   GoalTypeIsPi    -> "goal-type-is-pi"
   GoalTypeIsLet   -> "goal-type-is-let"
+  SurfaceIsSplit _        -> "surface-is-split"
+  SplitIsInduction _      -> "split-is-induction"
+  SplitIsCases _          -> "split-is-cases"
+  SplitHasArms _          -> "split-has-arms"
+  SplitHasNoArms _        -> "split-has-no-arms"
+  PatternIsName _         -> "pattern-is-name"
+  PatternIsWildcard _     -> "pattern-is-wildcard"
+  BinderIsArgument _      -> "binder-is-argument"
+  BinderIsHypothesis _    -> "binder-is-hypothesis"
+  BinderIsCopy _          -> "binder-is-copy"
+  SameName _ _            -> "same-name"
+  DifferentName _ _       -> "different-name"
   SurfaceIsName _         -> "surface-is-name"
   SurfaceIsLiteral _      -> "surface-is-literal"
   SurfaceIsObject _       -> "surface-is-object"
@@ -1824,6 +1948,18 @@ everyTest =
   , SurfaceIsTrusted (Lit (VText ""))
   , SurfaceIsElim (Lit (VText ""))
   , SurfaceIsDo (Lit (VText ""))
+  , SurfaceIsSplit (Lit (VText ""))
+  , SplitIsInduction (Lit (VText ""))
+  , SplitIsCases (Lit (VText ""))
+  , SplitHasArms (Lit (VText ""))
+  , SplitHasNoArms (Lit (VText ""))
+  , PatternIsName (Lit (VText ""))
+  , PatternIsWildcard (Lit (VText ""))
+  , BinderIsArgument (Lit (VText ""))
+  , BinderIsHypothesis (Lit (VText ""))
+  , BinderIsCopy (Lit (VText ""))
+  , SameName (Lit (VText "")) (Lit (VText ""))
+  , DifferentName (Lit (VText "")) (Lit (VText ""))
   , AppArgsAreExplicit (Lit (VText ""))
   , AppHeadIsName (Lit (VText ""))
   , AppHeadIsElim (Lit (VText ""))

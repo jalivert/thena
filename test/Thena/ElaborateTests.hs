@@ -18,14 +18,22 @@
 module Thena.ElaborateTests (tests) where
 
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
+
+import Data.List (isInfixOf)
 import Test.Tasty.QuickCheck
   (Gen, counterexample, forAll, oneof, property, testProperty, withNumTests)
 
 import Thena.Driver
   ( Loaded (..)
+  , Response (..)
+  , Session
+  , command
   , loadProofSource
+  , loadRuleBases
   , loadSource
+  , newSession
+  , withRuleBases
   )
 import Thena.Standard (withRules)
 
@@ -79,6 +87,9 @@ tests =
     , baseTests
     , endToEnd
     , honestRefusals
+    , testGroup "taking a split apart (MS9 phase 181)" splitParts
+    , testGroup "a split with no arms elaborates (MS9 phase 182)" emptySplit
+    , testGroup "the splitting tree (MS9 phase 184)" splittingTree
     ]
 
 -- --------------------------------------------------------------------------
@@ -756,7 +767,27 @@ baseTests =
               , "fit-core", "fit-core"
               , "claim", "assume", "quantify"
               ]
-              ++ replicate 19 "elaborate" ++ ["run-block"]
+              ++ replicate 7 "elaborate"
+              ++ [ "no-nesting", "ihs-for", "ihs-for"
+                 , "reverse-onto", "reverse-onto", "apply-all", "apply-all"
+                 , "instantiate-with" ]
+              ++ replicate 8 "intro-arm-binders"
+              ++ [ "bind-friendlies", "bind-friendlies", "bind-solved", "bind-solved"
+                 , "same-length", "same-length"
+                 , "arm-for", "arm-for", "pick", "pick", "arm-needs-body"
+                 , "elaborate-arm", "case-needs-an-arm"
+                 , "vanished-case-takes-no-body", "vanished-case-takes-no-body"
+                 , "case-must-vanish", "one-case", "one-case", "one-case"
+                 , "arm-must-be-for-this-datatype"
+                 , "arms-are-for-this-datatype", "arms-are-for-this-datatype"
+                 , "one-arm-per-constructor"
+                 , "arm-not-repeated", "arm-not-repeated"
+                 , "arms-are-distinct", "arms-are-distinct"
+                 , "split-cases", "split-cases", "split-over"
+                 , "split-claim", "split-claim", "split-elaborate"
+                 ]
+              ++ replicate 15 "elaborate"
+              ++ ["run-block"]
               ++ replicate 2 "spine-arguments"
 
     , testCase "prove is a rule over prim-prove" $
@@ -764,3 +795,1288 @@ baseTests =
           [Rule _ ps _ b] -> (ps, b) @?= ([], [Do Ops.Prove])
           other           -> assertFailure ("expected one clause: " ++ show other)
     ]
+
+
+-- --------------------------------------------------------------------------
+-- Taking a split apart (MS9 phase 181)
+-- --------------------------------------------------------------------------
+
+-- | The five head tests and the three moves over @induction … of@ and
+-- @case … of@, through a rule base and at run time.
+--
+-- __Nothing elaborates a split yet__, so the clause these exist for is not
+-- written: this walks one and /says/ what it reached, which is the only way to
+-- observe a move whose answer is a focused surface term. The suite's own word
+-- tables already check that each op parses, reads back and has a keyword; what
+-- they cannot check is that a frame reaches the child it names, and
+-- "Thena.SurfaceZipperTests" checks that against @rebuild@ rather than against
+-- a running rule.
+--
+-- __The second arm is reached through @split-tail@__, so a tail that dropped
+-- the later arms, or kept the first, would print the wrong name here.
+--
+-- @name-text@ is in the walk because @surface-name@ answers a @Name@ and @say@
+-- takes text — the one-way crossing, used in the direction that exists.
+splitParts :: [TestTree]
+splitParts =
+  [ testCase "induction: the word, the target, each arm's body, then the end" $
+      walks "describe surface`induction tgt of { zero -> zzz ; succ m -> sss }`"
+        ["induction", "tgt", "zzz", "sss", "end"]
+    -- __No arms is a legal split__, and it is what the recursion stops at —
+    -- @case t of { }@ is the whole of a case analysis on a datatype with no
+    -- constructors.
+  , testCase "case with no arms: the word, the target, and straight to the end" $
+      walks "describe surface`case other of { }`" ["case", "other", "end"]
+
+    -- __AN ARM WITH NO BODY ANSWERS @none@__ (MS9 phase 189), and this is the
+    -- test that the walk reaches the /next/ arm afterwards: an empty arm is a
+    -- legal arm, so @split-tail@ still has to peel it. @name-of-body@ is the
+    -- fixture's own reader, one clause per shape, which is how a rule is meant
+    -- to take @split-arm-body@'s answer apart.
+  , testCase "an arm with no body: the walk says so and goes on to the next" $
+      walks "describe surface`induction tgt of { vnil -> ; vcons k a as -> sss }`"
+        ["induction", "tgt", "empty", "sss", "end"]
+
+    -- __A NESTED pattern, read to depth two__ (MS9 phase 183), which is the
+    -- measurement the design rests on: @cons n x (cons m y nil)@ parses today,
+    -- so a reader answering a flat list of names would be wrong on syntax the
+    -- parser already accepts. @pattern-arguments@ answers with /patterns/ and
+    -- @show-pat@ recurses, so the whole tree comes out in order.
+  , testCase "a pattern is read to its leaves, nesting and all" $
+      walks ("patterns surface`induction v of "
+             ++ "{ nil -> a ; cons n x (cons m y nil) -> b ; _ -> c }`")
+        [ "nil", "|"
+        , "cons", "n", "x", "cons", "m", "y", "nil", "|"
+        -- __A wildcard is not a name__, and 'SurfacePattern' draws that
+        -- distinction on purpose: a pattern's @_@ binds where a term's @_@ is a
+        -- hole to solve.
+        , "_", "|"
+        , "end"
+        ]
+
+    -- __The one test that is not a shape question__, and the one without which
+    -- no splitting tree can pair an arm with a constructor.
+    -- __@chose 1@ is the ordering being a real choice point__, not noise: with
+    -- the names equal BOTH clauses' heads pass — the second has no head — so
+    -- the engine records an alternative and would run @different@ if the first
+    -- clause's body failed. With the names unequal the first head excludes
+    -- itself, one candidate is left, and nothing is recorded.
+  , testCase "two names read at run time can be compared" $
+      walks "cmp \"cons\" \"cons\"" ["chose 1: cmp", "same"]
+  , testCase "and told apart, with no alternative left to record" $
+      walks "cmp \"cons\" \"nil\"" ["different"]
+  ]
+  where
+    walks call want = case loadedError loaded of
+      Just e  -> assertFailure (show e)
+      Nothing -> [ w | Ran ws _ _ <- loadedResponses loaded, w <- ws ] @?= want
+      where loaded = loadSource walkSession call
+
+-- | A base that walks a split and says the name at each place it lands.
+walkBase :: String
+walkBase = unlines
+  [ "rule base splitwalk where"
+  , "name-of : Surface -> ()"
+  , "rule name-of g :- when (surface-is-name g)"
+  , "  do w = surface-name g ; x = name-text w ; say x"
+  , ""
+  , "name-of-body : Option Surface -> ()"
+  , "rule name-of-body (some b) :- do name-of b"
+  , "rule name-of-body none :- do say \"empty\""
+  , ""
+  , "walk-arms : Surface -> ()"
+  , "rule walk-arms t :- when (surface-is-split t) (split-has-no-arms t)"
+  , "  do say \"end\""
+  , "rule walk-arms t :- when (surface-is-split t) (split-has-arms t)"
+  , "  do b = split-arm-body t"
+  , "     ; name-of-body b"
+  , "     ; r = split-tail t"
+  , "     ; walk-arms r"
+  , ""
+  , "describe : Surface -> ()"
+  , "rule describe t :- when (surface-is-split t) (split-is-induction t)"
+  , "  do say \"induction\" ; g = split-target t ; name-of g ; walk-arms t"
+  , "rule describe t :- when (surface-is-split t) (split-is-cases t)"
+  , "  do say \"case\" ; g = split-target t ; name-of g ; walk-arms t"
+    -- The pattern readers (MS9 phase 183). @show-pat@ is recursive through
+    -- @pattern-arguments@, which is what reads a NESTED pattern.
+  , ""
+  , "show-pats : List Pattern -> ()"
+  , "rule show-pats [] :- do"
+  , "rule show-pats [p, ...ps] :- do show-pat p ; show-pats ps"
+  , ""
+  , "show-pat : Pattern -> ()"
+  , "rule show-pat p :- when (pattern-is-wildcard p) do say \"_\""
+  , "rule show-pat p :- when (pattern-is-name p)"
+  , "  do w = pattern-head p"
+  , "     ; x = name-text w"
+  , "     ; say x"
+  , "     ; as = pattern-arguments p"
+  , "     ; show-pats as"
+  , ""
+  , "patterns : Surface -> ()"
+  , "rule patterns t :- when (surface-is-split t) (split-has-no-arms t) do say \"end\""
+  , "rule patterns t :- when (surface-is-split t) (split-has-arms t)"
+  , "  do p = split-arm-pattern t"
+  , "     ; show-pat p"
+  , "     ; say \"|\""
+  , "     ; r = split-tail t"
+  , "     ; patterns r"
+    -- Two clauses and an ordering, there being no negation: the first is
+    -- excluded when the names differ, so the second is what runs.
+  , ""
+  , "cmp : Name -> Name -> ()"
+  , "rule cmp a b :- when (same-name a b) do say \"same\""
+  , "rule cmp a b :- do say \"different\""
+  ]
+
+-- | The walk beside the shipped base, as 'Thena.SpecialiseTests' does it: a
+-- load __replaces__ the bases a session searches, so the standard rules go
+-- back in alongside.
+walkSession :: Session
+walkSession = case loadRuleBases newSession [("walk.thena.rules", walkBase)] of
+  (s, BasesLoaded bs) -> withRuleBases (expectedBase ++ bs) s
+  (_, other)          -> error ("the fixture's base did not load: " ++ show other)
+
+
+-- --------------------------------------------------------------------------
+-- A split with no arms (MS9 phase 182)
+-- --------------------------------------------------------------------------
+
+-- | @case e of { }@ — case analysis on a datatype with no constructors.
+--
+-- __The whole stack, and the kernel is the judge__: a declaration ends in
+-- @qed@ and @qed@ certifies, so a load that reports no error means layout, the
+-- parser, the clause, the elimination tactic and @certify@ all agreed.
+--
+-- __One clause serves both words.__ A datatype with no constructors has no
+-- methods, so there is nothing for an inductive hypothesis to attach to and
+-- @induction@ and @case@ cannot differ here — which is why the clause tests
+-- @split-has-no-arms@ and not the analysis.
+--
+-- __The target's type is not known before the target is elaborated__, so the
+-- clause claims a hole for it and unification solves that hole on the way
+-- past. The @Tsplit@ in the extracted term below is that hole, and it is
+-- solved — @Empty {ℓ}@ — rather than left open, which is the thing worth
+-- pinning: a clause that failed to solve it would still load and still
+-- certify, with a level parameter nobody wrote.
+emptySplit :: [TestTree]
+emptySplit =
+  [ testCase "case: it declares, so the kernel accepted it" $
+      declares "case" >>= (@?= Nothing)
+  , testCase "and induction, on the same clause" $
+      declares "induction" >>= (@?= Nothing)
+    -- No methods at all, which is the observable difference between this and
+    -- every other elimination.
+    --
+    -- **AND THE WORD IS WHAT DECIDES THE HEAD** (MS9 phase 188). @case@ applies
+    -- the generated @caseEmpty@, @induction@ builds an @elim Empty@ node. The
+    -- two are convertible — @caseD@ δ-unfolds to exactly that elimination — so
+    -- nothing downstream and nothing in the kernel can tell them apart; what
+    -- changed is that the term now says which word was written.
+  , testCase "case: the term applies caseEmpty, at a solved type" $ do
+      shown <- extracted "case"
+      assertBool shown ("caseEmpty" `isInfixOf` shown)
+      assertBool shown ("Tsplit = Empty" `isInfixOf` shown)
+
+  , testCase "induction: the term is an elim node with no methods" $ do
+      shown <- extracted "induction"
+      assertBool shown ("elim Empty" `isInfixOf` shown)
+      assertBool shown ("Tsplit = Empty" `isInfixOf` shown)
+  ]
+  where
+    source word = unlines
+      [ "module Vacuous where"
+      , ""
+      , "fromEmpty : Empty -> Unit"
+      , "fromEmpty = \\ e -> " ++ word ++ " e of { }"
+      ]
+
+    loaded word = do
+      (s0, _) <- startingSession
+      pure (loadProofSource s0 (source word))
+
+    declares word = do
+      (s1, resp) <- loaded word
+      pure $ case resp of
+        ProofLoaded {} -> Nothing
+        other          -> Just (unwords (renderResponse s1 other))
+
+    extracted word = do
+      (s1, _) <- loaded word
+      pure (unwords (renderResponse' s1 ":show fromEmpty"))
+
+    renderResponse' sn l = let (sn', r) = command sn l in renderResponse sn' r
+
+
+-- --------------------------------------------------------------------------
+-- The splitting tree (MS9 phase 184)
+-- --------------------------------------------------------------------------
+
+-- | @induction t of { p -> e ; … }@ with arms, end to end and through the
+-- kernel.
+--
+-- __The first case is the milestone's point__: a function defined by pattern
+-- matching, which declares — so @qed@ certified it — and then /computes/.
+-- @pred (succ (succ zero))@ reducing to @succ zero@ is the whole claim, and it
+-- is checked by reduction rather than by reading the term, because the term is
+-- an @elim@ either way and only reduction says the methods went to the right
+-- constructors.
+--
+-- __The refusals are each a different cause and each says so__, which is the
+-- part that took work. The obvious shape for the arm search — one rule that
+-- matches the constructor's name and elaborates the body — makes both clauses a
+-- choice point, so a body that fails to elaborate backtracks into the search,
+-- walks on through the arms and reports /the search/. Every one of these four
+-- then said @no clause of arm-for applies here@. MS8 phase 170 found the same
+-- thing in the application clauses; the fix is the same, a pair of
+-- complementary tests so no choice point is recorded at all.
+splittingTree :: [TestTree]
+splittingTree =
+  [ testCase "a function defined by pattern matching declares and computes" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (natModule ++ predDef))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      let (s2, q) = command s1 ":whnf pred (succ (succ zero))"
+      unwords (renderResponse s2 q) @?= "succ zero"
+
+    -- __A RECURSIVE CALL IS THE INDUCTION HYPOTHESIS__ (MS9 phase 186, his
+    -- ruling of 2026-10-19). The name being defined is assumed while the body
+    -- elaborates and @tie-recursion@ replaces each application of it, so the
+    -- arm writes an ordinary call and no rule knows that it is one.
+    --
+    -- __Checked by reduction and not by reading the term__, for the reason the
+    -- case above gives: only reduction says the hypothesis went to the right
+    -- place. @double (succ (succ zero))@ is four, and it is four because the
+    -- call became the hypothesis about @m@ and not anything else of type
+    -- @Nat@ in scope.
+  , testCase "a recursive call becomes the induction hypothesis, and computes" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (natModule ++
+            [ "double : Nat -> Nat"
+            , "double = \\ n -> induction n of"
+            , "  { zero -> zero ; succ m -> succ (succ (double m)) }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      let (s2, q) = command s1
+            ":convert double (succ (succ zero)) \8799 succ (succ (succ (succ zero)))"
+      unwords (words (unwords (renderResponse s2 q))) @?=
+        "double (succ (succ zero)) \8799 succ (succ (succ (succ zero))) yes"
+
+    -- __The structural guard, and it is the whole of it.__ An eliminator makes
+    -- the hypothesis available only at the smaller index, so a call on
+    -- anything else names no hypothesis and is refused. This stands in for a
+    -- termination checker: there is nothing to check, because there is nothing
+    -- to express.
+  , refuses "a recursive call that is not structurally smaller is refused"
+      [ "loop : Nat -> Nat"
+      , "loop = \\ n -> induction n of { zero -> zero ; succ m -> loop zero }"
+      ]
+      "stuck: no induction hypothesis is about this call, so it is not \
+      \structurally smaller: loop zero"
+
+    -- The name used as a value rather than called. There is no hypothesis for
+    -- that, and leaving it would make the body open.
+  , refuses "the name being defined cannot be used as a value"
+      [ "self : Nat -> Nat"
+      , "self = self"
+      ]
+      "stuck: the name being defined is used as a value, and only a call to \
+      \it can be an induction hypothesis"
+    -- The arm names fewer variables than the constructor takes arguments.
+  , refuses "a pattern of the wrong arity is caught by same-length"
+      [ "bad : Nat -> Nat"
+      , "bad = \\ n -> induction n of { zero -> zero ; succ -> zero }"
+      ]
+      "stuck: no clause of same-length applies here"
+    -- Coverage: a method survived and no arm was written for it. **The refusal
+    -- names the complaint and not the search** (MS9 phase 190) — until the law
+    -- landed, @arm-for@ ran out of arms and reported itself, which named a rule
+    -- in the shipped base instead of the missing arm.
+  , refuses "a case that survived with no arm is refused by name"
+      [ "partial : Nat -> Nat"
+      , "partial = \\ n -> induction n of { zero -> zero }"
+      ]
+      "stuck: no clause of case-needs-an-arm applies here"
+
+    -- __EVERY ARM THE USER WROTE WAS ASKED FOR__ — his ruling of 2026-10-20,
+    -- built in MS9 phase 190. The three below are the three ways an arm went
+    -- unlooked-at before it, each of which loaded and declared in silence, and
+    -- __each refusal names what the user did and not the rule that went
+    -- looking__. The fourth, a body written for a case the specialiser closed,
+    -- needs an indexed family and is with the @Vec@ tests.
+  , refuses "a second arm for a constructor that already has one is refused"
+      [ "dup : Nat -> Nat"
+      , "dup = \\ n -> induction n of { zero -> zero ; zero -> zero ; succ m -> m }"
+      ]
+      "stuck: no clause of one-arm-per-constructor applies here"
+    -- __A head that is a constructor of SOME datatype, just not this one.__
+    -- @constructor-datatype@ answers, and the names do not agree. The separate
+    -- case below is the head that is no constructor at all, which stops one op
+    -- earlier and names the word instead.
+  , refusesIn vecModule "an arm headed by another datatype's constructor is refused"
+      [ "foreign : Nat -> Nat"
+      , "foreign = \\ n -> induction n of { zero -> zero ; vnil -> zero ; succ m -> m }"
+      ]
+      "stuck: no clause of arm-must-be-for-this-datatype applies here"
+    -- __A misspelled constructor was ALREADY refused before the law__, and the
+    -- only thing wrong with it was the words: it ran the arm search out and
+    -- reported @no clause of arm-for applies here@. It now stops in
+    -- @constructor-datatype@, which names the word the user typed.
+  , refuses "an arm headed by a word that is no constructor names the word"
+      [ "typo : Nat -> Nat"
+      , "typo = \\ n -> induction n of { zero -> zero ; succc m -> m }"
+      ]
+      "stuck: succc is not a constructor"
+    -- A nested pattern argument is a second split, which is a later phase.
+  , refuses "a nested pattern argument is declined by name"
+      [ "nested : Nat -> Nat"
+      , "nested = \\ n -> induction n of { zero -> zero ; succ (succ m) -> m }"
+      ]
+      "stuck: no clause of no-nesting applies here"
+
+    -- ----------------------------------------------------------------
+    -- A SPLIT THAT REFINES A POSITION BOUND OUTSIDE IT (MS9 phases 191, 195)
+    -- ----------------------------------------------------------------
+
+    -- __THE AMBIENT NAME MEANS THE REFINED THING, AND THAT IS THE WHOLE OF
+    -- WHAT THIS ASSERTS__ (MS9 phase 195, his ruling of 2026-10-20:
+    -- /"elaboration is 'compilation' — they should not change how they write
+    -- their proof because of how we compile it"/).
+    --
+    -- Splitting @e : Ev (s m)@ against @evs@'s own @Ev (s (s n))@ leaves @s n@
+    -- facing @m@, and @m@ is bound /outside/ the split, so nothing on the rule's
+    -- side can move to fit it: the split generalises @m@ and the arm solves the
+    -- copy to @s n@. **So @m@ in the arm is @s n@**, the goal @IsSucc (s m)@ is
+    -- @IsSucc (s (s n))@, and @isucc m@ inhabits it. Before this phase the copy
+    -- bound nothing, @m@ reached back out to the unrefined entry, and the arm
+    -- was refused — which is the state @~tzwjk@ recorded.
+    --
+    -- **It computes, which is the part a declaration alone would not say**: the
+    -- definition the arm binds @m@ to is the term the split forced, reduced, so
+    -- @namesOuter (s z) (evs z evz)@ is @isucc (s z)@ and not @isucc@ of a
+    -- β-redex.
+  , testCase "a name bound outside a split means what the split refined it to" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (evModule ++
+            [ "namesOuter : \8704 (m : N) (e : Ev (s m)) -> IsSucc (s m)"
+            , "namesOuter = \\ m e -> case e of { evs n en -> isucc m }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      let (s2, q) = command s1 ":whnf namesOuter (s z) (evs z evz)"
+      unwords (renderResponse s2 q) @?= "isucc (s z)"
+
+    -- __AND THE THREE SHAPES PHASE 191 WAS BUILT FOR__, which had been a
+    -- fixture nothing loaded: the copy that is refined and read under its own
+    -- name (@usesHyp@'s @h@), the copy that is solved (@refined@), and an index
+    -- the arm mentions (@mentionsIndex@). Each declares, and the two that can
+    -- compute are asserted by @refl@ inside the module, so a wrong refinement
+    -- fails here rather than passing quietly.
+  , testCase "a generalising split: refined, used and mentioned all declare" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (evModule ++
+            [ "refined : \8704 (m : N) (e : Ev (s m)) -> IsSucc m"
+            , "refined = \\ m e -> case e of { evs n en -> isucc n }"
+            , "usesHyp : \8704 (m : N) (h : Ev m) (e : Ev (s m)) -> IsSucc m"
+            , "usesHyp = \\ m h e -> case e of { evs n en -> isucc n }"
+            , "mentionsIndex : \8704 (m : N) (e : Ev (s m)) -> IsSucc (s m)"
+            , "mentionsIndex = \\ m e -> case e of { evs n en -> isucc (s n) }"
+            , "check1 : Eq (IsSucc (s z)) (refined (s z) (evs z evz)) (isucc z)"
+            , "check1 = refl (IsSucc (s z)) (isucc z)"
+            , "check3 : Eq (IsSucc (s (s z))) (mentionsIndex (s z) (evs z evz)) (isucc (s z))"
+            , "check3 = refl (IsSucc (s (s z))) (isucc (s z))"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __AND SO DOES A NAME A FRIENDLY INDEX ABSTRACTED__ (MS9 phase 196,
+    -- @~8v3pg@), which is the same ruling on the path that makes no copy. An
+    -- index the target supplies as a plain variable that no other entry mentions
+    -- needs no equation: the motive abstracts it outright. So nothing is
+    -- generalised and nothing is solved, and until this phase nothing bound the
+    -- ambient name either — the arm's goal was about the abstracted variable
+    -- while the name still reached the entry outside.
+    --
+    -- @indexIsRefined@ is the shape, and @m@ is the author's own name for
+    -- @Ev m@'s index: in the @evz@ arm it means @z@ and in the @evs@ arm it
+    -- means @s (s n)@, so one @refl N m@ answers both. @sameIndex@ is the same
+    -- thing where the index is the constructor's OWN argument — @mk@'s @k@ —
+    -- and writing @mk m@ there was refused with @m and k cannot be made equal@.
+    --
+    -- **Both compute**: @check@ asserts the first by @refl@ inside the module,
+    -- and the @:whnf@ below is the second, so a name bound to the wrong term
+    -- fails here rather than passing quietly.
+  , testCase "a friendly index's ambient name means the refined thing too" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (evModule ++
+            [ "data D : N -> Type\8320 where"
+            , "  mk : \8704 (k : N) -> D k"
+            , ""
+            , "indexIsRefined : \8704 (m : N) (e : Ev m) -> Eq N m m"
+            , "indexIsRefined = \\ m e -> case e of \
+              \{ evz -> refl N m ; evs n en -> refl N m }"
+            , "sameIndex : \8704 (m : N) (d : D m) -> D m"
+            , "sameIndex = \\ m d -> case d of { mk k -> mk m }"
+            , "check : Eq (Eq N z z) (indexIsRefined z evz) (refl N z)"
+            , "check = refl (Eq N z z) (refl N z)"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      let (s2, q) = command s1 ":whnf sameIndex (s z) (mk (s z))"
+      unwords (renderResponse s2 q) @?= "mk (s z)"
+
+    -- __AND SO DOES THE SCRUTINEE ITSELF__ (MS9 phase 202, @~hc4ps@), which is
+    -- the last name a split refines that is not a binder of the method. Inside
+    -- a method the target is the constructor applied to that method's
+    -- arguments, so the entry the author named it by went on being its old self
+    -- at the old index: @case d of { mk V -> d }@ was refused with @U and V
+    -- cannot be made equal@, naming the refinement it would not apply, while
+    -- @mk V@ in the same arm declared.
+    --
+    -- __The split writes its own name for the target__ — @xsplit := d@, and
+    -- eliminates that — so the author's name is one step out and the arm binds
+    -- every name in the chain.
+    --
+    -- All three paths are here: @onFriendly@\'s index is abstracted outright,
+    -- @onTied@\'s is generalised and solved, and @underInduction@ is a method
+    -- that also carries a hypothesis. **All three compute**, asserted by
+    -- @refl@ inside the module.
+  , testCase "the scrutinee written in its own arm means the refined thing" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (evModule ++
+            [ "data D : N -> Type\8320 where"
+            , "  mk : \8704 (k : N) -> D k"
+            , ""
+            , "onFriendly : \8704 (U : N) (d : D U) -> D U"
+            , "onFriendly = \\ U d -> case d of { mk V -> d }"
+            , "onTied : \8704 (m : N) (e : Ev (s m)) -> Ev (s m)"
+            , "onTied = \\ m e -> case e of { evs n en -> e }"
+            , "underInduction : \8704 (m : N) (e : Ev m) -> Ev m"
+            , "underInduction = \\ m e -> induction e of { evz -> e ; evs n en -> e }"
+            , "check1 : Eq (D (s z)) (onFriendly (s z) (mk (s z))) (mk (s z))"
+            , "check1 = refl (D (s z)) (mk (s z))"
+            , "check2 : Eq (Ev (s (s z))) (onTied (s z) (evs z evz)) (evs z evz)"
+            , "check2 = refl (Ev (s (s z))) (evs z evz)"
+            , "check3 : Eq (Ev (s (s z))) (underInduction (s (s z)) (evs z evz)) (evs z evz)"
+            , "check3 = refl (Ev (s (s z))) (evs z evz)"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __AND WHERE THE PREMISE IS INTRODUCED MAKES NO DIFFERENCE__ (MS9 phase
+    -- 197, @~k54hh@), which is the same ruling again: the statement
+    -- @\8704 (n : N) (x : A n) (u : N) (f : F n u) -> N@ says nothing about the
+    -- order a proof introduces its own premises in, and @\ n x u ->@ across the
+    -- top is what a student writes.
+    --
+    -- Both proofs here are the same text with @u@ and @f@ bound in two places,
+    -- and the inner @case f of@ has to generalise the ambient @u@ either way —
+    -- @fs@'s own @s m@ faces @u@ and there is nothing on the rule's side to
+    -- move. @inside@ always worked. __@outside@ was refused with @N and
+    -- Eq {0} N (s m) u -> N cannot be made equal@__ — the equation stated and
+    -- kept, because the generalisation was cancelled rather than made.
+    --
+    -- __What cancelled it was the @az@ arm.__ The split's own closure found @u@
+    -- and the induction hypothesis and wanted both; the context it looked at
+    -- also held @azMethod@ and @azCase@, the /previous arm's/ solved
+    -- definitions, whose types mention @u@ because the statement's @f@ is in
+    -- them — and one definition anywhere in the closure used to cancel every
+    -- copy. They are now skipped, and nothing else about the split moved.
+    --
+    -- **Both compute, to the same answer**, so a generalisation that lands on
+    -- the wrong copy fails here rather than declaring quietly.
+  , testCase "where a premise is introduced does not decide whether it loads" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (reachModule ++
+            [ "inside : \8704 (n : N) (x : A n) (u : N) (f : F n u) -> N"
+            , "inside = \\ n x -> induction x of \
+              \{ az -> \\ u f -> z ; as k p -> \\ u f -> case f of { fs j m r -> m } }"
+            , "outside : \8704 (n : N) (x : A n) (u : N) (f : F n u) -> N"
+            , "outside = \\ n x u -> induction x of \
+              \{ az -> \\ f -> z ; as k p -> \\ f -> case f of { fs j m r -> m } }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      let two = "(s (s z)) (as (s z) (as z az)) (s (s z)) (fs (s z) (s z) (fs z z fz))"
+          (s2, q) = command s1 (":whnf inside " ++ two)
+          (s3, q') = command s2 (":whnf outside " ++ two)
+      unwords (renderResponse s2 q) @?= "s z"
+      unwords (renderResponse s3 q') @?= "s z"
+
+    -- __AND A RECURSION MAY SUPPLY A GENERALISED PREMISE__ (MS9 phase 198,
+    -- @~krvdx@). Where the statement's own premises include one the split has to
+    -- generalise, the induction hypothesis stops being "the declaration's
+    -- telescope minus the target": the motive quantifies a copy of each
+    -- generalised entry and states one equation per tied index, so the
+    -- hypothesis takes those first.
+    --
+    -- @e@ is the case, and it is generalised because its type mentions @n@, the
+    -- index of the target. The hypothesis in the @as@ arm is
+    -- @∀ (n : N) (e : Eq N n n) -> Eq N k n -> N@, and the call supplies the
+    -- first two: @k@ is what the recursion says @n@ is at the smaller subject
+    -- and @refl N k@ is what it says @e@ is. **The equation is then reflexive,
+    -- and that is why the call's own arguments decide it** rather than anything
+    -- the arm carries.
+    --
+    -- Before this phase the call was the hypothesis applied to the arguments
+    -- after the one it recurses on, so @refl N k@ landed in the slot wanting an
+    -- @N@ and the kernel refused it with @N and Eq are different names@.
+    --
+    -- **@p38@ is the other spelling and stays refused**, which is the machinery
+    -- working: it passes the arm's own @e@, which the split refined to the copy
+    -- at @s k@, where a hypothesis about @k@ wants @Eq N k k@.
+  , testCase "a recursion supplies the premise a split generalised" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (reachModule ++
+            [ "takesPremise : \8704 (n : N) (x : A n) (e : Eq N n n) -> N"
+            , "takesPremise = \\ n x e -> induction x of \
+              \{ az -> z ; as k p -> s (takesPremise k p (refl N k)) }"
+            , "noPremise : \8704 (n : N) (x : A n) -> N"
+            , "noPremise = \\ n x -> induction x of \
+              \{ az -> z ; as k p -> s (noPremise k p) }"
+              -- Asserted by @refl@ inside the module rather than with
+              -- @:whnf@, which stops at the @s@ the answer is headed by and so
+              -- would say nothing about the recursion under it.
+            , "check : Eq N (takesPremise (s z) (as z az) (refl N (s z))) (s z)"
+            , "check = refl N (s z)"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+  , refusesIn reachModule "a recursion passing the arm's own refined premise is refused"
+      [ "wrongPremise : \8704 (n : N) (x : A n) (e : Eq N n n) -> N"
+      , "wrongPremise = \\ n x e -> induction x of \
+        \{ az -> z ; as k p -> s (wrongPremise k p e) }"
+      ]
+      "stuck: s k and k cannot be made equal"
+
+    -- __AND A RECURSION MAY VARY A PREMISE THE SPLIT DID NOT SPLIT ON__ (MS9
+    -- phase 199, @~754m3@), which is the last of the four and the one the two
+    -- TAPL rewrites were waiting on.
+    --
+    -- @u@ is the case. The tied index seeds @n@, and the forward closure takes
+    -- @f : F n u@ because its type mentions @n@ — but it used to leave @u@
+    -- behind, so the induction hypothesis read @∀ n' (f' : F n' u) -> …@ about
+    -- the **ambient** @u@. The inner split then refines that @u@ to @s m@ while
+    -- the recursion needs the hypothesis at @m@, so **the hypothesis the proof
+    -- needs did not exist in the arm at all** and nothing at the call could have
+    -- found it. The closure now closes backward as well — an entry a generalised
+    -- entry's type mentions is generalised too — and the copies are a telescope
+    -- that mentions nothing it did not take.
+    --
+    -- **It computes**, so a hypothesis generalised at the wrong index fails here
+    -- rather than declaring: three @fs@ layers deep, the answer counts them.
+  , testCase "a recursion varies a premise the split did not split on" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (reachModule ++
+            [ "varies : \8704 (n : N) (x : A n) (u : N) (f : F n u) -> N"
+            , "varies = \\ n x u f -> induction x of \
+              \{ az -> z ; as k p -> case f of { fs j m r -> s (varies k p m r) } }"
+            , "check : Eq N (varies (s (s z)) (as (s z) (as z az)) (s (s z)) \
+              \(fs (s z) (s z) (fs z z fz))) (s (s z))"
+            , "check = refl N (s (s z))"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __AND A SPLIT MAY TIE MORE THAN ONE INDEX__ (MS9 phase 201, @~zv8kf@).
+    -- Every shape above ties exactly one, and the difference is not the number
+    -- of copies: the specialiser solves the first equation outside the arm's
+    -- own \955-chain and every further one at a binder /of/ it, so the chain is
+    -- one binder longer than the arguments handed to it per coercion inside.
+    -- 'Thena.Tactics.Recurse' read that chain to turn a position in the
+    -- method's telescope into a position in the arm, ran out of arguments and
+    -- found no hole at all — so the arm was walked with no hypothesis in scope
+    -- and the call was refused for matching none.
+    --
+    -- @P@ ties both its indices: @pr@\'s @s a@ and @s b@ face the ambient @x@
+    -- and @y@, and @hx@ and @hy@ are what makes each tied rather than friendly.
+    -- **It computes two layers deep**, so a recursion tied to the wrong copy
+    -- fails here rather than declaring quietly.
+  , testCase "a recursion crosses a split that tied two indices" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (tiedModule ++
+            [ "twoTied : \8704 (x : N) (y : N) (hx : Q x) (hy : Q y) (p : P x y) -> N"
+            , "twoTied = \\ x y hx hy p -> induction p of \
+              \{ pz c -> z ; pr a b r -> s (twoTied a b (qq a) (qq b) r) }"
+            , "check : Eq N (twoTied (s (s z)) (s (s (s z))) (qq (s (s z))) \
+              \(qq (s (s (s z)))) (pr (s z) (s (s z)) (pr z (s z) (pz (s z))))) (s (s z))"
+            , "check = refl N (s (s z))"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+    -- __And the pair of indices the call claims is still checked__: swapping
+    -- them is a recursion at indices the split did not reach, and the kernel
+    -- says so at the call.
+  , refusesIn tiedModule "a recursion at the wrong pair of tied indices is refused"
+      [ "swapped : \8704 (x : N) (y : N) (hx : Q x) (hy : Q y) (p : P x y) -> N"
+      , "swapped = \\ x y hx hy p -> induction p of \
+        \{ pz c -> z ; pr a b r -> s (swapped b a (qq b) (qq a) r) }"
+      ]
+      "stuck: a and b cannot be made equal"
+
+    -- __AND THE RECURSION DEMANDS A COPY THE ARMS DO NOT__ (MS9 phase 205,
+    -- @~wk9qh@). Every shape above has its premises introduced where the split
+    -- can reach them /and/ a constructor whose conclusion index asks for a copy.
+    -- @T@ asks for neither: @tl@'s conclusion sits at its own argument @g0@, so
+    -- no /method/ needs @g@ copied — but its recursive premise sits at @s g0@,
+    -- so the induction hypothesis reads @Eq N (s g0) g -> …@ against the
+    -- ambient @g@ and no call can discharge it.
+    --
+    -- **The fix is the same positional test asked of the premise's indices**,
+    -- which is why @vtail@ below still demands nothing: @vcons@'s premise sits
+    -- at its own @k@, where @tl@'s sits at @s g0@.
+    --
+    -- **Two controls, and both declared before this phase**: the same proof with
+    -- @g1@ and @inc@ introduced inside the arms, and the same proof where the
+    -- recursion does not vary them. Those are why the item was a defect rather
+    -- than a limit — where a premise is introduced must not decide whether a
+    -- proof loads.
+  , testCase "a recursion varies a premise across a tied index no arm needs copied" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (atTopModule ++
+            [ "atTop : \8704 (g : N) (d : T g) (g1 : N) (inc : Inc g g1) -> N"
+            , "atTop = \\ g d g1 inc -> induction d of \
+              \{ tv g0 -> g1 ; tl g0 p -> atTop (s g0) p (s g1) (mkInc (s g0) (s g1)) }"
+            , "check : Eq N (atTop z (tl z (tv (s z))) z (mkInc z z)) (s z)"
+            , "check = refl N (s z)"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __A STATEMENT ABOUT THE THING YOU SPLIT, which is @~pmpqg@ and his
+    -- ruling of 2026-10-22 (MS9 phase 206).__ @L@ has no indices, so nothing is
+    -- tied and the only refinement available is the motive abstracting the
+    -- target. The split hands the eliminator a hole it elaborated @l@ into, so a
+    -- goal written in the author's own @l@ held no occurrence to abstract and
+    -- the @ln@ arm was asked for @P l@: *ln and l cannot be made equal*.
+  , testCase "a goal written in the author's own name for the target is refined" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (listModule ++
+            [ "goalMentions : \8704 (l : L) -> P l"
+            , "goalMentions = \\ l -> case l of { ln -> mkP ln ; lc a as -> mkP (lc a as) }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __And the premise half, which is why the two had to move together.__ With
+    -- the goal refined and the premise left alone the arm would hold a fact
+    -- about a subject it cannot even name, the arm having rebound @l@ to @ln@
+    -- (@~hc4ps@). So a premise whose type mentions the target seeds the
+    -- generalisation and the arm gets it refined. **@q@ answering was not enough
+    -- of a test**: it declared before this phase too, because the motive was
+    -- constant and the arm's goal was the unrefined @P l@ that @q@ already had.
+    -- Answering one arm with the refined term is what pins it.
+  , testCase "a premise whose type mentions the target is refined with it" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (listModule ++
+            [ "bothWays : \8704 (l : L) (q : P l) -> P l"
+            , "bothWays = \\ l q -> case l of { ln -> mkP ln ; lc a as -> q }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __And the target's own type does NOT drag its mentions into the
+    -- closure__, which is the narrowing the first build of this got wrong.
+    -- 'grow' closes backward as well as forward, so seeding the target itself
+    -- generalised everything its type mentioned — §3.7's own worked example
+    -- among them. It is the premises ABOUT the target that are seeded. Here
+    -- @d : Q n@ is the target and @e : Eq N n n@ mentions @n@ through the
+    -- target's type only, so it must stay fixed.
+  , testCase "a split does not generalise what the target's own type mentions" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (atTopModule ++
+            [ "data Q : N -> Type\8320 where"
+            , "  qq : \8704 (n : N) -> Q n"
+            , ""
+            , "fixed : \8704 (n : N) (d : Q n) (e : Eq N n n) -> N"
+            , "fixed = \\ n d e -> case d of { qq n0 -> n0 }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- ----------------------------------------------------------------
+    -- A FORCED POSITION (MS9 phase 185)
+    -- ----------------------------------------------------------------
+
+    -- __@vtail@, which is the milestone's own case and the one phase 184 could
+    -- not do.__ Splitting @v : Vec A (succ n)@ solves @vcons@'s own @k@ against
+    -- the outer @n@, so the subgoal binds two of the constructor's three
+    -- arguments and the pattern names three. The name in the forced position
+    -- becomes a /definition/ equal to what it was forced to — his ruling of
+    -- 2026-10-19 — so the arm's text means what it reads like either way.
+    --
+    -- __And no @vnil@ arm is written__, because that case vanished: the
+    -- conflicting equation closed the method outright, so there is nothing to
+    -- elaborate into and nothing for coverage to want.
+  , testCase "a split over an indexed family declares, with a forced position" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (vecModule ++ vtailDef))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      -- Saturated, because @:whnf@ reads a CORE term and nothing is inserted
+      -- there: @vcons@'s parameter is an argument like any other, and an
+      -- under-applied former is not a 'Canonical' for ι to fire on.
+      let (s2, q) = command s1 ":whnf vtail Nat zero (vcons Nat zero zero (vnil Nat))"
+      unwords (renderResponse s2 q) @?= "vnil Nat"
+
+    -- __AN EMPTY ARM IS HOW THE VANISHED CASE IS WRITTEN__ (MS9 phase 189, his
+    -- ruling of 2026-10-20). @vnil@'s method is closed by a conflicting
+    -- equation — @succ n = zero@ — so there is nothing to prove and the arm
+    -- carries no term. The same proof as above, with the case named rather than
+    -- left out, and it declares and computes identically.
+  , testCase "an arm with no body is accepted where the case vanished" $ do
+      (s0, _) <- startingSession
+      let src = vecModule ++
+            [ "vtail : \8704 (A : Type\8320) (n : Nat) -> Vec A (succ n) -> Vec A n"
+            , "vtail = \\ A n v -> induction v of { vnil -> ; vcons k a as -> as }"
+            ]
+          (s1, r) = loadProofSource s0 (unlines src)
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      let (s2, q) = command s1 ":whnf vtail Nat zero (vcons Nat zero zero (vnil Nat))"
+      unwords (renderResponse s2 q) @?= "vnil Nat"
+
+    -- __A BODY WHERE THE CASE VANISHED IS THE REFUSAL THE LAW ADDS__ (MS9 phase
+    -- 190). @vnil@'s method is closed by a conflicting equation, so a term
+    -- written in that arm is the user claiming the case is reachable against a
+    -- proof that it is not. Before the law it loaded, declared and computed,
+    -- with @nonsense@, @zzz@ and @qqq@ in no scope and no word said.
+  , refusesIn vecModule "a body for a case that vanished is refused"
+      [ "vtailB : \8704 (A : Type\8320) (n : Nat) -> Vec A (succ n) -> Vec A n"
+      , "vtailB = \\ A n v -> induction v of { vnil -> nonsense zzz qqq ; vcons k a as -> as }"
+      ]
+      "stuck: no clause of vanished-case-takes-no-body applies here"
+
+    -- __AND REFUSED WHERE THE CASE SURVIVED__, which is the other half of the
+    -- same ruling: @zero@'s method is right there, so there is something to
+    -- prove and the arm is what proves it. **The refusal names the user's
+    -- mistake and not the search** — @arm-for@ found the arm; what is missing is
+    -- its body.
+  , refuses "an arm with no body is refused where the case survived"
+      [ "pred : Nat -> Nat"
+      , "pred = \\ n -> induction n of { zero -> ; succ m -> m }"
+      ]
+      "stuck: no clause of arm-needs-body applies here"
+
+    -- __The forced position is a definition, and @refl@ proves it.__ The goal
+    -- is @Eq Nat n n@ and the arm answers with @refl Nat k@, whose type is
+    -- @Eq Nat k k@. The two are convertible only because @k@ /is/ @n@ — a
+    -- definition, not a propositional equation — so this is the design's claim
+    -- that no @Eq@ hypothesis and no transport is needed, run rather than
+    -- argued.
+  , testCase "and the name it binds is definitionally what it was forced to" $ do
+      (s0, _) <- startingSession
+      let src = vecModule ++
+            [ "tailLen : \8704 (A : Type\8320) (n : Nat) -> Vec A (succ n) -> Eq Nat n n"
+            , "tailLen = \\ A n v -> induction v of { vcons k a as -> refl Nat k }"
+            ]
+          (s1, r) = loadProofSource s0 (unlines src)
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- A wildcard in a forced position binds nothing at all, there being no
+    -- binder to take and no name asked for.
+  , testCase "a wildcard in a forced position binds nothing" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (vecModule ++
+            [ "vtailW : \8704 (A : Type\8320) (n : Nat) -> Vec A (succ n) -> Vec A n"
+            , "vtailW = \\ A n v -> induction v of { vcons _ a as -> as }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __TWO forced positions, which is the shape the corpus is made of__: an
+    -- inversion lemma over an indexed family whose index is pinned to a
+    -- two-argument constructor form. @okNode@ takes four arguments and the
+    -- equation @Eq Tr (node a b) (node p q)@ decomposes by injectivity into two
+    -- that are then solved, so @a@ and @b@ are both definitions and only the two
+    -- sub-derivations are binders. It computes, which is what says the methods
+    -- went to the right constructors.
+  , testCase "an inversion lemma forces two positions and still computes" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (okModule ++
+            [ "left : \8704 (p q : Tr) -> Ok (node p q) -> Ok p"
+            , "left = \\ p q d -> induction d of { okNode a b da db -> da }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      let (s2, q) = command s1
+            ":whnf left leaf leaf (okNode leaf leaf okLeaf okLeaf)"
+      unwords (renderResponse s2 q) @?= "okLeaf"
+
+    -- __TWO HYPOTHESES, AND THE CALL SAYS WHICH__ (MS9 phase 186). @okNode@
+    -- has two recursive arguments, so the arm has a hypothesis about each; the
+    -- call names @da@, so it is that one, and nothing had to be told. This is
+    -- the case where selection by /type/ would have had two candidates.
+  , testCase "a call picks its hypothesis out of two by the argument it names" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (okModule ++
+            [ "count : \8704 (t : Tr) -> Ok t -> Nat"
+            , "count = \\ t d -> induction d of"
+            , "  { okLeaf -> zero ; okNode a b da db -> succ (count a da) }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      -- @:convert@ and not @:whnf@: weak head normal form stops at the
+      -- @succ@, so only conversion says the hypothesis reduced to @zero@.
+      let (s2, q) = command s1
+            ":convert count (node leaf leaf) (okNode leaf leaf okLeaf okLeaf) \
+            \\8799 succ zero"
+      unwords (words (unwords (renderResponse s2 q))) @?=
+        "count (node leaf leaf) (okNode leaf leaf okLeaf okLeaf) \8799 succ zero yes"
+
+    -- __And a call naming both is refused rather than guessed at.__ Which
+    -- argument it recurses on is simply not written down, and there is no
+    -- ordering to fall back on that would not be arbitrary.
+  , refusesIn okModule "a call naming two hypotheses is refused as ambiguous"
+      [ "g : Tr -> Tr -> Tr"
+      , "g = \\ x y -> induction x of { leaf -> leaf ; node l r -> g l r }"
+      ]
+      "stuck: this call names 2 arguments that have an induction hypothesis, \
+      \so which one it recurses on is not written down: g l r"
+
+    -- __A PREMISE BOUND BEFORE THE SPLIT IS FIXED, AND THE CALL MAY SAY SO__
+    -- (MS9 phase 208, @~5kcb4@). @u@ is introduced across the top, after the
+    -- target, and the recursive call passes it: the hypothesis does not take it
+    -- — the motive quantifies nothing the body had already introduced — so the
+    -- argument is dropped. Until this phase it was applied to the hypothesis,
+    -- which is not a function, and the kernel refused the proof naming a binder
+    -- the author never wrote. **It refused every proof written with all of its
+    -- premises across the top**, which is how the examples are written.
+  , testCase "a call may pass a premise the split fixed" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (okModule ++
+            [ "size : \8704 (t : Tr) -> Ok t -> Tr -> Nat"
+            , "size = \\ t d u -> induction d of"
+            , "  { okLeaf -> zero ; okNode a b da db -> succ (size a da u) }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __AND IT MAY NOT VARY ONE.__ The hypothesis is the statement at @u@ and
+    -- at nothing else, so a call at @node u u@ is not it. Dropping the argument
+    -- in silence would make the call read as a statement it is not, and the
+    -- message says where the premise belongs instead.
+  , refusesIn okModule "a call may not vary a premise the split fixed"
+      [ "size2 : \8704 (t : Tr) -> Ok t -> Tr -> Nat"
+      , "size2 = \\ t d u -> induction d of"
+      , "  { okLeaf -> zero ; okNode a b da db -> succ (size2 a da (node u u)) }"
+      ]
+      "stuck: the split fixed u and this call passes node u u, so it is not \
+      \the induction hypothesis \8212 a premise the induction varies is bound \
+      \inside the arm and not before the split: size2 a da (node u u)"
+
+    -- __AND BOUND INSIDE THE ARM IT VARIES FREELY__, which is the whole of the
+    -- remedy: the motive then quantifies it and the hypothesis takes it. Same
+    -- statement, same proof, and the only difference is where the λ is.
+  , testCase "a premise bound inside the arm may vary across the recursion" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (okModule ++
+            [ "size3 : \8704 (t : Tr) -> Ok t -> Tr -> Nat"
+            , "size3 = \\ t d -> induction d of"
+            , "  { okLeaf -> \\ u -> zero"
+            , "  ; okNode a b da db -> \\ u -> succ (size3 a da (node u u)) }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __A VARIABLE INSIDE A TIED INDEX MAY NOT BE COPIED__ (MS9 phase 210,
+    -- @~5kcb4@). The upper index is @tv z@, so it is tied and an equation is
+    -- stated for it; @d2@ mentions the bare index @g@, so phase 209 refines it,
+    -- and the backward closure then reached @z@ through @d2@'s type. Copying it
+    -- restated @SbTrans@'s equation as @Eq Ty2 t1 (tv z')@ over a copy bound
+    -- AFTER @t1@, so the only solution left pointed forwards and the arm was
+    -- handed an equation nothing could discharge — @~cq5mt@'s trap, reached
+    -- from the other side.
+  , testCase "a variable inside a tied index is not copied" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (sbModule ++
+            [ "trv : \8704 (z : String) (g : Nat) (s : Ty2) (t : Ty2)"
+            , "        -> Sb g s (tv z) -> Sb g (tv z) t -> Sb g s t"
+            , "trv = \\ z g s t d1 d2 -> induction d1 of"
+            , "  { SbRefl g0 x -> d2"
+            , "  ; SbTrans x u g0 t1 p1 -> SbTrans x u g0 t (trv z g0 u t p1 d2) }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __A SPLIT IN AN ARGUMENT POSITION IS HANDED ITS GOAL AS A NAME__ (MS9
+    -- phase 208, @~5kcb4@), and abstracting the term handed abstracts nothing.
+    -- The expected type of @idT@'s second argument is one of the @let@s
+    -- elaboration binds, so the goal is @a1@ over @a1 := R a2 a3@,
+    -- @a2 := a@ and @a3 := c@: neither index occurs in it, the motive comes out
+    -- constant in both positions, and the two definitions that do mention the
+    -- indices were counted as fixed premises, so an equation was stated for each.
+    -- The specialiser solves one by the method's own binder and the second is
+    -- left between two ambient variables, which is rigid and reaches every arm —
+    -- @~7pn6x@'s failure in a place @~7pn6x@ did not reach.
+  , testCase "a split in an argument position refines its goal" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (twoModule ++
+            [ "f : \8704 (a : String) (c : String) -> Eq String a c -> R a c"
+            , "f = \\ a c q -> idT (R a c) (case q of { refl u -> mkR u u })"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __AND IT REACHES AN INDEX THROUGH A COPY OF A COMPOUND TERM__, which is
+    -- why the goal's copies are unfolded rather than renamed. @R (f a) c@ in an
+    -- argument position arrives over @a3 := mk a4@ and @a4 := a@, so no index
+    -- occurs in the goal even after every name for it is substituted: the copy
+    -- has to be looked through.
+  , testCase "a split sees an index under a copy of a compound term" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (twoModule ++
+            [ "pad : String -> String"
+            , "pad = \\ s -> appendString s \"!\""
+            , ""
+            , "g : \8704 (a : String) (c : String) -> Eq String a c -> R (pad a) c"
+            , "g = \\ a c q -> idT (R (pad a) c) (case q of { refl u -> mkR (pad u) u })"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __A PREMISE ABOUT AN INDEX IS REFINED WITH IT__ (MS9 phase 208), which is
+    -- @~pmpqg@'s ruling for the index half. Nothing /demands/ a copy of either
+    -- index — @refl@'s index is its own argument at both positions — so @p@ was
+    -- left at @R a c@ while the arm's own subject is @u@, and the lemma could
+    -- not be written at all.
+  , testCase "a premise about an index is refined with the index" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (twoModule ++
+            [ "h : \8704 (a : String) (c : String) -> R a c -> Eq String a c -> R c a"
+            , "h = \\ a c p q -> case q of { refl u -> p }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __A SPLIT AT A VARIABLE INDEX TIES NOTHING__ (MS9 phase 186, `~7pn6x`),
+    -- and this is the case the whole corpus is: every lemma in
+    -- @examples\/progress.thena@ splits a derivation whose indices are the
+    -- lemma's own variables. Until the fix each arm was handed
+    -- @Eq Tr leaf t -> …@, an equation over an ambient variable, which is rigid
+    -- and which no specialiser transition can touch.
+    --
+    -- __It is the tactic's own scaffolding that caused it.__ @induction … of@
+    -- cannot know the target's type before elaborating it, so it claims a hole
+    -- for the type and a hole for the target; the user's own hypothesis and the
+    -- type hole then both mention the index, and the friendliness test counted
+    -- them as fixed premises. The regression this guards is therefore invisible
+    -- to any test that calls the tactic directly — it needs the surface.
+  , testCase "a split at a variable index states no equation" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (okModule ++
+            [ "idOk : \8704 (t : Tr) -> Ok t -> Ok t"
+            , "idOk = \\ t d -> induction d of"
+            , "  { okLeaf -> okLeaf ; okNode a b da db -> okNode a b da db }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      let (s2, q) = command s1 ":whnf idOk leaf okLeaf"
+      unwords (renderResponse s2 q) @?= "okLeaf"
+
+    -- __And two indices, which is `progress`'s own shape__: a derivation
+    -- indexed by both the term and its type, with the target bound as a λ
+    -- parameter beside them.
+  , testCase "and a family with two variable indices" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (okModule ++
+            [ "data Ty : Type\8320 where"
+            , "  base : Ty"
+            , ""
+            , "data Has : Tr -> Ty -> Type\8320 where"
+            , "  hLeaf : Has leaf base"
+            , "  hNode : \8704 (a b : Tr) -> Has a base -> Has b base"
+            , "    -> Has (node a b) base"
+            , ""
+            , "fine : \8704 (t : Tr) (T : Ty) -> Has t T -> Ty"
+            , "fine = \\ t T d -> induction d of"
+            , "  { hLeaf -> base ; hNode a b da db -> base }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __A forced position cannot be destructured__, and that is a limitation of
+    -- the feature rather than of this phase: an inaccessible position binds
+    -- nothing, so there is nothing for a sub-pattern to match on. @no-nesting@
+    -- is the refusal, exactly as it is in a surviving position.
+  , refusesIn vecModule "a nested pattern in a forced position is declined"
+      [ "vtailN : \8704 (A : Type\8320) (n : Nat) -> Vec A (succ n) -> Vec A n"
+      , "vtailN = \\ A n v -> induction v of { vcons (succ j) a as -> as }"
+      ]
+      "stuck: no clause of no-nesting applies here"
+
+    -- ----------------------------------------------------------------
+    -- @case … of@ WITH ARMS (MS9 phase 188)
+    -- ----------------------------------------------------------------
+
+    -- __The same split, through @caseD@ instead of the eliminator.__ The term
+    -- is an application of the generated @caseNat@ global rather than an
+    -- @Eliminate@ node, so every method is the eliminator's minus its inductive
+    -- hypotheses — and @pred@ wants none, which is why this is the honest
+    -- spelling of it.
+    --
+    -- __Checked by reduction__, for the reason @induction@'s own case gives:
+    -- only reduction says the methods went to the right constructors, and here
+    -- it also says @caseNat@ δ-unfolds to the elimination underneath.
+  , testCase "case: a function defined by case analysis declares and computes" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (natModule ++
+            [ "predC : Nat -> Nat"
+            , "predC = \\ n -> case n of { zero -> zero ; succ m -> m }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      let (s2, q) = command s1 ":whnf predC (succ (succ zero))"
+      unwords (renderResponse s2 q) @?= "succ zero"
+
+    -- __And the term says which word was written.__ @caseNat@ applied, with a
+    -- method per constructor and no hypothesis in either.
+  , testCase "and the term applies caseNat, not an elim node" $ do
+      (s0, _) <- startingSession
+      let (s1, _) = loadProofSource s0 (unlines (natModule ++
+            [ "predC : Nat -> Nat"
+            , "predC = \\ n -> case n of { zero -> zero ; succ m -> m }"
+            ]))
+          (s2, q) = command s1 ":show predC"
+          shown   = unwords (renderResponse s2 q)
+      assertBool shown ("caseNat" `isInfixOf` shown)
+
+    -- __A RECURSIVE CALL IN A @case@ ARM IS REFUSED, AND BY ITSELF.__ Nothing
+    -- checks for it: @caseD@'s methods carry no hypothesis, so there is none
+    -- for @tie-recursion@ to tie the call to, and the refusal is the same one a
+    -- call on the wrong index gets under @induction@. That is the whole of why
+    -- @case@ against @induction@ is a /type/ here and not a convention.
+  , refuses "a recursive call in a case arm has no hypothesis to tie to"
+      [ "dblC : Nat -> Nat"
+      , "dblC = \\ n -> case n of { zero -> zero ; succ m -> succ (succ (dblC m)) }"
+      ]
+      "stuck: no induction hypothesis is about this call, so it is not \
+      \structurally smaller: dblC m"
+
+    -- __The equations and the forced positions are shared__, which is the
+    -- claim that the two words differ by hypotheses and nothing else. @vnil@
+    -- vanishes on a conflicting equation with no arm written, @vcons@'s own
+    -- @k@ is forced to the outer @n@, and the arm binds two of three.
+  , testCase "case over an indexed family forces a position the same way" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (vecModule ++
+            [ "vtailC : \8704 (A : Type\8320) (n : Nat) -> Vec A (succ n) -> Vec A n"
+            , "vtailC = \\ A n v -> case v of { vcons k a as -> as }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+      let (s2, q) = command s1 ":whnf vtailC Nat zero (vcons Nat zero zero (vnil Nat))"
+      unwords (renderResponse s2 q) @?= "vnil Nat"
+
+    -- Coverage fails the same way under @case@, and says the same thing.
+  , refuses "a case that survived with no arm is refused under case too"
+      [ "partialC : Nat -> Nat"
+      , "partialC = \\ n -> case n of { zero -> zero }"
+      ]
+      "stuck: no clause of case-needs-an-arm applies here"
+  ]
+  where
+    natModule =
+      [ "module M where", ""
+      , "data Nat : Type\8320 where"
+      , "  zero : Nat"
+      , "  succ : Nat -> Nat"
+      , ""
+      ]
+    -- Phase 191's own shapes: a family whose constructor's index wraps the
+    -- recursive one twice, so a split against @Ev (s m)@ leaves @s n@ facing an
+    -- @m@ bound outside it and the split has to generalise.
+    evModule =
+      [ "module Ev where"
+      , ""
+      , "data N : Type\8320 where"
+      , "  z : N"
+      , "  s : N -> N"
+      , ""
+      , "data Ev : N -> Type\8320 where"
+      , "  evz : Ev z"
+      , "  evs : \8704 (n : N) (e : Ev n) -> Ev (s (s n))"
+      , ""
+      , "data IsSucc : N -> Type\8320 where"
+      , "  isucc : \8704 (n : N) -> IsSucc (s n)"
+      , ""
+      ]
+    -- Phase 197's shape (@~k54hh@): a two-index family whose constructor's
+    -- second index wraps its own argument, so a split against @F (s k) u@
+    -- leaves @s m@ facing an ambient @u@ and has to generalise it — under an
+    -- @induction@ on a /second/ family, which is what puts the previous arm's
+    -- solved definitions in the context the split looks at. @fz@ is here only
+    -- so that a closed inhabitant exists and the proofs can be computed.
+    reachModule =
+      [ "module Reach where"
+      , ""
+      , "data N : Type\8320 where"
+      , "  z : N"
+      , "  s : N -> N"
+      , ""
+      , "data F : N -> N -> Type\8320 where"
+      , "  fz : F z z"
+      , "  fs : \8704 (k : N) (m : N) (r : F k m) -> F (s k) (s m)"
+      , ""
+      , "data A : N -> Type\8320 where"
+      , "  az : A z"
+      , "  as : \8704 (k : N) (p : A k) -> A (s k)"
+      , ""
+      ]
+    -- Phase 201's shape (@~zv8kf@): a family whose constructor wraps /both/ its
+    -- indices, so a split against @P x y@ with @x@ and @y@ both tied states two
+    -- equations. @Q@ is inhabited at every index, so a recursion can supply the
+    -- copies the motive quantified.
+    tiedModule =
+      [ "module Tied where"
+      , ""
+      , "data N : Type\8320 where"
+      , "  z : N"
+      , "  s : N -> N"
+      , ""
+      , "data P : N -> N -> Type\8320 where"
+      , "  pz : \8704 (c : N) -> P z c"
+      , "  pr : \8704 (a : N) (b : N) (r : P a b) -> P (s a) (s b)"
+      , ""
+      , "data Q : N -> Type\8320 where"
+      , "  qq : \8704 (n : N) -> Q n"
+      , ""
+      ]
+    -- Phase 205's shape (@~wk9qh@): a family that recurses at a /different/
+    -- index than it concludes at, with a premise about the index introduced at
+    -- the top. @Inc@ is inhabited at every pair, so the recursion can supply
+    -- the copy the motive quantified.
+    atTopModule =
+      [ "module AtTop where"
+      , ""
+      , "data N : Type\8320 where"
+      , "  z : N"
+      , "  s : N -> N"
+      , ""
+      , "data Inc : N -> N -> Type\8320 where"
+      , "  mkInc : \8704 (a : N) (b : N) -> Inc a b"
+      , ""
+      , "data T : N -> Type\8320 where"
+      , "  tv : \8704 (g : N) -> T g"
+      , "  tl : \8704 (g : N) (p : T (s g)) -> T g"
+      , ""
+      ]
+    -- Phase 206's shape (@~pmpqg@): a family with NO indices, and a second
+    -- family indexed by it, so that a statement can be /about/ the thing a
+    -- split takes apart.
+    -- __A two-index family and an identity, for a split in an ARGUMENT
+    -- POSITION__ (MS9 phase 208, @~5kcb4@). @idT@ is what puts the split there:
+    -- the goal then arrives as a name elaboration bound for the expected type,
+    -- which is the whole of what these probes are about.
+    -- __A family whose index is a CONSTRUCTOR APPLIED to an ambient variable__
+    -- (MS9 phase 210, @~5kcb4@), which is what @sub@'s middle type is in
+    -- @examples\/poplmark\/06-transitivity.thena@: @d1 : sub G S ‹Z›@ pins the
+    -- upper index to @tvar Z@, and @Z@ is inside it rather than being it.
+    sbModule =
+      natModule ++
+      [ "data Ty2 : Type\8320 where"
+      , "  tv : String -> Ty2"
+      , "  tp : Ty2"
+      , ""
+      , "data Sb : Nat -> Ty2 -> Ty2 -> Type\8320 where"
+      , "  SbTop : \8704 (g : Nat) (s : Ty2) -> Sb g s tp"
+      , "  SbRefl : \8704 (g : Nat) (x : String) -> Sb g (tv x) (tv x)"
+      , "  SbTrans : \8704 (x : String) (u : Ty2) (g : Nat) (t : Ty2)"
+      , "              -> Sb g u t -> Sb g (tv x) t"
+      , ""
+      ]
+    twoModule =
+      [ "module Two where"
+      , ""
+      , "data R : String -> String -> Type\8320 where"
+      , "  mkR : \8704 (s : String) (t : String) -> R s t"
+      , ""
+      , "idT : \8704 (A : Type\8320) (x : A) -> A"
+      , "idT = \\ A x -> x"
+      , ""
+      ]
+    listModule =
+      [ "module ListL where"
+      , ""
+      , "data N : Type\8320 where"
+      , "  z : N"
+      , "  s : N -> N"
+      , ""
+      , "data L : Type\8320 where"
+      , "  ln : L"
+      , "  lc : N -> L -> L"
+      , ""
+      , "data P : L -> Type\8320 where"
+      , "  mkP : \8704 (l : L) -> P l"
+      , ""
+      ]
+    vecModule =
+      natModule ++
+      [ "data Vec (A : Type\8320) : Nat -> Type\8320 where"
+      , "  vnil : Vec A zero"
+      , "  vcons : \8704 (k : Nat) (a : A) (as : Vec A k) -> Vec A (succ k)"
+      , ""
+      ]
+    okModule =
+      natModule ++
+      [ "data Tr : Type\8320 where"
+      , "  leaf : Tr"
+      , "  node : Tr -> Tr -> Tr"
+      , ""
+      , "data Ok : Tr -> Type\8320 where"
+      , "  okLeaf : Ok leaf"
+      , "  okNode : \8704 (a b : Tr) -> Ok a -> Ok b -> Ok (node a b)"
+      , ""
+      ]
+    vtailDef =
+      [ "vtail : \8704 (A : Type\8320) (n : Nat) -> Vec A (succ n) -> Vec A n"
+      , "vtail = \\ A n v -> induction v of { vcons k a as -> as }"
+      ]
+    predDef =
+      [ "pred : Nat -> Nat"
+      , "pred = \\ n -> induction n of { zero -> zero ; succ m -> m }"
+      ]
+
+    refuses = refusesIn natModule
+
+    refusesIn prefix what ls want = testCase what $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (prefix ++ ls))
+          said = filter (not . null) (renderResponse s1 r)
+      case said of
+        [] -> assertFailure "it loaded, and should not have"
+        rs -> unwords (words (last rs)) @?= want

@@ -70,6 +70,13 @@ tests =
         , ":whnf elim Fin () (\\ (n : Nat) (i : Fin n) -> Nat) \
           \((\\ (n : Nat) -> zero) (\\ (n : Nat) (i : Fin n) (ih : Nat) -> succ ih)) \
           \((succ (succ zero))) (fs (succ zero) (fz zero))"
+          -- **Case analysis, which is the eliminator minus the hypotheses**
+          -- (MS9 phase 178). @:show@ is the whole of what the generator did:
+          -- the type takes no @P x ->@ in its @succ@ method, and the body is an
+          -- @elim Nat@ whose methods bind the hypothesis and drop it. Then it
+          -- computes, which is the only thing a type cannot show.
+        , ":show caseNat"
+        , ":whnf caseNat (\\ (t : Nat) -> Nat) zero (\\ (m : Nat) -> m) (succ (succ zero))"
         , ":elim Foo"
         , ":elim Nat Nat"
         , ":elim"

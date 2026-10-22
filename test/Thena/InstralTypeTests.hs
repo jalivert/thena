@@ -146,18 +146,20 @@ theBuiltInTypes =
       -- party: 'renderTy' prints exactly these words and
       -- 'Thena.Rules.resolveTyIn' reads exactly these words, and a change to
       -- either has to come here and say so.
-    , testCase "and the list is exactly these eleven" $
+      -- **No count in the name**, for 'Thena.Rules.builtInTypes'\'s own reason:
+      -- the sentence that said how many went stale and the assertion did not.
+    , testCase "and the list is exactly these" $
         builtInTypes
           @?= [ "String", "Name", "Int", "Char", "Bool", "Surface", "Core"
-              , "Development", "Level", "List", "Option"
+              , "Development", "Level", "Pattern", "Binder", "List", "Option"
               ]
     , testCase "…which is what renderTy prints for each of them" $
         map renderTy
             [ TString, TName, TInt, TChar, TBool, TSurface, TCore, TDevelopment
-            , TList TInt, TOption TInt
+            , TPattern, TBinder, TList TInt, TOption TInt
             ]
           @?= [ "String", "Name", "Int", "Char", "Bool", "Surface", "Core"
-              , "Development", "List Int", "Option Int"
+              , "Development", "Pattern", "Binder", "List Int", "Option Int"
               ]
     ]
   where

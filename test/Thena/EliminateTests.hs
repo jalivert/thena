@@ -39,7 +39,7 @@ import Thena.Declared
   )
 import Thena.Driver (parseCore)
 import Thena.Errors (ElimError (..))
-import Thena.Global.Env (GlobalEnv)
+import Thena.Global.Env (GlobalEnv, Scheme (..))
 import Thena.Driver (Response (..), command, loadProofSource)
 import Thena.Files (startingSession)
 import Thena.Render ( Rendering (..)
@@ -56,6 +56,7 @@ tests =
     , testGroup "what it refuses" refusalTests
     , testGroup "a DEPENDENT motive, over the adversarial corpus" dependentMotives
     , testGroup "a goal that is an unfolded definition (MS6 phase 109c)" unfoldedGoal
+    , testGroup "a NESTED split: what it says it claimed, it claimed" nestedNames
     ]
 
 -- --------------------------------------------------------------------------
@@ -66,10 +67,9 @@ tests =
 --
 -- That is what let a real bug survive a behaviour-preserved check — the goal
 -- did not mention the target, so generalising it was a no-op and nothing about
--- the motive was exercised. `BUGHUNT.md` H says the same thing about the
--- type-check sweep in @GlobalTests@: it asks whether the generated equipment is
--- well formed, not whether it is the right shape, and only a proof that /uses/
--- it notices the difference.
+-- the motive was exercised. The type-check sweep in @GlobalTests@ asks
+-- whether the generated equipment is well formed, not whether it is the right
+-- shape, and only a proof that /uses/ it notices the difference.
 --
 -- So: each datatype below is eliminated at a goal that mentions the target, and
 -- the kernel is asked afterwards. @Eq {0} D x x@ is the smallest goal that is
@@ -343,9 +343,13 @@ friendlyTests =
           (without, n2) = contextOf env n0 [("n", "Nat"), ("i", "Fin n")]
        in do
             map (rendered with . thirdOf') (elimMethods (run "tied" env with n1 "Eq {0} Nat n n" "i"))
-              @?= [ "∀ (n1 : Nat) -> Eq {0} Nat (succ n1) n -> Eq {0} Nat (succ n1) (succ n1)"
-                  , "∀ (n1 : Nat) -> Fin n1 -> (Eq {0} Nat n1 n -> Eq {0} Nat n1 n1) \
-                    \-> Eq {0} Nat (succ n1) n -> Eq {0} Nat (succ n1) (succ n1)"
+              @?= [ "∀ (n1 : Nat) (n2 : Nat) -> Eq {0} Nat n2 n2 \
+                    \-> Eq {0} Nat (succ n1) n2 -> Eq {0} Nat (succ n1) (succ n1)"
+                  , "∀ (n1 : Nat) -> Fin n1 \
+                    \-> (∀ (n2 : Nat) -> Eq {0} Nat n2 n2 \
+                    \-> Eq {0} Nat n1 n2 -> Eq {0} Nat n1 n1) \
+                    \-> ∀ (n2 : Nat) -> Eq {0} Nat n2 n2 \
+                    \-> Eq {0} Nat (succ n1) n2 -> Eq {0} Nat (succ n1) (succ n1)"
                   ]
             map (rendered without . thirdOf') (elimMethods (run "free" env without n2 "Eq {0} Nat n n" "i"))
               @?= [ "∀ (n1 : Nat) -> Eq {0} Nat (succ n1) (succ n1)"
@@ -357,9 +361,10 @@ friendlyTests =
     -- the first freely. Before phase 19 this whole family was refused.
   , testCase "a dependent index telescope is fine when the dependent index is friendly" $
       map (rendered belowContext . thirdOf') (elimMethods belowProbe)
-        @?= [ "∀ (m : Nat) -> Eq {0} Nat (succ m) n -> Nat"
-            , "∀ (m : Nat) (j : Fin m) -> Below m j -> (Eq {0} Nat m n -> Nat) \
-              \-> Eq {0} Nat (succ m) n -> Nat"
+        @?= [ "∀ (m : Nat) (n1 : Nat) -> Eq {0} Nat (succ m) n1 -> Nat"
+            , "∀ (m : Nat) (j : Fin m) -> Below m j \
+              \-> (∀ (n1 : Nat) -> Eq {0} Nat m n1 -> Nat) \
+              \-> ∀ (n1 : Nat) -> Eq {0} Nat (succ m) n1 -> Nat"
             ]
 
     -- The load-bearing artifact of phase 19, and the thing @check@ alone would
@@ -369,7 +374,8 @@ friendlyTests =
   , testCase "and the motive's telescope carries the dependency" $
       rendered (withMethods belowContext belowProbe) (elimTerm belowProbe)
         @?= "(elim Below () (λ (n1 : Nat) (i1 : Fin n1) (target : Below n1 i1) \
-            \-> Eq {0} Nat n1 n -> Nat) (bzMethod bsMethod) (n i) b) (refl {0} Nat n)"
+            \-> ∀ (n2 : Nat) -> Eq {0} Nat n1 n2 -> Nat) (bzMethod bsMethod) (n i) b) \
+            \n (refl {0} Nat n)"
 
     -- A 'Definition' has a value as well as a type, and abstracting the
     -- variable would leave the value behind. Conservative on purpose: tying it
@@ -537,7 +543,7 @@ attempt env ctx n goal tgt = case parseCore [] env ctx n goal of
   Left e -> error ("fixture does not parse: " ++ show e)
   Right (g, n1) -> case parseCore [] env ctx n1 tgt of
     Left e        -> error ("fixture does not parse: " ++ show e)
-    Right (t, n2) -> eliminate env ctx n2 g t
+    Right (t, n2) -> eliminate env ctx Inductive n2 g t
 
 -- | The context the refinement is well typed in: the goal's, plus the holes
 -- the tactic asked for. 'Thena.Engine' puts them there with @insertAbove@; a
@@ -587,3 +593,52 @@ unfoldedGoal =
       if "subgoals: sameMethod, differentMethod" `elem` said && any ("valid" `isInfixOf`) said
         then pure ()
         else assertFailure (unlines said)
+
+-- --------------------------------------------------------------------------
+-- A nested split, and the name the message gives
+-- --------------------------------------------------------------------------
+
+-- | @subgoals:@ names the holes that now exist, not the hints they were asked
+-- for (MS9, 2026-10-19).
+--
+-- A method's hint is the constructor's name with @Method@ after it, and the
+-- hole it ends up with is that hint put through
+-- 'Thena.Development.Cursor.freshIdent'. **The two differ exactly when a split
+-- nests**: eliminating again /inside/ @succMethod@ asks for @zeroMethod@ and
+-- @succMethod@ a second time, and the second of those is the very guess the
+-- new holes are going in above — so they are claimed as @zeroMethod1@ and
+-- @succMethod1@.
+--
+-- The message was built from the hints, so it named two holes that do not
+-- exist, and it did so in the one situation where a reader most needs it:
+-- @goto-named "succMethod"@ at that point is accepted and focuses the
+-- /enclosing/ method, because that name is real and the one the message
+-- offered is not. Nothing was wrong with the development — @:revalidate@ is
+-- happy either way, which is why no suite caught this.
+--
+-- **Teeth**: build 'Thena.Engine.subgoalMessage' from the hints again and the
+-- second assertion below fails.
+nestedNames :: [TestTree]
+nestedNames =
+  [ testCase "the inner elimination's methods are named as they were claimed" $
+      let said = map show (loadedResponses (loadSource withRules (unlines script)))
+          says w = any ((("subgoals: " ++ w) `isInfixOf`)) said
+       in if says "zeroMethod, succMethod"
+             && says "zeroMethod1, succMethod1"
+             && any ("valid" `isInfixOf`) said
+            then pure ()
+            else assertFailure (unlines script ++ "\n  said: " ++ unlines said)
+  ]
+  where
+    -- Prelude-free, like every script in the suite (phase 11).
+    script =
+      [ "data Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
+      , ":theorem twice : \8704 (m : Nat) (n : Nat) -> Nat"
+      , "attack", "intro", "intro", "into", "along", "along"
+        -- The outer split, whose methods take the hints unchanged.
+      , "eliminate-core core`m`"
+        -- Into the one whose name the inner split will ask for again.
+      , "goto-named \"succMethod\""
+      , "eliminate-core core`n`"
+      , ":revalidate"
+      ]

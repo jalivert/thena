@@ -8,6 +8,19 @@
 -- of them has to be narrowed before transitivity applies to the bodies. The
 -- induction is on the structure of the middle type, with an inner induction
 -- on derivations.
+--
+-- == It is written in splits, and 16 `elim`s became none
+--
+-- **The three inversion lemmas are gone and so are the two datatypes they
+-- handed back**, because a split on the right-hand derivation IS the inversion:
+-- see the note below where they used to stand. That is 185 lines of this file.
+--
+-- **`narrowFrom` had to say more than its statement did**, for the same reason
+-- `03`'s `tyRebind` did: the SA-All case recurses at `Δ , W <: T1`, so the
+-- induction varies the Δ inside the `append`, and a split generalises whole
+-- premises and never a part of an index. `narrowFromAt` takes the context and
+-- the equation as arguments — the hand-written motive, said in the statement —
+-- and `narrowFrom` closes it with `refl`.
 
 module FsubTransitivity where
 
@@ -17,117 +30,30 @@ module FsubTransitivity where
 -- exactly where the freshness it needs is recorded.
 
 subRefl : forall (G : Ctx) (T : Ty) (h : ty G T) (o : ok G) -> sub G T T
-subRefl = \ G T h ->
-  elim ty () (\ C0 T0 h0 -> forall (o : ok C0) -> sub C0 T0 T0)
-    ((\ X T1 C0 lk o -> SA-Refl-TVar C0 X)
-     (\ C0 o -> SA-Top C0 Ty`⊤`)
-     (\ C0 T1 T2 h1 h2 ih1 ih2 o -> SA-Arrow C0 T1 T1 T2 T2 (ih1 o) (ih2 o))
-     (\ X C0 T1 T2 f h1 h2 ih1 ih2 o ->
-        SA-All C0 T1 T1 X T2 T2 (ih1 o)
-          (ok-bindTy C0 X T1 o f h1)
-          (ih2 (ok-bindTy C0 X T1 o f h1))))
-    (G T) h
+subRefl = \ G T h o -> induction h of
+  { ty-tvar X T1 C0 lk -> SA-Refl-TVar C0 X
+  ; ty-top C0 -> SA-Top C0 Ty`⊤`
+  ; ty-arrow C0 T1 T2 h1 h2 ->
+      SA-Arrow C0 T1 T1 T2 T2 (subRefl C0 T1 h1 o) (subRefl C0 T2 h2 o)
+  ; ty-all X C0 T1 T2 f h1 h2 ->
+      SA-All C0 T1 T1 X T2 T2 (subRefl C0 T1 h1 o)
+        (ok-bindTy C0 X T1 o f h1)
+        (subRefl (bindTy C0 X T1) T2 h2 (ok-bindTy C0 X T1 o f h1)) }
 
 
 -- ---------------------------------------------------------------------------
--- Inversion of subtyping on the SHAPE OF THE LOWER TYPE.
+-- THE INVERSION LEMMAS ARE GONE, and a split is why.
 --
--- `sub` gets no no-confusion lemma, so inversion is done the way 07 does it:
--- eliminate the derivation with a motive that takes an equation pinning the
--- index, then hand it `refl`.
-
--- Nothing is above ⊤ but ⊤.
-topSuper : forall (G : Ctx) (T : Ty) (d : sub G Ty`⊤` T) -> Eq Ty T Ty`⊤`
-topSuper = \ G T d ->
-  elim sub () (\ G0 S0 T0 d0 -> Eq Ty S0 Ty`⊤` -> Eq Ty T0 Ty`⊤`)
-    ((\ G0 S0 e -> refl Ty Ty`⊤`)
-     (\ G0 Z e -> absurdly (Eq Ty Ty`${Z}` Ty`⊤`) (noConfusionTy Ty`${Z}` Ty`⊤` e))
-     (\ Z U G0 T0 lk p1 ih1 e -> absurdly (Eq Ty T0 Ty`⊤`) (noConfusionTy Ty`${Z}` Ty`⊤` e))
-     (\ G0 T1 S1 S2 T2 p1 p2 ih1 ih2 e ->
-        absurdly (Eq Ty Ty`( ${T1} -> ${T2} )` Ty`⊤`)
-          (noConfusionTy Ty`( ${S1} -> ${S2} )` Ty`⊤` e))
-     (\ G0 T1 S1 Z S2 T2 p1 ok1 p2 ih1 ih2 e ->
-        absurdly (Eq Ty Ty`( ∀ ${Z} <: ${T1} . ${T2} )` Ty`⊤`)
-          (noConfusionTy Ty`( ∀ ${Z} <: ${S1} . ${S2} )` Ty`⊤` e)))
-    (G Ty`⊤` T) d (refl Ty Ty`⊤`)
-
--- Above an arrow there is ⊤, or an arrow related as SA-Arrow relates them.
-data ArrowSuper (G : Ctx) (A : Ty) (B : Ty) : Ty -> Type₀ where
-  AS-Top   : ArrowSuper G A B Ty`⊤`
-  AS-Arrow : forall (C : Ty) (D : Ty) (d1 : sub G C A) (d2 : sub G B D)
-               -> ArrowSuper G A B Ty`( ${C} -> ${D} )`
-
-arrowSuper : forall (G : Ctx) (A : Ty) (B : Ty) (T : Ty) (d : sub G Ty`( ${A} -> ${B} )` T)
-               -> ArrowSuper G A B T
-arrowSuper = \ G A B T d ->
-  elim sub () (\ G0 S0 T0 d0 -> Eq Ty S0 Ty`( ${A} -> ${B} )` -> ArrowSuper G0 A B T0)
-    ((\ G0 S0 e -> AS-Top G0 A B)
-     (\ G0 Z e ->
-        absurdly (ArrowSuper G0 A B Ty`${Z}`)
-          (noConfusionTy Ty`${Z}` Ty`( ${A} -> ${B} )` e))
-     (\ Z U G0 T0 lk p1 ih1 e ->
-        absurdly (ArrowSuper G0 A B T0)
-          (noConfusionTy Ty`${Z}` Ty`( ${A} -> ${B} )` e))
-     (\ G0 T1 S1 S2 T2 p1 p2 ih1 ih2 e ->
-        AS-Arrow G0 A B T1 T2
-          (substEq Ty (\ z -> sub G0 T1 z) S1 A
-            (andLeft (Eq Ty S1 A) (Eq Ty S2 B)
-              (noConfusionTy Ty`( ${S1} -> ${S2} )` Ty`( ${A} -> ${B} )` e)) p1)
-          (substEq Ty (\ z -> sub G0 z T2) S2 B
-            (andRight (Eq Ty S1 A) (Eq Ty S2 B)
-              (noConfusionTy Ty`( ${S1} -> ${S2} )` Ty`( ${A} -> ${B} )` e)) p2))
-     (\ G0 T1 S1 Z S2 T2 p1 ok1 p2 ih1 ih2 e ->
-        absurdly (ArrowSuper G0 A B Ty`( ∀ ${Z} <: ${T1} . ${T2} )`)
-          (noConfusionTy Ty`( ∀ ${Z} <: ${S1} . ${S2} )` Ty`( ${A} -> ${B} )` e)))
-    (G Ty`( ${A} -> ${B} )` T) d (refl Ty Ty`( ${A} -> ${B} )`)
-
--- Above a quantifier there is ⊤, or a quantifier BINDING THE SAME NAME — which
--- is why no α-equivalence is needed in this proof. The well-formedness premise
--- travels with it, because transitivity has to rebuild an SA-All and needs it.
-data AllSuper (G : Ctx) (Z : String) (A : Ty) (B : Ty) : Ty -> Type₀ where
-  ALS-Top : AllSuper G Z A B Ty`⊤`
-  ALS-All : forall (C : Ty) (D : Ty) (d1 : sub G C A) (o : ok (bindTy G Z C))
-              (d2 : sub (bindTy G Z C) B D)
-              -> AllSuper G Z A B Ty`( ∀ ${Z} <: ${C} . ${D} )`
-
-allSuper : forall (G : Ctx) (Z : String) (A : Ty) (B : Ty) (T : Ty)
-             (d : sub G Ty`( ∀ ${Z} <: ${A} . ${B} )` T) -> AllSuper G Z A B T
-allSuper = \ G Z A B T d ->
-  elim sub () (\ G0 S0 T0 d0 -> Eq Ty S0 Ty`( ∀ ${Z} <: ${A} . ${B} )` -> AllSuper G0 Z A B T0)
-    ((\ G0 S0 e -> ALS-Top G0 Z A B)
-     (\ G0 W e ->
-        absurdly (AllSuper G0 Z A B Ty`${W}`)
-          (noConfusionTy Ty`${W}` Ty`( ∀ ${Z} <: ${A} . ${B} )` e))
-     (\ W U G0 T0 lk p1 ih1 e ->
-        absurdly (AllSuper G0 Z A B T0)
-          (noConfusionTy Ty`${W}` Ty`( ∀ ${Z} <: ${A} . ${B} )` e))
-     (\ G0 T1 S1 S2 T2 p1 p2 ih1 ih2 e ->
-        absurdly (AllSuper G0 Z A B Ty`( ${T1} -> ${T2} )`)
-          (noConfusionTy Ty`( ${S1} -> ${S2} )` Ty`( ∀ ${Z} <: ${A} . ${B} )` e))
-     (\ G0 T1 S1 W S2 T2 p1 ok1 p2 ih1 ih2 e ->
-        substEq String (\ z -> AllSuper G0 Z A B Ty`( ∀ ${z} <: ${T1} . ${T2} )`) Z W
-          (symEq String W Z
-            (andLeft (Eq String W Z) (And (Eq Ty S1 A) (Eq Ty S2 B))
-              (noConfusionTy Ty`( ∀ ${W} <: ${S1} . ${S2} )` Ty`( ∀ ${Z} <: ${A} . ${B} )` e)))
-          (ALS-All G0 Z A B T1 T2
-            (substEq Ty (\ z -> sub G0 T1 z) S1 A
-              (andLeft (Eq Ty S1 A) (Eq Ty S2 B)
-                (andRight (Eq String W Z) (And (Eq Ty S1 A) (Eq Ty S2 B))
-                  (noConfusionTy Ty`( ∀ ${W} <: ${S1} . ${S2} )` Ty`( ∀ ${Z} <: ${A} . ${B} )` e)))
-              p1)
-            (substEq String (\ z -> ok (bindTy G0 z T1)) W Z
-              (andLeft (Eq String W Z) (And (Eq Ty S1 A) (Eq Ty S2 B))
-                (noConfusionTy Ty`( ∀ ${W} <: ${S1} . ${S2} )` Ty`( ∀ ${Z} <: ${A} . ${B} )` e))
-              ok1)
-            (substEq Ty (\ z -> sub (bindTy G0 Z T1) z T2) S2 B
-              (andRight (Eq Ty S1 A) (Eq Ty S2 B)
-                (andRight (Eq String W Z) (And (Eq Ty S1 A) (Eq Ty S2 B))
-                  (noConfusionTy Ty`( ∀ ${W} <: ${S1} . ${S2} )` Ty`( ∀ ${Z} <: ${A} . ${B} )` e)))
-              (substEq String (\ z -> sub (bindTy G0 z T1) S2 T2) W Z
-                (andLeft (Eq String W Z) (And (Eq Ty S1 A) (Eq Ty S2 B))
-                  (noConfusionTy Ty`( ∀ ${W} <: ${S1} . ${S2} )` Ty`( ∀ ${Z} <: ${A} . ${B} )` e))
-                p2)))))
-    (G Ty`( ∀ ${Z} <: ${A} . ${B} )` T) d (refl Ty Ty`( ∀ ${Z} <: ${A} . ${B} )`)
+-- Three used to stand here — one per shape of the lower type — each an
+-- elimination of the derivation under a motive that takes an equation pinning
+-- the index, and each handing back a datatype declared for the purpose
+-- (`ArrowSuper`, `AllSuper`) because `sub` gets no no-confusion lemma. Every
+-- one of them was the same move the split already makes: the rules that cannot
+-- conclude at the shape in hand have no arm, and the ones that can arrive with
+-- their premises already at the refined types. So the proofs below split the
+-- right-hand derivation where they used to invert it, and the two datatypes and
+-- their three lemmas are not needed at all. `07` reports the same thing, in its
+-- own words, about nine of them.
 
 
 -- ---------------------------------------------------------------------------
@@ -157,61 +83,30 @@ Wk = \ Q -> forall (G : Ctx) (Xn : String) (D : Ctx) (P : Ty)
 
 -- Q = ⊤. Nothing is above ⊤, so the right premise says T is ⊤.
 transTop : TransAt Ty`⊤`
-transTop = \ G S T d1 d2 ->
-  substEq Ty (\ z -> sub G S z) Ty`⊤` T (symEq Ty T Ty`⊤` (topSuper G T d2)) (SA-Top G S)
+transTop = \ G S T d1 d2 -> case d2 of
+  { SA-Top G0 S0 -> SA-Top G0 S }
 
 -- Q = X. Either SA-Refl-TVar, and the right premise IS the conclusion, or
 -- SA-Trans-TVar, and the inner hypothesis does it.
 transTVar : forall (Z : String) -> TransAt Ty`${Z}`
-transTVar = \ Z G S T d1 d2 ->
-  elim sub () (\ G0 S0 Q0 d0 -> Eq Ty Q0 Ty`${Z}`
-                 -> forall (T0 : Ty) (dd : sub G0 Q0 T0) -> sub G0 S0 T0)
-    ((\ G0 S0 e T0 dd -> absurdly (sub G0 S0 T0) (noConfusionTy Ty`⊤` Ty`${Z}` e))
-     (\ G0 W e T0 dd -> dd)
-     (\ W U G0 T1 lk p1 ih1 e T0 dd -> SA-Trans-TVar W U G0 T0 lk (ih1 e T0 dd))
-     (\ G0 T1 S1 S2 T2 p1 p2 ih1 ih2 e T0 dd ->
-        absurdly (sub G0 Ty`( ${S1} -> ${S2} )` T0)
-          (noConfusionTy Ty`( ${T1} -> ${T2} )` Ty`${Z}` e))
-     (\ G0 T1 S1 W S2 T2 p1 okW p2 ih1 ih2 e T0 dd ->
-        absurdly (sub G0 Ty`( ∀ ${W} <: ${S1} . ${S2} )` T0)
-          (noConfusionTy Ty`( ∀ ${W} <: ${T1} . ${T2} )` Ty`${Z}` e)))
-    (G S Ty`${Z}`) d1 (refl Ty Ty`${Z}`) T d2
+transTVar = \ Z G S T d1 d2 -> induction d1 of
+  { SA-Refl-TVar G0 W -> d2
+  ; SA-Trans-TVar W U G0 T1 lk p1 ->
+      SA-Trans-TVar W U G0 T lk (transTVar Z G0 U T p1 d2) }
 
 -- Q = Q₁ -> Q₂. The first case that uses the outer hypothesis, at both parts.
 transArrow : forall (Q1 : Ty) (Q2 : Ty) (ihQ1 : TransAt Q1) (ihQ2 : TransAt Q2)
                -> TransAt Ty`( ${Q1} -> ${Q2} )`
-transArrow = \ Q1 Q2 ihQ1 ihQ2 G S T d1 d2 ->
-  elim sub () (\ G0 S0 Q0 d0 -> Eq Ty Q0 Ty`( ${Q1} -> ${Q2} )`
-                 -> forall (T0 : Ty) (dd : sub G0 Q0 T0) -> sub G0 S0 T0)
-    ((\ G0 S0 e T0 dd ->
-        absurdly (sub G0 S0 T0) (noConfusionTy Ty`⊤` Ty`( ${Q1} -> ${Q2} )` e))
-     (\ G0 W e T0 dd ->
-        absurdly (sub G0 Ty`${W}` T0) (noConfusionTy Ty`${W}` Ty`( ${Q1} -> ${Q2} )` e))
-     (\ W U G0 T1 lk p1 ih1 e T0 dd -> SA-Trans-TVar W U G0 T0 lk (ih1 e T0 dd))
-     (\ G0 T1 S1 S2 T2 p1 p2 ih1 ih2 e T0 dd ->
-        elim ArrowSuper (G0 T1 T2) (\ T0' a -> sub G0 Ty`( ${S1} -> ${S2} )` T0')
-          ((SA-Top G0 Ty`( ${S1} -> ${S2} )`)
-           (\ C D dC dD ->
-              SA-Arrow G0 C S1 S2 D
-                (ihQ1 G0 C S1
-                  (substEq Ty (\ z -> sub G0 C z) T1 Q1
-                    (andLeft (Eq Ty T1 Q1) (Eq Ty T2 Q2)
-                      (noConfusionTy Ty`( ${T1} -> ${T2} )` Ty`( ${Q1} -> ${Q2} )` e)) dC)
-                  (substEq Ty (\ z -> sub G0 z S1) T1 Q1
-                    (andLeft (Eq Ty T1 Q1) (Eq Ty T2 Q2)
-                      (noConfusionTy Ty`( ${T1} -> ${T2} )` Ty`( ${Q1} -> ${Q2} )` e)) p1))
-                (ihQ2 G0 S2 D
-                  (substEq Ty (\ z -> sub G0 S2 z) T2 Q2
-                    (andRight (Eq Ty T1 Q1) (Eq Ty T2 Q2)
-                      (noConfusionTy Ty`( ${T1} -> ${T2} )` Ty`( ${Q1} -> ${Q2} )` e)) p2)
-                  (substEq Ty (\ z -> sub G0 z D) T2 Q2
-                    (andRight (Eq Ty T1 Q1) (Eq Ty T2 Q2)
-                      (noConfusionTy Ty`( ${T1} -> ${T2} )` Ty`( ${Q1} -> ${Q2} )` e)) dD))))
-          (T0) (arrowSuper G0 T1 T2 T0 dd))
-     (\ G0 T1 S1 W S2 T2 p1 okW p2 ih1 ih2 e T0 dd ->
-        absurdly (sub G0 Ty`( ∀ ${W} <: ${S1} . ${S2} )` T0)
-          (noConfusionTy Ty`( ∀ ${W} <: ${T1} . ${T2} )` Ty`( ${Q1} -> ${Q2} )` e)))
-    (G S Ty`( ${Q1} -> ${Q2} )`) d1 (refl Ty Ty`( ${Q1} -> ${Q2} )`) T d2
+transArrow = \ Q1 Q2 ihQ1 ihQ2 G S T d1 d2 -> induction d1 of
+  { SA-Trans-TVar W U G0 T1 lk p1 ->
+      SA-Trans-TVar W U G0 T lk (transArrow Q1 Q2 ihQ1 ihQ2 G0 U T p1 d2)
+  -- **The inner split IS the inversion**, so `arrowSuper` is not needed here:
+  -- `d2`'s lower type is `Q1 -> Q2`, and the three rules that cannot conclude
+  -- that have no arm.
+  ; SA-Arrow G0 T1 S1 S2 T2 p1 p2 -> case d2 of
+      { SA-Top G1 S3 -> SA-Top G0 Ty`( ${S1} -> ${S2} )`
+      ; SA-Arrow G1 T3 S3 S4 T4 q1 q2 ->
+          SA-Arrow G0 T3 S1 S2 T4 (ihQ1 G0 T3 S1 q1 p1) (ihQ2 G0 S2 T4 p2 q2) } }
 
 
 -- ---------------------------------------------------------------------------
@@ -221,53 +116,60 @@ transArrow = \ Q1 Q2 ihQ1 ihQ2 G S T d1 d2 ->
 -- rule carries `⊢ Γ , X <: T1 ok`, and okRebind turns that into the same fact
 -- about the narrowed context, which is what rebuilding the rule needs.
 
+-- **The context is a premise and the equation is written down**, because the
+-- induction has to vary Δ — the SA-All case recurses at `Δ , W <: T1` — and a
+-- split can only generalise a whole premise, never the Δ inside the `append`
+-- the paper's comma stands for. `narrowFrom` below closes the equation with
+-- `refl` and is the lemma the rest of the file asks for.
+narrowFromAt : forall (Q : Ty) (tr : TransAt Q) (wk : Wk Q)
+                 (C : Ctx) (M : Ty) (N : Ty) (d : sub C M N)
+                 (G : Ctx) (Xn : String) (D : Ctx) (P : Ty)
+                 (e : Eq Ctx C (append (bindTy G Xn Q) D))
+                 (o : ok (append (bindTy G Xn Q) D)) (tp : ty G P) (dp : sub G P Q)
+                 -> sub (append (bindTy G Xn P) D) M N
+narrowFromAt = \ Q tr wk C M N d G Xn D P e o tp dp -> induction d of
+  { SA-Top C0 S0 -> SA-Top (append (bindTy G Xn P) D) S0
+  ; SA-Refl-TVar C0 W -> SA-Refl-TVar (append (bindTy G Xn P) D) W
+  ; SA-Trans-TVar W U C0 N0 lk p1 ->
+      case (narrowLookup G Xn Q P D W U
+              (substEq Ctx (\ c -> bindTy-in W U c) C0 (append (bindTy G Xn Q) D) e lk)) of
+        { orLeft h -> SA-Trans-TVar W U (append (bindTy G Xn P) D) N0 h
+                        (narrowFromAt Q tr wk C0 U N0 p1 G Xn D P e o tp dp)
+        ; orRight h ->
+            substEq String (\ z -> sub (append (bindTy G Xn P) D) Ty`${z}` N0) Xn W
+              (symEq String W Xn
+                (andLeft (Eq String W Xn) (Eq Ty U Q)
+                  (andLeft (And (Eq String W Xn) (Eq Ty U Q))
+                           (bindTy-in Xn P (append (bindTy G Xn P) D)) h)))
+              (SA-Trans-TVar Xn P (append (bindTy G Xn P) D) N0
+                (andRight (And (Eq String W Xn) (Eq Ty U Q))
+                          (bindTy-in Xn P (append (bindTy G Xn P) D)) h)
+                (tr (append (bindTy G Xn P) D) P N0
+                  (wk G Xn D P (okRebind G Xn Q P D o tp) dp)
+                  (substEq Ty (\ z -> sub (append (bindTy G Xn P) D) z N0) U Q
+                    (andRight (Eq String W Xn) (Eq Ty U Q)
+                      (andLeft (And (Eq String W Xn) (Eq Ty U Q))
+                               (bindTy-in Xn P (append (bindTy G Xn P) D)) h))
+                    (narrowFromAt Q tr wk C0 U N0 p1 G Xn D P e o tp dp)))) }
+  ; SA-Arrow C0 T1 S1 S2 T2 p1 p2 ->
+      SA-Arrow (append (bindTy G Xn P) D) T1 S1 S2 T2
+        (narrowFromAt Q tr wk C0 T1 S1 p1 G Xn D P e o tp dp)
+        (narrowFromAt Q tr wk C0 S2 T2 p2 G Xn D P e o tp dp)
+  ; SA-All C0 T1 S1 W S2 T2 p1 okW p2 ->
+      SA-All (append (bindTy G Xn P) D) T1 S1 W S2 T2
+        (narrowFromAt Q tr wk C0 T1 S1 p1 G Xn D P e o tp dp)
+        (okRebind G Xn Q P (bindTy D W T1)
+          (substEq Ctx (\ c -> ok (bindTy c W T1)) C0 (append (bindTy G Xn Q) D) e okW)
+          tp)
+        (narrowFromAt Q tr wk (bindTy C0 W T1) S2 T2 p2 G Xn (bindTy D W T1) P
+          (substEq Ctx (\ c -> Eq Ctx (bindTy C0 W T1) (bindTy c W T1))
+            C0 (append (bindTy G Xn Q) D) e (refl Ctx (bindTy C0 W T1)))
+          (substEq Ctx (\ c -> ok (bindTy c W T1)) C0 (append (bindTy G Xn Q) D) e okW)
+          tp dp) }
+
 narrowFrom : forall (Q : Ty) (tr : TransAt Q) (wk : Wk Q) -> NarrowAt Q
 narrowFrom = \ Q tr wk G Xn D M N P o tp d dp ->
-  elim sub () (\ C0 M0 N0 d0 -> forall (G1 : Ctx) (Xn1 : String) (D1 : Ctx) (P1 : Ty)
-                 (e : Eq Ctx C0 (append (bindTy G1 Xn1 Q) D1))
-                 (o1 : ok (append (bindTy G1 Xn1 Q) D1)) (tp1 : ty G1 P1)
-                 (dp1 : sub G1 P1 Q)
-                 -> sub (append (bindTy G1 Xn1 P1) D1) M0 N0)
-    ((\ C0 S0 G1 Xn1 D1 P1 e o1 tp1 dp1 -> SA-Top (append (bindTy G1 Xn1 P1) D1) S0)
-     (\ C0 W G1 Xn1 D1 P1 e o1 tp1 dp1 -> SA-Refl-TVar (append (bindTy G1 Xn1 P1) D1) W)
-     (\ W U C0 N0 lk p1 ih1 G1 Xn1 D1 P1 e o1 tp1 dp1 ->
-        elim Or ((NFound1 G1 Xn1 P1 D1 W U) (NFound2 G1 Xn1 Q P1 D1 W U))
-          (\ or -> sub (append (bindTy G1 Xn1 P1) D1) Ty`${W}` N0)
-          ((\ h -> SA-Trans-TVar W U (append (bindTy G1 Xn1 P1) D1) N0 h
-                     (ih1 G1 Xn1 D1 P1 e o1 tp1 dp1))
-           (\ h ->
-              substEq String (\ z -> sub (append (bindTy G1 Xn1 P1) D1) Ty`${z}` N0) Xn1 W
-                (symEq String W Xn1
-                  (andLeft (Eq String W Xn1) (Eq Ty U Q)
-                    (andLeft (And (Eq String W Xn1) (Eq Ty U Q))
-                             (bindTy-in Xn1 P1 (append (bindTy G1 Xn1 P1) D1)) h)))
-                (SA-Trans-TVar Xn1 P1 (append (bindTy G1 Xn1 P1) D1) N0
-                  (andRight (And (Eq String W Xn1) (Eq Ty U Q))
-                            (bindTy-in Xn1 P1 (append (bindTy G1 Xn1 P1) D1)) h)
-                  (tr (append (bindTy G1 Xn1 P1) D1) P1 N0
-                    (wk G1 Xn1 D1 P1 (okRebind G1 Xn1 Q P1 D1 o1 tp1) dp1)
-                    (substEq Ty (\ z -> sub (append (bindTy G1 Xn1 P1) D1) z N0) U Q
-                      (andRight (Eq String W Xn1) (Eq Ty U Q)
-                        (andLeft (And (Eq String W Xn1) (Eq Ty U Q))
-                                 (bindTy-in Xn1 P1 (append (bindTy G1 Xn1 P1) D1)) h))
-                      (ih1 G1 Xn1 D1 P1 e o1 tp1 dp1))))))
-          () (narrowLookup G1 Xn1 Q P1 D1 W U
-               (substEq Ctx (\ c -> bindTy-in W U c) C0 (append (bindTy G1 Xn1 Q) D1) e lk)))
-     (\ C0 T1 S1 S2 T2 p1 p2 ih1 ih2 G1 Xn1 D1 P1 e o1 tp1 dp1 ->
-        SA-Arrow (append (bindTy G1 Xn1 P1) D1) T1 S1 S2 T2
-          (ih1 G1 Xn1 D1 P1 e o1 tp1 dp1) (ih2 G1 Xn1 D1 P1 e o1 tp1 dp1))
-     (\ C0 T1 S1 W S2 T2 p1 okW p2 ih1 ih2 G1 Xn1 D1 P1 e o1 tp1 dp1 ->
-        SA-All (append (bindTy G1 Xn1 P1) D1) T1 S1 W S2 T2
-          (ih1 G1 Xn1 D1 P1 e o1 tp1 dp1)
-          (okRebind G1 Xn1 Q P1 (bindTy D1 W T1)
-            (substEq Ctx (\ c -> ok (bindTy c W T1)) C0 (append (bindTy G1 Xn1 Q) D1) e okW)
-            tp1)
-          (ih2 G1 Xn1 (bindTy D1 W T1) P1
-            (substEq Ctx (\ c -> Eq Ctx (bindTy C0 W T1) (bindTy c W T1))
-              C0 (append (bindTy G1 Xn1 Q) D1) e (refl Ctx (bindTy C0 W T1)))
-            (substEq Ctx (\ c -> ok (bindTy c W T1)) C0 (append (bindTy G1 Xn1 Q) D1) e okW)
-            tp1 dp1)))
-    ((append (bindTy G Xn Q) D) M N) d G Xn D P
+  narrowFromAt Q tr wk (append (bindTy G Xn Q) D) M N d G Xn D P
     (refl Ctx (append (bindTy G Xn Q) D)) o tp dp
 
 
@@ -284,67 +186,22 @@ narrowFrom = \ Q tr wk G Xn D M N P o tp d dp ->
 transAll : forall (Z : String) (Q1 : Ty) (Q2 : Ty)
              (trQ1 : TransAt Q1) (naQ1 : NarrowAt Q1) (trQ2 : TransAt Q2)
              -> TransAt Ty`( ∀ ${Z} <: ${Q1} . ${Q2} )`
-transAll = \ Z Q1 Q2 trQ1 naQ1 trQ2 G S T d1 d2 ->
-  elim sub () (\ G0 S0 Q0 d0 -> Eq Ty Q0 Ty`( ∀ ${Z} <: ${Q1} . ${Q2} )`
-                 -> forall (T0 : Ty) (dd : sub G0 Q0 T0) -> sub G0 S0 T0)
-    ((\ G0 S0 e T0 dd ->
-        absurdly (sub G0 S0 T0)
-          (noConfusionTy Ty`⊤` Ty`( ∀ ${Z} <: ${Q1} . ${Q2} )` e))
-     (\ G0 W e T0 dd ->
-        absurdly (sub G0 Ty`${W}` T0)
-          (noConfusionTy Ty`${W}` Ty`( ∀ ${Z} <: ${Q1} . ${Q2} )` e))
-     (\ W U G0 T1 lk p1 ih1 e T0 dd -> SA-Trans-TVar W U G0 T0 lk (ih1 e T0 dd))
-     (\ G0 T1 S1 S2 T2 p1 p2 ih1 ih2 e T0 dd ->
-        absurdly (sub G0 Ty`( ${S1} -> ${S2} )` T0)
-          (noConfusionTy Ty`( ${T1} -> ${T2} )` Ty`( ∀ ${Z} <: ${Q1} . ${Q2} )` e))
-     (\ G0 T1 S1 W S2 T2 p1 okW p2 ih1 ih2 e T0 dd ->
-        elim AllSuper (G0 W T1 T2) (\ T0' a -> sub G0 Ty`( ∀ ${W} <: ${S1} . ${S2} )` T0')
-          ((SA-Top G0 Ty`( ∀ ${W} <: ${S1} . ${S2} )`)
-           (\ C Dd dC oC dD ->
-              SA-All G0 C S1 W S2 Dd
-                (trQ1 G0 C S1
-                  (substEq Ty (\ z -> sub G0 C z) T1 Q1
-                    (andLeft (Eq Ty T1 Q1) (Eq Ty T2 Q2)
-                      (andRight (Eq String W Z) (And (Eq Ty T1 Q1) (Eq Ty T2 Q2))
-                        (noConfusionTy Ty`( ∀ ${W} <: ${T1} . ${T2} )` Ty`( ∀ ${Z} <: ${Q1} . ${Q2} )` e)))
-                    dC)
-                  (substEq Ty (\ z -> sub G0 z S1) T1 Q1
-                    (andLeft (Eq Ty T1 Q1) (Eq Ty T2 Q2)
-                      (andRight (Eq String W Z) (And (Eq Ty T1 Q1) (Eq Ty T2 Q2))
-                        (noConfusionTy Ty`( ∀ ${W} <: ${T1} . ${T2} )` Ty`( ∀ ${Z} <: ${Q1} . ${Q2} )` e)))
-                    p1))
-                oC
-                (trQ2 (bindTy G0 W C) S2 Dd
-                  (substEq Ty (\ z -> sub (bindTy G0 W C) S2 z) T2 Q2
-                    (andRight (Eq Ty T1 Q1) (Eq Ty T2 Q2)
-                      (andRight (Eq String W Z) (And (Eq Ty T1 Q1) (Eq Ty T2 Q2))
-                        (noConfusionTy Ty`( ∀ ${W} <: ${T1} . ${T2} )` Ty`( ∀ ${Z} <: ${Q1} . ${Q2} )` e)))
-                    (naQ1 G0 W Ctx`·` S2 T2 C
-                      (substEq Ty (\ z -> ok (bindTy G0 W z)) T1 Q1
-                        (andLeft (Eq Ty T1 Q1) (Eq Ty T2 Q2)
-                          (andRight (Eq String W Z) (And (Eq Ty T1 Q1) (Eq Ty T2 Q2))
-                            (noConfusionTy Ty`( ∀ ${W} <: ${T1} . ${T2} )` Ty`( ∀ ${Z} <: ${Q1} . ${Q2} )` e)))
-                        okW)
-                      (andRight (notIn W G0) (ty G0 C)
-                        (andRight (ok G0) (And (notIn W G0) (ty G0 C))
-                          (okBindTy G0 W C oC)))
-                      (substEq Ty (\ z -> sub (bindTy G0 W z) S2 T2) T1 Q1
-                        (andLeft (Eq Ty T1 Q1) (Eq Ty T2 Q2)
-                          (andRight (Eq String W Z) (And (Eq Ty T1 Q1) (Eq Ty T2 Q2))
-                            (noConfusionTy Ty`( ∀ ${W} <: ${T1} . ${T2} )` Ty`( ∀ ${Z} <: ${Q1} . ${Q2} )` e)))
-                        p2)
-                      (substEq Ty (\ z -> sub G0 C z) T1 Q1
-                        (andLeft (Eq Ty T1 Q1) (Eq Ty T2 Q2)
-                          (andRight (Eq String W Z) (And (Eq Ty T1 Q1) (Eq Ty T2 Q2))
-                            (noConfusionTy Ty`( ∀ ${W} <: ${T1} . ${T2} )` Ty`( ∀ ${Z} <: ${Q1} . ${Q2} )` e)))
-                        dC)))
-                  (substEq Ty (\ z -> sub (bindTy G0 W C) z Dd) T2 Q2
-                    (andRight (Eq Ty T1 Q1) (Eq Ty T2 Q2)
-                      (andRight (Eq String W Z) (And (Eq Ty T1 Q1) (Eq Ty T2 Q2))
-                        (noConfusionTy Ty`( ∀ ${W} <: ${T1} . ${T2} )` Ty`( ∀ ${Z} <: ${Q1} . ${Q2} )` e)))
-                    dD))))
-          (T0) (allSuper G0 W T1 T2 T0 dd)))
-    (G S Ty`( ∀ ${Z} <: ${Q1} . ${Q2} )`) d1 (refl Ty Ty`( ∀ ${Z} <: ${Q1} . ${Q2} )`) T d2
+transAll = \ Z Q1 Q2 trQ1 naQ1 trQ2 G S T d1 d2 -> induction d1 of
+  { SA-Trans-TVar W U G0 T1 lk p1 ->
+      SA-Trans-TVar W U G0 T lk (transAll Z Q1 Q2 trQ1 naQ1 trQ2 G0 U T p1 d2)
+  ; SA-All G0 T1 S1 W S2 T2 p1 okW p2 -> case d2 of
+      { SA-Top G1 S3 -> SA-Top G0 Ty`( ∀ ${W} <: ${S1} . ${S2} )`
+      ; SA-All G1 T3 S3 W1 S4 T4 q1 oq q2 ->
+          SA-All G0 T3 S1 W S2 T4
+            (trQ1 G0 T3 S1 q1 p1)
+            oq
+            (trQ2 (bindTy G0 W T3) S2 T4
+              (naQ1 G0 W Ctx`·` S2 T2 T3 okW
+                (andRight (notIn W G0) (ty G0 T3)
+                  (andRight (ok G0) (And (notIn W G0) (ty G0 T3))
+                    (okBindTy G0 W T3 oq)))
+                p2 q1)
+              q2) } }
 
 
 -- ---------------------------------------------------------------------------
@@ -352,32 +209,30 @@ transAll = \ Z Q1 Q2 trQ1 naQ1 trQ2 G S T d1 d2 ->
 -- cases above, under the one hypothesis the development could not build.
 
 transNarrow : forall (wk : forall (Q : Ty) -> Wk Q) (Q : Ty) -> And (TransAt Q) (NarrowAt Q)
-transNarrow = \ wk Q ->
-  elim Ty () (\ Q0 -> And (TransAt Q0) (NarrowAt Q0))
-    ((\ W -> both (TransAt Ty`${W}`) (NarrowAt Ty`${W}`)
-               (transTVar W)
-               (narrowFrom Ty`${W}` (transTVar W) (wk Ty`${W}`)))
-     (both (TransAt Ty`⊤`) (NarrowAt Ty`⊤`)
-        transTop (narrowFrom Ty`⊤` transTop (wk Ty`⊤`)))
-     (\ A B ihA ihB ->
-        both (TransAt Ty`( ${A} -> ${B} )`) (NarrowAt Ty`( ${A} -> ${B} )`)
-          (transArrow A B (andLeft (TransAt A) (NarrowAt A) ihA)
-                          (andLeft (TransAt B) (NarrowAt B) ihB))
-          (narrowFrom Ty`( ${A} -> ${B} )`
-            (transArrow A B (andLeft (TransAt A) (NarrowAt A) ihA)
-                            (andLeft (TransAt B) (NarrowAt B) ihB))
-            (wk Ty`( ${A} -> ${B} )`)))
-     (\ W A B ihA ihB ->
-        both (TransAt Ty`( ∀ ${W} <: ${A} . ${B} )`) (NarrowAt Ty`( ∀ ${W} <: ${A} . ${B} )`)
-          (transAll W A B (andLeft (TransAt A) (NarrowAt A) ihA)
-                          (andRight (TransAt A) (NarrowAt A) ihA)
-                          (andLeft (TransAt B) (NarrowAt B) ihB))
-          (narrowFrom Ty`( ∀ ${W} <: ${A} . ${B} )`
-            (transAll W A B (andLeft (TransAt A) (NarrowAt A) ihA)
-                            (andRight (TransAt A) (NarrowAt A) ihA)
-                            (andLeft (TransAt B) (NarrowAt B) ihB))
-            (wk Ty`( ∀ ${W} <: ${A} . ${B} )`))))
-    () Q
+transNarrow = \ wk Q -> induction Q of
+  { tvar W -> both (TransAt Ty`${W}`) (NarrowAt Ty`${W}`)
+                (transTVar W)
+                (narrowFrom Ty`${W}` (transTVar W) (wk Ty`${W}`))
+  ; top -> both (TransAt Ty`⊤`) (NarrowAt Ty`⊤`)
+             transTop (narrowFrom Ty`⊤` transTop (wk Ty`⊤`))
+  ; arrow A B ->
+      both (TransAt Ty`( ${A} -> ${B} )`) (NarrowAt Ty`( ${A} -> ${B} )`)
+        (transArrow A B (andLeft (TransAt A) (NarrowAt A) (transNarrow wk A))
+                        (andLeft (TransAt B) (NarrowAt B) (transNarrow wk B)))
+        (narrowFrom Ty`( ${A} -> ${B} )`
+          (transArrow A B (andLeft (TransAt A) (NarrowAt A) (transNarrow wk A))
+                          (andLeft (TransAt B) (NarrowAt B) (transNarrow wk B)))
+          (wk Ty`( ${A} -> ${B} )`))
+  ; all W A B ->
+      both (TransAt Ty`( ∀ ${W} <: ${A} . ${B} )`) (NarrowAt Ty`( ∀ ${W} <: ${A} . ${B} )`)
+        (transAll W A B (andLeft (TransAt A) (NarrowAt A) (transNarrow wk A))
+                        (andRight (TransAt A) (NarrowAt A) (transNarrow wk A))
+                        (andLeft (TransAt B) (NarrowAt B) (transNarrow wk B)))
+        (narrowFrom Ty`( ∀ ${W} <: ${A} . ${B} )`
+          (transAll W A B (andLeft (TransAt A) (NarrowAt A) (transNarrow wk A))
+                          (andRight (TransAt A) (NarrowAt A) (transNarrow wk A))
+                          (andLeft (TransAt B) (NarrowAt B) (transNarrow wk B)))
+          (wk Ty`( ∀ ${W} <: ${A} . ${B} )`)) }
 
 -- Transitivity of subtyping, POPLMark problem 1A.
 transitivity : forall (wk : forall (Q : Ty) -> Wk Q) (G : Ctx) (S : Ty) (Q : Ty) (T : Ty)
@@ -411,12 +266,7 @@ narrowing = \ wk G Xn Q D M N P o tp d dp ->
 -- type.
 
 zNotB : Eq String "Z" "B" -> Empty
-zNotB = \ q ->
-  elim Eq (String)
-    (\ u v r -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "Z" u)
-                -> elim Comparison () (\ c -> Type₀) ((Unit) (Empty)) () (eqString "Z" v))
-    ((\ u d -> d))
-    ("Z" "B") q unit
+zNotB = \ q -> substEq String (\ z -> isSame (eqString "Z" z)) "Z" "B" q unit
 
 okB : ok`⊢ · , B <: ⊤ ok`
 okB = ok-bindTy Ctx`·` "B" Ty`⊤` ok-empty (NI-empty "B") (ty-top Ctx`·`)
@@ -444,39 +294,17 @@ okTarget =
 -- And yet the derivation does not survive into it.
 noBindsZ : forall (d : sub Ctx`· , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z )`
                           Ty`( ∀ Z <: ⊤ . Z )` Ty`( ∀ Z <: ⊤ . ⊤ )`) -> Empty
-noBindsZ = \ d ->
-  elim sub ()
-    (\ G0 S0 T0 d0 -> Eq Ctx G0 Ctx`· , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z )`
-       -> Eq Ty S0 Ty`( ∀ Z <: ⊤ . Z )` -> Eq Ty T0 Ty`( ∀ Z <: ⊤ . ⊤ )` -> Empty)
-    ((\ G0 S0 eG eS eT -> noConfusionTy Ty`⊤` Ty`( ∀ Z <: ⊤ . ⊤ )` eT)
-     (\ G0 W eG eS eT -> noConfusionTy Ty`${W}` Ty`( ∀ Z <: ⊤ . Z )` eS)
-     (\ W U G0 T0 lk p1 ih1 eG eS eT -> noConfusionTy Ty`${W}` Ty`( ∀ Z <: ⊤ . Z )` eS)
-     (\ G0 T1 S1 S2 T2 p1 p2 ih1 ih2 eG eS eT ->
-        noConfusionTy Ty`( ${S1} -> ${S2} )` Ty`( ∀ Z <: ⊤ . Z )` eS)
-     (\ G0 T1 S1 W S2 T2 p1 okW p2 ih1 ih2 eG eS eT ->
-        andLeft (Eq String "Z" "Z" -> Empty) (notIn "Z" Ctx`· , B <: ⊤`)
-          (notInBindTy "Z" Ctx`· , B <: ⊤` "Z" Ty`( ∀ Z <: ⊤ . Z )`
-            (andLeft (notIn "Z" Ctx`· , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z )`)
-                     (ty Ctx`· , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z )` Ty`⊤`)
-              (andRight (ok Ctx`· , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z )`)
-                (And (notIn "Z" Ctx`· , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z )`)
-                     (ty Ctx`· , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z )` Ty`⊤`))
-                (okBindTy Ctx`· , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z )` "Z" Ty`⊤`
-                  (substEq Ty
-                    (\ t -> ok (bindTy Ctx`· , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z )` "Z" t)) T1 Ty`⊤`
-                    (andLeft (Eq Ty T1 Ty`⊤`) (Eq Ty T2 Ty`⊤`)
-                      (andRight (Eq String W "Z") (And (Eq Ty T1 Ty`⊤`) (Eq Ty T2 Ty`⊤`))
-                        (noConfusionTy Ty`( ∀ ${W} <: ${T1} . ${T2} )` Ty`( ∀ Z <: ⊤ . ⊤ )` eT)))
-                    (substEq String
-                      (\ z -> ok (bindTy Ctx`· , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z )` z T1)) W "Z"
-                      (andLeft (Eq String W "Z") (And (Eq Ty T1 Ty`⊤`) (Eq Ty T2 Ty`⊤`))
-                        (noConfusionTy Ty`( ∀ ${W} <: ${T1} . ${T2} )` Ty`( ∀ Z <: ⊤ . ⊤ )` eT))
-                      (substEq Ctx (\ c -> ok (bindTy c W T1)) G0
-                        Ctx`· , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z )` eG okW)))))))
-          (refl String "Z")))
-    (Ctx`· , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z )` Ty`( ∀ Z <: ⊤ . Z )` Ty`( ∀ Z <: ⊤ . ⊤ )`) d
-    (refl Ctx Ctx`· , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z )`)
-    (refl Ty Ty`( ∀ Z <: ⊤ . Z )`) (refl Ty Ty`( ∀ Z <: ⊤ . ⊤ )`)
+noBindsZ = \ d -> case d of
+  { SA-All G0 T1 S1 W S2 T2 p1 okW p2 ->
+      andLeft (Eq String "Z" "Z" -> Empty) (notIn "Z" Ctx`· , B <: ⊤`)
+        (notInBindTy "Z" Ctx`· , B <: ⊤` "Z" Ty`( ∀ Z <: ⊤ . Z )`
+          (andLeft (notIn "Z" Ctx`· , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z )`)
+                   (ty Ctx`· , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z )` Ty`⊤`)
+            (andRight (ok Ctx`· , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z )`)
+              (And (notIn "Z" Ctx`· , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z )`)
+                   (ty Ctx`· , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z )` Ty`⊤`))
+              (okBindTy Ctx`· , B <: ⊤ , Z <: ( ∀ Z <: ⊤ . Z )` "Z" Ty`⊤` okW))))
+        (refl String "Z") }
 
 -- So plain weakening is refutable even between well-formed contexts.
 wkIsFalse : Wk Ty`( ∀ Z <: ⊤ . ⊤ )` -> Empty

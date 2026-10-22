@@ -251,6 +251,7 @@ everyOp =
   , ("here",          Here)
   , ("arrow x y",     Arrow (Ref "x") (Ref "y"))
   , ("apply-to x y",  ApplyTo (Ref "x") (Ref "y"))
+  , ("prepend x y",   Op.Prepend (Ref "x") (Ref "y"))
   , ("declare-primitive x y", Op.DeclarePrimitive (Ref "x") (Ref "y"))
   , ("surface-literal t", Op.SurfaceLiteralOf (Ref "t"))
   , ("object-term t", Op.ObjectTerm (Ref "t"))
@@ -280,6 +281,14 @@ everyOp =
   , ("ascription-term t", Op.AscriptionTerm (Ref "t"))
   , ("trusted-claim t", Op.TrustedClaim (Ref "t"))
   , ("trusted-body t", Op.TrustedBody (Ref "t"))
+    -- The three moves into a split (MS9 phase 181).
+  , ("split-target t", Op.SplitTarget (Ref "t"))
+  , ("split-arm-body t", Op.SplitArmBody (Ref "t"))
+  , ("split-tail t", Op.SplitTail (Ref "t"))
+    -- The pattern readers (MS9 phase 183).
+  , ("split-arm-pattern t", Op.SplitArmPattern (Ref "t"))
+  , ("pattern-head t", Op.PatternHead (Ref "t"))
+  , ("pattern-arguments t", Op.PatternArguments (Ref "t"))
   , ("make-trusted c a b", Op.MakeTrusted (Ref "c") (Ref "a") (Ref "b"))
   , ("define-global x t v", Op.DefineGlobal [] (Ref "x") (Ref "t") (Ref "v"))
   , ("app-function t", Op.AppFunction (Ref "t"))
@@ -297,6 +306,22 @@ everyOp =
   , ("forall-tail t", Op.ForallTail (Ref "t"))
   , ("quantify x y", Op.Quantify (Ref "x") (Ref "y"))
   , ("unify-into x y", Op.UnifyInto (Ref "x") (Ref "y"))
+    -- The six declaration readers (MS9 phase 176).
+  , ("datatype-of t", Op.DatatypeOf (Ref "t"))
+  , ("datatype-parameters d", Op.DatatypeParameters (Ref "d"))
+  , ("datatype-indices d", Op.DatatypeIndices (Ref "d"))
+  , ("constructors-of d", Op.ConstructorsOf (Ref "d"))
+  , ("constructor-datatype c", Op.ConstructorDatatype (Ref "c"))
+  , ("constructor-arguments c", Op.ConstructorArguments (Ref "c"))
+  , ("constructor-recursive-arguments c", Op.ConstructorRecursiveArguments (Ref "c"))
+    -- Specialisation by unification (MS9 phase 177).
+  , ("specialise c ihs k", Op.Specialise (Ref "c") (Ref "ihs") (Ref "k"))
+    -- @case … of@'s own claim (MS9 phase 188).
+  , ("prim-case x", Op.CaseAnalyse (Ref "x"))
+    -- Tying a recursive call to its induction hypothesis (MS9 phase 186).
+  , ("tie-recursion t", Op.TieRecursion (Ref "t"))
+    -- The binder report's accessor (MS9 phase 192).
+  , ("binder-name b", Op.BinderName (Ref "b"))
   ]
 
 vocabulary :: TestTree

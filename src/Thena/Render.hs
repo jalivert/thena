@@ -22,6 +22,7 @@ module Thena.Render
   , renderingIn
   , renderCore
   , renderSurface
+  , surfacePattern
   , renderLevel
   , renderPartial
   , renderPattern
@@ -126,6 +127,8 @@ import Thena.Errors
   , ConversionFailure (..)
   , DevForm (..)
   , ElimError (..)
+  , SpecialiseError (..)
+  , RecursionError (..)
   , FailReason (..)
   , KernelError (..)
   , MoveError (..)
@@ -154,6 +157,7 @@ import Thena.Syntax.Print
   , renderLevelAtom
   , renderSurface
   , subscript
+  , surfacePattern
   , tick
   )
 import Thena.Surface.Concrete (PairingError (..), Plicity (..))
@@ -172,6 +176,7 @@ import Thena.Instral.Ops
   , Value (..)
   , operandsOf
   )
+import Thena.Tactics.Specialise (binderWord)
 import Thena.Rules (RuleBase (..), RuleError (..))
 import qualified Thena.Instral.Ops as Ops
 import Thena.Syntax.Lexer (BlockKind (..), LexError (..), Pos (..), Token (..))
@@ -523,6 +528,9 @@ describe t = case t of
   TIn         -> "in"
   TElim       -> "elim"
   TTrusted    -> "trusted"
+  TInduction  -> "induction"
+  TCase       -> "case"
+  TOf         -> "of"
   TWhere      -> "where"
   TData       -> "data"
   TModule     -> "module"
@@ -1154,6 +1162,15 @@ renderValue ren ctx v = case v of
   -- they do everywhere else.
   VLevel l           -> renderLevel l
   VTerm t            -> "⌜" ++ renderCore ren ctx t ++ "⌝"
+  -- **A pattern prints as it was written** (MS9 phase 183), which is what
+  -- 'Thena.Syntax.Print.surfacePattern' is for — and the printer is the parser's
+  -- inverse here, so what a user sees is what they typed.
+  VPattern pt        -> surfacePattern pt
+  -- **A binder of a specialised method prints as what it is** (MS9 phase 192):
+  -- there is no written form for one, so the group and the name it is bound
+  -- under are what there is to say.
+  VBinder b          -> "‹" ++ binderWord b ++ "›"
+  VMethodShape _     -> "‹method shape›"
   -- **An unresolved core term prints as its shape, not its contents** (MS5
   -- phase 61b). Printing a 'Thena.Syntax.Concrete.Raw' back would need a
   -- printer for the written syntax, and there has never been one: every other
@@ -1261,6 +1278,8 @@ renderFailReason ren r = case r of
       ++ show i
       ++ " to take it"
   CannotEliminate e -> renderElimError ren e
+  CannotSpecialise e -> renderSpecialiseError ren e
+  CannotTieRecursion e -> renderRecursionError ren e
   UnboundInBody x   -> "nothing named " ++ x ++ " in this body"
   NotAnIdentifier s -> show s ++ " is not a name"
   ExpectedText      -> "expected text"
@@ -1294,6 +1313,10 @@ renderFailReason ren r = case r of
   -- that it *"is misleading and ambiguous"*.
   ExpectedSurface   -> "expected a surface term"
   ExpectedSurfaceShape what -> "expected a surface term that is " ++ what
+  -- **It names the thing and what was wanted of it** (MS9 phase 176), because
+  -- a reader refusing is routinely the answer rather than a mistake: asking
+  -- whether a pattern's head is a constructor is how a split finds out.
+  NotDeclaredAs what wanted -> what ++ " is not " ++ wanted
   -- **The four ways a tagged term literal does not become a term** (MS6 phase
   -- 104). One renderer, because both readers raise the same 'ObjectError'
   -- (phase 110); the third is the message @:parse@ gives, from the same
@@ -1857,6 +1880,42 @@ renderElimError ren e = case e of
       ++ concatMap ("\n  " ++) (renderTypeError ren te)
   SchemeIllTyped te ->
     "the elimination does not prove this goal"
+      ++ concatMap ("\n  " ++) (renderTypeError ren te)
+
+-- | Why specialisation by unification could not run (MS9 phase 177).
+-- | Why a recursive call could not be tied to an induction hypothesis (MS9
+-- phase 186).
+renderRecursionError :: Rendering -> RecursionError -> String
+renderRecursionError ren e = case e of
+  RecursionNotAbstracted ->
+    "the body was not elaborated under the name being defined"
+  RecursiveNameNotApplied ->
+    "the name being defined is used as a value, and only a call to it can be \
+    \an induction hypothesis"
+  CallMatchesNoHypothesis ctx t ->
+    "no induction hypothesis is about this call, so it is not structurally \
+    \smaller: " ++ renderCore ren ctx t
+  CallMatchesSeveral ctx t k ->
+    "this call names " ++ show k ++ " arguments that have an induction \
+    \hypothesis, so which one it recurses on is not written down: "
+      ++ renderCore ren ctx t
+  CallVariesAFixedPremise ctx t p a ->
+    "the split fixed " ++ renderCore ren ctx p ++ " and this call passes "
+      ++ renderCore ren ctx a ++ ", so it is not the induction hypothesis — a \
+      \premise the induction varies is bound inside the arm and not before the \
+      \split: " ++ renderCore ren ctx t
+
+renderSpecialiseError :: Rendering -> SpecialiseError -> String
+renderSpecialiseError ren e = case e of
+  NotThatConstructor g -> nameString g ++ " is not a constructor"
+  MethodNotShaped want eqs _ ->
+    "that is not a method of this constructor: it needs "
+      ++ count want "binder" ++ " and " ++ count eqs "equation"
+  NotAnEquation tys ->
+    "the equation block has " ++ count (length tys) "binder"
+      ++ " and one of them is not an equation"
+  SpecialisedIllTyped te ->
+    "the specialised method does not prove this one"
       ++ concatMap ("\n  " ++) (renderTypeError ren te)
 
 renderTypeError :: Rendering -> TypeError -> [String]

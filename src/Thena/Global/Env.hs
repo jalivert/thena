@@ -26,6 +26,7 @@ module Thena.Global.Env
   , lookupConstant
   , lookupDefinition
   , lookupInductive
+  , lookupConstructor
   , isDeclared
   , declaredNames
   , addConstant
@@ -45,6 +46,9 @@ module Thena.Global.Env
   , eliminatorType
   , eliminatorWrapper
   , eliminatorName
+  , Scheme (..)
+  , caseName
+  , caseWrapper
   , varsInEnv
   ) where
 
@@ -70,6 +74,8 @@ import Thena.Core.Term
   , Ident (..)
   , close
   , fresh
+  , globalsIn
+  , holdsTrusted
   , levelMetasIn
   , substLevelsIn
   , tokenName
@@ -339,6 +345,31 @@ data GlobalEnv = GlobalEnv
     -- resolver asks a question with one answer.
   , definitions :: [(GlobalName, Definition)]           -- ^ a type and a body
   , inductives  :: [(GlobalName, InductiveDefinition)]  -- ^ what the checker and ι consult
+  , restingOnTrust :: [GlobalName]
+    -- ^ __which definitions rest on a trusted claim__ (MS9 phase 207,
+    -- @~2dqc3@, his ruling of 2026-10-22). Transitively: a definition is here
+    -- when its own body holds a 'Thena.Core.Term.Trusted' node, or when it
+    -- mentions a definition that is here.
+    --
+    -- **It is stored because it cannot change, and it was costing half of every
+    -- load.** @Thena.Core.Trust.reaches@ answered the same question by walking
+    -- out from a term through every definition it mentions and reading each body
+    -- in full, on /every/ @certify@ — 4.4 s of an 8.5 s load of
+    -- @examples\/07-preservation.thena@, and the largest single cost in it. The
+    -- answer is a property of a definition alone and is fixed the moment the
+    -- definition is in the table, so 'addDefinition' works it out once.
+    --
+    -- **A list of the trusting ones and not a flag on each definition**, because
+    -- it is almost always EMPTY: nothing in the prelude or in any example here
+    -- rests on a trusted claim, so the question becomes @holdsTrusted t@ and one
+    -- walk of @t@'s own globals against an empty list. A 'Bool' per 'Definition'
+    -- would answer the same question and would have to be supplied at every
+    -- construction site.
+    --
+    -- **It is sound because a name cannot be re-declared** — 'isDeclared', and
+    -- the driver answers @AlreadyDeclaredHere@ — so no entry's meaning changes
+    -- under an entry classified before it, and a body can only mention names
+    -- already in the table.
   }
   deriving (Eq, Show)
 
@@ -352,7 +383,7 @@ data GlobalEnv = GlobalEnv
 -- everywhere, so @data String …@ is refused by the check that already exists
 -- rather than by one written for the purpose.
 emptyGlobals :: GlobalEnv
-emptyGlobals = GlobalEnv [] primitiveTypes [] []
+emptyGlobals = GlobalEnv [] primitiveTypes [] [] []
 
 -- | The three primitive types, each at @Type₀@, and @Token : Type₀ -> Type₀@
 -- (MS6 phase 100) — the type of a token class, whose values are regex literals.
@@ -385,6 +416,28 @@ lookupDefinition g = lookup g . definitions
 lookupInductive :: GlobalName -> GlobalEnv -> Maybe InductiveDefinition
 lookupInductive g = lookup g . inductives
 
+-- | The declaration a /constructor/ belongs to, and the constructor itself
+-- (MS9 phase 176).
+--
+-- **A scan, because 'inductives' is keyed by the datatype.** The table is an
+-- association list of at most a few dozen entries and this is asked once per
+-- splitting node, so an index keyed by constructor would be a second table to
+-- keep in step with the first — the denormalisation 'Constant' already warns
+-- about, for no measured gain.
+--
+-- **It answers for a constructor and for nothing else.** A datatype's own name
+-- is not a constructor of anything, so @lookupConstructor \"Vec\"@ is
+-- 'Nothing' — which is what lets a caller tell the two apart without asking
+-- twice.
+lookupConstructor
+  :: GlobalName -> GlobalEnv -> Maybe (InductiveDefinition, ConstructorDefinition)
+lookupConstructor c env =
+  case [ (d, k) | (_, d) <- inductives env
+                , k <- inductiveConstructors d
+                , constructorName k == c ] of
+    hit : _ -> Just hit
+    []      -> Nothing
+
 -- | Is the name taken, in any table?
 --
 -- One namespace, shared with generated names (§3.6): @noConfusionTerm@ is a
@@ -412,8 +465,26 @@ declaredNames e =
 addConstant :: GlobalName -> [LevelVar] -> Core -> GlobalEnv -> GlobalEnv
 addConstant g ls t e = e { constants = (g, MkConstant ls t) : constants e }
 
+-- | Install a definition, and record once whether it rests on a trusted claim.
+--
+-- **The only writer of 'definitions', which is what makes 'restingOnTrust'
+-- authoritative.** A caller cannot forget to maintain the field and cannot get
+-- it wrong: it is derived here from the body being handed in and from the
+-- entries already present, never supplied.
+--
+-- **Transitivity needs no fixpoint.** A body can only mention names already in
+-- the table, so every definition this one rests on has already been classified;
+-- @g@ itself is not yet in 'restingOnTrust', which is right, since a recursive
+-- call to @g@ adds no trust that @g@'s own body does not already hold.
 addDefinition :: GlobalName -> Definition -> GlobalEnv -> GlobalEnv
-addDefinition g d e = e { definitions = (g, d) : definitions e }
+addDefinition g d e =
+  e { definitions    = (g, d) : definitions e
+    , restingOnTrust = if rests then g : restingOnTrust e else restingOnTrust e
+    }
+  where
+    rests =
+      holdsTrusted (definitionBody d)
+        || any (`elem` restingOnTrust e) (globalsIn (definitionBody d))
 
 addInductive :: GlobalName -> InductiveDefinition -> GlobalEnv -> GlobalEnv
 addInductive g d e = e { inductives = (g, d) : inductives e }
@@ -478,20 +549,16 @@ constructorTarget d c =
 -- counts the parameters (shared, and abstracted by every constructor) and its
 -- own arguments. Nullary formers give @Just 0@, which is saturated
 -- immediately — @Nat@ still unfolds to @Canonical "Nat" []@ on its own.
+-- **The constructor half is 'lookupConstructor'** since MS9 phase 176, which
+-- needed the same scan for @instral@'s declaration readers. It was written
+-- twice for one phase and the second copy is gone.
 formerArity :: GlobalName -> GlobalEnv -> Maybe Int
 formerArity g e = case lookup g (inductives e) of
   Just d  -> Just (length (inductiveParameters d) + length (inductiveIndices d))
-  Nothing -> lookupConstructor
-  where
-    lookupConstructor =
-      case [ (d, c)
-           | (_, d) <- inductives e
-           , c      <- inductiveConstructors d
-           , constructorName c == g
-           ] of
-        (d, c) : _ ->
-          Just (length (inductiveParameters d) + length (constructorArguments c))
-        [] -> Nothing
+  Nothing -> case lookupConstructor g e of
+    Just (d, c) ->
+      Just (length (inductiveParameters d) + length (constructorArguments c))
+    Nothing -> Nothing
 
 -- | Is this constructor argument recursive, and if so at which indices?
 --
@@ -563,7 +630,28 @@ recursiveArgument dn np ty = case spine ty of
 -- constructor, paid here rather than by a second way to make a variable.
 eliminatorType :: InductiveDefinition -> Level -> Int -> (Core, Int)
 eliminatorType d l n0 = (piOver tel goal, n1)
-  where (tel, goal, _, n1) = eliminatorParts d l n0
+  where (tel, goal, _, n1) = eliminatorParts Inductive d l n0
+
+-- | Which scheme 'eliminatorParts' is building (MS9 phase 178).
+--
+-- __The two differ in one thing and it has two consequences.__ A method of the
+-- eliminator takes one inductive hypothesis per recursive argument; a method of
+-- @caseD@ takes none. So for 'CaseAnalysis' the method /types/ lose those
+-- binders, and the terms the node applies gain a λ that discards them — one
+-- decision, read in two places, which is why it is a parameter here rather than
+-- a second copy of this function.
+--
+-- __It is not a mode anything observes.__ Both build an ordinary
+-- 'Thena.Core.Term.Eliminate', so no 'Core' node and nothing in the kernel can
+-- tell a case analysis from an induction; @caseD@ is a definition like any
+-- other and δ-unfolds to an elimination.
+data Scheme
+  = Inductive
+    -- ^ the eliminator: every method carries its inductive hypotheses
+  | CaseAnalysis
+    -- ^ @caseD@: it carries none, and the elimination underneath throws them
+    -- away
+  deriving (Eq, Show)
 
 -- | The name the generated eliminator wrapper is bound to: @elimNat@,
 -- @elimVec@ (MS4 phase 49e).
@@ -606,7 +694,45 @@ eliminatorName (GlobalName d) = GlobalName ("elim" ++ d)
 -- datatype could not be eliminated through it.
 eliminatorWrapper :: InductiveDefinition -> Level -> Int -> (Core, Core, Int)
 eliminatorWrapper d l n0 = (piOver tel goal, lamOver tel node, n1)
-  where (tel, goal, node, n1) = eliminatorParts d l n0
+  where (tel, goal, node, n1) = eliminatorParts Inductive d l n0
+
+-- | The name of the generated case-analysis definition: @caseNat@, @caseVec@
+-- (MS9 phase 178).
+--
+-- 'eliminatorName'\'s shape, and @case@ being a word the surface will spell
+-- @case … of@ with costs nothing: a keyword is a whole token, so @caseNat@ lexes
+-- as one name and there is nothing to reserve. The same sentence
+-- 'eliminatorName' carries about @elim@.
+caseName :: GlobalName -> GlobalName
+caseName (GlobalName d) = GlobalName ("case" ++ d)
+
+-- | __Case analysis: the eliminator minus its inductive hypotheses__ (MS9 phase
+-- 178), as an ordinary global definition — its type and its body.
+--
+-- @
+-- caseD : ∀ params
+--           (P : ∀ indices (t : D params indices) -> Type l)
+--           (m₁ : ∀ Δ₁ -> P ī₁ ‹c₁ params Δ₁›)
+--           …
+--           indices (t : D params indices)
+--         -> P indices t
+-- @
+--
+-- __Why it has to exist separately.__ Thena's generated eliminator hands every
+-- method one hypothesis per recursive argument, which is what makes it
+-- induction. Analysing a case of a term and /not/ recursing on it is the other
+-- thing a user wants — @case … of@ as against @induction … of@ — and through
+-- @elimD@ it cannot be asked for: the hypothesis arrives whether it is wanted or
+-- not, and in a proof it has to be bound and ignored at every single method.
+--
+-- __Nothing in the kernel changes, and that is the point.__ The body is an
+-- @elim D@ whose methods are this definition's own under a λ per hypothesis, so
+-- @caseD@ δ-unfolds to an elimination and is checked as one. A user who writes
+-- @caseD@ and a user who writes @elimD@ with the hypotheses ignored have written
+-- the same term.
+caseWrapper :: InductiveDefinition -> Level -> Int -> (Core, Core, Int)
+caseWrapper d l n0 = (piOver tel goal, lamOver tel node, n1)
+  where (tel, goal, node, n1) = eliminatorParts CaseAnalysis d l n0
 
 -- | The telescope, the conclusion under it, and the saturated node its own
 -- binders form.
@@ -618,8 +744,8 @@ eliminatorWrapper d l n0 = (piOver tel goal, lamOver tel node, n1)
 -- its pieces are in scope instead of being recovered by splitting a list of
 -- variables peeled back off the type.
 eliminatorParts
-  :: InductiveDefinition -> Level -> Int -> (Context, Core, Core, Int)
-eliminatorParts d l n0 = (telescope, motiveAt indexVars (Free ctv), node, nEnd)
+  :: Scheme -> InductiveDefinition -> Level -> Int -> (Context, Core, Core, Int)
+eliminatorParts scheme d l n0 = (telescope, motiveAt indexVars (Free ctv), node, nEnd)
   where
     dn      = inductiveName d
     params  = inductiveParameters d
@@ -644,9 +770,12 @@ eliminatorParts d l n0 = (telescope, motiveAt indexVars (Free ctv), node, nEnd)
         ++ indices
         ++ [Hypothesis ctv (Ident "target") (familyAt indexVars)]
 
+    -- **The node is an 'Eliminate' for both schemes**, and that is the whole of
+    -- why @caseD@ needs no new 'Core' node: case analysis is the eliminator
+    -- with each method wrapped in a λ that throws the inductive hypotheses
+    -- away. The kernel is not told that anything is different.
     node =
-      Eliminate dn levels paramVars (Free pv)
-        (map (Free . entryVar) methodEntries) indexVars (Free ctv)
+      Eliminate dn levels paramVars (Free pv) methodTerms indexVars (Free ctv)
 
     -- @D params is@
     familyAt is = foldl App (Global dn levels) (paramVars ++ is)
@@ -658,35 +787,66 @@ eliminatorParts d l n0 = (telescope, motiveAt indexVars (Free ctv), node, nEnd)
     motiveType =
       piOver indices (Pi (Ident "target") (familyAt indexVars) (close mtv (Universe l)))
 
-    (methodEntries, nEnd) = methods (inductiveConstructors d) n3
+    -- **Each method's binder and the term the node applies, built together**,
+    -- because for 'CaseAnalysis' the second mentions the first and both need
+    -- the counter. They were one list until MS9 phase 178.
+    (methodParts, nEnd) = methods (inductiveConstructors d) n3
+    methodEntries = map fst methodParts
+    methodTerms   = map snd methodParts
 
     methods []       n = ([], n)
     methods (c : cs) n =
       let (mty, na)    = methodType c n
           (mv,  nb)    = fresh na
-          (below, nc)  = methods cs nb
-       in (Hypothesis mv (Ident "method") mty : below, nc)
+          (tm,  nc)    = methodTerm c mv nb
+          (below, nd)  = methods cs nc
+       in ((Hypothesis mv (Ident "method") mty, tm) : below, nd)
 
-    -- @forall D -> IH1 -> ... -> IHn -> P is (c params D)@
-    methodType c n =
-      let args = constructorArguments c
-          goal = motiveAt (constructorIndices c)
-                          (Canonical (constructorName c) levels
-                                     (paramVars ++ map (Free . entryVar) args))
-          (body, na) = hypotheses args n goal
-       in (piOver args body, na)
+    -- @forall D -> IH1 -> ... -> IHn -> P is (c params D)@ — and **without the
+    -- hypotheses for 'CaseAnalysis'**, which is the whole of the difference
+    -- between the two schemes.
+    methodType c n = case scheme of
+      Inductive    -> let (body, na) = hypotheses Pi args n (goalOf c) in (piOver args body, na)
+      CaseAnalysis -> (piOver args (goalOf c), n)
+      where args = constructorArguments c
+
+    -- @P is (c params D)@, the conclusion of a method.
+    goalOf c =
+      motiveAt (constructorIndices c)
+               (Canonical (constructorName c) levels
+                          (paramVars ++ map (Free . entryVar) (constructorArguments c)))
+
+    -- What the node applies. For the eliminator it is the method itself; for
+    -- case analysis it is the method under a λ per inductive hypothesis, which
+    -- is where the hypotheses go: they are bound and not used.
+    --
+    -- **So @caseD@ really is the eliminator with the hypotheses discarded**, and
+    -- the kernel checks that rather than taking it on trust — the adapter has to
+    -- have the eliminator's own method type or the definition is refused.
+    methodTerm c mv n = case scheme of
+      Inductive -> (Free mv, n)
+      CaseAnalysis ->
+        let args       = constructorArguments c
+            applied    = foldl App (Free mv) (map (Free . entryVar) args)
+            (body, na) = hypotheses Lam args n applied
+         in (lamOver args body, na)
 
     -- One inductive hypothesis per recursive argument, in argument order. The
     -- binder is non-dependent -- nothing may refer to an induction hypothesis --
     -- but a 'Thena.Core.Term.Scope' still needs a variable to close over, so
     -- each takes one from the counter rather than reusing a sentinel.
-    hypotheses []       n acc = (acc, n)
-    hypotheses (e : es) n acc = case recursiveArgument dn np (entryType e) of
-      Nothing -> hypotheses es n acc
+    --
+    -- **It takes its binder** since MS9 phase 178: the Π that /states/ a
+    -- hypothesis and the λ that /discards/ one are the same walk over the same
+    -- arguments, and 'recursiveArgument' is read once for both (the argument
+    -- its own header makes).
+    hypotheses _   []       n acc = (acc, n)
+    hypotheses con (e : es) n acc = case recursiveArgument dn np (entryType e) of
+      Nothing -> hypotheses con es n acc
       Just is ->
         let (hv, na)   = fresh n
-            (below, nb) = hypotheses es na acc
-         in (Pi (Ident "ih") (motiveAt is (Free (entryVar e))) (close hv below), nb)
+            (below, nb) = hypotheses con es na acc
+         in (con (Ident "ih") (motiveAt is (Free (entryVar e))) (close hv below), nb)
 
 -- | Every 'Var' the environment holds.
 --

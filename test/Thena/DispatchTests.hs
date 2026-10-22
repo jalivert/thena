@@ -307,7 +307,27 @@ dispatchableTests =
                -- @try-core@ above, which is what this test is about.
              , "fit-core", "fit-core"
              , "claim", "assume", "quantify"]
-               ++ replicate 19 "elaborate" ++ ["run-block"]
+               ++ replicate 7 "elaborate"
+               ++ [ "no-nesting", "ihs-for", "ihs-for"
+                  , "reverse-onto", "reverse-onto", "apply-all", "apply-all"
+                  , "instantiate-with" ]
+               ++ replicate 8 "intro-arm-binders"
+               ++ [ "bind-friendlies", "bind-friendlies", "bind-solved", "bind-solved"
+                  , "same-length", "same-length"
+                  , "arm-for", "arm-for", "pick", "pick", "arm-needs-body"
+                  , "elaborate-arm", "case-needs-an-arm"
+                  , "vanished-case-takes-no-body", "vanished-case-takes-no-body"
+                  , "case-must-vanish", "one-case", "one-case", "one-case"
+                  , "arm-must-be-for-this-datatype"
+                  , "arms-are-for-this-datatype", "arms-are-for-this-datatype"
+                  , "one-arm-per-constructor"
+                  , "arm-not-repeated", "arm-not-repeated"
+                  , "arms-are-distinct", "arms-are-distinct"
+                  , "split-cases", "split-cases", "split-over"
+                  , "split-claim", "split-claim", "split-elaborate"
+                  ]
+               ++ replicate 15 "elaborate"
+               ++ ["run-block"]
                ++ replicate 2 "spine-arguments"
         names' (dispatch std emptyGlobals hole)
           @?= ["attack", "abandon", "prove"]

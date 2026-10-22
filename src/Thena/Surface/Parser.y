@@ -26,7 +26,8 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 
 import Thena.Surface.Concrete
-  ( Plicity (..)
+  ( Analysis (..)
+  , Plicity (..)
   , Surface (..)
   , ObjectPiece (..)
   , SurfaceDecl (..)
@@ -34,7 +35,9 @@ import Thena.Surface.Concrete
   , SurfaceData (..)
   , SurfaceConstructor (..)
   , SurfaceArg (..)
+  , SurfaceArm (..)
   , SurfaceBinder (..)
+  , SurfacePattern (..)
   )
 import Thena.Instral.Concrete (RawInstr (..), RawOp (..), RawOperand (..), RawRhs (..), RawBody (..), RawPattern (..))
 import Thena.Core.Term (Literal (..))
@@ -64,6 +67,9 @@ import Thena.Syntax.Lexer (Located (..), Pos (..), Token (..))
   in      { Located _ TIn }
   elim    { Located _ TElim }
   trusted { Located _ TTrusted }
+  induction { Located _ TInduction }
+  case    { Located _ TCase }
+  of      { Located _ TOf }
   where   { Located _ TWhere }
   data    { Located _ TData }
   module  { Located _ TModule }
@@ -366,6 +372,58 @@ Atom :: { Surface }
   -- The third field of the core node is not written here: it is derived, and
   -- elaboration infers it.
   | trusted Atom Atom                      { SurfaceTrusted $2 $3 }
+  -- **An atom, because the form is self-delimiting** (MS9 phase 179): @of@
+  -- opens the block and the offside rule closes it, so the whole thing ends at
+  -- a @}@ exactly as @do { … }@ does. Which means it stands where a name stands
+  -- and needs no parentheses to be an argument.
+  --
+  -- **The target is an @App@ and not an @Atom@**, so @induction f x of …@
+  -- analyses the application and not just @f@. There is no ambiguity to settle:
+  -- @of@ is a keyword, so the spine stops there.
+  | induction App of '{' Arms '}'          { SurfaceSplit ByInduction $2 (reverse $5) }
+  | case App of '{' Arms '}'               { SurfaceSplit ByCases $2 (reverse $5) }
+
+-- | The arms of a split, reversed.
+--
+-- **No arms is legal**: @case t of { }@ is the whole of a case analysis on a
+-- datatype with no constructors. The same shape, and the same reason, as
+-- 'Constructors'.
+Arms :: { [SurfaceArm] }
+  :                                        { [] }
+  | SomeArms                               { $1 }
+
+SomeArms :: { [SurfaceArm] }
+  : Arm                                    { [$1] }
+  | SomeArms ';' Arm                       { $3 : $1 }
+
+-- | One arm. **@->@ and not @=@ — his ruling, 2026-10-18.**
+--
+-- **AN ARM MAY STOP AT THE ARROW — his ruling, 2026-10-20**, and that is how a
+-- case which cannot arise is written: @vnil ->@ with nothing after it. There is
+-- no ambiguity to resolve, because an arm is followed only by @;@ or @}@ and a
+-- 'Term' can begin with neither.
+Arm :: { SurfaceArm }
+  : Pattern '->' Term                      { SurfaceArm $1 (Just $3) }
+  | Pattern '->'                           { SurfaceArm $1 Nothing }
+
+-- | A written pattern.
+--
+-- **A head may take arguments and an argument may not**, which is the whole of
+-- the grammar: @cons n a as@ is one pattern three arguments wide, and
+-- @cons n a (cons m b nil)@ needs the parentheses because an argument is an
+-- atom. The shape of an application, which is what makes a clause's left-hand
+-- side readable as one later.
+Pattern :: { SurfacePattern }
+  : ident PatternAtoms                     { patternName $1 (reverse $2) }
+  | PatternAtom                            { $1 }
+
+PatternAtoms :: { [SurfacePattern] }
+  : PatternAtom                            { [$1] }
+  | PatternAtoms PatternAtom               { $2 : $1 }
+
+PatternAtom :: { SurfacePattern }
+  : ident                                  { patternName $1 [] }
+  | '(' Pattern ')'                        { $2 }
 
 -- | The pieces of a tagged term literal, reversed.
 --
@@ -458,6 +516,17 @@ name x = case x of
   "_"      -> SurfacePlaceholder
   '?' : h  -> SurfaceHole h
   _        -> SurfaceName x
+
+-- | @_@ is a wildcard; everything else is a name.
+--
+-- **'name''s arrangement, for 'name''s reason**: @_@ is legal inside an
+-- identifier, so the lexer hands over @TIdent "_"@ and this language decides
+-- what it means here. A wildcard with arguments is not special-cased — @_ a b@
+-- becomes a pattern headed by the name @_@, which elaboration refuses because
+-- nothing is declared under it.
+patternName :: String -> [SurfacePattern] -> SurfacePattern
+patternName "_" [] = PatternWildcard
+patternName x ps   = PatternName x ps
 
 -- | Build an application, **flattening a head that is already one**.
 --

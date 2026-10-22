@@ -13,10 +13,26 @@ instruction 1: wanted Core, got Int
 thena spine> say 42
 instruction 1: wanted String, got Int
 thena spine> :produces Core
+  apply-all/2 : Core -> List Core -> Core   (rule)
+  instantiate-with/2 : Core -> List Core -> Core   (rule)
+  intro-arm-binders/6 : List Pattern -> List (Binder, Option Core) -> List Core -> List (Name, Core) -> List (Name, Core) -> Core -> Core   (rule)
   intro-binders/2 : Surface -> Core -> Core   (rule)
   fresh-universe/0 : Core
 thena spine> :accepts Surface
   elaborate/1 : Surface -> ()   (rule)
+  ihs-for/2 : Surface -> Name -> List Name   (rule)
+  arm-for/2 : Surface -> Name -> Option (Pattern, Option Surface)   (rule)
+  pick/5 : Name -> Name -> Pattern -> Option Surface -> Surface -> Option (Pattern, Option Surface)   (rule)
+  elaborate-arm/6 : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> (Pattern, Option Surface) -> ()   (rule)
+  case-needs-an-arm/6 : Surface -> Name -> Core -> List (Binder, Option Core) -> List (Name, Core) -> Option (Pattern, Option Surface) -> ()   (rule)
+  one-case/5 : Surface -> Name -> Option Core -> List (Binder, Option Core) -> List (Name, Core) -> ()   (rule)
+  arms-are-for-this-datatype/2 : Surface -> Name -> ()   (rule)
+  arm-not-repeated/2 : Name -> Surface -> ()   (rule)
+  arms-are-distinct/1 : Surface -> ()   (rule)
+  split-cases/4 : Surface -> List Name -> List Core -> MethodShape -> ()   (rule)
+  split-over/3 : Surface -> List Name -> (List Core, MethodShape) -> ()   (rule)
+  split-claim/2 : Surface -> Core -> (List Core, MethodShape)   (rule)
+  split-elaborate/1 : Surface -> ()   (rule)
   run-block/1 : Surface -> ()   (rule)
   intro-binders/2 : Surface -> Core -> Core   (rule)
   spine-arguments/3 : Core -> Core -> Surface -> ()   (rule)

@@ -3,46 +3,46 @@ declared Nat
 thena spine> data Eq (A : Type) : A -> A -> Type where { refl : ∀ (a : A) -> Eq A a a }
 declared Eq
 thena spine> declare honest : Eq Nat zero zero ; honest = trusted (Eq Nat zero zero) (refl Nat zero)
-solved: ?ℓ44
+solved: ?ℓ56
 already equal
 already equal
-solved: ?ℓ44
-solved: ?ℓ55
+solved: ?ℓ56
+solved: ?ℓ68
 already equal
 already equal
-solved: ?ℓ55
-solved: ?ℓ66
+solved: ?ℓ68
+solved: ?ℓ79
 already equal
 solved: A
-solved: ?ℓ53
+solved: ?ℓ66
 thena spine> :whnf honest {0}
 refl {0} Nat zero
 thena spine> :trust any
 trust: any trust
   resting on nothing
 thena spine> declare liar : Eq Nat zero (succ zero) ; liar = trusted (Eq Nat zero (succ zero)) (refl Nat zero)
-solved: ?ℓ76
+solved: ?ℓ107
 already equal
 already equal
 already equal
-solved: ?ℓ76
-solved: ?ℓ89
+solved: ?ℓ107
+solved: ?ℓ121
 already equal
 already equal
 already equal
-solved: ?ℓ89
-solved: ?ℓ102
+solved: ?ℓ121
+solved: ?ℓ134
 already equal
 solved: A
-solved: ?ℓ87
+solved: ?ℓ119
 thena spine> :whnf liar {0}
 trusted (Eq {0} Nat zero (succ zero)) (Eq {0} Nat zero zero) (refl {0} Nat zero)
 thena spine> declare inferred : Eq Nat zero zero ; inferred = trusted _ (refl Nat zero)
-solved: ?ℓ112
+solved: ?ℓ164
 already equal
 already equal
-solved: ?ℓ112
-solved: ?ℓ126
+solved: ?ℓ164
+solved: ?ℓ179
 already equal
 solved: A
 solved: C
@@ -55,5 +55,5 @@ trusted (Eq {0} Nat zero zero) (Eq {0} Nat zero zero) (refl {0} Nat zero)
 thena spine> :surface trusted (Eq Nat zero zero) (refl Nat zero)
 trusted (Eq Nat zero zero) (refl Nat zero)
 thena spine> :infer trusted (Eq Nat zero (succ zero)) (refl Nat zero)
-trusted (Eq Nat zero (succ zero)) (refl Nat zero) : Eq {?ℓ137} Nat zero (succ zero)
+trusted (Eq Nat zero (succ zero)) (refl Nat zero) : Eq {?ℓ201} Nat zero (succ zero)
 thena spine> :quit

@@ -40,6 +40,7 @@ module Thena.View.Surface
   ( SurfaceShape (..)
   , SurfaceBinding (..)
   , SurfaceArgView (..)
+  , SurfaceArmView (..)
   , SurfacePieceView (..)
   , displaySurface
   ) where
@@ -49,11 +50,14 @@ import qualified Data.List.NonEmpty as NE
 
 import Thena.Core.Term (Literal (..))
 import Thena.Surface.Concrete
-  ( ObjectPiece (..)
+  ( Analysis (..)
+  , ObjectPiece (..)
   , Plicity (..)
   , Surface (..)
   , SurfaceArg (..)
+  , SurfaceArm (..)
   , SurfaceBinder (..)
+  , SurfacePattern (..)
   )
 import Thena.Syntax.Print (escapeChar, escapeString, rawInstruction)
 
@@ -86,8 +90,28 @@ data SurfaceShape
   | ASurfaceElimination String [SurfaceShape] SurfaceShape [SurfaceShape] [SurfaceShape] SurfaceShape
     -- ^ the datatype named, the parameters, the motive, the methods, the
     -- indices, the target — 'Thena.Surface.Concrete.Surface'\'s own order.
+  | ASurfaceSplit Analysis SurfaceShape [SurfaceArmView]
+    -- ^ @induction t of …@ and @case t of …@ (MS9 phase 179): which word was
+    -- written, the target, and one arm per pattern.
+    --
+    -- **The 'Analysis' is passed through and not mirrored**, which is
+    -- 'Plicity''s arrangement in 'SurfaceBinding' and for the same reason: it
+    -- holds no term, so there is nothing for a view to translate and a mirror
+    -- could only drift from it. The same is true of a
+    -- 'Thena.Surface.Concrete.SurfacePattern' — **until an inaccessible pattern
+    -- arrives**, which carries a term and will want translating here.
   | ASurfaceDo String
     -- ^ the block's own written text — see the module header.
+  deriving (Eq, Show)
+
+-- | One arm of a split: the pattern as written, and what it stands for — or
+-- __nothing__, for an arm written with no body at all.
+--
+-- **An empty arm is how a case that cannot arise is written** (MS9 phase 189,
+-- his ruling of 2026-10-20), so the body is optional here exactly as a binder's
+-- type is optional in 'SurfaceBinding'. A frontend drawing one has an arrow with
+-- nothing to its right, and that is the whole of it.
+data SurfaceArmView = SurfaceArmView SurfacePattern (Maybe SurfaceShape)
   deriving (Eq, Show)
 
 -- | One bound name: its plicity, its name, and its type if it was written.
@@ -123,6 +147,9 @@ displaySurface s = case s of
   SurfaceElim d ps mot ms is tgt ->
     ASurfaceElimination d (map displaySurface ps) (displaySurface mot)
       (map displaySurface ms) (map displaySurface is) (displaySurface tgt)
+  SurfaceSplit a tgt as ->
+    ASurfaceSplit a (displaySurface tgt)
+      [ SurfaceArmView pat (fmap displaySurface b) | SurfaceArm pat b <- as ]
   SurfaceDo is -> ASurfaceDo (intercalate " ; " (map rawInstruction is))
   where
     piece p = case p of

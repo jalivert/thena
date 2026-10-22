@@ -207,7 +207,9 @@ matchTests =
     , testCase "only the headless rules match in the core fragment" $
         case crossType (holeAt type0) of
           Left e    -> assertFailure ("could not cross: " ++ show e)
-          Right cur -> matching emptyGlobals cur @?= ["claim", "assume", "quantify", "run-block"]
+          Right cur -> matching emptyGlobals cur
+                         @?= ["claim", "assume", "quantify"]
+                               ++ splitHelpers ++ ["run-block"]
 
       -- Definition order is dispatch order (§8), so the match list is always a
       -- subsequence of the base and never a reordering of it.
@@ -809,7 +811,15 @@ everyHoleRule =
     -- runs none of them: they take a parameter.
   , "claim", "assume", "quantify"
   ]
-    ++ replicate 19 "elaborate" ++ ["run-block"]
+    ++ replicate 7 "elaborate"
+    -- **The splitting tree's helpers sit BETWEEN two runs of @elaborate@**,
+    -- because that is where the base declares them: written beside the clause
+    -- that calls them. **Both clauses of a split are in the second run**, the
+    -- arm-less one included: it stopped being a clause of its own when the
+    -- specialiser arrived, and now calls @split-elaborate@ like the other.
+    ++ splitHelpers
+    ++ replicate 15 "elaborate"
+    ++ ["run-block"]
     ++ replicate 2 "spine-arguments"
 
 -- | The recursive helpers every listing at a guess shows.
@@ -821,9 +831,44 @@ everyHoleRule =
 -- or without.
 walkers :: [String]
 walkers =
-  [ "claim", "assume", "quantify", "run-block"
-  , "intro-binders", "intro-binders", "intro-binders", "intro-binders"
-  , "spine-arguments", "spine-arguments"
+  ["claim", "assume", "quantify"]
+    -- **Before @run-block@, because the base declares them there** — beside the
+    -- @elaborate@ clause that calls them rather than with the other helpers.
+    ++ splitHelpers
+    ++ [ "run-block"
+       , "intro-binders", "intro-binders", "intro-binders", "intro-binders"
+       , "spine-arguments", "spine-arguments"
+       ]
+
+-- | The splitting tree's helpers (MS9), in the order the base declares them.
+--
+-- **Headless, or asking only about an argument**, so every one of them is
+-- offered wherever a state test passes — @walkers@' own reason, one phase on.
+-- They are a list of their own because both listings above show them and a
+-- second copy would be a second thing to remember.
+splitHelpers :: [String]
+splitHelpers =
+  [ "no-nesting"
+  , "ihs-for", "ihs-for"
+  , "reverse-onto", "reverse-onto", "apply-all", "apply-all"
+  , "instantiate-with"
+  ]
+  ++ replicate 8 "intro-arm-binders"
+  ++
+  [ "bind-friendlies", "bind-friendlies"
+      , "bind-solved", "bind-solved"
+  , "same-length", "same-length"
+  , "arm-for", "arm-for", "pick", "pick", "arm-needs-body", "elaborate-arm"
+  , "case-needs-an-arm"
+  , "vanished-case-takes-no-body", "vanished-case-takes-no-body"
+  , "case-must-vanish", "one-case", "one-case", "one-case"
+  , "arm-must-be-for-this-datatype"
+  , "arms-are-for-this-datatype", "arms-are-for-this-datatype"
+  , "one-arm-per-constructor"
+  , "arm-not-repeated", "arm-not-repeated"
+  , "arms-are-distinct", "arms-are-distinct"
+  , "split-cases", "split-cases", "split-over"
+  , "split-claim", "split-claim", "split-elaborate"
   ]
 
 -- | @Nat@, as a core term, for the row above.

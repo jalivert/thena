@@ -26,7 +26,8 @@ one paragraph, not three; the full argument lives in the design notes.
 
 ### An identifier may contain almost anything
 
-*Decided 2026-08-25; consequences accepted 2026-08-29.*
+*Decided 2026-08-25; consequences accepted 2026-08-29. The keyword list is
+reviewed whenever a word is reserved — most recently 2026-10-19.*
 
 Most languages reserve a generous set of punctuation and give you the rest.
 Thena does the opposite: it reserves as little as it can, so you can name things
@@ -39,10 +40,14 @@ in your own notation — `≼`, `Γ⊢`, `x'`, `2-cell`, `∂f/∂x` are all one
 | brackets and separators | `(` `)` `{` `}` `[` `]` `;` `,` `"` |
 | operator characters | `λ` `∀` `⊢` `≟` `≐` `≈` `▸` `⌜` `⌝` |
 | whitespace | |
-| keywords | `let` `in` `elim` `forall` `where` `do` `rule` `when` |
+| keywords | `forall` `let` `in` `elim` `induction` `case` `of` `trusted` `where` `data` `module` `do` `rule` `language` `context` `judgment` `notation` `when` |
 
 A name starts with an ASCII letter, `_`, or any non-reserved character above
 ASCII.
+
+**A keyword is a whole token, so a word that merely *contains* one is a name.**
+`caseNat` and `datatype-of` are each one identifier; the lexer takes the longest
+match, so a keyword rule can only win on the whole word.
 
 **What follows, and it is the part that will catch you out.** `:` and `=` are
 *not* reserved, so they can sit inside a name. The lexer takes the longest
@@ -2199,6 +2204,527 @@ are two. **It also removed a choice point from every name-headed application** �
 elaborating `succ y` used to record one, because a second clause matched and
 could be offered.
 
+### A recursive call *is* the induction hypothesis, and that is the whole termination story
+
+Write a function by splitting, and call it recursively:
+
+```
+double : Nat -> Nat
+double = \ n -> induction n of { zero -> zero ; succ m -> succ (succ (double m)) }
+```
+
+`double (succ (succ zero))` is four. There is no `fix`, no case tree and no
+termination checker — `double m` in the `succ` arm *is* the induction hypothesis
+the eliminator already supplies, and elaboration replaces it with that
+hypothesis.
+
+**So the guard is not a check, it is what can be said.** An eliminator makes the
+hypothesis available only at the smaller index, so there is nothing to verify:
+
+```
+loop = \ n -> induction n of { zero -> zero ; succ m -> loop zero }
+  no induction hypothesis is about this call, so it is not structurally
+  smaller: loop zero
+```
+
+`loop zero` names nothing that the `succ` method received a hypothesis about, so
+it does not elaborate. Coq checks a guard condition in the kernel; Thena has
+nothing to check, because an unguarded recursion cannot be written down.
+
+**How the call finds its hypothesis is worth knowing, because the obvious way
+does not work.** The name being defined is in scope in its own body as an
+ordinary assumption, and a pass over the elaborated term replaces each
+application of it. Which binder of a method is a hypothesis is read off the
+datatype — a method takes the constructor's arguments and then one hypothesis per
+*recursive* argument, in order — and a call resolves to the hypothesis about the
+argument it **names**. Types cannot decide it: in `double`'s `succ` arm both the
+pattern variable `m` and the hypothesis about it have type `Nat`, so a search by
+type would pick either and still typecheck.
+
+Three consequences a user meets:
+
+- **A call naming two recursive arguments is refused**, because which one it
+  recurses on is not written down. `g l r` in a `node l r` arm is that case.
+- **Where a split pins an index, the arm's hypotheses are guarded by an equation
+  and no call resolves there.** That is not a restriction being imposed: an
+  inversion lemma's hypotheses are genuinely unusable, which is why the ones
+  written by hand are bound and ignored.
+- **A premise bound before the split is fixed, and the recursion may pass it but
+  not vary it.** The motive quantifies what the split generalises and what it
+  refines, and nothing else — so a premise already introduced stays at the one
+  value it had, and the hypothesis is the statement at that value. Passing it is
+  free, and the argument is simply dropped:
+
+  ```
+  size : ∀ (t : Tr) -> Ok t -> Tr -> Nat
+  size = \ t d u -> induction d of
+    { okLeaf -> zero ; okNode a b da db -> succ (size a da u) }
+  ```
+
+  Varying it is not the hypothesis, and says so:
+
+  ```
+  size2 = \ t d u -> induction d of
+    { okLeaf -> zero ; okNode a b da db -> succ (size2 a da (node u u)) }
+    the split fixed u and this call passes node u u, so it is not the
+    induction hypothesis — a premise the induction varies is bound inside
+    the arm and not before the split: size2 a da (node u u)
+  ```
+
+  **Bind it inside the arm and it varies freely**, because the motive then
+  quantifies it and the hypothesis takes it:
+
+  ```
+  size3 = \ t d -> induction d of
+    { okLeaf -> \ u -> zero
+    ; okNode a b da db -> \ u -> succ (size3 a da (node u u)) }
+  ```
+
+  This is the one thing about an `induction` that the *shape* of the proof
+  decides rather than its statement, and it is why a lemma that strengthens its
+  own hypothesis — `chain n c`'s distinctness, where the recursion is at `c` with
+  one more prime — writes that premise to the right of the split.
+
+### Dot patterns are optional here, because we run the eliminator and not the clause
+
+When a split determines one of a constructor's arguments, that argument has no
+binder left in the case it produces. Splitting `v : Vec A (succ n)` makes `vcons`'s
+own length equal to `n`, so
+
+```
+vcons : ∀ (k : Nat) (a : A) (as : Vec A k) -> Vec A (succ k)
+```
+
+yields a case binding two arguments, not three. A reader who knows Agda will expect
+to have to write `.n` there, and to be *required* to.
+
+**Thena lets you write a name instead, and binds it as a definition.** Both spellings
+will exist; the dot will be a way to say more, never an obligation.
+
+**The reason is that the requirement protects something Thena does not have.**
+Inaccessible terms — Agda's dot patterns — were introduced to keep a *left-hand side*
+matchable: a matcher needs its pattern linear in the variables it binds, and
+specialisation naturally wants one variable in two positions. Marking the position
+inaccessible makes it bind nothing, and linearity survives. In the literature those
+marks are inserted *by the translation*; requiring the programmer to write them is a
+separate choice.
+
+Thena has no left-hand side to keep linear. `induction t of { … }` elaborates to an
+application of the datatype's eliminator, and the definition computes by that
+eliminator's reduction rule:
+
+```
+pred = \ n -> induction n of { zero -> zero ; succ m -> m }
+  elaborates to   elim Nat () (λ target -> Nat) (zeroMethod succMethod) () n
+  and  pred (succ (succ zero))  reduces to  succ zero
+```
+
+There is no matcher in that term, so nothing needs to be linear and nothing has to be
+marked.
+
+**Nor does the determined fact have to be carried.** The transition that forces the
+argument eliminates it by substitution, so the case is handed types already written in
+the outer names — the sub-derivations of an inverted typing judgment have type
+`Has m …`, not `Has m1 …`. And where you do name the position, the name is a
+definition, so the equality is *definitional*: `m1` and `m` are convertible, and `refl`
+proves `m1 = m` with no transport.
+
+**What is given up is a check, not an ability.** With dots required, the mark is an
+assertion the system verifies. Without them, the same text means a binder or a
+definition depending on an inference you cannot see, and changing a lemma's statement
+can silently change which. The answer to that is the system showing you which positions
+it determined, rather than making you write them out.
+
+### A case that cannot happen is an arm with no body, and there is no `impossible`
+
+Splitting a `Vec A (succ n)` leaves no `vnil` case: `succ n = zero` is a conflict, so
+that method is discharged by the conflict and there is nothing to prove. Agda has you
+write an absurd pattern; Idris has you write `impossible`. **Thena has you write the arm
+and stop at the arrow.**
+
+```
+vtail : forall (A : Type₀) (n : Nat) -> Vec A (succ n) -> Vec A n
+vtail = \ A n v -> induction v of { vnil -> ; vcons k a as -> as }
+```
+
+The whole split may also be written with no arms at all — `induction d of { }` — which
+is how the inversion lemmas in `examples/canonical.thena` are written, and **an empty
+arm is that same notion for one case rather than for all of them.** A keyword would have
+been a second spelling for something the syntax could already say.
+
+**And it would have spent the name.** A tactic called `impossible` — one that takes a
+case you believe cannot arise and finds the contradiction for you — is wanted, and a
+tactic in Thena is an ordinary rule whose name is an ordinary identifier. One lexer
+serves the surface and the rule language, so a word reserved for `induction … of` is a
+word no rule can be called.
+
+**Writing a body there is a refusal, not a redundancy.** The case being gone is
+something the system has a proof of, so a term written in that arm is a claim that the
+case can arise, against that proof. The converse is a refusal too: an empty arm for a
+case that *did* survive is refused, so believing a case impossible when the system
+could not discharge it is something you find out at the split. **What the refusal says
+today is only that the arm needs a body**; it does not hand you the method, and
+improving that is open work.
+
+**Underneath it is one law — every arm you wrote was asked for.** Elaboration walks the
+datatype's constructors asking for an arm for each, and the law is the other direction.
+It is what refuses an arm for a case that vanished, an arm headed by a constructor of
+some other datatype, and a second arm for a constructor that already has one — three
+mistakes, one rule, and nothing in the system has to tell them apart.
+
+### A split refines variables bound before it, where it has to and not otherwise
+
+A split's motive abstracts the *indices* of the family, so splitting `e : Ev (s m)`
+abstracts `s m` — not `m`. On its own that leaves `m` fixed, and a goal about `m` rather
+than about `s m` has nothing for the motive to abstract. **So where it has to, the motive
+also quantifies a fresh copy of the outside variable**, states the equation about the
+copy, and the use site passes the variable itself together with `refl`. The copy is a
+binder the elaborator introduced, so the specialiser can solve it; the variable stays
+where it was. This is all that is needed:
+
+```
+refined : forall (m : N) (e : Ev (s m)) -> IsSucc m
+refined = \ m e -> case e of { evs n en -> isucc n }
+```
+
+`evs n en` forces `m`'s copy to be `s n`, the goal arrives as `IsSucc (s n)`, and
+`isucc n` is the arm. It computes, too: `refined (s z) (evs z evz)` is `isucc z` by `refl`.
+
+**A hypothesis about a refined variable comes with it**, because a hypothesis whose type
+mentions a refined variable is refined too — otherwise the arm would hold a hypothesis
+about something that no longer means what it meant. Inside the arm it arrives under its
+own name:
+
+```
+usesHyp : forall (m : N) (h : Ev m) (e : Ev (s m)) -> IsSucc m
+usesHyp = \ m h e -> case e of { evs n en -> isucc n }
+```
+
+**AND "WHERE IT HAS TO" IS DECIDED BY LOOKING, POSITION BY POSITION.** Compare the rule's
+own index with the scrutinee's. If the rule's side is one of the **rule's own variables** —
+`eSucc c1` against `succ p` — then that variable is the one that moves, the equation is
+solved with no copy involved, and nothing is generalised. Only where the rule's side has
+something else facing a bare outside variable — `eIfTrue`'s `true` against `p` — is a copy
+the only thing a solution can reach, and only there is one made.
+
+**That is not an optimisation.** Generalising where it was not needed costs real proofs,
+because the copy is quantified *after* the rule's own binders: a rule variable that would
+have been solved to a term mentioning the copy cannot be, since that points backwards, and
+the equation is kept instead. Making a copy only where nothing else will do is what keeps
+both kinds of case working at once.
+
+**A STATEMENT ABOUT THE THING YOU SPLIT IS REFINED, GOAL AND PREMISES TOGETHER.** The
+ordinary dependent statement — *here is a thing, here is a fact about the thing* — splits:
+
+```
+data L : Type₀ where { ln : L ; lc : N -> L -> L }
+data P : L -> Type₀ where { mkP : forall (l : L) -> P l }
+
+bothWays : forall (l : L) (q : P l) -> P l
+bothWays = \ l q -> case l of { ln -> mkP ln ; lc a as -> q }
+```
+
+The `ln` arm is asked for `P ln`, not for `P l`, and `q` there is a `P ln`. Both halves
+have to move at once: refining the goal alone would leave the arm holding a fact about
+`l`, which inside the arm means `ln` and so can no longer be named.
+
+**Unlike an index, the thing you split on is refined everywhere it appears and never
+leaves an equation behind** — it is the subject of the elimination, so in each arm it
+simply *is* that arm's constructor. The looking-position-by-position rule above is about
+indices only; a premise mentioning the subject is always carried.
+
+**BUT A SPLIT GENERALISES WHOLE PREMISES, AND NEVER A PART OF AN INDEX.** This is the one
+place where a hand-written eliminator can still state a motive a split cannot, and a proof
+that needs it says so in its own statement:
+
+```
+-- the induction varies the Δ INSIDE the context, so the context and the
+-- equation are arguments — which is the motive, written down
+tyRebindAt : forall (G : Ctx) (Xn : String) (A : Ty) (B : Ty) (C : Ctx) (T : Ty)
+               (h : ty C T) (D : Ctx) (e : Eq Ctx C (append (bindTy G Xn A) D))
+               -> ty (append (bindTy G Xn B) D) T
+
+tyRebind = \ G Xn A B D T h ->
+  tyRebindAt G Xn A B (append (bindTy G Xn A) D) T h D
+    (refl Ctx (append (bindTy G Xn A) D))
+```
+
+`examples/poplmark/03-wellformed.thena` and `06-transitivity.thena` each have exactly one
+lemma of that shape, and the wrapper means no caller sees it. **Where the index IS a
+variable there is nothing to say**: the split abstracts it, and `examples/progress.thena`
+is made of that case.
+
+**AND A PREMISE ABOUT AN INDEX IS CARRIED TOO.** The position-by-position rule decides
+whether the *index* gets a copy, which is a question about what a method can be stated at;
+whether an *arm* can use a fact you already have is a different question, and the answer is
+the same as for the subject:
+
+```
+h : forall (a : String) (c : String) -> R a c -> Eq String a c -> R c a
+h = \ a c p q -> case q of { refl u -> p }
+```
+
+Splitting the equation makes `a` and `c` the same `u`, so `p` is an `R u u` and it is the
+answer. Nothing demands a copy of either index — `refl`'s index is its own argument at both
+positions — so until MS9 `p` was left standing at `R a c` beside an arm whose subject was
+`u`, and the lemma could not be written at all.
+
+**AND THE SCRUTINEE ITSELF IS ONE OF THE NAMES THAT MEANS THE REFINED THING.** Inside an
+arm the thing being split *is* the constructor applied to that arm's own variables, so the
+name you gave it means that:
+
+```
+p19 : forall (U : Ty) (d : D U) -> D U
+p19 = \ U d -> case d of { mk V -> d }
+```
+
+`d` in the arm is `mk V`, and the proof computes. Writing `mk V` there instead is the same
+proof, which is the point: which positions a split refined, and under which names, is
+elaboration's business and not something the author should have to spell differently.
+
+**A recursion across such a split is written as an ordinary recursive call, whatever the
+split had to generalise** — one index tied or several, a premise introduced before the
+subject or after it, a premise the recursion varies or one it does not. The induction
+hypothesis is reached by calling the function being defined; nothing in an arm binds one
+or names one.
+
+**A RECURSIVE CALL MAY BE WRITTEN INSIDE A SPLIT THAT GENERALISES.** A split that
+generalises makes each case prove something *more general* than the goal it came from — the
+case is about a fresh copy of the subject — so the hypothesis the case has to use is the
+copy of the enclosing arm's, which the split quantified along with everything else whose
+type mentions the subject. The recursion check follows that: a call inside such an arm is
+tied to the copy, and the copy is an unguarded premise of the method, so no termination
+argument is spent.
+
+**AND NOTHING IN THE ARM SAYS A SPLIT GENERALISED.** A name the split refined means the
+refined thing, whether the refinement came from a surviving copy or from one an equation
+solved outright. Where the case solves the copy of an outside variable — `eIf`'s own `c1`
+becomes the copy of `p` — the outside name is bound in the arm as a definition equal to
+that term, so the arm is written exactly as it would be if nothing had been copied:
+
+```
+; eIf p p' a b sr -> \ u s -> case s of
+    { …
+    ; eIf c1 c1' c2 c3 sr2 -> cong Term Term (\ x -> ifthen x c2 c3) p' c1' (determinacy p p' sr c1' sr2) }
+```
+
+`p` there is the inner case's own subject and `sr` is the copy, refined to `Step p p'`,
+which is what makes the call typecheck with nothing transported. The `eSucc` arm, whose
+split generalises nothing, is written the same way — and that is the point, because an
+author has no way of knowing which of the two they are in.
+
+**AND THAT HOLDS WHERE NOTHING WAS COPIED AT ALL.** An index the scrutinee supplies as a
+plain variable that no other premise mentions needs no equation: the motive abstracts it
+outright, which already generalises everything that mentions it. Nothing is copied and
+nothing is solved there — and the author's name for it still means what the case made of
+it:
+
+```
+indexIsRefined : forall (m : N) (e : Ev m) -> Eq N m m
+indexIsRefined = \ m e -> case e of { evz -> refl N m ; evs n en -> refl N m }
+```
+
+`m` is `Ev m`'s index, and one `refl N m` answers both arms because in the first it is `z`
+and in the second it is `s (s n)`. The same holds when the index is the constructor's own
+argument: splitting a `d : D m` on `mk k` leaves `m` meaning `k`, and `mk m` is the same
+term as `mk k`.
+
+**Which positions a split copied, and which copies it solved, is elaboration's business.**
+Elaboration is compilation: nobody should write a proof differently because of how it is
+compiled. **Agda and Idris show none of it either**, because a clause's whole left-hand
+side is one unification problem rather than one scrutinee with everything to its left
+fixed.
+
+**A RECURSION MAY ALSO VARY A PREMISE THE SPLIT DID NOT SPLIT ON.** A proof by induction
+on one premise may recurse at a different value of another, and nothing has to be said:
+
+```
+varies : forall (n : N) (x : A n) (u : N) (f : F n u) -> N
+varies = \ n x u f -> induction x of
+  { az -> z ; as k p -> case f of { fs j m r -> s (varies k p m r) } }
+```
+
+The induction is on `x`, and the call recurses at `m` rather than at `u`. What makes it
+work is that the split generalises `u` along with `f`, because `f`'s type mentions it — a
+copy is only useful if it is a copy of everything it is about.
+
+**A RECURSION MAY SUPPLY A PREMISE THE SPLIT HAD TO GENERALISE.** Where the statement's own
+premises include one the split generalises, the recursive call says what it is at the
+smaller subject and nothing else changes:
+
+```
+takesPremise : forall (n : N) (x : A n) (e : Eq N n n) -> N
+takesPremise = \ n x e -> induction x of
+  { az -> z ; as k p -> s (takesPremise k p (refl N k)) }
+```
+
+`e` is generalised because its type mentions `n`, the target's index. The recursion is at
+`k`, so the premise it needs is `refl N k` and that is what is written. **Passing the arm's
+own `e` instead is refused**, and it should be: the split refined `e` to the copy at
+`s k`, which is not a premise about `k`.
+
+**AND WHERE YOU INTRODUCE A PREMISE IS NOT PART OF THE PROOF EITHER.** A statement says
+what the premises are, not the order a proof takes them in, so `\ n x u f ->` across the top
+and a `\ u f ->` inside each arm are the same proof and both load:
+
+```
+inside  = \ n x -> induction x of
+  { az -> \ u f -> z ; as k p -> \ u f -> case f of { fs j m r -> m } }
+outside = \ n x u -> induction x of
+  { az -> \ f -> z ; as k p -> \ f -> case f of { fs j m r -> m } }
+```
+
+Both are `forall (n : N) (x : A n) (u : N) (f : F n u) -> N`, and in both the inner split
+has to generalise the ambient `u` — `fs`'s own `s m` faces it and there is nothing on the
+rule's side to move. The second spelling was refused until MS9: the generalisation a nested
+split needed was cancelled by what the elaborator had left in scope for the arms before it,
+which is nothing a proof can see or plan around.
+
+**And where the family recurses at one index and concludes at another, the recursion is
+what asks for the copy — MS9.** No *arm* needs one from
+
+```
+data T : N -> Type₀ where
+  tv : forall (g : N) -> T g
+  tl : forall (g : N) (p : T (s g)) -> T g
+```
+
+because `tl` concludes at its own `g`, which the split solves away. But the induction
+hypothesis is the motive at the *premise's* index, `s g`, so a proof that varies a premise
+across the recursion
+
+```
+atTop : forall (g : N) (d : T g) (g1 : N) (inc : Inc g g1) -> N
+atTop = \ g d g1 inc -> induction d of
+  { tv g0 -> g1
+  ; tl g0 p -> atTop (s g0) p (s g1) (mkInc (s g0) (s g1)) }
+```
+
+gets a hypothesis constrained against the variable outside the split, which no call can
+satisfy. **So the same question is asked of each recursive premise's indices as of the
+constructor's conclusion**, and that is the whole rule — it demands nothing extra where
+the premise sits at one of the constructor's own arguments, which is why `vtail` over
+`Vec` still copies nothing. **Where you introduce a premise does not decide whether your
+proof loads**, and that is the property these rules exist to keep.
+
+**An arm can be written to take a leftover equation** — `evs n en -> \ q -> …` — and then
+transport by hand. It type-checks, and it is deliberately not how the examples are written:
+an arm whose right-hand side is a function of an equation you had no way to predict is
+elaboration showing through the surface, not a way to write proofs.
+`examples/determinacy-patterns.thena` has no such arm, and no `elim` either.
+
+### `case` says the arm does not recurse, and the type is what says it
+
+```
+predC : Nat -> Nat
+predC = \ n -> case n of { zero -> zero ; succ m -> m }
+
+double : Nat -> Nat
+double = \ n -> induction n of { zero -> zero ; succ m -> succ (succ (double m)) }
+```
+
+Two words, one mechanism. `induction t of { … }` elaborates to the datatype's
+eliminator, whose every method is handed one inductive hypothesis per recursive
+argument. `case t of { … }` elaborates to the generated `caseNat` — the same
+eliminator with those hypotheses dropped — so a `case` arm has nothing to recurse
+with:
+
+```
+dblC = \ n -> case n of { zero -> zero ; succ m -> succ (succ (dblC m)) }
+  no induction hypothesis is about this call, so it is not structurally smaller: dblC m
+```
+
+**Nothing checks for that.** There is no rule anywhere that says a `case` arm may
+not recurse. The hypothesis is simply not in scope, so the call has nothing to tie
+to and is refused by the same mechanism that refuses a call at the wrong index
+under `induction`. Writing `case` is therefore a claim the type carries, not a
+comment: `examples/canonical.thena` is all `case`, because inversion never
+recurses, and `examples/progress.thena` has exactly one `induction` in it.
+
+**Everything else about the two is identical.** The same motive generalising the
+indices, the same equations recovering their specificity, the same forced
+positions, the same vanished cases. `case` over an indexed family forces a
+constructor argument exactly as `induction` does:
+
+```
+vtailC : ∀ (A : Type₀) (n : Nat) -> Vec A (succ n) -> Vec A n
+vtailC = \ A n v -> case v of { vcons k a as -> as }
+```
+
+**And the kernel cannot tell them apart**, which is the point of doing it this
+way. `caseNat` is an ordinary definition whose body is an `elim Nat` with a λ
+discarding each hypothesis, so it δ-unfolds to the elimination and is checked as
+one. Nothing was added to the core language, and a proof written either way is the
+same term up to unfolding.
+
+### Writing no arms is the claim that every case is impossible
+
+```
+trueNotNat : forall (d : HasType true nat) -> Empty
+trueNotNat = \ d -> induction d of { }
+```
+
+`HasType` has seven constructors, and none of them can have built this derivation:
+every one disagrees with `true` or with `nat`. So the split has nothing to answer,
+and writing no arms is how you say that. Each method is closed by its own
+conflicting equation and the proof is complete.
+
+**It is not a second form of split.** The same walk runs over the same methods,
+and the only thing the empty brace changes is that *every* method is now required
+to vanish. A datatype with no constructors — `case e of { }` at `e : Empty` —
+satisfies that by having no methods at all, which is how the two cases turned out
+to be one. A method that survives is refused by name:
+
+```
+oops = \ t n -> induction n of { }
+  no clause of case-must-vanish applies here      -- nvZero did not vanish
+```
+
+**`induction` and `case` mean the same thing here, and that is a consequence
+rather than a convenience.** The two words differ by whether a method carries
+inductive hypotheses; with no method surviving there is nothing for a hypothesis
+to be attached to, so there is nothing left for them to differ about.
+
+**One consequence worth knowing, and it is about universes rather than splitting.**
+A declaration's statement is level-polymorphic in any level it does not pin, and
+`Empty` is a family with a level. The seven-method proof pinned level 0 along the
+way, because it passed `Empty` to `absurd`, whose argument is declared at `Type₀`.
+The arm-less proof names nothing, so the lemma you get is the more general one:
+
+```
+trueNotNat {ℓ} : HasType true nat -> Empty {ℓ}
+```
+
+Both readings are lemmas you can use, and `trueNotNat {0}` is the old one. **Writing
+a shorter proof of the same signature can therefore give you a more general global**
+— worth knowing, and not a thing to work around.
+
+### The same lesson, one level on: a search must not be a choice point over the work
+
+`induction t of { … }` elaborates by walking a datatype's constructors against
+the method holes an elimination claimed, and for each one finding the arm the
+user wrote for it. The obvious shape is one rule that matches the constructor's
+name *and* elaborates that arm's body.
+
+**That shape loses every error the body produces.** With one name test and an
+ordering, both clauses of the search match whenever the names agree, so the
+engine keeps the other as an alternative; a body that then fails to elaborate
+backtracks into the search, which walks on through the remaining arms, runs out,
+and reports *itself*. A recursive call with nothing to resolve to, a pattern of
+the wrong arity and a missing arm all came back as the same sentence about the
+search.
+
+**So the search answers with the arm and does nothing else, and its two clauses
+are made mutually exclusive by a pair of complementary tests** — `same-name` and
+`different-name`, the way `let`'s annotated and bare clauses are two positive
+tests rather than a negation. The caller elaborates, and the caller's failure is
+its own. Each of those three now says what actually happened.
+
+**This is why the head language still has no negation and does not need one.**
+Every exclusive pair so far has been writable as two positive tests, and each
+time that has also removed a choice point the user would otherwise have been
+offered.
+
 **A rule body may be empty**, which it could not before. `E⟦_⟧` is *do nothing*:
 the hole is already there and unification is expected to find it. A clause that
 does nothing and a clause that does not match are different answers, so the
@@ -2844,6 +3370,92 @@ always succeeds, including when you are at the root already.
 that reach it from the root, so a click compiles to `goto-root` and then those
 moves — an ordinary program you could have typed, snapshotted and undoable like
 any line. Clicking the top of a development is `goto-root` on its own.
+
+### Every datatype generates `caseD` as well as `elimD`
+
+*Decided 2026-10-18.*
+
+`elimD` is induction: every method is handed one inductive hypothesis per
+recursive argument, whether it wants one or not. Analysing the cases of a term
+and *not* recursing on it is the other thing you do with a datatype, and through
+`elimD` you cannot ask for it — you bind the hypothesis and ignore it at every
+method. So a second definition is generated, the same scheme with those binders
+dropped:
+
+```
+thena spine> :elim Nat
+elim Nat : ∀ (P : Nat -> Type₀) -> P zero -> (∀ (x : Nat) -> P x -> P (succ x)) -> ∀ (target : Nat) -> P target
+thena spine> :show caseNat
+caseNat {ℓ} : ∀ (P : Nat -> Type ℓ) -> P zero -> (∀ (x : Nat) -> P (succ x)) -> ∀ (target : Nat) -> P target
+caseNat = λ P method method1 target -> elim Nat () P (method (λ x ih -> method1 x)) () target
+```
+
+So `pred` is `caseNat (λ t -> Nat) zero (λ m -> m)`, and the method for `succ`
+takes the predecessor and nothing else.
+
+**It is a definition and not a new kind of term.** Its body is an `elim D` whose
+methods are its own under a λ per hypothesis, so `caseD` δ-unfolds to an
+ordinary elimination, reduces like one and is checked like one. Nothing in the
+kernel can tell a case analysis from an induction, and `caseNat` and `elimNat`
+with the hypotheses ignored are the same term.
+
+**Its name is one more the declaration takes.** Generated names share your
+namespace, so declaring `Nat` when something called `caseNat` already exists is
+refused, exactly as it is for `elimNat` and for `noConfusionNat`.
+
+---
+
+### `specialise` discharges the equations an elimination hands you, and keeps the ones it cannot
+
+*Decided 2026-10-18.*
+
+Eliminating a family at specific indices gives you one method per constructor
+with the equations that recover those indices attached. Splitting `v : Vec A (succ n)`
+to prove `Vec A n` hands over
+
+```
+nilMethod  : Eq {0} Nat zero (succ n) -> Vec A n
+consMethod : ∀ (n1 : Nat) -> A -> Vec A n1
+           -> (Eq {0} Nat n1 (succ n) -> Vec A n)
+           -> Eq {0} Nat (succ n1) (succ n) -> Vec A n
+```
+
+and until now you discharged each one by hand, with a generated `noConfusion`
+and an `Empty` elimination for the branches that cannot occur and a transport
+for the ones that can. `specialise ‹constructor› ‹equations›` does it instead.
+At `nilMethod` it leaves **no subgoal at all** — `zero` against `succ n` cannot
+hold — and at `consMethod` it leaves
+
+```
+A -> Vec A n -> (Eq {0} Nat n (succ n) -> Vec A n) -> Vec A n
+```
+
+The binder `n1` is gone, because the equation determined it, and the vector is
+at `n` rather than at `n1` — which is exactly the coercion you were writing.
+
+**It is one instruction and not four**, for the same reason `prim-eliminate` is
+one: everything it does is term construction over a declaration, and a granular
+version would need a term-building sub-vocabulary that nothing else has asked
+for. What is *not* inside it is the choice of what to split, which is an
+ordinary rule — a wrong choice is a failed elaboration, while a wrong proof term
+would be a lie, and the second is the one the kernel has to be the judge of. So
+everything `specialise` builds is checked against the method it claims to prove
+before you are given it.
+
+**An equation it cannot simplify is kept, not refused.** There are four
+transitions — an equation of a term with itself goes, two different constructors
+close the method, the same constructor splits into its arguments, and a binder
+the equation determines is substituted away — and no fifth one for a *cyclic*
+equation like `Eq Nat m (succ m)`, which is refutable and is not refuted. When
+none applies, the equation stays a hypothesis of the simplified method. That is
+what you were handed before, so the worst case is the behaviour this replaces.
+
+**`prim-eliminate` now answers with a number**: how many equations each of its
+methods carries. A method type is Π binders all the way down and does not say
+which of them are the equations, so `specialise` has to be told — and the
+elimination that stated them is the only thing that knows.
+
+---
 
 ---
 

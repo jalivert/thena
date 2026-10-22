@@ -22,12 +22,12 @@ data-files:         prelude/prelude.thena
 --
 -- > cabal test thena-examples --flags=examples
 --
--- **A second test-suite is NOT opt-in by itself, which was measured the wrong
--- way round first.** `thena-boundary` is skipped by `cabal test` because it
--- depends on `thena:view` and not on `thena`, so it is a different component in
--- the plan — not because it is a second suite. Declaring `thena-examples` as an
--- ordinary second suite made `cabal test` run both. Hence the flag, which makes
--- the suite unbuildable unless it is asked for, so it can never silently pass.
+-- **A second test-suite is NOT opt-in by itself.** `cabal test` builds and runs every
+-- suite in the plan, `thena-boundary` included — measured 2026-10-20, correcting an
+-- earlier note here which claimed that depending on `thena:view` rather than on `thena`
+-- made it a different component and kept it out. It does not. Hence the flag, which is
+-- the only reliable exclusion: it makes the slow corpus unbuildable unless it is asked
+-- for, so it can neither pass silently nor be skipped silently.
 flag examples
     description:        Build the slow example-corpus test suite.
     default:            False
@@ -97,6 +97,8 @@ library
         Thena.Syntax.Print
         Thena.Syntax.Resolve
         Thena.Tactics.Eliminate
+        Thena.Tactics.Specialise
+        Thena.Tactics.Recurse
         Thena.View
         Thena.View.Address
         Thena.View.Chart
@@ -294,6 +296,8 @@ test-suite thena-test
         Thena.ProgressTests
         Thena.ProductTests
         Thena.DevelopmentTests
+        Thena.DeclarationReadersTests
+        Thena.SpecialiseTests
         Thena.EliminateTests
         Thena.EliminatorTests
         Thena.EngineTests
@@ -390,10 +394,10 @@ test-suite thena-tui-test
 -- theorems. The TAPL proofs he named are under a second each and stayed in
 -- `thena-test`, because moving them would cost coverage and buy nothing.
 --
--- > cabal test thena-examples
+-- > cabal test thena-examples --flags=examples
 --
--- A second test-suite is opt-in by cabal's own behaviour, the same way
--- `thena-boundary` is. See `corpus/Main.hs`.
+-- The flag is the whole of the opt-in — `cabal test` otherwise runs every suite in the
+-- plan. See `corpus/Main.hs`.
 test-suite thena-examples
     import:             warnings
     if !flag(examples)
