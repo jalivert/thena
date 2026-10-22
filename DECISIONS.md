@@ -2489,6 +2489,33 @@ rule's side to move. The second spelling was refused until MS9: the generalisati
 split needed was cancelled by what the elaborator had left in scope for the arms before it,
 which is nothing a proof can see or plan around.
 
+**And where the family recurses at one index and concludes at another, the recursion is
+what asks for the copy — MS9.** No *arm* needs one from
+
+```
+data T : N -> Type₀ where
+  tv : forall (g : N) -> T g
+  tl : forall (g : N) (p : T (s g)) -> T g
+```
+
+because `tl` concludes at its own `g`, which the split solves away. But the induction
+hypothesis is the motive at the *premise's* index, `s g`, so a proof that varies a premise
+across the recursion
+
+```
+atTop : forall (g : N) (d : T g) (g1 : N) (inc : Inc g g1) -> N
+atTop = \ g d g1 inc -> induction d of
+  { tv g0 -> g1
+  ; tl g0 p -> atTop (s g0) p (s g1) (mkInc (s g0) (s g1)) }
+```
+
+gets a hypothesis constrained against the variable outside the split, which no call can
+satisfy. **So the same question is asked of each recursive premise's indices as of the
+constructor's conclusion**, and that is the whole rule — it demands nothing extra where
+the premise sits at one of the constructor's own arguments, which is why `vtail` over
+`Vec` still copies nothing. **Where you introduce a premise does not decide whether your
+proof loads**, and that is the property these rules exist to keep.
+
 **An arm can be written to take a leftover equation** — `evs n en -> \ q -> …` — and then
 transport by hand. It type-checks, and it is deliberately not how the examples are written:
 an arm whose right-hand side is a function of an equation you had no way to predict is

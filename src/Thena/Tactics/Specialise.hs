@@ -70,6 +70,7 @@ module Thena.Tactics.Specialise
   , specialise
   ) where
 
+import Data.List (nub)
 import Thena.Core.Context (Context, Entry (..), entryIdent, entryType, entryVar, lamOver, piOver)
 import Thena.Core.Level (Level, instantiateLevels, substLevel)
 import Thena.Core.Reduce (whnf)
@@ -478,6 +479,7 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
           Conflict dn  -> conflict  bfr e after n dn
           Inject dn c  -> injection bfr e after n dn c
           Solve x left -> solution  bfr e after n x left
+          Permute moved -> permutation bfr e after n moved
 
         -- @∀ Δ -> eqs -> t@, the type of every term this function builds.
         problem es body = piOver (delta ++ map entry es) body
@@ -558,6 +560,16 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
                               , (x, substituteAll sol other) : sol )
                       , n2 )
 
+        -- __permutation.__ Thesis section 2.8. The binders are reordered so that
+        -- a solution's term no longer points backwards, and the two orders are
+        -- bridged by binding in one and applying in the other.
+        permutation bfr e after n moved =
+          let eqs' = reverse bfr ++ (e : after)
+           in case solve hv moved eqs' t n of
+                (Left err, n1) -> (Left err, n1)
+                (Right (want, g, sol), n1) ->
+                  (Right (want, lamOver delta (applyTo g (varsOf moved)), sol), n1)
+
         -- Solve the sub-problem, then shape this one's term out of its.
         continue es body n f = case solve hv delta es body n of
           (Left err, n1)             -> (Left err, n1)
@@ -578,6 +590,8 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
           if cu == cv then Inject dn cu else Conflict dn
       | Just x <- solvable (eqnRight e) (eqnLeft e)  = Solve x False
       | Just x <- solvable (eqnLeft e)  (eqnRight e) = Solve x True
+      | Just d <- reorder (eqnRight e) (eqnLeft e)   = Permute d
+      | Just d <- reorder (eqnLeft e)  (eqnRight e)  = Permute d
       | otherwise = NoTransition
       where
         -- A pattern variable is one of __this method's own binders__ — @delta@,
@@ -599,6 +613,35 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
           _ -> Nothing
 
         atOrAfter x = map entryVar (dropWhile ((/= x) . entryVar) delta)
+
+        -- __The permutation's own side condition.__ Which binders move is forced
+        -- rather than chosen: the ones the solving term mentions, closed under
+        -- what /their/ types mention. The move is legal exactly when the binder
+        -- being removed is not itself in that closure.
+        reorder candidate by = case whnf env ctx candidate of
+          Free x
+            | any ((== x) . entryVar) delta
+            , x `notElem` freeVars by
+            , let (ahead, rest) = break ((== x) . entryVar) delta
+            , let late  = map entryVar rest
+            , let needed = grow [ v | v <- late, v `elem` freeVars by ]
+            , not (null needed)
+            , x `notElem` needed ->
+                Just ( ahead
+                         ++ [ d | d <- rest, entryVar d `elem`    needed ]
+                         ++ [ d | d <- rest, entryVar d `notElem` needed ] )
+            where
+              late' = map entryVar (dropWhile ((/= x) . entryVar) delta)
+              grow vs =
+                let vs' = nub (vs ++ [ entryVar d
+                                     | d <- delta
+                                     , entryVar d `elem` late'
+                                     , w <- vs
+                                     , d' <- [ y | y <- delta, entryVar y == w ]
+                                     , entryVar d `elem` freeVars (entryType d')
+                                     ])
+                 in if length vs' == length vs then vs else grow vs'
+          _ -> Nothing
 
     -- The datatype, the constructor and its arguments, for a term that is a
     -- saturated constructor application. __The parameters are dropped__: a
@@ -796,6 +839,7 @@ data Transition
   | Conflict GlobalName
   | Inject GlobalName GlobalName   -- ^ the datatype, and the shared constructor
   | Solve Var Bool                 -- ^ the binder, and whether it is on the left
+  | Permute Context                -- ^ the binders, reordered so a solution fits
   | NoTransition
 
 varsOf :: Context -> [Core]

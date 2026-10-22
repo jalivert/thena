@@ -1427,6 +1427,36 @@ splittingTree =
       ]
       "stuck: a and b cannot be made equal"
 
+    -- __AND THE RECURSION DEMANDS A COPY THE ARMS DO NOT__ (MS9 phase 205,
+    -- @~wk9qh@). Every shape above has its premises introduced where the split
+    -- can reach them /and/ a constructor whose conclusion index asks for a copy.
+    -- @T@ asks for neither: @tl@'s conclusion sits at its own argument @g0@, so
+    -- no /method/ needs @g@ copied — but its recursive premise sits at @s g0@,
+    -- so the induction hypothesis reads @Eq N (s g0) g -> …@ against the
+    -- ambient @g@ and no call can discharge it.
+    --
+    -- **The fix is the same positional test asked of the premise's indices**,
+    -- which is why @vtail@ below still demands nothing: @vcons@'s premise sits
+    -- at its own @k@, where @tl@'s sits at @s g0@.
+    --
+    -- **Two controls, and both declared before this phase**: the same proof with
+    -- @g1@ and @inc@ introduced inside the arms, and the same proof where the
+    -- recursion does not vary them. Those are why the item was a defect rather
+    -- than a limit — where a premise is introduced must not decide whether a
+    -- proof loads.
+  , testCase "a recursion varies a premise across a tied index no arm needs copied" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (atTopModule ++
+            [ "atTop : \8704 (g : N) (d : T g) (g1 : N) (inc : Inc g g1) -> N"
+            , "atTop = \\ g d g1 inc -> induction d of \
+              \{ tv g0 -> g1 ; tl g0 p -> atTop (s g0) p (s g1) (mkInc (s g0) (s g1)) }"
+            , "check : Eq N (atTop z (tl z (tv (s z))) z (mkInc z z)) (s z)"
+            , "check = refl N (s z)"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
     -- ----------------------------------------------------------------
     -- A FORCED POSITION (MS9 phase 185)
     -- ----------------------------------------------------------------
@@ -1769,6 +1799,25 @@ splittingTree =
       , ""
       , "data Q : N -> Type\8320 where"
       , "  qq : \8704 (n : N) -> Q n"
+      , ""
+      ]
+    -- Phase 205's shape (@~wk9qh@): a family that recurses at a /different/
+    -- index than it concludes at, with a premise about the index introduced at
+    -- the top. @Inc@ is inhabited at every pair, so the recursion can supply
+    -- the copy the motive quantified.
+    atTopModule =
+      [ "module AtTop where"
+      , ""
+      , "data N : Type\8320 where"
+      , "  z : N"
+      , "  s : N -> N"
+      , ""
+      , "data Inc : N -> N -> Type\8320 where"
+      , "  mkInc : \8704 (a : N) (b : N) -> Inc a b"
+      , ""
+      , "data T : N -> Type\8320 where"
+      , "  tv : \8704 (g : N) -> T g"
+      , "  tl : \8704 (g : N) (p : T (s g)) -> T g"
       , ""
       ]
     vecModule =

@@ -450,11 +450,66 @@ eliminate env ctx sch n0 goal tgt =
             -- exactly the behaviour that preceded this phase.
             seeds = nub [ v | k <- tiedIx
                             , c <- inductiveConstructors d
-                            , v <- demandedAt c k
+                            , v <- demandedAt c k ++ recursionDemandsAt c k
                             , v `notElem` targetVars
                             , v `notElem` friendlies ]
 
-            demandedAt c k = walk (conIndex c k) (as !! k)
+            -- __AND THE RECURSION DEMANDS WHAT NO ARM DOES — MS9 phase 205,
+            -- `~wk9qh`.__ 'demandedAt' above asks what a /method/ cannot do
+            -- without, and that is not the whole of the question: the induction
+            -- hypothesis is the motive applied at a recursive premise's indices,
+            -- so where a constructor's recursive premise sits at a /different/
+            -- index than its own conclusion, the hypothesis is stated at a term
+            -- the ambient entry cannot be, and only a copy can carry it.
+            --
+            -- @tl : forall (g : N) (p : T (s g)) -> T g@ is the case: the
+            -- premise is at @s g@ and the conclusion at @g@, so a recursion
+            -- gets @Eq N (s g0) g -> …@, which nothing can discharge. Three
+            -- probes and a four-declaration fixture are in `~wk9qh`'s brief.
+            --
+            -- __It is the SAME positional test, asked of the premise's indices
+            -- instead of the conclusion's__, and that is what keeps it from
+            -- demanding a copy where the hypothesis is usable without one:
+            -- @vcons@'s premise sits at its own argument @n@, so @vtail@ demands
+            -- nothing and @EliminateTests@ still says so.
+            --
+            -- __It is asked per position, only of a recursive premise, and only
+            -- under @induction@__: a case analysis offers no hypothesis at all,
+            -- so there is nothing for a copy to let vary, and demanding one there
+            -- is what broke @examples\/normal.thena@ when this was first
+            -- measured. A family that does not recurse at that index demands
+            -- nothing new either, and the narrow rule stands unchanged.
+            recursionDemandsAt c k
+              | CaseAnalysis <- sch = []
+              | otherwise = concat [ walkAt c i (as !! k)
+                                   | is <- recursivePremiseIndices c
+                                   , i  <- take 1 (drop k is) ]
+
+            -- The index expressions of each argument of @c@ whose type is this
+            -- same family — the premises an induction hypothesis is offered for
+            -- — with the family's parameters replaced by the target's, which is
+            -- the substitution 'conIndex' makes for the conclusion's.
+            -- Parameters dropped, as everywhere else here.
+            recursivePremiseIndices c =
+              [ map (substVars psub) (drop (length (inductiveParameters d)) args)
+              | e <- constructorArguments c
+              , Just (g, _, args) <- [spineOf (whnf env ctx (entryType e))]
+              , g == inductiveName d
+              ]
+              where psub = zip (map entryVar (inductiveParameters d)) ps
+
+            demandedAt c k = walkAt c (conIndex c k) (as !! k)
+
+            -- __ONE POSITIONAL TEST, TWO SOURCES OF INDEX EXPRESSION.__ The
+            -- constructor's side against the target's: where the constructor's
+            -- side is one of its own argument variables a @solution@ removes
+            -- that binder and nothing is demanded; where the target's side is a
+            -- bare ambient variable only a copy is something a solution can
+            -- reach; the same former recurses and different formers conflict.
+            -- 'demandedAt' asks it of the constructor's /conclusion/ and
+            -- 'recursionDemandsAt' of each recursive /premise/ — see the note
+            -- on the latter for why both are needed.
+            walkAt c = walk
               where
                 argv = map entryVar (constructorArguments c)
                 walk ic it
