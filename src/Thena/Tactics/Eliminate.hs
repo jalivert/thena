@@ -432,6 +432,46 @@ eliminate env ctx sch n0 goal tgt =
                 && entryVar e `notElem` targetVars
                 && entryVar e `notElem` friendlies
 
+            -- __A VARIABLE THAT SITS INSIDE A TIED INDEX, which the closure may
+            -- not drag in — MS9 phase 210, @~5kcb4@.__ The equation for a tied index is stated at the
+            -- index with the generalised entries replaced, so copying something
+            -- the index /mentions/ states the equation about a copy — and a copy
+            -- is quantified after the constructor's telescope, so the only
+            -- solution left points forwards and @~cq5mt@ is what that costs.
+            --
+            -- @d1 : sub G S ‹Z›@ is the case. @Z@ is not the index; the index is
+            -- @tvar Z@, and @Z@ arrives in the closure backwards, from
+            -- @d2 : sub G ‹Z› T@ which phase 209 seeds. Copying it turns
+            -- @SA-Trans-TVar@'s equation into @Eq Ty T1 (tvar Z')@ over a copy
+            -- bound after @T1@, where before it was @Eq Ty T1 (tvar Z)@ over an
+            -- ambient variable and @T1 := tvar Z@ fired —
+            -- @stuck: T1 and Ty`${a6}` cannot be made equal@.
+            --
+            -- __An index that IS a bare variable is not in question__, and
+            -- generalising that one is the whole of phase 191: there the copy is
+            -- the only thing a solution can reach. The distinction is therefore
+            -- between being an index and being inside one, which is the same
+            -- line 'demandedAt' already draws position by position.
+            --
+            -- __A SEED OVERRIDES IT, and that is measured.__ The same variable
+            -- can be bare at one index position and inside a term at another —
+            -- @examples\/determinacy-patterns.thena@ splits a step whose indices
+            -- are @p@ and @ifthen p p2 p3@ — and there the demand test has
+            -- already said the copy is the only thing a solution can reach.
+            -- Without the override that file loses two arms:
+            -- @stuck: p and true cannot be made equal@.
+            insideTied =
+              nub [ v | k <- tiedIx
+                      , Just a <- [atIx k as]
+                      , not (bareVar a)
+                      , v <- freeVars a ]
+            bareVar a = case a of
+              Free _ -> True
+              _      -> False
+            atIx k xs = case drop k xs of
+              x : _ -> Just x
+              []    -> Nothing
+
             isHypothesis e = case e of
               Hypothesis {} -> True
               Definition {} -> False
@@ -622,6 +662,8 @@ eliminate env ctx sch n0 goal tgt =
                      | e <- ctx
                      , generalisable e
                      , entryVar e `elem` grow seeds
+                     , entryVar e `elem` seeds
+                         || entryVar e `notElem` insideTied
                      ]
 
 

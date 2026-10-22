@@ -2433,6 +2433,27 @@ leaves an equation behind** — it is the subject of the elimination, so in each
 simply *is* that arm's constructor. The looking-position-by-position rule above is about
 indices only; a premise mentioning the subject is always carried.
 
+**BUT A SPLIT GENERALISES WHOLE PREMISES, AND NEVER A PART OF AN INDEX.** This is the one
+place where a hand-written eliminator can still state a motive a split cannot, and a proof
+that needs it says so in its own statement:
+
+```
+-- the induction varies the Δ INSIDE the context, so the context and the
+-- equation are arguments — which is the motive, written down
+tyRebindAt : forall (G : Ctx) (Xn : String) (A : Ty) (B : Ty) (C : Ctx) (T : Ty)
+               (h : ty C T) (D : Ctx) (e : Eq Ctx C (append (bindTy G Xn A) D))
+               -> ty (append (bindTy G Xn B) D) T
+
+tyRebind = \ G Xn A B D T h ->
+  tyRebindAt G Xn A B (append (bindTy G Xn A) D) T h D
+    (refl Ctx (append (bindTy G Xn A) D))
+```
+
+`examples/poplmark/03-wellformed.thena` and `06-transitivity.thena` each have exactly one
+lemma of that shape, and the wrapper means no caller sees it. **Where the index IS a
+variable there is nothing to say**: the split abstracts it, and `examples/progress.thena`
+is made of that case.
+
 **AND A PREMISE ABOUT AN INDEX IS CARRIED TOO.** The position-by-position rule decides
 whether the *index* gets a copy, which is a question about what a method can be stated at;
 whether an *arm* can use a fact you already have is a different question, and the answer is

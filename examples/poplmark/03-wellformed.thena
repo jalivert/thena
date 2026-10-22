@@ -13,6 +13,27 @@
 -- that is FALSE for a context that repeats a name. So the law the paper gets
 -- from its notation is written down here instead, as two judgments, and
 -- carried as a hypothesis — which is what careful papers do anyway.
+--
+-- == It is written in splits, and 26 `elim`s became none
+--
+-- **The inversion lemmas carry the result.** Eight of the proofs here invert a
+-- lookup or a `#` against one shape of context, and each used to eliminate the
+-- derivation under a motive taking an `Eq Ctx` that pinned the index, then
+-- apply `noConfusionCtx` in every arm to get the equations back out.
+-- `bindTyInBindTm` was eleven lines of that; it is now
+--
+--     case i of { bindTy-there-bindTm G0 W S0 w' S' p -> p }
+--
+-- because the two rules that cannot conclude at a term binding have no arm, and
+-- the one that can arrives with its sub-lookup already at the right context.
+--
+-- **One proof had to say more than its statement did.** `tyRebind` inducts on a
+-- `ty` derivation and its quantifier case recurses at `Δ , X <: T1` — so the
+-- induction varies the Δ *inside* the `append` that the paper's comma stands
+-- for, and a split can generalise a whole premise but never a part of an index.
+-- So `tyRebindAt` below takes the context and the equation as arguments, which
+-- is the motive the hand-written elimination wrote, said in the statement
+-- instead; `tyRebind` closes it with `refl` and nothing else changed.
 
 module FsubWellformed where
 

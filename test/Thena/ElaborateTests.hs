@@ -1705,6 +1705,27 @@ splittingTree =
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
 
+    -- __A VARIABLE INSIDE A TIED INDEX MAY NOT BE COPIED__ (MS9 phase 210,
+    -- @~5kcb4@). The upper index is @tv z@, so it is tied and an equation is
+    -- stated for it; @d2@ mentions the bare index @g@, so phase 209 refines it,
+    -- and the backward closure then reached @z@ through @d2@'s type. Copying it
+    -- restated @SbTrans@'s equation as @Eq Ty2 t1 (tv z')@ over a copy bound
+    -- AFTER @t1@, so the only solution left pointed forwards and the arm was
+    -- handed an equation nothing could discharge — @~cq5mt@'s trap, reached
+    -- from the other side.
+  , testCase "a variable inside a tied index is not copied" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (sbModule ++
+            [ "trv : \8704 (z : String) (g : Nat) (s : Ty2) (t : Ty2)"
+            , "        -> Sb g s (tv z) -> Sb g (tv z) t -> Sb g s t"
+            , "trv = \\ z g s t d1 d2 -> induction d1 of"
+            , "  { SbRefl g0 x -> d2"
+            , "  ; SbTrans x u g0 t1 p1 -> SbTrans x u g0 t (trv z g0 u t p1 d2) }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
     -- __A SPLIT IN AN ARGUMENT POSITION IS HANDED ITS GOAL AS A NAME__ (MS9
     -- phase 208, @~5kcb4@), and abstracting the term handed abstracts nothing.
     -- The expected type of @idT@'s second argument is one of the @let@s
@@ -1981,6 +2002,23 @@ splittingTree =
     -- POSITION__ (MS9 phase 208, @~5kcb4@). @idT@ is what puts the split there:
     -- the goal then arrives as a name elaboration bound for the expected type,
     -- which is the whole of what these probes are about.
+    -- __A family whose index is a CONSTRUCTOR APPLIED to an ambient variable__
+    -- (MS9 phase 210, @~5kcb4@), which is what @sub@'s middle type is in
+    -- @examples\/poplmark\/06-transitivity.thena@: @d1 : sub G S ‹Z›@ pins the
+    -- upper index to @tvar Z@, and @Z@ is inside it rather than being it.
+    sbModule =
+      natModule ++
+      [ "data Ty2 : Type\8320 where"
+      , "  tv : String -> Ty2"
+      , "  tp : Ty2"
+      , ""
+      , "data Sb : Nat -> Ty2 -> Ty2 -> Type\8320 where"
+      , "  SbTop : \8704 (g : Nat) (s : Ty2) -> Sb g s tp"
+      , "  SbRefl : \8704 (g : Nat) (x : String) -> Sb g (tv x) (tv x)"
+      , "  SbTrans : \8704 (x : String) (u : Ty2) (g : Nat) (t : Ty2)"
+      , "              -> Sb g u t -> Sb g (tv x) t"
+      , ""
+      ]
     twoModule =
       [ "module Two where"
       , ""
