@@ -88,12 +88,10 @@ symEq = \ A x y e -> case e of { refl c -> refl A c }
 neqFromDifferent : forall (a : String) (c : String)
                 -> (Eq Comparison (eqString a c) different : Type₀)
                 -> (Eq String a c : Type₀) -> (Empty : Type₀)
-neqFromDifferent = \ a c dq q ->
-  transport Comparison isSame (eqString a c) different dq
-    (elim Eq (String) (\ u v r -> isSame (eqString a u) -> isSame (eqString a v))
-       ((\ u d -> d)) (a c) q
-       (transport Comparison isSame same (eqString a a)
-          (symEq Comparison (eqString a a) same (eqStringRefl a)) unit))
+neqFromDifferent = \ a c dq q -> case q of
+  { refl u -> transport Comparison isSame (eqString u u) different dq
+                (transport Comparison isSame same (eqString u u)
+                   (symEq Comparison (eqString u u) same (eqStringRefl u)) unit) }
 
 -- ---------------------------------------------------------------------------
 -- The chain of candidates, and that it is pairwise distinct
@@ -749,39 +747,29 @@ weakenFv = \ D e V d ->
 
 appendLeft : forall (l : List String) (r : List String) (w : String) (h : In w l)
                -> In w (appendL l r)
-appendLeft = \ l r w ->
-  elim List (String) (\ k -> In w k -> In w (appendL k r))
-    ((\ h -> absurdly (In w (appendL (nil String) r)) h)
-     (\ a as ra h ->
-        elim Or ((Eq String w a) (In w as)) (\ o -> Or (Eq String w a) (In w (appendL as r)))
-          ((\ q -> orLeft (Eq String w a) (In w (appendL as r)) q)
-           (\ i -> orRight (Eq String w a) (In w (appendL as r)) (ra i)))
-          () h))
-    () l
+appendLeft = \ l r w h -> induction l of
+  { nil -> absurdly (In w (appendL (nil String) r)) h
+  ; cons a as -> case h of
+      { orLeft q -> orLeft (Eq String w a) (In w (appendL as r)) q
+      ; orRight i -> orRight (Eq String w a) (In w (appendL as r)) (appendLeft as r w i) } }
 
 appendRight : forall (l : List String) (r : List String) (w : String) (h : In w r)
                 -> In w (appendL l r)
-appendRight = \ l r w ->
-  elim List (String) (\ k -> In w r -> In w (appendL k r))
-    ((\ h -> h)
-     (\ a as ra h -> orRight (Eq String w a) (In w (appendL as r)) (ra h)))
-    () l
+appendRight = \ l r w h -> induction l of
+  { nil -> h
+  ; cons a as -> orRight (Eq String w a) (In w (appendL as r)) (appendRight as r w h) }
 
 -- Every free name of the image of a listed name is a name to avoid.
 imagesCovers : forall (s : List (And String LC)) (ys : List String) (y : String) (w : String)
                  (hy : In y ys) (hw : In w (LC-fv-x (look y s)))
                  -> In w (images s ys)
-imagesCovers = \ s ys y w ->
-  elim List (String) (\ k -> In y k -> In w (LC-fv-x (look y s)) -> In w (images s k))
-    ((\ hy hw -> absurdly (In w (images s (nil String))) hy)
-     (\ a as ra hy hw ->
-        elim Or ((Eq String y a) (In y as))
-          (\ o -> In w (appendL (LC-fv-x (look a s)) (images s as)))
-          ((\ q -> appendLeft (LC-fv-x (look a s)) (images s as) w
-                     (subst String (\ z -> In w (LC-fv-x (look z s))) y a q hw))
-           (\ i -> appendRight (LC-fv-x (look a s)) (images s as) w (ra i hw)))
-          () hy))
-    () ys
+imagesCovers = \ s ys y w hy hw -> induction ys of
+  { nil -> absurdly (In w (images s (nil String))) hy
+  ; cons a as -> case hy of
+      { orLeft q -> appendLeft (LC-fv-x (look a s)) (images s as) w
+                      (subst String (\ z -> In w (LC-fv-x (look z s))) y a q hw)
+      ; orRight i -> appendRight (LC-fv-x (look a s)) (images s as) w
+                       (imagesCovers s as y w i hw) } }
 
 -- The binder substitution chooses, and the one trusted fact about it.
 chosen : String -> Ty -> LC -> List (And String LC) -> String

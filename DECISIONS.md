@@ -2433,6 +2433,21 @@ leaves an equation behind** — it is the subject of the elimination, so in each
 simply *is* that arm's constructor. The looking-position-by-position rule above is about
 indices only; a premise mentioning the subject is always carried.
 
+**AND A PREMISE ABOUT AN INDEX IS CARRIED TOO.** The position-by-position rule decides
+whether the *index* gets a copy, which is a question about what a method can be stated at;
+whether an *arm* can use a fact you already have is a different question, and the answer is
+the same as for the subject:
+
+```
+h : forall (a : String) (c : String) -> R a c -> Eq String a c -> R c a
+h = \ a c p q -> case q of { refl u -> p }
+```
+
+Splitting the equation makes `a` and `c` the same `u`, so `p` is an `R u u` and it is the
+answer. Nothing demands a copy of either index — `refl`'s index is its own argument at both
+positions — so until MS9 `p` was left standing at `R a c` beside an arm whose subject was
+`u`, and the lemma could not be written at all.
+
 **AND THE SCRUTINEE ITSELF IS ONE OF THE NAMES THAT MEANS THE REFINED THING.** Inside an
 arm the thing being split *is* the constructor applied to that arm's own variables, so the
 name you gave it means that:

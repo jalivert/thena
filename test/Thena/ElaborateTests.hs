@@ -1705,6 +1705,59 @@ splittingTree =
         ProofLoaded {} -> pure ()
         other -> assertFailure (unwords (renderResponse s1 other))
 
+    -- __A SPLIT IN AN ARGUMENT POSITION IS HANDED ITS GOAL AS A NAME__ (MS9
+    -- phase 208, @~5kcb4@), and abstracting the term handed abstracts nothing.
+    -- The expected type of @idT@'s second argument is one of the @let@s
+    -- elaboration binds, so the goal is @a1@ over @a1 := R a2 a3@,
+    -- @a2 := a@ and @a3 := c@: neither index occurs in it, the motive comes out
+    -- constant in both positions, and the two definitions that do mention the
+    -- indices were counted as fixed premises, so an equation was stated for each.
+    -- The specialiser solves one by the method's own binder and the second is
+    -- left between two ambient variables, which is rigid and reaches every arm —
+    -- @~7pn6x@'s failure in a place @~7pn6x@ did not reach.
+  , testCase "a split in an argument position refines its goal" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (twoModule ++
+            [ "f : \8704 (a : String) (c : String) -> Eq String a c -> R a c"
+            , "f = \\ a c q -> idT (R a c) (case q of { refl u -> mkR u u })"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __AND IT REACHES AN INDEX THROUGH A COPY OF A COMPOUND TERM__, which is
+    -- why the goal's copies are unfolded rather than renamed. @R (f a) c@ in an
+    -- argument position arrives over @a3 := mk a4@ and @a4 := a@, so no index
+    -- occurs in the goal even after every name for it is substituted: the copy
+    -- has to be looked through.
+  , testCase "a split sees an index under a copy of a compound term" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (twoModule ++
+            [ "pad : String -> String"
+            , "pad = \\ s -> appendString s \"!\""
+            , ""
+            , "g : \8704 (a : String) (c : String) -> Eq String a c -> R (pad a) c"
+            , "g = \\ a c q -> idT (R (pad a) c) (case q of { refl u -> mkR (pad u) u })"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __A PREMISE ABOUT AN INDEX IS REFINED WITH IT__ (MS9 phase 208), which is
+    -- @~pmpqg@'s ruling for the index half. Nothing /demands/ a copy of either
+    -- index — @refl@'s index is its own argument at both positions — so @p@ was
+    -- left at @R a c@ while the arm's own subject is @u@, and the lemma could
+    -- not be written at all.
+  , testCase "a premise about an index is refined with the index" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (twoModule ++
+            [ "h : \8704 (a : String) (c : String) -> R a c -> Eq String a c -> R c a"
+            , "h = \\ a c p q -> case q of { refl u -> p }"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
     -- __A SPLIT AT A VARIABLE INDEX TIES NOTHING__ (MS9 phase 186, `~7pn6x`),
     -- and this is the case the whole corpus is: every lemma in
     -- @examples\/progress.thena@ splits a derivation whose indices are the
@@ -1924,6 +1977,20 @@ splittingTree =
     -- Phase 206's shape (@~pmpqg@): a family with NO indices, and a second
     -- family indexed by it, so that a statement can be /about/ the thing a
     -- split takes apart.
+    -- __A two-index family and an identity, for a split in an ARGUMENT
+    -- POSITION__ (MS9 phase 208, @~5kcb4@). @idT@ is what puts the split there:
+    -- the goal then arrives as a name elaboration bound for the expected type,
+    -- which is the whole of what these probes are about.
+    twoModule =
+      [ "module Two where"
+      , ""
+      , "data R : String -> String -> Type\8320 where"
+      , "  mkR : \8704 (s : String) (t : String) -> R s t"
+      , ""
+      , "idT : \8704 (A : Type\8320) (x : A) -> A"
+      , "idT = \\ A x -> x"
+      , ""
+      ]
     listModule =
       [ "module ListL where"
       , ""

@@ -337,9 +337,20 @@ eliminate env ctx sch n0 goal tgt =
           _ -> False
         others k = [ b | (j, b) <- zip [(0 :: Int) ..] as, j /= k ]
         isHypothesisOf v = or [ True | Hypothesis w _ _ <- ctx, w == v ]
+        -- **An ALIAS of the index is not a premise about it** (MS9 phase 208,
+        -- @~5kcb4@). Elaborating a name binds a copy of it, so a goal the user
+        -- wrote in an argument position — @idT (R a c) (case q of …)@ — arrives
+        -- as @R a2 a3@ over @a2 := a@ and @a3 := c@, and those two definitions
+        -- mention the indices. Counting them as fixed premises tied every index
+        -- the goal names: with two of them the specialiser solves one equation
+        -- by the method's own binder and the second is left between two ambient
+        -- variables, which is rigid and reaches every arm. 'namesFor' is the
+        -- same walk 'targetChain' is, in both directions, because an alias is
+        -- not a premise constraining the index — it IS the index.
         unmentioned v e =
           entryVar e == v
             || entryVar e `elem` targetVars
+            || entryVar e `elem` namesFor v
             || v `notElem` entryUses e
 
         -- Which indices keep an equation, and which are simply abstracted.
@@ -489,7 +500,35 @@ eliminate env ctx sch n0 goal tgt =
                           , any (`elem` freeVars (entryType e)) targetChain
                           ]
 
+            -- __AND A PREMISE ABOUT AN INDEX IS REFINED WITH IT, FOR THE
+            -- SAME REASON — MS9 phase 208, @~5kcb4@.__ @~pmpqg@'s ruling was
+            -- about the target; the index half of it was still open, and
+            -- 'demandedAt' does not answer it. That test asks what a /method/
+            -- cannot do without, which is a question about the index's own copy;
+            -- whether an ARM can use a premise stated about the index is a
+            -- different question, and the answer is the same as for the target.
+            --
+            -- @\ a c dq q -> case q of { refl u -> … dq … }@ over
+            -- @dq : Eq Comparison (eqString a c) different@ is the case: nothing
+            -- demands @a@ or @c@, because @refl@'s index is its own argument at
+            -- both positions, so @dq@ stayed at @eqString a c@ while the arm's
+            -- own subject is @u@ — @stuck: c and a cannot be made equal@, and
+            -- the lemma cannot be written at all.
+            --
+            -- __It seeds the premise and not the index__, exactly as
+            -- 'aboutTarget' does, and for the same measured reason. The index's
+            -- own copy then comes from the backward closure where the equation
+            -- needs it and from 'friendlies' where it does not, so the two cases
+            -- sort themselves out rather than being told apart here.
+            aboutIndex = [ entryVar e
+                         | e <- ctx
+                         , generalisable e
+                         , any (`elem` indexVars) (freeVars (entryType e))
+                         ]
+            indexVars = [ v | Free v <- as ]
+
             seeds = nub (aboutTarget
+                      ++ aboutIndex
                       ++ [ v | k <- tiedIx
                              , c <- inductiveConstructors d
                              , v <- demandedAt c k ++ recursionDemandsAt c k
@@ -772,7 +811,7 @@ eliminate env ctx sch n0 goal tgt =
           -- goal alone would trade one failure for another, a premise ABOUT the
           -- target being left unrefined beside a refined goal; the seeds carry
           -- that half.
-          (goalT,  n4) = replaceTerm tgt xv n3' goal
+          (goalT,  n4) = replaceTerm tgt xv n3' (goalType as)
           goalX        = substVars tgtSubst goalT
           (goalIx, n5) = foldl abstractIndex (goalX, n4) (zip ivs as)
           abstractIndex (g, n) (iv, a) = replaceTerm a iv n g
@@ -1044,6 +1083,75 @@ eliminate env ctx sch n0 goal tgt =
           | entryVar e /= w                = []
           | Definition _ _ (Free y) _ <- e = [y]
           | otherwise                      = []
+
+    -- | __The goal, read through the names it is bound to__ (MS9 phase 208,
+    -- @~5kcb4@).
+    --
+    -- A split in an argument position is handed its goal as a /variable/: the
+    -- expected type is one of the @let@s elaboration binds, so
+    -- @idT (R a c) (case q of …)@ eliminates against @a1@, where
+    -- @a1 := refined2@ and @refined2 := R a c@. Abstracting the target and the
+    -- indices in @a1@ abstracts nothing at all, the motive comes out constant,
+    -- and the arm is handed the goal unrefined — @~pmpqg@'s failure one level
+    -- over, and the reason it was not found with it is that a goal written in a
+    -- declaration's type is no such name.
+    --
+    -- __Only the copies that HIDE something the motive must abstract are
+    -- unfolded__, which is what 'hiding' collects. A definition is
+    -- definitionally its value, so unfolding one changes nothing about what the
+    -- motive means; unfolding every one would, in effect, δ-normalise the goal
+    -- and leave the motive's body a term the author would not recognise. So the
+    -- rule is the narrowest one that works: a copy goes only if the target or an
+    -- index is somewhere underneath it.
+    goalType as = unfold (0 :: Int) goal
+      where
+        unfold depth t
+          | depth >= 64 = t
+          | otherwise   =
+              case [ (v, s) | v <- freeVars t, v `elem` hiding as, s <- valueIn v ] of
+                [] -> t
+                vs -> unfold (depth + 1) (substVars vs t)
+        valueIn v = take 1 [ s | Definition w _ s _ <- ctx, w == v ]
+
+    -- | __The local definitions a goal can reach the target or an index
+    -- through__ (MS9 phase 208, @~5kcb4@).
+    --
+    -- Elaborating a name binds a copy of it, and a copy of a /compound/ term is
+    -- where this bites: @isSame (eqString a c)@ in an argument position arrives
+    -- as @a2 a3@ over @a3 := eqString a4 a5@, @a4 := a@ and @a5 := c@, so
+    -- neither index occurs in the goal at all and no amount of renaming reaches
+    -- them. The set is therefore grown rather than walked: a definition is in it
+    -- when its value mentions something already in it, starting from the target's
+    -- chain and the indices.
+    hiding as = grow [] (targetChain ++ [ v | Free v <- as ])
+      where
+        grow acc seen =
+          let more = [ w | Definition w _ s _ <- ctx
+                         , w `notElem` acc
+                         , any (`elem` seen) (freeVars s) ]
+           in if null more then acc else grow (acc ++ more) (seen ++ more)
+
+    -- | __Every ambient name a variable is known by__ (MS9 phase 208,
+    -- @~5kcb4@), following the alias definitions elaboration binds __in both
+    -- directions__.
+    --
+    -- 'targetChain' walks forward only, from the hole the split eliminates to
+    -- the author's own name, because that is the direction the scaffolding
+    -- builds. A goal names its indices the other way round: the author wrote
+    -- @a@, elaboration bound @a2 := a@, and the goal mentions @a2@. Both ways
+    -- along a chain of @z := y@ is therefore the same relation read without a
+    -- preferred end, and every name in the class is definitionally the one
+    -- term, which is what makes substituting any of them for the index binder
+    -- sound.
+    namesFor v0 = walk [] [v0]
+      where
+        walk seen []       = seen
+        walk seen (w : ws)
+          | w `elem` seen = walk seen ws
+          | otherwise     = walk (w : seen) (ws ++ step w)
+        step w =
+          [ y | Definition z _ (Free y) _ <- ctx, z == w ]
+            ++ [ z | Definition z _ (Free y) _ <- ctx, y == w ]
 
     targetVars = case tgt of
       Free w -> walk [] [w]
