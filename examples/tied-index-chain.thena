@@ -1,0 +1,37 @@
+-- A family whose index telescope is DEPENDENT, split at a TIED index — which is
+-- what MS9 phase 214 built, and what was refused outright before it.
+--
+-- `Q`'s second index is typed by its first, so the motive states the second
+-- equation only after transporting its side along the first (§3.2 of Pattern
+-- Matching Without K). The second equation is therefore stated about the FIRST
+-- ONE'S PROOF, and solving the first removes the binder that proof is. The
+-- solution transition supplies `refl` for it as it goes, every transport
+-- ι-contracts, both equations are discharged, and the arm binds the
+-- constructor's arguments alone.
+--
+-- Compare `dependent-index.thena.script` beside this one: `Below`'s indices are
+-- plain variables there, so the dependent one is FRIENDLY and states no
+-- equation at all. The difference is the whole of what this file is for.
+--
+-- What is still refused is the shape where the first equation is between two
+-- CONSTRUCTOR applications, so injectivity rather than solution fires on it —
+-- that needs no-confusion backwards, which nothing generates.
+
+module TiedIndexChain where
+
+data N : Type₀ where
+  z : N
+  s : N -> N
+
+data Fin : N -> Type₀ where
+  fz : forall (n : N) -> Fin (s n)
+  fs : forall (n : N) (i : Fin n) -> Fin (s n)
+
+data Q : forall (n : N) -> Fin n -> Type₀ where
+  mk : forall (n : N) (i : Fin n) -> Q n i
+
+-- Both of the split's equations are discharged: the first solves `n`, which
+-- supplies `refl` for its own proof, and the second then reads `Eq (Fin (s m)) i
+-- (fz m)` with no transport left and solves `i`.
+tied : forall (m : N) (x : Q (s m) (fz m)) -> N
+tied = \ m x -> case x of { mk n i -> m }

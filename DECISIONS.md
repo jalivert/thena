@@ -2054,9 +2054,40 @@ chain is empty and the equation is the one it always was.
 missing equality.** An index whose type mentions an earlier index that was *abstracted
 outright* has no equation to transport along; and two mentioned indices that are themselves
 chained — `Chain : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Type₀` — need a motive
-abstracting the equality *proof* as well as its endpoint. **Splitting on such a family is
-also a step behind**: the motive can be stated, and the unifier says plainly that it cannot
-yet simplify a transported equation.
+abstracting the equality *proof* as well as its endpoint.
+
+**And splitting on such a family solves its chain.** A later equation of the chain is
+stated about an earlier one's *proof*, so the step that solves the earlier one removes the
+binder that proof is — and so it supplies `refl` for that proof as it goes, every transport
+along it computes away, and the next equation is an ordinary homogeneous one. For
+
+```
+data Q : ∀ (n : N) -> Fin n -> Type₀ where
+  mk : ∀ (n : N) (i : Fin n) -> Q n i
+
+tied : ∀ (m : N) (x : Q (s m) (fz m)) -> N
+tied = \ m x -> case x of { mk n i -> m }
+```
+
+both equations are discharged and the arm binds `n` and `i` and nothing else. Before, this
+was refused.
+
+**This is the paper's own `solution` step, and it is derived rather than assumed.** The
+step wants *based path induction* — a motive over the end that varies and the proof, with
+the other end fixed — while Thena's `Eq` has both ends as indices and so gives the
+symmetric Martin-Löf rule. The gap is closed by the singleton `Σ (y : I). y ≡ t`, which has
+one inhabitant up to `Eq`: the ordinary rule proves that, and carrying the goal along it is
+an ordinary transport. **No universe is spent**, which the obvious alternative — quantifying
+over the goal family — would have cost.
+
+**Two of the four unification steps still cannot cross a chain, and a split that needs one
+of them is refused by name.** Deleting an equation whose proof a later one mentions would
+need K, which is the line this whole design is drawn around. Taking a constructor equation
+*apart* when a later equation mentions its proof would need the no-confusion lemma
+backwards, with its round-trip law, and neither is generated — so
+`Small : ∀ (n : N) -> Fin n -> Type₀` with `isFz : ∀ (n : N) -> Small (s n) (fz n)` is
+refused, the first equation there being between two applications of `s`. The message says
+which step and what is missing.
 
 **What this costs: nothing you can currently name in language metatheory.** The proofs K
 buys are proofs *about* equality proofs rather than proofs that use them. If one is ever

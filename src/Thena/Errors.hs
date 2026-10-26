@@ -51,6 +51,7 @@ module Thena.Errors
     -- * The elimination tactic (§3.7)
   , ElimError (..)
   , SpecialiseError (..)
+  , ChainBlocker (..)
   , RecursionError (..)
 
     -- * Reading a term (§2.5, §2.6) — moved here at phase 17b
@@ -691,6 +692,29 @@ data ElimError
 -- keeps the equation as a hypothesis instead, which is what the user is handed
 -- today, so the specialiser can only refuse for a reason that is about its
 -- /caller/ rather than about the problem.
+-- | Which transition a transported chain stopped at, and so what Thena would
+-- need to carry one (MS9 phase 214, @~7gmvr@ step three).
+--
+-- **All three are named by what is missing rather than by what failed**,
+-- because each is a different piece of the paper's §3.5 and they are not one
+-- another's consequences.
+data ChainBlocker
+  = ByDeletion
+    -- ^ the equation says nothing, and dropping its binder would need
+    -- @q ≃ refl@ for an arbitrary proof of @Eq I t t@ — the K axiom, which
+    -- /Pattern Matching Without K/ §3.5 identifies as exactly a dependent
+    -- deletion rule. Thena is a without-K system, so this one is not coming
+  | ByInjectivity
+    -- ^ the equation is between two applications of one constructor, and
+    -- restating the later transport along the argument equations would need
+    -- @noConfusion@ backwards and its round-trip law — the paper's @noConfD⁻¹@
+    -- and @isLeftInvD@. "Thena.Global.NoConfusion" generates neither
+  | BySolution
+    -- ^ the construction that does carry a chain needs the prelude's
+    -- @DPair@ — the singleton whose contractibility derives based path
+    -- induction — and this session has no such declaration
+  deriving (Eq, Show)
+
 data SpecialiseError
   = NotThatConstructor GlobalName
     -- ^ the name a method was to be specialised for is not a constructor. A
@@ -703,19 +727,20 @@ data SpecialiseError
   | NotAnEquation [Core]
     -- ^ a binder in the equation block is not an application of @Eq@. Carries
     -- every domain in that block, because which one is wrong is the question
-  | TransportedEquation Int Core
-    -- ^ an equation of the block is stated about an __earlier equation's
-    -- proof__, which is what a dependent index telescope costs (MS9 phase 213,
-    -- @~7gmvr@). Carries the position, counting from 1, and the equation.
+  | TransportedEquation ChainBlocker Int Core
+    -- ^ a later equation is stated about this one's __proof__, and the
+    -- transition that would fire on it removes the binder that proof is (MS9
+    -- phase 214, @~7gmvr@). Carries which transition, the position counting
+    -- from 1, and the equation.
     --
     -- §3.2 of /Pattern Matching Without K/ states a telescopic equality
-    -- homogeneously by transporting each side along the equations before it, so
-    -- "Thena.Tactics.Eliminate" can now state the motive for a family like
-    -- @Below : ∀ (n : Nat) (i : Fin n) -> Type₀@ at a tied index. **The four
-    -- transitions cannot yet run over one**: a side is a transport rather than a
-    -- bare variable or a constructor application, so it has to reduce before any
-    -- of them matches. Declined here rather than attempted, so that a split of
-    -- such a family refuses where it stands instead of handing back a
+    -- homogeneously, by transporting each side along the equations before it,
+    -- so "Thena.Tactics.Eliminate" states the motive for a family like
+    -- @Below : ∀ (n : Nat) (i : Fin n) -> Type₀@ at a tied index. **The
+    -- solution transition carries such a chain** — §3.5's own @solution@,
+    -- derived from the contractible singleton; 'ChainBlocker' is the three ways
+    -- the other transitions do not. Declined rather than attempted, so that a
+    -- split refuses where it stands instead of handing back a
     -- 'SpecialisedIllTyped' about generated variables
   | SpecialisedIllTyped TypeError
     -- ^ the term built does not inhabit the method type it was built for. A

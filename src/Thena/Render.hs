@@ -119,6 +119,7 @@ import Thena.Engine
   )
 import Thena.Errors
   ( BuildError (..)
+  , ChainBlocker (..)
   , ObjectError (..)
   , DataBuildError (..)
   , Warning (..)
@@ -1905,13 +1906,23 @@ renderSpecialiseError ren e = case e of
   NotAnEquation tys ->
     "the equation block has " ++ count (length tys) "binder"
       ++ " and one of them is not an equation"
-  TransportedEquation k _ ->
-    "equation " ++ show k ++ " is stated about the proof of an earlier one,"
-      ++ "\n  so a split cannot yet simplify it — the family's index telescope"
-      ++ "\n  is dependent, and carrying the equations is only half of that"
+  TransportedEquation why k _ ->
+    "a later equation is stated about equation " ++ show k ++ "'s proof,"
+      ++ "\n  and " ++ blockedBy why
   SpecialisedIllTyped te ->
     "the specialised method does not prove this one"
       ++ concatMap ("\n  " ++) (renderTypeError ren te)
+
+-- | What a transported chain is waiting on, in the words a reader can act on.
+-- 'Thena.Errors.ChainBlocker' carries why each one is what it is.
+blockedBy :: ChainBlocker -> String
+blockedBy why = case why of
+  ByDeletion ->
+    "deleting it would need UIP, which this system does not have"
+  ByInjectivity ->
+    "taking it apart would need no-confusion backwards, which is not generated"
+  BySolution ->
+    "solving it needs the prelude's DPair, which is not declared here"
 
 renderTypeError :: Rendering -> TypeError -> [String]
 renderTypeError ren e = case e of

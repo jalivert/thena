@@ -66,6 +66,7 @@ module Thena.Global.NoConfusion
   ( Generated (..)
   , noConfusionNames
   , generateNoConfusion
+  , dependentPairInScope
   , dependentTelescope
   ) where
 

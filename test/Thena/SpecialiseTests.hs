@@ -44,7 +44,7 @@ import Thena.Driver
   , parseCore
   , withRuleBases
   )
-import Thena.Errors (SpecialiseError (..))
+import Thena.Errors (ChainBlocker (..), SpecialiseError (..))
 import Thena.Global.Env
   ( ConstructorDefinition (..)
   , GlobalEnv
@@ -71,6 +71,7 @@ tests =
     [ testGroup "vtail — the milestone's own case" vtailTests
     , testGroup "one transition at a time" transitionTests
     , testGroup "what it leaves alone" residualTests
+    , testGroup "a transported chain" chainTests
     , testGroup "what it refuses" refusalTests
     , testGroup "through a rule base, with the kernel as the judge" engineTests
     ]
@@ -320,24 +321,59 @@ refusalTests =
         Just (NotAnEquation [_]) -> pure ()
         other -> assertFailure ("expected one non-equation, got " ++ show other)
 
-    -- __And the one thing about the PROBLEM that is a refusal — MS9 phase
-    -- 213.__ "Thena.Tactics.Eliminate" states a tied index's equation at the
+    -- __AND THE TWO THINGS ABOUT THE PROBLEM THAT ARE REFUSALS — MS9 phase
+    -- 214.__ "Thena.Tactics.Eliminate" states a tied index's equation at the
     -- actual earlier indices and carries its generalised side there along the
-    -- earlier equations, so for a family with a dependent index telescope the
-    -- second equation names the first one's proof. None of the four transitions
-    -- can match a side that is a transport until it reduces, and attempting it
-    -- anyway is not harmless: @solution@ fires on the other side, removes the
-    -- binder the next equation is about, and the method comes back as
-    -- 'SpecialisedIllTyped' naming two generated variables.
+    -- earlier equations, so for a family with a dependent index telescope a
+    -- later equation names an earlier one's proof. The transition that fires on
+    -- the earlier one then removes the binder that proof is. @solution@ carries
+    -- such a chain — 'chainTests' below is that — and these two cannot:
+    -- deletion would need UIP, injectivity would need no-confusion backwards.
     --
-    -- The equation below mentions @q@ in its /carrier/, which is the cheapest
-    -- shape with the dependency; the generated one mentions it inside a J.
-  , testCase "an equation stated about an earlier equation's proof" $
+    -- Each equation below mentions @q@ in its /carrier/, which is the cheapest
+    -- shape with the dependency; a generated one mentions it inside a J.
+  , testCase "a deletion whose proof a later equation names" $
       case refused "succ" 2
-             "\8704 (m : Nat) (ih : Nat) (q : Eq {0} Nat m k) \
-             \-> Eq {0} (Eq {0} Nat m k) q q -> Nat" of
-        Just (TransportedEquation 2 _) -> pure ()
-        other -> assertFailure ("expected a transported equation, got " ++ show other)
+             "\8704 (m : Nat) (ih : Nat) (q : Eq {0} Nat k k) \
+             \-> Eq {0} (Eq {0} Nat k k) q q -> Nat" of
+        Just (TransportedEquation ByDeletion 1 _) -> pure ()
+        other -> assertFailure ("expected a blocked deletion, got " ++ show other)
+
+  , testCase "an injectivity whose proof a later equation names" $
+      case refused "succ" 2
+             "\8704 (m : Nat) (ih : Nat) (q : Eq {0} Nat (succ m) (succ k)) \
+             \-> Eq {0} (Eq {0} Nat (succ m) (succ k)) q q -> Nat" of
+        Just (TransportedEquation ByInjectivity 1 _) -> pure ()
+        other -> assertFailure ("expected a blocked injectivity, got " ++ show other)
+  ]
+
+-- --------------------------------------------------------------------------
+-- A transported chain
+-- --------------------------------------------------------------------------
+
+-- | __The solution transition over an equation a later one was transported
+-- along — MS9 phase 214, @~7gmvr@ step three.__
+--
+-- A dependent index telescope states a later equation after transporting its
+-- side along the earlier ones (§3.2 of /Pattern Matching Without K/), so the
+-- later equation names the earlier one's __proof__ — and solving the earlier
+-- one removes the binder that proof is. The paper's own @solution@ is based
+-- path induction, which @Eq@ does not give directly, so
+-- 'Thena.Tactics.Specialise' derives it from the contractible singleton.
+--
+-- __What this asserts is that the chain is carried, not how.__ Solving the
+-- first equation supplies @refl@ for its proof, the second equation's two sides
+-- then reduce to the same term, and deletion takes it — so both binders go and
+-- the method is left with the induction hypothesis alone. The term is
+-- typechecked by 'Thena.Tactics.Specialise.specialise' itself before it is
+-- handed back, which is what makes the printed type below meaningful.
+chainTests :: [TestTree]
+chainTests =
+  [ specialises "solving an equation a later one names carries the chain"
+      "succ" 2
+      "\8704 (m : Nat) (ih : Nat) (q : Eq {0} Nat m k) \
+      \-> Eq {0} (Eq {0} Nat m k) q q -> Nat"
+      (Just "Nat -> Nat")
   ]
 
 -- --------------------------------------------------------------------------

@@ -85,8 +85,8 @@ import Thena.Core.Term
   , open
   , substLevelsIn
   )
-import Thena.Core.Typing (check)
-import Thena.Errors (SpecialiseError (..))
+import Thena.Core.Typing (check, sortOf)
+import Thena.Errors (ChainBlocker (..), SpecialiseError (..))
 import Thena.Global.Env
   ( ConstructorDefinition (..)
   , GlobalEnv
@@ -95,7 +95,11 @@ import Thena.Global.Env
   , lookupConstructor
   , lookupInductive
   )
-import Thena.Global.NoConfusion (dependentTelescope, noConfusionNames)
+import Thena.Global.NoConfusion
+  ( dependentPairInScope
+  , dependentTelescope
+  , noConfusionNames
+  )
 import Thena.Tactics.Eliminate (MethodShape (..), spineOf)
 
 -- | What specialisation worked out: the subgoal, and __one ordered report of
@@ -281,7 +285,6 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
           let (delta, raw) = splitAt (arity d c + gc) tel
            in case mapM equationOf raw of
                 Nothing -> (Left (NotAnEquation (map entryType raw)), n1)
-                Just es | Just bad <- transported es -> (Left bad, n1)
                 Just es ->
                   let (hv, n2) = fresh n1
                    in case solve hv delta es body n2 of
@@ -294,29 +297,6 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
 
     h  = length hyps
     gc = length gens
-
-    -- __An equation stated about an earlier equation's PROOF, which is what a
-    -- dependent index telescope costs — MS9 phase 213, @~7gmvr@.__
-    -- "Thena.Tactics.Eliminate" states such an equation at the actual earlier
-    -- indices and carries its generalised side along the equations before it
-    -- (§3.2 of /Pattern Matching Without K/), so one side is a transport rather
-    -- than a bare variable or a constructor application and no transition below
-    -- can match it until it reduces.
-    --
-    -- __Declined where it stands rather than attempted.__ Running anyway is not
-    -- harmless: @solution@ fires on the /other/ side, removes the binder the
-    -- next equation is stated about, and the method comes back as
-    -- 'SpecialisedIllTyped' naming two generated variables. The refusal is the
-    -- same shape "Thena.Global.NoConfusion"\'s @dependentTelescope@ was until
-    -- phase 212 — the construction exists one layer up and the consumer says
-    -- plainly that it is not using it yet.
-    transported es =
-      case [ (i, eqnType e)
-           | (i, e) <- zip [(1 :: Int) ..] es
-           , any (\f -> eqnVar f `elem` freeVars (eqnType e)) es
-           ] of
-        (i, ty) : _ -> Just (TransportedEquation i ty)
-        []          -> Nothing
 
     -- One binder per constructor argument, plus the hypotheses the caller says
     -- this method carries. 'Thena.Global.Env.eliminatorType'\'s @methodType@
@@ -474,6 +454,25 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
         Just (Eqn (entryVar e) (entryIdent e) (entryType e) l i u v)
       _ -> Nothing
 
+    -- __An equation whose sides are re-read after a proof was substituted
+    -- into them — MS9 phase 214.__ 'solution' supplies @refl@ for its own
+    -- proof, so a later side that was @e* s@ is a transport along @refl@ and
+    -- ι-contracts; reducing here is what lets the next transition match it, and
+    -- what keeps a /residual/ equation readable instead of printing the spent J.
+    --
+    -- __The equation is restated rather than read back__, which is 'conjuncts'\'
+    -- bargain one transition over: the two spellings are convertible and
+    -- 'verify' is what holds it honest. Reduced at the ambient context for the
+    -- same reason 'transition' is — the sides mention this method's own binders,
+    -- which 'whnf' never needs to look up.
+    reduceEqn e =
+      let u = whnf env ctx (eqnLeft e)
+          v = whnf env ctx (eqnRight e)
+       in e { eqnLeft  = u
+            , eqnRight = v
+            , eqnType  = equation (eqnLevel e) (eqnCarrier e) u v
+            }
+
     -- ------------------------------------------------------------------
     -- The loop
     -- ------------------------------------------------------------------
@@ -496,12 +495,65 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
       where
         go bfr [] n = (Right (Just (problem (reverse bfr) t), Free hv, []), n)
 
-        go bfr (e : after) n = case transition delta e of
-          NoTransition -> go (e : bfr) after n
-          Delete       -> deletion  bfr e after n
-          Conflict dn  -> conflict  bfr e after n dn
-          Inject dn c  -> injection bfr e after n dn c
-          Solve x left -> solution  bfr e after n x left
+        -- __THREE OF THE FOUR DECLINE WHERE A LATER EQUATION NAMES THIS
+        -- ONE'S PROOF, AND THE EQUATION IS KEPT RATHER THAN THE SPLIT REFUSED
+        -- — MS9 phase 214.__ A dependent index telescope states a later
+        -- equation after transporting its side along an earlier one (§3.2 of
+        -- /Pattern Matching Without K/), so firing a transition that /removes/
+        -- that earlier binder leaves the later equation about a variable that
+        -- is gone — a 'SpecialisedIllTyped' naming two generated variables,
+        -- which is the error reserved for this module being wrong about its own
+        -- construction.
+        --
+        -- __@conflict@ is the one that carries a chain, and it does so for
+        -- free__: it claims nothing and binds the equation it fired on, so
+        -- everything after that equation — transports included — stays in scope
+        -- under the @Empty@ elimination. The other three each want something
+        -- Thena does not have:
+        --
+        --   * __deletion__ would need @q ≃ refl@ for an arbitrary proof of
+        --     @Eq I t t@, which is UIP, and that is the one place the paper
+        --     says the K axiom actually enters. It is not coming.
+        --   * __injectivity__ would need @noConfusion@ /backwards/ and its
+        --     round-trip law — the paper's @noConfD⁻¹@ and @isLeftInvD@, §3.5 —
+        --     to restate the later transport along the new proof. Neither is
+        --     generated.
+        --   * __solution__ would need the paper's own @solution@, which is
+        --     @J A x₀ Φ m x e@ with @Φ@ abstracting the /varying/ end and the
+        --     proof while the fixed end stays fixed — __based path induction__.
+        --     @Eq@ is declared with both ends as indices, so what Thena derives
+        --     is Martin-Löf's J, whose motive abstracts both; and the residue
+        --     cannot be abstracted in the fixed end, because a later equation's
+        --     right side inhabits its carrier by computation and not by its
+        --     spelling. 'coerce' is the non-dependent J this leaves in place.
+        --
+        -- __So they keep the equation, and that is this module's own law rather
+        -- than a new concession__: an equation no transition applies to stays a
+        -- hypothesis the method takes, because refusing would withdraw a split
+        -- the user can still do by hand. The split now goes through with a
+        -- residual equation where it refused outright, and a family with a
+        -- dependent index telescope splits for the first time.
+        go bfr (e : after) n =
+          let keep     = go (e : bfr) after n
+              -- Counting from 1, which is how 'NotAnEquation' and the
+              -- declaration readers count a position the user can see.
+              blocked why =
+                ( Left (TransportedEquation why
+                          (length eqs - length after) (eqnType e))
+                , n )
+           in case transition delta e of
+                NoTransition -> keep
+                Conflict dn  -> conflict bfr e after n dn
+                Delete
+                  | namedLater e after -> blocked ByDeletion
+                  | otherwise          -> deletion bfr e after n
+                Inject dn c
+                  | namedLater e after -> blocked ByInjectivity
+                  | otherwise          -> injection bfr e after n dn c
+                Solve x left
+                  | not (namedLater e after) -> solution bfr e after n x left
+                  | singletonInScope env     -> solution bfr e after n x left
+                  | otherwise                -> blocked BySolution
 
         -- @∀ Δ -> eqs -> t@, the type of every term this function builds.
         problem es body = piOver (delta ++ map entry es) body
@@ -554,23 +606,51 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
         -- substituted. What the sub-problem then proves is this method at the
         -- /term/ where this one wants it at the /binder/, so one J-elimination
         -- coerces between the two.
+        --
+        -- __AND IT SUPPLIES @refl@ FOR ITS OWN PROOF WHERE A LATER EQUATION WAS
+        -- TRANSPORTED ALONG IT — MS9 phase 214, @~7gmvr@ step three.__ The
+        -- sub-problem is then taken at @q := refl@ as well as at @x := other@,
+        -- every such transport ι-contracts, and what is left is an ordinary
+        -- homogeneous equation the transitions can match. 'coerceChained' is
+        -- what makes that honest and 'reduceEqn' is what lets the next
+        -- transition see it.
+        --
+        -- __A flat index telescope takes neither__: @carries@ is false, the
+        -- substitution is the identity, and 'coerce' builds exactly the term it
+        -- always did, down to the variables minted.
         solution bfr e after n x onLeft =
           let before    = reverse bfr
               (d1, d2)  = break ((== x) . entryVar) delta
               d2'       = drop 1 d2
               other     = if onLeft then eqnRight e else eqnLeft e
+              carries   = namedLater e after
+              reflHere  = reflAt (eqnLevel e) (eqnCarrier e) other
               -- @∀ Δ₂ -> before -> after -> t@ with @z@ for the binder being
-              -- removed: at @x@ the type this term must end at, at @other@ the
-              -- sub-problem's.
-              residueAt z =
-                substituting x z (piOver (d2' ++ map entry (before ++ after)) t)
+              -- removed and @q@ for this equation's proof: at @(x, its own
+              -- proof)@ the type this term must end at, at @(other, refl)@ the
+              -- sub-problem's. A flat telescope mentions @q@ nowhere, so the
+              -- second argument does nothing there.
+              base      = piOver (d2' ++ map entry (before ++ after)) t
+              residueAt z q =
+                substituting (eqnVar e) q (substituting x z base)
+              carry | carries   = substEqn (eqnVar e) reflHere
+                    | otherwise = id
+              -- Where the residue's universe is read, which 'coerceChained'
+              -- needs for the motive that states @Φ@ as a type. @base@ binds
+              -- @Δ₂@ and every equation itself, so only @Δ₁@, the binder being
+              -- removed and this equation stand outside it.
+              lvlCtx = ctx ++ d1 ++ take 1 d2 ++ [entry e]
            in case solve hv (d1 ++ substIn x other d2')
-                            (map (substEqn x other) (before ++ after))
-                            (substituting x other t) n of
+                            (map (reduceEqn . carry . substEqn x other)
+                                 (before ++ after))
+                            (substituting (eqnVar e) reflHere
+                               (substituting x other t)) n of
                 (Left err, n1) -> (Left err, n1)
                 (Right (want, g, sol), n1) ->
-                  let (co, n2) = coerce e onLeft residueAt n1
-                   in ( Right ( want
+                  case built e onLeft x residueAt carries lvlCtx n1 of
+                   (Left err, n2) -> (Left err, n2)
+                   (Right co, n2) ->
+                     ( Right ( want
                               , lamOver (prefix before e)
                                   (applyTo (App co (applyTo g (varsOf d1)))
                                            (varsOf d2' ++ eqnVars before))
@@ -581,6 +661,20 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
                               -- one pass enough.
                               , (x, substituteAll sol other) : sol )
                       , n2 )
+
+        -- Which coercion a solution needs: the plain J where nothing was
+        -- transported along this equation, and the singleton construction where
+        -- something was. Split here so that the common case cannot pay for the
+        -- rare one, in term size or in minted variables.
+        built e onLeft x residueAt carries lvlCtx n
+          | not carries =
+              let (co, n1) = coerce e onLeft (\z -> residueAt z (Free (eqnVar e))) n
+               in (Right co, n1)
+          | otherwise = case sortOf env lvlCtx n (residueAt (Free x) (Free (eqnVar e))) of
+              (Left te, _, n1) -> (Left (SpecialisedIllTyped te), n1)
+              (Right l, _, n1) ->
+                let (co, n2) = coerceChained e onLeft x residueAt l n1
+                 in (Right co, n2)
 
         -- Solve the sub-problem, then shape this one's term out of its.
         continue es body n f = case solve hv delta es body n of
@@ -788,8 +882,139 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
         (av, n2) = fresh n1
         (bv, n3) = fresh n2
 
+    -- @Φ (fixed, refl) -> Φ (‹the binder›, its own proof)@, where @Φ z q@ is
+    -- the residue at @z@ for the binder being removed and @q@ for this
+    -- equation's proof.
+    --
+    -- __THIS IS THE PAPER'S @solution@ AND IT IS WHAT A TRANSPORTED CHAIN
+    -- NEEDS — MS9 phase 214, @~7gmvr@ step three.__ §3.5 states it as
+    --
+    -- @
+    -- solution : (Φ : (x : A) (e : x₀ ≡ x) -> Set) -> Φ x₀ refl
+    --              -> (x : A) (e : x₀ ≡ x) -> Φ x e
+    -- @
+    --
+    -- — __based path induction__, whose motive abstracts the end that varies
+    -- and the proof while the other end stays the term it is. 'coerce''s plain
+    -- J cannot do it: @Eq@ is declared with both ends as indices, so what Thena
+    -- derives abstracts both, and __the residue cannot be abstracted in the
+    -- fixed end__ — a later equation's right side inhabits its carrier by
+    -- computation and not by its spelling, so @fz m : Fin (s m)@ does not
+    -- follow @s m@ to a motive binder. That was measured, not reasoned.
+    --
+    -- __So based path induction is derived, by the singleton that is
+    -- contractible__, and the derivation costs no universe: @Σ (y : I). I y ≡
+    -- fixed@ has one inhabitant up to @Eq@, the ordinary J proves it
+    -- (@contract@ below, whose motive is an equation and so stays at the
+    -- carrier's own level), and transporting @Φ@ along that equation is the
+    -- second J. The alternative — quantifying over the family, @∀ (P : …) ->
+    -- P x₀ refl -> P x e@ — is one universe up, which is the cost @~7gmvr@
+    -- named for the route not taken.
+    --
+    -- __@Φ@ is written once__, as the method of a @DPair@ elimination whose
+    -- motive is @λ _ -> Type ℓ@, so @Φ (z, p)@ ι-contracts to the residue and
+    -- the residue is not copied per occurrence. @ℓ@ is why 'built' reads the
+    -- universe.
+    coerceChained e onLeft x residueAt lvl n0' = (carry, n9)
+      where
+        i  = eqnCarrier e
+        lv = eqnLevel e
+
+        -- The end that does not vary. A residual equation after this one is
+        -- stated about a transport whose other index is this term, which is
+        -- precisely why it may not move.
+        fixed = if onLeft then eqnRight e else eqnLeft e
+
+        -- @λ y . Eq I y fixed@, or its mirror — the family whose total space is
+        -- the singleton. Which side @y@ falls on is the orientation, the same
+        -- one 'coerce' reads.
+        sideways z f | onLeft    = equation lv i z f
+                     | otherwise = equation lv i f z
+        famOf f    = Lam (Ident "y") i (close yv (sideways (Free yv) f))
+        singOf f   = foldl App (Global dependentPair [lv, lv]) [i, famOf f]
+        ptOf f z p = Canonical dependentPairMk [lv, lv] [i, famOf f, z, p]
+
+        sing     = singOf fixed
+        ptFixed  = ptOf fixed fixed (reflAt lv i fixed)
+        ptBinder = ptOf fixed (Free x) (Free (eqnVar e))
+
+        (yv, n1) = fresh n0'
+        (sv, n2) = fresh n1
+        (mv, n3) = fresh n2
+        (zv, n4) = fresh n3
+        (pv, n5) = fresh n4
+
+        -- @Φ@ as a function of the pair: @elim DPair (I, fam) (λ _ . Type ℓ)
+        -- ((λ z p . residue)) () s@, under one λ so the residue is written once.
+        psi = Lam (Ident "s") sing (close sv (Eliminate
+                { eliminated = dependentPair
+                , levels     = [lv, lv]
+                , parameters = [i, famOf fixed]
+                , motive     = Lam (Ident "p") sing (close mv (Universe lvl))
+                , methods    = [ Lam (Ident "z") i (close zv
+                                   (Lam (Ident "q") (sideways (Free zv) fixed) (close pv
+                                      (residueAt (Free zv) (Free pv))))) ]
+                , indices    = []
+                , target     = Free sv
+                }))
+
+        -- @(fixed, refl) ≡ (x, q)@ — the singleton is contractible, and the
+        -- ordinary J is all it takes: at @refl@ the two pairs are the same pair.
+        (ca, n6) = freshThree n5
+        contract = Eliminate
+          { eliminated = equality
+          , levels     = [lv]
+          , parameters = [i]
+          , motive     = contractMotive
+          , methods    = [contractMethod]
+          , indices    = [eqnLeft e, eqnRight e]
+          , target     = Free (eqnVar e)
+          }
+        (cl, cr, ce) = ca
+        contractMotive =
+          Lam (Ident "left") i (close cl
+            (Lam (Ident "right") i (close cr
+              (Lam (Ident "q") (equation lv i (Free cl) (Free cr)) (close ce
+                (let f  = if onLeft then Free cr else Free cl
+                     vy = if onLeft then Free cl else Free cr
+                  in equation lv (singOf f)
+                       (ptOf f f (reflAt lv i f))
+                       (ptOf f vy (Free ce))))))))
+        contractMethod =
+          Lam (Ident "same") i (close cm
+            (Canonical reflexivity [lv]
+               [ singOf (Free cm)
+               , ptOf (Free cm) (Free cm) (reflAt lv i (Free cm)) ]))
+
+        -- … and @Φ@ carried along it, which is the prelude's @transport@ at the
+        -- singleton: motive @λ u v w . Φ u -> Φ v@, method the identity.
+        (cm, n7) = fresh n6
+        (tu, n8) = freshThree n7
+        (tl, tr, tw) = tu
+        (td, n9) = freshTwo n8
+        (ta, tz) = td
+        carry = Eliminate
+          { eliminated = equality
+          , levels     = [lv]
+          , parameters = [sing]
+          , motive     = Lam (Ident "u") sing (close tl
+              (Lam (Ident "v") sing (close tr
+                (Lam (Ident "w") (equation lv sing (Free tl) (Free tr)) (close tw
+                  (Pi (Ident "at") (App psi (Free tl))
+                      (close ta (App psi (Free tr)))))))))
+          , methods    = [ Lam (Ident "same") sing (close tz
+                             (Lam (Ident "at") (App psi (Free tz)) (close ta (Free ta)))) ]
+          , indices    = [ptFixed, ptBinder]
+          , target     = contract
+          }
+
     -- @Eq {l} I a b@.
     equation l i a b = foldl App (Global equality [l]) [i, a, b]
+
+    -- @refl {l} I a@ — the spelling "Thena.Tactics.Eliminate" discharges a tied
+    -- index's equation with at the use site, which is why a transport along one
+    -- of these ι-contracts the moment 'solution' supplies it.
+    reflAt l i a = Canonical reflexivity [l] [i, a]
 
     -- @And@ right-nested, which is the shape "Thena.Global.NoConfusion"
     -- conjoins its equations in.
@@ -803,9 +1028,12 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
       [t]      -> t
       t : rest -> foldl App (Global conjunction [lv, lv]) [t, conjoin lv rest]
 
-    emptiness   = GlobalName "Empty"
-    equality    = GlobalName "Eq"
-    conjunction = GlobalName "And"
+    emptiness        = GlobalName "Empty"
+    equality         = GlobalName "Eq"
+    reflexivity      = GlobalName "refl"
+    conjunction      = GlobalName "And"
+    dependentPair    = GlobalName "DPair"
+    dependentPairMk  = GlobalName "dpair"
 
 -- | One equation of a method, read apart.
 --
@@ -857,6 +1085,44 @@ substIn v t = map one
   where
     one (Hypothesis w i ty)   = Hypothesis w i (substituting v t ty)
     one (Definition w i s ty) = Definition w i (substituting v t s) (substituting v t ty)
+
+-- | Does a later equation of the block mention this one's proof?
+--
+-- __It is the one question a dependent index telescope forces on the
+-- transitions__ (MS9 phase 214, @~7gmvr@ step three). §3.2 of /Pattern Matching
+-- Without K/ states a later equation after transporting its side along the
+-- earlier ones, so the answer is @True@ exactly where removing this equation's
+-- binder would leave a later one about a variable that is gone. @solve@'s @go@
+-- is where it decides something, and the module header says what each
+-- transition does about it.
+namedLater :: Eqn -> [Eqn] -> Bool
+namedLater e after = any ((eqnVar e `elem`) . freeVars . eqnType) after
+
+-- | Is the contractible singleton 'coerceChained' is built from available?
+--
+-- __It is @DPair@ of the prelude's own shape, matched structurally rather than
+-- by name__ — "Thena.Global.NoConfusion" draws that line and this is the same
+-- one, for the same reason: a user may declare something else called @DPair@,
+-- and the cost of not looking would be a type error from a term they never
+-- wrote. A session without the prelude has none, and then the solution
+-- transition declines a transported chain and the equation is kept.
+singletonInScope :: GlobalEnv -> Bool
+singletonInScope env = dependentPairInScope env && isDeclared (GlobalName "dpair") env
+
+-- | Three fresh variables, and two — @coerceChained@ mints eleven and a
+-- run of @let@ pairs for them is unreadable.
+freshThree :: Int -> ((Var, Var, Var), Int)
+freshThree n =
+  let (a, n1) = fresh n
+      (b, n2) = fresh n1
+      (c, n3) = fresh n2
+   in ((a, b, c), n3)
+
+freshTwo :: Int -> ((Var, Var), Int)
+freshTwo n =
+  let (a, n1) = fresh n
+      (b, n2) = fresh n1
+   in ((a, b), n2)
 
 substEqn :: Var -> Core -> Eqn -> Eqn
 substEqn v t e = e
