@@ -2613,6 +2613,39 @@ an arm whose right-hand side is a function of an equation you had no way to pred
 elaboration showing through the surface, not a way to write proofs.
 `examples/determinacy-patterns.thena` has no such arm, and no `elim` either.
 
+### The hand-driven induction tactic does not generalise, and the generalising one has its own name
+
+*Decided 2026-10-22, built 2026-10-26.*
+
+The motive above is built by one function, and the surface's `induction … of` is not its
+only caller: `eliminate-core ⌜ t ⌝` at the prompt reaches the same construction and hands
+you one hole per case to fill in by hand. **A copy is free only where something solves
+it.** Elaborating a split runs `specialise` over every method, which solves each copy and
+drops its binder, so the arm never sees one. Driving the tactic by hand there is no
+specialiser, so every copy is a further argument to every method you write — and every
+later widening of *what a split generalises* lands on the proof scripts again.
+
+So there are two tactics, and the plain word is the plain construction:
+
+```
+eliminate-core ⌜ t ⌝                -- §3.7: the target and its indices, premises fixed
+eliminate-generalising-core ⌜ t ⌝   -- … and a fresh copy of the premises the indices mention
+```
+
+**Two rules and not one with a flag.** A rule says only what it is about, and these are
+about two motives; a `generalise?` argument would be a mode. Underneath, one function with
+one more parameter, exactly as `induction` and `case` are one function with a scheme
+parameter — nothing in `Core` or the kernel can tell any of the three results apart.
+
+**The generalising one is reachable by any rule**, not reserved to elaboration, because a
+construction that is right for one caller may be right for another; what it is not is the
+word a person reaches for first.
+
+**What it costs**: a hand-written method cannot refine a variable bound outside its split
+unless it asks for the generalising tactic. That is the behaviour the tactic path had
+before the generalising motive existed, and it is the right default — the surface language
+is where refinement is meant to come from for free.
+
 ### `case` says the arm does not recurse, and the type is what says it
 
 ```

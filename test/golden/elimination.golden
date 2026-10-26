@@ -42,6 +42,7 @@ attack
 try-core ‹t›
 abandon
 eliminate-core ‹t›
+eliminate-generalising-core ‹t›
 prove
 fill ‹t›
 unify-refine-core ‹t›
@@ -140,8 +141,8 @@ context
   n : Nat
   i : Fin n
   b : Below n i
-  bzMethod : ∀ (m : Nat) (n1 : Nat) -> Eq {0} Nat (succ m) n1 -> Nat
-  bsMethod : ∀ (m : Nat) (j : Fin m) -> Below m j -> (∀ (n1 : Nat) -> Eq {0} Nat m n1 -> Nat) -> ∀ (n1 : Nat) -> Eq {0} Nat (succ m) n1 -> Nat
+  bzMethod : ∀ (m : Nat) -> Eq {0} Nat (succ m) n -> Nat
+  bsMethod : ∀ (m : Nat) (j : Fin m) -> Below m j -> (Eq {0} Nat m n -> Nat) -> Eq {0} Nat (succ m) n -> Nat
 type
   Nat
 thena spine> attack

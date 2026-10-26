@@ -318,6 +318,8 @@ everyOp =
   , ("specialise c ihs k", Op.Specialise (Ref "c") (Ref "ihs") (Ref "k"))
     -- @case … of@'s own claim (MS9 phase 188).
   , ("prim-case x", Op.CaseAnalyse (Ref "x"))
+    -- §3.7 with every premise fixed (MS9 phase 211).
+  , ("prim-eliminate-fixed x", Op.EliminateFixed (Ref "x"))
     -- Tying a recursive call to its induction hypothesis (MS9 phase 186).
   , ("tie-recursion t", Op.TieRecursion (Ref "t"))
     -- The binder report's accessor (MS9 phase 192).

@@ -143,7 +143,12 @@ import Thena.Global.Env
   , lookupInductive
   )
 import qualified Thena.Instral.Ops as Op
-import Thena.Tactics.Eliminate (Elimination (..), eliminate, spineOf)
+import Thena.Tactics.Eliminate
+  ( Elimination (..)
+  , Premises (..)
+  , eliminate
+  , spineOf
+  )
 import Thena.Tactics.Recurse (resolveRecursion)
 import Thena.Tactics.Specialise (Binder (..), Specialisation (..), specialise)
 import Thena.Rules
@@ -1222,7 +1227,7 @@ perform instr rest m = case operation instr of
   -- Qualified because "Thena.Core.Term" has an 'Eliminate' too. The two are
   -- exactly one apart: this op /decides/ to eliminate, that node /is/ the
   -- elimination it builds. The same shape as @Component.Claim@ beside 'Claim'.
-  Op.Eliminate tgt -> eliminating Inductive tgt
+  Op.Eliminate tgt -> eliminating Inductive Generalised tgt
 
   -- **@case … of@'s half, and it differs by one argument** (MS9 phase 188). The
   -- methods come off @caseD@'s type instead of the eliminator's, so each is the
@@ -1233,7 +1238,17 @@ perform instr rest m = case operation instr of
   -- pass and because a user asks for these by two different words. The tactic
   -- is one and the 'Scheme' is its parameter — "Thena.Tactics.Eliminate"'s
   -- header has the argument.
-  Op.CaseAnalyse tgt -> eliminating CaseAnalysis tgt
+  Op.CaseAnalyse tgt -> eliminating CaseAnalysis Generalised tgt
+
+  -- **§3.7 and nothing more, for a method written by hand** (MS9 phase 211,
+  -- @~84x46@). The same elimination the other two build, with every premise
+  -- left fixed: nothing here solves a copy, so a motive that quantified one
+  -- would hand the author a binder to take and an arm to rewrite. This is the
+  -- op @eliminate-core@ runs.
+  --
+  -- **A third op rather than a tag**, for 'Op.CaseAnalyse'\'s stated reason,
+  -- and the whole of the difference is the 'Premises' passed one line down.
+  Op.EliminateFixed tgt -> eliminating Inductive Fixed tgt
 
     -- **Tying a recursive call to the induction hypothesis it is** (MS9 phase
   -- 186) — his ruling of 2026-10-19. The driver assumes the name being defined
@@ -1991,14 +2006,14 @@ perform instr rest m = case operation instr of
   -- there. Elaboration's @FILL@ is what wanted it; see 'Thena.Instral.Ops.UnifyInto'.
   UnifyInto l r -> unifying unifyInto l r
   where
-    -- The whole of both elimination ops: the goal is the focus, the methods go
-    -- in above it, and the goal becomes the guess that uses them. 'Scheme' is
-    -- the only thing the two pass differently.
-    eliminating sch tgt = case term tgt of
+    -- The whole of all three elimination ops: the goal is the focus, the
+    -- methods go in above it, and the goal becomes the guess that uses them.
+    -- 'Scheme' and 'Premises' are the only things the three pass differently.
+    eliminating sch prem tgt = case term tgt of
       Left r  -> failure r m
       Right t -> case focus (cursor (development m)) of
         OnComponent (Component.Claim x i s) ->
-          case eliminate (globals m) contextAt sch (names m) s t of
+          case eliminate (globals m) contextAt sch prem (names m) s t of
             (Left e,   n1) -> failure (CannotEliminate e) m { names = n1 }
             (Right el, n1) ->
               -- The methods go in above the goal, innermost first, so the goal

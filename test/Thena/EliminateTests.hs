@@ -27,7 +27,13 @@ import Thena.Driver
 import Thena.Standard (withRules)
 
 import Thena.Core.Context (Context, Entry (..))
-import Thena.Core.Term (Core, GlobalName (..), Ident (..), fresh)
+import Thena.Core.Term
+  ( Core (..)
+  , GlobalName (..)
+  , Ident (..)
+  , fresh
+  , instantiate
+  )
 import Thena.Declared
   ( eqNat
   , eqNatCounter
@@ -44,7 +50,12 @@ import Thena.Driver (Response (..), command, loadProofSource)
 import Thena.Files (startingSession)
 import Thena.Render ( Rendering (..)
   ,renderCore, renderResponse)
-import Thena.Tactics.Eliminate (Elimination (..), eliminate)
+import Thena.Tactics.Eliminate
+  ( Elimination (..)
+  , MethodShape (..)
+  , Premises (..)
+  , eliminate
+  )
 
 tests :: TestTree
 tests =
@@ -57,7 +68,79 @@ tests =
     , testGroup "a DEPENDENT motive, over the adversarial corpus" dependentMotives
     , testGroup "a goal that is an unfolded definition (MS6 phase 109c)" unfoldedGoal
     , testGroup "a NESTED split: what it says it claimed, it claimed" nestedNames
+    , testGroup "Fixed against Generalised: the same elimination, no copies"
+        premisesTests
     ]
+
+-- --------------------------------------------------------------------------
+-- The two constructions (MS9 phase 211, `~84x46`)
+-- --------------------------------------------------------------------------
+
+-- | **One fixture, both 'Premises', and the only difference is the copies.**
+--
+-- @p a b u : Term@, @d : Step (ifthen p a b) u@ — the state
+-- @examples\/determinacy-patterns.thena@ reaches at its inner split, and the
+-- shape phase 191 was built for. The fixture's @Step@ is the first three rules
+-- of TAPL's, which is enough: the generalisation is decided by @eIfTrue@. The left index is @ifthen p a b@, constructed
+-- and so tied, and @eIfTrue@\'s own left index is @ifthen true t2 t3@: position
+-- by position that is @true@ facing the ambient variable @p@, which the copy
+-- is the only thing a solution can reach. So @p@ is a seed.
+--
+-- Under 'Generalised' the motive therefore quantifies a fresh copy of @p@ after
+-- the target and states the equation about the copy, and a method's arm can
+-- write @p := true@. Under 'Fixed' the equation is about @p@ itself, which is
+-- rigid — §3.7 exactly, and what @eliminate-core@ did before phase 191 and does
+-- again.
+--
+-- **The right index @u@ is friendly under both**, and that is why it is
+-- asserted: 'Fixed' turns off the ambient copies and touches nothing else. The
+-- equation count and the method count are the two constructions' shared half.
+premisesTests :: [TestTree]
+premisesTests =
+  [ testCase "Generalised copies the ambient variable a tied index demands" $
+      case fst (attempt env ctx n1 "Term" "d") of
+        Left e   -> assertFailure (show e)
+        Right el -> do
+          shapeGeneralised (elimShape el) @?= [Ident "p"]
+          shapeEquations (elimShape el) @?= 1
+          length (elimMethods el) @?= 3
+
+  , testCase "Fixed copies nothing, and leaves the rest of §3.7 alone" $
+      case fst (attemptFixed env ctx n1 "Term" "d") of
+        Left e   -> assertFailure (show e)
+        Right el -> do
+          shapeGeneralised (elimShape el) @?= []
+          shapeEquations (elimShape el) @?= 1
+          length (elimMethods el) @?= 3
+
+    -- **Every method is one binder shorter, and it is the copy that went.** The
+    -- count is what a hand-written method pays: @~84x46@'s whole cost was that
+    -- each of these binders had to be taken and the arm rewritten about it, on
+    -- every phase that widened the closure.
+  , testCase "so every method of Fixed is one binder shorter" $
+      case (fst (attempt env ctx n1 "Term" "d"), fst (attemptFixed env ctx n1 "Term" "d")) of
+        (Right gen, Right fix) ->
+          methodBinders fix @?= map (subtract 1) (methodBinders gen)
+        _ -> assertFailure "both constructions should succeed on this fixture"
+  ]
+  where
+    (ctx, n1) = contextOf env n0
+      [ ("p", "Term"), ("a", "Term"), ("b", "Term"), ("u", "Term")
+      , ("d", "Step (ifthen p a b) u")
+      ]
+    env = eqStep
+    n0  = eqStepCounter
+
+    methodBinders el = [ binders ty | (_, _, ty) <- elimMethods el ]
+
+-- | How many leading Π binders a method type has — the only shape of a method
+-- that says what the motive added, and the whole of what 'Premises' changes.
+-- The body is instantiated at a global rather than opened, since nothing here
+-- reads it.
+binders :: Core -> Int
+binders t = case t of
+  Pi _ _ sc -> 1 + binders (instantiate (Global (GlobalName "_") []) sc)
+  _         -> 0
 
 -- --------------------------------------------------------------------------
 -- A dependent motive, over datatypes chosen to be awkward (2026-09-13)
@@ -536,14 +619,28 @@ run label env ctx n goal tgt = case fst (attempt env ctx n goal tgt) of
   Right el -> el
   Left e   -> error (label ++ ": " ++ show e)
 
+-- | Every fixture above asks for 'Generalised', which is what a surface split
+-- asks for and what the whole suite was written against.
 attempt
   :: GlobalEnv -> Context -> Int -> String -> String
   -> (Either ElimError Elimination, Int)
-attempt env ctx n goal tgt = case parseCore [] env ctx n goal of
+attempt = attemptWith Generalised
+
+-- | … and 'Fixed' is §3.7 with every premise left alone — @eliminate-core@'s
+-- construction (MS9 phase 211, `~84x46`).
+attemptFixed
+  :: GlobalEnv -> Context -> Int -> String -> String
+  -> (Either ElimError Elimination, Int)
+attemptFixed = attemptWith Fixed
+
+attemptWith
+  :: Premises -> GlobalEnv -> Context -> Int -> String -> String
+  -> (Either ElimError Elimination, Int)
+attemptWith prem env ctx n goal tgt = case parseCore [] env ctx n goal of
   Left e -> error ("fixture does not parse: " ++ show e)
   Right (g, n1) -> case parseCore [] env ctx n1 tgt of
     Left e        -> error ("fixture does not parse: " ++ show e)
-    Right (t, n2) -> eliminate env ctx Inductive n2 g t
+    Right (t, n2) -> eliminate env ctx Inductive prem n2 g t
 
 -- | The context the refinement is well typed in: the goal's, plus the holes
 -- the tactic asked for. 'Thena.Engine' puts them there with @insertAbove@; a

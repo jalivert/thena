@@ -46,6 +46,12 @@
 -- site. It is __not__ @raise@, which moves a binding the other way and hands
 -- back the statement one started with.
 --
+-- **AND IT IS ONE OF TWO CONSTRUCTIONS THE CALLER ASKS FOR BY NAME — MS9 phase
+-- 211, @~84x46@.** 'Premises' says whether the ambient entries are copied or
+-- every premise stays fixed, and it is a parameter for the reason 'Scheme' is:
+-- a method written by hand has no specialiser to solve the copies away, so it
+-- asks for §3.7 and pays nothing. 'Premises' has the argument.
+--
 -- **The cheap case is subsumed rather than special-cased.** Where nothing the
 -- arm needs mentions the entry the equation is pure noise — the thesis's
 -- @delete-unused@ — and generalising gets that for free: the copy is
@@ -64,6 +70,7 @@
 module Thena.Tactics.Eliminate
   ( Elimination (..)
   , MethodShape (..)
+  , Premises (..)
   , eliminate
   , spineOf
   ) where
@@ -216,6 +223,39 @@ data MethodShape = MethodShape
   }
   deriving (Eq, Show)
 
+-- | Whether the motive generalises the ambient entries, or leaves every premise
+-- __fixed__ (MS9 phase 211, @~84x46@).
+--
+-- __The two are two constructions and not one with a preference.__ 'Fixed' is
+-- §3.7 exactly — the motive abstracts the target and its indices, every premise
+-- stays where it is, and an equation about a variable bound before the target is
+-- stated and kept. 'Generalised' is that plus §2.8's permutation: the entries a
+-- tied index mentions are copied after the target, the equations are about the
+-- copies, and the use site discharges them with the entries themselves. The
+-- module header has the construction.
+--
+-- __Which one a caller wants is decided by whether anything will solve the
+-- copies.__ A surface split runs "Thena.Tactics.Specialise" over every method,
+-- which solves each copy and drops its binder, so generalising costs the author
+-- nothing and buys the refinement. A method written __by hand__ has no
+-- specialiser behind it, so every copy is a binder its author has to take and
+-- write the arm about — the cost @~84x46@ measured over 1190 lines of
+-- @examples\/determinacy-tactics.thena.script@.
+--
+-- __It is a parameter for 'Scheme'\'s reason__, and not a mode: nothing
+-- downstream can tell the results apart. Both build an ordinary
+-- 'Thena.Core.Term.Eliminate' over an ordinary motive, both answer the same
+-- pair, and the specialiser reads what the motive did from 'MethodShape' rather
+-- than from which construction made it — under 'Fixed' 'shapeGeneralised' is
+-- empty and every transition behaves as it did before phase 191.
+data Premises
+  = Fixed
+    -- ^ §3.7's own scheme: the target and its indices, and nothing else
+  | Generalised
+    -- ^ … and a fresh copy, after the target, of every ambient entry a tied
+    -- index mentions
+  deriving (Eq, Show)
+
 -- | Eliminate @target@ in service of @goal@ (§3.7).
 --
 -- The scheme is exactly §3.7's:
@@ -248,9 +288,9 @@ data MethodShape = MethodShape
 -- then no longer matches the target. Both orders are sound — the use site
 -- substitutes everything back — but this one generalises more.
 eliminate
-  :: GlobalEnv -> Context -> Scheme -> Int -> Core -> Core
+  :: GlobalEnv -> Context -> Scheme -> Premises -> Int -> Core -> Core
   -> (Either ElimError Elimination, Int)
-eliminate env ctx sch n0 goal tgt =
+eliminate env ctx sch prem n0 goal tgt =
   -- **Level obligations are dropped here**, as everywhere outside the checking
   -- pass: "Thena.Core.Typing"'s header says why once, and @qed@ re-collects.
   case infer env ctx n0 tgt of
@@ -370,18 +410,15 @@ eliminate env ctx sch n0 goal tgt =
         -- means what it meant. @usesHyp@ is the case — generalising @m@ without
         -- @h : Ev m@ leaves the arm a hypothesis it cannot use.
         --
-        -- __IT IS UNCONDITIONAL, AND THAT HAS A MEASURED COST — this phase's
-        -- measurement, which `~6dpg5` asked for.__ A copy is made for every seed,
-        -- including one whose refinement nothing but the equation reads: making
-        -- it is what turns a stuck equation into a solved one, so there is no
-        -- seed it is free to skip. What is not free is the other caller. In a
-        -- split "Thena.Tactics.Specialise" solves the copy and drops the binder,
-        -- so the arm never sees it; under @eliminate-core@ the methods are
-        -- written __by hand__ and every copy is a binder the author has to take.
-        -- @examples\/dependent-index.thena.script@ and
-        -- @examples\/determinacy-tactics.thena.script@ both had to be rewritten
-        -- for that, and the item's claim that generalising \"always gets that case
-        -- for free\" holds only on the specialised side.
+        -- __IT IS UNCONDITIONAL UNDER 'Generalised', AND THAT IS WHY THERE IS A
+        -- 'Fixed' — `~6dpg5`'s measurement, and `~84x46`'s answer to it.__ A copy
+        -- is made for every seed, including one whose refinement nothing but the
+        -- equation reads: making it is what turns a stuck equation into a solved
+        -- one, so there is no seed this closure is free to skip. What is not free
+        -- is the caller with no specialiser behind it. In a split
+        -- "Thena.Tactics.Specialise" solves the copy and drops the binder, so the
+        -- arm never sees it; a method written __by hand__ pays for every copy in
+        -- binders, which is what @eliminate-core@ asks 'Fixed' for.
         --
         -- __TWO QUESTIONS, AND THEY ARE ASKED IN TWO PLACES — MS9 phase 197,
         -- `~k54hh`.__ /Which/ ambient entries may be copied is 'generalisable',
@@ -391,7 +428,9 @@ eliminate env ctx sch n0 goal tgt =
         -- equation stated and kept. They were one all-or-nothing test until
         -- phase 197, and that is what shut `~k54hh`: a definition the split did
         -- not put in the context cancelled every copy.
-        generalised = if viable then closed else []
+        generalised = case prem of
+          Fixed       -> []
+          Generalised -> if viable then closed else []
           where
             -- A friendly index's variable is abstracted outright, so it is
             -- neither a seed nor a reader nor part of the closure.

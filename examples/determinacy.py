@@ -607,123 +607,35 @@ def lam(bs, body):
     return "\\ %s -> %s" % (" ".join(n for n, _ in bs), surface(body))
 
 # ---------------------------------------------------------------------------
-# The copies a split generalises, and why only the script target has them
+# What this generator no longer mirrors
 # ---------------------------------------------------------------------------
 #
-# MS9 phase 191. `eliminate-core` quantifies a FRESH COPY of every ambient
-# entry the target's tied index mentions, after the target, states the
-# equations about the copy, and passes the entry itself and `refl` at the use
-# site. So a method's binder list gains one binder per copy, immediately before
-# the equation, and everything the method says has to be said about the copy:
-# the equation is about `w9`, so a transport of `sr` lands at `w9` and the
-# induction hypothesis that consumes it is `ih09`.
+# MS9 phase 191 made `eliminate-core` quantify a FRESH COPY of every ambient
+# entry the target's tied index mentions, and this file grew a mirror of that
+# rule — the seeds, the dependency closure, and a renamer that said each arm
+# about the copies instead of the entries. It cost 90 of the 157 `try-core`
+# lines, and it was paid again when phase 199 closed the closure backwards.
 #
-# **The surface target gets none of this**, and that is not an omission:
-# `determinacy-surface.thena` writes its `elim` and its motive out by hand, so
-# no tactic derives a motive there and there is nothing to generalise.
-IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_']*")
-
-def telescope(ty):
-    """The leading ∀ binder groups of a signature, as (name, type) pairs."""
-    out, i = [], 1 if ty.startswith("∀") else 0
-    while True:
-        while i < len(ty) and ty[i] == ' ': i += 1
-        if i >= len(ty) or ty[i] != '(': break
-        depth, j = 0, i
-        while j < len(ty):
-            if   ty[j] == '(': depth += 1
-            elif ty[j] == ')':
-                depth -= 1
-                if depth == 0: break
-            j += 1
-        n, _, t = ty[i+1:j].partition(" : ")
-        out.append((n, t))
-        i = j + 1
-    return out
-
-def demanded(ic, it, argv, names):
-    """Does this position of a rule's index need the target's entry COPIED?
-
-    One position of a constructor's own index against the target's, and the
-    three cases are the three the specialiser's transitions can reach:
-
-      * the rule's side is one of the RULE'S OWN variables — `ePred c1` against
-        `pred (succ v)` — so `solution` removes that binder and no copy is
-        involved. Nothing is demanded.
-      * the target's side is a bare ambient variable facing anything else —
-        `true` against `p` — and a copy is the only thing a solution can reach.
-        That position demands it.
-      * both are constructed: the same former recurses, different formers is a
-        conflict and demands nothing.
-    """
-    if ic[0] == 'v' and ic[1] in argv:
-        return []
-    if it[0] == 'v':
-        return [it[1]] if it[1] in names else []
-    if ic[0] == 'c' and it[0] == 'c' and ic[1] == it[1]:
-        return [v for a, b in zip(ic[2], it[2])
-                  for v in demanded(a, b, argv, names)]
-    return []
-
-def generalised(lem):
-    """Which ambient entries this lemma's elimination generalises.
-
-    A mirror of 'Thena.Tactics.Eliminate''s own rule, and it had better stay
-    one: the seeds are the entries SOME RULE cannot be solved without — see
-    'demanded' — and then an entry whose type mentions a seed is itself
-    generalised, until nothing more is added. @Step@'s left index is tied, the
-    statement pinning the target at a constructed term, and its right index @u@
-    is a plain variable and therefore friendly, so @u@ is neither a seed nor in
-    the closure, and neither is the target.
-    """
-    tel   = [(n, t) for n, t in telescope(lem['ty']) if n in lem['intros']]
-    fixed = [(n, t) for n, t in tel if n not in (lem['tgt'], "u")]
-    names = [n for n, _ in fixed]
-    seeds = []
-    for ct in STEP:
-        argv = [n for n, _ in ct['tel']]
-        for v in demanded(ct['lhs'], lem['L'], argv, names):
-            if v not in seeds:
-                seeds.append(v)
-    while True:
-        more = [n for n, t in fixed
-                  if n not in seeds and any(w in seeds for w in IDENT.findall(t))]
-        if not more: break
-        seeds += more
-    return [(n, t) for n, t in fixed if n in seeds]
-
-def copies(lem):
-    """The copies, in context order. **Under the ambient name with a 9**: the
-    arms already bind `c1`, `c2` and `nv1`, so a prime or a 1 would collide."""
-    return [] if TARGET != 'script' else \
-           [(n + "9", n, t) for n, t in generalised(lem)]
-
-def renamer(gen):
-    """The arm's text, said about the copies instead of the entries."""
-    m = dict((was, now) for now, was, _ in gen)
-    if not m: return lambda s: s
-    return lambda s: IDENT.sub(lambda o: m.get(o.group(0), o.group(0)), s)
-
+# **MS9 phase 211 removed the need for it** (`~84x46`): `eliminate-core` is
+# §3.7 again — the motive abstracts the target and its indices, every premise
+# stays fixed — and the generalising construction is `eliminate-generalising-core`,
+# which nothing here calls. So the mirror is deleted rather than maintained, and
+# a later widening of what a *split* generalises cannot land on this file again.
+#
 def branch(lem, ct):
-    gen  = copies(lem)
-    ren  = renamer(gen)
     goal = lem['goal'](arg(ct['rhs']))
     bs = list(ct['tel'])
     if ct['rec']:
-        # **The hypothesis is the motive at the recursive argument**, so it
-        # quantifies the copies too — which is the one place the copies appear
-        # as binders of a type rather than of the method.
-        ihty = ren("Eq {0} Term c1 %s -> %s" % (arg(lem['L']), lem['goal']("c2")))
-        if gen:
-            ihty = "∀ %s -> %s" % (" ".join("(%s : %s)" % (now, ren(t))
-                                            for now, _, t in gen), ihty)
+        # **The hypothesis is the motive at the recursive argument**, which under
+        # §3.7's scheme is the goal with the target replaced and the equation
+        # restated — nothing else.
         bs.append(("sr", "Step c1 c2"))
-        bs.append(("ih", ihty))
-    bs += [(now, ren(t)) for now, _, t in gen]
-    bs.append(("q", ren("Eq {0} Term %s %s" % (arg(ct['lhs']), arg(lem['L'])))))
+        bs.append(("ih", "Eq {0} Term c1 %s -> %s"
+                         % (arg(lem['L']), lem['goal']("c2"))))
+    bs.append(("q", "Eq {0} Term %s %s" % (arg(ct['lhs']), arg(lem['L']))))
     res, leaves = decompose(ct['lhs'], lem['L'], 'q', goal, itertools.count(1))
     body = res if leaves is None else compose(res, lem['fin'][ct['n']](leaves, goal))
-    return lam(bs, ren(body))
+    return lam(bs, body)
 
 # | One theorem, as a signature and an equation.
 #

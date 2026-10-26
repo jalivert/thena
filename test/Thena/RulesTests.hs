@@ -802,7 +802,8 @@ ranOk m = case runOut m of
 -- point between them is what makes it a search rather than a loop.
 everyHoleRule :: [String]
 everyHoleRule =
-  [ "attack", "try-core", "abandon", "eliminate-core", "prove", "fill"
+  [ "attack", "try-core", "abandon", "eliminate-core"
+  , "eliminate-generalising-core", "prove", "fill"
   , "unify-refine-core", "apply-core"
   , "fit-core", "fit-core"
     -- The asking half of the three component tactics (MS5 phase 62b). They

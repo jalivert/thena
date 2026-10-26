@@ -573,34 +573,34 @@ back
 back
 back
 back
-try-core ⌜ \ (c1 : Term) (c2 : Term) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (ifthen true c1 c2) (ifthen p9 a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term true p9) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b))) -> (\ (e1 : Eq {0} Term true p9) (e2 : Eq {0} Term c1 a) (e3 : Eq {0} Term c2 b) -> absurd (Eq {0} Term (ifthen p'9 a b) c1) (trueNoStep p'9 (subst Term (\ (x : Term) -> Step x p'9) p9 true (sym Term true p9 e1) (s09)))) (andLeft {0 0} (Eq {0} Term true p9) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term true p9) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4))) (andRight {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term true p9) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)))) (noConfusionTerm (ifthen true c1 c2) (ifthen p9 a b) q) ⌝
+try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (ifthen p a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term true p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b))) -> (\ (e1 : Eq {0} Term true p) (e2 : Eq {0} Term c1 a) (e3 : Eq {0} Term c2 b) -> absurd (Eq {0} Term (ifthen p' a b) c1) (trueNoStep p' (subst Term (\ (x : Term) -> Step x p') p true (sym Term true p e1) (s0)))) (andLeft {0 0} (Eq {0} Term true p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term true p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4))) (andRight {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term true p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)))) (noConfusionTerm (ifthen true c1 c2) (ifthen p a b) q) ⌝
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (ifthen false c1 c2) (ifthen p9 a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term false p9) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b))) -> (\ (e1 : Eq {0} Term false p9) (e2 : Eq {0} Term c1 a) (e3 : Eq {0} Term c2 b) -> absurd (Eq {0} Term (ifthen p'9 a b) c2) (falseNoStep p'9 (subst Term (\ (x : Term) -> Step x p'9) p9 false (sym Term false p9 e1) (s09)))) (andLeft {0 0} (Eq {0} Term false p9) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term false p9) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4))) (andRight {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term false p9) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)))) (noConfusionTerm (ifthen false c1 c2) (ifthen p9 a b) q) ⌝
+try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (ifthen p a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term false p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b))) -> (\ (e1 : Eq {0} Term false p) (e2 : Eq {0} Term c1 a) (e3 : Eq {0} Term c2 b) -> absurd (Eq {0} Term (ifthen p' a b) c2) (falseNoStep p' (subst Term (\ (x : Term) -> Step x p') p false (sym Term false p e1) (s0)))) (andLeft {0 0} (Eq {0} Term false p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term false p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4))) (andRight {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b) (andRight {0 0} (Eq {0} Term false p) (And {0 0} (Eq {0} Term c1 a) (Eq {0} Term c2 b)) (nc4)))) (noConfusionTerm (ifthen false c1 c2) (ifthen p a b) q) ⌝
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : ∀ (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) -> Eq {0} Term c1 (ifthen p9 a b) -> Eq {0} Term (ifthen p'9 a b) c2) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (ifthen c1 c3 c4) (ifthen p9 a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term c1 p9) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b))) -> (\ (e1 : Eq {0} Term c1 p9) (e2 : Eq {0} Term c3 a) (e3 : Eq {0} Term c4 b) -> trans Term (ifthen p'9 a b) (ifthen c2 a b) (ifthen c2 c3 c4) (cong Term Term (\ (x : Term) -> ifthen x a b) p'9 c2 (ih09 c2 (subst Term (\ (x : Term) -> Step x c2) c1 p9 (e1) (sr)))) (trans Term (ifthen c2 a b) (ifthen c2 c3 b) (ifthen c2 c3 c4) (cong Term Term (\ (x : Term) -> ifthen c2 x b) a c3 (sym Term c3 a e2)) (cong Term Term (\ (x : Term) -> ifthen c2 c3 x) b c4 (sym Term c4 b e3)))) (andLeft {0 0} (Eq {0} Term c1 p9) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b) (andRight {0 0} (Eq {0} Term c1 p9) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4))) (andRight {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b) (andRight {0 0} (Eq {0} Term c1 p9) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4)))) (noConfusionTerm (ifthen c1 c3 c4) (ifthen p9 a b) q) ⌝
+try-core ⌜ \ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen p a b) -> Eq {0} Term (ifthen p' a b) c2) (q : Eq {0} Term (ifthen c1 c3 c4) (ifthen p a b)) -> (\ (nc4 : And {0 0} (Eq {0} Term c1 p) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b))) -> (\ (e1 : Eq {0} Term c1 p) (e2 : Eq {0} Term c3 a) (e3 : Eq {0} Term c4 b) -> trans Term (ifthen p' a b) (ifthen c2 a b) (ifthen c2 c3 c4) (cong Term Term (\ (x : Term) -> ifthen x a b) p' c2 (ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 p (e1) (sr)))) (trans Term (ifthen c2 a b) (ifthen c2 c3 b) (ifthen c2 c3 c4) (cong Term Term (\ (x : Term) -> ifthen c2 x b) a c3 (sym Term c3 a e2)) (cong Term Term (\ (x : Term) -> ifthen c2 c3 x) b c4 (sym Term c4 b e3)))) (andLeft {0 0} (Eq {0} Term c1 p) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4)) (andLeft {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b) (andRight {0 0} (Eq {0} Term c1 p) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4))) (andRight {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b) (andRight {0 0} (Eq {0} Term c1 p) (And {0 0} (Eq {0} Term c3 a) (Eq {0} Term c4 b)) (nc4)))) (noConfusionTerm (ifthen c1 c3 c4) (ifthen p a b) q) ⌝
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : ∀ (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) -> Eq {0} Term c1 (ifthen p9 a b) -> Eq {0} Term (ifthen p'9 a b) c2) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (succ c1) (ifthen p9 a b)) -> absurd (Eq {0} Term (ifthen p'9 a b) (succ c2)) (noConfusionTerm (succ c1) (ifthen p9 a b) q) ⌝
+try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen p a b) -> Eq {0} Term (ifthen p' a b) c2) (q : Eq {0} Term (succ c1) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) (succ c2)) (noConfusionTerm (succ c1) (ifthen p a b) q) ⌝
 solve
 along
-try-core ⌜ \ (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (pred zero) (ifthen p9 a b)) -> absurd (Eq {0} Term (ifthen p'9 a b) zero) (noConfusionTerm (pred zero) (ifthen p9 a b) q) ⌝
+try-core ⌜ \ (q : Eq {0} Term (pred zero) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) zero) (noConfusionTerm (pred zero) (ifthen p a b) q) ⌝
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (pred (succ c1)) (ifthen p9 a b)) -> absurd (Eq {0} Term (ifthen p'9 a b) c1) (noConfusionTerm (pred (succ c1)) (ifthen p9 a b) q) ⌝
+try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) c1) (noConfusionTerm (pred (succ c1)) (ifthen p a b) q) ⌝
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : ∀ (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) -> Eq {0} Term c1 (ifthen p9 a b) -> Eq {0} Term (ifthen p'9 a b) c2) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (pred c1) (ifthen p9 a b)) -> absurd (Eq {0} Term (ifthen p'9 a b) (pred c2)) (noConfusionTerm (pred c1) (ifthen p9 a b) q) ⌝
+try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen p a b) -> Eq {0} Term (ifthen p' a b) c2) (q : Eq {0} Term (pred c1) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) (pred c2)) (noConfusionTerm (pred c1) (ifthen p a b) q) ⌝
 solve
 along
-try-core ⌜ \ (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (iszero zero) (ifthen p9 a b)) -> absurd (Eq {0} Term (ifthen p'9 a b) true) (noConfusionTerm (iszero zero) (ifthen p9 a b) q) ⌝
+try-core ⌜ \ (q : Eq {0} Term (iszero zero) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) true) (noConfusionTerm (iszero zero) (ifthen p a b) q) ⌝
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (iszero (succ c1)) (ifthen p9 a b)) -> absurd (Eq {0} Term (ifthen p'9 a b) false) (noConfusionTerm (iszero (succ c1)) (ifthen p9 a b) q) ⌝
+try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) false) (noConfusionTerm (iszero (succ c1)) (ifthen p a b) q) ⌝
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : ∀ (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) -> Eq {0} Term c1 (ifthen p9 a b) -> Eq {0} Term (ifthen p'9 a b) c2) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (iszero c1) (ifthen p9 a b)) -> absurd (Eq {0} Term (ifthen p'9 a b) (iszero c2)) (noConfusionTerm (iszero c1) (ifthen p9 a b) q) ⌝
+try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (ifthen p a b) -> Eq {0} Term (ifthen p' a b) c2) (q : Eq {0} Term (iszero c1) (ifthen p a b)) -> absurd (Eq {0} Term (ifthen p' a b) (iszero c2)) (noConfusionTerm (iszero c1) (ifthen p a b) q) ⌝
 solve
 along
 solve
@@ -861,34 +861,34 @@ back
 back
 back
 back
-try-core ⌜ \ (c1 : Term) (c2 : Term) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (ifthen true c1 c2) (pred p9)) -> absurd (Eq {0} Term (pred p'9) c1) (noConfusionTerm (ifthen true c1 c2) (pred p9) q) ⌝
+try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (pred p)) -> absurd (Eq {0} Term (pred p') c1) (noConfusionTerm (ifthen true c1 c2) (pred p) q) ⌝
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (ifthen false c1 c2) (pred p9)) -> absurd (Eq {0} Term (pred p'9) c2) (noConfusionTerm (ifthen false c1 c2) (pred p9) q) ⌝
+try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (pred p)) -> absurd (Eq {0} Term (pred p') c2) (noConfusionTerm (ifthen false c1 c2) (pred p) q) ⌝
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : ∀ (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) -> Eq {0} Term c1 (pred p9) -> Eq {0} Term (pred p'9) c2) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (ifthen c1 c3 c4) (pred p9)) -> absurd (Eq {0} Term (pred p'9) (ifthen c2 c3 c4)) (noConfusionTerm (ifthen c1 c3 c4) (pred p9) q) ⌝
+try-core ⌜ \ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred p) -> Eq {0} Term (pred p') c2) (q : Eq {0} Term (ifthen c1 c3 c4) (pred p)) -> absurd (Eq {0} Term (pred p') (ifthen c2 c3 c4)) (noConfusionTerm (ifthen c1 c3 c4) (pred p) q) ⌝
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : ∀ (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) -> Eq {0} Term c1 (pred p9) -> Eq {0} Term (pred p'9) c2) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (succ c1) (pred p9)) -> absurd (Eq {0} Term (pred p'9) (succ c2)) (noConfusionTerm (succ c1) (pred p9) q) ⌝
+try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred p) -> Eq {0} Term (pred p') c2) (q : Eq {0} Term (succ c1) (pred p)) -> absurd (Eq {0} Term (pred p') (succ c2)) (noConfusionTerm (succ c1) (pred p) q) ⌝
 solve
 along
-try-core ⌜ \ (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (pred zero) (pred p9)) -> (\ (nc2 : Eq {0} Term zero p9) -> (\ (e1 : Eq {0} Term zero p9) -> absurd (Eq {0} Term (pred p'9) zero) (zeroNoStep p'9 (subst Term (\ (x : Term) -> Step x p'9) p9 zero (sym Term zero p9 e1) (s09)))) (nc2)) (noConfusionTerm (pred zero) (pred p9) q) ⌝
+try-core ⌜ \ (q : Eq {0} Term (pred zero) (pred p)) -> (\ (nc2 : Eq {0} Term zero p) -> (\ (e1 : Eq {0} Term zero p) -> absurd (Eq {0} Term (pred p') zero) (zeroNoStep p' (subst Term (\ (x : Term) -> Step x p') p zero (sym Term zero p e1) (s0)))) (nc2)) (noConfusionTerm (pred zero) (pred p) q) ⌝
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (pred (succ c1)) (pred p9)) -> (\ (nc2 : Eq {0} Term (succ c1) p9) -> (\ (e1 : Eq {0} Term (succ c1) p9) -> absurd (Eq {0} Term (pred p'9) c1) (nvNoStep (succ c1) (nvSucc c1 nv1) p'9 (subst Term (\ (x : Term) -> Step x p'9) p9 (succ c1) (sym Term (succ c1) p9 e1) (s09)))) (nc2)) (noConfusionTerm (pred (succ c1)) (pred p9) q) ⌝
+try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (pred p)) -> (\ (nc2 : Eq {0} Term (succ c1) p) -> (\ (e1 : Eq {0} Term (succ c1) p) -> absurd (Eq {0} Term (pred p') c1) (nvNoStep (succ c1) (nvSucc c1 nv1) p' (subst Term (\ (x : Term) -> Step x p') p (succ c1) (sym Term (succ c1) p e1) (s0)))) (nc2)) (noConfusionTerm (pred (succ c1)) (pred p) q) ⌝
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : ∀ (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) -> Eq {0} Term c1 (pred p9) -> Eq {0} Term (pred p'9) c2) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (pred c1) (pred p9)) -> (\ (nc2 : Eq {0} Term c1 p9) -> (\ (e1 : Eq {0} Term c1 p9) -> cong Term Term (\ (x : Term) -> pred x) p'9 c2 (ih09 c2 (subst Term (\ (x : Term) -> Step x c2) c1 p9 (e1) (sr)))) (nc2)) (noConfusionTerm (pred c1) (pred p9) q) ⌝
+try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred p) -> Eq {0} Term (pred p') c2) (q : Eq {0} Term (pred c1) (pred p)) -> (\ (nc2 : Eq {0} Term c1 p) -> (\ (e1 : Eq {0} Term c1 p) -> cong Term Term (\ (x : Term) -> pred x) p' c2 (ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 p (e1) (sr)))) (nc2)) (noConfusionTerm (pred c1) (pred p) q) ⌝
 solve
 along
-try-core ⌜ \ (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (iszero zero) (pred p9)) -> absurd (Eq {0} Term (pred p'9) true) (noConfusionTerm (iszero zero) (pred p9) q) ⌝
+try-core ⌜ \ (q : Eq {0} Term (iszero zero) (pred p)) -> absurd (Eq {0} Term (pred p') true) (noConfusionTerm (iszero zero) (pred p) q) ⌝
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (iszero (succ c1)) (pred p9)) -> absurd (Eq {0} Term (pred p'9) false) (noConfusionTerm (iszero (succ c1)) (pred p9) q) ⌝
+try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (pred p)) -> absurd (Eq {0} Term (pred p') false) (noConfusionTerm (iszero (succ c1)) (pred p) q) ⌝
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : ∀ (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) -> Eq {0} Term c1 (pred p9) -> Eq {0} Term (pred p'9) c2) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (iszero c1) (pred p9)) -> absurd (Eq {0} Term (pred p'9) (iszero c2)) (noConfusionTerm (iszero c1) (pred p9) q) ⌝
+try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (pred p) -> Eq {0} Term (pred p') c2) (q : Eq {0} Term (iszero c1) (pred p)) -> absurd (Eq {0} Term (pred p') (iszero c2)) (noConfusionTerm (iszero c1) (pred p) q) ⌝
 solve
 along
 solve
@@ -1071,34 +1071,34 @@ back
 back
 back
 back
-try-core ⌜ \ (c1 : Term) (c2 : Term) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (ifthen true c1 c2) (iszero p9)) -> absurd (Eq {0} Term (iszero p'9) c1) (noConfusionTerm (ifthen true c1 c2) (iszero p9) q) ⌝
+try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen true c1 c2) (iszero p)) -> absurd (Eq {0} Term (iszero p') c1) (noConfusionTerm (ifthen true c1 c2) (iszero p) q) ⌝
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (ifthen false c1 c2) (iszero p9)) -> absurd (Eq {0} Term (iszero p'9) c2) (noConfusionTerm (ifthen false c1 c2) (iszero p9) q) ⌝
+try-core ⌜ \ (c1 : Term) (c2 : Term) (q : Eq {0} Term (ifthen false c1 c2) (iszero p)) -> absurd (Eq {0} Term (iszero p') c2) (noConfusionTerm (ifthen false c1 c2) (iszero p) q) ⌝
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : ∀ (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) -> Eq {0} Term c1 (iszero p9) -> Eq {0} Term (iszero p'9) c2) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (ifthen c1 c3 c4) (iszero p9)) -> absurd (Eq {0} Term (iszero p'9) (ifthen c2 c3 c4)) (noConfusionTerm (ifthen c1 c3 c4) (iszero p9) q) ⌝
+try-core ⌜ \ (c1 : Term) (c2 : Term) (c3 : Term) (c4 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero p) -> Eq {0} Term (iszero p') c2) (q : Eq {0} Term (ifthen c1 c3 c4) (iszero p)) -> absurd (Eq {0} Term (iszero p') (ifthen c2 c3 c4)) (noConfusionTerm (ifthen c1 c3 c4) (iszero p) q) ⌝
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : ∀ (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) -> Eq {0} Term c1 (iszero p9) -> Eq {0} Term (iszero p'9) c2) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (succ c1) (iszero p9)) -> absurd (Eq {0} Term (iszero p'9) (succ c2)) (noConfusionTerm (succ c1) (iszero p9) q) ⌝
+try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero p) -> Eq {0} Term (iszero p') c2) (q : Eq {0} Term (succ c1) (iszero p)) -> absurd (Eq {0} Term (iszero p') (succ c2)) (noConfusionTerm (succ c1) (iszero p) q) ⌝
 solve
 along
-try-core ⌜ \ (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (pred zero) (iszero p9)) -> absurd (Eq {0} Term (iszero p'9) zero) (noConfusionTerm (pred zero) (iszero p9) q) ⌝
+try-core ⌜ \ (q : Eq {0} Term (pred zero) (iszero p)) -> absurd (Eq {0} Term (iszero p') zero) (noConfusionTerm (pred zero) (iszero p) q) ⌝
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (pred (succ c1)) (iszero p9)) -> absurd (Eq {0} Term (iszero p'9) c1) (noConfusionTerm (pred (succ c1)) (iszero p9) q) ⌝
+try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (pred (succ c1)) (iszero p)) -> absurd (Eq {0} Term (iszero p') c1) (noConfusionTerm (pred (succ c1)) (iszero p) q) ⌝
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : ∀ (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) -> Eq {0} Term c1 (iszero p9) -> Eq {0} Term (iszero p'9) c2) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (pred c1) (iszero p9)) -> absurd (Eq {0} Term (iszero p'9) (pred c2)) (noConfusionTerm (pred c1) (iszero p9) q) ⌝
+try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero p) -> Eq {0} Term (iszero p') c2) (q : Eq {0} Term (pred c1) (iszero p)) -> absurd (Eq {0} Term (iszero p') (pred c2)) (noConfusionTerm (pred c1) (iszero p) q) ⌝
 solve
 along
-try-core ⌜ \ (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (iszero zero) (iszero p9)) -> (\ (nc2 : Eq {0} Term zero p9) -> (\ (e1 : Eq {0} Term zero p9) -> absurd (Eq {0} Term (iszero p'9) true) (zeroNoStep p'9 (subst Term (\ (x : Term) -> Step x p'9) p9 zero (sym Term zero p9 e1) (s09)))) (nc2)) (noConfusionTerm (iszero zero) (iszero p9) q) ⌝
+try-core ⌜ \ (q : Eq {0} Term (iszero zero) (iszero p)) -> (\ (nc2 : Eq {0} Term zero p) -> (\ (e1 : Eq {0} Term zero p) -> absurd (Eq {0} Term (iszero p') true) (zeroNoStep p' (subst Term (\ (x : Term) -> Step x p') p zero (sym Term zero p e1) (s0)))) (nc2)) (noConfusionTerm (iszero zero) (iszero p) q) ⌝
 solve
 along
-try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (iszero (succ c1)) (iszero p9)) -> (\ (nc2 : Eq {0} Term (succ c1) p9) -> (\ (e1 : Eq {0} Term (succ c1) p9) -> absurd (Eq {0} Term (iszero p'9) false) (nvNoStep (succ c1) (nvSucc c1 nv1) p'9 (subst Term (\ (x : Term) -> Step x p'9) p9 (succ c1) (sym Term (succ c1) p9 e1) (s09)))) (nc2)) (noConfusionTerm (iszero (succ c1)) (iszero p9) q) ⌝
+try-core ⌜ \ (c1 : Term) (nv1 : NV c1) (q : Eq {0} Term (iszero (succ c1)) (iszero p)) -> (\ (nc2 : Eq {0} Term (succ c1) p) -> (\ (e1 : Eq {0} Term (succ c1) p) -> absurd (Eq {0} Term (iszero p') false) (nvNoStep (succ c1) (nvSucc c1 nv1) p' (subst Term (\ (x : Term) -> Step x p') p (succ c1) (sym Term (succ c1) p e1) (s0)))) (nc2)) (noConfusionTerm (iszero (succ c1)) (iszero p) q) ⌝
 solve
 along
-try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : ∀ (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) -> Eq {0} Term c1 (iszero p9) -> Eq {0} Term (iszero p'9) c2) (p9 : Term) (p'9 : Term) (s09 : Step p9 p'9) (ih09 : ∀ (w : Term) (sw : Step p9 w) -> Eq {0} Term p'9 w) (q : Eq {0} Term (iszero c1) (iszero p9)) -> (\ (nc2 : Eq {0} Term c1 p9) -> (\ (e1 : Eq {0} Term c1 p9) -> cong Term Term (\ (x : Term) -> iszero x) p'9 c2 (ih09 c2 (subst Term (\ (x : Term) -> Step x c2) c1 p9 (e1) (sr)))) (nc2)) (noConfusionTerm (iszero c1) (iszero p9) q) ⌝
+try-core ⌜ \ (c1 : Term) (c2 : Term) (sr : Step c1 c2) (ih : Eq {0} Term c1 (iszero p) -> Eq {0} Term (iszero p') c2) (q : Eq {0} Term (iszero c1) (iszero p)) -> (\ (nc2 : Eq {0} Term c1 p) -> (\ (e1 : Eq {0} Term c1 p) -> cong Term Term (\ (x : Term) -> iszero x) p' c2 (ih0 c2 (subst Term (\ (x : Term) -> Step x c2) c1 p (e1) (sr)))) (nc2)) (noConfusionTerm (iszero c1) (iszero p) q) ⌝
 solve
 along
 solve

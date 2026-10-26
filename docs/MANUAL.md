@@ -712,6 +712,15 @@ follow the target into the abstraction, because the induction it could give you
 there would be too weak to use. The workaround is the ordinary one — do not
 `intro` something you need generalised.
 
+There is a second induction tactic, `eliminate-generalising-core`, which does
+follow them: it proves the more general statement, over a fresh copy of every
+premise the target's indices mention, and applies it to the premises you have.
+That is what the surface language's `induction … of` and `case … of` are built
+on, and there the extra copies are solved away case by case so you never see
+them. Driving it by hand you do see them, as a further argument to every method
+you write — which is why the plain word is the one that leaves your premises
+alone.
+
 ---
 
 ## 8. The rule engine
@@ -865,6 +874,7 @@ attack
 try-core ‹t›
 abandon
 eliminate-core ‹t›
+eliminate-generalising-core ‹t›
 prove
 …
 ```
@@ -1373,6 +1383,7 @@ language and elaborated on load.
 | `assume ⌜‹S›⌝` / `claim ⌜‹S›⌝` | the same, asking for the name |
 | `unify ⌜‹t›⌝ ⌜‹u›⌝` | solve by unification |
 | `eliminate-core ⌜ target ⌝` | induction |
+| `eliminate-generalising-core ⌜ target ⌝` | the same, and it generalises the premises the target's indices mention |
 | `reduce` | reduce the focused term in place |
 | `along` `into` `back` | move on the chain |
 | `cross type` / `cross val` | move into a term |

@@ -54,7 +54,12 @@ import Thena.Global.Env
   , recursiveArgument
   )
 import Thena.Render (Rendering (..), renderCore)
-import Thena.Tactics.Eliminate (Elimination (..), MethodShape (..), eliminate)
+import Thena.Tactics.Eliminate
+  ( Elimination (..)
+  , MethodShape (..)
+  , Premises (..)
+  , eliminate
+  )
 import Thena.Tactics.Specialise
   (Binder (..), Role (..), Specialisation (..), binderWord, specialise)
 import Thena.Standard (expectedBase)
@@ -550,6 +555,6 @@ run label env ctx n goal tgt = case parseCore [] env ctx n goal of
   Left e -> error ("fixture does not parse: " ++ show e)
   Right (g, n1) -> case parseCore [] env ctx n1 tgt of
     Left e -> error ("fixture does not parse: " ++ show e)
-    Right (t, n2) -> case fst (eliminate env ctx Inductive n2 g t) of
+    Right (t, n2) -> case fst (eliminate env ctx Inductive Generalised n2 g t) of
       Right el -> el
       Left e   -> error (label ++ ": " ++ show e)

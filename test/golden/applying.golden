@@ -9,6 +9,7 @@ attack
 try-core ‹t›
 abandon
 eliminate-core ‹t›
+eliminate-generalising-core ‹t›
 prove
 fill ‹t›
 unify-refine-core ‹t›

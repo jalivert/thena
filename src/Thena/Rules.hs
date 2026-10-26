@@ -1505,6 +1505,7 @@ unaryOps =
   , ("push-development", Op.PushDevelopment)
   , ("certify", Certify), ("prim-eliminate", Op.Eliminate)
   , ("prim-case", Op.CaseAnalyse)
+  , ("prim-eliminate-fixed", Op.EliminateFixed)
     -- The six declaration readers (MS9 phase 176).
   , ("datatype-of", Op.DatatypeOf)
   , ("datatype-parameters", Op.DatatypeParameters)

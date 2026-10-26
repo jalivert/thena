@@ -42,8 +42,36 @@ rule solve :- when focus-is-guess do prim-solve
 regret : ()
 rule regret :- when focus-is-guess do prim-regret
 
+-- THE TWO ELIMINATIONS, AND THEY ARE TWO RULES BECAUSE THEY ARE TWO
+-- CONSTRUCTIONS (MS9 phase 211, `~84x46`).
+--
+-- `eliminate-core` is §3.7's: the motive abstracts the target and its indices,
+-- every premise stays fixed, and an equation about a variable bound before the
+-- target is stated and handed over. It is the word a person types in tactic
+-- mode, and the methods they then write are written BY HAND.
+--
+-- `eliminate-generalising-core` is that plus thesis §2.8's permutation: a fresh
+-- copy of every ambient entry a tied index mentions, quantified after the
+-- target, with the equations about the copy. A copy is free only where something
+-- SOLVES it — `specialise` does, at every method of a surface split — so on a
+-- hand-written path each one is a binder the author takes and an arm they
+-- rewrite. That is why the generalising construction does not squat the plain
+-- word, and why every widening of what a split generalises used to land on
+-- `examples/determinacy-tactics.thena.script`.
+--
+-- NEITHER IS ELABORATION'S CALLER. `split-claim` reaches `prim-eliminate` and
+-- `prim-case` itself, for the same reason it always did: the written word picks
+-- the scheme there. This name exists so that the construction is REACHABLE by a
+-- rule — his instruction, 2026-10-26 — and not because anything calls it yet.
+--
+-- A flag on one rule would say the same thing and be a mode, which the first
+-- design principle forbids: a rule says only what it is about, and these two
+-- are about two motives.
 eliminate-core : Core -> ()
-rule eliminate-core t :- when focus-is-hole do prim-eliminate t
+rule eliminate-core t :- when focus-is-hole do prim-eliminate-fixed t
+
+eliminate-generalising-core : Core -> ()
+rule eliminate-generalising-core t :- when focus-is-hole do prim-eliminate t
 
 prove : ()
 rule prove :- when focus-is-hole do prim-prove

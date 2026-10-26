@@ -8,6 +8,7 @@ standard
   solve
   regret
   eliminate-core ‹t›
+  eliminate-generalising-core ‹t›
   prove
   prove
   fill ‹t›
@@ -101,6 +102,7 @@ attack
 try-core ‹t›
 abandon
 eliminate-core ‹t›
+eliminate-generalising-core ‹t›
 prove
 fill ‹t›
 unify-refine-core ‹t›
@@ -311,6 +313,7 @@ attack
 try-core ‹t›
 abandon
 eliminate-core ‹t›
+eliminate-generalising-core ‹t›
 prove
 fill ‹t›
 unify-refine-core ‹t›
@@ -476,6 +479,7 @@ attack
 try-core ‹t›
 abandon
 eliminate-core ‹t›
+eliminate-generalising-core ‹t›
 prove
 fill ‹t›
 unify-refine-core ‹t›

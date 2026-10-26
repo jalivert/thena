@@ -83,7 +83,12 @@ expectedStandard =
   , Rule (GlobalName "intro")      []    [FocusIsGuess, GoalTypeIsLet] [Do (IntroLet Nothing)]
   , Rule (GlobalName "solve")      []    [FocusIsGuess]                [Do Solve]
   , Rule (GlobalName "regret")     []    [FocusIsGuess]                [Do Regret]
-  , Rule (GlobalName "eliminate-core")  [PVar "t"] [FocusIsHole]                 [Do (Op.Eliminate (Ref "t"))]
+    -- **Two rules, two constructions** (MS9 phase 211, `~84x46`):
+    -- @eliminate-core@ is §3.7 with every premise fixed, and the generalising
+    -- one is that plus §2.8's copies. The base's own comment has why the
+    -- generalising construction does not squat the plain word.
+  , Rule (GlobalName "eliminate-core")  [PVar "t"] [FocusIsHole]                 [Do (Op.EliminateFixed (Ref "t"))]
+  , Rule (GlobalName "eliminate-generalising-core") [PVar "t"] [FocusIsHole]      [Do (Op.Eliminate (Ref "t"))]
   , proveRule
   , proveGuess
   , fillRule

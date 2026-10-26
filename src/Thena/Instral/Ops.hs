@@ -1173,6 +1173,26 @@ data Op
     --
     -- __It answers exactly what 'Eliminate' answers__, the method holes and the
     -- equation count, so @split-over@ and everything under it is shared.
+  | EliminateFixed Operand
+    -- ^ @prim-eliminate-fixed ‹t›@ — §3.7's elimination and nothing more: the
+    -- motive abstracts the target and its indices, and __every premise stays
+    -- fixed__ (MS9 phase 211, @~84x46@).
+    --
+    -- __The third op for the same reason there is a second.__ instral has no
+    -- enum to pass, and the two constructions are asked for by two different
+    -- callers: 'Eliminate' and 'CaseAnalyse' serve a /split/, which runs
+    -- 'Specialise' over every method and so solves away each copy the motive
+    -- quantified; this one serves a method written __by hand__, where nothing
+    -- solves a copy and every one of them is a binder its author must take.
+    -- 'Thena.Tactics.Eliminate.Premises' is the parameter underneath and has the
+    -- argument.
+    --
+    -- __It answers exactly what 'Eliminate' answers__, so a rule may take either
+    -- apart the same way; under this one 'Thena.Tactics.Eliminate.shapeGeneralised'
+    -- is always empty.
+    --
+    -- __It is the op @eliminate-core@ runs__, which is what gives the word back
+    -- its pre-phase-191 meaning while elaboration keeps the generalising one.
   | DatatypeOf Operand
     -- ^ the datatype a /type/ is an application of — @datatype-of ty@.
     --
@@ -1557,6 +1577,7 @@ resultOf o = case o of
   -- before phase 177 does.
   Eliminate _  -> Just (TPair (TList TCore) TMethodShape)
   CaseAnalyse _ -> Just (TPair (TList TCore) TMethodShape)
+  EliminateFixed _ -> Just (TPair (TList TCore) TMethodShape)
   -- **The subgoal it claimed, or none** (MS9 phase 184). A conflicting
   -- equation closes the method outright and claims nothing, which is the
   -- impossible case vanishing, so there is never more than one.
@@ -1712,6 +1733,7 @@ operandTypes o = case o of
   Define a b   -> [(a, TName), (b, TCore)]
   Eliminate a  -> [(a, TCore)]
   CaseAnalyse a -> [(a, TCore)]
+  EliminateFixed a -> [(a, TCore)]
   Specialise c h gk ->
     [(c, TName), (h, TList TName), (gk, TMethodShape)]
   TieRecursion t -> [(t, TCore)]
@@ -2238,6 +2260,7 @@ opKeyword o = case o of
   PopDevelopment -> "pop-development"
   Eliminate _  -> "prim-eliminate"
   CaseAnalyse _ -> "prim-case"
+  EliminateFixed _ -> "prim-eliminate-fixed"
   Specialise _ _ _ -> "specialise"
   TieRecursion _ -> "tie-recursion"
   DatatypeOf _ -> "datatype-of"

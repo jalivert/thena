@@ -763,6 +763,7 @@ baseTests =
       testCase "every rule whose head passes is a candidate" $
         [ n | Rule (GlobalName n) _ _ _ <- drain (matches expectedBase emptyGlobals hole) ]
           @?= [ "attack", "try-core", "abandon", "eliminate-core"
+              , "eliminate-generalising-core"
               , "prove", "fill", "unify-refine-core", "apply-core"
               , "fit-core", "fit-core"
               , "claim", "assume", "quantify"
