@@ -1988,6 +1988,43 @@ it can contain no name at all.
 the type binder is renamed because the term being substituted in has a free type
 variable, and renaming only the term binders would have captured it.
 
+### Thena does not assume K, and a dependent index telescope is handled by transported equations
+
+**Thena's identity type is the ordinary Martin-Löf one and K — uniqueness of identity
+proofs — is not assumed.** So `uip : (q : Eq A a a) -> Eq (Eq A a a) q (refl A a)` is not
+provable here, as it is not in Agda under `--without-K`:
+
+```
+uip = \ A a q -> case q of { refl b -> refl (Eq A b b) (refl A b) }
+
+stuck: the goal does not survive generalising the target
+```
+
+**The reason is structural rather than a check.** Splitting on a target of an indexed
+family works by generalising the family's indices into the motive and carrying one equation
+per index into each method. A motive abstracts the indices *separately*, so the arm's goal
+has to make sense when they differ — and a goal that needs the equality proof to be `refl`
+has no such reading. There is nothing to switch off: the K-needing goal cannot be written
+down.
+
+**The deletion step is kept, and keeping it is sound.** An equation `Eq I t t` constrains
+nothing and its binder is bound and ignored. This is the step that requires K in a system
+where a clause's right-hand side may depend on the equality proof; in Thena the goal never
+mentions these proofs, so the step is the proof-irrelevant one.
+
+**Where an index's type depends on an earlier index, the equation is stated after
+transporting along the earlier one.** `Eq (Vec A n) as as'` is ill-typed when
+`as' : Vec A n'`; what is stated instead is the equation between `as` transported along
+`n ≡ n'` and `as'`, so every equation stays homogeneous. This is the homogeneous
+*telescopic equality* of Cockx, Devriese and Piessens, *Pattern Matching Without K* (2014),
+and it is what Thena uses in place of a heterogeneous ("John Major") equality, whose
+elimination rule is equivalent to K.
+
+**What this costs: nothing you can currently name in language metatheory.** The proofs K
+buys are proofs *about* equality proofs rather than proofs that use them. If one is ever
+needed, K is provable rather than assumed for any type with decidable equality (Hedberg),
+so it can be had for one datatype instead of assumed everywhere.
+
 ## The development calculus
 
 ### There are five components, not McBride's four — the fifth is `∀`
