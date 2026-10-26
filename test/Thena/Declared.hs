@@ -16,6 +16,7 @@ module Thena.Declared
   , vecDecl
   , finDecl
   , packDecl
+  , spanDecl
   , emptyDecl
   , eqDecl
   , unitDecl
@@ -36,6 +37,8 @@ module Thena.Declared
   , eqNatFinCounter
   , eqNatFinPack
   , eqNatFinPackCounter
+  , eqNatVecSpan
+  , eqNatVecSpanCounter
   , eqNatCounter
   , eqTapl
   , eqTaplCounter
@@ -48,7 +51,7 @@ import Thena.Driver (parseDeclaration)
 import Thena.Global.Declare (declare)
 import Thena.Global.Env (GlobalEnv, emptyGlobals)
 
-natDecl, vecDecl, finDecl, packDecl, emptyDecl :: String
+natDecl, vecDecl, finDecl, packDecl, spanDecl, emptyDecl :: String
 natDecl = "Nat : Type\8320 where { zero : Nat ; succ : Nat -> Nat }"
 vecDecl =
   "Vec (A : Type\8320) : Nat -> Type\8320 \
@@ -82,6 +85,22 @@ finDecl =
 packDecl =
   "Pack : Type\8320 \
   \where { pack : forall (n : Nat) (i : Fin n) -> Pack }"
+
+-- | A constructor argument that reaches back PAST another argument (MS9 phase
+-- 216) — @e@'s type mentions @n@ and @as@, with @a@ sitting between @as@ and
+-- @e@.
+--
+-- **The gap is the whole point.** The chain's package is a contiguous span, so
+-- it holds @as; a; e@ and @a@ is /interior/ to it: the rest of the package is
+-- transported along @a@'s own equation while nothing at all mentions @a@. A
+-- no-confusion generator that decided the pair from the telescope — is this
+-- argument mentioned later? — answered @And@ there and left @a@'s proof free in
+-- the second conjunct, and the kernel refused the family it had built.
+-- @Pack@ has no gap, which is why it was not enough to catch this.
+spanDecl =
+  "Span (A : Type\8320) : Type\8320 \
+  \where { span : forall (n : Nat) (as : Vec A n) (a : A) \
+  \(e : Eq {0} (Vec A n) as as) -> Span A }"
 
 -- | No constructors at all — the eliminator with no methods, which every other
 -- fixture has at least one of.
@@ -219,6 +238,16 @@ eqNatFinPack = fst (declared (preludeDecls ++ [natDecl, finDecl, packDecl]))
 
 eqNatFinPackCounter :: Int
 eqNatFinPackCounter = snd (declared (preludeDecls ++ [natDecl, finDecl, packDecl]))
+
+-- | The prelude, @Nat@, @Vec@ and 'spanDecl' — a chain with an argument
+-- /interior/ to its package, which generated a no-confusion family the kernel
+-- refused until MS9 phase 216. @Span@ needs @Vec@ for an argument type that
+-- mentions two earlier arguments at once.
+eqNatVecSpan :: GlobalEnv
+eqNatVecSpan = fst (declared (preludeDecls ++ [natDecl, vecDecl, spanDecl]))
+
+eqNatVecSpanCounter :: Int
+eqNatVecSpanCounter = snd (declared (preludeDecls ++ [natDecl, vecDecl, spanDecl]))
 
 -- | The prelude and then MS1's target language.
 eqTapl :: GlobalEnv

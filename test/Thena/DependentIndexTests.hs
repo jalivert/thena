@@ -44,7 +44,8 @@ module Thena.DependentIndexTests (tests) where
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=), assertBool)
 
-import Thena.Core.Term (GlobalName (..))
+import Thena.Core.Reduce (whnf)
+import Thena.Core.Term (Core (Canonical), GlobalName (..))
 import Thena.Driver
   ( machineOf
   )
@@ -63,6 +64,9 @@ tiedTarget = "examples/tied-index-chain.thena"
 
 argumentTarget :: FilePath
 argumentTarget = "examples/dependent-argument-chain.thena"
+
+vectorTarget :: FilePath
+vectorTarget = "examples/vector-families.thena"
 
 tests :: TestTree
 tests =
@@ -109,6 +113,37 @@ tests =
           Just d  ->
             renderCore (Rendering [] (names m)) [] (definitionType d)
               @?= "\8704 (m : N) (j : Fin m) -> Holds (pack m j) -> N"
+
+      -- __The @Vec@-style families, which the corpus had never had — MS9 phase
+      -- 216.__ @examples\/vector-families.thena@ declares @Vec@ at a level
+      -- parameter and @All@ over it, whose /index/ telescope is dependent and
+      -- whose @allCons@ reaches back past an argument nothing mentions. That
+      -- last shape is what the phase found: the chain's package holds an
+      -- interior member, the rest of the package is transported along its
+      -- equation, and a generator that predicted the pair from the telescope
+      -- left that proof free.
+    , testCase "the vector file runs to the end" $ do
+        (s, _) <- startingSession
+        (_, _, stopped) <- loadProofFile s vectorTarget
+        assertBool (unlines (map show stopped)) (null stopped)
+
+      -- __And the recursion really fires.__ @count@ is a recursion over a
+      -- dependent index telescope, so its split generalises both indices and
+      -- the induction hypothesis has to be found at the shorter vector;
+      -- @one@ is it at a one-element vector, and reducing is what says the
+      -- hypothesis was reached rather than merely bound.
+    , testCase "and the recursion over it computes" $ do
+        (s, _) <- startingSession
+        (s', _, _) <- loadProofFile s vectorTarget
+        let m = machineOf s'
+        case lookupDefinition (GlobalName "one") (globals m) of
+          Nothing -> assertFailure "one was not admitted"
+          Just d  -> case whnf (globals m) [] (definitionBody d) of
+            Canonical (GlobalName "s") _ [inner] ->
+              case whnf (globals m) [] inner of
+                Canonical (GlobalName "z") _ [] -> pure ()
+                other -> assertFailure ("s applied to " ++ show other)
+            other -> assertFailure ("not a successor: " ++ show other)
 
     , testCase "the file runs to the end" $ do
         (s, _) <- startingSession

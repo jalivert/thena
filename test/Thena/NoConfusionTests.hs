@@ -36,6 +36,7 @@ import Thena.Declared
   , eqNatCounter
   , eqNatFin
   , eqNatVec
+  , eqNatVecSpan
   , eqTapl
   , eqTaplCounter
   , finDecl
@@ -249,6 +250,19 @@ kernelTests =
       certified belowEnv "NoConfusionBelow"
   , testCase "and its lemma" $
       certified belowEnv "noConfusionBelow"
+
+    -- **Found by MS9 phase 216, and it was a real bug.** @span@'s last argument
+    -- reaches back past the one before it, so the chain's package holds an
+    -- argument nothing mentions — and the rest of the package is still
+    -- transported along /that/ argument's equation. The generator predicted the
+    -- pair from the telescope instead of reading the type it had just built,
+    -- answered @And@ where the second conjunct mentions the proof, and left the
+    -- proof variable free. @Pack@ and @Fin@ have no gap, which is why nothing
+    -- here caught it.
+  , testCase "a chain with an argument interior to it (phase 216)" $
+      certified eqNatVecSpan "NoConfusionSpan"
+  , testCase "and its lemma" $
+      certified eqNatVecSpan "noConfusionSpan"
   ]
 
 -- | @Below@\'s second index has the first in its type — a dependent /index/

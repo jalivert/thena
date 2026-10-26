@@ -448,12 +448,34 @@ generateNoConfusion env n0 d
     -- @Unit@ for a constructor with no arguments, and the bare equation for
     -- one. 'headOf' is where @e*@ happens.
     --
-    -- **The pair is dependent exactly where the dependency is.** A later
-    -- equation mentions this one's proof only where its own side had to be
-    -- transported, and where it does not, @And@ says the same thing with one
-    -- binder fewer — which is §3.7's own table, and what every datatype in the
-    -- suite still generates. The same reason 'conjoin' used to drop the pair
-    -- altogether for a single argument.
+    -- **The pair is dependent exactly where the dependency is, and the question
+    -- is asked of the type that was built rather than predicted from the
+    -- telescope.** A later equation mentions this one's proof only where its own
+    -- side had to be transported, and where it does not, @And@ says the same
+    -- thing with one binder fewer — which is §3.7's own table, and what every
+    -- datatype in the suite still generates. The same reason 'conjoin' used to
+    -- drop the pair altogether for a single argument.
+    --
+    -- **Predicting it from \"is this argument mentioned later\" was wrong, and
+    -- phase 216 found the shape it was wrong on.** An argument that is carried
+    -- inside a package but that no later argument mentions still has the rest
+    -- of the package transported along /its/ proof, because 'walking' moves the
+    -- tail one component at a time — so the rest mentions the proof while
+    -- nothing mentions the argument. @Use@ below generated an @And@ whose
+    -- second conjunct had that proof free, and the checker refused the family
+    -- it had built:
+    --
+    -- @
+    -- data Holder (A : Type₀) : ∀ (n : N) -> Vec A n -> Type₀ where
+    --   hmk : ∀ (n : N) (as : Vec A n) -> Holder A n as
+    -- data Use (A : Type₀) : Type₀ where
+    --   umk : ∀ (n : N) (as : Vec A n) (pa : A) (h : Holder A n as) -> Use A
+    -- @
+    --
+    -- @pa@ sits between @as@ and the argument that reaches back past it, so the
+    -- package is @as; pa; h@ and @pa@ is interior to it. 'mentionedLater' still
+    -- says which prelude types the constructor needs — see 'pairKinds' — and
+    -- that is all it says now.
     telescopic args rs n0' = go [] Nothing args rs n0'
       where
         go _ _ []       _         n = (unitType, unitProof, n)
@@ -478,7 +500,7 @@ generateNoConfusion env n0 d
                       (restTy, restPrf, n4) = go (hist ++ [h]) carry' es rs' n3
                       binder = Lam (Ident "q") eq (close qv restTy)
                       prf'   = rewriting [(qv, prf)] restPrf
-                   in ( if mentionedLater e es
+                   in ( if qv `elem` freeVars restTy
                           then ( dpairAt eq binder
                                , dpairMk eq binder prf prf'
                                , n4 )
@@ -840,18 +862,26 @@ falsityInScope env = case lookupInductive (GlobalName "Empty") env of
 
 -- | Is this argument mentioned by the type of any argument after it?
 --
--- **This one question decides which pair each equation is held in**, and it is
--- asked in two places that must agree: 'telescopic' builds the pair, and
--- 'productsInScope' says which prelude types the constructor will therefore
--- need. @True@ means the equations after this one are stated about a transport
--- along /this/ one's proof, so the pair has to be @DPair@; @False@ means @And@
--- says the same thing with one binder fewer.
+-- **This says which prelude types a constructor will need, and nothing more.**
+-- @True@ means the equations after this one will be stated about a transport
+-- along /this/ one's proof, so @DPair@ will be wanted; @False@ means an @And@
+-- will be. Which pair each equation is actually held in is decided by
+-- 'telescopic', from the type it has just built — a prediction from the
+-- telescope is wrong for an argument interior to a package, which is the shape
+-- phase 216 found and which 'telescopic' describes.
+--
+-- **It cannot under-predict @DPair@.** An interior member of a package only
+-- exists where the package has a head, and a head is an argument some later
+-- argument's type reaches back to — so @True@ here already.
 mentionedLater :: Entry -> [Entry] -> Bool
 mentionedLater e after =
   any ((entryVar e `elem`) . freeVars . entryType) after
 
--- | Which pair each of a constructor's equations is held in, in argument order,
+-- | Which pair each of a constructor's equations will want, in argument order,
 -- one entry shorter than the telescope — the last equation heads no pair.
+--
+-- **Read only by 'productsInScope'.** See 'mentionedLater' for why this is a
+-- statement about what the prelude must hold rather than about what gets built.
 pairKinds :: ConstructorDefinition -> [Bool]
 pairKinds c = case constructorArguments c of
   []     -> []

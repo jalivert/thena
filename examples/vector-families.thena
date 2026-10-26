@@ -1,0 +1,60 @@
+-- The `Vec`-style families, which the corpus had never had — MS9 phase 216,
+-- and the last step of dependent index telescopes.
+--
+-- Three things are here, and each is a different telescope being dependent.
+--
+-- `Vec` itself is the easy one: one index, a `N`, and nothing depends on
+-- anything. Splitting a `Vec A (s m)` conflicts `z` against `s m`, so `vnil`'s
+-- case VANISHES and its arm is written with no body.
+--
+-- `All`'s INDEX telescope is dependent — `as`'s type is `Vec A n`, which
+-- mentions the index before it — so a split on an `All` states its second
+-- equation only after transporting along the first. Both of `count`'s indices
+-- are ambient variables, so both equations are solutions and the transports
+-- ι-contract; `tied-index-chain.thena` beside this one is the same chain where
+-- the actual indices are not variables.
+--
+-- `allCons`'s own ARGUMENT telescope is dependent in a shape nothing else in
+-- the suite has: `ps : All A P n as` reaches back past `pa`, so the chain's
+-- package holds `as; pa; ps` and `pa` is INTERIOR to it. The rest of the
+-- package is transported along `pa`'s own equation while nothing mentions `pa`
+-- itself, and a `noConfusionAll` that predicted the pair from the telescope
+-- left that proof free. See `dependent-argument-chain.thena` for the chain
+-- with no gap in it.
+--
+-- `Vec` is declared at `A : Type`, so its level is a parameter and everything
+-- below instantiates it at zero.
+
+module VectorFamilies where
+
+data N : Type₀ where
+  z : N
+  s : N -> N
+
+data Vec (A : Type) : N -> Type where
+  vnil : Vec A z
+  vcons : forall (n : N) (a : A) (as : Vec A n) -> Vec A (s n)
+
+-- `vnil` would need `z` to be `s m`, which conflict refuses, so the case
+-- vanishes and the arm has no body.
+vhead : forall (A : Type₀) (m : N) (xs : Vec A (s m)) -> A
+vhead = \ A m xs -> case xs of { vnil -> ; vcons n a as -> a }
+
+vtail : forall (A : Type₀) (m : N) (xs : Vec A (s m)) -> Vec A m
+vtail = \ A m xs -> case xs of { vnil -> ; vcons n a as -> as }
+
+-- Every element satisfies `P`. The index telescope is dependent, and
+-- `allCons`'s argument telescope has an interior member.
+data All (A : Type₀) (P : A -> Type₀) : forall (n : N) -> Vec A n -> Type₀ where
+  allNil : All A P z (vnil A)
+  allCons : forall (n : N) (a : A) (as : Vec A n) (pa : P a) (ps : All A P n as) -> All A P (s n) (vcons A n a as)
+
+-- A recursion over the dependent index telescope: the split generalises both
+-- indices, the recursive call is at the shorter vector, and the induction
+-- hypothesis is found at it.
+count : forall (A : Type₀) (P : A -> Type₀) (m : N) (xs : Vec A m) (ps : All A P m xs) -> N
+count = \ A P m xs ps -> induction ps of { allNil -> z ; allCons n a as pa qs -> s (count A P n as qs) }
+
+-- A closed value, so the recursion really reduces: one element, so `s z`.
+one : N
+one = count N (\ k -> N) (s z) (vcons N z z (vnil N)) (allCons N (\ k -> N) z z (vnil N) z (allNil N (\ k -> N)))

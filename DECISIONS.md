@@ -2032,8 +2032,11 @@ NoConfusionFin (fs n i) (fs n' i')
 ```
 
 — a *dependent* pair, because the second equation's type mentions the first equation's
-proof. Where no argument's type mentions an earlier one the pair is the ordinary `And` it
-always was, so nothing written against the old shape changed.
+proof. Where the rest of the chain does not mention an equation's proof the pair is the
+ordinary `And` it always was, so nothing written against the old shape changed. **Which of
+the two it is, is read off the equation that was built and not predicted from the
+telescope**: an argument may be carried along inside a chain while nothing mentions the
+argument itself, and the rest of the chain still mentions its proof.
 
 **And the same construction is now built one telescope over, for the family's own
 indices.** Eliminating `b : Below (succ m) (fz m)` — where `Below : ∀ (n : Nat) (i : Fin n)
