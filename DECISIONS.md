@@ -2033,10 +2033,30 @@ NoConfusionFin (fs n i) (fs n' i')
 
 — a *dependent* pair, because the second equation's type mentions the first equation's
 proof. Where no argument's type mentions an earlier one the pair is the ordinary `And` it
-always was, so nothing written against the old shape changed. **Splitting on such a family
-is a separate matter and is not built**: the elimination tactic still refuses a tied index
-whose type depends on an earlier index, which is the index-telescope half of the same
-construction.
+always was, so nothing written against the old shape changed.
+
+**And the same construction is now built one telescope over, for the family's own
+indices.** Eliminating `b : Below (succ m) (fz m)` — where `Below : ∀ (n : Nat) (i : Fin n)
+-> Type₀` — used to be refused outright, because `Eq (Fin i₁) i₂ (fz m)` has its two sides
+at `Fin i₁` and `Fin (succ m)`. Each method now carries
+
+```
+∀ (m₁ : Nat) (q : Eq Nat (succ m₁) (succ m))
+  -> Eq (Fin (succ m)) (transport q (fz m₁)) (fz m) -> …
+```
+
+The carrier is the *actual* earlier index, so the equation is homogeneous; the actual side
+is left bare, which is what keeps it in reach of the unifier; and the generalised side is
+carried there along the earlier equation. Where no index's type mentions an earlier one the
+chain is empty and the equation is the one it always was.
+
+**Two shapes are still refused, and both are a missing step of that chain rather than a
+missing equality.** An index whose type mentions an earlier index that was *abstracted
+outright* has no equation to transport along; and two mentioned indices that are themselves
+chained — `Chain : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Type₀` — need a motive
+abstracting the equality *proof* as well as its endpoint. **Splitting on such a family is
+also a step behind**: the motive can be stated, and the unifier says plainly that it cannot
+yet simplify a transported equation.
 
 **What this costs: nothing you can currently name in language metatheory.** The proofs K
 buys are proofs *about* equality proofs rather than proofs that use them. If one is ever

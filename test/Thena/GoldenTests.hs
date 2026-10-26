@@ -744,8 +744,18 @@ tests =
         , "attack"
         , "eliminate-core ⌜ n ⌝"
         , ":abandon"
-        -- And the refusal that remains: index 2 is @fz m@, a constructor
-        -- application, so it is tied and does want an equation.
+        -- And the TIED dependent index, which was the refusal that remained
+        -- until MS9 phase 213: index 2 is @fz m@, a constructor application, so
+        -- it is tied and does want an equation — and @Eq (Fin i₁) i₂ (fz m)@
+        -- cannot be written down, the two sides standing at @Fin i₁@ and
+        -- @Fin (succ m)@.
+        --
+        -- __The @:where@ is the phase's deliverable, and the second equation is
+        -- the thing to read__: @Eq {0} (Fin (succ m)) (elim Eq … q) (fz m)@. The
+        -- carrier is at the __actual__ first index, the actual side is the bare
+        -- @fz m@, and the generalised side is @i₂@ carried there along the first
+        -- equation — §3.2 of /Pattern Matching Without K/, with no heterogeneous
+        -- equality anywhere in it.
         , ":theorem tied : ∀ (m : Nat) (b : Below (succ m) (fz m)) -> Nat"
         , "attack"
         , "intro"
@@ -754,6 +764,22 @@ tests =
         , "along"
         , "along"
         , "eliminate-core ⌜ b ⌝"
+        , ":where"
+        , ":abandon"
+        -- And the refusal that remains, which is the message a user meets now:
+        -- @Chain@'s third index is tied and its type mentions BOTH earlier
+        -- ones, while the second's type mentions the first. Transporting past
+        -- the first leaves the second's binder typed at the old one, and the
+        -- chain has no step for that.
+        , "data Chain : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Type₀ where { c0 : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Chain n i b }"
+        , ":theorem chained : ∀ (m : Nat) (c : Chain (succ m) (fz m) (bz m)) -> Nat"
+        , "attack"
+        , "intro"
+        , "intro"
+        , "into"
+        , "along"
+        , "along"
+        , "eliminate-core ⌜ c ⌝"
         , ":quit"
         ]
     , -- Thesis §2.7, and the phase's deliverable. The interesting half is the

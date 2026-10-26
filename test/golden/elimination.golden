@@ -159,6 +159,33 @@ thena spine> into
 thena spine> along
 thena spine> along
 thena spine> eliminate-core ⌜ b ⌝
-stuck: index 2 (i) has a type that depends on an earlier index,
-  so the equation constraining it cannot be stated
+subgoals: bzMethod, bsMethod
+thena spine> :where
+focus
+  let ? tied1 : Nat ≐ (
+path
+  root ▸ ≐ tied ▸ m ▸ b ▸ bzMethod ▸ bsMethod
+context
+  m : Nat
+  b : Below (succ m) (fz m)
+  bzMethod : ∀ (m1 : Nat) (q : Eq {0} Nat (succ m1) (succ m)) -> Eq {0} (Fin (succ m)) ((elim Eq {0} (Nat) (λ (left : Nat) (right : Nat) (q1 : Eq {0} Nat left right) -> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) ((succ m1) (succ m)) q) (fz m1)) (fz m) -> Nat
+  bsMethod : ∀ (m1 : Nat) (j : Fin m1) -> Below m1 j -> (∀ (q : Eq {0} Nat m1 (succ m)) -> Eq {0} (Fin (succ m)) ((elim Eq {0} (Nat) (λ (left : Nat) (right : Nat) (q1 : Eq {0} Nat left right) -> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) (m1 (succ m)) q) j) (fz m) -> Nat) -> ∀ (q : Eq {0} Nat (succ m1) (succ m)) -> Eq {0} (Fin (succ m)) ((elim Eq {0} (Nat) (λ (left : Nat) (right : Nat) (q1 : Eq {0} Nat left right) -> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) ((succ m1) (succ m)) q) (fs m1 j)) (fz m) -> Nat
+type
+  Nat
+thena spine> :abandon
+abandoned tied
+thena spine> data Chain : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Type₀ where { c0 : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Chain n i b }
+declared Chain
+thena spine> :theorem chained : ∀ (m : Nat) (c : Chain (succ m) (fz m) (bz m)) -> Nat
+proving chained : ∀ (m : Nat) -> Chain (succ m) (fz m) (bz m) -> Nat
+thena spine> attack
+thena spine> intro
+thena spine> intro
+thena spine> into
+thena spine> along
+thena spine> along
+thena spine> eliminate-core ⌜ c ⌝
+stuck: index 3 (b) has a type depending on an earlier index
+  that its equation cannot be transported past — that index is either
+  abstracted outright, or itself typed by one this one also mentions
 thena spine> :quit

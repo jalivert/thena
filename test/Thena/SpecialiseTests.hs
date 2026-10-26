@@ -319,6 +319,25 @@ refusalTests =
       case refused "succ" 1 "\8704 (m : Nat) -> Nat -> Nat -> Nat" of
         Just (NotAnEquation [_]) -> pure ()
         other -> assertFailure ("expected one non-equation, got " ++ show other)
+
+    -- __And the one thing about the PROBLEM that is a refusal — MS9 phase
+    -- 213.__ "Thena.Tactics.Eliminate" states a tied index's equation at the
+    -- actual earlier indices and carries its generalised side there along the
+    -- earlier equations, so for a family with a dependent index telescope the
+    -- second equation names the first one's proof. None of the four transitions
+    -- can match a side that is a transport until it reduces, and attempting it
+    -- anyway is not harmless: @solution@ fires on the other side, removes the
+    -- binder the next equation is about, and the method comes back as
+    -- 'SpecialisedIllTyped' naming two generated variables.
+    --
+    -- The equation below mentions @q@ in its /carrier/, which is the cheapest
+    -- shape with the dependency; the generated one mentions it inside a J.
+  , testCase "an equation stated about an earlier equation's proof" $
+      case refused "succ" 2
+             "\8704 (m : Nat) (ih : Nat) (q : Eq {0} Nat m k) \
+             \-> Eq {0} (Eq {0} Nat m k) q q -> Nat" of
+        Just (TransportedEquation 2 _) -> pure ()
+        other -> assertFailure ("expected a transported equation, got " ++ show other)
   ]
 
 -- --------------------------------------------------------------------------

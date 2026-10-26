@@ -281,6 +281,7 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
           let (delta, raw) = splitAt (arity d c + gc) tel
            in case mapM equationOf raw of
                 Nothing -> (Left (NotAnEquation (map entryType raw)), n1)
+                Just es | Just bad <- transported es -> (Left bad, n1)
                 Just es ->
                   let (hv, n2) = fresh n1
                    in case solve hv delta es body n2 of
@@ -293,6 +294,29 @@ specialise env ctx n0 cn hyps shape mty = case lookupConstructor cn env of
 
     h  = length hyps
     gc = length gens
+
+    -- __An equation stated about an earlier equation's PROOF, which is what a
+    -- dependent index telescope costs — MS9 phase 213, @~7gmvr@.__
+    -- "Thena.Tactics.Eliminate" states such an equation at the actual earlier
+    -- indices and carries its generalised side along the equations before it
+    -- (§3.2 of /Pattern Matching Without K/), so one side is a transport rather
+    -- than a bare variable or a constructor application and no transition below
+    -- can match it until it reduces.
+    --
+    -- __Declined where it stands rather than attempted.__ Running anyway is not
+    -- harmless: @solution@ fires on the /other/ side, removes the binder the
+    -- next equation is stated about, and the method comes back as
+    -- 'SpecialisedIllTyped' naming two generated variables. The refusal is the
+    -- same shape "Thena.Global.NoConfusion"\'s @dependentTelescope@ was until
+    -- phase 212 — the construction exists one layer up and the consumer says
+    -- plainly that it is not using it yet.
+    transported es =
+      case [ (i, eqnType e)
+           | (i, e) <- zip [(1 :: Int) ..] es
+           , any (\f -> eqnVar f `elem` freeVars (eqnType e)) es
+           ] of
+        (i, ty) : _ -> Just (TransportedEquation i ty)
+        []          -> Nothing
 
     -- One binder per constructor argument, plus the hypotheses the caller says
     -- this method carries. 'Thena.Global.Env.eliminatorType'\'s @methodType@

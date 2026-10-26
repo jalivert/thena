@@ -1837,14 +1837,19 @@ renderDeclareError ren e = case e of
 --
 -- 'IndexTypeDepends' is the one worth reading twice: it is not a bug and not a
 -- typo, it is §3.7's stated limit — homogeneous @Eq@ cannot state a constraint
--- on an index whose /type/ mentions an earlier index, and lifting it is what
--- \"John Major\" equality is for (@AGENDA.md@ item 10, deferred past MS1). The
--- message says so, because a user meeting it has done nothing wrong.
+-- on an index whose /type/ mentions an earlier index. The message says so,
+-- because a user meeting it has done nothing wrong.
 --
 -- Since phase 19 it is raised only for an index that is /tied/ — one that
 -- actually states an equation. A friendly index is abstracted outright and its
 -- type may depend on an earlier index freely, which is why eliminating a
--- @Below n i@ whose indices are plain variables now works.
+-- @Below n i@ whose indices are plain variables works.
+--
+-- And since MS9 phase 213 a tied index's equation is stated at the /actual/
+-- earlier indices, its generalised side carried there along the earlier
+-- equations, so this is raised only where that chain has a missing step — see
+-- 'Thena.Errors.IndexTypeDepends' for the two shapes. The message names the
+-- chain rather than \"John Major\" equality, which Thena does not declare.
 renderElimError :: Rendering -> ElimError -> String
 renderElimError ren e = case e of
   TargetNotTypeable te ->
@@ -1855,8 +1860,9 @@ renderElimError ren e = case e of
   NoEquality g ->
     "eliminating at indices needs " ++ nameString g ++ ", which is not declared"
   IndexTypeDepends k (Ident i) ->
-    "index " ++ show k ++ " (" ++ i ++ ") has a type that depends on an earlier index,"
-      ++ "\n  so the equation constraining it cannot be stated"
+    "index " ++ show k ++ " (" ++ i ++ ") has a type depending on an earlier index"
+      ++ "\n  that its equation cannot be transported past — that index is either"
+      ++ "\n  abstracted outright, or itself typed by one this one also mentions"
   IndexTypeIllTyped te ->
     "the type of a tied index has no universe, so its equation cannot be stated"
       ++ concatMap ("\n  " ++) (renderTypeError ren te)
@@ -1899,6 +1905,10 @@ renderSpecialiseError ren e = case e of
   NotAnEquation tys ->
     "the equation block has " ++ count (length tys) "binder"
       ++ " and one of them is not an equation"
+  TransportedEquation k _ ->
+    "equation " ++ show k ++ " is stated about the proof of an earlier one,"
+      ++ "\n  so a split cannot yet simplify it — the family's index telescope"
+      ++ "\n  is dependent, and carrying the equations is only half of that"
   SpecialisedIllTyped te ->
     "the specialised method does not prove this one"
       ++ concatMap ("\n  " ++) (renderTypeError ren te)

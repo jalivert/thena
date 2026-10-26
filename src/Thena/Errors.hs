@@ -650,17 +650,27 @@ data ElimError
     -- 2026-08-11), and the named one is not declared. Only ever raised for a
     -- family that has indices: without them the scheme states no equations
   | IndexTypeDepends Int Ident
-    -- ^ §3.7's stated limit, and it binds a /tied/ index only. The type of
-    -- index @n@ (counting from 1, named) mentions an earlier index, so the
-    -- homogeneous @Eq I i a@ that constrains it cannot be written down: @i@ is
-    -- at the generalised index and @a@ at the actual one, which are two
-    -- different types. A /friendly/ index states no equation, so it is
-    -- abstracted and this is not raised for it (phase 19).
+    -- ^ §3.7's stated limit, and __what is left of it after MS9 phase 213__.
+    -- The type of index @n@ (counting from 1, named) mentions an earlier index
+    -- that the motive cannot be transported past. A /friendly/ index states no
+    -- equation, so it is abstracted and this is not raised for it (phase 19);
+    -- a /tied/ one has its equation stated at the actual earlier indices, with
+    -- its generalised side carried there along the earlier equations.
     --
-    -- Not @Vec@: a one-element index telescope has no earlier index to depend
-    -- on, so @Vec@ and @Fin@ eliminate fine. The shape is
-    -- @Below : ∀ (n : Nat) (i : Fin n) -> Type₀@, two indices with the second
-    -- typed by the first. @AGENDA.md@ item 10
+    -- Neither @Vec@ nor @Below@ any more: a one-element index telescope has no
+    -- earlier index to depend on, and
+    -- @Below : ∀ (n : Nat) (i : Fin n) -> Type₀@ eliminates at a tied @fz m@
+    -- since phase 213. __Two shapes remain, and both are a missing step of the
+    -- transport chain rather than a missing equality:__
+    --
+    --   * the mentioned index is friendly — abstracted outright, so there is no
+    --     equation to transport along;
+    --   * two mentioned indices are chained — @Iₙ@ mentions both @j@ and @m@
+    --     while @Iₘ@ mentions @j@, as in
+    --     @Chain : ∀ (n : Nat) (i : Fin n) (b : Below n i) -> Type₀@. Carrying
+    --     past @j@ then leaves @m@'s binder typed at the old @j@, and the
+    --     paper's answer is a motive abstracting the equality /proof/ as well as
+    --     its endpoint
   | IndexTypeIllTyped TypeError
     -- ^ a tied index's type has no universe (MS3 phase 31d). Needed because
     -- the equation @Eq Iₖ iₖ aₖ@ is stated at @Iₖ@'s **level** now, which has
@@ -693,6 +703,20 @@ data SpecialiseError
   | NotAnEquation [Core]
     -- ^ a binder in the equation block is not an application of @Eq@. Carries
     -- every domain in that block, because which one is wrong is the question
+  | TransportedEquation Int Core
+    -- ^ an equation of the block is stated about an __earlier equation's
+    -- proof__, which is what a dependent index telescope costs (MS9 phase 213,
+    -- @~7gmvr@). Carries the position, counting from 1, and the equation.
+    --
+    -- §3.2 of /Pattern Matching Without K/ states a telescopic equality
+    -- homogeneously by transporting each side along the equations before it, so
+    -- "Thena.Tactics.Eliminate" can now state the motive for a family like
+    -- @Below : ∀ (n : Nat) (i : Fin n) -> Type₀@ at a tied index. **The four
+    -- transitions cannot yet run over one**: a side is a transport rather than a
+    -- bare variable or a constructor application, so it has to reduce before any
+    -- of them matches. Declined here rather than attempted, so that a split of
+    -- such a family refuses where it stands instead of handing back a
+    -- 'SpecialisedIllTyped' about generated variables
   | SpecialisedIllTyped TypeError
     -- ^ the term built does not inhabit the method type it was built for. A
     -- **generator bug**, like 'Thena.Global.NoConfusion.Rejected': the whole of

@@ -450,6 +450,48 @@ friendlyTests =
               \-> ∀ (n1 : Nat) -> Eq {0} Nat (succ m) n1 -> Nat"
             ]
 
+    -- __MS9 phase 213, @~7gmvr@ step two, and this is the phase.__ Index 2 is
+    -- @fz m@, a constructor application, so it is tied and does want an
+    -- equation — and until this phase @Eq (Fin i1) i2 (fz m)@ was the one that
+    -- could not be written down, its two sides standing at @Fin i1@ and
+    -- @Fin (succ m)@.
+    --
+    -- Three things to read in the second equation, and they are the whole of
+    -- §3.2 of /Pattern Matching Without K/:
+    --
+    --   * the carrier is @Fin (succ m)@ — the __actual__ first index, not the
+    --     generalised @i1@, so the equation is homogeneous;
+    --   * the actual side is the bare @fz m@, which is what keeps @solution@'s
+    --     reach;
+    --   * the generalised side is this method's own index carried there along
+    --     the first equation, @q@ — one J, built as
+    --     "Thena.Tactics.Specialise"'s @coerce@ is.
+    --
+    -- @bsMethod@'s induction hypothesis carries the same chain at @m1@, which
+    -- is what says the motive is right rather than just statable.
+  , testCase "a tied dependent index states its equation transported" $
+      let (env, n0) = declared [eqDecl', natDecl, finDecl, belowDecl]
+          (ctx, n1) = contextOf env n0
+            [("m", "Nat"), ("b", "Below (succ m) (fz m)")]
+       in map (rendered ctx . thirdOf') (elimMethods (run "tiedDep" env ctx n1 "Nat" "b"))
+            @?= [ "∀ (m1 : Nat) (q : Eq {0} Nat (succ m1) (succ m)) \
+                  \-> Eq {0} (Fin (succ m)) ((elim Eq {0} (Nat) \
+                  \(λ (left : Nat) (right : Nat) (q1 : Eq {0} Nat left right) \
+                  \-> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) \
+                  \((succ m1) (succ m)) q) (fz m1)) (fz m) -> Nat"
+                , "∀ (m1 : Nat) (j : Fin m1) -> Below m1 j \
+                  \-> (∀ (q : Eq {0} Nat m1 (succ m)) \
+                  \-> Eq {0} (Fin (succ m)) ((elim Eq {0} (Nat) \
+                  \(λ (left : Nat) (right : Nat) (q1 : Eq {0} Nat left right) \
+                  \-> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) \
+                  \(m1 (succ m)) q) j) (fz m) -> Nat) \
+                  \-> ∀ (q : Eq {0} Nat (succ m1) (succ m)) \
+                  \-> Eq {0} (Fin (succ m)) ((elim Eq {0} (Nat) \
+                  \(λ (left : Nat) (right : Nat) (q1 : Eq {0} Nat left right) \
+                  \-> Fin left -> Fin right) ((λ (same : Nat) (at : Fin same) -> at)) \
+                  \((succ m1) (succ m)) q) (fs m1 j)) (fz m) -> Nat"
+                ]
+
     -- The load-bearing artifact of phase 19, and the thing @check@ alone would
     -- not have caught: the motive's own telescope is dependent, and its second
     -- binder names /this motive's/ first binder rather than the one in the
@@ -516,15 +558,18 @@ refusalTests =
         Left (TargetNotInductive {}) -> pure ()
         other                        -> assertFailure (show (fmap (const ()) other))
 
-    -- §3.7's limit, and it binds a /tied/ index only (phase 19). Here index 2
-    -- is @fz m@ — a constructor application, so it states an equation, and
-    -- @Eq {0} (Fin i1) i2 (fz m)@ is the one that cannot be written down.
-  , testCase "a dependent index that is tied is refused, by position and name" $
-      let (env, n0) = declared [eqDecl', natDecl, finDecl, belowDecl]
-          (ctx, n1) = contextOf env n0
-            [("m", "Nat"), ("b", "Below (succ m) (fz m)")]
-       in case fst (attempt env ctx n1 "Nat" "b") of
-            Left e  -> e @?= IndexTypeDepends 2 (Ident "i")
+    -- §3.7's limit as MS9 phase 213 leaves it: __two mentioned indices that are
+    -- CHAINED__. @Chain@'s index 3 is @bz m@, a constructor application, so it
+    -- is tied and its type @Below i1 i2@ mentions both earlier indices — while
+    -- @i2@'s own type @Fin i1@ mentions @i1@. Transporting past @i1@ would
+    -- leave @i2@'s binder typed at the old one, and the paper's answer is a
+    -- motive abstracting the /proof/ as well as the endpoint, which is the
+    -- packaged telescopic equality these phases do without.
+  , testCase "two chained dependent indices are refused, by position and name" $
+      let (env, n0) = declared [eqDecl', natDecl, finDecl, belowDecl, chainDecl]
+          (ctx, n1) = contextOf env n0 [("m", "Nat")]
+       in case fst (attempt env ctx n1 "Nat" "c0 (succ m) (fz m) (bz m)") of
+            Left e  -> e @?= IndexTypeDepends 3 (Ident "b")
             Right _ -> assertFailure "expected a refusal"
 
     -- §3.7, decided 2026-08-11: @Eq@ and @refl@ are named, not designated. A
@@ -590,6 +635,14 @@ belowDecl =
   "Below : \8704 (n : Nat) (i : Fin n) -> Type\8320 \
   \where { bz : \8704 (m : Nat) -> Below (succ m) (fz m) \
   \; bs : \8704 (m : Nat) (j : Fin m) (b : Below m j) -> Below (succ m) (fs m j) }"
+
+-- | Three indices, the third typed by the first /two/ — the shape MS9 phase
+-- 213's transport chain cannot state, because @Fin n@ makes index 2 depend on
+-- index 1 and so transporting past index 1 leaves index 2's binder behind.
+chainDecl :: String
+chainDecl =
+  "Chain : \8704 (n : Nat) (i : Fin n) (b : Below n i) -> Type\8320 \
+  \where { c0 : \8704 (n : Nat) (i : Fin n) (b : Below n i) -> Chain n i b }"
 
 -- | Build a context by parsing each entry's type against what precedes it, so
 -- that a dependent context can be written down as the user would type it.

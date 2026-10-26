@@ -23,6 +23,21 @@
 -- is free to depend; the motive's own telescope carries the dependency, which
 -- is what 'scheme' substitutes the earlier fresh index variables to build.
 --
+-- **AND A TIED ONE IS NOW STATED BY TRANSPORTING IT — MS9 phase 213.** §3.2 of
+-- Cockx, Devriese and Piessens, /Pattern Matching Without K/, states a
+-- telescopic equality homogeneously: @s; s̄ ≡ t; t̄@ is @(e : s ≡ t) (ē : e∗ s̄ ≡
+-- t̄)@, each equation stated after transporting along the one before it. So the
+-- carrier is the __actual__ earlier index rather than the generalised one, the
+-- __actual side is left bare__ — it is where a copy or a constructor argument
+-- stands, and @solution@ has to reach it — and the generalised side is carried
+-- there by one J per earlier position its type mentions. Nothing heterogeneous
+-- is declared and K is not assumed: @RULINGS.md@'s /Ruling of 2026-10-26/ is
+-- why, and @DECISIONS.md@ has the public statement.
+--
+-- **For a family whose index telescope is not dependent the chain is empty**,
+-- and every term this module generates for one is the term it generated before
+-- the phase, byte for byte.
+--
 -- **A SPLIT ALSO GENERALISES THE AMBIENT ENTRIES ITS INDICES MENTION — MS9
 -- phase 191.** A motive abstracts the target's /indices/, so a variable bound
 -- before the target was never refined by a split and the equation about it was
@@ -319,22 +334,21 @@ eliminate env ctx sch prem n0 goal tgt =
       -- level-polymorphic, so @Eq Iₖ iₖ aₖ@ has to say which level @Iₖ@ lives
       -- at.
       --
-      -- Read **here** and not inside 'scheme': here the type is
-      -- @substVars paramSubst (entryType e)@ and nothing more, and
-      -- 'dependentTied' has already refused a tied index whose type mentions an
-      -- earlier index — so it mentions only what @ctx@ already has. Inside
-      -- 'scheme' the same type also carries the motive's fresh binders, which
-      -- are in no context at all.
+      -- Read **here** and not inside 'scheme': here the type is read at the
+      -- /actual/ indices, which are terms of @ctx@, where inside 'scheme' the
+      -- same type also carries the motive's fresh binders, which are in no
+      -- context at all. **It is the actual indices and not the parameters
+      -- alone** (MS9 phase 213): a tied index's type may now mention an earlier
+      -- index, and the declaration's own index variable is in no context either.
       | otherwise = case tiedLevels n1 of
           (Left e,    n) -> (Left (IndexTypeIllTyped e), n)
           (Right lvls, n) -> scheme d ls ps as tiedIx generalised lvls n
       where
         tiedLevels k0 = go tiedIx k0
           where
-            psub = zip (map entryVar (inductiveParameters d)) ps
             go []       k = (Right [], k)
             go (i : is) k =
-              case sortOf env ctx k (substVars psub (entryType (inductiveIndices d !! i))) of
+              case sortOf env ctx k (actualIxType i) of
                 (Left e,  _, k1) -> (Left e, k1)
                 (Right v, _, k1) -> case go is k1 of
                   (Left e,   k2) -> (Left e, k2)
@@ -796,23 +810,53 @@ eliminate env ctx sch prem n0 goal tgt =
               | k <- tiedIx
               ]
 
-        -- §3.7's limit, and it binds a *tied* index only. @Eq Iₖ iₖ aₖ@ is
-        -- homogeneous, and @iₖ@ is the generalised index while @aₖ@ is the
-        -- actual one, so @Iₖ@ may not mention an earlier index: instantiated
-        -- for the two sides it would be two different types, which is what
-        -- \"John Major\" equality exists to relate. A /friendly/ index states no
-        -- equation at all, so its type is free to depend on an earlier one —
-        -- only the motive's own telescope has to carry the dependency, and
-        -- 'scheme' builds it so that it does.
+        -- The declaration's own index variables, and one index's type with the
+        -- family's parameters replaced by the target's — the two things every
+        -- question about the index telescope is asked in terms of.
+        ixVars = map entryVar (inductiveIndices d)
+        paramSub = zip (map entryVar (inductiveParameters d)) ps
+        ixType j = substVars paramSub (entryType (inductiveIndices d !! j))
+        -- … and the same with the /earlier actual/ indices put in, which is
+        -- where a tied index's equation is carried and so where its level is
+        -- read.
+        actualIxType j =
+          substVars (paramSub ++ zip (take j ixVars) (take j as))
+                    (entryType (inductiveIndices d !! j))
+        -- Which earlier index positions a tied index's type mentions.
+        mentionedBy k = [ j | j <- [0 .. k - 1], (ixVars !! j) `elem` freeVars (ixType k) ]
+
+        -- §3.7's limit, and __it is now the limit of a TRANSPORTED equation__
+        -- (MS9 phase 213, @~7gmvr@ step two). @Eq Iₖ iₖ aₖ@ is homogeneous, so
+        -- where @Iₖ@ mentions an earlier index the two sides stand at two
+        -- different types — and the remedy is §3.2 of /Pattern Matching Without
+        -- K/ rather than \"John Major\" equality: state the equation at the
+        -- __actual__ earlier indices and carry the generalised side there along
+        -- the earlier equations. 'scheme' builds that chain; a /friendly/ index
+        -- still states no equation at all, and its type was always free to
+        -- depend.
+        --
+        -- __Two shapes are left, and both are a missing step of the chain
+        -- rather than a missing equality.__
+        --
+        --   * the mentioned index is __friendly__ — abstracted outright, with no
+        --     equation to transport along. @b : Below n (fz m)@ is the case:
+        --     @n@ is a bare variable, so index 1 is abstracted, and
+        --     @Eq (Fin i₁) i₂ (fz m)@ would ask @fz m@ to inhabit @Fin i₁@ for
+        --     an @i₁@ nothing constrains.
+        --   * two mentioned indices are __chained__ — @Iₖ@ mentions both @j@ and
+        --     @m@ while @Iₘ@ mentions @j@ — and then transporting past @j@
+        --     leaves the binder at @m@ typed at the old @j@. The paper's answer
+        --     is a motive that abstracts the /proof/ as well as the endpoint,
+        --     which is the packaged telescopic equality these phases do without.
         dependentTied = firstJust [ dependent k | k <- tiedIx ]
-        dependent k =
-          let e     = inductiveIndices d !! k
-              subst = zip (map entryVar (inductiveParameters d)) ps
-              ty    = substVars subst (entryType e)
-              taken = take k (map entryVar (inductiveIndices d))
-           in if any (`elem` freeVars ty) taken
-                then Just (IndexTypeDepends (k + 1) (entryIdent e))
-                else Nothing
+        dependent k
+          | null untransportable = Nothing
+          | otherwise = Just (IndexTypeDepends (k + 1) (entryIdent (inductiveIndices d !! k)))
+          where
+            ms = mentionedBy k
+            untransportable =
+              [ j | j <- ms, j `notElem` tiedIx ]
+                ++ [ j | j <- ms, i <- ms, i < j, (ixVars !! i) `elem` freeVars (ixType j) ]
         firstJust xs = case [ x | Just x <- xs ] of
           x : _ -> Just x
           []    -> Nothing
@@ -876,6 +920,38 @@ eliminate env ctx sch prem n0 goal tgt =
             | (k, e) <- zip [(0 :: Int) ..] (inductiveIndices d)
             ]
 
+          -- The actual indices with the generalised entries replaced by their
+          -- copies — the side the equations are stated at, so that the equation
+          -- constrains the method's own binder (MS9 phase 191).
+          asG = map (substVars genSubst) as
+
+          -- __The type a tied index's equation is CARRIED at, and it is the
+          -- actual earlier indices — MS9 phase 213, @~7gmvr@ step two.__ §3.2 of
+          -- /Pattern Matching Without K/: for two instances of one telescope,
+          -- @s; s̄ ≡ t; t̄@ is @(e : s ≡ t) (ē : e∗ s̄ ≡ t̄)@ — a later equation is
+          -- stated after transporting the earlier one, which keeps every
+          -- equation inside the @Eq@ we already have.
+          --
+          -- So the carrier names @aⱼ@ where 'indexTys' names @iⱼ@, and it is the
+          -- __actual__ side that is left bare: @aₖ@ is where a copy or a
+          -- constructor argument stands, and burying it under a transport is
+          -- what would put it out of @solution@'s reach.
+          --
+          -- __For an index telescope that is not dependent these are the very
+          -- same terms as 'indexTys'__, so nothing a family without the shape
+          -- generates moves by a byte.
+          carrierTys =
+            [ substVars (paramSubst ++ zip (take k earlierIx) (take k asG)) (entryType e)
+            | (k, e) <- zip [(0 :: Int) ..] (inductiveIndices d)
+            ]
+
+          -- … and the same with the entries themselves rather than their
+          -- copies, which is the type the use site's @refl@ is at.
+          actualTys =
+            [ substVars (paramSubst ++ zip (take k earlierIx) (take k as)) (entryType e)
+            | (k, e) <- zip [(0 :: Int) ..] (inductiveIndices d)
+            ]
+
           -- **At the target's own level arguments** (phase 31c): the family
           -- the motive abstracts is the same family the target inhabits.
           familyAt is = foldl App (Global (inductiveName d) ls) (ps ++ is)
@@ -898,15 +974,96 @@ eliminate env ctx sch prem n0 goal tgt =
           abstractIndex (g, n) (iv, a) = replaceTerm a iv n g
           goalGen = substVars genSubst goalIx
 
-          -- Which indices keep an equation. Decided by 'build'; see the note
-          -- on 'friendlyAt' there.
-          -- Each tied index with **the level its type lives at**, in @tiedIx@
-          -- order — which is the order 'tiedLevels' produced them in.
-          tied = zip tiedLvs
-                     [ (ity, iv, a)
-                     | (k, (ity, iv, a)) <- zip [(0 :: Int) ..] (zip3 indexTys ivs as)
-                     , k `elem` tiedIx
-                     ]
+          -- __One binder per tied equation, minted BEFORE the equations are
+          -- built__ (MS9 phase 213). It used to be one fresh variable per Π that
+          -- nothing referred to; a transported equation names the proof of each
+          -- earlier one, so the binders have to exist before any equation can
+          -- be stated. In @tiedIx@ order, which is the order the Π chain binds
+          -- them in, so a later equation only ever names an __outer__ binder.
+          (qvs, n5') = freshen (length tiedIx) n5
+
+          -- Which positions a tied index's type mentions, read off the motive's
+          -- own binders rather than the declaration's, because 'indexTys' is
+          -- what the transport walks.
+          mentionedBy k =
+            [ j | j <- [0 .. k - 1], (ivs !! j) `elem` freeVars (indexTys !! k) ]
+
+          -- __The generalised side, carried to the equation's carrier along the
+          -- earlier equations — MS9 phase 213, @~7gmvr@ step two.__ One J per
+          -- earlier index position the type mentions, in increasing order, each
+          -- replacing that position's generalised binder by its actual index.
+          -- The shape is "Thena.Tactics.Specialise"'s @coerce@ exactly — motive
+          -- @λ l r q -> residue l -> residue r@, method @λ a at -> at@ — because
+          -- it is the same construction: a value wanted at one end of an
+          -- equation and held at the other.
+          --
+          -- __An empty chain is the identity and that is the common case__: a
+          -- tied index whose type mentions no earlier index gets @Free iv@ back
+          -- unchanged, which is what every family before this phase generated.
+          --
+          -- 'dependentTied' has already refused the two shapes this walk cannot
+          -- state — a mentioned index that is friendly, and two mentioned
+          -- indices that are chained — so every position it reaches has a proof
+          -- to transport along and leaves the binders after it well typed.
+          -- Each tied position with what the transport needs from it: the level
+          -- its carrier lives at, the binder of its own equation, and the side
+          -- that equation's left is. A position the walk cannot find is
+          -- impossible after 'dependentTied' — and if it ever were not, the
+          -- chain stops and the motive is refused by 'sortOf' below rather than
+          -- crashing, which is how 'SchemeIllTyped' already treats the tactic
+          -- being wrong about its own construction.
+          (lefts, n5'') = foldl carried ([], n5') tiedIx
+          carried (acc, m) k = (acc ++ [(k, t)], m')
+            where
+              (t, m') = walk (mentionedBy k) (Free (ivs !! k)) (indexTys !! k) m
+              walk []       u _  p = (u, p)
+              walk (j : js) u ty p
+                | [(lv, qv, lj)] <- [ (lv, qv, lj)
+                                    | ((i, lv), qv) <- zip (zip tiedIx tiedLvs) qvs
+                                    , i == j
+                                    , (i', lj) <- acc
+                                    , i' == j
+                                    ] =
+                let cj      = carrierTys !! j
+                    resid z = substVars [(ivs !! j, z)] ty
+                    (zl, p1) = fresh p
+                    (zr, p2) = fresh p1
+                    (zq, p3) = fresh p2
+                    (zf, p4) = fresh p3
+                    (za, p5) = fresh p4
+                    (zb, p6) = fresh p5
+                    motiveT =
+                      Lam (Ident "left") cj (close zl
+                        (Lam (Ident "right") cj (close zr
+                          (Lam (Ident "q") (equationOf lv cj (Free zl) (Free zr)) (close zq
+                            (Pi (Ident "at") (resid (Free zl))
+                                (close zf (resid (Free zr)))))))))
+                    methodT =
+                      Lam (Ident "same") cj (close za
+                        (Lam (Ident "at") (resid (Free za)) (close zb (Free zb))))
+                    carry = Eliminate
+                      { eliminated = equality
+                      , levels     = [lv]
+                      , parameters = [cj]
+                      , motive     = motiveT
+                      , methods    = [methodT]
+                      , indices    = [lj, asG !! j]
+                      , target     = Free qv
+                      }
+                 in walk js (App carry u) (resid (asG !! j)) p6
+                | otherwise = (u, p)
+
+          -- Each tied index with **the level its type lives at**, the equation
+          -- the motive states about it, and the @refl@ the use site discharges
+          -- it with — in @tiedIx@ order, which is the order 'tiedLevels'
+          -- produced the levels in.
+          tied =
+            [ ( lv
+              , equationOf lv (carrierTys !! k) l (asG !! k)
+              , Canonical reflexivity [lv] [actualTys !! k, as !! k]
+              )
+            | (lv, (k, l)) <- zip tiedLvs lefts
+            ]
 
           -- __Which ambient entry each FRIENDLY index abstracted, by
           -- position__ (MS9 phase 196, @~8v3pg@). A position is friendly
@@ -923,24 +1080,23 @@ eliminate env ctx sch prem n0 goal tgt =
             , w == v
             ]
 
-          -- @Eq Iₖ iₖ aₖ → …@, one non-dependent Π per *tied* index. A Π still
-          -- needs a variable to close over even when nothing refers to it,
-          -- exactly as 'Thena.Global.Env.eliminatorType' mints one per
-          -- induction hypothesis.
+          -- @Eq Iₖ iₖ aₖ → …@, one Π per *tied* index, in @tiedIx@ order so that
+          -- a transported equation's proof is bound before the equation that
+          -- names it.
           --
           -- **Stated about the copy** (MS9 phase 191): @aₖ@ with the
           -- generalised entries replaced, so that the equation constrains the
           -- method's own binder and @solution@ can reach it. @tied@ keeps the
           -- original @aₖ@, which is what the use site's @refl@ is at.
-          (equations, n6) = constrain tied n5 goalGen
-          constrain []                  n b = (b, n)
-          constrain ((lv, (ity, iv, a)) : cs) n b =
-            let (body, na) = constrain cs n b
-                (qv,   nb) = fresh na
-             in ( Pi (Ident "q")
-                     (equationOf lv ity (Free iv) (substVars genSubst a))
-                     (close qv body)
-                , nb )
+          --
+          -- **The Π is no longer always non-dependent** (MS9 phase 213): an
+          -- equation whose generalised side was transported names an earlier
+          -- one's proof, which is exactly the dependency §3.2's telescopic
+          -- equality introduces.
+          (equations, n6) = (constrain (zip qvs tied) goalGen, n5'')
+          constrain []                   b = b
+          constrain ((qv, (_, eq, _)) : cs) b =
+            Pi (Ident "q") eq (close qv (constrain cs b))
 
           -- The context the motive's body lives in, which is also where its
           -- universe is read.
@@ -1055,9 +1211,13 @@ eliminate env ctx sch prem n0 goal tgt =
           -- That application is what §2.8 calls discharging the dependency: the
           -- copy becomes the entry again, @aₖ@ becomes @aₖ@, and the @refl@
           -- below is at the index the target really has.
+          --
+          -- **A transported equation is discharged by the same @refl@** (MS9
+          -- phase 213): the motive is applied at the actual indices, so each
+          -- transport is a J over @refl@ and ι-contracts to the identity, and
+          -- the generalised side is @aₖ@ again. 'check' below is what says so.
           proof = foldl App node
-            ([ Free v | v <- gen ]
-             ++ [ Canonical reflexivity [lv] [ity, a] | (lv, (ity, _, a)) <- tied ])
+            ([ Free v | v <- gen ] ++ [ r | (_, _, r) <- tied ])
        in case check env (ctx ++ methodEntries) n10 proof goal of
             (Left e, _, n11)   -> (Left (SchemeIllTyped e), n11)
             (Right (), _, n11) ->
