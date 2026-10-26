@@ -1428,6 +1428,146 @@ splittingTree =
       ]
       "stuck: a and b cannot be made equal"
 
+    -- ----------------------------------------------------------------
+    -- THE SHAPES THE HUNT NAMED FOR ITSELF (MS9 phase 217, @~5kcb4@)
+    -- ----------------------------------------------------------------
+
+    -- __A RECURSION INSIDE THREE NESTED GENERALISING SPLITS__, which is the one
+    -- of these shapes that failed. Two splits deep had always worked and the
+    -- reason it stopped at three is positional: a copy's pair is looked up
+    -- after the arm's own, so two deep the arm's own pair was there and carried
+    -- the prefix, while three deep the only pair for the outer subject is the
+    -- copy — and a copy's pair was written with 'NoPrefix', saying the
+    -- hypothesis takes nothing before the call's own arguments. The outer split
+    -- generalises five entries and states two equations, so the call was
+    -- applied to @rq@ and @rr@ where three numbers were wanted and the kernel
+    -- refused the body with @P a b@ against @N@.
+    --
+    -- @threeDeep@ is the shape: each split refines an index the one outside it
+    -- did not — @p@ refines @x@ and @y@, @q@ refines @w@, @r@ refines neither —
+    -- so the innermost arm's indices are built from a pattern variable of each
+    -- enclosing arm, and the call's third argument @b2@ is bound by the middle
+    -- one. **It computes**, asserted by @refl@ inside the module, so a call
+    -- tied to the wrong copy fails here rather than declaring quietly.
+  , testCase "a recursion crosses three nested generalising splits" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (deepModule ++
+            [ "threeDeep : \8704 (x : N) (y : N) (w : N) (p : P x y) (q : P y w) \
+              \(r : P w x) -> N"
+            , "threeDeep = \\ x y w p q r -> induction p of { pz c -> z \
+              \; pr a b rp -> case q of { pz c -> \
+              \; pr a2 b2 rq -> case r of { pz c -> \
+              \; pr a3 b3 rr -> s (threeDeep a b b2 rp rq rr) } } }"
+            , "check : Eq N (threeDeep (s z) (s z) (s z) (pr z z (pz z)) \
+              \(pr z z (pz z)) (pr z z (pz z))) (s z)"
+            , "check = refl N (s z)"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __AND A SPLIT MAY TIE THREE INDICES__, which the two-index case above
+    -- does not cover on its own: the specialiser solves the first equation
+    -- outside the arm's \955-chain and every further one at a binder of it, so
+    -- the chain grows with the number tied and the walk that turns a position
+    -- in the method's telescope into a position in the arm has one more step
+    -- to take per index.
+  , testCase "a recursion crosses a split that tied three indices" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (deepModule ++
+            [ "threeTied : \8704 (x : N) (y : N) (w : N) (t : T x y w) -> Q x"
+            , "threeTied = \\ x y w t -> induction t of { tz -> qz \
+              \; tr a b c r -> qs a (threeTied a b c r) }"
+            , "check : Eq (Q (s z)) (threeTied (s z) (s z) (s z) (tr z z z tz)) \
+              \(qs z qz)"
+            , "check = refl (Q (s z)) (qs z qz)"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __AND AN ARGUMENT INTRODUCED AFTER THE SCRUTINEE IS PASSED THROUGH__. The
+    -- motive quantifies a copy of every ambient entry the split generalised and
+    -- those are the entries bound /before/ it, so @k@ is none of them: the
+    -- hypothesis takes it last, after the copies and the equations, which is
+    -- the @drop amb as@ end of the telescope. @underLam@ is the same argument
+    -- bound by the arm itself rather than by the statement, so the call is not
+    -- at the arm's own spine.
+  , testCase "a recursion passes an argument bound after the scrutinee" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (deepModule ++
+            [ "trailing : \8704 (x : N) (h : Q x) (e : Ev x) (k : N) -> Q k"
+            , "trailing = \\ x h e k -> induction e of { evz -> allQ k \
+              \; evs n en -> trailing n (allQ n) en k }"
+            , "underLam : \8704 (x : N) (h : Q x) (e : Ev x) -> \8704 (k : N) -> Q x"
+            , "underLam = \\ x h e -> induction e of { evz -> \\ k -> h \
+              \; evs n en -> \\ k -> qs (s n) (qs n (underLam n (allQ n) en k)) }"
+            , "check1 : Eq (Q (s z)) (trailing (s (s z)) (qs (s z) (qs z qz)) \
+              \(evs z evz) (s z)) (qs z qz)"
+            , "check1 = refl (Q (s z)) (qs z qz)"
+            , "check2 : Eq (Q (s (s z))) (underLam (s (s z)) \
+              \(qs (s z) (qs z qz)) (evs z evz) z) (qs (s z) (qs z qz))"
+            , "check2 = refl (Q (s (s z))) (qs (s z) (qs z qz))"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __AND TWO GENERALISED PREMISES MAY DEPEND ON EACH OTHER__: @g@\'s type
+    -- mentions @h@ as well as @x@, so the copies have to be quantified in order
+    -- and the second stated at the first.
+  , testCase "a recursion crosses a split generalising two dependent premises" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines (deepModule ++
+            [ "twoPrem : \8704 (x : N) (h : Q x) (g : Eq (Q x) h h) (e : Ev x) -> Q x"
+            , "twoPrem = \\ x h g e -> induction e of { evz -> h \
+              \; evs n en -> qs (s n) (qs n (twoPrem n (allQ n) \
+              \(refl (Q n) (allQ n)) en)) }"
+            , "check : Eq (Q (s (s z))) (twoPrem (s (s z)) (qs (s z) (qs z qz)) \
+              \(refl (Q (s (s z))) (qs (s z) (qs z qz))) (evs z evz)) \
+              \(qs (s z) (qs z qz))"
+            , "check = refl (Q (s (s z))) (qs (s z) (qs z qz))"
+            ]))
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
+    -- __AND A COPY MAY BE SOLVED TO A TERM BUILT FROM TWO OF THE CONSTRUCTOR\'S
+    -- ARGUMENTS__. Every tied index above is solved to one argument or to a
+    -- wrapping of one; @un@\'s index is @node p q@, so the equation's solution
+    -- is a term built from two, and the recursion is at each of them in turn.
+  , testCase "a recursion where the copy is solved to a built term" $ do
+      (s0, _) <- startingSession
+      let (s1, r) = loadProofSource s0 (unlines
+            [ "module Built where"
+            , ""
+            , "data M : Type\8320 where"
+            , "  leaf : M"
+            , "  node : M -> M -> M"
+            , ""
+            , "data R : M -> Type\8320 where"
+            , "  rl : R leaf"
+            , "  rn : \8704 (p : M) (q : M) (a : R p) (b : R q) -> R (node p q)"
+            , ""
+            , "allR : \8704 (m : M) -> R m"
+            , "allR = \\ m -> induction m of { leaf -> rl \
+              \; node p q -> rn p q (allR p) (allR q) }"
+            , ""
+            , "data U : M -> Type\8320 where"
+            , "  ul : U leaf"
+            , "  un : \8704 (p : M) (q : M) (r : U p) (t : U q) -> U (node p q)"
+            , ""
+            , "conv : \8704 (m : M) (k : R m) (u : U m) -> R m"
+            , "conv = \\ m k u -> induction u of { ul -> rl \
+              \; un p q r t -> rn p q (conv p (allR p) r) (conv q (allR q) t) }"
+            , "check : Eq (R (node leaf leaf)) (conv (node leaf leaf) \
+              \(allR (node leaf leaf)) (un leaf leaf ul ul)) (rn leaf leaf rl rl)"
+            , "check = refl (R (node leaf leaf)) (rn leaf leaf rl rl)"
+            ])
+      case r of
+        ProofLoaded {} -> pure ()
+        other -> assertFailure (unwords (renderResponse s1 other))
+
     -- __AND THE RECURSION DEMANDS A COPY THE ARMS DO NOT__ (MS9 phase 205,
     -- @~wk9qh@). Every shape above has its premises introduced where the split
     -- can reach them /and/ a constructor whose conclusion index asks for a copy.
@@ -1956,6 +2096,39 @@ splittingTree =
       , "data A : N -> Type\8320 where"
       , "  az : A z"
       , "  as : \8704 (k : N) (p : A k) -> A (s k)"
+      , ""
+      ]
+    -- Phase 217's shapes (@~5kcb4@), which are the hunt's own rather than any
+    -- item's: @P@ for nesting splits that each refine a different index, @T@ for
+    -- a split that ties three, @Ev@ for a split whose index wraps the recursive
+    -- one twice, and @Q@ with @allQ@ because every one of these recursions has
+    -- to rebuild a generalised premise at the smaller index and @Q@ is the one
+    -- that is inhabited everywhere.
+    deepModule =
+      [ "module Deep where"
+      , ""
+      , "data N : Type\8320 where"
+      , "  z : N"
+      , "  s : N -> N"
+      , ""
+      , "data Q : N -> Type\8320 where"
+      , "  qz : Q z"
+      , "  qs : \8704 (n : N) (q : Q n) -> Q (s n)"
+      , ""
+      , "allQ : \8704 (n : N) -> Q n"
+      , "allQ = \\ n -> induction n of { z -> qz ; s m -> qs m (allQ m) }"
+      , ""
+      , "data P : N -> N -> Type\8320 where"
+      , "  pz : \8704 (c : N) -> P z c"
+      , "  pr : \8704 (a : N) (b : N) (r : P a b) -> P (s a) (s b)"
+      , ""
+      , "data T : N -> N -> N -> Type\8320 where"
+      , "  tz : T z z z"
+      , "  tr : \8704 (a : N) (b : N) (c : N) (r : T a b c) -> T (s a) (s b) (s c)"
+      , ""
+      , "data Ev : N -> Type\8320 where"
+      , "  evz : Ev z"
+      , "  evs : \8704 (n : N) (e : Ev n) -> Ev (s (s n))"
       , ""
       ]
     -- Phase 201's shape (@~zv8kf@): a family whose constructor wraps /both/ its

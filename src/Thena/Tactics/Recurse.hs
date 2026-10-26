@@ -239,14 +239,36 @@ resolveRecursion env n0 tm = case tm of
     -- the hypothesis about it. That is the pair a recursion inside a
     -- generalising arm needs, and it is about the arm's own subject rather than
     -- the enclosing one.
+    --
+    -- __And it inherits that entry's prefix with the pairing__ (MS9 phase 217).
+    -- A copy of a hypothesis has the telescope the hypothesis had — the
+    -- specialiser quantifies a copy of the same type — so what the hypothesis
+    -- asked for before the call's own arguments is what its copy asks for: the
+    -- enclosing split's copies, then its equations. The pairing alone says the
+    -- copy is a hypothesis; the prefix says what it takes, and dropping the
+    -- second said that a copy takes nothing, which is only true where the
+    -- enclosing split generalised nothing.
+    --
+    -- __Widened by what this split generalised__, which is the half that is not
+    -- inheritance. The prefix's last field is the ambient entries the enclosing
+    -- split /refines/ rather than fixes, and 'varies' exempts them because a
+    -- call in that arm passes something else for them by construction. An entry
+    -- this split generalised is reached in this arm as a λ-bound copy, and
+    -- 'through' reads only @let@s, so the call's argument for it cannot be
+    -- resolved back to the premise either — it is exempt for the same reason
+    -- and has to be said here, where the list of them is in hand.
     withCopies hyps gen pre (Shape count pairs) =
       Shape (count + length gen)
             ([ (i, j, pre) | (i, j, _) <- pairs ]
-               ++ [ (count + i, count + j, NoPrefix)
-                  | (x, h, _) <- hyps
+               ++ [ (count + i, count + j, widen inherited)
+                  | (x, h, inherited) <- hyps
                   , Just i <- [elemIndex x gen]
                   , Just j <- [elemIndex h gen]
                   ])
+      where
+        widen NoPrefix                    = NoPrefix
+        widen (Prefix poss amb refls ref) =
+          Prefix poss amb refls (nub (ref ++ gen))
 
     -- One shape per constructor, in declaration order, as an infinite list so a
     -- method of an undeclared datatype is simply not reported.
